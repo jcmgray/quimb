@@ -1,0 +1,6 @@
+*.pyc
+quijy.egg-info/top_level.txt
+quijy.egg-info/requires.txt
+quijy.egg-info/dependency_links.txt
+quijy.egg-info/PKG-INFO
+quijy.egg-info/SOURCES.txt
