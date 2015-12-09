@@ -2,78 +2,14 @@
 # A python library for basic quantum stuff
 # Requires numpy, scipy
 #  NB: kets are column matrices - [[c0], [c1], ..., [cn]]
-# TODO: printprogress, pandas, sparse, simulation manager, adaptive SCHRO
+# TODO: simulation manager, adaptive SCHRO
 
 import numpy as np
 import numpy.linalg as nla
-# import scipy.linalg as sla
 import scipy.sparse as sp
 import scipy.sparse.linalg as spla
-from numba import jit
 import numexpr as ne
-
-import matplotlib.pyplot as plt
-from matplotlib import cm
-
-
-# class QuEvo(object):
-#     """docstring for QuEvo"""
-#     def __init__(self,
-#                  p_0=None,
-#                  ham=None,
-#                  method=None,
-#                  vals=None,
-#                  vecs=None,
-#                  solve=False):
-#         super(QuEvo, self).__init__()
-#         self.p_0 = p_0  # Initial state
-#         self.p_t = p_0  # Current state (being with same as initial)
-#         self.ham = ham
-#         self.method = method
-#         self.qtype = 'bra' if isbra(p_0) else 'dop'
-#         if solve:
-#             self.solve_ham()
-#             self.solved = True
-#         elif vals is not None and vecs is not None:
-#             self.vals = vals
-#             self.vecs = vecs
-#             self.solved = True
-#         else:
-#             self.solved = False
-
-#     def solve_ham(self):
-#         # Diagonalise hamiltonian
-#         self.vals, self.vecs = esys(self.ham)
-#         # Find initial state in energy eigenbasis
-#         if self.qtype = 'bra':
-#             self.pe_0 = self.vecs.H * p_0
-#         elif self.qtype = 'dop':
-#             self.pe_0 = self.vecs.H * p_0 * self.vecs
-#         # Mark solved
-#         self.solved = True
-
-#     def update_to(self, t):
-#         if method == 'uni':
-#             if not self.solved:
-#                 self.solve_ham()
-#             if self.qtype == 'bra':
-#                 pass
-
-
-def qonvert(data, qtype=None, sparse=False):
-    """
-    Converts lists to quantum objects as matrices, with kets as columns.
-    Assumes correct entries but not shape (i.e. DOES NOT conjugate for 'bra')
-    """
-    x = np.asmatrix(data, dtype=complex)
-    sz = np.prod(x.shape)
-    x = (x if qtype is None else
-         x.reshape(sz, 1) if qtype == 'ket' else
-         x.reshape(1, sz) if qtype == 'bra' else
-         qonvert(x, 'ket') * qonvert(x, 'ket').H if qtype == 'dop' else
-         x)
-    return (sp.csr_matrix(x, dtype=complex) if sparse else
-            x)
+from numba import jit
 
 
 def isket(p):
@@ -88,7 +24,25 @@ def isbra(p):
 
 def isop(p):
     """ Checks if q object is an operator, i.e. square """
-    return p.shape[0] == p.shape[1]  # Square matrix check
+    m, n = np.shape(p)
+    return m == n and m > 1  # Square matrix check
+
+
+def qonvert(data, qtype=None, sparse=False):
+    """
+    Converts lists to quantum objects as matrices, with kets as columns.
+    Assumes correct entries but not shape (i.e. DOES NOT conjugate for 'bra')
+    and will unravel a density operator to 'ket' or 'bra'.
+    """
+    x = np.asmatrix(data, dtype=complex)
+    sz = np.prod(x.shape)
+    if qtype == 'ket':
+        x.shape = (sz, 1)
+    elif qtype == 'bra':
+        x.shape = (1, sz)
+    elif qtype == 'dop' and not isop(x):
+        x = qonvert(x, 'ket') * qonvert(x, 'ket').H
+    return sp.csr_matrix(x, dtype=complex) if sparse else x
 
 
 @jit
@@ -446,31 +400,6 @@ def ham_heis(n, jx=1, jy=1, jz=1, bz=0, periodic=False, sparse=False):
     if not sparse:
         ham = ham.todense()  # always construct sparse though
     return ham
-
-
-def ezplot(x, y_i, fignum=1, xlog=False, ylog=False, **kwargs):
-    """
-    Function for automatically plotting multiple sets of data
-    """
-    # TODO colormap data and legend
-    y_i = np.atleast_2d(np.squeeze(y_i))
-    dimsy = np.array(np.shape(y_i))
-    xaxis = np.argwhere(len(x) == dimsy)[0]  # 0 or 1
-    fig = plt.figure(fignum, figsize=(8, 6), dpi=100)
-    axes = fig.add_axes([0.1, 0.1, 0.8, 0.8])
-    colors = np.linspace(0, 1, dimsy[1 - xaxis])
-
-    for i in range(dimsy[xaxis - 1]):
-        if xaxis:
-            y = y_i[i, :]
-        else:
-            y = y_i[:, i]
-        if xlog:
-            axes.set_xscale("log")
-        if ylog:
-            axes.set_yscale("log")
-        axes.plot(x, y, '.-', c=cm.jet(colors[i], 1), **kwargs)
-    return axes
 
 
 def ldmul(v, m):
