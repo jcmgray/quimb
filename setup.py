@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 setup(
     name='quijy',
     version='0.1.1.dev1',
-    author='Johnnie Gray'
+    author='Johnnie Gray',
     license='MIT',
     packages=find_packages(exclude=['contrib', 'docs', 'tests*']),
     install_requires=[
