@@ -8,31 +8,37 @@ import numpy as np
 import numpy.linalg as nla
 import scipy.sparse as sp
 import scipy.sparse.linalg as spla
-import numexpr as ne
+from numexpr import evaluate as evl
 from numba import jit
 
 
 def isket(p):
-    """ Check is q object is in ket form, i.e. columns """
+    """ Checks if matrix is in ket form, i.e. a column """
     return p.shape[0] > 1 and p.shape[1] == 1  # Column vector check
 
 
 def isbra(p):
-    """ Check is q object is in bra form, i.e. row """
+    """ Checks if matrix is in bra form, i.e. a row """
     return p.shape[0] == 1 and p.shape[1] > 1  # Row vector check
 
 
 def isop(p):
-    """ Checks if q object is an operator, i.e. square """
+    """ Checks if matrix is an operator, i.e. square """
     m, n = np.shape(p)
     return m == n and m > 1  # Square matrix check
 
 
 def qonvert(data, qtype=None, sparse=False):
-    """
-    Converts lists to quantum objects as matrices, with kets as columns.
-    Assumes correct entries but not shape (i.e. DOES NOT conjugate for 'bra')
-    and will unravel a density operator to 'ket' or 'bra'.
+    """ Converts lists to 'quantum' i.e. complex matrices, kets being columns.
+    Input:
+        data:  list describing entries
+        qtype: output type, either 'ket', 'bra' or 'dop' if given
+        sparse: convert output to sparse 'csr' format.
+    Returns:
+        x: numpy or sparse matrix
+    * Will unravel an array if 'ket' or 'bra' given.
+    * Will conjugate if 'bra' given.
+    * Will leave operators as is if 'dop' given.
     """
     x = np.asmatrix(data, dtype=complex)
     sz = np.prod(x.shape)
@@ -40,6 +46,7 @@ def qonvert(data, qtype=None, sparse=False):
         x.shape = (sz, 1)
     elif qtype == 'bra':
         x.shape = (1, sz)
+        x = np.conj(x)
     elif qtype == 'dop' and not isop(x):
         x = qonvert(x, 'ket') * qonvert(x, 'ket').H
     return sp.csr_matrix(x, dtype=complex) if sparse else x
@@ -65,7 +72,7 @@ def nrmlz(p):
 
 
 def eye(n, sparse=False):
-    """ Return identity in complex format, and possibly sparse"""
+    """ Return identity of size n in complex format, optionally sparse"""
     return (sp.eye(n, dtype=complex, format='csr') if sparse else
             np.eye(n, dtype=complex))
 
@@ -87,18 +94,29 @@ def krnd2(a, b):
 
 
 def kron(*args):
-    """ Tensor product of variable number of arguments"""
+    """ Tensor product of variable number of arguments.
+    Input:
+        args:
+    """
     a = args[0]
     b = args[1] if len(args) == 2 else  \
-        kron(*args[1:])  # Recursively perform kron
+        kron(*args[1:])  # Recursively perform kron to 'right'
     return (sp.kron(a, b, 'csr') if (sp.issparse(a) or sp.issparse(b)) else
             krnd2(a, b))
 
 
-def eyepad(a, dims, inds):
-    """
-    Pads the operators a with identities such that it acts on the subsystems of
-    dims specified by inds. Infers sparse/dense from a.
+def eyepad(a, dims, inds, sparse=False):
+    """ Pad an operator with identities to act on particular subsystem.
+    Input:
+        a: operator to act
+        dims: list of dimensions of subsystems.
+        inds: indices of dims to act a on.
+        sparse: whether output should be sparse
+    Returns:
+        b: operator with a acting on each subsystem specified by inds
+    Note that the actual numbers in dims[inds] are ignored and the size of
+    a is assumed to match. Sparsity of the output can be inferred from
+    input.
     """
     sparse = sp.issparse(a)
     inds = np.array(inds, ndmin=1)
@@ -147,55 +165,23 @@ def sig(xyz, sparse=False):
         return qonvert([[1, 0], [0, 1]], sparse=sparse)
 
 
-def bloch_state(ax, ay, az, sparse=False, purify=False):
-    if purify:
-        ax, ay, az = np.array([ax, ay, az])/np.sqrt(ax**2 + ay**2 + az**2)
-    rho = 0.5 * (sig('i') + ax * sig('x') + ay * sig('y') + az * sig('z'))
-    return rho if not sparse else qonvert(rho, sparse=sparse)
-
-
-def bell_state(n):
+def evals(a, sort=True):
+    """ Find sorted eigenvalues of matrix
+    Input:
+        a: hermitian matrix
+    Returns:
+        l: array of eigenvalues, if sorted, by ascending algebraic order
     """
-    Generates one of the four bell-states;
-    0: phi+, 1: phi-, 2: psi+, 3: psi- (singlet)
-    """
-    return (qonvert([1, 0, 0, 1], 'ket') / np.sqrt(2.0) if n == 0 else
-            qonvert([0, 1, 1, 0], 'ket') / np.sqrt(2.0) if n == 2 else
-            qonvert([1, 0, 0, -1], 'ket') / np.sqrt(2.0) if n == 1 else
-            qonvert([0, 1, -1, 0], 'ket') / np.sqrt(2.0))
+    l = nla.eigvalsh(a)
+    return np.sort(l) if sort else l
 
 
-# functions
-def random_psi(n):
-    """
-    Generates a wavefunction with random coefficients, normalised
-    """
-    psi = 2.0 * np.matrix(np.random.rand(n, 1)) - 1
-    psi = psi + 2.0j * np.random.rand(n, 1) - 1.0j
-    return nrmlz(psi)
-
-
-def random_rho(n):
-    """
-    Generates a random density matrix of dimension n, no special properties
-    other than being guarateed hermitian, positive, and trace 1.
-    """
-    rho = 2.0 * np.matrix(np.random.rand(n, n)) - 1
-    rho = rho + 2.0j * np.matrix(np.random.rand(n, n)) - 1.0j
-    rho = rho + rho.H
-    return nrmlz(rho * rho)
-
-
-def random_product_state(n):
-    x = 1
-    for i in range(n):
-        u = np.random.rand()
-        v = np.random.rand()
-        phi = 2 * np.pi * u
-        theta = np.arccos(2 * v - 1)
-        x = kron(x, np.matrix([[np.cos(theta / 2.0)],
-                               [np.exp(1.0j * phi) * np.sin(theta / 2)]]))
-    return x
+def ldmul(v, m):
+    '''
+    Fast left diagonal multiplication of v: vector of diagonal matrix, and m
+    '''
+    v = v.reshape(np.size(v), 1)
+    return evl('v*m')
 
 
 def groundstate(a):
@@ -206,57 +192,55 @@ def groundstate(a):
     return qonvert(v0, 'ket')
 
 
-def neel_state(n):
-    binary = '01' * (n / 2)
-    binary += (n % 2 == 1) * '0'  # add trailing spin for odd n
-    return basis_vec(int(binary, 2), 2 ** n)
+def rdmul(m, v):
+    '''
+    Fast right diagonal multiplication of v: vector of diagonal matrix, and m
+    '''
+    v = v.reshape(1, np.size(v))
+    return evl('m*v')
 
 
-def singlet_pairs(n):
-    return kronpow(bell_state(3), (n / 2))
-
-
-def werner_state(p):
-    return p * bell_state(3) * bell_state(3).H + (1 - p) * np.eye(4) / 4
-
-
-def evals(a):
-    """
-    Returns the eigenvalues of a, sorted by ascending algebraic value
-    """
-    l = nla.eigvalsh(a)
-    return np.sort(l)
-
-
-def evecs(a):
-    """
-    Returns the eigenvectors of a as columns, sorted in ascending eigenvalue
-    order
+def evecs(a, sort=True):
+    """ Find sorted eigenvectors of matrix
+    Input:
+        a: hermitian matrix
+    Returns:
+        v: eigenvectors as columns of matrix, if sorted, by ascending
+        eigenvalue order
     """
     l, v = nla.eigh(a)
-    sortinds = np.argsort(l)
-    return qonvert(v[:, sortinds])
+    return qonvert(v[:, np.argsort(l)]) if sort else qonvert(v)
 
 
-def esys(a):
-    """
-    Return the eigenvalues and eigenvectors of a, sorted according to
-    increasing algebraic value
+def esys(a, sort=True):
+    """ Find sorted eigenpairs of matrix
+    Input:
+        a: hermitian matrix
+    Returns:
+        l: array of eigenvalues, if sorted, by ascending algebraic order
+        v: corresponding eigenvectors as columns of matrix
     """
     l, v = nla.eigh(a)
-    sortinds = np.argsort(l)
-    return l[sortinds], qonvert(v[:, sortinds])
+    if sort:
+        sortinds = np.argsort(l)
+        return l[sortinds], qonvert(v[:, sortinds])
+    else:
+        return l, v
 
 
 def trx(p, dims, keep):
-    """
-    Perform partial trace on p, whose subsystems are given by dims, keeping
-    only indices given by keep
+    """ Perform partial trace.
+    Input:
+        p: state to perform partial trace on, vector or operator
+        dims: list of subsystem dimensions
+        keep: index of subsytems to keep
+    Returns:
+        Density matrix of subsytem dimensions dims[keep]
     """
     # Cast as ndarrays for 2D+ reshaping
-    if np.size(keep) == np.size(dims):
+    if np.size(keep) == np.size(dims):  # keep all subsystems
         if not isop(p):
-            return p * p.H
+            return p * p.H  # but return as density operator
         return p
     n = len(dims)
     dims = np.array(dims)
@@ -379,40 +363,66 @@ def negativity(rho, dims=[2, 2], sysa=0, sysb=1):
     return max(0.0, n)
 
 
-def ham_heis(n, jx=1, jy=1, jz=1, bz=0, periodic=False, sparse=False):
+def bell_state(n):
     """
-    Constructs the heisenberg spin 1/2 hamiltonian, defaulting to isotropic
-    coupling with no magnetic field and open boundary conditions.
+    Generates one of the four bell-states;
+    0: phi+, 1: phi-, 2: psi+, 3: psi- (singlet)
     """
-    dims = [2] * n
-    sds = (jx * kron(sig('x', True), sig('x', True)) +
-           jy * kron(sig('y', True), sig('y', True)) +
-           jz * kron(sig('z', True), sig('z', True)) -
-           bz * kron(sig('z', True), np.eye(2)))
-    # Begin with last spin, not covered by loop
-    ham = eyepad(-bz * sig('z', True), dims, n - 1)
-    for i in range(n - 1):
-        ham = ham + eyepad(sds, dims[:-1], i)
-    if periodic:
-        ham = ham + eyepad(sig('x', True), dims[:], [0, n - 1])  \
-                  + eyepad(sig('y', True), dims[:], [0, n - 1])  \
-                  + eyepad(sig('z', True), dims[:], [0, n - 1])
-    if not sparse:
-        ham = ham.todense()  # always construct sparse though
-    return ham
+    return (qonvert([1, 0, 0, 1], 'ket') / np.sqrt(2.0) if n == 0 else
+            qonvert([0, 1, 1, 0], 'ket') / np.sqrt(2.0) if n == 2 else
+            qonvert([1, 0, 0, -1], 'ket') / np.sqrt(2.0) if n == 1 else
+            qonvert([0, 1, -1, 0], 'ket') / np.sqrt(2.0))
 
 
-def ldmul(v, m):
-    '''
-    Fast left diagonal multiplication of v: vector of diagonal matrix, and m
-    '''
-    v = v.reshape(np.size(v), 1)
-    return ne.evaluate('v*m')
+def bloch_state(ax, ay, az, sparse=False, purify=False):
+    if purify:
+        ax, ay, az = np.array([ax, ay, az])/np.sqrt(ax**2 + ay**2 + az**2)
+    rho = 0.5 * (sig('i') + ax * sig('x') + ay * sig('y') + az * sig('z'))
+    return rho if not sparse else qonvert(rho, sparse=sparse)
 
 
-def rdmul(m, v):
-    '''
-    Fast right diagonal multiplication of v: vector of diagonal matrix, and m
-    '''
-    v = v.reshape(1, np.size(v))
-    return ne.evaluate('m*v')
+# functions
+def random_psi(n):
+    """
+    Generates a wavefunction with random coefficients, normalised
+    """
+    psi = 2.0 * np.matrix(np.random.rand(n, 1)) - 1
+    psi = psi + 2.0j * np.random.rand(n, 1) - 1.0j
+    return nrmlz(psi)
+
+
+def random_rho(n):
+    """
+    Generates a random density matrix of dimension n, no special properties
+    other than being guarateed hermitian, positive, and trace 1.
+    """
+    rho = 2.0 * np.matrix(np.random.rand(n, n)) - 1
+    rho = rho + 2.0j * np.matrix(np.random.rand(n, n)) - 1.0j
+    rho = rho + rho.H
+    return nrmlz(rho * rho)
+
+
+def random_product_state(n):
+    x = 1
+    for i in range(n):
+        u = np.random.rand()
+        v = np.random.rand()
+        phi = 2 * np.pi * u
+        theta = np.arccos(2 * v - 1)
+        x = kron(x, np.matrix([[np.cos(theta / 2.0)],
+                               [np.exp(1.0j * phi) * np.sin(theta / 2)]]))
+    return x
+
+
+def neel_state(n):
+    binary = '01' * (n / 2)
+    binary += (n % 2 == 1) * '0'  # add trailing spin for odd n
+    return basis_vec(int(binary, 2), 2 ** n)
+
+
+def singlet_pairs(n):
+    return kronpow(bell_state(3), (n / 2))
+
+
+def werner_state(p):
+    return p * bell_state(3) * bell_state(3).H + (1 - p) * np.eye(4) / 4
