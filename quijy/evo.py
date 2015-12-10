@@ -68,3 +68,21 @@ class QuEvo(object):
             self.pt = mdot([self.evecs, lvpvl, self.evecs.H])
         else:
             self.pt = self.evecs * ldmul(exptl, self.pe0)
+
+
+def rk4_step(y0, f, dt, t=None):
+    """
+    Performs a 4th order runge-kutta step of length dt according to the
+    relation dy/dt = f(t, y). If t is not specified then assumes f = f(y)
+    """
+    if t is None:
+        k1 = f(y0)
+        k2 = f(y0 + k1 * dt / 2.0)
+        k3 = f(y0 + k2 * dt / 2.0)
+        k4 = f(y0 + k3 * dt)
+    else:
+        k1 = f(y0, t)
+        k2 = f(y0 + k1 * dt / 2.0, t + dt / 2.0)
+        k3 = f(y0 + k2 * dt / 2.0, t + dt / 2.0)
+        k4 = f(y0 + k3 * dt, t + dt)
+    return y0 + (k1 + 2.0 * k2 + 2.0 * k3 + k4) * dt / 6.0
