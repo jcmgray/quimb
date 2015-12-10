@@ -73,7 +73,7 @@ def eye(n, sparse=False):
 @jit
 def krnd2(a, b):
     """
-    Fast tensor product of two dense arrays (Fast than numpy because of jit)
+    Fast tensor product of two dense arrays (Fast than numpy using jit)
     """
     m, n = a.shape
     p, q = b.shape

@@ -41,7 +41,7 @@ class QuEvo(object):
             self.evecs = evecs
             # Solve for initial state in energy basis
             if self.dop:
-                self.pe0 = self.evecs.H * p0 * self.evecs
+                self.pe0 = mdot([self.evecs.H * p0 * self.evecs])
             else:
                 self.pe0 = self.evecs.H * p0
             self.solved = True
@@ -54,15 +54,13 @@ class QuEvo(object):
         self.evals, self.evecs = esys(self.ham)
         # Find initial state in energy eigenbasis
         if self.dop:
-            self.pe0 = self.evecs.H * self.p0 * self.evecs
+            self.pe0 = mdot([self.evecs.H * self.p0 * self.evecs])
         else:
             self.pe0 = self.evecs.H * self.p0
         # Mark solved
         self.solved = True
 
     def update_to(self, t):
-        # if not self.solved:
-        #     raise ValueError('Must solve hamiltonian first.')
         l = self.evals
         exptl = evl('exp(-1.0j*t*l)')
         if self.dop:
