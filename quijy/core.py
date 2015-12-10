@@ -1,8 +1,6 @@
-# Copyright Johnnie Gray
-# A python library for basic quantum stuff
-# Requires numpy, scipy
-#  NB: kets are column matrices - [[c0], [c1], ..., [cn]]
-# TODO: simulation manager, adaptive SCHRO
+"""
+Core functions for manipulating quantum objects.
+"""
 
 import numpy as np
 import numpy.linalg as nla

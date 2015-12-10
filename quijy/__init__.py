@@ -1,3 +1,6 @@
+# Copyright Johnnie Gray
+# A python library for basic quantum stuff
+
 # Core functions
 from .core import *
 from . import core

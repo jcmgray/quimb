@@ -1,3 +1,7 @@
+"""
+Misc. functions not quantum related.
+"""
+
 import matplotlib.pyplot as plt
 from matplotlib import cm
 

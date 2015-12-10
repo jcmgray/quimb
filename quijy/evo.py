@@ -1,3 +1,8 @@
+"""
+Contains an evolution class, QuEvo to efficiently manage time evolution of
+quantum states according to schrodingers' equation, and related functions.
+"""
+
 from quijy.core import (isbra, isket, isop, esys, qonvert, ldmul, rdmul)
 from numpy.linalg import multi_dot as mdot
 from numexpr import evaluate as evl
