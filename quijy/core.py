@@ -94,7 +94,10 @@ def krnd2(a, b):
 def kron(*args):
     """ Tensor product of variable number of arguments.
     Input:
-        args:
+        args: objects to be tensored together
+    Returns:
+        operator
+    The product is performed as (a * (b * (c * ...)))
     """
     a = args[0]
     b = args[1] if len(args) == 2 else  \
