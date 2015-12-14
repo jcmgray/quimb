@@ -36,7 +36,7 @@ def qonvert(data, qtype=None, sparse=False):
         x: numpy or sparse matrix
     * Will unravel an array if 'ket' or 'bra' given.
     * Will conjugate if 'bra' given.
-    * Will leave operators as is if 'dop' given.
+    * Will leave operators as is if 'dop' given, but make them if vector given
     """
     x = np.asmatrix(data, dtype=complex)
     sz = np.prod(x.shape)
@@ -386,7 +386,7 @@ def random_rho(n):
 
 
 def random_product_state(n):
-    x = 1
+    x = np.matrix([[1]])
     for i in range(n):
         u = np.random.rand()
         v = np.random.rand()

@@ -10,15 +10,27 @@ from numpy import multiply
 
 
 class QuEvo(object):
-    """A class for evolving """
+    """
+    A class for evolving quantum systems according to schro equation
+    Note that vector states are converted to kets always.
+    """
+    # TODO diagonalise or use iterative method ...
     def __init__(self,
-                 p0=None,  # Starting state
-                 dop=None,  # evolve as density operator
-                 ham=None,  # hamiltonian
-                 solve=False,  # whether to immediately solve for
-                 evals=None,  # energy eigenvalues
-                 evecs=None,  # energy eigenvectors
-                 method=None):  # TODO diagonalise or use iterative method ...
+                 ham=None,
+                 p0=None,
+                 dop=None,
+                 solve=False,
+                 evals=None,
+                 evecs=None):
+        """
+        Inputs:
+            ham: Governing Hamiltonian
+            p0: inital state, either vector or operator
+            dop: whether to force evolution as density operator
+            solve: whether to immediately solve hamiltonian
+            evals: eigenvalues if ham already solved
+            evecs: eigevvectors if ham already solved
+        """
         super(QuEvo, self).__init__()
 
         # Convert state to ket or dop and mark as such
@@ -33,7 +45,7 @@ class QuEvo(object):
                 self.p0 = qonvert(p0, 'dop')
                 self.dop = True
             else:
-                self.p0 = qonvert(p0, 'ket')
+                self.p0 = qonvert(p0, 'ket')  # make sure ket
                 self.dop = False
         self.pt = p0  # Current state (start with same as initial)
 
@@ -52,7 +64,6 @@ class QuEvo(object):
             self.solved = True
         else:
             self.solved = False
-        self.method = method
 
     def solve_ham(self):
         # Diagonalise hamiltonian
