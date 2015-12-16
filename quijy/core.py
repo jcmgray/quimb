@@ -166,6 +166,22 @@ def sig(xyz, sparse=False):
         return qonvert([[1, 0], [0, 1]], sparse=sparse)
 
 
+def ldmul(v, m):
+    '''
+    Fast left diagonal multiplication of v: vector of diagonal matrix, and m
+    '''
+    v = v.reshape(np.size(v), 1)
+    return evl('v*m')
+
+
+def rdmul(m, v):
+    '''
+    Fast right diagonal multiplication of v: vector of diagonal matrix, and m
+    '''
+    v = v.reshape(1, np.size(v))
+    return evl('m*v')
+
+
 def evals(a, sort=True):
     """ Find sorted eigenvalues of matrix
     Input:
@@ -175,30 +191,6 @@ def evals(a, sort=True):
     """
     l = nla.eigvalsh(a)
     return np.sort(l) if sort else l
-
-
-def ldmul(v, m):
-    '''
-    Fast left diagonal multiplication of v: vector of diagonal matrix, and m
-    '''
-    v = v.reshape(np.size(v), 1)
-    return evl('v*m')
-
-
-def groundstate(a):
-    """
-    # Returns the eigenvecor corresponding to the smallest eigenvalue of a
-    """
-    l0, v0 = spla.eigsh(a, k=1, which='SA')
-    return qonvert(v0, 'ket')
-
-
-def rdmul(m, v):
-    '''
-    Fast right diagonal multiplication of v: vector of diagonal matrix, and m
-    '''
-    v = v.reshape(1, np.size(v))
-    return evl('m*v')
 
 
 def evecs(a, sort=True):
@@ -227,6 +219,35 @@ def esys(a, sort=True):
         return l[sortinds], qonvert(v[:, sortinds])
     else:
         return l, v
+
+
+def esyss(a, k=1, which='SA', ncv=None, **kwargs):
+    """
+    Returns a few eigenpairs from a
+    Inputs:
+        a: matrix, probably sparse
+        k: number of eigenpairs to return
+        which: where in spectrum to take eigenvalues from (see scipy eigsh)
+        nvc: number of lanczos vectors, can use to optimise speed
+    Returns:
+        l0: array of eigenvalues
+        v0: matrix of eigenvectors as columns
+    """
+    if ncv is None:
+        n = a.shape[0]
+        # Optimise for n, k, isparse, #TODO: sparsity?
+        if sp.issparse(a):
+            ncv = max(8, 2 * k + 2)
+        else:
+            ncv = max(10, n//2**5 - 1, k * 2 + 2)
+    l0, v0 = spla.eigsh(a, k=k, which=which, ncv=ncv, **kwargs)
+    return l0, qonvert(v0, 'ket')
+
+
+def groundstate(ham):
+    """ Convenience function for finding lowest eigenvector only. """
+    l0, v0 = esyss(ham)
+    return v0
 
 
 def trx(p, dims, keep):
