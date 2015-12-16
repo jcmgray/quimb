@@ -28,5 +28,5 @@ def ezplot(x, y_i, fignum=1, xlog=False, ylog=False, **kwargs):
             axes.set_xscale("log")
         if ylog:
             axes.set_yscale("log")
-        axes.plot(x, y, '.-', c=cm.jet(colors[i], 1), **kwargs)
+        axes.plot(x, y, '.-', c=cm.viridis(colors[i], 1), **kwargs)
     return axes
