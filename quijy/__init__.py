@@ -9,6 +9,10 @@ from . import core
 from .ham import *
 from . import ham
 
+# Solvers
+from .solve import *
+from . import solve
+
 # Evolution class and methods
 from .evo import *
 from . import evo

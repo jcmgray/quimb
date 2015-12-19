@@ -3,7 +3,8 @@ Contains an evolution class, QuEvo to efficiently manage time evolution of
 quantum states according to schrodingers' equation, and related functions.
 """
 
-from quijy.core import (isbra, isket, isop, esys, qonvert, ldmul, rdmul)
+from quijy.core import isbra, isket, isop, qonvert, ldmul, rdmul
+from quijy.solve import eigsys
 from numpy.linalg import multi_dot as mdot
 from numexpr import evaluate as evl
 from numpy import multiply
@@ -20,16 +21,16 @@ class QuEvo(object):
                  p0=None,
                  dop=None,
                  solve=False,
-                 evals=None,
-                 evecs=None):
+                 l=None,
+                 v=None):
         """
         Inputs:
             ham: Governing Hamiltonian
             p0: inital state, either vector or operator
             dop: whether to force evolution as density operator
             solve: whether to immediately solve hamiltonian
-            evals: eigenvalues if ham already solved
-            evecs: eigevvectors if ham already solved
+            l: eigenvalues if ham already solved
+            v: eigevvectors if ham already solved
         """
         super(QuEvo, self).__init__()
 
@@ -53,37 +54,37 @@ class QuEvo(object):
         if solve:
             self.solve_ham()
             self.solved = True
-        elif evals is not None and evecs is not None:
-            self.evals = evals
-            self.evecs = evecs
+        elif l is not None and v is not None:
+            self.l = l
+            self.v = v
             # Solve for initial state in energy basis
             if self.dop:
-                self.pe0 = mdot([self.evecs.H * p0 * self.evecs])
+                self.pe0 = mdot([self.v.H * p0 * self.v])
             else:
-                self.pe0 = self.evecs.H * p0
+                self.pe0 = self.v.H * p0
             self.solved = True
         else:
             self.solved = False
 
     def solve_ham(self):
         # Diagonalise hamiltonian
-        self.evals, self.evecs = esys(self.ham)
+        self.l, self.v = eigsys(self.ham)
         # Find initial state in energy eigenbasis
         if self.dop:
-            self.pe0 = mdot([self.evecs.H * self.p0 * self.evecs])
+            self.pe0 = mdot([self.v.H * self.p0 * self.v])
         else:
-            self.pe0 = self.evecs.H * self.p0
+            self.pe0 = self.v.H * self.p0
         # Mark solved
         self.solved = True
 
     def update_to(self, t):
-        l = self.evals
+        l = self.l
         exptl = evl('exp(-1.0j*t*l)')
         if self.dop:
             lvpvl = rdmul(ldmul(exptl, self.pe0), evl('conj(exptl)'))
-            self.pt = mdot([self.evecs, lvpvl, self.evecs.H])
+            self.pt = mdot([self.v, lvpvl, self.v.H])
         else:
-            self.pt = self.evecs * ldmul(exptl, self.pe0)
+            self.pt = self.v * ldmul(exptl, self.pe0)
 
 
 def rk4_step(y0, f, dt, t=None):

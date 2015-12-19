@@ -3,9 +3,7 @@ Core functions for manipulating quantum objects.
 """
 
 import numpy as np
-import numpy.linalg as nla
 import scipy.sparse as sp
-import scipy.sparse.linalg as spla
 from numexpr import evaluate as evl
 from numba import jit
 
@@ -24,6 +22,14 @@ def isop(p):
     """ Checks if matrix is an operator, i.e. square """
     m, n = np.shape(p)
     return m == n and m > 1  # Square matrix check
+
+
+def isherm(a):
+    """ Checks if matrix is hermitian, for sparse or dense"""
+    if sp.issparse(a):
+        # Since sparse, test that no .H elements aren't not equal..
+        return (a != a.H).nnz == 0
+    return np.allclose(a, a.H)
 
 
 def qonvert(data, qtype=None, sparse=False):
@@ -166,90 +172,6 @@ def sig(xyz, sparse=False):
         return qonvert([[1, 0], [0, 1]], sparse=sparse)
 
 
-def ldmul(v, m):
-    '''
-    Fast left diagonal multiplication of v: vector of diagonal matrix, and m
-    '''
-    v = v.reshape(np.size(v), 1)
-    return evl('v*m')
-
-
-def rdmul(m, v):
-    '''
-    Fast right diagonal multiplication of v: vector of diagonal matrix, and m
-    '''
-    v = v.reshape(1, np.size(v))
-    return evl('m*v')
-
-
-def evals(a, sort=True):
-    """ Find sorted eigenvalues of matrix
-    Input:
-        a: hermitian matrix
-    Returns:
-        l: array of eigenvalues, if sorted, by ascending algebraic order
-    """
-    l = nla.eigvalsh(a)
-    return np.sort(l) if sort else l
-
-
-def evecs(a, sort=True):
-    """ Find sorted eigenvectors of matrix
-    Input:
-        a: hermitian matrix
-    Returns:
-        v: eigenvectors as columns of matrix, if sorted, by ascending
-        eigenvalue order
-    """
-    l, v = nla.eigh(a)
-    return qonvert(v[:, np.argsort(l)]) if sort else qonvert(v)
-
-
-def esys(a, sort=True):
-    """ Find sorted eigenpairs of matrix
-    Input:
-        a: hermitian matrix
-    Returns:
-        l: array of eigenvalues, if sorted, by ascending algebraic order
-        v: corresponding eigenvectors as columns of matrix
-    """
-    l, v = nla.eigh(a)
-    if sort:
-        sortinds = np.argsort(l)
-        return l[sortinds], qonvert(v[:, sortinds])
-    else:
-        return l, v
-
-
-def esyss(a, k=1, which='SA', ncv=None, **kwargs):
-    """
-    Returns a few eigenpairs from a
-    Inputs:
-        a: matrix, probably sparse
-        k: number of eigenpairs to return
-        which: where in spectrum to take eigenvalues from (see scipy eigsh)
-        nvc: number of lanczos vectors, can use to optimise speed
-    Returns:
-        l0: array of eigenvalues
-        v0: matrix of eigenvectors as columns
-    """
-    if ncv is None:
-        n = a.shape[0]
-        # Optimise for n, k, isparse, #TODO: sparsity?
-        if sp.issparse(a):
-            ncv = max(8, 2 * k + 2)
-        else:
-            ncv = max(10, n//2**5 - 1, k * 2 + 2)
-    l0, v0 = spla.eigsh(a, k=k, which=which, ncv=ncv, **kwargs)
-    return l0, qonvert(v0, 'ket')
-
-
-def groundstate(ham):
-    """ Convenience function for finding lowest eigenvector only. """
-    l0, v0 = esyss(ham)
-    return v0
-
-
 def trx(p, dims, keep):
     """ Perform partial trace.
     Input:
@@ -294,7 +216,7 @@ def entropy(rho):
     """
     Computes the (von Neumann) entropy of positive matrix rho
     """
-    l = evals(rho)
+    l = eigvals(rho)
     l = l[np.nonzero(l)]
     return np.sum(-l * np.log2(l))
 
@@ -330,7 +252,7 @@ def chop(x, eps=1.0e-12):
 
 
 def trace_norm(a):
-    return np.absolute(evals(a)).sum()
+    return np.absolute(eigvals(a)).sum()
 
 
 def trace_distance(p, w):
@@ -430,3 +352,19 @@ def singlet_pairs(n):
 
 def werner_state(p):
     return p * bell_state(3) * bell_state(3).H + (1 - p) * np.eye(4) / 4
+
+
+def ldmul(v, m):
+    '''
+    Fast left diagonal multiplication of v: vector of diagonal matrix, and m
+    '''
+    v = v.reshape(np.size(v), 1)
+    return evl('v*m')
+
+
+def rdmul(m, v):
+    '''
+    Fast right diagonal multiplication of v: vector of diagonal matrix, and m
+    '''
+    v = v.reshape(1, np.size(v))
+    return evl('m*v')
