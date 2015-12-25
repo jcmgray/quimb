@@ -112,7 +112,7 @@ def kron(*args):
             krnd2(a, b))
 
 
-def eyepad(a, dims, inds, sparse=False):
+def eyepad(a, dims, inds, sparse=None):
     """ Pad an operator with identities to act on particular subsystem.
     Input:
         a: operator to act
@@ -125,7 +125,7 @@ def eyepad(a, dims, inds, sparse=False):
     a is assumed to match. Sparsity of the output can be inferred from
     input.
     """
-    sparse = sp.issparse(a)
+    sparse = sp.issparse(a) if sparse is None else sparse
     inds = np.array(inds, ndmin=1)
     b = eye(np.prod(dims[0:inds[0]]), sparse=sparse)
     for i in range(len(inds) - 1):
@@ -142,7 +142,7 @@ def kronpow(a, pow):
     """ Returns 'a' tensored with itself pow times """
     return (1 if pow == 0 else
             a if pow == 1 else
-            kron(*[a for i in range(pow)]))
+            kron(*[a] * pow))
 
 
 def basis_vec(dir, dim, sparse=False):
