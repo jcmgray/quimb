@@ -5,13 +5,17 @@
 from .core import *
 from . import core
 
+# Solving functions
+from .solve import *
+from . import solve
+
+# Functions for calculating properties
+from .calc import *
+from . import calc
+
 # Hamiltonians
 from .ham import *
 from . import ham
-
-# Solvers
-from .solve import *
-from . import solve
 
 # Evolution class and methods
 from .evo import *
