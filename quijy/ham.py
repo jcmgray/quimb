@@ -2,7 +2,8 @@
 Contains functions for generating hamiltonians.
 """
 
-from quijy import (kron, sig, eyepad, eye)
+from quijy.core import kron, eyepad, eye
+from quijy.gen import sig
 
 
 def ham_heis(n, jx=1, jy=1, jz=1, bz=0, periodic=False, sparse=False):
