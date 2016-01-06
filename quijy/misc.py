@@ -5,6 +5,15 @@ Misc. functions not quantum related.
 import matplotlib.pyplot as plt
 from matplotlib import cm
 from numpy import (atleast_2d, squeeze, array, shape, argwhere, linspace)
+from tqdm import tqdm
+
+
+def progbar(x, ascii=True, leave=True, **kwargs):
+    """
+    tqdm with changed defaults. Wraps any iterable and outputs progress bar
+    with statistics.
+    """
+    return tqdm(x, ascii=ascii, leave=leave, **kwargs)
 
 
 def ezplot(x, y_i, fignum=1, xlog=False, ylog=False, **kwargs):
