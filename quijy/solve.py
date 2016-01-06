@@ -67,7 +67,7 @@ def seigsys(a, k=1, which='SA', ncv=None, return_vecs=True, **kwargs):
     """
     n = a.shape[0]
     sparse = sp.issparse(a)
-    if not sparse and n <= 500:  # Small dense matrices can use full decomp.
+    if not sparse and n <= 500:  # Small dense matrices should use full decomp.
         if return_vecs:
             lk, vk = eigsys(a)
             return lk[0:k], vk[:, 0:k]

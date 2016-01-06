@@ -20,7 +20,7 @@ def trx(p, dims, keep):
     # Cast as ndarrays for 2D+ reshaping
     if np.size(keep) == np.size(dims):  # keep all subsystems
         if not isop(p):
-            return p * p.H  # but return as density operator
+            return p * p.H  # but return as density operator for consistency
         return p
     n = len(dims)
     dims = np.array(dims)
@@ -93,6 +93,9 @@ def mutual_information(p, dims, sysa=0, sysb=1):
 
 
 def trace_norm(a):
+    """
+    Returns the trace norm of operator a, that is, the sum of abs eigvals.
+    """
     return np.absolute(eigvals(a, sort=False)).sum()
 
 

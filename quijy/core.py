@@ -42,7 +42,8 @@ def qonvert(data, qtype=None, sparse=False):
         x: numpy or sparse matrix
     * Will unravel an array if 'ket' or 'bra' given.
     * Will conjugate if 'bra' given.
-    * Will leave operators as is if 'dop' given, but make them if vector given
+    * Will leave operators as is if 'dop' given, but construct one
+    them if vector given.
     """
     x = np.asmatrix(data, dtype=complex)
     sz = np.prod(x.shape)
@@ -130,9 +131,9 @@ def eyepad(a, dims, inds, sparse=None):
         b: operator with a acting on each subsystem specified by inds
     Note that the actual numbers in dims[inds] are ignored and the size of
     a is assumed to match. Sparsity of the output can be inferred from
-    input.
+    input if not specified.
     """
-    sparse = sp.issparse(a) if sparse is None else sparse
+    sparse = sp.issparse(a) if sparse is None else sparse  # infer sparsity
     inds = np.array(inds, ndmin=1)
     b = eye(np.prod(dims[0:inds[0]]), sparse=sparse)
     for i in range(len(inds) - 1):
@@ -157,7 +158,10 @@ def chop(x, eps=1.0e-12):
 
 def ldmul(v, m):
     '''
-    Fast left diagonal multiplication of v: vector of diagonal matrix, and m
+    Fast left diagonal multiplication using numexpr
+    Args:
+        v: vector of diagonal matrix, can be array
+        m: matrix
     '''
     v = v.reshape(np.size(v), 1)
     return evl('v*m')
@@ -165,7 +169,10 @@ def ldmul(v, m):
 
 def rdmul(m, v):
     '''
-    Fast right diagonal multiplication of v: vector of diagonal matrix, and m
+    Fast right diagonal multiplication using numexpr
+    Args:
+        m: matrix
+        v: vector of diagonal matrix, can be array
     '''
     v = v.reshape(1, np.size(v))
     return evl('m*v')
