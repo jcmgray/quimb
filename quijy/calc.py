@@ -6,6 +6,9 @@ quantum objects.
 import numpy as np
 from quijy.core import isket, isbra, isop, qonvert
 from quijy.solve import eigvals
+from quijy.core import isket, isbra, isop, qonvert, kron, ldmul
+from quijy.gen import sig
+from quijy.solve import eigvals, eigsys
 
 
 def trx(p, dims, keep):
@@ -90,6 +93,13 @@ def mutual_information(p, dims, sysa=0, sysb=1):
         ha = entropy(rhoa)
         hb = ha
     return ha + hb - hab
+
+
+def sqrtm(a):
+    # returns sqrt of hermitan matrix, seems faster than scipy.linalg.sqrtm
+    l, v = eigsys(a, sort=False)
+    l = np.sqrt(l.astype(complex))
+    return v * ldmul(l, v.H)
 
 
 def trace_norm(a):
