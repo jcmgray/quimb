@@ -176,3 +176,8 @@ def rdmul(m, v):
     '''
     v = v.reshape(1, np.size(v))
     return evl('m*v')
+
+
+def comm(a, b):
+    """ Commutator of two matrices """
+    return a * b - b * a

@@ -45,6 +45,11 @@ def bell_state(n):
             qonvert([0, 1, -1, 0], 'ket') / np.sqrt(2.0))
 
 
+def singlet():
+    """ Alias for one of bell-states """
+    return bell_state(4)
+
+
 def bloch_state(ax, ay, az, sparse=False, purify=False):
     if purify:
         ax, ay, az = np.array([ax, ay, az])/np.sqrt(ax**2 + ay**2 + az**2)
