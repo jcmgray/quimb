@@ -4,8 +4,6 @@ quantum objects.
 """
 
 import numpy as np
-from quijy.core import isket, isbra, isop, qonvert
-from quijy.solve import eigvals
 from quijy.core import isket, isbra, isop, qonvert, kron, ldmul
 from quijy.gen import sig
 from quijy.solve import eigvals, eigsys
@@ -126,3 +124,20 @@ def logneg(rho, dims=[2, 2], sysa=0, sysb=1):
         dims = [dims[sysa], dims[sysb]]
     e = np.log2(trace_norm(partial_transpose(rho, dims)))
     return max(0.0, e)
+
+
+def concurrence(p):
+    if isop(p):
+        p = qonvert(p, 'dop')  # make sure density operator
+        pt = kron(sig(2), sig(2)) * p.conj() * kron(sig(2), sig(2))
+        l = np.sqrt(np.linalg.eigvals(p * pt)).real
+        return max(0, 2 * np.max(l) - np.sum(l))
+    else:
+        p = qonvert(p, 'ket')
+        pt = kron(sig(2), sig(2)) * p.conj()
+        c = np.real(np.abs(p.H * p)).item(0)
+        return max(0, c)
+
+
+def qid(p, dims, inds):
+    pass
