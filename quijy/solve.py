@@ -95,7 +95,7 @@ def seigvecs(a, k=1, which='SA', ncv=None, **kwargs):
 
 def groundstate(ham):
     """ Alias for finding lowest eigenvector only. """
-    return seigvecs(a, k=1, which='SA')
+    return seigvecs(ham, k=1, which='SA')
 
 
 def groundenergy(ham):

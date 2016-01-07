@@ -5,6 +5,10 @@
 from .core import *
 from . import core
 
+# Generating objects
+from .gen import *
+from . import gen
+
 # Solving functions
 from .solve import *
 from . import solve
