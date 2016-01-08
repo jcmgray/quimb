@@ -125,7 +125,7 @@ def svds(a, k=1, ncv=None, return_vecs=True, **kwargs):
                              return_singular_vectors=False, **kwargs)
 
 
-def norm(a):
+def norm2(a):
     """ Return the 2-norm of matrix, a, i.e. the largest singular value. """
     return svds(a, k=1, return_vecs=False)[0]
 
