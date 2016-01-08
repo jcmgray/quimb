@@ -4,9 +4,9 @@ quantum objects.
 """
 
 import numpy as np
-from quijy.core import isket, isbra, isop, qonvert, kron, ldmul
+from quijy.core import isket, isbra, isop, qonvert, kron, ldmul, comm, eyepad
 from quijy.gen import sig
-from quijy.solve import eigvals, eigsys
+from quijy.solve import eigvals, eigsys, norm2
 
 
 def trx(p, dims, keep):
@@ -139,5 +139,19 @@ def concurrence(p):
         return max(0, c)
 
 
-def qid(p, dims, inds):
-    pass
+def qid(p, dims, inds, precomp_func=False, sparse_comp=False):
+    inds = np.atleast_1d(inds)
+    # Construct operators
+    ops_i = [[eyepad(sig(s), dims, ind, sparse=sparse_comp)
+              for s in (1, 2, 3)]
+             for ind in inds]
+
+    # Define function closed over precomputed operators
+    def qid_func(x):
+        qds = np.zeros(np.size(inds))
+        for i, ops in enumerate(ops_i):
+            for op in ops:
+                qds[i] += norm2(comm(x, op))**2
+        return qds
+
+    return qid_func if precomp_func else qid_func(p)
