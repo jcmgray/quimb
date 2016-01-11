@@ -17,10 +17,6 @@ from . import solve
 from .calc import *
 from . import calc
 
-# Hamiltonians
-from .ham import *
-from . import ham
-
 # Evolution class and methods
 from .evo import *
 from . import evo
