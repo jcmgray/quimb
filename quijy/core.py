@@ -146,13 +146,20 @@ def eyepad(a, dims, inds, sparse=None):
     return b
 
 
-def chop(x, eps=1.0e-12):
+def chop(x, tol=1.0e-14):
     """
-    Sets any values of x smaller than eps (relative to range(x)) to zero
+    Sets any values of x smaller than tol (relative to range(x)) to zero.
+    Acts in-place on array!
     """
-    xr = x.max() - x.min()
-    xm = xr * eps
-    x[abs(x) < xm] = 0
+    rnge = abs(x.max() - x.min())
+    minm = rnge * tol  # minimum value tolerated
+    if sp.issparse(x):
+        x.data.real[np.abs(x.data.real) < minm] = 0.0
+        x.data.imag[np.abs(x.data.imag) < minm] = 0.0
+        x.eliminate_zeros()
+    else:
+        x.real[abs(x.real) < minm] = 0.0
+        x.imag[abs(x.imag) < minm] = 0.0
     return x
 
 
