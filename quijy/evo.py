@@ -17,8 +17,8 @@ class QuEvo(object):
     """
     # TODO diagonalise or use iterative method ...
     def __init__(self,
-                 ham=None,
-                 p0=None,
+                 ham,
+                 p0,
                  dop=None,
                  solve=False,
                  l=None,
@@ -71,7 +71,7 @@ class QuEvo(object):
         self.l, self.v = eigsys(self.ham)
         # Find initial state in energy eigenbasis
         if self.dop:
-            self.pe0 = mdot([self.v.H * self.p0 * self.v])
+            self.pe0 = mdot([self.v.H, self.p0, self.v])
         else:
             self.pe0 = self.v.H * self.p0
         # Mark solved
