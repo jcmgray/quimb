@@ -139,12 +139,12 @@ def concurrence(p):
         return max(0, c)
 
 
-def qid(p, dims, inds, precomp_func=False, sparse_comp=False):
+def qid(p, dims, inds, precomp_func=False, sparse_comp=True):
     inds = np.atleast_1d(inds)
     # Construct operators
-    ops_i = [[eyepad(sig(s), dims, ind, sparse=sparse_comp)
-              for s in (1, 2, 3)]
-             for ind in inds]
+    ops_i = list([list([eyepad(sig(s), dims, ind, sparse=sparse_comp)
+                        for s in (1, 2, 3)])
+                  for ind in inds])
 
     # Define function closed over precomputed operators
     def qid_func(x):
