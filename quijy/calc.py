@@ -7,6 +7,7 @@ import numpy as np
 from quijy.core import isket, isbra, isop, qonvert, kron, ldmul, comm, eyepad
 from quijy.gen import sig
 from quijy.solve import eigvals, eigsys, norm2
+from itertools import product
 
 
 def trx(p, dims, keep):
@@ -151,7 +152,26 @@ def qid(p, dims, inds, precomp_func=False, sparse_comp=True):
         qds = np.zeros(np.size(inds))
         for i, ops in enumerate(ops_i):
             for op in ops:
-                qds[i] += norm2(comm(x, op))**2
-        return qds
+                qds[i] += 0.5 * norm2(comm(x, op))**2
+        return np.sqrt(qds)
 
     return qid_func if precomp_func else qid_func(p)
+
+
+def print_pauli_decomp(a, tol=1e-3):
+    """
+    Decomposes an operator via the Hilbert-schmidt inner product into the
+    pauli group and then prints the significant contirubionts. TODO: Sort
+    list according to weight.
+    """
+    n = int(np.log2(a.shape[0]))
+    perms = product('IXYZ', repeat=n)
+    for perm in perms:
+        op = kron(*[sig(s) for s in perm]) / 2**n
+        d = tr(a * op)
+        if abs(d) > tol:
+            name = "".join(perm)
+            if d < 0:
+                print(name, "%.3f" % d)
+            else:
+                print(name, "","%.3f" % d)
