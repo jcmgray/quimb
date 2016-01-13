@@ -47,10 +47,10 @@ def bell_state(n):
 
 def singlet():
     """ Alias for one of bell-states """
-    return bell_state(4)
+    return bell_state(3)
 
 
-def bloch_state(ax, ay, az, sparse=False, purify=False):
+def bloch_state(ax, ay, az, purify=False, sparse=False):
     if purify:
         ax, ay, az = np.array([ax, ay, az])/np.sqrt(ax**2 + ay**2 + az**2)
     rho = 0.5 * (sig('i') + ax * sig('x') + ay * sig('y') + az * sig('z'))
@@ -79,15 +79,19 @@ def random_rho(n):
 
 
 def random_product_state(n):
-    x = np.matrix([[1]])
-    for i in range(n):
-        u = np.random.rand()
-        v = np.random.rand()
-        phi = 2 * np.pi * u
-        theta = np.arccos(2 * v - 1)
-        x = kron(x, np.matrix([[np.cos(theta / 2.0)],
-                               [np.exp(1.0j * phi) * np.sin(theta / 2)]]))
-    return x
+    """
+    Calculates the wavefunction of n many random pure qubits.
+    """
+    # Generator
+    def calc_rand_pure_qubits(n):
+        for i in range(n):
+            u = np.random.rand()
+            v = np.random.rand()
+            phi = 2 * np.pi * u
+            theta = np.arccos(2 * v - 1)
+            yield np.matrix([[np.cos(theta / 2.0)],
+                             [np.sin(theta / 2.0) * np.exp(1.0j * phi) ]])
+    return kron(*[x for x in calc_rand_pure_qubits(n)])
 
 
 def neel_state(n):
@@ -102,6 +106,10 @@ def singlet_pairs(n):
 
 def werner_state(p):
     return p * bell_state(3) * bell_state(3).H + (1 - p) * np.eye(4) / 4
+
+
+def ghz_state(n):
+    return (basis_vec(0, 2**n) + basis_vec(2**n - 1, 2**n))/2.0**0.5
 
 
 def ham_heis(n, jx=1, jy=1, jz=1, bz=0, periodic=False, sparse=False):

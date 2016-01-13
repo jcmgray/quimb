@@ -141,7 +141,7 @@ def calcncv(k, n, sparse):
         ncv: number of lanczos vectors to use
     """
     if sparse:
-        ncv = max(8, 2 * k + 2)
+        ncv = max(20, 2 * k + 2)
     else:
-        ncv = max(10, n//2**5 - 1, k * 2 + 2)
+        ncv = max(20, n//2**5 - 1, k * 2 + 2)
     return ncv
