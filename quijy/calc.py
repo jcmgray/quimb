@@ -3,11 +3,13 @@ Functions for more advanced calculations of quantities and properties of
 quantum objects.
 """
 
+from itertools import product
+from collections import OrderedDict
 import numpy as np
-from quijy.core import isket, isbra, isop, qonvert, kron, ldmul, comm, eyepad
+from quijy.core import (isket, isbra, isop, qonvert, kron, ldmul, comm,
+                        eyepad, tr)
 from quijy.gen import sig
 from quijy.solve import eigvals, eigsys, norm2
-from itertools import product
 
 
 def trx(p, dims, keep):
@@ -158,20 +160,49 @@ def qid(p, dims, inds, precomp_func=False, sparse_comp=True):
     return qid_func if precomp_func else qid_func(p)
 
 
-def print_pauli_decomp(a, tol=1e-3):
+
+def pauli_decomp(a, mode='p', tol=1e-3):
     """
     Decomposes an operator via the Hilbert-schmidt inner product into the
-    pauli group and then prints the significant contirubionts. TODO: Sort
-    list according to weight.
+    pauli group. Can both print the decomposition or return it.
+    Parameters
+    ----------
+        a: operator to decompose
+        mode: string, include 'p' to print the decomp and/or 'c' to return dict
+        tol: print operators with contirbution above tol only.
+    Returns
+    -------
+        nds: OrderedDict of Pauli operator name and overlap with a.
+    Examples
+    --------
+    >>> pauli_decomp( singlet(), tol=1e-2)
+    II  0.25
+    XX -0.25
+    YY -0.25
+    ZZ -0.25
     """
-    n = int(np.log2(a.shape[0]))
-    perms = product('IXYZ', repeat=n)
-    for perm in perms:
-        op = kron(*[sig(s) for s in perm]) / 2**n
-        d = tr(a * op)
-        if abs(d) > tol:
+    a = qonvert(a, 'dop')  # make sure operator
+    n = int(np.log2(a.shape[0]))  # infer number of qubits
+
+    # define generator for inner product to iterate over efficiently
+    def calc_name_and_overlap(fa):
+        for perm in product('IXYZ', repeat=n):
             name = "".join(perm)
-            if d < 0:
-                print(name, "%.3f" % d)
-            else:
-                print(name, "","%.3f" % d)
+            op = kron(*[sig(s, sparse=True) for s in perm]) / 2**n
+            d = tr(a * op)
+            yield name, d
+    nds = [nd for nd in calc_name_and_overlap(a)]
+
+    # sort by descending overlap and turn into OrderedDict
+    nds.sort(key=lambda pair: -abs(pair[1]))
+    nds = OrderedDict(nds)
+
+    # Print decomposition
+    if 'p' in mode:
+        for x, d in nds.items():
+            if abs(d) < 0.01: break
+            print(x, '{: .{prec}f}'.format(d, prec=int(round(0.5 - np.log10(1.001 * tol)))))
+
+    # Return full calculation
+    if 'c' in mode:
+        return nds
