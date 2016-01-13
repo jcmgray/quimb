@@ -92,17 +92,20 @@ def krnd2(a, b):
 #     return np.kron(a, b)
 
 
-def kron(*args):
+def kron(*ps):
     """ Tensor product of variable number of arguments.
     Input:
-        args: objects to be tensored together
+        ps: objects to be tensored together
     Returns:
         operator
     The product is performed as (a * (b * (c * ...)))
     """
-    a = args[0]
-    b = args[1] if len(args) == 2 else  \
-        kron(*args[1:])  # Recursively perform kron to 'right'
+    pn = len(ps)
+    a = ps[0]
+    if pn == 1:
+        return a
+    b = ps[1] if pn == 2 else  \
+        kron(*ps[1:])  # Recursively perform kron to 'right'
     return (sp.kron(a, b, 'csr') if (sp.issparse(a) or sp.issparse(b)) else
             krnd2(a, b))
 
@@ -132,6 +135,12 @@ def eyepad(a, dims, inds, sparse=None):
     Note that the actual numbers in dims[inds] are ignored and the size of
     a is assumed to match. Sparsity of the output can be inferred from
     input if not specified.
+    e.g.
+    >>> X = sig('x')
+    >>> b1 = kron(X, eye(2), X, eye(2))
+    >>> b2 = eyepad(X, [2] * 4, [0, 2])
+    >>> np.allclose(b1, b2)
+    True
     """
     sparse = sp.issparse(a) if sparse is None else sparse  # infer sparsity
     inds = np.array(inds, ndmin=1)
