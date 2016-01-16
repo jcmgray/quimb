@@ -24,25 +24,29 @@ def sig(xyz, sparse=False):
     """
     Generates one of the three Pauli matrices, 0-X, 1-Y, 2-Z
     """
-    if xyz in ('x', 'X', 1):
+    if xyz in (1, 'x', 'X'):
         return qonvert([[0, 1], [1, 0]], sparse=sparse)
-    elif xyz in ('y', 'Y', 2):
+    elif xyz in (2, 'y', 'Y'):
         return qonvert([[0, -1j], [1j, 0]], sparse=sparse)
-    elif xyz in ('z', 'Z', 3):
+    elif xyz in (3, 'z', 'Z'):
         return qonvert([[1, 0], [0, -1]], sparse=sparse)
-    elif xyz in ('i', 'I', 'id', 0):
+    elif xyz in (0, 'i', 'I'):
         return qonvert([[1, 0], [0, 1]], sparse=sparse)
 
 
-def bell_state(n):
+def bell_state(s):
     """
     Generates one of the four bell-states;
     0: phi+, 1: phi-, 2: psi+, 3: psi- (singlet)
     """
-    return (qonvert([1, 0, 0, 1], 'ket') / np.sqrt(2.0) if n == 0 else
-            qonvert([0, 1, 1, 0], 'ket') / np.sqrt(2.0) if n == 2 else
-            qonvert([1, 0, 0, -1], 'ket') / np.sqrt(2.0) if n == 1 else
-            qonvert([0, 1, -1, 0], 'ket') / np.sqrt(2.0))
+    if s in (3, 'psim'):
+        return qonvert([0, 1, -1, 0], 'ket') / 2.0**0.5
+    elif s in (0, 'phip'):
+        return qonvert([1, 0, 0, 1], 'ket') / 2.0**0.5
+    elif s in (1, 'phim'):
+        return qonvert([1, 0, 0, -1], 'ket') / 2.0**0.5
+    elif s in (2, 'psip'):
+        return qonvert([0, 1, 1, 0], 'ket') / 2.0**0.5
 
 
 def singlet():
