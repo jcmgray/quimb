@@ -1,13 +1,13 @@
 """
 Contains an evolution class, QuEvo to efficiently manage time evolution of
 quantum states according to schrodingers' equation, and related functions.
+TODO: iterative method, sparse etc., turn off optimzations for small n
 """
 
-from quijy.core import isbra, isket, isop, qonvert, ldmul, rdmul
+from quijy.core import isop, qonvert, ldmul, rdmul
 from quijy.solve import eigsys
 from numpy.linalg import multi_dot as mdot
 from numexpr import evaluate as evl
-from numpy import multiply
 
 
 class QuEvo(object):
@@ -17,18 +17,18 @@ class QuEvo(object):
     """
     # TODO diagonalise or use iterative method ...
     def __init__(self,
-                 ham,
                  p0,
+                 ham,
                  dop=None,
                  solve=False,
-                 l=None,
-                 v=None):
+                 t0=0):
         """
         Inputs:
-            ham: Governing Hamiltonian
             p0: inital state, either vector or operator
+            ham: Governing Hamiltonian, can be tuple (eigvals, eigvecs)
             dop: whether to force evolution as density operator
             solve: whether to immediately solve hamiltonian
+            t0: initial time
             l: eigenvalues if ham already solved
             v: eigevvectors if ham already solved
         """
@@ -49,27 +49,30 @@ class QuEvo(object):
                 self.p0 = qonvert(p0, 'ket')  # make sure ket
                 self.dop = False
         self.pt = p0  # Current state (start with same as initial)
+        self.t0 = t0  # initial time
+        self.t = t0  # current time
 
-        self.ham = ham
-        if solve:
-            self.solve_ham()
-            self.solved = True
-        elif l is not None and v is not None:
-            self.l = l
-            self.v = v
+        # Set Hamiltonian and infer if solved already from tuple
+        if type(ham) is tuple:  # Eigendecomposition already supplied
+            self.l, self.v = ham
             # Solve for initial state in energy basis
             if self.dop:
                 self.pe0 = mdot([self.v.H * p0 * self.v])
             else:
                 self.pe0 = self.v.H * p0
             self.solved = True
+        elif solve:
+            self.ham = ham
+            self.solve_ham()
+            self.solved = True
         else:
+            self.ham = ham
             self.solved = False
 
     def solve_ham(self):
         # Diagonalise hamiltonian
         self.l, self.v = eigsys(self.ham)
-        # Find initial state in energy eigenbasis
+        # Find initial state in energy eigenbasis at t0
         if self.dop:
             self.pe0 = mdot([self.v.H, self.p0, self.v])
         else:
@@ -78,8 +81,9 @@ class QuEvo(object):
         self.solved = True
 
     def update_to(self, t):
-        l = self.l
-        exptl = evl('exp(-1.0j*t*l)')
+        self.t = t
+        dt = self.t - self.t0
+        exptl = evl('exp(-1.0j*dt*l)', local_dict={'l': self.l, 'dt': dt})
         if self.dop:
             lvpvl = rdmul(ldmul(exptl, self.pe0), evl('conj(exptl)'))
             self.pt = mdot([self.v, lvpvl, self.v.H])
