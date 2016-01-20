@@ -76,7 +76,7 @@ def entropy(rho):
     return np.sum(-l * np.log2(l))
 
 
-def mutual_information(p, dims, sysa=0, sysb=1):
+def mutual_information(p, dims=[2, 2], sysa=0, sysb=1):
     """
     Partitions rho into dims, and finds the mutual information between the
     subsystems at indices sysa and sysb
@@ -160,7 +160,6 @@ def qid(p, dims, inds, precomp_func=False, sparse_comp=True):
     return qid_func if precomp_func else qid_func(p)
 
 
-
 def pauli_decomp(a, mode='p', tol=1e-3):
     """
     Decomposes an operator via the Hilbert-schmidt inner product into the
@@ -200,8 +199,10 @@ def pauli_decomp(a, mode='p', tol=1e-3):
     # Print decomposition
     if 'p' in mode:
         for x, d in nds.items():
-            if abs(d) < 0.01: break
-            print(x, '{: .{prec}f}'.format(d, prec=int(round(0.5 - np.log10(1.001 * tol)))))
+            if abs(d) < 0.01:
+                break
+            dps = int(round(0.5 - np.log10(1.001 * tol)))  # dec places to show
+            print(x, '{: .{prec}f}'.format(d, prec=dps))
 
     # Return full calculation
     if 'c' in mode:

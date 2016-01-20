@@ -8,30 +8,6 @@ from numexpr import evaluate as evl
 from numba import jit
 
 
-def isket(p):
-    """ Checks if matrix is in ket form, i.e. a column """
-    return p.shape[0] > 1 and p.shape[1] == 1  # Column vector check
-
-
-def isbra(p):
-    """ Checks if matrix is in bra form, i.e. a row """
-    return p.shape[0] == 1 and p.shape[1] > 1  # Row vector check
-
-
-def isop(p):
-    """ Checks if matrix is an operator, i.e. square """
-    m, n = np.shape(p)
-    return m == n and m > 1  # Square matrix check
-
-
-def isherm(a):
-    """ Checks if matrix is hermitian, for sparse or dense"""
-    if sp.issparse(a):
-        # Since sparse, test that no .H elements are not unequal..
-        return (a != a.H).nnz == 0
-    return np.allclose(a, a.H)
-
-
 def qonvert(data, qtype=None, sparse=False):
     """ Converts lists to 'quantum' i.e. complex matrices, kets being columns.
     Input:
@@ -55,6 +31,30 @@ def qonvert(data, qtype=None, sparse=False):
     elif qtype == 'dop' and not isop(x):
         x = qonvert(x, 'ket') * qonvert(x, 'ket').H
     return sp.csr_matrix(x, dtype=complex) if sparse else x
+
+
+def isket(p):
+    """ Checks if matrix is in ket form, i.e. a column """
+    return p.shape[0] > 1 and p.shape[1] == 1  # Column vector check
+
+
+def isbra(p):
+    """ Checks if matrix is in bra form, i.e. a row """
+    return p.shape[0] == 1 and p.shape[1] > 1  # Row vector check
+
+
+def isop(p):
+    """ Checks if matrix is an operator, i.e. square """
+    m, n = np.shape(p)
+    return m == n and m > 1  # Square matrix check
+
+
+def isherm(a):
+    """ Checks if matrix is hermitian, for sparse or dense"""
+    if sp.issparse(a):
+        # Since sparse, test that no .H elements are not unequal..
+        return (a != a.H).nnz == 0
+    return np.allclose(a, a.H)
 
 
 @jit
