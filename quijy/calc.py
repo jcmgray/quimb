@@ -207,3 +207,13 @@ def pauli_decomp(a, mode='p', tol=1e-3):
     # Return full calculation
     if 'c' in mode:
         return nds
+
+
+def purify(rho, sparse=False):
+    n = rho.shape[0]
+    ls, vs = eigsys(rho)
+    ls = np.sqrt(ls)
+    psi = np.zeros(shape=(n**2, 1), dtype=complex)
+    for i, l in enumerate(ls.flat):
+        psi += l * kron(vs[:, i], basis_vec(i, n, sparse=sparse))
+    return psi
