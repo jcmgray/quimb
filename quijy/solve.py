@@ -1,5 +1,8 @@
 """
-Functions for solving matrices either fully or partially
+Functions for solving matrices either fully or partially.
+Note that the eigendecompositions here all assume a
+hermitian matrix, use explicit numpy/scipy linalg routines for
+non-hermitian matrices.
 """
 
 import numpy as np
@@ -9,8 +12,10 @@ import scipy.sparse.linalg as spla
 from quijy.core import qonvert
 
 
-# full eigendecomposition methods for dense matrices #
-# -------------------------------------------------- #
+##############################################################################
+# full eigendecomposition methods for dense matrices #########################
+##############################################################################
+
 def eigsys(a, sort=True):
     """ Find all eigenpairs of dense matrix
     Input:
@@ -52,8 +57,10 @@ def eigvecs(a, sort=True):
     return v
 
 
-# iterative methods for partial eigendecompision #
-# ---------------------------------------------- #
+###############################################################################
+# iterative methods for partial eigendecompision ##############################
+###############################################################################
+
 def seigsys(a, k=1, which='SA', ncv=None, return_vecs=True, **kwargs):
     """ Returns a few eigenpairs from a possibly sparse hermitian operator
     Inputs:
@@ -103,8 +110,10 @@ def groundenergy(ham):
     return seigvals(ham, k=1, which='SA')
 
 
-# iterative methods for partial singular value decomposition #
-# ---------------------------------------------------------- #
+###############################################################################
+# iterative methods for partial singular value decomposition ##################
+###############################################################################
+
 def svds(a, k=1, ncv=None, return_vecs=True, **kwargs):
     """ Compute a number of singular value pairs """
     n = a.shape[0]
