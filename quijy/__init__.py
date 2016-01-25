@@ -1,26 +1,19 @@
-# Copyright Johnnie Gray
-# A python library for basic quantum stuff
+# A flexible python library for many-body quantum calculations.
 
 # Core functions
-from .core import *
-from . import core
+from quijy.core import *
 
 # Generating objects
-from .gen import *
-from . import gen
+from quijy.gen import *
 
 # Solving functions
-from .solve import *
-from . import solve
+from quijy.solve import *
 
 # Functions for calculating properties
-from .calc import *
-from . import calc
+from quijy.calc import *
 
 # Evolution class and methods
-from .evo import *
-from . import evo
+from quijy.evo import *
 
 # Miscellaneous functions
-from .misc import *
-from . import misc
+from quijy.misc import *
