@@ -203,3 +203,9 @@ def rdmul(m, v):
 def comm(a, b):
     """ Commutator of two matrices """
     return a * b - b * a
+
+
+def infer_num_qubits(p):
+    """ Infers the size of a state assumed to be made of qubits """
+    d = max(p.shape)
+    return int(np.log2(d))
