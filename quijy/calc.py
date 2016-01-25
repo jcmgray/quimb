@@ -41,7 +41,7 @@ def trx(p, dims, keep):
         p = p.reshape(dims) \
             .transpose(perm) \
             .reshape([dimkeep, dimlose])
-        p = np.matrix(p)
+        p = np.matrix(p, copy=True)
         return qonvert(p * p.H)
     else:  # p = rho
         p = np.array(p)

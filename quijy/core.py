@@ -93,7 +93,7 @@ def krnd2(a, b):
     for i in range(m):
         for j in range(n):
             x[i * p:(i + 1)*p, j * q:(j + 1) * q] = a[i, j] * b
-    return np.asmatrix(x)
+    return np.matrix(x, copy=False)
 # def krnd2(a, b):  # Fallback for debugging
 #     return kron(a, b)
 
