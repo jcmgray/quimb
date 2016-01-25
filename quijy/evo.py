@@ -4,10 +4,10 @@ quantum states according to schrodingers' equation, and related functions.
 TODO: iterative method, sparse etc., turn off optimzations for small n
 """
 
-from quijy.core import isop, qonvert, ldmul, rdmul
-from quijy.solve import eigsys
 from numpy.linalg import multi_dot as mdot
 from numexpr import evaluate as evl
+from quijy.core import isop, qonvert, ldmul, rdmul
+from quijy.solve import eigsys
 
 
 class QuEvo(object):

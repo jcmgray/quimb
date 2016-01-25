@@ -8,7 +8,7 @@ from numexpr import evaluate as evl
 from numba import jit
 
 
-def qonvert(data, qtype=None, sparse=False):
+def qonvert(data, qtype=None, sparse=False, nrmlz=False):
     """ Converts lists to 'quantum' i.e. complex matrices, kets being columns.
     Input:
         data:  list describing entries
@@ -20,32 +20,39 @@ def qonvert(data, qtype=None, sparse=False):
     * Will conjugate if 'bra' given.
     * Will leave operators as is if 'dop' given, but construct one
     them if vector given.
+    TODO: convert sparse vector to sparse operator
     """
-    x = np.asmatrix(data, dtype=complex)
-    sz = np.prod(x.shape)
-    if qtype == 'ket':
-        x.shape = (sz, 1)
-    elif qtype == 'bra':
-        x.shape = (1, sz)
-        x = np.conj(x)
-    elif qtype == 'dop' and not isop(x):
-        x = qonvert(x, 'ket') * qonvert(x, 'ket').H
-    return sp.csr_matrix(x, dtype=complex) if sparse else x
+    p = np.matrix(data, copy=False, dtype=complex)
+    if qtype is not None:
+        sz = np.prod(p.shape)
+        if qtype in ('k', 'ket'):
+            p.shape = (sz, 1)
+        elif qtype in ('b', 'bra'):
+            p.shape = (1, sz)
+            p = np.conj(p)
+        elif qtype in ('p', 'd', 'r', 'rho', 'op', 'dop') and not isop(p):
+            p = qonvert(p, 'k') * qonvert(p, 'k').H
+    if nrmlz:
+        p = nrmlz(p)
+    return sp.csr_matrix(p, dtype=complex) if sparse else p
 
 
+@jit
 def isket(p):
     """ Checks if matrix is in ket form, i.e. a column """
     return p.shape[0] > 1 and p.shape[1] == 1  # Column vector check
 
 
+@jit
 def isbra(p):
     """ Checks if matrix is in bra form, i.e. a row """
     return p.shape[0] == 1 and p.shape[1] > 1  # Row vector check
 
 
+@jit
 def isop(p):
     """ Checks if matrix is an operator, i.e. square """
-    m, n = np.shape(p)
+    m, n = p.shape
     return m == n and m > 1  # Square matrix check
 
 
@@ -59,20 +66,19 @@ def isherm(a):
 
 @jit
 def tr(a):
-    """ Trace of hermitian matrix (jit version faster than numpy!) """
+    """ Trace of hermitian matrix (jit version faster than numpy!)
+    TODO: sparse method
+    """
     x = 0.0
     for i in range(a.shape[0]):
         x += a[i, i].real
     return x
-# def tr(a):
-#     """ Fallback version for debugging """
-#     return np.real(np.trace(a))
 
 
 def nrmlz(p):
     """ Returns the state p in normalized form """
-    return (p / np.sqrt(p.H * p) if isket(p) else
-            p / np.sqrt(p * p.H) if isbra(p) else
+    return (p / (p.H * p)[0, 0]**0.5 if isket(p) else
+            p / (p * p.H)[0, 0]**0.5 if isbra(p) else
             p / tr(p))
 
 
@@ -89,7 +95,7 @@ def krnd2(a, b):
             x[i * p:(i + 1)*p, j * q:(j + 1) * q] = a[i, j] * b
     return np.asmatrix(x)
 # def krnd2(a, b):  # Fallback for debugging
-#     return np.kron(a, b)
+#     return kron(a, b)
 
 
 def kron(*ps):
@@ -110,11 +116,11 @@ def kron(*ps):
             krnd2(a, b))
 
 
-def kronpow(a, pow):
-    """ Returns 'a' tensored with itself pow times """
-    return (1 if pow == 0 else
-            a if pow == 1 else
-            kron(*[a] * pow))
+def kronpow(a, pwr):
+    """ Returns 'a' tensored with itself pwr times """
+    return (1 if pwr == 0 else
+            a if pwr == 1 else
+            kron(*[a] * pwr))
 
 
 def eye(n, sparse=False):
@@ -138,8 +144,8 @@ def eyepad(a, dims, inds, sparse=None):
     e.g.
     >>> X = sig('x')
     >>> b1 = kron(X, eye(2), X, eye(2))
-    >>> b2 = eyepad(X, [2] * 4, [0, 2])
-    >>> np.allclose(b1, b2)
+    >>> b2 = eyepad(X, dims=[2]*4, inds=[0,2])
+    >>> allclose(b1, b2)
     True
     """
     sparse = sp.issparse(a) if sparse is None else sparse  # infer sparsity
@@ -167,8 +173,8 @@ def chop(x, tol=1.0e-14):
         x.data.imag[np.abs(x.data.imag) < minm] = 0.0
         x.eliminate_zeros()
     else:
-        x.real[abs(x.real) < minm] = 0.0
-        x.imag[abs(x.imag) < minm] = 0.0
+        x.real[np.abs(x.real) < minm] = 0.0
+        x.imag[np.abs(x.imag) < minm] = 0.0
     return x
 
 
