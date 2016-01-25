@@ -3,13 +3,14 @@ Functions for more advanced calculations of quantities and properties of
 quantum objects.
 """
 
-from itertools import product
-from collections import OrderedDict
 import numpy as np
+import numpy.linalg as nla
 from quijy.core import (isket, isbra, isop, qonvert, kron, ldmul, comm,
                         eyepad, tr)
-from quijy.gen import sig
-from quijy.solve import eigvals, eigsys, norm2
+from quijy.gen import (sig, basis_vec)
+from quijy.solve import (eigvals, eigsys, norm2)
+from itertools import product
+from collections import OrderedDict
 
 
 def trx(p, dims, keep):
@@ -26,11 +27,10 @@ def trx(p, dims, keep):
         if not isop(p):
             return p * p.H  # but return as density operator for consistency
         return p
-    n = len(dims)
-    dims = np.array(dims)
-    keep = np.array(keep)
-    keep = np.reshape(keep, [keep.size])  # make sure array
-    lose = np.delete(np.arange(n), keep)
+    n = np.size(dims)
+    dims = np.array(dims, ndmin=1)
+    keep = np.array(keep, ndmin=1)
+    lose = np.delete(range(n), keep)
     dimkeep = np.prod(dims[keep])
     dimlose = np.prod(dims[lose])
     # Permute dimensions into block of keep and block of lose
@@ -72,7 +72,7 @@ def entropy(rho):
     Computes the (von Neumann) entropy of positive matrix rho
     """
     l = eigvals(rho)
-    l = l[np.nonzero(l)]
+    l = l[l > 0.0]
     return np.sum(-l * np.log2(l))
 
 
@@ -81,7 +81,7 @@ def mutual_information(p, dims=[2, 2], sysa=0, sysb=1):
     Partitions rho into dims, and finds the mutual information between the
     subsystems at indices sysa and sysb
     """
-    if isop(p) or len(dims) > 2:  # mixed combined system
+    if isop(p) or np.size(dims) > 2:  # mixed combined system
         rhoab = trx(p, dims, [sysa, sysb])
         rhoa = trx(rhoab, np.r_[dims[sysa], dims[sysb]], 0)
         rhob = trx(rhoab, np.r_[dims[sysa], dims[sysb]], 1)
@@ -107,7 +107,7 @@ def trace_norm(a):
     """
     Returns the trace norm of operator a, that is, the sum of abs eigvals.
     """
-    return np.absolute(eigvals(a, sort=False)).sum()
+    return np.sum(np.absolute(eigvals(a, sort=False)))
 
 
 def trace_distance(p, w):
@@ -133,17 +133,18 @@ def concurrence(p):
     if isop(p):
         p = qonvert(p, 'dop')  # make sure density operator
         pt = kron(sig(2), sig(2)) * p.conj() * kron(sig(2), sig(2))
-        l = np.sqrt(np.linalg.eigvals(p * pt)).real
+        l = (nla.eigvals(p * pt).real**2)**0.25
         return max(0, 2 * np.max(l) - np.sum(l))
     else:
         p = qonvert(p, 'ket')
         pt = kron(sig(2), sig(2)) * p.conj()
-        c = np.real(np.abs(p.H * p)).item(0)
+        c = np.real(abs(p.H * pt)).item(0)
         return max(0, c)
 
 
 def qid(p, dims, inds, precomp_func=False, sparse_comp=True):
-    inds = np.atleast_1d(inds)
+    p = qonvert(p, 'dop')
+    inds = np.array(inds, ndmin=1)
     # Construct operators
     ops_i = list([list([eyepad(sig(s), dims, ind, sparse=sparse_comp)
                         for s in (1, 2, 3)])
@@ -154,8 +155,8 @@ def qid(p, dims, inds, precomp_func=False, sparse_comp=True):
         qds = np.zeros(np.size(inds))
         for i, ops in enumerate(ops_i):
             for op in ops:
-                qds[i] += 0.5 * norm2(comm(x, op))**2
-        return np.sqrt(qds)
+                qds[i] += norm2(comm(x, op))**2 / 3.0
+        return qds
 
     return qid_func if precomp_func else qid_func(p)
 
@@ -190,12 +191,11 @@ def pauli_decomp(a, mode='p', tol=1e-3):
             op = kron(*[sig(s, sparse=True) for s in perm]) / 2**n
             d = tr(a * op)
             yield name, d
-    nds = [nd for nd in calc_name_and_overlap(a)]
 
+    nds = [nd for nd in calc_name_and_overlap(a)]
     # sort by descending overlap and turn into OrderedDict
     nds.sort(key=lambda pair: -abs(pair[1]))
     nds = OrderedDict(nds)
-
     # Print decomposition
     if 'p' in mode:
         for x, d in nds.items():
@@ -203,7 +203,6 @@ def pauli_decomp(a, mode='p', tol=1e-3):
                 break
             dps = int(round(0.5 - np.log10(1.001 * tol)))  # dec places to show
             print(x, '{: .{prec}f}'.format(d, prec=dps))
-
     # Return full calculation
     if 'c' in mode:
         return nds
