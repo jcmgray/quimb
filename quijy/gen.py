@@ -70,15 +70,15 @@ def bloch_state(ax, ay, az, purify=False, sparse=False):
 
 
 # functions
-def random_psi(n):
+def rand_ket(n):
     """
     Generates a wavefunction with random coefficients, normalised
     """
     return qonvert(np.random.randn(n, 1) + 1.0j * np.random.randn(n, 1),
-                   nrmlz=True)
+                   nrmlzd=True)
 
 
-def random_rho(n):
+def rand_rho(n):
     """
     Generates a random density matrix of dimension n, no special properties
     other than being guarateed hermitian, positive, and trace 1.
@@ -88,7 +88,18 @@ def random_rho(n):
     return nrmlz(rho * rho)
 
 
-def random_product_state(n, qtype=None):
+def rand_mix(n):
+    """
+    Constructs a random mixed state by tracing out a random gaussian ket
+    where the composite system varies in size between 2 and n. This produces
+    a spread of states including more purity but has no real grounding.
+    """
+    m = np.random.randint(2, n+1)
+    psi = rand_ket(n*m)
+    return trx(psi, [n, m], 0)
+
+
+def rand_product_state(n, qtype=None):
     """
     Calculates the wavefunction of n many random pure qubits.
     """
