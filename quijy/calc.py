@@ -6,50 +6,11 @@ quantum objects.
 import numpy as np
 import numpy.linalg as nla
 from quijy.core import (isket, isbra, isop, qonvert, kron, ldmul, comm,
-                        eyepad, tr)
+                        eyepad, tr, trx)
 from quijy.gen import (sig, basis_vec)
 from quijy.solve import (eigvals, eigsys, norm2)
 from itertools import product
 from collections import OrderedDict
-
-
-def trx(p, dims, keep):
-    """ Perform partial trace.
-    Input:
-        p: state to perform partial trace on, vector or operator
-        dims: list of subsystem dimensions
-        keep: index of subsytems to keep
-    Returns:
-        Density matrix of subsytem dimensions dims[keep]
-    """
-    # Cast as ndarrays for 2D+ reshaping
-    if np.size(keep) == np.size(dims):  # keep all subsystems
-        if not isop(p):
-            return p * p.H  # but return as density operator for consistency
-        return p
-    n = np.size(dims)
-    dims = np.array(dims, ndmin=1)
-    keep = np.array(keep, ndmin=1)
-    lose = np.delete(range(n), keep)
-    dimkeep = np.prod(dims[keep])
-    dimlose = np.prod(dims[lose])
-    # Permute dimensions into block of keep and block of lose
-    perm = np.r_[keep, lose]
-    # Apply permutation to state and trace out block of lose
-    if not isop(p):  # p = psi
-        p = np.array(p)
-        p = p.reshape(dims) \
-            .transpose(perm) \
-            .reshape([dimkeep, dimlose])
-        p = np.matrix(p, copy=True)
-        return qonvert(p * p.H)
-    else:  # p = rho
-        p = np.array(p)
-        p = p.reshape(np.r_[dims, dims]) \
-            .transpose(np.r_[perm, perm + n]) \
-            .reshape([dimkeep, dimlose, dimkeep, dimlose]) \
-            .trace(axis1=1, axis2=3)
-        return qonvert(p)
 
 
 def partial_transpose(p, dims=[2, 2]):

@@ -8,7 +8,7 @@ from numexpr import evaluate as evl
 from numba import jit
 
 
-def qonvert(data, qtype=None, sparse=False, nrmlz=False):
+def qonvert(data, qtype=None, sparse=False, nrmlzd=False):
     """ Converts lists to 'quantum' i.e. complex matrices, kets being columns.
     Input:
         data:  list describing entries
@@ -32,7 +32,7 @@ def qonvert(data, qtype=None, sparse=False, nrmlz=False):
             p = np.conj(p)
         elif qtype in ('p', 'd', 'r', 'rho', 'op', 'dop') and not isop(p):
             p = qonvert(p, 'k') * qonvert(p, 'k').H
-    if nrmlz:
+    if nrmlzd:
         p = nrmlz(p)
     return sp.csr_matrix(p, dtype=complex) if sparse else p
 
@@ -159,6 +159,45 @@ def eyepad(a, dims, inds, sparse=None):
     pad_size = np.prod(dims[inds[-1] + 1:])
     b = kron(b, eye(pad_size, sparse=sparse))
     return b
+
+
+def trx(p, dims, keep):
+    """ Perform partial trace.
+    Input:
+        p: state to perform partial trace on, vector or operator
+        dims: list of subsystem dimensions
+        keep: index of subsytems to keep
+    Returns:
+        Density matrix of subsytem dimensions dims[keep]
+    """
+    # Cast as ndarrays for 2D+ reshaping
+    if np.size(keep) == np.size(dims):  # keep all subsystems
+        if not isop(p):
+            return p * p.H  # but return as density operator for consistency
+        return p
+    n = np.size(dims)
+    dims = np.array(dims, ndmin=1)
+    keep = np.array(keep, ndmin=1)
+    lose = np.delete(range(n), keep)
+    dimkeep = np.prod(dims[keep])
+    dimlose = np.prod(dims[lose])
+    # Permute dimensions into block of keep and block of lose
+    perm = np.r_[keep, lose]
+    # Apply permutation to state and trace out block of lose
+    if not isop(p):  # p = psi
+        p = np.array(p)
+        p = p.reshape(dims) \
+            .transpose(perm) \
+            .reshape([dimkeep, dimlose])
+        p = np.matrix(p, copy=True)
+        return qonvert(p * p.H)
+    else:  # p = rho
+        p = np.array(p)
+        p = p.reshape(np.r_[dims, dims]) \
+            .transpose(np.r_[perm, perm + n]) \
+            .reshape([dimkeep, dimlose, dimkeep, dimlose]) \
+            .trace(axis1=1, axis2=3)
+        return qonvert(p)
 
 
 def chop(x, tol=1.0e-14):

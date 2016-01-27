@@ -5,7 +5,7 @@ TODO: add sparse and qtype to all relevant functions.
 
 import numpy as np
 import scipy.sparse as sp
-from quijy.core import qonvert, nrmlz, kron, kronpow, eyepad, eye
+from quijy.core import (qonvert, nrmlz, kron, kronpow, eyepad, eye, trx)
 
 
 def basis_vec(dir, dim, sparse=False):
