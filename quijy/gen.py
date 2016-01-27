@@ -124,14 +124,14 @@ def ghz_state(n, sparse=False):
             basis_vec(2**n - 1, 2**n, sparse=sparse))/2.0**0.5
 
 
-def ham_heis(n, jx=1, jy=1, jz=1, bz=0, periodic=False, sparse=False):
+def ham_heis(n, jx=1, jy=1, jz=1, bz=0, ring=False, sparse=False):
     """ Constructs the heisenberg spin 1/2 hamiltonian
     Parameters:
         n: number of spins
         jx, jy, jz: coupling constants, with convention that positive =
         antiferromagnetic
         bz: z-direction magnetic field
-        periodic: whether to couple the first and last spins
+        ring: whether to couple the first and last spins
         sparse: whether to return the hamiltonian in sparse form
     Returns:
         ham: hamiltonian as matrix
@@ -145,7 +145,7 @@ def ham_heis(n, jx=1, jy=1, jz=1, bz=0, periodic=False, sparse=False):
     ham = eyepad(-bz * sig('z', sparse=True), dims, n - 1)
     for i in range(n - 1):
         ham = ham + eyepad(sds, dims[:-1], i)
-    if periodic:
+    if ring:
         ham = ham + eyepad(sig('x', sparse=True), dims, [0, n - 1])  \
                   + eyepad(sig('y', sparse=True), dims, [0, n - 1])  \
                   + eyepad(sig('z', sparse=True), dims, [0, n - 1])
