@@ -3,7 +3,6 @@ Misc. functions not quantum related.
 """
 
 import numpy as np
-from matplotlib import cm
 from tqdm import tqdm
 
 
@@ -15,7 +14,8 @@ def progbar(x, ascii=True, leave=True, **kwargs):
     return tqdm(x, ascii=ascii, leave=leave, **kwargs)
 
 
-def ezplot(x, y_i, fignum=1, xlog=False, ylog=False, **kwargs):
+def mplot(x, y_i, fignum=1, xlog=False, ylog=False, **kwargs):
+    from matplotlib import cm
     """
     Function for automatically plotting multiple sets of data
     """
