@@ -137,6 +137,45 @@ def eye(n, sparse=False):
             np.eye(n, dtype=complex))
 
 
+def mapcoords(dims, coos, cyclic=False, trim=None):
+    """
+    Maps multi-dimensional coordinates and indices to flat arrays in a
+    regular way. Wraps or deletes coordinates beyond the system size
+    depending on parameters `cyclic` and `trim`.
+    INPUTS:
+        dims: multi-dim array of systems' internal dimensions
+        coos: array of coordinate tuples to convert
+        cyclic: whether to automatically wrap coordinates beyond system size or
+            delete them.
+        trim: if not None, coos will be bound-checked. trim=True will delete
+            any coordinates beyond dimensions, trim=False will raise an error.
+    OUTPUTS:
+        dims: flattened version of dims
+        coos: indices mapped to flattened dims
+    EXAMPLE:
+    >>> dims = ([[10, 11, 12],
+                 [13, 14, 15]])
+    >>> coos = [(1, 1), (1, 2), (2, 1)]
+    >>> ndims, ncoos = flatcoords(dims, coos, cyclic=True)
+    >>> ndims[ncoos]
+    array([14, 15, 11])
+    """
+    # Calculate the raveled size of each dimension (i.e. size of 1 incr.)
+    shp_dims = np.shape(dims)
+    shp_mod = [np.prod(shp_dims[i+1:]) for i in range(len(shp_dims)-1)] + [1]
+    coos = np.array(coos)
+    if cyclic:
+        coos = coos % shp_dims  # (broadcasting dims down columns)
+    elif trim is not None:
+        if trim:
+            coos = coos[np.all(coos == coos % shp_dims, axis=1)]
+        elif np.any(coos != coos % shp_dims):
+            raise ValueError('Coordinates beyond system dimensions.')
+    # Sum contributions from each coordinate & flatten dimensions
+    coos = np.sum(shp_mod * coos, axis=1)
+    return np.ravel(dims), coos
+
+
 def eyepad(a, dims, inds, sparse=None):
     """ Pad an operator with identities to act on particular subsystem.
     Input:
