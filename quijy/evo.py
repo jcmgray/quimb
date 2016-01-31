@@ -6,7 +6,7 @@ TODO: iterative method, sparse etc., turn off optimzations for small n
 
 from numpy.linalg import multi_dot as mdot
 from numexpr import evaluate as evl
-from quijy.core import isop, qonvert, ldmul, rdmul
+from quijy.core import isop, quijify, ldmul, rdmul
 from quijy.solve import eigsys
 
 
@@ -35,7 +35,7 @@ class QuEvo(object):
         super(QuEvo, self).__init__()
 
         # Convert state to ket or dop and mark as such
-        self.p0 = qonvert(p0)
+        self.p0 = quijify(p0)
         if isop(self.p0):
             if dop is False:
                 raise ValueError('Cannot convert dop to ket.')
@@ -43,10 +43,10 @@ class QuEvo(object):
                 self.dop = True
         else:
             if dop is True:
-                self.p0 = qonvert(p0, 'dop')
+                self.p0 = quijify(p0, 'dop')
                 self.dop = True
             else:
-                self.p0 = qonvert(p0, 'ket')  # make sure ket
+                self.p0 = quijify(p0, 'ket')  # make sure ket
                 self.dop = False
         self.pt = p0  # Current state (start with same as initial)
         self.t0 = t0  # initial time

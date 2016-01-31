@@ -9,7 +9,7 @@ import numpy as np
 import numpy.linalg as nla
 import scipy.sparse as sp
 import scipy.sparse.linalg as spla
-from quijy.core import qonvert
+from quijy.core import quijify
 
 
 ##############################################################################
@@ -28,7 +28,7 @@ def eigsys(a, sort=True):
     l, v = nla.eigh(a)
     if sort:
         sortinds = np.argsort(l)
-        return l[sortinds], qonvert(v[:, sortinds])
+        return l[sortinds], quijify(v[:, sortinds])
     else:
         return l, v
 
@@ -85,7 +85,7 @@ def seigsys(a, k=1, which='SA', ncv=None, return_vecs=True, **kwargs):
         ncv = calcncv(k, n, sparse) if ncv is None else ncv
         if return_vecs:
             lk, vk = spla.eigsh(a, k=k, which=which, ncv=ncv, **kwargs)
-            return lk, qonvert(vk)
+            return lk, quijify(vk)
         else:
             return spla.eigsh(a, k=k, which=which, ncv=ncv,
                               return_eigenvectors=False, **kwargs)
@@ -128,7 +128,7 @@ def svds(a, k=1, ncv=None, return_vecs=True, **kwargs):
         ncv = calcncv(k, n, sparse) if ncv is None else ncv
         if return_vecs:
             uk, sk, vtk = spla.svds(a, k=k, ncv=ncv, **kwargs)
-            return qonvert(uk), sk, qonvert(vtk)
+            return quijify(uk), sk, quijify(vtk)
         else:
             return spla.svds(a, k=k, ncv=ncv,
                              return_singular_vectors=False, **kwargs)

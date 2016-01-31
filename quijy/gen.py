@@ -5,7 +5,7 @@ TODO: add sparse and qtype to all relevant functions.
 
 import numpy as np
 import scipy.sparse as sp
-from quijy.core import (qonvert, nrmlz, kron, kronpow, eyepad, eye, trx)
+from quijy.core import (quijify, nrmlz, kron, kronpow, eyepad, eye, trx)
 
 
 def basis_vec(dir, dim, sparse=False):
@@ -17,7 +17,7 @@ def basis_vec(dir, dim, sparse=False):
                              dtype=complex, shape=(dim, 1))
     else:
         x = np.zeros([dim, 1], dtype=complex)
-        x = qonvert(x)  # turn into matrix
+        x = quijify(x)  # turn into matrix
         x[dir] = 1.0
     return x
 
@@ -27,13 +27,13 @@ def sig(xyz, sparse=False):
     Generates one of the three Pauli matrices, 0-X, 1-Y, 2-Z
     """
     if xyz in (1, 'x', 'X'):
-        return qonvert([[0, 1], [1, 0]], sparse=sparse)
+        return quijify([[0, 1], [1, 0]], sparse=sparse)
     elif xyz in (2, 'y', 'Y'):
-        return qonvert([[0, -1j], [1j, 0]], sparse=sparse)
+        return quijify([[0, -1j], [1j, 0]], sparse=sparse)
     elif xyz in (3, 'z', 'Z'):
-        return qonvert([[1, 0], [0, -1]], sparse=sparse)
+        return quijify([[1, 0], [0, -1]], sparse=sparse)
     elif xyz in (0, 'i', 'I'):
-        return qonvert([[1, 0], [0, 1]], sparse=sparse)
+        return quijify([[1, 0], [0, 1]], sparse=sparse)
 
 
 def bell_state(s, qtype='ket', sparse=False):
@@ -43,13 +43,13 @@ def bell_state(s, qtype='ket', sparse=False):
     """
     isqr2 = 2.0**-0.5
     if s in (3, 'psi-'):
-        return qonvert([0, isqr2, -isqr2, 0], qtype=qtype, sparse=sparse)
+        return quijify([0, isqr2, -isqr2, 0], qtype=qtype, sparse=sparse)
     elif s in (0, 'phi+'):
-        return qonvert([isqr2, 0, 0, isqr2], qtype=qtype, sparse=sparse)
+        return quijify([isqr2, 0, 0, isqr2], qtype=qtype, sparse=sparse)
     elif s in (1, 'phi-'):
-        return qonvert([isqr2, 0, 0, -isqr2], qtype=qtype, sparse=sparse)
+        return quijify([isqr2, 0, 0, -isqr2], qtype=qtype, sparse=sparse)
     elif s in (2, 'psi+'):
-        return qonvert([0, isqr2, isqr2, 0], qtype=qtype, sparse=sparse)
+        return quijify([0, isqr2, isqr2, 0], qtype=qtype, sparse=sparse)
 
 
 def singlet(qtype='ket', sparse=False):
@@ -66,7 +66,7 @@ def bloch_state(ax, ay, az, purify=False, sparse=False):
     if purify:
         ax, ay, az = np.array([ax, ay, az]) / (ax**2 + ay**2 + az**2)**0.5
     rho = 0.5 * (sig('i') + ax * sig('x') + ay * sig('y') + az * sig('z'))
-    return rho if not sparse else qonvert(rho, sparse=sparse)
+    return rho if not sparse else quijify(rho, sparse=sparse)
 
 
 # functions
@@ -74,7 +74,7 @@ def rand_ket(n):
     """
     Generates a wavefunction with random coefficients, normalised
     """
-    return qonvert(np.random.randn(n, 1) + 1.0j * np.random.randn(n, 1),
+    return quijify(np.random.randn(n, 1) + 1.0j * np.random.randn(n, 1),
                    nrmlzd=True)
 
 
@@ -83,7 +83,7 @@ def rand_rho(n):
     Generates a random density matrix of dimension n, no special properties
     other than being guarateed hermitian, positive, and trace 1.
     """
-    rho = qonvert(np.random.randn(n, n) + 1.0j * np.random.randn(n, n))
+    rho = quijify(np.random.randn(n, n) + 1.0j * np.random.randn(n, n))
     rho = rho + rho.H
     return nrmlz(rho * rho)
 
@@ -110,7 +110,7 @@ def rand_product_state(n, qtype=None):
             v = np.random.rand()
             phi = 2 * np.pi * u
             theta = np.arccos(2 * v - 1)
-            yield qonvert([[np.cos(theta / 2.0)],
+            yield quijify([[np.cos(theta / 2.0)],
                            [np.sin(theta / 2.0) * np.exp(1.0j * phi)]],
                           qtype=qtype)
     return kron(*[x for x in calc_rand_pure_qubits(n)])

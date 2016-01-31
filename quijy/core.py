@@ -6,14 +6,16 @@ import numpy as np
 import scipy.sparse as sp
 from numexpr import evaluate as evl
 from numba import jit
+from itertools import cycle
 
 
-def qonvert(data, qtype=None, sparse=False, nrmlzd=False):
+def quijify(data, qtype=None, sparse=False, nrmlzd=False):
     """ Converts lists to 'quantum' i.e. complex matrices, kets being columns.
     Input:
         data:  list describing entries
         qtype: output type, either 'ket', 'bra' or 'dop' if given
-        sparse: convert output to sparse 'csr' format.
+        sparse: convert output to sparse 'csr' format
+        nrmlzd: normalise the output
     Returns:
         x: numpy or sparse matrix
     * Will unravel an array if 'ket' or 'bra' given.
@@ -31,10 +33,12 @@ def qonvert(data, qtype=None, sparse=False, nrmlzd=False):
             p.shape = (1, sz)
             p = np.conj(p)
         elif qtype in ('p', 'd', 'r', 'rho', 'op', 'dop') and not isop(p):
-            p = qonvert(p, 'k') * qonvert(p, 'k').H
+            p = quijify(p, 'k') * quijify(p, 'k').H
     if nrmlzd:
         p = nrmlz(p)
     return sp.csr_matrix(p, dtype=complex) if sparse else p
+
+qjf = quijify
 
 
 @jit
@@ -65,7 +69,7 @@ def isherm(a):
 
 
 @jit
-def tr(a):
+def trace(a):
     """ Trace of hermitian matrix (jit version faster than numpy!)
     TODO: sparse method
     """
@@ -74,12 +78,16 @@ def tr(a):
         x += a[i, i].real
     return x
 
+tr = trace
 
-def nrmlz(p):
+
+def normalize(p):
     """ Returns the state p in normalized form """
     return (p / (p.H * p)[0, 0]**0.5 if isket(p) else
             p / (p * p.H)[0, 0]**0.5 if isbra(p) else
             p / tr(p))
+
+nrmlz = normalize
 
 
 @jit
@@ -106,11 +114,11 @@ def kron(*ps):
         operator
     The product is performed as (a * (b * (c * ...)))
     """
-    pn = len(ps)
+    num_p = len(ps)
     a = ps[0]
-    if pn == 1:
+    if num_p == 1:
         return a
-    b = ps[1] if pn == 2 else  \
+    b = ps[1] if num_p == 2 else  \
         kron(*ps[1:])  # Recursively perform kron to 'right'
     return (sp.kron(a, b, 'csr') if (sp.issparse(a) or sp.issparse(b)) else
             krnd2(a, b))
@@ -161,7 +169,7 @@ def eyepad(a, dims, inds, sparse=None):
     return b
 
 
-def trx(p, dims, keep):
+def partial_trace(p, dims, keep):
     """ Perform partial trace.
     Input:
         p: state to perform partial trace on, vector or operator
@@ -190,14 +198,17 @@ def trx(p, dims, keep):
             .transpose(perm) \
             .reshape([dimkeep, dimlose])
         p = np.matrix(p, copy=True)
-        return qonvert(p * p.H)
+        return quijify(p * p.H)
     else:  # p = rho
         p = np.array(p)
         p = p.reshape(np.r_[dims, dims]) \
             .transpose(np.r_[perm, perm + n]) \
             .reshape([dimkeep, dimlose, dimkeep, dimlose]) \
             .trace(axis1=1, axis2=3)
-        return qonvert(p)
+        return quijify(p)
+
+ptr = partial_trace
+trx = partial_trace
 
 
 def chop(x, tol=1.0e-14):

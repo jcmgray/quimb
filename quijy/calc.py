@@ -5,7 +5,7 @@ quantum objects.
 
 import numpy as np
 import numpy.linalg as nla
-from quijy.core import (isket, isbra, isop, qonvert, kron, ldmul, comm,
+from quijy.core import (isket, isbra, isop, quijify, kron, ldmul, comm,
                         eyepad, tr, trx)
 from quijy.gen import (sig, basis_vec)
 from quijy.solve import (eigvals, eigsys, norm2)
@@ -25,7 +25,7 @@ def partial_transpose(p, dims=[2, 2]):
         .reshape(np.concatenate((dims, dims)))  \
         .transpose([2, 1, 0, 3])  \
         .reshape([np.prod(dims), np.prod(dims)])
-    return qonvert(p)
+    return quijify(p)
 
 
 def entropy(rho):
@@ -82,7 +82,7 @@ def negativity(rho, dims=[2, 2], sysa=0, sysb=1):
     return max(0.0, n)
 
 
-def logneg(rho, dims=[2, 2], sysa=0, sysb=1):
+def logarithmic_negativity(rho, dims=[2, 2], sysa=0, sysb=1):
     if np.size(dims) > 2:
         rho = trx(rho, dims, [sysa, sysb])
         dims = [dims[sysa], dims[sysb]]
@@ -92,19 +92,19 @@ def logneg(rho, dims=[2, 2], sysa=0, sysb=1):
 
 def concurrence(p):
     if isop(p):
-        p = qonvert(p, 'dop')  # make sure density operator
+        p = quijify(p, 'dop')  # make sure density operator
         pt = kron(sig(2), sig(2)) * p.conj() * kron(sig(2), sig(2))
         l = (nla.eigvals(p * pt).real**2)**0.25
         return max(0, 2 * np.max(l) - np.sum(l))
     else:
-        p = qonvert(p, 'ket')
+        p = quijify(p, 'ket')
         pt = kron(sig(2), sig(2)) * p.conj()
         c = np.real(abs(p.H * pt)).item(0)
         return max(0, c)
 
 
 def qid(p, dims, inds, precomp_func=False, sparse_comp=True):
-    p = qonvert(p, 'dop')
+    p = quijify(p, 'dop')
     inds = np.array(inds, ndmin=1)
     # Construct operators
     ops_i = list([list([eyepad(sig(s), dims, ind, sparse=sparse_comp)
@@ -142,7 +142,7 @@ def pauli_decomp(a, mode='p', tol=1e-3):
     YY -0.25
     ZZ -0.25
     """
-    a = qonvert(a, 'dop')  # make sure operator
+    a = quijify(a, 'dop')  # make sure operator
     n = int(np.log2(a.shape[0]))  # infer number of qubits
 
     # define generator for inner product to iterate over efficiently
@@ -177,3 +177,6 @@ def purify(rho, sparse=False):
     for i, l in enumerate(ls.flat):
         psi += l * kron(vs[:, i], basis_vec(i, n, sparse=sparse))
     return psi
+
+
+logneg = logarithmic_negativity
