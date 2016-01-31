@@ -208,6 +208,42 @@ def eyepad(a, dims, inds, sparse=None):
     return b
 
 
+def eyeplace(a, dims, inds, sparse=None):
+    """
+    Places the operator(s) a 'over' locations inds of dims. Automatically
+    placing a large operator over several dimensions is allowed and a list
+    of operators can be given which are then applied cyclically.
+    INPUTS:
+        a: operator or list of operators to put into the tensor space
+
+        dims: dimensions of tensor space, use None to ignore dimension matching
+        inds: indices of the dimenions to place operators on
+        sparse: whether to construct the new operator in sparse form.
+    """
+    sparse = sp.issparse(a) if sparse is None else sparse  # infer sparsity
+    inds = np.array(inds, ndmin=1)
+    ops = cycle(a)
+
+    def gen_ops():
+        op = next(ops)
+        op_sz = op.shape[0]
+        overlap_factor = 1
+        for i, dim in enumerate(dims):
+            if i in inds:
+                if op_sz == overlap_factor * dim or dim is None:
+                    yield op
+                    op = next(ops)  # reset
+                    op_sz = op.shape[0]
+                    overlap_factor = 1
+                else:
+                    # 'merge' dimensions to get bigger size
+                    overlap_factor *= dim
+            else:
+                yield eye(dim, sparse=sparse)
+
+    return kron(*[op for op in gen_ops()])
+
+
 def partial_trace(p, dims, keep):
     """ Perform partial trace.
     Input:
