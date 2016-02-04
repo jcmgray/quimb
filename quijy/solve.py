@@ -9,7 +9,7 @@ import numpy as np
 import numpy.linalg as nla
 import scipy.sparse as sp
 import scipy.sparse.linalg as spla
-from quijy.core import quijify
+from quijy.core import qjf
 
 
 ##############################################################################
@@ -28,7 +28,7 @@ def eigsys(a, sort=True):
     l, v = nla.eigh(a)
     if sort:
         sortinds = np.argsort(l)
-        return l[sortinds], quijify(v[:, sortinds])
+        return l[sortinds], qjf(v[:, sortinds])
     else:
         return l, v
 
@@ -57,9 +57,9 @@ def eigvecs(a, sort=True):
     return v
 
 
-###############################################################################
-# iterative methods for partial eigendecompision ##############################
-###############################################################################
+##############################################################################
+# iterative methods for partial eigendecompision #############################
+##############################################################################
 
 def seigsys(a, k=1, which='SA', ncv=None, return_vecs=True, **kwargs):
     """ Returns a few eigenpairs from a possibly sparse hermitian operator
@@ -85,10 +85,11 @@ def seigsys(a, k=1, which='SA', ncv=None, return_vecs=True, **kwargs):
         ncv = calcncv(k, n, sparse) if ncv is None else ncv
         if return_vecs:
             lk, vk = spla.eigsh(a, k=k, which=which, ncv=ncv, **kwargs)
-            return lk, quijify(vk)
+            return np.sort(lk), qjf(vk)
         else:
-            return spla.eigsh(a, k=k, which=which, ncv=ncv,
-                              return_eigenvectors=False, **kwargs)
+            lk = spla.eigsh(a, k=k, which=which, ncv=ncv,
+                            return_eigenvectors=False, **kwargs)
+            return np.sort(lk)
 
 
 def seigvals(a, k=1, which='SA', ncv=None, **kwargs):
@@ -110,9 +111,9 @@ def groundenergy(ham):
     return seigvals(ham, k=1, which='SA')
 
 
-###############################################################################
-# iterative methods for partial singular value decomposition ##################
-###############################################################################
+##############################################################################
+# iterative methods for partial singular value decomposition #################
+##############################################################################
 
 def svds(a, k=1, ncv=None, return_vecs=True, **kwargs):
     """ Compute a number of singular value pairs """
@@ -128,7 +129,7 @@ def svds(a, k=1, ncv=None, return_vecs=True, **kwargs):
         ncv = calcncv(k, n, sparse) if ncv is None else ncv
         if return_vecs:
             uk, sk, vtk = spla.svds(a, k=k, ncv=ncv, **kwargs)
-            return quijify(uk), sk, quijify(vtk)
+            return qjf(uk), sk, qjf(vtk)
         else:
             return spla.svds(a, k=k, ncv=ncv,
                              return_singular_vectors=False, **kwargs)
