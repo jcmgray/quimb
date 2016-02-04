@@ -9,7 +9,7 @@ from numba import jit
 from itertools import cycle
 
 
-def quijify(data, qtype=None, sparse=False, nrmlzd=False):
+def quijify(data, qtype=None, sparse=False, nrmlzd=False, chopd=False):
     """ Converts lists to 'quantum' i.e. complex matrices, kets being columns.
     Input:
         data:  list describing entries
@@ -25,6 +25,8 @@ def quijify(data, qtype=None, sparse=False, nrmlzd=False):
     TODO: convert sparse vector to sparse operator
     """
     p = np.matrix(data, copy=False, dtype=complex)
+    if chopd:
+        chop(p)
     if qtype is not None:
         sz = np.prod(p.shape)
         if qtype in ('k', 'ket'):
@@ -167,7 +169,7 @@ def mapcoords(dims, coos, cyclic=False, trim=None):
     if cyclic:
         coos = coos % shp_dims  # (broadcasting dims down columns)
     elif trim is not None:
-        if trim:
+        if trim:  # delete coordinates which overspill
             coos = coos[np.all(coos == coos % shp_dims, axis=1)]
         elif np.any(coos != coos % shp_dims):
             raise ValueError('Coordinates beyond system dimensions.')
@@ -241,7 +243,7 @@ def eyeplace(a, dims, inds, sparse=None):
             else:
                 yield eye(dim, sparse=sparse)
 
-    return kron(*[op for op in gen_ops()])
+    return kron(*gen_ops())
 
 
 def partial_trace(p, dims, keep):
@@ -253,6 +255,7 @@ def partial_trace(p, dims, keep):
     Returns:
         Density matrix of subsytem dimensions dims[keep]
     """
+    #TODO:  partial trace for sparse matrices
     # Cast as ndarrays for 2D+ reshaping
     if np.size(keep) == np.size(dims):  # keep all subsystems
         if not isop(p):
@@ -286,7 +289,7 @@ ptr = partial_trace
 trx = partial_trace
 
 
-def chop(x, tol=1.0e-14):
+def chop(x, tol=1.0e-15):
     """
     Sets any values of x smaller than tol (relative to range(x)) to zero.
     Acts in-place on array!
@@ -300,7 +303,6 @@ def chop(x, tol=1.0e-14):
     else:
         x.real[np.abs(x.real) < minm] = 0.0
         x.imag[np.abs(x.imag) < minm] = 0.0
-    return x
 
 
 def ldmul(v, m):
@@ -330,7 +332,7 @@ def comm(a, b):
     return a * b - b * a
 
 
-def infer_num_qubits(p):
+def infer_size(p, base=2):
     """ Infers the size of a state assumed to be made of qubits """
     d = max(p.shape)
-    return int(np.log2(d))
+    return int(np.log2(d) / np.log2(base))
