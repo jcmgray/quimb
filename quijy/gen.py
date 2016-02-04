@@ -5,6 +5,7 @@ TODO: add sparse and qtype to all relevant functions.
 
 import numpy as np
 import scipy.sparse as sp
+from itertools import product
 from quijy.core import (quijify, nrmlz, kron, kronpow, eyepad, eye, trx)
 
 
@@ -135,14 +136,14 @@ def ghz_state(n, sparse=False):
             basis_vec(2**n - 1, 2**n, sparse=sparse))/2.0**0.5
 
 
-def ham_heis(n, jx=1, jy=1, jz=1, bz=0, ring=False, sparse=False):
+def ham_heis(n, jx=1.0, jy=1.0, jz=1.0, bz=0.0, cyclic=False, sparse=False):
     """ Constructs the heisenberg spin 1/2 hamiltonian
     Parameters:
         n: number of spins
         jx, jy, jz: coupling constants, with convention that positive =
         antiferromagnetic
         bz: z-direction magnetic field
-        ring: whether to couple the first and last spins
+        cyclic: whether to couple the first and last spins
         sparse: whether to return the hamiltonian in sparse form
     Returns:
         ham: hamiltonian as matrix
@@ -156,7 +157,7 @@ def ham_heis(n, jx=1, jy=1, jz=1, bz=0, ring=False, sparse=False):
     ham = eyepad(-bz * sig('z', sparse=True), dims, n - 1)
     for i in range(n - 1):
         ham = ham + eyepad(sds, dims[:-1], i)
-    if ring:
+    if cyclic:
         ham = ham + eyepad(sig('x', sparse=True), dims, [0, n - 1])  \
                   + eyepad(sig('y', sparse=True), dims, [0, n - 1])  \
                   + eyepad(sig('z', sparse=True), dims, [0, n - 1])
@@ -165,8 +166,32 @@ def ham_heis(n, jx=1, jy=1, jz=1, bz=0, ring=False, sparse=False):
     return ham
 
 
-def ham_j1j2(n, j1, j2, bz):
-    pass
+def ham_j1j2(n, j1=1.0, j2=0.5, bz=0.0, cyclic=False, sparse=False):
+    dims = [2] * n
+    coosj1 = np.array([(i, i+1) for i in range(n)])
+    coosj2 = np.array([(i, i+2) for i in range(n)])
+
+    s = [sig(i, sparse=True) for i in 'xyz']
+    if cyclic:
+        coosj1, coosj2 = coosj1 % n, coosj2 % n
+    else:
+        coosj1 = coosj1[np.all(coosj1 < n, axis=1)]
+        coosj2 = coosj2[np.all(coosj2 < n, axis=1)]
+
+    def gen_j1():
+        for op, coo in product(s, coosj1):
+            yield eyepad(op, dims, sorted(coo), sparse=True)
+
+    def gen_j2():
+        for op, coo in product(s, coosj2):
+            yield eyepad(op, dims, sorted(coo), sparse=True)
+
+    def gen_bz():
+        for i in range(n):
+            yield eyepad(bz * s[2], dims, i)
+
+    ham = j1 * sum(gen_j1()) + j2 * sum(gen_j2()) + bz * sum(gen_bz())
+    return ham if sparse else ham.todense()
 
 
 def ham_majumdar_ghosh(n):
