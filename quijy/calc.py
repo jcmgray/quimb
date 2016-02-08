@@ -2,12 +2,13 @@
 Functions for more advanced calculations of quantities and properties of
 quantum objects.
 """
+# TODO: entanglement cross matrix
 
 import numpy as np
 import numpy.linalg as nla
-from quijy.core import (isket, isbra, isop, quijify, kron, ldmul, comm,
+from quijy.core import (isop, qjf, kron, ldmul, comm,
                         eyepad, tr, trx)
-from quijy.gen import (sig, basis_vec)
+from quijy.gen import (sig, basis_vec, bell_state)
 from quijy.solve import (eigvals, eigsys, norm2)
 from itertools import product
 from collections import OrderedDict
@@ -17,15 +18,12 @@ def partial_transpose(p, dims=[2, 2]):
     """
     Partial transpose
     """
-    if isket(p):  # state vector supplied
-        p = p * p.H
-    elif isbra(p):
-        p = p.H * p
+    p = qjf(p, 'op')
     p = np.array(p)\
         .reshape(np.concatenate((dims, dims)))  \
         .transpose([2, 1, 0, 3])  \
         .reshape([np.prod(dims), np.prod(dims)])
-    return quijify(p)
+    return qjf(p)
 
 
 def entropy(rho):
@@ -82,29 +80,31 @@ def negativity(rho, dims=[2, 2], sysa=0, sysb=1):
     return max(0.0, n)
 
 
-def logarithmic_negativity(rho, dims=[2, 2], sysa=0, sysb=1):
+def logarithmic_negativity(p, dims=[2, 2], sysa=0, sysb=1):
     if np.size(dims) > 2:
-        rho = trx(rho, dims, [sysa, sysb])
+        p = trx(p, dims, [sysa, sysb])
         dims = [dims[sysa], dims[sysb]]
-    e = np.log2(trace_norm(partial_transpose(rho, dims)))
+    e = np.log2(trace_norm(partial_transpose(p, dims)))
     return max(0.0, e)
+
+logneg = logarithmic_negativity
 
 
 def concurrence(p):
     if isop(p):
-        p = quijify(p, 'dop')  # make sure density operator
+        p = qjf(p, 'dop')  # make sure density operator
         pt = kron(sig(2), sig(2)) * p.conj() * kron(sig(2), sig(2))
         l = (nla.eigvals(p * pt).real**2)**0.25
         return max(0, 2 * np.max(l) - np.sum(l))
     else:
-        p = quijify(p, 'ket')
+        p = qjf(p, 'ket')
         pt = kron(sig(2), sig(2)) * p.conj()
         c = np.real(abs(p.H * pt)).item(0)
         return max(0, c)
 
 
 def qid(p, dims, inds, precomp_func=False, sparse_comp=True):
-    p = quijify(p, 'dop')
+    p = qjf(p, 'dop')
     inds = np.array(inds, ndmin=1)
     # Construct operators
     ops_i = list([list([eyepad(sig(s), dims, ind, sparse=sparse_comp)
@@ -126,14 +126,17 @@ def pauli_decomp(a, mode='p', tol=1e-3):
     """
     Decomposes an operator via the Hilbert-schmidt inner product into the
     pauli group. Can both print the decomposition or return it.
+
     Parameters
     ----------
         a: operator to decompose
         mode: string, include 'p' to print the decomp and/or 'c' to return dict
         tol: print operators with contirbution above tol only.
+
     Returns
     -------
         nds: OrderedDict of Pauli operator name and overlap with a.
+
     Examples
     --------
     >>> pauli_decomp( singlet(), tol=1e-2)
@@ -142,7 +145,7 @@ def pauli_decomp(a, mode='p', tol=1e-3):
     YY -0.25
     ZZ -0.25
     """
-    a = quijify(a, 'dop')  # make sure operator
+    a = qjf(a, 'dop')  # make sure operator
     n = int(np.log2(a.shape[0]))  # infer number of qubits
 
     # define generator for inner product to iterate over efficiently
@@ -176,7 +179,7 @@ def purify(rho, sparse=False):
     psi = np.zeros(shape=(n**2, 1), dtype=complex)
     for i, l in enumerate(ls.flat):
         psi += l * kron(vs[:, i], basis_vec(i, n, sparse=sparse))
-    return psi
+    return qjf(psi)
 
 
 logneg = logarithmic_negativity
