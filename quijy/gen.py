@@ -24,7 +24,44 @@ def basis_vec(dir, dim, sparse=False):
     return x
 
 
-def sig(xyz, sparse=False):
+def up(**kwargs):
+    """ Returns up-state, aka. |0>, +Z eigenstate."""
+    return qjf([[1], [0]], **kwargs)
+
+zplus = up
+
+
+def down(**kwargs):
+    """ Returns down-state, aka. |1>, -Z eigenstate."""
+    return qjf([[0], [1]], **kwargs)
+
+zminus = down
+
+
+def plus(**kwargs):
+    """ Returns plus-state, aka. |+>, +X eigenstate."""
+    return qjf([[2**-0.5], [2**-0.5]], **kwargs)
+
+xplus = plus
+
+
+def minus(**kwargs):
+    """ Returns minus-state, aka. |->, -X eigenstate."""
+    return qjf([[2**-0.5], [-2**-0.5]], **kwargs)
+
+xminus = minus
+
+
+def yplus(**kwargs):
+    """ Returns yplus-state, aka. |y+>, +Y eigenstate."""
+    return qjf([[2**-0.5], [1.0j / (2**0.5)]], **kwargs)
+
+
+def yminus(**kwargs):
+    """ Returns yplus-state, aka. |y->, -Y eigenstate."""
+    return qjf([[2**-0.5], [-1.0j / (2**0.5)]], **kwargs)
+
+
 def sig(s, **kwargs):
     """
     Generates one of the three Pauli matrices, 0-I, 1-X, 2-Y, 3-Z
@@ -137,6 +174,10 @@ def ghz_state(n, sparse=False):
             basis_vec(2**n - 1, 2**n, sparse=sparse))/2.0**0.5
 
 
+def w_state(n, sparse=False):
+    return sum(basis_vec(2**i, 2**n, sparse=sparse) for i in range(n))/n**0.5
+
+
 def ham_heis(n, jx=1.0, jy=1.0, jz=1.0, bz=0.0, cyclic=False, sparse=False):
     """ Constructs the heisenberg spin 1/2 hamiltonian
     Parameters:
@@ -199,3 +240,7 @@ def ham_majumdar_ghosh(n, j1=1.0, j2=0.5, **kwargs):
     return ham_j1j2(n, j1=j1, j2=j2, **kwargs)
 
 
+def rand_uni(n):
+    x = np.random.randn(n, n) + 1.0j*np.random.randn(n, n)
+    x /= 2**0.5
+    q, r = np.linalg.qr
