@@ -94,6 +94,10 @@ def sparse_trace(op):
     d = op.diagonal()
     return np.sum(d.real)
 
+# Monkey-patch trace methods
+np.matrix.tr = tr
+sp.csr_matrix.tr = sparse_trace
+
 
 def normalize(qob):
     """ Returns the state qob in normalized form """
@@ -103,6 +107,8 @@ def normalize(qob):
 
 nmlz = normalize
 
+np.matrix.nmlz = nmlz
+sp.csr_matrix.nmlz = nmlz
 
 
 @jit
@@ -140,6 +146,9 @@ def kron(*ps):
     else:
         krnd2(a, b)
 
+# Monkey-patch unused & symbol to tensor product
+np.matrix.__and__ = kron
+sp.csr_matrix.__and__ = kron
 
 
 def kronpow(a, pwr):
