@@ -99,7 +99,7 @@ def singlet(**kwargs):
 
 def triplets(**kwargs):
     """ Equal mixture of the three triplet bell_states """
-    return eye(4, **kwargs) - singlet(qtype='p', **kwargs)
+    return eye(4, **kwargs) - singlet('p', **kwargs)
 
 
 def bloch_state(ax, ay, az, purify=False, **kwargs):
@@ -191,10 +191,10 @@ def ham_heis(n, jx=1.0, jy=1.0, jz=1.0, bz=0.0, cyclic=False, sparse=False):
         ham: hamiltonian as matrix
     """
     dims = [2] * n
-    sds = qjf(jx * kron(sig('x'), sig('x')) +
-              jy * kron(sig('y'), sig('y')) +
-              jz * kron(sig('z'), sig('z')) -
-              bz * kron(sig('z'), eye(2)), sparse=True)
+    sds = (jx * kron(sig('x', sparse=True), sig('x', sparse=True)) +
+           jy * kron(sig('y', sparse=True), sig('y', sparse=True)) +
+           jz * kron(sig('z', sparse=True), sig('z', sparse=True)) -
+           bz * kron(sig('z', sparse=True), eye(2)))
     # Begin with last spin, not covered by loop
     ham = eyepad(-bz * sig('z', sparse=True), dims, n - 1)
     for i in range(n - 1):
@@ -209,11 +209,6 @@ def ham_heis(n, jx=1.0, jy=1.0, jz=1.0, bz=0.0, cyclic=False, sparse=False):
 
 
 def ham_j1j2(n, j1=1.0, j2=0.5, bz=0.0, cyclic=False, sparse=False):
-    """
-    Generate the j1-j2 hamiltonian, i.e. next nearest neighbour
-    interactions.
-    """
-    # TODO: efficient computation by translating operators.
     dims = [2] * n
     coosj1 = np.array([(i, i+1) for i in range(n)])
     coosj2 = np.array([(i, i+2) for i in range(n)])
@@ -226,17 +221,17 @@ def ham_j1j2(n, j1=1.0, j2=0.5, bz=0.0, cyclic=False, sparse=False):
 
     def gen_j1():
         for op, coo in product(s, coosj1):
-            yield eyeplace([op], dims, coo, sparse=True)
+            yield eyeplace([op], dims, coo)
 
     def gen_j2():
         for op, coo in product(s, coosj2):
-            yield eyeplace([op], dims, coo, sparse=True)
+            yield eyeplace([op], dims, coo)
 
     def gen_bz():
         for i in range(n):
-            yield eyeplace([s[2]], dims, i, sparse=True)
+            yield eyeplace([s[2]], dims, i)
 
-    ham = j1 * sum(gen_j1()) + j2 * sum(gen_j2()) + bz * sum(gen_bz())
+    ham = j1 * sum(gen_j1()) + j2 * sum(gen_j2()) * bz * sum(gen_bz())
     return ham if sparse else ham.todense()
 
 

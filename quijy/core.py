@@ -42,7 +42,7 @@ def quijify(data, qtype=None, sparse=False, normalized=False, chopped=False):
             qob.shape = (1, np.prod(qob.shape))
             qob = qob.conj()
         elif qtype in ('d', 'r', 'rho', 'op', 'dop') and not isop(qob):
-            qob = quijify(qob, 'k') @ quijify(qob, 'k').H
+            qob = quijify(qob, 'k') * quijify(qob, 'k').H
     if normalized:
         qob = normalize(qob)
     return sp.csr_matrix(qob, dtype=complex) if sparse else qob
@@ -144,7 +144,7 @@ def kron(*ps):
     if sp.issparse(a) or sp.issparse(b):
         return sp.kron(a, b, 'csr')
     else:
-        return krnd2(a, b)
+        krnd2(a, b)
 
 # Monkey-patch unused & symbol to tensor product
 np.matrix.__and__ = kron
@@ -161,7 +161,7 @@ def kronpow(a, pwr):
 def eye(n, sparse=False):
     """ Return identity of size n in complex format, optionally sparse"""
     return (sp.eye(n, dtype=complex, format='csr') if sparse else
-            qjf(np.eye(n, dtype=complex)))
+            np.eye(n, dtype=complex))
 
 
 def mapcoords(dims, coos, cyclic=False, trim=None):
