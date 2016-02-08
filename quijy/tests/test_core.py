@@ -1,8 +1,8 @@
-from quijy.core import *
-import numpy as np
 import scipy.sparse as sp
-from nose.tools import assert_almost_equal, assert_equal
+import numpy as np
 from numpy.testing import assert_allclose
+from nose.tools import assert_almost_equal, assert_equal
+from quijy.core import *
 
 
 def test_quijify_vector_create():
