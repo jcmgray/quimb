@@ -1,69 +1,76 @@
 """
 Core functions for manipulating quantum objects.
 """
+# TODO: move to @ dot products everywhere
 
+from itertools import cycle
 import numpy as np
 import scipy.sparse as sp
 from numexpr import evaluate as evl
 from numba import jit
-from itertools import cycle
 
 
-def quijify(data, qtype=None, sparse=False, nrmlzd=False, chopd=False):
+def quijify(data, qtype=None, sparse=False, normalized=False, chopped=False):
     """ Converts lists to 'quantum' i.e. complex matrices, kets being columns.
-    Input:
-        data:  list describing entries
-        qtype: output type, either 'ket', 'bra' or 'dop' if given
-        sparse: convert output to sparse 'csr' format
-        nrmlzd: normalise the output
-    Returns:
-        x: numpy or sparse matrix
     * Will unravel an array if 'ket' or 'bra' given.
     * Will conjugate if 'bra' given.
     * Will leave operators as is if 'dop' given, but construct one
-    them if vector given.
-    TODO: convert sparse vector to sparse operator
+    them if vector given with the assumption that it was a ket.
+
+    Parameters
+    ----------
+        data:  list describing entries
+        qtype: output type, either 'ket', 'bra' or 'dop' if given
+        sparse: convert output to sparse 'csr' format
+        normalized: normalise the output
+
+    Returns
+    -------
+        x: numpy or sparse matrix
     """
-    p = np.matrix(data, copy=False, dtype=complex)
-    if chopd:
-        chop(p)
+    is_sparse_input = sp.issparse(data)
+    if is_sparse_input:
+        qob = sp.csr_matrix(data, dtype=complex)
+    else:
+        qob = np.matrix(data, copy=False, dtype=complex)
+    if chopped:
+        chop(qob)
     if qtype is not None:
-        sz = np.prod(p.shape)
         if qtype in ('k', 'ket'):
-            p.shape = (sz, 1)
+            qob.shape = (np.prod(qob.shape), 1)
         elif qtype in ('b', 'bra'):
-            p.shape = (1, sz)
-            p = np.conj(p)
-        elif qtype in ('p', 'd', 'r', 'rho', 'op', 'dop') and not isop(p):
-            p = quijify(p, 'k') * quijify(p, 'k').H
-    if nrmlzd:
-        p = nrmlz(p)
-    return sp.csr_matrix(p, dtype=complex) if sparse else p
+            qob.shape = (1, np.prod(qob.shape))
+            qob = qob.conj()
+        elif qtype in ('d', 'r', 'rho', 'op', 'dop') and not isop(qob):
+            qob = quijify(qob, 'k') * quijify(qob, 'k').H
+    if normalized:
+        qob = normalize(qob)
+    return sp.csr_matrix(qob, dtype=complex) if sparse else qob
 
 qjf = quijify
 
 
 @jit
-def isket(p):
-    """ Checks if matrix is in ket form, i.e. a column """
-    return p.shape[0] > 1 and p.shape[1] == 1  # Column vector check
+def isket(qob):
+    """ Checks if matrix is in ket form, i.e. a matrix column. """
+    return qob.shape[0] > 1 and qob.shape[1] == 1  # Column vector check
 
 
 @jit
-def isbra(p):
-    """ Checks if matrix is in bra form, i.e. a row """
-    return p.shape[0] == 1 and p.shape[1] > 1  # Row vector check
+def isbra(qob):
+    """ Checks if matrix is in bra form, i.e. a matrix row. """
+    return qob.shape[0] == 1 and qob.shape[1] > 1  # Row vector check
 
 
 @jit
-def isop(p):
-    """ Checks if matrix is an operator, i.e. square """
-    m, n = p.shape
+def isop(qob):
+    """ Checks if matrix is an operator, i.e. a square matrix. """
+    m, n = qob.shape
     return m == n and m > 1  # Square matrix check
 
 
 def isherm(a):
-    """ Checks if matrix is hermitian, for sparse or dense"""
+    """ Checks if matrix is hermitian, for sparse or dense. """
     if sp.issparse(a):
         # Since sparse, test that no .H elements are not unequal..
         return (a != a.H).nnz == 0
@@ -71,25 +78,31 @@ def isherm(a):
 
 
 @jit
-def trace(a):
+def trace(op):
     """ Trace of hermitian matrix (jit version faster than numpy!)
     TODO: sparse method
     """
     x = 0.0
-    for i in range(a.shape[0]):
-        x += a[i, i].real
+    for i in range(op.shape[0]):
+        x += op[i, i].real
     return x
 
 tr = trace
 
 
-def normalize(p):
-    """ Returns the state p in normalized form """
-    return (p / (p.H * p)[0, 0]**0.5 if isket(p) else
-            p / (p * p.H)[0, 0]**0.5 if isbra(p) else
-            p / tr(p))
+def sparse_trace(op):
+    d = op.diagonal()
+    return np.sum(d.real)
 
-nrmlz = normalize
+
+def normalize(qob):
+    """ Returns the state qob in normalized form """
+    return (qob / (qob.H * qob)[0, 0]**0.5 if isket(qob) else
+            qob / (qob * qob.H)[0, 0]**0.5 if isbra(qob) else
+            qob / tr(qob))
+
+nmlz = normalize
+
 
 
 @jit
@@ -122,8 +135,11 @@ def kron(*ps):
         return a
     b = ps[1] if num_p == 2 else  \
         kron(*ps[1:])  # Recursively perform kron to 'right'
-    return (sp.kron(a, b, 'csr') if (sp.issparse(a) or sp.issparse(b)) else
-            krnd2(a, b))
+    if sp.issparse(a) or sp.issparse(b):
+        return sp.kron(a, b, 'csr')
+    else:
+        krnd2(a, b)
+
 
 
 def kronpow(a, pwr):
@@ -144,17 +160,23 @@ def mapcoords(dims, coos, cyclic=False, trim=None):
     Maps multi-dimensional coordinates and indices to flat arrays in a
     regular way. Wraps or deletes coordinates beyond the system size
     depending on parameters `cyclic` and `trim`.
-    INPUTS:
+
+    Parameters
+    ----------
         dims: multi-dim array of systems' internal dimensions
         coos: array of coordinate tuples to convert
         cyclic: whether to automatically wrap coordinates beyond system size or
             delete them.
         trim: if not None, coos will be bound-checked. trim=True will delete
             any coordinates beyond dimensions, trim=False will raise an error.
-    OUTPUTS:
+
+    Returns
+    -------
         dims: flattened version of dims
         coos: indices mapped to flattened dims
-    EXAMPLE:
+
+    Examples
+    --------
     >>> dims = ([[10, 11, 12],
                  [13, 14, 15]])
     >>> coos = [(1, 1), (1, 2), (2, 1)]
@@ -162,6 +184,7 @@ def mapcoords(dims, coos, cyclic=False, trim=None):
     >>> ndims[ncoos]
     array([14, 15, 11])
     """
+    # TODO: compress coords
     # Calculate the raveled size of each dimension (i.e. size of 1 incr.)
     shp_dims = np.shape(dims)
     shp_mod = [np.prod(shp_dims[i+1:]) for i in range(len(shp_dims)-1)] + [1]
@@ -178,63 +201,75 @@ def mapcoords(dims, coos, cyclic=False, trim=None):
     return np.ravel(dims), coos
 
 
-def eyepad(a, dims, inds, sparse=None):
+def eyepad(op, dims, inds, sparse=None):
     """ Pad an operator with identities to act on particular subsystem.
-    Input:
-        a: operator to act
+
+    Parameters
+    ----------
+        op: operator to act with
         dims: list of dimensions of subsystems.
-        inds: indices of dims to act a on.
+        inds: indices of dims to act op on.
         sparse: whether output should be sparse
-    Returns:
-        b: operator with a acting on each subsystem specified by inds
+
+    Returns
+    -------
+        bop: operator with op acting on each subsystem specified by inds
     Note that the actual numbers in dims[inds] are ignored and the size of
-    a is assumed to match. Sparsity of the output can be inferred from
+    op is assumed to match. Sparsity of the output can be inferred from
     input if not specified.
-    e.g.
+
+    Examples
+    --------
     >>> X = sig('x')
     >>> b1 = kron(X, eye(2), X, eye(2))
-    >>> b2 = eyepad(X, dims=[2]*4, inds=[0,2])
+    >>> b2 = eyepad(X, dims=[2,2,2,2], inds=[0,2])
     >>> allclose(b1, b2)
     True
     """
-    sparse = sp.issparse(a) if sparse is None else sparse  # infer sparsity
     inds = np.array(inds, ndmin=1)
-    b = eye(np.prod(dims[0:inds[0]]), sparse=sparse)
+    sparse = sp.issparse(op) if sparse is None else sparse  # infer sparsity
+    bop = eye(np.prod(dims[0:inds[0]]), sparse=sparse)
     for i in range(len(inds) - 1):
-        b = kron(b, a)
+        bop = kron(bop, op)
         pad_size = np.prod(dims[inds[i] + 1:inds[i + 1]])
-        b = kron(b, eye(pad_size, sparse=sparse))
-    b = kron(b, a)
+        bop = kron(bop, eye(pad_size, sparse=sparse))
+    bop = kron(bop, op)
     pad_size = np.prod(dims[inds[-1] + 1:])
-    b = kron(b, eye(pad_size, sparse=sparse))
-    return b
+    bop = kron(bop, eye(pad_size, sparse=sparse))
+    return bop
 
 
-def eyeplace(a, dims, inds, sparse=None):
+def eyeplace(ops, dims, inds, sparse=None):
     """
-    Places the operator(s) a 'over' locations inds of dims. Automatically
+    Places the operator(s) ops 'over' locations inds of dims. Automatically
     placing a large operator over several dimensions is allowed and a list
     of operators can be given which are then applied cyclically.
-    INPUTS:
-        a: operator or list of operators to put into the tensor space
+
+    Parameters
+    ----------
+        ops: operator or list of operators to put into the tensor space
 
         dims: dimensions of tensor space, use None to ignore dimension matching
         inds: indices of the dimenions to place operators on
         sparse: whether to construct the new operator in sparse form.
+
+    Returns
+    -------
+        Operator such that acts on dims[inds].
     """
-    sparse = sp.issparse(a) if sparse is None else sparse  # infer sparsity
+    sparse = sp.issparse(ops) if sparse is None else sparse  # infer sparsity
     inds = np.array(inds, ndmin=1)
-    ops = cycle(a)
+    ops_cyc = cycle(ops)
 
     def gen_ops():
-        op = next(ops)
+        op = next(ops_cyc)
         op_sz = op.shape[0]
         overlap_factor = 1
         for i, dim in enumerate(dims):
             if i in inds:
                 if op_sz == overlap_factor * dim or dim is None:
                     yield op
-                    op = next(ops)  # reset
+                    op = next(ops_cyc)  # reset
                     op_sz = op.shape[0]
                     overlap_factor = 1
                 else:
@@ -255,7 +290,7 @@ def partial_trace(p, dims, keep):
     Returns:
         Density matrix of subsytem dimensions dims[keep]
     """
-    #TODO:  partial trace for sparse matrices
+    # TODO:  partial trace for sparse matrices
     # Cast as ndarrays for 2D+ reshaping
     if np.size(keep) == np.size(dims):  # keep all subsystems
         if not isop(p):
@@ -294,6 +329,7 @@ def chop(x, tol=1.0e-15):
     Sets any values of x smaller than tol (relative to range(x)) to zero.
     Acts in-place on array!
     """
+    # TODO: copy vs in-place?
     rnge = abs(x.max() - x.min())
     minm = rnge * tol  # minimum value tolerated
     if sp.issparse(x):
