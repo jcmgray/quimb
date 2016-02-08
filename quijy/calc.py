@@ -182,4 +182,19 @@ def purify(rho, sparse=False):
     return qjf(psi)
 
 
-logneg = logarithmic_negativity
+def bell_fid(p):
+    """
+    Outputs a tuple of state p's fidelities with the four bell states
+    psi- (singlet) psi+, phi-, phi+ (triplets).
+    """
+    op = isop(p)
+
+    def gen_bfs():
+        for b in ['psi-', 'psi+', 'phi-', 'phi+']:
+            psib = bell_state(b)
+            if op:
+                yield tr(psib * psib.H * p)
+            else:
+                yield abs(psib.H * p)**2
+
+    return [*gen_bfs()]
