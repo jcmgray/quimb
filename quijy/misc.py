@@ -27,6 +27,18 @@ def xrmerge(*das, accept_new=False):
     return da
 
 
+def xrgroupby_to_dim(ds, dim):
+
+    def gen_ds():
+        for val, d in ds.groupby(dim):
+            del d[dim]  # delete grouped labels
+            d[dim] = [val]
+            d, = xr.broadcast(d)
+            yield d
+
+    return xrmerge(*gen_ds())
+
+
 def mplot(x, y_i, fignum=1, xlog=False, ylog=False, **kwargs):
     from matplotlib import cm
     """
