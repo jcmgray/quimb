@@ -142,15 +142,30 @@ def iheatmap(ds, data_name, x_coo, y_coo,
         plot(fig, **kwargs)
 
 
-def ilineplot(ds, data_name, x_coo, y_coo, logx=False, logy=False,
-           go_dict={}, ly_dict={}, nb=True, **kwargs):
+def ilineplot(ds, data_name, x_coo,
+              y_coo=None,
+              logx=False,
+              logy=False,
+              erry=None,
+              errx=None,
+              go_dict={},
+              ly_dict={},
+              nb=True,
+              **kwargs):
     from plotly.graph_objs import Scatter
 
-    traces = [Scatter({
-                'x': ds[x_coo].values,
-                'y': ds[data_name].loc[{y_coo: y}].values,
-                'name': str(y),})
-              for y in ds[y_coo].values]
+    if y_coo is None:
+        traces = [Scatter({
+                    'x': ds[x_coo].values,
+                    'y': ds[data_name].values,
+                    **go_dict,})]
+    else:
+        traces = [Scatter({
+                    'x': ds[x_coo].values,
+                    'y': ds[data_name].loc[{y_coo: y}].values,
+                    'name': str(y),
+                    **go_dict,})
+                  for y in ds[y_coo].values]
 
     layout = {"width": 750,
               "height": 600,
