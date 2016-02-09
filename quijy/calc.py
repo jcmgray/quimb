@@ -2,7 +2,7 @@
 Functions for more advanced calculations of quantities and properties of
 quantum objects.
 """
-# TODO: entanglement cross matrix
+# TODO: entanglement cross matrix, sparse ptr
 
 import numpy as np
 import numpy.linalg as nla

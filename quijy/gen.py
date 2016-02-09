@@ -99,7 +99,7 @@ def singlet(**kwargs):
 
 def triplets(**kwargs):
     """ Equal mixture of the three triplet bell_states """
-    return eye(4, **kwargs) - singlet(qtype='p', **kwargs)
+    return eye(4, **kwargs) - singlet(qtype='dop', **kwargs)
 
 
 def bloch_state(ax, ay, az, purify=False, **kwargs):
