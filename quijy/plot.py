@@ -126,7 +126,7 @@ def iheatmap(ds, data_name, x_coo, y_coo,
 
 def ilineplot(ds, data_name, x_coo, y_coo=None, logx=False, logy=False,
               erry=None, errx=None, go_dict={}, ly_dict={}, nb=True,
-              **kwargs):
+              color=False, colormap='Spectral', **kwargs):
     # TODO: generate traces from multiple data_names
     from plotly.graph_objs import Scatter
 
@@ -136,12 +136,24 @@ def ilineplot(ds, data_name, x_coo, y_coo=None, logx=False, logy=False,
                     'y': ds[data_name].values.flatten(),
                     **go_dict})]
     else:
+        if color:
+            import matplotlib.cm as cm
+            cmap = getattr(cm, colormap)
+            ymin = ds[y_coo].values.min()
+            ymax = ds[y_coo].values.max()
+            cols = ["rgba" + str(cmap(1 - (y-ymin)/ymax))
+                    for y in ds[y_coo].values]
+        else:
+            cols = [None for y in ds[y_coo].values]
+
         traces = [Scatter({
                     'x': ds[x_coo].values,
                     'y': ds[data_name].loc[{y_coo: y}].values.flatten(),
                     'name': str(y),
+                    'line': {"color": col},
+                    'marker': {"color": col},
                     **go_dict})
-                  for y in ds[y_coo].values]
+                  for y, col in zip(ds[y_coo].values, cols)]
     layout = {"width": 750,
               "height": 600,
               "xaxis": {"showline": True,
