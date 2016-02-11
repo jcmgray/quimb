@@ -7,7 +7,9 @@ from itertools import cycle
 import xarray as xr
 
 
-progbar = lambda it, **kwargs: tqdm(it, ascii=True, leave=True, **kwargs)
+def progbar(it, **kwargs):
+    """ tqdm progress bar with deifferent defaults. """
+    return tqdm(it, ascii=True, leave=True, **kwargs)
 
 
 def xrmerge(*das, accept_new=False):
@@ -125,8 +127,8 @@ def iheatmap(ds, data_name, x_coo, y_coo,
     from plotly.graph_objs import Heatmap
 
     hm = Heatmap({'z': ds[data_name].values,
-                  'x': ds.coords[x_coo].values,
-                  'y': ds.coords[y_coo].values,
+                  'x': ds.coords[x_coo].values.flatten(),
+                  'y': ds.coords[y_coo].values.flatten(),
                   'colorscale': 'Viridis',
                   'colorbar': {'title': data_name},
                   **go_dict})
@@ -141,7 +143,7 @@ def iheatmap(ds, data_name, x_coo, y_coo,
                     "mirror": "ticks",
                     "ticks": "outside",
                     "title": y_coo},
-                    **ly_dict}
+          **ly_dict}
 
     fig = {'data': [hm],
            'layout': ly}
@@ -169,14 +171,14 @@ def ilineplot(ds, data_name, x_coo,
     if y_coo is None:
         traces = [Scatter({
                     'x': ds[x_coo].values,
-                    'y': ds[data_name].values,
-                    **go_dict,})]
+                    'y': ds[data_name].values.flatten(),
+                    **go_dict})]
     else:
         traces = [Scatter({
                     'x': ds[x_coo].values,
-                    'y': ds[data_name].loc[{y_coo: y}].values,
+                    'y': ds[data_name].loc[{y_coo: y}].values.flatten(),
                     'name': str(y),
-                    **go_dict,})
+                    **go_dict})
                   for y in ds[y_coo].values]
 
     layout = {"width": 750,
@@ -185,12 +187,12 @@ def ilineplot(ds, data_name, x_coo,
                         "mirror": "ticks",
                         "ticks": "inside",
                         "title": x_coo,
-                        "type": "log" if logx else "linear",},
+                        "type": "log" if logx else "linear"},
               "yaxis": {"showline": True,
                         "mirror": "ticks",
                         "ticks": "inside",
                         "title": data_name,
-                        "type": "log" if logy else "linear",},
+                        "type": "log" if logy else "linear"},
               **ly_dict}
 
     fig = {"data": traces, "layout": layout}
