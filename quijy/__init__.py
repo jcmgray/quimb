@@ -15,5 +15,8 @@ from quijy.calc import *
 # Evolution class and methods
 from quijy.evo import *
 
+# Plotting functions
+from quijy.plot import *
+
 # Miscellaneous functions
 from quijy.misc import *
