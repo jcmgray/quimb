@@ -10,7 +10,6 @@ from itertools import product
 from quijy.core import (qjf, nmlz, kron, kronpow, eyepad, eye, trx, eyeplace)
 
 
-def basis_vec(dir, dim, sparse=False):
 def basis_vec(dir, dim, sparse=False, **kwargs):
     """
     Constructs a unit vector ket.
