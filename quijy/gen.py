@@ -11,17 +11,26 @@ from quijy.core import (qjf, nmlz, kron, kronpow, eyepad, eye, trx, eyeplace)
 
 
 def basis_vec(dir, dim, sparse=False):
+def basis_vec(dir, dim, sparse=False, **kwargs):
     """
-    Constructs a unit ket that points in dir of total dimensions dim
+    Constructs a unit vector ket.
+
+    Parameters
+    ----------
+        dir: which dimension the key should point in
+        dim: total number of dimensions
+        sparse: return vector as sparse-csr matrix
+
+    Returns:
+        x:
     """
     if sparse:
         return sp.csr_matrix(([1.0], ([dir], [0])),
                              dtype=complex, shape=(dim, 1))
     else:
         x = np.zeros([dim, 1], dtype=complex)
-        x = qjf(x)  # turn into matrix
         x[dir] = 1.0
-    return x
+    return qjf(x, **kwargs)
 
 
 def up(**kwargs):
