@@ -221,6 +221,19 @@ def ham_j1j2(n, j1=1.0, j2=0.5, bz=0.0, cyclic=False, sparse=False):
     """
     Generate the j1-j2 hamiltonian, i.e. next nearest neighbour
     interactions.
+
+    Parameters
+    ----------
+        n: number of spins
+        j1: nearest neighbour coupling strength
+        j2: next nearest neighbour coupling strength
+        bz: b-field strength in z-direction
+        cyclic: cyclic boundary conditions
+        sparse: return hamtiltonian as sparse-csr matrix
+
+    Returns
+    -------
+        ham: Hamtiltonian as matrix
     """
     # TODO: efficient computation by translating operators.
     dims = [2] * n
