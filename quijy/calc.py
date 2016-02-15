@@ -201,3 +201,107 @@ def bell_fid(p):
                 yield abs(psib.H * p)**2
 
     return [*gen_bfs()]
+
+
+def correlation(p, sysa, sysb, opa, opb, sparse=True, precomp_func=False):
+    """
+    Calculate the correlation between two sites given two operators.
+
+    Parameters
+    ----------
+        p: state
+        sysa: index of first subsystem
+        sysb: index of second subsystem
+        opa: operator to act on first subsystem
+        opb: operator to act on second subsystem
+        sparse: whether to compute with sparse operators
+        precomp_func: whether to return result or single arg function closed
+            over precomputed operators
+
+    Returns
+    -------
+        cab: correlation, <ab> - <a><b>
+    """
+    sz_p = infer_size(p)
+    dims = [2] * sz_p
+    op = isop(p)
+
+    opab = eyeplace([opa, opb], dims, [sysa, sysb], sparse=sparse)
+    opa = eyeplace([opa], dims, sysa, sparse=sparse)
+    opb = eyeplace([opb], dims, sysb, sparse=sparse)
+
+    if op:
+        def corr(state):
+            return tr(opab @ state) - tr(opa @ state) * tr(opb @ state)
+    else:
+        def corr(state):
+            return tr(state.H @ opab @ state -
+                      (state.H @ opa @ state) * (state.H @ opb @ state))
+
+    return corr if precomp_func else corr(p)
+
+
+def correlation_list(p, sysa=0, sysb=1, ss=('xx', 'yy', 'zz'),
+                     sum_abs=False, precomp_func=False):
+    """
+    Calculate the correlation between sites for a list of operator pairs.
+
+    Parameters
+    ----------
+        p: state
+        sysa: index of first site
+        sysb: index of second site
+        ss: list of pairs specifiying pauli matrices
+        sum_abs: whether to sum over the absolute values of each correlation
+        precomp_func: whether to return the values or a single argument
+            function closed over precomputed operators etc.
+
+    Returns
+    -------
+        corrs: list of values or functions specifiying each correlation.
+    """
+    def gen_corr_list():
+        for s1, s2 in ss:
+            yield correlation(p, sysa, sysb, sig(s1), sig(s2),
+                              precomp_func=precomp_func)
+
+    if sum_abs:
+        if precomp_func:
+            return lambda p: sum((abs(corr(p)) for corr in gen_corr_list()))
+        return sum((abs(corr) for corr in gen_corr_list()))
+    return [*gen_corr_list()]
+
+
+def ent_cross_matrix(p, ent_fun=concurrence, calc_self_ent=True):
+    """
+    Calculate the pair-wise function ent_fun  between all sites of a state.
+
+    Parameters
+    ----------
+        p: state
+        ent_fun: function acting on space [2, 2], notionally entanglement
+        calc_self_ent: whether to calculate the function for each site
+            alone, purified. If the whole state is pure then this is the
+            entanglement with the whole remaining system.
+
+    Returns
+    -------
+        ents: matrix of pairwise ent_fun results.
+    """
+    sz_p = infer_size(p)
+    ents = np.empty((sz_p, sz_p))
+    for i in range(sz_p):
+        for j in range(i, sz_p):
+            if i==j:
+                if calc_self_ent:
+                    rhoa = trx(p, [2]*sz_p, i)
+                    psiap = purify(rhoa)
+                    ent = ent_fun(psiap)
+                else:
+                    ent = np.nan
+            else:
+                rhoab = trx(p, [2]*sz_p, [i, j])
+                ent = ent_fun(rhoab)
+            ents[i,j] = ent
+            ents[j,i] = ent
+    return ents
