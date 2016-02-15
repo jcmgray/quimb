@@ -6,6 +6,9 @@ from quijy.core import *
 # Generating objects
 from quijy.gen import *
 
+# Random states
+from quijy.rand import *
+
 # Solving functions
 from quijy.solve import *
 

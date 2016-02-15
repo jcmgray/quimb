@@ -7,7 +7,8 @@ TODO: add sparse and qtype to all relevant functions.
 import numpy as np
 import scipy.sparse as sp
 from itertools import product
-from quijy.core import (qjf, nmlz, kron, kronpow, eyepad, eye, trx, eyeplace)
+from quijy.core import (qjf, kron, kronpow, eyepad, eye,
+                        eyeplace)
 
 
 def basis_vec(dir, dim, sparse=False, **kwargs):
@@ -117,52 +118,6 @@ def bloch_state(ax, ay, az, purify=False, **kwargs):
                for a, s in zip((1, ax, ay, az), 'ixyz'))
 
 
-def rand_ket(n):
-    """
-    Generates a wavefunction with random coefficients, normalised
-    """
-    return qjf(np.random.randn(n, 1) + 1.0j * np.random.randn(n, 1),
-               normalized=True)
-
-
-def rand_rho(n):
-    """
-    Generates a random density matrix of dimension n, no special properties
-    other than being guarateed hermitian, positive, and trace 1.
-    """
-    rho = qjf(np.random.randn(n, n) + 1.0j * np.random.randn(n, n))
-    rho = rho + rho.H
-    return nmlz(rho * rho)
-
-
-def rand_mix(n):
-    """
-    Constructs a random mixed state by tracing out a random gaussian ket
-    where the composite system varies in size between 2 and n. This produces
-    a spread of states including more purity but has no real grounding.
-    """
-    m = np.random.randint(2, n+1)
-    psi = rand_ket(n*m)
-    return trx(psi, [n, m], 0)
-
-
-def rand_product_state(n, qtype=None):
-    """
-    Calculates the wavefunction of n many random pure qubits.
-    """
-    # Generator
-    def calc_rand_pure_qubits(n):
-        for i in range(n):
-            u = np.random.rand()
-            v = np.random.rand()
-            phi = 2 * np.pi * u
-            theta = np.arccos(2 * v - 1)
-            yield qjf([[np.cos(theta / 2.0)],
-                       [np.sin(theta / 2.0) * np.exp(1.0j * phi)]],
-                      qtype=qtype)
-    return kron(*[x for x in calc_rand_pure_qubits(n)])
-
-
 def neel_state(n):
     binary = '01' * (n / 2)
     binary += (n % 2 == 1) * '0'  # add trailing spin for odd n
@@ -264,9 +219,3 @@ def ham_j1j2(n, j1=1.0, j2=0.5, bz=0.0, cyclic=False, sparse=False):
 def ham_majumdar_ghosh(n, j1=1.0, j2=0.5, **kwargs):
     """ Alias for ham-j1j2. """
     return ham_j1j2(n, j1=j1, j2=j2, **kwargs)
-
-
-def rand_uni(n):
-    x = np.random.randn(n, n) + 1.0j*np.random.randn(n, n)
-    x /= 2**0.5
-    q, r = np.linalg.qr
