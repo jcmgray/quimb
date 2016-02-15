@@ -1,8 +1,10 @@
+from itertools import combinations
 import scipy.sparse as sp
 import numpy as np
 from numpy.testing import assert_allclose
 from nose.tools import assert_almost_equal, eq_, ok_
 from quijy.core import *
+from quijy.gen import rand_rho, bell_state
 
 
 # Quijify
@@ -89,3 +91,46 @@ def test_op():
     ok_(not isket(x))
     ok_(isbra(x))
     ok_(not isop(x))
+
+
+# Partial Trace checks
+def test_partial_trace_early_return():
+    a = qjf([0.5, 0.5, 0.5, 0.5], 'ket')
+    b = ptr(a, [2,2], [0, 1])
+    assert_allclose(a @ a.H, b)
+    a = qjf([0.5, 0.5, 0.5, 0.5], 'dop')
+    b = ptr(a, [2,2], [0, 1])
+    assert_allclose(a, b)
+
+
+def test_partial_trace_single_ket():
+    dims = [2, 3, 4]
+    a = np.random.randn(np.prod(dims), 1)
+    for i, dim in enumerate(dims):
+        b = ptr(a, dims, i)
+        eq_(b.shape[0], dim)
+
+
+def test_partial_trace_multi_ket():
+    dims = [2, 3, 4]
+    a = np.random.randn(np.prod(dims), 1)
+    for i1, i2 in combinations([0, 1, 2], 2):
+        b = ptr(a, dims, [i1, i2])
+        eq_(b.shape[1], dims[i1] * dims[i2])
+
+
+def test_partial_trace_dop_product_state():
+    dims = [3, 2, 4, 2, 3]
+    ps = [rand_rho(dim) for dim in dims]
+    pt = kron(*ps)
+    for i, dim in enumerate(dims):
+        p = ptr(pt, dims, i)
+        assert_allclose(p, ps[i])
+
+
+def test_partial_trace_bell_states():
+    for lab in ('psi-', 'psi+', 'phi-', 'phi+'):
+        psi = bell_state(lab, qtype='dop')
+        rhoa = ptr(psi, [2,2], 0)
+        assert_allclose(rhoa, eye(2)/2)
+
