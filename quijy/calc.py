@@ -6,8 +6,8 @@ quantum objects.
 
 import numpy as np
 import numpy.linalg as nla
-from quijy.core import (isop, qjf, kron, ldmul, comm,
-                        eyepad, tr, trx)
+from quijy.core import (isop, qjf, kron, ldmul,
+                        eyepad, tr, trx, infer_size, eyeplace)
 from quijy.gen import (sig, basis_vec, bell_state)
 from quijy.solve import (eigvals, eigsys, norm2)
 from itertools import product
@@ -16,13 +16,13 @@ from collections import OrderedDict
 
 def partial_transpose(p, dims=[2, 2]):
     """
-    Partial transpose
+    Partial transpose of state `p` with bipartition as given by `dims`.
     """
     p = qjf(p, 'op')
     p = np.array(p)\
-        .reshape(np.concatenate((dims, dims)))  \
+        .reshape((*dims, *dims))  \
         .transpose([2, 1, 0, 3])  \
-        .reshape([np.prod(dims), np.prod(dims)])
+        .reshape((np.prod(dims), np.prod(dims)))
     return qjf(p)
 
 
@@ -116,7 +116,7 @@ def qid(p, dims, inds, precomp_func=False, sparse_comp=True):
         qds = np.zeros(np.size(inds))
         for i, ops in enumerate(ops_i):
             for op in ops:
-                qds[i] += norm2(comm(x, op))**2 / 3.0
+                qds[i] += norm2(x @ op - op @ x)**2 / 3.0
         return qds
 
     return qid_func if precomp_func else qid_func(p)
@@ -173,12 +173,15 @@ def pauli_decomp(a, mode='p', tol=1e-3):
 
 
 def purify(rho, sparse=False):
-    n = rho.shape[0]
+    """
+    Take state rho and purify it into a wavefunction of squared dimension.
+    """
+    d = rho.shape[0]
     ls, vs = eigsys(rho)
     ls = np.sqrt(ls)
-    psi = np.zeros(shape=(n**2, 1), dtype=complex)
+    psi = np.zeros(shape=(d**2, 1), dtype=complex)
     for i, l in enumerate(ls.flat):
-        psi += l * kron(vs[:, i], basis_vec(i, n, sparse=sparse))
+        psi += l * kron(vs[:, i], basis_vec(i, d, sparse=sparse))
     return qjf(psi)
 
 
