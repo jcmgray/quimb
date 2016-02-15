@@ -389,7 +389,7 @@ def ldmul(v, m):
         m: matrix
     '''
     v = v.reshape(np.size(v), 1)
-    return evl('v*m')
+    return np.matrix(evl('v*m'), copy=False)
 
 
 def rdmul(m, v):
@@ -400,7 +400,7 @@ def rdmul(m, v):
         v: vector of diagonal matrix, can be array
     '''
     v = v.reshape(1, np.size(v))
-    return evl('m*v')
+    return np.matrix(evl('m*v'), copy=False)
 
 
 def infer_size(p, base=2):
