@@ -85,6 +85,34 @@ def iplot(x, y_i, name=None, color='viridis', nb=True,
     plot(fig, **kwargs)
 
 
+def ihist(xs, nb=True, go_dict={}, ly_dict={}, **kwargs):
+    """
+    Multi histogram plot with plotly.
+    """
+    # TODO: name data, log scale
+    from plotly.graph_objs import Histogram
+
+    traces = [Histogram({'x': x,
+                        **go_dict}) for x in xs]
+    layout = {"width": 750,
+              "height": 600,
+              "xaxis": {"showline": True,
+                        "mirror": "ticks",
+                        "ticks": "inside"},
+              "yaxis": {"showline": True,
+                        "mirror": "ticks",
+                        "ticks": "inside"},
+              **ly_dict}
+    fig = {"data": traces, "layout": layout}
+    if nb:
+        from plotly.offline import init_notebook_mode
+        from plotly.offline import iplot as plot
+        init_notebook_mode()
+    else:
+        from plotly.plotly import plot
+    plot(fig, **kwargs)
+
+
 # -------------------------------------------------------------------------- #
 # Plots with plotly and xarray                                               #
 # -------------------------------------------------------------------------- #
