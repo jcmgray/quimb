@@ -103,6 +103,15 @@ def test_partial_trace_early_return():
     assert_allclose(a, b)
 
 
+def test_partial_trace_return_type():
+    a = qjf([0, 2**-0.5, 2**-0.5, 0], 'ket')
+    b = ptr(a, [2, 2], 1)
+    eq_(type(a), np.matrix)
+    a = qjf([0, 2**-0.5, 2**-0.5, 0], 'dop')
+    b = ptr(a, [2, 2], 1)
+    eq_(type(a), np.matrix)
+
+
 def test_partial_trace_single_ket():
     dims = [2, 3, 4]
     a = np.random.randn(np.prod(dims), 1)
@@ -134,3 +143,10 @@ def test_partial_trace_bell_states():
         rhoa = ptr(psi, [2,2], 0)
         assert_allclose(rhoa, eye(2)/2)
 
+
+def test_partial_trace_supply_ndarray():
+    a = rand_rho(2**3)
+    dims = np.array([2, 2, 2])
+    keep = np.array(1)
+    b = ptr(a, dims, keep)
+    eq_(b.shape[0], 2)
