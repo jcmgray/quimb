@@ -141,7 +141,7 @@ def ilineplot(ds, data_name, x_coo, y_coo=None, logx=False, logy=False,
             cmap = getattr(cm, colormap)
             ymin = ds[y_coo].values.min()
             ymax = ds[y_coo].values.max()
-            cols = ["rgba" + str(cmap(1 - (y-ymin)/ymax))
+            cols = ["rgba" + str(cmap(1 - (y-ymin)/(ymax-ymin)))
                     for y in ds[y_coo].values]
         else:
             cols = [None for y in ds[y_coo].values]
