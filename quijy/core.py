@@ -103,7 +103,7 @@ def normalize(qob):
     """ Returns the state qob in normalized form """
     return (qob / (qob.H * qob)[0, 0]**0.5 if isket(qob) else
             qob / (qob * qob.H)[0, 0]**0.5 if isbra(qob) else
-            qob / tr(qob))
+            qob / qob.tr())
 
 nmlz = normalize
 
@@ -123,8 +123,6 @@ def krnd2(a, b):
         for j in range(n):
             x[i * p:(i + 1)*p, j * q:(j + 1) * q] = a[i, j] * b
     return np.matrix(x, copy=False)
-# def krnd2(a, b):  # Fallback for debugging
-#     return kron(a, b)
 
 
 def kron(*ps):
@@ -193,7 +191,7 @@ def mapcoords(dims, coos, cyclic=False, trim=None):
     >>> ndims[ncoos]
     array([14, 15, 11])
     """
-    # TODO: compress coords
+    # TODO: compress coords?
     # Calculate the raveled size of each dimension (i.e. size of 1 incr.)
     shp_dims = np.shape(dims)
     shp_mod = [np.prod(shp_dims[i+1:]) for i in range(len(shp_dims)-1)] + [1]
@@ -290,13 +288,45 @@ def eyeplace(ops, dims, inds, sparse=None):
     return kron(*gen_ops())
 
 
+def permute_subsystems(p, dims, perm):
+    """
+    Permute the subsytems of a state.
+
+    Parameters
+    ----------
+        p: state, vector or operator
+        dims: dimensions of the system
+        perm: new order of indexes range(len(dims))
+
+    Returns
+    -------
+        pp: permuted state, vector or operator
+    """
+    p = np.array(p, copy=False)
+    perm = np.array(perm)
+    d = np.prod(dims)
+    if isop(p):
+        p = p.reshape([*dims, *dims]) \
+            .transpose([*perm, *(perm+len(dims))]) \
+            .reshape((d, d))
+    else:
+        p = p.reshape(dims) \
+            .transpose(perm) \
+            .reshape((d, 1))
+    return np.matrix(p, copy=False)
+
+
 def partial_trace(p, dims, keep):
     """ Perform partial trace.
-    Input:
+
+    Parameters
+    ----------
         p: state to perform partial trace on, vector or operator
         dims: list of subsystem dimensions
         keep: index of subsytems to keep
-    Returns:
+
+    Returns
+    -------
         Density matrix of subsytem dimensions dims[keep]
     """
     # TODO:  partial trace for sparse matrices
@@ -312,25 +342,26 @@ def partial_trace(p, dims, keep):
     dimkeep = np.prod(dims[keep])
     dimlose = np.prod(dims[lose])
     # Permute dimensions into block of keep and block of lose
-    perm = np.r_[keep, lose]
+    perm = np.array([*keep, *lose])
     # Apply permutation to state and trace out block of lose
     if not isop(p):  # p = psi
         p = np.array(p)
         p = p.reshape(dims) \
             .transpose(perm) \
             .reshape([dimkeep, dimlose])
-        p = np.matrix(p, copy=True)
-        return quijify(p * p.H)
+        p = np.matrix(p, copy=False)
+        return p * p.H
     else:  # p = rho
         p = np.array(p)
-        p = p.reshape(np.r_[dims, dims]) \
-            .transpose(np.r_[perm, perm + n]) \
+        p = p.reshape((*dims, *dims)) \
+            .transpose((*perm, *(perm + n))) \
             .reshape([dimkeep, dimlose, dimkeep, dimlose]) \
             .trace(axis1=1, axis2=3)
-        return quijify(p)
+        return np.matrix(p, copy=False)
 
 ptr = partial_trace
 trx = partial_trace
+np.matrix.ptr = partial_trace
 
 
 def chop(x, tol=1.0e-15):
@@ -339,7 +370,7 @@ def chop(x, tol=1.0e-15):
     Acts in-place on array!
     """
     # TODO: copy vs in-place?
-    rnge = abs(x.max() - x.min())
+    rnge = 2 * abs(x).max()
     minm = rnge * tol  # minimum value tolerated
     if sp.issparse(x):
         x.data.real[np.abs(x.data.real) < minm] = 0.0
@@ -370,11 +401,6 @@ def rdmul(m, v):
     '''
     v = v.reshape(1, np.size(v))
     return evl('m*v')
-
-
-def comm(a, b):
-    """ Commutator of two matrices """
-    return a * b - b * a
 
 
 def infer_size(p, base=2):
