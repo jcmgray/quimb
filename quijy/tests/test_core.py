@@ -4,7 +4,8 @@ import numpy as np
 from numpy.testing import assert_allclose
 from nose.tools import assert_almost_equal, eq_, ok_
 from quijy.core import *
-from quijy.gen import rand_rho, bell_state
+from quijy.gen import bell_state
+from quijy.rand import rand_rho
 
 
 # Quijify
@@ -16,7 +17,8 @@ def test_quijify_vector_create():
     eq_(p.shape, (3, 1))
     p = quijify(x, qtype='bra')
     eq_(p.shape, (1, 3))
-    assert_almost_equal(p[0,2], -3.0j)
+    assert_almost_equal(p[0, 2], -3.0j)
+
 
 def test_quijify_dop_create():
     x = np.random.randn(3, 3)
@@ -24,6 +26,7 @@ def test_quijify_dop_create():
     eq_(type(p), np.matrix)
     eq_(p.dtype, np.complex)
     eq_(p.shape, (3, 3))
+
 
 def test_quijify_convert_vector_to_dop():
     x = [1, 2, 3j]
@@ -50,6 +53,7 @@ def test_quijify_normalized():
     p = quijify(x, 'dop', normalized=True)
     assert_almost_equal(tr(p), 1.)
 
+
 def test_quijify_sparse_create():
     x = [[1, 0], [3, 0]]
     p = quijify(x, 'dop', sparse=False)
@@ -73,33 +77,58 @@ def test_quijify_sparse_convert_to_dop():
 
 # Shape checks
 def test_ket():
-    x = qjf([[1],[0]])
+    x = qjf([[1], [0]])
     ok_(isket(x))
     ok_(not isbra(x))
     ok_(not isop(x))
 
 
 def test_bra():
-    x = qjf([[1 , 0]])
+    x = qjf([[1, 0]])
     ok_(not isket(x))
     ok_(isbra(x))
     ok_(not isop(x))
 
 
 def test_op():
-    x = qjf([[1 , 0]])
+    x = qjf([[1, 0]])
     ok_(not isket(x))
     ok_(isbra(x))
     ok_(not isop(x))
 
 
+# Test Normalize
+def test_normalize():
+    a = qjf([1, 1], 'k')
+    b = nmlz(a)
+    assert_almost_equal(tr(b.H @ b), 1.0)
+    a = qjf([1, 1], 'b')
+    b = nmlz(a)
+    assert_almost_equal(tr(b @ b.H), 1.0)
+    a = qjf([1, 1], 'dop')
+    b = nmlz(a)
+    assert_almost_equal(tr(b), 1.0)
+
+
+def test_normalize_inplace():
+    a = qjf([1, 1], 'k')
+    a.nmlz(inplace=True)
+    assert_almost_equal(tr(a.H @ a), 1.0)
+    a = qjf([1, 1], 'b')
+    a.nmlz(inplace=True)
+    assert_almost_equal(tr(a @ a.H), 1.0)
+    a = qjf([1, 1], 'dop')
+    a.nmlz(inplace=True)
+    assert_almost_equal(tr(a), 1.0)
+
+
 # Partial Trace checks
 def test_partial_trace_early_return():
     a = qjf([0.5, 0.5, 0.5, 0.5], 'ket')
-    b = ptr(a, [2,2], [0, 1])
+    b = ptr(a, [2, 2], [0, 1])
     assert_allclose(a @ a.H, b)
     a = qjf([0.5, 0.5, 0.5, 0.5], 'dop')
-    b = ptr(a, [2,2], [0, 1])
+    b = ptr(a, [2, 2], [0, 1])
     assert_allclose(a, b)
 
 
@@ -140,7 +169,7 @@ def test_partial_trace_dop_product_state():
 def test_partial_trace_bell_states():
     for lab in ('psi-', 'psi+', 'phi-', 'phi+'):
         psi = bell_state(lab, qtype='dop')
-        rhoa = ptr(psi, [2,2], 0)
+        rhoa = ptr(psi, [2, 2], 0)
         assert_allclose(rhoa, eye(2)/2)
 
 
@@ -150,3 +179,39 @@ def test_partial_trace_supply_ndarray():
     keep = np.array(1)
     b = ptr(a, dims, keep)
     eq_(b.shape[0], 2)
+
+
+# Test chop
+def test_chop_inplace():
+    a = qjf([-1j, 0.1+0.2j])
+    chop(a, tol=0.11, inplace=True)
+    assert_allclose(a, qjf([-1j, 0.2j]))
+    # Sparse
+    a = qjf([-1j, 0.1+0.2j], sparse=True)
+    chop(a, tol=0.11, inplace=True)
+    b = qjf([-1j, 0.2j], sparse=True)
+    eq_((a != b).nnz, 0)
+
+
+def test_chop_inplace_dop():
+    a = qjf([1, 0.1], 'dop')
+    chop(a, tol=0.11, inplace=True)
+    assert_allclose(a, qjf([1, 0], 'dop'))
+    a = qjf([1, 0.1], 'dop', sparse=True)
+    chop(a, tol=0.11, inplace=True)
+    b = qjf([1, 0.0], 'dop', sparse=True)
+    eq_((a != b).nnz, 0)
+
+
+def test_chop_copy():
+    a = qjf([-1j, 0.1+0.2j])
+    b = chop(a, tol=0.11, inplace=False)
+    assert_allclose(a, qjf([-1j, 0.1+0.2j]))
+    assert_allclose(b, qjf([-1j, 0.2j]))
+    # Sparse
+    a = qjf([-1j, 0.1+0.2j], sparse=True)
+    b = chop(a, tol=0.11, inplace=False)
+    ao = qjf([-1j, 0.1+0.2j], sparse=True)
+    bo = qjf([-1j, 0.2j], sparse=True)
+    eq_((a != ao).nnz, 0)
+    eq_((b != bo).nnz, 0)

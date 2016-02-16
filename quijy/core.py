@@ -99,11 +99,16 @@ np.matrix.tr = tr
 sp.csr_matrix.tr = sparse_trace
 
 
-def normalize(qob):
+def normalize(qob, inplace=False):
     """ Returns the state qob in normalized form """
-    return (qob / (qob.H * qob)[0, 0]**0.5 if isket(qob) else
-            qob / (qob * qob.H)[0, 0]**0.5 if isbra(qob) else
-            qob / qob.tr())
+    # TODO: inplace vs copy switch
+    n_factor = ((qob.H * qob)[0, 0]**0.5 if isket(qob) else
+                (qob * qob.H)[0, 0]**0.5 if isbra(qob) else
+                qob.tr())
+    if inplace:
+        qob /= n_factor
+    else:
+        return qob / n_factor
 
 nmlz = normalize
 
@@ -364,14 +369,15 @@ trx = partial_trace
 np.matrix.ptr = partial_trace
 
 
-def chop(x, tol=1.0e-15):
+def chop(x, tol=1.0e-15, inplace=True):
     """
     Sets any values of x smaller than tol (relative to range(x)) to zero.
-    Acts in-place on array!
+    Acts in-place on array by default.
     """
     # TODO: copy vs in-place?
-    rnge = 2 * abs(x).max()
-    minm = rnge * tol  # minimum value tolerated
+    minm = abs(x).max() * tol  # minimum value tolerated
+    if not inplace:
+        x = x.copy()
     if sp.issparse(x):
         x.data.real[np.abs(x.data.real) < minm] = 0.0
         x.data.imag[np.abs(x.data.imag) < minm] = 0.0
@@ -379,6 +385,7 @@ def chop(x, tol=1.0e-15):
     else:
         x.real[np.abs(x.real) < minm] = 0.0
         x.imag[np.abs(x.imag) < minm] = 0.0
+    return None if inplace else x
 
 
 def ldmul(v, m):
