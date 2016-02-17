@@ -124,7 +124,7 @@ def iheatmap(ds, data_name, x_coo, y_coo,
     """
     # TODO: make sure order of coords matches data
     from plotly.graph_objs import Heatmap
-    hm = Heatmap({'z': ds[data_name].values,
+    hm = Heatmap({'z': np.squeeze(ds[data_name].values),
                   'x': ds.coords[x_coo].values,
                   'y': ds.coords[y_coo].values,
                   'colorscale': 'Viridis',
