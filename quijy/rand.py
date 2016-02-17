@@ -7,9 +7,9 @@ from quijy.core import (qjf, ptr, kron, rdmul, nmlz)
 
 def rand_matrix(n, nmlzd=False):
     """
-    Generate a random complex matrix with normally-distributed coeffs.
-    If `nmlzd` is `True`, then in the limit of large `n` the eigenvalues
-    will be distributed on the unit complex disk.
+    Generate a random complex matrix of order `n` with normally-distributed
+    coeffs. If `nmlzd` is `True`, then in the limit of large `n` the
+    eigenvalues will be distributed on the unit complex disk.
     """
     mat = np.random.randn(n, n) + 1.0j*np.random.randn(n, n)
     if nmlzd:
@@ -45,7 +45,7 @@ def rand_rho(n):
 
 def rand_ket(n):
     """
-    Generates a wavefunction with random, Gaussian coefficients, normalised
+    Generates a wavefunction with random, Gaussian coefficients, normalised.
     """
     return qjf(np.random.randn(n, 1) + 1.0j * np.random.randn(n, 1),
                normalized=True)
