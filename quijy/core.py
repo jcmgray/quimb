@@ -4,10 +4,10 @@ Core functions for manipulating quantum objects.
 # TODO: move to @ dot products everywhere
 
 from itertools import cycle
+from numba import jit
+from numexpr import evaluate as evl
 import numpy as np
 import scipy.sparse as sp
-from numexpr import evaluate as evl
-from numba import jit
 
 
 def quijify(data, qtype=None, sparse=False, normalized=False, chopped=False):
@@ -33,8 +33,6 @@ def quijify(data, qtype=None, sparse=False, normalized=False, chopped=False):
         qob = sp.csr_matrix(data, dtype=complex)
     else:
         qob = np.matrix(data, copy=False, dtype=complex)
-    if chopped:
-        chop(qob)
     if qtype is not None:
         if qtype in ('k', 'ket'):
             qob.shape = (np.prod(qob.shape), 1)
@@ -43,8 +41,10 @@ def quijify(data, qtype=None, sparse=False, normalized=False, chopped=False):
             qob = qob.conj()
         elif qtype in ('d', 'r', 'rho', 'op', 'dop') and not isop(qob):
             qob = quijify(qob, 'k') @ quijify(qob, 'k').H
+    if chopped:
+        chop(qob, inplace=True)
     if normalized:
-        qob = normalize(qob)
+        normalize(qob, inplace=True)
     return sp.csr_matrix(qob, dtype=complex) if sparse else qob
 
 qjf = quijify
@@ -371,11 +371,19 @@ np.matrix.ptr = partial_trace
 
 def chop(x, tol=1.0e-15, inplace=True):
     """
-    Sets any values of x smaller than tol (relative to range(x)) to zero.
-    Acts in-place on array by default.
+    Set small values of an array to zero.
+
+    Parameters
+    ----------
+        x: dense or sparse matrix/array.
+        tol: fraction of max(abs(x)) to chop below.
+        inplace: whether to act on input array or return copy
+
+    Returns
+    -------
+        None if inplace else chopped matrix
     """
-    # TODO: copy vs in-place?
-    minm = abs(x).max() * tol  # minimum value tolerated
+    minm = np.abs(x).max() * tol  # minimum value tolerated
     if not inplace:
         x = x.copy()
     if sp.issparse(x):
@@ -388,26 +396,40 @@ def chop(x, tol=1.0e-15, inplace=True):
     return None if inplace else x
 
 
-def ldmul(v, m):
+def ldmul(vec, mat):
     '''
-    Fast left diagonal multiplication using numexpr
-    Args:
-        v: vector of diagonal matrix, can be array
-        m: matrix
+    Fast left diagonal multiplication using numexpr,
+    faster than numpy for n > ~ 500.
+
+    Parameters
+    ----------
+        vec: vector of diagonal matrix, can be array
+        mat: matrix
+
+    Returns
+    -------
+        mat: np.matrix
     '''
-    v = v.reshape(np.size(v), 1)
-    return np.matrix(evl('v*m'), copy=False)
+    vec = vec.reshape(np.size(vec), 1)
+    return np.matrix(evl('vec*mat'), copy=False)
 
 
-def rdmul(m, v):
+def rdmul(mat, vec):
     '''
-    Fast right diagonal multiplication using numexpr
-    Args:
-        m: matrix
-        v: vector of diagonal matrix, can be array
+    Fast right diagonal multiplication using numexpr,
+    faster than numpy for n > ~ 500.
+
+    Parameters
+    ----------
+        mat: matrix
+        vec: vector of diagonal matrix, can be array
+
+    Returns
+    -------
+        mat: np.matrix
     '''
-    v = v.reshape(1, np.size(v))
-    return np.matrix(evl('m*v'), copy=False)
+    vec = vec.reshape(1, np.size(vec))
+    return np.matrix(evl('mat*vec'), copy=False)
 
 
 def infer_size(p, base=2):
