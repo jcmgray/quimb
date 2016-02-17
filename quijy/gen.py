@@ -4,11 +4,12 @@ TODO: add sparse and qtype to all relevant functions.
 """
 # TODO: Graph states, cluster states, multidimensional
 
+from itertools import product, permutations
+from math import factorial
 import numpy as np
 import scipy.sparse as sp
-from itertools import product
 from quijy.core import (qjf, kron, kronpow, eyepad, eye,
-                        eyeplace)
+                        eyeplace, levi_civita)
 
 
 def basis_vec(dir, dim, sparse=False, **kwargs):
@@ -219,3 +220,15 @@ def ham_j1j2(n, j1=1.0, j2=0.5, bz=0.0, cyclic=False, sparse=False):
 def ham_majumdar_ghosh(n, j1=1.0, j2=0.5, **kwargs):
     """ Alias for ham-j1j2. """
     return ham_j1j2(n, j1=j1, j2=j2, **kwargs)
+
+
+def multi_singlet(n):
+    es = [basis_vec(i, n) for i in range(n)]
+    vec_perm = permutations(es)
+    ind_perm = permutations(range(n))
+
+    def terms():
+        for vec, ind in zip(vec_perm, ind_perm):
+            yield levi_civita(ind) * kron(*vec)
+
+    return sum(terms()) / factorial(n)**0.5
