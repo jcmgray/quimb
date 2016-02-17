@@ -436,3 +436,17 @@ def infer_size(p, base=2):
     """ Infers the size of a state assumed to be made of qubits """
     d = max(p.shape)
     return int(np.log2(d) / np.log2(base))
+
+
+def levi_civita(perm):
+    """
+    Compute the generalised levi-civita coefficient for a
+    permutation of the ints in range(n)
+    """
+    n = len(perm)
+    if n != len(set(perm)):  # infer there are repeated elements
+        return 0
+    mat = np.zeros((n, n), dtype=np.int32)
+    for i, j in zip(range(n), perm):
+        mat[i, j] = 1
+    return int(np.linalg.det(mat))
