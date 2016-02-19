@@ -117,17 +117,21 @@ def ihist(xs, nb=True, go_dict={}, ly_dict={}, **kwargs):
 # Plots with plotly and xarray                                               #
 # -------------------------------------------------------------------------- #
 
-def iheatmap(ds, data_name, x_coo, y_coo,
+def iheatmap(ds, data_name, x_coo, y_coo, colormap='Portland',
              go_dict={}, ly_dict={}, nb=True, **kwargs):
     """
     Automatic 2D-Heatmap plot using plotly.
     """
-    # TODO: make sure order of coords matches data
     from plotly.graph_objs import Heatmap
-    hm = Heatmap({'z': np.squeeze(ds[data_name].values),
+    hm = Heatmap({'z': (ds[data_name]
+                        .dropna(x_coo, how='all')
+                        .dropna(y_coo, how='all')
+                        .squeeze()
+                        .transpose(y_coo, x_coo)
+                        .data),
                   'x': ds.coords[x_coo].values,
                   'y': ds.coords[y_coo].values,
-                  'colorscale': 'Viridis',
+                  'colorscale': colormap,
                   'colorbar': {'title': data_name},
                   **go_dict})
     ly = {'height': 600,
