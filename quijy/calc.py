@@ -59,7 +59,7 @@ def sqrtm(a):
     # returns sqrt of hermitan matrix, seems faster than scipy.linalg.sqrtm
     l, v = eigsys(a, sort=False)
     l = np.sqrt(l.astype(complex))
-    return v * ldmul(l, v.H)
+    return v @ ldmul(l, v.H)
 
 
 def trace_norm(a):
@@ -93,13 +93,13 @@ logneg = logarithmic_negativity
 def concurrence(p):
     if isop(p):
         p = qjf(p, 'dop')  # make sure density operator
-        pt = kron(sig(2), sig(2)) * p.conj() * kron(sig(2), sig(2))
-        l = (nla.eigvals(p * pt).real**2)**0.25
+        pt = kron(sig(2), sig(2)) @ p.conj() @ kron(sig(2), sig(2))
+        l = (nla.eigvals(p @ pt).real**2)**0.25
         return max(0, 2 * np.max(l) - np.sum(l))
     else:
         p = qjf(p, 'ket')
-        pt = kron(sig(2), sig(2)) * p.conj()
-        c = np.real(abs(p.H * pt)).item(0)
+        pt = kron(sig(2), sig(2)) @ p.conj()
+        c = np.real(abs(p.H @ pt)).item(0)
         return max(0, c)
 
 
@@ -153,7 +153,7 @@ def pauli_decomp(a, mode='p', tol=1e-3):
         for perm in product('IXYZ', repeat=n):
             name = "".join(perm)
             op = kron(*[sig(s, sparse=True) for s in perm]) / 2**n
-            d = tr(a * op)
+            d = tr(a @ op)
             yield name, d
 
     nds = [nd for nd in calc_name_and_overlap(a)]
@@ -196,9 +196,9 @@ def bell_fid(p):
         for b in ['psi-', 'psi+', 'phi-', 'phi+']:
             psib = bell_state(b)
             if op:
-                yield tr(psib * psib.H * p)
+                yield tr(psib.H @ p @ psib)
             else:
-                yield abs(psib.H * p)**2
+                yield abs(psib.H @ p)**2
 
     return [*gen_bfs()]
 

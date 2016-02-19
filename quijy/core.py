@@ -1,7 +1,6 @@
 """
 Core functions for manipulating quantum objects.
 """
-# TODO: move to @ dot products everywhere
 
 from itertools import cycle
 from numba import jit
@@ -79,31 +78,34 @@ def isherm(a):
 
 @jit
 def trace(op):
-    """ Trace of hermitian matrix (jit version faster than numpy!)
-    TODO: sparse method
+    """
+    Trace of hermitian matrix. This is faster than numpy's
+    built-in trace function for real diagonals.
     """
     x = 0.0
     for i in range(op.shape[0]):
         x += op[i, i].real
     return x
 
-tr = trace
-
 
 def sparse_trace(op):
+    """ Trace of sparse hermitian matrix. """
     d = op.diagonal()
     return np.sum(d.real)
 
+
+def tr(op):
+    return sparse_trace(op) if sp.issparse(op) else trace(op)
+
 # Monkey-patch trace methods
-np.matrix.tr = tr
+np.matrix.tr = trace
 sp.csr_matrix.tr = sparse_trace
 
 
 def normalize(qob, inplace=False):
     """ Returns the state qob in normalized form """
-    # TODO: inplace vs copy switch
-    n_factor = ((qob.H * qob)[0, 0]**0.5 if isket(qob) else
-                (qob * qob.H)[0, 0]**0.5 if isbra(qob) else
+    n_factor = ((qob.H @ qob)[0, 0]**0.5 if isket(qob) else
+                (qob @ qob.H)[0, 0]**0.5 if isbra(qob) else
                 qob.tr())
     if inplace:
         qob /= n_factor
@@ -117,37 +119,38 @@ sp.csr_matrix.nmlz = nmlz
 
 
 @jit
-def krnd2(a, b):
+def kron_dense(a, b):
     """
     Fast tensor product of two dense arrays (Fast than numpy using jit)
     """
     m, n = a.shape
     p, q = b.shape
-    x = np.empty((m * p, n * q), dtype=complex)
+    x = np.empty((m * p, n * q), dtype=np.complex128)
     for i in range(m):
         for j in range(n):
             x[i * p:(i + 1)*p, j * q:(j + 1) * q] = a[i, j] * b
     return np.matrix(x, copy=False)
 
 
-def kron(*ps):
+def kron(*ops):
     """ Tensor product of variable number of arguments.
     Input:
-        ps: objects to be tensored together
+        ops: objects to be tensored together
     Returns:
         operator
     The product is performed as (a * (b * (c * ...)))
     """
-    num_p = len(ps)
-    a = ps[0]
+    num_p = len(ops)
+    if num_p == 0:
+        return 1
+    a = ops[0]
     if num_p == 1:
         return a
-    b = ps[1] if num_p == 2 else  \
-        kron(*ps[1:])  # Recursively perform kron to 'right'
+    b = ops[1] if num_p == 2 else kron(*ops[1:])
     if sp.issparse(a) or sp.issparse(b):
         return sp.kron(a, b, 'csr')
     else:
-        return krnd2(a, b)
+        return kron_dense(a, b)
 
 # Monkey-patch unused & symbol to tensor product
 np.matrix.__and__ = kron
@@ -196,7 +199,7 @@ def mapcoords(dims, coos, cyclic=False, trim=None):
     >>> ndims[ncoos]
     array([14, 15, 11])
     """
-    # TODO: compress coords?
+    # TODO: compress coords? (argsort and merge identities)
     # Calculate the raveled size of each dimension (i.e. size of 1 incr.)
     shp_dims = np.shape(dims)
     shp_mod = [np.prod(shp_dims[i+1:]) for i in range(len(shp_dims)-1)] + [1]
@@ -338,7 +341,7 @@ def partial_trace(p, dims, keep):
     # Cast as ndarrays for 2D+ reshaping
     if np.size(keep) == np.size(dims):  # keep all subsystems
         if not isop(p):
-            return p * p.H  # but return as density operator for consistency
+            return p @ p.H  # but return as density operator for consistency
         return p
     n = np.size(dims)
     dims = np.array(dims, ndmin=1)
@@ -355,7 +358,7 @@ def partial_trace(p, dims, keep):
             .transpose(perm) \
             .reshape([dimkeep, dimlose])
         p = np.matrix(p, copy=False)
-        return p * p.H
+        return p @ p.H
     else:  # p = rho
         p = np.array(p)
         p = p.reshape((*dims, *dims)) \
@@ -410,9 +413,12 @@ def ldmul(vec, mat):
     -------
         mat: np.matrix
     '''
-    vec = vec.reshape(np.size(vec), 1)
-    return np.matrix(evl('vec*mat'), copy=False)
-
+    d = mat.shape[0]
+    vec = vec.reshape(d, 1)
+    if d > 500:
+        return np.matrix(evl('vec*mat'), copy=False)
+    else:
+        return np.matrix(np.multiply(vec, mat), copy=False)
 
 def rdmul(mat, vec):
     '''
@@ -428,8 +434,12 @@ def rdmul(mat, vec):
     -------
         mat: np.matrix
     '''
-    vec = vec.reshape(1, np.size(vec))
-    return np.matrix(evl('mat*vec'), copy=False)
+    d = mat.shape[0]
+    vec = vec.reshape(1, d)
+    if d > 500:
+        return np.matrix(evl('mat*vec'), copy=False)
+    else:
+        return np.matrix(np.multiply(mat, vec), copy=False)
 
 
 def infer_size(p, base=2):

@@ -130,7 +130,7 @@ def singlet_pairs(n):
 
 
 def werner_state(p):
-    return p * bell_state(3) * bell_state(3).H + (1 - p) * eye(4) / 4
+    return p * bell_state(3) @ bell_state(3).H + (1 - p) * eye(4) / 4
 
 
 def ghz_state(n, sparse=False):

@@ -57,9 +57,9 @@ class QuEvo(object):
             self.l, self.v = ham
             # Solve for initial state in energy basis
             if self.dop:
-                self.pe0 = mdot([self.v.H * p0 * self.v])
+                self.pe0 = mdot([self.v.H, p0, self.v])
             else:
-                self.pe0 = self.v.H * p0
+                self.pe0 = self.v.H @ p0
             self.solved = True
         elif solve:
             self.ham = ham
@@ -76,7 +76,7 @@ class QuEvo(object):
         if self.dop:
             self.pe0 = mdot([self.v.H, self.p0, self.v])
         else:
-            self.pe0 = self.v.H * self.p0
+            self.pe0 = self.v.H @ self.p0
         # Mark solved
         self.solved = True
 
@@ -88,7 +88,7 @@ class QuEvo(object):
             lvpvl = rdmul(ldmul(exptl, self.pe0), evl('conj(exptl)'))
             self.pt = mdot([self.v, lvpvl, self.v.H])
         else:
-            self.pt = self.v * ldmul(exptl, self.pe0)
+            self.pt = self.v @ ldmul(exptl, self.pe0)
 
 
 def rk4_step(y0, f, dt, t=None):
