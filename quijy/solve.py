@@ -12,9 +12,9 @@ import scipy.sparse.linalg as spla
 from quijy.core import qjf
 
 
-##############################################################################
-# full eigendecomposition methods for dense matrices #########################
-##############################################################################
+# -------------------------------------------------------------------------- #
+# Full eigendecomposition methods for dense matrices                         #
+# -------------------------------------------------------------------------- #
 
 def eigsys(a, sort=True):
     """ Find all eigenpairs of dense matrix
@@ -57,9 +57,9 @@ def eigvecs(a, sort=True):
     return v
 
 
-##############################################################################
-# iterative methods for partial eigendecompision #############################
-##############################################################################
+# -------------------------------------------------------------------------- #
+# iterative methods for partial eigendecompision                             #
+# -------------------------------------------------------------------------- #
 
 def seigsys(a, k=1, which='SA', ncv=None, return_vecs=True, **kwargs):
     """ Returns a few eigenpairs from a possibly sparse hermitian operator
@@ -111,9 +111,9 @@ def groundenergy(ham):
     return seigvals(ham, k=1, which='SA')
 
 
-##############################################################################
-# iterative methods for partial singular value decomposition #################
-##############################################################################
+# -------------------------------------------------------------------------- #
+# iterative methods for partial singular value decomposition                 #
+# -------------------------------------------------------------------------- #
 
 def svds(a, k=1, ncv=None, return_vecs=True, **kwargs):
     """ Compute a number of singular value pairs """
