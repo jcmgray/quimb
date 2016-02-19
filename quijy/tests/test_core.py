@@ -3,9 +3,11 @@ import scipy.sparse as sp
 import numpy as np
 from numpy.testing import assert_allclose
 from nose.tools import assert_almost_equal, eq_, ok_
-from quijy.core import *
+from quijy.core import (quijify, qjf, isket, isbra, isop, isherm,
+                        trace, sparse_trace, tr, nmlz, ptr, chop,
+                        eye, kron, kron_dense)
 from quijy.gen import bell_state
-from quijy.rand import rand_rho
+from quijy.rand import rand_rho, rand_matrix
 
 
 # Quijify
@@ -97,12 +99,42 @@ def test_op():
     ok_(not isop(x))
 
 
+def test_isherm():
+    a = qjf([[1.0, 2.0 + 3.0j],
+             [2.0 - 3.0j, 1.0]])
+    ok_(isherm(a))
+    a = qjf([[1.0, 2.0 - 3.0j],
+             [2.0 - 3.0j, 1.0]])
+    ok_(not isherm(a))
+
+
+def test_isherm_sparse():
+    a = qjf([[1.0, 2.0 + 3.0j],
+             [2.0 - 3.0j, 1.0]], sparse=True)
+    ok_(isherm(a))
+    a = qjf([[1.0, 2.0 - 3.0j],
+             [2.0 - 3.0j, 1.0]], sparse=True)
+    ok_(not isherm(a))
+
+
+def test_trace():
+    a = qjf([[2, 1], [4, 5]])
+    ok_(a.tr.__code__.co_code == trace.__code__.co_code)
+    eq_(tr(a), 7)
+
+
+def test_sparse_trace():
+    a = qjf([[2, 1], [4, 5]], sparse=True)
+    ok_(a.tr.__code__.co_code == sparse_trace.__code__.co_code)
+    eq_(tr(a), 7)
+
+
 # Test Normalize
 def test_normalize():
-    a = qjf([1, 1], 'k')
+    a = qjf([1, 1], 'ket')
     b = nmlz(a)
     assert_almost_equal(tr(b.H @ b), 1.0)
-    a = qjf([1, 1], 'b')
+    a = qjf([1, 1], 'bra')
     b = nmlz(a)
     assert_almost_equal(tr(b @ b.H), 1.0)
     a = qjf([1, 1], 'dop')
@@ -111,15 +143,49 @@ def test_normalize():
 
 
 def test_normalize_inplace():
-    a = qjf([1, 1], 'k')
+    a = qjf([1, 1], 'ket')
     a.nmlz(inplace=True)
     assert_almost_equal(tr(a.H @ a), 1.0)
-    a = qjf([1, 1], 'b')
+    a = qjf([1, 1], 'bra')
     a.nmlz(inplace=True)
     assert_almost_equal(tr(a @ a.H), 1.0)
     a = qjf([1, 1], 'dop')
     a.nmlz(inplace=True)
     assert_almost_equal(tr(a), 1.0)
+
+
+# Kron functions
+def test_kron_dense():
+    a = rand_matrix(3)
+    b = rand_matrix(3)
+    c = kron_dense(a, b)
+    npc = np.kron(a, b)
+    assert_allclose(c, npc)
+
+
+def test_kron_multi_args():
+    a = rand_matrix(3)
+    b = rand_matrix(3)
+    c = rand_matrix(3)
+    eq_(kron(), 1)
+    assert_allclose(kron(a), a)
+    assert_allclose(kron(a, b, c),
+                    np.kron(np.kron(a, b), c))
+
+
+def test_kron_mixed_types():
+    # TODO
+    a = qjf([1, 2, 3, 4], 'ket')
+    b = qjf([0, 1, 0, 2], 'ket', sparse=True)
+    # c = -1.0j
+    assert_allclose(kron(a, b).A,
+                    (sp.kron(a, b, 'csr')).A)
+    # assert_allclose(kron(a, c),
+                    # a * c)
+    # kron(b, c)
+    # kron(b, c)
+
+
 
 
 # Partial Trace checks
