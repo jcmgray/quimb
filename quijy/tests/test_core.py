@@ -180,6 +180,8 @@ def test_kron_mixed_types():
     # c = -1.0j
     assert_allclose(kron(a, b).A,
                     (sp.kron(a, b, 'csr')).A)
+    assert_allclose(kron(b, b).A,
+                    (sp.kron(b, b, 'csr')).A)
     # assert_allclose(kron(a, c),
                     # a * c)
     # kron(b, c)

@@ -1,16 +1,15 @@
 import numpy as np
-import scipy.sparse as sp
-from nose.tools import ok_, eq_, assert_almost_equal
+from nose.tools import eq_
 from numpy.testing import assert_allclose
-from quijy.gen import *
+from quijy.gen import basis_vec
 
 
 def test_basis_vec():
     x = basis_vec(1, 2)
-    assert_allclose(x, np.matrix([[0.],
-                                  [1.]]))
+    assert_allclose(x, np.matrix([[0.], [1.]]))
     x = basis_vec(1, 2, qtype='b')
     assert_allclose(x, np.matrix([[0., 1.]]))
+
 
 def test_basis_vec_sparse():
     x = basis_vec(4, 100, sparse=True)

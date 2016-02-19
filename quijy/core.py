@@ -270,7 +270,7 @@ def eyeplace(ops, dims, inds, sparse=None):
 
     Returns
     -------
-        Operator such that acts on dims[inds].
+        Operator such ops that act on dims[inds].
     """
     sparse = sp.issparse(ops) if sparse is None else sparse  # infer sparsity
     inds = np.array(inds, ndmin=1)
