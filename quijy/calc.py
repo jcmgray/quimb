@@ -7,7 +7,7 @@ quantum objects.
 import numpy as np
 import numpy.linalg as nla
 from quijy.core import (isop, qjf, kron, ldmul,
-                        eyepad, tr, trx, infer_size, eyeplace)
+                        eyepad, tr, trx, infer_size, eyepad)
 from quijy.gen import (sig, basis_vec, bell_state)
 from quijy.solve import (eigvals, eigsys, norm2)
 from itertools import product
@@ -226,9 +226,9 @@ def correlation(p, sysa, sysb, opa, opb, sparse=True, precomp_func=False):
     dims = [2] * sz_p
     op = isop(p)
 
-    opab = eyeplace([opa, opb], dims, [sysa, sysb], sparse=sparse)
-    opa = eyeplace([opa], dims, sysa, sparse=sparse)
-    opb = eyeplace([opb], dims, sysb, sparse=sparse)
+    opab = eyepad([opa, opb], dims, [sysa, sysb], sparse=sparse)
+    opa = eyepad([opa], dims, sysa, sparse=sparse)
+    opb = eyepad([opb], dims, sysb, sparse=sparse)
 
     if op:
         def corr(state):

@@ -9,7 +9,7 @@ from math import factorial
 import numpy as np
 import scipy.sparse as sp
 from quijy.core import (qjf, kron, kronpow, eyepad, eye,
-                        eyeplace, levi_civita)
+                        eyepad, levi_civita)
 
 
 def basis_vec(dir, dim, sparse=False, **kwargs):
@@ -36,54 +36,88 @@ def basis_vec(dir, dim, sparse=False, **kwargs):
 
 def up(**kwargs):
     """ Returns up-state, aka. |0>, +Z eigenstate."""
-    return qjf([[1], [0]], **kwargs)
+    return qjf([[1],
+                [0]], **kwargs)
 
 zplus = up
 
 
 def down(**kwargs):
     """ Returns down-state, aka. |1>, -Z eigenstate."""
-    return qjf([[0], [1]], **kwargs)
+    return qjf([[0],
+                [1]], **kwargs)
 
 zminus = down
 
 
 def plus(**kwargs):
     """ Returns plus-state, aka. |+>, +X eigenstate."""
-    return qjf([[2**-0.5], [2**-0.5]], **kwargs)
+    return qjf([[2**-0.5],
+                [2**-0.5]], **kwargs)
 
 xplus = plus
 
 
 def minus(**kwargs):
     """ Returns minus-state, aka. |->, -X eigenstate."""
-    return qjf([[2**-0.5], [-2**-0.5]], **kwargs)
+    return qjf([[2**-0.5],
+                [-2**-0.5]], **kwargs)
 
 xminus = minus
 
 
 def yplus(**kwargs):
     """ Returns yplus-state, aka. |y+>, +Y eigenstate."""
-    return qjf([[2**-0.5], [1.0j / (2**0.5)]], **kwargs)
+    return qjf([[2**-0.5],
+                [1.0j / (2**0.5)]], **kwargs)
 
 
 def yminus(**kwargs):
     """ Returns yplus-state, aka. |y->, -Y eigenstate."""
-    return qjf([[2**-0.5], [-1.0j / (2**0.5)]], **kwargs)
+    return qjf([[2**-0.5],
+                [-1.0j / (2**0.5)]], **kwargs)
 
 
-def sig(s, **kwargs):
+def sig(dir, dim=2, **kwargs):
     """
-    Generates one of the three Pauli matrices, 0-I, 1-X, 2-Y, 3-Z
+    Generates the spin operators for spin 1/2 or 1.
+
+    Parameters
+    ----------
+        dir: which spatial direction
+        dim: dimension of spin operator (e.g. 3 for spin-1)
+
+    Returns
+    -------
+        spin operator, quijified.
     """
-    if s in (1, 'x', 'X'):
-        return qjf([[0, 1], [1, 0]], **kwargs)
-    elif s in (2, 'y', 'Y'):
-        return qjf([[0, -1j], [1j, 0]], **kwargs)
-    elif s in (3, 'z', 'Z'):
-        return qjf([[1, 0], [0, -1]], **kwargs)
-    elif s in (0, 'i', 'I'):
-        return qjf([[1, 0], [0, 1]], **kwargs)
+    if dir in (1, 'x', 'X'):
+        if dim == 2:
+            return qjf([[0, 1],
+                        [1, 0]], **kwargs)
+        elif dim == 3:
+            return qjf([[0, 1, 0],
+                        [1, 0, 1],
+                        [0, 1, 0]], **kwargs) / 2**0.5
+    elif dir in (2, 'y', 'Y'):
+        if dim == 2:
+            return qjf([[0, -1j],
+                        [1j, 0]], **kwargs)
+        elif dim == 3:
+            return qjf([[0, -1j, 0],
+                        [1j, 0, -1j],
+                        [0, 1j, 0]], **kwargs) / 2**0.5
+    elif dir in (3, 'z', 'Z'):
+        if dim == 2:
+            return qjf([[1, 0],
+                        [0, -1]], **kwargs)
+        elif dim == 3:
+            return qjf([[1, 0, 0],
+                        [0, 0, 0],
+                        [0, 0, -1]], **kwargs)
+    elif dir in (0, 'i', 'I'):
+        return eye(dim, **kwargs)
+    raise ValueError('Invalid dir/dim combination.')
 
 
 def bell_state(s, **kwargs):
@@ -91,15 +125,28 @@ def bell_state(s, **kwargs):
     Generates one of the four bell-states;
     0: phi+, 1: phi-, 2: psi+, 3: psi- (singlet)
     """
-    isqr2 = 2.0**-0.5
+    c = 2.0**-0.5
     if s in (3, 'psi-'):
-        return qjf([[0], [isqr2], [-isqr2], [0]], **kwargs)
+        return qjf([[0],
+                    [c],
+                    [-c],
+                    [0]], **kwargs)
     elif s in (0, 'phi+'):
-        return qjf([[isqr2], [0], [0], [isqr2]], **kwargs)
+        return qjf([[c],
+                    [0],
+                    [0],
+                    [c]], **kwargs)
     elif s in (1, 'phi-'):
-        return qjf([[isqr2], [0], [0], [-isqr2]], **kwargs)
+        return qjf([[c],
+                    [0],
+                    [0],
+                    [-c]], **kwargs)
     elif s in (2, 'psi+'):
-        return qjf([[0], [isqr2], [isqr2], [0]], **kwargs)
+        return qjf([[0],
+                    [c],
+                    [c],
+                    [0]], **kwargs)
+    raise ValueError('Invalid bell state specifier.')
 
 
 def singlet(**kwargs):
@@ -162,7 +209,7 @@ def ham_heis(n, jx=1.0, jy=1.0, jz=1.0, bz=0.0, cyclic=False, sparse=False):
     # Begin with last spin, not covered by loop
     ham = eyepad(-bz * sig('z', sparse=True), dims, n - 1)
     for i in range(n - 1):
-        ham = ham + eyepad(sds, dims[:-1], i)
+        ham = ham + eyepad(sds, dims, [i, i + 1])
     if cyclic:
         ham = ham + eyepad(sig('x', sparse=True), dims, [0, n - 1])  \
                   + eyepad(sig('y', sparse=True), dims, [0, n - 1])  \
@@ -203,15 +250,15 @@ def ham_j1j2(n, j1=1.0, j2=0.5, bz=0.0, cyclic=False, sparse=False):
 
     def gen_j1():
         for op, coo in product(s, coosj1):
-            yield eyeplace([op], dims, coo, sparse=True)
+            yield eyepad([op], dims, coo, sparse=True)
 
     def gen_j2():
         for op, coo in product(s, coosj2):
-            yield eyeplace([op], dims, coo, sparse=True)
+            yield eyepad([op], dims, coo, sparse=True)
 
     def gen_bz():
         for i in range(n):
-            yield eyeplace([s[2]], dims, i, sparse=True)
+            yield eyepad([s[2]], dims, i, sparse=True)
 
     ham = j1 * sum(gen_j1()) + j2 * sum(gen_j2()) + bz * sum(gen_bz())
     return ham if sparse else ham.todense()

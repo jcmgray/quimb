@@ -159,9 +159,7 @@ sp.csr_matrix.__and__ = kron
 
 def kronpow(a, pwr):
     """ Returns 'a' tensored with itself pwr times """
-    return (1 if pwr == 0 else
-            a if pwr == 1 else
-            kron(*[a] * pwr))
+    return kron(*(a for i in range(pwr)))
 
 
 def eye(n, sparse=False):
@@ -170,7 +168,7 @@ def eye(n, sparse=False):
             qjf(np.eye(n, dtype=complex)))
 
 
-def mapcoords(dims, coos, cyclic=False, trim=None):
+def mapcoords(dims, coos, cyclic=False, trim=False):
     """
     Maps multi-dimensional coordinates and indices to flat arrays in a
     regular way. Wraps or deletes coordinates beyond the system size
@@ -182,8 +180,8 @@ def mapcoords(dims, coos, cyclic=False, trim=None):
         coos: array of coordinate tuples to convert
         cyclic: whether to automatically wrap coordinates beyond system size or
             delete them.
-        trim: if not None, coos will be bound-checked. trim=True will delete
-            any coordinates beyond dimensions, trim=False will raise an error.
+        trim: if True, any coordinates beyond dimensions will be deleted,
+            overidden by cyclic.
 
     Returns
     -------
@@ -199,101 +197,79 @@ def mapcoords(dims, coos, cyclic=False, trim=None):
     >>> ndims[ncoos]
     array([14, 15, 11])
     """
-    # TODO: compress coords? (argsort and merge identities)
     # Calculate the raveled size of each dimension (i.e. size of 1 incr.)
     shp_dims = np.shape(dims)
     shp_mod = [np.prod(shp_dims[i+1:]) for i in range(len(shp_dims)-1)] + [1]
     coos = np.array(coos)
     if cyclic:
         coos = coos % shp_dims  # (broadcasting dims down columns)
-    elif trim is not None:
-        if trim:  # delete coordinates which overspill
-            coos = coos[np.all(coos == coos % shp_dims, axis=1)]
-        elif np.any(coos != coos % shp_dims):
-            raise ValueError('Coordinates beyond system dimensions.')
+    elif trim:
+        coos = coos[np.all(coos == coos % shp_dims, axis=1)]
+    elif np.any(coos != coos % shp_dims):
+        raise ValueError('Coordinates beyond system dimensions.')
     # Sum contributions from each coordinate & flatten dimensions
     coos = np.sum(shp_mod * coos, axis=1)
     return np.ravel(dims), coos
 
 
-def eyepad(op, dims, inds, sparse=None):
-    """ Pad an operator with identities to act on particular subsystem.
-
-    Parameters
-    ----------
-        op: operator to act with
-        dims: list of dimensions of subsystems.
-        inds: indices of dims to act op on.
-        sparse: whether output should be sparse
-
-    Returns
-    -------
-        bop: operator with op acting on each subsystem specified by inds
-    Note that the actual numbers in dims[inds] are ignored and the size of
-    op is assumed to match. Sparsity of the output can be inferred from
-    input if not specified.
-
-    Examples
-    --------
-    >>> X = sig('x')
-    >>> b1 = kron(X, eye(2), X, eye(2))
-    >>> b2 = eyepad(X, dims=[2,2,2,2], inds=[0,2])
-    >>> allclose(b1, b2)
-    True
+def eyepad(ops, dims, inds, sparse=None):
     """
-    inds = np.array(inds, ndmin=1)
-    sparse = sp.issparse(op) if sparse is None else sparse  # infer sparsity
-    bop = eye(np.prod(dims[0:inds[0]]), sparse=sparse)
-    for i in range(len(inds) - 1):
-        bop = kron(bop, op)
-        pad_size = np.prod(dims[inds[i] + 1:inds[i + 1]])
-        bop = kron(bop, eye(pad_size, sparse=sparse))
-    bop = kron(bop, op)
-    pad_size = np.prod(dims[inds[-1] + 1:])
-    bop = kron(bop, eye(pad_size, sparse=sparse))
-    return bop
-
-
-def eyeplace(ops, dims, inds, sparse=None):
-    """
-    Places the operator(s) ops 'over' locations inds of dims. Automatically
+    Places several operators 'over' locations inds of dims. Automatically
     placing a large operator over several dimensions is allowed and a list
     of operators can be given which are then applied cyclically.
 
     Parameters
     ----------
         ops: operator or list of operators to put into the tensor space
-
-        dims: dimensions of tensor space, use None to ignore dimension matching
+        dims: dimensions of tensor space, use -1 to ignore dimension matching
         inds: indices of the dimenions to place operators on
         sparse: whether to construct the new operator in sparse form.
 
     Returns
     -------
-        Operator such ops that act on dims[inds].
+        Operator such that ops act on dims[inds].
     """
-    sparse = sp.issparse(ops) if sparse is None else sparse  # infer sparsity
-    inds = np.array(inds, ndmin=1)
-    ops_cyc = cycle(ops)
+    # TODO: place large operators over disjoint spaces, via permutataion?
+    # TODO: allow -1 in dims to auto place *without* ind?
+    # TODO: overlap and sort not working together
+    if not isinstance(ops, (list, tuple)):
+        ops = [ops]
+    if np.ndim(dims) > 1:
+        dims, inds = mapcoords(dims, inds)
+    elif np.ndim(inds) == 0:
+        inds = [inds]
+    sparse = sp.issparse(ops[0]) if sparse is None else sparse
+    inds, ops = zip(*sorted(zip(inds, cycle(ops))))
+    inds, ops = set(inds), iter(ops)
 
     def gen_ops():
-        op = next(ops_cyc)
-        op_sz = op.shape[0]
-        overlap_factor = 1
-        for i, dim in enumerate(dims):
-            if i in inds:
-                if op_sz == overlap_factor * dim or dim is None:
+        cff_id = 1  # keeps track of compressing adjacent identities
+        cff_ov = 1  # keeps track of overlaying op on multiple dimensions
+        for ind, dim in enumerate(dims):
+            if ind in inds:  # op should be placed here
+                if cff_id > 1:  # preceding identities to place first
+                    yield eye(cff_id, sparse=sparse)
+                    cff_id = 1  # reset cumulative identity size
+                if cff_ov == 1:  # first dim in placement block
+                    op = next(ops)
+                    sz_op = op.shape[0]
+                if cff_ov * dim == sz_op or dim == -1:  # final dim-> place op
                     yield op
-                    op = next(ops_cyc)  # reset
-                    op_sz = op.shape[0]
-                    overlap_factor = 1
-                else:
-                    # 'merge' dimensions to get bigger size
-                    overlap_factor *= dim
-            else:
-                yield eye(dim, sparse=sparse)
+                    cff_ov = 1
+                else:  # accumulate sub-dims
+                    cff_ov *= dim
+            else:  # accumulate adjacent identites
+                cff_id *= dim
+        if cff_id > 1:  # trailing identities
+            yield eye(cff_id, sparse=sparse)
 
     return kron(*gen_ops())
+
+
+def eyeplace(*args, **kwargs):
+    import warnings
+    warnings.warn("deprecated", Warning)
+    return eyepad(*args, **kwargs)
 
 
 def permute_subsystems(p, dims, perm):
@@ -315,7 +291,7 @@ def permute_subsystems(p, dims, perm):
     d = np.prod(dims)
     if isop(p):
         p = p.reshape([*dims, *dims]) \
-            .transpose([*perm, *(perm+len(dims))]) \
+            .transpose([*perm, *(perm + len(dims))]) \
             .reshape((d, d))
     else:
         p = p.reshape(dims) \

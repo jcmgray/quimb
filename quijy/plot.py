@@ -157,8 +157,8 @@ def iheatmap(ds, data_name, x_coo, y_coo, colormap='Portland',
 
 
 def ilineplot(ds, data_name, x_coo, y_coo=None, logx=False, logy=False,
-              erry=None, errx=None, go_dict={}, ly_dict={}, nb=True,
-              color=False, colormap='Spectral', **kwargs):
+              erry=None, errx=None, nb=True, color=False, colormap='Spectral',
+              traces=[], go_dict={}, ly_dict={}, **kwargs):
     # TODO: generate traces from multiple data_names
     from plotly.graph_objs import Scatter
 

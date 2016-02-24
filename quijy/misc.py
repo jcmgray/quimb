@@ -2,6 +2,8 @@
 Misc. functions not quantum related.
 """
 import numpy as np
+import scipy.sparse as sp
+from quijy.core import eye, kron
 from tqdm import tqdm
 import xarray as xr
 
@@ -38,3 +40,68 @@ def xrgroupby_to_dim(ds, dim):
             yield d
 
     return xrmerge(*gen_ds())
+
+
+def coords_compress(dims, inds):
+    """
+    Compress coordinates/dimensions by combining adjacent identities.
+    """
+    ndims = np.zeros(len(dims))
+    ninds = np.zeros(len(inds))
+    j = 0
+    k = 0
+    idsize = 1
+    for i, dim in enumerate(dims):
+        if i in inds:
+            if idsize > 1:
+                ndims[j] = idsize
+                idsize = 1
+                j += 1
+            ninds[k] = j
+            ndims[j] = dim
+            k += 1
+            j += 1
+        else:
+            idsize *= dim
+    if idsize > 1:
+        ndims[j] = idsize
+        j += 1
+    return ndims[:j], ninds[np.argsort(inds)]
+
+
+def eyepad_old(op, dims, inds, sparse=None):
+    """ Pad an operator with identities to act on particular subsystem.
+
+    Parameters
+    ----------
+        op: operator to act with
+        dims: list of dimensions of subsystems.
+        inds: indices of dims to act op on.
+        sparse: whether output should be sparse
+
+    Returns
+    -------
+        bop: operator with op acting on each subsystem specified by inds
+    Note that the actual numbers in dims[inds] are ignored and the size of
+    op is assumed to match. Sparsity of the output can be inferred from
+    input if not specified.
+
+    Examples
+    --------
+    >>> X = sig('x')
+    >>> b1 = kron(X, eye(2), X, eye(2))
+    >>> b2 = eyepad(X, dims=[2,2,2,2], inds=[0,2])
+    >>> allclose(b1, b2)
+    True
+    """
+    inds = np.array(inds, ndmin=1)
+    sparse = sp.issparse(op) if sparse is None else sparse  # infer sparsity
+    bop = eye(np.prod(dims[0:inds[0]]), sparse=sparse)
+    for i in range(len(inds) - 1):
+        bop = kron(bop, op)
+        pad_size = np.prod(dims[inds[i] + 1:inds[i + 1]])
+        bop = kron(bop, eye(pad_size, sparse=sparse))
+    bop = kron(bop, op)
+    pad_size = np.prod(dims[inds[-1] + 1:])
+    bop = kron(bop, eye(pad_size, sparse=sparse))
+    return bop

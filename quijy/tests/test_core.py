@@ -3,11 +3,11 @@ import scipy.sparse as sp
 import numpy as np
 from numpy.testing import assert_allclose
 from nose.tools import assert_almost_equal, eq_, ok_
-from quijy.core import (quijify, qjf, isket, isbra, isop, isherm,
-                        trace, sparse_trace, tr, nmlz, ptr, chop,
-                        eye, kron, kron_dense)
 from quijy.gen import bell_state
 from quijy.rand import rand_rho, rand_matrix
+from quijy.core import (quijify, qjf, isket, isbra, isop, isherm,
+                        trace, sparse_trace, tr, nmlz, ptr, chop,
+                        eye, kron, kron_dense, kronpow, eyepad)
 
 
 # Quijify
@@ -117,6 +117,7 @@ def test_isherm_sparse():
     ok_(not isherm(a))
 
 
+# Trace tests
 def test_trace():
     a = qjf([[2, 1], [4, 5]])
     ok_(a.tr.__code__.co_code == trace.__code__.co_code)
@@ -174,7 +175,7 @@ def test_kron_multi_args():
 
 
 def test_kron_mixed_types():
-    # TODO
+    # TODO: scalar
     a = qjf([1, 2, 3, 4], 'ket')
     b = qjf([0, 1, 0, 2], 'ket', sparse=True)
     # c = -1.0j
@@ -182,12 +183,102 @@ def test_kron_mixed_types():
                     (sp.kron(a, b, 'csr')).A)
     assert_allclose(kron(b, b).A,
                     (sp.kron(b, b, 'csr')).A)
-    # assert_allclose(kron(a, c),
-                    # a * c)
+    # assert_allclose(kron(a, c), a * c)
     # kron(b, c)
     # kron(b, c)
 
 
+def test_kronpow():
+    a = rand_matrix(2)
+    b = a & a & a
+    c = kronpow(a, 3)
+    assert_allclose(b, c)
+
+
+# Test coords_map
+# 1d
+# 2d
+# 3d
+# cyclic
+# trim
+# error
+
+
+# Test eyepad
+def test_eyepad_basic():
+    a = rand_matrix(2)
+    i = eye(2)
+    dims = [2, 2, 2]
+    b = eyepad([a], dims, [0])
+    assert_allclose(b, a & i & i)
+    b = eyepad([a], dims, [1])
+    assert_allclose(b, i & a & i)
+    b = eyepad([a], dims, [2])
+    assert_allclose(b, i & i & a)
+    b = eyepad([a], dims, [0, 2])
+    assert_allclose(b, a & i & a)
+    b = eyepad([a], dims, [0, 1, 2])
+    assert_allclose(b, a & a & a)
+
+
+def test_eyepad_mid_multi():
+    a = [rand_matrix(2) for i in range(3)]
+    i = eye(2)
+    dims = [2, 2, 2, 2, 2, 2]
+    inds = [1, 2, 4]
+    b = eyepad(a, dims, inds)
+    assert_allclose(b, i & a[0] & a[1] & i & a[2] & i)
+
+
+def test_eyepad_mid_multi_reverse():
+    a = [rand_matrix(2) for i in range(3)]
+    i = eye(2)
+    dims = [2, 2, 2, 2, 2, 2]
+    inds = [5, 4, 1]
+    b = eyepad(a, dims, inds)
+    assert_allclose(b, i & a[2] & i & i & a[1] & a[0])
+
+
+def test_eyepad_auto():
+    a = rand_matrix(2)
+    i = eye(2)
+    b = eyepad([a], (2, -1, 2), [1])
+    assert_allclose(b, i & a & i)
+
+
+def test_eyepad_ndarrays():
+    a = rand_matrix(2)
+    i = eye(2)
+    b = eyepad([a], np.array([2, 2, 2]), [0, 2])
+    assert_allclose(b, a & i & a)
+    b = eyepad([a], [2, 2, 2], np.array([0, 2]))
+    assert_allclose(b, a & i & a)
+
+
+def test_eyepad_overlap():
+    a = [rand_matrix(4) for i in range(2)]
+    dims1 = [2, 2, 2, 2, 2, 2]
+    dims2 = [2, 4, 4, 2]
+    b = eyepad(a, dims1, [1, 2, 3, 4])
+    c = eyepad(a, dims2, [1, 2])
+    assert_allclose(c, b)
+
+    dims2 = [4, 2, 2, 4]
+    b = eyepad(a, dims1, [0, 1, 4, 5])
+    c = eyepad(a, dims2, [0, 3])
+    assert_allclose(c, b)
+
+
+def test_eyepad_sparse():
+    i = eye(2, sparse=True)
+    a = qjf(rand_matrix(2), sparse=True)
+    b = eyepad(a, [2, 2, 2], 1)
+    ok_(sp.issparse(b))
+    assert_allclose(b.A, (i & a & i).A)
+    a = rand_matrix(2)
+    b = eyepad(a, [2, 2, 2], 1, sparse=True)
+    ok_(sp.issparse(b))
+    assert_allclose(b.A, (i & a & i).A)
 
 
 # Partial Trace checks
