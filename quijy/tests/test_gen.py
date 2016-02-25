@@ -1,5 +1,5 @@
 import numpy as np
-from nose.tools import eq_, raises
+from pytest import raises
 from numpy.testing import assert_allclose
 from quijy.gen import basis_vec, sig
 from quijy.solve import eigvals
@@ -14,9 +14,9 @@ def test_basis_vec():
 
 def test_basis_vec_sparse():
     x = basis_vec(4, 100, sparse=True)
-    eq_(x[4, 0], 1.)
-    eq_(x.nnz, 1)
-    eq_(x.dtype, complex)
+    assert x[4, 0] == 1.
+    assert x.nnz == 1
+    assert x.dtype == complex
 
 
 def test_sig_dim2():
@@ -36,11 +36,11 @@ def test_sig_dim3():
                         atol=1e-15)
 
 
-@raises(ValueError)
 def test_sig_bad_dim():
-    sig('x', 4)
+    with raises(ValueError):
+        sig('x', 4)
 
 
-@raises(ValueError)
 def test_sig_bad_dir():
-    sig('w', 2)
+    with raises(ValueError):
+        sig('w', 2)
