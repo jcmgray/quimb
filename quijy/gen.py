@@ -5,6 +5,7 @@ TODO: add sparse and qtype to all relevant functions.
 # TODO: Graph states, cluster states, multidimensional
 
 from itertools import product, permutations
+from functools import lru_cache
 from math import factorial
 import numpy as np
 import scipy.sparse as sp
@@ -78,80 +79,73 @@ def yminus(**kwargs):
                 [-1.0j / (2**0.5)]], **kwargs)
 
 
-def sig(dir, dim=2, **kwargs):
+@lru_cache(maxsize=48)
+def sig(xyz, dim=2, **kwargs):
     """
     Generates the spin operators for spin 1/2 or 1.
 
     Parameters
     ----------
-        dir: which spatial direction
+        xyz: which spatial direction
         dim: dimension of spin operator (e.g. 3 for spin-1)
 
     Returns
     -------
         spin operator, quijified.
     """
-    if dir in (1, 'x', 'X'):
-        if dim == 2:
-            return qjf([[0, 1],
-                        [1, 0]], **kwargs)
-        elif dim == 3:
-            return qjf([[0, 1, 0],
-                        [1, 0, 1],
-                        [0, 1, 0]], **kwargs) / 2**0.5
-    elif dir in (2, 'y', 'Y'):
-        if dim == 2:
-            return qjf([[0, -1j],
-                        [1j, 0]], **kwargs)
-        elif dim == 3:
-            return qjf([[0, -1j, 0],
-                        [1j, 0, -1j],
-                        [0, 1j, 0]], **kwargs) / 2**0.5
-    elif dir in (3, 'z', 'Z'):
-        if dim == 2:
-            return qjf([[1, 0],
-                        [0, -1]], **kwargs)
-        elif dim == 3:
-            return qjf([[1, 0, 0],
-                        [0, 0, 0],
-                        [0, 0, -1]], **kwargs)
-    elif dir in (0, 'i', 'I'):
-        return eye(dim, **kwargs)
-    raise ValueError('Invalid dir/dim combination.')
+    xyzmap = {
+        0: 'i', 'i': 'i', 'I': 'i',
+        1: 'x', 'x': 'x', 'X': 'x',
+        2: 'y', 'y': 'y', 'Y': 'y',
+        3: 'z', 'z': 'z', 'Z': 'z'
+    }
+    opmap = {
+        ('x', 2): lambda: qjf([[0, 1],
+                               [1, 0]], **kwargs),
+        ('x', 3): lambda: qjf([[0, 1, 0],
+                               [1, 0, 1],
+                               [0, 1, 0]], **kwargs) / 2**0.5,
+        ('y', 2): lambda: qjf([[0, -1j],
+                               [1j, 0]], **kwargs),
+        ('y', 3): lambda: qjf([[0, -1j, 0],
+                               [1j, 0, -1j],
+                               [0, 1j, 0]], **kwargs) / 2**0.5,
+        ('z', 2): lambda: qjf([[1, 0],
+                               [0, -1]], **kwargs),
+        ('z', 3): lambda: qjf([[1, 0, 0],
+                               [0, 0, 0],
+                               [0, 0, -1]], **kwargs),
+        ('i', 2): lambda: eye(2, **kwargs),
+        ('i', 3): lambda: eye(3, **kwargs),
+    }
+    return opmap[(xyzmap[xyz], dim)]()
 
 
+@lru_cache(maxsize=8)
 def bell_state(s, **kwargs):
     """
     Generates one of the four bell-states;
     0: phi+, 1: phi-, 2: psi+, 3: psi- (singlet)
     """
+    keymap = {
+        'psi-': 'psi-', 0: 'psi-',
+        'psi+': 'psi+', 1: 'psi+',
+        'phi-': 'phi-', 2: 'phi-',
+        'phi+': 'phi+', 3: 'phi+',
+    }
     c = 2.0**-0.5
-    if s in (3, 'psi-'):
-        return qjf([[0],
-                    [c],
-                    [-c],
-                    [0]], **kwargs)
-    elif s in (0, 'phi+'):
-        return qjf([[c],
-                    [0],
-                    [0],
-                    [c]], **kwargs)
-    elif s in (1, 'phi-'):
-        return qjf([[c],
-                    [0],
-                    [0],
-                    [-c]], **kwargs)
-    elif s in (2, 'psi+'):
-        return qjf([[0],
-                    [c],
-                    [c],
-                    [0]], **kwargs)
-    raise ValueError('Invalid bell state specifier.')
+    statemap = {
+        'psi-': lambda: qjf([[0], [c], [-c], [0]], **kwargs),
+        'phi+': lambda: qjf([[c], [0], [0], [c]], **kwargs),
+        'phi-': lambda: qjf([[c], [0], [0], [-c]], **kwargs),
+        'psi+': lambda: qjf([[0], [c], [c], [0]], **kwargs)
+    }
+    return statemap[keymap[s]]()
 
 
 def singlet(**kwargs):
     """ Alias for one of bell-states """
-    return bell_state(3, **kwargs)
+    return bell_state('psi-', **kwargs)
 
 
 def triplets(**kwargs):
@@ -223,7 +217,6 @@ def ham_j1j2(n, j1=1.0, j2=0.5, bz=0.0, cyclic=False, sparse=False):
     """
     Generate the j1-j2 hamiltonian, i.e. next nearest neighbour
     interactions.
-
     Parameters
     ----------
         n: number of spins
@@ -232,12 +225,10 @@ def ham_j1j2(n, j1=1.0, j2=0.5, bz=0.0, cyclic=False, sparse=False):
         bz: b-field strength in z-direction
         cyclic: cyclic boundary conditions
         sparse: return hamtiltonian as sparse-csr matrix
-
     Returns
     -------
         ham: Hamtiltonian as matrix
     """
-    # TODO: efficient computation by translating operators.
     dims = [2] * n
     coosj1 = np.array([(i, i+1) for i in range(n)])
     coosj2 = np.array([(i, i+2) for i in range(n)])
@@ -247,20 +238,24 @@ def ham_j1j2(n, j1=1.0, j2=0.5, bz=0.0, cyclic=False, sparse=False):
     else:
         coosj1 = coosj1[np.all(coosj1 < n, axis=1)]
         coosj2 = coosj2[np.all(coosj2 < n, axis=1)]
-
     def gen_j1():
-        for op, coo in product(s, coosj1):
-            yield eyepad([op], dims, coo, sparse=True)
-
+        for coo in coosj1:
+            if abs(coo[1] - coo[0]) == 1:  # can sum then tensor
+                yield eyepad(sum(op & op for op in s), dims, coo)
+            else:  # tensor then sum (slower)
+                yield sum(eyepad(op, dims, coo) for op in s)
     def gen_j2():
-        for op, coo in product(s, coosj2):
-            yield eyepad([op], dims, coo, sparse=True)
+        for coo in coosj2:
+            if abs(coo[1] - coo[0]) == 2:  # can add then tensor
+                yield eyepad(sum(op & eye(2) & op for op in s), dims, coo)
+            else:
+                yield sum(eyepad(op, dims, coo) for op in s)
 
-    def gen_bz():
-        for i in range(n):
-            yield eyepad([s[2]], dims, i, sparse=True)
+    gen_bz = (eyepad([s[2]], dims, i) for i in range(n))
 
-    ham = j1 * sum(gen_j1()) + j2 * sum(gen_j2()) + bz * sum(gen_bz())
+    ham = j1 * sum(gen_j1()) + j2 * sum(gen_j2())
+    if bz != 0:
+        ham += bz * sum(gen_bz)
     return ham if sparse else ham.todense()
 
 

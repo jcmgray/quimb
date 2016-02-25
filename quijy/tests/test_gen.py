@@ -37,10 +37,10 @@ def test_sig_dim3():
 
 
 def test_sig_bad_dim():
-    with raises(ValueError):
+    with raises(KeyError):
         sig('x', 4)
 
 
 def test_sig_bad_dir():
-    with raises(ValueError):
+    with raises(KeyError):
         sig('w', 2)
