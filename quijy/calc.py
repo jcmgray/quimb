@@ -191,14 +191,13 @@ def bell_fid(p):
     psi- (singlet) psi+, phi-, phi+ (triplets).
     """
     op = isop(p)
-
     def gen_bfs():
         for b in ['psi-', 'psi+', 'phi-', 'phi+']:
             psib = bell_state(b)
             if op:
                 yield tr(psib.H @ p @ psib)
             else:
-                yield abs(psib.H @ p)**2
+                yield abs(psib.H @ p)[0, 0]**2
 
     return [*gen_bfs()]
 

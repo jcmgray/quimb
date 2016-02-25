@@ -3,6 +3,7 @@ Core functions for manipulating quantum objects.
 """
 
 from itertools import cycle
+from functools import lru_cache
 from numba import jit
 from numexpr import evaluate as evl
 import numpy as np
@@ -68,12 +69,12 @@ def isop(qob):
     return m == n and m > 1  # Square matrix check
 
 
-def isherm(a):
+def isherm(qob):
     """ Checks if matrix is hermitian, for sparse or dense. """
-    if sp.issparse(a):
+    if sp.issparse(qob):
         # Since sparse, test that no .H elements are not unequal..
-        return (a != a.H).nnz == 0
-    return np.allclose(a, a.H)
+        return (qob != qob.H).nnz == 0
+    return np.allclose(qob, qob.H)
 
 
 @jit
@@ -162,6 +163,7 @@ def kronpow(a, pwr):
     return kron(*(a for i in range(pwr)))
 
 
+@lru_cache(maxsize=10)
 def eye(n, sparse=False):
     """ Return identity of size n in complex format, optionally sparse"""
     return (sp.eye(n, dtype=complex, format='csr') if sparse else
@@ -247,7 +249,7 @@ def eyepad(ops, dims, inds, sparse=None):
         cff_ov = 1  # keeps track of overlaying op on multiple dimensions
         for ind, dim in enumerate(dims):
             if ind in inds:  # op should be placed here
-                if cff_id > 1:  # preceding identities to place first
+                if cff_id > 1:  # need preceding identities
                     yield eye(cff_id, sparse=sparse)
                     cff_id = 1  # reset cumulative identity size
                 if cff_ov == 1:  # first dim in placement block
@@ -258,6 +260,8 @@ def eyepad(ops, dims, inds, sparse=None):
                     cff_ov = 1
                 else:  # accumulate sub-dims
                     cff_ov *= dim
+            elif cff_ov > 1:  # mid placing large operator
+                cff_ov *= dim
             else:  # accumulate adjacent identites
                 cff_id *= dim
         if cff_id > 1:  # trailing identities
