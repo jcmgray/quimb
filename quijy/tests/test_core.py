@@ -1,12 +1,14 @@
 from itertools import combinations
 import scipy.sparse as sp
 import numpy as np
+from pytest import raises
 from numpy.testing import assert_allclose, assert_almost_equal
 from quijy.gen import bell_state
 from quijy.rand import rand_rho, rand_matrix
 from quijy.core import (quijify, qjf, isket, isbra, isop, isherm,
                         trace, sparse_trace, tr, nmlz, ptr, chop,
-                        eye, kron, kron_dense, kronpow, eyepad)
+                        eye, kron, kron_dense, kronpow, eyepad,
+                        coord_map)
 
 
 class TestQuijify:
@@ -124,7 +126,6 @@ class TestTrace:
         assert(a.tr.__code__.co_code == trace.__code__.co_code)
         assert(tr(a) == 7)
 
-
     def test_sparse_trace(self):
         a = qjf([[2, 1], [4, 5]], sparse=True)
         assert(a.tr.__code__.co_code == sparse_trace.__code__.co_code)
@@ -193,14 +194,53 @@ class TestKron:
 
 
 # TODO: test eye
-# TODO: Test coords_map
-# 1d
-# 2d
-# 3d
-# cyclic
-# trim
-# error
 
+
+class TestCoordsMap:
+    def test_coord_map_1d(self):
+        dims = [10, 11, 12, 13]
+        coos = (1, 2, 3)
+        ndims, ncoos = coord_map(dims, coos)
+        assert_allclose(ndims[ncoos], (11, 12, 13))
+        coos = ([-1], [2], [5])
+        with raises(ValueError):
+            ndims, ncoos = coord_map(dims, coos)
+        ndims, ncoos = coord_map(dims, coos, cyclic=True)
+        assert_allclose(ndims[ncoos], (13, 12, 11))
+        ndims, ncoos = coord_map(dims, coos, trim=True)
+        assert_allclose(ndims[ncoos], [12])
+
+    def test_coord_map2d(self):
+        dims = [[200, 201, 202, 203],
+                [210, 211, 212, 213]]
+        coos = ((1, 2), (1, 3), (0, 3))
+        ndims, ncoos = coord_map(dims, coos)
+        assert_allclose(ndims[ncoos], (212, 213, 203))
+        coos = ((-1, 1), (1, 2), (3, 4))
+        with raises(ValueError):
+            ndims, ncoos = coord_map(dims, coos)
+        ndims, ncoos = coord_map(dims, coos, cyclic=True)
+        assert_allclose(ndims[ncoos], (211, 212, 210))
+        ndims, ncoos = coord_map(dims, coos, trim=True)
+        assert_allclose(ndims[ncoos], [212])
+
+    def test_coord_map_3d(self):
+        dims = [[[3000, 3001, 3002],
+                 [3010, 3011, 3012],
+                 [3020, 3021, 3022]],
+                    [[3100, 3101, 3102],
+                     [3110, 3111, 3112],
+                     [3120, 3121, 3122]]]
+        coos = ((0, 0, 2), (1, 1, 2), (1, 2, 0))
+        ndims, ncoos = coord_map(dims, coos)
+        assert_allclose(ndims[ncoos], (3002, 3112, 3120))
+        coos = ((0, -1, 2), (1, 2, 2), (4, -1, 3))
+        with raises(ValueError):
+            ndims, ncoos = coord_map(dims, coos)
+        ndims, ncoos = coord_map(dims, coos, cyclic=True)
+        assert_allclose(ndims[ncoos], (3022, 3122, 3020))
+        ndims, ncoos = coord_map(dims, coos, trim=True)
+        assert_allclose(ndims[ncoos], [3122])
 
 class TestEyepad:
     def test_eyepad_basic(self):

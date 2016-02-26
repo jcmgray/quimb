@@ -170,7 +170,7 @@ def eye(n, sparse=False):
             qjf(np.eye(n, dtype=complex)))
 
 
-def mapcoords(dims, coos, cyclic=False, trim=False):
+def coord_map(dims, coos, cyclic=False, trim=False):
     """
     Maps multi-dimensional coordinates and indices to flat arrays in a
     regular way. Wraps or deletes coordinates beyond the system size
@@ -189,19 +189,13 @@ def mapcoords(dims, coos, cyclic=False, trim=False):
     -------
         dims: flattened version of dims
         coos: indices mapped to flattened dims
-
-    Examples
-    --------
-    >>> dims = ([[10, 11, 12],
-                 [13, 14, 15]])
-    >>> coos = [(1, 1), (1, 2), (2, 1)]
-    >>> ndims, ncoos = flatcoords(dims, coos, cyclic=True)
-    >>> ndims[ncoos]
-    array([14, 15, 11])
     """
     # Calculate the raveled size of each dimension (i.e. size of 1 incr.)
     shp_dims = np.shape(dims)
-    shp_mod = [np.prod(shp_dims[i+1:]) for i in range(len(shp_dims)-1)] + [1]
+    if len(shp_dims) == 1 and len(np.shape(coos)) == 1:
+        coos = [[coo] for coo in coos]
+    shp_mod = [np.prod(shp_dims[i+1:], dtype=int)
+               for i in range(len(shp_dims))]
     coos = np.array(coos)
     if cyclic:
         coos = coos % shp_dims  # (broadcasting dims down columns)
