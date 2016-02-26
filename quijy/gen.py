@@ -160,6 +160,34 @@ def bloch_state(ax, ay, az, purify=False, **kwargs):
                for a, s in zip((1, ax, ay, az), 'ixyz'))
 
 
+def thermal_state(ham, beta, precomp_func=False):
+    """
+    Generate a thermal state of a hamtiltonian.
+
+    Parameters
+    ----------
+        ham: hamtilonian, either full or tuple of (evals, evecs)
+        beta: inverse temperatre of state
+        precomp_func: if true, return a function that takes `beta`
+            only and is closed over the solved hamiltonian.
+
+    Returns
+    -------
+        rho_th: density matrix of thermal state, or func to generate such
+    """
+    if isinstance(ham, (list, tuple)):  # solved already
+        l, v = ham
+    else:
+        l, v = eigsys(ham)
+
+    def gen_state(b):
+        el = np.exp(-b * l)
+        el /= np.sum(el)
+        return v @ ldmul(el, v.H)
+
+    return gen_state if precomp_func else gen_state(beta)
+
+
 def neel_state(n):
     binary = '01' * (n / 2)
     binary += (n % 2 == 1) * '0'  # add trailing spin for odd n
