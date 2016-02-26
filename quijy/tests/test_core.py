@@ -4,11 +4,8 @@ import numpy as np
 from pytest import raises
 from numpy.testing import assert_allclose, assert_almost_equal
 from quijy.gen import bell_state
-from quijy.rand import rand_rho, rand_matrix
-from quijy.core import (quijify, qjf, isket, isbra, isop, isherm,
-                        trace, sparse_trace, tr, nmlz, ptr, chop,
-                        eye, kron, kron_dense, kronpow, eyepad,
-                        coord_map)
+from quijy.rand import rand_rho, rand_matrix, rand_ket
+from quijy.core import *
 
 
 class TestQuijify:
@@ -228,9 +225,9 @@ class TestCoordsMap:
         dims = [[[3000, 3001, 3002],
                  [3010, 3011, 3012],
                  [3020, 3021, 3022]],
-                    [[3100, 3101, 3102],
-                     [3110, 3111, 3112],
-                     [3120, 3121, 3122]]]
+                [[3100, 3101, 3102],
+                 [3110, 3111, 3112],
+                 [3120, 3121, 3122]]]
         coos = ((0, 0, 2), (1, 1, 2), (1, 2, 0))
         ndims, ncoos = coord_map(dims, coos)
         assert_allclose(ndims[ncoos], (3002, 3112, 3120))
@@ -242,7 +239,9 @@ class TestCoordsMap:
         ndims, ncoos = coord_map(dims, coos, trim=True)
         assert_allclose(ndims[ncoos], [3122])
 
+
 class TestEyepad:
+    # TODO: test 2d+ dims and coos
     def test_eyepad_basic(self):
         a = rand_matrix(2)
         i = eye(2)
@@ -418,6 +417,70 @@ class TestChop:
         assert((a != ao).nnz == 0)
         assert((b != bo).nnz == 0)
 
-# TODO: test rdmul/ldmul
-# TODO: test infer_size
-# TODO: test levi_civita
+
+class TestFastDiagMul:
+    def test_ldmul_small(self):
+        n = 4
+        vec = np.random.randn(2**n)
+        mat = rand_matrix(2**n)
+        a = ldmul(vec, mat)
+        b = np.diag(vec) @ mat
+        assert_allclose(a, b)
+
+    def test_ldmul_large(self):
+        n = 9
+        vec = np.random.randn(2**n)
+        mat = rand_matrix(2**n)
+        a = ldmul(vec, mat)
+        b = np.diag(vec) @ mat
+        assert_allclose(a, b)
+
+    def test_rdmul_small(self):
+        n = 4
+        vec = np.random.randn(2**n)
+        mat = rand_matrix(2**n)
+        a = rdmul(mat, vec)
+        b = mat @ np.diag(vec)
+        assert_allclose(a, b)
+
+    def test_rdmul_large(self):
+        n = 9
+        vec = np.random.randn(2**n)
+        mat = rand_matrix(2**n)
+        a = rdmul(mat, vec)
+        b = mat @ np.diag(vec)
+        assert_allclose(a, b)
+
+
+class TestInferSize:
+    def test_infer_size(self):
+        p = rand_ket(8)
+        assert infer_size(p) == 3
+        p = rand_ket(16)
+        assert infer_size(p) == 4
+
+    def test_infer_size_base(self):
+        p = rand_ket(9)
+        assert infer_size(p, 3) == 2
+        p = rand_ket(81)
+        assert infer_size(p, 3) == 4
+
+
+class TestLeviCivita:
+    def test_levi_civita_pos(self):
+        perm = [0, 1, 2, 3]
+        assert levi_civita(perm) == 1
+        perm = [2, 3, 0, 1]
+        assert levi_civita(perm) == 1
+
+    def test_levi_civita_neg(self):
+        perm = [0, 2, 1, 3]
+        assert levi_civita(perm) == -1
+        perm = [2, 3, 1, 0]
+        assert levi_civita(perm) == -1
+
+    def test_levi_civita_nzero(self):
+        perm = [2, 3, 1, 1]
+        assert levi_civita(perm) == 0
+        perm = [0, 0, 1, 1]
+        assert levi_civita(perm) == 0

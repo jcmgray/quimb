@@ -370,7 +370,7 @@ def chop(x, tol=1.0e-15, inplace=True):
     else:
         x.real[np.abs(x.real) < minm] = 0.0
         x.imag[np.abs(x.imag) < minm] = 0.0
-    return None if inplace else x
+    return x
 
 
 def ldmul(vec, mat):
