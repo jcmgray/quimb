@@ -9,7 +9,7 @@ import numpy as np
 import numpy.linalg as nla
 import scipy.sparse as sp
 import scipy.sparse.linalg as spla
-from quijy.core import qjf
+from .core import qjf
 
 
 # -------------------------------------------------------------------------- #

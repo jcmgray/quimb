@@ -3,9 +3,9 @@ Misc. functions not quantum related.
 """
 import numpy as np
 import scipy.sparse as sp
-from quijy.core import eye, kron
-from tqdm import tqdm
 import xarray as xr
+from tqdm import tqdm
+from .core import eye, kron
 
 
 def progbar(it, **kwargs):

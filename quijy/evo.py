@@ -6,8 +6,8 @@ TODO: iterative method, sparse etc., turn off optimzations for small n
 
 from numpy.linalg import multi_dot as mdot
 from numexpr import evaluate as evl
-from quijy.core import isop, quijify, ldmul, rdmul
-from quijy.solve import eigsys
+from .core import isop, quijify, ldmul, rdmul
+from .solve import eigsys
 
 
 class QuEvo(object):

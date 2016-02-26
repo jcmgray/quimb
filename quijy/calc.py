@@ -4,14 +4,14 @@ quantum objects.
 """
 # TODO: entanglement cross matrix, sparse ptr
 
+from collections import OrderedDict
+from itertools import product
 import numpy as np
 import numpy.linalg as nla
-from quijy.core import (isop, qjf, kron, ldmul,
+from .core import (isop, qjf, kron, ldmul,
                         eyepad, tr, trx, infer_size, eyepad)
-from quijy.gen import (sig, basis_vec, bell_state)
-from quijy.solve import (eigvals, eigsys, norm2)
-from itertools import product
-from collections import OrderedDict
+from .gen import (sig, basis_vec, bell_state)
+from .solve import (eigvals, eigsys, norm2)
 
 
 def partial_transpose(p, dims=[2, 2]):

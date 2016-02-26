@@ -1,25 +1,25 @@
 # A flexible python library for many-body quantum calculations.
 
 # Core functions
-from quijy.core import *
+from .core import *
 
 # Generating objects
-from quijy.gen import *
+from .gen import *
 
 # Random states
-from quijy.rand import *
+from .rand import *
 
 # Solving functions
-from quijy.solve import *
+from .solve import *
 
 # Functions for calculating properties
-from quijy.calc import *
+from .calc import *
 
 # Evolution class and methods
-from quijy.evo import *
+from .evo import *
 
 # Plotting functions
-from quijy.plot import *
+from .plot import *
 
 # Miscellaneous functions
-from quijy.misc import *
+from .misc import *
