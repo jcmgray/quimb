@@ -94,7 +94,7 @@ class TestEigsh:
             o = u[:, i].H @ vk[:, j]
             assert_allclose(abs(o), 1.)
 
-    def test_seigsys_small_dense_novecs(self, prematsparse):
+    def test_seigsys_small_sparse_novecs(self, prematsparse):
         _, a = prematsparse
         assert sp.issparse(a)
         lk = seigvals(a, k=2)
