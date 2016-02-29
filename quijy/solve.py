@@ -118,7 +118,7 @@ def groundenergy(ham):
 # iterative methods for partial singular value decomposition                 #
 # -------------------------------------------------------------------------- #
 
-def svds(a, k=1, ncv=None, return_vecs=True, **kwargs):
+def svds(a, k=6, ncv=None, return_vecs=True, **kwargs):
     """ Compute a number of singular value pairs """
     n = a.shape[0]
     sparse = sp.issparse(a)
@@ -127,7 +127,7 @@ def svds(a, k=1, ncv=None, return_vecs=True, **kwargs):
             uk, sk, vtk = nla.svd(a)
             return uk[:, 0:k], sk[0:k], vtk[0:k, :]
         else:
-            return nla.svd(a, compute_uv=False)
+            return nla.svd(a, compute_uv=False)[:k]
     else:
         ncv = choose_ncv(k, n) if ncv is None else ncv
         if return_vecs:
