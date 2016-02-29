@@ -1,8 +1,9 @@
 """
 Functions for solving matrices either fully or partially.
 Note that the eigendecompositions here all assume a
-hermitian matrix, use explicit numpy/scipy linalg routines for
-non-hermitian matrices.
+hermitian matrix and sort the eigenvalues in ascending
+algebraic order by default. Use explicit numpy/scipy linalg
+routines for non-hermitian matrices.
 """
 
 import numpy as np
@@ -17,7 +18,7 @@ from .core import qjf
 # -------------------------------------------------------------------------- #
 
 def eigsys(a, sort=True):
-    """ Find all eigenpairs of dense matrix
+    """ Find all eigenpairs of dense, hermitian matrix.
     Input:
         a: hermitian matrix
         sort: whether to sort the eigenpairs in ascending eigenvalue order
@@ -28,7 +29,7 @@ def eigsys(a, sort=True):
     l, v = nla.eigh(a)
     if sort:
         sortinds = np.argsort(l)
-        return l[sortinds], qjf(v[:, sortinds])
+        return l[sortinds], np.asmatrix(v[:, sortinds])
     else:
         return l, v
 
@@ -61,7 +62,7 @@ def eigvecs(a, sort=True):
 # iterative methods for partial eigendecompision                             #
 # -------------------------------------------------------------------------- #
 
-def seigsys(a, k=1, which='SA', ncv=None, return_vecs=True, **kwargs):
+def seigsys(a, k=6, which='SA', ncv=None, return_vecs=True, **kwargs):
     """ Returns a few eigenpairs from a possibly sparse hermitian operator
     Inputs:
         a: matrix, probably sparse, hermitian
@@ -74,30 +75,32 @@ def seigsys(a, k=1, which='SA', ncv=None, return_vecs=True, **kwargs):
     """
     n = a.shape[0]
     sparse = sp.issparse(a)
-    if not sparse and n <= 500:  # Small dense matrices should use full decomp.
+    if not sparse and n <= 500:
+        # TODO: select which from nla full spectrum
         if return_vecs:
             lk, vk = eigsys(a)
-            return lk[0:k], vk[:, 0:k]
+            return lk[:k], vk[:, :k]
         else:
             lk = eigvals(a)
-            return lk[0:k]
+            return lk[:k]
     else:
-        ncv = calcncv(k, n, sparse) if ncv is None else ncv
+        ncv = choose_ncv(k, n) if ncv is None else ncv
         if return_vecs:
             lk, vk = spla.eigsh(a, k=k, which=which, ncv=ncv, **kwargs)
-            return np.sort(lk), qjf(vk)
+            sortinds = np.argsort(lk)
+            return lk[sortinds], np.asmatrix(vk[:, sortinds])
         else:
             lk = spla.eigsh(a, k=k, which=which, ncv=ncv,
                             return_eigenvectors=False, **kwargs)
             return np.sort(lk)
 
 
-def seigvals(a, k=1, which='SA', ncv=None, **kwargs):
-    return seigsys(a, k=k, which=which, ncv=ncv, return_vecs=False, **kwargs)
+def seigvals(a, k=6, **kwargs):
+    return seigsys(a, k=k, return_vecs=False, **kwargs)
 
 
-def seigvecs(a, k=1, which='SA', ncv=None, **kwargs):
-    l, v = seigsys(a, k, which, ncv, **kwargs)
+def seigvecs(a, k=6, **kwargs):
+    _, v = seigsys(a, k=k, return_vecs=True, **kwargs)
     return v
 
 
@@ -126,7 +129,7 @@ def svds(a, k=1, ncv=None, return_vecs=True, **kwargs):
         else:
             return nla.svd(a, compute_uv=False)
     else:
-        ncv = calcncv(k, n, sparse) if ncv is None else ncv
+        ncv = choose_ncv(k, n) if ncv is None else ncv
         if return_vecs:
             uk, sk, vtk = spla.svds(a, k=k, ncv=ncv, **kwargs)
             return qjf(uk), sk, qjf(vtk)
@@ -140,18 +143,12 @@ def norm2(a):
     return svds(a, k=1, return_vecs=False)[0]
 
 
-def calcncv(k, n, sparse):
+def choose_ncv(k, n):
     """ Optimise number of lanczos vectors for iterative methods
     Args:
         k: number of target eigenvalues/singular values
         n: matrix size
-        sparse:  if matrix is sparse
-        #TODO: sparsity?
     Returns:
         ncv: number of lanczos vectors to use
     """
-    if sparse:
-        ncv = max(20, 2 * k + 1)
-    else:
-        ncv = max(20, n//2**5 - 1, 2 * k + 1)
-    return ncv
+    return min(max(20, 2 * k + 1), n)

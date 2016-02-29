@@ -163,7 +163,7 @@ def kronpow(a, pwr):
     return kron(*(a for i in range(pwr)))
 
 
-@lru_cache(maxsize=10)
+@lru_cache(maxsize=16)
 def eye(n, sparse=False):
     """ Return identity of size n in complex format, optionally sparse"""
     return (sp.eye(n, dtype=complex, format='csr') if sparse else

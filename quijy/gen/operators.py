@@ -3,7 +3,7 @@ import numpy as np
 from ..core import qjf, eye, kron, eyepad
 
 
-@lru_cache(maxsize=48)
+@lru_cache(maxsize=64)
 def sig(xyz, dim=2, **kwargs):
     """
     Generates the spin operators for spin 1/2 or 1.
