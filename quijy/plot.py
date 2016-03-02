@@ -9,13 +9,13 @@ import numpy as np
 # Plots with matplotlib                                                      #
 # -------------------------------------------------------------------------- #
 
-def mplot(x, y_i, fignum=1, xlog=False, ylog=False, **kwargs):
-    from matplotlib import cm
+def mplot(x, y_i, fignum=1, logx=False, logy=False, **kwargs):
     """
     Function for automatically plotting multiple sets of data
     using matplot lib
     """
     import matplotlib.pyplot as plt
+    from matplotlib import cm
     # TODO colormap data and legend
     y_i = np.array(np.squeeze(y_i), ndmin=2)
     dimsy = np.array(y_i.shape)
@@ -29,12 +29,50 @@ def mplot(x, y_i, fignum=1, xlog=False, ylog=False, **kwargs):
             y = y_i[i, :]
         else:
             y = y_i[:, i]
-        if xlog:
+        if logx:
             axes.set_xscale("log")
-        if ylog:
+        if logy:
             axes.set_yscale("log")
-        axes.plot(x, y, '.-', c=cm.plasma(colors[i], 1), **kwargs)
-    return axes
+        axes.plot(x, y, '.-', c=cm.viridis(colors[i], 1), **kwargs)
+    return fig
+
+
+def xmlineplot(ds, y_coo, x_coo, z_coo, title=None,
+               xlabel=None, ylabel=None, zlabel=None,
+               vlines=None, hlines=None,
+               fignum=1, logx=False, logy=False, **kwargs):
+    """
+    Function for automatically plotting multiple sets of data
+    using matplotlib and xarray.
+    """
+    import matplotlib.pyplot as plt
+    from matplotlib import cm
+    fig = plt.figure(fignum, figsize=(8, 6), dpi=100)
+    axes = fig.add_axes([0.1, 0.1, 0.8, 0.8],
+                        title=('' if title is None else title))
+    cols = np.linspace(0, 1, len(ds[z_coo]))
+    for z, col in zip(ds[z_coo].data, cols):
+        x = ds[x_coo].data
+        y = ds[y_coo].loc[{z_coo: z}].data.flatten()
+        if logx:
+            axes.set_xscale("log")
+        if logy:
+            axes.set_yscale("log")
+        axes.plot(x, y, '.-', c=cm.viridis(col, 1), lw=1.3,
+                  label=str(z), zorder=3, **kwargs)
+    if vlines is not None:
+        for x in vlines:
+            axes.axvline(x)
+    if hlines is not None:
+        for y in hlines:
+            axes.axhline(y)
+    axes.grid(True, color='0.666')
+    axes.set_xlim((ds[x_coo].min(), ds[x_coo].max()))
+    axes.set_ylim((ds[y_coo].min(), ds[y_coo].max()))
+    axes.set_xlabel(x_coo if xlabel is None else xlabel)
+    axes.set_ylabel(y_coo if ylabel is None else ylabel)
+    axes.legend(title=(z_coo if z_coo is None else zlabel), loc='best')
+    return fig
 
 
 # -------------------------------------------------------------------------- #
@@ -156,13 +194,13 @@ def iheatmap(ds, data_name, x_coo, y_coo, colormap='Portland',
         plot(fig, **kwargs)
 
 
-def ilineplot(ds, data_name, x_coo, y_coo=None, logx=False, logy=False,
+def ilineplot(ds, data_name, x_coo, z_coo=None, logx=False, logy=False,
               erry=None, errx=None, nb=True, color=False, colormap='Spectral',
               traces=[], go_dict={}, ly_dict={}, **kwargs):
     # TODO: generate traces from multiple data_names
     from plotly.graph_objs import Scatter
 
-    if y_coo is None:
+    if z_coo is None:
         traces = [Scatter({
                     'x': ds[x_coo].values,
                     'y': ds[data_name].values.flatten(),
@@ -171,21 +209,21 @@ def ilineplot(ds, data_name, x_coo, y_coo=None, logx=False, logy=False,
         if color:
             import matplotlib.cm as cm
             cmap = getattr(cm, colormap)
-            ymin = ds[y_coo].values.min()
-            ymax = ds[y_coo].values.max()
-            cols = ["rgba" + str(cmap(1 - (y-ymin)/(ymax-ymin)))
-                    for y in ds[y_coo].values]
+            zmin = ds[z_coo].values.min()
+            zmax = ds[z_coo].values.max()
+            cols = ["rgba" + str(cmap(1 - (z-zmin)/(zmax-zmin)))
+                    for z in ds[z_coo].values]
         else:
-            cols = [None for y in ds[y_coo].values]
+            cols = [None for y in ds[z_coo].values]
 
         traces = [Scatter({
                     'x': ds[x_coo].values,
-                    'y': ds[data_name].loc[{y_coo: y}].values.flatten(),
-                    'name': str(y),
+                    'y': ds[data_name].loc[{z_coo: z}].values.flatten(),
+                    'name': str(z),
                     'line': {"color": col},
                     'marker': {"color": col},
                     **go_dict})
-                  for y, col in zip(ds[y_coo].values, cols)]
+                  for z, col in zip(ds[z_coo].values, cols)]
     layout = {"width": 750,
               "height": 600,
               "xaxis": {"showline": True,
