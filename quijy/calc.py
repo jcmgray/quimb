@@ -4,13 +4,15 @@ quantum objects.
 """
 # TODO: entanglement cross matrix, sparse ptr
 
+from math import sin, cos, pi
 from collections import OrderedDict
 from itertools import product
 import numpy as np
 import numpy.linalg as nla
-from .core import (isop, qjf, kron, ldmul,
-                        eyepad, tr, trx, infer_size, eyepad)
-from .gen import (sig, basis_vec, bell_state)
+from scipy.optimize import minimize
+from .core import (isop, qjf, kron, ldmul, ptr, eye,
+                   eyepad, tr, trx, infer_size, eyepad)
+from .gen import (sig, basis_vec, bell_state, bloch_state)
 from .solve import (eigvals, eigsys, norm2)
 
 
@@ -55,6 +57,71 @@ def mutual_information(p, dims=[2, 2], sysa=0, sysb=1):
     return ha + hb - hab
 
 
+def logarithmic_negativity(p, dims=[2, 2], sysa=0, sysb=1):
+    if np.size(dims) > 2:
+        p = trx(p, dims, [sysa, sysb])
+        dims = [dims[sysa], dims[sysb]]
+    e = np.log2(trace_norm(partial_transpose(p, dims)))
+    return max(0.0, e)
+
+logneg = logarithmic_negativity
+
+
+def concurrence(p):
+    if isop(p):
+        p = qjf(p, 'dop')  # make sure density operator
+        pt = kron(sig(2), sig(2)) @ p.conj() @ kron(sig(2), sig(2))
+        l = (nla.eigvals(p @ pt).real**2)**0.25
+        return max(0, 2 * np.max(l) - np.sum(l))
+    else:
+        p = qjf(p, 'ket')
+        pt = kron(sig(2), sig(2)) @ p.conj()
+        c = np.real(abs(p.H @ pt)).item(0)
+        return max(0, c)
+
+
+def one_way_classical_information(p_ab, prjs, precomp_func=False):
+    """
+    One way classical information for two qubit density matrix
+    given measurements.
+    """
+    p_a = ptr(p_ab, [2, 2], 0)
+    s_a = entropy(p_a)
+
+    def owci(prjs):
+        def gen_paj():
+            for prj in prjs:
+                p_ab_j = (eye(2) & prj) @ p_ab
+                prob = tr(p_ab_j)
+                p_a_j = ptr(p_ab_j, [2, 2], 0) / prob
+                yield prob, p_a_j
+        return s_a - sum(p * entropy(rho) for p, rho in gen_paj())
+
+    return owci if precomp_func else owci(prjs)
+
+
+def quantum_discord(p):
+    """
+    Quantum Discord for two qubit density matrix.
+    """
+    p = qjf(p, 'dop')
+    iab = mutual_information(p)
+    owci = one_way_classical_information(p, None, precomp_func=True)
+
+    def trial_qd(a):
+        ax, ay, az = cos(a[0]) * sin(a[1]), sin(a[0]) * sin(a[1]), cos(a[0])
+        prja = bloch_state(ax, ay, az)
+        prjb = eye(2) - prja
+        return iab - owci([prja, prjb])
+
+    opt = minimize(trial_qd, (pi/2, pi),
+                   method='SLSQP', bounds=((0, pi), (0, 2 * pi)))
+    if opt.success:
+        return opt.fun
+    else:
+        raise ValueError(opt.message)
+
+
 def sqrtm(a):
     # returns sqrt of hermitan matrix, seems faster than scipy.linalg.sqrtm
     l, v = eigsys(a, sort=False)
@@ -78,29 +145,6 @@ def negativity(rho, dims=[2, 2], sysa=0, sysb=1):
         rho = trx(rho, dims, [sysa, sysb])
     n = (trace_norm(partial_transpose(rho)) - 1.0) / 2.0
     return max(0.0, n)
-
-
-def logarithmic_negativity(p, dims=[2, 2], sysa=0, sysb=1):
-    if np.size(dims) > 2:
-        p = trx(p, dims, [sysa, sysb])
-        dims = [dims[sysa], dims[sysb]]
-    e = np.log2(trace_norm(partial_transpose(p, dims)))
-    return max(0.0, e)
-
-logneg = logarithmic_negativity
-
-
-def concurrence(p):
-    if isop(p):
-        p = qjf(p, 'dop')  # make sure density operator
-        pt = kron(sig(2), sig(2)) @ p.conj() @ kron(sig(2), sig(2))
-        l = (nla.eigvals(p @ pt).real**2)**0.25
-        return max(0, 2 * np.max(l) - np.sum(l))
-    else:
-        p = qjf(p, 'ket')
-        pt = kron(sig(2), sig(2)) @ p.conj()
-        c = np.real(abs(p.H @ pt)).item(0)
-        return max(0, c)
 
 
 def qid(p, dims, inds, precomp_func=False, sparse_comp=True):
@@ -191,6 +235,7 @@ def bell_fid(p):
     psi- (singlet) psi+, phi-, phi+ (triplets).
     """
     op = isop(p)
+
     def gen_bfs():
         for b in ['psi-', 'psi+', 'phi-', 'phi+']:
             psib = bell_state(b)
@@ -291,7 +336,7 @@ def ent_cross_matrix(p, ent_fun=concurrence, calc_self_ent=True):
     ents = np.empty((sz_p, sz_p))
     for i in range(sz_p):
         for j in range(i, sz_p):
-            if i==j:
+            if i == j:
                 if calc_self_ent:
                     rhoa = trx(p, [2]*sz_p, i)
                     psiap = purify(rhoa)
@@ -301,6 +346,6 @@ def ent_cross_matrix(p, ent_fun=concurrence, calc_self_ent=True):
             else:
                 rhoab = trx(p, [2]*sz_p, [i, j])
                 ent = ent_fun(rhoab)
-            ents[i,j] = ent
-            ents[j,i] = ent
+            ents[i, j] = ent
+            ents[j, i] = ent
     return ents

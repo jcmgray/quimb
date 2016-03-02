@@ -12,6 +12,7 @@ import scipy.sparse as sp
 from ..core import (qjf, kron, kronpow, eyepad, eye,
                     eyepad, levi_civita, ldmul)
 from ..solve import eigsys
+from .operators import sig
 
 
 def basis_vec(dir, dim, sparse=False, **kwargs):
@@ -87,7 +88,7 @@ def bell_state(s, **kwargs):
     0: phi+, 1: phi-, 2: psi+, 3: psi- (singlet)
     """
     keymap = {
-        'psi-': 'psi-', 0: 'psi-',
+        'psi-': 'psi-', 0: 'psi-', 's': 'psi-', 'singlet': 'psi-',
         'psi+': 'psi+', 1: 'psi+',
         'phi-': 'phi-', 2: 'phi-',
         'phi+': 'phi+', 3: 'phi+',
@@ -138,6 +139,7 @@ def thermal_state(ham, beta, precomp_func=False):
         l, v = ham
     else:
         l, v = eigsys(ham)
+    l = l - min(l)  # offset by min to avoid numeric problems
 
     def gen_state(b):
         el = np.exp(-b * l)

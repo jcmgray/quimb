@@ -9,6 +9,7 @@ from numexpr import evaluate as evl
 import numpy as np
 import scipy.sparse as sp
 
+#TODO: inner? psi/psi, psi/p, p/psi, p/p, numexpr
 
 def quijify(data, qtype=None, sparse=False, normalized=False, chopped=False):
     """ Converts lists to 'quantum' i.e. complex matrices, kets being columns.
@@ -264,12 +265,6 @@ def eyepad(ops, dims, inds, sparse=None):
     return kron(*gen_ops())
 
 
-def eyeplace(*args, **kwargs):
-    import warnings
-    warnings.warn("deprecated", Warning)
-    return eyepad(*args, **kwargs)
-
-
 def permute_subsystems(p, dims, perm):
     """
     Permute the subsytems of a state.
@@ -284,7 +279,7 @@ def permute_subsystems(p, dims, perm):
     -------
         pp: permuted state, vector or operator
     """
-    p = np.array(p, copy=False)
+    p = np.asarray(p)
     perm = np.array(perm)
     d = np.prod(dims)
     if isop(p):
@@ -295,7 +290,7 @@ def permute_subsystems(p, dims, perm):
         p = p.reshape(dims) \
             .transpose(perm) \
             .reshape((d, 1))
-    return np.matrix(p, copy=False)
+    return np.asmatrix(p)
 
 
 def partial_trace(p, dims, keep):
