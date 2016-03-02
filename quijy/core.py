@@ -105,13 +105,14 @@ np.matrix.tr = trace
 sp.csr_matrix.tr = sparse_trace
 
 
-def normalize(qob, inplace=False):
+def normalize(qob, inplace=True):
     """ Returns the state qob in normalized form """
     n_factor = ((qob.H @ qob)[0, 0]**0.5 if isket(qob) else
                 (qob @ qob.H)[0, 0]**0.5 if isbra(qob) else
                 qob.tr())
     if inplace:
         qob /= n_factor
+        return qob
     else:
         return qob / n_factor
 
