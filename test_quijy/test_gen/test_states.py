@@ -1,9 +1,9 @@
 import numpy as np
-from pytest import raises
+# from pytest import raises
 from numpy.testing import assert_allclose
 from quijy.core import tr, eye, chop
-from quijy.solve import eigvals, eigsys, groundstate
-from quijy.gen import basis_vec, sig, thermal_state, ham_j1j2, rand_herm
+from quijy.solve import eigsys, groundstate
+from quijy.gen import basis_vec, thermal_state, ham_j1j2, rand_herm
 
 
 class TestBasisVec:

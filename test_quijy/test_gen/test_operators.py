@@ -1,7 +1,9 @@
 from pytest import raises
+import numpy as np
 from numpy.testing import assert_allclose
+import scipy.sparse as sp
 from quijy.solve import eigvals
-from quijy.gen import sig
+from quijy.gen.operators import sig, controlled_z
 
 
 class TestSig:
@@ -27,3 +29,14 @@ class TestSig:
     def test_sig_bad_dir(self):
         with raises(KeyError):
             sig('w', 2)
+
+
+class TestControlledZ:
+    def test_controlled_z_dense(self):
+        cz = controlled_z()
+        assert_allclose(cz, np.diag([1, 1, 1, -1]))
+
+    def test_controlled_z_sparse(self):
+        cz = controlled_z(sparse=True)
+        assert(sp.issparse(cz))
+        assert_allclose(cz.A, np.diag([1, 1, 1, -1]))

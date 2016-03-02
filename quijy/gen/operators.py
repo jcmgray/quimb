@@ -45,6 +45,12 @@ def sig(xyz, dim=2, **kwargs):
     return opmap[(xyzmap[xyz], dim)]()
 
 
+def controlled_z(sparse=False):
+    cz = eye(4, sparse=sparse)
+    cz[3, 3] = -1
+    return cz
+
+
 def ham_heis(n, jx=1.0, jy=1.0, jz=1.0, bz=0.0, cyclic=False, sparse=False):
     """ Constructs the heisenberg spin 1/2 hamiltonian
     Parameters:

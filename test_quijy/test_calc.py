@@ -37,4 +37,3 @@ class TestQuantumDiscord:
             p = p @ p.H
             qd = quantum_discord(p)
             assert(0 <= qd and qd <= 1)
-
