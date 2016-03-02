@@ -1,8 +1,10 @@
 #QUIJY
 
- * A python library for many-body quantum calcuations, focused on flexibility and efficiency using ```numpy```, ```numba``` and ```numexpr```.
- * ```quijy``` uses ```numpy``` matrices as its basic object and is otherwise function based to reduce overhead.
-
+ * Python library for many-body quantum calcuations. 
+ * Uses ```numpy``` and ```scipy.sparse``` matrices as quantum objects.
+ * Function orientated aside from a few very convenient monkey-patches.
+ * Many operations are accelerated using ```numba``` and ```numexpr```.
+ 
 
 ## Example Usage
 ```python
