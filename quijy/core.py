@@ -9,7 +9,8 @@ from numexpr import evaluate as evl
 import numpy as np
 import scipy.sparse as sp
 
-#TODO: inner? psi/psi, psi/p, p/psi, p/p, numexpr
+# TODO: inner? psi/psi, psi/p, p/psi, p/p, numexpr
+# TODO: sparse partial trace
 
 def quijify(data, qtype=None, sparse=False, normalized=False, chopped=False):
     """ Converts lists to 'quantum' i.e. complex matrices, kets being columns.

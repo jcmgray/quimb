@@ -1,7 +1,6 @@
 from numpy.testing import assert_allclose
 from quijy import (qjf, rand_product_state, bell_state, rand_ket, rand_rho)
-from quijy.calc import (one_way_classical_information, mutual_information,
-                        quantum_discord)
+from quijy.calc import *
 
 
 class TestQuantumDiscord:

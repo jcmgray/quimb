@@ -3,8 +3,7 @@ from pytest import raises
 from numpy.testing import assert_allclose
 from quijy.core import tr, eye, chop
 from quijy.solve import eigvals, eigsys, groundstate
-from quijy.rand import rand_herm
-from quijy.gen import basis_vec, sig, thermal_state, ham_j1j2
+from quijy.gen import basis_vec, sig, thermal_state, ham_j1j2, rand_herm
 
 
 class TestBasisVec:

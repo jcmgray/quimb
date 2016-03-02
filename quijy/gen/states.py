@@ -9,8 +9,8 @@ from functools import lru_cache
 from math import factorial
 import numpy as np
 import scipy.sparse as sp
-from ..core import (qjf, kron, kronpow, eyepad, eye,
-                    eyepad, levi_civita, ldmul)
+from ..core import (qjf, kron, kronpow, eyepad, eye, eyepad, levi_civita,
+                    ldmul)
 from ..solve import eigsys
 from .operators import sig
 

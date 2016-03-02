@@ -3,8 +3,7 @@ import scipy.sparse as sp
 import numpy as np
 from pytest import raises
 from numpy.testing import assert_allclose, assert_almost_equal
-from quijy.gen import bell_state
-from quijy.rand import rand_rho, rand_matrix, rand_ket
+from quijy.gen import bell_state, rand_rho, rand_matrix, rand_ket
 from quijy.core import *
 
 

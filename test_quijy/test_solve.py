@@ -2,9 +2,8 @@ from functools import lru_cache
 import scipy.sparse as sp
 from pytest import fixture
 from numpy.testing import assert_allclose
+from quijy import ldmul, rand_uni
 from quijy.solve import *
-from quijy.core import ldmul
-from quijy.rand import rand_uni
 
 
 @fixture

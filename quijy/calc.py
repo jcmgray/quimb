@@ -2,7 +2,6 @@
 Functions for more advanced calculations of quantities and properties of
 quantum objects.
 """
-# TODO: entanglement cross matrix, sparse ptr
 
 from math import sin, cos, pi
 from collections import OrderedDict
@@ -10,10 +9,11 @@ from itertools import product
 import numpy as np
 import numpy.linalg as nla
 from scipy.optimize import minimize
-from .core import (isop, qjf, kron, ldmul, ptr, eye,
-                   eyepad, tr, trx, infer_size, eyepad)
-from .gen import (sig, basis_vec, bell_state, bloch_state)
-from .solve import (eigvals, eigsys, norm2)
+
+from .core import (isop, qjf, kron, ldmul, ptr, eye, eyepad, tr, trx,
+                   infer_size, eyepad)
+from .solve import eigvals, eigsys, norm2
+from .gen import sig, basis_vec, bell_state, bloch_state
 
 
 def partial_transpose(p, dims=[2, 2]):

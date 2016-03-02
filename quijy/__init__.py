@@ -6,9 +6,6 @@ from .core import *
 # Generating objects
 from .gen import *
 
-# Random states
-from .rand import *
-
 # Solving functions
 from .solve import *
 

@@ -2,7 +2,7 @@
 Functions for generating random quantum objects and states.
 """
 import numpy as np
-from .core import (qjf, ptr, kron, rdmul, nmlz)
+from ..core import qjf, ptr, kron, rdmul, nmlz
 
 
 def rand_matrix(d, scaled=False):
