@@ -3,7 +3,9 @@ import scipy.sparse as sp
 import numpy as np
 from pytest import raises
 from numpy.testing import assert_allclose, assert_almost_equal
-from quijy.gen import bell_state, rand_rho, rand_matrix, rand_ket
+from quijy.gen import (bell_state, rand_rho, rand_matrix, rand_ket, up, plus,
+                       yplus, sig)
+from quijy.calc import mutual_information
 from quijy.core import *
 
 
@@ -131,13 +133,13 @@ class TestTrace:
 class TestNormalize:
     def test_normalize(self):
         a = qjf([1, 1], 'ket')
-        b = nmlz(a)
+        b = nmlz(a, inplace=False)
         assert_almost_equal(tr(b.H @ b), 1.0)
         a = qjf([1, 1], 'bra')
-        b = nmlz(a)
+        b = nmlz(a, inplace=False)
         assert_almost_equal(tr(b @ b.H), 1.0)
         a = qjf([1, 1], 'dop')
-        b = nmlz(a)
+        b = nmlz(a, inplace=False)
         assert_almost_equal(tr(b), 1.0)
 
     def test_normalize_inplace(self):
@@ -327,8 +329,34 @@ class TestEyepad:
         assert(sp.issparse(b))
         assert_allclose(b.A, (i & a & i).A)
 
+    def test_eyepad_2d_simple(self):
+        a = (rand_matrix(2), rand_matrix(2))
+        dims = ((2, 3), (3, 2))
+        inds = ((0, 0), (1, 1))
+        b = eyepad(a, dims, inds)
+        assert b.shape == (36, 36)
+        assert_allclose(b, a[0] & eye(9) & a[1])
 
-# TODO: test permute_subsystems
+
+class TestPermuteSubsystems:
+    def test_permute_subsystems_ket(self):
+        a = up() & plus() & yplus()
+        b = permute_subsystems(a, [2, 2, 2], [2, 0, 1])
+        assert_allclose(b, yplus() & up() & plus())
+
+    def test_permute_subsystems_op(self):
+        a = sig('x') & sig('y') & sig('z')
+        b = permute_subsystems(a, [2, 2, 2], [2, 0, 1])
+        assert_allclose(b, sig('z') & sig('x') & sig('y'))
+
+    def test_entangled_permute(self):
+        dims = [2, 2, 2]
+        a = bell_state(0) & up()
+        assert_allclose(mutual_information(a, dims, 0, 1), 2.)
+        b = permute_subsystems(a, dims, [1, 2, 0])
+        assert_allclose(mutual_information(b, dims, 0, 1), 0., atol=1e-12)
+        assert_allclose(mutual_information(b, dims, 0, 2), 2.)
+
 
 class TestPartialTrace:
     def test_partial_trace_early_return(self):

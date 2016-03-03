@@ -12,6 +12,7 @@ import scipy.sparse as sp
 # TODO: inner? psi/psi, psi/p, p/psi, p/p, numexpr
 # TODO: sparse partial trace
 
+
 def quijify(data, qtype=None, sparse=False, normalized=False, chopped=False):
     """ Converts lists to 'quantum' i.e. complex matrices, kets being columns.
     * Will unravel an array if 'ket' or 'bra' given.
@@ -53,19 +54,19 @@ qjf = quijify
 
 
 @jit
-def isket(qob):
+def isket(qob):  # pragma: no cover
     """ Checks if matrix is in ket form, i.e. a matrix column. """
     return qob.shape[0] > 1 and qob.shape[1] == 1  # Column vector check
 
 
 @jit
-def isbra(qob):
+def isbra(qob):  # pragma: no cover
     """ Checks if matrix is in bra form, i.e. a matrix row. """
     return qob.shape[0] == 1 and qob.shape[1] > 1  # Row vector check
 
 
 @jit
-def isop(qob):
+def isop(qob):  # pragma: no cover
     """ Checks if matrix is an operator, i.e. a square matrix. """
     m, n = qob.shape
     return m == n and m > 1  # Square matrix check
@@ -80,7 +81,7 @@ def isherm(qob):
 
 
 @jit
-def trace(op):
+def trace(op):  # pragma: no cover
     """
     Trace of hermitian matrix. This is faster than numpy's
     built-in trace function for real diagonals.
@@ -123,7 +124,7 @@ sp.csr_matrix.nmlz = nmlz
 
 
 @jit
-def kron_dense(a, b):
+def kron_dense(a, b):  # pragma: no cover
     """
     Fast tensor product of two dense arrays (Fast than numpy using jit)
     """
@@ -234,7 +235,7 @@ def eyepad(ops, dims, inds, sparse=None):
     if not isinstance(ops, (list, tuple)):
         ops = [ops]
     if np.ndim(dims) > 1:
-        dims, inds = mapcoords(dims, inds)
+        dims, inds = coord_map(dims, inds)
     elif np.ndim(inds) == 0:
         inds = [inds]
     sparse = sp.issparse(ops[0]) if sparse is None else sparse
@@ -308,7 +309,6 @@ def partial_trace(p, dims, keep):
     -------
         Density matrix of subsytem dimensions dims[keep]
     """
-    # TODO:  partial trace for sparse matrices
     # Cast as ndarrays for 2D+ reshaping
     if np.size(keep) == np.size(dims):  # keep all subsystems
         if not isop(p):
@@ -390,6 +390,7 @@ def ldmul(vec, mat):
         return np.matrix(evl('vec*mat'), copy=False)
     else:
         return np.matrix(np.multiply(vec, mat), copy=False)
+
 
 def rdmul(mat, vec):
     '''

@@ -1,9 +1,10 @@
 import numpy as np
 # from pytest import raises
 from numpy.testing import assert_allclose
-from quijy.core import tr, eye, chop
+from quijy.core import tr, eye, chop, eyepad
 from quijy.solve import eigsys, groundstate
-from quijy.gen import basis_vec, thermal_state, ham_j1j2, rand_herm
+from quijy.gen import (basis_vec, thermal_state, ham_j1j2, rand_herm,
+                       graph_state_1d, sig)
 
 
 class TestBasisVec:
@@ -53,3 +54,14 @@ class TestThermalState:
         func = thermal_state(full, None, precomp_func=True)
         rhoth2 = func(beta)
         assert_allclose(rhoth1, rhoth2)
+
+
+class TestGraphState:
+    def test_graph_state_1d(self):
+        n = 5
+        p = graph_state_1d(n, cyclic=True)
+        for j in range(n):
+            k = eyepad([sig('x'), sig('z'), sig('z')], [2] * n,
+                       (j, (j - 1) % n, (j + 1) % n))
+            o = p.H @ k @ p
+            np.testing.assert_allclose(o, 1)

@@ -132,10 +132,12 @@ def svds(a, k=6, ncv=None, return_vecs=True, **kwargs):
         ncv = choose_ncv(k, n) if ncv is None else ncv
         if return_vecs:
             uk, sk, vtk = spla.svds(a, k=k, ncv=ncv, **kwargs)
-            return qjf(uk), sk, qjf(vtk)
+            so = np.argsort(-sk)
+            return qjf(uk[:, so]), sk[so], qjf(vtk[so, :])
         else:
-            return spla.svds(a, k=k, ncv=ncv,
-                             return_singular_vectors=False, **kwargs)
+            sk = spla.svds(a, k=k, ncv=ncv,
+                           return_singular_vectors=False, **kwargs)
+            return sk[np.argsort(-sk)]
 
 
 def norm2(a):

@@ -3,7 +3,7 @@ import numpy as np
 from numpy.testing import assert_allclose
 import scipy.sparse as sp
 from quijy.solve import eigvals
-from quijy.gen.operators import sig, controlled_z
+from quijy.gen.operators import sig, controlled
 
 
 class TestSig:
@@ -33,10 +33,10 @@ class TestSig:
 
 class TestControlledZ:
     def test_controlled_z_dense(self):
-        cz = controlled_z()
+        cz = controlled('z')
         assert_allclose(cz, np.diag([1, 1, 1, -1]))
 
     def test_controlled_z_sparse(self):
-        cz = controlled_z(sparse=True)
+        cz = controlled('z', sparse=True)
         assert(sp.issparse(cz))
         assert_allclose(cz.A, np.diag([1, 1, 1, -1]))

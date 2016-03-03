@@ -4,15 +4,15 @@ TODO: add sparse and qtype to all relevant functions.
 """
 # TODO: Graph states, cluster states, multidimensional
 
-from itertools import product, permutations
+from itertools import permutations
 from functools import lru_cache
 from math import factorial
 import numpy as np
 import scipy.sparse as sp
-from ..core import (qjf, kron, kronpow, eyepad, eye, eyepad, levi_civita,
-                    ldmul)
+from ..core import (qjf, kron, kronpow, eye, levi_civita,
+                    ldmul, eyepad)
 from ..solve import eigsys
-from .operators import sig
+from .operators import sig, controlled
 
 
 def basis_vec(dir, dim, sparse=False, **kwargs):
@@ -150,7 +150,7 @@ def thermal_state(ham, beta, precomp_func=False):
 
 
 def neel_state(n):
-    binary = '01' * (n / 2)
+    binary = '01' * (n // 2)
     binary += (n % 2 == 1) * '0'  # add trailing spin for odd n
     return basis_vec(int(binary, 2), 2 ** n)
 
@@ -182,3 +182,16 @@ def multi_singlet(n):
             yield levi_civita(ind) * kron(*vec)
 
     return sum(terms()) / factorial(n)**0.5
+
+
+def graph_state_1d(n, cyclic=True, sparse=False):
+    """ Graph State """
+    p = kronpow(plus(sparse=sparse), n)
+    for i in range(n-1):
+        p = eyepad(controlled('z', sparse=True), [2] * n, (i, i+1)) @ p
+    if cyclic:
+        p = ((eye(2, sparse=True) & eye(2**(n-2), sparse=True) &
+              qjf([1, 0], qtype='dop', sparse=True)) +
+             (sig('z', sparse=True) & eye(2**(n-2), sparse=True) &
+              qjf([0, 1], qtype='dop', sparse=True))) @ p
+    return p

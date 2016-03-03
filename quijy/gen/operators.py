@@ -45,10 +45,16 @@ def sig(xyz, dim=2, **kwargs):
     return opmap[(xyzmap[xyz], dim)]()
 
 
-def controlled_z(sparse=False):
-    cz = eye(4, sparse=sparse)
-    cz[3, 3] = -1
-    return cz
+@lru_cache(maxsize=8)
+def controlled(s, sparse=False):
+    keymap = {
+        'x': 'x', 'not': 'x',
+        'z': 'z'
+        }
+    op = sig(keymap[s], sparse=sparse)
+    return ((qjf([1, 0], qtype='dop', sparse=sparse) &
+             eye(2, sparse=sparse)) +
+            (qjf([0, 1], qtype='dop', sparse=sparse) & op))
 
 
 def ham_heis(n, jx=1.0, jy=1.0, jz=1.0, bz=0.0, cyclic=False, sparse=False):
