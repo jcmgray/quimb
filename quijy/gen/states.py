@@ -1,6 +1,5 @@
 """
 Functions for generating quantum objects.
-TODO: add sparse and qtype to all relevant functions.
 """
 # TODO: Graph states, cluster states, multidimensional
 
@@ -26,7 +25,8 @@ def basis_vec(dir, dim, sparse=False, **kwargs):
         sparse: return vector as sparse-csr matrix
 
     Returns:
-        x:
+    --------
+        x: quijified basis vector
     """
     if sparse:
         return sp.csr_matrix(([1.0], ([dir], [0])),

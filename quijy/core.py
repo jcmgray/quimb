@@ -14,7 +14,8 @@ import scipy.sparse as sp
 
 
 def quijify(data, qtype=None, sparse=False, normalized=False, chopped=False):
-    """ Converts lists to 'quantum' i.e. complex matrices, kets being columns.
+    """
+    Converts lists to 'quantum' i.e. complex matrices, kets being columns.
     * Will unravel an array if 'ket' or 'bra' given.
     * Will conjugate if 'bra' given.
     * Will leave operators as is if 'dop' given, but construct one
