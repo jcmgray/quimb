@@ -3,7 +3,7 @@ Functions for more advanced calculations of quantities and properties of
 quantum objects.
 """
 
-from math import sin, cos, pi
+from math import sin, cos, pi, log2
 from collections import OrderedDict
 from itertools import product
 import numpy as np
@@ -11,9 +11,9 @@ import numpy.linalg as nla
 from scipy.optimize import minimize
 
 from .core import (isop, qjf, kron, ldmul, ptr, eye, eyepad, tr, trx,
-                   infer_size, eyepad)
-from .solve import eigvals, eigsys, norm2
-from .gen import sig, basis_vec, bell_state, bloch_state
+                   infer_size)
+from .solve import (eigvals, eigsys, norm2)
+from .gen import (sig, basis_vec, bell_state, bloch_state)
 
 
 def partial_transpose(p, dims=[2, 2]):
@@ -23,7 +23,7 @@ def partial_transpose(p, dims=[2, 2]):
     p = qjf(p, 'op')
     p = np.array(p)\
         .reshape((*dims, *dims))  \
-        .transpose([2, 1, 0, 3])  \
+        .transpose((2, 1, 0, 3))  \
         .reshape((np.prod(dims), np.prod(dims)))
     return qjf(p)
 
@@ -61,7 +61,7 @@ def logarithmic_negativity(p, dims=[2, 2], sysa=0, sysb=1):
     if np.size(dims) > 2:
         p = trx(p, dims, [sysa, sysb])
         dims = [dims[sysa], dims[sysb]]
-    e = np.log2(trace_norm(partial_transpose(p, dims)))
+    e = log2(trace_norm(partial_transpose(p, dims)))
     return max(0.0, e)
 
 logneg = logarithmic_negativity

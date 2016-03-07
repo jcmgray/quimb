@@ -49,12 +49,13 @@ def sig(xyz, dim=2, **kwargs):
 def controlled(s, sparse=False):
     keymap = {
         'x': 'x', 'not': 'x',
-        'z': 'z'
+        'y': 'y',
+        'z': 'z',
         }
-    op = sig(keymap[s], sparse=sparse)
     return ((qjf([1, 0], qtype='dop', sparse=sparse) &
              eye(2, sparse=sparse)) +
-            (qjf([0, 1], qtype='dop', sparse=sparse) & op))
+            (qjf([0, 1], qtype='dop', sparse=sparse) &
+             sig(keymap[s], sparse=sparse)))
 
 
 def ham_heis(n, jx=1.0, jy=1.0, jz=1.0, bz=0.0, cyclic=False, sparse=False):
@@ -133,8 +134,3 @@ def ham_j1j2(n, j1=1.0, j2=0.5, bz=0.0, cyclic=False, sparse=False):
     if bz != 0:
         ham += bz * sum(gen_bz)
     return ham if sparse else ham.todense()
-
-
-def ham_majumdar_ghosh(n, j1=1.0, j2=0.5, **kwargs):
-    """ Alias for ham-j1j2. """
-    return ham_j1j2(n, j1=j1, j2=j2, **kwargs)

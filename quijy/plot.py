@@ -37,9 +37,13 @@ def mplot(x, y_i, fignum=1, logx=False, logy=False, **kwargs):
     return fig
 
 
-def xmlineplot(ds, y_coo, x_coo, z_coo, title=None,
+# -------------------------------------------------------------------------- #
+# Plots with matplotlib and xarray                                           #
+# -------------------------------------------------------------------------- #
+
+def xmlineplot(ds, y_coo, x_coo, z_coo, title=None, legend=None,
                xlabel=None, ylabel=None, zlabel=None,
-               vlines=None, hlines=None,
+               vlines=None, hlines=None, colormap='viridis',
                fignum=1, logx=False, logy=False, **kwargs):
     """
     Function for automatically plotting multiple sets of data
@@ -47,18 +51,19 @@ def xmlineplot(ds, y_coo, x_coo, z_coo, title=None,
     """
     import matplotlib.pyplot as plt
     from matplotlib import cm
+    cmap = getattr(cm, colormap)
     fig = plt.figure(fignum, figsize=(8, 6), dpi=100)
     axes = fig.add_axes([0.1, 0.1, 0.8, 0.8],
                         title=('' if title is None else title))
     cols = np.linspace(0, 1, len(ds[z_coo]))
     for z, col in zip(ds[z_coo].data, cols):
-        x = ds[x_coo].data
-        y = ds[y_coo].loc[{z_coo: z}].data.flatten()
+        x = ds.loc[{z_coo: z}][x_coo].data.flatten()
+        y = ds.loc[{z_coo: z}][y_coo].data.flatten()
         if logx:
             axes.set_xscale("log")
         if logy:
             axes.set_yscale("log")
-        axes.plot(x, y, '.-', c=cm.viridis(col, 1), lw=1.3,
+        axes.plot(x, y, '.-', c=cmap(col, 1), lw=1.3,
                   label=str(z), zorder=3, **kwargs)
     if vlines is not None:
         for x in vlines:
@@ -71,7 +76,8 @@ def xmlineplot(ds, y_coo, x_coo, z_coo, title=None,
     axes.set_ylim((ds[y_coo].min(), ds[y_coo].max()))
     axes.set_xlabel(x_coo if xlabel is None else xlabel)
     axes.set_ylabel(y_coo if ylabel is None else ylabel)
-    axes.legend(title=(z_coo if z_coo is None else zlabel), loc='best')
+    if legend or not (legend is False or len(ds[z_coo]) > 20):
+        axes.legend(title=(z_coo if zlabel is None else zlabel), loc='best')
     return fig
 
 
@@ -90,7 +96,7 @@ def iplot(x, y_i, name=None, color='viridis', nb=True,
     # Parse data
     y_i = np.array(np.squeeze(y_i), ndmin=2)
     ydims = np.array(y_i.shape)
-    xaxis = np.argwhere(np.size(x) == ydims).flat[0]  # 0 or 1
+    xaxis = np.argwhere(np.size(x[0]) == ydims).flat[0]  # 0 or 1
     if xaxis == 1:
         y_i = y_i.transpose()
     x = cycle(x)
@@ -195,9 +201,8 @@ def iheatmap(ds, data_name, x_coo, y_coo, colormap='Portland',
 
 
 def ilineplot(ds, data_name, x_coo, z_coo=None, logx=False, logy=False,
-              erry=None, errx=None, nb=True, color=False, colormap='Spectral',
-              traces=[], go_dict={}, ly_dict={}, **kwargs):
-    # TODO: generate traces from multiple data_names
+              erry=None, errx=None, nb=True, color=False, colormap='viridis',
+              legend=None, traces=[], go_dict={}, ly_dict={}, **kwargs):
     from plotly.graph_objs import Scatter
 
     if z_coo is None:
@@ -214,11 +219,11 @@ def ilineplot(ds, data_name, x_coo, z_coo=None, logx=False, logy=False,
             cols = ["rgba" + str(cmap(1 - (z-zmin)/(zmax-zmin)))
                     for z in ds[z_coo].values]
         else:
-            cols = [None for y in ds[z_coo].values]
+            cols = [None for z in ds[z_coo].values]
 
         traces = [Scatter({
-                    'x': ds[x_coo].values,
-                    'y': ds[data_name].loc[{z_coo: z}].values.flatten(),
+                    'x': ds.loc[{z_coo: z}][x_coo].values.flatten(),
+                    'y': ds.loc[{z_coo: z}][data_name].values.flatten(),
                     'name': str(z),
                     'line': {"color": col},
                     'marker': {"color": col},
@@ -236,6 +241,8 @@ def ilineplot(ds, data_name, x_coo, z_coo=None, logx=False, logy=False,
                         "ticks": "inside",
                         "title": data_name,
                         "type": "log" if logy else "linear"},
+              'showlegend': legend or not (legend is False or
+                                           len(ds[z_coo]) > 20),
               **ly_dict}
     fig = {"data": traces, "layout": layout}
     if nb:

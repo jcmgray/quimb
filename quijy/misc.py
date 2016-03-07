@@ -3,6 +3,7 @@ Misc. functions not quantum related.
 """
 import numpy as np
 import scipy.sparse as sp
+from scipy.interpolate import splrep, splev
 import xarray as xr
 from tqdm import tqdm
 from .core import eye, kron
@@ -11,6 +12,12 @@ from .core import eye, kron
 def progbar(it, **kwargs):
     """ tqdm progress bar with deifferent defaults. """
     return tqdm(it, ascii=True, leave=True, **kwargs)
+
+
+def spline_resample(x, y, n=100, **kwargs):
+    ix = np.linspace(x[0], x[-1], n)
+    iy = splev(ix, splrep(x, y, **kwargs))
+    return ix, iy
 
 
 def xrmerge(*das, accept_new=False):
