@@ -1,7 +1,7 @@
 from pytest import raises
 import numpy as np
 from numpy.testing import assert_allclose
-import scipy.sparse as sp
+from quijy.core import issparse
 from quijy.solve import eigvals
 from quijy.gen.operators import sig, controlled
 
@@ -38,5 +38,5 @@ class TestControlledZ:
 
     def test_controlled_z_sparse(self):
         cz = controlled('z', sparse=True)
-        assert(sp.issparse(cz))
+        assert(issparse(cz))
         assert_allclose(cz.A, np.diag([1, 1, 1, -1]))

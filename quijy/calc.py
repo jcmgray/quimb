@@ -3,29 +3,18 @@ Functions for more advanced calculations of quantities and properties of
 quantum objects.
 """
 
-from math import sin, cos, pi, log2
+from math import sin, cos, pi, log2, sqrt
 from collections import OrderedDict
 from itertools import product
 import numpy as np
 import numpy.linalg as nla
+import scipy.sparse.linalg as spla
 from scipy.optimize import minimize
 
 from .core import (isop, qjf, kron, ldmul, ptr, eye, eyepad, tr, trx,
-                   infer_size)
-from .solve import (eigvals, eigsys, norm2)
+                   infer_size, issparse, jdot, inner)
+from .solve import (eigvals, eigsys, norm)
 from .gen import (sig, basis_vec, bell_state, bloch_state)
-
-
-def partial_transpose(p, dims=[2, 2]):
-    """
-    Partial transpose of state `p` with bipartition as given by `dims`.
-    """
-    p = qjf(p, 'op')
-    p = np.array(p)\
-        .reshape((*dims, *dims))  \
-        .transpose((2, 1, 0, 3))  \
-        .reshape((np.prod(dims), np.prod(dims)))
-    return qjf(p)
 
 
 def entropy(rho):
@@ -57,11 +46,23 @@ def mutual_information(p, dims=[2, 2], sysa=0, sysb=1):
     return ha + hb - hab
 
 
+def partial_transpose(p, dims=[2, 2]):
+    """
+    Partial transpose of state `p` with bipartition as given by `dims`.
+    """
+    p = qjf(p, 'op')
+    p = np.array(p)\
+        .reshape((*dims, *dims))  \
+        .transpose((2, 1, 0, 3))  \
+        .reshape((np.prod(dims), np.prod(dims)))
+    return qjf(p)
+
+
 def logarithmic_negativity(p, dims=[2, 2], sysa=0, sysb=1):
     if np.size(dims) > 2:
         p = trx(p, dims, [sysa, sysb])
         dims = [dims[sysa], dims[sysb]]
-    e = log2(trace_norm(partial_transpose(p, dims)))
+    e = log2(norm(partial_transpose(p, dims), 'tr'))
     return max(0.0, e)
 
 logneg = logarithmic_negativity
@@ -109,7 +110,7 @@ def quantum_discord(p):
     owci = one_way_classical_information(p, None, precomp_func=True)
 
     def trial_qd(a):
-        ax, ay, az = cos(a[0]) * sin(a[1]), sin(a[0]) * sin(a[1]), cos(a[0])
+        ax, ay, az = sin(a[0]) * cos(a[1]), sin(a[0]) * sin(a[1]), cos(a[0])
         prja = bloch_state(ax, ay, az)
         prjb = eye(2) - prja
         return iab - owci([prja, prjb])
@@ -122,45 +123,56 @@ def quantum_discord(p):
         raise ValueError(opt.message)
 
 
-def sqrtm(a):
-    # returns sqrt of hermitan matrix, seems faster than scipy.linalg.sqrtm
-    l, v = eigsys(a, sort=False)
-    l = np.sqrt(l.astype(complex))
-    return v @ ldmul(l, v.H)
+def expm(a, herm=False):
+    """ Matrix exponential, can be accelerated if explicitly hermitian. """
+    if issparse(a):
+        return spla.expm(a)
+    elif not herm:
+        return np.asmatrix(spla.expm(a.A))
+    else:
+        l, v = eigsys(a)
+        return jdot(v, ldmul(np.exp(l), v.H))
 
 
-def trace_norm(a):
-    """
-    Returns the trace norm of operator a, that is, the sum of abs eigvals.
-    """
-    return np.sum(np.absolute(eigvals(a, sort=False)))
+def sqrtm(a, herm=False):
+    """ Matrix square root, can be accelerated if explicitly hermitian. """
+    if issparse(a):
+        return spla.sqrtm(a)
+    elif not herm:
+        return np.asmatrix(spla.sqrtm(a.A))
+    else:
+        l, v = eigsys(a)
+        return jdot(v, ldmul(np.sqrt(l.astype(complex)), v.H))
 
 
 def trace_distance(p, w):
-    return 0.5 * trace_norm(p - w)
+    if not isop(p) and not isop(w):
+        return sqrt(1 - inner(p, w))
+    return 0.5 * norm(p - w, 'tr')
 
 
 def negativity(rho, dims=[2, 2], sysa=0, sysb=1):
     if np.size(dims) > 2:
         rho = trx(rho, dims, [sysa, sysb])
-    n = (trace_norm(partial_transpose(rho)) - 1.0) / 2.0
+    n = (norm(partial_transpose(rho), 'tr') - 1.0) / 2.0
     return max(0.0, n)
 
 
-def qid(p, dims, inds, precomp_func=False, sparse_comp=True):
+def qid(p, dims, inds, precomp_func=False, sparse_comp=True,
+        norm_func=norm, pow=2, coeff=1/3):
     p = qjf(p, 'dop')
     inds = np.array(inds, ndmin=1)
     # Construct operators
-    ops_i = list([list([eyepad(sig(s), dims, ind, sparse=sparse_comp)
-                        for s in (1, 2, 3)])
-                  for ind in inds])
+    ops_i = [[eyepad(sig(s), dims, ind, sparse=sparse_comp)
+              for s in (1, 2, 3)]
+             for ind in inds]
 
     # Define function closed over precomputed operators
     def qid_func(x):
         qds = np.zeros(np.size(inds))
         for i, ops in enumerate(ops_i):
             for op in ops:
-                qds[i] += norm2(x @ op - op @ x)**2 / 3.0
+                qds[i] += coeff * norm_func(x @ op - op @ x)**pow
         return qds
 
     return qid_func if precomp_func else qid_func(p)
@@ -197,7 +209,7 @@ def pauli_decomp(a, mode='p', tol=1e-3):
         for perm in product('IXYZ', repeat=n):
             name = "".join(perm)
             op = kron(*[sig(s, sparse=True) for s in perm]) / 2**n
-            d = tr(a @ op)
+            d = np.trace(a @ op)
             yield name, d
 
     nds = [nd for nd in calc_name_and_overlap(a)]
@@ -247,7 +259,8 @@ def bell_fid(p):
     return [*gen_bfs()]
 
 
-def correlation(p, sysa, sysb, opa, opb, sparse=True, precomp_func=False):
+def correlation(p, sysa, sysb, opa, opb, dims=None, op=None, sparse=True,
+                precomp_func=False,):
     """
     Calculate the correlation between two sites given two operators.
 
@@ -266,9 +279,11 @@ def correlation(p, sysa, sysb, opa, opb, sparse=True, precomp_func=False):
     -------
         cab: correlation, <ab> - <a><b>
     """
-    sz_p = infer_size(p)
-    dims = [2] * sz_p
-    op = isop(p)
+    if dims is None:
+        sz_p = infer_size(p)
+        dims = [2] * sz_p
+    if op is None:
+        op = isop(p)
 
     opab = eyepad([opa, opb], dims, [sysa, sysb], sparse=sparse)
     opa = eyepad([opa], dims, sysa, sparse=sparse)

@@ -8,9 +8,9 @@ routines for non-hermitian matrices.
 
 import numpy as np
 import numpy.linalg as nla
-import scipy.sparse as sp
 import scipy.sparse.linalg as spla
-from .core import qjf
+from numba import jit
+from .core import qjf, issparse, jvdot
 
 
 # -------------------------------------------------------------------------- #
@@ -62,6 +62,17 @@ def eigvecs(a, sort=True):
 # iterative methods for partial eigendecompision                             #
 # -------------------------------------------------------------------------- #
 
+def choose_ncv(k, n):
+    """ Optimise number of lanczos vectors for iterative methods
+    Args:
+        k: number of target eigenvalues/singular values
+        n: matrix size
+    Returns:
+        ncv: number of lanczos vectors to use
+    """
+    return min(max(20, 2 * k + 1), n)
+
+
 def seigsys(a, k=6, which='SA', ncv=None, return_vecs=True, **kwargs):
     """ Returns a few eigenpairs from a possibly sparse hermitian operator
     Inputs:
@@ -74,7 +85,7 @@ def seigsys(a, k=6, which='SA', ncv=None, return_vecs=True, **kwargs):
         vk: matrix of eigenvectors as columns
     """
     n = a.shape[0]
-    sparse = sp.issparse(a)
+    sparse = issparse(a)
     if not sparse and n <= 500:
         # TODO: select which from nla full spectrum
         if return_vecs:
@@ -121,7 +132,7 @@ def groundenergy(ham):
 def svds(a, k=6, ncv=None, return_vecs=True, **kwargs):
     """ Compute a number of singular value pairs """
     n = a.shape[0]
-    sparse = sp.issparse(a)
+    sparse = issparse(a)
     if not sparse and n <= 500:  # small and dense --> use full decomposition
         if return_vecs:
             uk, sk, vtk = nla.svd(a)
@@ -140,17 +151,51 @@ def svds(a, k=6, ncv=None, return_vecs=True, **kwargs):
             return sk[np.argsort(-sk)]
 
 
-def norm2(a):
+# -------------------------------------------------------------------------- #
+# Norms and other quantities based on decompositions                         #
+# -------------------------------------------------------------------------- #
+
+def norm_2(a):
     """ Return the 2-norm of matrix, a, i.e. the largest singular value. """
     return svds(a, k=1, return_vecs=False)[0]
 
 
-def choose_ncv(k, n):
-    """ Optimise number of lanczos vectors for iterative methods
-    Args:
-        k: number of target eigenvalues/singular values
-        n: matrix size
-    Returns:
-        ncv: number of lanczos vectors to use
+@jit(nopython=True)
+def norm_fro_dense(a):
+    return jvdot(a, a).real**0.5
+
+
+def norm_fro_sparse(a):
+    return jvdot(a.data, a.data).real**0.5
+
+
+def norm_trace_dense(a):
     """
-    return min(max(20, 2 * k + 1), n)
+    Returns the trace norm of operator a, that is, the sum of abs eigvals.
+    """
+    return np.sum(np.absolute(eigvals(a, sort=False)))
+
+
+def norm(a, ntype=2):
+    """
+    Matrix norm.
+
+    Parameters
+    ----------
+        a: matrix, dense or sparse
+        ntype: norm to calculate
+
+    Returns
+    -------
+        x: matrix norm
+    """
+    keys = {'2': '2', 2: '2',
+            'f': 'f', 'fro': 'f',
+            't': 't', 'trace': 't', 'nuc': 't', 'tr': 't'}
+    methods = {('2', 0): norm_2,
+               ('2', 1): norm_2,
+               ('t', 0): norm_trace_dense,
+               ('t', 1): NotImplemented,
+               ('f', 0): norm_fro_dense,
+               ('f', 1): norm_fro_sparse}
+    return methods[(keys[ntype], issparse(a))](a)

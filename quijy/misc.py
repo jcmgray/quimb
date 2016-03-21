@@ -2,16 +2,21 @@
 Misc. functions not quantum related.
 """
 import numpy as np
-import scipy.sparse as sp
-from scipy.interpolate import splrep, splev
+from scipy.interpolate import splrep, splev, PchipInterpolator
 import xarray as xr
 from tqdm import tqdm
-from .core import eye, kron
+from .core import eye, kron, issparse
 
 
 def progbar(it, **kwargs):
     """ tqdm progress bar with deifferent defaults. """
     return tqdm(it, ascii=True, leave=True, **kwargs)
+
+
+def resample(x, y, n=100, **kwargs):
+    ix = np.linspace(x[0], x[-1], n)
+    iy = PchipInterpolator(x, y, **kwargs)(ix)
+    return ix, iy
 
 
 def spline_resample(x, y, n=100, **kwargs):
@@ -102,7 +107,7 @@ def eyepad_old(op, dims, inds, sparse=None):
     True
     """
     inds = np.array(inds, ndmin=1)
-    sparse = sp.issparse(op) if sparse is None else sparse  # infer sparsity
+    sparse = issparse(op) if sparse is None else sparse  # infer sparsity
     bop = eye(np.prod(dims[0:inds[0]]), sparse=sparse)
     for i in range(len(inds) - 1):
         bop = kron(bop, op)
@@ -112,3 +117,21 @@ def eyepad_old(op, dims, inds, sparse=None):
     pad_size = np.prod(dims[inds[-1] + 1:])
     bop = kron(bop, eye(pad_size, sparse=sparse))
     return bop
+
+
+def rk4_step(y0, f, dt, t=None):
+    """
+    Performs a 4th order runge-kutta step of length dt according to the
+    relation dy/dt = f(t, y). If t is not specified then assumes f = f(y)
+    """
+    if t is None:
+        k1 = f(y0)
+        k2 = f(y0 + k1 * dt / 2.0)
+        k3 = f(y0 + k2 * dt / 2.0)
+        k4 = f(y0 + k3 * dt)
+    else:
+        k1 = f(y0, t)
+        k2 = f(y0 + k1 * dt / 2.0, t + dt / 2.0)
+        k3 = f(y0 + k2 * dt / 2.0, t + dt / 2.0)
+        k4 = f(y0 + k3 * dt, t + dt)
+    return y0 + (k1 + 2.0 * k2 + 2.0 * k3 + k4) * dt / 6.0

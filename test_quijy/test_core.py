@@ -6,7 +6,11 @@ from numpy.testing import assert_allclose, assert_almost_equal
 from quijy.gen import (bell_state, rand_rho, rand_matrix, rand_ket, up, plus,
                        yplus, sig)
 from quijy.calc import mutual_information
-from quijy.core import *
+from quijy.core import (quijify, qjf, isbra, isket, isop, tr, isherm,
+                        trace, trace_dense, trace_sparse, nmlz, kron_dense,
+                        kron, kronpow, coos_map, coos_compress, eye, eyepad,
+                        permute_subsystems, ptr, chop, ldmul, rdmul,
+                        infer_size, issparse, matrixify, realify, issmall)
 
 
 class TestQuijify:
@@ -71,6 +75,12 @@ class TestQuijify:
 
 
 class TestShapes:
+    def test_sparse(self):
+        x = qjf([[1], [0]])
+        assert not issparse(x)
+        x = qjf([[1], [0]], sparse=True)
+        assert issparse(x)
+
     def test_ket(self):
         x = qjf([[1], [0]])
         assert(isket(x))
@@ -117,41 +127,107 @@ class TestShapes:
                  [2.0 - 3.0j, 1.0]], sparse=True)
         assert(not isherm(a))
 
+    def test_issmall(self):
+        a = qjf([1, 2, 3], 'ket')
+        assert issmall(a, 4)
+        assert not issmall(a, 2)
+        a = qjf([1, 2, 3], 'dop')
+        assert issmall(a, 4)
+        assert not issmall(a, 2)
+
+
+class TestMatrixify:
+    def test_matrixify(self):
+        def foo(n):
+            return np.random.randn(n, n)
+        a = foo(2)
+        assert not isinstance(a, np.matrix)
+
+        @matrixify
+        def foo(n):
+            return np.random.randn(n, n)
+        a = foo(2)
+        assert isinstance(a, np.matrix)
+
+
+class TestRealify:
+    def test_realify(self):
+        def foo(a, b):
+            return a + 1j * b
+        a = foo(1e15, 1)
+        assert a.real == 1e15
+        assert a.imag == 1
+
+        @realify
+        def foo(a, b):
+            return a + 1j * b
+        a = foo(1e15, 1)
+        assert a.real == 1e15
+        assert a.imag == 0
+
+
+class TestInferSize:
+    def test_infer_size(self):
+        p = rand_ket(8)
+        assert infer_size(p) == 3
+        p = rand_ket(16)
+        assert infer_size(p) == 4
+
+    def test_infer_size_base(self):
+        p = rand_ket(9)
+        assert infer_size(p, 3) == 2
+        p = rand_ket(81)
+        assert infer_size(p, 3) == 4
+
 
 class TestTrace:
-    def test_trace(self):
+    def test_trace_dense(self):
         a = qjf([[2, 1], [4, 5]])
-        assert(a.tr.__code__.co_code == trace.__code__.co_code)
-        assert(tr(a) == 7)
+        assert(trace(a) == 7)
+        a = qjf([[2, 1], [4, 5j]])
+        assert(trace(a) == 2 + 5j)
+        assert(a.tr.__code__.co_code == trace_dense.__code__.co_code)
 
     def test_sparse_trace(self):
-        a = qjf([[2, 1], [4, 5]], sparse=True)
-        assert(a.tr.__code__.co_code == sparse_trace.__code__.co_code)
-        assert(tr(a) == 7)
+        a = qjf([[2, 1], [0, 5]], sparse=True)
+        assert(trace(a) == 7)
+        a = qjf([[2, 1], [4, 5j]], sparse=True)
+        assert(trace(a) == 2 + 5j)
+        assert(a.tr.__code__.co_code == trace_sparse.__code__.co_code)
 
 
 class TestNormalize:
-    def test_normalize(self):
-        a = qjf([1, 1], 'ket')
+    def test_normalize_ket(self):
+        a = qjf([1, -1j], 'ket')
         b = nmlz(a, inplace=False)
-        assert_almost_equal(tr(b.H @ b), 1.0)
-        a = qjf([1, 1], 'bra')
-        b = nmlz(a, inplace=False)
-        assert_almost_equal(tr(b @ b.H), 1.0)
-        a = qjf([1, 1], 'dop')
-        b = nmlz(a, inplace=False)
-        assert_almost_equal(tr(b), 1.0)
+        assert_almost_equal(trace(b.H @ b), 1.0)
+        assert_almost_equal(trace(a.H @ a), 2.0)
 
-    def test_normalize_inplace(self):
-        a = qjf([1, 1], 'ket')
+    def test_normalize_bra(self):
+        a = qjf([1, -1j], 'bra')
+        b = nmlz(a, inplace=False)
+        assert_almost_equal(trace(b @ b.H), 1.0)
+
+    def test_normalize_dop(self):
+        a = qjf([1, -1j], 'dop')
+        b = nmlz(a, inplace=False)
+        assert_almost_equal(trace(b), 1.0)
+
+    def test_normalize_inplace_ket(self):
+        a = qjf([1, -1j], 'ket')
         a.nmlz(inplace=True)
-        assert_almost_equal(tr(a.H @ a), 1.0)
-        a = qjf([1, 1], 'bra')
+        assert_almost_equal(trace(a.H @ a), 1.0)
+
+    def test_normalize_inplace_bra(self):
+        a = qjf([1, -1j], 'bra')
         a.nmlz(inplace=True)
-        assert_almost_equal(tr(a @ a.H), 1.0)
-        a = qjf([1, 1], 'dop')
-        a.nmlz(inplace=True)
-        assert_almost_equal(tr(a), 1.0)
+        assert_almost_equal(trace(a @ a.H), 1.0)
+
+    def test_normalize_inplace_dop(self):
+        a = qjf([1, -1j], 'dop')
+        b = nmlz(a, inplace=True)
+        assert_almost_equal(trace(a), 1.0)
+        assert_almost_equal(trace(b), 1.0)
 
 
 class TestKron:
@@ -172,17 +248,12 @@ class TestKron:
                         np.kron(np.kron(a, b), c))
 
     def test_kron_mixed_types(self):
-        # TODO: scalar
         a = qjf([1, 2, 3, 4], 'ket')
         b = qjf([0, 1, 0, 2], 'ket', sparse=True)
-        # c = -1.0j
         assert_allclose(kron(a, b).A,
                         (sp.kron(a, b, 'csr')).A)
         assert_allclose(kron(b, b).A,
                         (sp.kron(b, b, 'csr')).A)
-        # assert_allclose(kron(a, c), a * c)
-        # kron(b, c)
-        # kron(b, c)
 
     def test_kronpow(self):
         a = rand_matrix(2)
@@ -191,38 +262,35 @@ class TestKron:
         assert_allclose(b, c)
 
 
-# TODO: test eye
-
-
-class TestCoordsMap:
-    def test_coord_map_1d(self):
+class TestCoosMap:
+    def test_coos_map_1d(self):
         dims = [10, 11, 12, 13]
         coos = (1, 2, 3)
-        ndims, ncoos = coord_map(dims, coos)
+        ndims, ncoos = coos_map(dims, coos)
         assert_allclose(ndims[ncoos], (11, 12, 13))
         coos = ([-1], [2], [5])
         with raises(ValueError):
-            ndims, ncoos = coord_map(dims, coos)
-        ndims, ncoos = coord_map(dims, coos, cyclic=True)
+            ndims, ncoos = coos_map(dims, coos)
+        ndims, ncoos = coos_map(dims, coos, cyclic=True)
         assert_allclose(ndims[ncoos], (13, 12, 11))
-        ndims, ncoos = coord_map(dims, coos, trim=True)
+        ndims, ncoos = coos_map(dims, coos, trim=True)
         assert_allclose(ndims[ncoos], [12])
 
-    def test_coord_map2d(self):
+    def test_coos_map2d(self):
         dims = [[200, 201, 202, 203],
                 [210, 211, 212, 213]]
         coos = ((1, 2), (1, 3), (0, 3))
-        ndims, ncoos = coord_map(dims, coos)
+        ndims, ncoos = coos_map(dims, coos)
         assert_allclose(ndims[ncoos], (212, 213, 203))
         coos = ((-1, 1), (1, 2), (3, 4))
         with raises(ValueError):
-            ndims, ncoos = coord_map(dims, coos)
-        ndims, ncoos = coord_map(dims, coos, cyclic=True)
+            ndims, ncoos = coos_map(dims, coos)
+        ndims, ncoos = coos_map(dims, coos, cyclic=True)
         assert_allclose(ndims[ncoos], (211, 212, 210))
-        ndims, ncoos = coord_map(dims, coos, trim=True)
+        ndims, ncoos = coos_map(dims, coos, trim=True)
         assert_allclose(ndims[ncoos], [212])
 
-    def test_coord_map_3d(self):
+    def test_coos_map_3d(self):
         dims = [[[3000, 3001, 3002],
                  [3010, 3011, 3012],
                  [3020, 3021, 3022]],
@@ -230,19 +298,48 @@ class TestCoordsMap:
                  [3110, 3111, 3112],
                  [3120, 3121, 3122]]]
         coos = ((0, 0, 2), (1, 1, 2), (1, 2, 0))
-        ndims, ncoos = coord_map(dims, coos)
+        ndims, ncoos = coos_map(dims, coos)
         assert_allclose(ndims[ncoos], (3002, 3112, 3120))
         coos = ((0, -1, 2), (1, 2, 2), (4, -1, 3))
         with raises(ValueError):
-            ndims, ncoos = coord_map(dims, coos)
-        ndims, ncoos = coord_map(dims, coos, cyclic=True)
+            ndims, ncoos = coos_map(dims, coos)
+        ndims, ncoos = coos_map(dims, coos, cyclic=True)
         assert_allclose(ndims[ncoos], (3022, 3122, 3020))
-        ndims, ncoos = coord_map(dims, coos, trim=True)
+        ndims, ncoos = coos_map(dims, coos, trim=True)
         assert_allclose(ndims[ncoos], [3122])
 
 
+class TestCoosCompress:
+    def test_coos_compress_edge(self):
+        dims = [2, 3, 2, 4, 5]
+        coos = [0, 4]
+        ndims, ncoos = coos_compress(dims, coos)
+        assert ndims == [2, 24, 5]
+        assert ncoos == [0, 2]
+
+    def test_coos_compress_middle(self):
+        dims = [5, 3, 2, 5, 4, 3, 2]
+        coos = [1, 2, 3, 5]
+        ndims, ncoos = coos_compress(dims, coos)
+        assert ndims == [5, 30, 4, 3, 2]
+        assert ncoos == [1, 3]
+
+
+class TestEye:
+    def test_eye_dense(self):
+        a = eye(3, sparse=False)
+        assert a.shape == (3, 3)
+        assert isinstance(a, np.matrix)
+        assert a.dtype == complex
+
+    def test_eye_sparse(self):
+        a = eye(3, sparse=True)
+        assert a.shape == (3, 3)
+        assert isinstance(a, sp.csr_matrix)
+        assert a.dtype == complex
+
+
 class TestEyepad:
-    # TODO: test 2d+ dims and coos
     def test_eyepad_basic(self):
         a = rand_matrix(2)
         i = eye(2)
@@ -322,11 +419,11 @@ class TestEyepad:
         i = eye(2, sparse=True)
         a = qjf(rand_matrix(2), sparse=True)
         b = eyepad(a, [2, 2, 2], 1)  # infer sparse
-        assert(sp.issparse(b))
+        assert(issparse(b))
         assert_allclose(b.A, (i & a & i).A)
         a = rand_matrix(2)
         b = eyepad(a, [2, 2, 2], 1, sparse=True)  # explicit sparse
-        assert(sp.issparse(b))
+        assert(issparse(b))
         assert_allclose(b.A, (i & a & i).A)
 
     def test_eyepad_2d_simple(self):
@@ -359,6 +456,12 @@ class TestPermuteSubsystems:
 
 
 class TestPartialTrace:
+    def TestPartialTraceBasic(self):
+        a = rand_matrix(2**2)
+        b = ptr(a, [2, 2], 0)
+        assert isinstance(b, np.matrix)
+        assert isherm(b)
+
     def test_partial_trace_early_return(self):
         a = qjf([0.5, 0.5, 0.5, 0.5], 'ket')
         b = ptr(a, [2, 2], [0, 1])
@@ -370,10 +473,10 @@ class TestPartialTrace:
     def test_partial_trace_return_type(self):
         a = qjf([0, 2**-0.5, 2**-0.5, 0], 'ket')
         b = ptr(a, [2, 2], 1)
-        assert(type(a) == np.matrix)
+        assert(type(b) == np.matrix)
         a = qjf([0, 2**-0.5, 2**-0.5, 0], 'dop')
         b = ptr(a, [2, 2], 1)
-        assert(type(a) == np.matrix)
+        assert(type(b) == np.matrix)
 
     def test_partial_trace_single_ket(self):
         dims = [2, 3, 4]
@@ -477,37 +580,3 @@ class TestFastDiagMul:
         a = rdmul(mat, vec)
         b = mat @ np.diag(vec)
         assert_allclose(a, b)
-
-
-class TestInferSize:
-    def test_infer_size(self):
-        p = rand_ket(8)
-        assert infer_size(p) == 3
-        p = rand_ket(16)
-        assert infer_size(p) == 4
-
-    def test_infer_size_base(self):
-        p = rand_ket(9)
-        assert infer_size(p, 3) == 2
-        p = rand_ket(81)
-        assert infer_size(p, 3) == 4
-
-
-class TestLeviCivita:
-    def test_levi_civita_pos(self):
-        perm = [0, 1, 2, 3]
-        assert levi_civita(perm) == 1
-        perm = [2, 3, 0, 1]
-        assert levi_civita(perm) == 1
-
-    def test_levi_civita_neg(self):
-        perm = [0, 2, 1, 3]
-        assert levi_civita(perm) == -1
-        perm = [2, 3, 1, 0]
-        assert levi_civita(perm) == -1
-
-    def test_levi_civita_nzero(self):
-        perm = [2, 3, 1, 1]
-        assert levi_civita(perm) == 0
-        perm = [0, 0, 1, 1]
-        assert levi_civita(perm) == 0

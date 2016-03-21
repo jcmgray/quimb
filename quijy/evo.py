@@ -4,106 +4,126 @@ quantum states according to schrodingers' equation, and related functions.
 TODO: iterative method, sparse etc., turn off optimzations for small n
 """
 
-from numpy.linalg import multi_dot as mdot
-from numexpr import evaluate as evl
-from .core import isop, quijify, ldmul, rdmul
-from .solve import eigsys
+import numpy as np
+from scipy.integrate import complex_ode
+from .core import isop, qjf, ldmul, rdmul
+from .solve import eigsys, norm
 
 
 class QuEvo(object):
+    # TODO: solout method with funcyt
+    # TODO: QuEvoTimeDepend
     """
     A class for evolving quantum systems according to schro equation
     Note that vector states are converted to kets always.
     """
-    # TODO diagonalise or use iterative method ...
     def __init__(self,
                  p0,
                  ham,
-                 dop=None,
                  solve=False,
-                 t0=0):
+                 t0=0,
+                 small_step=False):
         """
-        Inputs:
+        Parameters
+        ----------
             p0: inital state, either vector or operator
             ham: Governing Hamiltonian, can be tuple (eigvals, eigvecs)
             dop: whether to force evolution as density operator
             solve: whether to immediately solve hamiltonian
-            t0: initial time
+            t0: initial time (i.e. time of state p0)
             l: eigenvalues if ham already solved
             v: eigevvectors if ham already solved
+
+        Members
+        -------
+            t: current time
+            pt: current state
         """
         super(QuEvo, self).__init__()
 
-        # Convert state to ket or dop and mark as such
-        self.p0 = quijify(p0)
-        if isop(self.p0):
-            if dop is False:
-                raise ValueError('Cannot convert dop to ket.')
-            else:
-                self.dop = True
-        else:
-            if dop is True:
-                self.p0 = quijify(p0, 'dop')
-                self.dop = True
-            else:
-                self.p0 = quijify(p0, 'ket')  # make sure ket
-                self.dop = False
-        self.pt = p0  # Current state (start with same as initial)
+        self.p0 = qjf(p0)
         self.t0 = t0  # initial time
+        self.dop = isop(self.p0)
         self.t = t0  # current time
+        self.d = p0.shape[0]  # Hilbert space dimensions
 
         # Set Hamiltonian and infer if solved already from tuple
-        if type(ham) is tuple:  # Eigendecomposition already supplied
+        if type(ham) is tuple:
+            # Eigendecomposition already supplied
             self.l, self.v = ham
-            # Solve for initial state in energy basis
-            if self.dop:
-                self.pe0 = mdot([self.v.H, p0, self.v])
-            else:
-                self.pe0 = self.v.H @ p0
-            self.solved = True
+            self.solve_ham()
         elif solve:
+            # Eigendecomposition not supplied, but wanted
             self.ham = ham
             self.solve_ham()
             self.solved = True
         else:
+            # Use definite integration to solve schrodinger equation
             self.ham = ham
+            if self.dop:
+                self.stepper = complex_ode(schrodinger_eq_dop(self.ham))
+            else:
+                self.stepper = complex_ode(schrodinger_eq_ket(self.ham))
+            if small_step:
+                self.stepper.set_integrator(
+                    'dopri5', nsteps=1000,
+                    first_step=norm(self.ham, 'f') / 150)
+            else:
+                self.stepper.set_integrator(
+                    'dop853', nsteps=1000,
+                    first_step=norm(self.ham, 'f') / 50)
+            self.stepper.set_initial_value(np.asarray(p0).reshape(-1), t0)
             self.solved = False
 
     def solve_ham(self):
-        # Diagonalise hamiltonian
-        self.l, self.v = eigsys(self.ham)
+        try:  # Already set from tuple
+            self.l, self.v
+        except AttributeError:
+            self.l, self.v = eigsys(self.ham)
         # Find initial state in energy eigenbasis at t0
         if self.dop:
-            self.pe0 = mdot([self.v.H, self.p0, self.v])
+            self.pe0 = self.v.H @ self.p0 @ self.v
         else:
             self.pe0 = self.v.H @ self.p0
-        # Mark solved
+        self._pt = self.p0  # Current state (start with same as initial)
         self.solved = True
+
+    @property
+    def pt(self):
+        if self.solved:
+            return self._pt
+        else:
+            return np.asmatrix(self.stepper.y.reshape(self.d, -1))
 
     def update_to(self, t):
         self.t = t
-        dt = self.t - self.t0
-        exptl = evl('exp(-1.0j*dt*l)', local_dict={'l': self.l, 'dt': dt})
-        if self.dop:
-            lvpvl = rdmul(ldmul(exptl, self.pe0), evl('conj(exptl)'))
-            self.pt = mdot([self.v, lvpvl, self.v.H])
+        if self.solved:
+            exptl = np.exp((-1.0j * (self.t - self.t0)) * self.l)
+            if self.dop:
+                lvpvl = rdmul(ldmul(exptl, self.pe0), exptl.conj())
+                self._pt = self.v @ lvpvl @ self.v.H
+            else:
+                self._pt = self.v @ ldmul(exptl, self.pe0)
         else:
-            self.pt = self.v @ ldmul(exptl, self.pe0)
+            self.stepper.integrate(t)
 
 
-def rk4_step(y0, f, dt, t=None):
+def schrodinger_eq_ket(ham):
+    """ Fucntion representaiton of schrodinger equation. """
+
+    def foo(t, y):
+        return -1.0j * (ham @ y)
+    return foo
+
+
+def schrodinger_eq_dop(ham):
     """
-    Performs a 4th order runge-kutta step of length dt according to the
-    relation dy/dt = f(t, y). If t is not specified then assumes f = f(y)
+    Density operator schrodinger equation, but flattened input/output
     """
-    if t is None:
-        k1 = f(y0)
-        k2 = f(y0 + k1 * dt / 2.0)
-        k3 = f(y0 + k2 * dt / 2.0)
-        k4 = f(y0 + k3 * dt)
-    else:
-        k1 = f(y0, t)
-        k2 = f(y0 + k1 * dt / 2.0, t + dt / 2.0)
-        k3 = f(y0 + k2 * dt / 2.0, t + dt / 2.0)
-        k4 = f(y0 + k3 * dt, t + dt)
-    return y0 + (k1 + 2.0 * k2 + 2.0 * k3 + k4) * dt / 6.0
+    d = ham.shape[0]
+
+    def foo(t, y):
+        rho = y.reshape(d, -1)
+        hrho = ham @ rho
+        return -1.0j * (hrho - hrho.transpose().conjugate()).reshape(-1)
+    return foo

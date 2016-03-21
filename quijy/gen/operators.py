@@ -21,37 +21,33 @@ def sig(xyz, dim=2, **kwargs):
         0: 'i', 'i': 'i', 'I': 'i',
         1: 'x', 'x': 'x', 'X': 'x',
         2: 'y', 'y': 'y', 'Y': 'y',
-        3: 'z', 'z': 'z', 'Z': 'z'
-    }
+        3: 'z', 'z': 'z', 'Z': 'z'}
     opmap = {
+        ('i', 2): lambda: eye(2, **kwargs),
         ('x', 2): lambda: qjf([[0, 1],
                                [1, 0]], **kwargs),
+        ('y', 2): lambda: qjf([[0, -1j],
+                               [1j, 0]], **kwargs),
+        ('z', 2): lambda: qjf([[1, 0],
+                               [0, -1]], **kwargs),
+        ('i', 3): lambda: eye(3, **kwargs),
         ('x', 3): lambda: qjf([[0, 1, 0],
                                [1, 0, 1],
                                [0, 1, 0]], **kwargs) / 2**0.5,
-        ('y', 2): lambda: qjf([[0, -1j],
-                               [1j, 0]], **kwargs),
         ('y', 3): lambda: qjf([[0, -1j, 0],
                                [1j, 0, -1j],
                                [0, 1j, 0]], **kwargs) / 2**0.5,
-        ('z', 2): lambda: qjf([[1, 0],
-                               [0, -1]], **kwargs),
         ('z', 3): lambda: qjf([[1, 0, 0],
                                [0, 0, 0],
-                               [0, 0, -1]], **kwargs),
-        ('i', 2): lambda: eye(2, **kwargs),
-        ('i', 3): lambda: eye(3, **kwargs),
-    }
+                               [0, 0, -1]], **kwargs)}
     return opmap[(xyzmap[xyz], dim)]()
 
 
 @lru_cache(maxsize=8)
 def controlled(s, sparse=False):
-    keymap = {
-        'x': 'x', 'not': 'x',
-        'y': 'y',
-        'z': 'z',
-        }
+    keymap = {'x': 'x', 'not': 'x',
+              'y': 'y',
+              'z': 'z'}
     return ((qjf([1, 0], qtype='dop', sparse=sparse) &
              eye(2, sparse=sparse)) +
             (qjf([0, 1], qtype='dop', sparse=sparse) &

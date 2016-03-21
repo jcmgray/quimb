@@ -4,7 +4,7 @@ from numpy.testing import assert_allclose
 from quijy.core import tr, eye, chop, eyepad
 from quijy.solve import eigsys, groundstate
 from quijy.gen import (basis_vec, thermal_state, ham_j1j2, rand_herm,
-                       graph_state_1d, sig)
+                       graph_state_1d, sig, levi_civita)
 
 
 class TestBasisVec:
@@ -65,3 +65,23 @@ class TestGraphState:
                        (j, (j - 1) % n, (j + 1) % n))
             o = p.H @ k @ p
             np.testing.assert_allclose(o, 1)
+
+
+class TestLeviCivita:
+    def test_levi_civita_pos(self):
+        perm = [0, 1, 2, 3]
+        assert levi_civita(perm) == 1
+        perm = [2, 3, 0, 1]
+        assert levi_civita(perm) == 1
+
+    def test_levi_civita_neg(self):
+        perm = [0, 2, 1, 3]
+        assert levi_civita(perm) == -1
+        perm = [2, 3, 1, 0]
+        assert levi_civita(perm) == -1
+
+    def test_levi_civita_nzero(self):
+        perm = [2, 3, 1, 1]
+        assert levi_civita(perm) == 0
+        perm = [0, 0, 1, 1]
+        assert levi_civita(perm) == 0

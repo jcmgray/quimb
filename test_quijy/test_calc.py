@@ -74,7 +74,7 @@ class TestQuantumDiscord:
             p = p @ p.H
             iab = mutual_information(p)
             qd = quantum_discord(p)
-            assert_allclose(iab, qd)
+            assert_allclose(iab / 2, qd)
 
     def test_quantum_discord_mixed(self):
         for i in range(10):

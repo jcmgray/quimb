@@ -8,8 +8,7 @@ from functools import lru_cache
 from math import factorial
 import numpy as np
 import scipy.sparse as sp
-from ..core import (qjf, kron, kronpow, eye, levi_civita,
-                    ldmul, eyepad)
+from ..core import (qjf, kron, kronpow, eye, ldmul, eyepad)
 from ..solve import eigsys
 from .operators import sig, controlled
 
@@ -172,9 +171,23 @@ def w_state(n, sparse=False):
     return sum(basis_vec(2**i, 2**n, sparse=sparse) for i in range(n))/n**0.5
 
 
-def multi_singlet(n):
-    es = [basis_vec(i, n) for i in range(n)]
-    vec_perm = permutations(es)
+def levi_civita(perm):
+    """
+    Compute the generalised levi-civita coefficient for a
+    permutation of the ints in range(n)
+    """
+    n = len(perm)
+    if n != len(set(perm)):  # infer there are repeated elements
+        return 0
+    mat = np.zeros((n, n), dtype=np.int32)
+    for i, j in zip(range(n), perm):
+        mat[i, j] = 1
+    return int(np.linalg.det(mat))
+
+
+def perm_state(ps):
+    n = len(ps)
+    vec_perm = permutations(ps)
     ind_perm = permutations(range(n))
 
     def terms():

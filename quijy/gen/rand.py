@@ -2,44 +2,57 @@
 Functions for generating random quantum objects and states.
 """
 import numpy as np
+import scipy.sparse as sp
 from ..core import qjf, ptr, kron, rdmul, nmlz
 
 
-def rand_matrix(d, scaled=False):
+def rand_matrix(d, scaled=True, sparse=False, format='csr', density=0.01):
     """
     Generate a random complex matrix of order `d` with normally distributed
     entries. If `scaled` is `True`, then in the limit of large `d` the
     eigenvalues will be distributed on the unit complex disk.
     """
-    mat = np.random.randn(d, d) + 1.0j*np.random.randn(d, d)
+    if sparse:
+        mat = sp.random(d, d, format=format, density=density)
+        mat.data = np.random.randn(mat.nnz) + 1.0j * np.random.randn(mat.nnz)
+    else:
+        density = 1.0
+        mat = np.random.randn(d, d) + 1.0j * np.random.randn(d, d)
+        mat = np.asmatrix(mat)
     if scaled:
-        mat /= (2 * d)**0.5
-    return np.matrix(mat, copy=False)
+        mat /= (2 * d * density)**0.5
+    return mat
 
 
-def rand_herm(d):
+def rand_herm(d, sparse=False, density=0.01):
     """
     Generate a random hermitian matrix of order `d` with normally distributed
-    entries. In the limit of large `d` the spectrum will be a semi-circular distribution between [-1, 1].
+    entries. In the limit of large `d` the spectrum will be a semi-circular
+    distribution between [-1, 1].
     """
-    herm = rand_matrix(d) / (2**2 * d**0.5)
-    return herm + herm.H
+    density /= 2
+    herm = rand_matrix(d, scaled=True, sparse=sparse,
+                       density=density) / (2**1.5)
+    herm += herm.H
+    return herm
 
 
-def rand_pos(d):
+def rand_pos(d, sparse=False, density=0.01):
     """
     Generate a random positive matrix of order `d`, with normally distributed
     entries. In the limit of large `d` the spectrum will lie between [0, 1].
     """
-    pos = rand_matrix(d) / (2**1.5 * d**0.5)
+    density = (density / d)**0.5
+    pos = rand_matrix(d, scaled=True, sparse=sparse, density=density) / 2
     return pos @ pos.H
 
 
-def rand_rho(d):
+def rand_rho(d, sparse=False, density=0.01):
     """
-    Generate a random positive matrix of order `d` with normally distributed entries and unit trace.
+    Generate a random positive matrix of order `d` with normally distributed
+    entries and unit trace.
     """
-    return nmlz(rand_pos(d))
+    return nmlz(rand_pos(d, sparse=sparse, density=density))
 
 
 def rand_ket(d):

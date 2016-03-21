@@ -1,9 +1,10 @@
-from functools import lru_cache
-import scipy.sparse as sp
 from pytest import fixture
+import numpy as np
 from numpy.testing import assert_allclose
-from quijy import ldmul, rand_uni
-from quijy.solve import *
+from quijy import ldmul, rand_uni, issparse, qjf
+from quijy.solve import (eigsys, eigvals, eigvecs, seigvals, seigvecs,
+                         seigsys, groundstate, groundenergy, svds, norm,
+                         choose_ncv)
 
 
 @fixture
@@ -63,7 +64,7 @@ class TestEigh:
 class TestEigsh:
     def test_seigsys_small_dense_wvecs(self, premat):
         u, a = premat
-        assert not sp.issparse(a)
+        assert not issparse(a)
         lk, vk = seigsys(a, k=2)
         assert_allclose(lk, (-3, -1))
         for i, j in zip([3, 0], [0, 1]):
@@ -76,13 +77,13 @@ class TestEigsh:
 
     def test_seigsys_small_dense_novecs(self, premat):
         _, a = premat
-        assert not sp.issparse(a)
+        assert not issparse(a)
         lk = seigvals(a, k=2)
         assert_allclose(lk, (-3, -1))
 
     def test_seigsys_sparse_wvecs(self, prematsparse):
         u, a = prematsparse
-        assert sp.issparse(a)
+        assert issparse(a)
         lk, vk = seigsys(a, k=2)
         assert_allclose(lk, (-3, -1))
         for i, j in zip([3, 0], [0, 1]):
@@ -95,7 +96,7 @@ class TestEigsh:
 
     def test_seigsys_small_sparse_novecs(self, prematsparse):
         _, a = prematsparse
-        assert sp.issparse(a)
+        assert issparse(a)
         lk = seigvals(a, k=2)
         assert_allclose(lk, (-3, -1))
 
@@ -141,9 +142,9 @@ class TestSVDS:
         sk = svds(a, k=3, return_vecs=False)
         assert_allclose(sk, [4, 3, 2])
 
-    def test_norm2(self, svdpremat):
+    def test_norm(self, svdpremat):
         _, _, a = svdpremat
-        assert_allclose(norm2(a), 4.)
+        assert_allclose(norm(a), 4.)
 
 
 class TestChooseNCV:
