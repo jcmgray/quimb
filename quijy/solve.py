@@ -10,7 +10,7 @@ import numpy as np
 import numpy.linalg as nla
 import scipy.sparse.linalg as spla
 from numba import jit
-from .core import qjf, issparse, jvdot
+from .core import qjf, issparse, accel_vdot
 
 
 # -------------------------------------------------------------------------- #
@@ -162,11 +162,11 @@ def norm_2(a):
 
 @jit(nopython=True)
 def norm_fro_dense(a):
-    return jvdot(a, a).real**0.5
+    return accel_vdot(a, a).real**0.5
 
 
 def norm_fro_sparse(a):
-    return jvdot(a.data, a.data).real**0.5
+    return accel_vdot(a.data, a.data).real**0.5
 
 
 def norm_trace_dense(a):

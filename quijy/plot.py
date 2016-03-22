@@ -209,6 +209,7 @@ def ilineplot(ds, data_name, x_coo, z_coo=None, logx=False, logy=False,
               erry=None, errx=None, nb=True, color=False, colormap='viridis',
               legend=None, traces=[], go_dict={}, ly_dict={},
               return_fig=False, **kwargs):
+    # TODO: add hlines, vlines, xlims, ylims, title
     from plotly.graph_objs import Scatter
     if z_coo is None:
         traces = [Scatter({

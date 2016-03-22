@@ -229,6 +229,7 @@ def coos_map(dims, coos, cyclic=False, trim=False):
 
 
 def coos_compress(dims, coos):
+    # TODO: handle noniterble coos
     """
     Compresses identity spaces together: groups 1D dimensions according to
     whether their index appears in coos, then merges the groups.
@@ -242,10 +243,10 @@ def coos_compress(dims, coos):
 
 @matrixify
 @jit(nopython=True)
-def identity_dense(n):
+def identity_dense(n):  # pragma: no cover
     x = np.zeros((n, n), dtype=np.complex128)
     for i in range(n):
-        x[i, i] = 1.0 + 0.0j
+        x[i, i] = 1
     return x
 
 
@@ -253,10 +254,13 @@ def identity_sparse(n):
     return sp.eye(n, dtype=complex, format='csr')
 
 
-def eye(n, sparse=False):
+def identity(n, sparse=False):
     # TODO: rename?
     """ Return identity of size n in complex format, optionally sparse"""
     return identity_sparse(n) if sparse else identity_dense(n)
+
+
+eye = identity
 
 
 def eyepad(ops, dims, inds, sparse=None):
@@ -372,7 +376,7 @@ def permute_subsystems(p, dims, perm):
 
 
 def partial_trace_clever(p, dims, keep):
-    # TODO: clean up, compress coords?
+    # TODO: compress coords?
     """ Perform partial trace.
 
     Parameters
@@ -385,48 +389,40 @@ def partial_trace_clever(p, dims, keep):
     -------
         Density matrix of subsytem dimensions dims[keep]
     """
-    # Cast as ndarrays for 2D+ reshaping
-    if np.size(keep) == np.size(dims):  # keep all subsystems
-        if not isop(p):
-            return p @ p.H  # but return as density operator for consistency
-        return p
-    n = np.size(dims)
     dims, keep = np.array(dims, ndmin=1), np.array(keep, ndmin=1)
+    n = len(dims)
     lose = np.delete(range(n), keep)
-    dimkeep, dimlose = np.prod(dims[keep]), np.prod(dims[lose])
+    sz_keep, sz_lose = np.prod(dims[keep]), np.prod(dims[lose])
     # Permute dimensions into block of keep and block of lose
-    perm = np.array([*keep, *lose])
+    perm = np.asarray((*keep, *lose))
     # Apply permutation to state and trace out block of lose
     if not isop(p):  # p = psi
-        p = np.array(p)
-        p = p.reshape(dims) \
+        p = np.asarray(p).reshape(dims) \
             .transpose(perm) \
-            .reshape([dimkeep, dimlose])
-        p = np.matrix(p, copy=False)
-        return p @ p.H
-    else:  # p = rho
-        p = np.array(p)
-        p = p.reshape((*dims, *dims)) \
+            .reshape((sz_keep, sz_lose))
+        p = np.asmatrix(p)
+        return accel_dot(p, p.H)
+    else:
+        p = np.asarray(p).reshape((*dims, *dims)) \
             .transpose((*perm, *(perm + n))) \
-            .reshape([dimkeep, dimlose, dimkeep, dimlose]) \
+            .reshape((sz_keep, sz_lose, sz_keep, sz_lose)) \
             .trace(axis1=1, axis2=3)
-        return np.matrix(p, copy=False)
+        return np.asmatrix(p)
 
 
-def trace_lose(rho, dims, coo_lose):
-    # TODO: TEST
-    # TODO: jit version?
+def trace_lose(p, dims, coo_lose):
     """
     Simple partial trace where the single subsytem at coo_lose is traced out.
     """
-    dims = np.array(dims)
+    p = p if isop(p) else p @ p.H
+    dims = np.asarray(dims)
     e = dims[coo_lose]
     a = np.prod(dims[:coo_lose], dtype=int)
     b = np.prod(dims[coo_lose+1:], dtype=int)
     rhos = zeros(shape=(a * b, a * b), dtype=np.complex128)
     for i in range(a * b):
         for j in range(i, a * b):
-            rhos[i, j] = trace(rho[
+            rhos[i, j] = trace(p[
                     e * b * (i // b) + (i % b):
                     e * b * (i // b) + (i % b) + (e - 1) * b + 1: b,
                     e * b * (j // b) + (j % b):
@@ -436,21 +432,20 @@ def trace_lose(rho, dims, coo_lose):
     return rhos
 
 
-def trace_keep(rho, dims, coo_keep):
-    # TODO: TEST
-    # TODO: jit version?
+def trace_keep(p, dims, coo_keep):
     """
     Simple partial trace where the single subsytem at coo_keep is kept.
     """
-    dims = np.array(dims)
+    p = p if isop(p) else p @ p.H
+    dims = np.asarray(dims)
     s = dims[coo_keep]
-    a = np.prod(dims[:coo_keep], dtype=complex)
-    b = np.prod(dims[coo_keep+1:], dtype=complex)
+    a = np.prod(dims[:coo_keep], dtype=int)
+    b = np.prod(dims[coo_keep+1:], dtype=int)
     rhos = zeros(shape=(s, s), dtype=np.complex128)
-    for i in np.arange(s):
-        for j in np.arange(i, s):
-            for k in np.arange(a):
-                rhos[i, j] += trace(rho[
+    for i in range(s):
+        for j in range(i, s):
+            for k in range(a):
+                rhos[i, j] += trace(p[
                         b * i + s * b * k: b * i + s * b * k + b,
                         b * j + s * b * k: b * j + s * b * k + b])
             if j != i:
@@ -528,7 +523,7 @@ def chop(x, tol=1.0e-15, inplace=True):
 
 @matrixify
 @jit(nopython=True)
-def jmul(x, y):
+def accel_mul(x, y):  # pragma: no cover
     # TODO: write as method, with type inference etc.
     """ Accelerated element-wise multiplication of two matrices """
     return x * y
@@ -536,14 +531,15 @@ def jmul(x, y):
 
 @matrixify
 @jit(nopython=True)
-def jdot(a, b):
+def accel_dot(a, b):  # pragma: no cover
     # TODO: write as method, with type inference etc.
     """ Accelerated dot product of two matrices. """
     return a @ b
 
 
+@realify
 @jit(nopython=True)
-def jvdot(a, b):
+def accel_vdot(a, b):  # pragma: no cover
     """ Accelerated 'Hermitian' inner product of two vectors. """
     return np.vdot(a.ravel(), b.ravel())
 
@@ -568,7 +564,7 @@ def ldmul(vec, mat):
     if d > 500:
         return evl('vec*mat')
     else:
-        return jmul(vec, mat)
+        return accel_mul(vec, mat)
 
 
 @matrixify
@@ -591,7 +587,7 @@ def rdmul(mat, vec):
     if d > 500:
         return evl('mat*vec')
     else:
-        return jmul(mat, vec)
+        return accel_mul(mat, vec)
 
 
 def inner(a, b):
@@ -599,14 +595,12 @@ def inner(a, b):
     Operator inner product between a and b, i.e. for vectors it will be the
     absolute overlap squared <a|b><b|a>, rather than <a|b>.
     """
-    opa, opb = isop(a), isop(b)
-    sparse = issparse(a) or issparse(b)
-    method = {(0, 0, 0): lambda: abs(jvdot(a, b))**2,
-              (0, 1, 0): lambda: jvdot(a, jdot(b, a)),
-              (1, 0, 0): lambda: jvdot(b, jdot(a, b)),
-              (1, 1, 0): lambda: trace_dense(jdot(a, b)),
+    method = {(0, 0, 0): lambda: abs(accel_vdot(a, b))**2,
+              (0, 1, 0): lambda: accel_vdot(a, accel_dot(b, a)),
+              (1, 0, 0): lambda: accel_vdot(b, accel_dot(a, b)),
+              (1, 1, 0): lambda: trace_dense(accel_dot(a, b)),
               (0, 0, 1): lambda: abs((a.H @ b)[0, 0])**2,
               (1, 0, 1): lambda: (b.H @ a @ b)[0, 0],
               (0, 1, 1): lambda: (a.H @ b @ a)[0, 0],
               (1, 1, 1): lambda: trace_sparse(a @ b)}
-    return method[opa, opb, sparse]()
+    return method[isop(a), isop(b), issparse(a) or issparse(b)]()

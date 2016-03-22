@@ -10,7 +10,9 @@ from quijy.core import (quijify, qjf, isbra, isket, isop, tr, isherm,
                         trace, trace_dense, trace_sparse, nmlz, kron_dense,
                         kron, kronpow, coos_map, coos_compress, eye, eyepad,
                         permute_subsystems, ptr, chop, ldmul, rdmul,
-                        infer_size, issparse, matrixify, realify, issmall)
+                        infer_size, issparse, matrixify, realify, issmall,
+                        accel_mul, accel_dot, accel_vdot, inner, trace_lose,
+                        trace_keep)
 
 
 class TestQuijify:
@@ -455,9 +457,9 @@ class TestPermuteSubsystems:
         assert_allclose(mutual_information(b, dims, 0, 2), 2.)
 
 
-class TestPartialTrace:
-    def TestPartialTraceBasic(self):
-        a = rand_matrix(2**2)
+class TestPartialTraceClever:
+    def test_partial_trace_basic(self):
+        a = rand_rho(2**2)
         b = ptr(a, [2, 2], 0)
         assert isinstance(b, np.matrix)
         assert isherm(b)
@@ -514,6 +516,84 @@ class TestPartialTrace:
         assert(b.shape[0] == 2)
 
 
+class TestTraceLose:
+    def test_rps(self):
+        a, b, c = (rand_rho(2, sparse=True, density=0.5),
+                   rand_rho(3, sparse=True, density=0.5),
+                   rand_rho(2, sparse=True, density=0.5))
+        abc = a & b & c
+        pab = trace_lose(abc, [2, 3, 2], 2)
+        assert_allclose(pab, (a & b).A)
+        pac = trace_lose(abc, [2, 3, 2], 1)
+        assert_allclose(pac, (a & c).A)
+        pbc = trace_lose(abc, [2, 3, 2], 0)
+        assert_allclose(pbc, (b & c).A)
+
+    def test_bell_state(self):
+        a = bell_state('psi-', sparse=True)
+        b = trace_lose(a @ a.H, [2, 2], 0)
+        assert_allclose(b, eye(2) / 2)
+        b = trace_lose(a @ a.H, [2, 2], 1)
+        assert_allclose(b, eye(2) / 2)
+
+    def test_vs_ptr(self):
+        a = rand_rho(6, sparse=True, density=0.5)
+        b = trace_lose(a, [2, 3], 1)
+        c = ptr(a.A, [2, 3], 0)
+        assert_allclose(b, c)
+        b = trace_lose(a, [2, 3], 0)
+        c = ptr(a.A, [2, 3], 1)
+        assert_allclose(b, c)
+
+    def test_vec_dense(self):
+        a = rand_ket(4)
+        b = trace_lose(a, [2, 2], 1)
+        c = ptr(a.A, [2, 2], 0)
+        assert_allclose(b, c)
+        b = trace_lose(a, [2, 2], 0)
+        c = ptr(a.A, [2, 2], 1)
+        assert_allclose(b, c)
+
+
+class TestTraceKeep:
+    def test_rps(self):
+        a, b, c = (rand_rho(2, sparse=True, density=0.5),
+                   rand_rho(3, sparse=True, density=0.5),
+                   rand_rho(2, sparse=True, density=0.5))
+        abc = a & b & c
+        pc = trace_keep(abc, [2, 3, 2], 2)
+        assert_allclose(pc, c.A)
+        pb = trace_keep(abc, [2, 3, 2], 1)
+        assert_allclose(pb, b.A)
+        pa = trace_keep(abc, [2, 3, 2], 0)
+        assert_allclose(pa, a.A)
+
+    def test_bell_state(self):
+        a = bell_state('psi-', sparse=True)
+        b = trace_keep(a @ a.H, [2, 2], 0)
+        assert_allclose(b, eye(2) / 2)
+        b = trace_keep(a @ a.H, [2, 2], 1)
+        assert_allclose(b, eye(2) / 2)
+
+    def test_vs_ptr(self):
+        a = rand_rho(6, sparse=True, density=0.5)
+        b = trace_keep(a, [2, 3], 0)
+        c = ptr(a.A, [2, 3], 0)
+        assert_allclose(b, c)
+        b = trace_keep(a, [2, 3], 1)
+        c = ptr(a.A, [2, 3], 1)
+        assert_allclose(b, c)
+
+    def test_vec_dense(self):
+        a = rand_ket(4)
+        b = trace_keep(a, [2, 2], 0)
+        c = ptr(a.A, [2, 2], 0)
+        assert_allclose(b, c)
+        b = trace_keep(a, [2, 2], 1)
+        c = ptr(a.A, [2, 2], 1)
+        assert_allclose(b, c)
+
+
 class TestChop:
     def test_chop_inplace(self):
         a = qjf([-1j, 0.1+0.2j])
@@ -548,6 +628,50 @@ class TestChop:
         assert((b != bo).nnz == 0)
 
 
+class TestAccelMul:
+    def test_accel_mul_same(self):
+        a = rand_matrix(5)
+        b = rand_matrix(5)
+        ca = accel_mul(a, b)
+        cn = np.multiply(a, b)
+        assert_allclose(ca, cn)
+
+    def test_accel_mul_broadcast(self):
+        a = rand_matrix(5)
+        b = rand_ket(5)
+        ca = accel_mul(a, b)
+        cn = np.multiply(a, b)
+        assert_allclose(ca, cn)
+        ca = accel_mul(a.H, b)
+        cn = np.multiply(a.H, b)
+        assert_allclose(ca, cn)
+
+
+class TestAccelDot:
+    def test_accel_dot_matrix(self):
+        a = rand_matrix(5)
+        b = rand_matrix(5)
+        ca = accel_dot(a, b)
+        cn = a @ b
+        assert_allclose(ca, cn)
+
+    def test_accel_dot_ket(self):
+        a = rand_matrix(5)
+        b = rand_ket(5)
+        ca = accel_dot(a, b)
+        cn = a @ b
+        assert_allclose(ca, cn)
+
+
+class TestAccelVdot:
+    def test_accel_vdot(self):
+        a = rand_ket(5)
+        b = rand_ket(5)
+        ca = accel_vdot(a, b)
+        cn = (a.H @ b)[0, 0]
+        assert_allclose(ca, cn)
+
+
 class TestFastDiagMul:
     def test_ldmul_small(self):
         n = 4
@@ -580,3 +704,53 @@ class TestFastDiagMul:
         a = rdmul(mat, vec)
         b = mat @ np.diag(vec)
         assert_allclose(a, b)
+
+
+class TestInner:
+    def test_inner_vec_vec_dense(self):
+        a = qjf([[1], [2], [3]])
+        b = qjf([[1j], [2j], [3j]])
+        c = inner(a, b)
+        assert_allclose(c, 14**2)
+
+    def test_inner_vec_op_dense(self):
+        a = qjf([[1], [2], [3]], 'dop')
+        b = qjf([[1j], [2j], [3j]])
+        c = inner(a, b)
+        assert_allclose(c, 14**2)
+
+    def test_inner_op_vec_dense(self):
+        a = qjf([[1], [2], [3]])
+        b = qjf([[1j], [2j], [3j]], 'dop')
+        c = inner(a, b)
+        assert_allclose(c, 14**2)
+
+    def test_inner_op_op_dense(self):
+        a = qjf([[1], [2], [3]], 'dop')
+        b = qjf([[1j], [2j], [3j]], 'dop')
+        c = inner(a, b)
+        assert_allclose(c, 14**2)
+
+    def test_inner_vec_vec_sparse(self):
+        a = qjf([[1], [2], [3]], sparse=True)
+        b = qjf([[1j], [2j], [3j]])
+        c = inner(a, b)
+        assert_allclose(c, 14**2)
+
+    def test_inner_vec_op_sparse(self):
+        a = qjf([[1], [2], [3]], 'dop', sparse=True)
+        b = qjf([[1j], [2j], [3j]], sparse=True)
+        c = inner(a, b)
+        assert_allclose(c, 14**2)
+
+    def test_inner_op_vec_sparse(self):
+        a = qjf([[1], [2], [3]])
+        b = qjf([[1j], [2j], [3j]], 'dop', sparse=True)
+        c = inner(a, b)
+        assert_allclose(c, 14**2)
+
+    def test_inner_op_op_sparse(self):
+        a = qjf([[1], [2], [3]], 'dop', sparse=True)
+        b = qjf([[1j], [2j], [3j]], 'dop', sparse=True)
+        c = inner(a, b)
+        assert_allclose(c, 14**2)
