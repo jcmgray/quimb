@@ -55,12 +55,17 @@ def rand_rho(d, sparse=False, density=0.01):
     return nmlz(rand_pos(d, sparse=sparse, density=density))
 
 
-def rand_ket(d):
+def rand_ket(d, sparse=False, format='csr', density=0.01):
     """
     Generates a ket of length `d` with normally distributed entries.
     """
-    return qjf(np.random.randn(d, 1) + 1.0j * np.random.randn(d, 1),
-               normalized=True)
+    if sparse:
+        ket = sp.random(d, 1, format=format, density=density)
+        ket.data = np.random.randn(ket.nnz) + 1.0j * np.random.randn(ket.nnz)
+    else:
+        ket = np.asmatrix(np.random.randn(d, 1) +
+                          1.0j * np.random.randn(d, 1))
+    return nmlz(ket)
 
 
 def rand_uni(d):

@@ -8,11 +8,11 @@ from quijy.gen import (bell_state, rand_rho, rand_matrix, rand_ket, up, plus,
 from quijy.calc import mutual_information
 from quijy.core import (quijify, qjf, isbra, isket, isop, tr, isherm,
                         trace, trace_dense, trace_sparse, nmlz, kron_dense,
-                        kron, kronpow, coos_map, coos_compress, eye, eyepad,
-                        permute_subsystems, ptr, chop, ldmul, rdmul,
+                        kron, kronpow, coo_map, coo_compress, eye, eyepad,
+                        permute_subsystems, chop, ldmul, rdmul,
                         infer_size, issparse, matrixify, realify, issmall,
                         accel_mul, accel_dot, accel_vdot, inner, trace_lose,
-                        trace_keep)
+                        trace_keep, partial_trace)
 
 
 class TestQuijify:
@@ -264,35 +264,35 @@ class TestKron:
         assert_allclose(b, c)
 
 
-class TestCoosMap:
-    def test_coos_map_1d(self):
+class TestCooMap:
+    def test_coo_map_1d(self):
         dims = [10, 11, 12, 13]
         coos = (1, 2, 3)
-        ndims, ncoos = coos_map(dims, coos)
+        ndims, ncoos = coo_map(dims, coos)
         assert_allclose(ndims[ncoos], (11, 12, 13))
         coos = ([-1], [2], [5])
         with raises(ValueError):
-            ndims, ncoos = coos_map(dims, coos)
-        ndims, ncoos = coos_map(dims, coos, cyclic=True)
+            ndims, ncoos = coo_map(dims, coos)
+        ndims, ncoos = coo_map(dims, coos, cyclic=True)
         assert_allclose(ndims[ncoos], (13, 12, 11))
-        ndims, ncoos = coos_map(dims, coos, trim=True)
+        ndims, ncoos = coo_map(dims, coos, trim=True)
         assert_allclose(ndims[ncoos], [12])
 
-    def test_coos_map2d(self):
+    def test_coo_map2d(self):
         dims = [[200, 201, 202, 203],
                 [210, 211, 212, 213]]
         coos = ((1, 2), (1, 3), (0, 3))
-        ndims, ncoos = coos_map(dims, coos)
+        ndims, ncoos = coo_map(dims, coos)
         assert_allclose(ndims[ncoos], (212, 213, 203))
         coos = ((-1, 1), (1, 2), (3, 4))
         with raises(ValueError):
-            ndims, ncoos = coos_map(dims, coos)
-        ndims, ncoos = coos_map(dims, coos, cyclic=True)
+            ndims, ncoos = coo_map(dims, coos)
+        ndims, ncoos = coo_map(dims, coos, cyclic=True)
         assert_allclose(ndims[ncoos], (211, 212, 210))
-        ndims, ncoos = coos_map(dims, coos, trim=True)
+        ndims, ncoos = coo_map(dims, coos, trim=True)
         assert_allclose(ndims[ncoos], [212])
 
-    def test_coos_map_3d(self):
+    def test_coo_map_3d(self):
         dims = [[[3000, 3001, 3002],
                  [3010, 3011, 3012],
                  [3020, 3021, 3022]],
@@ -300,31 +300,38 @@ class TestCoosMap:
                  [3110, 3111, 3112],
                  [3120, 3121, 3122]]]
         coos = ((0, 0, 2), (1, 1, 2), (1, 2, 0))
-        ndims, ncoos = coos_map(dims, coos)
+        ndims, ncoos = coo_map(dims, coos)
         assert_allclose(ndims[ncoos], (3002, 3112, 3120))
         coos = ((0, -1, 2), (1, 2, 2), (4, -1, 3))
         with raises(ValueError):
-            ndims, ncoos = coos_map(dims, coos)
-        ndims, ncoos = coos_map(dims, coos, cyclic=True)
+            ndims, ncoos = coo_map(dims, coos)
+        ndims, ncoos = coo_map(dims, coos, cyclic=True)
         assert_allclose(ndims[ncoos], (3022, 3122, 3020))
-        ndims, ncoos = coos_map(dims, coos, trim=True)
+        ndims, ncoos = coo_map(dims, coos, trim=True)
         assert_allclose(ndims[ncoos], [3122])
 
 
-class TestCoosCompress:
-    def test_coos_compress_edge(self):
+class TestCooCompress:
+    def test_coo_compress_edge(self):
         dims = [2, 3, 2, 4, 5]
         coos = [0, 4]
-        ndims, ncoos = coos_compress(dims, coos)
+        ndims, ncoos = coo_compress(dims, coos)
         assert ndims == [2, 24, 5]
         assert ncoos == [0, 2]
 
-    def test_coos_compress_middle(self):
+    def test_coo_compress_middle(self):
         dims = [5, 3, 2, 5, 4, 3, 2]
         coos = [1, 2, 3, 5]
-        ndims, ncoos = coos_compress(dims, coos)
+        ndims, ncoos = coo_compress(dims, coos)
         assert ndims == [5, 30, 4, 3, 2]
         assert ncoos == [1, 3]
+
+    def test_coo_compress_single(self):
+        dims = [5, 3, 2, 5, 4, 3, 2]
+        coos = 3
+        ndims, ncoos = coo_compress(dims, coos)
+        assert ndims == [30, 5, 24]
+        assert ncoos == [1]
 
 
 class TestEye:
@@ -457,41 +464,51 @@ class TestPermuteSubsystems:
         assert_allclose(mutual_information(b, dims, 0, 2), 2.)
 
 
-class TestPartialTraceClever:
+class TestPartialTraceDense:
     def test_partial_trace_basic(self):
         a = rand_rho(2**2)
-        b = ptr(a, [2, 2], 0)
+        b = partial_trace(a, [2, 2], 0)
         assert isinstance(b, np.matrix)
         assert isherm(b)
+        assert_allclose(tr(b), 1.0)
+
+    def test_ptr_compare_to_manual(self):
+        a = rand_rho(2**2)
+        b = partial_trace(a, [2, 2], 0)
+        c = a.A.reshape([2, 2, 2, 2]).trace(axis1=1, axis2=3)
+        assert_allclose(b, c)
+        b = partial_trace(a, [2, 2], 1)
+        c = a.A.reshape([2, 2, 2, 2]).trace(axis1=0, axis2=2)
+        assert_allclose(b, c)
 
     def test_partial_trace_early_return(self):
         a = qjf([0.5, 0.5, 0.5, 0.5], 'ket')
-        b = ptr(a, [2, 2], [0, 1])
+        b = partial_trace(a, [2, 2], [0, 1])
         assert_allclose(a @ a.H, b)
         a = qjf([0.5, 0.5, 0.5, 0.5], 'dop')
-        b = ptr(a, [2, 2], [0, 1])
+        b = partial_trace(a, [2, 2], [0, 1])
         assert_allclose(a, b)
 
     def test_partial_trace_return_type(self):
         a = qjf([0, 2**-0.5, 2**-0.5, 0], 'ket')
-        b = ptr(a, [2, 2], 1)
+        b = partial_trace(a, [2, 2], 1)
         assert(type(b) == np.matrix)
         a = qjf([0, 2**-0.5, 2**-0.5, 0], 'dop')
-        b = ptr(a, [2, 2], 1)
+        b = partial_trace(a, [2, 2], 1)
         assert(type(b) == np.matrix)
 
     def test_partial_trace_single_ket(self):
         dims = [2, 3, 4]
         a = np.random.randn(np.prod(dims), 1)
         for i, dim in enumerate(dims):
-            b = ptr(a, dims, i)
+            b = partial_trace(a, dims, i)
             assert(b.shape[0] == dim)
 
     def test_partial_trace_multi_ket(self):
         dims = [2, 3, 4]
         a = np.random.randn(np.prod(dims), 1)
         for i1, i2 in combinations([0, 1, 2], 2):
-            b = ptr(a, dims, [i1, i2])
+            b = partial_trace(a, dims, [i1, i2])
             assert(b.shape[1] == dims[i1] * dims[i2])
 
     def test_partial_trace_dop_product_state(self):
@@ -499,20 +516,20 @@ class TestPartialTraceClever:
         ps = [rand_rho(dim) for dim in dims]
         pt = kron(*ps)
         for i, dim in enumerate(dims):
-            p = ptr(pt, dims, i)
+            p = partial_trace(pt, dims, i)
             assert_allclose(p, ps[i])
 
     def test_partial_trace_bell_states(self):
         for lab in ('psi-', 'psi+', 'phi-', 'phi+'):
             psi = bell_state(lab, qtype='dop')
-            rhoa = ptr(psi, [2, 2], 0)
+            rhoa = partial_trace(psi, [2, 2], 0)
             assert_allclose(rhoa, eye(2)/2)
 
     def test_partial_trace_supply_ndarray(self):
         a = rand_rho(2**3)
         dims = np.array([2, 2, 2])
         keep = np.array(1)
-        b = ptr(a, dims, keep)
+        b = partial_trace(a, dims, keep)
         assert(b.shape[0] == 2)
 
 
@@ -539,19 +556,19 @@ class TestTraceLose:
     def test_vs_ptr(self):
         a = rand_rho(6, sparse=True, density=0.5)
         b = trace_lose(a, [2, 3], 1)
-        c = ptr(a.A, [2, 3], 0)
+        c = partial_trace(a.A, [2, 3], 0)
         assert_allclose(b, c)
         b = trace_lose(a, [2, 3], 0)
-        c = ptr(a.A, [2, 3], 1)
+        c = partial_trace(a.A, [2, 3], 1)
         assert_allclose(b, c)
 
     def test_vec_dense(self):
         a = rand_ket(4)
         b = trace_lose(a, [2, 2], 1)
-        c = ptr(a.A, [2, 2], 0)
+        c = partial_trace(a.A, [2, 2], 0)
         assert_allclose(b, c)
         b = trace_lose(a, [2, 2], 0)
-        c = ptr(a.A, [2, 2], 1)
+        c = partial_trace(a.A, [2, 2], 1)
         assert_allclose(b, c)
 
 
@@ -578,19 +595,54 @@ class TestTraceKeep:
     def test_vs_ptr(self):
         a = rand_rho(6, sparse=True, density=0.5)
         b = trace_keep(a, [2, 3], 0)
-        c = ptr(a.A, [2, 3], 0)
+        c = partial_trace(a.A, [2, 3], 0)
         assert_allclose(b, c)
         b = trace_keep(a, [2, 3], 1)
-        c = ptr(a.A, [2, 3], 1)
+        c = partial_trace(a.A, [2, 3], 1)
         assert_allclose(b, c)
 
     def test_vec_dense(self):
         a = rand_ket(4)
         b = trace_keep(a, [2, 2], 0)
-        c = ptr(a.A, [2, 2], 0)
+        c = partial_trace(a.A, [2, 2], 0)
         assert_allclose(b, c)
         b = trace_keep(a, [2, 2], 1)
-        c = ptr(a.A, [2, 2], 1)
+        c = partial_trace(a.A, [2, 2], 1)
+        assert_allclose(b, c)
+
+
+class TestPartialTraceSparse:
+    def test_partial_trace_sparse_basic(self):
+        a = rand_rho(4)
+        b = partial_trace(a, [2, 2], 0)
+        assert type(b) == np.matrix
+        assert isherm(b)
+        assert_allclose(tr(b), 1.0)
+
+    def test_partial_trace_simple_single(self):
+        a = rand_rho(12, sparse=True, density=0.5)
+        dims = [2, 3, 2]
+        b = partial_trace(a, dims, 1)
+        c = a.A.reshape([*dims, *dims])  \
+             .trace(axis1=2, axis2=5)  \
+             .trace(axis1=0, axis2=2)
+        assert_allclose(c, b)
+
+    def test_partial_trace_simple_double(self):
+        a = rand_rho(12, sparse=True, density=0.5)
+        dims = [2, 3, 2]
+        b = partial_trace(a, dims, [0, 2])
+        c = partial_trace(a.A, dims, [0, 2])
+        assert_allclose(b, c)
+        b = partial_trace(a, dims, [1, 2])
+        c = partial_trace(a.A, dims, [1, 2])
+        assert_allclose(b, c)
+
+    def test_partial_trace_simple_ket(self):
+        a = rand_ket(12, sparse=True, density=0.5)
+        dims = [2, 3, 2]
+        b = partial_trace(a, dims, [0, 1])
+        c = partial_trace(a.A, dims, [0, 1])
         assert_allclose(b, c)
 
 

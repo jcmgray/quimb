@@ -164,6 +164,7 @@ def kron(*ops):
     # TODO: scalar?
     # TODO: rename? tensor
     # TODO: parallize?
+    # TODO: merge into eyepad with dims=None, coos=None
     """ Tensor product of variable number of arguments.
     Input:
         ops: objects to be tensored together
@@ -192,7 +193,7 @@ def kronpow(a, pwr):
     return kron(*(a for i in range(pwr)))
 
 
-def coos_map(dims, coos, cyclic=False, trim=False):
+def coo_map(dims, coos, cyclic=False, trim=False):
     """
     Maps multi-dimensional coordinates and indices to flat arrays in a
     regular way. Wraps or deletes coordinates beyond the system size
@@ -228,14 +229,17 @@ def coos_map(dims, coos, cyclic=False, trim=False):
     return np.ravel(dims), coos
 
 
-def coos_compress(dims, coos):
-    # TODO: handle noniterble coos
+def coo_compress(dims, inds):
     """
     Compresses identity spaces together: groups 1D dimensions according to
-    whether their index appears in coos, then merges the groups.
+    whether their index appears in inds, then merges the groups.
     """
-    ks, gs = zip(*(((k, tuple(g)) for k, g in
-                    groupby(range(len(dims)), lambda x: x in coos))))
+    try:
+        inds = {*inds}
+        grp_dims = groupby(range(len(dims)), lambda x: x in inds)
+    except TypeError:  # single index given
+        grp_dims = groupby(range(len(dims)), lambda x: x == inds)
+    ks, gs = zip(*(((k, tuple(g)) for k, g in grp_dims)))
     ndims = [reduce(mul, (dims[i] for i in g)) for g in gs]
     ncoos = [i for i in range(len(ndims)) if ks[i]]
     return ndims, ncoos
@@ -255,7 +259,6 @@ def identity_sparse(n):
 
 
 def identity(n, sparse=False):
-    # TODO: rename?
     """ Return identity of size n in complex format, optionally sparse"""
     return identity_sparse(n) if sparse else identity_dense(n)
 
@@ -287,7 +290,7 @@ def eyepad(ops, dims, inds, sparse=None):
     if isinstance(ops, (np.ndarray, sp.spmatrix)):
         ops = [ops]
     if np.ndim(dims) > 1:
-        dims, inds = coos_map(dims, inds)
+        dims, inds = coo_map(dims, inds)
     elif np.ndim(inds) == 0:
         inds = [inds]
     sparse = issparse(ops[0]) if sparse is None else sparse
@@ -324,6 +327,7 @@ def eyepad(ops, dims, inds, sparse=None):
 def perm_pad(op, dims, inds):
     # TODO: TEST
     # TODO: multiple ops
+    # TODO: coo map, coo compress
     """
     Advanced tensor placement of operators that allows arbitrary ordering such
     as reversal and interleaving of identities. For dense matrices only.
@@ -377,6 +381,7 @@ def permute_subsystems(p, dims, perm):
 
 def partial_trace_clever(p, dims, keep):
     # TODO: compress coords?
+    # TODO: user tensordot for vec
     """ Perform partial trace.
 
     Parameters
@@ -454,13 +459,12 @@ def trace_keep(p, dims, coo_keep):
 
 
 def partial_trace_simple(p, dims, coos_keep):
-    # TODO: TEST
-    # TODO: convert to dop?
     """
     Simple partial trace made up of consecutive single subsystem partial
     traces, augmented by 'compressing' the dimensions each time.
     """
-    dims, coos_keep = coos_compress(dims, coos_keep)
+    p = p if isop(p) else p @ p.H
+    dims, coos_keep = coo_compress(dims, coos_keep)
     if len(coos_keep) == 1:
         return trace_keep(p, dims, *coos_keep)
     lmax = max(enumerate(dims),
@@ -472,7 +476,6 @@ def partial_trace_simple(p, dims, coos_keep):
 
 
 def partial_trace(p, dims, coos):
-    # TODO: TEST
     """
     Dispatch partial trace based on sparsity.
     """
@@ -483,7 +486,7 @@ def partial_trace(p, dims, coos):
 
 ptr = partial_trace
 trx = partial_trace
-np.matrix.ptr = partial_trace
+np.matrix.ptr = partial_trace_clever
 sp.csr_matrix.ptr = partial_trace_simple
 
 
@@ -524,7 +527,6 @@ def chop(x, tol=1.0e-15, inplace=True):
 @matrixify
 @jit(nopython=True)
 def accel_mul(x, y):  # pragma: no cover
-    # TODO: write as method, with type inference etc.
     """ Accelerated element-wise multiplication of two matrices """
     return x * y
 
@@ -532,7 +534,6 @@ def accel_mul(x, y):  # pragma: no cover
 @matrixify
 @jit(nopython=True)
 def accel_dot(a, b):  # pragma: no cover
-    # TODO: write as method, with type inference etc.
     """ Accelerated dot product of two matrices. """
     return a @ b
 
