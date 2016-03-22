@@ -238,7 +238,7 @@ def ilineplot(ds, data_name, x_coo, z_coo=None, logx=False, logy=False,
               'yaxis': {'showline': True, 'title': data_name,
                         'mirror': 'ticks', 'ticks': 'inside',
                         'type': 'log' if logy else 'linear'},
-              'showlegend': legend or not (legend is False or
+              'showlegend': legend or not (legend is False or z_coo is None or
                                            len(ds[z_coo]) > 20), **ly_dict}
     fig = {'data': traces, 'layout': layout}
     if return_fig:
