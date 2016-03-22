@@ -3,13 +3,13 @@ Core functions for manipulating quantum objects.
 """
 
 from math import log
+from operator import mul
 from itertools import cycle, groupby
 from functools import reduce
-from operator import mul
-from numba import jit
 import numpy as np
 from numpy.matlib import zeros
 import scipy.sparse as sp
+from numba import jit
 from numexpr import evaluate as evl
 
 
@@ -328,11 +328,12 @@ def perm_pad(op, dims, inds):
     # TODO: TEST
     # TODO: multiple ops
     # TODO: coo map, coo compress
+    # TODO: sparse??
     """
     Advanced tensor placement of operators that allows arbitrary ordering such
     as reversal and interleaving of identities. For dense matrices only.
     """
-    op, dims, inds = np.asarray(op), np.asarray(dims), np.asarray(inds)
+    dims, inds = np.asarray(dims), np.asarray(inds)
     n = len(dims)  # number of subsytems
     sz = np.prod(dims)  # Total size of system
     dims_in = dims[inds]
@@ -340,8 +341,7 @@ def perm_pad(op, dims, inds):
     sz_out = sz // sz_in  # total size of identity space
     sz_op = op.shape[0]  # size of individual operator
     n_op = int(log(sz_in, sz_op))  # number of individual operators
-    b = np.asarray(kron(kronpow(op, n_op), eye(sz_out)))
-
+    b = np.asarray(kronpow(op, n_op) & eye(sz_out))
     inds_out, dims_out = zip(*((i, x) for i, x in enumerate(dims)
                                if i not in inds))  # inverse of inds
     p = [*inds, *inds_out]  # current order of system
@@ -594,14 +594,14 @@ def rdmul(mat, vec):
 def inner(a, b):
     """
     Operator inner product between a and b, i.e. for vectors it will be the
-    absolute overlap squared <a|b><b|a>, rather than <a|b>.
+    absolute overlap squared |<a|b><b|a>|, rather than <a|b>.
     """
     method = {(0, 0, 0): lambda: abs(accel_vdot(a, b))**2,
               (0, 1, 0): lambda: accel_vdot(a, accel_dot(b, a)),
               (1, 0, 0): lambda: accel_vdot(b, accel_dot(a, b)),
               (1, 1, 0): lambda: trace_dense(accel_dot(a, b)),
               (0, 0, 1): lambda: abs((a.H @ b)[0, 0])**2,
-              (1, 0, 1): lambda: (b.H @ a @ b)[0, 0],
-              (0, 1, 1): lambda: (a.H @ b @ a)[0, 0],
+              (1, 0, 1): lambda: abs((b.H @ a @ b)[0, 0]),
+              (0, 1, 1): lambda: abs((a.H @ b @ a)[0, 0]),
               (1, 1, 1): lambda: trace_sparse(a @ b)}
     return method[isop(a), isop(b), issparse(a) or issparse(b)]()
