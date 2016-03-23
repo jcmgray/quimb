@@ -325,7 +325,6 @@ def eyepad(ops, dims, inds, sparse=None):
 
 @matrixify
 def perm_pad(op, dims, inds):
-    # TODO: TEST
     # TODO: multiple ops
     # TODO: coo map, coo compress
     # TODO: sparse??
@@ -562,10 +561,7 @@ def ldmul(vec, mat):
     '''
     d = mat.shape[0]
     vec = vec.reshape(d, 1)
-    if d > 500:
-        return evl('vec*mat')
-    else:
-        return accel_mul(vec, mat)
+    return evl('vec*mat') if d > 500 else accel_mul(vec, mat)
 
 
 @matrixify
@@ -585,10 +581,7 @@ def rdmul(mat, vec):
     '''
     d = mat.shape[0]
     vec = vec.reshape(1, d)
-    if d > 500:
-        return evl('mat*vec')
-    else:
-        return accel_mul(mat, vec)
+    return evl('mat*vec') if d > 500 else accel_mul(mat, vec)
 
 
 def inner(a, b):

@@ -12,7 +12,7 @@ from quijy.core import (quijify, qjf, isbra, isket, isop, tr, isherm,
                         permute_subsystems, chop, ldmul, rdmul,
                         infer_size, issparse, matrixify, realify, issmall,
                         accel_mul, accel_dot, accel_vdot, inner, trace_lose,
-                        trace_keep, partial_trace)
+                        trace_keep, partial_trace, perm_pad)
 
 
 class TestQuijify:
@@ -442,6 +442,24 @@ class TestEyepad:
         b = eyepad(a, dims, inds)
         assert b.shape == (36, 36)
         assert_allclose(b, a[0] & eye(9) & a[1])
+
+
+class TestPermPad:
+    def test_perm_pad_dop_spread(self):
+        a = rand_rho(4)
+        b = perm_pad(a, [2, 2, 2], [0, 2])
+        c = (a & eye(2)).A.reshape([2, 2, 2, 2, 2, 2])  \
+                          .transpose([0, 2, 1, 3, 5, 4])  \
+                          .reshape([8, 8])
+        assert_allclose(b, c)
+
+    def test_perm_pad_dop_reverse(self):
+        a = rand_rho(4)
+        b = perm_pad(a, [2, 2, 2], [2, 0])
+        c = (a & eye(2)).A.reshape([2, 2, 2, 2, 2, 2])  \
+                          .transpose([1, 2, 0, 4, 5, 3])  \
+                          .reshape([8, 8])
+        assert_allclose(b, c)
 
 
 class TestPermuteSubsystems:
