@@ -162,6 +162,7 @@ def kron_sparse(a, b):
 
 def kron(*ops):
     # TODO: scalar?
+    # TODO: faster sparse kron using coo?
     # TODO: rename? tensor
     # TODO: parallize?
     # TODO: merge into eyepad with dims=None, coos=None
