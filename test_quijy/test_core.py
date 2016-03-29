@@ -9,7 +9,7 @@ from quijy.calc import mutual_information
 from quijy.core import (quijify, qjf, isbra, isket, isop, tr, isherm,
                         trace, trace_dense, trace_sparse, nmlz, kron_dense,
                         kron, kronpow, coo_map, coo_compress, eye, eyepad,
-                        permute_subsystems, chop, ldmul, rdmul,
+                        permute, chop, ldmul, rdmul,
                         infer_size, issparse, matrixify, realify, issmall,
                         accel_mul, accel_dot, accel_vdot, inner, trace_lose,
                         trace_keep, partial_trace, perm_pad)
@@ -462,24 +462,38 @@ class TestPermPad:
         assert_allclose(b, c)
 
 
-class TestPermuteSubsystems:
-    def test_permute_subsystems_ket(self):
+class TestPermute:
+    def test_permute_ket(self):
         a = up() & plus() & yplus()
-        b = permute_subsystems(a, [2, 2, 2], [2, 0, 1])
+        b = permute(a, [2, 2, 2], [2, 0, 1])
         assert_allclose(b, yplus() & up() & plus())
 
-    def test_permute_subsystems_op(self):
+    def test_permute_op(self):
         a = sig('x') & sig('y') & sig('z')
-        b = permute_subsystems(a, [2, 2, 2], [2, 0, 1])
+        b = permute(a, [2, 2, 2], [2, 0, 1])
         assert_allclose(b, sig('z') & sig('x') & sig('y'))
 
     def test_entangled_permute(self):
         dims = [2, 2, 2]
         a = bell_state(0) & up()
         assert_allclose(mutual_information(a, dims, 0, 1), 2.)
-        b = permute_subsystems(a, dims, [1, 2, 0])
+        b = permute(a, dims, [1, 2, 0])
         assert_allclose(mutual_information(b, dims, 0, 1), 0., atol=1e-12)
         assert_allclose(mutual_information(b, dims, 0, 2), 2.)
+
+    def test_permute_sparse_ket(self):
+        dims = [3, 2, 5, 4]
+        a = rand_ket(np.prod(dims), sparse=True, density=0.5)
+        b = permute(a, dims, [3, 1, 2, 0])
+        c = permute(a.A, dims, [3, 1, 2, 0])
+        assert_allclose(b.A, c)
+
+    def test_permute_sparse_op(self):
+        dims = [3, 2, 5, 4]
+        a = rand_rho(np.prod(dims), sparse=True, density=0.5)
+        b = permute(a, dims, [3, 1, 2, 0])
+        c = permute(a.A, dims, [3, 1, 2, 0])
+        assert_allclose(b.A, c)
 
 
 class TestPartialTraceDense:

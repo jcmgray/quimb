@@ -4,7 +4,7 @@ Core functions for manipulating quantum objects.
 
 from math import log
 from operator import mul
-from itertools import cycle, groupby
+from itertools import cycle, groupby, product
 from functools import reduce
 import numpy as np
 from numpy.matlib import zeros
@@ -322,6 +322,7 @@ def perm_pad(op, dims, inds):
     # TODO: multiple ops
     # TODO: coo map, coo compress
     # TODO: sparse??
+    # TODO: use permute
     """ Advanced tensor placement of operators that allows arbitrary ordering
     such as reversal and interleaving of identities. """
     dims, inds = np.asarray(dims), np.asarray(inds)
@@ -345,18 +346,8 @@ def perm_pad(op, dims, inds):
 
 
 @matrixify
-def permute_subsystems(p, dims, perm):
-    """ Permute the subsytems of a state.
-
-    Parameters
-    ----------
-        p: state, vector or operator
-        dims: dimensions of the system
-        perm: new order of indexes range(len(dims))
-
-    Returns
-    -------
-        pp: permuted state, vector or operator """
+def permute_dense(p, dims, perm):
+    """ Permute the subsytems of a dense matrix. """
     p, perm = np.asarray(p), np.asarray(perm)
     d = np.prod(dims)
     if isop(p):
@@ -366,6 +357,45 @@ def permute_subsystems(p, dims, perm):
     return p.reshape(dims) \
             .transpose(perm) \
             .reshape((d, 1))
+
+
+def permute_sparse(a, dims, perm):
+    """ Permute the subsytems of a sparse matrix. """
+    perm, dims = np.asarray(perm), np.asarray(dims)
+    ndims = dims[perm]
+    # New dimensions & stride (i.e. product of preceding dimensions)
+    odim_stride = np.asarray([np.prod(dims[i+1:])
+                              for i, _ in enumerate(dims)])
+    ndim_stride = np.asarray([np.prod(ndims[i+1:])
+                              for i, _ in enumerate(ndims)])
+    # Range of possible coordinates for each subsys
+    coos = (tuple(range(dim)) for dim in dims)
+    # Complete basis using coordinates for current and new dimensions
+    basis = np.asarray(tuple(product(*coos, repeat=1)))
+    oinds = np.sum(odim_stride * basis, axis=1)
+    ninds = np.sum(ndim_stride * basis[:, perm], axis=1)
+    # Construct permutation matrix and apply it to state
+    perm_mat = sp.coo_matrix((np.ones(a.shape[0]), (ninds, oinds))).tocsr()
+    if isop(a):
+        return (perm_mat @ a) @ perm_mat.H
+    return perm_mat @ a
+
+
+def permute(a, dims, perm):
+    """ Permute the subsytems of state a.
+
+    Parameters
+    ----------
+        p: state, vector or operator
+        dims: dimensions of the system
+        perm: new order of indexes range(len(dims))
+
+    Returns
+    -------
+        pp: permuted state, vector or operator"""
+    if issparse(a):
+        return permute_sparse(a, dims, perm)
+    return permute_dense(a, dims, perm)
 
 
 def partial_trace_clever(p, dims, keep):
