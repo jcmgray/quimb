@@ -1,10 +1,8 @@
-"""
-Functions for solving matrices either fully or partially.
+""" Functions for solving matrices either fully or partially.
 Note that the eigendecompositions here all assume a
 hermitian matrix and sort the eigenvalues in ascending
 algebraic order by default. Use explicit numpy/scipy linalg
-routines for non-hermitian matrices.
-"""
+routines for non-hermitian matrices. """
 
 import numpy as np
 import numpy.linalg as nla
@@ -19,41 +17,49 @@ from .core import qjf, issparse, accel_vdot
 
 def eigsys(a, sort=True):
     """ Find all eigenpairs of dense, hermitian matrix.
-    Input:
+
+    Parameters
+    ----------
         a: hermitian matrix
         sort: whether to sort the eigenpairs in ascending eigenvalue order
-    Returns:
+
+    Returns
+    -------
         l: array of eigenvalues
-        v: corresponding eigenvectors as columns of matrix
-    """
+        v: corresponding eigenvectors as columns of matrix """
     l, v = nla.eigh(a)
     if sort:
         sortinds = np.argsort(l)
         return l[sortinds], np.asmatrix(v[:, sortinds])
-    else:
-        return l, v
+    return l, v
 
 
 def eigvals(a, sort=True):
-    """ Find all eigenvalues of dense matrix
-    Input:
+    """ Find all eigenvalues of dense, hermitian matrix
+
+    Parameters
+    ----------
         a: hermitian matrix
         sort: whether to sort the eigenvalues in ascending order
-    Returns:
-        l: array of eigenvalues
-    """
+
+    Returns
+    -------
+        l: array of eigenvalues """
     l = nla.eigvalsh(a)
     return np.sort(l) if sort else l
 
 
 def eigvecs(a, sort=True):
-    """ Find all eigenvectors of dense matrix
-    Input:
+    """ Find all eigenvectors of dense, hermitian matrix
+
+    Parameters
+    ----------
         a: hermitian matrix
         sort: whether to sort the eigenvectors in ascending eigenvalue order
-    Returns:
-        v: eigenvectors as columns of matrix
-    """
+
+    Returns
+    -------
+        v: eigenvectors as columns of matrix """
     l, v = eigsys(a, sort=sort)
     return v
 
@@ -62,28 +68,35 @@ def eigvecs(a, sort=True):
 # iterative methods for partial eigendecompision                             #
 # -------------------------------------------------------------------------- #
 
-def choose_ncv(k, n):
+@jit(nopython=True)
+def choose_ncv(k, n):  # pragma: no cover
     """ Optimise number of lanczos vectors for iterative methods
-    Args:
+
+    Parameters
+    ----------
         k: number of target eigenvalues/singular values
         n: matrix size
-    Returns:
-        ncv: number of lanczos vectors to use
-    """
+
+    Returns
+    -------
+        ncv: number of lanczos vectors to use """
     return min(max(20, 2 * k + 1), n)
 
 
 def seigsys(a, k=6, which='SA', ncv=None, return_vecs=True, **kwargs):
     """ Returns a few eigenpairs from a possibly sparse hermitian operator
-    Inputs:
+
+    Parameters
+    ----------
         a: matrix, probably sparse, hermitian
         k: number of eigenpairs to return
         which: where in spectrum to take eigenvalues from (see scipy eigsh)
         nvc: number of lanczos vectors, can use to optimise speed
-    Returns:
+
+    Returns
+    -------
         lk: array of eigenvalues
-        vk: matrix of eigenvectors as columns
-    """
+        vk: matrix of eigenvectors as columns """
     n = a.shape[0]
     sparse = issparse(a)
     if not sparse and n <= 500:
@@ -107,10 +120,12 @@ def seigsys(a, k=6, which='SA', ncv=None, return_vecs=True, **kwargs):
 
 
 def seigvals(a, k=6, **kwargs):
+    """ Seigsys alias for finding eigenvalues only. """
     return seigsys(a, k=k, return_vecs=False, **kwargs)
 
 
 def seigvecs(a, k=6, **kwargs):
+    """ Seigsys alias for finding eigenvectors only. """
     _, v = seigsys(a, k=k, return_vecs=True, **kwargs)
     return v
 
@@ -128,6 +143,11 @@ def groundenergy(ham):
 # -------------------------------------------------------------------------- #
 # iterative methods for partial singular value decomposition                 #
 # -------------------------------------------------------------------------- #
+
+def svd(a, return_vecs=True):
+    """ Compute full singular value decomposiont of matrix. """
+    return nla.svd(a, full_matrices=False, compute_uv=return_vecs)
+
 
 def svds(a, k=6, ncv=None, return_vecs=True, **kwargs):
     """ Compute a number of singular value pairs """
@@ -160,8 +180,8 @@ def norm_2(a):
     return svds(a, k=1, return_vecs=False)[0]
 
 
-@jit(nopython=True)
 def norm_fro_dense(a):
+    """ Frobenius norm for dense matrices """
     return accel_vdot(a, a).real**0.5
 
 
@@ -170,15 +190,13 @@ def norm_fro_sparse(a):
 
 
 def norm_trace_dense(a):
-    """
-    Returns the trace norm of operator a, that is, the sum of abs eigvals.
-    """
+    """ Returns the trace norm of operator a, that is,
+    the sum of abs eigvals. """
     return np.sum(np.absolute(eigvals(a, sort=False)))
 
 
 def norm(a, ntype=2):
-    """
-    Matrix norm.
+    """ Operator norms.
 
     Parameters
     ----------
@@ -187,15 +205,13 @@ def norm(a, ntype=2):
 
     Returns
     -------
-        x: matrix norm
-    """
-    keys = {'2': '2', 2: '2',
+        x: matrix norm """
+    keys = {'2': '2', 2: '2', 'spectral': '2',
             'f': 'f', 'fro': 'f',
             't': 't', 'trace': 't', 'nuc': 't', 'tr': 't'}
     methods = {('2', 0): norm_2,
                ('2', 1): norm_2,
                ('t', 0): norm_trace_dense,
-               ('t', 1): NotImplemented,
                ('f', 0): norm_fro_dense,
                ('f', 1): norm_fro_sparse}
     return methods[(keys[ntype], issparse(a))](a)
