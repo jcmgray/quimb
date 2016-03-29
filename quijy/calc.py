@@ -6,6 +6,7 @@ quantum objects.
 from math import sin, cos, pi, log2, sqrt
 from collections import OrderedDict
 from itertools import product
+
 import numpy as np
 import numpy.linalg as nla
 import scipy.sparse.linalg as spla
@@ -15,112 +16,6 @@ from .core import (isop, qjf, kron, ldmul, ptr, eye, eyepad, tr, trx,
                    infer_size, issparse, accel_dot, inner)
 from .solve import (eigvals, eigsys, norm)
 from .gen import (sig, basis_vec, bell_state, bloch_state)
-
-
-def entropy(rho):
-    """
-    Computes the (von Neumann) entropy of positive matrix rho
-    """
-    l = eigvals(rho)
-    l = l[l > 0.0]
-    return np.sum(-l * np.log2(l))
-
-
-def mutual_information(p, dims=[2, 2], sysa=0, sysb=1):
-    """
-    Partitions rho into dims, and finds the mutual information between the
-    subsystems at indices sysa and sysb
-    """
-    if isop(p) or np.size(dims) > 2:  # mixed combined system
-        rhoab = trx(p, dims, [sysa, sysb])
-        rhoa = trx(rhoab, np.r_[dims[sysa], dims[sysb]], 0)
-        rhob = trx(rhoab, np.r_[dims[sysa], dims[sysb]], 1)
-        hab = entropy(rhoab)
-        ha = entropy(rhoa)
-        hb = entropy(rhob)
-    else:  # pure combined system
-        hab = 0.0
-        rhoa = trx(p, dims, sysa)
-        ha = entropy(rhoa)
-        hb = ha
-    return ha + hb - hab
-
-
-def partial_transpose(p, dims=[2, 2]):
-    """
-    Partial transpose of state `p` with bipartition as given by `dims`.
-    """
-    p = qjf(p, 'op')
-    p = np.array(p)\
-        .reshape((*dims, *dims))  \
-        .transpose((2, 1, 0, 3))  \
-        .reshape((np.prod(dims), np.prod(dims)))
-    return qjf(p)
-
-
-def logarithmic_negativity(p, dims=[2, 2], sysa=0, sysb=1):
-    if np.size(dims) > 2:
-        p = trx(p, dims, [sysa, sysb])
-        dims = [dims[sysa], dims[sysb]]
-    e = log2(norm(partial_transpose(p, dims), 'tr'))
-    return max(0.0, e)
-
-logneg = logarithmic_negativity
-
-
-def concurrence(p):
-    if isop(p):
-        p = qjf(p, 'dop')  # make sure density operator
-        pt = kron(sig(2), sig(2)) @ p.conj() @ kron(sig(2), sig(2))
-        l = (nla.eigvals(p @ pt).real**2)**0.25
-        return max(0, 2 * np.max(l) - np.sum(l))
-    else:
-        p = qjf(p, 'ket')
-        pt = kron(sig(2), sig(2)) @ p.conj()
-        c = np.real(abs(p.H @ pt)).item(0)
-        return max(0, c)
-
-
-def one_way_classical_information(p_ab, prjs, precomp_func=False):
-    """
-    One way classical information for two qubit density matrix
-    given measurements.
-    """
-    p_a = ptr(p_ab, [2, 2], 0)
-    s_a = entropy(p_a)
-
-    def owci(prjs):
-        def gen_paj():
-            for prj in prjs:
-                p_ab_j = (eye(2) & prj) @ p_ab
-                prob = tr(p_ab_j)
-                p_a_j = ptr(p_ab_j, [2, 2], 0) / prob
-                yield prob, p_a_j
-        return s_a - sum(p * entropy(rho) for p, rho in gen_paj())
-
-    return owci if precomp_func else owci(prjs)
-
-
-def quantum_discord(p):
-    """
-    Quantum Discord for two qubit density matrix.
-    """
-    p = qjf(p, 'dop')
-    iab = mutual_information(p)
-    owci = one_way_classical_information(p, None, precomp_func=True)
-
-    def trial_qd(a):
-        ax, ay, az = sin(a[0]) * cos(a[1]), sin(a[0]) * sin(a[1]), cos(a[0])
-        prja = bloch_state(ax, ay, az)
-        prjb = eye(2) - prja
-        return iab - owci([prja, prjb])
-
-    opt = minimize(trial_qd, (pi/2, pi),
-                   method='SLSQP', bounds=((0, pi), (0, 2 * pi)))
-    if opt.success:
-        return opt.fun
-    else:
-        raise ValueError(opt.message)
 
 
 def expm(a, herm=False):
@@ -145,40 +40,146 @@ def sqrtm(a, herm=False):
         return accel_dot(v, ldmul(np.sqrt(l.astype(complex)), v.H))
 
 
-def trace_distance(p, w):
-    if not isop(p) and not isop(w):
-        return sqrt(1 - inner(p, w))
-    return 0.5 * norm(p - w, 'tr')
+def purify(rho, sparse=False):
+    """
+    Take state rho and purify it into a wavefunction of squared dimension.
+    """
+    d = rho.shape[0]
+    ls, vs = eigsys(rho)
+    ls = np.sqrt(ls)
+    psi = np.zeros(shape=(d**2, 1), dtype=complex)
+    for i, l in enumerate(ls.flat):
+        psi += l * kron(vs[:, i], basis_vec(i, d, sparse=sparse))
+    return qjf(psi)
 
 
-def negativity(rho, dims=[2, 2], sysa=0, sysb=1):
+def entropy(a):
+    """ Computes the (von Neumann) entropy of positive matrix `a` """
+    l = eigvals(a)
+    l = l[l > 0.0]
+    return np.sum(-l * np.log2(l))
+
+
+def mutual_information(p, dims=[2, 2], sysa=0, sysb=1):
+    """ Partitions `p` into `dims`, and finds the mutual information between
+    the subsystems at indices `sysa` and `sysb` """
+    if isop(p) or np.size(dims) > 2:  # mixed combined system
+        rhoab = trx(p, dims, (sysa, sysb))
+        rhoa = trx(rhoab, (dims[sysa], dims[sysb]), 0)
+        rhob = trx(rhoab, (dims[sysa], dims[sysb]), 1)
+        hab = entropy(rhoab)
+        ha, hb = entropy(rhoa), entropy(rhob)
+    else:  # pure combined system
+        hab = 0.0
+        rhoa = trx(p, dims, sysa)
+        ha = entropy(rhoa)
+        hb = ha
+    return ha + hb - hab
+
+
+def partial_transpose(p, dims=[2, 2]):
+    """ Partial transpose of state `p` with bipartition as given by
+    `dims`. """
+    p = qjf(p, "dop")
+    p = np.array(p)\
+        .reshape((*dims, *dims))  \
+        .transpose((2, 1, 0, 3))  \
+        .reshape((np.prod(dims), np.prod(dims)))
+    return qjf(p)
+
+
+def negativity(p, dims=[2, 2], sysa=0, sysb=1):
+    """ Negativity between `sysa` and `sysb` of state `p` with subsystem
+    dimensions `dims` """
     if np.size(dims) > 2:
-        rho = trx(rho, dims, [sysa, sysb])
-    n = (norm(partial_transpose(rho), 'tr') - 1.0) / 2.0
+        p = trx(p, dims, [sysa, sysb])
+    n = (norm(partial_transpose(p), "tr") - 1.0) / 2.0
     return max(0.0, n)
 
 
-def qid(p, dims, inds, precomp_func=False, sparse_comp=True,
-        norm_func=norm, pow=2, coeff=1/3):
-    p = qjf(p, 'dop')
-    inds = np.array(inds, ndmin=1)
-    # Construct operators
-    ops_i = [[eyepad(sig(s), dims, ind, sparse=sparse_comp)
-              for s in (1, 2, 3)]
-             for ind in inds]
+def logarithmic_negativity(p, dims=[2, 2], sysa=0, sysb=1):
+    """ Logarithmic negativity between `sysa` and `sysb` of `p`, with
+    subsystem dimensions `dims`. """
+    if np.size(dims) > 2:
+        p = trx(p, dims, [sysa, sysb])
+        dims = [dims[sysa], dims[sysb]]
+    e = log2(norm(partial_transpose(p, dims), "tr"))
+    return max(0.0, e)
 
-    # Define function closed over precomputed operators
-    def qid_func(x):
-        qds = np.zeros(np.size(inds))
-        for i, ops in enumerate(ops_i):
-            for op in ops:
-                qds[i] += coeff * norm_func(x @ op - op @ x)**pow
-        return qds
-
-    return qid_func if precomp_func else qid_func(p)
+logneg = logarithmic_negativity
 
 
-def pauli_decomp(a, mode='p', tol=1e-3):
+def concurrence(p):
+    """ Concurrence of two-qubit state `p`. """
+    if isop(p):
+        p = qjf(p, "dop")  # make sure density operator
+        pt = kron(sig(2), sig(2)) @ p.conj() @ kron(sig(2), sig(2))
+        l = (nla.eigvals(p @ pt).real**2)**0.25
+        return max(0, 2 * np.max(l) - np.sum(l))
+    else:
+        p = qjf(p, "ket")
+        pt = kron(sig(2), sig(2)) @ p.conj()
+        c = np.real(abs(p.H @ pt)).item(0)
+        return max(0, c)
+
+
+def one_way_classical_information(p_ab, prjs, precomp_func=False):
+    """ One way classical information for two qubit density matrix.
+
+    Parameters
+    ----------
+        p_ab: state of two qubits
+        prjs: iterable of POVMs
+        precomp_func: whether to return a pre-computed function, closed over
+            the actual state.
+
+    Returns
+    -------
+        The one-way classical information or the function to compute such
+        given a set of POVMs """
+    p_a = ptr(p_ab, [2, 2], 0)
+    s_a = entropy(p_a)
+
+    def owci(prjs):
+        def gen_paj():
+            for prj in prjs:
+                p_ab_j = (eye(2) & prj) @ p_ab
+                prob = tr(p_ab_j)
+                p_a_j = ptr(p_ab_j, [2, 2], 0) / prob
+                yield prob, p_a_j
+        return s_a - sum(p * entropy(rho) for p, rho in gen_paj())
+
+    return owci if precomp_func else owci(prjs)
+
+
+def quantum_discord(p):
+    """ Quantum Discord for two qubit density matrix `p`. """
+    p = qjf(p, "dop")
+    iab = mutual_information(p)
+    owci = one_way_classical_information(p, None, precomp_func=True)
+
+    def trial_qd(a):
+        ax, ay, az = sin(a[0]) * cos(a[1]), sin(a[0]) * sin(a[1]), cos(a[0])
+        prja = bloch_state(ax, ay, az)
+        prjb = eye(2) - prja
+        return iab - owci([prja, prjb])
+
+    opt = minimize(trial_qd, (pi/2, pi),
+                   method="SLSQP", bounds=((0, pi), (0, 2 * pi)))
+    if opt.success:
+        return opt.fun
+    else:
+        raise ValueError(opt.message)
+
+
+def trace_distance(p, w):
+    """ Trace distance between states `p` and `w`. """
+    if not isop(p) and not isop(w):
+        return sqrt(1 - inner(p, w))
+    return 0.5 * norm(p - w, "tr")
+
+
+def pauli_decomp(a, mode="p", tol=1e-3):
     """
     Decomposes an operator via the Hilbert-schmidt inner product into the
     pauli group. Can both print the decomposition or return it.
@@ -201,12 +202,12 @@ def pauli_decomp(a, mode='p', tol=1e-3):
     YY -0.25
     ZZ -0.25
     """
-    a = qjf(a, 'dop')  # make sure operator
-    n = int(np.log2(a.shape[0]))  # infer number of qubits
+    a = qjf(a, "dop")  # make sure operator
+    n = infer_size(a)
 
     # define generator for inner product to iterate over efficiently
     def calc_name_and_overlap(fa):
-        for perm in product('IXYZ', repeat=n):
+        for perm in product("IXYZ", repeat=n):
             name = "".join(perm)
             op = kron(*[sig(s, sparse=True) for s in perm]) / 2**n
             d = np.trace(a @ op)
@@ -217,39 +218,25 @@ def pauli_decomp(a, mode='p', tol=1e-3):
     nds.sort(key=lambda pair: -abs(pair[1]))
     nds = OrderedDict(nds)
     # Print decomposition
-    if 'p' in mode:
+    if "p" in mode:
         for x, d in nds.items():
             if abs(d) < 0.01:
                 break
-            dps = int(round(0.5 - np.log10(1.001 * tol)))  # dec places to show
-            print(x, '{: .{prec}f}'.format(d, prec=dps))
+            dps = int(round(0.5 - np.log10(1.001 * tol)))  # decimal places
+            print(x, "{: .{prec}f}".format(d, prec=dps))
     # Return full calculation
-    if 'c' in mode:
+    if "c" in mode:
         return nds
 
 
-def purify(rho, sparse=False):
-    """
-    Take state rho and purify it into a wavefunction of squared dimension.
-    """
-    d = rho.shape[0]
-    ls, vs = eigsys(rho)
-    ls = np.sqrt(ls)
-    psi = np.zeros(shape=(d**2, 1), dtype=complex)
-    for i, l in enumerate(ls.flat):
-        psi += l * kron(vs[:, i], basis_vec(i, d, sparse=sparse))
-    return qjf(psi)
-
-
 def bell_fid(p):
-    """
-    Outputs a tuple of state p's fidelities with the four bell states
-    psi- (singlet) psi+, phi-, phi+ (triplets).
-    """
+    # TODO: bell_decomp, with arbitrary size, print and calc
+    """ Outputs a tuple of state p's fidelities with the four bell states
+    psi- (singlet) psi+, phi-, phi+ (triplets). """
     op = isop(p)
 
     def gen_bfs():
-        for b in ['psi-', 'psi+', 'phi-', 'phi+']:
+        for b in ["psi-", "psi+", "phi-", "phi+"]:
             psib = bell_state(b)
             if op:
                 yield tr(psib.H @ p @ psib)
@@ -259,51 +246,41 @@ def bell_fid(p):
     return [*gen_bfs()]
 
 
-def correlation(p, sysa, sysb, opa, opb, dims=None, op=None, sparse=True,
+def correlation(p, opa, opb, sysa, sysb, dims=None, sparse=True,
                 precomp_func=False,):
-    """
-    Calculate the correlation between two sites given two operators.
+    """ Calculate the correlation between two sites given two operators.
 
     Parameters
     ----------
         p: state
-        sysa: index of first subsystem
-        sysb: index of second subsystem
         opa: operator to act on first subsystem
         opb: operator to act on second subsystem
+        sysa: index of first subsystem
+        sysb: index of second subsystem
         sparse: whether to compute with sparse operators
         precomp_func: whether to return result or single arg function closed
             over precomputed operators
 
     Returns
     -------
-        cab: correlation, <ab> - <a><b>
-    """
+        cab: correlation, <ab> - <a><b> """
     if dims is None:
         sz_p = infer_size(p)
         dims = [2] * sz_p
-    if op is None:
-        op = isop(p)
 
-    opab = eyepad([opa, opb], dims, [sysa, sysb], sparse=sparse)
+    opab = eyepad([opa, opb], dims, (sysa, sysb), sparse=sparse)
     opa = eyepad([opa], dims, sysa, sparse=sparse)
     opb = eyepad([opb], dims, sysb, sparse=sparse)
 
-    if op:
-        def corr(state):
-            return tr(opab @ state) - tr(opa @ state) * tr(opb @ state)
-    else:
-        def corr(state):
-            return tr(state.H @ opab @ state -
-                      (state.H @ opa @ state) * (state.H @ opb @ state))
+    def corr(state):
+        return inner(opab, p) - inner(opa, p) * inner(opb, p)
 
     return corr if precomp_func else corr(p)
 
 
-def correlation_list(p, sysa=0, sysb=1, ss=('xx', 'yy', 'zz'),
+def correlation_list(p, ss=("xx", "yy", "zz"), sysa=0, sysb=1,
                      sum_abs=False, precomp_func=False):
-    """
-    Calculate the correlation between sites for a list of operator pairs.
+    """ Calculate the correlation between sites for a list of operator pairs.
 
     Parameters
     ----------
@@ -317,11 +294,10 @@ def correlation_list(p, sysa=0, sysb=1, ss=('xx', 'yy', 'zz'),
 
     Returns
     -------
-        corrs: list of values or functions specifiying each correlation.
-    """
+        corrs: list of values or functions specifiying each correlation. """
     def gen_corr_list():
         for s1, s2 in ss:
-            yield correlation(p, sysa, sysb, sig(s1), sig(s2),
+            yield correlation(p, sig(s1), sig(s2), sysa, sysb,
                               precomp_func=precomp_func)
 
     if sum_abs:
@@ -332,8 +308,8 @@ def correlation_list(p, sysa=0, sysb=1, ss=('xx', 'yy', 'zz'),
 
 
 def ent_cross_matrix(p, ent_fun=concurrence, calc_self_ent=True):
-    """
-    Calculate the pair-wise function ent_fun  between all sites of a state.
+    """ Calculate the pair-wise function ent_fun  between all sites
+    of a state.
 
     Parameters
     ----------
@@ -345,8 +321,7 @@ def ent_cross_matrix(p, ent_fun=concurrence, calc_self_ent=True):
 
     Returns
     -------
-        ents: matrix of pairwise ent_fun results.
-    """
+        ents: matrix of pairwise ent_fun results. """
     sz_p = infer_size(p)
     ents = np.empty((sz_p, sz_p))
     for i in range(sz_p):
@@ -364,3 +339,23 @@ def ent_cross_matrix(p, ent_fun=concurrence, calc_self_ent=True):
             ents[i, j] = ent
             ents[j, i] = ent
     return ents
+
+
+def qid(p, dims, inds, precomp_func=False, sparse_comp=True,
+        norm_func=norm, pow=2, coeff=1/3):
+    p = qjf(p, "dop")
+    inds = np.array(inds, ndmin=1)
+    # Construct operators
+    ops_i = [[eyepad(sig(s), dims, ind, sparse=sparse_comp)
+              for s in (1, 2, 3)]
+             for ind in inds]
+
+    # Define function closed over precomputed operators
+    def qid_func(x):
+        qds = np.zeros(np.size(inds))
+        for i, ops in enumerate(ops_i):
+            for op in ops:
+                qds[i] += coeff * norm_func(x @ op - op @ x)**pow
+        return qds
+
+    return qid_func if precomp_func else qid_func(p)

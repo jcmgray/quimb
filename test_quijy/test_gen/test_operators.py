@@ -40,3 +40,8 @@ class TestControlledZ:
         cz = controlled('z', sparse=True)
         assert(issparse(cz))
         assert_allclose(cz.A, np.diag([1, 1, 1, -1]))
+
+
+class TestHamHeis:
+    def test_ham_heis_2(self):
+        pass

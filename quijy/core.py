@@ -14,8 +14,7 @@ from numexpr import evaluate as evl
 
 
 def quijify(data, qtype=None, sparse=False, normalized=False, chopped=False):
-    """
-    Converts lists to 'quantum' i.e. complex matrices, kets being columns.
+    """ Converts lists to 'quantum' i.e. complex matrices, kets being columns.
     * Will unravel an array if 'ket' or 'bra' given.
     * Will conjugate if 'bra' given.
     * Will leave operators as is if 'dop' given, but construct one
@@ -30,21 +29,20 @@ def quijify(data, qtype=None, sparse=False, normalized=False, chopped=False):
 
     Returns
     -------
-        x: numpy or sparse matrix
-    """
+        x: numpy or sparse matrix """
     is_sparse_input = issparse(data)
     if is_sparse_input:
         qob = sp.csr_matrix(data, dtype=complex)
     else:
         qob = np.matrix(data, copy=False, dtype=complex)
     if qtype is not None:
-        if qtype in {'k', 'ket'}:
+        if qtype in {"k", "ket"}:
             qob.shape = (np.prod(qob.shape), 1)
-        elif qtype in {'b', 'bra'}:
+        elif qtype in {"b", "bra"}:
             qob.shape = (1, np.prod(qob.shape))
             qob = qob.conj()
-        elif qtype in {'d', 'r', 'rho', 'op', 'dop'} and not isop(qob):
-            qob = quijify(qob, 'k') @ quijify(qob, 'k').H
+        elif qtype in {"d", "r", "rho", "op", "dop"} and not isop(qob):
+            qob = quijify(qob, "k") @ quijify(qob, "k").H
     if chopped:
         chop(qob, inplace=True)
     if normalized:
@@ -60,6 +58,7 @@ def matrixify(foo):
 
 
 def realify(foo, imag_tol=1.0e-14):
+    """ To decorate functions that should return float for small complex. """
     def realified_foo(*args, **kwargs):
         x = foo(*args, **kwargs)
         return x.real if abs(x.imag) < abs(x.real) * imag_tol else x
@@ -67,6 +66,7 @@ def realify(foo, imag_tol=1.0e-14):
 
 
 def issparse(x):
+    """ Checks if object is scipy sparse format. """
     return isinstance(x, sp.spmatrix)
 
 
@@ -117,7 +117,8 @@ def trace_sparse(op):
     return np.sum(op.diagonal())
 
 
-def trace(op, imag_tol=1e-14):
+def trace(op):
+    """ Trace of dense or sparse matrix """
     return trace_sparse(op) if issparse(op) else trace_dense(op)
 
 # Monkey-patch trace methods
@@ -143,9 +144,7 @@ sp.csr_matrix.nmlz = nmlz
 @matrixify
 @jit(nopython=True)
 def kron_dense(a, b):  # pragma: no cover
-    """
-    Fast tensor product of two dense arrays (Fast than numpy using jit)
-    """
+    """ Fast tensor product of two dense arrays. """
     m, n = a.shape
     p, q = b.shape
     x = np.empty((m * p, n * q), dtype=np.complex128)
@@ -157,7 +156,7 @@ def kron_dense(a, b):  # pragma: no cover
 
 def kron_sparse(a, b):
     """ Sparse tensor product """
-    return sp.kron(a, b, format='csr')
+    return sp.kron(a, b, format="csr")
 
 
 def kron(*ops):
@@ -171,8 +170,7 @@ def kron(*ops):
         ops: objects to be tensored together
     Returns:
         operator
-    The product is performed as (a * (b * (c * ...)))
-    """
+    The product is performed as (a * (b * (c * ...))) """
     num_p = len(ops)
     if num_p == 0:
         return 1
@@ -190,13 +188,12 @@ sp.csr_matrix.__and__ = kron_sparse
 
 
 def kronpow(a, pwr):
-    """ Returns 'a' tensored with itself pwr times """
+    """ Returns `a` tensored with itself pwr times """
     return kron(*(a for i in range(pwr)))
 
 
 def coo_map(dims, coos, cyclic=False, trim=False):
-    """
-    Maps multi-dimensional coordinates and indices to flat arrays in a
+    """ Maps multi-dimensional coordinates and indices to flat arrays in a
     regular way. Wraps or deletes coordinates beyond the system size
     depending on parameters `cyclic` and `trim`.
 
@@ -212,8 +209,7 @@ def coo_map(dims, coos, cyclic=False, trim=False):
     Returns
     -------
         dims: flattened version of dims
-        coos: indices mapped to flattened dims
-    """
+        coos: indices mapped to flattened dims """
     dims = np.asarray(dims)
     shp_dims, n_dims = dims.shape, dims.ndim
     # Calculate 'shape multiplier' for each dimension
@@ -224,17 +220,15 @@ def coo_map(dims, coos, cyclic=False, trim=False):
     elif trim:
         coos = coos[np.all(coos == coos % shp_dims, axis=1)]
     elif np.any(coos != coos % shp_dims):
-        raise ValueError('Coordinates beyond system dimensions.')
+        raise ValueError("Coordinates beyond system dimensions.")
     # Sum contributions from each coordinate & flatten dimensions
     coos = np.sum(shp_mul * coos, axis=1)
     return np.ravel(dims), coos
 
 
 def coo_compress(dims, inds):
-    """
-    Compresses identity spaces together: groups 1D dimensions according to
-    whether their index appears in inds, then merges the groups.
-    """
+    """ Compresses identity spaces together: groups 1D dimensions according to
+    whether their index appears in inds, then merges the groups. """
     try:
         inds = {*inds}
         grp_dims = groupby(range(len(dims)), lambda x: x in inds)
@@ -248,21 +242,22 @@ def coo_compress(dims, inds):
 
 @matrixify
 @jit(nopython=True)
-def identity_dense(n):  # pragma: no cover
-    x = np.zeros((n, n), dtype=np.complex128)
-    for i in range(n):
+def identity_dense(d):  # pragma: no cover
+    """ Returns a dense, complex identity of order d. """
+    x = np.zeros((d, d), dtype=np.complex128)
+    for i in range(d):
         x[i, i] = 1
     return x
 
 
-def identity_sparse(n):
-    return sp.eye(n, dtype=complex, format='csr')
+def identity_sparse(d):
+    """ Returns a sparse, complex identity of order d. """
+    return sp.eye(d, dtype=complex, format="csr")
 
 
-def identity(n, sparse=False):
-    """ Return identity of size n in complex format, optionally sparse"""
-    return identity_sparse(n) if sparse else identity_dense(n)
-
+def identity(d, sparse=False):
+    """ Return identity of size d in complex format, optionally sparse"""
+    return identity_sparse(d) if sparse else identity_dense(d)
 
 eye = identity
 
@@ -272,8 +267,7 @@ def eyepad(ops, dims, inds, sparse=None):
     # TODO: test 2d+ dims and coos
     # TODO: compress coords?
     # TODO: allow -1 in dims to auto place *without* ind?
-    """
-    Places several operators 'over' locations inds of dims. Automatically
+    """ Places several operators 'over' locations inds of dims. Automatically
     placing a large operator over several dimensions is allowed and a list
     of operators can be given which are then applied cyclically.
 
@@ -286,8 +280,7 @@ def eyepad(ops, dims, inds, sparse=None):
 
     Returns
     -------
-        Operator such that ops act on dims[inds].
-    """
+        Operator such that ops act on dims[inds]. """
     if isinstance(ops, (np.ndarray, sp.spmatrix)):
         ops = [ops]
     if np.ndim(dims) > 1:
@@ -329,10 +322,8 @@ def perm_pad(op, dims, inds):
     # TODO: multiple ops
     # TODO: coo map, coo compress
     # TODO: sparse??
-    """
-    Advanced tensor placement of operators that allows arbitrary ordering such
-    as reversal and interleaving of identities. For dense matrices only.
-    """
+    """ Advanced tensor placement of operators that allows arbitrary ordering
+    such as reversal and interleaving of identities. """
     dims, inds = np.asarray(dims), np.asarray(inds)
     n = len(dims)  # number of subsytems
     sz = np.prod(dims)  # Total size of system
@@ -355,8 +346,7 @@ def perm_pad(op, dims, inds):
 
 @matrixify
 def permute_subsystems(p, dims, perm):
-    """
-    Permute the subsytems of a state.
+    """ Permute the subsytems of a state.
 
     Parameters
     ----------
@@ -366,8 +356,7 @@ def permute_subsystems(p, dims, perm):
 
     Returns
     -------
-        pp: permuted state, vector or operator
-    """
+        pp: permuted state, vector or operator """
     p, perm = np.asarray(p), np.asarray(perm)
     d = np.prod(dims)
     if isop(p):
@@ -392,8 +381,7 @@ def partial_trace_clever(p, dims, keep):
 
     Returns
     -------
-        Density matrix of subsytem dimensions dims[keep]
-    """
+        Density matrix of subsytem dimensions dims[keep] """
     dims, keep = np.array(dims, ndmin=1), np.array(keep, ndmin=1)
     n = len(dims)
     lose = np.delete(range(n), keep)
@@ -416,9 +404,8 @@ def partial_trace_clever(p, dims, keep):
 
 
 def trace_lose(p, dims, coo_lose):
-    """
-    Simple partial trace where the single subsytem at coo_lose is traced out.
-    """
+    """ Simple partial trace where the single subsytem at coo_lose is traced
+    out. """
     p = p if isop(p) else p @ p.H
     dims = np.asarray(dims)
     e = dims[coo_lose]
@@ -438,9 +425,7 @@ def trace_lose(p, dims, coo_lose):
 
 
 def trace_keep(p, dims, coo_keep):
-    """
-    Simple partial trace where the single subsytem at coo_keep is kept.
-    """
+    """ Simple partial trace where the single subsytem at coo_keep is kept. """
     p = p if isop(p) else p @ p.H
     dims = np.asarray(dims)
     s = dims[coo_keep]
@@ -459,10 +444,8 @@ def trace_keep(p, dims, coo_keep):
 
 
 def partial_trace_simple(p, dims, coos_keep):
-    """
-    Simple partial trace made up of consecutive single subsystem partial
-    traces, augmented by 'compressing' the dimensions each time.
-    """
+    """ Simple partial trace made up of consecutive single subsystem partial
+    traces, augmented by 'compressing' the dimensions each time. """
     p = p if isop(p) else p @ p.H
     dims, coos_keep = coo_compress(dims, coos_keep)
     if len(coos_keep) == 1:
@@ -476,13 +459,20 @@ def partial_trace_simple(p, dims, coos_keep):
 
 
 def partial_trace(p, dims, coos):
-    """
-    Dispatch partial trace based on sparsity.
-    """
+    """ Partial trace of a dense or sparse state.
+
+    Parameters
+    ----------
+        p: state
+        dims: list of dimensions of subsystems
+        coos: coordinates of subsytems to keep
+
+    Returns
+    -------
+        rhoab: density matrix of remaining subsytems,"""
     if issparse(p):
         return partial_trace_simple(p, dims, coos)
     return partial_trace_clever(p, dims, coos)
-
 
 ptr = partial_trace
 trx = partial_trace
@@ -491,8 +481,7 @@ sp.csr_matrix.ptr = partial_trace_simple
 
 
 def chop(x, tol=1.0e-15, inplace=True):
-    """
-    Set small values of an array to zero.
+    """ Set small values of an array to zero.
 
     Parameters
     ----------
@@ -502,8 +491,7 @@ def chop(x, tol=1.0e-15, inplace=True):
 
     Returns
     -------
-        None if inplace else chopped matrix
-    """
+        None if inplace else chopped matrix """
     minm = np.abs(x).max() * tol  # minimum value tolerated
     if not inplace:
         x = x.copy()
@@ -547,8 +535,7 @@ def accel_vdot(a, b):  # pragma: no cover
 
 @matrixify
 def ldmul(vec, mat):
-    '''
-    Accelerated left diagonal multiplication using numexpr,
+    """ Accelerated left diagonal multiplication using numexpr,
     faster than numpy for n > ~ 500.
 
     Parameters
@@ -558,17 +545,15 @@ def ldmul(vec, mat):
 
     Returns
     -------
-        mat: np.matrix
-    '''
+        mat: np.matrix """
     d = mat.shape[0]
     vec = vec.reshape(d, 1)
-    return evl('vec*mat') if d > 500 else accel_mul(vec, mat)
+    return evl("vec*mat") if d > 500 else accel_mul(vec, mat)
 
 
 @matrixify
 def rdmul(mat, vec):
-    '''
-    Accelerated right diagonal multiplication using numexpr,
+    """ Accelerated right diagonal multiplication using numexpr,
     faster than numpy for n > ~ 500.
 
     Parameters
@@ -578,24 +563,21 @@ def rdmul(mat, vec):
 
     Returns
     -------
-        mat: np.matrix
-    '''
+        mat: np.matrix """
     d = mat.shape[0]
     vec = vec.reshape(1, d)
-    return evl('mat*vec') if d > 500 else accel_mul(mat, vec)
+    return evl("mat*vec") if d > 500 else accel_mul(mat, vec)
 
 
 def inner(a, b):
-    """
-    Operator inner product between a and b, i.e. for vectors it will be the
-    absolute overlap squared |<a|b><b|a>|, rather than <a|b>.
-    """
+    """ Operator inner product between a and b, i.e. for vectors it will be the
+    absolute overlap squared |<a|b><b|a>|, rather than <a|b>. """
     method = {(0, 0, 0): lambda: abs(accel_vdot(a, b))**2,
-              (0, 1, 0): lambda: accel_vdot(a, accel_dot(b, a)),
-              (1, 0, 0): lambda: accel_vdot(b, accel_dot(a, b)),
-              (1, 1, 0): lambda: trace_dense(accel_dot(a, b)),
               (0, 0, 1): lambda: abs((a.H @ b)[0, 0])**2,
-              (1, 0, 1): lambda: abs((b.H @ a @ b)[0, 0]),
+              (0, 1, 0): lambda: accel_vdot(a, accel_dot(b, a)),
               (0, 1, 1): lambda: abs((a.H @ b @ a)[0, 0]),
+              (1, 0, 0): lambda: accel_vdot(b, accel_dot(a, b)),
+              (1, 0, 1): lambda: abs((b.H @ a @ b)[0, 0]),
+              (1, 1, 0): lambda: trace_dense(accel_dot(a, b)),
               (1, 1, 1): lambda: trace_sparse(a @ b)}
     return method[isop(a), isop(b), issparse(a) or issparse(b)]()

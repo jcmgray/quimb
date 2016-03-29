@@ -1,10 +1,10 @@
-#QUIJY
+# QUIJY
 
- * Python library for many-body quantum calcuations. 
- * Uses ```numpy``` and ```scipy.sparse``` matrices as quantum objects.
+ * Python library for many-body quantum calcuations.
+ * Uses `numpy` and `scipy.sparse` matrices as quantum objects.
  * Function orientated aside from a few very convenient monkey-patches.
- * Many operations are accelerated using ```numba``` and ```numexpr```.
- 
+ * Many operations are accelerated using `numba` and `numexpr`.
+
 
 ## Example Usage
 ```python
@@ -38,7 +38,7 @@ Finally, measure the groundstate, trace out its middle, and calculate a few prop
 >>> tr(rho_ab)
 1.0
 >>> quantum_discord(rho_ab)
-2.0
+1.0
 >>> pauli_decomp(rho_ab)  # final two should now be singlet as well
 II  0.250
 ZZ -0.250

@@ -703,6 +703,7 @@ class TestAccelMul:
         a = rand_matrix(5)
         b = rand_matrix(5)
         ca = accel_mul(a, b)
+        assert isinstance(ca, np.matrix)
         cn = np.multiply(a, b)
         assert_allclose(ca, cn)
 
@@ -710,9 +711,11 @@ class TestAccelMul:
         a = rand_matrix(5)
         b = rand_ket(5)
         ca = accel_mul(a, b)
+        assert isinstance(ca, np.matrix)
         cn = np.multiply(a, b)
         assert_allclose(ca, cn)
         ca = accel_mul(a.H, b)
+        assert isinstance(ca, np.matrix)
         cn = np.multiply(a.H, b)
         assert_allclose(ca, cn)
 
@@ -722,6 +725,7 @@ class TestAccelDot:
         a = rand_matrix(5)
         b = rand_matrix(5)
         ca = accel_dot(a, b)
+        assert isinstance(ca, np.matrix)
         cn = a @ b
         assert_allclose(ca, cn)
 
@@ -729,6 +733,7 @@ class TestAccelDot:
         a = rand_matrix(5)
         b = rand_ket(5)
         ca = accel_dot(a, b)
+        assert isinstance(ca, np.matrix)
         cn = a @ b
         assert_allclose(ca, cn)
 
@@ -749,6 +754,7 @@ class TestFastDiagMul:
         mat = rand_matrix(2**n)
         a = ldmul(vec, mat)
         b = np.diag(vec) @ mat
+        assert isinstance(a, np.matrix)
         assert_allclose(a, b)
 
     def test_ldmul_large(self):
@@ -757,6 +763,7 @@ class TestFastDiagMul:
         mat = rand_matrix(2**n)
         a = ldmul(vec, mat)
         b = np.diag(vec) @ mat
+        assert isinstance(a, np.matrix)
         assert_allclose(a, b)
 
     def test_rdmul_small(self):
@@ -765,6 +772,7 @@ class TestFastDiagMul:
         mat = rand_matrix(2**n)
         a = rdmul(mat, vec)
         b = mat @ np.diag(vec)
+        assert isinstance(a, np.matrix)
         assert_allclose(a, b)
 
     def test_rdmul_large(self):
@@ -773,6 +781,7 @@ class TestFastDiagMul:
         mat = rand_matrix(2**n)
         a = rdmul(mat, vec)
         b = mat @ np.diag(vec)
+        assert isinstance(a, np.matrix)
         assert_allclose(a, b)
 
 
