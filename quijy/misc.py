@@ -39,34 +39,33 @@ def xrsmoosh(*dss, accept_new=False):
             if data_var not in ds.data_vars:
                 ds[data_var] = np.nan
         # Expand both to have same dimensions, padding with NaN
-        ds, new_ds = xr.align(ds, new_ds, join='outer')
+        ds, new_ds = xr.align(ds, new_ds, join="outer")
         # Fill NaNs one way or the other w.r.t. accept_new
         ds = new_ds.fillna(ds) if accept_new else ds.fillna(new_ds)
     return ds
 
 
-def xrload(file_name, engine='h5netcdf', load_to_mem=True):
-    """
-    Loads a xarray dataset.
-    """
-    ds = xr.open_dataset(file_name, engine=engine)
+def xrload(file_name, engine="h5netcdf", load_to_mem=True,
+           create_new=True):
+    """ Loads a xarray dataset. """
+    try:
+        ds = xr.open_dataset(file_name, engine=engine)
+    except (RuntimeError, OSError) as e:
+        if "o such" in str(e) and create_new:
+            ds = xr.Dataset()
     if load_to_mem:
         ds.load()
         ds.close()
     return ds
 
 
-def xrsave(ds, file_name, engine='h5netcdf'):
-    """
-    Saves a xarray dataset.
-    """
+def xrsave(ds, file_name, engine="h5netcdf"):
+    """ Saves a xarray dataset. """
     ds.to_netcdf(file_name, engine=engine)
 
 
 def xrgroupby_to_dim(ds, dim):
-    """
-    Convert a grouped coordinate to dimension.
-    """
+    """ Convert a grouped coordinate to dimension. """
     def gen_ds():
         for val, d in ds.groupby(dim):
             del d[dim]  # delete grouped labels

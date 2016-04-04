@@ -434,8 +434,8 @@ def partial_trace_clever(p, dims, keep):
 
 
 def trace_lose(p, dims, coo_lose):
-    """ Simple partial trace where the single subsytem at coo_lose is traced
-    out. """
+    """ Simple partial trace where the single subsytem at `coo_lose`
+    is traced out. """
     p = p if isop(p) else p @ p.H
     dims = np.asarray(dims)
     e = dims[coo_lose]
@@ -455,7 +455,8 @@ def trace_lose(p, dims, coo_lose):
 
 
 def trace_keep(p, dims, coo_keep):
-    """ Simple partial trace where the single subsytem at coo_keep is kept. """
+    """ Simple partial trace where the single subsytem
+    at `coo_keep` is kept. """
     p = p if isop(p) else p @ p.H
     dims = np.asarray(dims)
     s = dims[coo_keep]
