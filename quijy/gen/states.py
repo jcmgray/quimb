@@ -14,8 +14,7 @@ from .operators import sig, controlled
 
 
 def basis_vec(dir, dim, sparse=False, **kwargs):
-    """
-    Constructs a unit vector ket.
+    """ Constructs a unit vector ket.
 
     Parameters
     ----------
@@ -25,8 +24,7 @@ def basis_vec(dir, dim, sparse=False, **kwargs):
 
     Returns:
     --------
-        x: quijified basis vector
-    """
+        x: quijified basis vector """
     if sparse:
         return sp.csr_matrix(([1.0], ([dir], [0])),
                              dtype=complex, shape=(dim, 1))
@@ -80,48 +78,49 @@ def yminus(**kwargs):
                 [-1.0j / (2**0.5)]], **kwargs)
 
 
+def bloch_state(ax, ay, az, purified=False, **kwargs):
+    """ Construct qubit density matrix from bloch vector.
+
+    Parameters
+    ----------
+        ax: x component
+        ay: y component
+        az: z component
+        purified: whether to map vector to surface of bloch sphere
+
+    Returns
+    -------
+        p: density matrix of qubit 'pointing' in (ax, ay, az) direction. """
+    n = (ax**2 + ay**2 + az**2)**.5
+    if purified:
+        ax, ay, az = (a / n for a in (ax, ay, az))
+    return sum(0.5 * a * sig(s, **kwargs)
+               for a, s in zip((1, ax, ay, az), "ixyz"))
+
+
 @lru_cache(maxsize=8)
 def bell_state(s, **kwargs):
-    """
-    Generates one of the four bell-states;
-    0: phi+, 1: phi-, 2: psi+, 3: psi- (singlet)
-    """
-    keymap = {
-        'psi-': 'psi-', 0: 'psi-', 's': 'psi-', 'singlet': 'psi-',
-        'psi+': 'psi+', 1: 'psi+',
-        'phi-': 'phi-', 2: 'phi-',
-        'phi+': 'phi+', 3: 'phi+',
-    }
-    c = 2.0**-0.5
-    statemap = {
-        'psi-': lambda: qjf([[0], [c], [-c], [0]], **kwargs),
-        'phi+': lambda: qjf([[c], [0], [0], [c]], **kwargs),
-        'phi-': lambda: qjf([[c], [0], [0], [-c]], **kwargs),
-        'psi+': lambda: qjf([[0], [c], [c], [0]], **kwargs)
-    }
+    """ Generates one of the four bell-states;
+    0: phi+, 1: phi-, 2: psi+, 3: psi- (singlet) """
+    keymap = {"psi-": "psi-", 0: "psi-", "psim": "psi-",
+              "psi+": "psi+", 1: "psi+", "psip": "psi+",
+              "phi-": "phi-", 2: "phi-", "phim": "phi-",
+              "phi+": "phi+", 3: "phi+", "phip": "phi+"}
+    c = 2.**-.5
+    statemap = {"psi-": lambda: qjf([[0], [c], [-c], [0]], **kwargs),
+                "phi+": lambda: qjf([[c], [0], [0], [c]], **kwargs),
+                "phi-": lambda: qjf([[c], [0], [0], [-c]], **kwargs),
+                "psi+": lambda: qjf([[0], [c], [c], [0]], **kwargs)}
     return statemap[keymap[s]]()
 
 
 def singlet(**kwargs):
     """ Alias for one of bell-states """
-    return bell_state('psi-', **kwargs)
-
-
-def triplets(**kwargs):
-    """ Equal mixture of the three triplet bell_states """
-    return eye(4, **kwargs) - singlet(qtype='dop', **kwargs)
-
-
-def bloch_state(ax, ay, az, purify=False, **kwargs):
-    if purify:
-        ax, ay, az = np.array([ax, ay, az]) / (ax**2 + ay**2 + az**2)**0.5
-    return sum(0.5 * a * sig(s, **kwargs)
-               for a, s in zip((1, ax, ay, az), 'ixyz'))
+    return bell_state("psi-", **kwargs)
 
 
 def thermal_state(ham, beta, precomp_func=False):
-    """
-    Generate a thermal state of a hamtiltonian.
+    """ Generate a thermal state of a hamtiltonian.
 
     Parameters
     ----------
@@ -132,8 +131,7 @@ def thermal_state(ham, beta, precomp_func=False):
 
     Returns
     -------
-        rho_th: density matrix of thermal state, or func to generate such
-    """
+        rho_th: density matrix of thermal state, or func to generate such """
     if isinstance(ham, (list, tuple)):  # solved already
         l, v = ham
     else:
@@ -148,34 +146,40 @@ def thermal_state(ham, beta, precomp_func=False):
     return gen_state if precomp_func else gen_state(beta)
 
 
-def neel_state(n):
-    binary = '01' * (n // 2)
-    binary += (n % 2 == 1) * '0'  # add trailing spin for odd n
-    return basis_vec(int(binary, 2), 2 ** n)
+def neel_state(n, **kwargs):
+    """ Construct Neel state for n spins, i.e. alternating up/down. """
+    binary = "01" * (n // 2) + (n % 2 == 1) * "0"
+    return basis_vec(int(binary, 2), 2 ** n, **kwargs)
 
 
-def singlet_pairs(n):
-    return kronpow(bell_state(3), (n // 2))
+def singlet_pairs(n, **kwargs):
+    """ Construct fully dimerised spin chain. """
+    return kronpow(bell_state('psi-', **kwargs), (n // 2))
 
 
-def werner_state(p):
-    return p * bell_state(3) @ bell_state(3).H + (1 - p) * eye(4) / 4
+def werner_state(p, **kwargs):
+    """ Construct Werner State, i.e. fractional mix of eye with `p` amount of
+    singlet """
+    return p * bell_state('psi-', qtype="dop", **kwargs) +  \
+        (1 - p) * eye(4, **kwargs) / 4
 
 
-def ghz_state(n, sparse=False):
-    return (basis_vec(0, 2**n, sparse=sparse) +
-            basis_vec(2**n - 1, 2**n, sparse=sparse))/2.0**0.5
+def ghz_state(n, **kwargs):
+    """ Construct GHZ state of `n` spins, i.e. equal superposition of all up
+    and down. """
+    return (basis_vec(0, 2**n, **kwargs) +
+            basis_vec(2**n - 1, 2**n, **kwargs)) / 2.**.5
 
 
-def w_state(n, sparse=False):
-    return sum(basis_vec(2**i, 2**n, sparse=sparse) for i in range(n))/n**0.5
+def w_state(n, **kwargs):
+    """ Construct W-state for `n` spins, i.e. equal superposition of all
+    single spin up states. """
+    return sum(basis_vec(2**i, 2**n, **kwargs) for i in range(n))/n**0.5
 
 
 def levi_civita(perm):
-    """
-    Compute the generalised levi-civita coefficient for a
-    permutation of the ints in range(n)
-    """
+    """ Compute the generalised levi-civita coefficient for a
+    permutation of the ints in range(n). """
     n = len(perm)
     if n != len(set(perm)):  # infer there are repeated elements
         return 0
@@ -186,6 +190,8 @@ def levi_civita(perm):
 
 
 def perm_state(ps):
+    """ Construct the anti-symmetric state which is the sum of all
+    permutations of states `ps`. """
     n = len(ps)
     vec_perm = permutations(ps)
     ind_perm = permutations(range(n))
@@ -198,13 +204,13 @@ def perm_state(ps):
 
 
 def graph_state_1d(n, cyclic=True, sparse=False):
-    """ Graph State """
+    """ Graph State on a line. """
     p = kronpow(plus(sparse=sparse), n)
     for i in range(n-1):
-        p = eyepad(controlled('z', sparse=True), [2] * n, (i, i+1)) @ p
+        p = eyepad(controlled("z", sparse=True), [2] * n, (i, i+1)) @ p
     if cyclic:
         p = ((eye(2, sparse=True) & eye(2**(n-2), sparse=True) &
-              qjf([1, 0], qtype='dop', sparse=True)) +
-             (sig('z', sparse=True) & eye(2**(n-2), sparse=True) &
-              qjf([0, 1], qtype='dop', sparse=True))) @ p
+              qjf([1, 0], qtype="dop", sparse=True)) +
+             (sig("z", sparse=True) & eye(2**(n-2), sparse=True) &
+              qjf([0, 1], qtype="dop", sparse=True))) @ p
     return p

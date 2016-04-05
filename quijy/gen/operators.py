@@ -5,8 +5,7 @@ from ..core import qjf, eye, kron, eyepad
 
 @lru_cache(maxsize=64)
 def sig(xyz, dim=2, **kwargs):
-    """
-    Generates the spin operators for spin 1/2 or 1.
+    """ Generates the spin operators for spin 1/2 or 1.
 
     Parameters
     ----------
@@ -15,36 +14,34 @@ def sig(xyz, dim=2, **kwargs):
 
     Returns
     -------
-        spin operator, quijified.
-    """
-    xyzmap = {
-        0: 'i', 'i': 'i', 'I': 'i',
-        1: 'x', 'x': 'x', 'X': 'x',
-        2: 'y', 'y': 'y', 'Y': 'y',
-        3: 'z', 'z': 'z', 'Z': 'z'}
-    opmap = {
-        ('i', 2): lambda: eye(2, **kwargs),
-        ('x', 2): lambda: qjf([[0, 1],
-                               [1, 0]], **kwargs),
-        ('y', 2): lambda: qjf([[0, -1j],
-                               [1j, 0]], **kwargs),
-        ('z', 2): lambda: qjf([[1, 0],
-                               [0, -1]], **kwargs),
-        ('i', 3): lambda: eye(3, **kwargs),
-        ('x', 3): lambda: qjf([[0, 1, 0],
-                               [1, 0, 1],
-                               [0, 1, 0]], **kwargs) / 2**0.5,
-        ('y', 3): lambda: qjf([[0, -1j, 0],
-                               [1j, 0, -1j],
-                               [0, 1j, 0]], **kwargs) / 2**0.5,
-        ('z', 3): lambda: qjf([[1, 0, 0],
-                               [0, 0, 0],
-                               [0, 0, -1]], **kwargs)}
+        spin operator, quijified. """
+    xyzmap = {0: 'i', 'i': 'i', 'I': 'i',
+              1: 'x', 'x': 'x', 'X': 'x',
+              2: 'y', 'y': 'y', 'Y': 'y',
+              3: 'z', 'z': 'z', 'Z': 'z'}
+    opmap = {('i', 2): lambda: eye(2, **kwargs),
+             ('x', 2): lambda: qjf([[0, 1],
+                                    [1, 0]], **kwargs),
+             ('y', 2): lambda: qjf([[0, -1j],
+                                    [1j, 0]], **kwargs),
+             ('z', 2): lambda: qjf([[1, 0],
+                                    [0, -1]], **kwargs),
+             ('i', 3): lambda: eye(3, **kwargs),
+             ('x', 3): lambda: qjf([[0, 1, 0],
+                                    [1, 0, 1],
+                                    [0, 1, 0]], **kwargs) / 2**.5,
+             ('y', 3): lambda: qjf([[0, -1j, 0],
+                                    [1j, 0, -1j],
+                                    [0, 1j, 0]], **kwargs) / 2**.5,
+             ('z', 3): lambda: qjf([[1, 0, 0],
+                                    [0, 0, 0],
+                                    [0, 0, -1]], **kwargs)}
     return opmap[(xyzmap[xyz], dim)]()
 
 
 @lru_cache(maxsize=8)
 def controlled(s, sparse=False):
+    """ Construct a controlled pauli gate for two qubits. """
     keymap = {'x': 'x', 'not': 'x',
               'y': 'y',
               'z': 'z'}
@@ -64,8 +61,7 @@ def ham_heis(n, jx=1.0, jy=1.0, jz=1.0, bz=0.0, cyclic=False, sparse=False):
         cyclic: whether to couple the first and last spins
         sparse: whether to return the hamiltonian in sparse form
     Returns:
-        ham: hamiltonian as matrix
-    """
+        ham: hamiltonian as matrix """
     dims = [2] * n
     sds = qjf(jx * kron(sig('x'), sig('x')) +
               jy * kron(sig('y'), sig('y')) +
@@ -85,8 +81,7 @@ def ham_heis(n, jx=1.0, jy=1.0, jz=1.0, bz=0.0, cyclic=False, sparse=False):
 
 
 def ham_j1j2(n, j1=1.0, j2=0.5, bz=0.0, cyclic=False, sparse=False):
-    """
-    Generate the j1-j2 hamiltonian, i.e. next nearest neighbour
+    """ Generate the j1-j2 hamiltonian, i.e. next nearest neighbour
     interactions.
     Parameters
     ----------
@@ -98,8 +93,7 @@ def ham_j1j2(n, j1=1.0, j2=0.5, bz=0.0, cyclic=False, sparse=False):
         sparse: return hamtiltonian as sparse-csr matrix
     Returns
     -------
-        ham: Hamtiltonian as matrix
-    """
+        ham: Hamtiltonian as matrix """
     dims = [2] * n
     coosj1 = np.array([(i, i+1) for i in range(n)])
     coosj2 = np.array([(i, i+2) for i in range(n)])

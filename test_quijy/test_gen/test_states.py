@@ -1,10 +1,10 @@
 import numpy as np
-# from pytest import raises
 from numpy.testing import assert_allclose
-from quijy.core import tr, eye, chop, eyepad
+from quijy.core import tr, eye, chop, eyepad, inner, ptr
 from quijy.solve import eigsys, groundstate
-from quijy.gen import (basis_vec, thermal_state, ham_j1j2, rand_herm,
-                       graph_state_1d, sig, levi_civita)
+from quijy.gen import (basis_vec, up, down, plus, minus, yplus, yminus,
+                       thermal_state, ham_j1j2, rand_herm, graph_state_1d,
+                       sig, levi_civita, bloch_state, bell_state, singlet)
 
 
 class TestBasisVec:
@@ -19,6 +19,74 @@ class TestBasisVec:
         assert x[4, 0] == 1.
         assert x.nnz == 1
         assert x.dtype == complex
+
+
+class TestBasicStates:
+    def test_up(self):
+        p = up(qtype='dop')
+        assert_allclose(tr(p @ sig('z')), 1.0)
+
+    def test_down(self):
+        p = down(qtype='dop')
+        assert_allclose(tr(p @ sig('z')), -1.0)
+
+    def test_plus(self):
+        p = plus(qtype='dop')
+        assert_allclose(tr(p @ sig('x')), 1.0)
+
+    def test_minus(self):
+        p = minus(qtype='dop')
+        assert_allclose(tr(p @ sig('x')), -1.0)
+
+    def test_yplus(self):
+        p = yplus(qtype='dop')
+        assert_allclose(tr(p @ sig('y')), 1.0)
+
+    def test_yminus(self):
+        p = yminus(qtype='dop')
+        assert_allclose(tr(p @ sig('y')), -1.0)
+
+
+class TestBlochState:
+    def test_pure(self):
+        for vec, op, val in zip(((1, 0, 0), (0, 1, 0), (0, 0, 1),
+                                 (-1, 0, 0), (0, -1, 0), (0, 0, -1)),
+                                ("x", "y", "z", "x", "y", "z"),
+                                (1, 1, 1, -1, -1, -1)):
+            x = tr(bloch_state(*vec) @ sig(op))
+            assert_allclose(x, val)
+
+    def test_mixed(self):
+        for vec, op, val in zip(((.5, 0, 0), (0, .5, 0), (0, 0, .5),
+                                 (-.5, 0, 0), (0, -.5, 0), (0, 0, -.5)),
+                                ("x", "y", "z", "x", "y", "z"),
+                                (.5, .5, .5, -.5, -.5, -.5)):
+            x = tr(bloch_state(*vec) @ sig(op))
+            assert_allclose(x, val)
+
+    def test_purify(self):
+        for vec, op, val in zip(((.5, 0, 0), (0, .5, 0), (0, 0, .5),
+                                 (-.5, 0, 0), (0, -.5, 0), (0, 0, -.5)),
+                                ("x", "y", "z", "x", "y", "z"),
+                                (1, 1, 1, -1, -1, -1)):
+            x = tr(bloch_state(*vec, purified=True) @ sig(op))
+            assert_allclose(x, val)
+
+
+class TestBellStates:
+    def test_bell_states(self):
+        for s, dic in zip(("psi-", "psi+", "phi+", "phi-"),
+                          ({"qtype": 'dop'}, {}, {"sparse": True}, {})):
+            p = bell_state(s, **dic)
+            assert_allclose(inner(p, p), 1.0)
+            pa = ptr(p, [2, 2], 0)
+            assert_allclose(inner(pa, pa), 0.5)
+
+    def test_bell_state_singlet(self):
+        p = singlet(qtype="dop", sparse=True)
+        assert_allclose(inner(p, p), 1.0)
+        pa = ptr(p, [2, 2], 0)
+        assert_allclose(inner(pa, pa), 0.5)
 
 
 class TestThermalState:

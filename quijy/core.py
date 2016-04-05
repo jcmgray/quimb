@@ -362,12 +362,12 @@ def permute_dense(p, dims, perm):
 def permute_sparse(a, dims, perm):
     """ Permute the subsytems of a sparse matrix. """
     perm, dims = np.asarray(perm), np.asarray(dims)
-    ndims = dims[perm]
+    new_dims = dims[perm]
     # New dimensions & stride (i.e. product of preceding dimensions)
     odim_stride = np.asarray([np.prod(dims[i+1:])
                               for i, _ in enumerate(dims)])
-    ndim_stride = np.asarray([np.prod(ndims[i+1:])
-                              for i, _ in enumerate(ndims)])
+    ndim_stride = np.asarray([np.prod(new_dims[i+1:])
+                              for i, _ in enumerate(new_dims)])
     # Range of possible coordinates for each subsys
     coos = (tuple(range(dim)) for dim in dims)
     # Complete basis using coordinates for current and new dimensions

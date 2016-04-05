@@ -50,12 +50,14 @@ def xrload(file_name, engine="h5netcdf", load_to_mem=True,
     """ Loads a xarray dataset. """
     try:
         ds = xr.open_dataset(file_name, engine=engine)
+        if load_to_mem:
+            ds.load()
+            ds.close()
     except (RuntimeError, OSError) as e:
         if "o such" in str(e) and create_new:
             ds = xr.Dataset()
-    if load_to_mem:
-        ds.load()
-        ds.close()
+        else:
+            raise e
     return ds
 
 
