@@ -1,6 +1,6 @@
 from numpy.testing import assert_allclose
-from quijy import (qjf, rand_product_state, bell_state, rand_ket, rand_rho,
-                   up)
+from quijy import (qjf, rand_product_state, bell_state, rand_ket,
+                   up, rand_mix)
 from quijy.calc import (quantum_discord, one_way_classical_information,
                         mutual_information, partial_transpose,
                         entropy)
@@ -78,7 +78,7 @@ class TestQuantumDiscord:
 
     def test_quantum_discord_mixed(self):
         for i in range(10):
-            p = rand_rho(4)
+            p = rand_mix(4)
             p = p @ p.H
             qd = quantum_discord(p)
             assert(0 <= qd and qd <= 1)
