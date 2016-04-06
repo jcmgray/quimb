@@ -424,7 +424,7 @@ def partial_trace_clever(p, dims, keep):
             .transpose(perm) \
             .reshape((sz_keep, sz_lose))
         p = np.asmatrix(p)
-        return accel_dot(p, p.H)
+        return dot(p, p.H)
     else:
         p = np.asarray(p).reshape((*dims, *dims)) \
             .transpose((*perm, *(perm + n))) \
@@ -552,9 +552,12 @@ def accel_mul(x, y):  # pragma: no cover
 
 @matrixify
 @jit(nopython=True)
-def accel_dot(a, b):  # pragma: no cover
-    """ Accelerated dot product of two matrices. """
-    return a @ b
+def dot(*args):  # pragma: no cover
+    """ Accelerated dot product of matrices. """
+    x = args[-1]
+    for y in args[-2::-1]:
+        x = y @ x
+    return x
 
 
 @realify
@@ -605,10 +608,10 @@ def inner(a, b):
     absolute overlap squared |<a|b><b|a>|, rather than <a|b>. """
     method = {(0, 0, 0): lambda: abs(accel_vdot(a, b))**2,
               (0, 0, 1): lambda: abs((a.H @ b)[0, 0])**2,
-              (0, 1, 0): lambda: accel_vdot(a, accel_dot(b, a)),
+              (0, 1, 0): lambda: accel_vdot(a, dot(b, a)),
               (0, 1, 1): lambda: abs((a.H @ b @ a)[0, 0]),
-              (1, 0, 0): lambda: accel_vdot(b, accel_dot(a, b)),
+              (1, 0, 0): lambda: accel_vdot(b, dot(a, b)),
               (1, 0, 1): lambda: abs((b.H @ a @ b)[0, 0]),
-              (1, 1, 0): lambda: trace_dense(accel_dot(a, b)),
+              (1, 1, 0): lambda: trace_dense(dot(a, b)),
               (1, 1, 1): lambda: trace_sparse(a @ b)}
     return method[isop(a), isop(b), issparse(a) or issparse(b)]()

@@ -11,7 +11,7 @@ from quijy.core import (quijify, qjf, isbra, isket, isop, tr, isherm,
                         kron, kronpow, coo_map, coo_compress, eye, eyepad,
                         permute, chop, ldmul, rdmul,
                         infer_size, issparse, matrixify, realify, issmall,
-                        accel_mul, accel_dot, accel_vdot, inner, trace_lose,
+                        accel_mul, dot, accel_vdot, inner, trace_lose,
                         trace_keep, partial_trace, perm_pad)
 
 
@@ -734,22 +734,40 @@ class TestAccelMul:
         assert_allclose(ca, cn)
 
 
-class TestAccelDot:
-    def test_accel_dot_matrix(self):
+class TestDot:
+    def test_dot_matrix(self):
         a = rand_matrix(5)
         b = rand_matrix(5)
-        ca = accel_dot(a, b)
+        ca = dot(a, b)
         assert isinstance(ca, np.matrix)
         cn = a @ b
         assert_allclose(ca, cn)
 
-    def test_accel_dot_ket(self):
+    def test_dot_ket(self):
         a = rand_matrix(5)
         b = rand_ket(5)
-        ca = accel_dot(a, b)
+        ca = dot(a, b)
         assert isinstance(ca, np.matrix)
         cn = a @ b
         assert_allclose(ca, cn)
+
+    def test_multiarg_mats(self):
+        a, b, c = rand_matrix(5), rand_matrix(5), rand_matrix(5)
+        d = dot(a, b, c)
+        assert isinstance(d, np.matrix)
+        assert_allclose(d, a @ b @ c)
+
+    def test_multiarg_vecs(self):
+        a, b, c = rand_matrix(5), rand_matrix(5), rand_ket(5)
+        d = dot(a, b, c)
+        assert isinstance(d, np.matrix)
+        assert_allclose(d, a @ b @ c)
+
+    def test_multiarg_closed(self):
+        a, b, c = rand_matrix(5), rand_matrix(5), rand_ket(5)
+        d = dot(c.H, a, b, c)
+        assert isinstance(d, np.matrix)
+        assert_allclose(d, c.H @ a @ b @ c)
 
 
 class TestAccelVdot:
