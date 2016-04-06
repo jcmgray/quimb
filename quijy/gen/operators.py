@@ -51,7 +51,7 @@ def controlled(s, sparse=False):
              sig(keymap[s], sparse=sparse)))
 
 
-def ham_heis(n, jx=1.0, jy=1.0, jz=1.0, bz=0.0, cyclic=False, sparse=False):
+def ham_heis(n, jx=1.0, jy=1.0, jz=1.0, bz=0.0, cyclic=True, sparse=False):
     """ Constructs the heisenberg spin 1/2 hamiltonian
     Parameters:
         n: number of spins
@@ -75,12 +75,10 @@ def ham_heis(n, jx=1.0, jy=1.0, jz=1.0, bz=0.0, cyclic=False, sparse=False):
         ham = ham + eyepad(sig('x', sparse=True), dims, [0, n - 1])  \
                   + eyepad(sig('y', sparse=True), dims, [0, n - 1])  \
                   + eyepad(sig('z', sparse=True), dims, [0, n - 1])
-    if not sparse:
-        ham = ham.todense()  # always construct sparse though
-    return ham
+    return ham if sparse else ham.todense()
 
 
-def ham_j1j2(n, j1=1.0, j2=0.5, bz=0.0, cyclic=False, sparse=False):
+def ham_j1j2(n, j1=1.0, j2=0.5, bz=0.0, cyclic=True, sparse=False):
     """ Generate the j1-j2 hamiltonian, i.e. next nearest neighbour
     interactions.
     Parameters

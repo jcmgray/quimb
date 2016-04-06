@@ -1,9 +1,8 @@
 from pytest import raises
 import numpy as np
 from numpy.testing import assert_allclose
-from quijy.core import issparse
-from quijy.solve import eigvals
-from quijy.gen.operators import sig, controlled
+from quijy import issparse, eigvals, groundstate, inner, singlet, seigvals
+from quijy.gen.operators import sig, controlled, ham_heis, ham_j1j2
 
 
 class TestSig:
@@ -44,4 +43,36 @@ class TestControlledZ:
 
 class TestHamHeis:
     def test_ham_heis_2(self):
-        pass
+        h = ham_heis(2, cyclic=False)
+        l = eigvals(h)
+        assert_allclose(l, [-3, 1, 1, 1])
+        gs = groundstate(h)
+        assert inner(gs, singlet()) == 1.
+
+    def test_ham_heis_sparse_cyclic_4(self):
+        h = ham_heis(4, sparse=True, cyclic=True)
+        lk = seigvals(h, 4)
+        assert_allclose(lk, [-8, -4, -4, -4])
+
+
+class TestHamJ1J2:
+    def test_ham_j1j2_3_dense(self):
+        h = ham_j1j2(3, j2=1.0, cyclic=False)
+        h2 = ham_heis(3, cyclic=True)
+        assert_allclose(h, h2)
+
+    def test_ham_j1j2_6_sparse_cyc(self):
+        h = ham_j1j2(6, j2=0.5, sparse=True, cyclic=True)
+        lk = seigvals(h, 5)
+        assert_allclose(lk, [-9, -9, -7, -7, -7])
+
+    def test_ham_j1j2_4_bz(self):
+        h = ham_j1j2(4, cyclic=True, bz=0)
+        lk = seigvals(h, 11)
+        assert_allclose(lk, [-6, -6, -2, -2, -2, -2, -2, -2, -2, -2, -2])
+        h = ham_j1j2(4, cyclic=True, bz=0.1)
+        lk = seigvals(h, 11)
+        assert_allclose(lk, [-6, -6,
+                             -2.2, -2.2, -2.2,
+                             -2.0, -2.0, -2.0,
+                             -1.8, -1.8, -1.8])
