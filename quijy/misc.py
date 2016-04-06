@@ -7,6 +7,19 @@ import xarray as xr
 from tqdm import tqdm
 
 
+def matrixify(foo):
+    """ To decorate functions returning ndarrays. """
+    return lambda *args, **kwargs: np.asmatrix(foo(*args, **kwargs))
+
+
+def realify(foo, imag_tol=1.0e-14):
+    """ To decorate functions that should return float for small complex. """
+    def realified_foo(*args, **kwargs):
+        x = foo(*args, **kwargs)
+        return x.real if abs(x.imag) < abs(x.real) * imag_tol else x
+    return realified_foo
+
+
 def progbar(it, **kwargs):
     """ tqdm progress bar with deifferent defaults. """
     return tqdm(it, ascii=True, leave=True, **kwargs)

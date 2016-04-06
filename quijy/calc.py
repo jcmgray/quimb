@@ -12,8 +12,9 @@ import numpy.linalg as nla
 import scipy.sparse.linalg as spla
 from scipy.optimize import minimize
 
-from .core import (isop, qjf, kron, ldmul, ptr, eye, eyepad, tr, trx,
-                   infer_size, issparse, dot, inner)
+from .accel import dot, ldmul
+from .core import (isop, qjf, kron, ptr, eye, eyepad, tr, trx,
+                   infer_size, issparse, inner)
 from .solve import (eigvals, eigsys, norm)
 from .gen import (sig, basis_vec, bell_state, bloch_state)
 

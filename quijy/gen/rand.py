@@ -3,7 +3,8 @@ Functions for generating random quantum objects and states.
 """
 import numpy as np
 import scipy.sparse as sp
-from ..core import qjf, ptr, kron, rdmul, nmlz
+from ..accel import rdmul
+from ..core import qjf, ptr, kron, nmlz
 
 
 def rand_matrix(d, scaled=True, sparse=False, format='csr', density=0.01):

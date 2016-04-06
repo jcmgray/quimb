@@ -8,7 +8,7 @@ import numpy as np
 import numpy.linalg as nla
 import scipy.sparse.linalg as spla
 from numba import jit
-from .core import qjf, issparse, accel_vdot
+from .core import qjf, issparse, vdot
 
 
 # -------------------------------------------------------------------------- #
@@ -182,11 +182,11 @@ def norm_2(a):
 
 def norm_fro_dense(a):
     """ Frobenius norm for dense matrices """
-    return accel_vdot(a, a).real**0.5
+    return vdot(a, a).real**0.5
 
 
 def norm_fro_sparse(a):
-    return accel_vdot(a.data, a.data).real**0.5
+    return vdot(a.data, a.data).real**0.5
 
 
 def norm_trace_dense(a):

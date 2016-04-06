@@ -10,7 +10,8 @@ import numpy as np
 from numpy.matlib import zeros
 import scipy.sparse as sp
 from numba import jit
-from numexpr import evaluate as evl
+from .misc import matrixify, realify
+from .accel import vdot, dot
 
 
 def quijify(data, qtype=None, sparse=False, normalized=False, chopped=False):
@@ -52,19 +53,6 @@ def quijify(data, qtype=None, sparse=False, normalized=False, chopped=False):
 qjf = quijify
 
 
-def matrixify(foo):
-    """ To decorate functions returning ndarrays. """
-    return lambda *args, **kwargs: np.asmatrix(foo(*args, **kwargs))
-
-
-def realify(foo, imag_tol=1.0e-14):
-    """ To decorate functions that should return float for small complex. """
-    def realified_foo(*args, **kwargs):
-        x = foo(*args, **kwargs)
-        return x.real if abs(x.imag) < abs(x.real) * imag_tol else x
-    return realified_foo
-
-
 def issparse(x):
     """ Checks if object is scipy sparse format. """
     return isinstance(x, sp.spmatrix)
@@ -90,10 +78,6 @@ def isherm(qob):
     """ Checks if matrix is hermitian, for sparse or dense. """
     return ((qob != qob.H).nnz == 0 if issparse(qob) else
             np.allclose(qob, qob.H))
-
-
-def issmall(p, sz=500):
-    return p.shape[0] < sz and p.shape[1] < sz
 
 
 def infer_size(p, base=2):
@@ -401,6 +385,7 @@ def permute(a, dims, perm):
 def partial_trace_clever(p, dims, keep):
     # TODO: compress coords?
     # TODO: user tensordot for vec
+    # TODO: matrixify
     """ Perform partial trace.
 
     Parameters
@@ -539,78 +524,14 @@ def chop(x, tol=1.0e-15, inplace=True):
 # sp.csr_matrix = chop
 
 
-# -------------------------------------------------------------------------- #
-# Functions accelerated over numpy                                           #
-# -------------------------------------------------------------------------- #
-
-@matrixify
-@jit(nopython=True)
-def accel_mul(x, y):  # pragma: no cover
-    """ Accelerated element-wise multiplication of two matrices """
-    return x * y
-
-
-@matrixify
-@jit(nopython=True)
-def dot(*args):  # pragma: no cover
-    """ Accelerated dot product of matrices. """
-    x = args[-1]
-    for y in args[-2::-1]:
-        x = y @ x
-    return x
-
-
-@realify
-@jit(nopython=True)
-def accel_vdot(a, b):  # pragma: no cover
-    """ Accelerated 'Hermitian' inner product of two vectors. """
-    return np.vdot(a.ravel(), b.ravel())
-
-
-@matrixify
-def ldmul(vec, mat):
-    """ Accelerated left diagonal multiplication using numexpr,
-    faster than numpy for n > ~ 500.
-
-    Parameters
-    ----------
-        vec: vector of diagonal matrix, can be array
-        mat: matrix
-
-    Returns
-    -------
-        mat: np.matrix """
-    d = mat.shape[0]
-    vec = vec.reshape(d, 1)
-    return evl("vec*mat") if d > 500 else accel_mul(vec, mat)
-
-
-@matrixify
-def rdmul(mat, vec):
-    """ Accelerated right diagonal multiplication using numexpr,
-    faster than numpy for n > ~ 500.
-
-    Parameters
-    ----------
-        mat: matrix
-        vec: vector of diagonal matrix, can be array
-
-    Returns
-    -------
-        mat: np.matrix """
-    d = mat.shape[0]
-    vec = vec.reshape(1, d)
-    return evl("mat*vec") if d > 500 else accel_mul(mat, vec)
-
-
 def inner(a, b):
     """ Operator inner product between a and b, i.e. for vectors it will be the
     absolute overlap squared |<a|b><b|a>|, rather than <a|b>. """
-    method = {(0, 0, 0): lambda: abs(accel_vdot(a, b))**2,
+    method = {(0, 0, 0): lambda: abs(vdot(a, b))**2,
               (0, 0, 1): lambda: abs((a.H @ b)[0, 0])**2,
-              (0, 1, 0): lambda: accel_vdot(a, dot(b, a)),
+              (0, 1, 0): lambda: vdot(a, dot(b, a)),
               (0, 1, 1): lambda: abs((a.H @ b @ a)[0, 0]),
-              (1, 0, 0): lambda: accel_vdot(b, dot(a, b)),
+              (1, 0, 0): lambda: vdot(b, dot(a, b)),
               (1, 0, 1): lambda: abs((b.H @ a @ b)[0, 0]),
               (1, 1, 0): lambda: trace_dense(dot(a, b)),
               (1, 1, 1): lambda: trace_sparse(a @ b)}

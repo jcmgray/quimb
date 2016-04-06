@@ -1,13 +1,19 @@
 # A flexible python library for many-body quantum calculations.
 
+# Miscellaneous functions
+from .misc import *
+
+# Accelerated basic linalg operations
+from .accel import *
+
 # Core functions
 from .core import *
 
-# Generating objects
-from .gen import *
-
 # Solving functions
 from .solve import *
+
+# Generating objects
+from .gen import *
 
 # Functions for calculating properties
 from .calc import *
@@ -17,6 +23,3 @@ from .evo import *
 
 # Plotting functions
 from .plot import *
-
-# Miscellaneous functions
-from .misc import *
