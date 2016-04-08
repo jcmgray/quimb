@@ -48,6 +48,12 @@ def isop(qob):
     return m == n and m > 1  # Square matrix check
 
 
+def isherm(qob):
+    """ Checks if matrix is hermitian, for sparse or dense. """
+    return ((qob != qob.H).nnz == 0 if issparse(qob) else
+            np.allclose(qob, qob.H))
+
+
 # --------------------------------------------------------------------------- #
 # Core accelerated numeric functions                                          #
 # --------------------------------------------------------------------------- #
@@ -60,13 +66,15 @@ def mul_dense(x, y):  # pragma: no cover
 
 
 def mul(x, y):
+    """ Dispatch to element wise multiplication. """
+    # TODO: add sparse, dense -> sparse w/ broadcasting
     if issparse(x) or issparse(y):
         return x.multiply(y)
     return mul_dense(x, y)
 
 
 @matrixify
-# @jit(nopython=True)
+@jit(nopython=True)
 def dot_dense(x, y):  # pragma: no cover
     """ Accelerated dot_dense product of matrices  """
     return x @ y
@@ -95,6 +103,11 @@ def reshape_for_ldmul(vec):  # pragma: no cover
 
 
 @matrixify
+def l_diag_dot_dense(vec, mat):
+    d, vec = reshape_for_ldmul(vec)
+    return evaluate("vec * mat") if d > 500 else mul_dense(vec, mat)
+
+
 def ldmul(vec, mat):
     """ Accelerated left diagonal multiplication using numexpr,
     faster than numpy for n > ~ 500.
@@ -109,8 +122,7 @@ def ldmul(vec, mat):
         mat: np.matrix """
     if issparse(mat):
         return sp.diags(vec) @ mat
-    d, vec = reshape_for_ldmul(vec)
-    return evaluate("vec * mat") if d > 500 else mul_dense(vec, mat)
+    return l_diag_dot_dense(vec, mat)
 
 
 @jit(nopython=True)
@@ -122,6 +134,11 @@ def reshape_for_rdmul(vec):  # pragma: no cover
 
 
 @matrixify
+def r_diag_dot_dense(mat, vec):
+    d, vec = reshape_for_rdmul(vec)
+    return evaluate("mat * vec") if d > 500 else mul_dense(mat, vec)
+
+
 def rdmul(mat, vec):
     """ Accelerated right diagonal multiplication using numexpr,
     faster than numpy for n > ~ 500.
@@ -136,8 +153,7 @@ def rdmul(mat, vec):
         mat: np.matrix """
     if issparse(mat):
         return mat @ sp.diags(vec)
-    d, vec = reshape_for_rdmul(vec)
-    return evaluate("mat * vec") if d > 500 else mul_dense(mat, vec)
+    return r_diag_dot_dense(mat, vec)
 
 
 @jit(nopython=True)
@@ -149,8 +165,6 @@ def reshape_for_outer(a, b):  # pragma: no cover
 
 def outer(a, b):
     """ Outer product between two vectors (no conjugation). """
-    if issparse(a) or issparse(b):
-        return a @ b
     d, a, b = reshape_for_outer(a, b)
     return mul_dense(a, b) if d < 500 else np.asmatrix(evaluate('a * b'))
 
@@ -219,7 +233,6 @@ def calc_dot_weights(*args):
 def calc_dot_func(x, y):
     """ Return the correct function to efficiently compute the dot product
     between x and y. """
-    # xdiag, ydiag, xop, yop
     func_map = {
         (1, 1): vdot,  # two kets -> assume inner product wanted
         (-1, 1): dot,  # same operation but slower because of .H'ing already

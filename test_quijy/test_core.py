@@ -3,17 +3,11 @@ import scipy.sparse as sp
 import numpy as np
 from pytest import raises
 from numpy.testing import assert_allclose, assert_almost_equal
-from quijy.accel import (
-    issparse,
-    isket,
-    isbra,
-    isop,
-)
+from quijy.accel import issparse, isherm
 
 from quijy.core import (
     quijify,
     qjf,
-    isherm,
     infer_size,
     trace_dense,
     trace_sparse,
@@ -107,60 +101,6 @@ class TestQuijify:
         assert_almost_equal(q[4, 4], 9.)
         q = quijify(p, 'dop', sparse=True, normalized=True)
         assert_almost_equal(tr(q), 1.)
-
-
-class TestShapes:
-    def test_sparse(self):
-        x = qjf([[1], [0]])
-        assert not issparse(x)
-        x = qjf([[1], [0]], sparse=True)
-        assert issparse(x)
-
-    def test_ket(self):
-        x = qjf([[1], [0]])
-        assert(isket(x))
-        assert(not isbra(x))
-        assert(not isop(x))
-        x = qjf([[1], [0]], sparse=True)
-        assert(isket(x))
-        assert(not isbra(x))
-        assert(not isop(x))
-
-    def test_bra(self):
-        x = qjf([[1, 0]])
-        assert(not isket(x))
-        assert(isbra(x))
-        assert(not isop(x))
-        x = qjf([[1, 0]], sparse=True)
-        assert(not isket(x))
-        assert(isbra(x))
-        assert(not isop(x))
-
-    def test_op(self):
-        x = qjf([[1, 0], [0, 1]])
-        assert(not isket(x))
-        assert(not isbra(x))
-        assert(isop(x))
-        x = qjf([[1, 0], [0, 1]], sparse=True)
-        assert(not isket(x))
-        assert(not isbra(x))
-        assert(isop(x))
-
-    def test_isherm(self):
-        a = qjf([[1.0, 2.0 + 3.0j],
-                 [2.0 - 3.0j, 1.0]])
-        assert(isherm(a))
-        a = qjf([[1.0, 2.0 - 3.0j],
-                 [2.0 - 3.0j, 1.0]])
-        assert(not isherm(a))
-
-    def test_isherm_sparse(self):
-        a = qjf([[1.0, 2.0 + 3.0j],
-                 [2.0 - 3.0j, 1.0]], sparse=True)
-        assert(isherm(a))
-        a = qjf([[1.0, 2.0 - 3.0j],
-                 [2.0 - 3.0j, 1.0]], sparse=True)
-        assert(not isherm(a))
 
 
 class TestInferSize:
@@ -450,7 +390,7 @@ class TestPermPad:
 
     def test_perm_pad_dop_reverse(self):
         a = rand_rho(4)
-        b = perm_pad(a, [2, 2, 2], [2, 0])
+        b = perm_pad(a, np.array([2, 2, 2]), [2, 0])
         c = (a & eye(2)).A.reshape([2, 2, 2, 2, 2, 2])  \
                           .transpose([1, 2, 0, 4, 5, 3])  \
                           .reshape([8, 8])

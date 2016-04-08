@@ -52,12 +52,6 @@ def quijify(data, qtype=None, sparse=False, normalized=False, chopped=False):
 qjf = quijify
 
 
-def isherm(qob):
-    """ Checks if matrix is hermitian, for sparse or dense. """
-    return ((qob != qob.H).nnz == 0 if issparse(qob) else
-            np.allclose(qob, qob.H))
-
-
 def infer_size(p, base=2):
     """ Infers the size of a state assumed to be made of qubits """
     return int(log(max(p.shape), base))
