@@ -13,11 +13,12 @@ from quijy.accel import (
     isherm,
     mul,
     dot,
-    idot,
     vdot,
+    rdot,
     ldmul,
     rdmul,
     outer,
+    idot,
 )
 
 
@@ -200,6 +201,14 @@ class TestAccelVdot:
         assert_allclose(ca, cn)
 
 
+class TestAccelRdot:
+    def test_accel_rdot(self, test_objs):
+        _, _, _, _, a, b, _ = test_objs
+        cq = rdot(a.H, b)
+        cn = (a.H @ b)[0, 0]
+        assert_allclose(cq, cn)
+
+
 class TestFastDiagMul:
     def test_ldmul_small(self, test_objs):
         mat, _, _, _, _, _, vec = test_objs
@@ -292,5 +301,5 @@ class TestIdot:
     def test_multiarg_closed(self):
         a, b, c = rand_matrix(5), rand_matrix(5), rand_ket(5)
         d = idot(c.H, a, b, c)
-        assert isinstance(d, np.matrix)
+        assert np.isscalar(d)
         assert_allclose(d, c.H @ a @ b @ c)

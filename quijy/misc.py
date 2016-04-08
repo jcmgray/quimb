@@ -29,9 +29,7 @@ def spline_resample(x, y, n=100, **kwargs):
 # -------------------------------------------------------------------------- #
 
 def xrsmoosh(*dss, accept_new=False):
-    """
-    Aggregates xarray Datasets and DataArrays
-    """
+    """ Aggregates xarray Datasets and DataArrays """
     ds = dss[0]
     for new_ds in dss[1:]:
         # First make sure both datasets have the same variables

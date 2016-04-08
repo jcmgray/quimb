@@ -96,7 +96,7 @@ def vdot(a, b):  # pragma: no cover
 
 @realify
 @jit(nopython=True)
-def rdot(a, b):
+def rdot(a, b):  # pragma: no cover
     """ Real dot product of two dense vectors. """
     d = max(a.shape[0], a.shape[1])
     a, b = a.reshape((1, d)), b.reshape((d, 1))
