@@ -94,6 +94,15 @@ def vdot(a, b):  # pragma: no cover
     return np.vdot(a.ravel(), b.ravel())
 
 
+@realify
+@jit(nopython=True)
+def rdot(a, b):
+    """ Real dot product of two dense vectors. """
+    d = max(a.shape[0], a.shape[1])
+    a, b = a.reshape((1, d)), b.reshape((d, 1))
+    return (a @ b)[0, 0]
+
+
 @jit(nopython=True)
 def reshape_for_ldmul(vec):  # pragma: no cover
     """ Reshape a vector to be broadcast multiplied against a matrix in a way
@@ -235,7 +244,7 @@ def calc_dot_func(x, y):
     between x and y. """
     func_map = {
         (1, 1): vdot,  # two kets -> assume inner product wanted
-        (-1, 1): dot,  # same operation but slower because of .H'ing already
+        (-1, 1): rdot,  # already conjugated so use real inner product
         (-1, 0): dot,
         (0, 0): dot,
         (0, 1): dot,
