@@ -12,9 +12,9 @@ import numpy.linalg as nla
 import scipy.sparse.linalg as spla
 from scipy.optimize import minimize
 
-from .accel import dot, ldmul
-from .core import (isop, qjf, kron, ptr, eye, eyepad, tr, trx,
-                   infer_size, issparse, inner)
+from .accel import dot_dense, ldmul, issparse, isop
+from .core import (qjf, kron, ptr, eye, eyepad, tr, trx,
+                   infer_size, inner)
 from .solve import (eigvals, eigsys, norm)
 from .gen import (sig, basis_vec, bell_state, bloch_state)
 
@@ -27,7 +27,7 @@ def expm(a, herm=False):
         return np.asmatrix(spla.expm(a.A))
     else:
         l, v = eigsys(a)
-        return dot(v, ldmul(np.exp(l), v.H))
+        return dot_dense(v, ldmul(np.exp(l), v.H))
 
 
 def sqrtm(a, herm=False):
@@ -38,7 +38,7 @@ def sqrtm(a, herm=False):
         return np.asmatrix(spla.sqrtm(a.A))
     else:
         l, v = eigsys(a)
-        return dot(v, ldmul(np.sqrt(l.astype(complex)), v.H))
+        return dot_dense(v, ldmul(np.sqrt(l.astype(complex)), v.H))
 
 
 def purify(rho, sparse=False):

@@ -2,8 +2,10 @@ import numpy as np
 from numpy.testing import assert_allclose
 from quijy import rand_matrix, rand_ket
 from quijy.accel import (
-    mul,
-    dot,
+    matrixify,
+    realify,
+    mul_dense,
+    dot_dense,
     idot,
     vdot,
     ldmul,
@@ -12,11 +14,41 @@ from quijy.accel import (
 )
 
 
-class TestMul:
+class TestMatrixify:
+    def test_matrixify(self):
+        def foo(n):
+            return np.random.randn(n, n)
+        a = foo(2)
+        assert not isinstance(a, np.matrix)
+
+        @matrixify
+        def foo(n):
+            return np.random.randn(n, n)
+        a = foo(2)
+        assert isinstance(a, np.matrix)
+
+
+class TestRealify:
+    def test_realify(self):
+        def foo(a, b):
+            return a + 1j * b
+        a = foo(1e15, 1)
+        assert a.real == 1e15
+        assert a.imag == 1
+
+        @realify
+        def foo(a, b):
+            return a + 1j * b
+        a = foo(1e15, 1)
+        assert a.real == 1e15
+        assert a.imag == 0
+
+
+class TestMulDense:
     def test_mul_same(self):
         a = rand_matrix(5)
         b = rand_matrix(5)
-        ca = mul(a, b)
+        ca = mul_dense(a, b)
         assert isinstance(ca, np.matrix)
         cn = np.multiply(a, b)
         assert_allclose(ca, cn)
@@ -24,21 +56,21 @@ class TestMul:
     def test_mul_broadcast(self):
         a = rand_matrix(5)
         b = rand_ket(5)
-        ca = mul(a, b)
+        ca = mul_dense(a, b)
         assert isinstance(ca, np.matrix)
         cn = np.multiply(a, b)
         assert_allclose(ca, cn)
-        ca = mul(a.H, b)
+        ca = mul_dense(a.H, b)
         assert isinstance(ca, np.matrix)
         cn = np.multiply(a.H, b)
         assert_allclose(ca, cn)
 
 
-class TestDot:
+class TestDotDense:
     def test_dot_matrix(self):
         a = rand_matrix(5)
         b = rand_matrix(5)
-        ca = dot(a, b)
+        ca = dot_dense(a, b)
         assert isinstance(ca, np.matrix)
         cn = a @ b
         assert_allclose(ca, cn)
@@ -46,7 +78,7 @@ class TestDot:
     def test_dot_ket(self):
         a = rand_matrix(5)
         b = rand_ket(5)
-        ca = dot(a, b)
+        ca = dot_dense(a, b)
         assert isinstance(ca, np.matrix)
         cn = a @ b
         assert_allclose(ca, cn)

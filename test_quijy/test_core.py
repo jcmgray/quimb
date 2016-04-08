@@ -3,13 +3,16 @@ import scipy.sparse as sp
 import numpy as np
 from pytest import raises
 from numpy.testing import assert_allclose, assert_almost_equal
-from quijy.core import (
-    quijify,
-    qjf,
+from quijy.accel import (
     issparse,
     isket,
     isbra,
     isop,
+)
+
+from quijy.core import (
+    quijify,
+    qjf,
     isherm,
     infer_size,
     trace_dense,

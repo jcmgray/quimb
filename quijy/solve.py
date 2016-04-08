@@ -8,7 +8,8 @@ import numpy as np
 import numpy.linalg as nla
 import scipy.sparse.linalg as spla
 from numba import jit
-from .core import qjf, issparse, vdot
+from .accel import issparse, vdot
+from .core import qjf
 
 
 # -------------------------------------------------------------------------- #

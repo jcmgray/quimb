@@ -10,8 +10,7 @@ import numpy as np
 from numpy.matlib import zeros
 import scipy.sparse as sp
 from numba import jit
-from .misc import matrixify, realify
-from .accel import vdot, dot
+from .accel import matrixify, realify, issparse, isop, vdot, dot_dense
 
 
 def quijify(data, qtype=None, sparse=False, normalized=False, chopped=False):
@@ -51,27 +50,6 @@ def quijify(data, qtype=None, sparse=False, normalized=False, chopped=False):
     return sp.csr_matrix(qob, dtype=complex) if sparse else qob
 
 qjf = quijify
-
-
-def issparse(x):
-    """ Checks if object is scipy sparse format. """
-    return isinstance(x, sp.spmatrix)
-
-
-def isket(qob):
-    """ Checks if matrix is in ket form, i.e. a matrix column. """
-    return qob.shape[0] > 1 and qob.shape[1] == 1  # Column vector check
-
-
-def isbra(qob):
-    """ Checks if matrix is in bra form, i.e. a matrix row. """
-    return qob.shape[0] == 1 and qob.shape[1] > 1  # Row vector check
-
-
-def isop(qob):
-    """ Checks if matrix is an operator, i.e. a square matrix. """
-    m, n = qob.shape
-    return m == n and m > 1  # Square matrix check
 
 
 def isherm(qob):
@@ -409,7 +387,7 @@ def partial_trace_clever(p, dims, keep):
             .transpose(perm) \
             .reshape((sz_keep, sz_lose))
         p = np.asmatrix(p)
-        return dot(p, p.H)
+        return dot_dense(p, p.H)
     else:
         p = np.asarray(p).reshape((*dims, *dims)) \
             .transpose((*perm, *(perm + n))) \
@@ -430,10 +408,10 @@ def trace_lose(p, dims, coo_lose):
     for i in range(a * b):
         for j in range(i, a * b):
             rhos[i, j] = trace(p[
-                    e * b * (i // b) + (i % b):
-                    e * b * (i // b) + (i % b) + (e - 1) * b + 1: b,
-                    e * b * (j // b) + (j % b):
-                    e * b * (j // b) + (j % b) + (e - 1) * b + 1: b])
+                    e*b*(i//b) + (i % b):
+                    e*b*(i//b) + (i % b) + (e-1)*b + 1: b,
+                    e*b*(j//b) + (j % b):
+                    e*b*(j//b) + (j % b) + (e-1)*b + 1: b])
             if j != i:
                 rhos[j, i] = rhos[i, j].conjugate()
     return rhos
@@ -452,8 +430,8 @@ def trace_keep(p, dims, coo_keep):
         for j in range(i, s):
             for k in range(a):
                 rhos[i, j] += trace(p[
-                        b * i + s * b * k: b * i + s * b * k + b,
-                        b * j + s * b * k: b * j + s * b * k + b])
+                        b*i + s*b*k: b*i + s*b*k + b,
+                        b*j + s*b*k: b*j + s*b*k + b])
             if j != i:
                 rhos[j, i] = rhos[i, j].conjugate()
     return rhos
@@ -529,10 +507,10 @@ def inner(a, b):
     absolute overlap squared |<a|b><b|a>|, rather than <a|b>. """
     method = {(0, 0, 0): lambda: abs(vdot(a, b))**2,
               (0, 0, 1): lambda: abs((a.H @ b)[0, 0])**2,
-              (0, 1, 0): lambda: vdot(a, dot(b, a)),
+              (0, 1, 0): lambda: vdot(a, dot_dense(b, a)),
               (0, 1, 1): lambda: abs((a.H @ b @ a)[0, 0]),
-              (1, 0, 0): lambda: vdot(b, dot(a, b)),
+              (1, 0, 0): lambda: vdot(b, dot_dense(a, b)),
               (1, 0, 1): lambda: abs((b.H @ a @ b)[0, 0]),
-              (1, 1, 0): lambda: trace_dense(dot(a, b)),
+              (1, 1, 0): lambda: trace_dense(dot_dense(a, b)),
               (1, 1, 1): lambda: trace_sparse(a @ b)}
     return method[isop(a), isop(b), issparse(a) or issparse(b)]()

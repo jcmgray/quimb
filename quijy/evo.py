@@ -7,10 +7,11 @@ TODO: iterative method, sparse etc., turn off optimzations for small n
 import numpy as np
 from scipy.integrate import complex_ode
 from .accel import (
+    isop,
     ldmul,
     rdmul,
 )
-from .core import isop, qjf
+from .core import qjf
 from .solve import eigsys, norm
 
 
