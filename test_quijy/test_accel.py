@@ -286,11 +286,11 @@ class TestOuter:
 
 
 class TestIdot:
-    def test_multiarg_mats(self):
-        a, b, c = rand_matrix(5), rand_matrix(5), rand_matrix(5)
-        d = idot(a, b, c)
-        assert isinstance(d, np.matrix)
-        assert_allclose(d, a @ b @ c)
+    def test_multiarg_mats(self, test_objs):
+        od1, od2, os1, os2, kd1, kd2, ld = test_objs
+        dq = idot(kd1.H, od1, os2, os1, ld, od2, kd2)
+        dn = (kd1.H @ od1 @ os2.A @ os1.A @ np.diag(ld) @ od2 @ kd2)[0, 0]
+        assert_allclose(dq, dn)
 
     def test_multiarg_vecs(self):
         a, b, c = rand_matrix(5), rand_matrix(5), rand_ket(5)

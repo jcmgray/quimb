@@ -83,7 +83,7 @@ def dot_dense(x, y):  # pragma: no cover
 def dot(x, y):
     """ Matrix multiplication, dispatched to dense method. """
     if issparse(x) or issparse(y):
-        return x.dot(y)
+        return x @ y
     return dot_dense(x, y)
 
 
@@ -208,6 +208,8 @@ def calc_dot_weight(x, y):
         (1, 0, 1): 22,
         (2, 0, 1): 23,
         (3, 0, 1): 24,
+        # ket | op, leaving until vdot at end
+        # (0, 1, 0):
         # bra @ op
         (0, -1, 0): 31,
         (1, -1, 0): 32,
@@ -260,7 +262,24 @@ def calc_dot_func(x, y):
     return func_map[(xkey, ykey)]
 
 
+# def idotold(*args, weights=None):
+#     """ Accelerated and intelligent dot product of multiple objects. """
+#     # TODO: reassess weights?
+#     n = len(args)
+#     if n == 1:
+#         return args[0]
+#     if n == 2:
+#         dot_func = calc_dot_func(*args)
+#         return dot_func(*args)
+#     if weights is None:
+#         weights = calc_dot_weights(*args)
+#     ind, _ = max(enumerate(weights), key=lambda p: p[1])
+#     return idot(idot(*args[:ind+1], weights=weights[:ind]),
+#                 idot(*args[ind+1:], weights=weights[ind+1:]))
+
+
 def idot(*args, weights=None):
+    # TODO: combine weight and func, double dict?
     """ Accelerated and intelligent dot product of multiple objects. """
     n = len(args)
     if n == 1:
@@ -270,6 +289,10 @@ def idot(*args, weights=None):
         return dot_func(*args)
     if weights is None:
         weights = calc_dot_weights(*args)
-    ind, _ = max(enumerate(weights), key=lambda p: p[1])
-    return idot(idot(*args[:ind+1], weights=weights[:ind]),
-                idot(*args[ind+1:], weights=weights[ind+1:]))
+    # Find best dot to do
+    ind, _ = min(enumerate(weights), key=lambda p: p[1])
+    args = [*args[:ind], idot(args[ind], args[ind+1]), *args[ind+2:]]
+    nweights = [*weights[:ind-1],
+                *calc_dot_weights(args[ind-1:ind+2]),
+                *weights[ind+2:]]
+    return idot(*args, weights=nweights)
