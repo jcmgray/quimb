@@ -262,24 +262,9 @@ def calc_dot_func(x, y):
     return func_map[(xkey, ykey)]
 
 
-# def idotold(*args, weights=None):
-#     """ Accelerated and intelligent dot product of multiple objects. """
-#     # TODO: reassess weights?
-#     n = len(args)
-#     if n == 1:
-#         return args[0]
-#     if n == 2:
-#         dot_func = calc_dot_func(*args)
-#         return dot_func(*args)
-#     if weights is None:
-#         weights = calc_dot_weights(*args)
-#     ind, _ = max(enumerate(weights), key=lambda p: p[1])
-#     return idot(idot(*args[:ind+1], weights=weights[:ind]),
-#                 idot(*args[ind+1:], weights=weights[ind+1:]))
-
-
 def idot(*args, weights=None):
-    # TODO: combine weight and func, double dict?
+    # TODO: combine weight and func and output
+    #   triple dict, pre-calculate entire tree
     """ Accelerated and intelligent dot product of multiple objects. """
     n = len(args)
     if n == 1:
