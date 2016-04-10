@@ -50,15 +50,21 @@ def xrload(file_name, engine="h5netcdf", load_to_mem=True,
            create_new=True):
     """ Loads a xarray dataset. """
     try:
-        ds = xr.open_dataset(file_name, engine=engine)
+        try:
+            ds = xr.open_dataset(file_name, engine=engine)
+        except AttributeError as e1:
+            if "object has no attribute" in str(e1):
+                ds = xr.open_dataset(file_name, engine="netcdf4")
+            else:
+                raise e1
         if load_to_mem:
             ds.load()
             ds.close()
-    except (RuntimeError, OSError) as e:
-        if "o such" in str(e) and create_new:
+    except (RuntimeError, OSError) as e2:
+        if "o such" in str(e2) and create_new:
             ds = xr.Dataset()
         else:
-            raise e
+            raise e2
     return ds
 
 
