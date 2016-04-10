@@ -8,7 +8,7 @@ from functools import lru_cache
 from math import factorial
 import numpy as np
 import scipy.sparse as sp
-from ..accel import ldmul
+from ..accel import ldmul, dot
 from ..core import (qjf, kron, kronpow, eye, eyepad)
 from ..solve import eigsys
 from .operators import sig, controlled
@@ -142,7 +142,7 @@ def thermal_state(ham, beta, precomp_func=False):
     def gen_state(b):
         el = np.exp(-b * l)
         el /= np.sum(el)
-        return v @ ldmul(el, v.H)
+        return dot(v, ldmul(el, v.H))
 
     return gen_state if precomp_func else gen_state(beta)
 
