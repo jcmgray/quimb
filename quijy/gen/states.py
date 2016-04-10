@@ -8,7 +8,8 @@ from functools import lru_cache
 from math import factorial
 import numpy as np
 import scipy.sparse as sp
-from ..core import (qjf, kron, kronpow, eye, ldmul, eyepad)
+from ..accel import ldmul
+from ..core import (qjf, kron, kronpow, eye, eyepad)
 from ..solve import eigsys
 from .operators import sig, controlled
 

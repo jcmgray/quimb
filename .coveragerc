@@ -1,0 +1,3 @@
+[run]
+omit = quijy/misc.py
+       quijy/plot.py

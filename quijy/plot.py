@@ -12,10 +12,8 @@ import numpy as np
 def mplot(x, y_i, fignum=1, logx=False, logy=False,
           xlims=None, ylims=None,
           color=False, colormap='viridis', **kwargs):
-    """
-    Function for automatically plotting multiple sets of data
-    using matplot lib
-    """
+    """ Function for automatically plotting multiple sets of data
+    using matplot lib. """
     import matplotlib.pyplot as plt
     y_i = np.array(np.squeeze(y_i), ndmin=2)
     if np.size(x) == y_i.shape[0]:
@@ -108,9 +106,9 @@ def ishow(fig, nb=True, **kwargs):
     plot(fig, **kwargs)
 
 
-def iplot(x, y_i, logx=False, logy=False,
-          color=False, colormap='viridis',
-          return_fig=False, nb=True, go_dict={}, ly_dict={}, **kwargs):
+def iplot(x, y_i, logx=False, logy=False, color=False, colormap='viridis',
+          return_fig=False, nb=True, go_dict={}, ly_dict={},
+          **kwargs):
     """ Multi line plot with plotly. """
     from plotly.graph_objs import Scatter
     y_i = np.array(np.squeeze(y_i), ndmin=2)
@@ -159,7 +157,8 @@ def iscatter(x, y, cols=None, logx=False, logy=False, nb=True,
     ishow(fig, nb=nb, **kwargs)
 
 
-def ihist(xs, nb=True, go_dict={}, ly_dict={}, return_fig=False, **kwargs):
+def ihist(xs, nb=True, go_dict={}, ly_dict={}, return_fig=False,
+          **kwargs):
     """ Histogram plot with plotly. """
     from plotly.graph_objs import Histogram
     traces = [Histogram({'x': x, **go_dict}) for x in xs]
@@ -179,7 +178,8 @@ def ihist(xs, nb=True, go_dict={}, ly_dict={}, return_fig=False, **kwargs):
 # -------------------------------------------------------------------------- #
 
 def iheatmap(ds, data_name, x_coo, y_coo, colormap='Portland',
-             go_dict={}, ly_dict={}, nb=True, return_fig=False, **kwargs):
+             go_dict={}, ly_dict={}, nb=True, return_fig=False,
+             **kwargs):
     """
     Automatic 2D-Heatmap plot using plotly.
     """

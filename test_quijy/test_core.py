@@ -3,16 +3,43 @@ import scipy.sparse as sp
 import numpy as np
 from pytest import raises
 from numpy.testing import assert_allclose, assert_almost_equal
-from quijy.gen import (bell_state, rand_rho, rand_matrix, rand_ket, up, plus,
-                       yplus, sig)
+from quijy.accel import issparse, isherm
+
+from quijy.core import (
+    quijify,
+    qjf,
+    infer_size,
+    trace_dense,
+    trace_sparse,
+    trace,
+    tr,
+    nmlz,
+    kron_dense,
+    kron,
+    kronpow,
+    coo_map,
+    coo_compress,
+    eye,
+    eyepad,
+    perm_pad,
+    permute,
+    trace_lose,
+    trace_keep,
+    partial_trace,
+    chop,
+    inner,
+)
 from quijy.calc import mutual_information
-from quijy.core import (quijify, qjf, isbra, isket, isop, tr, isherm,
-                        trace, trace_dense, trace_sparse, nmlz, kron_dense,
-                        kron, kronpow, coo_map, coo_compress, eye, eyepad,
-                        permute, chop, ldmul, rdmul,
-                        infer_size, issparse, matrixify, realify, issmall,
-                        accel_mul, accel_dot, accel_vdot, inner, trace_lose,
-                        trace_keep, partial_trace, perm_pad)
+from quijy.gen import (
+    bell_state,
+    rand_rho,
+    rand_matrix,
+    rand_ket,
+    up,
+    plus,
+    yplus,
+    sig,
+)
 
 
 class TestQuijify:
@@ -74,98 +101,6 @@ class TestQuijify:
         assert_almost_equal(q[4, 4], 9.)
         q = quijify(p, 'dop', sparse=True, normalized=True)
         assert_almost_equal(tr(q), 1.)
-
-
-class TestShapes:
-    def test_sparse(self):
-        x = qjf([[1], [0]])
-        assert not issparse(x)
-        x = qjf([[1], [0]], sparse=True)
-        assert issparse(x)
-
-    def test_ket(self):
-        x = qjf([[1], [0]])
-        assert(isket(x))
-        assert(not isbra(x))
-        assert(not isop(x))
-        x = qjf([[1], [0]], sparse=True)
-        assert(isket(x))
-        assert(not isbra(x))
-        assert(not isop(x))
-
-    def test_bra(self):
-        x = qjf([[1, 0]])
-        assert(not isket(x))
-        assert(isbra(x))
-        assert(not isop(x))
-        x = qjf([[1, 0]], sparse=True)
-        assert(not isket(x))
-        assert(isbra(x))
-        assert(not isop(x))
-
-    def test_op(self):
-        x = qjf([[1, 0], [0, 1]])
-        assert(not isket(x))
-        assert(not isbra(x))
-        assert(isop(x))
-        x = qjf([[1, 0], [0, 1]], sparse=True)
-        assert(not isket(x))
-        assert(not isbra(x))
-        assert(isop(x))
-
-    def test_isherm(self):
-        a = qjf([[1.0, 2.0 + 3.0j],
-                 [2.0 - 3.0j, 1.0]])
-        assert(isherm(a))
-        a = qjf([[1.0, 2.0 - 3.0j],
-                 [2.0 - 3.0j, 1.0]])
-        assert(not isherm(a))
-
-    def test_isherm_sparse(self):
-        a = qjf([[1.0, 2.0 + 3.0j],
-                 [2.0 - 3.0j, 1.0]], sparse=True)
-        assert(isherm(a))
-        a = qjf([[1.0, 2.0 - 3.0j],
-                 [2.0 - 3.0j, 1.0]], sparse=True)
-        assert(not isherm(a))
-
-    def test_issmall(self):
-        a = qjf([1, 2, 3], 'ket')
-        assert issmall(a, 4)
-        assert not issmall(a, 2)
-        a = qjf([1, 2, 3], 'dop')
-        assert issmall(a, 4)
-        assert not issmall(a, 2)
-
-
-class TestMatrixify:
-    def test_matrixify(self):
-        def foo(n):
-            return np.random.randn(n, n)
-        a = foo(2)
-        assert not isinstance(a, np.matrix)
-
-        @matrixify
-        def foo(n):
-            return np.random.randn(n, n)
-        a = foo(2)
-        assert isinstance(a, np.matrix)
-
-
-class TestRealify:
-    def test_realify(self):
-        def foo(a, b):
-            return a + 1j * b
-        a = foo(1e15, 1)
-        assert a.real == 1e15
-        assert a.imag == 1
-
-        @realify
-        def foo(a, b):
-            return a + 1j * b
-        a = foo(1e15, 1)
-        assert a.real == 1e15
-        assert a.imag == 0
 
 
 class TestInferSize:
@@ -455,7 +390,7 @@ class TestPermPad:
 
     def test_perm_pad_dop_reverse(self):
         a = rand_rho(4)
-        b = perm_pad(a, [2, 2, 2], [2, 0])
+        b = perm_pad(a, np.array([2, 2, 2]), [2, 0])
         c = (a & eye(2)).A.reshape([2, 2, 2, 2, 2, 2])  \
                           .transpose([1, 2, 0, 4, 5, 3])  \
                           .reshape([8, 8])
@@ -710,93 +645,6 @@ class TestChop:
         bo = qjf([-1j, 0.2j], sparse=True)
         assert((a != ao).nnz == 0)
         assert((b != bo).nnz == 0)
-
-
-class TestAccelMul:
-    def test_accel_mul_same(self):
-        a = rand_matrix(5)
-        b = rand_matrix(5)
-        ca = accel_mul(a, b)
-        assert isinstance(ca, np.matrix)
-        cn = np.multiply(a, b)
-        assert_allclose(ca, cn)
-
-    def test_accel_mul_broadcast(self):
-        a = rand_matrix(5)
-        b = rand_ket(5)
-        ca = accel_mul(a, b)
-        assert isinstance(ca, np.matrix)
-        cn = np.multiply(a, b)
-        assert_allclose(ca, cn)
-        ca = accel_mul(a.H, b)
-        assert isinstance(ca, np.matrix)
-        cn = np.multiply(a.H, b)
-        assert_allclose(ca, cn)
-
-
-class TestAccelDot:
-    def test_accel_dot_matrix(self):
-        a = rand_matrix(5)
-        b = rand_matrix(5)
-        ca = accel_dot(a, b)
-        assert isinstance(ca, np.matrix)
-        cn = a @ b
-        assert_allclose(ca, cn)
-
-    def test_accel_dot_ket(self):
-        a = rand_matrix(5)
-        b = rand_ket(5)
-        ca = accel_dot(a, b)
-        assert isinstance(ca, np.matrix)
-        cn = a @ b
-        assert_allclose(ca, cn)
-
-
-class TestAccelVdot:
-    def test_accel_vdot(self):
-        a = rand_ket(5)
-        b = rand_ket(5)
-        ca = accel_vdot(a, b)
-        cn = (a.H @ b)[0, 0]
-        assert_allclose(ca, cn)
-
-
-class TestFastDiagMul:
-    def test_ldmul_small(self):
-        n = 4
-        vec = np.random.randn(2**n)
-        mat = rand_matrix(2**n)
-        a = ldmul(vec, mat)
-        b = np.diag(vec) @ mat
-        assert isinstance(a, np.matrix)
-        assert_allclose(a, b)
-
-    def test_ldmul_large(self):
-        n = 9
-        vec = np.random.randn(2**n)
-        mat = rand_matrix(2**n)
-        a = ldmul(vec, mat)
-        b = np.diag(vec) @ mat
-        assert isinstance(a, np.matrix)
-        assert_allclose(a, b)
-
-    def test_rdmul_small(self):
-        n = 4
-        vec = np.random.randn(2**n)
-        mat = rand_matrix(2**n)
-        a = rdmul(mat, vec)
-        b = mat @ np.diag(vec)
-        assert isinstance(a, np.matrix)
-        assert_allclose(a, b)
-
-    def test_rdmul_large(self):
-        n = 9
-        vec = np.random.randn(2**n)
-        mat = rand_matrix(2**n)
-        a = rdmul(mat, vec)
-        b = mat @ np.diag(vec)
-        assert isinstance(a, np.matrix)
-        assert_allclose(a, b)
 
 
 class TestInner:

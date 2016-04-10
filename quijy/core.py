@@ -10,7 +10,7 @@ import numpy as np
 from numpy.matlib import zeros
 import scipy.sparse as sp
 from numba import jit
-from numexpr import evaluate as evl
+from .accel import matrixify, realify, issparse, isop, vdot, dot_dense
 
 
 def quijify(data, qtype=None, sparse=False, normalized=False, chopped=False):
@@ -50,50 +50,6 @@ def quijify(data, qtype=None, sparse=False, normalized=False, chopped=False):
     return sp.csr_matrix(qob, dtype=complex) if sparse else qob
 
 qjf = quijify
-
-
-def matrixify(foo):
-    """ To decorate functions returning ndarrays. """
-    return lambda *args, **kwargs: np.asmatrix(foo(*args, **kwargs))
-
-
-def realify(foo, imag_tol=1.0e-14):
-    """ To decorate functions that should return float for small complex. """
-    def realified_foo(*args, **kwargs):
-        x = foo(*args, **kwargs)
-        return x.real if abs(x.imag) < abs(x.real) * imag_tol else x
-    return realified_foo
-
-
-def issparse(x):
-    """ Checks if object is scipy sparse format. """
-    return isinstance(x, sp.spmatrix)
-
-
-def isket(qob):
-    """ Checks if matrix is in ket form, i.e. a matrix column. """
-    return qob.shape[0] > 1 and qob.shape[1] == 1  # Column vector check
-
-
-def isbra(qob):
-    """ Checks if matrix is in bra form, i.e. a matrix row. """
-    return qob.shape[0] == 1 and qob.shape[1] > 1  # Row vector check
-
-
-def isop(qob):
-    """ Checks if matrix is an operator, i.e. a square matrix. """
-    m, n = qob.shape
-    return m == n and m > 1  # Square matrix check
-
-
-def isherm(qob):
-    """ Checks if matrix is hermitian, for sparse or dense. """
-    return ((qob != qob.H).nnz == 0 if issparse(qob) else
-            np.allclose(qob, qob.H))
-
-
-def issmall(p, sz=500):
-    return p.shape[0] < sz and p.shape[1] < sz
 
 
 def infer_size(p, base=2):
@@ -401,6 +357,7 @@ def permute(a, dims, perm):
 def partial_trace_clever(p, dims, keep):
     # TODO: compress coords?
     # TODO: user tensordot for vec
+    # TODO: matrixify
     """ Perform partial trace.
 
     Parameters
@@ -424,7 +381,7 @@ def partial_trace_clever(p, dims, keep):
             .transpose(perm) \
             .reshape((sz_keep, sz_lose))
         p = np.asmatrix(p)
-        return accel_dot(p, p.H)
+        return dot_dense(p, p.H)
     else:
         p = np.asarray(p).reshape((*dims, *dims)) \
             .transpose((*perm, *(perm + n))) \
@@ -445,10 +402,10 @@ def trace_lose(p, dims, coo_lose):
     for i in range(a * b):
         for j in range(i, a * b):
             rhos[i, j] = trace(p[
-                    e * b * (i // b) + (i % b):
-                    e * b * (i // b) + (i % b) + (e - 1) * b + 1: b,
-                    e * b * (j // b) + (j % b):
-                    e * b * (j // b) + (j % b) + (e - 1) * b + 1: b])
+                    e*b*(i//b) + (i % b):
+                    e*b*(i//b) + (i % b) + (e-1)*b + 1: b,
+                    e*b*(j//b) + (j % b):
+                    e*b*(j//b) + (j % b) + (e-1)*b + 1: b])
             if j != i:
                 rhos[j, i] = rhos[i, j].conjugate()
     return rhos
@@ -467,8 +424,8 @@ def trace_keep(p, dims, coo_keep):
         for j in range(i, s):
             for k in range(a):
                 rhos[i, j] += trace(p[
-                        b * i + s * b * k: b * i + s * b * k + b,
-                        b * j + s * b * k: b * j + s * b * k + b])
+                        b*i + s*b*k: b*i + s*b*k + b,
+                        b*j + s*b*k: b*j + s*b*k + b])
             if j != i:
                 rhos[j, i] = rhos[i, j].conjugate()
     return rhos
@@ -539,76 +496,15 @@ def chop(x, tol=1.0e-15, inplace=True):
 # sp.csr_matrix = chop
 
 
-# -------------------------------------------------------------------------- #
-# Functions accelerated over numpy                                           #
-# -------------------------------------------------------------------------- #
-
-@matrixify
-@jit(nopython=True)
-def accel_mul(x, y):  # pragma: no cover
-    """ Accelerated element-wise multiplication of two matrices """
-    return x * y
-
-
-@matrixify
-@jit(nopython=True)
-def accel_dot(a, b):  # pragma: no cover
-    """ Accelerated dot product of two matrices. """
-    return a @ b
-
-
-@realify
-@jit(nopython=True)
-def accel_vdot(a, b):  # pragma: no cover
-    """ Accelerated 'Hermitian' inner product of two vectors. """
-    return np.vdot(a.ravel(), b.ravel())
-
-
-@matrixify
-def ldmul(vec, mat):
-    """ Accelerated left diagonal multiplication using numexpr,
-    faster than numpy for n > ~ 500.
-
-    Parameters
-    ----------
-        vec: vector of diagonal matrix, can be array
-        mat: matrix
-
-    Returns
-    -------
-        mat: np.matrix """
-    d = mat.shape[0]
-    vec = vec.reshape(d, 1)
-    return evl("vec*mat") if d > 500 else accel_mul(vec, mat)
-
-
-@matrixify
-def rdmul(mat, vec):
-    """ Accelerated right diagonal multiplication using numexpr,
-    faster than numpy for n > ~ 500.
-
-    Parameters
-    ----------
-        mat: matrix
-        vec: vector of diagonal matrix, can be array
-
-    Returns
-    -------
-        mat: np.matrix """
-    d = mat.shape[0]
-    vec = vec.reshape(1, d)
-    return evl("mat*vec") if d > 500 else accel_mul(mat, vec)
-
-
 def inner(a, b):
     """ Operator inner product between a and b, i.e. for vectors it will be the
     absolute overlap squared |<a|b><b|a>|, rather than <a|b>. """
-    method = {(0, 0, 0): lambda: abs(accel_vdot(a, b))**2,
+    method = {(0, 0, 0): lambda: abs(vdot(a, b))**2,
               (0, 0, 1): lambda: abs((a.H @ b)[0, 0])**2,
-              (0, 1, 0): lambda: accel_vdot(a, accel_dot(b, a)),
+              (0, 1, 0): lambda: vdot(a, dot_dense(b, a)),
               (0, 1, 1): lambda: abs((a.H @ b @ a)[0, 0]),
-              (1, 0, 0): lambda: accel_vdot(b, accel_dot(a, b)),
+              (1, 0, 0): lambda: vdot(b, dot_dense(a, b)),
               (1, 0, 1): lambda: abs((b.H @ a @ b)[0, 0]),
-              (1, 1, 0): lambda: trace_dense(accel_dot(a, b)),
+              (1, 1, 0): lambda: trace_dense(dot_dense(a, b)),
               (1, 1, 1): lambda: trace_sparse(a @ b)}
     return method[isop(a), isop(b), issparse(a) or issparse(b)]()
