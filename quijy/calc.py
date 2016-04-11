@@ -274,7 +274,7 @@ def correlation(p, opa, opb, sysa, sysb, dims=None, sparse=True,
     opb = eyepad([opb], dims, sysb, sparse=sparse)
 
     def corr(state):
-        return inner(opab, p) - inner(opa, p) * inner(opb, p)
+        return inner(opab, state) - inner(opa, state) * inner(opb, state)
 
     return corr if precomp_func else corr(p)
 
