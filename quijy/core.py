@@ -9,7 +9,7 @@ from functools import reduce
 import numpy as np
 from numpy.matlib import zeros
 import scipy.sparse as sp
-from numba import jit
+from numba import jit, complex128, int64
 from .accel import matrixify, realify, issparse, isop, vdot, dot_dense
 
 
@@ -58,7 +58,7 @@ def infer_size(p, base=2):
 
 
 @realify
-@jit(nopython=True)
+@jit(complex128(complex128[:, :]), nopython=True)
 def trace_dense(op):  # pragma: no cover
     """ Trace of matrix. """
     x = 0.0
@@ -98,7 +98,7 @@ sp.csr_matrix.nmlz = nmlz
 
 
 @matrixify
-@jit(nopython=True)
+@jit(complex128[:, :](complex128[:, :], complex128[:, :]), nopython=True)
 def kron_dense(a, b):  # pragma: no cover
     """ Fast tensor product of two dense arrays. """
     m, n = a.shape
@@ -197,7 +197,7 @@ def coo_compress(dims, inds):
 
 
 @matrixify
-@jit(nopython=True)
+@jit(complex128[:, :](int64), nopython=True)
 def identity_dense(d):  # pragma: no cover
     """ Returns a dense, complex identity of order d. """
     x = np.zeros((d, d), dtype=np.complex128)
