@@ -96,15 +96,21 @@ def xmlineplot(ds, y_coo, x_coo, z_coo, title=None, legend=None,
 # -------------------------------------------------------------------------- #
 # Plots with plotly                                                          #
 # -------------------------------------------------------------------------- #
-def ishow(fig, nb=True, **kwargs):
-    """ Show a plotly figure in notebook or on web. """
+def ishow(figs, nb=True, **kwargs):
+    """ Show multiple plotly figures in notebook or on web. """
+    if isinstance(figs, (list, tuple)):
+        fig_main = figs[0]
+        for fig in figs[1:]:
+            fig_main['data'] += fig['data']
+    else:
+        fig_main = figs
     if nb:
         from plotly.offline import init_notebook_mode
         from plotly.offline import iplot as plot
         init_notebook_mode()
     else:
         from plotly.plotly import plot
-    plot(fig, **kwargs)
+    plot(fig_main, **kwargs)
 
 
 def iplot(x, y_i, logx=False, logy=False, color=False, colormap="viridis",
