@@ -75,7 +75,7 @@ class TestRandPos:
         assert type(a) == sp.csr_matrix
         l = np.linalg.eigvals(a.A)
         assert_allclose(l.imag, [0, 0, 0], atol=1e-14)
-        assert np.all(l.real >= 0)
+        assert np.all(l.real >= -1e-15)
 
 
 class TestRandRho:
