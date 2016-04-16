@@ -2,7 +2,18 @@ from numpy.testing import assert_allclose, assert_almost_equal
 import numpy as np
 from quijy.core import eye, chop, tr
 from quijy.calc import mutual_information
-from quijy.gen.rand import *
+from quijy.gen.rand import (
+    rand_matrix,
+    rand_herm,
+    rand_pos,
+    rand_rho,
+    rand_ket,
+    rand_uni,
+    rand_haar_state,
+    gen_rand_haar_states,
+    rand_mix,
+    rand_product_state,
+)
 
 
 def test_rand_matrix():
