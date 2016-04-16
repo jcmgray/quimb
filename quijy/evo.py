@@ -128,7 +128,7 @@ def schrodinger_eq_dop(ham):
     d = ham.shape[0]
 
     def foo(t, y):
-        rho = y.reshape(d, -1)
+        rho = y.reshape(d, d)
         hrho = ham @ rho
         return -1.0j * (hrho - hrho.transpose().conjugate()).reshape(-1)
     return foo

@@ -61,7 +61,7 @@ def eigvecs(a, sort=True):
     Returns
     -------
         v: eigenvectors as columns of matrix """
-    l, v = eigsys(a, sort=sort)
+    _, v = eigsys(a, sort=sort)
     return v
 
 

@@ -19,6 +19,8 @@ from quijy.accel import (
     rdmul,
     outer,
     idot,
+    calc_dot_type,
+    calc_dot_weight_func_out,
 )
 
 
@@ -285,6 +287,37 @@ class TestOuter:
         assert_allclose(c, d)
 
 
+class TestCalcDotType:
+    def test_scalar(self):
+        assert calc_dot_type(1) == 'c'
+        assert calc_dot_type(1.) == 'c'
+        assert calc_dot_type(1.0j) == 'c'
+
+    def test_1d_array(self, test_objs):
+        _, _, _, _, _, _, l = test_objs
+        assert calc_dot_type(l) == 'l'
+
+    def test_ket(self, test_objs):
+        _, _, _, _, k, _, _ = test_objs
+        assert calc_dot_type(k) == 'k'
+
+    def test_bra(self, test_objs):
+        _, _, _, _, k, _, _ = test_objs
+        assert calc_dot_type(k.H) == 'b'
+
+    def test_op(self, test_objs):
+        od, _, os, _, _, _, _ = test_objs
+        assert calc_dot_type(od) == 'o'
+        assert calc_dot_type(os) == 'os'
+
+
+class TestCalcDotWeightFuncOut:
+    def test_ket(self):
+        for z, w in zip(("k", "b", "o", "os", "l", "c"),
+                        (11, 12, 21, 23, 25, 41)):
+            assert calc_dot_weight_func_out(z, "k")[0] == w
+
+
 class TestIdot:
     def test_multiarg_mats(self, test_objs):
         od1, od2, os1, os2, kd1, kd2, ld = test_objs
@@ -303,3 +336,13 @@ class TestIdot:
         d = idot(c.H, a, b, c)
         assert np.isscalar(d)
         assert_allclose(d, c.H @ a @ b @ c)
+
+    # 0, 1, 2, 3, 4, 5, 6
+    # a, b, c, d, e, f, g
+    #   m, n, o, p, q, r
+    #   0, 1, 2, 3, 4, 5
+
+    # 0, 1, 2, 3, 4, 5
+    # a, b, c, X, f, g
+    #   m, n, Y, Z, r
+    #   0, 1, 2, 3, 4

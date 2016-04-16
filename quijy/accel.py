@@ -75,16 +75,20 @@ def mul(x, y):
 
 @matrixify
 @jit(nopython=True)
-def dot_dense(x, y):  # pragma: no cover
+def dot_dense(a, b):  # pragma: no cover
     """ Accelerated dot_dense product of matrices  """
-    return x @ y
+    return a @ b
 
 
-def dot(x, y):
+def dot_sparse(a, b):
+    return a @ b
+
+
+def dot(a, b):
     """ Matrix multiplication, dispatched to dense method. """
-    if issparse(x) or issparse(y):
-        return x @ y
-    return dot_dense(x, y)
+    if issparse(a) or issparse(b):
+        return dot_sparse(a, b)
+    return dot_dense(a, b)
 
 
 @realify
@@ -117,6 +121,10 @@ def l_diag_dot_dense(vec, mat):
     return evaluate("vec * mat") if d > 500 else mul_dense(vec, mat)
 
 
+def l_diag_dot_sparse(vec, mat):
+    return sp.diags(vec) @ mat
+
+
 def ldmul(vec, mat):
     """ Accelerated left diagonal multiplication using numexpr,
     faster than numpy for n > ~ 500.
@@ -130,7 +138,7 @@ def ldmul(vec, mat):
     -------
         mat: np.matrix """
     if issparse(mat):
-        return sp.diags(vec) @ mat
+        l_diag_dot_sparse(vec, mat)
     return l_diag_dot_dense(vec, mat)
 
 
@@ -148,6 +156,10 @@ def r_diag_dot_dense(mat, vec):
     return evaluate("mat * vec") if d > 500 else mul_dense(mat, vec)
 
 
+def r_diag_dot_sparse(mat, vec):
+    return mat @ sp.diags(vec)
+
+
 def rdmul(mat, vec):
     """ Accelerated right diagonal multiplication using numexpr,
     faster than numpy for n > ~ 500.
@@ -161,7 +173,7 @@ def rdmul(mat, vec):
     -------
         mat: np.matrix """
     if issparse(mat):
-        return mat @ sp.diags(vec)
+        r_diag_dot_sparse(mat, vec)
     return r_diag_dot_dense(mat, vec)
 
 
@@ -181,6 +193,81 @@ def outer(a, b):
 # --------------------------------------------------------------------------- #
 # Intelligent chaining of operations                                          #
 # --------------------------------------------------------------------------- #
+
+def calc_dot_type(x):
+    """ Assign a label to a object to take part in a dot product. """
+    if np.isscalar(x):
+        s = "c"
+    elif x.ndim == 1:
+        s = "l"
+    elif isket(x):
+        s = "k"
+    elif isbra(x):
+        s = "b"
+    else:
+        s = "o"
+    return s + "s" if issparse(x) else s
+
+
+def calc_dot_weight_func_out(s1, s2):
+    # columns: weight | function | output-type
+    wfo = {
+        # vec inner
+        "kk": (11, vdot, "c"),
+        "bk": (12, rdot, "c"),
+        # op @ vec
+        "ok": (21, dot_dense, "k"),
+        "bo": (22, dot_dense, "b"),
+        "osk": (23, dot_sparse, "k"),
+        "bos": (24, dot_sparse, "b"),
+        "lk": (25, l_diag_dot_dense, "k"),
+        "bl": (26, r_diag_dot_dense, "b"),
+        # const mult
+        "cc": (31, lambda a, b: a * b, "c"),
+        "ck": (32, lambda a, b: a * b, "k"),
+        "kc": (33, lambda a, b: a * b, "k"),
+        "cb": (34, lambda a, b: a * b, "b"),
+        "bc": (35, lambda a, b: a * b, "b"),
+        "cl": (36, lambda a, b: a * b, "l"),
+        "lc": (37, lambda a, b: a * b, "l"),
+        "cos": (38, lambda a, b: a * b, "os"),
+        "osc": (39, lambda a, b: a * b, "os"),
+        "co": (48, mul_dense, "o"),
+        "oc": (49, mul_dense, "o"),
+        # op @ op
+        "los": (41, l_diag_dot_sparse, "os"),
+        "osl": (42, r_diag_dot_sparse, "os"),
+        "osos": (43, dot_sparse, "os"),
+        "lo": (51, l_diag_dot_dense, "o"),
+        "ol": (52, r_diag_dot_dense, "o"),
+        "oso": (53, dot_sparse, "o"),
+        "oos": (54, dot_sparse, "o"),
+        "oo": (55, dot_dense, "o"),
+        # vec outer
+        ("k", "b"): (61, outer, "o"),
+    }
+    return wfo[s1 + s2]
+
+
+def calc_wfo_pairs(ss):
+    s1 = ss[0]
+    for s2 in ss[1:]:
+        yield calc_dot_weight_func_out(s1, s2)
+        s1 = s2
+
+
+def calc_dot_tree(ops):
+    n = len(ops)
+    ss = [calc_dot_type(op) for op in ops]
+    wfos = [*calc_wfo_pairs(ss)]
+    for _ in range(n-1):
+        imin, (_, f, o) = min(enumerate(wfos), key=lambda p: p[1][0])
+        yield imin, f
+        del ss[imin]
+        ss[imin] = o
+        del wfos[imin]
+        wfos[imin-1:imin+1] = [*calc_wfo_pairs(ss[imin-1:imin+2])]
+
 
 def calc_dot_weight(x, y):
     """ Assign a 'weight' to a particular dot product based on the sparsity
