@@ -75,6 +75,10 @@ def srho_dot_ls():
     return rho, ham, gamma, ls, rhodl
 
 
+# --------------------------------------------------------------------------- #
+# Evolution equation tests                                                    #
+# --------------------------------------------------------------------------- #
+
 class TestSchrodingerEqKet:
     def test_ket_matrix(self, psi_dot):
         psi, ham, psid = psi_dot
@@ -179,3 +183,8 @@ class TestLindbladEqVec:
         foo = lindblad_eq_vec(ham, ls, gamma)
         rhod2 = foo(None, rho.A.reshape(-1)).reshape(3, 3)
         assert_allclose(rhod, rhod2)
+
+
+# --------------------------------------------------------------------------- #
+# Evolution class tests                                                       #
+# --------------------------------------------------------------------------- #
