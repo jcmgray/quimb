@@ -18,6 +18,7 @@ from quijy.accel import (
     ldmul,
     rdmul,
     outer,
+    explt,
     idot,
 )
 
@@ -284,6 +285,18 @@ class TestOuter:
         d = np.multiply(a.H.T, b.H)
         assert_allclose(c, d)
 
+
+class TestExplt:
+    def test_small(self):
+        l = np.random.randn(3)
+        en = np.exp(-1.0j * l * 7)
+        eq = explt(l, 7)
+        assert_allclose(eq, en)
+
+
+# --------------------------------------------------------------------------- #
+# Test Intelligent chaining of operations                                     #
+# --------------------------------------------------------------------------- #
 
 class TestIdot:
     def test_multiarg_mats(self, test_objs):
