@@ -51,7 +51,7 @@ def schrodinger_eq_dop(ham):
         rho_dot(t, y): function to calculate rho_dot(t) at rho(t), input and
             output both in ravelled (1D form). """
     d = ham.shape[0]
-    ham = ham.A
+    # ham = ham.A
 
     def rho_dot(t, y):
         rho = y.reshape(d, d)
@@ -147,7 +147,7 @@ def lindblad_eq_vec(ham, ls, gamma, sparse=False):
     return rho_dot
 
 
-def calc_evo_eq(isdop, issparse, isopen):
+def calc_evo_eq(isdop, issparse, isopen=False):
     """ Choose an appropirate dynamical equation to evolve with. """
     eq_chooser = {
         (0, 0, 0): schrodinger_eq_ket,
@@ -220,9 +220,10 @@ class QuEvo(object):
         self.sparse_ham = issparse(ham)
         evo_eq = calc_evo_eq(self.dop, self.sparse_ham)
         self.stepper = complex_ode(evo_eq(ham))
-        int_mthd, stp_fct = ('dopri5', 150) if small_step else ('dop853', 50)
-        self.stepper.set_integrator(int_mthd, nsteps=0,
-                                    first_step=norm(ham, 'f') / stp_fct)
+        int_mthd, step_fct = ('dopri5', 150) if small_step else ('dop853', 50)
+        first_step = norm(ham, 'f') / step_fct
+        self.stepper.set_integrator(int_mthd, nsteps=0, first_step=first_step)
+        self.stepper.set_initial_value(self.p0.A.reshape(-1), self.t0)
         self.update_to = self.update_to_integrate
         self.solved = False
 

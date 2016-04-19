@@ -1,10 +1,15 @@
+from math import pi, gcd
+from functools import reduce
 from pytest import fixture
+import numpy as np
 from numpy.testing import assert_allclose
 from quijy import (
+    qjf,
     rand_ket,
     rand_rho,
     rand_herm,
     rand_matrix,
+    rand_uni,
 )
 from quijy.evo import (
     schrodinger_eq_ket,
@@ -12,6 +17,7 @@ from quijy.evo import (
     schrodinger_eq_dop_vec,
     lindblad_eq,
     lindblad_eq_vec,
+    QuEvo,
 )
 
 
@@ -188,3 +194,40 @@ class TestLindbladEqVec:
 # --------------------------------------------------------------------------- #
 # Evolution class tests                                                       #
 # --------------------------------------------------------------------------- #
+
+
+@fixture
+def ham_rcr_psi():
+    # Define a hamiltonian with a known recurrence time
+    def lcm(a, b):
+        return a * b // gcd(a, b)
+
+    def lcms(*args):
+        return reduce(lcm, args)
+
+    def gcds(*args):
+        return reduce(gcd, args)
+
+    d = 3
+    ems = np.random.randint(1, 6, d)
+    LCD = gcds(*ems)
+    ens = np.random.randint(1, 10, d)
+    LCM = lcms(*ens)
+    trc = 2 * LCM/LCD
+    l = np.array(ems) / np.array(ens)
+    v = rand_uni(d)
+    ham = v @ np.diag(l) @ v.H
+    p0 = qjf([[0.123], [0.456j], [0.789]], qtype='ket', normalized=True)
+    tm = 0.573 * trc
+    pm = v @ np.diag(np.exp(-1.0j * tm * l)) @ v.H @ p0
+    return ham, trc, p0, tm, pm
+
+
+class TestQuEvo:
+    def test_quevo_ham_dense_ket(self, ham_rcr):
+        ham, t_recur, p0, p57 = ham_rcr
+        sim = QuEvo(p0, ham, solve=False)
+        sim.update_to(57 * pi)
+        assert_allclose(p57, sim.pt, rtol=1e-6, atol=1e-12)
+        sim.update_to(t_recur * pi)
+        assert_allclose(p0, sim.pt, rtol=1e-6, atol=1e-12)
