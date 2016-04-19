@@ -111,6 +111,7 @@ def kron_dense(a, b):  # pragma: no cover
 
 
 def kron_sparse(a, b):
+    # TODO: leave csc, bsr, csr etc.
     """ Sparse tensor product """
     return sp.kron(a, b, format="csr")
 
@@ -141,6 +142,7 @@ def kron(*ops):
 # Monkey-patch unused & symbol to tensor product
 np.matrix.__and__ = kron_dense
 sp.csr_matrix.__and__ = kron_sparse
+sp.csc_matrix.__and__ = kron_sparse
 
 
 def kronpow(a, pwr):

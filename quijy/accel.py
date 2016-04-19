@@ -1,6 +1,7 @@
+from cmath import exp
 import numpy as np
 import scipy.sparse as sp
-from numba import jit
+from numba import jit, vectorize
 from numexpr import evaluate
 
 
@@ -102,7 +103,7 @@ def vdot(a, b):  # pragma: no cover
 @jit(nopython=True)
 def rdot(a, b):  # pragma: no cover
     """ Real dot product of two dense vectors. """
-    d = max(a.shape[0], a.shape[1])
+    d = a.size
     a, b = a.reshape((1, d)), b.reshape((d, 1))
     return (a @ b)[0, 0]
 
@@ -188,6 +189,12 @@ def outer(a, b):
     """ Outer product between two vectors (no conjugation). """
     d, a, b = reshape_for_outer(a, b)
     return mul_dense(a, b) if d < 500 else np.asmatrix(evaluate('a * b'))
+
+
+@vectorize(nopython=True)
+def explt(l, t):
+    """ Complex exponenital as used in solution to schrodinger equation. """
+    return exp((-1.0j * t) * l)
 
 
 # --------------------------------------------------------------------------- #

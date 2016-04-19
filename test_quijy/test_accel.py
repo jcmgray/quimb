@@ -18,6 +18,7 @@ from quijy.accel import (
     ldmul,
     rdmul,
     outer,
+    explt,
     idot,
     calc_dot_type,
     calc_dot_weight_func_out,
@@ -229,6 +230,7 @@ class TestFastDiagMul:
 
     def test_ldmul_sparse(self, test_objs):
         _, _, mat, _, _, _, vec = test_objs
+        assert issparse(mat)
         a = ldmul(vec, mat)
         b = np.diag(vec) @ mat.A
         assert issparse(a)
@@ -314,9 +316,21 @@ class TestCalcDotType:
 class TestCalcDotWeightFuncOut:
     def test_ket(self):
         for z, w in zip(("k", "b", "o", "os", "l", "c"),
-                        (11, 12, 21, 23, 25, 41)):
+                        (11, 12, 21, 23, 25, 32)):
             assert calc_dot_weight_func_out(z, "k")[0] == w
 
+
+class TestExplt:
+    def test_small(self):
+        l = np.random.randn(3)
+        en = np.exp(-1.0j * l * 7)
+        eq = explt(l, 7)
+        assert_allclose(eq, en)
+
+
+# --------------------------------------------------------------------------- #
+# Test Intelligent chaining of operations                                     #
+# --------------------------------------------------------------------------- #
 
 class TestIdot:
     def test_multiarg_mats(self, test_objs):

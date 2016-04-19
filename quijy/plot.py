@@ -31,8 +31,8 @@ def mplot(x, y_i, fignum=1, logx=False, logy=False,
         cols = repeat(None)
     for y, col in zip(y_i, cols):
         axes.plot(x, y, ".-", c=col, **kwargs)
-    xlims = (min(x), max(x)) if xlims is None else xlims
-    ylims = (min(y_i), max(y_i)) if ylims is None else ylims
+    xlims = (np.min(x), np.max(x)) if xlims is None else xlims
+    ylims = (np.min(y_i), np.max(y_i)) if ylims is None else ylims
     axes.set_xlim(xlims)
     axes.set_ylim(ylims)
     axes.set_xscale("log" if logx else "linear")
