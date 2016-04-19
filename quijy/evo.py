@@ -6,6 +6,7 @@ TODO: iterative method, sparse etc., turn off optimzations for small n
 # TODO: solout method with funcyt
 # TODO: QuEvoTimeDepend
 # TODO: for state in qd.at_times():
+# TODO: delete p0, ham etc.
 import numpy as np
 from scipy.integrate import complex_ode
 from .accel import (
@@ -189,7 +190,7 @@ class QuEvo(object):
         self.dop = isop(self.p0)  # Density operator evolution
         self.d = p0.shape[0]  # Hilbert space dimension
 
-        # Hamtiltonian
+        # Hamiltonian
         if isinstance(ham, (tuple, list)):  # Already solved
             self.l, self.v = ham
             self._solve_ham(ham)
@@ -206,7 +207,7 @@ class QuEvo(object):
         try:  # See if already set from tuple
             self.l, self.v
         except AttributeError:
-            self.l, self.v = eigsys(ham)
+            self.l, self.v = eigsys(ham.A)
         # Find initial state in energy eigenbasis at t0
         self.pe0 = (self.v.H @ self.p0 @ self.v if self.dop else
                     self.v.H @ self.p0)

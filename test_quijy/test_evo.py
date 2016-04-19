@@ -5,11 +5,13 @@ import numpy as np
 from numpy.testing import assert_allclose
 from quijy import (
     qjf,
+    eigsys,
     rand_ket,
     rand_rho,
     rand_herm,
     rand_matrix,
     rand_uni,
+    inner,
 )
 from quijy.evo import (
     schrodinger_eq_ket,
@@ -198,36 +200,119 @@ class TestLindbladEqVec:
 
 @fixture
 def ham_rcr_psi():
-    # Define a hamiltonian with a known recurrence time
-    def lcm(a, b):
-        return a * b // gcd(a, b)
-
-    def lcms(*args):
-        return reduce(lcm, args)
-
-    def gcds(*args):
-        return reduce(gcd, args)
-
+    # Define a random hamiltonian with a known recurrence time
     d = 3
     ems = np.random.randint(1, 6, d)
-    LCD = gcds(*ems)
-    ens = np.random.randint(1, 10, d)
-    LCM = lcms(*ens)
-    trc = 2 * LCM/LCD
+    ens = np.random.randint(1, 6, d)  # eigenvalues as rational numbers
+    # numerator lowest common divisor
+    LCD = reduce(gcd, ems)
+    # denominator lowest common multiple
+    LCM = reduce(lambda a, b: a * b // gcd(a, b), ens)
+    trc = 2 * pi * LCM/LCD
     l = np.array(ems) / np.array(ens)
     v = rand_uni(d)
     ham = v @ np.diag(l) @ v.H
-    p0 = qjf([[0.123], [0.456j], [0.789]], qtype='ket', normalized=True)
+    p0 = rand_ket(d)
     tm = 0.573 * trc
     pm = v @ np.diag(np.exp(-1.0j * tm * l)) @ v.H @ p0
     return ham, trc, p0, tm, pm
 
 
 class TestQuEvo:
-    def test_quevo_ham_dense_ket(self, ham_rcr):
-        ham, t_recur, p0, p57 = ham_rcr
+    def test_quevo_ham_dense_ket_solve(self, ham_rcr_psi):
+        ham, trc, p0, tm, pm = ham_rcr_psi
+        sim = QuEvo(p0, ham, solve=True)
+        sim.update_to(tm)
+        assert_allclose(sim.pt, pm)
+        assert inner(sim.pt, p0) < 1.0
+        sim.update_to(trc)
+        assert_allclose(sim.pt, p0)
+        assert isinstance(sim.pt, np.matrix)
+        assert sim.t == trc
+
+    def test_quevo_ham_sparse_ket_solve(self, ham_rcr_psi):
+        ham, trc, p0, tm, pm = ham_rcr_psi
+        ham = qjf(ham, sparse=True)
+        sim = QuEvo(p0, ham, solve=True)
+        sim.update_to(tm)
+        assert_allclose(sim.pt, pm)
+        assert inner(sim.pt, p0) < 1.0
+        sim.update_to(trc)
+        assert_allclose(sim.pt, p0)
+        assert isinstance(sim.pt, np.matrix)
+        assert sim.t == trc
+
+    def test_quevo_ham_tuple_ket_solve(self, ham_rcr_psi):
+        ham, trc, p0, tm, pm = ham_rcr_psi
+        l, v = eigsys(ham)
+        sim = QuEvo(p0, (l, v))
+        sim.update_to(tm)
+        assert_allclose(sim.pt, pm)
+        assert inner(sim.pt, p0) < 1.0
+        sim.update_to(trc)
+        assert_allclose(sim.pt, p0)
+        assert isinstance(sim.pt, np.matrix)
+        assert sim.t == trc
+
+    def test_quevo_ham_dense_ket_integrate(self, ham_rcr_psi):
+        ham, trc, p0, tm, pm = ham_rcr_psi
         sim = QuEvo(p0, ham, solve=False)
-        sim.update_to(57 * pi)
-        assert_allclose(p57, sim.pt, rtol=1e-6, atol=1e-12)
-        sim.update_to(t_recur * pi)
-        assert_allclose(p0, sim.pt, rtol=1e-6, atol=1e-12)
+        sim.update_to(tm)
+        assert_allclose(sim.pt, pm, rtol=1e-3)
+        assert inner(sim.pt, p0) < 1.0
+        sim.update_to(trc)
+        assert_allclose(sim.pt, p0, rtol=1e-3)
+        assert isinstance(sim.pt, np.matrix)
+        assert sim.t == trc
+
+    def test_quevo_ham_sparse_ket_integrate(self, ham_rcr_psi):
+        ham, trc, p0, tm, pm = ham_rcr_psi
+        ham = qjf(ham, sparse=True)
+        sim = QuEvo(p0, ham, solve=False)
+        sim.update_to(tm)
+        assert_allclose(sim.pt, pm, rtol=1e-3)
+        assert inner(sim.pt, p0) < 1.0
+        sim.update_to(trc)
+        assert_allclose(sim.pt, p0, rtol=1e-3)
+        assert isinstance(sim.pt, np.matrix)
+        assert sim.t == trc
+
+    def test_quevo_ham_dense_dop_solve(self, ham_rcr_psi):
+        ham, trc, p0, tm, pm = ham_rcr_psi
+        p0 = p0 @ p0.H
+        pm = pm @ pm.H
+        sim = QuEvo(p0, ham, solve=True)
+        sim.update_to(tm)
+        assert_allclose(sim.pt, pm)
+        assert inner(sim.pt, p0) < 1.0
+        sim.update_to(trc)
+        assert_allclose(sim.pt, p0)
+        assert isinstance(sim.pt, np.matrix)
+        assert sim.t == trc
+
+    def test_quevo_ham_dense_dop_integrate(self, ham_rcr_psi):
+        ham, trc, p0, tm, pm = ham_rcr_psi
+        p0 = p0 @ p0.H
+        pm = pm @ pm.H
+        sim = QuEvo(p0, ham, solve=False)
+        sim.update_to(tm)
+        assert_allclose(sim.pt, pm, rtol=1e-3)
+        assert inner(sim.pt, p0) < 1.0
+        sim.update_to(trc)
+        assert_allclose(sim.pt, p0, rtol=1e-3)
+        assert isinstance(sim.pt, np.matrix)
+        assert sim.t == trc
+
+    def test_quevo_ham_sparse_dop_integrate(self, ham_rcr_psi):
+        ham, trc, p0, tm, pm = ham_rcr_psi
+        ham = qjf(ham, sparse=True)
+        p0 = p0 @ p0.H
+        pm = pm @ pm.H
+        sim = QuEvo(p0, ham, solve=False)
+        sim.update_to(tm)
+        assert_allclose(sim.pt, pm, rtol=1e-3)
+        assert inner(sim.pt, p0) < 1.0
+        sim.update_to(trc)
+        assert_allclose(sim.pt, p0, rtol=1e-3)
+        assert isinstance(sim.pt, np.matrix)
+        assert sim.t == trc
