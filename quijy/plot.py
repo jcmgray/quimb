@@ -1,6 +1,8 @@
 """
 Functions for plotting datasets nicely.
 """
+from itertools import cycle
+from collections import OrderedDict
 from math import log
 from itertools import repeat
 import numpy as np
@@ -10,8 +12,46 @@ import numpy as np
 # Plots with matplotlib                                                      #
 # -------------------------------------------------------------------------- #
 
+def mpl_markers():
+    marker_dict = OrderedDict([
+        ("o", "circle"),
+        ("x", "x"),
+        ("D", "diamond"),
+        ("+", "plus"),
+        ("s", "square"),
+        (".", "point"),
+        ("^", "triangle_up"),
+        ("3", "tri_left"),
+        (">", "triangle_right"),
+        ("d", "thin_diamond"),
+        ("*", "star"),
+        ("v", "triangle_down"),
+        ("|", "vline"),
+        ("1", "tri_down"),
+        ("p", "pentagon"),
+        (",", "pixel"),
+        ("2", "tri_up"),
+        ("<", "triangle_left"),
+        ("h", "hexagon1"),
+        ("4", "tri_right"),
+        (0, "tickleft"),
+        (2, "tickup"),
+        (3, "tickdown"),
+        (4, "caretleft"),
+        ("_", "hline"),
+        (5, "caretright"),
+        ("H", "hexagon2"),
+        (1, "tickright"),
+        (6, "caretup"),
+        ("8", "octagon"),
+        (7, "caretdown"),
+        ])
+    marker_keys = [*marker_dict.keys()]
+    return marker_keys
+
+
 def mplot(x, y_i, fignum=1, logx=False, logy=False,
-          xlims=None, ylims=None,
+          xlims=None, ylims=None, markers=True,
           color=False, colormap="viridis", **kwargs):
     """ Function for automatically plotting multiple sets of data
     using matplot lib. """
@@ -22,6 +62,12 @@ def mplot(x, y_i, fignum=1, logx=False, logy=False,
     n_y = y_i.shape[0]
     fig = plt.figure(fignum, figsize=(8, 6), dpi=100)
     axes = fig.add_axes([0.1, 0.1, 0.85, 0.8])
+
+    if markers:
+        mrkrs = cycle(mpl_markers())
+    else:
+        repeat(None)
+
     if color:
         from matplotlib import cm
         cmap = getattr(cm, colormap)
@@ -29,8 +75,9 @@ def mplot(x, y_i, fignum=1, logx=False, logy=False,
         cols = [cmap(cn, 1) for cn in cns]
     else:
         cols = repeat(None)
-    for y, col in zip(y_i, cols):
-        axes.plot(x, y, ".-", c=col, **kwargs)
+
+    for y, col, mrkr in zip(y_i, cols, mrkrs):
+        axes.plot(x, y, ".-", c=col, marker=mrkr, **kwargs)
     xlims = (np.min(x), np.max(x)) if xlims is None else xlims
     ylims = (np.min(y_i), np.max(y_i)) if ylims is None else ylims
     axes.set_xlim(xlims)
@@ -46,7 +93,7 @@ def mplot(x, y_i, fignum=1, logx=False, logy=False,
 
 def xmlineplot(ds, y_coo, x_coo, z_coo, title=None, legend=None,
                xlabel=None, ylabel=None, zlabel=None,
-               xlims=None, ylims=None,
+               xlims=None, ylims=None, markers=True,
                vlines=None, hlines=None, color=False, colormap="viridis",
                fignum=1, logx=False, logy=False, **kwargs):
     """
@@ -58,6 +105,11 @@ def xmlineplot(ds, y_coo, x_coo, z_coo, title=None, legend=None,
     axes = fig.add_axes([0.1, 0.1, 0.85, 0.8],
                         title=("" if title is None else title))
 
+    if markers:
+        mrkrs = cycle(mpl_markers())
+    else:
+        repeat(None)
+
     if color:
         from matplotlib import cm
         cmap = getattr(cm, colormap)
@@ -68,10 +120,10 @@ def xmlineplot(ds, y_coo, x_coo, z_coo, title=None, legend=None,
     else:
         cols = repeat(None)
 
-    for z, col in zip(ds[z_coo].data, cols):
+    for z, col, mrkr in zip(ds[z_coo].data, cols, mrkrs):
         x = ds.loc[{z_coo: z}][x_coo].data.flatten()
         y = ds.loc[{z_coo: z}][y_coo].data.flatten()
-        axes.plot(x, y, ".-", c=col, lw=1.3,
+        axes.plot(x, y, ".-", c=col, lw=1.3, marker=mrkr,
                   label=str(z), zorder=3, **kwargs)
     axes.set_xscale("log" if logx else "linear")
     axes.set_yscale("log" if logy else "linear")
