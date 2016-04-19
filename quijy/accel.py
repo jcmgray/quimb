@@ -139,7 +139,7 @@ def ldmul(vec, mat):
     -------
         mat: np.matrix """
     if issparse(mat):
-        l_diag_dot_sparse(vec, mat)
+        return l_diag_dot_sparse(vec, mat)
     return l_diag_dot_dense(vec, mat)
 
 
@@ -174,7 +174,7 @@ def rdmul(mat, vec):
     -------
         mat: np.matrix """
     if issparse(mat):
-        r_diag_dot_sparse(mat, vec)
+        return r_diag_dot_sparse(mat, vec)
     return r_diag_dot_dense(mat, vec)
 
 
