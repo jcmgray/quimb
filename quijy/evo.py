@@ -7,6 +7,7 @@ TODO: iterative method, sparse etc., turn off optimzations for small n
 # TODO: QuEvoTimeDepend
 # TODO: for state in qd.at_times():
 # TODO: delete p0, ham etc.
+# TODO: test known lindlbad evolution
 import numpy as np
 from scipy.integrate import complex_ode
 from .accel import (
@@ -253,9 +254,6 @@ class QuEvo(object):
         for t in ts:
             self.update_to(t)
             yield self.pt
-
-    def reset(self):
-        raise NotImplemented
 
     # Simulation properties #
 

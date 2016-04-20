@@ -1,4 +1,4 @@
-from math import pi, gcd
+from math import pi, gcd, cos
 from functools import reduce
 from pytest import fixture
 import numpy as np
@@ -12,6 +12,11 @@ from quijy import (
     rand_matrix,
     rand_uni,
     inner,
+    ham_heis,
+    up,
+    down,
+    eyepad,
+    sig,
 )
 from quijy.evo import (
     schrodinger_eq_ket,
@@ -316,3 +321,13 @@ class TestQuEvo:
         assert_allclose(sim.pt, p0, rtol=1e-3)
         assert isinstance(sim.pt, np.matrix)
         assert sim.t == trc
+
+    def test_quevo_at_times(self):
+        ham = ham_heis(2, cyclic=False)
+        p0 = up() & down()
+        sim = QuEvo(p0, ham, solve=True)
+        ts = np.linspace(0, 10)
+        for t, pt in zip(ts, sim.at_times(ts)):
+            x = cos(4 * t)
+            y = inner(pt, eyepad(sig('z'), [2, 2], 0))
+            assert_allclose(x, y, atol=1e-15)
