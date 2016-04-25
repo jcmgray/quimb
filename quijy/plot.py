@@ -93,17 +93,20 @@ def mplot(x, y_i, fignum=1, logx=False, logy=False,
 
 def xmlineplot(ds, y_coo, x_coo, z_coo, title=None, legend=None,
                xlabel=None, ylabel=None, zlabel=None,
-               xlims=None, ylims=None, markers=True,
+               xlims=None, ylims=None, markers=True, padding=0.0,
                vlines=None, hlines=None, color=False, colormap="viridis",
                fignum=1, logx=False, logy=False, **kwargs):
     """
     Function for automatically plotting multiple sets of data
     using matplotlib and xarray.
     """
+    import matplotlib as mpl
     import matplotlib.pyplot as plt
+    mpl.rc('font', family='CMU Serif')
     fig = plt.figure(fignum, figsize=(8, 6), dpi=100)
-    axes = fig.add_axes([0.1, 0.1, 0.85, 0.8],
+    axes = fig.add_axes([0.15, 0.15, 0.8, 0.75],
                         title=("" if title is None else title))
+    axes.tick_params(labelsize=16)
 
     if markers:
         mrkrs = cycle(mpl_markers())
@@ -113,35 +116,49 @@ def xmlineplot(ds, y_coo, x_coo, z_coo, title=None, legend=None,
     if color:
         from matplotlib import cm
         cmap = getattr(cm, colormap)
-        zmin = ds[z_coo].values.min()
-        zmax = ds[z_coo].values.max()
-        cols = [cmap(1 - (z-zmin)/(zmax-zmin))
-                for z in ds[z_coo].values]
+        zmin, zmax = ds[z_coo].values.min(), ds[z_coo].values.max()
+        cols = [cmap(1 - (z-zmin)/(zmax-zmin)) for z in ds[z_coo].values]
     else:
         cols = repeat(None)
 
+    # Add data plots
     for z, col, mrkr in zip(ds[z_coo].data, cols, mrkrs):
         x = ds.loc[{z_coo: z}][x_coo].data.flatten()
         y = ds.loc[{z_coo: z}][y_coo].data.flatten()
         axes.plot(x, y, ".-", c=col, lw=1.3, marker=mrkr,
                   label=str(z), zorder=3, **kwargs)
-    axes.set_xscale("log" if logx else "linear")
-    axes.set_yscale("log" if logy else "linear")
+
     if vlines is not None:
         for x in vlines:
             axes.axvline(x)
     if hlines is not None:
         for y in hlines:
             axes.axhline(y)
+
     axes.grid(True, color="0.666")
-    xlims = (ds[x_coo].min(), ds[x_coo].max()) if xlims is None else xlims
-    ylims = (ds[y_coo].min(), ds[y_coo].max()) if ylims is None else ylims
+
+    if xlims is None:
+        xmax = ds[x_coo].max()
+        xmin = ds[x_coo].min()
+        xrange = xmax - xmin
+        xlims = (xmin - padding * xrange, xmax + padding * xrange)
     axes.set_xlim(xlims)
+    if ylims is None:
+        ymax = ds[y_coo].max()
+        ymin = ds[y_coo].min()
+        yrange = ymax - ymin
+        ylims = (ymin - padding * yrange, ymax + padding * yrange)
     axes.set_ylim(ylims)
-    axes.set_xlabel(x_coo if xlabel is None else xlabel)
-    axes.set_ylabel(y_coo if ylabel is None else ylabel)
+
+    axes.set_xscale("log" if logx else "linear")
+    axes.set_yscale("log" if logy else "linear")
+    axes.set_xlabel(x_coo if xlabel is None else xlabel, fontsize=20)
+    axes.set_ylabel(y_coo if ylabel is None else ylabel, fontsize=20)
+
     if legend or not (legend is False or len(ds[z_coo]) > 20):
-        axes.legend(title=(z_coo if zlabel is None else zlabel), loc="best")
+        legend = axes.legend(title=(z_coo if zlabel is None else zlabel),
+                             loc="best", fontsize=16, frameon=False)
+        legend.get_title().set_fontsize(20)
     return fig
 
 
