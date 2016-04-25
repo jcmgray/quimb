@@ -3,7 +3,7 @@ import scipy.sparse as sp
 import numpy as np
 from pytest import raises
 from numpy.testing import assert_allclose, assert_almost_equal
-from quijy.accel import issparse, isherm
+from quijy.accel import issparse, isherm, kron
 
 from quijy.core import (
     quijify,
@@ -14,9 +14,6 @@ from quijy.core import (
     trace,
     tr,
     nmlz,
-    kron_dense,
-    kron,
-    kronpow,
     coo_map,
     coo_compress,
     eye,
@@ -165,38 +162,6 @@ class TestNormalize:
         b = nmlz(a, inplace=True)
         assert_almost_equal(trace(a), 1.0)
         assert_almost_equal(trace(b), 1.0)
-
-
-class TestKron:
-    def test_kron_dense(self):
-        a = rand_matrix(3)
-        b = rand_matrix(3)
-        c = kron_dense(a, b)
-        npc = np.kron(a, b)
-        assert_allclose(c, npc)
-
-    def test_kron_multi_args(self):
-        a = rand_matrix(3)
-        b = rand_matrix(3)
-        c = rand_matrix(3)
-        assert(kron() == 1)
-        assert_allclose(kron(a), a)
-        assert_allclose(kron(a, b, c),
-                        np.kron(np.kron(a, b), c))
-
-    def test_kron_mixed_types(self):
-        a = qjf([1, 2, 3, 4], 'ket')
-        b = qjf([0, 1, 0, 2], 'ket', sparse=True)
-        assert_allclose(kron(a, b).A,
-                        (sp.kron(a, b, 'csr')).A)
-        assert_allclose(kron(b, b).A,
-                        (sp.kron(b, b, 'csr')).A)
-
-    def test_kronpow(self):
-        a = rand_matrix(2)
-        b = a & a & a
-        c = kronpow(a, 3)
-        assert_allclose(b, c)
 
 
 class TestCooMap:

@@ -18,6 +18,10 @@ from quijy.accel import (
     ldmul,
     rdmul,
     outer,
+    kron_dense,
+    kron_dense_big,
+    kron,
+    kronpow,
     explt,
     idot,
     calc_dot_type,
@@ -145,6 +149,10 @@ class TestMul:
         _, _, a, b, _, _, _ = test_objs
         cq = mul(a, b)
         cn = a.A * b.A
+        assert issparse(cq)
+        assert_allclose(cq.A, cn)
+        cq = mul(b.A, a)
+        cn = b.A * a.A
         assert issparse(cq)
         assert_allclose(cq.A, cn)
 
@@ -287,6 +295,46 @@ class TestOuter:
         assert isinstance(c, np.matrix)
         d = np.multiply(a.H.T, b.H)
         assert_allclose(c, d)
+
+
+class TestKron:
+    def test_kron_dense(self):
+        a = rand_matrix(3)
+        b = rand_matrix(3)
+        c = kron_dense(a, b)
+        npc = np.kron(a, b)
+        assert_allclose(c, npc)
+        assert isinstance(c, np.matrix)
+
+    def test_kron_dense_big(self):
+        a = rand_matrix(3)
+        b = rand_matrix(3)
+        c = kron_dense_big(a, b)
+        npc = np.kron(a, b)
+        assert_allclose(c, npc)
+        assert isinstance(c, np.matrix)
+
+    def test_kron_multi_args(self):
+        a = rand_matrix(3)
+        b = rand_matrix(3)
+        c = rand_matrix(3)
+        assert_allclose(kron(a), a)
+        assert_allclose(kron(a, b, c),
+                        np.kron(np.kron(a, b), c))
+
+    def test_kron_mixed_types(self):
+        a = rand_ket(4)
+        b = rand_ket(4, sparse=True)
+        assert_allclose(kron(a, b).A,
+                        (sp.kron(a, b, 'csr')).A)
+        assert_allclose(kron(b, b).A,
+                        (sp.kron(b, b, 'csr')).A)
+
+    def test_kronpow(self):
+        a = rand_matrix(2)
+        b = a & a & a
+        c = kronpow(a, 3)
+        assert_allclose(b, c)
 
 
 class TestCalcDotType:

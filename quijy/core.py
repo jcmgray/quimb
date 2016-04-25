@@ -5,12 +5,21 @@ Core functions for manipulating quantum objects.
 from math import log
 from operator import mul
 from itertools import cycle, groupby, product
-from functools import reduce
+from functools import reduce  # partial
 import numpy as np
 from numpy.matlib import zeros
 import scipy.sparse as sp
 from numba import jit, complex128, int64
-from .accel import matrixify, realify, issparse, isop, vdot, dot_dense
+from .accel import (
+    matrixify,
+    realify,
+    issparse,
+    isop,
+    vdot,
+    dot_dense,
+    kron,
+    kronpow
+)
 
 
 def quijify(data, qtype=None, sparse=False, normalized=False, chopped=False):
@@ -50,6 +59,8 @@ def quijify(data, qtype=None, sparse=False, normalized=False, chopped=False):
     return sp.csr_matrix(qob, dtype=complex) if sparse else qob
 
 qjf = quijify
+# dop = partial(quijify, qtype='dop')?
+# sprs = partial(quijify, sparse=True)?
 
 
 def infer_size(p, base=2):
@@ -85,7 +96,7 @@ sp.csr_matrix.tr = trace_sparse
 
 def normalize(qob, inplace=True):
     """ Returns the state qob in normalized form """
-    n_factor = qob.tr() if isop(qob) else inner(qob, qob)**0.25
+    n_factor = qob.tr() if isop(qob) else overlap(qob, qob)**0.25
     if inplace:
         qob /= n_factor
         return qob
@@ -95,59 +106,6 @@ def normalize(qob, inplace=True):
 nmlz = normalize
 np.matrix.nmlz = nmlz
 sp.csr_matrix.nmlz = nmlz
-
-
-@matrixify
-@jit(complex128[:, :](complex128[:, :], complex128[:, :]), nopython=True)
-def kron_dense(a, b):  # pragma: no cover
-    """ Fast tensor product of two dense arrays. """
-    m, n = a.shape
-    p, q = b.shape
-    x = np.empty((m * p, n * q), dtype=np.complex128)
-    for i in range(m):
-        for j in range(n):
-            x[i * p:(i + 1)*p, j * q:(j + 1) * q] = a[i, j] * b
-    return x
-
-
-def kron_sparse(a, b):
-    # TODO: leave csc, bsr, csr etc.
-    """ Sparse tensor product """
-    return sp.kron(a, b, format="csr")
-
-
-def kron(*ops):
-    # TODO: scalar?
-    # TODO: faster sparse kron using coo?
-    # TODO: rename? tensor
-    # TODO: parallize?
-    # TODO: merge into eyepad with dims=None, coos=None
-    """ Tensor product of variable number of arguments.
-    Input:
-        ops: objects to be tensored together
-    Returns:
-        operator
-    The product is performed as (a * (b * (c * ...))) """
-    num_p = len(ops)
-    if num_p == 0:
-        return 1
-    a = ops[0]
-    if num_p == 1:
-        return a
-    b = ops[1] if num_p == 2 else kron(*ops[1:])
-    if issparse(a) or issparse(b):
-        return kron_sparse(a, b)
-    return kron_dense(a, b)
-
-# Monkey-patch unused & symbol to tensor product
-np.matrix.__and__ = kron_dense
-sp.csr_matrix.__and__ = kron_sparse
-sp.csc_matrix.__and__ = kron_sparse
-
-
-def kronpow(a, pwr):
-    """ Returns `a` tensored with itself pwr times """
-    return kron(*(a for i in range(pwr)))
 
 
 def coo_map(dims, coos, cyclic=False, trim=False):
@@ -498,7 +456,8 @@ def chop(x, tol=1.0e-15, inplace=True):
 # sp.csr_matrix = chop
 
 
-def inner(a, b):
+def overlap(a, b):
+    # TODO: rename overlap
     """ Operator inner product between a and b, i.e. for vectors it will be the
     absolute overlap squared |<a|b><b|a>|, rather than <a|b>. """
     method = {(0, 0, 0): lambda: abs(vdot(a, b))**2,
@@ -510,3 +469,6 @@ def inner(a, b):
               (1, 1, 0): lambda: trace_dense(dot_dense(a, b)),
               (1, 1, 1): lambda: trace_sparse(a @ b)}
     return method[isop(a), isop(b), issparse(a) or issparse(b)]()
+
+# Legacy
+inner = overlap

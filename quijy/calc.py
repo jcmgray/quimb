@@ -14,7 +14,7 @@ from scipy.optimize import minimize
 
 from .accel import dot_dense, ldmul, issparse, isop
 from .core import (qjf, kron, ptr, eye, eyepad, tr, trx,
-                   infer_size, inner)
+                   infer_size, overlap)
 from .solve import (eigvals, eigsys, norm)
 from .gen import (sig, basis_vec, bell_state, bloch_state)
 
@@ -176,7 +176,7 @@ def quantum_discord(p):
 def trace_distance(p, w):
     """ Trace distance between states `p` and `w`. """
     if not isop(p) and not isop(w):
-        return sqrt(1 - inner(p, w))
+        return sqrt(1 - overlap(p, w))
     return 0.5 * norm(p - w, "tr")
 
 
@@ -274,7 +274,7 @@ def correlation(p, opa, opb, sysa, sysb, dims=None, sparse=True,
     opb = eyepad([opb], dims, sysb, sparse=sparse)
 
     def corr(state):
-        return inner(opab, state) - inner(opa, state) * inner(opb, state)
+        return overlap(opab, state) - overlap(opa, state) * overlap(opb, state)
 
     return corr if precomp_func else corr(p)
 

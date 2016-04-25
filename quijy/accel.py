@@ -69,8 +69,10 @@ def mul_dense(x, y):  # pragma: no cover
 def mul(x, y):
     """ Dispatch to element wise multiplication. """
     # TODO: add sparse, dense -> sparse w/ broadcasting
-    if issparse(x) or issparse(y):
+    if issparse(x):
         return x.multiply(y)
+    elif issparse(y):
+        return y.multiply(x)
     return mul_dense(x, y)
 
 
@@ -96,15 +98,14 @@ def dot(a, b):
 @jit(nopython=True)
 def vdot(a, b):  # pragma: no cover
     """ Accelerated 'Hermitian' inner product of two vectors. """
-    return np.vdot(a.ravel(), b.ravel())
+    return np.vdot(a.reshape(-1), b.reshape(-1))
 
 
 @realify
 @jit(nopython=True)
 def rdot(a, b):  # pragma: no cover
     """ Real dot product of two dense vectors. """
-    d = a.size
-    a, b = a.reshape((1, d)), b.reshape((d, 1))
+    a, b = a.reshape((1, -1)), b.reshape((-1, 1))
     return (a @ b)[0, 0]
 
 
@@ -191,8 +192,67 @@ def outer(a, b):
     return mul_dense(a, b) if d < 500 else np.asmatrix(evaluate('a * b'))
 
 
+@matrixify
+@jit(nopython=True)
+def kron_dense(a, b):  # pragma: no cover
+    m, n = a.shape
+    p, q = b.shape
+    a = a.reshape((m, 1, n, 1))
+    b = b.reshape((1, p, 1, q))
+    return (a * b).reshape((m*p, n*q))
+
+
+@matrixify
+def kron_dense_big(a, b):
+    m, n = a.shape
+    p, q = b.shape
+    a = np.asarray(a).reshape((m, 1, n, 1))
+    b = np.asarray(b).reshape((1, p, 1, q))
+    return evaluate('a * b').reshape((m*p, n*q))
+
+
+def kron_sparse(a, b):
+    # TODO: leave csc, bsr, csr etc.
+    """ Sparse tensor product """
+    return sp.kron(a, b, format="csr")
+
+
+def kron(*ops):
+    # TODO: scalar?
+    # TODO: faster sparse kron using coo?
+    # TODO: rename? tensor
+    # TODO: parallize?
+    # TODO: merge into eyepad with dims=None, coos=None
+    """ Tensor product of variable number of arguments.
+    Input:
+        ops: objects to be tensored together
+    Returns:
+        operator
+    The product is performed as (a * (b * (c * ...))) """
+    num_p = len(ops)
+    a = ops[0]
+    if num_p == 1:
+        return a
+    b = ops[1] if num_p == 2 else kron(*ops[1:])
+    if issparse(a) or issparse(b):
+        return kron_sparse(a, b)
+    if a.size * b.size > 16000:
+        return kron_dense_big(a, b)
+    return kron_dense(a, b)
+
+# Monkey-patch unused & symbol to tensor product
+np.matrix.__and__ = kron_dense
+sp.csr_matrix.__and__ = kron_sparse
+sp.csc_matrix.__and__ = kron_sparse
+
+
+def kronpow(a, pwr):
+    """ Returns `a` tensored with itself pwr times """
+    return kron(*(a for _ in range(pwr)))
+
+
 @vectorize(nopython=True)
-def explt(l, t):
+def explt(l, t):  # pragma: no cover
     """ Complex exponenital as used in solution to schrodinger equation. """
     return exp((-1.0j * t) * l)
 
