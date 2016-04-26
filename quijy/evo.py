@@ -3,11 +3,10 @@ Contains an evolution class, QuEvo to efficiently manage time evolution of
 quantum states according to schrodingers' equation, and related functions.
 TODO: iterative method, sparse etc., turn off optimzations for small n
 """
+# TODO: test known lindlbad evolution
+# TODO: delete p0, ham etc? precompute -1.0j*ham
 # TODO: solout method with funcyt
 # TODO: QuEvoTimeDepend
-# TODO: for state in qd.at_times():
-# TODO: delete p0, ham etc.
-# TODO: test known lindlbad evolution
 import numpy as np
 from scipy.integrate import complex_ode
 from .accel import (
@@ -25,7 +24,7 @@ from .solve import eigsys, norm
 # Quantum evolution equations                                                 #
 # --------------------------------------------------------------------------- #
 
-def schrodinger_eq_ket(ham):
+def schrodinger_eq_ket(ham, dense_ham=False):
     """ Wavefunction schrodinger equation.
 
     Parameters
@@ -35,14 +34,20 @@ def schrodinger_eq_ket(ham):
     Returns
     -------
         psi_dot(t, y): function to calculate psi_dot(t) at psi(t). """
-    def psi_dot(t, y):
-        return -1.0j * (ham.dot(y))
-
+    if dense_ham:
+        def psi_dot(t, y):
+            return -1.0j * dot_dense(ham, y)
+    else:
+        def psi_dot(t, y):
+            return -1.0j * (ham.dot(y))
     return psi_dot
 
 
-def schrodinger_eq_dop(ham):
+def schrodinger_eq_dop(ham, dense_ham=False):
     """ Density operator schrodinger equation, but with flattened input/output.
+    Note that this assumes both `ham` and `rho` are hermitian in order to speed
+    up the commutator, non-hermitian hamiltonians as used to model loss should
+    be treated explicilty or with `schrodinger_eq_dop_vec`.
 
     Parameters
     ----------
@@ -53,12 +58,15 @@ def schrodinger_eq_dop(ham):
         rho_dot(t, y): function to calculate rho_dot(t) at rho(t), input and
             output both in ravelled (1D form). """
     d = ham.shape[0]
-    # ham = ham.A
 
-    def rho_dot(t, y):
-        rho = y.reshape(d, d)
-        hrho = ham.dot(rho)
-        return -1.0j * (hrho - hrho.T.conj()).reshape(-1)
+    if dense_ham:
+        def rho_dot(t, y):
+            hrho = dot_dense(ham, y.reshape(d, d))
+            return -1.0j * (hrho - hrho.T.conj()).reshape(-1)
+    else:
+        def rho_dot(t, y):
+            hrho = ham.dot(y.reshape(d, d))
+            return -1.0j * (hrho - hrho.T.conj()).reshape(-1)
 
     return rho_dot
 

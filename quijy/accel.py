@@ -192,23 +192,26 @@ def outer(a, b):
     return mul_dense(a, b) if d < 500 else np.asmatrix(evaluate('a * b'))
 
 
-@matrixify
 @jit(nopython=True)
-def kron_dense(a, b):  # pragma: no cover
+def reshape_for_kron(a, b):  # pragma: no cover
     m, n = a.shape
     p, q = b.shape
     a = a.reshape((m, 1, n, 1))
     b = b.reshape((1, p, 1, q))
-    return (a * b).reshape((m*p, n*q))
+    return a, b, m*p, n*q
+
+
+@matrixify
+@jit(nopython=True)
+def kron_dense(a, b):  # pragma: no cover
+    a, b, mp, nq = reshape_for_kron(a, b)
+    return (a * b).reshape((mp, nq))
 
 
 @matrixify
 def kron_dense_big(a, b):
-    m, n = a.shape
-    p, q = b.shape
-    a = np.asarray(a).reshape((m, 1, n, 1))
-    b = np.asarray(b).reshape((1, p, 1, q))
-    return evaluate('a * b').reshape((m*p, n*q))
+    a, b, mp, nq = reshape_for_kron(a, b)
+    return evaluate('a * b').reshape((mp, nq))
 
 
 def kron_sparse(a, b):

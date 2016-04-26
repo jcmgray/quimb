@@ -302,6 +302,8 @@ class TestKron:
         a = rand_matrix(3)
         b = rand_matrix(3)
         c = kron_dense(a, b)
+        assert a.shape == (3, 3)
+        assert b.shape == (3, 3)
         npc = np.kron(a, b)
         assert_allclose(c, npc)
         assert isinstance(c, np.matrix)
