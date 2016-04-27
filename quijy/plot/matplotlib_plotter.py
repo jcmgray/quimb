@@ -94,15 +94,13 @@ def mplot(x, y_i, fignum=1, logx=False, logy=False,
 # -------------------------------------------------------------------------- #
 
 def xmlineplot(ds, y_coo, x_coo, z_coo,
-               color=False, colormap="viridis", legend=None, markers=True,
+               color=False, colormap="viridis", legend=None, markers=None,
                xlabel=None, xlims=None, xticks=None, logx=False,
                ylabel=None, ylims=None, yticks=None, logy=False,
                zlabel=None, padding=0.0, vlines=None, hlines=None,
                title=None, fignum=1, **kwargs):
-    """
-    Function for automatically plotting multiple sets of data
-    using matplotlib and xarray.
-    """
+    """ Function for automatically plotting multiple sets of data
+    using matplotlib and xarray. """
     import matplotlib as mpl
     import matplotlib.pyplot as plt
     mpl.rc('font', family='Roboto')
@@ -110,7 +108,8 @@ def xmlineplot(ds, y_coo, x_coo, z_coo,
     axes = fig.add_axes([0.15, 0.15, 0.8, 0.75],
                         title=("" if title is None else title))
     axes.tick_params(labelsize=16)
-
+    n_z = len(ds[z_coo])
+    n_y = len(ds[y_coo])
     if color:
         from matplotlib import cm
         cmap = getattr(cm, colormap)
@@ -118,14 +117,13 @@ def xmlineplot(ds, y_coo, x_coo, z_coo,
         cols = [cmap(1 - (z-zmin)/(zmax-zmin)) for z in ds[z_coo].values]
     else:
         cols = repeat(None)
+    markers = (n_y <= 50) if markers is None else markers
     mrkrs = cycle(mpl_markers()) if markers else repeat(None)
-
     for z, col, mrkr in zip(ds[z_coo].data, cols, mrkrs):
         x = ds.loc[{z_coo: z}][x_coo].data.flatten()
         y = ds.loc[{z_coo: z}][y_coo].data.flatten()
         axes.plot(x, y, ".-", c=col, lw=1.3, marker=mrkr,
                   label=str(z), zorder=3, **kwargs)
-
     if xlims is None:
         xmax, xmin = ds[x_coo].max(), ds[x_coo].min()
         xrange = xmax - xmin
@@ -151,7 +149,7 @@ def xmlineplot(ds, y_coo, x_coo, z_coo,
         axes.set_xticks(xticks)
     if yticks is not None:
         axes.set_yticks(yticks)
-    if legend or not (legend is False or len(ds[z_coo]) > 20):
+    if legend or not (legend is False or n_z > 10):
         legend = axes.legend(title=(z_coo if zlabel is None else zlabel),
                              loc="best", fontsize=16, frameon=False)
         legend.get_title().set_fontsize(20)
