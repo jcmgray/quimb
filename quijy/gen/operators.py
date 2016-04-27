@@ -51,18 +51,22 @@ def controlled(s, sparse=False):
              sig(keymap[s], sparse=sparse)))
 
 
-def ham_heis(n, jx=1.0, jy=1.0, jz=1.0, bz=0.0, cyclic=True, sparse=False):
+def ham_heis(n, j=1.0, bz=0.0, cyclic=True, sparse=False):
     """ Constructs the heisenberg spin 1/2 hamiltonian
     Parameters:
         n: number of spins
-        jx, jy, jz: coupling constants, with convention that positive =
-        antiferromagnetic
+        j: coupling constant(s), with convention that positive =
+            antiferromagnetic. Can supply (jx, jy, jz) tuple.
         bz: z-direction magnetic field
         cyclic: whether to couple the first and last spins
         sparse: whether to return the hamiltonian in sparse form
     Returns:
         ham: hamiltonian as matrix """
     dims = [2] * n
+    try:
+        jx, jy, jz = j
+    except TypeError:
+        jx, jy, jz = (j, j, j)
     sds = qjf(jx * kron(sig('x'), sig('x')) +
               jy * kron(sig('y'), sig('y')) +
               jz * kron(sig('z'), sig('z')) -
