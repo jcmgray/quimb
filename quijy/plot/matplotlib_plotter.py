@@ -98,12 +98,12 @@ def xmlineplot(ds, y_coo, x_coo, z_coo,
                xlabel=None, xlims=None, xticks=None, logx=False,
                ylabel=None, ylims=None, yticks=None, logy=False,
                zlabel=None, padding=0.0, vlines=None, hlines=None,
-               title=None, fignum=1, **kwargs):
+               title=None, fignum=1, font='Roboto', **kwargs):
     """ Function for automatically plotting multiple sets of data
     using matplotlib and xarray. """
     import matplotlib as mpl
     import matplotlib.pyplot as plt
-    mpl.rc('font', family='Roboto')
+    mpl.rc('font', family=font)
     fig = plt.figure(fignum, figsize=(8, 6), dpi=100)
     axes = fig.add_axes([0.15, 0.15, 0.8, 0.75],
                         title=("" if title is None else title))
@@ -147,8 +147,10 @@ def xmlineplot(ds, y_coo, x_coo, z_coo,
     axes.set_ylabel(y_coo if ylabel is None else ylabel, fontsize=20)
     if xticks is not None:
         axes.set_xticks(xticks)
+        axes.get_xaxis().set_major_formatter(mpl.ticker.ScalarFormatter())
     if yticks is not None:
         axes.set_yticks(yticks)
+        axes.get_yaxis().set_major_formatter(mpl.ticker.ScalarFormatter())
     if legend or not (legend is False or n_z > 10):
         legend = axes.legend(title=(z_coo if zlabel is None else zlabel),
                              loc="best", fontsize=16, frameon=False)
