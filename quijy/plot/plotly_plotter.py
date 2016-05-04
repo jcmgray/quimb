@@ -107,16 +107,16 @@ def iheatmap(ds, data_name, x_coo, y_coo, colormap="Portland",
     Automatic 2D-Heatmap plot using plotly.
     """
     from plotly.graph_objs import Heatmap
-    traces = Heatmap({"z": (ds[data_name]
-                            .dropna(x_coo, how="all")
-                            .dropna(y_coo, how="all")
-                            .squeeze()
-                            .transpose(y_coo, x_coo)
-                            .data),
-                      "x": ds.coords[x_coo].values,
-                      "y": ds.coords[y_coo].values,
-                      "colorscale": colormap,
-                      "colorbar": {"title": data_name}, **go_dict})
+    traces = [Heatmap({"z": (ds[data_name]
+                             .dropna(x_coo, how="all")
+                             .dropna(y_coo, how="all")
+                             .squeeze()
+                             .transpose(y_coo, x_coo)
+                             .data),
+                       "x": ds.coords[x_coo].data,
+                       "y": ds.coords[y_coo].data,
+                       "colorscale": colormap,
+                       "colorbar": {"title": data_name}, **go_dict})]
     layout = {"height": 600, "width": 650,
               "xaxis": {"showline": True, "mirror": "ticks",
                         "ticks": "outside", "title": x_coo},

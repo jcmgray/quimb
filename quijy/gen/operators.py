@@ -56,17 +56,20 @@ def ham_heis(n, j=1.0, bz=0.0, cyclic=True, sparse=False):
     Parameters:
         n: number of spins
         j: coupling constant(s), with convention that positive =
-            antiferromagnetic. Can supply (jx, jy, jz) tuple.
+            antiferromagnetic. Can supply scalar for isotropic coupling or
+            vector (jx, jy, jz).
         bz: z-direction magnetic field
         cyclic: whether to couple the first and last spins
         sparse: whether to return the hamiltonian in sparse form
     Returns:
         ham: hamiltonian as matrix """
-    dims = [2] * n
+    # TODO: vector magnetic field
+    dims = (2,) * n
     try:
         jx, jy, jz = j
     except TypeError:
-        jx, jy, jz = (j, j, j)
+        jx = jy = jz = j
+
     sds = qjf(jx * kron(sig('x'), sig('x')) +
               jy * kron(sig('y'), sig('y')) +
               jz * kron(sig('z'), sig('z')) -
@@ -96,33 +99,34 @@ def ham_j1j2(n, j1=1.0, j2=0.5, bz=0.0, cyclic=True, sparse=False):
     Returns
     -------
         ham: Hamtiltonian as matrix """
-    dims = [2] * n
+    dims = (2,) * n
+    ps = [sig(i, sparse=True) for i in 'xyz']
+
     coosj1 = np.array([(i, i+1) for i in range(n)])
     coosj2 = np.array([(i, i+2) for i in range(n)])
-    s = [sig(i, sparse=True) for i in 'xyz']
     if cyclic:
         coosj1, coosj2 = coosj1 % n, coosj2 % n
     else:
         coosj1 = coosj1[np.all(coosj1 < n, axis=1)]
         coosj2 = coosj2[np.all(coosj2 < n, axis=1)]
 
-    def gen_j1():
+    def j1_terms():
         for coo in coosj1:
             if abs(coo[1] - coo[0]) == 1:  # can sum then tensor
-                yield eyepad(sum(op & op for op in s), dims, coo)
+                yield eyepad(sum(op & op for op in ps), dims, coo)
             else:  # tensor then sum (slower)
-                yield sum(eyepad(op, dims, coo) for op in s)
+                yield sum(eyepad(op, dims, coo) for op in ps)
 
-    def gen_j2():
+    def j2_terms():
         for coo in coosj2:
             if abs(coo[1] - coo[0]) == 2:  # can add then tensor
-                yield eyepad(sum(op & eye(2) & op for op in s), dims, coo)
+                yield eyepad(sum(op & eye(2) & op for op in ps), dims, coo)
             else:
-                yield sum(eyepad(op, dims, coo) for op in s)
+                yield sum(eyepad(op, dims, coo) for op in ps)
 
-    gen_bz = (eyepad([s[2]], dims, i) for i in range(n))
+    gen_bz = (eyepad([ps[2]], dims, i) for i in range(n))
 
-    ham = j1 * sum(gen_j1()) + j2 * sum(gen_j2())
+    ham = j1 * sum(j1_terms()) + j2 * sum(j2_terms())
     if bz != 0:
         ham += bz * sum(gen_bz)
     return ham if sparse else ham.todense()
