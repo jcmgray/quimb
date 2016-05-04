@@ -221,8 +221,8 @@ class QuEvo(object):
         self.pe0 = (self.v.H @ self.p0 @ self.v if self.dop else
                     self.v.H @ self.p0)
         self._pt = self.p0  # Current state (start with same as initial)
-        self.update_to = (self.update_to_solved_dop if self.dop else
-                          self.update_to_solved_ket)
+        self.update_to = (self._update_to_solved_dop if self.dop else
+                          self._update_to_solved_ket)
         self.solved = True
 
     def _start_integrator(self, ham, small_step):
@@ -234,19 +234,19 @@ class QuEvo(object):
         first_step = norm(ham, 'f') / step_fct
         self.stepper.set_integrator(int_mthd, nsteps=0, first_step=first_step)
         self.stepper.set_initial_value(self.p0.A.reshape(-1), self.t0)
-        self.update_to = self.update_to_integrate
+        self.update_to = self._update_to_integrate
         self.solved = False
 
     # Methods for updating the simulation #
 
-    def update_to_solved_ket(self, t):
+    def _update_to_solved_ket(self, t):
         """ Update simulation consisting of a solved hamiltonian and a
         wavefunction to time `t`. """
         self._t = t
         lt = explt(self.l, t - self.t0)
         self._pt = dot_dense(self.v, ldmul(lt, self.pe0))
 
-    def update_to_solved_dop(self, t):
+    def _update_to_solved_dop(self, t):
         """ Update simulation consisting of a solved hamiltonian and a
         density operator to time `t`. """
         self._t = t
@@ -254,7 +254,7 @@ class QuEvo(object):
         lvpvl = rdmul(ldmul(lt, self.pe0), lt.conj())
         self._pt = dot_dense(self.v, dot_dense(lvpvl, self.v.H))
 
-    def update_to_integrate(self, t):
+    def _update_to_integrate(self, t):
         """ Update simulation consisting of unsolved hamiltonian. """
         self.stepper.integrate(t)
 
