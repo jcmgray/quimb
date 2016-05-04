@@ -16,7 +16,7 @@ from .core import qjf
 # Full eigendecomposition methods for dense matrices                         #
 # -------------------------------------------------------------------------- #
 
-def eigsys(a, sort=True):
+def eigsys(a, sort=True, isherm=True):
     """ Find all eigenpairs of dense, hermitian matrix.
 
     Parameters
@@ -28,14 +28,14 @@ def eigsys(a, sort=True):
     -------
         l: array of eigenvalues
         v: corresponding eigenvectors as columns of matrix """
-    l, v = nla.eigh(a)
+    l, v = nla.eigh(a) if isherm else nla.eig(a)
     if sort:
         sortinds = np.argsort(l)
         return l[sortinds], np.asmatrix(v[:, sortinds])
     return l, v
 
 
-def eigvals(a, sort=True):
+def eigvals(a, sort=True, isherm=True):
     """ Find all eigenvalues of dense, hermitian matrix
 
     Parameters
@@ -46,11 +46,11 @@ def eigvals(a, sort=True):
     Returns
     -------
         l: array of eigenvalues """
-    l = nla.eigvalsh(a)
+    l = nla.eigvalsh(a) if isherm else nla.eigvals(a)
     return np.sort(l) if sort else l
 
 
-def eigvecs(a, sort=True):
+def eigvecs(a, sort=True, isherm=True):
     """ Find all eigenvectors of dense, hermitian matrix
 
     Parameters
@@ -61,7 +61,7 @@ def eigvecs(a, sort=True):
     Returns
     -------
         v: eigenvectors as columns of matrix """
-    _, v = eigsys(a, sort=sort)
+    _, v = eigsys(a, sort=sort, isherm=isherm)
     return v
 
 
@@ -84,7 +84,8 @@ def choose_ncv(k, n):  # pragma: no cover
     return min(max(20, 2 * k + 1), n)
 
 
-def seigsys(a, k=6, which='SA', ncv=None, return_vecs=True, **kwargs):
+def seigsys(a, k=6, which='SA', ncv=None, return_vecs=True, isherm=True,
+            **kwargs):
     """ Returns a few eigenpairs from a possibly sparse hermitian operator
 
     Parameters
@@ -103,31 +104,32 @@ def seigsys(a, k=6, which='SA', ncv=None, return_vecs=True, **kwargs):
     if not sparse and n <= 500:
         # TODO: select which from nla full spectrum
         if return_vecs:
-            lk, vk = eigsys(a)
+            lk, vk = eigsys(a, isherm=isherm)
             return lk[:k], vk[:, :k]
         else:
-            lk = eigvals(a)
+            lk = eigvals(a, isherm=isherm)
             return lk[:k]
     else:
         ncv = choose_ncv(k, n) if ncv is None else ncv
+        seig_func = spla.eigsh if isherm else spla.eigs
         if return_vecs:
-            lk, vk = spla.eigsh(a, k=k, which=which, ncv=ncv, **kwargs)
+            lk, vk = seig_func(a, k=k, which=which, ncv=ncv, **kwargs)
             sortinds = np.argsort(lk)
             return lk[sortinds], np.asmatrix(vk[:, sortinds])
         else:
-            lk = spla.eigsh(a, k=k, which=which, ncv=ncv,
-                            return_eigenvectors=False, **kwargs)
+            lk = seig_func(a, k=k, which=which, ncv=ncv,
+                           return_eigenvectors=False, **kwargs)
             return np.sort(lk)
 
 
-def seigvals(a, k=6, **kwargs):
+def seigvals(a, k=6, isherm=True, **kwargs):
     """ Seigsys alias for finding eigenvalues only. """
-    return seigsys(a, k=k, return_vecs=False, **kwargs)
+    return seigsys(a, k=k, return_vecs=False, isherm=isherm, **kwargs)
 
 
-def seigvecs(a, k=6, **kwargs):
+def seigvecs(a, k=6, isherm=True, **kwargs):
     """ Seigsys alias for finding eigenvectors only. """
-    _, v = seigsys(a, k=k, return_vecs=True, **kwargs)
+    _, v = seigsys(a, k=k, return_vecs=True, isherm=isherm, **kwargs)
     return v
 
 
@@ -190,10 +192,10 @@ def norm_fro_sparse(a):
     return vdot(a.data, a.data).real**0.5
 
 
-def norm_trace_dense(a):
+def norm_trace_dense(a, isherm=True):
     """ Returns the trace norm of operator a, that is,
     the sum of abs eigvals. """
-    return np.sum(np.absolute(eigvals(a, sort=False)))
+    return np.sum(np.absolute(eigvals(a, sort=False, isherm=isherm)))
 
 
 def norm(a, ntype=2):
