@@ -16,7 +16,7 @@ def matrixify(foo):
     return matrixified_foo
 
 
-def realify(foo, imag_tol=1.0e-14):
+def realify(foo, imag_tol=1.0e-13):
     """ To decorate functions that should return float for small complex. """
     def realified_foo(*args, **kwargs):
         x = foo(*args, **kwargs)

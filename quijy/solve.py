@@ -3,6 +3,7 @@ Note that the eigendecompositions here all assume a
 hermitian matrix and sort the eigenvalues in ascending
 algebraic order by default. Use explicit numpy/scipy linalg
 routines for non-hermitian matrices. """
+# TODO: test non-herm
 
 import numpy as np
 import numpy.linalg as nla
@@ -84,8 +85,8 @@ def choose_ncv(k, n):  # pragma: no cover
     return min(max(20, 2 * k + 1), n)
 
 
-def seigsys(a, k=6, which='SA', ncv=None, return_vecs=True, isherm=True,
-            **kwargs):
+def seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
+            isherm=True, ncv=None, **kwargs):
     """ Returns a few eigenpairs from a possibly sparse hermitian operator
 
     Parameters
@@ -100,9 +101,9 @@ def seigsys(a, k=6, which='SA', ncv=None, return_vecs=True, isherm=True,
         lk: array of eigenvalues
         vk: matrix of eigenvectors as columns """
     n = a.shape[0]
-    sparse = issparse(a)
-    if not sparse and n <= 500:
-        # TODO: select which from nla full spectrum
+    if which is None:
+        which = 'SA' if sigma is None else 'LM'
+    if not issparse(a) and n <= 500 and which == 'SA':
         if return_vecs:
             lk, vk = eigsys(a, isherm=isherm)
             return lk[:k], vk[:, :k]
@@ -112,24 +113,23 @@ def seigsys(a, k=6, which='SA', ncv=None, return_vecs=True, isherm=True,
     else:
         ncv = choose_ncv(k, n) if ncv is None else ncv
         seig_func = spla.eigsh if isherm else spla.eigs
+        lvk = seig_func(a, k=k, which=which, ncv=ncv, sigma=sigma,
+                        return_eigenvectors=return_vecs, **kwargs)
         if return_vecs:
-            lk, vk = seig_func(a, k=k, which=which, ncv=ncv, **kwargs)
-            sortinds = np.argsort(lk)
-            return lk[sortinds], np.asmatrix(vk[:, sortinds])
+            sortinds = np.argsort(lvk[0])
+            return lvk[0][sortinds], np.asmatrix(lvk[1][:, sortinds])
         else:
-            lk = seig_func(a, k=k, which=which, ncv=ncv,
-                           return_eigenvectors=False, **kwargs)
-            return np.sort(lk)
+            return np.sort(lvk)
 
 
-def seigvals(a, k=6, isherm=True, **kwargs):
+def seigvals(a, k=6, **kwargs):
     """ Seigsys alias for finding eigenvalues only. """
-    return seigsys(a, k=k, return_vecs=False, isherm=isherm, **kwargs)
+    return seigsys(a, k=k, return_vecs=False, **kwargs)
 
 
-def seigvecs(a, k=6, isherm=True, **kwargs):
+def seigvecs(a, k=6, **kwargs):
     """ Seigsys alias for finding eigenvectors only. """
-    _, v = seigsys(a, k=k, return_vecs=True, isherm=isherm, **kwargs)
+    _, v = seigsys(a, k=k, return_vecs=True, **kwargs)
     return v
 
 
@@ -140,7 +140,7 @@ def groundstate(ham):
 
 def groundenergy(ham):
     """ Alias for finding lowest eigenvalue only. """
-    return seigvals(ham, k=1, which='SA')
+    return seigvals(ham, k=1, which='SA')[0]
 
 
 # -------------------------------------------------------------------------- #
