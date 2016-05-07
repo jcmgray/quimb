@@ -5,7 +5,7 @@ Core functions for manipulating quantum objects.
 from math import log
 from operator import mul
 from itertools import cycle, groupby, product
-from functools import reduce  # partial
+from functools import reduce, partial
 import numpy as np
 from numpy.matlib import zeros
 import scipy.sparse as sp
@@ -39,8 +39,7 @@ def quijify(data, qtype=None, sparse=False, normalized=False, chopped=False):
     Returns
     -------
         x: numpy or sparse matrix """
-    is_sparse_input = issparse(data)
-    if is_sparse_input:
+    if issparse(data):
         qob = sp.csr_matrix(data, dtype=complex)
     else:
         qob = np.matrix(data, copy=False, dtype=complex)
@@ -52,15 +51,15 @@ def quijify(data, qtype=None, sparse=False, normalized=False, chopped=False):
             qob = qob.conj()
         elif qtype in {"d", "r", "rho", "op", "dop"} and not isop(qob):
             qob = quijify(qob, "k") @ quijify(qob, "k").H
-    if chopped:
-        chop(qob, inplace=True)
     if normalized:
         normalize(qob, inplace=True)
+    if chopped:
+        chop(qob, inplace=True)
     return sp.csr_matrix(qob, dtype=complex) if sparse else qob
 
 qjf = quijify
-# dop = partial(quijify, qtype='dop')?
-# sprs = partial(quijify, sparse=True)?
+dop = partial(quijify, qtype='dop')
+sparse = partial(quijify, sparse=True)
 
 
 def infer_size(p, base=2):
