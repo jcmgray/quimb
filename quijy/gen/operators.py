@@ -79,9 +79,9 @@ def ham_heis(n, j=1.0, bz=0.0, cyclic=True, sparse=False):
     for i in range(n - 1):
         ham = ham + eyepad(sds, dims, [i, i + 1])
     if cyclic:
-        ham = ham + eyepad(sig('x', sparse=True), dims, [0, n - 1])  \
-                  + eyepad(sig('y', sparse=True), dims, [0, n - 1])  \
-                  + eyepad(sig('z', sparse=True), dims, [0, n - 1])
+        ham = ham + eyepad(jx * sig('x', sparse=True), dims, [0, n - 1])  \
+                  + eyepad(jy * sig('y', sparse=True), dims, [0, n - 1])  \
+                  + eyepad(jz * sig('z', sparse=True), dims, [0, n - 1])
     return ham if sparse else ham.todense()
 
 
