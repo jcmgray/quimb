@@ -1,6 +1,7 @@
 from cmath import exp
 import numpy as np
 import scipy.sparse as sp
+from scipy.sparse import issparse
 from numba import jit, vectorize
 from numexpr import evaluate
 
@@ -27,11 +28,6 @@ def realify(foo, imag_tol=1.0e-13):
 # --------------------------------------------------------------------------- #
 # Type and shape checks                                                       #
 # --------------------------------------------------------------------------- #
-
-def issparse(x):
-    """ Checks if object is scipy sparse format. """
-    return isinstance(x, sp.spmatrix)
-
 
 def isket(qob):
     """ Checks if matrix is in ket form, i.e. a matrix column. """
