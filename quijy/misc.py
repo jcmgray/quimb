@@ -1,6 +1,7 @@
 """
 Misc. functions not quantum related.
 """
+from functools import partial
 import numpy as np
 from scipy.interpolate import splrep, splev, PchipInterpolator
 import xarray as xr
@@ -8,9 +9,9 @@ from tqdm import tqdm
 from .plot import ilineplot
 
 
-def progbar(it, **kwargs):
+def progbar(it, ascii=True, **kwargs):
     """ tqdm progress bar with deifferent defaults. """
-    return tqdm(it, ascii=True, leave=True, **kwargs)
+    return tqdm(it, ascii=ascii, **kwargs)
 
 
 def resample(x, y, n=100, **kwargs):
@@ -23,6 +24,20 @@ def spline_resample(x, y, n=100, **kwargs):
     ix = np.linspace(x[0], x[-1], n)
     iy = splev(ix, splrep(x, y, **kwargs))
     return ix, iy
+
+
+def case_runner(foo, cases, nest_level=0, progress_level=-1):
+    cases = [*cases] if nest_level == 0 else cases
+    cname, cvars = cases[0]
+    if nest_level <= progress_level:
+        cvars = progbar(cvars, desc=cname)  # , leave=(nest_level == 0))
+    for cvar in cvars:
+        if len(cases) == 1:
+            yield foo(**{cname: cvar})
+        else:
+            pfoo = partial(foo, **{cname: cvar})
+            yield [*case_runner(pfoo, cases[1:], nest_level=nest_level + 1,
+                                progress_level=progress_level)]
 
 
 # -------------------------------------------------------------------------- #
