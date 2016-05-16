@@ -3,6 +3,7 @@ Contains an evolution class, QuEvo to efficiently manage time evolution of
 quantum states according to schrodingers' equation, and related functions.
 TODO: iterative method, sparse etc., turn off optimzations for small n
 """
+# TODO: set/update rhot
 # TODO: test known lindlbad evolution
 # TODO: delete p0, ham etc? precompute -1.0j*ham
 # TODO: solout method with funcyt
