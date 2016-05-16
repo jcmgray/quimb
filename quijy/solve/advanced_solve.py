@@ -17,7 +17,7 @@ def scipy_to_petsc_csr(a):
     return b
 
 
-def aeigsys_solver(which="LM", sigma=None, isherm=True, extra_evals=False):
+def init_eigensolver(which="LM", sigma=None, isherm=True, extra_evals=False):
     """ Create an advanced eigensystem solver
 
     Parameters
@@ -30,7 +30,7 @@ def aeigsys_solver(which="LM", sigma=None, isherm=True, extra_evals=False):
     Returns
     -------
         SLEPc solver ready to be called. """
-    which = "TM" if sigma is not None else which
+
     scipy_to_slepc_which = {
         "LM": SLEPc.EPS.Which.LARGEST_MAGNITUDE,
         "SM": SLEPc.EPS.Which.SMALLEST_MAGNITUDE,
@@ -48,11 +48,35 @@ def aeigsys_solver(which="LM", sigma=None, isherm=True, extra_evals=False):
     }
     eigensolver = SLEPc.EPS()
     eigensolver.create()
+    if sigma is not None:
+        which = "TM"
+        eigensolver.setST(init_spectral_inverter(sigma))
+        eigensolver.setTarget(sigma)
     eigensolver.setType('krylovschur')
     eigensolver.setProblemType(slepc_isherm[isherm])
     eigensolver.setWhichEigenpairs(scipy_to_slepc_which[which])
     eigensolver.setConvergenceTest(SLEPc.EPS.Conv.ABS)
     return eigensolver
+
+
+def init_spectral_inverter(sigma=0.0):
+    """ Create a slepc spectral transformation object. """
+    # LINEAR SOLVER AND PRECONDITIONER
+    P = PETSc.PC()
+    P.create()
+    P.setType('lu')
+    P.setFactorSolverPackage('mumps')
+    K = PETSc.KSP()
+    K.create()
+    K.setPC(P)
+    K.setType('preonly')
+    # SPECTRAL TRANSFORMER
+    S = SLEPc.ST()
+    S.create()
+    S.setKSP(K)
+    S.setType('sinvert')
+    S.setShift(sigma)
+    return S
 
 
 def aeigsys(a, k=6, which="LM", sigma=None, isherm=True,
@@ -71,55 +95,11 @@ def aeigsys(a, k=6, which="LM", sigma=None, isherm=True,
     Returns
     -------
         lk: eigenvalues """
-    eigensolver = aeigsys_solver(which=which, sigma=sigma, isherm=isherm,
-                                 extra_evals=extra_evals)
+    eigensolver = init_eigensolver(which=which, sigma=sigma, isherm=isherm,
+                                   extra_evals=extra_evals)
     A = scipy_to_petsc_csr(a)
     eigensolver.setOperators(A)
     eigensolver.setDimensions(k)
-    eigensolver.solve()
-    nconv = eigensolver.getConverged()
-    assert nconv >= k
-    k = nconv if extra_evals else k
-    l = np.asarray([eigensolver.getEigenvalue(i).real for i in range(k)]).real
-    l = np.sort(l)
-    eigensolver.destroy()
-    return l
-
-
-def internal_eigsys_solver(k=6, sigma=0.0, tol=None):
-    # LINEAR SOLVER AND PRECONDITIONER
-    P = PETSc.PC()
-    P.create()
-    P.setType('lu')
-    P.setFactorSolverPackage('mumps')
-    K = PETSc.KSP()
-    K.create()
-    K.setPC(P)
-    K.setType('preonly')
-    # SPECTRAL TRANSFORMER
-    S = SLEPc.ST()
-    S.create()
-    S.setKSP(K)
-    S.setType('sinvert')
-    S.setShift(sigma)
-    # EIGENSOLVER
-    eigensolver = SLEPc.EPS()
-    eigensolver.create()
-    eigensolver.setST(S)
-    eigensolver.setProblemType(SLEPc.EPS.ProblemType.HEP)
-    eigensolver.setType('krylovschur')
-    eigensolver.setWhichEigenpairs(SLEPc.EPS.Which.TARGET_MAGNITUDE)
-    eigensolver.setTarget(sigma)
-    eigensolver.setDimensions(k)
-    eigensolver.setConvergenceTest(SLEPc.EPS.Conv.ABS)
-    eigensolver.setTolerances(tol=tol, max_it=None)
-    return eigensolver
-
-
-def internal_eigvals(a, k=6, sigma=0.0, tol=None, extra_evals=False):
-    A = scipy_to_petsc_csr(a)
-    eigensolver = internal_eigsys_solver(k=k, sigma=sigma, tol=tol)
-    eigensolver.setOperators(A)
     eigensolver.solve()
     nconv = eigensolver.getConverged()
     assert nconv >= k
