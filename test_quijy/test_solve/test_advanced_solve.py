@@ -2,8 +2,8 @@ import importlib
 from pytest import fixture, mark
 import numpy as np
 from numpy.testing import assert_allclose
-from quijy import ldmul, rand_uni, qjf
-from quijy.solve.advanced_solve import aeigsys
+from quijy import ldmul, rand_uni, qjf, rand_matrix, svds
+from quijy.solve.advanced_solve import aeigsys, asvds
 
 
 slepc4py_spec = importlib.util.find_spec("slepc4py")
@@ -33,3 +33,18 @@ def test_aeigsys_groundenergy(prematsparse):
     assert_allclose(lk, -3)
     lk = aeigsys(a, k=1, which="LR")
     assert_allclose(lk, 4)
+
+
+@mark.skipif(slepc4py_notfound, reason=slepc4py_notfound_msg)
+def test_svds_simple(prematsparse):
+    u, a = prematsparse
+    lk = asvds(a, k=1)
+    assert_allclose(lk, 4)
+
+
+@mark.skipif(slepc4py_notfound, reason=slepc4py_notfound_msg)
+def test_svds_random_compare_scipy(prematsparse):
+    a = rand_matrix(100, sparse=True, density=0.1)
+    lk = asvds(a, k=5)
+    ls = svds(a, k=5, return_vecs=False)
+    assert_allclose(lk, ls)
