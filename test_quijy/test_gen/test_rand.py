@@ -41,6 +41,12 @@ class TestRandMatrix:
         a = rand_matrix(3, sparse=True, density=7/9)
         assert a.nnz == 7
 
+    def test_rand_matrix_bsr(self):
+        a = rand_matrix(10, sparse=True, density=0.2, format='bsr')
+        assert a.shape == (10, 10)
+        assert type(a) == sp.bsr_matrix
+        assert a.dtype == complex
+
 
 class TestRandHerm:
     def test_rand_herm(self):
