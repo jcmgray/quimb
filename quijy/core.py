@@ -175,6 +175,7 @@ def identity(d, sparse=False):
     return identity_sparse(d) if sparse else identity_dense(d)
 
 eye = identity
+speye = partial(identity, sparse=True)
 
 
 def eyepad(ops, dims, inds, sparse=None):
@@ -456,8 +457,7 @@ def chop(x, tol=1.0e-15, inplace=True):
 
 
 def overlap(a, b):
-    # TODO: rename overlap
-    """ Operator inner product between a and b, i.e. for vectors it will be the
+    """ Overlap between a and b, i.e. for vectors it will be the
     absolute overlap squared |<a|b><b|a>|, rather than <a|b>. """
     method = {(0, 0, 0): lambda: abs(vdot(a, b))**2,
               (0, 0, 1): lambda: abs((a.H @ b)[0, 0])**2,
@@ -468,6 +468,3 @@ def overlap(a, b):
               (1, 1, 0): lambda: trace_dense(dot_dense(a, b)),
               (1, 1, 1): lambda: trace_sparse(a @ b)}
     return method[isop(a), isop(b), issparse(a) or issparse(b)]()
-
-# Legacy
-inner = overlap

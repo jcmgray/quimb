@@ -1,6 +1,6 @@
 import numpy as np
 from numpy.testing import assert_allclose
-from quijy.core import tr, eye, chop, eyepad, inner, ptr
+from quijy.core import tr, eye, chop, eyepad, overlap, ptr
 from quijy.solve import eigsys, groundstate
 from quijy.gen import (basis_vec, up, down, plus, minus, yplus, yminus,
                        thermal_state, ham_j1j2, rand_herm, graph_state_1d,
@@ -78,15 +78,15 @@ class TestBellStates:
         for s, dic in zip(("psi-", "psi+", "phi+", "phi-"),
                           ({"qtype": 'dop'}, {}, {"sparse": True}, {})):
             p = bell_state(s, **dic)
-            assert_allclose(inner(p, p), 1.0)
+            assert_allclose(overlap(p, p), 1.0)
             pa = ptr(p, [2, 2], 0)
-            assert_allclose(inner(pa, pa), 0.5)
+            assert_allclose(overlap(pa, pa), 0.5)
 
     def test_bell_state_singlet(self):
         p = singlet(qtype="dop", sparse=True)
-        assert_allclose(inner(p, p), 1.0)
+        assert_allclose(overlap(p, p), 1.0)
         pa = ptr(p, [2, 2], 0)
-        assert_allclose(inner(pa, pa), 0.5)
+        assert_allclose(overlap(pa, pa), 0.5)
 
 
 class TestThermalState:

@@ -24,7 +24,7 @@ from quijy.core import (
     trace_keep,
     partial_trace,
     chop,
-    inner,
+    overlap,
 )
 from quijy.calc import mutual_information
 from quijy.gen import (
@@ -616,55 +616,55 @@ class TestInner:
     def test_inner_vec_vec_dense(self):
         a = qjf([[1], [2j], [3]])
         b = qjf([[1j], [2], [3j]])
-        c = inner(a, b)
+        c = overlap(a, b)
         assert not isinstance(c, complex)
         assert_allclose(c, 36)
 
     def test_inner_vec_op_dense(self):
         a = qjf([[1], [2j], [3]], 'dop')
         b = qjf([[1j], [2], [3j]])
-        c = inner(a, b)
+        c = overlap(a, b)
         assert not isinstance(c, complex)
         assert_allclose(c, 36)
 
     def test_inner_op_vec_dense(self):
         a = qjf([[1], [2j], [3]])
         b = qjf([[1j], [2], [3j]], 'dop')
-        c = inner(a, b)
+        c = overlap(a, b)
         assert not isinstance(c, complex)
         assert_allclose(c, 36)
 
     def test_inner_op_op_dense(self):
         a = qjf([[1], [2j], [3]], 'dop')
         b = qjf([[1j], [2], [3j]], 'dop')
-        c = inner(a, b)
+        c = overlap(a, b)
         assert not isinstance(c, complex)
         assert_allclose(c, 36)
 
     def test_inner_vec_vec_sparse(self):
         a = qjf([[1], [2j], [3]], sparse=True)
         b = qjf([[1j], [2], [3j]])
-        c = inner(a, b)
+        c = overlap(a, b)
         assert not isinstance(c, complex)
         assert_allclose(c, 36)
 
     def test_inner_vec_op_sparse(self):
         a = qjf([[1], [2j], [3]], 'dop', sparse=True)
         b = qjf([[1j], [2], [3j]], sparse=True)
-        c = inner(a, b)
+        c = overlap(a, b)
         assert not isinstance(c, complex)
         assert_allclose(c, 36)
 
     def test_inner_op_vec_sparse(self):
         a = qjf([[1], [2j], [3]])
         b = qjf([[1j], [2], [3j]], 'dop', sparse=True)
-        c = inner(a, b)
+        c = overlap(a, b)
         assert not isinstance(c, complex)
         assert_allclose(c, 36)
 
     def test_inner_op_op_sparse(self):
         a = qjf([[1], [2j], [3]], 'dop', sparse=True)
         b = qjf([[1j], [2], [3j]], 'dop', sparse=True)
-        c = inner(a, b)
+        c = overlap(a, b)
         assert not isinstance(c, complex)
         assert_allclose(c, 36)

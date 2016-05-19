@@ -1,7 +1,7 @@
 from pytest import raises
 import numpy as np
 from numpy.testing import assert_allclose
-from quijy import issparse, eigvals, groundstate, inner, singlet, seigvals
+from quijy import issparse, eigvals, groundstate, overlap, singlet, seigvals
 from quijy.gen.operators import sig, controlled, ham_heis, ham_j1j2
 
 
@@ -47,7 +47,7 @@ class TestHamHeis:
         l = eigvals(h)
         assert_allclose(l, [-3, 1, 1, 1])
         gs = groundstate(h)
-        assert inner(gs, singlet()) == 1.
+        assert overlap(gs, singlet()) == 1.
 
     def test_ham_heis_sparse_cyclic_4(self):
         h = ham_heis(4, sparse=True, cyclic=True)

@@ -11,7 +11,7 @@ from quijy import (
     rand_herm,
     rand_matrix,
     rand_uni,
-    inner,
+    overlap,
     ham_heis,
     up,
     down,
@@ -229,7 +229,7 @@ class TestQuEvo:
         sim = QuEvo(p0, ham, solve=True)
         sim.update_to(tm)
         assert_allclose(sim.pt, pm)
-        assert inner(sim.pt, p0) < 1.0
+        assert overlap(sim.pt, p0) < 1.0
         sim.update_to(trc)
         assert_allclose(sim.pt, p0)
         assert isinstance(sim.pt, np.matrix)
@@ -241,7 +241,7 @@ class TestQuEvo:
         sim = QuEvo(p0, ham, solve=True)
         sim.update_to(tm)
         assert_allclose(sim.pt, pm)
-        assert inner(sim.pt, p0) < 1.0
+        assert overlap(sim.pt, p0) < 1.0
         sim.update_to(trc)
         assert_allclose(sim.pt, p0)
         assert isinstance(sim.pt, np.matrix)
@@ -253,7 +253,7 @@ class TestQuEvo:
         sim = QuEvo(p0, (l, v))
         sim.update_to(tm)
         assert_allclose(sim.pt, pm)
-        assert inner(sim.pt, p0) < 1.0
+        assert overlap(sim.pt, p0) < 1.0
         sim.update_to(trc)
         assert_allclose(sim.pt, p0)
         assert isinstance(sim.pt, np.matrix)
@@ -264,7 +264,7 @@ class TestQuEvo:
         sim = QuEvo(p0, ham, solve=False)
         sim.update_to(tm)
         assert_allclose(sim.pt, pm, rtol=1e-3)
-        assert inner(sim.pt, p0) < 1.0
+        assert overlap(sim.pt, p0) < 1.0
         sim.update_to(trc)
         assert_allclose(sim.pt, p0, rtol=1e-3)
         assert isinstance(sim.pt, np.matrix)
@@ -276,7 +276,7 @@ class TestQuEvo:
         sim = QuEvo(p0, ham, solve=False)
         sim.update_to(tm)
         assert_allclose(sim.pt, pm, rtol=1e-3)
-        assert inner(sim.pt, p0) < 1.0
+        assert overlap(sim.pt, p0) < 1.0
         sim.update_to(trc)
         assert_allclose(sim.pt, p0, rtol=1e-3)
         assert isinstance(sim.pt, np.matrix)
@@ -289,7 +289,7 @@ class TestQuEvo:
         sim = QuEvo(p0, ham, solve=True)
         sim.update_to(tm)
         assert_allclose(sim.pt, pm)
-        assert inner(sim.pt, p0) < 1.0
+        assert overlap(sim.pt, p0) < 1.0
         sim.update_to(trc)
         assert_allclose(sim.pt, p0)
         assert isinstance(sim.pt, np.matrix)
@@ -302,7 +302,7 @@ class TestQuEvo:
         sim = QuEvo(p0, ham, solve=False)
         sim.update_to(tm)
         assert_allclose(sim.pt, pm, rtol=1e-3)
-        assert inner(sim.pt, p0) < 1.0
+        assert overlap(sim.pt, p0) < 1.0
         sim.update_to(trc)
         assert_allclose(sim.pt, p0, rtol=1e-3)
         assert isinstance(sim.pt, np.matrix)
@@ -316,7 +316,7 @@ class TestQuEvo:
         sim = QuEvo(p0, ham, solve=False)
         sim.update_to(tm)
         assert_allclose(sim.pt, pm, rtol=1e-3)
-        assert inner(sim.pt, p0) < 1.0
+        assert overlap(sim.pt, p0) < 1.0
         sim.update_to(trc)
         assert_allclose(sim.pt, p0, rtol=1e-3)
         assert isinstance(sim.pt, np.matrix)
@@ -329,5 +329,5 @@ class TestQuEvo:
         ts = np.linspace(0, 10)
         for t, pt in zip(ts, sim.at_times(ts)):
             x = cos(4 * t)
-            y = inner(pt, eyepad(sig('z'), [2, 2], 0))
+            y = overlap(pt, eyepad(sig('z'), [2, 2], 0))
             assert_allclose(x, y, atol=1e-15)
