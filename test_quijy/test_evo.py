@@ -207,6 +207,7 @@ class TestLindbladEqVec:
 def ham_rcr_psi():
     # Define a random hamiltonian with a known recurrence time
     d = 3
+    np.random.seed(1)
     ems = np.random.randint(1, 6, d)
     ens = np.random.randint(1, 6, d)  # eigenvalues as rational numbers
     # numerator lowest common divisor

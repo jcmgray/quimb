@@ -4,6 +4,7 @@ Interface to slepc4py for solving advanced eigenvalue problems.
 # TODO: get eigenvectors
 # TODO: delete solver or keep and extend
 # TODO: FEAST / other contour solvers?
+# TODO: exponential, sqrt etc.
 import numpy as np
 import scipy.sparse as sp
 from petsc4py import PETSc
