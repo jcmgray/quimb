@@ -1,14 +1,14 @@
 from numpy.testing import assert_allclose, assert_almost_equal
 import numpy as np
 import scipy.sparse as sp
-from quijy import (
+from ... import (
     isherm,
     eye,
     chop,
     tr,
     mutual_information,
 )
-from quijy.gen.rand import (
+from ...gen.rand import (
     rand_matrix,
     rand_herm,
     rand_pos,

@@ -1,9 +1,9 @@
 from numpy.testing import assert_allclose
-from quijy import (qjf, rand_product_state, bell_state, rand_ket,
-                   up, rand_mix)
-from quijy.calc import (quantum_discord, one_way_classical_information,
-                        mutual_information, partial_transpose,
-                        entropy)
+from .. import (qjf, rand_product_state, bell_state, rand_ket,
+                up, rand_mix)
+from ..calc import (quantum_discord, one_way_classical_information,
+                    mutual_information, partial_transpose,
+                    entropy)
 
 
 class TestPartialTranspose:

@@ -3,7 +3,7 @@ from pytest import fixture, mark
 import numpy as np
 import scipy.sparse as sp
 from numpy.testing import assert_allclose
-from quijy import (
+from ... import (
     ldmul,
     rand_uni,
     qjf,
@@ -16,7 +16,7 @@ from quijy import (
     scipy_to_petsc_csr,
     eye,
     )
-from quijy.solve.advanced_solve import aeigsys, asvds
+from ...solve.advanced_solve import aeigsys, asvds
 
 
 slepc4py_notfound = not slepc4py_found()

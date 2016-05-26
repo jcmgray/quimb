@@ -3,7 +3,7 @@ import scipy.sparse as sp
 import numpy as np
 from pytest import raises
 from numpy.testing import assert_allclose, assert_almost_equal
-from quijy.accel import issparse, isherm, kron
+from ..accel import issparse, isherm, kron
 
 from quijy.core import (
     quijify,

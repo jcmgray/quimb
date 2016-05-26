@@ -1,7 +1,7 @@
 import numpy as np
 from numpy.testing import assert_allclose
-from quijy.core import tr, eye, chop, eyepad, overlap, ptr
-from quijy.solve import eigsys, groundstate
+from ...core import tr, eye, chop, eyepad, overlap, ptr
+from ...solve import eigsys, groundstate
 from quijy.gen import (basis_vec, up, down, plus, minus, yplus, yminus,
                        thermal_state, ham_j1j2, rand_herm, graph_state_1d,
                        sig, levi_civita, bloch_state, bell_state, singlet)

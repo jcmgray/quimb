@@ -3,7 +3,7 @@ from functools import reduce
 from pytest import fixture
 import numpy as np
 from numpy.testing import assert_allclose
-from quijy import (
+from .. import (
     qjf,
     eigsys,
     rand_ket,
@@ -18,7 +18,7 @@ from quijy import (
     eyepad,
     sig,
 )
-from quijy.evo import (
+from ..evo import (
     schrodinger_eq_ket,
     schrodinger_eq_dop,
     schrodinger_eq_dop_vec,
@@ -62,6 +62,7 @@ def srho_dot():
 
 @fixture
 def rho_dot_ls():
+    np.random.seed(1)
     rho = rand_rho(3)
     ham = rand_herm(3)
     gamma = 0.7

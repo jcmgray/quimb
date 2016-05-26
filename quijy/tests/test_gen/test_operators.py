@@ -1,8 +1,8 @@
 from pytest import raises
 import numpy as np
 from numpy.testing import assert_allclose
-from quijy import issparse, eigvals, groundstate, overlap, singlet, seigvals
-from quijy.gen.operators import sig, controlled, ham_heis, ham_j1j2
+from ... import issparse, eigvals, groundstate, overlap, singlet, seigvals
+from ...gen.operators import sig, controlled, ham_heis, ham_j1j2
 
 
 class TestSig:

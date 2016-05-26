@@ -1,10 +1,10 @@
 from pytest import fixture
 import numpy as np
 from numpy.testing import assert_allclose
-from quijy import ldmul, rand_uni, issparse, qjf, rand_product_state
-from quijy.solve import (eigsys, eigvals, eigvecs, seigvals, seigvecs,
-                         seigsys, groundstate, groundenergy, svds, norm,
-                         choose_ncv, svd)
+from ... import ldmul, rand_uni, issparse, qjf, rand_product_state
+from ...solve import (eigsys, eigvals, eigvecs, seigvals, seigvecs,
+                      seigsys, groundstate, groundenergy, svds, norm,
+                      choose_ncv, svd)
 
 
 @fixture

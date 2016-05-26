@@ -1,8 +1,5 @@
 # A flexible python library for many-body quantum calculations.
 
-# Miscellaneous functions
-from .misc import *
-
 # Accelerated basic linalg operations
 from .accel import *
 
@@ -20,6 +17,3 @@ from .calc import *
 
 # Evolution class and methods
 from .evo import *
-
-# Plotting functions
-from .plot import *

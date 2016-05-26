@@ -2,8 +2,8 @@ from pytest import fixture
 import numpy as np
 from numpy.testing import assert_allclose
 import scipy.sparse as sp
-from quijy import rand_matrix, rand_ket
-from quijy.accel import (
+from .. import rand_matrix, rand_ket
+from ..accel import (
     matrixify,
     realify,
     issparse,
