@@ -222,6 +222,7 @@ def kron(*ops):
     # TODO: rename? tensor
     # TODO: parallize?
     # TODO: merge into eyepad with dims=None, coos=None
+    # Internal recusive function, keeping 'coo'
     """ Tensor product of variable number of arguments.
     Input:
         ops: objects to be tensored together

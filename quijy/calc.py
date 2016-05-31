@@ -348,7 +348,7 @@ def qid(p, dims, inds, precomp_func=False, sparse_comp=True,
     inds = np.array(inds, ndmin=1)
     # Construct operators
     ops_i = [[eyepad(sig(s), dims, ind, sparse=sparse_comp)
-              for s in (1, 2, 3)]
+              for s in "xyz"]
              for ind in inds]
 
     # Define function closed over precomputed operators
