@@ -1,10 +1,12 @@
 """
 Interface to slepc4py for solving advanced eigenvalue problems.
 """
-# TODO: get eigenvectors
 # TODO: delete solver or keep and extend
 # TODO: FEAST / other contour solvers?
 # TODO: exponential, sqrt etc.
+# TODO: region for eps in middle, both ciss and normal
+# TODO: handle dense matrices / full decomp
+
 import numpy as np
 import scipy.sparse as sp
 from petsc4py import PETSc
@@ -17,14 +19,16 @@ def scipy_to_petsc_csr(a):
     if sp.isspmatrix_csr(a):
         b = PETSc.Mat().createAIJ(size=a.shape,
                                   csr=(a.indptr, a.indices, a.data))
-    if sp.isspmatrix_bsr(a):
+    elif sp.isspmatrix_bsr(a):
         b = PETSc.Mat().createBAIJ(size=a.shape, bsize=a.blocksize,
                                    csr=(a.indptr, a.indices, a.data))
+    else:
+        b = PETSc.Mat().createDense(size=a.shape, array=a)
     return b
 
 
 def init_eigensolver(which="LM", sigma=None, isherm=True, etype="krylovschur",
-                     st_opts_dict={}):
+                     st_opts_dict={}, tol=None, max_it=None):
     """ Create an advanced eigensystem solver
 
     Parameters
@@ -62,6 +66,7 @@ def init_eigensolver(which="LM", sigma=None, isherm=True, etype="krylovschur",
     eigensolver.setProblemType(slepc_isherm[isherm])
     eigensolver.setWhichEigenpairs(scipy_to_slepc_which[which.upper()])
     eigensolver.setConvergenceTest(SLEPc.EPS.Conv.ABS)
+    eigensolver.setTolerances(tol=tol, max_it=max_it)
     return eigensolver
 
 
@@ -88,7 +93,7 @@ def init_spectral_inverter(ptype="lu", ppackage="mumps", ktype="preonly",
 
 def aeigsys(a, k=6, which="SR", sigma=None, isherm=True, return_vecs=True,
             sort=True, ncv=None, etype="krylovschur", return_all_conv=False,
-            st_opts_dict={}):
+            st_opts_dict={}, tol=None, max_it=None):
     """ Solve a matrix using the advanced eigensystem solver
 
     Parameters
@@ -109,7 +114,8 @@ def aeigsys(a, k=6, which="SR", sigma=None, isherm=True, return_vecs=True,
         lk: eigenvalues
         vk: corresponding eigenvectors (if return_vecs == True)"""
     eigensolver = init_eigensolver(which=which, sigma=sigma, isherm=isherm,
-                                   etype=etype, st_opts_dict=st_opts_dict)
+                                   etype=etype, st_opts_dict=st_opts_dict,
+                                   tol=tol, max_it=max_it)
     pa = scipy_to_petsc_csr(a)
     eigensolver.setOperators(pa)
     eigensolver.setDimensions(k, ncv)
@@ -150,7 +156,8 @@ def agroundenergy(ham):
     return aeigvals(ham, k=1, which='SA')[0]
 
 
-def asvds(a, k=1, stype="cross", extra_vals=False):
+def asvds(a, k=1, stype="cross", extra_vals=False, ncv=None,
+          tol=None, max_it=None):
     """ Find the singular values for sparse matrix `a`.
 
     Parameters
@@ -166,7 +173,8 @@ def asvds(a, k=1, stype="cross", extra_vals=False):
     svd_solver = SLEPc.SVD()
     svd_solver.create()
     svd_solver.setType(stype)
-    svd_solver.setDimensions(k)
+    svd_solver.setDimensions(nsv=k, ncv=ncv)
+    svd_solver.setTolerances(tol=tol, max_it=max_it)
     svd_solver.setOperator(scipy_to_petsc_csr(a))
     svd_solver.solve()
     nconv = svd_solver.getConverged()
