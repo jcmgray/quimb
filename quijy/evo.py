@@ -197,14 +197,11 @@ class QuEvo(object):
 
         self._t = self.t0 = t0  # Initial time
         self.p0 = qjf(p0)  # Initial state
-        self.dop = isop(self.p0)  # Density operator evolution
+        self.isdop = isop(self.p0)  # Density operator evolution
         self.d = p0.shape[0]  # Hilbert space dimension
 
         # Hamiltonian
-        if isinstance(ham, (tuple, list)):  # Already solved
-            self.l, self.v = ham
-            self._solve_ham(ham)
-        elif solve:  # Solve hamiltonian now
+        if solve or isinstance(ham, (tuple, list)):
             self._solve_ham(ham)
         else:  # Use definite integration
             self._start_integrator(ham, small_step)
@@ -215,21 +212,24 @@ class QuEvo(object):
         """ Solve the supplied hamiltonian and find the initial state in the
         energy eigenbasis for quick evolution later. """
         try:  # See if already set from tuple
-            self.l, self.v
-        except AttributeError:
-            self.l, self.v = eigsys(ham.A)
+            self.evals, self.evecs = ham
+        except ValueError:
+            self.evals, self.evecs = eigsys(ham.A)
+
         # Find initial state in energy eigenbasis at t0
-        self.pe0 = (self.v.H @ self.p0 @ self.v if self.dop else
-                    self.v.H @ self.p0)
+        self.pe0 = (self.evecs.H @ self.p0 @ self.evecs if self.isdop else
+                    self.evecs.H @ self.p0)
         self._pt = self.p0  # Current state (start with same as initial)
-        self.update_to = (self._update_to_solved_dop if self.dop else
+
+        # Set update method conditional on type of state
+        self.update_to = (self._update_to_solved_dop if self.isdop else
                           self._update_to_solved_ket)
         self.solved = True
 
     def _start_integrator(self, ham, small_step):
         """ Initialize a stepping integrator. """
         self.sparse_ham = issparse(ham)
-        evo_eq = calc_evo_eq(self.dop, self.sparse_ham)
+        evo_eq = calc_evo_eq(self.isdop, self.sparse_ham)
         self.stepper = complex_ode(evo_eq(ham))
         int_mthd, step_fct = ('dopri5', 150) if small_step else ('dop853', 50)
         first_step = norm(ham, 'f') / step_fct
@@ -244,16 +244,16 @@ class QuEvo(object):
         """ Update simulation consisting of a solved hamiltonian and a
         wavefunction to time `t`. """
         self._t = t
-        lt = explt(self.l, t - self.t0)
-        self._pt = dot_dense(self.v, ldmul(lt, self.pe0))
+        lt = explt(self.evals, t - self.t0)
+        self._pt = dot_dense(self.evecs, ldmul(lt, self.pe0))
 
     def _update_to_solved_dop(self, t):
         """ Update simulation consisting of a solved hamiltonian and a
         density operator to time `t`. """
         self._t = t
-        lt = explt(self.l, t - self.t0)
+        lt = explt(self.evals, t - self.t0)
         lvpvl = rdmul(ldmul(lt, self.pe0), lt.conj())
-        self._pt = dot_dense(self.v, dot_dense(lvpvl, self.v.H))
+        self._pt = dot_dense(self.evecs, dot_dense(lvpvl, self.evecs.H))
 
     def _update_to_integrate(self, t):
         """ Update simulation consisting of unsolved hamiltonian. """
@@ -264,7 +264,7 @@ class QuEvo(object):
             self.update_to(t)
             yield self.pt
 
-    # Simulation properties #
+    # Simulation properties
 
     @property
     def t(self):
