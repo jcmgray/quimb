@@ -4,7 +4,26 @@
  * Uses `numpy` and `scipy.sparse` matrices as quantum objects.
  * Function orientated aside from a few very convenient monkey-patches.
  * Many operations are accelerated using `numba` and `numexpr`.
+ * Optional `slepc4py` interface for advanced eigenvalue problems.
 
+
+## Installation
+`quijy` requires python 3.5+, `numpy`, `scipy`, `numba` and `numexpr`, which are obtained most easily using `conda` (http://conda.pydata.org/miniconda.html):
+```
+conda install numpy scipy numba numexpr
+```
+The optional advanced solvers require `slepc4py` (https://bitbucket.org/slepc/slepc4py). 
+
+`quijy` can then be installed directly from github:
+```
+pip install git+https://github.com/jcmgray/quijy.git
+```
+or via a local editable repo:
+```
+git clone https://github.com/jcmgray/quijy.git
+cd quijy
+pip install -e .
+```
 
 ## Example Usage
 ```python
