@@ -195,9 +195,9 @@ class QuEvo(object):
             pt: current state """
         super(QuEvo, self).__init__()
 
-        self._t = self.t0 = t0  # Initial time
-        self.p0 = qjf(p0)  # Initial state
-        self.isdop = isop(self.p0)  # Density operator evolution
+        self.p0 = qjf(p0)
+        self._t = self.t0 = t0
+        self.isdop = isop(self.p0)  # Density operator evolution?
         self.d = p0.shape[0]  # Hilbert space dimension
 
         # Hamiltonian
@@ -205,8 +205,6 @@ class QuEvo(object):
             self._solve_ham(ham)
         else:  # Use definite integration
             self._start_integrator(ham, small_step)
-
-    # Inital setup of the simulation #
 
     def _solve_ham(self, ham):
         """ Solve the supplied hamiltonian and find the initial state in the
