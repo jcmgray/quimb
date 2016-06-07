@@ -13,10 +13,13 @@ from ... import (
     rand_herm,
     seigsys,
     overlap,
-    scipy_to_petsc_csr,
     eye,
     )
-from ...solve.advanced_solve import aeigsys, asvds
+from ...solve.advanced_solve import (
+    aeigsys,
+    asvds,
+    scipy_to_petsc,
+    )
 
 
 slepc4py_notfound = not slepc4py_found()
@@ -36,14 +39,19 @@ def prematsparse():
 class TestScipyToPETScConversion:
     def test_csr(self):
         a = rand_matrix(2, sparse=True, density=0.5)
-        b = scipy_to_petsc_csr(a)
+        b = scipy_to_petsc(a)
         assert b.getType() == 'seqaij'
 
     def test_bsr(self):
         a = sp.kron(rand_matrix(2), eye(2, sparse=True), format='bsr')
-        b = scipy_to_petsc_csr(a)
+        b = scipy_to_petsc(a)
         assert b.getType() == 'seqbaij'
         assert b.getBlockSize() == 2
+
+    def test_dense(self):
+        a = rand_matrix(3)
+        b = scipy_to_petsc(a)
+        assert b.getType() == 'seqdense'
 
 
 @slepc4py_test

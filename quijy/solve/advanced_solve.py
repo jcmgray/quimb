@@ -13,7 +13,7 @@ from petsc4py import PETSc
 from slepc4py import SLEPc
 
 
-def scipy_to_petsc_csr(a):
+def scipy_to_petsc(a):
     """ Convert a scipy sparse matrix to the relevant PETSc type, currently
     only supports csr and bsr formats. """
     if sp.isspmatrix_csr(a):
@@ -116,7 +116,7 @@ def aeigsys(a, k=6, which="SR", sigma=None, isherm=True, return_vecs=True,
     eigensolver = init_eigensolver(which=which, sigma=sigma, isherm=isherm,
                                    etype=etype, st_opts_dict=st_opts_dict,
                                    tol=tol, max_it=max_it)
-    pa = scipy_to_petsc_csr(a)
+    pa = scipy_to_petsc(a)
     eigensolver.setOperators(pa)
     eigensolver.setDimensions(k, ncv)
     eigensolver.solve()
@@ -175,7 +175,7 @@ def asvds(a, k=1, stype="cross", extra_vals=False, ncv=None,
     svd_solver.setType(stype)
     svd_solver.setDimensions(nsv=k, ncv=ncv)
     svd_solver.setTolerances(tol=tol, max_it=max_it)
-    svd_solver.setOperator(scipy_to_petsc_csr(a))
+    svd_solver.setOperator(scipy_to_petsc(a))
     svd_solver.solve()
     nconv = svd_solver.getConverged()
     assert nconv >= k
