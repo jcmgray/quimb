@@ -1,4 +1,5 @@
 from cmath import exp
+from functools import partial
 import numpy as np
 import scipy.sparse as sp
 from scipy.sparse import issparse
@@ -23,6 +24,8 @@ def realify(foo, imag_tol=1.0e-13):
         x = foo(*args, **kwargs)
         return x.real if abs(x.imag) < abs(x.real) * imag_tol else x
     return realified_foo
+
+accel = partial(jit, nopython=True, cache=True)
 
 
 # --------------------------------------------------------------------------- #
@@ -56,7 +59,7 @@ def isherm(qob):
 # --------------------------------------------------------------------------- #
 
 @matrixify
-@jit(nopython=True)
+@accel
 def mul_dense(x, y):  # pragma: no cover
     """ Accelerated element-wise multiplication of two matrices """
     return x * y
@@ -73,7 +76,7 @@ def mul(x, y):
 
 
 @matrixify
-@jit(nopython=True)
+@accel
 def dot_dense(a, b):  # pragma: no cover
     """ Accelerated dot_dense product of matrices  """
     return a @ b
@@ -91,21 +94,21 @@ def dot(a, b):
 
 
 @realify
-@jit(nopython=True)
+@accel
 def vdot(a, b):  # pragma: no cover
     """ Accelerated 'Hermitian' inner product of two vectors. """
     return np.vdot(a.reshape(-1), b.reshape(-1))
 
 
 @realify
-@jit(nopython=True)
+@accel
 def rdot(a, b):  # pragma: no cover
     """ Real dot product of two dense vectors. """
     a, b = a.reshape((1, -1)), b.reshape((-1, 1))
     return (a @ b)[0, 0]
 
 
-@jit(nopython=True)
+@accel
 def reshape_for_ldmul(vec):  # pragma: no cover
     """ Reshape a vector to be broadcast multiplied against a matrix in a way
     that replicates left diagonal matrix multiplication. """
@@ -140,7 +143,7 @@ def ldmul(vec, mat):
     return l_diag_dot_dense(vec, mat)
 
 
-@jit(nopython=True)
+@accel
 def reshape_for_rdmul(vec):  # pragma: no cover
     """ Reshape a vector to be broadcast multiplied against a matrix in a way
     that replicates right diagonal matrix multiplication. """
@@ -175,7 +178,7 @@ def rdmul(mat, vec):
     return r_diag_dot_dense(mat, vec)
 
 
-@jit(nopython=True)
+@accel
 def reshape_for_outer(a, b):  # pragma: no cover
     """ Reshape two vectors for an outer product """
     d = a.size
@@ -188,7 +191,7 @@ def outer(a, b):
     return mul_dense(a, b) if d < 500 else np.asmatrix(evaluate('a * b'))
 
 
-@jit(nopython=True)
+@accel
 def reshape_for_kron(a, b):  # pragma: no cover
     m, n = a.shape
     p, q = b.shape
@@ -198,7 +201,7 @@ def reshape_for_kron(a, b):  # pragma: no cover
 
 
 @matrixify
-@jit(nopython=True)
+@accel
 def kron_dense(a, b):  # pragma: no cover
     a, b, mp, nq = reshape_for_kron(a, b)
     return (a * b).reshape((mp, nq))

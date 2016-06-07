@@ -70,7 +70,7 @@ def eigvecs(a, sort=True, isherm=True):
 # iterative methods for partial eigendecompision                             #
 # -------------------------------------------------------------------------- #
 
-@jit(nopython=True)
+@jit(nopython=True, cache=True)
 def choose_ncv(k, n):  # pragma: no cover
     """ Optimise number of lanczos vectors for iterative methods
 
