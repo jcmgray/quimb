@@ -5,7 +5,7 @@ from pytest import raises
 from numpy.testing import assert_allclose, assert_almost_equal
 from ..accel import issparse, isherm, kron
 
-from quijy.core import (
+from quimb.core import (
     quijify,
     qjf,
     infer_size,
@@ -26,8 +26,8 @@ from quijy.core import (
     chop,
     overlap,
 )
-from quijy.calc import mutual_information
-from quijy.gen import (
+from quimb.calc import mutual_information
+from quimb.gen import (
     bell_state,
     rand_rho,
     rand_matrix,

@@ -77,6 +77,11 @@ class TestAEigsys:
             assert_allclose(ls, la)
             assert_allclose(overlap(vs, va), 1.0)
 
+    def test_aeigvals_all_consecutive(self):
+        # TODO
+        pass
+
+
 
 @slepc4py_test
 class TestASvds:

@@ -119,6 +119,7 @@ def aeigsys(a, k=6, which="SR", sigma=None, isherm=True, return_vecs=True,
     pa = scipy_to_petsc(a)
     eigensolver.setOperators(pa)
     eigensolver.setDimensions(k, ncv)
+    # eigensolver.setFromOptions()?
     eigensolver.solve()
     nconv = eigensolver.getConverged()
     assert nconv >= k

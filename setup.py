@@ -1,6 +1,6 @@
 from setuptools import setup, find_packages
 
-setup(name='quijy',
+setup(name='quimb',
       version='0.2.1',
       author='Johnnie Gray',
       license='MIT',

@@ -1,6 +1,6 @@
-# QUIJY
+# QUIMB
 
- * Python library for many-body quantum calcuations.
+ * Python library for quantum information and many-body calcuations.
  * Uses `numpy` and `scipy.sparse` matrices as quantum objects.
  * Function orientated aside from a few very convenient monkey-patches.
  * Many operations are accelerated using `numba` and `numexpr`.
@@ -8,26 +8,26 @@
 
 
 ## Installation
-`quijy` requires python 3.5+, `numpy`, `scipy`, `numba` and `numexpr`, which are obtained most easily using `conda` (http://conda.pydata.org/miniconda.html):
+`quimb` requires python 3.5+, `numpy`, `scipy`, `numba` and `numexpr`, which are obtained most easily using `conda` (http://conda.pydata.org/miniconda.html):
 ```
 conda install numpy scipy numba numexpr
 ```
 The optional advanced solvers require `slepc4py` (https://bitbucket.org/slepc/slepc4py). 
 
-`quijy` can then be installed directly from github:
+`quimb` can then be installed directly from github:
 ```
-pip install git+https://github.com/jcmgray/quijy.git
+pip install git+https://github.com/jcmgray/quimb.git
 ```
 or via a local editable repo:
 ```
-git clone https://github.com/jcmgray/quijy.git
-cd quijy
+git clone https://github.com/jcmgray/quimb.git
+cd quimb
 pip install -e .
 ```
 
 ## Example Usage
 ```python
->>> from quijy import *
+>>> from quimb import *
 ```
 First we construct a hamiltonian with next-nearest-neighbour interactions and find its groundstate.
 ```python
