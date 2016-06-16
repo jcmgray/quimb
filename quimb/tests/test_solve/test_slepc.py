@@ -15,7 +15,7 @@ from ... import (
     overlap,
     eye,
     )
-from ...solve.advanced_solve import (
+from ...solve.slepc import (
     aeigsys,
     asvds,
     scipy_to_petsc,

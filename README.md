@@ -40,7 +40,7 @@ matrix([[-15.7496449 -4.44089210e-16j]])
 Now we construct an operator that projects all but the first and last spins into singlet states.
 ```python
 >>> prj = qu(bell_state('psi-'), qtype='dop')  # `qu` (`quimbify`) ensures things are complex matrices
->>> prj  # qtype='dop' ensures its a density operator
+>>> prj                                        # qtype='dop' ensures its a density operator
 matrix([[ 0.0+0.j,  0.0+0.j,  0.0-0.j,  0.0+0.j],
         [ 0.0+0.j,  0.5+0.j, -0.5-0.j,  0.0+0.j],
         [ 0.0+0.j, -0.5+0.j,  0.5+0.j,  0.0+0.j],

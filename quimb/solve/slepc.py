@@ -6,6 +6,8 @@ Interface to slepc4py for solving advanced eigenvalue problems.
 # TODO: exponential, sqrt etc.
 # TODO: region for eps in middle, both ciss and normal
 # TODO: handle dense matrices / full decomp
+# TODO: compile with long int?
+# TODO: compile with fortran generic option
 
 import numpy as np
 import scipy.sparse as sp
@@ -14,14 +16,16 @@ from slepc4py import SLEPc
 
 
 def scipy_to_petsc(a):
-    """ Convert a scipy sparse matrix to the relevant PETSc type, currently
-    only supports csr and bsr formats. """
+    """
+    Convert a scipy sparse matrix to the relevant PETSc type, currently
+    only supports csr and bsr formats.
+    """
     if sp.isspmatrix_csr(a):
-        b = PETSc.Mat().createAIJ(size=a.shape,
-                                  csr=(a.indptr, a.indices, a.data))
+        csr = (a.indptr, a.indices, a.data)
+        b = PETSc.Mat().createAIJ(size=a.shape, csr=csr)
     elif sp.isspmatrix_bsr(a):
-        b = PETSc.Mat().createBAIJ(size=a.shape, bsize=a.blocksize,
-                                   csr=(a.indptr, a.indices, a.data))
+        csr = (a.indptr, a.indices, a.data)
+        b = PETSc.Mat().createBAIJ(size=a.shape, bsize=a.blocksize, csr=csr)
     else:
         b = PETSc.Mat().createDense(size=a.shape, array=a)
     return b
@@ -29,7 +33,8 @@ def scipy_to_petsc(a):
 
 def init_eigensolver(which="LM", sigma=None, isherm=True, etype="krylovschur",
                      st_opts_dict={}, tol=None, max_it=None):
-    """ Create an advanced eigensystem solver
+    """
+    Create an advanced eigensystem solver
 
     Parameters
     ----------
@@ -38,7 +43,8 @@ def init_eigensolver(which="LM", sigma=None, isherm=True, etype="krylovschur",
 
     Returns
     -------
-        SLEPc solver ready to be called. """
+        SLEPc solver ready to be called.
+    """
     slepc_isherm = {
         True: SLEPc.EPS.ProblemType.HEP,
         False: SLEPc.EPS.ProblemType.NHEP,
@@ -72,7 +78,9 @@ def init_eigensolver(which="LM", sigma=None, isherm=True, etype="krylovschur",
 
 def init_spectral_inverter(ptype="lu", ppackage="mumps", ktype="preonly",
                            stype="sinvert"):
-    """ Create a slepc spectral transformation object. """
+    """
+    Create a slepc spectral transformation object with specified solver.
+    """
     # Preconditioner and linear solver
     P = PETSc.PC()
     P.create()
@@ -94,7 +102,8 @@ def init_spectral_inverter(ptype="lu", ppackage="mumps", ktype="preonly",
 def aeigsys(a, k=6, which="SR", sigma=None, isherm=True, return_vecs=True,
             sort=True, ncv=None, etype="krylovschur", return_all_conv=False,
             st_opts_dict={}, tol=None, max_it=None):
-    """ Solve a matrix using the advanced eigensystem solver
+    """
+    Solve a matrix using the advanced eigensystem solver
 
     Parameters
     ----------
@@ -112,14 +121,15 @@ def aeigsys(a, k=6, which="SR", sigma=None, isherm=True, return_vecs=True,
     Returns
     -------
         lk: eigenvalues
-        vk: corresponding eigenvectors (if return_vecs == True)"""
+        vk: corresponding eigenvectors (if return_vecs == True)
+    """
     eigensolver = init_eigensolver(which=which, sigma=sigma, isherm=isherm,
                                    etype=etype, st_opts_dict=st_opts_dict,
                                    tol=tol, max_it=max_it)
     pa = scipy_to_petsc(a)
     eigensolver.setOperators(pa)
     eigensolver.setDimensions(k, ncv)
-    # eigensolver.setFromOptions()?
+    # eigensolver.setFromOptions()
     eigensolver.solve()
     nconv = eigensolver.getConverged()
     assert nconv >= k
@@ -137,29 +147,38 @@ def aeigsys(a, k=6, which="SR", sigma=None, isherm=True, return_vecs=True,
 
 
 def aeigvals(a, k=6, **kwargs):
-    """ Aeigsys alias for finding eigenvalues only. """
+    """
+    Aeigsys alias for finding eigenvalues only.
+    """
     return aeigsys(a, k=k, return_vecs=False, **kwargs)
 
 
 def aeigvecs(a, k=6, **kwargs):
-    """ Aeigsys alias for finding eigenvectors only. """
+    """
+    Aeigsys alias for finding eigenvectors only.
+    """
     _, v = aeigsys(a, k=k, return_vecs=True, **kwargs)
     return v
 
 
 def agroundstate(ham):
-    """ Alias for finding lowest eigenvector only. """
+    """
+    Alias for finding lowest eigenvector only.
+    """
     return aeigvecs(ham, k=1, which='SA')
 
 
 def agroundenergy(ham):
-    """ Alias for finding lowest eigenvalue only. """
+    """
+    Alias for finding lowest eigenvalue only.
+    """
     return aeigvals(ham, k=1, which='SA')[0]
 
 
 def asvds(a, k=1, stype="cross", extra_vals=False, ncv=None,
           tol=None, max_it=None):
-    """ Find the singular values for sparse matrix `a`.
+    """
+    Find the singular values for sparse matrix `a`.
 
     Parameters
     ----------
@@ -170,7 +189,8 @@ def asvds(a, k=1, stype="cross", extra_vals=False, ncv=None,
 
     Returns
     -------
-        ds: singular values """
+        ds: singular values
+    """
     svd_solver = SLEPc.SVD()
     svd_solver.create()
     svd_solver.setType(stype)
