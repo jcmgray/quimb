@@ -3,7 +3,7 @@ from numpy.testing import assert_allclose
 
 from ...core import tr, eye, chop, eyepad, overlap, ptr
 from ...solve import eigsys, groundstate
-from ..gen import (
+from ...gen import (
     basis_vec,
     up,
     down,
