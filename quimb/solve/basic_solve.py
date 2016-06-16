@@ -10,7 +10,7 @@ import numpy.linalg as nla
 import scipy.sparse.linalg as spla
 from numba import jit
 from ..accel import issparse, vdot
-from ..core import qjf
+from ..core import qu
 
 
 # -------------------------------------------------------------------------- #
@@ -167,7 +167,7 @@ def svds(a, k=6, ncv=None, return_vecs=True, **kwargs):
         if return_vecs:
             uk, sk, vtk = spla.svds(a, k=k, ncv=ncv, **kwargs)
             so = np.argsort(-sk)
-            return qjf(uk[:, so]), sk[so], qjf(vtk[so, :])
+            return qu(uk[:, so]), sk[so], qu(vtk[so, :])
         else:
             sk = spla.svds(a, k=k, ncv=ncv,
                            return_singular_vectors=False, **kwargs)

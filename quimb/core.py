@@ -22,7 +22,7 @@ from .accel import (
 )
 
 
-def quijify(data, qtype=None, sparse=False, normalized=False, chopped=False):
+def quimbify(data, qtype=None, sparse=False, normalized=False, chopped=False):
     """ Converts lists to 'quantum' i.e. complex matrices, kets being columns.
     * Will unravel an array if 'ket' or 'bra' given.
     * Will conjugate if 'bra' given.
@@ -50,16 +50,16 @@ def quijify(data, qtype=None, sparse=False, normalized=False, chopped=False):
             qob.shape = (1, np.prod(qob.shape))
             qob = qob.conj()
         elif qtype in {"d", "r", "rho", "op", "dop"} and not isop(qob):
-            qob = quijify(qob, "k") @ quijify(qob, "k").H
+            qob = quimbify(qob, "k") @ quimbify(qob, "k").H
     if normalized:
         normalize(qob, inplace=True)
     if chopped:
         chop(qob, inplace=True)
     return sp.csr_matrix(qob, dtype=complex) if sparse else qob
 
-qjf = quijify
-dop = partial(quijify, qtype='dop')
-sparse = partial(quijify, sparse=True)
+qu = quimbify
+dop = partial(quimbify, qtype='dop')
+sparse = partial(quimbify, sparse=True)
 
 
 def infer_size(p, base=2):

@@ -9,7 +9,7 @@ from math import factorial
 import numpy as np
 import scipy.sparse as sp
 from ..accel import ldmul, dot
-from ..core import (qjf, kron, kronpow, eye, eyepad)
+from ..core import (qu, kron, kronpow, eye, eyepad)
 from ..solve import eigsys
 from .operators import sig, controlled
 
@@ -32,51 +32,45 @@ def basis_vec(dir, dim, sparse=False, **kwargs):
     else:
         x = np.zeros([dim, 1], dtype=complex)
         x[dir] = 1.0
-    return qjf(x, **kwargs)
+    return qu(x, **kwargs)
 
 
 def up(**kwargs):
     """ Returns up-state, aka. |0>, +Z eigenstate."""
-    return qjf([[1],
-                [0]], **kwargs)
+    return qu([[1], [0]], **kwargs)
 
 zplus = up
 
 
 def down(**kwargs):
     """ Returns down-state, aka. |1>, -Z eigenstate."""
-    return qjf([[0],
-                [1]], **kwargs)
+    return qu([[0], [1]], **kwargs)
 
 zminus = down
 
 
 def plus(**kwargs):
     """ Returns plus-state, aka. |+>, +X eigenstate."""
-    return qjf([[2**-0.5],
-                [2**-0.5]], **kwargs)
+    return qu([[2**-0.5], [2**-0.5]], **kwargs)
 
 xplus = plus
 
 
 def minus(**kwargs):
     """ Returns minus-state, aka. |->, -X eigenstate."""
-    return qjf([[2**-0.5],
-                [-2**-0.5]], **kwargs)
+    return qu([[2**-0.5], [-2**-0.5]], **kwargs)
 
 xminus = minus
 
 
 def yplus(**kwargs):
     """ Returns yplus-state, aka. |y+>, +Y eigenstate."""
-    return qjf([[2**-0.5],
-                [1.0j / (2**0.5)]], **kwargs)
+    return qu([[2**-0.5], [1.0j / (2**0.5)]], **kwargs)
 
 
 def yminus(**kwargs):
     """ Returns yplus-state, aka. |y->, -Y eigenstate."""
-    return qjf([[2**-0.5],
-                [-1.0j / (2**0.5)]], **kwargs)
+    return qu([[2**-0.5], [-1.0j / (2**0.5)]], **kwargs)
 
 
 def bloch_state(ax, ay, az, purified=False, **kwargs):
@@ -108,10 +102,10 @@ def bell_state(s, **kwargs):
               "phi-": "phi-", 2: "phi-", "phim": "phi-",
               "phi+": "phi+", 3: "phi+", "phip": "phi+"}
     c = 2.**-.5
-    statemap = {"psi-": lambda: qjf([[0], [c], [-c], [0]], **kwargs),
-                "phi+": lambda: qjf([[c], [0], [0], [c]], **kwargs),
-                "phi-": lambda: qjf([[c], [0], [0], [-c]], **kwargs),
-                "psi+": lambda: qjf([[0], [c], [c], [0]], **kwargs)}
+    statemap = {"psi-": lambda: qu([[0], [c], [-c], [0]], **kwargs),
+                "phi+": lambda: qu([[c], [0], [0], [c]], **kwargs),
+                "phi-": lambda: qu([[c], [0], [0], [-c]], **kwargs),
+                "psi+": lambda: qu([[0], [c], [c], [0]], **kwargs)}
     return statemap[keymap[s]]()
 
 
@@ -211,7 +205,7 @@ def graph_state_1d(n, cyclic=True, sparse=False):
         p = eyepad(controlled("z", sparse=True), [2] * n, (i, i+1)) @ p
     if cyclic:
         p = ((eye(2, sparse=True) & eye(2**(n-2), sparse=True) &
-              qjf([1, 0], qtype="dop", sparse=True)) +
+              qu([1, 0], qtype="dop", sparse=True)) +
              (sig("z", sparse=True) & eye(2**(n-2), sparse=True) &
-              qjf([0, 1], qtype="dop", sparse=True))) @ p
+              qu([0, 1], qtype="dop", sparse=True))) @ p
     return p

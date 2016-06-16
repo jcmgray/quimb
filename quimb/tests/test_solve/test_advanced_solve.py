@@ -6,7 +6,7 @@ from numpy.testing import assert_allclose
 from ... import (
     ldmul,
     rand_uni,
-    qjf,
+    qu,
     rand_matrix,
     svds,
     slepc4py_found,
@@ -31,7 +31,7 @@ slepc4py_test = mark.skipif(slepc4py_notfound, reason=slepc4py_notfound_msg)
 def prematsparse():
     u = rand_uni(4)
     a = u @ ldmul(np.array([-1, 2, 4, -3]), u.H)
-    a = qjf(a, sparse=True)
+    a = qu(a, sparse=True)
     return u, a
 
 

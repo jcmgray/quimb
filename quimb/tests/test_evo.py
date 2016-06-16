@@ -4,7 +4,7 @@ from pytest import fixture
 import numpy as np
 from numpy.testing import assert_allclose
 from .. import (
-    qjf,
+    qu,
     eigsys,
     rand_ket,
     rand_rho,
@@ -239,7 +239,7 @@ class TestQuEvo:
 
     def test_quevo_ham_sparse_ket_solve(self, ham_rcr_psi):
         ham, trc, p0, tm, pm = ham_rcr_psi
-        ham = qjf(ham, sparse=True)
+        ham = qu(ham, sparse=True)
         sim = QuEvo(p0, ham, solve=True)
         sim.update_to(tm)
         assert_allclose(sim.pt, pm)
@@ -274,7 +274,7 @@ class TestQuEvo:
 
     def test_quevo_ham_sparse_ket_integrate(self, ham_rcr_psi):
         ham, trc, p0, tm, pm = ham_rcr_psi
-        ham = qjf(ham, sparse=True)
+        ham = qu(ham, sparse=True)
         sim = QuEvo(p0, ham, solve=False)
         sim.update_to(tm)
         assert_allclose(sim.pt, pm, rtol=1e-3)
@@ -312,7 +312,7 @@ class TestQuEvo:
 
     def test_quevo_ham_sparse_dop_integrate(self, ham_rcr_psi):
         ham, trc, p0, tm, pm = ham_rcr_psi
-        ham = qjf(ham, sparse=True)
+        ham = qu(ham, sparse=True)
         p0 = p0 @ p0.H
         pm = pm @ pm.H
         sim = QuEvo(p0, ham, solve=False)

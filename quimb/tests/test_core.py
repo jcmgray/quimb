@@ -5,9 +5,9 @@ from pytest import raises
 from numpy.testing import assert_allclose, assert_almost_equal
 from ..accel import issparse, isherm, kron
 
-from quimb.core import (
-    quijify,
-    qjf,
+from ..core import (
+    quimbify,
+    qu,
     infer_size,
     trace_dense,
     trace_sparse,
@@ -26,8 +26,8 @@ from quimb.core import (
     chop,
     overlap,
 )
-from quimb.calc import mutual_information
-from quimb.gen import (
+from ..calc import mutual_information
+from ..gen import (
     bell_state,
     rand_rho,
     rand_matrix,
@@ -39,64 +39,64 @@ from quimb.gen import (
 )
 
 
-class TestQuijify:
-    def test_quijify_vector_create(self):
+class TestQuimbify:
+    def test_quimbify_vector_create(self):
         x = [1, 2, 3j]
-        p = quijify(x, qtype='ket')
+        p = quimbify(x, qtype='ket')
         assert(type(p) == np.matrix)
         assert(p.dtype == np.complex)
         assert(p.shape == (3, 1))
-        p = quijify(x, qtype='bra')
+        p = quimbify(x, qtype='bra')
         assert(p.shape == (1, 3))
         assert_almost_equal(p[0, 2], -3.0j)
 
-    def test_quijify_dop_create(self):
+    def test_quimbify_dop_create(self):
         x = np.random.randn(3, 3)
-        p = quijify(x, qtype='dop')
+        p = quimbify(x, qtype='dop')
         assert(type(p) == np.matrix)
         assert(p.dtype == np.complex)
         assert(p.shape == (3, 3))
 
-    def test_quijify_convert_vector_to_dop(self):
+    def test_quimbify_convert_vector_to_dop(self):
         x = [1, 2, 3j]
-        p = quijify(x, qtype='r')
+        p = quimbify(x, qtype='r')
         assert_allclose(p, np.matrix([[1.+0.j,  2.+0.j,  0.-3.j],
                                       [2.+0.j,  4.+0.j,  0.-6.j],
                                       [0.+3.j,  0.+6.j,  9.+0.j]]))
 
-    def test_quijify_chopped(self):
+    def test_quimbify_chopped(self):
         x = [9e-16, 1]
-        p = quijify(x, 'k', chopped=False)
+        p = quimbify(x, 'k', chopped=False)
         assert(p[0, 0] != 0.0)
-        p = quijify(x, 'k', chopped=True)
+        p = quimbify(x, 'k', chopped=True)
         assert(p[0, 0] == 0.0)
 
-    def test_quijify_normalized(self):
+    def test_quimbify_normalized(self):
         x = [3j, 4j]
-        p = quijify(x, 'k', normalized=False)
+        p = quimbify(x, 'k', normalized=False)
         assert_almost_equal(tr(p.H @ p), 25.)
-        p = quijify(x, 'k', normalized=True)
+        p = quimbify(x, 'k', normalized=True)
         assert_almost_equal(tr(p.H @ p), 1.)
-        p = quijify(x, 'dop', normalized=True)
+        p = quimbify(x, 'dop', normalized=True)
         assert_almost_equal(tr(p), 1.)
 
-    def test_quijify_sparse_create(self):
+    def test_quimbify_sparse_create(self):
         x = [[1, 0], [3, 0]]
-        p = quijify(x, 'dop', sparse=False)
+        p = quimbify(x, 'dop', sparse=False)
         assert(type(p) == np.matrix)
-        p = quijify(x, 'dop', sparse=True)
+        p = quimbify(x, 'dop', sparse=True)
         assert(type(p) == sp.csr_matrix)
         assert(p.dtype == np.complex)
         assert(p.nnz == 2)
 
-    def test_quijify_sparse_convert_to_dop(self):
+    def test_quimbify_sparse_convert_to_dop(self):
         x = [1, 0, 9e-16, 0, 3j]
-        p = quijify(x, 'ket', sparse=True)
-        q = quijify(p, 'dop', sparse=True)
+        p = quimbify(x, 'ket', sparse=True)
+        q = quimbify(p, 'dop', sparse=True)
         assert(q.shape == (5, 5))
         assert(q.nnz == 9)
         assert_almost_equal(q[4, 4], 9.)
-        q = quijify(p, 'dop', sparse=True, normalized=True)
+        q = quimbify(p, 'dop', sparse=True, normalized=True)
         assert_almost_equal(tr(q), 1.)
 
 
@@ -116,49 +116,49 @@ class TestInferSize:
 
 class TestTrace:
     def test_trace_dense(self):
-        a = qjf([[2, 1], [4, 5]])
+        a = qu([[2, 1], [4, 5]])
         assert(trace(a) == 7)
-        a = qjf([[2, 1], [4, 5j]])
+        a = qu([[2, 1], [4, 5j]])
         assert(trace(a) == 2 + 5j)
         assert(a.tr.__code__.co_code == trace_dense.__code__.co_code)
 
     def test_sparse_trace(self):
-        a = qjf([[2, 1], [0, 5]], sparse=True)
+        a = qu([[2, 1], [0, 5]], sparse=True)
         assert(trace(a) == 7)
-        a = qjf([[2, 1], [4, 5j]], sparse=True)
+        a = qu([[2, 1], [4, 5j]], sparse=True)
         assert(trace(a) == 2 + 5j)
         assert(a.tr.__code__.co_code == trace_sparse.__code__.co_code)
 
 
 class TestNormalize:
     def test_normalize_ket(self):
-        a = qjf([1, -1j], 'ket')
+        a = qu([1, -1j], 'ket')
         b = nmlz(a, inplace=False)
         assert_almost_equal(trace(b.H @ b), 1.0)
         assert_almost_equal(trace(a.H @ a), 2.0)
 
     def test_normalize_bra(self):
-        a = qjf([1, -1j], 'bra')
+        a = qu([1, -1j], 'bra')
         b = nmlz(a, inplace=False)
         assert_almost_equal(trace(b @ b.H), 1.0)
 
     def test_normalize_dop(self):
-        a = qjf([1, -1j], 'dop')
+        a = qu([1, -1j], 'dop')
         b = nmlz(a, inplace=False)
         assert_almost_equal(trace(b), 1.0)
 
     def test_normalize_inplace_ket(self):
-        a = qjf([1, -1j], 'ket')
+        a = qu([1, -1j], 'ket')
         a.nmlz(inplace=True)
         assert_almost_equal(trace(a.H @ a), 1.0)
 
     def test_normalize_inplace_bra(self):
-        a = qjf([1, -1j], 'bra')
+        a = qu([1, -1j], 'bra')
         a.nmlz(inplace=True)
         assert_almost_equal(trace(a @ a.H), 1.0)
 
     def test_normalize_inplace_dop(self):
-        a = qjf([1, -1j], 'dop')
+        a = qu([1, -1j], 'dop')
         b = nmlz(a, inplace=True)
         assert_almost_equal(trace(a), 1.0)
         assert_almost_equal(trace(b), 1.0)
@@ -326,7 +326,7 @@ class TestEyepad:
 
     def test_eyepad_sparse(self):
         i = eye(2, sparse=True)
-        a = qjf(rand_matrix(2), sparse=True)
+        a = qu(rand_matrix(2), sparse=True)
         b = eyepad(a, [2, 2, 2], 1)  # infer sparse
         assert(issparse(b))
         assert_allclose(b.A, (i & a & i).A)
@@ -414,18 +414,18 @@ class TestPartialTraceDense:
         assert_allclose(b, c)
 
     def test_partial_trace_early_return(self):
-        a = qjf([0.5, 0.5, 0.5, 0.5], 'ket')
+        a = qu([0.5, 0.5, 0.5, 0.5], 'ket')
         b = partial_trace(a, [2, 2], [0, 1])
         assert_allclose(a @ a.H, b)
-        a = qjf([0.5, 0.5, 0.5, 0.5], 'dop')
+        a = qu([0.5, 0.5, 0.5, 0.5], 'dop')
         b = partial_trace(a, [2, 2], [0, 1])
         assert_allclose(a, b)
 
     def test_partial_trace_return_type(self):
-        a = qjf([0, 2**-0.5, 2**-0.5, 0], 'ket')
+        a = qu([0, 2**-0.5, 2**-0.5, 0], 'ket')
         b = partial_trace(a, [2, 2], 1)
         assert(type(b) == np.matrix)
-        a = qjf([0, 2**-0.5, 2**-0.5, 0], 'dop')
+        a = qu([0, 2**-0.5, 2**-0.5, 0], 'dop')
         b = partial_trace(a, [2, 2], 1)
         assert(type(b) == np.matrix)
 
@@ -580,91 +580,91 @@ class TestPartialTraceSparse:
 
 class TestChop:
     def test_chop_inplace(self):
-        a = qjf([-1j, 0.1+0.2j])
+        a = qu([-1j, 0.1+0.2j])
         chop(a, tol=0.11, inplace=True)
-        assert_allclose(a, qjf([-1j, 0.2j]))
+        assert_allclose(a, qu([-1j, 0.2j]))
         # Sparse
-        a = qjf([-1j, 0.1+0.2j], sparse=True)
+        a = qu([-1j, 0.1+0.2j], sparse=True)
         chop(a, tol=0.11, inplace=True)
-        b = qjf([-1j, 0.2j], sparse=True)
+        b = qu([-1j, 0.2j], sparse=True)
         assert((a != b).nnz == 0)
 
     def test_chop_inplace_dop(self):
-        a = qjf([1, 0.1], 'dop')
+        a = qu([1, 0.1], 'dop')
         chop(a, tol=0.11, inplace=True)
-        assert_allclose(a, qjf([1, 0], 'dop'))
-        a = qjf([1, 0.1], 'dop', sparse=True)
+        assert_allclose(a, qu([1, 0], 'dop'))
+        a = qu([1, 0.1], 'dop', sparse=True)
         chop(a, tol=0.11, inplace=True)
-        b = qjf([1, 0.0], 'dop', sparse=True)
+        b = qu([1, 0.0], 'dop', sparse=True)
         assert((a != b).nnz == 0)
 
     def test_chop_copy(self):
-        a = qjf([-1j, 0.1+0.2j])
+        a = qu([-1j, 0.1+0.2j])
         b = chop(a, tol=0.11, inplace=False)
-        assert_allclose(a, qjf([-1j, 0.1+0.2j]))
-        assert_allclose(b, qjf([-1j, 0.2j]))
+        assert_allclose(a, qu([-1j, 0.1+0.2j]))
+        assert_allclose(b, qu([-1j, 0.2j]))
         # Sparse
-        a = qjf([-1j, 0.1+0.2j], sparse=True)
+        a = qu([-1j, 0.1+0.2j], sparse=True)
         b = chop(a, tol=0.11, inplace=False)
-        ao = qjf([-1j, 0.1+0.2j], sparse=True)
-        bo = qjf([-1j, 0.2j], sparse=True)
+        ao = qu([-1j, 0.1+0.2j], sparse=True)
+        bo = qu([-1j, 0.2j], sparse=True)
         assert((a != ao).nnz == 0)
         assert((b != bo).nnz == 0)
 
 
 class TestInner:
     def test_inner_vec_vec_dense(self):
-        a = qjf([[1], [2j], [3]])
-        b = qjf([[1j], [2], [3j]])
+        a = qu([[1], [2j], [3]])
+        b = qu([[1j], [2], [3j]])
         c = overlap(a, b)
         assert not isinstance(c, complex)
         assert_allclose(c, 36)
 
     def test_inner_vec_op_dense(self):
-        a = qjf([[1], [2j], [3]], 'dop')
-        b = qjf([[1j], [2], [3j]])
+        a = qu([[1], [2j], [3]], 'dop')
+        b = qu([[1j], [2], [3j]])
         c = overlap(a, b)
         assert not isinstance(c, complex)
         assert_allclose(c, 36)
 
     def test_inner_op_vec_dense(self):
-        a = qjf([[1], [2j], [3]])
-        b = qjf([[1j], [2], [3j]], 'dop')
+        a = qu([[1], [2j], [3]])
+        b = qu([[1j], [2], [3j]], 'dop')
         c = overlap(a, b)
         assert not isinstance(c, complex)
         assert_allclose(c, 36)
 
     def test_inner_op_op_dense(self):
-        a = qjf([[1], [2j], [3]], 'dop')
-        b = qjf([[1j], [2], [3j]], 'dop')
+        a = qu([[1], [2j], [3]], 'dop')
+        b = qu([[1j], [2], [3j]], 'dop')
         c = overlap(a, b)
         assert not isinstance(c, complex)
         assert_allclose(c, 36)
 
     def test_inner_vec_vec_sparse(self):
-        a = qjf([[1], [2j], [3]], sparse=True)
-        b = qjf([[1j], [2], [3j]])
+        a = qu([[1], [2j], [3]], sparse=True)
+        b = qu([[1j], [2], [3j]])
         c = overlap(a, b)
         assert not isinstance(c, complex)
         assert_allclose(c, 36)
 
     def test_inner_vec_op_sparse(self):
-        a = qjf([[1], [2j], [3]], 'dop', sparse=True)
-        b = qjf([[1j], [2], [3j]], sparse=True)
+        a = qu([[1], [2j], [3]], 'dop', sparse=True)
+        b = qu([[1j], [2], [3j]], sparse=True)
         c = overlap(a, b)
         assert not isinstance(c, complex)
         assert_allclose(c, 36)
 
     def test_inner_op_vec_sparse(self):
-        a = qjf([[1], [2j], [3]])
-        b = qjf([[1j], [2], [3j]], 'dop', sparse=True)
+        a = qu([[1], [2j], [3]])
+        b = qu([[1j], [2], [3j]], 'dop', sparse=True)
         c = overlap(a, b)
         assert not isinstance(c, complex)
         assert_allclose(c, 36)
 
     def test_inner_op_op_sparse(self):
-        a = qjf([[1], [2j], [3]], 'dop', sparse=True)
-        b = qjf([[1j], [2], [3j]], 'dop', sparse=True)
+        a = qu([[1], [2j], [3]], 'dop', sparse=True)
+        b = qu([[1j], [2], [3j]], 'dop', sparse=True)
         c = overlap(a, b)
         assert not isinstance(c, complex)
         assert_allclose(c, 36)

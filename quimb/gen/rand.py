@@ -4,7 +4,7 @@ Functions for generating random quantum objects and states.
 import numpy as np
 import scipy.sparse as sp
 from ..accel import rdmul
-from ..core import qjf, ptr, kron, nmlz
+from ..core import qu, ptr, kron, nmlz
 
 
 def rand_matrix(d, scaled=True, sparse=False, format='csr', density=0.01):
@@ -118,7 +118,7 @@ def rand_product_state(n, qtype=None):
             v = np.random.rand()
             phi = 2 * np.pi * u
             theta = np.arccos(2 * v - 1)
-            yield qjf([[np.cos(theta / 2.0)],
-                       [np.sin(theta / 2.0) * np.exp(1.0j * phi)]],
-                      qtype=qtype)
+            yield qu([[np.cos(theta / 2.0)],
+                      [np.sin(theta / 2.0) * np.exp(1.0j * phi)]],
+                     qtype=qtype)
     return kron(*gen_rand_pure_qubits(n))

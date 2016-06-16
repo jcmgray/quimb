@@ -1,7 +1,7 @@
 from pytest import fixture
 import numpy as np
 from numpy.testing import assert_allclose
-from ... import ldmul, rand_uni, issparse, qjf, rand_product_state
+from ... import ldmul, rand_uni, issparse, qu, rand_product_state
 from ...solve import (eigsys, eigvals, eigvecs, seigvals, seigvecs,
                       seigsys, groundstate, groundenergy, svds, norm,
                       choose_ncv, svd)
@@ -18,7 +18,7 @@ def premat():
 def prematsparse():
     u = rand_uni(4)
     a = u @ ldmul(np.array([-1, 2, 4, -3]), u.H)
-    a = qjf(a, sparse=True)
+    a = qu(a, sparse=True)
     return u, a
 
 
@@ -33,7 +33,7 @@ def svdpremat():
 def svdprematsparse():
     u, v = rand_uni(5), rand_uni(5)
     a = u @ ldmul(np.array([1, 2, 4, 3, 0]), v.H)
-    a = qjf(a, sparse=True)
+    a = qu(a, sparse=True)
     return u, v, a
 
 
@@ -165,11 +165,11 @@ class TestSVDS:
 
 class TestNorms:
     def test_norm_fro_dense(self):
-        a = qjf([[1, 2], [3j, 4j]])
+        a = qu([[1, 2], [3j, 4j]])
         assert norm(a, "fro") == (1 + 4 + 9 + 16)**0.5
 
     def test_norm_fro_sparse(self):
-        a = qjf([[3, 0], [4j, 0]], sparse=True)
+        a = qu([[3, 0], [4j, 0]], sparse=True)
         assert norm(a, "fro") == (9 + 16)**0.5
 
     def test_norm_spectral_dense(self, svdpremat):

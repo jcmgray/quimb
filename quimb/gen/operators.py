@@ -1,6 +1,6 @@
 from functools import lru_cache
 import numpy as np
-from ..core import qjf, eye, kron, eyepad
+from ..core import qu, eye, kron, eyepad
 
 
 @lru_cache(maxsize=64)
@@ -20,22 +20,22 @@ def sig(xyz, dim=2, **kwargs):
               2: 'y', 'y': 'y', 'Y': 'y',
               3: 'z', 'z': 'z', 'Z': 'z'}
     opmap = {('i', 2): lambda: eye(2, **kwargs),
-             ('x', 2): lambda: qjf([[0, 1],
-                                    [1, 0]], **kwargs),
-             ('y', 2): lambda: qjf([[0, -1j],
-                                    [1j, 0]], **kwargs),
-             ('z', 2): lambda: qjf([[1, 0],
-                                    [0, -1]], **kwargs),
+             ('x', 2): lambda: qu([[0, 1],
+                                   [1, 0]], **kwargs),
+             ('y', 2): lambda: qu([[0, -1j],
+                                   [1j, 0]], **kwargs),
+             ('z', 2): lambda: qu([[1, 0],
+                                   [0, -1]], **kwargs),
              ('i', 3): lambda: eye(3, **kwargs),
-             ('x', 3): lambda: qjf([[0, 1, 0],
-                                    [1, 0, 1],
-                                    [0, 1, 0]], **kwargs) / 2**.5,
-             ('y', 3): lambda: qjf([[0, -1j, 0],
-                                    [1j, 0, -1j],
-                                    [0, 1j, 0]], **kwargs) / 2**.5,
-             ('z', 3): lambda: qjf([[1, 0, 0],
-                                    [0, 0, 0],
-                                    [0, 0, -1]], **kwargs)}
+             ('x', 3): lambda: qu([[0, 1, 0],
+                                   [1, 0, 1],
+                                   [0, 1, 0]], **kwargs) / 2**.5,
+             ('y', 3): lambda: qu([[0, -1j, 0],
+                                   [1j, 0, -1j],
+                                   [0, 1j, 0]], **kwargs) / 2**.5,
+             ('z', 3): lambda: qu([[1, 0, 0],
+                                   [0, 0, 0],
+                                   [0, 0, -1]], **kwargs)}
     return opmap[(xyzmap[xyz], dim)]()
 
 
@@ -45,9 +45,9 @@ def controlled(s, sparse=False):
     keymap = {'x': 'x', 'not': 'x',
               'y': 'y',
               'z': 'z'}
-    return ((qjf([1, 0], qtype='dop', sparse=sparse) &
+    return ((qu([1, 0], qtype='dop', sparse=sparse) &
              eye(2, sparse=sparse)) +
-            (qjf([0, 1], qtype='dop', sparse=sparse) &
+            (qu([0, 1], qtype='dop', sparse=sparse) &
              sig(keymap[s], sparse=sparse)))
 
 
@@ -70,10 +70,10 @@ def ham_heis(n, j=1.0, bz=0.0, cyclic=True, sparse=False):
     except TypeError:
         jx = jy = jz = j
 
-    sds = qjf(jx * kron(sig('x'), sig('x')) +
-              jy * kron(sig('y'), sig('y')) +
-              jz * kron(sig('z'), sig('z')) -
-              bz * kron(sig('z'), eye(2)), sparse=True)
+    sds = qu(jx * kron(sig('x'), sig('x')) +
+             jy * kron(sig('y'), sig('y')) +
+             jz * kron(sig('z'), sig('z')) -
+             bz * kron(sig('z'), eye(2)), sparse=True)
     # Begin with last spin, not covered by loop
     ham = eyepad(-bz * sig('z', sparse=True), dims, n - 1)
     for i in range(n - 1):

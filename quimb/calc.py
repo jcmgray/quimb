@@ -13,7 +13,7 @@ import scipy.sparse.linalg as spla
 from scipy.optimize import minimize
 
 from .accel import dot_dense, ldmul, issparse, isop
-from .core import (qjf, kron, ptr, eye, eyepad, tr, trx,
+from .core import (qu, kron, ptr, eye, eyepad, tr, trx,
                    infer_size, overlap)
 from .solve import (eigvals, eigsys, norm)
 from .gen import (sig, basis_vec, bell_state, bloch_state)
@@ -51,7 +51,7 @@ def purify(rho, sparse=False):
     psi = np.zeros(shape=(d**2, 1), dtype=complex)
     for i, l in enumerate(ls.flat):
         psi += l * kron(vs[:, i], basis_vec(i, d, sparse=sparse))
-    return qjf(psi)
+    return qu(psi)
 
 
 def entropy(a):
@@ -81,12 +81,12 @@ def mutual_information(p, dims=[2, 2], sysa=0, sysb=1):
 def partial_transpose(p, dims=[2, 2]):
     """ Partial transpose of state `p` with bipartition as given by
     `dims`. """
-    p = qjf(p, "dop")
+    p = qu(p, "dop")
     p = np.array(p)\
         .reshape((*dims, *dims))  \
         .transpose((2, 1, 0, 3))  \
         .reshape((np.prod(dims), np.prod(dims)))
-    return qjf(p)
+    return qu(p)
 
 
 def negativity(p, dims=[2, 2], sysa=0, sysb=1):
@@ -113,12 +113,12 @@ logneg = logarithmic_negativity
 def concurrence(p):
     """ Concurrence of two-qubit state `p`. """
     if isop(p):
-        p = qjf(p, "dop")  # make sure density operator
+        p = qu(p, "dop")  # make sure density operator
         pt = kron(sig(2), sig(2)) @ p.conj() @ kron(sig(2), sig(2))
         l = (nla.eigvals(p @ pt).real**2)**0.25
         return max(0, 2 * np.max(l) - np.sum(l))
     else:
-        p = qjf(p, "ket")
+        p = qu(p, "ket")
         pt = kron(sig(2), sig(2)) @ p.conj()
         c = np.real(abs(p.H @ pt)).item(0)
         return max(0, c)
@@ -155,7 +155,7 @@ def one_way_classical_information(p_ab, prjs, precomp_func=False):
 
 def quantum_discord(p):
     """ Quantum Discord for two qubit density matrix `p`. """
-    p = qjf(p, "dop")
+    p = qu(p, "dop")
     iab = mutual_information(p)
     owci = one_way_classical_information(p, None, precomp_func=True)
 
@@ -203,7 +203,7 @@ def pauli_decomp(a, mode="p", tol=1e-3):
     YY -0.25
     ZZ -0.25
     """
-    a = qjf(a, "dop")  # make sure operator
+    a = qu(a, "dop")  # make sure operator
     n = infer_size(a)
 
     # define generator for inner product to iterate over efficiently
@@ -344,7 +344,7 @@ def ent_cross_matrix(p, ent_fun=concurrence, calc_self_ent=True):
 
 def qid(p, dims, inds, precomp_func=False, sparse_comp=True,
         norm_func=norm, pow=2, coeff=1/3):
-    p = qjf(p, "dop")
+    p = qu(p, "dop")
     inds = np.array(inds, ndmin=1)
     # Construct operators
     ops_i = [[eyepad(sig(s), dims, ind, sparse=sparse_comp)

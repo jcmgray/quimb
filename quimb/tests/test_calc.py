@@ -1,5 +1,5 @@
 from numpy.testing import assert_allclose
-from .. import (qjf, rand_product_state, bell_state, rand_ket,
+from .. import (qu, rand_product_state, bell_state, rand_ket,
                 up, rand_mix)
 from ..calc import (quantum_discord, one_way_classical_information,
                     mutual_information, partial_transpose,
@@ -50,8 +50,8 @@ class TestMutualInformation:
 
 class TestQuantumDiscord:
     def test_owci(self):
-        a = qjf([1, 0], 'op')
-        b = qjf([0, 1], 'op')
+        a = qu([1, 0], 'op')
+        b = qu([0, 1], 'op')
         for i in (0, 1, 2, 3):
             p = rand_product_state(2)
             ci = one_way_classical_information(p @ p.H, [a, b])

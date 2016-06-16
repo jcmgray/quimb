@@ -1,10 +1,26 @@
 import numpy as np
 from numpy.testing import assert_allclose
+
 from ...core import tr, eye, chop, eyepad, overlap, ptr
 from ...solve import eigsys, groundstate
-from quimb.gen import (basis_vec, up, down, plus, minus, yplus, yminus,
-                       thermal_state, ham_j1j2, rand_herm, graph_state_1d,
-                       sig, levi_civita, bloch_state, bell_state, singlet)
+from ..gen import (
+    basis_vec,
+    up,
+    down,
+    plus,
+    minus,
+    yplus,
+    yminus,
+    thermal_state,
+    ham_j1j2,
+    rand_herm,
+    graph_state_1d,
+    sig,
+    levi_civita,
+    bloch_state,
+    bell_state,
+    singlet,
+)
 
 
 class TestBasisVec:

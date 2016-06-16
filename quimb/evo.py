@@ -17,7 +17,7 @@ from .accel import (
     explt,
 )
 from .accel import issparse, dot_dense
-from .core import qjf, eye
+from .core import qu, eye
 from .solve import eigsys, norm
 
 
@@ -195,7 +195,7 @@ class QuEvo(object):
             pt: current state """
         super(QuEvo, self).__init__()
 
-        self.p0 = qjf(p0)
+        self.p0 = qu(p0)
         self._t = self.t0 = t0
         self.isdop = isop(self.p0)  # Density operator evolution?
         self.d = p0.shape[0]  # Hilbert space dimension
