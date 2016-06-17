@@ -47,7 +47,7 @@ class TestHamHeis:
         l = eigvals(h)
         assert_allclose(l, [-3, 1, 1, 1])
         gs = groundstate(h)
-        assert overlap(gs, singlet()) == 1.
+        assert_allclose(overlap(gs, singlet()), 1.)
 
     def test_ham_heis_sparse_cyclic_4(self):
         h = ham_heis(4, sparse=True, cyclic=True)

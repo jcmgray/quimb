@@ -1,10 +1,31 @@
-from pytest import fixture
+from pytest import fixture, mark
 import numpy as np
 from numpy.testing import assert_allclose
-from ... import ldmul, rand_uni, issparse, qu, rand_product_state
-from ...solve import (eigsys, eigvals, eigvecs, seigvals, seigvecs,
-                      seigsys, groundstate, groundenergy, svds, norm,
-                      choose_ncv, svd)
+
+from ... import (
+    ldmul,
+    rand_uni,
+    issparse,
+    qu,
+    rand_product_state,
+)
+from ...solve import (
+    slepc4py_found,
+    eigsys,
+    eigvals,
+    eigvecs,
+    seigsys,
+    seigvals,
+    seigvecs,
+    groundstate,
+    groundenergy,
+    svds,
+    norm,
+    choose_ncv,
+    svd,
+)
+
+backends = ['scipy', 'slepc'] if slepc4py_found() else ['scipy']
 
 
 @fixture
@@ -69,52 +90,58 @@ class TestChooseNCV:
 
 
 class TestSeigs:
-    def test_seigsys_small_dense_wvecs(self, premat):
+    @mark.parametrize("backend", backends)
+    def test_seigsys_small_dense_wvecs(self, premat, backend):
         u, a = premat
         assert not issparse(a)
-        lk, vk = seigsys(a, k=2)
+        lk, vk = seigsys(a, k=2, backend=backend)
         assert_allclose(lk, (-3, -1))
         for i, j in zip([3, 0], [0, 1]):
             o = u[:, i].H @ vk[:, j]
             assert_allclose(abs(o), 1.)
-        vk = seigvecs(a, k=2)
+        vk = seigvecs(a, k=2, backend=backend)
         for i, j in zip([3, 0], [0, 1]):
             o = u[:, i].H @ vk[:, j]
             assert_allclose(abs(o), 1.)
 
-    def test_seigsys_small_dense_novecs(self, premat):
+    @mark.parametrize("backend", backends)
+    def test_seigsys_small_dense_novecs(self, premat, backend):
         _, a = premat
         assert not issparse(a)
-        lk = seigvals(a, k=2)
+        lk = seigvals(a, k=2, backend=backend)
         assert_allclose(lk, (-3, -1))
 
-    def test_seigsys_sparse_wvecs(self, prematsparse):
+    @mark.parametrize("backend", backends)
+    def test_seigsys_sparse_wvecs(self, prematsparse, backend):
         u, a = prematsparse
         assert issparse(a)
-        lk, vk = seigsys(a, k=2)
+        lk, vk = seigsys(a, k=2, backend=backend)
         assert_allclose(lk, (-3, -1))
         for i, j in zip([3, 0], [0, 1]):
             o = u[:, i].H @ vk[:, j]
             assert_allclose(abs(o), 1.)
-        vk = seigvecs(a, k=2)
+        vk = seigvecs(a, k=2, backend=backend)
         for i, j in zip([3, 0], [0, 1]):
             o = u[:, i].H @ vk[:, j]
             assert_allclose(abs(o), 1.)
 
-    def test_seigsys_small_sparse_novecs(self, prematsparse):
+    @mark.parametrize("backend", backends)
+    def test_seigsys_small_sparse_novecs(self, prematsparse, backend):
         _, a = prematsparse
         assert issparse(a)
-        lk = seigvals(a, k=2)
+        lk = seigvals(a, k=2, backend=backend)
         assert_allclose(lk, (-3, -1))
 
-    def test_groundstate(self, premat):
+    @mark.parametrize("backend", backends)
+    def test_groundstate(self, premat, backend):
         u, a = premat
-        gs = groundstate(a)
+        gs = groundstate(a, backend=backend)
         assert_allclose(abs(u[:, 3].H @ gs), 1.)
 
-    def test_groundenergy(self, premat):
+    @mark.parametrize("backend", backends)
+    def test_groundenergy(self, premat, backend):
         _, a = premat
-        ge = groundenergy(a)
+        ge = groundenergy(a, backend=backend)
         assert_allclose(ge, -3)
 
 
@@ -147,9 +174,10 @@ class TestSVDS:
         sk = svds(a, k=3, return_vecs=False)
         assert_allclose(sk, [4, 3, 2])
 
-    def test_svds_sparse_wvecs(self, svdprematsparse):
+    @mark.parametrize("backend", backends)
+    def test_svds_sparse_wvecs(self, svdprematsparse, backend):
         u, v, a = svdprematsparse
-        uk, sk, vk = svds(a, k=3, return_vecs=True)
+        uk, sk, vk = svds(a, k=3, return_vecs=True, backend=backend)
         assert_allclose(sk, [4, 3, 2])
         for i, j in zip((0, 1, 2), (2, 3, 1)):
             o = abs(uk[:, i].H @ u[:, j])
@@ -157,9 +185,10 @@ class TestSVDS:
             o = abs(vk[i, :] @ v[:, j])
             assert_allclose(o, 1.)
 
-    def test_svds_sparse_nvecs(self, svdprematsparse):
+    @mark.parametrize("backend", backends)
+    def test_svds_sparse_nvecs(self, svdprematsparse, backend):
         _, _, a = svdprematsparse
-        sk = svds(a, k=3, return_vecs=False)
+        sk = svds(a, k=3, return_vecs=False, backend=backend)
         assert_allclose(sk, [4, 3, 2])
 
 

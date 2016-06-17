@@ -5,9 +5,6 @@ Interface to slepc4py for solving advanced eigenvalue problems.
 # TODO: FEAST / other contour solvers?
 # TODO: exponential, sqrt etc.
 # TODO: region for eps in middle, both ciss and normal
-# TODO: handle dense matrices / full decomp
-# TODO: compile with long int?
-# TODO: compile with fortran generic option
 
 import numpy as np
 import scipy.sparse as sp
@@ -15,23 +12,35 @@ from petsc4py import PETSc
 from slepc4py import SLEPc
 
 
-def scipy_to_petsc(a):
+def convert_to_petsc(a):
     """
     Convert a scipy sparse matrix to the relevant PETSc type, currently
     only supports csr and bsr formats.
     """
     if sp.isspmatrix_csr(a):
         csr = (a.indptr, a.indices, a.data)
-        b = PETSc.Mat().createAIJ(size=a.shape, csr=csr)
+        b = PETSc.Mat().createAIJ(size=a.shape, csr=csr, comm=PETSc.COMM_WORLD)
     elif sp.isspmatrix_bsr(a):
         csr = (a.indptr, a.indices, a.data)
-        b = PETSc.Mat().createBAIJ(size=a.shape, bsize=a.blocksize, csr=csr)
+        b = PETSc.Mat().createBAIJ(size=a.shape, bsize=a.blocksize, csr=csr,
+                                   comm=PETSc.COMM_WORLD)
+    elif a.ndim == 1:
+        b = PETSc.Vec().createWithArray(a, comm=PETSc.COMM_WORLD)
     else:
-        b = PETSc.Mat().createDense(size=a.shape, array=a)
+        b = PETSc.Mat().createDense(size=a.shape, array=a,
+                                    comm=PETSc.COMM_WORLD)
     return b
 
 
-def init_eigensolver(which="LM", sigma=None, isherm=True, etype="krylovschur",
+def new_petsc_vec(n):
+    """
+    Create an empty complex petsc vector of size `n`.
+    """
+    a = np.empty(n, dtype=complex)
+    return PETSc.Vec().createWithArray(a, comm=PETSc.COMM_WORLD)
+
+
+def init_eigensolver(which='LM', sigma=None, isherm=True, etype="krylovschur",
                      st_opts_dict={}, tol=None, max_it=None):
     """
     Create an advanced eigensystem solver
@@ -99,9 +108,10 @@ def init_spectral_inverter(ptype="lu", ppackage="mumps", ktype="preonly",
     return S
 
 
-def aeigsys(a, k=6, which="SR", sigma=None, isherm=True, return_vecs=True,
-            sort=True, ncv=None, etype="krylovschur", return_all_conv=False,
-            st_opts_dict={}, tol=None, max_it=None):
+def slepc_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
+                  isherm=True, ncv=None, sort=True, etype="krylovschur",
+                  return_all_conv=False, st_opts_dict={}, tol=None,
+                  max_it=None):
     """
     Solve a matrix using the advanced eigensystem solver
 
@@ -123,10 +133,16 @@ def aeigsys(a, k=6, which="SR", sigma=None, isherm=True, return_vecs=True,
         lk: eigenvalues
         vk: corresponding eigenvectors (if return_vecs == True)
     """
-    eigensolver = init_eigensolver(which=which, sigma=sigma, isherm=isherm,
-                                   etype=etype, st_opts_dict=st_opts_dict,
-                                   tol=tol, max_it=max_it)
-    pa = scipy_to_petsc(a)
+    eps_settings = {
+        'which': 'SR' if which is None else which,
+        'sigma': sigma,
+        'isherm': isherm,
+        'etype': etype,
+        'tol': tol,
+        'max_it': max_it,
+    }
+    eigensolver = init_eigensolver(**eps_settings, **st_opts_dict)
+    pa = convert_to_petsc(a)
     eigensolver.setOperators(pa)
     eigensolver.setDimensions(k, ncv)
     # eigensolver.setFromOptions()
@@ -140,43 +156,17 @@ def aeigsys(a, k=6, which="SR", sigma=None, isherm=True, return_vecs=True,
         vk = np.empty((a.shape[0], k), dtype=complex)
         for i, v in enumerate(eigensolver.getInvariantSubspace()[:k]):
             vk[:, i] = v
+        eigensolver.destroy()
         if sort:
             sortinds = np.argsort(lk)
-            return lk[sortinds], np.asmatrix(vk[:, sortinds])
+            lk, vk = lk[sortinds], np.asmatrix(vk[:, sortinds])
+        return lk, vk
+    eigensolver.destroy()
     return np.sort(lk) if sort else lk
 
 
-def aeigvals(a, k=6, **kwargs):
-    """
-    Aeigsys alias for finding eigenvalues only.
-    """
-    return aeigsys(a, k=k, return_vecs=False, **kwargs)
-
-
-def aeigvecs(a, k=6, **kwargs):
-    """
-    Aeigsys alias for finding eigenvectors only.
-    """
-    _, v = aeigsys(a, k=k, return_vecs=True, **kwargs)
-    return v
-
-
-def agroundstate(ham):
-    """
-    Alias for finding lowest eigenvector only.
-    """
-    return aeigvecs(ham, k=1, which='SA')
-
-
-def agroundenergy(ham):
-    """
-    Alias for finding lowest eigenvalue only.
-    """
-    return aeigvals(ham, k=1, which='SA')[0]
-
-
-def asvds(a, k=1, stype="cross", extra_vals=False, ncv=None,
-          tol=None, max_it=None):
+def slepc_svds(a, k=6, ncv=None, return_vecs=True,
+               stype="cross", extra_vals=False, tol=None, max_it=None):
     """
     Find the singular values for sparse matrix `a`.
 
@@ -189,18 +179,40 @@ def asvds(a, k=1, stype="cross", extra_vals=False, ncv=None,
 
     Returns
     -------
-        ds: singular values
+        sk: singular values
     """
     svd_solver = SLEPc.SVD()
     svd_solver.create()
+    if return_vecs and stype in {'cross', 'cyclic'}:
+        # TODO: fix this, submit issue?
+        print('SVD: changing method since vecs broken for cross/cyclic')
+        stype = 'lanczos'
     svd_solver.setType(stype)
     svd_solver.setDimensions(nsv=k, ncv=ncv)
     svd_solver.setTolerances(tol=tol, max_it=max_it)
-    svd_solver.setOperator(scipy_to_petsc(a))
+    svd_solver.setOperator(convert_to_petsc(a))
     svd_solver.solve()
+
     nconv = svd_solver.getConverged()
     assert nconv >= k
     k = nconv if extra_vals else k
-    ds = [svd_solver.getValue(i) for i in range(k)]
-    svd_solver.destroy()
-    return ds
+
+    if return_vecs:
+        sk = np.empty(k, dtype=float)
+        uk = np.empty((a.shape[0], k), dtype=complex)
+        vtk = np.empty((k, a.shape[1]), dtype=complex)
+
+        u = new_petsc_vec(a.shape[0])
+        v = new_petsc_vec(a.shape[1])
+
+        for i in range(k):
+            sk[i] = svd_solver.getSingularTriplet(i, u, v)
+            uk[:, i] = u.getArray()
+            vtk[i, :] = v.getArray().conjugate()
+            so = np.argsort(-sk)
+        svd_solver.destroy()
+        return np.asmatrix(uk[:, so]), sk[so], np.asmatrix(vtk[so, :])
+    else:
+        sk = np.asarray([svd_solver.getValue(i) for i in range(k)])
+        svd_solver.destroy()
+        return sk[np.argsort(-sk)]
