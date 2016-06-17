@@ -11,8 +11,8 @@ import numpy.linalg as nla
 from ..accel import issparse, vdot
 from .scipy_solver import scipy_seigsys, scipy_svds
 
-from . import slepc4py_found
-if slepc4py_found():
+from . import SLEPC4PY_FOUND
+if SLEPC4PY_FOUND:
     from .slepc_solver import slepc_seigsys, slepc_svds
 
 
@@ -100,8 +100,14 @@ def seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
         'isherm': isherm,
         'ncv': ncv,
         'sort': sort}
-    seig_func = (slepc_seigsys if backend.lower() == 'slepc' else
-                 scipy_seigsys)
+
+    if backend.lower() == 'slepc':
+        seig_func = slepc_seigsys
+    elif backend.lower() == 'auto' and SLEPC4PY_FOUND and issparse(a):
+        seig_func = slepc_seigsys
+    else:
+        seig_func = scipy_seigsys
+
     return seig_func(a, **settings, **kwargs)
 
 

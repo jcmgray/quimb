@@ -10,7 +10,7 @@ from ... import (
     rand_product_state,
 )
 from ...solve import (
-    slepc4py_found,
+    SLEPC4PY_FOUND,
     eigsys,
     eigvals,
     eigvecs,
@@ -25,7 +25,7 @@ from ...solve import (
     svd,
 )
 
-backends = ['scipy', 'slepc'] if slepc4py_found() else ['scipy']
+backends = ['scipy', 'slepc'] if SLEPC4PY_FOUND else ['scipy']
 
 
 @fixture

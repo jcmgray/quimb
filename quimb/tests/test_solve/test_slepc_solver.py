@@ -10,7 +10,7 @@ from ... import (
     qu,
     rand_matrix,
     scipy_svds,
-    slepc4py_found,
+    SLEPC4PY_FOUND,
     rand_herm,
     seigsys,
     overlap,
@@ -25,9 +25,8 @@ from ...solve.slepc_solver import (
     )
 
 
-slepc4py_notfound = not slepc4py_found()
 slepc4py_notfound_msg = "No SLEPc4py installation"
-slepc4py_test = mark.skipif(slepc4py_notfound, reason=slepc4py_notfound_msg)
+slepc4py_test = mark.skipif(not SLEPC4PY_FOUND, reason=slepc4py_notfound_msg)
 
 
 @fixture
