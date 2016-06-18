@@ -236,7 +236,7 @@ class QuEvo(object):
         self.update_to = self._update_to_integrate
         self.solved = False
 
-    # Methods for updating the simulation #
+    # Methods for updating the simulation ----------------------------------- #
 
     def _update_to_solved_ket(self, t):
         """ Update simulation consisting of a solved hamiltonian and a
@@ -262,7 +262,7 @@ class QuEvo(object):
             self.update_to(t)
             yield self.pt
 
-    # Simulation properties
+    # Simulation properties ------------------------------------------------- #
 
     @property
     def t(self):
