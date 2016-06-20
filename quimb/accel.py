@@ -1,3 +1,10 @@
+"""
+Core accelerated numerical functions
+"""
+# TODO: merge kron, eyepad --> tensor
+# TODO: finish idot with rpn
+
+
 from cmath import exp
 from functools import partial
 import numpy as np
@@ -213,40 +220,63 @@ def kron_dense_big(a, b):
     return evaluate('a * b').reshape((mp, nq))
 
 
-def kron_sparse(a, b):
-    # TODO: leave csc, bsr, csr etc.
-    """ Sparse tensor product """
-    return sp.kron(a, b, format="csr")
+def kron_sparse(a, b, format=None):
+    """
+    Sparse tensor product
+    """
+    if format is None:
+        format = ("bsr" if isinstance(b, np.ndarray) or b.format == 'bsr' else
+                  b.format if isinstance(a, np.ndarray) else
+                  "csc" if a.format == "csc" and b.format == "csc" else
+                  "csr")
+
+    return sp.kron(a, b, format=format)
 
 
-def kron(*ops):
-    # TODO: scalar?
-    # TODO: faster sparse kron using coo?
-    # TODO: rename? tensor
-    # TODO: parallize?
-    # TODO: merge into eyepad with dims=None, coos=None
-    # Internal recusive function, keeping 'coo'
-    """ Tensor product of variable number of arguments.
-    Input:
+def kron_dispatch(a, b, format="csr"):
+        if issparse(a) or issparse(b):
+            return kron_sparse(a, b, format=format)
+        if a.size * b.size > 23000:  # pragma: no cover
+            return kron_dense_big(a, b)
+        return kron_dense(a, b)
+
+
+def kron(*ops, format=None):
+    """
+    Tensor product of variable number of arguments.
+
+    Parameters
+    ----------
         ops: objects to be tensored together
-    Returns:
+
+    Returns
+    -------
         operator
-    The product is performed as (a * (b * (c * ...))) """
-    num_p = len(ops)
-    a = ops[0]
-    if num_p == 1:
-        return a
-    b = ops[1] if num_p == 2 else kron(*ops[1:])
-    if issparse(a) or issparse(b):
-        return kron_sparse(a, b)
-    if a.size * b.size > 16000:
-        return kron_dense_big(a, b)
-    return kron_dense(a, b)
+
+    Notes
+    -----
+         1. The product is performed as (a * (b * (c * ...)))
+    """
+
+    def kronner(ops, _l):
+        if _l == 1:
+            return ops[0]
+        elif _l == 2:
+            return kron_dispatch(ops[0], ops[1], format="coo")
+        else:
+            return kron_dispatch(ops[0], kronner(ops[1:], _l-1), format="coo")
+
+    x = kronner(ops, len(ops))
+    if issparse(x):
+        x = x.asformat("csr" if format is None else format)
+    return x
+
 
 # Monkey-patch unused & symbol to tensor product
-np.matrix.__and__ = kron_dense
-sp.csr_matrix.__and__ = kron_sparse
-sp.csc_matrix.__and__ = kron_sparse
+np.matrix.__and__ = kron_dispatch
+sp.csr_matrix.__and__ = kron_dispatch
+sp.bsr_matrix.__and__ = kron_dispatch
+sp.csc_matrix.__and__ = kron_dispatch
 
 
 def kronpow(a, pwr):

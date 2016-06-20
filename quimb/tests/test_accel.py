@@ -20,6 +20,7 @@ from ..accel import (
     outer,
     kron_dense,
     kron_dense_big,
+    kron_sparse,
     kron,
     kronpow,
     explt,
@@ -40,6 +41,21 @@ def test_objs():
     kd2 = rand_ket(d)
     ld = np.random.randn(d) + 1.0j * np.random.randn(d)
     return od1, od2, os1, os2, kd1, kd2, ld
+
+
+@fixture
+def mat_d():
+    return rand_matrix(3)
+
+
+@fixture
+def mat_s():
+    return rand_matrix(3, sparse=True, density=0.5)
+
+
+@fixture
+def mat_snnz():
+    return rand_matrix(3, sparse=True, density=0.75)
 
 
 class TestMatrixify:
@@ -326,7 +342,7 @@ class TestKron:
 
     def test_kron_mixed_types(self):
         a = rand_ket(4)
-        b = rand_ket(4, sparse=True)
+        b = rand_ket(4, sparse=True, density=0.5)
         assert_allclose(kron(a, b).A,
                         (sp.kron(a, b, 'csr')).A)
         assert_allclose(kron(b, b).A,
@@ -337,6 +353,36 @@ class TestKron:
         b = a & a & a
         c = kronpow(a, 3)
         assert_allclose(b, c)
+
+
+class TestKronSparseFormats:
+    def test_sparse_sparse_auto(self, mat_s):
+        c = kron_sparse(mat_s, mat_s)
+        assert c.format == 'csr'
+
+    def test_sparse_dense_auto(self, mat_s, mat_d):
+        c = kron_sparse(mat_s, mat_d)
+        assert c.format == 'bsr'
+
+    def test_dense_sparse_auto(self, mat_s, mat_d):
+        c = kron_sparse(mat_d, mat_s)
+        assert c.format == 'csr'
+
+    def test_sparse_sparsennz(self, mat_s, mat_snnz):
+        c = kron_sparse(mat_s, mat_snnz)
+        assert c.format == 'csr'
+
+    def test_sparse_sparse_to_coo(self, mat_s):
+        c = kron_sparse(mat_s, mat_s, format='coo')
+        assert c.format == 'coo'
+
+    def test_sparse_sparse_to_csc(self, mat_s):
+        c = kron_sparse(mat_s, mat_s, format='csc')
+        assert c.format == 'csc'
+
+    def test_many_args_format(self, mat_s):
+        c = kron(mat_s, mat_s, mat_s, format='bsr')
+        assert c.format == 'bsr'
 
 
 class TestCalcDotType:

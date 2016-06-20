@@ -15,20 +15,20 @@ from slepc4py import SLEPc
 def convert_to_petsc(a):
     """
     Convert a scipy sparse matrix to the relevant PETSc type, currently
-    only supports csr and bsr formats.
+    only supports csr, bsr, vectors and dense matrices formats.
     """
+    comm = PETSc.COMM_WORLD
     if sp.isspmatrix_csr(a):
         csr = (a.indptr, a.indices, a.data)
-        b = PETSc.Mat().createAIJ(size=a.shape, csr=csr, comm=PETSc.COMM_WORLD)
+        b = PETSc.Mat().createAIJ(size=a.shape, csr=csr, comm=comm)
     elif sp.isspmatrix_bsr(a):
         csr = (a.indptr, a.indices, a.data)
-        b = PETSc.Mat().createBAIJ(size=a.shape, bsize=a.blocksize, csr=csr,
-                                   comm=PETSc.COMM_WORLD)
+        b = PETSc.Mat().createBAIJ(size=a.shape, bsize=a.blocksize,
+                                   csr=csr, comm=comm)
     elif a.ndim == 1:
-        b = PETSc.Vec().createWithArray(a, comm=PETSc.COMM_WORLD)
+        b = PETSc.Vec().createWithArray(a, comm=comm)
     else:
-        b = PETSc.Mat().createDense(size=a.shape, array=a,
-                                    comm=PETSc.COMM_WORLD)
+        b = PETSc.Mat().createDense(size=a.shape, array=a, comm=comm)
     return b
 
 
