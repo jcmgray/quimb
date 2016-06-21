@@ -4,29 +4,12 @@ from numpy.testing import assert_allclose
 import scipy.sparse as sp
 from .. import rand_matrix, rand_ket
 from ..accel import (
-    matrixify,
-    realify,
-    issparse,
-    isket,
-    isop,
-    isbra,
-    isherm,
-    mul,
-    dot,
-    vdot,
-    rdot,
-    ldmul,
-    rdmul,
-    outer,
-    kron_dense,
-    kron_dense_big,
-    kron_sparse,
-    kron,
-    kronpow,
+    matrixify, realify,
+    issparse, isket, isop, isbra, isherm,
+    mul, dot, vdot, rdot, ldmul, rdmul, outer,
+    kron_dense, kron_dense_big, kron_sparse, kron, kronpow,
     explt,
-    idot,
-    calc_dot_type,
-    calc_dot_weight_func_out,
+    idot, calc_dot_type, calc_dot_weight_func_out,
 )
 
 

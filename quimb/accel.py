@@ -233,21 +233,25 @@ def kron_sparse(a, b, format=None):
     return sp.kron(a, b, format=format)
 
 
-def kron_dispatch(a, b, format="csr"):
+def kron_dispatch(a, b, format=None):
         if issparse(a) or issparse(b):
             return kron_sparse(a, b, format=format)
-        if a.size * b.size > 23000:  # pragma: no cover
+        elif a.size * b.size > 23000:  # pragma: no cover
             return kron_dense_big(a, b)
-        return kron_dense(a, b)
+        else:
+            return kron_dense(a, b)
 
 
-def kron(*ops, format=None):
+def kron(*ops, format=None, coo_construct=False):
     """
     Tensor product of variable number of arguments.
 
     Parameters
     ----------
         ops: objects to be tensored together
+        format: desired output format if resultant object is sparse.
+        coo_construct: whether to force sparse construction to use the 'coo'
+            format,
 
     Returns
     -------
@@ -257,18 +261,19 @@ def kron(*ops, format=None):
     -----
          1. The product is performed as (a * (b * (c * ...)))
     """
+    cfrmt = "coo" if coo_construct else None
 
     def kronner(ops, _l):
         if _l == 1:
             return ops[0]
         elif _l == 2:
-            return kron_dispatch(ops[0], ops[1], format="coo")
+            return kron_dispatch(ops[0], ops[1], format=cfrmt)
         else:
-            return kron_dispatch(ops[0], kronner(ops[1:], _l-1), format="coo")
+            return kron_dispatch(ops[0], kronner(ops[1:], _l-1), format=cfrmt)
 
     x = kronner(ops, len(ops))
-    if issparse(x):
-        x = x.asformat("csr" if format is None else format)
+    if issparse(x) and format is not None:
+        x = x.asformat(format)
     return x
 
 
