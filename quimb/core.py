@@ -22,12 +22,21 @@ from .accel import (
 )
 
 
-def quimbify(data, qtype=None, sparse=False, normalized=False, chopped=False):
-    """ Converts lists to 'quantum' i.e. complex matrices, kets being columns.
-    * Will unravel an array if 'ket' or 'bra' given.
-    * Will conjugate if 'bra' given.
-    * Will leave operators as is if 'dop' given, but construct one
-    if vector given with the assumption that it was a ket.
+def sparse_matrix(data, format="csr"):
+    """
+    Construct a sparse matrix of a particular format.
+    """
+    sparse_constructors = {"csr": sp.csr_matrix,
+                           "bsr": sp.bsr_matrix,
+                           "csc": sp.csc_matrix,
+                           "coo": sp.coo_matrix}
+    return sparse_constructors[format](data, dtype=complex)
+
+
+def quimbify(data, qtype=None, sparse=None, normalized=False,
+             chopped=False, sformat=None):
+    """
+    Converts lists to 'quantum' i.e. complex matrices, kets being columns.
 
     Parameters
     ----------
@@ -35,29 +44,55 @@ def quimbify(data, qtype=None, sparse=False, normalized=False, chopped=False):
         qtype: output type, either 'ket', 'bra' or 'dop' if given
         sparse: convert output to sparse 'csr' format
         normalized: normalise the output
+        sformat: format of sparse matrix
 
     Returns
     -------
-        x: numpy or sparse matrix """
-    if issparse(data):
-        qob = sp.csr_matrix(data, dtype=complex)
-    else:
-        qob = np.matrix(data, copy=False, dtype=complex)
+        x: numpy scipy.sparse matrix.
+
+    Notes
+    -----
+        1. Will unravel an array if 'ket' or 'bra' given.
+        2. Will conjugate if 'bra' given.
+        3. Will leave operators as is if 'dop' given, but construct one
+            if vector given with the assumption that it was a ket.
+    """
+    # TODO: just require a format to get sparse output
+    sparse_input = issparse(data)
+    sparse_output = (sparse or (sparse_input and sparse is None) or
+                     sformat in {"csr", "bsr", "csc", "coo"})
+    # Infer output sparse format from input if necessary
+    if sparse_input and sparse_output and sformat is None:
+        sformat = data.format
+
     if qtype is not None:
+        # Must be dense to reshape
+        data = np.asmatrix(data.A if sparse_input else data, dtype=complex)
         if qtype in {"k", "ket"}:
-            qob.shape = (np.prod(qob.shape), 1)
+            data = data.reshape((np.prod(data.shape), 1))
         elif qtype in {"b", "bra"}:
-            qob.shape = (1, np.prod(qob.shape))
-            qob = qob.conj()
-        elif qtype in {"d", "r", "rho", "op", "dop"} and not isop(qob):
-            qob = quimbify(qob, "k") @ quimbify(qob, "k").H
+            data = data.reshape((1, np.prod(data.shape))).conj()
+        elif qtype in {"d", "r", "rho", "op", "dop"} and not isop(data):
+            data = quimbify(data, "k") @ quimbify(data, "k").H
+    # Just cast as numpy matrix
+    elif not sparse_output:
+        data = np.asmatrix(data, dtype=complex)
+
+    # Check if already sparse matrix, or wanted to be one
+    if sparse_output:
+        data = sparse_matrix(data, (sformat if sformat is not None else "csr"))
+
+    # Optionally normalize and chop small components
     if normalized:
-        normalize(qob, inplace=True)
+        normalize(data, inplace=True)
     if chopped:
-        chop(qob, inplace=True)
-    return sp.csr_matrix(qob, dtype=complex) if sparse else qob
+        chop(data, inplace=True)
+
+    return data
 
 qu = quimbify
+ket = partial(quimbify, qtype='ket')
+bra = partial(quimbify, qtype='bra')
 dop = partial(quimbify, qtype='dop')
 sparse = partial(quimbify, sparse=True)
 

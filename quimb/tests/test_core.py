@@ -1,12 +1,13 @@
 from itertools import combinations
+
+from pytest import raises, mark
 import scipy.sparse as sp
 import numpy as np
-from pytest import raises
 from numpy.testing import assert_allclose, assert_almost_equal
-from ..accel import issparse, isherm, kron
 
+from ..accel import issparse, isherm, kron
 from ..core import (
-    quimbify,
+    sparse_matrix,
     qu,
     infer_size,
     trace_dense,
@@ -39,79 +40,125 @@ from ..gen import (
 )
 
 
+sparse_types = ("csr", "csc", "bsr", "coo")
+
+
+class TestSparseMatrix:
+    @mark.parametrize("sformat", sparse_types)
+    def test_simple(self, sformat):
+        a = sparse_matrix([[0, 3], [1, 2]], sformat)
+        assert a.format == sformat
+        assert a.dtype == complex
+
+
 class TestQuimbify:
-    def test_quimbify_vector_create(self):
+    def test_vector_create(self):
         x = [1, 2, 3j]
-        p = quimbify(x, qtype='ket')
+        p = qu(x, qtype='ket')
         assert(type(p) == np.matrix)
         assert(p.dtype == np.complex)
         assert(p.shape == (3, 1))
-        p = quimbify(x, qtype='bra')
+        p = qu(x, qtype='bra')
         assert(p.shape == (1, 3))
         assert_almost_equal(p[0, 2], -3.0j)
 
-    def test_quimbify_dop_create(self):
+    def test_dop_create(self):
         x = np.random.randn(3, 3)
-        p = quimbify(x, qtype='dop')
+        p = qu(x, qtype='dop')
         assert(type(p) == np.matrix)
         assert(p.dtype == np.complex)
         assert(p.shape == (3, 3))
 
-    def test_quimbify_convert_vector_to_dop(self):
+    def test_convert_vector_to_dop(self):
         x = [1, 2, 3j]
-        p = quimbify(x, qtype='r')
+        p = qu(x, qtype='r')
         assert_allclose(p, np.matrix([[1.+0.j,  2.+0.j,  0.-3.j],
                                       [2.+0.j,  4.+0.j,  0.-6.j],
                                       [0.+3.j,  0.+6.j,  9.+0.j]]))
 
-    def test_quimbify_chopped(self):
+    def test_chopped(self):
         x = [9e-16, 1]
-        p = quimbify(x, 'k', chopped=False)
+        p = qu(x, 'k', chopped=False)
         assert(p[0, 0] != 0.0)
-        p = quimbify(x, 'k', chopped=True)
+        p = qu(x, 'k', chopped=True)
         assert(p[0, 0] == 0.0)
 
-    def test_quimbify_normalized(self):
+    def test_normalized(self):
         x = [3j, 4j]
-        p = quimbify(x, 'k', normalized=False)
+        p = qu(x, 'k', normalized=False)
         assert_almost_equal(tr(p.H @ p), 25.)
-        p = quimbify(x, 'k', normalized=True)
+        p = qu(x, 'k', normalized=True)
         assert_almost_equal(tr(p.H @ p), 1.)
-        p = quimbify(x, 'dop', normalized=True)
+        p = qu(x, 'dop', normalized=True)
         assert_almost_equal(tr(p), 1.)
 
-    def test_quimbify_sparse_create(self):
+    def test_sparse_create(self):
         x = [[1, 0], [3, 0]]
-        p = quimbify(x, 'dop', sparse=False)
+        p = qu(x, 'dop', sparse=False)
         assert(type(p) == np.matrix)
-        p = quimbify(x, 'dop', sparse=True)
+        p = qu(x, 'dop', sparse=True)
         assert(type(p) == sp.csr_matrix)
         assert(p.dtype == np.complex)
         assert(p.nnz == 2)
 
-    def test_quimbify_sparse_convert_to_dop(self):
+    def test_sparse_convert_to_dop(self):
+        # import pdb
+        # pdb.set_trace()
         x = [1, 0, 9e-16, 0, 3j]
-        p = quimbify(x, 'ket', sparse=True)
-        q = quimbify(p, 'dop', sparse=True)
+        p = qu(x, 'ket', sparse=True)
+        q = qu(p, 'dop', sparse=True)
         assert(q.shape == (5, 5))
         assert(q.nnz == 9)
         assert_almost_equal(q[4, 4], 9.)
-        q = quimbify(p, 'dop', sparse=True, normalized=True)
+        q = qu(p, 'dop', sparse=True, normalized=True)
         assert_almost_equal(tr(q), 1.)
+
+    @mark.parametrize("qtype,shape,out",
+                      (("bra", (1, 4), [[1, 0, 2, -3j]]),
+                       ("ket", (4, 1), [[1], [0], [2], [3j]]),
+                       ("dop", (4, 4), [[1, 0, 2, -3j],
+                                        [0, 0, 0, 0],
+                                        [2, 0, 4, -6j],
+                                        [3j, 0, 6j, 9]])))
+    @mark.parametrize("format_in", sparse_types)
+    @mark.parametrize("format_out", (None,) + sparse_types)
+    def test_reshape_sparse(self, qtype, shape, out, format_in, format_out):
+        x = sparse_matrix([[1], [0], [2], [3j]], format_in)
+        y = qu(x, qtype=qtype, sformat=format_out)
+        assert y.shape == shape
+        assert y.dtype == complex
+        if format_out is None:
+            format_out = format_in
+        assert y.format == format_out
+        assert_allclose(y.A, out)
+
+    @mark.parametrize("qtype,shape,out",
+                      (("bra", (1, 4), [[1, 0, 2, -3j]]),
+                       ("ket", (4, 1), [[1], [0], [2], [3j]]),
+                       ("dop", (4, 4), [[1, 0, 2, -3j],
+                                        [0, 0, 0, 0],
+                                        [2, 0, 4, -6j],
+                                        [3j, 0, 6j, 9]])))
+    @mark.parametrize("format_out", (None,) + sparse_types)
+    def test_dense_to_sparse_format(self, qtype, shape, out, format_out):
+        x = [[1], [0], [2], [3j]]
+        y = qu(x, qtype=qtype, sformat=format_out, sparse=True)
+        assert y.shape == shape
+        assert y.dtype == complex
+        if format_out is None:
+            format_out = "csr"
+        assert y.format == format_out
+        assert_allclose(y.A, out)
 
 
 class TestInferSize:
-    def test_infer_size(self):
-        p = rand_ket(8)
-        assert infer_size(p) == 3
-        p = rand_ket(16)
-        assert infer_size(p) == 4
-
-    def test_infer_size_base(self):
-        p = rand_ket(9)
-        assert infer_size(p, 3) == 2
-        p = rand_ket(81)
-        assert infer_size(p, 3) == 4
+    @mark.parametrize("d,base,n", ([8, 2, 3],
+                                   [16, 2, 4],
+                                   [9, 3, 2],
+                                   [81, 3, 4]))
+    def test_infer_size(self, d, base, n):
+        p = rand_ket(d)
+        assert infer_size(p, base) == n
 
 
 class TestTrace:
@@ -612,59 +659,14 @@ class TestChop:
         assert((b != bo).nnz == 0)
 
 
-class TestInner:
-    def test_inner_vec_vec_dense(self):
-        a = qu([[1], [2j], [3]])
-        b = qu([[1j], [2], [3j]])
-        c = overlap(a, b)
-        assert not isinstance(c, complex)
-        assert_allclose(c, 36)
-
-    def test_inner_vec_op_dense(self):
-        a = qu([[1], [2j], [3]], 'dop')
-        b = qu([[1j], [2], [3j]])
-        c = overlap(a, b)
-        assert not isinstance(c, complex)
-        assert_allclose(c, 36)
-
-    def test_inner_op_vec_dense(self):
-        a = qu([[1], [2j], [3]])
-        b = qu([[1j], [2], [3j]], 'dop')
-        c = overlap(a, b)
-        assert not isinstance(c, complex)
-        assert_allclose(c, 36)
-
-    def test_inner_op_op_dense(self):
-        a = qu([[1], [2j], [3]], 'dop')
-        b = qu([[1j], [2], [3j]], 'dop')
-        c = overlap(a, b)
-        assert not isinstance(c, complex)
-        assert_allclose(c, 36)
-
-    def test_inner_vec_vec_sparse(self):
-        a = qu([[1], [2j], [3]], sparse=True)
-        b = qu([[1j], [2], [3j]])
-        c = overlap(a, b)
-        assert not isinstance(c, complex)
-        assert_allclose(c, 36)
-
-    def test_inner_vec_op_sparse(self):
-        a = qu([[1], [2j], [3]], 'dop', sparse=True)
-        b = qu([[1j], [2], [3j]], sparse=True)
-        c = overlap(a, b)
-        assert not isinstance(c, complex)
-        assert_allclose(c, 36)
-
-    def test_inner_op_vec_sparse(self):
-        a = qu([[1], [2j], [3]])
-        b = qu([[1j], [2], [3j]], 'dop', sparse=True)
-        c = overlap(a, b)
-        assert not isinstance(c, complex)
-        assert_allclose(c, 36)
-
-    def test_inner_op_op_sparse(self):
-        a = qu([[1], [2j], [3]], 'dop', sparse=True)
-        b = qu([[1j], [2], [3j]], 'dop', sparse=True)
+class TestOverlap:
+    @mark.parametrize("qtype1", ['ket', 'dop'])
+    @mark.parametrize("spars1", [True, False])
+    @mark.parametrize("qtype2", ['ket', 'dop'])
+    @mark.parametrize("spars2", [True, False])
+    def test_inner_vec_vec_dense(self, qtype1, spars1, qtype2, spars2):
+        a = qu([[1], [2j], [3]], qtype=qtype1, sparse=spars1)
+        b = qu([[1j], [2], [3j]], qtype=qtype2, sparse=spars2)
         c = overlap(a, b)
         assert not isinstance(c, complex)
         assert_allclose(c, 36)
