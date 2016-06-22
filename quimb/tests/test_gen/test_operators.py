@@ -1,4 +1,4 @@
-from pytest import raises
+from pytest import raises, mark
 import numpy as np
 from numpy.testing import assert_allclose
 from ... import issparse, eigvals, groundstate, overlap, singlet, seigvals
@@ -53,6 +53,12 @@ class TestHamHeis:
         h = ham_heis(4, sparse=True, cyclic=True)
         lk = seigvals(h, 4)
         assert_allclose(lk, [-8, -4, -4, -4])
+
+    # @mark.parametrize("sformat", ["csr", "csc", "bsr", "coo"])
+    # TODO:
+    # def test_sformat_construct(self, sformat):
+    #     h = ham_heis(4, sparse=True, sformat=sformat)
+    #     assert h.format == sformat
 
 
 class TestHamJ1J2:

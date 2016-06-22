@@ -12,14 +12,14 @@ import numpy.linalg as nla
 import scipy.sparse.linalg as spla
 from scipy.optimize import minimize
 
-from .accel import dot_dense, ldmul, issparse, isop
+from .accel import dot_dense, ldmul, issparse, isop, zeroify
 from .core import (qu, kron, ptr, eye, eyepad, tr, trx,
                    infer_size, overlap)
 from .solve import (eigvals, eigsys, norm)
 from .gen import (sig, basis_vec, bell_state, bloch_state)
 
 
-def expm(a, herm=False):
+def expm(a, herm=True):
     """ Matrix exponential, can be accelerated if explicitly hermitian. """
     if issparse(a):
         return spla.expm(a)
@@ -30,7 +30,7 @@ def expm(a, herm=False):
         return dot_dense(v, ldmul(np.exp(l), v.H))
 
 
-def sqrtm(a, herm=False):
+def sqrtm(a, herm=True):
     """ Matrix square root, can be accelerated if explicitly hermitian. """
     if issparse(a):
         return spla.sqrtm(a)
@@ -40,6 +40,12 @@ def sqrtm(a, herm=False):
         l, v = eigsys(a)
         return dot_dense(v, ldmul(np.sqrt(l.astype(complex)), v.H))
 
+
+def fidelity(p1, p2):
+    if not isop(p1) or not isop(p2):
+        return overlap(p1, p2)
+    else:
+        pass
 
 def purify(rho, sparse=False):
     """
@@ -54,6 +60,7 @@ def purify(rho, sparse=False):
     return qu(psi)
 
 
+@zeroify
 def entropy(a):
     """ Computes the (von Neumann) entropy of positive matrix `a` """
     l = eigvals(a)
@@ -61,6 +68,7 @@ def entropy(a):
     return np.sum(-l * np.log2(l))
 
 
+@zeroify
 def mutual_information(p, dims=[2, 2], sysa=0, sysb=1):
     """ Partitions `p` into `dims`, and finds the mutual information between
     the subsystems at indices `sysa` and `sysb` """
@@ -89,6 +97,7 @@ def partial_transpose(p, dims=[2, 2]):
     return qu(p)
 
 
+@zeroify
 def negativity(p, dims=[2, 2], sysa=0, sysb=1):
     """ Negativity between `sysa` and `sysb` of state `p` with subsystem
     dimensions `dims` """
@@ -98,6 +107,7 @@ def negativity(p, dims=[2, 2], sysa=0, sysb=1):
     return max(0.0, n)
 
 
+@zeroify
 def logarithmic_negativity(p, dims=[2, 2], sysa=0, sysb=1):
     """ Logarithmic negativity between `sysa` and `sysb` of `p`, with
     subsystem dimensions `dims`. """
@@ -110,6 +120,7 @@ def logarithmic_negativity(p, dims=[2, 2], sysa=0, sysb=1):
 logneg = logarithmic_negativity
 
 
+@zeroify
 def concurrence(p):
     """ Concurrence of two-qubit state `p`. """
     if isop(p):
@@ -153,6 +164,7 @@ def one_way_classical_information(p_ab, prjs, precomp_func=False):
     return owci if precomp_func else owci(prjs)
 
 
+@zeroify
 def quantum_discord(p):
     """ Quantum Discord for two qubit density matrix `p`. """
     p = qu(p, "dop")
@@ -173,6 +185,7 @@ def quantum_discord(p):
         raise ValueError(opt.message)
 
 
+@zeroify
 def trace_distance(p, w):
     """ Trace distance between states `p` and `w`. """
     if not isop(p) and not isop(w):

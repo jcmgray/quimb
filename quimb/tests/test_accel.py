@@ -1,4 +1,4 @@
-from pytest import fixture
+from pytest import fixture, mark
 import numpy as np
 from numpy.testing import assert_allclose
 import scipy.sparse as sp
@@ -11,6 +11,9 @@ from ..accel import (
     explt,
     idot, calc_dot_type, calc_dot_weight_func_out,
 )
+
+
+sparse_types = ("csr", "bsr", "csc", "coo")
 
 
 @fixture
@@ -27,17 +30,32 @@ def test_objs():
 
 
 @fixture
-def mat_d():
+def d1():
     return rand_matrix(3)
 
 
 @fixture
-def mat_s():
+def d2():
+    return rand_matrix(3)
+
+
+@fixture
+def d3():
+    return rand_matrix(3)
+
+
+@fixture
+def s1():
     return rand_matrix(3, sparse=True, density=0.5)
 
 
 @fixture
-def mat_snnz():
+def s2():
+    return rand_matrix(3, sparse=True, density=0.5)
+
+
+@fixture
+def s1nnz():
     return rand_matrix(3, sparse=True, density=0.75)
 
 
@@ -59,15 +77,15 @@ class TestRealify:
     def test_realify(self):
         def foo(a, b):
             return a + 1j * b
-        a = foo(1e15, 1)
-        assert a.real == 1e15
-        assert a.imag == 1
+        a = foo(1, 1e-15)
+        assert a.real == 1
+        assert a.imag == 1e-15
 
         @realify
         def foo(a, b):
             return a + 1j * b
-        a = foo(1e15, 1)
-        assert a.real == 1e15
+        a = foo(1, 1e-15)
+        assert a.real == 1
         assert a.imag == 0
 
 
@@ -297,75 +315,77 @@ class TestOuter:
 
 
 class TestKron:
-    def test_kron_dense(self):
-        a = rand_matrix(3)
-        b = rand_matrix(3)
-        c = kron_dense(a, b)
-        assert a.shape == (3, 3)
-        assert b.shape == (3, 3)
-        npc = np.kron(a, b)
-        assert_allclose(c, npc)
-        assert isinstance(c, np.matrix)
+    @mark.parametrize("func", [kron_dense, kron_dense_big])
+    def test_kron_dense(self, d1, d2, func):
+        x = func(d1, d2)
+        assert d1.shape == (3, 3)
+        assert d2.shape == (3, 3)
+        xn = np.kron(d1, d2)
+        assert_allclose(x, xn)
+        assert isinstance(x, np.matrix)
 
-    def test_kron_dense_big(self):
-        a = rand_matrix(3)
-        b = rand_matrix(3)
-        c = kron_dense_big(a, b)
-        npc = np.kron(a, b)
-        assert_allclose(c, npc)
-        assert isinstance(c, np.matrix)
+    def test_kron_multi_args(self, d1, d2, d3):
+        assert_allclose(kron(d1), d1)
+        assert_allclose(kron(d1, d2, d3),
+                        np.kron(np.kron(d1, d2), d3))
 
-    def test_kron_multi_args(self):
-        a = rand_matrix(3)
-        b = rand_matrix(3)
-        c = rand_matrix(3)
-        assert_allclose(kron(a), a)
-        assert_allclose(kron(a, b, c),
-                        np.kron(np.kron(a, b), c))
+    def test_kron_mixed_types(self, d1, s1):
+        assert_allclose(kron(d1, s1).A,
+                        (sp.kron(d1, s1, 'csr')).A)
+        assert_allclose(kron(s1, s1).A,
+                        (sp.kron(s1, s1, 'csr')).A)
 
-    def test_kron_mixed_types(self):
-        a = rand_ket(4)
-        b = rand_ket(4, sparse=True, density=0.5)
-        assert_allclose(kron(a, b).A,
-                        (sp.kron(a, b, 'csr')).A)
-        assert_allclose(kron(b, b).A,
-                        (sp.kron(b, b, 'csr')).A)
-
-    def test_kronpow(self):
-        a = rand_matrix(2)
-        b = a & a & a
-        c = kronpow(a, 3)
-        assert_allclose(b, c)
+    def test_kronpow(self, d1):
+        x = d1 & d1 & d1
+        y = kronpow(d1, 3)
+        assert_allclose(x, y)
 
 
 class TestKronSparseFormats:
-    def test_sparse_sparse_auto(self, mat_s):
-        c = kron_sparse(mat_s, mat_s)
+    def test_sparse_sparse_auto(self, s1):
+        c = kron_sparse(s1, s1)
         assert c.format == 'csr'
 
-    def test_sparse_dense_auto(self, mat_s, mat_d):
-        c = kron_sparse(mat_s, mat_d)
+    def test_sparse_dense_auto(self, s1, d1):
+        c = kron_sparse(s1, d1)
         assert c.format == 'bsr'
 
-    def test_dense_sparse_auto(self, mat_s, mat_d):
-        c = kron_sparse(mat_d, mat_s)
+    def test_dense_sparse_auto(self, s1, d1):
+        c = kron_sparse(d1, s1)
         assert c.format == 'csr'
 
-    def test_sparse_sparsennz(self, mat_s, mat_snnz):
-        c = kron_sparse(mat_s, mat_snnz)
+    def test_sparse_sparsennz(self, s1, s1nnz):
+        c = kron_sparse(s1, s1nnz)
         assert c.format == 'csr'
 
-    def test_sparse_sparse_to_coo(self, mat_s):
-        c = kron_sparse(mat_s, mat_s, format='coo')
-        assert c.format == 'coo'
+    @mark.parametrize("sformat", sparse_types)
+    def test_sparse_sparse_to_sformat(self, s1, sformat):
+        c = kron_sparse(s1, s1, sformat=sformat)
+        assert c.format == sformat
 
-    def test_sparse_sparse_to_csc(self, mat_s):
-        c = kron_sparse(mat_s, mat_s, format='csc')
-        assert c.format == 'csc'
+    @mark.parametrize("sformat", (None,) + sparse_types)
+    def test_many_args_dense_last(self, s1, s2, d1, sformat):
+        c = kron(s1, s2, d1, sformat=sformat)
+        assert c.format == (sformat if sformat is not None else "bsr")
 
-    def test_many_args_format(self, mat_s):
-        c = kron(mat_s, mat_s, mat_s, format='bsr')
-        assert c.format == 'bsr'
+    @mark.parametrize("sformat", (None,) + sparse_types)
+    def test_many_args_dense_not_last(self, s1, s2, d1, sformat):
+        c = kron(d1, s1, s2, sformat=sformat)
+        assert c.format == (sformat if sformat is not None else "csr")
+        c = kron(s1, d1, s2, sformat=sformat)
+        assert c.format == (sformat if sformat is not None else "csr")
+
+    @mark.parametrize("sformat", (None,) + sparse_types)
+    def test_many_args_dense_last_coo_construct(self, s1, s2, d1, sformat):
+        c = kron(s1, s2, d1, sformat=sformat, coo_construct=True)
+        assert c.format == (sformat if sformat is not None else "csr")
+
+    @mark.parametrize("sformat", (None,) + sparse_types)
+    def test_many_args_dense_not_last_coo_construct(self, s1, s2, d1, sformat):
+        c = kron(s1, d1, s2, sformat=sformat, coo_construct=True)
+        assert c.format == (sformat if sformat is not None else "csr")
+        c = kron(d1, s1, s2, sformat=sformat, coo_construct=True)
+        assert c.format == (sformat if sformat is not None else "csr")
 
 
 class TestCalcDotType:

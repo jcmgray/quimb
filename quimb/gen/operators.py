@@ -51,7 +51,7 @@ def controlled(s, sparse=False):
              sig(keymap[s], sparse=sparse)))
 
 
-def ham_heis(n, j=1.0, bz=0.0, cyclic=True, sparse=False):
+def ham_heis(n, j=1.0, bz=0.0, cyclic=True, sparse=False, sformat="csr"):
     """ Constructs the heisenberg spin 1/2 hamiltonian
     Parameters:
         n: number of spins
@@ -64,6 +64,7 @@ def ham_heis(n, j=1.0, bz=0.0, cyclic=True, sparse=False):
     Returns:
         ham: hamiltonian as matrix """
     # TODO: vector magnetic field
+    opts = {'sparse': True, 'sformat': "coo"}
     dims = (2,) * n
     try:
         jx, jy, jz = j
@@ -73,16 +74,20 @@ def ham_heis(n, j=1.0, bz=0.0, cyclic=True, sparse=False):
     sds = qu(jx * kron(sig('x'), sig('x')) +
              jy * kron(sig('y'), sig('y')) +
              jz * kron(sig('z'), sig('z')) -
-             bz * kron(sig('z'), eye(2)), sparse=True)
-    # Begin with last spin, not covered by loop
-    ham = eyepad(-bz * sig('z', sparse=True), dims, n - 1)
-    for i in range(n - 1):
-        ham = ham + eyepad(sds, dims, [i, i + 1])
+             bz * kron(sig('z'), eye(2)), **opts)
+
+    ham = sum(eyepad(sds, dims, [i, i + 1], **opts)
+              for i in range(n - 1))
+
     if cyclic:
-        ham = ham + eyepad(jx * sig('x', sparse=True), dims, [0, n - 1])  \
-                  + eyepad(jy * sig('y', sparse=True), dims, [0, n - 1])  \
-                  + eyepad(jz * sig('z', sparse=True), dims, [0, n - 1])
-    return ham if sparse else ham.todense()
+        ham = ham + sum(eyepad(j*sig(s, sparse=True), dims, [0, n - 1], **opts)
+                        for j, s in zip((jx, jy, jz), 'xyz'))
+    if bz != 0.0:
+        ham = ham + eyepad(-bz * sig('z', sparse=True), dims, n - 1, **opts)
+
+    return (ham if sparse and sformat == "coo" else
+            ham.asformat(sformat) if sparse else
+            np.asmatrix(ham.todense()))
 
 
 def ham_j1j2(n, j1=1.0, j2=0.5, bz=0.0, cyclic=True, sparse=False):

@@ -1,6 +1,7 @@
 """
 Core functions for manipulating quantum objects.
 """
+# TODO: move identity, trace to accel
 
 from math import log
 from operator import mul
@@ -33,6 +34,45 @@ def sparse_matrix(data, format="csr"):
     return sparse_constructors[format](data, dtype=complex)
 
 
+def normalize(qob, inplace=True):
+    """ Returns the state qob in normalized form """
+    n_factor = qob.tr() if isop(qob) else overlap(qob, qob)**0.25
+    if inplace:
+        qob /= n_factor
+        return qob
+    return qob / n_factor
+
+# Monkey-patch normalise methods
+nmlz = normalize
+np.matrix.nmlz = nmlz
+sp.csr_matrix.nmlz = nmlz
+
+
+def chop(x, tol=1.0e-15, inplace=True):
+    """ Set small values of an array to zero.
+
+    Parameters
+    ----------
+        x: dense or sparse matrix/array.
+        tol: fraction of max(abs(x)) to chop below.
+        inplace: whether to act on input array or return copy
+
+    Returns
+    -------
+        None if inplace else chopped matrix """
+    minm = np.abs(x).max() * tol  # minimum value tolerated
+    if not inplace:
+        x = x.copy()
+    if issparse(x):
+        x.data.real[np.abs(x.data.real) < minm] = 0.0
+        x.data.imag[np.abs(x.data.imag) < minm] = 0.0
+        x.eliminate_zeros()
+    else:
+        x.real[np.abs(x.real) < minm] = 0.0
+        x.imag[np.abs(x.imag) < minm] = 0.0
+    return x
+
+
 def quimbify(data, qtype=None, sparse=None, normalized=False,
              chopped=False, sformat=None):
     """
@@ -57,10 +97,11 @@ def quimbify(data, qtype=None, sparse=None, normalized=False,
         3. Will leave operators as is if 'dop' given, but construct one
             if vector given with the assumption that it was a ket.
     """
-    # TODO: just require a format to get sparse output
+
     sparse_input = issparse(data)
     sparse_output = (sparse or (sparse_input and sparse is None) or
-                     sformat in {"csr", "bsr", "csc", "coo"})
+                     (sparse is None and sformat in {"csr", "bsr",
+                                                     "csc", "coo"}))
     # Infer output sparse format from input if necessary
     if sparse_input and sparse_output and sformat is None:
         sformat = data.format
@@ -76,7 +117,7 @@ def quimbify(data, qtype=None, sparse=None, normalized=False,
             data = quimbify(data, "k") @ quimbify(data, "k").H
     # Just cast as numpy matrix
     elif not sparse_output:
-        data = np.asmatrix(data, dtype=complex)
+        data = np.asmatrix(data.A if sparse_input else data, dtype=complex)
 
     # Check if already sparse matrix, or wanted to be one
     if sparse_output:
@@ -128,22 +169,32 @@ np.matrix.tr = trace_dense
 sp.csr_matrix.tr = trace_sparse
 
 
-def normalize(qob, inplace=True):
-    """ Returns the state qob in normalized form """
-    n_factor = qob.tr() if isop(qob) else overlap(qob, qob)**0.25
-    if inplace:
-        qob /= n_factor
-        return qob
-    return qob / n_factor
+@matrixify
+@jit(complex128[:, :](int64), nopython=True)
+def identity_dense(d):  # pragma: no cover
+    """ Returns a dense, complex identity of order d. """
+    x = np.zeros((d, d), dtype=np.complex128)
+    for i in range(d):
+        x[i, i] = 1
+    return x
 
-# Monkey-patch normalise methods
-nmlz = normalize
-np.matrix.nmlz = nmlz
-sp.csr_matrix.nmlz = nmlz
+
+def identity_sparse(d, sformat="csr"):
+    """ Returns a sparse, complex identity of order d. """
+    return sp.eye(d, dtype=complex, format=sformat)
+
+
+def identity(d, sparse=False, sformat="csr"):
+    """ Return identity of size d in complex format, optionally sparse"""
+    return identity_sparse(d, sformat=sformat) if sparse else identity_dense(d)
+
+eye = identity
+speye = partial(identity, sparse=True)
 
 
 def coo_map(dims, coos, cyclic=False, trim=False):
-    """ Maps multi-dimensional coordinates and indices to flat arrays in a
+    """
+    Maps multi-dimensional coordinates and indices to flat arrays in a
     regular way. Wraps or deletes coordinates beyond the system size
     depending on parameters `cyclic` and `trim`.
 
@@ -159,9 +210,12 @@ def coo_map(dims, coos, cyclic=False, trim=False):
     Returns
     -------
         dims: flattened version of dims
-        coos: indices mapped to flattened dims """
+        coos: indices mapped to flattened dims
+    """
+    # TODO: rename dim_map
     dims = np.asarray(dims)
     shp_dims, n_dims = dims.shape, dims.ndim
+
     # Calculate 'shape multiplier' for each dimension
     shp_mul = [np.prod(shp_dims[i+1:], dtype=int) for i in range(n_dims)]
     coos = np.asarray(coos).reshape((len(coos), n_dims))
@@ -171,74 +225,75 @@ def coo_map(dims, coos, cyclic=False, trim=False):
         coos = coos[np.all(coos == coos % shp_dims, axis=1)]
     elif np.any(coos != coos % shp_dims):
         raise ValueError("Coordinates beyond system dimensions.")
+
     # Sum contributions from each coordinate & flatten dimensions
     coos = np.sum(shp_mul * coos, axis=1)
     return np.ravel(dims), coos
 
 
 def coo_compress(dims, inds):
-    """ Compresses identity spaces together: groups 1D dimensions according to
-    whether their index appears in inds, then merges the groups. """
+    """
+    Compresses identity spaces together: groups 1D dimensions according to
+    whether their index appears in inds, then merges the groups.
+    """
+    # TODO: rename dim_compress
+    # TODO: take account of -1 ?
+
+    # Group all `dims` indicies based on membership of `inds`
     try:
         inds = {*inds}
         grp_dims = groupby(range(len(dims)), lambda x: x in inds)
     except TypeError:  # single index given
         grp_dims = groupby(range(len(dims)), lambda x: x == inds)
+
+    # ???
     ks, gs = zip(*(((k, tuple(g)) for k, g in grp_dims)))
     ndims = [reduce(mul, (dims[i] for i in g)) for g in gs]
     ncoos = [i for i in range(len(ndims)) if ks[i]]
     return ndims, ncoos
 
 
-@matrixify
-@jit(complex128[:, :](int64), nopython=True)
-def identity_dense(d):  # pragma: no cover
-    """ Returns a dense, complex identity of order d. """
-    x = np.zeros((d, d), dtype=np.complex128)
-    for i in range(d):
-        x[i, i] = 1
-    return x
-
-
-def identity_sparse(d):
-    """ Returns a sparse, complex identity of order d. """
-    return sp.eye(d, dtype=complex, format="csr")
-
-
-def identity(d, sparse=False):
-    """ Return identity of size d in complex format, optionally sparse"""
-    return identity_sparse(d) if sparse else identity_dense(d)
-
-eye = identity
-speye = partial(identity, sparse=True)
-
-
-def eyepad(ops, dims, inds, sparse=None):
+def eyepad(ops, dims, inds, sparse=None, sformat=None):
     # TODO: rename? itensor, tensor
     # TODO: test 2d+ dims and coos
-    # TODO: compress coords?
+    # TODO: simplify  with compress coords?
     # TODO: allow -1 in dims to auto place *without* ind?
-    """ Places several operators 'over' locations inds of dims. Automatically
+    """
+    Tensor product, but padded with identites. Automatically
     placing a large operator over several dimensions is allowed and a list
     of operators can be given which are then applied cyclically.
 
     Parameters
     ----------
-        ops: operator or list of operators to put into the tensor space
-        dims: dimensions of tensor space, use -1 to ignore dimension matching
-        inds: indices of the dimenions to place operators on
+        ops: operator or list of operators to put into the tensor space.
+        dims: dimensions of tensor space, use -1 to ignore dimension matching.
+        inds: indices of the dimenions to place operators on.
         sparse: whether to construct the new operator in sparse form.
 
     Returns
     -------
-        Operator such that ops act on dims[inds]. """
+        Operator such that ops act on dims[inds].
+
+    *Notes:*
+        1. if len(inds) > len(ops), then ops will be cycled over.
+    """
+
+    # Make sure `ops` islist
     if isinstance(ops, (np.ndarray, sp.spmatrix)):
         ops = [ops]
+
+    # Make sure dimensions and coordinates have been flattenened.
     if np.ndim(dims) > 1:
         dims, inds = coo_map(dims, inds)
+    # Make sure `inds` is list
     elif np.ndim(inds) == 0:
         inds = [inds]
-    sparse = issparse(ops[0]) if sparse is None else sparse
+
+    # Infer sparsity from list of ops
+    if sparse is None:
+        sparse = any(issparse(op) for op in ops)
+
+    # Create a sorted list of operators with their matching index
     inds, ops = zip(*sorted(zip(inds, cycle(ops))))
     inds, ops = set(inds), iter(ops)
 
@@ -248,7 +303,7 @@ def eyepad(ops, dims, inds, sparse=None):
         for ind, dim in enumerate(dims):
             if ind in inds:  # op should be placed here
                 if cff_id > 1:  # need preceding identities
-                    yield eye(cff_id, sparse=sparse)
+                    yield eye(cff_id, sparse=sparse, sformat=sformat)
                     cff_id = 1  # reset cumulative identity size
                 if cff_ov == 1:  # first dim in placement block
                     op = next(ops)
@@ -263,9 +318,9 @@ def eyepad(ops, dims, inds, sparse=None):
             else:  # accumulate adjacent identites
                 cff_id *= dim
         if cff_id > 1:  # trailing identities
-            yield eye(cff_id, sparse=sparse)
+            yield eye(cff_id, sparse=sparse, sformat=sformat)
 
-    return kron(*gen_ops())
+    return kron(*gen_ops(), sformat=sformat)
 
 
 @matrixify
@@ -461,34 +516,6 @@ ptr = partial_trace
 trx = partial_trace
 np.matrix.ptr = partial_trace_clever
 sp.csr_matrix.ptr = partial_trace_simple
-
-
-def chop(x, tol=1.0e-15, inplace=True):
-    """ Set small values of an array to zero.
-
-    Parameters
-    ----------
-        x: dense or sparse matrix/array.
-        tol: fraction of max(abs(x)) to chop below.
-        inplace: whether to act on input array or return copy
-
-    Returns
-    -------
-        None if inplace else chopped matrix """
-    minm = np.abs(x).max() * tol  # minimum value tolerated
-    if not inplace:
-        x = x.copy()
-    if issparse(x):
-        x.data.real[np.abs(x.data.real) < minm] = 0.0
-        x.data.imag[np.abs(x.data.imag) < minm] = 0.0
-        x.eliminate_zeros()
-    else:
-        x.real[np.abs(x.real) < minm] = 0.0
-        x.imag[np.abs(x.imag) < minm] = 0.0
-    return x
-
-# np.matrix.chop = chop
-# sp.csr_matrix = chop
 
 
 def overlap(a, b):

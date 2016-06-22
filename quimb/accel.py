@@ -7,11 +7,15 @@ Core accelerated numerical functions
 
 from cmath import exp
 from functools import partial
+
 import numpy as np
 import scipy.sparse as sp
 from scipy.sparse import issparse
 from numba import jit, vectorize
 from numexpr import evaluate
+
+
+accel = partial(jit, nopython=True, cache=True)
 
 
 # --------------------------------------------------------------------------- #
@@ -25,14 +29,20 @@ def matrixify(foo):
     return matrixified_foo
 
 
-def realify(foo, imag_tol=1.0e-13):
+def realify(foo, imag_tol=1.0e-14):
     """ To decorate functions that should return float for small complex. """
     def realified_foo(*args, **kwargs):
         x = foo(*args, **kwargs)
         return x.real if abs(x.imag) < abs(x.real) * imag_tol else x
     return realified_foo
 
-accel = partial(jit, nopython=True, cache=True)
+
+def zeroify(foo, tol=1e-14):
+    """ To decorate functions that compute close to zero answers. """
+    def zeroified_foo(*args, **kwargs):
+        x = foo(*args, **kwargs)
+        return 0.0 if abs(x) < tol else x
+    return zeroified_foo
 
 
 # --------------------------------------------------------------------------- #
@@ -198,6 +208,16 @@ def outer(a, b):
     return mul_dense(a, b) if d < 500 else np.asmatrix(evaluate('a * b'))
 
 
+@vectorize(nopython=True)
+def explt(l, t):  # pragma: no cover
+    """ Complex exponenital as used in solution to schrodinger equation. """
+    return exp((-1.0j * t) * l)
+
+
+# --------------------------------------------------------------------------- #
+# Kronecker (tensor) product                                                  #
+# --------------------------------------------------------------------------- #
+
 @accel
 def reshape_for_kron(a, b):  # pragma: no cover
     m, n = a.shape
@@ -220,38 +240,37 @@ def kron_dense_big(a, b):
     return evaluate('a * b').reshape((mp, nq))
 
 
-def kron_sparse(a, b, format=None):
-    """
-    Sparse tensor product
-    """
-    if format is None:
-        format = ("bsr" if isinstance(b, np.ndarray) or b.format == 'bsr' else
-                  b.format if isinstance(a, np.ndarray) else
-                  "csc" if a.format == "csc" and b.format == "csc" else
-                  "csr")
+def kron_sparse(a, b, sformat=None):
+    """  Sparse tensor product, output format can be specified or will be
+    automatically determined. """
+    if sformat is None:
+        sformat = ("bsr" if isinstance(b, np.ndarray) or b.format == 'bsr' else
+                   b.format if isinstance(a, np.ndarray) else
+                   "csc" if a.format == "csc" and b.format == "csc" else
+                   "csr")
 
-    return sp.kron(a, b, format=format)
+    return sp.kron(a, b, format=sformat)
 
 
-def kron_dispatch(a, b, format=None):
+def kron_dispatch(a, b, sformat=None):
         if issparse(a) or issparse(b):
-            return kron_sparse(a, b, format=format)
+            return kron_sparse(a, b, sformat=sformat)
         elif a.size * b.size > 23000:  # pragma: no cover
             return kron_dense_big(a, b)
         else:
             return kron_dense(a, b)
 
 
-def kron(*ops, format=None, coo_construct=False):
+def kron(*ops, sformat=None, coo_construct=False):
     """
     Tensor product of variable number of arguments.
 
     Parameters
     ----------
         ops: objects to be tensored together
-        format: desired output format if resultant object is sparse.
+        sformat: desired output format if resultant object is sparse.
         coo_construct: whether to force sparse construction to use the 'coo'
-            format,
+            format (only for sparse matrices in the first place.).
 
     Returns
     -------
@@ -267,14 +286,14 @@ def kron(*ops, format=None, coo_construct=False):
         if _l == 1:
             return ops[0]
         elif _l == 2:
-            return kron_dispatch(ops[0], ops[1], format=cfrmt)
+            a, b = ops
+            return kron_dispatch(ops[0], ops[1], sformat=cfrmt)
         else:
-            return kron_dispatch(ops[0], kronner(ops[1:], _l-1), format=cfrmt)
+            return kron_dispatch(ops[0], kronner(ops[1:], _l-1), sformat=cfrmt)
 
     x = kronner(ops, len(ops))
-    if issparse(x) and format is not None:
-        x = x.asformat(format)
-    return x
+    sformat = "csr" if coo_construct and sformat is None else sformat
+    return (x.asformat(sformat) if sformat is not None else x)
 
 
 # Monkey-patch unused & symbol to tensor product
@@ -282,17 +301,13 @@ np.matrix.__and__ = kron_dispatch
 sp.csr_matrix.__and__ = kron_dispatch
 sp.bsr_matrix.__and__ = kron_dispatch
 sp.csc_matrix.__and__ = kron_dispatch
+sp.coo_matrix.__and__ = kron_dispatch
 
 
-def kronpow(a, pwr):
-    """ Returns `a` tensored with itself pwr times """
-    return kron(*(a for _ in range(pwr)))
-
-
-@vectorize(nopython=True)
-def explt(l, t):  # pragma: no cover
-    """ Complex exponenital as used in solution to schrodinger equation. """
-    return exp((-1.0j * t) * l)
+def kronpow(a, pow, sformat=None, coo_construct=False):
+    """ Returns `a` tensored with itself `pow` times """
+    return kron(*(a for _ in range(pow)),
+                sformat=sformat, coo_construct=coo_construct)
 
 
 # --------------------------------------------------------------------------- #

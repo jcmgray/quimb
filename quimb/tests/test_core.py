@@ -102,8 +102,6 @@ class TestQuimbify:
         assert(p.nnz == 2)
 
     def test_sparse_convert_to_dop(self):
-        # import pdb
-        # pdb.set_trace()
         x = [1, 0, 9e-16, 0, 3j]
         p = qu(x, 'ket', sparse=True)
         q = qu(p, 'dop', sparse=True)
@@ -113,7 +111,7 @@ class TestQuimbify:
         q = qu(p, 'dop', sparse=True, normalized=True)
         assert_almost_equal(tr(q), 1.)
 
-    @mark.parametrize("qtype,shape,out",
+    @mark.parametrize("qtype, shape, out",
                       (("bra", (1, 4), [[1, 0, 2, -3j]]),
                        ("ket", (4, 1), [[1], [0], [2], [3j]]),
                        ("dop", (4, 4), [[1, 0, 2, -3j],
@@ -132,7 +130,7 @@ class TestQuimbify:
         assert y.format == format_out
         assert_allclose(y.A, out)
 
-    @mark.parametrize("qtype,shape,out",
+    @mark.parametrize("qtype, shape, out",
                       (("bra", (1, 4), [[1, 0, 2, -3j]]),
                        ("ket", (4, 1), [[1], [0], [2], [3j]]),
                        ("dop", (4, 4), [[1, 0, 2, -3j],
@@ -150,31 +148,41 @@ class TestQuimbify:
         assert y.format == format_out
         assert_allclose(y.A, out)
 
+    @mark.parametrize("qtype, shape",
+                      (["bra", (1, 4)],
+                       ["ket", (4, 1)],
+                       ["dop", (4, 4)]))
+    @mark.parametrize("format_out", sparse_types)
+    def test_give_sformat_only(self, qtype, shape, format_out):
+        x = [[1], [0], [2], [3j]]
+        y = qu(x, qtype=qtype, sformat=format_out)
+        assert issparse(y)
+        assert y.shape == shape
+        assert y.format == format_out
+
 
 class TestInferSize:
-    @mark.parametrize("d,base,n", ([8, 2, 3],
-                                   [16, 2, 4],
-                                   [9, 3, 2],
-                                   [81, 3, 4]))
+    @mark.parametrize("d,base,n",
+                      ([8, 2, 3],
+                       [16, 2, 4],
+                       [9, 3, 2],
+                       [81, 3, 4]))
     def test_infer_size(self, d, base, n):
         p = rand_ket(d)
         assert infer_size(p, base) == n
 
 
 class TestTrace:
-    def test_trace_dense(self):
-        a = qu([[2, 1], [4, 5]])
-        assert(trace(a) == 7)
-        a = qu([[2, 1], [4, 5j]])
-        assert(trace(a) == 2 + 5j)
-        assert(a.tr.__code__.co_code == trace_dense.__code__.co_code)
-
-    def test_sparse_trace(self):
-        a = qu([[2, 1], [0, 5]], sparse=True)
-        assert(trace(a) == 7)
-        a = qu([[2, 1], [4, 5j]], sparse=True)
-        assert(trace(a) == 2 + 5j)
-        assert(a.tr.__code__.co_code == trace_sparse.__code__.co_code)
+    @mark.parametrize("inpt, outpt",
+                      ([[[2, 1], [4, 5]], 7],
+                       [[[2, 1], [4, 5j]], 2 + 5j]))
+    @mark.parametrize("sparse, func",
+                      ([False, trace_dense],
+                       [True, trace_sparse]))
+    def test_simple(self, inpt, outpt, sparse, func):
+        a = qu(inpt, sparse=sparse)
+        assert(trace(a) == outpt)
+        assert(a.tr.__code__.co_code == func.__code__.co_code)
 
 
 class TestNormalize:
