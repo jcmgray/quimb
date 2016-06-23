@@ -54,11 +54,15 @@ class TestHamHeis:
         lk = seigvals(h, 4)
         assert_allclose(lk, [-8, -4, -4, -4])
 
-    # @mark.parametrize("sformat", ["csr", "csc", "bsr", "coo"])
-    # TODO:
-    # def test_sformat_construct(self, sformat):
-    #     h = ham_heis(4, sparse=True, sformat=sformat)
-    #     assert h.format == sformat
+    def test_ham_heis_bz(self):
+        h = ham_heis(2, cyclic=False, bz=2)
+        l = eigvals(h)
+        assert_allclose(l, [-3, -3, 1, 5])
+
+    @mark.parametrize("stype", ["coo", "csr", "csc", "bsr"])
+    def test_sformat_construct(self, stype):
+        h = ham_heis(4, sparse=True, stype=stype)
+        assert h.format == stype
 
 
 class TestHamJ1J2:
@@ -73,12 +77,10 @@ class TestHamJ1J2:
         assert_allclose(lk, [-9, -9, -7, -7, -7])
 
     def test_ham_j1j2_4_bz(self):
-        h = ham_j1j2(4, cyclic=True, bz=0)
+        h = ham_j1j2(4, j2=0.5, cyclic=True, bz=0)
         lk = seigvals(h, 11)
         assert_allclose(lk, [-6, -6, -2, -2, -2, -2, -2, -2, -2, -2, -2])
-        h = ham_j1j2(4, cyclic=True, bz=0.1)
+        h = ham_j1j2(4, j2=0.5, cyclic=True, bz=0.1)
         lk = seigvals(h, 11)
-        assert_allclose(lk, [-6, -6,
-                             -2.2, -2.2, -2.2,
-                             -2.0, -2.0, -2.0,
-                             -1.8, -1.8, -1.8])
+        assert_allclose(lk, [-6, -6, -2.2, -2.2, -2.2,
+                             -2.0, -2.0, -2.0, -1.8, -1.8, -1.8])

@@ -19,9 +19,11 @@ def convert_to_petsc(a):
     """
     comm = PETSc.COMM_WORLD
     if sp.isspmatrix_csr(a):
+        a.sort_indices()
         csr = (a.indptr, a.indices, a.data)
         b = PETSc.Mat().createAIJ(size=a.shape, csr=csr, comm=comm)
     elif sp.isspmatrix_bsr(a):
+        a.sort_indices()
         csr = (a.indptr, a.indices, a.data)
         b = PETSc.Mat().createBAIJ(size=a.shape, bsize=a.blocksize,
                                    csr=csr, comm=comm)

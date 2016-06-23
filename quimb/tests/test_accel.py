@@ -13,7 +13,7 @@ from ..accel import (
 )
 
 
-sparse_types = ("csr", "bsr", "csc", "coo")
+sparse_formats = ("csr", "bsr", "csc", "coo")
 
 
 @fixture
@@ -314,6 +314,18 @@ class TestOuter:
         assert_allclose(c, d)
 
 
+class TestExplt:
+    def test_small(self):
+        l = np.random.randn(3)
+        en = np.exp(-1.0j * l * 7)
+        eq = explt(l, 7)
+        assert_allclose(eq, en)
+
+
+# --------------------------------------------------------------------------- #
+# Kronecker (tensor) product tests                                            #
+# --------------------------------------------------------------------------- #
+
 class TestKron:
     @mark.parametrize("func", [kron_dense, kron_dense_big])
     def test_kron_dense(self, d1, d2, func):
@@ -335,11 +347,6 @@ class TestKron:
         assert_allclose(kron(s1, s1).A,
                         (sp.kron(s1, s1, 'csr')).A)
 
-    def test_kronpow(self, d1):
-        x = d1 & d1 & d1
-        y = kronpow(d1, 3)
-        assert_allclose(x, y)
-
 
 class TestKronSparseFormats:
     def test_sparse_sparse_auto(self, s1):
@@ -358,35 +365,67 @@ class TestKronSparseFormats:
         c = kron_sparse(s1, s1nnz)
         assert c.format == 'csr'
 
-    @mark.parametrize("sformat", sparse_types)
-    def test_sparse_sparse_to_sformat(self, s1, sformat):
-        c = kron_sparse(s1, s1, sformat=sformat)
-        assert c.format == sformat
+    @mark.parametrize("stype", sparse_formats)
+    def test_sparse_sparse_to_sformat(self, s1, stype):
+        c = kron_sparse(s1, s1, stype=stype)
+        assert c.format == stype
 
-    @mark.parametrize("sformat", (None,) + sparse_types)
-    def test_many_args_dense_last(self, s1, s2, d1, sformat):
-        c = kron(s1, s2, d1, sformat=sformat)
-        assert c.format == (sformat if sformat is not None else "bsr")
+    @mark.parametrize("stype", (None,) + sparse_formats)
+    def test_many_args_dense_last(self, s1, s2, d1, stype):
+        c = kron(s1, s2, d1, stype=stype)
+        assert c.format == (stype if stype is not None else "bsr")
 
-    @mark.parametrize("sformat", (None,) + sparse_types)
-    def test_many_args_dense_not_last(self, s1, s2, d1, sformat):
-        c = kron(d1, s1, s2, sformat=sformat)
-        assert c.format == (sformat if sformat is not None else "csr")
-        c = kron(s1, d1, s2, sformat=sformat)
-        assert c.format == (sformat if sformat is not None else "csr")
+    @mark.parametrize("stype", (None,) + sparse_formats)
+    def test_many_args_dense_not_last(self, s1, s2, d1, stype):
+        c = kron(d1, s1, s2, stype=stype)
+        assert c.format == (stype if stype is not None else "csr")
+        c = kron(s1, d1, s2, stype=stype)
+        assert c.format == (stype if stype is not None else "csr")
 
-    @mark.parametrize("sformat", (None,) + sparse_types)
-    def test_many_args_dense_last_coo_construct(self, s1, s2, d1, sformat):
-        c = kron(s1, s2, d1, sformat=sformat, coo_construct=True)
-        assert c.format == (sformat if sformat is not None else "csr")
+    @mark.parametrize("stype", (None,) + sparse_formats)
+    def test_many_args_dense_last_coo_construct(self, s1, s2, d1, stype):
+        c = kron(s1, s2, d1, stype=stype, coo_build=True)
+        assert c.format == (stype if stype is not None else "csr")
 
-    @mark.parametrize("sformat", (None,) + sparse_types)
-    def test_many_args_dense_not_last_coo_construct(self, s1, s2, d1, sformat):
-        c = kron(s1, d1, s2, sformat=sformat, coo_construct=True)
-        assert c.format == (sformat if sformat is not None else "csr")
-        c = kron(d1, s1, s2, sformat=sformat, coo_construct=True)
-        assert c.format == (sformat if sformat is not None else "csr")
+    @mark.parametrize("stype", (None,) + sparse_formats)
+    def test_many_args_dense_not_last_coo_construct(self, s1, s2, d1, stype):
+        c = kron(s1, d1, s2, stype=stype, coo_build=True)
+        assert c.format == (stype if stype is not None else "csr")
+        c = kron(d1, s1, s2, stype=stype, coo_build=True)
+        assert c.format == (stype if stype is not None else "csr")
 
+
+class TestKronPow:
+    def test_dense(self, d1):
+        x = d1 & d1 & d1
+        y = kronpow(d1, 3)
+        assert_allclose(x, y)
+
+    def test_sparse(self, s1):
+        x = s1 & s1 & s1
+        y = kronpow(s1, 3)
+        assert_allclose(x.A, y.A)
+
+    @mark.parametrize("stype", sparse_formats)
+    def test_sparse_formats(self, stype, s1):
+        x = s1 & s1 & s1
+        y = kronpow(s1, 3, stype=stype)
+        assert y.format == stype
+        assert_allclose(x.A, y.A)
+
+    @mark.parametrize("sformat_in", sparse_formats)
+    @mark.parametrize("stype", (None,) + sparse_formats)
+    def test_sparse_formats_coo_construct(self, sformat_in, stype, s1):
+        s1 = s1.asformat(sformat_in)
+        x = s1 & s1 & s1
+        y = kronpow(s1, 3, stype=stype, coo_build=True)
+        assert y.format == stype if stype is not None else "sformat_in"
+        assert_allclose(x.A, y.A)
+
+
+# --------------------------------------------------------------------------- #
+# Test Intelligent chaining of operations tests                               #
+# --------------------------------------------------------------------------- #
 
 class TestCalcDotType:
     def test_scalar(self):
@@ -418,18 +457,6 @@ class TestCalcDotWeightFuncOut:
                         (11, 12, 21, 23, 25, 32)):
             assert calc_dot_weight_func_out(z, "k")[0] == w
 
-
-class TestExplt:
-    def test_small(self):
-        l = np.random.randn(3)
-        en = np.exp(-1.0j * l * 7)
-        eq = explt(l, 7)
-        assert_allclose(eq, en)
-
-
-# --------------------------------------------------------------------------- #
-# Test Intelligent chaining of operations                                     #
-# --------------------------------------------------------------------------- #
 
 class TestIdot:
     def test_multiarg_mats(self, test_objs):

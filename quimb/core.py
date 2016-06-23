@@ -7,10 +7,12 @@ from math import log
 from operator import mul
 from itertools import cycle, groupby, product
 from functools import reduce, partial
+
 import numpy as np
 from numpy.matlib import zeros
 import scipy.sparse as sp
 from numba import jit, complex128, int64
+
 from .accel import (
     matrixify,
     realify,
@@ -74,7 +76,7 @@ def chop(x, tol=1.0e-15, inplace=True):
 
 
 def quimbify(data, qtype=None, sparse=None, normalized=False,
-             chopped=False, sformat=None):
+             chopped=False, stype=None):
     """
     Converts lists to 'quantum' i.e. complex matrices, kets being columns.
 
@@ -84,7 +86,7 @@ def quimbify(data, qtype=None, sparse=None, normalized=False,
         qtype: output type, either 'ket', 'bra' or 'dop' if given
         sparse: convert output to sparse 'csr' format
         normalized: normalise the output
-        sformat: format of sparse matrix
+        stype: format of sparse matrix
 
     Returns
     -------
@@ -100,11 +102,11 @@ def quimbify(data, qtype=None, sparse=None, normalized=False,
 
     sparse_input = issparse(data)
     sparse_output = (sparse or (sparse_input and sparse is None) or
-                     (sparse is None and sformat in {"csr", "bsr",
-                                                     "csc", "coo"}))
+                     (sparse is None and stype in {"csr", "bsr",
+                                                   "csc", "coo"}))
     # Infer output sparse format from input if necessary
-    if sparse_input and sparse_output and sformat is None:
-        sformat = data.format
+    if sparse_input and sparse_output and stype is None:
+        stype = data.format
 
     if qtype is not None:
         # Must be dense to reshape
@@ -121,7 +123,7 @@ def quimbify(data, qtype=None, sparse=None, normalized=False,
 
     # Check if already sparse matrix, or wanted to be one
     if sparse_output:
-        data = sparse_matrix(data, (sformat if sformat is not None else "csr"))
+        data = sparse_matrix(data, (stype if stype is not None else "csr"))
 
     # Optionally normalize and chop small components
     if normalized:
@@ -179,20 +181,20 @@ def identity_dense(d):  # pragma: no cover
     return x
 
 
-def identity_sparse(d, sformat="csr"):
+def identity_sparse(d, stype="csr"):
     """ Returns a sparse, complex identity of order d. """
-    return sp.eye(d, dtype=complex, format=sformat)
+    return sp.eye(d, dtype=complex, format=stype)
 
 
-def identity(d, sparse=False, sformat="csr"):
+def identity(d, sparse=False, stype="csr"):
     """ Return identity of size d in complex format, optionally sparse"""
-    return identity_sparse(d, sformat=sformat) if sparse else identity_dense(d)
+    return identity_sparse(d, stype=stype) if sparse else identity_dense(d)
 
 eye = identity
 speye = partial(identity, sparse=True)
 
 
-def coo_map(dims, coos, cyclic=False, trim=False):
+def dim_map(dims, coos, cyclic=False, trim=False):
     """
     Maps multi-dimensional coordinates and indices to flat arrays in a
     regular way. Wraps or deletes coordinates beyond the system size
@@ -231,12 +233,11 @@ def coo_map(dims, coos, cyclic=False, trim=False):
     return np.ravel(dims), coos
 
 
-def coo_compress(dims, inds):
+def dim_compress(dims, inds):
     """
     Compresses identity spaces together: groups 1D dimensions according to
     whether their index appears in inds, then merges the groups.
     """
-    # TODO: rename dim_compress
     # TODO: take account of -1 ?
 
     # Group all `dims` indicies based on membership of `inds`
@@ -253,7 +254,7 @@ def coo_compress(dims, inds):
     return ndims, ncoos
 
 
-def eyepad(ops, dims, inds, sparse=None, sformat=None):
+def eyepad(ops, dims, inds, sparse=None, stype=None, coo_build=False):
     # TODO: rename? itensor, tensor
     # TODO: test 2d+ dims and coos
     # TODO: simplify  with compress coords?
@@ -284,7 +285,7 @@ def eyepad(ops, dims, inds, sparse=None, sformat=None):
 
     # Make sure dimensions and coordinates have been flattenened.
     if np.ndim(dims) > 1:
-        dims, inds = coo_map(dims, inds)
+        dims, inds = dim_map(dims, inds)
     # Make sure `inds` is list
     elif np.ndim(inds) == 0:
         inds = [inds]
@@ -297,13 +298,14 @@ def eyepad(ops, dims, inds, sparse=None, sformat=None):
     inds, ops = zip(*sorted(zip(inds, cycle(ops))))
     inds, ops = set(inds), iter(ops)
 
+    # TODO: refactor this / just use dim_compress
     def gen_ops():
         cff_id = 1  # keeps track of compressing adjacent identities
         cff_ov = 1  # keeps track of overlaying op on multiple dimensions
         for ind, dim in enumerate(dims):
             if ind in inds:  # op should be placed here
                 if cff_id > 1:  # need preceding identities
-                    yield eye(cff_id, sparse=sparse, sformat=sformat)
+                    yield eye(cff_id, sparse=sparse, stype="coo")
                     cff_id = 1  # reset cumulative identity size
                 if cff_ov == 1:  # first dim in placement block
                     op = next(ops)
@@ -318,9 +320,9 @@ def eyepad(ops, dims, inds, sparse=None, sformat=None):
             else:  # accumulate adjacent identites
                 cff_id *= dim
         if cff_id > 1:  # trailing identities
-            yield eye(cff_id, sparse=sparse, sformat=sformat)
+            yield eye(cff_id, sparse=sparse, stype="coo")
 
-    return kron(*gen_ops(), sformat=sformat)
+    return kron(*gen_ops(), stype=stype, coo_build=coo_build)
 
 
 @matrixify
@@ -485,7 +487,7 @@ def partial_trace_simple(p, dims, coos_keep):
     """ Simple partial trace made up of consecutive single subsystem partial
     traces, augmented by 'compressing' the dimensions each time. """
     p = p if isop(p) else p @ p.H
-    dims, coos_keep = coo_compress(dims, coos_keep)
+    dims, coos_keep = dim_compress(dims, coos_keep)
     if len(coos_keep) == 1:
         return trace_keep(p, dims, *coos_keep)
     lmax = max(enumerate(dims),

@@ -3,6 +3,7 @@ Note that the eigendecompositions here all assume a
 hermitian matrix and sort the eigenvalues in ascending
 algebraic order by default. Use explicit numpy/scipy linalg
 routines for non-hermitian matrices. """
+# TODO: restart eigen and svd -  up to tol
 # TODO: test non-herm
 
 import numpy as np

@@ -240,36 +240,36 @@ def kron_dense_big(a, b):
     return evaluate('a * b').reshape((mp, nq))
 
 
-def kron_sparse(a, b, sformat=None):
+def kron_sparse(a, b, stype=None):
     """  Sparse tensor product, output format can be specified or will be
     automatically determined. """
-    if sformat is None:
-        sformat = ("bsr" if isinstance(b, np.ndarray) or b.format == 'bsr' else
-                   b.format if isinstance(a, np.ndarray) else
-                   "csc" if a.format == "csc" and b.format == "csc" else
-                   "csr")
+    if stype is None:
+        stype = ("bsr" if isinstance(b, np.ndarray) or b.format == 'bsr' else
+                 b.format if isinstance(a, np.ndarray) else
+                 "csc" if a.format == "csc" and b.format == "csc" else
+                 "csr")
 
-    return sp.kron(a, b, format=sformat)
+    return sp.kron(a, b, format=stype)
 
 
-def kron_dispatch(a, b, sformat=None):
+def kron_dispatch(a, b, stype=None):
         if issparse(a) or issparse(b):
-            return kron_sparse(a, b, sformat=sformat)
+            return kron_sparse(a, b, stype=stype)
         elif a.size * b.size > 23000:  # pragma: no cover
             return kron_dense_big(a, b)
         else:
             return kron_dense(a, b)
 
 
-def kron(*ops, sformat=None, coo_construct=False):
+def kron(*ops, stype=None, coo_build=False):
     """
     Tensor product of variable number of arguments.
 
     Parameters
     ----------
         ops: objects to be tensored together
-        sformat: desired output format if resultant object is sparse.
-        coo_construct: whether to force sparse construction to use the 'coo'
+        stype: desired output format if resultant object is sparse.
+        coo_build: whether to force sparse construction to use the 'coo'
             format (only for sparse matrices in the first place.).
 
     Returns
@@ -280,20 +280,21 @@ def kron(*ops, sformat=None, coo_construct=False):
     -----
          1. The product is performed as (a * (b * (c * ...)))
     """
-    cfrmt = "coo" if coo_construct else None
+    opts = {"stype": "coo" if coo_build or stype == "coo" else None}
 
-    def kronner(ops, _l):
+    def _inner_kron(ops, _l):
         if _l == 1:
             return ops[0]
-        elif _l == 2:
-            a, b = ops
-            return kron_dispatch(ops[0], ops[1], sformat=cfrmt)
-        else:
-            return kron_dispatch(ops[0], kronner(ops[1:], _l-1), sformat=cfrmt)
+        a, b = ops[0], _inner_kron(ops[1:], _l-1)
+        return kron_dispatch(a, b, **opts)
 
-    x = kronner(ops, len(ops))
-    sformat = "csr" if coo_construct and sformat is None else sformat
-    return (x.asformat(sformat) if sformat is not None else x)
+    x = _inner_kron(ops, len(ops))
+
+    if stype is not None:
+        return x.asformat(stype)
+    if coo_build or (issparse(x) and x.format == "coo"):
+        return x.asformat("csr")
+    return x
 
 
 # Monkey-patch unused & symbol to tensor product
@@ -304,10 +305,9 @@ sp.csc_matrix.__and__ = kron_dispatch
 sp.coo_matrix.__and__ = kron_dispatch
 
 
-def kronpow(a, pow, sformat=None, coo_construct=False):
+def kronpow(a, pow, stype=None, coo_build=False):
     """ Returns `a` tensored with itself `pow` times """
-    return kron(*(a for _ in range(pow)),
-                sformat=sformat, coo_construct=coo_construct)
+    return kron(*(a for _ in range(pow)), stype=stype, coo_build=coo_build)
 
 
 # --------------------------------------------------------------------------- #

@@ -51,9 +51,11 @@ def controlled(s, sparse=False):
              sig(keymap[s], sparse=sparse)))
 
 
-def ham_heis(n, j=1.0, bz=0.0, cyclic=True, sparse=False, sformat="csr"):
+def ham_heis(n, j=1.0, bz=0.0, cyclic=True, sparse=False, stype="csr"):
     """ Constructs the heisenberg spin 1/2 hamiltonian
-    Parameters:
+
+    Parameters
+    ----------
         n: number of spins
         j: coupling constant(s), with convention that positive =
             antiferromagnetic. Can supply scalar for isotropic coupling or
@@ -61,23 +63,25 @@ def ham_heis(n, j=1.0, bz=0.0, cyclic=True, sparse=False, sformat="csr"):
         bz: z-direction magnetic field
         cyclic: whether to couple the first and last spins
         sparse: whether to return the hamiltonian in sparse form
-    Returns:
+        stype: what format of sparse matrix to return
+
+    Returns
+    -------
         ham: hamiltonian as matrix """
     # TODO: vector magnetic field
-    opts = {'sparse': True, 'sformat': "coo"}
     dims = (2,) * n
     try:
         jx, jy, jz = j
     except TypeError:
         jx = jy = jz = j
 
+    opts = {"sparse": True, "stype": "coo", "coo_build": True}
+
     sds = qu(jx * kron(sig('x'), sig('x')) +
              jy * kron(sig('y'), sig('y')) +
              jz * kron(sig('z'), sig('z')) -
-             bz * kron(sig('z'), eye(2)), **opts)
-
-    ham = sum(eyepad(sds, dims, [i, i + 1], **opts)
-              for i in range(n - 1))
+             bz * kron(sig('z'), eye(2)), sparse=True, stype="coo")
+    ham = sum(eyepad(sds, dims, [i, i + 1], **opts) for i in range(n - 1))
 
     if cyclic:
         ham = ham + sum(eyepad(j*sig(s, sparse=True), dims, [0, n - 1], **opts)
@@ -85,9 +89,12 @@ def ham_heis(n, j=1.0, bz=0.0, cyclic=True, sparse=False, sformat="csr"):
     if bz != 0.0:
         ham = ham + eyepad(-bz * sig('z', sparse=True), dims, n - 1, **opts)
 
-    return (ham if sparse and sformat == "coo" else
-            ham.asformat(sformat) if sparse else
-            np.asmatrix(ham.todense()))
+    if not sparse:
+        return np.asmatrix(ham.todense())
+    elif ham.format != stype:
+        return ham.asformat(stype)
+    else:
+        return ham
 
 
 def ham_j1j2(n, j1=1.0, j2=0.5, bz=0.0, cyclic=True, sparse=False):
@@ -117,14 +124,14 @@ def ham_j1j2(n, j1=1.0, j2=0.5, bz=0.0, cyclic=True, sparse=False):
 
     def j1_terms():
         for coo in coosj1:
-            if abs(coo[1] - coo[0]) == 1:  # can sum then tensor
+            if abs(coo[1] - coo[0]) == 1:  # can sum then tensor (faster)
                 yield eyepad(sum(op & op for op in ps), dims, coo)
             else:  # tensor then sum (slower)
                 yield sum(eyepad(op, dims, coo) for op in ps)
 
     def j2_terms():
         for coo in coosj2:
-            if abs(coo[1] - coo[0]) == 2:  # can add then tensor
+            if abs(coo[1] - coo[0]) == 2:  # can add then tensor (faster)
                 yield eyepad(sum(op & eye(2) & op for op in ps), dims, coo)
             else:
                 yield sum(eyepad(op, dims, coo) for op in ps)

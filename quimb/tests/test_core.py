@@ -1,6 +1,6 @@
 from itertools import combinations
 
-from pytest import raises, mark
+from pytest import fixture, raises, mark
 import scipy.sparse as sp
 import numpy as np
 from numpy.testing import assert_allclose, assert_almost_equal
@@ -15,8 +15,8 @@ from ..core import (
     trace,
     tr,
     nmlz,
-    coo_map,
-    coo_compress,
+    dim_map,
+    dim_compress,
     eye,
     eyepad,
     perm_pad,
@@ -40,14 +40,24 @@ from ..gen import (
 )
 
 
-sparse_types = ("csr", "csc", "bsr", "coo")
+stypes = ("csr", "csc", "bsr", "coo")
+
+
+@fixture
+def od1():
+    return rand_matrix(3)
+
+
+@fixture
+def os1():
+    return rand_matrix(3, sparse=True, density=0.5)
 
 
 class TestSparseMatrix:
-    @mark.parametrize("sformat", sparse_types)
-    def test_simple(self, sformat):
-        a = sparse_matrix([[0, 3], [1, 2]], sformat)
-        assert a.format == sformat
+    @mark.parametrize("stype", stypes)
+    def test_simple(self, stype):
+        a = sparse_matrix([[0, 3], [1, 2]], stype)
+        assert a.format == stype
         assert a.dtype == complex
 
 
@@ -118,11 +128,11 @@ class TestQuimbify:
                                         [0, 0, 0, 0],
                                         [2, 0, 4, -6j],
                                         [3j, 0, 6j, 9]])))
-    @mark.parametrize("format_in", sparse_types)
-    @mark.parametrize("format_out", (None,) + sparse_types)
+    @mark.parametrize("format_in", stypes)
+    @mark.parametrize("format_out", (None,) + stypes)
     def test_reshape_sparse(self, qtype, shape, out, format_in, format_out):
         x = sparse_matrix([[1], [0], [2], [3j]], format_in)
-        y = qu(x, qtype=qtype, sformat=format_out)
+        y = qu(x, qtype=qtype, stype=format_out)
         assert y.shape == shape
         assert y.dtype == complex
         if format_out is None:
@@ -137,10 +147,10 @@ class TestQuimbify:
                                         [0, 0, 0, 0],
                                         [2, 0, 4, -6j],
                                         [3j, 0, 6j, 9]])))
-    @mark.parametrize("format_out", (None,) + sparse_types)
+    @mark.parametrize("format_out", (None,) + stypes)
     def test_dense_to_sparse_format(self, qtype, shape, out, format_out):
         x = [[1], [0], [2], [3j]]
-        y = qu(x, qtype=qtype, sformat=format_out, sparse=True)
+        y = qu(x, qtype=qtype, stype=format_out, sparse=True)
         assert y.shape == shape
         assert y.dtype == complex
         if format_out is None:
@@ -152,10 +162,10 @@ class TestQuimbify:
                       (["bra", (1, 4)],
                        ["ket", (4, 1)],
                        ["dop", (4, 4)]))
-    @mark.parametrize("format_out", sparse_types)
+    @mark.parametrize("format_out", stypes)
     def test_give_sformat_only(self, qtype, shape, format_out):
         x = [[1], [0], [2], [3j]]
-        y = qu(x, qtype=qtype, sformat=format_out)
+        y = qu(x, qtype=qtype, stype=format_out)
         assert issparse(y)
         assert y.shape == shape
         assert y.format == format_out
@@ -219,35 +229,35 @@ class TestNormalize:
         assert_almost_equal(trace(b), 1.0)
 
 
-class TestCooMap:
-    def test_coo_map_1d(self):
+class TestDimMap:
+    def test_1d(self):
         dims = [10, 11, 12, 13]
         coos = (1, 2, 3)
-        ndims, ncoos = coo_map(dims, coos)
+        ndims, ncoos = dim_map(dims, coos)
         assert_allclose(ndims[ncoos], (11, 12, 13))
         coos = ([-1], [2], [5])
         with raises(ValueError):
-            ndims, ncoos = coo_map(dims, coos)
-        ndims, ncoos = coo_map(dims, coos, cyclic=True)
+            ndims, ncoos = dim_map(dims, coos)
+        ndims, ncoos = dim_map(dims, coos, cyclic=True)
         assert_allclose(ndims[ncoos], (13, 12, 11))
-        ndims, ncoos = coo_map(dims, coos, trim=True)
+        ndims, ncoos = dim_map(dims, coos, trim=True)
         assert_allclose(ndims[ncoos], [12])
 
-    def test_coo_map2d(self):
+    def test_2d(self):
         dims = [[200, 201, 202, 203],
                 [210, 211, 212, 213]]
         coos = ((1, 2), (1, 3), (0, 3))
-        ndims, ncoos = coo_map(dims, coos)
+        ndims, ncoos = dim_map(dims, coos)
         assert_allclose(ndims[ncoos], (212, 213, 203))
         coos = ((-1, 1), (1, 2), (3, 4))
         with raises(ValueError):
-            ndims, ncoos = coo_map(dims, coos)
-        ndims, ncoos = coo_map(dims, coos, cyclic=True)
+            ndims, ncoos = dim_map(dims, coos)
+        ndims, ncoos = dim_map(dims, coos, cyclic=True)
         assert_allclose(ndims[ncoos], (211, 212, 210))
-        ndims, ncoos = coo_map(dims, coos, trim=True)
+        ndims, ncoos = dim_map(dims, coos, trim=True)
         assert_allclose(ndims[ncoos], [212])
 
-    def test_coo_map_3d(self):
+    def test_3d(self):
         dims = [[[3000, 3001, 3002],
                  [3010, 3011, 3012],
                  [3020, 3021, 3022]],
@@ -255,36 +265,36 @@ class TestCooMap:
                  [3110, 3111, 3112],
                  [3120, 3121, 3122]]]
         coos = ((0, 0, 2), (1, 1, 2), (1, 2, 0))
-        ndims, ncoos = coo_map(dims, coos)
+        ndims, ncoos = dim_map(dims, coos)
         assert_allclose(ndims[ncoos], (3002, 3112, 3120))
         coos = ((0, -1, 2), (1, 2, 2), (4, -1, 3))
         with raises(ValueError):
-            ndims, ncoos = coo_map(dims, coos)
-        ndims, ncoos = coo_map(dims, coos, cyclic=True)
+            ndims, ncoos = dim_map(dims, coos)
+        ndims, ncoos = dim_map(dims, coos, cyclic=True)
         assert_allclose(ndims[ncoos], (3022, 3122, 3020))
-        ndims, ncoos = coo_map(dims, coos, trim=True)
+        ndims, ncoos = dim_map(dims, coos, trim=True)
         assert_allclose(ndims[ncoos], [3122])
 
 
-class TestCooCompress:
-    def test_coo_compress_edge(self):
+class TestDimCompress:
+    def test_edge(self):
         dims = [2, 3, 2, 4, 5]
         coos = [0, 4]
-        ndims, ncoos = coo_compress(dims, coos)
+        ndims, ncoos = dim_compress(dims, coos)
         assert ndims == [2, 24, 5]
         assert ncoos == [0, 2]
 
-    def test_coo_compress_middle(self):
+    def test_middle(self):
         dims = [5, 3, 2, 5, 4, 3, 2]
         coos = [1, 2, 3, 5]
-        ndims, ncoos = coo_compress(dims, coos)
+        ndims, ncoos = dim_compress(dims, coos)
         assert ndims == [5, 30, 4, 3, 2]
         assert ncoos == [1, 3]
 
-    def test_coo_compress_single(self):
+    def test_single(self):
         dims = [5, 3, 2, 5, 4, 3, 2]
         coos = 3
-        ndims, ncoos = coo_compress(dims, coos)
+        ndims, ncoos = dim_compress(dims, coos)
         assert ndims == [30, 5, 24]
         assert ncoos == [1]
 
@@ -304,7 +314,7 @@ class TestEye:
 
 
 class TestEyepad:
-    def test_eyepad_basic(self):
+    def test_basic(self):
         a = rand_matrix(2)
         i = eye(2)
         dims = [2, 2, 2]
@@ -319,7 +329,7 @@ class TestEyepad:
         b = eyepad([a], dims, [0, 1, 2])
         assert_allclose(b, a & a & a)
 
-    def test_eyepad_mid_multi(self):
+    def test_mid_multi(self):
         a = [rand_matrix(2) for i in range(3)]
         i = eye(2)
         dims = [2, 2, 2, 2, 2, 2]
@@ -327,7 +337,7 @@ class TestEyepad:
         b = eyepad(a, dims, inds)
         assert_allclose(b, i & a[0] & a[1] & i & a[2] & i)
 
-    def test_eyepad_mid_multi_reverse(self):
+    def test_mid_multi_reverse(self):
         a = [rand_matrix(2) for i in range(3)]
         i = eye(2)
         dims = [2, 2, 2, 2, 2, 2]
@@ -335,13 +345,13 @@ class TestEyepad:
         b = eyepad(a, dims, inds)
         assert_allclose(b, i & a[2] & i & i & a[1] & a[0])
 
-    def test_eyepad_auto(self):
+    def test_auto(self):
         a = rand_matrix(2)
         i = eye(2)
         b = eyepad([a], (2, -1, 2), [1])
         assert_allclose(b, i & a & i)
 
-    def test_eyepad_ndarrays(self):
+    def test_ndarrays(self):
         a = rand_matrix(2)
         i = eye(2)
         b = eyepad([a], np.array([2, 2, 2]), [0, 2])
@@ -349,7 +359,7 @@ class TestEyepad:
         b = eyepad([a], [2, 2, 2], np.array([0, 2]))
         assert_allclose(b, a & i & a)
 
-    def test_eyepad_overlap(self):
+    def test_overlap(self):
         a = [rand_matrix(4) for i in range(2)]
         dims1 = [2, 2, 2, 2, 2, 2]
         dims2 = [2, 4, 4, 2]
@@ -361,7 +371,7 @@ class TestEyepad:
         c = eyepad(a, dims2, [0, 3])
         assert_allclose(c, b)
 
-    def test_eyepad_holey_overlap(self):
+    def test_holey_overlap(self):
         a = rand_matrix(8)
         dims1 = (2, 2, 2, 2, 2)
         dims2 = (2, 8, 2)
@@ -379,7 +389,7 @@ class TestEyepad:
         c = eyepad(a, dims2, 0)
         assert_allclose(b, c)
 
-    def test_eyepad_sparse(self):
+    def test_sparse(self):
         i = eye(2, sparse=True)
         a = qu(rand_matrix(2), sparse=True)
         b = eyepad(a, [2, 2, 2], 1)  # infer sparse
@@ -390,7 +400,7 @@ class TestEyepad:
         assert(issparse(b))
         assert_allclose(b.A, (i & a & i).A)
 
-    def test_eyepad_2d_simple(self):
+    def test_2d_simple(self):
         a = (rand_matrix(2), rand_matrix(2))
         dims = ((2, 3), (3, 2))
         inds = ((0, 0), (1, 1))
@@ -398,9 +408,38 @@ class TestEyepad:
         assert b.shape == (36, 36)
         assert_allclose(b, a[0] & eye(9) & a[1])
 
+    @mark.parametrize("stype", (None,) + stypes)
+    @mark.parametrize("pos", [0, 1, 2,
+                              (0,), (1,), (2,),
+                              (0, 1),
+                              (1, 2),
+                              (0, 2)])
+    @mark.parametrize("coo_build", [False, True])
+    def test_sparse_format_outputs(self, os1, stype, pos, coo_build):
+        x = eyepad(os1, [3, 3, 3], pos,
+                   stype=stype, coo_build=coo_build)
+        assert x.format == "csr" if stype is None else stype
+
+    @mark.parametrize("stype", (None,) + stypes)
+    @mark.parametrize("pos", [0, 1, 2,
+                              (0,), (1,), (2,),
+                              (0, 1),
+                              (1, 2),
+                              (0, 2)])
+    @mark.parametrize("coo_build", [False, True])
+    def test_sparse_format_outputs_with_dense(self, od1, stype, pos,
+                                              coo_build):
+        x = eyepad(od1, [3, 3, 3], pos, sparse=True,
+                   stype=stype, coo_build=coo_build)
+        try:
+            default = "bsr" if (2 in pos and not coo_build) else "csr"
+        except TypeError:
+            default = "bsr" if (pos == 2 and not coo_build) else "csr"
+        assert x.format == default if stype is None else stype
+
 
 class TestPermPad:
-    def test_perm_pad_dop_spread(self):
+    def test_dop_spread(self):
         a = rand_rho(4)
         b = perm_pad(a, [2, 2, 2], [0, 2])
         c = (a & eye(2)).A.reshape([2, 2, 2, 2, 2, 2])  \
@@ -408,7 +447,7 @@ class TestPermPad:
                           .reshape([8, 8])
         assert_allclose(b, c)
 
-    def test_perm_pad_dop_reverse(self):
+    def test_dop_reverse(self):
         a = rand_rho(4)
         b = perm_pad(a, np.array([2, 2, 2]), [2, 0])
         c = (a & eye(2)).A.reshape([2, 2, 2, 2, 2, 2])  \
@@ -672,7 +711,7 @@ class TestOverlap:
     @mark.parametrize("spars1", [True, False])
     @mark.parametrize("qtype2", ['ket', 'dop'])
     @mark.parametrize("spars2", [True, False])
-    def test_inner_vec_vec_dense(self, qtype1, spars1, qtype2, spars2):
+    def test_all(self, qtype1, spars1, qtype2, spars2):
         a = qu([[1], [2j], [3]], qtype=qtype1, sparse=spars1)
         b = qu([[1j], [2], [3j]], qtype=qtype2, sparse=spars2)
         c = overlap(a, b)
