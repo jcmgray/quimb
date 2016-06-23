@@ -2,6 +2,7 @@
 Functions for more advanced calculations of quantities and properties of
 quantum objects.
 """
+# TODO: move matrix functions to solve, add slepc versions
 
 from math import sin, cos, pi, log2, sqrt
 from collections import OrderedDict
@@ -41,11 +42,14 @@ def sqrtm(a, herm=True):
         return dot_dense(v, ldmul(np.sqrt(l.astype(complex)), v.H))
 
 
-def fidelity(p1, p2):
-    if not isop(p1) or not isop(p2):
-        return overlap(p1, p2)
+def fidelity(rho, sigma):
+    if not isop(rho) or not isop(sigma):
+        return overlap(rho, sigma)
     else:
-        pass
+        sqrho = sqrtm(rho)
+        return tr(sqrtm(sqrho @ sigma @ sqrho))
+        # return norm(sqrtm(rho) @ sqrtm(sigma), "tr")
+
 
 def purify(rho, sparse=False):
     """
