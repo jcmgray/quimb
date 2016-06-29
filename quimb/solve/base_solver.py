@@ -5,11 +5,15 @@ algebraic order by default. Use explicit numpy/scipy linalg
 routines for non-hermitian matrices. """
 # TODO: restart eigen and svd -  up to tol
 # TODO: test non-herm
+# TODO: factor out numpy
+# TODO: add petsc / elemental ...
 
 import numpy as np
 import numpy.linalg as nla
 
-from ..accel import issparse, vdot
+from .. import issparse, vdot
+
+from .numpy_solver import numpy_seigsys
 from .scipy_solver import scipy_seigsys, scipy_svds
 
 from . import SLEPC4PY_FOUND
@@ -106,6 +110,8 @@ def seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
         seig_func = slepc_seigsys
     elif backend.lower() == 'auto' and SLEPC4PY_FOUND and issparse(a):
         seig_func = slepc_seigsys
+    elif backend.lower() in {"dense", "numpy"}:
+        seig_func = numpy_seigsys
     else:
         seig_func = scipy_seigsys
 

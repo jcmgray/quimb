@@ -25,7 +25,9 @@ from ...solve import (
     svd,
 )
 
-backends = ['scipy', 'slepc'] if SLEPC4PY_FOUND else ['scipy']
+backends = ["dense", "scipy"]
+if SLEPC4PY_FOUND:
+    backends += ["slepc"]
 
 
 @fixture
