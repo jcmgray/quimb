@@ -1,19 +1,21 @@
-""" Functions for solving matrices either fully or partially.
+"""
+Functions for solving matrices either fully or partially.
 Note that the eigendecompositions here all assume a
 hermitian matrix and sort the eigenvalues in ascending
-algebraic order by default. Use explicit numpy/scipy linalg
-routines for non-hermitian matrices. """
-# TODO: restart eigen and svd -  up to tol
+algebraic order by default.
+"""
+# TODO: restart eigen and svd - up to tol
 # TODO: test non-herm
 # TODO: factor out numpy
 # TODO: add petsc / elemental ...
+# TODO: move default which behaviour to seigsys
 
 import numpy as np
 import numpy.linalg as nla
 
 from .. import issparse, vdot
 
-from .numpy_solver import numpy_seigsys
+from .numpy_solver import numpy_seigsys, numpy_svds
 from .scipy_solver import scipy_seigsys, scipy_svds
 
 from . import SLEPC4PY_FOUND
@@ -70,8 +72,7 @@ def eigvecs(a, sort=True, isherm=True):
     Returns
     -------
         v: eigenvectors as columns of matrix """
-    _, v = eigsys(a, sort=sort, isherm=isherm)
-    return v
+    return eigsys(a, sort=sort, isherm=isherm)[1]
 
 
 # -------------------------------------------------------------------------- #
@@ -79,10 +80,20 @@ def eigvecs(a, sort=True, isherm=True):
 # -------------------------------------------------------------------------- #
 
 
+def choose_backend(a, k, int_eps=False):
+    """ Pick a backend automatically for partial decompositions. """
+    # small matrix or large part of subspace requested
+    small_d_big_k = a.shape[0] ** 2 / k < (10000 if int_eps else 2000)
+    # avoid using slepc for dense matrices and inner eigenvectors
+    slepc_suitable = not int_eps or issparse(a)
+    return ("NUMPY" if small_d_big_k else
+            "SLEPC" if SLEPC4PY_FOUND and slepc_suitable else
+            "SCIPY")
+
+
 def seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
-            isherm=True, ncv=None, sort=True, backend='scipy', **kwargs):
-    """
-    Returns a few eigenpairs from a possibly sparse hermitian operator
+            isherm=True, ncv=None, sort=True, backend='AUTO', **kwargs):
+    """ Returns a few eigenpairs from a possibly sparse hermitian operator
 
     Parameters
     ----------
@@ -94,27 +105,25 @@ def seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
     Returns
     -------
         lk: array of eigenvalues
-        vk: matrix of eigenvectors as columns
-    """
-    # TODO: autodense for n < 500
+        vk: matrix of eigenvectors as columns """
     settings = {
         'k': k,
-        'which': which,
+        'which': ("SA" if which is None and sigma is None else
+                  "TM" if which is None and sigma is not None else
+                  which),
         'return_vecs': return_vecs,
         'sigma': sigma,
         'isherm': isherm,
         'ncv': ncv,
         'sort': sort}
-
-    if backend.lower() == 'slepc':
-        seig_func = slepc_seigsys
-    elif backend.lower() == 'auto' and SLEPC4PY_FOUND and issparse(a):
-        seig_func = slepc_seigsys
-    elif backend.lower() in {"dense", "numpy"}:
-        seig_func = numpy_seigsys
-    else:
-        seig_func = scipy_seigsys
-
+    # Choose backend to perform the decompostion
+    bkd = backend.upper()
+    if bkd == 'AUTO':
+        bkd = choose_backend(a, k, sigma is not None)
+    seig_func = {"SLEPC": slepc_seigsys,
+                 "NUMPY": numpy_seigsys,
+                 "DENSE": numpy_seigsys,
+                 "SCIPY": scipy_seigsys}[bkd]
     return seig_func(a, **settings, **kwargs)
 
 
@@ -125,8 +134,7 @@ def seigvals(a, k=6, **kwargs):
 
 def seigvecs(a, k=6, **kwargs):
     """ Seigsys alias for finding eigenvectors only. """
-    _, v = seigsys(a, k=k, return_vecs=True, **kwargs)
-    return v
+    return seigsys(a, k=k, return_vecs=True, **kwargs)[1]
 
 
 def groundstate(ham, **kwargs):
@@ -140,7 +148,7 @@ def groundenergy(ham, **kwargs):
 
 
 # -------------------------------------------------------------------------- #
-# iterative methods for partial singular value decomposition                 #
+# Partial singular value decomposition                                       #
 # -------------------------------------------------------------------------- #
 
 def svd(a, return_vecs=True):
@@ -148,17 +156,33 @@ def svd(a, return_vecs=True):
     return nla.svd(a, full_matrices=False, compute_uv=return_vecs)
 
 
-def svds(a, k=6, ncv=None, return_vecs=True, backend='scipy', **kwargs):
+def svds(a, k=6, ncv=None, return_vecs=True, backend='AUTO', **kwargs):
     """
-    Compute a number of singular value pairs
+    Compute the partial singular value decomposition of a matrix.
+
+    Parameters
+    ----------
+        a: operator to partially decompose
+        k: number of singular value (triplets) to retrieve
+        ncv: number of lanczos vectors to use in decomposition
+        return_vecs: whether to return the left and right vectors
+        backend: which solver to use to perform decomposition
+
+    Returns
+    -------
+        (uk,) sk (, vk): singular value(s) (and vectors)
     """
-    # TODO: autodense for n < 500
     settings = {
         'k': k,
         'ncv': ncv,
         'return_vecs': return_vecs}
-    svd_func = (slepc_svds if backend.lower() == 'slepc' else
-                scipy_svds)
+    bkd = backend.upper()
+    if bkd == 'AUTO':
+        bkd = choose_backend(a, k, False)
+    svd_func = {"SLEPC": slepc_svds,
+                "NUMPY": numpy_svds,
+                "DENSE": numpy_svds,
+                "SCIPY": scipy_svds}[bkd]
     return svd_func(a, **settings, **kwargs)
 
 

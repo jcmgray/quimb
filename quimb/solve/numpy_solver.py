@@ -53,9 +53,6 @@ def numpy_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
     -------
         lk, (vk): k eigenvalues (and eigenvectors) sorted according to which
     """
-    which = ("SA" if which is None and sigma is None else
-             "TM" if which is None and sigma is not None else
-             which)
 
     efunc = {(True, True): nla.eigh,
              (True, False): nla.eigvalsh,
@@ -70,3 +67,27 @@ def numpy_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
         l = efunc(a.A if issparse(a) else a, **kwargs)
         sk = sort_inds(l, method=which, sigma=sigma)[:k]
         return l[sk]
+
+
+def numpy_svds(a, k=6, return_vecs=True, **kwargs):
+    """
+    Partial singular value decomposition using numpys (full) singular value
+    decomposition.
+
+    Parameters
+    ----------
+        a: operator decompose
+        k: number of singular value triplets to retrieve
+        return_vecs: whether to return the computed vecs or values only
+        ncv: redundant, for compatibility only.
+
+    Returns
+    -------
+        (uk,) sk (, vkt): singlar value triplets
+    """
+    if return_vecs:
+        uk, sk, vkt = nla.svd(a.A if issparse(a) else a, compute_uv=True)
+        return np.asmatrix(uk[:, :k]), sk[:k], np.asmatrix(vkt[:k, :])
+    else:
+        sk = nla.svd(a.A if issparse(a) else a, compute_uv=False)
+        return sk[:k]
