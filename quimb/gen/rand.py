@@ -7,13 +7,14 @@ from ..accel import rdmul
 from ..core import qu, ptr, kron, nmlz
 
 
-def rand_matrix(d, scaled=True, sparse=False, format='csr', density=0.01):
-    """
-    Generate a random complex matrix of order `d` with normally distributed
+def rand_matrix(d, scaled=True, sparse=False, format='csr', density=None):
+    """ Generate a random complex matrix of order `d` with normally distributed
     entries. If `scaled` is `True`, then in the limit of large `d` the
     eigenvalues will be distributed on the unit complex disk.
     """
     if sparse:
+        # Aim for 10 non-zero values per row, but no more than half
+        density = min(0.5, 10/d) if density is None else density
         mat = sp.random(d, d, format=format, density=density)
         mat.data = np.random.randn(mat.nnz) + 1.0j * np.random.randn(mat.nnz)
     else:
@@ -25,30 +26,30 @@ def rand_matrix(d, scaled=True, sparse=False, format='csr', density=0.01):
     return mat
 
 
-def rand_herm(d, sparse=False, density=0.01):
+def rand_herm(d, sparse=False, density=None):
+    """ Generate a random hermitian matrix of order `d` with normally
+    distributed entries. In the limit of large `d` the spectrum will be a
+    semi-circular distribution between [-1, 1].
     """
-    Generate a random hermitian matrix of order `d` with normally distributed
-    entries. In the limit of large `d` the spectrum will be a semi-circular
-    distribution between [-1, 1].
-    """
-    density /= 2
+    density = min(0.5, 10/d) if density is None and sparse else density
     herm = rand_matrix(d, scaled=True, sparse=sparse,
-                       density=density) / (2**1.5)
+                       density=density/2)/(2**1.5)
     herm += herm.H
     return herm
 
 
-def rand_pos(d, sparse=False, density=0.01):
+def rand_pos(d, sparse=False, density=None):
+    """ Generate a random positive matrix of order `d`, with normally
+    distributed entries. In the limit of large `d` the spectrum will lie
+    between [0, 1].
     """
-    Generate a random positive matrix of order `d`, with normally distributed
-    entries. In the limit of large `d` the spectrum will lie between [0, 1].
-    """
-    density = (density / d)**0.5
-    pos = rand_matrix(d, scaled=True, sparse=sparse, density=density) / 2
+    density = min(0.5, 10/d) if density is None and sparse else density
+    pos = rand_matrix(d, scaled=True, sparse=sparse,
+                      density=(density/d)**0.5)/2
     return pos @ pos.H
 
 
-def rand_rho(d, sparse=False, density=0.01):
+def rand_rho(d, sparse=False, density=None):
     """
     Generate a random positive matrix of order `d` with normally distributed
     entries and unit trace.
