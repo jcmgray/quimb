@@ -42,7 +42,7 @@ class TestRandMatrix:
         assert a.nnz == 7
 
     def test_rand_matrix_bsr(self):
-        a = rand_matrix(10, sparse=True, density=0.2, format='bsr')
+        a = rand_matrix(10, sparse=True, density=0.2, stype='bsr')
         assert a.shape == (10, 10)
         assert type(a) == sp.bsr_matrix
         assert a.dtype == complex

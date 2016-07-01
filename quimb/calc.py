@@ -2,7 +2,8 @@
 Functions for more advanced calculations of quantities and properties of
 quantum objects.
 """
-# TODO: move matrix functions to solve, add slepc versions
+# TODO: move matrix functions to solve, add slepc versions ****************** #
+# TODO: all docs ************************************************************ #
 
 from math import sin, cos, pi, log2, sqrt
 from collections import OrderedDict
@@ -13,11 +14,10 @@ import numpy.linalg as nla
 import scipy.sparse.linalg as spla
 from scipy.optimize import minimize
 
-from .accel import dot_dense, ldmul, issparse, isop, zeroify
-from .core import (qu, kron, ptr, eye, eyepad, tr, trx,
-                   infer_size, overlap)
+from .accel import dot_dense, ldmul, issparse, isop, zeroify, realify
+from .core import (qu, kron, eye, eyepad, tr, ptr, infer_size, overlap)
 from .solve import (eigvals, eigsys, norm)
-from .gen import (sig, basis_vec, bell_state, bloch_state)
+from .gen import sig, basis_vec, bell_state, bloch_state
 
 
 def expm(a, herm=True):
@@ -52,9 +52,8 @@ def fidelity(rho, sigma):
 
 
 def purify(rho, sparse=False):
-    """
-    Take state rho and purify it into a wavefunction of squared dimension.
-    """
+    """ Take state rho and purify it into a wavefunction of squared
+    dimension. """
     d = rho.shape[0]
     ls, vs = eigsys(rho)
     ls = np.sqrt(ls)
@@ -66,8 +65,12 @@ def purify(rho, sparse=False):
 
 @zeroify
 def entropy(a):
-    """ Computes the (von Neumann) entropy of positive matrix `a` """
-    l = eigvals(a)
+    """ Computes the (von Neumann) entropy of positive matrix `a`. """
+    a = np.asarray(a)
+    if np.ndim(a) == 1:
+        l = a
+    else:
+        l = eigvals(a)
     l = l[l > 0.0]
     return np.sum(-l * np.log2(l))
 
@@ -77,14 +80,14 @@ def mutual_information(p, dims=[2, 2], sysa=0, sysb=1):
     """ Partitions `p` into `dims`, and finds the mutual information between
     the subsystems at indices `sysa` and `sysb` """
     if isop(p) or np.size(dims) > 2:  # mixed combined system
-        rhoab = trx(p, dims, (sysa, sysb))
-        rhoa = trx(rhoab, (dims[sysa], dims[sysb]), 0)
-        rhob = trx(rhoab, (dims[sysa], dims[sysb]), 1)
+        rhoab = ptr(p, dims, (sysa, sysb))
+        rhoa = ptr(rhoab, (dims[sysa], dims[sysb]), 0)
+        rhob = ptr(rhoab, (dims[sysa], dims[sysb]), 1)
         hab = entropy(rhoab)
         ha, hb = entropy(rhoa), entropy(rhob)
     else:  # pure combined system
         hab = 0.0
-        rhoa = trx(p, dims, sysa)
+        rhoa = ptr(p, dims, sysa)
         ha = entropy(rhoa)
         hb = ha
     return ha + hb - hab
@@ -106,7 +109,7 @@ def negativity(p, dims=[2, 2], sysa=0, sysb=1):
     """ Negativity between `sysa` and `sysb` of state `p` with subsystem
     dimensions `dims` """
     if np.size(dims) > 2:
-        p = trx(p, dims, [sysa, sysb])
+        p = ptr(p, dims, [sysa, sysb])
     n = (norm(partial_transpose(p), "tr") - 1.0) / 2.0
     return max(0.0, n)
 
@@ -116,7 +119,7 @@ def logarithmic_negativity(p, dims=[2, 2], sysa=0, sysb=1):
     """ Logarithmic negativity between `sysa` and `sysb` of `p`, with
     subsystem dimensions `dims`. """
     if np.size(dims) > 2:
-        p = trx(p, dims, [sysa, sysb])
+        p = ptr(p, dims, [sysa, sysb])
         dims = [dims[sysa], dims[sysb]]
     e = log2(norm(partial_transpose(p, dims), "tr"))
     return max(0.0, e)
@@ -152,7 +155,8 @@ def one_way_classical_information(p_ab, prjs, precomp_func=False):
     Returns
     -------
         The one-way classical information or the function to compute such
-        given a set of POVMs """
+        given a set of POVMs
+    """
     p_a = ptr(p_ab, [2, 2], 0)
     s_a = entropy(p_a)
 
@@ -198,8 +202,7 @@ def trace_distance(p, w):
 
 
 def pauli_decomp(a, mode="p", tol=1e-3):
-    """
-    Decomposes an operator via the Hilbert-schmidt inner product into the
+    """ Decomposes an operator via the Hilbert-schmidt inner product into the
     pauli group. Can both print the decomposition or return it.
 
     Parameters
@@ -264,8 +267,8 @@ def bell_fid(p):
     return [*gen_bfs()]
 
 
-def correlation(p, opa, opb, sysa, sysb, dims=None, sparse=True,
-                precomp_func=False,):
+def correlation(p, opa, opb, sysa, sysb, dims=None, sparse=None,
+                precomp_func=False):
     """ Calculate the correlation between two sites given two operators.
 
     Parameters
@@ -281,23 +284,30 @@ def correlation(p, opa, opb, sysa, sysb, dims=None, sparse=True,
 
     Returns
     -------
-        cab: correlation, <ab> - <a><b> """
+        cab: correlation, <ab> - <a><b>
+    """
     if dims is None:
         sz_p = infer_size(p)
         dims = [2] * sz_p
+    if sparse is None:
+        sparse = issparse(opa) or issparse(opb)
 
-    opab = eyepad([opa, opb], dims, (sysa, sysb), sparse=sparse)
-    opa = eyepad([opa], dims, sysa, sparse=sparse)
-    opb = eyepad([opb], dims, sysb, sparse=sparse)
+    opts = {'sparse': sparse,
+            'coo_build': sparse,
+            'stype': 'csr' if sparse else None}
+    opab = eyepad([opa, opb], dims, (sysa, sysb), **opts)
+    opa = eyepad([opa], dims, sysa, **opts)
+    opb = eyepad([opb], dims, sysb, **opts)
 
+    @realify
     def corr(state):
         return overlap(opab, state) - overlap(opa, state) * overlap(opb, state)
 
     return corr if precomp_func else corr(p)
 
 
-def correlation_list(p, ss=("xx", "yy", "zz"), sysa=0, sysb=1,
-                     sum_abs=False, precomp_func=False):
+def pauli_correlations(p, ss=("xx", "yy", "zz"), sysa=0, sysb=1,
+                       sum_abs=False, precomp_func=False):
     """ Calculate the correlation between sites for a list of operator pairs.
 
     Parameters
@@ -312,7 +322,8 @@ def correlation_list(p, ss=("xx", "yy", "zz"), sysa=0, sysb=1,
 
     Returns
     -------
-        corrs: list of values or functions specifiying each correlation. """
+        corrs: list of values or functions specifiying each correlation.
+    """
     def gen_corr_list():
         for s1, s2 in ss:
             yield correlation(p, sig(s1), sig(s2), sysa, sysb,
@@ -322,7 +333,7 @@ def correlation_list(p, ss=("xx", "yy", "zz"), sysa=0, sysb=1,
         if precomp_func:
             return lambda p: sum((abs(corr(p)) for corr in gen_corr_list()))
         return sum((abs(corr) for corr in gen_corr_list()))
-    return [*gen_corr_list()]
+    return tuple(gen_corr_list())
 
 
 def ent_cross_matrix(p, ent_fun=concurrence, calc_self_ent=True):
@@ -339,20 +350,21 @@ def ent_cross_matrix(p, ent_fun=concurrence, calc_self_ent=True):
 
     Returns
     -------
-        ents: matrix of pairwise ent_fun results. """
+        ents: matrix of pairwise ent_fun results.
+    """
     sz_p = infer_size(p)
     ents = np.empty((sz_p, sz_p))
     for i in range(sz_p):
         for j in range(i, sz_p):
             if i == j:
                 if calc_self_ent:
-                    rhoa = trx(p, [2]*sz_p, i)
+                    rhoa = ptr(p, [2]*sz_p, i)
                     psiap = purify(rhoa)
                     ent = ent_fun(psiap)
                 else:
                     ent = np.nan
             else:
-                rhoab = trx(p, [2]*sz_p, [i, j])
+                rhoab = ptr(p, [2]*sz_p, [i, j])
                 ent = ent_fun(rhoab)
             ents[i, j] = ent
             ents[j, i] = ent
