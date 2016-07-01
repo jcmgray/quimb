@@ -3,10 +3,11 @@ import numpy as np
 from numpy.testing import assert_allclose
 
 from ... import (
+    qu,
+    eye,
     ldmul,
     rand_uni,
     issparse,
-    qu,
     rand_product_state,
     )
 from ...solve import (
@@ -146,6 +147,20 @@ class TestSeigs:
         _, a = premat
         ge = groundenergy(a, backend=backend)
         assert_allclose(ge, -3)
+
+    @mark.parametrize("which", [None, "SA", "LA", "LM", "SM", "TR"])
+    @mark.parametrize("k", [1, 2])
+    def test_cross_equality(self, prematsparse, k, which):
+        # TODO -------------------------------------------------------------- #
+        _, a = prematsparse
+        sigma = 1 if which in {None, "TR"} else None
+        lk1, vk1 = seigsys(a, k=k, which=which, sigma=sigma, backend="DENSE")
+        lk2, vk2 = seigsys(a, k=k, which=which, sigma=sigma, backend="SCIPY")
+        lk3, vk3 = seigsys(a, k=k, which=which, sigma=sigma, backend="SLEPC")
+        assert_allclose(lk1, lk2)
+        assert_allclose(lk2, lk3)
+        assert_allclose(abs(vk1.H @ vk2), eye(k), atol=1e-14)
+        assert_allclose(abs(vk2.H @ vk3), eye(k), atol=1e-14)
 
 
 class TestSVD:

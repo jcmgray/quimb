@@ -33,7 +33,7 @@ def sort_inds(a, method, sigma=None):
 
 
 def numpy_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
-                  isherm=True, ncv=None, sort=True, **kwargs):
+                  isherm=True, sort=True, ncv=None, **kwargs):
     """
     Partial eigen-decomposition using numpy's dense linear algebra.
 
@@ -45,8 +45,8 @@ def numpy_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
         return_vecs: whether to return eigenvectors
         sigma: target eigenvalue
         isherm: whether `a` is hermitian
+        sort: whether to sort reduced list of eigenpairs into ascending order
         ncv: (for compatibility purposes only)
-        sort: (for compatibility purposes only)
         **kwargs: settings to pass to numpy.eig... functions
 
     Returns
@@ -62,11 +62,16 @@ def numpy_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
     if return_vecs:
         l, v = efunc(a.A if issparse(a) else a, **kwargs)
         sk = sort_inds(l, method=which, sigma=sigma)[:k]
-        return l[sk], v[:, sk]
+        l, v = l[sk], np.asmatrix(v[:, sk])
+        if sort:
+            so = np.argsort(l)
+            return l[so], v[:, so]
+        return l, v
     else:
         l = efunc(a.A if issparse(a) else a, **kwargs)
         sk = sort_inds(l, method=which, sigma=sigma)[:k]
-        return l[sk]
+        l = l[sk]
+        return np.sort(l) if sort else l
 
 
 def numpy_svds(a, k=6, return_vecs=True, **kwargs):

@@ -1,23 +1,18 @@
-"""
-Functions for solving matrices either fully or partially.
+""" Functions for solving matrices either fully or partially.
 Note that the eigendecompositions here all assume a
 hermitian matrix and sort the eigenvalues in ascending
-algebraic order by default.
-"""
+algebraic order by default. """
+
 # TODO: restart eigen and svd - up to tol
 # TODO: test non-herm
 # TODO: factor out numpy
 # TODO: add petsc / elemental ...
-# TODO: move default which behaviour to seigsys
 
 import numpy as np
 import numpy.linalg as nla
-
 from .. import issparse, vdot
-
 from .numpy_solver import numpy_seigsys, numpy_svds
 from .scipy_solver import scipy_seigsys, scipy_svds
-
 from . import SLEPC4PY_FOUND
 if SLEPC4PY_FOUND:
     from .slepc_solver import slepc_seigsys, slepc_svds
@@ -38,12 +33,13 @@ def eigsys(a, sort=True, isherm=True):
     Returns
     -------
         l: array of eigenvalues
-        v: corresponding eigenvectors as columns of matrix """
+        v: corresponding eigenvectors as columns of matrix
+    """
     l, v = nla.eigh(a) if isherm else nla.eig(a)
     if sort:
         sortinds = np.argsort(l)
         return l[sortinds], np.asmatrix(v[:, sortinds])
-    return l, v
+    return l, np.asmatrix(v)
 
 
 def eigvals(a, sort=True, isherm=True):
@@ -56,7 +52,8 @@ def eigvals(a, sort=True, isherm=True):
 
     Returns
     -------
-        l: array of eigenvalues """
+        l: array of eigenvalues
+    """
     l = nla.eigvalsh(a) if isherm else nla.eigvals(a)
     return np.sort(l) if sort else l
 
@@ -71,7 +68,8 @@ def eigvecs(a, sort=True, isherm=True):
 
     Returns
     -------
-        v: eigenvectors as columns of matrix """
+        v: eigenvectors as columns of matrix
+    """
     return eigsys(a, sort=sort, isherm=isherm)[1]
 
 
@@ -105,11 +103,12 @@ def seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
     Returns
     -------
         lk: array of eigenvalues
-        vk: matrix of eigenvectors as columns """
+        vk: matrix of eigenvectors as columns
+    """
     settings = {
         'k': k,
         'which': ("SA" if which is None and sigma is None else
-                  "TM" if which is None and sigma is not None else
+                  "TR" if which is None and sigma is not None else
                   which),
         'return_vecs': return_vecs,
         'sigma': sigma,
@@ -157,8 +156,7 @@ def svd(a, return_vecs=True):
 
 
 def svds(a, k=6, ncv=None, return_vecs=True, backend='AUTO', **kwargs):
-    """
-    Compute the partial singular value decomposition of a matrix.
+    """ Compute the partial singular value decomposition of a matrix.
 
     Parameters
     ----------
@@ -220,7 +218,8 @@ def norm(a, ntype=2, **kwargs):
 
     Returns
     -------
-        x: matrix norm """
+        x: matrix norm
+    """
     types = {'2': '2', 2: '2', 'spectral': '2',
              'f': 'f', 'fro': 'f',
              't': 't', 'trace': 't', 'nuc': 't', 'tr': 't'}

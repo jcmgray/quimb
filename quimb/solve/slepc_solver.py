@@ -5,6 +5,7 @@ Interface to slepc4py for solving advanced eigenvalue problems.
 # TODO: FEAST / other contour solvers?
 # TODO: exponential, sqrt etc.
 # TODO: region for eps in middle, both ciss and normal
+# TODO: mumps set icntrl(14): catch error infog(1)=-9 and resatrt
 
 import numpy as np
 import scipy.sparse as sp
@@ -76,7 +77,7 @@ def init_eigensolver(which='LM', sigma=None, isherm=True, etype="krylovschur",
     eigensolver = SLEPc.EPS()
     eigensolver.create()
     if sigma is not None:
-        which = "TM"
+        which = "TR"
         eigensolver.setST(init_spectral_inverter(**st_opts_dict))
         eigensolver.setTarget(sigma)
     eigensolver.setType(etype)
@@ -84,6 +85,7 @@ def init_eigensolver(which='LM', sigma=None, isherm=True, etype="krylovschur",
     eigensolver.setWhichEigenpairs(scipy_to_slepc_which[which.upper()])
     eigensolver.setConvergenceTest(SLEPc.EPS.Conv.ABS)
     eigensolver.setTolerances(tol=tol, max_it=max_it)
+    eigensolver.setFromOptions()
     return eigensolver
 
 
@@ -97,16 +99,19 @@ def init_spectral_inverter(ptype="lu", ppackage="mumps", ktype="preonly",
     P.create()
     P.setType(ptype)
     P.setFactorSolverPackage(ppackage)
+    P.setFromOptions()
     # Krylov subspace
     K = PETSc.KSP()
     K.create()
     K.setPC(P)
     K.setType(ktype)
+    K.setFromOptions()
     # Spectral transformer
     S = SLEPc.ST()
     S.create()
     S.setKSP(K)
     S.setType(stype)
+    S.setFromOptions()
     return S
 
 
@@ -147,10 +152,11 @@ def slepc_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
     pa = convert_to_petsc(a)
     eigensolver.setOperators(pa)
     eigensolver.setDimensions(k, ncv)
-    # eigensolver.setFromOptions()
+
     eigensolver.solve()
     nconv = eigensolver.getConverged()
     assert nconv >= k
+
     k = nconv if return_all_conv else k
     lk = np.asarray([eigensolver.getEigenvalue(i) for i in range(k)])
     lk = lk.real if isherm else lk
