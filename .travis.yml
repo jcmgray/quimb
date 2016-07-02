@@ -12,7 +12,9 @@ install:
     - conda create -q -n test-environment python=$TRAVIS_PYTHON_VERSION numpy scipy numba numexpr coverage
     - source activate test-environment
     - python setup.py install
-    - pip install pytest-cov
+    - pip install pytest-cov coveralls
 
 script:
     - py.test
+after_success:
+    - coveralls
