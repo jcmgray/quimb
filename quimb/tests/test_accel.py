@@ -3,14 +3,9 @@ import numpy as np
 from numpy.testing import assert_allclose
 import scipy.sparse as sp
 from .. import rand_matrix, rand_ket
-from ..accel import (
-    matrixify, realify,
-    issparse, isket, isop, isbra, isherm,
-    mul, dot, vdot, rdot, ldmul, rdmul, outer,
-    kron_dense, kron_dense_big, kron_sparse, kron, kronpow,
-    explt,
-    idot, calc_dot_type, calc_dot_weight_func_out,
-)
+from ..accel import (matrixify, realify, issparse, isket, isop, isbra, isherm,
+                     mul, dot, vdot, rdot, ldmul, rdmul, outer, kron_dense,
+                     kron_dense_big, kron_sparse, kron, kronpow, explt)
 
 
 sparse_formats = ("csr", "bsr", "csc", "coo")
@@ -421,68 +416,3 @@ class TestKronPow:
         y = kronpow(s1, 3, stype=stype, coo_build=True)
         assert y.format == stype if stype is not None else "sformat_in"
         assert_allclose(x.A, y.A)
-
-
-# --------------------------------------------------------------------------- #
-# Test Intelligent chaining of operations tests                               #
-# --------------------------------------------------------------------------- #
-
-class TestCalcDotType:
-    def test_scalar(self):
-        assert calc_dot_type(1) == 'c'
-        assert calc_dot_type(1.) == 'c'
-        assert calc_dot_type(1.0j) == 'c'
-
-    def test_1d_array(self, test_objs):
-        _, _, _, _, _, _, l = test_objs
-        assert calc_dot_type(l) == 'l'
-
-    def test_ket(self, test_objs):
-        _, _, _, _, k, _, _ = test_objs
-        assert calc_dot_type(k) == 'k'
-
-    def test_bra(self, test_objs):
-        _, _, _, _, k, _, _ = test_objs
-        assert calc_dot_type(k.H) == 'b'
-
-    def test_op(self, test_objs):
-        od, _, os, _, _, _, _ = test_objs
-        assert calc_dot_type(od) == 'o'
-        assert calc_dot_type(os) == 'os'
-
-
-class TestCalcDotWeightFuncOut:
-    def test_ket(self):
-        for z, w in zip(("k", "b", "o", "os", "l", "c"),
-                        (11, 12, 21, 23, 25, 32)):
-            assert calc_dot_weight_func_out(z, "k")[0] == w
-
-
-class TestIdot:
-    def test_multiarg_mats(self, test_objs):
-        od1, od2, os1, os2, kd1, kd2, ld = test_objs
-        dq = idot(kd1.H, od1, os2, os1, ld, od2, kd2)
-        dn = (kd1.H @ od1 @ os2.A @ os1.A @ np.diag(ld) @ od2 @ kd2)[0, 0]
-        assert_allclose(dq, dn)
-
-    def test_multiarg_vecs(self):
-        a, b, c = rand_matrix(5), rand_matrix(5), rand_ket(5)
-        d = idot(a, b, c)
-        assert isinstance(d, np.matrix)
-        assert_allclose(d, a @ b @ c)
-
-    def test_multiarg_closed(self):
-        a, b, c = rand_matrix(5), rand_matrix(5), rand_ket(5)
-        d = idot(c.H, a, b, c)
-        assert np.isscalar(d)
-        assert_allclose(d, c.H @ a @ b @ c)
-
-    # 0, 1, 2, 3, 4, 5, 6
-    # a, b, c, d, e, f, g
-    #   m, n, o, p, q, r
-    #   0, 1, 2, 3, 4, 5
-
-    # 0, 1, 2, 3, 4, 5
-    # a, b, c, X, f, g
-    #   m, n, Y, Z, r
-    #   0, 1, 2, 3, 4
