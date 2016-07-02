@@ -119,10 +119,10 @@ def seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
     bkd = backend.upper()
     if bkd == 'AUTO':
         bkd = choose_backend(a, k, sigma is not None)
-    seig_func = {"SLEPC": slepc_seigsys,
-                 "NUMPY": numpy_seigsys,
-                 "DENSE": numpy_seigsys,
-                 "SCIPY": scipy_seigsys}[bkd]
+    seig_func = (slepc_seigsys if bkd == 'SLEPC' else
+                 numpy_seigsys if bkd in {'NUMPY', 'DENSE'} else
+                 scipy_seigsys if bkd == 'SCIPY' else
+                 None)
     return seig_func(a, **settings, **kwargs)
 
 
@@ -174,14 +174,13 @@ def svds(a, k=6, ncv=None, return_vecs=True, backend='AUTO', **kwargs):
         'k': k,
         'ncv': ncv,
         'return_vecs': return_vecs}
-    bkd = backend.upper()
-    if bkd == 'AUTO':
-        bkd = choose_backend(a, k, False)
-    svd_func = {"SLEPC": slepc_svds,
-                "NUMPY": numpy_svds,
-                "DENSE": numpy_svds,
-                "SCIPY": scipy_svds}[bkd]
-    return svd_func(a, **settings, **kwargs)
+    bkd = (choose_backend(a, k, False) if backend in {'auto', 'AUTO'} else
+           backend.upper())
+    svds_func = (slepc_svds if bkd == 'SLEPC' else
+                 numpy_svds if bkd in {'NUMPY', 'DENSE'} else
+                 scipy_svds if bkd == 'SCIPY' else
+                 None)
+    return svds_func(a, **settings, **kwargs)
 
 
 # -------------------------------------------------------------------------- #

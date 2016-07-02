@@ -151,16 +151,14 @@ class TestSeigs:
     @mark.parametrize("which", [None, "SA", "LA", "LM", "SM", "TR"])
     @mark.parametrize("k", [1, 2])
     def test_cross_equality(self, prematsparse, k, which):
-        # TODO -------------------------------------------------------------- #
         _, a = prematsparse
         sigma = 1 if which in {None, "TR"} else None
-        lk1, vk1 = seigsys(a, k=k, which=which, sigma=sigma, backend="DENSE")
-        lk2, vk2 = seigsys(a, k=k, which=which, sigma=sigma, backend="SCIPY")
-        lk3, vk3 = seigsys(a, k=k, which=which, sigma=sigma, backend="SLEPC")
-        assert_allclose(lk1, lk2)
-        assert_allclose(lk2, lk3)
-        assert_allclose(abs(vk1.H @ vk2), eye(k), atol=1e-14)
-        assert_allclose(abs(vk2.H @ vk3), eye(k), atol=1e-14)
+        lks, vks = zip(*(seigsys(a, k=k, which=which, sigma=sigma, backend=b)
+                         for b in backends))
+        lks, vks = tuple(lks), tuple(vks)
+        for i in range(len(lks) - 1):
+            assert_allclose(lks[i], lks[i + 1])
+            assert_allclose(abs(vks[i].H @ vks[i + 1]), eye(k), atol=1e-14)
 
 
 class TestSVD:

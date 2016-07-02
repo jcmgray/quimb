@@ -4,25 +4,11 @@ from pytest import fixture, mark
 import numpy as np
 import scipy.sparse as sp
 from numpy.testing import assert_allclose
-from ... import (
-    ldmul,
-    rand_uni,
-    qu,
-    rand_matrix,
-    scipy_svds,
-    SLEPC4PY_FOUND,
-    rand_herm,
-    seigsys,
-    overlap,
-    eye,
-    ham_heis,
-    )
-
-from ...solve.slepc_solver import (
-    slepc_seigsys,
-    slepc_svds,
-    convert_to_petsc,
-    )
+from ... import (qu, rand_uni, ldmul, rand_matrix, scipy_svds, SLEPC4PY_FOUND,
+                 rand_herm, seigsys, overlap, eye)
+if SLEPC4PY_FOUND:
+    from ...solve.slepc_solver import (slepc_seigsys, slepc_svds,
+                                       convert_to_petsc)
 
 
 slepc4py_notfound_msg = "No SLEPc4py installation"
@@ -41,6 +27,10 @@ def prematsparse():
 def bigsparsemat():
     return rand_matrix(100, sparse=True, density=0.1)
 
+
+# --------------------------------------------------------------------------- #
+# TESTS                                                                       #
+# --------------------------------------------------------------------------- #
 
 @slepc4py_test
 class TestConvertToPETScConversion:
@@ -92,7 +82,9 @@ class TestSlepcSeigsys:
             assert_allclose(overlap(vs, va), 1.0)
 
     def test_aeigvals_all_consecutive(self):
-        h = ham_heis(n=10, sparse=True)
+        # TODO ************************************************************** #
+        # h = ham_heis(n=10, sparse=True)
+        pass
 
 
 @slepc4py_test
