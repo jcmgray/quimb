@@ -1,5 +1,7 @@
 # QUIMB
 
+[![Build Status](https://travis-ci.org/jcmgray/quimb.svg?branch=master)](https://travis-ci.org/jcmgray/quimb)
+
  * Python library for quantum information and many-body calcuations.
  * Uses `numpy` and `scipy.sparse` matrices as quantum objects.
  * Function orientated aside from a few very convenient monkey-patches.
