@@ -175,7 +175,7 @@ class TestSVD:
 
 
 class TestSVDS:
-    @mark.parametrize("backend", backends)
+    @mark.parametrize("backend", ["numpy", "scipy"])
     def test_svds_smalldense_wvecs(self, svdpremat, backend):
         u, v, a = svdpremat
         uk, sk, vk = svds(a, k=3, return_vecs=True, backend=backend)
@@ -192,7 +192,7 @@ class TestSVDS:
         sk = svds(a, k=3, return_vecs=False, backend=backend)
         assert_allclose(sk, [4, 3, 2])
 
-    @mark.parametrize("backend", backends)
+    @mark.parametrize("backend", ["numpy", "scipy"])
     def test_svds_sparse_wvecs(self, svdprematsparse, backend):
         u, v, a = svdprematsparse
         uk, sk, vk = svds(a, k=3, return_vecs=True, backend=backend)
@@ -203,7 +203,7 @@ class TestSVDS:
             o = abs(vk[i, :] @ v[:, j])
             assert_allclose(o, 1.)
 
-    @mark.parametrize("backend", backends)
+    @mark.parametrize("backend", ["numpy", "scipy"])
     def test_svds_sparse_nvecs(self, svdprematsparse, backend):
         _, _, a = svdprematsparse
         sk = svds(a, k=3, return_vecs=False, backend=backend)
