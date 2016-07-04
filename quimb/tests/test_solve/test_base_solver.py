@@ -26,7 +26,11 @@ from ...solve import (
     norm,
     )
 
+
+# TODO: reinstate slepc svd tests ******************************************* #
+
 backends = ["auto", "dense", "scipy"]
+svds_backends = ["dense", "scipy"]
 if SLEPC4PY_FOUND:
     backends += ["slepc"]
 
@@ -175,7 +179,7 @@ class TestSVD:
 
 
 class TestSVDS:
-    @mark.parametrize("backend", backends)
+    @mark.parametrize("backend", svds_backends)
     def test_svds_smalldense_wvecs(self, svdpremat, backend):
         u, v, a = svdpremat
         uk, sk, vk = svds(a, k=3, return_vecs=True, backend=backend)
@@ -186,13 +190,13 @@ class TestSVDS:
             o = abs(vk[i, :] @ v[:, j])
             assert_allclose(o, 1.)
 
-    @mark.parametrize("backend", ["numpy", "scipy"])
+    @mark.parametrize("backend", svds_backends)
     def test_svds_smalldense_nvecs(self, svdpremat, backend):
         _, _, a = svdpremat
         sk = svds(a, k=3, return_vecs=False, backend=backend)
         assert_allclose(sk, [4, 3, 2])
 
-    @mark.parametrize("backend", backends)
+    @mark.parametrize("backend", svds_backends)
     def test_svds_sparse_wvecs(self, svdprematsparse, backend):
         u, v, a = svdprematsparse
         uk, sk, vk = svds(a, k=3, return_vecs=True, backend=backend)
@@ -203,7 +207,7 @@ class TestSVDS:
             o = abs(vk[i, :] @ v[:, j])
             assert_allclose(o, 1.)
 
-    @mark.parametrize("backend", backends)
+    @mark.parametrize("backend", svds_backends)
     def test_svds_sparse_nvecs(self, svdprematsparse, backend):
         _, _, a = svdprematsparse
         sk = svds(a, k=3, return_vecs=False, backend=backend)
@@ -219,12 +223,12 @@ class TestNorms:
         a = qu([[3, 0], [4j, 0]], sparse=True)
         assert norm(a, "fro") == (9 + 16)**0.5
 
-    @mark.parametrize("backend", ["numpy", "scipy"])
+    @mark.parametrize("backend", svds_backends)
     def test_norm_spectral_dense(self, svdpremat, backend):
         _, _, a = svdpremat
         assert_allclose(norm(a, "spectral", backend=backend), 4.)
 
-    @mark.parametrize("backend", backends)
+    @mark.parametrize("backend", svds_backends)
     def test_norm_spectral_sparse(self, svdprematsparse, backend):
         _, _, a = svdprematsparse
         assert_allclose(norm(a, "spectral", backend=backend), 4.)

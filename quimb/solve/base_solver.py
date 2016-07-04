@@ -7,6 +7,7 @@ algebraic order by default. """
 # TODO: test non-herm
 # TODO: factor out numpy
 # TODO: add petsc / elemental ...
+# TODO: fix slepc svds instability
 
 import numpy as np
 import numpy.linalg as nla
