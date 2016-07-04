@@ -2,29 +2,29 @@ language: python
 python:
   - 3.5
 
-# addons:
-#   apt:
-#     packages:
-#       - build-essential
-#       - gcc
-#       - g++
-#       - gfortran
-#       - mpich
-#       - valgrind
-#       - bison
-#       - flex
-#       - cmake
-#       - libtool
-#       - autoconf
-#       - perl
-#       - m4
-#       - git
-#       - liblapack-dev
-#       - liblapack-doc
-#       - liblapack3gf
-#       - libblas-dev
-#       - libblas-doc
-#       - libblas3gf
+addons:
+  apt:
+    packages:
+      - build-essential
+      - gcc
+      - g++
+      - gfortran
+      - mpich
+      - valgrind
+      - bison
+      - flex
+      - cmake
+      - libtool
+      - autoconf
+      - perl
+      - m4
+      - git
+      - liblapack-dev
+      - liblapack-doc
+      - liblapack3gf
+      - libblas-dev
+      - libblas-doc
+      - libblas3gf
 
 cache:
   directories:
@@ -32,11 +32,10 @@ cache:
     # - $HOME/petsc_and_slepc_4py
 
 before_install:
-  - ls
   - bash deps/travis-install-conda.sh
   - export PATH="$HOME/conda/bin:$PATH"
   - source activate test-environment
-  # - bash deps/travis-install-slepc4py.sh
+  - bash deps/travis-install-slepc4py.sh
 
 install:
   - pip install .

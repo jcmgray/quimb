@@ -1,17 +1,19 @@
 #!/bin/sh
-
-# Required system packages...
-#     gfortran mpich valgrind bison flex cmake libtool autoconf
-#     gcc g++ build-essential perl m4 git
-
 set -e
-
 export INSTALL_DIR=$HOME/petsc_and_slepc
-
 mkdir $INSTALL_DIR
 cd $INSTALL_DIR
 
-# Download required repositories
+# if [ ! -d "$INSTALL_DIR" ]; then
+# else
+#   echo 'Using cached petsc_and_slepc directory.';
+# fi
+
+
+# ------------------------------ #
+# Download required repositories #
+# ------------------------------ #
+
 # git clone --depth 1 https://github.com/xianyi/OpenBLAS.git
 git clone --depth 1 https://bitbucket.org/petsc/petsc.git
 git clone --depth 1 https://bitbucket.org/slepc/slepc.git
@@ -19,10 +21,10 @@ git clone --depth 1 https://bitbucket.org/slepc/slepc.git
 git clone --depth 1 https://bitbucket.org/petsc/petsc4py.git
 git clone --depth 1 https://bitbucket.org/slepc/slepc4py.git
 
-# if [ ! -d "$INSTALL_DIR" ]; then
-# else
-#   echo 'Using cached petsc_and_slepc directory.';
-# fi
+
+# ---------- #
+# BUILD ALL  #
+# ---------- #
 
 # # Build Openblas
 # cd $INSTALL_DIR/OpenBLAS
@@ -30,6 +32,9 @@ git clone --depth 1 https://bitbucket.org/slepc/slepc4py.git
 # make -s
 
 # Build PETSc
+# Required system packages...
+#     gfortran mpich valgrind bison flex cmake libtool autoconf
+#     gcc g++ build-essential perl m4 git
 export PETSC_DIR=$INSTALL_DIR/petsc
 export PETSC_ARCH=arch-linux2-c-release
 cd $PETSC_DIR
@@ -57,6 +62,7 @@ git pull
 python2 ./configure
 make -s
 make test
+
 
 # ----------------------- #
 # Install python packages #

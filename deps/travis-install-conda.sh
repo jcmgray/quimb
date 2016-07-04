@@ -15,7 +15,7 @@ else
   export PATH="$HOME/conda/bin:$PATH"
   hash -r
   conda config --set always_yes yes --set changeps1 no
-  conda update conda
+  conda update -q conda
   conda info -a
   source activate test-environment
   conda update -q --all
