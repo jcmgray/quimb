@@ -31,13 +31,15 @@ python:
 #     - $HOME/conda
 #     # - $HOME/petsc_and_slepc_4py
 
-install:
+before_install:
   - bash deps/travis-install-conda.sh
   - export PATH="$HOME/conda/bin:$PATH"
-  - hash -r
+  # - hash -r
   - source activate test-environment
-  - pip install .
   # - bash deps/travis-install-slepc4py.sh
+
+install:
+  - pip install .
 
 script:
   - py.test
