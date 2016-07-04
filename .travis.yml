@@ -26,10 +26,10 @@ python:
 #       - libblas-doc
 #       - libblas3gf
 
-cache:
-  directories:
-    - $HOME/conda
-    # - $HOME/petsc_and_slepc_4py
+# cache:
+#   directories:
+#     - $HOME/conda
+#     # - $HOME/petsc_and_slepc_4py
 
 install:
   - bash deps/travis-install-conda.sh
