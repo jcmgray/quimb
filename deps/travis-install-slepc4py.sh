@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/sh
 
 # Required system packages...
 #     gfortran mpich valgrind bison flex cmake libtool autoconf

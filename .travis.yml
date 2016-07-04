@@ -35,8 +35,7 @@ install:
   - source activate test-environment
   - python setup.py install
   - pip install pytest-cov coveralls
-  - chmod -X deps/travis-install-slepc4py.sh
-  - ./deps/travis-install-slepc4py.sh
+  - bash deps/travis-install-slepc4py.sh
   - pip install .
 
 script:
