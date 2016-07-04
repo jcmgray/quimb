@@ -32,6 +32,7 @@ cache:
     # - $HOME/petsc_and_slepc_4py
 
 before_install:
+  - ls
   - bash deps/travis-install-conda.sh
   - export PATH="$HOME/conda/bin:$PATH"
   - source activate test-environment

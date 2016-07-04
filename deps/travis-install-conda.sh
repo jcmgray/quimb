@@ -1,6 +1,7 @@
 #!/bin/sh
 
-if [ ! -d "$HOME/conda" ]; then
+if [ ! -d "$HOME/conda/bin" ]; then
+  rm -rf $HOME/conda
   wget https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh;
   bash miniconda.sh -b -p $HOME/conda
   export PATH="$HOME/conda/bin:$PATH"
