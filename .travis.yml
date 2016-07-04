@@ -1,5 +1,6 @@
 language: python
-python: 3.5
+python:
+  - 3.5
 
 # addons:
 #   apt:
@@ -34,7 +35,7 @@ install:
   - bash deps/travis-install-conda.sh
   - export PATH="$HOME/conda/bin:$PATH"
   - source activate test-environment
-  - pip install .
+  - python setup.py install
   # - bash deps/travis-install-slepc4py.sh
 
 script:
