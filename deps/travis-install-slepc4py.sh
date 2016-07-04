@@ -6,21 +6,21 @@
 
 set -e
 
-export $INSTALL_DIR=$HOME/petsc_and_slepc_4py
-
-if [ ! -d "$INSTALL_DIR" ]; then
-  mkdir $INSTALL_DIR
-  cd $INSTALL_DIR
+if [ ! -d "$HOME/petsc_and_slepc_4py" ]; then
+  mkdir $HOME/petsc_and_slepc_4py
+  cd $HOME/petsc_and_slepc_4py
   # Download required repositories
-  git clone https://github.com/xianyi/OpenBLAS.git
-  git clone https://bitbucket.org/petsc/petsc.git
-  git clone https://bitbucket.org/slepc/slepc.git
-  git clone https://bitbucket.org/mpi4py/mpi4py.git
-  git clone https://bitbucket.org/petsc/petsc4py.git
-  git clone https://bitbucket.org/slepc/slepc4py.git
+  git clone --depth 1 https://github.com/xianyi/OpenBLAS.git
+  git clone --depth 1 https://bitbucket.org/petsc/petsc.git
+  git clone --depth 1 https://bitbucket.org/slepc/slepc.git
+  git clone --depth 1 https://bitbucket.org/mpi4py/mpi4py.git
+  git clone --depth 1 https://bitbucket.org/petsc/petsc4py.git
+  git clone --depth 1 https://bitbucket.org/slepc/slepc4py.git
 else
   echo 'Using cached petsc_and_slepc_4py directory.';
 fi
+
+export $INSTALL_DIR=$HOME/petsc_and_slepc_4py
 
 # Build Openblas
 cd $INSTALL_DIR/OpenBLAS
