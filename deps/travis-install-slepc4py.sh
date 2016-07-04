@@ -6,34 +6,33 @@
 
 set -e
 
-if [ ! -d "$HOME/petsc_and_slepc_4py" ]; then
-  mkdir $HOME/petsc_and_slepc_4py
-  cd $HOME/petsc_and_slepc_4py
-  # Download required repositories
-  git clone --depth 1 https://github.com/xianyi/OpenBLAS.git
-  git clone --depth 1 https://bitbucket.org/petsc/petsc.git
-  git clone --depth 1 https://bitbucket.org/slepc/slepc.git
-  git clone --depth 1 https://bitbucket.org/mpi4py/mpi4py.git
-  git clone --depth 1 https://bitbucket.org/petsc/petsc4py.git
-  git clone --depth 1 https://bitbucket.org/slepc/slepc4py.git
-else
-  echo 'Using cached petsc_and_slepc_4py directory.';
-fi
+mkdir $HOME/petsc_and_slepc
+cd $HOME/petsc_and_slepc
+# Download required repositories
+git clone --depth 1 https://github.com/xianyi/OpenBLAS.git
+git clone --depth 1 https://bitbucket.org/petsc/petsc.git
+git clone --depth 1 https://bitbucket.org/slepc/slepc.git
+git clone --depth 1 https://bitbucket.org/mpi4py/mpi4py.git
+git clone --depth 1 https://bitbucket.org/petsc/petsc4py.git
+git clone --depth 1 https://bitbucket.org/slepc/slepc4py.git
 
-export $INSTALL_DIR=$HOME/petsc_and_slepc_4py
+# if [ ! -d "$HOME/petsc_and_slepc" ]; then
+# else
+#   echo 'Using cached petsc_and_slepc directory.';
+# fi
 
 # Build Openblas
-cd $INSTALL_DIR/OpenBLAS
+cd $HOME/petsc_and_slepc/OpenBLAS
 git pull
 make
 
 # Build PETSc
-export PETSC_DIR=$INSTALL_DIR/petsc
+export PETSC_DIR=$HOME/petsc_and_slepc/petsc
 export PETSC_ARCH=arch-linux2-c-release-openblas
 cd $PETSC_DIR
 git pull
 python2 ./configure \
-  --with-blas-lapack-lib=$INSTALL_DIR/OpenBLAS/libopenblas.a \
+  --with-blas-lapack-lib=$HOME/petsc_and_slepc/OpenBLAS/libopenblas.a \
   --with-scalar-type=complex \
   --download-mumps \
   --download-scalapack \
@@ -48,7 +47,7 @@ make test
 make streams
 
 # Build SLEPc
-export SLEPC_DIR=$INSTALL_DIR/slepc
+export SLEPC_DIR=$HOME/petsc_and_slepc/slepc
 cd $SLEPC_DIR
 git pull
 python2 ./configure
@@ -56,14 +55,14 @@ make
 make test
 
 # Install python packages
-cd $INSTALL_DIR/mpi4py
+cd $HOME/petsc_and_slepc/mpi4py
 git pull
 pip install --no-deps .
 
-cd $INSTALL_DIR/petsc4py
+cd $HOME/petsc_and_slepc/petsc4py
 git pull
 pip install --no-deps .
 
-cd $INSTALL_DIR/slepc4py
+cd $HOME/petsc_and_slepc/slepc4py
 git pull
 pip install --no-deps .
