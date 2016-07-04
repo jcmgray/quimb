@@ -36,14 +36,10 @@ install:
   - export PATH="$HOME/conda/bin:$PATH"
   - hash -r
   - source activate test-environment
-  - conda list
-  - pip list
-  - pip install --no-deps .
+  - pip install .
   # - bash deps/travis-install-slepc4py.sh
 
 script:
-  - export PATH="$HOME/conda/bin:$PATH"
-  - hash -r
   - py.test
 
 after_success:
