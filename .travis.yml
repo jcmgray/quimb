@@ -34,8 +34,10 @@ python:
 install:
   - bash deps/travis-install-conda.sh
   - export PATH="$HOME/conda/bin:$PATH"
+  - hash -r
   - source activate test-environment
   - conda list
+  - pip list
   - pip install --no-deps .
   # - bash deps/travis-install-slepc4py.sh
 

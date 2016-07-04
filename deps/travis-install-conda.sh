@@ -12,10 +12,11 @@ if [ ! -d "$HOME/conda" ]; then
   pip install pytest-cov coveralls
 else
   export PATH="$HOME/conda/bin:$PATH"
+  hash -r
   conda config --set always_yes yes --set changeps1 no
   conda update conda
   conda info -a
   source activate test-environment
-  conda install numpy scipy numba numexpr coverage
+  conda update -q --all
   pip install -U pytest-cov coveralls
 fi
