@@ -8,8 +8,8 @@ if [ ! -d "$HOME/conda" ]; then
   conda config --set always_yes yes --set changeps1 no
   conda update -q conda
   conda info -a
-  conda create -q -n test-environment python=$TRAVIS_PYTHON_VERSION numpy scipy numba numexpr coverage
-  pip install pytest-cov coveralls
+  conda create -q -n test-environment python=$TRAVIS_PYTHON_VERSION numpy scipy numba numexpr coverage pytest pytest-cov
+  pip install coveralls
 else
   export PATH="$HOME/conda/bin:$PATH"
   hash -r
@@ -18,5 +18,5 @@ else
   conda info -a
   source activate test-environment
   conda update -q --all
-  pip install -U pytest-cov coveralls
+  pip install -U coveralls
 fi
