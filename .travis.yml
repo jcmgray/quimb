@@ -1,48 +1,41 @@
 language: python
 python: 3.5
 
-addons:
-  apt:
-    packages:
-      - build-essential
-      - gcc
-      - g++
-      - gfortran
-      - mpich
-      - valgrind
-      - bison
-      - flex
-      - cmake
-      - libtool
-      - autoconf
-      - perl
-      - m4
-      - git
-      - liblapack-dev
-      - liblapack-doc
-      - liblapack3gf
-      - libblas-dev
-      - libblas-doc
-      - libblas3gf
+# addons:
+#   apt:
+#     packages:
+#       - build-essential
+#       - gcc
+#       - g++
+#       - gfortran
+#       - mpich
+#       - valgrind
+#       - bison
+#       - flex
+#       - cmake
+#       - libtool
+#       - autoconf
+#       - perl
+#       - m4
+#       - git
+#       - liblapack-dev
+#       - liblapack-doc
+#       - liblapack3gf
+#       - libblas-dev
+#       - libblas-doc
+#       - libblas3gf
 
-# cache:
-#   directories:
-#     - $HOME/petsc_and_slepc_4py
+cache:
+  directories:
+    - $HOME/conda
+    # - $HOME/petsc_and_slepc_4py
 
 install:
-  - wget https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh;
-  - bash miniconda.sh -b -p $HOME/conda
+  - bash deps/travis-install-conda.sh
   - export PATH="$HOME/conda/bin:$PATH"
-  - hash -r
-  - conda config --set always_yes yes --set changeps1 no
-  - conda update -q conda
-  - conda info -a
-  - conda create -q -n test-environment python=$TRAVIS_PYTHON_VERSION numpy scipy numba numexpr coverage
   - source activate test-environment
-  - python setup.py install
-  - pip install pytest-cov coveralls
-  - bash deps/travis-install-slepc4py.sh
   - pip install .
+  # - bash deps/travis-install-slepc4py.sh
 
 script:
   - py.test

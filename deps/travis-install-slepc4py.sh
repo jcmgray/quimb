@@ -35,7 +35,7 @@ export PETSC_ARCH=arch-linux2-c-release
 cd $PETSC_DIR
 git pull
 python2 ./configure \
-  --with-mpi=0  \  # THIS IS FOR TRAVIS ONLY
+  --with-mpi=0  \
   --with-scalar-type=complex  \
   --download-mumps  \
   --download-scalapack  \
