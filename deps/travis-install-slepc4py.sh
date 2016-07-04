@@ -12,7 +12,7 @@ mkdir $INSTALL_DIR
 cd $INSTALL_DIR
 
 # Download required repositories
-git clone --depth 1 https://github.com/xianyi/OpenBLAS.git
+# git clone --depth 1 https://github.com/xianyi/OpenBLAS.git
 git clone --depth 1 https://bitbucket.org/petsc/petsc.git
 git clone --depth 1 https://bitbucket.org/slepc/slepc.git
 # git clone --depth 1 https://bitbucket.org/mpi4py/mpi4py.git
@@ -24,19 +24,18 @@ git clone --depth 1 https://bitbucket.org/slepc/slepc4py.git
 #   echo 'Using cached petsc_and_slepc directory.';
 # fi
 
-# Build Openblas
-cd $INSTALL_DIR/OpenBLAS
-git pull
-make -s
+# # Build Openblas
+# cd $INSTALL_DIR/OpenBLAS
+# git pull
+# make -s
 
 # Build PETSc
 export PETSC_DIR=$INSTALL_DIR/petsc
-export PETSC_ARCH=arch-linux2-c-release-openblas
+export PETSC_ARCH=arch-linux2-c-release
 cd $PETSC_DIR
 git pull
 python2 ./configure \
   --with-mpi=0  \  # THIS IS FOR TRAVIS ONLY
-  --with-blas-lapack-lib=$INSTALL_DIR/OpenBLAS/libopenblas.a \
   --with-scalar-type=complex  \
   --download-mumps  \
   --download-scalapack  \
@@ -46,6 +45,7 @@ python2 ./configure \
   COPTFLAGS='-O3 -march=native -mtune=native'  \
   CXXOPTFLAGS='-O3 -march=native -mtune=native'  \
   FOPTFLAGS='-O3 -march=native -mtune=native'
+  # --with-blas-lapack-lib=$INSTALL_DIR/OpenBLAS/libopenblas.a \
 make -s all
 make test
 make streams

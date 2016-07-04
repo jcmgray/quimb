@@ -18,6 +18,12 @@ addons:
       - perl
       - m4
       - git
+      - liblapack-dev
+      - liblapack-doc
+      - liblapack3gf
+      - libblas-dev
+      - libblas-doc
+      - libblas3gf
 
 # cache:
 #   directories:
