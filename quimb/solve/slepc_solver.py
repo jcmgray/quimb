@@ -38,8 +38,9 @@ def new_petsc_vec(n, comm=PETSc.COMM_WORLD):
     return PETSc.Vec().createWithArray(a, comm=comm)
 
 
-def init_eigensolver(which='LM', sigma=None, isherm=True, etype="krylovschur",
-                     st_opts_dict={}, tol=None, max_it=None):
+def init_eigensolver(which='LM', sigma=None, isherm=True,
+                     EPSType="krylovschur", st_opts_dict={}, tol=None,
+                     max_it=None):
     """
     Create an advanced eigensystem solver
 
@@ -74,7 +75,7 @@ def init_eigensolver(which='LM', sigma=None, isherm=True, etype="krylovschur",
         which = "TR"
         eigensolver.setST(init_spectral_inverter(**st_opts_dict))
         eigensolver.setTarget(sigma)
-    eigensolver.setType(etype)
+    eigensolver.setType(EPSType)
     eigensolver.setProblemType(slepc_isherm[isherm])
     eigensolver.setWhichEigenpairs(scipy_to_slepc_which[which.upper()])
     eigensolver.setConvergenceTest(SLEPc.EPS.Conv.ABS)
@@ -107,7 +108,7 @@ def init_spectral_inverter(ptype="lu", ppackage="mumps", ktype="preonly",
 
 
 def slepc_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
-                  isherm=True, ncv=None, sort=True, etype="krylovschur",
+                  isherm=True, ncv=None, sort=True, EPSType="krylovschur",
                   return_all_conv=False, st_opts_dict={}, tol=None,
                   max_it=None):
     """
@@ -121,7 +122,7 @@ def slepc_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
         isherm: whether problem is hermitian or not
         return_vecs: whether to return the eigenvectors
         sort: whether to sort the eigenpairs in ascending real value
-        etype: SLEPc eigensolver type to use
+        EPSType: SLEPc eigensolver type to use
         return_all_conv: whether to return converged eigenpairs beyond
             requested subspace size
         st_opts_dict: options to send to the eigensolver internal inverter
@@ -135,15 +136,13 @@ def slepc_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
         'which': 'SR' if which is None else which,
         'sigma': sigma,
         'isherm': isherm,
-        'etype': etype,
+        'EPSType': EPSType,
         'tol': tol,
         'max_it': max_it,
     }
     eigensolver = init_eigensolver(**eps_settings, **st_opts_dict)
-    pa = convert_to_petsc(a)
-    eigensolver.setOperators(pa)
+    eigensolver.setOperators(convert_to_petsc(a))
     eigensolver.setDimensions(k, ncv)
-
     eigensolver.solve()
     nconv = eigensolver.getConverged()
     assert nconv >= k
@@ -186,6 +185,7 @@ def slepc_svds(a, k=6, ncv=None, return_vecs=True,
     svd_solver.setTolerances(tol=tol, max_it=max_it)
     petsc_a = convert_to_petsc(a)
     svd_solver.setOperator(petsc_a)
+    svd_solver.setFromOptions()
     svd_solver.solve()
 
     nconv = svd_solver.getConverged()
@@ -193,10 +193,6 @@ def slepc_svds(a, k=6, ncv=None, return_vecs=True,
     k = nconv if extra_vals else k
 
     if return_vecs:
-        LBV, RBV = svd_solver.getBV()
-        LBV.setType(SLEPc.BV.Type.SVEC)
-        RBV.setType(SLEPc.BV.Type.SVEC)
-
         sk = np.empty(k, dtype=float)
         uk = np.empty((a.shape[0], k), dtype=complex)
         vtk = np.empty((k, a.shape[1]), dtype=complex)

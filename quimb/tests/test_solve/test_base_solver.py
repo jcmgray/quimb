@@ -38,6 +38,7 @@ if SLEPC4PY_FOUND:
 
 @fixture
 def premat():
+    np.random.seed(1)
     u = rand_uni(4)
     a = u @ ldmul(np.array([-1, 2, 4, -3]), u.H)
     return u, a
@@ -45,6 +46,7 @@ def premat():
 
 @fixture
 def prematsparse():
+    np.random.seed(1)
     u = rand_uni(4)
     a = u @ ldmul(np.array([-1, 2, 4, -3]), u.H)
     a = qu(a, sparse=True)
@@ -53,6 +55,7 @@ def prematsparse():
 
 @fixture
 def svdpremat():
+    np.random.seed(1)
     u, v = rand_uni(5), rand_uni(5)
     a = u @ ldmul(np.array([1, 2, 4, 3, 0]), v.H)
     return u, v, a
