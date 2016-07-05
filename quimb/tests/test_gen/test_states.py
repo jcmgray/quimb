@@ -1,26 +1,13 @@
+from pytest import mark
 import numpy as np
 from numpy.testing import assert_allclose
-
-from ...core import tr, eye, chop, eyepad, overlap, ptr
-from ...solve import eigsys, groundstate
-from ...gen import (
-    basis_vec,
-    up,
-    down,
-    plus,
-    minus,
-    yplus,
-    yminus,
-    thermal_state,
-    ham_j1j2,
-    rand_herm,
-    graph_state_1d,
-    sig,
-    levi_civita,
-    bloch_state,
-    bell_state,
-    singlet,
-)
+from ... import (tr, eye, chop, eyepad, overlap, ptr, eigsys,
+                 groundstate, concurrence)
+from ...gen import (basis_vec, up, down, plus, minus, yplus, yminus,
+                    thermal_state, neel_state, ham_j1j2, rand_herm,
+                    graph_state_1d, sig, levi_civita, bloch_state,
+                    bell_state, singlet, singlet_pairs, werner_state,
+                    ghz_state, w_state, perm_state)
 
 
 class TestBasisVec:
@@ -140,15 +127,52 @@ class TestThermalState:
         assert_allclose(rhoth1, rhoth2)
 
 
-class TestGraphState:
-    def test_graph_state_1d(self):
-        n = 5
-        p = graph_state_1d(n, cyclic=True)
-        for j in range(n):
-            k = eyepad([sig('x'), sig('z'), sig('z')], [2] * n,
-                       (j, (j - 1) % n, (j + 1) % n))
-            o = p.H @ k @ p
-            np.testing.assert_allclose(o, 1)
+class TestNeelState:
+    def test_simple(self):
+        p = neel_state(1)
+        assert_allclose(p, up())
+        p = neel_state(2)
+        assert_allclose(p, up() & down())
+        p = neel_state(3)
+        assert_allclose(p, up() & down() & up())
+
+
+class TestSingletPairs:
+    def test_n2(self):
+        p = singlet_pairs(2)
+        assert_allclose(p, bell_state('psi-'))
+        p = singlet_pairs(4)
+        assert_allclose(p, bell_state('psi-') & bell_state('psi-'))
+
+
+class TestWernerState:
+    def test_extremes(self):
+        p = werner_state(1)
+        assert_allclose(p, bell_state('psi-', qtype='dop'))
+        p = werner_state(0)
+        assert_allclose(p, eye(4) / 4, atol=1e-14)
+
+    @mark.parametrize("p", np.linspace(0, 1/3, 10))
+    def test_no_entanglement(self, p):
+        rho = werner_state(p)
+        assert concurrence(rho) < 1e-14
+
+    @mark.parametrize("p", np.linspace(1/3 + 0.001, 1.0, 10))
+    def test_entanglement(self, p):
+        rho = werner_state(p)
+        assert concurrence(rho) > 1e-14
+
+
+class TestGHZState:
+    def test_n2(self):
+        p = ghz_state(2)
+        assert_allclose(p, bell_state('phi+'))
+
+
+class TestWState:
+    def test_n2(self):
+        p = w_state(2)
+        assert_allclose(p, bell_state('psi+'))
 
 
 class TestLeviCivita:
@@ -169,3 +193,20 @@ class TestLeviCivita:
         assert levi_civita(perm) == 0
         perm = [0, 0, 1, 1]
         assert levi_civita(perm) == 0
+
+
+class TestPermState:
+    def test_n2(self):
+        p = perm_state([up(), down()])
+        assert_allclose(p, bell_state('psi-'))
+
+
+class TestGraphState:
+    def test_graph_state_1d(self):
+        n = 5
+        p = graph_state_1d(n, cyclic=True)
+        for j in range(n):
+            k = eyepad([sig('x'), sig('z'), sig('z')], [2] * n,
+                       (j, (j - 1) % n, (j + 1) % n))
+            o = p.H @ k @ p
+            np.testing.assert_allclose(o, 1)
