@@ -1,12 +1,14 @@
-from pytest import fixture, mark
+from pytest import fixture, mark, raises
 import numpy as np
 from numpy.testing import assert_allclose
 
 from .. import (qu, eye, rand_product_state, bell_state, up, eigvecs,
-                rand_mix, rand_rho, rand_ket, sig, down)
+                rand_mix, rand_rho, rand_ket, sig, down, overlap,
+                singlet_pairs)
 from ..calc import (fidelity, quantum_discord, one_way_classical_information,
                     mutual_information, partial_transpose, entropy,
-                    correlation, pauli_correlations)
+                    correlation, pauli_correlations, expm, sqrtm, purify,
+                    concurrence, negativity, logneg)
 
 
 @fixture
@@ -40,6 +42,31 @@ def orthog_ks():
 # TESTS                                                                       #
 # --------------------------------------------------------------------------- #
 
+class TestExpm:
+    @mark.parametrize("herm", [True, False])
+    def test_zeros_dense(self, herm):
+        p = expm(np.zeros((2, 2), dtype=complex), herm=herm)
+        assert_allclose(p, eye(2))
+
+    @mark.parametrize("sparse", [True, False])
+    @mark.parametrize("herm", [True, False])
+    def test_eye(self, sparse, herm):
+        p = expm(eye(2, sparse=sparse), herm=herm)
+        assert_allclose((p.A if sparse else p) / np.e, eye(2))
+
+
+class TestSqrtm:
+    @mark.parametrize("sparse", [True, False])
+    @mark.parametrize("herm", [True, False])
+    def test_eye(self, herm, sparse):
+        if sparse:
+            with raises(NotImplementedError):
+                p = sqrtm(eye(2, sparse=sparse), herm=herm)
+        else:
+            p = sqrtm(eye(2), herm=herm)
+            assert_allclose(p, eye(2))
+
+
 class TestFidelity:
     def test_both_pure(self, k1, k2):
         f = fidelity(k1, k1)
@@ -71,6 +98,20 @@ class TestFidelity:
                         [k1 @ k1.H, k3 @ k3.H]):
             f = fidelity(s1, s2)
             assert_allclose(f, 0.0, atol=1e-6)
+
+
+class TestPurify:
+    @mark.parametrize("sparse", [True, False])
+    def test_d2(self, sparse):
+        rho = eye(2) / 2
+        psi = purify(rho, sparse=sparse)
+        assert overlap(psi, bell_state('phi+')) > 1 - 1e-14
+
+    @mark.parametrize("sparse", [True, False])
+    def test_pure(self, sparse):
+        rho = up(qtype='dop')
+        psi = purify(rho, sparse=sparse)
+        assert abs(concurrence(psi)) < 1e-14
 
 
 class TestEntropy:
@@ -132,21 +173,39 @@ class TestPartialTranspose:
 
 
 class TestNegativity:
-    def test_simple(self):
-        # TODO ************************************************************** #
-        pass
+    @mark.parametrize("bs", ['psi-', 'phi-', 'psi+', 'phi+'])
+    @mark.parametrize("qtype", ['ket', 'dop'])
+    def test_simple(self, qtype, bs):
+        p = bell_state(bs, qtype=qtype)
+        assert negativity(p) > 0.5 - 1e-14
+
+    def test_subsystem(self):
+        p = singlet_pairs(4)
+        assert negativity(p, [2]*4, 0, 1) > 0.5 - 1e-14
+        assert negativity(p, [2]*4, 1, 2) < 1e-14
+        assert negativity(p, [2]*4, 2, 3) > 0.5 - 1e-14
 
 
 class TestLogarithmicNegativity:
-    def test_simple(self):
-        # TODO ************************************************************** #
-        pass
+    @mark.parametrize("bs", ['psi-', 'phi-', 'psi+', 'phi+'])
+    @mark.parametrize("qtype", ['ket', 'dop'])
+    def test_bell_states(self, qtype, bs):
+        p = bell_state(bs, qtype=qtype)
+        assert logneg(p) > 1.0 - 1e-14
+
+    def test_subsystem(self):
+        p = singlet_pairs(4)
+        assert logneg(p, [2]*4, 0, 1) > 1 - 1e-14
+        assert logneg(p, [2]*4, 1, 2) < 1e-14
+        assert logneg(p, [2]*4, 2, 3) > 1 - 1e-14
 
 
 class TestConcurrence:
-    def test_simple(self):
-        # TODO ************************************************************** #
-        pass
+    @mark.parametrize("bs", ['psi-', 'phi-', 'psi+', 'phi+'])
+    @mark.parametrize("qtype", ['ket', 'dop'])
+    def test_bell_states(self, qtype, bs):
+        p = bell_state(bs, qtype=qtype)
+        assert concurrence(p) > 1.0 - 1e-14
 
 
 class TestQuantumDiscord:
