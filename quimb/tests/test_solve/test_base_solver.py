@@ -33,6 +33,7 @@ backends = ["auto", "dense", "scipy"]
 svds_backends = ["dense", "scipy"]
 if SLEPC4PY_FOUND:
     backends += ["slepc"]
+    svds_backends += ["slepc"]
 
 
 @fixture
