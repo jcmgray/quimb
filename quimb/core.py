@@ -13,22 +13,12 @@ from numpy.matlib import zeros
 import scipy.sparse as sp
 from numba import jit, complex128, int64
 
-from .accel import (
-    matrixify,
-    realify,
-    issparse,
-    isop,
-    vdot,
-    dot_dense,
-    kron,
-    kronpow
-)
+from .accel import (matrixify, realify, issparse, isop, vdot, dot_dense,
+                    kron, kronpow)
 
 
 def sparse_matrix(data, format="csr"):
-    """
-    Construct a sparse matrix of a particular format.
-    """
+    """ Construct a sparse matrix of a particular format. """
     sparse_constructors = {"csr": sp.csr_matrix,
                            "bsr": sp.bsr_matrix,
                            "csc": sp.csc_matrix,

@@ -7,8 +7,10 @@ quantum objects.
 # TODO: sparse sqrtm function *********************************************** #
 
 from math import sin, cos, pi, log2, sqrt
+import numbers
 import collections
 import itertools
+import functools
 
 import numpy as np
 import numpy.linalg as nla
@@ -16,10 +18,10 @@ import scipy.linalg as sla
 import scipy.sparse.linalg as spla
 from scipy.optimize import minimize
 
-from .accel import dot_dense, ldmul, issparse, isop, zeroify, realify
-from .core import (qu, kron, eye, eyepad, tr, ptr, infer_size, overlap)
+from .accel import (dot_dense, ldmul, issparse, isop, zeroify, realify)
+from .core import (qu, kron, eye, eyepad, tr, ptr, infer_size, overlap, dop)
 from .solve import (eigvals, eigsys, norm)
-from .gen import sig, basis_vec, bell_state, bloch_state
+from .gen import (sig, basis_vec, bell_state, bloch_state)
 
 
 def expm(a, herm=True):
@@ -204,76 +206,66 @@ def quantum_discord(p):
 @zeroify
 def trace_distance(p, w):
     """ Trace distance between states `p` and `w`. """
-    if not isop(p) and not isop(w):
+    p_is_op, w_is_op = isop(p), isop(w)
+    if not p_is_op and not w_is_op:
         return sqrt(1 - overlap(p, w))
-    return 0.5 * norm(p - w, "tr")
+    return 0.5 * norm((p if p_is_op else dop(p)) -
+                      (w if w_is_op else dop(w)), "tr")
 
 
-def pauli_decomp(a, mode="p", tol=1e-3):
+def decomp(a, fn, fn_args, fn_d, nmlz_func, mode="p", tol=1e-3):
     """ Decomposes an operator via the Hilbert-schmidt inner product into the
     pauli group. Can both print the decomposition or return it.
 
     Parameters
     ----------
         a: operator to decompose
+        fn: function to generate operator/state to decompose with
+        fn_args: list of args whose permutations will be used
         mode: string, include 'p' to print the decomp and/or 'c' to return dict
         tol: print operators with contirbution above tol only.
 
     Returns
     -------
-        nds: OrderedDict of Pauli operator name and overlap with a.
-
-    Examples
-    --------
-    >>> pauli_decomp( singlet(), tol=1e-2)
-    II  0.25
-    XX -0.25
-    YY -0.25
-    ZZ -0.25
+        (names_cffs): OrderedDict of Pauli operator name and overlap with a.
     """
     if not isop(a):
         a = qu(a, "dop")  # make sure operator
-    n = infer_size(a)
+    n = infer_size(a, base=fn_d)
 
     # define generator for inner product to iterate over efficiently
-    def calc_name_and_overlap(fa):
-        for perm in itertools.product("IXYZ", repeat=n):
-            name = "".join(perm)
-            op = kron(*[sig(s, sparse=True) for s in perm]) / 2**n
-            d = np.trace(a @ op)
-            yield name, d
+    def calc_name_and_overlap():
+        for perm in itertools.product(fn_args, repeat=n):
+            op = kron(*(fn(x, sparse=True) for x in perm)) * nmlz_func(n)
+            cff = overlap(a, op)
+            yield "".join(str(x) for x in perm), cff
 
-    nds = [nd for nd in calc_name_and_overlap(a)]
+    names_cffs = list(calc_name_and_overlap())
     # sort by descending overlap and turn into OrderedDict
-    nds.sort(key=lambda pair: -abs(pair[1]))
-    nds = collections.OrderedDict(nds)
+    names_cffs.sort(key=lambda pair: -abs(pair[1]))
+    names_cffs = collections.OrderedDict(names_cffs)
     # Print decomposition
     if "p" in mode:
-        for x, d in nds.items():
-            if abs(d) < 0.01:
+        for x, cff in names_cffs.items():
+            if abs(cff) < 0.01:
                 break
             dps = int(round(0.5 - np.log10(1.001 * tol)))  # decimal places
-            print(x, "{: .{prec}f}".format(d, prec=dps))
+            print(x, "{: .{prec}f}".format(cff, prec=dps))
     # Return full calculation
     if "c" in mode:
-        return nds
+        return names_cffs
 
+pauli_decomp = functools.partial(decomp,
+                                 fn=sig,
+                                 fn_args='IXYZ',
+                                 fn_d=2,
+                                 nmlz_func=lambda n: 2**-n)
 
-def bell_fid(p):
-    # TODO: bell_decomp, with arbitrary size, print and calc
-    """ Outputs a tuple of state p's fidelities with the four bell states
-    psi- (singlet) psi+, phi-, phi+ (triplets). """
-    op = isop(p)
-
-    def gen_bfs():
-        for b in ["psi-", "psi+", "phi-", "phi+"]:
-            psib = bell_state(b)
-            if op:
-                yield tr(psib.H @ p @ psib)
-            else:
-                yield abs(psib.H @ p)[0, 0]**2
-
-    return [*gen_bfs()]
+bell_decomp = functools.partial(decomp,
+                                fn=bell_state,
+                                fn_args=(0, 1, 2, 3),
+                                fn_d=4,
+                                nmlz_func=lambda x: 1)
 
 
 def correlation(p, opa, opb, sysa, sysb, dims=None, sparse=None,
@@ -345,21 +337,21 @@ def pauli_correlations(p, ss=("xx", "yy", "zz"), sysa=0, sysb=1,
     return tuple(gen_corr_list())
 
 
-def ent_cross_matrix(p, ent_fun=concurrence, calc_self_ent=True):
-    """ Calculate the pair-wise function ent_fun  between all sites
+def ent_cross_matrix(p, ent_fn=concurrence, calc_self_ent=True):
+    """ Calculate the pair-wise function ent_fn  between all sites
     of a state.
 
     Parameters
     ----------
         p: state
-        ent_fun: function acting on space [2, 2], notionally entanglement
+        ent_fn: function acting on space [2, 2], notionally entanglement
         calc_self_ent: whether to calculate the function for each site
             alone, purified. If the whole state is pure then this is the
             entanglement with the whole remaining system.
 
     Returns
     -------
-        ents: matrix of pairwise ent_fun results.
+        ents: matrix of pairwise ent_fn results.
     """
     sz_p = infer_size(p)
     ents = np.empty((sz_p, sz_p))
@@ -369,32 +361,32 @@ def ent_cross_matrix(p, ent_fun=concurrence, calc_self_ent=True):
                 if calc_self_ent:
                     rhoa = ptr(p, [2]*sz_p, i)
                     psiap = purify(rhoa)
-                    ent = ent_fun(psiap)
+                    ent = ent_fn(psiap)
                 else:
                     ent = np.nan
             else:
                 rhoab = ptr(p, [2]*sz_p, [i, j])
-                ent = ent_fun(rhoab)
+                ent = ent_fn(rhoab)
             ents[i, j] = ent
             ents[j, i] = ent
     return ents
 
 
 def qid(p, dims, inds, precomp_func=False, sparse_comp=True,
-        norm_func=norm, pow=2, coeff=1/3):
-    p = qu(p, "dop")
-    inds = np.array(inds, ndmin=1)
+        norm_func=norm, pow=2, coeff=1):
+    # Check inputs
+    inds = (inds,) if isinstance(inds, numbers.Number) else inds
+
     # Construct operators
-    ops_i = [[eyepad(sig(s), dims, ind, sparse=sparse_comp)
-              for s in "xyz"]
-             for ind in inds]
+    ops_i = tuple(tuple(eyepad(sig(s), dims, ind, sparse=sparse_comp)
+                        for s in "xyz")
+                  for ind in inds)
 
     # Define function closed over precomputed operators
     def qid_func(x):
-        qds = np.zeros(np.size(inds))
-        for i, ops in enumerate(ops_i):
-            for op in ops:
-                qds[i] += coeff * norm_func(x @ op - op @ x)**pow
-        return qds
+        if not isop(x):
+            x = dop(x)
+        return tuple(sum(coeff * norm_func(x @ op - op @ x)**pow for op in ops)
+                     for ops in ops_i)
 
     return qid_func if precomp_func else qid_func(p)

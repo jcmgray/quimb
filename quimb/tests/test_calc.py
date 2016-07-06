@@ -1,14 +1,15 @@
 from pytest import fixture, mark, raises
+import itertools
 import numpy as np
 from numpy.testing import assert_allclose
-
 from .. import (qu, eye, rand_product_state, bell_state, up, eigvecs,
                 rand_mix, rand_rho, rand_ket, sig, down, overlap,
-                singlet_pairs)
+                singlet_pairs, dop, singlet, kron)
 from ..calc import (fidelity, quantum_discord, one_way_classical_information,
                     mutual_information, partial_transpose, entropy,
                     correlation, pauli_correlations, expm, sqrtm, purify,
-                    concurrence, negativity, logneg)
+                    concurrence, negativity, logneg, trace_distance,
+                    pauli_decomp, bell_decomp, ent_cross_matrix, qid)
 
 
 @fixture
@@ -245,15 +246,49 @@ class TestQuantumDiscord:
 
 
 class TestTraceDistance:
-    def test_simple(self):
-        # TODO ************************************************************** #
-        pass
+    def test_types(self, k1, k2):
+        td1 = trace_distance(k1, k2)
+        td2 = trace_distance(dop(k1), k2)
+        td3 = trace_distance(k1, dop(k2))
+        td4 = trace_distance(dop(k1), dop(k2))
+        assert_allclose([td1]*3, [td2, td3, td4])
+
+    def test_same(self, p1):
+        assert abs(trace_distance(p1, p1)) < 1e-14
+
+    @mark.parametrize("uqtype", ['ket', 'dop'])
+    @mark.parametrize("dqtype", ['ket', 'dop'])
+    def test_distinguishable(self, uqtype, dqtype):
+        assert trace_distance(up(qtype=uqtype), down(qtype=dqtype)) > 1 - 1e-10
 
 
-class TestPauliDecomp:
-    def test_simple(self):
-        # TODO ************************************************************** #
-        pass
+class TestDecomp:
+    @mark.parametrize("qtype", ['ket', 'dop'])
+    def test_pauli_decomp_singlet(self, qtype):
+        p = singlet(qtype=qtype)
+        names_cffs = pauli_decomp(p, mode='cp')
+        assert_allclose(names_cffs['II'], 0.25)
+        assert_allclose(names_cffs['ZZ'], -0.25)
+        assert_allclose(names_cffs['YY'], -0.25)
+        assert_allclose(names_cffs['ZZ'], -0.25)
+        for name in itertools.permutations('IXYZ', 2):
+            assert_allclose(names_cffs["".join(name)], 0.0)
+
+    def test_pauli_reconstruct(self):
+        p1 = rand_rho(4)
+        names_cffs = pauli_decomp(p1, mode='c')
+        pr = sum(kron(*(sig(s) for s in name)) * names_cffs["".join(name)]
+                 for name in itertools.product('IXYZ', repeat=2))
+        assert_allclose(pr, p1)
+
+    @mark.parametrize("state, out",
+                      [(up() & down(), {0: 0.5, 1: 0.5, 2: 0, 3: 0}),
+                       (down() & down(), {0: 0, 1: 0, 2: 0.5, 3: 0.5}),
+                       (singlet() & singlet(), {'00': 1.0, '23': 0.0})])
+    def test_bell_decomp(self, state, out):
+        names_cffs = bell_decomp(state, mode='c')
+        for key in out:
+            assert_allclose(names_cffs[str(key)], out[key])
 
 
 class TestCorrelation:
@@ -295,9 +330,48 @@ class TestCorrelation:
         c = c(p) if pre_c else c
         assert_allclose(c, ct)
 
+    def test_reuse_precomp(self):
+        cfn = correlation(None, sig('z'), sig('z'), 0, 1, dims=[2, 2],
+                          precomp_func=True)
+        assert_allclose(cfn(bell_state('psi-')), -1.0)
+        assert_allclose(cfn(bell_state('phi+')), 1.0)
+
     @mark.parametrize("pre_c", [False, True])
     def test_pauli_correlations_sum_abs(self, pre_c):
         p = bell_state('psi-')
         ct = pauli_correlations(p, sum_abs=True, precomp_func=pre_c)
         ct = ct(p) if pre_c else ct
         assert_allclose(ct, 3.0)
+
+    @mark.parametrize("pre_c", [False, True])
+    def test_pauli_correlations_no_sum_abs(self, pre_c):
+        p = bell_state('psi-')
+        ct = pauli_correlations(p, sum_abs=False, precomp_func=pre_c)
+        assert_allclose(list(c(p) for c in ct) if pre_c else ct, (-1, -1, -1))
+
+
+class TestEntCrossMatrix:
+    def test_bell_state(self):
+        p = bell_state('phi+')
+        ecm = ent_cross_matrix(p, ent_fn=concurrence, calc_self_ent=True)
+        assert_allclose(ecm, [[1, 1], [1, 1]])
+
+    def test_bell_state_no_self_ent(self):
+        p = bell_state('phi+')
+        ecm = ent_cross_matrix(p, ent_fn=concurrence, calc_self_ent=False)
+        assert_allclose(ecm, [[np.nan, 1], [1, np.nan]])
+
+
+class TestQID:
+    @mark.parametrize("bs", [0, 1, 2, 3])
+    @mark.parametrize("pre_c", [False, True])
+    def test_bell_state(self, bs, pre_c):
+        p = bell_state(bs)
+        qids = qid(p, dims=[2, 2], inds=[0, 1], precomp_func=pre_c)
+        assert_allclose(qids(p) if pre_c else qids, [3, 3])
+
+    @mark.parametrize("pre_c", [False, True])
+    def test_random_product_state(self, pre_c):
+        p = rand_product_state(3)
+        qids = qid(p, dims=[2, 2, 2], inds=[0, 1, 2], precomp_func=pre_c)
+        assert_allclose(qids(p) if pre_c else qids, [2, 2, 2])
