@@ -3,29 +3,11 @@ from functools import reduce
 from pytest import fixture
 import numpy as np
 from numpy.testing import assert_allclose
-from .. import (
-    qu,
-    eigsys,
-    rand_ket,
-    rand_rho,
-    rand_herm,
-    rand_matrix,
-    rand_uni,
-    overlap,
-    ham_heis,
-    up,
-    down,
-    eyepad,
-    sig,
-)
-from ..evo import (
-    schrodinger_eq_ket,
-    schrodinger_eq_dop,
-    schrodinger_eq_dop_vec,
-    lindblad_eq,
-    lindblad_eq_vec,
-    QuEvo,
-)
+from .. import (qu, eigsys, rand_ket, rand_rho, rand_herm, rand_matrix,
+                rand_uni, overlap, ham_heis, up, down, eyepad, sig)
+from ..evo import (schrodinger_eq_ket, schrodinger_eq_dop,
+                   schrodinger_eq_dop_vec, lindblad_eq, lindblad_eq_vec,
+                   QuEvo)
 
 
 @fixture

@@ -8,14 +8,10 @@ TODO: iterative method, sparse etc., turn off optimzations for small n
 # TODO: delete p0, ham etc? precompute -1.0j*ham
 # TODO: solout method with funcyt
 # TODO: QuEvoTimeDepend
+# TODO: homogenise dense_ham options and numba dot
 import numpy as np
 from scipy.integrate import complex_ode
-from .accel import (
-    isop,
-    ldmul,
-    rdmul,
-    explt,
-)
+from .accel import isop, ldmul, rdmul, explt
 from .accel import issparse, dot_dense
 from .core import qu, eye
 from .solve import eigsys, norm
