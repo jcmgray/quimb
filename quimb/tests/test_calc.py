@@ -9,7 +9,7 @@ from ..calc import (fidelity, quantum_discord, one_way_classical_information,
                     mutual_information, partial_transpose, entropy,
                     correlation, pauli_correlations, expm, sqrtm, purify,
                     concurrence, negativity, logneg, trace_distance,
-                    pauli_decomp, bell_decomp)
+                    pauli_decomp, bell_decomp, ent_cross_matrix, qid)
 
 
 @fixture
@@ -330,9 +330,48 @@ class TestCorrelation:
         c = c(p) if pre_c else c
         assert_allclose(c, ct)
 
+    def test_reuse_precomp(self):
+        cfn = correlation(None, sig('z'), sig('z'), 0, 1, dims=[2, 2],
+                          precomp_func=True)
+        assert_allclose(cfn(bell_state('psi-')), -1.0)
+        assert_allclose(cfn(bell_state('phi+')), 1.0)
+
     @mark.parametrize("pre_c", [False, True])
     def test_pauli_correlations_sum_abs(self, pre_c):
         p = bell_state('psi-')
         ct = pauli_correlations(p, sum_abs=True, precomp_func=pre_c)
         ct = ct(p) if pre_c else ct
         assert_allclose(ct, 3.0)
+
+    @mark.parametrize("pre_c", [False, True])
+    def test_pauli_correlations_no_sum_abs(self, pre_c):
+        p = bell_state('psi-')
+        ct = pauli_correlations(p, sum_abs=False, precomp_func=pre_c)
+        assert_allclose(list(c(p) for c in ct) if pre_c else ct, (-1, -1, -1))
+
+
+class TestEntCrossMatrix:
+    def test_bell_state(self):
+        p = bell_state('phi+')
+        ecm = ent_cross_matrix(p, ent_fn=concurrence, calc_self_ent=True)
+        assert_allclose(ecm, [[1, 1], [1, 1]])
+
+    def test_bell_state_no_self_ent(self):
+        p = bell_state('phi+')
+        ecm = ent_cross_matrix(p, ent_fn=concurrence, calc_self_ent=False)
+        assert_allclose(ecm, [[np.nan, 1], [1, np.nan]])
+
+
+class TestQID:
+    @mark.parametrize("bs", [0, 1, 2, 3])
+    @mark.parametrize("pre_c", [False, True])
+    def test_bell_state(self, bs, pre_c):
+        p = bell_state(bs)
+        qids = qid(p, dims=[2, 2], inds=[0, 1], precomp_func=pre_c)
+        assert_allclose(qids(p) if pre_c else qids, [3, 3])
+
+    @mark.parametrize("pre_c", [False, True])
+    def test_random_product_state(self, pre_c):
+        p = rand_product_state(3)
+        qids = qid(p, dims=[2, 2, 2], inds=[0, 1, 2], precomp_func=pre_c)
+        assert_allclose(qids(p) if pre_c else qids, [2, 2, 2])
