@@ -33,10 +33,12 @@ backends = ["auto", "dense", "scipy"]
 svds_backends = ["dense", "scipy"]
 if SLEPC4PY_FOUND:
     backends += ["slepc"]
+    svds_backends += ["slepc"]
 
 
 @fixture
 def premat():
+    np.random.seed(1)
     u = rand_uni(4)
     a = u @ ldmul(np.array([-1, 2, 4, -3]), u.H)
     return u, a
@@ -44,6 +46,7 @@ def premat():
 
 @fixture
 def prematsparse():
+    np.random.seed(1)
     u = rand_uni(4)
     a = u @ ldmul(np.array([-1, 2, 4, -3]), u.H)
     a = qu(a, sparse=True)
@@ -52,8 +55,9 @@ def prematsparse():
 
 @fixture
 def svdpremat():
+    np.random.seed(1)
     u, v = rand_uni(5), rand_uni(5)
-    a = u @ ldmul(np.array([1, 2, 4, 3, 0]), v.H)
+    a = u @ ldmul(np.array([1, 2, 4, 3, 0.1]), v.H)
     return u, v, a
 
 
@@ -61,7 +65,7 @@ def svdpremat():
 def svdprematsparse():
     np.random.seed(1)
     u, v = rand_uni(5), rand_uni(5)
-    a = u @ ldmul(np.array([1, 2, 4, 3, 0]), v.H)
+    a = u @ ldmul(np.array([1, 2, 4, 3, 0.1]), v.H)
     a = qu(a, sparse=True)
     return u, v, a
 
@@ -169,7 +173,7 @@ class TestSVD:
     def test_svd_full(self, svdpremat):
         u, v, a = svdpremat
         un, sn, vn = svd(a)
-        assert_allclose(sn, [4, 3, 2, 1, 0], atol=1e-14)
+        assert_allclose(sn, [4, 3, 2, 1, 0.1], atol=1e-14)
         for i, j, in zip((0, 1, 2, 3, 4),
                          (2, 3, 1, 0, 4)):
             o = abs(un[:, i].H @ u[:, j])

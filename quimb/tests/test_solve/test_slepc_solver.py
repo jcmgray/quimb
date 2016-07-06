@@ -8,7 +8,7 @@ from ... import (qu, rand_uni, ldmul, rand_matrix, scipy_svds, SLEPC4PY_FOUND,
                  rand_herm, seigsys, overlap, eye)
 if SLEPC4PY_FOUND:
     from ...solve.slepc_solver import (slepc_seigsys, slepc_svds,
-                                       convert_to_petsc)
+                                       convert_to_petsc, new_petsc_vec)
 
 
 slepc4py_notfound_msg = "No SLEPc4py installation"
@@ -55,6 +55,10 @@ class TestConvertToPETScConversion:
         b = convert_to_petsc(a)
         assert b.getType() == 'seqdense'
 
+    def test_new_petsc_vector(self):
+        a = new_petsc_vec(4)
+        assert a.getArray() is not None
+
 
 @slepc4py_test
 class TestSlepcSeigsys:
@@ -94,17 +98,19 @@ class TestSlepcSvds:
         lk = slepc_svds(a, k=1, return_vecs=False)
         assert_allclose(lk, 4)
 
-    def test_random_compare_scipy(self, bigsparsemat):
+    @mark.parametrize("SVDType", ['cross', 'lanczos'])
+    def test_random_compare_scipy(self, bigsparsemat, SVDType):
         a = bigsparsemat
-        lk = slepc_svds(a, k=5, return_vecs=False)
+        lk = slepc_svds(a, k=5, return_vecs=False, SVDType=SVDType)
         ls = scipy_svds(a, k=5, return_vecs=False)
         assert_allclose(lk, ls)
 
-    def test_unitary_vectors(self, bigsparsemat):
+    @mark.parametrize("SVDType", ['cross', 'lanczos'])
+    def test_unitary_vectors(self, bigsparsemat, SVDType):
         a = bigsparsemat
-        uk, sk, vk = slepc_svds(a, k=10, return_vecs=True)
-        assert_allclose(uk.H @ uk, eye(10), atol=1e-7)
-        assert_allclose(vk @ vk.H, eye(10), atol=1e-7)
+        uk, sk, vk = slepc_svds(a, k=10, return_vecs=True, SVDType=SVDType)
+        assert_allclose(uk.H @ uk, eye(10), atol=1e-6)
+        assert_allclose(vk @ vk.H, eye(10), atol=1e-6)
         pk, lk, qk = scipy_svds(a, k=10, return_vecs=True)
         assert_allclose(sk, lk)
         assert pk.shape == uk.shape

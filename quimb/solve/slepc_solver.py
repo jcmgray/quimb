@@ -13,12 +13,9 @@ from petsc4py import PETSc
 from slepc4py import SLEPc
 
 
-def convert_to_petsc(a):
-    """
-    Convert a scipy sparse matrix to the relevant PETSc type, currently
-    only supports csr, bsr, vectors and dense matrices formats.
-    """
-    comm = PETSc.COMM_WORLD
+def convert_to_petsc(a, comm=PETSc.COMM_WORLD):
+    """ Convert a scipy sparse matrix to the relevant PETSc type, currently
+    only supports csr, bsr, vectors and dense matrices formats. """
     if sp.isspmatrix_csr(a):
         a.sort_indices()
         csr = (a.indptr, a.indices, a.data)
@@ -35,16 +32,15 @@ def convert_to_petsc(a):
     return b
 
 
-def new_petsc_vec(n):
-    """
-    Create an empty complex petsc vector of size `n`.
-    """
+def new_petsc_vec(n, comm=PETSc.COMM_WORLD):
+    """ Create an empty complex petsc vector of size `n`. """
     a = np.empty(n, dtype=complex)
-    return PETSc.Vec().createWithArray(a, comm=PETSc.COMM_WORLD)
+    return PETSc.Vec().createWithArray(a, comm=comm)
 
 
-def init_eigensolver(which='LM', sigma=None, isherm=True, etype="krylovschur",
-                     st_opts_dict={}, tol=None, max_it=None):
+def init_eigensolver(which='LM', sigma=None, isherm=True,
+                     EPSType="krylovschur", st_opts_dict={}, tol=None,
+                     max_it=None):
     """
     Create an advanced eigensystem solver
 
@@ -74,13 +70,12 @@ def init_eigensolver(which='LM', sigma=None, isherm=True, etype="krylovschur",
         "TR": SLEPc.EPS.Which.TARGET_REAL,
         "TI": SLEPc.EPS.Which.TARGET_IMAGINARY,
     }
-    eigensolver = SLEPc.EPS()
-    eigensolver.create()
+    eigensolver = SLEPc.EPS().create()
     if sigma is not None:
         which = "TR"
         eigensolver.setST(init_spectral_inverter(**st_opts_dict))
         eigensolver.setTarget(sigma)
-    eigensolver.setType(etype)
+    eigensolver.setType(EPSType)
     eigensolver.setProblemType(slepc_isherm[isherm])
     eigensolver.setWhichEigenpairs(scipy_to_slepc_which[which.upper()])
     eigensolver.setConvergenceTest(SLEPc.EPS.Conv.ABS)
@@ -95,20 +90,17 @@ def init_spectral_inverter(ptype="lu", ppackage="mumps", ktype="preonly",
     Create a slepc spectral transformation object with specified solver.
     """
     # Preconditioner and linear solver
-    P = PETSc.PC()
-    P.create()
+    P = PETSc.PC().create()
     P.setType(ptype)
     P.setFactorSolverPackage(ppackage)
     P.setFromOptions()
     # Krylov subspace
-    K = PETSc.KSP()
-    K.create()
+    K = PETSc.KSP().create()
     K.setPC(P)
     K.setType(ktype)
     K.setFromOptions()
     # Spectral transformer
-    S = SLEPc.ST()
-    S.create()
+    S = SLEPc.ST().create()
     S.setKSP(K)
     S.setType(stype)
     S.setFromOptions()
@@ -116,7 +108,7 @@ def init_spectral_inverter(ptype="lu", ppackage="mumps", ktype="preonly",
 
 
 def slepc_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
-                  isherm=True, ncv=None, sort=True, etype="krylovschur",
+                  isherm=True, ncv=None, sort=True, EPSType="krylovschur",
                   return_all_conv=False, st_opts_dict={}, tol=None,
                   max_it=None):
     """
@@ -130,7 +122,7 @@ def slepc_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
         isherm: whether problem is hermitian or not
         return_vecs: whether to return the eigenvectors
         sort: whether to sort the eigenpairs in ascending real value
-        etype: SLEPc eigensolver type to use
+        EPSType: SLEPc eigensolver type to use
         return_all_conv: whether to return converged eigenpairs beyond
             requested subspace size
         st_opts_dict: options to send to the eigensolver internal inverter
@@ -144,15 +136,13 @@ def slepc_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
         'which': 'SR' if which is None else which,
         'sigma': sigma,
         'isherm': isherm,
-        'etype': etype,
+        'EPSType': EPSType,
         'tol': tol,
         'max_it': max_it,
     }
     eigensolver = init_eigensolver(**eps_settings, **st_opts_dict)
-    pa = convert_to_petsc(a)
-    eigensolver.setOperators(pa)
+    eigensolver.setOperators(convert_to_petsc(a))
     eigensolver.setDimensions(k, ncv)
-
     eigensolver.solve()
     nconv = eigensolver.getConverged()
     assert nconv >= k
@@ -174,7 +164,7 @@ def slepc_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
 
 
 def slepc_svds(a, k=6, ncv=None, return_vecs=True,
-               stype="cross", extra_vals=False, tol=None, max_it=None):
+               SVDType="cross", extra_vals=False, tol=None, max_it=None):
     """
     Find the singular values for sparse matrix `a`.
 
@@ -189,16 +179,13 @@ def slepc_svds(a, k=6, ncv=None, return_vecs=True,
     -------
         sk: singular values
     """
-    svd_solver = SLEPc.SVD()
-    svd_solver.create()
-    if return_vecs and stype in {'cross', 'cyclic'}:
-        # TODO: fix this, submit issue?
-        print('SVD: changing method since vecs broken for cross/cyclic')
-        stype = 'lanczos'
-    svd_solver.setType(stype)
+    svd_solver = SLEPc.SVD().create()
+    svd_solver.setType(SVDType)
     svd_solver.setDimensions(nsv=k, ncv=ncv)
     svd_solver.setTolerances(tol=tol, max_it=max_it)
-    svd_solver.setOperator(convert_to_petsc(a))
+    petsc_a = convert_to_petsc(a)
+    svd_solver.setOperator(petsc_a)
+    svd_solver.setFromOptions()
     svd_solver.solve()
 
     nconv = svd_solver.getConverged()
@@ -210,8 +197,7 @@ def slepc_svds(a, k=6, ncv=None, return_vecs=True,
         uk = np.empty((a.shape[0], k), dtype=complex)
         vtk = np.empty((k, a.shape[1]), dtype=complex)
 
-        u = new_petsc_vec(a.shape[0])
-        v = new_petsc_vec(a.shape[1])
+        u, v = petsc_a.getVecs()
 
         for i in range(k):
             sk[i] = svd_solver.getSingularTriplet(i, u, v)

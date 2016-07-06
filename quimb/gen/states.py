@@ -185,7 +185,7 @@ def levi_civita(perm):
 
 
 def perm_state(ps):
-    """ Construct the anti-symmetric state which is the sum of all
+    """ Construct the anti-symmetric state which is the +- sum of all
     permutations of states `ps`. """
     n = len(ps)
     vec_perm = permutations(ps)

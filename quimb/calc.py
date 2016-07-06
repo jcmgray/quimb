@@ -4,13 +4,15 @@ quantum objects.
 """
 # TODO: move matrix functions to solve, add slepc versions ****************** #
 # TODO: all docs ************************************************************ #
+# TODO: sparse sqrtm function *********************************************** #
 
 from math import sin, cos, pi, log2, sqrt
-from collections import OrderedDict
-from itertools import product
+import collections
+import itertools
 
 import numpy as np
 import numpy.linalg as nla
+import scipy.linalg as sla
 import scipy.sparse.linalg as spla
 from scipy.optimize import minimize
 
@@ -25,7 +27,7 @@ def expm(a, herm=True):
     if issparse(a):
         return spla.expm(a)
     elif not herm:
-        return np.asmatrix(spla.expm(a.A))
+        return np.asmatrix(spla.expm(a))
     else:
         l, v = eigsys(a)
         return dot_dense(v, ldmul(np.exp(l), v.H))
@@ -34,9 +36,9 @@ def expm(a, herm=True):
 def sqrtm(a, herm=True):
     """ Matrix square root, can be accelerated if explicitly hermitian. """
     if issparse(a):
-        return spla.sqrtm(a)
+        raise NotImplementedError("No sparse sqrtm available.")
     elif not herm:
-        return np.asmatrix(spla.sqrtm(a.A))
+        return np.asmatrix(sla.sqrtm(a))
     else:
         l, v = eigsys(a)
         return dot_dense(v, ldmul(np.sqrt(l.astype(complex)), v.H))
@@ -54,6 +56,7 @@ def fidelity(rho, sigma):
 def purify(rho, sparse=False):
     """ Take state rho and purify it into a wavefunction of squared
     dimension. """
+    # TODO: trim zeros?
     d = rho.shape[0]
     ls, vs = eigsys(rho)
     ls = np.sqrt(ls)
@@ -108,9 +111,12 @@ def partial_transpose(p, dims=[2, 2]):
 def negativity(p, dims=[2, 2], sysa=0, sysb=1):
     """ Negativity between `sysa` and `sysb` of state `p` with subsystem
     dimensions `dims` """
-    if np.size(dims) > 2:
+    if not isop(p):
+        p = qu(p, qtype='dop')
+    if len(dims) > 2:
         p = ptr(p, dims, [sysa, sysb])
-    n = (norm(partial_transpose(p), "tr") - 1.0) / 2.0
+        dims = [dims[sysa], dims[sysb]]
+    n = (norm(partial_transpose(p, dims=dims), "tr") - 1.0) / 2.0
     return max(0.0, n)
 
 
@@ -118,7 +124,9 @@ def negativity(p, dims=[2, 2], sysa=0, sysb=1):
 def logarithmic_negativity(p, dims=[2, 2], sysa=0, sysb=1):
     """ Logarithmic negativity between `sysa` and `sysb` of `p`, with
     subsystem dimensions `dims`. """
-    if np.size(dims) > 2:
+    if not isop(p):
+        p = qu(p, qtype='dop')
+    if len(dims) > 2:
         p = ptr(p, dims, [sysa, sysb])
         dims = [dims[sysa], dims[sysb]]
     e = log2(norm(partial_transpose(p, dims), "tr"))
@@ -189,7 +197,7 @@ def quantum_discord(p):
                    method="SLSQP", bounds=((0, pi), (0, 2 * pi)))
     if opt.success:
         return opt.fun
-    else:
+    else:  # pragma: no cover
         raise ValueError(opt.message)
 
 
@@ -223,12 +231,13 @@ def pauli_decomp(a, mode="p", tol=1e-3):
     YY -0.25
     ZZ -0.25
     """
-    a = qu(a, "dop")  # make sure operator
+    if not isop(a):
+        a = qu(a, "dop")  # make sure operator
     n = infer_size(a)
 
     # define generator for inner product to iterate over efficiently
     def calc_name_and_overlap(fa):
-        for perm in product("IXYZ", repeat=n):
+        for perm in itertools.product("IXYZ", repeat=n):
             name = "".join(perm)
             op = kron(*[sig(s, sparse=True) for s in perm]) / 2**n
             d = np.trace(a @ op)
@@ -237,7 +246,7 @@ def pauli_decomp(a, mode="p", tol=1e-3):
     nds = [nd for nd in calc_name_and_overlap(a)]
     # sort by descending overlap and turn into OrderedDict
     nds.sort(key=lambda pair: -abs(pair[1]))
-    nds = OrderedDict(nds)
+    nds = collections.OrderedDict(nds)
     # Print decomposition
     if "p" in mode:
         for x, d in nds.items():
