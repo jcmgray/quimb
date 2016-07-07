@@ -1,8 +1,11 @@
+from pytest import fixture, mark
+
 from math import pi, gcd, cos
 from functools import reduce
-from pytest import fixture
+
 import numpy as np
 from numpy.testing import assert_allclose
+
 from .. import (qu, eigsys, rand_ket, rand_rho, rand_herm, rand_matrix,
                 rand_uni, overlap, ham_heis, up, down, eyepad, sig)
 from ..evo import (schrodinger_eq_ket, schrodinger_eq_dop,
@@ -76,15 +79,17 @@ def srho_dot_ls():
 # --------------------------------------------------------------------------- #
 
 class TestSchrodingerEqKet:
-    def test_ket_matrix(self, psi_dot):
+    @mark.parametrize("all_dense", [False, True])
+    def test_ket_matrix(self, psi_dot, all_dense):
         psi, ham, psid = psi_dot
-        foo = schrodinger_eq_ket(ham)
+        foo = schrodinger_eq_ket(ham, all_dense=all_dense)
         psid2 = foo(None, psi)
         assert_allclose(psid, psid2)
 
-    def test_ket_1darray(self, psi_dot):
+    @mark.parametrize("all_dense", [False, True])
+    def test_ket_1darray(self, psi_dot, all_dense):
         psi, ham, psid = psi_dot
-        foo = schrodinger_eq_ket(ham)
+        foo = schrodinger_eq_ket(ham, all_dense=all_dense)
         psid2 = foo(None, psi.A.reshape(-1)).reshape(-1, 1)
         assert_allclose(psid, psid2)
 
@@ -102,15 +107,17 @@ class TestSchrodingerEqKet:
 
 
 class TestSchrodingerEqDop:
-    def test_dop_matrix(self, rho_dot):
+    @mark.parametrize("all_dense", [False, True])
+    def test_dop_matrix(self, rho_dot, all_dense):
         rho, ham, rhod = rho_dot
-        foo = schrodinger_eq_dop(ham)
+        foo = schrodinger_eq_dop(ham, all_dense=all_dense)
         rhod2 = foo(None, rho.A).reshape(3, 3)
         assert_allclose(rhod, rhod2)
 
-    def test_dop_1darray(self, rho_dot):
+    @mark.parametrize("all_dense", [False, True])
+    def test_dop_1darray(self, rho_dot, all_dense):
         rho, ham, rhod = rho_dot
-        foo = schrodinger_eq_dop(ham)
+        foo = schrodinger_eq_dop(ham, all_dense=all_dense)
         rhod2 = foo(None, rho.A.reshape(-1)).reshape(3, 3)
         assert_allclose(rhod, rhod2)
 
@@ -142,15 +149,17 @@ class TestSchrodingerEqDopVec:
 
 
 class TestLindbladEq:
-    def test_matrix(self, rho_dot_ls):
+    @mark.parametrize("all_dense", [False, True])
+    def test_matrix(self, rho_dot_ls, all_dense):
         rho, ham, gamma, ls, rhod = rho_dot_ls
-        foo = lindblad_eq(ham, ls, gamma)
+        foo = lindblad_eq(ham, ls, gamma, all_dense=all_dense)
         rhod2 = foo(None, rho).reshape(3, 3)
         assert_allclose(rhod, rhod2)
 
-    def test_1darray(self, rho_dot_ls):
+    @mark.parametrize("all_dense", [False, True])
+    def test_1darray(self, rho_dot_ls, all_dense):
         rho, ham, gamma, ls, rhod = rho_dot_ls
-        foo = lindblad_eq(ham, ls, gamma)
+        foo = lindblad_eq(ham, ls, gamma, all_dense=all_dense)
         rhod2 = foo(None, rho.A.reshape(-1)).reshape(3, 3)
         assert_allclose(rhod, rhod2)
 
@@ -208,9 +217,19 @@ def ham_rcr_psi():
 
 
 class TestQuEvo:
-    def test_quevo_ham_dense_ket_solve(self, ham_rcr_psi):
+    @mark.parametrize("sparse, presolve",
+                      [(False, False),
+                       (True, False),
+                       (False, True)])
+    def test_quevo_ham_dense_ket_solve(self, ham_rcr_psi, sparse, presolve):
         ham, trc, p0, tm, pm = ham_rcr_psi
-        sim = QuEvo(p0, ham, solve=True)
+        ham = qu(ham, sparse=sparse)
+        if presolve:
+            l, v = eigsys(ham)
+            sim = QuEvo(p0, (l, v))
+            assert sim.solved
+        else:
+            sim = QuEvo(p0, ham, solve=True)
         sim.update_to(tm)
         assert_allclose(sim.pt, pm)
         assert overlap(sim.pt, p0) < 1.0
@@ -219,90 +238,21 @@ class TestQuEvo:
         assert isinstance(sim.pt, np.matrix)
         assert sim.t == trc
 
-    def test_quevo_ham_sparse_ket_solve(self, ham_rcr_psi):
+    @mark.parametrize("dop", [False, True])
+    @mark.parametrize("sparse", [False, True])
+    @mark.parametrize("solve", [False, True])
+    def test_quevo_ham(self, ham_rcr_psi, sparse, dop, solve):
         ham, trc, p0, tm, pm = ham_rcr_psi
-        ham = qu(ham, sparse=True)
-        sim = QuEvo(p0, ham, solve=True)
+        if dop:
+            p0 = p0 @ p0.H
+            pm = pm @ pm.H
+        ham = qu(ham, sparse=sparse)
+        sim = QuEvo(p0, ham, solve=solve)
         sim.update_to(tm)
-        assert_allclose(sim.pt, pm)
+        assert_allclose(sim.pt, pm, rtol=1e-4)
         assert overlap(sim.pt, p0) < 1.0
         sim.update_to(trc)
-        assert_allclose(sim.pt, p0)
-        assert isinstance(sim.pt, np.matrix)
-        assert sim.t == trc
-
-    def test_quevo_ham_tuple_ket_solve(self, ham_rcr_psi):
-        ham, trc, p0, tm, pm = ham_rcr_psi
-        l, v = eigsys(ham)
-        sim = QuEvo(p0, (l, v))
-        sim.update_to(tm)
-        assert_allclose(sim.pt, pm)
-        assert overlap(sim.pt, p0) < 1.0
-        sim.update_to(trc)
-        assert_allclose(sim.pt, p0)
-        assert isinstance(sim.pt, np.matrix)
-        assert sim.t == trc
-
-    def test_quevo_ham_dense_ket_integrate(self, ham_rcr_psi):
-        ham, trc, p0, tm, pm = ham_rcr_psi
-        sim = QuEvo(p0, ham, solve=False)
-        sim.update_to(tm)
-        assert_allclose(sim.pt, pm, rtol=1e-3)
-        assert overlap(sim.pt, p0) < 1.0
-        sim.update_to(trc)
-        assert_allclose(sim.pt, p0, rtol=1e-3)
-        assert isinstance(sim.pt, np.matrix)
-        assert sim.t == trc
-
-    def test_quevo_ham_sparse_ket_integrate(self, ham_rcr_psi):
-        ham, trc, p0, tm, pm = ham_rcr_psi
-        ham = qu(ham, sparse=True)
-        sim = QuEvo(p0, ham, solve=False)
-        sim.update_to(tm)
-        assert_allclose(sim.pt, pm, rtol=1e-3)
-        assert overlap(sim.pt, p0) < 1.0
-        sim.update_to(trc)
-        assert_allclose(sim.pt, p0, rtol=1e-3)
-        assert isinstance(sim.pt, np.matrix)
-        assert sim.t == trc
-
-    def test_quevo_ham_dense_dop_solve(self, ham_rcr_psi):
-        ham, trc, p0, tm, pm = ham_rcr_psi
-        p0 = p0 @ p0.H
-        pm = pm @ pm.H
-        sim = QuEvo(p0, ham, solve=True)
-        sim.update_to(tm)
-        assert_allclose(sim.pt, pm)
-        assert overlap(sim.pt, p0) < 1.0
-        sim.update_to(trc)
-        assert_allclose(sim.pt, p0)
-        assert isinstance(sim.pt, np.matrix)
-        assert sim.t == trc
-
-    def test_quevo_ham_dense_dop_integrate(self, ham_rcr_psi):
-        ham, trc, p0, tm, pm = ham_rcr_psi
-        p0 = p0 @ p0.H
-        pm = pm @ pm.H
-        sim = QuEvo(p0, ham, solve=False)
-        sim.update_to(tm)
-        assert_allclose(sim.pt, pm, rtol=1e-3)
-        assert overlap(sim.pt, p0) < 1.0
-        sim.update_to(trc)
-        assert_allclose(sim.pt, p0, rtol=1e-3)
-        assert isinstance(sim.pt, np.matrix)
-        assert sim.t == trc
-
-    def test_quevo_ham_sparse_dop_integrate(self, ham_rcr_psi):
-        ham, trc, p0, tm, pm = ham_rcr_psi
-        ham = qu(ham, sparse=True)
-        p0 = p0 @ p0.H
-        pm = pm @ pm.H
-        sim = QuEvo(p0, ham, solve=False)
-        sim.update_to(tm)
-        assert_allclose(sim.pt, pm, rtol=1e-3)
-        assert overlap(sim.pt, p0) < 1.0
-        sim.update_to(trc)
-        assert_allclose(sim.pt, p0, rtol=1e-3)
+        assert_allclose(sim.pt, p0, rtol=1e-4)
         assert isinstance(sim.pt, np.matrix)
         assert sim.t == trc
 
