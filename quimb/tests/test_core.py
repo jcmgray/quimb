@@ -1,4 +1,4 @@
-from itertools import combinations
+import itertools
 
 from pytest import fixture, raises, mark
 import scipy.sparse as sp
@@ -6,38 +6,13 @@ import numpy as np
 from numpy.testing import assert_allclose, assert_almost_equal
 
 from ..accel import issparse, isherm, kron
-from ..core import (
-    sparse_matrix,
-    qu,
-    infer_size,
-    trace_dense,
-    trace_sparse,
-    trace,
-    tr,
-    nmlz,
-    dim_map,
-    dim_compress,
-    eye,
-    eyepad,
-    perm_pad,
-    permute,
-    trace_lose,
-    trace_keep,
-    partial_trace,
-    chop,
-    overlap,
-)
 from ..calc import mutual_information
-from ..gen import (
-    bell_state,
-    rand_rho,
-    rand_matrix,
-    rand_ket,
-    up,
-    plus,
-    yplus,
-    sig,
-)
+from ..gen import (bell_state, rand_rho, rand_matrix, rand_ket, up, plus,
+                   yplus, sig, singlet)
+from ..core import (sparse_matrix, qu, infer_size, trace_dense, trace_sparse,
+                    trace, tr, nmlz, dim_map, dim_compress, eye, eyepad,
+                    perm_pad, permute, trace_lose, trace_keep, partial_trace,
+                    chop, overlap)
 
 
 stypes = ("csr", "csc", "bsr", "coo")
@@ -533,7 +508,7 @@ class TestPartialTraceDense:
     def test_partial_trace_multi_ket(self):
         dims = [2, 3, 4]
         a = np.random.randn(np.prod(dims), 1)
-        for i1, i2 in combinations([0, 1, 2], 2):
+        for i1, i2 in itertools.combinations([0, 1, 2], 2):
             b = partial_trace(a, dims, [i1, i2])
             assert(b.shape[1] == dims[i1] * dims[i2])
 
@@ -717,3 +692,11 @@ class TestOverlap:
         c = overlap(a, b)
         assert not isinstance(c, complex)
         assert_allclose(c, 36)
+
+    @mark.parametrize("qtype", ['ket', 'dop'])
+    @mark.parametrize("sparse", [True, False])
+    @mark.parametrize("s", ['x', 'y', 'z'])
+    def test_negative_expec(self, qtype, sparse, s):
+        a = singlet(qtype=qtype)
+        b = sig(s, sparse=sparse) & sig(s, sparse=sparse)
+        assert_allclose(overlap(a, b), -1)

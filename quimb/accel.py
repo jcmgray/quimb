@@ -33,7 +33,9 @@ def realify(foo, imag_tol=1.0e-14):
     """ To decorate functions that should return float for small complex. """
     def realified_foo(*args, **kwargs):
         x = foo(*args, **kwargs)
-        return x.real if abs(x.imag) < abs(x.real) * imag_tol else x
+        if isinstance(x, complex):
+            return x.real if abs(x.imag) < abs(x.real) * imag_tol else x
+        return x
     return realified_foo
 
 
