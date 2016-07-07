@@ -516,9 +516,9 @@ def overlap(a, b):
     method = {(0, 0, 0): lambda: abs(vdot(a, b))**2,
               (0, 0, 1): lambda: abs((a.H @ b)[0, 0])**2,
               (0, 1, 0): lambda: vdot(a, dot_dense(b, a)),
-              (0, 1, 1): lambda: abs((a.H @ b @ a)[0, 0]),
               (1, 0, 0): lambda: vdot(b, dot_dense(a, b)),
-              (1, 0, 1): lambda: abs((b.H @ a @ b)[0, 0]),
+              (0, 1, 1): realify(lambda: (a.H @ b @ a)[0, 0]),
+              (1, 0, 1): realify(lambda: (b.H @ a @ b)[0, 0]),
               (1, 1, 0): lambda: trace_dense(dot_dense(a, b)),
               (1, 1, 1): lambda: trace_sparse(a @ b)}
     return method[isop(a), isop(b), issparse(a) or issparse(b)]()

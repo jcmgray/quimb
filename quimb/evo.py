@@ -1,14 +1,11 @@
-"""
-Contains an evolution class, QuEvo to efficiently manage time evolution of
-quantum states according to schrodingers' equation, and related functions.
-TODO: iterative method, sparse etc., turn off optimzations for small n
-"""
-# TODO: set/update rhot
-# TODO: test known lindlbad evolution
-# TODO: delete p0, ham etc? precompute -1.0j*ham
-# TODO: solout method with funcyt
-# TODO: QuEvoTimeDepend
-# TODO: homogenise dense_ham options and numba dot
+""" Contains an evolution class, QuEvo to efficiently manage time evolution of
+quantum states according to schrodingers' equation, and related functions."""
+
+# TODO: set/update pt * ***************************************************** #
+# TODO: test known lindlbad evolution *************************************** #
+# TODO: solout method with funcyt ******************************************* #
+# TODO: QuEvoTimeDepend ***************************************************** #
+
 import numpy as np
 from scipy.integrate import complex_ode
 from .accel import isop, ldmul, rdmul, explt
@@ -21,26 +18,27 @@ from .solve import eigsys, norm
 # Quantum evolution equations                                                 #
 # --------------------------------------------------------------------------- #
 
-def schrodinger_eq_ket(ham, dense_ham=False):
+def schrodinger_eq_ket(ham, all_dense=False):
     """ Wavefunction schrodinger equation.
 
     Parameters
     ----------
         ham: time-independant hamiltonian governing evolution
+        all_dense: eplicitly use dense optimized dot product
 
     Returns
     -------
         psi_dot(t, y): function to calculate psi_dot(t) at psi(t). """
-    if dense_ham:
+    if all_dense:
         def psi_dot(t, y):
             return -1.0j * dot_dense(ham, y)
     else:
         def psi_dot(t, y):
-            return -1.0j * (ham.dot(y))
+            return -1.0j * (ham @ y)
     return psi_dot
 
 
-def schrodinger_eq_dop(ham, dense_ham=False):
+def schrodinger_eq_dop(ham, all_dense=False):
     """ Density operator schrodinger equation, but with flattened input/output.
     Note that this assumes both `ham` and `rho` are hermitian in order to speed
     up the commutator, non-hermitian hamiltonians as used to model loss should
@@ -49,22 +47,21 @@ def schrodinger_eq_dop(ham, dense_ham=False):
     Parameters
     ----------
         ham: time-independant hamiltonian governing evolution
+        all_dense: eplicitly use dense optimized dot product
 
     Returns
     -------
         rho_dot(t, y): function to calculate rho_dot(t) at rho(t), input and
             output both in ravelled (1D form). """
     d = ham.shape[0]
-
-    if dense_ham:
+    if all_dense:
         def rho_dot(t, y):
             hrho = dot_dense(ham, y.reshape(d, d))
             return -1.0j * (hrho - hrho.T.conj()).reshape(-1)
     else:
         def rho_dot(t, y):
-            hrho = ham.dot(y.reshape(d, d))
+            hrho = ham @ y.reshape(d, d)
             return -1.0j * (hrho - hrho.T.conj()).reshape(-1)
-
     return rho_dot
 
 
@@ -82,16 +79,15 @@ def schrodinger_eq_dop_vec(ham):
             output both in ravelled (1D form). """
     d = ham.shape[0]
     sparse = issparse(ham)
-    evo = -1.0j * ((ham & eye(d, sparse=sparse)) -
-                   (eye(d, sparse=sparse) & ham.T))
+    I = eye(d, sparse=sparse)
+    evo_superop = -1.0j * ((ham & I) - (I & ham.T))
 
     def rho_dot(t, y):
-        return evo.dot(y)
-
+        return evo_superop @ y
     return rho_dot
 
 
-def lindblad_eq(ham, ls, gamma):
+def lindblad_eq(ham, ls, gamma, all_dense=False):
     """ Lindblad equation, but with flattened input/output.
 
     Parameters
@@ -99,24 +95,40 @@ def lindblad_eq(ham, ls, gamma):
         ham: time-independant hamiltonian governing evolution
         ls: lindblad operators
         gamma: dampening strength
+        all_dense: eplicitly use dense optimized dot product
 
     Returns
     -------
         rho_dot(t, y): function to calculate rho_dot(t) at rho(t), input and
             output both in ravelled (1D form). """
     d = ham.shape[0]
-    lls = [l.H @ l for l in ls]
+    lls = tuple(l.H @ l for l in ls)
 
-    def gen_l_terms(rho):
-        for l, ll in zip(ls, lls):
-            yield (l @ rho @ l.H) - 0.5 * ((rho @ ll) + (ll @ rho))
+    if all_dense:
+        def gen_l_terms(rho):
+            for l, ll in zip(ls, lls):
+                yield (dot_dense(l, dot_dense(rho, l.H)) -
+                       0.5 * (dot_dense(rho, ll) + dot_dense(ll, rho)))
 
-    def rho_dot(t, y):
-        rho = y.reshape(d, d)
-        rd = -1.0j * (ham @ rho - rho @ ham)
-        rd += gamma * sum(gen_l_terms(rho))
-        return np.asarray(rd).reshape(-1)
+        def rho_dot(t, y):
+            rho = y.reshape(d, d)
+            rho_d = dot_dense(ham, rho)
+            rho_d -= rho_d.T.conj()
+            rho_d *= -1.0j
+            rho_d += gamma * sum(gen_l_terms(rho))
+            return np.asarray(rho_d).reshape(-1)
+    else:
+        def gen_l_terms(rho):
+            for l, ll in zip(ls, lls):
+                yield (l @ rho @ l.H) - 0.5 * ((rho @ ll) + (ll @ rho))
 
+        def rho_dot(t, y):
+            rho = y.reshape(d, d)
+            rho_d = ham @ rho
+            rho_d -= rho_d.T.conj()
+            rho_d *= -1.0j
+            rho_d += gamma * sum(gen_l_terms(rho))
+            return np.asarray(rho_d).reshape(-1)
     return rho_dot
 
 
@@ -136,21 +148,18 @@ def lindblad_eq_vec(ham, ls, gamma, sparse=False):
             output both in ravelled (1D form). """
     d = ham.shape[0]
     ham_sparse = issparse(ham) or sparse
-    evo = -1.0j * ((ham & eye(d, sparse=ham_sparse)) -
-                   (eye(d, sparse=ham_sparse) & ham.T))
+    I = eye(d, sparse=ham_sparse)
+    evo_superop = -1.0j * ((ham & I) - (I & ham.T))
 
     def gen_lb_terms():
         for l in ls:
             lb_sparse = issparse(l) or sparse
-            yield ((l & l.conj()) -
-                   0.5*((eye(d, sparse=lb_sparse) & (l.H @ l).T) +
-                        ((l.H @ l) & eye(d, sparse=lb_sparse))))
-
-    evo += gamma * sum(gen_lb_terms())
+            I = eye(d, sparse=lb_sparse)
+            yield ((l & l.conj()) - 0.5*((I & (l.H @ l).T) + ((l.H @ l) & I)))
+    evo_superop += gamma * sum(gen_lb_terms())
 
     def rho_dot(t, y):
-        return evo.dot(y)
-
+        return evo_superop @ y
     return rho_dot
 
 
