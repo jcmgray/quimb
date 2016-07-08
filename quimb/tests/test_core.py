@@ -9,10 +9,10 @@ from ..accel import issparse, isherm, kron
 from ..calc import mutual_information
 from ..gen import (bell_state, rand_rho, rand_matrix, rand_ket, up, plus,
                    yplus, sig, singlet)
-from ..core import (sparse_matrix, qu, infer_size, trace_dense, trace_sparse,
-                    trace, tr, nmlz, dim_map, dim_compress, eye, eyepad,
-                    perm_pad, permute, trace_lose, trace_keep, partial_trace,
-                    chop, overlap)
+from ..core import (sparse_matrix, qu, infer_size, _trace_dense,
+                    _trace_sparse, trace, tr, nmlz, dim_map, dim_compress,
+                    eye, eyepad, perm_pad, permute, _trace_lose, _trace_keep,
+                    partial_trace, chop, overlap)
 
 
 stypes = ("csr", "csc", "bsr", "coo")
@@ -162,8 +162,8 @@ class TestTrace:
                       ([[[2, 1], [4, 5]], 7],
                        [[[2, 1], [4, 5j]], 2 + 5j]))
     @mark.parametrize("sparse, func",
-                      ([False, trace_dense],
-                       [True, trace_sparse]))
+                      ([False, _trace_dense],
+                       [True, _trace_sparse]))
     def test_simple(self, inpt, outpt, sparse, func):
         a = qu(inpt, sparse=sparse)
         assert(trace(a) == outpt)
@@ -540,35 +540,35 @@ class TestTraceLose:
                    rand_rho(3, sparse=True, density=0.5),
                    rand_rho(2, sparse=True, density=0.5))
         abc = a & b & c
-        pab = trace_lose(abc, [2, 3, 2], 2)
+        pab = _trace_lose(abc, [2, 3, 2], 2)
         assert_allclose(pab, (a & b).A)
-        pac = trace_lose(abc, [2, 3, 2], 1)
+        pac = _trace_lose(abc, [2, 3, 2], 1)
         assert_allclose(pac, (a & c).A)
-        pbc = trace_lose(abc, [2, 3, 2], 0)
+        pbc = _trace_lose(abc, [2, 3, 2], 0)
         assert_allclose(pbc, (b & c).A)
 
     def test_bell_state(self):
         a = bell_state('psi-', sparse=True)
-        b = trace_lose(a @ a.H, [2, 2], 0)
+        b = _trace_lose(a @ a.H, [2, 2], 0)
         assert_allclose(b, eye(2) / 2)
-        b = trace_lose(a @ a.H, [2, 2], 1)
+        b = _trace_lose(a @ a.H, [2, 2], 1)
         assert_allclose(b, eye(2) / 2)
 
     def test_vs_ptr(self):
         a = rand_rho(6, sparse=True, density=0.5)
-        b = trace_lose(a, [2, 3], 1)
+        b = _trace_lose(a, [2, 3], 1)
         c = partial_trace(a.A, [2, 3], 0)
         assert_allclose(b, c)
-        b = trace_lose(a, [2, 3], 0)
+        b = _trace_lose(a, [2, 3], 0)
         c = partial_trace(a.A, [2, 3], 1)
         assert_allclose(b, c)
 
     def test_vec_dense(self):
         a = rand_ket(4)
-        b = trace_lose(a, [2, 2], 1)
+        b = _trace_lose(a, [2, 2], 1)
         c = partial_trace(a.A, [2, 2], 0)
         assert_allclose(b, c)
-        b = trace_lose(a, [2, 2], 0)
+        b = _trace_lose(a, [2, 2], 0)
         c = partial_trace(a.A, [2, 2], 1)
         assert_allclose(b, c)
 
@@ -579,35 +579,35 @@ class TestTraceKeep:
                    rand_rho(3, sparse=True, density=0.5),
                    rand_rho(2, sparse=True, density=0.5))
         abc = a & b & c
-        pc = trace_keep(abc, [2, 3, 2], 2)
+        pc = _trace_keep(abc, [2, 3, 2], 2)
         assert_allclose(pc, c.A)
-        pb = trace_keep(abc, [2, 3, 2], 1)
+        pb = _trace_keep(abc, [2, 3, 2], 1)
         assert_allclose(pb, b.A)
-        pa = trace_keep(abc, [2, 3, 2], 0)
+        pa = _trace_keep(abc, [2, 3, 2], 0)
         assert_allclose(pa, a.A)
 
     def test_bell_state(self):
         a = bell_state('psi-', sparse=True)
-        b = trace_keep(a @ a.H, [2, 2], 0)
+        b = _trace_keep(a @ a.H, [2, 2], 0)
         assert_allclose(b, eye(2) / 2)
-        b = trace_keep(a @ a.H, [2, 2], 1)
+        b = _trace_keep(a @ a.H, [2, 2], 1)
         assert_allclose(b, eye(2) / 2)
 
     def test_vs_ptr(self):
         a = rand_rho(6, sparse=True, density=0.5)
-        b = trace_keep(a, [2, 3], 0)
+        b = _trace_keep(a, [2, 3], 0)
         c = partial_trace(a.A, [2, 3], 0)
         assert_allclose(b, c)
-        b = trace_keep(a, [2, 3], 1)
+        b = _trace_keep(a, [2, 3], 1)
         c = partial_trace(a.A, [2, 3], 1)
         assert_allclose(b, c)
 
     def test_vec_dense(self):
         a = rand_ket(4)
-        b = trace_keep(a, [2, 2], 0)
+        b = _trace_keep(a, [2, 2], 0)
         c = partial_trace(a.A, [2, 2], 0)
         assert_allclose(b, c)
-        b = trace_keep(a, [2, 2], 1)
+        b = _trace_keep(a, [2, 2], 1)
         c = partial_trace(a.A, [2, 2], 1)
         assert_allclose(b, c)
 
