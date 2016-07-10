@@ -137,7 +137,7 @@ def infer_size(p, base=2):
 
 @realify
 @jit(complex128(complex128[:, :]), nopython=True)
-def trace_dense(op):  # pragma: no cover
+def _trace_dense(op):  # pragma: no cover
     """ Trace of matrix. """
     x = 0.0
     for i in range(op.shape[0]):
@@ -146,24 +146,24 @@ def trace_dense(op):  # pragma: no cover
 
 
 @realify
-def trace_sparse(op):
+def _trace_sparse(op):
     """ Trace of sparse matrix. """
     return np.sum(op.diagonal())
 
 
 def trace(op):
     """ Trace of dense or sparse matrix """
-    return trace_sparse(op) if issparse(op) else trace_dense(op)
+    return _trace_sparse(op) if issparse(op) else _trace_dense(op)
 
 # Monkey-patch trace methods
 tr = trace
-np.matrix.tr = trace_dense
-sp.csr_matrix.tr = trace_sparse
+np.matrix.tr = _trace_dense
+sp.csr_matrix.tr = _trace_sparse
 
 
 @matrixify
 @jit(complex128[:, :](int64), nopython=True)
-def identity_dense(d):  # pragma: no cover
+def _identity_dense(d):  # pragma: no cover
     """ Returns a dense, complex identity of order d. """
     x = np.zeros((d, d), dtype=np.complex128)
     for i in range(d):
@@ -171,14 +171,14 @@ def identity_dense(d):  # pragma: no cover
     return x
 
 
-def identity_sparse(d, stype="csr"):
+def _identity_sparse(d, stype="csr"):
     """ Returns a sparse, complex identity of order d. """
     return sp.eye(d, dtype=complex, format=stype)
 
 
 def identity(d, sparse=False, stype="csr"):
     """ Return identity of size d in complex format, optionally sparse"""
-    return identity_sparse(d, stype=stype) if sparse else identity_dense(d)
+    return _identity_sparse(d, stype=stype) if sparse else _identity_dense(d)
 
 eye = identity
 speye = partial(identity, sparse=True)
@@ -344,7 +344,7 @@ def perm_pad(op, dims, inds):
 
 
 @matrixify
-def permute_dense(p, dims, perm):
+def _permute_dense(p, dims, perm):
     """ Permute the subsytems of a dense matrix. """
     p, perm = np.asarray(p), np.asarray(perm)
     d = np.prod(dims)
@@ -357,7 +357,7 @@ def permute_dense(p, dims, perm):
             .reshape((d, 1))
 
 
-def permute_sparse(a, dims, perm):
+def _permute_sparse(a, dims, perm):
     """ Permute the subsytems of a sparse matrix. """
     perm, dims = np.asarray(perm), np.asarray(dims)
     new_dims = dims[perm]
@@ -392,11 +392,11 @@ def permute(a, dims, perm):
     -------
         pp: permuted state, vector or operator"""
     if issparse(a):
-        return permute_sparse(a, dims, perm)
-    return permute_dense(a, dims, perm)
+        return _permute_sparse(a, dims, perm)
+    return _permute_dense(a, dims, perm)
 
 
-def partial_trace_clever(p, dims, keep):
+def _partial_trace_clever(p, dims, keep):
     # TODO: compress coords?
     # TODO: user tensordot for vec
     # TODO: matrixify
@@ -432,7 +432,7 @@ def partial_trace_clever(p, dims, keep):
         return np.asmatrix(p)
 
 
-def trace_lose(p, dims, coo_lose):
+def _trace_lose(p, dims, coo_lose):
     """ Simple partial trace where the single subsytem at `coo_lose`
     is traced out. """
     p = p if isop(p) else p @ p.H
@@ -453,7 +453,7 @@ def trace_lose(p, dims, coo_lose):
     return rhos
 
 
-def trace_keep(p, dims, coo_keep):
+def _trace_keep(p, dims, coo_keep):
     """ Simple partial trace where the single subsytem
     at `coo_keep` is kept. """
     p = p if isop(p) else p @ p.H
@@ -473,19 +473,19 @@ def trace_keep(p, dims, coo_keep):
     return rhos
 
 
-def partial_trace_simple(p, dims, coos_keep):
+def _partial_trace_simple(p, dims, coos_keep):
     """ Simple partial trace made up of consecutive single subsystem partial
     traces, augmented by 'compressing' the dimensions each time. """
     p = p if isop(p) else p @ p.H
     dims, coos_keep = dim_compress(dims, coos_keep)
     if len(coos_keep) == 1:
-        return trace_keep(p, dims, *coos_keep)
+        return _trace_keep(p, dims, *coos_keep)
     lmax = max(enumerate(dims),
                key=lambda ix: (ix[0] not in coos_keep)*ix[1])[0]
-    p = trace_lose(p, dims, lmax)
+    p = _trace_lose(p, dims, lmax)
     dims = [*dims[:lmax], *dims[lmax+1:]]
     coos_keep = {(ind if ind < lmax else ind - 1) for ind in coos_keep}
-    return partial_trace_simple(p, dims, coos_keep)
+    return _partial_trace_simple(p, dims, coos_keep)
 
 
 def partial_trace(p, dims, coos):
@@ -501,13 +501,12 @@ def partial_trace(p, dims, coos):
     -------
         rhoab: density matrix of remaining subsytems,"""
     if issparse(p):
-        return partial_trace_simple(p, dims, coos)
-    return partial_trace_clever(p, dims, coos)
+        return _partial_trace_simple(p, dims, coos)
+    return _partial_trace_clever(p, dims, coos)
 
 ptr = partial_trace
-trx = partial_trace
-np.matrix.ptr = partial_trace_clever
-sp.csr_matrix.ptr = partial_trace_simple
+np.matrix.ptr = _partial_trace_clever
+sp.csr_matrix.ptr = _partial_trace_simple
 
 
 def overlap(a, b):
@@ -519,6 +518,6 @@ def overlap(a, b):
               (1, 0, 0): lambda: vdot(b, dot_dense(a, b)),
               (0, 1, 1): realify(lambda: (a.H @ b @ a)[0, 0]),
               (1, 0, 1): realify(lambda: (b.H @ a @ b)[0, 0]),
-              (1, 1, 0): lambda: trace_dense(dot_dense(a, b)),
-              (1, 1, 1): lambda: trace_sparse(a @ b)}
+              (1, 1, 0): lambda: _trace_dense(dot_dense(a, b)),
+              (1, 1, 1): lambda: _trace_sparse(a @ b)}
     return method[isop(a), isop(b), issparse(a) or issparse(b)]()

@@ -390,3 +390,27 @@ def qid(p, dims, inds, precomp_func=False, sparse_comp=True,
                      for ops in ops_i)
 
     return qid_func if precomp_func else qid_func(p)
+
+
+def is_degenerate(op, tol=1e12):
+    """ Check if operator has any degenerate eigenvalues, determined relative
+    to equal spacing of all eigenvalues.
+
+    Paraemeters
+    -----------
+        op: operator or list of eigenvalues
+        tol: how much closer than evenly spaced the eigenvalue gap has to be
+        to count as degenerage
+
+    Returns
+    -------
+        n_dgen: number of degenerate eigenvalues.
+    """
+    op = np.asarray(op)
+    if op.ndim != 1:
+        l = eigvals(op)
+    else:
+        l = op
+    l_gaps = l[1:] - l[:-1]
+    l_tol = (l[-1] - l[0]) / (op.shape[0] * tol)
+    return np.count_nonzero(abs(l_gaps) < l_tol)
