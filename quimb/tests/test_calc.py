@@ -4,12 +4,13 @@ import numpy as np
 from numpy.testing import assert_allclose
 from .. import (qu, eye, rand_product_state, bell_state, up, eigvecs,
                 rand_mix, rand_rho, rand_ket, sig, down, overlap,
-                singlet_pairs, dop, singlet, kron)
+                singlet_pairs, dop, singlet, kron, ham_heis)
 from ..calc import (fidelity, quantum_discord, one_way_classical_information,
                     mutual_information, partial_transpose, entropy,
                     correlation, pauli_correlations, expm, sqrtm, purify,
                     concurrence, negativity, logneg, trace_distance,
-                    pauli_decomp, bell_decomp, ent_cross_matrix, qid)
+                    pauli_decomp, bell_decomp, ent_cross_matrix, qid,
+                    is_degenerate)
 
 
 @fixture
@@ -375,3 +376,13 @@ class TestQID:
         p = rand_product_state(3)
         qids = qid(p, dims=[2, 2, 2], inds=[0, 1, 2], precomp_func=pre_c)
         assert_allclose(qids(p) if pre_c else qids, [2, 2, 2])
+
+
+class TestIsDegenerate:
+    def test_known_degenerate(self):
+        h = ham_heis(2)
+        assert is_degenerate(h) == 2
+
+    def test_known_nondegen(self):
+        h = ham_heis(2, bz=0.3)
+        assert is_degenerate(h) == 0
