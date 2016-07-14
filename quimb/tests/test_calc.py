@@ -386,3 +386,12 @@ class TestIsDegenerate:
     def test_known_nondegen(self):
         h = ham_heis(2, bz=0.3)
         assert is_degenerate(h) == 0
+
+    def test_supply_list(self):
+        l = [0, 1, 2, 2.0, 3]
+        assert is_degenerate(l)
+
+    def test_tol(self):
+        l = [0, 1, 1.001, 3, 4, 5, 6, 7, 8, 9]
+        assert not is_degenerate(l)
+        assert is_degenerate(l, tol=1e-2)
