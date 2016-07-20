@@ -20,7 +20,7 @@ from scipy.optimize import minimize
 
 from .accel import (dot_dense, ldmul, issparse, isop, zeroify, realify)
 from .core import (qu, kron, eye, eyepad, tr, ptr, infer_size, overlap, dop)
-from .solve import (eigvals, eigsys, norm)
+from .solve import (eigvals, eigsys, norm, seigvals)
 from .gen import (sig, basis_vec, bell_state, bloch_state)
 
 
@@ -69,33 +69,63 @@ def purify(rho, sparse=False):
 
 
 @zeroify
-def entropy(a):
-    """ Computes the (von Neumann) entropy of positive matrix `a`. """
+def entropy(a, rank=None):
+    """ Compute the (von Neumann) entropy
+
+    Parameters
+    ----------
+        a: operator or list of eigenvalues
+        rank: if operator has known rank, then a partial decomposition can be
+            used to acclerate the calculation
+
+    Returns
+    -------
+        e: von neumann entropy
+    """
     a = np.asarray(a)
     if np.ndim(a) == 1:
         l = a
     else:
-        l = eigvals(a)
+        if rank is None:
+            l = eigvals(a)
+        else:  # know that not all eigenvalues needed
+            l = seigvals(a, k=rank, which='LM', backend='AUTO')
+
     l = l[l > 0.0]
     return np.sum(-l * np.log2(l))
 
 
 @zeroify
-def mutual_information(p, dims=[2, 2], sysa=0, sysb=1):
-    """ Partitions `p` into `dims`, and finds the mutual information between
-    the subsystems at indices `sysa` and `sysb` """
-    if isop(p) or np.size(dims) > 2:  # mixed combined system
-        rhoab = ptr(p, dims, (sysa, sysb))
-        rhoa = ptr(rhoab, (dims[sysa], dims[sysb]), 0)
-        rhob = ptr(rhoab, (dims[sysa], dims[sysb]), 1)
-        hab = entropy(rhoab)
+def mutual_information(p, dims=[2, 2], sysa=0, sysb=1, rank=None):
+    """ Find the mutual information between two subystems of a state
+
+    Parameters
+    ----------
+        p: state, can be vector or operator
+        dims: internal dimensions of state
+        sysa: index of first subsystem
+        sysb: index of second subsystem
+        rank: if known, the rank of rho_ab, to speed calculation up
+
+    Returns
+    -------
+        Ixy: mutual information
+    """
+    if np.size(dims) > 2:
+        p = ptr(p, dims, (sysa, sysb))
+        dims = (dims[sysa], dims[sysb])
+    if isop(p):  # mixed combined system
+        hab = entropy(p, rank=rank)
+        rhoa = ptr(p, dims, 0)
+        rhob = ptr(p, dims, 1)
         ha, hb = entropy(rhoa), entropy(rhob)
     else:  # pure combined system
         hab = 0.0
         rhoa = ptr(p, dims, sysa)
-        ha = entropy(rhoa)
-        hb = ha
+        ha = hb = entropy(rhoa)
     return ha + hb - hab
+
+mutinf = mutual_information
 
 
 def partial_transpose(p, dims=[2, 2]):
@@ -126,11 +156,11 @@ def negativity(p, dims=[2, 2], sysa=0, sysb=1):
 def logarithmic_negativity(p, dims=[2, 2], sysa=0, sysb=1):
     """ Logarithmic negativity between `sysa` and `sysb` of `p`, with
     subsystem dimensions `dims`. """
-    if not isop(p):
-        p = qu(p, qtype='dop')
     if len(dims) > 2:
         p = ptr(p, dims, [sysa, sysb])
         dims = [dims[sysa], dims[sysb]]
+    if not isop(p):
+        p = qu(p, qtype='dop')
     e = log2(norm(partial_transpose(p, dims), "tr"))
     return max(0.0, e)
 

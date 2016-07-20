@@ -4,7 +4,7 @@ import numpy as np
 from numpy.testing import assert_allclose
 from .. import (qu, eye, rand_product_state, bell_state, up, eigvecs,
                 rand_mix, rand_rho, rand_ket, sig, down, overlap,
-                singlet_pairs, dop, singlet, kron, ham_heis)
+                singlet_pairs, dop, singlet, kron, ham_heis, ptr)
 from ..calc import (fidelity, quantum_discord, one_way_classical_information,
                     mutual_information, partial_transpose, entropy,
                     correlation, pauli_correlations, expm, sqrtm, purify,
@@ -137,6 +137,14 @@ class TestEntropy:
                                ([0.25, 0.25, 0.25, 0.25], 2)])
     def test_1darray(self, l, e):
         assert_allclose(entropy(np.asarray(l)), e)
+
+    @mark.parametrize("m", [1, 2, 3])
+    def test_rank(self, m):
+        k = rand_ket(2**4)
+        pab = ptr(k, [2, 2, 2, 2], range(m))
+        ef = entropy(pab)
+        er = entropy(pab, rank=2**m)
+        assert_allclose(ef, er)
 
 
 class TestMutualInformation:
