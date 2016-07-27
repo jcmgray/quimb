@@ -11,6 +11,7 @@ import numbers
 import collections
 import itertools
 import functools
+import operator
 
 import numpy as np
 import numpy.linalg as nla
@@ -95,6 +96,11 @@ def entropy(a, rank=None):
     return np.sum(-l * np.log2(l))
 
 
+def prod(xs):
+    """ Product of a list. """
+    return functools.reduce(operator.mul, xs)
+
+
 @zeroify
 def mutual_information(p, dims=[2, 2], sysa=0, sysb=1, rank=None):
     """ Find the mutual information between two subystems of a state
@@ -112,6 +118,8 @@ def mutual_information(p, dims=[2, 2], sysa=0, sysb=1, rank=None):
         Ixy: mutual information
     """
     if np.size(dims) > 2:
+        if rank == 'AUTO':
+            rank = prod(dim for dim in dims if dim not in {sysa, sysb})
         p = ptr(p, dims, (sysa, sysb))
         dims = (dims[sysa], dims[sysb])
     if isop(p):  # mixed combined system

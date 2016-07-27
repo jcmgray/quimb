@@ -171,6 +171,10 @@ class TestMutualInformation:
         # TODO ************************************************************** #
         pass
 
+    def test_auto_rank(self):
+        # TODO ************************************************************** #
+        pass
+
 
 class TestPartialTranspose:
     def test_partial_transpose(self):
