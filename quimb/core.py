@@ -3,10 +3,9 @@ Core functions for manipulating quantum objects.
 """
 # TODO: move identity, trace to accel
 
-from math import log
-from operator import mul
-from itertools import cycle, groupby, product
-from functools import reduce, partial
+import math
+import itertools
+import functools
 
 import numpy as np
 from numpy.matlib import zeros
@@ -16,14 +15,15 @@ from numba import jit, complex128, int64
 from .accel import (matrixify, realify, issparse, isop, vdot, dot_dense,
                     kron, kronpow)
 
+_sparse_constructors = {"csr": sp.csr_matrix,
+                        "bsr": sp.bsr_matrix,
+                        "csc": sp.csc_matrix,
+                        "coo": sp.coo_matrix}
 
-def sparse_matrix(data, format="csr"):
+
+def sparse_matrix(data, stype="csr"):
     """ Construct a sparse matrix of a particular format. """
-    sparse_constructors = {"csr": sp.csr_matrix,
-                           "bsr": sp.bsr_matrix,
-                           "csc": sp.csc_matrix,
-                           "coo": sp.coo_matrix}
-    return sparse_constructors[format](data, dtype=complex)
+    return _sparse_constructors[stype](data, dtype=complex)
 
 
 def normalize(qob, inplace=True):
@@ -124,19 +124,19 @@ def quimbify(data, qtype=None, sparse=None, normalized=False,
     return data
 
 qu = quimbify
-ket = partial(quimbify, qtype='ket')
-bra = partial(quimbify, qtype='bra')
-dop = partial(quimbify, qtype='dop')
-sparse = partial(quimbify, sparse=True)
+ket = functools.partial(quimbify, qtype='ket')
+bra = functools.partial(quimbify, qtype='bra')
+dop = functools.partial(quimbify, qtype='dop')
+sparse = functools.partial(quimbify, sparse=True)
 
 
 def infer_size(p, base=2):
     """ Infers the size of a state assumed to be made of qubits """
-    return int(log(max(p.shape), base))
+    return int(math.log(max(p.shape), base))
 
 
 @realify
-@jit(complex128(complex128[:, :]), nopython=True)
+@jit(complex128(complex128[:, :]), nopython=True, cache=True)
 def _trace_dense(op):  # pragma: no cover
     """ Trace of matrix. """
     x = 0.0
@@ -162,7 +162,7 @@ sp.csr_matrix.tr = _trace_sparse
 
 
 @matrixify
-@jit(complex128[:, :](int64), nopython=True)
+@jit(complex128[:, :](int64), nopython=True, cache=True)
 def _identity_dense(d):  # pragma: no cover
     """ Returns a dense, complex identity of order d. """
     x = np.zeros((d, d), dtype=np.complex128)
@@ -181,7 +181,7 @@ def identity(d, sparse=False, stype="csr"):
     return _identity_sparse(d, stype=stype) if sparse else _identity_dense(d)
 
 eye = identity
-speye = partial(identity, sparse=True)
+speye = functools.partial(identity, sparse=True)
 
 
 def dim_map(dims, coos, cyclic=False, trim=False):
@@ -285,7 +285,7 @@ def eyepad(ops, dims, inds, sparse=None, stype=None, coo_build=False):
         sparse = any(issparse(op) for op in ops)
 
     # Create a sorted list of operators with their matching index
-    inds, ops = zip(*sorted(zip(inds, cycle(ops))))
+    inds, ops = zip(*sorted(zip(inds, itertools.cycle(ops))))
     inds, ops = set(inds), iter(ops)
 
     # TODO: refactor this / just use dim_compress
@@ -330,7 +330,7 @@ def perm_pad(op, dims, inds):
     sz_in = np.prod(dims_in)  # total size of operator space
     sz_out = sz // sz_in  # total size of identity space
     sz_op = op.shape[0]  # size of individual operator
-    n_op = int(log(sz_in, sz_op))  # number of individual operators
+    n_op = int(math.log(sz_in, sz_op))  # number of individual operators
     b = np.asarray(kronpow(op, n_op) & eye(sz_out))
     inds_out, dims_out = zip(*((i, x) for i, x in enumerate(dims)
                                if i not in inds))  # inverse of inds
@@ -369,7 +369,7 @@ def _permute_sparse(a, dims, perm):
     # Range of possible coordinates for each subsys
     coos = (tuple(range(dim)) for dim in dims)
     # Complete basis using coordinates for current and new dimensions
-    basis = np.asarray(tuple(product(*coos, repeat=1)))
+    basis = np.asarray(tuple(itertools.product(*coos, repeat=1)))
     oinds = np.sum(odim_stride * basis, axis=1)
     ninds = np.sum(ndim_stride * basis[:, perm], axis=1)
     # Construct permutation matrix and apply it to state
