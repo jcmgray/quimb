@@ -104,7 +104,7 @@ def prod(xs):
 
 
 @zeroify
-def mutual_information(p, dims=[2, 2], sysa=0, sysb=1, rank=None):
+def mutual_information(p, dims=(2, 2), sysa=0, sysb=1, rank=None):
     """ Find the mutual information between two subystems of a state
 
     Parameters
@@ -138,7 +138,7 @@ def mutual_information(p, dims=[2, 2], sysa=0, sysb=1, rank=None):
 mutinf = mutual_information
 
 
-def partial_transpose(p, dims=[2, 2]):
+def partial_transpose(p, dims=(2, 2)):
     """ Partial transpose of state `p` with bipartition as given by
     `dims`. """
     p = qu(p, "dop")
@@ -150,25 +150,25 @@ def partial_transpose(p, dims=[2, 2]):
 
 
 @zeroify
-def negativity(p, dims=[2, 2], sysa=0, sysb=1):
+def negativity(p, dims=(2, 2), sysa=0, sysb=1):
     """ Negativity between `sysa` and `sysb` of state `p` with subsystem
     dimensions `dims` """
     if not isop(p):
         p = qu(p, qtype='dop')
     if len(dims) > 2:
-        p = ptr(p, dims, [sysa, sysb])
-        dims = [dims[sysa], dims[sysb]]
+        p = ptr(p, dims, (sysa, sysb))
+        dims = (dims[sysa], dims[sysb])
     n = (norm(partial_transpose(p, dims=dims), "tr") - 1.0) / 2.0
     return max(0.0, n)
 
 
 @zeroify
-def logarithmic_negativity(p, dims=[2, 2], sysa=0, sysb=1):
+def logarithmic_negativity(p, dims=(2, 2), sysa=0, sysb=1):
     """ Logarithmic negativity between `sysa` and `sysb` of `p`, with
     subsystem dimensions `dims`. """
     if len(dims) > 2:
-        p = ptr(p, dims, [sysa, sysb])
-        dims = [dims[sysa], dims[sysb]]
+        p = ptr(p, dims, (sysa, sysb))
+        dims = (dims[sysa], dims[sysb])
     if not isop(p):
         p = qu(p, qtype='dop')
     e = log2(norm(partial_transpose(p, dims), "tr"))
@@ -207,7 +207,7 @@ def one_way_classical_information(p_ab, prjs, precomp_func=False):
         The one-way classical information or the function to compute such
         given a set of POVMs
     """
-    p_a = ptr(p_ab, [2, 2], 0)
+    p_a = ptr(p_ab, (2, 2), 0)
     s_a = entropy(p_a)
 
     def owci(prjs):
@@ -215,7 +215,7 @@ def one_way_classical_information(p_ab, prjs, precomp_func=False):
             for prj in prjs:
                 p_ab_j = (eye(2) & prj) @ p_ab
                 prob = tr(p_ab_j)
-                p_a_j = ptr(p_ab_j, [2, 2], 0) / prob
+                p_a_j = ptr(p_ab_j, (2, 2), 0) / prob
                 yield prob, p_a_j
         return s_a - sum(p * entropy(rho) for p, rho in gen_paj())
 
@@ -233,7 +233,7 @@ def quantum_discord(p):
         ax, ay, az = sin(a[0]) * cos(a[1]), sin(a[0]) * sin(a[1]), cos(a[0])
         prja = bloch_state(ax, ay, az)
         prjb = eye(2) - prja
-        return iab - owci([prja, prjb])
+        return iab - owci((prja, prjb))
 
     opt = minimize(trial_qd, (pi/2, pi),
                    method="SLSQP", bounds=((0, pi), (0, 2 * pi)))
@@ -329,16 +329,16 @@ def correlation(p, opa, opb, sysa, sysb, dims=None, sparse=None,
     """
     if dims is None:
         sz_p = infer_size(p)
-        dims = [2] * sz_p
+        dims = (2,) * sz_p
     if sparse is None:
         sparse = issparse(opa) or issparse(opb)
 
     opts = {'sparse': sparse,
             'coo_build': sparse,
             'stype': 'csr' if sparse else None}
-    opab = eyepad([opa, opb], dims, (sysa, sysb), **opts)
-    opa = eyepad([opa], dims, sysa, **opts)
-    opb = eyepad([opb], dims, sysb, **opts)
+    opab = eyepad((opa, opb), dims, (sysa, sysb), **opts)
+    opa = eyepad((opa,), dims, sysa, **opts)
+    opb = eyepad((opb,), dims, sysb, **opts)
 
     @realify
     def corr(state):
@@ -399,13 +399,13 @@ def ent_cross_matrix(p, ent_fn=concurrence, calc_self_ent=True):
         for j in range(i, sz_p):
             if i == j:
                 if calc_self_ent:
-                    rhoa = ptr(p, [2]*sz_p, i)
+                    rhoa = ptr(p, (2,)*sz_p, i)
                     psiap = purify(rhoa)
                     ent = ent_fn(psiap)
                 else:
                     ent = np.nan
             else:
-                rhoab = ptr(p, [2]*sz_p, [i, j])
+                rhoab = ptr(p, (2,) * sz_p, (i, j))
                 ent = ent_fn(rhoab)
             ents[i, j] = ent
             ents[j, i] = ent
