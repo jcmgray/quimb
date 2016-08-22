@@ -163,17 +163,19 @@ class TestMutualInformation:
         ixy = mutual_information(a, [2, 2, 2],  2, 1)
         assert_allclose(2.0, ixy, atol=1e-12)
 
-    def test_mixed(self):
-        # TODO ************************************************************** #
-        pass
+    @mark.parametrize('inds', [(0, 1), (1, 2), (0, 2)])
+    def test_mixed_sub(self, inds):
+        a = rand_rho(2**3)
+        ixy = mutual_information(a, (2, 2, 2), *inds)
+        assert (0 <= ixy <= 2.0)
 
-    def test_mixed_subb(self):
-        # TODO ************************************************************** #
-        pass
-
-    def test_auto_rank(self):
-        # TODO ************************************************************** #
-        pass
+    @mark.parametrize('inds', [(0, 1), (1, 2), (0, 2)])
+    def test_auto_rank(self, inds):
+        a = rand_ket(2**3)
+        ixy = mutual_information(a, (2, 2, 2), *inds)
+        assert (0 <= ixy <= 2.0)
+        ixya = mutual_information(a, (2, 2, 2), *inds, rank='AUTO')
+        assert_allclose(ixy, ixya)
 
 
 class TestPartialTranspose:

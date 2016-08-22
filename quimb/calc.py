@@ -11,7 +11,6 @@ import numbers
 import collections
 import itertools
 import functools
-import operator
 
 import numpy as np
 import numpy.linalg as nla
@@ -98,7 +97,10 @@ def entropy(a, rank=None):
 
 def prod(xs):
     """ Product of a list. """
-    return functools.reduce(operator.mul, xs)
+    y = 1
+    for x in xs:
+        y *= x
+    return y
 
 
 @zeroify
@@ -119,7 +121,7 @@ def mutual_information(p, dims=[2, 2], sysa=0, sysb=1, rank=None):
     """
     if np.size(dims) > 2:
         if rank == 'AUTO':
-            rank = prod(dim for dim in dims if dim not in {sysa, sysb})
+            rank = prod(dims) // (dims[sysa] * dims[sysb])
         p = ptr(p, dims, (sysa, sysb))
         dims = (dims[sysa], dims[sysb])
     if isop(p):  # mixed combined system
