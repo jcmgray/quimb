@@ -205,9 +205,12 @@ class TestNormalize:
 
 
 class TestDimMap:
-    def test_1d(self):
+    @mark.parametrize("numpy", [False, True])
+    def test_1d(self, numpy):
         dims = [10, 11, 12, 13]
         coos = (1, 2, 3)
+        if numpy:
+            dims, coos = np.asarray(dims), np.asarray(coos)
         ndims, ncoos = dim_map(dims, coos)
         assert_allclose([ndims[c] for c in ncoos], (11, 12, 13))
         coos = ([-1], [2], [5])

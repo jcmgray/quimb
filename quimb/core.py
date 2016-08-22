@@ -225,7 +225,7 @@ def _dim_map_2d(sza, szb, coos):
     for coo in coos:
         x, y = coo
         if 0 <= x < sza and 0 <= y < szb:
-            yield szb * coo[0] + coo[1]
+            yield szb * x + y
         else:
             raise ValueError("One or more coordinates out of range.")
 
@@ -279,8 +279,11 @@ def dim_map(dims, coos, cyclic=False, trim=False):
         ndim = len(szs)
 
     # Ensure `coos` in right format for 1d (i.e. not single tuples)
-    if ndim == 1 and not isinstance(coos[0], int):
-        coos = (c[0] for c in coos)
+    if ndim == 1:
+        if isinstance(coos, np.ndarray):
+            coos = coos.ravel()
+        elif not isinstance(coos[0], int):
+            coos = (c[0] for c in coos)
 
     # Map coordinates to indices
     try:
