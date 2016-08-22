@@ -189,7 +189,7 @@ def _find_shape_of_nested_int_array(x):
     shape = [len(x)]
     sub_x = x[0]
     while not isinstance(sub_x, int):
-        shape += [len(sub_x)]
+        shape.append(len(sub_x))
         sub_x = sub_x[0]
     return tuple(shape)
 
@@ -385,14 +385,14 @@ def eyepad(ops, dims, inds, sparse=None, stype=None, coo_build=False):
 
     # Make sure `ops` islist
     if isinstance(ops, (np.ndarray, sp.spmatrix)):
-        ops = [ops]
+        ops = (ops,)
 
     # Make sure dimensions and coordinates have been flattenened.
     if np.ndim(dims) > 1:
         dims, inds = dim_map(dims, inds)
     # Make sure `inds` is list
     elif np.ndim(inds) == 0:
-        inds = [inds]
+        inds = (inds,)
 
     # Infer sparsity from list of ops
     if sparse is None:
@@ -449,12 +449,12 @@ def perm_pad(op, dims, inds):
     inds_out, dims_out = zip(*((i, x) for i, x in enumerate(dims)
                                if i not in inds))  # inverse of inds
     p = [*inds, *inds_out]  # current order of system
-    dims_cur = [*dims_in, *dims_out]
+    dims_cur = (*dims_in, *dims_out)
     ip = np.empty(n, dtype=np.int)
     ip[p] = np.arange(n)  # inverse permutation
-    return b.reshape([*dims_cur, *dims_cur])  \
-            .transpose([*ip, *(ip + n)])  \
-            .reshape([sz, sz])
+    return b.reshape((*dims_cur, *dims_cur))  \
+            .transpose((*ip, *(ip + n)))  \
+            .reshape((sz, sz))
 
 
 @matrixify
@@ -463,8 +463,8 @@ def _permute_dense(p, dims, perm):
     p, perm = np.asarray(p), np.asarray(perm)
     d = np.prod(dims)
     if isop(p):
-        return p.reshape([*dims, *dims]) \
-                .transpose([*perm, *(perm + len(dims))]) \
+        return p.reshape((*dims, *dims)) \
+                .transpose((*perm, *(perm + len(dims)))) \
                 .reshape((d, d))
     return p.reshape(dims) \
             .transpose(perm) \
@@ -476,10 +476,8 @@ def _permute_sparse(a, dims, perm):
     perm, dims = np.asarray(perm), np.asarray(dims)
     new_dims = dims[perm]
     # New dimensions & stride (i.e. product of preceding dimensions)
-    odim_stride = np.asarray([np.prod(dims[i+1:])
-                              for i, _ in enumerate(dims)])
-    ndim_stride = np.asarray([np.prod(new_dims[i+1:])
-                              for i, _ in enumerate(new_dims)])
+    odim_stride = np.multiply.accumulate(dims[::-1])[::-1] // dims
+    ndim_stride = np.multiply.accumulate(new_dims[::-1])[::-1] // new_dims
     # Range of possible coordinates for each subsys
     coos = (tuple(range(dim)) for dim in dims)
     # Complete basis using coordinates for current and new dimensions
@@ -597,7 +595,7 @@ def _partial_trace_simple(p, dims, coos_keep):
     lmax = max(enumerate(dims),
                key=lambda ix: (ix[0] not in coos_keep)*ix[1])[0]
     p = _trace_lose(p, dims, lmax)
-    dims = [*dims[:lmax], *dims[lmax+1:]]
+    dims = (*dims[:lmax], *dims[lmax+1:])
     coos_keep = {(ind if ind < lmax else ind - 1) for ind in coos_keep}
     return _partial_trace_simple(p, dims, coos_keep)
 
