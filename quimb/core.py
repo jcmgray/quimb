@@ -184,9 +184,75 @@ eye = identity
 speye = functools.partial(identity, sparse=True)
 
 
+def _find_shape_of_nested_int_array(x):
+    """ Take a n-nested list/tuple of integers and find its array shape """
+    shape = [len(x)]
+    sub_x = x[0]
+    while not isinstance(sub_x, int):
+        shape += [len(sub_x)]
+        sub_x = sub_x[0]
+    return tuple(shape)
+
+
+def _dim_map_1d(sza, coos):
+    for coo in coos:
+        if 0 <= coo < sza:
+            yield coo
+        else:
+            raise ValueError("One or more coordinates out of range.")
+
+
+def _dim_map_1dtrim(sza, coos):
+    return (coo for coo in coos if (0 <= coo < sza))
+
+
+def _dim_map_1dcyclic(sza, coos):
+    return (coo % sza for coo in coos)
+
+
+def _dim_map_2dcyclic(sza, szb, coos):
+    return (szb * (coo[0] % sza) + coo[1] % szb for coo in coos)
+
+
+def _dim_map_2dtrim(sza, szb, coos):
+    for coo in coos:
+        x, y = coo
+        if 0 <= x < sza and 0 <= y < szb:
+            yield szb * x + y
+
+
+def _dim_map_2d(sza, szb, coos):
+    for coo in coos:
+        x, y = coo
+        if 0 <= x < sza and 0 <= y < szb:
+            yield szb * coo[0] + coo[1]
+        else:
+            raise ValueError("One or more coordinates out of range.")
+
+
+def _dim_map_nd(szs, coos, cyclic=False, trim=False):
+    strides = [1]
+    for sz in szs[-1:0:-1]:
+        strides.insert(0, sz*strides[0])
+    if cyclic:
+        coos = ((c % sz for c, sz in zip(coo, szs)) for coo in coos)
+    elif trim:
+        coos = (c for c in coos if all(x == x % sz for x, sz in zip(c, szs)))
+    elif not all(all(c == c % sz for c, sz in zip(coo, szs)) for coo in coos):
+        raise ValueError("One or more coordinates out of range.")
+    return (sum(c * m for c, m in zip(coo, strides)) for coo in coos)
+
+
+_dim_mapper_methods = {(1, False, False): _dim_map_1d,
+                       (1, False, True): _dim_map_1dtrim,
+                       (1, True, False): _dim_map_1dcyclic,
+                       (2, False, False): _dim_map_2d,
+                       (2, False, True): _dim_map_2dtrim,
+                       (2, True, False): _dim_map_2dcyclic}
+
+
 def dim_map(dims, coos, cyclic=False, trim=False):
-    """
-    Maps multi-dimensional coordinates and indices to flat arrays in a
+    """ Maps multi-dimensional coordinates and indices to flat arrays in a
     regular way. Wraps or deletes coordinates beyond the system size
     depending on parameters `cyclic` and `trim`.
 
@@ -204,44 +270,89 @@ def dim_map(dims, coos, cyclic=False, trim=False):
         dims: flattened version of dims
         coos: indices mapped to flattened dims
     """
-    # TODO: rename dim_map
-    dims = np.asarray(dims)
-    shp_dims, n_dims = dims.shape, dims.ndim
+    # Figure out shape of dimensions given
+    if isinstance(dims, np.ndarray):
+        szs = dims.shape
+        ndim = dims.ndim
+    else:
+        szs = _find_shape_of_nested_int_array(dims)
+        ndim = len(szs)
 
-    # Calculate 'shape multiplier' for each dimension
-    shp_mul = [np.prod(shp_dims[i+1:], dtype=int) for i in range(n_dims)]
-    coos = np.asarray(coos).reshape((len(coos), n_dims))
-    if cyclic:
-        coos = coos % shp_dims  # (broadcasting dims down columns)
-    elif trim:
-        coos = coos[np.all(coos == coos % shp_dims, axis=1)]
-    elif np.any(coos != coos % shp_dims):
-        raise ValueError("Coordinates beyond system dimensions.")
+    # Ensure `coos` in right format for 1d (i.e. not single tuples)
+    if ndim == 1 and not isinstance(coos[0], int):
+        coos = (c[0] for c in coos)
 
-    # Sum contributions from each coordinate & flatten dimensions
-    coos = np.sum(shp_mul * coos, axis=1)
-    return np.ravel(dims), coos
+    # Map coordinates to indices
+    try:
+        inds = _dim_mapper_methods[(ndim, cyclic, trim)](*szs, coos)
+    except KeyError:
+        inds = _dim_map_nd(szs, coos, cyclic, trim)
+
+    # Ravel dims
+    while ndim > 1:
+        dims = itertools.chain.from_iterable(dims)
+        ndim -= 1
+
+    return tuple(dims), tuple(inds)
+
+
+@jit(nopython=True)
+def _dim_compressor(dims, inds):  # pragma: no cover
+    """ Helper function for `dim_compress` that does the heavy lifting. """
+    blocksize_id = blocksize_op = 1
+    autoplace_count = 0
+    for i, dim in enumerate(dims):
+        if dim < 0:
+            if blocksize_op > 1:
+                yield (blocksize_op, 1)
+                blocksize_op = 1
+            elif blocksize_id > 1:
+                yield (blocksize_id, 0)
+                blocksize_id = 1
+            autoplace_count += dim
+        elif i in inds:
+            if blocksize_id > 1:
+                yield (blocksize_id, 0)
+                blocksize_id = 1
+            elif autoplace_count < 0:
+                yield (autoplace_count, 1)
+                autoplace_count = 0
+            blocksize_op *= dim
+        else:
+            if blocksize_op > 1:
+                yield (blocksize_op, 1)
+                blocksize_op = 1
+            elif autoplace_count < 0:
+                yield (autoplace_count, 1)
+                autoplace_count = 0
+            blocksize_id *= dim
+    yield ((blocksize_op, 1) if blocksize_op > 1 else
+           (blocksize_id, 0) if blocksize_id > 1 else
+           (autoplace_count, 1))
 
 
 def dim_compress(dims, inds):
-    """
-    Compresses identity spaces together: groups 1D dimensions according to
-    whether their index appears in inds, then merges the groups.
-    """
-    # TODO: take account of -1 ?
+    """ Take some dimensions and target indices and compress both such, i.e.
+    merge adjacent identity spaces.
 
-    # Group all `dims` indicies based on membership of `inds`
-    try:
-        inds = {*inds}
-        grp_dims = groupby(range(len(dims)), lambda x: x in inds)
-    except TypeError:  # single index given
-        grp_dims = groupby(range(len(dims)), lambda x: x == inds)
+    Parameters
+    ----------
+        dims: list of systems dimensions
+        inds: list of target indices
 
-    # ???
-    ks, gs = zip(*(((k, tuple(g)) for k, g in grp_dims)))
-    ndims = [reduce(mul, (dims[i] for i in g)) for g in gs]
-    ncoos = [i for i in range(len(ndims)) if ks[i]]
-    return ndims, ncoos
+    Returns
+    -------
+        dims, inds: new equivalent dimensions and matching indices
+    """
+    # TODO: turn off ind compress
+    # TODO: put yield (autoplace_count, False) --- no need?
+    # TODO: handle empty inds = () / [] etc.
+    # TODO: don't compress auto (-ve.) so as to allow multiple operators
+    if isinstance(inds, int):
+        inds = (inds,)
+    dims, inds = zip(*_dim_compressor(dims, inds))
+    inds = tuple(i for i, b in enumerate(inds) if b)
+    return dims, inds
 
 
 def eyepad(ops, dims, inds, sparse=None, stype=None, coo_build=False):
