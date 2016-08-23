@@ -12,20 +12,20 @@
 
 ## Installation
 `quimb` requires python 3.5+, `numpy`, `scipy`, `numba` and `numexpr`, which are obtained most easily using `conda` (http://conda.pydata.org/miniconda.html):
+```bash
+$ conda install numpy scipy numba numexpr
 ```
-conda install numpy scipy numba numexpr
-```
-The optional advanced solvers require `slepc4py` (https://bitbucket.org/slepc/slepc4py). 
+The optional advanced solvers require `slepc4py` (https://bitbucket.org/slepc/slepc4py). Instructions for its installation can be inferred from the `quimb/deps/travis-install-slepc4py.sh` script.
 
 `quimb` can then be installed directly from github:
-```
-pip install git+https://github.com/jcmgray/quimb.git
+```bash
+$ pip install git+https://github.com/jcmgray/quimb.git
 ```
 or via a local editable repo:
-```
-git clone https://github.com/jcmgray/quimb.git
-cd quimb
-pip install -e .
+```bash
+$ git clone https://github.com/jcmgray/quimb.git
+$ cd quimb
+$ pip install -e .
 ```
 
 ## Example Usage
