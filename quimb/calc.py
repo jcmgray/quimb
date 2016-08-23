@@ -20,7 +20,7 @@ from scipy.optimize import minimize
 
 from .accel import (dot_dense, ldmul, issparse, isop, zeroify, realify)
 from .core import (qu, kron, eye, eyepad, tr, ptr, infer_size, overlap, dop)
-from .solve import (eigvals, eigsys, norm)
+from .solve import (eigvals, eigsys, norm, seigvals)
 from .gen import (sig, basis_vec, bell_state, bloch_state)
 
 
@@ -69,36 +69,76 @@ def purify(rho, sparse=False):
 
 
 @zeroify
-def entropy(a):
-    """ Computes the (von Neumann) entropy of positive matrix `a`. """
+def entropy(a, rank=None):
+    """ Compute the (von Neumann) entropy
+
+    Parameters
+    ----------
+        a: operator or list of eigenvalues
+        rank: if operator has known rank, then a partial decomposition can be
+            used to acclerate the calculation
+
+    Returns
+    -------
+        e: von neumann entropy
+    """
     a = np.asarray(a)
     if np.ndim(a) == 1:
         l = a
     else:
-        l = eigvals(a)
+        if rank is None:
+            l = eigvals(a)
+        else:  # know that not all eigenvalues needed
+            l = seigvals(a, k=rank, which='LM', backend='AUTO')
+
     l = l[l > 0.0]
     return np.sum(-l * np.log2(l))
 
 
+def prod(xs):
+    """ Product of a list. """
+    y = 1
+    for x in xs:
+        y *= x
+    return y
+
+
 @zeroify
-def mutual_information(p, dims=[2, 2], sysa=0, sysb=1):
-    """ Partitions `p` into `dims`, and finds the mutual information between
-    the subsystems at indices `sysa` and `sysb` """
-    if isop(p) or np.size(dims) > 2:  # mixed combined system
-        rhoab = ptr(p, dims, (sysa, sysb))
-        rhoa = ptr(rhoab, (dims[sysa], dims[sysb]), 0)
-        rhob = ptr(rhoab, (dims[sysa], dims[sysb]), 1)
-        hab = entropy(rhoab)
+def mutual_information(p, dims=(2, 2), sysa=0, sysb=1, rank=None):
+    """ Find the mutual information between two subystems of a state
+
+    Parameters
+    ----------
+        p: state, can be vector or operator
+        dims: internal dimensions of state
+        sysa: index of first subsystem
+        sysb: index of second subsystem
+        rank: if known, the rank of rho_ab, to speed calculation up
+
+    Returns
+    -------
+        Ixy: mutual information
+    """
+    if np.size(dims) > 2:
+        if rank == 'AUTO':
+            rank = prod(dims) // (dims[sysa] * dims[sysb])
+        p = ptr(p, dims, (sysa, sysb))
+        dims = (dims[sysa], dims[sysb])
+    if isop(p):  # mixed combined system
+        hab = entropy(p, rank=rank)
+        rhoa = ptr(p, dims, 0)
+        rhob = ptr(p, dims, 1)
         ha, hb = entropy(rhoa), entropy(rhob)
     else:  # pure combined system
         hab = 0.0
         rhoa = ptr(p, dims, sysa)
-        ha = entropy(rhoa)
-        hb = ha
+        ha = hb = entropy(rhoa)
     return ha + hb - hab
 
+mutinf = mutual_information
 
-def partial_transpose(p, dims=[2, 2]):
+
+def partial_transpose(p, dims=(2, 2)):
     """ Partial transpose of state `p` with bipartition as given by
     `dims`. """
     p = qu(p, "dop")
@@ -110,27 +150,27 @@ def partial_transpose(p, dims=[2, 2]):
 
 
 @zeroify
-def negativity(p, dims=[2, 2], sysa=0, sysb=1):
+def negativity(p, dims=(2, 2), sysa=0, sysb=1):
     """ Negativity between `sysa` and `sysb` of state `p` with subsystem
     dimensions `dims` """
     if not isop(p):
         p = qu(p, qtype='dop')
     if len(dims) > 2:
-        p = ptr(p, dims, [sysa, sysb])
-        dims = [dims[sysa], dims[sysb]]
+        p = ptr(p, dims, (sysa, sysb))
+        dims = (dims[sysa], dims[sysb])
     n = (norm(partial_transpose(p, dims=dims), "tr") - 1.0) / 2.0
     return max(0.0, n)
 
 
 @zeroify
-def logarithmic_negativity(p, dims=[2, 2], sysa=0, sysb=1):
+def logarithmic_negativity(p, dims=(2, 2), sysa=0, sysb=1):
     """ Logarithmic negativity between `sysa` and `sysb` of `p`, with
     subsystem dimensions `dims`. """
+    if len(dims) > 2:
+        p = ptr(p, dims, (sysa, sysb))
+        dims = (dims[sysa], dims[sysb])
     if not isop(p):
         p = qu(p, qtype='dop')
-    if len(dims) > 2:
-        p = ptr(p, dims, [sysa, sysb])
-        dims = [dims[sysa], dims[sysb]]
     e = log2(norm(partial_transpose(p, dims), "tr"))
     return max(0.0, e)
 
@@ -167,7 +207,7 @@ def one_way_classical_information(p_ab, prjs, precomp_func=False):
         The one-way classical information or the function to compute such
         given a set of POVMs
     """
-    p_a = ptr(p_ab, [2, 2], 0)
+    p_a = ptr(p_ab, (2, 2), 0)
     s_a = entropy(p_a)
 
     def owci(prjs):
@@ -175,7 +215,7 @@ def one_way_classical_information(p_ab, prjs, precomp_func=False):
             for prj in prjs:
                 p_ab_j = (eye(2) & prj) @ p_ab
                 prob = tr(p_ab_j)
-                p_a_j = ptr(p_ab_j, [2, 2], 0) / prob
+                p_a_j = ptr(p_ab_j, (2, 2), 0) / prob
                 yield prob, p_a_j
         return s_a - sum(p * entropy(rho) for p, rho in gen_paj())
 
@@ -193,7 +233,7 @@ def quantum_discord(p):
         ax, ay, az = sin(a[0]) * cos(a[1]), sin(a[0]) * sin(a[1]), cos(a[0])
         prja = bloch_state(ax, ay, az)
         prjb = eye(2) - prja
-        return iab - owci([prja, prjb])
+        return iab - owci((prja, prjb))
 
     opt = minimize(trial_qd, (pi/2, pi),
                    method="SLSQP", bounds=((0, pi), (0, 2 * pi)))
@@ -289,16 +329,16 @@ def correlation(p, opa, opb, sysa, sysb, dims=None, sparse=None,
     """
     if dims is None:
         sz_p = infer_size(p)
-        dims = [2] * sz_p
+        dims = (2,) * sz_p
     if sparse is None:
         sparse = issparse(opa) or issparse(opb)
 
     opts = {'sparse': sparse,
             'coo_build': sparse,
             'stype': 'csr' if sparse else None}
-    opab = eyepad([opa, opb], dims, (sysa, sysb), **opts)
-    opa = eyepad([opa], dims, sysa, **opts)
-    opb = eyepad([opb], dims, sysb, **opts)
+    opab = eyepad((opa, opb), dims, (sysa, sysb), **opts)
+    opa = eyepad((opa,), dims, sysa, **opts)
+    opb = eyepad((opb,), dims, sysb, **opts)
 
     @realify
     def corr(state):
@@ -359,13 +399,13 @@ def ent_cross_matrix(p, ent_fn=concurrence, calc_self_ent=True):
         for j in range(i, sz_p):
             if i == j:
                 if calc_self_ent:
-                    rhoa = ptr(p, [2]*sz_p, i)
+                    rhoa = ptr(p, (2,)*sz_p, i)
                     psiap = purify(rhoa)
                     ent = ent_fn(psiap)
                 else:
                     ent = np.nan
             else:
-                rhoab = ptr(p, [2]*sz_p, [i, j])
+                rhoab = ptr(p, (2,) * sz_p, (i, j))
                 ent = ent_fn(rhoab)
             ents[i, j] = ent
             ents[j, i] = ent

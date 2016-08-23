@@ -3,10 +3,9 @@ Core functions for manipulating quantum objects.
 """
 # TODO: move identity, trace to accel
 
-from math import log
-from operator import mul
-from itertools import cycle, groupby, product
-from functools import reduce, partial
+import math
+import itertools
+import functools
 
 import numpy as np
 from numpy.matlib import zeros
@@ -16,14 +15,15 @@ from numba import jit, complex128, int64
 from .accel import (matrixify, realify, issparse, isop, vdot, dot_dense,
                     kron, kronpow)
 
+_sparse_constructors = {"csr": sp.csr_matrix,
+                        "bsr": sp.bsr_matrix,
+                        "csc": sp.csc_matrix,
+                        "coo": sp.coo_matrix}
 
-def sparse_matrix(data, format="csr"):
+
+def sparse_matrix(data, stype="csr"):
     """ Construct a sparse matrix of a particular format. """
-    sparse_constructors = {"csr": sp.csr_matrix,
-                           "bsr": sp.bsr_matrix,
-                           "csc": sp.csc_matrix,
-                           "coo": sp.coo_matrix}
-    return sparse_constructors[format](data, dtype=complex)
+    return _sparse_constructors[stype](data, dtype=complex)
 
 
 def normalize(qob, inplace=True):
@@ -124,19 +124,19 @@ def quimbify(data, qtype=None, sparse=None, normalized=False,
     return data
 
 qu = quimbify
-ket = partial(quimbify, qtype='ket')
-bra = partial(quimbify, qtype='bra')
-dop = partial(quimbify, qtype='dop')
-sparse = partial(quimbify, sparse=True)
+ket = functools.partial(quimbify, qtype='ket')
+bra = functools.partial(quimbify, qtype='bra')
+dop = functools.partial(quimbify, qtype='dop')
+sparse = functools.partial(quimbify, sparse=True)
 
 
 def infer_size(p, base=2):
     """ Infers the size of a state assumed to be made of qubits """
-    return int(log(max(p.shape), base))
+    return int(math.log(max(p.shape), base))
 
 
 @realify
-@jit(complex128(complex128[:, :]), nopython=True)
+@jit(complex128(complex128[:, :]), nopython=True, cache=True)
 def _trace_dense(op):  # pragma: no cover
     """ Trace of matrix. """
     x = 0.0
@@ -162,7 +162,7 @@ sp.csr_matrix.tr = _trace_sparse
 
 
 @matrixify
-@jit(complex128[:, :](int64), nopython=True)
+@jit(complex128[:, :](int64), nopython=True, cache=True)
 def _identity_dense(d):  # pragma: no cover
     """ Returns a dense, complex identity of order d. """
     x = np.zeros((d, d), dtype=np.complex128)
@@ -181,12 +181,78 @@ def identity(d, sparse=False, stype="csr"):
     return _identity_sparse(d, stype=stype) if sparse else _identity_dense(d)
 
 eye = identity
-speye = partial(identity, sparse=True)
+speye = functools.partial(identity, sparse=True)
+
+
+def _find_shape_of_nested_int_array(x):
+    """ Take a n-nested list/tuple of integers and find its array shape """
+    shape = [len(x)]
+    sub_x = x[0]
+    while not isinstance(sub_x, int):
+        shape.append(len(sub_x))
+        sub_x = sub_x[0]
+    return tuple(shape)
+
+
+def _dim_map_1d(sza, coos):
+    for coo in coos:
+        if 0 <= coo < sza:
+            yield coo
+        else:
+            raise ValueError("One or more coordinates out of range.")
+
+
+def _dim_map_1dtrim(sza, coos):
+    return (coo for coo in coos if (0 <= coo < sza))
+
+
+def _dim_map_1dcyclic(sza, coos):
+    return (coo % sza for coo in coos)
+
+
+def _dim_map_2dcyclic(sza, szb, coos):
+    return (szb * (coo[0] % sza) + coo[1] % szb for coo in coos)
+
+
+def _dim_map_2dtrim(sza, szb, coos):
+    for coo in coos:
+        x, y = coo
+        if 0 <= x < sza and 0 <= y < szb:
+            yield szb * x + y
+
+
+def _dim_map_2d(sza, szb, coos):
+    for coo in coos:
+        x, y = coo
+        if 0 <= x < sza and 0 <= y < szb:
+            yield szb * x + y
+        else:
+            raise ValueError("One or more coordinates out of range.")
+
+
+def _dim_map_nd(szs, coos, cyclic=False, trim=False):
+    strides = [1]
+    for sz in szs[-1:0:-1]:
+        strides.insert(0, sz*strides[0])
+    if cyclic:
+        coos = ((c % sz for c, sz in zip(coo, szs)) for coo in coos)
+    elif trim:
+        coos = (c for c in coos if all(x == x % sz for x, sz in zip(c, szs)))
+    elif not all(all(c == c % sz for c, sz in zip(coo, szs)) for coo in coos):
+        raise ValueError("One or more coordinates out of range.")
+    return (sum(c * m for c, m in zip(coo, strides)) for coo in coos)
+
+
+_dim_mapper_methods = {(1, False, False): _dim_map_1d,
+                       (1, False, True): _dim_map_1dtrim,
+                       (1, True, False): _dim_map_1dcyclic,
+                       (2, False, False): _dim_map_2d,
+                       (2, False, True): _dim_map_2dtrim,
+                       (2, True, False): _dim_map_2dcyclic}
 
 
 def dim_map(dims, coos, cyclic=False, trim=False):
-    """
-    Maps multi-dimensional coordinates and indices to flat arrays in a
+    """ Maps multi-dimensional coordinates and indices to flat arrays in a
     regular way. Wraps or deletes coordinates beyond the system size
     depending on parameters `cyclic` and `trim`.
 
@@ -204,44 +270,92 @@ def dim_map(dims, coos, cyclic=False, trim=False):
         dims: flattened version of dims
         coos: indices mapped to flattened dims
     """
-    # TODO: rename dim_map
-    dims = np.asarray(dims)
-    shp_dims, n_dims = dims.shape, dims.ndim
+    # Figure out shape of dimensions given
+    if isinstance(dims, np.ndarray):
+        szs = dims.shape
+        ndim = dims.ndim
+    else:
+        szs = _find_shape_of_nested_int_array(dims)
+        ndim = len(szs)
 
-    # Calculate 'shape multiplier' for each dimension
-    shp_mul = [np.prod(shp_dims[i+1:], dtype=int) for i in range(n_dims)]
-    coos = np.asarray(coos).reshape((len(coos), n_dims))
-    if cyclic:
-        coos = coos % shp_dims  # (broadcasting dims down columns)
-    elif trim:
-        coos = coos[np.all(coos == coos % shp_dims, axis=1)]
-    elif np.any(coos != coos % shp_dims):
-        raise ValueError("Coordinates beyond system dimensions.")
+    # Ensure `coos` in right format for 1d (i.e. not single tuples)
+    if ndim == 1:
+        if isinstance(coos, np.ndarray):
+            coos = coos.ravel()
+        elif not isinstance(coos[0], int):
+            coos = (c[0] for c in coos)
 
-    # Sum contributions from each coordinate & flatten dimensions
-    coos = np.sum(shp_mul * coos, axis=1)
-    return np.ravel(dims), coos
+    # Map coordinates to indices
+    try:
+        inds = _dim_mapper_methods[(ndim, cyclic, trim)](*szs, coos)
+    except KeyError:
+        inds = _dim_map_nd(szs, coos, cyclic, trim)
+
+    # Ravel dims
+    while ndim > 1:
+        dims = itertools.chain.from_iterable(dims)
+        ndim -= 1
+
+    return tuple(dims), tuple(inds)
+
+
+@jit(nopython=True)
+def _dim_compressor(dims, inds):  # pragma: no cover
+    """ Helper function for `dim_compress` that does the heavy lifting. """
+    blocksize_id = blocksize_op = 1
+    autoplace_count = 0
+    for i, dim in enumerate(dims):
+        if dim < 0:
+            if blocksize_op > 1:
+                yield (blocksize_op, 1)
+                blocksize_op = 1
+            elif blocksize_id > 1:
+                yield (blocksize_id, 0)
+                blocksize_id = 1
+            autoplace_count += dim
+        elif i in inds:
+            if blocksize_id > 1:
+                yield (blocksize_id, 0)
+                blocksize_id = 1
+            elif autoplace_count < 0:
+                yield (autoplace_count, 1)
+                autoplace_count = 0
+            blocksize_op *= dim
+        else:
+            if blocksize_op > 1:
+                yield (blocksize_op, 1)
+                blocksize_op = 1
+            elif autoplace_count < 0:
+                yield (autoplace_count, 1)
+                autoplace_count = 0
+            blocksize_id *= dim
+    yield ((blocksize_op, 1) if blocksize_op > 1 else
+           (blocksize_id, 0) if blocksize_id > 1 else
+           (autoplace_count, 1))
 
 
 def dim_compress(dims, inds):
-    """
-    Compresses identity spaces together: groups 1D dimensions according to
-    whether their index appears in inds, then merges the groups.
-    """
-    # TODO: take account of -1 ?
+    """ Take some dimensions and target indices and compress both such, i.e.
+    merge adjacent identity spaces.
 
-    # Group all `dims` indicies based on membership of `inds`
-    try:
-        inds = {*inds}
-        grp_dims = groupby(range(len(dims)), lambda x: x in inds)
-    except TypeError:  # single index given
-        grp_dims = groupby(range(len(dims)), lambda x: x == inds)
+    Parameters
+    ----------
+        dims: list of systems dimensions
+        inds: list of target indices
 
-    # ???
-    ks, gs = zip(*(((k, tuple(g)) for k, g in grp_dims)))
-    ndims = [reduce(mul, (dims[i] for i in g)) for g in gs]
-    ncoos = [i for i in range(len(ndims)) if ks[i]]
-    return ndims, ncoos
+    Returns
+    -------
+        dims, inds: new equivalent dimensions and matching indices
+    """
+    # TODO: turn off ind compress
+    # TODO: put yield (autoplace_count, False) --- no need?
+    # TODO: handle empty inds = () / [] etc.
+    # TODO: don't compress auto (-ve.) so as to allow multiple operators
+    if isinstance(inds, int):
+        inds = (inds,)
+    dims, inds = zip(*_dim_compressor(dims, inds))
+    inds = tuple(i for i, b in enumerate(inds) if b)
+    return dims, inds
 
 
 def eyepad(ops, dims, inds, sparse=None, stype=None, coo_build=False):
@@ -271,21 +385,21 @@ def eyepad(ops, dims, inds, sparse=None, stype=None, coo_build=False):
 
     # Make sure `ops` islist
     if isinstance(ops, (np.ndarray, sp.spmatrix)):
-        ops = [ops]
+        ops = (ops,)
 
     # Make sure dimensions and coordinates have been flattenened.
     if np.ndim(dims) > 1:
         dims, inds = dim_map(dims, inds)
     # Make sure `inds` is list
     elif np.ndim(inds) == 0:
-        inds = [inds]
+        inds = (inds,)
 
     # Infer sparsity from list of ops
     if sparse is None:
         sparse = any(issparse(op) for op in ops)
 
     # Create a sorted list of operators with their matching index
-    inds, ops = zip(*sorted(zip(inds, cycle(ops))))
+    inds, ops = zip(*sorted(zip(inds, itertools.cycle(ops))))
     inds, ops = set(inds), iter(ops)
 
     # TODO: refactor this / just use dim_compress
@@ -330,17 +444,17 @@ def perm_pad(op, dims, inds):
     sz_in = np.prod(dims_in)  # total size of operator space
     sz_out = sz // sz_in  # total size of identity space
     sz_op = op.shape[0]  # size of individual operator
-    n_op = int(log(sz_in, sz_op))  # number of individual operators
+    n_op = int(math.log(sz_in, sz_op))  # number of individual operators
     b = np.asarray(kronpow(op, n_op) & eye(sz_out))
     inds_out, dims_out = zip(*((i, x) for i, x in enumerate(dims)
                                if i not in inds))  # inverse of inds
     p = [*inds, *inds_out]  # current order of system
-    dims_cur = [*dims_in, *dims_out]
+    dims_cur = (*dims_in, *dims_out)
     ip = np.empty(n, dtype=np.int)
     ip[p] = np.arange(n)  # inverse permutation
-    return b.reshape([*dims_cur, *dims_cur])  \
-            .transpose([*ip, *(ip + n)])  \
-            .reshape([sz, sz])
+    return b.reshape((*dims_cur, *dims_cur))  \
+            .transpose((*ip, *(ip + n)))  \
+            .reshape((sz, sz))
 
 
 @matrixify
@@ -349,8 +463,8 @@ def _permute_dense(p, dims, perm):
     p, perm = np.asarray(p), np.asarray(perm)
     d = np.prod(dims)
     if isop(p):
-        return p.reshape([*dims, *dims]) \
-                .transpose([*perm, *(perm + len(dims))]) \
+        return p.reshape((*dims, *dims)) \
+                .transpose((*perm, *(perm + len(dims)))) \
                 .reshape((d, d))
     return p.reshape(dims) \
             .transpose(perm) \
@@ -362,14 +476,12 @@ def _permute_sparse(a, dims, perm):
     perm, dims = np.asarray(perm), np.asarray(dims)
     new_dims = dims[perm]
     # New dimensions & stride (i.e. product of preceding dimensions)
-    odim_stride = np.asarray([np.prod(dims[i+1:])
-                              for i, _ in enumerate(dims)])
-    ndim_stride = np.asarray([np.prod(new_dims[i+1:])
-                              for i, _ in enumerate(new_dims)])
+    odim_stride = np.multiply.accumulate(dims[::-1])[::-1] // dims
+    ndim_stride = np.multiply.accumulate(new_dims[::-1])[::-1] // new_dims
     # Range of possible coordinates for each subsys
     coos = (tuple(range(dim)) for dim in dims)
     # Complete basis using coordinates for current and new dimensions
-    basis = np.asarray(tuple(product(*coos, repeat=1)))
+    basis = np.asarray(tuple(itertools.product(*coos, repeat=1)))
     oinds = np.sum(odim_stride * basis, axis=1)
     ninds = np.sum(ndim_stride * basis[:, perm], axis=1)
     # Construct permutation matrix and apply it to state
@@ -483,7 +595,7 @@ def _partial_trace_simple(p, dims, coos_keep):
     lmax = max(enumerate(dims),
                key=lambda ix: (ix[0] not in coos_keep)*ix[1])[0]
     p = _trace_lose(p, dims, lmax)
-    dims = [*dims[:lmax], *dims[lmax+1:]]
+    dims = (*dims[:lmax], *dims[lmax+1:])
     coos_keep = {(ind if ind < lmax else ind - 1) for ind in coos_keep}
     return _partial_trace_simple(p, dims, coos_keep)
 

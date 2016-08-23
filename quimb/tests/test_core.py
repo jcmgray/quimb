@@ -205,32 +205,35 @@ class TestNormalize:
 
 
 class TestDimMap:
-    def test_1d(self):
+    @mark.parametrize("numpy", [False, True])
+    def test_1d(self, numpy):
         dims = [10, 11, 12, 13]
         coos = (1, 2, 3)
+        if numpy:
+            dims, coos = np.asarray(dims), np.asarray(coos)
         ndims, ncoos = dim_map(dims, coos)
-        assert_allclose(ndims[ncoos], (11, 12, 13))
+        assert_allclose([ndims[c] for c in ncoos], (11, 12, 13))
         coos = ([-1], [2], [5])
         with raises(ValueError):
             ndims, ncoos = dim_map(dims, coos)
         ndims, ncoos = dim_map(dims, coos, cyclic=True)
-        assert_allclose(ndims[ncoos], (13, 12, 11))
+        assert_allclose([ndims[c] for c in ncoos], (13, 12, 11))
         ndims, ncoos = dim_map(dims, coos, trim=True)
-        assert_allclose(ndims[ncoos], [12])
+        assert_allclose([ndims[c] for c in ncoos], [12])
 
     def test_2d(self):
         dims = [[200, 201, 202, 203],
                 [210, 211, 212, 213]]
         coos = ((1, 2), (1, 3), (0, 3))
         ndims, ncoos = dim_map(dims, coos)
-        assert_allclose(ndims[ncoos], (212, 213, 203))
+        assert_allclose([ndims[c] for c in ncoos], (212, 213, 203))
         coos = ((-1, 1), (1, 2), (3, 4))
         with raises(ValueError):
             ndims, ncoos = dim_map(dims, coos)
         ndims, ncoos = dim_map(dims, coos, cyclic=True)
-        assert_allclose(ndims[ncoos], (211, 212, 210))
+        assert_allclose([ndims[c] for c in ncoos], (211, 212, 210))
         ndims, ncoos = dim_map(dims, coos, trim=True)
-        assert_allclose(ndims[ncoos], [212])
+        assert_allclose([ndims[c] for c in ncoos], [212])
 
     def test_3d(self):
         dims = [[[3000, 3001, 3002],
@@ -241,14 +244,14 @@ class TestDimMap:
                  [3120, 3121, 3122]]]
         coos = ((0, 0, 2), (1, 1, 2), (1, 2, 0))
         ndims, ncoos = dim_map(dims, coos)
-        assert_allclose(ndims[ncoos], (3002, 3112, 3120))
+        assert_allclose([ndims[c] for c in ncoos], (3002, 3112, 3120))
         coos = ((0, -1, 2), (1, 2, 2), (4, -1, 3))
         with raises(ValueError):
             ndims, ncoos = dim_map(dims, coos)
         ndims, ncoos = dim_map(dims, coos, cyclic=True)
-        assert_allclose(ndims[ncoos], (3022, 3122, 3020))
+        assert_allclose([ndims[c] for c in ncoos], (3022, 3122, 3020))
         ndims, ncoos = dim_map(dims, coos, trim=True)
-        assert_allclose(ndims[ncoos], [3122])
+        assert_allclose([ndims[c] for c in ncoos], [3122])
 
 
 class TestDimCompress:
@@ -256,22 +259,30 @@ class TestDimCompress:
         dims = [2, 3, 2, 4, 5]
         coos = [0, 4]
         ndims, ncoos = dim_compress(dims, coos)
-        assert ndims == [2, 24, 5]
-        assert ncoos == [0, 2]
+        assert ndims == (2, 24, 5)
+        assert ncoos == (0, 2)
 
     def test_middle(self):
         dims = [5, 3, 2, 5, 4, 3, 2]
         coos = [1, 2, 3, 5]
         ndims, ncoos = dim_compress(dims, coos)
-        assert ndims == [5, 30, 4, 3, 2]
-        assert ncoos == [1, 3]
+        assert ndims == (5, 30, 4, 3, 2)
+        assert ncoos == (1, 3)
 
     def test_single(self):
         dims = [5, 3, 2, 5, 4, 3, 2]
         coos = 3
         ndims, ncoos = dim_compress(dims, coos)
-        assert ndims == [30, 5, 24]
-        assert ncoos == [1]
+        assert ndims == (30, 5, 24)
+        assert ncoos == (1,)
+
+    @mark.parametrize("dims, inds, ndims, ninds",
+                      [([2, 2], [0, 1], (4,), (0,)),
+                       ([4], [0], (4,), (0,))])
+    def test_tiny(self, dims, inds, ndims, ninds):
+        dims, inds = dim_compress(dims, inds)
+        assert dims == ndims
+        assert inds == ninds
 
 
 class TestEye:

@@ -4,7 +4,7 @@ import numpy as np
 from numpy.testing import assert_allclose
 from .. import (qu, eye, rand_product_state, bell_state, up, eigvecs,
                 rand_mix, rand_rho, rand_ket, sig, down, overlap,
-                singlet_pairs, dop, singlet, kron, ham_heis)
+                singlet_pairs, dop, singlet, kron, ham_heis, ptr)
 from ..calc import (fidelity, quantum_discord, one_way_classical_information,
                     mutual_information, partial_transpose, entropy,
                     correlation, pauli_correlations, expm, sqrtm, purify,
@@ -138,6 +138,14 @@ class TestEntropy:
     def test_1darray(self, l, e):
         assert_allclose(entropy(np.asarray(l)), e)
 
+    @mark.parametrize("m", [1, 2, 3])
+    def test_rank(self, m):
+        k = rand_ket(2**4)
+        pab = ptr(k, [2, 2, 2, 2], range(m))
+        ef = entropy(pab)
+        er = entropy(pab, rank=2**m)
+        assert_allclose(ef, er)
+
 
 class TestMutualInformation:
     def test_mutual_information_pure(self):
@@ -155,13 +163,19 @@ class TestMutualInformation:
         ixy = mutual_information(a, [2, 2, 2],  2, 1)
         assert_allclose(2.0, ixy, atol=1e-12)
 
-    def test_mixed(self):
-        # TODO ************************************************************** #
-        pass
+    @mark.parametrize('inds', [(0, 1), (1, 2), (0, 2)])
+    def test_mixed_sub(self, inds):
+        a = rand_rho(2**3)
+        ixy = mutual_information(a, (2, 2, 2), *inds)
+        assert (0 <= ixy <= 2.0)
 
-    def test_mixed_subb(self):
-        # TODO ************************************************************** #
-        pass
+    @mark.parametrize('inds', [(0, 1), (1, 2), (0, 2)])
+    def test_auto_rank(self, inds):
+        a = rand_ket(2**3)
+        ixy = mutual_information(a, (2, 2, 2), *inds)
+        assert (0 <= ixy <= 2.0)
+        ixya = mutual_information(a, (2, 2, 2), *inds, rank='AUTO')
+        assert_allclose(ixy, ixya)
 
 
 class TestPartialTranspose:
@@ -386,3 +400,12 @@ class TestIsDegenerate:
     def test_known_nondegen(self):
         h = ham_heis(2, bz=0.3)
         assert is_degenerate(h) == 0
+
+    def test_supply_list(self):
+        l = [0, 1, 2, 2.0, 3]
+        assert is_degenerate(l)
+
+    def test_tol(self):
+        l = [0, 1, 1.001, 3, 4, 5, 6, 7, 8, 9]
+        assert not is_degenerate(l)
+        assert is_degenerate(l, tol=1e-2)

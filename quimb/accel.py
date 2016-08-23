@@ -5,8 +5,8 @@ Core accelerated numerical functions
 # TODO: finish idot with rpn
 
 
-from cmath import exp
-from functools import partial
+import cmath
+import functools
 
 import numpy as np
 import scipy.sparse as sp
@@ -15,7 +15,7 @@ from numba import jit, vectorize
 from numexpr import evaluate
 
 
-accel = partial(jit, nopython=True, cache=True)
+accel = functools.partial(jit, nopython=True, cache=True)
 
 
 # --------------------------------------------------------------------------- #
@@ -213,7 +213,7 @@ def outer(a, b):
 @vectorize(nopython=True)
 def explt(l, t):  # pragma: no cover
     """ Complex exponenital as used in solution to schrodinger equation. """
-    return exp((-1.0j * t) * l)
+    return cmath.exp((-1.0j * t) * l)
 
 
 # --------------------------------------------------------------------------- #
