@@ -1,7 +1,9 @@
 # QUIMB
 
 [![Build Status](https://travis-ci.org/jcmgray/quimb.svg?branch=master)](https://travis-ci.org/jcmgray/quimb)
-[![codecov](https://codecov.io/gh/jcmgray/quimb/branch/master/graph/badge.svg)](https://codecov.io/gh/jcmgray/quimb)
+[![Test Coverage](https://codeclimate.com/github/jcmgray/quimb/badges/coverage.svg)](https://codeclimate.com/github/jcmgray/quimb/coverage)
+[![Code Climate](https://codeclimate.com/github/jcmgray/quimb/badges/gpa.svg)](https://codeclimate.com/github/jcmgray/quimb)
+[![Issue Count](https://codeclimate.com/github/jcmgray/quimb/badges/issue_count.svg)](https://codeclimate.com/github/jcmgray/quimb)
 
  * Python library for quantum information and many-body calcuations.
  * Uses `numpy` and `scipy.sparse` matrices as quantum objects.
