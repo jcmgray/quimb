@@ -22,29 +22,29 @@ accel = functools.partial(jit, nopython=True, cache=True)
 # Decorators for standardizing output                                         #
 # --------------------------------------------------------------------------- #
 
-def matrixify(foo):
+def matrixify(f):
     """ To decorate functions returning ndarrays. """
-    def matrixified_foo(*args, **kwargs):
-        return np.asmatrix(foo(*args, **kwargs))
-    return matrixified_foo
+    def matrixified_f(*args, **kwargs):
+        return np.asmatrix(f(*args, **kwargs))
+    return matrixified_f
 
 
-def realify(foo, imag_tol=1.0e-14):
+def realify(f, imag_tol=1.0e-14):
     """ To decorate functions that should return float for small complex. """
-    def realified_foo(*args, **kwargs):
-        x = foo(*args, **kwargs)
+    def realified_f(*args, **kwargs):
+        x = f(*args, **kwargs)
         if isinstance(x, complex):
             return x.real if abs(x.imag) < abs(x.real) * imag_tol else x
         return x
-    return realified_foo
+    return realified_f
 
 
-def zeroify(foo, tol=1e-14):
+def zeroify(f, tol=1e-14):
     """ To decorate functions that compute close to zero answers. """
-    def zeroified_foo(*args, **kwargs):
-        x = foo(*args, **kwargs)
+    def zeroified_f(*args, **kwargs):
+        x = f(*args, **kwargs)
         return 0.0 if abs(x) < tol else x
-    return zeroified_foo
+    return zeroified_f
 
 
 # --------------------------------------------------------------------------- #
@@ -255,12 +255,12 @@ def kron_sparse(a, b, stype=None):
 
 
 def kron_dispatch(a, b, stype=None):
-        if issparse(a) or issparse(b):
-            return kron_sparse(a, b, stype=stype)
-        elif a.size * b.size > 23000:  # pragma: no cover
-            return kron_dense_big(a, b)
-        else:
-            return kron_dense(a, b)
+    if issparse(a) or issparse(b):
+        return kron_sparse(a, b, stype=stype)
+    elif a.size * b.size > 23000:  # pragma: no cover
+        return kron_dense_big(a, b)
+    else:
+        return kron_dense(a, b)
 
 
 def kron(*ops, stype=None, coo_build=False):
@@ -307,6 +307,6 @@ sp.csc_matrix.__and__ = kron_dispatch
 sp.coo_matrix.__and__ = kron_dispatch
 
 
-def kronpow(a, pow, stype=None, coo_build=False):
-    """ Returns `a` tensored with itself `pow` times """
-    return kron(*(a for _ in range(pow)), stype=stype, coo_build=coo_build)
+def kronpow(a, p, stype=None, coo_build=False):
+    """ Returns `a` tensored with itself `p` times """
+    return kron(*(a for _ in range(p)), stype=stype, coo_build=coo_build)
