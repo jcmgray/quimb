@@ -1,7 +1,9 @@
 # QUIMB
 
 [![Build Status](https://travis-ci.org/jcmgray/quimb.svg?branch=master)](https://travis-ci.org/jcmgray/quimb)
-[![codecov](https://codecov.io/gh/jcmgray/quimb/branch/master/graph/badge.svg)](https://codecov.io/gh/jcmgray/quimb)
+[![Test Coverage](https://codeclimate.com/github/jcmgray/quimb/badges/coverage.svg)](https://codeclimate.com/github/jcmgray/quimb/coverage)
+[![Code Climate](https://codeclimate.com/github/jcmgray/quimb/badges/gpa.svg)](https://codeclimate.com/github/jcmgray/quimb)
+[![Issue Count](https://codeclimate.com/github/jcmgray/quimb/badges/issue_count.svg)](https://codeclimate.com/github/jcmgray/quimb)
 
  * Python library for quantum information and many-body calcuations.
  * Uses `numpy` and `scipy.sparse` matrices as quantum objects.
@@ -12,20 +14,20 @@
 
 ## Installation
 `quimb` requires python 3.5+, `numpy`, `scipy`, `numba` and `numexpr`, which are obtained most easily using `conda` (http://conda.pydata.org/miniconda.html):
+```bash
+$ conda install numpy scipy numba numexpr
 ```
-conda install numpy scipy numba numexpr
-```
-The optional advanced solvers require `slepc4py` (https://bitbucket.org/slepc/slepc4py). 
+The optional advanced solvers require `slepc4py` (https://bitbucket.org/slepc/slepc4py). Instructions for its installation can be inferred from the `quimb/deps/travis-install-slepc4py.sh` script.
 
 `quimb` can then be installed directly from github:
-```
-pip install git+https://github.com/jcmgray/quimb.git
+```bash
+$ pip install git+https://github.com/jcmgray/quimb.git
 ```
 or via a local editable repo:
-```
-git clone https://github.com/jcmgray/quimb.git
-cd quimb
-pip install -e .
+```bash
+$ git clone https://github.com/jcmgray/quimb.git
+$ cd quimb
+$ pip install -e .
 ```
 
 ## Example Usage

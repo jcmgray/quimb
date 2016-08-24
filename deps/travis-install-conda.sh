@@ -13,7 +13,7 @@ if [ ! -d "$HOME/conda/bin" ]; then
   conda info -a
   conda create -q -n test-environment python=$TRAVIS_PYTHON_VERSION numpy scipy numba numexpr coverage pytest pytest-cov
   source activate test-environment
-  pip install coveralls
+  pip install coveralls codeclimate-test-reporter
 else
   export PATH="$HOME/conda/bin:$PATH"
   hash -r
@@ -21,5 +21,5 @@ else
   conda update -q conda
   source activate test-environment
   conda update -q --all
-  pip install -U coveralls
+  pip install -U coveralls codeclimate-test-reporter
 fi
