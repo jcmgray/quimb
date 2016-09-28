@@ -15,28 +15,30 @@ from numba import jit, vectorize
 from numexpr import evaluate
 
 
-accel = functools.partial(jit, nopython=True, cache=True)
+accel = functools.partial(jit, nopython=True, cache=False)
 
 
 # --------------------------------------------------------------------------- #
 # Decorators for standardizing output                                         #
 # --------------------------------------------------------------------------- #
 
-def matrixify(f):
+def matrixify(fn):
     """ To decorate functions returning ndarrays. """
-    def matrixified_f(*args, **kwargs):
-        return np.asmatrix(f(*args, **kwargs))
-    return matrixified_f
+    def matrixified_fn(*args, **kwargs):
+        return np.asmatrix(fn(*args, **kwargs))
+    return matrixified_fn
 
 
-def realify(f, imag_tol=1.0e-14):
+def realify(fn, imag_tol=1.0e-14):
     """ To decorate functions that should return float for small complex. """
-    def realified_f(*args, **kwargs):
-        x = f(*args, **kwargs)
-        if isinstance(x, complex):
+    # XXX: ensure works for numpy scalars
+    def realified_fn(*args, **kwargs):
+        x = fn(*args, **kwargs)
+        try:
             return x.real if abs(x.imag) < abs(x.real) * imag_tol else x
-        return x
-    return realified_f
+        except AttributeError:
+            return x
+    return realified_fn
 
 
 def zeroify(f, tol=1e-14):
