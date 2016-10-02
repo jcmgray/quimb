@@ -275,7 +275,7 @@ def _reshape_for_kron(a, b):  # pragma: no cover
 
 
 @matrixify
-@accel
+@jit(nopython=True)
 def _kron_dense(a, b):  # pragma: no cover
     a, b, mp, nq = _reshape_for_kron(a, b)
     return (a * b).reshape((mp, nq))
