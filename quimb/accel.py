@@ -7,6 +7,8 @@ Core accelerated numerical functions
 
 import cmath
 import functools
+import psutil
+import threading
 
 import numpy as np
 import scipy.sparse as sp
@@ -14,8 +16,8 @@ from scipy.sparse import issparse
 from numba import jit, vectorize
 from numexpr import evaluate
 
-
-accel = functools.partial(jit, nopython=True, cache=False)
+_NUM_THREADS = psutil.cpu_count()
+accel = functools.partial(jit, nopython=True, cache=True)
 
 
 # --------------------------------------------------------------------------- #
@@ -81,7 +83,7 @@ def isherm(qob):
 
 @matrixify
 @accel
-def mul_dense(x, y):  # pragma: no cover
+def _mul_dense(x, y):  # pragma: no cover
     """ Accelerated element-wise multiplication of two matrices """
     return x * y
 
@@ -93,25 +95,66 @@ def mul(x, y):
         return x.multiply(y)
     elif issparse(y):
         return y.multiply(x)
-    return mul_dense(x, y)
+    return _mul_dense(x, y)
 
 
 @matrixify
 @accel
-def dot_dense(a, b):  # pragma: no cover
-    """ Accelerated dot_dense product of matrices  """
+def _dot_dense(a, b):  # pragma: no cover
+    """ Accelerated dense dot product of matrices  """
     return a @ b
 
 
-def dot_sparse(a, b):
+@accel(nogil=True)  # pragma: no cover
+def _dot_csr_matvec(data, indptr, indices, vec, out, k1, k2):
+    """Sparse csr matrix-vector dot-product, only acting on range(k1, k2).
+    """
+    for i in range(k1, k2):
+        ri = indptr[i]
+        rf = indptr[i + 1]
+        isum = 0.0j
+        for j in range(rf - ri):
+            ri_j = ri + j
+            isum += data[ri_j] * vec[indices[ri_j]]
+        out[i] = isum
+
+
+def _par_dot_csr_matvec(mat, vec, nthreads=_NUM_THREADS):
+    """Parallel sparse csr matrix vector dot product.
+    """
+    sz = mat.shape[0]
+    out = np.empty(sz, dtype=vec.dtype)
+    sz_chnk = (sz // nthreads) + 1
+    slices = tuple((i * sz_chnk, min((i + 1)*sz_chnk, sz))
+                   for i in range(nthreads))
+
+    fn = functools.partial(_dot_csr_matvec,
+                           mat.data,
+                           mat.indptr,
+                           mat.indices,
+                           vec.A.reshape(-1), out)
+
+    thrds = tuple(threading.Thread(target=fn, args=kslice)
+                  for kslice in slices)
+
+    for t in thrds:
+        t.start()
+    for t in thrds:
+        t.join()
+    return out.reshape(-1, 1)
+
+
+def _dot_sparse(a, b):
+    if isket(b) and a.nnz > 500000:
+        return _par_dot_csr_matvec(a, b)
     return a @ b
 
 
 def dot(a, b):
     """ Matrix multiplication, dispatched to dense method. """
     if issparse(a) or issparse(b):
-        return dot_sparse(a, b)
-    return dot_dense(a, b)
+        return _dot_sparse(a, b)
+    return _dot_dense(a, b)
 
 
 @realify
@@ -130,7 +173,7 @@ def rdot(a, b):  # pragma: no cover
 
 
 @accel
-def reshape_for_ldmul(vec):  # pragma: no cover
+def _reshape_for_ldmul(vec):  # pragma: no cover
     """ Reshape a vector to be broadcast multiplied against a matrix in a way
     that replicates left diagonal matrix multiplication. """
     d = vec.size
@@ -138,12 +181,12 @@ def reshape_for_ldmul(vec):  # pragma: no cover
 
 
 @matrixify
-def l_diag_dot_dense(vec, mat):
-    d, vec = reshape_for_ldmul(vec)
-    return evaluate("vec * mat") if d > 500 else mul_dense(vec, mat)
+def _l_diag_dot_dense(vec, mat):
+    d, vec = _reshape_for_ldmul(vec)
+    return evaluate("vec * mat") if d > 500 else _mul_dense(vec, mat)
 
 
-def l_diag_dot_sparse(vec, mat):
+def _l_diag_dot_sparse(vec, mat):
     return sp.diags(vec) @ mat
 
 
@@ -160,12 +203,12 @@ def ldmul(vec, mat):
     -------
         mat: np.matrix """
     if issparse(mat):
-        return l_diag_dot_sparse(vec, mat)
-    return l_diag_dot_dense(vec, mat)
+        return _l_diag_dot_sparse(vec, mat)
+    return _l_diag_dot_dense(vec, mat)
 
 
 @accel
-def reshape_for_rdmul(vec):  # pragma: no cover
+def _reshape_for_rdmul(vec):  # pragma: no cover
     """ Reshape a vector to be broadcast multiplied against a matrix in a way
     that replicates right diagonal matrix multiplication. """
     d = vec.size
@@ -173,12 +216,12 @@ def reshape_for_rdmul(vec):  # pragma: no cover
 
 
 @matrixify
-def r_diag_dot_dense(mat, vec):
-    d, vec = reshape_for_rdmul(vec)
-    return evaluate("mat * vec") if d > 500 else mul_dense(mat, vec)
+def _r_diag_dot_dense(mat, vec):
+    d, vec = _reshape_for_rdmul(vec)
+    return evaluate("mat * vec") if d > 500 else _mul_dense(mat, vec)
 
 
-def r_diag_dot_sparse(mat, vec):
+def _r_diag_dot_sparse(mat, vec):
     return mat @ sp.diags(vec)
 
 
@@ -195,12 +238,12 @@ def rdmul(mat, vec):
     -------
         mat: np.matrix """
     if issparse(mat):
-        return r_diag_dot_sparse(mat, vec)
-    return r_diag_dot_dense(mat, vec)
+        return _r_diag_dot_sparse(mat, vec)
+    return _r_diag_dot_dense(mat, vec)
 
 
 @accel
-def reshape_for_outer(a, b):  # pragma: no cover
+def _reshape_for_outer(a, b):  # pragma: no cover
     """ Reshape two vectors for an outer product """
     d = a.size
     return d, a.reshape(d, 1), b.reshape(1, d)
@@ -208,8 +251,8 @@ def reshape_for_outer(a, b):  # pragma: no cover
 
 def outer(a, b):
     """ Outer product between two vectors (no conjugation). """
-    d, a, b = reshape_for_outer(a, b)
-    return mul_dense(a, b) if d < 500 else np.asmatrix(evaluate('a * b'))
+    d, a, b = _reshape_for_outer(a, b)
+    return _mul_dense(a, b) if d < 500 else np.asmatrix(evaluate('a * b'))
 
 
 @vectorize(nopython=True)
@@ -223,7 +266,7 @@ def explt(l, t):  # pragma: no cover
 # --------------------------------------------------------------------------- #
 
 @accel
-def reshape_for_kron(a, b):  # pragma: no cover
+def _reshape_for_kron(a, b):  # pragma: no cover
     m, n = a.shape
     p, q = b.shape
     a = a.reshape((m, 1, n, 1))
@@ -233,18 +276,18 @@ def reshape_for_kron(a, b):  # pragma: no cover
 
 @matrixify
 @accel
-def kron_dense(a, b):  # pragma: no cover
-    a, b, mp, nq = reshape_for_kron(a, b)
+def _kron_dense(a, b):  # pragma: no cover
+    a, b, mp, nq = _reshape_for_kron(a, b)
     return (a * b).reshape((mp, nq))
 
 
 @matrixify
-def kron_dense_big(a, b):
-    a, b, mp, nq = reshape_for_kron(a, b)
+def _kron_dense_big(a, b):
+    a, b, mp, nq = _reshape_for_kron(a, b)
     return evaluate('a * b').reshape((mp, nq))
 
 
-def kron_sparse(a, b, stype=None):
+def _kron_sparse(a, b, stype=None):
     """  Sparse tensor product, output format can be specified or will be
     automatically determined. """
     if stype is None:
@@ -256,13 +299,13 @@ def kron_sparse(a, b, stype=None):
     return sp.kron(a, b, format=stype)
 
 
-def kron_dispatch(a, b, stype=None):
+def _kron_dispatch(a, b, stype=None):
     if issparse(a) or issparse(b):
-        return kron_sparse(a, b, stype=stype)
+        return _kron_sparse(a, b, stype=stype)
     elif a.size * b.size > 23000:  # pragma: no cover
-        return kron_dense_big(a, b)
+        return _kron_dense_big(a, b)
     else:
-        return kron_dense(a, b)
+        return _kron_dense(a, b)
 
 
 def kron(*ops, stype=None, coo_build=False):
@@ -290,7 +333,7 @@ def kron(*ops, stype=None, coo_build=False):
         if _l == 1:
             return ops[0]
         a, b = ops[0], _inner_kron(ops[1:], _l-1)
-        return kron_dispatch(a, b, **opts)
+        return _kron_dispatch(a, b, **opts)
 
     x = _inner_kron(ops, len(ops))
 
@@ -302,11 +345,11 @@ def kron(*ops, stype=None, coo_build=False):
 
 
 # Monkey-patch unused & symbol to tensor product
-np.matrix.__and__ = kron_dispatch
-sp.csr_matrix.__and__ = kron_dispatch
-sp.bsr_matrix.__and__ = kron_dispatch
-sp.csc_matrix.__and__ = kron_dispatch
-sp.coo_matrix.__and__ = kron_dispatch
+np.matrix.__and__ = _kron_dispatch
+sp.csr_matrix.__and__ = _kron_dispatch
+sp.bsr_matrix.__and__ = _kron_dispatch
+sp.csc_matrix.__and__ = _kron_dispatch
+sp.coo_matrix.__and__ = _kron_dispatch
 
 
 def kronpow(a, p, stype=None, coo_build=False):

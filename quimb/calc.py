@@ -18,7 +18,7 @@ import scipy.linalg as sla
 import scipy.sparse.linalg as spla
 from scipy.optimize import minimize
 
-from .accel import (dot_dense, ldmul, issparse, isop, zeroify, realify)
+from .accel import (_dot_dense, ldmul, issparse, isop, zeroify, realify)
 from .core import (qu, kron, eye, eyepad, tr, ptr, infer_size, overlap, dop)
 from .solve import (eigvals, eigsys, norm, seigvals)
 from .gen import (sig, basis_vec, bell_state, bloch_state)
@@ -32,7 +32,7 @@ def expm(a, herm=True):
         return np.asmatrix(spla.expm(a))
     else:
         l, v = eigsys(a)
-        return dot_dense(v, ldmul(np.exp(l), v.H))
+        return _dot_dense(v, ldmul(np.exp(l), v.H))
 
 
 def sqrtm(a, herm=True):
@@ -43,7 +43,7 @@ def sqrtm(a, herm=True):
         return np.asmatrix(sla.sqrtm(a))
     else:
         l, v = eigsys(a)
-        return dot_dense(v, ldmul(np.sqrt(l.astype(complex)), v.H))
+        return _dot_dense(v, ldmul(np.sqrt(l.astype(complex)), v.H))
 
 
 def fidelity(rho, sigma):

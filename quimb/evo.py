@@ -9,7 +9,7 @@ quantum states according to schrodingers' equation, and related functions."""
 import numpy as np
 from scipy.integrate import complex_ode
 from .accel import isop, ldmul, rdmul, explt
-from .accel import issparse, dot_dense
+from .accel import issparse, _dot_dense
 from .core import qu, eye
 from .solve import eigsys, norm
 
@@ -31,7 +31,7 @@ def schrodinger_eq_ket(ham, all_dense=False):
         psi_dot(t, y): function to calculate psi_dot(t) at psi(t). """
     if all_dense:
         def psi_dot(t, y):
-            return -1.0j * dot_dense(ham, y)
+            return -1.0j * _dot_dense(ham, y)
     else:
         def psi_dot(t, y):
             return -1.0j * (ham @ y)
@@ -56,7 +56,7 @@ def schrodinger_eq_dop(ham, all_dense=False):
     d = ham.shape[0]
     if all_dense:
         def rho_dot(t, y):
-            hrho = dot_dense(ham, y.reshape(d, d))
+            hrho = _dot_dense(ham, y.reshape(d, d))
             return -1.0j * (hrho - hrho.T.conj()).reshape(-1)
     else:
         def rho_dot(t, y):
@@ -107,12 +107,12 @@ def lindblad_eq(ham, ls, gamma, all_dense=False):
     if all_dense:
         def gen_l_terms(rho):
             for l, ll in zip(ls, lls):
-                yield (dot_dense(l, dot_dense(rho, l.H)) -
-                       0.5 * (dot_dense(rho, ll) + dot_dense(ll, rho)))
+                yield (_dot_dense(l, _dot_dense(rho, l.H)) -
+                       0.5 * (_dot_dense(rho, ll) + _dot_dense(ll, rho)))
 
         def rho_dot(t, y):
             rho = y.reshape(d, d)
-            rho_d = dot_dense(ham, rho)
+            rho_d = _dot_dense(ham, rho)
             rho_d -= rho_d.T.conj()
             rho_d *= -1.0j
             rho_d += gamma * sum(gen_l_terms(rho))
@@ -248,7 +248,7 @@ class QuEvo(object):
         wavefunction to time `t`. """
         self._t = t
         lt = explt(self.evals, t - self.t0)
-        self._pt = dot_dense(self.evecs, ldmul(lt, self.pe0))
+        self._pt = _dot_dense(self.evecs, ldmul(lt, self.pe0))
 
     def _update_to_solved_dop(self, t):
         """ Update simulation consisting of a solved hamiltonian and a
@@ -256,7 +256,7 @@ class QuEvo(object):
         self._t = t
         lt = explt(self.evals, t - self.t0)
         lvpvl = rdmul(ldmul(lt, self.pe0), lt.conj())
-        self._pt = dot_dense(self.evecs, dot_dense(lvpvl, self.evecs.H))
+        self._pt = _dot_dense(self.evecs, _dot_dense(lvpvl, self.evecs.H))
 
     def _update_to_integrate(self, t):
         """ Update simulation consisting of unsolved hamiltonian. """

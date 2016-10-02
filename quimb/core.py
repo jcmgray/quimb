@@ -12,7 +12,7 @@ from numpy.matlib import zeros
 import scipy.sparse as sp
 from numba import jit, complex128, int64
 
-from .accel import (matrixify, realify, issparse, isop, vdot, dot_dense,
+from .accel import (matrixify, realify, issparse, isop, vdot, _dot_dense,
                     kron, kronpow)
 
 _sparse_constructors = {"csr": sp.csr_matrix,
@@ -535,7 +535,7 @@ def _partial_trace_clever(p, dims, keep):
             .transpose(perm) \
             .reshape((sz_keep, sz_lose))
         p = np.asmatrix(p)
-        return dot_dense(p, p.H)
+        return _dot_dense(p, p.H)
     else:
         p = np.asarray(p).reshape((*dims, *dims)) \
             .transpose((*perm, *(perm + n))) \
@@ -621,15 +621,19 @@ np.matrix.ptr = _partial_trace_clever
 sp.csr_matrix.ptr = _partial_trace_simple
 
 
+_OVERLAP_METHODS = {
+    (0, 0, 0): lambda a, b: abs(vdot(a, b))**2,
+    (0, 0, 1): lambda a, b: abs((a.H @ b)[0, 0])**2,
+    (0, 1, 0): lambda a, b: vdot(a, _dot_dense(b, a)),
+    (1, 0, 0): lambda a, b: vdot(b, _dot_dense(a, b)),
+    (0, 1, 1): realify(lambda a, b: (a.H @ b @ a)[0, 0]),
+    (1, 0, 1): realify(lambda a, b: (b.H @ a @ b)[0, 0]),
+    (1, 1, 0): lambda a, b: _trace_dense(_dot_dense(a, b)),
+    (1, 1, 1): lambda a, b: _trace_sparse(a @ b),
+}
+
+
 def overlap(a, b):
     """ Overlap between a and b, i.e. for vectors it will be the
     absolute overlap squared |<a|b><b|a>|, rather than <a|b>. """
-    method = {(0, 0, 0): lambda: abs(vdot(a, b))**2,
-              (0, 0, 1): lambda: abs((a.H @ b)[0, 0])**2,
-              (0, 1, 0): lambda: vdot(a, dot_dense(b, a)),
-              (1, 0, 0): lambda: vdot(b, dot_dense(a, b)),
-              (0, 1, 1): realify(lambda: (a.H @ b @ a)[0, 0]),
-              (1, 0, 1): realify(lambda: (b.H @ a @ b)[0, 0]),
-              (1, 1, 0): lambda: _trace_dense(dot_dense(a, b)),
-              (1, 1, 1): lambda: _trace_sparse(a @ b)}
-    return method[isop(a), isop(b), issparse(a) or issparse(b)]()
+    return _OVERLAP_METHODS[isop(a), isop(b), issparse(a) or issparse(b)](a, b)

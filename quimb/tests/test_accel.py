@@ -3,12 +3,44 @@ import numpy as np
 from numpy.testing import assert_allclose
 import scipy.sparse as sp
 from .. import rand_matrix, rand_ket
-from ..accel import (matrixify, realify, issparse, isket, isop, isbra, isherm,
-                     mul, dot, vdot, rdot, ldmul, rdmul, outer, kron_dense,
-                     kron_dense_big, kron_sparse, kron, kronpow, explt)
+from ..accel import (
+    matrixify,
+    realify,
+    issparse,
+    isket,
+    isop,
+    isbra,
+    isherm,
+    mul,
+    dot,
+    _dot_sparse,
+    _par_dot_csr_matvec,
+    vdot,
+    rdot,
+    ldmul,
+    rdmul,
+    outer,
+    _kron_dense,
+    _kron_dense_big,
+    _kron_sparse,
+    kron,
+    kronpow,
+    explt,
+)
 
 
-sparse_formats = ("csr", "bsr", "csc", "coo")
+_SPARSE_FORMATS = ("csr", "bsr", "csc", "coo")
+_TEST_SZ = 4
+
+
+@fixture
+def sparse_mat():
+    return rand_matrix(_TEST_SZ, sparse=True, density=0.5)
+
+
+@fixture
+def ket():
+    return rand_ket(_TEST_SZ)
 
 
 @fixture
@@ -215,6 +247,13 @@ class TestDot:
         assert isket(cq)
         assert_allclose(cq.A, cn)
 
+    def test_par_dot_csr_matvec(self, sparse_mat, ket):
+        x = _par_dot_csr_matvec(sparse_mat, ket, 2)
+        y = _dot_sparse(sparse_mat, ket)
+        assert x.dtype == complex
+        assert x.shape == (_TEST_SZ, 1)
+        assert_allclose(x, y)
+
 
 class TestAccelVdot:
     def test_accel_vdot(self, test_objs):
@@ -322,7 +361,7 @@ class TestExplt:
 # --------------------------------------------------------------------------- #
 
 class TestKron:
-    @mark.parametrize("func", [kron_dense, kron_dense_big])
+    @mark.parametrize("func", [_kron_dense, _kron_dense_big])
     def test_kron_dense(self, d1, d2, func):
         x = func(d1, d2)
         assert d1.shape == (3, 3)
@@ -345,44 +384,44 @@ class TestKron:
 
 class TestKronSparseFormats:
     def test_sparse_sparse_auto(self, s1):
-        c = kron_sparse(s1, s1)
+        c = _kron_sparse(s1, s1)
         assert c.format == 'csr'
 
     def test_sparse_dense_auto(self, s1, d1):
-        c = kron_sparse(s1, d1)
+        c = _kron_sparse(s1, d1)
         assert c.format == 'bsr'
 
     def test_dense_sparse_auto(self, s1, d1):
-        c = kron_sparse(d1, s1)
+        c = _kron_sparse(d1, s1)
         assert c.format == 'csr'
 
     def test_sparse_sparsennz(self, s1, s1nnz):
-        c = kron_sparse(s1, s1nnz)
+        c = _kron_sparse(s1, s1nnz)
         assert c.format == 'csr'
 
-    @mark.parametrize("stype", sparse_formats)
+    @mark.parametrize("stype", _SPARSE_FORMATS)
     def test_sparse_sparse_to_sformat(self, s1, stype):
-        c = kron_sparse(s1, s1, stype=stype)
+        c = _kron_sparse(s1, s1, stype=stype)
         assert c.format == stype
 
-    @mark.parametrize("stype", (None,) + sparse_formats)
+    @mark.parametrize("stype", (None,) + _SPARSE_FORMATS)
     def test_many_args_dense_last(self, s1, s2, d1, stype):
         c = kron(s1, s2, d1, stype=stype)
         assert c.format == (stype if stype is not None else "bsr")
 
-    @mark.parametrize("stype", (None,) + sparse_formats)
+    @mark.parametrize("stype", (None,) + _SPARSE_FORMATS)
     def test_many_args_dense_not_last(self, s1, s2, d1, stype):
         c = kron(d1, s1, s2, stype=stype)
         assert c.format == (stype if stype is not None else "csr")
         c = kron(s1, d1, s2, stype=stype)
         assert c.format == (stype if stype is not None else "csr")
 
-    @mark.parametrize("stype", (None,) + sparse_formats)
+    @mark.parametrize("stype", (None,) + _SPARSE_FORMATS)
     def test_many_args_dense_last_coo_construct(self, s1, s2, d1, stype):
         c = kron(s1, s2, d1, stype=stype, coo_build=True)
         assert c.format == (stype if stype is not None else "csr")
 
-    @mark.parametrize("stype", (None,) + sparse_formats)
+    @mark.parametrize("stype", (None,) + _SPARSE_FORMATS)
     def test_many_args_dense_not_last_coo_construct(self, s1, s2, d1, stype):
         c = kron(s1, d1, s2, stype=stype, coo_build=True)
         assert c.format == (stype if stype is not None else "csr")
@@ -401,15 +440,15 @@ class TestKronPow:
         y = kronpow(s1, 3)
         assert_allclose(x.A, y.A)
 
-    @mark.parametrize("stype", sparse_formats)
+    @mark.parametrize("stype", _SPARSE_FORMATS)
     def test_sparse_formats(self, stype, s1):
         x = s1 & s1 & s1
         y = kronpow(s1, 3, stype=stype)
         assert y.format == stype
         assert_allclose(x.A, y.A)
 
-    @mark.parametrize("sformat_in", sparse_formats)
-    @mark.parametrize("stype", (None,) + sparse_formats)
+    @mark.parametrize("sformat_in", _SPARSE_FORMATS)
+    @mark.parametrize("stype", (None,) + _SPARSE_FORMATS)
     def test_sparse_formats_coo_construct(self, sformat_in, stype, s1):
         s1 = s1.asformat(sformat_in)
         x = s1 & s1 & s1
