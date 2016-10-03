@@ -8,12 +8,12 @@ import itertools
 import functools
 
 import numpy as np
+from numba import jit
 from numpy.matlib import zeros
 import scipy.sparse as sp
-from numba import jit, complex128, int64
 
-from .accel import (matrixify, realify, issparse, isop, vdot, _dot_dense,
-                    kron, kronpow)
+from .accel import (accel, matrixify, realify, issparse, isop, vdot,
+                    _dot_dense, kron, kronpow)
 
 _sparse_constructors = {"csr": sp.csr_matrix,
                         "bsr": sp.bsr_matrix,
@@ -136,10 +136,10 @@ def infer_size(p, base=2):
 
 
 @realify
-@jit(complex128(complex128[:, :]), nopython=True, cache=True)
+@accel
 def _trace_dense(op):  # pragma: no cover
     """ Trace of matrix. """
-    x = 0.0
+    x = 0.0j
     for i in range(op.shape[0]):
         x += op[i, i]
     return x
@@ -162,7 +162,7 @@ sp.csr_matrix.tr = _trace_sparse
 
 
 @matrixify
-@jit(complex128[:, :](int64), nopython=True, cache=True)
+@accel
 def _identity_dense(d):  # pragma: no cover
     """ Returns a dense, complex identity of order d. """
     x = np.zeros((d, d), dtype=np.complex128)
@@ -508,40 +508,69 @@ def permute(a, dims, perm):
     return _permute_dense(a, dims, perm)
 
 
-def _partial_trace_clever(p, dims, keep):
-    # TODO: compress coords?
-    # TODO: user tensordot for vec
-    # TODO: matrixify
-    """ Perform partial trace.
+def _ind_complement(inds, n):
+    """Return the indices below `n` not contained in `inds`.
+    """
+    return tuple(i for i in range(n) if i not in inds)
 
+
+def itrace(a, axes=(0, 1)):
+    """General tensor trace, i.e. multiple contractions.
+
+    Parameters
+    ----------
+        a: np.ndarray
+            tensor to trace
+        axes: (2,) int_like or (2,) array_like
+            * (2,) int_like
+              Perform trace on the two indices listed.
+            * (2,) array_like
+              Trace out first sequence indices with second sequence indices
+    """
+    # Single index pair to trace out
+    if isinstance(axes[0], int):
+        return np.trace(a, axis1=axes[0], axis2=axes[1])
+    elif len(axes[0]) == 1:
+        return np.trace(a, axis1=axes[0][0], axis2=axes[1][0])
+
+    # Multiple index pairs to trace out
+    gone = set()
+    for axis1, axis2 in zip(*axes):
+        # Modify indices to adjust for traced out dimensions
+        mod1 = sum(x < axis1 for x in gone)
+        mod2 = sum(x < axis2 for x in gone)
+        gone |= {axis1, axis2}
+        a = np.trace(a, axis1=axis1-mod1, axis2=axis2-mod2)
+    return a
+
+
+@matrixify
+def _partial_trace_dense(p, dims, keep):
+    """ Perform partial trace.
     Parameters
     ----------
         p: state to perform partial trace on, vector or operator
         dims: list of subsystem dimensions
         keep: index of subsytems to keep
-
     Returns
     -------
         Density matrix of subsytem dimensions dims[keep] """
-    dims, keep = np.array(dims, ndmin=1), np.array(keep, ndmin=1)
-    n = len(dims)
-    lose = np.delete(range(n), keep)
-    sz_keep, sz_lose = np.prod(dims[keep]), np.prod(dims[lose])
-    # Permute dimensions into block of keep and block of lose
-    perm = np.asarray((*keep, *lose))
-    # Apply permutation to state and trace out block of lose
+    if isinstance(keep, int):
+        keep = (keep,)
     if not isop(p):  # p = psi
-        p = np.asarray(p).reshape(dims) \
-            .transpose(perm) \
-            .reshape((sz_keep, sz_lose))
-        p = np.asmatrix(p)
-        return _dot_dense(p, p.H)
+        p = np.asarray(p).reshape(dims)
+        lose = _ind_complement(keep, len(dims))
+        p = np.tensordot(p, p.conj(), (lose, lose))
+        d = int(p.size**0.5)
+        return p.reshape((d, d))
     else:
-        p = np.asarray(p).reshape((*dims, *dims)) \
-            .transpose((*perm, *(perm + n))) \
-            .reshape((sz_keep, sz_lose, sz_keep, sz_lose)) \
-            .trace(axis1=1, axis2=3)
-        return np.asmatrix(p)
+        p = np.asarray(p).reshape((*dims, *dims))
+        total_dims = len(dims)
+        lose = _ind_complement(keep, total_dims)
+        lose2 = tuple(ind + total_dims for ind in lose)
+        p = itrace(p, (lose, lose2))
+    d = int(p.size**0.5)
+    return p.reshape((d, d))
 
 
 def _trace_lose(p, dims, coo_lose):
@@ -614,21 +643,21 @@ def partial_trace(p, dims, coos):
         rhoab: density matrix of remaining subsytems,"""
     if issparse(p):
         return _partial_trace_simple(p, dims, coos)
-    return _partial_trace_clever(p, dims, coos)
+    return _partial_trace_dense(p, dims, coos)
 
 ptr = partial_trace
-np.matrix.ptr = _partial_trace_clever
+np.matrix.ptr = _partial_trace_dense
 sp.csr_matrix.ptr = _partial_trace_simple
 
 
 _OVERLAP_METHODS = {
     (0, 0, 0): lambda a, b: abs(vdot(a, b))**2,
-    (0, 0, 1): lambda a, b: abs((a.H @ b)[0, 0])**2,
     (0, 1, 0): lambda a, b: vdot(a, _dot_dense(b, a)),
     (1, 0, 0): lambda a, b: vdot(b, _dot_dense(a, b)),
+    (1, 1, 0): lambda a, b: _trace_dense(_dot_dense(a, b)),
+    (0, 0, 1): lambda a, b: abs((a.H @ b)[0, 0])**2,
     (0, 1, 1): realify(lambda a, b: (a.H @ b @ a)[0, 0]),
     (1, 0, 1): realify(lambda a, b: (b.H @ a @ b)[0, 0]),
-    (1, 1, 0): lambda a, b: _trace_dense(_dot_dense(a, b)),
     (1, 1, 1): lambda a, b: _trace_sparse(a @ b),
 }
 
