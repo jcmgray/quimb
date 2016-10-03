@@ -145,9 +145,12 @@ def _par_dot_csr_matvec(mat, vec, nthreads=_NUM_THREADS):
 
 
 def _dot_sparse(a, b):
-    if isket(b) and a.nnz > 500000:
+    if (b.ndim == 1 or isket(b)) and a.nnz > 500000:
         return _par_dot_csr_matvec(a, b)
-    return a @ b
+    return a.dot(b)
+
+
+sp.csr_matrix.__matmul__ = _dot_sparse
 
 
 def dot(a, b):
