@@ -81,7 +81,7 @@ _SCIPY_TO_SLEPC_WHICH = {
 
 
 def _init_eigensolver(which='LM', sigma=None, isherm=True,
-                      EPSType="krylovschur", st_opts_dict={}, tol=None,
+                      EPSType="krylovschur", st_opts_dict=None, tol=None,
                       max_it=None):
     """Create an advanced eigensystem solver
 
@@ -94,6 +94,8 @@ def _init_eigensolver(which='LM', sigma=None, isherm=True,
     -------
         SLEPc solver ready to be called.
     """
+    if st_opts_dict is None:
+        st_opts_dict = dict()
     slepc_isherm = {True: SLEPc.EPS.ProblemType.HEP,
                     False: SLEPc.EPS.ProblemType.NHEP}
     eigensolver = SLEPc.EPS().create()
@@ -112,7 +114,7 @@ def _init_eigensolver(which='LM', sigma=None, isherm=True,
 
 def slepc_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
                   isherm=True, ncv=None, sort=True, EPSType="krylovschur",
-                  return_all_conv=False, st_opts_dict={}, tol=None,
+                  return_all_conv=False, st_opts_dict=None, tol=None,
                   max_it=None):
     """Solve a matrix using the advanced eigensystem solver
 
@@ -134,6 +136,8 @@ def slepc_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
         lk: eigenvalues
         vk: corresponding eigenvectors (if return_vecs == True)
     """
+    if st_opts_dict is None:
+        st_opts_dict = dict()
     eps_settings = {
         'which': 'SR' if which is None else which,
         'sigma': sigma,

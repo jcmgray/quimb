@@ -30,10 +30,10 @@ def schrodinger_eq_ket(ham, all_dense=False):
     -------
         psi_dot(t, y): function to calculate psi_dot(t) at psi(t). """
     if all_dense:
-        def psi_dot(t, y):
+        def psi_dot(_, y):
             return -1.0j * _dot_dense(ham, y)
     else:
-        def psi_dot(t, y):
+        def psi_dot(_, y):
             return -1.0j * (ham @ y)
     return psi_dot
 
@@ -55,11 +55,11 @@ def schrodinger_eq_dop(ham, all_dense=False):
             output both in ravelled (1D form). """
     d = ham.shape[0]
     if all_dense:
-        def rho_dot(t, y):
+        def rho_dot(_, y):
             hrho = _dot_dense(ham, y.reshape(d, d))
             return -1.0j * (hrho - hrho.T.conj()).reshape(-1)
     else:
-        def rho_dot(t, y):
+        def rho_dot(_, y):
             hrho = ham @ y.reshape(d, d)
             return -1.0j * (hrho - hrho.T.conj()).reshape(-1)
     return rho_dot
@@ -82,7 +82,7 @@ def schrodinger_eq_dop_vec(ham):
     I = eye(d, sparse=sparse)
     evo_superop = -1.0j * ((ham & I) - (I & ham.T))
 
-    def rho_dot(t, y):
+    def rho_dot(_, y):
         return evo_superop @ y
     return rho_dot
 
@@ -110,7 +110,7 @@ def lindblad_eq(ham, ls, gamma, all_dense=False):
                 yield (_dot_dense(l, _dot_dense(rho, l.H)) -
                        0.5 * (_dot_dense(rho, ll) + _dot_dense(ll, rho)))
 
-        def rho_dot(t, y):
+        def rho_dot(_, y):
             rho = y.reshape(d, d)
             rho_d = _dot_dense(ham, rho)
             rho_d -= rho_d.T.conj()
@@ -122,7 +122,7 @@ def lindblad_eq(ham, ls, gamma, all_dense=False):
             for l, ll in zip(ls, lls):
                 yield (l @ rho @ l.H) - 0.5 * ((rho @ ll) + (ll @ rho))
 
-        def rho_dot(t, y):
+        def rho_dot(_, y):
             rho = y.reshape(d, d)
             rho_d = ham @ rho
             rho_d -= rho_d.T.conj()
@@ -158,7 +158,7 @@ def lindblad_eq_vec(ham, ls, gamma, sparse=False):
             yield ((l & l.conj()) - 0.5*((I & (l.H @ l).T) + ((l.H @ l) & I)))
     evo_superop += gamma * sum(gen_lb_terms())
 
-    def rho_dot(t, y):
+    def rho_dot(_, y):
         return evo_superop @ y
     return rho_dot
 
@@ -181,11 +181,12 @@ def calc_evo_eq(isdop, issparse, isopen=False):
 # --------------------------------------------------------------------------- #
 
 class QuEvo(object):
-    """ A class for evolving quantum systems according to schro equation
-    Note that vector states are converted to kets always. """
+    """A class for evolving quantum systems according to schro equation
+    Note that vector states are converted to kets always.
+    """
 
     def __init__(self, p0, ham, solve=False, t0=0, small_step=False):
-        """ Parameters
+        """Parameters
         ----------
             p0: inital state, either vector or operator
             ham: Governing Hamiltonian, can be tuple (eigvals, eigvecs)
@@ -197,7 +198,8 @@ class QuEvo(object):
         Members
         -------
             t: current time
-            pt: current state """
+            pt: current state
+        """
         super(QuEvo, self).__init__()
 
         self.p0 = qu(p0)
@@ -212,8 +214,9 @@ class QuEvo(object):
             self._start_integrator(ham, small_step)
 
     def _solve_ham(self, ham):
-        """ Solve the supplied hamiltonian and find the initial state in the
-        energy eigenbasis for quick evolution later. """
+        """Solve the supplied hamiltonian and find the initial state in the
+        energy eigenbasis for quick evolution later.
+        """
         try:  # See if already set from tuple
             self.evals, self.evecs = ham
         except ValueError:
@@ -230,7 +233,8 @@ class QuEvo(object):
         self.solved = True
 
     def _start_integrator(self, ham, small_step):
-        """ Initialize a stepping integrator. """
+        """Initialize a stepping integrator.
+        """
         self.sparse_ham = issparse(ham)
         evo_eq = calc_evo_eq(self.isdop, self.sparse_ham)
         self.stepper = complex_ode(evo_eq(ham))
@@ -244,22 +248,25 @@ class QuEvo(object):
     # Methods for updating the simulation ----------------------------------- #
 
     def _update_to_solved_ket(self, t):
-        """ Update simulation consisting of a solved hamiltonian and a
-        wavefunction to time `t`. """
+        """Update simulation consisting of a solved hamiltonian and a
+        wavefunction to time `t`.
+        """
         self._t = t
         lt = explt(self.evals, t - self.t0)
         self._pt = _dot_dense(self.evecs, ldmul(lt, self.pe0))
 
     def _update_to_solved_dop(self, t):
-        """ Update simulation consisting of a solved hamiltonian and a
-        density operator to time `t`. """
+        """Update simulation consisting of a solved hamiltonian and a
+        density operator to time `t`.
+        """
         self._t = t
         lt = explt(self.evals, t - self.t0)
         lvpvl = rdmul(ldmul(lt, self.pe0), lt.conj())
         self._pt = _dot_dense(self.evecs, _dot_dense(lvpvl, self.evecs.H))
 
     def _update_to_integrate(self, t):
-        """ Update simulation consisting of unsolved hamiltonian. """
+        """Update simulation consisting of unsolved hamiltonian.
+        """
         self.stepper.integrate(t)
 
     def at_times(self, ts):
@@ -271,12 +278,14 @@ class QuEvo(object):
 
     @property
     def t(self):
-        """ Current time of simulation. """
+        """Current time of simulation.
+        """
         return (self._t if self.solved else
                 self.stepper.t)
 
     @property
     def pt(self):
-        """ Return the state of the system at the current time (t). """
+        """Return the state of the system at the current time (t).
+        """
         return (self._pt if self.solved else
                 np.asmatrix(self.stepper.y.reshape(self.d, -1)))
