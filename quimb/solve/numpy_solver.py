@@ -18,18 +18,20 @@ def sort_inds(a, method, sigma=None):
     -------
         inds: indices that would sort `a` based on `method`
     """
-    sfunc = {"LM": lambda a: -abs(a),
-             "SM": lambda a: -abs(1/a),
-             "SA": lambda a: a,
-             "SR": lambda a: a.real,
-             "SI": lambda a: a.imag,
-             "LA": lambda a: -a,
-             "LR": lambda a: -a.real,
-             "LI": lambda a: -a.imag,
-             "TM": lambda a: -1/abs(abs(a) - sigma),
-             "TR": lambda a: -1/abs(a.real - sigma),
-             "TI": lambda a: -1/abs(a.imag - sigma)}[method.upper()]
-    return np.argsort(sfunc(a))
+    _SORT_FUNCS = {
+        "LM": lambda a: -abs(a),
+        "SM": lambda a: -abs(1/a),
+        "SA": lambda a: a,
+        "SR": lambda a: a.real,
+        "SI": lambda a: a.imag,
+        "LA": lambda a: -a,
+        "LR": lambda a: -a.real,
+        "LI": lambda a: -a.imag,
+        "TM": lambda a: -1/abs(abs(a) - sigma),
+        "TR": lambda a: -1/abs(a.real - sigma),
+        "TI": lambda a: -1/abs(a.imag - sigma),
+    }
+    return np.argsort(_SORT_FUNCS[method.upper()](a))
 
 
 def numpy_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,

@@ -11,7 +11,7 @@ if [ ! -d "$HOME/conda/bin" ]; then
   conda config --set always_yes yes --set changeps1 no
   conda update -q conda
   conda info -a
-  conda create -q -n test-environment python=$TRAVIS_PYTHON_VERSION numpy scipy numba numexpr coverage pytest pytest-cov
+  conda create -q -n test-environment python=$TRAVIS_PYTHON_VERSION numpy scipy numba numexpr coverage pytest pytest-cov psutil
   source activate test-environment
   pip install coveralls codeclimate-test-reporter
 else

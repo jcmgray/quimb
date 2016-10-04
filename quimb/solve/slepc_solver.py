@@ -9,8 +9,13 @@ Interface to slepc4py for solving advanced eigenvalue problems.
 
 import numpy as np
 import scipy.sparse as sp
+import petsc4py
+import slepc4py
 from petsc4py import PETSc
 from slepc4py import SLEPc
+
+petsc4py.init()
+slepc4py.init()
 
 
 def convert_to_petsc(a, comm=PETSc.COMM_WORLD):

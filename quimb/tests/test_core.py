@@ -12,7 +12,7 @@ from ..gen import (bell_state, rand_rho, rand_matrix, rand_ket, up, plus,
 from ..core import (sparse_matrix, qu, infer_size, _trace_dense,
                     _trace_sparse, trace, tr, nmlz, dim_map, dim_compress,
                     eye, eyepad, perm_pad, permute, _trace_lose, _trace_keep,
-                    partial_trace, chop, overlap)
+                    partial_trace, chop, overlap, itrace)
 
 
 stypes = ("csr", "csc", "bsr", "coo")
@@ -168,6 +168,21 @@ class TestTrace:
         a = qu(inpt, sparse=sparse)
         assert(trace(a) == outpt)
         assert(a.tr.__code__.co_code == func.__code__.co_code)
+
+
+class TestITrace:
+    @mark.parametrize("axes", [(0, 1), ((0,), (1,))])
+    def test_axes_types(self, axes):
+        a = rand_matrix(4)
+        b = itrace(a, axes)
+        assert_allclose(b, np.trace(a))
+
+    def test_complex_dims(self):
+        a = np.random.rand(4, 3, 2, 2, 4, 3)
+        atr = itrace(a, ((0, 1, 2), (4, 5, 3)))
+        btr = np.trace(np.trace(np.trace(a, axis1=1, axis2=5),
+                       axis1=1, axis2=2))
+        assert_allclose(atr, btr)
 
 
 class TestNormalize:
