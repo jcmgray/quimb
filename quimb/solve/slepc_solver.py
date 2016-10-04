@@ -43,56 +43,9 @@ def new_petsc_vec(n, comm=PETSc.COMM_WORLD):
     return PETSc.Vec().createWithArray(a, comm=comm)
 
 
-def init_eigensolver(which='LM', sigma=None, isherm=True,
-                     EPSType="krylovschur", st_opts_dict={}, tol=None,
-                     max_it=None):
-    """
-    Create an advanced eigensystem solver
-
-    Parameters
-    ----------
-        sigma: target eigenvalue
-        isherm: whether problem is hermitian or not
-
-    Returns
-    -------
-        SLEPc solver ready to be called.
-    """
-    slepc_isherm = {
-        True: SLEPc.EPS.ProblemType.HEP,
-        False: SLEPc.EPS.ProblemType.NHEP,
-    }
-    scipy_to_slepc_which = {
-        "LM": SLEPc.EPS.Which.LARGEST_MAGNITUDE,
-        "SM": SLEPc.EPS.Which.SMALLEST_MAGNITUDE,
-        "LR": SLEPc.EPS.Which.LARGEST_REAL,
-        "LA": SLEPc.EPS.Which.LARGEST_REAL,
-        "SR": SLEPc.EPS.Which.SMALLEST_REAL,
-        "SA": SLEPc.EPS.Which.SMALLEST_REAL,
-        "LI": SLEPc.EPS.Which.LARGEST_IMAGINARY,
-        "SI": SLEPc.EPS.Which.SMALLEST_IMAGINARY,
-        "TM": SLEPc.EPS.Which.TARGET_MAGNITUDE,
-        "TR": SLEPc.EPS.Which.TARGET_REAL,
-        "TI": SLEPc.EPS.Which.TARGET_IMAGINARY,
-    }
-    eigensolver = SLEPc.EPS().create()
-    if sigma is not None:
-        which = "TR"
-        eigensolver.setST(init_spectral_inverter(**st_opts_dict))
-        eigensolver.setTarget(sigma)
-    eigensolver.setType(EPSType)
-    eigensolver.setProblemType(slepc_isherm[isherm])
-    eigensolver.setWhichEigenpairs(scipy_to_slepc_which[which.upper()])
-    eigensolver.setConvergenceTest(SLEPc.EPS.Conv.ABS)
-    eigensolver.setTolerances(tol=tol, max_it=max_it)
-    eigensolver.setFromOptions()
-    return eigensolver
-
-
-def init_spectral_inverter(ptype="lu", ppackage="mumps", ktype="preonly",
-                           stype="sinvert"):
-    """
-    Create a slepc spectral transformation object with specified solver.
+def _init_spectral_inverter(ptype="lu", ppackage="mumps", ktype="preonly",
+                            stype="sinvert"):
+    """Create a slepc spectral transformation object with specified solver.
     """
     # Preconditioner and linear solver
     P = PETSc.PC().create()
@@ -112,12 +65,56 @@ def init_spectral_inverter(ptype="lu", ppackage="mumps", ktype="preonly",
     return S
 
 
+_SCIPY_TO_SLEPC_WHICH = {
+    "LM": SLEPc.EPS.Which.LARGEST_MAGNITUDE,
+    "SM": SLEPc.EPS.Which.SMALLEST_MAGNITUDE,
+    "LR": SLEPc.EPS.Which.LARGEST_REAL,
+    "LA": SLEPc.EPS.Which.LARGEST_REAL,
+    "SR": SLEPc.EPS.Which.SMALLEST_REAL,
+    "SA": SLEPc.EPS.Which.SMALLEST_REAL,
+    "LI": SLEPc.EPS.Which.LARGEST_IMAGINARY,
+    "SI": SLEPc.EPS.Which.SMALLEST_IMAGINARY,
+    "TM": SLEPc.EPS.Which.TARGET_MAGNITUDE,
+    "TR": SLEPc.EPS.Which.TARGET_REAL,
+    "TI": SLEPc.EPS.Which.TARGET_IMAGINARY,
+}
+
+
+def _init_eigensolver(which='LM', sigma=None, isherm=True,
+                      EPSType="krylovschur", st_opts_dict={}, tol=None,
+                      max_it=None):
+    """Create an advanced eigensystem solver
+
+    Parameters
+    ----------
+        sigma: target eigenvalue
+        isherm: whether problem is hermitian or not
+
+    Returns
+    -------
+        SLEPc solver ready to be called.
+    """
+    slepc_isherm = {True: SLEPc.EPS.ProblemType.HEP,
+                    False: SLEPc.EPS.ProblemType.NHEP}
+    eigensolver = SLEPc.EPS().create()
+    if sigma is not None:
+        which = "TR"
+        eigensolver.setST(_init_spectral_inverter(**st_opts_dict))
+        eigensolver.setTarget(sigma)
+    eigensolver.setType(EPSType)
+    eigensolver.setProblemType(slepc_isherm[isherm])
+    eigensolver.setWhichEigenpairs(_SCIPY_TO_SLEPC_WHICH[which.upper()])
+    eigensolver.setConvergenceTest(SLEPc.EPS.Conv.ABS)
+    eigensolver.setTolerances(tol=tol, max_it=max_it)
+    eigensolver.setFromOptions()
+    return eigensolver
+
+
 def slepc_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
                   isherm=True, ncv=None, sort=True, EPSType="krylovschur",
                   return_all_conv=False, st_opts_dict={}, tol=None,
                   max_it=None):
-    """
-    Solve a matrix using the advanced eigensystem solver
+    """Solve a matrix using the advanced eigensystem solver
 
     Parameters
     ----------
@@ -145,7 +142,7 @@ def slepc_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
         'tol': tol,
         'max_it': max_it,
     }
-    eigensolver = init_eigensolver(**eps_settings, **st_opts_dict)
+    eigensolver = _init_eigensolver(**eps_settings, **st_opts_dict)
     eigensolver.setOperators(convert_to_petsc(a))
     eigensolver.setDimensions(k, ncv)
     eigensolver.solve()
@@ -170,8 +167,7 @@ def slepc_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
 
 def slepc_svds(a, k=6, ncv=None, return_vecs=True,
                SVDType="cross", extra_vals=False, tol=None, max_it=None):
-    """
-    Find the singular values for sparse matrix `a`.
+    """Find the singular values for sparse matrix `a`.
 
     Parameters
     ----------
