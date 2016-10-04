@@ -145,12 +145,9 @@ def _par_dot_csr_matvec(mat, vec, nthreads=_NUM_THREADS):
 
 
 def _dot_sparse(a, b):
-    if (b.ndim == 1 or isket(b)) and a.nnz > 500000:
+    if (b.ndim == 1 or isket(b)) and a.nnz > 500000:  # pragma: no cover
         return _par_dot_csr_matvec(a, b)
     return a.dot(b)
-
-
-sp.csr_matrix.__matmul__ = _dot_sparse
 
 
 def dot(a, b):
@@ -347,14 +344,22 @@ def kron(*ops, stype=None, coo_build=False):
     return x
 
 
-# Monkey-patch unused & symbol to tensor product
+def kronpow(a, p, stype=None, coo_build=False):
+    """ Returns `a` tensored with itself `p` times """
+    return kron(*(a for _ in range(p)), stype=stype, coo_build=coo_build)
+
+
+# --------------------------------------------------------------------------- #
+# MONKEY-PATCHES                                                              #
+# --------------------------------------------------------------------------- #
+
+
+# Allow parallel sparse mat-vec dot product automatically
+sp.csr_matrix.__matmul__ = _dot_sparse
+
+# Unused & symbol to tensor product
 np.matrix.__and__ = _kron_dispatch
 sp.csr_matrix.__and__ = _kron_dispatch
 sp.bsr_matrix.__and__ = _kron_dispatch
 sp.csc_matrix.__and__ = _kron_dispatch
 sp.coo_matrix.__and__ = _kron_dispatch
-
-
-def kronpow(a, p, stype=None, coo_build=False):
-    """ Returns `a` tensored with itself `p` times """
-    return kron(*(a for _ in range(p)), stype=stype, coo_build=coo_build)

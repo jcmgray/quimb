@@ -115,6 +115,12 @@ class TestRealify:
         assert a.real == 1
         assert a.imag == 0
 
+    def test_wrong_type(self):
+        @realify
+        def foo(a, b):
+            return str(a) + str(b)
+        assert foo(1, 2) == '12'
+
 
 class TestShapes:
     def test_sparse(self):
