@@ -1,5 +1,4 @@
-"""
-Interface to slepc4py for solving advanced eigenvalue problems.
+"""Interface to slepc4py for solving advanced eigenvalue problems.
 """
 # TODO: delete solver or keep and extend
 # TODO: FEAST / other contour solvers?
@@ -19,8 +18,9 @@ slepc4py.init()
 
 
 def convert_to_petsc(a, comm=PETSc.COMM_WORLD):
-    """ Convert a scipy sparse matrix to the relevant PETSc type, currently
-    only supports csr, bsr, vectors and dense matrices formats. """
+    """Convert a scipy sparse matrix to the relevant PETSc type, currently
+    only supports csr, bsr, vectors and dense matrices formats.
+    """
     if sp.isspmatrix_csr(a):
         a.sort_indices()
         csr = (a.indptr, a.indices, a.data)
@@ -38,7 +38,8 @@ def convert_to_petsc(a, comm=PETSc.COMM_WORLD):
 
 
 def new_petsc_vec(n, comm=PETSc.COMM_WORLD):
-    """ Create an empty complex petsc vector of size `n`. """
+    """Create an empty complex petsc vector of size `n`.
+    """
     a = np.empty(n, dtype=complex)
     return PETSc.Vec().createWithArray(a, comm=comm)
 

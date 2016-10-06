@@ -1,4 +1,5 @@
 # TODO: TEST NON_HERMITIAN
+# TODO: TEST multiprocessing throws no error with petsc
 
 from pytest import fixture, mark
 import numpy as np

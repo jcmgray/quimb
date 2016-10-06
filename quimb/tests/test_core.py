@@ -5,14 +5,14 @@ import scipy.sparse as sp
 import numpy as np
 from numpy.testing import assert_allclose, assert_almost_equal
 
-from ..accel import issparse, isherm, kron
+from ..accel import issparse, isherm, kron, prod
 from ..calc import mutual_information
 from ..gen import (bell_state, rand_rho, rand_matrix, rand_ket, up, plus,
                    yplus, sig, singlet)
-from ..core import (sparse_matrix, qu, infer_size, _trace_dense,
+from ..core import (_sparse_matrix, qu, infer_size, _trace_dense, itrace,
                     _trace_sparse, trace, tr, nmlz, dim_map, dim_compress,
                     eye, eyepad, perm_pad, permute, _trace_lose, _trace_keep,
-                    partial_trace, chop, overlap, itrace)
+                    partial_trace, chop, overlap)
 
 
 stypes = ("csr", "csc", "bsr", "coo")
@@ -31,7 +31,7 @@ def os1():
 class TestSparseMatrix:
     @mark.parametrize("stype", stypes)
     def test_simple(self, stype):
-        a = sparse_matrix([[0, 3], [1, 2]], stype)
+        a = _sparse_matrix([[0, 3], [1, 2]], stype)
         assert a.format == stype
         assert a.dtype == complex
 
@@ -106,7 +106,7 @@ class TestQuimbify:
     @mark.parametrize("format_in", stypes)
     @mark.parametrize("format_out", (None,) + stypes)
     def test_reshape_sparse(self, qtype, shape, out, format_in, format_out):
-        x = sparse_matrix([[1], [0], [2], [3j]], format_in)
+        x = _sparse_matrix([[1], [0], [2], [3j]], format_in)
         y = qu(x, qtype=qtype, stype=format_out)
         assert y.shape == shape
         assert y.dtype == complex
@@ -478,14 +478,14 @@ class TestPermute:
 
     def test_permute_sparse_ket(self):
         dims = [3, 2, 5, 4]
-        a = rand_ket(np.prod(dims), sparse=True, density=0.5)
+        a = rand_ket(prod(dims), sparse=True, density=0.5)
         b = permute(a, dims, [3, 1, 2, 0])
         c = permute(a.A, dims, [3, 1, 2, 0])
         assert_allclose(b.A, c)
 
     def test_permute_sparse_op(self):
         dims = [3, 2, 5, 4]
-        a = rand_rho(np.prod(dims), sparse=True, density=0.5)
+        a = rand_rho(prod(dims), sparse=True, density=0.5)
         b = permute(a, dims, [3, 1, 2, 0])
         c = permute(a.A, dims, [3, 1, 2, 0])
         assert_allclose(b.A, c)
@@ -526,14 +526,14 @@ class TestPartialTraceDense:
 
     def test_partial_trace_single_ket(self):
         dims = [2, 3, 4]
-        a = np.random.randn(np.prod(dims), 1)
+        a = np.random.randn(prod(dims), 1)
         for i, dim in enumerate(dims):
             b = partial_trace(a, dims, i)
             assert(b.shape[0] == dim)
 
     def test_partial_trace_multi_ket(self):
         dims = [2, 3, 4]
-        a = np.random.randn(np.prod(dims), 1)
+        a = np.random.randn(prod(dims), 1)
         for i1, i2 in itertools.combinations([0, 1, 2], 2):
             b = partial_trace(a, dims, [i1, i2])
             assert(b.shape[1] == dims[i1] * dims[i2])

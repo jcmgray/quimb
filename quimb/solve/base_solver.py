@@ -1,7 +1,8 @@
-""" Functions for solving matrices either fully or partially.
+"""Functions for solving matrices either fully or partially.
 Note that the eigendecompositions here all assume a
 hermitian matrix and sort the eigenvalues in ascending
-algebraic order by default. """
+algebraic order by default.
+"""
 
 # TODO: restart eigen and svd - up to tol
 # TODO: test non-herm
@@ -24,7 +25,7 @@ if SLEPC4PY_FOUND:
 # -------------------------------------------------------------------------- #
 
 def eigsys(a, sort=True, isherm=True):
-    """ Find all eigenpairs of dense, hermitian matrix.
+    """Find all eigenpairs of dense, hermitian matrix.
 
     Parameters
     ----------
@@ -44,7 +45,7 @@ def eigsys(a, sort=True, isherm=True):
 
 
 def eigvals(a, sort=True, isherm=True):
-    """ Find all eigenvalues of dense, hermitian matrix
+    """Find all eigenvalues of dense, hermitian matrix
 
     Parameters
     ----------
@@ -60,7 +61,7 @@ def eigvals(a, sort=True, isherm=True):
 
 
 def eigvecs(a, sort=True, isherm=True):
-    """ Find all eigenvectors of dense, hermitian matrix
+    """Find all eigenvectors of dense, hermitian matrix
 
     Parameters
     ----------
@@ -80,7 +81,8 @@ def eigvecs(a, sort=True, isherm=True):
 
 
 def choose_backend(a, k, int_eps=False):
-    """ Pick a backend automatically for partial decompositions. """
+    """Pick a backend automatically for partial decompositions.
+    """
     # small matrix or large part of subspace requested
     small_d_big_k = a.shape[0] ** 2 / k < (10000 if int_eps else 2000)
     # avoid using slepc for dense matrices and inner eigenvectors
@@ -92,7 +94,7 @@ def choose_backend(a, k, int_eps=False):
 
 def seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
             isherm=True, ncv=None, sort=True, backend='AUTO', **kwargs):
-    """ Returns a few eigenpairs from a possibly sparse hermitian operator
+    """Returns a few eigenpairs from a possibly sparse hermitian operator
 
     Parameters
     ----------
@@ -128,22 +130,26 @@ def seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
 
 
 def seigvals(a, k=6, **kwargs):
-    """ Seigsys alias for finding eigenvalues only. """
+    """Seigsys alias for finding eigenvalues only.
+    """
     return seigsys(a, k=k, return_vecs=False, **kwargs)
 
 
 def seigvecs(a, k=6, **kwargs):
-    """ Seigsys alias for finding eigenvectors only. """
+    """Seigsys alias for finding eigenvectors only.
+    """
     return seigsys(a, k=k, return_vecs=True, **kwargs)[1]
 
 
 def groundstate(ham, **kwargs):
-    """ Alias for finding lowest eigenvector only. """
+    """Alias for finding lowest eigenvector only.
+    """
     return seigvecs(ham, k=1, which='SA', **kwargs)
 
 
 def groundenergy(ham, **kwargs):
-    """ Alias for finding lowest eigenvalue only. """
+    """Alias for finding lowest eigenvalue only.
+    """
     return seigvals(ham, k=1, which='SA', **kwargs)[0]
 
 
@@ -152,12 +158,13 @@ def groundenergy(ham, **kwargs):
 # -------------------------------------------------------------------------- #
 
 def svd(a, return_vecs=True):
-    """ Compute full singular value decomposition of matrix. """
+    """Compute full singular value decomposition of matrix.
+    """
     return nla.svd(a, full_matrices=False, compute_uv=return_vecs)
 
 
 def svds(a, k=6, ncv=None, return_vecs=True, backend='AUTO', **kwargs):
-    """ Compute the partial singular value decomposition of a matrix.
+    """Compute the partial singular value decomposition of a matrix.
 
     Parameters
     ----------
@@ -189,12 +196,14 @@ def svds(a, k=6, ncv=None, return_vecs=True, backend='AUTO', **kwargs):
 # -------------------------------------------------------------------------- #
 
 def norm_2(a, **kwargs):
-    """ Return the 2-norm of matrix, a, i.e. the largest singular value. """
+    """Return the 2-norm of matrix, a, i.e. the largest singular value.
+    """
     return svds(a, k=1, return_vecs=False, **kwargs)[0]
 
 
 def norm_fro_dense(a):
-    """ Frobenius norm for dense matrices """
+    """Frobenius norm for dense matrices
+    """
     return vdot(a, a).real**0.5
 
 
@@ -203,13 +212,14 @@ def norm_fro_sparse(a):
 
 
 def norm_trace_dense(a, isherm=True):
-    """ Returns the trace norm of operator a, that is,
-    the sum of abs eigvals. """
+    """Returns the trace norm of operator a, that is,
+    the sum of abs eigvals.
+    """
     return np.sum(np.absolute(eigvals(a, sort=False, isherm=isherm)))
 
 
 def norm(a, ntype=2, **kwargs):
-    """ Operator norms.
+    """Operator norms.
 
     Parameters
     ----------

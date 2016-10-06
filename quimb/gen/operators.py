@@ -5,7 +5,7 @@ from ..core import qu, eye, kron, eyepad
 
 @lru_cache(maxsize=64)
 def sig(xyz, dim=2, **kwargs):
-    """ Generates the spin operators for spin 1/2 or 1.
+    """Generates the spin operators for spin 1/2 or 1.
 
     Parameters
     ----------
@@ -14,7 +14,8 @@ def sig(xyz, dim=2, **kwargs):
 
     Returns
     -------
-        spin operator, quijified. """
+        spin operator, quijified.
+    """
     xyzmap = {0: 'i', 'i': 'i', 'I': 'i',
               1: 'x', 'x': 'x', 'X': 'x',
               2: 'y', 'y': 'y', 'Y': 'y',
@@ -41,7 +42,8 @@ def sig(xyz, dim=2, **kwargs):
 
 @lru_cache(maxsize=8)
 def controlled(s, sparse=False):
-    """ Construct a controlled pauli gate for two qubits. """
+    """Construct a controlled pauli gate for two qubits.
+    """
     keymap = {'x': 'x', 'not': 'x',
               'y': 'y',
               'z': 'z'}
@@ -52,7 +54,7 @@ def controlled(s, sparse=False):
 
 
 def ham_heis(n, j=1.0, bz=0.0, cyclic=True, sparse=False, stype="csr"):
-    """ Constructs the heisenberg spin 1/2 hamiltonian
+    """Constructs the heisenberg spin 1/2 hamiltonian
 
     Parameters
     ----------
@@ -67,7 +69,8 @@ def ham_heis(n, j=1.0, bz=0.0, cyclic=True, sparse=False, stype="csr"):
 
     Returns
     -------
-        ham: hamiltonian as matrix """
+        ham: hamiltonian as matrix
+    """
     # TODO: vector magnetic field
     dims = (2,) * n
     try:
@@ -98,7 +101,7 @@ def ham_heis(n, j=1.0, bz=0.0, cyclic=True, sparse=False, stype="csr"):
 
 
 def ham_j1j2(n, j1=1.0, j2=0.5, bz=0.0, cyclic=True, sparse=False):
-    """ Generate the j1-j2 hamiltonian, i.e. next nearest neighbour
+    """Generate the j1-j2 hamiltonian, i.e. next nearest neighbour
     interactions.
     Parameters
     ----------
@@ -110,7 +113,8 @@ def ham_j1j2(n, j1=1.0, j2=0.5, bz=0.0, cyclic=True, sparse=False):
         sparse: return hamtiltonian as sparse-csr matrix
     Returns
     -------
-        ham: Hamtiltonian as matrix """
+        ham: Hamtiltonian as matrix
+    """
     dims = (2,) * n
     ps = [sig(i, sparse=True) for i in 'xyz']
 

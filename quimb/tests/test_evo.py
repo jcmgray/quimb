@@ -79,17 +79,15 @@ def srho_dot_ls():
 # --------------------------------------------------------------------------- #
 
 class TestSchrodingerEqKet:
-    @mark.parametrize("all_dense", [False, True])
-    def test_ket_matrix(self, psi_dot, all_dense):
+    def test_ket_matrix(self, psi_dot):
         psi, ham, psid = psi_dot
-        foo = schrodinger_eq_ket(ham, all_dense=all_dense)
+        foo = schrodinger_eq_ket(ham)
         psid2 = foo(None, psi)
         assert_allclose(psid, psid2)
 
-    @mark.parametrize("all_dense", [False, True])
-    def test_ket_1darray(self, psi_dot, all_dense):
+    def test_ket_1darray(self, psi_dot):
         psi, ham, psid = psi_dot
-        foo = schrodinger_eq_ket(ham, all_dense=all_dense)
+        foo = schrodinger_eq_ket(ham)
         psid2 = foo(None, psi.A.reshape(-1)).reshape(-1, 1)
         assert_allclose(psid, psid2)
 
@@ -107,17 +105,15 @@ class TestSchrodingerEqKet:
 
 
 class TestSchrodingerEqDop:
-    @mark.parametrize("all_dense", [False, True])
-    def test_dop_matrix(self, rho_dot, all_dense):
+    def test_dop_matrix(self, rho_dot):
         rho, ham, rhod = rho_dot
-        foo = schrodinger_eq_dop(ham, all_dense=all_dense)
+        foo = schrodinger_eq_dop(ham)
         rhod2 = foo(None, rho.A).reshape(3, 3)
         assert_allclose(rhod, rhod2)
 
-    @mark.parametrize("all_dense", [False, True])
-    def test_dop_1darray(self, rho_dot, all_dense):
+    def test_dop_1darray(self, rho_dot):
         rho, ham, rhod = rho_dot
-        foo = schrodinger_eq_dop(ham, all_dense=all_dense)
+        foo = schrodinger_eq_dop(ham)
         rhod2 = foo(None, rho.A.reshape(-1)).reshape(3, 3)
         assert_allclose(rhod, rhod2)
 
@@ -149,17 +145,15 @@ class TestSchrodingerEqDopVec:
 
 
 class TestLindbladEq:
-    @mark.parametrize("all_dense", [False, True])
-    def test_matrix(self, rho_dot_ls, all_dense):
+    def test_matrix(self, rho_dot_ls):
         rho, ham, gamma, ls, rhod = rho_dot_ls
-        foo = lindblad_eq(ham, ls, gamma, all_dense=all_dense)
+        foo = lindblad_eq(ham, ls, gamma)
         rhod2 = foo(None, rho).reshape(3, 3)
         assert_allclose(rhod, rhod2)
 
-    @mark.parametrize("all_dense", [False, True])
-    def test_1darray(self, rho_dot_ls, all_dense):
+    def test_1darray(self, rho_dot_ls):
         rho, ham, gamma, ls, rhod = rho_dot_ls
-        foo = lindblad_eq(ham, ls, gamma, all_dense=all_dense)
+        foo = lindblad_eq(ham, ls, gamma)
         rhod2 = foo(None, rho.A.reshape(-1)).reshape(3, 3)
         assert_allclose(rhod, rhod2)
 

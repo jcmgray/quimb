@@ -1,5 +1,4 @@
-"""
-Core accelerated numerical functions
+"""Core accelerated numerical functions
 """
 # TODO: merge kron, eyepad --> tensor
 # TODO: finish idot with rpn
@@ -9,6 +8,7 @@ import cmath
 import functools
 import psutil
 import threading
+import operator
 
 import numpy as np
 import scipy.sparse as sp
@@ -20,20 +20,27 @@ _NUM_THREADS = psutil.cpu_count()
 accel = functools.partial(jit, nopython=True, cache=True)
 
 
+def prod(xs):
+    """Product of an iterable.
+    """
+    return functools.reduce(operator.mul, xs, 1)
+
+
 # --------------------------------------------------------------------------- #
 # Decorators for standardizing output                                         #
 # --------------------------------------------------------------------------- #
 
 def matrixify(fn):
-    """ To decorate functions returning ndarrays. """
+    """To decorate functions returning ndarrays.
+    """
     def matrixified_fn(*args, **kwargs):
         return np.asmatrix(fn(*args, **kwargs))
     return matrixified_fn
 
 
 def realify(fn, imag_tol=1.0e-14):
-    """ To decorate functions that should return float for small complex. """
-    # XXX: ensure works for numpy scalars
+    """To decorate functions that should return float for small complex.
+    """
     def realified_fn(*args, **kwargs):
         x = fn(*args, **kwargs)
         try:
@@ -44,7 +51,8 @@ def realify(fn, imag_tol=1.0e-14):
 
 
 def zeroify(f, tol=1e-14):
-    """ To decorate functions that compute close to zero answers. """
+    """To decorate functions that compute close to zero answers.
+    """
     def zeroified_f(*args, **kwargs):
         x = f(*args, **kwargs)
         return 0.0 if abs(x) < tol else x
@@ -56,23 +64,34 @@ def zeroify(f, tol=1e-14):
 # --------------------------------------------------------------------------- #
 
 def isket(qob):
-    """ Checks if matrix is in ket form, i.e. a matrix column. """
+    """Checks if matrix is in ket form, i.e. a matrix column.
+    """
     return qob.shape[0] > 1 and qob.shape[1] == 1  # Column vector check
 
 
 def isbra(qob):
-    """ Checks if matrix is in bra form, i.e. a matrix row. """
+    """Checks if matrix is in bra form, i.e. a matrix row.
+    """
     return qob.shape[0] == 1 and qob.shape[1] > 1  # Row vector check
 
 
 def isop(qob):
-    """ Checks if matrix is an operator, i.e. a square matrix. """
+    """Checks if matrix is an operator, i.e. a square matrix.
+    """
     m, n = qob.shape
     return m == n and m > 1  # Square matrix check
 
 
+def isvec(qob):
+    """Checks if object is row-vector, column-vector or one-dimensional.
+    """
+    shp = qob.shape
+    return len(shp) == 1 or (len(shp) == 2 and (shp[0] == 1 or shp[1] == 1))
+
+
 def isherm(qob):
-    """ Checks if matrix is hermitian, for sparse or dense. """
+    """Checks if matrix is hermitian, for sparse or dense.
+    """
     return ((qob != qob.H).nnz == 0 if issparse(qob) else
             np.allclose(qob, qob.H))
 
@@ -84,12 +103,14 @@ def isherm(qob):
 @matrixify
 @accel
 def _mul_dense(x, y):  # pragma: no cover
-    """ Accelerated element-wise multiplication of two matrices """
+    """Accelerated element-wise multiplication of two matrices
+    """
     return x * y
 
 
 def mul(x, y):
-    """ Dispatch to element wise multiplication. """
+    """Dispatch to element wise multiplication.
+    """
     # TODO: add sparse, dense -> sparse w/ broadcasting
     if issparse(x):
         return x.multiply(y)
@@ -101,7 +122,8 @@ def mul(x, y):
 @matrixify
 @accel
 def _dot_dense(a, b):  # pragma: no cover
-    """ Accelerated dense dot product of matrices  """
+    """Accelerated dense dot product of matrices
+    """
     return a @ b
 
 
@@ -145,13 +167,16 @@ def _par_dot_csr_matvec(mat, vec, nthreads=_NUM_THREADS):
 
 
 def _dot_sparse(a, b):
-    if (b.ndim == 1 or isket(b)) and a.nnz > 500000:  # pragma: no cover
+    """Dot product for sparse matrix, dispatching to parallel v large nnz.
+    """
+    if (issparse(a) and isvec(b) and a.nnz > 500000):  # pragma: no cover
         return _par_dot_csr_matvec(a, b)
-    return a.dot(b)
+    return a @ b
 
 
 def dot(a, b):
-    """ Matrix multiplication, dispatched to dense method. """
+    """Matrix multiplication, dispatched to dense method.
+    """
     if issparse(a) or issparse(b):
         return _dot_sparse(a, b)
     return _dot_dense(a, b)
@@ -160,22 +185,25 @@ def dot(a, b):
 @realify
 @accel
 def vdot(a, b):  # pragma: no cover
-    """ Accelerated 'Hermitian' inner product of two vectors. """
+    """Accelerated 'Hermitian' inner product of two vectors.
+    """
     return np.vdot(a.reshape(-1), b.reshape(-1))
 
 
 @realify
 @accel
 def rdot(a, b):  # pragma: no cover
-    """ Real dot product of two dense vectors. """
+    """Real dot product of two dense vectors.
+    """
     a, b = a.reshape((1, -1)), b.reshape((-1, 1))
     return (a @ b)[0, 0]
 
 
 @accel
 def _reshape_for_ldmul(vec):  # pragma: no cover
-    """ Reshape a vector to be broadcast multiplied against a matrix in a way
-    that replicates left diagonal matrix multiplication. """
+    """Reshape a vector to be broadcast multiplied against a matrix in a way
+    that replicates left diagonal matrix multiplication.
+    """
     d = vec.size
     return d, vec.reshape(d, 1)
 
@@ -191,7 +219,7 @@ def _l_diag_dot_sparse(vec, mat):
 
 
 def ldmul(vec, mat):
-    """ Accelerated left diagonal multiplication using numexpr,
+    """Accelerated left diagonal multiplication using numexpr,
     faster than numpy for n > ~ 500.
 
     Parameters
@@ -201,7 +229,8 @@ def ldmul(vec, mat):
 
     Returns
     -------
-        mat: np.matrix """
+        mat: np.matrix
+    """
     if issparse(mat):
         return _l_diag_dot_sparse(vec, mat)
     return _l_diag_dot_dense(vec, mat)
@@ -209,8 +238,9 @@ def ldmul(vec, mat):
 
 @accel
 def _reshape_for_rdmul(vec):  # pragma: no cover
-    """ Reshape a vector to be broadcast multiplied against a matrix in a way
-    that replicates right diagonal matrix multiplication. """
+    """Reshape a vector to be broadcast multiplied against a matrix in a way
+    that replicates right diagonal matrix multiplication.
+    """
     d = vec.size
     return d, vec.reshape(1, d)
 
@@ -244,20 +274,23 @@ def rdmul(mat, vec):
 
 @accel
 def _reshape_for_outer(a, b):  # pragma: no cover
-    """ Reshape two vectors for an outer product """
+    """Reshape two vectors for an outer product
+    """
     d = a.size
     return d, a.reshape(d, 1), b.reshape(1, d)
 
 
 def outer(a, b):
-    """ Outer product between two vectors (no conjugation). """
+    """Outer product between two vectors (no conjugation).
+    """
     d, a, b = _reshape_for_outer(a, b)
     return _mul_dense(a, b) if d < 500 else np.asmatrix(evaluate('a * b'))
 
 
 @vectorize(nopython=True)
 def explt(l, t):  # pragma: no cover
-    """ Complex exponenital as used in solution to schrodinger equation. """
+    """Complex exponenital as used in solution to schrodinger equation.
+    """
     return cmath.exp((-1.0j * t) * l)
 
 
@@ -288,8 +321,9 @@ def _kron_dense_big(a, b):
 
 
 def _kron_sparse(a, b, stype=None):
-    """  Sparse tensor product, output format can be specified or will be
-    automatically determined. """
+    """Sparse tensor product, output format can be specified or will be
+    automatically determined.
+    """
     if stype is None:
         stype = ("bsr" if isinstance(b, np.ndarray) or b.format == 'bsr' else
                  b.format if isinstance(a, np.ndarray) else
@@ -309,8 +343,7 @@ def _kron_dispatch(a, b, stype=None):
 
 
 def kron(*ops, stype=None, coo_build=False):
-    """
-    Tensor product of variable number of arguments.
+    """Tensor product of variable number of arguments.
 
     Parameters
     ----------
@@ -345,17 +378,14 @@ def kron(*ops, stype=None, coo_build=False):
 
 
 def kronpow(a, p, stype=None, coo_build=False):
-    """ Returns `a` tensored with itself `p` times """
+    """Returns `a` tensored with itself `p` times
+    """
     return kron(*(a for _ in range(p)), stype=stype, coo_build=coo_build)
 
 
 # --------------------------------------------------------------------------- #
 # MONKEY-PATCHES                                                              #
 # --------------------------------------------------------------------------- #
-
-
-# Allow parallel sparse mat-vec dot product automatically
-sp.csr_matrix.__matmul__ = _dot_sparse
 
 # Unused & symbol to tensor product
 np.matrix.__and__ = _kron_dispatch

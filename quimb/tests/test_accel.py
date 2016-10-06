@@ -10,22 +10,23 @@ from ..accel import (
     isket,
     isop,
     isbra,
+    isvec,
     isherm,
     mul,
     dot,
-    _dot_sparse,
-    _par_dot_csr_matvec,
     vdot,
     rdot,
     ldmul,
     rdmul,
     outer,
-    _kron_dense,
-    _kron_dense_big,
-    _kron_sparse,
     kron,
     kronpow,
     explt,
+    _dot_sparse,
+    _par_dot_csr_matvec,
+    _kron_dense,
+    _kron_dense_big,
+    _kron_sparse,
 )
 
 
@@ -34,56 +35,48 @@ _TEST_SZ = 4
 
 
 @fixture
-def sparse_mat():
+def mat_d():
+    return rand_matrix(_TEST_SZ)
+
+
+@fixture
+def mat_d2():
+    return rand_matrix(_TEST_SZ)
+
+
+@fixture
+def mat_d3():
+    return rand_matrix(_TEST_SZ)
+
+
+@fixture
+def mat_s():
     return rand_matrix(_TEST_SZ, sparse=True, density=0.5)
 
 
 @fixture
-def ket():
+def mat_s2():
+    return rand_matrix(_TEST_SZ, sparse=True, density=0.5)
+
+
+@fixture
+def ket_d():
     return rand_ket(_TEST_SZ)
 
 
 @fixture
-def test_objs():
-    d = 5
-    od1 = rand_matrix(d)
-    od2 = rand_matrix(d)
-    os1 = rand_matrix(d, sparse=True, density=0.5)
-    os2 = rand_matrix(d, sparse=True, density=0.5)
-    kd1 = rand_ket(d)
-    kd2 = rand_ket(d)
-    ld = np.random.randn(d) + 1.0j * np.random.randn(d)
-    return od1, od2, os1, os2, kd1, kd2, ld
+def ket_d2():
+    return rand_ket(_TEST_SZ)
 
 
 @fixture
-def d1():
-    return rand_matrix(3)
+def l1d():
+    return np.random.randn(_TEST_SZ) + 1.0j * np.random.randn(_TEST_SZ)
 
 
 @fixture
-def d2():
-    return rand_matrix(3)
-
-
-@fixture
-def d3():
-    return rand_matrix(3)
-
-
-@fixture
-def s1():
-    return rand_matrix(3, sparse=True, density=0.5)
-
-
-@fixture
-def s2():
-    return rand_matrix(3, sparse=True, density=0.5)
-
-
-@fixture
-def s1nnz():
-    return rand_matrix(3, sparse=True, density=0.75)
+def mat_s_nnz():
+    return rand_matrix(_TEST_SZ, sparse=True, density=0.75)
 
 
 class TestMatrixify:
@@ -134,8 +127,10 @@ class TestShapes:
         assert(isket(x))
         assert(not isbra(x))
         assert(not isop(x))
+        assert isvec(x)
         x = sp.csr_matrix(x)
         assert(isket(x))
+        assert isvec(x)
         assert(not isbra(x))
         assert(not isop(x))
 
@@ -144,20 +139,24 @@ class TestShapes:
         assert(not isket(x))
         assert(isbra(x))
         assert(not isop(x))
+        assert isvec(x)
         x = sp.csr_matrix(x)
         assert(not isket(x))
         assert(isbra(x))
         assert(not isop(x))
+        assert isvec(x)
 
     def test_op(self):
         x = np.matrix([[1, 0], [0, 0]])
         assert(not isket(x))
         assert(not isbra(x))
         assert(isop(x))
+        assert (not isvec(x))
         x = sp.csr_matrix(x)
         assert(not isket(x))
         assert(not isbra(x))
         assert(isop(x))
+        assert (not isvec(x))
 
     def test_isherm(self):
         a = np.matrix([[1.0, 2.0 + 3.0j],
@@ -177,111 +176,99 @@ class TestShapes:
 
 
 class TestMul:
-    def test_mul_dense_same(self, test_objs):
-        a, b, _, _, _, _, _ = test_objs
-        ca = mul(a, b)
+    def test_mul_dense_same(self, mat_d, mat_d2):
+        ca = mul(mat_d, mat_d2)
         assert isinstance(ca, np.matrix)
-        cn = np.multiply(a, b)
+        cn = np.multiply(mat_d, mat_d2)
         assert_allclose(ca, cn)
 
-    def test_mul_broadcast(self, test_objs):
-        a, _, _, _, b, _, _ = test_objs
-        ca = mul(a, b)
+    def test_mul_broadcast(self, mat_d, ket_d):
+        ca = mul(mat_d, ket_d)
         assert isinstance(ca, np.matrix)
-        cn = np.multiply(a, b)
+        cn = np.multiply(mat_d, ket_d)
         assert_allclose(ca, cn)
-        ca = mul(a.H, b)
+        ca = mul(mat_d.H, ket_d)
         assert isinstance(ca, np.matrix)
-        cn = np.multiply(a.H, b)
+        cn = np.multiply(mat_d.H, ket_d)
         assert_allclose(ca, cn)
 
-    def test_mul_sparse(self, test_objs):
-        _, _, a, b, _, _, _ = test_objs
-        cq = mul(a, b)
-        cn = a.A * b.A
+    def test_mul_sparse(self, mat_s, mat_s2):
+        cq = mul(mat_s, mat_s2)
+        cn = mat_s.A * mat_s2.A
         assert issparse(cq)
         assert_allclose(cq.A, cn)
-        cq = mul(b.A, a)
-        cn = b.A * a.A
+        cq = mul(mat_s2.A, mat_s)
+        cn = mat_s2.A * mat_s.A
         assert issparse(cq)
         assert_allclose(cq.A, cn)
 
-    def test_mul_sparse_broadcast(self, test_objs):
-        _, _, a, _, b, _, _ = test_objs
-        ca = mul(a, b)
-        cn = np.multiply(a.A, b)
+    def test_mul_sparse_broadcast(self, mat_s, ket_d):
+        ca = mul(mat_s, ket_d)
+        cn = np.multiply(mat_s.A, ket_d)
         assert_allclose(ca.A, cn)
-        ca = mul(a.H, b)
-        cn = np.multiply(a.H.A, b)
+        ca = mul(mat_s.H, ket_d)
+        cn = np.multiply(mat_s.H.A, ket_d)
         assert_allclose(ca.A, cn)
 
 
 class TestDot:
-    def test_dot_matrix(self, test_objs):
-        a, b, _, _, _, _, _ = test_objs
-        ca = dot(a, b)
+    def test_dot_matrix(self, mat_d, mat_d2):
+        ca = dot(mat_d, mat_d2)
         assert isinstance(ca, np.matrix)
-        cn = a @ b
+        cn = mat_d @ mat_d2
         assert_allclose(ca, cn)
 
-    def test_dot_ket(self, test_objs):
-        a, _, _, _, b, _, _ = test_objs
-        ca = dot(a, b)
+    def test_dot_ket(self, mat_d, ket_d):
+        ca = dot(mat_d, ket_d)
         assert isinstance(ca, np.matrix)
-        cn = a @ b
+        cn = mat_d @ ket_d
         assert_allclose(ca, cn)
 
-    def test_dot_sparse_sparse(self, test_objs):
-        _, _, a, b, _, _, _ = test_objs
-        cq = dot(a, b)
-        cn = a @ b
+    def test_dot_sparse_sparse(self, mat_s, mat_s2):
+        cq = dot(mat_s, mat_s2)
+        cn = mat_s @ mat_s2
         assert issparse(cq)
         assert_allclose(cq.A, cn.A)
 
-    def test_dot_sparse_dense(self, test_objs):
-        _, _, a, _, b, _, _ = test_objs
-        cq = dot(a, b)
-        cn = a @ b
+    def test_dot_sparse_dense(self, mat_s, ket_d):
+        cq = dot(mat_s, ket_d)
+        cn = mat_s @ ket_d
         assert not issparse(cq)
         assert_allclose(cq.A, cn)
 
-    def test_dot_sparse_dense_ket(self, test_objs):
-        _, _, a, _, b, _, _ = test_objs
-        cq = dot(a, b)
-        cn = a @ b
+    def test_dot_sparse_dense_ket(self, mat_s, ket_d):
+        cq = dot(mat_s, ket_d)
+        cn = mat_s @ ket_d
         assert not issparse(cq)
         assert isket(cq)
         assert_allclose(cq.A, cn)
 
-    def test_par_dot_csr_matvec(self, sparse_mat, ket):
-        x = _par_dot_csr_matvec(sparse_mat, ket, 2)
-        y = _dot_sparse(sparse_mat, ket)
+    def test_par_dot_csr_matvec(self, mat_s, ket_d):
+        x = _par_dot_csr_matvec(mat_s, ket_d, 2)
+        y = _dot_sparse(mat_s, ket_d)
         assert x.dtype == complex
         assert x.shape == (_TEST_SZ, 1)
         assert_allclose(x, y)
 
 
 class TestAccelVdot:
-    def test_accel_vdot(self, test_objs):
-        _, _, _, _, a, b, _ = test_objs
-        ca = vdot(a, b)
-        cn = (a.H @ b)[0, 0]
+    def test_accel_vdot(self, ket_d, ket_d2):
+        ca = vdot(ket_d, ket_d2)
+        cn = (ket_d.H @ ket_d2)[0, 0]
         assert_allclose(ca, cn)
 
 
 class TestAccelRdot:
-    def test_accel_rdot(self, test_objs):
-        _, _, _, _, a, b, _ = test_objs
-        cq = rdot(a.H, b)
-        cn = (a.H @ b)[0, 0]
+    def test_accel_rdot(self, ket_d, ket_d2):
+        cq = rdot(ket_d.H, ket_d2)
+        cn = (ket_d.H @ ket_d2)[0, 0]
         assert_allclose(cq, cn)
 
 
 class TestFastDiagMul:
-    def test_ldmul_small(self, test_objs):
-        mat, _, _, _, _, _, vec = test_objs
-        a = ldmul(vec, mat)
-        b = np.diag(vec) @ mat
+    def test_ldmul_small(self, mat_d, l1d):
+        a = ldmul(l1d, mat_d)
+        b = np.diag(l1d) @ mat_d
         assert isinstance(a, np.matrix)
         assert_allclose(a, b)
 
@@ -293,18 +280,16 @@ class TestFastDiagMul:
         assert isinstance(a, np.matrix)
         assert_allclose(a, b)
 
-    def test_ldmul_sparse(self, test_objs):
-        _, _, mat, _, _, _, vec = test_objs
-        assert issparse(mat)
-        a = ldmul(vec, mat)
-        b = np.diag(vec) @ mat.A
+    def test_ldmul_sparse(self, mat_s, l1d):
+        assert issparse(mat_s)
+        a = ldmul(l1d, mat_s)
+        b = np.diag(l1d) @ mat_s.A
         assert issparse(a)
         assert_allclose(a.A, b)
 
-    def test_rdmul_small(self, test_objs):
-        mat, _, _, _, _, _, vec = test_objs
-        a = rdmul(mat, vec)
-        b = mat @ np.diag(vec)
+    def test_rdmul_small(self, mat_d, l1d):
+        a = rdmul(mat_d, l1d)
+        b = mat_d @ np.diag(l1d)
         assert isinstance(a, np.matrix)
         assert_allclose(a, b)
 
@@ -316,41 +301,36 @@ class TestFastDiagMul:
         assert isinstance(a, np.matrix)
         assert_allclose(a, b)
 
-    def test_rdmul_sparse(self, test_objs):
-        _, _, mat, _, _, _, vec = test_objs
-        a = rdmul(mat, vec)
-        b = mat.A @ np.diag(vec)
+    def test_rdmul_sparse(self, mat_s, l1d):
+        a = rdmul(mat_s, l1d)
+        b = mat_s.A @ np.diag(l1d)
         assert issparse(a)
         assert_allclose(a.A, b)
 
 
 class TestOuter:
-    def test_outer_ket_ket(self, test_objs):
-        _, _, _, _, a, b, _ = test_objs
-        c = outer(a, b)
+    def test_outer_ket_ket(self, ket_d, ket_d2):
+        c = outer(ket_d, ket_d2)
         assert isinstance(c, np.matrix)
-        d = np.multiply(a, b.T)
+        d = np.multiply(ket_d, ket_d2.T)
         assert_allclose(c, d)
 
-    def test_outer_ket_bra(self, test_objs):
-        _, _, _, _, a, b, _ = test_objs
-        c = outer(a, b.H)
+    def test_outer_ket_bra(self, ket_d, ket_d2):
+        c = outer(ket_d, ket_d2.H)
         assert isinstance(c, np.matrix)
-        d = np.multiply(a, b.H)
+        d = np.multiply(ket_d, ket_d2.H)
         assert_allclose(c, d)
 
-    def test_outer_bra_ket(self, test_objs):
-        _, _, _, _, a, b, _ = test_objs
-        c = outer(a.H, b)
+    def test_outer_bra_ket(self, ket_d, ket_d2):
+        c = outer(ket_d.H, ket_d2)
         assert isinstance(c, np.matrix)
-        d = np.multiply(a.H.T, b.T)
+        d = np.multiply(ket_d.H.T, ket_d2.T)
         assert_allclose(c, d)
 
-    def test_outer_bra_bra(self, test_objs):
-        _, _, _, _, a, b, _ = test_objs
-        c = outer(a.H, b.H)
+    def test_outer_bra_bra(self, ket_d, ket_d2):
+        c = outer(ket_d.H, ket_d2.H)
         assert isinstance(c, np.matrix)
-        d = np.multiply(a.H.T, b.H)
+        d = np.multiply(ket_d.H.T, ket_d2.H)
         assert_allclose(c, d)
 
 
@@ -368,96 +348,98 @@ class TestExplt:
 
 class TestKron:
     @mark.parametrize("func", [_kron_dense, _kron_dense_big])
-    def test_kron_dense(self, d1, d2, func):
-        x = func(d1, d2)
-        assert d1.shape == (3, 3)
-        assert d2.shape == (3, 3)
-        xn = np.kron(d1, d2)
+    def test_kron_dense(self, mat_d, mat_d2, func):
+        x = func(mat_d, mat_d2)
+        assert mat_d.shape == (_TEST_SZ, _TEST_SZ)
+        assert mat_d2.shape == (_TEST_SZ, _TEST_SZ)
+        xn = np.kron(mat_d, mat_d2)
         assert_allclose(x, xn)
         assert isinstance(x, np.matrix)
 
-    def test_kron_multi_args(self, d1, d2, d3):
-        assert_allclose(kron(d1), d1)
-        assert_allclose(kron(d1, d2, d3),
-                        np.kron(np.kron(d1, d2), d3))
+    def test_kron_multi_args(self, mat_d, mat_d2, mat_d3):
+        assert_allclose(kron(mat_d), mat_d)
+        assert_allclose(kron(mat_d, mat_d2, mat_d3),
+                        np.kron(np.kron(mat_d, mat_d2), mat_d3))
 
-    def test_kron_mixed_types(self, d1, s1):
-        assert_allclose(kron(d1, s1).A,
-                        (sp.kron(d1, s1, 'csr')).A)
-        assert_allclose(kron(s1, s1).A,
-                        (sp.kron(s1, s1, 'csr')).A)
+    def test_kron_mixed_types(self, mat_d, mat_s):
+        assert_allclose(kron(mat_d, mat_s).A,
+                        (sp.kron(mat_d, mat_s, 'csr')).A)
+        assert_allclose(kron(mat_s, mat_s).A,
+                        (sp.kron(mat_s, mat_s, 'csr')).A)
 
 
 class TestKronSparseFormats:
-    def test_sparse_sparse_auto(self, s1):
-        c = _kron_sparse(s1, s1)
+    def test_sparse_sparse_auto(self, mat_s):
+        c = _kron_sparse(mat_s, mat_s)
         assert c.format == 'csr'
 
-    def test_sparse_dense_auto(self, s1, d1):
-        c = _kron_sparse(s1, d1)
+    def test_sparse_dense_auto(self, mat_s, mat_d):
+        c = _kron_sparse(mat_s, mat_d)
         assert c.format == 'bsr'
 
-    def test_dense_sparse_auto(self, s1, d1):
-        c = _kron_sparse(d1, s1)
+    def test_dense_sparse_auto(self, mat_s, mat_d):
+        c = _kron_sparse(mat_d, mat_s)
         assert c.format == 'csr'
 
-    def test_sparse_sparsennz(self, s1, s1nnz):
-        c = _kron_sparse(s1, s1nnz)
+    def test_sparse_sparsennz(self, mat_s, mat_s_nnz):
+        c = _kron_sparse(mat_s, mat_s_nnz)
         assert c.format == 'csr'
 
     @mark.parametrize("stype", _SPARSE_FORMATS)
-    def test_sparse_sparse_to_sformat(self, s1, stype):
-        c = _kron_sparse(s1, s1, stype=stype)
+    def test_sparse_sparse_to_sformat(self, mat_s, stype):
+        c = _kron_sparse(mat_s, mat_s, stype=stype)
         assert c.format == stype
 
     @mark.parametrize("stype", (None,) + _SPARSE_FORMATS)
-    def test_many_args_dense_last(self, s1, s2, d1, stype):
-        c = kron(s1, s2, d1, stype=stype)
+    def test_many_args_dense_last(self, mat_s, mat_s2, mat_d, stype):
+        c = kron(mat_s, mat_s2, mat_d, stype=stype)
         assert c.format == (stype if stype is not None else "bsr")
 
     @mark.parametrize("stype", (None,) + _SPARSE_FORMATS)
-    def test_many_args_dense_not_last(self, s1, s2, d1, stype):
-        c = kron(d1, s1, s2, stype=stype)
+    def test_many_args_dense_not_last(self, mat_s, mat_s2, mat_d, stype):
+        c = kron(mat_d, mat_s, mat_s2, stype=stype)
         assert c.format == (stype if stype is not None else "csr")
-        c = kron(s1, d1, s2, stype=stype)
-        assert c.format == (stype if stype is not None else "csr")
-
-    @mark.parametrize("stype", (None,) + _SPARSE_FORMATS)
-    def test_many_args_dense_last_coo_construct(self, s1, s2, d1, stype):
-        c = kron(s1, s2, d1, stype=stype, coo_build=True)
+        c = kron(mat_s, mat_d, mat_s2, stype=stype)
         assert c.format == (stype if stype is not None else "csr")
 
     @mark.parametrize("stype", (None,) + _SPARSE_FORMATS)
-    def test_many_args_dense_not_last_coo_construct(self, s1, s2, d1, stype):
-        c = kron(s1, d1, s2, stype=stype, coo_build=True)
+    def test_many_args_dense_last_coo_construct(self, mat_s, mat_s2, mat_d,
+                                                stype):
+        c = kron(mat_s, mat_s2, mat_d, stype=stype, coo_build=True)
         assert c.format == (stype if stype is not None else "csr")
-        c = kron(d1, s1, s2, stype=stype, coo_build=True)
+
+    @mark.parametrize("stype", (None,) + _SPARSE_FORMATS)
+    def test_many_args_dense_not_last_coo_construct(self, mat_s, mat_s2, mat_d,
+                                                    stype):
+        c = kron(mat_s, mat_d, mat_s2, stype=stype, coo_build=True)
+        assert c.format == (stype if stype is not None else "csr")
+        c = kron(mat_d, mat_s, mat_s2, stype=stype, coo_build=True)
         assert c.format == (stype if stype is not None else "csr")
 
 
 class TestKronPow:
-    def test_dense(self, d1):
-        x = d1 & d1 & d1
-        y = kronpow(d1, 3)
+    def test_dense(self, mat_d):
+        x = mat_d & mat_d & mat_d
+        y = kronpow(mat_d, 3)
         assert_allclose(x, y)
 
-    def test_sparse(self, s1):
-        x = s1 & s1 & s1
-        y = kronpow(s1, 3)
+    def test_sparse(self, mat_s):
+        x = mat_s & mat_s & mat_s
+        y = kronpow(mat_s, 3)
         assert_allclose(x.A, y.A)
 
     @mark.parametrize("stype", _SPARSE_FORMATS)
-    def test_sparse_formats(self, stype, s1):
-        x = s1 & s1 & s1
-        y = kronpow(s1, 3, stype=stype)
+    def test_sparse_formats(self, stype, mat_s):
+        x = mat_s & mat_s & mat_s
+        y = kronpow(mat_s, 3, stype=stype)
         assert y.format == stype
         assert_allclose(x.A, y.A)
 
     @mark.parametrize("sformat_in", _SPARSE_FORMATS)
     @mark.parametrize("stype", (None,) + _SPARSE_FORMATS)
-    def test_sparse_formats_coo_construct(self, sformat_in, stype, s1):
-        s1 = s1.asformat(sformat_in)
-        x = s1 & s1 & s1
-        y = kronpow(s1, 3, stype=stype, coo_build=True)
+    def test_sparse_formats_coo_construct(self, sformat_in, stype, mat_s):
+        mat_s = mat_s.asformat(sformat_in)
+        x = mat_s & mat_s & mat_s
+        y = kronpow(mat_s, 3, stype=stype, coo_build=True)
         assert y.format == stype if stype is not None else "sformat_in"
         assert_allclose(x.A, y.A)

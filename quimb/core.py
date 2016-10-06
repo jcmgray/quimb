@@ -1,7 +1,7 @@
-"""
-Core functions for manipulating quantum objects.
+"""Core functions for manipulating quantum objects.
 """
 # TODO: move identity, trace to accel
+# TODO: refactor eyepad -> itensor
 
 import math
 import itertools
@@ -12,8 +12,9 @@ from numba import jit
 from numpy.matlib import zeros
 import scipy.sparse as sp
 
-from .accel import (accel, matrixify, realify, issparse, isop, vdot,
-                    _dot_dense, kron, kronpow)
+from .accel import (accel, matrixify, realify, issparse, isop, vdot, dot, prod,
+                    _dot_dense, kron, kronpow, isvec)
+
 
 _SPARSE_CONSTRUCTORS = {"csr": sp.csr_matrix,
                         "bsr": sp.bsr_matrix,
@@ -21,7 +22,7 @@ _SPARSE_CONSTRUCTORS = {"csr": sp.csr_matrix,
                         "coo": sp.coo_matrix}
 
 
-def sparse_matrix(data, stype="csr"):
+def _sparse_matrix(data, stype="csr"):
     """Construct a sparse matrix of a particular format.
 
     Parameters
@@ -116,18 +117,18 @@ def quimbify(data, qtype=None, normalized=False, chopped=False,
         # Must be dense to reshape
         data = np.asmatrix(data.A if sparse_input else data, dtype=complex)
         if qtype in {"k", "ket"}:
-            data = data.reshape((np.prod(data.shape), 1))
+            data = data.reshape((prod(data.shape), 1))
         elif qtype in {"b", "bra"}:
-            data = data.reshape((1, np.prod(data.shape))).conj()
-        elif qtype in {"d", "r", "rho", "op", "dop"} and not isop(data):
-            data = quimbify(data, "k") @ quimbify(data, "k").H
+            data = data.reshape((1, prod(data.shape))).conj()
+        elif qtype in {"d", "r", "rho", "op", "dop"} and isvec(data):
+            data = dot(quimbify(data, "k"), quimbify(data, "k").H)
     # Just cast as numpy matrix
     elif not sparse_output:
         data = np.asmatrix(data.A if sparse_input else data, dtype=complex)
 
     # Check if already sparse matrix, or wanted to be one
     if sparse_output:
-        data = sparse_matrix(data, (stype if stype is not None else "csr"))
+        data = _sparse_matrix(data, (stype if stype is not None else "csr"))
 
     # Optionally normalize and chop small components
     if normalized:
@@ -457,9 +458,9 @@ def perm_pad(op, dims, inds):
     """
     dims, inds = np.asarray(dims), np.asarray(inds)
     n = len(dims)  # number of subsytems
-    sz = np.prod(dims)  # Total size of system
+    sz = prod(dims)  # Total size of system
     dims_in = dims[inds]
-    sz_in = np.prod(dims_in)  # total size of operator space
+    sz_in = prod(dims_in)  # total size of operator space
     sz_out = sz // sz_in  # total size of identity space
     sz_op = op.shape[0]  # size of individual operator
     n_op = int(math.log(sz_in, sz_op))  # number of individual operators
@@ -480,7 +481,7 @@ def _permute_dense(p, dims, perm):
     """Permute the subsytems of a dense matrix.
     """
     p, perm = np.asarray(p), np.asarray(perm)
-    d = np.prod(dims)
+    d = prod(dims)
     if isop(p):
         return p.reshape((*dims, *dims)) \
                 .transpose((*perm, *(perm + len(dims)))) \
@@ -507,8 +508,8 @@ def _permute_sparse(a, dims, perm):
     # Construct permutation matrix and apply it to state
     perm_mat = sp.coo_matrix((np.ones(a.shape[0]), (ninds, oinds))).tocsr()
     if isop(a):
-        return (perm_mat @ a) @ perm_mat.H
-    return perm_mat @ a
+        return dot(dot(perm_mat, a), perm_mat.H)
+    return dot(perm_mat, a)
 
 
 def permute(a, dims, perm):
@@ -578,7 +579,7 @@ def _partial_trace_dense(p, dims, keep):
     """
     if isinstance(keep, int):
         keep = (keep,)
-    if not isop(p):  # p = psi
+    if isvec(p):  # p = psi
         p = np.asarray(p).reshape(dims)
         lose = _ind_complement(keep, len(dims))
         p = np.tensordot(p, p.conj(), (lose, lose))
@@ -598,11 +599,11 @@ def _trace_lose(p, dims, coo_lose):
     """Simple partial trace where the single subsytem at `coo_lose`
     is traced out.
     """
-    p = p if isop(p) else p @ p.H
+    p = p if isop(p) else dot(p, p.H)
     dims = np.asarray(dims)
     e = dims[coo_lose]
-    a = np.prod(dims[:coo_lose], dtype=int)
-    b = np.prod(dims[coo_lose+1:], dtype=int)
+    a = prod(dims[:coo_lose])
+    b = prod(dims[coo_lose+1:])
     rhos = zeros(shape=(a * b, a * b), dtype=np.complex128)
     for i in range(a * b):
         for j in range(i, a * b):
@@ -620,11 +621,11 @@ def _trace_keep(p, dims, coo_keep):
     """Simple partial trace where the single subsytem
     at `coo_keep` is kept.
     """
-    p = p if isop(p) else p @ p.H
+    p = p if isop(p) else dot(p, p.H)
     dims = np.asarray(dims)
     s = dims[coo_keep]
-    a = np.prod(dims[:coo_keep], dtype=int)
-    b = np.prod(dims[coo_keep+1:], dtype=int)
+    a = prod(dims[:coo_keep])
+    b = prod(dims[coo_keep+1:])
     rhos = zeros(shape=(s, s), dtype=np.complex128)
     for i in range(s):
         for j in range(i, s):
@@ -641,7 +642,7 @@ def _partial_trace_simple(p, dims, coos_keep):
     """Simple partial trace made up of consecutive single subsystem partial
     traces, augmented by 'compressing' the dimensions each time.
     """
-    p = p if isop(p) else p @ p.H
+    p = p if isop(p) else dot(p, p.H)
     dims, coos_keep = dim_compress(dims, coos_keep)
     if len(coos_keep) == 1:
         return _trace_keep(p, dims, *coos_keep)
@@ -676,10 +677,10 @@ _OVERLAP_METHODS = {
     (0, 1, 0): lambda a, b: vdot(a, _dot_dense(b, a)),
     (1, 0, 0): lambda a, b: vdot(b, _dot_dense(a, b)),
     (1, 1, 0): lambda a, b: _trace_dense(_dot_dense(a, b)),
-    (0, 0, 1): lambda a, b: abs((a.H @ b)[0, 0])**2,
-    (0, 1, 1): realify(lambda a, b: (a.H @ b @ a)[0, 0]),
-    (1, 0, 1): realify(lambda a, b: (b.H @ a @ b)[0, 0]),
-    (1, 1, 1): lambda a, b: _trace_sparse(a @ b),
+    (0, 0, 1): lambda a, b: abs(dot(a.H, b)[0, 0])**2,
+    (0, 1, 1): realify(lambda a, b: dot(a.H, dot(b, a))[0, 0]),
+    (1, 0, 1): realify(lambda a, b: dot(b.H, dot(a, b))[0, 0]),
+    (1, 1, 1): lambda a, b: _trace_sparse(dot(a, b)),
 }
 
 

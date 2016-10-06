@@ -5,8 +5,7 @@ from .. import issparse
 
 
 def sort_inds(a, method, sigma=None):
-    """
-    Return the sorting inds of a list
+    """Return the sorting inds of a list
 
     Parameters
     ----------
@@ -36,8 +35,7 @@ def sort_inds(a, method, sigma=None):
 
 def numpy_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
                   isherm=True, sort=True, ncv=None, **kwargs):
-    """
-    Partial eigen-decomposition using numpy's dense linear algebra.
+    """Partial eigen-decomposition using numpy's dense linear algebra.
 
     Parameters
     ----------
@@ -77,8 +75,7 @@ def numpy_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
 
 
 def numpy_svds(a, k=6, return_vecs=True, **kwargs):
-    """
-    Partial singular value decomposition using numpys (full) singular value
+    """Partial singular value decomposition using numpys (full) singular value
     decomposition.
 
     Parameters

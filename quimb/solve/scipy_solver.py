@@ -6,7 +6,7 @@ from ..accel import accel
 
 @accel
 def choose_ncv(k, n):  # pragma: no cover
-    """ Optimise number of lanczos vectors for iterative methods
+    """Optimise number of lanczos vectors for iterative methods
 
     Parameters
     ----------
@@ -22,7 +22,7 @@ def choose_ncv(k, n):  # pragma: no cover
 
 def scipy_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
                   isherm=True, ncv=None, sort=True, **kwargs):
-    """ Returns a few eigenpairs from a possibly sparse hermitian operator
+    """Returns a few eigenpairs from a possibly sparse hermitian operator
 
     Parameters
     ----------
@@ -56,7 +56,8 @@ def scipy_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
 
 
 def scipy_svds(a, k=6, ncv=None, return_vecs=True, **kwargs):
-    """ Compute a number of singular value pairs """
+    """Compute a number of singular value pairs
+    """
     settings = {
         'k': k,
         'ncv': choose_ncv(k, a.shape[0]) if ncv is None else ncv,

@@ -18,14 +18,16 @@ import scipy.linalg as sla
 import scipy.sparse.linalg as spla
 from scipy.optimize import minimize
 
-from .accel import (_dot_dense, ldmul, issparse, isop, zeroify, realify)
+from .accel import (_dot_dense, ldmul, issparse, isop, zeroify, realify, prod,
+                    isvec, dot)
 from .core import (qu, kron, eye, eyepad, tr, ptr, infer_size, overlap, dop)
 from .solve import (eigvals, eigsys, norm, seigvals)
 from .gen import (sig, basis_vec, bell_state, bloch_state)
 
 
 def expm(a, herm=True):
-    """ Matrix exponential, can be accelerated if explicitly hermitian. """
+    """Matrix exponential, can be accelerated if explicitly hermitian.
+    """
     if issparse(a):
         return spla.expm(a)
     elif not herm:
@@ -36,7 +38,8 @@ def expm(a, herm=True):
 
 
 def sqrtm(a, herm=True):
-    """ Matrix square root, can be accelerated if explicitly hermitian. """
+    """Matrix square root, can be accelerated if explicitly hermitian.
+    """
     if issparse(a):
         raise NotImplementedError("No sparse sqrtm available.")
     elif not herm:
@@ -47,17 +50,20 @@ def sqrtm(a, herm=True):
 
 
 def fidelity(rho, sigma):
-    if not isop(rho) or not isop(sigma):
+    """Fidelity between two quantum states
+    """
+    if isvec(rho) or isvec(sigma):
         return overlap(rho, sigma)
     else:
         sqrho = sqrtm(rho)
-        return tr(sqrtm(sqrho @ sigma @ sqrho))
+        return tr(sqrtm(dot(sqrho, dot(sigma, sqrho))))
         # return norm(sqrtm(rho) @ sqrtm(sigma), "tr")
 
 
 def purify(rho, sparse=False):
-    """ Take state rho and purify it into a wavefunction of squared
-    dimension. """
+    """Take state rho and purify it into a wavefunction of squared
+    dimension.
+    """
     # TODO: trim zeros?
     d = rho.shape[0]
     ls, vs = eigsys(rho)
@@ -70,7 +76,7 @@ def purify(rho, sparse=False):
 
 @zeroify
 def entropy(a, rank=None):
-    """ Compute the (von Neumann) entropy
+    """Compute the (von Neumann) entropy
 
     Parameters
     ----------
@@ -95,17 +101,9 @@ def entropy(a, rank=None):
     return np.sum(-l * np.log2(l))
 
 
-def prod(xs):
-    """ Product of a list. """
-    y = 1
-    for x in xs:
-        y *= x
-    return y
-
-
 @zeroify
 def mutual_information(p, dims=(2, 2), sysa=0, sysb=1, rank=None):
-    """ Find the mutual information between two subystems of a state
+    """Find the mutual information between two subystems of a state
 
     Parameters
     ----------
@@ -139,21 +137,23 @@ mutinf = mutual_information
 
 
 def partial_transpose(p, dims=(2, 2)):
-    """ Partial transpose of state `p` with bipartition as given by
-    `dims`. """
+    """Partial transpose of state `p` with bipartition as given by
+    `dims`.
+    """
     p = qu(p, "dop")
     p = np.array(p)\
         .reshape((*dims, *dims))  \
         .transpose((2, 1, 0, 3))  \
-        .reshape((np.prod(dims), np.prod(dims)))
+        .reshape((prod(dims), prod(dims)))
     return qu(p)
 
 
 @zeroify
 def negativity(p, dims=(2, 2), sysa=0, sysb=1):
-    """ Negativity between `sysa` and `sysb` of state `p` with subsystem
-    dimensions `dims` """
-    if not isop(p):
+    """Negativity between `sysa` and `sysb` of state `p` with subsystem
+    dimensions `dims`
+    """
+    if isvec(p):
         p = qu(p, qtype='dop')
     if len(dims) > 2:
         p = ptr(p, dims, (sysa, sysb))
@@ -164,12 +164,13 @@ def negativity(p, dims=(2, 2), sysa=0, sysb=1):
 
 @zeroify
 def logarithmic_negativity(p, dims=(2, 2), sysa=0, sysb=1):
-    """ Logarithmic negativity between `sysa` and `sysb` of `p`, with
-    subsystem dimensions `dims`. """
+    """Logarithmic negativity between `sysa` and `sysb` of `p`, with
+    subsystem dimensions `dims`.
+    """
     if len(dims) > 2:
         p = ptr(p, dims, (sysa, sysb))
         dims = (dims[sysa], dims[sysb])
-    if not isop(p):
+    if isvec(p):
         p = qu(p, qtype='dop')
     e = log2(norm(partial_transpose(p, dims), "tr"))
     return max(0.0, e)
@@ -179,21 +180,22 @@ logneg = logarithmic_negativity
 
 @zeroify
 def concurrence(p):
-    """ Concurrence of two-qubit state `p`. """
+    """Concurrence of two-qubit state `p`.
+    """
     if isop(p):
         p = qu(p, "dop")  # make sure density operator
-        pt = kron(sig(2), sig(2)) @ p.conj() @ kron(sig(2), sig(2))
-        l = (nla.eigvals(p @ pt).real**2)**0.25
+        pt = dot(kron(sig(2), sig(2)), dot(p.conj(), kron(sig(2), sig(2))))
+        l = (nla.eigvals(dot(p, pt)).real**2)**0.25
         return max(0, 2 * np.max(l) - np.sum(l))
     else:
         p = qu(p, "ket")
-        pt = kron(sig(2), sig(2)) @ p.conj()
-        c = np.real(abs(p.H @ pt)).item(0)
+        pt = dot(kron(sig(2), sig(2)), p.conj())
+        c = np.real(abs(dot(p.H, pt))).item(0)
         return max(0, c)
 
 
 def one_way_classical_information(p_ab, prjs, precomp_func=False):
-    """ One way classical information for two qubit density matrix.
+    """One way classical information for two qubit density matrix.
 
     Parameters
     ----------
@@ -213,7 +215,7 @@ def one_way_classical_information(p_ab, prjs, precomp_func=False):
     def owci(prjs):
         def gen_paj():
             for prj in prjs:
-                p_ab_j = (eye(2) & prj) @ p_ab
+                p_ab_j = dot((eye(2) & prj), p_ab)
                 prob = tr(p_ab_j)
                 p_a_j = ptr(p_ab_j, (2, 2), 0) / prob
                 yield prob, p_a_j
@@ -224,7 +226,8 @@ def one_way_classical_information(p_ab, prjs, precomp_func=False):
 
 @zeroify
 def quantum_discord(p):
-    """ Quantum Discord for two qubit density matrix `p`. """
+    """Quantum Discord for two qubit density matrix `p`.
+    """
     p = qu(p, "dop")
     iab = mutual_information(p)
     owci = one_way_classical_information(p, None, precomp_func=True)
@@ -245,7 +248,8 @@ def quantum_discord(p):
 
 @zeroify
 def trace_distance(p, w):
-    """ Trace distance between states `p` and `w`. """
+    """Trace distance between states `p` and `w`.
+    """
     p_is_op, w_is_op = isop(p), isop(w)
     if not p_is_op and not w_is_op:
         return sqrt(1 - overlap(p, w))
@@ -254,7 +258,7 @@ def trace_distance(p, w):
 
 
 def decomp(a, fn, fn_args, fn_d, nmlz_func, mode="p", tol=1e-3):
-    """ Decomposes an operator via the Hilbert-schmidt inner product into the
+    """Decomposes an operator via the Hilbert-schmidt inner product into the
     pauli group. Can both print the decomposition or return it.
 
     Parameters
@@ -269,7 +273,7 @@ def decomp(a, fn, fn_args, fn_d, nmlz_func, mode="p", tol=1e-3):
     -------
         (names_cffs): OrderedDict of Pauli operator name and overlap with a.
     """
-    if not isop(a):
+    if isvec(a):
         a = qu(a, "dop")  # make sure operator
     n = infer_size(a, base=fn_d)
 
@@ -310,7 +314,7 @@ bell_decomp = functools.partial(decomp,
 
 def correlation(p, opa, opb, sysa, sysb, dims=None, sparse=None,
                 precomp_func=False):
-    """ Calculate the correlation between two sites given two operators.
+    """Calculate the correlation between two sites given two operators.
 
     Parameters
     ----------
@@ -349,7 +353,7 @@ def correlation(p, opa, opb, sysa, sysb, dims=None, sparse=None,
 
 def pauli_correlations(p, ss=("xx", "yy", "zz"), sysa=0, sysb=1,
                        sum_abs=False, precomp_func=False):
-    """ Calculate the correlation between sites for a list of operator pairs.
+    """Calculate the correlation between sites for a list of operator pairs.
 
     Parameters
     ----------
@@ -378,7 +382,7 @@ def pauli_correlations(p, ss=("xx", "yy", "zz"), sysa=0, sysb=1,
 
 
 def ent_cross_matrix(p, ent_fn=concurrence, calc_self_ent=True):
-    """ Calculate the pair-wise function ent_fn  between all sites
+    """Calculate the pair-wise function ent_fn  between all sites
     of a state.
 
     Parameters
@@ -424,16 +428,17 @@ def qid(p, dims, inds, precomp_func=False, sparse_comp=True,
 
     # Define function closed over precomputed operators
     def qid_func(x):
-        if not isop(x):
+        if isvec(x):
             x = dop(x)
-        return tuple(sum(coeff * norm_func(x @ op - op @ x)**pow for op in ops)
+        return tuple(sum(coeff * norm_func(dot(x, op) - dot(op, x))**pow
+                         for op in ops)
                      for ops in ops_i)
 
     return qid_func if precomp_func else qid_func(p)
 
 
 def is_degenerate(op, tol=1e12):
-    """ Check if operator has any degenerate eigenvalues, determined relative
+    """Check if operator has any degenerate eigenvalues, determined relative
     to equal spacing of all eigenvalues.
 
     Paraemeters
