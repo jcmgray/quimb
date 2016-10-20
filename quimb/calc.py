@@ -18,11 +18,40 @@ import scipy.linalg as sla
 import scipy.sparse.linalg as spla
 from scipy.optimize import minimize
 
-from .accel import (_dot_dense, ldmul, issparse, isop, zeroify, realify, prod,
-                    isvec, dot)
-from .core import (qu, kron, eye, eyepad, tr, ptr, infer_size, overlap, dop)
-from .solve import (eigvals, eigsys, norm, seigvals)
-from .gen import (sig, basis_vec, bell_state, bloch_state)
+from .accel import (
+    _dot_dense,
+    ldmul,
+    issparse,
+    isop,
+    zeroify,
+    realify,
+    prod,
+    isvec,
+    dot,
+)
+from .core import (
+    qu,
+    kron,
+    eye,
+    eyepad,
+    tr,
+    ptr,
+    infer_size,
+    overlap,
+    dop,
+)
+from .solve import (
+    eigvals,
+    eigsys,
+    norm,
+    seigvals,
+)
+from .gen import (
+    sig,
+    basis_vec,
+    bell_state,
+    bloch_state,
+)
 
 
 def expm(a, herm=True):
@@ -167,12 +196,15 @@ def logarithmic_negativity(p, dims=(2, 2), sysa=0, sysb=1):
     """Logarithmic negativity between `sysa` and `sysb` of `p`, with
     subsystem dimensions `dims`.
     """
-    if len(dims) > 2:
-        p = ptr(p, dims, (sysa, sysb))
-        dims = (dims[sysa], dims[sysb])
-    if isvec(p):
-        p = qu(p, qtype='dop')
-    e = log2(norm(partial_transpose(p, dims), "tr"))
+    if isvec(p) and len(dims) == 2:  # pure bipartition, easier to calc
+        smaller_system = 0 if dims[0] <= dims[1] else 1
+        rhoa = ptr(p, dims, smaller_system)
+        e = 2 * log2(sum(np.sqrt(eigvals(rhoa, sort=False))))
+    else:
+        if len(dims) > 2:  #
+            p = ptr(p, dims, (sysa, sysb))
+            dims = (dims[sysa], dims[sysb])
+        e = log2(norm(partial_transpose(p, dims), "tr"))
     return max(0.0, e)
 
 logneg = logarithmic_negativity

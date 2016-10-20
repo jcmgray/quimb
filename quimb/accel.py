@@ -3,7 +3,6 @@
 # TODO: merge kron, eyepad --> tensor
 # TODO: finish idot with rpn
 
-
 import cmath
 import functools
 import psutil
@@ -33,6 +32,7 @@ def prod(xs):
 def matrixify(fn):
     """To decorate functions returning ndarrays.
     """
+    @functools.wraps(fn)
     def matrixified_fn(*args, **kwargs):
         return np.asmatrix(fn(*args, **kwargs))
     return matrixified_fn
@@ -41,6 +41,7 @@ def matrixify(fn):
 def realify(fn, imag_tol=1.0e-14):
     """To decorate functions that should return float for small complex.
     """
+    @functools.wraps(fn)
     def realified_fn(*args, **kwargs):
         x = fn(*args, **kwargs)
         try:
@@ -50,11 +51,12 @@ def realify(fn, imag_tol=1.0e-14):
     return realified_fn
 
 
-def zeroify(f, tol=1e-14):
+def zeroify(fn, tol=1e-14):
     """To decorate functions that compute close to zero answers.
     """
+    @functools.wraps(fn)
     def zeroified_f(*args, **kwargs):
-        x = f(*args, **kwargs)
+        x = fn(*args, **kwargs)
         return 0.0 if abs(x) < tol else x
     return zeroified_f
 
