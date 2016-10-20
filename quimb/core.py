@@ -107,7 +107,8 @@ def quimbify(data, qtype=None, normalized=False, chopped=False,
     """
 
     sparse_input = issparse(data)
-    sparse_output = (sparse or (sparse_input and sparse is None) or
+    sparse_output = ((sparse) or
+                     (sparse_input and sparse is None) or
                      (sparse is None and stype))
     # Infer output sparse format from input if necessary
     if sparse_input and sparse_output and stype is None:

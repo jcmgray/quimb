@@ -1,5 +1,7 @@
 from functools import lru_cache
 import numpy as np
+import scipy.sparse as sp
+from ..accel import accel
 from ..core import qu, eye, kron, eyepad
 
 
@@ -146,3 +148,59 @@ def ham_j1j2(n, j1=1.0, j2=0.5, bz=0.0, cyclic=True, sparse=False):
     if bz != 0:
         ham += bz * sum(gen_bz)
     return ham if sparse else ham.todense()
+
+
+@accel
+def cmbn(n, k):  # pragma: no cover
+    """Integer combinatorial factor.
+    """
+    x = 1.0
+    for _ in range(k):
+        x *= n / k
+        n -= 1
+        k -= 1
+    return x
+
+
+def uniq_perms(xs):
+    """Generate all the unique permutations of sequence `xs`.
+    """
+    if len(xs) == 1:
+        yield (xs[0],)
+    else:
+        uniq_xs = set(xs)
+        for first_x in uniq_xs:
+            rem_xs = list(xs)
+            rem_xs.remove(first_x)
+            for sub_perm in uniq_perms(rem_xs):
+                yield (first_x,) + sub_perm
+
+
+def zspin_projector(n, sz=0, stype="csr"):
+    """Construct the projector onto a spin-z subpspace.
+
+    Parameters
+    ----------
+        n : int
+            Total size of spin system.
+        sz : float, integer multiple of 1/2
+            Spin-z subspace to find projector for.
+        stype : str
+            Sparse format of the output matrix.
+    """
+    # Number of 'up' spins
+    k = n/2 + sz
+    assert k.is_integer()
+    k = int(k)
+    # Size of subspace
+    p = int(round(cmbn(n, k)))
+
+    # Find all computational basis states with correct number of 0s and 1s
+    first_perm = "".join(['0'] * (n - k) + ['1'] * k)
+    cis = tuple(range(p))
+    cjs = tuple(int("".join(perm), 2) for perm in uniq_perms(first_perm))
+
+    # Construct matrix which prjects only on to these basis states
+    prj = sp.coo_matrix((np.ones(p, dtype=complex), (cis, cjs)),
+                        shape=(p, 2**n), dtype=complex)
+    return qu(prj, stype=stype)
