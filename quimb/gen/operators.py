@@ -1,6 +1,9 @@
 from functools import lru_cache
+
+from cytoolz import isiterable, concat
 import numpy as np
 import scipy.sparse as sp
+
 from ..accel import accel
 from ..core import qu, eye, kron, eyepad
 
@@ -177,28 +180,39 @@ def uniq_perms(xs):
 
 
 def zspin_projector(n, sz=0, stype="csr"):
-    """Construct the projector onto a spin-z subpspace.
+    """Construct the projector onto spin-z subpspaces.
 
     Parameters
     ----------
         n : int
             Total size of spin system.
-        sz : float, integer multiple of 1/2
-            Spin-z subspace to find projector for.
+        sz : value or sequence of values
+            Spin-z value(s) subspace(s) to find projector for.
         stype : str
             Sparse format of the output matrix.
     """
-    # Number of 'up' spins
-    k = n/2 + sz
-    assert k.is_integer()
-    k = int(k)
-    # Size of subspace
-    p = int(round(cmbn(n, k)))
+    if not isiterable(sz):
+        sz = (sz,)
 
-    # Find all computational basis states with correct number of 0s and 1s
-    first_perm = "".join(['0'] * (n - k) + ['1'] * k)
-    cis = tuple(range(p))
-    cjs = tuple(int("".join(perm), 2) for perm in uniq_perms(first_perm))
+    p = 0
+    all_perms = []
+
+    for s in sz:
+        # Number of 'up' spins
+        k = n/2 + s
+        if not k.is_integer():
+            raise ValueError("{} is not a valid spin half subspace for "
+                             "{} spins.".format(s, n))
+        k = int(round(k))
+        # Size of subspace
+        p += int(round(cmbn(n, k)))
+        # Find all computational basis states with correct number of 0s and 1s
+        base_perm = '0'*(n - k) + '1'*k
+        all_perms += [uniq_perms(base_perm)]
+
+    # Coordinates
+    cis = tuple(range(p))  # arbitrary basis
+    cjs = tuple(int("".join(perm), 2) for perm in concat(all_perms))
 
     # Construct matrix which prjects only on to these basis states
     prj = sp.coo_matrix((np.ones(p, dtype=complex), (cis, cjs)),
