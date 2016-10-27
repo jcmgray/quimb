@@ -6,6 +6,7 @@ dependencies:
   - numba
   - numexpr
   - psutil
+  - cytoolz
   - coverage
   - pytest
   - pytest-cov
