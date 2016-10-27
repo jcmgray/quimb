@@ -413,7 +413,7 @@ def pauli_correlations(p, ss=("xx", "yy", "zz"), sysa=0, sysb=1,
     return tuple(gen_corr_list())
 
 
-def ent_cross_matrix(p, ent_fn=concurrence, calc_self_ent=True):
+def ent_cross_matrix(p, ent_fn=logneg, calc_self_ent=True, block2=False):
     """Calculate the pair-wise function ent_fn  between all sites
     of a state.
 
@@ -431,6 +431,8 @@ def ent_cross_matrix(p, ent_fn=concurrence, calc_self_ent=True):
     """
     sz_p = infer_size(p)
     ents = np.empty((sz_p, sz_p))
+
+    # Calculate individual pair-wise entanglement
     for i in range(sz_p):
         for j in range(i, sz_p):
             if i == j:
@@ -445,6 +447,27 @@ def ent_cross_matrix(p, ent_fn=concurrence, calc_self_ent=True):
                 ent = ent_fn(rhoab)
             ents[i, j] = ent
             ents[j, i] = ent
+
+    # Calculate pair-wise entanglement between blocks of 2
+    if block2:
+        for i in range(0, sz_p, 2):
+            for j in range(i, sz_p, 2):
+                if i == j:
+                    if calc_self_ent:
+                        rhoa = ptr(p, (2,)*sz_p, (i, i+1))
+                        psiap = purify(rhoa)
+                        ent = ent_fn(psiap, dims=(4, 4)) / 2
+                    else:
+                        ent = np.nan
+                    ents[j+1, i] = ent
+                else:
+                    rhoab = ptr(p, (2,) * sz_p, (i, i+1, j, j+1))
+                    ent = ent_fn(rhoab, dims=(4, 4)) / 2
+                    ents[j, i] = ent
+                    ents[j+1, i] = ent
+                    ents[j, i+1] = ent
+                    ents[j+1, i+1] = ent
+
     return ents
 
 
