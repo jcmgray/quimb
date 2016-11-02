@@ -2,10 +2,8 @@ from pytest import fixture, mark
 import numpy as np
 from numpy.testing import assert_allclose
 import scipy.sparse as sp
-from .. import rand_matrix, rand_ket
-from ..accel import (
-    matrixify,
-    realify,
+
+from quimb import (
     issparse,
     isket,
     isop,
@@ -22,6 +20,12 @@ from ..accel import (
     kron,
     kronpow,
     explt,
+    rand_matrix,
+    rand_ket,
+)
+from quimb.accel import (
+    matrixify,
+    realify,
     _dot_sparse,
     _par_dot_csr_matvec,
     _kron_dense,
@@ -336,9 +340,9 @@ class TestOuter:
 
 class TestExplt:
     def test_small(self):
-        l = np.random.randn(3)
-        en = np.exp(-1.0j * l * 7)
-        eq = explt(l, 7)
+        evals = np.random.randn(3)
+        en = np.exp(-1.0j * evals * 7)
+        eq = explt(evals, 7)
         assert_allclose(eq, en)
 
 

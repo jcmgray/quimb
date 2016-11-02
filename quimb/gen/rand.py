@@ -29,7 +29,7 @@ def rand_matrix(d, scaled=True, sparse=False, stype='csr', density=None):
     """
     if sparse:
         # Aim for 10 non-zero values per row, but betwen 1 and d/2
-        density = 10/d if density is None else density
+        density = 10 / d if density is None else density
         density = min(max(density, d**-2), 1 - d**-2)
         mat = sp.random(d, d, format=stype, density=density)
         mat.data = np.random.randn(mat.nnz) + 1.0j * np.random.randn(mat.nnz)
@@ -48,10 +48,11 @@ def rand_herm(d, sparse=False, density=None):
     semi-circular distribution between [-1, 1].
     """
     if sparse:
-        density = 10/d if density is None else density
+        density = 10 / d if density is None else density
         density = min(max(density, d**-2), 1 - d**-2)
         density /= 2  # to account of herm construction
-    herm = rand_matrix(d, scaled=True, sparse=sparse, density=density)/(2**1.5)
+    herm = rand_matrix(d, scaled=True, sparse=sparse,
+                       density=density) / (2**1.5)
     herm += herm.H
     return herm
 
@@ -62,7 +63,7 @@ def rand_pos(d, sparse=False, density=None):
     between [0, 1].
     """
     if sparse:
-        density = 10/d if density is None else density
+        density = 10 / d if density is None else density
         density = min(max(density, d**-2), 1 - d**-2)
         density = 0.5 * (density / d)**0.5  # to account for pos construction
     pos = rand_matrix(d, scaled=True, sparse=sparse, density=density)
@@ -122,7 +123,7 @@ def rand_mix(d):
     where the composite system varies in size between 2 and d. This produces
     a spread of states including more purity but has no real meaning.
     """
-    m = np.random.randint(2, d+1)
+    m = np.random.randint(2, d + 1)
     psi = rand_ket(d * m)
     return ptr(psi, [d, m], 0)
 

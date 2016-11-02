@@ -12,7 +12,8 @@ algebraic order by default.
 
 import numpy as np
 import numpy.linalg as nla
-from .. import issparse, vdot
+
+from ..accel import issparse, vdot
 from .numpy_solver import numpy_seigsys, numpy_svds
 from .scipy_solver import scipy_seigsys, scipy_svds
 from . import SLEPC4PY_FOUND
@@ -34,14 +35,14 @@ def eigsys(a, sort=True, isherm=True):
 
     Returns
     -------
-        l: array of eigenvalues
-        v: corresponding eigenvectors as columns of matrix
+        evals: array of eigenvalues
+        evecs: corresponding eigenvectors as columns of matrix
     """
-    l, v = nla.eigh(a) if isherm else nla.eig(a)
+    evals, evecs = nla.eigh(a) if isherm else nla.eig(a)
     if sort:
-        sortinds = np.argsort(l)
-        return l[sortinds], np.asmatrix(v[:, sortinds])
-    return l, np.asmatrix(v)
+        sortinds = np.argsort(evals)
+        return evals[sortinds], np.asmatrix(evecs[:, sortinds])
+    return evals, np.asmatrix(evecs)
 
 
 def eigvals(a, sort=True, isherm=True):
@@ -54,10 +55,10 @@ def eigvals(a, sort=True, isherm=True):
 
     Returns
     -------
-        l: array of eigenvalues
+        evals: array of eigenvalues
     """
-    l = nla.eigvalsh(a) if isherm else nla.eigvals(a)
-    return np.sort(l) if sort else l
+    evals = nla.eigvalsh(a) if isherm else nla.eigvals(a)
+    return np.sort(evals) if sort else evals
 
 
 def eigvecs(a, sort=True, isherm=True):
@@ -70,7 +71,7 @@ def eigvecs(a, sort=True, isherm=True):
 
     Returns
     -------
-        v: eigenvectors as columns of matrix
+        evecs: eigenvectors as columns of matrix
     """
     return eigsys(a, sort=sort, isherm=isherm)[1]
 

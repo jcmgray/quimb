@@ -12,8 +12,20 @@ from numba import jit
 from numpy.matlib import zeros
 import scipy.sparse as sp
 
-from .accel import (accel, matrixify, realify, issparse, isop, vdot, dot, prod,
-                    _dot_dense, kron, kronpow, isvec)
+from .accel import (
+    accel,
+    matrixify,
+    realify,
+    issparse,
+    isop,
+    vdot,
+    dot,
+    prod,
+    _dot_dense,
+    kron,
+    kronpow,
+    isvec
+)
 
 
 _SPARSE_CONSTRUCTORS = {"csr": sp.csr_matrix,
@@ -139,6 +151,7 @@ def quimbify(data, qtype=None, normalized=False, chopped=False,
 
     return data
 
+
 qu = quimbify
 ket = functools.partial(quimbify, qtype='ket')
 bra = functools.partial(quimbify, qtype='bra')
@@ -198,6 +211,7 @@ def identity(d, sparse=False, stype="csr"):
     """
     return _identity_sparse(d, stype=stype) if sparse else _identity_dense(d)
 
+
 eye = identity
 speye = functools.partial(identity, sparse=True)
 
@@ -252,7 +266,7 @@ def _dim_map_2d(sza, szb, coos):
 def _dim_map_nd(szs, coos, cyclic=False, trim=False):
     strides = [1]
     for sz in szs[-1:0:-1]:
-        strides.insert(0, sz*strides[0])
+        strides.insert(0, sz * strides[0])
     if cyclic:
         coos = ((c % sz for c, sz in zip(coo, szs)) for coo in coos)
     elif trim:
@@ -562,7 +576,7 @@ def itrace(a, axes=(0, 1)):
         mod1 = sum(x < axis1 for x in gone)
         mod2 = sum(x < axis2 for x in gone)
         gone |= {axis1, axis2}
-        a = np.trace(a, axis1=axis1-mod1, axis2=axis2-mod2)
+        a = np.trace(a, axis1=axis1 - mod1, axis2=axis2 - mod2)
     return a
 
 
@@ -604,15 +618,15 @@ def _trace_lose(p, dims, coo_lose):
     dims = np.asarray(dims)
     e = dims[coo_lose]
     a = prod(dims[:coo_lose])
-    b = prod(dims[coo_lose+1:])
+    b = prod(dims[coo_lose + 1:])
     rhos = zeros(shape=(a * b, a * b), dtype=np.complex128)
     for i in range(a * b):
         for j in range(i, a * b):
-            rhos[i, j] = trace(p[
-                    e*b*(i//b) + (i % b):
-                    e*b*(i//b) + (i % b) + (e-1)*b + 1: b,
-                    e*b*(j//b) + (j % b):
-                    e*b*(j//b) + (j % b) + (e-1)*b + 1: b])
+            i_i = e * b * (i // b) + (i % b)
+            i_f = e * b * (i // b) + (i % b) + (e - 1) * b + 1
+            j_i = e * b * (j // b) + (j % b)
+            j_f = e * b * (j // b) + (j % b) + (e - 1) * b + 1
+            rhos[i, j] = trace(p[i_i:i_f:b, j_i:j_f:b])
             if j != i:
                 rhos[j, i] = rhos[i, j].conjugate()
     return rhos
@@ -626,14 +640,16 @@ def _trace_keep(p, dims, coo_keep):
     dims = np.asarray(dims)
     s = dims[coo_keep]
     a = prod(dims[:coo_keep])
-    b = prod(dims[coo_keep+1:])
+    b = prod(dims[coo_keep + 1:])
     rhos = zeros(shape=(s, s), dtype=np.complex128)
     for i in range(s):
         for j in range(i, s):
             for k in range(a):
-                rhos[i, j] += trace(p[
-                        b*i + s*b*k: b*i + s*b*k + b,
-                        b*j + s*b*k: b*j + s*b*k + b])
+                i_i = b * i + s * b * k
+                i_f = b * i + s * b * k + b
+                j_i = b * j + s * b * k
+                j_f = b * j + s * b * k + b
+                rhos[i, j] += trace(p[i_i:i_f, j_i:j_f])
             if j != i:
                 rhos[j, i] = rhos[i, j].conjugate()
     return rhos
@@ -648,9 +664,9 @@ def _partial_trace_simple(p, dims, coos_keep):
     if len(coos_keep) == 1:
         return _trace_keep(p, dims, *coos_keep)
     lmax = max(enumerate(dims),
-               key=lambda ix: (ix[0] not in coos_keep)*ix[1])[0]
+               key=lambda ix: (ix[0] not in coos_keep) * ix[1])[0]
     p = _trace_lose(p, dims, lmax)
-    dims = (*dims[:lmax], *dims[lmax+1:])
+    dims = (*dims[:lmax], *dims[lmax + 1:])
     coos_keep = {(ind if ind < lmax else ind - 1) for ind in coos_keep}
     return _partial_trace_simple(p, dims, coos_keep)
 

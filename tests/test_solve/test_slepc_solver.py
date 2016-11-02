@@ -5,11 +5,25 @@ from pytest import fixture, mark
 import numpy as np
 import scipy.sparse as sp
 from numpy.testing import assert_allclose
-from ... import (qu, rand_uni, ldmul, rand_matrix, scipy_svds, SLEPC4PY_FOUND,
-                 rand_herm, seigsys, overlap, eye)
+
+from quimb import (
+    qu,
+    rand_uni,
+    ldmul,
+    rand_matrix,
+    rand_herm,
+    seigsys,
+    overlap,
+    eye,
+)
+from quimb.solve import SLEPC4PY_FOUND
+from quimb.solve.scipy_solver import scipy_svds
 if SLEPC4PY_FOUND:
-    from ...solve.slepc_solver import (slepc_seigsys, slepc_svds,
-                                       convert_to_petsc, new_petsc_vec)
+    from quimb.solve.slepc_solver import (
+        slepc_seigsys,
+        slepc_svds,
+        convert_to_petsc,
+        new_petsc_vec)
 
 
 slepc4py_notfound_msg = "No SLEPc4py installation"

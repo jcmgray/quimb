@@ -1,7 +1,7 @@
 import numpy as np
 import numpy.linalg as nla
 
-from .. import issparse
+from ..accel import issparse
 
 
 def sort_inds(a, method, sigma=None):
@@ -19,16 +19,16 @@ def sort_inds(a, method, sigma=None):
     """
     _SORT_FUNCS = {
         "LM": lambda a: -abs(a),
-        "SM": lambda a: -abs(1/a),
+        "SM": lambda a: -abs(1 / a),
         "SA": lambda a: a,
         "SR": lambda a: a.real,
         "SI": lambda a: a.imag,
         "LA": lambda a: -a,
         "LR": lambda a: -a.real,
         "LI": lambda a: -a.imag,
-        "TM": lambda a: -1/abs(abs(a) - sigma),
-        "TR": lambda a: -1/abs(a.real - sigma),
-        "TI": lambda a: -1/abs(a.imag - sigma),
+        "TM": lambda a: -1 / abs(abs(a) - sigma),
+        "TR": lambda a: -1 / abs(a.real - sigma),
+        "TI": lambda a: -1 / abs(a.imag - sigma),
     }
     return np.argsort(_SORT_FUNCS[method.upper()](a))
 
@@ -60,18 +60,18 @@ def numpy_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
              (False, False): nla.eigvals}[(isherm, return_vecs)]
 
     if return_vecs:
-        l, v = efunc(a.A if issparse(a) else a, **kwargs)
-        sk = sort_inds(l, method=which, sigma=sigma)[:k]
-        l, v = l[sk], np.asmatrix(v[:, sk])
+        evals, evecs = efunc(a.A if issparse(a) else a, **kwargs)
+        sk = sort_inds(evals, method=which, sigma=sigma)[:k]
+        evals, evecs = evals[sk], np.asmatrix(evecs[:, sk])
         if sort:
-            so = np.argsort(l)
-            return l[so], v[:, so]
-        return l, v
+            so = np.argsort(evals)
+            return evals[so], evecs[:, so]
+        return evals, evecs
     else:
-        l = efunc(a.A if issparse(a) else a, **kwargs)
-        sk = sort_inds(l, method=which, sigma=sigma)[:k]
-        l = l[sk]
-        return np.sort(l) if sort else l
+        evals = efunc(a.A if issparse(a) else a, **kwargs)
+        sk = sort_inds(evals, method=which, sigma=sigma)[:k]
+        evals = evals[sk]
+        return np.sort(evals) if sort else evals
 
 
 def numpy_svds(a, k=6, return_vecs=True, **kwargs):

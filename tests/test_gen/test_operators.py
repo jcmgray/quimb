@@ -1,21 +1,19 @@
 import pytest
 import numpy as np
 from numpy.testing import assert_allclose
-from ... import (
+from quimb import (
     issparse,
     eigvals,
     eigvecs,
     groundstate,
     overlap,
     singlet,
-    seigvals
-)
-from ...gen.operators import (
+    seigvals,
     sig,
     controlled,
     ham_heis,
     ham_j1j2,
-    zspin_projector
+    zspin_projector,
 )
 
 
@@ -58,8 +56,8 @@ class TestControlledZ:
 class TestHamHeis:
     def test_ham_heis_2(self):
         h = ham_heis(2, cyclic=False)
-        l = eigvals(h)
-        assert_allclose(l, [-3, 1, 1, 1])
+        evals = eigvals(h)
+        assert_allclose(evals, [-3, 1, 1, 1])
         gs = groundstate(h)
         assert_allclose(overlap(gs, singlet()), 1.)
 
@@ -70,8 +68,8 @@ class TestHamHeis:
 
     def test_ham_heis_bz(self):
         h = ham_heis(2, cyclic=False, bz=2)
-        l = eigvals(h)
-        assert_allclose(l, [-3, -3, 1, 5])
+        evals = eigvals(h)
+        assert_allclose(evals, [-3, -3, 1, 5])
 
     @pytest.mark.parametrize("stype", ["coo", "csr", "csc", "bsr"])
     def test_sformat_construct(self, stype):
@@ -123,9 +121,9 @@ class TestSpinZProjector:
         with pytest.raises(ValueError):
             zspin_projector(5, 0)
         with pytest.raises(ValueError):
-            zspin_projector(4, 1/2)
+            zspin_projector(4, 1 / 2)
 
-    @pytest.mark.parametrize("sz", [(-1/2, 1/2), (3/2, 5/2)])
+    @pytest.mark.parametrize("sz", [(-1 / 2, 1 / 2), (3 / 2, 5 / 2)])
     def test_spin_half_double_space(self, sz):
         prj = zspin_projector(5, sz)
         h = ham_heis(5)

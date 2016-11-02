@@ -1,5 +1,7 @@
 """Interface to slepc4py for solving advanced eigenvalue problems.
 """
+# TODO: fix mpi abort errors with multiprocessing
+# TODO: set number of processes (using mpi4py?)
 # TODO: delete solver or keep and extend
 # TODO: FEAST / other contour solvers?
 # TODO: exponential, sqrt etc.

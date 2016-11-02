@@ -40,14 +40,14 @@ from .core import (
     overlap,
     dop,
 )
-from .solve import (
-    eigvals,
+from .solve.base_solver import (
     eigsys,
+    eigvals,
     norm,
     seigvals,
 )
-from .gen import (
-    sig,
+from .gen.operators import sig
+from .gen.states import (
     basis_vec,
     bell_state,
     bloch_state,
@@ -62,8 +62,8 @@ def expm(a, herm=True):
     elif not herm:
         return np.asmatrix(spla.expm(a))
     else:
-        l, v = eigsys(a)
-        return _dot_dense(v, ldmul(np.exp(l), v.H))
+        evals, evecs = eigsys(a)
+        return _dot_dense(evecs, ldmul(np.exp(evals), evecs.H))
 
 
 def sqrtm(a, herm=True):
@@ -74,8 +74,9 @@ def sqrtm(a, herm=True):
     elif not herm:
         return np.asmatrix(sla.sqrtm(a))
     else:
-        l, v = eigsys(a)
-        return _dot_dense(v, ldmul(np.sqrt(l.astype(complex)), v.H))
+        evals, evecs = eigsys(a)
+        return _dot_dense(evecs, ldmul(np.sqrt(evals.astype(complex)),
+                                       evecs.H))
 
 
 def fidelity(rho, sigma):
@@ -95,11 +96,11 @@ def purify(rho, sparse=False):
     """
     # TODO: trim zeros?
     d = rho.shape[0]
-    ls, vs = eigsys(rho)
-    ls = np.sqrt(ls)
+    evals, vs = eigsys(rho)
+    evals = np.sqrt(evals)
     psi = np.zeros(shape=(d**2, 1), dtype=complex)
-    for i, l in enumerate(ls.flat):
-        psi += l * kron(vs[:, i], basis_vec(i, d, sparse=sparse))
+    for i, evals in enumerate(evals.flat):
+        psi += evals * kron(vs[:, i], basis_vec(i, d, sparse=sparse))
     return qu(psi)
 
 
@@ -119,15 +120,15 @@ def entropy(a, rank=None):
     """
     a = np.asarray(a)
     if np.ndim(a) == 1:
-        l = a
+        evals = a
     else:
         if rank is None:
-            l = eigvals(a)
+            evals = eigvals(a)
         else:  # know that not all eigenvalues needed
-            l = seigvals(a, k=rank, which='LM', backend='AUTO')
+            evals = seigvals(a, k=rank, which='LM', backend='AUTO')
 
-    l = l[l > 0.0]
-    return np.sum(-l * np.log2(l))
+    evals = evals[evals > 0.0]
+    return np.sum(-evals * np.log2(evals))
 
 
 @zeroify
@@ -161,6 +162,7 @@ def mutual_information(p, dims=(2, 2), sysa=0, sysb=1, rank=None):
         rhoa = ptr(p, dims, sysa)
         ha = hb = entropy(rhoa)
     return ha + hb - hab
+
 
 mutinf = mutual_information
 
@@ -207,6 +209,7 @@ def logarithmic_negativity(p, dims=(2, 2), sysa=0, sysb=1):
         e = log2(norm(partial_transpose(p, dims), "tr"))
     return max(0.0, e)
 
+
 logneg = logarithmic_negativity
 
 
@@ -217,8 +220,8 @@ def concurrence(p):
     if isop(p):
         p = qu(p, "dop")  # make sure density operator
         pt = dot(kron(sig(2), sig(2)), dot(p.conj(), kron(sig(2), sig(2))))
-        l = (nla.eigvals(dot(p, pt)).real**2)**0.25
-        return max(0, 2 * np.max(l) - np.sum(l))
+        evals = (nla.eigvals(dot(p, pt)).real**2)**0.25
+        return max(0, 2 * np.max(evals) - np.sum(evals))
     else:
         p = qu(p, "ket")
         pt = dot(kron(sig(2), sig(2)), p.conj())
@@ -270,7 +273,7 @@ def quantum_discord(p):
         prjb = eye(2) - prja
         return iab - owci((prja, prjb))
 
-    opt = minimize(trial_qd, (pi/2, pi),
+    opt = minimize(trial_qd, (pi / 2, pi),
                    method="SLSQP", bounds=((0, pi), (0, 2 * pi)))
     if opt.success:
         return opt.fun
@@ -330,6 +333,7 @@ def decomp(a, fn, fn_args, fn_d, nmlz_func, mode="p", tol=1e-3):
     # Return full calculation
     if "c" in mode:
         return names_cffs
+
 
 pauli_decomp = functools.partial(decomp,
                                  fn=sig,
@@ -437,7 +441,7 @@ def ent_cross_matrix(p, ent_fn=logneg, calc_self_ent=True, block2=False):
         for j in range(i, sz_p):
             if i == j:
                 if calc_self_ent:
-                    rhoa = ptr(p, (2,)*sz_p, i)
+                    rhoa = ptr(p, (2,) * sz_p, i)
                     psiap = purify(rhoa)
                     ent = ent_fn(psiap)
                 else:
@@ -454,19 +458,19 @@ def ent_cross_matrix(p, ent_fn=logneg, calc_self_ent=True, block2=False):
             for j in range(i, sz_p, 2):
                 if i == j:
                     if calc_self_ent:
-                        rhoa = ptr(p, (2,)*sz_p, (i, i+1))
+                        rhoa = ptr(p, (2,) * sz_p, (i, i + 1))
                         psiap = purify(rhoa)
                         ent = ent_fn(psiap, dims=(4, 4)) / 2
                     else:
                         ent = np.nan
-                    ents[j+1, i] = ent
+                    ents[j + 1, i] = ent
                 else:
-                    rhoab = ptr(p, (2,) * sz_p, (i, i+1, j, j+1))
+                    rhoab = ptr(p, (2,) * sz_p, (i, i + 1, j, j + 1))
                     ent = ent_fn(rhoab, dims=(4, 4)) / 2
                     ents[j, i] = ent
-                    ents[j+1, i] = ent
-                    ents[j, i+1] = ent
-                    ents[j+1, i+1] = ent
+                    ents[j + 1, i] = ent
+                    ents[j, i + 1] = ent
+                    ents[j + 1, i + 1] = ent
 
     return ents
 
@@ -508,9 +512,9 @@ def is_degenerate(op, tol=1e12):
     """
     op = np.asarray(op)
     if op.ndim != 1:
-        l = eigvals(op)
+        evals = eigvals(op)
     else:
-        l = op
-    l_gaps = l[1:] - l[:-1]
-    l_tol = (l[-1] - l[0]) / (op.shape[0] * tol)
+        evals = op
+    l_gaps = evals[1:] - evals[:-1]
+    l_tol = (evals[-1] - evals[0]) / (op.shape[0] * tol)
     return np.count_nonzero(abs(l_gaps) < l_tol)

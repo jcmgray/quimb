@@ -2,16 +2,15 @@ from pytest import fixture, mark
 import numpy as np
 from numpy.testing import assert_equal, assert_allclose
 
-from ... import (
+from quimb import (
     dot,
     ldmul,
     rand_uni,
-    )
-
-from ...solve.numpy_solver import(
+)
+from quimb.solve.numpy_solver import (
     sort_inds,
     numpy_seigsys,
-    )
+)
 
 
 @fixture
@@ -21,9 +20,9 @@ def xs():
 
 @fixture
 def ham1():
-    v = rand_uni(5)
-    l = np.array([-5, -3, 0.1, 2, 4])
-    return dot(v, ldmul(l, v.H))
+    evecs = rand_uni(5)
+    evals = np.array([-5, -3, 0.1, 2, 4])
+    return dot(evecs, ldmul(evals, evecs.H))
 
 
 class TestSortInds:

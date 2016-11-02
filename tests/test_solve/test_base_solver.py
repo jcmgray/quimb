@@ -2,20 +2,16 @@ from pytest import fixture, mark
 import numpy as np
 from numpy.testing import assert_allclose
 
-from ... import (
+from quimb import (
     qu,
     eye,
     ldmul,
     rand_uni,
     issparse,
     rand_product_state,
-    )
-from ...solve import (
-    SLEPC4PY_FOUND,
     eigsys,
     eigvals,
     eigvecs,
-    choose_ncv,
     seigsys,
     seigvals,
     seigvecs,
@@ -24,8 +20,9 @@ from ...solve import (
     svd,
     svds,
     norm,
-    )
-
+)
+from quimb.solve import SLEPC4PY_FOUND
+from quimb.solve.scipy_solver import choose_ncv
 
 # TODO: reinstate slepc svd tests ******************************************* #
 
@@ -73,18 +70,18 @@ def svdprematsparse():
 class TestEigh:
     def test_eigsys(self, premat):
         u, a = premat
-        l, _ = eigsys(a, sort=False)
-        assert(set(np.rint(l)) == set((-1, 2, 4, -3)))
-        l, v = eigsys(a)
-        assert_allclose(l, [-3, -1, 2, 4])
+        evals, _ = eigsys(a, sort=False)
+        assert(set(np.rint(evals)) == set((-1, 2, 4, -3)))
+        evals, v = eigsys(a)
+        assert_allclose(evals, [-3, -1, 2, 4])
         for i, j in zip([3, 0, 1, 2], range(4)):
             o = u[:, i].H @ v[:, j]
             assert_allclose(abs(o), 1.)
 
     def test_eigvals(self, premat):
         _, a = premat
-        l = eigvals(a)
-        assert_allclose(l, [-3, -1, 2, 4])
+        evals = eigvals(a)
+        assert_allclose(evals, [-3, -1, 2, 4])
 
     def test_eigvecs(self, premat):
         u, a = premat

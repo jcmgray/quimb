@@ -8,10 +8,10 @@ quantum states according to schrodingers' equation, and related functions."""
 
 import numpy as np
 from scipy.integrate import complex_ode
-from .accel import isop, ldmul, rdmul, explt, dot
-from .accel import issparse, _dot_dense
+
+from .accel import isop, ldmul, rdmul, explt, dot, issparse, _dot_dense
 from .core import qu, eye
-from .solve import eigsys, norm
+from .solve.base_solver import eigsys, norm
 
 
 # --------------------------------------------------------------------------- #
@@ -76,8 +76,8 @@ def schrodinger_eq_dop_vec(ham):
     """
     d = ham.shape[0]
     sparse = issparse(ham)
-    I = eye(d, sparse=sparse)
-    evo_superop = -1.0j * ((ham & I) - (I & ham.T))
+    idt = eye(d, sparse=sparse)
+    evo_superop = -1.0j * ((ham & idt) - (idt & ham.T))
 
     def rho_dot(_, y):
         return dot(evo_superop, y)
@@ -135,15 +135,15 @@ def lindblad_eq_vec(ham, ls, gamma, sparse=False):
     """
     d = ham.shape[0]
     ham_sparse = issparse(ham) or sparse
-    I = eye(d, sparse=ham_sparse)
-    evo_superop = -1.0j * ((ham & I) - (I & ham.T))
+    idt = eye(d, sparse=ham_sparse)
+    evo_superop = -1.0j * ((ham & idt) - (idt & ham.T))
 
     def gen_lb_terms():
         for l in ls:
             lb_sparse = issparse(l) or sparse
-            I = eye(d, sparse=lb_sparse)
-            yield ((l & l.conj()) - 0.5*((I & dot(l.H, l).T) +
-                                         (dot(l.H, l) & I)))
+            idt = eye(d, sparse=lb_sparse)
+            yield ((l & l.conj()) - 0.5 * ((idt & dot(l.H, l).T) +
+                                           (dot(l.H, l) & idt)))
     evo_superop += gamma * sum(gen_lb_terms())
 
     def rho_dot(_, y):

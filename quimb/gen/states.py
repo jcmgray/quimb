@@ -8,9 +8,10 @@ from functools import lru_cache
 from math import factorial
 import numpy as np
 import scipy.sparse as sp
+
 from ..accel import ldmul, dot
 from ..core import (qu, kron, kronpow, eye, eyepad)
-from ..solve import eigsys
+from ..solve.base_solver import eigsys
 from .operators import sig, controlled
 
 
@@ -41,6 +42,7 @@ def up(**kwargs):
     """
     return qu([[1], [0]], **kwargs)
 
+
 zplus = up
 
 
@@ -48,6 +50,7 @@ def down(**kwargs):
     """Returns down-state, aka. |1>, -Z eigenstate.
     """
     return qu([[0], [1]], **kwargs)
+
 
 zminus = down
 
@@ -57,6 +60,7 @@ def plus(**kwargs):
     """
     return qu([[2**-0.5], [2**-0.5]], **kwargs)
 
+
 xplus = plus
 
 
@@ -64,6 +68,7 @@ def minus(**kwargs):
     """Returns minus-state, aka. |->, -X eigenstate.
     """
     return qu([[2**-0.5], [-2**-0.5]], **kwargs)
+
 
 xminus = minus
 
@@ -139,15 +144,15 @@ def thermal_state(ham, beta, precomp_func=False):
         rho_th: density matrix of thermal state, or func to generate such
     """
     if isinstance(ham, (list, tuple)):  # solved already
-        l, v = ham
+        evals, evecs = ham
     else:
-        l, v = eigsys(ham)
-    l = l - min(l)  # offset by min to avoid numeric problems
+        evals, evecs = eigsys(ham)
+    evals = evals - min(evals)  # offset by min to avoid numeric problems
 
     def gen_state(b):
-        el = np.exp(-b * l)
+        el = np.exp(-b * evals)
         el /= np.sum(el)
-        return dot(v, ldmul(el, v.H))
+        return dot(evecs, ldmul(el, evecs.H))
 
     return gen_state if precomp_func else gen_state(beta)
 
@@ -185,7 +190,7 @@ def w_state(n, **kwargs):
     """Construct W-state for `n` spins, i.e. equal superposition of all
     single spin up states.
     """
-    return sum(basis_vec(2**i, 2**n, **kwargs) for i in range(n))/n**0.5
+    return sum(basis_vec(2**i, 2**n, **kwargs) for i in range(n)) / n**0.5
 
 
 def levi_civita(perm):
@@ -220,11 +225,11 @@ def graph_state_1d(n, cyclic=True, sparse=False):
     """Graph State on a line.
     """
     p = kronpow(plus(sparse=sparse), n)
-    for i in range(n-1):
-        p = eyepad(controlled("z", sparse=True), [2] * n, (i, i+1)) @ p
+    for i in range(n - 1):
+        p = eyepad(controlled("z", sparse=True), [2] * n, (i, i + 1)) @ p
     if cyclic:
-        p = ((eye(2, sparse=True) & eye(2**(n-2), sparse=True) &
+        p = ((eye(2, sparse=True) & eye(2**(n - 2), sparse=True) &
               qu([1, 0], qtype="dop", sparse=True)) +
-             (sig("z", sparse=True) & eye(2**(n-2), sparse=True) &
+             (sig("z", sparse=True) & eye(2**(n - 2), sparse=True) &
               qu([0, 1], qtype="dop", sparse=True))) @ p
     return p

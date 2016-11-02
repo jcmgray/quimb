@@ -6,11 +6,28 @@ from functools import reduce
 import numpy as np
 from numpy.testing import assert_allclose
 
-from .. import (qu, eigsys, rand_ket, rand_rho, rand_herm, rand_matrix,
-                rand_uni, overlap, ham_heis, up, down, eyepad, sig)
-from ..evo import (schrodinger_eq_ket, schrodinger_eq_dop,
-                   schrodinger_eq_dop_vec, lindblad_eq, lindblad_eq_vec,
-                   QuEvo)
+from quimb import (
+    qu, eigsys,
+    rand_ket,
+    rand_rho,
+    rand_herm,
+    rand_matrix,
+    rand_uni,
+    overlap,
+    ham_heis,
+    up,
+    down,
+    eyepad,
+    sig,
+)
+from quimb.evo import (
+    schrodinger_eq_ket,
+    schrodinger_eq_dop,
+    schrodinger_eq_dop_vec,
+    lindblad_eq,
+    lindblad_eq_vec,
+    QuEvo,
+)
 
 
 @fixture
@@ -200,13 +217,13 @@ def ham_rcr_psi():
     LCD = reduce(gcd, ems)
     # denominator lowest common multiple
     LCM = reduce(lambda a, b: a * b // gcd(a, b), ens)
-    trc = 2 * pi * LCM/LCD
-    l = np.array(ems) / np.array(ens)
+    trc = 2 * pi * LCM / LCD
+    evals = np.array(ems) / np.array(ens)
     v = rand_uni(d)
-    ham = v @ np.diag(l) @ v.H
+    ham = v @ np.diag(evals) @ v.H
     p0 = rand_ket(d)
     tm = 0.573 * trc
-    pm = v @ np.diag(np.exp(-1.0j * tm * l)) @ v.H @ p0
+    pm = v @ np.diag(np.exp(-1.0j * tm * evals)) @ v.H @ p0
     return ham, trc, p0, tm, pm
 
 

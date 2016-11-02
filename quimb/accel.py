@@ -11,7 +11,6 @@ import operator
 
 import numpy as np
 import scipy.sparse as sp
-from scipy.sparse import issparse
 from numba import jit, vectorize
 from numexpr import evaluate
 
@@ -91,6 +90,12 @@ def isvec(qob):
     return len(shp) == 1 or (len(shp) == 2 and (shp[0] == 1 or shp[1] == 1))
 
 
+def issparse(qob):
+    """Checks if an object is sparse.
+    """
+    return isinstance(qob, sp.spmatrix)
+
+
 def isherm(qob):
     """Checks if matrix is hermitian, for sparse or dense.
     """
@@ -149,7 +154,7 @@ def _par_dot_csr_matvec(mat, vec, nthreads=_NUM_THREADS):
     sz = mat.shape[0]
     out = np.empty(sz, dtype=vec.dtype)
     sz_chnk = (sz // nthreads) + 1
-    slices = tuple((i * sz_chnk, min((i + 1)*sz_chnk, sz))
+    slices = tuple((i * sz_chnk, min((i + 1) * sz_chnk, sz))
                    for i in range(nthreads))
 
     fn = functools.partial(_dot_csr_matvec,
@@ -306,7 +311,7 @@ def _reshape_for_kron(a, b):  # pragma: no cover
     p, q = b.shape
     a = a.reshape((m, 1, n, 1))
     b = b.reshape((1, p, 1, q))
-    return a, b, m*p, n*q
+    return a, b, m * p, n * q
 
 
 @matrixify
@@ -367,7 +372,7 @@ def kron(*ops, stype=None, coo_build=False):
     def _inner_kron(ops, _l):
         if _l == 1:
             return ops[0]
-        a, b = ops[0], _inner_kron(ops[1:], _l-1)
+        a, b = ops[0], _inner_kron(ops[1:], _l - 1)
         return _kron_dispatch(a, b, **opts)
 
     x = _inner_kron(ops, len(ops))

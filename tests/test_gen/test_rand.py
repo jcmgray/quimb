@@ -1,14 +1,12 @@
 from numpy.testing import assert_allclose, assert_almost_equal
 import numpy as np
 import scipy.sparse as sp
-from ... import (
+from quimb import (
     isherm,
     eye,
     chop,
     tr,
     mutual_information,
-)
-from ...gen.rand import (
     rand_matrix,
     rand_herm,
     rand_pos,
@@ -36,9 +34,9 @@ class TestRandMatrix:
         assert a.dtype == complex
 
     def test_rand_matrix_sparse_density(self):
-        a = rand_matrix(3, sparse=True, density=1/9)
+        a = rand_matrix(3, sparse=True, density=1 / 9)
         assert a.nnz == 1
-        a = rand_matrix(3, sparse=True, density=7/9)
+        a = rand_matrix(3, sparse=True, density=7 / 9)
         assert a.nnz == 7
 
     def test_rand_matrix_bsr(self):
@@ -54,16 +52,16 @@ class TestRandHerm:
         assert a.shape == (3, 3)
         assert type(a) == np.matrix
         assert_allclose(a, a.H)
-        l = np.linalg.eigvals(a)
-        assert_allclose(l.imag, [0, 0, 0], atol=1e-14)
+        evals = np.linalg.eigvals(a)
+        assert_allclose(evals.imag, [0, 0, 0], atol=1e-14)
 
     def test_rand_herm_sparse(self):
         a = rand_herm(3, sparse=True, density=0.3)
         assert a.shape == (3, 3)
         assert type(a) == sp.csr_matrix
         assert isherm(a)
-        l = np.linalg.eigvals(a.A)
-        assert_allclose(l.imag, [0, 0, 0], atol=1e-14)
+        evals = np.linalg.eigvals(a.A)
+        assert_allclose(evals.imag, [0, 0, 0], atol=1e-14)
 
 
 class TestRandPos:
@@ -71,17 +69,17 @@ class TestRandPos:
         a = rand_pos(3)
         assert a.shape == (3, 3)
         assert type(a) == np.matrix
-        l = np.linalg.eigvals(a)
-        assert_allclose(l.imag, [0, 0, 0], atol=1e-14)
-        assert np.all(l.real >= 0)
+        evals = np.linalg.eigvals(a)
+        assert_allclose(evals.imag, [0, 0, 0], atol=1e-14)
+        assert np.all(evals.real >= 0)
 
     def test_rand_pos_sparse(self):
         a = rand_pos(3, sparse=True, density=0.3)
         assert a.shape == (3, 3)
         assert type(a) == sp.csr_matrix
-        l = np.linalg.eigvals(a.A)
-        assert_allclose(l.imag, [0, 0, 0], atol=1e-14)
-        assert np.all(l.real >= -1e-15)
+        evals = np.linalg.eigvals(a.A)
+        assert_allclose(evals.imag, [0, 0, 0], atol=1e-14)
+        assert np.all(evals.real >= -1e-15)
 
 
 class TestRandRho:

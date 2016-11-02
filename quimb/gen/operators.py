@@ -92,7 +92,8 @@ def ham_heis(n, j=1.0, bz=0.0, cyclic=True, sparse=False, stype="csr"):
     ham = sum(eyepad(sds, dims, [i, i + 1], **opts) for i in range(n - 1))
 
     if cyclic:
-        ham = ham + sum(eyepad(j*sig(s, sparse=True), dims, [0, n - 1], **opts)
+        ham = ham + sum(eyepad(j * sig(s, sparse=True),
+                               dims, [0, n - 1], **opts)
                         for j, s in zip((jx, jy, jz), 'xyz'))
     if bz != 0.0:
         ham = ham + eyepad(-bz * sig('z', sparse=True), dims, n - 1, **opts)
@@ -123,8 +124,8 @@ def ham_j1j2(n, j1=1.0, j2=0.5, bz=0.0, cyclic=True, sparse=False):
     dims = (2,) * n
     ps = [sig(i, sparse=True) for i in 'xyz']
 
-    coosj1 = np.array([(i, i+1) for i in range(n)])
-    coosj2 = np.array([(i, i+2) for i in range(n)])
+    coosj1 = np.array([(i, i + 1) for i in range(n)])
+    coosj2 = np.array([(i, i + 2) for i in range(n)])
     if cyclic:
         coosj1, coosj2 = coosj1 % n, coosj2 % n
     else:
@@ -199,7 +200,7 @@ def zspin_projector(n, sz=0, stype="csr"):
 
     for s in sz:
         # Number of 'up' spins
-        k = n/2 + s
+        k = n / 2 + s
         if not k.is_integer():
             raise ValueError("{} is not a valid spin half subspace for "
                              "{} spins.".format(s, n))
@@ -207,7 +208,7 @@ def zspin_projector(n, sz=0, stype="csr"):
         # Size of subspace
         p += int(round(cmbn(n, k)))
         # Find all computational basis states with correct number of 0s and 1s
-        base_perm = '0'*(n - k) + '1'*k
+        base_perm = '0' * (n - k) + '1' * k
         all_perms += [uniq_perms(base_perm)]
 
     # Coordinates
