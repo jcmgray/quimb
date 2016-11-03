@@ -15,7 +15,7 @@ from numba import jit, vectorize
 from numexpr import evaluate
 
 _NUM_THREADS = psutil.cpu_count()
-accel = functools.partial(jit, nopython=True, cache=True)
+accel = functools.partial(jit, nopython=True, cache=False)
 
 
 def prod(xs):

@@ -254,6 +254,11 @@ class TestConcurrence:
         p = bell_state(bs, qtype=qtype)
         assert concurrence(p) > 1.0 - 1e-14
 
+    def test_subsystem(self):
+        p = rand_rho(2**4)
+        e = concurrence(p, [2, 2, 2, 2], 1, 2)
+        assert 0 <= e <= 1
+
 
 class TestQuantumDiscord:
     def test_owci(self):
@@ -409,19 +414,31 @@ class TestEntCrossMatrix:
 
     def test_block2(self):
         p = bell_state('phi+') & bell_state('phi+')
-        ecm = ent_cross_matrix(p, ent_fn=logneg,
-                               block2=True)
-        assert_allclose(ecm[0, 1], 1)
+        ecm = ent_cross_matrix(p, ent_fn=logneg, sz_blc=2)
+        assert_allclose(ecm[1, 1], 0)
+        assert_allclose(ecm[0, 1], 0)
         assert_allclose(ecm[1, 0], 0)
-        assert_allclose(ecm[2, 0], 0)
 
     def test_block2_no_self_ent(self):
         p = bell_state('phi+') & bell_state('phi+')
-        ecm = ent_cross_matrix(p, ent_fn=logneg, calc_self_ent=False,
-                               block2=True)
-        assert_allclose(ecm[0, 1], 1)
-        assert_allclose(ecm[1, 0], np.nan)
-        assert_allclose(ecm[2, 0], 0)
+        ecm = ent_cross_matrix(p, ent_fn=logneg, calc_self_ent=False, sz_blc=2)
+        assert_allclose(ecm[0, 1], 0)
+        assert_allclose(ecm[0, 0], np.nan)
+        assert_allclose(ecm[1, 0], 0)
+
+
+class TestEntCrossMatrixBlocked:
+    @mark.parametrize("sz_p", [2**2 for i in [2, 3, 4, 5, 6, 9, 12]])
+    @mark.parametrize("sz_blc", [1, 2, 3, 4, 5])
+    @mark.parametrize("calc_self_ent", [True, False])
+    def test_shapes_and_blocks(self, sz_blc, sz_p, calc_self_ent):
+        if sz_p // sz_blc > 0:
+            p = rand_rho(2**sz_p)
+            n = sz_p // sz_blc
+            ecm = ent_cross_matrix(p, sz_blc, calc_self_ent=calc_self_ent)
+            assert ecm.shape[0] == n
+            if not calc_self_ent:
+                assert_allclose(np.diag(ecm), [np.nan] * n, equal_nan=True)
 
 
 class TestQID:

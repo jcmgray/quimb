@@ -97,7 +97,7 @@ def purify(rho, sparse=False):
     # TODO: trim zeros?
     d = rho.shape[0]
     evals, vs = eigsys(rho)
-    evals = np.sqrt(evals)
+    evals = np.sqrt(np.clip(evals, 0, 1))
     psi = np.zeros(shape=(d**2, 1), dtype=complex)
     for i, evals in enumerate(evals.flat):
         psi += evals * kron(vs[:, i], basis_vec(i, d, sparse=sparse))
@@ -172,7 +172,7 @@ def partial_transpose(p, dims=(2, 2)):
     `dims`.
     """
     p = qu(p, "dop")
-    p = np.array(p)\
+    p = np.array(p)  \
         .reshape((*dims, *dims))  \
         .transpose((2, 1, 0, 3))  \
         .reshape((prod(dims), prod(dims)))
@@ -201,7 +201,7 @@ def logarithmic_negativity(p, dims=(2, 2), sysa=0, sysb=1):
     if isvec(p) and len(dims) == 2:  # pure bipartition, easier to calc
         smaller_system = 0 if dims[0] <= dims[1] else 1
         rhoa = ptr(p, dims, smaller_system)
-        e = 2 * log2(sum(np.sqrt(eigvals(rhoa, sort=False))))
+        e = 2 * log2(sum(np.sqrt(np.clip(eigvals(rhoa, sort=False), 0, 1))))
     else:
         if len(dims) > 2:  #
             p = ptr(p, dims, (sysa, sysb))
@@ -214,16 +214,16 @@ logneg = logarithmic_negativity
 
 
 @zeroify
-def concurrence(p):
+def concurrence(p, dims=(2, 2), sysa=0, sysb=1):
     """Concurrence of two-qubit state `p`.
     """
+    if len(dims) > 2:
+        p = ptr(p, dims, (sysa, sysb))
     if isop(p):
-        p = qu(p, "dop")  # make sure density operator
         pt = dot(kron(sig(2), sig(2)), dot(p.conj(), kron(sig(2), sig(2))))
         evals = (nla.eigvals(dot(p, pt)).real**2)**0.25
         return max(0, 2 * np.max(evals) - np.sum(evals))
     else:
-        p = qu(p, "ket")
         pt = dot(kron(sig(2), sig(2)), p.conj())
         c = np.real(abs(dot(p.H, pt))).item(0)
         return max(0, c)
@@ -417,15 +417,22 @@ def pauli_correlations(p, ss=("xx", "yy", "zz"), sysa=0, sysb=1,
     return tuple(gen_corr_list())
 
 
-def ent_cross_matrix(p, ent_fn=logneg, calc_self_ent=True, block2=False):
-    """Calculate the pair-wise function ent_fn  between all sites
+def ent_cross_matrix(p, sz_blc=1, ent_fn=logneg, calc_self_ent=True):
+    """Calculate the pair-wise function ent_fn  between all sites or blocks
     of a state.
 
     Parameters
     ----------
-        p: state
-        ent_fn: function acting on space [2, 2], notionally entanglement
-        calc_self_ent: whether to calculate the function for each site
+        p : matrix-like
+            State.
+        sz_blc : int
+            Size of the blocks to partition the state into. If the number of
+            individual sites is not a multiple of this then the final (smaller)
+            block will be ignored.
+        ent_fn : callable
+            Bipartite function, notionally entanglement
+        calc_self_ent : bool
+            Whether to calculate the function for each site
             alone, purified. If the whole state is pure then this is the
             entanglement with the whole remaining system.
 
@@ -434,44 +441,35 @@ def ent_cross_matrix(p, ent_fn=logneg, calc_self_ent=True, block2=False):
         ents: matrix of pairwise ent_fn results.
     """
     sz_p = infer_size(p)
-    ents = np.empty((sz_p, sz_p))
+    dims = (2,) * sz_p
+    n = sz_p // sz_blc
+    ents = np.empty((n, n))
 
-    # Calculate individual pair-wise entanglement
-    for i in range(sz_p):
-        for j in range(i, sz_p):
+    ispure = isvec(p)
+    if ispure and sz_blc * 2 == sz_p:  # pure bipartition
+        ent = ent_fn(p, dims=(2**sz_blc, 2**sz_blc)) / sz_blc
+        ents[:, :] = ent
+        if not calc_self_ent:
+            for i in range(n):
+                ents[i, i] = np.nan
+        return ents
+
+    # Range over pairwise blocks
+    for i in range(0, sz_p - sz_blc + 1, sz_blc):
+        for j in range(i, sz_p - sz_blc + 1, sz_blc):
             if i == j:
                 if calc_self_ent:
-                    rhoa = ptr(p, (2,) * sz_p, i)
+                    rhoa = ptr(p, dims, [i + b for b in range(sz_blc)])
                     psiap = purify(rhoa)
-                    ent = ent_fn(psiap)
+                    ent = ent_fn(psiap, dims=(2**sz_blc, 2**sz_blc)) / sz_blc
                 else:
                     ent = np.nan
             else:
-                rhoab = ptr(p, (2,) * sz_p, (i, j))
-                ent = ent_fn(rhoab)
-            ents[i, j] = ent
-            ents[j, i] = ent
-
-    # Calculate pair-wise entanglement between blocks of 2
-    if block2:
-        for i in range(0, sz_p, 2):
-            for j in range(i, sz_p, 2):
-                if i == j:
-                    if calc_self_ent:
-                        rhoa = ptr(p, (2,) * sz_p, (i, i + 1))
-                        psiap = purify(rhoa)
-                        ent = ent_fn(psiap, dims=(4, 4)) / 2
-                    else:
-                        ent = np.nan
-                    ents[j + 1, i] = ent
-                else:
-                    rhoab = ptr(p, (2,) * sz_p, (i, i + 1, j, j + 1))
-                    ent = ent_fn(rhoab, dims=(4, 4)) / 2
-                    ents[j, i] = ent
-                    ents[j + 1, i] = ent
-                    ents[j, i + 1] = ent
-                    ents[j + 1, i + 1] = ent
-
+                rhoab = ptr(p, dims, [i + b for b in range(sz_blc)] +
+                                     [j + b for b in range(sz_blc)])
+                ent = ent_fn(rhoab, dims=(2**sz_blc, 2**sz_blc)) / sz_blc
+            ents[i // sz_blc, j // sz_blc] = ent
+            ents[j // sz_blc, i // sz_blc] = ent
     return ents
 
 
@@ -500,8 +498,8 @@ def is_degenerate(op, tol=1e12):
     """Check if operator has any degenerate eigenvalues, determined relative
     to equal spacing of all eigenvalues.
 
-    Paraemeters
-    -----------
+    Parameters
+    ----------
         op: operator or list of eigenvalues
         tol: how much closer than evenly spaced the eigenvalue gap has to be
         to count as degenerage
