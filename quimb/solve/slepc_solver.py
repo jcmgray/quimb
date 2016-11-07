@@ -7,43 +7,44 @@
 # TODO: exponential, sqrt etc.
 # TODO: region for eps in middle, both ciss and normal
 # TODO: mumps set icntrl(14): catch error infog(1)=-9 and resatrt
+# TODO: cache storage
 
-import numpy as np
-import scipy.sparse as sp
 import petsc4py
 import slepc4py
 from petsc4py import PETSc
 from slepc4py import SLEPc
+import numpy as np
+import scipy.sparse as sp
 
 petsc4py.init()
 slepc4py.init()
 
 
-def convert_to_petsc(a, comm=PETSc.COMM_WORLD):
-    """Convert a scipy sparse matrix to the relevant PETSc type, currently
+def convert_to_petsc(mat):
+    """Convert a matrix to the relevant PETSc type, currently
     only supports csr, bsr, vectors and dense matrices formats.
     """
-    if sp.isspmatrix_csr(a):
-        a.sort_indices()
-        csr = (a.indptr, a.indices, a.data)
-        b = PETSc.Mat().createAIJ(size=a.shape, csr=csr, comm=comm)
-    elif sp.isspmatrix_bsr(a):
-        a.sort_indices()
-        csr = (a.indptr, a.indices, a.data)
-        b = PETSc.Mat().createBAIJ(size=a.shape, bsize=a.blocksize,
-                                   csr=csr, comm=comm)
-    elif a.ndim == 1:
-        b = PETSc.Vec().createWithArray(a, comm=comm)
+    if sp.isspmatrix_csr(mat):
+        mat.sort_indices()
+        csr = (mat.indptr, mat.indices, mat.data)
+        pmat = PETSc.Mat().createAIJ(size=mat.shape, csr=csr)
+    elif sp.isspmatrix_bsr(mat):
+        mat.sort_indices()
+        csr = (mat.indptr, mat.indices, mat.data)
+        pmat = PETSc.Mat().createBAIJ(size=mat.shape, bsize=mat.blocksize,
+                                      csr=csr)
+    elif mat.ndim == 1:
+        pmat = PETSc.Vec().createWithArray(mat)
     else:
-        b = PETSc.Mat().createDense(size=a.shape, array=a, comm=comm)
-    return b
+        pmat = PETSc.Mat().createDense(size=mat.shape, array=mat)
+    return pmat
 
 
-def new_petsc_vec(n, comm=PETSc.COMM_WORLD):
+def new_petsc_vec(n):
     """Create an empty complex petsc vector of size `n`.
     """
     a = np.empty(n, dtype=complex)
-    return PETSc.Vec().createWithArray(a, comm=comm)
+    return PETSc.Vec().createWithArray(a)
 
 
 def _init_spectral_inverter(ptype="lu", ppackage="mumps", ktype="preonly",
