@@ -6,8 +6,7 @@ algebraic order by default.
 
 # TODO: restart eigen and svd - up to tol
 # TODO: test non-herm
-# TODO: factor out numpy
-# TODO: add petsc / elemental ...
+# TODO: elemental?
 # TODO: fix slepc svds instability
 
 import numpy as np
@@ -21,9 +20,9 @@ if SLEPC4PY_FOUND:
     from .slepc_solver import slepc_seigsys, slepc_svds
 
 
-# -------------------------------------------------------------------------- #
-# Full eigendecomposition methods for dense matrices                         #
-# -------------------------------------------------------------------------- #
+# --------------------------------------------------------------------------- #
+#                        Full eigendecomposition                              #
+# --------------------------------------------------------------------------- #
 
 def eigsys(a, sort=True, isherm=True):
     """Find all eigenpairs of dense, hermitian matrix.
@@ -76,9 +75,9 @@ def eigvecs(a, sort=True, isherm=True):
     return eigsys(a, sort=sort, isherm=isherm)[1]
 
 
-# -------------------------------------------------------------------------- #
-# iterative methods for partial eigendecompision                             #
-# -------------------------------------------------------------------------- #
+# --------------------------------------------------------------------------- #
+#                          Partial eigendecomposition                         #
+# --------------------------------------------------------------------------- #
 
 
 def choose_backend(a, k, int_eps=False):
@@ -86,7 +85,7 @@ def choose_backend(a, k, int_eps=False):
     """
     # small matrix or large part of subspace requested
     small_d_big_k = a.shape[0] ** 2 / k < (10000 if int_eps else 2000)
-    # avoid using slepc for dense matrices and inner eigenvectors
+    # avoid using slepc for dense matrices *and* inner eigenvectors
     slepc_suitable = not int_eps or issparse(a)
     return ("NUMPY" if small_d_big_k else
             "SLEPC" if SLEPC4PY_FOUND and slepc_suitable else
