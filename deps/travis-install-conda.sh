@@ -29,5 +29,5 @@ else
   source activate test-environment
   conda update -q --all
   pip install -U coveralls codeclimate-test-reporter
-  pip uninstall quimb
+  pip uninstall --yes quimb
 fi
