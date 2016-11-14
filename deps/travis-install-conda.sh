@@ -3,6 +3,7 @@ set -ex
 
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
+# ~~~ New install ~~~ #
 if [ ! -d "$HOME/conda/bin" ]; then
   if [ -d "$HOME/conda" ]; then
     rm -rf $HOME/conda
@@ -18,6 +19,7 @@ if [ ! -d "$HOME/conda/bin" ]; then
   conda info -a
   conda env create --file $DIR/requirements-py35.yml
   source activate test-environment
+# ~~~ cached install ~~~ #
 else
   echo "Using cached conda installation."
   export PATH="$HOME/conda/bin:$PATH"
@@ -27,4 +29,5 @@ else
   source activate test-environment
   conda update -q --all
   pip install -U coveralls codeclimate-test-reporter
+  pip uninstall quimb
 fi
