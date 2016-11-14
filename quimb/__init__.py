@@ -1,4 +1,8 @@
-"""Quantum Information for Many-Body calculations.
+"""
+QUIMB
+-----
+
+Quantum Information for Many-Body calculations.
 """
 
 # Accelerated basic linalg operations
@@ -60,6 +64,10 @@ from .solve.base_solver import (
     seigvecs,
     groundstate,
     groundenergy,
+    bound_spectrum,
+    eigsys_window,
+    eigvals_window,
+    eigvecs_window,
     svd,
     svds,
     norm,
@@ -195,6 +203,10 @@ __all__ = [
     'seigvecs',
     'groundstate',
     'groundenergy',
+    'bound_spectrum',
+    'eigsys_window',
+    'eigvals_window',
+    'eigvecs_window',
     'svd',
     'svds',
     'norm',

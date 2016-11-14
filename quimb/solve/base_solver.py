@@ -80,7 +80,7 @@ def eigvecs(a, sort=True, isherm=True):
 # --------------------------------------------------------------------------- #
 
 
-def choose_backend(a, k, int_eps=False):
+def _choose_backend(a, k, int_eps=False):
     """Pick a backend automatically for partial decompositions.
     """
     # small matrix or large part of subspace requested
@@ -121,7 +121,7 @@ def seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
     # Choose backend to perform the decompostion
     bkd = backend.upper()
     if bkd == 'AUTO':
-        bkd = choose_backend(a, k, sigma is not None)
+        bkd = _choose_backend(a, k, sigma is not None)
     seig_func = (slepc_seigsys if bkd == 'SLEPC' else
                  numpy_seigsys if bkd in {'NUMPY', 'DENSE'} else
                  scipy_seigsys if bkd == 'SCIPY' else
@@ -153,6 +153,103 @@ def groundenergy(ham, **kwargs):
     return seigvals(ham, k=1, which='SA', **kwargs)[0]
 
 
+def bound_spectrum(a, backend='auto', **kwargs):
+    """Return the smallest and largest eigenvalue of operator `a`.
+    """
+    el_min = seigvals(a, k=1, which='SA', backend=backend, **kwargs)[0]
+    el_max = seigvals(a, k=1, which='LA', backend=backend, **kwargs)[0]
+    return el_min, el_max
+
+
+def _rel_window_to_abs_window(el_min, el_max, w_0, w_sz=None):
+    """Convert min/max eigenvalues and relative window to absolute values.
+
+    Parameters
+    ----------
+        el_min : float
+            Smallest eigenvalue.
+        el_max : float
+            Largest eigenvalue.
+        w_0 : float [0.0 - 1.0]
+            Relative window centre.
+        w_sz : float (None)
+            Relative window width.
+
+    Returns
+    -------
+        l_0[, l_min, l_max]:
+            Absolute value of centre of window, lower and upper intervals if a
+            window size is specified.
+    """
+    el_range = el_max - el_min
+    el_w_0 = el_min + w_0 * el_range
+    if w_sz is not None:
+        el_w_min = el_w_0 - w_sz * el_range / 2
+        el_w_max = el_w_0 + w_sz * el_range / 2
+        return el_w_0, el_w_min, el_w_max
+    return el_w_0
+
+
+def eigsys_window(a, w_0, w_n=6, w_sz=None, backend='AUTO',
+                  return_vecs=True, offset_const=1 / 7000):
+    """ Return eigenvalues internally from a hermitian matrix.
+
+    Parameters
+    ----------
+        a : operator
+            Operator to retrieve eigenpairs from.
+        w_0 : float [0.0 - 1.0]
+            Relative window centre to retrieve eigenpairs from.
+        w_n : int
+            Target number of eigenpairs to retrieve.
+        w_sz : float (optional)
+            Relative maximum window width within which to keep eigenpairs.
+        backend : str
+        return_vecs : bool
+        offset_const : float
+
+    Returns
+    -------
+        ls: eigenvalues around w_0
+    """
+    w_sz = w_sz if w_sz is not None else 1.1
+
+    if not issparse(a) or backend == "dense":
+        if return_vecs:
+            lk, vk = eigsys(a.A if issparse(a) else a)
+        else:
+            lk = eigvals(a.A if issparse(a) else a)
+        lmin, lmax = lk[0], lk[-1]
+        l_w0, l_wmin, l_wmax = _rel_window_to_abs_window(lmin, lmax, w_0, w_sz)
+
+    else:
+        lmin, lmax = bound_spectrum(a)
+        l_w0, l_wmin, l_wmax = _rel_window_to_abs_window(lmin, lmax, w_0, w_sz)
+        l_w0 += (lmax - lmin) * offset_const  # for 1/0 issues
+        if return_vecs:
+            lk, vk = seigsys(a, k=w_n, sigma=l_w0, backend=backend)
+        else:
+            lk = seigvals(a, k=w_n, sigma=l_w0, backend=backend)
+
+    # Trim eigenpairs from beyond window
+    in_window = (lk > l_wmin) & (lk < l_wmax)
+    if return_vecs:
+        return lk[in_window], vk[:, in_window]
+    return lk[in_window]
+
+
+def eigvals_window(*args, **kwargs):
+    """Alias for only finding the eigenvalues in a relative window.
+    """
+    return eigsys_window(*args, return_vecs=False, **kwargs)
+
+
+def eigvecs_window(*args, **kwargs):
+    """Alias for only finding the eigenvectors in a relative window.
+    """
+    return eigsys_window(*args, return_vecs=True, **kwargs)[1]
+
+
 # -------------------------------------------------------------------------- #
 # Partial singular value decomposition                                       #
 # -------------------------------------------------------------------------- #
@@ -182,7 +279,7 @@ def svds(a, k=6, ncv=None, return_vecs=True, backend='AUTO', **kwargs):
         'k': k,
         'ncv': ncv,
         'return_vecs': return_vecs}
-    bkd = (choose_backend(a, k, False) if backend in {'auto', 'AUTO'} else
+    bkd = (_choose_backend(a, k, False) if backend in {'auto', 'AUTO'} else
            backend.upper())
     svds_func = (slepc_svds if bkd == 'SLEPC' else
                  numpy_svds if bkd in {'NUMPY', 'DENSE'} else
