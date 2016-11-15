@@ -3,31 +3,27 @@
 # TODO: FEAST / other contour solvers?
 # TODO: expm, sqrtm
 
-import functools
 import numpy as np
 import scipy.sparse as sp
 
 
-@functools.lru_cache(1)
-def _get_petsc():
-    """Cache petsc module import to allow lazy start.
+def cache_first_call(fn):
+    """Wrap a function such that it returns its first call's result,
+    regardless of later calls with different arguments.
     """
-    import petsc4py
-    petsc4py.init(['-no_signal_handler'])
-    from petsc4py import PETSc
-    return PETSc
+
+    def wrapped(*args, **kwargs):
+        if wrapped.result is None:
+            wrapped.result = fn(*args, **kwargs)
+            return wrapped.result
+        else:
+            return wrapped.result
+
+    wrapped.result = None
+    return wrapped
 
 
-@functools.lru_cache(1)
-def _get_slepc():
-    """Cache slepc module import to allow lazy start.
-    """
-    import slepc4py
-    slepc4py.init(['-no_signal_handler'])
-    from slepc4py import SLEPc
-    return SLEPc
-
-
+@cache_first_call
 def get_default_comm():
     """Define the default communicator.
     """
@@ -35,11 +31,40 @@ def get_default_comm():
     return MPI.COMM_SELF
 
 
-def mpi_partition(n, comm=None):
-    """
+@cache_first_call
+def init_petsc_and_slepc(comm=None):
+    """Make sure petsc is initialized with comm before slepc.
     """
     if comm is None:
         comm = get_default_comm()
+    import petsc4py
+    petsc4py.init(args=['-no_signal_handler'], comm=comm)
+    from petsc4py import PETSc
+    import slepc4py
+    slepc4py.init(args=['-no_signal_handler'])
+    from slepc4py import SLEPc
+    return PETSc, SLEPc
+
+
+@cache_first_call
+def _get_petsc(comm=None):
+    """Cache petsc module import to allow lazy start.
+    """
+    return init_petsc_and_slepc(comm=comm)[0]
+
+
+@cache_first_call
+def _get_slepc(comm=None):
+    """Cache slepc module import to allow lazy start.
+    """
+    return init_petsc_and_slepc(comm=comm)[1]
+
+
+def mpi_partition(n, comm=None):
+    """
+    """
+    PETSc = _get_petsc(comm=comm)
+    comm = PETSc.COMM_WORLD
     # Get size and position within comm
     mpi_size = comm.Get_size()
     mpi_rank = comm.Get_rank()
@@ -57,9 +82,8 @@ def convert_to_petsc(mat, comm=None):
     """Convert a matrix to the relevant PETSc type, currently
     only supports csr, bsr, vectors and dense matrices formats.
     """
-    PETSc = _get_petsc()
-    if comm is None:
-        comm = get_default_comm()
+    PETSc = _get_petsc(comm=comm)
+    comm = PETSc.COMM_WORLD
     # Sparse compressed row matrix
     if sp.isspmatrix_csr(mat):
         mat.sort_indices()
@@ -90,9 +114,8 @@ def convert_to_petsc(mat, comm=None):
 def new_petsc_vec(n, comm=None):
     """Create an empty complex petsc vector of size `n`.
     """
-    PETSc = _get_petsc()
-    if comm is None:
-        comm = get_default_comm()
+    PETSc = _get_petsc(comm=comm)
+    comm = PETSc.COMM_WORLD
     a = np.empty(n, dtype=complex)
     return PETSc.Vec().createWithArray(a, comm=comm)
 
@@ -104,10 +127,9 @@ def _init_spectral_inverter(ptype="lu",
                             comm=None):
     """Create a slepc spectral transformation object with specified solver.
     """
-    PETSc = _get_petsc()
-    SLEPc = _get_slepc()
-    if comm is None:
-        comm = get_default_comm()
+    PETSc = _get_petsc(comm=comm)
+    SLEPc = _get_slepc(comm=comm)
+    comm = PETSc.COMM_WORLD
     # Preconditioner and linear solver
     P = PETSc.PC().create(comm=comm)
     P.setType(ptype)
@@ -160,9 +182,8 @@ def _init_eigensolver(which='LM', sigma=None, isherm=True,
     -------
         SLEPc solver ready to be called.
     """
-    SLEPc = _get_slepc()
-    if comm is None:
-        comm = get_default_comm()
+    SLEPc = _get_slepc(comm=comm)
+    comm = SLEPc.COMM_WORLD
     eigensolver = SLEPc.EPS().create(comm=comm)
     if sigma is not None:
         which = "TR"
@@ -213,15 +234,12 @@ def slepc_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
                                     comm=comm)
     eigensolver.setOperators(convert_to_petsc(a, comm=comm))
     eigensolver.setDimensions(k, ncv)
-
     eigensolver.solve()
     nconv = eigensolver.getConverged()
     assert nconv >= k
     k = nconv if return_all_conv else k
-
     lk = np.asarray([eigensolver.getEigenvalue(i) for i in range(k)])
     lk = lk.real if isherm else lk
-
     if return_vecs:
         vk = np.empty((a.shape[0], k), dtype=complex)
         for i, v in enumerate(eigensolver.getInvariantSubspace()[:k]):
@@ -237,9 +255,8 @@ def slepc_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
 
 
 def _init_svd_solver(SVDType='cross', tol=None, max_it=None, comm=None):
-    SLEPc = _get_slepc()
-    if comm is None:
-        comm = get_default_comm()
+    SLEPc = _get_slepc(comm=comm)
+    comm = SLEPc.COMM_WORLD
     svd_solver = SLEPc.SVD().create(comm=comm)
     svd_solver.setType(SVDType)
     svd_solver.setTolerances(tol=tol, max_it=max_it)
@@ -267,19 +284,15 @@ def slepc_svds(a, k=6, ncv=None, return_vecs=True, SVDType='cross',
     petsc_a = convert_to_petsc(a, comm=comm)
     svd_solver.setOperator(petsc_a)
     svd_solver.setDimensions(nsv=k, ncv=ncv)
-
     svd_solver.solve()
     nconv = svd_solver.getConverged()
     assert nconv >= k
     k = nconv if extra_vals else k
-
     if return_vecs:
         sk = np.empty(k, dtype=float)
         uk = np.empty((a.shape[0], k), dtype=complex)
         vtk = np.empty((k, a.shape[1]), dtype=complex)
-
         u, v = petsc_a.getVecs()
-
         for i in range(k):
             sk[i] = svd_solver.getSingularTriplet(i, u, v)
             uk[:, i] = u.getArray()
