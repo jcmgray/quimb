@@ -4,11 +4,11 @@ from cytoolz import isiterable, concat
 import numpy as np
 import scipy.sparse as sp
 
-from ..accel import accel
+from ..accel import accel, make_immutable
 from ..core import qu, eye, kron, eyepad
 
 
-@lru_cache(maxsize=64)
+@lru_cache(maxsize=8)
 def sig(xyz, dim=2, **kwargs):
     """Generates the spin operators for spin 1/2 or 1.
 
@@ -42,7 +42,10 @@ def sig(xyz, dim=2, **kwargs):
              ('z', 3): lambda: qu([[1, 0, 0],
                                    [0, 0, 0],
                                    [0, 0, -1]], **kwargs)}
-    return opmap[(xyzmap[xyz], dim)]()
+    op = opmap[(xyzmap[xyz], dim)]()
+    # Operator is cached, so make sure it cannot be modified
+    make_immutable(op)
+    return op
 
 
 @lru_cache(maxsize=8)
@@ -52,12 +55,15 @@ def controlled(s, sparse=False):
     keymap = {'x': 'x', 'not': 'x',
               'y': 'y',
               'z': 'z'}
-    return ((qu([1, 0], qtype='dop', sparse=sparse) &
-             eye(2, sparse=sparse)) +
-            (qu([0, 1], qtype='dop', sparse=sparse) &
-             sig(keymap[s], sparse=sparse)))
+    op = ((qu([1, 0], qtype='dop', sparse=sparse) &
+           eye(2, sparse=sparse)) +
+          (qu([0, 1], qtype='dop', sparse=sparse) &
+           sig(keymap[s], sparse=sparse)))
+    make_immutable(op)
+    return op
 
 
+@lru_cache(maxsize=8)
 def ham_heis(n, j=1.0, bz=0.0, cyclic=True, sparse=False, stype="csr"):
     """Constructs the heisenberg spin 1/2 hamiltonian
 
@@ -99,13 +105,14 @@ def ham_heis(n, j=1.0, bz=0.0, cyclic=True, sparse=False, stype="csr"):
         ham = ham + eyepad(-bz * sig('z', sparse=True), dims, n - 1, **opts)
 
     if not sparse:
-        return np.asmatrix(ham.todense())
+        ham = np.asmatrix(ham.todense())
     elif ham.format != stype:
-        return ham.asformat(stype)
-    else:
-        return ham
+        ham = ham.asformat(stype)
+    make_immutable(ham)
+    return ham
 
 
+@lru_cache(maxsize=8)
 def ham_j1j2(n, j1=1.0, j2=0.5, bz=0.0, cyclic=True, sparse=False):
     """Generate the j1-j2 hamiltonian, i.e. next nearest neighbour
     interactions.
@@ -151,7 +158,10 @@ def ham_j1j2(n, j1=1.0, j2=0.5, bz=0.0, cyclic=True, sparse=False):
     ham = j1 * sum(j1_terms()) + j2 * sum(j2_terms())
     if bz != 0:
         ham += bz * sum(gen_bz)
-    return ham if sparse else ham.todense()
+    if not sparse:
+        ham = ham.todense()
+    make_immutable(ham)
+    return ham
 
 
 @accel
@@ -180,6 +190,7 @@ def uniq_perms(xs):
                 yield (first_x,) + sub_perm
 
 
+@lru_cache(maxsize=8)
 def zspin_projector(n, sz=0, stype="csr"):
     """Construct the projector onto spin-z subpspaces.
 
@@ -218,4 +229,6 @@ def zspin_projector(n, sz=0, stype="csr"):
     # Construct matrix which prjects only on to these basis states
     prj = sp.coo_matrix((np.ones(p, dtype=complex), (cis, cjs)),
                         shape=(p, 2**n), dtype=complex)
-    return qu(prj, stype=stype)
+    prj = qu(prj, stype=stype)
+    make_immutable(prj)
+    return prj

@@ -1,9 +1,14 @@
-from pytest import fixture, mark
+from pytest import fixture, mark, raises
 import numpy as np
 from numpy.testing import assert_allclose
 import scipy.sparse as sp
 
 from quimb import (
+    qu,
+    rand_matrix,
+    rand_ket,
+)
+from quimb.accel import (
     issparse,
     isket,
     isop,
@@ -20,10 +25,7 @@ from quimb import (
     kron,
     kronpow,
     explt,
-    rand_matrix,
-    rand_ket,
-)
-from quimb.accel import (
+    make_immutable,
     matrixify,
     realify,
     _dot_sparse,
@@ -33,6 +35,8 @@ from quimb.accel import (
     _kron_sparse,
 )
 
+
+# ----------------------------- FIXTURES ------------------------------------ #
 
 _SPARSE_FORMATS = ("csr", "bsr", "csc", "coo")
 _TEST_SZ = 4
@@ -81,6 +85,26 @@ def l1d():
 @fixture
 def mat_s_nnz():
     return rand_matrix(_TEST_SZ, sparse=True, density=0.75)
+
+
+# --------------------------------------------------------------------------- #
+#                                  TESTS                                      #
+# --------------------------------------------------------------------------- #
+
+class TestMakeImmutable():
+    def test_dense(self):
+        mat = qu([[1, 2], [3, 4]])
+        make_immutable(mat)
+        with raises(ValueError):
+            mat[-1, -1] = 1
+
+    @mark.parametrize("stype", _SPARSE_FORMATS)
+    def test_sparse(self, stype):
+        mat = qu([[1, 2], [3, 4]], stype=stype)
+        make_immutable(mat)
+        if stype in {'csr', 'csc'}:
+            with raises(ValueError):
+                mat[-1, -1] = 1
 
 
 class TestMatrixify:

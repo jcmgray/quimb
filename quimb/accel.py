@@ -24,6 +24,21 @@ def prod(xs):
     return functools.reduce(operator.mul, xs, 1)
 
 
+def make_immutable(mat):
+    """Make sure matrix cannot be changed, for dense and sparse.
+    """
+    if issparse(mat):
+        mat.data.flags.writeable = False
+        if mat.format in {'csr', 'csc', 'bsr'}:
+            mat.indices.flags.writeable = False
+            mat.indptr.flags.writeable = False
+        elif mat.format == 'coo':
+            mat.row.flags.writeable = False
+            mat.col.flags.writeable = False
+    else:
+        mat.flags.writeable = False
+
+
 # --------------------------------------------------------------------------- #
 # Decorators for standardizing output                                         #
 # --------------------------------------------------------------------------- #

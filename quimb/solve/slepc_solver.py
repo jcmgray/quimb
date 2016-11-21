@@ -84,6 +84,7 @@ def convert_to_petsc(mat, comm=None):
     """
     PETSc = _get_petsc(comm=comm)
     comm = PETSc.COMM_WORLD
+
     # Sparse compressed row matrix
     if sp.isspmatrix_csr(mat):
         mat.sort_indices()
