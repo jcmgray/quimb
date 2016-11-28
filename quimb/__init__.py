@@ -144,6 +144,7 @@ from .calc import (
     ent_cross_matrix,
     qid,
     is_degenerate,
+    page_entropy,
 )
 
 # Evolution class and methods
@@ -273,6 +274,7 @@ __all__ = [
     'ent_cross_matrix',
     'qid',
     'is_degenerate',
+    'page_entropy',
     # Evo ------------------------------------------------------------------- #
     'QuEvo',
 ]
