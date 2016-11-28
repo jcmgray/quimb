@@ -19,6 +19,7 @@ import scipy.sparse.linalg as spla
 from scipy.optimize import minimize
 
 from .accel import (
+    accel,
     _dot_dense,
     ldmul,
     issparse,
@@ -260,10 +261,13 @@ def one_way_classical_information(p_ab, prjs, precomp_func=False):
 
 
 @zeroify
-def quantum_discord(p):
+def quantum_discord(p, dims=(2, 2), sysa=0, sysb=1):
     """Quantum Discord for two qubit density matrix `p`.
     """
-    p = qu(p, "dop")
+    if len(dims) > 2:
+        p = ptr(p, dims, (sysa, sysb))
+    else:
+        p = qu(p, "dop")
     iab = mutual_information(p)
     owci = one_way_classical_information(p, None, precomp_func=True)
 
@@ -494,19 +498,22 @@ def qid(p, dims, inds, precomp_func=False, sparse_comp=True,
     return qid_func if precomp_func else qid_func(p)
 
 
-def is_degenerate(op, tol=1e12):
+def is_degenerate(op, tol=1e-12):
     """Check if operator has any degenerate eigenvalues, determined relative
     to equal spacing of all eigenvalues.
 
     Parameters
     ----------
-        op: operator or list of eigenvalues
-        tol: how much closer than evenly spaced the eigenvalue gap has to be
-        to count as degenerage
+        op : list or operator-like
+            Operator or assumed eigenvalues to check degeneracy for.
+        tol : float
+            How much closer than evenly spaced the eigenvalue gap has to be
+            to count as degenerate.
 
     Returns
     -------
-        n_dgen: number of degenerate eigenvalues.
+        n_dgen : int
+            Number of degenerate eigenvalues.
     """
     op = np.asarray(op)
     if op.ndim != 1:
@@ -514,5 +521,30 @@ def is_degenerate(op, tol=1e12):
     else:
         evals = op
     l_gaps = evals[1:] - evals[:-1]
-    l_tol = (evals[-1] - evals[0]) / (op.shape[0] * tol)
+    l_tol = tol * (evals[-1] - evals[0]) / op.shape[0]
     return np.count_nonzero(abs(l_gaps) < l_tol)
+
+
+@accel
+def page_entropy(sz_subsys, sz_total):
+    """Calculate the page entropy, i.e. expected entropy for a subsytem
+    of a random state in Hilbert space.
+
+    Parameters
+    ----------
+        sz_subsys : int
+            Dimension of subsystem.
+        sz_total : int
+            Dimension of total system.
+
+    Returns
+    -------
+        s : float
+            Entropy.
+    """
+    n = sz_total // sz_subsys
+    s = 0
+    for k in range(n + 1, sz_total):
+        s += 1 / k
+    s -= (sz_subsys - 1) / (2 * n)
+    return s
