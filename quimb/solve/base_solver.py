@@ -191,7 +191,7 @@ def _rel_window_to_abs_window(el_min, el_max, w_0, w_sz=None):
 
 
 def eigsys_window(a, w_0, w_n=6, w_sz=None, backend='AUTO',
-                  return_vecs=True, offset_const=1 / 7000):
+                  return_vecs=True, offset_const=1 / 7000, **kwargs):
     """ Return eigenvalues internally from a hermitian matrix.
 
     Parameters
@@ -216,20 +216,20 @@ def eigsys_window(a, w_0, w_n=6, w_sz=None, backend='AUTO',
 
     if not issparse(a) or backend == "dense":
         if return_vecs:
-            lk, vk = eigsys(a.A if issparse(a) else a)
+            lk, vk = eigsys(a.A if issparse(a) else a, **kwargs)
         else:
-            lk = eigvals(a.A if issparse(a) else a)
+            lk = eigvals(a.A if issparse(a) else a, **kwargs)
         lmin, lmax = lk[0], lk[-1]
         l_w0, l_wmin, l_wmax = _rel_window_to_abs_window(lmin, lmax, w_0, w_sz)
 
     else:
-        lmin, lmax = bound_spectrum(a)
+        lmin, lmax = bound_spectrum(a, **kwargs)
         l_w0, l_wmin, l_wmax = _rel_window_to_abs_window(lmin, lmax, w_0, w_sz)
         l_w0 += (lmax - lmin) * offset_const  # for 1/0 issues
         if return_vecs:
-            lk, vk = seigsys(a, k=w_n, sigma=l_w0, backend=backend)
+            lk, vk = seigsys(a, k=w_n, sigma=l_w0, backend=backend, **kwargs)
         else:
-            lk = seigvals(a, k=w_n, sigma=l_w0, backend=backend)
+            lk = seigvals(a, k=w_n, sigma=l_w0, backend=backend, **kwargs)
 
     # Trim eigenpairs from beyond window
     in_window = (lk > l_wmin) & (lk < l_wmax)

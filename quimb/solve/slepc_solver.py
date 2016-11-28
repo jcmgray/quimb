@@ -60,7 +60,7 @@ def _get_slepc(comm=None):
     return init_petsc_and_slepc(comm=comm)[1]
 
 
-def mpi_partition(n, comm=None):
+def mpi_equal_partition(n, comm=None):
     """
     """
     PETSc = _get_petsc(comm=comm)
@@ -89,7 +89,7 @@ def convert_to_petsc(mat, comm=None):
     if sp.isspmatrix_csr(mat):
         mat.sort_indices()
         if comm.Get_size() > 1:
-            ri, rf = mpi_partition(mat.shape[0], comm=comm)
+            ri, rf = mpi_equal_partition(mat.shape[0], comm=comm)
             csr = (mat.indptr[ri:rf + 1] - mat.indptr[ri],
                    mat.indices[mat.indptr[ri]:mat.indptr[rf]],
                    mat.data[mat.indptr[ri]:mat.indptr[rf]])
@@ -236,6 +236,11 @@ def slepc_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
     eigensolver.setOperators(convert_to_petsc(a, comm=comm))
     eigensolver.setDimensions(k, ncv)
     eigensolver.solve()
+
+    if comm and comm.Get_rank() > 0:
+        eigensolver.destroy()
+        return
+
     nconv = eigensolver.getConverged()
     assert nconv >= k
     k = nconv if return_all_conv else k
@@ -286,6 +291,11 @@ def slepc_svds(a, k=6, ncv=None, return_vecs=True, SVDType='cross',
     svd_solver.setOperator(petsc_a)
     svd_solver.setDimensions(nsv=k, ncv=ncv)
     svd_solver.solve()
+
+    if comm and comm.Get_rank() > 0:
+        svd_solver.destroy()
+        return
+
     nconv = svd_solver.getConverged()
     assert nconv >= k
     k = nconv if extra_vals else k
