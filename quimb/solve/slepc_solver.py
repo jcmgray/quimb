@@ -7,23 +7,24 @@ import numpy as np
 import scipy.sparse as sp
 
 
-def cache_first_call(fn):
-    """Wrap a function such that it returns its first call's result,
-    regardless of later calls with different arguments.
+# --------------------------------------------------------------------------- #
+#                          LAZY LOAD MPI/PETSc/SLEPc                          #
+# --------------------------------------------------------------------------- #
+
+def comm_equal_cache(fn):
+    """Cache functions based only on equality of succesive comm arguments.
     """
-
-    def wrapped(*args, **kwargs):
-        if wrapped.result is None:
-            wrapped.result = fn(*args, **kwargs)
-            return wrapped.result
+    def wrapped_fn(comm=None):
+        if wrapped_fn.comm == comm:
+            return wrapped_fn.comm
         else:
-            return wrapped.result
+            wrapped_fn.comm = fn(comm)
+            return wrapped_fn.comm
 
-    wrapped.result = None
-    return wrapped
+    wrapped_fn.comm = "__UNINITIALIZED__"
+    return wrapped_fn
 
 
-@cache_first_call
 def get_default_comm():
     """Define the default communicator.
     """
@@ -31,7 +32,7 @@ def get_default_comm():
     return MPI.COMM_SELF
 
 
-@cache_first_call
+@comm_equal_cache
 def init_petsc_and_slepc(comm=None):
     """Make sure petsc is initialized with comm before slepc.
     """
@@ -46,24 +47,28 @@ def init_petsc_and_slepc(comm=None):
     return PETSc, SLEPc
 
 
-@cache_first_call
-def _get_petsc(comm=None):
+@comm_equal_cache
+def get_petsc(comm=None):
     """Cache petsc module import to allow lazy start.
     """
     return init_petsc_and_slepc(comm=comm)[0]
 
 
-@cache_first_call
-def _get_slepc(comm=None):
+@comm_equal_cache
+def get_slepc(comm=None):
     """Cache slepc module import to allow lazy start.
     """
     return init_petsc_and_slepc(comm=comm)[1]
 
 
+# --------------------------------------------------------------------------- #
+#                               PETSc FUNCTIONS                               #
+# --------------------------------------------------------------------------- #
+
 def mpi_equal_partition(n, comm=None):
     """
     """
-    PETSc = _get_petsc(comm=comm)
+    PETSc = get_petsc(comm=comm)
     comm = PETSc.COMM_WORLD
     # Get size and position within comm
     mpi_size = comm.Get_size()
@@ -82,7 +87,7 @@ def convert_to_petsc(mat, comm=None):
     """Convert a matrix to the relevant PETSc type, currently
     only supports csr, bsr, vectors and dense matrices formats.
     """
-    PETSc = _get_petsc(comm=comm)
+    PETSc = get_petsc(comm=comm)
     comm = PETSc.COMM_WORLD
 
     # Sparse compressed row matrix
@@ -95,19 +100,24 @@ def convert_to_petsc(mat, comm=None):
                    mat.data[mat.indptr[ri]:mat.indptr[rf]])
         else:
             csr = (mat.indptr, mat.indices, mat.data)
-        pmat = PETSc.Mat().createAIJ(size=mat.shape, csr=csr, comm=comm)
+        pmat = PETSc.Mat().createAIJ(size=mat.shape, nnz=mat.nnz,
+                                     csr=csr, comm=comm)
+
     # Sparse block row matrix
     elif sp.isspmatrix_bsr(mat):
         mat.sort_indices()
         csr = (mat.indptr, mat.indices, mat.data)
         pmat = PETSc.Mat().createBAIJ(size=mat.shape, bsize=mat.blocksize,
-                                      csr=csr, comm=comm)
+                                      nnz=mat.nnz, csr=csr, comm=comm)
+
     # Dense vector
     elif mat.ndim == 1:
         pmat = PETSc.Vec().createWithArray(mat, comm=comm)
+
     # Dense matrix
     else:
         pmat = PETSc.Mat().createDense(size=mat.shape, array=mat, comm=comm)
+
     pmat.assemble()
     return pmat
 
@@ -115,11 +125,15 @@ def convert_to_petsc(mat, comm=None):
 def new_petsc_vec(n, comm=None):
     """Create an empty complex petsc vector of size `n`.
     """
-    PETSc = _get_petsc(comm=comm)
+    PETSc = get_petsc(comm=comm)
     comm = PETSc.COMM_WORLD
     a = np.empty(n, dtype=complex)
     return PETSc.Vec().createWithArray(a, comm=comm)
 
+
+# --------------------------------------------------------------------------- #
+#                               SLEPc FUNCTIONS                               #
+# --------------------------------------------------------------------------- #
 
 def _init_spectral_inverter(ptype="lu",
                             ppackage="mumps",
@@ -128,8 +142,8 @@ def _init_spectral_inverter(ptype="lu",
                             comm=None):
     """Create a slepc spectral transformation object with specified solver.
     """
-    PETSc = _get_petsc(comm=comm)
-    SLEPc = _get_slepc(comm=comm)
+    PETSc = get_petsc(comm=comm)
+    SLEPc = get_slepc(comm=comm)
     comm = PETSc.COMM_WORLD
     # Preconditioner and linear solver
     P = PETSc.PC().create(comm=comm)
@@ -165,7 +179,7 @@ _WHICH_SCIPY_TO_SLEPC = {
 
 
 def _which_scipy_to_slepc(which):
-    SLEPc = _get_slepc()
+    SLEPc = get_slepc()
     return getattr(SLEPc.EPS.Which, _WHICH_SCIPY_TO_SLEPC[which.upper()])
 
 
@@ -183,7 +197,7 @@ def _init_eigensolver(which='LM', sigma=None, isherm=True,
     -------
         SLEPc solver ready to be called.
     """
-    SLEPc = _get_slepc(comm=comm)
+    SLEPc = get_slepc(comm=comm)
     comm = SLEPc.COMM_WORLD
     eigensolver = SLEPc.EPS().create(comm=comm)
     if sigma is not None:
@@ -261,7 +275,7 @@ def slepc_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
 
 
 def _init_svd_solver(SVDType='cross', tol=None, max_it=None, comm=None):
-    SLEPc = _get_slepc(comm=comm)
+    SLEPc = get_slepc(comm=comm)
     comm = SLEPc.COMM_WORLD
     svd_solver = SLEPc.SVD().create(comm=comm)
     svd_solver.setType(SVDType)

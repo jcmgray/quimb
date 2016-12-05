@@ -111,9 +111,11 @@ def entropy(a, rank=None):
 
     Parameters
     ----------
-        a: operator or list of eigenvalues
-        rank: if operator has known rank, then a partial decomposition can be
-            used to acclerate the calculation
+        a :
+            Operator or list of eigenvalues.
+        rank : int (optional)
+            If operator has known rank, then a partial decomposition can be
+            used to acclerate the calculation.
 
     Returns
     -------
