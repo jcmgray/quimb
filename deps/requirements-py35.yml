@@ -1,0 +1,15 @@
+name: test-environment
+dependencies:
+  - python=3.5
+  - numpy
+  - scipy
+  - numba
+  - numexpr
+  - psutil
+  - cytoolz
+  - coverage
+  - pytest
+  - pytest-cov
+  - pip:
+    - coveralls
+    - codeclimate-test-reporter

@@ -1,5 +1,5 @@
 #!/bin/sh
-set -e
+set -ex
 
 export INSTALL_DIR=$HOME/petsc_and_slepc
 

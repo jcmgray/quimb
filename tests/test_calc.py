@@ -2,15 +2,46 @@ from pytest import fixture, mark, raises
 import itertools
 import numpy as np
 from numpy.testing import assert_allclose
-from .. import (qu, eye, rand_product_state, bell_state, up, eigvecs,
-                rand_mix, rand_rho, rand_ket, sig, down, overlap,
-                singlet_pairs, dop, singlet, kron, ham_heis, ptr)
-from ..calc import (fidelity, quantum_discord, one_way_classical_information,
-                    mutual_information, partial_transpose, entropy,
-                    correlation, pauli_correlations, expm, sqrtm, purify,
-                    concurrence, negativity, logneg, trace_distance,
-                    pauli_decomp, bell_decomp, ent_cross_matrix, qid,
-                    is_degenerate)
+from quimb import (
+    qu,
+    eye,
+    rand_product_state,
+    bell_state,
+    up,
+    eigvecs,
+    rand_mix,
+    rand_rho,
+    rand_ket,
+    sig,
+    down,
+    overlap,
+    singlet_pairs,
+    dop,
+    singlet,
+    kron,
+    ham_heis,
+    ptr,
+    fidelity,
+    quantum_discord,
+    one_way_classical_information,
+    mutual_information,
+    partial_transpose,
+    entropy,
+    correlation,
+    pauli_correlations,
+    expm,
+    sqrtm,
+    purify,
+    concurrence,
+    negativity,
+    logneg,
+    trace_distance,
+    pauli_decomp,
+    bell_decomp,
+    ent_cross_matrix,
+    qid,
+    is_degenerate,
+)
 
 
 @fixture
@@ -77,7 +108,7 @@ class TestFidelity:
         assert f > 0 and f < 1
 
     def test_both_mixed(self, p1, p2):
-        f = fidelity(eye(3)/3, eye(3)/3)
+        f = fidelity(eye(3) / 3, eye(3) / 3)
         assert_allclose(f, 1.0)
         f = fidelity(p1, p1)
         assert_allclose(f, 1.0)
@@ -126,17 +157,17 @@ class TestEntropy:
                    bell_state(2, qtype='dop'))
         assert_allclose(1.0, entropy(a), atol=1e-12)
 
-    @mark.parametrize("l, e", [([0, 1, 0, 0], 0),
-                               ([0, 0.5, 0, 0.5], 1),
-                               ([0.25, 0.25, 0.25, 0.25], 2)])
-    def test_list(self, l, e):
-        assert_allclose(entropy(l), e)
+    @mark.parametrize("evals, e", [([0, 1, 0, 0], 0),
+                                   ([0, 0.5, 0, 0.5], 1),
+                                   ([0.25, 0.25, 0.25, 0.25], 2)])
+    def test_list(self, evals, e):
+        assert_allclose(entropy(evals), e)
 
-    @mark.parametrize("l, e", [([0, 1, 0, 0], 0),
-                               ([0, 0.5, 0, 0.5], 1),
-                               ([0.25, 0.25, 0.25, 0.25], 2)])
-    def test_1darray(self, l, e):
-        assert_allclose(entropy(np.asarray(l)), e)
+    @mark.parametrize("evals, e", [([0, 1, 0, 0], 0),
+                                   ([0, 0.5, 0, 0.5], 1),
+                                   ([0.25, 0.25, 0.25, 0.25], 2)])
+    def test_1darray(self, evals, e):
+        assert_allclose(entropy(np.asarray(evals)), e)
 
     @mark.parametrize("m", [1, 2, 3])
     def test_rank(self, m):
@@ -156,11 +187,11 @@ class TestMutualInformation:
 
     def test_mutual_information_pure_sub(self):
         a = up() & bell_state(1)
-        ixy = mutual_information(a, [2, 2, 2],  0, 1)
+        ixy = mutual_information(a, [2, 2, 2], 0, 1)
         assert_allclose(0.0, ixy, atol=1e-12)
-        ixy = mutual_information(a, [2, 2, 2],  0, 2)
+        ixy = mutual_information(a, [2, 2, 2], 0, 2)
         assert_allclose(0.0, ixy, atol=1e-12)
-        ixy = mutual_information(a, [2, 2, 2],  2, 1)
+        ixy = mutual_information(a, [2, 2, 2], 2, 1)
         assert_allclose(2.0, ixy, atol=1e-12)
 
     @mark.parametrize('inds', [(0, 1), (1, 2), (0, 2)])
@@ -197,9 +228,9 @@ class TestNegativity:
 
     def test_subsystem(self):
         p = singlet_pairs(4)
-        assert negativity(p, [2]*4, 0, 1) > 0.5 - 1e-14
-        assert negativity(p, [2]*4, 1, 2) < 1e-14
-        assert negativity(p, [2]*4, 2, 3) > 0.5 - 1e-14
+        assert negativity(p, [2] * 4, 0, 1) > 0.5 - 1e-14
+        assert negativity(p, [2] * 4, 1, 2) < 1e-14
+        assert negativity(p, [2] * 4, 2, 3) > 0.5 - 1e-14
 
 
 class TestLogarithmicNegativity:
@@ -211,9 +242,9 @@ class TestLogarithmicNegativity:
 
     def test_subsystem(self):
         p = singlet_pairs(4)
-        assert logneg(p, [2]*4, 0, 1) > 1 - 1e-14
-        assert logneg(p, [2]*4, 1, 2) < 1e-14
-        assert logneg(p, [2]*4, 2, 3) > 1 - 1e-14
+        assert logneg(p, [2] * 4, 0, 1) > 1 - 1e-14
+        assert logneg(p, [2] * 4, 1, 2) < 1e-14
+        assert logneg(p, [2] * 4, 2, 3) > 1 - 1e-14
 
 
 class TestConcurrence:
@@ -222,6 +253,11 @@ class TestConcurrence:
     def test_bell_states(self, qtype, bs):
         p = bell_state(bs, qtype=qtype)
         assert concurrence(p) > 1.0 - 1e-14
+
+    def test_subsystem(self):
+        p = rand_rho(2**4)
+        e = concurrence(p, [2, 2, 2, 2], 1, 2)
+        assert 0 <= e <= 1
 
 
 class TestQuantumDiscord:
@@ -266,7 +302,7 @@ class TestTraceDistance:
         td2 = trace_distance(dop(k1), k2)
         td3 = trace_distance(k1, dop(k2))
         td4 = trace_distance(dop(k1), dop(k2))
-        assert_allclose([td1]*3, [td2, td3, td4])
+        assert_allclose([td1] * 3, [td2, td3, td4])
 
     def test_same(self, p1):
         assert abs(trace_distance(p1, p1)) < 1e-14
@@ -376,6 +412,34 @@ class TestEntCrossMatrix:
         ecm = ent_cross_matrix(p, ent_fn=concurrence, calc_self_ent=False)
         assert_allclose(ecm, [[np.nan, 1], [1, np.nan]])
 
+    def test_block2(self):
+        p = bell_state('phi+') & bell_state('phi+')
+        ecm = ent_cross_matrix(p, ent_fn=logneg, sz_blc=2)
+        assert_allclose(ecm[1, 1], 0)
+        assert_allclose(ecm[0, 1], 0)
+        assert_allclose(ecm[1, 0], 0)
+
+    def test_block2_no_self_ent(self):
+        p = bell_state('phi+') & bell_state('phi+')
+        ecm = ent_cross_matrix(p, ent_fn=logneg, calc_self_ent=False, sz_blc=2)
+        assert_allclose(ecm[0, 1], 0)
+        assert_allclose(ecm[0, 0], np.nan)
+        assert_allclose(ecm[1, 0], 0)
+
+
+class TestEntCrossMatrixBlocked:
+    @mark.parametrize("sz_p", [2**2 for i in [2, 3, 4, 5, 6, 9, 12]])
+    @mark.parametrize("sz_blc", [1, 2, 3, 4, 5])
+    @mark.parametrize("calc_self_ent", [True, False])
+    def test_shapes_and_blocks(self, sz_blc, sz_p, calc_self_ent):
+        if sz_p // sz_blc > 0:
+            p = rand_rho(2**sz_p)
+            n = sz_p // sz_blc
+            ecm = ent_cross_matrix(p, sz_blc, calc_self_ent=calc_self_ent)
+            assert ecm.shape[0] == n
+            if not calc_self_ent:
+                assert_allclose(np.diag(ecm), [np.nan] * n, equal_nan=True)
+
 
 class TestQID:
     @mark.parametrize("bs", [0, 1, 2, 3])
@@ -402,10 +466,10 @@ class TestIsDegenerate:
         assert is_degenerate(h) == 0
 
     def test_supply_list(self):
-        l = [0, 1, 2, 2.0, 3]
-        assert is_degenerate(l)
+        evals = [0, 1, 2, 2.0, 3]
+        assert is_degenerate(evals)
 
     def test_tol(self):
-        l = [0, 1, 1.001, 3, 4, 5, 6, 7, 8, 9]
-        assert not is_degenerate(l)
-        assert is_degenerate(l, tol=1e-2)
+        evals = [0, 1, 1.001, 3, 4, 5, 6, 7, 8, 9]
+        assert not is_degenerate(evals)
+        assert is_degenerate(evals, tol=1e-2)

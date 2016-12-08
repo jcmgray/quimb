@@ -6,11 +6,28 @@ from functools import reduce
 import numpy as np
 from numpy.testing import assert_allclose
 
-from .. import (qu, eigsys, rand_ket, rand_rho, rand_herm, rand_matrix,
-                rand_uni, overlap, ham_heis, up, down, eyepad, sig)
-from ..evo import (schrodinger_eq_ket, schrodinger_eq_dop,
-                   schrodinger_eq_dop_vec, lindblad_eq, lindblad_eq_vec,
-                   QuEvo)
+from quimb import (
+    qu, eigsys,
+    rand_ket,
+    rand_rho,
+    rand_herm,
+    rand_matrix,
+    rand_uni,
+    overlap,
+    ham_heis,
+    up,
+    down,
+    eyepad,
+    sig,
+)
+from quimb.evo import (
+    schrodinger_eq_ket,
+    schrodinger_eq_dop,
+    schrodinger_eq_dop_vec,
+    lindblad_eq,
+    lindblad_eq_vec,
+    QuEvo,
+)
 
 
 @fixture
@@ -79,17 +96,15 @@ def srho_dot_ls():
 # --------------------------------------------------------------------------- #
 
 class TestSchrodingerEqKet:
-    @mark.parametrize("all_dense", [False, True])
-    def test_ket_matrix(self, psi_dot, all_dense):
+    def test_ket_matrix(self, psi_dot):
         psi, ham, psid = psi_dot
-        foo = schrodinger_eq_ket(ham, all_dense=all_dense)
+        foo = schrodinger_eq_ket(ham)
         psid2 = foo(None, psi)
         assert_allclose(psid, psid2)
 
-    @mark.parametrize("all_dense", [False, True])
-    def test_ket_1darray(self, psi_dot, all_dense):
+    def test_ket_1darray(self, psi_dot):
         psi, ham, psid = psi_dot
-        foo = schrodinger_eq_ket(ham, all_dense=all_dense)
+        foo = schrodinger_eq_ket(ham)
         psid2 = foo(None, psi.A.reshape(-1)).reshape(-1, 1)
         assert_allclose(psid, psid2)
 
@@ -107,17 +122,15 @@ class TestSchrodingerEqKet:
 
 
 class TestSchrodingerEqDop:
-    @mark.parametrize("all_dense", [False, True])
-    def test_dop_matrix(self, rho_dot, all_dense):
+    def test_dop_matrix(self, rho_dot):
         rho, ham, rhod = rho_dot
-        foo = schrodinger_eq_dop(ham, all_dense=all_dense)
+        foo = schrodinger_eq_dop(ham)
         rhod2 = foo(None, rho.A).reshape(3, 3)
         assert_allclose(rhod, rhod2)
 
-    @mark.parametrize("all_dense", [False, True])
-    def test_dop_1darray(self, rho_dot, all_dense):
+    def test_dop_1darray(self, rho_dot):
         rho, ham, rhod = rho_dot
-        foo = schrodinger_eq_dop(ham, all_dense=all_dense)
+        foo = schrodinger_eq_dop(ham)
         rhod2 = foo(None, rho.A.reshape(-1)).reshape(3, 3)
         assert_allclose(rhod, rhod2)
 
@@ -149,17 +162,15 @@ class TestSchrodingerEqDopVec:
 
 
 class TestLindbladEq:
-    @mark.parametrize("all_dense", [False, True])
-    def test_matrix(self, rho_dot_ls, all_dense):
+    def test_matrix(self, rho_dot_ls):
         rho, ham, gamma, ls, rhod = rho_dot_ls
-        foo = lindblad_eq(ham, ls, gamma, all_dense=all_dense)
+        foo = lindblad_eq(ham, ls, gamma)
         rhod2 = foo(None, rho).reshape(3, 3)
         assert_allclose(rhod, rhod2)
 
-    @mark.parametrize("all_dense", [False, True])
-    def test_1darray(self, rho_dot_ls, all_dense):
+    def test_1darray(self, rho_dot_ls):
         rho, ham, gamma, ls, rhod = rho_dot_ls
-        foo = lindblad_eq(ham, ls, gamma, all_dense=all_dense)
+        foo = lindblad_eq(ham, ls, gamma)
         rhod2 = foo(None, rho.A.reshape(-1)).reshape(3, 3)
         assert_allclose(rhod, rhod2)
 
@@ -206,13 +217,13 @@ def ham_rcr_psi():
     LCD = reduce(gcd, ems)
     # denominator lowest common multiple
     LCM = reduce(lambda a, b: a * b // gcd(a, b), ens)
-    trc = 2 * pi * LCM/LCD
-    l = np.array(ems) / np.array(ens)
+    trc = 2 * pi * LCM / LCD
+    evals = np.array(ems) / np.array(ens)
     v = rand_uni(d)
-    ham = v @ np.diag(l) @ v.H
+    ham = v @ np.diag(evals) @ v.H
     p0 = rand_ket(d)
     tm = 0.573 * trc
-    pm = v @ np.diag(np.exp(-1.0j * tm * l)) @ v.H @ p0
+    pm = v @ np.diag(np.exp(-1.0j * tm * evals)) @ v.H @ p0
     return ham, trc, p0, tm, pm
 
 

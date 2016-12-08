@@ -1,13 +1,39 @@
 from pytest import mark
 import numpy as np
 from numpy.testing import assert_allclose
-from ... import (tr, eye, chop, eyepad, overlap, ptr, eigsys,
-                 groundstate, concurrence)
-from ...gen import (basis_vec, up, down, plus, minus, yplus, yminus,
-                    thermal_state, neel_state, ham_j1j2, rand_herm,
-                    graph_state_1d, sig, levi_civita, bloch_state,
-                    bell_state, singlet, singlet_pairs, werner_state,
-                    ghz_state, w_state, perm_state)
+from quimb import (
+    tr,
+    eye,
+    chop,
+    eyepad,
+    overlap,
+    ptr,
+    eigsys,
+    groundstate,
+    concurrence,
+    basis_vec,
+    up,
+    down,
+    plus,
+    minus,
+    yplus,
+    yminus,
+    thermal_state,
+    neel_state,
+    ham_j1j2,
+    rand_herm,
+    graph_state_1d,
+    sig,
+    levi_civita,
+    bloch_state,
+    bell_state,
+    singlet,
+    singlet_pairs,
+    werner_state,
+    ghz_state,
+    w_state,
+    perm_state
+)
 
 
 class TestBasisVec:
@@ -152,12 +178,12 @@ class TestWernerState:
         p = werner_state(0)
         assert_allclose(p, eye(4) / 4, atol=1e-14)
 
-    @mark.parametrize("p", np.linspace(0, 1/3, 10))
+    @mark.parametrize("p", np.linspace(0, 1 / 3, 10))
     def test_no_entanglement(self, p):
         rho = werner_state(p)
         assert concurrence(rho) < 1e-14
 
-    @mark.parametrize("p", np.linspace(1/3 + 0.001, 1.0, 10))
+    @mark.parametrize("p", np.linspace(1 / 3 + 0.001, 1.0, 10))
     def test_entanglement(self, p):
         rho = werner_state(p)
         assert concurrence(rho) > 1e-14
