@@ -14,7 +14,13 @@ import scipy.sparse as sp
 from numba import jit, vectorize
 from numexpr import evaluate
 
-_NUM_THREADS = psutil.cpu_count()
+
+try:
+    import os
+    _NUM_THREADS = os.environ['OMP_NUM_THREADS']
+except KeyError:
+    _NUM_THREADS = psutil.cpu_count()
+
 accel = functools.partial(jit, nopython=True, cache=False)
 
 
