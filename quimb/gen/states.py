@@ -9,7 +9,7 @@ from math import factorial
 import numpy as np
 import scipy.sparse as sp
 
-from ..accel import ldmul, dot
+from ..accel import ldmul, dot, make_immutable
 from ..core import (qu, kron, kronpow, eye, eyepad)
 from ..solve.base_solver import eigsys
 from .operators import sig, controlled
@@ -37,19 +37,25 @@ def basis_vec(dir, dim, sparse=False, **kwargs):
     return qu(x, **kwargs)
 
 
+@lru_cache(8)
 def up(**kwargs):
     """Returns up-state, aka. |0>, +Z eigenstate.
     """
-    return qu([[1], [0]], **kwargs)
+    u = qu([[1], [0]], **kwargs)
+    make_immutable(u)
+    return u
 
 
 zplus = up
 
 
+@lru_cache(8)
 def down(**kwargs):
     """Returns down-state, aka. |1>, -Z eigenstate.
     """
-    return qu([[0], [1]], **kwargs)
+    d = qu([[0], [1]], **kwargs)
+    make_immutable(d)
+    return d
 
 
 zminus = down

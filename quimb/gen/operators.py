@@ -232,3 +232,16 @@ def zspin_projector(n, sz=0, stype="csr"):
     prj = qu(prj, stype=stype)
     make_immutable(prj)
     return prj
+
+
+@lru_cache(maxsize=8)
+def swap(dim=2, **kwargs):
+    """The SWAP operator acting on subsystems of dimension `dim`.
+    """
+    a = np.identity(dim**2, dtype=complex)
+    a = (a.reshape([dim, dim, dim, dim])
+          .transpose([0, 3, 1, 2])
+          .reshape([dim**2, dim**2]))
+    a = qu(a, **kwargs)
+    make_immutable(a)
+    return a

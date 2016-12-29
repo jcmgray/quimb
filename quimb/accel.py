@@ -17,7 +17,7 @@ from numexpr import evaluate
 
 try:
     import os
-    _NUM_THREADS = os.environ['OMP_NUM_THREADS']
+    _NUM_THREADS = int(os.environ['OMP_NUM_THREADS'])
 except KeyError:
     _NUM_THREADS = psutil.cpu_count()
 
