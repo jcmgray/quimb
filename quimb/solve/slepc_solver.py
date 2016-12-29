@@ -29,6 +29,8 @@ def get_default_comm():
     """Define the default communicator.
     """
     from mpi4py import MPI
+    if not MPI.Is_initialized():
+        MPI.Init()
     return MPI.COMM_SELF
 
 
