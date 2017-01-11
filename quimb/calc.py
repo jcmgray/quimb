@@ -545,8 +545,12 @@ def page_entropy(sz_subsys, sz_total):
             Entropy.
     """
     n = sz_total // sz_subsys
+
+    if sz_subsys > n:
+        raise ValueError("Subsystem size must be <= environment size.")
+
     s = 0
-    for k in range(n + 1, sz_total):
+    for k in range(n + 1, sz_total + 1):
         s += 1 / k
     s -= (sz_subsys - 1) / (2 * n)
     return s
