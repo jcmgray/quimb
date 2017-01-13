@@ -490,7 +490,7 @@ class TestPageEntropy:
         pe = page_entropy(2**10, 2**20)
         ae = 0.5 * (20 - math.log2(math.e))
 
-        assert abs(pe - ae) < 1e-7
+        assert abs(pe - ae) < 1e-5
 
     def test_raises(self):
         with pytest.raises(ValueError):
