@@ -1,5 +1,6 @@
-from pytest import fixture, mark, raises
+import pytest
 import itertools
+import math
 import numpy as np
 from numpy.testing import assert_allclose
 from quimb import (
@@ -41,30 +42,31 @@ from quimb import (
     ent_cross_matrix,
     qid,
     is_degenerate,
+    page_entropy,
 )
 
 
-@fixture
+@pytest.fixture
 def p1():
     return rand_rho(3)
 
 
-@fixture
+@pytest.fixture
 def p2():
     return rand_rho(3)
 
 
-@fixture
+@pytest.fixture
 def k1():
     return rand_ket(3)
 
 
-@fixture
+@pytest.fixture
 def k2():
     return rand_ket(3)
 
 
-@fixture
+@pytest.fixture
 def orthog_ks():
     p = rand_rho(3)
     v = eigvecs(p)
@@ -76,24 +78,24 @@ def orthog_ks():
 # --------------------------------------------------------------------------- #
 
 class TestExpm:
-    @mark.parametrize("herm", [True, False])
+    @pytest.mark.parametrize("herm", [True, False])
     def test_zeros_dense(self, herm):
         p = expm(np.zeros((2, 2), dtype=complex), herm=herm)
         assert_allclose(p, eye(2))
 
-    @mark.parametrize("sparse", [True, False])
-    @mark.parametrize("herm", [True, False])
+    @pytest.mark.parametrize("sparse", [True, False])
+    @pytest.mark.parametrize("herm", [True, False])
     def test_eye(self, sparse, herm):
         p = expm(eye(2, sparse=sparse), herm=herm)
         assert_allclose((p.A if sparse else p) / np.e, eye(2))
 
 
 class TestSqrtm:
-    @mark.parametrize("sparse", [True, False])
-    @mark.parametrize("herm", [True, False])
+    @pytest.mark.parametrize("sparse", [True, False])
+    @pytest.mark.parametrize("herm", [True, False])
     def test_eye(self, herm, sparse):
         if sparse:
-            with raises(NotImplementedError):
+            with pytest.raises(NotImplementedError):
                 p = sqrtm(eye(2, sparse=sparse), herm=herm)
         else:
             p = sqrtm(eye(2), herm=herm)
@@ -134,13 +136,13 @@ class TestFidelity:
 
 
 class TestPurify:
-    @mark.parametrize("sparse", [True, False])
+    @pytest.mark.parametrize("sparse", [True, False])
     def test_d2(self, sparse):
         rho = eye(2) / 2
         psi = purify(rho, sparse=sparse)
         assert overlap(psi, bell_state('phi+')) > 1 - 1e-14
 
-    @mark.parametrize("sparse", [True, False])
+    @pytest.mark.parametrize("sparse", [True, False])
     def test_pure(self, sparse):
         rho = up(qtype='dop')
         psi = purify(rho, sparse=sparse)
@@ -157,19 +159,19 @@ class TestEntropy:
                    bell_state(2, qtype='dop'))
         assert_allclose(1.0, entropy(a), atol=1e-12)
 
-    @mark.parametrize("evals, e", [([0, 1, 0, 0], 0),
-                                   ([0, 0.5, 0, 0.5], 1),
-                                   ([0.25, 0.25, 0.25, 0.25], 2)])
+    @pytest.mark.parametrize("evals, e", [([0, 1, 0, 0], 0),
+                                          ([0, 0.5, 0, 0.5], 1),
+                                          ([0.25, 0.25, 0.25, 0.25], 2)])
     def test_list(self, evals, e):
         assert_allclose(entropy(evals), e)
 
-    @mark.parametrize("evals, e", [([0, 1, 0, 0], 0),
-                                   ([0, 0.5, 0, 0.5], 1),
-                                   ([0.25, 0.25, 0.25, 0.25], 2)])
+    @pytest.mark.parametrize("evals, e", [([0, 1, 0, 0], 0),
+                                          ([0, 0.5, 0, 0.5], 1),
+                                          ([0.25, 0.25, 0.25, 0.25], 2)])
     def test_1darray(self, evals, e):
         assert_allclose(entropy(np.asarray(evals)), e)
 
-    @mark.parametrize("m", [1, 2, 3])
+    @pytest.mark.parametrize("m", [1, 2, 3])
     def test_rank(self, m):
         k = rand_ket(2**4)
         pab = ptr(k, [2, 2, 2, 2], range(m))
@@ -194,13 +196,13 @@ class TestMutualInformation:
         ixy = mutual_information(a, [2, 2, 2], 2, 1)
         assert_allclose(2.0, ixy, atol=1e-12)
 
-    @mark.parametrize('inds', [(0, 1), (1, 2), (0, 2)])
+    @pytest.mark.parametrize('inds', [(0, 1), (1, 2), (0, 2)])
     def test_mixed_sub(self, inds):
         a = rand_rho(2**3)
         ixy = mutual_information(a, (2, 2, 2), *inds)
         assert (0 <= ixy <= 2.0)
 
-    @mark.parametrize('inds', [(0, 1), (1, 2), (0, 2)])
+    @pytest.mark.parametrize('inds', [(0, 1), (1, 2), (0, 2)])
     def test_auto_rank(self, inds):
         a = rand_ket(2**3)
         ixy = mutual_information(a, (2, 2, 2), *inds)
@@ -220,8 +222,8 @@ class TestPartialTranspose:
 
 
 class TestNegativity:
-    @mark.parametrize("bs", ['psi-', 'phi-', 'psi+', 'phi+'])
-    @mark.parametrize("qtype", ['ket', 'dop'])
+    @pytest.mark.parametrize("bs", ['psi-', 'phi-', 'psi+', 'phi+'])
+    @pytest.mark.parametrize("qtype", ['ket', 'dop'])
     def test_simple(self, qtype, bs):
         p = bell_state(bs, qtype=qtype)
         assert negativity(p) > 0.5 - 1e-14
@@ -234,8 +236,8 @@ class TestNegativity:
 
 
 class TestLogarithmicNegativity:
-    @mark.parametrize("bs", ['psi-', 'phi-', 'psi+', 'phi+'])
-    @mark.parametrize("qtype", ['ket', 'dop'])
+    @pytest.mark.parametrize("bs", ['psi-', 'phi-', 'psi+', 'phi+'])
+    @pytest.mark.parametrize("qtype", ['ket', 'dop'])
     def test_bell_states(self, qtype, bs):
         p = bell_state(bs, qtype=qtype)
         assert logneg(p) > 1.0 - 1e-14
@@ -248,8 +250,8 @@ class TestLogarithmicNegativity:
 
 
 class TestConcurrence:
-    @mark.parametrize("bs", ['psi-', 'phi-', 'psi+', 'phi+'])
-    @mark.parametrize("qtype", ['ket', 'dop'])
+    @pytest.mark.parametrize("bs", ['psi-', 'phi-', 'psi+', 'phi+'])
+    @pytest.mark.parametrize("qtype", ['ket', 'dop'])
     def test_bell_states(self, qtype, bs):
         p = bell_state(bs, qtype=qtype)
         assert concurrence(p) > 1.0 - 1e-14
@@ -295,6 +297,11 @@ class TestQuantumDiscord:
             qd = quantum_discord(p)
             assert(0 <= qd and qd <= 1)
 
+    def test_auto_trace_out(self):
+        p = rand_rho(2**3)
+        qd = quantum_discord(p, [2, 2, 2], 0, 2)
+        assert(0 <= qd and qd <= 1)
+
 
 class TestTraceDistance:
     def test_types(self, k1, k2):
@@ -307,14 +314,14 @@ class TestTraceDistance:
     def test_same(self, p1):
         assert abs(trace_distance(p1, p1)) < 1e-14
 
-    @mark.parametrize("uqtype", ['ket', 'dop'])
-    @mark.parametrize("dqtype", ['ket', 'dop'])
+    @pytest.mark.parametrize("uqtype", ['ket', 'dop'])
+    @pytest.mark.parametrize("dqtype", ['ket', 'dop'])
     def test_distinguishable(self, uqtype, dqtype):
         assert trace_distance(up(qtype=uqtype), down(qtype=dqtype)) > 1 - 1e-10
 
 
 class TestDecomp:
-    @mark.parametrize("qtype", ['ket', 'dop'])
+    @pytest.mark.parametrize("qtype", ['ket', 'dop'])
     def test_pauli_decomp_singlet(self, qtype):
         p = singlet(qtype=qtype)
         names_cffs = pauli_decomp(p, mode='cp')
@@ -332,10 +339,10 @@ class TestDecomp:
                  for name in itertools.product('IXYZ', repeat=2))
         assert_allclose(pr, p1)
 
-    @mark.parametrize("state, out",
-                      [(up() & down(), {0: 0.5, 1: 0.5, 2: 0, 3: 0}),
-                       (down() & down(), {0: 0, 1: 0, 2: 0.5, 3: 0.5}),
-                       (singlet() & singlet(), {'00': 1.0, '23': 0.0})])
+    @pytest.mark.parametrize("state, out",
+                             [(up() & down(), {0: 0.5, 1: 0.5, 2: 0, 3: 0}),
+                              (down() & down(), {0: 0, 1: 0, 2: 0.5, 3: 0.5}),
+                              (singlet() & singlet(), {'00': 1.0, '23': 0.0})])
     def test_bell_decomp(self, state, out):
         names_cffs = bell_decomp(state, mode='c')
         for key in out:
@@ -343,10 +350,10 @@ class TestDecomp:
 
 
 class TestCorrelation:
-    @mark.parametrize("pre_c", [False, True])
-    @mark.parametrize("p_sps", [True, False])
-    @mark.parametrize("op_sps", [True, False])
-    @mark.parametrize("dims", (None, [2, 2]))
+    @pytest.mark.parametrize("pre_c", [False, True])
+    @pytest.mark.parametrize("p_sps", [True, False])
+    @pytest.mark.parametrize("op_sps", [True, False])
+    @pytest.mark.parametrize("dims", (None, [2, 2]))
     def test_types(self, dims, op_sps, p_sps, pre_c):
         p = rand_rho(4, sparse=p_sps)
         c = correlation(p, sig('x', sparse=op_sps), sig('z', sparse=op_sps),
@@ -355,17 +362,17 @@ class TestCorrelation:
         assert c >= -1.0
         assert c <= 1.0
 
-    @mark.parametrize("pre_c", [False, True])
-    @mark.parametrize("qtype", ["ket", "dop"])
-    @mark.parametrize("dir", ['x', 'y', 'z'])
+    @pytest.mark.parametrize("pre_c", [False, True])
+    @pytest.mark.parametrize("qtype", ["ket", "dop"])
+    @pytest.mark.parametrize("dir", ['x', 'y', 'z'])
     def test_classically_no_correlated(self, dir, qtype, pre_c):
         p = up(qtype=qtype) & up(qtype=qtype)
         c = correlation(p, sig(dir), sig(dir), 0, 1, precomp_func=pre_c)
         c = c(p) if pre_c else c
         assert_allclose(c, 0.0)
 
-    @mark.parametrize("pre_c", [False, True])
-    @mark.parametrize("dir, ct", [('x', 0), ('y', 0), ('z', 1)])
+    @pytest.mark.parametrize("pre_c", [False, True])
+    @pytest.mark.parametrize("dir, ct", [('x', 0), ('y', 0), ('z', 1)])
     def test_classically_correlated(self, dir, ct, pre_c):
         p = 0.5 * ((up(qtype='dop') & up(qtype='dop')) +
                    (down(qtype='dop') & down(qtype='dop')))
@@ -373,8 +380,8 @@ class TestCorrelation:
         c = c(p) if pre_c else c
         assert_allclose(c, ct)
 
-    @mark.parametrize("pre_c", [False, True])
-    @mark.parametrize("dir, ct", [('x', -1), ('y', -1), ('z', -1)])
+    @pytest.mark.parametrize("pre_c", [False, True])
+    @pytest.mark.parametrize("dir, ct", [('x', -1), ('y', -1), ('z', -1)])
     def test_entangled(self, dir, ct, pre_c):
         p = bell_state('psi-')
         c = correlation(p, sig(dir), sig(dir), 0, 1, precomp_func=pre_c)
@@ -387,14 +394,14 @@ class TestCorrelation:
         assert_allclose(cfn(bell_state('psi-')), -1.0)
         assert_allclose(cfn(bell_state('phi+')), 1.0)
 
-    @mark.parametrize("pre_c", [False, True])
+    @pytest.mark.parametrize("pre_c", [False, True])
     def test_pauli_correlations_sum_abs(self, pre_c):
         p = bell_state('psi-')
         ct = pauli_correlations(p, sum_abs=True, precomp_func=pre_c)
         ct = ct(p) if pre_c else ct
         assert_allclose(ct, 3.0)
 
-    @mark.parametrize("pre_c", [False, True])
+    @pytest.mark.parametrize("pre_c", [False, True])
     def test_pauli_correlations_no_sum_abs(self, pre_c):
         p = bell_state('psi-')
         ct = pauli_correlations(p, sum_abs=False, precomp_func=pre_c)
@@ -428,9 +435,9 @@ class TestEntCrossMatrix:
 
 
 class TestEntCrossMatrixBlocked:
-    @mark.parametrize("sz_p", [2**2 for i in [2, 3, 4, 5, 6, 9, 12]])
-    @mark.parametrize("sz_blc", [1, 2, 3, 4, 5])
-    @mark.parametrize("calc_self_ent", [True, False])
+    @pytest.mark.parametrize("sz_p", [2**2 for i in [2, 3, 4, 5, 6, 9, 12]])
+    @pytest.mark.parametrize("sz_blc", [1, 2, 3, 4, 5])
+    @pytest.mark.parametrize("calc_self_ent", [True, False])
     def test_shapes_and_blocks(self, sz_blc, sz_p, calc_self_ent):
         if sz_p // sz_blc > 0:
             p = rand_rho(2**sz_p)
@@ -442,14 +449,14 @@ class TestEntCrossMatrixBlocked:
 
 
 class TestQID:
-    @mark.parametrize("bs", [0, 1, 2, 3])
-    @mark.parametrize("pre_c", [False, True])
+    @pytest.mark.parametrize("bs", [0, 1, 2, 3])
+    @pytest.mark.parametrize("pre_c", [False, True])
     def test_bell_state(self, bs, pre_c):
         p = bell_state(bs)
         qids = qid(p, dims=[2, 2], inds=[0, 1], precomp_func=pre_c)
         assert_allclose(qids(p) if pre_c else qids, [3, 3])
 
-    @mark.parametrize("pre_c", [False, True])
+    @pytest.mark.parametrize("pre_c", [False, True])
     def test_random_product_state(self, pre_c):
         p = rand_product_state(3)
         qids = qid(p, dims=[2, 2, 2], inds=[0, 1, 2], precomp_func=pre_c)
@@ -473,3 +480,18 @@ class TestIsDegenerate:
         evals = [0, 1, 1.001, 3, 4, 5, 6, 7, 8, 9]
         assert not is_degenerate(evals)
         assert is_degenerate(evals, tol=1e-2)
+
+
+class TestPageEntropy:
+    def test_known_qubit_qubit(self):
+        assert abs(page_entropy(2, 4) - 0.4808983469629878) < 1e-12
+
+    def test_large_m_approx(self):
+        pe = page_entropy(2**10, 2**20)
+        ae = 0.5 * (20 - math.log2(math.e))
+
+        assert abs(pe - ae) < 1e-7
+
+    def test_raises(self):
+        with pytest.raises(ValueError):
+            page_entropy(8, 16)

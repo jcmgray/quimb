@@ -14,6 +14,10 @@ from quimb import (
     ham_heis,
     ham_j1j2,
     zspin_projector,
+    up,
+    down,
+    swap,
+    rand_ket,
 )
 
 
@@ -140,3 +144,17 @@ class TestSpinZProjector:
             gs0 = prj .H @ v0s[:, 0]
             assert_allclose(overlap(gs, gs0), 1.0)
             assert_allclose(overlap(h, gs0), overlap(h, gs))
+
+
+class TestSwap:
+    @pytest.mark.parametrize("sparse", [False, True])
+    def test_swap_qubits(self, sparse):
+        a = up() & down()
+        s = swap(2, sparse=sparse)
+        assert_allclose(s @ a, down() & up())
+
+    @pytest.mark.parametrize("sparse", [False, True])
+    def test_swap_higher_dim(self, sparse):
+        a = rand_ket(9)
+        s = swap(3, sparse=sparse)
+        assert_allclose(s @ a, a.reshape([3, 3]).T.reshape([9, 1]))

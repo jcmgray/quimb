@@ -80,6 +80,7 @@ from .gen.operators import (
     ham_heis,
     ham_j1j2,
     zspin_projector,
+    swap,
 )
 from .gen.states import (
     basis_vec,
@@ -217,6 +218,7 @@ __all__ = [
     'ham_heis',
     'ham_j1j2',
     'zspin_projector',
+    'swap',
     'basis_vec',
     'up',
     'zplus',

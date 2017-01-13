@@ -118,13 +118,22 @@ def gen_rand_haar_states(d, reps):
         yield u[:, cyc]
 
 
-def rand_mix(d):
+def rand_mix(d, tr_d_min=None, tr_d_max=None, mode='rand'):
     """Constructs a random mixed state by tracing out a random ket
     where the composite system varies in size between 2 and d. This produces
     a spread of states including more purity but has no real meaning.
     """
-    m = np.random.randint(2, d + 1)
-    psi = rand_ket(d * m)
+    if tr_d_min is None:
+        tr_d_min = 2
+    if tr_d_max is None:
+        tr_d_max = d
+
+    m = np.random.randint(tr_d_min, tr_d_max)
+    if mode == 'rand':
+        psi = rand_ket(d * m)
+    elif mode == 'haar':
+        psi = rand_haar_state(d * m)
+
     return ptr(psi, [d, m], 0)
 
 
