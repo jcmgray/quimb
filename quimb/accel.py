@@ -19,7 +19,7 @@ try:
     import os
     _NUM_THREADS = int(os.environ['OMP_NUM_THREADS'])
 except KeyError:
-    _NUM_THREADS = psutil.cpu_count()
+    _NUM_THREADS = psutil.cpu_count(logical=False)
 
 accel = functools.partial(jit, nopython=True, cache=False)
 

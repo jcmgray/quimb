@@ -137,10 +137,6 @@ def rand_mix(d, tr_d_min=None, tr_d_max=None, mode='rand'):
     return ptr(psi, [d, m], 0)
 
 
-def gen_rand_mix(d, tr_d_min=None, tr_d_max=None, mode='rand'):
-    pass
-
-
 def rand_product_state(n, qtype=None):
     """Generates a ket of `n` many random pure qubits.
     """

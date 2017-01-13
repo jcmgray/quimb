@@ -6,7 +6,7 @@ quantum objects.
 # TODO: all docs ************************************************************ #
 # TODO: sparse sqrtm function *********************************************** #
 
-from math import sin, cos, pi, log2, sqrt
+from math import sin, cos, pi, log, log2, sqrt
 import numbers
 import collections
 import itertools
@@ -528,7 +528,7 @@ def is_degenerate(op, tol=1e-12):
 
 
 @accel
-def page_entropy(sz_subsys, sz_total):
+def page_entropy(sz_subsys, sz_total):  # pragma: no cover
     """Calculate the page entropy, i.e. expected entropy for a subsytem
     of a random state in Hilbert space.
 
@@ -547,10 +547,12 @@ def page_entropy(sz_subsys, sz_total):
     n = sz_total // sz_subsys
 
     if sz_subsys > n:
-        raise ValueError("Subsystem size must be <= environment size.")
+        raise ValueError("Subsystem size must be <= 'environment' size.")
 
     s = 0
     for k in range(n + 1, sz_total + 1):
         s += 1 / k
     s -= (sz_subsys - 1) / (2 * n)
-    return s
+
+    # Normalize into bits of entropy
+    return s / log(2)

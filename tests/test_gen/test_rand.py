@@ -1,3 +1,4 @@
+import pytest
 from numpy.testing import assert_allclose, assert_almost_equal
 import numpy as np
 import scipy.sparse as sp
@@ -129,8 +130,9 @@ class TestRandHaarState:
 
 
 class TestRandMix:
-    def test_rand_mix(self):
-        rho = rand_mix(3)
+    @pytest.mark.parametrize("mode", ['rand', 'haar'])
+    def test_rand_mix(self, mode):
+        rho = rand_mix(3, mode=mode)
         assert rho.shape == (3, 3)
         assert type(rho) == np.matrix
         assert_almost_equal(tr(rho), 1.0)
