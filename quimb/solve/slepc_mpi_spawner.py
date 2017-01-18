@@ -1,3 +1,7 @@
+"""Manages the spawning of mpi processes to send to the slepc solver.
+"""
+# TODO: don't send whole matrix? only marginal time savings but memory better.
+
 from .slepc_solver import slepc_seigsys
 from ..accel import _NUM_THREADS
 

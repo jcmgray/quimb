@@ -266,7 +266,7 @@ def slepc_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
         if comm.Get_rank() > 0:
             # send ownership range
             comm.send((ri, rf), dest=0, tag=11)
-            # send local portion of eigenvectors
+            # send local portion of eigenvectors as buffer
             comm.Send(vk, dest=0, tag=42)
             # clean up
             eigensolver.destroy()
@@ -275,7 +275,6 @@ def slepc_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
         else:
             # pre-allocate array for whole eigenvectors and set local data
             nvk = np.empty((a.shape[0], k), dtype=complex)
-            print(ri, rf)
             nvk[ri:rf, :] = vk
             # get ownership ranges and data from worker processes
             for i in range(1, comm.Get_size()):
