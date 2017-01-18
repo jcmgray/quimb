@@ -17,7 +17,8 @@ from .numpy_solver import numpy_seigsys, numpy_svds
 from .scipy_solver import scipy_seigsys, scipy_svds
 from . import SLEPC4PY_FOUND
 if SLEPC4PY_FOUND:
-    from .slepc_solver import slepc_seigsys, slepc_svds
+    from .slepc_mpi_spawner import slepc_mpi_seigsys
+    from .slepc_solver import slepc_svds
 
 
 # --------------------------------------------------------------------------- #
@@ -122,7 +123,7 @@ def seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
     bkd = backend.upper()
     if bkd == 'AUTO':
         bkd = _choose_backend(a, k, sigma is not None)
-    seig_func = (slepc_seigsys if bkd == 'SLEPC' else
+    seig_func = (slepc_mpi_seigsys if bkd == 'SLEPC' else
                  numpy_seigsys if bkd in {'NUMPY', 'DENSE'} else
                  scipy_seigsys if bkd == 'SCIPY' else
                  None)

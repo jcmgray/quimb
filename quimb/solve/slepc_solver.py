@@ -67,43 +67,35 @@ def get_slepc(comm=None):
 #                               PETSc FUNCTIONS                               #
 # --------------------------------------------------------------------------- #
 
-def mpi_equal_partition(n, comm=None):
-    """
-    """
-    PETSc = get_petsc(comm=comm)
-    comm = PETSc.COMM_WORLD
-    # Get size and position within comm
-    mpi_size = comm.Get_size()
-    mpi_rank = comm.Get_rank()
-    # Equally partition
-    block_size = n // mpi_size
-    row_start = mpi_rank * block_size
-    if mpi_rank != n - 1:
-        row_finish = (mpi_rank + 1) * block_size
-    else:
-        row_finish = n
-    return row_start, row_finish
-
 
 def convert_to_petsc(mat, comm=None):
     """Convert a matrix to the relevant PETSc type, currently
     only supports csr, bsr, vectors and dense matrices formats.
     """
+    # TODO: split kwarg, --> assume matrix already sliced
+    # TODO: bsr, dense, vec
+
     PETSc = get_petsc(comm=comm)
     comm = PETSc.COMM_WORLD
 
     # Sparse compressed row matrix
     if sp.isspmatrix_csr(mat):
         mat.sort_indices()
+
+        pmat = PETSc.Mat()
+
         if comm.Get_size() > 1:
-            ri, rf = mpi_equal_partition(mat.shape[0], comm=comm)
+            pmat.create()
+            pmat.setSizes(mat.shape)
+            pmat.setFromOptions()
+            pmat.setUp()
+            ri, rf = pmat.getOwnershipRange()
             csr = (mat.indptr[ri:rf + 1] - mat.indptr[ri],
                    mat.indices[mat.indptr[ri]:mat.indptr[rf]],
                    mat.data[mat.indptr[ri]:mat.indptr[rf]])
         else:
             csr = (mat.indptr, mat.indices, mat.data)
-        pmat = PETSc.Mat().createAIJ(size=mat.shape, nnz=mat.nnz,
-                                     csr=csr, comm=comm)
+        pmat.createAIJ(size=mat.shape, nnz=mat.nnz, csr=csr, comm=comm)
 
     # Sparse block row matrix
     elif sp.isspmatrix_bsr(mat):
@@ -241,40 +233,72 @@ def slepc_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
         lk: eigenvalues
         vk: corresponding eigenvectors (if return_vecs == True)
     """
-    eigensolver = _init_eigensolver(which=which if which else 'SR',
-                                    sigma=sigma,
-                                    isherm=isherm,
-                                    EPSType=EPSType,
-                                    tol=tol,
-                                    max_it=max_it,
-                                    st_opts_dict=st_opts_dict,
-                                    comm=comm)
-    eigensolver.setOperators(convert_to_petsc(a, comm=comm))
+    eigensolver = _init_eigensolver(
+        which=("SA" if which is None and sigma is None else
+               "TR" if which is None and sigma is not None else
+               which),
+        sigma=sigma,
+        isherm=isherm,
+        EPSType=EPSType,
+        tol=tol,
+        max_it=max_it,
+        st_opts_dict=st_opts_dict,
+        comm=comm)
+
+    pa = convert_to_petsc(a, comm=comm)
+    ri, rf = pa.getOwnershipRange()
+
+    eigensolver.setOperators(pa)
     eigensolver.setDimensions(k, ncv)
     eigensolver.solve()
-
-    if comm and comm.Get_rank() > 0:
-        eigensolver.destroy()
-        return
-
     nconv = eigensolver.getConverged()
     assert nconv >= k
     k = nconv if return_all_conv else k
+
+    if return_vecs:
+        vec, _ = pa.getVecs()
+        vk = np.empty((rf - ri, k), dtype=complex)
+        for i in range(k):
+            eigensolver.getEigenvector(i, vec)
+            vk[:, i] = vec.getArray()
+
+        # Worker only
+        if comm.Get_rank() > 0:
+            # send ownership range
+            comm.send((ri, rf), dest=0, tag=11)
+            # send local portion of eigenvectors
+            comm.Send(vk, dest=0, tag=42)
+            # clean up
+            eigensolver.destroy()
+            return
+        # Master only
+        else:
+            # pre-allocate array for whole eigenvectors and set local data
+            nvk = np.empty((a.shape[0], k), dtype=complex)
+            print(ri, rf)
+            nvk[ri:rf, :] = vk
+            # get ownership ranges and data from worker processes
+            for i in range(1, comm.Get_size()):
+                ji, jf = comm.recv(source=i, tag=11)
+                comm.Recv(nvk[ji:jf, :], source=i, tag=42)
+            vk = nvk
+
     lk = np.asarray([eigensolver.getEigenvalue(i) for i in range(k)])
     lk = lk.real if isherm else lk
+
     if return_vecs:
-        vk = np.empty((a.shape[0], k), dtype=complex)
-        for i, v in enumerate(eigensolver.getInvariantSubspace()[:k]):
-            vk[:, i] = v
-        eigensolver.destroy()
         if sort:
             sortinds = np.argsort(lk)
             lk, vk = lk[sortinds], np.asmatrix(vk[:, sortinds])
-        return lk, vk
+        res = lk, np.asmatrix(vk)
     else:
-        eigensolver.destroy()
-        return np.sort(lk) if sort else lk
+        res = np.sort(lk) if sort else lk
 
+    eigensolver.destroy()
+    return res
+
+
+# ----------------------------------- SVD ----------------------------------- #
 
 def _init_svd_solver(SVDType='cross', tol=None, max_it=None, comm=None):
     SLEPc = get_slepc(comm=comm)
