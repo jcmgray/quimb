@@ -37,7 +37,7 @@ def mpi_pool(num_workers, num_threads):
                            env={'OMP_NUM_THREADS': str(num_threads)})
 
 
-def slepc_mpi_seigsys_master(*args, **kwargs):
+def slepc_mpi_seigsys_submit_fn(*args, **kwargs):
     """
     """
     from mpi4py import MPI
@@ -46,22 +46,14 @@ def slepc_mpi_seigsys_master(*args, **kwargs):
     return slepc_seigsys(*args, comm=comm, **kwargs)
 
 
-def slepc_mpi_seigsys_worker(*args, **kwargs):
-    """
-    """
-    from mpi4py import MPI
-
-    comm = MPI.COMM_WORLD
-    slepc_seigsys(*args, comm=comm, **kwargs)
-
-
-def slepc_mpi_seigsys(*args, num_workers=None, num_threads=1, **kwargs):
+def slepc_mpi_seigsys(a, *args, num_workers=None, num_threads=1, **kwargs):
     """Automagically spawn mpi workers to do slepc eigen decomposition.
     """
     if num_workers is None:
-        num_workers = _NUM_THREADS
+        num_workers = min(_NUM_THREADS, a.shape[0])
     pool = mpi_pool(num_workers, num_threads)
-    f = pool.submit(slepc_mpi_seigsys_master, *args, **kwargs)
-    for _ in range(num_workers - 1):
-        pool.submit(slepc_mpi_seigsys_worker, *args, **kwargs)
-    return f.result()
+    futures = [pool.submit(slepc_mpi_seigsys_submit_fn, a, *args, **kwargs)
+               for _ in range(num_workers)]
+    results = (f.result() for f in futures)
+    # Get master result, (not always first submitted)
+    return next(r for r in results if r is not None)

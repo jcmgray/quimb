@@ -255,6 +255,8 @@ def slepc_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
     assert nconv >= k
     k = nconv if return_all_conv else k
 
+    rank = comm.Get_rank()
+
     if return_vecs:
         vec, _ = pa.getVecs()
         vk = np.empty((rf - ri, k), dtype=complex)
@@ -262,17 +264,8 @@ def slepc_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
             eigensolver.getEigenvector(i, vec)
             vk[:, i] = vec.getArray()
 
-        # Worker only
-        if comm.Get_rank() > 0:
-            # send ownership range
-            comm.send((ri, rf), dest=0, tag=11)
-            # send local portion of eigenvectors as buffer
-            comm.Send(vk, dest=0, tag=42)
-            # clean up
-            eigensolver.destroy()
-            return
         # Master only
-        else:
+        if rank == 0:
             # pre-allocate array for whole eigenvectors and set local data
             nvk = np.empty((a.shape[0], k), dtype=complex)
             nvk[ri:rf, :] = vk
@@ -281,6 +274,17 @@ def slepc_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
                 ji, jf = comm.recv(source=i, tag=11)
                 comm.Recv(nvk[ji:jf, :], source=i, tag=42)
             vk = nvk
+
+        # Worker only
+        else:
+            # send ownership range
+            comm.send((ri, rf), dest=0, tag=11)
+            # send local portion of eigenvectors as buffer
+            comm.Send(vk, dest=0, tag=42)
+
+    if rank != 0:
+        eigensolver.destroy()
+        return None
 
     lk = np.asarray([eigensolver.getEigenvalue(i) for i in range(k)])
     lk = lk.real if isherm else lk
