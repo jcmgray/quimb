@@ -60,10 +60,10 @@ class TestConvertToPETScConversion:
         assert b.getType() == 'seqbaij'
         assert b.getBlockSize() == 2
 
-    def test_vec(self):
-        a = np.array([1, 2, 3, 4])
-        b = convert_to_petsc(a)
-        assert_allclose(b.getArray(), a)
+    # def test_vec(self):
+    #     a = np.array([1, 2, 3, 4])
+    #     b = convert_to_petsc(a)
+    #     assert_allclose(b.getArray(), a)
 
     def test_dense(self):
         a = rand_matrix(3)
