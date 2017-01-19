@@ -17,7 +17,8 @@ from .numpy_solver import numpy_seigsys, numpy_svds
 from .scipy_solver import scipy_seigsys, scipy_svds
 from . import SLEPC4PY_FOUND
 if SLEPC4PY_FOUND:
-    from .slepc_solver import slepc_seigsys, slepc_svds
+    from .slepc_mpi_spawner import slepc_mpi_seigsys
+    from .slepc_solver import slepc_svds
 
 
 # --------------------------------------------------------------------------- #
@@ -86,7 +87,7 @@ def _choose_backend(a, k, int_eps=False):
     # small matrix or large part of subspace requested
     small_d_big_k = a.shape[0] ** 2 / k < (10000 if int_eps else 2000)
     # avoid using slepc for dense matrices *and* inner eigenvectors
-    slepc_suitable = issparse(a) or (not int_eps and a.shape[0] < 46341)
+    slepc_suitable = issparse(a) or (not int_eps and a.shape[0] < 16384)
     return ("NUMPY" if small_d_big_k else
             "SLEPC" if SLEPC4PY_FOUND and slepc_suitable else
             "SCIPY")
@@ -122,7 +123,7 @@ def seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
     bkd = backend.upper()
     if bkd == 'AUTO':
         bkd = _choose_backend(a, k, sigma is not None)
-    seig_func = (slepc_seigsys if bkd == 'SLEPC' else
+    seig_func = (slepc_mpi_seigsys if bkd == 'SLEPC' else
                  numpy_seigsys if bkd in {'NUMPY', 'DENSE'} else
                  scipy_seigsys if bkd == 'SCIPY' else
                  None)
