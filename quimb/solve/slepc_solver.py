@@ -238,6 +238,9 @@ def slepc_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
         lk: eigenvalues
         vk: corresponding eigenvectors (if return_vecs == True)
     """
+    if comm is None:
+        comm = get_default_comm()
+
     eigensolver = _init_eigensolver(
         which=("SA" if which is None and sigma is None else
                "TR" if which is None and sigma is not None else
