@@ -29,7 +29,7 @@ if [ ! -d "$INSTALL_DIR/petsc" ]; then
   cd $PETSC_DIR
   git pull
   python2 ./configure \
-    --download-mpich \
+    --download-openmpi \
     --with-scalar-type=complex \
     --download-mumps \
     --download-scalapack \
