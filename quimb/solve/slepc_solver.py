@@ -77,19 +77,20 @@ def convert_to_petsc(mat, comm=None):
 
     PETSc = get_petsc(comm=comm)
     comm = PETSc.COMM_WORLD
+    mpi_sz = comm.Get_size()
+    pmat = PETSc.Mat()
+
+    if mpi_sz > 1:
+        pmat.create(comm=comm)
+        pmat.setSizes(mat.shape)
+        pmat.setFromOptions()
+        pmat.setUp()
+        ri, rf = pmat.getOwnershipRange()
 
     # Sparse compressed row matrix
     if sp.isspmatrix_csr(mat):
         mat.sort_indices()
-
-        pmat = PETSc.Mat()
-
-        if comm.Get_size() > 1:
-            pmat.create()
-            pmat.setSizes(mat.shape)
-            pmat.setFromOptions()
-            pmat.setUp()
-            ri, rf = pmat.getOwnershipRange()
+        if mpi_sz > 1:
             csr = (mat.indptr[ri:rf + 1] - mat.indptr[ri],
                    mat.indices[mat.indptr[ri]:mat.indptr[rf]],
                    mat.data[mat.indptr[ri]:mat.indptr[rf]])
@@ -100,17 +101,21 @@ def convert_to_petsc(mat, comm=None):
     # Sparse block row matrix
     elif sp.isspmatrix_bsr(mat):
         mat.sort_indices()
-        csr = (mat.indptr, mat.indices, mat.data)
-        pmat = PETSc.Mat().createBAIJ(size=mat.shape, bsize=mat.blocksize,
-                                      nnz=mat.nnz, csr=csr, comm=comm)
-
-    # Dense vector
-    elif mat.ndim == 1:
-        pmat = PETSc.Vec().createWithArray(mat, comm=comm)
+        if mpi_sz > 1:
+            csr = (mat.indptr[ri:rf + 1] - mat.indptr[ri],
+                   mat.indices[mat.indptr[ri]:mat.indptr[rf]],
+                   mat.data[mat.indptr[ri]:mat.indptr[rf]])
+        else:
+            csr = (mat.indptr, mat.indices, mat.data)
+        pmat.createBAIJ(size=mat.shape, bsize=mat.blocksize,
+                        nnz=mat.nnz, csr=csr, comm=comm)
 
     # Dense matrix
     else:
-        pmat = PETSc.Mat().createDense(size=mat.shape, array=mat, comm=comm)
+        if mpi_sz > 1:
+            pmat.createDense(size=mat.shape, array=mat[ri:rf, :], comm=comm)
+        else:
+            pmat.createDense(size=mat.shape, array=mat, comm=comm)
 
     pmat.assemble()
     return pmat
