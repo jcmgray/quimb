@@ -17,7 +17,7 @@ from .numpy_solver import numpy_seigsys, numpy_svds
 from .scipy_solver import scipy_seigsys, scipy_svds
 from . import SLEPC4PY_FOUND
 if SLEPC4PY_FOUND:
-    from .slepc_mpi_spawner import slepc_mpi_seigsys
+    from .mpi_spawner import slepc_mpi_seigsys
     from .slepc_solver import slepc_svds
 
 
