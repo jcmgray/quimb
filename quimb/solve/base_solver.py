@@ -86,10 +86,8 @@ def _choose_backend(a, k, int_eps=False):
     """
     # small matrix or large part of subspace requested
     small_d_big_k = a.shape[0] ** 2 / k < (10000 if int_eps else 2000)
-    # avoid using slepc for dense matrices *and* inner eigenvectors
-    slepc_suitable = issparse(a) or (not int_eps and a.shape[0] < 16384)
     return ("NUMPY" if small_d_big_k else
-            "SLEPC" if SLEPC4PY_FOUND and slepc_suitable else
+            "SLEPC" if SLEPC4PY_FOUND and issparse(a) else
             "SCIPY")
 
 
