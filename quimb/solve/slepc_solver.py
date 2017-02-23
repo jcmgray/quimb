@@ -16,10 +16,11 @@ def comm_equal_cache(fn):
     """
     def wrapped_fn(comm=None):
         if wrapped_fn.comm == comm:
-            return wrapped_fn.comm
+            return wrapped_fn.res
         else:
-            wrapped_fn.comm = fn(comm)
-            return wrapped_fn.comm
+            wrapped_fn.comm = comm
+            wrapped_fn.res = fn(comm)
+            return wrapped_fn.res
 
     wrapped_fn.comm = "__UNINITIALIZED__"
     return wrapped_fn
@@ -29,7 +30,7 @@ def get_default_comm():
     """Define the default communicator.
     """
     from mpi4py import MPI
-    if not MPI.Is_initialized():
+    if not MPI.Is_initialized():  # pragma: no cover
         MPI.Init()
     return MPI.COMM_SELF
 

@@ -191,7 +191,7 @@ def _rel_window_to_abs_window(el_min, el_max, w_0, w_sz=None):
 
 def eigsys_window(a, w_0, w_n=6, w_sz=None, backend='AUTO',
                   return_vecs=True, offset_const=1 / 7000, **kwargs):
-    """ Return eigenvalues internally from a hermitian matrix.
+    """ Return eigenpairs internally from a hermitian matrix.
 
     Parameters
     ----------
