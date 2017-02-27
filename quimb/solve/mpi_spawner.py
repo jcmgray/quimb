@@ -9,19 +9,21 @@ from ..accel import _NUM_THREADS
 
 
 def cached_with_shutdown(fn):
+    """Wraps the mpi_pool getter such that successive calls with the same
+    arguments return the same pool, but different arguments cause the
+    previous pool to be shutdown.
     """
-    """
-    def wrapped_pool_fn(num_workers, num_threads):
+    def wrapped_pool_fn(*args):
         if wrapped_pool_fn.__settings__ == '__UNINITIALIZED__':
             # Pool has not been called, make a new one.
-            wrapped_pool_fn.pool = fn(num_workers, num_threads)
-            wrapped_pool_fn.__settings__ = (num_workers, num_threads)
+            wrapped_pool_fn.pool = fn(*args)
+            wrapped_pool_fn.__settings__ = args
 
-        elif wrapped_pool_fn.__settings__ != (num_workers, num_threads):
+        elif wrapped_pool_fn.__settings__ != args:
             # New settings but old one exists, shut it down and return new one
             wrapped_pool_fn.pool.shutdown()
-            wrapped_pool_fn.pool = fn(num_workers, num_threads)
-            wrapped_pool_fn.__settings__ = (num_workers, num_threads)
+            wrapped_pool_fn.pool = fn(*args)
+            wrapped_pool_fn.__settings__ = args
 
         return wrapped_pool_fn.pool
 
@@ -30,10 +32,13 @@ def cached_with_shutdown(fn):
 
 
 @cached_with_shutdown
-def get_mpi_pool(num_workers, num_threads):
+def get_mpi_pool(num_workers=None, num_threads=1):
     """
     """
     from mpi4py.futures import MPIPoolExecutor
+
+    if num_workers is None:
+        num_workers = _NUM_THREADS
 
     return MPIPoolExecutor(num_workers, main=False, delay=1e-2,
                            env={'OMP_NUM_THREADS': str(num_threads)})
