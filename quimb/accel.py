@@ -17,9 +17,9 @@ from numexpr import evaluate
 
 try:
     import os
-    _NUM_THREADS = int(os.environ['OMP_NUM_THREADS'])
+    _NUM_WORKERS = int(os.environ['OMP_NUM_THREADS'])
 except KeyError:
-    _NUM_THREADS = psutil.cpu_count(logical=False)
+    _NUM_WORKERS = psutil.cpu_count(logical=False)
 
 accel = functools.partial(jit, nopython=True, cache=False)
 
@@ -58,7 +58,7 @@ def matrixify(fn):
     return matrixified_fn
 
 
-def realify(fn, imag_tol=1.0e-14):
+def realify(fn, imag_tol=1.0e-12):
     """To decorate functions that should return float for small complex.
     """
     @functools.wraps(fn)
@@ -169,7 +169,7 @@ def _dot_csr_matvec(data, indptr, indices, vec, out, k1, k2):
         out[i] = isum
 
 
-def _par_dot_csr_matvec(mat, vec, nthreads=_NUM_THREADS):
+def _par_dot_csr_matvec(mat, vec, nthreads=_NUM_WORKERS):
     """Parallel sparse csr matrix vector dot product.
     """
     sz = mat.shape[0]

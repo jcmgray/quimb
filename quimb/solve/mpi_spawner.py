@@ -5,7 +5,7 @@
 # import functools
 from .slepc_solver import slepc_seigsys
 from .scalapy_solver import scalapy_eigsys
-from ..accel import _NUM_THREADS
+from ..accel import _NUM_WORKERS
 
 
 def cached_with_shutdown(fn):
@@ -38,7 +38,7 @@ def get_mpi_pool(num_workers=None, num_threads=1):
     from mpi4py.futures import MPIPoolExecutor
 
     if num_workers is None:
-        num_workers = _NUM_THREADS
+        num_workers = _NUM_WORKERS
 
     return MPIPoolExecutor(num_workers, main=False, delay=1e-2,
                            env={'OMP_NUM_THREADS': str(num_threads)})
@@ -53,9 +53,15 @@ def mpi_spawn_func(fn, mat, *args,
     pool of spawned mpi workers.
     """
     if num_workers is None:
-        num_workers = min(_NUM_THREADS, mat.shape[0])
+        num_workers = min(_NUM_WORKERS, mat.shape[0])
+
     if mpi_pool is None:
+        # Check if only one process needed --> don't spawn mpi pool
+        if num_workers == 1:
+            return fn(mat, *args, **kwargs)
+
         pool = get_mpi_pool(num_workers, num_threads)
+
     futures = [pool.submit(fn, mat, *args, **kwargs)
                for _ in range(num_workers)]
     results = (f.result() for f in futures)
