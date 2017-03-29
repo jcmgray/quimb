@@ -2,43 +2,52 @@
 """
 # TODO: don't send whole matrix? only marginal time savings but memory better.
 
-# import functools
+
 from .slepc_solver import slepc_seigsys
 from .scalapy_solver import scalapy_eigsys
-from ..accel import _NUM_WORKERS
+
+import os
+for var in ['QMB_NUM_MPI_WORKERS', 'MPI_UNIVERSE_SIZE']:
+    if var in os.environ:
+        _NUM_MPI_WORKERS = int(os.environ[var])
+        _NUM_MPI_WORKERS_SET = True
+        break
+    _NUM_MPI_WORKERS_SET = False
+
+if not _NUM_MPI_WORKERS_SET:
+    import psutil
+    _NUM_MPI_WORKERS = psutil.cpu_count(logical=False)
 
 
-def cached_with_shutdown(fn):
-    """Wraps the mpi_pool getter such that successive calls with the same
-    arguments return the same pool, but different arguments cause the
-    previous pool to be shutdown.
+class PersistentPoolWithShutdown(object):
     """
-    def wrapped_pool_fn(*args):
-        if wrapped_pool_fn.__settings__ == '__UNINITIALIZED__':
-            # Pool has not been called, make a new one.
-            wrapped_pool_fn.pool = fn(*args)
-            wrapped_pool_fn.__settings__ = args
+    """
 
-        elif wrapped_pool_fn.__settings__ != args:
-            # New settings but old one exists, shut it down and return new one
-            wrapped_pool_fn.pool.shutdown()
-            wrapped_pool_fn.pool = fn(*args)
-            wrapped_pool_fn.__settings__ = args
+    def __init__(self, pool_fn):
+        self._settings = '__UNINITIALIZED__'
+        self._pool_fn = pool_fn
 
-        return wrapped_pool_fn.pool
+    def __call__(self, *args):
+        # first call
+        if self._settings == '__UNINITIALIZED__':
+            self._pool = self._pool_fn(*args)
+            self._settings = args
+        # new type of pool requested
+        elif self._settings != args:
+            self._pool.shutdown()
+            self._pool = self._pool_fn(*args)
+            self._settings = args
+        return self._pool
 
-    wrapped_pool_fn.__settings__ = '__UNINITIALIZED__'
-    return wrapped_pool_fn
 
-
-@cached_with_shutdown
+@PersistentPoolWithShutdown
 def get_mpi_pool(num_workers=None, num_threads=1):
     """
     """
     from mpi4py.futures import MPIPoolExecutor
 
     if num_workers is None:
-        num_workers = _NUM_WORKERS
+        num_workers = _NUM_MPI_WORKERS
 
     return MPIPoolExecutor(num_workers, main=False, delay=1e-2,
                            env={'OMP_NUM_THREADS': str(num_threads)})
@@ -53,7 +62,7 @@ def mpi_spawn_func(fn, mat, *args,
     pool of spawned mpi workers.
     """
     if num_workers is None:
-        num_workers = min(_NUM_WORKERS, mat.shape[0])
+        num_workers = min(_NUM_MPI_WORKERS, mat.shape[0])
 
     if mpi_pool is None:
         # Check if only one process needed --> don't spawn mpi pool
