@@ -19,7 +19,7 @@ if not _NUM_MPI_WORKERS_SET:
     _NUM_MPI_WORKERS = psutil.cpu_count(logical=False)
 
 
-class PersistentPoolWithShutdown(object):
+class CachedPoolWithShutdown(object):
     """
     """
 
@@ -27,28 +27,28 @@ class PersistentPoolWithShutdown(object):
         self._settings = '__UNINITIALIZED__'
         self._pool_fn = pool_fn
 
-    def __call__(self, *args):
+    def __call__(self, num_workers=None, num_threads=1):
+        # convert None to default so the cache the same
+        if num_workers is None:
+            num_workers = _NUM_MPI_WORKERS
+
         # first call
         if self._settings == '__UNINITIALIZED__':
-            self._pool = self._pool_fn(*args)
-            self._settings = args
+            self._pool = self._pool_fn(num_workers, num_threads)
+            self._settings = (num_workers, num_threads)
         # new type of pool requested
-        elif self._settings != args:
+        elif self._settings != (num_workers, num_threads):
             self._pool.shutdown()
-            self._pool = self._pool_fn(*args)
-            self._settings = args
+            self._pool = self._pool_fn(num_workers, num_threads)
+            self._settings = (num_workers, num_threads)
         return self._pool
 
 
-@PersistentPoolWithShutdown
+@CachedPoolWithShutdown
 def get_mpi_pool(num_workers=None, num_threads=1):
     """
     """
     from mpi4py.futures import MPIPoolExecutor
-
-    if num_workers is None:
-        num_workers = _NUM_MPI_WORKERS
-
     return MPIPoolExecutor(num_workers, main=False, delay=1e-2,
                            env={'OMP_NUM_THREADS': str(num_threads)})
 
