@@ -17,7 +17,7 @@ from .numpy_solver import numpy_seigsys, numpy_svds
 from .scipy_solver import scipy_seigsys, scipy_svds
 from . import SLEPC4PY_FOUND
 if SLEPC4PY_FOUND:
-    from .slepc_mpi_spawner import slepc_mpi_seigsys
+    from .mpi_spawner import slepc_mpi_seigsys
     from .slepc_solver import slepc_svds
 
 
@@ -86,10 +86,8 @@ def _choose_backend(a, k, int_eps=False):
     """
     # small matrix or large part of subspace requested
     small_d_big_k = a.shape[0] ** 2 / k < (10000 if int_eps else 2000)
-    # avoid using slepc for dense matrices *and* inner eigenvectors
-    slepc_suitable = issparse(a) or (not int_eps and a.shape[0] < 16384)
     return ("NUMPY" if small_d_big_k else
-            "SLEPC" if SLEPC4PY_FOUND and slepc_suitable else
+            "SLEPC" if SLEPC4PY_FOUND and issparse(a) else
             "SCIPY")
 
 
@@ -193,7 +191,7 @@ def _rel_window_to_abs_window(el_min, el_max, w_0, w_sz=None):
 
 def eigsys_window(a, w_0, w_n=6, w_sz=None, backend='AUTO',
                   return_vecs=True, offset_const=1 / 7000, **kwargs):
-    """ Return eigenvalues internally from a hermitian matrix.
+    """ Return eigenpairs internally from a hermitian matrix.
 
     Parameters
     ----------

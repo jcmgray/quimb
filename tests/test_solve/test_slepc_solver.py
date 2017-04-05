@@ -130,5 +130,5 @@ class TestSlepcSvds:
         assert_allclose(sk, lk)
         assert pk.shape == uk.shape
         assert vk.shape == qk.shape
-        assert_allclose(abs(uk.H @ pk), eye(10), atol=1e-7)
-        assert_allclose(abs(qk @ vk.H), eye(10), atol=1e-7)
+        assert_allclose(abs(uk.H @ pk), eye(10), atol=1e-6)
+        assert_allclose(abs(qk @ vk.H), eye(10), atol=1e-6)

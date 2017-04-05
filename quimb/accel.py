@@ -5,7 +5,6 @@
 
 import cmath
 import functools
-import psutil
 import threading
 import operator
 
@@ -14,12 +13,18 @@ import scipy.sparse as sp
 from numba import jit, vectorize
 from numexpr import evaluate
 
+import os
+for env_var in ['QMB_NUM_THREAD_WORKERS', 'OMP_NUM_THREADS']:
+    if env_var in os.environ:
+        _NUM_THREAD_WORKERS = int(os.environ[env_var])
+        _NUM_THREAD_WORKERS_SET = True
+        break
+    _NUM_THREAD_WORKERS_SET = False
 
-try:
-    import os
-    _NUM_THREADS = int(os.environ['OMP_NUM_THREADS'])
-except KeyError:
-    _NUM_THREADS = psutil.cpu_count(logical=False)
+if not _NUM_THREAD_WORKERS_SET:
+    import psutil
+    _NUM_THREAD_WORKERS = psutil.cpu_count(logical=False)
+
 
 accel = functools.partial(jit, nopython=True, cache=False)
 
@@ -58,7 +63,7 @@ def matrixify(fn):
     return matrixified_fn
 
 
-def realify(fn, imag_tol=1.0e-14):
+def realify(fn, imag_tol=1.0e-12):
     """To decorate functions that should return float for small complex.
     """
     @functools.wraps(fn)
@@ -169,7 +174,7 @@ def _dot_csr_matvec(data, indptr, indices, vec, out, k1, k2):
         out[i] = isum
 
 
-def _par_dot_csr_matvec(mat, vec, nthreads=_NUM_THREADS):
+def _par_dot_csr_matvec(mat, vec, nthreads=_NUM_THREAD_WORKERS):
     """Parallel sparse csr matrix vector dot product.
     """
     sz = mat.shape[0]
