@@ -11,36 +11,37 @@ import scipy.sparse as sp
 #                          LAZY LOAD MPI/PETSc/SLEPc                          #
 # --------------------------------------------------------------------------- #
 
-def comm_equal_cache(fn):
-    """Cache functions based only on equality of succesive comm arguments.
-    """
-    def wrapped_fn(comm=None):
-        if wrapped_fn.comm == comm:
-            return wrapped_fn.res
-        else:
-            wrapped_fn.comm = comm
-            wrapped_fn.res = fn(comm)
-            return wrapped_fn.res
-
-    wrapped_fn.comm = "__UNINITIALIZED__"
-    return wrapped_fn
-
 
 def get_default_comm():
     """Define the default communicator.
     """
     from mpi4py import MPI
-    if not MPI.Is_initialized():  # pragma: no cover
-        MPI.Init()
     return MPI.COMM_SELF
 
 
-@comm_equal_cache
+class CacheOnComm(object):
+    """
+    """
+
+    def __init__(self, comm_fn):
+        self._comm = '__UNINITIALIZED__'
+        self._comm_fn = comm_fn
+
+    def __call__(self, comm=None):
+        # resolve default comm
+        if comm is None:
+            comm = get_default_comm()
+        # first call or called with different comm
+        if self._comm is not comm:
+            self._result = self._comm_fn(comm=comm)
+            self._comm = comm
+        return self._result
+
+
+@CacheOnComm
 def init_petsc_and_slepc(comm=None):
     """Make sure petsc is initialized with comm before slepc.
     """
-    if comm is None:
-        comm = get_default_comm()
     import petsc4py
     petsc4py.init(args=['-no_signal_handler'], comm=comm)
     from petsc4py import PETSc
@@ -50,14 +51,14 @@ def init_petsc_and_slepc(comm=None):
     return PETSc, SLEPc
 
 
-@comm_equal_cache
+@CacheOnComm
 def get_petsc(comm=None):
     """Cache petsc module import to allow lazy start.
     """
     return init_petsc_and_slepc(comm=comm)[0]
 
 
-@comm_equal_cache
+@CacheOnComm
 def get_slepc(comm=None):
     """Cache slepc module import to allow lazy start.
     """
@@ -337,6 +338,9 @@ def slepc_svds(a, k=6, ncv=None, return_vecs=True, SVDType='cross',
     -------
         sk: singular values
     """
+    if comm is None:
+        comm = get_default_comm()
+
     svd_solver = _init_svd_solver(SVDType=SVDType, tol=tol,
                                   max_it=max_it, comm=comm)
     petsc_a = convert_to_petsc(a, comm=comm)
