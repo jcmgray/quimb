@@ -118,6 +118,7 @@ from .gen.rand import (
     gen_rand_haar_states,
     rand_mix,
     rand_product_state,
+    rand_matrix_product_state,
 )
 
 # Functions for calculating properties
@@ -252,6 +253,7 @@ __all__ = [
     'gen_rand_haar_states',
     'rand_mix',
     'rand_product_state',
+    'rand_matrix_product_state',
     # Calc ------------------------------------------------------------------ #
     'expm',
     'sqrtm',

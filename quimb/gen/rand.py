@@ -5,6 +5,7 @@
 
 import numpy as np
 import scipy.sparse as sp
+from cytoolz import interleave
 from ..accel import rdmul, dot
 from ..core import qu, ptr, kron, nmlz
 
@@ -150,3 +151,42 @@ def rand_product_state(n, qtype=None):
                       [np.sin(theta / 2.0) * np.exp(1.0j * phi)]],
                      qtype=qtype)
     return kron(*gen_rand_pure_qubits(n))
+
+
+def rand_matrix_product_state(phys_dim, n, bond_dim, trans_invar=False):
+    """Generate a random matrix product state.
+
+    Parameters
+    ----------
+        phys_dim : int
+            Physical dimension of each local site.
+        n : int
+            Number of sites.
+        bond_dim : int
+            Dimension of the bond (virtual) indices.
+        trans_invar : bool (optional)
+            Whether to generate a translationally invariant state.
+
+    Returns
+    -------
+        ket : matrix-like
+            The random state with shape (phys_dim**n, 1)
+
+    """
+    base_tensor_shape = (bond_dim, phys_dim, bond_dim)
+    if not trans_invar:
+        mats = [np.random.randn(*base_tensor_shape) for _ in range(n)]
+    else:
+        mats = [np.random.randn(*base_tensor_shape)] * n
+
+    # List of indices for each tensor, repeated ones will be summed over.
+    inds = [((2 * i - 1) % (2 * n), 2 * i, 2 * i + 1) for i in range(n)]
+    # einsum can accept args as (tensor1, inds1, tensor2, inds2, ...)
+    ket_tens = np.einsum(*interleave((mats, inds)), optimize=True)
+
+    norm = np.einsum(ket_tens, range(n), ket_tens, range(n))
+    ket_tens /= norm**0.5
+    return ket_tens.reshape((phys_dim**n, 1))
+
+
+rand_mps = rand_matrix_product_state
