@@ -32,13 +32,12 @@ class CacheOnComm(object):
         if comm is None:
             comm = get_default_comm()
         # first call or called with different comm
-        if self._comm is not comm:
+        if self._comm != comm:
             self._result = self._comm_fn(comm=comm)
             self._comm = comm
-        return self._result
+        return self._result, comm
 
 
-@CacheOnComm
 def init_petsc_and_slepc(comm=None):
     """Make sure petsc is initialized with comm before slepc.
     """
@@ -77,8 +76,7 @@ def convert_to_petsc(mat, comm=None):
     # TODO: split kwarg, --> assume matrix already sliced
     # TODO: bsr, dense, vec
 
-    PETSc = get_petsc(comm=comm)
-    comm = PETSc.COMM_WORLD
+    PETSc, comm = get_petsc(comm=comm)
     mpi_sz = comm.Get_size()
     pmat = PETSc.Mat()
 
@@ -126,8 +124,7 @@ def convert_to_petsc(mat, comm=None):
 def new_petsc_vec(n, comm=None):
     """Create an empty complex petsc vector of size `n`.
     """
-    PETSc = get_petsc(comm=comm)
-    comm = PETSc.COMM_WORLD
+    PETSc, comm = get_petsc(comm=comm)
     a = np.empty(n, dtype=complex)
     return PETSc.Vec().createWithArray(a, comm=comm)
 
@@ -143,9 +140,8 @@ def _init_spectral_inverter(ptype="lu",
                             comm=None):
     """Create a slepc spectral transformation object with specified solver.
     """
-    PETSc = get_petsc(comm=comm)
-    SLEPc = get_slepc(comm=comm)
-    comm = PETSc.COMM_WORLD
+    PETSc, comm = get_petsc(comm=comm)
+    SLEPc, comm = get_slepc(comm=comm)
     # Preconditioner and linear solver
     P = PETSc.PC().create(comm=comm)
     P.setType(ptype)
@@ -180,7 +176,7 @@ _WHICH_SCIPY_TO_SLEPC = {
 
 
 def _which_scipy_to_slepc(which):
-    SLEPc = get_slepc()
+    SLEPc = get_slepc()[0]
     return getattr(SLEPc.EPS.Which, _WHICH_SCIPY_TO_SLEPC[which.upper()])
 
 
@@ -198,8 +194,8 @@ def _init_eigensolver(which='LM', sigma=None, isherm=True,
     -------
         SLEPc solver ready to be called.
     """
-    SLEPc = get_slepc(comm=comm)
-    comm = SLEPc.COMM_WORLD
+    SLEPc, comm = get_slepc(comm=comm)
+
     eigensolver = SLEPc.EPS().create(comm=comm)
     if sigma is not None:
         which = "TR"
@@ -314,7 +310,7 @@ def slepc_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
 # ----------------------------------- SVD ----------------------------------- #
 
 def _init_svd_solver(SVDType='cross', tol=None, max_it=None, comm=None):
-    SLEPc = get_slepc(comm=comm)
+    SLEPc, comm = get_slepc(comm=comm)
     comm = SLEPc.COMM_WORLD
     svd_solver = SLEPc.SVD().create(comm=comm)
     svd_solver.setType(SVDType)
