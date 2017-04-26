@@ -119,6 +119,7 @@ from .gen.rand import (
     rand_mix,
     rand_product_state,
     rand_matrix_product_state,
+    rand_mps,
 )
 
 # Functions for calculating properties
@@ -254,6 +255,7 @@ __all__ = [
     'rand_mix',
     'rand_product_state',
     'rand_matrix_product_state',
+    'rand_mps',
     # Calc ------------------------------------------------------------------ #
     'expm',
     'sqrtm',

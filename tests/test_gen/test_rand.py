@@ -155,22 +155,25 @@ class TestRandProductState:
 
 
 class TestRandMPS:
-    @pytest.mark.parametrize("trans_invar", (False, True))
-    @pytest.mark.parametrize("d_n_b_e", [(2, 4, 5, 16),
-                                         (3, 3, 7, 27)])
-    def test_shape(self, d_n_b_e, trans_invar):
+    @pytest.mark.parametrize("cyclic", (True, False))
+    @pytest.mark.parametrize("d_n_b_e", [
+        (2, 4, 5, 16),
+        (2, 4, 1, 16),
+        (3, 3, 7, 27),
+    ])
+    def test_shape(self, d_n_b_e, cyclic):
         d, n, b, e = d_n_b_e
-        psi = rand_matrix_product_state(d, n, b, trans_invar=trans_invar)
+        psi = rand_matrix_product_state(d, n, b, cyclic=cyclic)
         assert psi.shape == (e, 1)
 
         assert_allclose(overlap(psi, psi), 1.0)
 
-    @pytest.mark.parametrize("trans_invar", (False, True))
-    @pytest.mark.parametrize("bond_dim", (2, 3))
-    def test_rank(self, trans_invar, bond_dim):
+    @pytest.mark.parametrize("cyclic", (True, False))
+    @pytest.mark.parametrize("bond_dim", (1, 2, 3))
+    def test_rank(self, bond_dim, cyclic):
         psi = rand_matrix_product_state(
-            2, 10, bond_dim, trans_invar=trans_invar)
+            2, 10, bond_dim, cyclic=cyclic)
         rhoa = ptr(psi, [2] * 10, [0, 1, 2, 3])
         el = eigvals(rhoa)
         # bond_dim squared as cyclic mps is generated
-        assert sum(el > 1e-12) == bond_dim ** 2
+        assert sum(el > 1e-12) == bond_dim ** (2 if cyclic else 1)
