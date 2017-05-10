@@ -177,6 +177,9 @@ def _dot_csr_matvec(data, indptr, indices, vec, out, k1, k2):
 def _par_dot_csr_matvec(mat, vec, nthreads=_NUM_THREAD_WORKERS):
     """Parallel sparse csr matrix vector dot product.
     """
+    vec_shape = vec.shape
+    vec_matrix = True if isinstance(vec, np.matrix) else False
+
     sz = mat.shape[0]
     out = np.empty(sz, dtype=vec.dtype)
     sz_chnk = (sz // nthreads) + 1
@@ -187,7 +190,7 @@ def _par_dot_csr_matvec(mat, vec, nthreads=_NUM_THREAD_WORKERS):
                            mat.data,
                            mat.indptr,
                            mat.indices,
-                           vec.A.reshape(-1), out)
+                           np.asarray(vec).reshape(-1), out)
 
     thrds = tuple(threading.Thread(target=fn, args=kslice)
                   for kslice in slices)
@@ -196,13 +199,23 @@ def _par_dot_csr_matvec(mat, vec, nthreads=_NUM_THREAD_WORKERS):
         t.start()
     for t in thrds:
         t.join()
-    return out.reshape(-1, 1)
+
+    if out.shape != vec_shape:
+        out = out.reshape(*vec_shape)
+    if vec_matrix:
+        out = np.asmatrix(out)
+
+    return out
 
 
 def _dot_sparse(a, b):
     """Dot product for sparse matrix, dispatching to parallel v large nnz.
     """
-    if (issparse(a) and isvec(b) and a.nnz > 500000):  # pragma: no cover
+    use_parallel = (issparse(a) and
+                    isvec(b) and
+                    a.nnz > 500000 and
+                    _NUM_THREAD_WORKERS > 1)
+    if use_parallel:  # pragma: no cover
         return _par_dot_csr_matvec(a, b)
     return a @ b
 
