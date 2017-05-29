@@ -15,9 +15,10 @@ else:
 
 
 # Work out the desired total number of workers
-for var in ['QUIMB_MPI_NUM_WORKERS',
-            'MPI_UNIVERSE_SIZE',
+for var in ['QUIMB_NUM_MPI_WORKERS',
+            'QUIMB_NUM_PROCS',
             'OMPI_UNIVERSE_SIZE',
+            'MPI_UNIVERSE_SIZE',
             'OMP_NUM_THREADS']:
     if var in os.environ:
         NUM_MPI_WORKERS = int(os.environ[var])
