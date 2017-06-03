@@ -1,6 +1,6 @@
-#####
+#######
 *QUIMB*
-#####
+#######
 
 .. image:: https://travis-ci.org/jcmgray/quimb.svg?branch=master
     :target: https://travis-ci.org/jcmgray/quimb
@@ -21,9 +21,9 @@
 * Many operations are accelerated using `numba` and `numexpr`.
 * Optional `slepc4py` interface for advanced eigenvalue problems.
 
-==========
+============
 Installation
-==========
+============
 ``quimb`` requires python 3.5+, ``numpy``, ``scipy``, ``numba`` and ``numexpr``, which are obtained most easily using `conda` (http://conda.pydata.org/miniconda.html):
 
 .. code:: bash
@@ -63,7 +63,7 @@ First we construct a hamiltonian with next-nearest-neighbour interactions and fi
         >>> gs = groundstate(ham)
         >>> gs.H @ ham @ gs  # energy expectation
         matrix([[-15.7496449 -4.44089210e-16j]])
-        
+
 
 Now we construct an operator that projects all but the first and last spins into singlet states.
 

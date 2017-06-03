@@ -20,7 +20,7 @@ from scipy.optimize import minimize
 
 from .accel import (
     accel,
-    _dot_dense,
+    dot_dense,
     ldmul,
     issparse,
     isop,
@@ -64,7 +64,7 @@ def expm(a, herm=True):
         return np.asmatrix(spla.expm(a))
     else:
         evals, evecs = eigsys(a)
-        return _dot_dense(evecs, ldmul(np.exp(evals), evecs.H))
+        return dot_dense(evecs, ldmul(np.exp(evals), evecs.H))
 
 
 def sqrtm(a, herm=True):
@@ -76,8 +76,8 @@ def sqrtm(a, herm=True):
         return np.asmatrix(sla.sqrtm(a))
     else:
         evals, evecs = eigsys(a)
-        return _dot_dense(evecs, ldmul(np.sqrt(evals.astype(complex)),
-                                       evecs.H))
+        return dot_dense(evecs, ldmul(np.sqrt(evals.astype(complex)),
+                                      evecs.H))
 
 
 def fidelity(rho, sigma):

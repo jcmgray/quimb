@@ -21,7 +21,7 @@ from .accel import (
     vdot,
     dot,
     prod,
-    _dot_dense,
+    dot_dense,
     kron,
     kronpow,
     isvec
@@ -691,9 +691,9 @@ def partial_trace(p, dims, coos):
 
 _OVERLAP_METHODS = {
     (0, 0, 0): lambda a, b: abs(vdot(a, b))**2,
-    (0, 1, 0): lambda a, b: vdot(a, _dot_dense(b, a)),
-    (1, 0, 0): lambda a, b: vdot(b, _dot_dense(a, b)),
-    (1, 1, 0): lambda a, b: _trace_dense(_dot_dense(a, b)),
+    (0, 1, 0): lambda a, b: vdot(a, dot_dense(b, a)),
+    (1, 0, 0): lambda a, b: vdot(b, dot_dense(a, b)),
+    (1, 1, 0): lambda a, b: _trace_dense(dot_dense(a, b)),
     (0, 0, 1): lambda a, b: abs(dot(a.H, b)[0, 0])**2,
     (0, 1, 1): realify(lambda a, b: dot(a.H, dot(b, a))[0, 0]),
     (1, 0, 1): realify(lambda a, b: dot(b.H, dot(a, b))[0, 0]),

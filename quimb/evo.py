@@ -9,7 +9,7 @@ quantum states according to schrodingers' equation, and related functions."""
 import numpy as np
 from scipy.integrate import complex_ode
 
-from .accel import isop, ldmul, rdmul, explt, dot, issparse, _dot_dense
+from .accel import isop, ldmul, rdmul, explt, dot, issparse, dot_dense
 from .core import qu, eye
 from .solve.base_solver import eigsys, norm
 
@@ -243,7 +243,7 @@ class QuEvo(object):
         """
         self._t = t
         lt = explt(self.evals, t - self.t0)
-        self._pt = _dot_dense(self.evecs, ldmul(lt, self.pe0))
+        self._pt = dot_dense(self.evecs, ldmul(lt, self.pe0))
 
     def _update_to_solved_dop(self, t):
         """Update simulation consisting of a solved hamiltonian and a
@@ -252,7 +252,7 @@ class QuEvo(object):
         self._t = t
         lt = explt(self.evals, t - self.t0)
         lvpvl = rdmul(ldmul(lt, self.pe0), lt.conj())
-        self._pt = _dot_dense(self.evecs, _dot_dense(lvpvl, self.evecs.H))
+        self._pt = dot_dense(self.evecs, dot_dense(lvpvl, self.evecs.H))
 
     def _update_to_integrate(self, t):
         """Update simulation consisting of unsolved hamiltonian.
