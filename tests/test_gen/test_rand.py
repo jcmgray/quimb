@@ -7,6 +7,9 @@ from quimb import (
     eye,
     chop,
     tr,
+    ptr,
+    overlap,
+    eigvals,
     mutual_information,
     rand_matrix,
     rand_herm,
@@ -18,6 +21,7 @@ from quimb import (
     gen_rand_haar_states,
     rand_mix,
     rand_product_state,
+    rand_matrix_product_state,
 )
 
 
@@ -148,3 +152,28 @@ class TestRandProductState:
         assert_almost_equal(mutual_information(a, [2, 2, 2], 0, 1), 0.0)
         assert_almost_equal(mutual_information(a, [2, 2, 2], 1, 2), 0.0)
         assert_almost_equal(mutual_information(a, [2, 2, 2], 0, 2), 0.0)
+
+
+class TestRandMPS:
+    @pytest.mark.parametrize("cyclic", (True, False))
+    @pytest.mark.parametrize("d_n_b_e", [
+        (2, 4, 5, 16),
+        (2, 4, 1, 16),
+        (3, 3, 7, 27),
+    ])
+    def test_shape(self, d_n_b_e, cyclic):
+        d, n, b, e = d_n_b_e
+        psi = rand_matrix_product_state(d, n, b, cyclic=cyclic)
+        assert psi.shape == (e, 1)
+
+        assert_allclose(overlap(psi, psi), 1.0)
+
+    @pytest.mark.parametrize("cyclic", (True, False))
+    @pytest.mark.parametrize("bond_dim", (1, 2, 3))
+    def test_rank(self, bond_dim, cyclic):
+        psi = rand_matrix_product_state(
+            2, 10, bond_dim, cyclic=cyclic)
+        rhoa = ptr(psi, [2] * 10, [0, 1, 2, 3])
+        el = eigvals(rhoa)
+        # bond_dim squared as cyclic mps is generated
+        assert sum(el > 1e-12) == bond_dim ** (2 if cyclic else 1)

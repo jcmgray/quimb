@@ -3,6 +3,7 @@
 # TODO: Test density -------------------------------------------------------- #
 # TODO: make sure eigen spectrum is correct ... ----------------------------- #
 
+from functools import reduce
 import numpy as np
 import scipy.sparse as sp
 from ..accel import rdmul, dot
@@ -150,3 +151,56 @@ def rand_product_state(n, qtype=None):
                       [np.sin(theta / 2.0) * np.exp(1.0j * phi)]],
                      qtype=qtype)
     return kron(*gen_rand_pure_qubits(n))
+
+
+def rand_matrix_product_state(phys_dim, n, bond_dim,
+                              cyclic=False, trans_invar=False):
+    """Generate a random matrix product state.
+
+    Parameters
+    ----------
+        phys_dim : int
+            Physical dimension of each local site.
+        n : int
+            Number of sites.
+        bond_dim : int
+            Dimension of the bond (virtual) indices.
+        cyclic : bool (optional)
+            Whether to impose cyclic boundary conditions on the entanglement
+            structure.
+        trans_invar : bool (optional)
+            Whether to generate a translationally invariant state,
+            requires cyclic=True.
+
+    Returns
+    -------
+        ket : matrix-like
+            The random state, with shape (phys_dim**n, 1)
+
+    """
+    if trans_invar and not cyclic:
+        raise ValueError("State cannot be translationally invariant"
+                         "with open boundary conditions.")
+    elif trans_invar:
+        raise NotImplementedError
+
+    tensor_shp = (bond_dim, phys_dim, bond_dim)
+
+    def gen_tensors():
+        for i in range(0, n):
+            shape = (tensor_shp[1:] if i == 0 and not cyclic else
+                     tensor_shp[:-1] if i == n - 1 and not cyclic else
+                     tensor_shp)
+
+            yield np.random.randn(*shape) + 1.0j * np.random.randn(*shape)
+
+    ket_tens = reduce(lambda x, y: np.tensordot(x, y, axes=1), gen_tensors())
+    if cyclic:
+        ket_tens = np.trace(ket_tens, axis1=0, axis2=-1)
+
+    norm = np.tensordot(ket_tens, ket_tens.conj(), n)
+    ket_tens /= norm**0.5
+    return ket_tens.reshape((phys_dim**n, 1))
+
+
+rand_mps = rand_matrix_product_state

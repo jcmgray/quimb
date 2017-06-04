@@ -276,7 +276,16 @@ class TestDot:
         y = _dot_sparse(mat_s, ket_d)
         assert x.dtype == complex
         assert x.shape == (_TEST_SZ, 1)
+        assert isinstance(x, np.matrix)
         assert_allclose(x, y)
+
+    def test_par_dot_csr_matvec_Array(self, mat_s, ket_d):
+        x = _par_dot_csr_matvec(mat_s, np.asarray(ket_d).reshape(-1), 2)
+        y = _dot_sparse(mat_s, ket_d)
+        assert x.dtype == complex
+        assert x.shape == (_TEST_SZ,)
+        assert not isinstance(x, np.matrix)
+        assert_allclose(y, np.asmatrix(x.reshape(-1, 1)))
 
 
 class TestAccelVdot:
