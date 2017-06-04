@@ -37,10 +37,7 @@ if [ ! -d "$INSTALL_DIR/petsc" ]; then
     --download-metis \
     --download-ptscotch \
     --with-fortran-kernels=generic \
-    --with-debugging=0 \
-    COPTFLAGS='-O3 -march=native -mtune=native' \
-    CXXOPTFLAGS='-O3 -march=native -mtune=native' \
-    FOPTFLAGS='-O3 -march=native -mtune=native'
+    --with-debugging=1
   make -s all
   make test
   make streams NPMAX=2
