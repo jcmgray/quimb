@@ -9,13 +9,28 @@ def sort_inds(a, method, sigma=None):
 
     Parameters
     ----------
-        a: list to base sort on
-        method: method of sorting list
-        sigma: target
+        a : array_like
+            List to base sort on.
+        method : str
+            Method of sorting list, one of
+                * "LM" - Largest magnitude first
+                * "SM" - Smallest magnitude first
+                * "SA" - Smallest algebraic first
+                * "SR" - Smallest real part first
+                * "SI" - Smallest imaginary part first
+                * "LA" - Largest algebraic first
+                * "LR" - Largest real part first
+                * "LI" - Largest imaginary part first
+                * "TM" - Magnitude closest to target sigma first
+                * "TR" - Real part closest to target sigma first
+                * "TI" - Imaginary part closest to target sigma first
+        sigma : float, optional
+            The target if method={"TM", "TR", or "TI"}.
 
     Returns
     -------
-        inds: indices that would sort `a` based on `method`
+        inds : array of int
+            Indices that would sort `a` based on `method`
     """
     _SORT_FUNCS = {
         "LM": lambda a: -abs(a),
@@ -34,7 +49,7 @@ def sort_inds(a, method, sigma=None):
 
 
 def numpy_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
-                  isherm=True, sort=True, ncv=None, **kwargs):
+                  isherm=True, sort=True, **kwargs):
     """Partial eigen-decomposition using numpy's dense linear algebra.
 
     Parameters
@@ -46,18 +61,18 @@ def numpy_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
         sigma: target eigenvalue
         isherm: whether `a` is hermitian
         sort: whether to sort reduced list of eigenpairs into ascending order
-        ncv: (for compatibility purposes only)
         **kwargs: settings to pass to numpy.eig... functions
 
     Returns
     -------
         lk, (vk): k eigenvalues (and eigenvectors) sorted according to which
     """
-
     efunc = {(True, True): nla.eigh,
              (True, False): nla.eigvalsh,
              (False, True): nla.eig,
              (False, False): nla.eigvals}[(isherm, return_vecs)]
+
+    kwargs.pop('ncv', None)  # might be given by seigsys but not used
 
     if return_vecs:
         evals, evecs = efunc(a.A if issparse(a) else a, **kwargs)
@@ -74,7 +89,7 @@ def numpy_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
         return np.sort(evals) if sort else evals
 
 
-def numpy_svds(a, k=6, return_vecs=True, **kwargs):
+def numpy_svds(a, k=6, return_vecs=True, **_):
     """Partial singular value decomposition using numpys (full) singular value
     decomposition.
 

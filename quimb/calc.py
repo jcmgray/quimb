@@ -59,7 +59,8 @@ def expm(a, herm=True):
     """Matrix exponential, can be accelerated if explicitly hermitian.
     """
     if issparse(a):
-        return spla.expm(a)
+        # convert to and from csc to suppress scipy warning
+        return spla.expm(a.tocsc()).tocsr()
     elif not herm:
         return np.asmatrix(spla.expm(a))
     else:

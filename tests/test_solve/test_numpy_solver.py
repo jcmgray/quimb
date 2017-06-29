@@ -35,10 +35,10 @@ class TestSortInds:
                        ("LA", [3, 2, 1, 0], None),
                        ("LR", [3, 2, 1, 0], None),
                        ("LI", [1, 3, 0, 2], None),
-                       ("TM", [1, 2, 3, 0], 2.4),
-                       ("tm", [1, 2, 3, 0], 2.4),
-                       ("TR", [2, 3, 1, 0], 1),
-                       ("TI", [3, 1, 0, 2], 1)])
+                       ("TM", [1, 2, 3, 0], 2.41),
+                       ("tm", [1, 2, 3, 0], 2.41),
+                       ("TR", [2, 3, 1, 0], 1.01),
+                       ("TI", [3, 1, 0, 2], 1.01)])
     def test_simple(self, xs, method, inds, sigma):
         assert_equal(sort_inds(xs, method, sigma), inds)
 
