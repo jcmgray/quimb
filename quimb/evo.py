@@ -4,11 +4,11 @@ evolution of quantum states according to the Schrodinger equation,
 and related functions.
 """
 
-# TODO: set/update pt * ***************************************************** #
-# TODO: test known lindlbad evolution *************************************** #
-# TODO: QuEvoTimeDepend ***************************************************** #
+# TODO: setter/update pt
+# TODO: setter for compute?
+# TODO: test known lindlbad evolution
+# TODO: QuEvoTimeDepend?
 # TODO: slepc krylov method
-# TODO: show integration progress
 
 import functools
 
@@ -18,6 +18,7 @@ from scipy.integrate import complex_ode
 from .accel import isop, ldmul, rdmul, explt, dot, issparse, _dot_dense
 from .core import qu, eye
 from .solve.base_solver import eigsys, norm
+from .utils import continuous_progbar, progbar
 
 
 # --------------------------------------------------------------------------- #
@@ -30,7 +31,6 @@ def schrodinger_eq_ket(ham):
     Parameters
     ----------
         ham: time-independant hamiltonian governing evolution
-        all_dense: explicitly use dense optimized dot product
 
     Returns
     -------
@@ -51,7 +51,6 @@ def schrodinger_eq_dop(ham):
     Parameters
     ----------
         ham: time-independant hamiltonian governing evolution
-        all_dense: eplicitly use dense optimized dot product
 
     Returns
     -------
@@ -98,7 +97,6 @@ def lindblad_eq(ham, ls, gamma):
         ham: time-independant hamiltonian governing evolution
         ls: lindblad operators
         gamma: dampening strength
-        all_dense: eplicitly use dense optimized dot product
 
     Returns
     -------
@@ -184,7 +182,8 @@ class QuEvo(object):
                  solve=False,
                  t0=0,
                  small_step=False,
-                 compute=None):
+                 compute=None,
+                 progbar=False):
         """
         Parameters
         ----------
@@ -224,6 +223,7 @@ class QuEvo(object):
         self.isdop = isop(self.p0)  # Density operator evolution?
         self.d = p0.shape[0]  # Hilbert space dimension
 
+        self.progbar = progbar
         self._setup_callback(compute)
 
         # Hamiltonian
@@ -248,6 +248,8 @@ class QuEvo(object):
                 for k, v in fn.items():
                     self.results[k].append(v(t, pt))
 
+            # For the integration callback, additionally need to convert
+            #   back to 'quantum' form
             @functools.wraps(fn)
             def int_step_callback(t, y):
                 pt = np.asmatrix(y.reshape(self.d, -1))
@@ -262,8 +264,6 @@ class QuEvo(object):
             def slv_step_callback(t, pt):
                 self.results.append(fn(t, pt))
 
-            # For the integration callback, additionally need to convert
-            #   back to 'quantum' form
             @functools.wraps(fn)
             def int_step_callback(t, y):
                 pt = np.asmatrix(y.reshape(self.d, -1))
@@ -288,8 +288,8 @@ class QuEvo(object):
         self._pt = self.p0  # Current state (start with same as initial)
 
         # Set update method conditional on type of state
-        self.update_to = (self._update_to_solved_dop if self.isdop else
-                          self._update_to_solved_ket)
+        self._update_method = (self._update_to_solved_dop if self.isdop else
+                               self._update_to_solved_ket)
         self.solved = True
 
     def _start_integrator(self, ham, small_step):
@@ -314,7 +314,7 @@ class QuEvo(object):
         self.stepper.set_initial_value(self.p0.A.reshape(-1), self.t0)
 
         # assign the correct update_to method
-        self.update_to = self._update_to_integrate
+        self._update_method = self._update_to_integrate
         self.solved = False
 
     # Methods for updating the simulation ----------------------------------- #
@@ -349,9 +349,43 @@ class QuEvo(object):
         """
         self.stepper.integrate(t)
 
+    def update_to(self, t):
+        """Update the simulation to time `t`.
+        """
+        if self.progbar and hasattr(self, 'stepper'):
+            with continuous_progbar(self.t, t) as pbar:
+                # def here for the pbar closure
+                def pbar_compute(fn):
+                    @functools.wraps(fn)
+                    def wrapped_fn(t, y):  # pragma: no cover
+                        res = fn(t, y)
+                        pbar.cupdate(t)
+                        return res
+
+                    return wrapped_fn
+
+                self.stepper.set_solout(
+                    pbar_compute(self._int_step_callback))
+                self._update_method(t)
+        else:
+            self._update_method(t)
+
     def at_times(self, ts):
+        """Generator expression that will yield the state at each of the times
+        in `ts`.
+
+        Notes
+        -----
+            If integrating (solve=False), currently any compute callbacks will
+            be called at every *integration* step, not just the times `ts` --
+            i.e. in general len(QuEvo.results) != len(ts).
+
+        """
+        if self.progbar:
+            ts = progbar(ts)
+
         for t in ts:
-            self.update_to(t)
+            self._update_method(t)
             yield self.pt
 
     # Simulation properties ------------------------------------------------- #
