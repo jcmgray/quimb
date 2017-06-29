@@ -1,10 +1,16 @@
-""" Contains an evolution class, QuEvo to efficiently manage time evolution of
-quantum states according to schrodingers' equation, and related functions."""
+"""
+Contains an evolution class, QuEvo to easily and efficiently manage time
+evolution of quantum states according to the Schrodinger equation,
+and related functions.
+"""
 
 # TODO: set/update pt * ***************************************************** #
 # TODO: test known lindlbad evolution *************************************** #
-# TODO: solout method with funcyt ******************************************* #
 # TODO: QuEvoTimeDepend ***************************************************** #
+# TODO: slepc krylov method
+# TODO: show integration progress
+
+import functools
 
 import numpy as np
 from scipy.integrate import complex_ode
@@ -40,7 +46,7 @@ def schrodinger_eq_dop(ham):
     """Density operator schrodinger equation, but with flattened input/output.
     Note that this assumes both `ham` and `rho` are hermitian in order to speed
     up the commutator, non-hermitian hamiltonians as used to model loss should
-    be treated explicilty or with `schrodinger_eq_dop_vec`.
+    be treated explicilty or with `schrodinger_eq_dop_vectorized`.
 
     Parameters
     ----------
@@ -61,7 +67,7 @@ def schrodinger_eq_dop(ham):
     return rho_dot
 
 
-def schrodinger_eq_dop_vec(ham):
+def schrodinger_eq_dop_vectorized(ham):
     """Density operator schrodinger equation, but with flattened input/output
     and vectorised superoperation mode (no reshaping required).
 
@@ -118,7 +124,7 @@ def lindblad_eq(ham, ls, gamma):
     return rho_dot
 
 
-def lindblad_eq_vec(ham, ls, gamma, sparse=False):
+def lindblad_eq_vectorized(ham, ls, gamma, sparse=False):
     """Lindblad equation, but with flattened input/output and vectorised
     superoperation mode (no reshaping required).
 
@@ -158,9 +164,9 @@ def calc_evo_eq(isdop, issparse, isopen=False):
         (0, 0, 0): schrodinger_eq_ket,
         (0, 1, 0): schrodinger_eq_ket,
         (1, 0, 0): schrodinger_eq_dop,
-        (1, 1, 0): schrodinger_eq_dop_vec,
+        (1, 1, 0): schrodinger_eq_dop_vectorized,
         (1, 0, 1): lindblad_eq,
-        (1, 1, 1): lindblad_eq_vec,
+        (1, 1, 1): lindblad_eq_vectorized,
     }
     return eq_chooser[(isdop, issparse, isopen)]
 
@@ -174,20 +180,42 @@ class QuEvo(object):
     Note that vector states are converted to kets always.
     """
 
-    def __init__(self, p0, ham, solve=False, t0=0, small_step=False):
-        """Parameters
+    def __init__(self, p0, ham,
+                 solve=False,
+                 t0=0,
+                 small_step=False,
+                 compute=None):
+        """
+        Parameters
         ----------
-            p0: inital state, either vector or operator
-            ham: Governing Hamiltonian, can be tuple (eigvals, eigvecs)
-            solve: whether to immediately solve hamiltonian
-            t0: initial time (i.e. time of state p0)
-            small_step: if integrating, whether to use a low or high order
+            p0 : quantum state
+                inital state, either vector or operator
+            ham : matrix-like, or tuple (1d array, mattix-like).
+                Governing Hamiltonian, if tuple then assumed to contain
+                (eigvals, eigvecs) of presolved system.
+            solve : bool, optional
+                Whether to immediately solve hamiltonian.
+            t0 : float, optional
+                Initial time (i.e. time of state p0), defaults to zero.
+            small_step : bool, optional
+                If integrating, whether to use a low or high order
                 integrator to give naturally small or large steps.
+            compute : callable, or dict of callable
+                Function(s) to compute on the state at each time step, called
+                with args (t, pt). If supplied with:
+                    * single callable, the results will be a list stored in
+                        QuEvo.results
+                    * dict of callables, results will a dict of lists with
+                        corresponding keys in QuEvo.results.
 
         Members
         -------
-            t: current time
-            pt: current state
+            t : float
+                Current time.
+            pt : quantum state
+                Current state.
+            results : list, or dict of lists, optional
+                Results of the compute callback(s) for each time step.
         """
         super(QuEvo, self).__init__()
 
@@ -196,11 +224,53 @@ class QuEvo(object):
         self.isdop = isop(self.p0)  # Density operator evolution?
         self.d = p0.shape[0]  # Hilbert space dimension
 
+        self._setup_callback(compute)
+
         # Hamiltonian
         if solve or isinstance(ham, (tuple, list)):
             self._solve_ham(ham)
         else:  # Use definite integration
             self._start_integrator(ham, small_step)
+
+    def _setup_callback(self, fn):
+        """
+        """
+        if fn is None:
+            slv_step_callback = None
+            int_step_callback = None
+
+        # dict of funcs input -> dict of funcs output
+        elif isinstance(fn, dict):
+            self.results = {k: [] for k in fn}
+
+            @functools.wraps(fn)
+            def slv_step_callback(t, pt):
+                for k, v in fn.items():
+                    self.results[k].append(v(t, pt))
+
+            @functools.wraps(fn)
+            def int_step_callback(t, y):
+                pt = np.asmatrix(y.reshape(self.d, -1))
+                for k, v in fn.items():
+                    self.results[k].append(v(t, pt))
+
+        # else results -> single list of outputs of fn
+        else:
+            self.results = []
+
+            @functools.wraps(fn)
+            def slv_step_callback(t, pt):
+                self.results.append(fn(t, pt))
+
+            # For the integration callback, additionally need to convert
+            #   back to 'quantum' form
+            @functools.wraps(fn)
+            def int_step_callback(t, y):
+                pt = np.asmatrix(y.reshape(self.d, -1))
+                self.results.append(fn(t, pt))
+
+        self._slv_step_callback = slv_step_callback
+        self._int_step_callback = int_step_callback
 
     def _solve_ham(self, ham):
         """Solve the supplied hamiltonian and find the initial state in the
@@ -226,12 +296,24 @@ class QuEvo(object):
         """Initialize a stepping integrator.
         """
         self.sparse_ham = issparse(ham)
+
+        # set complex ode with governing equation
         evo_eq = calc_evo_eq(self.isdop, self.sparse_ham)
         self.stepper = complex_ode(evo_eq(ham))
+
+        # 5th order stpper or 8th order stepper
         int_mthd, step_fct = ('dopri5', 150) if small_step else ('dop853', 50)
         first_step = norm(ham, 'f') / step_fct
+
         self.stepper.set_integrator(int_mthd, nsteps=0, first_step=first_step)
+
+        # Set step_callback to be evaluated with args (t, y) at each step
+        if self._int_step_callback is not None:
+            self.stepper.set_solout(self._int_step_callback)
+
         self.stepper.set_initial_value(self.p0.A.reshape(-1), self.t0)
+
+        # assign the correct update_to method
         self.update_to = self._update_to_integrate
         self.solved = False
 
@@ -245,6 +327,10 @@ class QuEvo(object):
         lt = explt(self.evals, t - self.t0)
         self._pt = dot_dense(self.evecs, ldmul(lt, self.pe0))
 
+        # compute any callbacks into ->> self.results
+        if self._slv_step_callback is not None:
+            self._slv_step_callback(t, self._pt)
+
     def _update_to_solved_dop(self, t):
         """Update simulation consisting of a solved hamiltonian and a
         density operator to time `t`.
@@ -253,6 +339,10 @@ class QuEvo(object):
         lt = explt(self.evals, t - self.t0)
         lvpvl = rdmul(ldmul(lt, self.pe0), lt.conj())
         self._pt = dot_dense(self.evecs, dot_dense(lvpvl, self.evecs.H))
+
+        # compute any callbacks into ->> self.results
+        if self._slv_step_callback is not None:
+            self._slv_step_callback(t, self._pt)
 
     def _update_to_integrate(self, t):
         """Update simulation consisting of unsolved hamiltonian.
