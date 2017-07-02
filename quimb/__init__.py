@@ -120,6 +120,7 @@ from .gen.rand import (
     rand_product_state,
     rand_matrix_product_state,
     rand_mps,
+    rand_seperable,
 )
 
 # Functions for calculating properties
@@ -256,6 +257,7 @@ __all__ = [
     'rand_product_state',
     'rand_matrix_product_state',
     'rand_mps',
+    'rand_seperable',
     # Calc ------------------------------------------------------------------ #
     'expm',
     'sqrtm',

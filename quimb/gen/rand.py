@@ -204,3 +204,20 @@ def rand_matrix_product_state(phys_dim, n, bond_dim,
 
 
 rand_mps = rand_matrix_product_state
+
+
+def rand_seperable(dims, num_mix=10):
+    """
+    """
+
+    def gen_single_sites():
+        for dim in dims:
+            yield rand_rho(dim)
+
+    weights = np.random.rand(num_mix)
+
+    def gen_single_states():
+        for w in weights:
+            yield w * kron(*gen_single_sites())
+
+    return sum(gen_single_states()) / np.sum(weights)
