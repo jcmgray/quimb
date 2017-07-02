@@ -330,3 +330,22 @@ class TestQuEvo:
                 assert abs(ln - manual_lns[4]) < 1e-12
                 checked = True
         assert checked
+
+    def test_progbar_update_to_integrate(self, capsys):
+        ham = ham_heis(2, cyclic=False)
+        p0 = up() & down()
+        sim = QuEvo(p0, ham, solve=False, progbar=True)
+        sim.update_to(100)
+        # check something as been printed
+        _, err = capsys.readouterr()
+        assert err and "%" in err
+
+    def test_progbar_at_times_solve(self, capsys):
+        ham = ham_heis(2, cyclic=False)
+        p0 = up() & down()
+        sim = QuEvo(p0, ham, solve=True, progbar=True)
+        for _ in sim.at_times(np.linspace(0, 100, 11)):
+            pass
+        # check something as been printed
+        _, err = capsys.readouterr()
+        assert err and "%" in err

@@ -3,6 +3,7 @@ import itertools
 import math
 import numpy as np
 from numpy.testing import assert_allclose
+import scipy.sparse as sp
 from quimb import (
     qu,
     eye,
@@ -88,6 +89,8 @@ class TestExpm:
     def test_eye(self, sparse, herm):
         p = expm(eye(2, sparse=sparse), herm=herm)
         assert_allclose((p.A if sparse else p) / np.e, eye(2))
+        if sparse:
+            assert isinstance(p, sp.csr_matrix)
 
 
 class TestSqrtm:
