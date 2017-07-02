@@ -207,7 +207,21 @@ rand_mps = rand_matrix_product_state
 
 
 def rand_seperable(dims, num_mix=10):
-    """
+    """Generate a random, mixed, seperable state. E.g rand_seperable([2, 2])
+    for a mixed two qubit state with no entanglement.
+
+    Parameters
+    ----------
+        dims : tuple of int
+            The local dimensions across which to be seperable.
+        num_mix : int, optional
+            How many individual product states to sum together, each with
+            random weight.
+
+    Returns
+    -------
+        np.matrix
+            Mixed seperable state.
     """
 
     def gen_single_sites():
