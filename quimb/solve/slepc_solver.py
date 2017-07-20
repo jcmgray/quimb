@@ -1,7 +1,7 @@
 """Interface to slepc4py for solving advanced eigenvalue problems.
 """
 # TODO: FEAST / other contour solvers?
-# TODO: expm, sqrtm
+# TODO: pre-sliced and/or un-constructed matrices?
 
 import numpy as np
 import scipy.sparse as sp
@@ -68,14 +68,31 @@ def get_slepc(comm=None):
 #                               PETSc FUNCTIONS                               #
 # --------------------------------------------------------------------------- #
 
-
-def convert_to_petsc(mat, comm=None):
-    """Convert a matrix to the relevant PETSc type, currently
-    only supports csr, bsr, vectors and dense matrices formats.
+def slice_sparse_matrix_to_components(mat, ri, rf):
+    """Slice the matrix `mat` between indices `ri` and `rf` -- for csr or bsr.
     """
-    # TODO: split kwarg, --> assume matrix already sliced
-    # TODO: bsr, dense, vec
+    return (mat.indptr[ri:rf + 1] - mat.indptr[ri],
+            mat.indices[mat.indptr[ri]:mat.indptr[rf]],
+            mat.data[mat.indptr[ri]:mat.indptr[rf]])
 
+
+def convert_mat_to_petsc(mat, comm=None):
+    """Convert a matrix to the relevant PETSc type, currently
+    only supports csr, bsr and dense matrices formats.
+
+    Parameters
+    ----------
+        mat : matrix-like
+            Matrix, dense or sparse.
+        comm : mpi4py.MPI.Comm instance
+            The mpi communicator.
+
+    Returns
+    -------
+        pmat : petsc4py.PETSc.Mat
+            The matrix in petsc form - only the local part if running
+            across several mpi processes.
+    """
     PETSc, comm = get_petsc(comm=comm)
     mpi_sz = comm.Get_size()
     pmat = PETSc.Mat()
@@ -91,9 +108,7 @@ def convert_to_petsc(mat, comm=None):
     if sp.isspmatrix_csr(mat):
         mat.sort_indices()
         if mpi_sz > 1:
-            csr = (mat.indptr[ri:rf + 1] - mat.indptr[ri],
-                   mat.indices[mat.indptr[ri]:mat.indptr[rf]],
-                   mat.data[mat.indptr[ri]:mat.indptr[rf]])
+            csr = slice_sparse_matrix_to_components(mat, ri, rf)
         else:
             csr = (mat.indptr, mat.indices, mat.data)
         pmat.createAIJ(size=mat.shape, nnz=mat.nnz, csr=csr, comm=comm)
@@ -102,9 +117,7 @@ def convert_to_petsc(mat, comm=None):
     elif sp.isspmatrix_bsr(mat):
         mat.sort_indices()
         if mpi_sz > 1:
-            csr = (mat.indptr[ri:rf + 1] - mat.indptr[ri],
-                   mat.indices[mat.indptr[ri]:mat.indptr[rf]],
-                   mat.data[mat.indptr[ri]:mat.indptr[rf]])
+            csr = slice_sparse_matrix_to_components(mat, ri, rf)
         else:
             csr = (mat.indptr, mat.indices, mat.data)
         pmat.createBAIJ(size=mat.shape, bsize=mat.blocksize,
@@ -121,12 +134,98 @@ def convert_to_petsc(mat, comm=None):
     return pmat
 
 
-def new_petsc_vec(n, comm=None):
-    """Create an empty complex petsc vector of size `n`.
+def convert_vec_to_petsc(vec, comm=None):
+    """Convert a vector/array to the PETSc form.
+
+    Parameters
+    ----------
+        vec : vector-like
+            Numpy array, will be unravelled to one dimension.
+        comm : mpi4py.MPI.Comm instance
+            The mpi communicator.
+
+    Returns
+    -------
+        pvec : petsc4py.PETSc.Vec
+            The vector in petsc form - only the local part if running
+            across several mpi processes.
     """
     PETSc, comm = get_petsc(comm=comm)
-    a = np.empty(n, dtype=complex)
-    return PETSc.Vec().createWithArray(a, comm=comm)
+    mpi_sz = comm.Get_size()
+    pvec = PETSc.Vec()
+
+    flat_vec = np.asarray(vec).reshape(-1)
+
+    if mpi_sz > 1:
+        pvec.create(comm=comm)
+        pvec.setSizes(vec.size)
+        pvec.setFromOptions()
+        pvec.setUp()
+        ri, rf = pvec.getOwnershipRange()
+        pvec.createWithArray(flat_vec[ri:rf], comm=comm)
+    else:
+        pvec.createWithArray(flat_vec, comm=comm)
+
+    return pvec
+
+
+def new_petsc_vec(d, comm=None):
+    """Create an empty complex petsc vector of size `d`.
+
+    Parameters
+    ----------
+        d : int
+            Dimension of vector, i.e. the global size.
+        comm : mpi4py.MPI.Comm instance
+            The mpi communicator.
+
+    Returns
+    -------
+        pvec : petsc4py.PETSc.Vec
+            An empty vector in petsc form - only the local part if running
+            across several mpi processes.
+    """
+    PETSc, comm = get_petsc(comm=comm)
+    pvec = PETSc.Vec()
+    pvec.create(comm=comm)
+    pvec.setSizes(d)
+    pvec.setFromOptions()
+    pvec.setUp()
+    return pvec
+
+
+def gather_petsc_array(x, shape, comm):
+    """Gather the petsc vector/matrix `x` to a single array on the master
+    process, assuming that owernership is sliced along the first dimension.
+    """
+    # get local numpy array
+    lx = x.getArray()
+    ri, rf = x.getOwnershipRange()
+
+    # master only
+    if comm.Get_rank() == 0:
+
+        # create total array
+        ax = np.empty(shape, dtype=complex)
+        # set master's portion
+        ax[ri:rf, ...] = lx
+
+        # get ownership ranges and data from worker processes
+        for i in range(1, comm.Get_size()):
+            ji, jf = comm.recv(source=i, tag=11)
+
+            # receive worker's part of ouput vector
+            comm.Recv(ax[ji:jf, ...], source=i, tag=42)
+
+    # Worker only
+    else:
+        # send ownership range
+        comm.send((ri, rf), dest=0, tag=11)
+        # send local portion of eigenvectors as buffer
+        comm.Send(lx, dest=0, tag=42)
+        ax = None
+
+    return ax
 
 
 # --------------------------------------------------------------------------- #
@@ -251,7 +350,7 @@ def slepc_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
         st_opts_dict=st_opts_dict,
         comm=comm)
 
-    pa = convert_to_petsc(a, comm=comm)
+    pa = convert_mat_to_petsc(a, comm=comm)
     ri, rf = pa.getOwnershipRange()
 
     eigensolver.setOperators(pa)
@@ -274,11 +373,13 @@ def slepc_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
         if rank == 0:
             # pre-allocate array for whole eigenvectors and set local data
             nvk = np.empty((a.shape[0], k), dtype=complex)
-            nvk[ri:rf, :] = vk
+            nvk[ri:rf, ...] = vk
             # get ownership ranges and data from worker processes
             for i in range(1, comm.Get_size()):
+                # receive worker's ownership range
                 ji, jf = comm.recv(source=i, tag=11)
-                comm.Recv(nvk[ji:jf, :], source=i, tag=42)
+                # receive worker's part of eigenvectors
+                comm.Recv(nvk[ji:jf, ...], source=i, tag=42)
             vk = nvk
 
         # Worker only
@@ -289,8 +390,9 @@ def slepc_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
             comm.Send(vk, dest=0, tag=42)
 
     if rank != 0:
+        # Work done -> clean up
         eigensolver.destroy()
-        return None
+        return
 
     lk = np.asarray([eigensolver.getEigenvalue(i) for i in range(k)])
     lk = lk.real if isherm else lk
@@ -339,7 +441,7 @@ def slepc_svds(a, k=6, ncv=None, return_vecs=True, SVDType='cross',
 
     svd_solver = _init_svd_solver(SVDType=SVDType, tol=tol,
                                   max_it=max_it, comm=comm)
-    petsc_a = convert_to_petsc(a, comm=comm)
+    petsc_a = convert_mat_to_petsc(a, comm=comm)
     svd_solver.setOperator(petsc_a)
     svd_solver.setDimensions(nsv=k, ncv=ncv)
     svd_solver.solve()
@@ -367,3 +469,66 @@ def slepc_svds(a, k=6, ncv=None, return_vecs=True, SVDType='cross',
         sk = np.asarray([svd_solver.getValue(i) for i in range(k)])
         svd_solver.destroy()
         return sk[np.argsort(-sk)]
+
+
+# ------------------------ matrix multiply function ------------------------- #
+
+def slepc_mfn_multiply(mat, vec,
+                       func='exp',
+                       MFNType='krylov',
+                       comm=None,
+                       isherm=False):
+    """Compute the action of ``func(mat) @ vec``.
+
+    Parameters
+    ----------
+        mat : matrix-like
+            Matrix to compute function action of.
+        vec : vector-like
+            Vector to compute matrix function action on.
+        func : {'exp', 'sqrt', 'log'}, optional
+            Function to use.
+        MFNType : {'krylov', 'expokit'}, optional
+            Method of computing the matrix function action, 'expokit' is only
+            available for func='exp'.
+        comm : mpi4py.MPI.Comm instance, optional
+            The mpi communicator.
+
+    Returns
+    -------
+        fvec : np.matrix
+            The vector output of ``func(mat) @ vec``.
+    """
+    SLEPc, comm = get_slepc(comm=comm)
+
+    mat = convert_mat_to_petsc(mat, comm=comm)
+    if isherm:
+        mat.setOption(mat.Option.HERMITIAN, True)
+    vec = convert_vec_to_petsc(vec, comm=comm)
+    out = new_petsc_vec(vec.size, comm=comm)
+
+    func_map = {'EXP': SLEPc.FN.Type.EXP,
+                'SQRT': SLEPc.FN.Type.SQRT,
+                'LOG': SLEPc.FN.Type.LOG}
+
+    type_map = {'KRYLOV': SLEPc.MFN.Type.KRYLOV,
+                'EXPOKIT': SLEPc.MFN.Type.EXPOKIT}
+
+    # set up the matrix function options and objects
+    mfn = SLEPc.MFN().create()
+    mfn.setOperator(mat)
+    mfn.setType(type_map[MFNType.upper()])
+    fn = mfn.getFN()
+    fn.setType(func_map[func.upper()])
+    fn.setScale(1.0, 1.0)
+    mfn.setFromOptions()
+
+    # 'solve' / perform the matrix function
+    mfn.solve(vec, out)
+
+    # --> gather the (distributed) petsc vector to a numpy matrix on master
+    all_out = gather_petsc_array(out, shape=vec.size, comm=comm)
+    all_out = np.matrix(all_out.reshape(-1, 1))
+
+    mfn.destroy()
+    return all_out

@@ -3,7 +3,8 @@
 # TODO: don't send whole matrix? only marginal time savings but memory better.
 
 import os
-from .slepc_solver import slepc_seigsys
+import functools
+from .slepc_solver import slepc_seigsys, slepc_mfn_multiply
 from .scalapy_solver import scalapy_eigsys
 
 
@@ -66,78 +67,99 @@ def get_mpi_pool(num_workers=None, num_threads=1):
                                 'MPI_UNIVERSE_SIZE': '1'})
 
 
-def mpi_pool_func(fn, *args,
-                  num_workers=None,
-                  num_threads=1,
-                  mpi_pool=None,
-                  spawn_all=not ALREADY_RUNNING_AS_MPI,
-                  **kwargs):
-    """Automatically wrap a function to be executed in parallel by a
-    pool of mpi workers.
+class GetMPIBeforeCall(object):
+    """Wrap a function to automatically get the correct communicator before
+    its called, and to set the `comm_self` kwarg to allow forced self mode.
     """
-    if num_workers is None:
-        num_workers = NUM_MPI_WORKERS
 
-    if num_workers == 1:
-        kwargs['comm_self'] = True
+    def __init__(self, fn):
+        self.fn = fn
 
-    if mpi_pool is not None:
-        pool = mpi_pool
-    else:
-        num_workers_to_spawn = num_workers - int(ALREADY_RUNNING_AS_MPI)
-        if num_workers_to_spawn > 0:
-            pool = get_mpi_pool(num_workers_to_spawn, num_threads)
+    def __call__(self, *args, comm_self=False, **kwargs):
+        if not comm_self:
+            from mpi4py import MPI
+            comm = MPI.COMM_WORLD
+        else:
+            comm = None
 
-    # the (non mpi) main process is idle while the workers compute.
-    if spawn_all:
-        futures = [pool.submit(fn, *args, **kwargs)
-                   for _ in range(num_workers)]
-        results = (f.result() for f in futures)
-        # Get master result, (not always first submitted)
-        return next(r for r in results if r is not None)
+        return self.fn(*args, comm=comm, **kwargs)
 
-    # the master process is the master mpi process and contributes
-    else:
-        for _ in range(num_workers - 1):
-            pool.submit(fn, *args, **kwargs)
-        return fn(*args, **kwargs)
+
+class MPIPoolFunc(object):
+
+    def __init__(self, fn):
+        self.fn = fn
+
+    def __call__(self, *args,
+                 num_workers=None,
+                 num_threads=1,
+                 mpi_pool=None,
+                 spawn_all=not ALREADY_RUNNING_AS_MPI,
+                 **kwargs):
+        """Automatically wrap a function to be executed in parallel by a
+        pool of mpi workers.
+
+        Parameters
+        ----------
+            *args
+                Supplied to `self.fn`.
+            num_workers : int, optional
+                How many total process should run function in parallel.
+            num_threads : int, optional
+                How many (OMP) threads each process should use
+            mpi_pool : pool-like, optional
+                If not None (default), submit function to this pool.
+            spawn_all : bool, optional
+                Whether all the parallel processes should be spawned (True), or
+                num_workers - 1, so that the current process can also do work.
+            **kwargs
+                Supplied to `self.fn`.
+
+        Returns
+        -------
+            `fn` output from the master process.
+        """
+        if num_workers is None:
+            num_workers = NUM_MPI_WORKERS
+
+        if num_workers == 1:
+            kwargs['comm_self'] = True
+
+        if mpi_pool is not None:
+            pool = mpi_pool
+        else:
+            num_workers_to_spawn = num_workers - int(ALREADY_RUNNING_AS_MPI)
+            if num_workers_to_spawn > 0:
+                pool = get_mpi_pool(num_workers_to_spawn, num_threads)
+
+        # the (non mpi) main process is idle while the workers compute.
+        if spawn_all:
+            futures = [pool.submit(self.fn, *args, **kwargs)
+                       for _ in range(num_workers)]
+            results = (f.result() for f in futures)
+            # Get master result, (not always first submitted)
+            return next(r for r in results if r is not None)
+
+        # the master process is the master mpi process and contributes
+        else:
+            for _ in range(num_workers - 1):
+                pool.submit(self.fn, *args, **kwargs)
+            return self.fn(*args, **kwargs)
 
 
 # ---------------------------------- SLEPC ---------------------------------- #
 
-def slepc_mpi_seigsys_submit_fn(*args, comm_self=False, **kwargs):
-    """SLEPc solve function with initial MPI comm find.
-    """
-    if not comm_self:
-        from mpi4py import MPI
-        comm = MPI.COMM_WORLD
-    else:
-        comm = None
-    return slepc_seigsys(*args, comm=comm, **kwargs)
+single_slepc_seigsys = functools.wraps(slepc_seigsys)(
+    GetMPIBeforeCall(slepc_seigsys))
+slepc_mpi_seigsys = MPIPoolFunc(single_slepc_seigsys)
 
-
-def slepc_mpi_seigsys(*args, num_workers=None, num_threads=1, **kwargs):
-    """Automagically spawn mpi workers to do slepc eigen decomposition.
-    """
-    return mpi_pool_func(slepc_mpi_seigsys_submit_fn, *args,
-                         num_workers=num_workers,
-                         num_threads=num_threads, **kwargs)
+single_slepc_mfn_multiply = functools.wraps(slepc_mfn_multiply)(
+    GetMPIBeforeCall(slepc_mfn_multiply))
+slepc_mpi_mfn_multiply = MPIPoolFunc(single_slepc_mfn_multiply)
 
 
 # --------------------------------- SCALAPY --------------------------------- #
 
-def scalapy_mpi_eigsys_submit_fn(*args, comm_self=False, **kwargs):
-    """Scalapy solve function with initial MPI comm find.
-    """
-    from mpi4py import MPI
-    if comm_self:
-        comm = MPI.COMM_SELF
-    else:
-        comm = MPI.COMM_WORLD
-    return scalapy_eigsys(*args, comm=comm, **kwargs)
-
-
-def scalapy_mpi_eigsys(*args, **kwargs):
-    """Automagically spawn mpi workers to do slepc eigen decomposition.
-    """
-    return mpi_pool_func(scalapy_mpi_eigsys_submit_fn, *args, **kwargs)
+single_scalapy_seigsys = functools.wraps(scalapy_eigsys)(
+    GetMPIBeforeCall(scalapy_eigsys))
+scalapy_mpi_eigsys = MPIPoolFunc(single_scalapy_seigsys)

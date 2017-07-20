@@ -3,21 +3,7 @@ import numpy as np
 from .slepc_solver import get_default_comm
 
 
-def comm_equal_cache(fn):
-    """Cache functions based only on equality of succesive comm arguments.
-    """
-    def wrapped_fn(comm=None):
-        if wrapped_fn.comm == comm:
-            return wrapped_fn.comm
-        else:
-            wrapped_fn.comm = fn(comm)
-            return wrapped_fn.comm
-
-    wrapped_fn.comm = "__UNINITIALIZED__"
-    return wrapped_fn
-
-
-def init_scalapy(pn=None, bsz=None, comm=None):
+def get_scalapy(pn=None, bsz=None, comm=None):
     """
     """
     import scalapy
@@ -40,7 +26,7 @@ def init_scalapy(pn=None, bsz=None, comm=None):
 def convert_to_scalapy(mat, pn=None, bsz=None, comm=None):
     """
     """
-    sclp, _ = init_scalapy(pn=pn, bsz=bsz, comm=comm)
+    sclp, _ = get_scalapy(pn=pn, bsz=bsz, comm=comm)
     smat = sclp.DistributedMatrix(mat.shape, dtype=mat.dtype.type)
     ri, ci = smat.indices()
     smat.local_array[:, :] = mat[ri, ci]
@@ -53,7 +39,7 @@ def scalapy_eigsys(a, return_vecs=True, pn=None, bsz=None, comm=None,
     """
     rank = comm.Get_rank()
 
-    sclp, comm = init_scalapy(pn=pn, bsz=bsz, comm=comm)
+    sclp, comm = get_scalapy(pn=pn, bsz=bsz, comm=comm)
     sa = convert_to_scalapy(a, pn=pn, bsz=bsz, comm=comm)
 
     defaults = {'overwrite_a': False,

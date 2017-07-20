@@ -1,14 +1,20 @@
 import pytest
+import numpy as np
 from numpy.testing import assert_allclose
 
 from quimb import (
     rand_herm,
+    rand_ket,
+    eigsys,
 )
 
 from quimb.solve import SLEPC4PY_FOUND
 
 if SLEPC4PY_FOUND:
-    from quimb.solve.mpi_spawner import slepc_mpi_seigsys
+    from quimb.solve.mpi_spawner import (
+        slepc_mpi_seigsys,
+        slepc_mpi_mfn_multiply,
+    )
 
 
 slepc4py_notfound_msg = "No SLEPc4py installation"
@@ -26,6 +32,17 @@ class TestSLEPcMPI:
     @pytest.mark.parametrize("num_workers", [None, 1, 2, 3])
     def test_1(self, num_workers, bigsparsemat):
         slepc_mpi_seigsys(bigsparsemat, num_workers=num_workers)
+
+    @pytest.mark.parametrize("num_workers", [None, 1, 2, 3])
+    def test_expm_multiply(self, num_workers, bigsparsemat):
+        a = bigsparsemat
+        k = rand_ket(100)
+        out = slepc_mpi_mfn_multiply(a, k)
+
+        al, av = eigsys(a.A)
+        expected = av @ np.diag(np.exp(al)) @ av.conj().T @ k
+
+        assert_allclose(out, expected)
 
 
 @slepc4py_test
