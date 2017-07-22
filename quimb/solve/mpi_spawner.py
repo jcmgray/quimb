@@ -160,10 +160,6 @@ class SpawnMPIProcessesFunc(object):
 
         # the master process is the master mpi process and contributes
         else:
-            import os
-            print(repr(__file__), __file__)
-            print(os.path.realpath(__file__))
-
             for _ in range(num_workers_to_spawn):
                 pool.submit(self.fn, *args, **kwargs)
             return self.fn(*args, **kwargs)
