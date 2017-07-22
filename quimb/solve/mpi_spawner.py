@@ -1,11 +1,15 @@
-"""Manages the spawning of mpi processes to send to the slepc solver.
+"""Manages the spawning of mpi processes to send to the various solvers.
 """
 # TODO: don't send whole matrix? only marginal time savings but memory better.
 
 import os
 import functools
-from .slepc_solver import slepc_seigsys, slepc_mfn_multiply
-from .scalapy_solver import scalapy_eigsys
+from .slepc_solver import (
+    slepc_seigsys,
+    slepc_svds,
+    slepc_mfn_multiply,
+)
+from .scalapy_solver import eigsys_scalapy
 
 
 # Work out if already running as mpi
@@ -75,19 +79,31 @@ class GetMPIBeforeCall(object):
     def __init__(self, fn):
         self.fn = fn
 
-    def __call__(self, *args, comm_self=False, **kwargs):
+    def __call__(self, *args,
+                 comm_self=False,
+                 wait_for_workers=None,
+                 **kwargs):
+        from mpi4py import MPI
+
         if not comm_self:
-            from mpi4py import MPI
             comm = MPI.COMM_WORLD
         else:
-            comm = None
+            comm = MPI.COMM_SELF
+
+        if wait_for_workers is not None:
+            while comm.Get_size() != wait_for_workers:
+                pass
 
         return self.fn(*args, comm=comm, **kwargs)
 
 
-class MPIPoolFunc(object):
+class SpawnMPIProcessesFunc(object):
+    """
+    """
 
     def __init__(self, fn):
+        """
+        """
         self.fn = fn
 
     def __call__(self, *args,
@@ -124,6 +140,8 @@ class MPIPoolFunc(object):
 
         if num_workers == 1:
             kwargs['comm_self'] = True
+        else:
+            kwargs['wait_for_workers'] = num_workers
 
         if mpi_pool is not None:
             pool = mpi_pool
@@ -142,24 +160,32 @@ class MPIPoolFunc(object):
 
         # the master process is the master mpi process and contributes
         else:
-            for _ in range(num_workers - 1):
+            import os
+            print(repr(__file__), __file__)
+            print(os.path.realpath(__file__))
+
+            for _ in range(num_workers_to_spawn):
                 pool.submit(self.fn, *args, **kwargs)
             return self.fn(*args, **kwargs)
 
 
 # ---------------------------------- SLEPC ---------------------------------- #
 
-single_slepc_seigsys = functools.wraps(slepc_seigsys)(
+seigsys_slepc_mpi = functools.wraps(slepc_seigsys)(
     GetMPIBeforeCall(slepc_seigsys))
-slepc_mpi_seigsys = MPIPoolFunc(single_slepc_seigsys)
+seigsys_slepc_spawn = SpawnMPIProcessesFunc(seigsys_slepc_mpi)
 
-single_slepc_mfn_multiply = functools.wraps(slepc_mfn_multiply)(
+svds_slepc_mpi = functools.wraps(slepc_svds)(
+    GetMPIBeforeCall(slepc_svds))
+svds_slepc_spawn = SpawnMPIProcessesFunc(svds_slepc_mpi)
+
+mfn_multiply_slepc_mpi = functools.wraps(slepc_mfn_multiply)(
     GetMPIBeforeCall(slepc_mfn_multiply))
-slepc_mpi_mfn_multiply = MPIPoolFunc(single_slepc_mfn_multiply)
+mfn_multiply_slepc_spawn = SpawnMPIProcessesFunc(mfn_multiply_slepc_mpi)
 
 
 # --------------------------------- SCALAPY --------------------------------- #
 
-single_scalapy_seigsys = functools.wraps(scalapy_eigsys)(
-    GetMPIBeforeCall(scalapy_eigsys))
-scalapy_mpi_eigsys = MPIPoolFunc(single_scalapy_seigsys)
+eigsys_scalapy_mpi = functools.wraps(eigsys_scalapy)(
+    GetMPIBeforeCall(eigsys_scalapy))
+eigsys_scalapy_spawn = SpawnMPIProcessesFunc(eigsys_scalapy_mpi)

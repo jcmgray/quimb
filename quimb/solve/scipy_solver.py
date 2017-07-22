@@ -20,7 +20,7 @@ def choose_ncv(k, n):  # pragma: no cover
     return min(max(20, 2 * k + 1), n)
 
 
-def scipy_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
+def seigsys_scipy(a, k=6, which=None, return_vecs=True, sigma=None,
                   isherm=True, ncv=None, sort=True, **kwargs):
     """Returns a few eigenpairs from a possibly sparse hermitian operator
 
@@ -38,9 +38,10 @@ def scipy_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
     """
     settings = {
         'k': k,
-        'which': ('LM' if 'T' in which.upper() and sigma is not None else
-                  'SA' if which is None and sigma is None else
-                  'LM' if which is None and sigma is not None else
+        'which': ('SA' if (which is None) and (sigma is None) else
+                  'LM' if (which is None) and (sigma is not None) else
+                  # For target using shift invert scipy requires 'LM' ->
+                  'LM' if ('T' in which.upper()) and (sigma is not None) else
                   which),
         'sigma': sigma,
         'ncv': choose_ncv(k, a.shape[0]) if ncv is None else ncv,

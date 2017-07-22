@@ -104,17 +104,8 @@ def convert_mat_to_petsc(mat, comm=None):
         pmat.setUp()
         ri, rf = pmat.getOwnershipRange()
 
-    # Sparse compressed row matrix
-    if sp.isspmatrix_csr(mat):
-        mat.sort_indices()
-        if mpi_sz > 1:
-            csr = slice_sparse_matrix_to_components(mat, ri, rf)
-        else:
-            csr = (mat.indptr, mat.indices, mat.data)
-        pmat.createAIJ(size=mat.shape, nnz=mat.nnz, csr=csr, comm=comm)
-
     # Sparse block row matrix
-    elif sp.isspmatrix_bsr(mat):
+    if sp.isspmatrix_bsr(mat):
         mat.sort_indices()
         if mpi_sz > 1:
             csr = slice_sparse_matrix_to_components(mat, ri, rf)
@@ -122,6 +113,15 @@ def convert_mat_to_petsc(mat, comm=None):
             csr = (mat.indptr, mat.indices, mat.data)
         pmat.createBAIJ(size=mat.shape, bsize=mat.blocksize,
                         nnz=mat.nnz, csr=csr, comm=comm)
+
+    # Sparse compressed row matrix
+    elif sp.isspmatrix_csr(mat):
+        mat.sort_indices()
+        if mpi_sz > 1:
+            csr = slice_sparse_matrix_to_components(mat, ri, rf)
+        else:
+            csr = (mat.indptr, mat.indices, mat.data)
+        pmat.createAIJ(size=mat.shape, nnz=mat.nnz, csr=csr, comm=comm)
 
     # Dense matrix
     else:
@@ -194,9 +194,24 @@ def new_petsc_vec(d, comm=None):
     return pvec
 
 
-def gather_petsc_array(x, shape, comm):
+def gather_petsc_array(x, comm, out_shape=None, matrix=False):
     """Gather the petsc vector/matrix `x` to a single array on the master
     process, assuming that owernership is sliced along the first dimension.
+
+    Parameters
+    ----------
+        x : petsc4py.PETSc Mat or Vec
+            Distributed petsc array to gather.
+        comm : mpi4py.MPI.COMM
+            MPI communicator
+        out_shape : tuple, optional
+            If not None, reshape the output array to this.
+        matrix : bool, optional
+            Whether to convert the array to a np.matrix.
+
+    Returns
+    -------
+        np.array or np.matrix on master, None on workers (rank > 0)
     """
     # get local numpy array
     lx = x.getArray()
@@ -206,7 +221,7 @@ def gather_petsc_array(x, shape, comm):
     if comm.Get_rank() == 0:
 
         # create total array
-        ax = np.empty(shape, dtype=complex)
+        ax = np.empty(x.getSize(), dtype=complex)
         # set master's portion
         ax[ri:rf, ...] = lx
 
@@ -216,6 +231,11 @@ def gather_petsc_array(x, shape, comm):
 
             # receive worker's part of ouput vector
             comm.Recv(ax[ji:jf, ...], source=i, tag=42)
+
+        if out_shape is not None:
+            ax = ax.reshape(*out_shape)
+        if matrix:
+            ax = np.asmatrix(ax)
 
     # Worker only
     else:
@@ -279,9 +299,9 @@ def _which_scipy_to_slepc(which):
     return getattr(SLEPc.EPS.Which, _WHICH_SCIPY_TO_SLEPC[which.upper()])
 
 
-def _init_eigensolver(which='LM', sigma=None, isherm=True,
+def _init_eigensolver(k=6, which='LM', sigma=None, isherm=True,
                       EPSType="krylovschur", st_opts_dict=(), tol=None,
-                      max_it=None, comm=None):
+                      max_it=None, ncv=None, comm=None):
     """Create an advanced eigensystem solver
 
     Parameters
@@ -307,6 +327,7 @@ def _init_eigensolver(which='LM', sigma=None, isherm=True,
     eigensolver.setWhichEigenpairs(_which_scipy_to_slepc(which))
     eigensolver.setConvergenceTest(SLEPc.EPS.Conv.ABS)
     eigensolver.setTolerances(tol=tol, max_it=max_it)
+    eigensolver.setDimensions(k, ncv)
     eigensolver.setFromOptions()
     return eigensolver
 
@@ -339,22 +360,22 @@ def slepc_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
         comm = get_default_comm()
 
     eigensolver = _init_eigensolver(
-        which=("SA" if which is None and sigma is None else
-               "TR" if which is None and sigma is not None else
+        k=k,
+        which=("SA" if (which is None) and (sigma is None) else
+               "TR" if (which is None) and (sigma is not None) else
                which),
         sigma=sigma,
         isherm=isherm,
         EPSType=EPSType,
         tol=tol,
         max_it=max_it,
+        ncv=ncv,
         st_opts_dict=st_opts_dict,
-        comm=comm)
+        comm=comm,
+    )
 
     pa = convert_mat_to_petsc(a, comm=comm)
-    ri, rf = pa.getOwnershipRange()
-
     eigensolver.setOperators(pa)
-    eigensolver.setDimensions(k, ncv)
     eigensolver.solve()
     nconv = eigensolver.getConverged()
     assert nconv >= k
@@ -362,48 +383,27 @@ def slepc_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
 
     rank = comm.Get_rank()
 
-    if return_vecs:
-        vec, _ = pa.getVecs()
-        vk = np.empty((rf - ri, k), dtype=complex)
-        for i in range(k):
-            eigensolver.getEigenvector(i, vec)
-            vk[:, i] = vec.getArray()
-
-        # Master only
-        if rank == 0:
-            # pre-allocate array for whole eigenvectors and set local data
-            nvk = np.empty((a.shape[0], k), dtype=complex)
-            nvk[ri:rf, ...] = vk
-            # get ownership ranges and data from worker processes
-            for i in range(1, comm.Get_size()):
-                # receive worker's ownership range
-                ji, jf = comm.recv(source=i, tag=11)
-                # receive worker's part of eigenvectors
-                comm.Recv(nvk[ji:jf, ...], source=i, tag=42)
-            vk = nvk
-
-        # Worker only
-        else:
-            # send ownership range
-            comm.send((ri, rf), dest=0, tag=11)
-            # send local portion of eigenvectors as buffer
-            comm.Send(vk, dest=0, tag=42)
-
-    if rank != 0:
-        # Work done -> clean up
-        eigensolver.destroy()
-        return
-
-    lk = np.asarray([eigensolver.getEigenvalue(i) for i in range(k)])
-    lk = lk.real if isherm else lk
-
-    if return_vecs:
-        if sort:
-            sortinds = np.argsort(lk)
-            lk, vk = lk[sortinds], np.asmatrix(vk[:, sortinds])
-        res = lk, np.asmatrix(vk)
+    if rank == 0:
+        lk = np.asarray([eigensolver.getEigenvalue(i) for i in range(k)])
+        lk = lk.real if isherm else lk
     else:
-        res = np.sort(lk) if sort else lk
+        res = None
+
+    if return_vecs:
+        # need master and workers to do this:
+        lvecs = [
+            gather_petsc_array(pvec, comm=comm, out_shape=(-1, 1))
+            for pvec in eigensolver.getInvariantSubspace()
+        ]
+        if rank == 0:
+            vk = np.concatenate(lvecs, axis=1)
+            if sort:
+                sortinds = np.argsort(lk)
+                lk, vk = lk[sortinds], np.asmatrix(vk[:, sortinds])
+            res = lk, np.asmatrix(vk)
+    else:
+        if rank == 0:
+            res = np.sort(lk) if sort else lk
 
     eigensolver.destroy()
     return res
@@ -411,12 +411,14 @@ def slepc_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
 
 # ----------------------------------- SVD ----------------------------------- #
 
-def _init_svd_solver(SVDType='cross', tol=None, max_it=None, comm=None):
+def _init_svd_solver(nsv=6, SVDType='cross', tol=None, max_it=None,
+                     ncv=None, comm=None):
     SLEPc, comm = get_slepc(comm=comm)
     comm = SLEPc.COMM_WORLD
     svd_solver = SLEPc.SVD().create(comm=comm)
     svd_solver.setType(SVDType)
     svd_solver.setTolerances(tol=tol, max_it=max_it)
+    svd_solver.setDimensions(nsv=nsv, ncv=ncv)
     svd_solver.setFromOptions()
     return svd_solver
 
@@ -439,36 +441,48 @@ def slepc_svds(a, k=6, ncv=None, return_vecs=True, SVDType='cross',
     if comm is None:
         comm = get_default_comm()
 
-    svd_solver = _init_svd_solver(SVDType=SVDType, tol=tol,
-                                  max_it=max_it, comm=comm)
-    petsc_a = convert_mat_to_petsc(a, comm=comm)
-    svd_solver.setOperator(petsc_a)
-    svd_solver.setDimensions(nsv=k, ncv=ncv)
+    pa = convert_mat_to_petsc(a, comm=comm)
+    svd_solver = _init_svd_solver(
+        nsv=k,
+        SVDType=SVDType,
+        tol=tol,
+        max_it=max_it,
+        ncv=ncv,
+        comm=comm
+    )
+    svd_solver.setOperator(pa)
     svd_solver.solve()
-
-    if comm and comm.Get_rank() > 0:
-        svd_solver.destroy()
-        return
-
     nconv = svd_solver.getConverged()
     assert nconv >= k
     k = nconv if extra_vals else k
+
+    rank = comm.Get_rank()
+
     if return_vecs:
-        sk = np.empty(k, dtype=float)
-        uk = np.empty((a.shape[0], k), dtype=complex)
-        vtk = np.empty((k, a.shape[1]), dtype=complex)
-        u, v = petsc_a.getVecs()
-        for i in range(k):
-            sk[i] = svd_solver.getSingularTriplet(i, u, v)
-            uk[:, i] = u.getArray()
-            vtk[i, :] = v.getArray().conjugate()
+
+        def usv_getter():
+            v, u = pa.createVecs()
+            for i in range(k):
+                s = svd_solver.getSingularTriplet(i, u, v)
+                lu = gather_petsc_array(u, comm=comm, out_shape=(-1, 1))
+                lv = gather_petsc_array(v, comm=comm, out_shape=(1, -1))
+                yield lu, s, lv.conjugate()
+
+        lus, sk, lvs = zip(*usv_getter())
+        sk = np.asarray(sk)
+
+        if rank == 0:
+            uk = np.concatenate(lus, axis=1)
+            vtk = np.concatenate(lvs, axis=0)
             so = np.argsort(-sk)
-        svd_solver.destroy()
-        return np.asmatrix(uk[:, so]), sk[so], np.asmatrix(vtk[so, :])
+            res = np.asmatrix(uk[:, so]), sk[so], np.asmatrix(vtk[so, :])
     else:
-        sk = np.asarray([svd_solver.getValue(i) for i in range(k)])
-        svd_solver.destroy()
-        return sk[np.argsort(-sk)]
+        if rank == 0:
+            sk = np.asarray([svd_solver.getValue(i) for i in range(k)])
+            res = sk[np.argsort(-sk)]
+
+    svd_solver.destroy()
+    return res if rank == 0 else None
 
 
 # ------------------------ matrix multiply function ------------------------- #
@@ -493,6 +507,9 @@ def slepc_mfn_multiply(mat, vec,
             available for func='exp'.
         comm : mpi4py.MPI.Comm instance, optional
             The mpi communicator.
+        isherm : bool, optional
+            If `mat` is known to be hermitian, this might speed things up in
+            some circumstances.
 
     Returns
     -------
@@ -527,8 +544,8 @@ def slepc_mfn_multiply(mat, vec,
     mfn.solve(vec, out)
 
     # --> gather the (distributed) petsc vector to a numpy matrix on master
-    all_out = gather_petsc_array(out, shape=vec.size, comm=comm)
-    all_out = np.matrix(all_out.reshape(-1, 1))
+    all_out = gather_petsc_array(
+        out, comm=comm, out_shape=(-1, 1), matrix=True)
 
     mfn.destroy()
     return all_out
