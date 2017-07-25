@@ -37,7 +37,7 @@ from quimb import (
     overlap,
 )
 from quimb.core import (
-    _sparse_matrix,
+    sparse_matrix,
     _trace_dense,
     _trace_sparse,
     _trace_lose,
@@ -60,7 +60,7 @@ def os1():
 class TestSparseMatrix:
     @mark.parametrize("stype", stypes)
     def test_simple(self, stype):
-        a = _sparse_matrix([[0, 3], [1, 2]], stype)
+        a = sparse_matrix([[0, 3], [1, 2]], stype)
         assert a.format == stype
         assert a.dtype == complex
 
@@ -135,7 +135,7 @@ class TestQuimbify:
     @mark.parametrize("format_in", stypes)
     @mark.parametrize("format_out", (None,) + stypes)
     def test_reshape_sparse(self, qtype, shape, out, format_in, format_out):
-        x = _sparse_matrix([[1], [0], [2], [3j]], format_in)
+        x = sparse_matrix([[1], [0], [2], [3j]], format_in)
         y = qu(x, qtype=qtype, stype=format_out)
         assert y.shape == shape
         assert y.dtype == complex
@@ -184,6 +184,11 @@ class TestInferSize:
     def test_infer_size(self, d, base, n):
         p = rand_ket(d)
         assert infer_size(p, base) == n
+
+    def test_raises(self):
+        p = rand_ket(2) & rand_ket(3)
+        with raises(ValueError):
+            infer_size(p, base=2)
 
 
 class TestTrace:

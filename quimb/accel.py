@@ -460,7 +460,8 @@ def kron(*ops, stype=None, coo_build=False):
             Objects to be tensored together/
         stype : str, optional
             Desired output format if resultant object is sparse. Should be one
-            of {``'csr'``, ``'bsr'``, ``'coo'``, ``'csc'``}.
+            of {``'csr'``, ``'bsr'``, ``'coo'``, ``'csc'``}. If ``None``, infer
+            from input matrices.
         coo_build : bool, optional
             Whether to force sparse construction to use the ``'coo'``
             format (only for sparse matrices in the first place.).
