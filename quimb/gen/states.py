@@ -9,8 +9,8 @@ from math import factorial
 import numpy as np
 import scipy.sparse as sp
 
-from ..accel import ldmul, dot, make_immutable
-from ..core import (qu, kron, kronpow, eye, eyepad)
+from ..accel import ldmul, dot, make_immutable, kronpow
+from ..core import (qu, kron, eye, eyepad)
 from ..solve.base_solver import eigsys
 from .operators import sig, controlled
 

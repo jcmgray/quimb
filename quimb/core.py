@@ -384,16 +384,17 @@ def dim_map(dims, coos, cyclic=False, trim=False):
 
     Examples
     --------
-    >>> dims = [[2, 3], [4, 5]]
-    >>> coords = [(0, 0), (1, 1)]
-    >>> flat_dims, inds = dim_map(dims, coords)
-    >>> flat_dims
-    (2, 3, 4, 5)
-    >>> inds
-    (0, 3)
 
-    >>> dim_map(dims, [(2, 0), (-1, 1)], cyclic=True)
-    ((2, 3, 4, 5), (0, 3))
+        >>> dims = [[2, 3], [4, 5]]
+        >>> coords = [(0, 0), (1, 1)]
+        >>> flat_dims, inds = dim_map(dims, coords)
+        >>> flat_dims
+        (2, 3, 4, 5)
+        >>> inds
+        (0, 3)
+
+        >>> dim_map(dims, [(2, 0), (-1, 1)], cyclic=True)
+        ((2, 3, 4, 5), (0, 3))
     """
     # Figure out shape of dimensions given
     if isinstance(dims, np.ndarray):
@@ -485,13 +486,14 @@ def dim_compress(dims, inds):
 
     Examples
     --------
-    >>> dims = [2] * 10
-    >>> inds = [3, 4]
-    >>> compressed_dims, compressed_inds = dim_compress(dims, inds)
-    >>> compressed_dims
-    (8, 4, 32)
-    >>> compressed_inds
-    (1,)
+
+        >>> dims = [2] * 10
+        >>> inds = [3, 4]
+        >>> compressed_dims, compressed_inds = dim_compress(dims, inds)
+        >>> compressed_dims
+        (8, 4, 32)
+        >>> compressed_inds
+        (1,)
     """
     # TODO: turn off ind compress
     # TODO: put yield (autoplace_count, False) --- no need?
@@ -515,43 +517,51 @@ def eyepad(ops, dims, inds, sparse=None, stype=None, coo_build=False):
 
     Parameters
     ----------
-        ops : matrix-like or tuple of matrix-like
+        op : matrix-like or tuple of matrix-like
             Operator(s) to place into the tensor space. If more than one, these
             are cyclically placed at each of the ``dims`` specified by
             ``inds``.
         dims : tuple of int
             Dimensions of tensor space, use -1 to ignore dimension matching.
         inds : tuple of int
-            Indices of the dimenions to place operators on. If multiple
-            operators are specified, ``inds[1]`` corresponds to ``ops[1]`` and
-            so on.
+            Indices of the dimensions to place operator on. Each dimension
+            specified can be smaller than the size of ``op`` (as long as it
+            factorizes it), and can be disjoint from other dimensions when
+            ``op`` will be placed.
         sparse : bool, optional
             Whether to construct the new operator in sparse form.
         stype : str, optional
             If sparse, which format to use for the output.
         coo_build : bool, optional
             Whether to build the intermediary matrices using the ``'coo'``
-            format - usually the quickest for many tensor products.
+            format - can be faster to build sparse in this way, then
+            convert to chosen format, including dense.
 
     Returns
     -------
         matrix-like
-            Operator such that ops act on dims[inds].
+            Operator such that ops act on ``dims[inds]``.
 
     Examples
     --------
-    >>> IZI = eyepad(sig('z'), [2, 2, 2], 1)
-    >>> np.allclose(IZI, eye(2) & sig('z') & eye(2))
-    True
+    Place an operator between two identities:
 
-    >>> rho_ab = rand_rho(2**2)
-    >>> rho_abc = eyepad(rho_ab, [5, 2, 2, 7], [1, 2])  # overlay several sites
-    >>> rho_abc.shape
-    (140, 140)
+        >>> IZI = eyepad(sig('z'), [2, 2, 2], 1)
+        >>> np.allclose(IZI, eye(2) & sig('z') & eye(2))
+        True
 
-    >>> A = rand_herm(5)
-    >>> eyepad(A, [2, -1, 2, -1, 2, -1], [1, 3, 5]).shape  # auto match op dim
-    (1000, 1000)
+    Overlay a large operator on several sites:
+
+        >>> rho_ab = rand_rho(2**2)
+        >>> rho_abc = eyepad(rho_ab, [5, 2, 2, 7], [1, 2])
+        >>> rho_abc.shape
+        (140, 140)
+
+    Place an operator at specified sites, regardless of size:
+
+        >>> A = rand_herm(5)
+        >>> eyepad(A, [2, -1, 2, -1, 2, -1], [1, 3, 5]).shape
+        (1000, 1000)
     """
 
     # Make sure `ops` islist
@@ -573,7 +583,6 @@ def eyepad(ops, dims, inds, sparse=None, stype=None, coo_build=False):
     inds, ops = zip(*sorted(zip(inds, itertools.cycle(ops))))
     inds, ops = set(inds), iter(ops)
 
-    # TODO: refactor this / just use dim_compress
     def gen_ops():
         cff_id = 1  # keeps track of compressing adjacent identities
         cff_ov = 1  # keeps track of overlaying op on multiple dimensions
@@ -619,16 +628,20 @@ def _permute_sparse(a, dims, perm):
     """Permute the subsytems of a sparse matrix.
     """
     perm, dims = np.asarray(perm), np.asarray(dims)
-    new_dims = dims[perm]
+
     # New dimensions & stride (i.e. product of preceding dimensions)
+    new_dims = dims[perm]
     odim_stride = np.multiply.accumulate(dims[::-1])[::-1] // dims
     ndim_stride = np.multiply.accumulate(new_dims[::-1])[::-1] // new_dims
+
     # Range of possible coordinates for each subsys
     coos = (tuple(range(dim)) for dim in dims)
+
     # Complete basis using coordinates for current and new dimensions
     basis = np.asarray(tuple(itertools.product(*coos, repeat=1)))
     oinds = np.sum(odim_stride * basis, axis=1)
     ninds = np.sum(ndim_stride * basis[:, perm], axis=1)
+
     # Construct permutation matrix and apply it to state
     perm_mat = sp.coo_matrix((np.ones(a.shape[0]), (ninds, oinds))).tocsr()
     if isop(a):
@@ -637,7 +650,7 @@ def _permute_sparse(a, dims, perm):
 
 
 def permute(p, dims, perm):
-    """Permute the subsytems of state ``p``.
+    """Permute the subsytems of state or opeator ``p``.
 
     Parameters
     ----------
@@ -652,6 +665,14 @@ def permute(p, dims, perm):
     -------
         pp : vector or matrix
             Permuted state or operator.
+
+    Examples
+    --------
+
+        >>> IX = speye(2) & sig('X', sparse=True)
+        >>> XI = permute(IX, dims=[2, 2], perm=[1, 0])
+        >>> np.allclose(XI.A, sig('X') & eye(2))
+        True
     """
     if issparse(p):
         return _permute_sparse(p, dims, perm)
@@ -662,8 +683,45 @@ def perm_eyepad(op, dims, inds, **kwargs):
     # TODO: multiple ops
     # TODO: coo map, coo compress
     # TODO: sparse, stype, coo_build?
-    """Advanced tensor placement of operators that allows arbitrary ordering
-    such as reversal and interleaving of identities.
+    """Advanced, padded tensor product. Construct an operator such that ``op``
+    acts on ``dims[inds]``, and allow it to be arbitrarily split and reversed
+    etc.
+
+    Parameters
+    ----------
+        ops : matrix-like or tuple of matrix-like
+            Operator to place into the tensor space.
+        dims : tuple of int
+            Dimensions of tensor space.
+        inds : tuple of int
+            Indices of the dimensions to place operators on. If multiple
+            operators are specified, ``inds[1]`` corresponds to ``ops[1]`` and
+            so on.
+        sparse : bool, optional
+            Whether to construct the new operator in sparse form.
+        stype : str, optional
+            If sparse, which format to use for the output.
+        coo_build : bool, optional
+            Whether to build the intermediary matrices using the ``'coo'``
+            format - can be faster to build sparse in this way, then
+            convert to chosen format, including dense.
+
+    Returns
+    -------
+        matrix-like
+            Operator such that ops act on ``dims[inds]``.
+
+    Examples
+    --------
+
+    Here we take an operator that acts on spins 0 and 1 with X and Z, and
+    transform it to act on spins 2 and 0 -- i.e. reverse it and sandwich an
+    identity between the two sites it acts on.
+
+        >>> XZ = sig('X') & sig('Z')
+        >>> ZIX = perm_eyepad(XZ, dims=[2, 3, 2], inds=[2, 0])
+        >>> np.allclose(ZIX, sig('Z') & eye(3) & sig('X'))
+        True
     """
     dims, inds = np.asarray(dims), np.asarray(inds)
 
@@ -700,7 +758,7 @@ def _ind_complement(inds, n):
 
 
 def itrace(a, axes=(0, 1)):
-    """General tensor trace, i.e. multiple contractions.
+    """General tensor trace, i.e. multiple contractions - for numpy.ndarray.
 
     Parameters
     ----------
@@ -719,11 +777,17 @@ def itrace(a, axes=(0, 1)):
 
     Examples
     --------
-    >>> a = np.random.rand(2, 3, 4, 2, 3, 4)
-    >>> itrace(a, axes=([1, 2], [4, 5])).shape
-    (2, 2)
-    >>> itrace(a, axes=(0, 3)).shape
-    (3, 4, 3, 4)
+
+    Trace out a single pair of dimensions:
+
+        >>> a = np.random.rand(2, 3, 4, 2, 3, 4)
+        >>> itrace(a, axes=(0, 3)).shape
+        (3, 4, 3, 4)
+
+    Trace out multiple dimensions:
+
+        >>> itrace(a, axes=([1, 2], [4, 5])).shape
+        (2, 2)
     """
     # Single index pair to trace out
     if isinstance(axes[0], int):
@@ -836,17 +900,28 @@ def partial_trace(p, dims, keep):
             List of subsystem dimensions.
         keep : int or tuple of int
             Index or indices of subsytem(s) to keep.
+
     Returns
     -------
         rho : dense matrix
-            Density matrix of subsytem dimensions dims[keep]
+            Density matrix of subsytem dimensions ``dims[keep]``.
 
     Examples
     --------
-    >>> rho_abc = rand_rho(3 *4 * 5)
-    >>> rho_ab = partial_trace(rho_abc, [3, 4, 5], keep=[0, 1])
-    >>> rho_ab.shape
-    (12, 12)
+
+    Trace out single subsystem of a ket:
+
+        >>> psi = bell_state('psi-')
+        >>> ptr(psi, [2, 2], keep=0)  # expect identity
+        matrix([[ 0.5+0.j,  0.0+0.j],
+                [ 0.0+0.j,  0.5+0.j]])
+
+    Trace out multiple subsystems of a density matrix:
+
+        >>> rho_abc = rand_rho(3 *4 * 5)
+        >>> rho_ab = partial_trace(rho_abc, [3, 4, 5], keep=[0, 1])
+        >>> rho_ab.shape
+        (12, 12)
     """
     if issparse(p):
         return _partial_trace_simple(p, dims, keep)
@@ -869,18 +944,19 @@ def overlap(a, b):
     """Overlap between a and b, i.e. for vectors it will be the
     absolute overlap squared |<a|b><b|a>|, rather than <a|b>, and for two
     operators it will be the Hilbert-schmidt inner product ``tr(A @ B)``.
+    In this way it is the same for the operator or
 
     Parameters
     ----------
-        a : ket or density matrix
+        a : vector or operator
             First state or operator - assumed to be ket if vector.
-        b : ket or density matrix
+        b : vector or operator
             Second state or operator - assumed to be ket if vector.
 
     Returns
     -------
         x : float
-            'Overlap'.
+            'Overlap' between ``a`` and ``b``.
     """
     return _OVERLAP_METHODS[isop(a), isop(b), issparse(a) or issparse(b)](a, b)
 
