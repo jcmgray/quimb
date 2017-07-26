@@ -1,4 +1,4 @@
-"""Core accelerated numerical functions
+"""Accelerated helper numerical functions.
 """
 # TODO: merge kron, eyepad --> tensor
 # TODO: finish idot with rpn
