@@ -24,7 +24,7 @@ from quimb import (
     svds,
     norm,
 )
-from quimb.solve import SLEPC4PY_FOUND
+from quimb.solve import SLEPC4PY_FOUND, SCALAPY_FOUND
 from quimb.solve.base_solver import _rel_window_to_abs_window
 from quimb.solve.scipy_solver import choose_ncv
 
@@ -35,6 +35,10 @@ svds_backends = ["dense", "scipy"]
 if SLEPC4PY_FOUND:
     backends += ["slepc"]
     svds_backends += ["slepc"]
+
+dense_backends = ["numpy"]
+if SCALAPY_FOUND:
+    dense_backends += ["scalapy"]
 
 
 # --------------------------------------------------------------------------- #
@@ -96,24 +100,27 @@ def ham2():
 # --------------------------------------------------------------------------- #
 
 class TestEigh:
-    def test_eigsys(self, mat_herm_dense):
+    @mark.parametrize("bkd", dense_backends)
+    def test_eigsys(self, mat_herm_dense, bkd):
         u, a = mat_herm_dense
-        evals, _ = eigsys(a, sort=False)
+        evals, _ = eigsys(a, sort=False, backend=bkd)
         assert(set(np.rint(evals)) == set((-1, 2, 4, -3)))
-        evals, v = eigsys(a)
+        evals, v = eigsys(a, backend=bkd)
         assert_allclose(evals, [-3, -1, 2, 4])
         for i, j in zip([3, 0, 1, 2], range(4)):
             o = u[:, i].H @ v[:, j]
             assert_allclose(abs(o), 1.)
 
-    def test_eigvals(self, mat_herm_dense):
+    @mark.parametrize("bkd", dense_backends)
+    def test_eigvals(self, mat_herm_dense, bkd):
         _, a = mat_herm_dense
-        evals = eigvals(a)
+        evals = eigvals(a, backend=bkd)
         assert_allclose(evals, [-3, -1, 2, 4])
 
-    def test_eigvecs(self, mat_herm_dense):
+    @mark.parametrize("bkd", dense_backends)
+    def test_eigvecs(self, mat_herm_dense, bkd):
         u, a = mat_herm_dense
-        v = eigvecs(a)
+        v = eigvecs(a, backend=bkd)
         for i, j in zip([3, 0, 1, 2], range(4)):
             o = u[:, i].H @ v[:, j]
             assert_allclose(abs(o), 1.)

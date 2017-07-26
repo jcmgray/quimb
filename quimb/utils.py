@@ -1,10 +1,33 @@
 """Miscellenous
 """
-try:
+import importlib
+
+
+def find_library(x):
+    """Check if library `x` is installed.
+    """
+    return importlib.util.find_spec(x) is not None
+
+
+def raise_cant_find_library_function(x, extra_msg=None):
+    """Return a simple function that flags up a missing necessary library `x`
+    when it is called.
+    """
+
+    def function_that_will_raise(*args, **kwargs):
+        error_msg = "The library {} is not installed. ".format(x)
+        if extra_msg is not None:
+            error_msg += extra_msg
+        raise ImportError(error_msg)
+
+    return function_that_will_raise
+
+
+FOUND_TQDM = find_library('tqdm')
+if FOUND_TQDM:
     from tqdm import tqdm
-    found_tqdm = True
-except ImportError:
-    found_tqdm = False
+else:  # pragma: no cover
+    tqdm = None
 
 
 class _ctqdm(tqdm):
@@ -54,18 +77,10 @@ class _ctqdm(tqdm):
             self.step += num_update
 
 
-class no_tqdm(object):
-    """Dummy class for raising no tqdm import error.
-    """
-
-    def __init__(self, *args, **kwargs):
-        raise ImportError("The library `tqdm` must be installed in order to "
-                          "show progress bars.")
-
-
-if found_tqdm:
+if FOUND_TQDM:
     progbar = tqdm
     continuous_progbar = _ctqdm
-else:
-    progbar = no_tqdm
-    continuous_progbar = no_tqdm
+else:  # pragma: no cover
+    extra_msg = "This is needed to show progress bars."
+    progbar = raise_cant_find_library_function("tqdm", extra_msg)
+    continuous_progbar = raise_cant_find_library_function("tqdm", extra_msg)

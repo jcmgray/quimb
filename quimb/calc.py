@@ -47,6 +47,9 @@ from .solve.base_solver import (
     norm,
     seigvals,
 )
+from .solve.mpi_spawner import (
+    mfn_multiply_slepc_spawn,
+)
 from .gen.operators import sig
 from .gen.states import (
     basis_vec,
@@ -66,6 +69,34 @@ def expm(a, herm=True):
     else:
         evals, evecs = eigsys(a)
         return dot_dense(evecs, ldmul(np.exp(evals), evecs.H))
+
+
+_EXPM_MULTIPLY_METHODS = {
+    'SCIPY': spla.expm_multiply,
+    'SLEPC': functools.partial(mfn_multiply_slepc_spawn, func='exp'),
+}
+
+
+def expm_multiply(mat, vec, backend="AUTO", **kwargs):
+    """Compute the action of ``expm(mat)`` on ``vec``.
+
+    Parameters
+    ----------
+        mat : matrix-like
+            Matrix to exponentiate.
+        vec : vector-like
+            Vector to act with exponential of matrix on.
+        backend : {'AUTO', 'SCIPY', 'SLEPC'}, optional
+            Which backend to use.
+        **kwargs
+            Supplied to backend function.
+
+    Returns
+    -------
+        out : vector
+            Result of ``expm(mat) @ vec``.
+    """
+    return _EXPM_MULTIPLY_METHODS[backend.upper()](mat, vec, **kwargs)
 
 
 def sqrtm(a, herm=True):

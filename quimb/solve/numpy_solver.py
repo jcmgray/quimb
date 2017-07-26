@@ -4,6 +4,35 @@ import numpy.linalg as nla
 from ..accel import issparse
 
 
+def eigsys_numpy(a, sort=True, isherm=True):
+    """Numpy based dense eigensolve.
+    """
+    if isherm:
+        evals, evecs = nla.eigh(a)
+    else:
+        evals, evecs = nla.eig(a)
+
+    if sort:
+        sortinds = np.argsort(evals)
+        return evals[sortinds], np.asmatrix(evecs[:, sortinds])
+
+    return evals, np.asmatrix(evecs)
+
+
+def eigvals_numpy(a, sort=True, isherm=True):
+    """Numpy based dense eigenvalues.
+    """
+    if isherm:
+        evals = nla.eigvalsh(a)
+    else:
+        evals = nla.eigvals(a)
+
+    if sort:
+        return np.sort(evals)
+
+    return evals
+
+
 def sort_inds(a, method, sigma=None):
     """Return the sorting inds of a list
 
@@ -48,7 +77,7 @@ def sort_inds(a, method, sigma=None):
     return np.argsort(_SORT_FUNCS[method.upper()](a))
 
 
-def numpy_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
+def seigsys_numpy(a, k=6, which=None, return_vecs=True, sigma=None,
                   isherm=True, sort=True, **kwargs):
     """Partial eigen-decomposition using numpy's dense linear algebra.
 

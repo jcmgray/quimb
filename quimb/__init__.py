@@ -127,6 +127,7 @@ from .gen.rand import (
 from .calc import (
     expm,
     sqrtm,
+    expm_multiply,
     fidelity,
     purify,
     entropy,
@@ -261,6 +262,7 @@ __all__ = [
     # Calc ------------------------------------------------------------------ #
     'expm',
     'sqrtm',
+    'expm_multiply',
     'fidelity',
     'purify',
     'entropy',

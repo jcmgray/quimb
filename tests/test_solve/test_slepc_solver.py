@@ -12,6 +12,9 @@ from quimb import (
     ldmul,
     rand_matrix,
     rand_herm,
+    # rand_pos,
+    rand_ket,
+    eigsys,
     seigsys,
     overlap,
     eye,
@@ -22,8 +25,10 @@ if SLEPC4PY_FOUND:
     from quimb.solve.slepc_solver import (
         slepc_seigsys,
         slepc_svds,
-        convert_to_petsc,
-        new_petsc_vec)
+        convert_mat_to_petsc,
+        new_petsc_vec,
+        slepc_mfn_multiply,
+    )
 
 
 slepc4py_notfound_msg = "No SLEPc4py installation"
@@ -51,23 +56,23 @@ def bigsparsemat():
 class TestConvertToPETScConversion:
     def test_csr(self):
         a = rand_matrix(2, sparse=True, density=0.5)
-        b = convert_to_petsc(a)
+        b = convert_mat_to_petsc(a)
         assert b.getType() == 'seqaij'
 
     def test_bsr(self):
         a = sp.kron(rand_matrix(2), eye(2, sparse=True), format='bsr')
-        b = convert_to_petsc(a)
+        b = convert_mat_to_petsc(a)
         assert b.getType() == 'seqbaij'
         assert b.getBlockSize() == 2
 
     # def test_vec(self):
     #     a = np.array([1, 2, 3, 4])
-    #     b = convert_to_petsc(a)
+    #     b = convert_mat_to_petsc(a)
     #     assert_allclose(b.getArray(), a)
 
     def test_dense(self):
         a = rand_matrix(3)
-        b = convert_to_petsc(a)
+        b = convert_mat_to_petsc(a)
         assert b.getType() == 'seqdense'
 
     def test_new_petsc_vector(self):
@@ -132,3 +137,32 @@ class TestSlepcSvds:
         assert vk.shape == qk.shape
         assert_allclose(abs(uk.H @ pk), eye(10), atol=1e-6)
         assert_allclose(abs(qk @ vk.H), eye(10), atol=1e-6)
+
+
+@slepc4py_test
+class TestSlepcMfnMultiply:
+
+    def test_exp_sparse(self):
+
+        a = rand_herm(100, sparse=True, density=0.1)
+        k = rand_ket(100)
+
+        out = slepc_mfn_multiply(a, k)
+
+        al, av = eigsys(a.A)
+        expected = av @ np.diag(np.exp(al)) @ av.conj().T @ k
+
+        assert_allclose(out, expected)
+
+    # def test_sqrt_sparse(self):
+
+    #     a = rand_pos(100, sparse=True, density=0.1)
+    #     k = rand_ket(100)
+
+    #     out = slepc_mfn_multiply(a, k, func='sqrt', isherm=True)
+
+    #     al, av = eigsys(a.A)
+    #     al[al < 0] = 0.0  # very small neg values spoil sqrt
+    #     expected = av @ np.diag(np.sqrt(al)) @ av.conj().T @ k
+
+    #     assert_allclose(out, expected)

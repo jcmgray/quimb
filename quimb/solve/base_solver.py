@@ -8,77 +8,141 @@ algebraic order by default.
 # TODO: test non-herm
 # TODO: elemental?
 # TODO: fix slepc svds instability
-
+import functools
 import numpy as np
 import numpy.linalg as nla
 
+from ..utils import raise_cant_find_library_function
+
 from ..accel import issparse, vdot
-from .numpy_solver import numpy_seigsys, numpy_svds
-from .scipy_solver import scipy_seigsys, scipy_svds
-from . import SLEPC4PY_FOUND
+
+from .numpy_solver import (
+    eigsys_numpy,
+    eigvals_numpy,
+    seigsys_numpy,
+    numpy_svds,
+)
+
+from .scipy_solver import seigsys_scipy, scipy_svds
+
+from . import SLEPC4PY_FOUND, SCALAPY_FOUND
+
 if SLEPC4PY_FOUND:
-    from .mpi_spawner import slepc_mpi_seigsys
+    from .mpi_spawner import seigsys_slepc_spawn
     from .slepc_solver import slepc_svds
+else:
+    seigsys_slepc_spawn = raise_cant_find_library_function("slepc4py")
+
+if SCALAPY_FOUND:
+    from .mpi_spawner import eigsys_scalapy_spawn
+else:
+    eigsys_scalapy_spawn = raise_cant_find_library_function("scalapy")
 
 
 # --------------------------------------------------------------------------- #
 #                        Full eigendecomposition                              #
 # --------------------------------------------------------------------------- #
 
-def eigsys(a, sort=True, isherm=True):
-    """Find all eigenpairs of dense, hermitian matrix.
+_EIGSYS_METHODS = {
+    'NUMPY': eigsys_numpy,
+    'SCALAPY': eigsys_scalapy_spawn,
+}
+
+
+def eigsys(a, sort=True, isherm=True, backend='NUMPY', **kwargs):
+    """Find all eigenpairs of a dense matrix.
 
     Parameters
     ----------
-        a: hermitian matrix
-        sort: whether to sort the eigenpairs in ascending eigenvalue order
+        a : matrix-like
+            The matrix of decompose.
+        sort : bool, optional
+            Whether to sort the eigenpairs in ascending eigenvalue order.
+        isherm : bool, optional
+            Whether the matrix is assumed to be hermitian or not.
+        backend : {'numpy', 'scalapy'}, optional
+            Which backend to use to solve the system.
+        **kwargs
+            Supplied to the backend function.
 
     Returns
     -------
-        evals: array of eigenvalues
-        evecs: corresponding eigenvectors as columns of matrix
+        evals : 1d-array
+            Eigenvalues.
+        evecs : np.matrix
+            Corresponding eigenvectors as columns of matrix, such that
+            ``evecs @ evals @ evecs.H == a``.
     """
-    evals, evecs = nla.eigh(a) if isherm else nla.eig(a)
-    if sort:
-        sortinds = np.argsort(evals)
-        return evals[sortinds], np.asmatrix(evecs[:, sortinds])
-    return evals, np.asmatrix(evecs)
+    fn = _EIGSYS_METHODS[backend.upper()]
+    return fn(a, sort=sort, isherm=isherm, **kwargs)
 
 
-def eigvals(a, sort=True, isherm=True):
-    """Find all eigenvalues of dense, hermitian matrix
+_EIGVALS_METHODS = {
+    'NUMPY': eigvals_numpy,
+    'SCALAPY': functools.partial(eigsys_scalapy_spawn, return_vecs=False)
+}
+
+
+def eigvals(a, sort=True, isherm=True, backend='numpy', **kwargs):
+    """Find all eigenvalues of dense matrix.
 
     Parameters
     ----------
-        a: hermitian matrix
-        sort: whether to sort the eigenvalues in ascending order
+        a : matrix-like
+            The matrix to find eigenvalues of.
+        sort : bool, optional
+            Whether to sort the eigenvalues in ascending order.
+        isherm : bool, optional
+            Whether the matrix is assumed to be hermitian or not.
+        backend : {'numpy', 'scalapy'}, optional
+            Which backend to use to solve the system.
+        **kwargs
+            Supplied to the backend function.
 
     Returns
     -------
-        evals: array of eigenvalues
+        evals : 1d-array
+            Eigenvalues.
     """
-    evals = nla.eigvalsh(a) if isherm else nla.eigvals(a)
-    return np.sort(evals) if sort else evals
+    fn = _EIGVALS_METHODS[backend.upper()]
+    return fn(a, sort=sort, isherm=isherm, **kwargs)
 
 
-def eigvecs(a, sort=True, isherm=True):
-    """Find all eigenvectors of dense, hermitian matrix
+def eigvecs(a, sort=True, isherm=True, backend='numpy', **kwargs):
+    """Find all eigenvectors of a dense matrix.
 
     Parameters
     ----------
-        a: hermitian matrix
-        sort: whether to sort the eigenvectors in ascending eigenvalue order
+        a : matrix-like
+            The matrix of decompose.
+        sort : bool, optional
+            Whether to sort the eigenpairs in ascending eigenvalue order.
+        isherm : bool, optional
+            Whether the matrix is assumed to be hermitian or not.
+        backend : {'numpy', 'scalapy'}, optional
+            Which backend to use to solve the system.
+        **kwargs
+            Supplied to the backend function.
 
     Returns
     -------
-        evecs: eigenvectors as columns of matrix
+        evecs : np.matrix
+            Eigenvectors as columns of matrix.
     """
-    return eigsys(a, sort=sort, isherm=isherm)[1]
+    return eigsys(a, sort=sort, isherm=isherm, backend=backend, **kwargs)[1]
 
 
 # --------------------------------------------------------------------------- #
 #                          Partial eigendecomposition                         #
 # --------------------------------------------------------------------------- #
+
+
+_SEIGSYS_METHODS = {
+    'NUMPY': seigsys_numpy,
+    'DENSE': seigsys_numpy,
+    'SCIPY': seigsys_scipy,
+    'SLEPC': seigsys_slepc_spawn,
+}
 
 
 def _choose_backend(a, k, int_eps=False):
@@ -117,15 +181,13 @@ def seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
         'isherm': isherm,
         'ncv': ncv,
         'sort': sort}
+
     # Choose backend to perform the decompostion
     bkd = backend.upper()
     if bkd == 'AUTO':
         bkd = _choose_backend(a, k, sigma is not None)
-    seig_func = (slepc_mpi_seigsys if bkd == 'SLEPC' else
-                 numpy_seigsys if bkd in {'NUMPY', 'DENSE'} else
-                 scipy_seigsys if bkd == 'SCIPY' else
-                 None)
-    return seig_func(a, **settings, **kwargs)
+
+    return _SEIGSYS_METHODS[bkd](a, **settings, **kwargs)
 
 
 def seigvals(a, k=6, **kwargs):

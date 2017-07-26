@@ -9,7 +9,7 @@ from quimb import (
 )
 from quimb.solve.numpy_solver import (
     sort_inds,
-    numpy_seigsys,
+    seigsys_numpy,
 )
 
 
@@ -49,14 +49,14 @@ class TestNumpySeigsys:
                        ("sm", 3, [0.1, 2, -3], None),
                        ("tm", 3, [-3, 2, 4], 2.9)])
     def test_evals(self, ham1, which, k, ls, sigma):
-        lk = numpy_seigsys(ham1, k=k, which=which, return_vecs=False,
+        lk = seigsys_numpy(ham1, k=k, which=which, return_vecs=False,
                            sigma=sigma, sort=False)
         assert_allclose(lk, ls)
 
     @mark.parametrize("which, k, sigma",
                       [("sa", 5, None)])
     def test_evecs(self, ham1, which, k, sigma):
-        lk, vk = numpy_seigsys(ham1, k=k, which=which, return_vecs=True,
+        lk, vk = seigsys_numpy(ham1, k=k, which=which, return_vecs=True,
                                sigma=sigma, sort=False)
         assert isinstance(vk, np.matrix)
         assert_allclose(dot(vk, ldmul(lk, vk.H)), ham1)
