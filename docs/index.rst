@@ -17,6 +17,20 @@ Contents:
    solving systems
    dynamics and evolution
 
+Fulle module contents:
+
+.. autosummary::
+    :toctree: _autosummary
+
+    quimb
+        quimb.accel
+        quimb.core
+        quimb.calc
+        quimb.evo
+        quimb.utils
+        quimb.solve
+
+
 Indices and tables
 ==================
 
