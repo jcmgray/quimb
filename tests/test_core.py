@@ -30,7 +30,7 @@ from quimb import (
     dim_compress,
     eye,
     eyepad,
-    perm_pad,
+    perm_eyepad,
     permute,
     partial_trace,
     chop,
@@ -473,10 +473,10 @@ class TestEyepad:
         assert x.format == default if stype is None else stype
 
 
-class TestPermPad:
+class TestPermEyepad:
     def test_dop_spread(self):
         a = rand_rho(4)
-        b = perm_pad(a, [2, 2, 2], [0, 2])
+        b = perm_eyepad(a, [2, 2, 2], [0, 2])
         c = (a & eye(2)).A.reshape([2, 2, 2, 2, 2, 2])  \
                           .transpose([0, 2, 1, 3, 5, 4])  \
                           .reshape([8, 8])
@@ -484,11 +484,19 @@ class TestPermPad:
 
     def test_dop_reverse(self):
         a = rand_rho(4)
-        b = perm_pad(a, np.array([2, 2, 2]), [2, 0])
+        b = perm_eyepad(a, np.array([2, 2, 2]), [2, 0])
         c = (a & eye(2)).A.reshape([2, 2, 2, 2, 2, 2])  \
                           .transpose([1, 2, 0, 4, 5, 3])  \
                           .reshape([8, 8])
         assert_allclose(b, c)
+
+    def test_dop_reverse_sparse(self):
+        a = rand_rho(4, sparse=True, density=0.5)
+        b = perm_eyepad(a, np.array([2, 2, 2]), [2, 0])
+        c = (a & eye(2)).A.reshape([2, 2, 2, 2, 2, 2])  \
+                          .transpose([1, 2, 0, 4, 5, 3])  \
+                          .reshape([8, 8])
+        assert_allclose(b.A, c)
 
 
 class TestPermute:

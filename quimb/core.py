@@ -23,7 +23,6 @@ from .accel import (
     prod,
     dot_dense,
     kron,
-    kronpow,
     isvec
 )
 
@@ -145,6 +144,10 @@ def quimbify(data, qtype=None, normalized=False, chopped=False,
     if sparse_input and sparse_output and stype is None:
         stype = data.format
 
+    if (qtype is None) and (np.ndim(data) == 1):
+        # assume quimbify simple list -> ket
+        qtype = 'ket'
+
     if qtype is not None:
         # Must be dense to reshape
         data = np.asmatrix(data.A if sparse_input else data, dtype=complex)
@@ -240,7 +243,7 @@ def trace(mat):
     Returns
     -------
         x : float
-            Trace of `mat`
+            Trace of ``mat``
     """
     return _trace_sparse(mat) if issparse(mat) else _trace_dense(mat)
 
@@ -357,7 +360,7 @@ _dim_mapper_methods = {(1, False, False): _dim_map_1d,
 def dim_map(dims, coos, cyclic=False, trim=False):
     """Maps multi-dimensional coordinates and indices to flat arrays in a
     regular way. Wraps or deletes coordinates beyond the system size
-    depending on parameters `cyclic` and `trim`.
+    depending on parameters ``cyclic`` and ``trim``.
 
     Parameters
     ----------
@@ -375,7 +378,7 @@ def dim_map(dims, coos, cyclic=False, trim=False):
     Returns
     -------
         flat_dims : tuple
-            Flattened version of `dims`.
+            Flattened version of ``dims``.
         inds : tuple
             Indices corresponding to the original coordinates.
 
@@ -423,7 +426,7 @@ def dim_map(dims, coos, cyclic=False, trim=False):
 
 @jit(nopython=True)
 def _dim_compressor(dims, inds):  # pragma: no cover
-    """Helper function for `dim_compress` that does the heavy lifting.
+    """Helper function for ``dim_compress`` that does the heavy lifting.
     """
     blocksize_id = blocksize_op = 1
     autoplace_count = 0
@@ -459,7 +462,7 @@ def _dim_compressor(dims, inds):  # pragma: no cover
 
 def dim_compress(dims, inds):
     """Take some dimensions and target indices and compress both, i.e.
-    merge adjacent dimensions that are both either in `dims` or not. For
+    merge adjacent dimensions that are both either in ``dims`` or not. For
     example, if tensoring an operator onto a single site, with many sites
     the identity, treat these as single large identities.
 
@@ -514,18 +517,21 @@ def eyepad(ops, dims, inds, sparse=None, stype=None, coo_build=False):
     ----------
         ops : matrix-like or tuple of matrix-like
             Operator(s) to place into the tensor space. If more than one, these
-            are cyclically placed at each of the `dims` specified by `inds`.
+            are cyclically placed at each of the ``dims`` specified by
+            ``inds``.
         dims : tuple of int
             Dimensions of tensor space, use -1 to ignore dimension matching.
         inds : tuple of int
-            Indices of the dimenions to place operators on.
+            Indices of the dimenions to place operators on. If multiple
+            operators are specified, ``inds[1]`` corresponds to ``ops[1]`` and
+            so on.
         sparse : bool, optional
             Whether to construct the new operator in sparse form.
         stype : str, optional
             If sparse, which format to use for the output.
         coo_build : bool, optional
-            Whether to build the intermediary matrices using the `'coo'` format
-            - usually the quickest for many tensor products.
+            Whether to build the intermediary matrices using the ``'coo'``
+            format - usually the quickest for many tensor products.
 
     Returns
     -------
@@ -595,35 +601,6 @@ def eyepad(ops, dims, inds, sparse=None, stype=None, coo_build=False):
 
 
 @matrixify
-def perm_pad(op, dims, inds):
-    # TODO: multiple ops
-    # TODO: coo map, coo compress
-    # TODO: sparse??
-    # TODO: use permute
-    """Advanced tensor placement of operators that allows arbitrary ordering
-    such as reversal and interleaving of identities.
-    """
-    dims, inds = np.asarray(dims), np.asarray(inds)
-    n = len(dims)  # number of subsytems
-    sz = prod(dims)  # Total size of system
-    dims_in = dims[inds]
-    sz_in = prod(dims_in)  # total size of operator space
-    sz_out = sz // sz_in  # total size of identity space
-    sz_op = op.shape[0]  # size of individual operator
-    n_op = int(math.log(sz_in, sz_op))  # number of individual operators
-    b = np.asarray(kronpow(op, n_op) & eye(sz_out))
-    inds_out, dims_out = zip(*((i, x) for i, x in enumerate(dims)
-                               if i not in inds))  # inverse of inds
-    p = [*inds, *inds_out]  # current order of system
-    dims_cur = (*dims_in, *dims_out)
-    ip = np.empty(n, dtype=np.int)
-    ip[p] = np.arange(n)  # inverse permutation
-    return b.reshape((*dims_cur, *dims_cur))  \
-            .transpose((*ip, *(ip + n)))  \
-            .reshape((sz, sz))
-
-
-@matrixify
 def _permute_dense(p, dims, perm):
     """Permute the subsytems of a dense matrix.
     """
@@ -659,25 +636,65 @@ def _permute_sparse(a, dims, perm):
     return dot(perm_mat, a)
 
 
-def permute(a, dims, perm):
-    """Permute the subsytems of state a.
+def permute(p, dims, perm):
+    """Permute the subsytems of state ``p``.
 
     Parameters
     ----------
-        p: state, vector or operator
-        dims: dimensions of the system
-        perm: new order of indexes range(len(dims))
+        p : vector or matrix
+            State or operator.
+        dims : tuple of int
+            Internal dimensions of the system.
+        perm : tuple of int
+            New order of indexes ``range(len(dims))``.
 
     Returns
     -------
-        pp: permuted state, vector or operator"""
-    if issparse(a):
-        return _permute_sparse(a, dims, perm)
-    return _permute_dense(a, dims, perm)
+        pp : vector or matrix
+            Permuted state or operator.
+    """
+    if issparse(p):
+        return _permute_sparse(p, dims, perm)
+    return _permute_dense(p, dims, perm)
+
+
+def perm_eyepad(op, dims, inds, **kwargs):
+    # TODO: multiple ops
+    # TODO: coo map, coo compress
+    # TODO: sparse, stype, coo_build?
+    """Advanced tensor placement of operators that allows arbitrary ordering
+    such as reversal and interleaving of identities.
+    """
+    dims, inds = np.asarray(dims), np.asarray(inds)
+
+    # total number of subsytems and size
+    n = len(dims)
+    sz = prod(dims)
+
+    # dimensions of space where op should be placed, and its total size
+    dims_in = dims[inds]
+    sz_in = prod(dims_in)
+
+    # construct pre-permuted full operator
+    b = eyepad(op, [sz_in, sz // sz_in], 0, **kwargs)
+
+    # inverse of inds
+    inds_out, dims_out = zip(
+        *((i, x) for i, x in enumerate(dims) if i not in inds))
+
+    # current order and dimensions of system
+    p = [*inds, *inds_out]
+    dims_cur = (*dims_in, *dims_out)
+
+    # find inverse permutation
+    ip = np.empty(n, dtype=np.int)
+    ip[p] = np.arange(n)
+
+    return permute(b, dims_cur, ip)
 
 
 def _ind_complement(inds, n):
-    """Return the indices below `n` not contained in `inds`.
+    """Return the indices below ``n`` not contained in ``inds``.
     """
     return tuple(i for i in range(n) if i not in inds)
 
@@ -748,7 +765,7 @@ def _partial_trace_dense(p, dims, coo_keep):
 
 
 def _trace_lose(p, dims, coo_lose):
-    """Simple partial trace where the single subsytem at `coo_lose`
+    """Simple partial trace where the single subsytem at ``coo_lose``
     is traced out.
     """
     p = p if isop(p) else dot(p, p.H)
@@ -771,7 +788,7 @@ def _trace_lose(p, dims, coo_lose):
 
 def _trace_keep(p, dims, coo_keep):
     """Simple partial trace where the single subsytem
-    at `coo_keep` is kept.
+    at ``coo_keep`` is kept.
     """
     p = p if isop(p) else dot(p, p.H)
     dims = np.asarray(dims)
@@ -814,7 +831,7 @@ def partial_trace(p, dims, keep):
     Parameters
     ----------
         p : ket or density matrix
-            State to perform partial trace on.
+            State to perform partial trace on - can be sparse.
         dims : tuple of int
             List of subsystem dimensions.
         keep : int or tuple of int

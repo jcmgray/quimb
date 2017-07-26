@@ -48,6 +48,9 @@ def sig(xyz, dim=2, **kwargs):
     return op
 
 
+pauli = sig
+
+
 @lru_cache(maxsize=8)
 def controlled(s, sparse=False):
     """Construct a controlled pauli gate for two qubits.

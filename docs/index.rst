@@ -11,8 +11,11 @@ Contents:
 .. toctree::
    :maxdepth: 2
 
-   readme
-
+   installation
+   states
+   calculating quantities
+   solving systems
+   dynamics and evolution
 
 Indices and tables
 ==================
