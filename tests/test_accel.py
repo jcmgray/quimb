@@ -22,8 +22,6 @@ from quimb.accel import (
     ldmul,
     rdmul,
     outer,
-    kron,
-    kronpow,
     explt,
     make_immutable,
     matrixify,
@@ -34,6 +32,7 @@ from quimb.accel import (
     kron_dense_big,
     kron_sparse,
 )
+from quimb.core import kron, kronpow
 
 
 # ----------------------------- FIXTURES ------------------------------------ #

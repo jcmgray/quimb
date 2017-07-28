@@ -1,4 +1,6 @@
 """Accelerated helper numerical functions.
+
+These in general do not need to be called directly.
 """
 # TODO: merge kron, eyepad --> tensor
 
@@ -97,19 +99,19 @@ def zeroify(fn, tol=1e-14):
 # --------------------------------------------------------------------------- #
 
 def isket(qob):
-    """Checks if ``qob`` is in ket form, i.e. a matrix column.
+    """Checks if ``qob`` is in ket form -- a matrix column.
     """
     return qob.shape[0] > 1 and qob.shape[1] == 1  # Column vector check
 
 
 def isbra(qob):
-    """Checks if ``qob`` is in bra form, i.e. a matrix row.
+    """Checks if ``qob`` is in bra form -- a matrix row.
     """
     return qob.shape[0] == 1 and qob.shape[1] > 1  # Row vector check
 
 
 def isop(qob):
-    """Checks if ``qob`` is an operator, i.e. a square matrix.
+    """Checks if ``qob`` is an operator -- a square matrix.
     """
     m, n = qob.shape
     return m == n and m > 1  # Square matrix check
@@ -485,72 +487,6 @@ def kron_dispatch(a, b, stype=None):
         return kron_dense_big(a, b)
     else:
         return kron_dense(a, b)
-
-
-def kron(*ops, stype=None, coo_build=False):
-    """Tensor (kronecker) product of variable number of arguments.
-
-    Parameters
-    ----------
-    *ops : sequence of vectors or matrices
-        Objects to be tensored together.
-    stype : str, optional
-        Desired output format if resultant object is sparse. Should be one
-        of {``'csr'``, ``'bsr'``, ``'coo'``, ``'csc'``}. If ``None``, infer
-        from input matrices.
-    coo_build : bool, optional
-        Whether to force sparse construction to use the ``'coo'``
-        format (only for sparse matrices in the first place.).
-
-    Returns
-    -------
-    dense or sparse vector or matrix
-        Tensor product of ``*ops``.
-
-    Notes
-    -----
-     1. The product is performed as ``(a & (b & (c & ...)))``
-    """
-    opts = {"stype": "coo" if coo_build or stype == "coo" else None}
-
-    def inner_kron(ops, _l):
-        if _l == 1:
-            return ops[0]
-        a, b = ops[0], inner_kron(ops[1:], _l - 1)
-        return kron_dispatch(a, b, **opts)
-
-    x = inner_kron(ops, len(ops))
-
-    if stype is not None:
-        return x.asformat(stype)
-    if coo_build or (issparse(x) and x.format == "coo"):
-        return x.asformat("csr")
-    return x
-
-
-def kronpow(a, p, stype=None, coo_build=False):
-    """Returns `a` tensored with itself `p` times
-
-    Equivalent to ``reduce(lambda x, y: x & y, [a] * p)``.
-
-    Parameters
-    ----------
-    a : dense or sparse matrix or vector
-        Object to tensor power.
-    p : int
-        Tensor power.
-    stype : str, optional
-        Desired output format if resultant object is sparse. Should be one
-        of {``'csr'``, ``'bsr'``, ``'coo'``, ``'csc'``}.
-    coo_build : bool, optional
-        Whether to force sparse construction to use the ``'coo'``
-        format (only for sparse matrices in the first place.).
-
-    Returns
-    -------
-    dense or sparse matrix or vector
-    """
-    return kron(*(a for _ in range(p)), stype=stype, coo_build=coo_build)
 
 
 # --------------------------------------------------------------------------- #

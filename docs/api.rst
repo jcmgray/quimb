@@ -80,8 +80,6 @@ Accel
     kron_dense_big
     kron_sparse
     kron_dispatch
-    kron
-    kronpow
 
 
 Core
@@ -100,6 +98,8 @@ Core
     sparse_matrix
     identity
     eye
+    kron
+    kronpow
     eyepad
     perm_eyepad
     permute
