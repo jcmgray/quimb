@@ -1,3 +1,6 @@
+"""Functions for generating quantum operators.
+"""
+
 from functools import lru_cache
 
 from cytoolz import isiterable, concat

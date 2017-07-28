@@ -1,4 +1,5 @@
-"""
+"""Easy and efficient time evolutions.
+
 Contains an evolution class, QuEvo to easily and efficiently manage time
 evolution of quantum states according to the Schrodinger equation,
 and related functions.

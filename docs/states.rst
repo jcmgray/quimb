@@ -5,8 +5,8 @@ States
 Basic Representation
 ====================
 
-States and operators in :mod:`quimb` are simply dense numpy or sparse scipy complex matrices.
-The :func:`quimb.quimbify` function (aliased to :func:`qu`) can convert between the various representations.
+States and operators in :py:mod:`quimb` are simply dense numpy or sparse scipy complex matrices.
+The :py:func:`~quimb.core.quimbify` function (aliased to :py:func:`~quimb.core.qu`) can convert between the various representations.
 
 .. code:: python
 
@@ -21,7 +21,7 @@ Kets are column vectors, i.e. with shape ``(d, 1)``:
             [ 0.+2.j],
             [-3.+0.j]])
 
-Use the ``normalized=True`` option for a normalized state.
+The ``normalized=True`` option can be used to ensure a normalized output.
 
 Bras are row vectors, i.e. with shape ``(1, d)``:
 
@@ -47,16 +47,34 @@ Which can also be sparse:
     <3x3 sparse matrix of type '<class 'numpy.complex128'>'
             with 9 stored elements in Compressed Sparse Row format>
 
-The sparse format can be specified with the ``stype`` keyword. The partial function versions of each of the above are also available: :func:`ket()`, :func:`bra()`, :func:`dop()` and :func:`sparse()`. If a simple 1d-list is supplied and no ``qtype`` is given, ``'ket'`` is assumed.
+The sparse format can be specified with the ``stype`` keyword. The partial function versions of each of the above are also available:
 
-@ and .H
+* :py:func:`~quimb.core.ket()`
+* :py:func:`~quimb.core.bra()`
+* :py:func:`~quimb.core.dop()`
+* :py:func:`~quimb.core.sparse()`
+
+
+.. note::
+
+    If a simple 1d-list is supplied and no ``qtype`` is given, ``'ket'`` is assumed.
+
+
+Basic Operations
+================
+
+dagger = .H
+conj
+trans
+@ and
+
 
 Composing States
 ================
 
 There are a number of ways to combine states and operators, i.e. tensoring them together.
 
-Functional form using :func:`quimb.kron`:
+Functional form using :py:func:`~quimb.accel.kron`:
 
 .. code:: python
 
@@ -70,7 +88,7 @@ This can also be done using the ``&`` overload on numpy and scipy matrices:
     >>> psi1 & psi2 & psi3
     ...
 
-Often one wants to sandwich an operator with many identities, :func:`quimb.eyepad` can be used for this:
+Often one wants to sandwich an operator with many identities, :py:func:`~quimb.core.eyepad` can be used for this:
 
 .. code:: python
 
@@ -80,7 +98,7 @@ Often one wants to sandwich an operator with many identities, :func:`quimb.eyepa
     >>> IIIXXIIIII.shape
     (1024, 1024)
 
-For more advanced tensor constructions, such as reversing and interleaving identities within operators :func:`quimb.perm_eyepad` can be used:
+For more advanced tensor constructions, such as reversing and interleaving identities within operators :py:func:`~quimb.core.perm_eyepad` can be used:
 
 .. code:: python
 

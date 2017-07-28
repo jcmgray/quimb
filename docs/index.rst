@@ -6,7 +6,8 @@
 Welcome to quimb's documentation!
 =================================
 
-Contents:
+
+.. rubric:: Guides:
 
 .. toctree::
    :maxdepth: 2
@@ -17,18 +18,13 @@ Contents:
    solving systems
    dynamics and evolution
 
-Fulle module contents:
 
-.. autosummary::
-    :toctree: _autosummary
+.. rubric:: Complete list of functions:
 
-    quimb
-        quimb.accel
-        quimb.core
-        quimb.calc
-        quimb.evo
-        quimb.utils
-        quimb.solve
+.. toctree::
+   :maxdepth: 1
+
+   api
 
 
 Indices and tables

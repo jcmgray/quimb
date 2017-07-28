@@ -31,5 +31,6 @@ The optional dependencies mainly allow high performance, distributed eigen-solvi
 
 For distributed, dense eigensolving (but probably slower than ``numpy``) the ``scalapy`` package interfaces with ``scalapack``.
 
-    * `scalapack <https://>`_
-    * `scalapy <https://>`_
+    * `scalapack <http://www.netlib.org/scalapack/>`_
+    * `scalapy <https://github.com/jrs65/scalapy>`_
+

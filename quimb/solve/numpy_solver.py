@@ -1,3 +1,6 @@
+"""Numpy base linear algebra.
+"""
+
 import numpy as np
 import numpy.linalg as nla
 

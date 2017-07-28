@@ -1,4 +1,5 @@
-""" Functions for generating random quantum objects and states. """
+"""Functions for generating random quantum objects and states.
+"""
 
 # TODO: Test density -------------------------------------------------------- #
 # TODO: make sure eigen spectrum is correct ... ----------------------------- #

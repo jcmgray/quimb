@@ -1,5 +1,5 @@
 """
-Functions for generating quantum objects.
+Functions for generating quantum states.
 """
 # TODO: Graph states, cluster states, multidimensional
 
