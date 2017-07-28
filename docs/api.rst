@@ -37,11 +37,57 @@ Modules
     quimb.solve.mpi_spawner
 
 
-Core Functions
-==============
+Accel
+-----
+
+.. currentmodule:: quimb.accel
+.. autosummary::
+    :toctree: _autosummary
+
+    prod
+    make_immutable
+    matrixify
+    realify
+    zeroify
+    isket
+    isbra
+    isop
+    isvec
+    issparse
+    isherm
+    mul_dense
+    mul
+    dot_dense
+    dot_csr_matvec
+    par_dot_csr_matvec
+    dot_sparse
+    dot
+    vdot
+    rdot
+    reshape_for_ldmul
+    l_diag_dot_dense
+    l_diag_dot_sparse
+    ldmul
+    reshape_for_rdmul
+    r_diag_dot_dense
+    r_diag_dot_sparse
+    rdmul
+    reshape_for_outer
+    outer
+    explt
+    reshape_for_kron
+    kron_dense
+    kron_dense_big
+    kron_sparse
+    kron_dispatch
+    kron
+    kronpow
+
+
+Core
+----
 
 .. currentmodule:: quimb.core
-
 .. autosummary::
     :toctree: _autosummary
 
@@ -69,3 +115,18 @@ Core Functions
     dim_compress
     dim_map
     infer_size
+
+Evo
+---
+
+.. currentmodule:: quimb.evo
+
+.. autosummary::
+    :toctree: _autosummary
+
+    QuEvo
+    schrodinger_eq_ket
+    schrodinger_eq_dop
+    schrodinger_eq_dop_vectorized
+    lindblad_eq
+    lindblad_eq_vectorized
