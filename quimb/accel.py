@@ -1,7 +1,6 @@
 """Accelerated helper numerical functions.
 """
 # TODO: merge kron, eyepad --> tensor
-# TODO: finish idot with rpn
 
 import cmath
 import functools
@@ -38,12 +37,12 @@ def prod(xs):
 
 
 def make_immutable(mat):
-    """Make matrix read only, in place.
+    """Make matrix read only, in-place.
 
     Parameters
     ----------
-        mat : sparse or dense array
-            Matrix to make immutable.
+    mat : sparse or dense matrix
+        Matrix to make immutable.
     """
     if issparse(mat):
         mat.data.flags.writeable = False
@@ -124,7 +123,7 @@ def isvec(qob):
 
 
 def issparse(qob):
-    """Checks ``qob`` is sparse.
+    """Checks if ``qob`` is sparse.
     """
     return isinstance(qob, sp.spmatrix)
 
@@ -134,8 +133,12 @@ def isherm(qob):
 
     Parameters
     ----------
-        qob : dense or sparse matrix
-            Matrix to check.
+    qob : dense or sparse matrix
+        Matrix to check.
+
+    Returns
+    -------
+    bool
     """
     return ((qob != qob.H).nnz == 0 if issparse(qob) else
             np.allclose(qob, qob.H))
@@ -148,7 +151,7 @@ def isherm(qob):
 @matrixify
 @accel
 def mul_dense(x, y):  # pragma: no cover
-    """Numba-accelerated element-wise multiplication of two dense matrices
+    """Numba-accelerated element-wise multiplication of two dense matrices.
     """
     return x * y
 
@@ -159,13 +162,15 @@ def mul(x, y):
 
     Parameters
     ----------
-        x : dense or sparse matrix
-        y : dense or sparse matrix
+    x : dense or sparse matrix
+        First array.
+    y : dense or sparse matrix
+        Second array.
 
     Returns
     -------
-        dense or sparse matrix
-            Element wise product of ``x`` and ``y``.
+    dense or sparse matrix
+        Element wise product of ``x`` and ``y``.
     """
     # TODO: add sparse, dense -> sparse w/ broadcasting
     if issparse(x):
@@ -202,22 +207,22 @@ def par_dot_csr_matvec(mat, vec, nthreads=_NUM_THREAD_WORKERS):
 
     Parameters
     ----------
-        mat : sparse csr-matrix
-            Matrix.
-        vec : dense vector
-            Vector.
-        nthreads : int, optional
-            Perform in parallel with this many threads.
+    mat : sparse csr-matrix
+        Matrix.
+    vec : dense vector
+        Vector.
+    nthreads : int, optional
+        Perform in parallel with this many threads.
 
     Returns
     -------
-        dense vector
-            Result of ``mat @ vec``.
+    dense vector
+        Result of ``mat @ vec``.
 
     Notes
-    =====
-        The main bottleneck for sparse matrix vector product is memory access,
-        as such this function is only beneficial for very large matrices.
+    -----
+    The main bottleneck for sparse matrix vector product is memory access,
+    as such this function is only beneficial for very large matrices.
     """
     vec_shape = vec.shape
     vec_matrix = True if isinstance(vec, np.matrix) else False
@@ -267,13 +272,15 @@ def dot(a, b):
 
     Parameters
     ----------
-        a : dense or sparse matrix
-        b : dense or sparse matrix
+    a : dense or sparse matrix
+        First array.
+    b : dense or sparse matrix
+        Second array.
 
     Returns
     -------
-        dense or sparse matrix
-            Dot product of ``a`` and ``b``.
+    dense or sparse matrix
+        Dot product of ``a`` and ``b``.
     """
     if issparse(a) or issparse(b):
         return dot_sparse(a, b)
@@ -284,6 +291,8 @@ def dot(a, b):
 @accel
 def vdot(a, b):  # pragma: no cover
     """Accelerated 'Hermitian' inner product of two vectors.
+
+    In other words, ``b`` here will be conjugated by the function.
     """
     return np.vdot(a.reshape(-1), b.reshape(-1))
 
@@ -292,6 +301,8 @@ def vdot(a, b):  # pragma: no cover
 @accel
 def rdot(a, b):  # pragma: no cover
     """Real dot product of two dense vectors.
+
+    Here, ``b`` will *not* be conjugated before the inner product.
     """
     a, b = a.reshape((1, -1)), b.reshape((-1, 1))
     return (a @ b)[0, 0]
@@ -307,32 +318,38 @@ def reshape_for_ldmul(vec):  # pragma: no cover
 
 
 @matrixify
-def l_diag_dot_dense(vec, mat):
-    d, vec = reshape_for_ldmul(vec)
-    return evaluate("vec * mat") if d > 500 else mul_dense(vec, mat)
+def l_diag_dot_dense(diag, mat):
+    """Dot product of digonal matrix (with only diagonal supplied) and dense
+    matrix.
+    """
+    d, diag = reshape_for_ldmul(diag)
+    return evaluate("diag * mat") if d > 500 else mul_dense(diag, mat)
 
 
-def l_diag_dot_sparse(vec, mat):
-    return sp.diags(vec) @ mat
+def l_diag_dot_sparse(diag, mat):
+    """Dot product of digonal matrix (with only diagonal supplied) and sparse
+    matrix.
+    """
+    return sp.diags(diag) @ mat
 
 
 def ldmul(diag, mat):
-    """Accelerated left diagonal multiplication using numexpr,
-    faster than numpy for n > ~ 500.
+    """Accelerated left diagonal multiplication using numexp.
 
-    Equivalent to ``numpy.diag(diag) @ mat``.
+    Equivalent to ``numpy.diag(diag) @ mat``, but faster than numpy
+    for n > ~ 500.
 
     Parameters
     ----------
-        diag : vector or 1d-array
-            Vector representing the diagonal of a matrix.
-        mat : dense or sparse matrix
-            A normal (non-diagonal) matrix.
+    diag : vector or 1d-array
+        Vector representing the diagonal of a matrix.
+    mat : dense or sparse matrix
+        A normal (non-diagonal) matrix.
 
     Returns
     -------
-        mat : dense or sparse matrix
-            Dot product of the matrix whose diagonal is ``diag`` and ``mat``.
+    dense or sparse matrix
+        Dot product of the matrix whose diagonal is ``diag`` and ``mat``.
     """
     if issparse(mat):
         return l_diag_dot_sparse(diag, mat)
@@ -349,32 +366,38 @@ def reshape_for_rdmul(vec):  # pragma: no cover
 
 
 @matrixify
-def r_diag_dot_dense(mat, vec):
-    d, vec = reshape_for_rdmul(vec)
-    return evaluate("mat * vec") if d > 500 else mul_dense(mat, vec)
+def r_diag_dot_dense(mat, diag):
+    """Dot product of dense matrix and digonal matrix (with only diagonal
+    supplied).
+    """
+    d, diag = reshape_for_rdmul(diag)
+    return evaluate("mat * diag") if d > 500 else mul_dense(mat, diag)
 
 
-def r_diag_dot_sparse(mat, vec):
-    return mat @ sp.diags(vec)
+def r_diag_dot_sparse(mat, diag):
+    """Dot product of sparse matrix and digonal matrix (with only diagonal
+    supplied).
+    """
+    return mat @ sp.diags(diag)
 
 
 def rdmul(mat, diag):
-    """Accelerated left diagonal multiplication using numexpr,
-    faster than numpy for n > ~ 500.
+    """Accelerated left diagonal multiplication using numexpr.
 
-    Equivalent to ``mat @ numpy.diag(diag)``.
+    Equivalent to ``mat @ numpy.diag(diag)``, but faster than numpy
+    for n > ~ 500.
 
     Parameters
     ----------
-        mat : dense or sparse matrix
-            A normal (non-diagonal) matrix.
-        diag : vector or 1d-array
-            Vector representing the diagonal of a matrix.
+    mat : dense or sparse matrix
+        A normal (non-diagonal) matrix.
+    diag : vector or 1d-array
+        Vector representing the diagonal of a matrix.
 
     Returns
     -------
-        mat : dense or sparse matrix
-            Dot product of ``mat`` and the matrix whose diagonal is ``diag``.
+    dense or sparse matrix
+        Dot product of ``mat`` and the matrix whose diagonal is ``diag``.
     """
     if issparse(mat):
         return r_diag_dot_sparse(mat, diag)
@@ -383,7 +406,7 @@ def rdmul(mat, diag):
 
 @accel
 def reshape_for_outer(a, b):  # pragma: no cover
-    """Reshape two vectors for an outer product
+    """Reshape two vectors for an outer product.
     """
     d = a.size
     return d, a.reshape(d, 1), b.reshape(1, d)
@@ -409,6 +432,10 @@ def explt(l, t):  # pragma: no cover
 
 @accel
 def reshape_for_kron(a, b):  # pragma: no cover
+    """Reshape two arrays for a 'broadcast' tensor (kronecker) product.
+
+    Returns the expected new dimensions as well.
+    """
     m, n = a.shape
     p, q = b.shape
     a = a.reshape((m, 1, n, 1))
@@ -417,21 +444,27 @@ def reshape_for_kron(a, b):  # pragma: no cover
 
 
 @matrixify
-@jit(nopython=True)
+@accel
 def kron_dense(a, b):  # pragma: no cover
+    """Tensor (kronecker) product of two dense arrays.
+    """
     a, b, mp, nq = reshape_for_kron(a, b)
     return (a * b).reshape((mp, nq))
 
 
 @matrixify
 def kron_dense_big(a, b):
+    """Parallelized (using numpexpr) tensor (kronecker) product for two
+    dense arrays.
+    """
     a, b, mp, nq = reshape_for_kron(a, b)
     return evaluate('a * b').reshape((mp, nq))
 
 
 def kron_sparse(a, b, stype=None):
-    """Sparse tensor product, output format can be specified or will be
-    automatically determined.
+    """Sparse tensor (kronecker) product,
+
+    Output format can be specified or will be automatically determined.
     """
     if stype is None:
         stype = ("bsr" if isinstance(b, np.ndarray) or b.format == 'bsr' else
@@ -443,6 +476,9 @@ def kron_sparse(a, b, stype=None):
 
 
 def kron_dispatch(a, b, stype=None):
+    """Kronecker product of two arrays, dispatched based on dense/sparse and
+    also size of product.
+    """
     if issparse(a) or issparse(b):
         return kron_sparse(a, b, stype=stype)
     elif a.size * b.size > 23000:  # pragma: no cover
@@ -452,28 +488,28 @@ def kron_dispatch(a, b, stype=None):
 
 
 def kron(*ops, stype=None, coo_build=False):
-    """Tensor product of variable number of arguments.
+    """Tensor (kronecker) product of variable number of arguments.
 
     Parameters
     ----------
-        *ops : iterable of vectors or matrices
-            Objects to be tensored together/
-        stype : str, optional
-            Desired output format if resultant object is sparse. Should be one
-            of {``'csr'``, ``'bsr'``, ``'coo'``, ``'csc'``}. If ``None``, infer
-            from input matrices.
-        coo_build : bool, optional
-            Whether to force sparse construction to use the ``'coo'``
-            format (only for sparse matrices in the first place.).
+    *ops : sequence of vectors or matrices
+        Objects to be tensored together.
+    stype : str, optional
+        Desired output format if resultant object is sparse. Should be one
+        of {``'csr'``, ``'bsr'``, ``'coo'``, ``'csc'``}. If ``None``, infer
+        from input matrices.
+    coo_build : bool, optional
+        Whether to force sparse construction to use the ``'coo'``
+        format (only for sparse matrices in the first place.).
 
     Returns
     -------
-        dense or sparse vector or matrix
-            Tensor product of ``*ops``.
+    dense or sparse vector or matrix
+        Tensor product of ``*ops``.
 
     Notes
-    =====
-         1. The product is performed as ``(a & (b & (c & ...)))``
+    -----
+     1. The product is performed as ``(a & (b & (c & ...)))``
     """
     opts = {"stype": "coo" if coo_build or stype == "coo" else None}
 
@@ -495,23 +531,24 @@ def kron(*ops, stype=None, coo_build=False):
 def kronpow(a, p, stype=None, coo_build=False):
     """Returns `a` tensored with itself `p` times
 
+    Equivalent to ``reduce(lambda x, y: x & y, [a] * p)``.
+
     Parameters
     ----------
-        a : dense or sparse matrix or vector
-            Object to tensor power.
-        p : int
-            Tensor power.
-        stype : str, optional
-            Desired output format if resultant object is sparse. Should be one
-            of {``'csr'``, ``'bsr'``, ``'coo'``, ``'csc'``}.
-        coo_build : bool, optional
-            Whether to force sparse construction to use the ``'coo'``
-            format (only for sparse matrices in the first place.).
+    a : dense or sparse matrix or vector
+        Object to tensor power.
+    p : int
+        Tensor power.
+    stype : str, optional
+        Desired output format if resultant object is sparse. Should be one
+        of {``'csr'``, ``'bsr'``, ``'coo'``, ``'csc'``}.
+    coo_build : bool, optional
+        Whether to force sparse construction to use the ``'coo'``
+        format (only for sparse matrices in the first place.).
 
     Returns
     -------
-        dense or sparse matrix or vector
-            Equivalent to ``reduce(lambda x, y: x & y, [a] * p)``.
+    dense or sparse matrix or vector
     """
     return kron(*(a for _ in range(p)), stype=stype, coo_build=coo_build)
 
