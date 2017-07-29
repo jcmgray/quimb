@@ -15,7 +15,6 @@ if [ ! -d "$INSTALL_DIR/petsc" ]; then
   # ------------------------------ #
   git clone --depth 1 https://bitbucket.org/petsc/petsc.git
   git clone --depth 1 https://bitbucket.org/slepc/slepc.git
-  git clone --depth 1 https://bitbucket.org/mpi4py/mpi4py.git
   git clone --depth 1 https://bitbucket.org/petsc/petsc4py.git
   git clone --depth 1 https://bitbucket.org/slepc/slepc4py.git
 
@@ -29,7 +28,6 @@ if [ ! -d "$INSTALL_DIR/petsc" ]; then
   cd $PETSC_DIR
   git pull
   python2 ./configure \
-    --download-openmpi \
     --with-scalar-type=complex \
     --download-mumps \
     --download-scalapack \
@@ -54,11 +52,6 @@ if [ ! -d "$INSTALL_DIR/petsc" ]; then
   # ----------------------- #
   # Install python packages #
   # ----------------------- #
-  cd $INSTALL_DIR/mpi4py
-  export PATH="$PATH:$INSTALL_DIR/petsc/arch-linux2-c-release/bin"
-  git pull
-  pip install --no-deps .
-
   cd $INSTALL_DIR/petsc4py
   git pull
   pip install --no-deps .
