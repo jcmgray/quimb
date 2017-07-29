@@ -4,7 +4,7 @@ set -ex
 export LOCAL=${LOCAL:-"$HOME/local"}
 
 # Check for pre existing mpi installation
-if [ -e $LOCAL/lib/libmpi.so ]l then
+if [ -e $LOCAL/lib/libmpi.so ]; then
     echo "mpi already installed"
     exit 0
 fi
