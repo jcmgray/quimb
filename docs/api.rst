@@ -37,6 +37,9 @@ Modules
     quimb.solve.mpi_spawner
 
 
+Functions
+=========
+
 Accel
 -----
 

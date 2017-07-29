@@ -310,8 +310,6 @@ texinfo_documents = [
 # texinfo_no_detailmenu = False
 
 
-import quimb
-
 intersphinx_mapping = {
     'python': ('https://docs.python.org/3.6/', None),
     'numpy': ('http://docs.scipy.org/doc/numpy/', None),

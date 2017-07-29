@@ -104,4 +104,4 @@ For more advanced tensor constructions, such as reversing and interleaving ident
 
     >>> dims = [2] * 3
     >>> XZ = pauli('X') & pauli('Z')
-    >>> ZIX = perm_eyepad(op, dims, [2, 0])  # now acts with Z on first spin, and X on 3rd
+    >>> ZIX = perm_eyepad(op, dims, inds=[2, 0])  # now acts with Z on first spin, and X on 3rd
