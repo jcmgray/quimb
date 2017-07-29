@@ -120,7 +120,6 @@ Evo
 ---
 
 .. currentmodule:: quimb.evo
-
 .. autosummary::
     :toctree: _autosummary
 

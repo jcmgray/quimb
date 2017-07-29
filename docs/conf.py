@@ -40,6 +40,7 @@ extensions = [
     'sphinx.ext.doctest',
     'sphinx.ext.viewcode',
     'sphinx.ext.napoleon',
+    'sphinx.ext.intersphinx',
     # 'numpydoc'
 ]
 
@@ -310,3 +311,9 @@ texinfo_documents = [
 
 
 import quimb
+
+intersphinx_mapping = {
+    'python': ('https://docs.python.org/3.6/', None),
+    'numpy': ('http://docs.scipy.org/doc/numpy/', None),
+    'scipy': ('http://docs.scipy.org/doc/scipy/reference', None),
+}

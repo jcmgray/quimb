@@ -197,23 +197,32 @@ def _calc_evo_eq(isdop, issparse, isopen=False):
 class QuEvo(object):
     """A class for evolving quantum systems according to Schrodinger equation.
 
+    The evolution can be performed in a number of ways:
+
+        - diagonalise the Hamiltonian (or use already diagonalised system).
+        - integrate the complex ODE, that is, the Schrodinger equation, using
+          scipy. Here either a mid- or high-order Dormand-Prince adaptive
+          time stepping scheme is used (see
+          :class:`scipy.integrate.complex_ode`).
+
     Parameters
     ----------
     p0 : quantum state
         Inital state, either vector or operator. If vector, converted to ket.
     ham : matrix-like, or tuple (1d array, matrix-like).
         Governing Hamiltonian, if tuple then assumed to contain
-        (eigvals, eigvecs) of presolved system.
+        ``(eigvals, eigvecs)`` of presolved system.
     solve : bool, optional
-        Whether to immediately solve hamiltonian.
+        Whether to immediately solve Hamiltonian.
     t0 : float, optional
-        Initial time (i.e. time of state p0), defaults to zero.
+        Initial time (i.e. time of state ``p0``), defaults to zero.
     small_step : bool, optional
         If integrating, whether to use a low or high order
         integrator to give naturally small or large steps.
     compute : callable, or dict of callable, optional
         Function(s) to compute on the state at each time step, called
         with args (t, pt). If supplied with:
+
             * single callable : ``QuEvo.results`` will contain the results as a
               list,
             * dict of callables : ``QuEvo.results`` will contain the results as
@@ -234,12 +243,12 @@ class QuEvo(object):
         """
         super(QuEvo, self).__init__()
 
-        self.p0 = qu(p0)
+        self._p0 = qu(p0)
         self._t = self.t0 = t0
-        self.isdop = isop(self.p0)  # Density operator evolution?
-        self.d = p0.shape[0]  # Hilbert space dimension
+        self._isdop = isop(self._p0)  # Density operator evolution?
+        self._d = p0.shape[0]  # Hilbert space dimension
 
-        self.progbar = progbar
+        self._progbar = progbar
         self._setup_callback(compute)
 
         # Hamiltonian
@@ -268,7 +277,7 @@ class QuEvo(object):
             #   back to 'quantum' form
             @functools.wraps(fn)
             def int_step_callback(t, y):
-                pt = np.asmatrix(y.reshape(self.d, -1))
+                pt = np.asmatrix(y.reshape(self._d, -1))
                 for k, v in fn.items():
                     self._results[k].append(v(t, pt))
 
@@ -282,7 +291,7 @@ class QuEvo(object):
 
             @functools.wraps(fn)
             def int_step_callback(t, y):
-                pt = np.asmatrix(y.reshape(self.d, -1))
+                pt = np.asmatrix(y.reshape(self._d, -1))
                 self._results.append(fn(t, pt))
 
         self._slv_step_callback = slv_step_callback
@@ -293,45 +302,45 @@ class QuEvo(object):
         energy eigenbasis for quick evolution later.
         """
         try:  # See if already set from tuple
-            self.evals, self.evecs = ham
+            self._evals, self._evecs = ham
         except ValueError:
-            self.evals, self.evecs = eigsys(ham.A)
+            self._evals, self._evecs = eigsys(ham.A)
 
         # Find initial state in energy eigenbasis at t0
-        self.pe0 = (dot(self.evecs.H, dot(self.p0,
-                                          self.evecs)) if self.isdop else
-                    dot(self.evecs.H, self.p0))
-        self._pt = self.p0  # Current state (start with same as initial)
+        self.pe0 = (dot(self._evecs.H, dot(self._p0,
+                                           self._evecs)) if self._isdop else
+                    dot(self._evecs.H, self._p0))
+        self._pt = self._p0  # Current state (start with same as initial)
 
         # Set update method conditional on type of state
-        self._update_method = (self._update_to_solved_dop if self.isdop else
+        self._update_method = (self._update_to_solved_dop if self._isdop else
                                self._update_to_solved_ket)
-        self.solved = True
+        self._solved = True
 
     def _start_integrator(self, ham, small_step):
         """Initialize a stepping integrator.
         """
-        self.sparse_ham = issparse(ham)
+        self._sparse_ham = issparse(ham)
 
         # set complex ode with governing equation
-        evo_eq = _calc_evo_eq(self.isdop, self.sparse_ham)
-        self.stepper = complex_ode(evo_eq(ham))
+        evo_eq = _calc_evo_eq(self._isdop, self._sparse_ham)
+        self._stepper = complex_ode(evo_eq(ham))
 
         # 5th order stpper or 8th order stepper
         int_mthd, step_fct = ('dopri5', 150) if small_step else ('dop853', 50)
         first_step = norm(ham, 'f') / step_fct
 
-        self.stepper.set_integrator(int_mthd, nsteps=0, first_step=first_step)
+        self._stepper.set_integrator(int_mthd, nsteps=0, first_step=first_step)
 
         # Set step_callback to be evaluated with args (t, y) at each step
         if self._int_step_callback is not None:
-            self.stepper.set_solout(self._int_step_callback)
+            self._stepper.set_solout(self._int_step_callback)
 
-        self.stepper.set_initial_value(self.p0.A.reshape(-1), self.t0)
+        self._stepper.set_initial_value(self._p0.A.reshape(-1), self.t0)
 
         # assign the correct update_to method
         self._update_method = self._update_to_integrate
-        self.solved = False
+        self._solved = False
 
     # Methods for updating the simulation ----------------------------------- #
 
@@ -340,8 +349,8 @@ class QuEvo(object):
         wavefunction to time `t`.
         """
         self._t = t
-        lt = explt(self.evals, t - self.t0)
-        self._pt = dot_dense(self.evecs, ldmul(lt, self.pe0))
+        lt = explt(self._evals, t - self.t0)
+        self._pt = dot_dense(self._evecs, ldmul(lt, self.pe0))
 
         # compute any callbacks into ->> self._results
         if self._slv_step_callback is not None:
@@ -352,9 +361,9 @@ class QuEvo(object):
         density operator to time `t`.
         """
         self._t = t
-        lt = explt(self.evals, t - self.t0)
+        lt = explt(self._evals, t - self.t0)
         lvpvl = rdmul(ldmul(lt, self.pe0), lt.conj())
-        self._pt = dot_dense(self.evecs, dot_dense(lvpvl, self.evecs.H))
+        self._pt = dot_dense(self._evecs, dot_dense(lvpvl, self._evecs.H))
 
         # compute any callbacks into ->> self._results
         if self._slv_step_callback is not None:
@@ -363,7 +372,7 @@ class QuEvo(object):
     def _update_to_integrate(self, t):
         """Update simulation consisting of unsolved hamiltonian.
         """
-        self.stepper.integrate(t)
+        self._stepper.integrate(t)
 
     def update_to(self, t):
         """Update the simulation to time ``t`` using relevant method.
@@ -373,7 +382,7 @@ class QuEvo(object):
         t : float
             Time to update the evolution to.
         """
-        if self.progbar and hasattr(self, 'stepper'):
+        if self._progbar and hasattr(self, '_stepper'):
             with continuous_progbar(self.t, t) as pbar:
                 # def here for the pbar closure
                 def pbar_compute(fn):
@@ -385,7 +394,7 @@ class QuEvo(object):
 
                     return wrapped_fn
 
-                self.stepper.set_solout(
+                self._stepper.set_solout(
                     pbar_compute(self._int_step_callback))
                 self._update_method(t)
         else:
@@ -412,7 +421,7 @@ class QuEvo(object):
         times are needed they should be added as a callback, e.g.
         ``compute['t'] = lambda t, _: return t``.
         """
-        if self.progbar:
+        if self._progbar:
             ts = progbar(ts)
 
         for t in ts:
@@ -425,15 +434,15 @@ class QuEvo(object):
     def t(self):
         """float : Current time of simulation.
         """
-        return (self._t if self.solved else
-                self.stepper.t)
+        return (self._t if self._solved else
+                self._stepper.t)
 
     @property
     def pt(self):
         """quantum state : State of the system at the current time (t).
         """
-        return (self._pt if self.solved else
-                np.asmatrix(self.stepper.y.reshape(self.d, -1)))
+        return (self._pt if self._solved else
+                np.asmatrix(self._stepper.y.reshape(self._d, -1)))
 
     @property
     def results(self):

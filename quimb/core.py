@@ -304,7 +304,7 @@ def kron(*ops, stype=None, coo_build=False):
 
     Parameters
     ----------
-    *ops : sequence of vectors or matrices
+    ops : sequence of vectors or matrices
         Objects to be tensored together.
     stype : str, optional
         Desired output format if resultant object is sparse. Should be one

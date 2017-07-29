@@ -1,5 +1,4 @@
-"""
-Functions for more advanced calculations of quantities and properties of
+"""Functions for more advanced calculations of quantities and properties of
 quantum objects.
 """
 # TODO: move matrix functions to solve, add slepc versions ****************** #
