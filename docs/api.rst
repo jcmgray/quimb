@@ -119,6 +119,35 @@ Core
     dim_map
     infer_size
 
+
+Calc
+----
+.. currentmodule:: quimb.calc
+.. autosummary::
+    :toctree: _autosummary
+
+    expm
+    expm_multiply
+    sqrtm
+    fidelity
+    purify
+    entropy
+    mutual_information
+    partial_transpose
+    negativity
+    logarithmic_negativity
+    concurrence
+    one_way_classical_information
+    quantum_discord
+    trace_distance
+    decomp
+    correlation
+    pauli_correlations
+    ent_cross_matrix
+    is_degenerate
+    page_entropy
+
+
 Evo
 ---
 
