@@ -239,7 +239,7 @@ class TestQuEvo:
         if presolve:
             l, v = eigsys(ham)
             sim = QuEvo(p0, (l, v))
-            assert sim.solved
+            assert sim._solved
         else:
             sim = QuEvo(p0, ham, solve=True)
         sim.update_to(tm)
