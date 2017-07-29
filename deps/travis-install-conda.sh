@@ -17,7 +17,7 @@ if [ ! -d "$HOME/conda/bin" ]; then
   conda install pyyaml
   conda update -q conda
   conda info -a
-  conda env create --file $DIR/requirements-py35.yml
+  conda env create --file $DIR/requirements-py3.yml
   source activate test-environment
 # ~~~ cached install ~~~ #
 else
