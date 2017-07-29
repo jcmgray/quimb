@@ -25,6 +25,10 @@ setup(
             'sphinx',
             'sphinx_rtd_theme',
         ],
+        'advanced_solvers': [
+            'slepc4py',
+            'scalapy',
+        ]
     },
     classifiers=[
         'Development Status :: 3 - Alpha',
