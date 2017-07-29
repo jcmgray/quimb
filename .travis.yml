@@ -33,8 +33,9 @@ before_install:
   - bash deps/travis-install-conda.sh
   - export PATH="$HOME/conda/bin:$PATH"
   - source activate test-environment
-  - bash deps/travis-install-openmpi.sh
   - export PATH="$HOME/local/bin:$PATH"
+  - export LD_LIBRARY_PATH="$HOME/local/lib:$LD_LIBRARY_PATH"
+  - bash deps/travis-install-openmpi.sh
   - bash deps/travis-install-slepc4py.sh
 
 install:
