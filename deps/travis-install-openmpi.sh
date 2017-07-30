@@ -11,7 +11,7 @@ fi
 
 # setup the source locations etc
 SRC_DIR=${SRC_DIR:-"$LOCAL/../src"}
-OPENMPI_VER=${OPENMPI_VER:-"openmpi-2.0.3"}
+OPENMPI_VER=${OPENMPI_VER:-"openmpi-2.1.1"}
 MPI4PY_REPO=${MPI4PY_REPO:-"https://bitbucket.org/mpi4py/mpi4py.git"}
 
 # make folders
@@ -30,7 +30,7 @@ make install
 
 # install python package
 cd $SRC_DIR
-git clone $MPI4PY_REPO --depth=1
+git clone $MPI4PY_REPO
 cd $SRC_DIR/mpi4py
 python setup.py build
 python setup.py install

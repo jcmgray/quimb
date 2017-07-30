@@ -54,6 +54,7 @@ if [ ! -d "$INSTALL_DIR/petsc" ]; then
   # ----------------------- #
   cd $INSTALL_DIR/petsc4py
   git pull
+  git reset --hard bacc506818f483153a74ce81e84708e259a5f47c
   python setup.py build
   python setup.py install
 
