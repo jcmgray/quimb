@@ -147,6 +147,33 @@ Calc
     is_degenerate
     page_entropy
 
+Gen.states
+----------
+
+.. currentmodule:: quimb.gen.states
+.. autosummary::
+    :toctree: _autosummary
+
+    basis_vec
+    up
+    down
+    plus
+    minus
+    yplus
+    yminus
+    bloch_state
+    bell_state
+    singlet
+    thermal_state
+    neel_state
+    singlet_pairs
+    werner_state
+    ghz_state
+    w_state
+    levi_civita
+    perm_state
+    graph_state_1d
+
 
 Evo
 ---
