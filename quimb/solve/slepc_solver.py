@@ -535,9 +535,9 @@ def slepc_mfn_multiply(mat, vec,
     mfn = SLEPc.MFN().create()
     mfn.setOperator(mat)
     mfn.setType(type_map[MFNType.upper()])
-    fn = mfn.getFN()
-    fn.setType(func_map[fn.upper()])
-    fn.setScale(1.0, 1.0)
+    mfn_fn = mfn.getFN()
+    mfn_fn.setType(func_map[fn.upper()])
+    mfn_fn.setScale(1.0, 1.0)
     mfn.setFromOptions()
 
     # 'solve' / perform the matrix function
