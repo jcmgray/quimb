@@ -4,7 +4,7 @@ import importlib
 
 
 def find_library(x):
-    """Check if library `x` is installed.
+    """Check if library is installed.
     """
     return importlib.util.find_spec(x) is not None
 
@@ -34,21 +34,22 @@ class _ctqdm(tqdm):
     """A continuous version of tqdm, so that it can
     be updated with a float within some pre-given
     range, rather than a number of steps.
+
+    Parameters
+    ----------
+    args : (stop) or (start, stop)
+        Stopping point (and starting point if
+        len(args) == 2) of window within which
+        to evaluate progress.
+    total : int
+        The number of steps to represent the
+        continuous progress with.
+    kwargs
+        Supplied to tqdm.tqdm
     """
 
     def __init__(self, *args, total=100, **kwargs):
         """
-        Parameters
-        ----------
-            *args : (stop) or (start, stop)
-                Stopping point (and starting point if
-                len(args) == 2) of window within which
-                to evaluate progress.
-            total : int
-                The number of steps to represent the
-                continuous progress with.
-            **kwargs
-                Supplied to tqdm.tqdm
         """
         super(_ctqdm, self).__init__(total=total, unit="%", **kwargs)
 
@@ -65,9 +66,8 @@ class _ctqdm(tqdm):
 
         Parameters
         ----------
-            x :  float
-                Current position within the range
-                [self.start, self.stop]
+        x : float
+            Current position within the range [self.start, self.stop].
         """
         num_update = int(
             (self.total + 1) * (x - self.start) / self.range - self.step
