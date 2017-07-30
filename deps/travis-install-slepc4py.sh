@@ -54,11 +54,13 @@ if [ ! -d "$INSTALL_DIR/petsc" ]; then
   # ----------------------- #
   cd $INSTALL_DIR/petsc4py
   git pull
-  pip install --no-deps .
+  python setup.py build
+  python setup.py install
 
   cd $INSTALL_DIR/slepc4py
   git pull
-  pip install --no-deps .
+  python setup.py build
+  python setup.py install
 else
   echo 'Using cached petsc_and_slepc directory.';
 fi

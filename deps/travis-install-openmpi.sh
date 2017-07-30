@@ -11,7 +11,7 @@ fi
 
 # setup the source locations etc
 SRC_DIR=${SRC_DIR:-"$LOCAL/../src"}
-OPENMPI_VER=${OPENMPI_VER:-"openmpi-2.1.1"}
+OPENMPI_VER=${OPENMPI_VER:-"openmpi-2.0.3"}
 MPI4PY_REPO=${MPI4PY_REPO:-"https://bitbucket.org/mpi4py/mpi4py.git"}
 
 # make folders
