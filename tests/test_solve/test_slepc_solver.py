@@ -159,7 +159,7 @@ class TestSlepcMfnMultiply:
     #     a = rand_pos(100, sparse=True, density=0.1)
     #     k = rand_ket(100)
 
-    #     out = slepc_mfn_multiply(a, k, fn='sqrt', isherm=True)
+    #     out = slepc_mfn_multiply(a, k, fntype='sqrt', isherm=True)
 
     #     al, av = eigsys(a.A)
     #     al[al < 0] = 0.0  # very small neg values spoil sqrt

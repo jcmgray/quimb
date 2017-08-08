@@ -80,7 +80,7 @@ def expm(a, herm=True):
 
 _EXPM_MULTIPLY_METHODS = {
     'SCIPY': spla.expm_multiply,
-    'SLEPC': functools.partial(mfn_multiply_slepc_spawn, fn='exp'),
+    'SLEPC': functools.partial(mfn_multiply_slepc_spawn, fntype='exp'),
 }
 
 
