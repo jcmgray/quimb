@@ -6,13 +6,13 @@ These in general do not need to be called directly.
 
 import cmath
 import functools
-import threading
 import operator
 
 import numpy as np
 import scipy.sparse as sp
 from numba import jit, vectorize
 from numexpr import evaluate
+from cytoolz import partition_all
 
 import os
 for env_var in ['QUIMB_NUM_THREAD_WORKERS',
@@ -30,6 +30,82 @@ if not _NUM_THREAD_WORKERS_SET:
 
 
 accel = functools.partial(jit, nopython=True, cache=False)
+
+
+class CacheThreadPool(object):
+    """
+    """
+
+    def __init__(self, func):
+        self._settings = '__UNINITIALIZED__'
+        self._pool_fn = func
+
+    def __call__(self, num_threads=None):
+        # convert None to default so caches the same
+        if num_threads is None:
+            num_threads = _NUM_THREAD_WORKERS
+        # first call
+        if self._settings == '__UNINITIALIZED__':
+            self._pool = self._pool_fn(num_threads)
+            self._settings = num_threads
+        # new type of pool requested
+        elif self._settings != num_threads:
+            self._pool.shutdown()
+            self._pool = self._pool_fn(num_threads)
+            self._settings = num_threads
+        return self._pool
+
+
+@CacheThreadPool
+def get_thread_pool(num_workers):
+    from concurrent.futures import ThreadPoolExecutor
+    return ThreadPoolExecutor(num_workers)
+
+
+def par_reduce(fn, seq, nthreads=_NUM_THREAD_WORKERS):
+    """Paralell reduce.
+
+    Parameters
+    ----------
+    fn : callable
+        Two argument function to reduce with.
+    seq : sequence
+        Sequence to reduce.
+    nthreads : int, optional
+        The number of threads to reduce with in parallel.
+
+    Returns
+    -------
+    depends on ``fn`` and ``seq``.
+
+    Notes
+    -----
+    This has a several hundred microsecond overhead.
+    """
+    pool = get_thread_pool(nthreads)
+
+    def _sfn(x):
+        """Single call of `fn`, but accounts for the fact
+        that can be passed a single item, in on which
+        it should not perform the binary operation.
+        """
+        if len(x) == 1:
+            return x[0]
+        return fn(*x)
+
+    def _inner_preduce(x):
+        """Splits the sequence into pairs and possibly one
+        singlet, on each of which `fn` is performed to create
+        a new sequence.
+        """
+        if len(x) < 3:
+            return _sfn(x)
+        else:
+            paired_x = partition_all(2, x)
+            new_x = tuple(pool.map(_sfn, paired_x))
+            return _inner_preduce(new_x)
+
+    return _inner_preduce(tuple(seq))
 
 
 def prod(xs):
@@ -191,10 +267,10 @@ def dot_dense(a, b):  # pragma: no cover
 
 
 @accel(nogil=True)  # pragma: no cover
-def dot_csr_matvec(data, indptr, indices, vec, out, k1, k2):
+def dot_csr_matvec(data, indptr, indices, vec, out, k1k2):
     """Sparse csr matrix-vector dot-product, only acting on range(k1, k2).
     """
-    for i in range(k1, k2):
+    for i in range(*k1k2):
         ri = indptr[i]
         rf = indptr[i + 1]
         isum = 0.0j
@@ -241,13 +317,8 @@ def par_dot_csr_matvec(mat, vec, nthreads=_NUM_THREAD_WORKERS):
                            mat.indices,
                            np.asarray(vec).reshape(-1), out)
 
-    thrds = tuple(threading.Thread(target=fn, args=kslice)
-                  for kslice in slices)
-
-    for t in thrds:
-        t.start()
-    for t in thrds:
-        t.join()
+    pool = get_thread_pool(nthreads)
+    tuple(pool.map(fn, slices))
 
     if out.shape != vec_shape:
         out = out.reshape(*vec_shape)

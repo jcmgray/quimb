@@ -14,6 +14,7 @@ import scipy.sparse as sp
 
 from .accel import (
     accel,
+    par_reduce,
     matrixify,
     realify,
     issparse,
@@ -299,7 +300,7 @@ eye = identity
 speye = functools.partial(identity, sparse=True)
 
 
-def kron(*ops, stype=None, coo_build=False):
+def kron(*ops, stype=None, coo_build=False, parallel=False):
     """Tensor (kronecker) product of variable number of arguments.
 
     Parameters
@@ -325,13 +326,15 @@ def kron(*ops, stype=None, coo_build=False):
     """
     opts = {"stype": "coo" if coo_build or stype == "coo" else None}
 
-    def inner_kron(ops, _l):
-        if _l == 1:
-            return ops[0]
-        a, b = ops[0], inner_kron(ops[1:], _l - 1)
-        return kron_dispatch(a, b, **opts)
+    if parallel:
+        reducer = par_reduce
+    else:
+        reducer = functools.reduce
 
-    x = inner_kron(ops, len(ops))
+    x = reducer(
+        functools.partial(kron_dispatch, **opts),
+        ops,
+    )
 
     if stype is not None:
         return x.asformat(stype)
