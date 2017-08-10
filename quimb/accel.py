@@ -1,17 +1,18 @@
-"""Core accelerated numerical functions
+"""Accelerated helper numerical functions.
+
+These in general do not need to be called directly.
 """
 # TODO: merge kron, eyepad --> tensor
-# TODO: finish idot with rpn
 
 import cmath
 import functools
-import threading
 import operator
 
 import numpy as np
 import scipy.sparse as sp
 from numba import jit, vectorize
 from numexpr import evaluate
+from cytoolz import partition_all
 
 import os
 for env_var in ['QUIMB_NUM_THREAD_WORKERS',
@@ -31,14 +32,95 @@ if not _NUM_THREAD_WORKERS_SET:
 accel = functools.partial(jit, nopython=True, cache=False)
 
 
+class CacheThreadPool(object):
+    """
+    """
+
+    def __init__(self, func):
+        self._settings = '__UNINITIALIZED__'
+        self._pool_fn = func
+
+    def __call__(self, num_threads=None):
+        # convert None to default so caches the same
+        if num_threads is None:
+            num_threads = _NUM_THREAD_WORKERS
+        # first call
+        if self._settings == '__UNINITIALIZED__':
+            self._pool = self._pool_fn(num_threads)
+            self._settings = num_threads
+        # new type of pool requested
+        elif self._settings != num_threads:
+            self._pool.shutdown()
+            self._pool = self._pool_fn(num_threads)
+            self._settings = num_threads
+        return self._pool
+
+
+@CacheThreadPool
+def get_thread_pool(num_workers):
+    from concurrent.futures import ThreadPoolExecutor
+    return ThreadPoolExecutor(num_workers)
+
+
+def par_reduce(fn, seq, nthreads=_NUM_THREAD_WORKERS):
+    """Paralell reduce.
+
+    Parameters
+    ----------
+    fn : callable
+        Two argument function to reduce with.
+    seq : sequence
+        Sequence to reduce.
+    nthreads : int, optional
+        The number of threads to reduce with in parallel.
+
+    Returns
+    -------
+    depends on ``fn`` and ``seq``.
+
+    Notes
+    -----
+    This has a several hundred microsecond overhead.
+    """
+    pool = get_thread_pool(nthreads)
+
+    def _sfn(x):
+        """Single call of `fn`, but accounts for the fact
+        that can be passed a single item, in on which
+        it should not perform the binary operation.
+        """
+        if len(x) == 1:
+            return x[0]
+        return fn(*x)
+
+    def _inner_preduce(x):
+        """Splits the sequence into pairs and possibly one
+        singlet, on each of which `fn` is performed to create
+        a new sequence.
+        """
+        if len(x) < 3:
+            return _sfn(x)
+        else:
+            paired_x = partition_all(2, x)
+            new_x = tuple(pool.map(_sfn, paired_x))
+            return _inner_preduce(new_x)
+
+    return _inner_preduce(tuple(seq))
+
+
 def prod(xs):
-    """Product of an iterable.
+    """Product (as in multiplication) of an iterable.
     """
     return functools.reduce(operator.mul, xs, 1)
 
 
 def make_immutable(mat):
-    """Make sure matrix cannot be changed, for dense and sparse.
+    """Make matrix read only, in-place.
+
+    Parameters
+    ----------
+    mat : sparse or dense matrix
+        Matrix to make immutable.
     """
     if issparse(mat):
         mat.data.flags.writeable = False
@@ -57,7 +139,7 @@ def make_immutable(mat):
 # --------------------------------------------------------------------------- #
 
 def matrixify(fn):
-    """To decorate functions returning ndarrays.
+    """Decorator that wraps output as a numpy.matrix.
     """
     @functools.wraps(fn)
     def matrixified_fn(*args, **kwargs):
@@ -66,7 +148,7 @@ def matrixify(fn):
 
 
 def realify(fn, imag_tol=1.0e-12):
-    """To decorate functions that should return float for small complex.
+    """Decorator that drops ``fn``'s output imaginary part if very small.
     """
     @functools.wraps(fn)
     def realified_fn(*args, **kwargs):
@@ -79,7 +161,7 @@ def realify(fn, imag_tol=1.0e-12):
 
 
 def zeroify(fn, tol=1e-14):
-    """To decorate functions that compute close to zero answers.
+    """Decorator that rounds ``fn``'s output to zero if very small.
     """
     @functools.wraps(fn)
     def zeroified_f(*args, **kwargs):
@@ -93,39 +175,48 @@ def zeroify(fn, tol=1e-14):
 # --------------------------------------------------------------------------- #
 
 def isket(qob):
-    """Checks if matrix is in ket form, i.e. a matrix column.
+    """Checks if ``qob`` is in ket form -- a matrix column.
     """
     return qob.shape[0] > 1 and qob.shape[1] == 1  # Column vector check
 
 
 def isbra(qob):
-    """Checks if matrix is in bra form, i.e. a matrix row.
+    """Checks if ``qob`` is in bra form -- a matrix row.
     """
     return qob.shape[0] == 1 and qob.shape[1] > 1  # Row vector check
 
 
 def isop(qob):
-    """Checks if matrix is an operator, i.e. a square matrix.
+    """Checks if ``qob`` is an operator -- a square matrix.
     """
     m, n = qob.shape
     return m == n and m > 1  # Square matrix check
 
 
 def isvec(qob):
-    """Checks if object is row-vector, column-vector or one-dimensional.
+    """Checks if ``qob`` is row-vector, column-vector or one-dimensional.
     """
     shp = qob.shape
     return len(shp) == 1 or (len(shp) == 2 and (shp[0] == 1 or shp[1] == 1))
 
 
 def issparse(qob):
-    """Checks if an object is sparse.
+    """Checks if ``qob`` is sparse.
     """
     return isinstance(qob, sp.spmatrix)
 
 
 def isherm(qob):
-    """Checks if matrix is hermitian, for sparse or dense.
+    """Checks if ``qob`` is hermitian.
+
+    Parameters
+    ----------
+    qob : dense or sparse matrix
+        Matrix to check.
+
+    Returns
+    -------
+    bool
     """
     return ((qob != qob.H).nnz == 0 if issparse(qob) else
             np.allclose(qob, qob.H))
@@ -137,36 +228,49 @@ def isherm(qob):
 
 @matrixify
 @accel
-def _mul_dense(x, y):  # pragma: no cover
-    """Accelerated element-wise multiplication of two matrices
+def mul_dense(x, y):  # pragma: no cover
+    """Numba-accelerated element-wise multiplication of two dense matrices.
     """
     return x * y
 
 
 def mul(x, y):
-    """Dispatch to element wise multiplication.
+    """Element-wise multiplication, dispatched to correct dense or sparse
+    function.
+
+    Parameters
+    ----------
+    x : dense or sparse matrix
+        First array.
+    y : dense or sparse matrix
+        Second array.
+
+    Returns
+    -------
+    dense or sparse matrix
+        Element wise product of ``x`` and ``y``.
     """
     # TODO: add sparse, dense -> sparse w/ broadcasting
     if issparse(x):
         return x.multiply(y)
     elif issparse(y):
         return y.multiply(x)
-    return _mul_dense(x, y)
+    return mul_dense(x, y)
 
 
 @matrixify
 @accel
-def _dot_dense(a, b):  # pragma: no cover
+def dot_dense(a, b):  # pragma: no cover
     """Accelerated dense dot product of matrices
     """
     return a @ b
 
 
 @accel(nogil=True)  # pragma: no cover
-def _dot_csr_matvec(data, indptr, indices, vec, out, k1, k2):
+def dot_csr_matvec(data, indptr, indices, vec, out, k1k2):
     """Sparse csr matrix-vector dot-product, only acting on range(k1, k2).
     """
-    for i in range(k1, k2):
+    for i in range(*k1k2):
         ri = indptr[i]
         rf = indptr[i + 1]
         isum = 0.0j
@@ -176,8 +280,27 @@ def _dot_csr_matvec(data, indptr, indices, vec, out, k1, k2):
         out[i] = isum
 
 
-def _par_dot_csr_matvec(mat, vec, nthreads=_NUM_THREAD_WORKERS):
-    """Parallel sparse csr matrix vector dot product.
+def par_dot_csr_matvec(mat, vec, nthreads=_NUM_THREAD_WORKERS):
+    """Parallel sparse csr-matrix vector dot product.
+
+    Parameters
+    ----------
+    mat : sparse csr-matrix
+        Matrix.
+    vec : dense vector
+        Vector.
+    nthreads : int, optional
+        Perform in parallel with this many threads.
+
+    Returns
+    -------
+    dense vector
+        Result of ``mat @ vec``.
+
+    Notes
+    -----
+    The main bottleneck for sparse matrix vector product is memory access,
+    as such this function is only beneficial for very large matrices.
     """
     vec_shape = vec.shape
     vec_matrix = True if isinstance(vec, np.matrix) else False
@@ -188,19 +311,14 @@ def _par_dot_csr_matvec(mat, vec, nthreads=_NUM_THREAD_WORKERS):
     slices = tuple((i * sz_chnk, min((i + 1) * sz_chnk, sz))
                    for i in range(nthreads))
 
-    fn = functools.partial(_dot_csr_matvec,
+    fn = functools.partial(dot_csr_matvec,
                            mat.data,
                            mat.indptr,
                            mat.indices,
                            np.asarray(vec).reshape(-1), out)
 
-    thrds = tuple(threading.Thread(target=fn, args=kslice)
-                  for kslice in slices)
-
-    for t in thrds:
-        t.start()
-    for t in thrds:
-        t.join()
+    pool = get_thread_pool(nthreads)
+    tuple(pool.map(fn, slices))
 
     if out.shape != vec_shape:
         out = out.reshape(*vec_shape)
@@ -210,30 +328,44 @@ def _par_dot_csr_matvec(mat, vec, nthreads=_NUM_THREAD_WORKERS):
     return out
 
 
-def _dot_sparse(a, b):
-    """Dot product for sparse matrix, dispatching to parallel v large nnz.
+def dot_sparse(a, b):
+    """Dot product for sparse matrix, dispatching to parallel for v large nnz.
     """
     use_parallel = (issparse(a) and
                     isvec(b) and
                     a.nnz > 500000 and
                     _NUM_THREAD_WORKERS > 1)
     if use_parallel:  # pragma: no cover
-        return _par_dot_csr_matvec(a, b)
+        return par_dot_csr_matvec(a, b)
     return a @ b
 
 
 def dot(a, b):
-    """Matrix multiplication, dispatched to dense method.
+    """Matrix multiplication, dispatched to dense or sparse functions.
+
+    Parameters
+    ----------
+    a : dense or sparse matrix
+        First array.
+    b : dense or sparse matrix
+        Second array.
+
+    Returns
+    -------
+    dense or sparse matrix
+        Dot product of ``a`` and ``b``.
     """
     if issparse(a) or issparse(b):
-        return _dot_sparse(a, b)
-    return _dot_dense(a, b)
+        return dot_sparse(a, b)
+    return dot_dense(a, b)
 
 
 @realify
 @accel
 def vdot(a, b):  # pragma: no cover
     """Accelerated 'Hermitian' inner product of two vectors.
+
+    In other words, ``b`` here will be conjugated by the function.
     """
     return np.vdot(a.reshape(-1), b.reshape(-1))
 
@@ -242,13 +374,15 @@ def vdot(a, b):  # pragma: no cover
 @accel
 def rdot(a, b):  # pragma: no cover
     """Real dot product of two dense vectors.
+
+    Here, ``b`` will *not* be conjugated before the inner product.
     """
     a, b = a.reshape((1, -1)), b.reshape((-1, 1))
     return (a @ b)[0, 0]
 
 
 @accel
-def _reshape_for_ldmul(vec):  # pragma: no cover
+def reshape_for_ldmul(vec):  # pragma: no cover
     """Reshape a vector to be broadcast multiplied against a matrix in a way
     that replicates left diagonal matrix multiplication.
     """
@@ -257,35 +391,46 @@ def _reshape_for_ldmul(vec):  # pragma: no cover
 
 
 @matrixify
-def _l_diag_dot_dense(vec, mat):
-    d, vec = _reshape_for_ldmul(vec)
-    return evaluate("vec * mat") if d > 500 else _mul_dense(vec, mat)
+def l_diag_dot_dense(diag, mat):
+    """Dot product of digonal matrix (with only diagonal supplied) and dense
+    matrix.
+    """
+    d, diag = reshape_for_ldmul(diag)
+    return evaluate("diag * mat") if d > 500 else mul_dense(diag, mat)
 
 
-def _l_diag_dot_sparse(vec, mat):
-    return sp.diags(vec) @ mat
+def l_diag_dot_sparse(diag, mat):
+    """Dot product of digonal matrix (with only diagonal supplied) and sparse
+    matrix.
+    """
+    return sp.diags(diag) @ mat
 
 
-def ldmul(vec, mat):
-    """Accelerated left diagonal multiplication using numexpr,
-    faster than numpy for n > ~ 500.
+def ldmul(diag, mat):
+    """Accelerated left diagonal multiplication using numexp.
+
+    Equivalent to ``numpy.diag(diag) @ mat``, but faster than numpy
+    for n > ~ 500.
 
     Parameters
     ----------
-        vec: vector of diagonal matrix, can be array
-        mat: matrix
+    diag : vector or 1d-array
+        Vector representing the diagonal of a matrix.
+    mat : dense or sparse matrix
+        A normal (non-diagonal) matrix.
 
     Returns
     -------
-        mat: np.matrix
+    dense or sparse matrix
+        Dot product of the matrix whose diagonal is ``diag`` and ``mat``.
     """
     if issparse(mat):
-        return _l_diag_dot_sparse(vec, mat)
-    return _l_diag_dot_dense(vec, mat)
+        return l_diag_dot_sparse(diag, mat)
+    return l_diag_dot_dense(diag, mat)
 
 
 @accel
-def _reshape_for_rdmul(vec):  # pragma: no cover
+def reshape_for_rdmul(vec):  # pragma: no cover
     """Reshape a vector to be broadcast multiplied against a matrix in a way
     that replicates right diagonal matrix multiplication.
     """
@@ -294,35 +439,47 @@ def _reshape_for_rdmul(vec):  # pragma: no cover
 
 
 @matrixify
-def _r_diag_dot_dense(mat, vec):
-    d, vec = _reshape_for_rdmul(vec)
-    return evaluate("mat * vec") if d > 500 else _mul_dense(mat, vec)
+def r_diag_dot_dense(mat, diag):
+    """Dot product of dense matrix and digonal matrix (with only diagonal
+    supplied).
+    """
+    d, diag = reshape_for_rdmul(diag)
+    return evaluate("mat * diag") if d > 500 else mul_dense(mat, diag)
 
 
-def _r_diag_dot_sparse(mat, vec):
-    return mat @ sp.diags(vec)
+def r_diag_dot_sparse(mat, diag):
+    """Dot product of sparse matrix and digonal matrix (with only diagonal
+    supplied).
+    """
+    return mat @ sp.diags(diag)
 
 
-def rdmul(mat, vec):
-    """ Accelerated right diagonal multiplication using numexpr,
-    faster than numpy for n > ~ 500.
+def rdmul(mat, diag):
+    """Accelerated left diagonal multiplication using numexpr.
+
+    Equivalent to ``mat @ numpy.diag(diag)``, but faster than numpy
+    for n > ~ 500.
 
     Parameters
     ----------
-        mat: matrix
-        vec: vector of diagonal matrix, can be array
+    mat : dense or sparse matrix
+        A normal (non-diagonal) matrix.
+    diag : vector or 1d-array
+        Vector representing the diagonal of a matrix.
 
     Returns
     -------
-        mat: np.matrix """
+    dense or sparse matrix
+        Dot product of ``mat`` and the matrix whose diagonal is ``diag``.
+    """
     if issparse(mat):
-        return _r_diag_dot_sparse(mat, vec)
-    return _r_diag_dot_dense(mat, vec)
+        return r_diag_dot_sparse(mat, diag)
+    return r_diag_dot_dense(mat, diag)
 
 
 @accel
-def _reshape_for_outer(a, b):  # pragma: no cover
-    """Reshape two vectors for an outer product
+def reshape_for_outer(a, b):  # pragma: no cover
+    """Reshape two vectors for an outer product.
     """
     d = a.size
     return d, a.reshape(d, 1), b.reshape(1, d)
@@ -331,8 +488,8 @@ def _reshape_for_outer(a, b):  # pragma: no cover
 def outer(a, b):
     """Outer product between two vectors (no conjugation).
     """
-    d, a, b = _reshape_for_outer(a, b)
-    return _mul_dense(a, b) if d < 500 else np.asmatrix(evaluate('a * b'))
+    d, a, b = reshape_for_outer(a, b)
+    return mul_dense(a, b) if d < 500 else np.asmatrix(evaluate('a * b'))
 
 
 @vectorize(nopython=True)
@@ -347,7 +504,11 @@ def explt(l, t):  # pragma: no cover
 # --------------------------------------------------------------------------- #
 
 @accel
-def _reshape_for_kron(a, b):  # pragma: no cover
+def reshape_for_kron(a, b):  # pragma: no cover
+    """Reshape two arrays for a 'broadcast' tensor (kronecker) product.
+
+    Returns the expected new dimensions as well.
+    """
     m, n = a.shape
     p, q = b.shape
     a = a.reshape((m, 1, n, 1))
@@ -356,21 +517,27 @@ def _reshape_for_kron(a, b):  # pragma: no cover
 
 
 @matrixify
-@jit(nopython=True)
-def _kron_dense(a, b):  # pragma: no cover
-    a, b, mp, nq = _reshape_for_kron(a, b)
+@accel
+def kron_dense(a, b):  # pragma: no cover
+    """Tensor (kronecker) product of two dense arrays.
+    """
+    a, b, mp, nq = reshape_for_kron(a, b)
     return (a * b).reshape((mp, nq))
 
 
 @matrixify
-def _kron_dense_big(a, b):
-    a, b, mp, nq = _reshape_for_kron(a, b)
+def kron_dense_big(a, b):
+    """Parallelized (using numpexpr) tensor (kronecker) product for two
+    dense arrays.
+    """
+    a, b, mp, nq = reshape_for_kron(a, b)
     return evaluate('a * b').reshape((mp, nq))
 
 
-def _kron_sparse(a, b, stype=None):
-    """Sparse tensor product, output format can be specified or will be
-    automatically determined.
+def kron_sparse(a, b, stype=None):
+    """Sparse tensor (kronecker) product,
+
+    Output format can be specified or will be automatically determined.
     """
     if stype is None:
         stype = ("bsr" if isinstance(b, np.ndarray) or b.format == 'bsr' else
@@ -381,63 +548,25 @@ def _kron_sparse(a, b, stype=None):
     return sp.kron(a, b, format=stype)
 
 
-def _kron_dispatch(a, b, stype=None):
+def kron_dispatch(a, b, stype=None):
+    """Kronecker product of two arrays, dispatched based on dense/sparse and
+    also size of product.
+    """
     if issparse(a) or issparse(b):
-        return _kron_sparse(a, b, stype=stype)
+        return kron_sparse(a, b, stype=stype)
     elif a.size * b.size > 23000:  # pragma: no cover
-        return _kron_dense_big(a, b)
+        return kron_dense_big(a, b)
     else:
-        return _kron_dense(a, b)
-
-
-def kron(*ops, stype=None, coo_build=False):
-    """Tensor product of variable number of arguments.
-
-    Parameters
-    ----------
-        ops: objects to be tensored together
-        stype: desired output format if resultant object is sparse.
-        coo_build: whether to force sparse construction to use the 'coo'
-            format (only for sparse matrices in the first place.).
-
-    Returns
-    -------
-        operator
-
-    Notes
-    -----
-         1. The product is performed as (a * (b * (c * ...)))
-    """
-    opts = {"stype": "coo" if coo_build or stype == "coo" else None}
-
-    def _inner_kron(ops, _l):
-        if _l == 1:
-            return ops[0]
-        a, b = ops[0], _inner_kron(ops[1:], _l - 1)
-        return _kron_dispatch(a, b, **opts)
-
-    x = _inner_kron(ops, len(ops))
-
-    if stype is not None:
-        return x.asformat(stype)
-    if coo_build or (issparse(x) and x.format == "coo"):
-        return x.asformat("csr")
-    return x
-
-
-def kronpow(a, p, stype=None, coo_build=False):
-    """Returns `a` tensored with itself `p` times
-    """
-    return kron(*(a for _ in range(p)), stype=stype, coo_build=coo_build)
+        return kron_dense(a, b)
 
 
 # --------------------------------------------------------------------------- #
 # MONKEY-PATCHES                                                              #
 # --------------------------------------------------------------------------- #
 
-# Unused & symbol to tensor product
-np.matrix.__and__ = _kron_dispatch
-sp.csr_matrix.__and__ = _kron_dispatch
-sp.bsr_matrix.__and__ = _kron_dispatch
-sp.csc_matrix.__and__ = _kron_dispatch
-sp.coo_matrix.__and__ = _kron_dispatch
+# Map unused & symbol to tensor product
+np.matrix.__and__ = kron_dispatch
+sp.csr_matrix.__and__ = kron_dispatch
+sp.bsr_matrix.__and__ = kron_dispatch
+sp.csc_matrix.__and__ = kron_dispatch
+sp.coo_matrix.__and__ = kron_dispatch

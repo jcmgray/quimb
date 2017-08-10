@@ -22,18 +22,17 @@ from quimb.accel import (
     ldmul,
     rdmul,
     outer,
-    kron,
-    kronpow,
     explt,
     make_immutable,
     matrixify,
     realify,
-    _dot_sparse,
-    _par_dot_csr_matvec,
-    _kron_dense,
-    _kron_dense_big,
-    _kron_sparse,
+    dot_sparse,
+    par_dot_csr_matvec,
+    kron_dense,
+    kron_dense_big,
+    kron_sparse,
 )
+from quimb.core import kron, kronpow
 
 
 # ----------------------------- FIXTURES ------------------------------------ #
@@ -272,16 +271,16 @@ class TestDot:
         assert_allclose(cq.A, cn)
 
     def test_par_dot_csr_matvec(self, mat_s, ket_d):
-        x = _par_dot_csr_matvec(mat_s, ket_d, 2)
-        y = _dot_sparse(mat_s, ket_d)
+        x = par_dot_csr_matvec(mat_s, ket_d, 2)
+        y = dot_sparse(mat_s, ket_d)
         assert x.dtype == complex
         assert x.shape == (_TEST_SZ, 1)
         assert isinstance(x, np.matrix)
         assert_allclose(x, y)
 
     def test_par_dot_csr_matvec_Array(self, mat_s, ket_d):
-        x = _par_dot_csr_matvec(mat_s, np.asarray(ket_d).reshape(-1), 2)
-        y = _dot_sparse(mat_s, ket_d)
+        x = par_dot_csr_matvec(mat_s, np.asarray(ket_d).reshape(-1), 2)
+        y = dot_sparse(mat_s, ket_d)
         assert x.dtype == complex
         assert x.shape == (_TEST_SZ,)
         assert not isinstance(x, np.matrix)
@@ -384,7 +383,7 @@ class TestExplt:
 # --------------------------------------------------------------------------- #
 
 class TestKron:
-    @mark.parametrize("func", [_kron_dense, _kron_dense_big])
+    @mark.parametrize("func", [kron_dense, kron_dense_big])
     def test_kron_dense(self, mat_d, mat_d2, func):
         x = func(mat_d, mat_d2)
         assert mat_d.shape == (_TEST_SZ, _TEST_SZ)
@@ -407,24 +406,24 @@ class TestKron:
 
 class TestKronSparseFormats:
     def test_sparse_sparse_auto(self, mat_s):
-        c = _kron_sparse(mat_s, mat_s)
+        c = kron_sparse(mat_s, mat_s)
         assert c.format == 'csr'
 
     def test_sparse_dense_auto(self, mat_s, mat_d):
-        c = _kron_sparse(mat_s, mat_d)
+        c = kron_sparse(mat_s, mat_d)
         assert c.format == 'bsr'
 
     def test_dense_sparse_auto(self, mat_s, mat_d):
-        c = _kron_sparse(mat_d, mat_s)
+        c = kron_sparse(mat_d, mat_s)
         assert c.format == 'csr'
 
     def test_sparse_sparsennz(self, mat_s, mat_s_nnz):
-        c = _kron_sparse(mat_s, mat_s_nnz)
+        c = kron_sparse(mat_s, mat_s_nnz)
         assert c.format == 'csr'
 
     @mark.parametrize("stype", _SPARSE_FORMATS)
     def test_sparse_sparse_to_sformat(self, mat_s, stype):
-        c = _kron_sparse(mat_s, mat_s, stype=stype)
+        c = kron_sparse(mat_s, mat_s, stype=stype)
         assert c.format == stype
 
     @mark.parametrize("stype", (None,) + _SPARSE_FORMATS)

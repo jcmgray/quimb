@@ -1,7 +1,4 @@
-"""Functions for solving matrices either fully or partially.
-Note that the eigendecompositions here all assume a
-hermitian matrix and sort the eigenvalues in ascending
-algebraic order by default.
+"""Backend agnostic fFunctions for solving matrices either fully or partially.
 """
 
 # TODO: restart eigen and svd - up to tol

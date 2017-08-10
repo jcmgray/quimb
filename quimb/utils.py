@@ -4,14 +4,40 @@ import importlib
 
 
 def find_library(x):
-    """Check if library `x` is installed.
+    """Check if library is installed.
+
+    Parameters
+    ----------
+    x : str
+        Name of library
+
+    Returns
+    -------
+    bool
+        If library is available.
     """
     return importlib.util.find_spec(x) is not None
 
 
 def raise_cant_find_library_function(x, extra_msg=None):
-    """Return a simple function that flags up a missing necessary library `x`
-    when it is called.
+    """Return function to flag up a missing necessary library.
+
+    This is simplify the task of flagging optional dependencies only at the
+    point at which they are needed, and not earlier.
+
+    Parameters
+    ----------
+    x : str
+        Name of library
+    extra_msg : str, optional
+        Make the function print this message as well, for additional
+        information.
+
+    Returns
+    -------
+    callable
+        A mock function that when called, raises an import error specifying
+        the required library.
     """
 
     def function_that_will_raise(*args, **kwargs):
@@ -31,24 +57,22 @@ else:  # pragma: no cover
 
 
 class _ctqdm(tqdm):
-    """A continuous version of tqdm, so that it can
-    be updated with a float within some pre-given
-    range, rather than a number of steps.
+    """A continuous version of tqdm, so that it can be updated with a float
+    within some pre-given range, rather than a number of steps.
+
+    Parameters
+    ----------
+    args : (stop) or (start, stop)
+        Stopping point (and starting point if ``len(args) == 2``) of window
+        within which to evaluate progress.
+    total : int
+        The number of steps to represent the continuous progress with.
+    kwargs
+        Supplied to ``tqdm.tqdm``
     """
 
     def __init__(self, *args, total=100, **kwargs):
         """
-        Parameters
-        ----------
-            *args : (stop) or (start, stop)
-                Stopping point (and starting point if
-                len(args) == 2) of window within which
-                to evaluate progress.
-            total : int
-                The number of steps to represent the
-                continuous progress with.
-            **kwargs
-                Supplied to tqdm.tqdm
         """
         super(_ctqdm, self).__init__(total=total, unit="%", **kwargs)
 
@@ -65,9 +89,8 @@ class _ctqdm(tqdm):
 
         Parameters
         ----------
-            x :  float
-                Current position within the range
-                [self.start, self.stop]
+        x : float
+            Current position within the range ``[self.start, self.stop]``.
         """
         num_update = int(
             (self.total + 1) * (x - self.start) / self.range - self.step

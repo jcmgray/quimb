@@ -1,3 +1,6 @@
+"""Scipy based linear algebra.
+"""
+
 import numpy as np
 import scipy.sparse.linalg as spla
 

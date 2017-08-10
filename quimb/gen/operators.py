@@ -1,3 +1,6 @@
+"""Functions for generating quantum operators.
+"""
+
 from functools import lru_cache
 
 from cytoolz import isiterable, concat
@@ -46,6 +49,9 @@ def sig(xyz, dim=2, **kwargs):
     # Operator is cached, so make sure it cannot be modified
     make_immutable(op)
     return op
+
+
+pauli = sig
 
 
 @lru_cache(maxsize=8)

@@ -1,6 +1,7 @@
 language: python
 python:
   - 3.5
+dist: trusty
 
 addons:
   apt:
@@ -22,6 +23,7 @@ addons:
       - liblapack3gf
       - libblas-dev
       - libblas3gf
+      - wget
 
 cache:
   directories:
@@ -29,10 +31,13 @@ cache:
     - $HOME/petsc_and_slepc
 
 before_install:
-  - bash deps/travis-install-conda.sh
+  - bash deps/travis-install-conda.sh >/dev/null
   - export PATH="$HOME/conda/bin:$PATH"
   - source activate test-environment
-  - bash deps/travis-install-slepc4py.sh
+  - export PATH="$HOME/local/bin:$PATH"
+  - export LD_LIBRARY_PATH="$HOME/local/lib:$LD_LIBRARY_PATH"
+  - bash deps/travis-install-openmpi.sh >/dev/null
+  - bash deps/travis-install-slepc4py.sh >/dev/null
 
 install:
   - pip install .
@@ -43,5 +48,5 @@ script:
 
 after_success:
   - coveralls
-  - bash <(curl -s https://codecov.io/bash)
+  - codecov
   - codeclimate-test-reporter

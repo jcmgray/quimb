@@ -1,3 +1,6 @@
+"""Scalapack based linear algebra - via the scalapy interface.
+"""
+
 import numpy as np
 from .slepc_solver import get_default_comm
 

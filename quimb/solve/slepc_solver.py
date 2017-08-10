@@ -488,7 +488,7 @@ def slepc_svds(a, k=6, ncv=None, return_vecs=True, SVDType='cross',
 # ------------------------ matrix multiply function ------------------------- #
 
 def slepc_mfn_multiply(mat, vec,
-                       func='exp',
+                       fntype='exp',
                        MFNType='krylov',
                        comm=None,
                        isherm=False):
@@ -535,9 +535,9 @@ def slepc_mfn_multiply(mat, vec,
     mfn = SLEPc.MFN().create()
     mfn.setOperator(mat)
     mfn.setType(type_map[MFNType.upper()])
-    fn = mfn.getFN()
-    fn.setType(func_map[func.upper()])
-    fn.setScale(1.0, 1.0)
+    mfn_fn = mfn.getFN()
+    mfn_fn.setType(func_map[fntype.upper()])
+    mfn_fn.setScale(1.0, 1.0)
     mfn.setFromOptions()
 
     # 'solve' / perform the matrix function

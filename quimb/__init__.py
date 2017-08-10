@@ -22,8 +22,6 @@ from .accel import (
     rdmul,
     outer,
     explt,
-    kron,
-    kronpow,
 )
 
 # Core functions
@@ -43,8 +41,10 @@ from .core import (
     speye,
     dim_map,
     dim_compress,
+    kron,
+    kronpow,
     eyepad,
-    perm_pad,
+    perm_eyepad,
     permute,
     itrace,
     partial_trace,
@@ -173,8 +173,6 @@ __all__ = [
     'rdmul',
     'outer',
     'explt',
-    'kron',
-    'kronpow',
     # Core ------------------------------------------------------------------ #
     'normalize',
     'chop',
@@ -191,8 +189,10 @@ __all__ = [
     'speye',
     'dim_map',
     'dim_compress',
+    'kron',
+    'kronpow',
     'eyepad',
-    'perm_pad',
+    'perm_eyepad',
     'permute',
     'itrace',
     'partial_trace',

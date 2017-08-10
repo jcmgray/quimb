@@ -139,16 +139,14 @@ class TestFidelity:
 
 
 class TestPurify:
-    @pytest.mark.parametrize("sparse", [True, False])
-    def test_d2(self, sparse):
+    def test_d2(self):
         rho = eye(2) / 2
-        psi = purify(rho, sparse=sparse)
+        psi = purify(rho)
         assert overlap(psi, bell_state('phi+')) > 1 - 1e-14
 
-    @pytest.mark.parametrize("sparse", [True, False])
-    def test_pure(self, sparse):
+    def test_pure(self):
         rho = up(qtype='dop')
-        psi = purify(rho, sparse=sparse)
+        psi = purify(rho)
         assert abs(concurrence(psi)) < 1e-14
 
 

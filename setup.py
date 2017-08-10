@@ -13,10 +13,28 @@ setup(
         'numexpr>=2.3',
         'psutil>=4.3.1',
         'cytoolz>=0.8.0',
+        'tqdm',
     ],
+    extras_require={
+        'test': [
+            'coverage',
+            'pytest',
+            'pytest-cov',
+        ],
+        'docs': [
+            'sphinx',
+            'sphinx_rtd_theme',
+        ],
+        'advanced_solvers': [
+            'slepc4py',
+            'scalapy',
+        ]
+    },
     classifiers=[
         'Development Status :: 3 - Alpha',
         'License :: OSI Approved :: MIT License',
+        'Programming Language :: Python :: 3',
         'Programming Language :: Python :: 3.5',
+        'Programming Language :: Python :: 3.6',
     ]
 )

@@ -14,6 +14,7 @@ import scipy.sparse as sp
 
 from .accel import (
     accel,
+    par_reduce,
     matrixify,
     realify,
     issparse,
@@ -21,9 +22,8 @@ from .accel import (
     vdot,
     dot,
     prod,
-    _dot_dense,
-    kron,
-    kronpow,
+    dot_dense,
+    kron_dispatch,
     isvec
 )
 
@@ -34,26 +34,38 @@ _SPARSE_CONSTRUCTORS = {"csr": sp.csr_matrix,
                         "coo": sp.coo_matrix}
 
 
-def _sparse_matrix(data, stype="csr"):
+def sparse_matrix(data, stype="csr"):
     """Construct a sparse matrix of a particular format.
 
     Parameters
     ----------
-        data: fed to scipy.sparse constructor
-        stype: sparse type {'csr', 'csc', 'coo', 'bsr', ...}
+    data : array_like
+        Fed to scipy.sparse constructor.
+    stype : {'csr', 'csc', 'coo', 'bsr'}, optional
+        Sparse format.
+
+    Returns
+    -------
+    scipy sparse matrix
+        Of format ``stype``.
     """
     return _SPARSE_CONSTRUCTORS[stype](data, dtype=complex)
 
 
 def normalize(qob, inplace=True):
-    """Normalize a quantum object
+    """Normalize a quantum object.
 
     Parameters
     ----------
-        qob: dense or sparse, operator or vector
-            Quantum object to normalize.
-        inplace: bool
-            Whether to act inplace on the given operator.
+    qob : dense or sparse, matrix or vector
+        Quantum object to normalize.
+    inplace : bool, optional
+        Whether to act inplace on the given operator.
+
+    Returns
+    -------
+    dense or sparse, matrix or vector
+        Normalized quantum object.
     """
     n_factor = qob.tr() if isop(qob) else overlap(qob, qob)**0.25
     if inplace:
@@ -63,16 +75,21 @@ def normalize(qob, inplace=True):
 
 
 def chop(qob, tol=1.0e-15, inplace=True):
-    """Set small values of an array to zero.
+    """Set small values of a dense or sparse array to zero.
 
     Parameters
     ----------
-        qob: dense or sparse, operator or vector
-            Quantum object to chop
-        tol: float
-            Fraction of max(abs(qob)) to chop below.
-        inplace: bool
-            Whether to act on input array or return copy.
+    qob : dense or sparse, matrix or vector
+        Quantum object to chop.
+    tol : float, optional
+        Fraction of ``max(abs(qob))`` to chop below.
+    inplace : bool, optional
+        Whether to act on input array or return copy.
+
+    Returns
+    -------
+    dense or sparse, matrix or vector
+        Chopped quantum object.
     """
     minm = np.abs(qob).max() * tol  # minimum value tolerated
     if not inplace:
@@ -93,29 +110,32 @@ def quimbify(data, qtype=None, normalized=False, chopped=False,
 
     Parameters
     ----------
-        data: array_like
-            Matrix data
-        qtype: {'ket', 'bra' or 'dop'}, optional
-            Quantum object type output type.
-        sparse: bool
-            Whether to convert output to sparse a format.
-        normalized: bool
-            Whether to normalise the output.
-        chopped: bool
-            Whether to trim almost zero entries of the output.
-        stype: {'csr', 'csc', 'bsr', 'coo'}
-            Format of matrix if sparse, defaults to 'csr'.
+    data : dense or sparse array_like
+        Array describing vector or matrix.
+    qtype : {``'ket'``, ``'bra'`` or ``'dop'``}, optional
+        Quantum object type output type. Note that if a matrix is given
+        as ``data`` and ``'ket'`` or ``'bra'`` as ``qtype``, the matrix
+        will be unravelled into a column or row vector.
+    sparse : bool, optional
+        Whether to convert output to sparse a format.
+    normalized : bool, optional
+        Whether to normalise the output.
+    chopped : bool, optional
+        Whether to trim almost zero entries of the output.
+    stype : {``'csr'``, ``'csc'``, ``'bsr'``, ``'coo'``}, optional
+        Format of output matrix if sparse, defaults to ``'csr'``.
 
     Returns
     -------
-        x: numpy or scipy.sparse matrix.
+    dense or sparse matrix or vector
 
     Notes
     -----
-        1. Will unravel an array if 'ket' or 'bra' given.
-        2. Will conjugate if 'bra' given.
-        3. Will leave operators as is if 'dop' given, but construct one
-            if vector given with the assumption that it was a ket.
+    1. Will unravel an array if ``'ket'`` or ``'bra'`` given.
+    2. Will conjugate if ``'bra'`` given.
+    3. Will leave operators as is if ``'dop'`` given, but construct one if
+       vector given with the assumption that it was a ket.
+
     """
 
     sparse_input = issparse(data)
@@ -125,6 +145,10 @@ def quimbify(data, qtype=None, normalized=False, chopped=False,
     # Infer output sparse format from input if necessary
     if sparse_input and sparse_output and stype is None:
         stype = data.format
+
+    if (qtype is None) and (np.ndim(data) == 1):
+        # assume quimbify simple list -> ket
+        qtype = 'ket'
 
     if qtype is not None:
         # Must be dense to reshape
@@ -141,7 +165,7 @@ def quimbify(data, qtype=None, normalized=False, chopped=False,
 
     # Check if already sparse matrix, or wanted to be one
     if sparse_output:
-        data = _sparse_matrix(data, (stype if stype is not None else "csr"))
+        data = sparse_matrix(data, (stype if stype is not None else "csr"))
 
     # Optionally normalize and chop small components
     if normalized:
@@ -153,22 +177,58 @@ def quimbify(data, qtype=None, normalized=False, chopped=False,
 
 
 qu = quimbify
+"""Alias of quimbify."""
+
 ket = functools.partial(quimbify, qtype='ket')
+"""Convert an object into a ket."""
+
 bra = functools.partial(quimbify, qtype='bra')
+"""Convert an object into a bra."""
+
 dop = functools.partial(quimbify, qtype='dop')
+"""Convert an object into a density operator."""
+
 sparse = functools.partial(quimbify, sparse=True)
+"""Convert an object into sparse form."""
 
 
 def infer_size(p, base=2):
-    """Infers the size of a state assumed to be made of qubits.
+    """Infer the size, i.e. number of 'sites' in a state.
+
+    Parameters
+    ----------
+    p : vector or matrix
+        An array representing a state with a shape attribute.
+    base : int, optional
+        Size of the individual states that ``p`` is composed of, e.g. this
+        defauts 2 for qubits.
+
+    Returns
+    -------
+    int
+        Number of composite systems.
+
+    Examples
+    --------
+    >>> infer_size(singlet() & singlet())
+    4
+
+    >>> infersize(rand_rho(5**3), base=5)
+    3
     """
-    return int(math.log(max(p.shape), base))
+    sz = math.log(max(p.shape), base)
+
+    if sz % 1 > 1e-13:
+        raise ValueError("This state does not seem to be composed of sites"
+                         "of equal size {}.".format(base))
+
+    return int(sz)
 
 
 @realify
 @accel
 def _trace_dense(op):  # pragma: no cover
-    """Trace of matrix.
+    """Trace of a dense matrix.
     """
     x = 0.0j
     for i in range(op.shape[0]):
@@ -178,21 +238,31 @@ def _trace_dense(op):  # pragma: no cover
 
 @realify
 def _trace_sparse(op):
-    """Trace of sparse matrix.
+    """Trace of a sparse matrix.
     """
     return np.sum(op.diagonal())
 
 
-def trace(op):
-    """Trace of dense or sparse matrix.
+def trace(mat):
+    """Trace of a dense or sparse matrix.
+
+    Parameters
+    ----------
+    mat : matrix-like
+        Complex matrix, dense or sparse.
+
+    Returns
+    -------
+    x : float
+        Trace of ``mat``
     """
-    return _trace_sparse(op) if issparse(op) else _trace_dense(op)
+    return _trace_sparse(mat) if issparse(mat) else _trace_dense(mat)
 
 
 @matrixify
 @accel
 def _identity_dense(d):  # pragma: no cover
-    """Returns a dense, complex identity of order d.
+    """Returns a dense, complex identity of given dimension.
     """
     x = np.zeros((d, d), dtype=np.complex128)
     for i in range(d):
@@ -208,12 +278,94 @@ def _identity_sparse(d, stype="csr"):
 
 def identity(d, sparse=False, stype="csr"):
     """Return identity of size d in complex format, optionally sparse.
+
+    Parameters
+    ----------
+    d : int
+        Dimension of identity.
+    sparse : bool, optional
+        Whether to output in sparse form.
+    stype : str, optional
+        If sparse, what format to use.
+
+    Returns
+    -------
+    id : matrix
+        Identity with complex type.
     """
     return _identity_sparse(d, stype=stype) if sparse else _identity_dense(d)
 
 
 eye = identity
 speye = functools.partial(identity, sparse=True)
+
+
+def kron(*ops, stype=None, coo_build=False, parallel=False):
+    """Tensor (kronecker) product of variable number of arguments.
+
+    Parameters
+    ----------
+    ops : sequence of vectors or matrices
+        Objects to be tensored together.
+    stype : str, optional
+        Desired output format if resultant object is sparse. Should be one
+        of {``'csr'``, ``'bsr'``, ``'coo'``, ``'csc'``}. If ``None``, infer
+        from input matrices.
+    coo_build : bool, optional
+        Whether to force sparse construction to use the ``'coo'``
+        format (only for sparse matrices in the first place.).
+
+    Returns
+    -------
+    dense or sparse vector or matrix
+        Tensor product of ``*ops``.
+
+    Notes
+    -----
+     1. The product is performed as ``(a & (b & (c & ...)))``
+    """
+    opts = {"stype": "coo" if coo_build or stype == "coo" else None}
+
+    if parallel:
+        reducer = par_reduce
+    else:
+        reducer = functools.reduce
+
+    x = reducer(
+        functools.partial(kron_dispatch, **opts),
+        ops,
+    )
+
+    if stype is not None:
+        return x.asformat(stype)
+    if coo_build or (issparse(x) and x.format == "coo"):
+        return x.asformat("csr")
+    return x
+
+
+def kronpow(a, p, stype=None, coo_build=False):
+    """Returns `a` tensored with itself `p` times
+
+    Equivalent to ``reduce(lambda x, y: x & y, [a] * p)``.
+
+    Parameters
+    ----------
+    a : dense or sparse matrix or vector
+        Object to tensor power.
+    p : int
+        Tensor power.
+    stype : str, optional
+        Desired output format if resultant object is sparse. Should be one
+        of {``'csr'``, ``'bsr'``, ``'coo'``, ``'csc'``}.
+    coo_build : bool, optional
+        Whether to force sparse construction to use the ``'coo'``
+        format (only for sparse matrices in the first place.).
+
+    Returns
+    -------
+    dense or sparse matrix or vector
+    """
+    return kron(*(a for _ in range(p)), stype=stype, coo_build=coo_build)
 
 
 def _find_shape_of_nested_int_array(x):
@@ -285,23 +437,45 @@ _dim_mapper_methods = {(1, False, False): _dim_map_1d,
 
 
 def dim_map(dims, coos, cyclic=False, trim=False):
-    """Maps multi-dimensional coordinates and indices to flat arrays in a
+    """Flatten 2d+ dimensions and coordinates.
+
+    Maps multi-dimensional coordinates and indices to flat arrays in a
     regular way. Wraps or deletes coordinates beyond the system size
-    depending on parameters `cyclic` and `trim`.
+    depending on parameters ``cyclic`` and ``trim``.
 
     Parameters
     ----------
-        dims: multi-dim array of systems' internal dimensions
-        coos: array of coordinate tuples to convert
-        cyclic: whether to automatically wrap coordinates beyond system size or
-            delete them.
-        trim: if True, any coordinates beyond dimensions will be deleted,
-            overidden by cyclic.
+    dims : nested tuple of int
+        Multi-dim array of systems' internal dimensions.
+    coos : list of tuples of int
+        Array of coordinate tuples to convert
+    cyclic : bool, optional
+        Whether to automatically wrap coordinates beyond system size or
+        delete them.
+    trim : bool, optional
+        If True, any coordinates beyond dimensions will be deleted,
+        overidden by cyclic.
 
     Returns
     -------
-        dims: flattened version of dims
-        coos: indices mapped to flattened dims
+    flat_dims : tuple
+        Flattened version of ``dims``.
+    inds : tuple
+        Indices corresponding to the original coordinates.
+
+    Examples
+    --------
+
+    >>> dims = [[2, 3], [4, 5]]
+    >>> coords = [(0, 0), (1, 1)]
+    >>> flat_dims, inds = dim_map(dims, coords)
+    >>> flat_dims
+    (2, 3, 4, 5)
+    >>> inds
+    (0, 3)
+
+    >>> dim_map(dims, [(2, 0), (-1, 1)], cyclic=True)
+    ((2, 3, 4, 5), (0, 3))
     """
     # Figure out shape of dimensions given
     if isinstance(dims, np.ndarray):
@@ -334,7 +508,7 @@ def dim_map(dims, coos, cyclic=False, trim=False):
 
 @jit(nopython=True)
 def _dim_compressor(dims, inds):  # pragma: no cover
-    """Helper function for `dim_compress` that does the heavy lifting.
+    """Helper function for ``dim_compress`` that does the heavy lifting.
     """
     blocksize_id = blocksize_op = 1
     autoplace_count = 0
@@ -369,17 +543,39 @@ def _dim_compressor(dims, inds):  # pragma: no cover
 
 
 def dim_compress(dims, inds):
-    """Take some dimensions and target indices and compress both such, i.e.
-    merge adjacent identity spaces.
+    """Compress neighbouring subsytem dimensions.
+
+    Take some dimensions and target indices and compress both, i.e.
+    merge adjacent dimensions that are both either in ``dims`` or not. For
+    example, if tensoring an operator onto a single site, with many sites
+    the identity, treat these as single large identities.
 
     Parameters
     ----------
-        dims: list of systems dimensions
-        inds: list of target indices
+    dims : tuple of int
+        List of system's dimensions - 1d or flattened (e.g. with
+        ``dim_map``).
+    inds: tuple of int
+        List of target indices, i.e. dimensions not to merge.
 
     Returns
     -------
-        dims, inds: new equivalent dimensions and matching indices
+    dims : tuple of int
+        New compressed dimensions.
+    inds : tuple of int
+        New indexes corresponding to the compressed dimensions. These are
+        guaranteed to now be alternating i.e. either (0, 2, ...) or
+        (1, 3, ...).
+
+    Examples
+    --------
+    >>> dims = [2] * 10
+    >>> inds = [3, 4]
+    >>> compressed_dims, compressed_inds = dim_compress(dims, inds)
+    >>> compressed_dims
+    (8, 4, 32)
+    >>> compressed_inds
+    (1,)
     """
     # TODO: turn off ind compress
     # TODO: put yield (autoplace_count, False) --- no need?
@@ -393,27 +589,66 @@ def dim_compress(dims, inds):
 
 
 def eyepad(ops, dims, inds, sparse=None, stype=None, coo_build=False):
-    # TODO: rename? itensor, tensor
+    # TODO: rename? itensor, tensor, ikron,
     # TODO: test 2d+ dims and coos
     # TODO: simplify  with compress coords?
-    # TODO: allow -1 in dims to auto place *without* ind?
-    """Tensor product, but padded with identites. Automatically
-    placing a large operator over several dimensions is allowed and a list
-    of operators can be given which are then applied cyclically.
+    # TODO: allow -1 in dims to auto place *without* ind? one or other
+    """Tensor an operator into a larger space by padding with identities.
+
+    Automatically placing a large operator over several dimensions is allowed
+    and a list of operators can be given which are then placed cyclically.
 
     Parameters
     ----------
-        ops: operator or list of operators to put into the tensor space.
-        dims: dimensions of tensor space, use -1 to ignore dimension matching.
-        inds: indices of the dimenions to place operators on.
-        sparse: whether to construct the new operator in sparse form.
+    op : matrix-like or tuple of matrix-like
+        Operator(s) to place into the tensor space. If more than one, these
+        are cyclically placed at each of the ``dims`` specified by
+        ``inds``.
+    dims : tuple of int
+        Dimensions of tensor space, use -1 to ignore dimension matching.
+    inds : tuple of int
+        Indices of the dimensions to place operator on. Each dimension
+        specified can be smaller than the size of ``op`` (as long as it
+        factorizes it), and can be disjoint from other dimensions when
+        ``op`` will be placed.
+    sparse : bool, optional
+        Whether to construct the new operator in sparse form.
+    stype : str, optional
+        If sparse, which format to use for the output.
+    coo_build : bool, optional
+        Whether to build the intermediary matrices using the ``'coo'``
+        format - can be faster to build sparse in this way, then
+        convert to chosen format, including dense.
 
     Returns
     -------
-        Operator such that ops act on dims[inds].
+    matrix-like
+        Operator such that ops act on ``dims[inds]``.
 
-    *Notes:*
-        1. if len(inds) > len(ops), then ops will be cycled over.
+    See Also
+    --------
+    perm_eyepad
+
+    Examples
+    --------
+    Place an operator between two identities:
+
+    >>> IZI = eyepad(sig('z'), [2, 2, 2], 1)
+    >>> np.allclose(IZI, eye(2) & sig('z') & eye(2))
+    True
+
+    Overlay a large operator on several sites:
+
+    >>> rho_ab = rand_rho(4)
+    >>> rho_abc = eyepad(rho_ab, [5, 2, 2, 7], [1, 2])  # overlay both 2s
+    >>> rho_abc.shape
+    (140, 140)
+
+    Place an operator at specified sites, regardless of size:
+
+    >>> A = rand_herm(5)
+    >>> eyepad(A, [2, -1, 2, -1, 2, -1], [1, 3, 5]).shape
+    (1000, 1000)
     """
 
     # Make sure `ops` islist
@@ -435,7 +670,6 @@ def eyepad(ops, dims, inds, sparse=None, stype=None, coo_build=False):
     inds, ops = zip(*sorted(zip(inds, itertools.cycle(ops))))
     inds, ops = set(inds), iter(ops)
 
-    # TODO: refactor this / just use dim_compress
     def gen_ops():
         cff_id = 1  # keeps track of compressing adjacent identities
         cff_ov = 1  # keeps track of overlaying op on multiple dimensions
@@ -463,35 +697,6 @@ def eyepad(ops, dims, inds, sparse=None, stype=None, coo_build=False):
 
 
 @matrixify
-def perm_pad(op, dims, inds):
-    # TODO: multiple ops
-    # TODO: coo map, coo compress
-    # TODO: sparse??
-    # TODO: use permute
-    """Advanced tensor placement of operators that allows arbitrary ordering
-    such as reversal and interleaving of identities.
-    """
-    dims, inds = np.asarray(dims), np.asarray(inds)
-    n = len(dims)  # number of subsytems
-    sz = prod(dims)  # Total size of system
-    dims_in = dims[inds]
-    sz_in = prod(dims_in)  # total size of operator space
-    sz_out = sz // sz_in  # total size of identity space
-    sz_op = op.shape[0]  # size of individual operator
-    n_op = int(math.log(sz_in, sz_op))  # number of individual operators
-    b = np.asarray(kronpow(op, n_op) & eye(sz_out))
-    inds_out, dims_out = zip(*((i, x) for i, x in enumerate(dims)
-                               if i not in inds))  # inverse of inds
-    p = [*inds, *inds_out]  # current order of system
-    dims_cur = (*dims_in, *dims_out)
-    ip = np.empty(n, dtype=np.int)
-    ip[p] = np.arange(n)  # inverse permutation
-    return b.reshape((*dims_cur, *dims_cur))  \
-            .transpose((*ip, *(ip + n)))  \
-            .reshape((sz, sz))
-
-
-@matrixify
 def _permute_dense(p, dims, perm):
     """Permute the subsytems of a dense matrix.
     """
@@ -510,16 +715,20 @@ def _permute_sparse(a, dims, perm):
     """Permute the subsytems of a sparse matrix.
     """
     perm, dims = np.asarray(perm), np.asarray(dims)
-    new_dims = dims[perm]
+
     # New dimensions & stride (i.e. product of preceding dimensions)
+    new_dims = dims[perm]
     odim_stride = np.multiply.accumulate(dims[::-1])[::-1] // dims
     ndim_stride = np.multiply.accumulate(new_dims[::-1])[::-1] // new_dims
+
     # Range of possible coordinates for each subsys
     coos = (tuple(range(dim)) for dim in dims)
+
     # Complete basis using coordinates for current and new dimensions
     basis = np.asarray(tuple(itertools.product(*coos, repeat=1)))
     oinds = np.sum(odim_stride * basis, axis=1)
     ninds = np.sum(ndim_stride * basis[:, perm], axis=1)
+
     # Construct permutation matrix and apply it to state
     perm_mat = sp.coo_matrix((np.ones(a.shape[0]), (ninds, oinds))).tocsr()
     if isop(a):
@@ -527,41 +736,157 @@ def _permute_sparse(a, dims, perm):
     return dot(perm_mat, a)
 
 
-def permute(a, dims, perm):
-    """Permute the subsytems of state a.
+def permute(p, dims, perm):
+    """Permute the subsytems of state or opeator.
 
     Parameters
     ----------
-        p: state, vector or operator
-        dims: dimensions of the system
-        perm: new order of indexes range(len(dims))
+    p : vector or matrix
+        State or operator to permute.
+    dims : tuple of int
+        Internal dimensions of the system.
+    perm : tuple of int
+        New order of indexes ``range(len(dims))``.
 
     Returns
     -------
-        pp: permuted state, vector or operator"""
-    if issparse(a):
-        return _permute_sparse(a, dims, perm)
-    return _permute_dense(a, dims, perm)
+    pp : vector or matrix
+        Permuted state or operator.
+
+    See Also
+    --------
+    perm_eyepad
+
+    Examples
+    --------
+
+    >>> IX = speye(2) & sig('X', sparse=True)
+    >>> XI = permute(IX, dims=[2, 2], perm=[1, 0])
+    >>> np.allclose(XI.A, sig('X') & eye(2))
+    True
+    """
+    if issparse(p):
+        return _permute_sparse(p, dims, perm)
+    return _permute_dense(p, dims, perm)
+
+
+def perm_eyepad(op, dims, inds, **kwargs):
+    # TODO: multiple ops
+    # TODO: coo map, coo compress
+    # TODO: sparse, stype, coo_build?
+    """Advanced, padded tensor product.
+
+    Construct an operator such that ``op`` acts on ``dims[inds]``, and allow it
+    to be arbitrarily split and reversed etc., in other words, permute and then
+    tensor it into a larger space.
+
+    Parameters
+    ----------
+    ops : matrix-like or tuple of matrix-like
+        Operator to place into the tensor space.
+    dims : tuple of int
+        Dimensions of tensor space.
+    inds : tuple of int
+        Indices of the dimensions to place operators on. If multiple
+        operators are specified, ``inds[1]`` corresponds to ``ops[1]`` and
+        so on.
+    sparse : bool, optional
+        Whether to construct the new operator in sparse form.
+    stype : str, optional
+        If sparse, which format to use for the output.
+    coo_build : bool, optional
+        Whether to build the intermediary matrices using the ``'coo'``
+        format - can be faster to build sparse in this way, then
+        convert to chosen format, including dense.
+
+    Returns
+    -------
+    matrix-like
+        Operator such that ops act on ``dims[inds]``.
+
+    See Also
+    --------
+    eyepad, permute
+
+    Examples
+    --------
+
+    Here we take an operator that acts on spins 0 and 1 with X and Z, and
+    transform it to act on spins 2 and 0 -- i.e. reverse it and sandwich an
+    identity between the two sites it acts on.
+
+    >>> XZ = sig('X') & sig('Z')
+    >>> ZIX = perm_eyepad(XZ, dims=[2, 3, 2], inds=[2, 0])
+    >>> np.allclose(ZIX, sig('Z') & eye(3) & sig('X'))
+    True
+    """
+    dims, inds = np.asarray(dims), np.asarray(inds)
+
+    # total number of subsytems and size
+    n = len(dims)
+    sz = prod(dims)
+
+    # dimensions of space where op should be placed, and its total size
+    dims_in = dims[inds]
+    sz_in = prod(dims_in)
+
+    # construct pre-permuted full operator
+    b = eyepad(op, [sz_in, sz // sz_in], 0, **kwargs)
+
+    # inverse of inds
+    inds_out, dims_out = zip(
+        *((i, x) for i, x in enumerate(dims) if i not in inds))
+
+    # current order and dimensions of system
+    p = [*inds, *inds_out]
+    dims_cur = (*dims_in, *dims_out)
+
+    # find inverse permutation
+    ip = np.empty(n, dtype=np.int)
+    ip[p] = np.arange(n)
+
+    return permute(b, dims_cur, ip)
 
 
 def _ind_complement(inds, n):
-    """Return the indices below `n` not contained in `inds`.
+    """Return the indices below ``n`` not contained in ``inds``.
     """
     return tuple(i for i in range(n) if i not in inds)
 
 
 def itrace(a, axes=(0, 1)):
-    """General tensor trace, i.e. multiple contractions.
+    """General tensor trace, i.e. multiple contractions, for a dense array.
 
     Parameters
     ----------
-        a: np.ndarray
-            tensor to trace
-        axes: (2,) int_like or (2,) array_like
-            * (2,) int_like
-              Perform trace on the two indices listed.
-            * (2,) array_like
-              Trace out first sequence indices with second sequence indices
+    a : numpy.ndarray
+        Tensor to trace.
+    axes : (2,) int or (2,) array of int
+        - (2,) int: Perform trace on the two indices listed.
+        - (2,) array of int: Trace out first sequence of indices with second
+          sequence indices.
+
+    Returns
+    -------
+    numpy.ndarray
+        The tensor remaining after tracing out the specified axes.
+
+    See Also
+    --------
+    trace, partial_trace
+
+    Examples
+    --------
+    Trace out a single pair of dimensions:
+
+    >>> a = np.random.rand(2, 3, 4, 2, 3, 4)
+    >>> itrace(a, axes=(0, 3)).shape
+    (3, 4, 3, 4)
+
+    Trace out multiple dimensions:
+
+    >>> itrace(a, axes=([1, 2], [4, 5])).shape
+    (2, 2)
     """
     # Single index pair to trace out
     if isinstance(axes[0], int):
@@ -581,29 +906,21 @@ def itrace(a, axes=(0, 1)):
 
 
 @matrixify
-def _partial_trace_dense(p, dims, keep):
-    """Perform partial trace.
-    Parameters
-    ----------
-        p: state to perform partial trace on, vector or operator
-        dims: list of subsystem dimensions
-        keep: index of subsytems to keep
-    Returns
-    -------
-        Density matrix of subsytem dimensions dims[keep]
+def _partial_trace_dense(p, dims, coo_keep):
+    """Perform partial trace of a dense matrix.
     """
-    if isinstance(keep, int):
-        keep = (keep,)
+    if isinstance(coo_keep, int):
+        coo_keep = (coo_keep,)
     if isvec(p):  # p = psi
         p = np.asarray(p).reshape(dims)
-        lose = _ind_complement(keep, len(dims))
+        lose = _ind_complement(coo_keep, len(dims))
         p = np.tensordot(p, p.conj(), (lose, lose))
         d = int(p.size**0.5)
         return p.reshape((d, d))
     else:
         p = np.asarray(p).reshape((*dims, *dims))
         total_dims = len(dims)
-        lose = _ind_complement(keep, total_dims)
+        lose = _ind_complement(coo_keep, total_dims)
         lose2 = tuple(ind + total_dims for ind in lose)
         p = itrace(p, (lose, lose2))
     d = int(p.size**0.5)
@@ -611,7 +928,7 @@ def _partial_trace_dense(p, dims, keep):
 
 
 def _trace_lose(p, dims, coo_lose):
-    """Simple partial trace where the single subsytem at `coo_lose`
+    """Simple partial trace where the single subsytem at ``coo_lose``
     is traced out.
     """
     p = p if isop(p) else dot(p, p.H)
@@ -634,7 +951,7 @@ def _trace_lose(p, dims, coo_lose):
 
 def _trace_keep(p, dims, coo_keep):
     """Simple partial trace where the single subsytem
-    at `coo_keep` is kept.
+    at ``coo_keep`` is kept.
     """
     p = p if isop(p) else dot(p, p.H)
     dims = np.asarray(dims)
@@ -655,45 +972,69 @@ def _trace_keep(p, dims, coo_keep):
     return rhos
 
 
-def _partial_trace_simple(p, dims, coos_keep):
+def _partial_trace_simple(p, dims, coo_keep):
     """Simple partial trace made up of consecutive single subsystem partial
     traces, augmented by 'compressing' the dimensions each time.
     """
     p = p if isop(p) else dot(p, p.H)
-    dims, coos_keep = dim_compress(dims, coos_keep)
-    if len(coos_keep) == 1:
-        return _trace_keep(p, dims, *coos_keep)
+    dims, coo_keep = dim_compress(dims, coo_keep)
+    if len(coo_keep) == 1:
+        return _trace_keep(p, dims, *coo_keep)
     lmax = max(enumerate(dims),
-               key=lambda ix: (ix[0] not in coos_keep) * ix[1])[0]
+               key=lambda ix: (ix[0] not in coo_keep) * ix[1])[0]
     p = _trace_lose(p, dims, lmax)
     dims = (*dims[:lmax], *dims[lmax + 1:])
-    coos_keep = {(ind if ind < lmax else ind - 1) for ind in coos_keep}
-    return _partial_trace_simple(p, dims, coos_keep)
+    coo_keep = {(ind if ind < lmax else ind - 1) for ind in coo_keep}
+    return _partial_trace_simple(p, dims, coo_keep)
 
 
-def partial_trace(p, dims, coos):
+def partial_trace(p, dims, keep):
     """Partial trace of a dense or sparse state.
 
     Parameters
     ----------
-        p: state
-        dims: list of dimensions of subsystems
-        coos: coordinates of subsytems to keep
+    p : ket or density matrix
+        State to perform partial trace on - can be sparse.
+    dims : tuple of int
+        List of subsystem dimensions.
+    keep : int or tuple of int
+        Index or indices of subsytem(s) to keep.
 
     Returns
     -------
-        rhoab: density matrix of remaining subsytems,
+    rho : dense matrix
+        Density matrix of subsytem dimensions ``dims[keep]``.
+
+    See Also
+    --------
+    itrace
+
+    Examples
+    --------
+    Trace out single subsystem of a ket:
+
+    >>> psi = bell_state('psi-')
+    >>> ptr(psi, [2, 2], keep=0)  # expect identity
+    matrix([[ 0.5+0.j,  0.0+0.j],
+            [ 0.0+0.j,  0.5+0.j]])
+
+    Trace out multiple subsystems of a density matrix:
+
+    >>> rho_abc = rand_rho(3 *4 * 5)
+    >>> rho_ab = partial_trace(rho_abc, [3, 4, 5], keep=[0, 1])
+    >>> rho_ab.shape
+    (12, 12)
     """
     if issparse(p):
-        return _partial_trace_simple(p, dims, coos)
-    return _partial_trace_dense(p, dims, coos)
+        return _partial_trace_simple(p, dims, keep)
+    return _partial_trace_dense(p, dims, keep)
 
 
 _OVERLAP_METHODS = {
     (0, 0, 0): lambda a, b: abs(vdot(a, b))**2,
-    (0, 1, 0): lambda a, b: vdot(a, _dot_dense(b, a)),
-    (1, 0, 0): lambda a, b: vdot(b, _dot_dense(a, b)),
-    (1, 1, 0): lambda a, b: _trace_dense(_dot_dense(a, b)),
+    (0, 1, 0): lambda a, b: vdot(a, dot_dense(b, a)),
+    (1, 0, 0): lambda a, b: vdot(b, dot_dense(a, b)),
+    (1, 1, 0): lambda a, b: _trace_dense(dot_dense(a, b)),
     (0, 0, 1): lambda a, b: abs(dot(a.H, b)[0, 0])**2,
     (0, 1, 1): realify(lambda a, b: dot(a.H, dot(b, a))[0, 0]),
     (1, 0, 1): realify(lambda a, b: dot(b.H, dot(a, b))[0, 0]),
@@ -702,8 +1043,30 @@ _OVERLAP_METHODS = {
 
 
 def overlap(a, b):
-    """Overlap between a and b, i.e. for vectors it will be the
-    absolute overlap squared |<a|b><b|a>|, rather than <a|b>.
+    """'Overlap' between a vector/operator and another vector/operator.
+
+    The 'operator' inner product between ``a`` and ``b``, but also for vectors.
+    This means that for consistency:
+    * for two vectors it will be the absolute overlap squared ``|<a|b><b|a>|``,
+    *not* ``<a|b>``
+    * for a vector and an operator its will be ``<a|b|a>``
+    * for two operators it will be the Hilbert-schmidt inner product
+    ``tr(A @ B)``
+
+    In this way ``overlap(a, b) == overlap(dop(a), b) == overlap(dop(a),
+    dop(b))``.
+
+    Parameters
+    ----------
+    a : vector or operator
+        First state or operator - assumed to be ket if vector.
+    b : vector or operator
+        Second state or operator - assumed to be ket if vector.
+
+    Returns
+    -------
+    x : float
+        'Overlap' between ``a`` and ``b``.
     """
     return _OVERLAP_METHODS[isop(a), isop(b), issparse(a) or issparse(b)](a, b)
 
