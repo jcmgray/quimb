@@ -1,13 +1,13 @@
 """Functions for generating quantum operators.
 """
-
+from operator import add
 from functools import lru_cache
 
 from cytoolz import isiterable, concat
 import numpy as np
 import scipy.sparse as sp
 
-from ..accel import accel, make_immutable
+from ..accel import accel, make_immutable, get_thread_pool, par_reduce
 from ..core import qu, eye, kron, eyepad
 
 
@@ -70,23 +70,34 @@ def controlled(s, sparse=False):
 
 
 @lru_cache(maxsize=8)
-def ham_heis(n, j=1.0, bz=0.0, cyclic=True, sparse=False, stype="csr"):
+def ham_heis(n, j=1.0, bz=0.0, cyclic=True, sparse=False, stype="csr",
+             parallel=None):
     """Constructs the heisenberg spin 1/2 hamiltonian
 
     Parameters
     ----------
-        n: number of spins
-        j: coupling constant(s), with convention that positive =
-            antiferromagnetic. Can supply scalar for isotropic coupling or
-            vector (jx, jy, jz).
-        bz: z-direction magnetic field
-        cyclic: whether to couple the first and last spins
-        sparse: whether to return the hamiltonian in sparse form
-        stype: what format of sparse matrix to return
+    n : int,
+        Number of spins.
+    j : float or tuple(float, float, float), optional
+        Coupling constant(s), with convention that positive =
+        antiferromagnetic. Can supply scalar for isotropic coupling or
+        vector ``(jx, jy, jz)``.
+    bz : float, optional.
+        z-direction magnetic field.
+    cyclic : bool, optional
+        Whether to couple the first and last spins.
+    sparse : bool, optional
+        Whether to return the hamiltonian in sparse form.
+    stype : str, optional
+        What format of sparse matrix to return if ``sparse``.
+    parallel : bool, optional
+        Whether to build the matrix in parallel. By default will do this
+        for n > 16.
 
     Returns
     -------
-        ham: hamiltonian as matrix
+    matrix
+        The Hamiltonian.
     """
     # TODO: vector magnetic field
     dims = (2,) * n
@@ -95,20 +106,39 @@ def ham_heis(n, j=1.0, bz=0.0, cyclic=True, sparse=False, stype="csr"):
     except TypeError:
         jx = jy = jz = j
 
-    opts = {"sparse": True, "stype": "coo", "coo_build": True}
+    parallel = (n > 16) if parallel is None else parallel
 
-    sds = qu(jx * kron(sig('x'), sig('x')) +
-             jy * kron(sig('y'), sig('y')) +
-             jz * kron(sig('z'), sig('z')) -
-             bz * kron(sig('z'), eye(2)), sparse=True, stype="coo")
-    ham = sum(eyepad(sds, dims, [i, i + 1], **opts) for i in range(n - 1))
+    op_kws = {'sparse': True, 'stype': 'coo'}
+    kron_kws = {"sparse": True, "stype": "coo", "coo_build": True}
 
-    if cyclic:
-        ham = ham + sum(eyepad(j * sig(s, sparse=True),
-                               dims, [0, n - 1], **opts)
-                        for j, s in zip((jx, jy, jz), 'xyz'))
-    if bz != 0.0:
-        ham = ham + eyepad(-bz * sig('z', sparse=True), dims, n - 1, **opts)
+    # The basic operator (interaction and single z-field) that can be repeated.
+    sds = (jx * kron(sig('x', **op_kws), sig('x', **op_kws)) +
+           jy * kron(sig('y', **op_kws), sig('y', **op_kws)) +
+           jz * kron(sig('z', **op_kws), sig('z', **op_kws)) -
+           bz * kron(sig('z', **op_kws), eye(2, **op_kws)))
+
+    def gen_term(i):
+        # special case: the last bz term needs to be added manually
+        if i == -1:
+            return eyepad(-bz * sig('z', **op_kws), dims, n - 1, **kron_kws)
+
+        # special case: the interaction between first and last spins if cyclic
+        if i == n - 1:
+            return sum(
+                j * eyepad(sig(s, **op_kws), dims, [0, n - 1], **kron_kws)
+                for j, s in zip((jx, jy, jz), 'xyz')
+            )
+
+        return eyepad(sds, dims, [i, i + 1], **kron_kws)
+
+    terms = range(-1 if (bz != 0.0) else 0,  # only need extra bz term if nz
+                  n if cyclic else n - 1)
+
+    if parallel:
+        pool = get_thread_pool()
+        ham = par_reduce(add, pool.map(gen_term, terms))
+    else:
+        ham = sum(map(gen_term, terms))
 
     if not sparse:
         ham = np.asmatrix(ham.todense())
