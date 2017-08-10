@@ -466,14 +466,14 @@ def slepc_svds(a, k=6, ncv=None, return_vecs=True, SVDType='cross',
                 s = svd_solver.getSingularTriplet(i, u, v)
                 lu = gather_petsc_array(u, comm=comm, out_shape=(-1, 1))
                 lv = gather_petsc_array(v, comm=comm, out_shape=(1, -1))
-                yield lu, s, lv.conjugate()
+                yield lu, s, lv
 
         lus, sk, lvs = zip(*usv_getter())
         sk = np.asarray(sk)
 
         if rank == 0:
             uk = np.concatenate(lus, axis=1)
-            vtk = np.concatenate(lvs, axis=0)
+            vtk = np.concatenate(lvs, axis=0).conjugate()
             so = np.argsort(-sk)
             res = np.asmatrix(uk[:, so]), sk[so], np.asmatrix(vtk[so, :])
     else:
