@@ -30,6 +30,7 @@ setup(
             'scalapy',
         ]
     },
+    scripts=['bin/quimb-mpiexec'],
     classifiers=[
         'Development Status :: 3 - Alpha',
         'License :: OSI Approved :: MIT License',

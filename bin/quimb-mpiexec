@@ -1,0 +1,15 @@
+#!/bin/sh
+
+# TODO: make num_procs optional and use keyword "-n 4" e.g.
+
+num_procs=$1
+target=$2
+# now chuck away these two to past rest of args to target
+shift 2
+
+# set up environment
+export OMP_NUM_THREADS=1
+export QUIMB_NUM_MPI_WORKERS=$num_procs
+
+# run script with mpi through mpi4py module
+exec mpiexec -np $num_procs python -m mpi4py.futures $target "$@"
