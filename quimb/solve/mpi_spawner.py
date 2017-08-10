@@ -91,8 +91,13 @@ class GetMPIBeforeCall(object):
             comm = MPI.COMM_SELF
 
         if wait_for_workers is not None:
+            from time import time
+            t0 = time()
             while comm.Get_size() != wait_for_workers:
-                pass
+                if time() - t0 > 2:
+                    raise RuntimeError("Timeout while waiting for {} workers "
+                                       "to join comm {}."
+                                       "".format(wait_for_workers, comm))
 
         return self.fn(*args, comm=comm, **kwargs)
 
