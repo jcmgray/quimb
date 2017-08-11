@@ -46,9 +46,11 @@ def convert_mat_to_scalapy(mat, pn=None, bsz=None, comm=None):
 
 
 def eigsys_scalapy(a, return_vecs=True, pn=None, bsz=None, comm=None,
-                   k=None, isherm=True, sort=True, **kwargs):
+                   k=None, isherm=True, **kwargs):
     """
     """
+    kwargs.pop('sort')  # unused
+
     if not isherm:
         raise NotImplementedError
 

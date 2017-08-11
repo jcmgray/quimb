@@ -71,7 +71,7 @@ def controlled(s, sparse=False):
 
 @lru_cache(maxsize=8)
 def ham_heis(n, j=1.0, bz=0.0, cyclic=True, sparse=False, stype="csr",
-             parallel=None):
+             parallel=None, nthreads=None,):
     """Constructs the heisenberg spin 1/2 hamiltonian
 
     Parameters
@@ -135,7 +135,7 @@ def ham_heis(n, j=1.0, bz=0.0, cyclic=True, sparse=False, stype="csr",
                   n if cyclic else n - 1)
 
     if parallel:
-        pool = get_thread_pool()
+        pool = get_thread_pool(nthreads)
         ham = par_reduce(add, pool.map(gen_term, terms))
     else:
         ham = sum(map(gen_term, terms))

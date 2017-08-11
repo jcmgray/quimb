@@ -143,7 +143,7 @@ def rand_product_state(n, qtype=None):
     """Generates a ket of `n` many random pure qubits.
     """
     def gen_rand_pure_qubits(n):
-        for i in range(n):
+        for _ in range(n):
             u = np.random.rand()
             v = np.random.rand()
             phi = 2 * np.pi * u
