@@ -103,9 +103,10 @@ class TestEigh:
     @mark.parametrize("bkd", dense_backends)
     def test_eigsys(self, mat_herm_dense, bkd):
         u, a = mat_herm_dense
-        evals, _ = eigsys(a, sort=False, backend=bkd)
+        kwargs = {'bsz': (2, 2)} if bkd == 'scalapy' else {}
+        evals, _ = eigsys(a, sort=False, backend=bkd, **kwargs)
         assert(set(np.rint(evals)) == set((-1, 2, 4, -3)))
-        evals, v = eigsys(a, backend=bkd)
+        evals, v = eigsys(a, backend=bkd, **kwargs)
         assert_allclose(evals, [-3, -1, 2, 4])
         for i, j in zip([3, 0, 1, 2], range(4)):
             o = u[:, i].H @ v[:, j]
@@ -114,13 +115,15 @@ class TestEigh:
     @mark.parametrize("bkd", dense_backends)
     def test_eigvals(self, mat_herm_dense, bkd):
         _, a = mat_herm_dense
-        evals = eigvals(a, backend=bkd)
+        kwargs = {'bsz': (2, 2)} if bkd == 'scalapy' else {}
+        evals = eigvals(a, backend=bkd, **kwargs)
         assert_allclose(evals, [-3, -1, 2, 4])
 
     @mark.parametrize("bkd", dense_backends)
     def test_eigvecs(self, mat_herm_dense, bkd):
         u, a = mat_herm_dense
-        v = eigvecs(a, backend=bkd)
+        kwargs = {'bsz': (2, 2)} if bkd == 'scalapy' else {}
+        v = eigvecs(a, backend=bkd, **kwargs)
         for i, j in zip([3, 0, 1, 2], range(4)):
             o = u[:, i].H @ v[:, j]
             assert_allclose(abs(o), 1.)
