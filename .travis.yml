@@ -36,6 +36,8 @@ before_install:
   - bash deps/travis-install-conda.sh >/dev/null
   - export PATH="$HOME/conda/bin:$PATH"
   - source activate test-environment
+  - mpiexec --version
+  - mpiexec -np 2 hostname
   - bash deps/travis-install-slepc4py.sh >/dev/null
 
 install:
