@@ -28,14 +28,16 @@ if [ ! -d "$INSTALL_DIR/petsc" ]; then
   cd $PETSC_DIR
   git pull
   python2 ./configure \
+    COPTFLAGS='-O0'\
+    CXXOPTFLAGS='-O0'\
+    FOPTFLAGS='-O0'\
     --with-scalar-type=complex \
     --download-mumps \
     --download-scalapack \
     --download-parmetis \
     --download-metis \
     --download-ptscotch \
-    --with-fortran-kernels=generic \
-    --with-debugging=1
+    --with-fortran-kernels=generic
   make -s all
   make test
   make streams NPMAX=2

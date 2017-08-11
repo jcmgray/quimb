@@ -24,7 +24,7 @@ tar xzf "$SRC_DIR/$OPENMPI_VER.tar.gz" -C $SRC_DIR
 cd "$SRC_DIR/$OPENMPI_VER"
 
 # compile and install
-./configure --prefix=$LOCAL
+./configure --prefix=$LOCAL COPTFLAGS='-O0' CXXOPTFLAGS='-O0' FOPTFLAGS='-O0'
 make
 make install
 
