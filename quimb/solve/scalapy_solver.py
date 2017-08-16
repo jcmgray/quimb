@@ -49,7 +49,7 @@ def eigsys_scalapy(a, return_vecs=True, pn=None, bsz=None, comm=None,
                    k=None, isherm=True, **kwargs):
     """
     """
-    kwargs.pop('sort')  # unused
+    kwargs.pop('sort', None)  # unused
 
     if not isherm:
         raise NotImplementedError
