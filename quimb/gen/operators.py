@@ -1,28 +1,93 @@
 """Functions for generating quantum operators.
 """
-
+from operator import add
 from functools import lru_cache
 
 from cytoolz import isiterable, concat
 import numpy as np
 import scipy.sparse as sp
 
-from ..accel import accel, make_immutable
+from ..accel import accel, make_immutable, get_thread_pool, par_reduce
 from ..core import qu, eye, kron, eyepad
+
+
+@lru_cache(maxsize=16)
+def spin_operator(label, S=1 / 2, **kwargs):
+    """Generate a general spin-operator.
+
+    Parameters
+    ----------
+    label : str
+        The type of operator, can be one of five options:
+            - ``{'x', 'X'}``, x-spin operator.
+            - ``{'y', 'Y'}``, y-spin operator.
+            - ``{'z', 'Z'}``, z-spin operator.
+            - ``{'+', 'p'}``, Raising operator.
+            - ``{'-', 'm'}``, Lowering operator.
+    S : float, optional
+        The spin of particle to act on, default to spin-1/2.
+    kwargs
+        Passed to :func:`quimbify`.
+
+    Returns
+    -------
+    immutable matrix
+        The spin operator.
+    """
+
+    D = int(2 * S + 1)
+
+    op = np.zeros((D, D), dtype=complex)
+    ms = np.linspace(S, -S, D)
+
+    label = label.lower()
+
+    if label in {'x', 'y'}:
+        for i in range(D - 1):
+            c = 0.5 * (S * (S + 1) - (ms[i] * ms[i + 1]))**0.5
+            op[i, i + 1] = -1.0j * c if (label == 'y') else c
+            op[i + 1, i] = 1.0j * c if (label == 'y') else c
+
+    elif label == 'z':
+        for i in range(D):
+            op[i, i] = ms[i]
+
+    elif label in {'+', 'p', '-', 'm'}:
+        for i in range(D - 1):
+            c = (S * (S + 1) - (ms[i] * ms[i + 1]))**0.5
+            if label in {'+', 'p'}:
+                op[i, i + 1] = c
+            else:
+                op[i + 1, i] = c
+
+    op = qu(op, **kwargs)
+    make_immutable(op)
+    return op
 
 
 @lru_cache(maxsize=8)
 def sig(xyz, dim=2, **kwargs):
-    """Generates the spin operators for spin 1/2 or 1.
+    """Generates the pauli operators for dimension 2 or 3.
 
     Parameters
     ----------
-        xyz: which spatial direction
-        dim: dimension of spin operator (e.g. 3 for spin-1)
+    xyz : str
+        Which spatial direction, upper or lower case from ``{'I', 'X', 'Y',
+        'Z'}``.
+    dim : int, optional
+        Dimension of spin operator (e.g. 3 for spin-1), defaults to 2 for
+        spin half.
+    kwargs
+        Passed to ``quimbify``.
 
     Returns
     -------
-        spin operator, quijified.
+    immutable matrix
+
+    Notes
+    -----
+    The operators return are un-normalized in the sense that they are are not
+    spin operators.
     """
     xyzmap = {0: 'i', 'i': 'i', 'I': 'i',
               1: 'x', 'x': 'x', 'X': 'x',
@@ -57,6 +122,17 @@ pauli = sig
 @lru_cache(maxsize=8)
 def controlled(s, sparse=False):
     """Construct a controlled pauli gate for two qubits.
+
+    Parameters
+    ----------
+    s : str
+        Which pauli to use, including 'not' aliased to 'x'.
+    sparse : bool, optional
+        Whether to construct a sparse operator.
+
+    Returns
+    -------
+    immutable matrix
     """
     keymap = {'x': 'x', 'not': 'x',
               'y': 'y',
@@ -70,23 +146,36 @@ def controlled(s, sparse=False):
 
 
 @lru_cache(maxsize=8)
-def ham_heis(n, j=1.0, bz=0.0, cyclic=True, sparse=False, stype="csr"):
+def ham_heis(n, j=1.0, bz=0.0, cyclic=True, sparse=False, stype="csr",
+             parallel=None, nthreads=None):
     """Constructs the heisenberg spin 1/2 hamiltonian
 
     Parameters
     ----------
-        n: number of spins
-        j: coupling constant(s), with convention that positive =
-            antiferromagnetic. Can supply scalar for isotropic coupling or
-            vector (jx, jy, jz).
-        bz: z-direction magnetic field
-        cyclic: whether to couple the first and last spins
-        sparse: whether to return the hamiltonian in sparse form
-        stype: what format of sparse matrix to return
+    n : int
+        Number of spins.
+    j : float or tuple(float, float, float), optional
+        Coupling constant(s), with convention that positive =
+        antiferromagnetic. Can supply scalar for isotropic coupling or
+        vector ``(jx, jy, jz)``.
+    bz : float, optional.
+        z-direction magnetic field.
+    cyclic : bool, optional
+        Whether to couple the first and last spins.
+    sparse : bool, optional
+        Whether to return the hamiltonian in sparse form.
+    stype : str, optional
+        What format of sparse matrix to return if ``sparse``.
+    parallel : bool, optional
+        Whether to build the matrix in parallel. By default will do this
+        for n > 16.
+    nthreads : int optional
+        How mny threads to use in parallel to build the matrix.
 
     Returns
     -------
-        ham: hamiltonian as matrix
+    immutable matrix
+        The Hamiltonian.
     """
     # TODO: vector magnetic field
     dims = (2,) * n
@@ -95,20 +184,39 @@ def ham_heis(n, j=1.0, bz=0.0, cyclic=True, sparse=False, stype="csr"):
     except TypeError:
         jx = jy = jz = j
 
-    opts = {"sparse": True, "stype": "coo", "coo_build": True}
+    parallel = (n > 16) if parallel is None else parallel
 
-    sds = qu(jx * kron(sig('x'), sig('x')) +
-             jy * kron(sig('y'), sig('y')) +
-             jz * kron(sig('z'), sig('z')) -
-             bz * kron(sig('z'), eye(2)), sparse=True, stype="coo")
-    ham = sum(eyepad(sds, dims, [i, i + 1], **opts) for i in range(n - 1))
+    op_kws = {'sparse': True, 'stype': 'coo'}
+    kron_kws = {"sparse": True, "stype": "coo", "coo_build": True}
 
-    if cyclic:
-        ham = ham + sum(eyepad(j * sig(s, sparse=True),
-                               dims, [0, n - 1], **opts)
-                        for j, s in zip((jx, jy, jz), 'xyz'))
-    if bz != 0.0:
-        ham = ham + eyepad(-bz * sig('z', sparse=True), dims, n - 1, **opts)
+    # The basic operator (interaction and single z-field) that can be repeated.
+    sds = (jx * kron(sig('x', **op_kws), sig('x', **op_kws)) +
+           jy * kron(sig('y', **op_kws), sig('y', **op_kws)) +
+           jz * kron(sig('z', **op_kws), sig('z', **op_kws)) -
+           bz * kron(sig('z', **op_kws), eye(2, **op_kws)))
+
+    def gen_term(i):
+        # special case: the last bz term needs to be added manually
+        if i == -1:
+            return eyepad(-bz * sig('z', **op_kws), dims, n - 1, **kron_kws)
+
+        # special case: the interaction between first and last spins if cyclic
+        if i == n - 1:
+            return sum(
+                j * eyepad(sig(s, **op_kws), dims, [0, n - 1], **kron_kws)
+                for j, s in zip((jx, jy, jz), 'xyz')
+            )
+
+        return eyepad(sds, dims, [i, i + 1], **kron_kws)
+
+    terms = range(-1 if (bz != 0.0) else 0,  # only need extra bz term if nz
+                  n if cyclic else n - 1)
+
+    if parallel:
+        pool = get_thread_pool(nthreads)
+        ham = par_reduce(add, pool.map(gen_term, terms))
+    else:
+        ham = sum(map(gen_term, terms))
 
     if not sparse:
         ham = np.asmatrix(ham.todense())
@@ -122,17 +230,26 @@ def ham_heis(n, j=1.0, bz=0.0, cyclic=True, sparse=False, stype="csr"):
 def ham_j1j2(n, j1=1.0, j2=0.5, bz=0.0, cyclic=True, sparse=False):
     """Generate the j1-j2 hamiltonian, i.e. next nearest neighbour
     interactions.
+
     Parameters
     ----------
-        n: number of spins
-        j1: nearest neighbour coupling strength
-        j2: next nearest neighbour coupling strength
-        bz: b-field strength in z-direction
-        cyclic: cyclic boundary conditions
-        sparse: return hamtiltonian as sparse-csr matrix
+    n : int
+        Number of spins.
+    j1 : float, optional
+        Nearest neighbour coupling strength.
+    j2 : float, optional
+        Next nearest neighbour coupling strength.
+    bz : float, optional
+        B-field strength in z-direction.
+    cyclic : bool, optional
+        Cyclic boundary conditions.
+    sparse : bool, optional
+        Return hamtiltonian as sparse-csr matrix.
+
     Returns
     -------
-        ham: Hamtiltonian as matrix
+    immutable matrix
+        The Hamiltonian.
     """
     dims = (2,) * n
     ps = [sig(i, sparse=True) for i in 'xyz']
@@ -183,7 +300,7 @@ def cmbn(n, k):  # pragma: no cover
 
 
 def uniq_perms(xs):
-    """Generate all the unique permutations of sequence `xs`.
+    """Generate all the unique permutations of sequence ``xs``.
     """
     if len(xs) == 1:
         yield (xs[0],)
@@ -202,12 +319,24 @@ def zspin_projector(n, sz=0, stype="csr"):
 
     Parameters
     ----------
-        n : int
-            Total size of spin system.
-        sz : value or sequence of values
-            Spin-z value(s) subspace(s) to find projector for.
-        stype : str
-            Sparse format of the output matrix.
+    n : int
+        Total size of spin system.
+    sz : float or sequence of floats
+        Spin-z value(s) subspace(s) to find projector for.
+    stype : str
+        Sparse format of the output matrix.
+
+    Returns
+    -------
+    immutable sparse matrix
+        The (non-square) projector onto the specified subspace(s).
+
+    Examples
+    --------
+    >>> zspin_projector(2, 0).A
+    array([[ 0.+0.j,  0.+0.j,  1.+0.j,  0.+0.j],
+           [ 0.+0.j,  1.+0.j,  0.+0.j,  0.+0.j]])
+
     """
     if not isiterable(sz):
         sz = (sz,)

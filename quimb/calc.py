@@ -705,7 +705,7 @@ def ent_cross_matrix(p, sz_blc=1, ent_fn=logneg, calc_self_ent=True):
 
 
 def qid(p, dims, inds, precomp_func=False, sparse_comp=True,
-        norm_func=norm, pow=2, coeff=1):
+        norm_func=norm, power=2, coeff=1):
     # Check inputs
     inds = (inds,) if isinstance(inds, numbers.Number) else inds
 
@@ -718,7 +718,7 @@ def qid(p, dims, inds, precomp_func=False, sparse_comp=True,
     def qid_func(x):
         if isvec(x):
             x = dop(x)
-        return tuple(sum(coeff * norm_func(dot(x, op) - dot(op, x))**pow
+        return tuple(sum(coeff * norm_func(dot(x, op) - dot(op, x))**power
                          for op in ops)
                      for ops in ops_i)
 

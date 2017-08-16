@@ -82,11 +82,14 @@ def par_reduce(fn, seq, nthreads=_NUM_THREAD_WORKERS):
     -----
     This has a several hundred microsecond overhead.
     """
-    pool = get_thread_pool(nthreads)
+    if nthreads == 1:
+        return functools.reduce(fn, seq)
+
+    pool = get_thread_pool(nthreads)  # cached
 
     def _sfn(x):
         """Single call of `fn`, but accounts for the fact
-        that can be passed a single item, in on which
+        that can be passed a single item, in which case
         it should not perform the binary operation.
         """
         if len(x) == 1:
@@ -100,10 +103,9 @@ def par_reduce(fn, seq, nthreads=_NUM_THREAD_WORKERS):
         """
         if len(x) < 3:
             return _sfn(x)
-        else:
-            paired_x = partition_all(2, x)
-            new_x = tuple(pool.map(_sfn, paired_x))
-            return _inner_preduce(new_x)
+        paired_x = partition_all(2, x)
+        new_x = tuple(pool.map(_sfn, paired_x))
+        return _inner_preduce(new_x)
 
     return _inner_preduce(tuple(seq))
 

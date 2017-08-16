@@ -40,7 +40,7 @@ def raise_cant_find_library_function(x, extra_msg=None):
         the required library.
     """
 
-    def function_that_will_raise(*args, **kwargs):
+    def function_that_will_raise(*_, **__):
         error_msg = "The library {} is not installed. ".format(x)
         if extra_msg is not None:
             error_msg += extra_msg

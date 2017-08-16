@@ -588,7 +588,8 @@ def dim_compress(dims, inds):
     return dims, inds
 
 
-def eyepad(ops, dims, inds, sparse=None, stype=None, coo_build=False):
+def eyepad(ops, dims, inds, sparse=None, stype=None, coo_build=False,
+           parallel=False):
     # TODO: rename? itensor, tensor, ikron,
     # TODO: test 2d+ dims and coos
     # TODO: simplify  with compress coords?
@@ -619,6 +620,9 @@ def eyepad(ops, dims, inds, sparse=None, stype=None, coo_build=False):
         Whether to build the intermediary matrices using the ``'coo'``
         format - can be faster to build sparse in this way, then
         convert to chosen format, including dense.
+    parallel : bool, optional
+        Whether to build the operator in parallel using threads (only good
+        for big (d > 2**16) operators).
 
     Returns
     -------
@@ -693,7 +697,10 @@ def eyepad(ops, dims, inds, sparse=None, stype=None, coo_build=False):
         if cff_id > 1:  # trailing identities
             yield eye(cff_id, sparse=sparse, stype="coo")
 
-    return kron(*gen_ops(), stype=stype, coo_build=coo_build)
+    return kron(*gen_ops(),
+                stype=stype,
+                coo_build=coo_build,
+                parallel=parallel)
 
 
 @matrixify
