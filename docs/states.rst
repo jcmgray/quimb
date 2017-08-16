@@ -63,14 +63,42 @@ The sparse format can be specified with the ``stype`` keyword. The partial funct
 Basic Operations
 ================
 
-dagger = .H
-conj
-trans
-@ and
+The 'dagger', or hermitian conjugate, operation is performed with the ``.H`` attribute:
+
+.. code:: python
+
+    >>> psi = 1.0j * bell_state('psi-')
+    >>> psi
+    matrix([[ 0.+0.j        ],
+            [ 0.+0.70710678j],
+            [ 0.-0.70710678j],
+            [ 0.+0.j        ]])
+
+    >>> psi.H
+    matrix([[ 0.-0.j        ,  0.-0.70710678j,  0.+0.70710678j,  0.-0.j        ]])
+
+This is just the combination of ``.conj()`` and ``.T``, but only available for :mod:`scipy.sparse` matrices  and :class:`numpy.matrix` s (not :class:`numpy.ndarray` s).
+
+The product of two quantum objects is the dot or matrix product, which, since python 3.5, has been is overloaded on the ``@`` symbol. Using it is recommended.
+
+.. code:: python
+
+    >>> psi = up()
+    >>> psi
+    matrix([[ 1.+0.j],
+            [ 0.+0.j]])
+    >>> psi.H @ psi  # inner product
+    matrix([[ 1.+0.j]])
+    >>> X = sig('X')
+    >>> X @ psi  # act as gate
+    matrix([[ 0.+0.j],
+            [ 1.+0.j]])
+    >>> psi.H @ X @ psi  # operator expectation
+    matrix([[ 0.+0.j]])
 
 
-Composing States
-================
+Combining Objects - Tensoring
+=============================
 
 There are a number of ways to combine states and operators, i.e. tensoring them together.
 
@@ -87,6 +115,10 @@ This can also be done using the ``&`` overload on numpy and scipy matrices:
 
     >>> psi1 & psi2 & psi3
     ...
+
+.. warning::
+
+    When :mod:`quimb` is imported, it overloads the ``&``/``__and__`` of :class:`numpy.matrix` which replaces the overload of :func:`numpy.bitwise_and`.
 
 Often one wants to sandwich an operator with many identities, :py:func:`~quimb.core.eyepad` can be used for this:
 
@@ -105,3 +137,26 @@ For more advanced tensor constructions, such as reversing and interleaving ident
     >>> dims = [2] * 3
     >>> XZ = pauli('X') & pauli('Z')
     >>> ZIX = perm_eyepad(op, dims, inds=[2, 0])  # now acts with Z on first spin, and X on 3rd
+
+
+Removing Objects - Partial Trace
+================================
+
+To remove, or ignore, certain parts of a quantum state the partial trace function :func:`~quimb.core.partial_trace` (aliased to :func:`~quimb.core.ptr`) is used.
+Here, the internal dimensions of a state must be supplied as well as the indicies of which of these subsystems to *keep*.
+
+For example, if we have a random system of 10 qubits (hilbert space of dimension ``2**10``), and we want just the reduced density matrix describing the first and last spins:
+
+.. code:: python
+
+    >>> dims = [2] * 10
+    >>> D = prod(dims)
+    >>> psi = rand_ket(D)
+    >>> rho_ab = ptr(psi, dims, [0, 9])
+    >>> rho_ab.round(3)  # probably pretty close to identity
+    matrix([[ 0.252+0.j   , -0.012+0.011j, -0.004-0.017j,  0.008+0.005j],
+            [-0.012-0.011j,  0.254+0.j   , -0.017+0.006j,  0.014-0.006j],
+            [-0.004+0.017j, -0.017-0.006j,  0.251+0.j   , -0.017-0.011j],
+            [ 0.008-0.005j,  0.014+0.006j, -0.017+0.011j,  0.244+0.j   ]])
+
+:func:`~quimb.core.partial_trace` accepts dense or sparse, operators or vectors.
