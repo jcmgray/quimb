@@ -38,6 +38,7 @@ before_install:
   - chronic bash deps/travis-install-conda.sh
   - export PATH="$HOME/conda/bin:$PATH"
   - source activate test-environment
+  - chronic bash deps/travis-install-openmpi.sh
   - mpiexec --version
   - mpiexec -np 2 hostname
   - chronic bash deps/travis-install-slepc4py.sh
