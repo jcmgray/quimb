@@ -75,6 +75,7 @@ from .solve.base_solver import (
 
 # Generating objects
 from .gen.operators import (
+    spin_operator,
     sig,
     controlled,
     ham_heis,
@@ -217,6 +218,7 @@ __all__ = [
     'svds',
     'norm',
     # Gen ------------------------------------------------------------------- #
+    'spin_operator',
     'sig',
     'controlled',
     'ham_heis',

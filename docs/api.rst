@@ -174,6 +174,22 @@ Gen.states
     perm_state
     graph_state_1d
 
+Gen.operators
+-------------
+
+.. currentmodule:: quimb.gen.operators
+.. autosummary::
+    :toctree: _autosummary
+
+    spin_operator
+    sig
+    controlled
+    ham_heis
+    ham_j1j2
+    cmbn
+    uniq_perms
+    zspin_projector
+    swap
 
 Evo
 ---
