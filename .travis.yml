@@ -26,6 +26,7 @@ addons:
       - wget
       - openmpi-bin
       - openmpi-common
+      - libopenmpi-dev
 
 cache:
   directories:
