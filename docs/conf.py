@@ -133,12 +133,13 @@ todo_include_todos = False
 # html_theme = 'sphinx_rtd_theme'
 # html_theme = 'alabaster'
 # html_theme = 'flask'
-# html_theme = 'bootstrap'
+
 import sphinx_bootstrap_theme
 html_theme = 'bootstrap'
 html_theme_path = sphinx_bootstrap_theme.get_html_theme_path()
 html_theme_options = {
-  'bootswatch_theme': "journal"
+  'bootswatch_theme': "journal",
+  'navbar_site_name': "Guides",
 }
 
 # Theme options are theme-specific and customize the look and feel of a theme

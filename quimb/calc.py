@@ -545,12 +545,14 @@ pauli_decomp = functools.partial(decomp,
                                  fn_args='IXYZ',
                                  fn_d=2,
                                  nmlz_func=lambda n: 2**-n)
+"""Decompose an operator into Paulis."""
 
 bell_decomp = functools.partial(decomp,
                                 fn=bell_state,
                                 fn_args=(0, 1, 2, 3),
                                 fn_d=4,
                                 nmlz_func=lambda x: 1)
+"""Decompose an operator into bell-states."""
 
 
 def correlation(p, opa, opb, sysa, sysb, dims=None, sparse=None,
