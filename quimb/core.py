@@ -26,6 +26,7 @@ from .accel import (
     kron_dispatch,
     isvec
 )
+from .utils import deprecated
 
 
 _SPARSE_CONSTRUCTORS = {"csr": sp.csr_matrix,
@@ -67,7 +68,7 @@ def normalize(qob, inplace=True):
     dense or sparse, matrix or vector
         Normalized quantum object.
     """
-    n_factor = qob.tr() if isop(qob) else overlap(qob, qob)**0.25
+    n_factor = qob.tr() if isop(qob) else expectation(qob, qob)**0.25
     if inplace:
         qob /= n_factor
         return qob
@@ -1049,19 +1050,19 @@ _OVERLAP_METHODS = {
 }
 
 
-def overlap(a, b):
+def expectation(a, b):
     """'Overlap' between a vector/operator and another vector/operator.
 
     The 'operator' inner product between ``a`` and ``b``, but also for vectors.
     This means that for consistency:
-    * for two vectors it will be the absolute overlap squared ``|<a|b><b|a>|``,
+    * for two vectors it will be the absolute expec squared ``|<a|b><b|a>|``,
     *not* ``<a|b>``
     * for a vector and an operator its will be ``<a|b|a>``
     * for two operators it will be the Hilbert-schmidt inner product
     ``tr(A @ B)``
 
-    In this way ``overlap(a, b) == overlap(dop(a), b) == overlap(dop(a),
-    dop(b))``.
+    In this way ``expectation(a, b) == expectation(dop(a), b) ==
+    expectation(dop(a), dop(b))``.
 
     Parameters
     ----------
@@ -1076,6 +1077,10 @@ def overlap(a, b):
         'Overlap' between ``a`` and ``b``.
     """
     return _OVERLAP_METHODS[isop(a), isop(b), issparse(a) or issparse(b)](a, b)
+
+
+expec = expectation
+overlap = deprecated(expectation, "'overlap'", "'expectation' or 'expec'")
 
 
 # --------------------------------------------------------------------------- #

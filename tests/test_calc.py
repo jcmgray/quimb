@@ -16,7 +16,7 @@ from quimb import (
     rand_ket,
     sig,
     down,
-    overlap,
+    expec,
     singlet_pairs,
     dop,
     singlet,
@@ -142,7 +142,7 @@ class TestPurify:
     def test_d2(self):
         rho = eye(2) / 2
         psi = purify(rho)
-        assert overlap(psi, bell_state('phi+')) > 1 - 1e-14
+        assert expec(psi, bell_state('phi+')) > 1 - 1e-14
 
     def test_pure(self):
         rho = up(qtype='dop')

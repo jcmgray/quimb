@@ -16,7 +16,7 @@ from quimb import (
     rand_ket,
     eigsys,
     seigsys,
-    overlap,
+    expec,
     eye,
 )
 from quimb.solve import SLEPC4PY_FOUND
@@ -103,7 +103,7 @@ class TestSlepcSeigsys:
         assert vks.shape == vka.shape
         for ls, vs, la, va in zip(lks, vks.T, lka, vka.T):
             assert_allclose(ls, la)
-            assert_allclose(overlap(vs, va), 1.0)
+            assert_allclose(expec(vs, va), 1.0)
 
     def test_aeigvals_all_consecutive(self):
         # TODO ************************************************************** #

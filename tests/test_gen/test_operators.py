@@ -6,7 +6,7 @@ from quimb import (
     eigvals,
     eigvecs,
     groundstate,
-    overlap,
+    expec,
     singlet,
     seigvals,
     spin_operator,
@@ -89,7 +89,7 @@ class TestHamHeis:
         evals = eigvals(h)
         assert_allclose(evals, [-3, 1, 1, 1])
         gs = groundstate(h)
-        assert_allclose(overlap(gs, singlet()), 1.)
+        assert_allclose(expec(gs, singlet()), 1.)
 
     def test_ham_heis_sparse_cyclic_4(self):
         h = ham_heis(4, sparse=True, cyclic=True)
@@ -144,8 +144,8 @@ class TestSpinZProjector:
             # Groundstate must be in most symmetric subspace
             gs = groundstate(h)
             gs0 = prj .H @ v0s[:, 0]
-            assert_allclose(overlap(gs, gs0), 1.0)
-            assert_allclose(overlap(h, gs0), overlap(h, gs))
+            assert_allclose(expec(gs, gs0), 1.0)
+            assert_allclose(expec(h, gs0), expec(h, gs))
 
     def test_raises(self):
         with pytest.raises(ValueError):
@@ -168,8 +168,8 @@ class TestSpinZProjector:
             # Groundstate must be in most symmetric subspace
             gs = groundstate(h)
             gs0 = prj .H @ v0s[:, 0]
-            assert_allclose(overlap(gs, gs0), 1.0)
-            assert_allclose(overlap(h, gs0), overlap(h, gs))
+            assert_allclose(expec(gs, gs0), 1.0)
+            assert_allclose(expec(h, gs0), expec(h, gs))
 
 
 class TestSwap:

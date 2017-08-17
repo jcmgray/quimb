@@ -34,7 +34,7 @@ from quimb import (
     permute,
     partial_trace,
     chop,
-    overlap,
+    expec,
 )
 from quimb.core import (
     sparse_matrix,
@@ -757,7 +757,7 @@ class TestOverlap:
     def test_all(self, qtype1, spars1, qtype2, spars2):
         a = qu([[1], [2j], [3]], qtype=qtype1, sparse=spars1)
         b = qu([[1j], [2], [3j]], qtype=qtype2, sparse=spars2)
-        c = overlap(a, b)
+        c = expec(a, b)
         assert not isinstance(c, complex)
         assert_allclose(c, 36)
 
@@ -767,4 +767,4 @@ class TestOverlap:
     def test_negative_expec(self, qtype, sparse, s):
         a = singlet(qtype=qtype)
         b = sig(s, sparse=sparse) & sig(s, sparse=sparse)
-        assert_allclose(overlap(a, b), -1)
+        assert_allclose(expec(a, b), -1)

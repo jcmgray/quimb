@@ -107,3 +107,15 @@ else:  # pragma: no cover
     extra_msg = "This is needed to show progress bars."
     progbar = raise_cant_find_library_function("tqdm", extra_msg)
     continuous_progbar = raise_cant_find_library_function("tqdm", extra_msg)
+
+
+def deprecated(fn, old_name, new_name):
+
+    def new_fn(*args, **kwargs):
+        import warnings
+        warnings.warn("The {} function is deprecated in favor "
+                      "of {}".format(old_name, new_name),
+                      Warning)
+        return fn(*args, **kwargs)
+
+    return new_fn

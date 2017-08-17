@@ -337,7 +337,7 @@ def perm_state(ps):
 
     >>> states = [up(), down()]
     >>> pstate = perm_state(states)
-    >>> overlap(pstate, singlet())
+    >>> expec(pstate, singlet())
     1.0
     """
     n = len(ps)
