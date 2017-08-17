@@ -101,6 +101,7 @@ Core
     sparse_matrix
     identity
     eye
+    speye
     kron
     kronpow
     eyepad
@@ -111,6 +112,8 @@ Core
     itrace
     partial_trace
     ptr
+    expectation
+    expec
     overlap
     normalize
     nmlz
@@ -136,11 +139,14 @@ Calc
     partial_transpose
     negativity
     logarithmic_negativity
+    logneg
     concurrence
     one_way_classical_information
     quantum_discord
     trace_distance
     decomp
+    pauli_decomp
+    bell_decomp
     correlation
     pauli_correlations
     ent_cross_matrix
@@ -156,9 +162,13 @@ Gen.states
 
     basis_vec
     up
+    zplus
     down
+    zminus
     plus
+    xplus
     minus
+    xminus
     yplus
     yminus
     bloch_state
@@ -183,6 +193,7 @@ Gen.operators
 
     spin_operator
     sig
+    pauli
     controlled
     ham_heis
     ham_j1j2

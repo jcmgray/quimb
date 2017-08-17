@@ -1,4 +1,7 @@
 name: test-environment
+channels:
+  - defaults
+  - conda-forge
 dependencies:
   - python=3.6
   - numpy
@@ -11,6 +14,8 @@ dependencies:
   - coverage
   - pytest
   - pytest-cov
+  - sphinx_bootstrap_theme
+  - openmpi
   - pip:
     - coveralls
     - codeclimate-test-reporter

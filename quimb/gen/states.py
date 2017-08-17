@@ -45,7 +45,7 @@ def basis_vec(i, dim, sparse=False, **kwargs):
 
 @functools.lru_cache(8)
 def up(**kwargs):
-    """Returns up-state, aka. |0>, +Z eigenstate.
+    """Returns up-state, aka. ``|0>``, +Z eigenstate.
     """
     u = qu([[1], [0]], **kwargs)
     make_immutable(u)
@@ -57,7 +57,7 @@ zplus = up
 
 @functools.lru_cache(8)
 def down(**kwargs):
-    """Returns down-state, aka. |1>, -Z eigenstate.
+    """Returns down-state, aka. ``|1>``, -Z eigenstate.
     """
     d = qu([[0], [1]], **kwargs)
     make_immutable(d)
@@ -69,7 +69,7 @@ zminus = down
 
 @functools.lru_cache(8)
 def plus(**kwargs):
-    """Returns plus-state, aka. |+>, +X eigenstate.
+    """Returns plus-state, aka. ``|+>``, +X eigenstate.
     """
     return qu([[2**-0.5], [2**-0.5]], **kwargs)
 
@@ -79,7 +79,7 @@ xplus = plus
 
 @functools.lru_cache(8)
 def minus(**kwargs):
-    """Returns minus-state, aka. |->, -X eigenstate.
+    """Returns minus-state, aka. ``|->``, -X eigenstate.
     """
     return qu([[2**-0.5], [-2**-0.5]], **kwargs)
 
@@ -89,14 +89,14 @@ xminus = minus
 
 @functools.lru_cache(8)
 def yplus(**kwargs):
-    """Returns yplus-state, aka. |y+>, +Y eigenstate.
+    """Returns yplus-state, aka. ``|y+>``, +Y eigenstate.
     """
     return qu([[2**-0.5], [1.0j / (2**0.5)]], **kwargs)
 
 
 @functools.lru_cache(8)
 def yminus(**kwargs):
-    """Returns yplus-state, aka. |y->, -Y eigenstate.
+    """Returns yplus-state, aka. ``|y->``, -Y eigenstate.
     """
     return qu([[2**-0.5], [-1.0j / (2**0.5)]], **kwargs)
 
@@ -133,12 +133,12 @@ def bell_state(s, **kwargs):
 
     If n = 2**-0.5, they are:
 
-        0. ``'psi-'`` : n * ( |01> - |10> )
-        1. ``'psi+'`` : n * ( |01> + |10> )
-        2. ``'phi-'`` : n * ( |00> - |11> )
-        3. ``'phi+'`` : n * ( |00> + |11> )
+        0. ``'psi-'`` : ``n * ( |01> - |10> )``
+        1. ``'psi+'`` : ``n * ( |01> + |10> )``
+        2. ``'phi-'`` : ``n * ( |00> - |11> )``
+        3. ``'phi+'`` : ``n * ( |00> + |11> )``
 
-    The can be enumerated in this order.
+    They can be enumerated in this order.
 
     Parameters
     ----------
@@ -146,6 +146,10 @@ def bell_state(s, **kwargs):
         String of number of state corresponding to above.
     kwargs :
         Supplied to ``qu`` called on state.
+
+    Returns
+    -------
+    immutable vector
     """
     keymap = {"psi-": "psi-", 0: "psi-", "psim": "psi-",
               "psi+": "psi+", 1: "psi+", "psip": "psi+",
@@ -156,7 +160,9 @@ def bell_state(s, **kwargs):
                 "phi+": lambda: qu([c, 0, 0, c], **kwargs),
                 "phi-": lambda: qu([c, 0, 0, -c], **kwargs),
                 "psi+": lambda: qu([0, c, c, 0], **kwargs)}
-    return statemap[keymap[s]]()
+    state = statemap[keymap[s]]()
+    make_immutable(state)
+    return state
 
 
 def singlet(**kwargs):
@@ -331,7 +337,7 @@ def perm_state(ps):
 
     >>> states = [up(), down()]
     >>> pstate = perm_state(states)
-    >>> overlap(pstate, singlet())
+    >>> expec(pstate, singlet())
     1.0
     """
     n = len(ps)

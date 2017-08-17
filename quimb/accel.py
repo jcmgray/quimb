@@ -63,7 +63,7 @@ def get_thread_pool(num_workers):
 
 
 def par_reduce(fn, seq, nthreads=_NUM_THREAD_WORKERS):
-    """Paralell reduce.
+    """Parallel reduce.
 
     Parameters
     ----------

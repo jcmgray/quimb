@@ -3,7 +3,9 @@ set -ex
 
 export INSTALL_DIR=$HOME/petsc_and_slepc
 
-if [ ! -d "$INSTALL_DIR/petsc" ]; then
+if [ pip list | grep slepc4py &>/dev/null ]; then
+  echo 'Using cached petsc_and_slepc directory.';
+else
   if [ -d $INSTALL_DIR ]; then
     rm -rf $INSTALL_DIR
   fi
@@ -63,6 +65,4 @@ if [ ! -d "$INSTALL_DIR/petsc" ]; then
   git pull
   python setup.py build
   python setup.py install
-else
-  echo 'Using cached petsc_and_slepc directory.';
 fi

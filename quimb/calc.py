@@ -33,7 +33,7 @@ from .core import (
     tr,
     ptr,
     infer_size,
-    overlap,
+    expec,
     dop,
 )
 from .solve.base_solver import (
@@ -146,7 +146,7 @@ def fidelity(p1, p2):
     float
     """
     if isvec(p1) or isvec(p2):
-        return overlap(p1, p2)
+        return expec(p1, p2)
     else:
         sqrho = sqrtm(p1)
         return tr(sqrtm(dot(sqrho, dot(p2, sqrho))))
@@ -473,7 +473,7 @@ def trace_distance(p1, p2):
 
     # If both are pure kets then special case
     if (not p1_is_op) and (not p2_is_op):
-        return sqrt(1 - overlap(p1, p2))
+        return sqrt(1 - expec(p1, p2))
 
     # Otherwise do full calculation
     return 0.5 * norm((p1 if p1_is_op else dop(p1)) -
@@ -507,7 +507,7 @@ def decomp(a, fn, fn_args, fn_d, nmlz_func, mode="p", tol=1e-3):
     Returns
     -------
     None or OrderedDict:
-        Pauli operator name and overlap with ``a``.
+        Pauli operator name and expec with ``a``.
 
     See Also
     --------
@@ -521,11 +521,11 @@ def decomp(a, fn, fn_args, fn_d, nmlz_func, mode="p", tol=1e-3):
     def calc_name_and_overlap():
         for perm in itertools.product(fn_args, repeat=n):
             op = kron(*(fn(x, sparse=True) for x in perm)) * nmlz_func(n)
-            cff = overlap(a, op)
+            cff = expec(a, op)
             yield "".join(str(x) for x in perm), cff
 
     names_cffs = list(calc_name_and_overlap())
-    # sort by descending overlap and turn into OrderedDict
+    # sort by descending expec and turn into OrderedDict
     names_cffs.sort(key=lambda pair: -abs(pair[1]))
     names_cffs = collections.OrderedDict(names_cffs)
     # Print decomposition
@@ -545,12 +545,14 @@ pauli_decomp = functools.partial(decomp,
                                  fn_args='IXYZ',
                                  fn_d=2,
                                  nmlz_func=lambda n: 2**-n)
+"""Decompose an operator into Paulis."""
 
 bell_decomp = functools.partial(decomp,
                                 fn=bell_state,
                                 fn_args=(0, 1, 2, 3),
                                 fn_d=4,
                                 nmlz_func=lambda x: 1)
+"""Decompose an operator into bell-states."""
 
 
 def correlation(p, opa, opb, sysa, sysb, dims=None, sparse=None,
@@ -599,7 +601,7 @@ def correlation(p, opa, opb, sysa, sysb, dims=None, sparse=None,
 
     @realify
     def corr(state):
-        return overlap(opab, state) - overlap(opa, state) * overlap(opb, state)
+        return expec(opab, state) - expec(opa, state) * expec(opb, state)
 
     return corr if precomp_func else corr(p)
 

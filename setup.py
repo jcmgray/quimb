@@ -24,6 +24,7 @@ setup(
         'docs': [
             'sphinx',
             'sphinx_rtd_theme',
+            'sphinx_bootstrap_theme',
         ],
         'advanced_solvers': [
             'slepc4py',

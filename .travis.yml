@@ -24,8 +24,6 @@ addons:
       - libblas-dev
       - libblas3gf
       - wget
-      - openmpi-bin
-      - openmpi-common
 
 cache:
   directories:
@@ -33,12 +31,14 @@ cache:
     - $HOME/petsc_and_slepc
 
 before_install:
-  - bash deps/travis-install-conda.sh >/dev/null
+  - function chronic { /bin/rm --force /tmp/surpress.out 2> /dev/null; $* 2>&1 > /tmp/surpress.out || cat /tmp/surpress.out; /bin/rm /tmp/surpress.out; }
+  - chronic bash deps/travis-install-conda.sh
   - export PATH="$HOME/conda/bin:$PATH"
   - source activate test-environment
+  - chronic bash deps/travis-install-openmpi.sh
   - mpiexec --version
   - mpiexec -np 2 hostname
-  - bash deps/travis-install-slepc4py.sh >/dev/null
+  - chronic bash deps/travis-install-slepc4py.sh
 
 install:
   - pip install .

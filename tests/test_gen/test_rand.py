@@ -8,7 +8,7 @@ from quimb import (
     chop,
     tr,
     ptr,
-    overlap,
+    expec,
     eigvals,
     mutual_information,
     logneg,
@@ -168,7 +168,7 @@ class TestRandMPS:
         psi = rand_matrix_product_state(d, n, b, cyclic=cyclic)
         assert psi.shape == (e, 1)
 
-        assert_allclose(overlap(psi, psi), 1.0)
+        assert_allclose(expec(psi, psi), 1.0)
 
     @pytest.mark.parametrize("cyclic", (True, False))
     @pytest.mark.parametrize("bond_dim", (1, 2, 3))
