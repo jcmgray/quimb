@@ -11,14 +11,13 @@ fi
 
 # setup the source locations etc
 SRC_DIR=${SRC_DIR:-"$LOCAL/../src"}
-OPENMPI_VER=${OPENMPI_VER:-"openmpi-2.1.1"}
-MPI4PY_REPO=${MPI4PY_REPO:-"https://bitbucket.org/mpi4py/mpi4py.git"}
 
 # make folders
 mkdir -p $LOCAL
 mkdir -p $SRC_DIR
 
 # # download and extract openmpi
+# OPENMPI_VER=${OPENMPI_VER:-"openmpi-2.1.1"}
 # wget "https://www.open-mpi.org/software/ompi/v${OPENMPI_VER:8:3}/downloads/$OPENMPI_VER.tar.gz" -P $SRC_DIR
 # tar xzf "$SRC_DIR/$OPENMPI_VER.tar.gz" -C $SRC_DIR
 # cd "$SRC_DIR/$OPENMPI_VER"
@@ -29,6 +28,7 @@ mkdir -p $SRC_DIR
 # make install
 
 # install python package
+MPI4PY_REPO=${MPI4PY_REPO:-"https://bitbucket.org/mpi4py/mpi4py.git"}
 cd $SRC_DIR
 git clone $MPI4PY_REPO
 cd $SRC_DIR/mpi4py

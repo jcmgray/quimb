@@ -15,6 +15,7 @@ dependencies:
   - pytest
   - pytest-cov
   - sphinx_bootstrap_theme
+  - openmpi
   - pip:
     - coveralls
     - codeclimate-test-reporter

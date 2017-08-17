@@ -24,9 +24,6 @@ addons:
       - libblas-dev
       - libblas3gf
       - wget
-      - openmpi-bin
-      - openmpi-common
-      - libopenmpi-dev
 
 cache:
   directories:
