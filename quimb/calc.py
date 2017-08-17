@@ -649,7 +649,8 @@ def pauli_correlations(p, ss=("xx", "yy", "zz"), sysa=0, sysb=1,
     return tuple(gen_corr_list())
 
 
-def ent_cross_matrix(p, sz_blc=1, ent_fn=logneg, calc_self_ent=True):
+def ent_cross_matrix(p, sz_blc=1, ent_fn=logneg, calc_self_ent=True,
+                     upscale=False):
     """Calculate the pair-wise function ent_fn  between all sites or blocks
     of a state.
 
@@ -667,6 +668,9 @@ def ent_cross_matrix(p, sz_blc=1, ent_fn=logneg, calc_self_ent=True):
         Whether to calculate the function for each site
         alone, purified. If the whole state is pure then this is the
         entanglement with the whole remaining system.
+    upscale : bool, optional
+        Whether, if sz_blc != 1, to upscale the results so that the output
+        array is the same size as if it was.
 
     Returns
     -------
@@ -703,6 +707,19 @@ def ent_cross_matrix(p, sz_blc=1, ent_fn=logneg, calc_self_ent=True):
                 ent = ent_fn(rhoab, dims=(2**sz_blc, 2**sz_blc)) / sz_blc
             ents[i // sz_blc, j // sz_blc] = ent
             ents[j // sz_blc, i // sz_blc] = ent
+
+    if upscale:
+        up_ents = np.tile(np.nan, (sz_p, sz_p))
+
+        for i in range(n):
+            for j in range(i, n):
+                up_ents[i * sz_blc:(i + 1) * sz_blc,
+                        j * sz_blc:(j + 1) * sz_blc] = ents[i, j]
+                up_ents[j * sz_blc:(j + 1) * sz_blc,
+                        i * sz_blc:(i + 1) * sz_blc] = ents[j, i]
+
+        ents = up_ents
+
     return ents
 
 
