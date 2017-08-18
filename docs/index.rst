@@ -6,6 +6,7 @@
 Welcome to quimb's documentation!
 =================================
 
+:mod:`quimb` is a library for quantum information and many-body calculations.
 
 .. rubric:: Guides:
 
@@ -16,6 +17,7 @@ Welcome to quimb's documentation!
    states
    calculating quantities
    solving systems
+   distributed parallelism - mpi
    dynamics and evolution
 
 
