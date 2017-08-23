@@ -390,11 +390,14 @@ def slepc_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
         res = None
 
     if return_vecs:
-        # need master and workers to do this:
-        lvecs = [
-            gather_petsc_array(pvec, comm=comm, out_shape=(-1, 1))
-            for pvec in eigensolver.getInvariantSubspace()
-        ]
+        pvec = pa.getVecLeft()
+
+        def get_vecs_local():
+            for i in range(k):
+                eigensolver.getEigenvector(i, pvec)
+                yield gather_petsc_array(pvec, comm=comm, out_shape=(-1, 1))
+
+        lvecs = list(get_vecs_local())
         if rank == 0:
             vk = np.concatenate(lvecs, axis=1)
             if sort:
