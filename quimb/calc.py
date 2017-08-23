@@ -677,6 +677,7 @@ def ent_cross_matrix(p, sz_blc=1, ent_fn=logneg, calc_self_ent=True,
     2d-numpy.ndarray
         matrix of pairwise ent_fn results.
     """
+
     sz_p = infer_size(p)
     dims = (2,) * sz_p
     n = sz_p // sz_blc
@@ -689,24 +690,25 @@ def ent_cross_matrix(p, sz_blc=1, ent_fn=logneg, calc_self_ent=True,
         if not calc_self_ent:
             for i in range(n):
                 ents[i, i] = np.nan
-        return ents
 
-    # Range over pairwise blocks
-    for i in range(0, sz_p - sz_blc + 1, sz_blc):
-        for j in range(i, sz_p - sz_blc + 1, sz_blc):
-            if i == j:
-                if calc_self_ent:
-                    rhoa = ptr(p, dims, [i + b for b in range(sz_blc)])
-                    psiap = purify(rhoa)
-                    ent = ent_fn(psiap, dims=(2**sz_blc, 2**sz_blc)) / sz_blc
+    else:
+        # Range over pairwise blocks
+        for i in range(0, sz_p - sz_blc + 1, sz_blc):
+            for j in range(i, sz_p - sz_blc + 1, sz_blc):
+                if i == j:
+                    if calc_self_ent:
+                        rhoa = ptr(p, dims, [i + b for b in range(sz_blc)])
+                        psiap = purify(rhoa)
+                        ent = ent_fn(psiap,
+                                     dims=(2**sz_blc, 2**sz_blc)) / sz_blc
+                    else:
+                        ent = np.nan
                 else:
-                    ent = np.nan
-            else:
-                rhoab = ptr(p, dims, [i + b for b in range(sz_blc)] +
-                                     [j + b for b in range(sz_blc)])
-                ent = ent_fn(rhoab, dims=(2**sz_blc, 2**sz_blc)) / sz_blc
-            ents[i // sz_blc, j // sz_blc] = ent
-            ents[j // sz_blc, i // sz_blc] = ent
+                    rhoab = ptr(p, dims, [i + b for b in range(sz_blc)] +
+                                         [j + b for b in range(sz_blc)])
+                    ent = ent_fn(rhoab, dims=(2**sz_blc, 2**sz_blc)) / sz_blc
+                ents[i // sz_blc, j // sz_blc] = ent
+                ents[j // sz_blc, i // sz_blc] = ent
 
     if upscale:
         up_ents = np.tile(np.nan, (sz_p, sz_p))
