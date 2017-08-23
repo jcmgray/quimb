@@ -145,6 +145,7 @@ class SpawnMPIProcessesFunc(object):
 
         if num_workers == 1:
             kwargs['comm_self'] = True
+            return self.fn(*args, **kwargs)
         else:
             kwargs['wait_for_workers'] = num_workers
 
