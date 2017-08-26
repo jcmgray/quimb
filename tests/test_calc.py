@@ -43,7 +43,10 @@ from quimb import (
     ent_cross_matrix,
     qid,
     is_degenerate,
+    is_eigenvector,
     page_entropy,
+    rand_herm,
+    seigvecs,
 )
 
 
@@ -434,6 +437,14 @@ class TestEntCrossMatrix:
         assert_allclose(ecm[0, 0], np.nan)
         assert_allclose(ecm[1, 0], 0)
 
+    def test_block2_upscale(self):
+        p = bell_state('phi+') & bell_state('phi+')
+        ecm = ent_cross_matrix(p, ent_fn=logneg, calc_self_ent=False, sz_blc=2)
+        assert ecm.shape == (2, 2)
+        ecm = ent_cross_matrix(p, ent_fn=logneg, calc_self_ent=False, sz_blc=2,
+                               upscale=True)
+        assert ecm.shape == (4, 4)
+
 
 class TestEntCrossMatrixBlocked:
     @pytest.mark.parametrize("sz_p", [2**2 for i in [2, 3, 4, 5, 6, 9, 12]])
@@ -496,3 +507,24 @@ class TestPageEntropy:
     def test_raises(self):
         with pytest.raises(ValueError):
             page_entropy(8, 16)
+
+
+class TestIsEigenvector:
+
+    def test_dense_true(self):
+        a = rand_herm(10)
+        v = eigvecs(a)
+        for i in range(10):
+            assert is_eigenvector(v[:, i], a)
+
+    def test_dense_false(self):
+        a = rand_herm(10)
+        v = rand_ket(10)
+        assert not is_eigenvector(v, a)
+
+    def test_sparse(self):
+        a = rand_herm(10, sparse=True, density=0.4)
+        vt = seigvecs(a, sigma=0, k=1)
+        assert is_eigenvector(vt, a)
+        vf = rand_ket(10)
+        assert not is_eigenvector(vf, a)

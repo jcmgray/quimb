@@ -152,6 +152,7 @@ from .calc import (
     ent_cross_matrix,
     qid,
     is_degenerate,
+    is_eigenvector,
     page_entropy,
 )
 
@@ -290,6 +291,7 @@ __all__ = [
     'ent_cross_matrix',
     'qid',
     'is_degenerate',
+    'is_eigenvector',
     'page_entropy',
     # Evo ------------------------------------------------------------------- #
     'QuEvo',

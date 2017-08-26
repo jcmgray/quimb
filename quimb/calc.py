@@ -773,6 +773,28 @@ def is_degenerate(op, tol=1e-12):
     return np.count_nonzero(abs(l_gaps) < l_tol)
 
 
+def is_eigenvector(vec, mat, **kwargs):
+    """Determines whether a vector is an eigenvector of an operator.
+
+    Parameters
+    ----------
+    vec : vector
+        Vector to check.
+    mat : matrix
+        Matrix to check.
+    kwargs :
+        Supplied to numpy.allclose
+
+    Returns
+    -------
+    bool
+        Whether ``mat @ vec = l * vec`` for some scalar ``l``.
+    """
+    vec2 = mat @ vec
+    factor = np.asscalar(vec2[0] / vec[0])
+    return np.allclose(factor * vec, vec2, **kwargs)
+
+
 @accel
 def page_entropy(sz_subsys, sz_total):  # pragma: no cover
     """Calculate the page entropy, i.e. expected entropy for a subsytem
