@@ -417,7 +417,6 @@ def slepc_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
 def _init_svd_solver(nsv=6, SVDType='cross', tol=None, max_it=None,
                      ncv=None, comm=None):
     SLEPc, comm = get_slepc(comm=comm)
-    comm = SLEPc.COMM_WORLD
     svd_solver = SLEPc.SVD().create(comm=comm)
     svd_solver.setType(SVDType)
     svd_solver.setTolerances(tol=tol, max_it=max_it)
@@ -535,7 +534,7 @@ def slepc_mfn_multiply(mat, vec,
                 'EXPOKIT': SLEPc.MFN.Type.EXPOKIT}
 
     # set up the matrix function options and objects
-    mfn = SLEPc.MFN().create()
+    mfn = SLEPc.MFN().create(comm=comm)
     mfn.setOperator(mat)
     mfn.setType(type_map[MFNType.upper()])
     mfn_fn = mfn.getFN()
