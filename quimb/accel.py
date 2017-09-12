@@ -145,7 +145,10 @@ def matrixify(fn):
     """
     @functools.wraps(fn)
     def matrixified_fn(*args, **kwargs):
-        return np.asmatrix(fn(*args, **kwargs))
+        out = fn(*args, **kwargs)
+        if not isinstance(out, np.matrix):
+            return np.asmatrix(out)
+        return out
     return matrixified_fn
 
 
