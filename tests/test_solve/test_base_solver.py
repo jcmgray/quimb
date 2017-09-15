@@ -104,9 +104,8 @@ class TestEigh:
     def test_eigsys(self, mat_herm_dense, bkd):
         u, a = mat_herm_dense
         kwargs = {'bsz': (2, 2)} if bkd == 'scalapy' else {}
-        evals, _ = eigsys(a, sort=False, backend=bkd, **kwargs)
-        assert(set(np.rint(evals)) == set((-1, 2, 4, -3)))
         evals, v = eigsys(a, backend=bkd, **kwargs)
+        assert(set(np.rint(evals)) == set((-1, 2, 4, -3)))
         assert_allclose(evals, [-3, -1, 2, 4])
         for i, j in zip([3, 0, 1, 2], range(4)):
             o = u[:, i].H @ v[:, j]

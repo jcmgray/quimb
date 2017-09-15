@@ -15,24 +15,29 @@ from .scalapy_solver import eigsys_scalapy
 # Work out if already running as mpi
 if ('OMPI_COMM_WORLD_SIZE' in os.environ) or ('PMI_SIZE' in os.environ):
     ALREADY_RUNNING_AS_MPI = True
+    if '_QUIMB_MPI_LAUNCHED' not in os.environ:
+        raise RuntimeError(
+            "For the moment, quimb programs launched explicitly"
+            " using MPI need to use `quimb-mpiexec`."
+        )
+
 else:
     ALREADY_RUNNING_AS_MPI = False
 
-
 # Work out the desired total number of workers
-for var in ['QUIMB_NUM_MPI_WORKERS',
-            'QUIMB_NUM_PROCS',
-            'OMPI_UNIVERSE_SIZE',
-            'MPI_UNIVERSE_SIZE',
-            'OMP_NUM_THREADS']:
-    if var in os.environ:
-        NUM_MPI_WORKERS = int(os.environ[var])
+for _NUM_MPI_WORKERS_VAR in ['QUIMB_NUM_MPI_WORKERS',
+                             'QUIMB_NUM_PROCS',
+                             'OMP_NUM_THREADS',
+                             ]:
+    if _NUM_MPI_WORKERS_VAR in os.environ:
+        NUM_MPI_WORKERS = int(os.environ[_NUM_MPI_WORKERS_VAR])
         NUM_MPI_WORKERS_SET = True
         break
     NUM_MPI_WORKERS_SET = False
 
 if not NUM_MPI_WORKERS_SET:
     import psutil
+    _NUM_MPI_WORKERS_VAR = 'psutil'
     NUM_MPI_WORKERS = psutil.cpu_count(logical=False)
 
 
@@ -48,6 +53,9 @@ class CachedPoolWithShutdown(object):
         # convert None to default so the cache the same
         if num_workers is None:
             num_workers = NUM_MPI_WORKERS
+        elif ALREADY_RUNNING_AS_MPI and (num_workers != NUM_MPI_WORKERS):
+            raise ValueError("Can't specify number of processes when running "
+                             "under MPI rather than spawning processes.")
 
         # first call
         if self._settings == '__UNINITIALIZED__':
@@ -68,12 +76,15 @@ def get_mpi_pool(num_workers=None, num_threads=1):
     from mpi4py.futures import MPIPoolExecutor
     return MPIPoolExecutor(num_workers, main=False, delay=1e-2,
                            env={'OMP_NUM_THREADS': str(num_threads),
-                                'MPI_UNIVERSE_SIZE': '1'})
+                                'QUIMB_NUM_MPI_WORKERS': str(num_workers),
+                                '_QUIMB_MPI_LAUNCHED': 'SPAWNED'})
 
 
 class GetMPIBeforeCall(object):
     """Wrap a function to automatically get the correct communicator before
     its called, and to set the `comm_self` kwarg to allow forced self mode.
+
+    This is called by every mpi process before the function evaluation.
     """
 
     def __init__(self, fn):
@@ -83,6 +94,19 @@ class GetMPIBeforeCall(object):
                  comm_self=False,
                  wait_for_workers=None,
                  **kwargs):
+        """
+        Parameters
+        ----------
+        *args :
+            Supplied to self.fn
+        comm_self : bool, optional
+            Whether to force use of MPI.COMM_SELF
+        wait_for_workers : int, optional
+            If set, wait for the communicator to have this many workers, this
+            can help to catch some errors regarding expected worker numbers.
+        **kwargs :
+            Supplied to self.fn
+        """
         from mpi4py import MPI
 
         if not comm_self:
@@ -95,20 +119,23 @@ class GetMPIBeforeCall(object):
             t0 = time()
             while comm.Get_size() != wait_for_workers:
                 if time() - t0 > 2:
-                    raise RuntimeError("Timeout while waiting for {} workers "
-                                       "to join comm {}."
-                                       "".format(wait_for_workers, comm))
+                    raise RuntimeError(
+                        "Timeout while waiting for {} workers "
+                        "to join comm {}.".format(wait_for_workers, comm)
+                    )
 
         return self.fn(*args, comm=comm, **kwargs)
 
 
 class SpawnMPIProcessesFunc(object):
-    """
+    """Automatically wrap a function to be executed in parallel by a
+    pool of mpi workers.
+
+    This is only called by the master mpi process in manual mode, or only by
+    the (non-mpi) spawning process in automatic mode.
     """
 
     def __init__(self, fn):
-        """
-        """
         self.fn = fn
 
     def __call__(self, *args,
@@ -117,9 +144,7 @@ class SpawnMPIProcessesFunc(object):
                  mpi_pool=None,
                  spawn_all=not ALREADY_RUNNING_AS_MPI,
                  **kwargs):
-        """Automatically wrap a function to be executed in parallel by a
-        pool of mpi workers.
-
+        """
         Parameters
         ----------
             *args
@@ -143,51 +168,54 @@ class SpawnMPIProcessesFunc(object):
         if num_workers is None:
             num_workers = NUM_MPI_WORKERS
 
-        if num_workers == 1:
-            kwargs['comm_self'] = True
-            return self.fn(*args, **kwargs)
-        else:
-            kwargs['wait_for_workers'] = num_workers
+        if num_workers == 1:  # no pool or communicator required
+            return self.fn(*args, comm_self=True, **kwargs)
+
+        kwargs['wait_for_workers'] = num_workers
 
         if mpi_pool is not None:
             pool = mpi_pool
         else:
-            num_workers_to_spawn = num_workers - int(ALREADY_RUNNING_AS_MPI)
-            if num_workers_to_spawn > 0:
-                pool = get_mpi_pool(num_workers_to_spawn, num_threads)
+            pool = get_mpi_pool(num_workers, num_threads)
 
         # the (non mpi) main process is idle while the workers compute.
         if spawn_all:
             futures = [pool.submit(self.fn, *args, **kwargs)
                        for _ in range(num_workers)]
-            results = (f.result() for f in futures)
-            # Get master result, (not always first submitted)
-            return next(r for r in results if r is not None)
+            results = [f.result() for f in futures]
 
         # the master process is the master mpi process and contributes
         else:
-            for _ in range(num_workers_to_spawn):
-                pool.submit(self.fn, *args, **kwargs)
-            return self.fn(*args, **kwargs)
+            futures = [pool.submit(self.fn, *args, **kwargs)
+                       for _ in range(num_workers - 1)]
+            results = ([self.fn(*args, **kwargs)] +
+                       [f.result() for f in futures])
+
+        # Get master result, (not always first submitted)
+        return next(r for r in results if r is not None)
 
 
 # ---------------------------------- SLEPC ---------------------------------- #
 
 seigsys_slepc_mpi = functools.wraps(slepc_seigsys)(
     GetMPIBeforeCall(slepc_seigsys))
-seigsys_slepc_spawn = SpawnMPIProcessesFunc(seigsys_slepc_mpi)
+seigsys_slepc_spawn = functools.wraps(slepc_seigsys)(
+    SpawnMPIProcessesFunc(seigsys_slepc_mpi))
 
 svds_slepc_mpi = functools.wraps(slepc_svds)(
     GetMPIBeforeCall(slepc_svds))
-svds_slepc_spawn = SpawnMPIProcessesFunc(svds_slepc_mpi)
+svds_slepc_spawn = functools.wraps(slepc_svds)(
+    SpawnMPIProcessesFunc(svds_slepc_mpi))
 
 mfn_multiply_slepc_mpi = functools.wraps(slepc_mfn_multiply)(
     GetMPIBeforeCall(slepc_mfn_multiply))
-mfn_multiply_slepc_spawn = SpawnMPIProcessesFunc(mfn_multiply_slepc_mpi)
+mfn_multiply_slepc_spawn = functools.wraps(slepc_mfn_multiply)(
+    SpawnMPIProcessesFunc(mfn_multiply_slepc_mpi))
 
 
 # --------------------------------- SCALAPY --------------------------------- #
 
 eigsys_scalapy_mpi = functools.wraps(eigsys_scalapy)(
     GetMPIBeforeCall(eigsys_scalapy))
-eigsys_scalapy_spawn = SpawnMPIProcessesFunc(eigsys_scalapy_mpi)
+eigsys_scalapy_spawn = functools.wraps(eigsys_scalapy)(
+    SpawnMPIProcessesFunc(eigsys_scalapy_mpi))

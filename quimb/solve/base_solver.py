@@ -1,27 +1,22 @@
-"""Backend agnostic fFunctions for solving matrices either fully or partially.
+"""Backend agnostic functions for solving matrices either fully or partially.
 """
 
 # TODO: restart eigen and svd - up to tol
 # TODO: test non-herm
-# TODO: elemental?
-# TODO: fix slepc svds instability
+
 import functools
 import numpy as np
 import numpy.linalg as nla
 
 from ..utils import raise_cant_find_library_function
-
 from ..accel import issparse, vdot
-
 from .numpy_solver import (
     eigsys_numpy,
     eigvals_numpy,
     seigsys_numpy,
     numpy_svds,
 )
-
 from .scipy_solver import seigsys_scipy, scipy_svds
-
 from . import SLEPC4PY_FOUND, SCALAPY_FOUND
 
 if SLEPC4PY_FOUND:
