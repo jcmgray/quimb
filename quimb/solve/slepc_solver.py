@@ -426,7 +426,7 @@ def _init_svd_solver(nsv=6, SVDType='cross', tol=None, max_it=None,
 
 
 def slepc_svds(a, k=6, ncv=None, return_vecs=True, SVDType='cross',
-               extra_vals=False, tol=None, max_it=None, comm=None):
+               return_all_conv=False, tol=None, max_it=None, comm=None):
     """Find the singular values for sparse matrix `a`.
 
     Parameters
@@ -443,7 +443,6 @@ def slepc_svds(a, k=6, ncv=None, return_vecs=True, SVDType='cross',
     if comm is None:
         comm = get_default_comm()
 
-    pa = convert_mat_to_petsc(a, comm=comm)
     svd_solver = _init_svd_solver(
         nsv=k,
         SVDType=SVDType,
@@ -452,11 +451,13 @@ def slepc_svds(a, k=6, ncv=None, return_vecs=True, SVDType='cross',
         ncv=ncv,
         comm=comm
     )
+
+    pa = convert_mat_to_petsc(a, comm=comm)
     svd_solver.setOperator(pa)
     svd_solver.solve()
     nconv = svd_solver.getConverged()
     assert nconv >= k
-    k = nconv if extra_vals else k
+    k = nconv if return_all_conv else k
 
     rank = comm.Get_rank()
 
