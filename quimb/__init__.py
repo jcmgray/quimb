@@ -73,6 +73,9 @@ from .solve.base_solver import (
     svd,
     svds,
     norm,
+    expm,
+    sqrtm,
+    expm_multiply,
 )
 
 # Generating objects
@@ -128,9 +131,6 @@ from .gen.rand import (
 
 # Functions for calculating properties
 from .calc import (
-    expm,
-    sqrtm,
-    expm_multiply,
     fidelity,
     purify,
     entropy,

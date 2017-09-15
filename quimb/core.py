@@ -13,7 +13,7 @@ from numpy.matlib import zeros
 import scipy.sparse as sp
 
 from .accel import (
-    accel,
+    njit,
     par_reduce,
     matrixify,
     realify,
@@ -227,7 +227,7 @@ def infer_size(p, base=2):
 
 
 @realify
-@accel
+@njit
 def _trace_dense(op):  # pragma: no cover
     """Trace of a dense matrix.
     """
@@ -261,7 +261,7 @@ def trace(mat):
 
 
 @matrixify
-@accel
+@njit
 def _identity_dense(d):  # pragma: no cover
     """Returns a dense, complex identity of given dimension.
     """

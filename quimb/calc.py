@@ -9,14 +9,10 @@ import functools
 
 import numpy as np
 import numpy.linalg as nla
-import scipy.linalg as sla
-import scipy.sparse.linalg as spla
 from scipy.optimize import minimize
 
 from .accel import (
-    accel,
-    dot_dense,
-    ldmul,
+    njit,
     issparse,
     isop,
     zeroify,
@@ -41,9 +37,8 @@ from .solve.base_solver import (
     eigvals,
     norm,
     seigvals,
-)
-from .solve.mpi_spawner import (
-    mfn_multiply_slepc_spawn,
+    sqrtm,
+
 )
 from .gen.operators import sig
 from .gen.states import (
@@ -51,84 +46,6 @@ from .gen.states import (
     bell_state,
     bloch_state,
 )
-
-
-def expm(a, herm=True):
-    """Matrix exponential, can be accelerated if explicitly hermitian.
-
-    Parameters
-    ----------
-    a : dense or sparse matrix
-        Matrix to exponentiate.
-    herm : bool, optional
-        If True (the default), and ``a`` is dense, digonalize the matrix
-        in order to perform the exponential.
-
-    Returns
-    -------
-    matrix
-    """
-    if issparse(a):
-        # convert to and from csc to suppress scipy warning
-        return spla.expm(a.tocsc()).tocsr()
-    elif not herm:
-        return np.asmatrix(spla.expm(a))
-    else:
-        evals, evecs = eigsys(a)
-        return dot_dense(evecs, ldmul(np.exp(evals), evecs.H))
-
-
-_EXPM_MULTIPLY_METHODS = {
-    'SCIPY': spla.expm_multiply,
-    'SLEPC': functools.partial(mfn_multiply_slepc_spawn, fntype='exp'),
-}
-
-
-def expm_multiply(mat, vec, backend="AUTO", **kwargs):
-    """Compute the action of ``expm(mat)`` on ``vec``.
-
-    Parameters
-    ----------
-    mat : matrix-like
-        Matrix to exponentiate.
-    vec : vector-like
-        Vector to act with exponential of matrix on.
-    backend : {'AUTO', 'SCIPY', 'SLEPC'}, optional
-        Which backend to use.
-    kwargs
-        Supplied to backend function.
-
-    Returns
-    -------
-    vector
-        Result of ``expm(mat) @ vec``.
-    """
-    return _EXPM_MULTIPLY_METHODS[backend.upper()](mat, vec, **kwargs)
-
-
-def sqrtm(a, herm=True):
-    """Matrix square root, can be accelerated if explicitly hermitian.
-
-    Parameters
-    ----------
-    a : dense or sparse matrix
-        Matrix to take square root of.
-    herm : bool, optional
-        If True (the default), and ``a`` is dense, digonalize the matrix
-        in order to take the square root.
-
-    Returns
-    -------
-    matrix
-    """
-    if issparse(a):
-        raise NotImplementedError("No sparse sqrtm available.")
-    elif not herm:
-        return np.asmatrix(sla.sqrtm(a))
-    else:
-        evals, evecs = eigsys(a)
-        return dot_dense(evecs, ldmul(np.sqrt(evals.astype(complex)),
-                                      evecs.H))
 
 
 def fidelity(p1, p2):
@@ -795,7 +712,7 @@ def is_eigenvector(vec, mat, **kwargs):
     return np.allclose(factor * vec, vec2, **kwargs)
 
 
-@accel
+@njit
 def page_entropy(sz_subsys, sz_total):  # pragma: no cover
     """Calculate the page entropy, i.e. expected entropy for a subsytem
     of a random state in Hilbert space.

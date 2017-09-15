@@ -7,7 +7,7 @@ from cytoolz import isiterable, concat
 import numpy as np
 import scipy.sparse as sp
 
-from ..accel import accel, make_immutable, get_thread_pool, par_reduce
+from ..accel import njit, make_immutable, get_thread_pool, par_reduce
 from ..core import qu, eye, kron, eyepad
 
 
@@ -287,7 +287,7 @@ def ham_j1j2(n, j1=1.0, j2=0.5, bz=0.0, cyclic=True, sparse=False):
     return ham
 
 
-@accel
+@njit
 def cmbn(n, k):  # pragma: no cover
     """Integer combinatorial factor.
     """
