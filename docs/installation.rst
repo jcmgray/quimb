@@ -28,9 +28,3 @@ The optional dependencies mainly allow high performance, distributed eigen-solvi
     * `petsc <http://www.mcs.anl.gov/petsc/>`_
     * `mpi4py <http://mpi4py.readthedocs.io/en/latest/>`_ (v2.1.0+)
     * An MPI implementation (`OpenMPI <https://www.open-mpi.org/>`_ recommended)
-
-For distributed, dense eigensolving (but probably slower than ``numpy``) the ``scalapy`` package interfaces with ``scalapack``.
-
-    * `scalapack <http://www.netlib.org/scalapack/>`_
-    * `scalapy <https://github.com/jrs65/scalapy>`_
-

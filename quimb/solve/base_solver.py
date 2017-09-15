@@ -4,7 +4,6 @@
 # TODO: restart eigen and svd - up to tol
 # TODO: test non-herm
 
-import functools
 import numpy as np
 import numpy.linalg as nla
 
@@ -17,18 +16,13 @@ from .numpy_solver import (
     numpy_svds,
 )
 from .scipy_solver import seigsys_scipy, scipy_svds
-from . import SLEPC4PY_FOUND, SCALAPY_FOUND
+from . import SLEPC4PY_FOUND
 
 if SLEPC4PY_FOUND:
     from .mpi_spawner import seigsys_slepc_spawn
     from .slepc_solver import slepc_svds
 else:
     seigsys_slepc_spawn = raise_cant_find_library_function("slepc4py")
-
-if SCALAPY_FOUND:
-    from .mpi_spawner import eigsys_scalapy_spawn
-else:
-    eigsys_scalapy_spawn = raise_cant_find_library_function("scalapy")
 
 
 # --------------------------------------------------------------------------- #
@@ -37,7 +31,6 @@ else:
 
 _EIGSYS_METHODS = {
     'NUMPY': eigsys_numpy,
-    'SCALAPY': eigsys_scalapy_spawn,
 }
 
 
@@ -52,7 +45,7 @@ def eigsys(a, sort=True, isherm=True, backend='NUMPY', **kwargs):
             Whether to sort the eigenpairs in ascending eigenvalue order.
         isherm : bool, optional
             Whether the matrix is assumed to be hermitian or not.
-        backend : {'numpy', 'scalapy'}, optional
+        backend : {'numpy'}, optional
             Which backend to use to solve the system.
         **kwargs
             Supplied to the backend function.
@@ -71,7 +64,6 @@ def eigsys(a, sort=True, isherm=True, backend='NUMPY', **kwargs):
 
 _EIGVALS_METHODS = {
     'NUMPY': eigvals_numpy,
-    'SCALAPY': functools.partial(eigsys_scalapy_spawn, return_vecs=False)
 }
 
 
@@ -86,7 +78,7 @@ def eigvals(a, sort=True, isherm=True, backend='numpy', **kwargs):
             Whether to sort the eigenvalues in ascending order.
         isherm : bool, optional
             Whether the matrix is assumed to be hermitian or not.
-        backend : {'numpy', 'scalapy'}, optional
+        backend : {'numpy'}, optional
             Which backend to use to solve the system.
         **kwargs
             Supplied to the backend function.
@@ -111,7 +103,7 @@ def eigvecs(a, sort=True, isherm=True, backend='numpy', **kwargs):
             Whether to sort the eigenpairs in ascending eigenvalue order.
         isherm : bool, optional
             Whether the matrix is assumed to be hermitian or not.
-        backend : {'numpy', 'scalapy'}, optional
+        backend : {'numpy'}, optional
             Which backend to use to solve the system.
         **kwargs
             Supplied to the backend function.

@@ -33,7 +33,6 @@ Modules
     quimb.solve.numpy_solver
     quimb.solve.scipy_solver
     quimb.solve.slepc_solver
-    quimb.solve.scalapy_solver
     quimb.solve.mpi_spawner
 
 
