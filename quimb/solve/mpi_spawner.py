@@ -123,7 +123,10 @@ class GetMPIBeforeCall(object):
                         "to join comm {}.".format(wait_for_workers, comm)
                     )
 
-        return self.fn(*args, comm=comm, **kwargs)
+        comm.Barrier()
+        res = self.fn(*args, comm=comm, **kwargs)
+        comm.Barrier()
+        return res
 
 
 class SpawnMPIProcessesFunc(object):
