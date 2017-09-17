@@ -18,7 +18,7 @@ from scipy.integrate import complex_ode
 
 from .accel import isop, ldmul, rdmul, explt, dot, issparse, dot_dense
 from .core import qu, eye
-from .solve.base_solver import eigsys, norm
+from .linalg.base_linalg import eigsys, norm
 from .utils import continuous_progbar, progbar
 
 

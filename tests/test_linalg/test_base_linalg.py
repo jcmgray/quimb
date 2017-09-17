@@ -24,9 +24,9 @@ from quimb import (
     svds,
     norm,
 )
-from quimb.solve import SLEPC4PY_FOUND
-from quimb.solve.base_solver import _rel_window_to_abs_window
-from quimb.solve.scipy_solver import choose_ncv
+from quimb.linalg import SLEPC4PY_FOUND
+from quimb.linalg.base_linalg import _rel_window_to_abs_window
+from quimb.linalg.scipy_linalg import choose_ncv
 
 # TODO: reinstate slepc svd tests ******************************************* #
 

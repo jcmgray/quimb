@@ -8,11 +8,11 @@ from quimb import (
     eigsys,
 )
 
-from quimb.solve import SLEPC4PY_FOUND
-from quimb.solve.scipy_solver import seigsys_scipy
+from quimb.linalg import SLEPC4PY_FOUND
+from quimb.linalg.scipy_linalg import seigsys_scipy
 
 if SLEPC4PY_FOUND:
-    from quimb.solve.mpi_spawner import (
+    from quimb.linalg.mpi_spawner import (
         seigsys_slepc_spawn,
         svds_slepc_spawn,
         mfn_multiply_slepc_spawn,
@@ -103,7 +103,7 @@ class TestSLEPcMPI:
 @slepc4py_test
 class TestMPIPool:
     def test_spawning_pool_in_pool(self, bigsparsemat):
-        from quimb.solve.mpi_spawner import get_mpi_pool
+        from quimb.linalg.mpi_spawner import get_mpi_pool
         l1 = seigsys_slepc_spawn(bigsparsemat, return_vecs=False)
         pool = get_mpi_pool()
         f = pool.submit(seigsys_slepc_spawn,

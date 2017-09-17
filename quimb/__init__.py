@@ -57,7 +57,7 @@ from .core import (
 )
 
 # Solving functions
-from .solve.base_solver import (
+from .linalg.base_linalg import (
     eigsys,
     eigvals,
     eigvecs,

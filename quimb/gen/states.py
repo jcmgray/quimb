@@ -11,7 +11,7 @@ import scipy.sparse as sp
 
 from ..accel import ldmul, dot, make_immutable
 from ..core import qu, kron, eye, eyepad, kronpow
-from ..solve.base_solver import eigsys
+from ..linalg.base_linalg import eigsys
 from .operators import sig, controlled
 
 

@@ -28,12 +28,12 @@ Modules
 .. autosummary::
     :toctree: _autosummary
 
-    quimb.solve
-    quimb.solve.base_solver
-    quimb.solve.numpy_solver
-    quimb.solve.scipy_solver
-    quimb.solve.slepc_solver
-    quimb.solve.mpi_spawner
+    quimb.linalg
+    quimb.linalg.base_linalg
+    quimb.linalg.numpy_linalg
+    quimb.linalg.scipy_linalg
+    quimb.linalg.slepc_linalg
+    quimb.linalg.mpi_spawner
 
 
 Functions

@@ -32,7 +32,7 @@ from .core import (
     expec,
     dop,
 )
-from .solve.base_solver import (
+from .linalg.base_linalg import (
     eigsys,
     eigvals,
     norm,

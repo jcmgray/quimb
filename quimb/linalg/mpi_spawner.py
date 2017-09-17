@@ -4,7 +4,7 @@
 
 import os
 import functools
-from .slepc_solver import (
+from .slepc_linalg import (
     slepc_seigsys,
     slepc_svds,
     slepc_mfn_multiply,

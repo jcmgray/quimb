@@ -19,10 +19,10 @@ from quimb import (
     expec,
     eye,
 )
-from quimb.solve import SLEPC4PY_FOUND
-from quimb.solve.scipy_solver import scipy_svds
+from quimb.linalg import SLEPC4PY_FOUND
+from quimb.linalg.scipy_linalg import scipy_svds
 if SLEPC4PY_FOUND:
-    from quimb.solve.slepc_solver import (
+    from quimb.linalg.slepc_linalg import (
         slepc_seigsys,
         slepc_svds,
         convert_mat_to_petsc,
