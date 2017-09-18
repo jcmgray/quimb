@@ -3,7 +3,6 @@ import itertools
 import math
 import numpy as np
 from numpy.testing import assert_allclose
-import scipy.sparse as sp
 from quimb import (
     qu,
     eye,
@@ -31,8 +30,6 @@ from quimb import (
     entropy,
     correlation,
     pauli_correlations,
-    expm,
-    sqrtm,
     purify,
     concurrence,
     negativity,
@@ -80,33 +77,6 @@ def orthog_ks():
 # --------------------------------------------------------------------------- #
 # TESTS                                                                       #
 # --------------------------------------------------------------------------- #
-
-class TestExpm:
-    @pytest.mark.parametrize("herm", [True, False])
-    def test_zeros_dense(self, herm):
-        p = expm(np.zeros((2, 2), dtype=complex), herm=herm)
-        assert_allclose(p, eye(2))
-
-    @pytest.mark.parametrize("sparse", [True, False])
-    @pytest.mark.parametrize("herm", [True, False])
-    def test_eye(self, sparse, herm):
-        p = expm(eye(2, sparse=sparse), herm=herm)
-        assert_allclose((p.A if sparse else p) / np.e, eye(2))
-        if sparse:
-            assert isinstance(p, sp.csr_matrix)
-
-
-class TestSqrtm:
-    @pytest.mark.parametrize("sparse", [True, False])
-    @pytest.mark.parametrize("herm", [True, False])
-    def test_eye(self, herm, sparse):
-        if sparse:
-            with pytest.raises(NotImplementedError):
-                p = sqrtm(eye(2, sparse=sparse), herm=herm)
-        else:
-            p = sqrtm(eye(2), herm=herm)
-            assert_allclose(p, eye(2))
-
 
 class TestFidelity:
     def test_both_pure(self, k1, k2):
@@ -219,6 +189,7 @@ class TestPartialTranspose:
     def test_partial_transpose(self):
         a = bell_state(0, qtype='dop')
         b = partial_transpose(a)
+        assert isinstance(b, np.matrix)
         assert_allclose(b, [[0, 0, 0, -0.5],
                             [0, 0.5, 0, 0],
                             [0, 0, 0.5, 0],

@@ -1,5 +1,6 @@
-from pytest import fixture, mark
+from pytest import fixture, mark, raises
 import numpy as np
+import scipy.sparse as sp
 from numpy.testing import assert_allclose
 
 from quimb import (
@@ -23,6 +24,8 @@ from quimb import (
     svd,
     svds,
     norm,
+    expm,
+    sqrtm,
 )
 from quimb.linalg import SLEPC4PY_FOUND
 from quimb.linalg.base_linalg import _rel_window_to_abs_window
@@ -320,3 +323,30 @@ class TestNorms:
         assert norm(a, "trace") == 11
         a = rand_product_state(1, qtype="dop")
         assert_allclose(norm(a, "nuc"), 1)
+
+
+class TestExpm:
+    @mark.parametrize("herm", [True, False])
+    def test_zeros_dense(self, herm):
+        p = expm(np.zeros((2, 2), dtype=complex), herm=herm)
+        assert_allclose(p, eye(2))
+
+    @mark.parametrize("sparse", [True, False])
+    @mark.parametrize("herm", [True, False])
+    def test_eye(self, sparse, herm):
+        p = expm(eye(2, sparse=sparse), herm=herm)
+        assert_allclose((p.A if sparse else p) / np.e, eye(2))
+        if sparse:
+            assert isinstance(p, sp.csr_matrix)
+
+
+class TestSqrtm:
+    @mark.parametrize("sparse", [True, False])
+    @mark.parametrize("herm", [True, False])
+    def test_eye(self, herm, sparse):
+        if sparse:
+            with raises(NotImplementedError):
+                p = sqrtm(eye(2, sparse=sparse), herm=herm)
+        else:
+            p = sqrtm(eye(2), herm=herm)
+            assert_allclose(p, eye(2))
