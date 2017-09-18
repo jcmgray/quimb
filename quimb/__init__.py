@@ -56,7 +56,7 @@ from .core import (
     ptr,
 )
 
-# Solving functions
+# Linear algebra functions
 from .linalg.base_linalg import (
     eigsys,
     eigvals,
@@ -206,7 +206,7 @@ __all__ = [
     'nmlz',
     'tr',
     'ptr',
-    # Solve ----------------------------------------------------------------- #
+    # Linalg ---------------------------------------------------------------- #
     'eigsys',
     'eigvals',
     'eigvecs',
