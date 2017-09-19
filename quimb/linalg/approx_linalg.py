@@ -7,15 +7,15 @@ except ImportError:
 
 
 @functools.lru_cache(128)
-def get_cntrct_inds_ptr_dot(ndim_ab, keep):
+def get_cntrct_inds_ptr_dot(ndim_ab, sysa):
     """Find the correct integer contraction labels for ``lazy_ptr_dot``.
 
     Parameters
     ----------
     ndim_ab : int
         The total number of subsystems (dimensions) in 'ab'.
-    keep : sequence of int
-        Indexes of the subsytems not to be traced out.
+    sysa : int or sequence of int, optional
+            Index(es) of the 'a' subsystem(s) to keep.
 
     Returns
     -------
@@ -33,7 +33,7 @@ def get_cntrct_inds_ptr_dot(ndim_ab, keep):
     upper_inds = iter(range(ndim_ab, 2 * ndim_ab))
 
     for i in range(ndim_ab):
-        if i in keep:
+        if i in sysa:
             inds_a_ket.append(i)
             inds_ab_bra.append(i)
             inds_ab_ket.append(next(upper_inds))
@@ -44,7 +44,7 @@ def get_cntrct_inds_ptr_dot(ndim_ab, keep):
     return inds_a_ket, inds_ab_bra, inds_ab_ket
 
 
-def lazy_ptr_dot(psi_ab, psi_a, dims=None, keep=0):
+def lazy_ptr_dot(psi_ab, psi_a, dims=None, sysa=0):
     """Perform the 'lazy' evalution of ``ptr(psi_ab, ...) @ psi_a``,
     that is, contract the tensor diagram in an efficient way that does not
     necessarily construct the explicit reduced density matrix. In tensor
@@ -71,13 +71,12 @@ def lazy_ptr_dot(psi_ab, psi_a, dims=None, keep=0):
         State to partially trace and dot with another ket, with
         size ``prod(dims)``.
     psi_a : ket
-        State to act on with the dot product, of size ``prod(dims[keep])``.
+        State to act on with the dot product, of size ``prod(dims[sysa])``.
     dims : sequence of int, optional
         The sub dimensions of ``psi_ab``, inferred as bipartite if not given,
         i.e. ``(psi_a.size, psi_ab.size // psi_a.size)``.
-    keep : int, optional
-        Index of the subsystem to keep in the partial trace, assumed to be 0 if
-        not given.
+    sysa : int or sequence of int, optional
+        Index(es) of the 'a' subsystem(s) to keep.
 
     Returns
     -------
@@ -89,13 +88,13 @@ def lazy_ptr_dot(psi_ab, psi_a, dims=None, keep=0):
         dims = (da, d // da)
 
     # convert to tuple so can always cache
-    keep = (keep,) if isinstance(keep, int) else tuple(keep)
+    sysa = (sysa,) if isinstance(sysa, int) else tuple(sysa)
 
     ndim_ab = len(dims)
-    dims_a = [d for i, d in enumerate(dims) if i in keep]
+    dims_a = [d for i, d in enumerate(dims) if i in sysa]
 
     inds_a_ket, inds_ab_bra, inds_ab_ket = get_cntrct_inds_ptr_dot(
-        ndim_ab, keep)
+        ndim_ab, sysa)
 
     psi_ab_tensor = np.asarray(psi_ab).reshape(dims)
 
@@ -107,17 +106,19 @@ def lazy_ptr_dot(psi_ab, psi_a, dims=None, keep=0):
 
 
 @functools.lru_cache(128)
-def get_cntrct_inds_ptr_ppt_dot(ndim_abc, keep_a, keep_b):
+def get_cntrct_inds_ptr_ppt_dot(ndim_abc, sysa, sysb):
     """Find the correct integer contraction labels for ``lazy_ptr_ppt_dot``.
 
     Parameters
     ----------
-    ndim_abb : int
+    ndim_abc : int
         The total number of subsystems (dimensions) in 'abc'.
-    keep_a : sequence of int
-        Indexes of the 'a' subsystems to keep.
-    keep_b : sequence of int
-        Indexes of the 'b' subsystems to keep.
+    sysa : int or sequence of int, optional
+        Index(es) of the 'a' subsystem(s) to keep, with respect to all
+        the dimensions, ``dims``, (i.e. pre-partial trace).
+    sysa : int or sequence of int, optional
+        Index(es) of the 'b' subsystem(s) to keep, with respect to all
+        the dimensions, ``dims``, (i.e. pre-partial trace).
 
     Returns
     -------
@@ -139,13 +140,13 @@ def get_cntrct_inds_ptr_ppt_dot(ndim_abc, keep_a, keep_b):
     upper_inds = iter(range(ndim_abc, 2 * ndim_abc))
 
     for i in range(ndim_abc):
-        if i in keep_a:
+        if i in sysa:
             up_ind = next(upper_inds)
             inds_ab_ket.append(i)
             inds_abc_bra.append(up_ind)
             inds_abc_ket.append(i)
             inds_out.append(up_ind)
-        elif i in keep_b:
+        elif i in sysb:
             up_ind = next(upper_inds)
             inds_ab_ket.append(up_ind)
             inds_abc_bra.append(up_ind)
@@ -158,7 +159,7 @@ def get_cntrct_inds_ptr_ppt_dot(ndim_abc, keep_a, keep_b):
     return inds_ab_ket, inds_abc_bra, inds_abc_ket, inds_out
 
 
-def lazy_ptr_ppt_dot(psi_abc, psi_ab, dims, keep_a, keep_b):
+def lazy_ptr_ppt_dot(psi_abc, psi_ab, dims, sysa, sysb):
     """Perform the 'lazy' evalution of
     ``partial_transpose(ptr(psi_abc, ...)) @ psi_ab``, that is, contract the
     tensor diagram in an efficient way that does not necessarily construct
@@ -169,8 +170,8 @@ def lazy_ptr_ppt_dot(psi_abc, psi_ab, dims, keep_a, keep_b):
     +--------------+
     |   psi_ab     |
     +______________+  _____
-     a|  ____    |   /     \
-      | /   a\  b|   |c    |
+     a|  ____   b|   /     \
+      | /   a\   |   |c    |
       | | +-------------+  |
       | | |  psi_abc.H  |  |
       \ / +-------------+  |
@@ -184,34 +185,34 @@ def lazy_ptr_ppt_dot(psi_abc, psi_ab, dims, keep_a, keep_b):
 
     Parameters
     ----------
-    psi_ab : ket
+    psi_abc : ket
         State to partially trace, partially tranpose, then dot with another
         ket, with size ``prod(dims)``.
-    psi_a : ket
+    psi_ab : ket
         State to act on with the dot product, of size
-        ``prod(dims[keep_a] + dims[keep_b])``.
+        ``prod(dims[sysa] + dims[sysb])``.
     dims : sequence of int
         The sub dimensions of ``psi_abc``.
-    keep_a : int
-        Index of the subsystems in partition 'a', with respect to *all*
-        the dimensions in ``dims``.
-    keep_b : int
-        Index of the subsystems in partition 'b', with respect to *all*
-        the dimensions in ``dims``.
+    sysa : int or sequence of int, optional
+        Index(es) of the 'a' subsystem(s) to keep, with respect to all
+        the dimensions, ``dims``, (i.e. pre-partial trace).
+    sysa : int or sequence of int, optional
+        Index(es) of the 'b' subsystem(s) to keep, with respect to all
+        the dimensions, ``dims``, (i.e. pre-partial trace).
 
     Returns
     -------
     ket
     """
     # convert to tuple so can always cache
-    keep_a = (keep_a,) if isinstance(keep_a, int) else tuple(keep_a)
-    keep_b = (keep_b,) if isinstance(keep_b, int) else tuple(keep_b)
+    sysa = (sysa,) if isinstance(sysa, int) else tuple(sysa)
+    sysb = (sysb,) if isinstance(sysb, int) else tuple(sysb)
 
     inds_ab_ket, inds_abc_bra, inds_abc_ket, inds_out = \
-        get_cntrct_inds_ptr_ppt_dot(len(dims), keep_a, keep_b)
+        get_cntrct_inds_ptr_ppt_dot(len(dims), sysa, sysb)
 
     psi_abc_tensor = np.asarray(psi_abc).reshape(dims)
-    dims_ab = [d for i, d in enumerate(dims) if (i in keep_a) or (i in keep_b)]
+    dims_ab = [d for i, d in enumerate(dims) if (i in sysa) or (i in sysb)]
 
     # must have ``inds_out`` as resulting indices are not ordered
     # in the same way as input due to partial tranpose.
