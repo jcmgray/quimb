@@ -1,5 +1,7 @@
 import functools
+from math import sqrt
 import numpy as np
+import scipy.linalg as scla
 try:
     from opt_einsum import contract as einsum
 except ImportError:
@@ -222,3 +224,76 @@ def lazy_ptr_ppt_dot(psi_abc, psi_ab, dims, sysa, sysb):
         psi_abc_tensor, inds_abc_ket,
         inds_out,
     ).reshape(psi_ab.shape)
+
+
+def construct_lanczos_tridiag(A, v0=None, M=20):
+    """Construct the tridiagonal lanczos matrix using only matvec operators.
+
+    Parameters
+    ----------
+    A : linear operator
+        The operator to approximate, must implement ``.dot`` method to compute
+        its action of a vector.
+    v0 : vector, optional
+        The starting vector to iterate with, default to random.
+    M : int, optional
+        The number of iterations and thus rank of the matrix to find.
+
+    Returns
+    -------
+    alpha : sequence of float of length k
+        The diagonal entries of the lanczos matrix.
+    beta : sequence of float of length k - 1
+        The off-diagonal entries of the lanczos matrix.
+    """
+    if isinstance(A, np.matrix):
+        A = np.asarray(A)
+
+    d = A.shape[0]
+
+    alpha = np.zeros(M + 1)
+    beta = np.zeros(M + 2)
+    vk = np.empty((d, M + 2), dtype=np.complex128)
+    vk[:, 0] = 0.0j
+
+    # initialize & normalize the starting vector
+    if v0 is None:
+        vk[:, 1] = np.random.randn(d)
+        vk[:, 1] += 1.0j * np.random.randn(d)
+    else:
+        vk[:, 1] = v0
+    vk[:, 1] /= sqrt(np.vdot(vk[:, 1], vk[:, 1]).real)
+
+    # construct the krylov subspace
+    for k in range(1, M + 1):
+        wk = A.dot(vk[:, k]) - beta[k] * vk[:, k - 1]
+        alpha[k] = np.vdot(wk, vk[:, k]).real
+        wk -= alpha[k] * vk[:, k]
+        beta[k + 1] = sqrt(np.vdot(wk, wk).real)
+        vk[:, k + 1] = wk / beta[k + 1]
+
+    return alpha[1:], beta[2:-1]
+
+
+def lanczos_tridiag_eig(alpha, beta):
+    """Find the eigen-values and -vectors of the Lanczos triadiagonal matrix.
+    """
+    Tk_banded = np.empty((2, alpha.size))
+    Tk_banded[0, :] = alpha
+    Tk_banded[1, :-1] = beta
+    return scla.eig_banded(Tk_banded, lower=True)
+
+
+def approx_spectral_function(A, fn, M=20, R=10, v0=None):
+    """Approximate a spectral function, that is, the quantity ``Tr(fn(A))``.
+    """
+
+    def gen_vals():
+        for r in range(R):
+            alpha, beta = construct_lanczos_tridiag(A, M=M, v0=v0)
+            el, ev = lanczos_tridiag_eig(alpha, beta)
+
+            for i in range(M):
+                yield fn(el[i]) * ev[0, i]**2
+
+    return sum(gen_vals()) * (A.shape[0] / R)

@@ -1,10 +1,16 @@
 import pytest
+from math import sqrt
+import numpy as np
 from numpy.testing import assert_allclose
 
 from quimb import (
     prod,
     rand_ket,
+    rand_pos,
+    rand_herm,
     partial_transpose,
+    norm,
+    eigvals,
 )
 
 from quimb.linalg.approx_linalg import (
@@ -12,6 +18,9 @@ from quimb.linalg.approx_linalg import (
     lazy_ptr_dot,
     get_cntrct_inds_ptr_ppt_dot,
     lazy_ptr_ppt_dot,
+    construct_lanczos_tridiag,
+    lanczos_tridiag_eig,
+    approx_spectral_function,
 )
 
 SZS = (5, 4, 3)
@@ -74,7 +83,7 @@ class TestLazyTensorEval:
     def test_lazy_ptr_dot_simple(self, tri_psi, bi_psi):
         rho_ab = tri_psi.ptr(DIMS, [0, 1])
         psi_out_expected = rho_ab @ bi_psi
-        psi_out_got = lazy_ptr_dot(tri_psi, bi_psi, DIMS, sysa=[0, 1])
+        psi_out_got = lazy_ptr_dot(tri_psi, bi_psi)
         assert_allclose(psi_out_expected, psi_out_got)
 
     def test_lazy_ptr_dot_manybody(self, psi_mb_abc, psi_mb_ab):
@@ -136,3 +145,30 @@ class TestLazyTensorEval:
         psi_out_got = lazy_ptr_ppt_dot(
             psi_mb_abc, psi_mb_ab, DIMS_MB, sysa=sysa, sysb=sysb)
         assert_allclose(psi_out_expected, psi_out_got)
+
+
+class TestLanczosApprox:
+
+    def test_construct_lanczos_tridiag(self):
+        a = rand_herm(2**4)
+        alpha, beta = construct_lanczos_tridiag(a)
+        assert alpha.shape == (20,)
+        assert beta.shape == (19,)
+
+        el, ev = lanczos_tridiag_eig(alpha, beta)
+        assert el.shape == (20,)
+        assert el.dtype == float
+        assert ev.shape == (20, 20)
+        assert ev.dtype == float
+
+    def test_approx_spectral_function_abs(self):
+        a = rand_herm(2**4)
+        actual_norm = norm(a, 'tr')
+        approx_norm = approx_spectral_function(a, abs, M=20, R=30)
+        assert_allclose(actual_norm, approx_norm, rtol=1e-1)
+
+    def test_approx_spectral_function_sqrt(self):
+        a = rand_pos(2**4)
+        actual_x = sum(np.sqrt(eigvals(a)))
+        approx_x = approx_spectral_function(a, sqrt, M=20, R=30)
+        assert_allclose(actual_x, approx_x, rtol=1e-1)
