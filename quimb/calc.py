@@ -20,6 +20,7 @@ from .accel import (
     prod,
     isvec,
     dot,
+    matrixify,
 )
 from .core import (
     qu,
@@ -31,6 +32,7 @@ from .core import (
     infer_size,
     expec,
     dop,
+    ind_complement,
 )
 from .linalg.base_linalg import (
     eigsys,
@@ -170,7 +172,8 @@ def mutual_information(p, dims=(2, 2), sysa=0, sysb=1, rank=None):
 mutinf = mutual_information
 
 
-def partial_transpose(p, dims=(2, 2)):
+@matrixify
+def partial_transpose(p, dims=(2, 2), sysa=0):
     """Partial transpose of a density matrix.
 
     Parameters
@@ -184,43 +187,26 @@ def partial_transpose(p, dims=(2, 2)):
     -------
     matrix
     """
-    p = qu(p, "dop")
-    p = np.array(p)  \
-        .reshape((*dims, *dims))  \
-        .transpose((2, 1, 0, 3))  \
+    sysa = (sysa,) if isinstance(sysa, int) else tuple(sysa)
+
+    ndims = len(dims)
+    perm_ket_inds = []
+    perm_bra_inds = []
+
+    for i in range(ndims):
+        if i in sysa:
+            perm_ket_inds.append(i)
+            perm_bra_inds.append(i + ndims)
+        else:
+            perm_ket_inds.append(i + ndims)
+            perm_bra_inds.append(i)
+
+    return (
+        np.asarray(qu(p, "dop"))
+        .reshape((*dims, *dims))
+        .transpose((*perm_ket_inds, *perm_bra_inds))
         .reshape((prod(dims), prod(dims)))
-    return qu(p)
-
-
-@zeroify
-def negativity(p, dims=(2, 2), sysa=0, sysb=1):
-    """Compute negativity between two subsytems.
-
-    This is defined as ( | rho_{AB}^{T_B} | - 1) / 2. If ``len(dims) > 2``,
-    then the non-target dimensions will be traced out first.
-
-    Parameters
-    ----------
-    p : matrix or vector
-        State to compute negativity for.
-    dims : tuple(int), optional
-        The internal dimensions of ``p``.
-    sysa : int, optional
-        Index of the first subsystem, A, relative to ``dims``.
-    sysb : int, optional
-        Index of the first subsystem, B, relative to ``dims``.
-
-    Returns
-    -------
-    float
-    """
-    if isvec(p):
-        p = qu(p, qtype='dop')
-    if len(dims) > 2:
-        p = ptr(p, dims, (sysa, sysb))
-        dims = (dims[sysa], dims[sysb])
-    n = (norm(partial_transpose(p, dims=dims), "tr") - 1.0) / 2.0
-    return max(0.0, n)
+    )
 
 
 @zeroify
@@ -245,19 +231,56 @@ def logarithmic_negativity(p, dims=(2, 2), sysa=0, sysb=1):
     -------
     float
     """
-    if isvec(p) and len(dims) == 2:  # pure bipartition, easier to calc
+    ndims = len(dims)
+
+    if isvec(p) and ndims == 2:  # pure bipartition, easier to calc
         smaller_system = 0 if dims[0] <= dims[1] else 1
         rhoa = ptr(p, dims, smaller_system)
-        e = 2 * log2(sum(np.sqrt(np.clip(eigvals(rhoa, sort=False), 0, 1))))
+        e = sum(np.sqrt(np.clip(eigvals(rhoa, sort=False), 0, 1)))**2
+
     else:
-        if len(dims) > 2:  #
-            p = ptr(p, dims, (sysa, sysb))
-            dims = (dims[sysa], dims[sysb])
-        e = log2(norm(partial_transpose(p, dims), "tr"))
-    return max(0.0, e)
+        sysa = (sysa,) if isinstance(sysa, int) else tuple(sysa)
+        sysb = (sysb,) if isinstance(sysb, int) else tuple(sysb)
+
+        if ndims > len(sysa) + len(sysb):  # need to trace out
+            sysab = sysa + sysb
+            p = ptr(p, dims, sysab)
+            # 'slide' sysa inds down based on now missing sysc inds
+            dims = [d for i, d in enumerate(dims) if i in sysab]
+            sysc = ind_complement(sysab, ndims)
+            sysa = [i - sum(j < i for j in sysc) for i in sysa]
+
+        e = norm(partial_transpose(p, dims, sysa), "tr")
+
+    return max(0.0, log2(e))
 
 
 logneg = logarithmic_negativity
+
+
+def negativity(p, dims=(2, 2), sysa=0, sysb=1):
+    """Compute negativity between two subsytems.
+
+    This is defined as  (| rho_{AB}^{T_B} | - 1) / 2. If ``len(dims) > 2``,
+    then the non-target dimensions will be traced out first.
+
+    Parameters
+    ----------
+    p : matrix or vector
+        State to compute logarithmic negativity for.
+    dims : tuple(int), optional
+        The internal dimensions of ``p``.
+    sysa : int, optional
+        Index of the first subsystem, A, relative to ``dims``.
+    sysb : int, optional
+        Index of the first subsystem, B, relative to ``dims``.
+
+    Returns
+    -------
+    float
+    """
+    ln = logarithmic_negativity(p, dims=dims, sysa=sysa, sysb=sysb)
+    return 2**ln - 1
 
 
 @zeroify

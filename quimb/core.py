@@ -856,7 +856,7 @@ def perm_eyepad(op, dims, inds, **kwargs):
     return permute(b, dims_cur, ip)
 
 
-def _ind_complement(inds, n):
+def ind_complement(inds, n):
     """Return the indices below ``n`` not contained in ``inds``.
     """
     return tuple(i for i in range(n) if i not in inds)
@@ -921,14 +921,14 @@ def _partial_trace_dense(p, dims, coo_keep):
         coo_keep = (coo_keep,)
     if isvec(p):  # p = psi
         p = np.asarray(p).reshape(dims)
-        lose = _ind_complement(coo_keep, len(dims))
+        lose = ind_complement(coo_keep, len(dims))
         p = np.tensordot(p, p.conj(), (lose, lose))
         d = int(p.size**0.5)
         return p.reshape((d, d))
     else:
         p = np.asarray(p).reshape((*dims, *dims))
         total_dims = len(dims)
-        lose = _ind_complement(coo_keep, total_dims)
+        lose = ind_complement(coo_keep, total_dims)
         lose2 = tuple(ind + total_dims for ind in lose)
         p = itrace(p, (lose, lose2))
     d = int(p.size**0.5)

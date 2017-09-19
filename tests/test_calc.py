@@ -44,6 +44,7 @@ from quimb import (
     page_entropy,
     rand_herm,
     seigvecs,
+    permute,
 )
 
 
@@ -222,6 +223,10 @@ class TestLogarithmicNegativity:
         assert logneg(p, [2] * 4, 0, 1) > 1 - 1e-14
         assert logneg(p, [2] * 4, 1, 2) < 1e-14
         assert logneg(p, [2] * 4, 2, 3) > 1 - 1e-14
+
+    def test_interleaving(self):
+        p = permute(singlet() & singlet(), [2, 2, 2, 2], [0, 2, 1, 3])
+        assert logneg(p, [2] * 4, sysa=[0, 3], sysb=[1, 2]) > 2 - 1e-13
 
 
 class TestConcurrence:
