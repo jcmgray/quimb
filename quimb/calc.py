@@ -195,11 +195,11 @@ def partial_transpose(p, dims=(2, 2), sysa=0):
 
     for i in range(ndims):
         if i in sysa:
-            perm_ket_inds.append(i)
-            perm_bra_inds.append(i + ndims)
-        else:
             perm_ket_inds.append(i + ndims)
             perm_bra_inds.append(i)
+        else:
+            perm_ket_inds.append(i)
+            perm_bra_inds.append(i + ndims)
 
     return (
         np.asarray(qu(p, "dop"))
