@@ -10,6 +10,7 @@ shift 2
 # set up environment
 export OMP_NUM_THREADS=1
 export QUIMB_NUM_MPI_WORKERS=$num_procs
+export _QUIMB_MPI_LAUNCHED="MANUAL"
 
 # run script with mpi through mpi4py module
-exec mpiexec -np $num_procs python -m mpi4py.futures $target "$@"
+mpiexec --np $num_procs python -m mpi4py.futures $target "$@"

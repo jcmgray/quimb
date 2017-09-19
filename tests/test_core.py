@@ -601,6 +601,13 @@ class TestPartialTraceDense:
         b = partial_trace(a, dims, keep)
         assert(b.shape[0] == 2)
 
+    def test_partial_trace_order_doesnt_matter(self):
+        a = rand_rho(2**3)
+        dims = np.array([2, 2, 2])
+        b1 = partial_trace(a, dims, [0, 2])
+        b2 = partial_trace(a, dims, [2, 0])
+        assert_allclose(b1, b2)
+
 
 class TestTraceLose:
     def test_rps(self):

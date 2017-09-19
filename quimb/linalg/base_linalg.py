@@ -1,39 +1,33 @@
-"""Backend agnostic fFunctions for solving matrices either fully or partially.
+"""Backend agnostic functions for solving matrices either fully or partially.
 """
 
 # TODO: restart eigen and svd - up to tol
 # TODO: test non-herm
-# TODO: elemental?
-# TODO: fix slepc svds instability
+
 import functools
 import numpy as np
 import numpy.linalg as nla
+import scipy.linalg as sla
+import scipy.sparse.linalg as spla
 
 from ..utils import raise_cant_find_library_function
-
-from ..accel import issparse, vdot
-
-from .numpy_solver import (
+from ..accel import issparse, vdot, dot_dense, ldmul
+from .numpy_linalg import (
     eigsys_numpy,
     eigvals_numpy,
     seigsys_numpy,
     numpy_svds,
 )
-
-from .scipy_solver import seigsys_scipy, scipy_svds
-
-from . import SLEPC4PY_FOUND, SCALAPY_FOUND
+from .scipy_linalg import seigsys_scipy, scipy_svds
+from . import SLEPC4PY_FOUND
 
 if SLEPC4PY_FOUND:
-    from .mpi_spawner import seigsys_slepc_spawn
-    from .slepc_solver import slepc_svds
+    from .mpi_spawner import seigsys_slepc_spawn, mfn_multiply_slepc_spawn
+    from .slepc_linalg import slepc_svds
 else:
     seigsys_slepc_spawn = raise_cant_find_library_function("slepc4py")
-
-if SCALAPY_FOUND:
-    from .mpi_spawner import eigsys_scalapy_spawn
-else:
-    eigsys_scalapy_spawn = raise_cant_find_library_function("scalapy")
+    slepc_svds = raise_cant_find_library_function("slepc4py")
+    mfn_multiply_slepc_spawn = raise_cant_find_library_function("slepc4py")
 
 
 # --------------------------------------------------------------------------- #
@@ -42,7 +36,6 @@ else:
 
 _EIGSYS_METHODS = {
     'NUMPY': eigsys_numpy,
-    'SCALAPY': eigsys_scalapy_spawn,
 }
 
 
@@ -57,7 +50,7 @@ def eigsys(a, sort=True, isherm=True, backend='NUMPY', **kwargs):
             Whether to sort the eigenpairs in ascending eigenvalue order.
         isherm : bool, optional
             Whether the matrix is assumed to be hermitian or not.
-        backend : {'numpy', 'scalapy'}, optional
+        backend : {'numpy'}, optional
             Which backend to use to solve the system.
         **kwargs
             Supplied to the backend function.
@@ -76,7 +69,6 @@ def eigsys(a, sort=True, isherm=True, backend='NUMPY', **kwargs):
 
 _EIGVALS_METHODS = {
     'NUMPY': eigvals_numpy,
-    'SCALAPY': functools.partial(eigsys_scalapy_spawn, return_vecs=False)
 }
 
 
@@ -91,7 +83,7 @@ def eigvals(a, sort=True, isherm=True, backend='numpy', **kwargs):
             Whether to sort the eigenvalues in ascending order.
         isherm : bool, optional
             Whether the matrix is assumed to be hermitian or not.
-        backend : {'numpy', 'scalapy'}, optional
+        backend : {'numpy'}, optional
             Which backend to use to solve the system.
         **kwargs
             Supplied to the backend function.
@@ -116,7 +108,7 @@ def eigvecs(a, sort=True, isherm=True, backend='numpy', **kwargs):
             Whether to sort the eigenpairs in ascending eigenvalue order.
         isherm : bool, optional
             Whether the matrix is assumed to be hermitian or not.
-        backend : {'numpy', 'scalapy'}, optional
+        backend : {'numpy'}, optional
             Which backend to use to solve the system.
         **kwargs
             Supplied to the backend function.
@@ -249,7 +241,7 @@ def _rel_window_to_abs_window(el_min, el_max, w_0, w_sz=None):
 
 
 def eigsys_window(a, w_0, w_n=6, w_sz=None, backend='AUTO',
-                  return_vecs=True, offset_const=1 / 7000, **kwargs):
+                  return_vecs=True, offset_const=1 / 104729, **kwargs):
     """ Return eigenpairs internally from a hermitian matrix.
 
     Parameters
@@ -394,3 +386,85 @@ def norm(a, ntype=2, **kwargs):
                ('f', 0): norm_fro_dense,
                ('f', 1): norm_fro_sparse}
     return methods[(types[ntype], issparse(a))](a, **kwargs)
+
+
+# --------------------------------------------------------------------------- #
+#                               Matrix functions                              #
+# --------------------------------------------------------------------------- #
+
+def expm(a, herm=False):
+    """Matrix exponential, can be accelerated if explicitly hermitian.
+
+    Parameters
+    ----------
+    a : dense or sparse matrix
+        Matrix to exponentiate.
+    herm : bool, optional
+        If True (not default), and ``a`` is dense, digonalize the matrix
+        in order to perform the exponential.
+
+    Returns
+    -------
+    matrix
+    """
+    if issparse(a):
+        # convert to and from csc to suppress scipy warning
+        return spla.expm(a.tocsc()).tocsr()
+    elif not herm:
+        return np.asmatrix(spla.expm(a))
+    else:
+        evals, evecs = eigsys(a)
+        return dot_dense(evecs, ldmul(np.exp(evals), evecs.H))
+
+
+_EXPM_MULTIPLY_METHODS = {
+    'SCIPY': spla.expm_multiply,
+    'SLEPC': functools.partial(mfn_multiply_slepc_spawn, fntype='exp'),
+}
+
+
+def expm_multiply(mat, vec, backend="AUTO", **kwargs):
+    """Compute the action of ``expm(mat)`` on ``vec``.
+
+    Parameters
+    ----------
+    mat : matrix-like
+        Matrix to exponentiate.
+    vec : vector-like
+        Vector to act with exponential of matrix on.
+    backend : {'AUTO', 'SCIPY', 'SLEPC'}, optional
+        Which backend to use.
+    kwargs
+        Supplied to backend function.
+
+    Returns
+    -------
+    vector
+        Result of ``expm(mat) @ vec``.
+    """
+    return _EXPM_MULTIPLY_METHODS[backend.upper()](mat, vec, **kwargs)
+
+
+def sqrtm(a, herm=True):
+    """Matrix square root, can be accelerated if explicitly hermitian.
+
+    Parameters
+    ----------
+    a : dense or sparse matrix
+        Matrix to take square root of.
+    herm : bool, optional
+        If True (the default), and ``a`` is dense, digonalize the matrix
+        in order to take the square root.
+
+    Returns
+    -------
+    matrix
+    """
+    if issparse(a):
+        raise NotImplementedError("No sparse sqrtm available.")
+    elif not herm:
+        return np.asmatrix(sla.sqrtm(a))
+    else:
+        evals, evecs = eigsys(a)
+        return dot_dense(evecs, ldmul(np.sqrt(evals.astype(complex)),
+                                      evecs.H))

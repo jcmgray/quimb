@@ -4,10 +4,7 @@
 import numpy as np
 import scipy.sparse.linalg as spla
 
-from ..accel import accel
 
-
-@accel
 def choose_ncv(k, n):  # pragma: no cover
     """Optimise number of lanczos vectors for iterative methods
 

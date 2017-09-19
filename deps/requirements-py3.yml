@@ -19,3 +19,5 @@ dependencies:
   - pip:
     - coveralls
     - codeclimate-test-reporter
+    - codecov
+    - codacy-coverage

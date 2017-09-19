@@ -28,6 +28,6 @@ else
   conda update -q conda
   source activate test-environment
   conda update -q --all
-  pip install -U coveralls codeclimate-test-reporter codecov
+  pip install -U coveralls codeclimate-test-reporter codecov codacy-coverage
   pip uninstall --yes quimb
 fi

@@ -390,11 +390,14 @@ def slepc_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
         res = None
 
     if return_vecs:
-        # need master and workers to do this:
-        lvecs = [
-            gather_petsc_array(pvec, comm=comm, out_shape=(-1, 1))
-            for pvec in eigensolver.getInvariantSubspace()
-        ]
+        pvec = pa.getVecLeft()
+
+        def get_vecs_local():
+            for i in range(k):
+                eigensolver.getEigenvector(i, pvec)
+                yield gather_petsc_array(pvec, comm=comm, out_shape=(-1, 1))
+
+        lvecs = list(get_vecs_local())
         if rank == 0:
             vk = np.concatenate(lvecs, axis=1)
             if sort:
@@ -414,7 +417,6 @@ def slepc_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
 def _init_svd_solver(nsv=6, SVDType='cross', tol=None, max_it=None,
                      ncv=None, comm=None):
     SLEPc, comm = get_slepc(comm=comm)
-    comm = SLEPc.COMM_WORLD
     svd_solver = SLEPc.SVD().create(comm=comm)
     svd_solver.setType(SVDType)
     svd_solver.setTolerances(tol=tol, max_it=max_it)
@@ -424,7 +426,7 @@ def _init_svd_solver(nsv=6, SVDType='cross', tol=None, max_it=None,
 
 
 def slepc_svds(a, k=6, ncv=None, return_vecs=True, SVDType='cross',
-               extra_vals=False, tol=None, max_it=None, comm=None):
+               return_all_conv=False, tol=None, max_it=None, comm=None):
     """Find the singular values for sparse matrix `a`.
 
     Parameters
@@ -441,7 +443,6 @@ def slepc_svds(a, k=6, ncv=None, return_vecs=True, SVDType='cross',
     if comm is None:
         comm = get_default_comm()
 
-    pa = convert_mat_to_petsc(a, comm=comm)
     svd_solver = _init_svd_solver(
         nsv=k,
         SVDType=SVDType,
@@ -450,11 +451,13 @@ def slepc_svds(a, k=6, ncv=None, return_vecs=True, SVDType='cross',
         ncv=ncv,
         comm=comm
     )
+
+    pa = convert_mat_to_petsc(a, comm=comm)
     svd_solver.setOperator(pa)
     svd_solver.solve()
     nconv = svd_solver.getConverged()
     assert nconv >= k
-    k = nconv if extra_vals else k
+    k = nconv if return_all_conv else k
 
     rank = comm.Get_rank()
 
@@ -532,7 +535,7 @@ def slepc_mfn_multiply(mat, vec,
                 'EXPOKIT': SLEPc.MFN.Type.EXPOKIT}
 
     # set up the matrix function options and objects
-    mfn = SLEPc.MFN().create()
+    mfn = SLEPc.MFN().create(comm=comm)
     mfn.setOperator(mat)
     mfn.setType(type_map[MFNType.upper()])
     mfn_fn = mfn.getFN()

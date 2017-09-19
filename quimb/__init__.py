@@ -56,8 +56,8 @@ from .core import (
     ptr,
 )
 
-# Solving functions
-from .solve.base_solver import (
+# Linear algebra functions
+from .linalg.base_linalg import (
     eigsys,
     eigvals,
     eigvecs,
@@ -73,6 +73,9 @@ from .solve.base_solver import (
     svd,
     svds,
     norm,
+    expm,
+    sqrtm,
+    expm_multiply,
 )
 
 # Generating objects
@@ -128,9 +131,6 @@ from .gen.rand import (
 
 # Functions for calculating properties
 from .calc import (
-    expm,
-    sqrtm,
-    expm_multiply,
     fidelity,
     purify,
     entropy,
@@ -152,6 +152,7 @@ from .calc import (
     ent_cross_matrix,
     qid,
     is_degenerate,
+    is_eigenvector,
     page_entropy,
 )
 
@@ -205,7 +206,7 @@ __all__ = [
     'nmlz',
     'tr',
     'ptr',
-    # Solve ----------------------------------------------------------------- #
+    # Linalg ---------------------------------------------------------------- #
     'eigsys',
     'eigvals',
     'eigvecs',
@@ -290,6 +291,7 @@ __all__ = [
     'ent_cross_matrix',
     'qid',
     'is_degenerate',
+    'is_eigenvector',
     'page_entropy',
     # Evo ------------------------------------------------------------------- #
     'QuEvo',

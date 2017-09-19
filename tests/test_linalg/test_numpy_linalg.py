@@ -7,7 +7,7 @@ from quimb import (
     ldmul,
     rand_uni,
 )
-from quimb.solve.numpy_solver import (
+from quimb.linalg.numpy_linalg import (
     sort_inds,
     seigsys_numpy,
 )

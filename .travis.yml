@@ -45,9 +45,12 @@ install:
 
 script:
   - export OMP_NUM_THREADS=2
-  - py.test
+  - env COVERAGE_FILE=.coverage.autompi pytest
+  - env COVERAGE_FILE=.coverage.manualmpi quimb-mpiexec 2 -m pytest
+  - coverage combine .
 
 after_success:
   - coveralls
   - codecov
   - codeclimate-test-reporter
+  - python-codacy-coverage -r coverage.xml

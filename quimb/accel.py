@@ -10,7 +10,7 @@ import operator
 
 import numpy as np
 import scipy.sparse as sp
-from numba import jit, vectorize
+from numba import njit, vectorize
 from numexpr import evaluate
 from cytoolz import partition_all
 
@@ -27,9 +27,6 @@ for env_var in ['QUIMB_NUM_THREAD_WORKERS',
 if not _NUM_THREAD_WORKERS_SET:
     import psutil
     _NUM_THREAD_WORKERS = psutil.cpu_count(logical=False)
-
-
-accel = functools.partial(jit, nopython=True, cache=False)
 
 
 class CacheThreadPool(object):
@@ -145,7 +142,10 @@ def matrixify(fn):
     """
     @functools.wraps(fn)
     def matrixified_fn(*args, **kwargs):
-        return np.asmatrix(fn(*args, **kwargs))
+        out = fn(*args, **kwargs)
+        if not isinstance(out, np.matrix):
+            return np.asmatrix(out)
+        return out
     return matrixified_fn
 
 
@@ -229,7 +229,7 @@ def isherm(qob):
 # --------------------------------------------------------------------------- #
 
 @matrixify
-@accel
+@njit
 def mul_dense(x, y):  # pragma: no cover
     """Numba-accelerated element-wise multiplication of two dense matrices.
     """
@@ -261,14 +261,14 @@ def mul(x, y):
 
 
 @matrixify
-@accel
+@njit
 def dot_dense(a, b):  # pragma: no cover
     """Accelerated dense dot product of matrices
     """
     return a @ b
 
 
-@accel(nogil=True)  # pragma: no cover
+@njit(nogil=True)  # pragma: no cover
 def dot_csr_matvec(data, indptr, indices, vec, out, k1k2):
     """Sparse csr matrix-vector dot-product, only acting on range(k1, k2).
     """
@@ -363,7 +363,7 @@ def dot(a, b):
 
 
 @realify
-@accel
+@njit
 def vdot(a, b):  # pragma: no cover
     """Accelerated 'Hermitian' inner product of two vectors.
 
@@ -373,7 +373,7 @@ def vdot(a, b):  # pragma: no cover
 
 
 @realify
-@accel
+@njit
 def rdot(a, b):  # pragma: no cover
     """Real dot product of two dense vectors.
 
@@ -383,7 +383,7 @@ def rdot(a, b):  # pragma: no cover
     return (a @ b)[0, 0]
 
 
-@accel
+@njit
 def reshape_for_ldmul(vec):  # pragma: no cover
     """Reshape a vector to be broadcast multiplied against a matrix in a way
     that replicates left diagonal matrix multiplication.
@@ -431,7 +431,7 @@ def ldmul(diag, mat):
     return l_diag_dot_dense(diag, mat)
 
 
-@accel
+@njit
 def reshape_for_rdmul(vec):  # pragma: no cover
     """Reshape a vector to be broadcast multiplied against a matrix in a way
     that replicates right diagonal matrix multiplication.
@@ -479,7 +479,7 @@ def rdmul(mat, diag):
     return r_diag_dot_dense(mat, diag)
 
 
-@accel
+@njit
 def reshape_for_outer(a, b):  # pragma: no cover
     """Reshape two vectors for an outer product.
     """
@@ -505,7 +505,7 @@ def explt(l, t):  # pragma: no cover
 # Kronecker (tensor) product                                                  #
 # --------------------------------------------------------------------------- #
 
-@accel
+@njit
 def reshape_for_kron(a, b):  # pragma: no cover
     """Reshape two arrays for a 'broadcast' tensor (kronecker) product.
 
@@ -519,7 +519,7 @@ def reshape_for_kron(a, b):  # pragma: no cover
 
 
 @matrixify
-@accel
+@njit
 def kron_dense(a, b):  # pragma: no cover
     """Tensor (kronecker) product of two dense arrays.
     """

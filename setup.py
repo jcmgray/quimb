@@ -28,7 +28,6 @@ setup(
         ],
         'advanced_solvers': [
             'slepc4py',
-            'scalapy',
         ]
     },
     scripts=['bin/quimb-mpiexec'],

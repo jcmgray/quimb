@@ -1,5 +1,6 @@
-from pytest import fixture, mark
+from pytest import fixture, mark, raises
 import numpy as np
+import scipy.sparse as sp
 from numpy.testing import assert_allclose
 
 from quimb import (
@@ -23,10 +24,12 @@ from quimb import (
     svd,
     svds,
     norm,
+    expm,
+    sqrtm,
 )
-from quimb.solve import SLEPC4PY_FOUND, SCALAPY_FOUND
-from quimb.solve.base_solver import _rel_window_to_abs_window
-from quimb.solve.scipy_solver import choose_ncv
+from quimb.linalg import SLEPC4PY_FOUND
+from quimb.linalg.base_linalg import _rel_window_to_abs_window
+from quimb.linalg.scipy_linalg import choose_ncv
 
 # TODO: reinstate slepc svd tests ******************************************* #
 
@@ -37,8 +40,6 @@ if SLEPC4PY_FOUND:
     svds_backends += ["slepc"]
 
 dense_backends = ["numpy"]
-if SCALAPY_FOUND:
-    dense_backends += ["scalapy"]
 
 
 # --------------------------------------------------------------------------- #
@@ -103,10 +104,8 @@ class TestEigh:
     @mark.parametrize("bkd", dense_backends)
     def test_eigsys(self, mat_herm_dense, bkd):
         u, a = mat_herm_dense
-        kwargs = {'bsz': (2, 2)} if bkd == 'scalapy' else {}
-        evals, _ = eigsys(a, sort=False, backend=bkd, **kwargs)
+        evals, v = eigsys(a, backend=bkd)
         assert(set(np.rint(evals)) == set((-1, 2, 4, -3)))
-        evals, v = eigsys(a, backend=bkd, **kwargs)
         assert_allclose(evals, [-3, -1, 2, 4])
         for i, j in zip([3, 0, 1, 2], range(4)):
             o = u[:, i].H @ v[:, j]
@@ -115,15 +114,13 @@ class TestEigh:
     @mark.parametrize("bkd", dense_backends)
     def test_eigvals(self, mat_herm_dense, bkd):
         _, a = mat_herm_dense
-        kwargs = {'bsz': (2, 2)} if bkd == 'scalapy' else {}
-        evals = eigvals(a, backend=bkd, **kwargs)
+        evals = eigvals(a, backend=bkd)
         assert_allclose(evals, [-3, -1, 2, 4])
 
     @mark.parametrize("bkd", dense_backends)
     def test_eigvecs(self, mat_herm_dense, bkd):
         u, a = mat_herm_dense
-        kwargs = {'bsz': (2, 2)} if bkd == 'scalapy' else {}
-        v = eigvecs(a, backend=bkd, **kwargs)
+        v = eigvecs(a, backend=bkd)
         for i, j in zip([3, 0, 1, 2], range(4)):
             o = u[:, i].H @ v[:, j]
             assert_allclose(abs(o), 1.)
@@ -326,3 +323,30 @@ class TestNorms:
         assert norm(a, "trace") == 11
         a = rand_product_state(1, qtype="dop")
         assert_allclose(norm(a, "nuc"), 1)
+
+
+class TestExpm:
+    @mark.parametrize("herm", [True, False])
+    def test_zeros_dense(self, herm):
+        p = expm(np.zeros((2, 2), dtype=complex), herm=herm)
+        assert_allclose(p, eye(2))
+
+    @mark.parametrize("sparse", [True, False])
+    @mark.parametrize("herm", [True, False])
+    def test_eye(self, sparse, herm):
+        p = expm(eye(2, sparse=sparse), herm=herm)
+        assert_allclose((p.A if sparse else p) / np.e, eye(2))
+        if sparse:
+            assert isinstance(p, sp.csr_matrix)
+
+
+class TestSqrtm:
+    @mark.parametrize("sparse", [True, False])
+    @mark.parametrize("herm", [True, False])
+    def test_eye(self, herm, sparse):
+        if sparse:
+            with raises(NotImplementedError):
+                p = sqrtm(eye(2, sparse=sparse), herm=herm)
+        else:
+            p = sqrtm(eye(2), herm=herm)
+            assert_allclose(p, eye(2))

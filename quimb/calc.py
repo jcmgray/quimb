@@ -9,14 +9,10 @@ import functools
 
 import numpy as np
 import numpy.linalg as nla
-import scipy.linalg as sla
-import scipy.sparse.linalg as spla
 from scipy.optimize import minimize
 
 from .accel import (
-    accel,
-    dot_dense,
-    ldmul,
+    njit,
     issparse,
     isop,
     zeroify,
@@ -24,6 +20,7 @@ from .accel import (
     prod,
     isvec,
     dot,
+    matrixify,
 )
 from .core import (
     qu,
@@ -35,15 +32,15 @@ from .core import (
     infer_size,
     expec,
     dop,
+    ind_complement,
 )
-from .solve.base_solver import (
+from .linalg.base_linalg import (
     eigsys,
     eigvals,
     norm,
     seigvals,
-)
-from .solve.mpi_spawner import (
-    mfn_multiply_slepc_spawn,
+    sqrtm,
+
 )
 from .gen.operators import sig
 from .gen.states import (
@@ -51,84 +48,6 @@ from .gen.states import (
     bell_state,
     bloch_state,
 )
-
-
-def expm(a, herm=True):
-    """Matrix exponential, can be accelerated if explicitly hermitian.
-
-    Parameters
-    ----------
-    a : dense or sparse matrix
-        Matrix to exponentiate.
-    herm : bool, optional
-        If True (the default), and ``a`` is dense, digonalize the matrix
-        in order to perform the exponential.
-
-    Returns
-    -------
-    matrix
-    """
-    if issparse(a):
-        # convert to and from csc to suppress scipy warning
-        return spla.expm(a.tocsc()).tocsr()
-    elif not herm:
-        return np.asmatrix(spla.expm(a))
-    else:
-        evals, evecs = eigsys(a)
-        return dot_dense(evecs, ldmul(np.exp(evals), evecs.H))
-
-
-_EXPM_MULTIPLY_METHODS = {
-    'SCIPY': spla.expm_multiply,
-    'SLEPC': functools.partial(mfn_multiply_slepc_spawn, fntype='exp'),
-}
-
-
-def expm_multiply(mat, vec, backend="AUTO", **kwargs):
-    """Compute the action of ``expm(mat)`` on ``vec``.
-
-    Parameters
-    ----------
-    mat : matrix-like
-        Matrix to exponentiate.
-    vec : vector-like
-        Vector to act with exponential of matrix on.
-    backend : {'AUTO', 'SCIPY', 'SLEPC'}, optional
-        Which backend to use.
-    kwargs
-        Supplied to backend function.
-
-    Returns
-    -------
-    vector
-        Result of ``expm(mat) @ vec``.
-    """
-    return _EXPM_MULTIPLY_METHODS[backend.upper()](mat, vec, **kwargs)
-
-
-def sqrtm(a, herm=True):
-    """Matrix square root, can be accelerated if explicitly hermitian.
-
-    Parameters
-    ----------
-    a : dense or sparse matrix
-        Matrix to take square root of.
-    herm : bool, optional
-        If True (the default), and ``a`` is dense, digonalize the matrix
-        in order to take the square root.
-
-    Returns
-    -------
-    matrix
-    """
-    if issparse(a):
-        raise NotImplementedError("No sparse sqrtm available.")
-    elif not herm:
-        return np.asmatrix(sla.sqrtm(a))
-    else:
-        evals, evecs = eigsys(a)
-        return dot_dense(evecs, ldmul(np.sqrt(evals.astype(complex)),
-                                      evecs.H))
 
 
 def fidelity(p1, p2):
@@ -253,7 +172,8 @@ def mutual_information(p, dims=(2, 2), sysa=0, sysb=1, rank=None):
 mutinf = mutual_information
 
 
-def partial_transpose(p, dims=(2, 2)):
+@matrixify
+def partial_transpose(p, dims=(2, 2), sysa=0):
     """Partial transpose of a density matrix.
 
     Parameters
@@ -267,43 +187,26 @@ def partial_transpose(p, dims=(2, 2)):
     -------
     matrix
     """
-    p = qu(p, "dop")
-    p = np.array(p)  \
-        .reshape((*dims, *dims))  \
-        .transpose((2, 1, 0, 3))  \
+    sysa = (sysa,) if isinstance(sysa, int) else tuple(sysa)
+
+    ndims = len(dims)
+    perm_ket_inds = []
+    perm_bra_inds = []
+
+    for i in range(ndims):
+        if i in sysa:
+            perm_ket_inds.append(i + ndims)
+            perm_bra_inds.append(i)
+        else:
+            perm_ket_inds.append(i)
+            perm_bra_inds.append(i + ndims)
+
+    return (
+        np.asarray(qu(p, "dop"))
+        .reshape((*dims, *dims))
+        .transpose((*perm_ket_inds, *perm_bra_inds))
         .reshape((prod(dims), prod(dims)))
-    return qu(p)
-
-
-@zeroify
-def negativity(p, dims=(2, 2), sysa=0, sysb=1):
-    """Compute negativity between two subsytems.
-
-    This is defined as ( | rho_{AB}^{T_B} | - 1) / 2. If ``len(dims) > 2``,
-    then the non-target dimensions will be traced out first.
-
-    Parameters
-    ----------
-    p : matrix or vector
-        State to compute negativity for.
-    dims : tuple(int), optional
-        The internal dimensions of ``p``.
-    sysa : int, optional
-        Index of the first subsystem, A, relative to ``dims``.
-    sysb : int, optional
-        Index of the first subsystem, B, relative to ``dims``.
-
-    Returns
-    -------
-    float
-    """
-    if isvec(p):
-        p = qu(p, qtype='dop')
-    if len(dims) > 2:
-        p = ptr(p, dims, (sysa, sysb))
-        dims = (dims[sysa], dims[sysb])
-    n = (norm(partial_transpose(p, dims=dims), "tr") - 1.0) / 2.0
-    return max(0.0, n)
+    )
 
 
 @zeroify
@@ -328,19 +231,56 @@ def logarithmic_negativity(p, dims=(2, 2), sysa=0, sysb=1):
     -------
     float
     """
-    if isvec(p) and len(dims) == 2:  # pure bipartition, easier to calc
+    ndims = len(dims)
+
+    if isvec(p) and ndims == 2:  # pure bipartition, easier to calc
         smaller_system = 0 if dims[0] <= dims[1] else 1
         rhoa = ptr(p, dims, smaller_system)
-        e = 2 * log2(sum(np.sqrt(np.clip(eigvals(rhoa, sort=False), 0, 1))))
+        e = sum(np.sqrt(np.clip(eigvals(rhoa, sort=False), 0, 1)))**2
+
     else:
-        if len(dims) > 2:  #
-            p = ptr(p, dims, (sysa, sysb))
-            dims = (dims[sysa], dims[sysb])
-        e = log2(norm(partial_transpose(p, dims), "tr"))
-    return max(0.0, e)
+        sysa = (sysa,) if isinstance(sysa, int) else tuple(sysa)
+        sysb = (sysb,) if isinstance(sysb, int) else tuple(sysb)
+
+        if ndims > len(sysa) + len(sysb):  # need to trace out
+            sysab = sysa + sysb
+            p = ptr(p, dims, sysab)
+            # 'slide' sysa inds down based on now missing sysc inds
+            dims = [d for i, d in enumerate(dims) if i in sysab]
+            sysc = ind_complement(sysab, ndims)
+            sysa = [i - sum(j < i for j in sysc) for i in sysa]
+
+        e = norm(partial_transpose(p, dims, sysa), "tr")
+
+    return max(0.0, log2(e))
 
 
 logneg = logarithmic_negativity
+
+
+def negativity(p, dims=(2, 2), sysa=0, sysb=1):
+    """Compute negativity between two subsytems.
+
+    This is defined as  (| rho_{AB}^{T_B} | - 1) / 2. If ``len(dims) > 2``,
+    then the non-target dimensions will be traced out first.
+
+    Parameters
+    ----------
+    p : matrix or vector
+        State to compute logarithmic negativity for.
+    dims : tuple(int), optional
+        The internal dimensions of ``p``.
+    sysa : int, optional
+        Index of the first subsystem, A, relative to ``dims``.
+    sysb : int, optional
+        Index of the first subsystem, B, relative to ``dims``.
+
+    Returns
+    -------
+    float
+    """
+    ln = logarithmic_negativity(p, dims=dims, sysa=sysa, sysb=sysb)
+    return 2**ln - 1
 
 
 @zeroify
@@ -677,6 +617,7 @@ def ent_cross_matrix(p, sz_blc=1, ent_fn=logneg, calc_self_ent=True,
     2d-numpy.ndarray
         matrix of pairwise ent_fn results.
     """
+
     sz_p = infer_size(p)
     dims = (2,) * sz_p
     n = sz_p // sz_blc
@@ -689,24 +630,25 @@ def ent_cross_matrix(p, sz_blc=1, ent_fn=logneg, calc_self_ent=True,
         if not calc_self_ent:
             for i in range(n):
                 ents[i, i] = np.nan
-        return ents
 
-    # Range over pairwise blocks
-    for i in range(0, sz_p - sz_blc + 1, sz_blc):
-        for j in range(i, sz_p - sz_blc + 1, sz_blc):
-            if i == j:
-                if calc_self_ent:
-                    rhoa = ptr(p, dims, [i + b for b in range(sz_blc)])
-                    psiap = purify(rhoa)
-                    ent = ent_fn(psiap, dims=(2**sz_blc, 2**sz_blc)) / sz_blc
+    else:
+        # Range over pairwise blocks
+        for i in range(0, sz_p - sz_blc + 1, sz_blc):
+            for j in range(i, sz_p - sz_blc + 1, sz_blc):
+                if i == j:
+                    if calc_self_ent:
+                        rhoa = ptr(p, dims, [i + b for b in range(sz_blc)])
+                        psiap = purify(rhoa)
+                        ent = ent_fn(psiap,
+                                     dims=(2**sz_blc, 2**sz_blc)) / sz_blc
+                    else:
+                        ent = np.nan
                 else:
-                    ent = np.nan
-            else:
-                rhoab = ptr(p, dims, [i + b for b in range(sz_blc)] +
-                                     [j + b for b in range(sz_blc)])
-                ent = ent_fn(rhoab, dims=(2**sz_blc, 2**sz_blc)) / sz_blc
-            ents[i // sz_blc, j // sz_blc] = ent
-            ents[j // sz_blc, i // sz_blc] = ent
+                    rhoab = ptr(p, dims, [i + b for b in range(sz_blc)] +
+                                         [j + b for b in range(sz_blc)])
+                    ent = ent_fn(rhoab, dims=(2**sz_blc, 2**sz_blc)) / sz_blc
+                ents[i // sz_blc, j // sz_blc] = ent
+                ents[j // sz_blc, i // sz_blc] = ent
 
     if upscale:
         up_ents = np.tile(np.nan, (sz_p, sz_p))
@@ -771,7 +713,29 @@ def is_degenerate(op, tol=1e-12):
     return np.count_nonzero(abs(l_gaps) < l_tol)
 
 
-@accel
+def is_eigenvector(vec, mat, **kwargs):
+    """Determines whether a vector is an eigenvector of an operator.
+
+    Parameters
+    ----------
+    vec : vector
+        Vector to check.
+    mat : matrix
+        Matrix to check.
+    kwargs :
+        Supplied to numpy.allclose
+
+    Returns
+    -------
+    bool
+        Whether ``mat @ vec = l * vec`` for some scalar ``l``.
+    """
+    vec2 = mat @ vec
+    factor = np.asscalar(vec2[0] / vec[0])
+    return np.allclose(factor * vec, vec2, **kwargs)
+
+
+@njit
 def page_entropy(sz_subsys, sz_total):  # pragma: no cover
     """Calculate the page entropy, i.e. expected entropy for a subsytem
     of a random state in Hilbert space.
