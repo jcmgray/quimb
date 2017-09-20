@@ -2,10 +2,18 @@ import functools
 from math import sqrt
 import numpy as np
 import scipy.linalg as scla
+import scipy.sparse.linalg as spla
 try:
     from opt_einsum import contract as einsum
 except ImportError:
     from numpy import einsum
+from ..accel import prod
+
+
+def int2tup(x):
+    return (x if isinstance(x, tuple) else
+            (x,) if isinstance(x, int) else
+            tuple(x))
 
 
 @functools.lru_cache(128)
@@ -90,7 +98,7 @@ def lazy_ptr_dot(psi_ab, psi_a, dims=None, sysa=0):
         dims = (da, d // da)
 
     # convert to tuple so can always cache
-    sysa = (sysa,) if isinstance(sysa, int) else tuple(sysa)
+    sysa = int2tup(sysa)
 
     ndim_ab = len(dims)
     dims_a = [d for i, d in enumerate(dims) if i in sysa]
@@ -105,6 +113,36 @@ def lazy_ptr_dot(psi_ab, psi_a, dims=None, sysa=0):
         psi_ab_tensor.conjugate(), inds_ab_bra,
         psi_ab_tensor, inds_ab_ket,
     ).reshape(psi_a.shape)
+
+
+class LazyPtrOperatr(spla.LinearOperator):
+    """A linear operator representing action of partially tracing a bipartite
+    state, then multiplying another 'unipartite' state.
+
+    Parameters
+    ----------
+    psi_ab : ket
+        State to partially trace and dot with another ket, with
+        size ``prod(dims)``.
+    dims : sequence of int, optional
+        The sub dimensions of ``psi_ab``.
+    sysa : int or sequence of int, optional
+        Index(es) of the 'a' subsystem(s) to keep.
+    """
+
+    def __init__(self, psi_ab, dims, sysa):
+        self.psi_ab = psi_ab
+        self.dims = dims
+        self.sysa = int2tup(sysa)
+        dims_a = [d for i, d in enumerate(dims) if i in self.sysa]
+        sz_a = prod(dims_a)
+        super().__init__(dtype=psi_ab.dtype, shape=(sz_a, sz_a))
+
+    def _matvec(self, vec):
+        return lazy_ptr_dot(self.psi_ab, vec, self.dims, self.sysa)
+
+    def _adjoint(self):
+        return self.__class__(self.psi_ab.conjugate(), self.dims, self.sysa)
 
 
 @functools.lru_cache(128)
@@ -207,8 +245,7 @@ def lazy_ptr_ppt_dot(psi_abc, psi_ab, dims, sysa, sysb):
     ket
     """
     # convert to tuple so can always cache
-    sysa = (sysa,) if isinstance(sysa, int) else tuple(sysa)
-    sysb = (sysb,) if isinstance(sysb, int) else tuple(sysb)
+    sysa, sysb = int2tup(sysa), int2tup(sysb)
 
     inds_ab_ket, inds_abc_bra, inds_abc_ket, inds_out = \
         get_cntrct_inds_ptr_ppt_dot(len(dims), sysa, sysb)
@@ -226,14 +263,52 @@ def lazy_ptr_ppt_dot(psi_abc, psi_ab, dims, sysa, sysb):
     ).reshape(psi_ab.shape)
 
 
+class LazyPtrPptOperator(spla.LinearOperator):
+    """A linear operator representing action of partially tracing a tripartite
+    state, partially transposing the remaining bipartite state, then
+    multiplying another bipartite state.
+
+    Parameters
+    ----------
+    psi_abc : ket
+        State to partially trace, partially tranpose, then dot with another
+        ket, with size ``prod(dims)``.
+        ``prod(dims[sysa] + dims[sysb])``.
+    dims : sequence of int
+        The sub dimensions of ``psi_abc``.
+    sysa : int or sequence of int, optional
+        Index(es) of the 'a' subsystem(s) to keep, with respect to all
+        the dimensions, ``dims``, (i.e. pre-partial trace).
+    sysa : int or sequence of int, optional
+        Index(es) of the 'b' subsystem(s) to keep, with respect to all
+        the dimensions, ``dims``, (i.e. pre-partial trace).
+    """
+
+    def __init__(self, psi_abc, dims, sysa, sysb):
+        self.psi_abc = psi_abc
+        self.dims = dims
+        self.sysa, self.sysb = int2tup(sysa), int2tup(sysb)
+        sys_ab = self.sysa + self.sysb
+        sz_ab = prod([d for i, d in enumerate(dims) if i in sys_ab])
+        super().__init__(dtype=psi_abc.dtype, shape=(sz_ab, sz_ab))
+
+    def _matvec(self, vec):
+        return lazy_ptr_ppt_dot(self.psi_abc, vec, self.dims,
+                                self.sysa, self.sysb)
+
+    def _adjoint(self):
+        return self.__class__(self.psi_abc.conjugate(), self.dims,
+                              self.sysa, self.sysb)
+
+
 def construct_lanczos_tridiag(A, v0=None, M=20):
     """Construct the tridiagonal lanczos matrix using only matvec operators.
 
     Parameters
     ----------
-    A : linear operator
+    A : matrix-like or linear operator
         The operator to approximate, must implement ``.dot`` method to compute
-        its action of a vector.
+        its action on a vector.
     v0 : vector, optional
         The starting vector to iterate with, default to random.
     M : int, optional
@@ -289,7 +364,7 @@ def approx_spectral_function(A, fn, M=20, R=10, v0=None):
     """
 
     def gen_vals():
-        for r in range(R):
+        for _ in range(R):
             alpha, beta = construct_lanczos_tridiag(A, M=M, v0=v0)
             el, ev = lanczos_tridiag_eig(alpha, beta)
 

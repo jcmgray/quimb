@@ -1,5 +1,4 @@
 import pytest
-from math import sqrt
 import numpy as np
 from numpy.testing import assert_allclose
 
@@ -9,7 +8,6 @@ from quimb import (
     rand_pos,
     rand_herm,
     partial_transpose,
-    norm,
     eigvals,
 )
 
@@ -18,9 +16,11 @@ from quimb.linalg.approx_linalg import (
     lazy_ptr_dot,
     get_cntrct_inds_ptr_ppt_dot,
     lazy_ptr_ppt_dot,
+    LazyPtrPptOperator,
     construct_lanczos_tridiag,
     lanczos_tridiag_eig,
     approx_spectral_function,
+    LazyPtrOperatr,
 )
 
 SZS = (5, 4, 3)
@@ -86,11 +86,26 @@ class TestLazyTensorEval:
         psi_out_got = lazy_ptr_dot(tri_psi, bi_psi)
         assert_allclose(psi_out_expected, psi_out_got)
 
+    def test_lazy_ptr_dot_simple_linear_op(self, tri_psi, bi_psi):
+        rho_ab = tri_psi.ptr(DIMS, [0, 1])
+        psi_out_expected = rho_ab @ bi_psi
+        lo = LazyPtrOperatr(tri_psi, DIMS, [0, 1])
+        psi_out_got = lo @ bi_psi
+        assert_allclose(psi_out_expected, psi_out_got)
+
     def test_lazy_ptr_dot_manybody(self, psi_mb_abc, psi_mb_ab):
         sysa = [0, 1, 2, 3, 7, 8, 9]
         rho_ab = psi_mb_abc.ptr(DIMS_MB, sysa)
         psi_out_expected = rho_ab @ psi_mb_ab
         psi_out_got = lazy_ptr_dot(psi_mb_abc, psi_mb_ab, DIMS_MB, sysa=sysa)
+        assert_allclose(psi_out_expected, psi_out_got)
+
+    def test_lazy_ptr_dot_manybody_linear_op(self, psi_mb_abc, psi_mb_ab):
+        sysa = [0, 1, 2, 3, 7, 8, 9]
+        rho_ab = psi_mb_abc.ptr(DIMS_MB, sysa)
+        psi_out_expected = rho_ab @ psi_mb_ab
+        lo = LazyPtrOperatr(psi_mb_abc, DIMS_MB, sysa=sysa)
+        psi_out_got = lo @ psi_mb_ab
         assert_allclose(psi_out_expected, psi_out_got)
 
     def test_get_cntrct_inds_ptr_ppt_dot_simple(self):
@@ -136,6 +151,16 @@ class TestLazyTensorEval:
         psi_out_got = lazy_ptr_ppt_dot(tri_psi, bi_psi, DIMS, 0, 1)
         assert_allclose(psi_out_expected, psi_out_got)
 
+    def test_lazy_ptr_ppt_dot_linear_op(self, tri_psi, bi_psi):
+        rho_ab = tri_psi.ptr(DIMS, [0, 1])
+        rho_ab_pt = partial_transpose(rho_ab, DIMS[:-1])
+        psi_out_expected = rho_ab_pt @ bi_psi
+        lo = LazyPtrPptOperator(tri_psi, DIMS, 0, 1)
+        assert lo.dtype == complex
+        assert lo.shape == (512, 512)
+        psi_out_got = lo @ bi_psi
+        assert_allclose(psi_out_expected, psi_out_got)
+
     def test_lazy_ptr_ppt_dot_manybody(self, psi_mb_abc, psi_mb_ab):
         sysa = [0, 1, 7, 8]
         sysb = [2, 3, 9]
@@ -144,6 +169,19 @@ class TestLazyTensorEval:
         psi_out_expected = rho_ab @ psi_mb_ab
         psi_out_got = lazy_ptr_ppt_dot(
             psi_mb_abc, psi_mb_ab, DIMS_MB, sysa=sysa, sysb=sysb)
+        assert_allclose(psi_out_expected, psi_out_got)
+
+    def test_lazy_ptr_ppt_dot_manybody_linear_op(self, psi_mb_abc, psi_mb_ab):
+        sysa = [0, 1, 7, 8]
+        sysb = [2, 3, 9]
+        rho_ab = psi_mb_abc.ptr(DIMS_MB, sysa + sysb)
+        rho_ab = partial_transpose(rho_ab, [2] * 7, sysa=(0, 1, 4, 5))
+        psi_out_expected = rho_ab @ psi_mb_ab
+        lo = LazyPtrPptOperator(psi_mb_abc, DIMS_MB, sysa, sysb)
+        assert hasattr(lo, "H")
+        assert lo.dtype == complex
+        assert lo.shape == (128, 128)
+        psi_out_got = lo.dot(psi_mb_ab)
         assert_allclose(psi_out_expected, psi_out_got)
 
 
@@ -161,14 +199,19 @@ class TestLanczosApprox:
         assert ev.shape == (20, 20)
         assert ev.dtype == float
 
-    def test_approx_spectral_function_abs(self):
-        a = rand_herm(2**4)
-        actual_norm = norm(a, 'tr')
-        approx_norm = approx_spectral_function(a, abs, M=20, R=30)
-        assert_allclose(actual_norm, approx_norm, rtol=1e-1)
-
-    def test_approx_spectral_function_sqrt(self):
-        a = rand_pos(2**4)
-        actual_x = sum(np.sqrt(eigvals(a)))
-        approx_x = approx_spectral_function(a, sqrt, M=20, R=30)
-        assert_allclose(actual_x, approx_x, rtol=1e-1)
+    @pytest.mark.parametrize(
+        "fn_matrix",
+        [
+            (np.abs, rand_herm),
+            (np.sqrt, rand_pos),
+            (np.log2, rand_pos),
+            (np.exp, rand_herm),
+        ]
+    )
+    def test_approx_spectral_function_sqrt(self, fn_matrix):
+        fn, matrix = fn_matrix
+        np.random.seed(42)
+        a = matrix(2**7)
+        actual_x = sum(fn(eigvals(a)))
+        approx_x = approx_spectral_function(a, fn, M=20, R=20)
+        assert_allclose(actual_x, approx_x, rtol=3e-2)
