@@ -1,5 +1,12 @@
+"""Use lanczos tri-diagonalization to approximate the spectrum of any operator
+which has an efficient represenation of its linear action on a vector.
+"""
+# TODO: error estimates
+# TODO: more advanced tri-diagonalization method?
+
 import functools
-from math import sqrt
+from math import sqrt, log2, exp
+
 import numpy as np
 import scipy.linalg as scla
 import scipy.sparse.linalg as spla
@@ -7,6 +14,7 @@ try:
     from opt_einsum import contract as einsum
 except ImportError:
     from numpy import einsum
+
 from ..accel import prod
 
 
@@ -115,7 +123,7 @@ def lazy_ptr_dot(psi_ab, psi_a, dims=None, sysa=0):
     ).reshape(psi_a.shape)
 
 
-class LazyPtrOperatr(spla.LinearOperator):
+class LazyPtrOperator(spla.LinearOperator):
     """A linear operator representing action of partially tracing a bipartite
     state, then multiplying another 'unipartite' state.
 
@@ -350,25 +358,61 @@ def construct_lanczos_tridiag(A, v0=None, M=20):
     return alpha[1:], beta[2:-1]
 
 
-def lanczos_tridiag_eig(alpha, beta):
+def lanczos_tridiag_eig(alpha, beta, check_finite=True):
     """Find the eigen-values and -vectors of the Lanczos triadiagonal matrix.
     """
     Tk_banded = np.empty((2, alpha.size))
+    Tk_banded[1, -1] = 0.0  # sometimes can get nan here? -> breaks eig_banded
     Tk_banded[0, :] = alpha
     Tk_banded[1, :-1] = beta
-    return scla.eig_banded(Tk_banded, lower=True)
+    return scla.eig_banded(Tk_banded, lower=True, check_finite=check_finite)
 
 
-def approx_spectral_function(A, fn, M=20, R=10, v0=None):
+def approx_spectral_function(A, fn, M=20, R=10, v0=None, pos=False):
     """Approximate a spectral function, that is, the quantity ``Tr(fn(A))``.
+
+    Parameters
+    ----------
+    A : matrix-like or LinearOperator
+        Operator to approximate spectral function for. Should implement
+        ``A.dot(vec)``.
+    fn : callable
+        Scalar function with with to act on approximate eigenvalues.
+    M : int, optional
+        The size of the tri-diagonal lanczos matrix to form. Cost of algorithm
+        scales linearly with ``M``.
+    R : int, optional
+        The number of repeats with different initial random vectors to perform.
+        Increasing this should increase accuracy as ``sqrt(R)``. Cost of
+        algorithm thus scales linearly with ``R``.
+    v0 :
+        Initial vector to iterate with, sets ``R=1`` if given.
+    pos : bool, optional
+        If True, make sure any approximate eigenvalues are positive by
+        clipping below 0.
+
+    Returns
+    -------
+    scalar
+        The approximate value ``Tr(fn(a))``.
     """
+    if v0 is not None:
+        R = 1
 
     def gen_vals():
         for _ in range(R):
             alpha, beta = construct_lanczos_tridiag(A, M=M, v0=v0)
-            el, ev = lanczos_tridiag_eig(alpha, beta)
+            el, ev = lanczos_tridiag_eig(alpha, beta, check_finite=False)
 
             for i in range(M):
-                yield fn(el[i]) * ev[0, i]**2
+                eli = max(el[i], 0.0) if pos else el[i]
+                yield fn(eli) * ev[0, i]**2
 
-    return sum(gen_vals()) * (A.shape[0] / R)
+    return sum(gen_vals()) * A.shape[0] / R
+
+
+tr_abs_approx = functools.partial(approx_spectral_function, fn=abs)
+tr_exp_approx = functools.partial(approx_spectral_function, fn=exp)
+tr_sqrt_approx = functools.partial(approx_spectral_function, fn=sqrt, pos=True)
+tr_xlogx_approx = functools.partial(approx_spectral_function,
+                                    fn=lambda x: x * log2(x) if x > 0 else 0.0)
