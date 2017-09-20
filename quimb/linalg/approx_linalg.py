@@ -11,14 +11,17 @@ import numpy as np
 import scipy.linalg as scla
 import scipy.sparse.linalg as spla
 try:
-    from opt_einsum import contract as einsum
+    from opt_einsum import contract as contract
 except ImportError:
-    from numpy import einsum
+    from numpy import contract
 
 from ..accel import prod
 from ..utils import int2tup
 
 
+# --------------------------------------------------------------------------- #
+#                   'Lazy' represenation tensor contractions                  #
+# --------------------------------------------------------------------------- #
 
 @functools.lru_cache(128)
 def get_cntrct_inds_ptr_dot(ndim_ab, sysa):
@@ -59,7 +62,7 @@ def get_cntrct_inds_ptr_dot(ndim_ab, sysa):
 
 
 def lazy_ptr_dot(psi_ab, psi_a, dims=None, sysa=0):
-    """Perform the 'lazy' evalution of ``ptr(psi_ab, ...) @ psi_a``,
+    r"""Perform the 'lazy' evalution of ``ptr(psi_ab, ...) @ psi_a``,
     that is, contract the tensor diagram in an efficient way that does not
     necessarily construct the explicit reduced density matrix. In tensor
     diagram notation:
@@ -112,10 +115,11 @@ def lazy_ptr_dot(psi_ab, psi_a, dims=None, sysa=0):
 
     psi_ab_tensor = np.asarray(psi_ab).reshape(dims)
 
-    return einsum(
+    return contract(
         np.asarray(psi_a).reshape(dims_a), inds_a_ket,
         psi_ab_tensor.conjugate(), inds_ab_bra,
         psi_ab_tensor, inds_ab_ket,
+        optimize=True,
     ).reshape(psi_a.shape)
 
 
@@ -204,7 +208,7 @@ def get_cntrct_inds_ptr_ppt_dot(ndim_abc, sysa, sysb):
 
 
 def lazy_ptr_ppt_dot(psi_abc, psi_ab, dims, sysa, sysb):
-    """Perform the 'lazy' evalution of
+    r"""Perform the 'lazy' evalution of
     ``partial_transpose(ptr(psi_abc, ...)) @ psi_ab``, that is, contract the
     tensor diagram in an efficient way that does not necessarily construct
     the explicit reduced density matrix. For a tripartite system, the partial
@@ -259,11 +263,12 @@ def lazy_ptr_ppt_dot(psi_abc, psi_ab, dims, sysa, sysb):
 
     # must have ``inds_out`` as resulting indices are not ordered
     # in the same way as input due to partial tranpose.
-    return einsum(
+    return contract(
         np.asarray(psi_ab).reshape(dims_ab), inds_ab_ket,
         psi_abc_tensor.conjugate(), inds_abc_bra,
         psi_abc_tensor, inds_abc_ket,
         inds_out,
+        optimize=True,
     ).reshape(psi_ab.shape)
 
 
@@ -304,6 +309,10 @@ class LazyPtrPptOperator(spla.LinearOperator):
         return self.__class__(self.psi_abc.conjugate(), self.dims,
                               self.sysa, self.sysb)
 
+
+# --------------------------------------------------------------------------- #
+#                         Lanczos tri-diag technique                          #
+# --------------------------------------------------------------------------- #
 
 def construct_lanczos_tridiag(A, v0=None, M=20):
     """Construct the tridiagonal lanczos matrix using only matvec operators.
