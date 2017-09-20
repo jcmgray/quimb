@@ -28,12 +28,12 @@ DIMS = [2**sz for sz in SZS]
 
 
 @pytest.fixture
-def tri_psi():
+def psi_abc():
     return rand_ket(prod(DIMS))
 
 
 @pytest.fixture
-def bi_psi():
+def psi_ab():
     return rand_ket(prod(DIMS[:-1]))
 
 
@@ -80,17 +80,17 @@ class TestLazyTensorEval:
         assert ci_ab_b == list(range(11))
         assert ci_ab_k == [0, 11, 12, 13, 14, 5, 6, 7, 15, 16, 10]
 
-    def test_lazy_ptr_dot_simple(self, tri_psi, bi_psi):
-        rho_ab = tri_psi.ptr(DIMS, [0, 1])
-        psi_out_expected = rho_ab @ bi_psi
-        psi_out_got = lazy_ptr_dot(tri_psi, bi_psi)
+    def test_lazy_ptr_dot_simple(self, psi_abc, psi_ab):
+        rho_ab = psi_abc.ptr(DIMS, [0, 1])
+        psi_out_expected = rho_ab @ psi_ab
+        psi_out_got = lazy_ptr_dot(psi_abc, psi_ab)
         assert_allclose(psi_out_expected, psi_out_got)
 
-    def test_lazy_ptr_dot_simple_linear_op(self, tri_psi, bi_psi):
-        rho_ab = tri_psi.ptr(DIMS, [0, 1])
-        psi_out_expected = rho_ab @ bi_psi
-        lo = LazyPtrOperatr(tri_psi, DIMS, [0, 1])
-        psi_out_got = lo @ bi_psi
+    def test_lazy_ptr_dot_simple_linear_op(self, psi_abc, psi_ab):
+        rho_ab = psi_abc.ptr(DIMS, [0, 1])
+        psi_out_expected = rho_ab @ psi_ab
+        lo = LazyPtrOperatr(psi_abc, DIMS, [0, 1])
+        psi_out_got = lo @ psi_ab
         assert_allclose(psi_out_expected, psi_out_got)
 
     def test_lazy_ptr_dot_manybody(self, psi_mb_abc, psi_mb_ab):
@@ -144,21 +144,21 @@ class TestLazyTensorEval:
         assert inds_abc_ket == [0, 1, 2, 3, 4, 5, 6, 7, 8]
         assert inds_out == [9, 10, 2, 3, 13, 6]
 
-    def test_lazy_ptr_ppt_dot(self, tri_psi, bi_psi):
-        rho_ab = tri_psi.ptr(DIMS, [0, 1])
+    def test_lazy_ptr_ppt_dot(self, psi_abc, psi_ab):
+        rho_ab = psi_abc.ptr(DIMS, [0, 1])
         rho_ab_pt = partial_transpose(rho_ab, DIMS[:-1])
-        psi_out_expected = rho_ab_pt @ bi_psi
-        psi_out_got = lazy_ptr_ppt_dot(tri_psi, bi_psi, DIMS, 0, 1)
+        psi_out_expected = rho_ab_pt @ psi_ab
+        psi_out_got = lazy_ptr_ppt_dot(psi_abc, psi_ab, DIMS, 0, 1)
         assert_allclose(psi_out_expected, psi_out_got)
 
-    def test_lazy_ptr_ppt_dot_linear_op(self, tri_psi, bi_psi):
-        rho_ab = tri_psi.ptr(DIMS, [0, 1])
+    def test_lazy_ptr_ppt_dot_linear_op(self, psi_abc, psi_ab):
+        rho_ab = psi_abc.ptr(DIMS, [0, 1])
         rho_ab_pt = partial_transpose(rho_ab, DIMS[:-1])
-        psi_out_expected = rho_ab_pt @ bi_psi
-        lo = LazyPtrPptOperator(tri_psi, DIMS, 0, 1)
+        psi_out_expected = rho_ab_pt @ psi_ab
+        lo = LazyPtrPptOperator(psi_abc, DIMS, 0, 1)
         assert lo.dtype == complex
         assert lo.shape == (512, 512)
-        psi_out_got = lo @ bi_psi
+        psi_out_got = lo @ psi_ab
         assert_allclose(psi_out_expected, psi_out_got)
 
     def test_lazy_ptr_ppt_dot_manybody(self, psi_mb_abc, psi_mb_ab):
@@ -208,10 +208,13 @@ class TestLanczosApprox:
             (np.exp, rand_herm),
         ]
     )
-    def test_approx_spectral_function_sqrt(self, fn_matrix):
+    def test_approx_spectral_function(self, fn_matrix):
         fn, matrix = fn_matrix
         np.random.seed(42)
         a = matrix(2**7)
         actual_x = sum(fn(eigvals(a)))
         approx_x = approx_spectral_function(a, fn, M=20, R=20)
         assert_allclose(actual_x, approx_x, rtol=3e-2)
+
+    def test_approx_sepctral_function_ptr_lin_op(self):
+        pass
