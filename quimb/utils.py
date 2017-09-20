@@ -119,3 +119,9 @@ def deprecated(fn, old_name, new_name):
         return fn(*args, **kwargs)
 
     return new_fn
+
+
+def int2tup(x):
+    return (x if isinstance(x, tuple) else
+            (x,) if isinstance(x, int) else
+            tuple(x))

@@ -40,7 +40,6 @@ from .linalg.base_linalg import (
     norm,
     seigvals,
     sqrtm,
-
 )
 from .gen.operators import sig
 from .gen.states import (
@@ -48,6 +47,7 @@ from .gen.states import (
     bell_state,
     bloch_state,
 )
+from .utils import int2tup
 
 
 def fidelity(p1, p2):
@@ -187,7 +187,7 @@ def partial_transpose(p, dims=(2, 2), sysa=0):
     -------
     matrix
     """
-    sysa = (sysa,) if isinstance(sysa, int) else tuple(sysa)
+    sysa = int2tup(sysa)
 
     ndims = len(dims)
     perm_ket_inds = []
@@ -239,8 +239,7 @@ def logarithmic_negativity(p, dims=(2, 2), sysa=0, sysb=1):
         e = sum(np.sqrt(np.clip(eigvals(rhoa, sort=False), 0, 1)))**2
 
     else:
-        sysa = (sysa,) if isinstance(sysa, int) else tuple(sysa)
-        sysb = (sysb,) if isinstance(sysb, int) else tuple(sysb)
+        sysa, sysb = int2tup(sysa), int2tup(sysb)
 
         if ndims > len(sysa) + len(sysb):  # need to trace out
             sysab = sysa + sysb

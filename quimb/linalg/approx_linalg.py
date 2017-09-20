@@ -16,12 +16,8 @@ except ImportError:
     from numpy import einsum
 
 from ..accel import prod
+from ..utils import int2tup
 
-
-def int2tup(x):
-    return (x if isinstance(x, tuple) else
-            (x,) if isinstance(x, int) else
-            tuple(x))
 
 
 @functools.lru_cache(128)
