@@ -328,7 +328,7 @@ class TestLanczosApprox:
 
     def test_construct_lanczos_tridiag(self):
         a = rand_herm(2**4)
-        alpha, beta = construct_lanczos_tridiag(a)
+        alpha, beta, scaling = construct_lanczos_tridiag(a)
         assert alpha.shape == (20,)
         assert beta.shape == (19,)
 

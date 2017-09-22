@@ -401,9 +401,11 @@ def construct_lanczos_tridiag(A, M=M_DEFAULT, v0=None):
         alpha[k] = np.vdot(wk, vk[:, k]).real
         wk -= alpha[k] * vk[:, k]
         beta[k + 1] = sqrt(np.vdot(wk, wk).real)
+        if beta[k + 1] < 1e-12:  # converged
+            break
         np.divide(wk, beta[k + 1], out=vk[:, k + 1])
 
-    return alpha[1:], beta[2:-1]
+    return alpha[1:k + 1], beta[2:k + 1], A.shape[0]
 
 
 def lanczos_tridiag_eig(alpha, beta, check_finite=True):
@@ -414,6 +416,11 @@ def lanczos_tridiag_eig(alpha, beta, check_finite=True):
     Tk_banded[0, :] = alpha
     Tk_banded[1, :-1] = beta
     return scla.eig_banded(Tk_banded, lower=True, check_finite=check_finite)
+
+
+def calc_trace_fn_tridiag(tl, tv, fn, pos=True):
+    return sum(fn(max(tl[i], 0.0) if pos else tl[i]) * tv[0, i]**2
+               for i in range(tl.size))
 
 
 def approx_spectral_function(A, fn, M=M_DEFAULT, R=R_DEFAULT,
@@ -450,14 +457,11 @@ def approx_spectral_function(A, fn, M=M_DEFAULT, R=R_DEFAULT,
 
     def gen_vals():
         for _ in range(R):
-            alpha, beta = construct_lanczos_tridiag(A, M=M, v0=v0)
-            el, ev = lanczos_tridiag_eig(alpha, beta, check_finite=False)
+            alpha, beta, scaling = construct_lanczos_tridiag(A, M=M, v0=v0)
+            tl, tv = lanczos_tridiag_eig(alpha, beta, check_finite=False)
+            yield scaling * calc_trace_fn_tridiag(tl, tv, fn, pos=pos)
 
-            for i in range(M):
-                eli = max(el[i], 0.0) if pos else el[i]
-                yield fn(eli) * ev[0, i]**2
-
-    return sum(gen_vals()) * A.shape[0] / R
+    return sum(gen_vals()) / R
 
 
 tr_abs_approx = functools.partial(approx_spectral_function, fn=abs)
