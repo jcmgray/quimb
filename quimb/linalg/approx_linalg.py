@@ -24,7 +24,7 @@ from ..utils import int2tup
 # --------------------------------------------------------------------------- #
 
 @functools.lru_cache(128)
-def get_cntrct_inds_ptr_dot(ndim_ab, sysa):
+def get_cntrct_inds_ptr_dot(ndim_ab, sysa, matmat=False):
     """Find the correct integer contraction labels for ``lazy_ptr_dot``.
 
     Parameters
@@ -33,6 +33,9 @@ def get_cntrct_inds_ptr_dot(ndim_ab, sysa):
         The total number of subsystems (dimensions) in 'ab'.
     sysa : int or sequence of int, optional
             Index(es) of the 'a' subsystem(s) to keep.
+    matmat : bool, optional
+        Whether to output indices corresponding to a matrix-vector or
+        matrix-matrix opertion.
 
     Returns
     -------
@@ -58,6 +61,9 @@ def get_cntrct_inds_ptr_dot(ndim_ab, sysa):
             inds_ab_bra.append(i)
             inds_ab_ket.append(i)
 
+    if matmat:
+        inds_a_ket.append(2 * ndim_ab)
+
     return inds_a_ket, inds_ab_bra, inds_ab_ket
 
 
@@ -67,6 +73,7 @@ def lazy_ptr_dot(psi_ab, psi_a, dims=None, sysa=0):
     necessarily construct the explicit reduced density matrix. In tensor
     diagram notation:
     ``
+      ( | )
     +-------+
     | psi_a |   ______
     +_______+  /      \
@@ -87,8 +94,10 @@ def lazy_ptr_dot(psi_ab, psi_a, dims=None, sysa=0):
     psi_ab : ket
         State to partially trace and dot with another ket, with
         size ``prod(dims)``.
-    psi_a : ket
-        State to act on with the dot product, of size ``prod(dims[sysa])``.
+    psi_a : ket or sequence of kets
+        State to act on with the dot product, of size ``prod(dims[sysa])``, or
+        several states to act on at once, then rectangular matrix of size
+        ``(prod(dims[sysa]), nstates)``.
     dims : sequence of int, optional
         The sub dimensions of ``psi_ab``, inferred as bipartite if not given,
         i.e. ``(psi_a.size, psi_ab.size // psi_a.size)``.
@@ -99,8 +108,10 @@ def lazy_ptr_dot(psi_ab, psi_a, dims=None, sysa=0):
     -------
     ket
     """
+    mat_size = psi_a.shape[1]
+
     if dims is None:
-        da = psi_a.size
+        da = psi_a.shape[0]
         d = psi_ab.size
         dims = (da, d // da)
 
@@ -108,15 +119,18 @@ def lazy_ptr_dot(psi_ab, psi_a, dims=None, sysa=0):
     sysa = int2tup(sysa)
 
     ndim_ab = len(dims)
-    dims_a = [d for i, d in enumerate(dims) if i in sysa]
-
     inds_a_ket, inds_ab_bra, inds_ab_ket = get_cntrct_inds_ptr_dot(
-        ndim_ab, sysa)
+        ndim_ab, sysa, matmat=mat_size > 1)
 
+    dims_a = [d for i, d in enumerate(dims) if i in sysa]
+    if mat_size > 1:
+        dims_a.append(mat_size)
+
+    psi_a_tensor = np.asarray(psi_a).reshape(dims_a)
     psi_ab_tensor = np.asarray(psi_ab).reshape(dims)
 
     return contract(
-        np.asarray(psi_a).reshape(dims_a), inds_a_ket,
+        psi_a_tensor, inds_a_ket,
         psi_ab_tensor.conjugate(), inds_ab_bra,
         psi_ab_tensor, inds_ab_ket,
         optimize=True,
@@ -149,12 +163,15 @@ class LazyPtrOperator(spla.LinearOperator):
     def _matvec(self, vec):
         return lazy_ptr_dot(self.psi_ab, vec, self.dims, self.sysa)
 
+    def _matmat(self, vecs):
+        return lazy_ptr_dot(self.psi_ab, vecs, self.dims, self.sysa)
+
     def _adjoint(self):
         return self.__class__(self.psi_ab.conjugate(), self.dims, self.sysa)
 
 
 @functools.lru_cache(128)
-def get_cntrct_inds_ptr_ppt_dot(ndim_abc, sysa, sysb):
+def get_cntrct_inds_ptr_ppt_dot(ndim_abc, sysa, sysb, matmat=False):
     """Find the correct integer contraction labels for ``lazy_ptr_ppt_dot``.
 
     Parameters
@@ -167,6 +184,9 @@ def get_cntrct_inds_ptr_ppt_dot(ndim_abc, sysa, sysb):
     sysa : int or sequence of int, optional
         Index(es) of the 'b' subsystem(s) to keep, with respect to all
         the dimensions, ``dims``, (i.e. pre-partial trace).
+    matmat : bool, optional
+        Whether to output indices corresponding to a matrix-vector or
+        matrix-matrix opertion.
 
     Returns
     -------
@@ -204,6 +224,10 @@ def get_cntrct_inds_ptr_ppt_dot(ndim_abc, sysa, sysb):
             inds_abc_bra.append(i)
             inds_abc_ket.append(i)
 
+    if matmat:
+        inds_ab_ket.append(2 * ndim_abc)
+        inds_out.append(2 * ndim_abc)
+
     return inds_ab_ket, inds_abc_bra, inds_abc_ket, inds_out
 
 
@@ -215,6 +239,7 @@ def lazy_ptr_ppt_dot(psi_abc, psi_ab, dims, sysa, sysb):
     trace is with respect to ``c``, while the partial tranpose is with
     respect to ``a/b``. In tensor diagram notation:
     ``
+         ( | )
     +--------------+
     |   psi_ab     |
     +______________+  _____
@@ -236,9 +261,13 @@ def lazy_ptr_ppt_dot(psi_abc, psi_ab, dims, sysa, sysb):
     psi_abc : ket
         State to partially trace, partially tranpose, then dot with another
         ket, with size ``prod(dims)``.
-    psi_ab : ket
+    psi_ab : ket, sequence of kets
         State to act on with the dot product, of size
-        ``prod(dims[sysa] + dims[sysb])``.
+        , or series of states to ac
+        State to act on with the dot product, of size
+        ``prod(dims[sysa] + dims[sysb])``, or several states to act on at once,
+        then rectangular matrix of size
+        ``(prod(dims[sysa] + dims[sysb]), nstates)``.
     dims : sequence of int
         The sub dimensions of ``psi_abc``.
     sysa : int or sequence of int, optional
@@ -252,19 +281,24 @@ def lazy_ptr_ppt_dot(psi_abc, psi_ab, dims, sysa, sysb):
     -------
     ket
     """
+    mat_size = psi_ab.shape[1]
+
     # convert to tuple so can always cache
     sysa, sysb = int2tup(sysa), int2tup(sysb)
 
     inds_ab_ket, inds_abc_bra, inds_abc_ket, inds_out = \
-        get_cntrct_inds_ptr_ppt_dot(len(dims), sysa, sysb)
+        get_cntrct_inds_ptr_ppt_dot(len(dims), sysa, sysb, matmat=mat_size > 1)
 
-    psi_abc_tensor = np.asarray(psi_abc).reshape(dims)
     dims_ab = [d for i, d in enumerate(dims) if (i in sysa) or (i in sysb)]
+    if mat_size > 1:
+        dims_ab.append(mat_size)
+    psi_ab_tensor = np.asarray(psi_ab).reshape(dims_ab)
+    psi_abc_tensor = np.asarray(psi_abc).reshape(dims)
 
     # must have ``inds_out`` as resulting indices are not ordered
     # in the same way as input due to partial tranpose.
     return contract(
-        np.asarray(psi_ab).reshape(dims_ab), inds_ab_ket,
+        psi_ab_tensor, inds_ab_ket,
         psi_abc_tensor.conjugate(), inds_abc_bra,
         psi_abc_tensor, inds_abc_ket,
         inds_out,
@@ -305,6 +339,10 @@ class LazyPtrPptOperator(spla.LinearOperator):
         return lazy_ptr_ppt_dot(self.psi_abc, vec, self.dims,
                                 self.sysa, self.sysb)
 
+    def _matmat(self, vecs):
+        return lazy_ptr_ppt_dot(self.psi_abc, vecs, self.dims,
+                                self.sysa, self.sysb)
+
     def _adjoint(self):
         return self.__class__(self.psi_abc.conjugate(), self.dims,
                               self.sysa, self.sysb)
@@ -314,7 +352,11 @@ class LazyPtrPptOperator(spla.LinearOperator):
 #                         Lanczos tri-diag technique                          #
 # --------------------------------------------------------------------------- #
 
-def construct_lanczos_tridiag(A, v0=None, M=20):
+M_DEFAULT = 20
+R_DEFAULT = 20
+
+
+def construct_lanczos_tridiag(A, M=M_DEFAULT, v0=None):
     """Construct the tridiagonal lanczos matrix using only matvec operators.
 
     Parameters
@@ -354,11 +396,12 @@ def construct_lanczos_tridiag(A, v0=None, M=20):
 
     # construct the krylov subspace
     for k in range(1, M + 1):
-        wk = A.dot(vk[:, k]) - beta[k] * vk[:, k - 1]
+        wk = A.dot(vk[:, k])
+        wk -= beta[k] * vk[:, k - 1]
         alpha[k] = np.vdot(wk, vk[:, k]).real
         wk -= alpha[k] * vk[:, k]
         beta[k + 1] = sqrt(np.vdot(wk, wk).real)
-        vk[:, k + 1] = wk / beta[k + 1]
+        np.divide(wk, beta[k + 1], out=vk[:, k + 1])
 
     return alpha[1:], beta[2:-1]
 
@@ -373,7 +416,8 @@ def lanczos_tridiag_eig(alpha, beta, check_finite=True):
     return scla.eig_banded(Tk_banded, lower=True, check_finite=check_finite)
 
 
-def approx_spectral_function(A, fn, M=20, R=10, v0=None, pos=False):
+def approx_spectral_function(A, fn, M=M_DEFAULT, R=R_DEFAULT,
+                             v0=None, pos=False):
     """Approximate a spectral function, that is, the quantity ``Tr(fn(A))``.
 
     Parameters
@@ -421,3 +465,96 @@ tr_exp_approx = functools.partial(approx_spectral_function, fn=exp)
 tr_sqrt_approx = functools.partial(approx_spectral_function, fn=sqrt, pos=True)
 tr_xlogx_approx = functools.partial(approx_spectral_function,
                                     fn=lambda x: x * log2(x) if x > 0 else 0.0)
+
+
+# --------------------------------------------------------------------------- #
+#                             Specific quantities                             #
+# --------------------------------------------------------------------------- #
+
+def entropy_subsys_approx(psi_ab, dims, sysa,
+                          M=M_DEFAULT, R=R_DEFAULT, v0=None):
+    """Approximate the (Von Neumann) entropy of a pure state's subsystem.
+    psi_ab : ket
+        Bipartite state to partially trace and find entopy of.
+    dims : sequence of int, optional
+        The sub dimensions of ``psi_ab``.
+    sysa : int or sequence of int, optional
+        Index(es) of the 'a' subsystem(s) to keep.
+    M : int, optional
+        The size of the tri-diagonal lanczos matrix to form. Cost of algorithm
+        scales linearly with ``M``.
+    R : int, optional
+        The number of repeats with different initial random vectors to perform.
+        Increasing this should increase accuracy as ``sqrt(R)``. Cost of
+        algorithm thus scales linearly with ``R``.
+    v0 :
+        Initial vector to iterate with, sets ``R=1`` if given.
+    """
+    lo = LazyPtrOperator(psi_ab, dims=dims, sysa=sysa)
+    return - tr_xlogx_approx(lo, M=M, R=R, v0=v0)
+
+
+def norm_ppt_subsys_approx(psi_abc, dims, sysa, sysb,
+                           M=M_DEFAULT, R=R_DEFAULT, v0=None):
+    """Estimate the norm of the partial tranpose of a pure state's subsystem.
+    """
+    lo = LazyPtrPptOperator(psi_abc, dims=dims, sysa=sysa, sysb=sysb)
+    return tr_abs_approx(lo, M=M, R=R, v0=v0)
+
+
+def logneg_subsys_approx(*args, **kwargs):
+    """Estimate the logarithmic negativity of a pure state's subsystem.
+
+    Parameters
+    ----------
+    psi_abc : ket
+        Pure tripartite state, for which estimate the entanglement between
+        'a' and 'b'.
+    dims : sequence of int
+        The sub dimensions of ``psi_abc``.
+    sysa : int or sequence of int, optional
+        Index(es) of the 'a' subsystem(s) to keep, with respect to all
+        the dimensions, ``dims``, (i.e. pre-partial trace).
+    sysa : int or sequence of int, optional
+        Index(es) of the 'b' subsystem(s) to keep, with respect to all
+        the dimensions, ``dims``, (i.e. pre-partial trace).
+    M : int, optional
+        The size of the tri-diagonal lanczos matrix to form. Cost of algorithm
+        scales linearly with ``M``.
+    R : int, optional
+        The number of repeats with different initial random vectors to perform.
+        Increasing this should increase accuracy as ``sqrt(R)``. Cost of
+        algorithm thus scales linearly with ``R``.
+    v0 :
+        Initial vector to iterate with, sets ``R=1`` if given.
+    """
+    return max(log2(norm_ppt_subsys_approx(*args, **kwargs)), 0.0)
+
+
+def negativity_subsys_approx(*args, **kwargs):
+    """Estimate the negativity of a pure state's subsystem.
+
+    Parameters
+    ----------
+    psi_abc : ket
+        Pure tripartite state, for which estimate the entanglement between
+        'a' and 'b'.
+    dims : sequence of int
+        The sub dimensions of ``psi_abc``.
+    sysa : int or sequence of int, optional
+        Index(es) of the 'a' subsystem(s) to keep, with respect to all
+        the dimensions, ``dims``, (i.e. pre-partial trace).
+    sysa : int or sequence of int, optional
+        Index(es) of the 'b' subsystem(s) to keep, with respect to all
+        the dimensions, ``dims``, (i.e. pre-partial trace).
+    M : int, optional
+        The size of the tri-diagonal lanczos matrix to form. Cost of algorithm
+        scales linearly with ``M``.
+    R : int, optional
+        The number of repeats with different initial random vectors to perform.
+        Increasing this should increase accuracy as ``sqrt(R)``. Cost of
+        algorithm thus scales linearly with ``R``.
+    v0 :
+        Initial vector to iterate with, sets ``R=1`` if given.
+    """
+    return max((norm_ppt_subsys_approx(*args, **kwargs) - 1) / 2, 0.0)

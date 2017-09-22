@@ -32,7 +32,6 @@ from .core import (
     infer_size,
     expec,
     dop,
-    ind_complement,
 )
 from .linalg.base_linalg import (
     eigsys,
@@ -112,6 +111,10 @@ def entropy(a, rank=None):
     -------
     float
         The von Neumann entropy.
+
+    See Also
+    --------
+    mutinf, entropy_subsys_approx
     """
     a = np.asarray(a)
     if np.ndim(a) == 1:
@@ -127,7 +130,7 @@ def entropy(a, rank=None):
 
 
 @zeroify
-def mutual_information(p, dims=(2, 2), sysa=0, sysb=1, rank=None):
+def mutinf(p, dims=(2, 2), sysa=0, sysb=1, rank=None):
     """Find the mutual information between two subystems of a state.
 
     That is, ``H(A) + H(B) - H(AB)``, for von Neumann entropy ``H``, and two
@@ -151,6 +154,10 @@ def mutual_information(p, dims=(2, 2), sysa=0, sysb=1, rank=None):
     Returns
     -------
     float
+
+    See Also
+    --------
+    entropy
     """
     if np.size(dims) > 2:
         if rank == 'AUTO':
@@ -169,7 +176,7 @@ def mutual_information(p, dims=(2, 2), sysa=0, sysb=1, rank=None):
     return ha + hb - hab
 
 
-mutinf = mutual_information
+mutual_information = mutinf
 
 
 @matrixify
@@ -186,6 +193,10 @@ def partial_transpose(p, dims=(2, 2), sysa=0):
     Returns
     -------
     matrix
+
+    See Also
+    --------
+    logneg, negativity
     """
     sysa = int2tup(sysa)
 
@@ -209,8 +220,19 @@ def partial_transpose(p, dims=(2, 2), sysa=0):
     )
 
 
+def partial_tranpose_norm(p, dims, sysa=0):
+    """Compute the norm of the partial transpose for (log) negativity."""
+    ndims = len(dims)
+
+    if isvec(p) and ndims == 2:  # pure bipartition, easier to calc
+        smaller_system = 0 if dims[0] <= dims[1] else 1
+        rhoa = ptr(p, dims, smaller_system)
+        return sum(np.sqrt(np.clip(eigvals(rhoa, sort=False), 0, 1)))**2
+    return norm(partial_transpose(p, dims, sysa), "tr")
+
+
 @zeroify
-def logarithmic_negativity(p, dims=(2, 2), sysa=0, sysb=1):
+def logneg(p, dims=(2, 2), sysa=0):
     """Compute logarithmic negativity between two subsytems.
 
     This is defined as  log_2( | rho_{AB}^{T_B} | ). If ``len(dims) > 2``,
@@ -224,37 +246,19 @@ def logarithmic_negativity(p, dims=(2, 2), sysa=0, sysb=1):
         The internal dimensions of ``p``.
     sysa : int, optional
         Index of the first subsystem, A, relative to ``dims``.
-    sysb : int, optional
-        Index of the first subsystem, B, relative to ``dims``.
 
     Returns
     -------
     float
+
+    See Also
+    --------
+    negativity, partial_transpose, logneg_subsys_approx
     """
-    ndims = len(dims)
-
-    if isvec(p) and ndims == 2:  # pure bipartition, easier to calc
-        smaller_system = 0 if dims[0] <= dims[1] else 1
-        rhoa = ptr(p, dims, smaller_system)
-        e = sum(np.sqrt(np.clip(eigvals(rhoa, sort=False), 0, 1)))**2
-
-    else:
-        sysa, sysb = int2tup(sysa), int2tup(sysb)
-
-        if ndims > len(sysa) + len(sysb):  # need to trace out
-            sysab = sysa + sysb
-            p = ptr(p, dims, sysab)
-            # 'slide' sysa inds down based on now missing sysc inds
-            dims = [d for i, d in enumerate(dims) if i in sysab]
-            sysc = ind_complement(sysab, ndims)
-            sysa = [i - sum(j < i for j in sysc) for i in sysa]
-
-        e = norm(partial_transpose(p, dims, sysa), "tr")
-
-    return max(0.0, log2(e))
+    return max(0.0, log2(partial_tranpose_norm(p, dims, sysa)))
 
 
-logneg = logarithmic_negativity
+logarithmic_negativity = logneg
 
 
 def negativity(p, dims=(2, 2), sysa=0, sysb=1):
@@ -271,15 +275,16 @@ def negativity(p, dims=(2, 2), sysa=0, sysb=1):
         The internal dimensions of ``p``.
     sysa : int, optional
         Index of the first subsystem, A, relative to ``dims``.
-    sysb : int, optional
-        Index of the first subsystem, B, relative to ``dims``.
 
     Returns
     -------
     float
+
+    See Also
+    --------
+    logneg, partial_transpose, negativity_subsys_approx
     """
-    ln = logarithmic_negativity(p, dims=dims, sysa=sysa, sysb=sysb)
-    return 2**ln - 1
+    return max(0.0, (partial_tranpose_norm(p, dims, sysa) - 1) / 2)
 
 
 @zeroify
