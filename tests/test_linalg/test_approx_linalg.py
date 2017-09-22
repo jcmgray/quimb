@@ -387,7 +387,7 @@ class TestLanczosApprox:
 
     @pytest.mark.parametrize("fn_approx_rtol",
                              [(np.exp, tr_exp_approx, 3e-2),
-                              (np.abs, tr_abs_approx, 3e-2)])
+                              (np.abs, tr_abs_approx, 5e-2)])
     def test_approx_spectral_function_ptr_ppt_lin_op(self, fn_approx_rtol,
                                                      psi_abc, psi_ab):
         fn, approx, rtol = fn_approx_rtol
@@ -420,7 +420,7 @@ class TestSpecificApproxQuantities:
         actual_e = entropy(rho_ab)
         approx_e = entropy_subsys_approx(psi_mb_abc, DIMS_MB,
                                          [0, 1, 7, 8, 2, 3, 9])
-        assert_allclose(actual_e, approx_e, rtol=1e-1)
+        assert_allclose(actual_e, approx_e, rtol=2e-1)
 
     def test_logneg_approx_simple(self, psi_abc):
         rho_ab = psi_abc.ptr(DIMS, [0, 1])
@@ -441,4 +441,4 @@ class TestSpecificApproxQuantities:
         rho_ab = psi_abc.ptr(DIMS, [0, 1])
         actual_neg = negativity(rho_ab, DIMS[:-1], 0)
         approx_neg = negativity_subsys_approx(psi_abc, DIMS, 0, 1)
-        assert_allclose(actual_neg, approx_neg, rtol=1e-1)
+        assert_allclose(actual_neg, approx_neg, rtol=2e-1)

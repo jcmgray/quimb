@@ -108,7 +108,7 @@ def lazy_ptr_dot(psi_ab, psi_a, dims=None, sysa=0):
     -------
     ket
     """
-    mat_size = psi_a.shape[1]
+    mat_size = psi_a.shape[1] if len(psi_a.shape) > 1 else 1
 
     if dims is None:
         da = psi_a.shape[0]
@@ -281,7 +281,7 @@ def lazy_ptr_ppt_dot(psi_abc, psi_ab, dims, sysa, sysb):
     -------
     ket
     """
-    mat_size = psi_ab.shape[1]
+    mat_size = psi_ab.shape[1] if len(psi_ab.shape) > 1 else 1
 
     # convert to tuple so can always cache
     sysa, sysb = int2tup(sysa), int2tup(sysb)
