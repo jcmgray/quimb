@@ -354,6 +354,19 @@ class LazyPtrPptOperator(spla.LinearOperator):
 
 M_DEFAULT = 20
 R_DEFAULT = 20
+BETA_TOL = 1e-10
+
+
+def inner_vec(a, b):
+    """Inner product between two vectors
+    """
+    return np.vdot(a, b).real
+
+
+def norm_fro_vec(a):
+    """'Frobenius' norm of a vector.
+    """
+    return sqrt(inner_vec(a, a))
 
 
 def construct_lanczos_tridiag(A, M=M_DEFAULT, v0=None):
@@ -378,43 +391,51 @@ def construct_lanczos_tridiag(A, M=M_DEFAULT, v0=None):
     """
     if isinstance(A, np.matrix):
         A = np.asarray(A)
-
     d = A.shape[0]
 
     alpha = np.zeros(M + 1)
     beta = np.zeros(M + 2)
-    vk = np.empty((d, M + 2), dtype=np.complex128)
-    vk[:, 0] = 0.0j
 
-    # initialize & normalize the starting vector
+    Vm1 = np.zeros(d, dtype=np.complex128)
     if v0 is None:
-        vk[:, 1] = np.random.randn(d)
-        vk[:, 1] += 1.0j * np.random.randn(d)
+        V = np.random.choice([-1, 1], d).astype(np.complex128)
     else:
-        vk[:, 1] = v0
-    vk[:, 1] /= sqrt(np.vdot(vk[:, 1], vk[:, 1]).real)
+        V = v0.astype(np.complex128)
+        V /= (inner_vec(V, V) / v0.shape[0]) ** 0.5
 
-    # construct the krylov subspace
-    for k in range(1, M + 1):
-        wk = A.dot(vk[:, k])
-        wk -= beta[k] * vk[:, k - 1]
-        alpha[k] = np.vdot(wk, vk[:, k]).real
-        wk -= alpha[k] * vk[:, k]
-        beta[k + 1] = sqrt(np.vdot(wk, wk).real)
-        if beta[k + 1] < 1e-12:  # converged
+    beta[1] = norm_fro_vec(V)
+    V /= beta[1]
+
+    for j in range(1, M + 1):
+        Vt = A @ V
+        Vt -= beta[j] * Vm1
+        alpha[j] = inner_vec(V, Vt)
+        Vt -= alpha[j] * V
+        beta[j + 1] = norm_fro_vec(Vt)
+
+        if abs(beta[j + 1]) < BETA_TOL:
             break
-        np.divide(wk, beta[k + 1], out=vk[:, k + 1])
 
-    return alpha[1:k + 1], beta[2:k + 1], A.shape[0]
+        Vm1[...] = V[...]
+        V[...] = Vt / beta[j + 1]
+
+    return alpha[1:j + 1], beta[2:j + 2], beta[1]**2
 
 
 def lanczos_tridiag_eig(alpha, beta, check_finite=True):
     """Find the eigen-values and -vectors of the Lanczos triadiagonal matrix.
+
+    Parameters
+    ----------
+    alpha : array of float
+        The diagonal.
+    beta : array of float
+        The k={-1, 1} off-diagonal. Only first ``len(alpha) - 1`` entries used.
     """
     Tk_banded = np.empty((2, alpha.size))
     Tk_banded[1, -1] = 0.0  # sometimes can get nan here? -> breaks eig_banded
     Tk_banded[0, :] = alpha
-    Tk_banded[1, :-1] = beta
+    Tk_banded[1, :beta.size] = beta
     return scla.eig_banded(Tk_banded, lower=True, check_finite=check_finite)
 
 
@@ -458,8 +479,19 @@ def approx_spectral_function(A, fn, M=M_DEFAULT, R=R_DEFAULT,
     def gen_vals():
         for _ in range(R):
             alpha, beta, scaling = construct_lanczos_tridiag(A, M=M, v0=v0)
-            tl, tv = lanczos_tridiag_eig(alpha, beta, check_finite=False)
-            yield scaling * calc_trace_fn_tridiag(tl, tv, fn, pos=pos)
+            Gf = scaling * calc_trace_fn_tridiag(*lanczos_tridiag_eig(
+                alpha, beta, check_finite=False), fn=fn, pos=pos)
+
+            if abs(beta[-1]) < BETA_TOL:
+                yield Gf
+
+            else:
+                beta[-1] = beta[0]
+                Rf = scaling * calc_trace_fn_tridiag(*lanczos_tridiag_eig(
+                    np.append(alpha, alpha[0]), beta, check_finite=False),
+                    fn=fn, pos=pos)
+
+                yield (Gf + Rf) / 2
 
     return sum(gen_vals()) / R
 

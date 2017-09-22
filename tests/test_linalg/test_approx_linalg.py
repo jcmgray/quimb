@@ -327,15 +327,27 @@ def np_xlogx(x):
 class TestLanczosApprox:
 
     def test_construct_lanczos_tridiag(self):
-        a = rand_herm(2**4)
+        a = rand_herm(2**5)
         alpha, beta, scaling = construct_lanczos_tridiag(a)
         assert alpha.shape == (20,)
-        assert beta.shape == (19,)
+        assert beta.shape == (20,)
 
         el, ev = lanczos_tridiag_eig(alpha, beta)
         assert el.shape == (20,)
         assert el.dtype == float
         assert ev.shape == (20, 20)
+        assert ev.dtype == float
+
+    def test_construct_lanczos_tridiag_beta_breakdown(self):
+        a = rand_herm(2**3)
+        alpha, beta, scaling = construct_lanczos_tridiag(a)
+        assert alpha.shape == (8,)
+        assert beta.shape == (8,)
+
+        el, ev = lanczos_tridiag_eig(alpha, beta)
+        assert el.shape == (8,)
+        assert el.dtype == float
+        assert ev.shape == (8, 8)
         assert ev.dtype == float
 
     @pytest.mark.parametrize(
@@ -344,14 +356,16 @@ class TestLanczosApprox:
             (np.abs, rand_herm, 3e-2),
             (np.sqrt, rand_pos, 3e-2),
             (np.log1p, rand_pos, 2e-1),
-            (np.exp, rand_herm, 3e-2),
+            (np.exp, rand_herm, 5e-2),
         ]
     )
     def test_approx_spectral_function(self, fn_matrix_rtol):
+        # import pdb; pdb.set_trace()
         fn, matrix, rtol = fn_matrix_rtol
         a = matrix(2**7)
+        pos = fn == np.sqrt
         actual_x = sum(fn(eigvals(a)))
-        approx_x = approx_spectral_function(a, fn, M=20, R=20)
+        approx_x = approx_spectral_function(a, fn, M=20, R=20, pos=pos)
         assert_allclose(actual_x, approx_x, rtol=rtol)
 
     @pytest.mark.parametrize(
@@ -367,8 +381,11 @@ class TestLanczosApprox:
         fn, matrix, rtol = fn_matrix_rtol
         a = matrix(2**7)
         actual_x = sum(fn(eigvals(a)))
-        v0 = neel_state(7).A.reshape(-1)
-        approx_x = approx_spectral_function(a, fn, M=20, v0=v0)
+        # check un-normalized state work properly
+        v0 = (neel_state(7) + neel_state(7, down_first=True))
+        v0 = v0.A.reshape(-1)
+        pos = fn == np.sqrt
+        approx_x = approx_spectral_function(a, fn, M=20, v0=v0, pos=pos)
         assert_allclose(actual_x, approx_x, rtol=rtol)
 
     @pytest.mark.parametrize("fn_approx_rtol",
