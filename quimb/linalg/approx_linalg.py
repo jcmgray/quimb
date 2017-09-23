@@ -3,6 +3,7 @@ which has an efficient represenation of its linear action on a vector.
 """
 # TODO: error estimates
 # TODO: more advanced tri-diagonalization method?
+# TODO: tol and/or max number of steps
 
 import functools
 from math import sqrt, log2, exp
@@ -15,7 +16,7 @@ try:
 except ImportError:
     from numpy import contract
 
-from ..accel import prod
+from ..accel import prod, vdot
 from ..utils import int2tup
 
 
@@ -67,7 +68,7 @@ def get_cntrct_inds_ptr_dot(ndim_ab, sysa, matmat=False):
     return inds_a_ket, inds_ab_bra, inds_ab_ket
 
 
-def lazy_ptr_dot(psi_ab, psi_a, dims=None, sysa=0):
+def lazy_ptr_dot(psi_ab, psi_a, dims=None, sysa=0, out=None):
     r"""Perform the 'lazy' evalution of ``ptr(psi_ab, ...) @ psi_a``,
     that is, contract the tensor diagram in an efficient way that does not
     necessarily construct the explicit reduced density matrix. In tensor
@@ -103,6 +104,8 @@ def lazy_ptr_dot(psi_ab, psi_a, dims=None, sysa=0):
         i.e. ``(psi_a.size, psi_ab.size // psi_a.size)``.
     sysa : int or sequence of int, optional
         Index(es) of the 'a' subsystem(s) to keep.
+    out : array, optional
+        If provided, the calculation is done into this array.
 
     Returns
     -------
@@ -129,11 +132,16 @@ def lazy_ptr_dot(psi_ab, psi_a, dims=None, sysa=0):
     psi_a_tensor = np.asarray(psi_a).reshape(dims_a)
     psi_ab_tensor = np.asarray(psi_ab).reshape(dims)
 
+    if out is None:
+        out = np.empty_like(psi_a_tensor)
+
     return contract(
         psi_a_tensor, inds_a_ket,
         psi_ab_tensor.conjugate(), inds_ab_bra,
         psi_ab_tensor, inds_ab_ket,
-        optimize=True,
+        optimize='optimal',
+        memory_limit=-1,
+        out=out,
     ).reshape(psi_a.shape)
 
 
@@ -231,7 +239,7 @@ def get_cntrct_inds_ptr_ppt_dot(ndim_abc, sysa, sysb, matmat=False):
     return inds_ab_ket, inds_abc_bra, inds_abc_ket, inds_out
 
 
-def lazy_ptr_ppt_dot(psi_abc, psi_ab, dims, sysa, sysb):
+def lazy_ptr_ppt_dot(psi_abc, psi_ab, dims, sysa, sysb, out=None):
     r"""Perform the 'lazy' evalution of
     ``partial_transpose(ptr(psi_abc, ...)) @ psi_ab``, that is, contract the
     tensor diagram in an efficient way that does not necessarily construct
@@ -276,6 +284,8 @@ def lazy_ptr_ppt_dot(psi_abc, psi_ab, dims, sysa, sysb):
     sysa : int or sequence of int, optional
         Index(es) of the 'b' subsystem(s) to keep, with respect to all
         the dimensions, ``dims``, (i.e. pre-partial trace).
+    out : array, optional
+        If provided, the calculation is done into this array.
 
     Returns
     -------
@@ -297,12 +307,18 @@ def lazy_ptr_ppt_dot(psi_abc, psi_ab, dims, sysa, sysb):
 
     # must have ``inds_out`` as resulting indices are not ordered
     # in the same way as input due to partial tranpose.
+
+    if out is None:
+        out = np.empty_like(psi_ab_tensor)
+
     return contract(
         psi_ab_tensor, inds_ab_ket,
         psi_abc_tensor.conjugate(), inds_abc_bra,
         psi_abc_tensor, inds_abc_ket,
         inds_out,
-        optimize=True,
+        optimize='optimal',
+        memory_limit=-1,
+        out=out,
     ).reshape(psi_ab.shape)
 
 
@@ -352,24 +368,25 @@ class LazyPtrPptOperator(spla.LinearOperator):
 #                         Lanczos tri-diag technique                          #
 # --------------------------------------------------------------------------- #
 
-M_DEFAULT = 20
-R_DEFAULT = 20
-BETA_TOL = 1e-10
+K_DEFAULT = 20
+R_DEFAULT = 10
+BSZ_DEFAULT = 1
+BETA_TOL = 1e-9
 
 
-def inner_vec(a, b):
+def inner(a, b):
     """Inner product between two vectors
     """
-    return np.vdot(a, b).real
+    return vdot(a, b).real
 
 
-def norm_fro_vec(a):
+def norm_fro(a):
     """'Frobenius' norm of a vector.
     """
-    return sqrt(inner_vec(a, a))
+    return sqrt(inner(a, a))
 
 
-def construct_lanczos_tridiag(A, M=M_DEFAULT, v0=None):
+def construct_lanczos_tridiag(A, K=K_DEFAULT, v0=None, bsz=BSZ_DEFAULT):
     """Construct the tridiagonal lanczos matrix using only matvec operators.
 
     Parameters
@@ -379,47 +396,55 @@ def construct_lanczos_tridiag(A, M=M_DEFAULT, v0=None):
         its action on a vector.
     v0 : vector, optional
         The starting vector to iterate with, default to random.
-    M : int, optional
+    K : int, optional
         The number of iterations and thus rank of the matrix to find.
 
     Returns
     -------
     alpha : sequence of float of length k
         The diagonal entries of the lanczos matrix.
-    beta : sequence of float of length k - 1
-        The off-diagonal entries of the lanczos matrix.
+    beta : sequence of float of length k
+        The off-diagonal entries of the lanczos matrix, with the last entry
+        the 'look' forward value.
+    scaling : float
+        How to scale the overall weights.
     """
     if isinstance(A, np.matrix):
         A = np.asarray(A)
     d = A.shape[0]
 
-    alpha = np.zeros(M + 1)
-    beta = np.zeros(M + 2)
+    if bsz == 1:
+        v_shp = (d,)
+    else:
+        v_shp = (d, bsz)
 
-    Vm1 = np.zeros(d, dtype=np.complex128)
+    alpha = np.zeros(K + 1)
+    beta = np.zeros(K + 2)
+    beta[1] = sqrt(prod(v_shp))  # by construction
+
     if v0 is None:
-        V = np.random.choice([-1, 1], d).astype(np.complex128)
+        V = np.random.choice([-1, 1], v_shp).astype(np.complex128)
+        V /= beta[1]  # normalize
     else:
         V = v0.astype(np.complex128)
-        V /= (inner_vec(V, V) / v0.shape[0]) ** 0.5
+        V /= norm_fro(V)  # normalize (make sure has unit variance)
+    Vm1 = np.zeros_like(V)
 
-    beta[1] = norm_fro_vec(V)
-    V /= beta[1]
-
-    for j in range(1, M + 1):
-        Vt = A @ V
+    for j in range(1, K + 1):
+        Vt = A.dot(V)
         Vt -= beta[j] * Vm1
-        alpha[j] = inner_vec(V, Vt)
+        alpha[j] = inner(V, Vt)
         Vt -= alpha[j] * V
-        beta[j + 1] = norm_fro_vec(Vt)
+        beta[j + 1] = norm_fro(Vt)
 
+        # check for convergence
         if abs(beta[j + 1]) < BETA_TOL:
             break
 
         Vm1[...] = V[...]
-        V[...] = Vt / beta[j + 1]
+        np.divide(Vt, beta[j + 1], out=V)
 
-    return alpha[1:j + 1], beta[2:j + 2], beta[1]**2
+    return alpha[1:j + 1], beta[2:j + 2], beta[1]**2 / bsz
 
 
 def lanczos_tridiag_eig(alpha, beta, check_finite=True):
@@ -444,7 +469,8 @@ def calc_trace_fn_tridiag(tl, tv, fn, pos=True):
                for i in range(tl.size))
 
 
-def approx_spectral_function(A, fn, M=M_DEFAULT, R=R_DEFAULT,
+def approx_spectral_function(A, fn,
+                             K=K_DEFAULT, R=R_DEFAULT, bsz=BSZ_DEFAULT,
                              v0=None, pos=False):
     """Approximate a spectral function, that is, the quantity ``Tr(fn(A))``.
 
@@ -455,15 +481,16 @@ def approx_spectral_function(A, fn, M=M_DEFAULT, R=R_DEFAULT,
         ``A.dot(vec)``.
     fn : callable
         Scalar function with with to act on approximate eigenvalues.
-    M : int, optional
+    K : int, optional
         The size of the tri-diagonal lanczos matrix to form. Cost of algorithm
-        scales linearly with ``M``.
+        scales linearly with ``K``.
     R : int, optional
         The number of repeats with different initial random vectors to perform.
         Increasing this should increase accuracy as ``sqrt(R)``. Cost of
         algorithm thus scales linearly with ``R``.
-    v0 :
-        Initial vector to iterate with, sets ``R=1`` if given.
+    v0 : vector, or callable
+        Initial vector to iterate with, sets ``R=1`` if given. If callable, the
+        function to produce a random intial vector (sequence).
     pos : bool, optional
         If True, make sure any approximate eigenvalues are positive by
         clipping below 0.
@@ -473,42 +500,46 @@ def approx_spectral_function(A, fn, M=M_DEFAULT, R=R_DEFAULT,
     scalar
         The approximate value ``Tr(fn(a))``.
     """
-    if v0 is not None:
+    if (v0 is not None) and not callable(v0):
         R = 1
 
     def gen_vals():
         for _ in range(R):
-            alpha, beta, scaling = construct_lanczos_tridiag(A, M=M, v0=v0)
+            alpha, beta, scaling = construct_lanczos_tridiag(
+                A, K=K, bsz=bsz, v0=v0() if callable(v0) else v0)
+
+            # First bound
             Gf = scaling * calc_trace_fn_tridiag(*lanczos_tridiag_eig(
                 alpha, beta, check_finite=False), fn=fn, pos=pos)
 
+            # Check if already converged (i.e. found non-null space)
             if abs(beta[-1]) < BETA_TOL:
                 yield Gf
 
             else:
                 beta[-1] = beta[0]
+                # second bound
                 Rf = scaling * calc_trace_fn_tridiag(*lanczos_tridiag_eig(
                     np.append(alpha, alpha[0]), beta, check_finite=False),
                     fn=fn, pos=pos)
 
-                yield (Gf + Rf) / 2
+                yield (Gf + Rf) / 2  # mean of lower and upper bounds
 
-    return sum(gen_vals()) / R
+    return sum(gen_vals()) / R  # take average over repeats
 
 
 tr_abs_approx = functools.partial(approx_spectral_function, fn=abs)
 tr_exp_approx = functools.partial(approx_spectral_function, fn=exp)
 tr_sqrt_approx = functools.partial(approx_spectral_function, fn=sqrt, pos=True)
-tr_xlogx_approx = functools.partial(approx_spectral_function,
-                                    fn=lambda x: x * log2(x) if x > 0 else 0.0)
+tr_xlogx_approx = functools.partial(
+    approx_spectral_function, fn=lambda x: x * log2(x) if x > 0 else 0.0)
 
 
 # --------------------------------------------------------------------------- #
 #                             Specific quantities                             #
 # --------------------------------------------------------------------------- #
 
-def entropy_subsys_approx(psi_ab, dims, sysa,
-                          M=M_DEFAULT, R=R_DEFAULT, v0=None):
+def entropy_subsys_approx(psi_ab, dims, sysa, **kwargs):
     """Approximate the (Von Neumann) entropy of a pure state's subsystem.
     psi_ab : ket
         Bipartite state to partially trace and find entopy of.
@@ -516,9 +547,9 @@ def entropy_subsys_approx(psi_ab, dims, sysa,
         The sub dimensions of ``psi_ab``.
     sysa : int or sequence of int, optional
         Index(es) of the 'a' subsystem(s) to keep.
-    M : int, optional
+    K : int, optional
         The size of the tri-diagonal lanczos matrix to form. Cost of algorithm
-        scales linearly with ``M``.
+        scales linearly with ``K``.
     R : int, optional
         The number of repeats with different initial random vectors to perform.
         Increasing this should increase accuracy as ``sqrt(R)``. Cost of
@@ -527,15 +558,14 @@ def entropy_subsys_approx(psi_ab, dims, sysa,
         Initial vector to iterate with, sets ``R=1`` if given.
     """
     lo = LazyPtrOperator(psi_ab, dims=dims, sysa=sysa)
-    return - tr_xlogx_approx(lo, M=M, R=R, v0=v0)
+    return - tr_xlogx_approx(lo, **kwargs)
 
 
-def norm_ppt_subsys_approx(psi_abc, dims, sysa, sysb,
-                           M=M_DEFAULT, R=R_DEFAULT, v0=None):
+def norm_ppt_subsys_approx(psi_abc, dims, sysa, sysb, **kwargs):
     """Estimate the norm of the partial tranpose of a pure state's subsystem.
     """
     lo = LazyPtrPptOperator(psi_abc, dims=dims, sysa=sysa, sysb=sysb)
-    return tr_abs_approx(lo, M=M, R=R, v0=v0)
+    return tr_abs_approx(lo, **kwargs)
 
 
 def logneg_subsys_approx(*args, **kwargs):
@@ -554,9 +584,9 @@ def logneg_subsys_approx(*args, **kwargs):
     sysa : int or sequence of int, optional
         Index(es) of the 'b' subsystem(s) to keep, with respect to all
         the dimensions, ``dims``, (i.e. pre-partial trace).
-    M : int, optional
+    K : int, optional
         The size of the tri-diagonal lanczos matrix to form. Cost of algorithm
-        scales linearly with ``M``.
+        scales linearly with ``K``.
     R : int, optional
         The number of repeats with different initial random vectors to perform.
         Increasing this should increase accuracy as ``sqrt(R)``. Cost of
@@ -583,9 +613,9 @@ def negativity_subsys_approx(*args, **kwargs):
     sysa : int or sequence of int, optional
         Index(es) of the 'b' subsystem(s) to keep, with respect to all
         the dimensions, ``dims``, (i.e. pre-partial trace).
-    M : int, optional
+    K : int, optional
         The size of the tri-diagonal lanczos matrix to form. Cost of algorithm
-        scales linearly with ``M``.
+        scales linearly with ``K``.
     R : int, optional
         The number of repeats with different initial random vectors to perform.
         Increasing this should increase accuracy as ``sqrt(R)``. Cost of
