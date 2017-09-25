@@ -12,12 +12,31 @@ import numpy as np
 import scipy.linalg as scla
 import scipy.sparse.linalg as spla
 try:
-    from opt_einsum import contract
+    import opt_einsum
+    contract = opt_einsum.contract
+
+    def contract_path(*args, optimize='optimal', memory_limit=-1, **kwargs):
+        return opt_einsum.contract_path(
+            *args, path=optimize, memory_limit=memory_limit, **kwargs)
 except ImportError:
     def contract(*args, optimize='optimal', memory_limit=-1, **kwargs):
-        return np.einsum(*args, optimize=(optimize, memory_limit), **kwargs)
+        return np.einsum(
+            *args, optimize=(optimize, memory_limit), **kwargs)
+
+    def contract_path(*args, optimize='optimal', memory_limit=-1, **kwargs):
+        return np.einsum_path(
+            *args, optimize=(optimize, memory_limit), **kwargs)
 from ..accel import prod, vdot
 from ..utils import int2tup
+
+
+class HuskArray(np.ndarray):
+    """Just an ndarray with only shape defined, so as to allow caching on shape
+    alone.
+    """
+
+    def __init__(self, shape):
+        self.shape = shape
 
 
 # --------------------------------------------------------------------------- #
@@ -65,7 +84,57 @@ def get_cntrct_inds_ptr_dot(ndim_ab, sysa, matmat=False):
     if matmat:
         inds_a_ket.append(2 * ndim_ab)
 
-    return inds_a_ket, inds_ab_bra, inds_ab_ket
+    return tuple(inds_a_ket), tuple(inds_ab_bra), tuple(inds_ab_ket)
+
+
+@functools.lru_cache(128)
+def prepare_lazy_ptr_dot(psi_a_shape, dims=None, sysa=0):
+    """Pre-calculate the arrays and indexes etc for ``lazy_ptr_dot``.
+    """
+    mat_size = psi_a_shape[1] if len(psi_a_shape) > 1 else 1
+
+    # convert to tuple so can always cache
+    sysa = int2tup(sysa)
+
+    ndim_ab = len(dims)
+    inds_a_ket, inds_ab_bra, inds_ab_ket = get_cntrct_inds_ptr_dot(
+        ndim_ab, sysa, matmat=mat_size > 1)
+
+    dims_a = tuple(d for i, d in enumerate(dims) if i in sysa)
+    if mat_size > 1:
+        dims_a = dims_a + (mat_size,)
+
+    return dims_a, inds_a_ket, inds_ab_bra, inds_ab_ket
+
+
+@functools.lru_cache(128)
+def get_path_lazy_ptr_dot(psi_ab_tensor_shape, psi_a_tensor_shape,
+                          inds_a_ket, inds_ab_bra, inds_ab_ket):
+    return contract_path(
+        HuskArray(psi_a_tensor_shape), inds_a_ket,
+        HuskArray(psi_ab_tensor_shape), inds_ab_bra,
+        HuskArray(psi_ab_tensor_shape), inds_ab_ket,
+        optimize='optimal',
+        memory_limit=-1,
+    )[0]
+
+
+def do_lazy_ptr_dot(psi_ab_tensor, psi_a_tensor,
+                    inds_a_ket, inds_ab_bra, inds_ab_ket,
+                    path, out=None):
+    """Perform ``lazy_ptr_dot`` with the pre-calculated indexes etc from
+    ``prepare_lazy_ptr_dot``.
+    """
+    if out is None:
+        out = np.empty_like(psi_a_tensor)
+
+    return contract(
+        psi_a_tensor, inds_a_ket,
+        psi_ab_tensor.conjugate(), inds_ab_bra,
+        psi_ab_tensor, inds_ab_ket,
+        optimize=path,
+        out=out,
+    )
 
 
 def lazy_ptr_dot(psi_ab, psi_a, dims=None, sysa=0, out=None):
@@ -111,37 +180,31 @@ def lazy_ptr_dot(psi_ab, psi_a, dims=None, sysa=0, out=None):
     -------
     ket
     """
-    mat_size = psi_a.shape[1] if len(psi_a.shape) > 1 else 1
-
     if dims is None:
         da = psi_a.shape[0]
         d = psi_ab.size
         dims = (da, d // da)
-
-    # convert to tuple so can always cache
+    else:
+        dims = int2tup(dims)
     sysa = int2tup(sysa)
 
-    ndim_ab = len(dims)
-    inds_a_ket, inds_ab_bra, inds_ab_ket = get_cntrct_inds_ptr_dot(
-        ndim_ab, sysa, matmat=mat_size > 1)
-
-    dims_a = [d for i, d in enumerate(dims) if i in sysa]
-    if mat_size > 1:
-        dims_a.append(mat_size)
-
-    psi_a_tensor = np.asarray(psi_a).reshape(dims_a)
+    # prepare shapes and arrays -- cached
+    dims_a, inds_a_ket, inds_ab_bra, inds_ab_ket = \
+        prepare_lazy_ptr_dot(psi_a.shape, dims=dims, sysa=sysa)
     psi_ab_tensor = np.asarray(psi_ab).reshape(dims)
+    psi_a_tensor = np.asarray(psi_a).reshape(dims_a)
 
-    if out is None:
-        out = np.empty_like(psi_a_tensor)
+    # find the optimal path -- cached
+    path = get_path_lazy_ptr_dot(
+        psi_ab_tensor.shape, psi_a_tensor.shape,
+        inds_a_ket, inds_ab_bra, inds_ab_ket
+    )
 
-    return contract(
-        psi_a_tensor, inds_a_ket,
-        psi_ab_tensor.conjugate(), inds_ab_bra,
-        psi_ab_tensor, inds_ab_ket,
-        optimize='optimal',
-        memory_limit=-1,
-        out=out,
+    # perform the contraction
+    return do_lazy_ptr_dot(
+        psi_ab_tensor, psi_a_tensor,
+        inds_a_ket, inds_ab_bra, inds_ab_ket,
+        path=path, out=out
     ).reshape(psi_a.shape)
 
 
@@ -236,7 +299,57 @@ def get_cntrct_inds_ptr_ppt_dot(ndim_abc, sysa, sysb, matmat=False):
         inds_ab_ket.append(2 * ndim_abc)
         inds_out.append(2 * ndim_abc)
 
-    return inds_ab_ket, inds_abc_bra, inds_abc_ket, inds_out
+    return (tuple(inds_ab_ket), tuple(inds_abc_bra),
+            tuple(inds_abc_ket), tuple(inds_out))
+
+
+@functools.lru_cache(128)
+def prepare_lazy_ptr_ppt_dot(psi_ab_shape, dims, sysa, sysb):
+    """Pre-calculate the arrays and indexes etc for ``lazy_ptr_ppt_dot``.
+    """
+    mat_size = psi_ab_shape[1] if len(psi_ab_shape) > 1 else 1
+
+    inds_ab_ket, inds_abc_bra, inds_abc_ket, inds_out = \
+        get_cntrct_inds_ptr_ppt_dot(len(dims), sysa, sysb, matmat=mat_size > 1)
+
+    dims_ab = tuple(d for i, d in enumerate(dims)
+                    if (i in sysa) or (i in sysb))
+    if mat_size > 1:
+        dims_ab = dims_ab + (mat_size,)
+
+    return dims_ab, inds_ab_ket, inds_abc_bra, inds_abc_ket, inds_out
+
+
+@functools.lru_cache(128)
+def get_path_lazy_ptr_ppt_dot(psi_abc_tensor_shape, psi_ab_tensor_shape,
+                              inds_ab_ket, inds_abc_bra,
+                              inds_abc_ket, inds_out):
+    return contract_path(
+        HuskArray(psi_ab_tensor_shape), inds_ab_ket,
+        HuskArray(psi_abc_tensor_shape), inds_abc_bra,
+        HuskArray(psi_abc_tensor_shape), inds_abc_ket,
+        inds_out,
+        optimize='optimal',
+        memory_limit=-1,
+    )[0]
+
+
+def do_lazy_ptr_ppt_dot(psi_ab_tensor, psi_abc_tensor,
+                        inds_ab_ket, inds_abc_bra, inds_abc_ket, inds_out,
+                        path, out=None):
+    if out is None:
+        out = np.empty_like(psi_ab_tensor)
+
+    # must have ``inds_out`` as resulting indices are not ordered
+    # in the same way as input due to partial tranpose.
+    return contract(
+        psi_ab_tensor, inds_ab_ket,
+        psi_abc_tensor.conjugate(), inds_abc_bra,
+        psi_abc_tensor, inds_abc_ket,
+        inds_out,
+        optimize=path,
+        out=out,
+    )
 
 
 def lazy_ptr_ppt_dot(psi_abc, psi_ab, dims, sysa, sysb, out=None):
@@ -291,33 +404,27 @@ def lazy_ptr_ppt_dot(psi_abc, psi_ab, dims, sysa, sysb, out=None):
     -------
     ket
     """
-    mat_size = psi_ab.shape[1] if len(psi_ab.shape) > 1 else 1
-
     # convert to tuple so can always cache
-    sysa, sysb = int2tup(sysa), int2tup(sysb)
+    dims, sysa, sysb = int2tup(dims), int2tup(sysa), int2tup(sysb)
 
-    inds_ab_ket, inds_abc_bra, inds_abc_ket, inds_out = \
-        get_cntrct_inds_ptr_ppt_dot(len(dims), sysa, sysb, matmat=mat_size > 1)
-
-    dims_ab = [d for i, d in enumerate(dims) if (i in sysa) or (i in sysb)]
-    if mat_size > 1:
-        dims_ab.append(mat_size)
+    # prepare shapes and arrays -- cached
+    dims_ab, inds_ab_ket, inds_abc_bra, inds_abc_ket, inds_out = \
+        prepare_lazy_ptr_ppt_dot(psi_ab.shape, dims, sysa, sysb)
     psi_ab_tensor = np.asarray(psi_ab).reshape(dims_ab)
     psi_abc_tensor = np.asarray(psi_abc).reshape(dims)
 
-    if out is None:
-        out = np.empty_like(psi_ab_tensor)
+    # find the optimal path -- cached
+    path = get_path_lazy_ptr_ppt_dot(
+        psi_abc_tensor.shape, psi_ab_tensor.shape,
+        inds_ab_ket, inds_abc_bra, inds_abc_ket, inds_out,
+    )
 
     # must have ``inds_out`` as resulting indices are not ordered
     # in the same way as input due to partial tranpose.
-    return contract(
-        psi_ab_tensor, inds_ab_ket,
-        psi_abc_tensor.conjugate(), inds_abc_bra,
-        psi_abc_tensor, inds_abc_ket,
-        inds_out,
-        optimize='optimal',
-        memory_limit=-1,
-        out=out,
+    return do_lazy_ptr_ppt_dot(
+        psi_ab_tensor, psi_abc_tensor,
+        inds_ab_ket, inds_abc_bra, inds_abc_ket, inds_out,
+        path, out=out,
     ).reshape(psi_ab.shape)
 
 

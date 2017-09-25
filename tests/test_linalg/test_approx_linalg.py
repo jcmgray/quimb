@@ -84,18 +84,18 @@ class TestLazyTensorEval:
         sysa = (1,)
 
         ndim_ab = len(dims)
-        dims_a = [d for i, d in enumerate(dims) if i in sysa]
+        dims_a = tuple(d for i, d in enumerate(dims) if i in sysa)
 
         ci_a_k, ci_ab_b, ci_ab_k = get_cntrct_inds_ptr_dot(
             ndim_ab, sysa)
-        assert dims_a == [7]
-        assert ci_a_k == [1]
-        assert ci_ab_b == [0, 1]
-        assert ci_ab_k == [0, 2]
+        assert dims_a == (7,)
+        assert ci_a_k == (1,)
+        assert ci_ab_b == (0, 1)
+        assert ci_ab_k == (0, 2)
 
         ci_a_k, ci_ab_b, ci_ab_k = get_cntrct_inds_ptr_dot(
             ndim_ab, sysa, matmat=True)
-        assert ci_a_k == [1, 4]
+        assert ci_a_k == (1, 4)
 
     def test_get_cntrct_inds_ptr_dot_many_body(self):
         dims = (10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20)
@@ -107,13 +107,13 @@ class TestLazyTensorEval:
         ci_a_k, ci_ab_b, ci_ab_k = get_cntrct_inds_ptr_dot(
             ndim_ab, sysa)
         assert dims_a == [11, 12, 13, 14, 18, 19]
-        assert ci_a_k == [1, 2, 3, 4, 8, 9]
-        assert ci_ab_b == list(range(11))
-        assert ci_ab_k == [0, 11, 12, 13, 14, 5, 6, 7, 15, 16, 10]
+        assert ci_a_k == (1, 2, 3, 4, 8, 9)
+        assert ci_ab_b == tuple(range(11))
+        assert ci_ab_k == (0, 11, 12, 13, 14, 5, 6, 7, 15, 16, 10)
 
         ci_a_k, ci_ab_b, ci_ab_k = get_cntrct_inds_ptr_dot(
             ndim_ab, sysa, matmat=True)
-        assert ci_a_k == [1, 2, 3, 4, 8, 9, 2 * len(dims)]
+        assert ci_a_k == (1, 2, 3, 4, 8, 9, 2 * len(dims))
 
     def test_lazy_ptr_dot_simple(self, psi_abc, psi_ab):
         rho_ab = psi_abc.ptr(DIMS, [0, 1])
@@ -195,16 +195,16 @@ class TestLazyTensorEval:
             get_cntrct_inds_ptr_ppt_dot(ndim_abc, sysa, sysb)
 
         assert dims_ab == [4, 9]
-        assert inds_ab_ket == [0, 4]
-        assert inds_abc_bra == [3, 4, 2]
-        assert inds_abc_ket == [0, 1, 2]
-        assert inds_out == [3, 1]
+        assert inds_ab_ket == (0, 4)
+        assert inds_abc_bra == (3, 4, 2)
+        assert inds_abc_ket == (0, 1, 2)
+        assert inds_out == (3, 1)
 
         inds_ab_ket, inds_abc_bra, inds_abc_ket, inds_out = \
             get_cntrct_inds_ptr_ppt_dot(ndim_abc, sysa, sysb, matmat=True)
 
-        assert inds_ab_ket == [0, 4, 2 * len(dims)]
-        assert inds_out == [3, 1, 2 * len(dims)]
+        assert inds_ab_ket == (0, 4, 2 * len(dims))
+        assert inds_out == (3, 1, 2 * len(dims))
 
     def test_get_cntrct_inds_ptr_ppt_dot_many_body(self):
         dims = (10, 20, 30, 40, 50, 60, 70, 80, 90)
@@ -218,14 +218,14 @@ class TestLazyTensorEval:
         inds_ab_ket, inds_abc_bra, inds_abc_ket, inds_out = \
             get_cntrct_inds_ptr_ppt_dot(ndim_abc, sysa, sysb)
         assert dims_ab == [10, 20, 30, 40, 60, 70]
-        assert inds_ab_ket == [0, 1, 11, 12, 5, 14]
-        assert inds_abc_bra == [9, 10, 11, 12, 4, 13, 14, 7, 8]
-        assert inds_abc_ket == [0, 1, 2, 3, 4, 5, 6, 7, 8]
-        assert inds_out == [9, 10, 2, 3, 13, 6]
+        assert inds_ab_ket == (0, 1, 11, 12, 5, 14)
+        assert inds_abc_bra == (9, 10, 11, 12, 4, 13, 14, 7, 8)
+        assert inds_abc_ket == (0, 1, 2, 3, 4, 5, 6, 7, 8)
+        assert inds_out == (9, 10, 2, 3, 13, 6)
         inds_ab_ket, inds_abc_bra, inds_abc_ket, inds_out = \
             get_cntrct_inds_ptr_ppt_dot(ndim_abc, sysa, sysb, matmat=True)
-        assert inds_ab_ket == [0, 1, 11, 12, 5, 14, 2 * len(dims)]
-        assert inds_out == [9, 10, 2, 3, 13, 6, 2 * len(dims)]
+        assert inds_ab_ket == (0, 1, 11, 12, 5, 14, 2 * len(dims))
+        assert inds_out == (9, 10, 2, 3, 13, 6, 2 * len(dims))
 
     def test_lazy_ptr_ppt_dot(self, psi_abc, psi_ab):
         rho_ab = psi_abc.ptr(DIMS, [0, 1])
