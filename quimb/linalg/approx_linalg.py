@@ -188,7 +188,7 @@ def lazy_ptr_dot(psi_ab, psi_a, dims=None, sysa=0, out=None):
         dims = int2tup(dims)
     sysa = int2tup(sysa)
 
-    # prepare shapes and arrays -- cached
+    # prepare shapes and indexes -- cached
     dims_a, inds_a_ket, inds_ab_bra, inds_ab_ket = \
         prepare_lazy_ptr_dot(psi_a.shape, dims=dims, sysa=sysa)
     psi_ab_tensor = np.asarray(psi_ab).reshape(dims)
@@ -197,15 +197,13 @@ def lazy_ptr_dot(psi_ab, psi_a, dims=None, sysa=0, out=None):
     # find the optimal path -- cached
     path = get_path_lazy_ptr_dot(
         psi_ab_tensor.shape, psi_a_tensor.shape,
-        inds_a_ket, inds_ab_bra, inds_ab_ket
-    )
+        inds_a_ket, inds_ab_bra, inds_ab_ket)
 
     # perform the contraction
     return do_lazy_ptr_dot(
         psi_ab_tensor, psi_a_tensor,
         inds_a_ket, inds_ab_bra, inds_ab_ket,
-        path=path, out=out
-    ).reshape(psi_a.shape)
+        path=path, out=out).reshape(psi_a.shape)
 
 
 class LazyPtrOperator(spla.LinearOperator):
@@ -224,21 +222,38 @@ class LazyPtrOperator(spla.LinearOperator):
     """
 
     def __init__(self, psi_ab, dims, sysa):
-        self.psi_ab = psi_ab
-        self.dims = dims
+        self.psi_ab_tensor = np.asarray(psi_ab).reshape(dims)
+        self.dims = int2tup(dims)
         self.sysa = int2tup(sysa)
         dims_a = [d for i, d in enumerate(dims) if i in self.sysa]
         sz_a = prod(dims_a)
         super().__init__(dtype=psi_ab.dtype, shape=(sz_a, sz_a))
 
-    def _matvec(self, vec):
-        return lazy_ptr_dot(self.psi_ab, vec, self.dims, self.sysa)
+    def _matvec(self, vecs):
+        # prepare shapes and indexes -- cached
+        dims_a, inds_a_ket, inds_ab_bra, inds_ab_ket = \
+            prepare_lazy_ptr_dot(vecs.shape, dims=self.dims, sysa=self.sysa)
+
+        # have to do this each time?
+        psi_a_tensor = np.asarray(vecs).reshape(dims_a)
+
+        # find the optimal path -- cached
+        path = get_path_lazy_ptr_dot(
+            self.psi_ab_tensor.shape, psi_a_tensor.shape,
+            inds_a_ket, inds_ab_bra, inds_ab_ket)
+
+        # perform the contraction
+        return do_lazy_ptr_dot(
+            self.psi_ab_tensor, psi_a_tensor,
+            inds_a_ket, inds_ab_bra, inds_ab_ket,
+            path=path).reshape(vecs.shape)
 
     def _matmat(self, vecs):
-        return lazy_ptr_dot(self.psi_ab, vecs, self.dims, self.sysa)
+        return self._matvec(vecs)
 
     def _adjoint(self):
-        return self.__class__(self.psi_ab.conjugate(), self.dims, self.sysa)
+        return self.__class__(self.psi_ab_tensor.conjugate(),
+                              self.dims, self.sysa)
 
 
 @functools.lru_cache(128)
@@ -407,7 +422,7 @@ def lazy_ptr_ppt_dot(psi_abc, psi_ab, dims, sysa, sysb, out=None):
     # convert to tuple so can always cache
     dims, sysa, sysb = int2tup(dims), int2tup(sysa), int2tup(sysb)
 
-    # prepare shapes and arrays -- cached
+    # prepare shapes and indexes -- cached
     dims_ab, inds_ab_ket, inds_abc_bra, inds_abc_ket, inds_out = \
         prepare_lazy_ptr_ppt_dot(psi_ab.shape, dims, sysa, sysb)
     psi_ab_tensor = np.asarray(psi_ab).reshape(dims_ab)
@@ -416,16 +431,13 @@ def lazy_ptr_ppt_dot(psi_abc, psi_ab, dims, sysa, sysb, out=None):
     # find the optimal path -- cached
     path = get_path_lazy_ptr_ppt_dot(
         psi_abc_tensor.shape, psi_ab_tensor.shape,
-        inds_ab_ket, inds_abc_bra, inds_abc_ket, inds_out,
-    )
+        inds_ab_ket, inds_abc_bra, inds_abc_ket, inds_out)
 
-    # must have ``inds_out`` as resulting indices are not ordered
-    # in the same way as input due to partial tranpose.
+    # perform contraction
     return do_lazy_ptr_ppt_dot(
         psi_ab_tensor, psi_abc_tensor,
         inds_ab_ket, inds_abc_bra, inds_abc_ket, inds_out,
-        path, out=out,
-    ).reshape(psi_ab.shape)
+        path, out=out).reshape(psi_ab.shape)
 
 
 class LazyPtrPptOperator(spla.LinearOperator):
@@ -450,23 +462,38 @@ class LazyPtrPptOperator(spla.LinearOperator):
     """
 
     def __init__(self, psi_abc, dims, sysa, sysb):
-        self.psi_abc = psi_abc
-        self.dims = dims
+        self.psi_abc_tensor = np.asarray(psi_abc).reshape(dims)
+        self.dims = int2tup(dims)
         self.sysa, self.sysb = int2tup(sysa), int2tup(sysb)
         sys_ab = self.sysa + self.sysb
         sz_ab = prod([d for i, d in enumerate(dims) if i in sys_ab])
         super().__init__(dtype=psi_abc.dtype, shape=(sz_ab, sz_ab))
 
-    def _matvec(self, vec):
-        return lazy_ptr_ppt_dot(self.psi_abc, vec, self.dims,
-                                self.sysa, self.sysb)
+    def _matvec(self, vecs):
+        # prepare shapes and indexes -- cached
+        dims_ab, inds_ab_ket, inds_abc_bra, inds_abc_ket, inds_out = \
+            prepare_lazy_ptr_ppt_dot(vecs.shape, self.dims,
+                                     self.sysa, self.sysb)
+
+        # do each time
+        psi_ab_tensor = np.asarray(vecs).reshape(dims_ab)
+
+        # find the optimal path -- cached
+        path = get_path_lazy_ptr_ppt_dot(
+            self.psi_abc_tensor.shape, psi_ab_tensor.shape,
+            inds_ab_ket, inds_abc_bra, inds_abc_ket, inds_out)
+
+        # perform contraction
+        return do_lazy_ptr_ppt_dot(
+            psi_ab_tensor, self.psi_abc_tensor,
+            inds_ab_ket, inds_abc_bra, inds_abc_ket, inds_out,
+            path).reshape(vecs.shape)
 
     def _matmat(self, vecs):
-        return lazy_ptr_ppt_dot(self.psi_abc, vecs, self.dims,
-                                self.sysa, self.sysb)
+        return self._matvec(vecs)
 
     def _adjoint(self):
-        return self.__class__(self.psi_abc.conjugate(), self.dims,
+        return self.__class__(self.psi_abc_tensor.conjugate(), self.dims,
                               self.sysa, self.sysb)
 
 
