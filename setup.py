@@ -20,6 +20,7 @@ setup(
             'coverage',
             'pytest',
             'pytest-cov',
+            'pytest-timeout',
         ],
         'docs': [
             'sphinx',
