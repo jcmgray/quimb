@@ -12,10 +12,10 @@ import numpy as np
 import scipy.linalg as scla
 import scipy.sparse.linalg as spla
 try:
-    from opt_einsum import contract as contract
+    from opt_einsum import contract
 except ImportError:
-    from numpy import contract
-
+    def contract(*args, optimize='optimal', memory_limit=-1, **kwargs):
+        return np.einsum(*args, optimize=(optimize, memory_limit), **kwargs)
 from ..accel import prod, vdot
 from ..utils import int2tup
 
@@ -305,12 +305,11 @@ def lazy_ptr_ppt_dot(psi_abc, psi_ab, dims, sysa, sysb, out=None):
     psi_ab_tensor = np.asarray(psi_ab).reshape(dims_ab)
     psi_abc_tensor = np.asarray(psi_abc).reshape(dims)
 
-    # must have ``inds_out`` as resulting indices are not ordered
-    # in the same way as input due to partial tranpose.
-
     if out is None:
         out = np.empty_like(psi_ab_tensor)
 
+    # must have ``inds_out`` as resulting indices are not ordered
+    # in the same way as input due to partial tranpose.
     return contract(
         psi_ab_tensor, inds_ab_ket,
         psi_abc_tensor.conjugate(), inds_abc_bra,
@@ -423,7 +422,7 @@ def construct_lanczos_tridiag(A, K=K_DEFAULT, v0=None, bsz=BSZ_DEFAULT):
     beta[1] = sqrt(prod(v_shp))  # by construction
 
     if v0 is None:
-        V = np.random.choice([-1, 1], v_shp).astype(np.complex128)
+        V = np.random.choice([-1, 1, 1j, -1j], v_shp)
         V /= beta[1]  # normalize
     else:
         V = v0.astype(np.complex128)
