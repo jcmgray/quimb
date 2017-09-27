@@ -12,6 +12,8 @@ import numpy as np
 import scipy.linalg as scla
 import scipy.sparse.linalg as spla
 try:
+    # opt_einsum is highly recommended as until numpy 1.14 einsum contractions
+    # do not use BLAS.
     import opt_einsum
     contract = opt_einsum.contract
 
