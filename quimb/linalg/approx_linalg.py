@@ -21,9 +21,9 @@ try:
         return opt_einsum.contract_path(
             *args, path=optimize, memory_limit=memory_limit, **kwargs)
 except ImportError:
-    def contract(*args, optimize='optimal', memory_limit=-1, **kwargs):
+    def contract(*args, optimize='optimal', **kwargs):
         return np.einsum(
-            *args, optimize=(optimize, memory_limit), **kwargs)
+            *args, optimize=optimize, **kwargs)
 
     def contract_path(*args, optimize='optimal', memory_limit=-1, **kwargs):
         return np.einsum_path(
