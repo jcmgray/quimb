@@ -28,6 +28,7 @@ else
   conda update -q conda
   source activate test-environment
   conda update -q --all
-  pip install -U coveralls codeclimate-test-reporter codecov codacy-coverage
+  pip install -U codeclimate-test-reporter codacy-coverage
+  pip install -U --editable=git+https://github.com/dgasmith/opt_einsum.git
   pip uninstall --yes quimb
 fi
