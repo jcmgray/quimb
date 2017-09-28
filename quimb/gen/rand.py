@@ -7,7 +7,7 @@
 from functools import reduce
 import numpy as np
 import scipy.sparse as sp
-from ..accel import rdmul, dot
+from ..accel import rdmul, dot, matrixify
 from ..core import qu, ptr, kron, nmlz
 
 
@@ -154,9 +154,10 @@ def rand_product_state(n, qtype=None):
     return kron(*gen_rand_pure_qubits(n))
 
 
+@matrixify
 def rand_matrix_product_state(phys_dim, n, bond_dim,
                               cyclic=False, trans_invar=False):
-    """Generate a random matrix product state.
+    """Generate a random matrix product state (in dense form).
 
     Parameters
     ----------

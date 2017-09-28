@@ -206,9 +206,12 @@ class TestNegativity:
 
     def test_subsystem(self):
         p = singlet_pairs(4)
-        assert negativity(p, [2] * 4, 0, 1) > 0.5 - 1e-14
-        assert negativity(p, [2] * 4, 1, 2) < 1e-14
-        assert negativity(p, [2] * 4, 2, 3) > 0.5 - 1e-14
+        rhoab = p.ptr([2, 2, 2, 2], [0, 1])
+        assert negativity(rhoab, [2] * 2) > 0.5 - 1e-14
+        rhoab = p.ptr([2, 2, 2, 2], [1, 2])
+        assert negativity(rhoab, [2] * 2) < 1e-14
+        rhoab = p.ptr([2, 2, 2, 2], [2, 3])
+        assert negativity(rhoab, [2] * 2) > 0.5 - 1e-14
 
 
 class TestLogarithmicNegativity:
@@ -220,13 +223,16 @@ class TestLogarithmicNegativity:
 
     def test_subsystem(self):
         p = singlet_pairs(4)
-        assert logneg(p, [2] * 4, 0, 1) > 1 - 1e-14
-        assert logneg(p, [2] * 4, 1, 2) < 1e-14
-        assert logneg(p, [2] * 4, 2, 3) > 1 - 1e-14
+        rhoab = p.ptr([2, 2, 2, 2], [0, 1])
+        assert logneg(rhoab, [2] * 2) > 1 - 1e-14
+        rhoab = p.ptr([2, 2, 2, 2], [1, 2])
+        assert logneg(rhoab, [2] * 2) < 1e-14
+        rhoab = p.ptr([2, 2, 2, 2], [2, 3])
+        assert logneg(rhoab, [2] * 2) > 1 - 1e-14
 
     def test_interleaving(self):
         p = permute(singlet() & singlet(), [2, 2, 2, 2], [0, 2, 1, 3])
-        assert logneg(p, [2] * 4, sysa=[0, 3], sysb=[1, 2]) > 2 - 1e-13
+        assert logneg(p, [2] * 4, sysa=[0, 3]) > 2 - 1e-13
 
 
 class TestConcurrence:

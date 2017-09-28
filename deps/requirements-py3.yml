@@ -14,10 +14,12 @@ dependencies:
   - coverage
   - pytest
   - pytest-cov
+  - pytest-timeout
   - sphinx_bootstrap_theme
   - openmpi
+  - coveralls
+  - codecov
   - pip:
-    - coveralls
     - codeclimate-test-reporter
-    - codecov
     - codacy-coverage
+    - "--editable=git+https://github.com/dgasmith/opt_einsum.git"

@@ -1038,7 +1038,8 @@ def partial_trace(p, dims, keep):
     return _partial_trace_dense(p, dims, keep)
 
 
-_OVERLAP_METHODS = {
+_EXPEC_METHODS = {
+    # [isop(a), isop(b), issparse(a) or issparse(b)]
     (0, 0, 0): lambda a, b: abs(vdot(a, b))**2,
     (0, 1, 0): lambda a, b: vdot(a, dot_dense(b, a)),
     (1, 0, 0): lambda a, b: vdot(b, dot_dense(a, b)),
@@ -1076,7 +1077,7 @@ def expectation(a, b):
     x : float
         'Overlap' between ``a`` and ``b``.
     """
-    return _OVERLAP_METHODS[isop(a), isop(b), issparse(a) or issparse(b)](a, b)
+    return _EXPEC_METHODS[isop(a), isop(b), issparse(a) or issparse(b)](a, b)
 
 
 expec = expectation

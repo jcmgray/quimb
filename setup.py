@@ -13,13 +13,13 @@ setup(
         'numexpr>=2.3',
         'psutil>=4.3.1',
         'cytoolz>=0.8.0',
-        'tqdm',
     ],
     extras_require={
         'test': [
             'coverage',
             'pytest',
             'pytest-cov',
+            'pytest-timeout',
         ],
         'docs': [
             'sphinx',

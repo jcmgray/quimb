@@ -204,13 +204,15 @@ def thermal_state(ham, beta, precomp_func=False):
     return gen_state if precomp_func else gen_state(beta)
 
 
-def neel_state(n, **kwargs):
+def neel_state(n, down_first=False, **kwargs):
     """Construct Neel state for n spins, i.e. alternating up/down.
 
     Parameters
     ----------
     n : int
         Number of spins.
+    down_first : bool, optional
+        Whether to start with '1' or '0' first
     kwargs
         Supplied to ``qu`` called on state.
 
@@ -219,6 +221,8 @@ def neel_state(n, **kwargs):
     vector
     """
     binary = "01" * (n // 2) + (n % 2 == 1) * "0"
+    if down_first:
+        binary = "1" + binary[:-1]
     return basis_vec(int(binary, 2), 2 ** n, **kwargs)
 
 
