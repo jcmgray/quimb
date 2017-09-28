@@ -8,9 +8,10 @@ from quimb import (
     chop,
     tr,
     ptr,
-    overlap,
+    expec,
     eigvals,
     mutual_information,
+    logneg,
     rand_matrix,
     rand_herm,
     rand_pos,
@@ -22,6 +23,7 @@ from quimb import (
     rand_mix,
     rand_product_state,
     rand_matrix_product_state,
+    rand_seperable,
 )
 
 
@@ -166,7 +168,7 @@ class TestRandMPS:
         psi = rand_matrix_product_state(d, n, b, cyclic=cyclic)
         assert psi.shape == (e, 1)
 
-        assert_allclose(overlap(psi, psi), 1.0)
+        assert_allclose(expec(psi, psi), 1.0)
 
     @pytest.mark.parametrize("cyclic", (True, False))
     @pytest.mark.parametrize("bond_dim", (1, 2, 3))
@@ -177,3 +179,20 @@ class TestRandMPS:
         el = eigvals(rhoa)
         # bond_dim squared as cyclic mps is generated
         assert sum(el > 1e-12) == bond_dim ** (2 if cyclic else 1)
+
+
+class TestRandSeperable:
+
+    def test_entanglement(self):
+        rho = rand_seperable([2, 3, 2], 10)
+        assert_almost_equal(tr(rho), 1.0)
+        assert isherm(rho)
+
+        assert logneg(rho, [2, 6]) < 1e-12
+        assert logneg(rho, [6, 2]) < 1e-12
+
+        rho_a = ptr(rho, [2, 3, 2], 1)
+
+        el = eigvals(rho_a)
+        assert np.all(el < 1 - 1e-12)
+        assert np.all(el > 1e-12)

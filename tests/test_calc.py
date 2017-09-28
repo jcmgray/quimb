@@ -15,7 +15,7 @@ from quimb import (
     rand_ket,
     sig,
     down,
-    overlap,
+    expec,
     singlet_pairs,
     dop,
     singlet,
@@ -30,8 +30,6 @@ from quimb import (
     entropy,
     correlation,
     pauli_correlations,
-    expm,
-    sqrtm,
     purify,
     concurrence,
     negativity,
@@ -42,7 +40,11 @@ from quimb import (
     ent_cross_matrix,
     qid,
     is_degenerate,
+    is_eigenvector,
     page_entropy,
+    rand_herm,
+    seigvecs,
+    permute,
 )
 
 
@@ -76,31 +78,6 @@ def orthog_ks():
 # --------------------------------------------------------------------------- #
 # TESTS                                                                       #
 # --------------------------------------------------------------------------- #
-
-class TestExpm:
-    @pytest.mark.parametrize("herm", [True, False])
-    def test_zeros_dense(self, herm):
-        p = expm(np.zeros((2, 2), dtype=complex), herm=herm)
-        assert_allclose(p, eye(2))
-
-    @pytest.mark.parametrize("sparse", [True, False])
-    @pytest.mark.parametrize("herm", [True, False])
-    def test_eye(self, sparse, herm):
-        p = expm(eye(2, sparse=sparse), herm=herm)
-        assert_allclose((p.A if sparse else p) / np.e, eye(2))
-
-
-class TestSqrtm:
-    @pytest.mark.parametrize("sparse", [True, False])
-    @pytest.mark.parametrize("herm", [True, False])
-    def test_eye(self, herm, sparse):
-        if sparse:
-            with pytest.raises(NotImplementedError):
-                p = sqrtm(eye(2, sparse=sparse), herm=herm)
-        else:
-            p = sqrtm(eye(2), herm=herm)
-            assert_allclose(p, eye(2))
-
 
 class TestFidelity:
     def test_both_pure(self, k1, k2):
@@ -136,16 +113,14 @@ class TestFidelity:
 
 
 class TestPurify:
-    @pytest.mark.parametrize("sparse", [True, False])
-    def test_d2(self, sparse):
+    def test_d2(self):
         rho = eye(2) / 2
-        psi = purify(rho, sparse=sparse)
-        assert overlap(psi, bell_state('phi+')) > 1 - 1e-14
+        psi = purify(rho)
+        assert expec(psi, bell_state('phi+')) > 1 - 1e-14
 
-    @pytest.mark.parametrize("sparse", [True, False])
-    def test_pure(self, sparse):
+    def test_pure(self):
         rho = up(qtype='dop')
-        psi = purify(rho, sparse=sparse)
+        psi = purify(rho)
         assert abs(concurrence(psi)) < 1e-14
 
 
@@ -215,6 +190,7 @@ class TestPartialTranspose:
     def test_partial_transpose(self):
         a = bell_state(0, qtype='dop')
         b = partial_transpose(a)
+        assert isinstance(b, np.matrix)
         assert_allclose(b, [[0, 0, 0, -0.5],
                             [0, 0.5, 0, 0],
                             [0, 0, 0.5, 0],
@@ -230,9 +206,12 @@ class TestNegativity:
 
     def test_subsystem(self):
         p = singlet_pairs(4)
-        assert negativity(p, [2] * 4, 0, 1) > 0.5 - 1e-14
-        assert negativity(p, [2] * 4, 1, 2) < 1e-14
-        assert negativity(p, [2] * 4, 2, 3) > 0.5 - 1e-14
+        rhoab = p.ptr([2, 2, 2, 2], [0, 1])
+        assert negativity(rhoab, [2] * 2) > 0.5 - 1e-14
+        rhoab = p.ptr([2, 2, 2, 2], [1, 2])
+        assert negativity(rhoab, [2] * 2) < 1e-14
+        rhoab = p.ptr([2, 2, 2, 2], [2, 3])
+        assert negativity(rhoab, [2] * 2) > 0.5 - 1e-14
 
 
 class TestLogarithmicNegativity:
@@ -244,9 +223,16 @@ class TestLogarithmicNegativity:
 
     def test_subsystem(self):
         p = singlet_pairs(4)
-        assert logneg(p, [2] * 4, 0, 1) > 1 - 1e-14
-        assert logneg(p, [2] * 4, 1, 2) < 1e-14
-        assert logneg(p, [2] * 4, 2, 3) > 1 - 1e-14
+        rhoab = p.ptr([2, 2, 2, 2], [0, 1])
+        assert logneg(rhoab, [2] * 2) > 1 - 1e-14
+        rhoab = p.ptr([2, 2, 2, 2], [1, 2])
+        assert logneg(rhoab, [2] * 2) < 1e-14
+        rhoab = p.ptr([2, 2, 2, 2], [2, 3])
+        assert logneg(rhoab, [2] * 2) > 1 - 1e-14
+
+    def test_interleaving(self):
+        p = permute(singlet() & singlet(), [2, 2, 2, 2], [0, 2, 1, 3])
+        assert logneg(p, [2] * 4, sysa=[0, 3]) > 2 - 1e-13
 
 
 class TestConcurrence:
@@ -433,6 +419,14 @@ class TestEntCrossMatrix:
         assert_allclose(ecm[0, 0], np.nan)
         assert_allclose(ecm[1, 0], 0)
 
+    def test_block2_upscale(self):
+        p = bell_state('phi+') & bell_state('phi+')
+        ecm = ent_cross_matrix(p, ent_fn=logneg, calc_self_ent=False, sz_blc=2)
+        assert ecm.shape == (2, 2)
+        ecm = ent_cross_matrix(p, ent_fn=logneg, calc_self_ent=False, sz_blc=2,
+                               upscale=True)
+        assert ecm.shape == (4, 4)
+
 
 class TestEntCrossMatrixBlocked:
     @pytest.mark.parametrize("sz_p", [2**2 for i in [2, 3, 4, 5, 6, 9, 12]])
@@ -495,3 +489,24 @@ class TestPageEntropy:
     def test_raises(self):
         with pytest.raises(ValueError):
             page_entropy(8, 16)
+
+
+class TestIsEigenvector:
+
+    def test_dense_true(self):
+        a = rand_herm(10)
+        v = eigvecs(a)
+        for i in range(10):
+            assert is_eigenvector(v[:, i], a)
+
+    def test_dense_false(self):
+        a = rand_herm(10)
+        v = rand_ket(10)
+        assert not is_eigenvector(v, a)
+
+    def test_sparse(self):
+        a = rand_herm(10, sparse=True, density=0.4)
+        vt = seigvecs(a, sigma=0, k=1)
+        assert is_eigenvector(vt, a)
+        vf = rand_ket(10)
+        assert not is_eigenvector(vf, a)

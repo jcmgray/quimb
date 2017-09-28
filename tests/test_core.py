@@ -30,14 +30,14 @@ from quimb import (
     dim_compress,
     eye,
     eyepad,
-    perm_pad,
+    perm_eyepad,
     permute,
     partial_trace,
     chop,
-    overlap,
+    expec,
 )
 from quimb.core import (
-    _sparse_matrix,
+    sparse_matrix,
     _trace_dense,
     _trace_sparse,
     _trace_lose,
@@ -60,7 +60,7 @@ def os1():
 class TestSparseMatrix:
     @mark.parametrize("stype", stypes)
     def test_simple(self, stype):
-        a = _sparse_matrix([[0, 3], [1, 2]], stype)
+        a = sparse_matrix([[0, 3], [1, 2]], stype)
         assert a.format == stype
         assert a.dtype == complex
 
@@ -135,7 +135,7 @@ class TestQuimbify:
     @mark.parametrize("format_in", stypes)
     @mark.parametrize("format_out", (None,) + stypes)
     def test_reshape_sparse(self, qtype, shape, out, format_in, format_out):
-        x = _sparse_matrix([[1], [0], [2], [3j]], format_in)
+        x = sparse_matrix([[1], [0], [2], [3j]], format_in)
         y = qu(x, qtype=qtype, stype=format_out)
         assert y.shape == shape
         assert y.dtype == complex
@@ -184,6 +184,11 @@ class TestInferSize:
     def test_infer_size(self, d, base, n):
         p = rand_ket(d)
         assert infer_size(p, base) == n
+
+    def test_raises(self):
+        p = rand_ket(2) & rand_ket(3)
+        with raises(ValueError):
+            infer_size(p, base=2)
 
 
 class TestTrace:
@@ -468,10 +473,10 @@ class TestEyepad:
         assert x.format == default if stype is None else stype
 
 
-class TestPermPad:
+class TestPermEyepad:
     def test_dop_spread(self):
         a = rand_rho(4)
-        b = perm_pad(a, [2, 2, 2], [0, 2])
+        b = perm_eyepad(a, [2, 2, 2], [0, 2])
         c = (a & eye(2)).A.reshape([2, 2, 2, 2, 2, 2])  \
                           .transpose([0, 2, 1, 3, 5, 4])  \
                           .reshape([8, 8])
@@ -479,11 +484,19 @@ class TestPermPad:
 
     def test_dop_reverse(self):
         a = rand_rho(4)
-        b = perm_pad(a, np.array([2, 2, 2]), [2, 0])
+        b = perm_eyepad(a, np.array([2, 2, 2]), [2, 0])
         c = (a & eye(2)).A.reshape([2, 2, 2, 2, 2, 2])  \
                           .transpose([1, 2, 0, 4, 5, 3])  \
                           .reshape([8, 8])
         assert_allclose(b, c)
+
+    def test_dop_reverse_sparse(self):
+        a = rand_rho(4, sparse=True, density=0.5)
+        b = perm_eyepad(a, np.array([2, 2, 2]), [2, 0])
+        c = (a & eye(2)).A.reshape([2, 2, 2, 2, 2, 2])  \
+                          .transpose([1, 2, 0, 4, 5, 3])  \
+                          .reshape([8, 8])
+        assert_allclose(b.A, c)
 
 
 class TestPermute:
@@ -587,6 +600,13 @@ class TestPartialTraceDense:
         keep = np.array(1)
         b = partial_trace(a, dims, keep)
         assert(b.shape[0] == 2)
+
+    def test_partial_trace_order_doesnt_matter(self):
+        a = rand_rho(2**3)
+        dims = np.array([2, 2, 2])
+        b1 = partial_trace(a, dims, [0, 2])
+        b2 = partial_trace(a, dims, [2, 0])
+        assert_allclose(b1, b2)
 
 
 class TestTraceLose:
@@ -744,7 +764,7 @@ class TestOverlap:
     def test_all(self, qtype1, spars1, qtype2, spars2):
         a = qu([[1], [2j], [3]], qtype=qtype1, sparse=spars1)
         b = qu([[1j], [2], [3j]], qtype=qtype2, sparse=spars2)
-        c = overlap(a, b)
+        c = expec(a, b)
         assert not isinstance(c, complex)
         assert_allclose(c, 36)
 
@@ -754,4 +774,4 @@ class TestOverlap:
     def test_negative_expec(self, qtype, sparse, s):
         a = singlet(qtype=qtype)
         b = sig(s, sparse=sparse) & sig(s, sparse=sparse)
-        assert_allclose(overlap(a, b), -1)
+        assert_allclose(expec(a, b), -1)

@@ -14,9 +14,28 @@ setup(
         'psutil>=4.3.1',
         'cytoolz>=0.8.0',
     ],
+    extras_require={
+        'test': [
+            'coverage',
+            'pytest',
+            'pytest-cov',
+            'pytest-timeout',
+        ],
+        'docs': [
+            'sphinx',
+            'sphinx_rtd_theme',
+            'sphinx_bootstrap_theme',
+        ],
+        'advanced_solvers': [
+            'slepc4py',
+        ]
+    },
+    scripts=['bin/quimb-mpiexec'],
     classifiers=[
         'Development Status :: 3 - Alpha',
         'License :: OSI Approved :: MIT License',
+        'Programming Language :: Python :: 3',
         'Programming Language :: Python :: 3.5',
+        'Programming Language :: Python :: 3.6',
     ]
 )

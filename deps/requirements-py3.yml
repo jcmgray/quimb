@@ -1,0 +1,25 @@
+name: test-environment
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - python=3.6
+  - numpy
+  - scipy
+  - numba
+  - numexpr
+  - psutil
+  - cytoolz
+  - tqdm
+  - coverage
+  - pytest
+  - pytest-cov
+  - pytest-timeout
+  - sphinx_bootstrap_theme
+  - openmpi
+  - coveralls
+  - codecov
+  - pip:
+    - codeclimate-test-reporter
+    - codacy-coverage
+    - "--editable=git+https://github.com/dgasmith/opt_einsum.git"

@@ -3,7 +3,9 @@ set -ex
 
 export INSTALL_DIR=$HOME/petsc_and_slepc
 
-if [ ! -d "$INSTALL_DIR/petsc" ]; then
+if [ pip list | grep slepc4py &>/dev/null ]; then
+  echo 'Using cached petsc_and_slepc directory.';
+else
   if [ -d $INSTALL_DIR ]; then
     rm -rf $INSTALL_DIR
   fi
@@ -15,7 +17,6 @@ if [ ! -d "$INSTALL_DIR/petsc" ]; then
   # ------------------------------ #
   git clone --depth 1 https://bitbucket.org/petsc/petsc.git
   git clone --depth 1 https://bitbucket.org/slepc/slepc.git
-  git clone --depth 1 https://bitbucket.org/mpi4py/mpi4py.git
   git clone --depth 1 https://bitbucket.org/petsc/petsc4py.git
   git clone --depth 1 https://bitbucket.org/slepc/slepc4py.git
 
@@ -29,15 +30,16 @@ if [ ! -d "$INSTALL_DIR/petsc" ]; then
   cd $PETSC_DIR
   git pull
   python2 ./configure \
-    --download-openmpi \
+    COPTFLAGS='-O0'\
+    CXXOPTFLAGS='-O0'\
+    FOPTFLAGS='-O0'\
     --with-scalar-type=complex \
     --download-mumps \
     --download-scalapack \
     --download-parmetis \
     --download-metis \
     --download-ptscotch \
-    --with-fortran-kernels=generic \
-    --with-debugging=1
+    --with-fortran-kernels=generic
   make -s all
   make test
   make streams NPMAX=2
@@ -54,18 +56,13 @@ if [ ! -d "$INSTALL_DIR/petsc" ]; then
   # ----------------------- #
   # Install python packages #
   # ----------------------- #
-  cd $INSTALL_DIR/mpi4py
-  export PATH="$PATH:$INSTALL_DIR/petsc/arch-linux2-c-release/bin"
-  git pull
-  pip install --no-deps .
-
   cd $INSTALL_DIR/petsc4py
   git pull
-  pip install --no-deps .
+  python setup.py build
+  python setup.py install
 
   cd $INSTALL_DIR/slepc4py
   git pull
-  pip install --no-deps .
-else
-  echo 'Using cached petsc_and_slepc directory.';
+  python setup.py build
+  python setup.py install
 fi

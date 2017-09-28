@@ -6,9 +6,10 @@ from quimb import (
     eigvals,
     eigvecs,
     groundstate,
-    overlap,
+    expec,
     singlet,
     seigvals,
+    spin_operator,
     sig,
     controlled,
     ham_heis,
@@ -19,6 +20,31 @@ from quimb import (
     swap,
     rand_ket,
 )
+
+
+class TestSpinOperator:
+    def test_spin_half(self):
+        Sx = spin_operator('x', 1 / 2)
+        assert_allclose(Sx, [[0.0, 0.5], [0.5, 0.0]])
+
+        Sy = spin_operator('y', 1 / 2)
+        assert_allclose(Sy, [[0.0, -0.5j], [0.5j, 0.0]])
+
+        Sz = spin_operator('z', 1 / 2)
+        assert_allclose(Sz, [[0.5, 0.0], [0.0, -0.5]])
+
+        Sp = spin_operator('+', 1 / 2)
+        assert_allclose(Sp, [[0.0, 1.0], [0.0, 0.0]])
+
+        Sm = spin_operator('-', 1 / 2)
+        assert_allclose(Sm, [[0.0, 0.0], [1.0, 0.0]])
+
+    @pytest.mark.parametrize("label", ('x', 'y', 'z'))
+    @pytest.mark.parametrize("S", [1, 3 / 2, 2, 5 / 2])
+    def test_spin_high(self, label, S):
+        D = int(2 * S + 1)
+        op = spin_operator(label, S)
+        assert_allclose(eigvals(op), np.linspace(-S, S, D), atol=1e-13)
 
 
 class TestSig:
@@ -63,7 +89,7 @@ class TestHamHeis:
         evals = eigvals(h)
         assert_allclose(evals, [-3, 1, 1, 1])
         gs = groundstate(h)
-        assert_allclose(overlap(gs, singlet()), 1.)
+        assert_allclose(expec(gs, singlet()), 1.)
 
     def test_ham_heis_sparse_cyclic_4(self):
         h = ham_heis(4, sparse=True, cyclic=True)
@@ -118,8 +144,8 @@ class TestSpinZProjector:
             # Groundstate must be in most symmetric subspace
             gs = groundstate(h)
             gs0 = prj .H @ v0s[:, 0]
-            assert_allclose(overlap(gs, gs0), 1.0)
-            assert_allclose(overlap(h, gs0), overlap(h, gs))
+            assert_allclose(expec(gs, gs0), 1.0)
+            assert_allclose(expec(h, gs0), expec(h, gs))
 
     def test_raises(self):
         with pytest.raises(ValueError):
@@ -142,8 +168,8 @@ class TestSpinZProjector:
             # Groundstate must be in most symmetric subspace
             gs = groundstate(h)
             gs0 = prj .H @ v0s[:, 0]
-            assert_allclose(overlap(gs, gs0), 1.0)
-            assert_allclose(overlap(h, gs0), overlap(h, gs))
+            assert_allclose(expec(gs, gs0), 1.0)
+            assert_allclose(expec(h, gs0), expec(h, gs))
 
 
 class TestSwap:

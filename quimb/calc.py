@@ -1,11 +1,6 @@
-"""
-Functions for more advanced calculations of quantities and properties of
+"""Functions for more advanced calculations of quantities and properties of
 quantum objects.
 """
-# TODO: move matrix functions to solve, add slepc versions ****************** #
-# TODO: all docs ************************************************************ #
-# TODO: sparse sqrtm function *********************************************** #
-
 from math import sin, cos, pi, log, log2, sqrt
 import numbers
 import collections
@@ -14,14 +9,10 @@ import functools
 
 import numpy as np
 import numpy.linalg as nla
-import scipy.linalg as sla
-import scipy.sparse.linalg as spla
 from scipy.optimize import minimize
 
 from .accel import (
-    accel,
-    _dot_dense,
-    ldmul,
+    njit,
     issparse,
     isop,
     zeroify,
@@ -29,6 +20,7 @@ from .accel import (
     prod,
     isvec,
     dot,
+    matrixify,
 )
 from .core import (
     qu,
@@ -38,14 +30,15 @@ from .core import (
     tr,
     ptr,
     infer_size,
-    overlap,
+    expec,
     dop,
 )
-from .solve.base_solver import (
+from .linalg.base_linalg import (
     eigsys,
     eigvals,
     norm,
     seigvals,
+    sqrtm,
 )
 from .gen.operators import sig
 from .gen.states import (
@@ -53,47 +46,44 @@ from .gen.states import (
     bell_state,
     bloch_state,
 )
+from .utils import int2tup
 
 
-def expm(a, herm=True):
-    """Matrix exponential, can be accelerated if explicitly hermitian.
+def fidelity(p1, p2):
+    """Fidelity between two quantum states.
+
+    Parameters
+    ----------
+    p1 : vector or matrix
+        First state.
+    p2 : vector or matrix
+        Second state.
+
+    Returns
+    -------
+    float
     """
-    if issparse(a):
-        return spla.expm(a)
-    elif not herm:
-        return np.asmatrix(spla.expm(a))
+    if isvec(p1) or isvec(p2):
+        return expec(p1, p2)
     else:
-        evals, evecs = eigsys(a)
-        return _dot_dense(evecs, ldmul(np.exp(evals), evecs.H))
+        sqrho = sqrtm(p1)
+        return tr(sqrtm(dot(sqrho, dot(p2, sqrho))))
+        # return norm(sqrtm(p1) @ sqrtm(p2), "tr")
 
 
-def sqrtm(a, herm=True):
-    """Matrix square root, can be accelerated if explicitly hermitian.
-    """
-    if issparse(a):
-        raise NotImplementedError("No sparse sqrtm available.")
-    elif not herm:
-        return np.asmatrix(sla.sqrtm(a))
-    else:
-        evals, evecs = eigsys(a)
-        return _dot_dense(evecs, ldmul(np.sqrt(evals.astype(complex)),
-                                       evecs.H))
-
-
-def fidelity(rho, sigma):
-    """Fidelity between two quantum states
-    """
-    if isvec(rho) or isvec(sigma):
-        return overlap(rho, sigma)
-    else:
-        sqrho = sqrtm(rho)
-        return tr(sqrtm(dot(sqrho, dot(sigma, sqrho))))
-        # return norm(sqrtm(rho) @ sqrtm(sigma), "tr")
-
-
-def purify(rho, sparse=False):
+def purify(rho):
     """Take state rho and purify it into a wavefunction of squared
     dimension.
+
+    Parameters
+    ----------
+    rho : matrix
+        Density matrix to purify.
+
+    Returns
+    -------
+    vector :
+        The purified ket.
     """
     # TODO: trim zeros?
     d = rho.shape[0]
@@ -101,25 +91,30 @@ def purify(rho, sparse=False):
     evals = np.sqrt(np.clip(evals, 0, 1))
     psi = np.zeros(shape=(d**2, 1), dtype=complex)
     for i, evals in enumerate(evals.flat):
-        psi += evals * kron(vs[:, i], basis_vec(i, d, sparse=sparse))
+        psi += evals * kron(vs[:, i], basis_vec(i, d))
     return qu(psi)
 
 
 @zeroify
 def entropy(a, rank=None):
-    """Compute the (von Neumann) entropy
+    """Compute the (von Neumann) entropy.
 
     Parameters
     ----------
-        a :
-            Operator or list of eigenvalues.
-        rank : int (optional)
-            If operator has known rank, then a partial decomposition can be
-            used to acclerate the calculation.
+    a : matrix or 1d array
+        Positive operator or list of positive eigenvalues.
+    rank : int (optional)
+        If operator has known rank, then a partial decomposition can be
+        used to accelerate the calculation.
 
     Returns
     -------
-        e: von neumann entropy
+    float
+        The von Neumann entropy.
+
+    See Also
+    --------
+    mutinf, entropy_subsys_approx
     """
     a = np.asarray(a)
     if np.ndim(a) == 1:
@@ -135,20 +130,34 @@ def entropy(a, rank=None):
 
 
 @zeroify
-def mutual_information(p, dims=(2, 2), sysa=0, sysb=1, rank=None):
-    """Find the mutual information between two subystems of a state
+def mutinf(p, dims=(2, 2), sysa=0, sysb=1, rank=None):
+    """Find the mutual information between two subystems of a state.
+
+    That is, ``H(A) + H(B) - H(AB)``, for von Neumann entropy ``H``, and two
+    subsystems A and B.
 
     Parameters
     ----------
-        p: state, can be vector or operator
-        dims: internal dimensions of state
-        sysa: index of first subsystem
-        sysb: index of second subsystem
-        rank: if known, the rank of rho_ab, to speed calculation up
+    p : vector or matrix
+        State, can be vector or operator.
+    dims : tuple(int), optional
+        Internal dimensions of state.
+    sysa : int, optional
+        Index of first subsystem, A.
+    sysb : int, optional
+        Index of second subsystem, B.
+    rank : int, optional
+        If known, the rank of rho_ab, to speed calculation of ``H(AB)`` up.
+        For example, if ``p`` comes from tracing out three qubits from a
+        system, then its rank is 2^3 = 8 etc.
 
     Returns
     -------
-        Ixy: mutual information
+    float
+
+    See Also
+    --------
+    entropy
     """
     if np.size(dims) > 2:
         if rank == 'AUTO':
@@ -167,58 +176,138 @@ def mutual_information(p, dims=(2, 2), sysa=0, sysb=1, rank=None):
     return ha + hb - hab
 
 
-mutinf = mutual_information
+mutual_information = mutinf
 
 
-def partial_transpose(p, dims=(2, 2)):
-    """Partial transpose of state `p` with bipartition as given by
-    `dims`.
+@matrixify
+def partial_transpose(p, dims=(2, 2), sysa=0):
+    """Partial transpose of a density matrix.
+
+    Parameters
+    ----------
+    p : matrix or vector
+        The state to partially transpose.
+    dims : tuple(int), optional
+        The two internal dimensions describing a bipartition of the state.
+
+    Returns
+    -------
+    matrix
+
+    See Also
+    --------
+    logneg, negativity
     """
-    p = qu(p, "dop")
-    p = np.array(p)  \
-        .reshape((*dims, *dims))  \
-        .transpose((2, 1, 0, 3))  \
+    sysa = int2tup(sysa)
+
+    ndims = len(dims)
+    perm_ket_inds = []
+    perm_bra_inds = []
+
+    for i in range(ndims):
+        if i in sysa:
+            perm_ket_inds.append(i + ndims)
+            perm_bra_inds.append(i)
+        else:
+            perm_ket_inds.append(i)
+            perm_bra_inds.append(i + ndims)
+
+    return (
+        np.asarray(qu(p, "dop"))
+        .reshape((*dims, *dims))
+        .transpose((*perm_ket_inds, *perm_bra_inds))
         .reshape((prod(dims), prod(dims)))
-    return qu(p)
+    )
 
 
-@zeroify
-def negativity(p, dims=(2, 2), sysa=0, sysb=1):
-    """Negativity between `sysa` and `sysb` of state `p` with subsystem
-    dimensions `dims`
-    """
-    if isvec(p):
-        p = qu(p, qtype='dop')
-    if len(dims) > 2:
-        p = ptr(p, dims, (sysa, sysb))
-        dims = (dims[sysa], dims[sysb])
-    n = (norm(partial_transpose(p, dims=dims), "tr") - 1.0) / 2.0
-    return max(0.0, n)
+def partial_tranpose_norm(p, dims, sysa=0):
+    """Compute the norm of the partial transpose for (log) negativity."""
+    ndims = len(dims)
 
-
-@zeroify
-def logarithmic_negativity(p, dims=(2, 2), sysa=0, sysb=1):
-    """Logarithmic negativity between `sysa` and `sysb` of `p`, with
-    subsystem dimensions `dims`.
-    """
-    if isvec(p) and len(dims) == 2:  # pure bipartition, easier to calc
+    if isvec(p) and ndims == 2:  # pure bipartition, easier to calc
         smaller_system = 0 if dims[0] <= dims[1] else 1
         rhoa = ptr(p, dims, smaller_system)
-        e = 2 * log2(sum(np.sqrt(np.clip(eigvals(rhoa, sort=False), 0, 1))))
-    else:
-        if len(dims) > 2:  #
-            p = ptr(p, dims, (sysa, sysb))
-            dims = (dims[sysa], dims[sysb])
-        e = log2(norm(partial_transpose(p, dims), "tr"))
-    return max(0.0, e)
+        return sum(np.sqrt(np.clip(eigvals(rhoa, sort=False), 0, 1)))**2
+    return norm(partial_transpose(p, dims, sysa), "tr")
 
 
-logneg = logarithmic_negativity
+@zeroify
+def logneg(p, dims=(2, 2), sysa=0):
+    """Compute logarithmic negativity between two subsytems.
+
+    This is defined as  log_2( | rho_{AB}^{T_B} | ). If ``len(dims) > 2``,
+    then the non-target dimensions will be traced out first.
+
+    Parameters
+    ----------
+    p : matrix or vector
+        State to compute logarithmic negativity for.
+    dims : tuple(int), optional
+        The internal dimensions of ``p``.
+    sysa : int, optional
+        Index of the first subsystem, A, relative to ``dims``.
+
+    Returns
+    -------
+    float
+
+    See Also
+    --------
+    negativity, partial_transpose, logneg_subsys_approx
+    """
+    return max(0.0, log2(partial_tranpose_norm(p, dims, sysa)))
+
+
+logarithmic_negativity = logneg
+
+
+def negativity(p, dims=(2, 2), sysa=0, sysb=1):
+    """Compute negativity between two subsytems.
+
+    This is defined as  (| rho_{AB}^{T_B} | - 1) / 2. If ``len(dims) > 2``,
+    then the non-target dimensions will be traced out first.
+
+    Parameters
+    ----------
+    p : matrix or vector
+        State to compute logarithmic negativity for.
+    dims : tuple(int), optional
+        The internal dimensions of ``p``.
+    sysa : int, optional
+        Index of the first subsystem, A, relative to ``dims``.
+
+    Returns
+    -------
+    float
+
+    See Also
+    --------
+    logneg, partial_transpose, negativity_subsys_approx
+    """
+    return max(0.0, (partial_tranpose_norm(p, dims, sysa) - 1) / 2)
 
 
 @zeroify
 def concurrence(p, dims=(2, 2), sysa=0, sysb=1):
-    """Concurrence of two-qubit state `p`.
+    """Concurrence of two-qubit state.
+
+    If ``len(dims) > 2``, then the non-target dimensions will be traced out
+    first.
+
+    Parameters
+    ----------
+    p : matrix or vector
+        State to compute concurrence for.
+    dims : tuple(int), optional
+        The internal dimensions of ``p``.
+    sysa : int, optional
+        Index of the first subsystem, A, relative to ``dims``.
+    sysb : int, optional
+        Index of the first subsystem, B, relative to ``dims``.
+
+    Returns
+    -------
+    float
     """
     if len(dims) > 2:
         p = ptr(p, dims, (sysa, sysb))
@@ -237,15 +326,19 @@ def one_way_classical_information(p_ab, prjs, precomp_func=False):
 
     Parameters
     ----------
-        p_ab: state of two qubits
-        prjs: iterable of POVMs
-        precomp_func: whether to return a pre-computed function, closed over
-            the actual state.
+    p_ab : matrix
+        State of two qubits
+    prjs : sequence of matrices
+       The POVMs.
+    precomp_func : bool, optional
+        Whether to return a pre-computed function, closed over the actual
+        state.
 
     Returns
     -------
-        The one-way classical information or the function to compute such
-        given a set of POVMs
+    float or callable
+        The one-way classical information or the function to compute it for
+        the given state which takes a set of POVMs as its single argument.
     """
     p_a = ptr(p_ab, (2, 2), 0)
     s_a = entropy(p_a)
@@ -264,7 +357,25 @@ def one_way_classical_information(p_ab, prjs, precomp_func=False):
 
 @zeroify
 def quantum_discord(p, dims=(2, 2), sysa=0, sysb=1):
-    """Quantum Discord for two qubit density matrix `p`.
+    """Quantum Discord for two qubit density matrix.
+
+    If ``len(dims) > 2``, then the non-target dimensions will be traced out
+    first.
+
+    Parameters
+    ----------
+    p : matrix or vector
+        State to compute quantum discord for.
+    dims : tuple(int), optional
+        The internal dimensions of ``p``.
+    sysa : int, optional
+        Index of the first subsystem, A, relative to ``dims``.
+    sysb : int, optional
+        Index of the first subsystem, B, relative to ``dims``.
+
+    Returns
+    -------
+    float
     """
     if len(dims) > 2:
         p = ptr(p, dims, (sysa, sysb))
@@ -288,31 +399,63 @@ def quantum_discord(p, dims=(2, 2), sysa=0, sysb=1):
 
 
 @zeroify
-def trace_distance(p, w):
-    """Trace distance between states `p` and `w`.
-    """
-    p_is_op, w_is_op = isop(p), isop(w)
-    if not p_is_op and not w_is_op:
-        return sqrt(1 - overlap(p, w))
-    return 0.5 * norm((p if p_is_op else dop(p)) -
-                      (w if w_is_op else dop(w)), "tr")
-
-
-def decomp(a, fn, fn_args, fn_d, nmlz_func, mode="p", tol=1e-3):
-    """Decomposes an operator via the Hilbert-schmidt inner product into the
-    pauli group. Can both print the decomposition or return it.
+def trace_distance(p1, p2):
+    """Trace distance between two states.
 
     Parameters
     ----------
-        a: operator to decompose
-        fn: function to generate operator/state to decompose with
-        fn_args: list of args whose permutations will be used
-        mode: string, include 'p' to print the decomp and/or 'c' to return dict
-        tol: print operators with contirbution above tol only.
+    p1 : vector or matrix
+        The first state.
+    p2 : vector or matrix
+        The second state.
 
     Returns
     -------
-        (names_cffs): OrderedDict of Pauli operator name and overlap with a.
+    float
+    """
+    p1_is_op, p2_is_op = isop(p1), isop(p2)
+
+    # If both are pure kets then special case
+    if (not p1_is_op) and (not p2_is_op):
+        return sqrt(1 - expec(p1, p2))
+
+    # Otherwise do full calculation
+    return 0.5 * norm((p1 if p1_is_op else dop(p1)) -
+                      (p2 if p2_is_op else dop(p2)), "tr")
+
+
+def decomp(a, fn, fn_args, fn_d, nmlz_func, mode="p", tol=1e-3):
+    """Decomposes an operator via the Hilbert-schmidt inner product.
+
+    Can both print the decomposition or return it.
+
+    Parameters
+    ----------
+    a : vector or matrix
+        Operator to decompose.
+    fn : callable
+        Function to generate operator/state to decompose with.
+    fn_args :
+        Sequence of args whose permutations will be supplied to ``fn``.
+    fn_d : int
+        The dimension of the operators that `fn` produces.
+    nmlz_func : callable
+        Function to produce a normlization coefficient given the ``n``
+        permutations of operators that will be produced.
+    mode :
+        String, include ``'p'`` to print the decomp and/or ``'c'`` to
+        return OrderedDict, sorted by size of contribution.
+    tol :
+        Print operators with contirbution above ``tol`` only.
+
+    Returns
+    -------
+    None or OrderedDict:
+        Pauli operator name and expec with ``a``.
+
+    See Also
+    --------
+    pauli_decomp, bell_decomp
     """
     if isvec(a):
         a = qu(a, "dop")  # make sure operator
@@ -322,11 +465,11 @@ def decomp(a, fn, fn_args, fn_d, nmlz_func, mode="p", tol=1e-3):
     def calc_name_and_overlap():
         for perm in itertools.product(fn_args, repeat=n):
             op = kron(*(fn(x, sparse=True) for x in perm)) * nmlz_func(n)
-            cff = overlap(a, op)
+            cff = expec(a, op)
             yield "".join(str(x) for x in perm), cff
 
     names_cffs = list(calc_name_and_overlap())
-    # sort by descending overlap and turn into OrderedDict
+    # sort by descending expec and turn into OrderedDict
     names_cffs.sort(key=lambda pair: -abs(pair[1]))
     names_cffs = collections.OrderedDict(names_cffs)
     # Print decomposition
@@ -346,12 +489,14 @@ pauli_decomp = functools.partial(decomp,
                                  fn_args='IXYZ',
                                  fn_d=2,
                                  nmlz_func=lambda n: 2**-n)
+"""Decompose an operator into Paulis."""
 
 bell_decomp = functools.partial(decomp,
                                 fn=bell_state,
                                 fn_args=(0, 1, 2, 3),
                                 fn_d=4,
                                 nmlz_func=lambda x: 1)
+"""Decompose an operator into bell-states."""
 
 
 def correlation(p, opa, opb, sysa, sysb, dims=None, sparse=None,
@@ -360,18 +505,30 @@ def correlation(p, opa, opb, sysa, sysb, dims=None, sparse=None,
 
     Parameters
     ----------
-        p: state
-        opa: operator to act on first subsystem
-        opb: operator to act on second subsystem
-        sysa: index of first subsystem
-        sysb: index of second subsystem
-        sparse: whether to compute with sparse operators
-        precomp_func: whether to return result or single arg function closed
-            over precomputed operators
+    p : vector or matrix
+        State to compute correlations for, ignored if ``precomp_func=True``.
+    opa : matrix
+        Operator to act on first subsystem.
+    opb : matrix
+        Operator to act on second subsystem.
+    sysa : int
+        Index of first subsystem.
+    sysb : int
+        Index of second subsystem.
+    dims : tuple of int, optional
+        Internal dimensions of ``p``, will be assumed to be qubits if not
+        given.
+    sparse : bool, optional
+        Whether to compute with sparse operators.
+    precomp_func : bool, optional
+        Whether to return result or single arg function closed
+        over precomputed operator.
 
     Returns
     -------
-        cab: correlation, <ab> - <a><b>
+    float or callable
+        The correlation, <ab> - <a><b>, or a function to compute for an
+        arbitrary state.
     """
     if dims is None:
         sz_p = infer_size(p)
@@ -388,28 +545,38 @@ def correlation(p, opa, opb, sysa, sysb, dims=None, sparse=None,
 
     @realify
     def corr(state):
-        return overlap(opab, state) - overlap(opa, state) * overlap(opb, state)
+        return expec(opab, state) - expec(opa, state) * expec(opb, state)
 
     return corr if precomp_func else corr(p)
 
 
 def pauli_correlations(p, ss=("xx", "yy", "zz"), sysa=0, sysb=1,
                        sum_abs=False, precomp_func=False):
-    """Calculate the correlation between sites for a list of operator pairs.
+    """Calculate the correlation between sites for a list of operator pairs
+    choisen from the pauli matrices.
 
     Parameters
     ----------
-        p: state
-        sysa: index of first site
-        sysb: index of second site
-        ss: list of pairs specifiying pauli matrices
-        sum_abs: whether to sum over the absolute values of each correlation
-        precomp_func: whether to return the values or a single argument
-            function closed over precomputed operators etc.
+    p : vector or matrix
+        State to compute correlations for. Ignored if ``precomp_func=True``.
+    ss : tuple or str
+        List of pairs specifiying pauli matrices.
+    sysa : int, optional
+        Index of first site.
+    sysb : int, optional
+        Index of second site.
+    sum_abs : bool, optional
+        Whether to sum over the absolute values of each correlation
+    precomp_func : bool, optional
+        whether to return the values or a single argument
+        function closed over precomputed operators etc.
 
     Returns
     -------
-        corrs: list of values or functions specifiying each correlation.
+    list of float, list of callable, float or callable
+        Either the value(s) of each correlation or the function(s) to compute
+        the correlations for an arbitrary state, depending on ``sum_abs`` and
+        ``precomp_func``.
     """
     def gen_corr_list():
         for s1, s2 in ss:
@@ -417,35 +584,44 @@ def pauli_correlations(p, ss=("xx", "yy", "zz"), sysa=0, sysb=1,
                               precomp_func=precomp_func)
 
     if sum_abs:
+
         if precomp_func:
             return lambda p: sum((abs(corr(p)) for corr in gen_corr_list()))
+
         return sum((abs(corr) for corr in gen_corr_list()))
+
     return tuple(gen_corr_list())
 
 
-def ent_cross_matrix(p, sz_blc=1, ent_fn=logneg, calc_self_ent=True):
+def ent_cross_matrix(p, sz_blc=1, ent_fn=logneg, calc_self_ent=True,
+                     upscale=False):
     """Calculate the pair-wise function ent_fn  between all sites or blocks
     of a state.
 
     Parameters
     ----------
-        p : matrix-like
-            State.
-        sz_blc : int
-            Size of the blocks to partition the state into. If the number of
-            individual sites is not a multiple of this then the final (smaller)
-            block will be ignored.
-        ent_fn : callable
-            Bipartite function, notionally entanglement
-        calc_self_ent : bool
-            Whether to calculate the function for each site
-            alone, purified. If the whole state is pure then this is the
-            entanglement with the whole remaining system.
+    p : matrix-like
+        State.
+    sz_blc : int
+        Size of the blocks to partition the state into. If the number of
+        individual sites is not a multiple of this then the final (smaller)
+        block will be ignored.
+    ent_fn : callable
+        Bipartite function, notionally entanglement
+    calc_self_ent : bool
+        Whether to calculate the function for each site
+        alone, purified. If the whole state is pure then this is the
+        entanglement with the whole remaining system.
+    upscale : bool, optional
+        Whether, if sz_blc != 1, to upscale the results so that the output
+        array is the same size as if it was.
 
     Returns
     -------
-        ents: matrix of pairwise ent_fn results.
+    2d-numpy.ndarray
+        matrix of pairwise ent_fn results.
     """
+
     sz_p = infer_size(p)
     dims = (2,) * sz_p
     n = sz_p // sz_blc
@@ -458,29 +634,43 @@ def ent_cross_matrix(p, sz_blc=1, ent_fn=logneg, calc_self_ent=True):
         if not calc_self_ent:
             for i in range(n):
                 ents[i, i] = np.nan
-        return ents
 
-    # Range over pairwise blocks
-    for i in range(0, sz_p - sz_blc + 1, sz_blc):
-        for j in range(i, sz_p - sz_blc + 1, sz_blc):
-            if i == j:
-                if calc_self_ent:
-                    rhoa = ptr(p, dims, [i + b for b in range(sz_blc)])
-                    psiap = purify(rhoa)
-                    ent = ent_fn(psiap, dims=(2**sz_blc, 2**sz_blc)) / sz_blc
+    else:
+        # Range over pairwise blocks
+        for i in range(0, sz_p - sz_blc + 1, sz_blc):
+            for j in range(i, sz_p - sz_blc + 1, sz_blc):
+                if i == j:
+                    if calc_self_ent:
+                        rhoa = ptr(p, dims, [i + b for b in range(sz_blc)])
+                        psiap = purify(rhoa)
+                        ent = ent_fn(psiap,
+                                     dims=(2**sz_blc, 2**sz_blc)) / sz_blc
+                    else:
+                        ent = np.nan
                 else:
-                    ent = np.nan
-            else:
-                rhoab = ptr(p, dims, [i + b for b in range(sz_blc)] +
-                                     [j + b for b in range(sz_blc)])
-                ent = ent_fn(rhoab, dims=(2**sz_blc, 2**sz_blc)) / sz_blc
-            ents[i // sz_blc, j // sz_blc] = ent
-            ents[j // sz_blc, i // sz_blc] = ent
+                    rhoab = ptr(p, dims, [i + b for b in range(sz_blc)] +
+                                         [j + b for b in range(sz_blc)])
+                    ent = ent_fn(rhoab, dims=(2**sz_blc, 2**sz_blc)) / sz_blc
+                ents[i // sz_blc, j // sz_blc] = ent
+                ents[j // sz_blc, i // sz_blc] = ent
+
+    if upscale:
+        up_ents = np.tile(np.nan, (sz_p, sz_p))
+
+        for i in range(n):
+            for j in range(i, n):
+                up_ents[i * sz_blc:(i + 1) * sz_blc,
+                        j * sz_blc:(j + 1) * sz_blc] = ents[i, j]
+                up_ents[j * sz_blc:(j + 1) * sz_blc,
+                        i * sz_blc:(i + 1) * sz_blc] = ents[j, i]
+
+        ents = up_ents
+
     return ents
 
 
 def qid(p, dims, inds, precomp_func=False, sparse_comp=True,
-        norm_func=norm, pow=2, coeff=1):
+        norm_func=norm, power=2, coeff=1):
     # Check inputs
     inds = (inds,) if isinstance(inds, numbers.Number) else inds
 
@@ -493,7 +683,7 @@ def qid(p, dims, inds, precomp_func=False, sparse_comp=True,
     def qid_func(x):
         if isvec(x):
             x = dop(x)
-        return tuple(sum(coeff * norm_func(dot(x, op) - dot(op, x))**pow
+        return tuple(sum(coeff * norm_func(dot(x, op) - dot(op, x))**power
                          for op in ops)
                      for ops in ops_i)
 
@@ -502,20 +692,20 @@ def qid(p, dims, inds, precomp_func=False, sparse_comp=True,
 
 def is_degenerate(op, tol=1e-12):
     """Check if operator has any degenerate eigenvalues, determined relative
-    to equal spacing of all eigenvalues.
+    to mean spacing of all eigenvalues.
 
     Parameters
     ----------
-        op : list or operator-like
-            Operator or assumed eigenvalues to check degeneracy for.
-        tol : float
-            How much closer than evenly spaced the eigenvalue gap has to be
-            to count as degenerate.
+    op : matrix or 1d-array
+        Operator or assumed eigenvalues to check degeneracy for.
+    tol : float
+        How much closer than evenly spaced the eigenvalue gap has to be
+        to count as degenerate.
 
     Returns
     -------
-        n_dgen : int
-            Number of degenerate eigenvalues.
+    n_dgen : int
+        Number of degenerate eigenvalues.
     """
     op = np.asarray(op)
     if op.ndim != 1:
@@ -527,22 +717,44 @@ def is_degenerate(op, tol=1e-12):
     return np.count_nonzero(abs(l_gaps) < l_tol)
 
 
-@accel
+def is_eigenvector(vec, mat, **kwargs):
+    """Determines whether a vector is an eigenvector of an operator.
+
+    Parameters
+    ----------
+    vec : vector
+        Vector to check.
+    mat : matrix
+        Matrix to check.
+    kwargs :
+        Supplied to numpy.allclose
+
+    Returns
+    -------
+    bool
+        Whether ``mat @ vec = l * vec`` for some scalar ``l``.
+    """
+    vec2 = mat @ vec
+    factor = np.asscalar(vec2[0] / vec[0])
+    return np.allclose(factor * vec, vec2, **kwargs)
+
+
+@njit
 def page_entropy(sz_subsys, sz_total):  # pragma: no cover
     """Calculate the page entropy, i.e. expected entropy for a subsytem
     of a random state in Hilbert space.
 
     Parameters
     ----------
-        sz_subsys : int
-            Dimension of subsystem.
-        sz_total : int
-            Dimension of total system.
+    sz_subsys : int
+        Dimension of subsystem.
+    sz_total : int
+        Dimension of total system.
 
     Returns
     -------
-        s : float
-            Entropy.
+    s : float
+        Entropy in bits.
     """
     n = sz_total // sz_subsys
 

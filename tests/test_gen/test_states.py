@@ -6,7 +6,7 @@ from quimb import (
     eye,
     chop,
     eyepad,
-    overlap,
+    expec,
     ptr,
     eigsys,
     groundstate,
@@ -107,15 +107,15 @@ class TestBellStates:
         for s, dic in zip(("psi-", "psi+", "phi+", "phi-"),
                           ({"qtype": 'dop'}, {}, {"sparse": True}, {})):
             p = bell_state(s, **dic)
-            assert_allclose(overlap(p, p), 1.0)
+            assert_allclose(expec(p, p), 1.0)
             pa = ptr(p, [2, 2], 0)
-            assert_allclose(overlap(pa, pa), 0.5)
+            assert_allclose(expec(pa, pa), 0.5)
 
     def test_bell_state_singlet(self):
         p = singlet(qtype="dop", sparse=True)
-        assert_allclose(overlap(p, p), 1.0)
+        assert_allclose(expec(p, p), 1.0)
         pa = ptr(p, [2, 2], 0)
-        assert_allclose(overlap(pa, pa), 0.5)
+        assert_allclose(expec(pa, pa), 0.5)
 
 
 class TestThermalState:

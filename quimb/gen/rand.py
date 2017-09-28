@@ -1,4 +1,5 @@
-""" Functions for generating random quantum objects and states. """
+"""Functions for generating random quantum objects and states.
+"""
 
 # TODO: Test density -------------------------------------------------------- #
 # TODO: make sure eigen spectrum is correct ... ----------------------------- #
@@ -6,7 +7,7 @@
 from functools import reduce
 import numpy as np
 import scipy.sparse as sp
-from ..accel import rdmul, dot
+from ..accel import rdmul, dot, matrixify
 from ..core import qu, ptr, kron, nmlz
 
 
@@ -142,7 +143,7 @@ def rand_product_state(n, qtype=None):
     """Generates a ket of `n` many random pure qubits.
     """
     def gen_rand_pure_qubits(n):
-        for i in range(n):
+        for _ in range(n):
             u = np.random.rand()
             v = np.random.rand()
             phi = 2 * np.pi * u
@@ -153,9 +154,10 @@ def rand_product_state(n, qtype=None):
     return kron(*gen_rand_pure_qubits(n))
 
 
+@matrixify
 def rand_matrix_product_state(phys_dim, n, bond_dim,
                               cyclic=False, trans_invar=False):
-    """Generate a random matrix product state.
+    """Generate a random matrix product state (in dense form).
 
     Parameters
     ----------
@@ -204,3 +206,34 @@ def rand_matrix_product_state(phys_dim, n, bond_dim,
 
 
 rand_mps = rand_matrix_product_state
+
+
+def rand_seperable(dims, num_mix=10):
+    """Generate a random, mixed, seperable state. E.g rand_seperable([2, 2])
+    for a mixed two qubit state with no entanglement.
+
+    Parameters
+    ----------
+        dims : tuple of int
+            The local dimensions across which to be seperable.
+        num_mix : int, optional
+            How many individual product states to sum together, each with
+            random weight.
+
+    Returns
+    -------
+        np.matrix
+            Mixed seperable state.
+    """
+
+    def gen_single_sites():
+        for dim in dims:
+            yield rand_rho(dim)
+
+    weights = np.random.rand(num_mix)
+
+    def gen_single_states():
+        for w in weights:
+            yield w * kron(*gen_single_sites())
+
+    return sum(gen_single_states()) / np.sum(weights)

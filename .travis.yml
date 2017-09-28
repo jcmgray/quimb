@@ -1,6 +1,7 @@
 language: python
 python:
   - 3.5
+dist: trusty
 
 addons:
   apt:
@@ -22,26 +23,35 @@ addons:
       - liblapack3gf
       - libblas-dev
       - libblas3gf
+      - wget
 
 cache:
   directories:
     - $HOME/conda
     - $HOME/petsc_and_slepc
+    - $HOME/mpi_stuff
 
 before_install:
-  - bash deps/travis-install-conda.sh
+  - function chronic { /bin/rm --force /tmp/surpress.out 2> /dev/null; $* 2>&1 > /tmp/surpress.out || cat /tmp/surpress.out; /bin/rm /tmp/surpress.out; }
+  - chronic bash deps/travis-install-conda.sh
   - export PATH="$HOME/conda/bin:$PATH"
   - source activate test-environment
-  - bash deps/travis-install-slepc4py.sh
+  - chronic bash deps/travis-install-openmpi.sh
+  - mpiexec --version
+  - mpiexec -np 2 hostname
+  - chronic bash deps/travis-install-slepc4py.sh
 
 install:
   - pip install .
 
 script:
   - export OMP_NUM_THREADS=2
-  - py.test
+  - env COVERAGE_FILE=.coverage.autompi pytest
+  - env COVERAGE_FILE=.coverage.manualmpi quimb-mpiexec 2 -m pytest
+  - coverage combine .
 
 after_success:
   - coveralls
-  - bash <(curl -s https://codecov.io/bash)
+  - codecov
   - codeclimate-test-reporter
+  - python-codacy-coverage -r coverage.xml

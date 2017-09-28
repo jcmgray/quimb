@@ -107,3 +107,5 @@ $RECYCLE.BIN/
 
 # Windows shortcuts
 *.lnk
+
+docs/_autosummary/

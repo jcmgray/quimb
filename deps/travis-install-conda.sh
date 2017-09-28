@@ -17,7 +17,7 @@ if [ ! -d "$HOME/conda/bin" ]; then
   conda install pyyaml
   conda update -q conda
   conda info -a
-  conda env create --file $DIR/requirements-py35.yml
+  conda env create --file $DIR/requirements-py3.yml
   source activate test-environment
 # ~~~ cached install ~~~ #
 else
@@ -28,6 +28,7 @@ else
   conda update -q conda
   source activate test-environment
   conda update -q --all
-  pip install -U coveralls codeclimate-test-reporter
+  pip install -U codeclimate-test-reporter codacy-coverage
+  pip install -U --editable=git+https://github.com/dgasmith/opt_einsum.git
   pip uninstall --yes quimb
 fi

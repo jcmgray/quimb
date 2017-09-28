@@ -13,19 +13,20 @@ from quimb import (
     rand_herm,
     rand_matrix,
     rand_uni,
-    overlap,
+    expec,
     ham_heis,
     up,
     down,
     eyepad,
     sig,
+    logneg,
 )
 from quimb.evo import (
     schrodinger_eq_ket,
     schrodinger_eq_dop,
-    schrodinger_eq_dop_vec,
+    schrodinger_eq_dop_vectorized,
     lindblad_eq,
-    lindblad_eq_vec,
+    lindblad_eq_vectorized,
     QuEvo,
 )
 
@@ -150,13 +151,13 @@ class TestSchrodingerEqDop:
 class TestSchrodingerEqDopVec:
     def test_dop_1darray(self, rho_dot):
         rho, ham, rhod = rho_dot
-        foo = schrodinger_eq_dop_vec(ham)
+        foo = schrodinger_eq_dop_vectorized(ham)
         rhod2 = foo(None, rho.A.reshape(-1)).reshape(3, 3)
         assert_allclose(rhod, rhod2)
 
     def test_dop_1darray_sparse(self, srho_dot):
         rho, ham, rhod = srho_dot
-        foo = schrodinger_eq_dop_vec(ham)
+        foo = schrodinger_eq_dop_vectorized(ham)
         rhod2 = foo(None, rho.A.reshape(-1)).reshape(3, 3)
         assert_allclose(rhod, rhod2, atol=1e-12)
 
@@ -190,13 +191,13 @@ class TestLindbladEq:
 class TestLindbladEqVec:
     def test_1darray(self, rho_dot_ls):
         rho, ham, gamma, ls, rhod = rho_dot_ls
-        foo = lindblad_eq_vec(ham, ls, gamma)
+        foo = lindblad_eq_vectorized(ham, ls, gamma)
         rhod2 = foo(None, rho.A.reshape(-1)).reshape(3, 3)
         assert_allclose(rhod, rhod2)
 
     def test_1darray_sparse(self, srho_dot_ls):
         rho, ham, gamma, ls, rhod = srho_dot_ls
-        foo = lindblad_eq_vec(ham, ls, gamma)
+        foo = lindblad_eq_vectorized(ham, ls, gamma)
         rhod2 = foo(None, rho.A.reshape(-1)).reshape(3, 3)
         assert_allclose(rhod, rhod2)
 
@@ -238,12 +239,12 @@ class TestQuEvo:
         if presolve:
             l, v = eigsys(ham)
             sim = QuEvo(p0, (l, v))
-            assert sim.solved
+            assert sim._solved
         else:
             sim = QuEvo(p0, ham, solve=True)
         sim.update_to(tm)
         assert_allclose(sim.pt, pm)
-        assert overlap(sim.pt, p0) < 1.0
+        assert expec(sim.pt, p0) < 1.0
         sim.update_to(trc)
         assert_allclose(sim.pt, p0)
         assert isinstance(sim.pt, np.matrix)
@@ -261,7 +262,7 @@ class TestQuEvo:
         sim = QuEvo(p0, ham, solve=solve)
         sim.update_to(tm)
         assert_allclose(sim.pt, pm, rtol=1e-4)
-        assert overlap(sim.pt, p0) < 1.0
+        assert expec(sim.pt, p0) < 1.0
         sim.update_to(trc)
         assert_allclose(sim.pt, p0, rtol=1e-4)
         assert isinstance(sim.pt, np.matrix)
@@ -274,5 +275,77 @@ class TestQuEvo:
         ts = np.linspace(0, 10)
         for t, pt in zip(ts, sim.at_times(ts)):
             x = cos(4 * t)
-            y = overlap(pt, eyepad(sig('z'), [2, 2], 0))
+            y = expec(pt, eyepad(sig('z'), [2, 2], 0))
             assert_allclose(x, y, atol=1e-15)
+
+    @mark.parametrize("qtype", ['ket', 'dop'])
+    @mark.parametrize("solve", [True, False])
+    def test_quevo_compute_callback(self, qtype, solve):
+        ham = ham_heis(2, cyclic=False)
+        p0 = qu(up() & down(), qtype=qtype)
+
+        def some_quantity(t, pt):
+            return t, logneg(pt)
+
+        evo = QuEvo(p0, ham, solve=solve, compute=some_quantity)
+        manual_lns = []
+        for pt in evo.at_times(np.linspace(0, 1, 6)):
+            manual_lns.append(logneg(pt))
+        ts, lns = zip(*evo.results)
+        assert len(lns) >= len(manual_lns)
+        # check a specific value of logneg at t=0.8 was computed automatically
+        checked = False
+        for t, ln in zip(ts, lns):
+            if abs(t - 0.8) < 1e-12:
+                assert abs(ln - manual_lns[4]) < 1e-12
+                checked = True
+        assert checked
+
+    @mark.parametrize("qtype", ['ket', 'dop'])
+    @mark.parametrize("solve", [True, False])
+    def test_quevo_multi_compute(self, solve, qtype):
+
+        ham = ham_heis(2, cyclic=False)
+        p0 = qu(up() & down(), qtype=qtype)
+
+        def some_quantity(t, _):
+            return t
+
+        def some_other_quantity(_, pt):
+            return logneg(pt)
+
+        evo = QuEvo(p0, ham, solve=solve,
+                    compute={'t': some_quantity,
+                             'logneg': some_other_quantity})
+        manual_lns = []
+        for pt in evo.at_times(np.linspace(0, 1, 6)):
+            manual_lns.append(logneg(pt))
+        ts = evo.results['t']
+        lns = evo.results['logneg']
+        assert len(lns) >= len(manual_lns)
+        # check a specific value of logneg at t=0.8 was computed automatically
+        checked = False
+        for t, ln in zip(ts, lns):
+            if abs(t - 0.8) < 1e-12:
+                assert abs(ln - manual_lns[4]) < 1e-12
+                checked = True
+        assert checked
+
+    def test_progbar_update_to_integrate(self, capsys):
+        ham = ham_heis(2, cyclic=False)
+        p0 = up() & down()
+        sim = QuEvo(p0, ham, solve=False, progbar=True)
+        sim.update_to(100)
+        # check something as been printed
+        _, err = capsys.readouterr()
+        assert err and "%" in err
+
+    def test_progbar_at_times_solve(self, capsys):
+        ham = ham_heis(2, cyclic=False)
+        p0 = up() & down()
+        sim = QuEvo(p0, ham, solve=True, progbar=True)
+        for _ in sim.at_times(np.linspace(0, 100, 11)):
+            pass
+        # check something as been printed
+        _, err = capsys.readouterr()
+        assert err and "%" in err

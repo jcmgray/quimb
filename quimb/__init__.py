@@ -22,8 +22,6 @@ from .accel import (
     rdmul,
     outer,
     explt,
-    kron,
-    kronpow,
 )
 
 # Core functions
@@ -43,19 +41,23 @@ from .core import (
     speye,
     dim_map,
     dim_compress,
+    kron,
+    kronpow,
     eyepad,
-    perm_pad,
+    perm_eyepad,
     permute,
     itrace,
     partial_trace,
+    expectation,
+    expec,
     overlap,
     nmlz,
     tr,
     ptr,
 )
 
-# Solving functions
-from .solve.base_solver import (
+# Linear algebra functions
+from .linalg.base_linalg import (
     eigsys,
     eigvals,
     eigvecs,
@@ -71,10 +73,14 @@ from .solve.base_solver import (
     svd,
     svds,
     norm,
+    expm,
+    sqrtm,
+    expm_multiply,
 )
 
 # Generating objects
 from .gen.operators import (
+    spin_operator,
     sig,
     controlled,
     ham_heis,
@@ -120,12 +126,11 @@ from .gen.rand import (
     rand_product_state,
     rand_matrix_product_state,
     rand_mps,
+    rand_seperable,
 )
 
 # Functions for calculating properties
 from .calc import (
-    expm,
-    sqrtm,
     fidelity,
     purify,
     entropy,
@@ -147,6 +152,7 @@ from .calc import (
     ent_cross_matrix,
     qid,
     is_degenerate,
+    is_eigenvector,
     page_entropy,
 )
 
@@ -171,8 +177,6 @@ __all__ = [
     'rdmul',
     'outer',
     'explt',
-    'kron',
-    'kronpow',
     # Core ------------------------------------------------------------------ #
     'normalize',
     'chop',
@@ -189,16 +193,20 @@ __all__ = [
     'speye',
     'dim_map',
     'dim_compress',
+    'kron',
+    'kronpow',
     'eyepad',
-    'perm_pad',
+    'perm_eyepad',
     'permute',
     'itrace',
     'partial_trace',
+    'expectation',
+    'expec',
     'overlap',
     'nmlz',
     'tr',
     'ptr',
-    # Solve ----------------------------------------------------------------- #
+    # Linalg ---------------------------------------------------------------- #
     'eigsys',
     'eigvals',
     'eigvecs',
@@ -215,6 +223,7 @@ __all__ = [
     'svds',
     'norm',
     # Gen ------------------------------------------------------------------- #
+    'spin_operator',
     'sig',
     'controlled',
     'ham_heis',
@@ -256,9 +265,11 @@ __all__ = [
     'rand_product_state',
     'rand_matrix_product_state',
     'rand_mps',
+    'rand_seperable',
     # Calc ------------------------------------------------------------------ #
     'expm',
     'sqrtm',
+    'expm_multiply',
     'fidelity',
     'purify',
     'entropy',
@@ -280,6 +291,7 @@ __all__ = [
     'ent_cross_matrix',
     'qid',
     'is_degenerate',
+    'is_eigenvector',
     'page_entropy',
     # Evo ------------------------------------------------------------------- #
     'QuEvo',

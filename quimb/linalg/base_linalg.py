@@ -1,84 +1,137 @@
-"""Functions for solving matrices either fully or partially.
-Note that the eigendecompositions here all assume a
-hermitian matrix and sort the eigenvalues in ascending
-algebraic order by default.
+"""Backend agnostic functions for solving matrices either fully or partially.
 """
 
 # TODO: restart eigen and svd - up to tol
 # TODO: test non-herm
-# TODO: elemental?
-# TODO: fix slepc svds instability
 
+import functools
 import numpy as np
 import numpy.linalg as nla
+import scipy.linalg as sla
+import scipy.sparse.linalg as spla
 
-from ..accel import issparse, vdot
-from .numpy_solver import numpy_seigsys, numpy_svds
-from .scipy_solver import scipy_seigsys, scipy_svds
+from ..utils import raise_cant_find_library_function
+from ..accel import issparse, vdot, dot_dense, ldmul
+from .numpy_linalg import (
+    eigsys_numpy,
+    eigvals_numpy,
+    seigsys_numpy,
+    numpy_svds,
+)
+from .scipy_linalg import seigsys_scipy, scipy_svds
 from . import SLEPC4PY_FOUND
+
 if SLEPC4PY_FOUND:
-    from .mpi_spawner import slepc_mpi_seigsys
-    from .slepc_solver import slepc_svds
+    from .mpi_spawner import seigsys_slepc_spawn, mfn_multiply_slepc_spawn
+    from .slepc_linalg import slepc_svds
+else:
+    seigsys_slepc_spawn = raise_cant_find_library_function("slepc4py")
+    slepc_svds = raise_cant_find_library_function("slepc4py")
+    mfn_multiply_slepc_spawn = raise_cant_find_library_function("slepc4py")
 
 
 # --------------------------------------------------------------------------- #
 #                        Full eigendecomposition                              #
 # --------------------------------------------------------------------------- #
 
-def eigsys(a, sort=True, isherm=True):
-    """Find all eigenpairs of dense, hermitian matrix.
+_EIGSYS_METHODS = {
+    'NUMPY': eigsys_numpy,
+}
+
+
+def eigsys(a, sort=True, isherm=True, backend='NUMPY', **kwargs):
+    """Find all eigenpairs of a dense matrix.
 
     Parameters
     ----------
-        a: hermitian matrix
-        sort: whether to sort the eigenpairs in ascending eigenvalue order
+        a : matrix-like
+            The matrix of decompose.
+        sort : bool, optional
+            Whether to sort the eigenpairs in ascending eigenvalue order.
+        isherm : bool, optional
+            Whether the matrix is assumed to be hermitian or not.
+        backend : {'numpy'}, optional
+            Which backend to use to solve the system.
+        **kwargs
+            Supplied to the backend function.
 
     Returns
     -------
-        evals: array of eigenvalues
-        evecs: corresponding eigenvectors as columns of matrix
+        evals : 1d-array
+            Eigenvalues.
+        evecs : np.matrix
+            Corresponding eigenvectors as columns of matrix, such that
+            ``evecs @ evals @ evecs.H == a``.
     """
-    evals, evecs = nla.eigh(a) if isherm else nla.eig(a)
-    if sort:
-        sortinds = np.argsort(evals)
-        return evals[sortinds], np.asmatrix(evecs[:, sortinds])
-    return evals, np.asmatrix(evecs)
+    fn = _EIGSYS_METHODS[backend.upper()]
+    return fn(a, sort=sort, isherm=isherm, **kwargs)
 
 
-def eigvals(a, sort=True, isherm=True):
-    """Find all eigenvalues of dense, hermitian matrix
+_EIGVALS_METHODS = {
+    'NUMPY': eigvals_numpy,
+}
+
+
+def eigvals(a, sort=True, isherm=True, backend='numpy', **kwargs):
+    """Find all eigenvalues of dense matrix.
 
     Parameters
     ----------
-        a: hermitian matrix
-        sort: whether to sort the eigenvalues in ascending order
+        a : matrix-like
+            The matrix to find eigenvalues of.
+        sort : bool, optional
+            Whether to sort the eigenvalues in ascending order.
+        isherm : bool, optional
+            Whether the matrix is assumed to be hermitian or not.
+        backend : {'numpy'}, optional
+            Which backend to use to solve the system.
+        **kwargs
+            Supplied to the backend function.
 
     Returns
     -------
-        evals: array of eigenvalues
+        evals : 1d-array
+            Eigenvalues.
     """
-    evals = nla.eigvalsh(a) if isherm else nla.eigvals(a)
-    return np.sort(evals) if sort else evals
+    fn = _EIGVALS_METHODS[backend.upper()]
+    return fn(a, sort=sort, isherm=isherm, **kwargs)
 
 
-def eigvecs(a, sort=True, isherm=True):
-    """Find all eigenvectors of dense, hermitian matrix
+def eigvecs(a, sort=True, isherm=True, backend='numpy', **kwargs):
+    """Find all eigenvectors of a dense matrix.
 
     Parameters
     ----------
-        a: hermitian matrix
-        sort: whether to sort the eigenvectors in ascending eigenvalue order
+        a : matrix-like
+            The matrix of decompose.
+        sort : bool, optional
+            Whether to sort the eigenpairs in ascending eigenvalue order.
+        isherm : bool, optional
+            Whether the matrix is assumed to be hermitian or not.
+        backend : {'numpy'}, optional
+            Which backend to use to solve the system.
+        **kwargs
+            Supplied to the backend function.
 
     Returns
     -------
-        evecs: eigenvectors as columns of matrix
+        evecs : np.matrix
+            Eigenvectors as columns of matrix.
     """
-    return eigsys(a, sort=sort, isherm=isherm)[1]
+    return eigsys(a, sort=sort, isherm=isherm, backend=backend, **kwargs)[1]
 
 
 # --------------------------------------------------------------------------- #
 #                          Partial eigendecomposition                         #
 # --------------------------------------------------------------------------- #
+
+
+_SEIGSYS_METHODS = {
+    'NUMPY': seigsys_numpy,
+    'DENSE': seigsys_numpy,
+    'SCIPY': seigsys_scipy,
+    'SLEPC': seigsys_slepc_spawn,
+}
 
 
 def _choose_backend(a, k, int_eps=False):
@@ -117,15 +170,13 @@ def seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
         'isherm': isherm,
         'ncv': ncv,
         'sort': sort}
+
     # Choose backend to perform the decompostion
     bkd = backend.upper()
     if bkd == 'AUTO':
         bkd = _choose_backend(a, k, sigma is not None)
-    seig_func = (slepc_mpi_seigsys if bkd == 'SLEPC' else
-                 numpy_seigsys if bkd in {'NUMPY', 'DENSE'} else
-                 scipy_seigsys if bkd == 'SCIPY' else
-                 None)
-    return seig_func(a, **settings, **kwargs)
+
+    return _SEIGSYS_METHODS[bkd](a, **settings, **kwargs)
 
 
 def seigvals(a, k=6, **kwargs):
@@ -190,7 +241,7 @@ def _rel_window_to_abs_window(el_min, el_max, w_0, w_sz=None):
 
 
 def eigsys_window(a, w_0, w_n=6, w_sz=None, backend='AUTO',
-                  return_vecs=True, offset_const=1 / 7000, **kwargs):
+                  return_vecs=True, offset_const=1 / 104729, **kwargs):
     """ Return eigenpairs internally from a hermitian matrix.
 
     Parameters
@@ -335,3 +386,85 @@ def norm(a, ntype=2, **kwargs):
                ('f', 0): norm_fro_dense,
                ('f', 1): norm_fro_sparse}
     return methods[(types[ntype], issparse(a))](a, **kwargs)
+
+
+# --------------------------------------------------------------------------- #
+#                               Matrix functions                              #
+# --------------------------------------------------------------------------- #
+
+def expm(a, herm=False):
+    """Matrix exponential, can be accelerated if explicitly hermitian.
+
+    Parameters
+    ----------
+    a : dense or sparse matrix
+        Matrix to exponentiate.
+    herm : bool, optional
+        If True (not default), and ``a`` is dense, digonalize the matrix
+        in order to perform the exponential.
+
+    Returns
+    -------
+    matrix
+    """
+    if issparse(a):
+        # convert to and from csc to suppress scipy warning
+        return spla.expm(a.tocsc()).tocsr()
+    elif not herm:
+        return np.asmatrix(spla.expm(a))
+    else:
+        evals, evecs = eigsys(a)
+        return dot_dense(evecs, ldmul(np.exp(evals), evecs.H))
+
+
+_EXPM_MULTIPLY_METHODS = {
+    'SCIPY': spla.expm_multiply,
+    'SLEPC': functools.partial(mfn_multiply_slepc_spawn, fntype='exp'),
+}
+
+
+def expm_multiply(mat, vec, backend="AUTO", **kwargs):
+    """Compute the action of ``expm(mat)`` on ``vec``.
+
+    Parameters
+    ----------
+    mat : matrix-like
+        Matrix to exponentiate.
+    vec : vector-like
+        Vector to act with exponential of matrix on.
+    backend : {'AUTO', 'SCIPY', 'SLEPC'}, optional
+        Which backend to use.
+    kwargs
+        Supplied to backend function.
+
+    Returns
+    -------
+    vector
+        Result of ``expm(mat) @ vec``.
+    """
+    return _EXPM_MULTIPLY_METHODS[backend.upper()](mat, vec, **kwargs)
+
+
+def sqrtm(a, herm=True):
+    """Matrix square root, can be accelerated if explicitly hermitian.
+
+    Parameters
+    ----------
+    a : dense or sparse matrix
+        Matrix to take square root of.
+    herm : bool, optional
+        If True (the default), and ``a`` is dense, digonalize the matrix
+        in order to take the square root.
+
+    Returns
+    -------
+    matrix
+    """
+    if issparse(a):
+        raise NotImplementedError("No sparse sqrtm available.")
+    elif not herm:
+        return np.asmatrix(sla.sqrtm(a))
+    else:
+        evals, evecs = eigsys(a)
+        return dot_dense(evecs, ldmul(np.sqrt(evals.astype(complex)),
+                                      evecs.H))
