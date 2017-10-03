@@ -143,23 +143,23 @@ def lazy_ptr_dot(psi_ab, psi_a, dims=None, sysa=0, out=None):
     r"""Perform the 'lazy' evalution of ``ptr(psi_ab, ...) @ psi_a``,
     that is, contract the tensor diagram in an efficient way that does not
     necessarily construct the explicit reduced density matrix. In tensor
-    diagram notation:
-    ``
-      ( | )
-    +-------+
-    | psi_a |   ______
-    +_______+  /      \
-       a|      |b     |
-    +-------------+   |
-    |  psi_ab.H   |   |
-    +_____________+   |
-                      |
-    +-------------+   |
-    |   psi_ab    |   |
-    +_____________+   |
-       a|      |b     |
-        |      \______/
-    ``
+    diagram notation::
+
+          ( | )
+        +-------+
+        | psi_a |   ______
+        +_______+  /      \
+           a|      |b     |
+        +-------------+   |
+        |  psi_ab.H   |   |
+        +_____________+   |
+                          |
+        +-------------+   |
+        |   psi_ab    |   |
+        +_____________+   |
+           a|      |b     |
+            |      \______/
+
 
     Parameters
     ----------
@@ -375,24 +375,24 @@ def lazy_ptr_ppt_dot(psi_abc, psi_ab, dims, sysa, sysb, out=None):
     tensor diagram in an efficient way that does not necessarily construct
     the explicit reduced density matrix. For a tripartite system, the partial
     trace is with respect to ``c``, while the partial tranpose is with
-    respect to ``a/b``. In tensor diagram notation:
-    ``
-         ( | )
-    +--------------+
-    |   psi_ab     |
-    +______________+  _____
-     a|  ____   b|   /     \
-      | /   a\   |   |c    |
-      | | +-------------+  |
-      | | |  psi_abc.H  |  |
-      \ / +-------------+  |
-       X                   |
-      / \ +-------------+  |
-      | | |   psi_abc   |  |
-      | | +-------------+  |
-      | \____/a  |b  |c    |
-     a|          |   \_____/
-    ``
+    respect to ``a/b``. In tensor diagram notation::
+
+             ( | )
+        +--------------+
+        |   psi_ab     |
+        +______________+  _____
+         a|  ____   b|   /     \
+          | /   a\   |   |c    |
+          | | +-------------+  |
+          | | |  psi_abc.H  |  |
+          \ / +-------------+  |
+           X                   |
+          / \ +-------------+  |
+          | | |   psi_abc   |  |
+          | | +-------------+  |
+          | \____/a  |b  |c    |
+         a|          |   \_____/
+
 
     Parameters
     ----------
@@ -533,6 +533,8 @@ def construct_lanczos_tridiag(A, K=K_DEFAULT, v0=None, bsz=BSZ_DEFAULT):
         The starting vector to iterate with, default to random.
     K : int, optional
         The number of iterations and thus rank of the matrix to find.
+    bsz : int, optional
+        The block size (number of columns) of random vectors to iterate with.
 
     Returns
     -------
@@ -623,6 +625,11 @@ def approx_spectral_function(A, fn,
         The number of repeats with different initial random vectors to perform.
         Increasing this should increase accuracy as ``sqrt(R)``. Cost of
         algorithm thus scales linearly with ``R``.
+    bsz : int, optional
+        Number of simultenous vector columns to use at once, 1 equating to the
+        standard lanczos method. If ``bsz > 1`` then ``A`` must implement
+        matrix-matrix multiplication. This is a more performant way of
+        essentially increasing ``R``, at the cost of more memory.
     v0 : vector, or callable
         Initial vector to iterate with, sets ``R=1`` if given. If callable, the
         function to produce a random intial vector (sequence).
@@ -663,11 +670,28 @@ def approx_spectral_function(A, fn,
     return sum(gen_vals()) / R  # take average over repeats
 
 
-tr_abs_approx = functools.partial(approx_spectral_function, fn=abs)
-tr_exp_approx = functools.partial(approx_spectral_function, fn=exp)
-tr_sqrt_approx = functools.partial(approx_spectral_function, fn=sqrt, pos=True)
-tr_xlogx_approx = functools.partial(
-    approx_spectral_function, fn=lambda x: x * log2(x) if x > 0 else 0.0)
+@functools.wraps(approx_spectral_function)
+def tr_abs_approx(*args, **kwargs):
+    return approx_spectral_function(*args, fn=abs, **kwargs)
+
+
+@functools.wraps(approx_spectral_function)
+def tr_exp_approx(*args, **kwargs):
+    return approx_spectral_function(*args, fn=exp, **kwargs)
+
+
+@functools.wraps(approx_spectral_function)
+def tr_sqrt_approx(*args, **kwargs):
+    return approx_spectral_function(*args, fn=sqrt, pos=True, **kwargs)
+
+
+def xlogx(x):
+    return x * log2(x) if x > 0 else 0.0
+
+
+@functools.wraps(approx_spectral_function)
+def tr_xlogx_approx(*args, **kwargs):
+    return approx_spectral_function(*args, fn=xlogx, **kwargs)
 
 
 # --------------------------------------------------------------------------- #
@@ -676,6 +700,9 @@ tr_xlogx_approx = functools.partial(
 
 def entropy_subsys_approx(psi_ab, dims, sysa, **kwargs):
     """Approximate the (Von Neumann) entropy of a pure state's subsystem.
+
+    Parameters
+    ----------
     psi_ab : ket
         Bipartite state to partially trace and find entopy of.
     dims : sequence of int, optional
@@ -683,14 +710,13 @@ def entropy_subsys_approx(psi_ab, dims, sysa, **kwargs):
     sysa : int or sequence of int, optional
         Index(es) of the 'a' subsystem(s) to keep.
     K : int, optional
-        The size of the tri-diagonal lanczos matrix to form. Cost of algorithm
-        scales linearly with ``K``.
+        See :py:func:`approx_spectral_function`.
     R : int, optional
-        The number of repeats with different initial random vectors to perform.
-        Increasing this should increase accuracy as ``sqrt(R)``. Cost of
-        algorithm thus scales linearly with ``R``.
+        See :py:func:`approx_spectral_function`.
+    bsz : int, optional
+        See :py:func:`approx_spectral_function`.
     v0 :
-        Initial vector to iterate with, sets ``R=1`` if given.
+        See :py:func:`approx_spectral_function`.
     """
     lo = LazyPtrOperator(psi_ab, dims=dims, sysa=sysa)
     return - tr_xlogx_approx(lo, **kwargs)
@@ -720,14 +746,13 @@ def logneg_subsys_approx(*args, **kwargs):
         Index(es) of the 'b' subsystem(s) to keep, with respect to all
         the dimensions, ``dims``, (i.e. pre-partial trace).
     K : int, optional
-        The size of the tri-diagonal lanczos matrix to form. Cost of algorithm
-        scales linearly with ``K``.
+        See :py:func:`approx_spectral_function`.
     R : int, optional
-        The number of repeats with different initial random vectors to perform.
-        Increasing this should increase accuracy as ``sqrt(R)``. Cost of
-        algorithm thus scales linearly with ``R``.
+        See :py:func:`approx_spectral_function`.
+    bsz : int, optional
+        See :py:func:`approx_spectral_function`.
     v0 :
-        Initial vector to iterate with, sets ``R=1`` if given.
+        See :py:func:`approx_spectral_function`.
     """
     return max(log2(norm_ppt_subsys_approx(*args, **kwargs)), 0.0)
 
@@ -749,13 +774,12 @@ def negativity_subsys_approx(*args, **kwargs):
         Index(es) of the 'b' subsystem(s) to keep, with respect to all
         the dimensions, ``dims``, (i.e. pre-partial trace).
     K : int, optional
-        The size of the tri-diagonal lanczos matrix to form. Cost of algorithm
-        scales linearly with ``K``.
+        See :py:func:`approx_spectral_function`.
     R : int, optional
-        The number of repeats with different initial random vectors to perform.
-        Increasing this should increase accuracy as ``sqrt(R)``. Cost of
-        algorithm thus scales linearly with ``R``.
+        See :py:func:`approx_spectral_function`.
+    bsz : int, optional
+        See :py:func:`approx_spectral_function`.
     v0 :
-        Initial vector to iterate with, sets ``R=1`` if given.
+        See :py:func:`approx_spectral_function`.
     """
     return max((norm_ppt_subsys_approx(*args, **kwargs) - 1) / 2, 0.0)

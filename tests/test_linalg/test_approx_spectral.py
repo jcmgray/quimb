@@ -16,7 +16,7 @@ from quimb import (
     entropy,
 )
 
-from quimb.linalg.approx_linalg import (
+from quimb.linalg.approx_spectral import (
     get_cntrct_inds_ptr_dot,
     lazy_ptr_dot,
     get_cntrct_inds_ptr_ppt_dot,

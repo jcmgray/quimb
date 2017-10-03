@@ -178,7 +178,7 @@ def quimbify(data, qtype=None, normalized=False, chopped=False,
 
 
 qu = quimbify
-"""Alias of quimbify."""
+"""Alias of :func:`quimbify`."""
 
 ket = functools.partial(quimbify, qtype='ket')
 """Convert an object into a ket."""
@@ -298,7 +298,10 @@ def identity(d, sparse=False, stype="csr"):
 
 
 eye = identity
+"""Alias for :func:`identity`."""
+
 speye = functools.partial(identity, sparse=True)
+"""Sparse identity."""
 
 
 def kron(*ops, stype=None, coo_build=False, parallel=False):
@@ -1081,6 +1084,8 @@ def expectation(a, b):
 
 
 expec = expectation
+"""Alias for :func:`expectation`."""
+
 overlap = deprecated(expectation, "'overlap'", "'expectation' or 'expec'")
 
 
@@ -1090,11 +1095,15 @@ overlap = deprecated(expectation, "'overlap'", "'expectation' or 'expec'")
 
 # Normalise methods
 nmlz = normalize
+"""Alias for :func:`normalize`."""
+
 np.matrix.nmlz = nmlz
 sp.csr_matrix.nmlz = nmlz
 
 # Trace methods
 tr = trace
+"""Alias for :func:`trace`."""
+
 np.matrix.tr = _trace_dense
 sp.csr_matrix.tr = _trace_sparse
 sp.csc_matrix.tr = _trace_sparse
@@ -1103,6 +1112,8 @@ sp.bsr_matrix.tr = _trace_sparse
 
 # Partial trace methods
 ptr = partial_trace
+"""Alias for :func:`partial_trace`."""
+
 np.matrix.ptr = _partial_trace_dense
 sp.csr_matrix.ptr = _partial_trace_simple
 sp.csc_matrix.ptr = _partial_trace_simple

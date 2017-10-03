@@ -17,16 +17,10 @@ Modules
     quimb.evo
     quimb.utils
 
-.. autosummary::
-    :toctree: _autosummary
-
     quimb.gen
     quimb.gen.states
     quimb.gen.operators
     quimb.gen.rand
-
-.. autosummary::
-    :toctree: _autosummary
 
     quimb.linalg
     quimb.linalg.base_linalg
@@ -34,18 +28,21 @@ Modules
     quimb.linalg.scipy_linalg
     quimb.linalg.slepc_linalg
     quimb.linalg.mpi_spawner
+    quimb.linalg.approx_spectral
 
 
 Functions
 =========
 
-Accel
+accel
 -----
 
 .. currentmodule:: quimb.accel
 .. autosummary::
     :toctree: _autosummary
 
+    get_thread_pool
+    par_reduce
     prod
     make_immutable
     matrixify
@@ -84,7 +81,7 @@ Accel
     kron_dispatch
 
 
-Core
+core
 ----
 
 .. currentmodule:: quimb.core
@@ -122,15 +119,12 @@ Core
     infer_size
 
 
-Calc
+calc
 ----
 .. currentmodule:: quimb.calc
 .. autosummary::
     :toctree: _autosummary
 
-    expm
-    expm_multiply
-    sqrtm
     fidelity
     purify
     entropy
@@ -150,9 +144,10 @@ Calc
     pauli_correlations
     ent_cross_matrix
     is_degenerate
+    is_eigenvector
     page_entropy
 
-Gen.states
+gen.states
 ----------
 
 .. currentmodule:: quimb.gen.states
@@ -183,7 +178,7 @@ Gen.states
     perm_state
     graph_state_1d
 
-Gen.operators
+gen.operators
 -------------
 
 .. currentmodule:: quimb.gen.operators
@@ -201,7 +196,27 @@ Gen.operators
     zspin_projector
     swap
 
-Evo
+gen.rand
+--------
+
+.. currentmodule:: quimb.gen.rand
+.. autosummary::
+    :toctree: _autosummary
+
+    rand_matrix
+    rand_herm
+    rand_pos
+    rand_rho
+    rand_ket
+    rand_uni
+    rand_haar_state
+    gen_rand_haar_states
+    rand_mix
+    rand_product_state
+    rand_matrix_product_state
+    rand_seperable
+
+evo
 ---
 
 .. currentmodule:: quimb.evo
@@ -214,3 +229,126 @@ Evo
     schrodinger_eq_dop_vectorized
     lindblad_eq
     lindblad_eq_vectorized
+
+
+linalg
+------
+
+.. currentmodule:: quimb.linalg.base_linalg
+.. autosummary::
+    :toctree: _autosummary
+
+    eigsys
+    eigvals
+    eigvecs
+    seigsys
+    seigvals
+    seigvecs
+    groundstate
+    groundenergy
+    bound_spectrum
+    eigsys_window
+    eigvals_window
+    eigvecs_window
+    svd
+    svds
+    norm_2
+    norm_fro_dense
+    norm_fro_sparse
+    norm_trace_dense
+    norm
+    expm
+    expm_multiply
+    sqrtm
+
+Specialised Linalg
+------------------
+
+.. currentmodule:: quimb.linalg.numpy_linalg
+.. autosummary::
+    :toctree: _autosummary
+
+    eigsys_numpy
+    eigvals_numpy
+    sort_inds
+    seigsys_numpy
+    numpy_svds
+
+.. currentmodule:: quimb.linalg.scipy_linalg
+.. autosummary::
+    :toctree: _autosummary
+
+    choose_ncv
+    seigsys_scipy
+    scipy_svds
+
+
+.. currentmodule:: quimb.linalg.slepc_linalg
+.. autosummary::
+    :toctree: _autosummary
+
+    get_default_comm
+    init_petsc_and_slepc
+    get_petsc
+    get_slepc
+    slice_sparse_matrix_to_components
+    convert_mat_to_petsc
+    convert_vec_to_petsc
+    new_petsc_vec
+    gather_petsc_array
+    slepc_seigsys
+    slepc_svds
+    slepc_mfn_multiply
+
+MPI stuff
+---------
+
+.. currentmodule:: quimb.linalg.mpi_spawner
+.. autosummary::
+    :toctree: _autosummary
+
+    CachedPoolWithShutdown
+    GetMPIBeforeCall
+    SpawnMPIProcessesFunc
+    seigsys_slepc_mpi
+    seigsys_slepc_spawn
+    svds_slepc_mpi
+    svds_slepc_spawn
+    mfn_multiply_slepc_mpi
+    mfn_multiply_slepc_spawn
+
+
+Approximate spectral linear algebra
+-----------------------------------
+
+.. currentmodule:: quimb.linalg.approx_spectral
+.. autosummary::
+    :toctree: _autosummary
+
+    HuskArray
+    LazyPtrOperator
+    LazyPtrPptOperator
+    get_cntrct_inds_ptr_dot
+    prepare_lazy_ptr_dot
+    get_path_lazy_ptr_dot
+    do_lazy_ptr_dot
+    lazy_ptr_dot
+    get_cntrct_inds_ptr_ppt_dot
+    prepare_lazy_ptr_ppt_dot
+    get_path_lazy_ptr_ppt_dot
+    do_lazy_ptr_ppt_dot
+    lazy_ptr_ppt_dot
+    inner
+    norm_fro
+    construct_lanczos_tridiag
+    lanczos_tridiag_eig
+    calc_trace_fn_tridiag
+    approx_spectral_function
+    tr_abs_approx
+    tr_exp_approx
+    tr_sqrt_approx
+    tr_xlogx_approx
+    entropy_subsys_approx
+    norm_ppt_subsys_approx
+    logneg_subsys_approx
+    negativity_subsys_approx
