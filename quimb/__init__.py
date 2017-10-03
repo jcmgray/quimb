@@ -159,6 +159,17 @@ from .calc import (
 # Evolution class and methods
 from .evo import QuEvo
 
+from .linalg.approx_spectral import (
+    approx_spectral_function,
+    tr_abs_approx,
+    tr_exp_approx,
+    tr_sqrt_approx,
+    tr_xlogx_approx,
+    entropy_subsys_approx,
+    logneg_subsys_approx,
+    negativity_subsys_approx,
+)
+
 
 __all__ = [
     # Accel ----------------------------------------------------------------- #
@@ -295,4 +306,13 @@ __all__ = [
     'page_entropy',
     # Evo ------------------------------------------------------------------- #
     'QuEvo',
+    # Approx spectral ------------------------------------------------------- #
+    'approx_spectral_function',
+    'tr_abs_approx',
+    'tr_exp_approx',
+    'tr_sqrt_approx',
+    'tr_xlogx_approx',
+    'entropy_subsys_approx',
+    'logneg_subsys_approx',
+    'negativity_subsys_approx',
 ]
