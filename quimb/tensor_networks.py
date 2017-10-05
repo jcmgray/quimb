@@ -7,7 +7,28 @@ from operator import or_
 from cytoolz import concat, frequencies, interleave
 import numpy as np
 
-from .linalg.approx_spectral import contract
+try:
+    # opt_einsum is highly recommended as until numpy 1.14 einsum contractions
+    # do not use BLAS.
+    import opt_einsum
+    contract = opt_einsum.contract
+
+    @functools.wraps(opt_einsum.contract_path)
+    def contract_path(*args, optimize='greedy', memory_limit=2**28, **kwargs):
+        return opt_einsum.contract_path(
+            *args, path=optimize, memory_limit=memory_limit, **kwargs)
+
+except ImportError:
+
+    @functools.wraps(np.einsum)
+    def contract(*args, optimize='greedy', memory_limit=2**28, **kwargs):
+        return np.einsum(
+            *args, optimize=(optimize, memory_limit), **kwargs)
+
+    @functools.wraps(np.einsum_path)
+    def contract_path(*args, optimize='greedy', memory_limit=2**28, **kwargs):
+        return np.einsum_path(
+            *args, optimize=(optimize, memory_limit), **kwargs)
 
 
 # --------------------------------------------------------------------------- #

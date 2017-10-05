@@ -11,23 +11,7 @@ from math import sqrt, log2, exp
 import numpy as np
 import scipy.linalg as scla
 import scipy.sparse.linalg as spla
-try:
-    # opt_einsum is highly recommended as until numpy 1.14 einsum contractions
-    # do not use BLAS.
-    import opt_einsum
-    contract = opt_einsum.contract
-
-    def contract_path(*args, optimize='optimal', memory_limit=-1, **kwargs):
-        return opt_einsum.contract_path(
-            *args, path=optimize, memory_limit=memory_limit, **kwargs)
-except ImportError:
-    def contract(*args, optimize='optimal', **kwargs):
-        return np.einsum(
-            *args, optimize=optimize, **kwargs)
-
-    def contract_path(*args, optimize='optimal', memory_limit=-1, **kwargs):
-        return np.einsum_path(
-            *args, optimize=(optimize, memory_limit), **kwargs)
+from ..tensor_networks import contract, contract_path
 from ..accel import prod, vdot
 from ..utils import int2tup
 
