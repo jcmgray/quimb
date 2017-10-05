@@ -375,7 +375,7 @@ class TestLanczosApprox:
     @pytest.mark.parametrize(
         "fn_matrix_rtol",
         [
-            (np.abs, rand_herm, 1e-1),
+            (np.abs, rand_herm, 2e-1),
             (np.sqrt, rand_pos, 2e-1),
             (np.log1p, rand_pos, 3e-1),
             (np.exp, rand_herm, 1e-1),

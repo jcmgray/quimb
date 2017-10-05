@@ -40,8 +40,8 @@ class TestBasicTensorOperations:
                                     operator.__truediv__])
     @pytest.mark.parametrize("mismatch", (True, False))
     def test_tensor_tensor_arithmetic(self, op, mismatch):
-        a = Tensor(np.random.randn(2, 3, 4), inds=[0, 1, 2], tags='blue')
-        b = Tensor(np.random.randn(2, 3, 4), inds=[0, 1, 2], tags='red')
+        a = Tensor(np.random.rand(2, 3, 4), inds=[0, 1, 2], tags='blue')
+        b = Tensor(np.random.rand(2, 3, 4), inds=[0, 1, 2], tags='red')
         if mismatch:
             b.inds = (0, 1, 3)
             with pytest.raises(ValueError):
