@@ -98,6 +98,15 @@ class TestBasicTensorOperations:
         assert d.inds == (4,)
         assert d.tags == {'red', 'blue'}
 
+    def test_contract_with_out_of_range_inds(self):
+        a = Tensor(np.random.randn(2, 3, 4), inds=[-1, 100, 2200],
+                   tags='red')
+        b = Tensor(np.random.randn(3, 4, 5), inds=[100, 2200, -3],
+                   tags='blue')
+        c = a @ b
+        assert c.shape == (5, 2)
+        assert c.inds == (-3, -1)
+
 
 class TestTensorNetworkBasic:
     def test_combining_tensors(self):

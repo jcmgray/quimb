@@ -141,12 +141,10 @@ for meth_name, op in [('__radd__', operator.__add__),
 #                                Tensor Funcs                                 #
 # --------------------------------------------------------------------------- #
 
-def gen_output_inds(inds):
+def _gen_output_inds(all_inds):
     """Generate the output indices from the set ``inds``.
     """
-    freqs = frequencies(concat(inds))
-
-    for ind, freq in freqs.items():
+    for ind, freq in frequencies(all_inds).items():
         if freq > 2:
             raise ValueError("The index {} appears more "
                              "than twice!".format(ind))
@@ -154,22 +152,70 @@ def gen_output_inds(inds):
             yield ind
 
 
-def tensor_contract(*tensors, memory_limit=-1, optimize=True):
-    """Efficiently contract some tensors.
+def _maybe_map_indices_between_52(ai_ix, i_ix, o_ix):
+    """``einsum`` maps indices to the letters a-z,A-Z, thus all integer
+    specifiers need to be between between 0 and 52.
+
+    Parameters
+    ----------
+    ai_ix : list of int
+        All of the input indices.
+    i_ix : list of list of int
+        The input indices per tensor.
+    o_ix : list of int
+        The output indices.
+
+    Returns
+    -------
+    contract_ix : sequence of sequence of int
+        The list of tensor indices supplied to contract.
+    contract_o_ix : sequence of int
+        The list of output indices supplied to contract.
     """
-    i_inds = [t.inds for t in tensors]
-    o_inds = sorted(gen_output_inds(i_inds))
+    if not any(not (0 <= i < 51) for i in ai_ix):
+        return i_ix, o_ix
 
-    o_array = contract(*interleave(((t.array for t in tensors), i_inds)),
-                       o_inds, memory_limit=memory_limit, optimize=optimize)
+    imap = {i: r for r, i in enumerate(set(ai_ix))}
+    contract_ix = ((imap[i] for i in each_inds) for each_inds in i_ix)
+    contract_o_ix = (imap[i] for i in o_ix)
 
-    if not o_inds:
+    return contract_ix, contract_o_ix
+
+
+def tensor_contract(*tensors, memory_limit=2**28, optimize='greedy'):
+    """Efficiently contract multiple tensors, combining their tags.
+
+    Parameters
+    ----------
+    *tensors : sequence of Tensor
+        The tensors to contract.
+    memory_limit : int, optional
+        See :py:func:`contract`.
+    optimize : str, optional
+        See :py:func:`contract`.
+
+    Returns
+    -------
+    scalar or Tensor
+    """
+    i_ix = [t.inds for t in tensors]  # input indices per tensor
+    ai_ix = list(concat(i_ix))  # list of all input indices
+    o_ix = sorted(_gen_output_inds(ai_ix))  # output indices
+
+    # possibly map indices into the 0-52 range needed by einsum
+    c_ix, co_ix = _maybe_map_indices_between_52(ai_ix, i_ix, o_ix)
+
+    # perform the contraction
+    o_array = contract(*interleave(((t.array for t in tensors), c_ix)), co_ix,
+                       memory_limit=memory_limit, optimize=optimize)
+
+    if not o_ix:
         return o_array
 
     # unison of all tags
     o_tags = reduce(or_, (t.tags for t in tensors))
 
-    return Tensor(array=o_array, inds=o_inds, tags=o_tags)
+    return Tensor(array=o_array, inds=o_ix, tags=o_tags)
 
 
 # --------------------------------------------------------------------------- #
