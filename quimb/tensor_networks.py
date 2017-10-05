@@ -22,8 +22,16 @@ except ImportError:
 
     @functools.wraps(np.einsum)
     def contract(*args, optimize='greedy', memory_limit=2**28, **kwargs):
-        return np.einsum(
-            *args, optimize=(optimize, memory_limit), **kwargs)
+
+        explicit_path = (isinstance(optimize, (tuple, list)) and
+                         optimize[0] == 'einsum_path')
+
+        if explicit_path:
+            optimize = optimize
+        else:
+            optimize = (optimize, memory_limit)
+
+        return np.einsum(*args, optimize=optimize, **kwargs)
 
     @functools.wraps(np.einsum_path)
     def contract_path(*args, optimize='greedy', memory_limit=2**28, **kwargs):
