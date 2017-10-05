@@ -4,7 +4,7 @@ from functools import reduce
 import operator
 from operator import or_
 
-from cytoolz import concat, frequencies, interleave
+from cytoolz import concat, frequencies
 import numpy as np
 
 try:
@@ -42,6 +42,12 @@ class Tensor(object):
     def __init__(self, array, inds, tags=None):
         self.array = np.asarray(array)
         self.inds = tuple(inds)
+
+        if self.array.ndim != len(self.inds):
+            raise ValueError(
+                "Wrong number of inds, {}, supplied for array"
+                " of shape {}.".format(self.inds, self.array.shape))
+
         self.tags = (set() if tags is None else
                      {tags} if isinstance(tags, str) else
                      set(tags))
@@ -152,34 +158,38 @@ def _gen_output_inds(all_inds):
             yield ind
 
 
-def _maybe_map_indices_between_52(ai_ix, i_ix, o_ix):
-    """``einsum`` maps indices to the letters a-z,A-Z, thus all integer
-    specifiers need to be between between 0 and 52.
+_einsum_symbols = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
+_einsum_symbols_set = set(_einsum_symbols)
+
+
+def _maybe_map_indices_to_alphabet(ai_ix, i_ix, o_ix):
+    """``einsum`` need characters a-z,A-Z or equivalent numbers,
+    do this early, allowing *any* index labels.
 
     Parameters
     ----------
-    ai_ix : list of int
+    ai_ix : sequence
         All of the input indices.
-    i_ix : list of list of int
+    i_ix : sequence of sequence
         The input indices per tensor.
     o_ix : list of int
         The output indices.
 
     Returns
     -------
-    contract_ix : sequence of sequence of int
-        The list of tensor indices supplied to contract.
-    contract_o_ix : sequence of int
-        The list of output indices supplied to contract.
+    contract_str : str
+        The string to feed to einsum/contract.
     """
-    if not any(not (0 <= i < 51) for i in ai_ix):
-        return i_ix, o_ix
+    if any(i not in _einsum_symbols_set for i in ai_ix):
+        # need to map inds to alphabet
+        amap = {i: lett for i, lett in zip(set(ai_ix), _einsum_symbols)}
+        in_str = map(lambda x: "".join(map(amap.__getitem__, x)), i_ix)
+        out_str = "".join(map(amap.__getitem__, o_ix))
+    else:
+        in_str = map("".join, i_ix)
+        out_str = "".join(o_ix)
 
-    imap = {i: r for r, i in enumerate(set(ai_ix))}
-    contract_ix = ((imap[i] for i in each_inds) for each_inds in i_ix)
-    contract_o_ix = (imap[i] for i in o_ix)
-
-    return contract_ix, contract_o_ix
+    return ",".join(in_str) + "->" + out_str
 
 
 def tensor_contract(*tensors, memory_limit=2**28, optimize='greedy'):
@@ -203,10 +213,10 @@ def tensor_contract(*tensors, memory_limit=2**28, optimize='greedy'):
     o_ix = sorted(_gen_output_inds(ai_ix))  # output indices
 
     # possibly map indices into the 0-52 range needed by einsum
-    c_ix, co_ix = _maybe_map_indices_between_52(ai_ix, i_ix, o_ix)
+    contract_str = _maybe_map_indices_to_alphabet(ai_ix, i_ix, o_ix)
 
     # perform the contraction
-    o_array = contract(*interleave(((t.array for t in tensors), c_ix)), co_ix,
+    o_array = contract(contract_str, *(t.array for t in tensors),
                        memory_limit=memory_limit, optimize=optimize)
 
     if not o_ix:
@@ -239,7 +249,7 @@ class TensorNetwork(object):
             elif isinstance(t, TensorNetwork):
                 self.tensors += t.tensors
 
-    def contract(self, tags=None):
+    def contract(self, tags=...):
         """
         """
         leave, lose = self.filt(tags)
@@ -253,7 +263,7 @@ class TensorNetwork(object):
         """
         """
         # contract all
-        if tags is None:
+        if tags is ...:
             return [], self.tensors
 
         if isinstance(tags, str):
@@ -275,8 +285,10 @@ class TensorNetwork(object):
     def H(self):
         return self.conj()
 
-    def __rshift__(self, tags=None):
-        return self.contract(tags)
+    def __rshift__(self, *args, **kwargs):
+        """ '>>'
+        """
+        return self.contract(*args, **kwargs)
 
     def __and__(self, other):
         """Combine this tensor network with more tensors, without contracting.

@@ -19,6 +19,26 @@ class TestBasicTensorOperations:
         assert_allclose(a.H.array, x.conj())
         assert a.size == 24
 
+        with pytest.raises(ValueError):
+            Tensor(x, inds=[0, 2], tags='blue')
+
+    def test_with_alpha_construct(self):
+        x = np.random.randn(2, 3, 4)
+        a = Tensor(x, inds='ijk', tags='blue')
+        assert_allclose(a.H.array, x.conj())
+        assert a.size == 24
+
+        with pytest.raises(ValueError):
+            Tensor(x, inds='ij', tags='blue')
+
+        x = np.random.randn(2, 3, 4)
+        a = Tensor(x, inds=['a1', 'b2', 'c3'], tags='blue')
+        assert_allclose(a.H.array, x.conj())
+        assert a.size == 24
+
+        with pytest.raises(ValueError):
+            Tensor(x, inds=['ijk'], tags='blue')
+
     def test_arithmetic_scalar(self):
         x = np.random.randn(2, 3, 4)
         a = Tensor(x, inds=[0, 1, 2], tags='blue')
@@ -98,14 +118,32 @@ class TestBasicTensorOperations:
         assert d.inds == (4,)
         assert d.tags == {'red', 'blue'}
 
+    def test_contract_with_legal_characters(self):
+        a = Tensor(np.random.randn(2, 3, 4), inds='abc',
+                   tags='red')
+        b = Tensor(np.random.randn(3, 4, 5), inds='bcd',
+                   tags='blue')
+        c = a @ b
+        assert ((c.shape == (2, 5)) and (c.inds == ('a', 'd')) or
+                (c.shape == (5, 2)) and (c.inds == ('d', 'a')))
+
     def test_contract_with_out_of_range_inds(self):
         a = Tensor(np.random.randn(2, 3, 4), inds=[-1, 100, 2200],
                    tags='red')
         b = Tensor(np.random.randn(3, 4, 5), inds=[100, 2200, -3],
                    tags='blue')
         c = a @ b
-        assert c.shape == (5, 2)
-        assert c.inds == (-3, -1)
+        assert ((c.shape == (2, 5)) and (c.inds == (-1, -3)) or
+                (c.shape == (5, 2)) and (c.inds == (-3, -1)))
+
+    def test_contract_with_wild_mix(self):
+        a = Tensor(np.random.randn(2, 3, 4), inds=[-1, 'a', 'foo'],
+                   tags='red')
+        b = Tensor(np.random.randn(3, 4, 5), inds=['a', 'foo', 42.42],
+                   tags='blue')
+        c = a @ b
+        assert ((c.shape == (2, 5)) and (c.inds == (-1, 42.42)) or
+                (c.shape == (5, 2)) and (c.inds == (42.42, -1)))
 
 
 class TestTensorNetworkBasic:
@@ -141,6 +179,7 @@ class TestTensorNetworkBasic:
 
         a_b_c = a & b & c
         print(a_b_c)
+        repr(a_b_c)
 
         assert isinstance(a_b_c, TensorNetwork)
         a_bc = a_b_c >> 'blue'
