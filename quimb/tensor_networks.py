@@ -218,7 +218,9 @@ def tensor_contract(*tensors, memory_limit=2**28, optimize='greedy'):
     """
     i_ix = [t.inds for t in tensors]  # input indices per tensor
     ai_ix = list(concat(i_ix))  # list of all input indices
-    o_ix = sorted(_gen_output_inds(ai_ix))  # output indices
+
+    # get output indices & sort by input order for efficiency and consistency
+    o_ix = tuple(filter(lambda x: x in set(_gen_output_inds(ai_ix)), ai_ix))
 
     # possibly map indices into the 0-52 range needed by einsum
     contract_str = _maybe_map_indices_to_alphabet(ai_ix, i_ix, o_ix)
@@ -256,6 +258,10 @@ class TensorNetwork(object):
                 self.tensors.append(t)
             elif isinstance(t, TensorNetwork):
                 self.tensors += t.tensors
+            else:
+                raise TypeError("TensorNetwork should be called as "
+                                "``TensorNetwork(*tensors)``, where all "
+                                "arguments are Tensors or TensorNetworks.")
 
     def contract(self, tags=...):
         """

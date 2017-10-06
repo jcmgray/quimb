@@ -96,8 +96,9 @@ class TestBasicTensorOperations:
         a = Tensor(np.random.randn(2, 3, 4), inds=[0, 1, 2])
         b = Tensor(np.random.randn(3, 4, 5), inds=[5, 4, 3])
         c = a @ b
-        assert c.shape == (2, 3, 4, 5, 4, 3)
-        assert c.inds == (0, 1, 2, 3, 4, 5)
+
+        assert c.shape == (2, 3, 4, 3, 4, 5)
+        assert c.inds == (0, 1, 2, 5, 4, 3)
 
     def test_raise_on_triple_inds(self):
         a = Tensor(np.random.randn(2, 3, 4), inds=[0, 1, 2])
@@ -124,8 +125,8 @@ class TestBasicTensorOperations:
         b = Tensor(np.random.randn(3, 4, 5), inds='bcd',
                    tags='blue')
         c = a @ b
-        assert ((c.shape == (2, 5)) and (c.inds == ('a', 'd')) or
-                (c.shape == (5, 2)) and (c.inds == ('d', 'a')))
+        assert c.shape == (2, 5)
+        assert c.inds == ('a', 'd')
 
     def test_contract_with_out_of_range_inds(self):
         a = Tensor(np.random.randn(2, 3, 4), inds=[-1, 100, 2200],
@@ -133,8 +134,8 @@ class TestBasicTensorOperations:
         b = Tensor(np.random.randn(3, 4, 5), inds=[100, 2200, -3],
                    tags='blue')
         c = a @ b
-        assert ((c.shape == (2, 5)) and (c.inds == (-1, -3)) or
-                (c.shape == (5, 2)) and (c.inds == (-3, -1)))
+        assert c.shape == (2, 5)
+        assert c.inds == (-1, -3)
 
     def test_contract_with_wild_mix(self):
         a = Tensor(np.random.randn(2, 3, 4), inds=[-1, 'a', 'foo'],
@@ -142,8 +143,8 @@ class TestBasicTensorOperations:
         b = Tensor(np.random.randn(3, 4, 5), inds=['a', 'foo', 42.42],
                    tags='blue')
         c = a @ b
-        assert ((c.shape == (2, 5)) and (c.inds == (-1, 42.42)) or
-                (c.shape == (5, 2)) and (c.inds == (42.42, -1)))
+        assert c.shape == (2, 5)
+        assert c.inds == (-1, 42.42)
 
 
 class TestTensorNetworkBasic:
@@ -168,6 +169,15 @@ class TestTensorNetworkBasic:
         assert_allclose(abc1.array, abc3.array)
         assert_allclose(abc1.array, abc4.array)
         assert_allclose(abc1.array, abc5.array)
+
+    def test_TensorNetwork_init_checks(self):
+        a = Tensor(np.random.randn(2, 3, 4), inds=[0, 1, 2],
+                   tags='red')
+        b = Tensor(np.random.randn(3, 4, 5), inds=[1, 2, 3],
+                   tags='blue')
+
+        with pytest.raises(TypeError):
+            TensorNetwork((a, b))  # note extra bracket
 
     def test_contracting_tensors(self):
         a = Tensor(np.random.randn(2, 3, 4), inds=[0, 1, 2],
