@@ -146,6 +146,25 @@ class TestBasicTensorOperations:
         assert c.shape == (2, 5)
         assert c.inds == (-1, 42.42)
 
+    def test_fuse(self):
+        a = Tensor(np.random.rand(2, 3, 4, 5), 'abcd', tags={'blue'})
+        b = a.fuse({'bra': ['a', 'c'], 'ket': 'bd'})
+        assert b.shape == (8, 15)
+        assert b.inds == ('bra', 'ket')
+        assert b.tags == {'blue'}
+
+        b = a.fuse({'ket': 'bd', 'bra': 'ac'})
+        assert b.shape == (15, 8)
+        assert b.inds == ('ket', 'bra')
+        assert b.tags == {'blue'}
+
+    def test_fuse_leftover(self):
+        a = Tensor(np.random.rand(2, 3, 4, 5, 2, 2), 'abcdef', tags={'blue'})
+        b = a.fuse({'bra': 'ac', 'ket': 'bd'})
+        assert b.shape == (8, 15, 2, 2)
+        assert b.inds == ('bra', 'ket', 'e', 'f')
+        assert b.tags == {'blue'}
+
 
 class TestTensorNetworkBasic:
     def test_combining_tensors(self):
