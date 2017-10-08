@@ -16,7 +16,6 @@ dependencies:
   - pytest-cov
   - pytest-timeout
   - sphinx_bootstrap_theme
-  - openmpi
   - coveralls
   - codecov
   - pip:

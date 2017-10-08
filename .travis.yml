@@ -36,6 +36,8 @@ before_install:
   - chronic bash deps/travis-install-conda.sh
   - export PATH="$HOME/conda/bin:$PATH"
   - source activate test-environment
+  - export PATH="$HOME/mpi_stuff/openmpi_install/bin:$PATH"
+  - export LD_LIBRARY_PATH="$HOME/mpi_stuff/openmpi_install/lib:$LD_LIBRARY_PATH"
   - chronic bash deps/travis-install-openmpi.sh
   - mpiexec --version
   - mpiexec -np 2 hostname
