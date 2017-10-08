@@ -109,3 +109,5 @@ $RECYCLE.BIN/
 *.lnk
 
 docs/_autosummary/
+
+.fuse_hidden*
