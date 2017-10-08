@@ -4,10 +4,15 @@ import operator
 import numpy as np
 from numpy.testing import assert_allclose
 
+from quimb import ham_heis
+
 from quimb.tensor_networks import (
     Tensor,
     tensor_contract,
     TensorNetwork,
+    matrix_product_state,
+    matrix_product_operator,
+    ham_heis_mpo,
 )
 
 
@@ -211,12 +216,24 @@ class TestTensorNetworkBasic:
         repr(a_b_c)
 
         assert isinstance(a_b_c, TensorNetwork)
-        a_bc = a_b_c >> 'blue'
+        a_bc = a_b_c ^ 'blue'
         assert isinstance(a_bc, TensorNetwork)
         assert len(a_bc.tensors) == 2
-        abc = a_bc >> ['red', 'blue']
+        abc = a_bc ^ ['red', 'blue']
         assert isinstance(abc, Tensor)
         assert_allclose(abc.array, a_b_c.contract().array)
+
+    def test_cumulative_contract(self):
+        a = Tensor(np.random.randn(2, 3, 4), inds=[0, 1, 2],
+                   tags='red')
+        b = Tensor(np.random.randn(3, 4, 5), inds=[1, 2, 3],
+                   tags='blue')
+        c = Tensor(np.random.randn(5, 2, 6), inds=[3, 0, 4],
+                   tags='green')
+
+        d = (a & b & c) >> ['red', 'green', 'blue']
+        assert d.shape == (6,)
+        assert d.inds == (4,)
 
     def test_entanglement_of_mps_state(self):
 
@@ -229,3 +246,38 @@ class TestTensorNetworkBasic:
 
         psi = mps.contract()
         assert psi.shape == (2,) * 10
+
+
+class TestSpecificNetworks:
+
+    def test_matrix_product_state(self):
+        tensors = ([np.random.rand(5, 2)] +
+                   [np.random.rand(5, 5, 2) for _ in range(3)] +
+                   [np.random.rand(5, 2)])
+        mps = matrix_product_state(*tensors)
+        assert len(mps.tensors) == 5
+
+    def test_matrix_product_operator(self):
+        tensors = ([np.random.rand(5, 2, 2)] +
+                   [np.random.rand(5, 5, 2, 2) for _ in range(3)] +
+                   [np.random.rand(5, 2, 2)])
+        mpo = matrix_product_operator(*tensors)
+        assert len(mpo.tensors) == 5
+        op = mpo ^ ...
+        assert op.inds == ('k0', 'b0', 'k1', 'b1', 'k2', 'b2',
+                           'k3', 'b3', 'k4', 'b4')
+
+
+class TestSpecificStatesOperators:
+
+    def test_mpo_site_ham_heis(self):
+        hh_mpo = ham_heis_mpo(5)
+
+        assert hh_mpo.shape == (2,) * 10
+
+        hh_ = (hh_mpo ^ ...).fuse({'k': ['k0', 'k1', 'k2', 'k3', 'k4'],
+                                   'b': ['b0', 'b1', 'b2', 'b3', 'b4']})
+
+        hh = ham_heis(5, cyclic=False) / 4
+
+        assert_allclose(hh, hh_.array)

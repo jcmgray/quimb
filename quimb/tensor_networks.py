@@ -7,7 +7,8 @@ from operator import or_
 from cytoolz import concat, frequencies
 import numpy as np
 
-from .accel import prod
+from .accel import prod, make_immutable
+from .gen.operators import spin_operator, eye
 
 try:
     # opt_einsum is highly recommended as until numpy 1.14 einsum contractions
@@ -110,7 +111,7 @@ class Tensor(object):
         unfused_inds = tuple(i for i in self.inds if not
                              any(i in fs for fs in fuseds))
 
-        # tranpose tensor to bring groups of fused inds to the beginning
+        # transpose tensor to bring groups of fused inds to the beginning
         transpose_inds = [*concat(fuseds + unfused_inds)]
         TT = tensor_contract(self, output_inds=transpose_inds, optimize=False)
 
@@ -126,13 +127,7 @@ class Tensor(object):
         """Combine with another ``Tensor`` or ``TensorNetwork`` into a new
         ``TensorNetwork``.
         """
-        if isinstance(other, Tensor):
-            return TensorNetwork(self, other)
-        elif isinstance(other, TensorNetwork):
-            return TensorNetwork(self, *other.tensors)
-        else:
-            raise TypeError("Cannot combine with object of "
-                            "type {}".format(type(other)))
+        return TensorNetwork(self, other)
 
     def __matmul__(self, other):
         """Explicitly contract with another tensor.
@@ -293,12 +288,49 @@ def tensor_contract(*tensors,
     return Tensor(array=o_array, inds=o_ix, tags=o_tags)
 
 
+def _gen_rand_uuids():
+    """Generate shortish identifiers which are guaranteed unique.
+    Will break if more than ~10**12.4 required.
+    """
+    import uuid
+    used = set()
+    while True:
+        s = str(uuid.uuid4())[:8]
+        while s in used:  # pragma: no cover
+            s = str(uuid.uuid4())[:8]
+        used.add(s)
+        yield s
+
+
+RAND_UUIDS = iter(_gen_rand_uuids())
+
+
+def rand_uuid(base=""):
+    """Return a guaranteed unique, shortish identifier, optional appended
+    to ``base``.
+
+    Examples
+    --------
+    >>> rand_uuid()
+    '_2e1dae1b'
+
+    >>> rand_uuid('virt-bond')
+    'virt-bond_bf342e68'
+    """
+    return base + "_" + next(RAND_UUIDS)
+
+
 # --------------------------------------------------------------------------- #
 #                            Tensor Network Class                             #
 # --------------------------------------------------------------------------- #
 
 class TensorNetwork(object):
     """A collection of (as yet uncontracted) Tensors.
+
+    Parameters
+    ----------
+    *tensors : sequence of Tensor or TensorNetwork
+        The objects to combine.
 
     Members
     -------
@@ -318,26 +350,16 @@ class TensorNetwork(object):
                                 "``TensorNetwork(*tensors)``, where all "
                                 "arguments are Tensors or TensorNetworks.")
 
-    def contract(self, tags=...):
-        """Contract some, or all, of the tensors in this network.
-
-        Parameters
-        ----------
-        tags : sequence of hashable
-            Any tensors with any of these tags with be contracted.
-
-        Returns
-        -------
-        TensorNetwork, Tensor or Scalar
-            The result of the contraction, still a TensorNetwork if the
-            contraction was only partial.
+    def conj(self):
+        """Conjugate all the tensors in this network (leaves all indices).
         """
-        leave, lose = self.split(tags)
+        return TensorNetwork(*[t.conj() for t in self.tensors])
 
-        if leave:
-            return TensorNetwork(*leave) & tensor_contract(*lose)
-
-        return tensor_contract(*lose)
+    @property
+    def H(self):
+        """Conjugate all the tensors in this network (leaves all indices).
+        """
+        return self.conj()
 
     def split(self, tags):
         """Split this TN into a list of tensors containing any of ``tags`` and
@@ -350,8 +372,8 @@ class TensorNetwork(object):
 
         Returns
         -------
-        (tagged, untagged) : (list of Tensor, list of Tensor)
-            The list of tagged and untagged tensors.
+        (untagged, tagged) : (list of Tensor, list of Tensor)
+            The list of untagged and tagged tensors.
         """
         # contract all
         if tags is ...:
@@ -360,38 +382,96 @@ class TensorNetwork(object):
         if isinstance(tags, str):
             tags = {tags}
 
-        tagged, untagged = [], []
+        untagged, tagged = [], []
         for t in self.tensors:
             if any(tag in t.tags for tag in tags):
-                untagged.append(t)
-            else:
                 tagged.append(t)
+            else:
+                untagged.append(t)
 
-        return tagged, untagged
+        return untagged, tagged
 
-    def conj(self):
-        """Conjugate all the tensors in this network (leaves all indices).
+    def contract(self, tags=...):
+        """Contract some, or all, of the tensors in this network.
+
+        Parameters
+        ----------
+        tags : sequence of hashable
+            Any tensors with any of these tags with be contracted. Set to
+            ``...`` (``Ellipsis``) to contract all tensors, the default.
+
+        Returns
+        -------
+        TensorNetwork, Tensor or Scalar
+            The result of the contraction, still a TensorNetwork if the
+            contraction was only partial.
         """
-        return TensorNetwork(*[t.conj() for t in self.tensors])
+        untagged, tagged = self.split(tags)
+
+        if untagged:
+            return TensorNetwork(*untagged) & tensor_contract(*tagged)
+
+        return tensor_contract(*tagged)
+
+    def cumulative_contract(self, tags_seq):
+        """Cumulative contraction of tensor network. Contract the first set of
+        tags, then this set with the next set, then both of these the next and
+        so forth.
+
+        Parameters
+        ----------
+        tags_seq : sequence of sequence of hashable
+            The list of set of tags to cumulatively contract.
+
+        Returns
+        -------
+        TensorNetwork, Tensor or Scalar
+            The result of the contraction, still a TensorNetwork if the
+            contraction was only partial.
+        """
+        new_tn = self
+        ctags = set()
+
+        for tags in tags_seq:
+            # accumulate tags from each contractions
+            ctags |= {tags} if isinstance(tags, str) else set(tags)
+            # peform the next contraction
+            new_tn ^= ctags
+
+        return new_tn
 
     @property
-    def H(self):
-        """Conjugate all the tensors in this network (leaves all indices).
+    def shape(self):
+        """Actual, i.e. exterior, shape of this TensorNetwork.
         """
-        return self.conj()
+        dims, inds = zip(*concat(zip(t.shape, t.inds) for t in self.tensors))
+        ind_freqs = frequencies(inds)
+        return tuple(d for d, i in zip(dims, inds) if ind_freqs[i] == 1)
 
-    def __rshift__(self, *args, **kwargs):
-        """ Overload of '>>' for TensorNetwork.contract
+    def __xor__(self, *args, **kwargs):
+        """Overload of '^' for TensorNetwork.contract.
         """
         return self.contract(*args, **kwargs)
+
+    def __ixor__(self, *args, **kwargs):
+        """Overload of '^=' for inplace TensorNetwork.contract.
+        """
+        return self.contract(*args, **kwargs)
+
+    def __rshift__(self, *args, **kwargs):
+        """Overload of '>>' for TensorNetwork.cumulative_contract.
+        """
+        return self.cumulative_contract(*args, **kwargs)
+
+    def __irshift__(self, *args, **kwargs):
+        """Overload of '>>=' for inplace TensorNetwork.cumulative_contract.
+        """
+        return self.cumulative_contract(*args, **kwargs)
 
     def __and__(self, other):
         """Combine this tensor network with more tensors, without contracting.
         """
-        if isinstance(other, Tensor):
-            return TensorNetwork(*self.tensors, other)
-
-        return TensorNetwork(*self.tensors, *other.tensors)
+        return TensorNetwork(self, other)
 
     def __repr__(self):
         return "TensorNetwork({})".format(
@@ -404,3 +484,220 @@ class TensorNetwork(object):
                      for t in self.tensors[:-1]]),
             "    " + repr(self.tensors[-1]),
             os.linesep)
+
+
+# --------------------------------------------------------------------------- #
+#                          Specific forms on network                          #
+# --------------------------------------------------------------------------- #
+
+def matrix_product_state(*arrays, shape='lrp', site_inds=None, bond_name=""):
+    """Initialise a matrix product state, with auto labelling and tagging.
+
+    Parameters
+    ----------
+    *arrays : sequence of arrays
+        The tensor arrays to form into a MPS.
+    site_inds : sequence of hashable, or str
+        The indices to label the physical dimensions with, if a string is
+        supplied, use this to format the indices thus:
+        ``map(site_inds.format, range(len(arrays)))``.
+        Defaults ``'k0', 'k1', 'k2'...``.
+    shape : str
+        String specifying layout of the tensors. E.g. 'lrp' (the default)
+        indicates the shape corresponds left-bond, right-bond, physical index.
+        End tensors have either 'l' or 'r' dropped from the string.
+    bond_name : str, optional
+        The base name of the bond indices, onto which uuids will be added.
+
+    Returns
+    -------
+    TensorNetwork
+    """
+    arrays = tuple(arrays)
+    nsites = len(arrays)
+
+    # process site indices
+    if site_inds is None:
+        site_inds = 'k{}'
+
+    if isinstance(site_inds, str):
+        site_inds = tuple(map(site_inds.format, range(nsites)))
+    else:
+        site_inds = tuple(site_inds)
+
+    # TODO: process tags
+    # TODO: figure out cyclic or not
+    # TODO: allow open ends non-cyclic
+
+    lp_ord = tuple(map(lambda x: shape.replace('r', "").find(x), 'lp'))
+    rp_ord = tuple(map(lambda x: shape.replace('l', "").find(x), 'rp'))
+    lrp_ord = tuple(map(shape.find, 'lrp'))  # transpose arrays to 'lrp' order.
+
+    tensors = []
+    next_bond = rand_uuid(base=bond_name)
+
+    # Do the first tensor seperately.
+    tensors.append(Tensor(array=arrays[0].transpose(*lp_ord),
+                          inds=[next_bond, site_inds[0]]))
+    previous_bond = next_bond
+
+    # Range over the middle tensors
+    for array, site_ind in zip(arrays[1:-1], site_inds[1:-1]):
+        next_bond = rand_uuid(base=bond_name)
+        tensors.append(Tensor(array=array.transpose(*lrp_ord),
+                              inds=[previous_bond, next_bond, site_ind]))
+        previous_bond = next_bond
+
+    # Do the last tensor seperately.
+    tensors.append(Tensor(array=arrays[-1].transpose(*rp_ord),
+                          inds=[previous_bond, site_inds[-1]]))
+
+    return TensorNetwork(*tensors)
+
+
+def matrix_product_operator(*arrays, shape='lrkb',
+                            ket_site_inds=None,
+                            bra_site_inds=None,
+                            bond_name=""):
+    """Initialise a matrix product operator, with auto labelling and tagging.
+
+    Parameters
+    ----------
+    *arrays : sequence of arrays
+        The tensor arrays to form into a MPO.
+    ket_site_inds : sequence of hashable, or str
+        The indices to label the ket physical dimensions with, if a string is
+        supplied, use this to format the indices thus:
+        ``map(ket_site_inds.format, range(len(arrays)))``.
+        Defaults ``'k0', 'k1', 'k2'...``.
+    bra_site_inds : sequence of hashable, or str
+        The indices to label the ket physical dimensions with, if a string is
+        supplied, use this to format the indices thus:
+        ``map(bra_site_inds.format, range(len(arrays)))``.
+        Defaults ``'b0', 'b1', 'b2'...``.
+    shape : str
+        String specifying layout of the tensors. E.g. 'lrkb' (the default)
+        indicates the shape corresponds left-bond, right-bond, ket physical
+        index, bra physical index.
+        End tensors have either 'l' or 'r' dropped from the string.
+    bond_name : str, optional
+        The base name of the bond indices, onto which uuids will be added.
+
+    Returns
+    -------
+    TensorNetwork
+    """
+    arrays = tuple(arrays)
+    nsites = len(arrays)
+
+    # process ket site indices
+    if ket_site_inds is None:
+        ket_site_inds = 'k{}'
+
+    if isinstance(ket_site_inds, str):
+        ket_site_inds = tuple(map(ket_site_inds.format, range(nsites)))
+    else:
+        ket_site_inds = tuple(ket_site_inds)
+
+    # process bra site indices
+    if bra_site_inds is None:
+        bra_site_inds = 'b{}'
+
+    if isinstance(bra_site_inds, str):
+        bra_site_inds = tuple(map(bra_site_inds.format, range(nsites)))
+    else:
+        bra_site_inds = tuple(bra_site_inds)
+
+    # transpose arrays to 'lrkb' order.
+    lkb_ord = tuple(map(lambda x: shape.replace('r', "").find(x), 'lkb'))
+    rkb_ord = tuple(map(lambda x: shape.replace('l', "").find(x), 'rkb'))
+    lrkb_ord = tuple(map(shape.find, 'lrkb'))
+
+    tensors = []
+    next_bond = rand_uuid(base=bond_name)
+
+    # Do the first tensor seperately.
+    tensors += [Tensor(array=arrays[0].transpose(*lkb_ord),
+                       inds=[next_bond, ket_site_inds[0], bra_site_inds[0]])]
+    previous_bond = next_bond
+
+    # Range over the middle tensors
+    for array, ksi, bsi in zip(arrays[1:-1],
+                               ket_site_inds[1:-1],
+                               bra_site_inds[1:-1]):
+        next_bond = rand_uuid(base=bond_name)
+        tensors += [Tensor(array=array.transpose(*lrkb_ord),
+                           inds=[previous_bond, next_bond, ksi, bsi])]
+        previous_bond = next_bond
+
+    # Do the last tensor seperately.
+    tensors.append(Tensor(array=arrays[-1].transpose(*rkb_ord),
+                          inds=[previous_bond,
+                                ket_site_inds[-1],
+                                bra_site_inds[-1]]))
+
+    return TensorNetwork(*tensors)
+
+
+# --------------------------------------------------------------------------- #
+#                        Specific states and operators                        #
+# --------------------------------------------------------------------------- #
+
+@functools.lru_cache(128)
+def mpo_site_ham_heis(j=1.0, bz=0.0):
+    """Single site of the spin-1/2 Heisenberg Hamiltonian in MPO form.
+    This is cached.
+
+    Parameters
+    ----------
+    j : float
+        (Isotropic) nearest neighbour coupling.
+    bz : float
+        Magnetic field in Z-direction.
+
+    Returns
+    -------
+    H : numpy.ndarray
+        The tensor, with shape (5, 5, 2, 2).
+    """
+    H = np.zeros((5, 5, 2, 2), dtype=complex)
+
+    for i, s in enumerate('XYZ'):
+        H[1 + i, 0, :, :] = spin_operator(s)
+        H[-1, 1 + i, :, :] = j * spin_operator(s)
+
+    H[0, 0, :, :] = eye(2)
+    H[4, 4, :, :] = eye(2)
+    H[4, 0, :, :] = - bz * spin_operator('Z')
+
+    make_immutable(H)
+    return H
+
+
+def mpo_end_ham_heis_left(j=1.0, bz=0.0):
+    """The left most site of a open boundary conditions Heisenberg
+    matrix product operator.
+    """
+    return mpo_site_ham_heis(j=j, bz=bz)[-1, :, :, :]
+
+
+def mpo_end_ham_heis_right(j=1.0, bz=0.0):
+    """The right most site of a open boundary conditions Heisenberg
+    matrix product operator.
+    """
+    return mpo_site_ham_heis(j=j, bz=bz)[:, 0, :, :]
+
+
+def ham_heis_mpo(n, j=1.0, bz=0.0, ket_site_inds=None, bra_site_inds=None,
+                 bond_name=""):
+    """
+    """
+    HH_mpo = matrix_product_operator(
+        mpo_end_ham_heis_left(),
+        *[mpo_site_ham_heis()] * (n - 2),
+        mpo_end_ham_heis_right(),
+        ket_site_inds=ket_site_inds,
+        bra_site_inds=bra_site_inds,
+        bond_name=bond_name,
+    )
+    return HH_mpo
