@@ -17,21 +17,22 @@ cd $INSTALL_DIR
 # ------------------------------ #
 # Download required repositories #
 # ------------------------------ #
-git clone --depth 1 https://bitbucket.org/petsc/petsc.git
-git clone --depth 1 https://bitbucket.org/slepc/slepc.git
-git clone --depth 1 https://bitbucket.org/petsc/petsc4py.git
-git clone --depth 1 https://bitbucket.org/slepc/slepc4py.git
+git clone --depth 5 https://bitbucket.org/petsc/petsc.git
+git clone --depth 5 https://bitbucket.org/slepc/slepc.git
+git clone --depth 5 https://bitbucket.org/petsc/petsc4py.git
+git clone --depth 5 https://bitbucket.org/slepc/slepc4py.git
 
 
 # ---------- #
 # BUILD ALL  #
 # ---------- #
-# PETSc
-cd $PETSC_DIR
-git pull
 
 export PETSC_DIR=$INSTALL_DIR/petsc
 export PETSC_ARCH=arch-linux2-c-release
+
+# PETSc
+cd $PETSC_DIR
+git pull
 
 python2 ./configure \
   --download-mumps \
