@@ -57,11 +57,9 @@ make test
 # ----------------------- #
 cd $INSTALL_DIR/petsc4py
 git pull
-python setup.py build
-python setup.py install
+pip install --no-deps -U .
 
 cd $INSTALL_DIR/slepc4py
 git pull
-python setup.py build
-python setup.py install
+pip install --no-deps -U .
 
