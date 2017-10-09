@@ -94,6 +94,20 @@ class Tensor(object):
     def size(self):
         return self.array.size
 
+    def tranpose(self, output_inds):
+        """Transpose this tensor.
+
+        Parameters
+        ----------
+        output_inds : sequence of hashable
+            The desired output sequence of indices.
+
+        Returns
+        -------
+        Tensor
+        """
+        return tensor_tranpose(self, output_inds)
+
     def fuse(self, fuse_map):
         """Combine groups of indices into single indices.
 
@@ -112,8 +126,7 @@ class Tensor(object):
                              any(i in fs for fs in fuseds))
 
         # transpose tensor to bring groups of fused inds to the beginning
-        transpose_inds = [*concat(fuseds + unfused_inds)]
-        TT = tensor_contract(self, output_inds=transpose_inds, optimize=False)
+        TT = self.tranpose(output_inds=concat(fuseds + unfused_inds))
 
         # for each set of fused dims, group into product, then add remaining
         dims = iter(TT.shape)
@@ -194,6 +207,33 @@ for meth_name, op in [('__radd__', operator.__add__),
 # --------------------------------------------------------------------------- #
 #                                Tensor Funcs                                 #
 # --------------------------------------------------------------------------- #
+
+def tensor_tranpose(tensor, output_inds):
+    """Tranpose a tensor.
+
+    Parameters
+    ----------
+    tensor : Tensor
+        The tensor to tranpose.
+    output_inds : sequence of hashable
+        The desired output sequence of indices.
+
+    Returns
+    -------
+    Tensor
+    """
+    output_inds = tuple(output_inds)  # need to re-use this.
+
+    if set(tensor.inds) != set(output_inds):
+        raise ValueError("'output_inds' must be permutation of the "
+                         "current tensor indices.")
+
+    current_ind_map = {ind: i for i, ind in enumerate(tensor.inds)}
+    out_shape = map(current_ind_map.__getitem__, output_inds)
+
+    return Tensor(tensor.array.transpose(*out_shape),
+                  inds=output_inds, tags=tensor.tags)
+
 
 def _gen_output_inds(all_inds):
     """Generate the output, i.e. unnique, indices from the set ``inds``. Raise
