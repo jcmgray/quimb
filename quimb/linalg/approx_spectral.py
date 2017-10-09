@@ -11,7 +11,7 @@ from math import sqrt, log2, exp
 import numpy as np
 import scipy.linalg as scla
 import scipy.sparse.linalg as spla
-from ..tensor_networks import contract, contract_path
+from ..tensor_networks import einsum, einsum_path
 from ..accel import prod, vdot
 from ..utils import int2tup
 
@@ -96,7 +96,7 @@ def prepare_lazy_ptr_dot(psi_a_shape, dims=None, sysa=0):
 @functools.lru_cache(128)
 def get_path_lazy_ptr_dot(psi_ab_tensor_shape, psi_a_tensor_shape,
                           inds_a_ket, inds_ab_bra, inds_ab_ket):
-    return contract_path(
+    return einsum_path(
         HuskArray(psi_a_tensor_shape), inds_a_ket,
         HuskArray(psi_ab_tensor_shape), inds_ab_bra,
         HuskArray(psi_ab_tensor_shape), inds_ab_ket,
@@ -114,7 +114,7 @@ def do_lazy_ptr_dot(psi_ab_tensor, psi_a_tensor,
     if out is None:
         out = np.empty_like(psi_a_tensor)
 
-    return contract(
+    return einsum(
         psi_a_tensor, inds_a_ket,
         psi_ab_tensor.conjugate(), inds_ab_bra,
         psi_ab_tensor, inds_ab_ket,
@@ -325,7 +325,7 @@ def prepare_lazy_ptr_ppt_dot(psi_ab_shape, dims, sysa, sysb):
 def get_path_lazy_ptr_ppt_dot(psi_abc_tensor_shape, psi_ab_tensor_shape,
                               inds_ab_ket, inds_abc_bra,
                               inds_abc_ket, inds_out):
-    return contract_path(
+    return einsum_path(
         HuskArray(psi_ab_tensor_shape), inds_ab_ket,
         HuskArray(psi_abc_tensor_shape), inds_abc_bra,
         HuskArray(psi_abc_tensor_shape), inds_abc_ket,
@@ -343,7 +343,7 @@ def do_lazy_ptr_ppt_dot(psi_ab_tensor, psi_abc_tensor,
 
     # must have ``inds_out`` as resulting indices are not ordered
     # in the same way as input due to partial tranpose.
-    return contract(
+    return einsum(
         psi_ab_tensor, inds_ab_ket,
         psi_abc_tensor.conjugate(), inds_abc_bra,
         psi_abc_tensor, inds_abc_ket,

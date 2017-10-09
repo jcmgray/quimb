@@ -14,17 +14,17 @@ try:
     # opt_einsum is highly recommended as until numpy 1.14 einsum contractions
     # do not use BLAS.
     import opt_einsum
-    contract = opt_einsum.contract
+    einsum = opt_einsum.contract
 
     @functools.wraps(opt_einsum.contract_path)
-    def contract_path(*args, optimize='greedy', memory_limit=2**28, **kwargs):
+    def einsum_path(*args, optimize='greedy', memory_limit=2**28, **kwargs):
         return opt_einsum.contract_path(
             *args, path=optimize, memory_limit=memory_limit, **kwargs)
 
 except ImportError:
 
     @functools.wraps(np.einsum)
-    def contract(*args, optimize='greedy', memory_limit=2**28, **kwargs):
+    def einsum(*args, optimize='greedy', memory_limit=2**28, **kwargs):
 
         if optimize is False:
             return np.einsum(*args, optimize=False, **kwargs)
@@ -40,7 +40,7 @@ except ImportError:
         return np.einsum(*args, optimize=optimize, **kwargs)
 
     @functools.wraps(np.einsum_path)
-    def contract_path(*args, optimize='greedy', memory_limit=2**28, **kwargs):
+    def einsum_path(*args, optimize='greedy', memory_limit=2**28, **kwargs):
         return np.einsum_path(
             *args, optimize=(optimize, memory_limit), **kwargs)
 
@@ -341,8 +341,8 @@ def tensor_contract(*tensors,
     contract_str = _maybe_map_indices_to_alphabet(a_ix, i_ix, o_ix)
 
     # perform the contraction
-    o_array = contract(contract_str, *(t.array for t in tensors),
-                       memory_limit=memory_limit, optimize=optimize)
+    o_array = einsum(contract_str, *(t.array for t in tensors),
+                     memory_limit=memory_limit, optimize=optimize)
 
     if not o_ix:
         return o_array
