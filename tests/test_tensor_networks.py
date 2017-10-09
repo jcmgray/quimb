@@ -9,6 +9,7 @@ from quimb import ham_heis
 from quimb.tensor_networks import (
     Tensor,
     tensor_contract,
+    tensor_split,
     TensorNetwork,
     matrix_product_state,
     matrix_product_operator,
@@ -169,6 +170,22 @@ class TestBasicTensorOperations:
         assert b.shape == (8, 15, 2, 2)
         assert b.inds == ('bra', 'ket', 'e', 'f')
         assert b.tags == {'blue'}
+
+
+class TestTensorFunctions:
+    @pytest.mark.parametrize('method', ['svd', 'eig', 'qr', 'lq'])
+    @pytest.mark.parametrize('linds', ['abd', 'ce'])
+    @pytest.mark.parametrize('tol', [-1.0, 1e-13])
+    def test_split_tensor_full_svd(self, method, linds, tol):
+        a = Tensor(np.random.randn(2, 3, 4, 5, 6), inds='abcde', tags='red')
+
+        a_split = tensor_split(a, linds, method=method, tol=tol)
+        assert len(a_split.tensors) == 2
+        if linds == 'abd':
+            assert a_split.shape == (2, 3, 5, 4, 6)
+        elif linds == 'ce':
+            assert a_split.shape == (4, 6, 2, 3, 5)
+        assert (a_split ^ ...).almost_equals(a)
 
 
 class TestTensorNetworkBasic:

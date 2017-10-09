@@ -7,7 +7,7 @@ from operator import or_
 from cytoolz import concat, frequencies
 import numpy as np
 
-from .accel import prod, make_immutable
+from .accel import prod, make_immutable, njit
 from .gen.operators import spin_operator, eye
 
 try:
@@ -46,200 +46,16 @@ except ImportError:
 
 
 # --------------------------------------------------------------------------- #
-#                                Tensor Class                                 #
-# --------------------------------------------------------------------------- #
-
-class Tensor(object):
-    """A labelled, tagged ndarray.
-
-    Parameters
-    ----------
-    array : numpy.ndarray
-        The n-dimensions data.
-    inds : sequence of hashable
-        The index labels for each dimension.
-    tags : sequence of hashable
-        Tags with which to select and filter from multiple tensors.
-    """
-
-    def __init__(self, array, inds, tags=None):
-        self.array = np.asarray(array)
-        self.inds = tuple(inds)
-
-        if self.array.ndim != len(self.inds):
-            raise ValueError(
-                "Wrong number of inds, {}, supplied for array"
-                " of shape {}.".format(self.inds, self.array.shape))
-
-        self.tags = (set() if tags is None else
-                     {tags} if isinstance(tags, str) else
-                     set(tags))
-
-    def conj(self):
-        """Conjugate this tensors data (does nothing to indices).
-        """
-        return Tensor(self.array.conj(), self.inds, self.tags)
-
-    @property
-    def H(self):
-        """Conjugate this tensors data (does nothing to indices).
-        """
-        return self.conj()
-
-    @property
-    def shape(self):
-        return self.array.shape
-
-    @property
-    def size(self):
-        return self.array.size
-
-    def tranpose(self, output_inds):
-        """Transpose this tensor.
-
-        Parameters
-        ----------
-        output_inds : sequence of hashable
-            The desired output sequence of indices.
-
-        Returns
-        -------
-        Tensor
-        """
-        return tensor_tranpose(self, output_inds)
-
-    def contract(self, *others,
-                 memory_limit=2**28,
-                 optimize='greedy',
-                 output_inds=None):
-        """Efficiently contract multiple tensors, combining their tags.
-
-        Parameters
-        ----------
-        *others : sequence of Tensor
-            The other tensors to contract with.
-        memory_limit : int, optional
-            See :py:func:`contract`.
-        optimize : str, optional
-            See :py:func:`contract`.
-        output_inds : sequence
-            If given, the desired order of output indices, else defaults to the
-            order they occur in the input indices.
-
-        Returns
-        -------
-        scalar or Tensor
-        """
-        return tensor_contract(self, *others, memory_limit=memory_limit,
-                               optimize=optimize, output_inds=output_inds)
-
-    def fuse(self, fuse_map):
-        """Combine groups of indices into single indices.
-
-        Parameters
-        ----------
-        fuse_map : dict_like
-            Mapping like: ``{new_ind: sequence of existing inds, ...}``.
-
-        Returns
-        -------
-        Tensor
-            The tranposed, reshaped and re-labeled tensor.
-        """
-        fuseds = tuple(fuse_map.values())  # groups of indices to be fused
-        unfused_inds = tuple(i for i in self.inds if not
-                             any(i in fs for fs in fuseds))
-
-        # transpose tensor to bring groups of fused inds to the beginning
-        TT = self.tranpose(output_inds=concat(fuseds + unfused_inds))
-
-        # for each set of fused dims, group into product, then add remaining
-        dims = iter(TT.shape)
-        dims = [prod(next(dims) for _ in fs) for fs in fuseds] + list(dims)
-
-        # create new tensor with new + remaining indices
-        new_inds = concat((fuse_map.keys(), unfused_inds))
-        return Tensor(TT.array.reshape(*dims), new_inds, self.tags)
-
-    def __and__(self, other):
-        """Combine with another ``Tensor`` or ``TensorNetwork`` into a new
-        ``TensorNetwork``.
-        """
-        return TensorNetwork(self, other)
-
-    def __matmul__(self, other):
-        """Explicitly contract with another tensor.
-        """
-        return tensor_contract(self, other)
-
-    def __repr__(self):
-        return "Tensor(shape={}, inds={}, tags={})".format(
-            self.array.shape,
-            self.inds,
-            self.tags)
-
-
-# ------------------------- Add ufunc like methods -------------------------- #
-
-def _make_promote_array_func(op, meth_name):
-
-    @functools.wraps(getattr(np.ndarray, meth_name))
-    def _promote_array_func(self, other):
-        """Use standard array func, but make sure Tensor inds match.
-        """
-        if isinstance(other, Tensor):
-            if self.inds != other.inds:
-                raise ValueError(
-                    "The indicies of these two tensors do not "
-                    "match: {} != {}".format(self.inds, other.inds))
-            return Tensor(
-                array=op(self.array, other.array), inds=self.inds,
-                tags=self.tags | other.tags)
-        return Tensor(array=op(self.array, other),
-                      inds=self.inds, tags=self.tags)
-
-    return _promote_array_func
-
-
-for meth_name, op in [('__add__', operator.__add__),
-                      ('__sub__', operator.__sub__),
-                      ('__mul__', operator.__mul__),
-                      ('__pow__', operator.__pow__),
-                      ('__truediv__', operator.__truediv__)]:
-    setattr(Tensor, meth_name, _make_promote_array_func(op, meth_name))
-
-
-def _make_rhand_array_promote_func(op, meth_name):
-
-    @functools.wraps(getattr(np.ndarray, meth_name))
-    def _rhand_array_promote_func(self, other):
-        """Right hand operations -- no need to check ind equality first.
-        """
-        return Tensor(array=op(other, self.array),
-                      inds=self.inds, tags=self.tags)
-
-    return _rhand_array_promote_func
-
-
-for meth_name, op in [('__radd__', operator.__add__),
-                      ('__rsub__', operator.__sub__),
-                      ('__rmul__', operator.__mul__),
-                      ('__rpow__', operator.__pow__),
-                      ('__rtruediv__', operator.__truediv__)]:
-    setattr(Tensor, meth_name, _make_rhand_array_promote_func(op, meth_name))
-
-
-# --------------------------------------------------------------------------- #
 #                                Tensor Funcs                                 #
 # --------------------------------------------------------------------------- #
 
-def tensor_tranpose(tensor, output_inds):
-    """Tranpose a tensor.
+def tensor_transpose(tensor, output_inds):
+    """Transpose a tensor.
 
     Parameters
     ----------
     tensor : Tensor
-        The tensor to tranpose.
+        The tensor to transpose.
     output_inds : sequence of hashable
         The desired output sequence of indices.
 
@@ -385,6 +201,293 @@ def rand_uuid(base=""):
     return base + "_" + next(RAND_UUIDS)
 
 
+@njit  # pragma: no cover
+def _array_split_svd(x, tol=-1.0):
+    """SVD-decomposition.
+    """
+    U, s, V = np.linalg.svd(x, full_matrices=False)
+
+    if tol > 0.0:
+        s = s[s > tol]
+        n_chi = s.size
+        U = U[..., :n_chi]
+        V = V[:n_chi, ...]
+
+    s **= 0.5
+    U = U * s.reshape((1, -1))
+    V = s.reshape((-1, 1)) * V
+
+    return U, V
+
+
+@njit  # pragma: no cover
+def dag(x):
+    """Hermitian conjugate.
+    """
+    return np.conjugate(x).T
+
+
+@njit  # pragma: no cover
+def _array_split_eig(x, tol=-1.0):
+    """SVD-split via eigen-decomposition.
+    """
+    if x.shape[0] > x.shape[1]:
+        l, V = np.linalg.eigh(dag(x) @ x)
+        U = x @ dag(V)
+
+    else:
+        l, U = np.linalg.eigh(x @ dag(x))
+        V = dag(U) @ x
+
+    if tol > 0.0:
+        n_chi = np.sum(l > tol**2)
+        U = U[..., :n_chi]
+        V = V[:n_chi, ...]
+
+    return U, V
+
+
+@njit  # pragma: no cover
+def _array_split_qr(x, tol):
+    """QR-decomposition.
+    """
+    Q, R = np.linalg.qr(x)
+    return Q, R
+
+
+@njit  # pragma: no cover
+def _array_split_lq(x, tol):
+    """QR-decomposition.
+    """
+    Q, L = np.linalg.qr(dag(x))
+    return dag(L), dag(Q)
+
+
+class BondError(Exception):
+    pass
+
+
+def tensor_split(tensor, left_inds, bond_name="", method='svd',
+                 tol=None, relative=False, max_bond=None):
+    """Decompose a tensor into two tensors.
+
+    Parameters
+    ----------
+    tensor : Tensor
+        The tensor to split.
+    left_inds : sequence of hashable
+        The sequence of inds, which ``tensor`` should already have, to split
+    bond_name : str, optional
+        The base name to give to the bond between the two resulting tensors.
+
+    Returns
+    -------
+    TensorNetwork
+    """
+    left_inds = tuple(left_inds)
+    right_inds = tuple(filter(lambda x: x not in left_inds, tensor.inds))
+
+    TT = tensor.transpose(*left_inds, *right_inds)
+
+    left_dims = TT.shape[:len(left_inds)]
+    right_dims = TT.shape[len(left_inds):]
+
+    Tf = tensor.fuse({'left': left_inds, 'right': right_inds})
+
+    if tol is None:
+        tol = -1.0
+
+    left, right = {'svd': _array_split_svd,
+                   'eig': _array_split_eig,
+                   'qr': _array_split_qr,
+                   'lq': _array_split_lq}[method](Tf.array, tol=tol)
+
+    left = left.reshape(*left_dims, -1)
+    right = right.reshape(-1, *right_dims)
+
+    if max_bond is not None:
+        if left.shape[-1] > max_bond:
+            raise BondError("Maximum bond size exceeded")
+
+    bond_ind = rand_uuid(base=bond_name)
+
+    return TensorNetwork(
+        Tensor(array=left, inds=(*left_inds, bond_ind), tags=tensor.tags),
+        Tensor(array=right, inds=(bond_ind, *right_inds), tags=tensor.tags),
+    )
+
+
+# --------------------------------------------------------------------------- #
+#                                Tensor Class                                 #
+# --------------------------------------------------------------------------- #
+
+class Tensor(object):
+    """A labelled, tagged ndarray.
+
+    Parameters
+    ----------
+    array : numpy.ndarray
+        The n-dimensions data.
+    inds : sequence of hashable
+        The index labels for each dimension.
+    tags : sequence of hashable
+        Tags with which to select and filter from multiple tensors.
+    """
+
+    def __init__(self, array, inds, tags=None):
+        self.array = np.asarray(array)
+        self.inds = tuple(inds)
+
+        if self.array.ndim != len(self.inds):
+            raise ValueError(
+                "Wrong number of inds, {}, supplied for array"
+                " of shape {}.".format(self.inds, self.array.shape))
+
+        self.tags = (set() if tags is None else
+                     {tags} if isinstance(tags, str) else
+                     set(tags))
+
+    def conj(self):
+        """Conjugate this tensors data (does nothing to indices).
+        """
+        return Tensor(self.array.conj(), self.inds, self.tags)
+
+    @property
+    def H(self):
+        """Conjugate this tensors data (does nothing to indices).
+        """
+        return self.conj()
+
+    @property
+    def shape(self):
+        return self.array.shape
+
+    @property
+    def size(self):
+        return self.array.size
+
+    @functools.wraps(tensor_transpose)
+    def transpose(self, *output_inds):
+        return tensor_transpose(self, output_inds)
+
+    @functools.wraps(tensor_contract)
+    def contract(self, *others, memory_limit=2**28, optimize='greedy',
+                 output_inds=None):
+        return tensor_contract(self, *others, memory_limit=memory_limit,
+                               optimize=optimize, output_inds=output_inds)
+
+    @functools.wraps(tensor_split)
+    def split(self, left_inds, bond_name="", method='svd',
+              tol=None, relative=False, max_bond=None):
+        return tensor_split(self, left_inds=left_inds, bond_name=bond_name,
+                            method=method, tol=tol, relative=relative,
+                            max_bond=max_bond)
+
+    def fuse(self, fuse_map):
+        """Combine groups of indices into single indices.
+
+        Parameters
+        ----------
+        fuse_map : dict_like
+            Mapping like: ``{new_ind: sequence of existing inds, ...}``.
+
+        Returns
+        -------
+        Tensor
+            The transposed, reshaped and re-labeled tensor.
+        """
+        fuseds = tuple(fuse_map.values())  # groups of indices to be fused
+        unfused_inds = tuple(i for i in self.inds if not
+                             any(i in fs for fs in fuseds))
+
+        # transpose tensor to bring groups of fused inds to the beginning
+        TT = self.transpose(*concat(fuseds), *unfused_inds)
+
+        # for each set of fused dims, group into product, then add remaining
+        dims = iter(TT.shape)
+        dims = [prod(next(dims) for _ in fs) for fs in fuseds] + list(dims)
+
+        # create new tensor with new + remaining indices
+        new_inds = concat((fuse_map.keys(), unfused_inds))
+        return Tensor(TT.array.reshape(*dims), new_inds, self.tags)
+
+    def almost_equals(self, other, **kwargs):
+        """Check if this tensor is almost the same as another.
+        """
+        same_inds = (set(self.inds) == set(other.inds))
+        if not same_inds:
+            return False
+        otherT = other.transpose(*self.inds)
+        return np.allclose(self.array, otherT.array, **kwargs)
+
+    def __and__(self, other):
+        """Combine with another ``Tensor`` or ``TensorNetwork`` into a new
+        ``TensorNetwork``.
+        """
+        return TensorNetwork(self, other)
+
+    def __matmul__(self, other):
+        """Explicitly contract with another tensor.
+        """
+        return tensor_contract(self, other)
+
+    def __repr__(self):
+        return "Tensor(shape={}, inds={}, tags={})".format(
+            self.array.shape,
+            self.inds,
+            self.tags)
+
+
+# ------------------------- Add ufunc like methods -------------------------- #
+
+def _make_promote_array_func(op, meth_name):
+
+    @functools.wraps(getattr(np.ndarray, meth_name))
+    def _promote_array_func(self, other):
+        """Use standard array func, but make sure Tensor inds match.
+        """
+        if isinstance(other, Tensor):
+            if self.inds != other.inds:
+                raise ValueError(
+                    "The indicies of these two tensors do not "
+                    "match: {} != {}".format(self.inds, other.inds))
+            return Tensor(
+                array=op(self.array, other.array), inds=self.inds,
+                tags=self.tags | other.tags)
+        return Tensor(array=op(self.array, other),
+                      inds=self.inds, tags=self.tags)
+
+    return _promote_array_func
+
+
+for meth_name, op in [('__add__', operator.__add__),
+                      ('__sub__', operator.__sub__),
+                      ('__mul__', operator.__mul__),
+                      ('__pow__', operator.__pow__),
+                      ('__truediv__', operator.__truediv__)]:
+    setattr(Tensor, meth_name, _make_promote_array_func(op, meth_name))
+
+
+def _make_rhand_array_promote_func(op, meth_name):
+
+    @functools.wraps(getattr(np.ndarray, meth_name))
+    def _rhand_array_promote_func(self, other):
+        """Right hand operations -- no need to check ind equality first.
+        """
+        return Tensor(array=op(other, self.array),
+                      inds=self.inds, tags=self.tags)
+
+    return _rhand_array_promote_func
+
+
+for meth_name, op in [('__radd__', operator.__add__),
+                      ('__rsub__', operator.__sub__),
+                      ('__rmul__', operator.__mul__),
+                      ('__rpow__', operator.__pow__),
+                      ('__rtruediv__', operator.__truediv__)]:
+    setattr(Tensor, meth_name, _make_rhand_array_promote_func(op, meth_name))
+
+
 # --------------------------------------------------------------------------- #
 #                            Tensor Network Class                             #
 # --------------------------------------------------------------------------- #
@@ -426,7 +529,7 @@ class TensorNetwork(object):
         """
         return self.conj()
 
-    def split(self, tags):
+    def filter_by_tags(self, tags):
         """Split this TN into a list of tensors containing any of ``tags`` and
         the rest.
 
@@ -437,8 +540,8 @@ class TensorNetwork(object):
 
         Returns
         -------
-        (untagged, tagged) : (list of Tensor, list of Tensor)
-            The list of untagged and tagged tensors.
+        (untagged, tagged) : (Tensor sequence, Tensor sequence)
+            A pair of lists with the untagged and tagged tensors.
         """
         # contract all
         if tags is ...:
@@ -471,7 +574,7 @@ class TensorNetwork(object):
             The result of the contraction, still a TensorNetwork if the
             contraction was only partial.
         """
-        untagged, tagged = self.split(tags)
+        untagged, tagged = self.filter_by_tags(tags)
 
         if untagged:
             return TensorNetwork(*untagged) & tensor_contract(*tagged)
@@ -480,13 +583,14 @@ class TensorNetwork(object):
 
     def cumulative_contract(self, tags_seq):
         """Cumulative contraction of tensor network. Contract the first set of
-        tags, then this set with the next set, then both of these the next and
-        so forth.
+        tags, then that set with the next set, then both of those with the next
+        and so forth. Could also be described as an manually ordered
+        contraction of all tags in ``tags_seq``.
 
         Parameters
         ----------
         tags_seq : sequence of sequence of hashable
-            The list of set of tags to cumulatively contract.
+            The list of tag-groups to cumulatively contract.
 
         Returns
         -------
