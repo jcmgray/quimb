@@ -108,6 +108,31 @@ class Tensor(object):
         """
         return tensor_tranpose(self, output_inds)
 
+    def contract(self, *others,
+                 memory_limit=2**28,
+                 optimize='greedy',
+                 output_inds=None):
+        """Efficiently contract multiple tensors, combining their tags.
+
+        Parameters
+        ----------
+        *others : sequence of Tensor
+            The other tensors to contract with.
+        memory_limit : int, optional
+            See :py:func:`contract`.
+        optimize : str, optional
+            See :py:func:`contract`.
+        output_inds : sequence
+            If given, the desired order of output indices, else defaults to the
+            order they occur in the input indices.
+
+        Returns
+        -------
+        scalar or Tensor
+        """
+        return tensor_contract(self, *others, memory_limit=memory_limit,
+                               optimize=optimize, output_inds=output_inds)
+
     def fuse(self, fuse_map):
         """Combine groups of indices into single indices.
 
