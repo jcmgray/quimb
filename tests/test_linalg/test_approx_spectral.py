@@ -1,6 +1,7 @@
 import pytest
 import numpy as np
 from numpy.testing import assert_allclose
+from cytoolz import last
 
 from quimb import (
     prod,
@@ -328,7 +329,8 @@ class TestLanczosApprox:
     @pytest.mark.parametrize("bsz", [1, 2, 5])
     def test_construct_lanczos_tridiag(self, bsz):
         a = rand_herm(2**5)
-        alpha, beta, scaling = construct_lanczos_tridiag(a, bsz=bsz)
+        alpha, beta, scaling = last(
+            construct_lanczos_tridiag(a, bsz=bsz, K=20))
         assert alpha.shape == (20,)
         assert beta.shape == (20,)
 
@@ -341,7 +343,7 @@ class TestLanczosApprox:
     @pytest.mark.parametrize("bsz", [1, 2, 5])
     def test_construct_lanczos_tridiag_beta_breakdown(self, bsz):
         a = rand_herm(8)
-        alpha, beta, scaling = construct_lanczos_tridiag(a, bsz=bsz)
+        alpha, beta, scaling = last(construct_lanczos_tridiag(a, bsz=bsz))
         assert alpha.shape == (8,)
         assert beta.shape == (8,)
 

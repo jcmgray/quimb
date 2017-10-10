@@ -1,10 +1,6 @@
 """Use lanczos tri-diagonalization to approximate the spectrum of any operator
-which has an efficient represenation of its linear action on a vector.
+which has an efficient representation of its linear action on a vector.
 """
-# TODO: error estimates
-# TODO: more advanced tri-diagonalization method?
-# TODO: tol and/or max number of steps
-
 import functools
 from math import sqrt, log2, exp
 
@@ -487,10 +483,11 @@ class LazyPtrPptOperator(spla.LinearOperator):
 #                         Lanczos tri-diag technique                          #
 # --------------------------------------------------------------------------- #
 
-K_DEFAULT = 20
+K_DEFAULT = 40
 R_DEFAULT = 10
 BSZ_DEFAULT = 1
-BETA_TOL = 1e-9
+BETA_TOL_DEFAULT = 1e-6
+TAU_DEFAULT = 1e-3
 
 
 def inner(a, b):
@@ -505,8 +502,11 @@ def norm_fro(a):
     return sqrt(inner(a, a))
 
 
-def construct_lanczos_tridiag(A, K=K_DEFAULT, v0=None, bsz=BSZ_DEFAULT):
+def construct_lanczos_tridiag(A, K=K_DEFAULT, v0=None, bsz=BSZ_DEFAULT,
+                              beta_tol=BETA_TOL_DEFAULT):
     """Construct the tridiagonal lanczos matrix using only matvec operators.
+    This is a generator that iteratively yields the alpha and beta digaonals
+    at each step.
 
     Parameters
     ----------
@@ -516,12 +516,12 @@ def construct_lanczos_tridiag(A, K=K_DEFAULT, v0=None, bsz=BSZ_DEFAULT):
     v0 : vector, optional
         The starting vector to iterate with, default to random.
     K : int, optional
-        The number of iterations and thus rank of the matrix to find.
+        The maximum number of iterations and thus rank of the matrix to find.
     bsz : int, optional
         The block size (number of columns) of random vectors to iterate with.
 
-    Returns
-    -------
+    Yields
+    ------
     alpha : sequence of float of length k
         The diagonal entries of the lanczos matrix.
     beta : sequence of float of length k
@@ -552,6 +552,7 @@ def construct_lanczos_tridiag(A, K=K_DEFAULT, v0=None, bsz=BSZ_DEFAULT):
     Vm1 = np.zeros_like(V)
 
     for j in range(1, K + 1):
+
         Vt = A.dot(V)
         Vt -= beta[j] * Vm1
         alpha[j] = inner(V, Vt)
@@ -559,13 +560,15 @@ def construct_lanczos_tridiag(A, K=K_DEFAULT, v0=None, bsz=BSZ_DEFAULT):
         beta[j + 1] = norm_fro(Vt)
 
         # check for convergence
-        if abs(beta[j + 1]) < BETA_TOL:
+        if abs(beta[j + 1]) < beta_tol:
+            yield alpha[1:j + 1], beta[2:j + 2], beta[1]**2 / bsz
             break
 
         Vm1[...] = V[...]
         np.divide(Vt, beta[j + 1], out=V)
-
-    return alpha[1:j + 1], beta[2:j + 2], beta[1]**2 / bsz
+        yield (np.copy(alpha[1:j + 1]),
+               np.copy(beta[2:j + 2]),
+               np.copy(beta[1])**2 / bsz)
 
 
 def lanczos_tridiag_eig(alpha, beta, check_finite=True):
@@ -590,9 +593,9 @@ def calc_trace_fn_tridiag(tl, tv, fn, pos=True):
                for i in range(tl.size))
 
 
-def approx_spectral_function(A, fn,
-                             K=K_DEFAULT, R=R_DEFAULT, bsz=BSZ_DEFAULT,
-                             v0=None, pos=False):
+def approx_spectral_function(A, fn, K=K_DEFAULT, R=R_DEFAULT, bsz=BSZ_DEFAULT,
+                             v0=None, pos=False, tau=TAU_DEFAULT,
+                             beta_tol=BETA_TOL_DEFAULT):
     """Approximate a spectral function, that is, the quantity ``Tr(fn(A))``.
 
     Parameters
@@ -604,7 +607,8 @@ def approx_spectral_function(A, fn,
         Scalar function with with to act on approximate eigenvalues.
     K : int, optional
         The size of the tri-diagonal lanczos matrix to form. Cost of algorithm
-        scales linearly with ``K``.
+        scales linearly with ``K``. If ``tau`` is specified, this is the
+        maximum size matrix to form.
     R : int, optional
         The number of repeats with different initial random vectors to perform.
         Increasing this should increase accuracy as ``sqrt(R)``. Cost of
@@ -620,6 +624,12 @@ def approx_spectral_function(A, fn,
     pos : bool, optional
         If True, make sure any approximate eigenvalues are positive by
         clipping below 0.
+    tau : float, optional
+        The relative tolerance required for a single lanczos run to converge.
+    beta_tol : float, optional
+        The 'breakdown' tolerance. If the next beta ceofficient in the lanczos
+        matrix is less that this, implying that the full non-null space has
+        been found, terminate early.
 
     Returns
     -------
@@ -631,25 +641,39 @@ def approx_spectral_function(A, fn,
 
     def gen_vals():
         for _ in range(R):
-            alpha, beta, scaling = construct_lanczos_tridiag(
-                A, K=K, bsz=bsz, v0=v0() if callable(v0) else v0)
 
-            # First bound
-            Gf = scaling * calc_trace_fn_tridiag(*lanczos_tridiag_eig(
-                alpha, beta, check_finite=False), fn=fn, pos=pos)
+            estimate = None
 
-            # Check if already converged (i.e. found non-null space)
-            if abs(beta[-1]) < BETA_TOL:
-                yield Gf
+            # iteratively build the lanczos matrix, checking for convergence
+            for alpha, beta, scaling in construct_lanczos_tridiag(
+                    A, K=K, bsz=bsz, beta_tol=beta_tol,
+                    v0=v0() if callable(v0) else v0):
 
-            else:
-                beta[-1] = beta[0]
+                # First bound
+                Gf = scaling * calc_trace_fn_tridiag(*lanczos_tridiag_eig(
+                    alpha, beta, check_finite=False), fn=fn, pos=pos)
+
+                # check for break-down convergence (e.g. found entire non-null)
+                if abs(beta[-1]) < beta_tol:
+                    estimate = Gf
+                    break
+
                 # second bound
+                beta[-1] = beta[0]
                 Rf = scaling * calc_trace_fn_tridiag(*lanczos_tridiag_eig(
                     np.append(alpha, alpha[0]), beta, check_finite=False),
                     fn=fn, pos=pos)
 
-                yield (Gf + Rf) / 2  # mean of lower and upper bounds
+                # check for error bound convergence
+                if abs(Rf - Gf) < 2 * tau * abs(Gf):
+                    estimate = (Gf + Rf) / 2
+                    break
+
+            # didn't converge, use best estimate
+            if estimate is None:
+                estimate = (Gf + Rf) / 2
+
+            yield estimate  # mean of lower and upper bounds
 
     return sum(gen_vals()) / R  # take average over repeats
 
