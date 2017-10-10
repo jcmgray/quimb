@@ -1050,7 +1050,9 @@ def rand_ket_mps(n, bond_dim, phys_dim=2,
               (bond_dim, phys_dim)]
 
     arrays = \
-        map(lambda x: np.random.randn(*x) + 1.0j * np.random.randn(*x), shapes)
+        map(lambda x: x / norm_fro_dense(x)**(1 / (x.ndim - 1)),
+            map(lambda x: np.random.randn(*x) + 1.0j * np.random.randn(*x),
+                shapes))
 
     rmps = matrix_product_state(*arrays, site_inds=site_inds,
                                 bond_name=bond_name, site_tags=site_tags,
