@@ -318,6 +318,11 @@ class TestSpecificStatesOperators:
         assert rmps.tensors[0].tags == {'foo0', 'bar'}
         assert rmps.tensors[3].tags == {'foo3', 'bar'}
         assert rmps.tensors[-1].tags == {'foo9', 'bar'}
+
+        rmpsH_rmps = rmps.H & rmps
+        assert rmpsH_rmps.tag_map['foo0'] == [0, 10]
+        assert rmpsH_rmps.tag_map['bar'] == list(range(20))
+
         assert abs(rmps.H @ rmps - 1) < 1e-13
         # import pdb;pdb.set_trace()
         c = (rmps.H & rmps) ^ slice(0, 5) ^ slice(9, 4, -1) ^ slice(4, 6)

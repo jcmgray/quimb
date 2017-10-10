@@ -7,10 +7,11 @@ from functools import reduce
 import operator
 from operator import or_
 
-from cytoolz import concat, frequencies
+from cytoolz import concat, frequencies, groupby
 import numpy as np
 
 from .accel import prod, make_immutable, njit
+from .linalg.base_linalg import norm_fro_dense
 from .gen.operators import spin_operator, eye
 
 try:
@@ -326,6 +327,7 @@ def tensor_split(tensor, left_inds, bond_name="", method='svd',
     return TensorNetwork(
         Tensor(array=left, inds=(*left_inds, bond_ind), tags=tensor.tags),
         Tensor(array=right, inds=(bond_ind, *right_inds), tags=tensor.tags),
+        check_collisions=False,
     )
 
 
@@ -538,6 +540,12 @@ class TensorNetwork(object):
     nsites : int, optional
         The number of sites, if explicitly known. This will be calculated
         using `contract_strategy` if needed but not specified.
+    check_collisions : bool, optional
+        If True, the default, then Tensors and TensorNetworks with double
+        indices which match another Tensor or TensorNetworks double indices
+        will have those indices' names mangled. Should be explicily turned off
+        when it is known that no collisions will take place -- i.e. when not
+        adding any new tensors.
 
     Members
     -------
@@ -545,7 +553,8 @@ class TensorNetwork(object):
         The tensors in this network.
     """
 
-    def __init__(self, *tensors, contract_strategy=None, nsites=None):
+    def __init__(self, *tensors, contract_strategy=None, nsites=None,
+                 check_collisions=True):
 
         self.tensors = []
         self.contract_strategy = contract_strategy
@@ -554,23 +563,25 @@ class TensorNetwork(object):
 
         for i, t in enumerate(tensors):
 
-            if not isinstance(t, (Tensor, TensorNetwork)):
+            istensor = isinstance(t, Tensor)
+            istensornetwork = isinstance(t, TensorNetwork)
+
+            if not (istensor or istensornetwork):
                 raise TypeError("TensorNetwork should be called as "
                                 "``TensorNetwork(*tensors)``, where all "
                                 "arguments are Tensors or TensorNetworks.")
 
-            # check for matching inner_indices -> need to re-index
-            new_inner_inds = set(t.inner_inds)
-            if current_inner_inds & new_inner_inds:
-                t = t.reindex({old: old + "-{}".format(i)
-                               for old in new_inner_inds})
-            current_inner_inds |= new_inner_inds
+            if check_collisions:
+                # check for matching inner_indices -> need to re-index
+                new_inner_inds = set(t.inner_inds)
+                if current_inner_inds & new_inner_inds:
+                    t = t.reindex({old: old + "-{}".format(i)
+                                   for old in new_inner_inds})
+                current_inner_inds |= new_inner_inds
 
-            if isinstance(t, Tensor):
+            if istensor:
                 self.tensors.append(t)
-
-            elif isinstance(t, TensorNetwork):
-
+            else:  # assume TensorNetwork
                 if t.contract_strategy is not None:
                     # check whether to inherit ...
                     if self.contract_strategy is None:
@@ -584,32 +595,35 @@ class TensorNetwork(object):
 
                 self.tensors += t.tensors
 
+        # build a map to efficiently locate tensors.
+        self.tag_map = self.calc_tag_map()
+
         # count how many sites if a contract_strategy is given
         if (self.contract_strategy) and (self.nsites is None):
             self.nsites = self.calc_nsites()
 
+    def calc_tag_map(self):
+        """Make a dict which maps tags to a list of tensors indices.
+        """
+        tag_map = {}
+        for i, t in enumerate(self.tensors):
+            for tag in t.tags:
+                if tag in tag_map:
+                    tag_map[tag].append(i)
+                else:
+                    tag_map[tag] = [i]
+        return tag_map
+
     def calc_nsites(self):
-        all_tags = self.tags
+        """Calculate how many tags there are which match ``contract_strategy``.
+        """
         nsites = 0
         for i in range(10000):
-            if self.contract_strategy.format(i) in all_tags:
+            if self.contract_strategy.format(i) in self.tag_map:
                 nsites += 1
             else:
                 break
         return nsites
-
-    def conj(self):
-        """Conjugate all the tensors in this network (leaves all indices).
-        """
-        return TensorNetwork(*[t.conj() for t in self.tensors],
-                             contract_strategy=self.contract_strategy,
-                             nsites=self.nsites)
-
-    @property
-    def H(self):
-        """Conjugate all the tensors in this network (leaves all indices).
-        """
-        return self.conj()
 
     def filter_by_tags(self, tags):
         """Split this TN into a list of tensors containing any of ``tags`` and
@@ -629,15 +643,19 @@ class TensorNetwork(object):
         if tags is ...:
             return [], self.tensors
 
+        # Else get the locations of where each tag is found on tensor
         if isinstance(tags, str):
-            tags = {tags}
+            tagged_locs = set(self.tag_map[tags])
+        else:
+            tagged_locs = set(concat(map(self.tag_map.__getitem__, tags)))
 
-        untagged, tagged = [], []
-        for t in self.tensors:
-            if any(tag in t.tags for tag in tags):
-                tagged.append(t)
-            else:
-                untagged.append(t)
+        # Split a (loc, Tensor) list into tagged and untagged groups
+        groups = groupby(lambda x: x[0] in tagged_locs,
+                         enumerate(self.tensors))
+
+        # Filter out the locations themselves
+        untagged = [i[1] for i in groups.pop(False, [])]
+        tagged = [i[1] for i in groups.pop(True, [])]
 
         return untagged, tagged
 
@@ -677,7 +695,7 @@ class TensorNetwork(object):
         if untagged:
             return TensorNetwork(tensor_contract(*tagged), *untagged,
                                  contract_strategy=self.contract_strategy,
-                                 nsites=self.nsites)
+                                 nsites=self.nsites, check_collisions=False)
 
         return tensor_contract(*tagged)
 
@@ -724,7 +742,20 @@ class TensorNetwork(object):
         else:
             return TensorNetwork(*(t.reindex(index_map) for t in self.tensors),
                                  contract_strategy=self.contract_strategy,
-                                 nsites=self.nsites)
+                                 nsites=self.nsites, check_collisions=False)
+
+    def conj(self):
+        """Conjugate all the tensors in this network (leaves all indices).
+        """
+        return TensorNetwork(*[t.conj() for t in self.tensors],
+                             contract_strategy=self.contract_strategy,
+                             nsites=self.nsites, check_collisions=False)
+
+    @property
+    def H(self):
+        """Conjugate all the tensors in this network (leaves all indices).
+        """
+        return self.conj()
 
     @property
     def all_dims_inds(self):
@@ -919,7 +950,7 @@ def matrix_product_state(*arrays,
                           tags=site_tags[-1]))
 
     return TensorNetwork(*tensors, contract_strategy=contract_strategy,
-                         nsites=nsites)
+                         nsites=nsites, check_collisions=False)
 
 
 def matrix_product_operator(*arrays, shape='lrkb',
@@ -1015,7 +1046,7 @@ def matrix_product_operator(*arrays, shape='lrkb',
                           tags=site_tags[-1]))
 
     return TensorNetwork(*tensors, contract_strategy=contract_strategy,
-                         nsites=nsites)
+                         nsites=nsites, check_collisions=False)
 
 
 # --------------------------------------------------------------------------- #
