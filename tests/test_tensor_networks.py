@@ -13,6 +13,7 @@ from quimb.tensor_networks import (
     TensorNetwork,
     matrix_product_state,
     matrix_product_operator,
+    rand_ket_mps,
     ham_heis_mpo,
 )
 
@@ -264,6 +265,30 @@ class TestTensorNetworkBasic:
         psi = mps.contract()
         assert psi.shape == (2,) * 10
 
+    def test_reindex(self):
+        a = Tensor(np.random.randn(2, 3, 4), inds=[0, 1, 2],
+                   tags='red')
+        b = Tensor(np.random.randn(3, 4, 5), inds=[1, 2, 3],
+                   tags='blue')
+        c = Tensor(np.random.randn(5, 2, 6), inds=[3, 0, 4],
+                   tags='green')
+
+        a_b_c = (a & b & c)
+
+        d = a_b_c.reindex({4: 'foo', 2: 'bar'})
+
+        assert a_b_c.outer_inds == (4,)
+        assert d.outer_inds == ('foo',)
+        assert set(a_b_c.inner_inds) == {0, 1, 2, 3}
+        assert set(d.inner_inds) == {0, 1, 'bar', 3}
+        assert d.tensors[0].inds == (0, 1, 'bar')
+
+        d = a_b_c.reindex({4: 'foo', 2: 'bar'}, inplace=True)
+
+        assert a_b_c.outer_inds == ('foo',)
+        assert set(d.inner_inds) == {0, 1, 'bar', 3}
+        assert d.tensors[0].inds == (0, 1, 'bar')
+
 
 class TestSpecificNetworks:
 
@@ -281,14 +306,29 @@ class TestSpecificNetworks:
         mpo = matrix_product_operator(*tensors)
         assert len(mpo.tensors) == 5
         op = mpo ^ ...
+        # this relies on left to right contraction
         assert op.inds == ('k0', 'b0', 'k1', 'b1', 'k2', 'b2',
                            'k3', 'b3', 'k4', 'b4')
 
 
 class TestSpecificStatesOperators:
 
+    def test_rand_ket_mps(self):
+        rmps = rand_ket_mps(10, 10, site_tags="foo{}", tags='bar')
+        assert rmps.tensors[0].tags == {'foo0', 'bar'}
+        assert rmps.tensors[3].tags == {'foo3', 'bar'}
+        assert rmps.tensors[-1].tags == {'foo9', 'bar'}
+        assert abs(rmps.H @ rmps - 1) < 1e-13
+        # import pdb;pdb.set_trace()
+        c = (rmps.H & rmps) ^ slice(0, 5) ^ slice(9, 4, -1) ^ slice(4, 6)
+        assert abs(c - 1) < 1e-13
+
     def test_mpo_site_ham_heis(self):
-        hh_mpo = ham_heis_mpo(5)
+        hh_mpo = ham_heis_mpo(5, tags=['foo'])
+
+        assert hh_mpo.tensors[0].tags == {'i0', 'foo'}
+        assert hh_mpo.tensors[3].tags == {'i3', 'foo'}
+        assert hh_mpo.tensors[-1].tags == {'i4', 'foo'}
 
         assert hh_mpo.shape == (2,) * 10
 

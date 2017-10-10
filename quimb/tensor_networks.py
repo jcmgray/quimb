@@ -1,3 +1,6 @@
+"""Tensor network tools.
+"""
+
 import os
 import functools
 from functools import reduce
@@ -110,11 +113,20 @@ def _maybe_map_indices_to_alphabet(a_ix, i_ix, o_ix):
     contract_str : str
         The string to feed to einsum/contract.
     """
+    a_ix = set(a_ix)
+
     if any(i not in _einsum_symbols_set for i in a_ix):
         # need to map inds to alphabet
-        amap = {i: lett for i, lett in zip(set(a_ix), _einsum_symbols)}
+
+        if len(a_ix) > len(_einsum_symbols_set):
+            raise ValueError("Too many indices to auto-optimize contraction "
+                             "for at once, try setting a `contract_strategy` "
+                             "or manual contraction order using tags.")
+
+        amap = {i: lett for i, lett in zip(a_ix, _einsum_symbols)}
         in_str = map(lambda x: "".join(map(amap.__getitem__, x)), i_ix)
         out_str = "".join(map(amap.__getitem__, o_ix))
+
     else:
         in_str = map("".join, i_ix)
         out_str = "".join(o_ix)
@@ -366,6 +378,11 @@ class Tensor(object):
     def size(self):
         return self.array.size
 
+    @property
+    def inner_inds(self):
+        ind_freqs = frequencies(self.inds)
+        return tuple(filter(lambda i: ind_freqs[i] == 2, self.inds))
+
     @functools.wraps(tensor_transpose)
     def transpose(self, *output_inds):
         return tensor_transpose(self, output_inds)
@@ -382,6 +399,21 @@ class Tensor(object):
         return tensor_split(self, left_inds=left_inds, bond_name=bond_name,
                             method=method, tol=tol, relative=relative,
                             max_bond=max_bond)
+
+    def reindex(self, index_map, inplace=False):
+        """Rename the indices of this tensor, optionally in-place.
+
+        Parameters
+        ----------
+        index_map : dict-like
+            Mapping of pairs ``{old_ind: new_ind, ...}``.
+        """
+        new_inds = tuple(index_map.get(ind, ind) for ind in self.inds)
+        if inplace:
+            self.inds = new_inds
+            return self
+        else:
+            return Tensor(array=self.array, inds=new_inds, tags=self.tags)
 
     def fuse(self, fuse_map):
         """Combine groups of indices into single indices.
@@ -447,12 +479,13 @@ def _make_promote_array_func(op, meth_name):
         """Use standard array func, but make sure Tensor inds match.
         """
         if isinstance(other, Tensor):
-            if self.inds != other.inds:
+            if set(self.inds) != set(other.inds):
                 raise ValueError(
                     "The indicies of these two tensors do not "
                     "match: {} != {}".format(self.inds, other.inds))
+            otherT = other.transpose(*self.inds)
             return Tensor(
-                array=op(self.array, other.array), inds=self.inds,
+                array=op(self.array, otherT.array), inds=self.inds,
                 tags=self.tags | other.tags)
         return Tensor(array=op(self.array, other),
                       inds=self.inds, tags=self.tags)
@@ -499,6 +532,12 @@ class TensorNetwork(object):
     ----------
     *tensors : sequence of Tensor or TensorNetwork
         The objects to combine.
+    contract_strategy : str, optional
+        A string, with integer format specifier, that describes how to range
+        over the network's tags in order to contract it.
+    nsites : int, optional
+        The number of sites, if explicitly known. This will be calculated
+        using `contract_strategy` if needed but not specified.
 
     Members
     -------
@@ -506,22 +545,65 @@ class TensorNetwork(object):
         The tensors in this network.
     """
 
-    def __init__(self, *tensors):
+    def __init__(self, *tensors, contract_strategy=None, nsites=None):
+
         self.tensors = []
-        for t in tensors:
-            if isinstance(t, Tensor):
-                self.tensors.append(t)
-            elif isinstance(t, TensorNetwork):
-                self.tensors += t.tensors
-            else:
+        self.contract_strategy = contract_strategy
+        self.nsites = nsites
+        current_inner_inds = set()
+
+        for i, t in enumerate(tensors):
+
+            if not isinstance(t, (Tensor, TensorNetwork)):
                 raise TypeError("TensorNetwork should be called as "
                                 "``TensorNetwork(*tensors)``, where all "
                                 "arguments are Tensors or TensorNetworks.")
 
+            # check for matching inner_indices -> need to re-index
+            new_inner_inds = set(t.inner_inds)
+            if current_inner_inds & new_inner_inds:
+                t = t.reindex({old: old + "-{}".format(i)
+                               for old in new_inner_inds})
+            current_inner_inds |= new_inner_inds
+
+            if isinstance(t, Tensor):
+                self.tensors.append(t)
+
+            elif isinstance(t, TensorNetwork):
+
+                if t.contract_strategy is not None:
+                    # check whether to inherit ...
+                    if self.contract_strategy is None:
+                        self.contract_strategy = t.contract_strategy
+                    # ... or compare contract_strategies
+                    else:
+                        if t.contract_strategy != self.contract_strategy:
+                            raise ValueError(
+                                "Conflicting contraction strategies found on "
+                                "tensor networks.")
+
+                self.tensors += t.tensors
+
+        # count how many sites if a contract_strategy is given
+        if (self.contract_strategy) and (self.nsites is None):
+            self.nsites = self.calc_nsites()
+
+    def calc_nsites(self):
+        all_tags = self.tags
+        nsites = 0
+        for i in range(10000):
+            if self.contract_strategy.format(i) in all_tags:
+                nsites += 1
+            else:
+                break
+        return nsites
+
     def conj(self):
         """Conjugate all the tensors in this network (leaves all indices).
         """
-        return TensorNetwork(*[t.conj() for t in self.tensors])
+        return TensorNetwork(*[t.conj() for t in self.tensors],
+                             contract_strategy=self.contract_strategy,
+                             nsites=self.nsites)
 
     @property
     def H(self):
@@ -574,10 +656,28 @@ class TensorNetwork(object):
             The result of the contraction, still a TensorNetwork if the
             contraction was only partial.
         """
+
+        # Check for a structured strategy for performing contraction.
+        if self.contract_strategy is not None:
+            if tags is ...:  # all sites
+                tags = slice(0, self.nsites)
+
+            if isinstance(tags, slice):
+                return self >> (self.contract_strategy.format(i) for i in
+                                range(tags.start, tags.stop,
+                                      1 if tags.step is None else tags.step))
+
+        # Else just contract those tensors specified by tags.
         untagged, tagged = self.filter_by_tags(tags)
 
+        if not tagged:
+            raise ValueError("No tags were found - nothing to contract. "
+                             "(Change this to a no-op maybe?)")
+
         if untagged:
-            return TensorNetwork(*untagged) & tensor_contract(*tagged)
+            return TensorNetwork(tensor_contract(*tagged), *untagged,
+                                 contract_strategy=self.contract_strategy,
+                                 nsites=self.nsites)
 
         return tensor_contract(*tagged)
 
@@ -609,13 +709,66 @@ class TensorNetwork(object):
 
         return new_tn
 
+    def reindex(self, index_map, inplace=False):
+        """Rename indices for all tensors in this network, optionally in-place.
+
+        Parameters
+        ----------
+        index_map : dict-like
+            Mapping of pairs ``{old_ind: new_ind, ...}``.
+        """
+        if inplace:
+            for t in self.tensors:
+                t.reindex(index_map, inplace=True)
+            return self
+        else:
+            return TensorNetwork(*(t.reindex(index_map) for t in self.tensors),
+                                 contract_strategy=self.contract_strategy,
+                                 nsites=self.nsites)
+
+    @property
+    def all_dims_inds(self):
+        """Return a list of all dimensions, and the corresponding list of
+        indices from the tensor network.
+        """
+        return zip(*concat(zip(t.shape, t.inds) for t in self.tensors))
+
+    @property
+    def all_inds(self):
+        return tuple(concat(t.inds for t in self.tensors))
+
+    @property
+    def inner_inds(self):
+        """Return all inner indices, that is, those that appear twice.
+        """
+        all_inds = self.all_inds
+        ind_freqs = frequencies(all_inds)
+        return tuple(filter(lambda i: ind_freqs[i] == 2, all_inds))
+
+    @property
+    def outer_dims_inds(self):
+        """Get the 'outer' pairs of dimension and indices, i.e. as if this
+        tensor network was fully contracted.
+        """
+        dims, inds = self.all_dims_inds
+        ind_freqs = frequencies(inds)
+        return tuple((d, i) for d, i in zip(dims, inds) if ind_freqs[i] == 1)
+
+    @property
+    def outer_inds(self):
+        """Actual, i.e. exterior, shape of this TensorNetwork.
+        """
+        return tuple(i for d, i in self.outer_dims_inds)
+
     @property
     def shape(self):
         """Actual, i.e. exterior, shape of this TensorNetwork.
         """
-        dims, inds = zip(*concat(zip(t.shape, t.inds) for t in self.tensors))
-        ind_freqs = frequencies(inds)
-        return tuple(d for d, i in zip(dims, inds) if ind_freqs[i] == 1)
+        return tuple(d for d, i in self.outer_dims_inds)
+
+    @property
+    def tags(self):
+        return reduce(or_, (t.tags for t in self.tensors))
 
     def __xor__(self, *args, **kwargs):
         """Overload of '^' for TensorNetwork.contract.
@@ -642,39 +795,75 @@ class TensorNetwork(object):
         """
         return TensorNetwork(self, other)
 
+    def __matmul__(self, other):
+        """Overload "@" to mean full contraction with another network.
+        """
+        return TensorNetwork(self, other) ^ ...
+
     def __repr__(self):
-        return "TensorNetwork({})".format(
-            repr(self.tensors))
+        return "TensorNetwork({}, {}, {})".format(
+            repr(self.tensors),
+            "contract_strategy='{}'".format(self.contract_strategy) if
+            self.contract_strategy is not None else "",
+            "nsites={}".format(self.nsites) if
+            self.nsites is not None else "",
+        )
 
     def __str__(self):
-        return "TensorNetwork([{}{}{}{}])".format(
+        return "TensorNetwork([{}{}{}]{}{})".format(
             os.linesep,
-            "".join(["    " + repr(t) + os.linesep
+            "".join(["    " + repr(t) + "," + os.linesep
                      for t in self.tensors[:-1]]),
-            "    " + repr(self.tensors[-1]),
-            os.linesep)
+            "    " + repr(self.tensors[-1]) + "," + os.linesep,
+            ", contract_strategy='{}'".format(self.contract_strategy) if
+            self.contract_strategy is not None else "",
+            ", nsites={}".format(self.nsites) if
+            self.nsites is not None else "")
 
 
 # --------------------------------------------------------------------------- #
 #                          Specific forms on network                          #
 # --------------------------------------------------------------------------- #
 
-def matrix_product_state(*arrays, shape='lrp', site_inds=None, bond_name=""):
+
+def make_site_strs(x, nsites):
+    """Get a range of site inds or tags based.
+    """
+    if isinstance(x, str):
+        x = tuple(map(x.format, range(nsites)))
+    else:
+        x = tuple(x)
+
+    return x
+
+
+def matrix_product_state(*arrays,
+                         shape='lrp',
+                         site_inds=None,
+                         site_tags=None,
+                         tags=None,
+                         bond_name="",):
     """Initialise a matrix product state, with auto labelling and tagging.
 
     Parameters
     ----------
     *arrays : sequence of arrays
         The tensor arrays to form into a MPS.
+    shape : str, optional
+        String specifying layout of the tensors. E.g. 'lrp' (the default)
+        indicates the shape corresponds left-bond, right-bond, physical index.
+        End tensors have either 'l' or 'r' dropped from the string.
     site_inds : sequence of hashable, or str
         The indices to label the physical dimensions with, if a string is
         supplied, use this to format the indices thus:
         ``map(site_inds.format, range(len(arrays)))``.
         Defaults ``'k0', 'k1', 'k2'...``.
-    shape : str
-        String specifying layout of the tensors. E.g. 'lrp' (the default)
-        indicates the shape corresponds left-bond, right-bond, physical index.
-        End tensors have either 'l' or 'r' dropped from the string.
+    site_tags : sequence of hashable, or str
+        The tags to label each site with, if a string is supplied, use this to
+        format the indices thus: ``map(site_tags.format, range(len(arrays)))``.
+        Defaults ``'i0', 'i1', 'i2'...``.
+    tags : str or sequence of hashable, optional
+        Global tags to attach to all tensors.
     bond_name : str, optional
         The base name of the bond indices, onto which uuids will be added.
 
@@ -686,15 +875,22 @@ def matrix_product_state(*arrays, shape='lrp', site_inds=None, bond_name=""):
     nsites = len(arrays)
 
     # process site indices
-    if site_inds is None:
-        site_inds = 'k{}'
+    site_inds = 'k{}' if site_inds is None else site_inds
+    site_inds = make_site_strs(site_inds, nsites)
 
-    if isinstance(site_inds, str):
-        site_inds = tuple(map(site_inds.format, range(nsites)))
-    else:
-        site_inds = tuple(site_inds)
+    # process site tags
+    site_tags = 'i{}' if site_tags is None else site_tags
+    contract_strategy = site_tags
+    site_tags = make_site_strs(site_tags, nsites)
 
-    # TODO: process tags
+    if tags is not None:
+        if isinstance(tags, str):
+            tags = (tags,)
+        else:
+            tags = tuple(tags)
+
+        site_tags = tuple((st,) + tags for st in site_tags)
+
     # TODO: figure out cyclic or not
     # TODO: allow open ends non-cyclic
 
@@ -702,31 +898,35 @@ def matrix_product_state(*arrays, shape='lrp', site_inds=None, bond_name=""):
     rp_ord = tuple(map(lambda x: shape.replace('l', "").find(x), 'rp'))
     lrp_ord = tuple(map(shape.find, 'lrp'))  # transpose arrays to 'lrp' order.
 
-    tensors = []
-    next_bond = rand_uuid(base=bond_name)
-
     # Do the first tensor seperately.
-    tensors.append(Tensor(array=arrays[0].transpose(*lp_ord),
-                          inds=[next_bond, site_inds[0]]))
+    next_bond = rand_uuid(base=bond_name)
+    tensors = [Tensor(array=arrays[0].transpose(*lp_ord),
+                      inds=[next_bond, site_inds[0]], tags=site_tags[0])]
     previous_bond = next_bond
 
     # Range over the middle tensors
-    for array, site_ind in zip(arrays[1:-1], site_inds[1:-1]):
+    for array, site_ind, site_tag in zip(arrays[1:-1], site_inds[1:-1],
+                                         site_tags[1:-1]):
         next_bond = rand_uuid(base=bond_name)
         tensors.append(Tensor(array=array.transpose(*lrp_ord),
-                              inds=[previous_bond, next_bond, site_ind]))
+                              inds=[previous_bond, next_bond, site_ind],
+                              tags=site_tag))
         previous_bond = next_bond
 
     # Do the last tensor seperately.
     tensors.append(Tensor(array=arrays[-1].transpose(*rp_ord),
-                          inds=[previous_bond, site_inds[-1]]))
+                          inds=[previous_bond, site_inds[-1]],
+                          tags=site_tags[-1]))
 
-    return TensorNetwork(*tensors)
+    return TensorNetwork(*tensors, contract_strategy=contract_strategy,
+                         nsites=nsites)
 
 
 def matrix_product_operator(*arrays, shape='lrkb',
                             ket_site_inds=None,
                             bra_site_inds=None,
+                            site_tags=None,
+                            tags=None,
                             bond_name=""):
     """Initialise a matrix product operator, with auto labelling and tagging.
 
@@ -734,6 +934,11 @@ def matrix_product_operator(*arrays, shape='lrkb',
     ----------
     *arrays : sequence of arrays
         The tensor arrays to form into a MPO.
+    shape : str, optional
+        String specifying layout of the tensors. E.g. 'lrkb' (the default)
+        indicates the shape corresponds left-bond, right-bond, ket physical
+        index, bra physical index.
+        End tensors have either 'l' or 'r' dropped from the string.
     ket_site_inds : sequence of hashable, or str
         The indices to label the ket physical dimensions with, if a string is
         supplied, use this to format the indices thus:
@@ -744,11 +949,12 @@ def matrix_product_operator(*arrays, shape='lrkb',
         supplied, use this to format the indices thus:
         ``map(bra_site_inds.format, range(len(arrays)))``.
         Defaults ``'b0', 'b1', 'b2'...``.
-    shape : str
-        String specifying layout of the tensors. E.g. 'lrkb' (the default)
-        indicates the shape corresponds left-bond, right-bond, ket physical
-        index, bra physical index.
-        End tensors have either 'l' or 'r' dropped from the string.
+    site_tags : sequence of hashable, or str
+        The tags to label each site with, if a string is supplied, use this to
+        format the indices thus: ``map(site_tags.format, range(len(arrays)))``.
+        Defaults ``'i0', 'i1', 'i2'...``.
+    tags : str or sequence of hashable, optional
+        Global tags to attach to all tensors.
     bond_name : str, optional
         The base name of the bond indices, onto which uuids will be added.
 
@@ -759,58 +965,103 @@ def matrix_product_operator(*arrays, shape='lrkb',
     arrays = tuple(arrays)
     nsites = len(arrays)
 
-    # process ket site indices
-    if ket_site_inds is None:
-        ket_site_inds = 'k{}'
+    # process site indices
+    ket_site_inds = 'k{}' if ket_site_inds is None else ket_site_inds
+    ket_site_inds = make_site_strs(ket_site_inds, nsites)
+    bra_site_inds = 'b{}' if bra_site_inds is None else bra_site_inds
+    bra_site_inds = make_site_strs(bra_site_inds, nsites)
 
-    if isinstance(ket_site_inds, str):
-        ket_site_inds = tuple(map(ket_site_inds.format, range(nsites)))
-    else:
-        ket_site_inds = tuple(ket_site_inds)
+    # process site tags
+    site_tags = 'i{}' if site_tags is None else site_tags
+    contract_strategy = site_tags
+    site_tags = make_site_strs(site_tags, nsites)
+    if tags is not None:
+        if isinstance(tags, str):
+            tags = (tags,)
+        else:
+            tags = tuple(tags)
 
-    # process bra site indices
-    if bra_site_inds is None:
-        bra_site_inds = 'b{}'
-
-    if isinstance(bra_site_inds, str):
-        bra_site_inds = tuple(map(bra_site_inds.format, range(nsites)))
-    else:
-        bra_site_inds = tuple(bra_site_inds)
+        site_tags = tuple((st,) + tags for st in site_tags)
 
     # transpose arrays to 'lrkb' order.
     lkb_ord = tuple(map(lambda x: shape.replace('r', "").find(x), 'lkb'))
     rkb_ord = tuple(map(lambda x: shape.replace('l', "").find(x), 'rkb'))
     lrkb_ord = tuple(map(shape.find, 'lrkb'))
 
-    tensors = []
-    next_bond = rand_uuid(base=bond_name)
-
     # Do the first tensor seperately.
-    tensors += [Tensor(array=arrays[0].transpose(*lkb_ord),
-                       inds=[next_bond, ket_site_inds[0], bra_site_inds[0]])]
+    next_bond = rand_uuid(base=bond_name)
+    tensors = [Tensor(array=arrays[0].transpose(*lkb_ord),
+                      inds=[next_bond, ket_site_inds[0], bra_site_inds[0]],
+                      tags=site_tags[0])]
     previous_bond = next_bond
 
     # Range over the middle tensors
-    for array, ksi, bsi in zip(arrays[1:-1],
-                               ket_site_inds[1:-1],
-                               bra_site_inds[1:-1]):
+    for array, ksi, bsi, site_tag in zip(arrays[1:-1],
+                                         ket_site_inds[1:-1],
+                                         bra_site_inds[1:-1],
+                                         site_tags[1:-1]):
+
         next_bond = rand_uuid(base=bond_name)
         tensors += [Tensor(array=array.transpose(*lrkb_ord),
-                           inds=[previous_bond, next_bond, ksi, bsi])]
+                           inds=[previous_bond, next_bond, ksi, bsi],
+                           tags=site_tag)]
         previous_bond = next_bond
 
     # Do the last tensor seperately.
     tensors.append(Tensor(array=arrays[-1].transpose(*rkb_ord),
                           inds=[previous_bond,
                                 ket_site_inds[-1],
-                                bra_site_inds[-1]]))
+                                bra_site_inds[-1]],
+                          tags=site_tags[-1]))
 
-    return TensorNetwork(*tensors)
+    return TensorNetwork(*tensors, contract_strategy=contract_strategy,
+                         nsites=nsites)
 
 
 # --------------------------------------------------------------------------- #
 #                        Specific states and operators                        #
 # --------------------------------------------------------------------------- #
+
+def rand_ket_mps(n, bond_dim, phys_dim=2,
+                 site_inds=None,
+                 site_tags=None,
+                 tags=None,
+                 bond_name="",
+                 normalize=True):
+    """Generate a random matrix product state.
+
+    Parameters
+    ----------
+    bond_dim : int
+        The bond dimension.
+    phys_dim : int, optional
+        The physical (site) dimensions, defaults to 2.
+    site_inds : sequence of hashable, or str
+        See :func:`matrix_product_state`.
+    site_tags=None, optional
+        See :func:`matrix_product_state`.
+    tags=None, optional
+        See :func:`matrix_product_state`.
+    bond_name : str, optional
+        See :func:`matrix_product_state`.
+    """
+    shapes = [(bond_dim, phys_dim),
+              *((bond_dim, bond_dim, phys_dim),) * (n - 2),
+              (bond_dim, phys_dim)]
+
+    arrays = \
+        map(lambda x: np.random.randn(*x) + 1.0j * np.random.randn(*x), shapes)
+
+    rmps = matrix_product_state(*arrays, site_inds=site_inds,
+                                bond_name=bond_name, site_tags=site_tags,
+                                tags=tags)
+
+    if normalize:
+        c = (rmps.H @ rmps)**0.5
+        rmps.tensors[n // 2] /= c
+
+    return rmps
+
 
 @functools.lru_cache(128)
 def mpo_site_ham_heis(j=1.0, bz=0.0):
@@ -857,9 +1108,13 @@ def mpo_end_ham_heis_right(j=1.0, bz=0.0):
     return mpo_site_ham_heis(j=j, bz=bz)[:, 0, :, :]
 
 
-def ham_heis_mpo(n, j=1.0, bz=0.0, ket_site_inds=None, bra_site_inds=None,
+def ham_heis_mpo(n, j=1.0, bz=0.0,
+                 ket_site_inds=None,
+                 bra_site_inds=None,
+                 site_tags=None,
+                 tags=None,
                  bond_name=""):
-    """
+    """Heisenberg Hamiltonian in matrix product operator form.
     """
     HH_mpo = matrix_product_operator(
         mpo_end_ham_heis_left(),
@@ -867,6 +1122,8 @@ def ham_heis_mpo(n, j=1.0, bz=0.0, ket_site_inds=None, bra_site_inds=None,
         mpo_end_ham_heis_right(),
         ket_site_inds=ket_site_inds,
         bra_site_inds=bra_site_inds,
+        site_tags=site_tags,
+        tags=tags,
         bond_name=bond_name,
     )
     return HH_mpo
