@@ -343,7 +343,7 @@ class TestLanczosApprox:
     @pytest.mark.parametrize("bsz", [1, 2, 5])
     def test_construct_lanczos_tridiag_beta_breakdown(self, bsz):
         a = rand_herm(8)
-        alpha, beta, scaling = last(construct_lanczos_tridiag(a, bsz=bsz))
+        alpha, beta, scaling = last(construct_lanczos_tridiag(a, bsz=bsz, K=9))
         assert alpha.shape == (8,)
         assert beta.shape == (8,)
 

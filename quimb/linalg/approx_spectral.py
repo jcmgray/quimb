@@ -477,14 +477,6 @@ class LazyPtrPptOperator(spla.LinearOperator):
 #                         Lanczos tri-diag technique                          #
 # --------------------------------------------------------------------------- #
 
-TOL_DEFAULT = 1e-2
-K_DEFAULT = 40
-R_DEFAULT = 40
-BSZ_DEFAULT = 1
-BETA_TOL_DEFAULT = 1e-6
-TAU_DEFAULT = 1e-3
-
-
 def inner(a, b):
     """Inner product between two vectors
     """
@@ -497,11 +489,12 @@ def norm_fro(a):
     return sqrt(inner(a, a))
 
 
-def construct_lanczos_tridiag(A,
-                              K=K_DEFAULT,
-                              v0=None,
-                              bsz=BSZ_DEFAULT,
-                              beta_tol=BETA_TOL_DEFAULT):
+def construct_lanczos_tridiag(
+        A,
+        K,
+        v0=None,
+        bsz=1,
+        beta_tol=1e-6):
     """Construct the tridiagonal lanczos matrix using only matvec operators.
     This is a generator that iteratively yields the alpha and beta digaonals
     at each step.
@@ -511,12 +504,16 @@ def construct_lanczos_tridiag(A,
     A : matrix-like or linear operator
         The operator to approximate, must implement ``.dot`` method to compute
         its action on a vector.
-    v0 : vector, optional
-        The starting vector to iterate with, default to random.
     K : int, optional
         The maximum number of iterations and thus rank of the matrix to find.
+    v0 : vector, optional
+        The starting vector to iterate with, default to random.
     bsz : int, optional
         The block size (number of columns) of random vectors to iterate with.
+    beta_tol : float, optional
+        The 'breakdown' tolerance. If the next beta ceofficient in the lanczos
+        matrix is less that this, implying that the full non-null space has
+        been found, terminate early.
 
     Yields
     ------
@@ -591,15 +588,17 @@ def calc_trace_fn_tridiag(tl, tv, fn, pos=True):
                for i in range(tl.size))
 
 
-def approx_spectral_function(A, fn,
-                             K=K_DEFAULT,
-                             R=R_DEFAULT,
-                             bsz=BSZ_DEFAULT,
-                             v0=None, pos=False,
-                             tol=TOL_DEFAULT,
-                             tol_scale=1,
-                             tau=TAU_DEFAULT,
-                             beta_tol=BETA_TOL_DEFAULT):
+def approx_spectral_function(
+        A, fn,
+        tol=1e-2,
+        K=100,
+        R=25,
+        bsz=5,
+        v0=None,
+        pos=False,
+        tau=1e-3,
+        tol_scale=1,
+        beta_tol=1e-6):
     """Approximate a spectral function, that is, the quantity ``Tr(fn(A))``.
 
     Parameters
@@ -609,19 +608,24 @@ def approx_spectral_function(A, fn,
         ``A.dot(vec)``.
     fn : callable
         Scalar function with with to act on approximate eigenvalues.
+    tol : float, optional
+        Convergence tolerance threshold for error on mean of repeats. This can
+        be relied on as the overall accuracy. See ``tol_scale`` and ``tau``.
+        Default: 1%.
     K : int, optional
         The size of the tri-diagonal lanczos matrix to form. Cost of algorithm
-        scales linearly with ``K``. If ``tau`` is specified, this is the
-        maximum size matrix to form.
+        scales linearly with ``K``. If ``tau`` is non-zero, this is the
+        maximum size matrix to form. Default: 40.
     R : int, optional
         The number of repeats with different initial random vectors to perform.
         Increasing this should increase accuracy as ``sqrt(R)``. Cost of
-        algorithm thus scales linearly with ``R``.
+        algorithm thus scales linearly with ``R``. If ``tol`` is non-zero, this
+        is the maximum number of repeats. Default: 40.
     bsz : int, optional
         Number of simultenous vector columns to use at once, 1 equating to the
         standard lanczos method. If ``bsz > 1`` then ``A`` must implement
         matrix-matrix multiplication. This is a more performant way of
-        essentially increasing ``R``, at the cost of more memory.
+        essentially increasing ``R``, at the cost of more memory. Default: 5.
     v0 : vector, or callable
         Initial vector to iterate with, sets ``R=1`` if given. If callable, the
         function to produce a random intial vector (sequence).
@@ -630,10 +634,16 @@ def approx_spectral_function(A, fn,
         clipping below 0.
     tau : float, optional
         The relative tolerance required for a single lanczos run to converge.
+        This needs to be small enough that each estimate with a single random
+        vector produces an unbiased sample of the opeators spectrum.
+        Default: 0.1%.
+    tol_scale : float, optional
+        This sets the overall expected scale of each estimate, so that an
+        absolute tolerance can be used for values near zero. Default: 1.
     beta_tol : float, optional
         The 'breakdown' tolerance. If the next beta ceofficient in the lanczos
         matrix is less that this, implying that the full non-null space has
-        been found, terminate early.
+        been found, terminate early. Default: 1e-6.
 
     Returns
     -------
@@ -643,59 +653,65 @@ def approx_spectral_function(A, fn,
     if (v0 is not None) and not callable(v0):
         R = 1
 
-    def gen_vals():
-        for _ in range(R):
+    def single_random_estimate():
+        estimate = None
 
-            estimate = None
+        # iteratively build the lanczos matrix, checking for convergence
+        for alpha, beta, scaling in construct_lanczos_tridiag(
+                A, K=K, bsz=bsz, beta_tol=beta_tol,
+                v0=v0() if callable(v0) else v0):
 
-            # iteratively build the lanczos matrix, checking for convergence
-            for alpha, beta, scaling in construct_lanczos_tridiag(
-                    A, K=K, bsz=bsz, beta_tol=beta_tol,
-                    v0=v0() if callable(v0) else v0):
+            # First bound
+            Gf = scaling * calc_trace_fn_tridiag(*lanczos_tridiag_eig(
+                alpha, beta, check_finite=False), fn=fn, pos=pos)
 
-                # First bound
-                Gf = scaling * calc_trace_fn_tridiag(*lanczos_tridiag_eig(
-                    alpha, beta, check_finite=False), fn=fn, pos=pos)
+            # check for break-down convergence (e.g. found entire non-null)
+            if abs(beta[-1]) < beta_tol:
+                estimate = Gf
+                logger.debug("beta-breakdown convergence with "
+                             "K={}, k={}. ".format(K, alpha.size) +
+                             "Estimate = {}".format(estimate))
+                break
 
-                # check for break-down convergence (e.g. found entire non-null)
-                if abs(beta[-1]) < beta_tol:
-                    estimate = Gf
-                    logger.debug("beta-breakdown with "
-                                 "K={}, k={}".format(K, alpha.size))
-                    break
+            # second bound
+            beta[-1] = beta[0]
+            Rf = scaling * calc_trace_fn_tridiag(*lanczos_tridiag_eig(
+                np.append(alpha, alpha[0]), beta, check_finite=False),
+                fn=fn, pos=pos)
 
-                # second bound
-                beta[-1] = beta[0]
-                Rf = scaling * calc_trace_fn_tridiag(*lanczos_tridiag_eig(
-                    np.append(alpha, alpha[0]), beta, check_finite=False),
-                    fn=fn, pos=pos)
-
-                # check for error bound convergence
-                if abs(Rf - Gf) < 2 * tau * abs(Gf):
-                    estimate = (Gf + Rf) / 2
-                    logger.debug("bound convergence with "
-                                 "K={}, k={}".format(K, alpha.size))
-                    break
-
-            # didn't converge, use best estimate
-            if estimate is None:
+            # check for error bound convergence
+            if abs(Rf - Gf) < 2 * tau * (abs(Gf) + tol_scale):
                 estimate = (Gf + Rf) / 2
+                logger.debug("bound convergence with "
+                             "K={}, k={}. ".format(K, alpha.size) +
+                             "Estimate = {}".format(estimate))
+                break
 
-            yield estimate  # mean of lower and upper bounds
+        # didn't converge, use best estimate
+        if estimate is None:
+            estimate = (Gf + Rf) / 2
+            logger.debug("NO bound convergence, "
+                         "K={}. ".format(alpha.size) +
+                         "Estimate = {}".format(estimate))
+
+        return estimate
 
     estimates = []
-    for r, est in enumerate(gen_vals()):
+    for r, est in ((r, single_random_estimate()) for r in range(R)):
         estimates.append(est)
         mean = np.mean(estimates)
 
-        # wait a few iterations before calculating statistical error
-        if r > 4:
+        # wait a few iterations before checking error on mean breakout
+        if r >= 2:  # i.e. 3 samples
             err = np.std(estimates) / (r + 1) ** 0.5
-            if err < tol * (tol_scale + abs(mean)):
+            if err < tol * (abs(mean) + tol_scale):
                 logger.debug("repetition convergence with "
-                             "R={}, r={}".format(R, r + 1))
+                             "R={}, r={}. ".format(R, r + 1) +
+                             "Mean = {}".format(mean))
                 return mean
 
+    logger.debug("NO repetition convergence, R={}. ".format(R) +
+                 "Mean = {}".format(mean))
     return mean
 
 
@@ -738,14 +754,8 @@ def entropy_subsys_approx(psi_ab, dims, sysa, **kwargs):
         The sub dimensions of ``psi_ab``.
     sysa : int or sequence of int, optional
         Index(es) of the 'a' subsystem(s) to keep.
-    K : int, optional
-        See :py:func:`approx_spectral_function`.
-    R : int, optional
-        See :py:func:`approx_spectral_function`.
-    bsz : int, optional
-        See :py:func:`approx_spectral_function`.
-    v0 :
-        See :py:func:`approx_spectral_function`.
+    **kwargs
+        See :func:`approx_spectral_function`.
     """
     lo = LazyPtrOperator(psi_ab, dims=dims, sysa=sysa)
     return - tr_xlogx_approx(lo, **kwargs)
@@ -758,7 +768,7 @@ def norm_ppt_subsys_approx(psi_abc, dims, sysa, sysb, **kwargs):
     return tr_abs_approx(lo, **kwargs)
 
 
-def logneg_subsys_approx(*args, **kwargs):
+def logneg_subsys_approx(psi_abc, dims, sysa, sysb, **kwargs):
     """Estimate the logarithmic negativity of a pure state's subsystem.
 
     Parameters
@@ -774,19 +784,14 @@ def logneg_subsys_approx(*args, **kwargs):
     sysa : int or sequence of int, optional
         Index(es) of the 'b' subsystem(s) to keep, with respect to all
         the dimensions, ``dims``, (i.e. pre-partial trace).
-    K : int, optional
-        See :py:func:`approx_spectral_function`.
-    R : int, optional
-        See :py:func:`approx_spectral_function`.
-    bsz : int, optional
-        See :py:func:`approx_spectral_function`.
-    v0 :
-        See :py:func:`approx_spectral_function`.
+    **kwargs
+        See :func:`approx_spectral_function`.
     """
-    return max(log2(norm_ppt_subsys_approx(*args, **kwargs)), 0.0)
+    return max(log2(norm_ppt_subsys_approx(psi_abc, dims, sysa, sysb,
+                                           **kwargs)), 0.0)
 
 
-def negativity_subsys_approx(*args, **kwargs):
+def negativity_subsys_approx(psi_abc, dims, sysa, sysb, **kwargs):
     """Estimate the negativity of a pure state's subsystem.
 
     Parameters
@@ -802,13 +807,8 @@ def negativity_subsys_approx(*args, **kwargs):
     sysa : int or sequence of int, optional
         Index(es) of the 'b' subsystem(s) to keep, with respect to all
         the dimensions, ``dims``, (i.e. pre-partial trace).
-    K : int, optional
-        See :py:func:`approx_spectral_function`.
-    R : int, optional
-        See :py:func:`approx_spectral_function`.
-    bsz : int, optional
-        See :py:func:`approx_spectral_function`.
-    v0 :
-        See :py:func:`approx_spectral_function`.
+    **kwargs
+        See :func:`approx_spectral_function`.
     """
-    return max((norm_ppt_subsys_approx(*args, **kwargs) - 1) / 2, 0.0)
+    return max((norm_ppt_subsys_approx(psi_abc, dims, sysa, sysb,
+                                       **kwargs) - 1) / 2, 0.0)
