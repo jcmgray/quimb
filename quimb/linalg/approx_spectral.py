@@ -22,7 +22,7 @@ class HuskArray(np.ndarray):
 
 
 # --------------------------------------------------------------------------- #
-#                   'Lazy' represenation tensor contractions                  #
+#                  'Lazy' representation tensor contractions                  #
 # --------------------------------------------------------------------------- #
 
 @functools.lru_cache(128)
