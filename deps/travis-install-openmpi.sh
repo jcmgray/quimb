@@ -2,8 +2,8 @@
 set -ex
 
 # Check for pre existing mpi installation
-if [ pip list | grep mpi4py &>/dev/null ]; then
-    echo "mpi4py already installed"
+if $(pip list | grep -F mpi4py &>/dev/null); then
+    echo "mpi4py already installed from cache"
     exit 0
 fi
 

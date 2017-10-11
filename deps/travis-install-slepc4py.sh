@@ -3,8 +3,8 @@ set -ex
 
 export INSTALL_DIR=$HOME/petsc_and_slepc
 
-if [ pip list | grep slepc4py &>/dev/null ]; then
-  echo 'Using cached petsc_and_slepc directory.';
+if $(pip list | grep -F slepc4py &>/dev/null); then
+  echo 'slepc4py already installed from cache';
   exit 0
 fi
 
