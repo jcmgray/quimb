@@ -7,18 +7,12 @@ from math import sqrt, log2, exp
 import numpy as np
 import scipy.linalg as scla
 import scipy.sparse.linalg as spla
-from ..tensor_networks import einsum, einsum_path
+from ..tensor_networks import einsum, einsum_path, HuskArray
 from ..accel import prod, vdot
 from ..utils import int2tup
 
-
-class HuskArray(np.ndarray):
-    """Just an ndarray with only shape defined, so as to allow caching on shape
-    alone.
-    """
-
-    def __init__(self, shape):
-        self.shape = shape
+import logging
+logger = logging.getLogger(__name__)
 
 
 # --------------------------------------------------------------------------- #
@@ -483,8 +477,9 @@ class LazyPtrPptOperator(spla.LinearOperator):
 #                         Lanczos tri-diag technique                          #
 # --------------------------------------------------------------------------- #
 
+TOL_DEFAULT = 1e-2
 K_DEFAULT = 40
-R_DEFAULT = 10
+R_DEFAULT = 40
 BSZ_DEFAULT = 1
 BETA_TOL_DEFAULT = 1e-6
 TAU_DEFAULT = 1e-3
@@ -502,7 +497,10 @@ def norm_fro(a):
     return sqrt(inner(a, a))
 
 
-def construct_lanczos_tridiag(A, K=K_DEFAULT, v0=None, bsz=BSZ_DEFAULT,
+def construct_lanczos_tridiag(A,
+                              K=K_DEFAULT,
+                              v0=None,
+                              bsz=BSZ_DEFAULT,
                               beta_tol=BETA_TOL_DEFAULT):
     """Construct the tridiagonal lanczos matrix using only matvec operators.
     This is a generator that iteratively yields the alpha and beta digaonals
@@ -593,8 +591,14 @@ def calc_trace_fn_tridiag(tl, tv, fn, pos=True):
                for i in range(tl.size))
 
 
-def approx_spectral_function(A, fn, K=K_DEFAULT, R=R_DEFAULT, bsz=BSZ_DEFAULT,
-                             v0=None, pos=False, tau=TAU_DEFAULT,
+def approx_spectral_function(A, fn,
+                             K=K_DEFAULT,
+                             R=R_DEFAULT,
+                             bsz=BSZ_DEFAULT,
+                             v0=None, pos=False,
+                             tol=TOL_DEFAULT,
+                             tol_scale=1,
+                             tau=TAU_DEFAULT,
                              beta_tol=BETA_TOL_DEFAULT):
     """Approximate a spectral function, that is, the quantity ``Tr(fn(A))``.
 
@@ -656,6 +660,8 @@ def approx_spectral_function(A, fn, K=K_DEFAULT, R=R_DEFAULT, bsz=BSZ_DEFAULT,
                 # check for break-down convergence (e.g. found entire non-null)
                 if abs(beta[-1]) < beta_tol:
                     estimate = Gf
+                    logger.debug("beta-breakdown with "
+                                 "K={}, k={}".format(K, alpha.size))
                     break
 
                 # second bound
@@ -667,6 +673,8 @@ def approx_spectral_function(A, fn, K=K_DEFAULT, R=R_DEFAULT, bsz=BSZ_DEFAULT,
                 # check for error bound convergence
                 if abs(Rf - Gf) < 2 * tau * abs(Gf):
                     estimate = (Gf + Rf) / 2
+                    logger.debug("bound convergence with "
+                                 "K={}, k={}".format(K, alpha.size))
                     break
 
             # didn't converge, use best estimate
@@ -675,7 +683,20 @@ def approx_spectral_function(A, fn, K=K_DEFAULT, R=R_DEFAULT, bsz=BSZ_DEFAULT,
 
             yield estimate  # mean of lower and upper bounds
 
-    return sum(gen_vals()) / R  # take average over repeats
+    estimates = []
+    for r, est in enumerate(gen_vals()):
+        estimates.append(est)
+        mean = np.mean(estimates)
+
+        # wait a few iterations before calculating statistical error
+        if r > 4:
+            err = np.std(estimates) / (r + 1) ** 0.5
+            if err < tol * (tol_scale + abs(mean)):
+                logger.debug("repetition convergence with "
+                             "R={}, r={}".format(R, r + 1))
+                return mean
+
+    return mean
 
 
 @functools.wraps(approx_spectral_function)
