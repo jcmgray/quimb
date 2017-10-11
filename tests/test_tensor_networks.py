@@ -277,16 +277,16 @@ class TestTensorNetworkBasic:
 
         d = a_b_c.reindex({4: 'foo', 2: 'bar'})
 
-        assert a_b_c.outer_inds == (4,)
-        assert d.outer_inds == ('foo',)
-        assert set(a_b_c.inner_inds) == {0, 1, 2, 3}
-        assert set(d.inner_inds) == {0, 1, 'bar', 3}
+        assert a_b_c.outer_inds() == (4,)
+        assert d.outer_inds() == ('foo',)
+        assert set(a_b_c.inner_inds()) == {0, 1, 2, 3}
+        assert set(d.inner_inds()) == {0, 1, 'bar', 3}
         assert d.tensors[0].inds == (0, 1, 'bar')
 
         d = a_b_c.reindex({4: 'foo', 2: 'bar'}, inplace=True)
 
-        assert a_b_c.outer_inds == ('foo',)
-        assert set(d.inner_inds) == {0, 1, 'bar', 3}
+        assert a_b_c.outer_inds() == ('foo',)
+        assert set(d.inner_inds()) == {0, 1, 'bar', 3}
         assert d.tensors[0].inds == (0, 1, 'bar')
 
 

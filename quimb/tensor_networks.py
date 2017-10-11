@@ -398,7 +398,6 @@ class Tensor(object):
     def size(self):
         return self.array.size
 
-    @property
     def inner_inds(self):
         ind_freqs = frequencies(self.inds)
         return tuple(filter(lambda i: ind_freqs[i] == 2, self.inds))
@@ -545,6 +544,9 @@ for meth_name, op in [('__radd__', operator.__add__),
 #                            Tensor Network Class                             #
 # --------------------------------------------------------------------------- #
 
+_NON_DATA_PROPS = ['contract_strategy', 'nsites', 'contract_bsz']
+
+
 class TensorNetwork(object):
     """A collection of (as yet uncontracted) Tensors.
 
@@ -571,8 +573,11 @@ class TensorNetwork(object):
         The tensors in this network.
     """
 
-    def __init__(self, *tensors, contract_strategy=None, nsites=None,
-                 check_collisions=True, contract_bsz=3):
+    def __init__(self, *tensors,
+                 check_collisions=True,
+                 contract_strategy=None,
+                 nsites=None,
+                 contract_bsz=3):
 
         self.tensors = []
         self.contract_strategy = contract_strategy
@@ -592,7 +597,7 @@ class TensorNetwork(object):
 
             if check_collisions:
                 # check for matching inner_indices -> need to re-index
-                new_inner_inds = set(t.inner_inds)
+                new_inner_inds = set(t.inner_inds())
                 if current_inner_inds & new_inner_inds:
                     t = t.reindex({old: old + "-{}".format(i)
                                    for old in new_inner_inds})
@@ -602,16 +607,19 @@ class TensorNetwork(object):
                 self.tensors.append(t)
             else:  # assume TensorNetwork
 
-                if t.contract_strategy is not None:
-                    # check whether to inherit ...
-                    if self.contract_strategy is None:
-                        self.contract_strategy = t.contract_strategy
-                    # ... or compare contract_strategies
-                    else:
-                        if t.contract_strategy != self.contract_strategy:
+                for attr in _NON_DATA_PROPS:
+                    if getattr(t, attr) is not None:
+                        # check whether to inherit ...
+                        if getattr(self, attr) is None:
+                            setattr(self, attr, getattr(t, attr))
+                        # ... or compare properties
+                        elif getattr(t, attr) != getattr(self, attr):
                             raise ValueError(
-                                "Conflicting contraction strategies found on "
-                                "tensor networks.")
+                                ("Conflicting values found on tensor "
+                                 "networks for property {}. First value: "
+                                 "{}, second value: {}").format(
+                                    attr, getattr(self, attr),
+                                    getattr(t, attr)))
 
                 self.tensors += t.tensors
 
@@ -626,9 +634,7 @@ class TensorNetwork(object):
         """Properties that can generally be propagated if only arrays are
         changing.
         """
-        return {'contract_strategy': self.contract_strategy,
-                'nsites': self.nsites,
-                'contract_bsz': self.contract_bsz}
+        return {attr: getattr(self, attr) for attr in _NON_DATA_PROPS}
 
     def calc_tag_map(self):
         """Make a dict which maps tags to a list of tensors indices.
@@ -804,49 +810,40 @@ class TensorNetwork(object):
         """
         return self.conj()
 
-    @property
     def all_dims_inds(self):
         """Return a list of all dimensions, and the corresponding list of
         indices from the tensor network.
         """
         return zip(*concat(zip(t.shape, t.inds) for t in self.tensors))
 
-    @property
     def all_inds(self):
         return tuple(concat(t.inds for t in self.tensors))
 
-    @property
     def inner_inds(self):
         """Return all inner indices, that is, those that appear twice.
         """
-        all_inds = self.all_inds
+        all_inds = self.all_inds()
         ind_freqs = frequencies(all_inds)
         return tuple(filter(lambda i: ind_freqs[i] == 2, all_inds))
 
-    @property
     def outer_dims_inds(self):
         """Get the 'outer' pairs of dimension and indices, i.e. as if this
         tensor network was fully contracted.
         """
-        dims, inds = self.all_dims_inds
+        dims, inds = self.all_dims_inds()
         ind_freqs = frequencies(inds)
         return tuple((d, i) for d, i in zip(dims, inds) if ind_freqs[i] == 1)
 
-    @property
     def outer_inds(self):
-        """Actual, i.e. exterior, shape of this TensorNetwork.
+        """Actual, i.e. exterior, indices of this TensorNetwork.
         """
-        return tuple(i for d, i in self.outer_dims_inds)
+        return tuple(i for d, i in self.outer_dims_inds())
 
     @property
     def shape(self):
         """Actual, i.e. exterior, shape of this TensorNetwork.
         """
-        return tuple(d for d, i in self.outer_dims_inds)
-
-    @property
-    def tags(self):
-        return reduce(or_, (t.tags for t in self.tensors))
+        return tuple(d for d, i in self.outer_dims_inds())
 
     def __xor__(self, *args, **kwargs):
         """Overload of '^' for TensorNetwork.contract.
