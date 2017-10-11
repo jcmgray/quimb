@@ -596,35 +596,39 @@ class TensorNetwork(object):
                                 "arguments are Tensors or TensorNetworks.")
 
             if check_collisions:
+
                 # check for matching inner_indices -> need to re-index
                 new_inner_inds = set(t.inner_inds())
-                if current_inner_inds & new_inner_inds:
+                if current_inner_inds & new_inner_inds:  # any overlap
                     t = t.reindex({old: old + "-{}".format(i)
                                    for old in new_inner_inds})
                 current_inner_inds |= new_inner_inds
 
+                # check for tensor index collisions -> rename
+
             if istensor:
                 self.tensors.append(t)
-            else:  # assume TensorNetwork
+                continue
 
-                for attr in _NON_DATA_PROPS:
-                    if getattr(t, attr) is not None:
-                        # check whether to inherit ...
-                        if getattr(self, attr) is None:
-                            setattr(self, attr, getattr(t, attr))
-                        # ... or compare properties
-                        elif getattr(t, attr) != getattr(self, attr):
-                            raise ValueError(
-                                ("Conflicting values found on tensor "
-                                 "networks for property {}. First value: "
-                                 "{}, second value: {}").format(
-                                    attr, getattr(self, attr),
-                                    getattr(t, attr)))
+            for x in _NON_DATA_PROPS:
+                # check whether to inherit ... or compare properties
+                if getattr(t, x) is not None:
 
-                self.tensors += t.tensors
+                    # dont' have prop yet -> inherit
+                    if getattr(self, x) is None:
+                        setattr(self, x, getattr(t, x))
+
+                    # both have prop, and don't match -> raise
+                    elif getattr(t, x) != getattr(self, x):
+                        raise ValueError(
+                            "Conflicting values found on tensor networks for "
+                            "property {}. First value: {}, second value: {}"
+                            .format(x, getattr(self, x), getattr(t, x)))
+
+            self.tensors += t.tensors
 
         # build a map to efficiently locate tensors.
-        self.tag_map = self.calc_tag_map()
+        self.tag_index = self.calc_tag_index()
 
         # count how many sites if a contract_strategy is given
         if (self.contract_strategy) and (self.nsites is None):
@@ -636,24 +640,24 @@ class TensorNetwork(object):
         """
         return {attr: getattr(self, attr) for attr in _NON_DATA_PROPS}
 
-    def calc_tag_map(self):
+    def calc_tag_index(self):
         """Make a dict which maps tags to a list of tensors indices.
         """
-        tag_map = {}
+        tag_index = {}
         for i, t in enumerate(self.tensors):
             for tag in t.tags:
-                if tag in tag_map:
-                    tag_map[tag].append(i)
+                if tag in tag_index:
+                    tag_index[tag].append(i)
                 else:
-                    tag_map[tag] = [i]
-        return tag_map
+                    tag_index[tag] = [i]
+        return tag_index
 
     def calc_nsites(self):
         """Calculate how many tags there are which match ``contract_strategy``.
         """
         nsites = 0
         for i in range(10000):
-            if self.contract_strategy.format(i) in self.tag_map:
+            if self.contract_strategy.format(i) in self.tag_index:
                 nsites += 1
             else:
                 break
@@ -679,9 +683,9 @@ class TensorNetwork(object):
 
         # Else get the locations of where each tag is found on tensor
         if isinstance(tags, str):
-            tagged_locs = set(self.tag_map[tags])
+            tagged_locs = set(self.tag_index[tags])
         else:
-            tagged_locs = set(concat(map(self.tag_map.__getitem__, tags)))
+            tagged_locs = set(concat(map(self.tag_index.__getitem__, tags)))
 
         # Split a (loc, Tensor) list into tagged and untagged groups
         groups = groupby(lambda x: x[0] in tagged_locs,
@@ -801,8 +805,7 @@ class TensorNetwork(object):
         """Conjugate all the tensors in this network (leaves all indices).
         """
         return TensorNetwork(*[t.conj() for t in self.tensors],
-                             check_collisions=False,
-                             **self._non_data_props())
+                             check_collisions=False, **self._non_data_props())
 
     @property
     def H(self):
