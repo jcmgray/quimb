@@ -33,7 +33,7 @@ cd "$BUILD_DIR/$OPENMPI_VER"
     FOPTFLAGS='-O0' \
     --prefix=$INSTALL_DIR \
     --disable-dlopen
-make
+make -s
 make install
 
 # install python package
