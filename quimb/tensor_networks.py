@@ -114,7 +114,7 @@ def _maybe_map_indices_to_alphabet(a_ix, i_ix, o_ix):
     contract_str : str
         The string to feed to einsum/contract.
     """
-    a_ix = set(a_ix)
+    a_ix = sorted(set(a_ix))
 
     if any(i not in _einsum_symbols_set for i in a_ix):
         # need to map inds to alphabet
@@ -133,6 +133,21 @@ def _maybe_map_indices_to_alphabet(a_ix, i_ix, o_ix):
         out_str = "".join(o_ix)
 
     return ",".join(in_str) + "->" + out_str
+
+
+class HuskArray(np.ndarray):
+    """Just an ndarray with only shape defined, so as to allow caching on shape
+    alone.
+    """
+
+    def __init__(self, shape):
+        self.shape = shape
+
+
+@functools.lru_cache(1024)
+def cache_einsum_path_on_shape(contract_str, *shapes):
+    return einsum_path(contract_str, *(HuskArray(shape) for shape in shapes),
+                       memory_limit=2**28, optimize='greedy')[0]
 
 
 def tensor_contract(*tensors,
@@ -170,8 +185,11 @@ def tensor_contract(*tensors,
     contract_str = _maybe_map_indices_to_alphabet(a_ix, i_ix, o_ix)
 
     # perform the contraction
+    path = cache_einsum_path_on_shape(contract_str,
+                                      *(t.shape for t in tensors))
+
     o_array = einsum(contract_str, *(t.array for t in tensors),
-                     memory_limit=memory_limit, optimize=optimize)
+                     optimize=path)
 
     if not o_ix:
         return o_array
