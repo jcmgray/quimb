@@ -7,7 +7,7 @@ from functools import reduce
 import operator
 from operator import or_
 
-from cytoolz import concat, frequencies, groupby
+from cytoolz import concat, frequencies, groupby, partition_all
 import numpy as np
 
 from .accel import prod, make_immutable, njit
@@ -572,10 +572,11 @@ class TensorNetwork(object):
     """
 
     def __init__(self, *tensors, contract_strategy=None, nsites=None,
-                 check_collisions=True):
+                 check_collisions=True, contract_bsz=3):
 
         self.tensors = []
         self.contract_strategy = contract_strategy
+        self.contract_bsz = contract_bsz
         self.nsites = nsites
         current_inner_inds = set()
 
@@ -600,6 +601,7 @@ class TensorNetwork(object):
             if istensor:
                 self.tensors.append(t)
             else:  # assume TensorNetwork
+
                 if t.contract_strategy is not None:
                     # check whether to inherit ...
                     if self.contract_strategy is None:
@@ -619,6 +621,14 @@ class TensorNetwork(object):
         # count how many sites if a contract_strategy is given
         if (self.contract_strategy) and (self.nsites is None):
             self.nsites = self.calc_nsites()
+
+    def _non_data_props(self):
+        """Properties that can generally be propagated if only arrays are
+        changing.
+        """
+        return {'contract_strategy': self.contract_strategy,
+                'nsites': self.nsites,
+                'contract_bsz': self.contract_bsz}
 
     def calc_tag_map(self):
         """Make a dict which maps tags to a list of tensors indices.
@@ -677,6 +687,20 @@ class TensorNetwork(object):
 
         return untagged, tagged
 
+    def _contract_tags(self, tags):
+        untagged, tagged = self.filter_by_tags(tags)
+
+        if not tagged:
+            raise ValueError("No tags were found - nothing to contract. "
+                             "(Change this to a no-op maybe?)")
+
+        if untagged:
+            return TensorNetwork(tensor_contract(*tagged), *untagged,
+                                 check_collisions=False,
+                                 **self._non_data_props())
+
+        return tensor_contract(*tagged)
+
     def contract(self, tags=...):
         """Contract some, or all, of the tensors in this network.
 
@@ -699,23 +723,18 @@ class TensorNetwork(object):
                 tags = slice(0, self.nsites)
 
             if isinstance(tags, slice):
-                return self >> (self.contract_strategy.format(i) for i in
-                                range(tags.start, tags.stop,
-                                      1 if tags.step is None else tags.step))
+                step = 1 if tags.step is None else tags.step
+
+                tags_seq = (self.contract_strategy.format(i)
+                            for i in range(tags.start, tags.stop, step))
+
+                if self.contract_bsz > 1:
+                    tags_seq = partition_all(self.contract_bsz, tags_seq)
+
+                return self.cumulative_contract(tags_seq)
 
         # Else just contract those tensors specified by tags.
-        untagged, tagged = self.filter_by_tags(tags)
-
-        if not tagged:
-            raise ValueError("No tags were found - nothing to contract. "
-                             "(Change this to a no-op maybe?)")
-
-        if untagged:
-            return TensorNetwork(tensor_contract(*tagged), *untagged,
-                                 contract_strategy=self.contract_strategy,
-                                 nsites=self.nsites, check_collisions=False)
-
-        return tensor_contract(*tagged)
+        return self._contract_tags(tags)
 
     def cumulative_contract(self, tags_seq):
         """Cumulative contraction of tensor network. Contract the first set of
@@ -739,9 +758,19 @@ class TensorNetwork(object):
 
         for tags in tags_seq:
             # accumulate tags from each contractions
-            ctags |= {tags} if isinstance(tags, str) else set(tags)
+            if isinstance(tags, str):
+                tags = {tags}
+            elif isinstance(tags, slice):
+                step = 1 if tags.step is None else tags.step
+                tags = {self.contract_strategy.format(i)
+                        for i in range(tags.start, tags.stop, step)}
+            else:
+                tags = set(tags)
+
+            ctags |= tags
+
             # peform the next contraction
-            new_tn ^= ctags
+            new_tn = new_tn._contract_tags(ctags)
 
         return new_tn
 
@@ -759,15 +788,15 @@ class TensorNetwork(object):
             return self
         else:
             return TensorNetwork(*(t.reindex(index_map) for t in self.tensors),
-                                 contract_strategy=self.contract_strategy,
-                                 nsites=self.nsites, check_collisions=False)
+                                 check_collisions=False,
+                                 **self._non_data_props())
 
     def conj(self):
         """Conjugate all the tensors in this network (leaves all indices).
         """
         return TensorNetwork(*[t.conj() for t in self.tensors],
-                             contract_strategy=self.contract_strategy,
-                             nsites=self.nsites, check_collisions=False)
+                             check_collisions=False,
+                             **self._non_data_props())
 
     @property
     def H(self):
@@ -891,7 +920,8 @@ def matrix_product_state(*arrays,
                          site_inds=None,
                          site_tags=None,
                          tags=None,
-                         bond_name="",):
+                         bond_name="",
+                         **kwargs):
     """Initialise a matrix product state, with auto labelling and tagging.
 
     Parameters
@@ -968,7 +998,7 @@ def matrix_product_state(*arrays,
                           tags=site_tags[-1]))
 
     return TensorNetwork(*tensors, contract_strategy=contract_strategy,
-                         nsites=nsites, check_collisions=False)
+                         nsites=nsites, check_collisions=False, **kwargs)
 
 
 def matrix_product_operator(*arrays, shape='lrkb',
@@ -976,7 +1006,8 @@ def matrix_product_operator(*arrays, shape='lrkb',
                             bra_site_inds=None,
                             site_tags=None,
                             tags=None,
-                            bond_name=""):
+                            bond_name="",
+                            **kwargs):
     """Initialise a matrix product operator, with auto labelling and tagging.
 
     Parameters
@@ -1064,7 +1095,7 @@ def matrix_product_operator(*arrays, shape='lrkb',
                           tags=site_tags[-1]))
 
     return TensorNetwork(*tensors, contract_strategy=contract_strategy,
-                         nsites=nsites, check_collisions=False)
+                         nsites=nsites, check_collisions=False, **kwargs)
 
 
 # --------------------------------------------------------------------------- #
@@ -1076,7 +1107,8 @@ def rand_ket_mps(n, bond_dim, phys_dim=2,
                  site_tags=None,
                  tags=None,
                  bond_name="",
-                 normalize=True):
+                 normalize=True,
+                 **kwargs):
     """Generate a random matrix product state.
 
     Parameters
@@ -1105,7 +1137,7 @@ def rand_ket_mps(n, bond_dim, phys_dim=2,
 
     rmps = matrix_product_state(*arrays, site_inds=site_inds,
                                 bond_name=bond_name, site_tags=site_tags,
-                                tags=tags)
+                                tags=tags, **kwargs)
 
     if normalize:
         c = (rmps.H @ rmps)**0.5

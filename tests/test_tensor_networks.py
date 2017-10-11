@@ -145,13 +145,13 @@ class TestBasicTensorOperations:
         assert c.inds == (-1, -3)
 
     def test_contract_with_wild_mix(self):
-        a = Tensor(np.random.randn(2, 3, 4), inds=[-1, 'a', 'foo'],
+        a = Tensor(np.random.randn(2, 3, 4), inds=['-1', 'a', 'foo'],
                    tags='red')
-        b = Tensor(np.random.randn(3, 4, 5), inds=['a', 'foo', 42.42],
+        b = Tensor(np.random.randn(3, 4, 5), inds=['a', 'foo', '42.42'],
                    tags='blue')
         c = a @ b
         assert c.shape == (2, 5)
-        assert c.inds == (-1, 42.42)
+        assert c.inds == ('-1', '42.42')
 
     def test_fuse(self):
         a = Tensor(np.random.rand(2, 3, 4, 5), 'abcd', tags={'blue'})
