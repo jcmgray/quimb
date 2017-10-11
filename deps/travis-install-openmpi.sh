@@ -39,7 +39,7 @@ make install
 # install python package
 MPI4PY_REPO=${MPI4PY_REPO:-"https://bitbucket.org/mpi4py/mpi4py.git"}
 cd $BUILD_DIR
-if [ -d "$BUILD_DIR/mpi4py" ]; then
+if [ ! -d "$BUILD_DIR/mpi4py" ]; then
     git clone $MPI4PY_REPO
 fi
 cd $BUILD_DIR/mpi4py
