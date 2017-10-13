@@ -588,17 +588,56 @@ def calc_trace_fn_tridiag(tl, tv, fn, pos=True):
                for i in range(tl.size))
 
 
+def ext_per_trim(x, p=0.6, s=1.0):
+    """Extended percentile trimmed-mean. Makes the mean robust to asymmetric
+    outliers, while using all data when it is nicely clustered. This can be
+    visualized roughly as:
+
+            |--------|=========|--------|
+        x     x   xx xx xxxxx xxx   xx     x      x           x
+
+    Where the inner range contains the central ``p`` proportion of the data,
+    and the outer ranges entends this by a factor of ``s`` either side.
+
+    Parameters
+    ----------
+    x : array
+        Data to trim.
+    p : Proportion of data used to define the 'central' percentile.
+        For example, p=0.5 gives the inter-quartile range.
+    s : Include data up to this factor times the central 'percentile' range
+        away from the central percentile itself.
+
+    Returns
+    xt : array
+        Trimmed data.
+    """
+    lb = np.percentile(x, 100 * (1 - p) / 2)
+    ub = np.percentile(x, 100 * (1 + p) / 2)
+    ib = ub - lb
+
+    x = np.array(x)
+    trimmed_x = x[(lb - s * ib < x) & (x < ub + s * ib)]
+
+    logger.debug("ext_per_trim: trimming data from {} to {}"
+                 .format(x.size, trimmed_x.size))
+
+    return trimmed_x
+
+
 def approx_spectral_function(
         A, fn,
-        tol=1e-2,
+        tol=5e-3,
         K=100,
-        R=25,
-        bsz=5,
+        R=100,
+        bsz=10,
         v0=None,
         pos=False,
         tau=1e-3,
         tol_scale=1,
-        beta_tol=1e-6):
+        beta_tol=1e-6,
+        mean_p=0.7,
+        mean_s=1.0):
     """Approximate a spectral function, that is, the quantity ``Tr(fn(A))``.
 
     Parameters
@@ -610,22 +649,22 @@ def approx_spectral_function(
         Scalar function with with to act on approximate eigenvalues.
     tol : float, optional
         Convergence tolerance threshold for error on mean of repeats. This can
-        be relied on as the overall accuracy. See ``tol_scale`` and ``tau``.
-        Default: 1%.
+        pretty much be relied on as the overall accuracy. See also
+        ``tol_scale`` and ``tau``. Default: 0.5%.
     K : int, optional
         The size of the tri-diagonal lanczos matrix to form. Cost of algorithm
         scales linearly with ``K``. If ``tau`` is non-zero, this is the
-        maximum size matrix to form. Default: 40.
+        maximum size matrix to form. Default: 100.
     R : int, optional
         The number of repeats with different initial random vectors to perform.
         Increasing this should increase accuracy as ``sqrt(R)``. Cost of
         algorithm thus scales linearly with ``R``. If ``tol`` is non-zero, this
-        is the maximum number of repeats. Default: 40.
+        is the maximum number of repeats. Default: 100.
     bsz : int, optional
         Number of simultenous vector columns to use at once, 1 equating to the
         standard lanczos method. If ``bsz > 1`` then ``A`` must implement
         matrix-matrix multiplication. This is a more performant way of
-        essentially increasing ``R``, at the cost of more memory. Default: 5.
+        essentially increasing ``R``, at the cost of more memory. Default: 10.
     v0 : vector, or callable
         Initial vector to iterate with, sets ``R=1`` if given. If callable, the
         function to produce a random intial vector (sequence).
@@ -635,8 +674,8 @@ def approx_spectral_function(
     tau : float, optional
         The relative tolerance required for a single lanczos run to converge.
         This needs to be small enough that each estimate with a single random
-        vector produces an unbiased sample of the opeators spectrum.
-        Default: 0.1%.
+        vector produces an unbiased sample of the operators spectrum.
+        Default: 0.05%.
     tol_scale : float, optional
         This sets the overall expected scale of each estimate, so that an
         absolute tolerance can be used for values near zero. Default: 1.
@@ -644,6 +683,12 @@ def approx_spectral_function(
         The 'breakdown' tolerance. If the next beta ceofficient in the lanczos
         matrix is less that this, implying that the full non-null space has
         been found, terminate early. Default: 1e-6.
+    mean_p : float, optional
+        Factor for robustly finding mean and err of repeat estimates,
+        see :func:`ext_per_trim`.
+    mean_s : float, optional
+        Factor for robustly finding mean and err of repeat estimates,
+        see :func:`ext_per_trim`.
 
     Returns
     -------
@@ -696,23 +741,29 @@ def approx_spectral_function(
 
         return estimate
 
-    estimates = []
-    for r, est in ((r, single_random_estimate()) for r in range(R)):
-        estimates.append(est)
-        mean = np.mean(estimates)
+    estimate = None
+    samples = []
+
+    for r, sample in ((r, single_random_estimate()) for r in range(R)):
+        samples.append(sample)
 
         # wait a few iterations before checking error on mean breakout
-        if r >= 2:  # i.e. 3 samples
-            err = np.std(estimates) / (r + 1) ** 0.5
-            if err < tol * (abs(mean) + tol_scale):
-                logger.debug("repetition convergence with "
-                             "R={}, r={}. ".format(R, r + 1) +
-                             "Mean = {}".format(mean))
-                return mean
+        if r >= 3:  # i.e. 4 samples
+            xtrim = ext_per_trim(samples, p=mean_p, s=mean_s)
+            estimate, sdev = np.mean(xtrim), np.std(xtrim)
 
-    logger.debug("NO repetition convergence, R={}. ".format(R) +
-                 "Mean = {}".format(mean))
-    return mean
+            err = sdev / r ** 0.5
+
+            logger.debug("r={} of R={}, err={}, required={}"
+                         .format(r + 1, R, err,
+                                 tol * (abs(estimate) + tol_scale)))
+
+            if err < tol * (abs(estimate) + tol_scale):
+                logger.debug("repetition convergence!")
+                return estimate
+
+    logger.debug("NO repetition convergence...")
+    return np.mean(samples) if estimate is None else estimate
 
 
 @functools.wraps(approx_spectral_function)
