@@ -11,9 +11,6 @@ from ..tensor_networks import einsum, einsum_path, HuskArray
 from ..accel import prod, vdot
 from ..utils import int2tup
 
-import logging
-logger = logging.getLogger(__name__)
-
 
 # --------------------------------------------------------------------------- #
 #                  'Lazy' representation tensor contractions                  #
@@ -619,9 +616,6 @@ def ext_per_trim(x, p=0.6, s=1.0):
     x = np.array(x)
     trimmed_x = x[(lb - s * ib < x) & (x < ub + s * ib)]
 
-    logger.debug("ext_per_trim: trimming data from {} to {}"
-                 .format(x.size, trimmed_x.size))
-
     return trimmed_x
 
 
@@ -713,9 +707,6 @@ def approx_spectral_function(
             # check for break-down convergence (e.g. found entire non-null)
             if abs(beta[-1]) < beta_tol:
                 estimate = Gf
-                logger.debug("beta-breakdown convergence with "
-                             "K={}, k={}. ".format(K, alpha.size) +
-                             "Estimate = {}".format(estimate))
                 break
 
             # second bound
@@ -727,17 +718,11 @@ def approx_spectral_function(
             # check for error bound convergence
             if abs(Rf - Gf) < 2 * tau * (abs(Gf) + tol_scale):
                 estimate = (Gf + Rf) / 2
-                logger.debug("bound convergence with "
-                             "K={}, k={}. ".format(K, alpha.size) +
-                             "Estimate = {}".format(estimate))
                 break
 
         # didn't converge, use best estimate
         if estimate is None:
             estimate = (Gf + Rf) / 2
-            logger.debug("NO bound convergence, "
-                         "K={}. ".format(alpha.size) +
-                         "Estimate = {}".format(estimate))
 
         return estimate
 
@@ -754,15 +739,9 @@ def approx_spectral_function(
 
             err = sdev / r ** 0.5
 
-            logger.debug("r={} of R={}, err={}, required={}"
-                         .format(r + 1, R, err,
-                                 tol * (abs(estimate) + tol_scale)))
-
             if err < tol * (abs(estimate) + tol_scale):
-                logger.debug("repetition convergence!")
                 return estimate
 
-    logger.debug("NO repetition convergence...")
     return np.mean(samples) if estimate is None else estimate
 
 
