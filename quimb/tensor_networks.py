@@ -71,7 +71,8 @@ def tensor_transpose(tensor, output_inds):
 
     if set(tensor.inds) != set(output_inds):
         raise ValueError("'output_inds' must be permutation of the "
-                         "current tensor indices.")
+                         "current tensor indices, but {} != {}"
+                         .format(set(tensor.inds), set(output_inds)))
 
     current_ind_map = {ind: i for i, ind in enumerate(tensor.inds)}
     out_shape = map(current_ind_map.__getitem__, output_inds)
@@ -379,10 +380,14 @@ class Tensor(object):
                      {tags} if isinstance(tags, str) else
                      set(tags))
 
-    def conj(self):
+    def conj(self, inplace=False):
         """Conjugate this tensors data (does nothing to indices).
         """
-        return Tensor(self.array.conj(), self.inds, self.tags)
+        if inplace:
+            self.array = self.array.conj()
+            return self
+        else:
+            return Tensor(self.array.conj(), self.inds, self.tags)
 
     @property
     def H(self):
@@ -600,14 +605,13 @@ class TensorNetwork(object):
                 # check for matching inner_indices -> need to re-index
                 new_inner_inds = set(t.inner_inds())
                 if current_inner_inds & new_inner_inds:  # any overlap
-                    t = t.reindex({old: old + "-{}".format(i)
-                                   for old in new_inner_inds})
+                    t = t.reindex({old: old + "'" for old in new_inner_inds})
                 current_inner_inds |= new_inner_inds
 
                 # check for tensor index collisions -> rename
 
             if istensor:
-                self.tensors.append(t)
+                self.tensors[rand_uuid(base='_T')] =
                 continue
 
             for x in _NON_DATA_PROPS:
@@ -801,11 +805,17 @@ class TensorNetwork(object):
                                  check_collisions=False,
                                  **self._non_data_props())
 
-    def conj(self):
+    def conj(self, inplace=False):
         """Conjugate all the tensors in this network (leaves all indices).
         """
-        return TensorNetwork(*[t.conj() for t in self.tensors],
-                             check_collisions=False, **self._non_data_props())
+        if inplace:
+            for t in self.tensors:
+                t.conj(inplace=True)
+            return self
+        else:
+            return TensorNetwork(*[t.conj() for t in self.tensors],
+                                 check_collisions=False,
+                                 **self._non_data_props())
 
     @property
     def H(self):

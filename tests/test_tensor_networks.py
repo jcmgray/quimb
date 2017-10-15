@@ -77,6 +77,12 @@ class TestBasicTensorOperations:
             c = op(a, b)
             assert_allclose(c.array, op(a.array, b.array))
 
+    def test_tensor_conj_inplace(self):
+        array = np.random.rand(2, 3, 4)
+        a = Tensor(array, inds=[0, 1, 2], tags='blue')
+        a.conj(inplace=True)
+        assert_allclose(array.conj(), a.array)
+
     def test_contract_some(self):
         a = Tensor(np.random.randn(2, 3, 4), inds=[0, 1, 2])
         b = Tensor(np.random.randn(3, 4, 5), inds=[1, 2, 3])
@@ -172,6 +178,15 @@ class TestBasicTensorOperations:
         assert b.inds == ('bra', 'ket', 'e', 'f')
         assert b.tags == {'blue'}
 
+    def test_tensor_transpose(self):
+        a = Tensor(np.random.rand(2, 3, 4, 5, 2, 2), 'abcdef', tags={'blue'})
+        at = a.transpose(*'cdfeba')
+        assert at.shape == (4, 5, 2, 2, 3, 2)
+        assert at.inds == ('c', 'd', 'f', 'e', 'b', 'a')
+
+        with pytest.raises(ValueError):
+            a.transpose(*'cdfebz')
+
 
 class TestTensorFunctions:
     @pytest.mark.parametrize('method', ['svd', 'eig', 'qr', 'lq'])
@@ -189,7 +204,7 @@ class TestTensorFunctions:
         assert (a_split ^ ...).almost_equals(a)
 
 
-class TestTensorNetworkBasic:
+class TestTensorNetwork:
     def test_combining_tensors(self):
         a = Tensor(np.random.randn(2, 3, 4), inds=[0, 1, 2],
                    tags='red')
@@ -220,6 +235,21 @@ class TestTensorNetworkBasic:
 
         with pytest.raises(TypeError):
             TensorNetwork((a, b))  # note extra bracket
+
+    def test_conj_inplace(self):
+        a_array = np.random.randn(2, 3, 4)
+        b_array = np.random.randn(3, 4, 5)
+        c_array = np.random.randn(5, 2, 6)
+
+        a = Tensor(a_array, inds=[0, 1, 2], tags='red')
+        b = Tensor(b_array, inds=[1, 2, 3], tags='blue')
+        c = Tensor(c_array, inds=[3, 0, 4], tags='blue')
+
+        tn = a & b & c
+        tn.conj(inplace=True)
+
+        for i, arr in enumerate((a_array, b_array, c_array)):
+            assert_allclose(tn.tensors[i].array, arr.conj())
 
     def test_contracting_tensors(self):
         a = Tensor(np.random.randn(2, 3, 4), inds=[0, 1, 2],
