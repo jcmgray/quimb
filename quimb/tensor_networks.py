@@ -343,9 +343,9 @@ def tensor_split(tensor, left_inds, bond_name="", method='svd',
 
     bond_ind = rand_uuid(base=bond_name)
 
-    return TensorNetwork(
+    return TensorNetwork((
         Tensor(array=left, inds=(*left_inds, bond_ind), tags=tensor.tags),
-        Tensor(array=right, inds=(bond_ind, *right_inds), tags=tensor.tags),
+        Tensor(array=right, inds=(bond_ind, *right_inds), tags=tensor.tags)),
         check_collisions=False,
     )
 
@@ -480,7 +480,7 @@ class Tensor(object):
         """Combine with another ``Tensor`` or ``TensorNetwork`` into a new
         ``TensorNetwork``.
         """
-        return TensorNetwork(self, other)
+        return TensorNetwork((self, other))
 
     def __matmul__(self, other):
         """Explicitly contract with another tensor.
@@ -557,7 +557,7 @@ class TensorNetwork(object):
 
     Parameters
     ----------
-    *tensors : sequence of Tensor or TensorNetwork
+    tensors : sequence of Tensor or TensorNetwork
         The objects to combine.
     contract_strategy : str, optional
         A string, with integer format specifier, that describes how to range
@@ -578,7 +578,7 @@ class TensorNetwork(object):
         The tensors in this network.
     """
 
-    def __init__(self, *tensors,
+    def __init__(self, tensors, *,
                  check_collisions=True,
                  contract_strategy=None,
                  nsites=None,
@@ -597,8 +597,9 @@ class TensorNetwork(object):
 
             if not (istensor or istensornetwork):
                 raise TypeError("TensorNetwork should be called as "
-                                "``TensorNetwork(*tensors)``, where all "
-                                "arguments are Tensors or TensorNetworks.")
+                                "'TensorNetwork(tensors, ...)', where each "
+                                "object in 'tensors' is a Tensor or "
+                                "TensorNetwork.")
 
             if check_collisions:
 
@@ -611,7 +612,7 @@ class TensorNetwork(object):
                 # check for tensor index collisions -> rename
 
             if istensor:
-                self.tensors[rand_uuid(base='_T')] =
+                self.tensors.append(t)
                 continue
 
             for x in _NON_DATA_PROPS:
@@ -709,7 +710,7 @@ class TensorNetwork(object):
                              "(Change this to a no-op maybe?)")
 
         if untagged:
-            return TensorNetwork(tensor_contract(*tagged), *untagged,
+            return TensorNetwork((tensor_contract(*tagged), *untagged),
                                  check_collisions=False,
                                  **self._non_data_props())
 
@@ -801,7 +802,7 @@ class TensorNetwork(object):
                 t.reindex(index_map, inplace=True)
             return self
         else:
-            return TensorNetwork(*(t.reindex(index_map) for t in self.tensors),
+            return TensorNetwork((t.reindex(index_map) for t in self.tensors),
                                  check_collisions=False,
                                  **self._non_data_props())
 
@@ -813,7 +814,7 @@ class TensorNetwork(object):
                 t.conj(inplace=True)
             return self
         else:
-            return TensorNetwork(*[t.conj() for t in self.tensors],
+            return TensorNetwork((t.conj() for t in self.tensors),
                                  check_collisions=False,
                                  **self._non_data_props())
 
@@ -881,12 +882,12 @@ class TensorNetwork(object):
     def __and__(self, other):
         """Combine this tensor network with more tensors, without contracting.
         """
-        return TensorNetwork(self, other)
+        return TensorNetwork((self, other))
 
     def __matmul__(self, other):
         """Overload "@" to mean full contraction with another network.
         """
-        return TensorNetwork(self, other) ^ ...
+        return TensorNetwork((self, other)) ^ ...
 
     def __repr__(self):
         return "TensorNetwork({}, {}, {})".format(
@@ -1007,7 +1008,7 @@ def matrix_product_state(*arrays,
                           inds=[previous_bond, site_inds[-1]],
                           tags=site_tags[-1]))
 
-    return TensorNetwork(*tensors, contract_strategy=contract_strategy,
+    return TensorNetwork(tensors, contract_strategy=contract_strategy,
                          nsites=nsites, check_collisions=False, **kwargs)
 
 
@@ -1104,7 +1105,7 @@ def matrix_product_operator(*arrays, shape='lrkb',
                                 bra_site_inds[-1]],
                           tags=site_tags[-1]))
 
-    return TensorNetwork(*tensors, contract_strategy=contract_strategy,
+    return TensorNetwork(tensors, contract_strategy=contract_strategy,
                          nsites=nsites, check_collisions=False, **kwargs)
 
 

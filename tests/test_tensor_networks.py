@@ -218,9 +218,9 @@ class TestTensorNetwork:
 
         abc1 = (a & b & c).H.contract()
         abc2 = (a & (b & c)).H.contract()
-        abc3 = (TensorNetwork(a, b, c)).H.contract()
-        abc4 = (TensorNetwork(a, TensorNetwork(b, c))).H.contract()
-        abc5 = (TensorNetwork(a) & TensorNetwork(b, c)).H.contract()
+        abc3 = (TensorNetwork([a, b, c])).H.contract()
+        abc4 = (TensorNetwork([a, TensorNetwork([b, c])])).H.contract()
+        abc5 = (TensorNetwork([a]) & TensorNetwork([b, c])).H.contract()
 
         assert_allclose(abc1.array, abc2.array)
         assert_allclose(abc1.array, abc3.array)
@@ -234,7 +234,7 @@ class TestTensorNetwork:
                    tags='blue')
 
         with pytest.raises(TypeError):
-            TensorNetwork((a, b))  # note extra bracket
+            TensorNetwork(a, b)  # missing brackets around ``a, b``.
 
     def test_conj_inplace(self):
         a_array = np.random.randn(2, 3, 4)
@@ -285,11 +285,11 @@ class TestTensorNetwork:
 
     def test_entanglement_of_mps_state(self):
 
-        mps = TensorNetwork(
+        mps = TensorNetwork([
             Tensor(np.random.randn(2, 8), [0, 1]),
             *[Tensor(np.random.randn(8, 2, 8), [2 * i - 1, 2 * i, 2 * i + 1])
               for i in range(1, 9)],
-            Tensor(np.random.randn(8, 2), [17, 18])
+            Tensor(np.random.randn(8, 2), [17, 18])]
         )
 
         psi = mps.contract()
