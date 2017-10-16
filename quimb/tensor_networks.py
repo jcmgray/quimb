@@ -3,11 +3,15 @@
 
 import os
 import functools
-from functools import reduce
 import operator
-from operator import or_
+import copy
 
-from cytoolz import concat, frequencies, groupby, partition_all
+from cytoolz import (
+    concat,
+    frequencies,
+    partition_all,
+    merge_with,
+)
 import numpy as np
 
 from .accel import prod, make_immutable, njit
@@ -47,6 +51,15 @@ except ImportError:
     def einsum_path(*args, optimize='greedy', memory_limit=2**28, **kwargs):
         return np.einsum_path(
             *args, optimize=(optimize, memory_limit), **kwargs)
+
+
+def set_join(sets):
+    """Combine a sequence of sets.
+    """
+    new_set = set()
+    for each_set in sets:
+        new_set |= each_set
+    return new_set
 
 
 # --------------------------------------------------------------------------- #
@@ -103,7 +116,7 @@ def _maybe_map_indices_to_alphabet(a_ix, i_ix, o_ix):
 
     Parameters
     ----------
-    a_ix : sequence
+    a_ix : set
         All of the input indices.
     i_ix : sequence of sequence
         The input indices per tensor.
@@ -115,7 +128,8 @@ def _maybe_map_indices_to_alphabet(a_ix, i_ix, o_ix):
     contract_str : str
         The string to feed to einsum/contract.
     """
-    a_ix = sorted(set(a_ix))
+    # TODO: sort by which group of i_ix they appear in
+    # a_ix = sorted(set(a_ix), key=lambda ind: inner_rank(ind, i_ix))
 
     if any(i not in _einsum_symbols_set for i in a_ix):
         # need to map inds to alphabet
@@ -133,7 +147,11 @@ def _maybe_map_indices_to_alphabet(a_ix, i_ix, o_ix):
         in_str = map("".join, i_ix)
         out_str = "".join(o_ix)
 
-    return ",".join(in_str) + "->" + out_str
+    s = ",".join(in_str) + "->" + out_str
+
+    # re-order strings, for caching
+    return "".join(_einsum_symbols[s.replace(',', "").find(x)]
+                   if x not in {',', '-', '>'} else x for x in s)
 
 
 class HuskArray(np.ndarray):
@@ -173,8 +191,8 @@ def tensor_contract(*tensors,
     -------
     scalar or Tensor
     """
-    i_ix = [t.inds for t in tensors]  # input indices per tensor
-    a_ix = list(concat(i_ix))  # list of all input indices
+    i_ix = tuple(t.inds for t in tensors)  # input indices per tensor
+    a_ix = tuple(concat(i_ix))  # list of all input indices
 
     if output_inds is None:
         # sort output indices  by input order for efficiency and consistency
@@ -183,20 +201,19 @@ def tensor_contract(*tensors,
         o_ix = output_inds
 
     # possibly map indices into the 0-52 range needed by einsum
-    contract_str = _maybe_map_indices_to_alphabet(a_ix, i_ix, o_ix)
+    contract_str = _maybe_map_indices_to_alphabet(set(a_ix), i_ix, o_ix)
 
     # perform the contraction
-    path = cache_einsum_path_on_shape(contract_str,
-                                      *(t.shape for t in tensors))
-
-    o_array = einsum(contract_str, *(t.array for t in tensors),
-                     optimize=path)
+    path = cache_einsum_path_on_shape(
+        contract_str, *(t.shape for t in tensors))
+    o_array = einsum(
+        contract_str, *(t.array for t in tensors), optimize=path)
 
     if not o_ix:
         return o_array
 
     # unison of all tags
-    o_tags = reduce(or_, (t.tags for t in tensors))
+    o_tags = set_join(t.tags for t in tensors)
 
     return Tensor(array=o_array, inds=o_ix, tags=o_tags)
 
@@ -405,7 +422,7 @@ class Tensor(object):
 
     def inner_inds(self):
         ind_freqs = frequencies(self.inds)
-        return tuple(filter(lambda i: ind_freqs[i] == 2, self.inds))
+        return set(i for i in self.inds if ind_freqs[i] == 2)
 
     @functools.wraps(tensor_transpose)
     def transpose(self, *output_inds):
@@ -549,7 +566,8 @@ for meth_name, op in [('__radd__', operator.__add__),
 #                            Tensor Network Class                             #
 # --------------------------------------------------------------------------- #
 
-_NON_DATA_PROPS = ['contract_strategy', 'nsites', 'contract_bsz']
+_TN_SIMPLE_PROPS = ['contract_strategy', 'nsites', 'contract_bsz']
+_TN_DATA_PROPS = ['tensor_index', 'tag_index']
 
 
 class TensorNetwork(object):
@@ -576,21 +594,40 @@ class TensorNetwork(object):
     -------
     tensors : sequence of Tensor
         The tensors in this network.
+    tensor_index : dict
+        Mapping of names to tensors, like``{tensor_name: tensor, ...}``. I.e.
+        this is where the tensors are 'stored' by the network.
+    tag_index : dict
+        Mapping of tags to a set of tensor names which have those tags. I.e.
+        ``{tag: {tensor1, tensor2, ...}}``. Thus to select those tensors one
+        might do: ``map(tensor_index.__getitem__, tag_index[tag])``.
     """
 
     def __init__(self, tensors, *,
                  check_collisions=True,
                  contract_strategy=None,
                  nsites=None,
-                 contract_bsz=3):
+                 contract_bsz=None):
 
-        self.tensors = []
+        # bypass everthing if single TensorNetwork supplied for copying
+        if isinstance(tensors, TensorNetwork):
+            self.contract_strategy = tensors.contract_strategy
+            self.nsites = tensors.nsites
+            self.contract_bsz = tensors.contract_bsz
+            self.tensor_index = copy.copy(tensors.tensor_index)
+            self.tag_index = copy.deepcopy(tensors.tag_index)
+            return
+
         self.contract_strategy = contract_strategy
         self.contract_bsz = contract_bsz
         self.nsites = nsites
+
+        self.tensor_index = {}
+        self.tag_index = {}
+
         current_inner_inds = set()
 
-        for i, t in enumerate(tensors):
+        for t in tensors:
 
             istensor = isinstance(t, Tensor)
             istensornetwork = isinstance(t, TensorNetwork)
@@ -607,15 +644,13 @@ class TensorNetwork(object):
                 new_inner_inds = set(t.inner_inds())
                 if current_inner_inds & new_inner_inds:  # any overlap
                     t = t.reindex({old: old + "'" for old in new_inner_inds})
-                current_inner_inds |= new_inner_inds
-
-                # check for tensor index collisions -> rename
+                current_inner_inds |= t.inner_inds()
 
             if istensor:
-                self.tensors.append(t)
+                self.add_tensor_to_network(t)
                 continue
 
-            for x in _NON_DATA_PROPS:
+            for x in _TN_SIMPLE_PROPS:
                 # check whether to inherit ... or compare properties
                 if getattr(t, x) is not None:
 
@@ -630,93 +665,142 @@ class TensorNetwork(object):
                             "property {}. First value: {}, second value: {}"
                             .format(x, getattr(self, x), getattr(t, x)))
 
-            self.tensors += t.tensors
-
-        # build a map to efficiently locate tensors.
-        self.tag_index = self.calc_tag_index()
+            if check_collisions:
+                for name, tensor in t.tensor_index.items():
+                    self.add_tensor_to_network(tensor, name=name)
+            else:
+                self.tensor_index.update(t.tensor_index)
+                self.tag_index = merge_with(
+                    set_join, self.tag_index, t.tag_index)
 
         # count how many sites if a contract_strategy is given
-        if (self.contract_strategy) and (self.nsites is None):
-            self.nsites = self.calc_nsites()
+        if self.contract_strategy:
 
-    def _non_data_props(self):
+            if self.nsites is None:
+                self.nsites = self.calc_nsites()
+
+            # set default blocksize
+            if self.contract_bsz is None:
+                self.contract_bsz = 3
+
+    def _simple_props(self):
         """Properties that can generally be propagated if only arrays are
         changing.
-        """
-        return {attr: getattr(self, attr) for attr in _NON_DATA_PROPS}
 
-    def calc_tag_index(self):
-        """Make a dict which maps tags to a list of tensors indices.
         """
-        tag_index = {}
-        for i, t in enumerate(self.tensors):
-            for tag in t.tags:
-                if tag in tag_index:
-                    tag_index[tag].append(i)
-                else:
-                    tag_index[tag] = [i]
-        return tag_index
+        return {attr: getattr(self, attr) for attr in _TN_SIMPLE_PROPS}
+
+    def copy(self, deep=False):
+        if deep:
+            return copy.deepcopy(self)
+
+        return TensorNetwork(self)
+
+    def add_tensor_to_network(self, tensor, name=None):
+        # check for name conflict
+        if (name is None) or (name in self.tensor_index):
+            name = rand_uuid(base="_T")
+
+        # add tensor to the main index
+        self.tensor_index[name] = tensor
+
+        # add its name to the relative tags
+        for tag in tensor.tags:
+
+            if tag in self.tag_index:
+                self.tag_index[tag].add(name)
+
+            # create new index_entry if not present
+            else:
+                self.tag_index[tag] = {name}
+
+    def pop_tensor(self, name):
+        # remove the tensor from the tag index
+        for tag in self.tensor_index[name].tags:
+            self.tag_index[tag].discard(name)
+
+        # pop the tensor itself
+        return self.tensor_index.pop(name)
+
+    def delete_tensor(self, name):
+        # remove the tensor from the tag index
+        for tag in self.tensor_index(name).tags:
+            self.tag_index(tag).discard(name)
+
+        # remove the tensor itself
+        del self.tensor_index[name]
+
+    @property
+    def tensors(self):
+        return list(self.tensor_index.values())
 
     def calc_nsites(self):
         """Calculate how many tags there are which match ``contract_strategy``.
         """
         nsites = 0
-        for i in range(10000):
-            if self.contract_strategy.format(i) in self.tag_index:
+        while True:
+            if self.contract_strategy.format(nsites) in self.tag_index:
                 nsites += 1
             else:
                 break
         return nsites
 
-    def filter_by_tags(self, tags):
+    def filter_by_tags(self, tags, inplace=False):
         """Split this TN into a list of tensors containing any of ``tags`` and
-        the rest.
+        a TensorNetwork of the the rest.
 
         Parameters
         ----------
         tags : sequence of hashable
             The list of tags to filter the tensors by.
+        inplace : bool, optional
+            If true, remove tagged tensors from self, else create a new network
+            with the tensors removed.
 
         Returns
         -------
-        (untagged, tagged) : (Tensor sequence, Tensor sequence)
-            A pair of lists with the untagged and tagged tensors.
+        (u_tn, t_ts) : (TensorNetwork, Tensor sequence)
+            The untagged tensor network, and the sequence of Tensors to
+            contract.
         """
+
         # contract all
         if tags is ...:
-            return [], self.tensors
+            return None, self.tensor_index.values()
 
         # Else get the locations of where each tag is found on tensor
         if isinstance(tags, str):
-            tagged_locs = set(self.tag_index[tags])
+            tagged_names = self.tag_index[tags]
         else:
-            tagged_locs = set(concat(map(self.tag_index.__getitem__, tags)))
+            tagged_names = set_join(self.tag_index[t] for t in tags)
 
-        # Split a (loc, Tensor) list into tagged and untagged groups
-        groups = groupby(lambda x: x[0] in tagged_locs,
-                         enumerate(self.tensors))
+        # check if all tensors have been tagged
+        if len(tagged_names) == len(self.tensor_index):
+            return None, self.tensor_index.values()
 
-        # Filter out the locations themselves
-        untagged = [i[1] for i in groups.pop(False, [])]
-        tagged = [i[1] for i in groups.pop(True, [])]
+        # Copy u_tn to new network, and pop tagged tensors from this
+        if inplace:
+            u_tn = self
+        else:
+            u_tn = self.copy()
+        t_ts = tuple(map(u_tn.pop_tensor, sorted(tagged_names)))
 
-        return untagged, tagged
+        return u_tn, t_ts
 
-    def _contract_tags(self, tags):
-        untagged, tagged = self.filter_by_tags(tags)
+    def _contract_tags(self, tags, inplace=False):
+        u_tn, t_ts = self.filter_by_tags(tags, inplace=inplace)
 
-        if not tagged:
+        if not t_ts:
             raise ValueError("No tags were found - nothing to contract. "
                              "(Change this to a no-op maybe?)")
 
-        if untagged:
-            return TensorNetwork((tensor_contract(*tagged), *untagged),
-                                 check_collisions=False,
-                                 **self._non_data_props())
+        if u_tn:
+            u_tn.add_tensor_to_network(tensor_contract(*t_ts))
+            return u_tn
 
-        return tensor_contract(*tagged)
+        return tensor_contract(*t_ts)
 
-    def contract(self, tags=...):
+    def contract(self, tags=..., inplace=False):
         """Contract some, or all, of the tensors in this network.
 
         Parameters
@@ -749,9 +833,9 @@ class TensorNetwork(object):
                 return self.cumulative_contract(tags_seq)
 
         # Else just contract those tensors specified by tags.
-        return self._contract_tags(tags)
+        return self._contract_tags(tags, inplace=inplace)
 
-    def cumulative_contract(self, tags_seq):
+    def cumulative_contract(self, tags_seq, inplace=False):
         """Cumulative contraction of tensor network. Contract the first set of
         tags, then that set with the next set, then both of those with the next
         and so forth. Could also be described as an manually ordered
@@ -768,7 +852,10 @@ class TensorNetwork(object):
             The result of the contraction, still a TensorNetwork if the
             contraction was only partial.
         """
-        new_tn = self
+        if inplace:
+            new_tn = self
+        else:
+            new_tn = self.copy()
         ctags = set()
 
         for tags in tags_seq:
@@ -785,7 +872,7 @@ class TensorNetwork(object):
             ctags |= tags
 
             # peform the next contraction
-            new_tn = new_tn._contract_tags(ctags)
+            new_tn = new_tn._contract_tags(ctags, inplace=True)
 
         return new_tn
 
@@ -804,7 +891,7 @@ class TensorNetwork(object):
         else:
             return TensorNetwork((t.reindex(index_map) for t in self.tensors),
                                  check_collisions=False,
-                                 **self._non_data_props())
+                                 **self._simple_props())
 
     def conj(self, inplace=False):
         """Conjugate all the tensors in this network (leaves all indices).
@@ -814,9 +901,9 @@ class TensorNetwork(object):
                 t.conj(inplace=True)
             return self
         else:
-            return TensorNetwork((t.conj() for t in self.tensors),
+            return TensorNetwork((t.H for t in self.tensors),
                                  check_collisions=False,
-                                 **self._non_data_props())
+                                 **self._simple_props())
 
     @property
     def H(self):
@@ -828,17 +915,18 @@ class TensorNetwork(object):
         """Return a list of all dimensions, and the corresponding list of
         indices from the tensor network.
         """
-        return zip(*concat(zip(t.shape, t.inds) for t in self.tensors))
+        return zip(*concat(zip(t.shape, t.inds)
+                           for t in self.tensor_index.values()))
 
     def all_inds(self):
-        return tuple(concat(t.inds for t in self.tensors))
+        return concat(t.inds for t in self.tensor_index.values())
 
     def inner_inds(self):
-        """Return all inner indices, that is, those that appear twice.
+        """Return set of all inner indices, i.e. those that appear twice.
         """
-        all_inds = self.all_inds()
+        all_inds = tuple(self.all_inds())
         ind_freqs = frequencies(all_inds)
-        return tuple(filter(lambda i: ind_freqs[i] == 2, all_inds))
+        return set(i for i in all_inds if ind_freqs[i] == 2)
 
     def outer_dims_inds(self):
         """Get the 'outer' pairs of dimension and indices, i.e. as if this
@@ -858,6 +946,35 @@ class TensorNetwork(object):
         """Actual, i.e. exterior, shape of this TensorNetwork.
         """
         return tuple(d for d, i in self.outer_dims_inds())
+
+    def __getitem__(self, tag):
+        """Get the single tensor associated with ``tag``.
+        """
+        names = self.tag_index[tag]
+
+        if len(names) != 1:
+            raise KeyError("'TensorNetwork.__getitem__' is meant for a single "
+                           "tensor only - found {} with tag '{}'."
+                           .format(len(names), tag))
+
+        name, = names
+        return self.tensor_index[name]
+
+    def __setitem__(self, tag, tensor):
+        """Set the single tensor associated with ``tag``.
+        """
+        names = self.tag_index[tag]
+
+        if len(names) != 1:
+            raise KeyError("'TensorNetwork.__setitem__' is meant for a single "
+                           "existing tensor only - found {} with tag '{}'."
+                           .format(len(names), tag))
+
+        if not isinstance(tensor, Tensor):
+            raise TypeError("Can only set value with a new 'Tensor'.")
+
+        name, = names
+        self.tensor_index[name] = tensor
 
     def __xor__(self, *args, **kwargs):
         """Overload of '^' for TensorNetwork.contract.
@@ -1152,7 +1269,7 @@ def rand_ket_mps(n, bond_dim, phys_dim=2,
 
     if normalize:
         c = (rmps.H @ rmps)**0.5
-        rmps.tensors[n // 2] /= c
+        rmps[rmps.contract_strategy.format(n - 1)] /= c
 
     return rmps
 

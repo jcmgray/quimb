@@ -279,9 +279,16 @@ class TestTensorNetwork:
         c = Tensor(np.random.randn(5, 2, 6), inds=[3, 0, 4],
                    tags='green')
 
-        d = (a & b & c) >> ['red', 'green', 'blue']
-        assert d.shape == (6,)
-        assert d.inds == (4,)
+        d = (a & b & c)
+        d2 = d.copy(deep=True)
+
+        cd = d >> ['red', 'green', 'blue']
+        assert cd.shape == (6,)
+        assert cd.inds == (4,)
+
+        # make sure inplace operations didn't effect original tensor
+        for tag, names in d2.tag_index.items():
+            assert d.tag_index[tag] == names
 
     def test_entanglement_of_mps_state(self):
 
@@ -336,25 +343,25 @@ class TestSpecificNetworks:
         mpo = matrix_product_operator(*tensors)
         assert len(mpo.tensors) == 5
         op = mpo ^ ...
-        # this relies on left to right contraction
-        assert op.inds == ('k0', 'b0', 'k1', 'b1', 'k2', 'b2',
-                           'k3', 'b3', 'k4', 'b4')
+        # this would rely on left to right contraction if not in set form
+        assert set(op.inds) == {'k0', 'b0', 'k1', 'b1', 'k2', 'b2',
+                                'k3', 'b3', 'k4', 'b4'}
 
 
 class TestSpecificStatesOperators:
 
     def test_rand_ket_mps(self):
-        rmps = rand_ket_mps(10, 10, site_tags="foo{}", tags='bar')
+        n = 10
+        rmps = rand_ket_mps(n, 10, site_tags="foo{}", tags='bar')
         assert rmps.tensors[0].tags == {'foo0', 'bar'}
         assert rmps.tensors[3].tags == {'foo3', 'bar'}
         assert rmps.tensors[-1].tags == {'foo9', 'bar'}
 
         rmpsH_rmps = rmps.H & rmps
-        assert rmpsH_rmps.tag_index['foo0'] == [0, 10]
-        assert rmpsH_rmps.tag_index['bar'] == list(range(20))
+        assert len(rmpsH_rmps.tag_index['foo0']) == 2
+        assert len(rmpsH_rmps.tag_index['bar']) == n * 2
 
         assert abs(rmps.H @ rmps - 1) < 1e-13
-        # import pdb;pdb.set_trace()
         c = (rmps.H & rmps) ^ slice(0, 5) ^ slice(9, 4, -1) ^ slice(4, 6)
         assert abs(c - 1) < 1e-13
 
