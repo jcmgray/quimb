@@ -388,7 +388,7 @@ class Tensor(object):
         if isinstance(array, Tensor):
             self.array = array.array
             self.inds = array.inds
-            self.tags = copy.copy(array.tags)
+            self.tags = array.tags.copy()
             return
 
         self.array = np.asarray(array)
@@ -626,9 +626,10 @@ class TensorNetwork(object):
             self.contract_strategy = tensors.contract_strategy
             self.nsites = tensors.nsites
             self.contract_bsz = tensors.contract_bsz
-            self.tag_index = copy.deepcopy(tensors.tag_index)
-            self.tensor_index = {n: t.copy()
-                                 for n, t in tensors.tensor_index.items()}
+            self.tag_index = {
+                tg: ns.copy() for tg, ns in tensors.tag_index.items()}
+            self.tensor_index = {
+                n: t.copy() for n, t in tensors.tensor_index.items()}
             return
 
         self.contract_strategy = contract_strategy
@@ -660,7 +661,7 @@ class TensorNetwork(object):
                 current_inner_inds |= t.inner_inds()
 
             if istensor:
-                self.add_tensor_to_network(t)
+                self.add_tensor(t)
                 continue
 
             for x in _TN_SIMPLE_PROPS:
@@ -680,7 +681,7 @@ class TensorNetwork(object):
 
             if check_collisions:
                 for name, tensor in t.tensor_index.items():
-                    self.add_tensor_to_network(tensor, name=name)
+                    self.add_tensor(tensor, name=name)
             else:
                 self.tensor_index.update(t.tensor_index)
                 self.tag_index = merge_with(
@@ -694,21 +695,18 @@ class TensorNetwork(object):
 
             # set default blocksize
             if self.contract_bsz is None:
-                self.contract_bsz = 3
+                self.contract_bsz = 2
 
-    def _simple_props(self):
-        """Properties that can generally be propagated if only arrays are
-        changing.
-
-        """
-        return {attr: getattr(self, attr) for attr in _TN_SIMPLE_PROPS}
+    # ------------------------------- Methods ------------------------------- #
 
     def copy(self, deep=False):
         if deep:
             return copy.deepcopy(self)
         return TensorNetwork(self)
 
-    def add_tensor_to_network(self, tensor, name=None):
+    def add_tensor(self, tensor, name=None):
+        """Add a single tensor to this network - mangle its name if neccessary.
+        """
         # check for name conflict
         if (name is None) or (name in self.tensor_index):
             name = rand_uuid(base="_T")
@@ -716,17 +714,16 @@ class TensorNetwork(object):
         # add tensor to the main index
         self.tensor_index[name] = tensor
 
-        # add its name to the relative tags
+        # add its name to the relevant tags, or create a new tag
         for tag in tensor.tags:
-
             if tag in self.tag_index:
                 self.tag_index[tag].add(name)
-
-            # create new index_entry if not present
             else:
                 self.tag_index[tag] = {name}
 
     def pop_tensor(self, name):
+        """Remove a tensor from this network, returning said tensor.
+        """
         # remove the tensor from the tag index
         for tag in self.tensor_index[name].tags:
             self.tag_index[tag].discard(name)
@@ -735,6 +732,8 @@ class TensorNetwork(object):
         return self.tensor_index.pop(name)
 
     def delete_tensor(self, name):
+        """Delete a tensor from this network.
+        """
         # remove the tensor from the tag index
         for tag in self.tensor_index(name).tags:
             self.tag_index(tag).discard(name)
@@ -807,7 +806,7 @@ class TensorNetwork(object):
                              "(Change this to a no-op maybe?)")
 
         if u_tn:
-            u_tn.add_tensor_to_network(tensor_contract(*t_ts))
+            u_tn.add_tensor(tensor_contract(*t_ts))
             return u_tn
 
         return tensor_contract(*t_ts)

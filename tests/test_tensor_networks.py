@@ -308,7 +308,7 @@ class TestTensorNetwork:
                    tags='green')
 
         d = (a & b & c)
-        d2 = d.copy(deep=True)
+        d2 = d.copy()
 
         cd = d >> ['red', 'green', 'blue']
         assert cd.shape == (6,)
