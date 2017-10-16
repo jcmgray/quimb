@@ -385,6 +385,12 @@ class Tensor(object):
     """
 
     def __init__(self, array, inds, tags=None):
+        if isinstance(array, Tensor):
+            self.array = array.array
+            self.inds = array.inds
+            self.tags = copy.copy(array.tags)
+            return
+
         self.array = np.asarray(array)
         self.inds = tuple(inds)
 
@@ -396,6 +402,12 @@ class Tensor(object):
         self.tags = (set() if tags is None else
                      {tags} if isinstance(tags, str) else
                      set(tags))
+
+    def copy(self, deep=False):
+        if deep:
+            return copy.deepcopy(self)
+        else:
+            return Tensor(self, None)
 
     def conj(self, inplace=False):
         """Conjugate this tensors data (does nothing to indices).
@@ -614,8 +626,9 @@ class TensorNetwork(object):
             self.contract_strategy = tensors.contract_strategy
             self.nsites = tensors.nsites
             self.contract_bsz = tensors.contract_bsz
-            self.tensor_index = copy.copy(tensors.tensor_index)
             self.tag_index = copy.deepcopy(tensors.tag_index)
+            self.tensor_index = {n: t.copy()
+                                 for n, t in tensors.tensor_index.items()}
             return
 
         self.contract_strategy = contract_strategy
@@ -693,7 +706,6 @@ class TensorNetwork(object):
     def copy(self, deep=False):
         if deep:
             return copy.deepcopy(self)
-
         return TensorNetwork(self)
 
     def add_tensor_to_network(self, tensor, name=None):
@@ -885,25 +897,26 @@ class TensorNetwork(object):
             Mapping of pairs ``{old_ind: new_ind, ...}``.
         """
         if inplace:
-            for t in self.tensors:
-                t.reindex(index_map, inplace=True)
-            return self
+            new_tn = self
         else:
-            return TensorNetwork((t.reindex(index_map) for t in self.tensors),
-                                 check_collisions=False,
-                                 **self._simple_props())
+            new_tn = self.copy()
+
+        for t in new_tn.tensor_index.values():
+            t.reindex(index_map, inplace=True)
+        return new_tn
 
     def conj(self, inplace=False):
         """Conjugate all the tensors in this network (leaves all indices).
         """
         if inplace:
-            for t in self.tensors:
-                t.conj(inplace=True)
-            return self
+            new_tn = self
         else:
-            return TensorNetwork((t.H for t in self.tensors),
-                                 check_collisions=False,
-                                 **self._simple_props())
+            new_tn = self.copy()
+
+        for t in new_tn.tensor_index.values():
+            t.conj(inplace=True)
+
+        return new_tn
 
     @property
     def H(self):

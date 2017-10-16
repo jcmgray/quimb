@@ -29,6 +29,15 @@ class TestBasicTensorOperations:
         with pytest.raises(ValueError):
             Tensor(x, inds=[0, 2], tags='blue')
 
+    def test_tensor_copy(self):
+        a = Tensor(np.random.randn(2, 3, 4), inds=[0, 1, 2], tags='blue')
+        b = a.copy()
+        b.tags.add('foo')
+        assert 'foo' not in a.tags
+        b.array /= 2
+        # still reference the same underlying array
+        assert_allclose(a.array, b.array)
+
     def test_with_alpha_construct(self):
         x = np.random.randn(2, 3, 4)
         a = Tensor(x, inds='ijk', tags='blue')
@@ -235,6 +244,25 @@ class TestTensorNetwork:
 
         with pytest.raises(TypeError):
             TensorNetwork(a, b)  # missing brackets around ``a, b``.
+
+    def test_conj(self):
+        a_array = np.random.randn(2, 3, 4)
+        b_array = np.random.randn(3, 4, 5)
+        c_array = np.random.randn(5, 2, 6)
+
+        a = Tensor(a_array, inds=[0, 1, 2], tags='red')
+        b = Tensor(b_array, inds=[1, 2, 3], tags='blue')
+        c = Tensor(c_array, inds=[3, 0, 4], tags='blue')
+
+        tn = a & b & c
+        new_tn = tn.conj()
+
+        for i, arr in enumerate((a_array, b_array, c_array)):
+            assert_allclose(new_tn.tensors[i].array, arr.conj())
+
+        # make sure original network unchanged
+        for i, arr in enumerate((a_array, b_array, c_array)):
+            assert_allclose(tn.tensors[i].array, arr)
 
     def test_conj_inplace(self):
         a_array = np.random.randn(2, 3, 4)
