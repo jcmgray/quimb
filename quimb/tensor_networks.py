@@ -196,7 +196,7 @@ def tensor_contract(*tensors,
 
     if output_inds is None:
         # sort output indices  by input order for efficiency and consistency
-        o_ix = tuple(filter(lambda x: x in set(_gen_output_inds(a_ix)), a_ix))
+        o_ix = tuple(x for x in a_ix if x in set(_gen_output_inds(a_ix)))
     else:
         o_ix = output_inds
 
@@ -334,7 +334,7 @@ def tensor_split(tensor, left_inds, bond_name="", method='svd',
     TensorNetwork
     """
     left_inds = tuple(left_inds)
-    right_inds = tuple(filter(lambda x: x not in left_inds, tensor.inds))
+    right_inds = tuple(x for x in tensor.inds if x not in left_inds)
 
     TT = tensor.transpose(*left_inds, *right_inds)
 
