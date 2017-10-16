@@ -25,15 +25,18 @@ from quimb import (
     fidelity,
     quantum_discord,
     one_way_classical_information,
-    mutual_information,
     partial_transpose,
     entropy,
+    entropy_subsys,
+    mutual_information,
+    mutinf_subsys,
     correlation,
     pauli_correlations,
     purify,
     concurrence,
     negativity,
     logneg,
+    logneg_subsys,
     trace_distance,
     pauli_decomp,
     bell_decomp,
@@ -154,6 +157,17 @@ class TestEntropy:
         er = entropy(pab, rank=2**m)
         assert_allclose(ef, er)
 
+    def test_entropy_subsystem(self):
+        p = rand_ket(2**10)
+        # exact
+        e1 = entropy_subsys(p, (2**5, 2**5), 0, approx_thresh=1e30)
+        # approx
+        e2 = entropy_subsys(p, (2**5, 2**5), 0, approx_thresh=1)
+        assert e1 != e2
+        assert_allclose(e1, e2, rtol=5e-2)
+
+        assert entropy_subsys(p, (2**5, 2**5), [0, 1], approx_thresh=1) == 0.0
+
 
 class TestMutualInformation:
     def test_mutual_information_pure(self):
@@ -184,6 +198,28 @@ class TestMutualInformation:
         assert (0 <= ixy <= 2.0)
         ixya = mutual_information(a, (2, 2, 2), *inds, rank='AUTO')
         assert_allclose(ixy, ixya)
+
+    def test_mutinf_subsys(self):
+        p = rand_ket(2**9)
+        dims = (2**3, 2**2, 2**4)
+        # exact
+        mi0 = mutual_information(p, dims, sysa=0, sysb=2)
+        mi1 = mutinf_subsys(p, dims, sysa=0, sysb=2, approx_thresh=1e30)
+        assert_allclose(mi1, mi0)
+        # approx
+        mi2 = mutinf_subsys(p, dims, sysa=0, sysb=2, approx_thresh=1)
+        assert_allclose(mi1, mi2, rtol=5e-2)
+
+    def test_mutinf_subsys_pure(self):
+        p = rand_ket(2**7)
+        dims = (2**3, 2**4)
+        # exact
+        mi0 = mutual_information(p, dims, sysa=0, sysb=1)
+        mi1 = mutinf_subsys(p, dims, sysa=0, sysb=1, approx_thresh=1e30)
+        assert_allclose(mi1, mi0)
+        # approx
+        mi2 = mutinf_subsys(p, dims, sysa=0, sysb=1, approx_thresh=1)
+        assert_allclose(mi1, mi2, rtol=5e-2)
 
 
 class TestPartialTranspose:
@@ -233,6 +269,35 @@ class TestLogarithmicNegativity:
     def test_interleaving(self):
         p = permute(singlet() & singlet(), [2, 2, 2, 2], [0, 2, 1, 3])
         assert logneg(p, [2] * 4, sysa=[0, 3]) > 2 - 1e-13
+
+    def test_logneg_subsys(self):
+        p = rand_ket(2**(2 + 3 + 1 + 2))
+        dims = (2**2, 2**3, 2**1, 2**2)
+        sysa = [0, 3]
+        sysb = 1
+        # exact 1
+        ln0 = logneg(ptr(p, dims, [0, 1, 3]), [4, 8, 4], [0, 2])
+        # exact 2
+        ln1 = logneg_subsys(p, dims, sysa, sysb, approx_thresh=1e30)
+        assert_allclose(ln0, ln1)
+        # approx
+        ln2 = logneg_subsys(p, dims, sysa, sysb, approx_thresh=1)
+        assert ln1 != ln2
+        assert_allclose(ln1, ln2, rtol=5e-2)
+
+    def test_logneg_subsys_pure(self):
+        p = rand_ket(2**(3 + 4))
+        dims = (2**3, 2**4)
+        sysa = 0
+        sysb = 1
+        # exact 1
+        ln0 = logneg(p, dims, 0)
+        # exact 2
+        ln1 = logneg_subsys(p, dims, sysa, sysb, approx_thresh=1e30)
+        assert_allclose(ln0, ln1)
+        # approx
+        ln2 = logneg_subsys(p, dims, sysa, sysb, approx_thresh=1)
+        assert ln1 == ln2
 
 
 class TestConcurrence:

@@ -128,11 +128,15 @@ calc
     fidelity
     purify
     entropy
+    entropy_subsys
     mutual_information
+    mutinf
+    mutinf_subsys
     partial_transpose
     negativity
     logarithmic_negativity
     logneg
+    logneg_subsys
     concurrence
     one_way_classical_information
     quantum_discord
