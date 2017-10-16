@@ -361,7 +361,8 @@ def logneg(p, dims=(2, 2), sysa=0):
 logarithmic_negativity = logneg
 
 
-def logneg_subsys(psi_abc, dims, sysa, sysb, approx_thresh, **approx_opts):
+def logneg_subsys(psi_abc, dims, sysa, sysb,
+                  approx_thresh=2**12, **approx_opts):
     """Compute the logarithmic negativity between two subsystems of a pure
     state, possibly using an approximate lanczos for large subsystems.
 
