@@ -10,7 +10,7 @@ from quimb import (
     isherm,
     kron,
     prod,
-    mutual_information,
+    mutinf_subsys,
     bell_state,
     rand_rho,
     rand_matrix,
@@ -513,10 +513,10 @@ class TestPermute:
     def test_entangled_permute(self):
         dims = [2, 2, 2]
         a = bell_state(0) & up()
-        assert_allclose(mutual_information(a, dims, 0, 1), 2.)
+        assert_allclose(mutinf_subsys(a, dims, 0, 1), 2.)
         b = permute(a, dims, [1, 2, 0])
-        assert_allclose(mutual_information(b, dims, 0, 1), 0., atol=1e-12)
-        assert_allclose(mutual_information(b, dims, 0, 2), 2.)
+        assert_allclose(mutinf_subsys(b, dims, 0, 1), 0., atol=1e-12)
+        assert_allclose(mutinf_subsys(b, dims, 0, 2), 2.)
 
     def test_permute_sparse_ket(self):
         dims = [3, 2, 5, 4]

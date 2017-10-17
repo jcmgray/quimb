@@ -165,8 +165,8 @@ entropy, entropy_subsys_approx, mutinf_subsys
 
 
 @zeroify
-def mutinf(p, dims=(2, 2), sysa=0, sysb=1, rank=None):
-    """Find the mutual information between two subystems of a state.
+def mutinf(p, dims=(2, 2), sysa=0, rank=None):
+    """Find the mutual information for a bipartition of a state.
 
     That is, ``H(A) + H(B) - H(AB)``, for von Neumann entropy ``H``, and two
     subsystems A and B.
@@ -194,28 +194,26 @@ def mutinf(p, dims=(2, 2), sysa=0, sysb=1, rank=None):
     --------
     entropy, mutinf_subsys, entropy_subsys_approx
     """
-
-    # TODO: make this a no-partial trace, arbitrary subsystems function
-
-
-    if np.size(dims) > 2:
-        if rank == 'AUTO':
-            rank = prod(dims) // (dims[sysa] * dims[sysb])
-        p = ptr(p, dims, (sysa, sysb))
-        dims = (dims[sysa], dims[sysb])
+    sysa = int2tup(sysa)
 
     # mixed combined system
     if isop(p):
+        # total
         hab = entropy(p, rank=rank)
-        rhoa = ptr(p, dims, 0)
-        rhob = ptr(p, dims, 1)
-        ha, hb = entropy(rhoa), entropy(rhob)
+
+        # subsystem a
+        rhoa = ptr(p, dims, sysa)
+        ha = entropy(rhoa)
+
+        # need subsystem b as well
+        sysb = tuple(i for i in range(len(dims)) if i not in sysa)
+        rhob = ptr(p, dims, sysb)
+        hb = entropy(rhob)
 
     # pure combined system
     else:
         hab = 0.0
-        rhoa = ptr(p, dims, sysa)
-        ha = hb = entropy(rhoa)
+        ha = hb = entropy_subsys(p, dims, sysa)
 
     return ha + hb - hab
 

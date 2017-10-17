@@ -189,22 +189,26 @@ class TestMutualInformation:
     @pytest.mark.parametrize('inds', [(0, 1), (1, 2), (0, 2)])
     def test_mixed_sub(self, inds):
         a = rand_rho(2**3)
-        ixy = mutual_information(a, (2, 2, 2), *inds)
+        rho_ab = ptr(a, [2, 2, 2], inds)
+        ixy = mutual_information(rho_ab, (2, 2))
         assert (0 <= ixy <= 2.0)
 
-    @pytest.mark.parametrize('inds', [(0, 1), (1, 2), (0, 2)])
-    def test_auto_rank(self, inds):
-        a = rand_ket(2**3)
-        ixy = mutual_information(a, (2, 2, 2), *inds)
-        assert (0 <= ixy <= 2.0)
-        ixya = mutual_information(a, (2, 2, 2), *inds, rank='AUTO')
-        assert_allclose(ixy, ixya)
+    def test_mutinf_interleave(self):
+        p = dop(singlet() & singlet())
+        ixy = mutual_information(p, [2] * 4, sysa=(0, 2))
+        assert_allclose(ixy, 4)
+
+    def test_mutinf_interleave_pure(self):
+        p = singlet() & singlet()
+        ixy = mutual_information(p, [2] * 4, sysa=(0, 2))
+        assert_allclose(ixy, 4)
 
     def test_mutinf_subsys(self):
         p = rand_ket(2**9)
         dims = (2**3, 2**2, 2**4)
         # exact
-        mi0 = mutual_information(p, dims, sysa=0, sysb=2)
+        rho_ab = ptr(p, dims, [0, 2])
+        mi0 = mutual_information(rho_ab, [8, 16])
         mi1 = mutinf_subsys(p, dims, sysa=0, sysb=2, approx_thresh=1e30)
         assert_allclose(mi1, mi0)
         # approx
@@ -215,7 +219,7 @@ class TestMutualInformation:
         p = rand_ket(2**7)
         dims = (2**3, 2**4)
         # exact
-        mi0 = mutual_information(p, dims, sysa=0, sysb=1)
+        mi0 = mutual_information(p, dims, sysa=0)
         mi1 = mutinf_subsys(p, dims, sysa=0, sysb=1, approx_thresh=1e30)
         assert_allclose(mi1, mi0)
         # approx
@@ -592,7 +596,7 @@ class TestIsEigenvector:
         assert not is_eigenvector(v, a)
 
     def test_sparse(self):
-        a = rand_herm(10, sparse=True, density=0.4)
+        a = rand_herm(10, sparse=True, density=0.9)
         vt = seigvecs(a, sigma=0, k=1)
         assert is_eigenvector(vt, a)
         vf = rand_ket(10)
