@@ -93,7 +93,7 @@ def get_path_lazy_ptr_dot(psi_ab_tensor_shape, psi_a_tensor_shape,
     )[0]
 
 
-def do_lazy_ptr_dot(psi_ab_tensor, psi_a_tensor,
+def do_lazy_ptr_dot(psi_ab_tensor, psi_ab_tensor_conj, psi_a_tensor,
                     inds_a_ket, inds_ab_bra, inds_ab_ket,
                     path, out=None):
     """Perform ``lazy_ptr_dot`` with the pre-calculated indexes etc from
@@ -104,7 +104,7 @@ def do_lazy_ptr_dot(psi_ab_tensor, psi_a_tensor,
 
     return einsum(
         psi_a_tensor, inds_a_ket,
-        psi_ab_tensor.conjugate(), inds_ab_bra,
+        psi_ab_tensor_conj, inds_ab_bra,
         psi_ab_tensor, inds_ab_ket,
         optimize=path,
         out=out,
@@ -175,7 +175,7 @@ def lazy_ptr_dot(psi_ab, psi_a, dims=None, sysa=0, out=None):
 
     # perform the contraction
     return do_lazy_ptr_dot(
-        psi_ab_tensor, psi_a_tensor,
+        psi_ab_tensor, psi_ab_tensor.conjugate(), psi_a_tensor,
         inds_a_ket, inds_ab_bra, inds_ab_ket,
         path=path, out=out).reshape(psi_a.shape)
 
@@ -197,6 +197,7 @@ class LazyPtrOperator(spla.LinearOperator):
 
     def __init__(self, psi_ab, dims, sysa):
         self.psi_ab_tensor = np.asarray(psi_ab).reshape(dims)
+        self.psi_ab_tensor_conj = self.psi_ab_tensor.conjugate()
         self.dims = int2tup(dims)
         self.sysa = int2tup(sysa)
         dims_a = [d for i, d in enumerate(dims) if i in self.sysa]
@@ -218,7 +219,7 @@ class LazyPtrOperator(spla.LinearOperator):
 
         # perform the contraction
         return do_lazy_ptr_dot(
-            self.psi_ab_tensor, psi_a_tensor,
+            self.psi_ab_tensor, self.psi_ab_tensor_conj, psi_a_tensor,
             inds_a_ket, inds_ab_bra, inds_ab_ket,
             path=path).reshape(vecs.shape)
 
@@ -323,7 +324,7 @@ def get_path_lazy_ptr_ppt_dot(psi_abc_tensor_shape, psi_ab_tensor_shape,
     )[0]
 
 
-def do_lazy_ptr_ppt_dot(psi_ab_tensor, psi_abc_tensor,
+def do_lazy_ptr_ppt_dot(psi_ab_tensor, psi_abc_tensor, psi_abc_tensor_conj,
                         inds_ab_ket, inds_abc_bra, inds_abc_ket, inds_out,
                         path, out=None):
     if out is None:
@@ -333,7 +334,7 @@ def do_lazy_ptr_ppt_dot(psi_ab_tensor, psi_abc_tensor,
     # in the same way as input due to partial tranpose.
     return einsum(
         psi_ab_tensor, inds_ab_ket,
-        psi_abc_tensor.conjugate(), inds_abc_bra,
+        psi_abc_tensor_conj, inds_abc_bra,
         psi_abc_tensor, inds_abc_ket,
         inds_out,
         optimize=path,
@@ -409,7 +410,7 @@ def lazy_ptr_ppt_dot(psi_abc, psi_ab, dims, sysa, sysb, out=None):
 
     # perform contraction
     return do_lazy_ptr_ppt_dot(
-        psi_ab_tensor, psi_abc_tensor,
+        psi_ab_tensor, psi_abc_tensor, psi_abc_tensor.conjugate(),
         inds_ab_ket, inds_abc_bra, inds_abc_ket, inds_out,
         path, out=out).reshape(psi_ab.shape)
 
@@ -437,6 +438,7 @@ class LazyPtrPptOperator(spla.LinearOperator):
 
     def __init__(self, psi_abc, dims, sysa, sysb):
         self.psi_abc_tensor = np.asarray(psi_abc).reshape(dims)
+        self.psi_abc_tensor_conj = self.psi_abc_tensor.conjugate()
         self.dims = int2tup(dims)
         self.sysa, self.sysb = int2tup(sysa), int2tup(sysb)
         sys_ab = self.sysa + self.sysb
@@ -459,7 +461,7 @@ class LazyPtrPptOperator(spla.LinearOperator):
 
         # perform contraction
         return do_lazy_ptr_ppt_dot(
-            psi_ab_tensor, self.psi_abc_tensor,
+            psi_ab_tensor, self.psi_abc_tensor, self.psi_abc_tensor_conj,
             inds_ab_ket, inds_abc_bra, inds_abc_ket, inds_out,
             path).reshape(vecs.shape)
 
