@@ -42,7 +42,9 @@ from .linalg.base_linalg import (
 )
 from .linalg.approx_spectral import (
     entropy_subsys_approx,
+    tr_sqrt_subsys_approx,
     logneg_subsys_approx,
+    gen_bipartite_spectral_fn,
 )
 from .gen.operators import sig
 from .gen.states import (
@@ -133,46 +135,33 @@ def entropy(a, rank=None):
     return np.sum(-evals * np.log2(evals))
 
 
-def entropy_subsys(psi_ab, dims, sysa, approx_thresh=2**12, **approx_opts):
-    """Calculate the entropy of a pure states' subsystem, optionally switching
-    to an approximate lanczos method when the subsystem is very large.
+entropy_subsys = gen_bipartite_spectral_fn(entropy, entropy_subsys_approx, 0.0)
+"""Calculate the entropy of a pure states' subsystem, optionally switching
+to an approximate lanczos method when the subsystem is very large.
 
-    Parameters
-    ----------
-    psi_ab : vector
-        Bi-partite state.
-    dims : sequence of int
-        The sub-dimensions of the state.
-    sysa :  sequence of int
-        The indices of which dimensions to calculate the entropy for.
-    approx_thresh : int, optional
-        The size of sysa at which to switch to the approx method.
-    **approx_opts
-        Supplied to :func:`entropy_subsys_approx`, if used.
+Parameters
+----------
+psi_ab : vector
+    Bipartite state.
+dims : sequence of int
+    The sub-dimensions of the state.
+sysa :  sequence of int
+    The indices of which dimensions to calculate the entropy for.
+approx_thresh : int, optional
+    The size of sysa at which to switch to the approx method. Set to
+    ``None`` to never use the approximation.
+**approx_opts
+    Supplied to :func:`entropy_subsys_approx`, if used.
 
-    Returns
-    -------
-    float
-        The subsytem entropy.
+Returns
+-------
+float
+    The subsytem entropy.
 
-    See Also
-    --------
-    entropy, entropy_subsys_approx, mutinf_subsys
-    """
-    sysa = int2tup(sysa)
-    sz_a = prod(d for i, d in enumerate(dims) if i in sysa)
-    sz_b = prod(dims) // sz_a
-
-    # pure state
-    if sz_b == 1:
-        return 0.0
-
-    # check whether to use approx lanczos method
-    if (approx_thresh is not None) and (sz_a >= approx_thresh):
-        return entropy_subsys_approx(psi_ab, dims, sysa, **approx_opts)
-
-    rho_ab = ptr(psi_ab, dims, sysa)
-    return entropy(rho_ab, rank=sz_b)
+See Also
+--------
+entropy, entropy_subsys_approx, mutinf_subsys
+"""
 
 
 @zeroify
@@ -205,6 +194,10 @@ def mutinf(p, dims=(2, 2), sysa=0, sysb=1, rank=None):
     --------
     entropy, mutinf_subsys, entropy_subsys_approx
     """
+
+    # TODO: make this a no-partial trace, arbitrary subsystems function
+
+
     if np.size(dims) > 2:
         if rank == 'AUTO':
             rank = prod(dims) // (dims[sysa] * dims[sysb])
@@ -247,7 +240,7 @@ def mutinf_subsys(psi_abc, dims, sysa, sysb, approx_thresh=2**12,
         The index(es) of the subsystem(s) to consider part of 'B'.
     approx_thresh : int, optional
         The size of subsystem at which to switch to the approximate lanczos
-        method.
+        method. Set to ``None`` to never use the approximation.
      **approx_opts
         Supplied to :func:`entropy_subsys_approx`, if used.
 
@@ -278,6 +271,45 @@ def mutinf_subsys(psi_abc, dims, sysa, sysb, approx_thresh=2**12,
     return hb + ha - hab
 
 
+def tr_sqrt(a, rank=None):
+    """Return the trace of the sqrt of a positive semidefinite matrix.
+    """
+    if rank is None:
+        el = eigvals(a, sort=False)
+    else:
+        el = seigvals(a, k=rank, which='LM', backend='AUTO')
+    return np.sum(np.sqrt(el[el > 0.0]))
+
+
+tr_sqrt_subsys = gen_bipartite_spectral_fn(tr_sqrt, tr_sqrt_subsys_approx, 1.0)
+"""Compute the trace sqrt of a subsystem, possibly using an approximate
+lanczos method when the subsytem is big.
+
+Parameters
+----------
+psi_ab : vector
+    Bipartite state.
+dims : sequence of int
+    The sub-dimensions of the state.
+sysa :  sequence of int
+    The indices of which dimensions to calculate the trace sqrt for.
+approx_thresh : int, optional
+    The size of sysa at which to switch to the approx method. Set to
+    ``None`` to never use the approximation.
+**approx_opts
+    Supplied to :func:`tr_sqrt_subsys_approx`, if used.
+
+Returns
+-------
+float
+    The subsytem entropy.
+
+See Also
+--------
+tr_sqrt, tr_sqrt_subsys_approx, partial_tranpose_norm
+"""
+
+
 @matrixify
 def partial_transpose(p, dims=(2, 2), sysa=0):
     """Partial transpose of a density matrix.
@@ -287,7 +319,9 @@ def partial_transpose(p, dims=(2, 2), sysa=0):
     p : matrix or vector
         The state to partially transpose.
     dims : tuple(int), optional
-        The two internal dimensions describing a bipartition of the state.
+        The internal dimensions of the state.
+    sysa : sequence of int
+        The indices of 'system A', everything else assumed to be 'system B'.
 
     Returns
     -------
@@ -311,22 +345,33 @@ def partial_transpose(p, dims=(2, 2), sysa=0):
             perm_ket_inds.append(i)
             perm_bra_inds.append(i + ndims)
 
-    return (
-        np.asarray(qu(p, "dop"))
-        .reshape((*dims, *dims))
-        .transpose((*perm_ket_inds, *perm_bra_inds))
-        .reshape((prod(dims), prod(dims)))
-    )
+    return (np.asarray(qu(p, "dop"))
+            .reshape((*dims, *dims))
+            .transpose((*perm_ket_inds, *perm_bra_inds))
+            .reshape((prod(dims), prod(dims))))
 
 
-def partial_tranpose_norm(p, dims, sysa=0):
-    """Compute the norm of the partial transpose for (log) negativity."""
-    ndims = len(dims)
+def partial_tranpose_norm(p, dims, sysa):
+    """Compute the norm of the partial transpose for (log)-negativity,
+    taking a shortcut (trace sqrt of reduced subsytem), when system is a
+    vector.
+    """
+    sysa = int2tup(sysa)
 
-    if isvec(p) and ndims == 2:  # pure bipartition, easier to calc
-        smaller_system = 0 if dims[0] <= dims[1] else 1
-        rhoa = ptr(p, dims, smaller_system)
-        return sum(np.sqrt(np.clip(eigvals(rhoa, sort=False), 0, 1)))**2
+    # check for pure bipartition -> easier to calc
+    if isvec(p):
+        sz_a = prod(d for i, d in enumerate(dims) if i in sysa)
+        sz_b = prod(dims) // sz_a
+
+        # check if system b is smaller, since entropy is same for both a & b.
+        if sz_b < sz_a:
+            # if so swap things around
+            sz_a, sz_b = sz_b, sz_a
+            sysb = [i for i in range(len(dims)) if i not in sysa]
+            sysa = sysb
+
+        rhoa = ptr(p, dims, sysa)
+        return tr_sqrt(rhoa)**2
 
     return norm(partial_transpose(p, dims, sysa), "tr")
 
@@ -364,7 +409,8 @@ logarithmic_negativity = logneg
 def logneg_subsys(psi_abc, dims, sysa, sysb,
                   approx_thresh=2**12, **approx_opts):
     """Compute the logarithmic negativity between two subsystems of a pure
-    state, possibly using an approximate lanczos for large subsystems.
+    state, possibly using an approximate lanczos for large subsystems. Uses
+    a special method if the two subsystems form a bipartition of the state.
 
     Parameters
     ----------
@@ -378,7 +424,7 @@ def logneg_subsys(psi_abc, dims, sysa, sysb,
         The index(es) of the subsystem(s) to consider part of 'B'.
     approx_thresh : int, optional
         The size of subsystem at which to switch to the approximate lanczos
-        method.
+        method. Set to ``None`` to never use the approximation.
      **approx_opts
         Supplied to :func:`logneg_subsys_approx`, if used.
 
@@ -399,8 +445,9 @@ def logneg_subsys(psi_abc, dims, sysa, sysb,
 
     # check for pure bipartition
     if sz_c == 1:
-        # TODO: add trace_sqrt version, for very big bipartitions?
-        return logneg(psi_abc, dims, sysa)
+        psi_ab_ppt_norm = tr_sqrt_subsys(
+            psi_abc, dims, sysa, approx_thresh=approx_thresh, **approx_opts)**2
+        return max(log2(psi_ab_ppt_norm), 0.0)
 
     # check whether to use approx lanczos method
     if (approx_thresh is not None) and (sz_ab >= approx_thresh):

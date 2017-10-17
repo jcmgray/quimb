@@ -132,6 +132,8 @@ calc
     mutual_information
     mutinf
     mutinf_subsys
+    tr_sqrt
+    tr_sqrt_subsys
     partial_transpose
     negativity
     logarithmic_negativity

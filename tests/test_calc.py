@@ -25,7 +25,6 @@ from quimb import (
     fidelity,
     quantum_discord,
     one_way_classical_information,
-    partial_transpose,
     entropy,
     entropy_subsys,
     mutual_information,
@@ -34,6 +33,8 @@ from quimb import (
     pauli_correlations,
     purify,
     concurrence,
+    tr_sqrt,
+    partial_transpose,
     negativity,
     logneg,
     logneg_subsys,
@@ -158,15 +159,15 @@ class TestEntropy:
         assert_allclose(ef, er)
 
     def test_entropy_subsystem(self):
-        p = rand_ket(2**10)
+        p = rand_ket(2**9)
         # exact
-        e1 = entropy_subsys(p, (2**5, 2**5), 0, approx_thresh=1e30)
+        e1 = entropy_subsys(p, (2**5, 2**4), 0, approx_thresh=1e30)
         # approx
-        e2 = entropy_subsys(p, (2**5, 2**5), 0, approx_thresh=1)
+        e2 = entropy_subsys(p, (2**5, 2**4), 0, approx_thresh=1)
         assert e1 != e2
         assert_allclose(e1, e2, rtol=5e-2)
 
-        assert entropy_subsys(p, (2**5, 2**5), [0, 1], approx_thresh=1) == 0.0
+        assert entropy_subsys(p, (2**5, 2**4), [0, 1], approx_thresh=1) == 0.0
 
 
 class TestMutualInformation:
@@ -231,6 +232,11 @@ class TestPartialTranspose:
                             [0, 0.5, 0, 0],
                             [0, 0, 0.5, 0],
                             [-0.5, 0, 0, 0]])
+
+    def test_tr_sqrt_rank(self):
+        psi = rand_ket(2**5)
+        rhoa = psi.ptr([2] * 5, range(4))
+        assert_allclose(tr_sqrt(rhoa), tr_sqrt(rhoa, rank=2))
 
 
 class TestNegativity:
@@ -297,7 +303,23 @@ class TestLogarithmicNegativity:
         assert_allclose(ln0, ln1)
         # approx
         ln2 = logneg_subsys(p, dims, sysa, sysb, approx_thresh=1)
-        assert ln1 == ln2
+        assert ln1 != ln2
+        assert_allclose(ln1, ln2, rtol=5e-2)
+
+    def test_logneg_subsys_pure_should_swap_subsys(self):
+        p = rand_ket(2**(5 + 2))
+        dims = (2**5, 2**2)
+        sysa = 0
+        sysb = 1
+        # exact 1
+        ln0 = logneg(p, dims, 0)
+        # exact 2
+        ln1 = logneg_subsys(p, dims, sysa, sysb, approx_thresh=1e30)
+        assert_allclose(ln0, ln1)
+        # approx
+        ln2 = logneg_subsys(p, dims, sysa, sysb, approx_thresh=1)
+        assert ln1 != ln2
+        assert_allclose(ln1, ln2, rtol=5e-2)
 
 
 class TestConcurrence:

@@ -7,6 +7,7 @@ from math import sqrt, log2, exp
 import numpy as np
 import scipy.linalg as scla
 import scipy.sparse.linalg as spla
+from ..core import ptr
 from ..tensor_networks import einsum, einsum_path, HuskArray
 from ..accel import prod, vdot
 from ..utils import int2tup
@@ -791,6 +792,24 @@ def entropy_subsys_approx(psi_ab, dims, sysa, **kwargs):
     return - tr_xlogx_approx(lo, **kwargs)
 
 
+def tr_sqrt_subsys_approx(psi_ab, dims, sysa, **kwargs):
+    """Approximate the trace sqrt of a pure state's subsystem.
+
+    Parameters
+    ----------
+    psi_ab : ket
+        Bipartite state to partially trace and find trace sqrt of.
+    dims : sequence of int, optional
+        The sub dimensions of ``psi_ab``.
+    sysa : int or sequence of int, optional
+        Index(es) of the 'a' subsystem(s) to keep.
+    **kwargs
+        See :func:`approx_spectral_function`.
+    """
+    lo = LazyPtrOperator(psi_ab, dims=dims, sysa=sysa)
+    return tr_sqrt_approx(lo, **kwargs)
+
+
 def norm_ppt_subsys_approx(psi_abc, dims, sysa, sysb, **kwargs):
     """Estimate the norm of the partial tranpose of a pure state's subsystem.
     """
@@ -842,3 +861,53 @@ def negativity_subsys_approx(psi_abc, dims, sysa, sysb, **kwargs):
     """
     return max((norm_ppt_subsys_approx(psi_abc, dims, sysa, sysb,
                                        **kwargs) - 1) / 2, 0.0)
+
+
+def gen_bipartite_spectral_fn(exact_fn, approx_fn, pure_default):
+    """Generate a function that computes a spectral quantity of the subsystem
+    of a pure state. Automatically computes for the smaller subsystem, or
+    switches to the approximate method for large subsystems.
+
+    Parameters
+    ----------
+    exact_fn : callable
+        The function that computes the quantity on a density matrix, with
+        signature: ``exact_fn(rho_a, rank=...)``.
+    approx_fn : callable
+        The function that approximately computes the quantity using a lazy
+        representation of the whole system. With signature
+        ``approx_fn(psi_ab, dims, sysa, **approx_opts)``.
+    pure_default : float
+        The default value when the whole state is the subsystem.
+
+    Returns
+    -------
+    bipartite_spectral_fn : callable
+        The function, with signature:
+        ``(psi_ab, dims, sysa, approx_thresh=2**12, **approx_opts)``
+    """
+    def bipartite_spectral_fn(psi_ab, dims, sysa, approx_thresh=2**12,
+                              **approx_opts):
+        sysa = int2tup(sysa)
+        sz_a = prod(d for i, d in enumerate(dims) if i in sysa)
+        sz_b = prod(dims) // sz_a
+
+        # pure state
+        if sz_b == 1:
+            return pure_default
+
+        # also check if system b is smaller, since spectrum is same for both
+        if sz_b < sz_a:
+            # if so swap things around
+            sz_a, sz_b = sz_b, sz_a
+            sysb = [i for i in range(len(dims)) if i not in sysa]
+            sysa = sysb
+
+        # check whether to use approx lanczos method
+        if (approx_thresh is not None) and (sz_a >= approx_thresh):
+            return approx_fn(psi_ab, dims, sysa, **approx_opts)
+
+        rho_a = ptr(psi_ab, dims, sysa)
+        return exact_fn(rho_a)
+
+    return bipartite_spectral_fn
