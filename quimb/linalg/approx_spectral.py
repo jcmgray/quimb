@@ -561,9 +561,11 @@ def construct_lanczos_tridiag(
 
         Vm1[...] = V[...]
         np.divide(Vt, beta[j + 1], out=V)
-        yield (np.copy(alpha[1:j + 1]),
-               np.copy(beta[2:j + 2]),
-               np.copy(beta[1])**2 / bsz)
+
+        if j > 3:
+            yield (np.copy(alpha[1:j + 1]),
+                   np.copy(beta[2:j + 2]),
+                   np.copy(beta[1])**2 / bsz)
 
 
 def lanczos_tridiag_eig(alpha, beta, check_finite=True):
@@ -580,7 +582,18 @@ def lanczos_tridiag_eig(alpha, beta, check_finite=True):
     Tk_banded[1, -1] = 0.0  # sometimes can get nan here? -> breaks eig_banded
     Tk_banded[0, :] = alpha
     Tk_banded[1, :beta.size] = beta
-    return scla.eig_banded(Tk_banded, lower=True, check_finite=check_finite)
+
+    try:
+        tl, tv = scla.eig_banded(
+            Tk_banded, lower=True, check_finite=check_finite)
+
+    # sometimes get no convergence -> use dense hermitian method
+    except np.linalg.linalg.LinAlgError:  # pragma: no cover
+        tl, tv = np.linalg.eigh(np.diag(alpha) +
+                                np.diag(beta[:alpha.size - 1], 1) +
+                                np.diag(beta[:alpha.size - 1], -1))
+
+    return tl, tv
 
 
 def calc_trace_fn_tridiag(tl, tv, fn, pos=True):
@@ -738,7 +751,11 @@ def approx_spectral_function(
         # wait a few iterations before checking error on mean breakout
         if r >= 3:  # i.e. 4 samples
             xtrim = ext_per_trim(samples, p=mean_p, s=mean_s)
-            estimate, sdev = np.mean(xtrim), np.std(xtrim)
+
+            if xtrim.size == 0:  # sometimes everything is an outlier...
+                estimate, sdev = np.mean(samples), np.std(samples)
+            else:
+                estimate, sdev = np.mean(xtrim), np.std(xtrim)
 
             err = sdev / r ** 0.5
 
