@@ -5,8 +5,11 @@ import os
 import functools
 import operator
 import copy
+import itertools
+import string
 
 from cytoolz import (
+    unique,
     concat,
     frequencies,
     partition_all,
@@ -147,11 +150,11 @@ def _maybe_map_indices_to_alphabet(a_ix, i_ix, o_ix):
         in_str = map("".join, i_ix)
         out_str = "".join(o_ix)
 
-    s = ",".join(in_str) + "->" + out_str
+    return ",".join(in_str) + "->" + out_str
 
-    # re-order strings, for caching
-    return "".join(_einsum_symbols[s.replace(',', "").find(x)]
-                   if x not in {',', '-', '>'} else x for x in s)
+    # # re-order strings, for caching
+    # return "".join(_einsum_symbols[s.replace(',', "").find(x)]
+    #                if x not in {',', '-', '>'} else x for x in s)
 
 
 class HuskArray(np.ndarray):
@@ -196,12 +199,12 @@ def tensor_contract(*tensors,
 
     if output_inds is None:
         # sort output indices  by input order for efficiency and consistency
-        o_ix = tuple(x for x in a_ix if x in set(_gen_output_inds(a_ix)))
+        o_ix = tuple(x for x in a_ix if x in [*_gen_output_inds(a_ix)])
     else:
         o_ix = output_inds
 
     # possibly map indices into the 0-52 range needed by einsum
-    contract_str = _maybe_map_indices_to_alphabet(set(a_ix), i_ix, o_ix)
+    contract_str = _maybe_map_indices_to_alphabet([*unique(a_ix)], i_ix, o_ix)
 
     # perform the contraction
     path = cache_einsum_path_on_shape(
@@ -218,21 +221,7 @@ def tensor_contract(*tensors,
     return Tensor(array=o_array, inds=o_ix, tags=o_tags)
 
 
-def _gen_rand_uuids():
-    """Generate shortish identifiers which are guaranteed unique.
-    Will break if more than ~10**12.4 required.
-    """
-    import uuid
-    used = set()
-    while True:
-        s = str(uuid.uuid4())[:8]
-        while s in used:  # pragma: no cover
-            s = str(uuid.uuid4())[:8]
-        used.add(s)
-        yield s
-
-
-RAND_UUIDS = iter(_gen_rand_uuids())
+RAND_UUIDS = map("".join, itertools.product(string.hexdigits, repeat=7))
 
 
 def rand_uuid(base=""):
@@ -317,7 +306,8 @@ class BondError(Exception):
 
 
 def tensor_split(tensor, left_inds, bond_name="", method='svd',
-                 tol=None, relative=False, max_bond=None):
+                 tol=None, relative=False, max_bond=None,
+                 return_tensors=False):
     """Decompose a tensor into two tensors.
 
     Parameters
@@ -360,11 +350,13 @@ def tensor_split(tensor, left_inds, bond_name="", method='svd',
 
     bond_ind = rand_uuid(base=bond_name)
 
-    return TensorNetwork((
-        Tensor(array=left, inds=(*left_inds, bond_ind), tags=tensor.tags),
-        Tensor(array=right, inds=(bond_ind, *right_inds), tags=tensor.tags)),
-        check_collisions=False,
-    )
+    Tl = Tensor(array=left, inds=(*left_inds, bond_ind), tags=tensor.tags)
+    Tr = Tensor(array=right, inds=(bond_ind, *right_inds), tags=tensor.tags)
+
+    if return_tensors:
+        return Tl, Tr
+
+    return TensorNetwork((Tl, Tr), check_collisions=False)
 
 
 # --------------------------------------------------------------------------- #
@@ -716,9 +708,9 @@ class TensorNetwork(object):
 
         # add its name to the relevant tags, or create a new tag
         for tag in tensor.tags:
-            if tag in self.tag_index:
+            try:
                 self.tag_index[tag].add(name)
-            else:
+            except KeyError:
                 self.tag_index[tag] = {name}
 
     def pop_tensor(self, name):
@@ -763,7 +755,8 @@ class TensorNetwork(object):
         Parameters
         ----------
         tags : sequence of hashable
-            The list of tags to filter the tensors by.
+            The list of tags to filter the tensors by. Use ``...``
+            (``Ellipsis``) to contract all.
         inplace : bool, optional
             If true, remove tagged tensors from self, else create a new network
             with the tensors removed.
@@ -789,62 +782,27 @@ class TensorNetwork(object):
         if len(tagged_names) == len(self.tensor_index):
             return None, self.tensor_index.values()
 
-        # Copy u_tn to new network, and pop tagged tensors from this
+        # Copy untagged to new network, and pop tagged tensors from this
         if inplace:
-            u_tn = self
+            untagged_tn = self
         else:
-            u_tn = self.copy()
-        t_ts = tuple(map(u_tn.pop_tensor, sorted(tagged_names)))
+            untagged_tn = self.copy()
+        tagged_ts = tuple(map(untagged_tn.pop_tensor, sorted(tagged_names)))
 
-        return u_tn, t_ts
+        return untagged_tn, tagged_ts
 
     def _contract_tags(self, tags, inplace=False):
-        u_tn, t_ts = self.filter_by_tags(tags, inplace=inplace)
+        untagged_tn, tagged_ts = self.filter_by_tags(tags, inplace=inplace)
 
-        if not t_ts:
+        if not tagged_ts:
             raise ValueError("No tags were found - nothing to contract. "
                              "(Change this to a no-op maybe?)")
 
-        if u_tn:
-            u_tn.add_tensor(tensor_contract(*t_ts))
-            return u_tn
+        if untagged_tn:
+            untagged_tn.add_tensor(tensor_contract(*tagged_ts))
+            return untagged_tn
 
-        return tensor_contract(*t_ts)
-
-    def contract(self, tags=..., inplace=False):
-        """Contract some, or all, of the tensors in this network.
-
-        Parameters
-        ----------
-        tags : sequence of hashable
-            Any tensors with any of these tags with be contracted. Set to
-            ``...`` (``Ellipsis``) to contract all tensors, the default.
-
-        Returns
-        -------
-        TensorNetwork, Tensor or Scalar
-            The result of the contraction, still a TensorNetwork if the
-            contraction was only partial.
-        """
-
-        # Check for a structured strategy for performing contraction.
-        if self.contract_strategy is not None:
-            if tags is ...:  # all sites
-                tags = slice(0, self.nsites)
-
-            if isinstance(tags, slice):
-                step = 1 if tags.step is None else tags.step
-
-                tags_seq = (self.contract_strategy.format(i)
-                            for i in range(tags.start, tags.stop, step))
-
-                if self.contract_bsz > 1:
-                    tags_seq = partition_all(self.contract_bsz, tags_seq)
-
-                return self.cumulative_contract(tags_seq)
-
-        # Else just contract those tensors specified by tags.
-        return self._contract_tags(tags, inplace=inplace)
+        return tensor_contract(*tagged_ts)
 
     def cumulative_contract(self, tags_seq, inplace=False):
         """Cumulative contraction of tensor network. Contract the first set of
@@ -886,6 +844,45 @@ class TensorNetwork(object):
             new_tn = new_tn._contract_tags(ctags, inplace=True)
 
         return new_tn
+
+    def _contract_with_strategy(self, tags, inplace=False):
+        # check for all sites
+        if tags is ...:
+            tags = slice(0, self.nsites)
+
+        # generate the correct tag for each site
+        step = 1 if tags.step is None else tags.step
+        tags_seq = (self.contract_strategy.format(i)
+                    for i in range(tags.start, tags.stop, step))
+
+        # partition sites into `contract_bsz` groups
+        if self.contract_bsz > 1:
+            tags_seq = partition_all(self.contract_bsz, tags_seq)
+
+        return self.cumulative_contract(tags_seq, inplace=inplace)
+
+    def contract(self, tags=..., inplace=False):
+        """Contract some, or all, of the tensors in this network.
+
+        Parameters
+        ----------
+        tags : sequence of hashable
+            Any tensors with any of these tags with be contracted. Set to
+            ``...`` (``Ellipsis``) to contract all tensors, the default.
+
+        Returns
+        -------
+        TensorNetwork, Tensor or Scalar
+            The result of the contraction, still a TensorNetwork if the
+            contraction was only partial.
+        """
+
+        # Check for a structured strategy for performing contraction.
+        if self.contract_strategy is not None:
+            return self._contract_with_strategy(tags, inplace=inplace)
+
+        # Else just contract those tensors specified by tags.
+        return self._contract_tags(tags, inplace=inplace)
 
     def reindex(self, index_map, inplace=False):
         """Rename indices for all tensors in this network, optionally in-place.
