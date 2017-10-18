@@ -41,7 +41,8 @@ if not NUM_MPI_WORKERS_SET:
 
 
 class CachedPoolWithShutdown(object):
-    """
+    """Decorator for caching the mpi pool when called with the equivalent args,
+    and shutting down previous ones when not needed.
     """
 
     def __init__(self, pool_fn):
@@ -70,7 +71,8 @@ class CachedPoolWithShutdown(object):
 
 @CachedPoolWithShutdown
 def get_mpi_pool(num_workers=None, num_threads=1):
-    """
+    """Get the MPI executor pool, with specified number of processes and
+    threads per process.
     """
     from mpi4py.futures import MPIPoolExecutor
     return MPIPoolExecutor(num_workers, main=False, delay=1e-2,
