@@ -353,6 +353,7 @@ class TestLanczosApprox:
         assert ev.shape == (8, 8)
         assert ev.dtype == float
 
+    @pytest.mark.parametrize("mpi", [False, True])
     @pytest.mark.parametrize("bsz", [1, 2, 5])
     @pytest.mark.parametrize(
         "fn_matrix_rtol",
@@ -363,12 +364,12 @@ class TestLanczosApprox:
             (np.exp, rand_herm, 5e-2),
         ]
     )
-    def test_approx_spectral_function(self, fn_matrix_rtol, bsz):
+    def test_approx_spectral_function(self, fn_matrix_rtol, bsz, mpi):
         fn, matrix, rtol = fn_matrix_rtol
         a = matrix(2**7)
         pos = fn == np.sqrt
         actual_x = sum(fn(eigvals(a)))
-        approx_x = approx_spectral_function(a, fn, K=20, R=20,
+        approx_x = approx_spectral_function(a, fn, K=20, R=20, mpi=mpi,
                                             pos=pos, bsz=bsz)
         assert_allclose(actual_x, approx_x, rtol=rtol)
 

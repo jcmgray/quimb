@@ -7,10 +7,12 @@ from math import sqrt, log2, exp
 import numpy as np
 import scipy.linalg as scla
 import scipy.sparse.linalg as spla
+
 from ..core import ptr
 from ..tensor_networks import einsum, einsum_path, HuskArray
 from ..accel import prod, vdot
 from ..utils import int2tup
+from ..linalg.mpi_spawner import get_mpi_pool
 
 
 # --------------------------------------------------------------------------- #
@@ -494,7 +496,8 @@ def construct_lanczos_tridiag(
         K,
         v0=None,
         bsz=1,
-        beta_tol=1e-6):
+        beta_tol=1e-6,
+        seed=None):
     """Construct the tridiagonal lanczos matrix using only matvec operators.
     This is a generator that iteratively yields the alpha and beta digaonals
     at each step.
@@ -539,6 +542,8 @@ def construct_lanczos_tridiag(
     beta[1] = sqrt(prod(v_shp))  # by construction
 
     if v0 is None:
+        if seed is not None:
+            np.random.seed(seed)
         V = np.random.choice([-1, 1, 1j, -1j], v_shp)
         V /= beta[1]  # normalize
     else:
@@ -635,6 +640,42 @@ def ext_per_trim(x, p=0.6, s=1.0):
     return trimmed_x
 
 
+def _single_random_estimate(A, K, bsz, beta_tol, v0, fn, pos,
+                            tau, tol_scale, seed=None):
+    estimate = None
+
+    # iteratively build the lanczos matrix, checking for convergence
+    for alpha, beta, scaling in construct_lanczos_tridiag(
+            A, K=K, bsz=bsz, beta_tol=beta_tol, seed=seed,
+            v0=v0() if callable(v0) else v0):
+
+        # First bound
+        Gf = scaling * calc_trace_fn_tridiag(*lanczos_tridiag_eig(
+            alpha, beta, check_finite=False), fn=fn, pos=pos)
+
+        # check for break-down convergence (e.g. found entire non-null)
+        if abs(beta[-1]) < beta_tol:
+            estimate = Gf
+            break
+
+        # second bound
+        beta[-1] = beta[0]
+        Rf = scaling * calc_trace_fn_tridiag(*lanczos_tridiag_eig(
+            np.append(alpha, alpha[0]), beta, check_finite=False),
+            fn=fn, pos=pos)
+
+        # check for error bound convergence
+        if abs(Rf - Gf) < 2 * tau * (abs(Gf) + tol_scale):
+            estimate = (Gf + Rf) / 2
+            break
+
+    # didn't converge, use best estimate
+    if estimate is None:
+        estimate = (Gf + Rf) / 2
+
+    return estimate
+
+
 def approx_spectral_function(
         A, fn,
         tol=5e-3,
@@ -647,7 +688,8 @@ def approx_spectral_function(
         tol_scale=1,
         beta_tol=1e-6,
         mean_p=0.7,
-        mean_s=1.0):
+        mean_s=1.0,
+        mpi=False):
     """Approximate a spectral function, that is, the quantity ``Tr(fn(A))``.
 
     Parameters
@@ -708,59 +750,42 @@ def approx_spectral_function(
     if (v0 is not None) and not callable(v0):
         R = 1
 
-    def single_random_estimate():
-        estimate = None
+    args = (A, K, bsz, beta_tol, v0, fn, pos, tau, tol_scale)
 
-        # iteratively build the lanczos matrix, checking for convergence
-        for alpha, beta, scaling in construct_lanczos_tridiag(
-                A, K=K, bsz=bsz, beta_tol=beta_tol,
-                v0=v0() if callable(v0) else v0):
-
-            # First bound
-            Gf = scaling * calc_trace_fn_tridiag(*lanczos_tridiag_eig(
-                alpha, beta, check_finite=False), fn=fn, pos=pos)
-
-            # check for break-down convergence (e.g. found entire non-null)
-            if abs(beta[-1]) < beta_tol:
-                estimate = Gf
-                break
-
-            # second bound
-            beta[-1] = beta[0]
-            Rf = scaling * calc_trace_fn_tridiag(*lanczos_tridiag_eig(
-                np.append(alpha, alpha[0]), beta, check_finite=False),
-                fn=fn, pos=pos)
-
-            # check for error bound convergence
-            if abs(Rf - Gf) < 2 * tau * (abs(Gf) + tol_scale):
-                estimate = (Gf + Rf) / 2
-                break
-
-        # didn't converge, use best estimate
-        if estimate is None:
-            estimate = (Gf + Rf) / 2
-
-        return estimate
+    if not mpi:
+        results = iter(_single_random_estimate(*args) for _ in range(R))
+    else:
+        mpi_pool = get_mpi_pool()
+        fs = [mpi_pool.submit(_single_random_estimate,
+                              *args, seed=i) for i in range(R)]
+        results = iter(f.result() for f in fs)
 
     estimate = None
     samples = []
 
-    for r, sample in ((r, single_random_estimate()) for r in range(R)):
-        samples.append(sample)
+    for _ in range(R):
+        try:
+            samples.append(next(results))
+        except np.linalg.linalg.LinAlgError:  # pragma: no cover
+            # XXX: sometimes both eig methods fail... ignore for now
+            continue
+        r = len(samples)
 
         # wait a few iterations before checking error on mean breakout
-        if r >= 3:  # i.e. 4 samples
+        if r >= 4:
             xtrim = ext_per_trim(samples, p=mean_p, s=mean_s)
-
-            if xtrim.size == 0:  # sometimes everything is an outlier...
+            # sometimes everything is an outlier...
+            if xtrim.size == 0:  # pragma: no cover
                 estimate, sdev = np.mean(samples), np.std(samples)
             else:
                 estimate, sdev = np.mean(xtrim), np.std(xtrim)
-
-            err = sdev / r ** 0.5
-
+            err = sdev / (r - 1) ** 0.5
             if err < tol * (abs(estimate) + tol_scale):
                 return estimate
+
+    if mpi:
+        for f in fs:
+            f.cancel()
 
     return np.mean(samples) if estimate is None else estimate
 
