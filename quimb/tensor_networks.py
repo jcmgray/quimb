@@ -131,30 +131,22 @@ def _maybe_map_indices_to_alphabet(a_ix, i_ix, o_ix):
     contract_str : str
         The string to feed to einsum/contract.
     """
-    # TODO: sort by which group of i_ix they appear in
-    # a_ix = sorted(set(a_ix), key=lambda ind: inner_rank(ind, i_ix))
-
     if any(i not in _einsum_symbols_set for i in a_ix):
         # need to map inds to alphabet
-
         if len(a_ix) > len(_einsum_symbols_set):
             raise ValueError("Too many indices to auto-optimize contraction "
                              "for at once, try setting a `contract_strategy` "
-                             "or manual contraction order using tags.")
+                             "or do a manual contraction order using tags.")
 
-        amap = {i: lett for i, lett in zip(a_ix, _einsum_symbols)}
-        in_str = map(lambda x: "".join(map(amap.__getitem__, x)), i_ix)
-        out_str = "".join(map(amap.__getitem__, o_ix))
+        amap = dict(zip(a_ix, _einsum_symbols))
+        in_str = ("".join(amap[i] for i in ix) for ix in i_ix)
+        out_str = "".join(amap[o] for o in o_ix)
 
     else:
-        in_str = map("".join, i_ix)
+        in_str = ("".join(ix) for ix in i_ix)
         out_str = "".join(o_ix)
 
     return ",".join(in_str) + "->" + out_str
-
-    # # re-order strings, for caching
-    # return "".join(_einsum_symbols[s.replace(',', "").find(x)]
-    #                if x not in {',', '-', '>'} else x for x in s)
 
 
 class HuskArray(np.ndarray):
@@ -297,8 +289,8 @@ def _array_split_qr(x, tol):
 def _array_split_lq(x, tol):
     """QR-decomposition.
     """
-    Q, L = np.linalg.qr(dag(x))
-    return dag(L), dag(Q)
+    Q, L = np.linalg.qr(x.T)
+    return L.T, Q.T
 
 
 class BondError(Exception):
@@ -1040,6 +1032,23 @@ class TensorNetwork(object):
         self[tag1] = Q
         self[tag2] = R @ T2
 
+    def right_canonize_site(self, site):
+        """
+        """
+        tag1 = self.contract_strategy.format(site)
+        tag2 = self.contract_strategy.format(site - 1)
+
+        T1 = self[tag1]
+        T2 = self[tag2]
+
+        L, Q = tensor_split(
+            T1, set(T1.inds) & set(T2.inds), method='lq', return_tensors=True)
+
+        L.drop_tags()
+
+        self[tag1] = Q
+        self[tag2] = L @ T2
+
     def left_canonize(self, start=None, stop=None, normalize=False):
         """
         """
@@ -1052,9 +1061,39 @@ class TensorNetwork(object):
             self.left_canonize_site(i)
 
         if normalize:
-            last_tag = self.contract_strategy.format(self.nsites - 1)
-            T = self[last_tag]
-            self[last_tag] /= T.norm()
+            last = self.contract_strategy.format(self.nsites - 1)
+            T = self[last]
+            self[last] /= T.norm()
+
+    def right_canonize(self, start=None, stop=None, normalize=False):
+        """
+        """
+        if start is None:
+            start = self.nsites - 1
+        if stop is None:
+            stop = 0
+
+        for i in range(start, stop, -1):
+            self.right_canonize_site(i)
+
+        if normalize:
+            first = self.contract_strategy.format(0)
+            T = self[first]
+            self[first] /= T.norm()
+
+    def canonize(self, orthogonality_center):
+        """
+        """
+        self.left_canonize(stop=orthogonality_center)
+        self.right_canonize(stop=orthogonality_center)
+
+    def shift_orthogonality_center(self, current, new):
+        if new > current:
+            for i in range(current, new):
+                self.left_canonize_site(i)
+        else:
+            for i in range(current, new, -1):
+                self.right_canonize_site(i)
 
     def __and__(self, other):
         """Combine this tensor network with more tensors, without contracting.
@@ -1066,14 +1105,15 @@ class TensorNetwork(object):
         """
         return TensorNetwork((self, other)) ^ ...
 
+    # ------------------------------ printing ------------------------------- #
+
     def __repr__(self):
         return "TensorNetwork({}, {}, {})".format(
             repr(self.tensors),
             "contract_strategy='{}'".format(self.contract_strategy) if
             self.contract_strategy is not None else "",
             "nsites={}".format(self.nsites) if
-            self.nsites is not None else "",
-        )
+            self.nsites is not None else "")
 
     def __str__(self):
         return "TensorNetwork([{}{}{}]{}{})".format(
@@ -1289,6 +1329,14 @@ def matrix_product_operator(*arrays, shape='lrkb',
 # --------------------------------------------------------------------------- #
 #                        Specific states and operators                        #
 # --------------------------------------------------------------------------- #
+
+
+def rand_tensor(shape, inds, tags=None):
+    """Generate a random (complex) tensor with specified shape.
+    """
+    array = np.random.randn(*shape) + 1.0j * np.random.randn(*shape)
+    return Tensor(array=array, inds=inds, tags=tags)
+
 
 def rand_ket_mps(n, bond_dim, phys_dim=2,
                  site_inds=None,
