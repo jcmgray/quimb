@@ -488,6 +488,11 @@ class Tensor(object):
         new_inds = concat((fuse_map.keys(), unfused_inds))
         return Tensor(TT.array.reshape(*dims), new_inds, self.tags)
 
+    def norm(self):
+        """Frobenius norm of this tensor.
+        """
+        return norm_fro_dense(self.array.reshape(-1))
+
     def almost_equals(self, other, **kwargs):
         """Check if this tensor is almost the same as another.
         """
@@ -496,6 +501,17 @@ class Tensor(object):
             return False
         otherT = other.transpose(*self.inds)
         return np.allclose(self.array, otherT.array, **kwargs)
+
+    def drop_tags(self, tags=None):
+        """Drop certain tags, defaulting to all, from this tensor.
+        """
+        if tags is None:
+            self.tags = set()
+        elif isinstance(tags, str):
+            self.tags.discard(tags)
+        else:
+            for tag in tags:
+                self.tags.discard(tag)
 
     def __and__(self, other):
         """Combine with another ``Tensor`` or ``TensorNetwork`` into a new
@@ -845,6 +861,16 @@ class TensorNetwork(object):
 
         return new_tn
 
+    def __rshift__(self, *args, **kwargs):
+        """Overload of '>>' for TensorNetwork.cumulative_contract.
+        """
+        return self.cumulative_contract(*args, **kwargs)
+
+    def __irshift__(self, *args, **kwargs):
+        """Overload of '>>=' for inplace TensorNetwork.cumulative_contract.
+        """
+        return self.cumulative_contract(*args, **kwargs)
+
     def _contract_with_strategy(self, tags, inplace=False):
         # check for all sites
         if tags is ...:
@@ -877,12 +903,24 @@ class TensorNetwork(object):
             contraction was only partial.
         """
 
-        # Check for a structured strategy for performing contraction.
+        # Check for a structured strategy for performing contraction...
         if self.contract_strategy is not None:
-            return self._contract_with_strategy(tags, inplace=inplace)
+            # ... but only use for total or slice tags
+            if (tags is ...) or isinstance(tags, slice):
+                return self._contract_with_strategy(tags, inplace=inplace)
 
         # Else just contract those tensors specified by tags.
         return self._contract_tags(tags, inplace=inplace)
+
+    def __xor__(self, *args, **kwargs):
+        """Overload of '^' for TensorNetwork.contract.
+        """
+        return self.contract(*args, **kwargs)
+
+    def __ixor__(self, *args, **kwargs):
+        """Overload of '^=' for inplace TensorNetwork.contract.
+        """
+        return self.contract(*args, **kwargs)
 
     def reindex(self, index_map, inplace=False):
         """Rename indices for all tensors in this network, optionally in-place.
@@ -985,25 +1023,38 @@ class TensorNetwork(object):
         name, = names
         self.tensor_index[name] = tensor
 
-    def __xor__(self, *args, **kwargs):
-        """Overload of '^' for TensorNetwork.contract.
+    def left_canonize_site(self, site):
         """
-        return self.contract(*args, **kwargs)
+        """
+        tag1 = self.contract_strategy.format(site)
+        tag2 = self.contract_strategy.format(site + 1)
 
-    def __ixor__(self, *args, **kwargs):
-        """Overload of '^=' for inplace TensorNetwork.contract.
-        """
-        return self.contract(*args, **kwargs)
+        T1 = self[tag1]
+        T2 = self[tag2]
 
-    def __rshift__(self, *args, **kwargs):
-        """Overload of '>>' for TensorNetwork.cumulative_contract.
-        """
-        return self.cumulative_contract(*args, **kwargs)
+        Q, R = tensor_split(
+            T1, set(T1.inds) - set(T2.inds), method='qr', return_tensors=True)
 
-    def __irshift__(self, *args, **kwargs):
-        """Overload of '>>=' for inplace TensorNetwork.cumulative_contract.
+        R.drop_tags()
+
+        self[tag1] = Q
+        self[tag2] = R @ T2
+
+    def left_canonize(self, start=None, stop=None, normalize=False):
         """
-        return self.cumulative_contract(*args, **kwargs)
+        """
+        if start is None:
+            start = 0
+        if stop is None:
+            stop = self.nsites - 1
+
+        for i in range(start, stop):
+            self.left_canonize_site(i)
+
+        if normalize:
+            last_tag = self.contract_strategy.format(self.nsites - 1)
+            T = self[last_tag]
+            self[last_tag] /= T.norm()
 
     def __and__(self, other):
         """Combine this tensor network with more tensors, without contracting.

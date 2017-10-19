@@ -318,18 +318,6 @@ class TestTensorNetwork:
         for tag, names in d2.tag_index.items():
             assert d.tag_index[tag] == names
 
-    def test_entanglement_of_mps_state(self):
-
-        mps = TensorNetwork([
-            Tensor(np.random.randn(2, 8), [0, 1]),
-            *[Tensor(np.random.randn(8, 2, 8), [2 * i - 1, 2 * i, 2 * i + 1])
-              for i in range(1, 9)],
-            Tensor(np.random.randn(8, 2), [17, 18])]
-        )
-
-        psi = mps.contract()
-        assert psi.shape == (2,) * 10
-
     def test_reindex(self):
         a = Tensor(np.random.randn(2, 3, 4), inds=[0, 1, 2],
                    tags='red')
@@ -353,6 +341,32 @@ class TestTensorNetwork:
         assert a_b_c.outer_inds() == ('foo',)
         assert set(d.inner_inds()) == {0, 1, 'bar', 3}
         assert d.tensors[0].inds == (0, 1, 'bar')
+
+    def test_left_canonize_site(self):
+        a = Tensor(np.random.randn(7, 2), inds=['b01', 'p0'], tags='i0')
+        b = Tensor(np.random.randn(7, 7, 2), inds=['b01', 'b12', 'p1'],
+                   tags='i1')
+        c = Tensor(np.random.randn(7, 2), inds=['b12', 'p2'], tags='i2')
+        tn = TensorNetwork([a, b, c], contract_strategy='i{}')
+
+        tn.left_canonize_site(0)
+        assert tn['i0'].shape == (2, 2)
+        assert tn['i0'].tags == {'i0'}
+        assert tn['i1'].tags == {'i1'}
+
+        U = (tn['i0'].array)
+        assert_allclose(U.T @ U, np.eye(2), atol=1e-13)
+        assert_allclose(U @ U.T, np.eye(2), atol=1e-13)
+
+        # combined two site contraction is identity also
+        tn.left_canonize_site(1)
+        ptn = (tn.H & tn) ^ ['i0', 'i1']
+        assert_allclose(ptn['i0'].array, np.eye(4), atol=1e-13)
+
+        # try normalizing the state
+        tn['i2'] /= tn['i2'].norm()
+
+        assert abs(tn.H @ tn - 1) < 1e-13
 
 
 class TestSpecificNetworks:
@@ -392,6 +406,15 @@ class TestSpecificStatesOperators:
         assert abs(rmps.H @ rmps - 1) < 1e-13
         c = (rmps.H & rmps) ^ slice(0, 5) ^ slice(9, 4, -1) ^ slice(4, 6)
         assert abs(c - 1) < 1e-13
+
+    def test_rand_mps_left_canonize(self):
+        n = 10
+        rmps = rand_ket_mps(n, 10, site_tags="foo{}",
+                            tags='bar', normalize=False)
+        rmps.left_canonize(normalize=True)
+        assert abs(rmps.H @ rmps - 1) < 1e-13
+        p_tn = (rmps.H & rmps) ^ slice(0, 9)
+        assert_allclose(p_tn['foo8'].array, np.eye(10), atol=1e-13)
 
     def test_mpo_site_ham_heis(self):
         hh_mpo = ham_heis_mpo(5, tags=['foo'])
