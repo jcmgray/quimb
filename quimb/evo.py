@@ -18,7 +18,7 @@ from scipy.integrate import complex_ode
 
 from .accel import isop, ldmul, rdmul, explt, dot, issparse, dot_dense
 from .core import qu, eye
-from .linalg.base_linalg import eigsys, norm
+from .linalg.base_linalg import eigsys, norm, expm_multiply
 from .utils import continuous_progbar, progbar
 
 
@@ -212,56 +212,78 @@ class QuEvo(object):
     ham : matrix-like, or tuple (1d array, matrix-like).
         Governing Hamiltonian, if tuple then assumed to contain
         ``(eigvals, eigvecs)`` of presolved system.
-    solve : bool, optional
-        Whether to immediately solve Hamiltonian.
     t0 : float, optional
         Initial time (i.e. time of state ``p0``), defaults to zero.
-    small_step : bool, optional
-        If integrating, whether to use a low or high order
-        integrator to give naturally small or large steps.
     compute : callable, or dict of callable, optional
         Function(s) to compute on the state at each time step, called
         with args (t, pt). If supplied with:
 
-            * single callable : ``QuEvo.results`` will contain the results as a
+            - single callable : ``QuEvo.results`` will contain the results as a
               list,
-            * dict of callables : ``QuEvo.results`` will contain the results as
+            - dict of callables : ``QuEvo.results`` will contain the results as
               a dict of lists with corresponding keys to those given in
               ``compute``.
+
+    method : {'integrate', 'solve', 'expm'}
+        How to evolve the system:
+
+            - 'integrate': use definite integration. Get system at each time
+            step, only need action of Hamiltonian on state. Generally
+            efficient.
+            - 'solve': diagonalise dense hamiltonian. Best for small systems
+            and allows arbitrary time steps without loss of precision.
+            - 'expm': compute the evolved state using the action of the
+            matrix exponential in a 'single shot' style. Only needs action of
+            Hamiltonian, for very large systems can use distributed MPI.
+
+    int_small_step : bool, optional
+        If ``method='integrate'``, whether to use a low or high order
+        integrator to give naturally small or large steps.
+    expm_backend : {'auto', 'scipy', 'slepc'}
+        How to perform the expm_multiply function if ``method='exmp'``.
+    expm_opts : dict
+        Supplied to expm_multiply function if ``method='exmp'``.
     progbar : bool, optional
         Whether to show a progress bar when calling ``at_times`` or integrating
         with the ``update_to`` method.
     """
 
-    def __init__(self, p0, ham,
-                 solve=False,
-                 t0=0,
-                 small_step=False,
+    def __init__(self, p0, ham, t0=0,
                  compute=None,
+                 method='integrate',
+                 int_small_step=False,
+                 expm_backend='AUTO',
+                 expm_opts=None,
                  progbar=False):
-        """
-        """
-        super(QuEvo, self).__init__()
 
         self._p0 = qu(p0)
         self._t = self.t0 = t0
         self._isdop = isop(self._p0)  # Density operator evolution?
         self._d = p0.shape[0]  # Hilbert space dimension
-
         self._progbar = progbar
-        self._setup_callback(compute)
 
-        # Hamiltonian
-        if solve or isinstance(ham, (tuple, list)):
+        self._setup_callback(compute)
+        self.method = method
+
+        if method == 'solve' or isinstance(ham, (tuple, list)):
             self._solve_ham(ham)
-        else:  # Use definite integration
-            self._start_integrator(ham, small_step)
+        elif method == 'integrate':
+            self._start_integrator(ham, int_small_step)
+        elif method == 'expm':
+            self._update_method = self._update_to_expm_ket
+            self._pt = self._p0
+            self.ham = ham
+            self.expm_backend = expm_backend
+            self.expm_opts = {} if expm_opts is None else dict(expm_opts)
+        else:
+            raise ValueError("Did not understand evolution method: '{}'."
+                             .format(method))
 
     def _setup_callback(self, fn):
         """Setup callbacks in the correct place to compute into _results
         """
         if fn is None:
-            slv_step_callback = None
+            step_callback = None
             int_step_callback = None
 
         # dict of funcs input -> dict of funcs output
@@ -269,7 +291,7 @@ class QuEvo(object):
             self._results = {k: [] for k in fn}
 
             @functools.wraps(fn)
-            def slv_step_callback(t, pt):
+            def step_callback(t, pt):
                 for k, v in fn.items():
                     self._results[k].append(v(t, pt))
 
@@ -286,7 +308,7 @@ class QuEvo(object):
             self._results = []
 
             @functools.wraps(fn)
-            def slv_step_callback(t, pt):
+            def step_callback(t, pt):
                 self._results.append(fn(t, pt))
 
             @functools.wraps(fn)
@@ -294,27 +316,30 @@ class QuEvo(object):
                 pt = np.asmatrix(y.reshape(self._d, -1))
                 self._results.append(fn(t, pt))
 
-        self._slv_step_callback = slv_step_callback
+        self._step_callback = step_callback
         self._int_step_callback = int_step_callback
 
     def _solve_ham(self, ham):
         """Solve the supplied hamiltonian and find the initial state in the
         energy eigenbasis for quick evolution later.
         """
-        try:  # See if already set from tuple
+        # See if already solved from tuple
+        try:
             self._evals, self._evecs = ham
+            self.method = 'solve'
         except ValueError:
             self._evals, self._evecs = eigsys(ham.A)
 
         # Find initial state in energy eigenbasis at t0
-        self.pe0 = (dot(self._evecs.H, dot(self._p0,
-                                           self._evecs)) if self._isdop else
-                    dot(self._evecs.H, self._p0))
-        self._pt = self._p0  # Current state (start with same as initial)
+        if self._isdop:
+            self.pe0 = dot(self._evecs.H, dot(self._p0, self._evecs))
+            self._update_method = self._update_to_solved_dop
+        else:
+            self.pe0 = dot(self._evecs.H, self._p0)
+            self._update_method = self._update_to_solved_ket
 
-        # Set update method conditional on type of state
-        self._update_method = (self._update_to_solved_dop if self._isdop else
-                               self._update_to_solved_ket)
+        # Current state (start with same as initial)
+        self._pt = self._p0
         self._solved = True
 
     def _start_integrator(self, ham, small_step):
@@ -344,6 +369,19 @@ class QuEvo(object):
 
     # Methods for updating the simulation ----------------------------------- #
 
+    def _update_to_expm_ket(self, t):
+        """Update the simulation to time ``t``, without explicitly computing
+        the matrix exponential itself.
+        """
+        factor = -1j * (t - self.t)
+        self._pt = expm_multiply(factor * self.ham, self._pt,
+                                 backend=self.expm_backend, **self.expm_opts)
+        self._t = t
+
+        # compute any callbacks into -> self._results
+        if self._step_callback is not None:
+            self._step_callback(t, self._pt)
+
     def _update_to_solved_ket(self, t):
         """Update simulation consisting of a solved hamiltonian and a
         wavefunction to time `t`.
@@ -352,9 +390,9 @@ class QuEvo(object):
         lt = explt(self._evals, t - self.t0)
         self._pt = dot_dense(self._evecs, ldmul(lt, self.pe0))
 
-        # compute any callbacks into ->> self._results
-        if self._slv_step_callback is not None:
-            self._slv_step_callback(t, self._pt)
+        # compute any callbacks into -> self._results
+        if self._step_callback is not None:
+            self._step_callback(t, self._pt)
 
     def _update_to_solved_dop(self, t):
         """Update simulation consisting of a solved hamiltonian and a
@@ -365,9 +403,9 @@ class QuEvo(object):
         lvpvl = rdmul(ldmul(lt, self.pe0), lt.conj())
         self._pt = dot_dense(self._evecs, dot_dense(lvpvl, self._evecs.H))
 
-        # compute any callbacks into ->> self._results
-        if self._slv_step_callback is not None:
-            self._slv_step_callback(t, self._pt)
+        # compute any callbacks into -> self._results
+        if self._step_callback is not None:
+            self._step_callback(t, self._pt)
 
     def _update_to_integrate(self, t):
         """Update simulation consisting of unsolved hamiltonian.
@@ -415,10 +453,10 @@ class QuEvo(object):
 
         Notes
         -----
-        If integrating (solve=False), currently any compute callbacks will
-        be called at every *integration* step, not just the times `ts` --
-        i.e. in general len(QuEvo.results) != len(ts) and if the adaptive step
-        times are needed they should be added as a callback, e.g.
+        If integrating, currently any compute callbacks will be called at every
+        *integration* step, not just the times `ts` -- i.e. in general
+        len(QuEvo.results) != len(ts) and if the adaptive step times are needed
+        they should be added as a callback, e.g.
         ``compute['t'] = lambda t, _: return t``.
         """
         if self._progbar:
@@ -434,15 +472,16 @@ class QuEvo(object):
     def t(self):
         """float : Current time of simulation.
         """
-        return (self._t if self._solved else
-                self._stepper.t)
+        return self._stepper.t if self.method == 'integrate' else self._t
 
     @property
     def pt(self):
         """quantum state : State of the system at the current time (t).
         """
-        return (self._pt if self._solved else
-                np.asmatrix(self._stepper.y.reshape(self._d, -1)))
+        if self.method == 'integrate':
+            return np.asmatrix(self._stepper.y.reshape(self._d, -1))
+        else:
+            return self._pt
 
     @property
     def results(self):

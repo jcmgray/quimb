@@ -348,6 +348,17 @@ class TestEye:
         assert a.dtype == complex
 
 
+class TestKron:
+    @mark.parametrize("parallel", [True, False])
+    def test_kron_basic(self, parallel):
+        a = rand_ket(2)
+        b = rand_ket(4)
+        c = rand_ket(4)
+        d = rand_ket(5)
+        t = kron(a, b, c, d, parallel=parallel)
+        assert_allclose(t, a & b & c & d)
+
+
 class TestEyepad:
     def test_basic(self):
         a = rand_matrix(2)

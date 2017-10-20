@@ -509,7 +509,7 @@ def slepc_svds(a, k=6, ncv=None, return_vecs=True, SVDType='cross',
 
 def slepc_mfn_multiply(mat, vec,
                        fntype='exp',
-                       MFNType='krylov',
+                       MFNType='AUTO',
                        comm=None,
                        isherm=False):
     """Compute the action of ``func(mat) @ vec``.
@@ -544,18 +544,17 @@ def slepc_mfn_multiply(mat, vec,
     vec = convert_vec_to_petsc(vec, comm=comm)
     out = new_petsc_vec(vec.size, comm=comm)
 
-    func_map = {'EXP': SLEPc.FN.Type.EXP,
-                'SQRT': SLEPc.FN.Type.SQRT,
-                'LOG': SLEPc.FN.Type.LOG}
-
-    type_map = {'KRYLOV': SLEPc.MFN.Type.KRYLOV,
-                'EXPOKIT': SLEPc.MFN.Type.EXPOKIT}
+    if MFNType.upper() == 'AUTO':
+        if vec.size > 2**16:
+            MFNType = 'KRYLOV'
+        else:
+            MFNType = 'EXPOKIT'
 
     # set up the matrix function options and objects
     mfn = SLEPc.MFN().create(comm=comm)
-    mfn.setType(type_map[MFNType.upper()])
+    mfn.setType(getattr(SLEPc.MFN.Type, MFNType.upper()))
     mfn_fn = mfn.getFN()
-    mfn_fn.setType(func_map[fntype.upper()])
+    mfn_fn.setType(getattr(SLEPc.FN.Type, fntype.upper()))
     mfn_fn.setScale(1.0, 1.0)
     mfn.setFromOptions()
 
