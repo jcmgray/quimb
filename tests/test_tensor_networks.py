@@ -11,8 +11,8 @@ from quimb.tensor_networks import (
     tensor_contract,
     tensor_split,
     TensorNetwork,
-    matrix_product_state,
-    matrix_product_operator,
+    MatrixProductState,
+    MatrixProductOperator,
     rand_ket_mps,
     ham_heis_mpo,
     rand_tensor,
@@ -328,71 +328,141 @@ class TestTensorNetwork:
         assert set(d.inner_inds()) == {0, 1, 'bar', 3}
         assert d.tensors[0].inds == (0, 1, 'bar')
 
-    def test_left_canonize_site(self):
-        a = rand_tensor((7, 2), inds=['b01', 'p0'], tags='i0')
-        b = rand_tensor((7, 7, 2), inds=['b01', 'b12', 'p1'], tags='i1')
-        c = rand_tensor((7, 2), inds=['b12', 'p2'], tags='i2')
-        tn = TensorNetwork([a, b, c], contract_strategy='i{}')
-
-        tn.left_canonize_site(0)
-        assert tn['i0'].shape == (2, 2)
-        assert tn['i0'].tags == {'i0'}
-        assert tn['i1'].tags == {'i1'}
-
-        U = (tn['i0'].array)
-        assert_allclose(U.conj().T @ U, np.eye(2), atol=1e-13)
-        assert_allclose(U @ U.conj().T, np.eye(2), atol=1e-13)
-
-        # combined two site contraction is identity also
-        tn.left_canonize_site(1)
-        ptn = (tn.H & tn) ^ ['i0', 'i1']
-        assert_allclose(ptn['i1'].array, np.eye(4), atol=1e-13)
-
-        # try normalizing the state
-        tn['i2'] /= tn['i2'].norm()
-
-        assert abs(tn.H @ tn - 1) < 1e-13
-
-    def test_right_canonize_site(self):
-        a = rand_tensor((7, 2), inds=['b01', 'p0'], tags='i0')
-        b = rand_tensor((7, 7, 2), inds=['b01', 'b12', 'p1'], tags='i1')
-        c = rand_tensor((7, 2), inds=['b12', 'p2'], tags='i2')
-        tn = TensorNetwork([a, b, c], contract_strategy='i{}')
-
-        tn.right_canonize_site(2)
-        assert tn['i2'].shape == (2, 2)
-        assert tn['i2'].tags == {'i2'}
-        assert tn['i1'].tags == {'i1'}
-
-        U = (tn['i2'].array)
-        assert_allclose(U.conj().T @ U, np.eye(2), atol=1e-13)
-        assert_allclose(U @ U.conj().T, np.eye(2), atol=1e-13)
-
-        # combined two site contraction is identity also
-        tn.right_canonize_site(1)
-        ptn = (tn.H & tn) ^ ['i1', 'i2']
-        assert_allclose(ptn['i1'].array, np.eye(4), atol=1e-13)
-
-        # try normalizing the state
-        tn['i0'] /= tn['i0'].norm()
-
-        assert abs(tn.H @ tn - 1) < 1e-13
+    def test_add_tag(self):
+        a = rand_tensor((2, 3, 4), inds='abc', tags={'red'})
+        b = rand_tensor((2, 3, 4), inds='abc', tags={'blue'})
+        tn = a & b
+        tn.add_tag('green')
+        assert 'green' in tn.tag_index
+        assert 'green' in tn['red'].tags
+        assert 'green' in tn['blue'].tags
+        tn.add_tag('blue')
+        for t in tn.tensors:
+            assert 'blue' in t.tags
 
 
-class TestSpecificNetworks:
+class TestMatrixProductState:
 
     def test_matrix_product_state(self):
         tensors = ([np.random.rand(5, 2)] +
                    [np.random.rand(5, 5, 2) for _ in range(3)] +
                    [np.random.rand(5, 2)])
-        mps = matrix_product_state(*tensors)
+        mps = MatrixProductState(tensors)
         assert len(mps.tensors) == 5
+        nmps = mps.reindex_sites('foo{}', inplace=False, where=slice(0, 3))
+        assert nmps.site_inds == "k{}"
+        assert isinstance(nmps, MatrixProductState)
+        assert set(nmps.outer_inds()) == {'foo0', 'foo1',
+                                          'foo2', 'k3', 'k4'}
+        assert set(mps.outer_inds()) == {'k0', 'k1',
+                                         'k2', 'k3', 'k4'}
+        mps.set_site_inds('foo{}')
+        assert set(mps.outer_inds()) == {'foo0', 'foo1',
+                                         'foo2', 'foo3', 'foo4'}
+        assert mps.site_inds == 'foo{}'
+
+    def test_left_canonize_site(self):
+        a = np.random.randn(7, 2) + 1.0j * np.random.randn(7, 2)
+        b = np.random.randn(7, 7, 2) + 1.0j * np.random.randn(7, 7, 2)
+        c = np.random.randn(7, 2) + 1.0j * np.random.randn(7, 2)
+        mps = MatrixProductState([a, b, c], site_tags="i{}")
+
+        mps.left_canonize_site(0)
+        assert mps['i0'].shape == (2, 2)
+        assert mps['i0'].tags == {'i0'}
+        assert mps['i1'].tags == {'i1'}
+
+        U = (mps['i0'].array)
+        assert_allclose(U.conj().T @ U, np.eye(2), atol=1e-13)
+        assert_allclose(U @ U.conj().T, np.eye(2), atol=1e-13)
+
+        # combined two site contraction is identity also
+        mps.left_canonize_site(1)
+        ptn = (mps.H & mps) ^ ['i0', 'i1']
+        assert_allclose(ptn['i1'].array, np.eye(4), atol=1e-13)
+
+        # try normalizing the state
+        mps['i2'] /= mps['i2'].norm()
+
+        assert abs(mps.H @ mps - 1) < 1e-13
+
+    def test_right_canonize_site(self):
+        a = np.random.randn(7, 2) + 1.0j * np.random.randn(7, 2)
+        b = np.random.randn(7, 7, 2) + 1.0j * np.random.randn(7, 7, 2)
+        c = np.random.randn(7, 2) + 1.0j * np.random.randn(7, 2)
+        mps = MatrixProductState([a, b, c], site_tags="i{}")
+
+        mps.right_canonize_site(2)
+        assert mps['i2'].shape == (2, 2)
+        assert mps['i2'].tags == {'i2'}
+        assert mps['i1'].tags == {'i1'}
+
+        U = (mps['i2'].array)
+        assert_allclose(U.conj().T @ U, np.eye(2), atol=1e-13)
+        assert_allclose(U @ U.conj().T, np.eye(2), atol=1e-13)
+
+        # combined two site contraction is identity also
+        mps.right_canonize_site(1)
+        ptn = (mps.H & mps) ^ ['i1', 'i2']
+        assert_allclose(ptn['i1'].array, np.eye(4), atol=1e-13)
+
+        # try normalizing the state
+        mps['i0'] /= mps['i0'].norm()
+
+        assert abs(mps.H @ mps - 1) < 1e-13
+
+    def test_rand_mps_left_canonize(self):
+        n = 10
+        rmps = rand_ket_mps(n, 10, site_tags="foo{}",
+                            tags='bar', normalize=False)
+        rmps.left_canonize(normalize=True)
+        assert abs(rmps.H @ rmps - 1) < 1e-13
+        p_tn = (rmps.H & rmps) ^ slice(0, 9)
+        assert_allclose(p_tn['foo8'].array, np.eye(10), atol=1e-13)
+
+    def test_rand_mps_right_canonize(self):
+        n = 10
+        rmps = rand_ket_mps(n, 10, site_tags="foo{}",
+                            tags='bar', normalize=False)
+        rmps.right_canonize(normalize=True)
+        assert abs(rmps.H @ rmps - 1) < 1e-13
+        p_tn = (rmps.H & rmps) ^ slice(1, 10)
+        assert_allclose(p_tn['foo1'].array, np.eye(10), atol=1e-13)
+
+    def test_rand_mps_mixed_canonize(self):
+        n = 10
+        rmps = rand_ket_mps(n, 10, site_tags="foo{}",
+                            tags='bar', normalize=True)
+
+        # move to the center
+        rmps.canonize(orthogonality_center=4)
+        assert abs(rmps.H @ rmps - 1) < 1e-13
+        p_tn = (rmps.H & rmps) ^ slice(0, 4) ^ slice(5, 10)
+        assert_allclose(p_tn['foo3'].array, np.eye(10), atol=1e-13)
+        assert_allclose(p_tn['foo5'].array, np.eye(10), atol=1e-13)
+
+        # try shifting to the right
+        rmps.shift_orthogonality_center(current=4, new=8)
+        assert abs(rmps.H @ rmps - 1) < 1e-13
+        p_tn = (rmps.H & rmps) ^ slice(0, 8) ^ slice(9, 10)
+        assert_allclose(p_tn['foo7'].array, np.eye(4), atol=1e-13)
+        assert_allclose(p_tn['foo9'].array, np.eye(2), atol=1e-13)
+
+        # try shifting to the left
+        rmps.shift_orthogonality_center(current=8, new=6)
+        assert abs(rmps.H @ rmps - 1) < 1e-13
+        p_tn = (rmps.H & rmps) ^ slice(0, 6) ^ slice(7, 10)
+        assert_allclose(p_tn['foo5'].array, np.eye(10), atol=1e-13)
+        assert_allclose(p_tn['foo7'].array, np.eye(8), atol=1e-13)
+
+
+class TestMatrixProductOperator:
 
     def test_matrix_product_operator(self):
         tensors = ([np.random.rand(5, 2, 2)] +
                    [np.random.rand(5, 5, 2, 2) for _ in range(3)] +
                    [np.random.rand(5, 2, 2)])
-        mpo = matrix_product_operator(*tensors)
+        mpo = MatrixProductOperator(tensors)
         assert len(mpo.tensors) == 5
         op = mpo ^ ...
         # this would rely on left to right contraction if not in set form
@@ -417,61 +487,13 @@ class TestSpecificStatesOperators:
         c = (rmps.H & rmps) ^ slice(0, 5) ^ slice(9, 4, -1) ^ slice(4, 6)
         assert abs(c - 1) < 1e-13
 
-    def test_rand_mps_left_canonize(self):
-        n = 10
-        rmps = rand_ket_mps(n, 10, site_tags="foo{}",
-                            tags='bar', normalize=False)
-        rmps.left_canonize(normalize=True)
-        assert abs(rmps.H @ rmps - 1) < 1e-13
-        p_tn = (rmps.H & rmps) ^ slice(0, 9)
-        assert_allclose(p_tn['foo8'].array, np.eye(10), atol=1e-13)
-
-    def test_rand_mps_right_canonize(self):
-        n = 10
-        rmps = rand_ket_mps(n, 10, site_tags="foo{}",
-                            tags='bar', normalize=False)
-        rmps.right_canonize(normalize=True)
-        assert abs(rmps.H @ rmps - 1) < 1e-13
-        p_tn = (rmps.H & rmps) ^ slice(1, 10)
-        assert_allclose(p_tn['foo1'].array, np.eye(10), atol=1e-13)
-
-    def test_rand_mps_mixed_canonize(self):
-        n = 10
-        rmps = rand_ket_mps(n, 10, site_tags="foo{}",
-                            tags='bar', normalize=True)
-        rmps.canonize(orthogonality_center=4)
-
-        assert abs(rmps.H @ rmps - 1) < 1e-13
-        p_tn = (rmps.H & rmps) ^ slice(0, 4) ^ slice(5, 10)
-        assert_allclose(p_tn['foo3'].array, np.eye(10), atol=1e-13)
-        assert_allclose(p_tn['foo5'].array, np.eye(10), atol=1e-13)
-
-        # try shifting to the right
-        rmps.shift_orthogonality_center(current=4, new=8)
-        assert abs(rmps.H @ rmps - 1) < 1e-13
-        p_tn = (rmps.H & rmps) ^ slice(0, 8) ^ slice(9, 10)
-        assert_allclose(p_tn['foo7'].array, np.eye(4), atol=1e-13)
-        assert_allclose(p_tn['foo9'].array, np.eye(2), atol=1e-13)
-
-        # try shifting to the left
-        rmps.shift_orthogonality_center(current=8, new=6)
-        assert abs(rmps.H @ rmps - 1) < 1e-13
-        p_tn = (rmps.H & rmps) ^ slice(0, 6) ^ slice(7, 10)
-        assert_allclose(p_tn['foo5'].array, np.eye(10), atol=1e-13)
-        assert_allclose(p_tn['foo7'].array, np.eye(8), atol=1e-13)
-
     def test_mpo_site_ham_heis(self):
         hh_mpo = ham_heis_mpo(5, tags=['foo'])
-
         assert hh_mpo.tensors[0].tags == {'i0', 'foo'}
         assert hh_mpo.tensors[3].tags == {'i3', 'foo'}
         assert hh_mpo.tensors[-1].tags == {'i4', 'foo'}
-
         assert hh_mpo.shape == (2,) * 10
-
         hh_ = (hh_mpo ^ ...).fuse({'k': ['k0', 'k1', 'k2', 'k3', 'k4'],
                                    'b': ['b0', 'b1', 'b2', 'b3', 'b4']})
-
-        hh = ham_heis(5, cyclic=False) / 4
-
+        hh = ham_heis(5, cyclic=False) / 4  # /4 :ham_heis uses paulis not spin
         assert_allclose(hh, hh_.array)
