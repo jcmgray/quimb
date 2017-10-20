@@ -891,7 +891,7 @@ class TensorNetwork(object):
 
         if tags.stop is ...:
             stop = self.nsites
-        if tags.stop < 0:
+        elif tags.stop < 0:
             stop = self.nsites + tags.stop
         else:
             stop = tags.stop

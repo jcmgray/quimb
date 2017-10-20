@@ -426,7 +426,7 @@ class TestMatrixProductState:
                             tags='bar', normalize=False)
         rmps.right_canonize(normalize=True)
         assert abs(rmps.H @ rmps - 1) < 1e-13
-        p_tn = (rmps.H & rmps) ^ slice(1, 10)
+        p_tn = (rmps.H & rmps) ^ slice(1, ...)
         assert_allclose(p_tn['foo1'].array, np.eye(10), atol=1e-13)
 
     def test_rand_mps_mixed_canonize(self):
@@ -437,21 +437,21 @@ class TestMatrixProductState:
         # move to the center
         rmps.canonize(orthogonality_center=4)
         assert abs(rmps.H @ rmps - 1) < 1e-13
-        p_tn = (rmps.H & rmps) ^ slice(0, 4) ^ slice(5, 10)
+        p_tn = (rmps.H & rmps) ^ slice(0, 4) ^ slice(5, ...)
         assert_allclose(p_tn['foo3'].array, np.eye(10), atol=1e-13)
         assert_allclose(p_tn['foo5'].array, np.eye(10), atol=1e-13)
 
         # try shifting to the right
         rmps.shift_orthogonality_center(current=4, new=8)
         assert abs(rmps.H @ rmps - 1) < 1e-13
-        p_tn = (rmps.H & rmps) ^ slice(0, 8) ^ slice(9, 10)
+        p_tn = (rmps.H & rmps) ^ slice(0, 8) ^ slice(9, ...)
         assert_allclose(p_tn['foo7'].array, np.eye(4), atol=1e-13)
         assert_allclose(p_tn['foo9'].array, np.eye(2), atol=1e-13)
 
         # try shifting to the left
         rmps.shift_orthogonality_center(current=8, new=6)
         assert abs(rmps.H @ rmps - 1) < 1e-13
-        p_tn = (rmps.H & rmps) ^ slice(0, 6) ^ slice(7, 10)
+        p_tn = (rmps.H & rmps) ^ slice(0, 6) ^ slice(7, ...)
         assert_allclose(p_tn['foo5'].array, np.eye(10), atol=1e-13)
         assert_allclose(p_tn['foo7'].array, np.eye(8), atol=1e-13)
 

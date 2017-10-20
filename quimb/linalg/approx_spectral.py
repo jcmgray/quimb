@@ -3,6 +3,7 @@ which has an efficient representation of its linear action on a vector.
 """
 import functools
 from math import sqrt, log2, exp
+import time
 
 import numpy as np
 import scipy.linalg as scla
@@ -543,7 +544,7 @@ def construct_lanczos_tridiag(
 
     if v0 is None:
         if seed is not None:
-            np.random.seed(seed)
+            np.random.seed(int(time.time() * 1e7 % (2**32 - 1)) + seed)
         V = np.random.choice([-1, 1, 1j, -1j], v_shp)
         V /= beta[1]  # normalize
     else:
@@ -768,7 +769,8 @@ def approx_spectral_function(
             samples.append(next(results))
         except np.linalg.linalg.LinAlgError:  # pragma: no cover
             # XXX: sometimes both eig methods fail... ignore for now
-            continue
+            import warnings
+            warnings.warn("Approx Spectral tri-eig didn't converge.")
         r = len(samples)
 
         # wait a few iterations before checking error on mean breakout
