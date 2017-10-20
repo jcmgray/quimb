@@ -306,8 +306,10 @@ def _init_eigensolver(k=6, which='LM', sigma=None, isherm=True,
 
     Parameters
     ----------
-        sigma: target eigenvalue
-        isherm: whether problem is hermitian or not
+    sigma :
+        Target eigenvalue.
+    isherm :
+        Whether problem is hermitian or not.
 
     Returns
     -------
@@ -340,21 +342,34 @@ def slepc_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
 
     Parameters
     ----------
-        a: sparse matrix in csr format
-        k: number of requested eigenpairs
-        sigma: target eigenvalue
-        isherm: whether problem is hermitian or not
-        return_vecs: whether to return the eigenvectors
-        sort: whether to sort the eigenpairs in ascending real value
-        EPSType: SLEPc eigensolver type to use
-        return_all_conv: whether to return converged eigenpairs beyond
-            requested subspace size
-        st_opts_dict: options to send to the eigensolver internal inverter
+    a : sparse matrix in csr format
+        Operator to solve.
+    k : int, optional
+        Number of requested eigenpairs.
+    which : {"LM": "SM", "LR", "LA", "SR", "SA", "LI", "SI", "TM", "TR", "TI"}
+        Which eigenpairs to target. See :func:`scipy.sparse.linalg.eigs`.
+    sigma : float, optional
+        Target eigenvalue, implies ``which='TR'`` if this is not set but
+        ``sigma`` is.
+    isherm : bool, optional
+        Whether problem is hermitian or not.
+    return_vecs : bool, optional
+        Whether to return the eigenvectors.
+    sort : bool, optional
+        Whether to sort the eigenpairs in ascending real value.
+    EPSType : {"krylovschur", ...}, optional
+        SLEPc eigensolver type to use, see slepc4py.EPSType.
+    return_all_conv : bool, optional
+        Whether to return converged eigenpairs beyond requested subspace size
+    st_opts_dict : dict, optional
+        options to send to the eigensolver internal inverter.
 
     Returns
     -------
-        lk: eigenvalues
-        vk: corresponding eigenvectors (if return_vecs == True)
+    lk : array
+        The eigenvalues.
+    vk : np.matrix
+        Corresponding eigenvectors (if return_vecs == True)
     """
     if comm is None:
         comm = get_default_comm()
@@ -431,33 +446,35 @@ def slepc_svds(a, k=6, ncv=None, return_vecs=True, SVDType='cross',
 
     Parameters
     ----------
-        a: sparse matrix in csr format
-        k: number of requested singular values
-        method: solver method to use, options ["cross", "cyclic", "lanczos",
-            "trlanczos"]
+    a : sparse matrix in csr format
+        The matrix to solve.
+    k : int
+        Number of requested singular values.
+    method : {"cross", "cyclic", "lanczos", "trlanczos"}
+        Solver method to use.
 
     Returns
     -------
-        sk: singular values
+    (uk,) sk (, vtk,) : (np.matrix,) np.array (, np.matrix,)
+        Singular values, or if return_vecs=True, the left, unitary matrix
+        singular values, and and transposed right unitary matrix, such that
+        ``a ~ uk @ diag(sk) @ vtk``.
     """
     if comm is None:
         comm = get_default_comm()
 
-    svd_solver = _init_svd_solver(
-        nsv=k,
-        SVDType=SVDType,
-        tol=tol,
-        max_it=max_it,
-        ncv=ncv,
-        comm=comm
-    )
-
     pa = convert_mat_to_petsc(a, comm=comm)
+
+    svd_solver = _init_svd_solver(nsv=k, SVDType=SVDType, tol=tol,
+                                  max_it=max_it, ncv=ncv, comm=comm)
     svd_solver.setOperator(pa)
     svd_solver.solve()
+
     nconv = svd_solver.getConverged()
-    assert nconv >= k
     k = nconv if return_all_conv else k
+    if nconv < k:
+        raise RuntimeError("SLEPC svds did not find enough singular triplets, "
+                           "wanted: {}, found: {}.".format(k, nconv))
 
     rank = comm.Get_rank()
 
@@ -499,25 +516,25 @@ def slepc_mfn_multiply(mat, vec,
 
     Parameters
     ----------
-        mat : matrix-like
-            Matrix to compute function action of.
-        vec : vector-like
-            Vector to compute matrix function action on.
-        func : {'exp', 'sqrt', 'log'}, optional
-            Function to use.
-        MFNType : {'krylov', 'expokit'}, optional
-            Method of computing the matrix function action, 'expokit' is only
-            available for func='exp'.
-        comm : mpi4py.MPI.Comm instance, optional
-            The mpi communicator.
-        isherm : bool, optional
-            If `mat` is known to be hermitian, this might speed things up in
-            some circumstances.
+    mat : matrix-like
+        Matrix to compute function action of.
+    vec : vector-like
+        Vector to compute matrix function action on.
+    func : {'exp', 'sqrt', 'log'}, optional
+        Function to use.
+    MFNType : {'krylov', 'expokit'}, optional
+        Method of computing the matrix function action, 'expokit' is only
+        available for func='exp'.
+    comm : mpi4py.MPI.Comm instance, optional
+        The mpi communicator.
+    isherm : bool, optional
+        If `mat` is known to be hermitian, this might speed things up in
+        some circumstances.
 
     Returns
     -------
-        fvec : np.matrix
-            The vector output of ``func(mat) @ vec``.
+    fvec : np.matrix
+        The vector output of ``func(mat) @ vec``.
     """
     SLEPc, comm = get_slepc(comm=comm)
 
@@ -536,13 +553,13 @@ def slepc_mfn_multiply(mat, vec,
 
     # set up the matrix function options and objects
     mfn = SLEPc.MFN().create(comm=comm)
-    mfn.setOperator(mat)
     mfn.setType(type_map[MFNType.upper()])
     mfn_fn = mfn.getFN()
     mfn_fn.setType(func_map[fntype.upper()])
     mfn_fn.setScale(1.0, 1.0)
     mfn.setFromOptions()
 
+    mfn.setOperator(mat)
     # 'solve' / perform the matrix function
     mfn.solve(vec, out)
 

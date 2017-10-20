@@ -442,6 +442,12 @@ def expm_multiply(mat, vec, backend="AUTO", **kwargs):
     vector
         Result of ``expm(mat) @ vec``.
     """
+    if backend == 'AUTO':
+        if SLEPC4PY_FOUND and vec.size > 2**10:
+            backend = 'SLEPC'
+        else:
+            backend = 'SCIPY'
+
     return _EXPM_MULTIPLY_METHODS[backend.upper()](mat, vec, **kwargs)
 
 
