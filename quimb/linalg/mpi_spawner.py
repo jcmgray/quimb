@@ -9,7 +9,7 @@ from .slepc_linalg import (
     slepc_svds,
     slepc_mfn_multiply,
 )
-
+from ..accel import _NUM_THREAD_WORKERS
 
 # Work out if already running as mpi
 if ('OMPI_COMM_WORLD_SIZE' in os.environ) or ('PMI_SIZE' in os.environ):
@@ -74,6 +74,10 @@ def get_mpi_pool(num_workers=None, num_threads=1):
     """Get the MPI executor pool, with specified number of processes and
     threads per process.
     """
+    if (num_workers == 1) and (num_threads == _NUM_THREAD_WORKERS):
+        from concurrent.futures import ProcessPoolExecutor
+        return ProcessPoolExecutor(1)
+
     from mpi4py.futures import MPIPoolExecutor
     return MPIPoolExecutor(num_workers, main=False, delay=1e-2,
                            env={'OMP_NUM_THREADS': str(num_threads),
