@@ -420,6 +420,10 @@ def expm(a, herm=False):
 _EXPM_MULTIPLY_METHODS = {
     'SCIPY': spla.expm_multiply,
     'SLEPC': functools.partial(mfn_multiply_slepc_spawn, fntype='exp'),
+    'SLEPC-KRYLOV': functools.partial(
+        mfn_multiply_slepc_spawn, fntype='exp', MFNType='KRYLOV'),
+    'SLEPC-EXPOKIT': functools.partial(
+        mfn_multiply_slepc_spawn, fntype='exp', MFNType='EXPOKIT'),
 }
 
 
@@ -432,7 +436,7 @@ def expm_multiply(mat, vec, backend="AUTO", **kwargs):
         Matrix to exponentiate.
     vec : vector-like
         Vector to act with exponential of matrix on.
-    backend : {'AUTO', 'SCIPY', 'SLEPC'}, optional
+    backend : {'AUTO', 'SCIPY', 'SLEPC', 'SLEPC-KRYLOV', 'SLEPC-EXPOKIT'}
         Which backend to use.
     kwargs
         Supplied to backend function.

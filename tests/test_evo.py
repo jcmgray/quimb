@@ -346,10 +346,10 @@ class TestQuEvo:
         ham = rand_herm(100, sparse=True, density=0.8)
         psi = rand_ket(100)
         evo_exact = QuEvo(psi, ham, method='solve')
-        evo_krylov = QuEvo(psi, ham, method='expm', expm_backend='slepc',
-                           expm_opts={'MFNType': 'krylov'})
-        evo_expokit = QuEvo(psi, ham, method='expm', expm_backend='slepc',
-                            expm_opts={'MFNType': 'expokit'})
+        evo_krylov = QuEvo(psi, ham, method='expm',
+                           expm_backend='slepc-krylov')
+        evo_expokit = QuEvo(psi, ham, method='expm',
+                            expm_backend='slepc-expokit')
         ts = np.linspace(0, 100, 21)
         for p1, p2, p3 in zip(evo_exact.at_times(ts),
                               evo_krylov.at_times(ts),

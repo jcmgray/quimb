@@ -35,6 +35,11 @@ from quimb.linalg.approx_spectral import (
     logneg_subsys_approx,
     negativity_subsys_approx,
 )
+from quimb.linalg import SLEPC4PY_FOUND
+
+
+MPI_PARALLEL = [False] + ([True] if SLEPC4PY_FOUND else [])
+
 
 np.random.seed(42)
 
@@ -353,7 +358,7 @@ class TestLanczosApprox:
         assert ev.shape == (8, 8)
         assert ev.dtype == float
 
-    @pytest.mark.parametrize("mpi", [False, True])
+    @pytest.mark.parametrize("mpi", MPI_PARALLEL)
     @pytest.mark.parametrize("bsz", [1, 2, 5])
     @pytest.mark.parametrize(
         "fn_matrix_rtol",
