@@ -16,9 +16,10 @@ from cytoolz import (
     merge_with,
 )
 import numpy as np
+import scipy.sparse.linalg as spla
 
 from .accel import prod, make_immutable, njit
-from .linalg.base_linalg import norm_fro_dense, groundstate
+from .linalg.base_linalg import norm_fro_dense
 from .gen.operators import spin_operator, eye
 
 try:
@@ -1611,9 +1612,10 @@ def update_with_eff_gs(energy_tn, k, b, i):
     eff_ham = (energy_tn ^ slice(0, i) ^ slice(..., i) ^ '__ham__')['__ham__']
     eff_ham.fuse((('lower', b.site[i].inds),
                   ('upper', k.site[i].inds)), inplace=True)
-    eff_gs = groundstate(eff_ham.data).A
+    eff_e, eff_gs = spla.eigs(eff_ham.data, k=1)
     k.site[i].data = eff_gs
     b.site[i].data = eff_gs.conj()
+    return eff_e
 
 
 def dmrg1_sweep(energy_tn, k, b, direction, canonize=True):
@@ -1626,15 +1628,17 @@ def dmrg1_sweep(energy_tn, k, b, direction, canonize=True):
 
     if direction == 'right':
         for i in range(0, k.nsites):
-            update_with_eff_gs(energy_tn, k, b, i)
+            eff_e = update_with_eff_gs(energy_tn, k, b, i)
             if i < k.nsites - 1:
                 k.left_canonize_site(i, bra=b)
 
     elif direction == 'left':
         for i in reversed(range(0, k.nsites)):
-            update_with_eff_gs(energy_tn, k, b, i)
+            eff_e = update_with_eff_gs(energy_tn, k, b, i)
             if i > 0:
                 k.right_canonize_site(i, bra=b)
+
+    return eff_e
 
 
 def dmrg1(ham, bond_dim, num_sweeps=4):
@@ -1650,6 +1654,6 @@ def dmrg1(ham, bond_dim, num_sweeps=4):
     energy_tn = (b & ham & k)
 
     for _ in range(num_sweeps):
-        dmrg1_sweep(energy_tn, k, b, direction='right')
+        eff_e = dmrg1_sweep(energy_tn, k, b, direction='right')
 
-    return k
+    return eff_e, k

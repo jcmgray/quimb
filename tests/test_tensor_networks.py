@@ -4,7 +4,7 @@ import operator
 import numpy as np
 from numpy.testing import assert_allclose
 
-from quimb import ham_heis, qu, groundstate, expec
+from quimb import ham_heis, qu, expec, seigsys
 
 from quimb.tensor_networks import (
     Tensor,
@@ -582,20 +582,24 @@ class TestDMRG1:
         e0 = energy_tn ^ ...
         assert abs(e0.imag) < 1e-13
 
-        dmrg1_sweep(energy_tn, k, b, direction='right')
+        de1 = dmrg1_sweep(energy_tn, k, b, direction='right')
         e1 = energy_tn ^ ...
+        assert_allclose(de1, e1)
         assert abs(e1.imag) < 1e-13
 
-        dmrg1_sweep(energy_tn, k, b, direction='right')
+        de2 = dmrg1_sweep(energy_tn, k, b, direction='right')
         e2 = energy_tn ^ ...
+        assert_allclose(de2, e2)
         assert abs(e2.imag) < 1e-13
 
-        dmrg1_sweep(energy_tn, k, b, direction='left', canonize=False)
+        de3 = dmrg1_sweep(energy_tn, k, b, direction='left', canonize=False)
         e3 = energy_tn ^ ...
+        assert_allclose(de3, e3)
         assert abs(e2.imag) < 1e-13
 
-        dmrg1_sweep(energy_tn, k, b, direction='left')
+        de4 = dmrg1_sweep(energy_tn, k, b, direction='left')
         e4 = energy_tn ^ ...
+        assert_allclose(de4, e4)
         assert abs(e2.imag) < 1e-13
 
         # test still normalized
@@ -609,7 +613,7 @@ class TestDMRG1:
 
     def test_ground_state_matches(self):
         h = ham_heis_mpo(5)
-        mps_gs = dmrg1(h, 5)
+        eff_e, mps_gs = dmrg1(h, 5)
         mps_inds = [mps_gs.site_inds.format(i) for i in range(mps_gs.nsites)]
         mps_gs_dense = qu((mps_gs ^ ...).fuse({'all': mps_inds}).data)
 
@@ -619,8 +623,10 @@ class TestDMRG1:
         h_dense = (h ^ ...).fuse((('lower', h_lower_inds),
                                   ('upper', h_upper_inds))).data
 
-        gs = groundstate(h_dense)
+        actual_e, gs = seigsys(h_dense, k=1)
         assert abs(expec(mps_gs_dense, gs)) - 1 < 1e-12
+        assert_allclose(actual_e, eff_e)
 
-        gs = groundstate(ham_heis(5, cyclic=False) / 4)
+        actual_e, gs = seigsys(ham_heis(5, cyclic=False) / 4, k=1)
         assert abs(expec(mps_gs_dense, gs)) - 1 < 1e-12
+        assert_allclose(actual_e, eff_e)
