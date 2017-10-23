@@ -4,18 +4,19 @@ import operator
 import numpy as np
 from numpy.testing import assert_allclose
 
-from quimb import ham_heis
+from quimb import ham_heis, qu, groundstate, expec
 
 from quimb.tensor_networks import (
     Tensor,
     tensor_contract,
-    tensor_split,
     TensorNetwork,
     MatrixProductState,
     MatrixProductOperator,
     rand_ket_mps,
     ham_heis_mpo,
     rand_tensor,
+    dmrg1_sweep,
+    dmrg1,
 )
 
 
@@ -24,7 +25,7 @@ class TestBasicTensorOperations:
     def test_tensor_construct(self):
         x = np.random.randn(2, 3, 4)
         a = Tensor(x, inds=[0, 1, 2], tags='blue')
-        assert_allclose(a.H.array, x.conj())
+        assert_allclose(a.H.data, x.conj())
         assert a.size == 24
 
         with pytest.raises(ValueError):
@@ -35,14 +36,14 @@ class TestBasicTensorOperations:
         b = a.copy()
         b.tags.add('foo')
         assert 'foo' not in a.tags
-        b.array /= 2
+        b.data /= 2
         # still reference the same underlying array
-        assert_allclose(a.array, b.array)
+        assert_allclose(a.data, b.data)
 
     def test_with_alpha_construct(self):
         x = np.random.randn(2, 3, 4)
         a = Tensor(x, inds='ijk', tags='blue')
-        assert_allclose(a.H.array, x.conj())
+        assert_allclose(a.H.data, x.conj())
         assert a.size == 24
 
         with pytest.raises(ValueError):
@@ -50,7 +51,7 @@ class TestBasicTensorOperations:
 
         x = np.random.randn(2, 3, 4)
         a = Tensor(x, inds=['a1', 'b2', 'c3'], tags='blue')
-        assert_allclose(a.H.array, x.conj())
+        assert_allclose(a.H.data, x.conj())
         assert a.size == 24
 
         with pytest.raises(ValueError):
@@ -59,16 +60,16 @@ class TestBasicTensorOperations:
     def test_arithmetic_scalar(self):
         x = np.random.randn(2, 3, 4)
         a = Tensor(x, inds=[0, 1, 2], tags='blue')
-        assert_allclose((a + 2).array, x + 2)
-        assert_allclose((a - 3).array, x - 3)
-        assert_allclose((a * 4).array, x * 4)
-        assert_allclose((a / 5).array, x / 5)
-        assert_allclose((a ** 2).array, x ** 2)
-        assert_allclose((2 + a).array, 2 + x)
-        assert_allclose((3 - a).array, 3 - x)
-        assert_allclose((4 * a).array, 4 * x)
-        assert_allclose((5 / a).array, 5 / x)
-        assert_allclose((5 ** a).array, 5 ** x)
+        assert_allclose((a + 2).data, x + 2)
+        assert_allclose((a - 3).data, x - 3)
+        assert_allclose((a * 4).data, x * 4)
+        assert_allclose((a / 5).data, x / 5)
+        assert_allclose((a ** 2).data, x ** 2)
+        assert_allclose((2 + a).data, 2 + x)
+        assert_allclose((3 - a).data, 3 - x)
+        assert_allclose((4 * a).data, 4 * x)
+        assert_allclose((5 / a).data, 5 / x)
+        assert_allclose((5 ** a).data, 5 ** x)
 
     @pytest.mark.parametrize("op", [operator.__add__,
                                     operator.__sub__,
@@ -85,13 +86,13 @@ class TestBasicTensorOperations:
                 op(a, b)
         else:
             c = op(a, b)
-            assert_allclose(c.array, op(a.array, b.array))
+            assert_allclose(c.data, op(a.data, b.data))
 
     def test_tensor_conj_inplace(self):
         array = np.random.rand(2, 3, 4) + 1.0j * np.random.rand(2, 3, 4)
         a = Tensor(array, inds=[0, 1, 2], tags='blue')
         a.conj(inplace=True)
-        assert_allclose(array.conj(), a.array)
+        assert_allclose(array.conj(), a.data)
 
     def test_contract_some(self):
         a = Tensor(np.random.randn(2, 3, 4), inds=[0, 1, 2])
@@ -172,8 +173,8 @@ class TestBasicTensorOperations:
     def test_fuse(self):
         a = Tensor(np.random.rand(2, 3, 4, 5), 'abcd', tags={'blue'})
         b = a.fuse({'bra': ['a', 'c'], 'ket': 'bd'})
-        assert b.shape == (8, 15)
-        assert b.inds == ('bra', 'ket')
+        assert set(b.shape) == {8, 15}
+        assert set(b.inds) == {'bra', 'ket'}
         assert b.tags == {'blue'}
 
         b = a.fuse({'ket': 'bd', 'bra': 'ac'})
@@ -204,12 +205,14 @@ class TestTensorFunctions:
     @pytest.mark.parametrize('tol', [-1.0, 1e-13])
     def test_split_tensor_full_svd(self, method, linds, tol):
         a = rand_tensor((2, 3, 4, 5, 6), inds='abcde', tags='red')
-        a_split = tensor_split(a, linds, method=method, tol=tol)
+        a_split = a.split(linds, method=method, tol=tol)
         assert len(a_split.tensors) == 2
         if linds == 'abd':
-            assert a_split.shape == (2, 3, 5, 4, 6)
-        elif linds == 'ce':
-            assert a_split.shape == (4, 6, 2, 3, 5)
+            assert ((a_split.shape == (2, 3, 5, 4, 6)) or
+                    (a_split.shape == (4, 6, 2, 3, 5)))
+        elif linds == 'edc':
+            assert ((a_split.shape == (6, 5, 4, 2, 3)) or
+                    (a_split.shape == (2, 3, 6, 5, 4)))
         assert (a_split ^ ...).almost_equals(a)
 
 
@@ -228,10 +231,10 @@ class TestTensorNetwork:
         abc4 = (TensorNetwork([a, TensorNetwork([b, c])])).H.contract()
         abc5 = (TensorNetwork([a]) & TensorNetwork([b, c])).H.contract()
 
-        assert_allclose(abc1.array, abc2.array)
-        assert_allclose(abc1.array, abc3.array)
-        assert_allclose(abc1.array, abc4.array)
-        assert_allclose(abc1.array, abc5.array)
+        assert_allclose(abc1.data, abc2.data)
+        assert_allclose(abc1.data, abc3.data)
+        assert_allclose(abc1.data, abc4.data)
+        assert_allclose(abc1.data, abc5.data)
 
     def test_TensorNetwork_init_checks(self):
         a = Tensor(np.random.randn(2, 3, 4), inds=[0, 1, 2], tags='red')
@@ -245,34 +248,34 @@ class TestTensorNetwork:
         b_array = np.random.randn(3, 4, 5) + 1.0j * np.random.randn(3, 4, 5)
         c_array = np.random.randn(5, 2, 6) + 1.0j * np.random.randn(5, 2, 6)
 
-        a = Tensor(a_array, inds=[0, 1, 2], tags='red')
-        b = Tensor(b_array, inds=[1, 2, 3], tags='blue')
-        c = Tensor(c_array, inds=[3, 0, 4], tags='blue')
+        a = Tensor(a_array, inds=[0, 1, 2], tags={'red', 0})
+        b = Tensor(b_array, inds=[1, 2, 3], tags={'blue', 1})
+        c = Tensor(c_array, inds=[3, 0, 4], tags={'blue', 2})
 
         tn = a & b & c
         new_tn = tn.conj()
 
         for i, arr in enumerate((a_array, b_array, c_array)):
-            assert_allclose(new_tn.tensors[i].array, arr.conj())
+            assert_allclose(new_tn[i].data, arr.conj())
 
         # make sure original network unchanged
         for i, arr in enumerate((a_array, b_array, c_array)):
-            assert_allclose(tn.tensors[i].array, arr)
+            assert_allclose(tn[i].data, arr)
 
     def test_conj_inplace(self):
         a_array = np.random.randn(2, 3, 4) + 1.0j * np.random.randn(2, 3, 4)
         b_array = np.random.randn(3, 4, 5) + 1.0j * np.random.randn(3, 4, 5)
         c_array = np.random.randn(5, 2, 6) + 1.0j * np.random.randn(5, 2, 6)
 
-        a = Tensor(a_array, inds=[0, 1, 2], tags='red')
-        b = Tensor(b_array, inds=[1, 2, 3], tags='blue')
-        c = Tensor(c_array, inds=[3, 0, 4], tags='blue')
+        a = Tensor(a_array, inds=[0, 1, 2], tags={'red', 'i0'})
+        b = Tensor(b_array, inds=[1, 2, 3], tags={'blue', 'i1'})
+        c = Tensor(c_array, inds=[3, 0, 4], tags={'blue', 'i2'})
 
         tn = a & b & c
         tn.conj(inplace=True)
 
         for i, arr in enumerate((a_array, b_array, c_array)):
-            assert_allclose(tn.tensors[i].array, arr.conj())
+            assert_allclose(tn["i{}".format(i)].data, arr.conj())
 
     def test_contracting_tensors(self):
         a = rand_tensor((2, 3, 4), inds=[0, 1, 2], tags='red')
@@ -289,7 +292,7 @@ class TestTensorNetwork:
         assert len(a_bc.tensors) == 2
         abc = a_bc ^ ['red', 'blue']
         assert isinstance(abc, Tensor)
-        assert_allclose(abc.array, a_b_c.contract().array)
+        assert_allclose(abc.data, a_b_c.contract().data)
 
     def test_cumulative_contract(self):
         a = rand_tensor((2, 3, 4), inds=[0, 1, 2], tags='red')
@@ -340,6 +343,29 @@ class TestTensorNetwork:
         for t in tn.tensors:
             assert 'blue' in t.tags
 
+    def test_index_by_site(self):
+        a_array = np.random.randn(2, 3, 4)
+        b_array = np.random.randn(2, 3, 4)
+        a = Tensor(a_array, inds='abc', tags={'i0'})
+        b = Tensor(b_array, inds='abc', tags={'i1'})
+        tn = TensorNetwork((a, b), contract_strategy="i{}")
+        assert_allclose(tn.site[0].data, a_array)
+        new_array = np.random.randn(2, 3, 4)
+        tn.site[1] = Tensor(new_array, inds='abc', tags={'i1', 'red'})
+        assert_allclose(tn['i1'].data, new_array)
+        assert 'red' in tn['i1'].tags
+
+    def test_set_data_in_tensor(self):
+        a_array = np.random.randn(2, 3, 4)
+        b_array = np.random.randn(2, 3, 4)
+        a = Tensor(a_array, inds='abc', tags={'i0'})
+        b = Tensor(b_array, inds='abc', tags={'i1'})
+        tn = TensorNetwork((a, b), contract_strategy="i{}")
+        assert_allclose(tn.site[0].data, a_array)
+        new_array = np.random.randn(24)
+        tn.site[1].data = new_array
+        assert_allclose(tn['i1'].data, new_array.reshape(2, 3, 4))
+
 
 class TestMatrixProductState:
 
@@ -372,14 +398,14 @@ class TestMatrixProductState:
         assert mps['i0'].tags == {'i0'}
         assert mps['i1'].tags == {'i1'}
 
-        U = (mps['i0'].array)
+        U = (mps['i0'].data)
         assert_allclose(U.conj().T @ U, np.eye(2), atol=1e-13)
         assert_allclose(U @ U.conj().T, np.eye(2), atol=1e-13)
 
         # combined two site contraction is identity also
         mps.left_canonize_site(1)
         ptn = (mps.H & mps) ^ ['i0', 'i1']
-        assert_allclose(ptn['i1'].array, np.eye(4), atol=1e-13)
+        assert_allclose(ptn['i1'].data, np.eye(4), atol=1e-13)
 
         # try normalizing the state
         mps['i2'] /= mps['i2'].norm()
@@ -397,14 +423,14 @@ class TestMatrixProductState:
         assert mps['i2'].tags == {'i2'}
         assert mps['i1'].tags == {'i1'}
 
-        U = (mps['i2'].array)
+        U = (mps['i2'].data)
         assert_allclose(U.conj().T @ U, np.eye(2), atol=1e-13)
         assert_allclose(U @ U.conj().T, np.eye(2), atol=1e-13)
 
         # combined two site contraction is identity also
         mps.right_canonize_site(1)
         ptn = (mps.H & mps) ^ ['i1', 'i2']
-        assert_allclose(ptn['i1'].array, np.eye(4), atol=1e-13)
+        assert_allclose(ptn['i1'].data, np.eye(4), atol=1e-13)
 
         # try normalizing the state
         mps['i0'] /= mps['i0'].norm()
@@ -418,7 +444,16 @@ class TestMatrixProductState:
         rmps.left_canonize(normalize=True)
         assert abs(rmps.H @ rmps - 1) < 1e-13
         p_tn = (rmps.H & rmps) ^ slice(0, 9)
-        assert_allclose(p_tn['foo8'].array, np.eye(10), atol=1e-13)
+        assert_allclose(p_tn['foo8'].data, np.eye(10), atol=1e-13)
+
+    def test_rand_mps_left_canonize_with_bra(self):
+        n = 10
+        k = rand_ket_mps(n, 10, site_tags="foo{}", tags='bar', normalize=False)
+        b = k.H
+        k.left_canonize(normalize=True, bra=b)
+        assert abs(b @ k - 1) < 1e-13
+        p_tn = (b & k) ^ slice(0, 9)
+        assert_allclose(p_tn['foo8'].data, np.eye(10), atol=1e-13)
 
     def test_rand_mps_right_canonize(self):
         n = 10
@@ -426,8 +461,18 @@ class TestMatrixProductState:
                             tags='bar', normalize=False)
         rmps.right_canonize(normalize=True)
         assert abs(rmps.H @ rmps - 1) < 1e-13
-        p_tn = (rmps.H & rmps) ^ slice(1, ...)
-        assert_allclose(p_tn['foo1'].array, np.eye(10), atol=1e-13)
+        p_tn = (rmps.H & rmps) ^ slice(..., 0)
+        assert_allclose(p_tn['foo1'].data, np.eye(10), atol=1e-13)
+
+    def test_rand_mps_right_canonize_with_bra(self):
+        n = 10
+        k = rand_ket_mps(n, 10, site_tags="foo{}",
+                         tags='bar', normalize=False)
+        b = k.H
+        k.right_canonize(normalize=True, bra=b)
+        assert abs(b @ k - 1) < 1e-13
+        p_tn = (b & k) ^ slice(..., 0)
+        assert_allclose(p_tn['foo1'].data, np.eye(10), atol=1e-13)
 
     def test_rand_mps_mixed_canonize(self):
         n = 10
@@ -437,23 +482,43 @@ class TestMatrixProductState:
         # move to the center
         rmps.canonize(orthogonality_center=4)
         assert abs(rmps.H @ rmps - 1) < 1e-13
-        p_tn = (rmps.H & rmps) ^ slice(0, 4) ^ slice(5, ...)
-        assert_allclose(p_tn['foo3'].array, np.eye(10), atol=1e-13)
-        assert_allclose(p_tn['foo5'].array, np.eye(10), atol=1e-13)
+        p_tn = (rmps.H & rmps) ^ slice(0, 4) ^ slice(..., 4)
+        assert_allclose(p_tn['foo3'].data, np.eye(10), atol=1e-13)
+        assert_allclose(p_tn['foo5'].data, np.eye(10), atol=1e-13)
 
         # try shifting to the right
         rmps.shift_orthogonality_center(current=4, new=8)
         assert abs(rmps.H @ rmps - 1) < 1e-13
-        p_tn = (rmps.H & rmps) ^ slice(0, 8) ^ slice(9, ...)
-        assert_allclose(p_tn['foo7'].array, np.eye(4), atol=1e-13)
-        assert_allclose(p_tn['foo9'].array, np.eye(2), atol=1e-13)
+        p_tn = (rmps.H & rmps) ^ slice(0, 8) ^ slice(..., 8)
+        assert_allclose(p_tn['foo7'].data, np.eye(4), atol=1e-13)
+        assert_allclose(p_tn['foo9'].data, np.eye(2), atol=1e-13)
 
         # try shifting to the left
         rmps.shift_orthogonality_center(current=8, new=6)
         assert abs(rmps.H @ rmps - 1) < 1e-13
-        p_tn = (rmps.H & rmps) ^ slice(0, 6) ^ slice(7, ...)
-        assert_allclose(p_tn['foo5'].array, np.eye(10), atol=1e-13)
-        assert_allclose(p_tn['foo7'].array, np.eye(8), atol=1e-13)
+        p_tn = (rmps.H & rmps) ^ slice(0, 6) ^ slice(..., 6)
+        assert_allclose(p_tn['foo5'].data, np.eye(10), atol=1e-13)
+        assert_allclose(p_tn['foo7'].data, np.eye(8), atol=1e-13)
+
+    def test_can_change_data(self):
+        p = rand_ket_mps(3, 10)
+        assert abs(p.H @ p - 1) < 1e-13
+        p.site[1].data = np.random.randn(200)
+        assert abs(p.H @ p - 1) > 1e-13
+
+    def test_can_change_data_using_subnetwork(self):
+        p = rand_ket_mps(3, 10)
+        pH = p.H
+        p.add_tag('__ket__')
+        pH.add_tag('__bra__')
+        tn = p & pH
+        assert abs((tn ^ ...) - 1) < 1e-13
+        assert_allclose(tn[('__ket__', 'i1')].data,
+                        tn[('__bra__', 'i1')].data.conj())
+        p.site[1].data = np.random.randn(200)
+        assert abs((tn ^ ...) - 1) > 1e-13
+        assert not np.allclose(tn[('__ket__', 'i1')].data,
+                               tn[('__bra__', 'i1')].data.conj())
 
 
 class TestMatrixProductOperator:
@@ -475,9 +540,9 @@ class TestSpecificStatesOperators:
     def test_rand_ket_mps(self):
         n = 10
         rmps = rand_ket_mps(n, 10, site_tags="foo{}", tags='bar')
-        assert rmps.tensors[0].tags == {'foo0', 'bar'}
-        assert rmps.tensors[3].tags == {'foo3', 'bar'}
-        assert rmps.tensors[-1].tags == {'foo9', 'bar'}
+        assert rmps.site[0].tags == {'foo0', 'bar'}
+        assert rmps.site[3].tags == {'foo3', 'bar'}
+        assert rmps.site[-1].tags == {'foo9', 'bar'}
 
         rmpsH_rmps = rmps.H & rmps
         assert len(rmpsH_rmps.tag_index['foo0']) == 2
@@ -489,11 +554,73 @@ class TestSpecificStatesOperators:
 
     def test_mpo_site_ham_heis(self):
         hh_mpo = ham_heis_mpo(5, tags=['foo'])
-        assert hh_mpo.tensors[0].tags == {'i0', 'foo'}
-        assert hh_mpo.tensors[3].tags == {'i3', 'foo'}
-        assert hh_mpo.tensors[-1].tags == {'i4', 'foo'}
+        assert hh_mpo.site[0].tags == {'i0', 'foo'}
+        assert hh_mpo.site[3].tags == {'i3', 'foo'}
+        assert hh_mpo.site[-1].tags == {'i4', 'foo'}
         assert hh_mpo.shape == (2,) * 10
         hh_ = (hh_mpo ^ ...).fuse({'k': ['k0', 'k1', 'k2', 'k3', 'k4'],
                                    'b': ['b0', 'b1', 'b2', 'b3', 'b4']})
         hh = ham_heis(5, cyclic=False) / 4  # /4 :ham_heis uses paulis not spin
-        assert_allclose(hh, hh_.array)
+        assert_allclose(hh, hh_.data)
+
+
+class TestDMRG1:
+
+    def test_single_explicit_sweep(self):
+        h = ham_heis_mpo(5)
+
+        k = rand_ket_mps(5, 3)
+        b = k.H
+        b.set_site_inds(h.bra_site_inds)
+
+        k.add_tag("__ket__")
+        b.add_tag("__bra__")
+        h.add_tag("__ham__")
+
+        energy_tn = (b & h & k)
+
+        e0 = energy_tn ^ ...
+        assert abs(e0.imag) < 1e-13
+
+        dmrg1_sweep(energy_tn, k, b, direction='right')
+        e1 = energy_tn ^ ...
+        assert abs(e1.imag) < 1e-13
+
+        dmrg1_sweep(energy_tn, k, b, direction='right')
+        e2 = energy_tn ^ ...
+        assert abs(e2.imag) < 1e-13
+
+        dmrg1_sweep(energy_tn, k, b, direction='left', canonize=False)
+        e3 = energy_tn ^ ...
+        assert abs(e2.imag) < 1e-13
+
+        dmrg1_sweep(energy_tn, k, b, direction='left')
+        e4 = energy_tn ^ ...
+        assert abs(e2.imag) < 1e-13
+
+        # test still normalized
+        b.set_site_inds(k.site_inds)
+        assert abs(b @ k) - 1 < 1e-13
+
+        assert e1.real < e0.real
+        assert e2.real < e1.real
+        assert e3.real < e2.real
+        assert e4.real < e3.real
+
+    def test_ground_state_matches(self):
+        h = ham_heis_mpo(5)
+        mps_gs = dmrg1(h, 5)
+        mps_inds = [mps_gs.site_inds.format(i) for i in range(mps_gs.nsites)]
+        mps_gs_dense = qu((mps_gs ^ ...).fuse({'all': mps_inds}).data)
+
+        h_lower_inds = [h.bra_site_inds.format(i) for i in range(h.nsites)]
+        h_upper_inds = [h.ket_site_inds.format(i) for i in range(h.nsites)]
+
+        h_dense = (h ^ ...).fuse((('lower', h_lower_inds),
+                                  ('upper', h_upper_inds))).data
+
+        gs = groundstate(h_dense)
+        assert abs(expec(mps_gs_dense, gs)) - 1 < 1e-12
+
+        gs = groundstate(ham_heis(5, cyclic=False) / 4)
+        assert abs(expec(mps_gs_dense, gs)) - 1 < 1e-12

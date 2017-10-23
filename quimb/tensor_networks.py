@@ -18,7 +18,7 @@ from cytoolz import (
 import numpy as np
 
 from .accel import prod, make_immutable, njit
-from .linalg.base_linalg import norm_fro_dense
+from .linalg.base_linalg import norm_fro_dense, groundstate
 from .gen.operators import spin_operator, eye
 
 try:
@@ -68,34 +68,6 @@ def set_join(sets):
 # --------------------------------------------------------------------------- #
 #                                Tensor Funcs                                 #
 # --------------------------------------------------------------------------- #
-
-def tensor_transpose(tensor, output_inds):
-    """Transpose a tensor.
-
-    Parameters
-    ----------
-    tensor : Tensor
-        The tensor to transpose.
-    output_inds : sequence of hashable
-        The desired output sequence of indices.
-
-    Returns
-    -------
-    Tensor
-    """
-    output_inds = tuple(output_inds)  # need to re-use this.
-
-    if set(tensor.inds) != set(output_inds):
-        raise ValueError("'output_inds' must be permutation of the "
-                         "current tensor indices, but {} != {}"
-                         .format(set(tensor.inds), set(output_inds)))
-
-    current_ind_map = {ind: i for i, ind in enumerate(tensor.inds)}
-    out_shape = map(current_ind_map.__getitem__, output_inds)
-
-    return Tensor(tensor.array.transpose(*out_shape),
-                  inds=output_inds, tags=tensor.tags)
-
 
 def _gen_output_inds(all_inds):
     """Generate the output, i.e. unnique, indices from the set ``inds``. Raise
@@ -202,7 +174,7 @@ def tensor_contract(*tensors,
     path = cache_einsum_path_on_shape(
         contract_str, *(t.shape for t in tensors))
     o_array = einsum(
-        contract_str, *(t.array for t in tensors), optimize=path)
+        contract_str, *(t.data for t in tensors), optimize=path)
 
     if not o_ix:
         return o_array
@@ -297,60 +269,6 @@ class BondError(Exception):
     pass
 
 
-def tensor_split(tensor, left_inds, bond_name="", method='svd',
-                 tol=None, relative=False, max_bond=None,
-                 return_tensors=False):
-    """Decompose a tensor into two tensors.
-
-    Parameters
-    ----------
-    tensor : Tensor
-        The tensor to split.
-    left_inds : sequence of hashable
-        The sequence of inds, which ``tensor`` should already have, to split
-    bond_name : str, optional
-        The base name to give to the bond between the two resulting tensors.
-
-    Returns
-    -------
-    TensorNetwork
-    """
-    left_inds = tuple(left_inds)
-    right_inds = tuple(x for x in tensor.inds if x not in left_inds)
-
-    TT = tensor.transpose(*left_inds, *right_inds)
-
-    left_dims = TT.shape[:len(left_inds)]
-    right_dims = TT.shape[len(left_inds):]
-
-    Tf = tensor.fuse({'left': left_inds, 'right': right_inds})
-
-    if tol is None:
-        tol = -1.0
-
-    left, right = {'svd': _array_split_svd,
-                   'eig': _array_split_eig,
-                   'qr': _array_split_qr,
-                   'lq': _array_split_lq}[method](Tf.array, tol=tol)
-
-    left = left.reshape(*left_dims, -1)
-    right = right.reshape(-1, *right_dims)
-
-    if max_bond is not None:
-        if left.shape[-1] > max_bond:
-            raise BondError("Maximum bond size exceeded")
-
-    bond_ind = rand_uuid(base=bond_name)
-
-    Tl = Tensor(array=left, inds=(*left_inds, bond_ind), tags=tensor.tags)
-    Tr = Tensor(array=right, inds=(bond_ind, *right_inds), tags=tensor.tags)
-
-    if return_tensors:
-        return Tl, Tr
-
-    return TensorNetwork((Tl, Tr), check_collisions=False)
-
-
 # --------------------------------------------------------------------------- #
 #                                Tensor Class                                 #
 # --------------------------------------------------------------------------- #
@@ -370,18 +288,18 @@ class Tensor(object):
 
     def __init__(self, array, inds, tags=None):
         if isinstance(array, Tensor):
-            self.array = array.array
+            self._data = array.data
             self.inds = array.inds
             self.tags = array.tags.copy()
             return
 
-        self.array = np.asarray(array)
+        self._data = np.asarray(array)
         self.inds = tuple(inds)
 
-        if self.array.ndim != len(self.inds):
+        if self._data.ndim != len(self.inds):
             raise ValueError(
                 "Wrong number of inds, {}, supplied for array"
-                " of shape {}.".format(self.inds, self.array.shape))
+                " of shape {}.".format(self.inds, self._data.shape))
 
         self.tags = (set() if tags is None else
                      {tags} if isinstance(tags, str) else
@@ -393,14 +311,28 @@ class Tensor(object):
         else:
             return Tensor(self, None)
 
+    def get_data(self):
+        return self._data
+
+    def set_data(self, data):
+        if data.size != self.size:
+            raise ValueError("Cannot set - array size does not match Tensor.")
+        elif data.shape != self.shape:
+            self._data = data.reshape(self.shape)
+        else:
+            self._data = data
+
+    data = property(get_data, set_data,
+                    doc="The numpy.ndarray with this Tensors' numeric data.")
+
     def conj(self, inplace=False):
         """Conjugate this tensors data (does nothing to indices).
         """
         if inplace:
-            self.array = self.array.conj()
+            self._data = self._data.conj()
             return self
         else:
-            return Tensor(self.array.conj(), self.inds, self.tags)
+            return Tensor(self._data.conj(), self.inds, self.tags)
 
     @property
     def H(self):
@@ -410,19 +342,46 @@ class Tensor(object):
 
     @property
     def shape(self):
-        return self.array.shape
+        return self._data.shape
 
     @property
     def size(self):
-        return self.array.size
+        return self._data.size
 
     def inner_inds(self):
         ind_freqs = frequencies(self.inds)
         return set(i for i in self.inds if ind_freqs[i] == 2)
 
-    @functools.wraps(tensor_transpose)
-    def transpose(self, *output_inds):
-        return tensor_transpose(self, output_inds)
+    def transpose(self, *output_inds, inplace=False):
+        """Transpose this tensor.
+
+        Parameters
+        ----------
+        output_inds : sequence of hashable
+            The desired output sequence of indices.
+
+        Returns
+        -------
+        Tensor
+        """
+        if inplace:
+            tn = self
+        else:
+            tn = self.copy()
+
+        output_inds = tuple(output_inds)  # need to re-use this.
+
+        if set(tn.inds) != set(output_inds):
+            raise ValueError("'output_inds' must be permutation of the "
+                             "current tensor indices, but {} != {}"
+                             .format(set(tn.inds), set(output_inds)))
+
+        current_ind_map = {ind: i for i, ind in enumerate(tn.inds)}
+        out_shape = tuple(current_ind_map[i] for i in output_inds)
+
+        tn._data = tn._data.transpose(*out_shape)
+        tn.inds = output_inds
+        return tn
 
     @functools.wraps(tensor_contract)
     def contract(self, *others, memory_limit=2**28, optimize='greedy',
@@ -430,12 +389,64 @@ class Tensor(object):
         return tensor_contract(self, *others, memory_limit=memory_limit,
                                optimize=optimize, output_inds=output_inds)
 
-    @functools.wraps(tensor_split)
-    def split(self, left_inds, bond_name="", method='svd',
-              tol=None, relative=False, max_bond=None):
-        return tensor_split(self, left_inds=left_inds, bond_name=bond_name,
-                            method=method, tol=tol, relative=relative,
-                            max_bond=max_bond)
+    def split(self, left_inds, method='svd', tol=None,
+              max_bond=None, return_tensors=False):
+        """Decompose this tensor into two tensors.
+
+        Parameters
+        ----------
+        left_inds : sequence of hashable
+            The sequence of inds, which ``tensor`` should already have, to
+            split to the 'left'.
+        method : {'svd', 'eig', 'qr', 'lq'}, optional
+            How to split the tensor.
+        tol : float, optional
+            The tolerance below which to discard singular values, only applies
+            to ``method='svd'`` and ``method='eig'``.
+        max_bond : int, optional
+            If the new bond is larger than this, raise a ``BondError``.
+        return_tensors : bool, optional
+            If true, return the two tensors rather than the TensorNetwork
+            describing the split tensor.
+
+        Returns
+        -------
+        TensorNetwork or (Tensor, Tensor)
+        """
+        left_inds = tuple(left_inds)
+        right_inds = tuple(x for x in self.inds if x not in left_inds)
+
+        TT = self.transpose(*left_inds, *right_inds)
+
+        left_dims = TT.shape[:len(left_inds)]
+        right_dims = TT.shape[len(left_inds):]
+
+        array = TT.data.reshape(prod(left_dims), prod(right_dims))
+
+        if tol is None:
+            tol = -1.0
+
+        left, right = {'svd': _array_split_svd,
+                       'eig': _array_split_eig,
+                       'qr': _array_split_qr,
+                       'lq': _array_split_lq}[method](array, tol=tol)
+
+        left = left.reshape(*left_dims, -1)
+        right = right.reshape(-1, *right_dims)
+
+        if max_bond is not None:
+            if left.shape[-1] > max_bond:
+                raise BondError("Maximum bond size exceeded")
+
+        bond_ind = rand_uuid()
+
+        Tl = Tensor(array=left, inds=(*left_inds, bond_ind), tags=self.tags)
+        Tr = Tensor(array=right, inds=(bond_ind, *right_inds), tags=self.tags)
+
+        if return_tensors:
+            return Tl, Tr
+
+        return TensorNetwork((Tl, Tr), check_collisions=False)
 
     def reindex(self, index_map, inplace=False):
         """Rename the indices of this tensor, optionally in-place.
@@ -445,45 +456,60 @@ class Tensor(object):
         index_map : dict-like
             Mapping of pairs ``{old_ind: new_ind, ...}``.
         """
-        new_inds = tuple(index_map.get(ind, ind) for ind in self.inds)
         if inplace:
-            self.inds = new_inds
-            return self
+            new = self
         else:
-            return Tensor(array=self.array, inds=new_inds, tags=self.tags)
+            new = self.copy()
 
-    def fuse(self, fuse_map):
+        new.inds = tuple(index_map.get(ind, ind) for ind in new.inds)
+        return new
+
+    def fuse(self, fuse_map, inplace=False):
         """Combine groups of indices into single indices.
 
         Parameters
         ----------
-        fuse_map : dict_like
-            Mapping like: ``{new_ind: sequence of existing inds, ...}``.
+        fuse_map : dict_like or sequence of tuples.
+            Mapping like: ``{new_ind: sequence of existing inds, ...}`` or an
+            ordered mapping like ``[(new_ind_1, old_inds_1), ...]`` in which
+            case the output tensor's fused inds will be ordered. In both cases
+            the new indices are created at the beginning of the tensor's shape.
 
         Returns
         -------
         Tensor
             The transposed, reshaped and re-labeled tensor.
         """
-        fuseds = tuple(fuse_map.values())  # groups of indices to be fused
-        unfused_inds = tuple(i for i in self.inds if not
-                             any(i in fs for fs in fuseds))
+        if inplace:
+            tn = self
+        else:
+            tn = self.copy()
+
+        if isinstance(fuse_map, dict):
+            new_fused_inds, fused_inds = zip(*fuse_map.items())
+        else:
+            new_fused_inds, fused_inds = zip(*fuse_map)
+
+        unfused_inds = tuple(
+            i for i in tn.inds if not
+            any(i in fs for fs in fused_inds))
 
         # transpose tensor to bring groups of fused inds to the beginning
-        TT = self.transpose(*concat(fuseds), *unfused_inds)
+        tn.transpose(*concat(fused_inds), *unfused_inds, inplace=True)
 
         # for each set of fused dims, group into product, then add remaining
-        dims = iter(TT.shape)
-        dims = [prod(next(dims) for _ in fs) for fs in fuseds] + list(dims)
+        dims = iter(tn.shape)
+        dims = [prod(next(dims) for _ in fs) for fs in fused_inds] + list(dims)
 
         # create new tensor with new + remaining indices
-        new_inds = concat((fuse_map.keys(), unfused_inds))
-        return Tensor(TT.array.reshape(*dims), new_inds, self.tags)
+        tn._data = tn._data.reshape(*dims)
+        tn.inds = (*new_fused_inds, *unfused_inds)
+        return tn
 
     def norm(self):
         """Frobenius norm of this tensor.
         """
-        return norm_fro_dense(self.array.reshape(-1))
+        return norm_fro_dense(self.data.reshape(-1))
 
     def almost_equals(self, other, **kwargs):
         """Check if this tensor is almost the same as another.
@@ -492,7 +518,7 @@ class Tensor(object):
         if not same_inds:
             return False
         otherT = other.transpose(*self.inds)
-        return np.allclose(self.array, otherT.array, **kwargs)
+        return np.allclose(self.data, otherT.data, **kwargs)
 
     def drop_tags(self, tags=None):
         """Drop certain tags, defaulting to all, from this tensor.
@@ -504,6 +530,19 @@ class Tensor(object):
         else:
             for tag in tags:
                 self.tags.discard(tag)
+
+    def filter_shared_inds(self, other):
+        """Sort this tensor's indices into a list of those that it shares and
+        doesn't share with another tensor.
+        """
+        shared = []
+        unshared = []
+        for i in self.inds:
+            if i in other.inds:
+                shared.append(i)
+            else:
+                unshared.append(i)
+        return shared, unshared
 
     def __and__(self, other):
         """Combine with another ``Tensor`` or ``TensorNetwork`` into a new
@@ -518,7 +557,7 @@ class Tensor(object):
 
     def __repr__(self):
         return "Tensor(shape={}, inds={}, tags={})".format(
-            self.array.shape,
+            self.data.shape,
             self.inds,
             self.tags)
 
@@ -538,9 +577,9 @@ def _make_promote_array_func(op, meth_name):
                     "match: {} != {}".format(self.inds, other.inds))
             otherT = other.transpose(*self.inds)
             return Tensor(
-                array=op(self.array, otherT.array), inds=self.inds,
+                array=op(self.data, otherT.data), inds=self.inds,
                 tags=self.tags | other.tags)
-        return Tensor(array=op(self.array, other),
+        return Tensor(array=op(self.data, other),
                       inds=self.inds, tags=self.tags)
 
     return _promote_array_func
@@ -560,7 +599,7 @@ def _make_rhand_array_promote_func(op, meth_name):
     def _rhand_array_promote_func(self, other):
         """Right hand operations -- no need to check ind equality first.
         """
-        return Tensor(array=op(other, self.array),
+        return Tensor(array=op(other, self.data),
                       inds=self.inds, tags=self.tags)
 
     return _rhand_array_promote_func
@@ -582,13 +621,32 @@ _TN_SIMPLE_PROPS = ['contract_strategy', 'nsites', 'contract_bsz']
 _TN_DATA_PROPS = ['tensor_index', 'tag_index']
 
 
+class SiteIndexer(object):
+
+    def __init__(self, tn):
+        self.tn = tn
+
+    def __getitem__(self, site):
+        if site < 0:
+            site = self.tn.nsites + site
+        site_tag = self.tn.contract_strategy.format(site)
+        return self.tn[site_tag]
+
+    def __setitem__(self, site, tensor):
+        if site < 0:
+            site = self.tn.nsites + site
+        site_tag = self.tn.contract_strategy.format(site)
+        self.tn[site_tag] = tensor
+
+
 class TensorNetwork(object):
     """A collection of (as yet uncontracted) Tensors.
 
     Parameters
     ----------
     tensors : sequence of Tensor or TensorNetwork
-        The objects to combine.
+        The objects to combine. The new network will be a *view* onto these
+        constituent tensors unless explicitly copied.
     contract_strategy : str, optional
         A string, with integer format specifier, that describes how to range
         over the network's tags in order to contract it.
@@ -620,6 +678,7 @@ class TensorNetwork(object):
                  contract_strategy=None,
                  nsites=None,
                  contract_bsz=None):
+        self.site = SiteIndexer(self)
 
         # bypass everthing if single TensorNetwork supplied for copying
         if isinstance(tensors, TensorNetwork):
@@ -657,7 +716,8 @@ class TensorNetwork(object):
                 # check for matching inner_indices -> need to re-index
                 new_inner_inds = set(t.inner_inds())
                 if current_inner_inds & new_inner_inds:  # any overlap
-                    t = t.reindex({old: old + "'" for old in new_inner_inds})
+                    t.reindex({old: old + "'" for old in new_inner_inds},
+                              inplace=True)
                 current_inner_inds |= t.inner_inds()
 
             if istensor:
@@ -700,6 +760,9 @@ class TensorNetwork(object):
     # ------------------------------- Methods ------------------------------- #
 
     def copy(self, deep=False):
+        """Copy this ``TensorNetwork``. If ``deep=False``, (the default), then
+        everything but the actual numeric data will be copied.
+        """
         if deep:
             return copy.deepcopy(self)
         return self.__class__(self)
@@ -877,24 +940,23 @@ class TensorNetwork(object):
         if tags is ...:
             tags = slice(0, self.nsites)
 
-        # generate the correct tag for each site
-        step = 1 if tags.step is None else tags.step
-
         if tags.start is None:
             start = 0
         elif tags.start is ...:
-            start = self.nsites
+            start = self.nsites - 1
         elif tags.start < 0:
             start = self.nsites + tags.start
         else:
             start = tags.start
 
         if tags.stop is ...:
-            stop = self.nsites
+            stop = self.nsites - 1
         elif tags.stop < 0:
             stop = self.nsites + tags.stop
         else:
             stop = tags.stop
+
+        step = 1 if stop > start else -1
 
         tags_seq = (self.contract_strategy.format(i)
                     for i in range(start, stop, step))
@@ -1006,34 +1068,46 @@ class TensorNetwork(object):
         """
         return tuple(i for d, i in self.outer_dims_inds())
 
+    def mangle_inner(self):
+        index_map = {ind: rand_uuid() for ind in self.inner_inds()}
+        self.reindex(index_map, inplace=True)
+
     @property
     def shape(self):
         """Actual, i.e. exterior, shape of this TensorNetwork.
         """
         return tuple(d for d, i in self.outer_dims_inds())
 
-    def __getitem__(self, tag):
-        """Get the single tensor associated with ``tag``.
+    def __getitem__(self, tags):
+        """Get the single tensor uniquely associated with ``tags``.
         """
-        names = self.tag_index[tag]
+        try:
+            names = self.tag_index[tags]
+        except (KeyError, TypeError):
+            names = functools.reduce(
+                operator.and_, (self.tag_index[t] for t in tags))
 
         if len(names) != 1:
             raise KeyError("'TensorNetwork.__getitem__' is meant for a single "
-                           "tensor only - found {} with tag '{}'."
-                           .format(len(names), tag))
+                           "tensor only - found {} with tag(s) '{}'."
+                           .format(len(names), tags))
 
         name, = names
         return self.tensor_index[name]
 
-    def __setitem__(self, tag, tensor):
-        """Set the single tensor associated with ``tag``.
+    def __setitem__(self, tags, tensor):
+        """Set the single tensor uniquely associated with ``tags``.
         """
-        names = self.tag_index[tag]
+        try:
+            names = self.tag_index[tags]
+        except (KeyError, TypeError):
+            names = functools.reduce(
+                operator.and_, (self.tag_index[t] for t in tags))
 
         if len(names) != 1:
             raise KeyError("'TensorNetwork.__setitem__' is meant for a single "
-                           "existing tensor only - found {} with tag '{}'."
-                           .format(len(names), tag))
+                           "existing tensor only - found {} with tag(s) '{}'."
+                           .format(len(names), tags))
 
         if not isinstance(tensor, Tensor):
             raise TypeError("Can only set value with a new 'Tensor'.")
@@ -1121,7 +1195,7 @@ class MatrixProductState(TensorNetwork):
         if isinstance(arrays, MatrixProductState):
             super().__init__(arrays)
             self.site_inds = copy.copy(arrays.site_inds)
-            self.site_tags = copy.copy(arrays.site_inds)
+            self.site_tags = copy.copy(arrays.site_tags)
             return
 
         arrays = tuple(arrays)
@@ -1205,41 +1279,63 @@ class MatrixProductState(TensorNetwork):
         self.reindex_sites(new_site_inds, inplace=True)
         self.site_inds = new_site_inds
 
-    def left_canonize_site(self, site):
+    def left_canonize_site(self, i, bra=None):
         """
         """
-        tag1 = self.contract_strategy.format(site)
-        tag2 = self.contract_strategy.format(site + 1)
+        T1 = self.site[i]
+        T2 = self.site[i + 1]
 
-        T1 = self[tag1]
-        T2 = self[tag2]
+        t1_inds_set = set(T1.inds)
+        t2_inds_set = set(T2.inds)
 
-        Q, R = tensor_split(
-            T1, set(T1.inds) - set(T2.inds), method='qr', return_tensors=True)
+        old_shared_bond, = t1_inds_set & t2_inds_set
+        left_inds = t1_inds_set - t2_inds_set
 
-        R.drop_tags()
+        Q, R = T1.split(left_inds, method='qr', return_tensors=True)
+        R = R @ T2
 
-        self[tag1] = Q
-        self[tag2] = R @ T2
+        new_shared_bond, = (j for j in Q.inds if j not in t1_inds_set)
+        Q.reindex({new_shared_bond: old_shared_bond}, inplace=True)
+        Q.transpose(*T1.inds, inplace=True)
+        R.reindex({new_shared_bond: old_shared_bond}, inplace=True)
+        R.transpose(*T2.inds, inplace=True)
 
-    def right_canonize_site(self, site):
+        self.site[i]._data = Q._data
+        self.site[i + 1]._data = R._data
+
+        if bra is not None:
+            bra.site[i]._data = Q._data.conj()
+            bra.site[i + 1]._data = R._data.conj()
+
+    def right_canonize_site(self, i, bra=None):
         """
         """
-        tag1 = self.contract_strategy.format(site)
-        tag2 = self.contract_strategy.format(site - 1)
+        T1 = self.site[i]
+        T2 = self.site[i - 1]
 
-        T1 = self[tag1]
-        T2 = self[tag2]
+        t1_inds_set = set(T1.inds)
+        t2_inds_set = set(T2.inds)
 
-        L, Q = tensor_split(
-            T1, set(T1.inds) & set(T2.inds), method='lq', return_tensors=True)
+        left_inds = t1_inds_set & t2_inds_set
+        old_shared_bond, = left_inds
 
-        L.drop_tags()
+        L, Q = T1.split(left_inds, method='lq', return_tensors=True)
+        L = T2 @ L
 
-        self[tag1] = Q
-        self[tag2] = L @ T2
+        new_shared_bond, = (j for j in Q.inds if j not in t1_inds_set)
+        L.reindex({new_shared_bond: old_shared_bond}, inplace=True)
+        L.transpose(*T2.inds, inplace=True)
+        Q.reindex({new_shared_bond: old_shared_bond}, inplace=True)
+        Q.transpose(*T1.inds, inplace=True)
 
-    def left_canonize(self, start=None, stop=None, normalize=False):
+        self.site[i - 1]._data = L._data
+        self.site[i]._data = Q._data
+
+        if bra is not None:
+            bra.site[i - 1]._data = L._data.conj()
+            bra.site[i]._data = Q._data.conj()
+
+    def left_canonize(self, start=None, stop=None, normalize=False, bra=None):
         """
         """
         if start is None:
@@ -1248,14 +1344,15 @@ class MatrixProductState(TensorNetwork):
             stop = self.nsites - 1
 
         for i in range(start, stop):
-            self.left_canonize_site(i)
+            self.left_canonize_site(i, bra=bra)
 
         if normalize:
-            last = self.contract_strategy.format(self.nsites - 1)
-            T = self[last]
-            self[last] /= T.norm()
+            factor = self.site[-1].norm()
+            self.site[-1] /= factor
+            if bra is not None:
+                bra.site[-1] /= factor
 
-    def right_canonize(self, start=None, stop=None, normalize=False):
+    def right_canonize(self, start=None, stop=None, normalize=False, bra=None):
         """
         """
         if start is None:
@@ -1264,12 +1361,13 @@ class MatrixProductState(TensorNetwork):
             stop = 0
 
         for i in range(start, stop, -1):
-            self.right_canonize_site(i)
+            self.right_canonize_site(i, bra=bra)
 
         if normalize:
-            first = self.contract_strategy.format(0)
-            T = self[first]
-            self[first] /= T.norm()
+            factor = self.site[0].norm()
+            self.site[0] /= factor
+            if bra is not None:
+                bra.site[0] /= factor
 
     def canonize(self, orthogonality_center):
         """
@@ -1324,16 +1422,22 @@ class MatrixProductOperator(TensorNetwork):
         # short-circuit for copying
         if isinstance(arrays, MatrixProductOperator):
             super().__init__(arrays)
+            self.ket_site_inds = copy.copy(arrays.ket_site_inds)
+            self.bra_site_inds = copy.copy(arrays.bra_site_inds)
+            self.site_tags = copy.copy(arrays.site_tags)
             return
 
         arrays = tuple(arrays)
         nsites = len(arrays)
 
         # process site indices
+        self.ket_site_inds = ket_site_inds
+        self.bra_site_inds = bra_site_inds
         ket_site_inds = make_site_strs(ket_site_inds, nsites)
         bra_site_inds = make_site_strs(bra_site_inds, nsites)
 
         # process site tags
+        self.site_tags = site_tags
         contract_strategy = site_tags
         site_tags = make_site_strs(site_tags, nsites)
         if tags is not None:
@@ -1499,3 +1603,53 @@ def ham_heis_mpo(n, j=1.0, bz=0.0,
                                    tags=tags,
                                    bond_name=bond_name)
     return HH_mpo
+
+
+def update_with_eff_gs(energy_tn, k, b, i):
+    """
+    """
+    eff_ham = (energy_tn ^ slice(0, i) ^ slice(..., i) ^ '__ham__')['__ham__']
+    eff_ham.fuse((('lower', b.site[i].inds),
+                  ('upper', k.site[i].inds)), inplace=True)
+    eff_gs = groundstate(eff_ham.data).A
+    k.site[i].data = eff_gs
+    b.site[i].data = eff_gs.conj()
+
+
+def dmrg1_sweep(energy_tn, k, b, direction, canonize=True):
+    """
+    """
+    if canonize and direction == 'right':
+        k.right_canonize(bra=b)
+    elif canonize and direction == 'left':
+        k.left_canonize(bra=b)
+
+    if direction == 'right':
+        for i in range(0, k.nsites):
+            update_with_eff_gs(energy_tn, k, b, i)
+            if i < k.nsites - 1:
+                k.left_canonize_site(i, bra=b)
+
+    elif direction == 'left':
+        for i in reversed(range(0, k.nsites)):
+            update_with_eff_gs(energy_tn, k, b, i)
+            if i > 0:
+                k.right_canonize_site(i, bra=b)
+
+
+def dmrg1(ham, bond_dim, num_sweeps=4):
+    ham.add_tag("__ham__")
+
+    k = rand_ket_mps(ham.nsites, bond_dim)
+    k.add_tag("__ket__")
+
+    b = k.H
+    b.set_site_inds(ham.bra_site_inds)
+    b.add_tag("__bra__")
+
+    energy_tn = (b & ham & k)
+
+    for _ in range(num_sweeps):
+        dmrg1_sweep(energy_tn, k, b, direction='right')
+
+    return k
