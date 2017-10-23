@@ -12,8 +12,8 @@ from quimb.tensor_networks import (
     TensorNetwork,
     MatrixProductState,
     MatrixProductOperator,
-    rand_ket_mps,
-    ham_heis_mpo,
+    MPS_rand,
+    MPO_ham_heis,
     rand_tensor,
     dmrg1_sweep,
     dmrg1,
@@ -439,8 +439,7 @@ class TestMatrixProductState:
 
     def test_rand_mps_left_canonize(self):
         n = 10
-        rmps = rand_ket_mps(n, 10, site_tags="foo{}",
-                            tags='bar', normalize=False)
+        rmps = MPS_rand(n, 10, site_tags="foo{}", tags='bar', normalize=False)
         rmps.left_canonize(normalize=True)
         assert abs(rmps.H @ rmps - 1) < 1e-13
         p_tn = (rmps.H & rmps) ^ slice(0, 9)
@@ -448,7 +447,7 @@ class TestMatrixProductState:
 
     def test_rand_mps_left_canonize_with_bra(self):
         n = 10
-        k = rand_ket_mps(n, 10, site_tags="foo{}", tags='bar', normalize=False)
+        k = MPS_rand(n, 10, site_tags="foo{}", tags='bar', normalize=False)
         b = k.H
         k.left_canonize(normalize=True, bra=b)
         assert abs(b @ k - 1) < 1e-13
@@ -457,8 +456,7 @@ class TestMatrixProductState:
 
     def test_rand_mps_right_canonize(self):
         n = 10
-        rmps = rand_ket_mps(n, 10, site_tags="foo{}",
-                            tags='bar', normalize=False)
+        rmps = MPS_rand(n, 10, site_tags="foo{}", tags='bar', normalize=False)
         rmps.right_canonize(normalize=True)
         assert abs(rmps.H @ rmps - 1) < 1e-13
         p_tn = (rmps.H & rmps) ^ slice(..., 0)
@@ -466,8 +464,7 @@ class TestMatrixProductState:
 
     def test_rand_mps_right_canonize_with_bra(self):
         n = 10
-        k = rand_ket_mps(n, 10, site_tags="foo{}",
-                         tags='bar', normalize=False)
+        k = MPS_rand(n, 10, site_tags="foo{}", tags='bar', normalize=False)
         b = k.H
         k.right_canonize(normalize=True, bra=b)
         assert abs(b @ k - 1) < 1e-13
@@ -476,8 +473,7 @@ class TestMatrixProductState:
 
     def test_rand_mps_mixed_canonize(self):
         n = 10
-        rmps = rand_ket_mps(n, 10, site_tags="foo{}",
-                            tags='bar', normalize=True)
+        rmps = MPS_rand(n, 10, site_tags="foo{}", tags='bar', normalize=True)
 
         # move to the center
         rmps.canonize(orthogonality_center=4)
@@ -501,13 +497,13 @@ class TestMatrixProductState:
         assert_allclose(p_tn['foo7'].data, np.eye(8), atol=1e-13)
 
     def test_can_change_data(self):
-        p = rand_ket_mps(3, 10)
+        p = MPS_rand(3, 10)
         assert abs(p.H @ p - 1) < 1e-13
         p.site[1].data = np.random.randn(200)
         assert abs(p.H @ p - 1) > 1e-13
 
     def test_can_change_data_using_subnetwork(self):
-        p = rand_ket_mps(3, 10)
+        p = MPS_rand(3, 10)
         pH = p.H
         p.add_tag('__ket__')
         pH.add_tag('__bra__')
@@ -539,7 +535,7 @@ class TestSpecificStatesOperators:
 
     def test_rand_ket_mps(self):
         n = 10
-        rmps = rand_ket_mps(n, 10, site_tags="foo{}", tags='bar')
+        rmps = MPS_rand(n, 10, site_tags="foo{}", tags='bar')
         assert rmps.site[0].tags == {'foo0', 'bar'}
         assert rmps.site[3].tags == {'foo3', 'bar'}
         assert rmps.site[-1].tags == {'foo9', 'bar'}
@@ -553,7 +549,7 @@ class TestSpecificStatesOperators:
         assert abs(c - 1) < 1e-13
 
     def test_mpo_site_ham_heis(self):
-        hh_mpo = ham_heis_mpo(5, tags=['foo'])
+        hh_mpo = MPO_ham_heis(5, tags=['foo'])
         assert hh_mpo.site[0].tags == {'i0', 'foo'}
         assert hh_mpo.site[3].tags == {'i3', 'foo'}
         assert hh_mpo.site[-1].tags == {'i4', 'foo'}
@@ -567,9 +563,9 @@ class TestSpecificStatesOperators:
 class TestDMRG1:
 
     def test_single_explicit_sweep(self):
-        h = ham_heis_mpo(5)
+        h = MPO_ham_heis(5)
 
-        k = rand_ket_mps(5, 3)
+        k = MPS_rand(5, 3)
         b = k.H
         b.set_site_inds(h.bra_site_inds)
 
@@ -612,7 +608,7 @@ class TestDMRG1:
         assert e4.real < e3.real
 
     def test_ground_state_matches(self):
-        h = ham_heis_mpo(5)
+        h = MPO_ham_heis(5)
         eff_e, mps_gs = dmrg1(h, 5)
         mps_inds = [mps_gs.site_inds.format(i) for i in range(mps_gs.nsites)]
         mps_gs_dense = qu((mps_gs ^ ...).fuse({'all': mps_inds}).data)

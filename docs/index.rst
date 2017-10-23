@@ -14,6 +14,7 @@ Welcome to quimb's documentation!
    solving systems
    distributed parallelism - mpi
    dynamics and evolution
+   tensor networks
    develop
 
 

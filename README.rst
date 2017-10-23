@@ -14,5 +14,6 @@
 * Uses `numpy` and `scipy.sparse` matrices as quantum objects.
 * Many operations accelerated using `numba` and `numexpr`.
 * Optional `slepc4py` interface for easy distributed linear algebra.
+* Simple tensor network manipulations and algorithms.
 
 Some documentation at: `<http://quimb.readthedocs.io/en/latest/>`_.

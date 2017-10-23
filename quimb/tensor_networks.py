@@ -1496,13 +1496,13 @@ def rand_tensor(shape, inds, tags=None):
     return Tensor(array=array, inds=inds, tags=tags)
 
 
-def rand_ket_mps(n, bond_dim, phys_dim=2,
-                 site_inds='k{}',
-                 site_tags='i{}',
-                 tags=None,
-                 bond_name="",
-                 normalize=True,
-                 **kwargs):
+def MPS_rand(n, bond_dim, phys_dim=2,
+             site_inds='k{}',
+             site_tags='i{}',
+             tags=None,
+             bond_name="",
+             normalize=True,
+             **kwargs):
     """Generate a random matrix product state.
 
     Parameters
@@ -1585,7 +1585,7 @@ def mpo_end_ham_heis_right(j=1.0, bz=0.0):
     return mpo_site_ham_heis(j=j, bz=bz)[:, 0, :, :]
 
 
-def ham_heis_mpo(n, j=1.0, bz=0.0,
+def MPO_ham_heis(n, j=1.0, bz=0.0,
                  ket_site_inds='k{}',
                  bra_site_inds='b{}',
                  site_tags='i{}',
@@ -1593,9 +1593,9 @@ def ham_heis_mpo(n, j=1.0, bz=0.0,
                  bond_name=""):
     """Heisenberg Hamiltonian in matrix product operator form.
     """
-    arrays = (mpo_end_ham_heis_left(),
-              *[mpo_site_ham_heis()] * (n - 2),
-              mpo_end_ham_heis_right())
+    arrays = (mpo_end_ham_heis_left(j=j, bz=bz),
+              *[mpo_site_ham_heis(j=j, bz=bz)] * (n - 2),
+              mpo_end_ham_heis_right(j=j, bz=bz))
 
     HH_mpo = MatrixProductOperator(arrays=arrays,
                                    ket_site_inds=ket_site_inds,
@@ -1644,7 +1644,7 @@ def dmrg1_sweep(energy_tn, k, b, direction, canonize=True):
 def dmrg1(ham, bond_dim, num_sweeps=4):
     ham.add_tag("__ham__")
 
-    k = rand_ket_mps(ham.nsites, bond_dim)
+    k = MPS_rand(ham.nsites, bond_dim)
     k.add_tag("__ket__")
 
     b = k.H
