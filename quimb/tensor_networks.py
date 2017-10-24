@@ -57,6 +57,10 @@ except ImportError:
             *args, optimize=(optimize, memory_limit), **kwargs)
 
 
+# --------------------------------------------------------------------------- #
+#                                Tensor Funcs                                 #
+# --------------------------------------------------------------------------- #
+
 def set_join(sets):
     """Combine a sequence of sets.
     """
@@ -65,10 +69,6 @@ def set_join(sets):
         new_set |= each_set
     return new_set
 
-
-# --------------------------------------------------------------------------- #
-#                                Tensor Funcs                                 #
-# --------------------------------------------------------------------------- #
 
 def _gen_output_inds(all_inds):
     """Generate the output, i.e. unnique, indices from the set ``inds``. Raise
@@ -137,20 +137,13 @@ def cache_einsum_path_on_shape(contract_str, *shapes):
                        memory_limit=2**28, optimize='greedy')[0]
 
 
-def tensor_contract(*tensors,
-                    memory_limit=2**28,
-                    optimize='greedy',
-                    output_inds=None):
+def tensor_contract(*tensors, output_inds=None):
     """Efficiently contract multiple tensors, combining their tags.
 
     Parameters
     ----------
     *tensors : sequence of Tensor
         The tensors to contract.
-    memory_limit : int, optional
-        See :py:func:`contract`.
-    optimize : str, optional
-        See :py:func:`contract`.
     output_inds : sequence
         If given, the desired order of output indices, else defaults to the
         order they occur in the input indices.
@@ -279,22 +272,27 @@ class Tensor(object):
 
     Parameters
     ----------
-    array : numpy.ndarray
+    data : numpy.ndarray
         The n-dimensions data.
     inds : sequence of hashable
         The index labels for each dimension.
     tags : sequence of hashable
         Tags with which to select and filter from multiple tensors.
+
+    Members
+    -------
+
     """
 
-    def __init__(self, array, inds, tags=None):
-        if isinstance(array, Tensor):
-            self._data = array.data
-            self.inds = array.inds
-            self.tags = array.tags.copy()
+    def __init__(self, data, inds, tags=None):
+        # Short circuit for copying Tensors
+        if isinstance(data, Tensor):
+            self._data = data.data
+            self.inds = data.inds
+            self.tags = data.tags.copy()
             return
 
-        self._data = np.asarray(array)
+        self._data = np.asarray(data)
         self.inds = tuple(inds)
 
         if self._data.ndim != len(self.inds):
@@ -307,6 +305,8 @@ class Tensor(object):
                      set(tags))
 
     def copy(self, deep=False):
+        """
+        """
         if deep:
             return copy.deepcopy(self)
         else:
@@ -350,6 +350,8 @@ class Tensor(object):
         return self._data.size
 
     def inner_inds(self):
+        """
+        """
         ind_freqs = frequencies(self.inds)
         return set(i for i in self.inds if ind_freqs[i] == 2)
 
@@ -623,6 +625,8 @@ _TN_DATA_PROPS = ['tensor_index', 'tag_index']
 
 
 class SiteIndexer(object):
+    """
+    """
 
     def __init__(self, tn):
         self.tn = tn
@@ -648,18 +652,29 @@ class TensorNetwork(object):
     tensors : sequence of Tensor or TensorNetwork
         The objects to combine. The new network will be a *view* onto these
         constituent tensors unless explicitly copied.
-    contract_strategy : str, optional
-        A string, with integer format specifier, that describes how to range
-        over the network's tags in order to contract it.
-    nsites : int, optional
-        The number of sites, if explicitly known. This will be calculated
-        using `contract_strategy` if needed but not specified.
     check_collisions : bool, optional
         If True, the default, then Tensors and TensorNetworks with double
         indices which match another Tensor or TensorNetworks double indices
         will have those indices' names mangled. Should be explicily turned off
         when it is known that no collisions will take place -- i.e. when not
         adding any new tensors.
+    contract_strategy : str, optional
+        A string, with integer format specifier, that describes how to range
+        over the network's tags in order to contract it.
+    contract_bsz : int, optional
+        How many sites to group together when auto contracting. Eg for 3 (with
+        the dotted lines denoting vertical strips of tensors to be contracted):
+
+            .....                ........          .....
+            O-O-O-O-O-O-O-        /-O-O-O-O-        /-O-
+            | | | | | | |   ->   0  | | | |   ->   8  |   ->  etc.
+            O-O-O-O-O-O-O-        \-O-O-O-O-        \-O-
+
+        Should not require tensor contractions with more than 52 unique
+        indices.
+    nsites : int, optional
+        The number of sites, if explicitly known. This will be calculated
+        using `contract_strategy` if needed but not specified.
 
     Members
     -------
@@ -677,11 +692,12 @@ class TensorNetwork(object):
     def __init__(self, tensors, *,
                  check_collisions=True,
                  contract_strategy=None,
-                 nsites=None,
-                 contract_bsz=None):
+                 contract_bsz=None,
+                 nsites=None):
+
         self.site = SiteIndexer(self)
 
-        # bypass everthing if single TensorNetwork supplied for copying
+        # short-circuit for copying TensorNetworks
         if isinstance(tensors, TensorNetwork):
             self.contract_strategy = tensors.contract_strategy
             self.nsites = tensors.nsites
@@ -1192,7 +1208,7 @@ class MatrixProductState(TensorNetwork):
 
     def __init__(self, arrays, shape='lrp', site_inds='k{}', site_tags='i{}',
                  tags=None, bond_name="", **kwargs):
-        # short-circuit for copying
+        # short-circuit for copying MPSs
         if isinstance(arrays, MatrixProductState):
             super().__init__(arrays)
             self.site_inds = copy.copy(arrays.site_inds)
@@ -1281,7 +1297,16 @@ class MatrixProductState(TensorNetwork):
         self.site_inds = new_site_inds
 
     def left_canonize_site(self, i, bra=None):
-        """
+        """Left canonize this MPS' ith site, inplace.
+
+        Parameters
+        ----------
+        i : int
+            Which site to canonize. The site at i + 1 also absorbs the
+            non-isometric part of the decomposition of site i.
+        bra : None or MatrixProductState, optional
+            If given, simultaneously left canonize site i of this MPS, assuming
+            it to hold the conjugate state.
         """
         T1 = self.site[i]
         T2 = self.site[i + 1]
@@ -1309,7 +1334,16 @@ class MatrixProductState(TensorNetwork):
             bra.site[i + 1]._data = R._data.conj()
 
     def right_canonize_site(self, i, bra=None):
-        """
+        """Right canonize this MPS' ith site, inplace.
+
+        Parameters
+        ----------
+        i : int
+            Which site to canonize. The site at i - 1 also absorbs the
+            non-isometric part of the decomposition of site i.
+        bra : None or MatrixProductState, optional
+            If given, simultaneously right canonize site i of this MPS,
+            assuming it to hold the conjugate state.
         """
         T1 = self.site[i]
         T2 = self.site[i - 1]
@@ -1337,7 +1371,24 @@ class MatrixProductState(TensorNetwork):
             bra.site[i]._data = Q._data.conj()
 
     def left_canonize(self, start=None, stop=None, normalize=False, bra=None):
-        """
+        """Left canonize all or a portion of this MPS, such that:
+
+                          i            i
+            o-o-o-o-o-o-o-o-         /-o-
+            | | | | | | | | ...  ->  | | ...
+            o-o-o-o-o-o-o-o-         \-o-
+
+        Parameters
+        ----------
+        start : int, optional
+            If given, the site to start left canonizing at.
+        stop : int, optional
+            If given, the site to stop left canonizing at.
+        normalize : bool, optional
+            Whether to normalize the state.
+        bra : MatrixProductState, optional
+            If supplied, simultaneously left canonize this MPS too, assuming it
+            to be the conjugate state.
         """
         if start is None:
             start = 0
@@ -1354,7 +1405,25 @@ class MatrixProductState(TensorNetwork):
                 bra.site[-1] /= factor
 
     def right_canonize(self, start=None, stop=None, normalize=False, bra=None):
-        """
+        """Right canonize all or a portion of this MPS, such that:
+
+                 i                          i
+                -o-o-o-o-o-o-o-o           -o-\
+            ...  | | | | | | | |   ->  ...  | |
+                -o-o-o-o-o-o-o-o           -o-/
+
+
+        Parameters
+        ----------
+        start : int, optional
+            If given, the site to start right canonizing at.
+        stop : int, optional
+            If given, the site to stop right canonizing at.
+        normalize : bool, optional
+            Whether to normalize the state.
+        bra : MatrixProductState, optional
+            If supplied, simultaneously right canonize this MPS too, assuming
+            it to be the conjugate state.
         """
         if start is None:
             start = self.nsites - 1
@@ -1370,13 +1439,30 @@ class MatrixProductState(TensorNetwork):
             if bra is not None:
                 bra.site[0] /= factor
 
-    def canonize(self, orthogonality_center):
+    def canonize(self, orthogonality_center, bra=None):
+        """Mixed canonize this MPS.
+
+        Parameters
+        ----------
+        orthogonality_center : int, optional
+            Which site to orthogonalize around.
+        bra : MatrixProductState, optional
+            If supplied, simultaneously mixed canonize this MPS too, assuming
+            it to be the conjugate state.
         """
-        """
-        self.left_canonize(stop=orthogonality_center)
-        self.right_canonize(stop=orthogonality_center)
+        self.left_canonize(stop=orthogonality_center, bra=bra)
+        self.right_canonize(stop=orthogonality_center, bra=bra)
 
     def shift_orthogonality_center(self, current, new):
+        """Move the orthogonality center of this MPS.
+
+        Parameters
+        ----------
+        current : int
+            The current orthogonality center.
+        new : int
+            The target orthogonality center.
+        """
         if new > current:
             for i in range(current, new):
                 self.left_canonize_site(i)
@@ -1607,7 +1693,17 @@ def MPO_ham_heis(n, j=1.0, bz=0.0,
 
 
 def update_with_eff_gs(energy_tn, k, b, i):
-    """
+    """Find the effective tensor groundstate of:
+
+                  /|\
+        o-o-o-o-o- | -o-o-o-o-o-o-o-o
+        | | | | |  |  | | | | | | | |
+        O-O-O-O-O--O--O-O-O-O-O-O-O-O
+        | | | | | i|  | | | | | | | |
+        o-o-o-o-o- | -o-o-o-o-o-o-o-o
+                  \|/
+
+    And insert it back into the states ``k`` and ``b``, and thus ``energy_tn``.
     """
     eff_ham = (energy_tn ^ slice(0, i) ^ slice(..., i) ^ '__ham__')['__ham__']
     eff_ham.fuse((('lower', b.site[i].inds),
