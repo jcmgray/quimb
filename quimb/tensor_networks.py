@@ -1177,18 +1177,6 @@ class TensorNetwork(object):
 #                          Specific forms on network                          #
 # --------------------------------------------------------------------------- #
 
-
-def make_site_strs(x, nsites):
-    """Get a range of site inds or tags based.
-    """
-    if isinstance(x, str):
-        x = tuple(map(x.format, range(nsites)))
-    else:
-        x = tuple(x)
-
-    return x
-
-
 class MatrixProductState(TensorNetwork):
     """Initialise a matrix product state, with auto labelling and tagging.
 
@@ -1200,15 +1188,14 @@ class MatrixProductState(TensorNetwork):
         String specifying layout of the tensors. E.g. 'lrp' (the default)
         indicates the shape corresponds left-bond, right-bond, physical index.
         End tensors have either 'l' or 'r' dropped from the string.
-    site_ind_id : sequence of hashable, or str
-        The indices to label the physical dimensions with, if a string is
-        supplied, use this to format the indices thus:
-        ``map(site_ind_id.format, range(len(arrays)))``.
-        Defaults ``'k0', 'k1', 'k2'...``.
-    site_tag_id : sequence of hashable, or str
-        The tags to label each site with, if a string is supplied, use this to
-        format the indices thus: ``map(site_tag_id.format,
-        range(len(arrays)))``. Defaults to ``'i0', 'i1', 'i2'...``.
+    site_ind_id : str
+        A string specifiying how to label the physical site indices. Should
+        contain a ``'{}'`` placeholder. It is used to generate the actual
+        indices like: ``map(site_ind_id.format, range(len(arrays)))``.
+    site_tag_id : str
+        A string specifiying how to tag the tensors at each site. Should
+        contain a ``'{}'`` placeholder. It is used to generate the actual tags
+        like: ``map(site_tag_id.format, range(len(arrays)))``.
     tags : str or sequence of hashable, optional
         Global tags to attach to all tensors.
     bond_name : str, optional
@@ -1230,12 +1217,11 @@ class MatrixProductState(TensorNetwork):
 
         # process site indices
         self._site_ind_id = site_ind_id
-        site_inds = make_site_strs(site_ind_id, nsites)
+        site_inds = map(site_ind_id.format, range(nsites))
 
         # process site tags
         self._site_tag_id = site_tag_id
-        contract_strategy = site_tag_id
-        site_tags = make_site_strs(site_tag_id, nsites)
+        site_tags = map(site_tag_id.format, range(nsites))
 
         if tags is not None:
             if isinstance(tags, str):
@@ -1249,32 +1235,31 @@ class MatrixProductState(TensorNetwork):
         # TODO: allow open ends non-cyclic
 
         # transpose arrays to 'lrp' order.
-        lp_ord = tuple(shape.replace('r', "").find(x) for x in 'lp')
-        lrp_ord = tuple(shape.find(x) for x in 'lrp')
-        rp_ord = tuple(shape.replace('l', "").find(x) for x in 'rp')
+        def gen_orders():
+            lp_ord = tuple(shape.replace('r', "").find(x) for x in 'lp')
+            lrp_ord = tuple(shape.find(x) for x in 'lrp')
+            rp_ord = tuple(shape.replace('l', "").find(x) for x in 'rp')
+            yield lp_ord
+            for _ in range(nsites - 2):
+                yield lrp_ord
+            yield rp_ord
 
-        # Do the first tensor seperately.
-        next_bond = rand_uuid(base=bond_name)
-        tensors = [Tensor(data=arrays[0].transpose(*lp_ord),
-                          inds=[next_bond, site_inds[0]],
-                          tags=site_tags[0])]
-        previous_bond = next_bond
+        def gen_inds():
+            nbond = rand_uuid(base=bond_name)
+            yield (nbond, next(site_inds))
+            pbond = nbond
+            for _ in range(nsites - 2):
+                nbond = rand_uuid(base=bond_name)
+                yield (pbond, nbond, next(site_inds))
+                pbond = nbond
+            yield (pbond, next(site_inds))
 
-        # Range over the middle tensors
-        for array, site_ind, site_tag in zip(arrays[1:-1], site_inds[1:-1],
-                                             site_tags[1:-1]):
-            next_bond = rand_uuid(base=bond_name)
-            tensors.append(Tensor(data=array.transpose(*lrp_ord),
-                                  inds=[previous_bond, next_bond, site_ind],
-                                  tags=site_tag))
-            previous_bond = next_bond
+        def gen_tensors():
+            for array, site_tag, inds, order in zip(arrays, site_tags,
+                                                    gen_inds(), gen_orders()):
+                yield Tensor(array.transpose(*order), inds=inds, tags=site_tag)
 
-        # Do the last tensor seperately.
-        tensors.append(Tensor(data=arrays[-1].transpose(*rp_ord),
-                              inds=[previous_bond, site_inds[-1]],
-                              tags=site_tags[-1]))
-
-        super().__init__(tensors, contract_strategy=contract_strategy,
+        super().__init__(gen_tensors(), contract_strategy=site_tag_id,
                          nsites=nsites, check_collisions=False, **kwargs)
 
     def reindex_sites(self, new_id, where=None, inplace=False):
@@ -1521,31 +1506,29 @@ class MatrixProductOperator(TensorNetwork):
     *arrays : sequence of arrays
         The tensor arrays to form into a MPO.
     shape : str, optional
-        String specifying layout of the tensors. E.g. 'lrkb' (the default)
-        indicates the shape corresponds left-bond, right-bond, ket physical
-        index, bra physical index.
+        String specifying layout of the tensors. E.g. 'lrud' (the default)
+        indicates the shape corresponds left-bond, right-bond, 'up' physical
+        index, 'down' physical index.
         End tensors have either 'l' or 'r' dropped from the string.
-    upper_ind_id : sequence of hashable, or str
-        The indices to label the ket physical dimensions with, if a string is
-        supplied, use this to format the indices thus:
-        ``map(upper_ind_id.format, range(len(arrays)))``.
-        Defaults ``'k0', 'k1', 'k2'...``.
-    lower_ind_id : sequence of hashable, or str
-        The indices to label the ket physical dimensions with, if a string is
-        supplied, use this to format the indices thus:
-        ``map(lower_ind_id.format, range(len(arrays)))``.
-        Defaults ``'b0', 'b1', 'b2'...``.
-    site_tag_id : sequence of hashable, or str
-        The tags to label each site with, if a string is supplied, use this to
-        format the indices thus: ``map(site_tag_id.format,
-        range(len(arrays)))``. Defaults to ``'i0', 'i1', 'i2'...``.
+    upper_ind_id : str
+        A string specifiying how to label the upper physical site indices.
+        Should contain a ``'{}'`` placeholder. It is used to generate the
+        actual indices like: ``map(upper_ind_id.format, range(len(arrays)))``.
+    lower_ind_id : str
+        A string specifiying how to label the lower physical site indices.
+        Should contain a ``'{}'`` placeholder. It is used to generate the
+        actual indices like: ``map(lower_ind_id.format, range(len(arrays)))``.
+    site_tag_id : str
+        A string specifiying how to tag the tensors at each site. Should
+        contain a ``'{}'`` placeholder. It is used to generate the actual tags
+        like: ``map(site_tag_id.format, range(len(arrays)))``.
     tags : str or sequence of hashable, optional
         Global tags to attach to all tensors.
     bond_name : str, optional
         The base name of the bond indices, onto which uuids will be added.
     """
 
-    def __init__(self, arrays, shape='lrkb', site_tag_id='i{}', tags=None,
+    def __init__(self, arrays, shape='lrud', site_tag_id='i{}', tags=None,
                  upper_ind_id='k{}', lower_ind_id='b{}', bond_name="",
                  **kwargs):
         # short-circuit for copying
@@ -1562,12 +1545,12 @@ class MatrixProductOperator(TensorNetwork):
         # process site indices
         self._upper_ind_id = upper_ind_id
         self._lower_ind_id = lower_ind_id
-        upper_inds = make_site_strs(upper_ind_id, nsites)
-        lower_inds = make_site_strs(lower_ind_id, nsites)
+        upper_inds = map(upper_ind_id.format, range(nsites))
+        lower_inds = map(lower_ind_id.format, range(nsites))
 
         # process site tags
         self._site_tag_id = site_tag_id
-        site_tags = make_site_strs(site_tag_id, nsites)
+        site_tags = map(site_tag_id.format, range(nsites))
         if tags is not None:
             if isinstance(tags, str):
                 tags = (tags,)
@@ -1576,38 +1559,33 @@ class MatrixProductOperator(TensorNetwork):
 
             site_tags = tuple((st,) + tags for st in site_tags)
 
-        # transpose arrays to 'lrkb' order.
-        lkb_ord = tuple(map(lambda x: shape.replace('r', "").find(x), 'lkb'))
-        rkb_ord = tuple(map(lambda x: shape.replace('l', "").find(x), 'rkb'))
-        lrkb_ord = tuple(map(shape.find, 'lrkb'))
+        # transpose arrays to 'lrud' order.
+        def gen_orders():
+            lud_ord = tuple(shape.replace('r', "").find(x) for x in 'lud')
+            rud_ord = tuple(shape.replace('l', "").find(x) for x in 'rud')
+            lrud_ord = tuple(map(shape.find, 'lrud'))
+            yield lud_ord
+            for _ in range(nsites - 2):
+                yield lrud_ord
+            yield rud_ord
 
-        # Do the first tensor seperately.
-        next_bond = rand_uuid(base=bond_name)
-        tensors = [Tensor(data=arrays[0].transpose(*lkb_ord),
-                          inds=[next_bond, upper_inds[0], lower_inds[0]],
-                          tags=site_tags[0])]
-        previous_bond = next_bond
+        def gen_inds():
+            nbond = rand_uuid(base=bond_name)
+            yield (nbond, next(upper_inds), next(lower_inds))
+            pbond = nbond
+            for _ in range(nsites - 2):
+                nbond = rand_uuid(base=bond_name)
+                yield (pbond, nbond, next(upper_inds), next(lower_inds))
+                pbond = nbond
+            yield (pbond, next(upper_inds), next(lower_inds))
 
-        # Range over the middle tensors
-        for array, ksi, bsi, site_tag in zip(arrays[1:-1],
-                                             upper_inds[1:-1],
-                                             lower_inds[1:-1],
-                                             site_tags[1:-1]):
+        def gen_tensors():
+            for array, site_tag, inds, order in zip(arrays, site_tags,
+                                                    gen_inds(), gen_orders()):
 
-            next_bond = rand_uuid(base=bond_name)
-            tensors += [Tensor(data=array.transpose(*lrkb_ord),
-                               inds=[previous_bond, next_bond, ksi, bsi],
-                               tags=site_tag)]
-            previous_bond = next_bond
+                yield Tensor(array.transpose(*order), inds=inds, tags=site_tag)
 
-        # Do the last tensor seperately.
-        tensors.append(Tensor(data=arrays[-1].transpose(*rkb_ord),
-                              inds=[previous_bond,
-                                    upper_inds[-1],
-                                    lower_inds[-1]],
-                              tags=site_tags[-1]))
-
-        super().__init__(tensors, contract_strategy=site_tag_id,
+        super().__init__(gen_tensors(), contract_strategy=site_tag_id,
                          nsites=nsites, check_collisions=False, **kwargs)
 
     def reindex_lower_sites(self, new_id, where=None, inplace=False):

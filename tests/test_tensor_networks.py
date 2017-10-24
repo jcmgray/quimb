@@ -528,6 +528,8 @@ class TestMatrixProductOperator:
                    [np.random.rand(5, 2, 2)])
         mpo = MatrixProductOperator(tensors)
         assert len(mpo.tensors) == 5
+        assert mpo.upper_inds == ('k0', 'k1', 'k2', 'k3', 'k4')
+        assert mpo.lower_inds == ('b0', 'b1', 'b2', 'b3', 'b4')
         op = mpo ^ ...
         # this would rely on left to right contraction if not in set form
         assert set(op.inds) == {'k0', 'b0', 'k1', 'b1', 'k2', 'b2',
