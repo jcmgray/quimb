@@ -4,7 +4,7 @@ import operator
 import numpy as np
 from numpy.testing import assert_allclose
 
-from quimb import ham_heis, qu, expec, seigsys
+from quimb import ham_heis, expec, seigsys
 
 from quimb.tensor_networks import (
     Tensor,
@@ -378,22 +378,23 @@ class TestMatrixProductState:
         mps = MatrixProductState(tensors)
         assert len(mps.tensors) == 5
         nmps = mps.reindex_sites('foo{}', inplace=False, where=slice(0, 3))
-        assert nmps.site_inds == "k{}"
+        assert nmps.site_ind_id == "k{}"
         assert isinstance(nmps, MatrixProductState)
         assert set(nmps.outer_inds()) == {'foo0', 'foo1',
                                           'foo2', 'k3', 'k4'}
         assert set(mps.outer_inds()) == {'k0', 'k1',
                                          'k2', 'k3', 'k4'}
-        mps.set_site_inds('foo{}')
+        mps.site_ind_id = 'foo{}'
         assert set(mps.outer_inds()) == {'foo0', 'foo1',
                                          'foo2', 'foo3', 'foo4'}
-        assert mps.site_inds == 'foo{}'
+        assert mps.site_inds == ('foo0', 'foo1', 'foo2', 'foo3', 'foo4')
+        assert mps.site_ind_id == 'foo{}'
 
     def test_left_canonize_site(self):
         a = np.random.randn(7, 2) + 1.0j * np.random.randn(7, 2)
         b = np.random.randn(7, 7, 2) + 1.0j * np.random.randn(7, 7, 2)
         c = np.random.randn(7, 2) + 1.0j * np.random.randn(7, 2)
-        mps = MatrixProductState([a, b, c], site_tags="i{}")
+        mps = MatrixProductState([a, b, c], site_tag_id="i{}")
 
         mps.left_canonize_site(0)
         assert mps['i0'].shape == (2, 2)
@@ -418,7 +419,7 @@ class TestMatrixProductState:
         a = np.random.randn(7, 2) + 1.0j * np.random.randn(7, 2)
         b = np.random.randn(7, 7, 2) + 1.0j * np.random.randn(7, 7, 2)
         c = np.random.randn(7, 2) + 1.0j * np.random.randn(7, 2)
-        mps = MatrixProductState([a, b, c], site_tags="i{}")
+        mps = MatrixProductState([a, b, c], site_tag_id="i{}")
 
         mps.right_canonize_site(2)
         assert mps['i2'].shape == (2, 2)
@@ -441,41 +442,41 @@ class TestMatrixProductState:
 
     def test_rand_mps_left_canonize(self):
         n = 10
-        rmps = MPS_rand(n, 10, site_tags="foo{}", tags='bar', normalize=False)
-        rmps.left_canonize(normalize=True)
-        assert abs(rmps.H @ rmps - 1) < 1e-13
-        p_tn = (rmps.H & rmps) ^ slice(0, 9)
+        k = MPS_rand(n, 10, site_tag_id="foo{}", tags='bar', normalize=False)
+        k.left_canonize(normalize=True)
+        assert abs(k.H @ k) - 1 < 1e-13
+        p_tn = (k.H & k) ^ slice(0, 9)
         assert_allclose(p_tn['foo8'].data, np.eye(10), atol=1e-13)
 
     def test_rand_mps_left_canonize_with_bra(self):
         n = 10
-        k = MPS_rand(n, 10, site_tags="foo{}", tags='bar', normalize=False)
+        k = MPS_rand(n, 10, site_tag_id="foo{}", tags='bar', normalize=False)
         b = k.H
         k.left_canonize(normalize=True, bra=b)
-        assert abs(b @ k - 1) < 1e-13
+        assert abs(b @ k) - 1 < 1e-13
         p_tn = (b & k) ^ slice(0, 9)
         assert_allclose(p_tn['foo8'].data, np.eye(10), atol=1e-13)
 
     def test_rand_mps_right_canonize(self):
         n = 10
-        rmps = MPS_rand(n, 10, site_tags="foo{}", tags='bar', normalize=False)
-        rmps.right_canonize(normalize=True)
-        assert abs(rmps.H @ rmps - 1) < 1e-13
-        p_tn = (rmps.H & rmps) ^ slice(..., 0)
+        k = MPS_rand(n, 10, site_tag_id="foo{}", tags='bar', normalize=False)
+        k.right_canonize(normalize=True)
+        assert abs(k.H @ k) - 1 < 1e-13
+        p_tn = (k.H & k) ^ slice(..., 0)
         assert_allclose(p_tn['foo1'].data, np.eye(10), atol=1e-13)
 
     def test_rand_mps_right_canonize_with_bra(self):
         n = 10
-        k = MPS_rand(n, 10, site_tags="foo{}", tags='bar', normalize=False)
+        k = MPS_rand(n, 10, site_tag_id="foo{}", tags='bar', normalize=False)
         b = k.H
         k.right_canonize(normalize=True, bra=b)
-        assert abs(b @ k - 1) < 1e-13
+        assert abs(b @ k) - 1 < 1e-13
         p_tn = (b & k) ^ slice(..., 0)
         assert_allclose(p_tn['foo1'].data, np.eye(10), atol=1e-13)
 
     def test_rand_mps_mixed_canonize(self):
         n = 10
-        rmps = MPS_rand(n, 10, site_tags="foo{}", tags='bar', normalize=True)
+        rmps = MPS_rand(n, 10, site_tag_id="foo{}", tags='bar', normalize=True)
 
         # move to the center
         rmps.canonize(orthogonality_center=4)
@@ -537,7 +538,7 @@ class TestSpecificStatesOperators:
 
     def test_rand_ket_mps(self):
         n = 10
-        rmps = MPS_rand(n, 10, site_tags="foo{}", tags='bar')
+        rmps = MPS_rand(n, 10, site_tag_id="foo{}", tags='bar')
         assert rmps.site[0].tags == {'foo0', 'bar'}
         assert rmps.site[3].tags == {'foo3', 'bar'}
         assert rmps.site[-1].tags == {'foo9', 'bar'}
@@ -616,14 +617,9 @@ class TestDMRG1:
 
         assert "__ham__" not in h.tags
 
-        mps_inds = [mps_gs.site_inds.format(i) for i in range(mps_gs.nsites)]
-        mps_gs_dense = qu((mps_gs ^ ...).fuse({'all': mps_inds}).data)
+        mps_gs_dense = mps_gs.to_dense()
 
-        h_lower_inds = [h.bra_site_inds.format(i) for i in range(h.nsites)]
-        h_upper_inds = [h.ket_site_inds.format(i) for i in range(h.nsites)]
-
-        h_dense = (h ^ ...).fuse((('lower', h_lower_inds),
-                                  ('upper', h_upper_inds))).data
+        h_dense = h.to_dense()
 
         actual_e, gs = seigsys(h_dense, k=1)
         assert abs(expec(mps_gs_dense, gs)) - 1 < 1e-12

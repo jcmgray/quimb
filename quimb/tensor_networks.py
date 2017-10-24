@@ -665,7 +665,7 @@ class TensorNetwork(object):
 
             .....                ........          .....
             O-O-O-O-O-O-O-        /-O-O-O-O-        /-O-
-            | | | | | | |   ->   0  | | | |   ->   8  |   ->  etc.
+            | | | | | | |   ->   Q  | | | |   ->   0  |   ->  etc.
             O-O-O-O-O-O-O-        \-O-O-O-O-        \-O-
 
         Should not require tensor contractions with more than 52 unique
@@ -1200,41 +1200,42 @@ class MatrixProductState(TensorNetwork):
         String specifying layout of the tensors. E.g. 'lrp' (the default)
         indicates the shape corresponds left-bond, right-bond, physical index.
         End tensors have either 'l' or 'r' dropped from the string.
-    site_inds : sequence of hashable, or str
+    site_ind_id : sequence of hashable, or str
         The indices to label the physical dimensions with, if a string is
         supplied, use this to format the indices thus:
-        ``map(site_inds.format, range(len(arrays)))``.
+        ``map(site_ind_id.format, range(len(arrays)))``.
         Defaults ``'k0', 'k1', 'k2'...``.
-    site_tags : sequence of hashable, or str
+    site_tag_id : sequence of hashable, or str
         The tags to label each site with, if a string is supplied, use this to
-        format the indices thus: ``map(site_tags.format, range(len(arrays)))``.
-        Defaults ``'i0', 'i1', 'i2'...``.
+        format the indices thus: ``map(site_tag_id.format,
+        range(len(arrays)))``. Defaults to ``'i0', 'i1', 'i2'...``.
     tags : str or sequence of hashable, optional
         Global tags to attach to all tensors.
     bond_name : str, optional
         The base name of the bond indices, onto which uuids will be added.
     """
 
-    def __init__(self, arrays, shape='lrp', site_inds='k{}', site_tags='i{}',
-                 tags=None, bond_name="", **kwargs):
+    def __init__(self, arrays, *, shape='lrp', tags=None, bond_name="",
+                 site_ind_id='k{}', site_tag_id='i{}', **kwargs):
+
         # short-circuit for copying MPSs
         if isinstance(arrays, MatrixProductState):
             super().__init__(arrays)
-            self.site_inds = copy.copy(arrays.site_inds)
-            self.site_tags = copy.copy(arrays.site_tags)
+            self._site_ind_id = copy.copy(arrays._site_ind_id)
+            self._site_tag_id = copy.copy(arrays._site_tag_id)
             return
 
         arrays = tuple(arrays)
         nsites = len(arrays)
 
         # process site indices
-        self.site_inds = site_inds
-        site_inds = make_site_strs(site_inds, nsites)
+        self._site_ind_id = site_ind_id
+        site_inds = make_site_strs(site_ind_id, nsites)
 
         # process site tags
-        self.site_tags = site_tags
-        contract_strategy = site_tags
-        site_tags = make_site_strs(site_tags, nsites)
+        self._site_tag_id = site_tag_id
+        contract_strategy = site_tag_id
+        site_tags = make_site_strs(site_tag_id, nsites)
 
         if tags is not None:
             if isinstance(tags, str):
@@ -1276,12 +1277,12 @@ class MatrixProductState(TensorNetwork):
         super().__init__(tensors, contract_strategy=contract_strategy,
                          nsites=nsites, check_collisions=False, **kwargs)
 
-    def reindex_sites(self, pattern, where=None, inplace=False):
-        """Update the physical site index labels to a new pattern.
+    def reindex_sites(self, new_id, where=None, inplace=False):
+        """Update the physical site index labels to a new string specifier.
 
         Parameters
         ----------
-        new_site_inds : str
+        new_id : str
             A string with a format placeholder to accept an int, e.g. "ket{}".
         where : None or slice
             Which sites to update the index labels on. If ``None`` (default)
@@ -1296,14 +1297,30 @@ class MatrixProductState(TensorNetwork):
             start = 0 if where.start is None else where.start
             stop = self.nsites if where.stop is ... else where.stop
 
-        return self.reindex({self.site_inds.format(i): pattern.format(i)
+        return self.reindex({self.site_ind_id.format(i): new_id.format(i)
                              for i in range(start, stop)}, inplace=inplace)
 
-    def set_site_inds(self, new_site_inds):
-        """Reindex all site indices, and set this as the site_inds.
+    def _get_site_ind_id(self):
+        return self._site_ind_id
+
+    def _set_site_ind_id(self, new_id):
+        self.reindex_sites(new_id, inplace=True)
+        self._site_ind_id = new_id
+
+    site_ind_id = property(_get_site_ind_id, _set_site_ind_id,
+                           doc="The string specifier for the physical indices")
+
+    @property
+    def site_inds(self):
+        """An ordered tuple of the actual physical indices.
         """
-        self.reindex_sites(new_site_inds, inplace=True)
-        self.site_inds = new_site_inds
+        return tuple(self.site_ind_id.format(i) for i in range(self.nsites))
+
+    @property
+    def site_tags(self):
+        """An ordered tuple of the actual site tags.
+        """
+        return tuple(self.site_tag_id.format(i) for i in range(self.nsites))
 
     def left_canonize_site(self, i, bra=None):
         """Left canonize this MPS' ith site, inplace.
@@ -1382,10 +1399,10 @@ class MatrixProductState(TensorNetwork):
     def left_canonize(self, start=None, stop=None, normalize=False, bra=None):
         """Left canonize all or a portion of this MPS, such that:
 
-                          i            i
-            o-o-o-o-o-o-o-o-         /-o-
-            | | | | | | | | ...  ->  | | ...
-            o-o-o-o-o-o-o-o-         \-o-
+                          i              i
+            +-+-+-+-+-+-+-o-o-         +-o-o-
+            | | | | | | | | | ...  ->  | | | ...
+            +-+-+-+-+-+-+-o-o-         +-o-o-
 
         Parameters
         ----------
@@ -1416,10 +1433,10 @@ class MatrixProductState(TensorNetwork):
     def right_canonize(self, start=None, stop=None, normalize=False, bra=None):
         """Right canonize all or a portion of this MPS, such that:
 
-                 i                          i
-                -o-o-o-o-o-o-o-o           -o-\
-            ...  | | | | | | | |   ->  ...  | |
-                -o-o-o-o-o-o-o-o           -o-/
+                   i                           i
+                -o-o-+-+-+-+-+-+-+          -o-o-+
+             ... | | | | | | | | |   ->  ... | | |
+                -o-o-+-+-+-+-+-+-+          -o-o-+
 
 
         Parameters
@@ -1449,7 +1466,12 @@ class MatrixProductState(TensorNetwork):
                 bra.site[0] /= factor
 
     def canonize(self, orthogonality_center, bra=None):
-        """Mixed canonize this MPS.
+        """Mixed canonize this MPS, such that:
+
+                          i                      i
+            +-+-+-+-+- -+-o-+- -+-+-+-+-+      +-o-+
+            | | | | |...| | |...| | | | |  ->  | | |
+            +-+-+-+-+- -+-o-+- -+-+-+-+-+      +-o-+
 
         Parameters
         ----------
@@ -1480,7 +1502,15 @@ class MatrixProductState(TensorNetwork):
                 self.left_canonize_site(i, bra=bra)
         else:
             for i in range(current, new, -1):
-                self.right_canonize_site(i)
+                self.right_canonize_site(i, bra=bra)
+
+    def to_dense(self):
+        """Return the dense ket version of this MPS, i.e. a ``numpy.matrix``
+        with shape (-1, 1).
+        """
+        return np.asmatrix(self.contract(...)
+                           .fuse({'all': self.site_inds})
+                           .data.reshape(-1, 1))
 
 
 class MatrixProductOperator(TensorNetwork):
@@ -1495,50 +1525,49 @@ class MatrixProductOperator(TensorNetwork):
         indicates the shape corresponds left-bond, right-bond, ket physical
         index, bra physical index.
         End tensors have either 'l' or 'r' dropped from the string.
-    ket_site_inds : sequence of hashable, or str
+    upper_ind_id : sequence of hashable, or str
         The indices to label the ket physical dimensions with, if a string is
         supplied, use this to format the indices thus:
-        ``map(ket_site_inds.format, range(len(arrays)))``.
+        ``map(upper_ind_id.format, range(len(arrays)))``.
         Defaults ``'k0', 'k1', 'k2'...``.
-    bra_site_inds : sequence of hashable, or str
+    lower_ind_id : sequence of hashable, or str
         The indices to label the ket physical dimensions with, if a string is
         supplied, use this to format the indices thus:
-        ``map(bra_site_inds.format, range(len(arrays)))``.
+        ``map(lower_ind_id.format, range(len(arrays)))``.
         Defaults ``'b0', 'b1', 'b2'...``.
-    site_tags : sequence of hashable, or str
+    site_tag_id : sequence of hashable, or str
         The tags to label each site with, if a string is supplied, use this to
-        format the indices thus: ``map(site_tags.format, range(len(arrays)))``.
-        Defaults ``'i0', 'i1', 'i2'...``.
+        format the indices thus: ``map(site_tag_id.format,
+        range(len(arrays)))``. Defaults to ``'i0', 'i1', 'i2'...``.
     tags : str or sequence of hashable, optional
         Global tags to attach to all tensors.
     bond_name : str, optional
         The base name of the bond indices, onto which uuids will be added.
     """
 
-    def __init__(self, arrays, shape='lrkb', site_tags='i{}', tags=None,
-                 ket_site_inds='k{}', bra_site_inds='b{}', bond_name="",
+    def __init__(self, arrays, shape='lrkb', site_tag_id='i{}', tags=None,
+                 upper_ind_id='k{}', lower_ind_id='b{}', bond_name="",
                  **kwargs):
         # short-circuit for copying
         if isinstance(arrays, MatrixProductOperator):
             super().__init__(arrays)
-            self.ket_site_inds = copy.copy(arrays.ket_site_inds)
-            self.bra_site_inds = copy.copy(arrays.bra_site_inds)
-            self.site_tags = copy.copy(arrays.site_tags)
+            self._upper_ind_id = copy.copy(arrays._upper_ind_id)
+            self._lower_ind_id = copy.copy(arrays._lower_ind_id)
+            self._site_tag_id = copy.copy(arrays._site_tag_id)
             return
 
         arrays = tuple(arrays)
         nsites = len(arrays)
 
         # process site indices
-        self.ket_site_inds = ket_site_inds
-        self.bra_site_inds = bra_site_inds
-        ket_site_inds = make_site_strs(ket_site_inds, nsites)
-        bra_site_inds = make_site_strs(bra_site_inds, nsites)
+        self._upper_ind_id = upper_ind_id
+        self._lower_ind_id = lower_ind_id
+        upper_inds = make_site_strs(upper_ind_id, nsites)
+        lower_inds = make_site_strs(lower_ind_id, nsites)
 
         # process site tags
-        self.site_tags = site_tags
-        contract_strategy = site_tags
-        site_tags = make_site_strs(site_tags, nsites)
+        self._site_tag_id = site_tag_id
+        site_tags = make_site_strs(site_tag_id, nsites)
         if tags is not None:
             if isinstance(tags, str):
                 tags = (tags,)
@@ -1555,14 +1584,14 @@ class MatrixProductOperator(TensorNetwork):
         # Do the first tensor seperately.
         next_bond = rand_uuid(base=bond_name)
         tensors = [Tensor(data=arrays[0].transpose(*lkb_ord),
-                          inds=[next_bond, ket_site_inds[0], bra_site_inds[0]],
+                          inds=[next_bond, upper_inds[0], lower_inds[0]],
                           tags=site_tags[0])]
         previous_bond = next_bond
 
         # Range over the middle tensors
         for array, ksi, bsi, site_tag in zip(arrays[1:-1],
-                                             ket_site_inds[1:-1],
-                                             bra_site_inds[1:-1],
+                                             upper_inds[1:-1],
+                                             lower_inds[1:-1],
                                              site_tags[1:-1]):
 
             next_bond = rand_uuid(base=bond_name)
@@ -1574,12 +1603,104 @@ class MatrixProductOperator(TensorNetwork):
         # Do the last tensor seperately.
         tensors.append(Tensor(data=arrays[-1].transpose(*rkb_ord),
                               inds=[previous_bond,
-                                    ket_site_inds[-1],
-                                    bra_site_inds[-1]],
+                                    upper_inds[-1],
+                                    lower_inds[-1]],
                               tags=site_tags[-1]))
 
-        super().__init__(tensors, contract_strategy=contract_strategy,
+        super().__init__(tensors, contract_strategy=site_tag_id,
                          nsites=nsites, check_collisions=False, **kwargs)
+
+    def reindex_lower_sites(self, new_id, where=None, inplace=False):
+        """Update the lower site index labels to a new string specifier.
+
+        Parameters
+        ----------
+        new_id : str
+            A string with a format placeholder to accept an int, e.g. "ket{}".
+        where : None or slice
+            Which sites to update the index labels on. If ``None`` (default)
+            all sites.
+        inplace : bool
+            Whether to reindex in place.
+        """
+        if where is None:
+            start = 0
+            stop = self.nsites
+        else:
+            start = 0 if where.start is None else where.start
+            stop = self.nsites if where.stop is ... else where.stop
+
+        return self.reindex({self.lower_ind_id.format(i): new_id.format(i)
+                             for i in range(start, stop)}, inplace=inplace)
+
+    def reindex_upper_sites(self, new_id, where=None, inplace=False):
+        """Update the upper site index labels to a new string specifier.
+
+        Parameters
+        ----------
+        new_id : str
+            A string with a format placeholder to accept an int, e.g. "ket{}".
+        where : None or slice
+            Which sites to update the index labels on. If ``None`` (default)
+            all sites.
+        inplace : bool
+            Whether to reindex in place.
+        """
+        if where is None:
+            start = 0
+            stop = self.nsites
+        else:
+            start = 0 if where.start is None else where.start
+            stop = self.nsites if where.stop is ... else where.stop
+
+        return self.reindex({self.upper_ind_id.format(i): new_id.format(i)
+                             for i in range(start, stop)}, inplace=inplace)
+
+    def _get_lower_ind_id(self):
+        return self._lower_ind_id
+
+    def _set_lower_ind_id(self, new_id):
+        self.reindex_sites(new_id, inplace=True)
+        self._lower_ind_id = new_id
+
+    lower_ind_id = property(_get_lower_ind_id, _set_lower_ind_id,
+                            doc="The string specifier for the lower phyiscal "
+                            "indices")
+
+    def _get_upper_ind_id(self):
+        return self._upper_ind_id
+
+    def _set_upper_ind_id(self, new_id):
+        self.reindex_sites(new_id, inplace=True)
+        self._upper_ind_id = new_id
+
+    upper_ind_id = property(_get_upper_ind_id, _set_upper_ind_id,
+                            doc="The string specifier for the upper phyiscal "
+                            "indices")
+
+    @property
+    def lower_inds(self):
+        """An ordered tuple of the actual lower physical indices.
+        """
+        return tuple(self.lower_ind_id.format(i) for i in range(self.nsites))
+
+    @property
+    def upper_inds(self):
+        """An ordered tuple of the actual upper physical indices.
+        """
+        return tuple(self.upper_ind_id.format(i) for i in range(self.nsites))
+
+    @property
+    def site_tags(self):
+        """An ordered tuple of the actual site tags.
+        """
+        return tuple(self.site_tag_id.format(i) for i in range(self.nsites))
+
+    def to_dense(self):
+        data = self.contract(...).fuse((('lower', self.lower_inds),
+                                        ('upper', self.upper_inds))).data
+        d = int(data.size**0.5)
+        return np.matrix(data.reshape(d, d))
 
 
 def align_inner(mps_ket, mps_bra, mpo=None):
@@ -1596,15 +1717,15 @@ def align_inner(mps_ket, mps_bra, mpo=None):
         If given, sandwich this operator between the two MPS.
     """
     if mpo is None:
-        if mps_ket.site_inds != mps_bra.site_inds:
-            mps_bra.set_site_inds(mps_ket.site_inds)
+        if mps_ket.site_ind_id != mps_bra.site_ind_id:
+            mps_bra.site_ind_id = mps_ket.site_ind_id
             return
 
-    if mps_ket.site_inds != mpo.ket_site_inds:
-        mps_ket.set_site_inds(mpo.ket_site_inds)
+    if mps_ket.site_ind_id != mpo.upper_ind_id:
+        mps_ket.site_ind_id = mpo.upper_ind_id
 
-    if mps_bra.site_inds != mpo.bra_site_inds:
-        mps_bra.set_site_inds(mpo.bra_site_inds)
+    if mps_bra.site_ind_id != mpo.lower_ind_id:
+        mps_bra.site_ind_id = mpo.lower_ind_id
 
 
 # --------------------------------------------------------------------------- #
@@ -1620,8 +1741,8 @@ def rand_tensor(shape, inds, tags=None):
 
 
 def MPS_rand(n, bond_dim, phys_dim=2,
-             site_inds='k{}',
-             site_tags='i{}',
+             site_ind_id='k{}',
+             site_tag_id='i{}',
              tags=None,
              bond_name="",
              normalize=True,
@@ -1634,9 +1755,9 @@ def MPS_rand(n, bond_dim, phys_dim=2,
         The bond dimension.
     phys_dim : int, optional
         The physical (site) dimensions, defaults to 2.
-    site_inds : sequence of hashable, or str
+    site_ind_id : sequence of hashable, or str
         See :func:`matrix_product_state`.
-    site_tags=None, optional
+    site_tag_id=None, optional
         See :func:`matrix_product_state`.
     tags=None, optional
         See :func:`matrix_product_state`.
@@ -1652,13 +1773,12 @@ def MPS_rand(n, bond_dim, phys_dim=2,
             map(lambda x: np.random.randn(*x) + 1.0j * np.random.randn(*x),
                 shapes))
 
-    rmps = MatrixProductState(arrays, site_inds=site_inds,
-                              bond_name=bond_name, site_tags=site_tags,
+    rmps = MatrixProductState(arrays, site_ind_id=site_ind_id,
+                              bond_name=bond_name, site_tag_id=site_tag_id,
                               tags=tags, **kwargs)
 
     if normalize:
-        c = (rmps.H @ rmps)**0.5
-        rmps[rmps.contract_strategy.format(n - 1)] /= c
+        rmps.site[-1] /= (rmps.H @ rmps)**0.5
 
     return rmps
 
@@ -1709,9 +1829,9 @@ def mpo_end_ham_heis_right(j=1.0, bz=0.0):
 
 
 def MPO_ham_heis(n, j=1.0, bz=0.0,
-                 ket_site_inds='k{}',
-                 bra_site_inds='b{}',
-                 site_tags='i{}',
+                 upper_ind_id='k{}',
+                 lower_ind_id='b{}',
+                 site_tag_id='i{}',
                  tags=None,
                  bond_name=""):
     """Heisenberg Hamiltonian in matrix product operator form.
@@ -1721,9 +1841,9 @@ def MPO_ham_heis(n, j=1.0, bz=0.0,
               mpo_end_ham_heis_right(j=j, bz=bz))
 
     HH_mpo = MatrixProductOperator(arrays=arrays,
-                                   ket_site_inds=ket_site_inds,
-                                   bra_site_inds=bra_site_inds,
-                                   site_tags=site_tags,
+                                   upper_ind_id=upper_ind_id,
+                                   lower_ind_id=lower_ind_id,
+                                   site_tag_id=site_tag_id,
                                    tags=tags,
                                    bond_name=bond_name)
     return HH_mpo
