@@ -830,9 +830,20 @@ class TensorNetwork(object):
             t.tags.add(tag)
         self.tag_index[tag] = names
 
+    def remove_tag(self, tag):
+        """Remove a tag from any tensors in this network which have it.
+        """
+        for n, t in self.tensor_index.items():
+            t.tags.discard(tag)
+        del self.tag_index[tag]
+
+    @property
+    def tags(self):
+        return tuple(self.tag_index.keys())
+
     @property
     def tensors(self):
-        return list(self.tensor_index.values())
+        return tuple(self.tensor_index.values())
 
     def calc_nsites(self):
         """Calculate how many tags there are which match ``contract_strategy``.
@@ -1570,6 +1581,31 @@ class MatrixProductOperator(TensorNetwork):
                          nsites=nsites, check_collisions=False, **kwargs)
 
 
+def align_inner(mps_ket, mps_bra, mpo=None):
+    """Align two MPS, with or without a sandwiched MPO, so that they form an
+    overlap/expectation tensor network.
+
+    Parameters
+    ----------
+    mps_ket : MatrixProductState
+        A state.
+    mps_bra : MatrixProductState
+        Another state, notionally the 'bra'.
+    mpo : None or MatrixProductOperator
+        If given, sandwich this operator between the two MPS.
+    """
+    if mpo is None:
+        if mps_ket.site_inds != mps_bra.site_inds:
+            mps_bra.set_site_inds(mps_ket.site_inds)
+            return
+
+    if mps_ket.site_inds != mpo.ket_site_inds:
+        mps_ket.set_site_inds(mpo.ket_site_inds)
+
+    if mps_bra.site_inds != mpo.bra_site_inds:
+        mps_bra.set_site_inds(mpo.bra_site_inds)
+
+
 # --------------------------------------------------------------------------- #
 #                        Specific states and operators                        #
 # --------------------------------------------------------------------------- #
@@ -1714,42 +1750,50 @@ def update_with_eff_gs(energy_tn, k, b, i):
     return eff_e
 
 
-def dmrg1_sweep(energy_tn, k, b, direction, canonize=True):
+def dmrg1_sweep_right(energy_tn, k, b, canonize=True):
     """
     """
-    if canonize and direction == 'right':
+    if canonize:
         k.right_canonize(bra=b)
-    elif canonize and direction == 'left':
+
+    for i in range(0, k.nsites):
+        eff_e = update_with_eff_gs(energy_tn, k, b, i)
+        if i < k.nsites - 1:
+            k.left_canonize_site(i, bra=b)
+
+    return eff_e
+
+
+def dmrg1_sweep_left(energy_tn, k, b, canonize=True):
+    """
+    """
+    if canonize:
         k.left_canonize(bra=b)
 
-    if direction == 'right':
-        for i in range(0, k.nsites):
-            eff_e = update_with_eff_gs(energy_tn, k, b, i)
-            if i < k.nsites - 1:
-                k.left_canonize_site(i, bra=b)
-
-    elif direction == 'left':
-        for i in reversed(range(0, k.nsites)):
-            eff_e = update_with_eff_gs(energy_tn, k, b, i)
-            if i > 0:
-                k.right_canonize_site(i, bra=b)
+    for i in reversed(range(0, k.nsites)):
+        eff_e = update_with_eff_gs(energy_tn, k, b, i)
+        if i > 0:
+            k.right_canonize_site(i, bra=b)
 
     return eff_e
 
 
 def dmrg1(ham, bond_dim, num_sweeps=4):
-    ham.add_tag("__ham__")
-
+    """
+    """
     k = MPS_rand(ham.nsites, bond_dim)
-    k.add_tag("__ket__")
-
     b = k.H
-    b.set_site_inds(ham.bra_site_inds)
+    ham.add_tag("__ham__")
+    k.add_tag("__ket__")
     b.add_tag("__bra__")
+
+    align_inner(k, b, ham)
 
     energy_tn = (b & ham & k)
 
     for _ in range(num_sweeps):
-        eff_e = dmrg1_sweep(energy_tn, k, b, direction='right')
+        eff_e = dmrg1_sweep_right(energy_tn, k, b, direction='right')
+
+    ham.remove_tag("__ham__")
 
     return eff_e, k

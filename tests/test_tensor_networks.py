@@ -14,8 +14,10 @@ from quimb.tensor_networks import (
     MatrixProductOperator,
     MPS_rand,
     MPO_ham_heis,
+    align_inner,
     rand_tensor,
-    dmrg1_sweep,
+    dmrg1_sweep_right,
+    dmrg1_sweep_left,
     dmrg1,
 )
 
@@ -564,42 +566,43 @@ class TestDMRG1:
 
     def test_single_explicit_sweep(self):
         h = MPO_ham_heis(5)
-
         k = MPS_rand(5, 3)
         b = k.H
-        b.set_site_inds(h.bra_site_inds)
 
         k.add_tag("__ket__")
         b.add_tag("__bra__")
         h.add_tag("__ham__")
+
+        align_inner(k, b, h)
 
         energy_tn = (b & h & k)
 
         e0 = energy_tn ^ ...
         assert abs(e0.imag) < 1e-13
 
-        de1 = dmrg1_sweep(energy_tn, k, b, direction='right')
+        de1 = dmrg1_sweep_right(energy_tn, k, b)
         e1 = energy_tn ^ ...
         assert_allclose(de1, e1)
         assert abs(e1.imag) < 1e-13
 
-        de2 = dmrg1_sweep(energy_tn, k, b, direction='right')
+        de2 = dmrg1_sweep_right(energy_tn, k, b)
         e2 = energy_tn ^ ...
         assert_allclose(de2, e2)
         assert abs(e2.imag) < 1e-13
 
-        de3 = dmrg1_sweep(energy_tn, k, b, direction='left', canonize=False)
+        # state is already left canonized after right sweep
+        de3 = dmrg1_sweep_left(energy_tn, k, b, canonize=False)
         e3 = energy_tn ^ ...
         assert_allclose(de3, e3)
         assert abs(e2.imag) < 1e-13
 
-        de4 = dmrg1_sweep(energy_tn, k, b, direction='left')
+        de4 = dmrg1_sweep_left(energy_tn, k, b)
         e4 = energy_tn ^ ...
         assert_allclose(de4, e4)
         assert abs(e2.imag) < 1e-13
 
         # test still normalized
-        b.set_site_inds(k.site_inds)
+        align_inner(k, b)
         assert abs(b @ k) - 1 < 1e-13
 
         assert e1.real < e0.real
@@ -610,6 +613,9 @@ class TestDMRG1:
     def test_ground_state_matches(self):
         h = MPO_ham_heis(5)
         eff_e, mps_gs = dmrg1(h, 5)
+
+        assert "__ham__" not in h.tags
+
         mps_inds = [mps_gs.site_inds.format(i) for i in range(mps_gs.nsites)]
         mps_gs_dense = qu((mps_gs ^ ...).fuse({'all': mps_inds}).data)
 
