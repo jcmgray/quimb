@@ -6,16 +6,22 @@ from numpy.testing import assert_allclose
 
 from quimb import ham_heis, expec, seigsys
 
-from quimb.tensor_networks import (
+from quimb.tensor.tensor_core import (
     Tensor,
     tensor_contract,
     TensorNetwork,
+)
+from quimb.tensor.tensor_1d import (
     MatrixProductState,
     MatrixProductOperator,
+    align_inner,
+)
+from quimb.tensor.tensor_gen import (
     MPS_rand,
     MPO_ham_heis,
-    align_inner,
     rand_tensor,
+)
+from quimb.tensor.tensor_dmrg import (
     dmrg1_sweep_right,
     dmrg1_sweep_left,
     dmrg1,

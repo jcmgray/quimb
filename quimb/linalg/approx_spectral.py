@@ -10,7 +10,7 @@ import scipy.linalg as scla
 import scipy.sparse.linalg as spla
 
 from ..core import ptr
-from ..tensor_networks import einsum, einsum_path, HuskArray
+from ..tensor.tensor_core import einsum, einsum_path, HuskArray
 from ..accel import prod, vdot
 from ..utils import int2tup
 from ..linalg.mpi_spawner import get_mpi_pool
