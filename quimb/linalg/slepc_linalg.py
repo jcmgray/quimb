@@ -392,9 +392,12 @@ def slepc_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
     pa = convert_mat_to_petsc(a, comm=comm)
     eigensolver.setOperators(pa)
     eigensolver.solve()
+
     nconv = eigensolver.getConverged()
-    assert nconv >= k
     k = nconv if return_all_conv else k
+    if nconv < k:
+        raise RuntimeError("SLEPC eigs did not find enough singular triplets, "
+                           "wanted: {}, found: {}.".format(k, nconv))
 
     rank = comm.Get_rank()
 

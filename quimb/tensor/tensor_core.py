@@ -829,7 +829,7 @@ class TensorNetwork(object):
     def remove_tag(self, tag):
         """Remove a tag from any tensors in this network which have it.
         """
-        for n, t in self.tensor_index.items():
+        for t in self.tensor_index.values():
             t.tags.discard(tag)
         del self.tag_index[tag]
 
