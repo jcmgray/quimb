@@ -89,10 +89,10 @@ class TestBasicTensorOperations:
             assert_allclose(c.data, op(a.data, b.data))
 
     def test_tensor_conj_inplace(self):
-        array = np.random.rand(2, 3, 4) + 1.0j * np.random.rand(2, 3, 4)
-        a = Tensor(array, inds=[0, 1, 2], tags='blue')
+        data = np.random.rand(2, 3, 4) + 1.0j * np.random.rand(2, 3, 4)
+        a = Tensor(data, inds=[0, 1, 2], tags='blue')
         a.conj(inplace=True)
-        assert_allclose(array.conj(), a.data)
+        assert_allclose(data.conj(), a.data)
 
     def test_contract_some(self):
         a = Tensor(np.random.randn(2, 3, 4), inds=[0, 1, 2])
@@ -244,37 +244,37 @@ class TestTensorNetwork:
             TensorNetwork(a, b)  # missing brackets around ``a, b``.
 
     def test_conj(self):
-        a_array = np.random.randn(2, 3, 4) + 1.0j * np.random.randn(2, 3, 4)
-        b_array = np.random.randn(3, 4, 5) + 1.0j * np.random.randn(3, 4, 5)
-        c_array = np.random.randn(5, 2, 6) + 1.0j * np.random.randn(5, 2, 6)
+        a_data = np.random.randn(2, 3, 4) + 1.0j * np.random.randn(2, 3, 4)
+        b_data = np.random.randn(3, 4, 5) + 1.0j * np.random.randn(3, 4, 5)
+        c_data = np.random.randn(5, 2, 6) + 1.0j * np.random.randn(5, 2, 6)
 
-        a = Tensor(a_array, inds=[0, 1, 2], tags={'red', 0})
-        b = Tensor(b_array, inds=[1, 2, 3], tags={'blue', 1})
-        c = Tensor(c_array, inds=[3, 0, 4], tags={'blue', 2})
+        a = Tensor(a_data, inds=[0, 1, 2], tags={'red', 0})
+        b = Tensor(b_data, inds=[1, 2, 3], tags={'blue', 1})
+        c = Tensor(c_data, inds=[3, 0, 4], tags={'blue', 2})
 
         tn = a & b & c
         new_tn = tn.conj()
 
-        for i, arr in enumerate((a_array, b_array, c_array)):
+        for i, arr in enumerate((a_data, b_data, c_data)):
             assert_allclose(new_tn[i].data, arr.conj())
 
         # make sure original network unchanged
-        for i, arr in enumerate((a_array, b_array, c_array)):
+        for i, arr in enumerate((a_data, b_data, c_data)):
             assert_allclose(tn[i].data, arr)
 
     def test_conj_inplace(self):
-        a_array = np.random.randn(2, 3, 4) + 1.0j * np.random.randn(2, 3, 4)
-        b_array = np.random.randn(3, 4, 5) + 1.0j * np.random.randn(3, 4, 5)
-        c_array = np.random.randn(5, 2, 6) + 1.0j * np.random.randn(5, 2, 6)
+        a_data = np.random.randn(2, 3, 4) + 1.0j * np.random.randn(2, 3, 4)
+        b_data = np.random.randn(3, 4, 5) + 1.0j * np.random.randn(3, 4, 5)
+        c_data = np.random.randn(5, 2, 6) + 1.0j * np.random.randn(5, 2, 6)
 
-        a = Tensor(a_array, inds=[0, 1, 2], tags={'red', 'i0'})
-        b = Tensor(b_array, inds=[1, 2, 3], tags={'blue', 'i1'})
-        c = Tensor(c_array, inds=[3, 0, 4], tags={'blue', 'i2'})
+        a = Tensor(a_data, inds=[0, 1, 2], tags={'red', 'i0'})
+        b = Tensor(b_data, inds=[1, 2, 3], tags={'blue', 'i1'})
+        c = Tensor(c_data, inds=[3, 0, 4], tags={'blue', 'i2'})
 
         tn = a & b & c
         tn.conj(inplace=True)
 
-        for i, arr in enumerate((a_array, b_array, c_array)):
+        for i, arr in enumerate((a_data, b_data, c_data)):
             assert_allclose(tn["i{}".format(i)].data, arr.conj())
 
     def test_contracting_tensors(self):
@@ -344,27 +344,27 @@ class TestTensorNetwork:
             assert 'blue' in t.tags
 
     def test_index_by_site(self):
-        a_array = np.random.randn(2, 3, 4)
-        b_array = np.random.randn(2, 3, 4)
-        a = Tensor(a_array, inds='abc', tags={'i0'})
-        b = Tensor(b_array, inds='abc', tags={'i1'})
+        a_data = np.random.randn(2, 3, 4)
+        b_data = np.random.randn(2, 3, 4)
+        a = Tensor(a_data, inds='abc', tags={'i0'})
+        b = Tensor(b_data, inds='abc', tags={'i1'})
         tn = TensorNetwork((a, b), contract_strategy="i{}")
-        assert_allclose(tn.site[0].data, a_array)
-        new_array = np.random.randn(2, 3, 4)
-        tn.site[1] = Tensor(new_array, inds='abc', tags={'i1', 'red'})
-        assert_allclose(tn['i1'].data, new_array)
+        assert_allclose(tn.site[0].data, a_data)
+        new_data = np.random.randn(2, 3, 4)
+        tn.site[1] = Tensor(new_data, inds='abc', tags={'i1', 'red'})
+        assert_allclose(tn['i1'].data, new_data)
         assert 'red' in tn['i1'].tags
 
     def test_set_data_in_tensor(self):
-        a_array = np.random.randn(2, 3, 4)
-        b_array = np.random.randn(2, 3, 4)
-        a = Tensor(a_array, inds='abc', tags={'i0'})
-        b = Tensor(b_array, inds='abc', tags={'i1'})
+        a_data = np.random.randn(2, 3, 4)
+        b_data = np.random.randn(2, 3, 4)
+        a = Tensor(a_data, inds='abc', tags={'i0'})
+        b = Tensor(b_data, inds='abc', tags={'i1'})
         tn = TensorNetwork((a, b), contract_strategy="i{}")
-        assert_allclose(tn.site[0].data, a_array)
-        new_array = np.random.randn(24)
-        tn.site[1].data = new_array
-        assert_allclose(tn['i1'].data, new_array.reshape(2, 3, 4))
+        assert_allclose(tn.site[0].data, a_data)
+        new_data = np.random.randn(24)
+        tn.site[1].data = new_data
+        assert_allclose(tn['i1'].data, new_data.reshape(2, 3, 4))
 
 
 class TestMatrixProductState:

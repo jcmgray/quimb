@@ -176,7 +176,7 @@ def tensor_contract(*tensors, output_inds=None):
     # unison of all tags
     o_tags = set_join(t.tags for t in tensors)
 
-    return Tensor(array=o_array, inds=o_ix, tags=o_tags)
+    return Tensor(data=o_array, inds=o_ix, tags=o_tags)
 
 
 RAND_UUIDS = map("".join, itertools.product(string.hexdigits, repeat=7))
@@ -443,8 +443,8 @@ class Tensor(object):
 
         bond_ind = rand_uuid()
 
-        Tl = Tensor(array=left, inds=(*left_inds, bond_ind), tags=self.tags)
-        Tr = Tensor(array=right, inds=(bond_ind, *right_inds), tags=self.tags)
+        Tl = Tensor(data=left, inds=(*left_inds, bond_ind), tags=self.tags)
+        Tr = Tensor(data=right, inds=(bond_ind, *right_inds), tags=self.tags)
 
         if return_tensors:
             return Tl, Tr
@@ -580,9 +580,9 @@ def _make_promote_array_func(op, meth_name):
                     "match: {} != {}".format(self.inds, other.inds))
             otherT = other.transpose(*self.inds)
             return Tensor(
-                array=op(self.data, otherT.data), inds=self.inds,
+                data=op(self.data, otherT.data), inds=self.inds,
                 tags=self.tags | other.tags)
-        return Tensor(array=op(self.data, other),
+        return Tensor(data=op(self.data, other),
                       inds=self.inds, tags=self.tags)
 
     return _promote_array_func
@@ -602,7 +602,7 @@ def _make_rhand_array_promote_func(op, meth_name):
     def _rhand_array_promote_func(self, other):
         """Right hand operations -- no need to check ind equality first.
         """
-        return Tensor(array=op(other, self.data),
+        return Tensor(data=op(other, self.data),
                       inds=self.inds, tags=self.tags)
 
     return _rhand_array_promote_func
@@ -1245,7 +1245,7 @@ class MatrixProductState(TensorNetwork):
 
         # Do the first tensor seperately.
         next_bond = rand_uuid(base=bond_name)
-        tensors = [Tensor(array=arrays[0].transpose(*lp_ord),
+        tensors = [Tensor(data=arrays[0].transpose(*lp_ord),
                           inds=[next_bond, site_inds[0]],
                           tags=site_tags[0])]
         previous_bond = next_bond
@@ -1254,13 +1254,13 @@ class MatrixProductState(TensorNetwork):
         for array, site_ind, site_tag in zip(arrays[1:-1], site_inds[1:-1],
                                              site_tags[1:-1]):
             next_bond = rand_uuid(base=bond_name)
-            tensors.append(Tensor(array=array.transpose(*lrp_ord),
+            tensors.append(Tensor(data=array.transpose(*lrp_ord),
                                   inds=[previous_bond, next_bond, site_ind],
                                   tags=site_tag))
             previous_bond = next_bond
 
         # Do the last tensor seperately.
-        tensors.append(Tensor(array=arrays[-1].transpose(*rp_ord),
+        tensors.append(Tensor(data=arrays[-1].transpose(*rp_ord),
                               inds=[previous_bond, site_inds[-1]],
                               tags=site_tags[-1]))
 
@@ -1542,7 +1542,7 @@ class MatrixProductOperator(TensorNetwork):
 
         # Do the first tensor seperately.
         next_bond = rand_uuid(base=bond_name)
-        tensors = [Tensor(array=arrays[0].transpose(*lkb_ord),
+        tensors = [Tensor(data=arrays[0].transpose(*lkb_ord),
                           inds=[next_bond, ket_site_inds[0], bra_site_inds[0]],
                           tags=site_tags[0])]
         previous_bond = next_bond
@@ -1554,13 +1554,13 @@ class MatrixProductOperator(TensorNetwork):
                                              site_tags[1:-1]):
 
             next_bond = rand_uuid(base=bond_name)
-            tensors += [Tensor(array=array.transpose(*lrkb_ord),
+            tensors += [Tensor(data=array.transpose(*lrkb_ord),
                                inds=[previous_bond, next_bond, ksi, bsi],
                                tags=site_tag)]
             previous_bond = next_bond
 
         # Do the last tensor seperately.
-        tensors.append(Tensor(array=arrays[-1].transpose(*rkb_ord),
+        tensors.append(Tensor(data=arrays[-1].transpose(*rkb_ord),
                               inds=[previous_bond,
                                     ket_site_inds[-1],
                                     bra_site_inds[-1]],
@@ -1578,8 +1578,8 @@ class MatrixProductOperator(TensorNetwork):
 def rand_tensor(shape, inds, tags=None):
     """Generate a random (complex) tensor with specified shape.
     """
-    array = np.random.randn(*shape) + 1.0j * np.random.randn(*shape)
-    return Tensor(array=array, inds=inds, tags=tags)
+    data = np.random.randn(*shape) + 1.0j * np.random.randn(*shape)
+    return Tensor(data=data, inds=inds, tags=tags)
 
 
 def MPS_rand(n, bond_dim, phys_dim=2,
