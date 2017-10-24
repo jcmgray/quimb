@@ -387,10 +387,8 @@ class Tensor(object):
         return tn
 
     @functools.wraps(tensor_contract)
-    def contract(self, *others, memory_limit=2**28, optimize='greedy',
-                 output_inds=None):
-        return tensor_contract(self, *others, memory_limit=memory_limit,
-                               optimize=optimize, output_inds=output_inds)
+    def contract(self, *others, output_inds=None):
+        return tensor_contract(self, *others, output_inds=output_inds)
 
     def split(self, left_inds, method='svd', tol=None,
               max_bond=None, return_tensors=False):
@@ -1464,7 +1462,7 @@ class MatrixProductState(TensorNetwork):
         self.left_canonize(stop=orthogonality_center, bra=bra)
         self.right_canonize(stop=orthogonality_center, bra=bra)
 
-    def shift_orthogonality_center(self, current, new):
+    def shift_orthogonality_center(self, current, new, bra=None):
         """Move the orthogonality center of this MPS.
 
         Parameters
@@ -1473,10 +1471,13 @@ class MatrixProductState(TensorNetwork):
             The current orthogonality center.
         new : int
             The target orthogonality center.
+        bra : MatrixProductState, optional
+            If supplied, simultaneously move the orthogonality cente this MPS
+            too, assuming it to be the conjugate state.
         """
         if new > current:
             for i in range(current, new):
-                self.left_canonize_site(i)
+                self.left_canonize_site(i, bra=bra)
         else:
             for i in range(current, new, -1):
                 self.right_canonize_site(i)
@@ -1792,7 +1793,7 @@ def dmrg1(ham, bond_dim, num_sweeps=4):
     energy_tn = (b & ham & k)
 
     for _ in range(num_sweeps):
-        eff_e = dmrg1_sweep_right(energy_tn, k, b, direction='right')
+        eff_e = dmrg1_sweep_right(energy_tn, k, b)
 
     ham.remove_tag("__ham__")
 
