@@ -286,7 +286,7 @@ class TestTensorNetwork:
     def test_TensorNetwork_init_checks(self):
         a = rand_tensor((2, 3, 4), inds=[0, 1, 2], tags={'red'})
         b = rand_tensor((3, 4, 5), inds=[1, 2, 3], tags={'blue'})
-        c = rand_tensor((3, 4, 5), inds=[1, 2, 3], tags={'blue'})
+        c = rand_tensor((3, 4, 5), inds=[1, 2, 3], tags={'blue', 'c'})
 
         with pytest.raises(TypeError):
             TensorNetwork(a, b)  # missing brackets around ``a, b``.
@@ -296,13 +296,23 @@ class TestTensorNetwork:
             tn['red'] = 1
 
         tn.add_tag('foo')
-        with pytest.raises(KeyError):
-            tn['foo']
+        # assert len(tn['foo']) == 2
         with pytest.raises(KeyError):
             tn['foo'] = c
 
-        tn[('foo', 'red')] = c
-        assert tn[('foo', 'red')] is c
+        tn[('foo', 'blue')] = c
+        assert 'c' in tn.tags
+        assert tn[('blue', 'c')] is c
+
+        del tn['red']
+        assert 'red' not in tn.tags
+
+        assert set(tn.tag_index.keys()) == {'blue', 'c'}
+
+        tn.drop_tags('c')
+        assert set(tn.tag_index.keys()) == {'blue'}
+        tn.drop_tags(['blue'])
+        assert set(tn.tag_index.keys()) == set()
 
     def test_conj(self):
         a_data = np.random.randn(2, 3, 4) + 1.0j * np.random.randn(2, 3, 4)
@@ -701,9 +711,10 @@ class TestDMRG1:
         assert e3.real < e2.real
         assert e4.real < e3.real
 
-    def test_ground_state_matches(self):
+    @pytest.mark.parametrize("eff_ham_dense", [False, True])
+    def test_ground_state_matches(self, eff_ham_dense):
         h = MPO_ham_heis(5)
-        eff_e, mps_gs = dmrg1(h, 5)
+        eff_e, mps_gs = dmrg1(h, 5, eff_ham_dense=eff_ham_dense)
 
         assert "__ham__" not in h.tags
 

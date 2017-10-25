@@ -783,8 +783,15 @@ class TensorNetwork(object):
         """Add a single tensor to this network - mangle its name if neccessary.
         """
         # check for name conflict
-        if (name is None) or (name in self.tensor_index):
+        if name is None:
             name = rand_uuid(base="_T")
+        else:
+            try:
+                self.tensor_index[name]
+                name = rand_uuid(base="_T")
+            except KeyError:
+                # name is fine to keep
+                pass
 
         # add tensor to the main index
         self.tensor_index[name] = tensor
@@ -793,7 +800,7 @@ class TensorNetwork(object):
         for tag in tensor.tags:
             try:
                 self.tag_index[tag].add(name)
-            except KeyError:
+            except (KeyError, TypeError):
                 self.tag_index[tag] = {name}
 
     def pop_tensor(self, name):
@@ -806,6 +813,19 @@ class TensorNetwork(object):
         # pop the tensor itself
         return self.tensor_index.pop(name)
 
+    def del_tensor(self, name):
+        """Delete a tensor from this network.
+        """
+        # remove the tensor from the tag index
+        for tag in self.tensor_index[name].tags:
+            tagged_names = self.tag_index[tag]
+            tagged_names.discard(name)
+            if not tagged_names:
+                del self.tag_index[tag]
+
+        # delete the tensor itself
+        del self.tensor_index[name]
+
     def add_tag(self, tag):
         """Add tag to every tensor in this network.
         """
@@ -815,12 +835,16 @@ class TensorNetwork(object):
             t.tags.add(tag)
         self.tag_index[tag] = names
 
-    def remove_tag(self, tag):
+    def drop_tags(self, tags):
         """Remove a tag from any tensors in this network which have it.
         """
         for t in self.tensor_index.values():
-            t.tags.discard(tag)
-        del self.tag_index[tag]
+            t.drop_tags(tags)
+        if isinstance(tags, str):
+            del self.tag_index[tags]
+        else:
+            for tag in tags:
+                del self.tag_index[tag]
 
     @property
     def tags(self):
@@ -1086,7 +1110,16 @@ class TensorNetwork(object):
         return tuple(d for d, i in self.outer_dims_inds())
 
     def __getitem__(self, tags):
-        """Get the single tensor uniquely associated with ``tags``.
+        """Get the tensor(s) associated with ``tags``.
+
+        Parameters
+        ----------
+        tags : str or sequence of str
+            The tags used to select the tensor(s)
+
+        Returns
+        -------
+        Tensor or sequence of Tensors
         """
         try:
             names = self.tag_index[tags]
@@ -1094,13 +1127,12 @@ class TensorNetwork(object):
             names = functools.reduce(
                 operator.and_, (self.tag_index[t] for t in tags))
 
-        if len(names) != 1:
-            raise KeyError("'TensorNetwork.__getitem__' is meant for a single "
-                           "tensor only - found {} with tag(s) '{}'."
-                           .format(len(names), tags))
+        tensors = tuple(self.tensor_index[name] for name in names)
 
-        name, = names
-        return self.tensor_index[name]
+        if len(names) == 1:
+            return tensors[0]
+
+        return tensors
 
     def __setitem__(self, tags, tensor):
         """Set the single tensor uniquely associated with ``tags``.
@@ -1120,7 +1152,25 @@ class TensorNetwork(object):
             raise TypeError("Can only set value with a new 'Tensor'.")
 
         name, = names
-        self.tensor_index[name] = tensor
+
+        # check if tags match, else need to modify TN structure
+        if self.tensor_index[name].tags != tensor.tags:
+            self.del_tensor(name)
+            self.add_tensor(tensor, name)
+        else:
+            self.tensor_index[name] = tensor
+
+    def __delitem__(self, tags):
+        """Delete any tensors associated with ``tags``.
+        """
+        try:
+            names = self.tag_index[tags]
+        except (KeyError, TypeError):
+            names = functools.reduce(
+                operator.and_, (self.tag_index[t] for t in tags))
+
+        for name in copy.copy(names):
+            self.del_tensor(name)
 
     def __and__(self, other):
         """Combine this tensor network with more tensors, without contracting.
@@ -1135,7 +1185,8 @@ class TensorNetwork(object):
     # ------------------------------ printing ------------------------------- #
 
     def __repr__(self):
-        return "TensorNetwork({}, {}, {})".format(
+        return "{}({}, {}, {})".format(
+            self.__class__.__name__,
             repr(self.tensors),
             "contract_strategy='{}'".format(self.contract_strategy) if
             self.contract_strategy is not None else "",
@@ -1143,7 +1194,8 @@ class TensorNetwork(object):
             self.nsites is not None else "")
 
     def __str__(self):
-        return "TensorNetwork([{}{}{}]{}{})".format(
+        return "{}([{}{}{}]{}{})".format(
+            self.__class__.__name__,
             os.linesep,
             "".join(["    " + repr(t) + "," + os.linesep
                      for t in self.tensors[:-1]]),
