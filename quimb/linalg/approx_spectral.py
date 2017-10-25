@@ -680,9 +680,9 @@ def _single_random_estimate(A, K, bsz, beta_tol, v0, fn, pos,
 def approx_spectral_function(
         A, fn,
         tol=5e-3,
-        K=100,
-        R=100,
-        bsz=10,
+        K=128,
+        R=1024,
+        bsz=1,
         v0=None,
         pos=False,
         tau=1e-3,
@@ -750,6 +750,8 @@ def approx_spectral_function(
     """
     if (v0 is not None) and not callable(v0):
         R = 1
+    else:
+        R = max(1, int(R / bsz))
 
     args = (A, K, bsz, beta_tol, v0, fn, pos, tau, tol_scale)
 
@@ -820,7 +822,17 @@ def tr_xlogx_approx(*args, **kwargs):
 #                             Specific quantities                             #
 # --------------------------------------------------------------------------- #
 
-def entropy_subsys_approx(psi_ab, dims, sysa, **kwargs):
+
+def choose_bsz_from_dims(dims, subsys):
+    """Try to guess a good blocksize to ensure convergence quickly. Based
+    on some benchmarks, plus the fact that if bsz is > rank, then the lanczos
+    vectors will start to take up the most memory.
+    """
+    rank = prod(d for i, d in enumerate(dims) if i not in subsys)
+    return min(max(1, int(rank / 8)), 128)
+
+
+def entropy_subsys_approx(psi_ab, dims, sysa, bsz=None, **kwargs):
     """Approximate the (Von Neumann) entropy of a pure state's subsystem.
 
     Parameters
@@ -831,14 +843,21 @@ def entropy_subsys_approx(psi_ab, dims, sysa, **kwargs):
         The sub dimensions of ``psi_ab``.
     sysa : int or sequence of int, optional
         Index(es) of the 'a' subsystem(s) to keep.
+    bsz : int, optional
+        The size of the lanczos vector blocks to use. If None, guess a good
+        value based on the effective rank of the subsystem.
     **kwargs
         See :func:`approx_spectral_function`.
     """
     lo = LazyPtrOperator(psi_ab, dims=dims, sysa=sysa)
-    return - tr_xlogx_approx(lo, **kwargs)
+
+    if bsz is None:
+        bsz = choose_bsz_from_dims(dims, sysa)
+
+    return - tr_xlogx_approx(lo, bsz=bsz, **kwargs)
 
 
-def tr_sqrt_subsys_approx(psi_ab, dims, sysa, **kwargs):
+def tr_sqrt_subsys_approx(psi_ab, dims, sysa, bsz=None, **kwargs):
     """Approximate the trace sqrt of a pure state's subsystem.
 
     Parameters
@@ -849,21 +868,32 @@ def tr_sqrt_subsys_approx(psi_ab, dims, sysa, **kwargs):
         The sub dimensions of ``psi_ab``.
     sysa : int or sequence of int, optional
         Index(es) of the 'a' subsystem(s) to keep.
+    bsz : int, optional
+        The size of the lanczos vector blocks to use. If None, guess a good
+        value based on the effective rank of the subsystem.
     **kwargs
         See :func:`approx_spectral_function`.
     """
     lo = LazyPtrOperator(psi_ab, dims=dims, sysa=sysa)
-    return tr_sqrt_approx(lo, **kwargs)
+
+    if bsz is None:
+        bsz = choose_bsz_from_dims(dims, sysa)
+
+    return tr_sqrt_approx(lo, bsz=bsz, **kwargs)
 
 
-def norm_ppt_subsys_approx(psi_abc, dims, sysa, sysb, **kwargs):
+def norm_ppt_subsys_approx(psi_abc, dims, sysa, sysb, bsz=None, **kwargs):
     """Estimate the norm of the partial tranpose of a pure state's subsystem.
     """
     lo = LazyPtrPptOperator(psi_abc, dims=dims, sysa=sysa, sysb=sysb)
-    return tr_abs_approx(lo, **kwargs)
+
+    if bsz is None:
+        bsz = choose_bsz_from_dims(dims, sysa + sysb)
+
+    return tr_abs_approx(lo, bsz=bsz, **kwargs)
 
 
-def logneg_subsys_approx(psi_abc, dims, sysa, sysb, **kwargs):
+def logneg_subsys_approx(psi_abc, dims, sysa, sysb, bsz=None, **kwargs):
     """Estimate the logarithmic negativity of a pure state's subsystem.
 
     Parameters
@@ -879,14 +909,17 @@ def logneg_subsys_approx(psi_abc, dims, sysa, sysb, **kwargs):
     sysa : int or sequence of int, optional
         Index(es) of the 'b' subsystem(s) to keep, with respect to all
         the dimensions, ``dims``, (i.e. pre-partial trace).
+    bsz : int, optional
+        The size of the lanczos vector blocks to use. If None, guess a good
+        value based on the effective rank of the subsystem.
     **kwargs
         See :func:`approx_spectral_function`.
     """
     return max(log2(norm_ppt_subsys_approx(psi_abc, dims, sysa, sysb,
-                                           **kwargs)), 0.0)
+                                           bsz=bsz, **kwargs)), 0.0)
 
 
-def negativity_subsys_approx(psi_abc, dims, sysa, sysb, **kwargs):
+def negativity_subsys_approx(psi_abc, dims, sysa, sysb, bsz=None, **kwargs):
     """Estimate the negativity of a pure state's subsystem.
 
     Parameters
@@ -902,11 +935,14 @@ def negativity_subsys_approx(psi_abc, dims, sysa, sysb, **kwargs):
     sysa : int or sequence of int, optional
         Index(es) of the 'b' subsystem(s) to keep, with respect to all
         the dimensions, ``dims``, (i.e. pre-partial trace).
+    bsz : int, optional
+        The size of the lanczos vector blocks to use. If None, guess a good
+        value based on the effective rank of the subsystem.
     **kwargs
         See :func:`approx_spectral_function`.
     """
     return max((norm_ppt_subsys_approx(psi_abc, dims, sysa, sysb,
-                                       **kwargs) - 1) / 2, 0.0)
+                                       bsz=bsz, **kwargs) - 1) / 2, 0.0)
 
 
 def gen_bipartite_spectral_fn(exact_fn, approx_fn, pure_default):
