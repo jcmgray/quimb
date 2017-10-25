@@ -725,7 +725,6 @@ class TensorNetwork(object):
                                 "TensorNetwork.")
 
             if check_collisions:
-
                 # check for matching inner_indices -> need to re-index
                 new_inner_inds = set(t.inner_inds())
                 if current_inner_inds & new_inner_inds:  # any overlap
@@ -806,16 +805,6 @@ class TensorNetwork(object):
 
         # pop the tensor itself
         return self.tensor_index.pop(name)
-
-    def delete_tensor(self, name):
-        """Delete a tensor from this network.
-        """
-        # remove the tensor from the tag index
-        for tag in self.tensor_index(name).tags:
-            self.tag_index(tag).discard(name)
-
-        # remove the tensor itself
-        del self.tensor_index[name]
 
     def add_tag(self, tag):
         """Add tag to every tensor in this network.
@@ -908,6 +897,26 @@ class TensorNetwork(object):
 
         return tensor_contract(*tagged_ts)
 
+    def parse_tag_slice(self, tag_slice):
+        if tag_slice.start is None:
+            start = 0
+        elif tag_slice.start is ...:
+            start = self.nsites - 1
+        elif tag_slice.start < 0:
+            start = self.nsites + tag_slice.start
+        else:
+            start = tag_slice.start
+
+        if tag_slice.stop is ...:
+            stop = self.nsites
+        elif tag_slice.stop < 0:
+            stop = self.nsites + tag_slice.stop
+        else:
+            stop = tag_slice.stop
+
+        step = 1 if stop > start else -1
+        return start, stop, step
+
     def cumulative_contract(self, tags_seq, inplace=False):
         """Cumulative contraction of tensor network. Contract the first set of
         tags, then that set with the next set, then both of those with the next
@@ -935,10 +944,6 @@ class TensorNetwork(object):
             # accumulate tags from each contractions
             if isinstance(tags, str):
                 tags = {tags}
-            elif isinstance(tags, slice):
-                step = 1 if tags.step is None else tags.step
-                tags = {self.contract_strategy.format(i)
-                        for i in range(tags.start, tags.stop, step)}
             else:
                 tags = set(tags)
 
@@ -949,41 +954,23 @@ class TensorNetwork(object):
 
         return new_tn
 
-    def __rshift__(self, *args, **kwargs):
+    def __rshift__(self, tags_seq):
         """Overload of '>>' for TensorNetwork.cumulative_contract.
         """
-        return self.cumulative_contract(*args, **kwargs)
+        return self.cumulative_contract(tags_seq)
 
-    def __irshift__(self, *args, **kwargs):
+    def __irshift__(self, tags_seq):
         """Overload of '>>=' for inplace TensorNetwork.cumulative_contract.
         """
-        return self.cumulative_contract(*args, **kwargs)
+        return self.cumulative_contract(tags_seq, inplace=True)
 
     def _contract_with_strategy(self, tags, inplace=False):
         # check for all sites
         if tags is ...:
             tags = slice(0, self.nsites)
 
-        if tags.start is None:
-            start = 0
-        elif tags.start is ...:
-            start = self.nsites - 1
-        elif tags.start < 0:
-            start = self.nsites + tags.start
-        else:
-            start = tags.start
-
-        if tags.stop is ...:
-            stop = self.nsites - 1
-        elif tags.stop < 0:
-            stop = self.nsites + tags.stop
-        else:
-            stop = tags.stop
-
-        step = 1 if stop > start else -1
-
         tags_seq = (self.contract_strategy.format(i)
-                    for i in range(start, stop, step))
+                    for i in range(*self.parse_tag_slice(tags)))
 
         # partition sites into `contract_bsz` groups
         if self.contract_bsz > 1:
@@ -1016,15 +1003,15 @@ class TensorNetwork(object):
         # Else just contract those tensors specified by tags.
         return self._contract_tags(tags, inplace=inplace)
 
-    def __xor__(self, *args, **kwargs):
+    def __xor__(self, tags):
         """Overload of '^' for TensorNetwork.contract.
         """
-        return self.contract(*args, **kwargs)
+        return self.contract(tags)
 
-    def __ixor__(self, *args, **kwargs):
+    def __ixor__(self, tags):
         """Overload of '^=' for inplace TensorNetwork.contract.
         """
-        return self.contract(*args, **kwargs)
+        return self.contract(tags, inplace=True)
 
     def reindex(self, index_map, inplace=False):
         """Rename indices for all tensors in this network, optionally in-place.
@@ -1091,10 +1078,6 @@ class TensorNetwork(object):
         """Actual, i.e. exterior, indices of this TensorNetwork.
         """
         return tuple(i for d, i in self.outer_dims_inds())
-
-    def mangle_inner(self):
-        index_map = {ind: rand_uuid() for ind in self.inner_inds()}
-        self.reindex(index_map, inplace=True)
 
     @property
     def shape(self):

@@ -48,6 +48,15 @@ class TestBasicTensorOperations:
         # still reference the same underlying array
         assert_allclose(a.data, b.data)
 
+    def test_tensor_deep_copy(self):
+        a = Tensor(np.random.randn(2, 3, 4), inds=[0, 1, 2], tags='blue')
+        b = a.copy(deep=True)
+        b.tags.add('foo')
+        assert 'foo' not in a.tags
+        b.data /= 2
+        # still reference the same underlying array
+        assert_allclose(a.data / 2, b.data)
+
     def test_with_alpha_construct(self):
         x = np.random.randn(2, 3, 4)
         a = Tensor(x, inds='ijk', tags='blue')
@@ -244,12 +253,56 @@ class TestTensorNetwork:
         assert_allclose(abc1.data, abc4.data)
         assert_allclose(abc1.data, abc5.data)
 
+    def test_copy(self):
+        a = rand_tensor((2, 3, 4), inds='abc', tags='t0')
+        b = rand_tensor((2, 3, 4), inds='abd', tags='t1')
+        tn1 = TensorNetwork((a, b))
+        tn2 = tn1.copy()
+        # check can modify tensor structure
+        tn2['t1'].inds = ('a', 'b', 'X')
+        assert tn1['t1'] is not tn2['t1']
+        assert tn2['t1'].inds == ('a', 'b', 'X')
+        assert tn1['t1'].inds == ('a', 'b', 'd')
+        # but that data remains the same
+        assert tn1['t1'].data is tn2['t1'].data
+        tn2['t1'].data /= 2
+        assert_allclose(tn1['t1'].data, tn2['t1'].data)
+
+    def test_copy_deep(self):
+        a = rand_tensor((2, 3, 4), inds='abc', tags='t0')
+        b = rand_tensor((2, 3, 4), inds='abd', tags='t1')
+        tn1 = TensorNetwork((a, b))
+        tn2 = tn1.copy(deep=True)
+        # check can modify tensor structure
+        tn2['t1'].inds = ('a', 'b', 'X')
+        assert tn1['t1'] is not tn2['t1']
+        assert tn2['t1'].inds == ('a', 'b', 'X')
+        assert tn1['t1'].inds == ('a', 'b', 'd')
+        # and that data is not the same
+        assert tn1['t1'].data is not tn2['t1'].data
+        tn2['t1'].data /= 2
+        assert_allclose(tn1['t1'].data / 2, tn2['t1'].data)
+
     def test_TensorNetwork_init_checks(self):
-        a = Tensor(np.random.randn(2, 3, 4), inds=[0, 1, 2], tags='red')
-        b = Tensor(np.random.randn(3, 4, 5), inds=[1, 2, 3], tags='blue')
+        a = rand_tensor((2, 3, 4), inds=[0, 1, 2], tags={'red'})
+        b = rand_tensor((3, 4, 5), inds=[1, 2, 3], tags={'blue'})
+        c = rand_tensor((3, 4, 5), inds=[1, 2, 3], tags={'blue'})
 
         with pytest.raises(TypeError):
             TensorNetwork(a, b)  # missing brackets around ``a, b``.
+
+        tn = a & b
+        with pytest.raises(TypeError):
+            tn['red'] = 1
+
+        tn.add_tag('foo')
+        with pytest.raises(KeyError):
+            tn['foo']
+        with pytest.raises(KeyError):
+            tn['foo'] = c
+
+        tn[('foo', 'red')] = c
+        assert tn[('foo', 'red')] is c
 
     def test_conj(self):
         a_data = np.random.randn(2, 3, 4) + 1.0j * np.random.randn(2, 3, 4)
@@ -302,6 +355,10 @@ class TestTensorNetwork:
         assert isinstance(abc, Tensor)
         assert_allclose(abc.data, a_b_c.contract().data)
 
+        assert len(a_b_c.tensors) == 3
+        a_b_c ^= 'blue'
+        assert len(a_b_c.tensors) == 2
+
     def test_cumulative_contract(self):
         a = rand_tensor((2, 3, 4), inds=[0, 1, 2], tags='red')
         b = rand_tensor((3, 4, 5), inds=[1, 2, 3], tags='blue')
@@ -317,6 +374,23 @@ class TestTensorNetwork:
         # make sure inplace operations didn't effect original tensor
         for tag, names in d2.tag_index.items():
             assert d.tag_index[tag] == names
+
+        # test inplace
+        d >>= ['red', 'green', 'blue']
+        assert isinstance(d, Tensor)
+
+    def test_contract_with_slices(self):
+        a = rand_tensor((2, 3, 4), inds=[0, 1, 2], tags='i0')
+        b = rand_tensor((3, 4, 5), inds=[1, 2, 3], tags='i1')
+        c = rand_tensor((5, 2, 6), inds=[3, 0, 4], tags='i2')
+        d = rand_tensor((5, 2, 6), inds=[5, 6, 4], tags='i3')
+        tn = TensorNetwork((a, b, c, d), contract_strategy="i{}")
+
+        assert len((tn ^ slice(2)).tensors) == 3
+        assert len((tn ^ slice(..., 1)).tensors) == 3
+        assert len((tn ^ slice(-1, 0)).tensors) == 2
+        assert len((tn ^ slice(None, -2)).tensors) == 3
+        assert len((tn ^ slice(-2, ...)).tensors) == 3
 
     def test_reindex(self):
         a = Tensor(np.random.randn(2, 3, 4), inds=[0, 1, 2], tags='red')
@@ -373,6 +447,14 @@ class TestTensorNetwork:
         new_data = np.random.randn(24)
         tn.site[1].data = new_data
         assert_allclose(tn['i1'].data, new_data.reshape(2, 3, 4))
+
+    def test_combining_with_no_check_collisions(self):
+        p1 = MPS_rand(5, 3, phys_dim=3)
+        p2 = MPS_rand(5, 3, phys_dim=3)
+        # shouldn't need to check any collisions
+        tn = TensorNetwork((p1, p2), check_collisions=False)
+        # test can contract
+        assert 0 < abs(tn ^ ...) < 1
 
 
 class TestMatrixProductState:
