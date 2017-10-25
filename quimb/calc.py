@@ -269,6 +269,44 @@ def mutinf_subsys(psi_abc, dims, sysa, sysb, approx_thresh=2**12,
     return hb + ha - hab
 
 
+def schmidt_gap(psi_ab, dims, sysa):
+    """Find the schmidt gap of the bipartition of ``psi_ab``. That is, the
+    difference between the two largest eigenvalues of the reduced density
+    matrix.
+
+    Parameters
+    ----------
+    psi_ab : vector
+        Bipartite state.
+    dims : sequence of int
+        The sub-dimensions of the state.
+    sysa :  sequence of int
+        The indices of which dimensions to calculate the entropy for.
+
+    Returns
+    -------
+    float
+    """
+    sysa = int2tup(sysa)
+    sz_a = prod(d for i, d in enumerate(dims) if i in sysa)
+    sz_b = prod(dims) // sz_a
+
+    # pure state
+    if sz_b == 1:
+        return 1.0
+
+    # also check if system b is smaller, since spectrum is same for both
+    if sz_b < sz_a:
+        # if so swap things around
+        sz_a, sz_b = sz_b, sz_a
+        sysb = [i for i in range(len(dims)) if i not in sysa]
+        sysa = sysb
+
+    rho_a = ptr(psi_ab, dims, sysa)
+    el = seigvals(rho_a, k=2, which='LM')
+    return abs(el[0] - el[1])
+
+
 def tr_sqrt(a, rank=None):
     """Return the trace of the sqrt of a positive semidefinite matrix.
     """

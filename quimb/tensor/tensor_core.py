@@ -214,6 +214,12 @@ def _array_split_svd(x, tol=-1.0):
     return U, V
 
 
+def _array_split_svdvals(x):
+    """SVD-decomposition, but return singular values only.
+    """
+    return np.linalg.svd(x, full_matrices=False, compute_uv=False)
+
+
 @njit  # pragma: no cover
 def dag(x):
     """Hermitian conjugate.
@@ -226,19 +232,30 @@ def _array_split_eig(x, tol=-1.0):
     """SVD-split via eigen-decomposition.
     """
     if x.shape[0] > x.shape[1]:
-        l, V = np.linalg.eigh(dag(x) @ x)
+        s2, V = np.linalg.eigh(dag(x) @ x)
         U = x @ dag(V)
 
     else:
-        l, U = np.linalg.eigh(x @ dag(x))
+        s2, U = np.linalg.eigh(x @ dag(x))
         V = dag(U) @ x
 
     if tol > 0.0:
-        n_chi = np.sum(l > tol**2)
+        n_chi = np.sum(s2 > tol**2)
         U = U[..., :n_chi]
         V = V[:n_chi, ...]
 
     return U, V
+
+
+@njit
+def _array_split_svdvals_eig(x):
+    """SVD-decomposition via eigen, but return singular values only.
+    """
+    if x.shape[0] > x.shape[1]:
+        s2 = np.linalg.eigvalsh(dag(x) @ x)
+    else:
+        s2 = np.linalg.eigvalsh(x @ dag(x))
+    return s2**0.5
 
 
 @njit  # pragma: no cover
@@ -251,7 +268,7 @@ def _array_split_qr(x, tol):
 
 @njit  # pragma: no cover
 def _array_split_lq(x, tol):
-    """QR-decomposition.
+    """LQ-decomposition.
     """
     Q, L = np.linalg.qr(x.T)
     return L.T, Q.T
@@ -389,7 +406,7 @@ class Tensor(object):
         return tensor_contract(self, *others, output_inds=output_inds)
 
     def split(self, left_inds, method='svd', tol=None,
-              max_bond=None, return_tensors=False):
+              max_bond=None, get=None):
         """Decompose this tensor into two tensors.
 
         Parameters
@@ -404,9 +421,9 @@ class Tensor(object):
             to ``method='svd'`` and ``method='eig'``.
         max_bond : int, optional
             If the new bond is larger than this, raise a ``BondError``.
-        return_tensors : bool, optional
-            If true, return the two tensors rather than the TensorNetwork
-            describing the split tensor.
+        get : {None, 'tensors', 'values'}
+            If given, what to return instead of the TensorNetwork describing
+            the split.
 
         Returns
         -------
@@ -425,6 +442,10 @@ class Tensor(object):
         if tol is None:
             tol = -1.0
 
+        if get == 'values':
+            return {'svd': _array_split_svdvals,
+                    'eig': _array_split_svdvals_eig}[method](array)
+
         left, right = {'svd': _array_split_svd,
                        'eig': _array_split_eig,
                        'qr': _array_split_qr,
@@ -442,10 +463,49 @@ class Tensor(object):
         Tl = Tensor(data=left, inds=(*left_inds, bond_ind), tags=self.tags)
         Tr = Tensor(data=right, inds=(bond_ind, *right_inds), tags=self.tags)
 
-        if return_tensors:
+        if get == 'tensors':
             return Tl, Tr
 
         return TensorNetwork((Tl, Tr), check_collisions=False)
+
+    def singular_values(self, left_inds, method='svd'):
+        """Return the singular values associated with splitting this tensor
+        according to ``left_inds``.
+
+        Parameters
+        ----------
+        left_inds : sequence of hashable
+            A subset of this tensors indices that defines 'left'.
+        method : {'svd', 'eig'}
+            Whether to use the SVD or eigenvalue decomposition to get the
+            singular values.
+
+        Returns
+        -------
+        1d-array
+            The singular values.
+        """
+        return self.split(left_inds=left_inds, method=method, get='values')
+
+    def entropy(self, left_inds, method='svd'):
+        """Return the entropy associated with splitting this tensor
+        according to ``left_inds``.
+
+        Parameters
+        ----------
+        left_inds : sequence of hashable
+            A subset of this tensors indices that defines 'left'.
+        method : {'svd', 'eig'}
+            Whether to use the SVD or eigenvalue decomposition to get the
+            singular values.
+
+        Returns
+        -------
+        float
+        """
+        el = self.singular_values(left_inds=left_inds, method=method)**2
+        el = el[el > 0.0]
+        return np.sum(-el * np.log2(el))
 
     def reindex(self, index_map, inplace=False):
         """Rename the indices of this tensor, optionally in-place.

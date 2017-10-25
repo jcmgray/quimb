@@ -132,6 +132,7 @@ calc
     mutual_information
     mutinf
     mutinf_subsys
+    schmidt_gap
     tr_sqrt
     tr_sqrt_subsys
     partial_transpose

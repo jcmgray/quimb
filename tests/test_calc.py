@@ -29,6 +29,7 @@ from quimb import (
     entropy_subsys,
     mutual_information,
     mutinf_subsys,
+    schmidt_gap,
     correlation,
     pauli_correlations,
     purify,
@@ -225,6 +226,16 @@ class TestMutualInformation:
         # approx
         mi2 = mutinf_subsys(p, dims, sysa=0, sysb=1, approx_thresh=1)
         assert_allclose(mi1, mi2, rtol=5e-2)
+
+
+class TestSchmidtGap:
+    def test_bell_state(self):
+        p = bell_state('psi-')
+        assert_allclose(schmidt_gap(p, [2, 2], 0), 0.0)
+        p = up() & down()
+        assert_allclose(schmidt_gap(p, [2, 2], 0), 1.0)
+        p = rand_ket(2**3)
+        assert 0 < schmidt_gap(p, [2] * 3, sysa=[0, 1]) < 1.0
 
 
 class TestPartialTranspose:

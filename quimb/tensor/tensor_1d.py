@@ -156,7 +156,7 @@ class MatrixProductState(TensorNetwork):
         old_shared_bond, = t1_inds_set & t2_inds_set
         left_inds = t1_inds_set - t2_inds_set
 
-        Q, R = T1.split(left_inds, method='qr', return_tensors=True)
+        Q, R = T1.split(left_inds, method='qr', get='tensors')
         R = R @ T2
 
         new_shared_bond, = (j for j in Q.inds if j not in t1_inds_set)
@@ -193,7 +193,7 @@ class MatrixProductState(TensorNetwork):
         left_inds = t1_inds_set & t2_inds_set
         old_shared_bond, = left_inds
 
-        L, Q = T1.split(left_inds, method='lq', return_tensors=True)
+        L, Q = T1.split(left_inds, method='lq', get='tensors')
         L = T2 @ L
 
         new_shared_bond, = (j for j in Q.inds if j not in t1_inds_set)
@@ -316,6 +316,88 @@ class MatrixProductState(TensorNetwork):
         else:
             for i in range(current, new, -1):
                 self.right_canonize_site(i, bra=bra)
+
+    def schmidt_values(self, i, current_orthog_centre=None, method='svd'):
+        """Find the schmidt values associated with the bipartition of this
+        MPS between sites on either site of ``i``. In other words, ``i`` is the
+        number of sites in the left hand partition:
+
+            ....L....   i
+            o-o-o-o-o-S-o-o-o-o-o-o-o-o-o-o-o
+            | | | | |   | | | | | | | | | | |
+                   i-1  ..........R..........
+
+        The schmidt values, ``S``, are the singular values associated with the
+        ``(i - 1, i)`` bond, squared, provided the MPS is mixed canonized at
+        one of those sites.
+
+        Parameters
+        ----------
+        i : int
+            The number of sites in the left partition.
+        current_orthog_centre : int
+            If given, the known current orthogonality center, to speed up the
+            mixed canonization.
+
+        Returns
+        -------
+        S : 1d-array
+            The schmidt values.
+        """
+        if not (0 < i < self.nsites):
+            raise ValueError("Need 0 < i < {}, got i={}."
+                             .format(self.nsites, i))
+
+        if current_orthog_centre is None:
+            self.canonize(i)
+        else:
+            self.shift_orthogonality_center(current_orthog_centre, i)
+
+        Tm1 = self.site[i]
+        left_inds = set(Tm1.inds) & set(self.site[i - 1].inds)
+        S = Tm1.singular_values(left_inds, method=method)**2
+        return S
+
+    def entropy(self, i, current_orthog_centre=None, method='svd'):
+        """The entropy of bipartition between the left block of ``i`` sites and
+        the rest.
+
+        Parameters
+        ----------
+        i : int
+            The number of sites in the left partition.
+        current_orthog_centre : int
+            If given, the known current orthogonality center, to speed up the
+            mixed canonization.
+
+        Returns
+        -------
+        float
+        """
+        S = self.schmidt_values(i, current_orthog_centre=current_orthog_centre,
+                                method=method)
+        S = S[S > 0.0]
+        return np.sum(-S * np.log2(S))
+
+    def schmidt_gap(self, i, current_orthog_centre=None, method='svd'):
+        """The schmidt gap of bipartition between the left block of ``i`` sites
+        and the rest.
+
+        Parameters
+        ----------
+        i : int
+            The number of sites in the left partition.
+        current_orthog_centre : int
+            If given, the known current orthogonality center, to speed up the
+            mixed canonization.
+
+        Returns
+        -------
+        float
+        """
+        S = self.schmidt_values(i, current_orthog_centre=current_orthog_centre,
+                                method=method)
+        return S[0] - S[1]
 
     def to_dense(self):
         """Return the dense ket version of this MPS, i.e. a ``numpy.matrix``

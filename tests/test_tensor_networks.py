@@ -4,7 +4,14 @@ import operator
 import numpy as np
 from numpy.testing import assert_allclose
 
-from quimb import ham_heis, expec, seigsys
+from quimb import (
+    ham_heis,
+    expec,
+    seigsys,
+    entropy,
+    entropy_subsys,
+    schmidt_gap,
+)
 
 from quimb.tensor.tensor_core import (
     Tensor,
@@ -231,6 +238,42 @@ class TestTensorFunctions:
             assert ((a_split.shape == (6, 5, 4, 2, 3)) or
                     (a_split.shape == (2, 3, 6, 5, 4)))
         assert (a_split ^ ...).almost_equals(a)
+
+    @pytest.mark.parametrize('method', ['svd', 'eig'])
+    def test_singular_values(self, method):
+        psim = Tensor(np.eye(2) * 2**-0.5, inds='ab')
+        assert_allclose(psim.H @ psim, 1.0)
+        assert_allclose(psim.singular_values('a', method=method)**2,
+                        [0.5, 0.5])
+
+    @pytest.mark.parametrize('method', ['svd', 'eig'])
+    def test_entropy(self, method):
+        psim = Tensor(np.eye(2) * 2**-0.5, inds='ab')
+        assert_allclose(psim.H @ psim, 1.0)
+        assert_allclose(psim.entropy('a', method=method)**2, 1)
+
+    @pytest.mark.parametrize('method', ['svd', 'eig'])
+    def test_entropy_matches_dense(self, method):
+        p = MPS_rand(5, 32)
+        p_dense = p.to_dense()
+        real_svn = entropy(p_dense.ptr([2] * 5, [0, 1, 2]))
+
+        svn = (p ^ ...).entropy(('k0', 'k1', 'k2'))
+        assert_allclose(real_svn, svn)
+
+        # use tensor to left of bipartition
+        p.canonize(2)
+        t1 = p['i2']
+        left_inds = set(t1.inds) - set(p['i3'].inds)
+        svn = (t1).entropy(left_inds, method=method)
+        assert_allclose(real_svn, svn)
+
+        # use tensor to right of bipartition
+        p.canonize(3)
+        t2 = p['i3']
+        left_inds = set(t2.inds) & set(p['i2'].inds)
+        svn = (t2).entropy(left_inds, method=method)
+        assert_allclose(real_svn, svn)
 
 
 class TestTensorNetwork:
@@ -616,6 +659,22 @@ class TestMatrixProductState:
         assert abs((tn ^ ...) - 1) > 1e-13
         assert not np.allclose(tn[('__ket__', 'i1')].data,
                                tn[('__bra__', 'i1')].data.conj())
+
+    def test_schmidt_values_entropy_gap_simple(self):
+        n = 12
+        p = MPS_rand(n, 16)
+        p.right_canonize()
+        svns = []
+        sgs = []
+        for i in range(1, n):
+            sgs.append(p.schmidt_gap(i, current_orthog_centre=i - 1))
+            svns.append(p.entropy(i, current_orthog_centre=i))
+
+        pd = p.to_dense()
+        ex_svns = [entropy_subsys(pd, [2] * n, range(i)) for i in range(1, n)]
+        ex_sgs = [schmidt_gap(pd, [2] * n, range(i)) for i in range(1, n)]
+        assert_allclose(ex_svns, svns)
+        assert_allclose(ex_sgs, sgs)
 
 
 class TestMatrixProductOperator:

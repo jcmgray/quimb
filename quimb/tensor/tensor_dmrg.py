@@ -49,10 +49,9 @@ def update_with_eff_gs(energy_tn, k, b, i, dense=False):
                       ('upper', k.site[i].inds)), inplace=True)
         eff_ham = eff_ham.data
     else:
-        eff_ham = EffectiveHamLinearOperator(eff_ham,
+        eff_ham = EffectiveHamLinearOperator(eff_ham, dims=k.site[i].shape,
                                              upper_inds=k.site[i].inds,
-                                             lower_inds=b.site[i].inds,
-                                             dims=k.site[i].shape)
+                                             lower_inds=b.site[i].inds)
 
     eff_e, eff_gs = spla.eigs(eff_ham, k=1, which='SR')
     k.site[i].data = eff_gs
