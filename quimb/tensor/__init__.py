@@ -16,7 +16,7 @@ from .tensor_1d import (
     align_inner,
 )
 from .tensor_dmrg import (
-    dmrg1,
+    DMRG1,
 )
 
 
@@ -32,5 +32,5 @@ __all__ = (
     "MatrixProductState",
     "MatrixProductOperator",
     "align_inner",
-    "dmrg1",
+    "DMRG1",
 )

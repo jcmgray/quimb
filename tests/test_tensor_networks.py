@@ -29,9 +29,7 @@ from quimb.tensor.tensor_gen import (
     rand_tensor,
 )
 from quimb.tensor.tensor_dmrg import (
-    dmrg1_sweep_right,
-    dmrg1_sweep_left,
-    dmrg1,
+    DMRG1,
 )
 
 
@@ -726,44 +724,37 @@ class TestDMRG1:
 
     def test_single_explicit_sweep(self):
         h = MPO_ham_heis(5)
-        k = MPS_rand(5, 3)
-        b = k.H
+        dmrg = DMRG1(h, bond_dim=3)
 
-        k.add_tag("__ket__")
-        b.add_tag("__bra__")
-        h.add_tag("__ham__")
-
-        align_inner(k, b, h)
-
-        energy_tn = (b | h | k)
+        energy_tn = (dmrg.b | h | dmrg.k)
 
         e0 = energy_tn ^ ...
         assert abs(e0.imag) < 1e-13
 
-        de1 = dmrg1_sweep_right(energy_tn, k, b)
+        de1 = dmrg.sweep_right()
         e1 = energy_tn ^ ...
         assert_allclose(de1, e1)
         assert abs(e1.imag) < 1e-13
 
-        de2 = dmrg1_sweep_right(energy_tn, k, b)
+        de2 = dmrg.sweep_right()
         e2 = energy_tn ^ ...
         assert_allclose(de2, e2)
         assert abs(e2.imag) < 1e-13
 
         # state is already left canonized after right sweep
-        de3 = dmrg1_sweep_left(energy_tn, k, b, canonize=False)
+        de3 = dmrg.sweep_left(canonize=False)
         e3 = energy_tn ^ ...
         assert_allclose(de3, e3)
         assert abs(e2.imag) < 1e-13
 
-        de4 = dmrg1_sweep_left(energy_tn, k, b)
+        de4 = dmrg.sweep_left()
         e4 = energy_tn ^ ...
         assert_allclose(de4, e4)
         assert abs(e2.imag) < 1e-13
 
         # test still normalized
-        align_inner(k, b)
-        assert abs(b @ k) - 1 < 1e-13
+        align_inner(dmrg.k, dmrg.b)
+        assert abs(dmrg.b @ dmrg.k) - 1 < 1e-13
 
         assert e1.real < e0.real
         assert e2.real < e1.real
@@ -773,9 +764,7 @@ class TestDMRG1:
     @pytest.mark.parametrize("eff_ham_dense", [False, True])
     def test_ground_state_matches(self, eff_ham_dense):
         h = MPO_ham_heis(5)
-        eff_e, mps_gs = dmrg1(h, 5, eff_ham_dense=eff_ham_dense)
-
-        assert "__ham__" not in h.tags
+        eff_e, mps_gs = DMRG1(h, bond_dim=5).solve(eff_ham_dense=eff_ham_dense)
 
         mps_gs_dense = mps_gs.to_dense()
 

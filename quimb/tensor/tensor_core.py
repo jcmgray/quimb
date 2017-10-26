@@ -699,6 +699,12 @@ class SiteIndexer(object):
         site_tag = self.tn.contract_strategy.format(site)
         self.tn[site_tag] = tensor
 
+    def __delitem__(self, site):
+        if site < 0:
+            site = self.tn.nsites + site
+        site_tag = self.tn.contract_strategy.format(site)
+        del self.tn[site_tag]
+
 
 class TensorNetwork(object):
     """A collection of (as yet uncontracted) Tensors.
@@ -870,6 +876,20 @@ class TensorNetwork(object):
             except (KeyError, TypeError):
                 self.tag_index[tag] = {name}
 
+    def __iand__(self, tensor):
+        """Inplace, but non-virtual, addition of tensor to this network. It
+        should not have any conflicting indices.
+        """
+        self.add_tensor(tensor, virtual=False)
+        return self
+
+    def __ior__(self, tensor):
+        """Inplace, virtual, addition of tensor to this network. It
+        should not have any conflicting indices.
+        """
+        self.add_tensor(tensor, virtual=True)
+        return self
+
     def pop_tensor(self, name):
         """Remove a tensor from this network, returning said tensor.
         """
@@ -998,7 +1018,7 @@ class TensorNetwork(object):
         else:
             start = tag_slice.start
 
-        if tag_slice.stop is ...:
+        if (tag_slice.stop is ...) or (tag_slice.stop is None):
             stop = self.nsites
         elif tag_slice.stop < 0:
             stop = self.nsites + tag_slice.stop

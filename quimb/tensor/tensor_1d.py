@@ -130,6 +130,12 @@ class MatrixProductState(TensorNetwork):
         return tuple(self.site_ind_id.format(i) for i in range(self.nsites))
 
     @property
+    def site_tag_id(self):
+        """The string specifier for tagging each site of this MPS.
+        """
+        return self._site_tag_id
+
+    @property
     def site_tags(self):
         """An ordered tuple of the actual site tags.
         """
@@ -577,6 +583,12 @@ class MatrixProductOperator(TensorNetwork):
         """An ordered tuple of the actual upper physical indices.
         """
         return tuple(self.upper_ind_id.format(i) for i in range(self.nsites))
+
+    @property
+    def site_tag_id(self):
+        """The string specifier for tagging each site of this MPO.
+        """
+        return self._site_tag_id
 
     @property
     def site_tags(self):

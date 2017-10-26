@@ -10,9 +10,30 @@ from .tensor_1d import align_inner
 
 
 class EffectiveHamLinearOperator(spla.LinearOperator):
+    """Get a linear operator - something that replicates the matrix-vector
+    operation - for an arbitrary *uncontracted* hamiltonian operator, e.g:
 
-    def __init__(self, eff_ham, upper_inds, lower_inds, dims):
-        self.eff_ham_ts = eff_ham["__ham__"]
+         / | | \
+        L--H-H--R
+         \ | | /
+
+    This can then be supplied to scipy's sparse linear algebra routines.
+
+    Parameters
+    ----------
+    TN_ham : TensorNetwork
+        A representation of the hamiltonian
+    upper_inds : sequence of hashable
+        The upper inds of the effective hamiltonian network.
+    lower_inds : sequence of hashable
+        The lower inds of the effective hamiltonian network. These should be
+        ordered the same way as ``upper_inds``.
+    dims : tuple of int
+        The dimensions corresponding to the inds.
+    """
+
+    def __init__(self, TN_ham, upper_inds, lower_inds, dims):
+        self.eff_ham_tensors = TN_ham["__ham__"]
         self.upper_inds = upper_inds
         self.lower_inds = lower_inds
         self.dims = dims
@@ -20,125 +41,181 @@ class EffectiveHamLinearOperator(spla.LinearOperator):
         super().__init__(dtype=complex, shape=(self.d, self.d))
 
     def _matvec(self, vec):
-        k = Tensor(vec.reshape(*self.dims), inds=self.upper_inds)
-        k_out = tensor_contract(*self.eff_ham_ts, k,
+        v = Tensor(vec.reshape(*self.dims), inds=self.upper_inds)
+        v_out = tensor_contract(*self.eff_ham_tensors, v,
                                 output_inds=self.lower_inds).data
-        return k_out.reshape(*vec.shape)
+        return v_out.reshape(*vec.shape)
 
 
-def update_with_eff_gs(eff_ham, k, b, i, dense=False):
-    """Find the effective tensor groundstate of:
+class DMRG1:
+    """Single site, fixed bond-dimension variational groundstate search.
 
-                  /|\
-        o-o-o-o-o- | -o-o-o-o-o-o-o-o
-        | | | | |  |  | | | | | | | |
-        O-O-O-O-O--O--O-O-O-O-O-O-O-O
-        | | | | | i|  | | | | | | | |
-        o-o-o-o-o- | -o-o-o-o-o-o-o-o
-                  \|/
-
-    And insert it back into the states ``k`` and ``b``, and thus ``energy_tn``.
+    Parameters
+    ----------
+    ham : MatrixProductOperator
+        The hamiltonian in MPO form.
+    bond_dim : int
+        The bond-dimension of the MPS to optimize.
     """
-    if dense:
-        # also contract remaining hamiltonian and get its dense representation
-        eff_ham = (eff_ham ^ '__ham__')['__ham__']
-        eff_ham.fuse((('lower', b.site[i].inds),
-                      ('upper', k.site[i].inds)), inplace=True)
-        eff_ham = eff_ham.data
-    else:
-        eff_ham = EffectiveHamLinearOperator(
-            eff_ham, dims=k.site[i].shape,
-            upper_inds=k.site[i].inds, lower_inds=b.site[i].inds)
 
-    eff_e, eff_gs = spla.eigs(eff_ham, k=1, which='SR')
-    k.site[i].data = eff_gs
-    b.site[i].data = eff_gs.conj()
-    return eff_e
+    def __init__(self, ham, bond_dim):
+        self.n = ham.nsites
+        self.bond_dim = bond_dim
+        self.k = MPS_rand(self.n, bond_dim)
+        self.b = self.k.H
 
+        # Tag the various bits for contraction.
+        ham.add_tag("__ham__")
 
-def dmrg1_sweep_right(energy_tn, k, b, canonize=True, eff_ham_dense=False):
-    """
-    """
-    if canonize:
-        k.right_canonize(bra=b)
+        # Line up and overlap
+        align_inner(self.k, self.b, ham)
 
-    # build right envs iteratively, saving each step to be re-used
-    envs = {k.nsites - 1: energy_tn.copy(virtual=True)}
-    for i in reversed(range(0, k.nsites - 1)):
-        env = envs[i + 1].copy(virtual=True)
-        env ^= slice(min(k.nsites - 1, i + 2), i)
-        envs[i] = env
+        # want to contract this multiple times while
+        #   manipulating k -> make virtual
+        self.TN_energy = TensorNetwork([self.b, ham, self.k], virtual=True)
+        self.energies = []
+        self.site_id = ham.site_tag_id
 
-    for i in range(0, k.nsites):
-        eff_ham = envs[i]
-        if i >= 2:
-            # replace left env with new effective left env
-            for j in range(i - 1):
-                del eff_ham["i{}".format(j)]
-            eff_ham.add_tensor(envs[i - 1]["i{}".format(i - 2)], virtual=True)
-
-        if i >= 1:
-            # contract left env with new minimized, canonized site
-            eff_ham ^= slice(max(0, i - 2), i)
-
-        eff_e = update_with_eff_gs(eff_ham, k, b, i, dense=eff_ham_dense)
-        if i < k.nsites - 1:
-            k.left_canonize_site(i, bra=b)
-
-    return eff_e
+    def update_with_eff_gs(self, eff_ham, i, dense=False):
+        """Find the effective tensor groundstate of:
 
 
-def dmrg1_sweep_left(energy_tn, k, b, canonize=True, eff_ham_dense=False):
-    """
-    """
-    if canonize:
-        k.left_canonize(bra=b)
+                      /|\
+            o-o-o-o-o- | -o-o-o-o-o-o-o-o          |||
+            | | | | |  |  | | | | | | | |         / | \
+            H-H-H-H-H--H--H-H-H-H-H-H-H-H   =    L--H--R
+            | | | | | i|  | | | | | | | |         \i| /
+            o-o-o-o-o- | -o-o-o-o-o-o-o-o          |||
+                      \|/
 
-    # build left envs iteratively, saving each step to be re-used
-    envs = {0: energy_tn.copy(virtual=True)}
-    for i in range(1, k.nsites):
-        env = envs[i - 1].copy(virtual=True)
-        env ^= slice(max(0, i - 2), i)
-        envs[i] = env
+        And insert it back into the states ``k`` and ``b``, and thus
+        ``TN_energy``.
+        """
+        if dense:
+            # contract remaining hamiltonian and get its dense representation
+            eff_ham = (eff_ham ^ '__ham__')['__ham__']
+            eff_ham.fuse((('lower', self.b.site[i].inds),
+                          ('upper', self.k.site[i].inds)), inplace=True)
+            op = eff_ham.data
+        else:
+            op = EffectiveHamLinearOperator(eff_ham, dims=self.k.site[i].shape,
+                                            upper_inds=self.k.site[i].inds,
+                                            lower_inds=self.b.site[i].inds)
 
-    for i in reversed(range(0, k.nsites)):
-        eff_ham = envs[i]
-        if i <= k.nsites - 3:
-            # replace right env with new effective right env
-            for j in reversed(range(i + 2, k.nsites)):
-                del eff_ham["i{}".format(j)]
-            eff_ham.add_tensor(envs[i + 1]["i{}".format(i + 2)], virtual=True)
+        eff_e, eff_gs = spla.eigs(op, k=1, which='SR')
+        self.k.site[i].data = eff_gs
+        self.b.site[i].data = eff_gs.conj()
+        return eff_e
 
-        if i <= k.nsites - 2:
-            # contract right env with new minimized, canonized site
-            eff_ham ^= slice(min(k.nsites - 1, i + 2), i)
+    def sweep_right(self, canonize=True, eff_ham_dense=False):
+        """Perform a sweep of optimizations rightwards:
 
-        eff_e = update_with_eff_gs(eff_ham, k, b, i, dense=eff_ham_dense)
-        if i > 0:
-            k.right_canonize_site(i, bra=b)
+              optimize -->
+                .
+            /-/-o-\-\-\-\-\-\-\-\-\-\-\-\-\
+            | | | | | | | | | | | | | | | |
+            H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H
+            | | | | | | | | | | | | | | | |
+            \-\-o-/-/-/-/-/-/-/-/-/-/-/-/-/
 
-    return eff_e
+        After the sweep the state is left canonized.
 
+        Parameters
+        ----------
+        canonize : bool, optional
+            Right canonize first. Set to False if already right-canonized.
+        eff_ham_dense : bool, optional
+            Solve the inner eigensystem using a dense representation of the
+            effective hamiltonian. Can be quicker for small bond_dim.
+        """
+        if canonize:
+            self.k.right_canonize(bra=self.b)
 
-def dmrg1(ham, bond_dim, num_sweeps=4, eff_ham_dense="AUTO"):
-    """
-    """
-    k = MPS_rand(ham.nsites, bond_dim)
-    b = k.H
-    ham.add_tag("__ham__")
-    k.add_tag("__ket__")
-    b.add_tag("__bra__")
+        # build right envs iteratively, saving each step to be re-used
+        envs = {self.n - 1: self.TN_energy.copy(virtual=True)}
+        for i in reversed(range(0, self.n - 1)):
+            env = envs[i + 1].copy(virtual=True)
+            # contract the previous env with one more site
+            env ^= slice(min(self.n - 1, i + 2), i)
+            envs[i] = env
 
-    align_inner(k, b, ham)
+        for i in range(0, self.n):
+            eff_ham = envs[i]
+            if i >= 2:
+                # replace left env with new effective left env
+                for j in range(i - 1):
+                    del eff_ham.site[j]
+                eff_ham |= envs[i - 1].site[i - 2]
 
-    energy_tn = TensorNetwork([b, ham, k], virtual=True)
+            if i >= 1:
+                # contract left env with new minimized, canonized site
+                eff_ham ^= slice(max(0, i - 2), i)
 
-    if eff_ham_dense == "AUTO":
-        eff_ham_dense = bond_dim < 20
+            eff_e = self.update_with_eff_gs(eff_ham, i, dense=eff_ham_dense)
 
-    for _ in progbar(range(num_sweeps)):
-        eff_e = dmrg1_sweep_right(energy_tn, k, b, eff_ham_dense=eff_ham_dense)
+            if i < self.n - 1:
+                self.k.left_canonize_site(i, bra=self.b)
 
-    ham.drop_tags("__ham__")
+        return eff_e
 
-    return eff_e, k
+    def sweep_left(self, canonize=True, eff_ham_dense=False):
+        """Perform a sweep of optimizations leftwards:
+
+                            <-- optimize
+                                      .
+            /-/-/-/-/-/-/-/-/-/-/-/-/-o-\-\
+            | | | | | | | | | | | | | | | |
+            H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H
+            | | | | | | | | | | | | | | | |
+            \-\-\-\-\-\-\-\-\-\-\-\-\-o-/-/
+
+        After the sweep the state is right canonized.
+
+        Parameters
+        ----------
+        canonize : bool, optional
+            Left canonize first. Set to False if already right-canonized.
+        eff_ham_dense : bool, optional
+            Solve the inner eigensystem using a dense representation of the
+            effective hamiltonian. Can be quicker for small bond_dim.
+        """
+        if canonize:
+            self.k.left_canonize(bra=self.b)
+
+        # build left envs iteratively, saving each step to be re-used
+        envs = {0: self.TN_energy.copy(virtual=True)}
+        for i in range(1, self.n):
+            env = envs[i - 1].copy(virtual=True)
+            # contract the previous env with one more site
+            env ^= slice(max(0, i - 2), i)
+            envs[i] = env
+
+        for i in reversed(range(0, self.n)):
+            eff_ham = envs[i]
+            if i <= self.n - 3:
+                # replace right env with new effective right env
+                for j in reversed(range(i + 2, self.n)):
+                    del eff_ham.site[j]
+                eff_ham |= envs[i + 1].site[i + 2]
+
+            if i <= self.n - 2:
+                # contract right env with new minimized, canonized site
+                eff_ham ^= slice(min(self.n - 1, i + 2), i)
+
+            eff_e = self.update_with_eff_gs(eff_ham, i, dense=eff_ham_dense)
+            if i > 0:
+                self.k.right_canonize_site(i, bra=self.b)
+
+        return eff_e
+
+    def solve(self, num_sweeps=4, eff_ham_dense="AUTO"):
+        """Sweep a number of times.
+        """
+        # choose a rough value at which dense effective ham should not be used
+        if eff_ham_dense == "AUTO":
+            eff_ham_dense = self.bond_dim < 20
+
+        for _ in progbar(range(num_sweeps)):
+            self.energies.append(self.sweep_right(eff_ham_dense=eff_ham_dense))
+
+        return self.energies[-1], self.k
