@@ -19,11 +19,9 @@ setup(
             'coverage',
             'pytest',
             'pytest-cov',
-            'pytest-timeout',
         ],
         'docs': [
             'sphinx',
-            'sphinx_rtd_theme',
             'sphinx_bootstrap_theme',
         ],
         'advanced_solvers': [

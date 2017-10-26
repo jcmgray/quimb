@@ -1,4 +1,4 @@
-name: test-environment
+name: docs
 channels:
   - defaults
   - conda-forge
@@ -8,6 +8,7 @@ dependencies:
   - scipy
   - numba
   - numexpr
+  - opt_einsum
   - psutil
   - cytoolz
   - tqdm
@@ -20,4 +21,3 @@ dependencies:
   - pip:
     - codeclimate-test-reporter
     - codacy-coverage
-    - "--editable=git+https://github.com/dgasmith/opt_einsum.git"
