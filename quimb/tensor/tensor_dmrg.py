@@ -4,7 +4,7 @@ import scipy.sparse.linalg as spla
 
 from ..utils import progbar
 from ..accel import prod
-from .tensor_core import Tensor, tensor_contract
+from .tensor_core import Tensor, TensorNetwork, tensor_contract
 from .tensor_gen import MPS_rand
 from .tensor_1d import align_inner
 
@@ -26,7 +26,7 @@ class EffectiveHamLinearOperator(spla.LinearOperator):
         return k_out.reshape(*vec.shape)
 
 
-def update_with_eff_gs(energy_tn, k, b, i, dense=False):
+def update_with_eff_gs(eff_ham, k, b, i, dense=False):
     """Find the effective tensor groundstate of:
 
                   /|\
@@ -39,9 +39,6 @@ def update_with_eff_gs(energy_tn, k, b, i, dense=False):
 
     And insert it back into the states ``k`` and ``b``, and thus ``energy_tn``.
     """
-    # contract left and right environments
-    eff_ham = energy_tn ^ slice(0, i) ^ slice(..., i)
-
     if dense:
         # also contract remaining hamiltonian and get its dense representation
         eff_ham = (eff_ham ^ '__ham__')['__ham__']
@@ -49,9 +46,9 @@ def update_with_eff_gs(energy_tn, k, b, i, dense=False):
                       ('upper', k.site[i].inds)), inplace=True)
         eff_ham = eff_ham.data
     else:
-        eff_ham = EffectiveHamLinearOperator(eff_ham, dims=k.site[i].shape,
-                                             upper_inds=k.site[i].inds,
-                                             lower_inds=b.site[i].inds)
+        eff_ham = EffectiveHamLinearOperator(
+            eff_ham, dims=k.site[i].shape,
+            upper_inds=k.site[i].inds, lower_inds=b.site[i].inds)
 
     eff_e, eff_gs = spla.eigs(eff_ham, k=1, which='SR')
     k.site[i].data = eff_gs
@@ -65,8 +62,26 @@ def dmrg1_sweep_right(energy_tn, k, b, canonize=True, eff_ham_dense=False):
     if canonize:
         k.right_canonize(bra=b)
 
+    # build right envs iteratively, saving each step to be re-used
+    envs = {k.nsites - 1: energy_tn.copy(virtual=True)}
+    for i in reversed(range(0, k.nsites - 1)):
+        env = envs[i + 1].copy(virtual=True)
+        env ^= slice(min(k.nsites - 1, i + 2), i)
+        envs[i] = env
+
     for i in range(0, k.nsites):
-        eff_e = update_with_eff_gs(energy_tn, k, b, i, dense=eff_ham_dense)
+        eff_ham = envs[i]
+        if i >= 2:
+            # replace left env with new effective left env
+            for j in range(i - 1):
+                del eff_ham["i{}".format(j)]
+            eff_ham.add_tensor(envs[i - 1]["i{}".format(i - 2)], virtual=True)
+
+        if i >= 1:
+            # contract left env with new minimized, canonized site
+            eff_ham ^= slice(max(0, i - 2), i)
+
+        eff_e = update_with_eff_gs(eff_ham, k, b, i, dense=eff_ham_dense)
         if i < k.nsites - 1:
             k.left_canonize_site(i, bra=b)
 
@@ -79,8 +94,26 @@ def dmrg1_sweep_left(energy_tn, k, b, canonize=True, eff_ham_dense=False):
     if canonize:
         k.left_canonize(bra=b)
 
+    # build left envs iteratively, saving each step to be re-used
+    envs = {0: energy_tn.copy(virtual=True)}
+    for i in range(1, k.nsites):
+        env = envs[i - 1].copy(virtual=True)
+        env ^= slice(max(0, i - 2), i)
+        envs[i] = env
+
     for i in reversed(range(0, k.nsites)):
-        eff_e = update_with_eff_gs(energy_tn, k, b, i, dense=eff_ham_dense)
+        eff_ham = envs[i]
+        if i <= k.nsites - 3:
+            # replace right env with new effective right env
+            for j in reversed(range(i + 2, k.nsites)):
+                del eff_ham["i{}".format(j)]
+            eff_ham.add_tensor(envs[i + 1]["i{}".format(i + 2)], virtual=True)
+
+        if i <= k.nsites - 2:
+            # contract right env with new minimized, canonized site
+            eff_ham ^= slice(min(k.nsites - 1, i + 2), i)
+
+        eff_e = update_with_eff_gs(eff_ham, k, b, i, dense=eff_ham_dense)
         if i > 0:
             k.right_canonize_site(i, bra=b)
 
@@ -98,7 +131,7 @@ def dmrg1(ham, bond_dim, num_sweeps=4, eff_ham_dense="AUTO"):
 
     align_inner(k, b, ham)
 
-    energy_tn = b & ham & k
+    energy_tn = TensorNetwork([b, ham, k], virtual=True)
 
     if eff_ham_dense == "AUTO":
         eff_ham_dense = bond_dim < 20

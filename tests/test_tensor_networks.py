@@ -651,7 +651,7 @@ class TestMatrixProductState:
         pH = p.H
         p.add_tag('__ket__')
         pH.add_tag('__bra__')
-        tn = p & pH
+        tn = p | pH
         assert abs((tn ^ ...) - 1) < 1e-13
         assert_allclose(tn[('__ket__', 'i1')].data,
                         tn[('__bra__', 'i1')].data.conj())
@@ -735,7 +735,7 @@ class TestDMRG1:
 
         align_inner(k, b, h)
 
-        energy_tn = (b & h & k)
+        energy_tn = (b | h | k)
 
         e0 = energy_tn ^ ...
         assert abs(e0.imag) < 1e-13

@@ -731,6 +731,11 @@ class TensorNetwork(object):
     nsites : int, optional
         The number of sites, if explicitly known. This will be calculated
         using `contract_strategy` if needed but not specified.
+    virtual : bool, optional
+        Whether the TensorNetwork should be a *view* onto the tensors it is
+        given, or a copy of them. E.g. if a virtual TN is constructed, any
+        changes to a Tensor's indices will propagate to all TNs viewing that
+        Tensor.
 
     Members
     -------
@@ -749,7 +754,8 @@ class TensorNetwork(object):
                  check_collisions=True,
                  contract_strategy=None,
                  contract_bsz=None,
-                 nsites=None):
+                 nsites=None,
+                 virtual=False):
 
         self.site = SiteIndexer(self)
 
@@ -759,9 +765,9 @@ class TensorNetwork(object):
             self.nsites = tensors.nsites
             self.contract_bsz = tensors.contract_bsz
             self.tag_index = {
-                tg: ns.copy() for tg, ns in tensors.tag_index.items()}
-            self.tensor_index = {
-                n: t.copy() for n, t in tensors.tensor_index.items()}
+                tg: nms.copy() for tg, nms in tensors.tag_index.items()}
+            self.tensor_index = {nm: tsr if virtual else tsr.copy()
+                                 for nm, tsr in tensors.tensor_index.items()}
             return
 
         self.contract_strategy = contract_strategy
@@ -793,7 +799,7 @@ class TensorNetwork(object):
                 current_inner_inds |= t.inner_inds()
 
             if istensor:
-                self.add_tensor(t)
+                self.add_tensor(t, virtual=virtual)
                 continue
 
             for x in _TN_SIMPLE_PROPS:
@@ -812,10 +818,11 @@ class TensorNetwork(object):
                             .format(x, getattr(self, x), getattr(t, x)))
 
             if check_collisions:
-                for name, tensor in t.tensor_index.items():
-                    self.add_tensor(tensor, name=name)
+                for nm, tsr in t.tensor_index.items():
+                    self.add_tensor(tsr, virtual=virtual, name=nm)
             else:
-                self.tensor_index.update(t.tensor_index)
+                for nm, tsr in t.tensor_index.items():
+                    self.tensor_index[nm] = tsr if virtual else tsr.copy()
                 self.tag_index = merge_with(
                     set_join, self.tag_index, t.tag_index)
 
@@ -831,15 +838,15 @@ class TensorNetwork(object):
 
     # ------------------------------- Methods ------------------------------- #
 
-    def copy(self, deep=False):
+    def copy(self, virtual=False, deep=False):
         """Copy this ``TensorNetwork``. If ``deep=False``, (the default), then
         everything but the actual numeric data will be copied.
         """
         if deep:
             return copy.deepcopy(self)
-        return self.__class__(self)
+        return self.__class__(self, virtual=virtual)
 
-    def add_tensor(self, tensor, name=None):
+    def add_tensor(self, tensor, name=None, virtual=False):
         """Add a single tensor to this network - mangle its name if neccessary.
         """
         # check for name conflict
@@ -854,7 +861,7 @@ class TensorNetwork(object):
                 pass
 
         # add tensor to the main index
-        self.tensor_index[name] = tensor
+        self.tensor_index[name] = tensor if virtual else tensor.copy()
 
         # add its name to the relevant tags, or create a new tag
         for tag in tensor.tags:
@@ -976,7 +983,7 @@ class TensorNetwork(object):
                              "(Change this to a no-op maybe?)")
 
         if untagged_tn:
-            untagged_tn.add_tensor(tensor_contract(*tagged_ts))
+            untagged_tn.add_tensor(tensor_contract(*tagged_ts), virtual=True)
             return untagged_tn
 
         return tensor_contract(*tagged_ts)
@@ -1216,7 +1223,7 @@ class TensorNetwork(object):
         # check if tags match, else need to modify TN structure
         if self.tensor_index[name].tags != tensor.tags:
             self.del_tensor(name)
-            self.add_tensor(tensor, name)
+            self.add_tensor(tensor, name, virtual=True)
         else:
             self.tensor_index[name] = tensor
 
@@ -1234,8 +1241,15 @@ class TensorNetwork(object):
 
     def __and__(self, other):
         """Combine this tensor network with more tensors, without contracting.
+        Copies the tensors.
         """
         return TensorNetwork((self, other))
+
+    def __or__(self, other):
+        """Combine this tensor network with more tensors, without contracting.
+        Views the constituent tensors.
+        """
+        return TensorNetwork((self, other), virtual=True)
 
     def __matmul__(self, other):
         """Overload "@" to mean full contraction with another network.
