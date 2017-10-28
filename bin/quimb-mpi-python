@@ -20,7 +20,7 @@ case $key in
             letting the MPI launcher decide.
         -l, --launcher <MPI_LAUNCHER>
             How to launch the python process, defaults
-            to 'mpiexec'.
+            to 'mpiexec'. Can add mpi options here.
         -s, --syncro
             Launch in syncro mode, where all processes
             run the script, splitting work up only when
@@ -58,27 +58,24 @@ set -- "${POSITIONAL[@]}" # restore positional parameters
 
 mpi_launcher=${mpi_launcher:-"mpiexec"}
 
-if [ "$num_procs" ]; then
-    # number of processes specified
-    proc_str=" --np ${num_procs}"
-    proc_descr="${num_procs}"
-    export QUIMB_NUM_MPI_WORKERS=$num_procs
-else
-    # use however many mpi launcher will by default
-    proc_str=""
-    proc_descr="AUTO"
-fi
-
 # set up environment
 export OMP_NUM_THREADS=1
 export _QUIMB_MPI_LAUNCHED="MANUAL"
 
-# use simplistic syncronized pool
-if [ $QUIMB_SYNCRO_MPI ]; then
-    echo "Launching quimb in Syncro mode with ${mpi_launcher} and ${proc_descr} processes."
-    $mpi_launcher --np "$num_procs" python "$@"
-# run script with mpi through mpi4py module
-else
-    echo "Launching quimb in mpi4py.futures mode with ${mpi_launcher} and ${proc_descr} processes."
-    $mpi_launcher "$proc_str" python -m mpi4py.futures "$@"
+if [ $QUIMB_SYNCRO_MPI ]; then  # use simplistic syncronized pool
+    if [ $num_procs ]; then
+        echo "Launching quimb in Syncro mode with ${mpi_launcher} and ${proc_descr} processes."
+        ${mpi_launcher} --np "${num_procs}" python "$@"
+    else
+        echo "Launching quimb in Syncro mode with ${mpi_launcher}".
+        ${mpi_launcher} python "$@"
+    fi
+else  # run script with mpi through mpi4py module
+    if [ $num_procs ]; then
+        echo "Launching quimb in mpi4py.futures mode with ${mpi_launcher} and ${proc_descr} processes."
+        ${mpi_launcher} --np "${num_procs}" python -m mpi4py.futures "$@"
+    else
+        echo "Launching quimb in mpi4py.futures mode with ${mpi_launcher}."
+        ${mpi_launcher} python -m mpi4py.futures "$@"
+    fi
 fi
