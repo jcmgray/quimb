@@ -44,7 +44,7 @@ before_install:
   - chronic bash deps/travis-install-slepc4py.sh
 
 install:
-  - pip install .
+  - pip install -U .
 
 script:
   - export OMP_NUM_THREADS=2
