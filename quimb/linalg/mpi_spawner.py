@@ -26,8 +26,9 @@ else:
 # Work out the desired total number of workers
 for _NUM_MPI_WORKERS_VAR in ['QUIMB_NUM_MPI_WORKERS',
                              'QUIMB_NUM_PROCS',
-                             'OMP_NUM_THREADS',
-                             ]:
+                             'OMPI_COMM_WORLD_SIZE',
+                             'PMI_SIZE',
+                             'OMP_NUM_THREADS']:
     if _NUM_MPI_WORKERS_VAR in os.environ:
         NUM_MPI_WORKERS = int(os.environ[_NUM_MPI_WORKERS_VAR])
         NUM_MPI_WORKERS_SET = True
@@ -50,13 +51,15 @@ class SyncroFuture:
     def result(self):
         return self.comm.bcast(self._result, root=self.result_rank)
 
-    def shutdown(self):
-        pass
+    def cancel(self):
+        raise ValueError("SyncroFutures cannot be cancelled - they are "
+                         "submitted in a parallel round-robin fasion where "
+                         "each worker immediately computes all its results.")
 
 
 class SynchroMPIPool:
 
-    def __init__(self, num_workers=None, num_threads=1):
+    def __init__(self):
         import itertools
         from mpi4py import MPI
         self.comm = MPI.COMM_WORLD
@@ -76,6 +79,9 @@ class SynchroMPIPool:
 
         # wrap the result in a SyncroFuture, that will broadcast result
         return SyncroFuture(res, current_counter, self.comm)
+
+    def shutdown(self):
+        pass
 
 
 class CachedPoolWithShutdown:

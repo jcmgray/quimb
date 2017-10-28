@@ -8,7 +8,8 @@ key="$1"
 
 case $key in
     -h|--help)
-    echo "Run a python script that uses quimb, eargerly launching with mpi.
+    echo "Run a python script that uses quimb, eagerly launching
+    with mpi, rather than dynamically spawning MPI processes.
 
     Usage:
         quimb-mpi-python [OPTIONS]... [SCRIPT]...
@@ -16,7 +17,7 @@ case $key in
     Options:
         -n, --np <NUM_PROCS>
             How many mpi processes to use, defaults to
-            the number of physical cores.
+            letting the MPI launcher decide.
         -l, --launcher <MPI_LAUNCHER>
             How to launch the python process, defaults
             to 'mpiexec'.
@@ -55,20 +56,29 @@ esac
 done
 set -- "${POSITIONAL[@]}" # restore positional parameters
 
-num_procs=${num_procs:-$(grep '^core id' /proc/cpuinfo |sort -u|wc -l)}
 mpi_launcher=${mpi_launcher:-"mpiexec"}
+
+if [ "$num_procs"]; then
+    # number of processes specified
+    proc_str=" --np ${num_procs}"
+    proc_descr = "${num_procs}"
+    export QUIMB_NUM_MPI_WORKERS=$num_procs
+else
+    # use however many mpi launcher will by default
+    proc_str=""
+    proc_descr="AUTO"
+fi
 
 # set up environment
 export OMP_NUM_THREADS=1
-export QUIMB_NUM_MPI_WORKERS=$num_procs
 export _QUIMB_MPI_LAUNCHED="MANUAL"
 
 # use simplistic syncronized pool
 if [ $QUIMB_SYNCRO_MPI ]; then
-    echo "Launching quimb in Syncro mode with ${mpi_launcher} and ${num_procs} processes."
+    echo "Launching quimb in Syncro mode with ${mpi_launcher} and ${proc_descr} processes."
     $mpi_launcher --np "$num_procs" python "$@"
 # run script with mpi through mpi4py module
 else
-    echo "Launching quimb in mpi4py.futures mode with ${mpi_launcher} and ${num_procs} processes."
-    $mpi_launcher --np "$num_procs" python -m mpi4py.futures "$@"
+    echo "Launching quimb in mpi4py.futures mode with ${mpi_launcher} and ${proc_descr} processes."
+    $mpi_launcher "$proc_str" python -m mpi4py.futures "$@"
 fi
