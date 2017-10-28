@@ -58,10 +58,10 @@ set -- "${POSITIONAL[@]}" # restore positional parameters
 
 mpi_launcher=${mpi_launcher:-"mpiexec"}
 
-if [ "$num_procs"]; then
+if [ "$num_procs" ]; then
     # number of processes specified
     proc_str=" --np ${num_procs}"
-    proc_descr = "${num_procs}"
+    proc_descr="${num_procs}"
     export QUIMB_NUM_MPI_WORKERS=$num_procs
 else
     # use however many mpi launcher will by default
