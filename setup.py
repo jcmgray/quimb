@@ -28,7 +28,7 @@ setup(
             'slepc4py',
         ]
     },
-    scripts=['bin/quimb-mpiexec'],
+    scripts=['bin/quimb-mpi-python'],
     classifiers=[
         'Development Status :: 3 - Alpha',
         'License :: OSI Approved :: MIT License',

@@ -17,11 +17,11 @@ if ('OMPI_COMM_WORLD_SIZE' in os.environ) or ('PMI_SIZE' in os.environ):
     if '_QUIMB_MPI_LAUNCHED' not in os.environ:
         raise RuntimeError(
             "For the moment, quimb programs launched explicitly"
-            " using MPI need to use `quimb-mpiexec`."
-        )
-
+            " using MPI need to use `quimb-mpi-python`.")
+    USE_SYNCRO = "QUIMB_SYNCRO_MPI" in os.environ
 else:
     ALREADY_RUNNING_AS_MPI = False
+    USE_SYNCRO = False
 
 # Work out the desired total number of workers
 for _NUM_MPI_WORKERS_VAR in ['QUIMB_NUM_MPI_WORKERS',
@@ -40,7 +40,45 @@ if not NUM_MPI_WORKERS_SET:
     NUM_MPI_WORKERS = psutil.cpu_count(logical=False)
 
 
-class CachedPoolWithShutdown(object):
+class SyncroFuture:
+
+    def __init__(self, result, result_rank, comm):
+        self._result = result
+        self.result_rank = result_rank
+        self.comm = comm
+
+    def result(self):
+        return self.comm.bcast(self._result, root=self.result_rank)
+
+    def shutdown(self):
+        pass
+
+
+class SynchroMPIPool:
+
+    def __init__(self, num_workers=None, num_threads=1):
+        import itertools
+        from mpi4py import MPI
+        self.comm = MPI.COMM_WORLD
+        self.size = self.comm.Get_size()
+        self.rank = self.comm.Get_rank()
+        self.counter = itertools.cycle(range(0, NUM_MPI_WORKERS))
+
+    def submit(self, fn, *args, **kwargs):
+        # round robin iterate through ranks
+        current_counter = next(self.counter)
+
+        # accept job and compute if have the same rank, else do nothing
+        if current_counter == self.rank:
+            res = fn(*args, **kwargs)
+        else:
+            res = None
+
+        # wrap the result in a SyncroFuture, that will broadcast result
+        return SyncroFuture(res, current_counter, self.comm)
+
+
+class CachedPoolWithShutdown:
     """Decorator for caching the mpi pool when called with the equivalent args,
     and shutting down previous ones when not needed.
     """
@@ -77,6 +115,9 @@ def get_mpi_pool(num_workers=None, num_threads=1):
     if (num_workers == 1) and (num_threads == _NUM_THREAD_WORKERS):
         from concurrent.futures import ProcessPoolExecutor
         return ProcessPoolExecutor(1)
+
+    if USE_SYNCRO:
+        return SynchroMPIPool()
 
     from mpi4py.futures import MPIPoolExecutor
     return MPIPoolExecutor(num_workers, main=False, delay=1e-2,
@@ -150,7 +191,7 @@ class SpawnMPIProcessesFunc(object):
                  num_workers=None,
                  num_threads=1,
                  mpi_pool=None,
-                 spawn_all=not ALREADY_RUNNING_AS_MPI,
+                 spawn_all=USE_SYNCRO or (not ALREADY_RUNNING_AS_MPI),
                  **kwargs):
         """
         Parameters
