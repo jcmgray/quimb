@@ -11,6 +11,9 @@
 .. image:: https://landscape.io/github/jcmgray/quimb/develop/landscape.svg?style=flat
    :target: https://landscape.io/github/jcmgray/quimb/develop
    :alt: Code Health
+.. image:: https://readthedocs.org/projects/quimb/badge/?version=latest
+   :target: http://quimb.readthedocs.io/en/latest/?badge=latest
+   :alt: Documentation Status
 
 * Python library for quantum information and many-body calcuations.
 * Uses `numpy` and `scipy.sparse` matrices as quantum objects.
