@@ -13,7 +13,7 @@ from ..core import ptr
 from ..tensor.tensor_core import einsum, einsum_path, HuskArray
 from ..accel import prod, vdot
 from ..utils import int2tup
-from ..linalg.mpi_spawner import get_mpi_pool
+from ..linalg.mpi_launcher import get_mpi_pool
 
 
 # --------------------------------------------------------------------------- #

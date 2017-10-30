@@ -27,7 +27,7 @@ Modules
     quimb.linalg.numpy_linalg
     quimb.linalg.scipy_linalg
     quimb.linalg.slepc_linalg
-    quimb.linalg.mpi_spawner
+    quimb.linalg.mpi_launcher
     quimb.linalg.approx_spectral
 
 
@@ -310,7 +310,7 @@ Specialised Linalg
 MPI stuff
 ---------
 
-.. currentmodule:: quimb.linalg.mpi_spawner
+.. currentmodule:: quimb.linalg.mpi_launcher
 .. autosummary::
     :toctree: _autosummary
 

@@ -22,7 +22,7 @@ from .scipy_linalg import seigsys_scipy, scipy_svds
 from . import SLEPC4PY_FOUND
 
 if SLEPC4PY_FOUND:
-    from .mpi_spawner import seigsys_slepc_spawn, mfn_multiply_slepc_spawn
+    from .mpi_launcher import seigsys_slepc_spawn, mfn_multiply_slepc_spawn
     from .slepc_linalg import slepc_svds
 else:
     seigsys_slepc_spawn = raise_cant_find_library_function("slepc4py")

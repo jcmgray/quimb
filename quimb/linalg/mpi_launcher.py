@@ -1,6 +1,8 @@
 """Manages the spawning of mpi processes to send to the various solvers.
 """
-# TODO: don't send whole matrix? only marginal time savings but memory better.
+# TODO: don't send whole matrix? only marginal time savings but memory better?
+#    Currently, hamiltonian construction etc. seems to be a small proportion of
+#    time and memory.
 
 import os
 import functools
@@ -185,8 +187,9 @@ class SpawnMPIProcessesFunc(object):
     """Automatically wrap a function to be executed in parallel by a
     pool of mpi workers.
 
-    This is only called by the master mpi process in manual mode, or only by
-    the (non-mpi) spawning process in automatic mode.
+    This is only called by the master mpi process in manual mode, only by
+    the (non-mpi) spawning process in automatic mode, or by all processes in
+    syncro mode.
     """
 
     def __init__(self, fn):
