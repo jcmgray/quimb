@@ -334,7 +334,7 @@ def _init_eigensolver(k=6, which='LM', sigma=None, isherm=True,
     return eigensolver
 
 
-def slepc_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
+def slepc_seigsys(mat, k=6, which=None, return_vecs=True, sigma=None,
                   isherm=True, ncv=None, sort=True, EPSType="krylovschur",
                   return_all_conv=False, st_opts_dict=(), tol=None,
                   max_it=None, comm=None):
@@ -342,7 +342,7 @@ def slepc_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
 
     Parameters
     ----------
-    a : sparse matrix in csr format
+    mat : sparse matrix in csr format
         Operator to solve.
     k : int, optional
         Number of requested eigenpairs.
@@ -389,8 +389,8 @@ def slepc_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
         comm=comm,
     )
 
-    pa = convert_mat_to_petsc(a, comm=comm)
-    eigensolver.setOperators(pa)
+    mat = convert_mat_to_petsc(mat, comm=comm)
+    eigensolver.setOperators(mat)
     eigensolver.solve()
 
     nconv = eigensolver.getConverged()
@@ -408,7 +408,7 @@ def slepc_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
         res = None
 
     if return_vecs:
-        pvec = pa.getVecLeft()
+        pvec = mat.getVecLeft()
 
         def get_vecs_local():
             for i in range(k):
@@ -443,13 +443,13 @@ def _init_svd_solver(nsv=6, SVDType='cross', tol=None, max_it=None,
     return svd_solver
 
 
-def slepc_svds(a, k=6, ncv=None, return_vecs=True, SVDType='cross',
+def slepc_svds(mat, k=6, ncv=None, return_vecs=True, SVDType='cross',
                return_all_conv=False, tol=None, max_it=None, comm=None):
     """Find the singular values for sparse matrix `a`.
 
     Parameters
     ----------
-    a : sparse matrix in csr format
+    mat : sparse matrix in csr format
         The matrix to solve.
     k : int
         Number of requested singular values.
@@ -466,11 +466,11 @@ def slepc_svds(a, k=6, ncv=None, return_vecs=True, SVDType='cross',
     if comm is None:
         comm = get_default_comm()
 
-    pa = convert_mat_to_petsc(a, comm=comm)
+    mat = convert_mat_to_petsc(mat, comm=comm)
 
     svd_solver = _init_svd_solver(nsv=k, SVDType=SVDType, tol=tol,
                                   max_it=max_it, ncv=ncv, comm=comm)
-    svd_solver.setOperator(pa)
+    svd_solver.setOperator(mat)
     svd_solver.solve()
 
     nconv = svd_solver.getConverged()
@@ -484,7 +484,7 @@ def slepc_svds(a, k=6, ncv=None, return_vecs=True, SVDType='cross',
     if return_vecs:
 
         def usv_getter():
-            v, u = pa.createVecs()
+            v, u = mat.createVecs()
             for i in range(k):
                 s = svd_solver.getSingularTriplet(i, u, v)
                 lu = gather_petsc_array(u, comm=comm, out_shape=(-1, 1))
