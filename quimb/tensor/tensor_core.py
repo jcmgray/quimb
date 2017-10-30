@@ -106,7 +106,7 @@ def _maybe_map_indices_to_alphabet(a_ix, i_ix, o_ix):
         # need to map inds to alphabet
         if len(a_ix) > len(_einsum_symbols_set):
             raise ValueError("Too many indices to auto-optimize contraction "
-                             "for at once, try setting a `contract_strategy` "
+                             "for at once, try setting a `structure` "
                              "or do a manual contraction order using tags.")
 
         amap = dict(zip(a_ix, _einsum_symbols))
@@ -276,6 +276,105 @@ def _array_split_lq(x, tol):
 
 class BondError(Exception):
     pass
+
+
+def array_direct_product(X, Y, sum_axes=()):
+    """Direct product of two numpy.ndarrays.
+
+    Parameters
+    ----------
+    X : numpy.ndarray
+        First tensor.
+    Y : numpy.ndarray
+        Second tensor, same shape as ``X``.
+    sum_axes : sequence of int
+        Axes to sum over rather than direct product, e.g. physical indices when
+        adding tensor networks.
+
+    Returns
+    -------
+    Z : numpy.ndarray
+        Same shape as ``X`` and ``Y``, but with every dimension doubled in size
+        unless it is included in ``sum_axes``.
+    """
+    if X.shape != Y.shape:
+        raise ValueError("Can only add tensors of the "
+                         "same shape.")
+
+    if isinstance(sum_axes, int):
+        sum_axes = (sum_axes,)
+
+    # parse the intermediate and final shape doubling the size of any axes that
+    #   is not to be summed, and preparing slices with which to add X, Y.
+    temp_shape = []
+    final_shape = []
+    selectorX = []
+    selectorY = []
+    for i, d in enumerate(X.shape):
+        if i not in sum_axes:
+            temp_shape.append(2)
+            final_shape.append(2 * d)
+            selectorX.append(0)
+            selectorY.append(1)
+        else:
+            final_shape.append(d)
+        temp_shape.append(d)
+        selectorX.append(slice(None))
+        selectorY.append(slice(None))
+
+    new_type = np.find_common_type((X.dtype, Y.dtype), ())
+    Z = np.zeros(temp_shape, dtype=new_type)
+
+    # Add tensors to [0, :, 0, :, ...], [1, :, 1, :, ...] locations, i.e. the
+    #   'diagonal' representing the temp doubled axes
+    Z[selectorX] += X
+    Z[selectorY] += Y
+
+    # Reshape to the same number of original dimensions
+    return Z.reshape(final_shape)
+
+
+def tensor_direct_product(T1, T2, sum_inds=(), inplace=False):
+    """Direct product of two Tensors. They must have the same shape, any axes
+    included in ``sum_inds`` will be summed over rather than combined.
+    Summing over contractions of TensorNetworks equates to contracting a
+    TensorNetwork made of direct products of each set of tensors.
+    I.e. (a1 @ b1) + (a2 @ b2) == (a1 (+) a2) @ (b1 (+) b2).
+
+    Parameters
+    ----------
+    T1 : Tensor
+        The first tensor.
+    T2 : Tensor
+        The second tensor, with matching indices and dimensions to ``T1``.
+    sum_inds : sequence of hashable, optional
+        Axes to sum over rather than combine, e.g. physical indices when
+        adding tensor networks.
+    inplace : bool, optional
+        Whether to modify ``T1`` inplace.
+
+    Returns
+    -------
+    Tensor
+        Like ``T1``, but with each dimension doubled in size if not
+        in ``sum_inds``.
+    """
+    if isinstance(sum_inds, (str, int)):
+        sum_inds = (sum_inds,)
+
+    if T2.inds != T1.inds:
+        T2 = T2.transpose(*T1.inds)
+
+    sum_axes = tuple(T1.inds.index(ind) for ind in sum_inds)
+
+    if inplace:
+        new_T = T1
+    else:
+        new_T = T1.copy()
+
+    # XXX: add T2s tags?
+    new_T._data = array_direct_product(T1.data, T2.data, sum_axes=sum_axes)
+    return new_T
 
 
 # --------------------------------------------------------------------------- #
@@ -676,7 +775,7 @@ for meth_name, op in [('__radd__', operator.__add__),
 #                            Tensor Network Class                             #
 # --------------------------------------------------------------------------- #
 
-_TN_SIMPLE_PROPS = ['contract_strategy', 'nsites', 'contract_bsz']
+_TN_SIMPLE_PROPS = ['structure', 'nsites', 'structure_bsz']
 _TN_DATA_PROPS = ['tensor_index', 'tag_index']
 
 
@@ -690,19 +789,19 @@ class SiteIndexer(object):
     def __getitem__(self, site):
         if site < 0:
             site = self.tn.nsites + site
-        site_tag = self.tn.contract_strategy.format(site)
+        site_tag = self.tn.structure.format(site)
         return self.tn[site_tag]
 
     def __setitem__(self, site, tensor):
         if site < 0:
             site = self.tn.nsites + site
-        site_tag = self.tn.contract_strategy.format(site)
+        site_tag = self.tn.structure.format(site)
         self.tn[site_tag] = tensor
 
     def __delitem__(self, site):
         if site < 0:
             site = self.tn.nsites + site
-        site_tag = self.tn.contract_strategy.format(site)
+        site_tag = self.tn.structure.format(site)
         del self.tn[site_tag]
 
 
@@ -720,23 +819,23 @@ class TensorNetwork(object):
         will have those indices' names mangled. Should be explicily turned off
         when it is known that no collisions will take place -- i.e. when not
         adding any new tensors.
-    contract_strategy : str, optional
+    structure : str, optional
         A string, with integer format specifier, that describes how to range
         over the network's tags in order to contract it.
-    contract_bsz : int, optional
+    structure_bsz : int, optional
         How many sites to group together when auto contracting. Eg for 3 (with
         the dotted lines denoting vertical strips of tensors to be contracted):
 
-            .....                ........          .....
+            .....       i        ........ i        ...i.
             O-O-O-O-O-O-O-        /-O-O-O-O-        /-O-
-            | | | | | | |   ->   Q  | | | |   ->   0  |   ->  etc.
+            | | | | | | |   ->   1  | | | |   ->   2  |   ->  etc.
             O-O-O-O-O-O-O-        \-O-O-O-O-        \-O-
 
         Should not require tensor contractions with more than 52 unique
         indices.
     nsites : int, optional
         The number of sites, if explicitly known. This will be calculated
-        using `contract_strategy` if needed but not specified.
+        using `structure` if needed but not specified.
     virtual : bool, optional
         Whether the TensorNetwork should be a *view* onto the tensors it is
         given, or a copy of them. E.g. if a virtual TN is constructed, any
@@ -758,8 +857,8 @@ class TensorNetwork(object):
 
     def __init__(self, tensors, *,
                  check_collisions=True,
-                 contract_strategy=None,
-                 contract_bsz=None,
+                 structure=None,
+                 structure_bsz=None,
                  nsites=None,
                  virtual=False):
 
@@ -767,17 +866,17 @@ class TensorNetwork(object):
 
         # short-circuit for copying TensorNetworks
         if isinstance(tensors, TensorNetwork):
-            self.contract_strategy = tensors.contract_strategy
+            self.structure = tensors.structure
             self.nsites = tensors.nsites
-            self.contract_bsz = tensors.contract_bsz
+            self.structure_bsz = tensors.structure_bsz
             self.tag_index = {
                 tg: nms.copy() for tg, nms in tensors.tag_index.items()}
             self.tensor_index = {nm: tsr if virtual else tsr.copy()
                                  for nm, tsr in tensors.tensor_index.items()}
             return
 
-        self.contract_strategy = contract_strategy
-        self.contract_bsz = contract_bsz
+        self.structure = structure
+        self.structure_bsz = structure_bsz
         self.nsites = nsites
 
         self.tensor_index = {}
@@ -832,15 +931,15 @@ class TensorNetwork(object):
                 self.tag_index = merge_with(
                     set_join, self.tag_index, t.tag_index)
 
-        # count how many sites if a contract_strategy is given
-        if self.contract_strategy:
+        # count how many sites if a structure is given
+        if self.structure:
 
             if self.nsites is None:
                 self.nsites = self.calc_nsites()
 
             # set default blocksize
-            if self.contract_bsz is None:
-                self.contract_bsz = 2
+            if self.structure_bsz is None:
+                self.structure_bsz = 2
 
     # ------------------------------- Methods ------------------------------- #
 
@@ -942,11 +1041,11 @@ class TensorNetwork(object):
         return tuple(self.tensor_index.values())
 
     def calc_nsites(self):
-        """Calculate how many tags there are which match ``contract_strategy``.
+        """Calculate how many tags there are which match ``structure``.
         """
         nsites = 0
         while True:
-            if self.contract_strategy.format(nsites) in self.tag_index:
+            if self.structure.format(nsites) in self.tag_index:
                 nsites += 1
             else:
                 break
@@ -1080,12 +1179,12 @@ class TensorNetwork(object):
         if tags is ...:
             tags = slice(0, self.nsites)
 
-        tags_seq = (self.contract_strategy.format(i)
+        tags_seq = (self.structure.format(i)
                     for i in range(*self.parse_tag_slice(tags)))
 
-        # partition sites into `contract_bsz` groups
-        if self.contract_bsz > 1:
-            tags_seq = partition_all(self.contract_bsz, tags_seq)
+        # partition sites into `structure_bsz` groups
+        if self.structure_bsz > 1:
+            tags_seq = partition_all(self.structure_bsz, tags_seq)
 
         return self.cumulative_contract(tags_seq, inplace=inplace)
 
@@ -1106,7 +1205,7 @@ class TensorNetwork(object):
         """
 
         # Check for a structured strategy for performing contraction...
-        if self.contract_strategy is not None:
+        if self.structure is not None:
             # ... but only use for total or slice tags
             if (tags is ...) or isinstance(tags, slice):
                 return self._contract_with_strategy(tags, inplace=inplace)
@@ -1279,22 +1378,13 @@ class TensorNetwork(object):
     # ------------------------------ printing ------------------------------- #
 
     def __repr__(self):
-        return "{}({}, {}, {})".format(
-            self.__class__.__name__,
-            repr(self.tensors),
-            "contract_strategy='{}'".format(self.contract_strategy) if
-            self.contract_strategy is not None else "",
-            "nsites={}".format(self.nsites) if
-            self.nsites is not None else "")
-
-    def __str__(self):
         return "{}([{}{}{}]{}{})".format(
             self.__class__.__name__,
             os.linesep,
             "".join(["    " + repr(t) + "," + os.linesep
                      for t in self.tensors[:-1]]),
             "    " + repr(self.tensors[-1]) + "," + os.linesep,
-            ", contract_strategy='{}'".format(self.contract_strategy) if
-            self.contract_strategy is not None else "",
+            ", structure='{}'".format(self.structure) if
+            self.structure is not None else "",
             ", nsites={}".format(self.nsites) if
             self.nsites is not None else "")

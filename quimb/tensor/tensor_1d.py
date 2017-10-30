@@ -87,7 +87,7 @@ class MatrixProductState(TensorNetwork):
                                                     gen_inds(), gen_orders()):
                 yield Tensor(array.transpose(*order), inds=inds, tags=site_tag)
 
-        super().__init__(gen_tensors(), contract_strategy=site_tag_id,
+        super().__init__(gen_tensors(), structure=site_tag_id,
                          nsites=nsites, check_collisions=False, **kwargs)
 
     def reindex_sites(self, new_id, where=None, inplace=False):
@@ -501,7 +501,7 @@ class MatrixProductOperator(TensorNetwork):
 
                 yield Tensor(array.transpose(*order), inds=inds, tags=site_tag)
 
-        super().__init__(gen_tensors(), contract_strategy=site_tag_id,
+        super().__init__(gen_tensors(), structure=site_tag_id,
                          nsites=nsites, check_collisions=False, **kwargs)
 
     def reindex_lower_sites(self, new_id, where=None, inplace=False):

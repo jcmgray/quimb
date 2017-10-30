@@ -359,3 +359,25 @@ Approximate spectral linear algebra
     norm_ppt_subsys_approx
     logneg_subsys_approx
     negativity_subsys_approx
+
+
+Tensor Networks
+---------------
+
+.. currentmodule:: quimb.tensor
+.. autosummary::
+    :toctree: _autosummary
+
+    einsum
+    einsum_path
+    tensor_contract
+    tensor_direct_product
+    Tensor
+    rand_tensor
+    TensorNetwork
+    MatrixProductState
+    MPS_rand
+    MatrixProductOperator
+    MPO_ham_heis
+    align_inner
+    DMRG1

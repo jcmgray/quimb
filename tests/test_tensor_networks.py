@@ -14,8 +14,9 @@ from quimb import (
 )
 
 from quimb.tensor.tensor_core import (
-    Tensor,
     tensor_contract,
+    tensor_direct_product,
+    Tensor,
     TensorNetwork,
 )
 from quimb.tensor.tensor_1d import (
@@ -273,6 +274,32 @@ class TestTensorFunctions:
         svn = (t2).entropy(left_inds, method=method)
         assert_allclose(real_svn, svn)
 
+    def test_direct_product(self):
+        a1 = rand_tensor((2, 3, 4), inds='abc')
+        b1 = rand_tensor((3, 4, 5), inds='bcd')
+        a2 = rand_tensor((2, 3, 4), inds='abc')
+        b2 = rand_tensor((3, 4, 5), inds='bcd')
+
+        c1 = (a1 @ b1) + (a2 @ b2)
+        c2 = (tensor_direct_product(a1, a2, sum_inds=('a')) @
+              tensor_direct_product(b1, b2, sum_inds=('d')))
+        assert c1.almost_equals(c2)
+
+    def test_direct_product_triple(self):
+        a1 = rand_tensor((2, 3, 4), inds='abc')
+        b1 = rand_tensor((3, 4, 5, 6), inds='bcde')
+        c1 = rand_tensor((6, 7), inds='ef')
+
+        a2 = rand_tensor((2, 3, 4), inds='abc')
+        b2 = rand_tensor((3, 4, 5, 6), inds='bcde').transpose(*'decb')
+        c2 = rand_tensor((6, 7), inds='ef')
+
+        d1 = (a1 @ b1 @ c1) + (a2 @ b2 @ c2)
+        d2 = (tensor_direct_product(a1, a2, sum_inds=('a')) @
+              tensor_direct_product(b1, b2, sum_inds=('d')) @
+              tensor_direct_product(c1, c2, sum_inds=('f')))
+        assert d1.almost_equals(d2)
+
 
 class TestTensorNetwork:
     def test_combining_tensors(self):
@@ -435,7 +462,7 @@ class TestTensorNetwork:
         b = rand_tensor((3, 4, 5), inds=[1, 2, 3], tags='i1')
         c = rand_tensor((5, 2, 6), inds=[3, 0, 4], tags='i2')
         d = rand_tensor((5, 2, 6), inds=[5, 6, 4], tags='i3')
-        tn = TensorNetwork((a, b, c, d), contract_strategy="i{}")
+        tn = TensorNetwork((a, b, c, d), structure="i{}")
 
         assert len((tn ^ slice(2)).tensors) == 3
         assert len((tn ^ slice(..., 1)).tensors) == 3
@@ -481,7 +508,7 @@ class TestTensorNetwork:
         b_data = np.random.randn(2, 3, 4)
         a = Tensor(a_data, inds='abc', tags={'i0'})
         b = Tensor(b_data, inds='abc', tags={'i1'})
-        tn = TensorNetwork((a, b), contract_strategy="i{}")
+        tn = TensorNetwork((a, b), structure="i{}")
         assert_allclose(tn.site[0].data, a_data)
         new_data = np.random.randn(2, 3, 4)
         tn.site[1] = Tensor(new_data, inds='abc', tags={'i1', 'red'})
@@ -493,7 +520,7 @@ class TestTensorNetwork:
         b_data = np.random.randn(2, 3, 4)
         a = Tensor(a_data, inds='abc', tags={'i0'})
         b = Tensor(b_data, inds='abc', tags={'i1'})
-        tn = TensorNetwork((a, b), contract_strategy="i{}")
+        tn = TensorNetwork((a, b), structure="i{}")
         assert_allclose(tn.site[0].data, a_data)
         new_data = np.random.randn(24)
         tn.site[1].data = new_data
