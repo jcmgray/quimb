@@ -215,7 +215,8 @@ def gather_petsc_array(x, comm, out_shape=None, matrix=False):
     """
     # get local numpy array
     lx = x.getArray()
-    ri, rf = x.getOwnershipRange()
+    ox = np.empty(2, dtype=int)
+    ox[:] = x.getOwnershipRange()
 
     # master only
     if comm.Get_rank() == 0:
@@ -223,14 +224,14 @@ def gather_petsc_array(x, comm, out_shape=None, matrix=False):
         # create total array
         ax = np.empty(x.getSize(), dtype=complex)
         # set master's portion
-        ax[ri:rf, ...] = lx
+        ax[ox[0]:ox[1], ...] = lx
 
         # get ownership ranges and data from worker processes
         for i in range(1, comm.Get_size()):
-            ji, jf = comm.recv(source=i, tag=11)
+            comm.Recv(ox, source=i, tag=11)
 
             # receive worker's part of ouput vector
-            comm.Recv(ax[ji:jf, ...], source=i, tag=42)
+            comm.Recv(ax[ox[0]:ox[1], ...], source=i, tag=42)
 
         if out_shape is not None:
             ax = ax.reshape(*out_shape)
@@ -240,7 +241,7 @@ def gather_petsc_array(x, comm, out_shape=None, matrix=False):
     # Worker only
     else:
         # send ownership range
-        comm.send((ri, rf), dest=0, tag=11)
+        comm.Send(ox, dest=0, tag=11)
         # send local portion of eigenvectors as buffer
         comm.Send(lx, dest=0, tag=42)
         ax = None

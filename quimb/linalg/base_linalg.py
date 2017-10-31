@@ -273,7 +273,7 @@ def eigsys_window(a, w_0, w_n=6, w_sz=None, backend='AUTO',
         l_w0, l_wmin, l_wmax = _rel_window_to_abs_window(lmin, lmax, w_0, w_sz)
 
     else:
-        lmin, lmax = bound_spectrum(a, **kwargs)
+        lmin, lmax = bound_spectrum(a, backend=backend, **kwargs)
         l_w0, l_wmin, l_wmax = _rel_window_to_abs_window(lmin, lmax, w_0, w_sz)
         l_w0 += (lmax - lmin) * offset_const  # for 1/0 issues
         if return_vecs:
