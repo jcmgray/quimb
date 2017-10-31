@@ -64,7 +64,7 @@ export _QUIMB_MPI_LAUNCHED="MANUAL"
 
 if [ $QUIMB_SYNCRO_MPI ]; then  # use simplistic syncronized pool
     if [ $num_procs ]; then
-        echo "Launching quimb in Syncro mode with ${mpi_launcher} and ${proc_descr} processes."
+        echo "Launching quimb in Syncro mode with ${mpi_launcher} and ${num_procs} processes."
         ${mpi_launcher} --np "${num_procs}" python "$@"
     else
         echo "Launching quimb in Syncro mode with ${mpi_launcher}".
@@ -72,7 +72,7 @@ if [ $QUIMB_SYNCRO_MPI ]; then  # use simplistic syncronized pool
     fi
 else  # run script with mpi through mpi4py module
     if [ $num_procs ]; then
-        echo "Launching quimb in mpi4py.futures mode with ${mpi_launcher} and ${proc_descr} processes."
+        echo "Launching quimb in mpi4py.futures mode with ${mpi_launcher} and ${num_procs} processes."
         ${mpi_launcher} --np "${num_procs}" python -m mpi4py.futures "$@"
     else
         echo "Launching quimb in mpi4py.futures mode with ${mpi_launcher}."
