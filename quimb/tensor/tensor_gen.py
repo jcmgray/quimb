@@ -59,7 +59,8 @@ def MPS_rand(n, bond_dim, phys_dim=2,
     return rmps
 
 
-def build_spin_ham_mpos(one_site_terms, two_site_terms, S=1 / 2, which=None):
+def build_spin_ham_mpo_tensors(one_site_terms, two_site_terms,
+                               S=1 / 2, which=None):
     """Genereate a spin hamiltonian MPO tensor
 
     Parameters
@@ -76,7 +77,6 @@ def build_spin_ham_mpos(one_site_terms, two_site_terms, S=1 / 2, which=None):
     which : {None, 'L', 'R', 'A'}, optional
         If ``None``, generate the middle tensor, if 'L' a left-end tensor, if
         'R' a right-end tensor and if 'A' all three.
-        not ``None``.
 
     Returns
     -------
@@ -112,7 +112,7 @@ def build_spin_ham_mpos(one_site_terms, two_site_terms, S=1 / 2, which=None):
     if which == 'L':
         return H[-1, :, :, :]
     elif which == 'R':
-        H[:, 0, :, :]
+        return H[:, 0, :, :]
     elif which == 'A':
         return H[-1, :, :, :], H, H[:, 0, :, :]
 
@@ -142,7 +142,7 @@ class MPOSpinHam:
               site_tag_id='i{}', tags=None, bond_name=""):
         """
         """
-        left, middle, right = build_spin_ham_mpos(
+        left, middle, right = build_spin_ham_mpo_tensors(
             self.one_site_terms, self.two_site_terms, S=self.S, which='A')
 
         arrays = (left, *[middle] * (n - 2), right)
