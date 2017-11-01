@@ -128,7 +128,7 @@ def get_mpi_pool(num_workers=None, num_threads=1):
         return SynchroMPIPool()
 
     from mpi4py.futures import MPIPoolExecutor
-    return MPIPoolExecutor(num_workers, main=False, delay=1e-2,
+    return MPIPoolExecutor(num_workers, main=False,
                            env={'OMP_NUM_THREADS': str(num_threads),
                                 'QUIMB_NUM_MPI_WORKERS': str(num_workers),
                                 '_QUIMB_MPI_LAUNCHED': 'SPAWNED'})
