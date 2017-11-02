@@ -773,6 +773,13 @@ def approx_spectral_function(
             # XXX: sometimes both eig methods fail... ignore for now
             import warnings
             warnings.warn("Approx Spectral tri-eig didn't converge.")
+        except StopIteration:
+            import warnings
+            msg = (
+                "Unexepected StopIteration during ``approx_spectral_function``"
+                ", current length of samples: {}, maximum repeats={}, mpi={}.")
+            warnings.warn(msg.format(len(samples), R, mpi))
+
         r = len(samples)
 
         # wait a few iterations before checking error on mean breakout
