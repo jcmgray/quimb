@@ -15,4 +15,4 @@ Modes of execution
 
 .. warning::
 
-    In syncro mode, potentially conflicting operations such as IO should be guarded with ``if MPI.COMM_WORLD.Get_rank() == 0`` etc.
+    In syncro mode, potentially conflicting operations such as IO should be guarded with ``if MPI.COMM_WORLD.Get_rank() == 0`` etc. Additionally, any functions called outside of the MPI pool should be pure to ensure syncronization.

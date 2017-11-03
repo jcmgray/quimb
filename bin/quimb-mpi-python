@@ -9,7 +9,7 @@ key="$1"
 case $key in
     -h|--help)
     echo "Run a python script that uses quimb, eagerly launching
-    with mpi, rather than dynamically spawning MPI processes.
+with mpi, rather than dynamically spawning MPI processes.
 
     Usage:
         quimb-mpi-python [OPTIONS]... [SCRIPT]...
@@ -27,6 +27,9 @@ case $key in
             a MPIPool is encountered.
         -h, --help
             Show this help.
+
+Note that in syncro mode, *all* functions called outside
+of the mpi pool must be pure to ensure syncronization.
     "
     exit 0
     ;;
