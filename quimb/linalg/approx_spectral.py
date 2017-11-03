@@ -594,10 +594,9 @@ def lanczos_tridiag_eig(alpha, beta, check_finite=True):
             Tk_banded, lower=True, check_finite=check_finite)
 
     # sometimes get no convergence -> use dense hermitian method
-    except np.linalg.linalg.LinAlgError:  # pragma: no cover
-        tl, tv = np.linalg.eigh(np.diag(alpha) +
-                                np.diag(beta[:alpha.size - 1], 1) +
-                                np.diag(beta[:alpha.size - 1], -1))
+    except scla.LinAlgError:  # pragma: no cover
+        tl, tv = np.linalg.eigh(
+            np.diag(alpha) + np.diag(beta[:alpha.size - 1], -1), UPLO='L')
 
     return tl, tv
 
@@ -650,20 +649,28 @@ def _single_random_estimate(A, K, bsz, beta_tol, v0, fn, pos,
             A, K=K, bsz=bsz, beta_tol=beta_tol, seed=seed,
             v0=v0() if callable(v0) else v0):
 
-        # First bound
-        Gf = scaling * calc_trace_fn_tridiag(*lanczos_tridiag_eig(
-            alpha, beta, check_finite=False), fn=fn, pos=pos)
+        try:  # First bound
+            Gf = scaling * calc_trace_fn_tridiag(*lanczos_tridiag_eig(
+                alpha, beta, check_finite=False), fn=fn, pos=pos)
+        except scla.LinAlgError:
+            import warnings
+            warnings.warn("Approx Spectral Gf tri-eig didn't converge.")
+            continue
 
         # check for break-down convergence (e.g. found entire non-null)
         if abs(beta[-1]) < beta_tol:
             estimate = Gf
             break
 
-        # second bound
-        beta[-1] = beta[0]
-        Rf = scaling * calc_trace_fn_tridiag(*lanczos_tridiag_eig(
-            np.append(alpha, alpha[0]), beta, check_finite=False),
-            fn=fn, pos=pos)
+        try:  # second bound
+            beta[-1] = beta[0]
+            Rf = scaling * calc_trace_fn_tridiag(*lanczos_tridiag_eig(
+                np.append(alpha, alpha[0]), beta, check_finite=False),
+                fn=fn, pos=pos)
+        except scla.LinAlgError:
+            import warnings
+            warnings.warn("Approx Spectral Rf tri-eig didn't converge.")
+            continue
 
         # check for error bound convergence
         if abs(Rf - Gf) < 2 * tau * (abs(Gf) + tol_scale):
@@ -753,33 +760,21 @@ def approx_spectral_function(
     else:
         R = max(1, int(R / bsz))
 
+    # generate repeat estimates
     args = (A, K, bsz, beta_tol, v0, fn, pos, tau, tol_scale)
-
     if not mpi:
         results = iter(_single_random_estimate(*args) for _ in range(R))
     else:
         mpi_pool = get_mpi_pool()
-        fs = [mpi_pool.submit(_single_random_estimate,
-                              *args, seed=i) for i in range(R)]
+        fs = [mpi_pool.submit(_single_random_estimate, *args, seed=i)
+              for i in range(R)]
         results = iter(f.result() for f in fs)
 
+    # iterate through estimates, waiting for convergence
     estimate = None
     samples = []
-
     for _ in range(R):
-        try:
-            samples.append(next(results))
-        except np.linalg.linalg.LinAlgError:  # pragma: no cover
-            # XXX: sometimes both eig methods fail... ignore for now
-            import warnings
-            warnings.warn("Approx Spectral tri-eig didn't converge.")
-        except StopIteration:
-            import warnings
-            msg = (
-                "Unexepected StopIteration during ``approx_spectral_function``"
-                ", current length of samples: {}, maximum repeats={}, mpi={}.")
-            warnings.warn(msg.format(len(samples), R, mpi))
-
+        samples.append(next(results))
         r = len(samples)
 
         # wait a few iterations before checking error on mean breakout
