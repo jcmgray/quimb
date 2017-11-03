@@ -3,7 +3,7 @@
 from operator import add
 from functools import lru_cache
 
-from cytoolz import isiterable, concat
+from cytoolz import isiterable, concat, unique
 import numpy as np
 import scipy.sparse as sp
 
@@ -305,7 +305,7 @@ def uniq_perms(xs):
     if len(xs) == 1:
         yield (xs[0],)
     else:
-        uniq_xs = set(xs)
+        uniq_xs = unique(xs)
         for first_x in uniq_xs:
             rem_xs = list(xs)
             rem_xs.remove(first_x)
