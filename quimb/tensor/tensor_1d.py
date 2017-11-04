@@ -219,9 +219,9 @@ class MatrixProductState(TensorNetwork):
         """Left canonize all or a portion of this MPS, such that:
 
                           i              i
-            +-+-+-+-+-+-+-o-o-         +-o-o-
+            >->->->->->->-o-o-         +-o-o-
             | | | | | | | | | ...  ->  | | | ...
-            +-+-+-+-+-+-+-o-o-         +-o-o-
+            >->->->->->->-o-o-         +-o-o-
 
         Parameters
         ----------
@@ -253,9 +253,9 @@ class MatrixProductState(TensorNetwork):
         """Right canonize all or a portion of this MPS, such that:
 
                    i                           i
-                -o-o-+-+-+-+-+-+-+          -o-o-+
+                -o-o-<-<-<-<-<-<-<          -o-o-+
              ... | | | | | | | | |   ->  ... | | |
-                -o-o-+-+-+-+-+-+-+          -o-o-+
+                -o-o-<-<-<-<-<-<-<          -o-o-+
 
 
         Parameters
@@ -288,9 +288,9 @@ class MatrixProductState(TensorNetwork):
         """Mixed canonize this MPS, such that:
 
                           i                      i
-            +-+-+-+-+- -+-o-+- -+-+-+-+-+      +-o-+
+            >->->->->- ->-o-<- -<-<-<-<-<      +-o-+
             | | | | |...| | |...| | | | |  ->  | | |
-            +-+-+-+-+- -+-o-+- -+-+-+-+-+      +-o-+
+            >->->->->- ->-o-<- -<-<-<-<-<      +-o-+
 
         Parameters
         ----------
