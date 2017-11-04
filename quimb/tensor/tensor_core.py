@@ -941,6 +941,18 @@ class TensorNetwork(object):
             if self.structure_bsz is None:
                 self.structure_bsz = 2
 
+    def __and__(self, other):
+        """Combine this tensor network with more tensors, without contracting.
+        Copies the tensors.
+        """
+        return TensorNetwork((self, other))
+
+    def __or__(self, other):
+        """Combine this tensor network with more tensors, without contracting.
+        Views the constituent tensors.
+        """
+        return TensorNetwork((self, other), virtual=True)
+
     # ------------------------------- Methods ------------------------------- #
 
     def copy(self, virtual=False, deep=False):
@@ -1039,6 +1051,69 @@ class TensorNetwork(object):
     @property
     def tensors(self):
         return tuple(self.tensor_index.values())
+
+    def __getitem__(self, tags):
+        """Get the tensor(s) associated with ``tags``.
+
+        Parameters
+        ----------
+        tags : str or sequence of str
+            The tags used to select the tensor(s)
+
+        Returns
+        -------
+        Tensor or sequence of Tensors
+        """
+        try:
+            names = self.tag_index[tags]
+        except (KeyError, TypeError):
+            names = functools.reduce(
+                operator.and_, (self.tag_index[t] for t in tags))
+
+        tensors = tuple(self.tensor_index[name] for name in names)
+
+        if len(names) == 1:
+            return tensors[0]
+
+        return tensors
+
+    def __setitem__(self, tags, tensor):
+        """Set the single tensor uniquely associated with ``tags``.
+        """
+        try:
+            names = self.tag_index[tags]
+        except (KeyError, TypeError):
+            names = functools.reduce(
+                operator.and_, (self.tag_index[t] for t in tags))
+
+        if len(names) != 1:
+            raise KeyError("'TensorNetwork.__setitem__' is meant for a single "
+                           "existing tensor only - found {} with tag(s) '{}'."
+                           .format(len(names), tags))
+
+        if not isinstance(tensor, Tensor):
+            raise TypeError("Can only set value with a new 'Tensor'.")
+
+        name, = names
+
+        # check if tags match, else need to modify TN structure
+        if self.tensor_index[name].tags != tensor.tags:
+            self.del_tensor(name)
+            self.add_tensor(tensor, name, virtual=True)
+        else:
+            self.tensor_index[name] = tensor
+
+    def __delitem__(self, tags):
+        """Delete any tensors associated with ``tags``.
+        """
+        try:
+            names = self.tag_index[tags]
+        except (KeyError, TypeError):
+            names = functools.reduce(
+                operator.and_, (self.tag_index[t] for t in tags))
+
+        for name in copy.copy(names):
+            self.del_tensor(name)
 
     def calc_nsites(self):
         """Calculate how many tags there are which match ``structure``.
@@ -1223,6 +1298,11 @@ class TensorNetwork(object):
         """
         return self.contract(tags, inplace=True)
 
+    def __matmul__(self, other):
+        """Overload "@" to mean full contraction with another network.
+        """
+        return TensorNetwork((self, other)) ^ ...
+
     def reindex(self, index_map, inplace=False):
         """Rename indices for all tensors in this network, optionally in-place.
 
@@ -1259,6 +1339,8 @@ class TensorNetwork(object):
         """
         return self.conj()
 
+    # --------------- information about indices and dimensions -------------- #
+
     def all_dims_inds(self):
         """Return a list of all dimensions, and the corresponding list of
         indices from the tensor network.
@@ -1287,93 +1369,13 @@ class TensorNetwork(object):
     def outer_inds(self):
         """Actual, i.e. exterior, indices of this TensorNetwork.
         """
-        return tuple(i for d, i in self.outer_dims_inds())
+        return tuple(di[1] for di in self.outer_dims_inds())
 
     @property
     def shape(self):
         """Actual, i.e. exterior, shape of this TensorNetwork.
         """
-        return tuple(d for d, i in self.outer_dims_inds())
-
-    def __getitem__(self, tags):
-        """Get the tensor(s) associated with ``tags``.
-
-        Parameters
-        ----------
-        tags : str or sequence of str
-            The tags used to select the tensor(s)
-
-        Returns
-        -------
-        Tensor or sequence of Tensors
-        """
-        try:
-            names = self.tag_index[tags]
-        except (KeyError, TypeError):
-            names = functools.reduce(
-                operator.and_, (self.tag_index[t] for t in tags))
-
-        tensors = tuple(self.tensor_index[name] for name in names)
-
-        if len(names) == 1:
-            return tensors[0]
-
-        return tensors
-
-    def __setitem__(self, tags, tensor):
-        """Set the single tensor uniquely associated with ``tags``.
-        """
-        try:
-            names = self.tag_index[tags]
-        except (KeyError, TypeError):
-            names = functools.reduce(
-                operator.and_, (self.tag_index[t] for t in tags))
-
-        if len(names) != 1:
-            raise KeyError("'TensorNetwork.__setitem__' is meant for a single "
-                           "existing tensor only - found {} with tag(s) '{}'."
-                           .format(len(names), tags))
-
-        if not isinstance(tensor, Tensor):
-            raise TypeError("Can only set value with a new 'Tensor'.")
-
-        name, = names
-
-        # check if tags match, else need to modify TN structure
-        if self.tensor_index[name].tags != tensor.tags:
-            self.del_tensor(name)
-            self.add_tensor(tensor, name, virtual=True)
-        else:
-            self.tensor_index[name] = tensor
-
-    def __delitem__(self, tags):
-        """Delete any tensors associated with ``tags``.
-        """
-        try:
-            names = self.tag_index[tags]
-        except (KeyError, TypeError):
-            names = functools.reduce(
-                operator.and_, (self.tag_index[t] for t in tags))
-
-        for name in copy.copy(names):
-            self.del_tensor(name)
-
-    def __and__(self, other):
-        """Combine this tensor network with more tensors, without contracting.
-        Copies the tensors.
-        """
-        return TensorNetwork((self, other))
-
-    def __or__(self, other):
-        """Combine this tensor network with more tensors, without contracting.
-        Views the constituent tensors.
-        """
-        return TensorNetwork((self, other), virtual=True)
-
-    def __matmul__(self, other):
-        """Overload "@" to mean full contraction with another network.
-        """
-        return TensorNetwork((self, other)) ^ ...
+        return tuple(di[0] for di in self.outer_dims_inds())
 
     # ------------------------------ printing ------------------------------- #
 
