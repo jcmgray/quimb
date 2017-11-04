@@ -610,7 +610,7 @@ class TestMatrixProductState:
         n = 10
         k = MPS_rand(n, 10, site_tag_id="foo{}", tags='bar', normalize=False)
         k.left_canonize(normalize=True)
-        assert abs(k.H @ k) - 1 < 1e-13
+        assert abs(k.H @ k - 1) < 1e-13
         p_tn = (k.H & k) ^ slice(0, 9)
         assert_allclose(p_tn['foo8'].data, np.eye(10), atol=1e-13)
 
@@ -619,7 +619,7 @@ class TestMatrixProductState:
         k = MPS_rand(n, 10, site_tag_id="foo{}", tags='bar', normalize=False)
         b = k.H
         k.left_canonize(normalize=True, bra=b)
-        assert abs(b @ k) - 1 < 1e-13
+        assert abs(b @ k - 1) < 1e-13
         p_tn = (b & k) ^ slice(0, 9)
         assert_allclose(p_tn['foo8'].data, np.eye(10), atol=1e-13)
 
@@ -627,7 +627,7 @@ class TestMatrixProductState:
         n = 10
         k = MPS_rand(n, 10, site_tag_id="foo{}", tags='bar', normalize=False)
         k.right_canonize(normalize=True)
-        assert abs(k.H @ k) - 1 < 1e-13
+        assert abs(k.H @ k - 1) < 1e-13
         p_tn = (k.H & k) ^ slice(..., 0)
         assert_allclose(p_tn['foo1'].data, np.eye(10), atol=1e-13)
 
@@ -636,7 +636,7 @@ class TestMatrixProductState:
         k = MPS_rand(n, 10, site_tag_id="foo{}", tags='bar', normalize=False)
         b = k.H
         k.right_canonize(normalize=True, bra=b)
-        assert abs(b @ k) - 1 < 1e-13
+        assert abs(b @ k - 1) < 1e-13
         p_tn = (b & k) ^ slice(..., 0)
         assert_allclose(p_tn['foo1'].data, np.eye(10), atol=1e-13)
 
@@ -684,6 +684,16 @@ class TestMatrixProductState:
         assert abs((tn ^ ...) - 1) > 1e-13
         assert not np.allclose(tn[('__ket__', 'i1')].data,
                                tn[('__bra__', 'i1')].data.conj())
+
+    def test_adding_mps(self):
+        p = MPS_rand(10, 7)
+        assert max(p['i4'].shape) == 7
+        p2 = p + p
+        assert max(p2['i4'].shape) == 14
+        assert abs(p2.H @ p - 2) < 1e-13
+        p += p
+        assert max(p['i4'].shape) == 14
+        assert abs(p.H @ p - 4) < 1e-13
 
     def test_schmidt_values_entropy_gap_simple(self):
         n = 12

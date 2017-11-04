@@ -2,7 +2,12 @@
 """
 import copy
 import numpy as np
-from .tensor_core import Tensor, TensorNetwork, rand_uuid
+from .tensor_core import (
+    Tensor,
+    TensorNetwork,
+    rand_uuid,
+    tensor_direct_product
+)
 
 
 class MatrixProductState(TensorNetwork):
@@ -322,6 +327,33 @@ class MatrixProductState(TensorNetwork):
         else:
             for i in range(current, new, -1):
                 self.right_canonize_site(i, bra=bra)
+
+    def add_MPS(self, other, inplace=False):
+        """Add another MatrixProductState to this one.
+        """
+        if self.nsites != other.nsites:
+            raise ValueError("Can't add MPS with of different length.")
+
+        if inplace:
+            new = self
+        else:
+            new = self.copy()
+
+        for i in range(new.nsites):
+            tensor_direct_product(new.site[i], other.site[i], inplace=True,
+                                  sum_inds=new.site_ind_id.format(i))
+
+        return new
+
+    def __add__(self, other):
+        """MPS addition.
+        """
+        return self.add_MPS(other, inplace=False)
+
+    def __iadd__(self, other):
+        """In-place MPS addition.
+        """
+        return self.add_MPS(other, inplace=True)
 
     def schmidt_values(self, i, current_orthog_centre=None, method='svd'):
         """Find the schmidt values associated with the bipartition of this
