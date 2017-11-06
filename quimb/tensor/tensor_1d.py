@@ -6,7 +6,7 @@ from .tensor_core import (
     Tensor,
     TensorNetwork,
     rand_uuid,
-    tensor_direct_product
+    tensor_direct_product,
 )
 
 
@@ -15,7 +15,7 @@ class MatrixProductState(TensorNetwork):
 
     Parameters
     ----------
-    *arrays : sequence of arrays
+    arrays : sequence of arrays
         The tensor arrays to form into a MPS.
     shape : str, optional
         String specifying layout of the tensors. E.g. 'lrp' (the default)
