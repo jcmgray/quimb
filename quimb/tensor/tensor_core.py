@@ -504,7 +504,7 @@ class Tensor(object):
     def contract(self, *others, output_inds=None):
         return tensor_contract(self, *others, output_inds=output_inds)
 
-    def split(self, left_inds, method='svd', tol=None,
+    def split(self, left_inds, method='svd', tol=1e-13,
               max_bond=None, get=None):
         """Decompose this tensor into two tensors.
 

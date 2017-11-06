@@ -10,7 +10,121 @@ from .tensor_core import (
 )
 
 
-class MatrixProductState(TensorNetwork):
+class TensorNetwork1D(TensorNetwork):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def _left_decomp_site(self, i, bra=None, **split_opts):
+        T1 = self.site[i]
+        T2 = self.site[i + 1]
+
+        t1_inds_set = set(T1.inds)
+        t2_inds_set = set(T2.inds)
+
+        old_shared_bond, = t1_inds_set & t2_inds_set
+        left_inds = t1_inds_set - t2_inds_set
+
+        Q, R = T1.split(left_inds, get='tensors', **split_opts)
+        R = R @ T2
+
+        new_shared_bond, = (j for j in Q.inds if j not in t1_inds_set)
+        Q.reindex({new_shared_bond: old_shared_bond}, inplace=True)
+        Q.transpose(*T1.inds, inplace=True)
+        R.reindex({new_shared_bond: old_shared_bond}, inplace=True)
+        R.transpose(*T2.inds, inplace=True)
+
+        self.site[i]._data = Q._data
+        self.site[i + 1]._data = R._data
+
+        if bra is not None:
+            bra.site[i]._data = Q._data.conj()
+            bra.site[i + 1]._data = R._data.conj()
+
+    def _right_decomp_site(self, i, bra=None, **split_opts):
+        T1 = self.site[i]
+        T2 = self.site[i - 1]
+
+        t1_inds_set = set(T1.inds)
+        t2_inds_set = set(T2.inds)
+
+        left_inds = t1_inds_set & t2_inds_set
+        old_shared_bond, = left_inds
+
+        L, Q = T1.split(left_inds, get='tensors', **split_opts)
+        L = T2 @ L
+
+        new_shared_bond, = (j for j in Q.inds if j not in t1_inds_set)
+        L.reindex({new_shared_bond: old_shared_bond}, inplace=True)
+        L.transpose(*T2.inds, inplace=True)
+        Q.reindex({new_shared_bond: old_shared_bond}, inplace=True)
+        Q.transpose(*T1.inds, inplace=True)
+
+        self.site[i - 1]._data = L._data
+        self.site[i]._data = Q._data
+
+        if bra is not None:
+            bra.site[i - 1]._data = L._data.conj()
+            bra.site[i]._data = Q._data.conj()
+
+    def left_compress_site(self, i, bra=None, method='svd', tol=1e-13):
+        """Left compress this 1D TN's ith site, such that the site is then
+        left unitary with its right bond (possibly) reduced in dimension.
+
+        Parameters
+        ----------
+        i : int
+            Which site to compress.
+        bra : None or matching TensorNetwork to self, optional
+            If set, also update this TN's data with the conjugate compression.
+        method : {'svd', 'eig'}, optional
+            How to perform the Tensor decomposition.
+        tol : float, optional
+            What tolerance to keep singular values above.
+        """
+        self._left_decomp_site(i, bra=bra, method=method, tol=tol)
+
+    def right_compress_site(self, i, bra=None, method='svd', tol=1e-13):
+        """Right compress this 1D TN's ith site, such that the site is then
+        right unitary with its left bond (possibly) reduced in dimension.
+
+        Parameters
+        ----------
+        i : int
+            Which site to compress.
+        bra : None or matching TensorNetwork to self, optional
+            If set, update this TN's data with the conjugate compression.
+        method : {'svd', 'eig'}, optional
+            How to perform the Tensor decomposition.
+        tol : float, optional
+            What tolerance to keep singular values above.
+        """
+        self._right_decomp_site(i, bra=bra, method=method, tol=tol)
+
+    def left_compress(self, start=None, stop=None, **kwargs):
+        """Compress this 1D TN, from left to right.
+        """
+        if start is None:
+            start = 0
+        if stop is None:
+            stop = self.nsites - 1
+
+        for i in range(start, stop):
+            self.left_compress_site(i, **kwargs)
+
+    def right_compress(self, start=None, stop=None, **kwargs):
+        """Compress this 1D TN, from right to left.
+        """
+        if start is None:
+            start = self.nsites - 1
+        if stop is None:
+            stop = 0
+
+        for i in range(start, stop, -1):
+            self.right_compress_site(i, **kwargs)
+
+
+class MatrixProductState(TensorNetwork1D):
     """Initialise a matrix product state, with auto labelling and tagging.
 
     Parameters
@@ -147,78 +261,30 @@ class MatrixProductState(TensorNetwork):
         return tuple(self.site_tag_id.format(i) for i in range(self.nsites))
 
     def left_canonize_site(self, i, bra=None):
-        """Left canonize this MPS' ith site, inplace.
+        """Left canonize this TN's ith site, inplace.
 
         Parameters
         ----------
         i : int
             Which site to canonize. The site at i + 1 also absorbs the
             non-isometric part of the decomposition of site i.
-        bra : None or MatrixProductState, optional
-            If given, simultaneously left canonize site i of this MPS, assuming
-            it to hold the conjugate state.
+        bra : None or matching TensorNetwork to self, optional
+            If set, also update this TN's data with the conjugate canonization.
         """
-        T1 = self.site[i]
-        T2 = self.site[i + 1]
-
-        t1_inds_set = set(T1.inds)
-        t2_inds_set = set(T2.inds)
-
-        old_shared_bond, = t1_inds_set & t2_inds_set
-        left_inds = t1_inds_set - t2_inds_set
-
-        Q, R = T1.split(left_inds, method='qr', get='tensors')
-        R = R @ T2
-
-        new_shared_bond, = (j for j in Q.inds if j not in t1_inds_set)
-        Q.reindex({new_shared_bond: old_shared_bond}, inplace=True)
-        Q.transpose(*T1.inds, inplace=True)
-        R.reindex({new_shared_bond: old_shared_bond}, inplace=True)
-        R.transpose(*T2.inds, inplace=True)
-
-        self.site[i]._data = Q._data
-        self.site[i + 1]._data = R._data
-
-        if bra is not None:
-            bra.site[i]._data = Q._data.conj()
-            bra.site[i + 1]._data = R._data.conj()
+        self._left_decomp_site(i, bra=bra, method='qr')
 
     def right_canonize_site(self, i, bra=None):
-        """Right canonize this MPS' ith site, inplace.
+        """Right canonize this TN's ith site, inplace.
 
         Parameters
         ----------
         i : int
             Which site to canonize. The site at i - 1 also absorbs the
             non-isometric part of the decomposition of site i.
-        bra : None or MatrixProductState, optional
-            If given, simultaneously right canonize site i of this MPS,
-            assuming it to hold the conjugate state.
+         bra : None or matching TensorNetwork to self, optional
+            If set, also update this TN's data with the conjugate canonization.
         """
-        T1 = self.site[i]
-        T2 = self.site[i - 1]
-
-        t1_inds_set = set(T1.inds)
-        t2_inds_set = set(T2.inds)
-
-        left_inds = t1_inds_set & t2_inds_set
-        old_shared_bond, = left_inds
-
-        L, Q = T1.split(left_inds, method='lq', get='tensors')
-        L = T2 @ L
-
-        new_shared_bond, = (j for j in Q.inds if j not in t1_inds_set)
-        L.reindex({new_shared_bond: old_shared_bond}, inplace=True)
-        L.transpose(*T2.inds, inplace=True)
-        Q.reindex({new_shared_bond: old_shared_bond}, inplace=True)
-        Q.transpose(*T1.inds, inplace=True)
-
-        self.site[i - 1]._data = L._data
-        self.site[i]._data = Q._data
-
-        if bra is not None:
-            bra.site[i - 1]._data = L._data.conj()
-            bra.site[i]._data = Q._data.conj()
+        self._right_decomp_site(i, bra=bra, method='lq')
 
     def left_canonize(self, start=None, stop=None, normalize=False, bra=None):
         """Left canonize all or a portion of this MPS, such that:
@@ -446,7 +512,7 @@ class MatrixProductState(TensorNetwork):
                            .data.reshape(-1, 1))
 
 
-class MatrixProductOperator(TensorNetwork):
+class MatrixProductOperator(TensorNetwork1D):
     """Initialise a matrix product operator, with auto labelling and tagging.
 
     Parameters
