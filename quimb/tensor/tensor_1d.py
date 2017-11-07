@@ -67,6 +67,142 @@ class TensorNetwork1D(TensorNetwork):
             bra.site[i - 1]._data = L._data.conj()
             bra.site[i]._data = Q._data.conj()
 
+    def left_canonize_site(self, i, bra=None):
+        """Left canonize this TN's ith site, inplace.
+
+        Parameters
+        ----------
+        i : int
+            Which site to canonize. The site at i + 1 also absorbs the
+            non-isometric part of the decomposition of site i.
+        bra : None or matching TensorNetwork to self, optional
+            If set, also update this TN's data with the conjugate canonization.
+        """
+        self._left_decomp_site(i, bra=bra, method='qr')
+
+    def right_canonize_site(self, i, bra=None):
+        """Right canonize this TN's ith site, inplace.
+
+        Parameters
+        ----------
+        i : int
+            Which site to canonize. The site at i - 1 also absorbs the
+            non-isometric part of the decomposition of site i.
+         bra : None or matching TensorNetwork to self, optional
+            If set, also update this TN's data with the conjugate canonization.
+        """
+        self._right_decomp_site(i, bra=bra, method='lq')
+
+    def left_canonize(self, start=None, stop=None, normalize=False, bra=None):
+        """Left canonize all or a portion of this TN. If this is a MPS,
+        this implies that:
+
+                          i              i
+            >->->->->->->-o-o-         +-o-o-
+            | | | | | | | | | ...  ->  | | | ...
+            >->->->->->->-o-o-         +-o-o-
+
+        Parameters
+        ----------
+        start : int, optional
+            If given, the site to start left canonizing at.
+        stop : int, optional
+            If given, the site to stop left canonizing at.
+        normalize : bool, optional
+            Whether to normalize the state.
+        bra : MatrixProductState, optional
+            If supplied, simultaneously left canonize this MPS too, assuming it
+            to be the conjugate state.
+        """
+        if start is None:
+            start = 0
+        if stop is None:
+            stop = self.nsites - 1
+
+        for i in range(start, stop):
+            self.left_canonize_site(i, bra=bra)
+
+        if normalize:
+            factor = self.site[-1].norm()
+            self.site[-1] /= factor
+            if bra is not None:
+                bra.site[-1] /= factor
+
+    def right_canonize(self, start=None, stop=None, normalize=False, bra=None):
+        """Right canonize all or a portion of this TN. If this is a MPS,
+        this implies that:
+
+                   i                           i
+                -o-o-<-<-<-<-<-<-<          -o-o-+
+             ... | | | | | | | | |   ->  ... | | |
+                -o-o-<-<-<-<-<-<-<          -o-o-+
+
+
+        Parameters
+        ----------
+        start : int, optional
+            If given, the site to start right canonizing at.
+        stop : int, optional
+            If given, the site to stop right canonizing at.
+        normalize : bool, optional
+            Whether to normalize the state.
+        bra : MatrixProductState, optional
+            If supplied, simultaneously right canonize this MPS too, assuming
+            it to be the conjugate state.
+        """
+        if start is None:
+            start = self.nsites - 1
+        if stop is None:
+            stop = 0
+
+        for i in range(start, stop, -1):
+            self.right_canonize_site(i, bra=bra)
+
+        if normalize:
+            factor = self.site[0].norm()
+            self.site[0] /= factor
+            if bra is not None:
+                bra.site[0] /= factor
+
+    def canonize(self, orthogonality_center, bra=None):
+        """Mixed canonize this TN. If this is a MPS, this implies that:
+
+                          i                      i
+            >->->->->- ->-o-<- -<-<-<-<-<      +-o-+
+            | | | | |...| | |...| | | | |  ->  | | |
+            >->->->->- ->-o-<- -<-<-<-<-<      +-o-+
+
+        Parameters
+        ----------
+        orthogonality_center : int, optional
+            Which site to orthogonalize around.
+        bra : MatrixProductState, optional
+            If supplied, simultaneously mixed canonize this MPS too, assuming
+            it to be the conjugate state.
+        """
+        self.left_canonize(stop=orthogonality_center, bra=bra)
+        self.right_canonize(stop=orthogonality_center, bra=bra)
+
+    def shift_orthogonality_center(self, current, new, bra=None):
+        """Move the orthogonality center of this MPS.
+
+        Parameters
+        ----------
+        current : int
+            The current orthogonality center.
+        new : int
+            The target orthogonality center.
+        bra : MatrixProductState, optional
+            If supplied, simultaneously move the orthogonality center of this
+            MPS too, assuming it to be the conjugate state.
+        """
+        if new > current:
+            for i in range(current, new):
+                self.left_canonize_site(i, bra=bra)
+        else:
+            for i in range(current, new, -1):
+                self.right_canonize_site(i, bra=bra)
+
     def left_compress_site(self, i, bra=None, method='svd', tol=1e-13):
         """Left compress this 1D TN's ith site, such that the site is then
         left unitary with its right bond (possibly) reduced in dimension.
@@ -101,27 +237,75 @@ class TensorNetwork1D(TensorNetwork):
         """
         self._right_decomp_site(i, bra=bra, method=method, tol=tol)
 
-    def left_compress(self, start=None, stop=None, **kwargs):
-        """Compress this 1D TN, from left to right.
+    def left_compress(self, start=None, stop=None, bra=None,
+                      current_orthog_centre=None, **kwargs):
+        """Compress this 1D TN, from left to right, such that it becomes
+        left-canonical.
+
+        Parameters
+        ----------
+        start : int, optional
+            Site to begin compressing on.
+        stop : int, optional
+            Site to stop compressing at (won't itself be an isometry).
+        bra : None or TensorNetwork like this one, optional
+            If given, update this TN as well, assuming it to be the conjugate.
+        current_orthog_centre : int, optional
+            The current orthogonality center, if known, to speed things up.
+        method : {'svd', 'eig'}, optional
+            How to perform the decomposition.
+        tol : float, optional
+            Below what magnitude to chuck away singular values.
         """
         if start is None:
             start = 0
         if stop is None:
             stop = self.nsites - 1
 
-        for i in range(start, stop):
-            self.left_compress_site(i, **kwargs)
+        # right canonize first -> ensures truncation is optimal?
+        if current_orthog_centre is None:
+            # assume need to canonize whole chain
+            current_orthog_centre = self.nsites - 1
+        self.shift_orthogonality_center(
+            current_orthog_centre, start, bra=bra)
 
-    def right_compress(self, start=None, stop=None, **kwargs):
-        """Compress this 1D TN, from right to left.
+        for i in range(start, stop):
+            self.left_compress_site(i, bra=bra, **kwargs)
+
+    def right_compress(self, start=None, stop=None, bra=None,
+                       current_orthog_centre=None, **kwargs):
+        """Compress this 1D TN, from right to left, such that it becomes
+        right-canonical.
+
+        Parameters
+        ----------
+        start : int, optional
+            Site to begin compressing on.
+        stop : int, optional
+            Site to stop compressing at (won't itself be an isometry).
+        bra : None or TensorNetwork like this one, optional
+            If given, update this TN as well, assuming it to be the conjugate.
+        current_orthog_centre : int, optional
+            The current orthogonality center, if known, to speed things up.
+        method : {'svd', 'eig'}, optional
+            How to perform the decomposition.
+        tol : float, optional
+            Below what magnitude to chuck away singular values.
         """
         if start is None:
             start = self.nsites - 1
         if stop is None:
             stop = 0
 
+        # left canonize first -> ensures truncation is optimal?
+        if current_orthog_centre is None:
+            # assume need to canonize whole chain
+            current_orthog_centre = 0
+        self.shift_orthogonality_center(
+            current_orthog_centre, start, bra=bra)
+
         for i in range(start, stop, -1):
-            self.right_compress_site(i, **kwargs)
+            self.right_compress_site(i, bra=bra, **kwargs)
 
 
 class MatrixProductState(TensorNetwork1D):
@@ -260,145 +444,11 @@ class MatrixProductState(TensorNetwork1D):
         """
         return tuple(self.site_tag_id.format(i) for i in range(self.nsites))
 
-    def left_canonize_site(self, i, bra=None):
-        """Left canonize this TN's ith site, inplace.
-
-        Parameters
-        ----------
-        i : int
-            Which site to canonize. The site at i + 1 also absorbs the
-            non-isometric part of the decomposition of site i.
-        bra : None or matching TensorNetwork to self, optional
-            If set, also update this TN's data with the conjugate canonization.
-        """
-        self._left_decomp_site(i, bra=bra, method='qr')
-
-    def right_canonize_site(self, i, bra=None):
-        """Right canonize this TN's ith site, inplace.
-
-        Parameters
-        ----------
-        i : int
-            Which site to canonize. The site at i - 1 also absorbs the
-            non-isometric part of the decomposition of site i.
-         bra : None or matching TensorNetwork to self, optional
-            If set, also update this TN's data with the conjugate canonization.
-        """
-        self._right_decomp_site(i, bra=bra, method='lq')
-
-    def left_canonize(self, start=None, stop=None, normalize=False, bra=None):
-        """Left canonize all or a portion of this MPS, such that:
-
-                          i              i
-            >->->->->->->-o-o-         +-o-o-
-            | | | | | | | | | ...  ->  | | | ...
-            >->->->->->->-o-o-         +-o-o-
-
-        Parameters
-        ----------
-        start : int, optional
-            If given, the site to start left canonizing at.
-        stop : int, optional
-            If given, the site to stop left canonizing at.
-        normalize : bool, optional
-            Whether to normalize the state.
-        bra : MatrixProductState, optional
-            If supplied, simultaneously left canonize this MPS too, assuming it
-            to be the conjugate state.
-        """
-        if start is None:
-            start = 0
-        if stop is None:
-            stop = self.nsites - 1
-
-        for i in range(start, stop):
-            self.left_canonize_site(i, bra=bra)
-
-        if normalize:
-            factor = self.site[-1].norm()
-            self.site[-1] /= factor
-            if bra is not None:
-                bra.site[-1] /= factor
-
-    def right_canonize(self, start=None, stop=None, normalize=False, bra=None):
-        """Right canonize all or a portion of this MPS, such that:
-
-                   i                           i
-                -o-o-<-<-<-<-<-<-<          -o-o-+
-             ... | | | | | | | | |   ->  ... | | |
-                -o-o-<-<-<-<-<-<-<          -o-o-+
-
-
-        Parameters
-        ----------
-        start : int, optional
-            If given, the site to start right canonizing at.
-        stop : int, optional
-            If given, the site to stop right canonizing at.
-        normalize : bool, optional
-            Whether to normalize the state.
-        bra : MatrixProductState, optional
-            If supplied, simultaneously right canonize this MPS too, assuming
-            it to be the conjugate state.
-        """
-        if start is None:
-            start = self.nsites - 1
-        if stop is None:
-            stop = 0
-
-        for i in range(start, stop, -1):
-            self.right_canonize_site(i, bra=bra)
-
-        if normalize:
-            factor = self.site[0].norm()
-            self.site[0] /= factor
-            if bra is not None:
-                bra.site[0] /= factor
-
-    def canonize(self, orthogonality_center, bra=None):
-        """Mixed canonize this MPS, such that:
-
-                          i                      i
-            >->->->->- ->-o-<- -<-<-<-<-<      +-o-+
-            | | | | |...| | |...| | | | |  ->  | | |
-            >->->->->- ->-o-<- -<-<-<-<-<      +-o-+
-
-        Parameters
-        ----------
-        orthogonality_center : int, optional
-            Which site to orthogonalize around.
-        bra : MatrixProductState, optional
-            If supplied, simultaneously mixed canonize this MPS too, assuming
-            it to be the conjugate state.
-        """
-        self.left_canonize(stop=orthogonality_center, bra=bra)
-        self.right_canonize(stop=orthogonality_center, bra=bra)
-
-    def shift_orthogonality_center(self, current, new, bra=None):
-        """Move the orthogonality center of this MPS.
-
-        Parameters
-        ----------
-        current : int
-            The current orthogonality center.
-        new : int
-            The target orthogonality center.
-        bra : MatrixProductState, optional
-            If supplied, simultaneously move the orthogonality cente this MPS
-            too, assuming it to be the conjugate state.
-        """
-        if new > current:
-            for i in range(current, new):
-                self.left_canonize_site(i, bra=bra)
-        else:
-            for i in range(current, new, -1):
-                self.right_canonize_site(i, bra=bra)
-
     def add_MPS(self, other, inplace=False):
         """Add another MatrixProductState to this one.
         """
         if self.nsites != other.nsites:
-            raise ValueError("Can't add MPS with of different length.")
+            raise ValueError("Can't add MPS with another of different length.")
 
         if inplace:
             new = self
@@ -669,6 +719,34 @@ class MatrixProductOperator(TensorNetwork1D):
     upper_ind_id = property(_get_upper_ind_id, _set_upper_ind_id,
                             doc="The string specifier for the upper phyiscal "
                             "indices")
+
+    def add_MPO(self, other, inplace=False):
+        """Add another MatrixProductState to this one.
+        """
+        if self.nsites != other.nsites:
+            raise ValueError("Can't add MPO with another of different length.")
+
+        if inplace:
+            new = self
+        else:
+            new = self.copy()
+
+        for i in range(new.nsites):
+            tensor_direct_product(new.site[i], other.site[i], inplace=True,
+                                  sum_inds=(new.upper_ind_id.format(i),
+                                            new.lower_ind_id.format(i)))
+
+        return new
+
+    def __add__(self, other):
+        """MPO addition.
+        """
+        return self.add_MPO(other, inplace=False)
+
+    def __iadd__(self, other):
+        """In-place MPO addition.
+        """
+        return self.add_MPO(other, inplace=True)
 
     @property
     def lower_inds(self):

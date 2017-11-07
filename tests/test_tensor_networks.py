@@ -705,6 +705,26 @@ class TestMatrixProductState:
         assert max(p2['i4'].shape) == 7
         assert abs(p2.H @ p - 2) < 1e-13
 
+    def test_compress_mps_right(self):
+        p = MPS_rand(10, 7)
+        assert max(p['i4'].shape) == 7
+        p2 = p + p
+        assert max(p2['i4'].shape) == 14
+        assert abs(p2.H @ p - 2) < 1e-13
+        p2.right_compress()
+        assert max(p2['i4'].shape) == 7
+        assert abs(p2.H @ p - 2) < 1e-13
+
+    def test_adding_mpo(self):
+        h = MPO_ham_heis(6)
+        hd = h.to_dense()
+        assert_allclose(h @ h.H, (hd @ hd.H).tr())
+        h2 = h + h
+        assert_allclose(h2 @ h2.H, (hd @ hd.H).tr() * 4)
+        h2.right_compress()
+        assert_allclose(h2 @ h2.H, (hd @ hd.H).tr() * 4)
+        assert max(h2['i3'].shape) == 5
+
     def test_schmidt_values_entropy_gap_simple(self):
         n = 12
         p = MPS_rand(n, 16)
