@@ -412,7 +412,7 @@ class TestLanczosApprox:
         rho_ab = psi_abc.ptr(DIMS, sysa)
         actual_x = sum(fn(eigvals(rho_ab)))
         lo = LazyPtrOperator(psi_abc, DIMS, sysa)
-        approx_x = approx(lo, K=20, R=20, bsz=bsz)
+        approx_x = approx(lo, R=50, bsz=bsz)
         assert_allclose(actual_x, approx_x, rtol=rtol)
 
     @pytest.mark.parametrize("bsz", [1, 2, 5])
