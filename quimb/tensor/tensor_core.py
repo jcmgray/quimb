@@ -933,7 +933,6 @@ class TensorNetwork(object):
 
         # count how many sites if a structure is given
         if self.structure:
-
             if self.nsites is None:
                 self.nsites = self.calc_nsites()
 

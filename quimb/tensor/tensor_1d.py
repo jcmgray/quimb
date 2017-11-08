@@ -238,7 +238,7 @@ class TensorNetwork1D(TensorNetwork):
         self._right_decomp_site(i, bra=bra, method=method, tol=tol)
 
     def left_compress(self, start=None, stop=None, bra=None,
-                      current_orthog_centre=None, **kwargs):
+                      current_orthog_centre=None, **compress_opts):
         """Compress this 1D TN, from left to right, such that it becomes
         left-canonical.
 
@@ -256,6 +256,8 @@ class TensorNetwork1D(TensorNetwork):
             How to perform the decomposition.
         tol : float, optional
             Below what magnitude to chuck away singular values.
+        compress_opts
+            Supplied to ``self.left_compress_site``.
         """
         if start is None:
             start = 0
@@ -270,10 +272,10 @@ class TensorNetwork1D(TensorNetwork):
             current_orthog_centre, start, bra=bra)
 
         for i in range(start, stop):
-            self.left_compress_site(i, bra=bra, **kwargs)
+            self.left_compress_site(i, bra=bra, **compress_opts)
 
     def right_compress(self, start=None, stop=None, bra=None,
-                       current_orthog_centre=None, **kwargs):
+                       current_orthog_centre=None, **compress_opts):
         """Compress this 1D TN, from right to left, such that it becomes
         right-canonical.
 
@@ -291,6 +293,8 @@ class TensorNetwork1D(TensorNetwork):
             How to perform the decomposition.
         tol : float, optional
             Below what magnitude to chuck away singular values.
+        compress_opts
+            Supplied to ``self.right_compress_site``.
         """
         if start is None:
             start = self.nsites - 1
@@ -305,7 +309,19 @@ class TensorNetwork1D(TensorNetwork):
             current_orthog_centre, start, bra=bra)
 
         for i in range(start, stop, -1):
-            self.right_compress_site(i, bra=bra, **kwargs)
+            self.right_compress_site(i, bra=bra, **compress_opts)
+
+    def compress(self, *args, form='L', **kwargs):
+        """Compress this 1D Tensor Network, either left or right, based on
+        ``form``.
+        """
+        if form.upper() == 'L':
+            self.left_compress(*args, **kwargs)
+        elif form.upper() == 'R':
+            self.right_compress(*args, **kwargs)
+        else:
+            raise ValueError("Form specifier {} not understood, should be "
+                             "either 'L' or 'R".format(form))
 
 
 class MatrixProductState(TensorNetwork1D):
@@ -444,7 +460,7 @@ class MatrixProductState(TensorNetwork1D):
         """
         return tuple(self.site_tag_id.format(i) for i in range(self.nsites))
 
-    def add_MPS(self, other, inplace=False):
+    def add_MPS(self, other, inplace=False, compress=False, **compress_opts):
         """Add another MatrixProductState to this one.
         """
         if self.nsites != other.nsites:
@@ -458,6 +474,9 @@ class MatrixProductState(TensorNetwork1D):
         for i in range(new.nsites):
             tensor_direct_product(new.site[i], other.site[i], inplace=True,
                                   sum_inds=new.site_ind_id.format(i))
+
+        if compress:
+            new.compress(**compress_opts)
 
         return new
 
@@ -720,7 +739,7 @@ class MatrixProductOperator(TensorNetwork1D):
                             doc="The string specifier for the upper phyiscal "
                             "indices")
 
-    def add_MPO(self, other, inplace=False):
+    def add_MPO(self, other, inplace=False, compress=False, **compress_opts):
         """Add another MatrixProductState to this one.
         """
         if self.nsites != other.nsites:
@@ -735,6 +754,9 @@ class MatrixProductOperator(TensorNetwork1D):
             tensor_direct_product(new.site[i], other.site[i], inplace=True,
                                   sum_inds=(new.upper_ind_id.format(i),
                                             new.lower_ind_id.format(i)))
+
+        if compress:
+            new.compress(**compress_opts)
 
         return new
 

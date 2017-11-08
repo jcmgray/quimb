@@ -715,6 +715,21 @@ class TestMatrixProductState:
         assert max(p2['i4'].shape) == 7
         assert abs(p2.H @ p - 2) < 1e-13
 
+    @pytest.mark.parametrize("method", ['svd'])  # , 'eig'])
+    @pytest.mark.parametrize("form", ['L', 'R', 'raise'])
+    def test_add_and_compress_mps(self, method, form):
+        p = MPS_rand(10, 7)
+        assert max(p['i4'].shape) == 7
+
+        if form == 'raise':
+            with pytest.raises(ValueError):
+                p.add_MPS(p, compress=True, method=method, form=form)
+            return
+
+        p2 = p.add_MPS(p, compress=True, method=method, form=form)
+        assert max(p2['i4'].shape) == 7
+        assert abs(p2.H @ p - 2) < 1e-13
+
     def test_adding_mpo(self):
         h = MPO_ham_heis(6)
         hd = h.to_dense()
