@@ -7,7 +7,11 @@ from .tensor_core import (
 )
 from .tensor_gen import (
     rand_tensor,
-    MPS_rand,
+    MPS_rand_state,
+    MPS_product_state,
+    MPOSpinHam,
+    MPO_ham_ising,
+    MPO_ham_XY,
     MPO_ham_heis,
 )
 from .tensor_1d import (
@@ -27,7 +31,11 @@ __all__ = (
     "Tensor",
     "TensorNetwork",
     "rand_tensor",
-    "MPS_rand",
+    "MPS_rand_state",
+    "MPS_product_state",
+    "MPOSpinHam",
+    "MPO_ham_ising",
+    "MPO_ham_XY",
     "MPO_ham_heis",
     "MatrixProductState",
     "MatrixProductOperator",

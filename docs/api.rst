@@ -376,8 +376,12 @@ Tensor Networks
     rand_tensor
     TensorNetwork
     MatrixProductState
-    MPS_rand
+    MPS_rand_state
+    MPS_product_state
     MatrixProductOperator
+    MPOSpinHam
+    MPO_ham_ising
+    MPO_ham_XY
     MPO_ham_heis
     align_inner
     DMRG1

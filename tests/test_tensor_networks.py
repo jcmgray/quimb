@@ -11,6 +11,7 @@ from quimb import (
     entropy,
     entropy_subsys,
     schmidt_gap,
+    plus,
 )
 
 from quimb.tensor.tensor_core import (
@@ -25,7 +26,10 @@ from quimb.tensor.tensor_1d import (
     align_inner,
 )
 from quimb.tensor.tensor_gen import (
-    MPS_rand,
+    MPS_rand_state,
+    MPS_product_state,
+    MPO_ham_ising,
+    MPO_ham_XY,
     MPO_ham_heis,
     rand_tensor,
 )
@@ -253,7 +257,7 @@ class TestTensorFunctions:
 
     @pytest.mark.parametrize('method', ['svd', 'eig'])
     def test_entropy_matches_dense(self, method):
-        p = MPS_rand(5, 32)
+        p = MPS_rand_state(5, 32)
         p_dense = p.to_dense()
         real_svn = entropy(p_dense.ptr([2] * 5, [0, 1, 2]))
 
@@ -527,8 +531,8 @@ class TestTensorNetwork:
         assert_allclose(tn['i1'].data, new_data.reshape(2, 3, 4))
 
     def test_combining_with_no_check_collisions(self):
-        p1 = MPS_rand(5, 3, phys_dim=3)
-        p2 = MPS_rand(5, 3, phys_dim=3)
+        p1 = MPS_rand_state(5, 3, phys_dim=3)
+        p2 = MPS_rand_state(5, 3, phys_dim=3)
         # shouldn't need to check any collisions
         tn = TensorNetwork((p1, p2), check_collisions=False)
         # test can contract
@@ -579,7 +583,7 @@ class TestMatrixProductState:
         # try normalizing the state
         mps['i2'] /= mps['i2'].norm()
 
-        assert abs(mps.H @ mps - 1) < 1e-13
+        assert_allclose(abs(mps.H @ mps), 1.0)
 
     def test_right_canonize_site(self):
         a = np.random.randn(7, 2) + 1.0j * np.random.randn(7, 2)
@@ -604,80 +608,85 @@ class TestMatrixProductState:
         # try normalizing the state
         mps['i0'] /= mps['i0'].norm()
 
-        assert abs(mps.H @ mps - 1) < 1e-13
+        assert_allclose(mps.H @ mps, 1)
 
     def test_rand_mps_left_canonize(self):
         n = 10
-        k = MPS_rand(n, 10, site_tag_id="foo{}", tags='bar', normalize=False)
+        k = MPS_rand_state(n, 10, site_tag_id="foo{}",
+                           tags='bar', normalize=False)
         k.left_canonize(normalize=True)
-        assert abs(k.H @ k - 1) < 1e-13
+        assert_allclose(k.H @ k, 1)
         p_tn = (k.H & k) ^ slice(0, 9)
         assert_allclose(p_tn['foo8'].data, np.eye(10), atol=1e-13)
 
     def test_rand_mps_left_canonize_with_bra(self):
         n = 10
-        k = MPS_rand(n, 10, site_tag_id="foo{}", tags='bar', normalize=False)
+        k = MPS_rand_state(n, 10, site_tag_id="foo{}",
+                           tags='bar', normalize=False)
         b = k.H
         k.left_canonize(normalize=True, bra=b)
-        assert abs(b @ k - 1) < 1e-13
+        assert_allclose(b @ k, 1)
         p_tn = (b & k) ^ slice(0, 9)
         assert_allclose(p_tn['foo8'].data, np.eye(10), atol=1e-13)
 
     def test_rand_mps_right_canonize(self):
         n = 10
-        k = MPS_rand(n, 10, site_tag_id="foo{}", tags='bar', normalize=False)
+        k = MPS_rand_state(n, 10, site_tag_id="foo{}",
+                           tags='bar', normalize=False)
         k.right_canonize(normalize=True)
-        assert abs(k.H @ k - 1) < 1e-13
+        assert_allclose(k.H @ k, 1)
         p_tn = (k.H & k) ^ slice(..., 0)
         assert_allclose(p_tn['foo1'].data, np.eye(10), atol=1e-13)
 
     def test_rand_mps_right_canonize_with_bra(self):
         n = 10
-        k = MPS_rand(n, 10, site_tag_id="foo{}", tags='bar', normalize=False)
+        k = MPS_rand_state(n, 10, site_tag_id="foo{}",
+                           tags='bar', normalize=False)
         b = k.H
         k.right_canonize(normalize=True, bra=b)
-        assert abs(b @ k - 1) < 1e-13
+        assert_allclose(b @ k, 1)
         p_tn = (b & k) ^ slice(..., 0)
         assert_allclose(p_tn['foo1'].data, np.eye(10), atol=1e-13)
 
     def test_rand_mps_mixed_canonize(self):
         n = 10
-        rmps = MPS_rand(n, 10, site_tag_id="foo{}", tags='bar', normalize=True)
+        rmps = MPS_rand_state(n, 10, site_tag_id="foo{}",
+                              tags='bar', normalize=True)
 
         # move to the center
         rmps.canonize(orthogonality_center=4)
-        assert abs(rmps.H @ rmps - 1) < 1e-13
+        assert_allclose(rmps.H @ rmps, 1)
         p_tn = (rmps.H & rmps) ^ slice(0, 4) ^ slice(..., 4)
         assert_allclose(p_tn['foo3'].data, np.eye(10), atol=1e-13)
         assert_allclose(p_tn['foo5'].data, np.eye(10), atol=1e-13)
 
         # try shifting to the right
         rmps.shift_orthogonality_center(current=4, new=8)
-        assert abs(rmps.H @ rmps - 1) < 1e-13
+        assert_allclose(rmps.H @ rmps, 1)
         p_tn = (rmps.H & rmps) ^ slice(0, 8) ^ slice(..., 8)
         assert_allclose(p_tn['foo7'].data, np.eye(4), atol=1e-13)
         assert_allclose(p_tn['foo9'].data, np.eye(2), atol=1e-13)
 
         # try shifting to the left
         rmps.shift_orthogonality_center(current=8, new=6)
-        assert abs(rmps.H @ rmps - 1) < 1e-13
+        assert_allclose(rmps.H @ rmps, 1)
         p_tn = (rmps.H & rmps) ^ slice(0, 6) ^ slice(..., 6)
         assert_allclose(p_tn['foo5'].data, np.eye(10), atol=1e-13)
         assert_allclose(p_tn['foo7'].data, np.eye(8), atol=1e-13)
 
     def test_can_change_data(self):
-        p = MPS_rand(3, 10)
-        assert abs(p.H @ p - 1) < 1e-13
+        p = MPS_rand_state(3, 10)
+        assert_allclose(p.H @ p, 1)
         p.site[1].data = np.random.randn(200)
         assert abs(p.H @ p - 1) > 1e-13
 
     def test_can_change_data_using_subnetwork(self):
-        p = MPS_rand(3, 10)
+        p = MPS_rand_state(3, 10)
         pH = p.H
         p.add_tag('__ket__')
         pH.add_tag('__bra__')
         tn = p | pH
-        assert abs((tn ^ ...) - 1) < 1e-13
+        assert_allclose((tn ^ ...), 1)
         assert_allclose(tn[('__ket__', 'i1')].data,
                         tn[('__bra__', 'i1')].data.conj())
         p.site[1].data = np.random.randn(200)
@@ -686,39 +695,39 @@ class TestMatrixProductState:
                                tn[('__bra__', 'i1')].data.conj())
 
     def test_adding_mps(self):
-        p = MPS_rand(10, 7)
+        p = MPS_rand_state(10, 7)
         assert max(p['i4'].shape) == 7
         p2 = p + p
         assert max(p2['i4'].shape) == 14
-        assert abs(p2.H @ p - 2) < 1e-13
+        assert_allclose(p2.H @ p, 2)
         p += p
         assert max(p['i4'].shape) == 14
-        assert abs(p.H @ p - 4) < 1e-13
+        assert_allclose(p.H @ p, 4)
 
     def test_compress_mps(self):
-        p = MPS_rand(10, 7)
+        p = MPS_rand_state(10, 7)
         assert max(p['i4'].shape) == 7
         p2 = p + p
         assert max(p2['i4'].shape) == 14
-        assert abs(p2.H @ p - 2) < 1e-13
+        assert_allclose(p2.H @ p, 2)
         p2.left_compress()
         assert max(p2['i4'].shape) == 7
-        assert abs(p2.H @ p - 2) < 1e-13
+        assert_allclose(p2.H @ p, 2)
 
     def test_compress_mps_right(self):
-        p = MPS_rand(10, 7)
+        p = MPS_rand_state(10, 7)
         assert max(p['i4'].shape) == 7
         p2 = p + p
         assert max(p2['i4'].shape) == 14
-        assert abs(p2.H @ p - 2) < 1e-13
+        assert_allclose(p2.H @ p, 2)
         p2.right_compress()
         assert max(p2['i4'].shape) == 7
-        assert abs(p2.H @ p - 2) < 1e-13
+        assert_allclose(p2.H @ p, 2)
 
     @pytest.mark.parametrize("method", ['svd'])  # , 'eig'])
     @pytest.mark.parametrize("form", ['L', 'R', 'raise'])
     def test_add_and_compress_mps(self, method, form):
-        p = MPS_rand(10, 7)
+        p = MPS_rand_state(10, 7)
         assert max(p['i4'].shape) == 7
 
         if form == 'raise':
@@ -728,7 +737,7 @@ class TestMatrixProductState:
 
         p2 = p.add_MPS(p, compress=True, method=method, form=form)
         assert max(p2['i4'].shape) == 7
-        assert abs(p2.H @ p - 2) < 1e-13
+        assert_allclose(p2.H @ p, 2)
 
     def test_adding_mpo(self):
         h = MPO_ham_heis(6)
@@ -742,7 +751,7 @@ class TestMatrixProductState:
 
     def test_schmidt_values_entropy_gap_simple(self):
         n = 12
-        p = MPS_rand(n, 16)
+        p = MPS_rand_state(n, 16)
         p.right_canonize()
         svns = []
         sgs = []
@@ -777,7 +786,7 @@ class TestSpecificStatesOperators:
 
     def test_rand_ket_mps(self):
         n = 10
-        rmps = MPS_rand(n, 10, site_tag_id="foo{}", tags='bar')
+        rmps = MPS_rand_state(n, 10, site_tag_id="foo{}", tags='bar')
         assert rmps.site[0].tags == {'foo0', 'bar'}
         assert rmps.site[3].tags == {'foo3', 'bar'}
         assert rmps.site[-1].tags == {'foo9', 'bar'}
@@ -786,9 +795,9 @@ class TestSpecificStatesOperators:
         assert len(rmpsH_rmps.tag_index['foo0']) == 2
         assert len(rmpsH_rmps.tag_index['bar']) == n * 2
 
-        assert abs(rmps.H @ rmps - 1) < 1e-13
+        assert_allclose(rmps.H @ rmps, 1)
         c = (rmps.H & rmps) ^ slice(0, 5) ^ slice(9, 4, -1) ^ slice(4, 6)
-        assert abs(c - 1) < 1e-13
+        assert_allclose(c, 1)
 
     def test_mpo_site_ham_heis(self):
         hh_mpo = MPO_ham_heis(5, tags=['foo'])
@@ -836,7 +845,7 @@ class TestDMRG1:
 
         # test still normalized
         align_inner(dmrg.k, dmrg.b)
-        assert abs(dmrg.b @ dmrg.k) - 1 < 1e-13
+        assert_allclose(abs(dmrg.b @ dmrg.k), 1)
 
         assert e1.real < e0.real
         assert e2.real < e1.real
@@ -844,18 +853,43 @@ class TestDMRG1:
         assert e4.real < e3.real
 
     @pytest.mark.parametrize("eff_ham_dense", [False, True])
-    def test_ground_state_matches(self, eff_ham_dense):
-        h = MPO_ham_heis(5)
-        eff_e, mps_gs = DMRG1(h, bond_dim=5).solve(eff_ham_dense=eff_ham_dense)
+    @pytest.mark.parametrize("MPO_ham", [MPO_ham_XY, MPO_ham_heis])
+    def test_ground_state_matches(self, eff_ham_dense, MPO_ham):
+        h = MPO_ham(6)
 
+        eff_e, mps_gs = DMRG1(h, bond_dim=8).solve(eff_ham_dense=eff_ham_dense)
         mps_gs_dense = mps_gs.to_dense()
+
+        assert_allclose(mps_gs_dense.H @ mps_gs_dense, 1.0)
 
         h_dense = h.to_dense()
 
+        # check against dense form
         actual_e, gs = seigsys(h_dense, k=1)
-        assert abs(expec(mps_gs_dense, gs)) - 1 < 1e-12
         assert_allclose(actual_e, eff_e)
+        assert_allclose(abs(expec(mps_gs_dense, gs)), 1.0)
 
-        actual_e, gs = seigsys(ham_heis(5, cyclic=False) / 4, k=1)
-        assert abs(expec(mps_gs_dense, gs)) - 1 < 1e-12
+        # check against actual MPO_ham
+        if MPO_ham is MPO_ham_XY:
+            ham_dense = ham_heis(6, cyclic=False, j=(1.0, 1.0, 0.0)) / 4
+        elif MPO_ham is MPO_ham_heis:
+            ham_dense = ham_heis(6, cyclic=False) / 4
+
+        actual_e, gs = seigsys(ham_dense, k=1)
         assert_allclose(actual_e, eff_e)
+        assert_allclose(abs(expec(mps_gs_dense, gs)), 1.0)
+
+    def test_ising_and_MPS_product_state(self):
+        h = MPO_ham_ising(6, bx=2.0, j=0.1)
+        eff_e, mps_gs = DMRG1(h, bond_dim=8).solve()
+        mps_gs_dense = mps_gs.to_dense()
+        assert_allclose(mps_gs_dense.H @ mps_gs_dense, 1.0)
+
+        # check against dense
+        h_dense = h.to_dense()
+        actual_e, gs = seigsys(h_dense, k=1)
+        assert_allclose(actual_e, eff_e)
+        assert_allclose(abs(expec(mps_gs_dense, gs)), 1.0)
+
+        exp_gs = MPS_product_state([plus()] * 6)
+        assert_allclose(abs(exp_gs.H @ mps_gs), 1.0, rtol=1e-3)

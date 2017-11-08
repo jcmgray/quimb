@@ -98,7 +98,7 @@ class TestHamHeis:
         assert_allclose(lk, [-8, -4, -4, -4])
 
     def test_ham_heis_bz(self):
-        h = ham_heis(2, cyclic=False, bz=2)
+        h = ham_heis(2, cyclic=False, b=2)
         evals = eigvals(h)
         assert_allclose(evals, [-3, -3, 1, 5])
 

@@ -16,13 +16,13 @@ def rand_tensor(shape, inds, tags=None):
     return Tensor(data=data, inds=inds, tags=tags)
 
 
-def MPS_rand(n, bond_dim, phys_dim=2,
-             site_ind_id='k{}',
-             site_tag_id='i{}',
-             tags=None,
-             bond_name="",
-             normalize=True,
-             **kwargs):
+def MPS_rand_state(n, bond_dim, phys_dim=2,
+                   site_ind_id='k{}',
+                   site_tag_id='i{}',
+                   tags=None,
+                   bond_name="",
+                   normalize=True,
+                   **kwargs):
     """Generate a random matrix product state.
 
     Parameters
@@ -59,9 +59,25 @@ def MPS_rand(n, bond_dim, phys_dim=2,
     return rmps
 
 
+def MPS_product_state(arrays, **kwargs):
+    """Generate a product state in MatrixProductState form, i,e,
+    with bond dimension 1, from single site vectors described by ``arrays``.
+    """
+    def gen_array_shapes():
+        yield (1, -1)
+        for _ in range(len(arrays) - 2):
+            yield (1, 1, -1)
+        yield (1, -1)
+
+    mps_arrays = (np.asarray(array).reshape(*shape)
+                  for array, shape in zip(arrays, gen_array_shapes()))
+
+    return MatrixProductState(mps_arrays, shape='lrp', **kwargs)
+
+
 def build_spin_ham_mpo_tensors(one_site_terms, two_site_terms,
                                S=1 / 2, which=None):
-    """Genereate a spin hamiltonian MPO tensor
+    """Generate tensor(s) for a spin hamiltonian MPO.
 
     Parameters
     ----------
@@ -120,7 +136,23 @@ def build_spin_ham_mpo_tensors(one_site_terms, two_site_terms,
 
 
 class MPOSpinHam:
-    """
+    """Class for easily building translationally invariant spin hamiltonians in
+    MPO form. Currently limited to nearest neighbour interactions (and single
+    site terms).
+
+    Parameters
+    ----------
+    S : float
+        The type of spin.
+
+    Example
+    -------
+    >>> builder = MPOSpinHam(S=3 / 2)
+    >>> builder.add_term(-0.3, 'Z')
+    >>> builder.add_term(0.5, '+', '-')
+    >>> builder.add_term(0.5, '-', '+')
+    >>> builder.add_term(1.0, 'Z', 'Z')
+    >>> mpo_ham = builder.build(100)
     """
 
     def __init__(self, S=1 / 2):
@@ -129,7 +161,17 @@ class MPOSpinHam:
         self.two_site_terms = []
 
     def add_term(self, factor, *operators):
-        """
+        """Add another term to the expression to be built.
+
+        Parameters
+        ----------
+        factor : scalar
+            Scalar factor to multiply this term by.
+        *operators : str or array
+            The operators to use. Can specify one or two for single or two site
+            terms respectively. Can use strings, which are supplied to
+            ``spin_operator``, or actual arrays as long as they have the
+            correct dimension.
         """
         if len(operators) == 1:
             self.one_site_terms.append((factor, *operators))
@@ -140,7 +182,8 @@ class MPOSpinHam:
 
     def build(self, n, upper_ind_id='k{}', lower_ind_id='b{}',
               site_tag_id='i{}', tags=None, bond_name=""):
-        """
+        """Build an instance of this MPO of size ``n``. See also
+        ``MatrixProductOperator``.
         """
         left, middle, right = build_spin_ham_mpo_tensors(
             self.one_site_terms, self.two_site_terms, S=self.S, which='A')

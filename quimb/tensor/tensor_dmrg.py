@@ -5,7 +5,7 @@ import scipy.sparse.linalg as spla
 from ..utils import progbar
 from ..accel import prod
 from .tensor_core import Tensor, TensorNetwork, tensor_contract
-from .tensor_gen import MPS_rand
+from .tensor_gen import MPS_rand_state
 from .tensor_1d import align_inner
 
 
@@ -61,7 +61,7 @@ class DMRG1:
     def __init__(self, ham, bond_dim):
         self.n = ham.nsites
         self.bond_dim = bond_dim
-        self.k = MPS_rand(self.n, bond_dim)
+        self.k = MPS_rand_state(self.n, bond_dim)
         self.b = self.k.H
 
         # Tag the various bits for contraction.

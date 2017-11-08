@@ -565,7 +565,7 @@ class TestIsDegenerate:
         assert is_degenerate(h) == 2
 
     def test_known_nondegen(self):
-        h = ham_heis(2, bz=0.3)
+        h = ham_heis(2, b=0.3)
         assert is_degenerate(h) == 0
 
     def test_supply_list(self):
