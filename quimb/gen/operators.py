@@ -148,7 +148,8 @@ def controlled(s, sparse=False):
 @lru_cache(maxsize=8)
 def ham_heis(n, j=1.0, b=0.0, cyclic=True, sparse=False, stype="csr",
              parallel=None, nthreads=None):
-    """Constructs the heisenberg spin 1/2 hamiltonian
+    """Constructs the nearest neighbour 1d heisenberg spin-1/2 hamiltonian.
+
 
     Parameters
     ----------
@@ -236,6 +237,12 @@ def ham_heis(n, j=1.0, b=0.0, cyclic=True, sparse=False, stype="csr",
 
     make_immutable(ham)
     return ham
+
+
+def ham_ising(n, jz=1.0, bx=1.0, **kwargs):
+    """Generate the quantum transverse field ising model hamiltonian.
+    """
+    return ham_heis(n, j=(0, 0, jz), b=(bx, 0, 0), **kwargs)
 
 
 @lru_cache(maxsize=8)

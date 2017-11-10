@@ -197,6 +197,7 @@ gen.operators
     pauli
     controlled
     ham_heis
+    ham_ising
     ham_j1j2
     cmbn
     uniq_perms
