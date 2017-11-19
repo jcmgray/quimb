@@ -138,8 +138,8 @@ import sphinx_bootstrap_theme
 html_theme = 'bootstrap'
 html_theme_path = sphinx_bootstrap_theme.get_html_theme_path()
 html_theme_options = {
-  'bootswatch_theme': "journal",
-  'navbar_site_name': "Guides",
+    'bootswatch_theme': "journal",
+    'navbar_site_name': "Guides",
 }
 
 # Theme options are theme-specific and customize the look and feel of a theme
@@ -169,7 +169,10 @@ html_theme_options = {
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
-# html_static_path = ['_static']
+html_static_path = ['_static']
+
+def setup(app):
+    app.add_stylesheet("my-styles.css")
 
 # Add any extra paths that contain custom files (such as robots.txt or
 # .htaccess) here, relative to this directory. These files are copied
@@ -237,25 +240,25 @@ htmlhelp_basename = 'quimbdoc'
 # -- Options for LaTeX output ---------------------------------------------
 
 latex_elements = {
-# The paper size ('letterpaper' or 'a4paper').
-# 'papersize': 'letterpaper',
+    # The paper size ('letterpaper' or 'a4paper').
+    # 'papersize': 'letterpaper',
 
-# The font size ('10pt', '11pt' or '12pt').
-# 'pointsize': '10pt',
+    # The font size ('10pt', '11pt' or '12pt').
+    # 'pointsize': '10pt',
 
-# Additional stuff for the LaTeX preamble.
-# 'preamble': '',
+    # Additional stuff for the LaTeX preamble.
+    # 'preamble': '',
 
-# Latex figure (float) alignment
-# 'figure_align': 'htbp',
+    # Latex figure (float) alignment
+    # 'figure_align': 'htbp',
 }
 
 # Grouping the document tree into LaTeX files. List of tuples
 # (source start file, target name, title,
 #  author, documentclass [howto, manual, or own class]).
 latex_documents = [
-  (master_doc, 'quimb.tex', 'quimb Documentation',
-   'Johnnie Gray', 'manual'),
+    (master_doc, 'quimb.tex', 'quimb Documentation',
+     'Johnnie Gray', 'manual'),
 ]
 
 # The name of an image file (relative to this directory) to place at the top of
@@ -298,9 +301,9 @@ man_pages = [
 # (source start file, target name, title, author,
 #  dir menu entry, description, category)
 texinfo_documents = [
-  (master_doc, 'quimb', 'quimb Documentation',
-   author, 'quimb', 'One line description of project.',
-   'Miscellaneous'),
+    (master_doc, 'quimb', 'quimb Documentation',
+     author, 'quimb', 'One line description of project.',
+     'Miscellaneous'),
 ]
 
 # Documents to append as an appendix to all manuals.

@@ -28,3 +28,69 @@ The optional dependencies mainly allow high performance, distributed eigen-solvi
     * `petsc <http://www.mcs.anl.gov/petsc/>`_
     * `mpi4py <http://mpi4py.readthedocs.io/en/latest/>`_ (v2.1.0+)
     * An MPI implementation (`OpenMPI <https://www.open-mpi.org/>`_ recommended)
+
+It is recommended to compile and install these (apart from MPI if you are e.g. on a cluster) yourself.
+
+For best performance of some routines, (e.g. shift invert eigen-solving), petsc must be configured with certain options. Here is a rough overview of the steps to installing the above in a directory ``$SRC_DIR``, with MPI and ``mpi4py`` already installed. ``$PATH_TO_YOUR_BLAS_LAPACK_LIB`` should point to e.g. OpenBLAS (libopenblas.so) or the MKL library (libmkl_rt.so). ``$COMPILE_FLAGS`` should be optimizations chosen for your compiler, e.g. for ``gcc`` ``"-O3 -march=native -s -DNDEBUG"``, or for ``icc`` ``"-O3 -xHost"`` etc.
+
+
+Build PETSC
+~~~~~~~~~~~
+
+.. code-block:: bash
+
+    cd $SRC_DIR
+    git clone https://bitbucket.org/petsc/petsc.git
+
+    export PETSC_DIR=$SRC_DIR/petsc
+    export PETSC_ARCH=arch-auto-complex
+
+    cd petsc
+    python2 ./configure \
+      --download-mumps \
+      --download-scalapack \
+      --download-parmetis \
+      --download-metis \
+      --download-ptscotch \
+      --with-debugging=0 \
+      --with-blas-lapack-lib=$PATH_TO_YOUR_BLAS_LAPACK_LIB \
+      COPTFLAGS="$COMPILE_FLAGS" \
+      CXXOPTFLAGS="$COMPILE_FLAGS" \
+      FOPTFLAGS="$COMPILE_FLAGS" \
+      --with-scalar-type=complex
+    make all
+    make test
+    make streams NPMAX=4
+
+
+Build SLEPC
+~~~~~~~~~~~
+
+.. code-block:: bash
+
+    cd $SRC_DIR
+    git clone https://bitbucket.org/slepc/slepc.git
+    export SLEPC_DIR=$SRC_DIR/slepc
+    cd slepc
+    python2 ./configure
+    make
+    make test
+
+
+Build the python interfaces
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: bash
+
+    cd $SRC_DIR
+    git clone https://bitbucket.org/petsc/petsc4py.git
+    git clone https://bitbucket.org/slepc/slepc4py.git
+
+    cd $SRC_DIR/petsc4py
+    python setup.py build
+    python setup.py install
+
+    cd $SRC_DIR/slepc4py
+    python setup.py build
+    python setup.py install
+

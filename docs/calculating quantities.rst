@@ -8,7 +8,7 @@ Approximate Spectral Functions
 
 The module :py:mod:`~quimb.linalg.approx_spectral`, contains a Lanczos method for estimating any quantities of the form ``tr(fn(A))``. Where ``A`` is any operator that implements a dot product with a vector. For example, estimating the trace of the sqrt of a matrix would naievly require diagonalising it:
 
-.. code:: python
+.. code-block:: python
 
     >>> rho = rand_rho(2**12)
     >>> np.sum(np.sqrt(eigvals(rho)))
@@ -23,7 +23,7 @@ However, the real advantage occurs when the full matrix does not need to be full
 
 For example, the partial trace, followed by partial transpose, followed by vector multiplication can be 'lazily' evaluated as a tensor contraction (see :py:func:`~quimb.linalg.approx_spectral.lazy_ptr_ppt_dot`). In this way the logarithmic negativity of subsytems can be efficiently calculated:
 
-.. code:: python
+.. code-block:: python
 
     >>> psi = rand_ket(2**20)
     >>> dims = [2**8, 2**4, 2**8]

@@ -212,7 +212,7 @@ def neel_state(n, down_first=False, **kwargs):
     n : int
         Number of spins.
     down_first : bool, optional
-        Whether to start with '1' or '0' first
+        Whether to start with '1' or '0' first.
     kwargs
         Supplied to ``qu`` called on state.
 

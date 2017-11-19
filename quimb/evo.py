@@ -227,22 +227,25 @@ class QuEvo(object):
     method : {'integrate', 'solve', 'expm'}
         How to evolve the system:
 
-            - 'integrate': use definite integration. Get system at each time
-            step, only need action of Hamiltonian on state. Generally
-            efficient.
-            - 'solve': diagonalise dense hamiltonian. Best for small systems
-            and allows arbitrary time steps without loss of precision.
-            - 'expm': compute the evolved state using the action of the
-            matrix exponential in a 'single shot' style. Only needs action of
-            Hamiltonian, for very large systems can use distributed MPI.
+            - ``'integrate'``: use definite integration. Get system at each
+              time step, only need action of Hamiltonian on state. Generally
+              efficient.
+            - ``'solve'``: diagonalise dense hamiltonian. Best for small
+              systems and allows arbitrary time steps without loss of
+              precision.
+            - ``'expm'``: compute the evolved state using the action of the
+              matrix exponential in a 'single shot' style. Only needs action of
+              Hamiltonian, for very large systems can use distributed MPI.
 
     int_small_step : bool, optional
         If ``method='integrate'``, whether to use a low or high order
         integrator to give naturally small or large steps.
     expm_backend : {'auto', 'scipy', 'slepc'}
-        How to perform the expm_multiply function if ``method='exmp'``.
+        How to perform the expm_multiply function if ``method='expm'``. Can
+        further specifiy ``'slepc-krylov'``, or ``'slepc-expokit'``.
     expm_opts : dict
-        Supplied to expm_multiply function if ``method='exmp'``.
+        Supplied to :func:`~quimb.linalg.base_linalg.expm_multiply`
+        function if ``method='expm'``.
     progbar : bool, optional
         Whether to show a progress bar when calling ``at_times`` or integrating
         with the ``update_to`` method.

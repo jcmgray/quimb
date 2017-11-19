@@ -239,7 +239,7 @@ def mutinf_subsys(psi_abc, dims, sysa, sysb, approx_thresh=2**12,
     approx_thresh : int, optional
         The size of subsystem at which to switch to the approximate lanczos
         method. Set to ``None`` to never use the approximation.
-     **approx_opts
+    approx_opts
         Supplied to :func:`entropy_subsys_approx`, if used.
 
     Returns
@@ -461,7 +461,7 @@ def logneg_subsys(psi_abc, dims, sysa, sysb,
     approx_thresh : int, optional
         The size of subsystem at which to switch to the approximate lanczos
         method. Set to ``None`` to never use the approximation.
-     **approx_opts
+    approx_opts
         Supplied to :func:`logneg_subsys_approx`, if used.
 
     Returns
