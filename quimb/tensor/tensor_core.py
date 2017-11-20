@@ -392,10 +392,6 @@ class Tensor(object):
         The index labels for each dimension.
     tags : sequence of hashable
         Tags with which to select and filter from multiple tensors.
-
-    Members
-    -------
-
     """
 
     def __init__(self, data, inds, tags=None):

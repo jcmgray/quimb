@@ -2,6 +2,15 @@
 Distributed Parallelism - MPI
 #############################
 
+The ``slepc`` and ``petsc`` parts of ``quimb`` (``seigsys(..., method='slepc')``, ``svds(..., method='slepc')``, ``expm(..., method='slepc')``) generally perform best when run on multiple, single-threaded MPI processes, whereas ``numpy`` and ``scipy`` need single-process multi-threaded exectution to parallize (via BLAS).
+
+By default, ``quimb`` thus switches between standard execution and a cached pool of MPI processes when required.
+
+
+MPI pool
+~~~~~~~~
+
+The pool of MPI workers is generated automatically for special functions that require it, but can also be explicitly used with :func:`quimb.linalg.mpi_launcher.get_mpi_pool` for other simple parallel tasks that will then scale to multi-node cluster settings.
 
 
 Modes of execution
