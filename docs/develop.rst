@@ -3,6 +3,12 @@ Developer notes
 ###############
 
 
+Running the Tests
+=================
+
+Testing ``quimb`` requires `pytest <https://docs.pytest.org/en/latest/index.html>`_ and simply involves running ``pytest`` in the root ``quimb`` directory.
+
+
 Adding a function
 =================
 
@@ -16,6 +22,8 @@ Steps:
 
 Building the docs locally
 =========================
+
+Building the docs requires `sphinx <http://www.sphinx-doc.org/en/stable/>`_ and `sphinx_bootstrap_theme <https://ryan-roemer.github.io/sphinx-bootstrap-theme/>`_
 
 1. To start from scratch, remove ``quimb/docs/_autosummary`` and ``quimb/docs/_build``.
 2. Run ``make html`` (``make.bat html`` on windows) in the ``quimb/docs`` folder.

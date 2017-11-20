@@ -2,9 +2,14 @@
 Installation
 ############
 
+If the dependencies are satisfied, ``quimb`` can be installed with pip directly from github:
+
+.. code-block:: bash
+
+    pip install git+git://github.com/jcmgray/quimb.git@develop
 
 Required Dependencies
----------------------
+=====================
 
 The core packages ``quimb`` requires are:
 
@@ -13,12 +18,13 @@ The core packages ``quimb`` requires are:
     * `scipy <https://www.scipy.org/>`_
     * `numba <http://numba.pydata.org/>`_
     * `numexpr <https://github.com/pydata/numexpr>`_
+    * `cytoolz <https://github.com/pytoolz/cytoolz>`_
 
 For ease and performance (i.e. mkl compiled libraries), `conda <http://conda.pydata.org/miniconda.html/>`_ is the recommended distribution with which to install these.
 
 
 Optional Dependencies
----------------------
+=====================
 
 The optional dependencies mainly allow high performance, distributed eigen-solving. For sparse systems this functionality is provided by ``slepc4py``, along with its dependencies:
 
@@ -31,7 +37,7 @@ The optional dependencies mainly allow high performance, distributed eigen-solvi
 
 It is recommended to compile and install these (apart from MPI if you are e.g. on a cluster) yourself.
 
-For best performance of some routines, (e.g. shift invert eigen-solving), petsc must be configured with certain options. Here is a rough overview of the steps to installing the above in a directory ``$SRC_DIR``, with MPI and ``mpi4py`` already installed. ``$PATH_TO_YOUR_BLAS_LAPACK_LIB`` should point to e.g. OpenBLAS (libopenblas.so) or the MKL library (libmkl_rt.so). ``$COMPILE_FLAGS`` should be optimizations chosen for your compiler, e.g. for ``gcc`` ``"-O3 -march=native -s -DNDEBUG"``, or for ``icc`` ``"-O3 -xHost"`` etc.
+For best performance of some routines, (e.g. shift invert eigen-solving), petsc must be configured with certain options. Here is a rough overview of the steps to installing the above in a directory ``$SRC_DIR``, with MPI and ``mpi4py`` already installed. ``$PATH_TO_YOUR_BLAS_LAPACK_LIB`` should point to e.g. `OpenBLAS <https://github.com/xianyi/OpenBLAS>`_ (``libopenblas.so``) or the MKL library (``libmkl_rt.so``). ``$COMPILE_FLAGS`` should be optimizations chosen for your compiler, e.g. for ``gcc`` ``"-O3 -march=native -s -DNDEBUG"``, or for ``icc`` ``"-O3 -xHost"`` etc.
 
 
 Build PETSC
