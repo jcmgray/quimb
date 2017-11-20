@@ -2,7 +2,7 @@
 Installation
 ############
 
-If the dependencies are satisfied, ``quimb`` can be installed with pip directly from github:
+``quimb`` is hosted on `github <https://github.com/jcmgray/quimb>`_. If the dependencies are satisfied, it can be installed with pip directly from there:
 
 .. code-block:: bash
 

@@ -1,7 +1,7 @@
 Welcome to quimb's documentation!
 =================================
 
-:mod:`quimb` is a library for quantum information and many-body calculations.
+`quimb <https://github.com/jcmgray/quimb>`_ is a library for quantum information and many-body calculations.
 
 .. rubric:: Guides:
 
