@@ -294,49 +294,45 @@ def array_direct_product(X, Y, sum_axes=()):
     Returns
     -------
     Z : numpy.ndarray
-        Same shape as ``X`` and ``Y``, but with every dimension doubled in size
-        unless it is included in ``sum_axes``.
+        Same shape as ``X`` and ``Y``, but with every dimension the sum of the
+        two respective dimensions, unless it is included in ``sum_axes``.
     """
-    if X.shape != Y.shape:
-        raise ValueError("Can only add tensors of the "
-                         "same shape.")
 
     if isinstance(sum_axes, int):
         sum_axes = (sum_axes,)
 
     # parse the intermediate and final shape doubling the size of any axes that
     #   is not to be summed, and preparing slices with which to add X, Y.
-    temp_shape = []
     final_shape = []
     selectorX = []
     selectorY = []
-    for i, d in enumerate(X.shape):
+
+    for i, (d1, d2) in enumerate(zip(X.shape, Y.shape)):
         if i not in sum_axes:
-            temp_shape.append(2)
-            final_shape.append(2 * d)
-            selectorX.append(0)
-            selectorY.append(1)
+            final_shape.append(d1 + d2)
+            selectorX.append(slice(0, d1))
+            selectorY.append(slice(d1, None))
         else:
-            final_shape.append(d)
-        temp_shape.append(d)
-        selectorX.append(slice(None))
-        selectorY.append(slice(None))
+            if d1 != d2:
+                raise ValueError("Can only add sum tensor indices of the same "
+                                 "size.")
+            final_shape.append(d1)
+            selectorX.append(slice(None))
+            selectorY.append(slice(None))
 
     new_type = np.find_common_type((X.dtype, Y.dtype), ())
-    Z = np.zeros(temp_shape, dtype=new_type)
+    Z = np.zeros(final_shape, dtype=new_type)
 
-    # Add tensors to [0, :, 0, :, ...], [1, :, 1, :, ...] locations, i.e. the
-    #   'diagonal' representing the temp doubled axes
+    # Add tensors to the diagonals
     Z[selectorX] += X
     Z[selectorY] += Y
 
-    # Reshape to the same number of original dimensions
-    return Z.reshape(final_shape)
+    return Z
 
 
 def tensor_direct_product(T1, T2, sum_inds=(), inplace=False):
-    """Direct product of two Tensors. They must have the same shape, any axes
-    included in ``sum_inds`` will be summed over rather than combined.
+    """Direct product of two Tensors. Any axes included in ``sum_inds`` must be
+    the same size and will be summed over rather than concatenated.
     Summing over contractions of TensorNetworks equates to contracting a
     TensorNetwork made of direct products of each set of tensors.
     I.e. (a1 @ b1) + (a2 @ b2) == (a1 (+) a2) @ (b1 (+) b2).
@@ -435,6 +431,19 @@ class Tensor(object):
 
     data = property(get_data, set_data,
                     doc="The numpy.ndarray with this Tensors' numeric data.")
+
+    def update(self, data=None, inds=None, tags=None):
+        """Overwrite the data of this tensor.
+        """
+        if data is not None:
+            self._data = np.asarray(data)
+        if inds is not None:
+            self.inds = inds
+        if tags is not None:
+            tags = tags
+        if len(self.inds) != self.data.ndim:
+            raise ValueError("Mismatch between number of data dimensions and "
+                             "number of indices supplied.")
 
     def conj(self, inplace=False):
         """Conjugate this tensors data (does nothing to indices).
@@ -1231,6 +1240,10 @@ class TensorNetwork(object):
 
             # peform the next contraction
             new_tn = new_tn._contract_tags(ctags, inplace=True)
+
+            if isinstance(new_tn, Tensor):
+                # nothing more to contract
+                break
 
         return new_tn
 

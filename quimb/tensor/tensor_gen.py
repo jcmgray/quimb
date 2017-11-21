@@ -16,13 +16,17 @@ def rand_tensor(shape, inds, tags=None):
     return Tensor(data=data, inds=inds, tags=tags)
 
 
+# --------------------------------------------------------------------------- #
+#                                    MPSs                                     #
+# --------------------------------------------------------------------------- #
+
 def MPS_rand_state(n, bond_dim, phys_dim=2,
                    site_ind_id='k{}',
                    site_tag_id='i{}',
                    tags=None,
                    bond_name="",
                    normalize=True,
-                   **kwargs):
+                   **mps_opts):
     """Generate a random matrix product state.
 
     Parameters
@@ -51,7 +55,7 @@ def MPS_rand_state(n, bond_dim, phys_dim=2,
 
     rmps = MatrixProductState(arrays, site_ind_id=site_ind_id,
                               bond_name=bond_name, site_tag_id=site_tag_id,
-                              tags=tags, **kwargs)
+                              tags=tags, **mps_opts)
 
     if normalize:
         rmps.site[-1] /= (rmps.H @ rmps)**0.5
@@ -59,7 +63,7 @@ def MPS_rand_state(n, bond_dim, phys_dim=2,
     return rmps
 
 
-def MPS_product_state(arrays, **kwargs):
+def MPS_product_state(arrays, **mps_opts):
     """Generate a product state in MatrixProductState form, i,e,
     with bond dimension 1, from single site vectors described by ``arrays``.
     """
@@ -72,11 +76,78 @@ def MPS_product_state(arrays, **kwargs):
     mps_arrays = (np.asarray(array).reshape(*shape)
                   for array, shape in zip(arrays, gen_array_shapes()))
 
-    return MatrixProductState(mps_arrays, shape='lrp', **kwargs)
+    return MatrixProductState(mps_arrays, shape='lrp', **mps_opts)
 
 
-def build_spin_ham_mpo_tensors(one_site_terms, two_site_terms,
-                               S=1 / 2, which=None):
+def MPS_computational_state(binary_str, **mps_opts):
+    """A computational basis state in Matrix Product State form.
+
+    Parameters
+    ----------
+    binary_str : str
+        String specifying the state, e.g. '00101010111'
+    mps_opts
+        Supplied to MatrixProductState constructor.
+    """
+    array_map = {
+        '0': np.array([1., 0.]),
+        '1': np.array([0., 1.]),
+    }
+
+    def gen_arrays():
+        for s in binary_str:
+            yield array_map[s]
+
+    return MPS_product_state(tuple(gen_arrays()), **mps_opts)
+
+
+def MPS_neel_state(n, down_first=False, **mps_opts):
+    """Generate the neel state in Matrix Product State form.
+
+    Parameters
+    ----------
+    n : int
+        The number of spins.
+    down_first : bool, optional
+        Whether to start with '1' or '0' first.
+    mps_opts
+        Supplied to MatrixProductState constructor.
+    """
+    binary_str = "01" * (n // 2) + (n % 2 == 1) * "0"
+    if down_first:
+        binary_str = "1" + binary_str[:-1]
+    return MPS_computational_state(binary_str, **mps_opts)
+
+
+def MPS_zero_state(n, bond_dim=1, phys_dim=2, **mps_opts):
+    """The all-zeros MPS state, of given bond-dimension.
+    """
+    def gen_arrays():
+        yield np.zeros((bond_dim, phys_dim))
+        for _ in range(n - 2):
+            yield np.zeros((bond_dim, bond_dim, phys_dim))
+        yield np.zeros((bond_dim, phys_dim))
+
+    return MatrixProductState(gen_arrays(), **mps_opts)
+
+
+# --------------------------------------------------------------------------- #
+#                                    MPOs                                     #
+# --------------------------------------------------------------------------- #
+
+def MPO_identity(n, phys_dim=2, **mpo_opts):
+    """Generate an identity MPO of size ``n``.
+    """
+    def gen_arrays():
+        yield np.identity(phys_dim).reshape(1, phys_dim, phys_dim)
+        for _ in range(n - 2):
+            yield np.identity(phys_dim).reshape(1, 1, phys_dim, phys_dim)
+        yield np.identity(phys_dim).reshape(1, phys_dim, phys_dim)
+
+    return MatrixProductOperator(gen_arrays(), **mpo_opts)
+
+
+def spin_ham_mpo_tensor(one_site_terms, two_site_terms, S=1 / 2, which=None):
     """Generate tensor(s) for a spin hamiltonian MPO.
 
     Parameters
@@ -185,7 +256,7 @@ class MPOSpinHam:
         """Build an instance of this MPO of size ``n``. See also
         ``MatrixProductOperator``.
         """
-        left, middle, right = build_spin_ham_mpo_tensors(
+        left, middle, right = spin_ham_mpo_tensor(
             self.one_site_terms, self.two_site_terms, S=self.S, which='A')
 
         arrays = (left, *[middle] * (n - 2), right)
@@ -242,3 +313,43 @@ def MPO_ham_heis(n, j=1.0, bz=0.0,
     H.add_term(-bz, 'Z')
     return H.build(n, site_tag_id=site_tag_id, tags=tags, bond_name=bond_name,
                    upper_ind_id=upper_ind_id, lower_ind_id=lower_ind_id)
+
+
+def MPO_ham_mbl(n, dh, j=1.0, run=None, S=1 / 2, **mpo_opts):
+    """The many-body-localized spin hamiltonian.
+
+    Parameters
+    ----------
+    n : int
+        Number of spins.
+    dh : float
+        Random noise strength.
+    j : float, sequence of float
+        Interaction strength(s) e.g. 1 or (1., 1., 0.5).
+    run : int
+        Random number to seed the noise with.
+    S : float
+        The underlying spin of the system, defaults to 1/2.
+    mpo_opts
+        Supplied to :class:`MatrixProductOperator`.
+    """
+    if run is not None:
+        np.random.seed(run)
+
+    try:
+        jx, jy, jz = j
+    except (TypeError, ValueError):
+        jx = jy = jz = j
+
+    interaction = [(jx, 'X', 'X'), (jy, 'Y', 'Y'), (jz, 'Z', 'Z')]
+
+    def dhi():
+        return dh * (2 * np.random.rand() - 1)
+
+    def gen_arrays():
+        yield spin_ham_mpo_tensor([(dhi(), 'Z')], interaction, which='L', S=S)
+        for _ in range(n - 2):
+            yield spin_ham_mpo_tensor([(dhi(), 'Z')], interaction, S=S)
+        yield spin_ham_mpo_tensor([(dhi(), 'Z')], interaction, which='R', S=S)
+
+    return MatrixProductOperator(gen_arrays(), **mpo_opts)

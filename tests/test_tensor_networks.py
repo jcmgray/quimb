@@ -12,29 +12,31 @@ from quimb import (
     entropy_subsys,
     schmidt_gap,
     plus,
+    neel_state,
+    is_eigenvector,
+    eigsys,
 )
 
-from quimb.tensor.tensor_core import (
+from quimb.tensor import (
     tensor_contract,
     tensor_direct_product,
     Tensor,
     TensorNetwork,
-)
-from quimb.tensor.tensor_1d import (
+    rand_tensor,
     MatrixProductState,
     MatrixProductOperator,
     align_inner,
-)
-from quimb.tensor.tensor_gen import (
     MPS_rand_state,
     MPS_product_state,
+    MPS_neel_state,
+    MPS_zero_state,
+    MPO_identity,
     MPO_ham_ising,
     MPO_ham_XY,
     MPO_ham_heis,
-    rand_tensor,
-)
-from quimb.tensor.tensor_dmrg import (
+    MPO_ham_mbl,
     DMRG1,
+    DMRGX,
 )
 
 
@@ -781,6 +783,40 @@ class TestMatrixProductOperator:
         assert set(op.inds) == {'k0', 'b0', 'k1', 'b1', 'k2', 'b2',
                                 'k3', 'b3', 'k4', 'b4'}
 
+    def test_add_mpo(self):
+        h = MPO_ham_heis(12)
+        h2 = h + h
+        assert max(h2.site[6].shape) == 10
+        h.lower_ind_id = h.upper_ind_id
+        t = h ^ ...
+        h2.upper_ind_id = h2.lower_ind_id
+        t2 = h2 ^ ...
+        assert_allclose(2 * t, t2)
+
+    def test_expand_mpo(self):
+        h = MPO_ham_heis(12)
+        he = h.expand_bond_dimension(13)
+        assert max(he.site[6].shape) == 13
+        h.lower_ind_id = h.upper_ind_id
+        t = h ^ ...
+        he.upper_ind_id = he.lower_ind_id
+        te = he ^ ...
+        assert_allclose(t, te)
+
+    def test_expand_mpo_limited(self):
+        h = MPO_ham_heis(12)
+        he = h.expand_bond_dimension(3)  # should do nothing
+        assert max(he.site[6].shape) == 5
+
+    def test_mpo_identity(self):
+        k = MPS_rand_state(13, 7)
+        b = MPS_rand_state(13, 7)
+        o1 = k @ b
+        i = MPO_identity(13)
+        align_inner(k, b, i)
+        o2 = (k & i & b) ^ ...
+        assert_allclose(o1, o2)
+
 
 class TestSpecificStatesOperators:
 
@@ -798,6 +834,20 @@ class TestSpecificStatesOperators:
         assert_allclose(rmps.H @ rmps, 1)
         c = (rmps.H & rmps) ^ slice(0, 5) ^ slice(9, 4, -1) ^ slice(4, 6)
         assert_allclose(c, 1)
+
+    def test_mps_computation_state(self):
+        p = MPS_neel_state(10)
+        pd = neel_state(10)
+        assert_allclose(p.to_dense(), pd)
+
+    def test_zero_state(self):
+        z = MPS_zero_state(21, 7)
+        p = MPS_rand_state(21, 13)
+        assert_allclose(p.H @ z, 0.0)
+        assert_allclose(p.H @ p, 1.0)
+        zp = z + p
+        assert max(zp.site[13].shape) == 20
+        assert_allclose(zp.H @ p, 1.0)
 
     def test_mpo_site_ham_heis(self):
         hh_mpo = MPO_ham_heis(5, tags=['foo'])
@@ -893,3 +943,40 @@ class TestDMRG1:
 
         exp_gs = MPS_product_state([plus()] * 6)
         assert_allclose(abs(exp_gs.H @ mps_gs), 1.0, rtol=1e-3)
+
+
+class TestDMRGX:
+
+    def test_1(self):
+        n = 8
+        chi = 16
+        ham = MPO_ham_mbl(n, dh=12, run=42)
+        p0 = MPS_neel_state(n)
+        dmrgx = DMRGX(ham, p0, chi)
+        en1 = dmrgx.sweep_right(canonize=True)
+        en2 = dmrgx.sweep_right(canonize=True)
+        assert en1 != en2
+
+        dmrgx.sweep_right(canonize=True)
+        en = dmrgx.sweep_right(canonize=True)
+
+        # check normalized
+        assert_allclose(dmrgx.k.H @ dmrgx.k, 1.0)
+
+        k = dmrgx.k.to_dense()
+        h = ham.to_dense()
+        el, ev = eigsys(h)
+
+        # check variance very low
+        assert np.abs((k.H @ h @ h @ k) - (k.H @ h @ k)**2) < 1e-12
+
+        # check exactly one eigenvalue matched well
+        assert np.sum(np.abs(el - en) < 1e-12) == 1
+
+        # check exactly one eigenvector is matched with high fidelity
+        ovlps = (ev.H @ k).A**2
+        big_ovlps = ovlps[ovlps > 1e-12]
+        assert_allclose(big_ovlps, [1])
+
+        # check fully
+        assert is_eigenvector(k, h)

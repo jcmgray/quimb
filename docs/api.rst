@@ -374,15 +374,21 @@ Tensor Networks
     tensor_contract
     tensor_direct_product
     Tensor
-    rand_tensor
     TensorNetwork
-    MatrixProductState
+    rand_tensor
     MPS_rand_state
     MPS_product_state
-    MatrixProductOperator
+    MPS_computational_state
+    MPS_neel_state
+    MPS_zero_state
+    MPO_identity
     MPOSpinHam
     MPO_ham_ising
     MPO_ham_XY
     MPO_ham_heis
+    MPO_ham_mbl
+    MatrixProductState
+    MatrixProductOperator
     align_inner
     DMRG1
+    DMRGX

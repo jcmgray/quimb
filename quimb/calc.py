@@ -980,7 +980,10 @@ def is_eigenvector(vec, mat, **kwargs):
         Whether ``mat @ vec = l * vec`` for some scalar ``l``.
     """
     vec2 = mat @ vec
-    factor = np.asscalar(vec2[0] / vec[0])
+
+    # define scalar factor using largest entry (otherwise can divide by ~zero)
+    largest = np.argmax(vec)
+    factor = np.asscalar(vec2[largest] / vec[largest])
     return np.allclose(factor * vec, vec2, **kwargs)
 
 

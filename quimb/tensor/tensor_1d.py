@@ -323,6 +323,40 @@ class TensorNetwork1D(TensorNetwork):
             raise ValueError("Form specifier {} not understood, should be "
                              "either 'L' or 'R".format(form))
 
+    def bond(self, i, j):
+        """Get the name of the index defining the bond between sites i and j.
+        """
+        inds_i = self.site[i].inds
+        inds_j = self.site[j].inds
+        bond, = (i for i in inds_i if i in inds_j)
+        return bond
+
+    def expand_bond_dimension(self, new_bond_dim, inplace=False):
+        """Expand the bond dimensions of this 1D tensor network to at least
+        ``new_bond_dim``.
+        """
+        if inplace:
+            expanded = self
+        else:
+            expanded = self.copy()
+
+        for i in range(self.nsites):
+            tensor = expanded.site[i]
+            to_expand = []
+
+            if i > 0:
+                to_expand.append(self.bond(i - 1, i))
+            if i < self.nsites - 1:
+                to_expand.append(self.bond(i, i + 1))
+
+            pads = [(0, 0) if i not in to_expand else
+                    (0, max(new_bond_dim - d, 0))
+                    for d, i in zip(tensor.shape, tensor.inds)]
+
+            tensor._data = np.pad(tensor._data, pads, mode='constant')
+
+        return expanded
+
 
 class MatrixProductState(TensorNetwork1D):
     """Initialise a matrix product state, with auto labelling and tagging.
@@ -350,7 +384,7 @@ class MatrixProductState(TensorNetwork1D):
     """
 
     def __init__(self, arrays, *, shape='lrp', tags=None, bond_name="",
-                 site_ind_id='k{}', site_tag_id='i{}', **kwargs):
+                 site_ind_id='k{}', site_tag_id='i{}', **tn_opts):
 
         # short-circuit for copying MPSs
         if isinstance(arrays, MatrixProductState):
@@ -407,7 +441,7 @@ class MatrixProductState(TensorNetwork1D):
                 yield Tensor(array.transpose(*order), inds=inds, tags=site_tag)
 
         super().__init__(gen_tensors(), structure=site_tag_id,
-                         nsites=nsites, check_collisions=False, **kwargs)
+                         nsites=nsites, check_collisions=False, **tn_opts)
 
     def reindex_sites(self, new_id, where=None, inplace=False):
         """Update the physical site index labels to a new string specifier.
@@ -467,18 +501,30 @@ class MatrixProductState(TensorNetwork1D):
             raise ValueError("Can't add MPS with another of different length.")
 
         if inplace:
-            new = self
+            summed = self
         else:
-            new = self.copy()
+            summed = self.copy()
 
-        for i in range(new.nsites):
-            tensor_direct_product(new.site[i], other.site[i], inplace=True,
-                                  sum_inds=new.site_ind_id.format(i))
+        for i in range(summed.nsites):
+            summed_tensor = summed.site[i]
+            other_tensor = other.site[i]
+
+            if set(summed_tensor.inds) != set(other_tensor.inds):
+                # Need to use bonds to match indices
+                reindex_map = {}
+                if i > 0:
+                    reindex_map[other.bond(i - 1, i)] = summed.bond(i - 1, i)
+                if i < summed.nsites - 1:
+                    reindex_map[other.bond(i, i + 1)] = summed.bond(i, i + 1)
+                other_tensor = other_tensor.reindex(reindex_map)
+
+            tensor_direct_product(summed_tensor, other_tensor, inplace=True,
+                                  sum_inds=summed.site_ind_id.format(i))
 
         if compress:
-            new.compress(**compress_opts)
+            summed.compress(**compress_opts)
 
-        return new
+        return summed
 
     def __add__(self, other):
         """MPS addition.
@@ -579,6 +625,12 @@ class MatrixProductState(TensorNetwork1D):
         return np.asmatrix(self.contract(...)
                            .fuse({'all': self.site_inds})
                            .data.reshape(-1, 1))
+
+    def get_phys_dim(self, i):
+        tns = self.site[i]
+        d, = (d for d, i in zip(tns.shape, tns.inds)
+              if i == self.site_ind_id.format(i))
+        return d
 
 
 class MatrixProductOperator(TensorNetwork1D):
@@ -721,7 +773,7 @@ class MatrixProductOperator(TensorNetwork1D):
         return self._lower_ind_id
 
     def _set_lower_ind_id(self, new_id):
-        self.reindex_sites(new_id, inplace=True)
+        self.reindex_lower_sites(new_id, inplace=True)
         self._lower_ind_id = new_id
 
     lower_ind_id = property(_get_lower_ind_id, _set_lower_ind_id,
@@ -732,7 +784,7 @@ class MatrixProductOperator(TensorNetwork1D):
         return self._upper_ind_id
 
     def _set_upper_ind_id(self, new_id):
-        self.reindex_sites(new_id, inplace=True)
+        self.reindex_upper_sites(new_id, inplace=True)
         self._upper_ind_id = new_id
 
     upper_ind_id = property(_get_upper_ind_id, _set_upper_ind_id,
@@ -746,19 +798,31 @@ class MatrixProductOperator(TensorNetwork1D):
             raise ValueError("Can't add MPO with another of different length.")
 
         if inplace:
-            new = self
+            summed = self
         else:
-            new = self.copy()
+            summed = self.copy()
 
-        for i in range(new.nsites):
-            tensor_direct_product(new.site[i], other.site[i], inplace=True,
-                                  sum_inds=(new.upper_ind_id.format(i),
-                                            new.lower_ind_id.format(i)))
+        for i in range(summed.nsites):
+            summed_tensor = summed.site[i]
+            other_tensor = other.site[i]
+
+            if set(summed_tensor.inds) != set(other_tensor.inds):
+                # Need to use bonds to match indices
+                reindex_map = {}
+                if i > 0:
+                    reindex_map[other.bond(i - 1, i)] = summed.bond(i - 1, i)
+                if i < summed.nsites - 1:
+                    reindex_map[other.bond(i, i + 1)] = summed.bond(i, i + 1)
+                other_tensor = other_tensor.reindex(reindex_map)
+
+            tensor_direct_product(summed_tensor, other_tensor, inplace=True,
+                                  sum_inds=(summed.upper_ind_id.format(i),
+                                            summed.lower_ind_id.format(i)))
 
         if compress:
-            new.compress(**compress_opts)
+            summed.compress(**compress_opts)
 
-        return new
+        return summed
 
     def __add__(self, other):
         """MPO addition.
@@ -799,6 +863,12 @@ class MatrixProductOperator(TensorNetwork1D):
                                         ('upper', self.upper_inds))).data
         d = int(data.size**0.5)
         return np.matrix(data.reshape(d, d))
+
+    def get_phys_dim(self, i):
+        tns = self.site[i]
+        d, = (d for d, i in zip(tns.shape, tns.inds)
+              if i == self.upper_ind_id.format(i))
+        return d
 
 
 def align_inner(mps_ket, mps_bra, mpo=None):
