@@ -989,10 +989,10 @@ class TestDMRGX:
         assert is_eigenvector(k, h)
 
     def test_solve_bigger(self):
-        n = 20
-        chi = 16
+        n = 14
+        chi = 8
         ham = MPO_ham_mbl(n, dh=12, run=42)
-        p0 = MPS_computational_state('00110111000101001001')
+        p0 = MPS_computational_state('00110111000101')
         dmrgx = DMRGX(ham, p0, chi)
         dmrgx.solve(vtol=1e-6)
         assert dmrgx.variances[-1] < 1e-6
