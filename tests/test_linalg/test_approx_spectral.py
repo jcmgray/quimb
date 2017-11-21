@@ -443,6 +443,7 @@ class TestSpecificApproxQuantities:
 
     @pytest.mark.parametrize("bsz", [1, 2, 5])
     def test_entropy_approx_simple(self, psi_abc, bsz):
+        np.random.seed(42)
         rho_ab = psi_abc.ptr(DIMS, [0, 1])
         actual_e = entropy(rho_ab)
         approx_e = entropy_subsys_approx(psi_abc, DIMS, [0, 1],

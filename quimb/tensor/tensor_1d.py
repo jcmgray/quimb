@@ -3,6 +3,7 @@
 import copy
 import numpy as np
 from .tensor_core import (
+    _einsum_symbols,
     Tensor,
     TensorNetwork,
     rand_uuid,
@@ -34,12 +35,12 @@ class TensorNetwork1D(TensorNetwork):
         R.reindex({new_shared_bond: old_shared_bond}, inplace=True)
         R.transpose(*T2.inds, inplace=True)
 
-        self.site[i]._data = Q._data
-        self.site[i + 1]._data = R._data
+        self.site[i].update(data=Q._data)
+        self.site[i + 1].update(data=R._data)
 
         if bra is not None:
-            bra.site[i]._data = Q._data.conj()
-            bra.site[i + 1]._data = R._data.conj()
+            bra.site[i].update(data=Q._data.conj())
+            bra.site[i + 1].update(data=R._data.conj())
 
     def _right_decomp_site(self, i, bra=None, **split_opts):
         T1 = self.site[i]
@@ -60,12 +61,12 @@ class TensorNetwork1D(TensorNetwork):
         Q.reindex({new_shared_bond: old_shared_bond}, inplace=True)
         Q.transpose(*T1.inds, inplace=True)
 
-        self.site[i - 1]._data = L._data
-        self.site[i]._data = Q._data
+        self.site[i - 1].update(data=L._data)
+        self.site[i].update(data=Q._data)
 
         if bra is not None:
-            bra.site[i - 1]._data = L._data.conj()
-            bra.site[i]._data = Q._data.conj()
+            bra.site[i - 1].update(data=L._data.conj())
+            bra.site[i].update(data=Q._data.conj())
 
     def left_canonize_site(self, i, bra=None):
         """Left canonize this TN's ith site, inplace.
@@ -331,7 +332,7 @@ class TensorNetwork1D(TensorNetwork):
         bond, = (i for i in inds_i if i in inds_j)
         return bond
 
-    def expand_bond_dimension(self, new_bond_dim, inplace=False):
+    def expand_bond_dimension(self, new_bond_dim, inplace=False, bra=None):
         """Expand the bond dimensions of this 1D tensor network to at least
         ``new_bond_dim``.
         """
@@ -353,7 +354,10 @@ class TensorNetwork1D(TensorNetwork):
                     (0, max(new_bond_dim - d, 0))
                     for d, i in zip(tensor.shape, tensor.inds)]
 
-            tensor._data = np.pad(tensor._data, pads, mode='constant')
+            tensor.update(data=np.pad(tensor._data, pads, mode='constant'))
+
+            if bra is not None:
+                bra.site[i].update(data=tensor.data.conj())
 
         return expanded
 
@@ -871,26 +875,53 @@ class MatrixProductOperator(TensorNetwork1D):
         return d
 
 
-def align_inner(mps_ket, mps_bra, mpo=None):
-    """Align two MPS, with or without a sandwiched MPO, so that they form an
-    overlap/expectation tensor network.
+def TN_1D_align(*tns, ind_ids=None, inplace=False):
+    """Align an arbitrary number of 1d TNs in a stack-like geometry:
+
+        a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a
+        | | | | | | | | | | | | | | | | | | <- ind_ids[0] (defaults to 1st id)
+        b-b-b-b-b-b-b-b-b-b-b-b-b-b-b-b-b-b
+        | | | | | | | | | | | | | | | | | | <- ind_ids[1]
+                       ...
+        | | | | | | | | | | | | | | | | | | <- ind_ids[-2]
+        y-y-y-y-y-y-y-y-y-y-y-y-y-y-y-y-y-y
+        | | | | | | | | | | | | | | | | | | <- ind_ids[-1]
+        z-z-z-z-z-z-z-z-z-z-z-z-z-z-z-z-z-z
 
     Parameters
     ----------
-    mps_ket : MatrixProductState
-        A state.
-    mps_bra : MatrixProductState
-        Another state, notionally the 'bra'.
-    mpo : None or MatrixProductOperator
-        If given, sandwich this operator between the two MPS.
+    tns : sequence of MatrixProductState and MatrixProductOperator
+        The 1D TNs to align.
+    ind_ids : None, or sequence of str
+        String with format specifiers to id each level of sites with. Will be
+        automatically generated like ``(tns[0].site_ind_id, "__ind_a{}__",
+        "__ind_b{}__", ...)`` if not given.
     """
-    if mpo is None:
-        if mps_ket.site_ind_id != mps_bra.site_ind_id:
-            mps_bra.site_ind_id = mps_ket.site_ind_id
-            return
+    if not inplace:
+        tns = [tn.copy() for tn in tns]
 
-    if mps_ket.site_ind_id != mpo.upper_ind_id:
-        mps_ket.site_ind_id = mpo.upper_ind_id
+    if ind_ids is None:
+        ind_ids = ([tns[0].site_ind_id] +
+                   ["__ind_{}".format(_einsum_symbols[i]) + "{}__"
+                    for i in range(len(tns) - 2)])
+    else:
+        ind_ids = tuple(ind_ids)
 
-    if mps_bra.site_ind_id != mpo.lower_ind_id:
-        mps_bra.site_ind_id = mpo.lower_ind_id
+    for i, tn in enumerate(tns):
+        if isinstance(tn, MatrixProductState):
+            if i == 0:
+                tn.site_ind_id = ind_ids[i]
+            elif i == len(tns) - 1:
+                tn.site_ind_id = ind_ids[i - 1]
+            else:
+                raise ValueError("An MPS can only be aligned as the first or "
+                                 "last TN in a sequence.")
+
+        elif isinstance(tn, MatrixProductOperator):
+            tn.upper_ind_id = ind_ids[i - 1]
+            tn.lower_ind_id = ind_ids[i]
+
+        else:
+            raise ValueError("Can only align MPS and MPOs currently.")
+
+    return tns

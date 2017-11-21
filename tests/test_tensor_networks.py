@@ -25,9 +25,10 @@ from quimb.tensor import (
     rand_tensor,
     MatrixProductState,
     MatrixProductOperator,
-    align_inner,
+    TN_1D_align,
     MPS_rand_state,
     MPS_product_state,
+    MPS_computational_state,
     MPS_neel_state,
     MPS_zero_state,
     MPO_identity,
@@ -813,7 +814,7 @@ class TestMatrixProductOperator:
         b = MPS_rand_state(13, 7)
         o1 = k @ b
         i = MPO_identity(13)
-        align_inner(k, b, i)
+        k, i, b = TN_1D_align(k, i, b)
         o2 = (k & i & b) ^ ...
         assert_allclose(o1, o2)
 
@@ -867,7 +868,7 @@ class TestDMRG1:
         h = MPO_ham_heis(5)
         dmrg = DMRG1(h, bond_dim=3)
 
-        energy_tn = (dmrg.b | h | dmrg.k)
+        energy_tn = (dmrg.b | dmrg.ham | dmrg.k)
 
         e0 = energy_tn ^ ...
         assert abs(e0.imag) < 1e-13
@@ -894,7 +895,7 @@ class TestDMRG1:
         assert abs(e2.imag) < 1e-13
 
         # test still normalized
-        align_inner(dmrg.k, dmrg.b)
+        TN_1D_align(dmrg.k, dmrg.b, inplace=True)
         assert_allclose(abs(dmrg.b @ dmrg.k), 1)
 
         assert e1.real < e0.real
@@ -952,12 +953,18 @@ class TestDMRGX:
         chi = 16
         ham = MPO_ham_mbl(n, dh=12, run=42)
         p0 = MPS_neel_state(n)
-        dmrgx = DMRGX(ham, p0, chi)
-        en1 = dmrgx.sweep_right(canonize=True)
-        en2 = dmrgx.sweep_right(canonize=True)
-        assert en1 != en2
 
-        dmrgx.sweep_right(canonize=True)
+        b0 = p0.H
+        TN_1D_align(p0, ham, b0, inplace=True)
+        en0 = np.asscalar(p0 & ham & b0 ^ ...)
+
+        dmrgx = DMRGX(ham, p0, chi)
+        en1 = dmrgx.sweep_right()
+
+        assert en0 != en1
+
+        dmrgx.sweep_left(canonize=False)
+        dmrgx.sweep_right(canonize=False)
         en = dmrgx.sweep_right(canonize=True)
 
         # check normalized
@@ -980,3 +987,12 @@ class TestDMRGX:
 
         # check fully
         assert is_eigenvector(k, h)
+
+    def test_solve_bigger(self):
+        n = 20
+        chi = 16
+        ham = MPO_ham_mbl(n, dh=12, run=42)
+        p0 = MPS_computational_state('00110111000101001001')
+        dmrgx = DMRGX(ham, p0, chi)
+        dmrgx.solve(vtol=1e-6)
+        assert dmrgx.variances[-1] < 1e-6

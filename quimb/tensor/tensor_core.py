@@ -369,7 +369,8 @@ def tensor_direct_product(T1, T2, sum_inds=(), inplace=False):
         new_T = T1.copy()
 
     # XXX: add T2s tags?
-    new_T._data = array_direct_product(T1.data, T2.data, sum_axes=sum_axes)
+    new_T.update(data=array_direct_product(T1.data, T2.data,
+                                           sum_axes=sum_axes))
     return new_T
 
 
