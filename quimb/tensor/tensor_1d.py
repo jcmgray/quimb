@@ -96,7 +96,7 @@ class TensorNetwork1D(TensorNetwork):
 
     def left_canonize(self, start=None, stop=None, normalize=False, bra=None):
         """Left canonize all or a portion of this TN. If this is a MPS,
-        this implies that:
+        this implies that::
 
                           i              i
             >->->->->->->-o-o-         +-o-o-
@@ -131,7 +131,7 @@ class TensorNetwork1D(TensorNetwork):
 
     def right_canonize(self, start=None, stop=None, normalize=False, bra=None):
         """Right canonize all or a portion of this TN. If this is a MPS,
-        this implies that:
+        this implies that::
 
                    i                           i
                 -o-o-<-<-<-<-<-<-<          -o-o-+
@@ -543,7 +543,7 @@ class MatrixProductState(TensorNetwork1D):
     def schmidt_values(self, i, current_orthog_centre=None, method='svd'):
         """Find the schmidt values associated with the bipartition of this
         MPS between sites on either site of ``i``. In other words, ``i`` is the
-        number of sites in the left hand partition:
+        number of sites in the left hand partition::
 
             ....L....   i
             o-o-o-o-o-S-o-o-o-o-o-o-o-o-o-o-o
@@ -876,7 +876,7 @@ class MatrixProductOperator(TensorNetwork1D):
 
 
 def TN_1D_align(*tns, ind_ids=None, inplace=False):
-    """Align an arbitrary number of 1d TNs in a stack-like geometry:
+    """Align an arbitrary number of 1d TNs in a stack-like geometry::
 
         a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a
         | | | | | | | | | | | | | | | | | | <- ind_ids[0] (defaults to 1st id)

@@ -26,7 +26,15 @@ For ease and performance (i.e. mkl compiled libraries), `conda <http://conda.pyd
 Optional Dependencies
 =====================
 
-The optional dependencies mainly allow high performance, distributed eigen-solving. For sparse systems this functionality is provided by ``slepc4py``, along with its dependencies:
+The optional dependencies can improve performance considerably in a number of situations.
+
+The tensor network routines benefit greatly from:
+
+  * `opt_einsum <https://github.com/dgasmith/opt_einsum>`_
+
+which efficiently optimizes tensor contraction expressions.
+
+Fast and optionally distributed partial eigen-solving, SVD, exponentiation etc. can be accelerated with ``slepc4py`` and its dependencies:
 
     * `slepc4py <https://bitbucket.org/slepc/slepc4py>`_
     * `slepc <http://slepc.upv.es/>`_
@@ -35,7 +43,7 @@ The optional dependencies mainly allow high performance, distributed eigen-solvi
     * `mpi4py <http://mpi4py.readthedocs.io/en/latest/>`_ (v2.1.0+)
     * An MPI implementation (`OpenMPI <https://www.open-mpi.org/>`_ recommended)
 
-It is recommended to compile and install these (apart from MPI if you are e.g. on a cluster) yourself.
+It is recommended to compile and install these (apart from MPI if you are e.g. on a cluster) yourself (see below).
 
 For best performance of some routines, (e.g. shift invert eigen-solving), petsc must be configured with certain options. Here is a rough overview of the steps to installing the above in a directory ``$SRC_DIR``, with MPI and ``mpi4py`` already installed. ``$PATH_TO_YOUR_BLAS_LAPACK_LIB`` should point to e.g. `OpenBLAS <https://github.com/xianyi/OpenBLAS>`_ (``libopenblas.so``) or the MKL library (``libmkl_rt.so``). ``$COMPILE_FLAGS`` should be optimizations chosen for your compiler, e.g. for ``gcc`` ``"-O3 -march=native -s -DNDEBUG"``, or for ``icc`` ``"-O3 -xHost"`` etc.
 

@@ -7,9 +7,9 @@
 import os
 import functools
 from .slepc_linalg import (
-    slepc_seigsys,
-    slepc_svds,
-    slepc_mfn_multiply,
+    seigsys_slepc,
+    svds_slepc,
+    mfn_multiply_slepc,
 )
 from ..accel import _NUM_THREAD_WORKERS
 
@@ -254,17 +254,17 @@ class SpawnMPIProcessesFunc(object):
 
 # ---------------------------------- SLEPC ---------------------------------- #
 
-seigsys_slepc_mpi = functools.wraps(slepc_seigsys)(
-    GetMPIBeforeCall(slepc_seigsys))
-seigsys_slepc_spawn = functools.wraps(slepc_seigsys)(
+seigsys_slepc_mpi = functools.wraps(seigsys_slepc)(
+    GetMPIBeforeCall(seigsys_slepc))
+seigsys_slepc_spawn = functools.wraps(seigsys_slepc)(
     SpawnMPIProcessesFunc(seigsys_slepc_mpi))
 
-svds_slepc_mpi = functools.wraps(slepc_svds)(
-    GetMPIBeforeCall(slepc_svds))
-svds_slepc_spawn = functools.wraps(slepc_svds)(
+svds_slepc_mpi = functools.wraps(svds_slepc)(
+    GetMPIBeforeCall(svds_slepc))
+svds_slepc_spawn = functools.wraps(svds_slepc)(
     SpawnMPIProcessesFunc(svds_slepc_mpi))
 
-mfn_multiply_slepc_mpi = functools.wraps(slepc_mfn_multiply)(
-    GetMPIBeforeCall(slepc_mfn_multiply))
-mfn_multiply_slepc_spawn = functools.wraps(slepc_mfn_multiply)(
+mfn_multiply_slepc_mpi = functools.wraps(mfn_multiply_slepc)(
+    GetMPIBeforeCall(mfn_multiply_slepc))
+mfn_multiply_slepc_spawn = functools.wraps(mfn_multiply_slepc)(
     SpawnMPIProcessesFunc(mfn_multiply_slepc_mpi))

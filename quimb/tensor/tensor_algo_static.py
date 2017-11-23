@@ -6,7 +6,7 @@ import itertools
 
 from ..utils import progbar
 from ..accel import prod
-from ..linalg.base_linalg import eigsys
+from ..linalg.base_linalg import eigsys, seigsys
 from .tensor_core import Tensor, TensorNetwork, tensor_contract
 from .tensor_gen import MPS_rand_state
 from .tensor_1d import TN_1D_align
@@ -53,7 +53,7 @@ class EffectiveHamLinearOperator(spla.LinearOperator):
 class Moving1SiteEnv:
     """Helper class for efficiently moving the effective 'environment' of a
     single site in a 1D tensor network. E.g. for ``start='left'`` this
-    initialzes the right environments like so:
+    initialzes the right environments like so::
 
         n - 1: o-o-o-     -o-o-o
                | | |       | | |
@@ -192,7 +192,7 @@ class DMRG1:
         self.energies = [self.TN_energy ^ ...]
 
     def update_with_eff_gs(self, eff_ham, i, dense=False):
-        """Find the effective tensor groundstate of:
+        """Find the effective tensor groundstate of::
 
 
                       /|\
@@ -213,18 +213,18 @@ class DMRG1:
                           ('upper', self.k.site[i].inds)), inplace=True)
             op = eff_ham.data
         else:
-            op = EffectiveHamLinearOperator(
-                eff_ham, dims=self.k.site[i].shape,
-                upper_inds=self.k.site[i].inds, lower_inds=self.b.site[i].inds
-            )
+            op = EffectiveHamLinearOperator(eff_ham, dims=self.k.site[i].shape,
+                                            upper_inds=self.k.site[i].inds,
+                                            lower_inds=self.b.site[i].inds)
 
-        eff_e, eff_gs = spla.eigsh(op, k=1, which=self.which)
+        eff_e, eff_gs = seigsys(op, k=1, which=self.which)
+        eff_gs = eff_gs.A
         self.k.site[i].data = eff_gs
         self.b.site[i].data = eff_gs.conj()
         return eff_e
 
     def sweep_right(self, canonize=True, eff_ham_dense=False):
-        """Perform a sweep of optimizations rightwards:
+        """Perform a sweep of optimizations rightwards::
 
               optimize -->
                 .
@@ -259,7 +259,7 @@ class DMRG1:
         return en
 
     def sweep_left(self, canonize=True, eff_ham_dense=False):
-        """Perform a sweep of optimizations leftwards:
+        """Perform a sweep of optimizations leftwards::
 
                             <-- optimize
                                       .
@@ -402,36 +402,27 @@ class DMRGX:
         self.TN_en_var2 = self.k | var_ham1 | var_ham2 | self.b
         self.variances = [(self.TN_en_var2 ^ ...) - self.energies[-1]**2]
 
-    def update_with_best_evec(self, eff_ham, eff_ovlp, i, k=None, sigma=None):
+    def update_with_best_evec(self, eff_ham, eff_ovlp, i):
         """Like ``update_with_eff_gs``, but re-insert all eigenvectors, then
         choose the one with best overlap with ``eff_evlp``.
         """
-        if k is None:
-            # contract remaining hamiltonian and get its dense representation
-            eff_ham = (eff_ham ^ '__ham__')['__ham__']
-            eff_ham.fuse((('lower', self.b.site[i].inds),
-                          ('upper', self.k.site[i].inds)), inplace=True)
-            op = eff_ham.data
+        # contract remaining hamiltonian and get its dense representation
+        eff_ham = (eff_ham ^ '__ham__')['__ham__']
+        eff_ham.fuse((('lower', self.b.site[i].inds),
+                      ('upper', self.k.site[i].inds)), inplace=True)
+        op = eff_ham.data
 
-            # eigen-decompose and reshape eigenvectors thus:  |
-            #                                                 E
-            #                                                /|\
-            evals, evecs = eigsys(op)
-
-        else:
-            op = EffectiveHamLinearOperator(
-                eff_ham, dims=self.k.site[i].shape,
-                upper_inds=self.k.site[i].inds, lower_inds=self.b.site[i].inds
-            )
-            evals, evecs = spla.eigsh(op, k=k, sigma=sigma)
-
+        # eigen-decompose and reshape eigenvectors thus:  |
+        #                                                 E
+        #                                                /|\
+        evals, evecs = eigsys(op)
         evecs = np.asarray(evecs).reshape(*self.k.site[i].shape, -1)
 
         # update tensor at site i with all evecs -> need dummy index
         tnsr = self.k.site[i]
         tnsr.update(data=evecs, inds=(*tnsr.inds, '__ev_ind__'))
 
-        # find the index of the highest overlap eigenvector, by contracting:
+        # find the index of the highest overlap eigenvector, by contracting::
         #
         #           |
         #     o-o-o-E-o-o-o-o-o-o-o

@@ -68,6 +68,22 @@ def get_slepc(comm=None):
 #                               PETSc FUNCTIONS                               #
 # --------------------------------------------------------------------------- #
 
+class PetscLinearOperatorContext:
+    def __init__(self, lo):
+        self.lo = lo
+
+    def mult(self, _, x, y):
+        y[:] = self.lo.matvec(x)
+
+
+def linear_operator_2_petsc_shell(lo, comm=None):
+    PETSc, comm = get_petsc(comm=comm)
+    context = PetscLinearOperatorContext(lo)
+    A = PETSc.Mat().createPython(lo.shape, context, comm=comm)
+    A.setUp()
+    return A
+
+
 def slice_sparse_matrix_to_components(mat, ri, rf):
     """Slice the matrix `mat` between indices `ri` and `rf` -- for csr or bsr.
     """
@@ -93,6 +109,9 @@ def convert_mat_to_petsc(mat, comm=None):
             The matrix in petsc form - only the local part if running
             across several mpi processes.
     """
+    if isinstance(mat, sp.linalg.LinearOperator):
+        return linear_operator_2_petsc_shell(mat, comm=comm)
+
     PETSc, comm = get_petsc(comm=comm)
     mpi_sz = comm.Get_size()
     pmat = PETSc.Mat()
@@ -253,10 +272,10 @@ def gather_petsc_array(x, comm, out_shape=None, matrix=False):
 #                               SLEPc FUNCTIONS                               #
 # --------------------------------------------------------------------------- #
 
-def _init_spectral_inverter(ptype="lu",
-                            ppackage="mumps",
-                            ktype="preonly",
-                            stype="sinvert",
+def _init_spectral_inverter(STType="sinvert",
+                            KSPType="preonly",
+                            PType="lu",
+                            PFactorSolverPackage="mumps",
                             comm=None):
     """Create a slepc spectral transformation object with specified solver.
     """
@@ -264,18 +283,18 @@ def _init_spectral_inverter(ptype="lu",
     SLEPc, comm = get_slepc(comm=comm)
     # Preconditioner and linear solver
     P = PETSc.PC().create(comm=comm)
-    P.setType(ptype)
-    P.setFactorSolverPackage(ppackage)
+    P.setType(PType)
+    P.setFactorSolverPackage(PFactorSolverPackage)
     P.setFromOptions()
     # Krylov subspace
     K = PETSc.KSP().create(comm=comm)
     K.setPC(P)
-    K.setType(ktype)
+    K.setType(KSPType)
     K.setFromOptions()
     # Spectral transformer
     S = SLEPc.ST().create(comm=comm)
+    S.setType(STType)
     S.setKSP(K)
-    S.setType(stype)
     S.setFromOptions()
     return S
 
@@ -335,8 +354,8 @@ def _init_eigensolver(k=6, which='LM', sigma=None, isherm=True,
     return eigensolver
 
 
-def slepc_seigsys(mat, k=6, which=None, return_vecs=True, sigma=None,
-                  isherm=True, ncv=None, sort=True, EPSType="krylovschur",
+def seigsys_slepc(mat, k=6, which=None, return_vecs=True, sigma=None,
+                  isherm=True, ncv=None, sort=True, EPSType=None,
                   return_all_conv=False, st_opts_dict=(), tol=None,
                   max_it=None, comm=None):
     """Solve a matrix using the advanced eigensystem solver
@@ -375,6 +394,19 @@ def slepc_seigsys(mat, k=6, which=None, return_vecs=True, sigma=None,
     if comm is None:
         comm = get_default_comm()
 
+    # Need different defaults for interior eigensearch of shell matrix
+    if (
+            isinstance(mat, sp.linalg.LinearOperator) and
+            (sigma is not None) and
+            (EPSType is None) and
+            st_opts_dict is ()
+    ):
+        # Note : probably very slow compared to converting to explicit matrix!
+        EPSType = 'gd'
+        st_opts_dict = {'STType': 'precond',
+                        'KSPType': 'preonly',
+                        'PType': 'none'}
+
     eigensolver = _init_eigensolver(
         k=k,
         which=("SA" if (which is None) and (sigma is None) else
@@ -382,7 +414,7 @@ def slepc_seigsys(mat, k=6, which=None, return_vecs=True, sigma=None,
                which),
         sigma=sigma,
         isherm=isherm,
-        EPSType=EPSType,
+        EPSType="krylovschur" if EPSType is None else EPSType,
         tol=tol,
         max_it=max_it,
         ncv=ncv,
@@ -444,7 +476,7 @@ def _init_svd_solver(nsv=6, SVDType='cross', tol=None, max_it=None,
     return svd_solver
 
 
-def slepc_svds(mat, k=6, ncv=None, return_vecs=True, SVDType='cross',
+def svds_slepc(mat, k=6, ncv=None, return_vecs=True, SVDType='cross',
                return_all_conv=False, tol=None, max_it=None, comm=None):
     """Find the singular values for sparse matrix `a`.
 
@@ -511,7 +543,7 @@ def slepc_svds(mat, k=6, ncv=None, return_vecs=True, SVDType='cross',
 
 # ------------------------ matrix multiply function ------------------------- #
 
-def slepc_mfn_multiply(mat, vec,
+def mfn_multiply_slepc(mat, vec,
                        fntype='exp',
                        MFNType='AUTO',
                        comm=None,

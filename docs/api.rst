@@ -304,9 +304,9 @@ Specialised Linalg
     convert_vec_to_petsc
     new_petsc_vec
     gather_petsc_array
-    slepc_seigsys
-    slepc_svds
-    slepc_mfn_multiply
+    seigsys_slepc
+    svds_slepc
+    mfn_multiply_slepc
 
 MPI stuff
 ---------
