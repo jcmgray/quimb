@@ -1,5 +1,6 @@
 """Classes and algorithms related to 1d tensor networks.
 """
+import functools
 import copy
 import numpy as np
 from .tensor_core import (
@@ -9,6 +10,59 @@ from .tensor_core import (
     rand_uuid,
     tensor_direct_product,
 )
+
+
+def align_TN_1D(*tns, ind_ids=None, inplace=False):
+    """Align an arbitrary number of 1D tensor networks in a stack-like
+    geometry::
+
+        a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a
+        | | | | | | | | | | | | | | | | | | <- ind_ids[0] (defaults to 1st id)
+        b-b-b-b-b-b-b-b-b-b-b-b-b-b-b-b-b-b
+        | | | | | | | | | | | | | | | | | | <- ind_ids[1]
+                       ...
+        | | | | | | | | | | | | | | | | | | <- ind_ids[-2]
+        y-y-y-y-y-y-y-y-y-y-y-y-y-y-y-y-y-y
+        | | | | | | | | | | | | | | | | | | <- ind_ids[-1]
+        z-z-z-z-z-z-z-z-z-z-z-z-z-z-z-z-z-z
+
+    Parameters
+    ----------
+    tns : sequence of MatrixProductState and MatrixProductOperator
+        The 1D TNs to align.
+    ind_ids : None, or sequence of str
+        String with format specifiers to id each level of sites with. Will be
+        automatically generated like ``(tns[0].site_ind_id, "__ind_a{}__",
+        "__ind_b{}__", ...)`` if not given.
+    """
+    if not inplace:
+        tns = [tn.copy() for tn in tns]
+
+    if ind_ids is None:
+        ind_ids = ([tns[0].site_ind_id] +
+                   ["__ind_{}".format(_einsum_symbols[i]) + "{}__"
+                    for i in range(len(tns) - 2)])
+    else:
+        ind_ids = tuple(ind_ids)
+
+    for i, tn in enumerate(tns):
+        if isinstance(tn, MatrixProductState):
+            if i == 0:
+                tn.site_ind_id = ind_ids[i]
+            elif i == len(tns) - 1:
+                tn.site_ind_id = ind_ids[i - 1]
+            else:
+                raise ValueError("An MPS can only be aligned as the first or "
+                                 "last TN in a sequence.")
+
+        elif isinstance(tn, MatrixProductOperator):
+            tn.upper_ind_id = ind_ids[i - 1]
+            tn.lower_ind_id = ind_ids[i]
+
+        else:
+            raise ValueError("Can only align MPS and MPOs currently.")
+
+    return tns
 
 
 class TensorNetwork1D(TensorNetwork):
@@ -632,9 +686,11 @@ class MatrixProductState(TensorNetwork1D):
 
     def get_phys_dim(self, i):
         tns = self.site[i]
-        d, = (d for d, i in zip(tns.shape, tns.inds)
-              if i == self.site_ind_id.format(i))
-        return d
+        return tns.shape[tns.inds.index(self.site_ind_id.format(i))]
+
+    @functools.wraps(align_TN_1D)
+    def align(self, *args, inplace=True):
+        return align_TN_1D(self, *args, inplace=inplace)
 
 
 class MatrixProductOperator(TensorNetwork1D):
@@ -870,58 +926,4 @@ class MatrixProductOperator(TensorNetwork1D):
 
     def get_phys_dim(self, i):
         tns = self.site[i]
-        d, = (d for d, i in zip(tns.shape, tns.inds)
-              if i == self.upper_ind_id.format(i))
-        return d
-
-
-def TN_1D_align(*tns, ind_ids=None, inplace=False):
-    """Align an arbitrary number of 1d TNs in a stack-like geometry::
-
-        a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a
-        | | | | | | | | | | | | | | | | | | <- ind_ids[0] (defaults to 1st id)
-        b-b-b-b-b-b-b-b-b-b-b-b-b-b-b-b-b-b
-        | | | | | | | | | | | | | | | | | | <- ind_ids[1]
-                       ...
-        | | | | | | | | | | | | | | | | | | <- ind_ids[-2]
-        y-y-y-y-y-y-y-y-y-y-y-y-y-y-y-y-y-y
-        | | | | | | | | | | | | | | | | | | <- ind_ids[-1]
-        z-z-z-z-z-z-z-z-z-z-z-z-z-z-z-z-z-z
-
-    Parameters
-    ----------
-    tns : sequence of MatrixProductState and MatrixProductOperator
-        The 1D TNs to align.
-    ind_ids : None, or sequence of str
-        String with format specifiers to id each level of sites with. Will be
-        automatically generated like ``(tns[0].site_ind_id, "__ind_a{}__",
-        "__ind_b{}__", ...)`` if not given.
-    """
-    if not inplace:
-        tns = [tn.copy() for tn in tns]
-
-    if ind_ids is None:
-        ind_ids = ([tns[0].site_ind_id] +
-                   ["__ind_{}".format(_einsum_symbols[i]) + "{}__"
-                    for i in range(len(tns) - 2)])
-    else:
-        ind_ids = tuple(ind_ids)
-
-    for i, tn in enumerate(tns):
-        if isinstance(tn, MatrixProductState):
-            if i == 0:
-                tn.site_ind_id = ind_ids[i]
-            elif i == len(tns) - 1:
-                tn.site_ind_id = ind_ids[i - 1]
-            else:
-                raise ValueError("An MPS can only be aligned as the first or "
-                                 "last TN in a sequence.")
-
-        elif isinstance(tn, MatrixProductOperator):
-            tn.upper_ind_id = ind_ids[i - 1]
-            tn.lower_ind_id = ind_ids[i]
-
-        else:
-            raise ValueError("Can only align MPS and MPOs currently.")
-
-    return tns
+        return tns.shape[tns.inds.index(self.upper_ind_id.format(i))]

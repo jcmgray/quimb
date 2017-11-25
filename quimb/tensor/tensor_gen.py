@@ -1,5 +1,6 @@
 """Generate specific tensor network states and operators.
 """
+import random
 import numpy as np
 
 from ..accel import make_immutable
@@ -117,6 +118,14 @@ def MPS_neel_state(n, down_first=False, **mps_opts):
     if down_first:
         binary_str = "1" + binary_str[:-1]
     return MPS_computational_state(binary_str, **mps_opts)
+
+
+def MPS_rand_computational_state(n, seed=None, **mps_opts):
+    if seed is not None:
+        random.seed(seed)
+
+    cstr = "".join(random.choice(('0', '1')) for _ in range(n))
+    return MPS_computational_state(cstr, **mps_opts)
 
 
 def MPS_zero_state(n, bond_dim=1, phys_dim=2, **mps_opts):

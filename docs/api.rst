@@ -389,6 +389,7 @@ Tensor Networks
     MPO_ham_mbl
     MatrixProductState
     MatrixProductOperator
-    TN_1D_align
+    align_TN_1D
+    MovingEnvironment
     DMRG1
     DMRGX

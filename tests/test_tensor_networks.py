@@ -25,7 +25,7 @@ from quimb.tensor import (
     rand_tensor,
     MatrixProductState,
     MatrixProductOperator,
-    TN_1D_align,
+    align_TN_1D,
     MPS_rand_state,
     MPS_product_state,
     MPS_computational_state,
@@ -36,6 +36,7 @@ from quimb.tensor import (
     MPO_ham_XY,
     MPO_ham_heis,
     MPO_ham_mbl,
+    MovingEnvironment,
     DMRG1,
     DMRGX,
 )
@@ -208,8 +209,8 @@ class TestBasicTensorOperations:
         assert b.tags == {'blue'}
 
         b = a.fuse({'ket': 'bd', 'bra': 'ac'})
-        assert b.shape == (15, 8)
-        assert b.inds == ('ket', 'bra')
+        assert set(b.shape) == {15, 8}
+        assert set(b.inds) == {'ket', 'bra'}
         assert b.tags == {'blue'}
 
     def test_fuse_leftover(self):
@@ -814,7 +815,7 @@ class TestMatrixProductOperator:
         b = MPS_rand_state(13, 7)
         o1 = k @ b
         i = MPO_identity(13)
-        k, i, b = TN_1D_align(k, i, b)
+        k, i, b = align_TN_1D(k, i, b)
         o2 = (k & i & b) ^ ...
         assert_allclose(o1, o2)
 
@@ -862,6 +863,69 @@ class TestSpecificStatesOperators:
         assert_allclose(hh, hh_.data)
 
 
+class TestMovingEnvironment:
+    def test_bsz1_start_left(self):
+        tn = MPS_rand_state(6, bond_dim=7)
+        env = MovingEnvironment(tn, n=6, start='left', bsz=1)
+        assert env.pos == 0
+        assert len(env().tensors) == 2
+        env.move_right()
+        assert env.pos == 1
+        assert len(env().tensors) == 3
+        env.move_right()
+        assert env.pos == 2
+        assert len(env().tensors) == 3
+        env.move_to(5)
+        assert env.pos == 5
+        assert len(env().tensors) == 2
+
+    def test_bsz1_start_right(self):
+        tn = MPS_rand_state(6, bond_dim=7)
+        env = MovingEnvironment(tn, n=6, start='right', bsz=1)
+        assert env.pos == 5
+        assert len(env().tensors) == 2
+        env.move_left()
+        assert env.pos == 4
+        assert len(env().tensors) == 3
+        env.move_left()
+        assert env.pos == 3
+        assert len(env().tensors) == 3
+        env.move_to(0)
+        assert env.pos == 0
+        assert len(env().tensors) == 2
+
+    def test_bsz2_start_left(self):
+        tn = MPS_rand_state(6, bond_dim=7)
+        env = MovingEnvironment(tn, n=6, start='left', bsz=2)
+        assert len(env().tensors) == 3
+        env.move_right()
+        assert len(env().tensors) == 4
+        env.move_right()
+        assert len(env().tensors) == 4
+        with pytest.raises(ValueError):
+            env.move_to(5)
+        env.move_to(4)
+        assert env.pos == 4
+        assert len(env().tensors) == 3
+
+    def test_bsz2_start_right(self):
+        tn = MPS_rand_state(6, bond_dim=7)
+        env = MovingEnvironment(tn, n=6, start='right', bsz=2)
+        assert env.pos == 4
+        assert len(env().tensors) == 3
+        env.move_left()
+        assert env.pos == 3
+        assert len(env().tensors) == 4
+        env.move_left()
+        assert env.pos == 2
+        assert len(env().tensors) == 4
+        with pytest.raises(ValueError):
+            env.move_to(-1)
+        env.move_to(0)
+        assert env.pos == 0
+        assert len(env().tensors) == 3
+
+
 class TestDMRG1:
 
     def test_single_explicit_sweep(self):
@@ -895,7 +959,7 @@ class TestDMRG1:
         assert abs(e2.imag) < 1e-13
 
         # test still normalized
-        TN_1D_align(dmrg.k, dmrg.b, inplace=True)
+        align_TN_1D(dmrg.k, dmrg.b, inplace=True)
         assert_allclose(abs(dmrg.b @ dmrg.k), 1)
 
         assert e1.real < e0.real
@@ -955,7 +1019,7 @@ class TestDMRGX:
         p0 = MPS_neel_state(n)
 
         b0 = p0.H
-        TN_1D_align(p0, ham, b0, inplace=True)
+        align_TN_1D(p0, ham, b0, inplace=True)
         en0 = np.asscalar(p0 & ham & b0 ^ ...)
 
         dmrgx = DMRGX(ham, p0, chi)

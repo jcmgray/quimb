@@ -9,7 +9,6 @@ from ..accel import prod
 from ..linalg.base_linalg import eigsys, seigsys
 from .tensor_core import Tensor, TensorNetwork, tensor_contract
 from .tensor_gen import MPS_rand_state
-from .tensor_1d import TN_1D_align
 
 
 class EffectiveHamLinearOperator(spla.LinearOperator):
@@ -50,10 +49,10 @@ class EffectiveHamLinearOperator(spla.LinearOperator):
         return v_out.reshape(*vec.shape)
 
 
-class Moving1SiteEnv:
+class MovingEnvironment:
     """Helper class for efficiently moving the effective 'environment' of a
-    single site in a 1D tensor network. E.g. for ``start='left'`` this
-    initialzes the right environments like so::
+    few sites in a 1D tensor network. E.g. for ``start='left', bsz=2``, this
+    initializes the right environments like so::
 
         n - 1: o-o-o-     -o-o-o
                | | |       | | |
@@ -75,14 +74,28 @@ class Moving1SiteEnv:
 
         ...
 
-        0    : o\
-               | oo   ooo
-               H-HH...HHH
-               | oo   ooo
-               o/
+        0    : o-o\
+               | | oo   ooo
+               H-H-HH...HHH
+               | | oo   ooo
+               o-o/
 
     which can then be used to efficiently generate the left environments as
-    each site is updated.
+    each site is updated. For example if ``bsz=2`` and the environements have
+    been shifted many sites into the middle, then ``MovingEnvironment[i]``
+    returns something like::
+
+             <---> bsz sites
+             /o-o\
+        ooooo | | ooooooo
+        HHHHH-H-H-HHHHHHH
+        ooooo | | ooooooo
+             \o-o/
+        0 ... i i+1 ... n-1
+
+    Does not necessarily need to be an operator overlap tensor network. Useful
+    for any kind of sweep where only local tensor updates are being made. Note
+     that *only* the current site is completely up-to-date.
 
     Parameters
     ----------
@@ -91,65 +104,86 @@ class Moving1SiteEnv:
     n : int
         Number of sites.
     start : {'left', 'right'}
-        Which side to start at.
+        Which side to start at, e.g. 'left' for diagram above.
+    bsz : int
+        Number of local sites to keep un-contracted from the environment.
+        Defaults to 1, but would be 2 for DMRG2 etc.
     """
 
-    def __init__(self, tn, n, start):
+    def __init__(self, tn, n, start, bsz=1):
         self.n = n
         self.start = start
+        self.bsz = bsz
+        self.num_blocks = self.n - self.bsz + 1
 
         if start == 'left':
-            first_i = n - 1
-            sweep = reversed(range(0, n - 1))
+            initial_j = n - self.bsz
+            sweep = reversed(range(0, self.num_blocks - 1))
             previous_step = 1
-            self.site = 0
+            self.pos = 0
         elif start == 'right':
-            first_i = 0
-            sweep = range(1, n)
+            initial_j = 0
+            sweep = range(1, self.num_blocks)
             previous_step = -1
-            self.site = n - 1
+            self.pos = n - self.bsz
         else:
             raise ValueError("'start' must be one of {'left', 'right'}.")
 
-        self.envs = {first_i: tn.copy(virtual=True)}
-        for i in sweep:
-            env = self.envs[i + previous_step].copy(virtual=True)
-            limit = min(n - 1, i + 2) if (start == 'left') else max(0, i - 2)
-            env ^= slice(limit, i)
-            self.envs[i] = env
+        self.envs = {initial_j: tn.copy(virtual=True)}
+        for j in sweep:
+            # get the env from previous step
+            env = self.envs[j + previous_step].copy(virtual=True)
+
+            # contract it with one more site, no-op if near end, to get jth env
+            if start == 'left':
+                env ^= slice(j + self.bsz, min(n, j + self.bsz + 2))
+            else:
+                env ^= slice(max(0, j - 2), j)
+            self.envs[j] = env
 
     def move_right(self):
-        i = self.site
+        i = self.pos + 1
 
-        if i >= 2:
+        if i > 1:
             # replace left env with new effective left env
             for j in range(i - 1):
                 del self.envs[i].site[j]
             self.envs[i] |= self.envs[i - 1].site[i - 2]
 
-        if i >= 1:
+        if i > 0:
             # contract left env with new minimized, canonized site
             self.envs[i] ^= slice(max(0, i - 2), i)
 
-        self.site += 1
+        self.pos += 1
 
     def move_left(self):
-        i = self.site
+        i = self.pos - 1
 
-        if i <= self.n - 3:
+        if i < self.n - self.bsz - 1:
             # replace right env with new effective right env
-            for j in reversed(range(i + 2, self.n)):
+            for j in range(self.n - 1, i + self.bsz, -1):
                 del self.envs[i].site[j]
-            self.envs[i] |= self.envs[i + 1].site[i + 2]
+            self.envs[i] |= self.envs[i + 1].site[i + self.bsz + 1]
 
-        if i <= self.n - 2:
+        if i < self.n - self.bsz:
             # contract right env with new minimized, canonized site
-            self.envs[i] ^= slice(min(self.n - 1, i + 2), i)
+            self.envs[i] ^= slice(min(self.n - 1, i + self.bsz + 1),
+                                  i + self.bsz - 1)
+        self.pos -= 1
 
-        self.site -= 1
+    def move_to(self, i):
+        if not (0 <= i < self.num_blocks):
+            raise ValueError("Condition 0 <= {} < {} not satisfied"
+                             "".format(i, self.num_blocks))
+        if i < self.pos:
+            while self.pos != i:
+                self.move_left()
+        else:
+            while self.pos != i:
+                self.move_right()
 
-    def __getitem__(self, i):
-        return self.envs[i]
+    def __call__(self):
+        return self.envs[self.pos]
 
 
 class DMRG1:
@@ -176,7 +210,8 @@ class DMRG1:
         self.n = ham.nsites
         self.bond_dim = bond_dim
         self.which = which
-        self.k = MPS_rand_state(self.n, bond_dim)
+        self.phys_dim = ham.get_phys_dim(0)
+        self.k = MPS_rand_state(self.n, bond_dim, phys_dim=self.phys_dim)
         self.b = self.k.H
         self.ham = ham.copy()
 
@@ -184,7 +219,7 @@ class DMRG1:
         self.ham.add_tag("__ham__")
 
         # Line up and overlap
-        TN_1D_align(self.k, self.ham, self.b, inplace=True)
+        self.k.align(self.ham, self.b, inplace=True)
 
         # want to contract this multiple times while
         #   manipulating k -> make virtual
@@ -217,7 +252,8 @@ class DMRG1:
                                             upper_inds=self.k.site[i].inds,
                                             lower_inds=self.b.site[i].inds)
 
-        eff_e, eff_gs = seigsys(op, k=1, which=self.which)
+        eff_e, eff_gs = seigsys(op, k=1, which=self.which,
+                                v0=self.k.site[i].data)
         eff_gs = eff_gs.A
         self.k.site[i].data = eff_gs
         self.b.site[i].data = eff_gs.conj()
@@ -247,11 +283,11 @@ class DMRG1:
         if canonize:
             self.k.right_canonize(bra=self.b)
 
-        eff_envs = Moving1SiteEnv(self.TN_energy, self.n, start='left')
+        eff_envs = MovingEnvironment(self.TN_energy, self.n, start='left')
 
         for i in range(0, self.n):
-            eff_envs.move_right()
-            en = self.update_with_eff_gs(eff_envs[i], i, dense=eff_ham_dense)
+            eff_envs.move_to(i)
+            en = self.update_with_eff_gs(eff_envs(), i, dense=eff_ham_dense)
 
             if i < self.n - 1:
                 self.k.left_canonize_site(i, bra=self.b)
@@ -282,11 +318,11 @@ class DMRG1:
         if canonize:
             self.k.left_canonize(bra=self.b)
 
-        eff_envs = Moving1SiteEnv(self.TN_energy, self.n, start='right')
+        eff_envs = MovingEnvironment(self.TN_energy, self.n, start='right')
 
         for i in reversed(range(0, self.n)):
-            eff_envs.move_left()
-            en = self.update_with_eff_gs(eff_envs[i], i, dense=eff_ham_dense)
+            eff_envs.move_to(i)
+            en = self.update_with_eff_gs(eff_envs(), i, dense=eff_ham_dense)
 
             if i > 0:
                 self.k.right_canonize_site(i, bra=self.b)
@@ -385,7 +421,7 @@ class DMRGX:
         self.ham.add_tag("__ham__")
 
         # Line up and overlap
-        TN_1D_align(self.k, self.ham, self.b, inplace=True)
+        self.k.align(self.ham, self.b, inplace=True)
 
         # want to contract this multiple times while
         #   manipulating k -> make virtual
@@ -404,7 +440,7 @@ class DMRGX:
 
     def update_with_best_evec(self, eff_ham, eff_ovlp, i):
         """Like ``update_with_eff_gs``, but re-insert all eigenvectors, then
-        choose the one with best overlap with ``eff_evlp``.
+        choose the one with best overlap with ``eff_ovlp``.
         """
         # contract remaining hamiltonian and get its dense representation
         eff_ham = (eff_ham ^ '__ham__')['__ham__']
@@ -445,13 +481,13 @@ class DMRGX:
         if canonize:
             self.k.right_canonize(bra=self.b)
 
-        enrg_envs = Moving1SiteEnv(self.TN_energy, self.n, start='left')
-        ovlp_envs = Moving1SiteEnv(TN_overlap, self.n, start='left')
+        enrg_envs = MovingEnvironment(self.TN_energy, self.n, start='left')
+        ovlp_envs = MovingEnvironment(TN_overlap, self.n, start='left')
 
         for i in range(0, self.n):
-            enrg_envs.move_right()
-            ovlp_envs.move_right()
-            en = self.update_with_best_evec(enrg_envs[i], ovlp_envs[i], i)
+            enrg_envs.move_to(i)
+            ovlp_envs.move_to(i)
+            en = self.update_with_best_evec(enrg_envs(), ovlp_envs(), i)
             if i < self.n - 1:
                 self.k.left_canonize_site(i, bra=self.b)
 
@@ -464,13 +500,13 @@ class DMRGX:
         if canonize:
             self.k.left_canonize(bra=self.b)
 
-        enrg_envs = Moving1SiteEnv(self.TN_energy, self.n, start='right')
-        ovlp_envs = Moving1SiteEnv(TN_overlap, self.n, start='right')
+        enrg_envs = MovingEnvironment(self.TN_energy, self.n, start='right')
+        ovlp_envs = MovingEnvironment(TN_overlap, self.n, start='right')
 
         for i in reversed(range(0, self.n)):
-            enrg_envs.move_left()
-            ovlp_envs.move_left()
-            en = self.update_with_best_evec(enrg_envs[i], ovlp_envs[i], i)
+            enrg_envs.move_to(i)
+            ovlp_envs.move_to(i)
+            en = self.update_with_best_evec(enrg_envs(), ovlp_envs(), i)
             if i > 0:
                 self.k.right_canonize_site(i, bra=self.b)
 
@@ -494,7 +530,7 @@ class DMRGX:
         RLs = itertools.cycle(sweep_sequence)
         previous_LR = '0'
 
-        for i in progbar(range(max_sweeps)):
+        for _ in progbar(range(max_sweeps)):
             LR = next(RLs)
             # if last sweep was opposite direction no need to canonize
             canonize = False if LR + previous_LR in {'LR', 'RL'} else True

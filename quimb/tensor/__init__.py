@@ -23,9 +23,10 @@ from .tensor_gen import (
 from .tensor_1d import (
     MatrixProductState,
     MatrixProductOperator,
-    TN_1D_align,
+    align_TN_1D,
 )
 from .tensor_algo_static import (
+    MovingEnvironment,
     DMRG1,
     DMRGX,
 )
@@ -52,7 +53,8 @@ __all__ = (
     "MPO_ham_mbl",
     "MatrixProductState",
     "MatrixProductOperator",
-    "TN_1D_align",
+    "align_TN_1D",
+    "MovingEnvironment",
     "DMRG1",
     "DMRGX",
 )
