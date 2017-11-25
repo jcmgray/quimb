@@ -104,7 +104,9 @@ def seigsys_numpy(a, k=6, which=None, return_vecs=True, sigma=None,
              (False, True): nla.eig,
              (False, False): nla.eigvals}[(isherm, return_vecs)]
 
-    kwargs.pop('ncv', None)  # might be given by seigsys but not used
+    # these might be given by seigsys but not relevant for numpy
+    kwargs.pop('ncv', None)
+    kwargs.pop('v0', None)
 
     if return_vecs:
         evals, evecs = efunc(a.A if issparse(a) else a, **kwargs)

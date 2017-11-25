@@ -311,6 +311,7 @@ _WHICH_SCIPY_TO_SLEPC = {
     "TM": 'TARGET_MAGNITUDE',
     "TR": 'TARGET_REAL',
     "TI": 'TARGET_IMAGINARY',
+    "ALL": 'ALL',
 }
 
 
@@ -321,7 +322,7 @@ def _which_scipy_to_slepc(which):
 
 def _init_eigensolver(k=6, which='LM', sigma=None, isherm=True,
                       EPSType="krylovschur", st_opts_dict=(), tol=None,
-                      max_it=None, ncv=None, comm=None):
+                      max_it=None, ncv=None, l_win=None, comm=None):
     """Create an advanced eigensystem solver
 
     Parameters
@@ -338,26 +339,56 @@ def _init_eigensolver(k=6, which='LM', sigma=None, isherm=True,
     SLEPc, comm = get_slepc(comm=comm)
 
     eigensolver = SLEPc.EPS().create(comm=comm)
+
+    if l_win is not None:
+        EPSType = 'ciss'
+        which = 'ALL'
+        rg = eigensolver.getRG()
+        rg.setType(SLEPc.RG.Type.INTERVAL)
+        rg.setIntervalEndpoints(*l_win, -0.1, 0.1)
+        # rg.setType(SLEPc.RG.Type.ELLIPSE)
+        # rg_c = (l_win[0] + l_win[1]) / 2
+        # rg_r = (l_win[1] - l_win[0]) / 2
+        # rg.setEllipseParameters(rg_c, rg_r, 1)
+
     if sigma is not None:
         which = "TR"
-        eigensolver.setST(_init_spectral_inverter(comm=comm,
-                                                  **dict(st_opts_dict)))
+        eigensolver.setST(
+            _init_spectral_inverter(comm=comm, **dict(st_opts_dict)))
         eigensolver.setTarget(sigma)
+
+    if EPSType is None:
+        EPSType = 'krylovschur'
+
     eigensolver.setType(EPSType)
     eigensolver.setProblemType(SLEPc.EPS.ProblemType.HEP if isherm else
                                SLEPc.EPS.ProblemType.NHEP)
     eigensolver.setWhichEigenpairs(_which_scipy_to_slepc(which))
     eigensolver.setConvergenceTest(SLEPc.EPS.Conv.ABS)
     eigensolver.setTolerances(tol=tol, max_it=max_it)
-    eigensolver.setDimensions(k, ncv)
+
+    if l_win is None:
+        eigensolver.setDimensions(k, ncv)
+
     eigensolver.setFromOptions()
     return eigensolver
 
 
-def seigsys_slepc(mat, k=6, which=None, return_vecs=True, sigma=None,
-                  isherm=True, ncv=None, sort=True, EPSType=None,
-                  return_all_conv=False, st_opts_dict=(), tol=None,
-                  max_it=None, comm=None):
+def seigsys_slepc(mat, k=6, *,
+                  which=None,
+                  sigma=None,
+                  isherm=True,
+                  v0=None,
+                  ncv=None,
+                  return_vecs=True,
+                  sort=True,
+                  EPSType=None,
+                  return_all_conv=False,
+                  st_opts_dict=(),
+                  tol=None,
+                  max_it=None,
+                  l_win=None,
+                  comm=None):
     """Solve a matrix using the advanced eigensystem solver
 
     Parameters
@@ -373,6 +404,10 @@ def seigsys_slepc(mat, k=6, which=None, return_vecs=True, sigma=None,
         ``sigma`` is.
     isherm : bool, optional
         Whether problem is hermitian or not.
+    v0 : 1D-array like, optional
+        Initial iteration vector, e.g., informed guess at eigenvector.
+    ncv : int, optional
+        Subspace size, defaults to ``min(20, 2 * k)``.
     return_vecs : bool, optional
         Whether to return the eigenvectors.
     sort : bool, optional
@@ -383,6 +418,12 @@ def seigsys_slepc(mat, k=6, which=None, return_vecs=True, sigma=None,
         Whether to return converged eigenpairs beyond requested subspace size
     st_opts_dict : dict, optional
         options to send to the eigensolver internal inverter.
+    tol : float, optional
+        Tolerance.
+    max_it : int, optional
+        Maximum number of iterations.
+    comm : mpi4py communicator, optional
+        MPI communicator, defaults to ``COMM_SELF`` for a single process solve.
 
     Returns
     -------
@@ -408,38 +449,35 @@ def seigsys_slepc(mat, k=6, which=None, return_vecs=True, sigma=None,
                         'PType': 'none'}
 
     eigensolver = _init_eigensolver(
-        k=k,
         which=("SA" if (which is None) and (sigma is None) else
                "TR" if (which is None) and (sigma is not None) else
                which),
-        sigma=sigma,
-        isherm=isherm,
-        EPSType="krylovschur" if EPSType is None else EPSType,
-        tol=tol,
-        max_it=max_it,
-        ncv=ncv,
-        st_opts_dict=st_opts_dict,
-        comm=comm,
-    )
+        EPSType=EPSType, k=k, sigma=sigma, isherm=isherm, tol=tol, ncv=ncv,
+        max_it=max_it, st_opts_dict=st_opts_dict, comm=comm, l_win=l_win)
 
+    # set up the initial operators and solve
     mat = convert_mat_to_petsc(mat, comm=comm)
     eigensolver.setOperators(mat)
+    if v0 is not None:
+        eigensolver.setInitialSpace(convert_vec_to_petsc(v0, comm=comm))
     eigensolver.solve()
 
+    # work out how many eigenpairs to retrieve
     nconv = eigensolver.getConverged()
-    k = nconv if return_all_conv else k
+    k = nconv if (return_all_conv or l_win is not None) else k
     if nconv < k:
         raise RuntimeError("SLEPC eigs did not find enough singular triplets, "
                            "wanted: {}, found: {}.".format(k, nconv))
 
+    # get eigenvalues
     rank = comm.Get_rank()
-
     if rank == 0:
         lk = np.asarray([eigensolver.getEigenvalue(i) for i in range(k)])
         lk = lk.real if isherm else lk
     else:
         res = None
 
+    # gather eigenvectors
     if return_vecs:
         pvec = mat.getVecLeft()
 
@@ -581,10 +619,10 @@ def mfn_multiply_slepc(mat, vec,
     out = new_petsc_vec(vec.size, comm=comm)
 
     if MFNType.upper() == 'AUTO':
-        if vec.size > 2**16:
-            MFNType = 'KRYLOV'
-        else:
+        if (fntype == 'exp') and (vec.size <= 2**16):
             MFNType = 'EXPOKIT'
+        else:
+            MFNType = 'KRYLOV'
 
     # set up the matrix function options and objects
     mfn = SLEPc.MFN().create(comm=comm)

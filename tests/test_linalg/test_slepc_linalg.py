@@ -12,12 +12,13 @@ from quimb import (
     ldmul,
     rand_matrix,
     rand_herm,
-    # rand_pos,
+    rand_pos,
     rand_ket,
     eigsys,
     seigsys,
     expec,
     eye,
+    norm,
 )
 from quimb.linalg import SLEPC4PY_FOUND
 from quimb.linalg.scipy_linalg import scipy_svds
@@ -154,18 +155,20 @@ class TestSlepcMfnMultiply:
 
         assert_allclose(out, expected)
 
-    # def test_sqrt_sparse(self):
+    def test_sqrt_sparse(self):
+        import scipy.sparse as sp
 
-    #     a = rand_pos(100, sparse=True, density=0.1)
-    #     k = rand_ket(100)
+        a = rand_pos(100, sparse=True, density=0.1)
+        a = a + 0.001 * sp.eye(100)
+        k = rand_ket(100)
 
-    #     out = mfn_multiply_slepc(a, k, fntype='sqrt', isherm=True)
+        out = mfn_multiply_slepc(a, k, fntype='sqrt', isherm=True)
 
-    #     al, av = eigsys(a.A)
-    #     al[al < 0] = 0.0  # very small neg values spoil sqrt
-    #     expected = av @ np.diag(np.sqrt(al)) @ av.conj().T @ k
+        al, av = eigsys(a.A)
+        al[al < 0] = 0.0  # very small neg values spoil sqrt
+        expected = av @ np.diag(np.sqrt(al)) @ av.conj().T @ k
 
-    #     assert_allclose(out, expected)
+        assert_allclose(out, expected, rtol=1e-6)
 
 
 @slepc4py_test
@@ -246,3 +249,21 @@ class TestShellMatrix:
 
         assert_allclose(el_s, el, rtol=1e-6)
         assert_allclose(np.abs(ev_s.conj().T @ ev), 1.0)
+
+
+@slepc4py_test
+class TestCISS:
+
+    def test_1(self):
+        a = rand_herm(100, sparse=True)
+        el, ev = eigsys(a.A)
+        which = abs(el) < 0.2
+        el, ev = el[which], ev[:, which]
+
+        offset = norm(a, 'fro')
+        a = a + offset * sp.eye(a.shape[0])
+
+        sl, sv = seigsys_slepc(a, l_win=(-0.2 + offset, 0.2 + offset))
+        sl -= offset
+        assert_allclose(el, sl)
+        assert_allclose(np.abs(sv.H @ ev), np.eye(el.size), atol=1e-11)
