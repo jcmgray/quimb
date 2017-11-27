@@ -53,7 +53,8 @@ class SyncroFuture:
     def result(self):
         return self.comm.bcast(self._result, root=self.result_rank)
 
-    def cancel(self):
+    @staticmethod
+    def cancel():
         raise ValueError("SyncroFutures cannot be cancelled - they are "
                          "submitted in a parallel round-robin fasion where "
                          "each worker immediately computes all its results.")
