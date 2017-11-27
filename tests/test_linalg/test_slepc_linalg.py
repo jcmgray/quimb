@@ -158,9 +158,9 @@ class TestSlepcMfnMultiply:
     def test_sqrt_sparse(self):
         import scipy.sparse as sp
 
-        a = rand_pos(100, sparse=True, density=0.1)
-        a = a + 0.001 * sp.eye(100)
-        k = rand_ket(100)
+        a = rand_pos(32, sparse=True, density=0.1)
+        a = a + 0.001 * sp.eye(32)
+        k = rand_ket(32)
 
         out = mfn_multiply_slepc(a, k, fntype='sqrt', isherm=True)
 
@@ -194,7 +194,7 @@ class TestShellMatrix:
         a = rand_herm(100, sparse=True)
         alo = sp.linalg.aslinearoperator(a)
         el, ev = seigsys_slepc(alo, k=1, which='TR', sigma=0.0)
-        el_s, ev_s = sp.linalg.eigsh(a, k=1, which='LM', sigma=0.0)
+        el_s, ev_s = sp.linalg.eigsh(a.tocsc(), k=1, which='LM', sigma=0.0)
 
         assert_allclose(el_s, el, rtol=1e-5)
         assert_allclose(np.abs(ev_s.conj().T @ ev), 1.0)
@@ -211,7 +211,7 @@ class TestShellMatrix:
 
         el, ev = seigsys_slepc(alo, k=1, which='TR', sigma=0.0,
                                st_opts_dict=st_opts_dict)
-        el_s, ev_s = sp.linalg.eigsh(a, k=1, which='LM', sigma=0.0)
+        el_s, ev_s = sp.linalg.eigsh(a.tocsc(), k=1, which='LM', sigma=0.0)
 
         assert_allclose(el_s, el, rtol=1e-5)
         assert_allclose(np.abs(ev_s.conj().T @ ev), 1.0)
@@ -228,7 +228,7 @@ class TestShellMatrix:
 
         el, ev = seigsys_slepc(alo, k=1, which='TR', sigma=0.0,
                                st_opts_dict=st_opts_dict, EPSType='gd')
-        el_s, ev_s = sp.linalg.eigsh(a, k=1, which='LM', sigma=0.0)
+        el_s, ev_s = sp.linalg.eigsh(a.tocsc(), k=1, which='LM', sigma=0.0)
 
         assert_allclose(el_s, el, rtol=1e-6)
         assert_allclose(np.abs(ev_s.conj().T @ ev), 1.0)
@@ -245,7 +245,7 @@ class TestShellMatrix:
 
         el, ev = seigsys_slepc(alo, k=1, which='TR', sigma=0.0,
                                st_opts_dict=st_opts_dict, EPSType='jd')
-        el_s, ev_s = sp.linalg.eigsh(a, k=1, which='LM', sigma=0.0)
+        el_s, ev_s = sp.linalg.eigsh(a.tocsc(), k=1, which='LM', sigma=0.0)
 
         assert_allclose(el_s, el, rtol=1e-6)
         assert_allclose(np.abs(ev_s.conj().T @ ev), 1.0)
