@@ -206,7 +206,8 @@ class DMRG:
     which : {'SR', 'LR'}, optional
         Whether to search for smallest or largest real part eigenvectors.
     compress_opts : dict-like
-        Options to
+        Options to supply when compressing or splitting, e.g.
+        ``compress_opts={'method': 'eig', 'tol': 1e-7}``.
 
     Attributes
     ----------
@@ -217,8 +218,8 @@ class DMRG:
     """
 
     def __init__(self, ham, bond_dim, bsz=1, which='SR', compress_opts=None):
+        self._set_bond_dim_seq(bond_dim)
         self.n = ham.nsites
-        self.bond_dim = bond_dim
         self.phys_dim = ham.phys_dim(0)
         self.bsz = bsz
         self.which = which
@@ -226,7 +227,7 @@ class DMRG:
                               dict(compress_opts))
 
         # create internal states and ham
-        self.k = MPS_rand_state(self.n, bond_dim, phys_dim=self.phys_dim)
+        self.k = MPS_rand_state(self.n, self._bond_dim0, self.phys_dim)
         self.b = self.k.H
         self.ham = ham.copy()
         self.ham.add_tag("__ham__")
@@ -239,7 +240,13 @@ class DMRG:
         self.TN_energy = self.b | self.ham | self.k
         self.energies = [self.TN_energy ^ ...]
 
-    def update_local_gs_1site(self, eff_ham, i, direction, dense=False):
+    def _set_bond_dim_seq(self, bond_dim):
+        bds = (bond_dim,) if isinstance(bond_dim, int) else tuple(bond_dim)
+        self._bond_dim0 = bds[0]
+        self._bond_dims = itertools.chain(bds, itertools.repeat(bds[-1]))
+
+    def update_local_gs_1site(self, eff_ham, i, direction, dense="AUTO",
+                              max_bond=None, method='svd', tol=1e-10):
         """Find the single site effective tensor groundstate of::
 
 
@@ -258,6 +265,10 @@ class DMRG:
         lix = self.b.site[i].inds
         dims = self.k.site[i].shape
 
+        # choose a rough value at which dense effective ham should not be used
+        if dense == "AUTO":
+            dense = prod(dims) < 800
+
         if dense:
             # contract remaining hamiltonian and get its dense representation
             eff_ham = (eff_ham ^ '__ham__')['__ham__']
@@ -273,12 +284,13 @@ class DMRG:
         self.b.site[i].data = eff_gs.conj()
 
         if (direction == 'right') and (i < self.n - 1):
-            self.k.left_canonize_site(i, bra=self.b)
+            self.k.left_compress_site(i, bra=self.b, method=method, tol=tol)
         elif (direction == 'left') and (i > 0):
-            self.k.right_canonize_site(i, bra=self.b)
+            self.k.right_compress_site(i, bra=self.b, method=method, tol=tol)
         return eff_e
 
-    def update_local_gs_2site(self, eff_ham, i, direction, dense=False):
+    def update_local_gs_2site(self, eff_ham, i, direction, dense="AUTO",
+                              max_bond=None, method='svd', tol=1e-10):
         """Find the 2-site effective tensor groundstate of::
 
 
@@ -318,6 +330,10 @@ class DMRG:
 
         dims = dims_L + dims_R
 
+        # choose a rough value at which dense effective ham should not be used
+        if dense == "AUTO":
+            dense = prod(dims) < 800
+
         # form the local operator to find ground-state of
         if dense:
             # contract remaining hamiltonian and get its dense representation
@@ -333,7 +349,8 @@ class DMRG:
 
         # split the two site local groundstate
         T_AB = Tensor(eff_gs.A.reshape(dims), uix)
-        L, R = T_AB.split(left_inds=uix_L, get='arrays', absorb=direction)
+        L, R = T_AB.split(left_inds=uix_L, get='arrays', absorb=direction,
+                          max_bond=max_bond, method=method, tol=tol)
 
         self.k.site[i].update(data=L, inds=(*uix_L, u_bond_ind))
         self.b.site[i].update(data=L.conj(), inds=(*lix_L, l_bond_ind))
@@ -342,13 +359,13 @@ class DMRG:
 
         return eff_e
 
-    def update_local_gs(self, eff_ham, i, dense, direction):
+    def update_local_gs(self, eff_ham, i, **update_opts):
         return {
             1: self.update_local_gs_1site,
             2: self.update_local_gs_2site,
-        }[self.bsz](eff_ham, i, direction=direction, dense=dense)
+        }[self.bsz](eff_ham, i, **update_opts)
 
-    def sweep_right(self, canonize=True, dense=False, verbose=False):
+    def sweep_right(self, canonize=True, verbose=False, **update_opts):
         """Perform a sweep of optimizations rightwards::
 
               optimize -->
@@ -381,11 +398,11 @@ class DMRG:
         for i in sweep:
             eff_envs.move_to(i)
             en = self.update_local_gs(
-                eff_envs(), i, direction='right', dense=dense)
+                eff_envs(), i, direction='right', **update_opts)
 
         return en
 
-    def sweep_left(self, canonize=True, dense=False, verbose=False):
+    def sweep_left(self, canonize=True, verbose=False, **update_opts):
         """Perform a sweep of optimizations leftwards::
 
                             <-- optimize
@@ -418,16 +435,17 @@ class DMRG:
         for i in sweep:
             eff_envs.move_to(i)
             en = self.update_local_gs(
-                eff_envs(), i, direction='left', dense=dense)
+                eff_envs(), i, direction='left', **update_opts)
 
         return en
 
     def solve(self,
-              tol=1e-9,
+              tol=1e-10,
               max_sweeps=10,
               sweep_sequence='R',
               dense="AUTO",
               compress_opts=None,
+              bond_dim=None,
               verbose=0):
         """Solve the system with a sequence of sweeps, up to a certain
         absolute tolerance in the energy or maximum number of sweeps.
@@ -445,27 +463,30 @@ class DMRG:
             Whether to use a dense representation of the effective hamiltonians
             or a tensor contraction based linear operation representation.
         """
-        # choose a rough value at which dense effective ham should not be used
-        if dense == "AUTO":
-            dense = (self.phys_dim * self.bsz * self.bond_dim**2) < 800
-
         verbose = {False: 0, True: 1}.get(verbose, verbose)
+        if bond_dim is not None:
+            self._set_bond_dim_seq(bond_dim)
 
         compress_opts = {} if compress_opts is None else dict(compress_opts)
+        compress_opts = {**self.compress_opts, **compress_opts}
 
         RLs = itertools.cycle(sweep_sequence)
         previous_LR = '0'
 
         for i in range(max_sweeps):
+            bd = next(self._bond_dims)
+
+            if self.bsz == 1:
+                self.k.expand_bond_dimension(bd, bra=self.b)
+
             LR = next(RLs)
+            if verbose:
+                print(f"SWEEP {i + 1}, direction={LR}, max_bond={bd}:")
+
             # if last sweep was opposite direction no need to canonize
             canonize = False if LR + previous_LR in {'LR', 'RL'} else True
-            sweep_opts = {'dense': dense,
-                          'canonize': canonize,
-                          'verbose': verbose}
-
-            if verbose:
-                print(f"Sweep {i + 1} to {LR}:")
+            sweep_opts = {'dense': dense, 'canonize': canonize,
+                          'verbose': verbose, 'max_bond': bd, **compress_opts}
 
             if LR == 'R':
                 self.energies.append(self.sweep_right(**sweep_opts))
@@ -478,11 +499,11 @@ class DMRG:
                 print(f"Energy: {np.asscalar(self.energies[-1])}", end="")
             if abs(self.energies[-2] - self.energies[-1]) < tol:
                 if verbose:
-                    print(" - converged!")
+                    print(" ... converged!")
                 break
             else:
                 if verbose:
-                    print(" - not converged")
+                    print(" ... not converged")
 
             previous_LR = LR
 
@@ -490,15 +511,23 @@ class DMRG:
 
 
 class DMRG1(DMRG):
+    """Simple alias of one site ``DMRG``.
+    """
+    __doc__ += DMRG.__doc__
 
-    def __init__(self, ham, bond_dim, which='SR'):
-        super().__init__(ham, bond_dim, which=which, bsz=1)
+    def __init__(self, ham, bond_dim, which='SR', compress_opts=None):
+        super().__init__(ham, bond_dim=bond_dim, which=which, bsz=1,
+                         compress_opts=compress_opts)
 
 
 class DMRG2(DMRG):
+    """Simple alias of two site ``DMRG``.
+    """
+    __doc__ += DMRG.__doc__
 
-    def __init__(self, ham, max_bond_dim, which='SR'):
-        super().__init__(ham, bond_dim=max_bond_dim, which=which, bsz=2)
+    def __init__(self, ham, bond_dim, which='SR', compress_opts=None):
+        super().__init__(ham, bond_dim=bond_dim, which=which, bsz=2,
+                         compress_opts=compress_opts)
 
 
 class DMRGX:

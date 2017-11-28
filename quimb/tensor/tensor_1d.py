@@ -444,7 +444,7 @@ class TensorNetwork1D(TensorNetwork):
         left_inds = set(Tm1.inds) & set(self.site[i - 1].inds)
         return Tm1.singular_values(left_inds, method=method)
 
-    def expand_bond_dimension(self, new_bond_dim, inplace=False, bra=None):
+    def expand_bond_dimension(self, new_bond_dim, inplace=True, bra=None):
         """Expand the bond dimensions of this 1D tensor network to at least
         ``new_bond_dim``.
         """
