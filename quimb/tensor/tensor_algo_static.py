@@ -327,9 +327,9 @@ class DMRG:
         else:
             op = EffHamOp(eff_ham, upper_inds=uix, lower_inds=lix, dims=dims)
 
-        # find the 2-site local groundstate
-        # XXX: contract sites for v0
-        eff_e, eff_gs = seigsys(op, k=1, which=self.which)
+        # find the 2-site local groundstate using previous as initial guess
+        v0 = self.k.site[i].contract(self.k.site[i + 1], output_inds=uix).data
+        eff_e, eff_gs = seigsys(op, k=1, which=self.which, v0=v0)
 
         # split the two site local groundstate
         T_AB = Tensor(eff_gs.A.reshape(dims), uix)
