@@ -36,8 +36,8 @@ from quimb.linalg.scipy_linalg import choose_ncv
 backends = ["auto", "dense", "scipy"]
 svds_backends = ["dense", "scipy"]
 if SLEPC4PY_FOUND:
-    backends += ["slepc"]
-    svds_backends += ["slepc"]
+    backends += ["slepc-nompi", "slepc"]
+    svds_backends += ["slepc-nompi", "slepc"]
 
 dense_backends = ["numpy"]
 
