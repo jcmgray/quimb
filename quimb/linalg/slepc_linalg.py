@@ -493,9 +493,8 @@ def seigsys_slepc(mat, k=6, *,
                 sortinds = np.argsort(lk)
                 lk, vk = lk[sortinds], np.asmatrix(vk[:, sortinds])
             res = lk, np.asmatrix(vk)
-    else:
-        if rank == 0:
-            res = np.sort(lk) if sort else lk
+    elif rank == 0:
+        res = np.sort(lk) if sort else lk
 
     eigensolver.destroy()
     return res
@@ -553,7 +552,6 @@ def svds_slepc(mat, k=6, ncv=None, return_vecs=True, SVDType='cross',
     rank = comm.Get_rank()
 
     if return_vecs:
-
         def usv_getter():
             v, u = mat.createVecs()
             for i in range(k):
@@ -566,15 +564,13 @@ def svds_slepc(mat, k=6, ncv=None, return_vecs=True, SVDType='cross',
         sk = np.asarray(sk)
 
         if rank == 0:
-            uk = np.concatenate(lus, axis=1)
-            vtk = np.concatenate(lvs, axis=0).conjugate()
-            so = np.argsort(-sk)
-            res = np.asmatrix(uk[:, so]), sk[so], np.asmatrix(vtk[so, :])
-    else:
-        if rank == 0:
-            sk = np.asarray([svd_solver.getValue(i) for i in range(k)])
-            res = sk[np.argsort(-sk)]
+            uk = np.asmatrix(np.concatenate(lus, axis=1))
+            vtk = np.asmatrix(np.concatenate(lvs, axis=0).conjugate())
+            res = uk, sk, vtk
+    elif rank == 0:
+        res = np.asarray([svd_solver.getValue(i) for i in range(k)])
 
+    comm.Barrier()
     svd_solver.destroy()
     return res if rank == 0 else None
 
