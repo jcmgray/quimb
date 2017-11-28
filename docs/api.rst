@@ -379,6 +379,7 @@ Tensor Networks
     MPS_rand_state
     MPS_product_state
     MPS_computational_state
+    MPS_rand_computational_state
     MPS_neel_state
     MPS_zero_state
     MPO_identity
@@ -391,5 +392,7 @@ Tensor Networks
     MatrixProductOperator
     align_TN_1D
     MovingEnvironment
+    DMRG
     DMRG1
+    DMRG2
     DMRGX

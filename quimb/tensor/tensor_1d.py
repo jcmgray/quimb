@@ -258,7 +258,8 @@ class TensorNetwork1D(TensorNetwork):
             for i in range(current, new, -1):
                 self.right_canonize_site(i, bra=bra)
 
-    def left_compress_site(self, i, bra=None, method='svd', tol=1e-13):
+    def left_compress_site(self, i, bra=None, method='svd',
+                           tol=1e-10, max_bond=None):
         """Left compress this 1D TN's ith site, such that the site is then
         left unitary with its right bond (possibly) reduced in dimension.
 
@@ -271,11 +272,17 @@ class TensorNetwork1D(TensorNetwork):
         method : {'svd', 'eig'}, optional
             How to perform the Tensor decomposition.
         tol : float, optional
-            What tolerance to keep singular values above.
+            What tolerance to keep singular values above, relative to the
+            largest singular value.
+        max_bond : None or int, optional
+            The maximum number of singular values to keep, regardless of
+            ``tol``.
         """
-        self._left_decomp_site(i, bra=bra, method=method, tol=tol)
+        self._left_decomp_site(i, bra=bra, method=method, tol=tol,
+                               absorb='right', max_bond=max_bond)
 
-    def right_compress_site(self, i, bra=None, method='svd', tol=1e-13):
+    def right_compress_site(self, i, bra=None, method='svd',
+                            tol=1e-10, max_bond=None):
         """Right compress this 1D TN's ith site, such that the site is then
         right unitary with its left bond (possibly) reduced in dimension.
 
@@ -288,9 +295,14 @@ class TensorNetwork1D(TensorNetwork):
         method : {'svd', 'eig'}, optional
             How to perform the Tensor decomposition.
         tol : float, optional
-            What tolerance to keep singular values above.
+            What tolerance to keep singular values above, relative to the
+            largest singular value.
+        max_bond : None or int, optional
+            The maximum number of singular values to keep, regardless of
+            ``tol``.
         """
-        self._right_decomp_site(i, bra=bra, method=method, tol=tol)
+        self._right_decomp_site(i, bra=bra, method=method, tol=tol,
+                                absorb='left', max_bond=max_bond)
 
     def left_compress(self, start=None, stop=None, bra=None,
                       current_orthog_centre=None, **compress_opts):
@@ -310,7 +322,8 @@ class TensorNetwork1D(TensorNetwork):
         method : {'svd', 'eig'}, optional
             How to perform the decomposition.
         tol : float, optional
-            Below what magnitude to chuck away singular values.
+            What tolerance to keep singular values above, relative to the
+            largest singular value.
         compress_opts
             Supplied to ``self.left_compress_site``.
         """
@@ -347,7 +360,8 @@ class TensorNetwork1D(TensorNetwork):
         method : {'svd', 'eig'}, optional
             How to perform the decomposition.
         tol : float, optional
-            Below what magnitude to chuck away singular values.
+            What tolerance to keep singular values above, relative to the
+            largest singular value.
         compress_opts
             Supplied to ``self.right_compress_site``.
         """
@@ -366,14 +380,14 @@ class TensorNetwork1D(TensorNetwork):
         for i in range(start, stop, -1):
             self.right_compress_site(i, bra=bra, **compress_opts)
 
-    def compress(self, *args, form='L', **kwargs):
+    def compress(self, *args, form='L', **compress_opts):
         """Compress this 1D Tensor Network, either left or right, based on
         ``form``.
         """
         if form.upper() == 'L':
-            self.left_compress(*args, **kwargs)
+            self.left_compress(*args, **compress_opts)
         elif form.upper() == 'R':
-            self.right_compress(*args, **kwargs)
+            self.right_compress(*args, **compress_opts)
         else:
             raise ValueError("Form specifier {} not understood, should be "
                              "either 'L' or 'R".format(form))
@@ -385,6 +399,50 @@ class TensorNetwork1D(TensorNetwork):
         inds_j = self.site[j].inds
         bond, = (i for i in inds_i if i in inds_j)
         return bond
+
+    def bond_dim(self, i, j):
+        """Return the size of the bond between site ``i`` and ``j``.
+        """
+        b_ix = self.bond(i, j)
+        return self.site[i].ind_size(b_ix)
+
+    def singular_values(self, i, current_orthog_centre=None, method='svd'):
+        """Find the singular values associated with the ith bond::
+
+            ....L....   i
+            o-o-o-o-o-l-o-o-o-o-o-o-o-o-o-o-o
+            | | | | |   | | | | | | | | | | |
+                   i-1  ..........R..........
+
+        Leaves the 1D TN in mixed canoncial form at bond ``i``.
+
+        Parameters
+        ----------
+        i : int
+            Which bond, or equivalently, the number of sites in the
+            left partition.
+        current_orthog_centre : int
+            If given, the known current orthogonality center, to speed up the
+            mixed canonization, e.g. if sweeping this function from left to
+            right would use ``i - 1``.
+
+        Returns
+        -------
+        svals : 1d-array
+            The singular values.
+        """
+        if not (0 < i < self.nsites):
+            raise ValueError("Need 0 < i < {}, got i={}."
+                             .format(self.nsites, i))
+
+        if current_orthog_centre is None:
+            self.canonize(i)
+        else:
+            self.shift_orthogonality_center(current_orthog_centre, i)
+
+        Tm1 = self.site[i]
+        left_inds = set(Tm1.inds) & set(self.site[i - 1].inds)
+        return Tm1.singular_values(left_inds, method=method)
 
     def expand_bond_dimension(self, new_bond_dim, inplace=False, bra=None):
         """Expand the bond dimensions of this 1D tensor network to at least
@@ -414,6 +472,52 @@ class TensorNetwork1D(TensorNetwork):
                 bra.site[i].update(data=tensor.data.conj())
 
         return expanded
+
+    def count_canonized(self, **allclose_opts):
+        ov = self.H & self
+        num_can_l = 0
+        num_can_r = 0
+
+        # import pdb; pdb.set_trace()
+
+        for i in range(self.nsites - 1):
+            ov ^= slice(0, i + 1)
+            x = ov.site[i].data
+            if np.allclose(x, np.eye(x.shape[0]), **allclose_opts):
+                num_can_l += 1
+            else:
+                break
+
+        for j in reversed(range(i + 1, self.nsites)):
+            ov ^= slice(j, ...)
+            x = ov.site[j].data
+            if np.allclose(x, np.eye(x.shape[0]), **allclose_opts):
+                num_can_r += 1
+            else:
+                break
+
+        return num_can_l, num_can_r
+
+    def plot(self):
+        l1 = ""
+        l2 = ""
+        l3 = ""
+        num_can_l, num_can_r = self.count_canonized()
+        for i in range(self.nsites - 1):
+            bdim = self.bond_dim(i, i + 1)
+            strl = len(str(bdim))
+            l1 += " {}".format(bdim)
+            l2 += (">" if i < num_can_l else
+                   "<" if i >= self.nsites - num_can_r else
+                   "o") + ("-" if bdim < 100 else "=") * strl
+            l3 += "|" + " " * strl
+
+        l2 += "<" if num_can_r > 0 else "o"
+        l3 += "|"
+
+        print(l1)
+        print(l2)
+        print(l3)
 
 
 class MatrixProductState(TensorNetwork1D):
@@ -621,19 +725,7 @@ class MatrixProductState(TensorNetwork1D):
         S : 1d-array
             The schmidt values.
         """
-        if not (0 < i < self.nsites):
-            raise ValueError("Need 0 < i < {}, got i={}."
-                             .format(self.nsites, i))
-
-        if current_orthog_centre is None:
-            self.canonize(i)
-        else:
-            self.shift_orthogonality_center(current_orthog_centre, i)
-
-        Tm1 = self.site[i]
-        left_inds = set(Tm1.inds) & set(self.site[i - 1].inds)
-        S = Tm1.singular_values(left_inds, method=method)**2
-        return S
+        return self.singular_values(i, current_orthog_centre, method=method)**2
 
     def entropy(self, i, current_orthog_centre=None, method='svd'):
         """The entropy of bipartition between the left block of ``i`` sites and
@@ -684,9 +776,8 @@ class MatrixProductState(TensorNetwork1D):
                            .fuse({'all': self.site_inds})
                            .data.reshape(-1, 1))
 
-    def get_phys_dim(self, i):
-        tns = self.site[i]
-        return tns.shape[tns.inds.index(self.site_ind_id.format(i))]
+    def phys_dim(self, i):
+        return self.site[i].ind_size(self.site_ind_id.format(i))
 
     @functools.wraps(align_TN_1D)
     def align(self, *args, inplace=True):
@@ -924,6 +1015,24 @@ class MatrixProductOperator(TensorNetwork1D):
         d = int(data.size**0.5)
         return np.matrix(data.reshape(d, d))
 
-    def get_phys_dim(self, i):
-        tns = self.site[i]
-        return tns.shape[tns.inds.index(self.upper_ind_id.format(i))]
+    def phys_dim(self, i):
+        return self.site[i].ind_size(self.upper_ind_id.format(i))
+
+    def plot(self):
+        l1 = ""
+        l2 = ""
+        l3 = ""
+        for i in range(self.nsites - 1):
+            bdim = self.bond_dim(i, i + 1)
+            strl = len(str(bdim))
+            l1 += "|{}".format(bdim)
+            l2 += "O" + ("-" if bdim < 100 else "=") * strl
+            l3 += "|" + " " * strl
+
+        l1 += "|"
+        l2 += "O"
+        l3 += "|"
+
+        print(l1)
+        print(l2)
+        print(l3)

@@ -196,20 +196,29 @@ def rand_uuid(base=""):
 
 
 @njit  # pragma: no cover
-def _array_split_svd(x, tol=-1.0):
+def _array_split_svd(x, tol=-1.0, max_bond=-1, absorb=0):
     """SVD-decomposition.
     """
     U, s, V = np.linalg.svd(x, full_matrices=False)
 
     if tol > 0.0:
-        s = s[s > tol]
-        n_chi = s.size
+        n_chi = np.sum(s > tol * s[0])
+
+        if max_bond > 0:
+            n_chi = min(n_chi, max_bond)
+
+        s = s[:n_chi]
         U = U[..., :n_chi]
         V = V[:n_chi, ...]
 
-    s **= 0.5
-    U = U * s.reshape((1, -1))
-    V = s.reshape((-1, 1)) * V
+    if absorb == -1:
+        U *= s.reshape((1, -1))
+    elif absorb == 1:
+        V *= s.reshape((-1, 1))
+    else:
+        s **= 0.5
+        U *= s.reshape((1, -1))
+        V *= s.reshape((-1, 1))
 
     return U, V
 
@@ -228,21 +237,52 @@ def dag(x):
 
 
 @njit  # pragma: no cover
-def _array_split_eig(x, tol=-1.0):
+def _array_split_eig(x, tol=-1.0, max_bond=-1, absorb=0):
     """SVD-split via eigen-decomposition.
     """
     if x.shape[0] > x.shape[1]:
+        # Get sU, V
         s2, V = np.linalg.eigh(dag(x) @ x)
-        U = x @ dag(V)
+        U = x @ V
+        V = dag(V)
+
+        # Check if want U, sV
+        if absorb == 1:
+            s = s2**0.5
+            U /= s.reshape((1, -1))
+            V *= s.reshape((-1, 1))
+        # Or sqrt(s)U, sqrt(s)V
+        elif absorb == 0:
+            sqrts = s2**0.25
+            U /= sqrts.reshape((1, -1))
+            V *= sqrts.reshape((-1, 1))
 
     else:
+        # Get U, sV
         s2, U = np.linalg.eigh(x @ dag(x))
         V = dag(U) @ x
 
+        # Check if want sU, V
+        if absorb == -1:
+            s = s2**0.5
+            U *= s.reshape((1, -1))
+            V /= s.reshape((-1, 1))
+
+        # Or sqrt(s)U, sqrt(s)V
+        elif absorb == 0:
+            sqrts = s2**0.25
+            U *= sqrts.reshape((1, -1))
+            V /= sqrts.reshape((-1, 1))
+
+    # eigh produces ascending eigenvalue order -> slice opposite to svd
     if tol > 0.0:
-        n_chi = np.sum(s2 > tol**2)
-        U = U[..., :n_chi]
-        V = V[:n_chi, ...]
+        n_chi = np.sum(s2 > tol**2 * s2[-1])
+
+        if max_bond > 0:
+            n_chi = min(n_chi, max_bond)
+
+        U = U[..., -n_chi:]
+        V = V[-n_chi:, ...]
 
     return U, V
 
@@ -259,7 +299,7 @@ def _array_split_svdvals_eig(x):
 
 
 @njit  # pragma: no cover
-def _array_split_qr(x, tol):
+def _array_split_qr(x):
     """QR-decomposition.
     """
     Q, R = np.linalg.qr(x)
@@ -267,7 +307,7 @@ def _array_split_qr(x, tol):
 
 
 @njit  # pragma: no cover
-def _array_split_lq(x, tol):
+def _array_split_lq(x):
     """LQ-decomposition.
     """
     Q, L = np.linalg.qr(x.T)
@@ -469,6 +509,9 @@ class Tensor(object):
     def size(self):
         return self._data.size
 
+    def ind_size(self, ind):
+        return self.shape[self.inds.index(ind)]
+
     def inner_inds(self):
         """
         """
@@ -510,8 +553,8 @@ class Tensor(object):
     def contract(self, *others, output_inds=None):
         return tensor_contract(self, *others, output_inds=output_inds)
 
-    def split(self, left_inds, method='svd', tol=1e-13,
-              max_bond=None, get=None):
+    def split(self, left_inds, method='svd', tol=1e-10,
+              absorb='both', max_bond=None, get=None):
         """Decompose this tensor into two tensors.
 
         Parameters
@@ -526,7 +569,7 @@ class Tensor(object):
             to ``method='svd'`` and ``method='eig'``.
         max_bond : int, optional
             If the new bond is larger than this, raise a ``BondError``.
-        get : {None, 'tensors', 'values'}
+        get : {None, 'arrays', 'tensors', 'values'}
             If given, what to return instead of the TensorNetwork describing
             the split.
 
@@ -544,24 +587,27 @@ class Tensor(object):
 
         array = TT.data.reshape(prod(left_dims), prod(right_dims))
 
-        if tol is None:
-            tol = -1.0
-
         if get == 'values':
             return {'svd': _array_split_svdvals,
                     'eig': _array_split_svdvals_eig}[method](array)
 
+        split_opts = {}
+        if method in ('svd', 'eig'):
+            # Convert defaults and settings to numeric type for numba funcs
+            split_opts['tol'] = {None: -1.0}.get(tol, tol)
+            split_opts['absorb'] = {'left': -1, 'both': 0, 'right': 1}[absorb]
+            split_opts['max_bond'] = {None: -1}.get(max_bond, max_bond)
+
         left, right = {'svd': _array_split_svd,
                        'eig': _array_split_eig,
                        'qr': _array_split_qr,
-                       'lq': _array_split_lq}[method](array, tol=tol)
+                       'lq': _array_split_lq}[method](array, **split_opts)
 
         left = left.reshape(*left_dims, -1)
         right = right.reshape(-1, *right_dims)
 
-        if max_bond is not None:
-            if left.shape[-1] > max_bond:
-                raise BondError("Maximum bond size exceeded")
+        if get == 'arrays':
+            return left, right
 
         bond_ind = rand_uuid()
 

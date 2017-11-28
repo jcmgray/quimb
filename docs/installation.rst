@@ -45,6 +45,8 @@ Fast and optionally distributed partial eigen-solving, SVD, exponentiation etc. 
 
 It is recommended to compile and install these (apart from MPI if you are e.g. on a cluster) yourself (see below).
 
+To show real-time progress on certain operations (evolutions, DMRG, ...), `tqdm <https://github.com/tqdm/tqdm>`_ is needed.
+
 For best performance of some routines, (e.g. shift invert eigen-solving), petsc must be configured with certain options. Here is a rough overview of the steps to installing the above in a directory ``$SRC_DIR``, with MPI and ``mpi4py`` already installed. ``$PATH_TO_YOUR_BLAS_LAPACK_LIB`` should point to e.g. `OpenBLAS <https://github.com/xianyi/OpenBLAS>`_ (``libopenblas.so``) or the MKL library (``libmkl_rt.so``). ``$COMPILE_FLAGS`` should be optimizations chosen for your compiler, e.g. for ``gcc`` ``"-O3 -march=native -s -DNDEBUG"``, or for ``icc`` ``"-O3 -xHost"`` etc.
 
 

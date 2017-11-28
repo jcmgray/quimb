@@ -11,6 +11,7 @@ from .tensor_gen import (
     MPS_rand_state,
     MPS_product_state,
     MPS_computational_state,
+    MPS_rand_computational_state,
     MPS_neel_state,
     MPS_zero_state,
     MPO_identity,
@@ -27,7 +28,9 @@ from .tensor_1d import (
 )
 from .tensor_algo_static import (
     MovingEnvironment,
+    DMRG,
     DMRG1,
+    DMRG2,
     DMRGX,
 )
 
@@ -43,6 +46,7 @@ __all__ = (
     "MPS_rand_state",
     "MPS_product_state",
     "MPS_computational_state",
+    "MPS_rand_computational_state",
     "MPS_neel_state",
     "MPS_zero_state",
     "MPO_identity",
@@ -55,6 +59,8 @@ __all__ = (
     "MatrixProductOperator",
     "align_TN_1D",
     "MovingEnvironment",
+    "DMRG",
     "DMRG1",
+    "DMRG2",
     "DMRGX",
 )

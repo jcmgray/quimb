@@ -38,6 +38,7 @@ from quimb.tensor import (
     MPO_ham_mbl,
     MovingEnvironment,
     DMRG1,
+    DMRG2,
     DMRGX,
 )
 
@@ -231,12 +232,27 @@ class TestBasicTensorOperations:
 
 
 class TestTensorFunctions:
-    @pytest.mark.parametrize('method', ['svd', 'eig', 'qr', 'lq'])
+    @pytest.mark.parametrize('method', ['svd', 'eig'])
     @pytest.mark.parametrize('linds', ['abd', 'ce'])
-    @pytest.mark.parametrize('tol', [-1.0, 1e-13])
-    def test_split_tensor_full_svd(self, method, linds, tol):
+    @pytest.mark.parametrize('tol', [-1.0, 1e-13, 1e-10])
+    @pytest.mark.parametrize('absorb', ['left', 'both', 'right'])
+    def test_split_tensor_with_vals(self, method, linds, tol, absorb):
         a = rand_tensor((2, 3, 4, 5, 6), inds='abcde', tags='red')
-        a_split = a.split(linds, method=method, tol=tol)
+        a_split = a.split(linds, method=method, tol=tol, absorb=absorb)
+        assert len(a_split.tensors) == 2
+        if linds == 'abd':
+            assert ((a_split.shape == (2, 3, 5, 4, 6)) or
+                    (a_split.shape == (4, 6, 2, 3, 5)))
+        elif linds == 'edc':
+            assert ((a_split.shape == (6, 5, 4, 2, 3)) or
+                    (a_split.shape == (2, 3, 6, 5, 4)))
+        assert (a_split ^ ...).almost_equals(a)
+
+    @pytest.mark.parametrize('method', ['qr', 'lq'])
+    @pytest.mark.parametrize('linds', ['abd', 'ce'])
+    def test_split_tensor_no_vals(self, method, linds):
+        a = rand_tensor((2, 3, 4, 5, 6), inds='abcde', tags='red')
+        a_split = a.split(linds, method=method)
         assert len(a_split.tensors) == 2
         if linds == 'abd':
             assert ((a_split.shape == (2, 3, 5, 4, 6)) or
@@ -619,6 +635,9 @@ class TestMatrixProductState:
         k = MPS_rand_state(n, 10, site_tag_id="foo{}",
                            tags='bar', normalize=False)
         k.left_canonize(normalize=True)
+
+        assert k.count_canonized() == (9, 0)
+
         assert_allclose(k.H @ k, 1)
         p_tn = (k.H & k) ^ slice(0, 9)
         assert_allclose(p_tn['foo8'].data, np.eye(10), atol=1e-13)
@@ -708,15 +727,19 @@ class TestMatrixProductState:
         assert max(p['i4'].shape) == 14
         assert_allclose(p.H @ p, 4)
 
-    def test_compress_mps(self):
-        p = MPS_rand_state(10, 7)
-        assert max(p['i4'].shape) == 7
+    @pytest.mark.parametrize("method", ['svd', 'eig'])
+    def test_compress_mps(self, method):
+        n = 10
+        chi = 7
+        p = MPS_rand_state(n, chi)
+        assert max(p['i4'].shape) == chi
         p2 = p + p
-        assert max(p2['i4'].shape) == 14
+        assert max(p2['i4'].shape) == chi * 2
         assert_allclose(p2.H @ p, 2)
-        p2.left_compress()
-        assert max(p2['i4'].shape) == 7
+        p2.left_compress(method=method, tol=1e-6)
+        assert max(p2['i4'].shape) == chi
         assert_allclose(p2.H @ p, 2)
+        assert p2.count_canonized() == (n - 1, 0)
 
     def test_compress_mps_right(self):
         p = MPS_rand_state(10, 7)
@@ -728,7 +751,16 @@ class TestMatrixProductState:
         assert max(p2['i4'].shape) == 7
         assert_allclose(p2.H @ p, 2)
 
-    @pytest.mark.parametrize("method", ['svd'])  # , 'eig'])
+    @pytest.mark.parametrize("method", ['svd', 'eig'])
+    def test_compress_trim_max_bond(self, method):
+        p = MPS_rand_state(20, 20)
+        p.compress(method=method)
+        assert max(p['i4'].shape) == 20
+        p.compress(max_bond=13, method=method)
+        assert max(p['i4'].shape) == 13
+        assert p.H @ p < 1.0
+
+    @pytest.mark.parametrize("method", ['svd', 'eig'])
     @pytest.mark.parametrize("form", ['L', 'R', 'raise'])
     def test_add_and_compress_mps(self, method, form):
         p = MPS_rand_state(10, 7)
@@ -736,10 +768,10 @@ class TestMatrixProductState:
 
         if form == 'raise':
             with pytest.raises(ValueError):
-                p.add_MPS(p, compress=True, method=method, form=form)
+                p.add_MPS(p, compress=True, method=method, form=form, tol=1e-6)
             return
 
-        p2 = p.add_MPS(p, compress=True, method=method, form=form)
+        p2 = p.add_MPS(p, compress=True, method=method, form=form, tol=1e-6)
         assert max(p2['i4'].shape) == 7
         assert_allclose(p2.H @ p, 2)
 
@@ -967,12 +999,12 @@ class TestDMRG1:
         assert e3.real < e2.real
         assert e4.real < e3.real
 
-    @pytest.mark.parametrize("eff_ham_dense", [False, True])
+    @pytest.mark.parametrize("dense", [False, True])
     @pytest.mark.parametrize("MPO_ham", [MPO_ham_XY, MPO_ham_heis])
-    def test_ground_state_matches(self, eff_ham_dense, MPO_ham):
+    def test_ground_state_matches(self, dense, MPO_ham):
         h = MPO_ham(6)
 
-        eff_e, mps_gs = DMRG1(h, bond_dim=8).solve(eff_ham_dense=eff_ham_dense)
+        eff_e, mps_gs = DMRG1(h, bond_dim=8).solve(dense=dense)
         mps_gs_dense = mps_gs.to_dense()
 
         assert_allclose(mps_gs_dense.H @ mps_gs_dense, 1.0)
@@ -1008,6 +1040,35 @@ class TestDMRG1:
 
         exp_gs = MPS_product_state([plus()] * 6)
         assert_allclose(abs(exp_gs.H @ mps_gs), 1.0, rtol=1e-3)
+
+
+class TestDMRG2:
+    @pytest.mark.parametrize("dense", [False, True])
+    @pytest.mark.parametrize("MPO_ham", [MPO_ham_XY, MPO_ham_heis])
+    def test_matches_exact(self, dense, MPO_ham):
+        h = MPO_ham(6)
+
+        eff_e, mps_gs = DMRG2(h, max_bond_dim=8).solve(dense=dense)
+        mps_gs_dense = mps_gs.to_dense()
+
+        assert_allclose(mps_gs_dense.H @ mps_gs_dense, 1.0)
+
+        h_dense = h.to_dense()
+
+        # check against dense form
+        actual_e, gs = seigsys(h_dense, k=1)
+        assert_allclose(actual_e, eff_e)
+        assert_allclose(abs(expec(mps_gs_dense, gs)), 1.0)
+
+        # check against actual MPO_ham
+        if MPO_ham is MPO_ham_XY:
+            ham_dense = ham_heis(6, cyclic=False, j=(1.0, 1.0, 0.0)) / 4
+        elif MPO_ham is MPO_ham_heis:
+            ham_dense = ham_heis(6, cyclic=False) / 4
+
+        actual_e, gs = seigsys(ham_dense, k=1)
+        assert_allclose(actual_e, eff_e)
+        assert_allclose(abs(expec(mps_gs_dense, gs)), 1.0)
 
 
 class TestDMRGX:
