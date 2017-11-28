@@ -1003,8 +1003,9 @@ class TestDMRG1:
     @pytest.mark.parametrize("MPO_ham", [MPO_ham_XY, MPO_ham_heis])
     def test_ground_state_matches(self, dense, MPO_ham):
         h = MPO_ham(6)
-
-        eff_e, mps_gs = DMRG1(h, bond_dim=8).solve(dense=dense)
+        dmrg = DMRG1(h, bond_dim=8)
+        assert dmrg.solve(dense=dense)
+        eff_e, mps_gs = dmrg.energy, dmrg.state
         mps_gs_dense = mps_gs.to_dense()
 
         assert_allclose(mps_gs_dense.H @ mps_gs_dense, 1.0)
@@ -1028,7 +1029,9 @@ class TestDMRG1:
 
     def test_ising_and_MPS_product_state(self):
         h = MPO_ham_ising(6, bx=2.0, j=0.1)
-        eff_e, mps_gs = DMRG1(h, bond_dim=8).solve()
+        dmrg = DMRG1(h, bond_dim=8)
+        assert dmrg.solve()
+        eff_e, mps_gs = dmrg.energy, dmrg.state
         mps_gs_dense = mps_gs.to_dense()
         assert_allclose(mps_gs_dense.H @ mps_gs_dense, 1.0)
 
@@ -1047,8 +1050,9 @@ class TestDMRG2:
     @pytest.mark.parametrize("MPO_ham", [MPO_ham_XY, MPO_ham_heis])
     def test_matches_exact(self, dense, MPO_ham):
         h = MPO_ham(6)
-
-        eff_e, mps_gs = DMRG2(h, max_bond_dim=8).solve(dense=dense)
+        dmrg = DMRG2(h, bond_dim=8)
+        assert dmrg.solve(dense=dense)
+        eff_e, mps_gs = dmrg.energy, dmrg.state
         mps_gs_dense = mps_gs.to_dense()
 
         assert_allclose(mps_gs_dense.H @ mps_gs_dense, 1.0)
@@ -1074,10 +1078,11 @@ class TestDMRG2:
 class TestDMRGX:
 
     def test_1(self):
+        # import pdb; pdb.set_trace()
         n = 8
         chi = 16
         ham = MPO_ham_mbl(n, dh=12, run=42)
-        p0 = MPS_neel_state(n)
+        p0 = MPS_neel_state(n).expand_bond_dimension(chi)
 
         b0 = p0.H
         align_TN_1D(p0, ham, b0, inplace=True)
@@ -1119,5 +1124,5 @@ class TestDMRGX:
         ham = MPO_ham_mbl(n, dh=12, run=42)
         p0 = MPS_computational_state('00110111000101')
         dmrgx = DMRGX(ham, p0, chi)
-        dmrgx.solve(vtol=1e-6)
+        assert dmrgx.solve(tol=1e-6)
         assert dmrgx.variances[-1] < 1e-6

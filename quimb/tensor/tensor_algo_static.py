@@ -217,7 +217,8 @@ class DMRG:
         The list of energies after each sweep.
     """
 
-    def __init__(self, ham, bond_dim, bsz=1, which='SR', compress_opts=None):
+    def __init__(self, ham, bond_dim, bsz=1, which='SR',
+                 compress_opts=None, p0=None):
         self._set_bond_dim_seq(bond_dim)
         self.n = ham.nsites
         self.phys_dim = ham.phys_dim(0)
@@ -227,7 +228,10 @@ class DMRG:
                               dict(compress_opts))
 
         # create internal states and ham
-        self.k = MPS_rand_state(self.n, self._bond_dim0, self.phys_dim)
+        if p0 is not None:
+            self.k = p0.copy()
+        else:
+            self.k = MPS_rand_state(self.n, self._bond_dim0, self.phys_dim)
         self.b = self.k.H
         self.ham = ham.copy()
         self.ham.add_tag("__ham__")
@@ -245,8 +249,16 @@ class DMRG:
         self._bond_dim0 = bds[0]
         self._bond_dims = itertools.chain(bds, itertools.repeat(bds[-1]))
 
-    def update_local_gs_1site(self, eff_ham, i, direction, dense="AUTO",
-                              max_bond=None, method='svd', tol=1e-10):
+    @property
+    def energy(self):
+        return np.asscalar(self.energies[-1])
+
+    @property
+    def state(self):
+        return self.k.copy()
+
+    def update_local_state_1site(self, eff_ham, i, direction, dense=None,
+                                 max_bond=None, method='svd', tol=1e-10):
         """Find the single site effective tensor groundstate of::
 
 
@@ -266,7 +278,7 @@ class DMRG:
         dims = self.k.site[i].shape
 
         # choose a rough value at which dense effective ham should not be used
-        if dense == "AUTO":
+        if dense is None:
             dense = prod(dims) < 800
 
         if dense:
@@ -289,8 +301,8 @@ class DMRG:
             self.k.right_compress_site(i, bra=self.b, method=method, tol=tol)
         return eff_e
 
-    def update_local_gs_2site(self, eff_ham, i, direction, dense="AUTO",
-                              max_bond=None, method='svd', tol=1e-10):
+    def update_local_state_2site(self, eff_ham, i, direction, dense=None,
+                                 max_bond=None, method='svd', tol=1e-10):
         """Find the 2-site effective tensor groundstate of::
 
 
@@ -331,7 +343,7 @@ class DMRG:
         dims = dims_L + dims_R
 
         # choose a rough value at which dense effective ham should not be used
-        if dense == "AUTO":
+        if dense is None:
             dense = prod(dims) < 800
 
         # form the local operator to find ground-state of
@@ -359,17 +371,17 @@ class DMRG:
 
         return eff_e
 
-    def update_local_gs(self, eff_ham, i, **update_opts):
+    def update_local_state(self, eff_ham, i, **update_opts):
         return {
-            1: self.update_local_gs_1site,
-            2: self.update_local_gs_2site,
+            1: self.update_local_state_1site,
+            2: self.update_local_state_2site,
         }[self.bsz](eff_ham, i, **update_opts)
 
     def sweep_right(self, canonize=True, verbose=False, **update_opts):
         """Perform a sweep of optimizations rightwards::
 
               optimize -->
-                .
+                ...
             >->-o-<-<-<-<-<-<-<-<-<-<-<-<-<
             | | | | | | | | | | | | | | | |
             H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H
@@ -397,7 +409,7 @@ class DMRG:
 
         for i in sweep:
             eff_envs.move_to(i)
-            en = self.update_local_gs(
+            en = self.update_local_state(
                 eff_envs(), i, direction='right', **update_opts)
 
         return en
@@ -406,7 +418,7 @@ class DMRG:
         """Perform a sweep of optimizations leftwards::
 
                             <-- optimize
-                                      .
+                                      ...
             >->->->->->->->->->->->->-o-<-<
             | | | | | | | | | | | | | | | |
             H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H
@@ -434,16 +446,39 @@ class DMRG:
 
         for i in sweep:
             eff_envs.move_to(i)
-            en = self.update_local_gs(
+            en = self.update_local_state(
                 eff_envs(), i, direction='left', **update_opts)
 
         return en
+
+    def _compute_pre_sweep(self):
+        pass
+
+    def _print_pre_sweep(self, i, LR, bd, verbose=0):
+        if verbose > 0:
+            print(f"SWEEP-{i + 1}, direction={LR}, max_bond={bd}:")
+
+    def _compute_post_sweep(self):
+        pass
+
+    def _print_post_sweep(self, converged, verbose=0):
+        if verbose > 1:
+            self.k.plot()
+        if verbose > 0:
+            print(f"Energy: {self.energy}", end="")
+            if converged:
+                print(" ... converged!")
+            else:
+                print(" ... not converged")
+
+    def _check_convergence(self, tol):
+        return abs(self.energies[-2] - self.energies[-1]) < tol
 
     def solve(self,
               tol=1e-10,
               max_sweeps=10,
               sweep_sequence='R',
-              dense="AUTO",
+              dense=None,
               compress_opts=None,
               bond_dim=None,
               verbose=0):
@@ -459,7 +494,7 @@ class DMRG:
         sweep_sequence : str, optional
             String made of 'L' and 'R' defining the sweep sequence, e.g 'RRL'.
             The sequence will be repeated until ``max_sweeps`` is reached.
-        dense : "AUTO" or bool, optional
+        dense : None or bool, optional
             Whether to use a dense representation of the effective hamiltonians
             or a tensor contraction based linear operation representation.
         """
@@ -475,39 +510,32 @@ class DMRG:
 
         for i in range(max_sweeps):
             bd = next(self._bond_dims)
+            LR = next(RLs)
+            self._print_pre_sweep(i, LR, bd, verbose=verbose)
 
+            # need to manually expand bond dimension
             if self.bsz == 1:
                 self.k.expand_bond_dimension(bd, bra=self.b)
 
-            LR = next(RLs)
-            if verbose:
-                print(f"SWEEP {i + 1}, direction={LR}, max_bond={bd}:")
-
             # if last sweep was opposite direction no need to canonize
             canonize = False if LR + previous_LR in {'LR', 'RL'} else True
-            sweep_opts = {'dense': dense, 'canonize': canonize,
-                          'verbose': verbose, 'max_bond': bd, **compress_opts}
+            sweep_opts = {'dense': dense, 'canonize': canonize, 'max_bond': bd,
+                          'verbose': verbose, **compress_opts}
 
+            self._compute_pre_sweep()
             if LR == 'R':
                 self.energies.append(self.sweep_right(**sweep_opts))
             elif LR == 'L':
                 self.energies.append(self.sweep_left(**sweep_opts))
+            self._compute_post_sweep()
 
-            if verbose:
-                if verbose > 1:
-                    self.k.plot()
-                print(f"Energy: {np.asscalar(self.energies[-1])}", end="")
-            if abs(self.energies[-2] - self.energies[-1]) < tol:
-                if verbose:
-                    print(" ... converged!")
+            converged = self._check_convergence(tol)
+            self._print_post_sweep(converged, verbose=verbose)
+            if converged:
                 break
-            else:
-                if verbose:
-                    print(" ... not converged")
-
             previous_LR = LR
 
-        return self.energies[-1], self.k
+        return converged
 
 
 class DMRG1(DMRG):
@@ -530,7 +558,7 @@ class DMRG2(DMRG):
                          compress_opts=compress_opts)
 
 
-class DMRGX:
+class DMRGX(DMRG):
     """Class implmenting DMRG-X [1], whereby local effective energy eigenstates
     are chosen to maximise overlap with the previous step's state, leading to
     convergence on an mid-spectrum eigenstate of the full hamiltonian, as long
@@ -557,21 +585,9 @@ class DMRGX:
         The list of energies after each sweep.
     """
 
-    def __init__(self, ham, p0, bond_dim):
-        self.n = ham.nsites
-        self.k = p0.expand_bond_dimension(bond_dim)  # copies as well
-        self.b = self.k.H
-        self.ham = ham.copy()
-        self.ham.add_tag("__ham__")
-
-        # Line up and overlap
-        self.k.align(self.ham, self.b, inplace=True)
-
-        # want to contract this multiple times while
-        #   manipulating k -> make virtual
-        self.TN_energy = self.b | self.ham | self.k
-        self.energies = [self.TN_energy ^ ...]
-
+    def __init__(self, ham, p0, bond_dim, bsz=1, compress_opts=None):
+        super().__init__(ham, bond_dim=bond_dim, p0=p0, bsz=bsz,
+                         compress_opts=compress_opts)
         # Want to keep track of energy variance as well
         var_ham1 = self.ham.copy()
         var_ham1.upper_ind_id = self.k.site_ind_id
@@ -582,8 +598,14 @@ class DMRGX:
         self.TN_en_var2 = self.k | var_ham1 | var_ham2 | self.b
         self.variances = [(self.TN_en_var2 ^ ...) - self.energies[-1]**2]
 
-    def update_with_best_evec(self, eff_ham, eff_ovlp, i):
-        """Like ``update_local_gs``, but re-insert all eigenvectors, then
+    @property
+    def variance(self):
+        return self.variances[-1]
+
+    def update_local_state_1site(self, eff_ham, eff_ovlp, i, direction,
+                                 dense=True, max_bond=None, method='svd',
+                                 tol=1e-10):
+        """Like ``update_local_state``, but re-insert all eigenvectors, then
         choose the one with best overlap with ``eff_ovlp``.
         """
         # contract remaining hamiltonian and get its dense representation
@@ -592,9 +614,12 @@ class DMRGX:
                       ('upper', self.k.site[i].inds)), inplace=True)
         op = eff_ham.data
 
-        # eigen-decompose and reshape eigenvectors thus:  |
-        #                                                 E
-        #                                                /|\
+        # eigen-decompose and reshape eigenvectors thus::
+        #
+        #    |'__ev_ind__'
+        #    E
+        #   /|\
+        #
         evals, evecs = eigsys(op)
         evecs = np.asarray(evecs).reshape(*self.k.site[i].shape, -1)
 
@@ -604,10 +629,10 @@ class DMRGX:
 
         # find the index of the highest overlap eigenvector, by contracting::
         #
-        #           |
+        #           |'__ev_ind__'
         #     o-o-o-E-o-o-o-o-o-o-o
         #     | | | | | | | | | | |
-        #     O-O-O-O-O-O-O-O-O-O-O  <- state from previous step
+        #     0-0-0-0-0-0-0-0-0-0-0  <- state from previous step
         #
         best = np.argmax(np.abs((eff_ovlp ^ ...).data))
 
@@ -616,9 +641,26 @@ class DMRGX:
 
         # update the bra -> it only needs the new, conjugated data.
         self.b.site[i].data = evecs[..., best].conj()
+
+        if (direction == 'right') and (i < self.n - 1):
+            self.k.left_compress_site(i, bra=self.b, method=method, tol=tol)
+        elif (direction == 'left') and (i > 0):
+            self.k.right_compress_site(i, bra=self.b, method=method, tol=tol)
+
         return evals[best]
 
-    def sweep_right(self, canonize=True):
+    def update_local_state_2site(self, eff_ham, eff_ovlp, i, direction,
+                                 dense=True, max_bond=None, method='svd',
+                                 tol=1e-10):
+        raise NotImplementedError("2-site DMRGX not implemented yet.")
+
+    def update_local_state(self, eff_ham, eff_ovlp, i, **update_opts):
+        return {
+            1: self.update_local_state_1site,
+            2: self.update_local_state_2site,
+        }[self.bsz](eff_ham, eff_ovlp, i, **update_opts)
+
+    def sweep_right(self, canonize=True, verbose=False, **update_opts):
         self.old_k = self.k.copy().H
         TN_overlap = TensorNetwork([self.k, self.old_k], virtual=True)
 
@@ -628,16 +670,19 @@ class DMRGX:
         enrg_envs = MovingEnvironment(self.TN_energy, self.n, start='left')
         ovlp_envs = MovingEnvironment(TN_overlap, self.n, start='left')
 
-        for i in range(0, self.n):
+        sweep = range(0, self.n - self.bsz + 1)
+        if verbose:
+            sweep = progbar(sweep, ncols=80)
+
+        for i in sweep:
             enrg_envs.move_to(i)
             ovlp_envs.move_to(i)
-            en = self.update_with_best_evec(enrg_envs(), ovlp_envs(), i)
-            if i < self.n - 1:
-                self.k.left_canonize_site(i, bra=self.b)
+            en = self.update_local_state(
+                enrg_envs(), ovlp_envs(), i, direction='right', **update_opts)
 
         return en
 
-    def sweep_left(self, canonize=True):
+    def sweep_left(self, canonize=True, **update_opts):
         self.old_k = self.k.copy().H
         TN_overlap = TensorNetwork([self.k, self.old_k], virtual=True)
 
@@ -650,47 +695,24 @@ class DMRGX:
         for i in reversed(range(0, self.n)):
             enrg_envs.move_to(i)
             ovlp_envs.move_to(i)
-            en = self.update_with_best_evec(enrg_envs(), ovlp_envs(), i)
-            if i > 0:
-                self.k.right_canonize_site(i, bra=self.b)
+            en = self.update_local_state(
+                enrg_envs(), ovlp_envs(), i, direction='left', **update_opts)
 
         return en
 
-    def solve(self, vtol=1e-9, max_sweeps=10, sweep_sequence='R'):
-        """Solve the system with a sequence of sweeps, up to a certain
-        absolute tolerance in the energy variance, i.e. ``<E^2> - <E>^2``,
-        or maximum number of sweeps.
+    def _compute_post_sweep(self):
+        en_var = (self.TN_en_var2 ^ ...) - self.energies[-1]**2
+        self.variances.append(en_var)
 
-        Parameters
-        ----------
-        vtol : float, optional
-            The absolute tolerance to converge energy variance to.
-        max_sweeps : int, optional
-            The maximum number of sweeps to perform.
-        sweep_sequence : str, optional
-            String made of 'L' and 'R' defining the sweep sequence, e.g 'RRL'.
-            The sequence will be repeated until ``max_sweeps`` is reached.
-        """
-        RLs = itertools.cycle(sweep_sequence)
-        previous_LR = '0'
+    def _print_post_sweep(self, converged, verbose=0):
+        if verbose > 1:
+            self.k.plot()
+        if verbose > 0:
+            print(f"Energy={self.energy}, Variance={self.variance}", end="")
+            if converged:
+                print(" ... converged!")
+            else:
+                print(" ... not converged")
 
-        for _ in progbar(range(max_sweeps)):
-            LR = next(RLs)
-            # if last sweep was opposite direction no need to canonize
-            canonize = False if LR + previous_LR in {'LR', 'RL'} else True
-
-            if LR == 'R':
-                self.energies.append(self.sweep_right(canonize=canonize))
-            elif LR == 'L':
-                self.energies.append(self.sweep_left(canonize=canonize))
-
-            # update the variances
-            self.variances.append(
-                (self.TN_en_var2 ^ ...) - self.energies[-1]**2)
-
-            if self.variances[-1] < vtol:
-                break
-
-            previous_LR = LR
-
-        return self.energies[-1], self.k
+    def _check_convergence(self, tol):
+        return self.variances[-1] < tol
