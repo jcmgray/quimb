@@ -1004,10 +1004,10 @@ def page_entropy(sz_subsys, sz_total):  # pragma: no cover
     s : float
         Entropy in bits.
     """
-    n = sz_total // sz_subsys
+    if sz_subsys > sz_total**0.5:
+        sz_subsys = sz_total // sz_subsys
 
-    if sz_subsys > n:
-        raise ValueError("Subsystem size must be <= 'environment' size.")
+    n = sz_total // sz_subsys
 
     s = 0
     for k in range(n + 1, sz_total + 1):
