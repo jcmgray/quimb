@@ -184,8 +184,14 @@ class MovingEnvironment:
                 self.move_right()
 
     def __call__(self):
+        """Get the current environment.
+        """
         return self.envs[self.pos]
 
+
+# --------------------------------------------------------------------------- #
+#                                  DMRG Base                                  #
+# --------------------------------------------------------------------------- #
 
 class DMRG:
     """Single site, fixed bond-dimension variational groundstate search.
@@ -196,78 +202,91 @@ class DMRG:
     ----------
     ham : MatrixProductOperator
         The hamiltonian in MPO form.
-    bond_dim : int or sequence of ints.
+    bond_dims : int or sequence of ints.
         The bond-dimension of the MPS to optimize. If ``bsz > 1``, then this
         corresponds to the maximum bond dimension when splitting the effective
         local groundstate. If a sequence is supplied then successive sweeps
         iterate through, then repeate the final value. E.g.
         ``[16, 32, 64] -> (16, 32, 64, 64, 64, ...)```.
+    cutoffs : dict-like
+        The cutoff threshold(s) to use when compressing. If a sequence is
+        supplied then successive sweeps iterate through, then repeate the final
+        value. E.g. ``[1e-5, 1e-7, 1e-9] -> (1e-5, 1e-7, 1e-9, 1e-9, ...)```.
     bsz : {1, 2}
-        Number of sites to optimize for locally.
+        Number of sites to optimize for locally i.e. DMRG1 or DMRG2.
     which : {'SA', 'LA'}, optional
         Whether to search for smallest or largest real part eigenvectors.
-    compress_opts : dict-like
-        Options to supply when compressing or splitting, e.g.
-        ``compress_opts={'method': 'eig', 'cutoff': 1e-7}``.
 
     Attributes
     ----------
-    k : MatrixProductState
+    energy : float
+        The current most optimized energy.
+    state : MatrixProductState
         The current, optimized state.
     energies : list of float
         The list of energies after each sweep.
+    opts : dict
+        Advanced options e.g. relating to the inner eigensolve or compression.
     """
 
-    def __init__(self, ham, bond_dim, bsz=1, which='SA',
-                 compress_opts=None, p0=None):
-        self._set_bond_dim_seq(bond_dim)
+    def __init__(self, ham, bond_dims,
+                 bsz=1, cutoffs=1e-8, which='SA', p0=None):
         self.n = ham.nsites
         self.phys_dim = ham.phys_dim(0)
         self.bsz = bsz
         self.which = which
-        self.compress_opts = ({} if compress_opts is None else
-                              dict(compress_opts))
+        self._set_bond_dim_seq(bond_dims)
+        self._set_cutoff_seq(cutoffs)
+
+        self.opts = {
+            'eff_eig_bkd': "AUTO",
+            'eff_eig_tol': 0.1,
+            'eff_eig_maxiter': None,
+            'eff_eig_ncv': None,
+            'eff_eig_dense': None,
+            'compress_method': 'svd',
+            'compress_cutoff_mode': 'sum2',
+        }
 
         # create internal states and ham
         if p0 is not None:
-            self.k = p0.copy()
+            self._k = p0.copy()
         else:
             dtype = ham.site[0].dtype
-            self.k = MPS_rand_state(self.n, self._bond_dim0, self.phys_dim,
-                                    dtype=dtype)
-        self.b = self.k.H
+            self._k = MPS_rand_state(self.n, self._bond_dim0, self.phys_dim,
+                                     dtype=dtype)
+        self._b = self._k.H
         self.ham = ham.copy()
         self.ham.add_tag("__ham__")
 
         # Line up and overlap for energy calc
-        self.k.align(self.ham, self.b, inplace=True)
+        self._k.align(self.ham, self._b, inplace=True)
 
         # want to contract this multiple times while
         #   manipulating k/b -> make virtual
-        self.TN_energy = self.b | self.ham | self.k
+        self.TN_energy = self._b | self.ham | self._k
         self.energies = [self.TN_energy ^ ...]
 
-        self.advanced_opts = {
-            'eff_eig_bkd': "AUTO",
-            'eff_eig_tol': None,
-            'eff_eig_maxiter': None,
-        }
-
-    def _set_bond_dim_seq(self, bond_dim):
-        bds = (bond_dim,) if isinstance(bond_dim, int) else tuple(bond_dim)
+    def _set_bond_dim_seq(self, bond_dims):
+        bds = (bond_dims,) if isinstance(bond_dims, int) else tuple(bond_dims)
         self._bond_dim0 = bds[0]
         self._bond_dims = itertools.chain(bds, itertools.repeat(bds[-1]))
 
+    def _set_cutoff_seq(self, cutoffs):
+        bds = (cutoffs,) if isinstance(cutoffs, float) else tuple(cutoffs)
+        self._cutoffs = itertools.chain(bds, itertools.repeat(bds[-1]))
+
     @property
     def energy(self):
-        return np.asscalar(self.energies[-1])
+        return self.energies[-1]
 
     @property
     def state(self):
-        return self.k.copy()
+        return self._k.copy()
 
-    def update_local_state_1site(self, eff_ham, i, direction, dense=None,
-                                 **compress_opts):
+    # -------------------- standard DMRG update methods --------------------- #
+
+    def update_local_state_1site(self, eff_ham, i, direction, **compress_opts):
         """Find the single site effective tensor groundstate of::
 
 
@@ -282,11 +301,12 @@ class DMRG:
         And insert it back into the states ``k`` and ``b``, and thus
         ``TN_energy``.
         """
-        uix = self.k.site[i].inds
-        lix = self.b.site[i].inds
-        dims = self.k.site[i].shape
+        uix = self._k.site[i].inds
+        lix = self._b.site[i].inds
+        dims = self._k.site[i].shape
 
         # choose a rough value at which dense effective ham should not be used
+        dense = self.opts['eff_eig_dense']
         if dense is None:
             dense = prod(dims) < 800
 
@@ -298,23 +318,23 @@ class DMRG:
         else:
             op = EffHamOp(eff_ham, dims=dims, upper_inds=uix, lower_inds=lix)
 
-        eff_e, eff_gs = seigsys(op, k=1, which=self.which,
-                                v0=self.k.site[i].data,
-                                tol=self.advanced_opts['eff_eig_tol'],
-                                maxiter=self.advanced_opts['eff_eig_maxiter'],
-                                backend=self.advanced_opts['eff_eig_bkd'])
+        eff_e, eff_gs = seigsys(
+            op, k=1, which=self.which, v0=self._k.site[i].data,
+            tol=self.opts['eff_eig_tol'], maxiter=self.opts['eff_eig_maxiter'],
+            backend=self.opts['eff_eig_bkd'], ncv=self.opts['eff_eig_ncv'])
+
         eff_gs = eff_gs.A
-        self.k.site[i].data = eff_gs
-        self.b.site[i].data = eff_gs.conj()
+        self._k.site[i].data = eff_gs
+        self._b.site[i].data = eff_gs.conj()
 
         if (direction == 'right') and (i < self.n - 1):
-            self.k.left_compress_site(i, bra=self.b, **compress_opts)
+            self._k.left_compress_site(i, bra=self._b, **compress_opts)
         elif (direction == 'left') and (i > 0):
-            self.k.right_compress_site(i, bra=self.b, **compress_opts)
-        return eff_e
+            self._k.right_compress_site(i, bra=self._b, **compress_opts)
 
-    def update_local_state_2site(self, eff_ham, i, direction, dense=None,
-                                 **compress_opts):
+        return eff_e[0]
+
+    def update_local_state_2site(self, eff_ham, i, direction, **compress_opts):
         """Find the 2-site effective tensor groundstate of::
 
 
@@ -334,27 +354,29 @@ class DMRG:
         #   ---O---O---
         #      |   |
         #
-        u_bond_ind = self.k.bond(i, i + 1)
+        u_bond_ind = self._k.bond(i, i + 1)
         dims_L, uix_L = zip(*(
             (d, ix)
-            for d, ix in zip(self.k.site[i].shape, self.k.site[i].inds)
+            for d, ix in zip(self._k.site[i].shape, self._k.site[i].inds)
             if ix != u_bond_ind
         ))
         dims_R, uix_R = zip(*(
             (d, ix)
-            for d, ix in zip(self.k.site[i + 1].shape, self.k.site[i + 1].inds)
+            for d, ix in zip(self._k.site[i + 1].shape,
+                             self._k.site[i + 1].inds)
             if ix != u_bond_ind
         ))
         uix = uix_L + uix_R
 
-        l_bond_ind = self.b.bond(i, i + 1)
-        lix_L = tuple(i for i in self.b.site[i].inds if i != l_bond_ind)
-        lix_R = tuple(i for i in self.b.site[i + 1].inds if i != l_bond_ind)
+        l_bond_ind = self._b.bond(i, i + 1)
+        lix_L = tuple(i for i in self._b.site[i].inds if i != l_bond_ind)
+        lix_R = tuple(i for i in self._b.site[i + 1].inds if i != l_bond_ind)
         lix = lix_L + lix_R
 
         dims = dims_L + dims_R
 
         # choose a rough value at which dense effective ham should not be used
+        dense = self.opts['eff_eig_dense']
         if dense is None:
             dense = prod(dims) < 800
 
@@ -368,23 +390,24 @@ class DMRG:
             op = EffHamOp(eff_ham, upper_inds=uix, lower_inds=lix, dims=dims)
 
         # find the 2-site local groundstate using previous as initial guess
-        v0 = self.k.site[i].contract(self.k.site[i + 1], output_inds=uix).data
+        v0 = self._k.site[i].contract(self._k.site[i + 1],
+                                      output_inds=uix).data
         eff_e, eff_gs = seigsys(op, k=1, which=self.which, v0=v0,
-                                tol=self.advanced_opts['eff_eig_tol'],
-                                maxiter=self.advanced_opts['eff_eig_maxiter'],
-                                backend=self.advanced_opts['eff_eig_bkd'])
+                                tol=self.opts['eff_eig_tol'],
+                                maxiter=self.opts['eff_eig_maxiter'],
+                                backend=self.opts['eff_eig_bkd'])
 
         # split the two site local groundstate
         T_AB = Tensor(eff_gs.A.reshape(dims), uix)
         L, R = T_AB.split(left_inds=uix_L, get='arrays', absorb=direction,
                           **compress_opts)
 
-        self.k.site[i].update(data=L, inds=(*uix_L, u_bond_ind))
-        self.b.site[i].update(data=L.conj(), inds=(*lix_L, l_bond_ind))
-        self.k.site[i + 1].update(data=R, inds=(u_bond_ind, *uix_R))
-        self.b.site[i + 1].update(data=R.conj(), inds=(l_bond_ind, *lix_R))
+        self._k.site[i].update(data=L, inds=(*uix_L, u_bond_ind))
+        self._b.site[i].update(data=L.conj(), inds=(*lix_L, l_bond_ind))
+        self._k.site[i + 1].update(data=R, inds=(u_bond_ind, *uix_R))
+        self._b.site[i + 1].update(data=R.conj(), inds=(l_bond_ind, *lix_R))
 
-        return eff_e
+        return eff_e[0]
 
     def update_local_state(self, eff_ham, i, **update_opts):
         return {
@@ -414,7 +437,7 @@ class DMRG:
             effective hamiltonian. Can be quicker for small bond_dim.
         """
         if canonize:
-            self.k.right_canonize(bra=self.b)
+            self._k.right_canonize(bra=self._b)
 
         eff_envs = MovingEnvironment(self.TN_energy, self.n, 'left', self.bsz)
 
@@ -451,7 +474,7 @@ class DMRG:
             effective hamiltonian. Can be quicker for small bond_dim.
         """
         if canonize:
-            self.k.left_canonize(bra=self.b)
+            self._k.left_canonize(bra=self._b)
 
         eff_envs = MovingEnvironment(self.TN_energy, self.n, 'right', self.bsz)
 
@@ -466,36 +489,55 @@ class DMRG:
 
         return en
 
+    def sweep(self, direction, **sweep_opts):
+        if direction == 'L':
+            en = self.sweep_left(**sweep_opts)
+        elif direction == 'R':
+            en = self.sweep_right(**sweep_opts)
+        return en
+
+    # ----------------- overloadable 'plugin' style methods ----------------- #
+
     def _compute_pre_sweep(self):
+        """Compute this before each sweep.
+        """
         pass
 
-    def _print_pre_sweep(self, i, LR, bd, verbose=0):
+    def _print_pre_sweep(self, i, LR, bd, ctf, verbose=0):
+        """Print this before each sweep.
+        """
         if verbose > 0:
-            print(f"SWEEP-{i + 1}, direction={LR}, max_bond={bd}:", flush=True)
+            msg = f"SWEEP-{i + 1}, direction={LR}, max_bond={bd}, cutoff:{ctf}"
+            print(msg, flush=True)
 
     def _compute_post_sweep(self):
+        """Compute this after each sweep.
+        """
         pass
 
     def _print_post_sweep(self, converged, verbose=0):
+        """Print this after each sweep.
+        """
         if verbose > 1:
-            self.k.plot()
+            self._k.plot()
         if verbose > 0:
-            print(f"Energy: {self.energy}", end="", flush=True)
-            if converged:
-                print(" ... converged!", flush=True)
-            else:
-                print(" ... not converged", flush=True)
+            msg = f"Energy: {self.energy} ... " + ("converged!" if converged
+                                                   else "not converged")
+            print(msg, flush=True)
 
     def _check_convergence(self, tol):
+        """By default check the aboslute change in energy.
+        """
         return abs(self.energies[-2] - self.energies[-1]) < tol
 
+    # -------------------------- main solve driver -------------------------- #
+
     def solve(self,
-              tol=1e-10,
-              max_sweeps=10,
+              tol=1e-8,
+              bond_dims=None,
+              cutoffs=None,
               sweep_sequence='R',
-              dense=None,
-              compress_opts=None,
-              bond_dim=None,
+              max_sweeps=10,
               verbose=0):
         """Solve the system with a sequence of sweeps, up to a certain
         absolute tolerance in the energy or maximum number of sweeps.
@@ -504,48 +546,57 @@ class DMRG:
         ----------
         tol : float, optional
             The absolute tolerance to converge energy to.
-        max_sweeps : int, optional
-            The maximum number of sweeps to perform.
+        bond_dims : int or sequence of int
+            Overide the initial/current bond_dim sequence.
+        cutoffs : float of sequence of float
+            Overide the initial/current cutoff sequence.
         sweep_sequence : str, optional
             String made of 'L' and 'R' defining the sweep sequence, e.g 'RRL'.
             The sequence will be repeated until ``max_sweeps`` is reached.
-        dense : None or bool, optional
-            Whether to use a dense representation of the effective hamiltonians
-            or a tensor contraction based linear operation representation.
+        max_sweeps : int, optional
+            The maximum number of sweeps to perform.
         """
         verbose = {False: 0, True: 1}.get(verbose, verbose)
-        if bond_dim is not None:
-            self._set_bond_dim_seq(bond_dim)
 
-        compress_opts = {} if compress_opts is None else dict(compress_opts)
-        compress_opts = {**self.compress_opts, **compress_opts}
+        # Possibly overide the default bond dimension and cutoff sequences.
+        if bond_dims is not None:
+            self._set_bond_dim_seq(bond_dims)
+        if cutoffs is not None:
+            self._set_cutoff_seq(cutoffs)
 
         RLs = itertools.cycle(sweep_sequence)
         previous_LR = '0'
 
         for i in range(max_sweeps):
-            bd = next(self._bond_dims)
-            LR = next(RLs)
-            self._print_pre_sweep(i, LR, bd, verbose=verbose)
+            # Get the next direction, bond dimension and cutoff
+            LR, bd, ctf = next(RLs), next(self._bond_dims), next(self._cutoffs)
+            self._print_pre_sweep(i, LR, bd, ctf, verbose=verbose)
 
-            # need to manually expand bond dimension
-            if self.bsz == 1:
-                self.k.expand_bond_dimension(bd, bra=self.b)
-
-            # if last sweep was opposite direction no need to canonize
+            # if last sweep was in opposite direction no need to canonize
             canonize = False if LR + previous_LR in {'LR', 'RL'} else True
-            sweep_opts = {'dense': dense, 'canonize': canonize, 'max_bond': bd,
-                          'verbose': verbose, **compress_opts}
+
+            # need to manually expand bond dimension for DMRG1
+            if self.bsz == 1:
+                self._k.expand_bond_dimension(bd, bra=self._b)
+
+            # inject all options and defaults
+            sweep_opts = {
+                'canonize': canonize,
+                'max_bond': bd,
+                'cutoff': ctf,
+                'cutoff_mode': self.opts['compress_cutoff_mode'],
+                'method': self.opts['compress_method'],
+                'verbose': verbose
+            }
 
             self._compute_pre_sweep()
-            if LR == 'R':
-                self.energies.append(self.sweep_right(**sweep_opts))
-            elif LR == 'L':
-                self.energies.append(self.sweep_left(**sweep_opts))
+            self.energies += [self.sweep(direction=LR, **sweep_opts)]
             self._compute_post_sweep()
 
             converged = self._check_convergence(tol)
+
             self._print_post_sweep(converged, verbose=verbose)
+
             if converged:
                 break
             previous_LR = LR
@@ -558,9 +609,9 @@ class DMRG1(DMRG):
     """
     __doc__ += DMRG.__doc__
 
-    def __init__(self, ham, bond_dim, which='SA', compress_opts=None):
-        super().__init__(ham, bond_dim=bond_dim, which=which, bsz=1,
-                         compress_opts=compress_opts)
+    def __init__(self, ham, bond_dims, cutoffs=1e-8, which='SA'):
+        super().__init__(ham, bond_dims=bond_dims, cutoffs=cutoffs,
+                         which=which, bsz=1)
 
 
 class DMRG2(DMRG):
@@ -568,9 +619,9 @@ class DMRG2(DMRG):
     """
     __doc__ += DMRG.__doc__
 
-    def __init__(self, ham, bond_dim, which='SA', compress_opts=None):
-        super().__init__(ham, bond_dim=bond_dim, which=which, bsz=2,
-                         compress_opts=compress_opts)
+    def __init__(self, ham, bond_dims, cutoffs=1e-8, which='SA'):
+        super().__init__(ham, bond_dims=bond_dims, cutoffs=cutoffs,
+                         which=which, bsz=2)
 
 
 class DMRGX(DMRG):
@@ -589,7 +640,7 @@ class DMRGX(DMRG):
         The hamiltonian in MPO form, should have ~area-law eigenstates.
     p0 : MatrixProductState
         The intial MPS guess, e.g. a computation basis state.
-    bond_dim : int
+    bond_dims : int
         The bond dimension to find the state for.
 
     Attributes
@@ -600,17 +651,17 @@ class DMRGX(DMRG):
         The list of energies after each sweep.
     """
 
-    def __init__(self, ham, p0, bond_dim, bsz=1, compress_opts=None):
-        super().__init__(ham, bond_dim=bond_dim, p0=p0, bsz=bsz,
-                         compress_opts=compress_opts)
+    def __init__(self, ham, p0, bond_dims, cutoffs=1e-8, bsz=1, ):
+        super().__init__(ham, bond_dims=bond_dims, p0=p0, bsz=bsz,
+                         cutoffs=cutoffs)
         # Want to keep track of energy variance as well
         var_ham1 = self.ham.copy()
-        var_ham1.upper_ind_id = self.k.site_ind_id
+        var_ham1.upper_ind_id = self._k.site_ind_id
         var_ham1.lower_ind_id = "__var_ham{}__"
         var_ham2 = self.ham.copy()
         var_ham2.upper_ind_id = "__var_ham{}__"
-        var_ham2.lower_ind_id = self.b.site_ind_id
-        self.TN_en_var2 = self.k | var_ham1 | var_ham2 | self.b
+        var_ham2.lower_ind_id = self._b.site_ind_id
+        self.TN_en_var2 = self._k | var_ham1 | var_ham2 | self._b
         self.variances = [(self.TN_en_var2 ^ ...) - self.energies[-1]**2]
 
     @property
@@ -624,8 +675,8 @@ class DMRGX(DMRG):
         """
         # contract remaining hamiltonian and get its dense representation
         eff_ham = (eff_ham ^ '__ham__')['__ham__']
-        eff_ham.fuse((('lower', self.b.site[i].inds),
-                      ('upper', self.k.site[i].inds)), inplace=True)
+        eff_ham.fuse((('lower', self._b.site[i].inds),
+                      ('upper', self._k.site[i].inds)), inplace=True)
         op = eff_ham.data
 
         # eigen-decompose and reshape eigenvectors thus::
@@ -635,10 +686,10 @@ class DMRGX(DMRG):
         #   /|\
         #
         evals, evecs = eigsys(op)
-        evecs = np.asarray(evecs).reshape(*self.k.site[i].shape, -1)
+        evecs = np.asarray(evecs).reshape(*self._k.site[i].shape, -1)
 
         # update tensor at site i with all evecs -> need dummy index
-        tnsr = self.k.site[i]
+        tnsr = self._k.site[i]
         tnsr.update(data=evecs, inds=(*tnsr.inds, '__ev_ind__'))
 
         # find the index of the highest overlap eigenvector, by contracting::
@@ -654,12 +705,12 @@ class DMRGX(DMRG):
         tnsr.update(data=evecs[..., best], inds=tnsr.inds[:-1])
 
         # update the bra -> it only needs the new, conjugated data.
-        self.b.site[i].data = evecs[..., best].conj()
+        self._b.site[i].data = evecs[..., best].conj()
 
         if (direction == 'right') and (i < self.n - 1):
-            self.k.left_compress_site(i, bra=self.b, **compress_opts)
+            self._k.left_compress_site(i, bra=self._b, **compress_opts)
         elif (direction == 'left') and (i > 0):
-            self.k.right_compress_site(i, bra=self.b, **compress_opts)
+            self._k.right_compress_site(i, bra=self._b, **compress_opts)
 
         return evals[best]
 
@@ -674,11 +725,11 @@ class DMRGX(DMRG):
         }[self.bsz](eff_ham, eff_ovlp, i, **update_opts)
 
     def sweep_right(self, canonize=True, verbose=False, **update_opts):
-        self.old_k = self.k.copy().H
-        TN_overlap = TensorNetwork([self.k, self.old_k], virtual=True)
+        self.old_k = self._k.copy().H
+        TN_overlap = TensorNetwork([self._k, self.old_k], virtual=True)
 
         if canonize:
-            self.k.right_canonize(bra=self.b)
+            self._k.right_canonize(bra=self._b)
 
         enrg_envs = MovingEnvironment(self.TN_energy, self.n, start='left')
         ovlp_envs = MovingEnvironment(TN_overlap, self.n, start='left')
@@ -696,11 +747,11 @@ class DMRGX(DMRG):
         return en
 
     def sweep_left(self, canonize=True, **update_opts):
-        self.old_k = self.k.copy().H
-        TN_overlap = TensorNetwork([self.k, self.old_k], virtual=True)
+        self.old_k = self._k.copy().H
+        TN_overlap = TensorNetwork([self._k, self.old_k], virtual=True)
 
         if canonize:
-            self.k.left_canonize(bra=self.b)
+            self._k.left_canonize(bra=self._b)
 
         enrg_envs = MovingEnvironment(self.TN_energy, self.n, start='right')
         ovlp_envs = MovingEnvironment(TN_overlap, self.n, start='right')
@@ -719,7 +770,7 @@ class DMRGX(DMRG):
 
     def _print_post_sweep(self, converged, verbose=0):
         if verbose > 1:
-            self.k.plot()
+            self._k.plot()
         if verbose > 0:
             print(f"Energy={self.energy}, Variance={self.variance}",
                   end="", flush=True)

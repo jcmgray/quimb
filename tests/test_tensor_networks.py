@@ -1014,10 +1014,10 @@ class TestDMRG1:
 
     def test_single_explicit_sweep(self):
         h = MPO_ham_heis(5)
-        dmrg = DMRG1(h, bond_dim=3)
-        assert dmrg.k.site[0].dtype == float
+        dmrg = DMRG1(h, bond_dims=3)
+        assert dmrg._k.site[0].dtype == float
 
-        energy_tn = (dmrg.b | dmrg.ham | dmrg.k)
+        energy_tn = (dmrg._b | dmrg.ham | dmrg._k)
 
         e0 = energy_tn ^ ...
         assert abs(e0.imag) < 1e-13
@@ -1044,9 +1044,9 @@ class TestDMRG1:
         assert abs(e2.imag) < 1e-13
 
         # test still normalized
-        assert dmrg.k.site[0].dtype == float
-        align_TN_1D(dmrg.k, dmrg.b, inplace=True)
-        assert_allclose(abs(dmrg.b @ dmrg.k), 1)
+        assert dmrg._k.site[0].dtype == float
+        align_TN_1D(dmrg._k, dmrg._b, inplace=True)
+        assert_allclose(abs(dmrg._b @ dmrg._k), 1)
 
         assert e1.real < e0.real
         assert e2.real < e1.real
@@ -1057,8 +1057,9 @@ class TestDMRG1:
     @pytest.mark.parametrize("MPO_ham", [MPO_ham_XY, MPO_ham_heis])
     def test_ground_state_matches(self, dense, MPO_ham):
         h = MPO_ham(6)
-        dmrg = DMRG1(h, bond_dim=8)
-        assert dmrg.solve(dense=dense)
+        dmrg = DMRG1(h, bond_dims=8)
+        dmrg.opts['eff_eig_dense'] = dense
+        assert dmrg.solve()
         eff_e, mps_gs = dmrg.energy, dmrg.state
         mps_gs_dense = mps_gs.to_dense()
 
@@ -1083,7 +1084,7 @@ class TestDMRG1:
 
     def test_ising_and_MPS_product_state(self):
         h = MPO_ham_ising(6, bx=2.0, j=0.1)
-        dmrg = DMRG1(h, bond_dim=8)
+        dmrg = DMRG1(h, bond_dims=8)
         assert dmrg.solve()
         eff_e, mps_gs = dmrg.energy, dmrg.state
         mps_gs_dense = mps_gs.to_dense()
@@ -1104,12 +1105,13 @@ class TestDMRG2:
     @pytest.mark.parametrize("MPO_ham", [MPO_ham_XY, MPO_ham_heis])
     def test_matches_exact(self, dense, MPO_ham):
         h = MPO_ham(6)
-        dmrg = DMRG2(h, bond_dim=8)
-        assert dmrg.k.site[0].dtype == float
-        assert dmrg.solve(dense=dense)
+        dmrg = DMRG2(h, bond_dims=8)
+        assert dmrg._k.site[0].dtype == float
+        dmrg.opts['eff_eig_dense'] = dense
+        assert dmrg.solve()
 
         # XXX: need to dispatch SLEPc seigsys on real input
-        # assert dmrg.k.site[0].dtype == float
+        # assert dmrg._k.site[0].dtype == float
 
         eff_e, mps_gs = dmrg.energy, dmrg.state
         mps_gs_dense = mps_gs.to_dense()
@@ -1157,9 +1159,9 @@ class TestDMRGX:
         en = dmrgx.sweep_right(canonize=True)
 
         # check normalized
-        assert_allclose(dmrgx.k.H @ dmrgx.k, 1.0)
+        assert_allclose(dmrgx._k.H @ dmrgx._k, 1.0)
 
-        k = dmrgx.k.to_dense()
+        k = dmrgx._k.to_dense()
         h = ham.to_dense()
         el, ev = eigsys(h)
 
