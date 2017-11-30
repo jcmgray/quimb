@@ -238,16 +238,6 @@ class DMRG:
         self._set_bond_dim_seq(bond_dims)
         self._set_cutoff_seq(cutoffs)
 
-        self.opts = {
-            'eff_eig_bkd': "AUTO",
-            'eff_eig_tol': 0.1,
-            'eff_eig_maxiter': None,
-            'eff_eig_ncv': None,
-            'eff_eig_dense': None,
-            'compress_method': 'svd',
-            'compress_cutoff_mode': 'sum2',
-        }
-
         # create internal states and ham
         if p0 is not None:
             self._k = p0.copy()
@@ -267,6 +257,16 @@ class DMRG:
         self.TN_energy = self._b | self.ham | self._k
         self.energies = [self.TN_energy ^ ...]
 
+        self.opts = {
+            'eff_eig_bkd': "AUTO",
+            'eff_eig_tol': 1e-1,
+            'eff_eig_ncv': 4,
+            'eff_eig_maxiter': None,
+            'eff_eig_dense': None,
+            'compress_method': 'svd',
+            'compress_cutoff_mode': 'sum2',
+        }
+
     def _set_bond_dim_seq(self, bond_dims):
         bds = (bond_dims,) if isinstance(bond_dims, int) else tuple(bond_dims)
         self._bond_dim0 = bds[0]
@@ -285,6 +285,16 @@ class DMRG:
         return self._k.copy()
 
     # -------------------- standard DMRG update methods --------------------- #
+
+    def _seigsys(self, op, v0=None):
+        """Find single eigenpair, using all the internal settings.
+        """
+        return seigsys(
+            op, k=1, which=self.which, v0=v0,
+            backend=self.opts['eff_eig_bkd'],
+            ncv=self.opts['eff_eig_ncv'],
+            tol=self.opts['eff_eig_tol'],
+            maxiter=self.opts['eff_eig_maxiter'])
 
     def update_local_state_1site(self, eff_ham, i, direction, **compress_opts):
         """Find the single site effective tensor groundstate of::
@@ -318,10 +328,7 @@ class DMRG:
         else:
             op = EffHamOp(eff_ham, dims=dims, upper_inds=uix, lower_inds=lix)
 
-        eff_e, eff_gs = seigsys(
-            op, k=1, which=self.which, v0=self._k.site[i].data,
-            tol=self.opts['eff_eig_tol'], maxiter=self.opts['eff_eig_maxiter'],
-            backend=self.opts['eff_eig_bkd'], ncv=self.opts['eff_eig_ncv'])
+        eff_e, eff_gs = self._seigsys(op, v0=self._k.site[i].data)
 
         eff_gs = eff_gs.A
         self._k.site[i].data = eff_gs
@@ -392,10 +399,8 @@ class DMRG:
         # find the 2-site local groundstate using previous as initial guess
         v0 = self._k.site[i].contract(self._k.site[i + 1],
                                       output_inds=uix).data
-        eff_e, eff_gs = seigsys(op, k=1, which=self.which, v0=v0,
-                                tol=self.opts['eff_eig_tol'],
-                                maxiter=self.opts['eff_eig_maxiter'],
-                                backend=self.opts['eff_eig_bkd'])
+
+        eff_e, eff_gs = self._seigsys(op, v0=v0)
 
         # split the two site local groundstate
         T_AB = Tensor(eff_gs.A.reshape(dims), uix)
