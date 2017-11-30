@@ -29,7 +29,6 @@ from quimb import (
 )
 from quimb.linalg import SLEPC4PY_FOUND
 from quimb.linalg.base_linalg import _rel_window_to_abs_window
-from quimb.linalg.scipy_linalg import choose_ncv
 
 # TODO: reinstate slepc svd tests ******************************************* #
 
@@ -124,13 +123,6 @@ class TestEigh:
         for i, j in zip([3, 0, 1, 2], range(4)):
             o = u[:, i].H @ v[:, j]
             assert_allclose(abs(o), 1.)
-
-
-class TestChooseNCV:
-    def test_choose_ncv(self):
-        assert(choose_ncv(1, 100) == 20)
-        assert(choose_ncv(15, 100) == 31)
-        assert(choose_ncv(50, 100) == 100)
 
 
 class TestSeigs:

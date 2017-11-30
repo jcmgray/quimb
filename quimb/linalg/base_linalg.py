@@ -164,8 +164,17 @@ def _choose_backend(a, k, int_eps=False):
     return 'SCIPY'
 
 
-def seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
-            isherm=True, ncv=None, sort=True, backend='AUTO', **backend_opts):
+def seigsys(a, k=6,
+            which=None,
+            return_vecs=True,
+            isherm=True,
+            sigma=None,
+            ncv=None,
+            tol=None,
+            v0=None,
+            sort=True,
+            backend='AUTO',
+            **backend_opts):
     """Return a few eigenpairs from an operator.
 
     Parameters
@@ -179,12 +188,16 @@ def seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
         :func:``scipy.sparse.linalg.eigsh``)
     return_vecs : bool, optional
         Whether to return the eigenvectors.
-    sigma : float, optional
-        Which part of spectrum to target, implies which='TR' if which is None.
     isherm : bool, optional
         Whether operator is known to be hermitian.
+    sigma : float, optional
+        Which part of spectrum to target, implies which='TR' if which is None.
     ncv : int, optional
         number of lanczos vectors, can use to optimise speed
+    tol : None or float
+        Tolerance with which to find eigenvalues.
+    v0 : None or 1D-array like
+        An initial vector guess to iterate with.
     sort : bool, optional
         Whether to sort by ascending eigenvalue order.
     backend : {'AUTO', 'NUMPY', 'SCIPY', 'SLEPC', 'SLEPC-NOMPI'}, optional
@@ -209,6 +222,8 @@ def seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
         'isherm': isherm,
         'ncv': ncv,
         'sort': sort,
+        'tol': tol,
+        'v0': v0,
     }
 
     # Choose backend to perform the decompostion

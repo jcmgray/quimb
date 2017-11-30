@@ -81,37 +81,46 @@ def sort_inds(a, method, sigma=None):
 
 
 def seigsys_numpy(a, k=6, which=None, return_vecs=True, sigma=None,
-                  isherm=True, sort=True, **kwargs):
+                  isherm=True, sort=True, **eig_opts):
     """Partial eigen-decomposition using numpy's dense linear algebra.
 
     Parameters
     ----------
-        a: operator to partially eigen-decompose
-        k: number of eigenpairs to return
-        which: which part of the spectrum to target
-        return_vecs: whether to return eigenvectors
-        sigma: target eigenvalue
-        isherm: whether `a` is hermitian
-        sort: whether to sort reduced list of eigenpairs into ascending order
-        **kwargs: settings to pass to numpy.eig... functions
+    a : matrix-like
+        Operator to partially eigen-decompose.
+    k : int, optional
+        Number of eigenpairs to return.
+    which : str, optional
+        Which part of the spectrum to target.
+    return_vecs : bool, optional
+        Whether to return eigenvectors.
+    sigma : None or float, optional
+        Target eigenvalue.
+    isherm : bool, optional
+        Whether `a` is hermitian.
+    sort : bool, optional
+        Whether to sort reduced list of eigenpairs into ascending order.
+    eig_opts
+        Settings to pass to numpy.eig... functions.
 
     Returns
     -------
         lk, (vk): k eigenvalues (and eigenvectors) sorted according to which
     """
-    efunc = {(True, True): nla.eigh,
-             (True, False): nla.eigvalsh,
-             (False, True): nla.eig,
-             (False, False): nla.eigvals}[(isherm, return_vecs)]
+    fn = {(True, True): nla.eigh,
+          (True, False): nla.eigvalsh,
+          (False, True): nla.eig,
+          (False, False): nla.eigvals}[(isherm, return_vecs)]
 
     # these might be given by seigsys but not relevant for numpy
-    kwargs.pop('ncv', None)
-    kwargs.pop('v0', None)
-    kwargs.pop('tol', None)
-    kwargs.pop('maxiter', None)
+    eig_opts.pop('ncv', None)
+    eig_opts.pop('v0', None)
+    eig_opts.pop('tol', None)
+    eig_opts.pop('maxiter', None)
+    eig_opts.pop('EPSType', None)
 
     if return_vecs:
-        evals, evecs = efunc(a.A if issparse(a) else a, **kwargs)
+        evals, evecs = fn(a.A if issparse(a) else a, **eig_opts)
         sk = sort_inds(evals, method=which, sigma=sigma)[:k]
         evals, evecs = evals[sk], np.asmatrix(evecs[:, sk])
         if sort:
@@ -119,7 +128,7 @@ def seigsys_numpy(a, k=6, which=None, return_vecs=True, sigma=None,
             return evals[so], evecs[:, so]
         return evals, evecs
     else:
-        evals = efunc(a.A if issparse(a) else a, **kwargs)
+        evals = fn(a.A if issparse(a) else a, **eig_opts)
         sk = sort_inds(evals, method=which, sigma=sigma)[:k]
         evals = evals[sk]
         return np.sort(evals) if sort else evals
