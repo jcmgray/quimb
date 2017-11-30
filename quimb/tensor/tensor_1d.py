@@ -3,6 +3,7 @@
 import functools
 import copy
 import numpy as np
+from ..utils import three_line_multi_print
 from .tensor_core import (
     _einsum_symbols,
     Tensor,
@@ -123,7 +124,11 @@ class TensorNetwork1D(TensorNetwork):
             bra.site[i].update(data=Q._data.conj())
 
     def left_canonize_site(self, i, bra=None):
-        """Left canonize this TN's ith site, inplace.
+        """Left canonize this TN's ith site, inplace::
+
+                i                i
+               -o-o-            ->-s-
+            ... | | ...  --> ... | | ...
 
         Parameters
         ----------
@@ -136,7 +141,11 @@ class TensorNetwork1D(TensorNetwork):
         self._left_decomp_site(i, bra=bra, method='qr')
 
     def right_canonize_site(self, i, bra=None):
-        """Right canonize this TN's ith site, inplace.
+        """Right canonize this TN's ith site, inplace::
+
+                  i                i
+               -o-o-            -s-<-
+            ... | | ...  --> ... | | ...
 
         Parameters
         ----------
@@ -258,8 +267,7 @@ class TensorNetwork1D(TensorNetwork):
             for i in range(current, new, -1):
                 self.right_canonize_site(i, bra=bra)
 
-    def left_compress_site(self, i, bra=None, method='svd',
-                           tol=1e-10, max_bond=None):
+    def left_compress_site(self, i, bra=None, **compress_opts):
         """Left compress this 1D TN's ith site, such that the site is then
         left unitary with its right bond (possibly) reduced in dimension.
 
@@ -269,20 +277,13 @@ class TensorNetwork1D(TensorNetwork):
             Which site to compress.
         bra : None or matching TensorNetwork to self, optional
             If set, also update this TN's data with the conjugate compression.
-        method : {'svd', 'eig'}, optional
-            How to perform the Tensor decomposition.
-        tol : float, optional
-            What tolerance to keep singular values above, relative to the
-            largest singular value.
-        max_bond : None or int, optional
-            The maximum number of singular values to keep, regardless of
-            ``tol``.
+        compress_opts
+            Supplied to :meth:`Tensor.split`.
         """
-        self._left_decomp_site(i, bra=bra, method=method, tol=tol,
-                               absorb='right', max_bond=max_bond)
+        compress_opts['absorb'] = compress_opts.get('absorb', 'right')
+        self._left_decomp_site(i, bra=bra, **compress_opts)
 
-    def right_compress_site(self, i, bra=None, method='svd',
-                            tol=1e-10, max_bond=None):
+    def right_compress_site(self, i, bra=None, **compress_opts):
         """Right compress this 1D TN's ith site, such that the site is then
         right unitary with its left bond (possibly) reduced in dimension.
 
@@ -292,22 +293,16 @@ class TensorNetwork1D(TensorNetwork):
             Which site to compress.
         bra : None or matching TensorNetwork to self, optional
             If set, update this TN's data with the conjugate compression.
-        method : {'svd', 'eig'}, optional
-            How to perform the Tensor decomposition.
-        tol : float, optional
-            What tolerance to keep singular values above, relative to the
-            largest singular value.
-        max_bond : None or int, optional
-            The maximum number of singular values to keep, regardless of
-            ``tol``.
+        compress_opts
+            Supplied to :meth:`Tensor.split`.
         """
-        self._right_decomp_site(i, bra=bra, method=method, tol=tol,
-                                absorb='left', max_bond=max_bond)
+        compress_opts['absorb'] = compress_opts.get('absorb', 'left')
+        self._right_decomp_site(i, bra=bra, **compress_opts)
 
     def left_compress(self, start=None, stop=None, bra=None,
                       current_orthog_centre=None, **compress_opts):
         """Compress this 1D TN, from left to right, such that it becomes
-        left-canonical.
+        left-canonical (unless ``absorb != 'right'``).
 
         Parameters
         ----------
@@ -319,25 +314,13 @@ class TensorNetwork1D(TensorNetwork):
             If given, update this TN as well, assuming it to be the conjugate.
         current_orthog_centre : int, optional
             The current orthogonality center, if known, to speed things up.
-        method : {'svd', 'eig'}, optional
-            How to perform the decomposition.
-        tol : float, optional
-            What tolerance to keep singular values above, relative to the
-            largest singular value.
         compress_opts
-            Supplied to ``self.left_compress_site``.
+            Supplied to :meth:`Tensor.split`.
         """
         if start is None:
             start = 0
         if stop is None:
             stop = self.nsites - 1
-
-        # right canonize first -> ensures truncation is optimal?
-        if current_orthog_centre is None:
-            # assume need to canonize whole chain
-            current_orthog_centre = self.nsites - 1
-        self.shift_orthogonality_center(
-            current_orthog_centre, start, bra=bra)
 
         for i in range(start, stop):
             self.left_compress_site(i, bra=bra, **compress_opts)
@@ -345,7 +328,7 @@ class TensorNetwork1D(TensorNetwork):
     def right_compress(self, start=None, stop=None, bra=None,
                        current_orthog_centre=None, **compress_opts):
         """Compress this 1D TN, from right to left, such that it becomes
-        right-canonical.
+        right-canonical (unless ``absorb != 'left'``).
 
         Parameters
         ----------
@@ -357,40 +340,46 @@ class TensorNetwork1D(TensorNetwork):
             If given, update this TN as well, assuming it to be the conjugate.
         current_orthog_centre : int, optional
             The current orthogonality center, if known, to speed things up.
-        method : {'svd', 'eig'}, optional
-            How to perform the decomposition.
-        tol : float, optional
-            What tolerance to keep singular values above, relative to the
-            largest singular value.
         compress_opts
-            Supplied to ``self.right_compress_site``.
+            Supplied to :meth:`Tensor.split`.
         """
         if start is None:
             start = self.nsites - 1
         if stop is None:
             stop = 0
 
-        # left canonize first -> ensures truncation is optimal?
-        if current_orthog_centre is None:
-            # assume need to canonize whole chain
-            current_orthog_centre = 0
-        self.shift_orthogonality_center(
-            current_orthog_centre, start, bra=bra)
-
         for i in range(start, stop, -1):
             self.right_compress_site(i, bra=bra, **compress_opts)
 
-    def compress(self, *args, form='L', **compress_opts):
-        """Compress this 1D Tensor Network, either left or right, based on
-        ``form``.
+    def compress(self, form='flat', **compress_opts):
+        """Compress this 1D Tensor Network, possibly into canonical form.
+
+        Parameters
+        ----------
+        form : {'flat', 'left', 'right'} or int
+            Output form of the TN. ``'flat'`` tries to distribute the singular
+            values evenly, but state willl not be canonical (default).
+            ``'left'`` and ``'right'`` put the state into left and right
+            canonical form respectively, or an int will put the state into
+            mixed canonical form at that site.
+        compress_opts
+            Supplied to :meth:`Tensor.split`.
         """
-        if form.upper() == 'L':
-            self.left_compress(*args, **compress_opts)
-        elif form.upper() == 'R':
-            self.right_compress(*args, **compress_opts)
+        if isinstance(form, int):
+            self.left_compress(stop=form, **compress_opts)
+            self.right_compress(stop=form, **compress_opts)
+        elif form == 'left':
+            self.left_compress(**compress_opts)
+        elif form == 'right':
+            self.right_compress(**compress_opts)
+        elif form == 'flat':
+            compress_opts['absorb'] = 'both'
+            self.right_compress(stop=self.nsites // 2, **compress_opts)
+            self.left_compress(stop=self.nsites // 2, **compress_opts)
         else:
             raise ValueError("Form specifier {} not understood, should be "
-                             "either 'L' or 'R".format(form))
+                             "either 'left', 'right', 'flat' or an int "
+                             "specifiying a new orthog center.".format(form))
 
     def bond(self, i, j):
         """Get the name of the index defining the bond between sites i and j.
@@ -498,7 +487,7 @@ class TensorNetwork1D(TensorNetwork):
 
         return num_can_l, num_can_r
 
-    def plot(self):
+    def plot(self, max_width=None):
         l1 = ""
         l2 = ""
         l3 = ""
@@ -515,9 +504,7 @@ class TensorNetwork1D(TensorNetwork):
         l2 += "<" if num_can_r > 0 else "o"
         l3 += "|"
 
-        print(l1)
-        print(l2)
-        print(l3)
+        three_line_multi_print(l1, l2, l3, max_width=max_width)
 
 
 class MatrixProductState(TensorNetwork1D):
@@ -1018,7 +1005,7 @@ class MatrixProductOperator(TensorNetwork1D):
     def phys_dim(self, i):
         return self.site[i].ind_size(self.upper_ind_id.format(i))
 
-    def plot(self):
+    def plot(self, max_width=120):
         l1 = ""
         l2 = ""
         l3 = ""
@@ -1033,6 +1020,4 @@ class MatrixProductOperator(TensorNetwork1D):
         l2 += "O"
         l3 += "|"
 
-        print(l1)
-        print(l2)
-        print(l3)
+        three_line_multi_print(l1, l2, l3, max_width=max_width)

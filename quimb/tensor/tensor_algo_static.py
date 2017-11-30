@@ -36,11 +36,12 @@ class EffHamOp(spla.LinearOperator):
 
     def __init__(self, TN_ham, upper_inds, lower_inds, dims):
         self.eff_ham_tensors = TN_ham["__ham__"]
+        dtype = self.eff_ham_tensors[0].dtype
         self.upper_inds = upper_inds
         self.lower_inds = lower_inds
         self.dims = dims
         self.d = prod(dims)
-        super().__init__(dtype=complex, shape=(self.d, self.d))
+        super().__init__(dtype=dtype, shape=(self.d, self.d))
 
     def _matvec(self, vec):
         v = Tensor(vec.reshape(*self.dims), inds=self.upper_inds)
@@ -203,11 +204,11 @@ class DMRG:
         ``[16, 32, 64] -> (16, 32, 64, 64, 64, ...)```.
     bsz : {1, 2}
         Number of sites to optimize for locally.
-    which : {'SR', 'LR'}, optional
+    which : {'SA', 'LA'}, optional
         Whether to search for smallest or largest real part eigenvectors.
     compress_opts : dict-like
         Options to supply when compressing or splitting, e.g.
-        ``compress_opts={'method': 'eig', 'tol': 1e-7}``.
+        ``compress_opts={'method': 'eig', 'cutoff': 1e-7}``.
 
     Attributes
     ----------
@@ -217,7 +218,7 @@ class DMRG:
         The list of energies after each sweep.
     """
 
-    def __init__(self, ham, bond_dim, bsz=1, which='SR',
+    def __init__(self, ham, bond_dim, bsz=1, which='SA',
                  compress_opts=None, p0=None):
         self._set_bond_dim_seq(bond_dim)
         self.n = ham.nsites
@@ -231,7 +232,9 @@ class DMRG:
         if p0 is not None:
             self.k = p0.copy()
         else:
-            self.k = MPS_rand_state(self.n, self._bond_dim0, self.phys_dim)
+            dtype = ham.site[0].dtype
+            self.k = MPS_rand_state(self.n, self._bond_dim0, self.phys_dim,
+                                    dtype=dtype)
         self.b = self.k.H
         self.ham = ham.copy()
         self.ham.add_tag("__ham__")
@@ -243,6 +246,12 @@ class DMRG:
         #   manipulating k/b -> make virtual
         self.TN_energy = self.b | self.ham | self.k
         self.energies = [self.TN_energy ^ ...]
+
+        self.advanced_opts = {
+            'eff_eig_bkd': "AUTO",
+            'eff_eig_tol': None,
+            'eff_eig_maxiter': None,
+        }
 
     def _set_bond_dim_seq(self, bond_dim):
         bds = (bond_dim,) if isinstance(bond_dim, int) else tuple(bond_dim)
@@ -258,7 +267,7 @@ class DMRG:
         return self.k.copy()
 
     def update_local_state_1site(self, eff_ham, i, direction, dense=None,
-                                 max_bond=None, method='svd', tol=1e-10):
+                                 **compress_opts):
         """Find the single site effective tensor groundstate of::
 
 
@@ -290,19 +299,22 @@ class DMRG:
             op = EffHamOp(eff_ham, dims=dims, upper_inds=uix, lower_inds=lix)
 
         eff_e, eff_gs = seigsys(op, k=1, which=self.which,
-                                v0=self.k.site[i].data)
+                                v0=self.k.site[i].data,
+                                tol=self.advanced_opts['eff_eig_tol'],
+                                maxiter=self.advanced_opts['eff_eig_maxiter'],
+                                backend=self.advanced_opts['eff_eig_bkd'])
         eff_gs = eff_gs.A
         self.k.site[i].data = eff_gs
         self.b.site[i].data = eff_gs.conj()
 
         if (direction == 'right') and (i < self.n - 1):
-            self.k.left_compress_site(i, bra=self.b, method=method, tol=tol)
+            self.k.left_compress_site(i, bra=self.b, **compress_opts)
         elif (direction == 'left') and (i > 0):
-            self.k.right_compress_site(i, bra=self.b, method=method, tol=tol)
+            self.k.right_compress_site(i, bra=self.b, **compress_opts)
         return eff_e
 
     def update_local_state_2site(self, eff_ham, i, direction, dense=None,
-                                 max_bond=None, method='svd', tol=1e-10):
+                                 **compress_opts):
         """Find the 2-site effective tensor groundstate of::
 
 
@@ -357,12 +369,15 @@ class DMRG:
 
         # find the 2-site local groundstate using previous as initial guess
         v0 = self.k.site[i].contract(self.k.site[i + 1], output_inds=uix).data
-        eff_e, eff_gs = seigsys(op, k=1, which=self.which, v0=v0)
+        eff_e, eff_gs = seigsys(op, k=1, which=self.which, v0=v0,
+                                tol=self.advanced_opts['eff_eig_tol'],
+                                maxiter=self.advanced_opts['eff_eig_maxiter'],
+                                backend=self.advanced_opts['eff_eig_bkd'])
 
         # split the two site local groundstate
         T_AB = Tensor(eff_gs.A.reshape(dims), uix)
         L, R = T_AB.split(left_inds=uix_L, get='arrays', absorb=direction,
-                          max_bond=max_bond, method=method, tol=tol)
+                          **compress_opts)
 
         self.k.site[i].update(data=L, inds=(*uix_L, u_bond_ind))
         self.b.site[i].update(data=L.conj(), inds=(*lix_L, l_bond_ind))
@@ -456,7 +471,7 @@ class DMRG:
 
     def _print_pre_sweep(self, i, LR, bd, verbose=0):
         if verbose > 0:
-            print(f"SWEEP-{i + 1}, direction={LR}, max_bond={bd}:")
+            print(f"SWEEP-{i + 1}, direction={LR}, max_bond={bd}:", flush=True)
 
     def _compute_post_sweep(self):
         pass
@@ -465,11 +480,11 @@ class DMRG:
         if verbose > 1:
             self.k.plot()
         if verbose > 0:
-            print(f"Energy: {self.energy}", end="")
+            print(f"Energy: {self.energy}", end="", flush=True)
             if converged:
-                print(" ... converged!")
+                print(" ... converged!", flush=True)
             else:
-                print(" ... not converged")
+                print(" ... not converged", flush=True)
 
     def _check_convergence(self, tol):
         return abs(self.energies[-2] - self.energies[-1]) < tol
@@ -543,7 +558,7 @@ class DMRG1(DMRG):
     """
     __doc__ += DMRG.__doc__
 
-    def __init__(self, ham, bond_dim, which='SR', compress_opts=None):
+    def __init__(self, ham, bond_dim, which='SA', compress_opts=None):
         super().__init__(ham, bond_dim=bond_dim, which=which, bsz=1,
                          compress_opts=compress_opts)
 
@@ -553,7 +568,7 @@ class DMRG2(DMRG):
     """
     __doc__ += DMRG.__doc__
 
-    def __init__(self, ham, bond_dim, which='SR', compress_opts=None):
+    def __init__(self, ham, bond_dim, which='SA', compress_opts=None):
         super().__init__(ham, bond_dim=bond_dim, which=which, bsz=2,
                          compress_opts=compress_opts)
 
@@ -603,8 +618,7 @@ class DMRGX(DMRG):
         return self.variances[-1]
 
     def update_local_state_1site(self, eff_ham, eff_ovlp, i, direction,
-                                 dense=True, max_bond=None, method='svd',
-                                 tol=1e-10):
+                                 dense=True, **compress_opts):
         """Like ``update_local_state``, but re-insert all eigenvectors, then
         choose the one with best overlap with ``eff_ovlp``.
         """
@@ -643,15 +657,14 @@ class DMRGX(DMRG):
         self.b.site[i].data = evecs[..., best].conj()
 
         if (direction == 'right') and (i < self.n - 1):
-            self.k.left_compress_site(i, bra=self.b, method=method, tol=tol)
+            self.k.left_compress_site(i, bra=self.b, **compress_opts)
         elif (direction == 'left') and (i > 0):
-            self.k.right_compress_site(i, bra=self.b, method=method, tol=tol)
+            self.k.right_compress_site(i, bra=self.b, **compress_opts)
 
         return evals[best]
 
     def update_local_state_2site(self, eff_ham, eff_ovlp, i, direction,
-                                 dense=True, max_bond=None, method='svd',
-                                 tol=1e-10):
+                                 dense=True, **compress_opts):
         raise NotImplementedError("2-site DMRGX not implemented yet.")
 
     def update_local_state(self, eff_ham, eff_ovlp, i, **update_opts):
@@ -708,11 +721,12 @@ class DMRGX(DMRG):
         if verbose > 1:
             self.k.plot()
         if verbose > 0:
-            print(f"Energy={self.energy}, Variance={self.variance}", end="")
+            print(f"Energy={self.energy}, Variance={self.variance}",
+                  end="", flush=True)
             if converged:
-                print(" ... converged!")
+                print(" ... converged!", flush=True)
             else:
-                print(" ... not converged")
+                print(" ... not converged", flush=True)
 
     def _check_convergence(self, tol):
         return self.variances[-1] < tol

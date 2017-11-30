@@ -41,11 +41,14 @@ class CacheOnComm(object):
 def init_petsc_and_slepc(comm=None):
     """Make sure petsc is initialized with comm before slepc.
     """
+    import os
+    petsc_arch = os.environ.get("PETSC_ARCH", None)
+
     import petsc4py
-    petsc4py.init(args=['-no_signal_handler'], comm=comm)
+    petsc4py.init(args=['-no_signal_handler'], arch=petsc_arch, comm=comm)
     from petsc4py import PETSc
     import slepc4py
-    slepc4py.init(args=['-no_signal_handler'])
+    slepc4py.init(args=['-no_signal_handler'], arch=petsc_arch)
     from slepc4py import SLEPc
     return PETSc, SLEPc
 
@@ -71,9 +74,10 @@ def get_slepc(comm=None):
 class PetscLinearOperatorContext:
     def __init__(self, lo):
         self.lo = lo
+        self.real = lo.dtype in (float, np.float_)
 
     def mult(self, _, x, y):
-        y[:] = self.lo.matvec(x)
+        y[:] = self.lo.matvec(x[:])
 
 
 def linear_operator_2_petsc_shell(lo, comm=None):
@@ -189,7 +193,7 @@ def convert_vec_to_petsc(vec, comm=None):
 
 
 def new_petsc_vec(d, comm=None):
-    """Create an empty complex petsc vector of size `d`.
+    """Create an empty petsc vector of size `d`.
 
     Parameters
     ----------
@@ -219,14 +223,14 @@ def gather_petsc_array(x, comm, out_shape=None, matrix=False):
 
     Parameters
     ----------
-        x : petsc4py.PETSc Mat or Vec
-            Distributed petsc array to gather.
-        comm : mpi4py.MPI.COMM
-            MPI communicator
-        out_shape : tuple, optional
-            If not None, reshape the output array to this.
-        matrix : bool, optional
-            Whether to convert the array to a np.matrix.
+    x : petsc4py.PETSc Mat or Vec
+        Distributed petsc array to gather.
+    comm : mpi4py.MPI.COMM
+        MPI communicator
+    out_shape : tuple, optional
+        If not None, reshape the output array to this.
+    matrix : bool, optional
+        Whether to convert the array to a np.matrix.
 
     Returns
     -------
@@ -241,7 +245,7 @@ def gather_petsc_array(x, comm, out_shape=None, matrix=False):
     if comm.Get_rank() == 0:
 
         # create total array
-        ax = np.empty(x.getSize(), dtype=complex)
+        ax = np.empty(x.getSize(), dtype=lx.dtype)
         # set master's portion
         ax[ox[0]:ox[1], ...] = lx
 
@@ -321,8 +325,8 @@ def _which_scipy_to_slepc(which):
 
 
 def _init_eigensolver(k=6, which='LM', sigma=None, isherm=True,
-                      EPSType="krylovschur", st_opts_dict=(), tol=None,
-                      max_it=None, ncv=None, l_win=None, comm=None):
+                      EPSType=None, st_opts_dict=(), tol=None,
+                      maxiter=None, ncv=None, l_win=None, comm=None):
     """Create an advanced eigensystem solver
 
     Parameters
@@ -365,7 +369,7 @@ def _init_eigensolver(k=6, which='LM', sigma=None, isherm=True,
                                SLEPc.EPS.ProblemType.NHEP)
     eigensolver.setWhichEigenpairs(_which_scipy_to_slepc(which))
     eigensolver.setConvergenceTest(SLEPc.EPS.Conv.ABS)
-    eigensolver.setTolerances(tol=tol, max_it=max_it)
+    eigensolver.setTolerances(tol=tol, max_it=maxiter)
 
     if l_win is None:
         eigensolver.setDimensions(k, ncv)
@@ -386,7 +390,7 @@ def seigsys_slepc(mat, k=6, *,
                   return_all_conv=False,
                   st_opts_dict=(),
                   tol=None,
-                  max_it=None,
+                  maxiter=None,
                   l_win=None,
                   comm=None):
     """Solve a matrix using the advanced eigensystem solver
@@ -420,7 +424,7 @@ def seigsys_slepc(mat, k=6, *,
         options to send to the eigensolver internal inverter.
     tol : float, optional
         Tolerance.
-    max_it : int, optional
+    maxiter : int, optional
         Maximum number of iterations.
     comm : mpi4py communicator, optional
         MPI communicator, defaults to ``COMM_SELF`` for a single process solve.
@@ -453,7 +457,7 @@ def seigsys_slepc(mat, k=6, *,
                "TR" if (which is None) and (sigma is not None) else
                which),
         EPSType=EPSType, k=k, sigma=sigma, isherm=isherm, tol=tol, ncv=ncv,
-        max_it=max_it, st_opts_dict=st_opts_dict, comm=comm, l_win=l_win)
+        maxiter=maxiter, st_opts_dict=st_opts_dict, comm=comm, l_win=l_win)
 
     # set up the initial operators and solve
     mat = convert_mat_to_petsc(mat, comm=comm)
@@ -502,19 +506,19 @@ def seigsys_slepc(mat, k=6, *,
 
 # ----------------------------------- SVD ----------------------------------- #
 
-def _init_svd_solver(nsv=6, SVDType='cross', tol=None, max_it=None,
+def _init_svd_solver(nsv=6, SVDType='cross', tol=None, maxiter=None,
                      ncv=None, comm=None):
     SLEPc, comm = get_slepc(comm=comm)
     svd_solver = SLEPc.SVD().create(comm=comm)
     svd_solver.setType(SVDType)
-    svd_solver.setTolerances(tol=tol, max_it=max_it)
+    svd_solver.setTolerances(tol=tol, max_it=maxiter)
     svd_solver.setDimensions(nsv=nsv, ncv=ncv)
     svd_solver.setFromOptions()
     return svd_solver
 
 
 def svds_slepc(mat, k=6, ncv=None, return_vecs=True, SVDType='cross',
-               return_all_conv=False, tol=None, max_it=None, comm=None):
+               return_all_conv=False, tol=None, maxiter=None, comm=None):
     """Find the singular values for sparse matrix `a`.
 
     Parameters
@@ -539,7 +543,7 @@ def svds_slepc(mat, k=6, ncv=None, return_vecs=True, SVDType='cross',
     mat = convert_mat_to_petsc(mat, comm=comm)
 
     svd_solver = _init_svd_solver(nsv=k, SVDType=SVDType, tol=tol,
-                                  max_it=max_it, ncv=ncv, comm=comm)
+                                  maxiter=maxiter, ncv=ncv, comm=comm)
     svd_solver.setOperator(mat)
     svd_solver.solve()
 

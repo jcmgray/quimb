@@ -588,9 +588,8 @@ class TestPageEntropy:
 
         assert abs(pe - ae) < 1e-5
 
-    def test_raises(self):
-        with pytest.raises(ValueError):
-            page_entropy(8, 16)
+    def test_bigger_than_half(self):
+        assert_allclose(page_entropy(4, 24), page_entropy(6, 24))
 
 
 class TestIsEigenvector:

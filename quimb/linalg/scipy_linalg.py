@@ -21,7 +21,7 @@ def choose_ncv(k, n):  # pragma: no cover
 
 
 def seigsys_scipy(a, k=6, which=None, return_vecs=True, sigma=None,
-                  isherm=True, ncv=None, sort=True, **kwargs):
+                  isherm=True, ncv=None, sort=True, tol=None, **kwargs):
     """Returns a few eigenpairs from a possibly sparse hermitian operator
 
     Parameters
@@ -45,7 +45,9 @@ def seigsys_scipy(a, k=6, which=None, return_vecs=True, sigma=None,
                   which),
         'sigma': sigma,
         'ncv': choose_ncv(k, a.shape[0]) if ncv is None else ncv,
-        'return_eigenvectors': return_vecs}
+        'return_eigenvectors': return_vecs,
+        'tol': 0 if tol is None else tol
+    }
     seig_func = spla.eigsh if isherm else spla.eigs
     if return_vecs:
         lk, vk = seig_func(a, **settings, **kwargs)

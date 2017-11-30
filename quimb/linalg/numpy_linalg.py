@@ -107,6 +107,8 @@ def seigsys_numpy(a, k=6, which=None, return_vecs=True, sigma=None,
     # these might be given by seigsys but not relevant for numpy
     kwargs.pop('ncv', None)
     kwargs.pop('v0', None)
+    kwargs.pop('tol', None)
+    kwargs.pop('maxiter', None)
 
     if return_vecs:
         evals, evecs = efunc(a.A if issparse(a) else a, **kwargs)

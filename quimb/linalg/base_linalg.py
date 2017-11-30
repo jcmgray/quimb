@@ -174,7 +174,7 @@ def seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
         The operator to solve for.
     k : int, optional
         Number of eigenpairs to return (default=6).
-    which : {'SR', 'LR', 'LM', 'SM', 'TR'}
+    which : {'SA', 'LA', 'LM', 'SM', 'TR'}
         Where in spectrum to take eigenvalues from (see
         :func:``scipy.sparse.linalg.eigsh``)
     return_vecs : bool, optional

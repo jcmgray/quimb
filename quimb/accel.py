@@ -172,6 +172,19 @@ def zeroify(fn, tol=1e-14):
     return zeroified_f
 
 
+def upcast(fn):
+    """Decorator to make sure the types of two numpy arguments match.
+    """
+    def upcasted_fn(a, b):
+        if a.dtype == b.dtype:
+            return fn(a, b)
+        else:
+            common = np.common_type(a, b)
+            return fn(a.astype(common), b.astype(common))
+
+    return upcasted_fn
+
+
 # --------------------------------------------------------------------------- #
 # Type and shape checks                                                       #
 # --------------------------------------------------------------------------- #
@@ -363,6 +376,7 @@ def dot(a, b):
 
 
 @realify
+@upcast
 @njit
 def vdot(a, b):  # pragma: no cover
     """Accelerated 'Hermitian' inner product of two vectors.

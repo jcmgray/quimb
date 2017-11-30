@@ -10,10 +10,15 @@ from .tensor_core import Tensor
 from .tensor_1d import MatrixProductState, MatrixProductOperator
 
 
-def rand_tensor(shape, inds, tags=None):
+def rand_tensor(shape, inds, tags=None, dtype=complex):
     """Generate a random (complex) tensor with specified shape and inds.
     """
-    data = np.random.randn(*shape) + 1.0j * np.random.randn(*shape)
+    if dtype in (float, np.float_):
+        data = np.random.randn(*shape)
+    elif dtype in (complex, np.complex_):
+        data = np.random.randn(*shape) + 1.0j * np.random.randn(*shape)
+    else:
+        raise TypeError("dtype not understood - should be float or complex.")
     return Tensor(data=data, inds=inds, tags=tags)
 
 
@@ -27,6 +32,7 @@ def MPS_rand_state(n, bond_dim, phys_dim=2,
                    tags=None,
                    bond_name="",
                    normalize=True,
+                   dtype=complex,
                    **mps_opts):
     """Generate a random matrix product state.
 
@@ -49,10 +55,18 @@ def MPS_rand_state(n, bond_dim, phys_dim=2,
               *((bond_dim, bond_dim, phys_dim),) * (n - 2),
               (bond_dim, phys_dim)]
 
+    if dtype in (float, np.float_):
+        def def_gen_data(shape):
+            return np.random.randn(*shape)
+    elif dtype in (complex, np.complex_):
+        def def_gen_data(shape):
+            return np.random.randn(*shape) + 1.0j * np.random.randn(*shape)
+    else:
+        raise TypeError("dtype not understood - should be float or complex.")
+
     arrays = \
         map(lambda x: x / norm_fro_dense(x)**(1 / (x.ndim - 1)),
-            map(lambda x: np.random.randn(*x) + 1.0j * np.random.randn(*x),
-                shapes))
+            map(def_gen_data, shapes))
 
     rmps = MatrixProductState(arrays, site_ind_id=site_ind_id,
                               bond_name=bond_name, site_tag_id=site_tag_id,
@@ -203,6 +217,9 @@ def spin_ham_mpo_tensor(one_site_terms, two_site_terms, S=1 / 2, which=None):
     H[0, 0, :, :] = eye(D)
     H[B - 1, B - 1, :, :] = eye(D)
 
+    if np.allclose(H.imag, np.zeros_like(H)):
+        H = H.real
+
     make_immutable(H)
 
     if which == 'L':
@@ -299,9 +316,19 @@ def MPO_ham_XY(n, j=1.0, bz=0.0,
                bond_name=""):
     """XY-Hamiltonian in matrix product operator form.
     """
+    try:
+        jx, jy = j
+    except (TypeError, ValueError):
+        jx = jy = j
+
     H = MPOSpinHam(S=1 / 2)
-    H.add_term(j, 'X', 'X')
-    H.add_term(j, 'Y', 'Y')
+    if jx == jy:
+        # easy way to enforce realness
+        H.add_term(jx / 2, '+', '-')
+        H.add_term(jx / 2, '-', '+')
+    else:
+        H.add_term(jx, 'X', 'X')
+        H.add_term(jy, 'Y', 'Y')
     H.add_term(-bz, 'Z')
     return H.build(n, site_tag_id=site_tag_id, tags=tags, bond_name=bond_name,
                    upper_ind_id=upper_ind_id, lower_ind_id=lower_ind_id)
@@ -315,16 +342,27 @@ def MPO_ham_heis(n, j=1.0, bz=0.0,
                  bond_name=""):
     """Heisenberg Hamiltonian in matrix product operator form.
     """
+    try:
+        jx, jy, jz = j
+    except (TypeError, ValueError):
+        jx = jy = jz = j
+
     H = MPOSpinHam(S=1 / 2)
-    H.add_term(j, 'X', 'X')
-    H.add_term(j, 'Y', 'Y')
-    H.add_term(j, 'Z', 'Z')
+    if jx == jy:
+        # easy way to enforce realness
+        H.add_term(jx / 2, '+', '-')
+        H.add_term(jx / 2, '-', '+')
+    else:
+        H.add_term(jx, 'X', 'X')
+        H.add_term(jy, 'Y', 'Y')
+    H.add_term(jz, 'Z', 'Z')
     H.add_term(-bz, 'Z')
     return H.build(n, site_tag_id=site_tag_id, tags=tags, bond_name=bond_name,
                    upper_ind_id=upper_ind_id, lower_ind_id=lower_ind_id)
 
 
-def MPO_ham_mbl(n, dh, j=1.0, run=None, S=1 / 2, **mpo_opts):
+def MPO_ham_mbl(n, dh, j=1.0, run=None, S=1 / 2, dh_dist='s',
+                dh_dim=1, beta=None, **mpo_opts):
     """The many-body-localized spin hamiltonian.
 
     Parameters
@@ -342,23 +380,55 @@ def MPO_ham_mbl(n, dh, j=1.0, run=None, S=1 / 2, **mpo_opts):
     mpo_opts
         Supplied to :class:`MatrixProductOperator`.
     """
-    if run is not None:
-        np.random.seed(run)
-
+    # Parse the interaction term and strengths
     try:
         jx, jy, jz = j
     except (TypeError, ValueError):
         jx = jy = jz = j
 
-    interaction = [(jx, 'X', 'X'), (jy, 'Y', 'Y'), (jz, 'Z', 'Z')]
+    if jy == jx:
+        # can specify specifically real MPO-terms
+        interaction = [(jx / 2, '+', '+'), (jx / 2, '-', '-'), (jz, 'Z', 'Z')]
+    else:
+        interaction = [(jx, 'X', 'X'), (jy, 'Y', 'Y'), (jz, 'Z', 'Z')]
 
-    def dhi():
-        return dh * (2 * np.random.rand() - 1)
+    # sort out a vector of noise strengths -> e.g. (0, 0, 1) for z-noise only
+    if isinstance(dh, (tuple, list)):
+        dhds = dh
+    else:
+        dh_dim = {0: '', 1: 'z', 2: 'xy', 3: 'xyz'}.get(dh_dim, dh_dim)
+        dhds = tuple((dh if d in dh_dim else 0) for d in 'xyz')
+
+    if run is not None:
+        np.random.seed(run)
+
+    # sort out the noise distribution
+    if dh_dist in {'g', 'gauss', 'gaussian', 'normal'}:
+        rs = np.random.randn(3, n)
+    elif dh_dist in {'s', 'flat', 'square', 'uniform', 'box'}:
+        rs = 2.0 * np.random.rand(3, n) - 1.0
+    elif dh_dist in {'qr', 'quasirandom'}:
+        assert dh_dim == 'z'
+        if beta is None:
+            beta = (5**0.5 - 1) / 2
+        delta = np.random.rand() / beta
+        inds = np.arange(0, n)
+        inds = np.stack([inds, inds, inds], axis=0)
+        rs = np.cos(2 * np.pi * beta * (inds + delta))
+
+    # generate noise, potentially in all directions, each with own strength
+    def single_site_terms():
+        for i in range(n):
+            yield [(dh * r, s)
+                   for dh, r, s in zip(dhds, rs[:, i], 'XYZ')
+                   if dh != 0]
+
+    dh_terms = iter(single_site_terms())
 
     def gen_arrays():
-        yield spin_ham_mpo_tensor([(dhi(), 'Z')], interaction, which='L', S=S)
+        yield spin_ham_mpo_tensor(next(dh_terms), interaction, which='L', S=S)
         for _ in range(n - 2):
-            yield spin_ham_mpo_tensor([(dhi(), 'Z')], interaction, S=S)
-        yield spin_ham_mpo_tensor([(dhi(), 'Z')], interaction, which='R', S=S)
+            yield spin_ham_mpo_tensor(next(dh_terms), interaction, S=S)
+        yield spin_ham_mpo_tensor(next(dh_terms), interaction, which='R', S=S)
 
     return MatrixProductOperator(gen_arrays(), **mpo_opts)

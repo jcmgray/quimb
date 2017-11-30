@@ -1,12 +1,10 @@
 """Core tensor network tools.
 """
-
 import os
 import functools
 import operator
 import copy
-import itertools
-import string
+import uuid
 
 from cytoolz import (
     unique,
@@ -129,7 +127,7 @@ class HuskArray(np.ndarray):
         self.shape = shape
 
 
-@functools.lru_cache(1024)
+@functools.lru_cache(4096)
 def cache_einsum_path_on_shape(contract_str, *shapes):
     return einsum_path(contract_str, *(HuskArray(shape) for shape in shapes),
                        memory_limit=2**28, optimize='greedy')[0]
@@ -177,9 +175,6 @@ def tensor_contract(*tensors, output_inds=None):
     return Tensor(data=o_array, inds=o_ix, tags=o_tags)
 
 
-RAND_UUIDS = map("".join, itertools.product(string.hexdigits, repeat=7))
-
-
 def rand_uuid(base=""):
     """Return a guaranteed unique, shortish identifier, optional appended
     to ``base``.
@@ -192,17 +187,39 @@ def rand_uuid(base=""):
     >>> rand_uuid('virt-bond')
     'virt-bond_bf342e68'
     """
-    return base + "_" + next(RAND_UUIDS)
+
+    return base + "_" + str(uuid.uuid4())[:8]
 
 
 @njit  # pragma: no cover
-def _array_split_svd(x, tol=-1.0, max_bond=-1, absorb=0):
+def _trim_singular_vals(s, cutoff, cutoff_mode):
+    if cutoff_mode == 1:
+        return np.sum(s > cutoff)
+    elif cutoff_mode == 2:
+        return np.sum(s > cutoff * s[0])
+    elif cutoff_mode == 3:
+        n_chi = s.size
+        s2s = 0.0
+        for i in range(s.size - 1, -1, -1):
+            s2 = s[i]**2
+            if not np.isnan(s2):
+                s2s += s2
+            if s2s > cutoff:
+                break
+            n_chi -= 1
+        return n_chi
+    else:
+        raise ValueError("``cutoff_mode`` not one of {1, 2, 3}.")
+
+
+@njit  # pragma: no cover
+def _array_split_svd(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0):
     """SVD-decomposition.
     """
     U, s, V = np.linalg.svd(x, full_matrices=False)
 
-    if tol > 0.0:
-        n_chi = np.sum(s > tol * s[0])
+    if cutoff > 0.0:
+        n_chi = _trim_singular_vals(s, cutoff, cutoff_mode)
 
         if max_bond > 0:
             n_chi = min(n_chi, max_bond)
@@ -237,7 +254,7 @@ def dag(x):
 
 
 @njit  # pragma: no cover
-def _array_split_eig(x, tol=-1.0, max_bond=-1, absorb=0):
+def _array_split_eig(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0):
     """SVD-split via eigen-decomposition.
     """
     if x.shape[0] > x.shape[1]:
@@ -275,8 +292,8 @@ def _array_split_eig(x, tol=-1.0, max_bond=-1, absorb=0):
             V /= sqrts.reshape((-1, 1))
 
     # eigh produces ascending eigenvalue order -> slice opposite to svd
-    if tol > 0.0:
-        n_chi = np.sum(s2 > tol**2 * s2[-1])
+    if cutoff > 0.0:
+        n_chi = _trim_singular_vals(s2[::-1]**0.5, cutoff, cutoff_mode)
 
         if max_bond > 0:
             n_chi = min(n_chi, max_bond)
@@ -509,6 +526,10 @@ class Tensor(object):
     def size(self):
         return self._data.size
 
+    @property
+    def dtype(self):
+        return self._data.dtype
+
     def ind_size(self, ind):
         return self.shape[self.inds.index(ind)]
 
@@ -553,8 +574,8 @@ class Tensor(object):
     def contract(self, *others, output_inds=None):
         return tensor_contract(self, *others, output_inds=output_inds)
 
-    def split(self, left_inds, method='svd', tol=1e-10,
-              absorb='both', max_bond=None, get=None):
+    def split(self, left_inds, method='svd', cutoff=1e-10, cutoff_mode='sum2',
+              max_bond=None, absorb='both', get=None):
         """Decompose this tensor into two tensors.
 
         Parameters
@@ -564,18 +585,30 @@ class Tensor(object):
             split to the 'left'.
         method : {'svd', 'eig', 'qr', 'lq'}, optional
             How to split the tensor.
-        tol : float, optional
-            The tolerance below which to discard singular values, only applies
+        cutoff : float, optional
+            The threshold below which to discard singular values, only applies
             to ``method='svd'`` and ``method='eig'``.
-        max_bond : int, optional
-            If the new bond is larger than this, raise a ``BondError``.
+        cutoff_mode : {'sum2', 'rel', 'abs'}
+            Method with which to apply the cutoff threshold:
+
+                - 'sum2': sum squared of values discarded must be ``< cutoff``.
+                - 'rel': values less than ``cutoff * s[0]`` discarded.
+                - 'abs': values less than ``cutoff`` discarded.
+
+        max_bond: None or int
+            If integer, the maxmimum number of singular values to keep,
+            regardless of ``cutoff``.
+        absorb = {'both', 'left', 'right'}
+            Whether to absorb the singular values into both, the left or right
+            unitary matrix respectively.
         get : {None, 'arrays', 'tensors', 'values'}
             If given, what to return instead of the TensorNetwork describing
             the split.
 
         Returns
         -------
-        TensorNetwork or (Tensor, Tensor)
+        TensorNetwork or (Tensor, Tensor) or (array, array) or 1D-array
+            Respectively if get={None, 'tensors', 'arrays', 'values'}.
         """
         left_inds = tuple(left_inds)
         right_inds = tuple(x for x in self.inds if x not in left_inds)
@@ -591,17 +624,18 @@ class Tensor(object):
             return {'svd': _array_split_svdvals,
                     'eig': _array_split_svdvals_eig}[method](array)
 
-        split_opts = {}
+        opts = {}
         if method in ('svd', 'eig'):
             # Convert defaults and settings to numeric type for numba funcs
-            split_opts['tol'] = {None: -1.0}.get(tol, tol)
-            split_opts['absorb'] = {'left': -1, 'both': 0, 'right': 1}[absorb]
-            split_opts['max_bond'] = {None: -1}.get(max_bond, max_bond)
+            opts['cutoff'] = {None: -1.0}.get(cutoff, cutoff)
+            opts['absorb'] = {'left': -1, 'both': 0, 'right': 1}[absorb]
+            opts['max_bond'] = {None: -1}.get(max_bond, max_bond)
+            opts['cutoff_mode'] = {'abs': 1, 'rel': 2, 'sum2': 3}[cutoff_mode]
 
         left, right = {'svd': _array_split_svd,
                        'eig': _array_split_eig,
                        'qr': _array_split_qr,
-                       'lq': _array_split_lq}[method](array, **split_opts)
+                       'lq': _array_split_lq}[method](array, **opts)
 
         left = left.reshape(*left_dims, -1)
         right = right.reshape(-1, *right_dims)
@@ -990,7 +1024,7 @@ class TensorNetwork(object):
 
             # set default blocksize
             if self.structure_bsz is None:
-                self.structure_bsz = 2
+                self.structure_bsz = 3
 
     def __and__(self, other):
         """Combine this tensor network with more tensors, without contracting.
@@ -1304,7 +1338,7 @@ class TensorNetwork(object):
         """
         return self.cumulative_contract(tags_seq, inplace=True)
 
-    def _contract_with_strategy(self, tags, inplace=False):
+    def _structured_contract(self, tags, inplace=False):
         # check for all sites
         if tags is ...:
             tags = slice(0, self.nsites)
@@ -1338,7 +1372,7 @@ class TensorNetwork(object):
         if self.structure is not None:
             # ... but only use for total or slice tags
             if (tags is ...) or isinstance(tags, slice):
-                return self._contract_with_strategy(tags, inplace=inplace)
+                return self._structured_contract(tags, inplace=inplace)
 
         # Else just contract those tensors specified by tags.
         return self._contract_tags(tags, inplace=inplace)

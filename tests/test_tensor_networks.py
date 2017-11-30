@@ -41,6 +41,15 @@ from quimb.tensor import (
     DMRG2,
     DMRGX,
 )
+from quimb.tensor.tensor_core import _trim_singular_vals
+
+
+def test__trim_singular_vals():
+    s = np.array([3., 2., 1., 0.1])
+    assert _trim_singular_vals(s, 0.5, 1) == 3
+    assert _trim_singular_vals(s, 0.5, 2) == 2
+    assert _trim_singular_vals(s, 2, 3) == 2
+    assert _trim_singular_vals(s, 5.02, 3) == 1
 
 
 class TestBasicTensorOperations:
@@ -234,11 +243,14 @@ class TestBasicTensorOperations:
 class TestTensorFunctions:
     @pytest.mark.parametrize('method', ['svd', 'eig'])
     @pytest.mark.parametrize('linds', ['abd', 'ce'])
-    @pytest.mark.parametrize('tol', [-1.0, 1e-13, 1e-10])
+    @pytest.mark.parametrize('cutoff', [-1.0, 1e-13, 1e-10])
+    @pytest.mark.parametrize('cutoff_mode', ['abs', 'rel', 'sum2'])
     @pytest.mark.parametrize('absorb', ['left', 'both', 'right'])
-    def test_split_tensor_with_vals(self, method, linds, tol, absorb):
+    def test_split_tensor_with_vals(self, method, linds, cutoff,
+                                    cutoff_mode, absorb):
         a = rand_tensor((2, 3, 4, 5, 6), inds='abcde', tags='red')
-        a_split = a.split(linds, method=method, tol=tol, absorb=absorb)
+        a_split = a.split(linds, method=method, cutoff=cutoff,
+                          cutoff_mode=cutoff_mode, absorb=absorb)
         assert len(a_split.tensors) == 2
         if linds == 'abd':
             assert ((a_split.shape == (2, 3, 5, 4, 6)) or
@@ -323,6 +335,16 @@ class TestTensorFunctions:
               tensor_direct_product(b1, b2, sum_inds=('d')) @
               tensor_direct_product(c1, c2, sum_inds=('f')))
         assert d1.almost_equals(d2)
+
+    @pytest.mark.parametrize("dtype", [float, complex, np.complex128,
+                                       np.float_, 'raise'])
+    def test_rand_tensor(self, dtype):
+        if dtype == 'raise':
+            with pytest.raises(TypeError):
+                rand_tensor((2, 3, 4), 'abc', dtype=dtype)
+        else:
+            t = rand_tensor((2, 3, 4), 'abc', dtype=dtype)
+            assert t.dtype == dtype
 
 
 class TestTensorNetwork:
@@ -579,6 +601,18 @@ class TestMatrixProductState:
                                          'foo2', 'foo3', 'foo4'}
         assert mps.site_inds == ('foo0', 'foo1', 'foo2', 'foo3', 'foo4')
         assert mps.site_ind_id == 'foo{}'
+        mps.plot()
+
+    @pytest.mark.parametrize("dtype", [float, complex, np.complex128,
+                                       np.float64, 'raise'])
+    def test_rand_mps_dtype(self, dtype):
+        if dtype == 'raise':
+            with pytest.raises(TypeError):
+                MPS_rand_state(10, 7, dtype=dtype)
+        else:
+            p = MPS_rand_state(10, 7, dtype=dtype)
+            assert p.site[0].dtype == dtype
+            assert p.site[7].dtype == dtype
 
     def test_left_canonize_site(self):
         a = np.random.randn(7, 2) + 1.0j * np.random.randn(7, 2)
@@ -678,6 +712,7 @@ class TestMatrixProductState:
 
         # move to the center
         rmps.canonize(orthogonality_center=4)
+        assert rmps.count_canonized() == (4, 5)
         assert_allclose(rmps.H @ rmps, 1)
         p_tn = (rmps.H & rmps) ^ slice(0, 4) ^ slice(..., 4)
         assert_allclose(p_tn['foo3'].data, np.eye(10), atol=1e-13)
@@ -728,7 +763,8 @@ class TestMatrixProductState:
         assert_allclose(p.H @ p, 4)
 
     @pytest.mark.parametrize("method", ['svd', 'eig'])
-    def test_compress_mps(self, method):
+    @pytest.mark.parametrize('cutoff_mode', ['abs', 'rel', 'sum2'])
+    def test_compress_mps(self, method, cutoff_mode):
         n = 10
         chi = 7
         p = MPS_rand_state(n, chi)
@@ -736,7 +772,7 @@ class TestMatrixProductState:
         p2 = p + p
         assert max(p2['i4'].shape) == chi * 2
         assert_allclose(p2.H @ p, 2)
-        p2.left_compress(method=method, tol=1e-6)
+        p2.left_compress(method=method, cutoff=1e-6, cutoff_mode=cutoff_mode)
         assert max(p2['i4'].shape) == chi
         assert_allclose(p2.H @ p, 2)
         assert p2.count_canonized() == (n - 1, 0)
@@ -760,18 +796,31 @@ class TestMatrixProductState:
         assert max(p['i4'].shape) == 13
         assert p.H @ p < 1.0
 
+    def test_compress_form(self):
+        p = MPS_rand_state(20, 20)
+        p.compress('left')
+        assert p.count_canonized() == (19, 0)
+        p.compress('right')
+        assert p.count_canonized() == (0, 19)
+        p.compress(7)
+        assert p.count_canonized() == (7, 12)
+        p = MPS_rand_state(20, 20)
+        p.compress('flat', absorb='left')
+        assert p.count_canonized() == (0, 0)
+
     @pytest.mark.parametrize("method", ['svd', 'eig'])
-    @pytest.mark.parametrize("form", ['L', 'R', 'raise'])
+    @pytest.mark.parametrize("form", ['left', 'right', 'raise'])
     def test_add_and_compress_mps(self, method, form):
         p = MPS_rand_state(10, 7)
         assert max(p['i4'].shape) == 7
 
         if form == 'raise':
             with pytest.raises(ValueError):
-                p.add_MPS(p, compress=True, method=method, form=form, tol=1e-6)
+                p.add_MPS(p, compress=True, method=method,
+                          form=form, cutoff=1e-6)
             return
 
-        p2 = p.add_MPS(p, compress=True, method=method, form=form, tol=1e-6)
+        p2 = p.add_MPS(p, compress=True, method=method, form=form, cutoff=1e-6)
         assert max(p2['i4'].shape) == 7
         assert_allclose(p2.H @ p, 2)
 
@@ -809,6 +858,7 @@ class TestMatrixProductOperator:
                    [np.random.rand(5, 5, 2, 2) for _ in range(3)] +
                    [np.random.rand(5, 2, 2)])
         mpo = MatrixProductOperator(tensors)
+        mpo.plot()
         assert len(mpo.tensors) == 5
         assert mpo.upper_inds == ('k0', 'k1', 'k2', 'k3', 'k4')
         assert mpo.lower_inds == ('b0', 'b1', 'b2', 'b3', 'b4')
@@ -829,7 +879,9 @@ class TestMatrixProductOperator:
 
     def test_expand_mpo(self):
         h = MPO_ham_heis(12)
+        assert h.site[0].dtype == float
         he = h.expand_bond_dimension(13)
+        assert h.site[0].dtype == float
         assert max(he.site[6].shape) == 13
         h.lower_ind_id = h.upper_ind_id
         t = h ^ ...
@@ -963,6 +1015,7 @@ class TestDMRG1:
     def test_single_explicit_sweep(self):
         h = MPO_ham_heis(5)
         dmrg = DMRG1(h, bond_dim=3)
+        assert dmrg.k.site[0].dtype == float
 
         energy_tn = (dmrg.b | dmrg.ham | dmrg.k)
 
@@ -991,6 +1044,7 @@ class TestDMRG1:
         assert abs(e2.imag) < 1e-13
 
         # test still normalized
+        assert dmrg.k.site[0].dtype == float
         align_TN_1D(dmrg.k, dmrg.b, inplace=True)
         assert_allclose(abs(dmrg.b @ dmrg.k), 1)
 
@@ -1051,7 +1105,12 @@ class TestDMRG2:
     def test_matches_exact(self, dense, MPO_ham):
         h = MPO_ham(6)
         dmrg = DMRG2(h, bond_dim=8)
+        assert dmrg.k.site[0].dtype == float
         assert dmrg.solve(dense=dense)
+
+        # XXX: need to dispatch SLEPc seigsys on real input
+        # assert dmrg.k.site[0].dtype == float
+
         eff_e, mps_gs = dmrg.energy, dmrg.state
         mps_gs_dense = mps_gs.to_dense()
 
@@ -1077,11 +1136,11 @@ class TestDMRG2:
 
 class TestDMRGX:
 
-    def test_1(self):
+    def test_explicit_sweeps(self):
         # import pdb; pdb.set_trace()
-        n = 8
+        n = 10
         chi = 16
-        ham = MPO_ham_mbl(n, dh=12, run=42)
+        ham = MPO_ham_mbl(n, dh=5, run=42)
         p0 = MPS_neel_state(n).expand_bond_dimension(chi)
 
         b0 = p0.H
@@ -1121,8 +1180,10 @@ class TestDMRGX:
     def test_solve_bigger(self):
         n = 14
         chi = 8
-        ham = MPO_ham_mbl(n, dh=12, run=42)
+        ham = MPO_ham_mbl(n, dh=8, run=42)
         p0 = MPS_computational_state('00110111000101')
         dmrgx = DMRGX(ham, p0, chi)
         assert dmrgx.solve(tol=1e-6)
         assert dmrgx.variances[-1] < 1e-6
+
+        assert dmrgx.state.site[0].dtype == float

@@ -178,14 +178,14 @@ class TestShellMatrix:
         a = rand_herm(100, sparse=True)
         alo = sp.linalg.aslinearoperator(a)
 
-        el_us, ev_us = sp.linalg.eigsh(alo, k=1, which='LR')
-        el_u, ev_u = seigsys_slepc(alo, k=1, which='LR')
+        el_us, ev_us = sp.linalg.eigsh(alo, k=1, which='LA')
+        el_u, ev_u = seigsys_slepc(alo, k=1, which='LA')
 
         assert_allclose(el_us, el_u)
         assert_allclose(np.abs(ev_us.conj().T @ ev_u), 1.0)
 
-        el_ls, ev_ls = sp.linalg.eigsh(alo, k=1, which='SR')
-        el_l, ev_l = seigsys_slepc(alo, k=1, which='SR')
+        el_ls, ev_ls = sp.linalg.eigsh(alo, k=1, which='SA')
+        el_l, ev_l = seigsys_slepc(alo, k=1, which='SA')
 
         assert_allclose(el_ls, el_l)
         assert_allclose(np.abs(ev_ls.conj().T @ ev_l), 1.0)
