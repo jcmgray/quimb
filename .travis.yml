@@ -38,22 +38,22 @@ before_install:
   - source activate test-environment
   - export PATH="$HOME/mpi_stuff/openmpi_install/bin:$PATH"
   - export LD_LIBRARY_PATH="$HOME/mpi_stuff/openmpi_install/lib:$LD_LIBRARY_PATH"
-  - [ ${BUILD_MPI:-ON} = ON ] && chronic bash deps/travis-install-openmpi.sh
+  - "[ ${BUILD_MPI:-ON} = ON ] && chronic bash deps/travis-install-openmpi.sh"
   - mpiexec --version
   - mpiexec -np 2 hostname
-  - [ ${BUILD_SLEPC:-ON} = ON ] && chronic bash deps/travis-install-slepc4py.sh
+  - "[ ${BUILD_SLEPC:-ON} = ON ] && chronic bash deps/travis-install-slepc4py.sh"
 
 install:
   - pip install -U .
 
 script:
-  - [ ${TEST_QUIMB:-ON} = ON ] && export OMP_NUM_THREADS=2
-  - [ ${TEST_QUIMB:-ON} = ON ] && env COVERAGE_FILE=.coverage.autompi pytest
-  - [ ${TEST_QUIMB:-ON} = ON ] && env COVERAGE_FILE=.coverage.manualmpi quimb-mpi-python --np 2 -m pytest
-  - [ ${TEST_QUIMB:-ON} = ON ] && coverage combine .
+  - "[ ${TEST_QUIMB:-ON} = ON ] && export OMP_NUM_THREADS=2"
+  - "[ ${TEST_QUIMB:-ON} = ON ] && env COVERAGE_FILE=.coverage.autompi pytest"
+  - "[ ${TEST_QUIMB:-ON} = ON ] && env COVERAGE_FILE=.coverage.manualmpi quimb-mpi-python --np 2 -m pytest"
+  - "[ ${TEST_QUIMB:-ON} = ON ] && coverage combine ."
 
 after_success:
-  - [ ${TEST_QUIMB:-ON} = ON ] && coveralls
-  - [ ${TEST_QUIMB:-ON} = ON ] && codecov
-  - [ ${TEST_QUIMB:-ON} = ON ] && codeclimate-test-reporter
-  - [ ${TEST_QUIMB:-ON} = ON ] && python-codacy-coverage -r coverage.xml
+  - "[ ${TEST_QUIMB:-ON} = ON ] && coveralls"
+  - "[ ${TEST_QUIMB:-ON} = ON ] && codecov"
+  - "[ ${TEST_QUIMB:-ON} = ON ] && codeclimate-test-reporter"
+  - "[ ${TEST_QUIMB:-ON} = ON ] && python-codacy-coverage -r coverage.xml"
