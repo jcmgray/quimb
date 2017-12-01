@@ -263,6 +263,7 @@ class DMRG:
             'eff_eig_ncv': 4,
             'eff_eig_maxiter': None,
             'eff_eig_dense': None,
+            'eff_eig_EPSType': 'krylovschur',
             'compress_method': 'svd',
             'compress_cutoff_mode': 'sum2',
         }
@@ -292,6 +293,7 @@ class DMRG:
         return seigsys(
             op, k=1, which=self.which, v0=v0,
             backend=self.opts['eff_eig_bkd'],
+            EPSType=self.opts['eff_eig_EPSType'],
             ncv=self.opts['eff_eig_ncv'],
             tol=self.opts['eff_eig_tol'],
             maxiter=self.opts['eff_eig_maxiter'])
@@ -629,6 +631,10 @@ class DMRG2(DMRG):
                          which=which, bsz=2)
 
 
+# --------------------------------------------------------------------------- #
+#                                    DMRGX                                    #
+# --------------------------------------------------------------------------- #
+
 class DMRGX(DMRG):
     """Class implmenting DMRG-X [1], whereby local effective energy eigenstates
     are chosen to maximise overlap with the previous step's state, leading to
@@ -645,8 +651,10 @@ class DMRGX(DMRG):
         The hamiltonian in MPO form, should have ~area-law eigenstates.
     p0 : MatrixProductState
         The intial MPS guess, e.g. a computation basis state.
-    bond_dims : int
-        The bond dimension to find the state for.
+    bond_dims : int or sequence of int
+        See :class:`DMRG`.
+    cutoffs : float or sequence of float
+        See :class:`DMRG`.
 
     Attributes
     ----------
@@ -656,7 +664,7 @@ class DMRGX(DMRG):
         The list of energies after each sweep.
     """
 
-    def __init__(self, ham, p0, bond_dims, cutoffs=1e-8, bsz=1, ):
+    def __init__(self, ham, p0, bond_dims, cutoffs=1e-8, bsz=1):
         super().__init__(ham, bond_dims=bond_dims, p0=p0, bsz=bsz,
                          cutoffs=cutoffs)
         # Want to keep track of energy variance as well
@@ -674,7 +682,7 @@ class DMRGX(DMRG):
         return self.variances[-1]
 
     def update_local_state_1site(self, eff_ham, eff_ovlp, i, direction,
-                                 dense=True, **compress_opts):
+                                 **compress_opts):
         """Like ``update_local_state``, but re-insert all eigenvectors, then
         choose the one with best overlap with ``eff_ovlp``.
         """
@@ -720,7 +728,7 @@ class DMRGX(DMRG):
         return evals[best]
 
     def update_local_state_2site(self, eff_ham, eff_ovlp, i, direction,
-                                 dense=True, **compress_opts):
+                                 **compress_opts):
         raise NotImplementedError("2-site DMRGX not implemented yet.")
 
     def update_local_state(self, eff_ham, eff_ovlp, i, **update_opts):
@@ -777,12 +785,9 @@ class DMRGX(DMRG):
         if verbose > 1:
             self._k.plot()
         if verbose > 0:
-            print(f"Energy={self.energy}, Variance={self.variance}",
-                  end="", flush=True)
-            if converged:
-                print(" ... converged!", flush=True)
-            else:
-                print(" ... not converged", flush=True)
+            msg = (f"Energy={self.energy}, Variance={self.variance} ... " +
+                   "converged!" if converged else "not converged")
+            print(msg, flush=True)
 
     def _check_convergence(self, tol):
-        return self.variances[-1] < tol
+        return self.variance < tol

@@ -203,14 +203,14 @@ class TestShellMatrix:
         a = rand_herm(100, sparse=True)
         alo = sp.linalg.aslinearoperator(a)
 
-        st_opts_dict = {
+        st_opts = {
             'STType': 'sinvert',
             'KSPType': 'bcgs',  # / 'gmres'
             'PType': 'none',
         }
 
         el, ev = seigsys_slepc(alo, k=1, which='TR', sigma=0.0,
-                               st_opts_dict=st_opts_dict)
+                               st_opts=st_opts, EPSType='krylovschur')
         el_s, ev_s = sp.linalg.eigsh(a.tocsc(), k=1, which='LM', sigma=0.0)
 
         assert_allclose(el_s, el, rtol=1e-5)
@@ -220,14 +220,14 @@ class TestShellMatrix:
         a = rand_herm(100, sparse=True)
         alo = sp.linalg.aslinearoperator(a)
 
-        st_opts_dict = {
+        st_opts = {
             'STType': 'precond',
             'KSPType': 'preonly',
             'PType': 'none',
         }
 
         el, ev = seigsys_slepc(alo, k=1, which='TR', sigma=0.0,
-                               st_opts_dict=st_opts_dict, EPSType='gd')
+                               st_opts=st_opts, EPSType='gd')
         el_s, ev_s = sp.linalg.eigsh(a.tocsc(), k=1, which='LM', sigma=0.0)
 
         assert_allclose(el_s, el, rtol=1e-6)
@@ -237,14 +237,14 @@ class TestShellMatrix:
         a = rand_herm(100, sparse=True)
         alo = sp.linalg.aslinearoperator(a)
 
-        st_opts_dict = {
+        st_opts = {
             'STType': 'precond',
             'KSPType': 'bcgs',  # / 'gmres'
             'PType': 'none',
         }
 
         el, ev = seigsys_slepc(alo, k=1, which='TR', sigma=0.0,
-                               st_opts_dict=st_opts_dict, EPSType='jd')
+                               st_opts=st_opts, EPSType='jd')
         el_s, ev_s = sp.linalg.eigsh(a.tocsc(), k=1, which='LM', sigma=0.0)
 
         assert_allclose(el_s, el, rtol=1e-6)

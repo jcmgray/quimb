@@ -325,7 +325,7 @@ def _which_scipy_to_slepc(which):
 
 
 def _init_eigensolver(k=6, which='LM', sigma=None, isherm=True,
-                      EPSType=None, st_opts_dict=(), tol=None,
+                      EPSType=None, st_opts=None, tol=None,
                       maxiter=None, ncv=None, l_win=None, comm=None):
     """Create an advanced eigensystem solver
 
@@ -344,8 +344,11 @@ def _init_eigensolver(k=6, which='LM', sigma=None, isherm=True,
 
     eigensolver = SLEPc.EPS().create(comm=comm)
 
+    if st_opts is None:
+        st_opts = {}
+
     if l_win is not None:
-        EPSType = 'ciss'
+        EPSType = {'ciss': 'ciss', None: 'ciss'}[EPSType]
         which = 'ALL'
         rg = eigensolver.getRG()
         rg.setType(SLEPc.RG.Type.INTERVAL)
@@ -354,15 +357,28 @@ def _init_eigensolver(k=6, which='LM', sigma=None, isherm=True,
         # rg_c = (l_win[0] + l_win[1]) / 2
         # rg_r = (l_win[1] - l_win[0]) / 2
         # rg.setEllipseParameters(rg_c, rg_r, 1)
-
-    if sigma is not None:
-        which = "TR"
-        eigensolver.setST(
-            _init_spectral_inverter(comm=comm, **dict(st_opts_dict)))
-        eigensolver.setTarget(sigma)
+    else:
+        eigensolver.setDimensions(k, ncv)
 
     if EPSType is None:
         EPSType = 'krylovschur'
+    # set some preconditioning defaults for 'gd' and 'lobpcg'
+    elif EPSType in ('gd', 'lobpcg'):
+        st_opts['STType'] = st_opts.get('STType', 'precond')
+        st_opts['KSPType'] = st_opts.get('KSPType', 'preonly')
+        st_opts['PType'] = st_opts.get('PType', 'none')
+    # set some preconditioning defaults for 'jd'
+    elif EPSType == 'jd':
+        st_opts['STType'] = st_opts.get('STType', 'precond')
+        st_opts['KSPType'] = st_opts.get('KSPType', 'bcgs')
+        st_opts['PType'] = st_opts.get('PType', 'none')
+
+    if sigma is not None:
+        which = "TR"
+        eigensolver.setTarget(sigma)
+
+    if st_opts:
+        eigensolver.setST(_init_spectral_inverter(comm=comm, **st_opts))
 
     eigensolver.setType(EPSType)
     eigensolver.setProblemType(SLEPc.EPS.ProblemType.HEP if isherm else
@@ -370,10 +386,6 @@ def _init_eigensolver(k=6, which='LM', sigma=None, isherm=True,
     eigensolver.setWhichEigenpairs(_which_scipy_to_slepc(which))
     eigensolver.setConvergenceTest(SLEPc.EPS.Conv.ABS)
     eigensolver.setTolerances(tol=tol, max_it=maxiter)
-
-    if l_win is None:
-        eigensolver.setDimensions(k, ncv)
-
     eigensolver.setFromOptions()
     return eigensolver
 
@@ -388,7 +400,7 @@ def seigsys_slepc(mat, k=6, *,
                   sort=True,
                   EPSType=None,
                   return_all_conv=False,
-                  st_opts_dict=(),
+                  st_opts=None,
                   tol=None,
                   maxiter=None,
                   l_win=None,
@@ -416,11 +428,11 @@ def seigsys_slepc(mat, k=6, *,
         Whether to return the eigenvectors.
     sort : bool, optional
         Whether to sort the eigenpairs in ascending real value.
-    EPSType : {"krylovschur", ...}, optional
+    EPSType : {"krylovschur", 'gd', 'lobpcg', 'jd', 'ciss'}, optional
         SLEPc eigensolver type to use, see slepc4py.EPSType.
     return_all_conv : bool, optional
         Whether to return converged eigenpairs beyond requested subspace size
-    st_opts_dict : dict, optional
+    st_opts : dict, optional
         options to send to the eigensolver internal inverter.
     tol : float, optional
         Tolerance.
@@ -439,25 +451,15 @@ def seigsys_slepc(mat, k=6, *,
     if comm is None:
         comm = get_default_comm()
 
-    # Need different defaults for interior eigensearch of shell matrix
-    if (
-            isinstance(mat, sp.linalg.LinearOperator) and
-            (sigma is not None) and
-            (EPSType is None) and
-            st_opts_dict is ()
-    ):
-        # Note : probably very slow compared to converting to explicit matrix!
+    if isinstance(mat, sp.linalg.LinearOperator) and EPSType is None:
         EPSType = 'gd'
-        st_opts_dict = {'STType': 'precond',
-                        'KSPType': 'preonly',
-                        'PType': 'none'}
 
     eigensolver = _init_eigensolver(
         which=("SA" if (which is None) and (sigma is None) else
                "TR" if (which is None) and (sigma is not None) else
                which),
         EPSType=EPSType, k=k, sigma=sigma, isherm=isherm, tol=tol, ncv=ncv,
-        maxiter=maxiter, st_opts_dict=st_opts_dict, comm=comm, l_win=l_win)
+        maxiter=maxiter, st_opts=st_opts, comm=comm, l_win=l_win)
 
     # set up the initial operators and solve
     mat = convert_mat_to_petsc(mat, comm=comm)
