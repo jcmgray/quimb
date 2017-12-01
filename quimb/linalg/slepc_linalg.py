@@ -362,11 +362,13 @@ def _init_eigensolver(k=6, which='LM', sigma=None, isherm=True,
 
     if EPSType is None:
         EPSType = 'krylovschur'
+
     # set some preconditioning defaults for 'gd' and 'lobpcg'
     elif EPSType in ('gd', 'lobpcg'):
         st_opts['STType'] = st_opts.get('STType', 'precond')
         st_opts['KSPType'] = st_opts.get('KSPType', 'preonly')
         st_opts['PType'] = st_opts.get('PType', 'none')
+
     # set some preconditioning defaults for 'jd'
     elif EPSType == 'jd':
         st_opts['STType'] = st_opts.get('STType', 'precond')
@@ -377,7 +379,7 @@ def _init_eigensolver(k=6, which='LM', sigma=None, isherm=True,
         which = "TR"
         eigensolver.setTarget(sigma)
 
-    if st_opts:
+    if st_opts or sigma is not None:
         eigensolver.setST(_init_spectral_inverter(comm=comm, **st_opts))
 
     eigensolver.setType(EPSType)
