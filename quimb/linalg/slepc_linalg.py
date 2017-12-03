@@ -476,7 +476,7 @@ def seigsys_slepc(mat, k=6, *,
     nconv = eigensolver.getConverged()
     k = nconv if (return_all_conv or l_win is not None) else k
     if nconv < k:
-        raise RuntimeError("SLEPC eigs did not find enough singular triplets, "
+        raise RuntimeError("SLEPC eigs did not find enough eigenpairs, "
                            "wanted: {}, found: {}.".format(k, nconv))
 
     # get eigenvalues
@@ -577,7 +577,7 @@ def svds_slepc(mat, k=6, ncv=None, return_vecs=True, SVDType='cross',
             uk = np.asmatrix(np.concatenate(lus, axis=1))
             vtk = np.asmatrix(np.concatenate(lvs, axis=0).conjugate())
             res = uk, sk, vtk
-    elif rank == 0:
+    else:
         res = np.asarray([svd_solver.getValue(i) for i in range(k)])
 
     comm.Barrier()
