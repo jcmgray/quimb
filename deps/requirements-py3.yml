@@ -20,4 +20,4 @@ dependencies:
   - pip:
     - codeclimate-test-reporter
     - codacy-coverage
-    - "--editable=git+https://github.com/dgasmith/opt_einsum.git"
+    - "git+https://github.com/dgasmith/opt_einsum.git"
