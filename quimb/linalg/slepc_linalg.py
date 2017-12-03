@@ -375,12 +375,14 @@ def _init_eigensolver(k=6, which='LM', sigma=None, isherm=True,
         st_opts['KSPType'] = st_opts.get('KSPType', 'bcgs')
         st_opts['PType'] = st_opts.get('PType', 'none')
 
-    if sigma is not None:
-        which = "TR"
-        eigensolver.setTarget(sigma)
-
-    if st_opts or sigma is not None:
+    # set the spectral inverter / preconditioner.
+    if st_opts or (sigma is not None):
         eigensolver.setST(_init_spectral_inverter(comm=comm, **st_opts))
+
+        # NB: `setTarget` must be called *after* `setST`.
+        if sigma is not None:
+            which = "TR"
+            eigensolver.setTarget(sigma)
 
     eigensolver.setType(EPSType)
     eigensolver.setProblemType(SLEPc.EPS.ProblemType.HEP if isherm else
