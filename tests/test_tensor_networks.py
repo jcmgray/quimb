@@ -1140,7 +1140,7 @@ class TestDMRGX:
 
     def test_explicit_sweeps(self):
         # import pdb; pdb.set_trace()
-        n = 12
+        n = 8
         chi = 16
         ham = MPO_ham_mbl(n, dh=5, run=42)
         p0 = MPS_neel_state(n).expand_bond_dimension(chi)
