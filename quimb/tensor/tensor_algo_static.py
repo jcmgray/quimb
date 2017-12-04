@@ -681,8 +681,8 @@ class DMRGX(DMRG):
     def variance(self):
         return self.variances[-1]
 
-    def update_local_state_1site(self, eff_ham, eff_ovlp, i, direction,
-                                 **compress_opts):
+    def update_local_state_1site_dmrgx(self, eff_ham, eff_ovlp, i, direction,
+                                       **compress_opts):
         """Like ``update_local_state``, but re-insert all eigenvectors, then
         choose the one with best overlap with ``eff_ovlp``.
         """
@@ -727,14 +727,14 @@ class DMRGX(DMRG):
 
         return evals[best]
 
-    def update_local_state_2site(self, eff_ham, eff_ovlp, i, direction,
-                                 **compress_opts):
+    def update_local_state_2site_dmrgx(self, eff_ham, eff_ovlp, i, direction,
+                                       **compress_opts):
         raise NotImplementedError("2-site DMRGX not implemented yet.")
 
-    def update_local_state(self, eff_ham, eff_ovlp, i, **update_opts):
+    def update_local_state_dmrgx(self, eff_ham, eff_ovlp, i, **update_opts):
         return {
-            1: self.update_local_state_1site,
-            2: self.update_local_state_2site,
+            1: self.update_local_state_1site_dmrgx,
+            2: self.update_local_state_2site_dmrgx,
         }[self.bsz](eff_ham, eff_ovlp, i, **update_opts)
 
     def sweep_right(self, canonize=True, verbose=False, **update_opts):
@@ -754,7 +754,7 @@ class DMRGX(DMRG):
         for i in sweep:
             enrg_envs.move_to(i)
             ovlp_envs.move_to(i)
-            en = self.update_local_state(
+            en = self.update_local_state_dmrgx(
                 enrg_envs(), ovlp_envs(), i, direction='right', **update_opts)
 
         return en
@@ -772,7 +772,7 @@ class DMRGX(DMRG):
         for i in reversed(range(0, self.n)):
             enrg_envs.move_to(i)
             ovlp_envs.move_to(i)
-            en = self.update_local_state(
+            en = self.update_local_state_dmrgx(
                 enrg_envs(), ovlp_envs(), i, direction='left', **update_opts)
 
         return en
