@@ -180,7 +180,7 @@ def tensor_contract(*tensors, output_inds=None):
 # generate a random base to avoid collisions on difference processes ...
 r_bs_str = str(uuid.uuid4())[:6]
 # but then make the list orderable to help contraction caching
-RAND_UUIDS = map(r_bs_str.join, itertools.product(string.hexdigits, repeat=7))
+RAND_UUIDS = map("".join, itertools.product(string.hexdigits, repeat=7))
 
 
 def rand_uuid(base=""):
@@ -195,7 +195,7 @@ def rand_uuid(base=""):
     >>> rand_uuid('virt-bond')
     'virt-bond_bf342e68'
     """
-    return base + "_" + next(RAND_UUIDS)
+    return base + "_" + r_bs_str + next(RAND_UUIDS)
 
 
 @njit  # pragma: no cover
