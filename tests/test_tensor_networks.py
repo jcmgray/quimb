@@ -1140,7 +1140,7 @@ class TestDMRGX:
 
     def test_explicit_sweeps(self):
         # import pdb; pdb.set_trace()
-        n = 10
+        n = 12
         chi = 16
         ham = MPO_ham_mbl(n, dh=5, run=42)
         p0 = MPS_neel_state(n).expand_bond_dimension(chi)
@@ -1150,11 +1150,10 @@ class TestDMRGX:
         en0 = np.asscalar(p0 & ham & b0 ^ ...)
 
         dmrgx = DMRGX(ham, p0, chi)
-        en1 = dmrgx.sweep_right()
-
+        dmrgx.sweep_right()
+        en1 = dmrgx.sweep_left(canonize=False)
         assert en0 != en1
 
-        dmrgx.sweep_left(canonize=False)
         dmrgx.sweep_right(canonize=False)
         en = dmrgx.sweep_right(canonize=True)
 
