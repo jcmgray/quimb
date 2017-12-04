@@ -4,6 +4,8 @@ import os
 import functools
 import operator
 import copy
+import itertools
+import string
 import uuid
 
 from cytoolz import (
@@ -175,6 +177,12 @@ def tensor_contract(*tensors, output_inds=None):
     return Tensor(data=o_array, inds=o_ix, tags=o_tags)
 
 
+# generate a random base to avoid collisions on difference processes ...
+r_bs_str = str(uuid.uuid4())[:6]
+# but then make the list orderable to help contraction caching
+RAND_UUIDS = map(r_bs_str.join, itertools.product(string.hexdigits, repeat=7))
+
+
 def rand_uuid(base=""):
     """Return a guaranteed unique, shortish identifier, optional appended
     to ``base``.
@@ -187,8 +195,7 @@ def rand_uuid(base=""):
     >>> rand_uuid('virt-bond')
     'virt-bond_bf342e68'
     """
-
-    return base + "_" + str(uuid.uuid4())[:8]
+    return base + "_" + next(RAND_UUIDS)
 
 
 @njit  # pragma: no cover
