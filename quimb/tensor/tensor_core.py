@@ -21,38 +21,16 @@ from ..accel import prod, njit
 from ..linalg.base_linalg import norm_fro_dense
 
 try:
-    # opt_einsum is highly recommended as until numpy 1.14 einsum contractions
-    # do not use BLAS.
     import opt_einsum
     einsum = opt_einsum.contract
+    einsum_expression = opt_einsum.contract_expression
 
     @functools.wraps(opt_einsum.contract_path)
     def einsum_path(*args, optimize='greedy', memory_limit=2**28, **kwargs):
         return opt_einsum.contract_path(
             *args, path=optimize, memory_limit=memory_limit, **kwargs)
-
 except ImportError:
-
-    @functools.wraps(np.einsum)
-    def einsum(*args, optimize='greedy', memory_limit=2**28, **kwargs):
-
-        if optimize is False:
-            return np.einsum(*args, optimize=False, **kwargs)
-
-        explicit_path = (isinstance(optimize, (tuple, list)) and
-                         optimize[0] == 'einsum_path')
-
-        if explicit_path:
-            optimize = optimize
-        else:
-            optimize = (optimize, memory_limit)
-
-        return np.einsum(*args, optimize=optimize, **kwargs)
-
-    @functools.wraps(np.einsum_path)
-    def einsum_path(*args, optimize='greedy', memory_limit=2**28, **kwargs):
-        return np.einsum_path(
-            *args, optimize=(optimize, memory_limit), **kwargs)
+    pass
 
 
 # --------------------------------------------------------------------------- #
@@ -130,9 +108,9 @@ class HuskArray(np.ndarray):
 
 
 @functools.lru_cache(4096)
-def cache_einsum_path_on_shape(contract_str, *shapes):
-    return einsum_path(contract_str, *(HuskArray(shape) for shape in shapes),
-                       memory_limit=2**28, optimize='greedy')[0]
+def cached_einsum_expr(contract_str, *shapes):
+    return einsum_expression(contract_str, *shapes,
+                             memory_limit=2**28, optimize='greedy')
 
 
 def tensor_contract(*tensors, output_inds=None):
@@ -163,10 +141,8 @@ def tensor_contract(*tensors, output_inds=None):
     contract_str = _maybe_map_indices_to_alphabet([*unique(a_ix)], i_ix, o_ix)
 
     # perform the contraction
-    path = cache_einsum_path_on_shape(
-        contract_str, *(t.shape for t in tensors))
-    o_array = einsum(
-        contract_str, *(t.data for t in tensors), optimize=path)
+    expression = cached_einsum_expr(contract_str, *(t.shape for t in tensors))
+    o_array = expression(*(t.data for t in tensors))
 
     if not o_ix:
         return o_array
