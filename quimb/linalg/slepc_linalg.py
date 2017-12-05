@@ -288,7 +288,8 @@ def _init_spectral_inverter(STType="sinvert",
     # Preconditioner and linear solver
     P = PETSc.PC().create(comm=comm)
     P.setType(PType)
-    P.setFactorSolverPackage(PFactorSolverPackage)
+    if PFactorSolverPackage:
+        P.setFactorSolverPackage(PFactorSolverPackage)
     P.setFromOptions()
     # Krylov subspace
     K = PETSc.KSP().create(comm=comm)

@@ -110,3 +110,7 @@ Build the python interfaces
     python setup.py build
     python setup.py install
 
+
+.. note ::
+
+    It is possible to compile several versions of PETSc/SLEPc side by side, for example a ``--with-scalar-type=real`` version, naming them with different values of ``PETSC_ARCH``. When loading PETSc/SLEPc, ``quimb`` respects ``PETSC_ARCH`` if it is set, but it cannot dynamically switch bewteen them.

@@ -96,7 +96,7 @@ class MovingEnvironment:
 
     Does not necessarily need to be an operator overlap tensor network. Useful
     for any kind of sweep where only local tensor updates are being made. Note
-     that *only* the current site is completely up-to-date.
+    that *only* the current site is completely up-to-date.
 
     Parameters
     ----------
@@ -226,7 +226,7 @@ def parse_2site_inds_dims(k, b, i):
 
 
 class DMRG:
-    """Single site, fixed bond-dimension variational groundstate search.
+    """Density Matrix Renormalization Group variational groundstate search.
     Some initialising arguments act as defaults, but can be overidden with
     each solve or sweep.
 
@@ -239,11 +239,11 @@ class DMRG:
         corresponds to the maximum bond dimension when splitting the effective
         local groundstate. If a sequence is supplied then successive sweeps
         iterate through, then repeate the final value. E.g.
-        ``[16, 32, 64] -> (16, 32, 64, 64, 64, ...)```.
+        ``[16, 32, 64] -> (16, 32, 64, 64, 64, ...)``.
     cutoffs : dict-like
         The cutoff threshold(s) to use when compressing. If a sequence is
         supplied then successive sweeps iterate through, then repeate the final
-        value. E.g. ``[1e-5, 1e-7, 1e-9] -> (1e-5, 1e-7, 1e-9, 1e-9, ...)```.
+        value. E.g. ``[1e-5, 1e-7, 1e-9] -> (1e-5, 1e-7, 1e-9, 1e-9, ...)``.
     bsz : {1, 2}
         Number of sites to optimize for locally i.e. DMRG1 or DMRG2.
     which : {'SA', 'LA'}, optional
@@ -319,7 +319,7 @@ class DMRG:
 
     # -------------------- standard DMRG update methods --------------------- #
 
-    def compress_after_1site_update(self, direction, i, **compress_opts):
+    def _compress_after_1site_update(self, direction, i, **compress_opts):
         """Compress a site having updated it.
         """
         if (direction == 'right') and (i < self.n - 1):
@@ -338,7 +338,7 @@ class DMRG:
             tol=self.opts['eff_eig_tol'],
             maxiter=self.opts['eff_eig_maxiter'])
 
-    def update_local_state_1site(self, eff_ham, i, direction, **compress_opts):
+    def _update_local_state_1site(self, i, direction, **compress_opts):
         """Find the single site effective tensor groundstate of::
 
 
@@ -364,11 +364,12 @@ class DMRG:
 
         if dense:
             # contract remaining hamiltonian and get its dense representation
-            eff_ham = (eff_ham ^ '__ham__')['__ham__']
+            eff_ham = (self._eff_ham ^ '__ham__')['__ham__']
             eff_ham.fuse((('lower', lix), ('upper', uix)), inplace=True)
             op = eff_ham.data
         else:
-            op = EffHamOp(eff_ham, dims=dims, upper_inds=uix, lower_inds=lix)
+            op = EffHamOp(self._eff_ham, dims=dims,
+                          upper_inds=uix, lower_inds=lix)
 
         eff_e, eff_gs = self._seigsys(op, v0=self._k.site[i].data)
 
@@ -376,10 +377,10 @@ class DMRG:
         self._k.site[i].data = eff_gs
         self._b.site[i].data = eff_gs.conj()
 
-        self.compress_after_1site_update(direction, i, **compress_opts)
+        self._compress_after_1site_update(direction, i, **compress_opts)
         return eff_e[0]
 
-    def update_local_state_2site(self, eff_ham, i, direction, **compress_opts):
+    def _update_local_state_2site(self, i, direction, **compress_opts):
         """Find the 2-site effective tensor groundstate of::
 
 
@@ -405,11 +406,12 @@ class DMRG:
         # form the local operator to find ground-state of
         if dense:
             # contract remaining hamiltonian and get its dense representation
-            eff_ham = (eff_ham ^ '__ham__')['__ham__']
+            eff_ham = (self._eff_ham ^ '__ham__')['__ham__']
             eff_ham.fuse((('lower', lix), ('upper', uix)), inplace=True)
             op = eff_ham.data
         else:
-            op = EffHamOp(eff_ham, upper_inds=uix, lower_inds=lix, dims=dims)
+            op = EffHamOp(self._eff_ham, upper_inds=uix,
+                          lower_inds=lix, dims=dims)
 
         # find the 2-site local groundstate using previous as initial guess
         v0 = self._k.site[i].contract(self._k.site[i + 1],
@@ -429,11 +431,11 @@ class DMRG:
 
         return eff_e[0]
 
-    def update_local_state(self, eff_ham, i, **update_opts):
+    def _update_local_state(self, i, **update_opts):
         return {
-            1: self.update_local_state_1site,
-            2: self.update_local_state_2site,
-        }[self.bsz](eff_ham, i, **update_opts)
+            1: self._update_local_state_1site,
+            2: self._update_local_state_2site,
+        }[self.bsz](i, **update_opts)
 
     def sweep_right(self, canonize=True, verbose=False, **update_opts):
         """Perform a sweep of optimizations rightwards::
@@ -459,16 +461,16 @@ class DMRG:
         if canonize:
             self._k.right_canonize(bra=self._b)
 
-        eff_envs = MovingEnvironment(self.TN_energy, self.n, 'left', self.bsz)
+        eff_hams = MovingEnvironment(self.TN_energy, self.n, 'left', self.bsz)
 
         sweep = range(0, self.n - self.bsz + 1)
         if verbose:
             sweep = progbar(sweep, ncols=80)
 
         for i in sweep:
-            eff_envs.move_to(i)
-            en = self.update_local_state(
-                eff_envs(), i, direction='right', **update_opts)
+            eff_hams.move_to(i)
+            self._eff_ham = eff_hams()
+            en = self._update_local_state(i, direction='right', **update_opts)
 
         return en
 
@@ -496,16 +498,16 @@ class DMRG:
         if canonize:
             self._k.left_canonize(bra=self._b)
 
-        eff_envs = MovingEnvironment(self.TN_energy, self.n, 'right', self.bsz)
+        eff_hams = MovingEnvironment(self.TN_energy, self.n, 'right', self.bsz)
 
         sweep = reversed(range(0, self.n - self.bsz + 1))
         if verbose:
             sweep = progbar(sweep, ncols=80)
 
         for i in sweep:
-            eff_envs.move_to(i)
-            en = self.update_local_state(
-                eff_envs(), i, direction='left', **update_opts)
+            eff_hams.move_to(i)
+            self._eff_ham = eff_hams()
+            en = self._update_local_state(i, direction='left', **update_opts)
 
         return en
 
@@ -552,7 +554,7 @@ class DMRG:
               bond_dims=None,
               cutoffs=None,
               sweep_sequence='R',
-              max_sweeps=10,
+              max_sweeps=8,
               verbose=0):
         """Solve the system with a sequence of sweeps, up to a certain
         absolute tolerance in the energy or maximum number of sweeps.
@@ -621,7 +623,8 @@ class DMRG1(DMRG):
     """
     __doc__ += DMRG.__doc__
 
-    def __init__(self, ham, bond_dims, cutoffs=1e-8, which='SA'):
+    def __init__(self, ham, which='SA',
+                 bond_dims=[8, 16, 32, 64], cutoffs=1e-8):
         super().__init__(ham, bond_dims=bond_dims, cutoffs=cutoffs,
                          which=which, bsz=1)
 
@@ -631,7 +634,8 @@ class DMRG2(DMRG):
     """
     __doc__ += DMRG.__doc__
 
-    def __init__(self, ham, bond_dims, cutoffs=1e-8, which='SA'):
+    def __init__(self, ham, which='SA',
+                 bond_dims=[10, 20, 50, 100], cutoffs=1e-8):
         super().__init__(ham, bond_dims=bond_dims, cutoffs=cutoffs,
                          which=which, bsz=2)
 
@@ -696,9 +700,8 @@ class DMRGX(DMRG):
     def variance(self):
         return self.variances[-1]
 
-    def update_local_state_1site_dmrgx(self, eff_ham, eff_ovlp, i, direction,
-                                       **compress_opts):
-        """Like ``update_local_state``, but re-insert all eigenvectors, then
+    def _update_local_state_1site_dmrgx(self, i, direction, **compress_opts):
+        """Like ``_update_local_state``, but re-insert all eigenvectors, then
         choose the one with best overlap with ``eff_ovlp``.
         """
         uix = self._k.site[i].inds
@@ -706,7 +709,7 @@ class DMRGX(DMRG):
         dims = self._k.site[i].shape
 
         # contract remaining hamiltonian and get its dense representation
-        eff_ham = (eff_ham ^ '__ham__')['__ham__']
+        eff_ham = (self._eff_ham ^ '__ham__')['__ham__']
         eff_ham.fuse((('lower', lix), ('upper', uix)), inplace=True)
         op = eff_ham.data
 
@@ -745,7 +748,7 @@ class DMRGX(DMRG):
         #     0-0-0-0-0-0-0-0-0-0-0  <- state from previous step
         #
         # choose the eigenvectors with best overlap
-        overlaps = np.abs((eff_ovlp ^ ...).data)
+        overlaps = np.abs((self._eff_ovlp ^ ...).data)
 
         if self.opts['overlap_thresh'] == 1:
             # just choose the maximum overlap state
@@ -781,7 +784,7 @@ class DMRGX(DMRG):
                 #           |'__ev_ind__'
                 #
                 # use einsum notation to get diagonal of left hand term
-                en2 = tensor_contract(*self._eff_en2.tensors,
+                en2 = tensor_contract(*self._eff_ham2.tensors,
                                       output_inds=['__ev_ind__']).data
 
                 # then find minimum variance
@@ -793,18 +796,47 @@ class DMRGX(DMRG):
         # store the current effective energy for possibly targeted seigsys
         self._target_energy = evals[best]
 
-        self.compress_after_1site_update(direction, i, **compress_opts)
+        self._compress_after_1site_update(direction, i, **compress_opts)
         return evals[best]
 
-    def update_local_state_2site_dmrgx(self, eff_ham, eff_ovlp, i, direction,
-                                       **compress_opts):
+    def _update_local_state_2site_dmrgx(self, i, direction, **compress_opts):
         raise NotImplementedError("2-site DMRGX not implemented yet.")
+        dims, lix_L, lix_R, lix, uix_L, uix_R, uix, l_bond_ind, u_bond_ind = \
+            parse_2site_inds_dims(self._k, self._b, i)
 
-    def update_local_state_dmrgx(self, eff_ham, eff_ovlp, i, **update_opts):
+        # contract remaining hamiltonian and get its dense representation
+        eff_ham = (self._eff_ham ^ '__ham__')['__ham__']
+        eff_ham.fuse((('lower', lix), ('upper', uix)), inplace=True)
+        op = eff_ham.data
+
+        # eigen-decompose and reshape eigenvectors thus::
+        #
+        #    ||'__ev_ind__'
+        #    EE
+        #   /||\
+        #
+        D = prod(dims)
+        if D <= self.opts['eff_eig_partial_cutoff']:
+            evals, evecs = eigsys(op)
+        else:
+            if isinstance(self.opts['eff_eig_partial_k'], float):
+                k = int(self.opts['eff_eig_partial_k'] * D)
+            else:
+                k = self.opts['eff_eig_partial_k']
+
+            # find the 2-site local state using previous as initial guess
+            v0 = self._k.site[i].contract(self._k.site[i + 1],
+                                          output_inds=uix).data
+
+            evals, evecs = seigsys(
+                op, sigma=self.energies[-1], v0=v0,
+                k=k, tol=self.opts['eff_eig_tol'], backend='scipy')
+
+    def _update_local_state(self, i, **update_opts):
         return {
-            1: self.update_local_state_1site_dmrgx,
-            2: self.update_local_state_2site_dmrgx,
-        }[self.bsz](eff_ham, eff_ovlp, i, **update_opts)
+            1: self._update_local_state_1site_dmrgx,
+            2: self._update_local_state_2site_dmrgx,
+        }[self.bsz](i, **update_opts)
 
     def sweep_right(self, canonize=True, verbose=False, **update_opts):
         self.old_k = self._k.copy().H
@@ -813,21 +845,22 @@ class DMRGX(DMRG):
         if canonize:
             self._k.right_canonize(bra=self._b)
 
-        enrg_envs = MovingEnvironment(self.TN_energy, self.n, start='left')
-        enrg2_envs = MovingEnvironment(self.TN_en_var2, self.n, start='left')
-        ovlp_envs = MovingEnvironment(TN_overlap, self.n, start='left')
+        eff_hams = MovingEnvironment(self.TN_energy, self.n, start='left')
+        eff_ham2s = MovingEnvironment(self.TN_en_var2, self.n, start='left')
+        eff_ovlps = MovingEnvironment(TN_overlap, self.n, start='left')
 
         sweep = range(0, self.n - self.bsz + 1)
         if verbose:
             sweep = progbar(sweep, ncols=80)
 
         for i in sweep:
-            enrg_envs.move_to(i)
-            enrg2_envs.move_to(i)
-            ovlp_envs.move_to(i)
-            self._eff_en2 = enrg2_envs()
-            en = self.update_local_state_dmrgx(
-                enrg_envs(), ovlp_envs(), i, direction='right', **update_opts)
+            eff_hams.move_to(i)
+            eff_ham2s.move_to(i)
+            eff_ovlps.move_to(i)
+            self._eff_ham = eff_hams()
+            self._eff_ovlp = eff_ovlps()
+            self._eff_ham2 = eff_ham2s()
+            en = self._update_local_state(i, direction='right', **update_opts)
 
         return en
 
@@ -838,17 +871,18 @@ class DMRGX(DMRG):
         if canonize:
             self._k.left_canonize(bra=self._b)
 
-        enrg_envs = MovingEnvironment(self.TN_energy, self.n, start='right')
-        enrg2_envs = MovingEnvironment(self.TN_en_var2, self.n, start='right')
-        ovlp_envs = MovingEnvironment(TN_overlap, self.n, start='right')
+        eff_hams = MovingEnvironment(self.TN_energy, self.n, start='right')
+        eff_ham2s = MovingEnvironment(self.TN_en_var2, self.n, start='right')
+        eff_ovlps = MovingEnvironment(TN_overlap, self.n, start='right')
 
         for i in reversed(range(0, self.n)):
-            enrg_envs.move_to(i)
-            enrg2_envs.move_to(i)
-            ovlp_envs.move_to(i)
-            self._eff_en2 = enrg2_envs()
-            en = self.update_local_state_dmrgx(
-                enrg_envs(), ovlp_envs(), i, direction='left', **update_opts)
+            eff_hams.move_to(i)
+            eff_ham2s.move_to(i)
+            eff_ovlps.move_to(i)
+            self._eff_ham = eff_hams()
+            self._eff_ovlp = eff_ovlps()
+            self._eff_ham2 = eff_ham2s()
+            en = self._update_local_state(i, direction='left', **update_opts)
 
         return en
 

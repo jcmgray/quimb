@@ -286,7 +286,6 @@ Specialised Linalg
 .. autosummary::
     :toctree: _autosummary
 
-    choose_ncv
     seigsys_scipy
     scipy_svds
 
