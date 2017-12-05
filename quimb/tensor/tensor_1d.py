@@ -67,6 +67,8 @@ def align_TN_1D(*tns, ind_ids=None, inplace=False):
 
 
 class TensorNetwork1D(TensorNetwork):
+    """
+    """
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -776,7 +778,7 @@ class MatrixProductOperator(TensorNetwork1D):
 
     Parameters
     ----------
-    *arrays : sequence of arrays
+    arrays : sequence of arrays
         The tensor arrays to form into a MPO.
     shape : str, optional
         String specifying layout of the tensors. E.g. 'lrud' (the default)
