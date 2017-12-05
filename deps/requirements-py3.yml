@@ -14,7 +14,6 @@ dependencies:
   - coverage
   - pytest
   - pytest-cov
-  - sphinx_bootstrap_theme
   - coveralls
   - codecov
   - pip:

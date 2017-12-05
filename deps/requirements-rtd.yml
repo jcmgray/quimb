@@ -8,16 +8,17 @@ dependencies:
   - scipy
   - numba
   - numexpr
-  - opt_einsum
   - psutil
   - cytoolz
   - tqdm
   - coverage
   - pytest
   - pytest-cov
+  - sphinx
   - sphinx_bootstrap_theme
   - coveralls
   - codecov
   - pip:
     - codeclimate-test-reporter
     - codacy-coverage
+    - "git+https://github.com/jcmgray/opt_einsum.git"
