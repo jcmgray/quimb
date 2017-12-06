@@ -382,6 +382,8 @@ Tensor Networks
     MPS_neel_state
     MPS_zero_state
     MPO_identity
+    MPO_identity_like
+    MPO_rand_herm
     MPOSpinHam
     MPO_ham_ising
     MPO_ham_XY

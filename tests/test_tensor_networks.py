@@ -32,6 +32,8 @@ from quimb.tensor import (
     MPS_neel_state,
     MPS_zero_state,
     MPO_identity,
+    MPO_identity_like,
+    MPO_rand_herm,
     MPO_ham_ising,
     MPO_ham_XY,
     MPO_ham_heis,
@@ -902,6 +904,24 @@ class TestMatrixProductOperator:
         k, i, b = align_TN_1D(k, i, b)
         o2 = (k & i & b) ^ ...
         assert_allclose(o1, o2)
+
+    @pytest.mark.parametrize("dtype", (complex, float))
+    def test_mpo_rand_herm_and_trace(self, dtype):
+        op = MPO_rand_herm(20, bond_dim=5, phys_dim=3, dtype=dtype)
+        assert_allclose(op.H @ op, 1.0)
+        tr_val = op.trace()
+        assert tr_val != 0.0
+        assert_allclose(tr_val.imag, 0.0, atol=1e-14)
+
+    def test_mpo_rand_herm_trace_and_identity_like(self):
+        op = MPO_rand_herm(20, bond_dim=5, phys_dim=3, upper_ind_id='foo{}')
+        t = op.trace()
+        assert t != 0.0
+        Id = MPO_identity_like(op)
+        assert_allclose(Id.trace(), 3**20)
+        Id.site[0] *= 3 / 3**20
+        op += Id
+        assert_allclose(op.trace(), t + 3)
 
 
 class TestSpecificStatesOperators:

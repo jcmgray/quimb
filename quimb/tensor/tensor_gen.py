@@ -26,14 +26,8 @@ def rand_tensor(shape, inds, tags=None, dtype=complex):
 #                                    MPSs                                     #
 # --------------------------------------------------------------------------- #
 
-def MPS_rand_state(n, bond_dim, phys_dim=2,
-                   site_ind_id='k{}',
-                   site_tag_id='i{}',
-                   tags=None,
-                   bond_name="",
-                   normalize=True,
-                   dtype=complex,
-                   **mps_opts):
+def MPS_rand_state(n, bond_dim, phys_dim=2, normalize=True,
+                   dtype=complex, **mps_opts):
     """Generate a random matrix product state.
 
     Parameters
@@ -42,14 +36,12 @@ def MPS_rand_state(n, bond_dim, phys_dim=2,
         The bond dimension.
     phys_dim : int, optional
         The physical (site) dimensions, defaults to 2.
-    site_ind_id : sequence of hashable, or str
-        See :class:`~quimb.tensor.tensor_1d.MatrixProductState`.
-    site_tag_id=None, optional
-        See :class:`~quimb.tensor.tensor_1d.MatrixProductState`.
-    tags=None, optional
-        See :class:`~quimb.tensor.tensor_1d.MatrixProductState`.
-    bond_name : str, optional
-        See :class:`~quimb.tensor.tensor_1d.MatrixProductState`.
+    normalize : bool, optional
+        Whether to normalize the state.
+    dtype : {complex, float}, optional
+        What dtype to use.
+    mps_opts
+        Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductState`.
     """
     shapes = [(bond_dim, phys_dim),
               *((bond_dim, bond_dim, phys_dim),) * (n - 2),
@@ -68,9 +60,7 @@ def MPS_rand_state(n, bond_dim, phys_dim=2,
         map(lambda x: x / norm_fro_dense(x)**(1 / (x.ndim - 1)),
             map(def_gen_data, shapes))
 
-    rmps = MatrixProductState(arrays, site_ind_id=site_ind_id,
-                              bond_name=bond_name, site_tag_id=site_tag_id,
-                              tags=tags, **mps_opts)
+    rmps = MatrixProductState(arrays, **mps_opts)
 
     if normalize:
         rmps.site[-1] /= (rmps.H @ rmps)**0.5
@@ -168,6 +158,64 @@ def MPO_identity(n, phys_dim=2, **mpo_opts):
         yield np.identity(phys_dim).reshape(1, phys_dim, phys_dim)
 
     return MatrixProductOperator(gen_arrays(), **mpo_opts)
+
+
+def MPO_identity_like(mpo, **mpo_opts):
+    """Return an identity matrix operator with the same physical index and
+    inds/tags as ``mpo``.
+    """
+    return MPO_identity(n=mpo.nsites, phys_dim=mpo.phys_dim(),
+                        site_tag_id=mpo.site_tag_id,
+                        upper_ind_id=mpo.upper_ind_id,
+                        lower_ind_id=mpo.lower_ind_id)
+
+
+
+def MPO_rand_herm(n, bond_dim, phys_dim=2, normalize=True,
+                  dtype=complex, **mpo_opts):
+    """Generate a random matrix product state.
+
+    Parameters
+    ----------
+    bond_dim : int
+        The bond dimension.
+    phys_dim : int, optional
+        The physical (site) dimensions, defaults to 2.
+    normalize : bool, optional
+        Whether to normalize the operator such that ``trace(A.H @ A) == 1``.
+    dtype : {complex, float}, optional
+        What dtype to use.
+    mpo_opts
+        Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductOperator`.
+    """
+    shapes = [(bond_dim, phys_dim, phys_dim),
+              *((bond_dim, bond_dim, phys_dim, phys_dim),) * (n - 2),
+              (bond_dim, phys_dim, phys_dim)]
+
+    if dtype in (float, np.float_):
+        def def_gen_data(shape):
+            data = np.random.randn(*shape)
+            trans = (0, 2, 1) if len(shape) == 3 else (0, 1, 3, 2)
+            return data + data.transpose(*trans)
+    elif dtype in (complex, np.complex_):
+        def def_gen_data(shape):
+            data = np.random.randn(*shape) + 1.0j * np.random.randn(*shape)
+            trans = (0, 2, 1) if len(shape) == 3 else (0, 1, 3, 2)
+            return data + data.transpose(trans).conj()
+    else:
+        raise TypeError("dtype not understood - should be float or complex.")
+
+    arrays = \
+        map(lambda x: x / norm_fro_dense(x)**(1 / (x.ndim - 1)),
+            map(def_gen_data, shapes))
+
+    rmps = MatrixProductOperator(arrays, **mpo_opts)
+
+    if normalize:
+        rmps.site[-1] /= (rmps.H @ rmps)**0.5
+
+    return rmps
+
 
 
 def spin_ham_mpo_tensor(one_site_terms, two_site_terms, S=1 / 2, which=None):

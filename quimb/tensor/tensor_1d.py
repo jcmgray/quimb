@@ -765,7 +765,7 @@ class MatrixProductState(TensorNetwork1D):
                            .fuse({'all': self.site_inds})
                            .data.reshape(-1, 1))
 
-    def phys_dim(self, i):
+    def phys_dim(self, i=0):
         return self.site[i].ind_size(self.site_ind_id.format(i))
 
     @functools.wraps(align_TN_1D)
@@ -964,6 +964,11 @@ class MatrixProductOperator(TensorNetwork1D):
 
         return summed
 
+    def trace(self):
+        traced = self.copy()
+        traced.upper_ind_id = traced.lower_ind_id
+        return traced ^ ...
+
     def __add__(self, other):
         """MPO addition.
         """
@@ -1004,7 +1009,7 @@ class MatrixProductOperator(TensorNetwork1D):
         d = int(data.size**0.5)
         return np.matrix(data.reshape(d, d))
 
-    def phys_dim(self, i):
+    def phys_dim(self, i=0):
         return self.site[i].ind_size(self.upper_ind_id.format(i))
 
     def plot(self, max_width=120):

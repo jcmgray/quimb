@@ -18,12 +18,13 @@ def spin_operator(label, S=1 / 2, **kwargs):
     Parameters
     ----------
     label : str
-        The type of operator, can be one of five options:
+        The type of operator, can be one of six options:
             - ``{'x', 'X'}``, x-spin operator.
             - ``{'y', 'Y'}``, y-spin operator.
             - ``{'z', 'Z'}``, z-spin operator.
             - ``{'+', 'p'}``, Raising operator.
             - ``{'-', 'm'}``, Lowering operator.
+            - ``{'i', 'I'}``, identity operator.
     S : float, optional
         The spin of particle to act on, default to spin-1/2.
     kwargs
@@ -59,6 +60,11 @@ def spin_operator(label, S=1 / 2, **kwargs):
                 op[i, i + 1] = c
             else:
                 op[i + 1, i] = c
+    elif label in {'i', 'I'}:
+        np.fill_diagonal(op, 1.0)
+    else:
+        raise ValueError("Label '{}'' not understood, should be one of ``{'X',"
+                         " 'Y', 'Z', '+', '-', 'I'}``.".format(label))
 
     op = qu(op, **kwargs)
     make_immutable(op)
