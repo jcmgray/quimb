@@ -298,6 +298,7 @@ class DMRG:
             'eff_eig_EPSType': 'krylovschur',
             'compress_method': 'svd',
             'compress_cutoff_mode': 'sum2',
+            'default_sweep_sequence': 'R',
         }
 
     def _set_bond_dim_seq(self, bond_dims):
@@ -437,8 +438,8 @@ class DMRG:
             2: self._update_local_state_2site,
         }[self.bsz](i, **update_opts)
 
-    def sweep_right(self, canonize=True, verbose=False, **update_opts):
-        """Perform a sweep of optimizations rightwards::
+    def sweep(self, direction, canonize=True, verbose=False, **update_opts):
+        """Perform a sweep of optimizations rightwards (`direction='R'`)::
 
               optimize -->
                 ...
@@ -448,34 +449,7 @@ class DMRG:
             | | | | | | | | | | | | | | | |
             >->-o-<-<-<-<-<-<-<-<-<-<-<-<-<
 
-        After the sweep the state is left canonized.
-
-        Parameters
-        ----------
-        canonize : bool, optional
-            Right canonize first. Set to False if already right-canonized.
-        dense : bool, optional
-            Solve the inner eigensystem using a dense representation of the
-            effective hamiltonian. Can be quicker for small bond_dim.
-        """
-        if canonize:
-            self._k.right_canonize(bra=self._b)
-
-        eff_hams = MovingEnvironment(self.TN_energy, self.n, 'left', self.bsz)
-
-        sweep = range(0, self.n - self.bsz + 1)
-        if verbose:
-            sweep = progbar(sweep, ncols=80)
-
-        for i in sweep:
-            eff_hams.move_to(i)
-            self._eff_ham = eff_hams()
-            en = self._update_local_state(i, direction='right', **update_opts)
-
-        return en
-
-    def sweep_left(self, canonize=True, verbose=False, **update_opts):
-        """Perform a sweep of optimizations leftwards::
+        or leftwards (`direction='L'`)::
 
                             <-- optimize
                                       ...
@@ -485,38 +459,49 @@ class DMRG:
             | | | | | | | | | | | | | | | |
             >->->->->->->->->->->->->-o-<-<
 
-        After the sweep the state is right canonized.
+        After the sweep the state is left or right canonized respectively.
 
         Parameters
         ----------
+        direction : {'R', 'L'}
+            Sweep from left to right (->) or right to left (<-) respectively.
         canonize : bool, optional
-            Left canonize first. Set to False if already right-canonized.
-        dense : bool, optional
-            Solve the inner eigensystem using a dense representation of the
-            effective hamiltonian. Can be quicker for small bond_dim.
+            Canonize the state first, not needed if doing alternate sweeps.
+        verbose : bool, optional
+            Show a progress bar for the sweep.
+        update_opts :
+            Supplied to ``self._update_local_state``.
         """
         if canonize:
-            self._k.left_canonize(bra=self._b)
+            {'R': self._k.right_canonize,
+             'L': self._k.left_canonize}[direction](bra=self._b)
 
-        eff_hams = MovingEnvironment(self.TN_energy, self.n, 'right', self.bsz)
+        direction, eff_start, sweep = {
+            'R': ('right', 'left', range(0, self.n - self.bsz + 1)),
+            'L': ('left', 'right', reversed(range(0, self.n - self.bsz + 1))),
+        }[direction]
 
-        sweep = reversed(range(0, self.n - self.bsz + 1))
+        eff_args = {'n': self.n, 'start': eff_start, 'bsz': self.bsz}
+        eff_hams = MovingEnvironment(self.TN_energy, **eff_args)
+
         if verbose:
-            sweep = progbar(sweep, ncols=80)
+            sweep = progbar(sweep, ncols=80, total=self.n - self.bsz + 1)
 
         for i in sweep:
             eff_hams.move_to(i)
             self._eff_ham = eff_hams()
-            en = self._update_local_state(i, direction='left', **update_opts)
+            en = self._update_local_state(
+                i, direction=direction, **update_opts)
 
         return en
 
-    def sweep(self, direction, **sweep_opts):
-        if direction == 'L':
-            en = self.sweep_left(**sweep_opts)
-        elif direction == 'R':
-            en = self.sweep_right(**sweep_opts)
-        return en
+    def sweep_right(self, canonize=True, verbose=False, **update_opts):
+        return self.sweep(direction='R', canonize=canonize,
+                          verbose=verbose, **update_opts)
+
+    def sweep_left(self, canonize=True, verbose=False, **update_opts):
+        return self.sweep(direction='L', canonize=canonize,
+                          verbose=verbose, **update_opts)
 
     # ----------------- overloadable 'plugin' style methods ----------------- #
 
@@ -553,7 +538,7 @@ class DMRG:
               tol=1e-8,
               bond_dims=None,
               cutoffs=None,
-              sweep_sequence='R',
+              sweep_sequence=None,
               max_sweeps=8,
               verbose=0):
         """Solve the system with a sequence of sweeps, up to a certain
@@ -575,11 +560,13 @@ class DMRG:
         """
         verbose = {False: 0, True: 1}.get(verbose, verbose)
 
-        # Possibly overide the default bond dimension and cutoff sequences.
+        # Possibly overide the default bond dimension, cutoff, LR sequences.
         if bond_dims is not None:
             self._set_bond_dim_seq(bond_dims)
         if cutoffs is not None:
             self._set_cutoff_seq(cutoffs)
+        if sweep_sequence is None:
+            sweep_sequence = self.opts['default_sweep_sequence']
 
         RLs = itertools.cycle(sweep_sequence)
         previous_LR = '0'
@@ -587,6 +574,9 @@ class DMRG:
         for i in range(max_sweeps):
             # Get the next direction, bond dimension and cutoff
             LR, bd, ctf = next(RLs), next(self._bond_dims), next(self._cutoffs)
+            if LR == 'X':
+                import random
+                LR = random.choice(('R', 'L'))
             self._print_pre_sweep(i, LR, bd, ctf, verbose=verbose)
 
             # if last sweep was in opposite direction no need to canonize
@@ -694,6 +684,7 @@ class DMRGX(DMRG):
             'overlap_thresh': 2 / 3,
             'compress_method': 'svd',
             'compress_cutoff_mode': 'sum2',
+            'default_sweep_sequence': 'RRLL',
         }
 
     @property
@@ -832,26 +823,45 @@ class DMRGX(DMRG):
                 op, sigma=self.energies[-1], v0=v0,
                 k=k, tol=self.opts['eff_eig_tol'], backend='scipy')
 
-    def _update_local_state(self, i, **update_opts):
+    def _update_local_state_dmrgx(self, i, **update_opts):
         return {
             1: self._update_local_state_1site_dmrgx,
             2: self._update_local_state_2site_dmrgx,
         }[self.bsz](i, **update_opts)
 
-    def sweep_right(self, canonize=True, verbose=False, **update_opts):
+    def sweep(self, direction, canonize=True, verbose=False, **update_opts):
+        """Perform a sweep of the algorithm.
+
+        Parameters
+        ----------
+        direction : {'R', 'L'}
+            Sweep from left to right (->) or right to left (<-) respectively.
+        canonize : bool, optional
+            Canonize the state first, not needed if doing alternate sweeps.
+        verbose : bool, optional
+            Show a progress bar for the sweep.
+        update_opts :
+            Supplied to ``self._update_local_state``.
+        """
         self.old_k = self._k.copy().H
         TN_overlap = TensorNetwork([self._k, self.old_k], virtual=True)
 
         if canonize:
-            self._k.right_canonize(bra=self._b)
+            {'R': self._k.right_canonize,
+             'L': self._k.left_canonize}[direction](bra=self._b)
 
-        eff_hams = MovingEnvironment(self.TN_energy, self.n, start='left')
-        eff_ham2s = MovingEnvironment(self.TN_en_var2, self.n, start='left')
-        eff_ovlps = MovingEnvironment(TN_overlap, self.n, start='left')
+        direction, eff_start, sweep = {
+            'R': ('right', 'left', range(0, self.n - self.bsz + 1)),
+            'L': ('left', 'right', reversed(range(0, self.n - self.bsz + 1))),
+        }[direction]
 
-        sweep = range(0, self.n - self.bsz + 1)
+        eff_args = {'n': self.n, 'start': eff_start, 'bsz': self.bsz}
+        eff_hams = MovingEnvironment(self.TN_energy, **eff_args)
+        eff_ham2s = MovingEnvironment(self.TN_en_var2, **eff_args)
+        eff_ovlps = MovingEnvironment(TN_overlap, **eff_args)
+
         if verbose:
-            sweep = progbar(sweep, ncols=80)
+            sweep = progbar(sweep, ncols=80, total=self.n - self.bsz + 1)
 
         for i in sweep:
             eff_hams.move_to(i)
@@ -860,29 +870,8 @@ class DMRGX(DMRG):
             self._eff_ham = eff_hams()
             self._eff_ovlp = eff_ovlps()
             self._eff_ham2 = eff_ham2s()
-            en = self._update_local_state(i, direction='right', **update_opts)
-
-        return en
-
-    def sweep_left(self, canonize=True, **update_opts):
-        self.old_k = self._k.copy().H
-        TN_overlap = TensorNetwork([self._k, self.old_k], virtual=True)
-
-        if canonize:
-            self._k.left_canonize(bra=self._b)
-
-        eff_hams = MovingEnvironment(self.TN_energy, self.n, start='right')
-        eff_ham2s = MovingEnvironment(self.TN_en_var2, self.n, start='right')
-        eff_ovlps = MovingEnvironment(TN_overlap, self.n, start='right')
-
-        for i in reversed(range(0, self.n)):
-            eff_hams.move_to(i)
-            eff_ham2s.move_to(i)
-            eff_ovlps.move_to(i)
-            self._eff_ham = eff_hams()
-            self._eff_ovlp = eff_ovlps()
-            self._eff_ham2 = eff_ham2s()
-            en = self._update_local_state(i, direction='left', **update_opts)
+            en = self._update_local_state_dmrgx(
+                i, direction=direction, **update_opts)
 
         return en
 
