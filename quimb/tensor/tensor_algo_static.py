@@ -871,7 +871,7 @@ class DMRGX(DMRG):
         return en
 
     def _compute_post_sweep(self):
-        en_var = (self.TN_en_var2 ^ ...) - self.energies[-1]**2
+        en_var = (self.TN_energy2 ^ ...) - self.energies[-1]**2
         self.variances.append(en_var)
 
     def _print_post_sweep(self, converged, verbose=0):
