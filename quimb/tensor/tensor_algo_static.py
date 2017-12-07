@@ -328,11 +328,11 @@ class DMRG:
         elif (direction == 'left') and (i > 0):
             self._k.right_compress_site(i, bra=self._b, **compress_opts)
 
-    def _seigsys(self, op, v0=None):
+    def _seigsys(self, A, v0=None):
         """Find single eigenpair, using all the internal settings.
         """
         return seigsys(
-            op, k=1, which=self.which, v0=v0,
+            A, k=1, which=self.which, v0=v0,
             backend=self.opts['eff_eig_bkd'],
             EPSType=self.opts['eff_eig_EPSType'],
             ncv=self.opts['eff_eig_ncv'],
@@ -342,14 +342,11 @@ class DMRG:
     def _update_local_state_1site(self, i, direction, **compress_opts):
         """Find the single site effective tensor groundstate of::
 
-
-                      /|\
-            >->->->->- | -<-<-<-<-<-<-<-<          /|\
+            >->->->->-/|\-<-<-<-<-<-<-<-<          /|\
             | | | | |  |  | | | | | | | |         / | \
             H-H-H-H-H--H--H-H-H-H-H-H-H-H   =    L--H--R
             | | | | | i|  | | | | | | | |         \i| /
-            >->->->->- | -<-<-<-<-<-<-<-<          \|/
-                      \|/
+            >->->->->-\|/-<-<-<-<-<-<-<-<          \|/
 
         And insert it back into the states ``k`` and ``b``, and thus
         ``TN_energy``.
@@ -367,12 +364,12 @@ class DMRG:
             # contract remaining hamiltonian and get its dense representation
             eff_ham = (self._eff_ham ^ '__ham__')['__ham__']
             eff_ham.fuse((('lower', lix), ('upper', uix)), inplace=True)
-            op = eff_ham.data
+            A = eff_ham.data
         else:
-            op = EffHamOp(self._eff_ham, dims=dims,
-                          upper_inds=uix, lower_inds=lix)
+            A = EffHamOp(self._eff_ham, dims=dims,
+                         upper_inds=uix, lower_inds=lix)
 
-        eff_e, eff_gs = self._seigsys(op, v0=self._k.site[i].data)
+        eff_e, eff_gs = self._seigsys(A, v0=self._k.site[i].data)
 
         eff_gs = eff_gs.A
         self._k.site[i].data = eff_gs
@@ -384,14 +381,12 @@ class DMRG:
     def _update_local_state_2site(self, i, direction, **compress_opts):
         """Find the 2-site effective tensor groundstate of::
 
-
-                      /| |\
-            >->->->->- | | -<-<-<-<-<-<-<-<          /| |\
+            >->->->->-/| |\-<-<-<-<-<-<-<-<          /| |\
             | | | | |  | |  | | | | | | | |         / | | \
             H-H-H-H-H--H-H--H-H-H-H-H-H-H-H   =    L--H-H--R
             | | | | |  i i+1| | | | | | | |         \ | | /
-            >->->->->- | | -<-<-<-<-<-<-<-<          \| |/
-                      \| |/                           i i+1
+            >->->->->-\| |/-<-<-<-<-<-<-<-<          \| |/
+                                                 i i+1
 
         And insert it back into the states ``k`` and ``b``, and thus
         ``TN_energy``.
@@ -409,16 +404,16 @@ class DMRG:
             # contract remaining hamiltonian and get its dense representation
             eff_ham = (self._eff_ham ^ '__ham__')['__ham__']
             eff_ham.fuse((('lower', lix), ('upper', uix)), inplace=True)
-            op = eff_ham.data
+            A = eff_ham.data
         else:
-            op = EffHamOp(self._eff_ham, upper_inds=uix,
-                          lower_inds=lix, dims=dims)
+            A = EffHamOp(self._eff_ham, upper_inds=uix,
+                         lower_inds=lix, dims=dims)
 
         # find the 2-site local groundstate using previous as initial guess
         v0 = self._k.site[i].contract(self._k.site[i + 1],
                                       output_inds=uix).data
 
-        eff_e, eff_gs = self._seigsys(op, v0=v0)
+        eff_e, eff_gs = self._seigsys(A, v0=v0)
 
         # split the two site local groundstate
         T_AB = Tensor(eff_gs.A.reshape(dims), uix)
@@ -670,11 +665,11 @@ class DMRGX(DMRG):
         var_ham1 = self.ham.copy()
         var_ham2 = self.ham.copy()
         var_ham1.upper_ind_id = self._k.site_ind_id
-        var_ham1.lower_ind_id = "__var_ham{}__"
-        var_ham2.upper_ind_id = "__var_ham{}__"
+        var_ham1.lower_ind_id = "__ham2{}__"
+        var_ham2.upper_ind_id = "__ham2{}__"
         var_ham2.lower_ind_id = self._b.site_ind_id
-        self.TN_en_var2 = self._k | var_ham1 | var_ham2 | self._b
-        self.variances = [(self.TN_en_var2 ^ ...) - self.energies[-1]**2]
+        self.TN_energy2 = self._k | var_ham1 | var_ham2 | self._b
+        self.variances = [(self.TN_energy2 ^ ...) - self.energies[-1]**2]
         self._target_energy = self.energies[-1]
 
         self.opts = {
@@ -702,7 +697,7 @@ class DMRGX(DMRG):
         # contract remaining hamiltonian and get its dense representation
         eff_ham = (self._eff_ham ^ '__ham__')['__ham__']
         eff_ham.fuse((('lower', lix), ('upper', uix)), inplace=True)
-        op = eff_ham.data
+        A = eff_ham.data
 
         # eigen-decompose and reshape eigenvectors thus::
         #
@@ -712,7 +707,7 @@ class DMRGX(DMRG):
         #
         D = prod(dims)
         if D <= self.opts['eff_eig_partial_cutoff']:
-            evals, evecs = eigsys(op)
+            evals, evecs = eigsys(A)
         else:
             if isinstance(self.opts['eff_eig_partial_k'], float):
                 k = int(self.opts['eff_eig_partial_k'] * D)
@@ -720,7 +715,7 @@ class DMRGX(DMRG):
                 k = self.opts['eff_eig_partial_k']
 
             evals, evecs = seigsys(
-                op, sigma=self._target_energy, v0=self._k.site[i].data,
+                A, sigma=self._target_energy, v0=self._k.site[i].data,
                 k=k, tol=self.opts['eff_eig_tol'], backend='scipy')
 
         evecs = np.asarray(evecs).reshape(*dims, -1)
@@ -798,7 +793,7 @@ class DMRGX(DMRG):
         # contract remaining hamiltonian and get its dense representation
         eff_ham = (self._eff_ham ^ '__ham__')['__ham__']
         eff_ham.fuse((('lower', lix), ('upper', uix)), inplace=True)
-        op = eff_ham.data
+        A = eff_ham.data
 
         # eigen-decompose and reshape eigenvectors thus::
         #
@@ -808,7 +803,7 @@ class DMRGX(DMRG):
         #
         D = prod(dims)
         if D <= self.opts['eff_eig_partial_cutoff']:
-            evals, evecs = eigsys(op)
+            evals, evecs = eigsys(A)
         else:
             if isinstance(self.opts['eff_eig_partial_k'], float):
                 k = int(self.opts['eff_eig_partial_k'] * D)
@@ -820,7 +815,7 @@ class DMRGX(DMRG):
                                           output_inds=uix).data
 
             evals, evecs = seigsys(
-                op, sigma=self.energies[-1], v0=v0,
+                A, sigma=self.energies[-1], v0=v0,
                 k=k, tol=self.opts['eff_eig_tol'], backend='scipy')
 
     def _update_local_state_dmrgx(self, i, **update_opts):
@@ -843,8 +838,8 @@ class DMRGX(DMRG):
         update_opts :
             Supplied to ``self._update_local_state``.
         """
-        self.old_k = self._k.copy().H
-        TN_overlap = TensorNetwork([self._k, self.old_k], virtual=True)
+        old_k = self._k.copy().H
+        TN_overlap = TensorNetwork([self._k, old_k], virtual=True)
 
         if canonize:
             {'R': self._k.right_canonize,
@@ -857,7 +852,7 @@ class DMRGX(DMRG):
 
         eff_args = {'n': self.n, 'start': eff_start, 'bsz': self.bsz}
         eff_hams = MovingEnvironment(self.TN_energy, **eff_args)
-        eff_ham2s = MovingEnvironment(self.TN_en_var2, **eff_args)
+        eff_ham2s = MovingEnvironment(self.TN_energy2, **eff_args)
         eff_ovlps = MovingEnvironment(TN_overlap, **eff_args)
 
         if verbose:
