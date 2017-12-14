@@ -489,7 +489,7 @@ class TensorNetwork1D(TensorNetwork):
 
         return num_can_l, num_can_r
 
-    def plot(self, max_width=None):
+    def show(self, max_width=None):
         l1 = ""
         l2 = ""
         l3 = ""
@@ -535,7 +535,7 @@ class MatrixProductState(TensorNetwork1D):
     """
 
     def __init__(self, arrays, *, shape='lrp', tags=None, bond_name="",
-                 site_ind_id='k{}', site_tag_id='i{}', **tn_opts):
+                 site_ind_id='k{}', site_tag_id='I{}', **tn_opts):
 
         # short-circuit for copying MPSs
         if isinstance(arrays, MatrixProductState):
@@ -803,7 +803,7 @@ class MatrixProductOperator(TensorNetwork1D):
         The base name of the bond indices, onto which uuids will be added.
     """
 
-    def __init__(self, arrays, shape='lrud', site_tag_id='i{}', tags=None,
+    def __init__(self, arrays, shape='lrud', site_tag_id='I{}', tags=None,
                  upper_ind_id='k{}', lower_ind_id='b{}', bond_name="",
                  **kwargs):
         # short-circuit for copying
@@ -1012,7 +1012,7 @@ class MatrixProductOperator(TensorNetwork1D):
     def phys_dim(self, i=0):
         return self.site[i].ind_size(self.upper_ind_id.format(i))
 
-    def plot(self, max_width=120):
+    def show(self, max_width=None):
         l1 = ""
         l2 = ""
         l3 = ""

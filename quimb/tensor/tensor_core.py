@@ -1449,6 +1449,91 @@ class TensorNetwork(object):
         """
         return tuple(di[0] for di in self.outer_dims_inds())
 
+    def plot(tn, iterations=2000, color=None, figsize=(6, 6), **plot_opts):
+        """Plot this tensor network as a networkx graph using matplotlib.
+
+        Parameters
+        ----------
+        iterations : int, optional
+            How many iterations to perform when when finding the best layout
+            using node repulsion. Ramp this up if the graph is drawing
+            messily.
+        color : sequence of tags, optional
+            If given, uniquely color any tensors which have each of the tags.
+            If some tensors have more than of the tags, only one color will
+            be shown.
+        figsize : tuple of int
+            The size of the drawing.
+        plot_opts
+            Supplied to ``networkx.draw``.
+        """
+        import networkx as nx
+        import matplotlib.pyplot as plt
+
+        # build the graph
+        G = nx.Graph()
+        ts = list(tn.tensors)
+        n = len(ts)
+
+        for i, t1 in enumerate(ts):
+            for ix in t1.inds:
+                found_ind = False
+                for j in range(0, n):
+                    if j == i:
+                        continue
+
+                    t2 = ts[j]
+                    if ix in t2.inds:
+                        G.add_edge(i, j)
+                        found_ind = True
+
+                if not found_ind:
+                    G.add_edge(i, "ext{}".format(ix))
+
+        # color the nodes
+        if color is None:
+            colors = {}
+        else:
+            colors = {tag: c for
+                      tag, c in zip(color, plt.get_cmap('tab10').colors)}
+
+        for i, t1 in enumerate(ts):
+            G.node[i]['color'] = None
+            for tag in t1.tags:
+                if tag in colors:
+                    G.node[i]['color'] = colors[tag]
+
+        # Set the size of the nodes, so that dangling inds appear so.
+        # Also set the colors of any tagged tensors.
+        szs = []
+        crs = []
+        for nd in G.nodes:
+            if isinstance(nd, str):
+                szs += [0]
+                crs += [(0, 0, 0)]
+            else:
+                szs += [300 / n**0.5]
+                if G.node[nd]['color'] is not None:
+                    crs += [G.node[nd]['color']]
+                else:
+                    crs += [(0, 0, 0)]
+
+        plt.figure(figsize=figsize)
+        nx.draw(G, node_size=szs, node_color=crs,
+                pos=nx.spring_layout(G, iterations=iterations), **plot_opts)
+
+        # create legend
+        if colors:
+            handles = []
+            for tag, color in colors.items():
+                handles += [plt.Line2D([0], [0], marker='o', color=color,
+                                       linestyle='', markersize=10)]
+
+            plt.legend(handles, colors.keys(), loc='center left',
+                       bbox_to_anchor=(1, 0.5))
+
+        plt.show()
+
     # ------------------------------ printing ------------------------------- #
 
     def __repr__(self):

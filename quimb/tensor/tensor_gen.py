@@ -326,7 +326,7 @@ class MPOSpinHam:
             raise NotImplementedError("3-body+ terms are not supported yet.")
 
     def build(self, n, upper_ind_id='k{}', lower_ind_id='b{}',
-              site_tag_id='i{}', tags=None, bond_name=""):
+              site_tag_id='I{}', tags=None, bond_name=""):
         """Build an instance of this MPO of size ``n``. See also
         ``MatrixProductOperator``.
         """
@@ -344,7 +344,7 @@ class MPOSpinHam:
 def MPO_ham_ising(n, j=1.0, bx=0.0,
                   upper_ind_id='k{}',
                   lower_ind_id='b{}',
-                  site_tag_id='i{}',
+                  site_tag_id='I{}',
                   tags=None,
                   bond_name=""):
     """Ising Hamiltonian in matrix product operator form.
@@ -359,7 +359,7 @@ def MPO_ham_ising(n, j=1.0, bx=0.0,
 def MPO_ham_XY(n, j=1.0, bz=0.0,
                upper_ind_id='k{}',
                lower_ind_id='b{}',
-               site_tag_id='i{}',
+               site_tag_id='I{}',
                tags=None,
                bond_name=""):
     """XY-Hamiltonian in matrix product operator form.
@@ -385,7 +385,7 @@ def MPO_ham_XY(n, j=1.0, bz=0.0,
 def MPO_ham_heis(n, j=1.0, bz=0.0,
                  upper_ind_id='k{}',
                  lower_ind_id='b{}',
-                 site_tag_id='i{}',
+                 site_tag_id='I{}',
                  tags=None,
                  bond_name=""):
     """Heisenberg Hamiltonian in matrix product operator form.

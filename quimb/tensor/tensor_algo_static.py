@@ -516,7 +516,7 @@ class DMRG:
         """Print this after each sweep.
         """
         if verbose > 1:
-            self._k.plot()
+            self._k.show()
         if verbose > 0:
             msg = f"Energy: {self.energy} ... " + ("converged!" if converged
                                                    else "not converged")
@@ -876,7 +876,7 @@ class DMRGX(DMRG):
 
     def _print_post_sweep(self, converged, verbose=0):
         if verbose > 1:
-            self._k.plot()
+            self._k.show()
         if verbose > 0:
             msg = (f"Energy={self.energy}, Variance={self.variance} ... " +
                    "converged!" if converged else "not converged")

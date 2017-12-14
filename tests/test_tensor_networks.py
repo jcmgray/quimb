@@ -300,15 +300,15 @@ class TestTensorFunctions:
 
         # use tensor to left of bipartition
         p.canonize(2)
-        t1 = p['i2']
-        left_inds = set(t1.inds) - set(p['i3'].inds)
+        t1 = p['I2']
+        left_inds = set(t1.inds) - set(p['I3'].inds)
         svn = (t1).entropy(left_inds, method=method)
         assert_allclose(real_svn, svn)
 
         # use tensor to right of bipartition
         p.canonize(3)
-        t2 = p['i3']
-        left_inds = set(t2.inds) & set(p['i2'].inds)
+        t2 = p['I3']
+        left_inds = set(t2.inds) & set(p['I2'].inds)
         svn = (t2).entropy(left_inds, method=method)
         assert_allclose(real_svn, svn)
 
@@ -454,15 +454,15 @@ class TestTensorNetwork:
         b_data = np.random.randn(3, 4, 5) + 1.0j * np.random.randn(3, 4, 5)
         c_data = np.random.randn(5, 2, 6) + 1.0j * np.random.randn(5, 2, 6)
 
-        a = Tensor(a_data, inds=[0, 1, 2], tags={'red', 'i0'})
-        b = Tensor(b_data, inds=[1, 2, 3], tags={'blue', 'i1'})
-        c = Tensor(c_data, inds=[3, 0, 4], tags={'blue', 'i2'})
+        a = Tensor(a_data, inds=[0, 1, 2], tags={'red', 'I0'})
+        b = Tensor(b_data, inds=[1, 2, 3], tags={'blue', 'I1'})
+        c = Tensor(c_data, inds=[3, 0, 4], tags={'blue', 'I2'})
 
         tn = a & b & c
         tn.conj(inplace=True)
 
         for i, arr in enumerate((a_data, b_data, c_data)):
-            assert_allclose(tn["i{}".format(i)].data, arr.conj())
+            assert_allclose(tn["I{}".format(i)].data, arr.conj())
 
     def test_contracting_tensors(self):
         a = rand_tensor((2, 3, 4), inds=[0, 1, 2], tags='red')
@@ -506,11 +506,11 @@ class TestTensorNetwork:
         assert isinstance(d, Tensor)
 
     def test_contract_with_slices(self):
-        a = rand_tensor((2, 3, 4), inds=[0, 1, 2], tags='i0')
-        b = rand_tensor((3, 4, 5), inds=[1, 2, 3], tags='i1')
-        c = rand_tensor((5, 2, 6), inds=[3, 0, 4], tags='i2')
-        d = rand_tensor((5, 2, 6), inds=[5, 6, 4], tags='i3')
-        tn = TensorNetwork((a, b, c, d), structure="i{}")
+        a = rand_tensor((2, 3, 4), inds=[0, 1, 2], tags='I0')
+        b = rand_tensor((3, 4, 5), inds=[1, 2, 3], tags='I1')
+        c = rand_tensor((5, 2, 6), inds=[3, 0, 4], tags='I2')
+        d = rand_tensor((5, 2, 6), inds=[5, 6, 4], tags='I3')
+        tn = TensorNetwork((a, b, c, d), structure="I{}")
 
         assert len((tn ^ slice(2)).tensors) == 3
         assert len((tn ^ slice(..., 1)).tensors) == 3
@@ -554,25 +554,25 @@ class TestTensorNetwork:
     def test_index_by_site(self):
         a_data = np.random.randn(2, 3, 4)
         b_data = np.random.randn(2, 3, 4)
-        a = Tensor(a_data, inds='abc', tags={'i0'})
-        b = Tensor(b_data, inds='abc', tags={'i1'})
-        tn = TensorNetwork((a, b), structure="i{}")
+        a = Tensor(a_data, inds='abc', tags={'I0'})
+        b = Tensor(b_data, inds='abc', tags={'I1'})
+        tn = TensorNetwork((a, b), structure="I{}")
         assert_allclose(tn.site[0].data, a_data)
         new_data = np.random.randn(2, 3, 4)
-        tn.site[1] = Tensor(new_data, inds='abc', tags={'i1', 'red'})
-        assert_allclose(tn['i1'].data, new_data)
-        assert 'red' in tn['i1'].tags
+        tn.site[1] = Tensor(new_data, inds='abc', tags={'I1', 'red'})
+        assert_allclose(tn['I1'].data, new_data)
+        assert 'red' in tn['I1'].tags
 
     def test_set_data_in_tensor(self):
         a_data = np.random.randn(2, 3, 4)
         b_data = np.random.randn(2, 3, 4)
-        a = Tensor(a_data, inds='abc', tags={'i0'})
-        b = Tensor(b_data, inds='abc', tags={'i1'})
-        tn = TensorNetwork((a, b), structure="i{}")
+        a = Tensor(a_data, inds='abc', tags={'I0'})
+        b = Tensor(b_data, inds='abc', tags={'I1'})
+        tn = TensorNetwork((a, b), structure="I{}")
         assert_allclose(tn.site[0].data, a_data)
         new_data = np.random.randn(24)
         tn.site[1].data = new_data
-        assert_allclose(tn['i1'].data, new_data.reshape(2, 3, 4))
+        assert_allclose(tn['I1'].data, new_data.reshape(2, 3, 4))
 
     def test_combining_with_no_check_collisions(self):
         p1 = MPS_rand_state(5, 3, phys_dim=3)
@@ -603,7 +603,7 @@ class TestMatrixProductState:
                                          'foo2', 'foo3', 'foo4'}
         assert mps.site_inds == ('foo0', 'foo1', 'foo2', 'foo3', 'foo4')
         assert mps.site_ind_id == 'foo{}'
-        mps.plot()
+        mps.show()
 
     @pytest.mark.parametrize("dtype", [float, complex, np.complex128,
                                        np.float64, 'raise'])
@@ -620,24 +620,24 @@ class TestMatrixProductState:
         a = np.random.randn(7, 2) + 1.0j * np.random.randn(7, 2)
         b = np.random.randn(7, 7, 2) + 1.0j * np.random.randn(7, 7, 2)
         c = np.random.randn(7, 2) + 1.0j * np.random.randn(7, 2)
-        mps = MatrixProductState([a, b, c], site_tag_id="i{}")
+        mps = MatrixProductState([a, b, c], site_tag_id="I{}")
 
         mps.left_canonize_site(0)
-        assert mps['i0'].shape == (2, 2)
-        assert mps['i0'].tags == {'i0'}
-        assert mps['i1'].tags == {'i1'}
+        assert mps['I0'].shape == (2, 2)
+        assert mps['I0'].tags == {'I0'}
+        assert mps['I1'].tags == {'I1'}
 
-        U = (mps['i0'].data)
+        U = (mps['I0'].data)
         assert_allclose(U.conj().T @ U, np.eye(2), atol=1e-13)
         assert_allclose(U @ U.conj().T, np.eye(2), atol=1e-13)
 
         # combined two site contraction is identity also
         mps.left_canonize_site(1)
-        ptn = (mps.H & mps) ^ ['i0', 'i1']
-        assert_allclose(ptn['i1'].data, np.eye(4), atol=1e-13)
+        ptn = (mps.H & mps) ^ ['I0', 'I1']
+        assert_allclose(ptn['I1'].data, np.eye(4), atol=1e-13)
 
         # try normalizing the state
-        mps['i2'] /= mps['i2'].norm()
+        mps['I2'] /= mps['I2'].norm()
 
         assert_allclose(abs(mps.H @ mps), 1.0)
 
@@ -645,24 +645,24 @@ class TestMatrixProductState:
         a = np.random.randn(7, 2) + 1.0j * np.random.randn(7, 2)
         b = np.random.randn(7, 7, 2) + 1.0j * np.random.randn(7, 7, 2)
         c = np.random.randn(7, 2) + 1.0j * np.random.randn(7, 2)
-        mps = MatrixProductState([a, b, c], site_tag_id="i{}")
+        mps = MatrixProductState([a, b, c], site_tag_id="I{}")
 
         mps.right_canonize_site(2)
-        assert mps['i2'].shape == (2, 2)
-        assert mps['i2'].tags == {'i2'}
-        assert mps['i1'].tags == {'i1'}
+        assert mps['I2'].shape == (2, 2)
+        assert mps['I2'].tags == {'I2'}
+        assert mps['I1'].tags == {'I1'}
 
-        U = (mps['i2'].data)
+        U = (mps['I2'].data)
         assert_allclose(U.conj().T @ U, np.eye(2), atol=1e-13)
         assert_allclose(U @ U.conj().T, np.eye(2), atol=1e-13)
 
         # combined two site contraction is identity also
         mps.right_canonize_site(1)
-        ptn = (mps.H & mps) ^ ['i1', 'i2']
-        assert_allclose(ptn['i1'].data, np.eye(4), atol=1e-13)
+        ptn = (mps.H & mps) ^ ['I1', 'I2']
+        assert_allclose(ptn['I1'].data, np.eye(4), atol=1e-13)
 
         # try normalizing the state
-        mps['i0'] /= mps['i0'].norm()
+        mps['I0'] /= mps['I0'].norm()
 
         assert_allclose(mps.H @ mps, 1)
 
@@ -747,21 +747,21 @@ class TestMatrixProductState:
         pH.add_tag('__bra__')
         tn = p | pH
         assert_allclose((tn ^ ...), 1)
-        assert_allclose(tn[('__ket__', 'i1')].data,
-                        tn[('__bra__', 'i1')].data.conj())
+        assert_allclose(tn[('__ket__', 'I1')].data,
+                        tn[('__bra__', 'I1')].data.conj())
         p.site[1].data = np.random.randn(200)
         assert abs((tn ^ ...) - 1) > 1e-13
-        assert not np.allclose(tn[('__ket__', 'i1')].data,
-                               tn[('__bra__', 'i1')].data.conj())
+        assert not np.allclose(tn[('__ket__', 'I1')].data,
+                               tn[('__bra__', 'I1')].data.conj())
 
     def test_adding_mps(self):
         p = MPS_rand_state(10, 7)
-        assert max(p['i4'].shape) == 7
+        assert max(p['I4'].shape) == 7
         p2 = p + p
-        assert max(p2['i4'].shape) == 14
+        assert max(p2['I4'].shape) == 14
         assert_allclose(p2.H @ p, 2)
         p += p
-        assert max(p['i4'].shape) == 14
+        assert max(p['I4'].shape) == 14
         assert_allclose(p.H @ p, 4)
 
     @pytest.mark.parametrize("method", ['svd', 'eig'])
@@ -770,32 +770,32 @@ class TestMatrixProductState:
         n = 10
         chi = 7
         p = MPS_rand_state(n, chi)
-        assert max(p['i4'].shape) == chi
+        assert max(p['I4'].shape) == chi
         p2 = p + p
-        assert max(p2['i4'].shape) == chi * 2
+        assert max(p2['I4'].shape) == chi * 2
         assert_allclose(p2.H @ p, 2)
         p2.left_compress(method=method, cutoff=1e-6, cutoff_mode=cutoff_mode)
-        assert max(p2['i4'].shape) == chi
+        assert max(p2['I4'].shape) == chi
         assert_allclose(p2.H @ p, 2)
         assert p2.count_canonized() == (n - 1, 0)
 
     def test_compress_mps_right(self):
         p = MPS_rand_state(10, 7)
-        assert max(p['i4'].shape) == 7
+        assert max(p['I4'].shape) == 7
         p2 = p + p
-        assert max(p2['i4'].shape) == 14
+        assert max(p2['I4'].shape) == 14
         assert_allclose(p2.H @ p, 2)
         p2.right_compress()
-        assert max(p2['i4'].shape) == 7
+        assert max(p2['I4'].shape) == 7
         assert_allclose(p2.H @ p, 2)
 
     @pytest.mark.parametrize("method", ['svd', 'eig'])
     def test_compress_trim_max_bond(self, method):
         p = MPS_rand_state(20, 20)
         p.compress(method=method)
-        assert max(p['i4'].shape) == 20
+        assert max(p['I4'].shape) == 20
         p.compress(max_bond=13, method=method)
-        assert max(p['i4'].shape) == 13
+        assert max(p['I4'].shape) == 13
         assert p.H @ p < 1.0
 
     def test_compress_form(self):
@@ -814,7 +814,7 @@ class TestMatrixProductState:
     @pytest.mark.parametrize("form", ['left', 'right', 'raise'])
     def test_add_and_compress_mps(self, method, form):
         p = MPS_rand_state(10, 7)
-        assert max(p['i4'].shape) == 7
+        assert max(p['I4'].shape) == 7
 
         if form == 'raise':
             with pytest.raises(ValueError):
@@ -823,7 +823,7 @@ class TestMatrixProductState:
             return
 
         p2 = p.add_MPS(p, compress=True, method=method, form=form, cutoff=1e-6)
-        assert max(p2['i4'].shape) == 7
+        assert max(p2['I4'].shape) == 7
         assert_allclose(p2.H @ p, 2)
 
     def test_adding_mpo(self):
@@ -834,7 +834,7 @@ class TestMatrixProductState:
         assert_allclose(h2 @ h2.H, (hd @ hd.H).tr() * 4)
         h2.right_compress()
         assert_allclose(h2 @ h2.H, (hd @ hd.H).tr() * 4)
-        assert max(h2['i3'].shape) == 5
+        assert max(h2['I3'].shape) == 5
 
     def test_schmidt_values_entropy_gap_simple(self):
         n = 12
@@ -860,7 +860,7 @@ class TestMatrixProductOperator:
                    [np.random.rand(5, 5, 2, 2) for _ in range(3)] +
                    [np.random.rand(5, 2, 2)])
         mpo = MatrixProductOperator(tensors)
-        mpo.plot()
+        mpo.show()
         assert len(mpo.tensors) == 5
         assert mpo.upper_inds == ('k0', 'k1', 'k2', 'k3', 'k4')
         assert mpo.lower_inds == ('b0', 'b1', 'b2', 'b3', 'b4')
@@ -957,9 +957,9 @@ class TestSpecificStatesOperators:
 
     def test_mpo_site_ham_heis(self):
         hh_mpo = MPO_ham_heis(5, tags=['foo'])
-        assert hh_mpo.site[0].tags == {'i0', 'foo'}
-        assert hh_mpo.site[3].tags == {'i3', 'foo'}
-        assert hh_mpo.site[-1].tags == {'i4', 'foo'}
+        assert hh_mpo.site[0].tags == {'I0', 'foo'}
+        assert hh_mpo.site[3].tags == {'I3', 'foo'}
+        assert hh_mpo.site[-1].tags == {'I4', 'foo'}
         assert hh_mpo.shape == (2,) * 10
         hh_ = (hh_mpo ^ ...).fuse({'k': ['k0', 'k1', 'k2', 'k3', 'k4'],
                                    'b': ['b0', 'b1', 'b2', 'b3', 'b4']})
