@@ -20,7 +20,7 @@ The core packages ``quimb`` requires are:
     * `numexpr <https://github.com/pydata/numexpr>`_
     * `cytoolz <https://github.com/pytoolz/cytoolz>`_
 
-For ease and performance (i.e. mkl compiled libraries), `conda <http://conda.pydata.org/miniconda.html/>`_ is the recommended distribution with which to install these.
+For ease and performance (i.e. mkl compiled libraries), `conda <https://conda.io/miniconda.html/>`_ is the recommended distribution with which to install these.
 
 
 Optional Dependencies
