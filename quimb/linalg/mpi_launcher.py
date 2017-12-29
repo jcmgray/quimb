@@ -10,6 +10,7 @@ from .slepc_linalg import (
     seigsys_slepc,
     svds_slepc,
     mfn_multiply_slepc,
+    ssolve_slepc,
 )
 from ..accel import _NUM_THREAD_WORKERS
 
@@ -269,3 +270,8 @@ mfn_multiply_slepc_mpi = functools.wraps(mfn_multiply_slepc)(
     GetMPIBeforeCall(mfn_multiply_slepc))
 mfn_multiply_slepc_spawn = functools.wraps(mfn_multiply_slepc)(
     SpawnMPIProcessesFunc(mfn_multiply_slepc_mpi))
+
+ssolve_slepc_mpi = functools.wraps(ssolve_slepc)(
+    GetMPIBeforeCall(ssolve_slepc))
+ssolve_slepc_spawn = functools.wraps(ssolve_slepc)(
+    SpawnMPIProcessesFunc(ssolve_slepc_mpi))

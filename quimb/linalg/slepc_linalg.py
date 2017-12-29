@@ -276,30 +276,47 @@ def gather_petsc_array(x, comm, out_shape=None, matrix=False):
 #                               SLEPc FUNCTIONS                               #
 # --------------------------------------------------------------------------- #
 
+
+def _init_krylov_subspace(comm=None, tol=None, maxiter=None,
+                          KSPType="preonly",
+                          PCType="lu",
+                          PCFactorSolverPackage="mumps",
+                          ):
+    """Initialise a krylov subspace and preconditioner.
+    """
+    PETSc, comm = get_petsc(comm=comm)
+    K = PETSc.KSP().create(comm=comm)
+    K.setType(KSPType)
+
+    if PCType:
+        PC = K.getPC()
+        PC.setType(PCType)
+        if PCFactorSolverPackage:
+            PC.setFactorSolverPackage(PCFactorSolverPackage)
+        PC.setFactorShift(PETSc.Mat.FactorShiftType.POSITIVE_DEFINITE)
+        PC.setFromOptions()
+        K.setPC(PC)
+
+    K.setFromOptions()
+    return K
+
+
 def _init_spectral_inverter(STType="sinvert",
                             KSPType="preonly",
-                            PType="lu",
-                            PFactorSolverPackage="mumps",
+                            PCType="lu",
+                            PCFactorSolverPackage="mumps",
                             comm=None):
     """Create a slepc spectral transformation object with specified solver.
     """
-    PETSc, comm = get_petsc(comm=comm)
     SLEPc, comm = get_slepc(comm=comm)
-    # Preconditioner and linear solver
-    P = PETSc.PC().create(comm=comm)
-    P.setType(PType)
-    if PFactorSolverPackage:
-        P.setFactorSolverPackage(PFactorSolverPackage)
-    P.setFromOptions()
-    # Krylov subspace
-    K = PETSc.KSP().create(comm=comm)
-    K.setPC(P)
-    K.setType(KSPType)
-    K.setFromOptions()
-    # Spectral transformer
     S = SLEPc.ST().create(comm=comm)
     S.setType(STType)
-    S.setKSP(K)
+    # set the krylov subspace and preconditioner.
+    if KSPType:
+        K = _init_krylov_subspace(
+            KSPType=KSPType, PCType=PCType, comm=comm,
+            PCFactorSolverPackage=PCFactorSolverPackage)
+        S.setKSP(K)
     S.setFromOptions()
     return S
 
@@ -326,7 +343,7 @@ def _which_scipy_to_slepc(which):
 
 
 def _init_eigensolver(k=6, which='LM', sigma=None, isherm=True,
-                      EPSType=None, st_opts=None, tol=None,
+                      EPSType=None, st_opts=None, tol=None, is_linop=False,
                       maxiter=None, ncv=None, l_win=None, comm=None):
     """Create an advanced eigensystem solver
 
@@ -354,36 +371,36 @@ def _init_eigensolver(k=6, which='LM', sigma=None, isherm=True,
         rg = eigensolver.getRG()
         rg.setType(SLEPc.RG.Type.INTERVAL)
         rg.setIntervalEndpoints(*l_win, -0.1, 0.1)
-        # rg.setType(SLEPc.RG.Type.ELLIPSE)
-        # rg_c = (l_win[0] + l_win[1]) / 2
-        # rg_r = (l_win[1] - l_win[0]) / 2
-        # rg.setEllipseParameters(rg_c, rg_r, 1)
     else:
         eigensolver.setDimensions(k, ncv)
 
     if EPSType is None:
-        EPSType = 'krylovschur'
+        EPSType = {False: 'krylovschur', True: 'gd'}[is_linop]
 
     # set some preconditioning defaults for 'gd' and 'lobpcg'
-    elif EPSType in ('gd', 'lobpcg'):
+    if EPSType in ('gd', 'lobpcg'):
         st_opts['STType'] = st_opts.get('STType', 'precond')
         st_opts['KSPType'] = st_opts.get('KSPType', 'preonly')
-        st_opts['PType'] = st_opts.get('PType', 'none')
+        st_opts['PCType'] = st_opts.get('PCType', 'none')
 
     # set some preconditioning defaults for 'jd'
     elif EPSType == 'jd':
         st_opts['STType'] = st_opts.get('STType', 'precond')
         st_opts['KSPType'] = st_opts.get('KSPType', 'bcgs')
-        st_opts['PType'] = st_opts.get('PType', 'none')
+        st_opts['PCType'] = st_opts.get('PCType', 'none')
 
     # set the spectral inverter / preconditioner.
     if st_opts or (sigma is not None):
-        eigensolver.setST(_init_spectral_inverter(comm=comm, **st_opts))
+        st = _init_spectral_inverter(comm=comm, **st_opts)
+        eigensolver.setST(st)
 
         # NB: `setTarget` must be called *after* `setST`.
         if sigma is not None:
             which = "TR"
             eigensolver.setTarget(sigma)
+
+            if is_linop:
+                st.setMatMode(SLEPc.ST.MatMode.SHELL)
 
     eigensolver.setType(EPSType)
     eigensolver.setProblemType(SLEPc.EPS.ProblemType.HEP if isherm else
@@ -456,15 +473,13 @@ def seigsys_slepc(mat, k=6, *,
     if comm is None:
         comm = get_default_comm()
 
-    if isinstance(mat, sp.linalg.LinearOperator) and EPSType is None:
-        EPSType = 'gd'
-
     eigensolver = _init_eigensolver(
         which=("SA" if (which is None) and (sigma is None) else
                "TR" if (which is None) and (sigma is not None) else
                which),
         EPSType=EPSType, k=k, sigma=sigma, isherm=isherm, tol=tol, ncv=ncv,
-        maxiter=maxiter, st_opts=st_opts, comm=comm, l_win=l_win)
+        maxiter=maxiter, st_opts=st_opts, comm=comm, l_win=l_win,
+        is_linop=isinstance(mat, sp.linalg.LinearOperator))
 
     # set up the initial operators and solve
     mat = convert_mat_to_petsc(mat, comm=comm)
@@ -647,5 +662,51 @@ def mfn_multiply_slepc(mat, vec,
     all_out = gather_petsc_array(
         out, comm=comm, out_shape=(-1, 1), matrix=True)
 
+    comm.Barrier()
     mfn.destroy()
     return all_out
+
+
+# -------------------- solve linear system of equations --------------------- #
+
+
+def lookup_ksp_error(i):
+    """Look up PETSc error to print when raising after not converging.
+    """
+    from petsc4py import PETSc
+    _KSP_DIVERGED_REASONS = {i: error for error, i in
+                             PETSc.KSP.ConvergedReason.__dict__.items()
+                             if isinstance(i, int)}
+    return _KSP_DIVERGED_REASONS[i]
+
+
+def ssolve_slepc(A, y, isherm=True, comm=None, maxiter=None, tol=None,
+                 KSPType='preonly',
+                 PCType='lu',
+                 PCFactorSolverPackage="mumps",
+                 ):
+
+    PETSc, comm = get_petsc(comm=comm)
+    A = convert_mat_to_petsc(A, comm=comm)
+    if isherm:
+        A.setOption(A.Option.HERMITIAN, isherm)
+    x = A.createVecRight()
+    out_shape = y.shape
+    y = convert_vec_to_petsc(y, comm=comm)
+
+    ksp = _init_krylov_subspace(
+        KSPType=KSPType, PCType=PCType, comm=comm, maxiter=maxiter, tol=tol,
+        PCFactorSolverPackage=PCFactorSolverPackage)
+
+    ksp.setOperators(A)
+    ksp.solve(y, x)
+
+    converged_reason = ksp.getConvergedReason()
+    if converged_reason < 0:
+        raise RuntimeError("PETSc KSP solve did not converge, reason: {}"
+                           "".format(lookup_ksp_error(converged_reason)))
+
+    x = gather_petsc_array(x, comm=comm, out_shape=out_shape)
+    comm.Barrier()
+    ksp.destroy()
+    return x

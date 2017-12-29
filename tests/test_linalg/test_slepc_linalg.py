@@ -29,6 +29,7 @@ if SLEPC4PY_FOUND:
         convert_mat_to_petsc,
         new_petsc_vec,
         mfn_multiply_slepc,
+        ssolve_slepc,
     )
 
 
@@ -206,7 +207,7 @@ class TestShellMatrix:
         st_opts = {
             'STType': 'sinvert',
             'KSPType': 'bcgs',  # / 'gmres'
-            'PType': 'none',
+            'PCType': 'none',
         }
 
         el, ev = seigsys_slepc(alo, k=1, which='TR', sigma=0.0,
@@ -223,7 +224,7 @@ class TestShellMatrix:
         st_opts = {
             'STType': 'precond',
             'KSPType': 'preonly',
-            'PType': 'none',
+            'PCType': 'none',
         }
 
         el, ev = seigsys_slepc(alo, k=1, which='TR', sigma=0.0,
@@ -240,7 +241,7 @@ class TestShellMatrix:
         st_opts = {
             'STType': 'precond',
             'KSPType': 'bcgs',  # / 'gmres'
-            'PType': 'none',
+            'PCType': 'none',
         }
 
         el, ev = seigsys_slepc(alo, k=1, which='TR', sigma=0.0,
@@ -267,3 +268,13 @@ class TestCISS:
         sl -= offset
         assert_allclose(el, sl)
         assert_allclose(np.abs(sv.H @ ev), np.eye(el.size), atol=1e-11)
+
+
+@slepc4py_test
+class TestSSolve:
+
+    def test_simple_dense(self):
+        a = rand_herm(2**4, sparse=True)
+        y = rand_ket(2**4)
+        x = ssolve_slepc(a, y)
+        assert_allclose(a @ x, y, atol=1e-12, rtol=1e-6)

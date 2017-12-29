@@ -610,12 +610,15 @@ class MatrixProductState(TensorNetwork1D):
         if where is None:
             start = 0
             stop = self.nsites
-        else:
+        elif isinstance(where, slice):
             start = 0 if where.start is None else where.start
             stop = self.nsites if where.stop is ... else where.stop
+            indices = range(start, stop)
+        else:
+            indices = where
 
         return self.reindex({self.site_ind_id.format(i): new_id.format(i)
-                             for i in range(start, stop)}, inplace=inplace)
+                             for i in indices}, inplace=inplace)
 
     def _get_site_ind_id(self):
         return self._site_ind_id

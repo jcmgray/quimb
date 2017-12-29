@@ -7,6 +7,7 @@ import copy
 import itertools
 import string
 import uuid
+import fnmatch
 
 from cytoolz import (
     unique,
@@ -1186,13 +1187,8 @@ class TensorNetwork(object):
     def calc_nsites(self):
         """Calculate how many tags there are which match ``structure``.
         """
-        nsites = 0
-        while True:
-            if self.structure.format(nsites) in self.tag_index:
-                nsites += 1
-            else:
-                break
-        return nsites
+        return len(fnmatch.filter(self.tag_index.keys(),
+                                  self.structure.format("*")))
 
     def filter_by_tags(self, tags, inplace=False):
         """Split this TN into a list of tensors containing any of ``tags`` and
@@ -1519,8 +1515,8 @@ class TensorNetwork(object):
                     crs += [(0, 0, 0)]
 
         plt.figure(figsize=figsize)
-        nx.draw(G, node_size=szs, node_color=crs,
-                pos=nx.spring_layout(G, iterations=iterations), **plot_opts)
+        pos = nx.spring_layout(G, iterations=iterations)
+        nx.draw(G, node_size=szs, node_color=crs, pos=pos, **plot_opts)
 
         # create legend
         if colors:
