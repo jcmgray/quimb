@@ -1301,7 +1301,7 @@ class TensorNetwork(object):
             # peform the next contraction
             new_tn = new_tn._contract_tags(ctags, inplace=True)
 
-            if isinstance(new_tn, Tensor):
+            if isinstance(new_tn, Tensor) or np.isscalar(new_tn):
                 # nothing more to contract
                 break
 
@@ -1445,7 +1445,8 @@ class TensorNetwork(object):
         """
         return tuple(di[0] for di in self.outer_dims_inds())
 
-    def plot(tn, iterations=2000, color=None, figsize=(6, 6), **plot_opts):
+    def plot(tn, iterations=2000, color=None, figsize=(6, 6),
+             label_inds=None, label_tags=None, **plot_opts):
         """Plot this tensor network as a networkx graph using matplotlib.
 
         Parameters
@@ -1471,9 +1472,17 @@ class TensorNetwork(object):
         ts = list(tn.tensors)
         n = len(ts)
 
+        if label_inds is None:
+            label_inds = (n <= 20)
+            label_tags = (n <= 20)
+
+        labels = {}
+
         for i, t1 in enumerate(ts):
             for ix in t1.inds:
                 found_ind = False
+
+                # check to see if index is linked to another tensor
                 for j in range(0, n):
                     if j == i:
                         continue
@@ -1483,12 +1492,19 @@ class TensorNetwork(object):
                         G.add_edge(i, j)
                         found_ind = True
 
+                # else it must be an 'external' index
                 if not found_ind:
                     G.add_edge(i, "ext{}".format(ix))
+
+                    # optionally label the external index
+                    if label_inds:
+                        labels["ext{}".format(ix)] = ix
 
         # color the nodes
         if color is None:
             colors = {}
+        elif isinstance(color, str):
+            colors = {color: plt.get_cmap('tab10').colors[0]}
         else:
             colors = {tag: c for
                       tag, c in zip(color, plt.get_cmap('tab10').colors)}
@@ -1499,6 +1515,10 @@ class TensorNetwork(object):
                 if tag in colors:
                     G.node[i]['color'] = colors[tag]
 
+            # optionally label the tensor's tags
+            if label_tags:
+                labels[i] = str(t1.tags)
+
         # Set the size of the nodes, so that dangling inds appear so.
         # Also set the colors of any tagged tensors.
         szs = []
@@ -1506,17 +1526,18 @@ class TensorNetwork(object):
         for nd in G.nodes:
             if isinstance(nd, str):
                 szs += [0]
-                crs += [(0, 0, 0)]
+                crs += [(0.5, 0.5, 0.5)]
             else:
                 szs += [300 / n**0.5]
                 if G.node[nd]['color'] is not None:
                     crs += [G.node[nd]['color']]
                 else:
-                    crs += [(0, 0, 0)]
+                    crs += [(0.5, 0.5, 0.5)]
 
         plt.figure(figsize=figsize)
         pos = nx.spring_layout(G, iterations=iterations)
-        nx.draw(G, node_size=szs, node_color=crs, pos=pos, **plot_opts)
+        nx.draw(G, node_size=szs, node_color=crs, pos=pos, labels=labels,
+                with_labels=True, **plot_opts)
 
         # create legend
         if colors:
@@ -1525,7 +1546,7 @@ class TensorNetwork(object):
                 handles += [plt.Line2D([0], [0], marker='o', color=color,
                                        linestyle='', markersize=10)]
 
-            plt.legend(handles, colors.keys(), loc='center left',
+            plt.legend(handles, tuple(colors.keys()), loc='center left',
                        bbox_to_anchor=(1, 0.5))
 
         plt.show()
