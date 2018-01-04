@@ -444,7 +444,7 @@ class TensorNetwork1D(TensorNetwork):
         else:
             expanded = self.copy()
 
-        for i in range(self.nsites):
+        for i in self.sites:
             tensor = expanded.site[i]
             to_expand = []
 
@@ -608,8 +608,7 @@ class MatrixProductState(TensorNetwork1D):
             Whether to reindex in place.
         """
         if where is None:
-            start = 0
-            stop = self.nsites
+            indices = range(0, self.nsites)
         elif isinstance(where, slice):
             start = 0 if where.start is None else where.start
             stop = self.nsites if where.stop is ... else where.stop
@@ -634,7 +633,7 @@ class MatrixProductState(TensorNetwork1D):
     def site_inds(self):
         """An ordered tuple of the actual physical indices.
         """
-        return tuple(self.site_ind_id.format(i) for i in range(self.nsites))
+        return tuple(self.site_ind_id.format(i) for i in self.sites)
 
     @property
     def site_tag_id(self):
@@ -646,7 +645,7 @@ class MatrixProductState(TensorNetwork1D):
     def site_tags(self):
         """An ordered tuple of the actual site tags.
         """
-        return tuple(self.site_tag_id.format(i) for i in range(self.nsites))
+        return tuple(self.site_tag_id.format(i) for i in self.sites)
 
     def add_MPS(self, other, inplace=False, compress=False, **compress_opts):
         """Add another MatrixProductState to this one.
@@ -759,6 +758,69 @@ class MatrixProductState(TensorNetwork1D):
         S = self.schmidt_values(i, current_orthog_centre=current_orthog_centre,
                                 method=method)
         return S[0] - S[1]
+
+    def partial_trace(self, keep, upper_ind_id="b{}"):
+        """Partially trace this matrix product state, producing a matrix
+        product operator.
+
+        Parameters
+        ----------
+        keep : sequence of int or slice
+            Indicies of the sites to keep.
+        upper_ind_id : str, optional
+            The ind id of the (new) 'upper' inds, i.e. the 'bra' inds.
+
+        Returns
+        -------
+        rho : MatrixProductOperator
+            The density operator in MPO form.
+        """
+        p_bra = self.copy()
+        p_bra.reindex_sites(upper_ind_id, where=keep, inplace=True)
+        rho = self & p_bra.H
+        # now have e.g:
+        #     | |     |   |
+        # o-o-o-o-o-o-o-o-o
+        # | |     | |   |
+        # o-o-o-o-o-o-o-o-o
+        #     | |     |   |
+
+        if isinstance(keep, slice):
+            keep = range(*self.parse_tag_slice(keep))
+
+        def ith_tag(i):
+            return self.site_tag_id.format(i)
+
+        for i in self.sites:
+            if i in keep:
+                #      |
+                #     -o-             |
+                # ... -o- ... -> ... -O- ...
+                #     i|             i|
+                rho ^= ith_tag(i)
+            else:
+                #        |
+                #     -o-o-              |
+                # ...  |    ... -> ... -OO- ...
+                #     -o-o-              |i+1
+                #      i |i+1
+                if i < self.nsites - 1:
+                    rho >>= [ith_tag(i), ith_tag(i + 1)]
+                else:
+                    rho >>= [ith_tag(i), ith_tag(max(keep))]
+
+                rho.drop_tags(ith_tag(i))
+
+        rho = view_TN_as_MPO(rho, upper_ind_id=upper_ind_id,
+                             lower_ind_id=self.site_ind_id,
+                             site_tag_id=self.site_tag_id, inplace=True)
+        rho.sites = sorted(keep)
+
+        return rho
+
+    @functools.wraps(partial_trace)
+    def ptr(self, keep, upper_ind_id="b{}"):
+        return self.partial_trace(keep, upper_ind_id)
 
     def to_dense(self):
         """Return the dense ket version of this MPS, i.e. a ``numpy.matrix``
@@ -986,13 +1048,13 @@ class MatrixProductOperator(TensorNetwork1D):
     def lower_inds(self):
         """An ordered tuple of the actual lower physical indices.
         """
-        return tuple(self.lower_ind_id.format(i) for i in range(self.nsites))
+        return tuple(self.lower_ind_id.format(i) for i in self.sites)
 
     @property
     def upper_inds(self):
         """An ordered tuple of the actual upper physical indices.
         """
-        return tuple(self.upper_ind_id.format(i) for i in range(self.nsites))
+        return tuple(self.upper_ind_id.format(i) for i in self.sites)
 
     @property
     def site_tag_id(self):
@@ -1004,7 +1066,7 @@ class MatrixProductOperator(TensorNetwork1D):
     def site_tags(self):
         """An ordered tuple of the actual site tags.
         """
-        return tuple(self.site_tag_id.format(i) for i in range(self.nsites))
+        return tuple(self.site_tag_id.format(i) for i in self.sites)
 
     def to_dense(self):
         data = self.contract(...).fuse((('lower', self.lower_inds),
@@ -1031,3 +1093,32 @@ class MatrixProductOperator(TensorNetwork1D):
         l3 += "|"
 
         three_line_multi_print(l1, l2, l3, max_width=max_width)
+
+
+def view_TN_as_MPO(tn, upper_ind_id, lower_ind_id, site_tag_id, inplace=False):
+    """Convert a TensorNetwork into a MatrixProductOperator, assuming it has
+    the appropirate underlying structure.
+
+    Parameters
+    ----------
+    tn : TensorNetwork
+        The tensor network to convert.
+    upper_ind_id : str
+        The string formatter that specifies the upper indices -- it should
+        match what the tensors of ``tn`` already have.
+    lower_ind_id : str
+        The string formatter that specifies the lower indices -- it should
+        match what the tensors of ``tn`` already have.
+    site_tag_id : str
+        The string formatter that specifies the site tags -- it should
+        match what the tensors of ``tn`` already have.
+    inplace : bool, optional
+        If True, perform the conversion in-place.
+    """
+    if inplace:
+        tn = tn.copy()
+    tn.__class__ = MatrixProductOperator
+    tn._upper_ind_id = upper_ind_id
+    tn._lower_ind_id = lower_ind_id
+    tn._site_tag_id = site_tag_id
+    return tn

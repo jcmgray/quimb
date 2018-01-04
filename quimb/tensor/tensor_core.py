@@ -906,6 +906,10 @@ class TensorNetwork(object):
     nsites : int, optional
         The number of sites, if explicitly known. This will be calculated
         using `structure` if needed but not specified.
+    sites : sequence of int, optional
+        The indices of the sites present in this network, defaults to
+        ``range(nsites)``. But could be e.g. ``[0, 1, 4, 5, 7]`` if some sites
+        have been removed.
     virtual : bool, optional
         Whether the TensorNetwork should be a *view* onto the tensors it is
         given, or a copy of them. E.g. if a virtual TN is constructed, any
@@ -930,6 +934,7 @@ class TensorNetwork(object):
                  structure=None,
                  structure_bsz=None,
                  nsites=None,
+                 sites=None,
                  virtual=False):
 
         self.site = SiteIndexer(self)
@@ -938,6 +943,7 @@ class TensorNetwork(object):
         if isinstance(tensors, TensorNetwork):
             self.structure = tensors.structure
             self.nsites = tensors.nsites
+            self.sites = tensors.sites
             self.structure_bsz = tensors.structure_bsz
             self.tag_index = {
                 tg: nms.copy() for tg, nms in tensors.tag_index.items()}
@@ -948,6 +954,7 @@ class TensorNetwork(object):
         self.structure = structure
         self.structure_bsz = structure_bsz
         self.nsites = nsites
+        self.sites = sites
 
         self.tensor_index = {}
         self.tag_index = {}
@@ -1001,10 +1008,16 @@ class TensorNetwork(object):
                 self.tag_index = merge_with(
                     set_join, self.tag_index, t.tag_index)
 
-        # count how many sites if a structure is given
         if self.structure:
+            # count how many sites if a structure is given
             if self.nsites is None:
                 self.nsites = self.calc_nsites()
+
+            # set the list of indices of sites which are present
+            if self.sites is None:
+                self.sites = range(self.nsites)
+            else:
+                self.sites = tuple(self.sites)
 
             # set default blocksize
             if self.structure_bsz is None:
@@ -1247,6 +1260,9 @@ class TensorNetwork(object):
         return tensor_contract(*tagged_ts)
 
     def parse_tag_slice(self, tag_slice):
+        """Take a slice object, and work out its implied start stop and step,
+        taking into account counting negatively from the end etc.
+        """
         if tag_slice.start is None:
             start = 0
         elif tag_slice.start is ...:
@@ -1322,13 +1338,16 @@ class TensorNetwork(object):
         if tags is ...:
             tags = slice(0, self.nsites)
 
+        # filter sites by the slice, but also which sites are present at all
         tags_seq = (self.structure.format(i)
-                    for i in range(*self.parse_tag_slice(tags)))
+                    for i in range(*self.parse_tag_slice(tags))
+                    if i in self.sites)
 
         # partition sites into `structure_bsz` groups
         if self.structure_bsz > 1:
             tags_seq = partition_all(self.structure_bsz, tags_seq)
 
+        # contract each block of sites cumulatively
         return self.cumulative_contract(tags_seq, inplace=inplace)
 
     def contract(self, tags=..., inplace=False):

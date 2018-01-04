@@ -852,14 +852,25 @@ class TestMatrixProductState:
         assert_allclose(ex_svns, svns)
         assert_allclose(ex_sgs, sgs)
 
+    def test_partial_trace(self):
+        n = 10
+        p = MPS_rand_state(n, 7)
+        r = p.ptr(keep=[2, 3, 4, 6, 8], upper_ind_id='u{}')
+        assert r.upper_inds == ('u2', 'u3', 'u4', 'u6', 'u8')
+        assert r.lower_inds == ('k2', 'k3', 'k4', 'k6', 'k8')
+        assert_allclose(r.trace(), 1.0)
+        pd = p.to_dense()
+        rd = pd.ptr([2] * n, keep=[2, 3, 4, 6, 8])
+        assert_allclose(r.to_dense(), rd)
+
 
 class TestMatrixProductOperator:
-
     def test_matrix_product_operator(self):
         tensors = ([np.random.rand(5, 2, 2)] +
                    [np.random.rand(5, 5, 2, 2) for _ in range(3)] +
                    [np.random.rand(5, 2, 2)])
         mpo = MatrixProductOperator(tensors)
+
         mpo.show()
         assert len(mpo.tensors) == 5
         assert mpo.upper_inds == ('k0', 'k1', 'k2', 'k3', 'k4')
