@@ -484,8 +484,6 @@ class TensorNetwork1D(TensorNetwork):
         num_can_l = 0
         num_can_r = 0
 
-        # import pdb; pdb.set_trace()
-
         for i in range(self.nsites - 1):
             ov ^= slice(0, i + 1)
             x = ov.site[i].data
@@ -664,7 +662,7 @@ class MatrixProductState(TensorNetwork1D):
         else:
             summed = self.copy()
 
-        for i in range(summed.nsites):
+        for i in summed.sites:
             summed_tensor = summed.site[i]
             other_tensor = other.site[i]
 
@@ -1050,7 +1048,7 @@ class MatrixProductOperator(TensorNetwork1D):
         else:
             summed = self.copy()
 
-        for i in range(summed.nsites):
+        for i in summed.sites:
             summed_tensor = summed.site[i]
             other_tensor = other.site[i]
 
@@ -1112,8 +1110,8 @@ class MatrixProductOperator(TensorNetwork1D):
         l1 = ""
         l2 = ""
         l3 = ""
-        for i in range(self.nsites - 1):
-            bdim = self.bond_dim(i, i + 1)
+        for i in range(len(self.sites) - 1):
+            bdim = self.bond_dim(self.sites[i], self.sites[i + 1])
             strl = len(str(bdim))
             l1 += "|{}".format(bdim)
             l2 += "O" + ("-" if bdim < 100 else "=") * strl
