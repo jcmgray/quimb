@@ -420,10 +420,10 @@ class DMRG:
         L, R = T_AB.split(left_inds=uix_L, get='arrays', absorb=direction,
                           **compress_opts)
 
-        self._k.site[i].update(data=L, inds=(*uix_L, u_bond_ind))
-        self._b.site[i].update(data=L.conj(), inds=(*lix_L, l_bond_ind))
-        self._k.site[i + 1].update(data=R, inds=(u_bond_ind, *uix_R))
-        self._b.site[i + 1].update(data=R.conj(), inds=(l_bond_ind, *lix_R))
+        self._k.site[i].modify(data=L, inds=(*uix_L, u_bond_ind))
+        self._b.site[i].modify(data=L.conj(), inds=(*lix_L, l_bond_ind))
+        self._k.site[i + 1].modify(data=R, inds=(u_bond_ind, *uix_R))
+        self._b.site[i + 1].modify(data=R.conj(), inds=(l_bond_ind, *lix_R))
 
         return eff_e[0]
 
@@ -724,7 +724,7 @@ class DMRGX(DMRG):
         # update tensor at site i with all evecs -> need dummy index
         ki = self._k.site[i]
         bi = self._b.site[i]
-        ki.update(data=evecs, inds=(*uix, '__ev_ind__'))
+        ki.modify(data=evecs, inds=(*uix, '__ev_ind__'))
 
         # find the index of the highest overlap eigenvector, by contracting::
         #
@@ -754,8 +754,8 @@ class DMRGX(DMRG):
                 evecs_c = evecs_c[..., best_overlaps]
 
                 # need bra site in place with extra dimension to calc variance
-                ki.update(data=evecs)
-                bi.update(data=evecs_c, inds=(*lix, '__ev_ind__'))
+                ki.modify(data=evecs)
+                bi.modify(data=evecs_c, inds=(*lix, '__ev_ind__'))
 
                 # now find the variances of the best::
                 #
@@ -777,8 +777,8 @@ class DMRGX(DMRG):
                 best = np.argmin(en2 - evals**2)
 
         # update site i with the data and drop dummy index too
-        ki.update(data=evecs[..., best], inds=uix)
-        bi.update(data=evecs_c[..., best], inds=lix)
+        ki.modify(data=evecs[..., best], inds=uix)
+        bi.modify(data=evecs_c[..., best], inds=lix)
         # store the current effective energy for possibly targeted seigsys
         self._target_energy = evals[best]
 

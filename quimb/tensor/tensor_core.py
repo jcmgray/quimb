@@ -410,7 +410,7 @@ def tensor_direct_product(T1, T2, sum_inds=(), inplace=False):
         new_T = T1.copy()
 
     # XXX: add T2s tags?
-    new_T.update(data=array_direct_product(T1.data, T2.data,
+    new_T.modify(data=array_direct_product(T1.data, T2.data,
                                            sum_axes=sum_axes))
     return new_T
 
@@ -474,7 +474,7 @@ class Tensor(object):
     data = property(get_data, set_data,
                     doc="The numpy.ndarray with this Tensors' numeric data.")
 
-    def update(self, data=None, inds=None, tags=None):
+    def modify(self, data=None, inds=None, tags=None):
         """Overwrite the data of this tensor.
         """
         if data is not None:
@@ -482,7 +482,7 @@ class Tensor(object):
         if inds is not None:
             self.inds = inds
         if tags is not None:
-            tags = tags
+            self.tags = tags
         if len(self.inds) != self.data.ndim:
             raise ValueError("Mismatch between number of data dimensions and "
                              "number of indices supplied.")
@@ -683,6 +683,9 @@ class Tensor(object):
         ----------
         index_map : dict-like
             Mapping of pairs ``{old_ind: new_ind, ...}``.
+        inplace : bool, optional
+            If ``False`` (the default), a copy of this tensor with the changed
+            inds will be returned.
         """
         if inplace:
             new = self
@@ -1299,10 +1302,7 @@ class TensorNetwork(object):
             The result of the contraction, still a TensorNetwork if the
             contraction was only partial.
         """
-        if inplace:
-            new_tn = self
-        else:
-            new_tn = self.copy()
+        new_tn = self if inplace else self.copy()
         ctags = set()
 
         for tags in tags_seq:
@@ -1390,6 +1390,33 @@ class TensorNetwork(object):
         """
         return TensorNetwork((self, other)) ^ ...
 
+    def retag(self, tag_map, inplace=False):
+        """Rename tags for all tensors in this network, optionally in-place.
+
+        Parameters
+        ----------
+        tag_map : dict-like
+            Mapping of pairs ``{old_tag: new_tag, ...}``.
+        """
+        retagged = self if inplace else self.copy()
+
+        def _retag_single(tag_map):
+            # for each remapping pair
+            for old_tag, new_tag in tag_map.items():
+                # get each tensor with that tag
+                for tensor in retagged.tag_index[old_tag]:
+                    retagged.tensor_index[tensor].tags.remove(old_tag)
+                    retagged.tensor_index[tensor].tags.add(new_tag)
+                # and update the tag index
+                retagged.tag_index[new_tag] = retagged.tag_index.pop(old_tag)
+
+        # to avoid muddling tags e.g. when swapping, need intermediary step
+        midtags = [rand_uuid() for _ in range(len(tag_map))]
+        _retag_single({ot: mt for ot, mt in zip(tag_map.keys(), midtags)})
+        _retag_single({mt: nt for mt, nt in zip(midtags, tag_map.values())})
+
+        return retagged
+
     def reindex(self, index_map, inplace=False):
         """Rename indices for all tensors in this network, optionally in-place.
 
@@ -1398,10 +1425,7 @@ class TensorNetwork(object):
         index_map : dict-like
             Mapping of pairs ``{old_ind: new_ind, ...}``.
         """
-        if inplace:
-            new_tn = self
-        else:
-            new_tn = self.copy()
+        new_tn = self if inplace else self.copy()
 
         for t in new_tn.tensor_index.values():
             t.reindex(index_map, inplace=True)
@@ -1410,10 +1434,7 @@ class TensorNetwork(object):
     def conj(self, inplace=False):
         """Conjugate all the tensors in this network (leaves all indices).
         """
-        if inplace:
-            new_tn = self
-        else:
-            new_tn = self.copy()
+        new_tn = self if inplace else self.copy()
 
         for t in new_tn.tensor_index.values():
             t.conj(inplace=True)

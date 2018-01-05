@@ -92,12 +92,12 @@ class TensorNetwork1D(TensorNetwork):
         R.reindex({new_shared_bond: old_shared_bond}, inplace=True)
         R.transpose(*T2.inds, inplace=True)
 
-        self.site[i].update(data=Q._data)
-        self.site[i + 1].update(data=R._data)
+        self.site[i].modify(data=Q._data)
+        self.site[i + 1].modify(data=R._data)
 
         if bra is not None:
-            bra.site[i].update(data=Q._data.conj())
-            bra.site[i + 1].update(data=R._data.conj())
+            bra.site[i].modify(data=Q._data.conj())
+            bra.site[i + 1].modify(data=R._data.conj())
 
     def _right_decomp_site(self, i, bra=None, **split_opts):
         T1 = self.site[i]
@@ -118,12 +118,12 @@ class TensorNetwork1D(TensorNetwork):
         Q.reindex({new_shared_bond: old_shared_bond}, inplace=True)
         Q.transpose(*T1.inds, inplace=True)
 
-        self.site[i - 1].update(data=L._data)
-        self.site[i].update(data=Q._data)
+        self.site[i - 1].modify(data=L._data)
+        self.site[i].modify(data=Q._data)
 
         if bra is not None:
-            bra.site[i - 1].update(data=L._data.conj())
-            bra.site[i].update(data=Q._data.conj())
+            bra.site[i - 1].modify(data=L._data.conj())
+            bra.site[i].modify(data=Q._data.conj())
 
     def left_canonize_site(self, i, bra=None):
         """Left canonize this TN's ith site, inplace::
@@ -457,10 +457,10 @@ class TensorNetwork1D(TensorNetwork):
                     (0, max(new_bond_dim - d, 0))
                     for d, i in zip(tensor.shape, tensor.inds)]
 
-            tensor.update(data=np.pad(tensor._data, pads, mode='constant'))
+            tensor.modify(data=np.pad(tensor._data, pads, mode='constant'))
 
             if bra is not None:
-                bra.site[i].update(data=tensor.data.conj())
+                bra.site[i].modify(data=tensor.data.conj())
 
         return expanded
 
@@ -759,7 +759,7 @@ class MatrixProductState(TensorNetwork1D):
                                 method=method)
         return S[0] - S[1]
 
-    def partial_trace(self, keep, upper_ind_id="b{}"):
+    def partial_trace(self, keep, upper_ind_id="b{}", rescale_sites=True):
         """Partially trace this matrix product state, producing a matrix
         product operator.
 
@@ -769,6 +769,10 @@ class MatrixProductState(TensorNetwork1D):
             Indicies of the sites to keep.
         upper_ind_id : str, optional
             The ind id of the (new) 'upper' inds, i.e. the 'bra' inds.
+        rescale_sites : bool, optional
+            If ``True`` (the default), then the kept sites will be rescaled to
+            ``(0, 1, 2, ...)`` etc. rather than keeping their original site
+            numbers.
 
         Returns
         -------
@@ -787,6 +791,8 @@ class MatrixProductState(TensorNetwork1D):
 
         if isinstance(keep, slice):
             keep = range(*self.parse_tag_slice(keep))
+
+        keep = sorted(keep)
 
         def ith_tag(i):
             return self.site_tag_id.format(i)
@@ -814,12 +820,16 @@ class MatrixProductState(TensorNetwork1D):
         rho = view_TN_as_MPO(rho, upper_ind_id=upper_ind_id,
                              lower_ind_id=self.site_ind_id,
                              site_tag_id=self.site_tag_id, inplace=True)
-        rho.sites = sorted(keep)
+        rho.sites = keep
+
+        if rescale_sites:
+            rho.retag({ith_tag(old): ith_tag(new)
+                       for new, old in enumerate(keep)})
 
         return rho
 
     @functools.wraps(partial_trace)
-    def ptr(self, keep, upper_ind_id="b{}"):
+    def ptr(self, keep, upper_ind_id="b{}", rescale_sites=True):
         return self.partial_trace(keep, upper_ind_id)
 
     def to_dense(self):

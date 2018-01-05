@@ -582,6 +582,14 @@ class TestTensorNetwork:
         # test can contract
         assert 0 < abs(tn ^ ...) < 1
 
+    def test_retagging(self):
+        x = rand_tensor((2, 4), inds='ab', tags={'X', 'I0'})
+        y = rand_tensor((4, 2, 5), inds='bcd', tags={'Y', 'I1'})
+        z = rand_tensor((5, 3), inds='de', tags={'Z', 'I2'})
+        tn = TensorNetwork((x, y, z))
+        tn.retag({"I0": "I1", "I1": "I2", "I2": "I3", "Z": "A"}, inplace=True)
+        assert set(tn.tag_index.keys()) == {'X', 'I1', 'I2', 'I3', 'Y', 'A'}
+
 
 class TestMatrixProductState:
 
@@ -852,10 +860,12 @@ class TestMatrixProductState:
         assert_allclose(ex_svns, svns)
         assert_allclose(ex_sgs, sgs)
 
-    def test_partial_trace(self):
+    @pytest.mark.parametrize("rescale", [False, True])
+    def test_partial_trace(self, rescale):
         n = 10
         p = MPS_rand_state(n, 7)
-        r = p.ptr(keep=[2, 3, 4, 6, 8], upper_ind_id='u{}')
+        r = p.ptr(keep=[2, 3, 4, 6, 8], upper_ind_id='u{}',
+                  rescale_sites=rescale)
         assert r.upper_inds == ('u2', 'u3', 'u4', 'u6', 'u8')
         assert r.lower_inds == ('k2', 'k3', 'k4', 'k6', 'k8')
         assert_allclose(r.trace(), 1.0)
