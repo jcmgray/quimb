@@ -762,6 +762,12 @@ class Tensor(object):
             for tag in tags:
                 self.tags.discard(tag)
 
+    def shared_inds(self, other):
+        """Return a tuple of the shared indices between this tensor
+        and ``other``.
+        """
+        return tuple(i for i in self.inds if i in other.inds)
+
     def filter_shared_inds(self, other):
         """Sort this tensor's indices into a list of those that it shares and
         doesn't share with another tensor.
@@ -1566,13 +1572,13 @@ class TensorNetwork(object):
         for nd in G.nodes:
             if isinstance(nd, str):
                 szs += [0]
-                crs += [(0.5, 0.5, 0.5)]
+                crs += [(1.0, 1.0, 1.0)]
             else:
-                szs += [300 / n**0.5]
+                szs += [500 / n**0.6]
                 if G.node[nd]['color'] is not None:
                     crs += [G.node[nd]['color']]
                 else:
-                    crs += [(0.5, 0.5, 0.5)]
+                    crs += [(0.6, 0.6, 0.6)]
 
         plt.figure(figsize=figsize)
         pos = nx.spring_layout(G, iterations=iterations)

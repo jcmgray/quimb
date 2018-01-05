@@ -73,6 +73,23 @@ class TensorNetwork1D(TensorNetwork):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
+    @property
+    def site_tag_id(self):
+        """The string specifier for tagging each site of this 1D TN.
+        """
+        return self._site_tag_id
+
+    def site_tag(self, i):
+        """The name of the tag specifiying the tensor at site ``i``.
+        """
+        return self.site_tag_id.format(i)
+
+    @property
+    def site_tags(self):
+        """An ordered tuple of the actual site tags.
+        """
+        return tuple(self.site_tag(i) for i in self.sites)
+
     def _left_decomp_site(self, i, bra=None, **split_opts):
         T1 = self.site[i]
         T2 = self.site[i + 1]
@@ -386,9 +403,7 @@ class TensorNetwork1D(TensorNetwork):
     def bond(self, i, j):
         """Get the name of the index defining the bond between sites i and j.
         """
-        inds_i = self.site[i].inds
-        inds_j = self.site[j].inds
-        bond, = (i for i in inds_i if i in inds_j)
+        bond, = self.site[i].shared_inds(self.site[j])
         return bond
 
     def bond_dim(self, i, j):
@@ -432,7 +447,7 @@ class TensorNetwork1D(TensorNetwork):
             self.shift_orthogonality_center(current_orthog_centre, i)
 
         Tm1 = self.site[i]
-        left_inds = set(Tm1.inds) & set(self.site[i - 1].inds)
+        left_inds = Tm1.shared_inds(self.site[i - 1])
         return Tm1.singular_values(left_inds, method=method)
 
     def expand_bond_dimension(self, new_bond_dim, inplace=True, bra=None):
@@ -616,7 +631,7 @@ class MatrixProductState(TensorNetwork1D):
         else:
             indices = where
 
-        return self.reindex({self.site_ind_id.format(i): new_id.format(i)
+        return self.reindex({self.site_ind(i): new_id.format(i)
                              for i in indices}, inplace=inplace)
 
     def _get_site_ind_id(self):
@@ -629,23 +644,14 @@ class MatrixProductState(TensorNetwork1D):
     site_ind_id = property(_get_site_ind_id, _set_site_ind_id,
                            doc="The string specifier for the physical indices")
 
+    def site_ind(self, i):
+        return self.site_ind_id.format(i)
+
     @property
     def site_inds(self):
         """An ordered tuple of the actual physical indices.
         """
-        return tuple(self.site_ind_id.format(i) for i in self.sites)
-
-    @property
-    def site_tag_id(self):
-        """The string specifier for tagging each site of this MPS.
-        """
-        return self._site_tag_id
-
-    @property
-    def site_tags(self):
-        """An ordered tuple of the actual site tags.
-        """
-        return tuple(self.site_tag_id.format(i) for i in self.sites)
+        return tuple(self.site_ind(i) for i in self.sites)
 
     def add_MPS(self, other, inplace=False, compress=False, **compress_opts):
         """Add another MatrixProductState to this one.
@@ -672,7 +678,7 @@ class MatrixProductState(TensorNetwork1D):
                 other_tensor = other_tensor.reindex(reindex_map)
 
             tensor_direct_product(summed_tensor, other_tensor, inplace=True,
-                                  sum_inds=summed.site_ind_id.format(i))
+                                  sum_inds=summed.site_ind(i))
 
         if compress:
             summed.compress(**compress_opts)
@@ -793,9 +799,7 @@ class MatrixProductState(TensorNetwork1D):
             keep = range(*self.parse_tag_slice(keep))
 
         keep = sorted(keep)
-
-        def ith_tag(i):
-            return self.site_tag_id.format(i)
+        n = len(keep)
 
         for i in self.sites:
             if i in keep:
@@ -803,7 +807,7 @@ class MatrixProductState(TensorNetwork1D):
                 #     -o-             |
                 # ... -o- ... -> ... -O- ...
                 #     i|             i|
-                rho ^= ith_tag(i)
+                rho ^= self.site_tag(i)
             else:
                 #        |
                 #     -o-o-              |
@@ -811,26 +815,45 @@ class MatrixProductState(TensorNetwork1D):
                 #     -o-o-              |i+1
                 #      i |i+1
                 if i < self.nsites - 1:
-                    rho >>= [ith_tag(i), ith_tag(i + 1)]
+                    rho >>= [self.site_tag(i), self.site_tag(i + 1)]
                 else:
-                    rho >>= [ith_tag(i), ith_tag(max(keep))]
+                    rho >>= [self.site_tag(i), self.site_tag(max(keep))]
 
-                rho.drop_tags(ith_tag(i))
+                rho.drop_tags(self.site_tag(i))
 
         rho = view_TN_as_MPO(rho, upper_ind_id=upper_ind_id,
                              lower_ind_id=self.site_ind_id,
                              site_tag_id=self.site_tag_id, inplace=True)
-        rho.sites = keep
+
+        # fuse all the double bonds
+        for i in range(n - 1):
+            T1, T2 = rho.site[keep[i]], rho.site[keep[i + 1]]
+            dbnds = T1.shared_inds(T2)
+            T1.fuse({dbnds[0]: dbnds}, inplace=True)
+            T2.fuse({dbnds[0]: dbnds}, inplace=True)
 
         if rescale_sites:
-            rho.retag({ith_tag(old): ith_tag(new)
-                       for new, old in enumerate(keep)})
+            # e.g. [3, 4, 5, 7, 9] -> [0, 1, 2, 3, 4]
+            tag_map, ind_map = {}, {}
+            for new, old in enumerate(keep):
+                tag_map[self.site_tag(old)] = self.site_tag(new)
+                ind_map[rho.lower_ind(old)] = rho.lower_ind(new)
+                ind_map[rho.upper_ind(old)] = rho.upper_ind(new)
+
+            rho.retag(tag_map, inplace=True)
+            rho.reindex(ind_map, inplace=True)
+
+            rho.nsites = n
+            rho.sites = range(n)
+        else:
+            rho.sites = keep
 
         return rho
 
     @functools.wraps(partial_trace)
     def ptr(self, keep, upper_ind_id="b{}", rescale_sites=True):
-        return self.partial_trace(keep, upper_ind_id)
+        return self.partial_trace(keep, upper_ind_id,
+                                  rescale_sites=rescale_sites)
 
     def to_dense(self):
         """Return the dense ket version of this MPS, i.e. a ``numpy.matrix``
@@ -841,7 +864,7 @@ class MatrixProductState(TensorNetwork1D):
                            .data.reshape(-1, 1))
 
     def phys_dim(self, i=0):
-        return self.site[i].ind_size(self.site_ind_id.format(i))
+        return self.site[i].ind_size(self.site_ind(i))
 
     @functools.wraps(align_TN_1D)
     def align(self, *args, inplace=True):
@@ -958,7 +981,7 @@ class MatrixProductOperator(TensorNetwork1D):
             start = 0 if where.start is None else where.start
             stop = self.nsites if where.stop is ... else where.stop
 
-        return self.reindex({self.lower_ind_id.format(i): new_id.format(i)
+        return self.reindex({self.lower_ind(i): new_id.format(i)
                              for i in range(start, stop)}, inplace=inplace)
 
     def reindex_upper_sites(self, new_id, where=None, inplace=False):
@@ -981,7 +1004,7 @@ class MatrixProductOperator(TensorNetwork1D):
             start = 0 if where.start is None else where.start
             stop = self.nsites if where.stop is ... else where.stop
 
-        return self.reindex({self.upper_ind_id.format(i): new_id.format(i)
+        return self.reindex({self.upper_ind(i): new_id.format(i)
                              for i in range(start, stop)}, inplace=inplace)
 
     def _get_lower_ind_id(self):
@@ -995,6 +1018,11 @@ class MatrixProductOperator(TensorNetwork1D):
                             doc="The string specifier for the lower phyiscal "
                             "indices")
 
+    def lower_ind(self, i):
+        """The name of the lower ('ket') index at site ``i``.
+        """
+        return self.lower_ind_id.format(i)
+
     def _get_upper_ind_id(self):
         return self._upper_ind_id
 
@@ -1005,6 +1033,11 @@ class MatrixProductOperator(TensorNetwork1D):
     upper_ind_id = property(_get_upper_ind_id, _set_upper_ind_id,
                             doc="The string specifier for the upper phyiscal "
                             "indices")
+
+    def upper_ind(self, i):
+        """The name of the upper ('bra') index at site ``i``.
+        """
+        return self.upper_ind_id.format(i)
 
     def add_MPO(self, other, inplace=False, compress=False, **compress_opts):
         """Add another MatrixProductState to this one.
@@ -1031,8 +1064,8 @@ class MatrixProductOperator(TensorNetwork1D):
                 other_tensor = other_tensor.reindex(reindex_map)
 
             tensor_direct_product(summed_tensor, other_tensor, inplace=True,
-                                  sum_inds=(summed.upper_ind_id.format(i),
-                                            summed.lower_ind_id.format(i)))
+                                  sum_inds=(summed.upper_ind(i),
+                                            summed.lower_ind(i)))
 
         if compress:
             summed.compress(**compress_opts)
@@ -1058,25 +1091,13 @@ class MatrixProductOperator(TensorNetwork1D):
     def lower_inds(self):
         """An ordered tuple of the actual lower physical indices.
         """
-        return tuple(self.lower_ind_id.format(i) for i in self.sites)
+        return tuple(self.lower_ind(i) for i in self.sites)
 
     @property
     def upper_inds(self):
         """An ordered tuple of the actual upper physical indices.
         """
-        return tuple(self.upper_ind_id.format(i) for i in self.sites)
-
-    @property
-    def site_tag_id(self):
-        """The string specifier for tagging each site of this MPO.
-        """
-        return self._site_tag_id
-
-    @property
-    def site_tags(self):
-        """An ordered tuple of the actual site tags.
-        """
-        return tuple(self.site_tag_id.format(i) for i in self.sites)
+        return tuple(self.upper_ind(i) for i in self.sites)
 
     def to_dense(self):
         data = self.contract(...).fuse((('lower', self.lower_inds),
@@ -1085,7 +1106,7 @@ class MatrixProductOperator(TensorNetwork1D):
         return np.matrix(data.reshape(d, d))
 
     def phys_dim(self, i=0):
-        return self.site[i].ind_size(self.upper_ind_id.format(i))
+        return self.site[i].ind_size(self.upper_ind(i))
 
     def show(self, max_width=None):
         l1 = ""

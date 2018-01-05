@@ -866,8 +866,13 @@ class TestMatrixProductState:
         p = MPS_rand_state(n, 7)
         r = p.ptr(keep=[2, 3, 4, 6, 8], upper_ind_id='u{}',
                   rescale_sites=rescale)
-        assert r.upper_inds == ('u2', 'u3', 'u4', 'u6', 'u8')
-        assert r.lower_inds == ('k2', 'k3', 'k4', 'k6', 'k8')
+
+        if rescale:
+            assert r.upper_inds == ('u0', 'u1', 'u2', 'u3', 'u4')
+            assert r.lower_inds == ('k0', 'k1', 'k2', 'k3', 'k4')
+        else:
+            assert r.upper_inds == ('u2', 'u3', 'u4', 'u6', 'u8')
+            assert r.lower_inds == ('k2', 'k3', 'k4', 'k6', 'k8')
         assert_allclose(r.trace(), 1.0)
         pd = p.to_dense()
         rd = pd.ptr([2] * n, keep=[2, 3, 4, 6, 8])
