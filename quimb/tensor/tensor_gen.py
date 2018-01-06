@@ -170,9 +170,8 @@ def MPO_identity_like(mpo, **mpo_opts):
                         lower_ind_id=mpo.lower_ind_id)
 
 
-
-def MPO_rand_herm(n, bond_dim, phys_dim=2, normalize=True,
-                  dtype=complex, **mpo_opts):
+def MPO_rand(n, bond_dim, phys_dim=2, normalize=True,
+             dtype=complex, herm=False, **mpo_opts):
     """Generate a random matrix product state.
 
     Parameters
@@ -185,6 +184,8 @@ def MPO_rand_herm(n, bond_dim, phys_dim=2, normalize=True,
         Whether to normalize the operator such that ``trace(A.H @ A) == 1``.
     dtype : {complex, float}, optional
         What dtype to use.
+    herm : bool, optional
+        Whether to make the matrix hermitian (or symmetric if real) or not.
     mpo_opts
         Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductOperator`.
     """
@@ -193,29 +194,48 @@ def MPO_rand_herm(n, bond_dim, phys_dim=2, normalize=True,
               (bond_dim, phys_dim, phys_dim)]
 
     if dtype in (float, np.float_):
+
         def def_gen_data(shape):
             data = np.random.randn(*shape)
+
+            if not herm:
+                return data
+
             trans = (0, 2, 1) if len(shape) == 3 else (0, 1, 3, 2)
             return data + data.transpose(*trans)
+
     elif dtype in (complex, np.complex_):
+
         def def_gen_data(shape):
             data = np.random.randn(*shape) + 1.0j * np.random.randn(*shape)
+
+            if not herm:
+                return data
+
             trans = (0, 2, 1) if len(shape) == 3 else (0, 1, 3, 2)
             return data + data.transpose(trans).conj()
+
     else:
         raise TypeError("dtype not understood - should be float or complex.")
 
-    arrays = \
-        map(lambda x: x / norm_fro_dense(x)**(1 / (x.ndim - 1)),
-            map(def_gen_data, shapes))
+    arrays = map(lambda x: x / norm_fro_dense(x)**(1 / (x.ndim - 1)),
+                 map(def_gen_data, shapes))
 
-    rmps = MatrixProductOperator(arrays, **mpo_opts)
+    rmpo = MatrixProductOperator(arrays, **mpo_opts)
 
     if normalize:
-        rmps.site[-1] /= (rmps.H @ rmps)**0.5
+        rmpo.site[-1] /= (rmpo.H @ rmpo)**0.5
 
-    return rmps
+    return rmpo
 
+
+def MPO_rand_herm(n, bond_dim, phys_dim=2, normalize=True,
+                  dtype=complex, **mpo_opts):
+    """Generate a random hermitian matrix product operator.
+    See :class:`~quimb.tensor.tensor_gen.MPO_rand`.
+    """
+    return MPO_rand(n, bond_dim, phys_dim=phys_dim, normalize=normalize,
+                    dtype=dtype, herm=True, **mpo_opts)
 
 
 def spin_ham_mpo_tensor(one_site_terms, two_site_terms, S=1 / 2, which=None):

@@ -1485,6 +1485,11 @@ class TensorNetwork(object):
         """
         return tuple(di[1] for di in self.outer_dims_inds())
 
+    def max_bond(self):
+        """Return the size of the largest bond in this network.
+        """
+        return max(max(t.shape) for t in self.tensor_index.values())
+
     @property
     def shape(self):
         """Actual, i.e. exterior, shape of this TensorNetwork.

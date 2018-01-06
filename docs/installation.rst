@@ -41,7 +41,7 @@ Fast and optionally distributed partial eigen-solving, SVD, exponentiation etc. 
     * `petsc4py <https://bitbucket.org/petsc/petsc4py>`_
     * `petsc <http://www.mcs.anl.gov/petsc/>`_
     * `mpi4py <http://mpi4py.readthedocs.io/en/latest/>`_ (v2.1.0+)
-    * An MPI implementation (`OpenMPI <https://www.open-mpi.org/>`_ recommended)
+    * An MPI implementation (`OpenMPI <https://www.open-mpi.org/>`_ recommended, the 1.10.x series seems most robust for spawning processes)
 
 It is recommended to compile and install these (apart from MPI if you are e.g. on a cluster) yourself (see below).
 
