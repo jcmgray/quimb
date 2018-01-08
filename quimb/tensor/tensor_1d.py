@@ -693,6 +693,16 @@ class MatrixProductState(TensorNetwork1D):
         """
         return self.add_MPS(other, inplace=True)
 
+    def __sub__(self, other):
+        """MPS subtraction.
+        """
+        return self.add_MPS(other * -1, inplace=False)
+
+    def __isub__(self, other):
+        """In-place MPS subtraction.
+        """
+        return self.add_MPS(other * -1, inplace=True)
+
     def schmidt_values(self, i, current_orthog_centre=None, method='svd'):
         """Find the schmidt values associated with the bipartition of this
         MPS between sites on either site of ``i``. In other words, ``i`` is the
@@ -1084,6 +1094,16 @@ class MatrixProductOperator(TensorNetwork1D):
         """In-place MPO addition.
         """
         return self.add_MPO(other, inplace=True)
+
+    def __sub__(self, other):
+        """MPO subtraction.
+        """
+        return self.add_MPO(-1 * other, inplace=False)
+
+    def __isub__(self, other):
+        """In-place MPO subtraction.
+        """
+        return self.add_MPO(-1 * other, inplace=True)
 
     @property
     def lower_inds(self):

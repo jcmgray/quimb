@@ -33,6 +33,7 @@ from quimb.tensor import (
     MPS_zero_state,
     MPO_identity,
     MPO_identity_like,
+    MPO_rand,
     MPO_rand_herm,
     MPO_ham_ising,
     MPO_ham_XY,
@@ -464,6 +465,25 @@ class TestTensorNetwork:
         for i, arr in enumerate((a_data, b_data, c_data)):
             assert_allclose(tn["I{}".format(i)].data, arr.conj())
 
+    def test_multiply(self):
+        a = rand_tensor((2, 3, 4), inds=['0', '1', '2'], tags='red')
+        b = rand_tensor((3, 4, 5), inds=['1', '2', '3'], tags='blue')
+        c = rand_tensor((5, 2, 6), inds=['3', '0', '4'], tags='blue')
+        tn = a & b & c
+        x1 = (tn & tn.H) ^ ...
+        x2 = ((2 * tn) & tn.H) ^ ...
+        assert_allclose(2 * x1, x2)
+
+    def test_multiply_inplace(self):
+        a = rand_tensor((2, 3, 4), inds=['0', '1', '2'], tags='red')
+        b = rand_tensor((3, 4, 5), inds=['1', '2', '3'], tags='blue')
+        c = rand_tensor((5, 2, 6), inds=['3', '0', '4'], tags='blue')
+        tn = a & b & c
+        x1 = (tn & tn.H) ^ ...
+        tn *= 2
+        x2 = (tn & tn.H) ^ ...
+        assert_allclose(4 * x1, x2)
+
     def test_contracting_tensors(self):
         a = rand_tensor((2, 3, 4), inds=[0, 1, 2], tags='red')
         b = rand_tensor((3, 4, 5), inds=[1, 2, 3], tags='blue')
@@ -834,15 +854,20 @@ class TestMatrixProductState:
         assert max(p2['I4'].shape) == 7
         assert_allclose(p2.H @ p, 2)
 
-    def test_adding_mpo(self):
-        h = MPO_ham_heis(6)
-        hd = h.to_dense()
-        assert_allclose(h @ h.H, (hd @ hd.H).tr())
-        h2 = h + h
-        assert_allclose(h2 @ h2.H, (hd @ hd.H).tr() * 4)
-        h2.right_compress()
-        assert_allclose(h2 @ h2.H, (hd @ hd.H).tr() * 4)
-        assert max(h2['I3'].shape) == 5
+    def test_subtract(self):
+        a, b, c = (MPS_rand_state(10, 7) for _ in 'abc')
+        ab = a.H @ b
+        ac = a.H @ c
+        abmc = a.H @ (b - c)
+        assert_allclose(ab - ac, abmc)
+
+    def test_subtract_inplace(self):
+        a, b, c = (MPS_rand_state(10, 7) for _ in 'abc')
+        ab = a.H @ b
+        ac = a.H @ c
+        b -= c
+        abmc = a.H @ b
+        assert_allclose(ab - ac, abmc)
 
     def test_schmidt_values_entropy_gap_simple(self):
         n = 12
@@ -904,6 +929,23 @@ class TestMatrixProductOperator:
         h2.upper_ind_id = h2.lower_ind_id
         t2 = h2 ^ ...
         assert_allclose(2 * t, t2)
+
+    def test_adding_mpo(self):
+        h = MPO_ham_heis(6)
+        hd = h.to_dense()
+        assert_allclose(h @ h.H, (hd @ hd.H).tr())
+        h2 = h + h
+        assert_allclose(h2 @ h2.H, (hd @ hd.H).tr() * 4)
+        h2.right_compress()
+        assert_allclose(h2 @ h2.H, (hd @ hd.H).tr() * 4)
+        assert max(h2['I3'].shape) == 5
+
+    def test_subtract_mpo(self):
+        a, b = MPO_rand(13, 7), MPO_rand(13, 7)
+        x1 = a.trace() - b.trace()
+        assert_allclose(x1, (a - b).trace())
+        a -= b
+        assert_allclose(x1, a.trace())
 
     def test_expand_mpo(self):
         h = MPO_ham_heis(12)

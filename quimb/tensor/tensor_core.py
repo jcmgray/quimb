@@ -808,16 +808,20 @@ def _make_promote_array_func(op, meth_name):
         """Use standard array func, but make sure Tensor inds match.
         """
         if isinstance(other, Tensor):
+
             if set(self.inds) != set(other.inds):
                 raise ValueError(
                     "The indicies of these two tensors do not "
                     "match: {} != {}".format(self.inds, other.inds))
+
             otherT = other.transpose(*self.inds)
+
             return Tensor(
                 data=op(self.data, otherT.data), inds=self.inds,
                 tags=self.tags | other.tags)
-        return Tensor(data=op(self.data, other),
-                      inds=self.inds, tags=self.tags)
+        else:
+            return Tensor(data=op(self.data, other),
+                          inds=self.inds, tags=self.tags)
 
     return _promote_array_func
 
@@ -1453,6 +1457,29 @@ class TensorNetwork(object):
         """
         return self.conj()
 
+    def multiply(self, x, inplace=False):
+        """Scalar multiplication of this tensor network with ``x``.
+        """
+        multiplied = self if inplace else self.copy()
+        tensor = next(iter(multiplied.tensor_index.values()))
+        tensor.modify(data=tensor.data * x)
+        return multiplied
+
+    def __mul__(self, other):
+        """Scalar multiplication.
+        """
+        return self.multiply(other, inplace=False)
+
+    def __rmul__(self, other):
+        """Right side scalar multiplication.
+        """
+        return self.multiply(other, inplace=False)
+
+    def __imul__(self, other):
+        """Inplace scalar multiplication.
+        """
+        return self.multiply(other, inplace=True)
+
     # --------------- information about indices and dimensions -------------- #
 
     def all_dims_inds(self):
@@ -1495,6 +1522,8 @@ class TensorNetwork(object):
         """Actual, i.e. exterior, shape of this TensorNetwork.
         """
         return tuple(di[0] for di in self.outer_dims_inds())
+
+    # ------------------------------ printing ------------------------------- #
 
     def plot(tn, iterations=2000, color=None, figsize=(6, 6),
              label_inds=None, label_tags=None, **plot_opts):
@@ -1601,8 +1630,6 @@ class TensorNetwork(object):
                        bbox_to_anchor=(1, 0.5))
 
         plt.show()
-
-    # ------------------------------ printing ------------------------------- #
 
     def __repr__(self):
         return "{}([{}{}{}]{}{})".format(
