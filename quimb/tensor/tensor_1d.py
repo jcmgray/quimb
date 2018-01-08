@@ -1164,7 +1164,7 @@ def view_TN_as_MPO(tn, upper_ind_id, lower_ind_id, site_tag_id, inplace=False):
     inplace : bool, optional
         If True, perform the conversion in-place.
     """
-    if inplace:
+    if not inplace:
         tn = tn.copy()
     tn.__class__ = MatrixProductOperator
     tn._upper_ind_id = upper_ind_id
