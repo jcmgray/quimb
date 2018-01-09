@@ -18,7 +18,7 @@ from cytoolz import (
 )
 import numpy as np
 
-from ..accel import prod, njit
+from ..accel import prod, njit, realify_scalar
 from ..linalg.base_linalg import norm_fro_dense
 
 try:
@@ -146,7 +146,7 @@ def tensor_contract(*tensors, output_inds=None):
     o_array = expression(*(t.data for t in tensors))
 
     if not o_ix:
-        return o_array
+        return realify_scalar(o_array)
 
     # unison of all tags
     o_tags = set_join(t.tags for t in tensors)
@@ -178,9 +178,9 @@ def rand_uuid(base=""):
 @njit  # pragma: no cover
 def _trim_singular_vals(s, cutoff, cutoff_mode):
     if cutoff_mode == 1:
-        return np.sum(s > cutoff)
+        n_chi = np.sum(s > cutoff)
     elif cutoff_mode == 2:
-        return np.sum(s > cutoff * s[0])
+        n_chi = np.sum(s > cutoff * s[0])
     elif cutoff_mode == 3:
         n_chi = s.size
         s2s = 0.0
@@ -191,9 +191,10 @@ def _trim_singular_vals(s, cutoff, cutoff_mode):
             if s2s > cutoff:
                 break
             n_chi -= 1
-        return n_chi
     else:
         raise ValueError("``cutoff_mode`` not one of {1, 2, 3}.")
+
+    return max(n_chi, 1)
 
 
 @njit  # pragma: no cover

@@ -46,6 +46,7 @@ accel
     prod
     make_immutable
     matrixify
+    realify_scalar
     realify
     zeroify
     isket
@@ -54,6 +55,7 @@ accel
     isvec
     issparse
     isherm
+    ispos
     mul_dense
     mul
     dot_dense

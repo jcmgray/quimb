@@ -4,6 +4,7 @@ import numpy as np
 import scipy.sparse as sp
 from quimb import (
     isherm,
+    ispos,
     eye,
     chop,
     tr,
@@ -74,6 +75,7 @@ class TestRandHerm:
 class TestRandPos:
     def test_rand_pos(self):
         a = rand_pos(3)
+        assert ispos(a)
         assert a.shape == (3, 3)
         assert type(a) == np.matrix
         evals = np.linalg.eigvals(a)

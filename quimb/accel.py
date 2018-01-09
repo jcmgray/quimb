@@ -149,16 +149,20 @@ def matrixify(fn):
     return matrixified_fn
 
 
-def realify(fn, imag_tol=1.0e-12):
+def realify_scalar(x, imag_tol=1e-12):
+    try:
+        return x.real if abs(x.imag) < abs(x.real) * imag_tol else x
+    except AttributeError:
+        return x
+
+
+def realify(fn, imag_tol=1e-12):
     """Decorator that drops ``fn``'s output imaginary part if very small.
     """
     @functools.wraps(fn)
     def realified_fn(*args, **kwargs):
-        x = fn(*args, **kwargs)
-        try:
-            return x.real if abs(x.imag) < abs(x.real) * imag_tol else x
-        except AttributeError:
-            return x
+        return realify_scalar(fn(*args, **kwargs))
+
     return realified_fn
 
 
@@ -235,6 +239,26 @@ def isherm(qob):
     """
     return ((qob != qob.H).nnz == 0 if issparse(qob) else
             np.allclose(qob, qob.H))
+
+
+def ispos(qob, tol=1e-15):
+    """Checks if the dense hermitian ``qob`` is approximately positive
+    semi-definite, using the cholesky decomposition.
+
+    Parameters
+    ----------
+    qob : dense matrix
+        Matrix to check.
+
+    Returns
+    -------
+    bool
+    """
+    try:
+        np.linalg.cholesky(qob + tol * np.eye(qob.shape[0]))
+        return True
+    except np.linalg.LinAlgError:
+        return False
 
 
 # --------------------------------------------------------------------------- #

@@ -15,6 +15,8 @@ from quimb import (
     neel_state,
     is_eigenvector,
     eigsys,
+    isherm,
+    ispos,
 )
 
 from quimb.tensor import (
@@ -891,17 +893,18 @@ class TestMatrixProductState:
         p = MPS_rand_state(n, 7)
         r = p.ptr(keep=[2, 3, 4, 6, 8], upper_ind_id='u{}',
                   rescale_sites=rescale)
-
+        rd = r.to_dense()
         if rescale:
-            assert r.upper_inds == ('u0', 'u1', 'u2', 'u3', 'u4')
-            assert r.lower_inds == ('k0', 'k1', 'k2', 'k3', 'k4')
+            assert r.lower_inds == ('u0', 'u1', 'u2', 'u3', 'u4')
+            assert r.upper_inds == ('k0', 'k1', 'k2', 'k3', 'k4')
         else:
-            assert r.upper_inds == ('u2', 'u3', 'u4', 'u6', 'u8')
-            assert r.lower_inds == ('k2', 'k3', 'k4', 'k6', 'k8')
+            assert r.lower_inds == ('u2', 'u3', 'u4', 'u6', 'u8')
+            assert r.upper_inds == ('k2', 'k3', 'k4', 'k6', 'k8')
         assert_allclose(r.trace(), 1.0)
+        assert isherm(rd)
         pd = p.to_dense()
-        rd = pd.ptr([2] * n, keep=[2, 3, 4, 6, 8])
-        assert_allclose(r.to_dense(), rd)
+        rdd = pd.ptr([2] * n, keep=[2, 3, 4, 6, 8])
+        assert_allclose(rd, rdd)
 
 
 class TestMatrixProductOperator:
@@ -990,6 +993,25 @@ class TestMatrixProductOperator:
         Id.site[0] *= 3 / 3**20
         op += Id
         assert_allclose(op.trace(), t + 3)
+
+    def test_partial_tranpose(self):
+        p = MPS_rand_state(8, 10)
+        r = p.ptr([2, 3, 4, 5, 6, 7])
+        rd = r.to_dense()
+
+        assert isherm(rd)
+        assert ispos(rd)
+
+        rpt = r.partial_transpose([0, 1, 2])
+        rptd = rpt.to_dense()
+
+        upper_inds = tuple('b{}'.format(i) for i in range(6))
+        lower_inds = tuple('k{}'.format(i) for i in range(6))
+        outer_inds = rpt.outer_inds()
+        assert all(i in outer_inds for i in upper_inds + lower_inds)
+
+        assert isherm(rptd)
+        assert not ispos(rptd)
 
 
 class TestSpecificStatesOperators:

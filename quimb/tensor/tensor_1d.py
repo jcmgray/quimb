@@ -609,6 +609,7 @@ class MatrixProductState(TensorNetwork1D):
 
     def reindex_sites(self, new_id, where=None, inplace=False):
         """Update the physical site index labels to a new string specifier.
+        Note that this doesn't change the stored id string with the TN.
 
         Parameters
         ----------
@@ -795,7 +796,7 @@ class MatrixProductState(TensorNetwork1D):
         """
         p_bra = self.copy()
         p_bra.reindex_sites(upper_ind_id, where=keep, inplace=True)
-        rho = self & p_bra.H
+        rho = self.H & p_bra
         # now have e.g:
         #     | |     |   |
         # o-o-o-o-o-o-o-o-o
@@ -829,8 +830,9 @@ class MatrixProductState(TensorNetwork1D):
 
                 rho.drop_tags(self.site_tag(i))
 
-        rho = view_TN_as_MPO(rho, upper_ind_id=upper_ind_id,
-                             lower_ind_id=self.site_ind_id,
+        # transpose upper and lower tags to match other MPOs
+        rho = view_TN_as_MPO(rho, lower_ind_id=upper_ind_id,
+                             upper_ind_id=self.site_ind_id,
                              site_tag_id=self.site_tag_id, inplace=True)
 
         # fuse all the double bonds
@@ -1085,6 +1087,36 @@ class MatrixProductOperator(TensorNetwork1D):
         traced.upper_ind_id = traced.lower_ind_id
         return traced ^ ...
 
+    def partial_transpose(self, sysa, inplace=False):
+        """Perform the partial tranpose on this MPO by swapping the bra and ket
+        indices on sites in ``sysa``.
+
+        Parameters
+        ----------
+        sysa : sequence of int or int
+            The sites to tranpose indices on.
+        inplace : bool, optional
+            Whether to perform the partial transposition inplace.
+
+        Returns
+        -------
+        MatrixProductOperator
+        """
+        tn = self if inplace else self.copy()
+
+        if isinstance(sysa, int):
+            sysa = (sysa,)
+
+        tmp_ind_id = "__tmp_{}__"
+
+        tn.reindex({tn.upper_ind(i): tmp_ind_id.format(i)
+                    for i in sysa}, inplace=True)
+        tn.reindex({tn.lower_ind(i): tn.upper_ind(i)
+                    for i in sysa}, inplace=True)
+        tn.reindex({tmp_ind_id.format(i): tn.lower_ind(i)
+                    for i in sysa}, inplace=True)
+        return tn
+
     def __add__(self, other):
         """MPO addition.
         """
@@ -1130,15 +1162,18 @@ class MatrixProductOperator(TensorNetwork1D):
         l1 = ""
         l2 = ""
         l3 = ""
+        num_can_l, num_can_r = self.count_canonized()
         for i in range(len(self.sites) - 1):
             bdim = self.bond_dim(self.sites[i], self.sites[i + 1])
             strl = len(str(bdim))
             l1 += "|{}".format(bdim)
-            l2 += "O" + ("-" if bdim < 100 else "=") * strl
+            l2 += (">" if i < num_can_l else
+                   "<" if i >= self.nsites - num_can_r else
+                   "O") + ("-" if bdim < 100 else "=") * strl
             l3 += "|" + " " * strl
 
         l1 += "|"
-        l2 += "O"
+        l2 += "<" if num_can_r > 0 else "O"
         l3 += "|"
 
         three_line_multi_print(l1, l2, l3, max_width=max_width)
