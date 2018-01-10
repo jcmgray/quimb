@@ -8,6 +8,8 @@ from quimb import (
     schmidt_gap,
     isherm,
     ispos,
+    ham_heis,
+    neel_state,
 )
 
 from quimb.tensor import (
@@ -20,6 +22,8 @@ from quimb.tensor import (
     MPO_rand,
     MPO_rand_herm,
     MPO_ham_heis,
+    MPS_neel_state,
+    MPS_zero_state,
 )
 
 
@@ -422,3 +426,50 @@ class TestMatrixProductOperator:
 
         assert isherm(rptd)
         assert not ispos(rptd)
+
+
+# --------------------------------------------------------------------------- #
+#                         Test specific 1D instances                          #
+# --------------------------------------------------------------------------- #
+
+class TestSpecificStatesOperators:
+
+    def test_rand_ket_mps(self):
+        n = 10
+        rmps = MPS_rand_state(n, 10, site_tag_id="foo{}", tags='bar')
+        assert rmps.site[0].tags == {'foo0', 'bar'}
+        assert rmps.site[3].tags == {'foo3', 'bar'}
+        assert rmps.site[-1].tags == {'foo9', 'bar'}
+
+        rmpsH_rmps = rmps.H & rmps
+        assert len(rmpsH_rmps.tag_index['foo0']) == 2
+        assert len(rmpsH_rmps.tag_index['bar']) == n * 2
+
+        assert_allclose(rmps.H @ rmps, 1)
+        c = (rmps.H & rmps) ^ slice(0, 5) ^ slice(9, 4, -1) ^ slice(4, 6)
+        assert_allclose(c, 1)
+
+    def test_mps_computation_state(self):
+        p = MPS_neel_state(10)
+        pd = neel_state(10)
+        assert_allclose(p.to_dense(), pd)
+
+    def test_zero_state(self):
+        z = MPS_zero_state(21, 7)
+        p = MPS_rand_state(21, 13)
+        assert_allclose(p.H @ z, 0.0)
+        assert_allclose(p.H @ p, 1.0)
+        zp = z + p
+        assert max(zp.site[13].shape) == 20
+        assert_allclose(zp.H @ p, 1.0)
+
+    def test_mpo_site_ham_heis(self):
+        hh_mpo = MPO_ham_heis(5, tags=['foo'])
+        assert hh_mpo.site[0].tags == {'I0', 'foo'}
+        assert hh_mpo.site[3].tags == {'I3', 'foo'}
+        assert hh_mpo.site[-1].tags == {'I4', 'foo'}
+        assert hh_mpo.shape == (2,) * 10
+        hh_ = (hh_mpo ^ ...).fuse({'k': ['k0', 'k1', 'k2', 'k3', 'k4'],
+                                   'b': ['b0', 'b1', 'b2', 'b3', 'b4']})
+        hh = ham_heis(5, cyclic=False) / 4  # /4 :ham_heis uses paulis not spin
+        assert_allclose(hh, hh_.data)
