@@ -287,6 +287,7 @@ def _init_krylov_subspace(comm=None, tol=None, maxiter=None,
     PETSc, comm = get_petsc(comm=comm)
     K = PETSc.KSP().create(comm=comm)
     K.setType(KSPType)
+    K.setTolerances(rtol=tol, max_it=maxiter)
 
     if PCType:
         PC = K.getPC()
@@ -685,8 +686,8 @@ def ssolve_slepc(A, y, isherm=True, comm=None, maxiter=None, tol=None,
                  PCType='lu',
                  PCFactorSolverPackage="mumps",
                  ):
-
-    PETSc, comm = get_petsc(comm=comm)
+    if comm is None:
+        comm = get_default_comm()
     A = convert_mat_to_petsc(A, comm=comm)
     if isherm:
         A.setOption(A.Option.HERMITIAN, isherm)

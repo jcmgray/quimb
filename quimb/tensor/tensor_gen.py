@@ -167,7 +167,7 @@ def MPO_identity_like(mpo, **mpo_opts):
     return MPO_identity(n=mpo.nsites, phys_dim=mpo.phys_dim(),
                         site_tag_id=mpo.site_tag_id,
                         upper_ind_id=mpo.upper_ind_id,
-                        lower_ind_id=mpo.lower_ind_id)
+                        lower_ind_id=mpo.lower_ind_id, **mpo_opts)
 
 
 def MPO_rand(n, bond_dim, phys_dim=2, normalize=True,

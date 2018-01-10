@@ -504,8 +504,8 @@ class DMRG:
         """Print this before each sweep.
         """
         if verbose > 0:
-            msg = f"SWEEP-{i + 1}, direction={LR}, max_bond={bd}, cutoff:{ctf}"
-            print(msg, flush=True)
+            msg = "SWEEP-{}, direction={}, max_bond={}, cutoff:{}"
+            print(msg.format(i + 1, LR, bd, ctf), flush=True)
 
     def _compute_post_sweep(self):
         """Compute this after each sweep.

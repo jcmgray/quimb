@@ -63,8 +63,8 @@ def spin_operator(label, S=1 / 2, **kwargs):
     elif label in {'i', 'I'}:
         np.fill_diagonal(op, 1.0)
     else:
-        raise ValueError("Label '{}'' not understood, should be one of ``{'X',"
-                         " 'Y', 'Z', '+', '-', 'I'}``.".format(label))
+        raise ValueError("Label '{}'' not understood, should be one of ``['X',"
+                         " 'Y', 'Z', '+', '-', 'I']``.".format(label))
 
     op = qu(op, **kwargs)
     make_immutable(op)

@@ -551,8 +551,7 @@ class Tensor(object):
         current_ind_map = {ind: i for i, ind in enumerate(tn.inds)}
         out_shape = tuple(current_ind_map[i] for i in output_inds)
 
-        tn._data = tn._data.transpose(*out_shape)
-        tn.inds = output_inds
+        tn.modify(data=tn.data.transpose(*out_shape), inds=output_inds)
         return tn
 
     @functools.wraps(tensor_contract)
@@ -734,8 +733,8 @@ class Tensor(object):
         dims = [prod(next(dims) for _ in fs) for fs in fused_inds] + list(dims)
 
         # create new tensor with new + remaining indices
-        tn._data = tn._data.reshape(*dims)
-        tn.inds = (*new_fused_inds, *unfused_inds)
+        tn.modify(data=tn.data.reshape(*dims),
+                  inds=(*new_fused_inds, *unfused_inds))
         return tn
 
     def norm(self):

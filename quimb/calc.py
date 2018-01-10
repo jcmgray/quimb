@@ -506,7 +506,7 @@ def logneg_subsys(psi_abc, dims, sysa, sysb,
     return logneg(rho_ab, new_dims, new_sysa)
 
 
-def negativity(p, dims=(2, 2), sysa=0, sysb=1):
+def negativity(p, dims=(2, 2), sysa=0):
     """Compute negativity between two subsytems.
 
     This is defined as  (| rho_{AB}^{T_B} | - 1) / 2. If ``len(dims) > 2``,

@@ -109,12 +109,12 @@ class TensorNetwork1D(TensorNetwork):
         R.reindex({new_shared_bond: old_shared_bond}, inplace=True)
         R.transpose(*T2.inds, inplace=True)
 
-        self.site[i].modify(data=Q._data)
-        self.site[i + 1].modify(data=R._data)
+        self.site[i].modify(data=Q.data)
+        self.site[i + 1].modify(data=R.data)
 
         if bra is not None:
-            bra.site[i].modify(data=Q._data.conj())
-            bra.site[i + 1].modify(data=R._data.conj())
+            bra.site[i].modify(data=Q.data.conj())
+            bra.site[i + 1].modify(data=R.data.conj())
 
     def _right_decomp_site(self, i, bra=None, **split_opts):
         T1 = self.site[i]
@@ -135,12 +135,12 @@ class TensorNetwork1D(TensorNetwork):
         Q.reindex({new_shared_bond: old_shared_bond}, inplace=True)
         Q.transpose(*T1.inds, inplace=True)
 
-        self.site[i - 1].modify(data=L._data)
-        self.site[i].modify(data=Q._data)
+        self.site[i - 1].modify(data=L.data)
+        self.site[i].modify(data=Q.data)
 
         if bra is not None:
-            bra.site[i - 1].modify(data=L._data.conj())
-            bra.site[i].modify(data=Q._data.conj())
+            bra.site[i - 1].modify(data=L.data.conj())
+            bra.site[i].modify(data=Q.data.conj())
 
     def left_canonize_site(self, i, bra=None):
         """Left canonize this TN's ith site, inplace::
@@ -318,8 +318,7 @@ class TensorNetwork1D(TensorNetwork):
         compress_opts['absorb'] = compress_opts.get('absorb', 'left')
         self._right_decomp_site(i, bra=bra, **compress_opts)
 
-    def left_compress(self, start=None, stop=None, bra=None,
-                      current_orthog_centre=None, **compress_opts):
+    def left_compress(self, start=None, stop=None, bra=None, **compress_opts):
         """Compress this 1D TN, from left to right, such that it becomes
         left-canonical (unless ``absorb != 'right'``).
 
@@ -331,8 +330,6 @@ class TensorNetwork1D(TensorNetwork):
             Site to stop compressing at (won't itself be an isometry).
         bra : None or TensorNetwork like this one, optional
             If given, update this TN as well, assuming it to be the conjugate.
-        current_orthog_centre : int, optional
-            The current orthogonality center, if known, to speed things up.
         compress_opts
             Supplied to :meth:`Tensor.split`.
         """
@@ -344,8 +341,7 @@ class TensorNetwork1D(TensorNetwork):
         for i in range(start, stop):
             self.left_compress_site(i, bra=bra, **compress_opts)
 
-    def right_compress(self, start=None, stop=None, bra=None,
-                       current_orthog_centre=None, **compress_opts):
+    def right_compress(self, start=None, stop=None, bra=None, **compress_opts):
         """Compress this 1D TN, from right to left, such that it becomes
         right-canonical (unless ``absorb != 'left'``).
 
@@ -357,8 +353,6 @@ class TensorNetwork1D(TensorNetwork):
             Site to stop compressing at (won't itself be an isometry).
         bra : None or TensorNetwork like this one, optional
             If given, update this TN as well, assuming it to be the conjugate.
-        current_orthog_centre : int, optional
-            The current orthogonality center, if known, to speed things up.
         compress_opts
             Supplied to :meth:`Tensor.split`.
         """
@@ -472,7 +466,7 @@ class TensorNetwork1D(TensorNetwork):
                     (0, max(new_bond_dim - d, 0))
                     for d, i in zip(tensor.shape, tensor.inds)]
 
-            tensor.modify(data=np.pad(tensor._data, pads, mode='constant'))
+            tensor.modify(data=np.pad(tensor.data, pads, mode='constant'))
 
             if bra is not None:
                 bra.site[i].modify(data=tensor.data.conj())
@@ -553,8 +547,8 @@ class MatrixProductState(TensorNetwork1D):
         # short-circuit for copying MPSs
         if isinstance(arrays, MatrixProductState):
             super().__init__(arrays)
-            self._site_ind_id = copy.copy(arrays._site_ind_id)
-            self._site_tag_id = copy.copy(arrays._site_tag_id)
+            self._site_ind_id = copy.copy(arrays.site_ind_id)
+            self._site_tag_id = copy.copy(arrays.site_tag_id)
             return
 
         arrays = tuple(arrays)
@@ -917,9 +911,9 @@ class MatrixProductOperator(TensorNetwork1D):
         # short-circuit for copying
         if isinstance(arrays, MatrixProductOperator):
             super().__init__(arrays)
-            self._upper_ind_id = copy.copy(arrays._upper_ind_id)
-            self._lower_ind_id = copy.copy(arrays._lower_ind_id)
-            self._site_tag_id = copy.copy(arrays._site_tag_id)
+            self._upper_ind_id = copy.copy(arrays.upper_ind_id)
+            self._lower_ind_id = copy.copy(arrays.lower_ind_id)
+            self._site_tag_id = copy.copy(arrays.site_tag_id)
             return
 
         arrays = tuple(arrays)
