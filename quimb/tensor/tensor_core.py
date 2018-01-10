@@ -743,7 +743,8 @@ class Tensor(object):
         t = self if inplace else self.copy()
         new_shape, new_inds = zip(
             *((d, i) for d, i in zip(self.shape, self.inds) if d > 1))
-        t.modify(data=t.data.reshape(new_shape), inds=new_inds)
+        if len(t.inds) != len(new_inds):
+            t.modify(data=t.data.reshape(new_shape), inds=new_inds)
         return t
 
     def norm(self):
@@ -1473,6 +1474,14 @@ class TensorNetwork(object):
         tensor = next(iter(multiplied.tensor_index.values()))
         tensor.modify(data=tensor.data * x)
         return multiplied
+
+    def squeeze(self, inplace=False):
+        """Drop singlet bonds and dimensions from this tensor network.
+        """
+        tn = self if inplace else self.copy()
+        for t in tn.tensor_index.values():
+            t.squeeze(inplace=True)
+        return tn
 
     def __mul__(self, other):
         """Scalar multiplication.

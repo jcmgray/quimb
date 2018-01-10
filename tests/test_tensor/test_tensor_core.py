@@ -586,3 +586,23 @@ class TestTensorNetwork:
         tn = TensorNetwork((x, y, z))
         tn.retag({"I0": "I1", "I1": "I2", "I2": "I3", "Z": "A"}, inplace=True)
         assert set(tn.tag_index.keys()) == {'X', 'I1', 'I2', 'I3', 'Y', 'A'}
+
+    def test_squeeze(self):
+        A, B, C = (rand_tensor((1, 2, 3), 'abc', tags=['I0']),
+                   rand_tensor((2, 3, 4), 'bcd', tags=['I1']),
+                   rand_tensor((4, 1, 1), 'dae', tags=['I2']))
+        tn = A & B & C
+
+        x1 = tn ^ ...
+        stn = tn.squeeze()
+
+        assert tn['I0'].shape == (1, 2, 3)
+        assert tn['I1'].shape == (2, 3, 4)
+        assert tn['I2'].shape == (4, 1, 1)
+
+        assert stn['I0'].shape == (2, 3)
+        assert stn['I1'].shape == (2, 3, 4)
+        assert stn['I2'].shape == (4,)
+
+        x2 = stn ^ ...
+        assert_allclose(x1.data, x2.data)
