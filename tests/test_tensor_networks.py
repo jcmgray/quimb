@@ -351,6 +351,14 @@ class TestTensorFunctions:
             t = rand_tensor((2, 3, 4), 'abc', dtype=dtype)
             assert t.dtype == dtype
 
+    def test_squeeze(self):
+        a = rand_tensor((1, 2, 3, 1, 4), inds='abcde', tags=['hello'])
+        b = a.squeeze()
+        assert b.shape == (2, 3, 4)
+        assert b.inds == ('b', 'c', 'e')
+        assert 'hello' in b.tags
+        assert a.shape == (1, 2, 3, 1, 4)
+
 
 class TestTensorNetwork:
     def test_combining_tensors(self):

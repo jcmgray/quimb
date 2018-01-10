@@ -737,6 +737,15 @@ class Tensor(object):
                   inds=(*new_fused_inds, *unfused_inds))
         return tn
 
+    def squeeze(self, inplace=False):
+        """Drop any singlet dimensions from this tensor.
+        """
+        t = self if inplace else self.copy()
+        new_shape, new_inds = zip(
+            *((d, i) for d, i in zip(self.shape, self.inds) if d > 1))
+        t.modify(data=t.data.reshape(new_shape), inds=new_inds)
+        return t
+
     def norm(self):
         """Frobenius norm of this tensor.
         """
