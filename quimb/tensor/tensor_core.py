@@ -1498,6 +1498,16 @@ class TensorNetwork(object):
         """
         return self.multiply(other, inplace=True)
 
+    def __truediv__(self, other):
+        """Scalar division.
+        """
+        return self.multiply(1 / other, inplace=False)
+
+    def __itruediv__(self, other):
+        """Inplace scalar division.
+        """
+        return self.multiply(1 / other, inplace=True)
+
     # --------------- information about indices and dimensions -------------- #
 
     def all_dims_inds(self):
