@@ -3,7 +3,7 @@
 import functools
 import copy
 import numpy as np
-from ..utils import three_line_multi_print
+from ..utils import three_line_multi_print, pairwise
 from .tensor_core import (
     _einsum_symbols,
     Tensor,
@@ -364,31 +364,39 @@ class TensorNetwork1D(TensorNetwork):
         for i in range(start, stop, -1):
             self.right_compress_site(i, bra=bra, **compress_opts)
 
-    def compress(self, form='flat', **compress_opts):
+    def compress(self, form=None, **compress_opts):
         """Compress this 1D Tensor Network, possibly into canonical form.
 
         Parameters
         ----------
-        form : {'flat', 'left', 'right'} or int
-            Output form of the TN. ``'flat'`` tries to distribute the singular
-            values evenly, but state willl not be canonical (default).
-            ``'left'`` and ``'right'`` put the state into left and right
-            canonical form respectively, or an int will put the state into
-            mixed canonical form at that site.
+        form : {None, 'flat', 'left', 'right'} or int
+            Output form of the TN. ``None`` left canonizes the state first for
+            stability reasons, then right_compresses (default). ``'flat'``
+            tries to distribute the singular values evenly -- state will not
+            be canonical. ``'left'`` and ``'right'`` put the state into left
+            and right canonical form respectively without a prior sweep, or an
+            int will put the state into mixed canonical form at that site.
         compress_opts
             Supplied to :meth:`Tensor.split`.
         """
-        if isinstance(form, int):
+        if form is None:
+            self.left_canonize(bra=compress_opts.get('bra', None))
+            self.right_compress(**compress_opts)
+
+        elif isinstance(form, int):
             self.left_compress(stop=form, **compress_opts)
             self.right_compress(stop=form, **compress_opts)
+
         elif form == 'left':
             self.left_compress(**compress_opts)
         elif form == 'right':
             self.right_compress(**compress_opts)
+
         elif form == 'flat':
             compress_opts['absorb'] = 'both'
             self.right_compress(stop=self.nsites // 2, **compress_opts)
             self.left_compress(stop=self.nsites // 2, **compress_opts)
+
         else:
             raise ValueError("Form specifier {} not understood, should be "
                              "either 'left', 'right', 'flat' or an int "
@@ -405,6 +413,19 @@ class TensorNetwork1D(TensorNetwork):
         """
         b_ix = self.bond(i, j)
         return self.site[i].ind_size(b_ix)
+
+    def fuse_multibonds(self, inplace=False):
+        """Fuse any double/triple etc bonds between neighbours
+        """
+        tn = self if inplace else self.copy()
+
+        for i, j in pairwise(tn.sites):
+            T1, T2 = tn.site[i], tn.site[j]
+            dbnds = T1.shared_inds(T2)
+            T1.fuse({dbnds[0]: dbnds}, inplace=True)
+            T2.fuse({dbnds[0]: dbnds}, inplace=True)
+
+        return tn
 
     def singular_values(self, i, current_orthog_centre=None, method='svd'):
         """Find the singular values associated with the ith bond::
@@ -829,13 +850,6 @@ class MatrixProductState(TensorNetwork1D):
                              upper_ind_id=self.site_ind_id,
                              site_tag_id=self.site_tag_id, inplace=True)
 
-        # fuse all the double bonds
-        for i in range(n - 1):
-            T1, T2 = rho.site[keep[i]], rho.site[keep[i + 1]]
-            dbnds = T1.shared_inds(T2)
-            T1.fuse({dbnds[0]: dbnds}, inplace=True)
-            T2.fuse({dbnds[0]: dbnds}, inplace=True)
-
         if rescale_sites:
             # e.g. [3, 4, 5, 7, 9] -> [0, 1, 2, 3, 4]
             tag_map, ind_map = {}, {}
@@ -852,6 +866,7 @@ class MatrixProductState(TensorNetwork1D):
         else:
             rho.sites = keep
 
+        rho.fuse_multibonds(inplace=True)
         return rho
 
     @functools.wraps(partial_trace)

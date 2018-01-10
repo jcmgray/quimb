@@ -1,6 +1,7 @@
 """Miscellenous
 """
 import importlib
+import itertools
 
 
 def find_library(x):
@@ -125,6 +126,14 @@ def int2tup(x):
     return (x if isinstance(x, tuple) else
             (x,) if isinstance(x, int) else
             tuple(x))
+
+
+def pairwise(iterable):
+    """Iterate over each pair of neighbours in ``iterable``.
+    """
+    a, b = itertools.tee(iterable)
+    next(b, None)
+    return zip(a, b)
 
 
 def three_line_multi_print(l1, l2, l3, max_width=None):
