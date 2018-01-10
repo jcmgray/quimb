@@ -19,6 +19,8 @@ from quimb.tensor import (
     MPS_rand_state,
     MPO_identity,
     MPO_identity_like,
+    MPO_zeros,
+    MPO_zeros_like,
     MPO_rand,
     MPO_rand_herm,
     MPO_ham_heis,
@@ -473,3 +475,16 @@ class TestSpecificStatesOperators:
                                    'b': ['b0', 'b1', 'b2', 'b3', 'b4']})
         hh = ham_heis(5, cyclic=False) / 4  # /4 :ham_heis uses paulis not spin
         assert_allclose(hh, hh_.data)
+
+    def test_mpo_zeros(self):
+        mpo0 = MPO_zeros(10)
+        assert mpo0.trace() == 0.0
+        assert mpo0.H @ mpo0 == 0.0
+
+    def test_mpo_zeros_like(self):
+        A = MPO_rand(10, 7, phys_dim=3, normalize=False)
+        Z = MPO_zeros_like(A)
+        assert A @ Z == 0.0
+        x1 = A.trace()
+        x2 = (A + Z).trace()
+        assert_allclose(x1, x2)

@@ -170,6 +170,28 @@ def MPO_identity_like(mpo, **mpo_opts):
                         lower_ind_id=mpo.lower_ind_id, **mpo_opts)
 
 
+def MPO_zeros(n, phys_dim=2, **mpo_opts):
+    """Generate a zeros MPO of size ``n``.
+    """
+    def gen_arrays():
+        yield np.zeros((1, phys_dim, phys_dim))
+        for _ in range(n - 2):
+            yield np.zeros((1, 1, phys_dim, phys_dim))
+        yield np.zeros((1, phys_dim, phys_dim))
+
+    return MatrixProductOperator(gen_arrays(), **mpo_opts)
+
+
+def MPO_zeros_like(mpo, **mpo_opts):
+    """Return a zeros matrix operator with the same physical index and
+    inds/tags as ``mpo``.
+    """
+    return MPO_zeros(n=mpo.nsites, phys_dim=mpo.phys_dim(),
+                     site_tag_id=mpo.site_tag_id,
+                     upper_ind_id=mpo.upper_ind_id,
+                     lower_ind_id=mpo.lower_ind_id, **mpo_opts)
+
+
 def MPO_rand(n, bond_dim, phys_dim=2, normalize=True,
              dtype=complex, herm=False, **mpo_opts):
     """Generate a random matrix product state.
@@ -237,6 +259,8 @@ def MPO_rand_herm(n, bond_dim, phys_dim=2, normalize=True,
     return MPO_rand(n, bond_dim, phys_dim=phys_dim, normalize=normalize,
                     dtype=dtype, herm=True, **mpo_opts)
 
+
+# ---------------------------- MPO hamiltonians ----------------------------- #
 
 def spin_ham_mpo_tensor(one_site_terms, two_site_terms, S=1 / 2, which=None):
     """Generate tensor(s) for a spin hamiltonian MPO.
