@@ -429,6 +429,16 @@ class TestMatrixProductOperator:
         assert isherm(rptd)
         assert not ispos(rptd)
 
+    def test_dot_mpo(self):
+        A, B = MPO_rand(8, 5), MPO_rand(8, 5, upper_ind_id='q{}',
+                                        lower_ind_id='w{}')
+        C = A.apply(B)
+        assert C.max_bond() == 25
+        assert C.upper_ind_id == 'q{}'
+        assert C.lower_ind_id == 'w{}'
+        Ad, Bd, Cd = A.to_dense(), B.to_dense(), C.to_dense()
+        assert_allclose(Ad @ Bd, Cd)
+
 
 # --------------------------------------------------------------------------- #
 #                         Test specific 1D instances                          #

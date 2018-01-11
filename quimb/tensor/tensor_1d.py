@@ -1091,6 +1091,57 @@ class MatrixProductOperator(TensorNetwork1D):
 
         return summed
 
+    def _apply_mpo(self, other, compress=False, **compress_opts):
+        """This MPO acting on another MPO ladder style.
+        """
+        A, B = self.copy(), other.copy()
+
+        # align the indices and combine into a ladder
+        A.lower_ind_id = B.lower_ind_id
+        B.lower_ind_id = "__tmp{}__"
+        A.upper_ind_id = "__tmp{}__"
+        both = A | B
+
+        import pdb; pdb.set_trace()
+
+        # contract each pair of tensors at each site
+        for i in range(A.nsites):
+            both ^= A.site_tag(i)
+
+        # convert back to MPO and fuse the double bonds
+        out = view_TN_as_MPO(both, inplace=True, site_tag_id=A.site_tag_id,
+                             upper_ind_id=B.upper_ind_id,
+                             lower_ind_id=A.lower_ind_id)
+
+
+
+        out.fuse_multibonds(inplace=True)
+
+        # optionally compress
+        if compress:
+            out.compress(**compress_opts)
+
+        return out
+
+    def apply(self, other, compress=True, **compress_opts):
+        """Act with this MPO on another MPO or MPS, such that the resulting
+        object has the same tensor network structure/indices as the input.
+
+        Parameters
+        ----------
+        other : MatrixProductOperator or MatrixProductState
+            The object to act on.
+        compress : bool, optional
+            Whether to compress the resulting object.
+        compress_opts
+            Supplied to :meth:`TensorNetwork1D.compress`.
+        """
+        if isinstance(other, MatrixProductOperator):
+            return self._apply_mpo(other, compress=compress, **compress_opts)
+        else:
+            raise TypeError("Can only Dot with a MatrixProductOperator or a "
+                            "MatrixProductState, got {}".format(type(other)))
+
     def trace(self):
         traced = self.copy()
         traced.upper_ind_id = traced.lower_ind_id
