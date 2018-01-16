@@ -1102,8 +1102,6 @@ class MatrixProductOperator(TensorNetwork1D):
         A.upper_ind_id = "__tmp{}__"
         both = A | B
 
-        import pdb; pdb.set_trace()
-
         # contract each pair of tensors at each site
         for i in range(A.nsites):
             both ^= A.site_tag(i)
