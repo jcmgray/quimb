@@ -161,7 +161,7 @@ def realify(fn, imag_tol=1e-12):
     """
     @functools.wraps(fn)
     def realified_fn(*args, **kwargs):
-        return realify_scalar(fn(*args, **kwargs))
+        return realify_scalar(fn(*args, **kwargs), imag_tol=imag_tol)
 
     return realified_fn
 

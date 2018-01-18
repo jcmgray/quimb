@@ -11,6 +11,8 @@ import scipy.sparse.linalg as spla
 
 from ..core import ptr
 from ..tensor.tensor_core import einsum, einsum_path, HuskArray
+from ..tensor.tensor_1d import MatrixProductOperator
+from ..tensor.tensor_approx_spectral import construct_lanczos_tridiag_MPO
 from ..accel import prod, vdot
 from ..utils import int2tup
 from ..linalg.mpi_launcher import get_mpi_pool
@@ -642,12 +644,19 @@ def ext_per_trim(x, p=0.6, s=1.0):
 
 def _single_random_estimate(A, K, bsz, beta_tol, v0, fn, pos,
                             tau, tol_scale, seed=None):
-    estimate = None
+    # choose normal (any LinearOperator) or MPO lanczos tridiag construction
+    if isinstance(A, MatrixProductOperator):
+        lanc_fn = construct_lanczos_tridiag_MPO
+        lanc_opts = {'max_bond': None, 'initial_bond_dim': None}
+    else:
+        lanc_fn = construct_lanczos_tridiag
+        lanc_opts = {'bsz': bsz}
 
     # iteratively build the lanczos matrix, checking for convergence
-    for alpha, beta, scaling in construct_lanczos_tridiag(
-            A, K=K, bsz=bsz, beta_tol=beta_tol, seed=seed,
-            v0=v0() if callable(v0) else v0):
+    estimate = None
+    for alpha, beta, scaling in lanc_fn(
+            A, K=K, beta_tol=beta_tol, seed=seed,
+            v0=v0() if callable(v0) else v0, **lanc_opts):
 
         try:  # First bound
             Gf = scaling * calc_trace_fn_tridiag(*lanczos_tridiag_eig(

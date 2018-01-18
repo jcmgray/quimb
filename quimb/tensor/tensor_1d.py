@@ -1111,8 +1111,6 @@ class MatrixProductOperator(TensorNetwork1D):
                              upper_ind_id=B.upper_ind_id,
                              lower_ind_id=A.lower_ind_id)
 
-
-
         out.fuse_multibonds(inplace=True)
 
         # optionally compress
@@ -1121,7 +1119,7 @@ class MatrixProductOperator(TensorNetwork1D):
 
         return out
 
-    def apply(self, other, compress=True, **compress_opts):
+    def apply(self, other, compress=False, **compress_opts):
         """Act with this MPO on another MPO or MPS, such that the resulting
         object has the same tensor network structure/indices as the input.
 
