@@ -625,3 +625,22 @@ class TestTensorNetwork:
 
         x2 = stn ^ ...
         assert_allclose(x1.data, x2.data)
+
+    def test_tensors_sorted(self):
+        tn1, tn2 = TensorNetwork([]), TensorNetwork([])
+        A, B, C = (rand_tensor((1, 2, 3), 'abc', tags=['I0']),
+                   rand_tensor((2, 3, 4), 'bcd', tags=['I1']),
+                   rand_tensor((4, 1, 1), 'dae', tags=['I2']))
+
+        tn1.add_tensor(A)
+        tn1.add_tensor(B)
+        tn1.add_tensor(C)
+
+        tn2.add_tensor(C)
+        tn2.add_tensor(A)
+        tn2.add_tensor(B)
+
+        for t1, t2 in zip(tn1.tensors_sorted(), tn2.tensors_sorted()):
+            assert t1.tags == t2.tags
+            assert t1.almost_equals(t2)
+

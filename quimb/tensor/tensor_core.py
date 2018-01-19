@@ -974,12 +974,12 @@ class TensorNetwork(object):
     tensors : sequence of Tensor
         The tensors in this network.
     tensor_index : dict
-        Mapping of names to tensors, like``{tensor_name: tensor, ...}``. I.e.
-        this is where the tensors are 'stored' by the network.
+        Mapping of unique ids to tensors, like``{tensor_id: tensor, ...}``.
+        I.e. this is where the tensors are 'stored' by the network.
     tag_index : dict
-        Mapping of tags to a set of tensor names which have those tags. I.e.
-        ``{tag: {tensor1, tensor2, ...}}``. Thus to select those tensors one
-        might do: ``map(tensor_index.__getitem__, tag_index[tag])``.
+        Mapping of tags to a set of tensor ids which have those tags. I.e.
+        ``{tag: {tensor_id_1, tensor_id_2, ...}}``. Thus to select those
+        tensors could do: ``map(tensor_index.__getitem__, tag_index[tag])``.
     """
 
     def __init__(self, tensors, *,
@@ -1186,6 +1186,16 @@ class TensorNetwork(object):
     @property
     def tensors(self):
         return tuple(self.tensor_index.values())
+
+    def tensors_sorted(self):
+        """Return a tuple of tensors sorted by their respective tags, such that
+        the tensors of two networks with the same tag structure can be
+        iterated over pairwise.
+        """
+        ts_and_sorted_tags = [(tensor, sorted(tensor.tags))
+                              for tensor in self.tensor_index.values()]
+        ts_and_sorted_tags.sort(key=lambda x: x[1])
+        return tuple(x[0] for x in ts_and_sorted_tags)
 
     def __getitem__(self, tags):
         """Get the tensor(s) associated with ``tags``.

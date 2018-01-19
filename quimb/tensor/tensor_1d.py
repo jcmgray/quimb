@@ -673,10 +673,7 @@ class MatrixProductState(TensorNetwork1D):
         if self.nsites != other.nsites:
             raise ValueError("Can't add MPS with another of different length.")
 
-        if inplace:
-            summed = self
-        else:
-            summed = self.copy()
+        summed = self if inplace else self.copy()
 
         for i in summed.sites:
             summed_tensor = summed.site[i]

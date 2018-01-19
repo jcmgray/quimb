@@ -19,7 +19,7 @@ class TestTensorSpectralApprox:
         A = MPO_rand_herm(10, 7, normalize=True)
         xe = sum(fn(eigvals(A.to_dense())))
         xf = approx_spectral_function(A, fn, R=10)
-        assert_allclose(xe, xf, rtol=0.1)
+        assert_allclose(xe, xf, rtol=0.2)
 
     def test_realistic(self):
         ham = MPO_ham_heis(20)
