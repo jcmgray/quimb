@@ -198,6 +198,23 @@ def _trim_singular_vals(s, cutoff, cutoff_mode):
 
 
 @njit  # pragma: no cover
+def _renorm_singular_vals(s, n_chi):
+    """Find the normalization constant for ``s`` such that the new sum squared
+    of the ``n_chi`` largest values equals the sum squared of all the old ones.
+    """
+    s_tot_keep = 0.0
+    s_tot_lose = 0.0
+    for i in range(s.size):
+        s2 = s[i]**2
+        if not np.isnan(s2):
+            if i < n_chi:
+                s_tot_keep += s2
+            else:
+                s_tot_lose += s2
+    return ((s_tot_keep + s_tot_lose) / s_tot_keep)**0.5
+
+
+@njit  # pragma: no cover
 def _array_split_svd(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0):
     """SVD-decomposition.
     """
@@ -209,9 +226,11 @@ def _array_split_svd(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0):
         if max_bond > 0:
             n_chi = min(n_chi, max_bond)
 
-        s = s[:n_chi]
-        U = U[..., :n_chi]
-        V = V[:n_chi, ...]
+        if n_chi < s.size:
+            norm = _renorm_singular_vals(s, n_chi)
+            s = s[:n_chi] * norm
+            U = U[..., :n_chi]
+            V = V[:n_chi, ...]
 
     if absorb == -1:
         U *= s.reshape((1, -1))
@@ -278,13 +297,24 @@ def _array_split_eig(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0):
 
     # eigh produces ascending eigenvalue order -> slice opposite to svd
     if cutoff > 0.0:
-        n_chi = _trim_singular_vals(s2[::-1]**0.5, cutoff, cutoff_mode)
+        s = s2[::-1]**0.5
+        n_chi = _trim_singular_vals(s, cutoff, cutoff_mode)
 
         if max_bond > 0:
             n_chi = min(n_chi, max_bond)
 
-        U = U[..., -n_chi:]
-        V = V[-n_chi:, ...]
+        if n_chi < s.size:
+            norm = _renorm_singular_vals(s, n_chi)
+            U = U[..., -n_chi:]
+            V = V[-n_chi:, ...]
+
+            if absorb == -1:
+                U *= norm
+            elif absorb == 0:
+                U *= norm**0.5
+                V *= norm**0.5
+            else:
+                V *= norm
 
     return U, V
 

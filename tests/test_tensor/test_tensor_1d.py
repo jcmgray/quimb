@@ -237,12 +237,13 @@ class TestMatrixProductState:
 
     @pytest.mark.parametrize("method", ['svd', 'eig'])
     def test_compress_trim_max_bond(self, method):
-        p = MPS_rand_state(20, 20)
+        p0 = MPS_rand_state(20, 20)
+        p = p0.copy()
         p.compress(method=method)
         assert max(p['I4'].shape) == 20
         p.compress(max_bond=13, method=method)
         assert max(p['I4'].shape) == 13
-        assert p.H @ p < 1.0
+        assert_allclose(p.H @ p, p0.H @ p0)
 
     def test_compress_form(self):
         p = MPS_rand_state(20, 20)

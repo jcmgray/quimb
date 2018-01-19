@@ -16,7 +16,7 @@ def construct_lanczos_tridiag_MPO(
     if initial_bond_dim is None:
         initial_bond_dim = 2
     if max_bond is None:
-        max_bond = int(A.max_bond()**1)
+        max_bond = 4
 
     if v0 is None:
         V = MPO_rand(A.nsites, initial_bond_dim, phys_dim=A.phys_dim(0))
@@ -30,10 +30,9 @@ def construct_lanczos_tridiag_MPO(
     bsz = A.phys_dim()**A.nsites
     beta[1] = A.phys_dim()**A.nsites
 
-    compress_kws = {'max_bond': max_bond}
+    compress_kws = {'max_bond': max_bond, 'method': 'eig'}
 
     for j in range(1, K + 1):
-
         Vt = A.apply(V, compress=True, **compress_kws)
         Vt.add_MPO(-beta[j] * Vm1, inplace=True, compress=True, **compress_kws)
         alpha[j] = (V.H @ Vt).real
