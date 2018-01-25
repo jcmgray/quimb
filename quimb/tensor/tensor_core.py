@@ -59,10 +59,6 @@ def _gen_output_inds(all_inds):
             yield ind
 
 
-_einsum_symbols = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
-_einsum_symbols_set = set(_einsum_symbols)
-
-
 def _maybe_map_indices_to_alphabet(a_ix, i_ix, o_ix):
     """``einsum`` need characters a-z,A-Z or equivalent numbers.
     Do this early, and allow *any* index labels.
@@ -81,14 +77,14 @@ def _maybe_map_indices_to_alphabet(a_ix, i_ix, o_ix):
     contract_str : str
         The string to feed to einsum/contract.
     """
-    if any(i not in _einsum_symbols_set for i in a_ix):
+    if any(i not in opt_einsum.parser.einsum_symbols_set for i in a_ix):
         # need to map inds to alphabet
-        if len(a_ix) > len(_einsum_symbols_set):
+        if len(a_ix) > len(opt_einsum.parser.einsum_symbols_set):
             raise ValueError("Too many indices to auto-optimize contraction "
                              "for at once, try setting a `structure` "
                              "or do a manual contraction order using tags.")
 
-        amap = dict(zip(a_ix, _einsum_symbols))
+        amap = dict(zip(a_ix, opt_einsum.parser.einsum_symbols))
         in_str = ("".join(amap[i] for i in ix) for ix in i_ix)
         out_str = "".join(amap[o] for o in o_ix)
 

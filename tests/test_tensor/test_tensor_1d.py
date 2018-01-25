@@ -447,9 +447,11 @@ class TestMatrixProductOperator:
 
 class TestSpecificStatesOperators:
 
-    def test_rand_ket_mps(self):
+    @pytest.mark.parametrize("cyclic", [False, True])
+    def test_rand_ket_mps(self, cyclic):
         n = 10
-        rmps = MPS_rand_state(n, 10, site_tag_id="foo{}", tags='bar')
+        rmps = MPS_rand_state(n, 10, site_tag_id="foo{}",
+                              tags='bar', cyclic=cyclic)
         assert rmps.site[0].tags == {'foo0', 'bar'}
         assert rmps.site[3].tags == {'foo3', 'bar'}
         assert rmps.site[-1].tags == {'foo9', 'bar'}
@@ -461,6 +463,9 @@ class TestSpecificStatesOperators:
         assert_allclose(rmps.H @ rmps, 1)
         c = (rmps.H & rmps) ^ slice(0, 5) ^ slice(9, 4, -1) ^ slice(4, 6)
         assert_allclose(c, 1)
+
+        assert rmps.site[0].data.ndim == (3 if cyclic else 2)
+        assert rmps.site[-1].data.ndim == (3 if cyclic else 2)
 
     def test_mps_computation_state(self):
         p = MPS_neel_state(10)

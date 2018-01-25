@@ -5,12 +5,15 @@ import copy
 import numpy as np
 from ..utils import three_line_multi_print, pairwise
 from .tensor_core import (
-    _einsum_symbols,
     Tensor,
     TensorNetwork,
     rand_uuid,
     tensor_direct_product,
 )
+try:
+    from opt_einsum import parser
+except ImportError:
+    pass
 
 
 def align_TN_1D(*tns, ind_ids=None, inplace=False):
@@ -41,7 +44,7 @@ def align_TN_1D(*tns, ind_ids=None, inplace=False):
 
     if ind_ids is None:
         ind_ids = ([tns[0].site_ind_id] +
-                   ["__ind_{}".format(_einsum_symbols[i]) + "{}__"
+                   ["__ind_{}".format(parser.einsum_symbols[i]) + "{}__"
                     for i in range(len(tns) - 2)])
     else:
         ind_ids = tuple(ind_ids)
@@ -591,28 +594,29 @@ class MatrixProductState(TensorNetwork1D):
 
             site_tags = tuple({st} | tags for st in site_tags)
 
-        # TODO: figure out cyclic or not
-        # TODO: allow open ends non-cyclic
+        cyclic = (arrays[0].ndim == 3)
 
         # transpose arrays to 'lrp' order.
         def gen_orders():
             lp_ord = tuple(shape.replace('r', "").find(x) for x in 'lp')
             lrp_ord = tuple(shape.find(x) for x in 'lrp')
             rp_ord = tuple(shape.replace('l', "").find(x) for x in 'rp')
-            yield lp_ord
-            for _ in range(nsites - 2):
+            yield lp_ord if not cyclic else lrp_ord
+            for _ in range(len(sites) - 2):
                 yield lrp_ord
-            yield rp_ord
+            yield rp_ord if not cyclic else lrp_ord
 
         def gen_inds():
+            cyc_bond = (rand_uuid(base=bond_name),) if cyclic else ()
+
             nbond = rand_uuid(base=bond_name)
-            yield (nbond, next(site_inds))
+            yield cyc_bond + (nbond, next(site_inds))
             pbond = nbond
-            for _ in range(nsites - 2):
+            for _ in range(len(sites) - 2):
                 nbond = rand_uuid(base=bond_name)
                 yield (pbond, nbond, next(site_inds))
                 pbond = nbond
-            yield (pbond, next(site_inds))
+            yield (pbond,) + cyc_bond + (next(site_inds),)
 
         def gen_tensors():
             for array, site_tag, inds, order in zip(arrays, site_tags,

@@ -26,7 +26,7 @@ def rand_tensor(shape, inds, tags=None, dtype=complex):
 #                                    MPSs                                     #
 # --------------------------------------------------------------------------- #
 
-def MPS_rand_state(n, bond_dim, phys_dim=2, normalize=True,
+def MPS_rand_state(n, bond_dim, phys_dim=2, normalize=True, cyclic=False,
                    dtype=complex, **mps_opts):
     """Generate a random matrix product state.
 
@@ -43,22 +43,26 @@ def MPS_rand_state(n, bond_dim, phys_dim=2, normalize=True,
     mps_opts
         Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductState`.
     """
-    shapes = [(bond_dim, phys_dim),
-              *((bond_dim, bond_dim, phys_dim),) * (n - 2),
-              (bond_dim, phys_dim)]
+    cyc_dim = (bond_dim,) if cyclic else ()
+
+    def gen_shapes():
+        yield cyc_dim + (bond_dim, phys_dim)
+        for _ in range(n - 2):
+            yield (bond_dim, bond_dim, phys_dim)
+        yield cyc_dim + (bond_dim, phys_dim)
 
     if dtype in (float, np.float_):
-        def def_gen_data(shape):
+        def gen_data(shape):
             return np.random.randn(*shape)
     elif dtype in (complex, np.complex_):
-        def def_gen_data(shape):
+        def gen_data(shape):
             return np.random.randn(*shape) + 1.0j * np.random.randn(*shape)
     else:
         raise TypeError("dtype not understood - should be float or complex.")
 
     arrays = \
         map(lambda x: x / norm_fro_dense(x)**(1 / (x.ndim - 1)),
-            map(def_gen_data, shapes))
+            map(gen_data, gen_shapes()))
 
     rmps = MatrixProductState(arrays, **mps_opts)
 
@@ -217,7 +221,7 @@ def MPO_rand(n, bond_dim, phys_dim=2, normalize=True,
 
     if dtype in (float, np.float_):
 
-        def def_gen_data(shape):
+        def gen_data(shape):
             data = np.random.randn(*shape)
 
             if not herm:
@@ -228,7 +232,7 @@ def MPO_rand(n, bond_dim, phys_dim=2, normalize=True,
 
     elif dtype in (complex, np.complex_):
 
-        def def_gen_data(shape):
+        def gen_data(shape):
             data = np.random.randn(*shape) + 1.0j * np.random.randn(*shape)
 
             if not herm:
@@ -241,7 +245,7 @@ def MPO_rand(n, bond_dim, phys_dim=2, normalize=True,
         raise TypeError("dtype not understood - should be float or complex.")
 
     arrays = map(lambda x: x / norm_fro_dense(x)**(1 / (x.ndim - 1)),
-                 map(def_gen_data, shapes))
+                 map(gen_data, shapes))
 
     rmpo = MatrixProductOperator(arrays, **mpo_opts)
 
