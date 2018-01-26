@@ -323,6 +323,12 @@ class TestMatrixProductState:
         rdd = pd.ptr([2] * n, keep=[2, 3, 4, 6, 8])
         assert_allclose(rd, rdd)
 
+    @pytest.mark.parametrize("cyclic", [False, True])
+    def test_specify_sites(self, cyclic):
+        sites = [12, 13, 15, 16, 17]
+        k = MPS_rand_state(5, 7, cyclic=cyclic, sites=sites, nsites=20)
+        assert set(k.tags) == {'I{}'.format(i) for i in sites}
+
 
 class TestMatrixProductOperator:
     def test_matrix_product_operator(self):
@@ -439,6 +445,13 @@ class TestMatrixProductOperator:
         assert C.lower_ind_id == 'w{}'
         Ad, Bd, Cd = A.to_dense(), B.to_dense(), C.to_dense()
         assert_allclose(Ad @ Bd, Cd)
+
+    def test_sites_mpo_mps_product(self):
+        k = MPS_rand_state(13, 7)
+        X = MPO_rand_herm(3, 5, sites=[3, 6, 7], nsites=13)
+        b = k.H
+        align_TN_1D(k, X, b, inplace=True)
+        assert (k & X & b) ^ ...
 
 
 # --------------------------------------------------------------------------- #

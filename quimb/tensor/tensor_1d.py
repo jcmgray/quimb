@@ -566,7 +566,8 @@ class MatrixProductState(TensorNetwork1D):
     """
 
     def __init__(self, arrays, *, shape='lrp', tags=None, bond_name="",
-                 site_ind_id='k{}', site_tag_id='I{}', **tn_opts):
+                 site_ind_id='k{}', site_tag_id='I{}', sites=None, nsites=None,
+                 **tn_opts):
 
         # short-circuit for copying MPSs
         if isinstance(arrays, MatrixProductState):
@@ -576,15 +577,19 @@ class MatrixProductState(TensorNetwork1D):
             return
 
         arrays = tuple(arrays)
-        nsites = len(arrays)
+
+        if sites is None:
+            if nsites is None:
+                nsites = len(arrays)
+            sites = range(nsites)
 
         # process site indices
         self._site_ind_id = site_ind_id
-        site_inds = map(site_ind_id.format, range(nsites))
+        site_inds = map(site_ind_id.format, sites)
 
         # process site tags
         self._site_tag_id = site_tag_id
-        site_tags = map(site_tag_id.format, range(nsites))
+        site_tags = map(site_tag_id.format, sites)
 
         if tags is not None:
             if isinstance(tags, str):
@@ -623,7 +628,7 @@ class MatrixProductState(TensorNetwork1D):
                                                     gen_inds(), gen_orders()):
                 yield Tensor(array.transpose(*order), inds=inds, tags=site_tag)
 
-        super().__init__(gen_tensors(), structure=site_tag_id,
+        super().__init__(gen_tensors(), structure=site_tag_id, sites=sites,
                          nsites=nsites, check_collisions=False, **tn_opts)
 
     def reindex_sites(self, new_id, where=None, inplace=False):
@@ -923,7 +928,7 @@ class MatrixProductOperator(TensorNetwork1D):
 
     def __init__(self, arrays, shape='lrud', site_tag_id='I{}', tags=None,
                  upper_ind_id='k{}', lower_ind_id='b{}', bond_name="",
-                 **kwargs):
+                 sites=None, nsites=None, **tn_opts):
         # short-circuit for copying
         if isinstance(arrays, MatrixProductOperator):
             super().__init__(arrays)
@@ -933,17 +938,21 @@ class MatrixProductOperator(TensorNetwork1D):
             return
 
         arrays = tuple(arrays)
-        nsites = len(arrays)
+
+        if sites is None:
+            if nsites is None:
+                nsites = len(arrays)
+            sites = range(nsites)
 
         # process site indices
         self._upper_ind_id = upper_ind_id
         self._lower_ind_id = lower_ind_id
-        upper_inds = map(upper_ind_id.format, range(nsites))
-        lower_inds = map(lower_ind_id.format, range(nsites))
+        upper_inds = map(upper_ind_id.format, sites)
+        lower_inds = map(lower_ind_id.format, sites)
 
         # process site tags
         self._site_tag_id = site_tag_id
-        site_tags = map(site_tag_id.format, range(nsites))
+        site_tags = map(site_tag_id.format, sites)
         if tags is not None:
             if isinstance(tags, str):
                 tags = (tags,)
@@ -958,7 +967,7 @@ class MatrixProductOperator(TensorNetwork1D):
             rud_ord = tuple(shape.replace('l', "").find(x) for x in 'rud')
             lrud_ord = tuple(map(shape.find, 'lrud'))
             yield lud_ord
-            for _ in range(nsites - 2):
+            for _ in range(len(sites) - 2):
                 yield lrud_ord
             yield rud_ord
 
@@ -966,7 +975,7 @@ class MatrixProductOperator(TensorNetwork1D):
             nbond = rand_uuid(base=bond_name)
             yield (nbond, next(upper_inds), next(lower_inds))
             pbond = nbond
-            for _ in range(nsites - 2):
+            for _ in range(len(sites) - 2):
                 nbond = rand_uuid(base=bond_name)
                 yield (pbond, nbond, next(upper_inds), next(lower_inds))
                 pbond = nbond
@@ -978,8 +987,8 @@ class MatrixProductOperator(TensorNetwork1D):
 
                 yield Tensor(array.transpose(*order), inds=inds, tags=site_tag)
 
-        super().__init__(gen_tensors(), structure=site_tag_id,
-                         nsites=nsites, check_collisions=False, **kwargs)
+        super().__init__(gen_tensors(), structure=site_tag_id, sites=sites,
+                         nsites=nsites, check_collisions=False, **tn_opts)
 
     def reindex_lower_sites(self, new_id, where=None, inplace=False):
         """Update the lower site index labels to a new string specifier.

@@ -67,7 +67,7 @@ def MPS_rand_state(n, bond_dim, phys_dim=2, normalize=True, cyclic=False,
     rmps = MatrixProductState(arrays, **mps_opts)
 
     if normalize:
-        rmps.site[-1] /= (rmps.H @ rmps)**0.5
+        rmps /= (rmps.H @ rmps)**0.5
 
     return rmps
 
@@ -250,7 +250,7 @@ def MPO_rand(n, bond_dim, phys_dim=2, normalize=True,
     rmpo = MatrixProductOperator(arrays, **mpo_opts)
 
     if normalize:
-        rmpo.site[-1] /= (rmpo.H @ rmpo)**0.5
+        rmpo /= (rmpo.H @ rmpo)**0.5
 
     return rmpo
 

@@ -894,10 +894,6 @@ for meth_name, op in [('__radd__', operator.__add__),
 #                            Tensor Network Class                             #
 # --------------------------------------------------------------------------- #
 
-_TN_SIMPLE_PROPS = ['structure', 'nsites', 'structure_bsz']
-_TN_DATA_PROPS = ['tensor_index', 'tag_index']
-
-
 class SiteIndexer(object):
     """
     """
@@ -1025,7 +1021,7 @@ class TensorNetwork(object):
                 # check for matching inner_indices -> need to re-index
                 new_inner_inds = set(t.inner_inds())
                 if current_inner_inds & new_inner_inds:  # any overlap
-                    t.reindex({old: old + "'" for old in new_inner_inds},
+                    t.reindex({old: rand_uuid() for old in new_inner_inds},
                               inplace=True)
                 current_inner_inds |= t.inner_inds()
 
@@ -1033,11 +1029,13 @@ class TensorNetwork(object):
                 self.add_tensor(t, virtual=virtual)
                 continue
 
-            for x in _TN_SIMPLE_PROPS:
+            self._combine_sites(t)
+
+            for x in ('structure', 'nsites', 'structure_bsz'):
                 # check whether to inherit ... or compare properties
                 if getattr(t, x) is not None:
 
-                    # dont' have prop yet -> inherit
+                    # don't have prop yet -> inherit
                     if getattr(self, x) is None:
                         setattr(self, x, getattr(t, x))
 
@@ -1058,14 +1056,16 @@ class TensorNetwork(object):
                     set_join, self.tag_index, t.tag_index)
 
         if self.structure:
-            # count how many sites if a structure is given
-            if self.nsites is None:
-                self.nsites = self.calc_nsites()
-
             # set the list of indices of sites which are present
             if self.sites is None:
+                if self.nsites is None:
+                    self.nsites = self.calc_nsites()
                 self.sites = range(self.nsites)
             else:
+                if self.nsites is None:
+                    raise ValueError("The total number of sites, ``nsites`` "
+                                     "must be specifed when a custom subset, "
+                                     "i.e. ``sites``, is.")
                 self.sites = tuple(self.sites)
 
             # set default blocksize
@@ -1255,6 +1255,15 @@ class TensorNetwork(object):
 
         for name in copy.copy(names):
             self.del_tensor(name)
+
+    def _combine_sites(self, other):
+        """Correctly combine the sites list of two TNs.
+        """
+        if (self.sites != other.sites) and (other.sites is not None):
+            if self.sites is None:
+                self.sites = other.sites
+            else:
+                self.sites = tuple(sorted(set(self.sites) | set(other.sites)))
 
     def calc_nsites(self):
         """Calculate how many tags there are which match ``structure``.
