@@ -1066,7 +1066,7 @@ class TensorNetwork(object):
                     raise ValueError("The total number of sites, ``nsites`` "
                                      "must be specifed when a custom subset, "
                                      "i.e. ``sites``, is.")
-                self.sites = tuple(self.sites)
+                self.sites = self.sites
 
             # set default blocksize
             if self.structure_bsz is None:
@@ -1264,6 +1264,10 @@ class TensorNetwork(object):
                 self.sites = other.sites
             else:
                 self.sites = tuple(sorted(set(self.sites) | set(other.sites)))
+
+                mn, mx = min(self.sites), max(self.sites) + 1
+                if len(self.sites) == mx - mn:
+                    self.sites = range(mn, mx)
 
     def calc_nsites(self):
         """Calculate how many tags there are which match ``structure``.
