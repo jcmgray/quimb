@@ -280,7 +280,7 @@ def gather_petsc_array(x, comm, out_shape=None, matrix=False):
 def _init_krylov_subspace(comm=None, tol=None, maxiter=None,
                           KSPType="preonly",
                           PCType="lu",
-                          PCFactorSolverPackage="mumps",
+                          PCFactorSolverType="mumps",
                           ):
     """Initialise a krylov subspace and preconditioner.
     """
@@ -292,8 +292,8 @@ def _init_krylov_subspace(comm=None, tol=None, maxiter=None,
     if PCType:
         PC = K.getPC()
         PC.setType(PCType)
-        if PCFactorSolverPackage:
-            PC.setFactorSolverPackage(PCFactorSolverPackage)
+        if PCFactorSolverType:
+            PC.setFactorSolverType(PCFactorSolverType)
         PC.setFactorShift(PETSc.Mat.FactorShiftType.POSITIVE_DEFINITE)
         PC.setFromOptions()
         K.setPC(PC)
@@ -305,7 +305,7 @@ def _init_krylov_subspace(comm=None, tol=None, maxiter=None,
 def _init_spectral_inverter(STType="sinvert",
                             KSPType="preonly",
                             PCType="lu",
-                            PCFactorSolverPackage="mumps",
+                            PCFactorSolverType="mumps",
                             comm=None):
     """Create a slepc spectral transformation object with specified solver.
     """
@@ -316,7 +316,7 @@ def _init_spectral_inverter(STType="sinvert",
     if KSPType:
         K = _init_krylov_subspace(
             KSPType=KSPType, PCType=PCType, comm=comm,
-            PCFactorSolverPackage=PCFactorSolverPackage)
+            PCFactorSolverType=PCFactorSolverType)
         S.setKSP(K)
     S.setFromOptions()
     return S
@@ -684,7 +684,7 @@ def lookup_ksp_error(i):
 def ssolve_slepc(A, y, isherm=True, comm=None, maxiter=None, tol=None,
                  KSPType='preonly',
                  PCType='lu',
-                 PCFactorSolverPackage="mumps",
+                 PCFactorSolverType="mumps",
                  ):
     if comm is None:
         comm = get_default_comm()
@@ -697,7 +697,7 @@ def ssolve_slepc(A, y, isherm=True, comm=None, maxiter=None, tol=None,
 
     ksp = _init_krylov_subspace(
         KSPType=KSPType, PCType=PCType, comm=comm, maxiter=maxiter, tol=tol,
-        PCFactorSolverPackage=PCFactorSolverPackage)
+        PCFactorSolverType=PCFactorSolverType)
 
     ksp.setOperators(A)
     ksp.solve(y, x)
