@@ -53,55 +53,50 @@ def raise_cant_find_library_function(x, extra_msg=None):
 FOUND_TQDM = find_library('tqdm')
 if FOUND_TQDM:
     from tqdm import tqdm
-else:  # pragma: no cover
-    tqdm = None
 
-
-class _ctqdm(tqdm):
-    """A continuous version of tqdm, so that it can be updated with a float
-    within some pre-given range, rather than a number of steps.
-
-    Parameters
-    ----------
-    args : (stop) or (start, stop)
-        Stopping point (and starting point if ``len(args) == 2``) of window
-        within which to evaluate progress.
-    total : int
-        The number of steps to represent the continuous progress with.
-    kwargs
-        Supplied to ``tqdm.tqdm``
-    """
-
-    def __init__(self, *args, total=100, **kwargs):
-        """
-        """
-        super(_ctqdm, self).__init__(total=total, unit="%", **kwargs)
-
-        if len(args) == 2:
-            self.start, self.stop = args
-        else:
-            self.start, self.stop = 0, args[0]
-
-        self.range = self.stop - self.start
-        self.step = 1
-
-    def cupdate(self, x):
-        """'Continuous' update of progress bar.
+    class _ctqdm(tqdm):
+        """A continuous version of tqdm, so that it can be updated with a float
+        within some pre-given range, rather than a number of steps.
 
         Parameters
         ----------
-        x : float
-            Current position within the range ``[self.start, self.stop]``.
+        args : (stop) or (start, stop)
+            Stopping point (and starting point if ``len(args) == 2``) of window
+            within which to evaluate progress.
+        total : int
+            The number of steps to represent the continuous progress with.
+        kwargs
+            Supplied to ``tqdm.tqdm``
         """
-        num_update = int(
-            (self.total + 1) * (x - self.start) / self.range - self.step
-        )
-        if num_update > 0:
-            self.update(num_update)
-            self.step += num_update
 
+        def __init__(self, *args, total=100, **kwargs):
+            """
+            """
+            super(_ctqdm, self).__init__(total=total, unit="%", **kwargs)
 
-if FOUND_TQDM:
+            if len(args) == 2:
+                self.start, self.stop = args
+            else:
+                self.start, self.stop = 0, args[0]
+
+            self.range = self.stop - self.start
+            self.step = 1
+
+        def cupdate(self, x):
+            """'Continuous' update of progress bar.
+
+            Parameters
+            ----------
+            x : float
+                Current position within the range ``[self.start, self.stop]``.
+            """
+            num_update = int(
+                (self.total + 1) * (x - self.start) / self.range - self.step
+            )
+            if num_update > 0:
+                self.update(num_update)
+                self.step += num_update
+
     progbar = tqdm
     continuous_progbar = _ctqdm
 else:  # pragma: no cover

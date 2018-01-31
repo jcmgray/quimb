@@ -20,6 +20,7 @@ import numpy as np
 
 from ..accel import prod, njit, realify_scalar
 from ..linalg.base_linalg import norm_fro_dense
+from ..utils import raise_cant_find_library_function
 
 try:
     import opt_einsum
@@ -30,8 +31,15 @@ try:
     def einsum_path(*args, optimize='greedy', memory_limit=2**28, **kwargs):
         return opt_einsum.contract_path(
             *args, path=optimize, memory_limit=memory_limit, **kwargs)
+
 except ImportError:
-    pass
+    extra_msg = "Needed for optimized tensor contractions."
+    einsum = einsum_expression = einsum_path = \
+        raise_cant_find_library_function("opt_einsum", extra_msg)
+except AttributeError:
+    einsum_expression = raise_cant_find_library_function(
+        "opt_einsum", "A more recent (github?) version is needed for caching "
+        "tensor contractions.")
 
 
 # --------------------------------------------------------------------------- #
