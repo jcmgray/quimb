@@ -542,7 +542,14 @@ class Tensor(object):
         return self._data.dtype
 
     def ind_size(self, ind):
+        """Return the size of dimension corresponding to ``ind``.
+        """
         return self.shape[self.inds.index(ind)]
+
+    def bond_size(self, other):
+        """Get the total size of the shared index(es) with ``other``.
+        """
+        return prod(self.ind_size(i) for i in self.shared_inds(other))
 
     def inner_inds(self):
         """
@@ -1602,9 +1609,10 @@ class TensorNetwork(object):
 
     # ------------------------------ printing ------------------------------- #
 
-    def plot(tn, iterations=2000, color=None, figsize=(6, 6),
-             label_inds=None, label_tags=None, **plot_opts):
-        """Plot this tensor network as a networkx graph using matplotlib.
+    def graph(tn, iterations=2000, color=None, figsize=(6, 6),
+              label_inds=None, label_tags=None, **plot_opts):
+        """Plot this tensor network as a networkx graph using matplotlib,
+        with edge width corresponding to bond dimension.
 
         Parameters
         ----------
@@ -1623,6 +1631,7 @@ class TensorNetwork(object):
         """
         import networkx as nx
         import matplotlib.pyplot as plt
+        import math
 
         # build the graph
         G = nx.Graph()
@@ -1646,16 +1655,19 @@ class TensorNetwork(object):
 
                     t2 = ts[j]
                     if ix in t2.inds:
-                        G.add_edge(i, j)
                         found_ind = True
+                        G.add_edge(i, j, weight=t1.bond_size(t2))
 
                 # else it must be an 'external' index
                 if not found_ind:
-                    G.add_edge(i, "ext{}".format(ix))
+                    ext_lbl = "ext{}".format(ix)
+                    G.add_edge(i, ext_lbl, weight=t1.ind_size(ix))
 
                     # optionally label the external index
                     if label_inds:
-                        labels["ext{}".format(ix)] = ix
+                        labels[ext_lbl] = ix
+
+        edge_weights = [x[2]['weight'] for x in G.edges(data=True)]
 
         # color the nodes
         if color is None:
@@ -1691,10 +1703,12 @@ class TensorNetwork(object):
                 else:
                     crs += [(0.6, 0.6, 0.6)]
 
+        edge_weights = [math.log2(d) for d in edge_weights]
+
         plt.figure(figsize=figsize)
         pos = nx.spring_layout(G, iterations=iterations)
         nx.draw(G, node_size=szs, node_color=crs, pos=pos, labels=labels,
-                with_labels=True, **plot_opts)
+                with_labels=True, width=edge_weights, **plot_opts)
 
         # create legend
         if colors:

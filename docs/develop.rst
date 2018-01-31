@@ -8,6 +8,8 @@ Running the Tests
 
 Testing ``quimb`` requires `pytest <https://docs.pytest.org/en/latest/index.html>`_ and simply involves running ``pytest`` in the root ``quimb`` directory.
 
+The tests can also be run with pre-spawned mpi workers using the command ``quimb-mpi-python -m pytest`` (but not in syncro mode -- see :ref:`mpistuff`).
+
 
 Adding a function
 =================

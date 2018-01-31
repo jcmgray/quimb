@@ -70,7 +70,7 @@ def align_TN_1D(*tns, ind_ids=None, inplace=False):
 
 
 class TensorNetwork1D(TensorNetwork):
-    """
+    """Base class for tensor networks with a one-dimensional structure.
     """
 
     def __init__(self, *args, **kwargs):

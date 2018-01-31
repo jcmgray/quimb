@@ -110,6 +110,9 @@ class TestBasicTensorOperations:
     def test_contract_some(self):
         a = Tensor(np.random.randn(2, 3, 4), inds=[0, 1, 2])
         b = Tensor(np.random.randn(3, 4, 5), inds=[1, 2, 3])
+
+        assert a.bond_size(b) == 12
+
         c = a @ b
 
         assert isinstance(c, Tensor)
@@ -643,4 +646,3 @@ class TestTensorNetwork:
         for t1, t2 in zip(tn1.tensors_sorted(), tn2.tensors_sorted()):
             assert t1.tags == t2.tags
             assert t1.almost_equals(t2)
-
