@@ -1,6 +1,7 @@
 """Miscellenous
 """
 import importlib
+import itertools
 
 
 def find_library(x):
@@ -125,3 +126,40 @@ def int2tup(x):
     return (x if isinstance(x, tuple) else
             (x,) if isinstance(x, int) else
             tuple(x))
+
+
+def pairwise(iterable):
+    """Iterate over each pair of neighbours in ``iterable``.
+    """
+    a, b = itertools.tee(iterable)
+    next(b, None)
+    return zip(a, b)
+
+
+def three_line_multi_print(l1, l2, l3, max_width=None):
+    if max_width is None:
+        import shutil
+        max_width, _ = shutil.get_terminal_size()
+
+    if len(l2) <= max_width:
+        print(l1)
+        print(l2)
+        print(l3)
+    else:  # pragma: no cover
+        max_width -= 8  # for ellipses
+        n_lines = (len(l2) - 1) // max_width + 1
+        for i in range(n_lines):
+            if i == 0:
+                print("   ", l1[i * max_width:(i + 1) * max_width], "   ")
+                print("   ", l2[i * max_width:(i + 1) * max_width], "...")
+                print("   ", l3[i * max_width:(i + 1) * max_width], "   ")
+                print(("{:^" + str(max_width) + "}").format("..."))
+            elif i == n_lines - 1:
+                print("   ", l1[i * max_width:(i + 1) * max_width])
+                print("...", l2[i * max_width:(i + 1) * max_width])
+                print("   ", l3[i * max_width:(i + 1) * max_width])
+            else:
+                print("   ", l1[i * max_width:(i + 1) * max_width], "   ")
+                print("...", l2[i * max_width:(i + 1) * max_width], "...")
+                print("   ", l3[i * max_width:(i + 1) * max_width], "   ")
+                print(("{:^" + str(max_width) + "}").format("..."))

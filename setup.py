@@ -19,18 +19,17 @@ setup(
             'coverage',
             'pytest',
             'pytest-cov',
-            'pytest-timeout',
         ],
         'docs': [
             'sphinx',
-            'sphinx_rtd_theme',
             'sphinx_bootstrap_theme',
         ],
         'advanced_solvers': [
             'slepc4py',
         ]
     },
-    scripts=['bin/quimb-mpiexec'],
+    scripts=['bin/quimb-mpi-python'],
+    python_requires='>=3.5',
     classifiers=[
         'Development Status :: 3 - Alpha',
         'License :: OSI Approved :: MIT License',

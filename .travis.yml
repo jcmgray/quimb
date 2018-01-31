@@ -36,22 +36,24 @@ before_install:
   - chronic bash deps/travis-install-conda.sh
   - export PATH="$HOME/conda/bin:$PATH"
   - source activate test-environment
-  - chronic bash deps/travis-install-openmpi.sh
+  - export PATH="$HOME/mpi_stuff/openmpi_install/bin:$PATH"
+  - export LD_LIBRARY_PATH="$HOME/mpi_stuff/openmpi_install/lib:$LD_LIBRARY_PATH"
+  - "if [ ${BUILD_MPI:-ON} = ON ]; then chronic bash deps/travis-install-openmpi.sh; fi"
   - mpiexec --version
   - mpiexec -np 2 hostname
-  - chronic bash deps/travis-install-slepc4py.sh
+  - "if [ ${BUILD_SLEPC:-ON} = ON ]; then chronic bash deps/travis-install-slepc4py.sh; fi"
 
 install:
-  - pip install .
+  - pip install -U .
 
 script:
-  - export OMP_NUM_THREADS=2
-  - env COVERAGE_FILE=.coverage.autompi pytest
-  - env COVERAGE_FILE=.coverage.manualmpi quimb-mpiexec 2 -m pytest
-  - coverage combine .
+  - "if [ ${TEST_QUIMB:-ON} = ON ]; then export OMP_NUM_THREADS=2; fi"
+  - "if [ ${TEST_QUIMB:-ON} = ON ]; then env COVERAGE_FILE=.coverage.autompi pytest; fi"
+  - "if [ ${TEST_QUIMB:-ON} = ON ]; then env COVERAGE_FILE=.coverage.manualmpi quimb-mpi-python --np 2 -m pytest; fi"
+  - "if [ ${TEST_QUIMB:-ON} = ON ]; then coverage combine .; fi"
 
 after_success:
-  - coveralls
-  - codecov
-  - codeclimate-test-reporter
-  - python-codacy-coverage -r coverage.xml
+  - "if [ ${TEST_QUIMB:-ON} = ON ]; then coveralls; fi"
+  - "if [ ${TEST_QUIMB:-ON} = ON ]; then codecov; fi"
+  - "if [ ${TEST_QUIMB:-ON} = ON ]; then codeclimate-test-reporter; fi"
+  - "if [ ${TEST_QUIMB:-ON} = ON ]; then python-codacy-coverage -r coverage.xml; fi"

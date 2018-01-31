@@ -14,6 +14,7 @@ from .accel import (
     isvec,
     issparse,
     isherm,
+    ispos,
     mul,
     dot,
     vdot,
@@ -84,6 +85,7 @@ from .gen.operators import (
     sig,
     controlled,
     ham_heis,
+    ham_ising,
     ham_j1j2,
     zspin_projector,
     swap,
@@ -134,12 +136,18 @@ from .calc import (
     fidelity,
     purify,
     entropy,
+    entropy_subsys,
     mutual_information,
     mutinf,
+    mutinf_subsys,
+    schmidt_gap,
+    tr_sqrt,
+    tr_sqrt_subsys,
     partial_transpose,
     negativity,
     logarithmic_negativity,
     logneg,
+    logneg_subsys,
     concurrence,
     one_way_classical_information,
     quantum_discord,
@@ -159,6 +167,17 @@ from .calc import (
 # Evolution class and methods
 from .evo import QuEvo
 
+from .linalg.approx_spectral import (
+    approx_spectral_function,
+    tr_abs_approx,
+    tr_exp_approx,
+    tr_sqrt_approx,
+    tr_xlogx_approx,
+    entropy_subsys_approx,
+    logneg_subsys_approx,
+    negativity_subsys_approx,
+)
+
 
 __all__ = [
     # Accel ----------------------------------------------------------------- #
@@ -169,6 +188,7 @@ __all__ = [
     'isvec',
     'issparse',
     'isherm',
+    'ispos',
     'mul',
     'dot',
     'vdot',
@@ -227,6 +247,7 @@ __all__ = [
     'sig',
     'controlled',
     'ham_heis',
+    'ham_ising',
     'ham_j1j2',
     'zspin_projector',
     'swap',
@@ -273,12 +294,18 @@ __all__ = [
     'fidelity',
     'purify',
     'entropy',
+    'entropy_subsys',
     'mutual_information',
     'mutinf',
+    'mutinf_subsys',
+    'schmidt_gap',
+    'tr_sqrt',
+    'tr_sqrt_subsys',
     'partial_transpose',
     'negativity',
     'logarithmic_negativity',
     'logneg',
+    'logneg_subsys',
     'concurrence',
     'one_way_classical_information',
     'quantum_discord',
@@ -295,4 +322,13 @@ __all__ = [
     'page_entropy',
     # Evo ------------------------------------------------------------------- #
     'QuEvo',
+    # Approx spectral ------------------------------------------------------- #
+    'approx_spectral_function',
+    'tr_abs_approx',
+    'tr_exp_approx',
+    'tr_sqrt_approx',
+    'tr_xlogx_approx',
+    'entropy_subsys_approx',
+    'logneg_subsys_approx',
+    'negativity_subsys_approx',
 ]

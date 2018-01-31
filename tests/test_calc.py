@@ -25,15 +25,20 @@ from quimb import (
     fidelity,
     quantum_discord,
     one_way_classical_information,
-    mutual_information,
-    partial_transpose,
     entropy,
+    entropy_subsys,
+    mutual_information,
+    mutinf_subsys,
+    schmidt_gap,
     correlation,
     pauli_correlations,
     purify,
     concurrence,
+    tr_sqrt,
+    partial_transpose,
     negativity,
     logneg,
+    logneg_subsys,
     trace_distance,
     pauli_decomp,
     bell_decomp,
@@ -154,6 +159,17 @@ class TestEntropy:
         er = entropy(pab, rank=2**m)
         assert_allclose(ef, er)
 
+    def test_entropy_subsystem(self):
+        p = rand_ket(2**9)
+        # exact
+        e1 = entropy_subsys(p, (2**5, 2**4), 0, approx_thresh=1e30)
+        # approx
+        e2 = entropy_subsys(p, (2**5, 2**4), 0, approx_thresh=1)
+        assert e1 != e2
+        assert_allclose(e1, e2, rtol=5e-2)
+
+        assert entropy_subsys(p, (2**5, 2**4), [0, 1], approx_thresh=1) == 0.0
+
 
 class TestMutualInformation:
     def test_mutual_information_pure(self):
@@ -174,16 +190,52 @@ class TestMutualInformation:
     @pytest.mark.parametrize('inds', [(0, 1), (1, 2), (0, 2)])
     def test_mixed_sub(self, inds):
         a = rand_rho(2**3)
-        ixy = mutual_information(a, (2, 2, 2), *inds)
+        rho_ab = ptr(a, [2, 2, 2], inds)
+        ixy = mutual_information(rho_ab, (2, 2))
         assert (0 <= ixy <= 2.0)
 
-    @pytest.mark.parametrize('inds', [(0, 1), (1, 2), (0, 2)])
-    def test_auto_rank(self, inds):
-        a = rand_ket(2**3)
-        ixy = mutual_information(a, (2, 2, 2), *inds)
-        assert (0 <= ixy <= 2.0)
-        ixya = mutual_information(a, (2, 2, 2), *inds, rank='AUTO')
-        assert_allclose(ixy, ixya)
+    def test_mutinf_interleave(self):
+        p = dop(singlet() & singlet())
+        ixy = mutual_information(p, [2] * 4, sysa=(0, 2))
+        assert_allclose(ixy, 4)
+
+    def test_mutinf_interleave_pure(self):
+        p = singlet() & singlet()
+        ixy = mutual_information(p, [2] * 4, sysa=(0, 2))
+        assert_allclose(ixy, 4)
+
+    def test_mutinf_subsys(self):
+        p = rand_ket(2**9)
+        dims = (2**3, 2**2, 2**4)
+        # exact
+        rho_ab = ptr(p, dims, [0, 2])
+        mi0 = mutual_information(rho_ab, [8, 16])
+        mi1 = mutinf_subsys(p, dims, sysa=0, sysb=2, approx_thresh=1e30)
+        assert_allclose(mi1, mi0)
+        # approx
+        mi2 = mutinf_subsys(p, dims, sysa=0, sysb=2, approx_thresh=1)
+        assert_allclose(mi1, mi2, rtol=5e-2)
+
+    def test_mutinf_subsys_pure(self):
+        p = rand_ket(2**7)
+        dims = (2**3, 2**4)
+        # exact
+        mi0 = mutual_information(p, dims, sysa=0)
+        mi1 = mutinf_subsys(p, dims, sysa=0, sysb=1, approx_thresh=1e30)
+        assert_allclose(mi1, mi0)
+        # approx
+        mi2 = mutinf_subsys(p, dims, sysa=0, sysb=1, approx_thresh=1)
+        assert_allclose(mi1, mi2, rtol=5e-2)
+
+
+class TestSchmidtGap:
+    def test_bell_state(self):
+        p = bell_state('psi-')
+        assert_allclose(schmidt_gap(p, [2, 2], 0), 0.0)
+        p = up() & down()
+        assert_allclose(schmidt_gap(p, [2, 2], 0), 1.0)
+        p = rand_ket(2**3)
+        assert 0 < schmidt_gap(p, [2] * 3, sysa=[0, 1]) < 1.0
 
 
 class TestPartialTranspose:
@@ -195,6 +247,11 @@ class TestPartialTranspose:
                             [0, 0.5, 0, 0],
                             [0, 0, 0.5, 0],
                             [-0.5, 0, 0, 0]])
+
+    def test_tr_sqrt_rank(self):
+        psi = rand_ket(2**5)
+        rhoa = psi.ptr([2] * 5, range(4))
+        assert_allclose(tr_sqrt(rhoa), tr_sqrt(rhoa, rank=2))
 
 
 class TestNegativity:
@@ -233,6 +290,51 @@ class TestLogarithmicNegativity:
     def test_interleaving(self):
         p = permute(singlet() & singlet(), [2, 2, 2, 2], [0, 2, 1, 3])
         assert logneg(p, [2] * 4, sysa=[0, 3]) > 2 - 1e-13
+
+    def test_logneg_subsys(self):
+        p = rand_ket(2**(2 + 3 + 1 + 2))
+        dims = (2**2, 2**3, 2**1, 2**2)
+        sysa = [0, 3]
+        sysb = 1
+        # exact 1
+        ln0 = logneg(ptr(p, dims, [0, 1, 3]), [4, 8, 4], [0, 2])
+        # exact 2
+        ln1 = logneg_subsys(p, dims, sysa, sysb, approx_thresh=1e30)
+        assert_allclose(ln0, ln1)
+        # approx
+        ln2 = logneg_subsys(p, dims, sysa, sysb, approx_thresh=1)
+        assert ln1 != ln2
+        assert_allclose(ln1, ln2, rtol=5e-2)
+
+    def test_logneg_subsys_pure(self):
+        p = rand_ket(2**(3 + 4))
+        dims = (2**3, 2**4)
+        sysa = 0
+        sysb = 1
+        # exact 1
+        ln0 = logneg(p, dims, 0)
+        # exact 2
+        ln1 = logneg_subsys(p, dims, sysa, sysb, approx_thresh=1e30)
+        assert_allclose(ln0, ln1)
+        # approx
+        ln2 = logneg_subsys(p, dims, sysa, sysb, approx_thresh=1)
+        assert ln1 != ln2
+        assert_allclose(ln1, ln2, rtol=5e-2)
+
+    def test_logneg_subsys_pure_should_swap_subsys(self):
+        p = rand_ket(2**(5 + 2))
+        dims = (2**5, 2**2)
+        sysa = 0
+        sysb = 1
+        # exact 1
+        ln0 = logneg(p, dims, 0)
+        # exact 2
+        ln1 = logneg_subsys(p, dims, sysa, sysb, approx_thresh=1e30)
+        assert_allclose(ln0, ln1)
+        # approx
+        ln2 = logneg_subsys(p, dims, sysa, sysb, approx_thresh=1)
+        assert ln1 != ln2
+        assert_allclose(ln1, ln2, rtol=5e-2)
 
 
 class TestConcurrence:
@@ -463,7 +565,7 @@ class TestIsDegenerate:
         assert is_degenerate(h) == 2
 
     def test_known_nondegen(self):
-        h = ham_heis(2, bz=0.3)
+        h = ham_heis(2, b=0.3)
         assert is_degenerate(h) == 0
 
     def test_supply_list(self):
@@ -486,9 +588,8 @@ class TestPageEntropy:
 
         assert abs(pe - ae) < 1e-5
 
-    def test_raises(self):
-        with pytest.raises(ValueError):
-            page_entropy(8, 16)
+    def test_bigger_than_half(self):
+        assert_allclose(page_entropy(4, 24), page_entropy(6, 24))
 
 
 class TestIsEigenvector:
@@ -505,7 +606,7 @@ class TestIsEigenvector:
         assert not is_eigenvector(v, a)
 
     def test_sparse(self):
-        a = rand_herm(10, sparse=True, density=0.4)
+        a = rand_herm(10, sparse=True, density=0.9)
         vt = seigvecs(a, sigma=0, k=1)
         assert is_eigenvector(vt, a)
         vf = rand_ket(10)

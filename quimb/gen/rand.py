@@ -157,27 +157,28 @@ def rand_product_state(n, qtype=None):
 @matrixify
 def rand_matrix_product_state(phys_dim, n, bond_dim,
                               cyclic=False, trans_invar=False):
-    """Generate a random matrix product state (in dense form).
+    """Generate a random matrix product state (in dense form, see
+    :func:`~quimb.tensor_networks.MPS_rand_state` for tensor network form).
 
     Parameters
     ----------
-        phys_dim : int
-            Physical dimension of each local site.
-        n : int
-            Number of sites.
-        bond_dim : int
-            Dimension of the bond (virtual) indices.
-        cyclic : bool (optional)
-            Whether to impose cyclic boundary conditions on the entanglement
-            structure.
-        trans_invar : bool (optional)
-            Whether to generate a translationally invariant state,
-            requires cyclic=True.
+    phys_dim : int
+        Physical dimension of each local site.
+    n : int
+        Number of sites.
+    bond_dim : int
+        Dimension of the bond (virtual) indices.
+    cyclic : bool (optional)
+        Whether to impose cyclic boundary conditions on the entanglement
+        structure.
+    trans_invar : bool (optional)
+        Whether to generate a translationally invariant state,
+        requires cyclic=True.
 
     Returns
     -------
-        ket : matrix-like
-            The random state, with shape (phys_dim**n, 1)
+    ket : matrix-like
+        The random state, with shape (phys_dim**n, 1)
 
     """
     if trans_invar and not cyclic:

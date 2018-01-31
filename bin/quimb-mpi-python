@@ -1,0 +1,84 @@
+#!/bin/bash
+
+
+POSITIONAL=()
+while [[ $# -gt 0 ]]
+do
+key="$1"
+
+case $key in
+    -h|--help)
+    echo "Run a python script that uses quimb, eagerly launching
+with mpi, rather than dynamically spawning MPI processes.
+
+    Usage:
+        quimb-mpi-python [OPTIONS]... [SCRIPT]...
+
+    Options:
+        -n, --np <NUM_PROCS>
+            How many mpi processes to use, defaults to
+            letting the MPI launcher decide.
+        -l, --launcher <MPI_LAUNCHER>
+            How to launch the python process, defaults
+            to 'mpiexec'. Can add mpi options here.
+        -s, --syncro
+            Launch in syncro mode, where all processes
+            run the script, splitting work up only when
+            a MPIPool is encountered.
+        -h, --help
+            Show this help.
+
+Note that in syncro mode, *all* functions called outside
+of the mpi pool must be pure to ensure syncronization.
+    "
+    exit 0
+    ;;
+    -n|--np)
+    num_procs="$2"
+    shift
+    shift
+    ;;
+    -s|--syncro)
+    export QUIMB_SYNCRO_MPI=YES
+    shift
+    ;;
+    -l|--launcher)
+    mpi_launcher="$2"
+    shift
+    shift
+    ;;
+    "-")
+    shift
+    break
+    ;;
+    *)    # unknown option
+    POSITIONAL+=("$1") # save it in an array for later
+    shift # past argument
+    ;;
+esac
+done
+set -- "${POSITIONAL[@]}" # restore positional parameters
+
+mpi_launcher=${mpi_launcher:-"mpiexec"}
+
+# set up environment
+export OMP_NUM_THREADS=1
+export _QUIMB_MPI_LAUNCHED="MANUAL"
+
+if [ $QUIMB_SYNCRO_MPI ]; then  # use simplistic syncronized pool
+    if [ $num_procs ]; then
+        echo "Launching quimb in Syncro mode with ${mpi_launcher} and ${num_procs} processes."
+        ${mpi_launcher} --np "${num_procs}" python "$@"
+    else
+        echo "Launching quimb in Syncro mode with ${mpi_launcher}".
+        ${mpi_launcher} python "$@"
+    fi
+else  # run script with mpi through mpi4py module
+    if [ $num_procs ]; then
+        echo "Launching quimb in mpi4py.futures mode with ${mpi_launcher} and ${num_procs} processes."
+        ${mpi_launcher} --np "${num_procs}" python -m mpi4py.futures "$@"
+    else
+        echo "Launching quimb in mpi4py.futures mode with ${mpi_launcher}."
+        ${mpi_launcher} python -m mpi4py.futures "$@"
+    fi
+fi

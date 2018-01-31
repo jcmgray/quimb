@@ -40,6 +40,12 @@ from .linalg.base_linalg import (
     seigvals,
     sqrtm,
 )
+from .linalg.approx_spectral import (
+    entropy_subsys_approx,
+    tr_sqrt_subsys_approx,
+    logneg_subsys_approx,
+    gen_bipartite_spectral_fn,
+)
 from .gen.operators import sig
 from .gen.states import (
     basis_vec,
@@ -114,7 +120,7 @@ def entropy(a, rank=None):
 
     See Also
     --------
-    mutinf, entropy_subsys_approx
+    mutinf, entropy_subsys, entropy_subsys_approx
     """
     a = np.asarray(a)
     if np.ndim(a) == 1:
@@ -129,9 +135,38 @@ def entropy(a, rank=None):
     return np.sum(-evals * np.log2(evals))
 
 
+entropy_subsys = gen_bipartite_spectral_fn(entropy, entropy_subsys_approx, 0.0)
+"""Calculate the entropy of a pure states' subsystem, optionally switching
+to an approximate lanczos method when the subsystem is very large.
+
+Parameters
+----------
+psi_ab : vector
+    Bipartite state.
+dims : sequence of int
+    The sub-dimensions of the state.
+sysa :  sequence of int
+    The indices of which dimensions to calculate the entropy for.
+approx_thresh : int, optional
+    The size of sysa at which to switch to the approx method. Set to
+    ``None`` to never use the approximation.
+**approx_opts
+    Supplied to :func:`entropy_subsys_approx`, if used.
+
+Returns
+-------
+float
+    The subsytem entropy.
+
+See Also
+--------
+entropy, entropy_subsys_approx, mutinf_subsys
+"""
+
+
 @zeroify
-def mutinf(p, dims=(2, 2), sysa=0, sysb=1, rank=None):
-    """Find the mutual information between two subystems of a state.
+def mutinf(p, dims=(2, 2), sysa=0, rank=None):
+    """Find the mutual information for a bipartition of a state.
 
     That is, ``H(A) + H(B) - H(AB)``, for von Neumann entropy ``H``, and two
     subsystems A and B.
@@ -157,26 +192,158 @@ def mutinf(p, dims=(2, 2), sysa=0, sysb=1, rank=None):
 
     See Also
     --------
-    entropy
+    entropy, mutinf_subsys, entropy_subsys_approx
     """
-    if np.size(dims) > 2:
-        if rank == 'AUTO':
-            rank = prod(dims) // (dims[sysa] * dims[sysb])
-        p = ptr(p, dims, (sysa, sysb))
-        dims = (dims[sysa], dims[sysb])
-    if isop(p):  # mixed combined system
+    sysa = int2tup(sysa)
+
+    # mixed combined system
+    if isop(p):
+        # total
         hab = entropy(p, rank=rank)
-        rhoa = ptr(p, dims, 0)
-        rhob = ptr(p, dims, 1)
-        ha, hb = entropy(rhoa), entropy(rhob)
-    else:  # pure combined system
-        hab = 0.0
+
+        # subsystem a
         rhoa = ptr(p, dims, sysa)
-        ha = hb = entropy(rhoa)
+        ha = entropy(rhoa)
+
+        # need subsystem b as well
+        sysb = tuple(i for i in range(len(dims)) if i not in sysa)
+        rhob = ptr(p, dims, sysb)
+        hb = entropy(rhob)
+
+    # pure combined system
+    else:
+        hab = 0.0
+        ha = hb = entropy_subsys(p, dims, sysa)
+
     return ha + hb - hab
 
 
 mutual_information = mutinf
+
+
+def mutinf_subsys(psi_abc, dims, sysa, sysb, approx_thresh=2**12,
+                  **approx_opts):
+    """Calculate the mutual information of two subsystems of a pure state,
+    possibly using an approximate lanczos method for large subsytems.
+
+    Parameters
+    ----------
+    psi_abc : vector
+        Tri-partite pure state.
+    dims : sequence of int
+        The sub dimensions of the state.
+    sysa : sequence of int
+        The index(es) of the subsystem(s) to consider part of 'A'.
+    sysb : sequence of int
+        The index(es) of the subsystem(s) to consider part of 'B'.
+    approx_thresh : int, optional
+        The size of subsystem at which to switch to the approximate lanczos
+        method. Set to ``None`` to never use the approximation.
+    approx_opts
+        Supplied to :func:`entropy_subsys_approx`, if used.
+
+    Returns
+    -------
+    float
+        The mutual information.
+
+    See Also
+    --------
+    mutinf, entropy_subsys, entropy_subsys_approx, logneg_subsys
+    """
+    sysa, sysb = int2tup(sysa), int2tup(sysb)
+    sz_a = prod(d for i, d in enumerate(dims) if i in sysa)
+    sz_b = prod(d for i, d in enumerate(dims) if i in sysb)
+    sz_c = prod(dims) // (sz_a * sz_b)
+
+    kws = {'approx_thresh': approx_thresh, **approx_opts}
+
+    if sz_c == 1:
+        hab = 0.0
+        ha = hb = entropy_subsys(psi_abc, dims, sysa, **kws)
+    else:
+        hab = entropy_subsys(psi_abc, dims, sysa + sysb, **kws)
+        ha = entropy_subsys(psi_abc, dims, sysa, **kws)
+        hb = entropy_subsys(psi_abc, dims, sysb, **kws)
+
+    return hb + ha - hab
+
+
+def schmidt_gap(psi_ab, dims, sysa):
+    """Find the schmidt gap of the bipartition of ``psi_ab``. That is, the
+    difference between the two largest eigenvalues of the reduced density
+    matrix.
+
+    Parameters
+    ----------
+    psi_ab : vector
+        Bipartite state.
+    dims : sequence of int
+        The sub-dimensions of the state.
+    sysa :  sequence of int
+        The indices of which dimensions to calculate the entropy for.
+
+    Returns
+    -------
+    float
+    """
+    sysa = int2tup(sysa)
+    sz_a = prod(d for i, d in enumerate(dims) if i in sysa)
+    sz_b = prod(dims) // sz_a
+
+    # pure state
+    if sz_b == 1:
+        return 1.0
+
+    # also check if system b is smaller, since spectrum is same for both
+    if sz_b < sz_a:
+        # if so swap things around
+        sz_a, sz_b = sz_b, sz_a
+        sysb = [i for i in range(len(dims)) if i not in sysa]
+        sysa = sysb
+
+    rho_a = ptr(psi_ab, dims, sysa)
+    el = seigvals(rho_a, k=2, which='LM')
+    return abs(el[0] - el[1])
+
+
+def tr_sqrt(a, rank=None):
+    """Return the trace of the sqrt of a positive semidefinite matrix.
+    """
+    if rank is None:
+        el = eigvals(a, sort=False)
+    else:
+        el = seigvals(a, k=rank, which='LM', backend='AUTO')
+    return np.sum(np.sqrt(el[el > 0.0]))
+
+
+tr_sqrt_subsys = gen_bipartite_spectral_fn(tr_sqrt, tr_sqrt_subsys_approx, 1.0)
+"""Compute the trace sqrt of a subsystem, possibly using an approximate
+lanczos method when the subsytem is big.
+
+Parameters
+----------
+psi_ab : vector
+    Bipartite state.
+dims : sequence of int
+    The sub-dimensions of the state.
+sysa :  sequence of int
+    The indices of which dimensions to calculate the trace sqrt for.
+approx_thresh : int, optional
+    The size of sysa at which to switch to the approx method. Set to
+    ``None`` to never use the approximation.
+**approx_opts
+    Supplied to :func:`tr_sqrt_subsys_approx`, if used.
+
+Returns
+-------
+float
+    The subsytem entropy.
+
+See Also
+--------
+tr_sqrt, tr_sqrt_subsys_approx, partial_tranpose_norm
+"""
 
 
 @matrixify
@@ -188,7 +355,9 @@ def partial_transpose(p, dims=(2, 2), sysa=0):
     p : matrix or vector
         The state to partially transpose.
     dims : tuple(int), optional
-        The two internal dimensions describing a bipartition of the state.
+        The internal dimensions of the state.
+    sysa : sequence of int
+        The indices of 'system A', everything else assumed to be 'system B'.
 
     Returns
     -------
@@ -212,31 +381,43 @@ def partial_transpose(p, dims=(2, 2), sysa=0):
             perm_ket_inds.append(i)
             perm_bra_inds.append(i + ndims)
 
-    return (
-        np.asarray(qu(p, "dop"))
-        .reshape((*dims, *dims))
-        .transpose((*perm_ket_inds, *perm_bra_inds))
-        .reshape((prod(dims), prod(dims)))
-    )
+    return (np.asarray(qu(p, "dop"))
+            .reshape((*dims, *dims))
+            .transpose((*perm_ket_inds, *perm_bra_inds))
+            .reshape((prod(dims), prod(dims))))
 
 
-def partial_tranpose_norm(p, dims, sysa=0):
-    """Compute the norm of the partial transpose for (log) negativity."""
-    ndims = len(dims)
+def partial_tranpose_norm(p, dims, sysa):
+    """Compute the norm of the partial transpose for (log)-negativity,
+    taking a shortcut (trace sqrt of reduced subsytem), when system is a
+    vector.
+    """
+    sysa = int2tup(sysa)
 
-    if isvec(p) and ndims == 2:  # pure bipartition, easier to calc
-        smaller_system = 0 if dims[0] <= dims[1] else 1
-        rhoa = ptr(p, dims, smaller_system)
-        return sum(np.sqrt(np.clip(eigvals(rhoa, sort=False), 0, 1)))**2
+    # check for pure bipartition -> easier to calc
+    if isvec(p):
+        sz_a = prod(d for i, d in enumerate(dims) if i in sysa)
+        sz_b = prod(dims) // sz_a
+
+        # check if system b is smaller, since entropy is same for both a & b.
+        if sz_b < sz_a:
+            # if so swap things around
+            sz_a, sz_b = sz_b, sz_a
+            sysb = [i for i in range(len(dims)) if i not in sysa]
+            sysa = sysb
+
+        rhoa = ptr(p, dims, sysa)
+        return tr_sqrt(rhoa)**2
+
     return norm(partial_transpose(p, dims, sysa), "tr")
 
 
 @zeroify
 def logneg(p, dims=(2, 2), sysa=0):
     """Compute logarithmic negativity between two subsytems.
-
-    This is defined as  log_2( | rho_{AB}^{T_B} | ). If ``len(dims) > 2``,
-    then the non-target dimensions will be traced out first.
+    This is defined as  log_2( | rho_{AB}^{T_B} | ). This only handles
+    bipartitions (including pure states efficiently), and will not trace
+    anything out.
 
     Parameters
     ----------
@@ -261,7 +442,71 @@ def logneg(p, dims=(2, 2), sysa=0):
 logarithmic_negativity = logneg
 
 
-def negativity(p, dims=(2, 2), sysa=0, sysb=1):
+def logneg_subsys(psi_abc, dims, sysa, sysb,
+                  approx_thresh=2**12, **approx_opts):
+    """Compute the logarithmic negativity between two subsystems of a pure
+    state, possibly using an approximate lanczos for large subsystems. Uses
+    a special method if the two subsystems form a bipartition of the state.
+
+    Parameters
+    ----------
+    psi_abc : vector
+        Tri-partite pure state.
+    dims : sequence of int
+        The sub dimensions of the state.
+    sysa : sequence of int
+        The index(es) of the subsystem(s) to consider part of 'A'.
+    sysb : sequence of int
+        The index(es) of the subsystem(s) to consider part of 'B'.
+    approx_thresh : int, optional
+        The size of subsystem at which to switch to the approximate lanczos
+        method. Set to ``None`` to never use the approximation.
+    approx_opts
+        Supplied to :func:`logneg_subsys_approx`, if used.
+
+    Returns
+    -------
+    float
+        The logarithmic negativity.
+
+    See Also
+    --------
+    logneg, mutinf_subsys, logneg_subsys_approx
+    """
+    sysa, sysb = int2tup(sysa), int2tup(sysb)
+    sz_a = prod(d for i, d in enumerate(dims) if i in sysa)
+    sz_b = prod(d for i, d in enumerate(dims) if i in sysb)
+    sz_ab = sz_a * sz_b
+    sz_c = prod(dims) // sz_ab
+
+    # check for pure bipartition
+    if sz_c == 1:
+        psi_ab_ppt_norm = tr_sqrt_subsys(
+            psi_abc, dims, sysa, approx_thresh=approx_thresh, **approx_opts)**2
+        return max(log2(psi_ab_ppt_norm), 0.0)
+
+    # check whether to use approx lanczos method
+    if (approx_thresh is not None) and (sz_ab >= approx_thresh):
+        return logneg_subsys_approx(psi_abc, dims, sysa, sysb, **approx_opts)
+
+    rho_ab = ptr(psi_abc, dims, sysa + sysb)
+
+    # need to adjust for new dimensions and indices
+    new_dims, new_sysa = [], []
+    new_inds = iter(range(len(dims)))
+
+    for i, d in enumerate(dims):
+        if i in sysa:
+            new_dims.append(d)
+            new_sysa.append(next(new_inds))
+        elif i in sysb:
+            new_dims.append(d)
+            next(new_inds)  # don't need sysb
+
+    return logneg(rho_ab, new_dims, new_sysa)
+
+
+def negativity(p, dims=(2, 2), sysa=0):
     """Compute negativity between two subsytems.
 
     This is defined as  (| rho_{AB}^{T_B} | - 1) / 2. If ``len(dims) > 2``,
@@ -735,7 +980,10 @@ def is_eigenvector(vec, mat, **kwargs):
         Whether ``mat @ vec = l * vec`` for some scalar ``l``.
     """
     vec2 = mat @ vec
-    factor = np.asscalar(vec2[0] / vec[0])
+
+    # define scalar factor using largest entry (otherwise can divide by ~zero)
+    largest = np.argmax(vec)
+    factor = np.asscalar(vec2[largest] / vec[largest])
     return np.allclose(factor * vec, vec2, **kwargs)
 
 
@@ -756,10 +1004,10 @@ def page_entropy(sz_subsys, sz_total):  # pragma: no cover
     s : float
         Entropy in bits.
     """
-    n = sz_total // sz_subsys
+    if sz_subsys > sz_total**0.5:
+        sz_subsys = sz_total // sz_subsys
 
-    if sz_subsys > n:
-        raise ValueError("Subsystem size must be <= 'environment' size.")
+    n = sz_total // sz_subsys
 
     s = 0
     for k in range(n + 1, sz_total + 1):

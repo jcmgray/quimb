@@ -41,11 +41,14 @@ class CacheOnComm(object):
 def init_petsc_and_slepc(comm=None):
     """Make sure petsc is initialized with comm before slepc.
     """
+    import os
+    petsc_arch = os.environ.get("PETSC_ARCH", None)
+
     import petsc4py
-    petsc4py.init(args=['-no_signal_handler'], comm=comm)
+    petsc4py.init(args=['-no_signal_handler'], arch=petsc_arch, comm=comm)
     from petsc4py import PETSc
     import slepc4py
-    slepc4py.init(args=['-no_signal_handler'])
+    slepc4py.init(args=['-no_signal_handler'], arch=petsc_arch)
     from slepc4py import SLEPc
     return PETSc, SLEPc
 
@@ -67,6 +70,23 @@ def get_slepc(comm=None):
 # --------------------------------------------------------------------------- #
 #                               PETSc FUNCTIONS                               #
 # --------------------------------------------------------------------------- #
+
+class PetscLinearOperatorContext:
+    def __init__(self, lo):
+        self.lo = lo
+        self.real = lo.dtype in (float, np.float_)
+
+    def mult(self, _, x, y):
+        y[:] = self.lo.matvec(x[:])
+
+
+def linear_operator_2_petsc_shell(lo, comm=None):
+    PETSc, comm = get_petsc(comm=comm)
+    context = PetscLinearOperatorContext(lo)
+    A = PETSc.Mat().createPython(lo.shape, context, comm=comm)
+    A.setUp()
+    return A
+
 
 def slice_sparse_matrix_to_components(mat, ri, rf):
     """Slice the matrix `mat` between indices `ri` and `rf` -- for csr or bsr.
@@ -93,6 +113,9 @@ def convert_mat_to_petsc(mat, comm=None):
             The matrix in petsc form - only the local part if running
             across several mpi processes.
     """
+    if isinstance(mat, sp.linalg.LinearOperator):
+        return linear_operator_2_petsc_shell(mat, comm=comm)
+
     PETSc, comm = get_petsc(comm=comm)
     mpi_sz = comm.Get_size()
     pmat = PETSc.Mat()
@@ -170,7 +193,7 @@ def convert_vec_to_petsc(vec, comm=None):
 
 
 def new_petsc_vec(d, comm=None):
-    """Create an empty complex petsc vector of size `d`.
+    """Create an empty petsc vector of size `d`.
 
     Parameters
     ----------
@@ -200,14 +223,14 @@ def gather_petsc_array(x, comm, out_shape=None, matrix=False):
 
     Parameters
     ----------
-        x : petsc4py.PETSc Mat or Vec
-            Distributed petsc array to gather.
-        comm : mpi4py.MPI.COMM
-            MPI communicator
-        out_shape : tuple, optional
-            If not None, reshape the output array to this.
-        matrix : bool, optional
-            Whether to convert the array to a np.matrix.
+    x : petsc4py.PETSc Mat or Vec
+        Distributed petsc array to gather.
+    comm : mpi4py.MPI.COMM
+        MPI communicator
+    out_shape : tuple, optional
+        If not None, reshape the output array to this.
+    matrix : bool, optional
+        Whether to convert the array to a np.matrix.
 
     Returns
     -------
@@ -215,22 +238,23 @@ def gather_petsc_array(x, comm, out_shape=None, matrix=False):
     """
     # get local numpy array
     lx = x.getArray()
-    ri, rf = x.getOwnershipRange()
+    ox = np.empty(2, dtype=int)
+    ox[:] = x.getOwnershipRange()
 
     # master only
     if comm.Get_rank() == 0:
 
         # create total array
-        ax = np.empty(x.getSize(), dtype=complex)
+        ax = np.empty(x.getSize(), dtype=lx.dtype)
         # set master's portion
-        ax[ri:rf, ...] = lx
+        ax[ox[0]:ox[1], ...] = lx
 
         # get ownership ranges and data from worker processes
         for i in range(1, comm.Get_size()):
-            ji, jf = comm.recv(source=i, tag=11)
+            comm.Recv(ox, source=i, tag=11)
 
             # receive worker's part of ouput vector
-            comm.Recv(ax[ji:jf, ...], source=i, tag=42)
+            comm.Recv(ax[ox[0]:ox[1], ...], source=i, tag=42)
 
         if out_shape is not None:
             ax = ax.reshape(*out_shape)
@@ -240,7 +264,7 @@ def gather_petsc_array(x, comm, out_shape=None, matrix=False):
     # Worker only
     else:
         # send ownership range
-        comm.send((ri, rf), dest=0, tag=11)
+        comm.Send(ox, dest=0, tag=11)
         # send local portion of eigenvectors as buffer
         comm.Send(lx, dest=0, tag=42)
         ax = None
@@ -252,29 +276,48 @@ def gather_petsc_array(x, comm, out_shape=None, matrix=False):
 #                               SLEPc FUNCTIONS                               #
 # --------------------------------------------------------------------------- #
 
-def _init_spectral_inverter(ptype="lu",
-                            ppackage="mumps",
-                            ktype="preonly",
-                            stype="sinvert",
+
+def _init_krylov_subspace(comm=None, tol=None, maxiter=None,
+                          KSPType="preonly",
+                          PCType="lu",
+                          PCFactorSolverType="mumps",
+                          ):
+    """Initialise a krylov subspace and preconditioner.
+    """
+    PETSc, comm = get_petsc(comm=comm)
+    K = PETSc.KSP().create(comm=comm)
+    K.setType(KSPType)
+    K.setTolerances(rtol=tol, max_it=maxiter)
+
+    if PCType:
+        PC = K.getPC()
+        PC.setType(PCType)
+        if PCFactorSolverType:
+            PC.setFactorSolverType(PCFactorSolverType)
+        PC.setFactorShift(PETSc.Mat.FactorShiftType.POSITIVE_DEFINITE)
+        PC.setFromOptions()
+        K.setPC(PC)
+
+    K.setFromOptions()
+    return K
+
+
+def _init_spectral_inverter(STType="sinvert",
+                            KSPType="preonly",
+                            PCType="lu",
+                            PCFactorSolverType="mumps",
                             comm=None):
     """Create a slepc spectral transformation object with specified solver.
     """
-    PETSc, comm = get_petsc(comm=comm)
     SLEPc, comm = get_slepc(comm=comm)
-    # Preconditioner and linear solver
-    P = PETSc.PC().create(comm=comm)
-    P.setType(ptype)
-    P.setFactorSolverPackage(ppackage)
-    P.setFromOptions()
-    # Krylov subspace
-    K = PETSc.KSP().create(comm=comm)
-    K.setPC(P)
-    K.setType(ktype)
-    K.setFromOptions()
-    # Spectral transformer
     S = SLEPc.ST().create(comm=comm)
-    S.setKSP(K)
-    S.setType(stype)
+    S.setType(STType)
+    # set the krylov subspace and preconditioner.
+    if KSPType:
+        K = _init_krylov_subspace(
+            KSPType=KSPType, PCType=PCType, comm=comm,
+            PCFactorSolverType=PCFactorSolverType)
+        S.setKSP(K)
     S.setFromOptions()
     return S
 
@@ -291,6 +334,7 @@ _WHICH_SCIPY_TO_SLEPC = {
     "TM": 'TARGET_MAGNITUDE',
     "TR": 'TARGET_REAL',
     "TI": 'TARGET_IMAGINARY',
+    "ALL": 'ALL',
 }
 
 
@@ -300,14 +344,16 @@ def _which_scipy_to_slepc(which):
 
 
 def _init_eigensolver(k=6, which='LM', sigma=None, isherm=True,
-                      EPSType="krylovschur", st_opts_dict=(), tol=None,
-                      max_it=None, ncv=None, comm=None):
+                      EPSType=None, st_opts=None, tol=None, is_linop=False,
+                      maxiter=None, ncv=None, l_win=None, comm=None):
     """Create an advanced eigensystem solver
 
     Parameters
     ----------
-        sigma: target eigenvalue
-        isherm: whether problem is hermitian or not
+    sigma :
+        Target eigenvalue.
+    isherm :
+        Whether problem is hermitian or not.
 
     Returns
     -------
@@ -316,81 +362,151 @@ def _init_eigensolver(k=6, which='LM', sigma=None, isherm=True,
     SLEPc, comm = get_slepc(comm=comm)
 
     eigensolver = SLEPc.EPS().create(comm=comm)
-    if sigma is not None:
-        which = "TR"
-        eigensolver.setST(_init_spectral_inverter(comm=comm,
-                                                  **dict(st_opts_dict)))
-        eigensolver.setTarget(sigma)
+
+    if st_opts is None:
+        st_opts = {}
+
+    if l_win is not None:
+        EPSType = {'ciss': 'ciss', None: 'ciss'}[EPSType]
+        which = 'ALL'
+        rg = eigensolver.getRG()
+        rg.setType(SLEPc.RG.Type.INTERVAL)
+        rg.setIntervalEndpoints(*l_win, -0.1, 0.1)
+    else:
+        eigensolver.setDimensions(k, ncv)
+
+    if EPSType is None:
+        EPSType = {False: 'krylovschur', True: 'gd'}[is_linop]
+
+    # set some preconditioning defaults for 'gd' and 'lobpcg'
+    if EPSType in ('gd', 'lobpcg'):
+        st_opts['STType'] = st_opts.get('STType', 'precond')
+        st_opts['KSPType'] = st_opts.get('KSPType', 'preonly')
+        st_opts['PCType'] = st_opts.get('PCType', 'none')
+
+    # set some preconditioning defaults for 'jd'
+    elif EPSType == 'jd':
+        st_opts['STType'] = st_opts.get('STType', 'precond')
+        st_opts['KSPType'] = st_opts.get('KSPType', 'bcgs')
+        st_opts['PCType'] = st_opts.get('PCType', 'none')
+
+    # set the spectral inverter / preconditioner.
+    if st_opts or (sigma is not None):
+        st = _init_spectral_inverter(comm=comm, **st_opts)
+        eigensolver.setST(st)
+
+        # NB: `setTarget` must be called *after* `setST`.
+        if sigma is not None:
+            which = "TR"
+            eigensolver.setTarget(sigma)
+
+            if is_linop:
+                st.setMatMode(SLEPc.ST.MatMode.SHELL)
+
     eigensolver.setType(EPSType)
     eigensolver.setProblemType(SLEPc.EPS.ProblemType.HEP if isherm else
                                SLEPc.EPS.ProblemType.NHEP)
     eigensolver.setWhichEigenpairs(_which_scipy_to_slepc(which))
     eigensolver.setConvergenceTest(SLEPc.EPS.Conv.ABS)
-    eigensolver.setTolerances(tol=tol, max_it=max_it)
-    eigensolver.setDimensions(k, ncv)
+    eigensolver.setTolerances(tol=tol, max_it=maxiter)
     eigensolver.setFromOptions()
     return eigensolver
 
 
-def slepc_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
-                  isherm=True, ncv=None, sort=True, EPSType="krylovschur",
-                  return_all_conv=False, st_opts_dict=(), tol=None,
-                  max_it=None, comm=None):
+def seigsys_slepc(mat, k=6, *,
+                  which=None,
+                  sigma=None,
+                  isherm=True,
+                  v0=None,
+                  ncv=None,
+                  return_vecs=True,
+                  sort=True,
+                  EPSType=None,
+                  return_all_conv=False,
+                  st_opts=None,
+                  tol=None,
+                  maxiter=None,
+                  l_win=None,
+                  comm=None):
     """Solve a matrix using the advanced eigensystem solver
 
     Parameters
     ----------
-        a: sparse matrix in csr format
-        k: number of requested eigenpairs
-        sigma: target eigenvalue
-        isherm: whether problem is hermitian or not
-        return_vecs: whether to return the eigenvectors
-        sort: whether to sort the eigenpairs in ascending real value
-        EPSType: SLEPc eigensolver type to use
-        return_all_conv: whether to return converged eigenpairs beyond
-            requested subspace size
-        st_opts_dict: options to send to the eigensolver internal inverter
+    mat : sparse matrix in csr format
+        Operator to solve.
+    k : int, optional
+        Number of requested eigenpairs.
+    which : {"LM": "SM", "LR", "LA", "SR", "SA", "LI", "SI", "TM", "TR", "TI"}
+        Which eigenpairs to target. See :func:`scipy.sparse.linalg.eigs`.
+    sigma : float, optional
+        Target eigenvalue, implies ``which='TR'`` if this is not set but
+        ``sigma`` is.
+    isherm : bool, optional
+        Whether problem is hermitian or not.
+    v0 : 1D-array like, optional
+        Initial iteration vector, e.g., informed guess at eigenvector.
+    ncv : int, optional
+        Subspace size, defaults to ``min(20, 2 * k)``.
+    return_vecs : bool, optional
+        Whether to return the eigenvectors.
+    sort : bool, optional
+        Whether to sort the eigenpairs in ascending real value.
+    EPSType : {"krylovschur", 'gd', 'lobpcg', 'jd', 'ciss'}, optional
+        SLEPc eigensolver type to use, see slepc4py.EPSType.
+    return_all_conv : bool, optional
+        Whether to return converged eigenpairs beyond requested subspace size
+    st_opts : dict, optional
+        options to send to the eigensolver internal inverter.
+    tol : float, optional
+        Tolerance.
+    maxiter : int, optional
+        Maximum number of iterations.
+    comm : mpi4py communicator, optional
+        MPI communicator, defaults to ``COMM_SELF`` for a single process solve.
 
     Returns
     -------
-        lk: eigenvalues
-        vk: corresponding eigenvectors (if return_vecs == True)
+    lk : array
+        The eigenvalues.
+    vk : np.matrix
+        Corresponding eigenvectors (if return_vecs == True)
     """
     if comm is None:
         comm = get_default_comm()
 
     eigensolver = _init_eigensolver(
-        k=k,
         which=("SA" if (which is None) and (sigma is None) else
                "TR" if (which is None) and (sigma is not None) else
                which),
-        sigma=sigma,
-        isherm=isherm,
-        EPSType=EPSType,
-        tol=tol,
-        max_it=max_it,
-        ncv=ncv,
-        st_opts_dict=st_opts_dict,
-        comm=comm,
-    )
+        EPSType=EPSType, k=k, sigma=sigma, isherm=isherm, tol=tol, ncv=ncv,
+        maxiter=maxiter, st_opts=st_opts, comm=comm, l_win=l_win,
+        is_linop=isinstance(mat, sp.linalg.LinearOperator))
 
-    pa = convert_mat_to_petsc(a, comm=comm)
-    eigensolver.setOperators(pa)
+    # set up the initial operators and solve
+    mat = convert_mat_to_petsc(mat, comm=comm)
+    eigensolver.setOperators(mat)
+    if v0 is not None:
+        eigensolver.setInitialSpace(convert_vec_to_petsc(v0, comm=comm))
     eigensolver.solve()
+
+    # work out how many eigenpairs to retrieve
     nconv = eigensolver.getConverged()
-    assert nconv >= k
-    k = nconv if return_all_conv else k
+    k = nconv if (return_all_conv or l_win is not None) else k
+    if nconv < k:
+        raise RuntimeError("SLEPC eigs did not find enough eigenpairs, "
+                           "wanted: {}, found: {}.".format(k, nconv))
 
+    # get eigenvalues
     rank = comm.Get_rank()
-
     if rank == 0:
         lk = np.asarray([eigensolver.getEigenvalue(i) for i in range(k)])
         lk = lk.real if isherm else lk
     else:
         res = None
 
+    # gather eigenvectors
     if return_vecs:
-        pvec = pa.getVecLeft()
+        pvec = mat.getVecLeft()
 
         def get_vecs_local():
             for i in range(k):
@@ -404,9 +520,8 @@ def slepc_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
                 sortinds = np.argsort(lk)
                 lk, vk = lk[sortinds], np.asmatrix(vk[:, sortinds])
             res = lk, np.asmatrix(vk)
-    else:
-        if rank == 0:
-            res = np.sort(lk) if sort else lk
+    elif rank == 0:
+        res = np.sort(lk) if sort else lk
 
     eigensolver.destroy()
     return res
@@ -414,57 +529,58 @@ def slepc_seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
 
 # ----------------------------------- SVD ----------------------------------- #
 
-def _init_svd_solver(nsv=6, SVDType='cross', tol=None, max_it=None,
+def _init_svd_solver(nsv=6, SVDType='cross', tol=None, maxiter=None,
                      ncv=None, comm=None):
     SLEPc, comm = get_slepc(comm=comm)
     svd_solver = SLEPc.SVD().create(comm=comm)
     svd_solver.setType(SVDType)
-    svd_solver.setTolerances(tol=tol, max_it=max_it)
+    svd_solver.setTolerances(tol=tol, max_it=maxiter)
     svd_solver.setDimensions(nsv=nsv, ncv=ncv)
     svd_solver.setFromOptions()
     return svd_solver
 
 
-def slepc_svds(a, k=6, ncv=None, return_vecs=True, SVDType='cross',
-               return_all_conv=False, tol=None, max_it=None, comm=None):
+def svds_slepc(mat, k=6, ncv=None, return_vecs=True, SVDType='cross',
+               return_all_conv=False, tol=None, maxiter=None, comm=None):
     """Find the singular values for sparse matrix `a`.
 
     Parameters
     ----------
-        a: sparse matrix in csr format
-        k: number of requested singular values
-        method: solver method to use, options ["cross", "cyclic", "lanczos",
-            "trlanczos"]
+    mat : sparse matrix in csr format
+        The matrix to solve.
+    k : int
+        Number of requested singular values.
+    method : {"cross", "cyclic", "lanczos", "trlanczos"}
+        Solver method to use.
 
     Returns
     -------
-        sk: singular values
+    (uk,) sk (, vtk,) : (np.matrix,) np.array (, np.matrix,)
+        Singular values, or if return_vecs=True, the left, unitary matrix
+        singular values, and and transposed right unitary matrix, such that
+        ``a ~ uk @ diag(sk) @ vtk``.
     """
     if comm is None:
         comm = get_default_comm()
 
-    svd_solver = _init_svd_solver(
-        nsv=k,
-        SVDType=SVDType,
-        tol=tol,
-        max_it=max_it,
-        ncv=ncv,
-        comm=comm
-    )
+    mat = convert_mat_to_petsc(mat, comm=comm)
 
-    pa = convert_mat_to_petsc(a, comm=comm)
-    svd_solver.setOperator(pa)
+    svd_solver = _init_svd_solver(nsv=k, SVDType=SVDType, tol=tol,
+                                  maxiter=maxiter, ncv=ncv, comm=comm)
+    svd_solver.setOperator(mat)
     svd_solver.solve()
+
     nconv = svd_solver.getConverged()
-    assert nconv >= k
     k = nconv if return_all_conv else k
+    if nconv < k:
+        raise RuntimeError("SLEPC svds did not find enough singular triplets, "
+                           "wanted: {}, found: {}.".format(k, nconv))
 
     rank = comm.Get_rank()
 
     if return_vecs:
-
         def usv_getter():
-            v, u = pa.createVecs()
+            v, u = mat.createVecs()
             for i in range(k):
                 s = svd_solver.getSingularTriplet(i, u, v)
                 lu = gather_petsc_array(u, comm=comm, out_shape=(-1, 1))
@@ -475,49 +591,47 @@ def slepc_svds(a, k=6, ncv=None, return_vecs=True, SVDType='cross',
         sk = np.asarray(sk)
 
         if rank == 0:
-            uk = np.concatenate(lus, axis=1)
-            vtk = np.concatenate(lvs, axis=0).conjugate()
-            so = np.argsort(-sk)
-            res = np.asmatrix(uk[:, so]), sk[so], np.asmatrix(vtk[so, :])
+            uk = np.asmatrix(np.concatenate(lus, axis=1))
+            vtk = np.asmatrix(np.concatenate(lvs, axis=0).conjugate())
+            res = uk, sk, vtk
     else:
-        if rank == 0:
-            sk = np.asarray([svd_solver.getValue(i) for i in range(k)])
-            res = sk[np.argsort(-sk)]
+        res = np.asarray([svd_solver.getValue(i) for i in range(k)])
 
+    comm.Barrier()
     svd_solver.destroy()
     return res if rank == 0 else None
 
 
 # ------------------------ matrix multiply function ------------------------- #
 
-def slepc_mfn_multiply(mat, vec,
+def mfn_multiply_slepc(mat, vec,
                        fntype='exp',
-                       MFNType='krylov',
+                       MFNType='AUTO',
                        comm=None,
                        isherm=False):
     """Compute the action of ``func(mat) @ vec``.
 
     Parameters
     ----------
-        mat : matrix-like
-            Matrix to compute function action of.
-        vec : vector-like
-            Vector to compute matrix function action on.
-        func : {'exp', 'sqrt', 'log'}, optional
-            Function to use.
-        MFNType : {'krylov', 'expokit'}, optional
-            Method of computing the matrix function action, 'expokit' is only
-            available for func='exp'.
-        comm : mpi4py.MPI.Comm instance, optional
-            The mpi communicator.
-        isherm : bool, optional
-            If `mat` is known to be hermitian, this might speed things up in
-            some circumstances.
+    mat : matrix-like
+        Matrix to compute function action of.
+    vec : vector-like
+        Vector to compute matrix function action on.
+    func : {'exp', 'sqrt', 'log'}, optional
+        Function to use.
+    MFNType : {'krylov', 'expokit'}, optional
+        Method of computing the matrix function action, 'expokit' is only
+        available for func='exp'.
+    comm : mpi4py.MPI.Comm instance, optional
+        The mpi communicator.
+    isherm : bool, optional
+        If `mat` is known to be hermitian, this might speed things up in
+        some circumstances.
 
     Returns
     -------
-        fvec : np.matrix
-            The vector output of ``func(mat) @ vec``.
+    fvec : np.matrix
+        The vector output of ``func(mat) @ vec``.
     """
     SLEPc, comm = get_slepc(comm=comm)
 
@@ -527,22 +641,21 @@ def slepc_mfn_multiply(mat, vec,
     vec = convert_vec_to_petsc(vec, comm=comm)
     out = new_petsc_vec(vec.size, comm=comm)
 
-    func_map = {'EXP': SLEPc.FN.Type.EXP,
-                'SQRT': SLEPc.FN.Type.SQRT,
-                'LOG': SLEPc.FN.Type.LOG}
-
-    type_map = {'KRYLOV': SLEPc.MFN.Type.KRYLOV,
-                'EXPOKIT': SLEPc.MFN.Type.EXPOKIT}
+    if MFNType.upper() == 'AUTO':
+        if (fntype == 'exp') and (vec.size <= 2**16):
+            MFNType = 'EXPOKIT'
+        else:
+            MFNType = 'KRYLOV'
 
     # set up the matrix function options and objects
     mfn = SLEPc.MFN().create(comm=comm)
-    mfn.setOperator(mat)
-    mfn.setType(type_map[MFNType.upper()])
+    mfn.setType(getattr(SLEPc.MFN.Type, MFNType.upper()))
     mfn_fn = mfn.getFN()
-    mfn_fn.setType(func_map[fntype.upper()])
+    mfn_fn.setType(getattr(SLEPc.FN.Type, fntype.upper()))
     mfn_fn.setScale(1.0, 1.0)
     mfn.setFromOptions()
 
+    mfn.setOperator(mat)
     # 'solve' / perform the matrix function
     mfn.solve(vec, out)
 
@@ -550,5 +663,51 @@ def slepc_mfn_multiply(mat, vec,
     all_out = gather_petsc_array(
         out, comm=comm, out_shape=(-1, 1), matrix=True)
 
+    comm.Barrier()
     mfn.destroy()
     return all_out
+
+
+# -------------------- solve linear system of equations --------------------- #
+
+
+def lookup_ksp_error(i):
+    """Look up PETSc error to print when raising after not converging.
+    """
+    from petsc4py import PETSc
+    _KSP_DIVERGED_REASONS = {i: error for error, i in
+                             PETSc.KSP.ConvergedReason.__dict__.items()
+                             if isinstance(i, int)}
+    return _KSP_DIVERGED_REASONS[i]
+
+
+def ssolve_slepc(A, y, isherm=True, comm=None, maxiter=None, tol=None,
+                 KSPType='preonly',
+                 PCType='lu',
+                 PCFactorSolverType="mumps",
+                 ):
+    if comm is None:
+        comm = get_default_comm()
+    A = convert_mat_to_petsc(A, comm=comm)
+    if isherm:
+        A.setOption(A.Option.HERMITIAN, isherm)
+    x = A.createVecRight()
+    out_shape = y.shape
+    y = convert_vec_to_petsc(y, comm=comm)
+
+    ksp = _init_krylov_subspace(
+        KSPType=KSPType, PCType=PCType, comm=comm, maxiter=maxiter, tol=tol,
+        PCFactorSolverType=PCFactorSolverType)
+
+    ksp.setOperators(A)
+    ksp.solve(y, x)
+
+    converged_reason = ksp.getConvergedReason()
+    if converged_reason < 0:
+        raise RuntimeError("PETSc KSP solve did not converge, reason: {}"
+                           "".format(lookup_ksp_error(converged_reason)))
+
+    x = gather_petsc_array(x, comm=comm, out_shape=out_shape)
+    comm.Barrier()
+    ksp.destroy()
+    return x

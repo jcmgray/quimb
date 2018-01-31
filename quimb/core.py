@@ -178,7 +178,7 @@ def quimbify(data, qtype=None, normalized=False, chopped=False,
 
 
 qu = quimbify
-"""Alias of quimbify."""
+"""Alias of :func:`quimbify`."""
 
 ket = functools.partial(quimbify, qtype='ket')
 """Convert an object into a ket."""
@@ -298,7 +298,10 @@ def identity(d, sparse=False, stype="csr"):
 
 
 eye = identity
+"""Alias for :func:`identity`."""
+
 speye = functools.partial(identity, sparse=True)
+"""Sparse identity."""
 
 
 def kron(*ops, stype=None, coo_build=False, parallel=False):
@@ -914,36 +917,36 @@ def itrace(a, axes=(0, 1)):
 
 
 @matrixify
-def _partial_trace_dense(p, dims, coo_keep):
+def _partial_trace_dense(p, dims, keep):
     """Perform partial trace of a dense matrix.
     """
-    if isinstance(coo_keep, int):
-        coo_keep = (coo_keep,)
+    if isinstance(keep, int):
+        keep = (keep,)
     if isvec(p):  # p = psi
         p = np.asarray(p).reshape(dims)
-        lose = ind_complement(coo_keep, len(dims))
+        lose = ind_complement(keep, len(dims))
         p = np.tensordot(p, p.conj(), (lose, lose))
         d = int(p.size**0.5)
         return p.reshape((d, d))
     else:
         p = np.asarray(p).reshape((*dims, *dims))
         total_dims = len(dims)
-        lose = ind_complement(coo_keep, total_dims)
+        lose = ind_complement(keep, total_dims)
         lose2 = tuple(ind + total_dims for ind in lose)
         p = itrace(p, (lose, lose2))
     d = int(p.size**0.5)
     return p.reshape((d, d))
 
 
-def _trace_lose(p, dims, coo_lose):
-    """Simple partial trace where the single subsytem at ``coo_lose``
+def _trace_lose(p, dims, lose):
+    """Simple partial trace where the single subsytem at ``lose``
     is traced out.
     """
     p = p if isop(p) else dot(p, p.H)
     dims = np.asarray(dims)
-    e = dims[coo_lose]
-    a = prod(dims[:coo_lose])
-    b = prod(dims[coo_lose + 1:])
+    e = dims[lose]
+    a = prod(dims[:lose])
+    b = prod(dims[lose + 1:])
     rhos = zeros(shape=(a * b, a * b), dtype=np.complex128)
     for i in range(a * b):
         for j in range(i, a * b):
@@ -957,15 +960,15 @@ def _trace_lose(p, dims, coo_lose):
     return rhos
 
 
-def _trace_keep(p, dims, coo_keep):
+def _trace_keep(p, dims, keep):
     """Simple partial trace where the single subsytem
-    at ``coo_keep`` is kept.
+    at ``keep`` is kept.
     """
     p = p if isop(p) else dot(p, p.H)
     dims = np.asarray(dims)
-    s = dims[coo_keep]
-    a = prod(dims[:coo_keep])
-    b = prod(dims[coo_keep + 1:])
+    s = dims[keep]
+    a = prod(dims[:keep])
+    b = prod(dims[keep + 1:])
     rhos = zeros(shape=(s, s), dtype=np.complex128)
     for i in range(s):
         for j in range(i, s):
@@ -980,20 +983,20 @@ def _trace_keep(p, dims, coo_keep):
     return rhos
 
 
-def _partial_trace_simple(p, dims, coo_keep):
+def _partial_trace_simple(p, dims, keep):
     """Simple partial trace made up of consecutive single subsystem partial
     traces, augmented by 'compressing' the dimensions each time.
     """
     p = p if isop(p) else dot(p, p.H)
-    dims, coo_keep = dim_compress(dims, coo_keep)
-    if len(coo_keep) == 1:
-        return _trace_keep(p, dims, *coo_keep)
+    dims, keep = dim_compress(dims, keep)
+    if len(keep) == 1:
+        return _trace_keep(p, dims, *keep)
     lmax = max(enumerate(dims),
-               key=lambda ix: (ix[0] not in coo_keep) * ix[1])[0]
+               key=lambda ix: (ix[0] not in keep) * ix[1])[0]
     p = _trace_lose(p, dims, lmax)
     dims = (*dims[:lmax], *dims[lmax + 1:])
-    coo_keep = {(ind if ind < lmax else ind - 1) for ind in coo_keep}
-    return _partial_trace_simple(p, dims, coo_keep)
+    keep = {(ind if ind < lmax else ind - 1) for ind in keep}
+    return _partial_trace_simple(p, dims, keep)
 
 
 def partial_trace(p, dims, keep):
@@ -1081,6 +1084,8 @@ def expectation(a, b):
 
 
 expec = expectation
+"""Alias for :func:`expectation`."""
+
 overlap = deprecated(expectation, "'overlap'", "'expectation' or 'expec'")
 
 
@@ -1090,11 +1095,15 @@ overlap = deprecated(expectation, "'overlap'", "'expectation' or 'expec'")
 
 # Normalise methods
 nmlz = normalize
+"""Alias for :func:`normalize`."""
+
 np.matrix.nmlz = nmlz
 sp.csr_matrix.nmlz = nmlz
 
 # Trace methods
 tr = trace
+"""Alias for :func:`trace`."""
+
 np.matrix.tr = _trace_dense
 sp.csr_matrix.tr = _trace_sparse
 sp.csc_matrix.tr = _trace_sparse
@@ -1103,6 +1112,8 @@ sp.bsr_matrix.tr = _trace_sparse
 
 # Partial trace methods
 ptr = partial_trace
+"""Alias for :func:`partial_trace`."""
+
 np.matrix.ptr = _partial_trace_dense
 sp.csr_matrix.ptr = _partial_trace_simple
 sp.csc_matrix.ptr = _partial_trace_simple

@@ -12,22 +12,24 @@ from quimb import (
     ldmul,
     rand_matrix,
     rand_herm,
-    # rand_pos,
+    rand_pos,
     rand_ket,
     eigsys,
     seigsys,
     expec,
     eye,
+    norm,
 )
 from quimb.linalg import SLEPC4PY_FOUND
 from quimb.linalg.scipy_linalg import scipy_svds
 if SLEPC4PY_FOUND:
     from quimb.linalg.slepc_linalg import (
-        slepc_seigsys,
-        slepc_svds,
+        seigsys_slepc,
+        svds_slepc,
         convert_mat_to_petsc,
         new_petsc_vec,
-        slepc_mfn_multiply,
+        mfn_multiply_slepc,
+        ssolve_slepc,
     )
 
 
@@ -84,21 +86,21 @@ class TestConvertToPETScConversion:
 class TestSlepcSeigsys:
     def test_internal_eigvals(self, prematsparse):
         u, a = prematsparse
-        lk = slepc_seigsys(a, k=2, sigma=0.5, return_vecs=False)
+        lk = seigsys_slepc(a, k=2, sigma=0.5, return_vecs=False)
         assert_allclose(lk, [-1, 2])
 
     @mark.parametrize("which, output", [
         ('lm', 4),
         ("sa", -3),
     ])
-    def test_slepc_seigsys_groundenergy(self, prematsparse, which, output):
+    def test_seigsys_slepc_groundenergy(self, prematsparse, which, output):
         u, a = prematsparse
-        lk = slepc_seigsys(a, k=1, which=which, return_vecs=False)
+        lk = seigsys_slepc(a, k=1, which=which, return_vecs=False)
         assert_allclose(lk, output)
 
-    def test_slepc_seigsys_eigvecs(self):
+    def test_seigsys_slepc_eigvecs(self):
         h = rand_herm(100, sparse=True, density=0.2)
-        lks, vks = slepc_seigsys(h, k=5)
+        lks, vks = seigsys_slepc(h, k=5)
         lka, vka = seigsys(h, k=5)
         assert vks.shape == vka.shape
         for ls, vs, la, va in zip(lks, vks.T, lka, vka.T):
@@ -115,20 +117,20 @@ class TestSlepcSeigsys:
 class TestSlepcSvds:
     def test_simple(self, prematsparse):
         u, a = prematsparse
-        lk = slepc_svds(a, k=1, return_vecs=False)
+        lk = svds_slepc(a, k=1, return_vecs=False)
         assert_allclose(lk, 4)
 
     @mark.parametrize("SVDType", ['cross', 'lanczos'])
     def test_random_compare_scipy(self, bigsparsemat, SVDType):
         a = bigsparsemat
-        lk = slepc_svds(a, k=5, return_vecs=False, SVDType=SVDType)
+        lk = svds_slepc(a, k=5, return_vecs=False, SVDType=SVDType)
         ls = scipy_svds(a, k=5, return_vecs=False)
         assert_allclose(lk, ls)
 
     @mark.parametrize("SVDType", ['cross', 'lanczos'])
     def test_unitary_vectors(self, bigsparsemat, SVDType):
         a = bigsparsemat
-        uk, sk, vk = slepc_svds(a, k=10, return_vecs=True, SVDType=SVDType)
+        uk, sk, vk = svds_slepc(a, k=10, return_vecs=True, SVDType=SVDType)
         assert_allclose(uk.H @ uk, eye(10), atol=1e-6)
         assert_allclose(vk @ vk.H, eye(10), atol=1e-6)
         pk, lk, qk = scipy_svds(a, k=10, return_vecs=True)
@@ -147,22 +149,132 @@ class TestSlepcMfnMultiply:
         a = rand_herm(100, sparse=True, density=0.1)
         k = rand_ket(100)
 
-        out = slepc_mfn_multiply(a, k)
+        out = mfn_multiply_slepc(a, k)
 
         al, av = eigsys(a.A)
         expected = av @ np.diag(np.exp(al)) @ av.conj().T @ k
 
         assert_allclose(out, expected)
 
-    # def test_sqrt_sparse(self):
+    def test_sqrt_sparse(self):
+        import scipy.sparse as sp
 
-    #     a = rand_pos(100, sparse=True, density=0.1)
-    #     k = rand_ket(100)
+        a = rand_pos(32, sparse=True, density=0.1)
+        a = a + 0.001 * sp.eye(32)
+        k = rand_ket(32)
 
-    #     out = slepc_mfn_multiply(a, k, fntype='sqrt', isherm=True)
+        out = mfn_multiply_slepc(a, k, fntype='sqrt', isherm=True)
 
-    #     al, av = eigsys(a.A)
-    #     al[al < 0] = 0.0  # very small neg values spoil sqrt
-    #     expected = av @ np.diag(np.sqrt(al)) @ av.conj().T @ k
+        al, av = eigsys(a.A)
+        al[al < 0] = 0.0  # very small neg values spoil sqrt
+        expected = av @ np.diag(np.sqrt(al)) @ av.conj().T @ k
 
-    #     assert_allclose(out, expected)
+        assert_allclose(out, expected, rtol=1e-6)
+
+
+@slepc4py_test
+class TestShellMatrix:
+
+    def test_extermal_eigen(self):
+        a = rand_herm(100, sparse=True)
+        alo = sp.linalg.aslinearoperator(a)
+
+        el_us, ev_us = sp.linalg.eigsh(alo, k=1, which='LA')
+        el_u, ev_u = seigsys_slepc(alo, k=1, which='LA')
+
+        assert_allclose(el_us, el_u)
+        assert_allclose(np.abs(ev_us.conj().T @ ev_u), 1.0)
+
+        el_ls, ev_ls = sp.linalg.eigsh(alo, k=1, which='SA')
+        el_l, ev_l = seigsys_slepc(alo, k=1, which='SA')
+
+        assert_allclose(el_ls, el_l)
+        assert_allclose(np.abs(ev_ls.conj().T @ ev_l), 1.0)
+
+    def test_internal_interior_default(self):
+        a = rand_herm(100, sparse=True)
+        alo = sp.linalg.aslinearoperator(a)
+        el, ev = seigsys_slepc(alo, k=1, which='TR', sigma=0.0)
+        el_s, ev_s = sp.linalg.eigsh(a.tocsc(), k=1, which='LM', sigma=0.0)
+
+        assert_allclose(el_s, el, rtol=1e-5)
+        assert_allclose(np.abs(ev_s.conj().T @ ev), 1.0)
+
+    def test_internal_shift_invert_linear_solver(self):
+        a = rand_herm(100, sparse=True)
+        alo = sp.linalg.aslinearoperator(a)
+
+        st_opts = {
+            'STType': 'sinvert',
+            'KSPType': 'bcgs',  # / 'gmres'
+            'PCType': 'none',
+        }
+
+        el, ev = seigsys_slepc(alo, k=1, which='TR', sigma=0.0,
+                               st_opts=st_opts, EPSType='krylovschur')
+        el_s, ev_s = sp.linalg.eigsh(a.tocsc(), k=1, which='LM', sigma=0.0)
+
+        assert_allclose(el_s, el, rtol=1e-5)
+        assert_allclose(np.abs(ev_s.conj().T @ ev), 1.0)
+
+    def test_internal_shift_invert_precond(self):
+        a = rand_herm(100, sparse=True)
+        alo = sp.linalg.aslinearoperator(a)
+
+        st_opts = {
+            'STType': 'precond',
+            'KSPType': 'preonly',
+            'PCType': 'none',
+        }
+
+        el, ev = seigsys_slepc(alo, k=1, which='TR', sigma=0.0,
+                               st_opts=st_opts, EPSType='gd')
+        el_s, ev_s = sp.linalg.eigsh(a.tocsc(), k=1, which='LM', sigma=0.0)
+
+        assert_allclose(el_s, el, rtol=1e-6)
+        assert_allclose(np.abs(ev_s.conj().T @ ev), 1.0)
+
+    def test_internal_shift_invert_precond_jd(self):
+        a = rand_herm(100, sparse=True)
+        alo = sp.linalg.aslinearoperator(a)
+
+        st_opts = {
+            'STType': 'precond',
+            'KSPType': 'bcgs',  # / 'gmres'
+            'PCType': 'none',
+        }
+
+        el, ev = seigsys_slepc(alo, k=1, which='TR', sigma=0.0,
+                               st_opts=st_opts, EPSType='jd')
+        el_s, ev_s = sp.linalg.eigsh(a.tocsc(), k=1, which='LM', sigma=0.0)
+
+        assert_allclose(el_s, el, rtol=1e-6)
+        assert_allclose(np.abs(ev_s.conj().T @ ev), 1.0)
+
+
+@slepc4py_test
+class TestCISS:
+
+    def test_1(self):
+        a = rand_herm(100, sparse=True)
+        el, ev = eigsys(a.A)
+        which = abs(el) < 0.2
+        el, ev = el[which], ev[:, which]
+
+        offset = norm(a, 'fro')
+        a = a + offset * sp.eye(a.shape[0])
+
+        sl, sv = seigsys_slepc(a, l_win=(-0.2 + offset, 0.2 + offset))
+        sl -= offset
+        assert_allclose(el, sl)
+        assert_allclose(np.abs(sv.H @ ev), np.eye(el.size), atol=1e-11)
+
+
+@slepc4py_test
+class TestSSolve:
+
+    def test_simple_dense(self):
+        a = rand_herm(2**4, sparse=True)
+        y = rand_ket(2**4)
+        x = ssolve_slepc(a, y)
+        assert_allclose(a @ x, y, atol=1e-12, rtol=1e-6)

@@ -91,13 +91,14 @@ class TestHamHeis:
         gs = groundstate(h)
         assert_allclose(expec(gs, singlet()), 1.)
 
-    def test_ham_heis_sparse_cyclic_4(self):
-        h = ham_heis(4, sparse=True, cyclic=True)
+    @pytest.mark.parametrize("parallel", [False, True])
+    def test_ham_heis_sparse_cyclic_4(self, parallel):
+        h = ham_heis(4, sparse=True, cyclic=True, parallel=parallel)
         lk = seigvals(h, 4)
         assert_allclose(lk, [-8, -4, -4, -4])
 
     def test_ham_heis_bz(self):
-        h = ham_heis(2, cyclic=False, bz=2)
+        h = ham_heis(2, cyclic=False, b=2)
         evals = eigvals(h)
         assert_allclose(evals, [-3, -3, 1, 5])
 

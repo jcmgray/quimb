@@ -5,23 +5,8 @@ import numpy as np
 import scipy.sparse.linalg as spla
 
 
-def choose_ncv(k, n):  # pragma: no cover
-    """Optimise number of lanczos vectors for iterative methods
-
-    Parameters
-    ----------
-        k: number of target eigenvalues/singular values
-        n: matrix size
-
-    Returns
-    -------
-        ncv: number of lanczos vectors to use
-    """
-    return min(max(20, 2 * k + 1), n)
-
-
-def seigsys_scipy(a, k=6, which=None, return_vecs=True, sigma=None,
-                  isherm=True, ncv=None, sort=True, **kwargs):
+def seigsys_scipy(a, k=6, *, which=None, return_vecs=True, sigma=None,
+                  isherm=True, sort=True, tol=None, **eigs_opts):
     """Returns a few eigenpairs from a possibly sparse hermitian operator
 
     Parameters
@@ -36,33 +21,40 @@ def seigsys_scipy(a, k=6, which=None, return_vecs=True, sigma=None,
         lk: array of eigenvalues
         vk: matrix of eigenvectors as columns
     """
+    # Options that might get passed that scipy doesn't support
+    eigs_opts.pop('EPSType', None)
+
+    # convert certain options for scipy
     settings = {
         'k': k,
         'which': ('SA' if (which is None) and (sigma is None) else
                   'LM' if (which is None) and (sigma is not None) else
-                  # For target using shift invert scipy requires 'LM' ->
+                  # For target using shift-invert scipy requires 'LM' ->
                   'LM' if ('T' in which.upper()) and (sigma is not None) else
                   which),
         'sigma': sigma,
-        'ncv': choose_ncv(k, a.shape[0]) if ncv is None else ncv,
-        'return_eigenvectors': return_vecs}
-    seig_func = spla.eigsh if isherm else spla.eigs
+        'return_eigenvectors': return_vecs,
+        'tol': 0 if tol is None else tol
+    }
+
+    fn = spla.eigsh if isherm else spla.eigs
+
     if return_vecs:
-        lk, vk = seig_func(a, **settings, **kwargs)
+        lk, vk = fn(a, **settings, **eigs_opts)
         sortinds = np.argsort(lk)
         return lk[sortinds], np.asmatrix(vk[:, sortinds])
     else:
-        lk = seig_func(a, **settings, **kwargs)
+        lk = fn(a, **settings, **eigs_opts)
         return np.sort(lk) if sort else lk
 
 
-def scipy_svds(a, k=6, ncv=None, return_vecs=True, **kwargs):
+def scipy_svds(a, k=6, *, return_vecs=True, **kwargs):
     """Compute a number of singular value pairs
     """
     settings = {
         'k': k,
-        'ncv': choose_ncv(k, a.shape[0]) if ncv is None else ncv,
-        'return_singular_vectors': return_vecs}
+        'return_singular_vectors': return_vecs
+    }
     if return_vecs:
         uk, sk, vtk = spla.svds(a, **settings, **kwargs)
         so = np.argsort(-sk)

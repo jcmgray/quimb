@@ -3,7 +3,7 @@
 from operator import add
 from functools import lru_cache
 
-from cytoolz import isiterable, concat
+from cytoolz import isiterable, concat, unique
 import numpy as np
 import scipy.sparse as sp
 
@@ -18,12 +18,13 @@ def spin_operator(label, S=1 / 2, **kwargs):
     Parameters
     ----------
     label : str
-        The type of operator, can be one of five options:
+        The type of operator, can be one of six options:
             - ``{'x', 'X'}``, x-spin operator.
             - ``{'y', 'Y'}``, y-spin operator.
             - ``{'z', 'Z'}``, z-spin operator.
             - ``{'+', 'p'}``, Raising operator.
             - ``{'-', 'm'}``, Lowering operator.
+            - ``{'i', 'I'}``, identity operator.
     S : float, optional
         The spin of particle to act on, default to spin-1/2.
     kwargs
@@ -59,6 +60,11 @@ def spin_operator(label, S=1 / 2, **kwargs):
                 op[i, i + 1] = c
             else:
                 op[i + 1, i] = c
+    elif label in {'i', 'I'}:
+        np.fill_diagonal(op, 1.0)
+    else:
+        raise ValueError("Label '{}'' not understood, should be one of ``['X',"
+                         " 'Y', 'Z', '+', '-', 'I']``.".format(label))
 
     op = qu(op, **kwargs)
     make_immutable(op)
@@ -146,9 +152,10 @@ def controlled(s, sparse=False):
 
 
 @lru_cache(maxsize=8)
-def ham_heis(n, j=1.0, bz=0.0, cyclic=True, sparse=False, stype="csr",
+def ham_heis(n, j=1.0, b=0.0, cyclic=True, sparse=False, stype="csr",
              parallel=None, nthreads=None):
-    """Constructs the heisenberg spin 1/2 hamiltonian
+    """Constructs the nearest neighbour 1d heisenberg spin-1/2 hamiltonian.
+
 
     Parameters
     ----------
@@ -158,8 +165,8 @@ def ham_heis(n, j=1.0, bz=0.0, cyclic=True, sparse=False, stype="csr",
         Coupling constant(s), with convention that positive =
         antiferromagnetic. Can supply scalar for isotropic coupling or
         vector ``(jx, jy, jz)``.
-    bz : float, optional.
-        z-direction magnetic field.
+    b : float or tuple(float, float, float), optional
+        Magnetic field, defaults to z-direction only if tuple not given.
     cyclic : bool, optional
         Whether to couple the first and last spins.
     sparse : bool, optional
@@ -177,53 +184,71 @@ def ham_heis(n, j=1.0, bz=0.0, cyclic=True, sparse=False, stype="csr",
     immutable matrix
         The Hamiltonian.
     """
-    # TODO: vector magnetic field
     dims = (2,) * n
     try:
         jx, jy, jz = j
     except TypeError:
         jx = jy = jz = j
 
+    try:
+        bx, by, bz = b
+    except TypeError:
+        bz = b
+        bx = by = 0.0
+
     parallel = (n > 16) if parallel is None else parallel
 
     op_kws = {'sparse': True, 'stype': 'coo'}
     kron_kws = {"sparse": True, "stype": "coo", "coo_build": True}
 
-    # The basic operator (interaction and single z-field) that can be repeated.
-    sds = (jx * kron(sig('x', **op_kws), sig('x', **op_kws)) +
-           jy * kron(sig('y', **op_kws), sig('y', **op_kws)) +
-           jz * kron(sig('z', **op_kws), sig('z', **op_kws)) -
-           bz * kron(sig('z', **op_kws), eye(2, **op_kws)))
+    # The basic operator (interaction and single b-field) that can be repeated.
+    two_site_term = sum(
+        j * kron(sig(s, **op_kws), sig(s, **op_kws))
+        for j, s in zip((jx, jy, jz), 'xyz') if j != 0.0
+    ) - sum(
+        b * kron(sig(s, **op_kws), eye(2, **op_kws))
+        for b, s in zip((bx, by, bz), 'xyz') if b != 0.0
+    )
+
+    single_site_b = sum(-b * sig(s, **op_kws)
+                        for b, s in zip((bx, by, bz), 'xyz') if b != 0.0)
 
     def gen_term(i):
-        # special case: the last bz term needs to be added manually
+        # special case: the last b term needs to be added manually
         if i == -1:
-            return eyepad(-bz * sig('z', **op_kws), dims, n - 1, **kron_kws)
+            return eyepad(single_site_b, dims, n - 1, **kron_kws)
 
         # special case: the interaction between first and last spins if cyclic
         if i == n - 1:
             return sum(
                 j * eyepad(sig(s, **op_kws), dims, [0, n - 1], **kron_kws)
-                for j, s in zip((jx, jy, jz), 'xyz')
-            )
+                for j, s in zip((jx, jy, jz), 'xyz') if j != 0.0)
 
-        return eyepad(sds, dims, [i, i + 1], **kron_kws)
+        # General term, on-site b-field plus interaction with next site
+        return eyepad(two_site_term, dims, [i, i + 1], **kron_kws)
 
-    terms = range(-1 if (bz != 0.0) else 0,  # only need extra bz term if nz
-                  n if cyclic else n - 1)
+    terms_needed = range(0 if single_site_b is 0 else -1,
+                         n if cyclic else n - 1)
 
     if parallel:
         pool = get_thread_pool(nthreads)
-        ham = par_reduce(add, pool.map(gen_term, terms))
+        ham = par_reduce(add, pool.map(gen_term, terms_needed))
     else:
-        ham = sum(map(gen_term, terms))
+        ham = sum(map(gen_term, terms_needed))
 
     if not sparse:
         ham = np.asmatrix(ham.todense())
     elif ham.format != stype:
         ham = ham.asformat(stype)
+
     make_immutable(ham)
     return ham
+
+
+def ham_ising(n, jz=1.0, bx=1.0, **kwargs):
+    """Generate the quantum transverse field ising model hamiltonian.
+    """
+    return ham_heis(n, j=(0, 0, jz), b=(bx, 0, 0), **kwargs)
 
 
 @lru_cache(maxsize=8)
@@ -305,7 +330,7 @@ def uniq_perms(xs):
     if len(xs) == 1:
         yield (xs[0],)
     else:
-        uniq_xs = set(xs)
+        uniq_xs = unique(xs)
         for first_x in uniq_xs:
             rem_xs = list(xs)
             rem_xs.remove(first_x)

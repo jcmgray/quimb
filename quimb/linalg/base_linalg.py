@@ -22,11 +22,18 @@ from .scipy_linalg import seigsys_scipy, scipy_svds
 from . import SLEPC4PY_FOUND
 
 if SLEPC4PY_FOUND:
-    from .mpi_spawner import seigsys_slepc_spawn, mfn_multiply_slepc_spawn
-    from .slepc_linalg import slepc_svds
+    from .mpi_launcher import (
+        seigsys_slepc_spawn,
+        mfn_multiply_slepc_spawn,
+        svds_slepc_spawn,
+    )
+    from .slepc_linalg import seigsys_slepc, svds_slepc, mfn_multiply_slepc
 else:
+    seigsys_slepc = raise_cant_find_library_function("slepc4py")
     seigsys_slepc_spawn = raise_cant_find_library_function("slepc4py")
-    slepc_svds = raise_cant_find_library_function("slepc4py")
+    svds_slepc = raise_cant_find_library_function("slepc4py")
+    svds_slepc_spawn = raise_cant_find_library_function("slepc4py")
+    mfn_multiply_slepc = raise_cant_find_library_function("slepc4py")
     mfn_multiply_slepc_spawn = raise_cant_find_library_function("slepc4py")
 
 
@@ -131,52 +138,100 @@ _SEIGSYS_METHODS = {
     'DENSE': seigsys_numpy,
     'SCIPY': seigsys_scipy,
     'SLEPC': seigsys_slepc_spawn,
+    'SLEPC-NOMPI': seigsys_slepc,
 }
 
 
 def _choose_backend(a, k, int_eps=False):
     """Pick a backend automatically for partial decompositions.
     """
+    # LinOps -> not possible to simply convert to dense or use MPI processes
+    islinop = isinstance(a, spla.LinearOperator)
+
     # small matrix or large part of subspace requested
     small_d_big_k = a.shape[0] ** 2 / k < (10000 if int_eps else 2000)
-    return ("NUMPY" if small_d_big_k else
-            "SLEPC" if SLEPC4PY_FOUND and issparse(a) else
-            "SCIPY")
+
+    if small_d_big_k and not islinop:
+        return "NUMPY"
+
+    # slepc seems faster for sparse, dense and LinearOperators
+    if SLEPC4PY_FOUND:
+        # only spool up an mpi pool for big matrices though
+        if issparse(a) and a.nnz > 10000:
+            return 'SLEPC'
+        return 'SLEPC-NOMPI'
+
+    return 'SCIPY'
 
 
-def seigsys(a, k=6, which=None, return_vecs=True, sigma=None,
-            isherm=True, ncv=None, sort=True, backend='AUTO', **kwargs):
-    """Returns a few eigenpairs from a possibly sparse hermitian operator
+def seigsys(a, k=6,
+            which=None,
+            return_vecs=True,
+            isherm=True,
+            sigma=None,
+            ncv=None,
+            tol=None,
+            v0=None,
+            sort=True,
+            backend='AUTO',
+            **backend_opts):
+    """Return a few eigenpairs from an operator.
 
     Parameters
     ----------
-        a: matrix, probably sparse, hermitian
-        k: number of eigenpairs to return
-        which: where in spectrum to take eigenvalues from (see scipy eigsh)
-        nvc: number of lanczos vectors, can use to optimise speed
+    a : sparse matrix-like, dense matrix-like, or LinearOperator
+        The operator to solve for.
+    k : int, optional
+        Number of eigenpairs to return (default=6).
+    which : {'SA', 'LA', 'LM', 'SM', 'TR'}
+        Where in spectrum to take eigenvalues from (see
+        :func:``scipy.sparse.linalg.eigsh``)
+    return_vecs : bool, optional
+        Whether to return the eigenvectors.
+    isherm : bool, optional
+        Whether operator is known to be hermitian.
+    sigma : float, optional
+        Which part of spectrum to target, implies which='TR' if which is None.
+    ncv : int, optional
+        number of lanczos vectors, can use to optimise speed
+    tol : None or float
+        Tolerance with which to find eigenvalues.
+    v0 : None or 1D-array like
+        An initial vector guess to iterate with.
+    sort : bool, optional
+        Whether to sort by ascending eigenvalue order.
+    backend : {'AUTO', 'NUMPY', 'SCIPY', 'SLEPC', 'SLEPC-NOMPI'}, optional
+        Which solver to use.
+    backend_opts
+        Supplied to the backend solver.
 
     Returns
     -------
-        lk: array of eigenvalues
-        vk: matrix of eigenvectors as columns
+    lk : 1d-array
+        The ``k`` eigenvalues.
+    {vk : 2d-matrix
+        matrix with ``k`` eigenvectors as columns if ``return_vecs``}
     """
     settings = {
         'k': k,
-        'which': ("SA" if which is None and sigma is None else
-                  "TR" if which is None and sigma is not None else
+        'which': ("SA" if (which is None) and (sigma is None) else
+                  "TR" if (which is None) and (sigma is not None) else
                   which),
         'return_vecs': return_vecs,
         'sigma': sigma,
         'isherm': isherm,
         'ncv': ncv,
-        'sort': sort}
+        'sort': sort,
+        'tol': tol,
+        'v0': v0,
+    }
 
     # Choose backend to perform the decompostion
     bkd = backend.upper()
     if bkd == 'AUTO':
         bkd = _choose_backend(a, k, sigma is not None)
 
-    return _SEIGSYS_METHODS[bkd](a, **settings, **kwargs)
+    return _SEIGSYS_METHODS[bkd](a, **settings, **backend_opts)
 
 
 def seigvals(a, k=6, **kwargs):
@@ -273,7 +328,7 @@ def eigsys_window(a, w_0, w_n=6, w_sz=None, backend='AUTO',
         l_w0, l_wmin, l_wmax = _rel_window_to_abs_window(lmin, lmax, w_0, w_sz)
 
     else:
-        lmin, lmax = bound_spectrum(a, **kwargs)
+        lmin, lmax = bound_spectrum(a, backend=backend, **kwargs)
         l_w0, l_wmin, l_wmax = _rel_window_to_abs_window(lmin, lmax, w_0, w_sz)
         l_w0 += (lmax - lmin) * offset_const  # for 1/0 issues
         if return_vecs:
@@ -331,7 +386,8 @@ def svds(a, k=6, ncv=None, return_vecs=True, backend='AUTO', **kwargs):
         'return_vecs': return_vecs}
     bkd = (_choose_backend(a, k, False) if backend in {'auto', 'AUTO'} else
            backend.upper())
-    svds_func = (slepc_svds if bkd == 'SLEPC' else
+    svds_func = (svds_slepc_spawn if bkd == 'SLEPC' else
+                 svds_slepc if bkd == 'SLEPC-NOMPI' else
                  numpy_svds if bkd in {'NUMPY', 'DENSE'} else
                  scipy_svds if bkd == 'SCIPY' else
                  None)
@@ -420,6 +476,11 @@ def expm(a, herm=False):
 _EXPM_MULTIPLY_METHODS = {
     'SCIPY': spla.expm_multiply,
     'SLEPC': functools.partial(mfn_multiply_slepc_spawn, fntype='exp'),
+    'SLEPC-KRYLOV': functools.partial(
+        mfn_multiply_slepc_spawn, fntype='exp', MFNType='KRYLOV'),
+    'SLEPC-EXPOKIT': functools.partial(
+        mfn_multiply_slepc_spawn, fntype='exp', MFNType='EXPOKIT'),
+    'SLEPC-NOMPI': functools.partial(mfn_multiply_slepc, fntype='exp'),
 }
 
 
@@ -432,7 +493,7 @@ def expm_multiply(mat, vec, backend="AUTO", **kwargs):
         Matrix to exponentiate.
     vec : vector-like
         Vector to act with exponential of matrix on.
-    backend : {'AUTO', 'SCIPY', 'SLEPC'}, optional
+    backend : {'AUTO', 'SCIPY', 'SLEPC', 'SLEPC-KRYLOV', 'SLEPC-EXPOKIT'}
         Which backend to use.
     kwargs
         Supplied to backend function.
@@ -442,6 +503,12 @@ def expm_multiply(mat, vec, backend="AUTO", **kwargs):
     vector
         Result of ``expm(mat) @ vec``.
     """
+    if backend == 'AUTO':
+        if SLEPC4PY_FOUND and vec.size > 2**10:
+            backend = 'SLEPC'
+        else:
+            backend = 'SCIPY'
+
     return _EXPM_MULTIPLY_METHODS[backend.upper()](mat, vec, **kwargs)
 
 

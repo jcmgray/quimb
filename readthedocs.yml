@@ -1,5 +1,5 @@
 conda:
-    file: deps/requirements-py3.yml
+    file: deps/requirements-rtd.yml
 python:
     version: 3
     setup_py_install: true

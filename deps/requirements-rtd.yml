@@ -1,4 +1,4 @@
-name: test-environment
+name: docs
 channels:
   - defaults
   - conda-forge
@@ -14,6 +14,8 @@ dependencies:
   - coverage
   - pytest
   - pytest-cov
+  - sphinx
+  - sphinx_bootstrap_theme
   - coveralls
   - codecov
   - pip:
