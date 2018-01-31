@@ -16,7 +16,7 @@ Welcome to quimb's documentation!
 
 ----------------------------------------------------------------------------------
 
-`quimb <https://github.com/jcmgray/quimb>`_ is a performant library for quantum information and many-body calculations. It is also thoroughly unit-tested and the tests are probably the best place to look for detailed documentation.
+`quimb <https://github.com/jcmgray/quimb>`_ is a performant library for quantum information and many-body calculations. It is also thoroughly unit-tested and the tests are probably the best place to look for detailed documentation. Do please submit any issues or pull requests etc. on `github <https://github.com/jcmgray/quimb/issues>`_.
 
 .. rubric:: Guides:
 
