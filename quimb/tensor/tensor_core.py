@@ -25,21 +25,23 @@ from ..utils import raise_cant_find_library_function
 try:
     import opt_einsum
     einsum = opt_einsum.contract
-    einsum_expression = opt_einsum.contract_expression
 
     @functools.wraps(opt_einsum.contract_path)
     def einsum_path(*args, optimize='greedy', memory_limit=2**28, **kwargs):
         return opt_einsum.contract_path(
             *args, path=optimize, memory_limit=memory_limit, **kwargs)
 
+    try:
+        einsum_expression = opt_einsum.contract_expression
+    except AttributeError:
+        einsum_expression = raise_cant_find_library_function(
+            "opt_einsum", "Or a more recent (github?) version is needed for "
+            "caching tensor contractions.")
+
 except ImportError:
     extra_msg = "Needed for optimized tensor contractions."
     einsum = einsum_expression = einsum_path = \
         raise_cant_find_library_function("opt_einsum", extra_msg)
-except AttributeError:
-    einsum_expression = raise_cant_find_library_function(
-        "opt_einsum", "A more recent (github?) version is needed for caching "
-        "tensor contractions.")
 
 
 # --------------------------------------------------------------------------- #
