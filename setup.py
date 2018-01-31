@@ -1,8 +1,10 @@
 from setuptools import setup, find_packages
+import versioneer
 
 setup(
     name='quimb',
-    version='0.2.1',
+    version=versioneer.get_version(),
+    cmdclass=versioneer.get_cmdclass(),
     author='Johnnie Gray',
     license='MIT',
     packages=find_packages(exclude=['deps', 'tests*']),

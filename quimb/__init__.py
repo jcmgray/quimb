@@ -332,3 +332,7 @@ __all__ = [
     'logneg_subsys_approx',
     'negativity_subsys_approx',
 ]
+
+from ._version import get_versions
+__version__ = get_versions()['version']
+del get_versions
