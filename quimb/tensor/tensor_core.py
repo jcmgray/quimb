@@ -1619,8 +1619,8 @@ class TensorNetwork(object):
 
     # ------------------------------ printing ------------------------------- #
 
-    def graph(tn, iterations=2000, color=None, figsize=(6, 6),
-              label_inds=None, label_tags=None, **plot_opts):
+    def graph(tn, color=None, label_inds=None, label_tags=None,
+              iterations=200, figsize=(6, 6), **plot_opts):
         """Plot this tensor network as a networkx graph using matplotlib,
         with edge width corresponding to bond dimension.
 
@@ -1716,18 +1716,25 @@ class TensorNetwork(object):
         edge_weights = [math.log2(d) for d in edge_weights]
 
         plt.figure(figsize=figsize)
-        pos = nx.spring_layout(G, iterations=iterations)
+
+        # use spectral layout as starting point
+        pos0 = nx.spectral_layout(G)
+        # but then relax using spring layout
+        pos = nx.spring_layout(G, pos=pos0, iterations=iterations)
         nx.draw(G, node_size=szs, node_color=crs, pos=pos, labels=labels,
                 with_labels=True, width=edge_weights, **plot_opts)
 
         # create legend
         if colors:
             handles = []
-            for tag, color in colors.items():
+            for color in colors.values():
                 handles += [plt.Line2D([0], [0], marker='o', color=color,
                                        linestyle='', markersize=10)]
 
-            plt.legend(handles, tuple(colors.keys()), loc='center left',
+            # needed in case '_' is the first character
+            lbls = [" {}".format(l) for l in colors]
+
+            plt.legend(handles, lbls, loc='center left',
                        bbox_to_anchor=(1, 0.5))
 
         plt.show()
