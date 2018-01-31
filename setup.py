@@ -3,6 +3,8 @@ import versioneer
 
 setup(
     name='quimb',
+    description='Quantum information and many-body library.',
+    url='http://quimb.readthedocs.io',
     version=versioneer.get_version(),
     cmdclass=versioneer.get_cmdclass(),
     author='Johnnie Gray',
@@ -28,6 +30,10 @@ setup(
         ],
         'advanced_solvers': [
             'slepc4py',
+        ],
+        'tensor': [
+            'opt_einsum',
+            'matplotlib',
         ]
     },
     scripts=['bin/quimb-mpi-python'],
