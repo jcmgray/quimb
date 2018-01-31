@@ -641,8 +641,8 @@ def eyepad(ops, dims, inds, sparse=None, stype=None, coo_build=False,
     --------
     Place an operator between two identities:
 
-    >>> IZI = eyepad(sig('z'), [2, 2, 2], 1)
-    >>> np.allclose(IZI, eye(2) & sig('z') & eye(2))
+    >>> IZI = eyepad(pauli('z'), [2, 2, 2], 1)
+    >>> np.allclose(IZI, eye(2) & pauli('z') & eye(2))
     True
 
     Overlay a large operator on several sites:
@@ -771,9 +771,9 @@ def permute(p, dims, perm):
     Examples
     --------
 
-    >>> IX = speye(2) & sig('X', sparse=True)
+    >>> IX = speye(2) & pauli('X', sparse=True)
     >>> XI = permute(IX, dims=[2, 2], perm=[1, 0])
-    >>> np.allclose(XI.A, sig('X') & eye(2))
+    >>> np.allclose(XI.A, pauli('X') & eye(2))
     True
     """
     if issparse(p):
@@ -826,9 +826,9 @@ def perm_eyepad(op, dims, inds, **kwargs):
     transform it to act on spins 2 and 0 -- i.e. reverse it and sandwich an
     identity between the two sites it acts on.
 
-    >>> XZ = sig('X') & sig('Z')
+    >>> XZ = pauli('X') & pauli('Z')
     >>> ZIX = perm_eyepad(XZ, dims=[2, 3, 2], inds=[2, 0])
-    >>> np.allclose(ZIX, sig('Z') & eye(3) & sig('X'))
+    >>> np.allclose(ZIX, pauli('Z') & eye(3) & pauli('X'))
     True
     """
     dims, inds = np.asarray(dims), np.asarray(inds)

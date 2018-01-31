@@ -12,7 +12,7 @@ import scipy.sparse as sp
 from ..accel import ldmul, dot, make_immutable
 from ..core import qu, kron, eye, eyepad, kronpow
 from ..linalg.base_linalg import eigsys
-from .operators import sig, controlled
+from .operators import pauli, controlled
 
 
 def basis_vec(i, dim, sparse=False, **kwargs):
@@ -123,7 +123,7 @@ def bloch_state(ax, ay, az, purified=False, **kwargs):
     n = (ax**2 + ay**2 + az**2)**.5
     if purified:
         ax, ay, az = (a / n for a in (ax, ay, az))
-    return sum(0.5 * a * sig(s, **kwargs)
+    return sum(0.5 * a * pauli(s, **kwargs)
                for a, s in zip((1, ax, ay, az), "ixyz"))
 
 
@@ -378,6 +378,6 @@ def graph_state_1d(n, cyclic=True, sparse=False):
     if cyclic:
         p = ((eye(2, sparse=True) & eye(2**(n - 2), sparse=True) &
               qu([1, 0], qtype="dop", sparse=True)) +
-             (sig("z", sparse=True) & eye(2**(n - 2), sparse=True) &
+             (pauli("z", sparse=True) & eye(2**(n - 2), sparse=True) &
               qu([0, 1], qtype="dop", sparse=True))) @ p
     return p

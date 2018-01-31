@@ -89,7 +89,7 @@ The product of two quantum objects is the dot or matrix product, which, since py
             [ 0.+0.j]])
     >>> psi.H @ psi  # inner product
     matrix([[ 1.+0.j]])
-    >>> X = sig('X')
+    >>> X = pauli('X')
     >>> X @ psi  # act as gate
     matrix([[ 0.+0.j],
             [ 1.+0.j]])

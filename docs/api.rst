@@ -195,7 +195,6 @@ gen.operators
     :toctree: _autosummary
 
     spin_operator
-    sig
     pauli
     controlled
     ham_heis

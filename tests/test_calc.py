@@ -13,7 +13,7 @@ from quimb import (
     rand_mix,
     rand_rho,
     rand_ket,
-    sig,
+    pauli,
     down,
     expec,
     singlet_pairs,
@@ -423,7 +423,7 @@ class TestDecomp:
     def test_pauli_reconstruct(self):
         p1 = rand_rho(4)
         names_cffs = pauli_decomp(p1, mode='c')
-        pr = sum(kron(*(sig(s) for s in name)) * names_cffs["".join(name)]
+        pr = sum(kron(*(pauli(s) for s in name)) * names_cffs["".join(name)]
                  for name in itertools.product('IXYZ', repeat=2))
         assert_allclose(pr, p1)
 
@@ -444,7 +444,8 @@ class TestCorrelation:
     @pytest.mark.parametrize("dims", (None, [2, 2]))
     def test_types(self, dims, op_sps, p_sps, pre_c):
         p = rand_rho(4, sparse=p_sps)
-        c = correlation(p, sig('x', sparse=op_sps), sig('z', sparse=op_sps),
+        c = correlation(p, pauli('x', sparse=op_sps),
+                        pauli('z', sparse=op_sps),
                         0, 1, dims=dims, precomp_func=pre_c)
         c = c(p) if pre_c else c
         assert c >= -1.0
@@ -455,7 +456,7 @@ class TestCorrelation:
     @pytest.mark.parametrize("dir", ['x', 'y', 'z'])
     def test_classically_no_correlated(self, dir, qtype, pre_c):
         p = up(qtype=qtype) & up(qtype=qtype)
-        c = correlation(p, sig(dir), sig(dir), 0, 1, precomp_func=pre_c)
+        c = correlation(p, pauli(dir), pauli(dir), 0, 1, precomp_func=pre_c)
         c = c(p) if pre_c else c
         assert_allclose(c, 0.0)
 
@@ -464,7 +465,7 @@ class TestCorrelation:
     def test_classically_correlated(self, dir, ct, pre_c):
         p = 0.5 * ((up(qtype='dop') & up(qtype='dop')) +
                    (down(qtype='dop') & down(qtype='dop')))
-        c = correlation(p, sig(dir), sig(dir), 0, 1, precomp_func=pre_c)
+        c = correlation(p, pauli(dir), pauli(dir), 0, 1, precomp_func=pre_c)
         c = c(p) if pre_c else c
         assert_allclose(c, ct)
 
@@ -472,12 +473,12 @@ class TestCorrelation:
     @pytest.mark.parametrize("dir, ct", [('x', -1), ('y', -1), ('z', -1)])
     def test_entangled(self, dir, ct, pre_c):
         p = bell_state('psi-')
-        c = correlation(p, sig(dir), sig(dir), 0, 1, precomp_func=pre_c)
+        c = correlation(p, pauli(dir), pauli(dir), 0, 1, precomp_func=pre_c)
         c = c(p) if pre_c else c
         assert_allclose(c, ct)
 
     def test_reuse_precomp(self):
-        cfn = correlation(None, sig('z'), sig('z'), 0, 1, dims=[2, 2],
+        cfn = correlation(None, pauli('z'), pauli('z'), 0, 1, dims=[2, 2],
                           precomp_func=True)
         assert_allclose(cfn(bell_state('psi-')), -1.0)
         assert_allclose(cfn(bell_state('phi+')), 1.0)

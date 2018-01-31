@@ -502,7 +502,7 @@ class TestSpecificStatesOperators:
         assert hh_mpo.shape == (2,) * 10
         hh_ = (hh_mpo ^ ...).fuse({'k': ['k0', 'k1', 'k2', 'k3', 'k4'],
                                    'b': ['b0', 'b1', 'b2', 'b3', 'b4']})
-        hh = ham_heis(5, cyclic=False) / 4  # /4 :ham_heis uses paulis not spin
+        hh = ham_heis(5, cyclic=False)
         assert_allclose(hh, hh_.data)
 
     def test_mpo_zeros(self):

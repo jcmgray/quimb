@@ -82,7 +82,7 @@ from .linalg.base_linalg import (
 # Generating objects
 from .gen.operators import (
     spin_operator,
-    sig,
+    pauli,
     controlled,
     ham_heis,
     ham_ising,
@@ -244,7 +244,7 @@ __all__ = [
     'norm',
     # Gen ------------------------------------------------------------------- #
     'spin_operator',
-    'sig',
+    'pauli',
     'controlled',
     'ham_heis',
     'ham_ising',

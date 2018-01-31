@@ -72,7 +72,7 @@ def spin_operator(label, S=1 / 2, **kwargs):
 
 
 @lru_cache(maxsize=8)
-def sig(xyz, dim=2, **kwargs):
+def pauli(xyz, dim=2, **kwargs):
     """Generates the pauli operators for dimension 2 or 3.
 
     Parameters
@@ -122,9 +122,6 @@ def sig(xyz, dim=2, **kwargs):
     return op
 
 
-pauli = sig
-
-
 @lru_cache(maxsize=8)
 def controlled(s, sparse=False):
     """Construct a controlled pauli gate for two qubits.
@@ -146,7 +143,7 @@ def controlled(s, sparse=False):
     op = ((qu([1, 0], qtype='dop', sparse=sparse) &
            eye(2, sparse=sparse)) +
           (qu([0, 1], qtype='dop', sparse=sparse) &
-           sig(keymap[s], sparse=sparse)))
+           pauli(keymap[s], sparse=sparse)))
     make_immutable(op)
     return op
 
@@ -203,14 +200,14 @@ def ham_heis(n, j=1.0, b=0.0, cyclic=True, sparse=False, stype="csr",
 
     # The basic operator (interaction and single b-field) that can be repeated.
     two_site_term = sum(
-        j * kron(sig(s, **op_kws), sig(s, **op_kws))
+        j * kron(spin_operator(s, **op_kws), spin_operator(s, **op_kws))
         for j, s in zip((jx, jy, jz), 'xyz') if j != 0.0
     ) - sum(
-        b * kron(sig(s, **op_kws), eye(2, **op_kws))
+        b * kron(spin_operator(s, **op_kws), eye(2, **op_kws))
         for b, s in zip((bx, by, bz), 'xyz') if b != 0.0
     )
 
-    single_site_b = sum(-b * sig(s, **op_kws)
+    single_site_b = sum(-b * spin_operator(s, **op_kws)
                         for b, s in zip((bx, by, bz), 'xyz') if b != 0.0)
 
     def gen_term(i):
@@ -221,7 +218,8 @@ def ham_heis(n, j=1.0, b=0.0, cyclic=True, sparse=False, stype="csr",
         # special case: the interaction between first and last spins if cyclic
         if i == n - 1:
             return sum(
-                j * eyepad(sig(s, **op_kws), dims, [0, n - 1], **kron_kws)
+                j * eyepad(spin_operator(s, **op_kws),
+                           dims, [0, n - 1], **kron_kws)
                 for j, s in zip((jx, jy, jz), 'xyz') if j != 0.0)
 
         # General term, on-site b-field plus interaction with next site
@@ -277,7 +275,7 @@ def ham_j1j2(n, j1=1.0, j2=0.5, bz=0.0, cyclic=True, sparse=False):
         The Hamiltonian.
     """
     dims = (2,) * n
-    ps = [sig(i, sparse=True) for i in 'xyz']
+    sxyz = [spin_operator(i, sparse=True) for i in 'xyz']
 
     coosj1 = np.array([(i, i + 1) for i in range(n)])
     coosj2 = np.array([(i, i + 2) for i in range(n)])
@@ -290,18 +288,18 @@ def ham_j1j2(n, j1=1.0, j2=0.5, bz=0.0, cyclic=True, sparse=False):
     def j1_terms():
         for coo in coosj1:
             if abs(coo[1] - coo[0]) == 1:  # can sum then tensor (faster)
-                yield eyepad(sum(op & op for op in ps), dims, coo)
+                yield eyepad(sum(op & op for op in sxyz), dims, coo)
             else:  # tensor then sum (slower)
-                yield sum(eyepad(op, dims, coo) for op in ps)
+                yield sum(eyepad(op, dims, coo) for op in sxyz)
 
     def j2_terms():
         for coo in coosj2:
             if abs(coo[1] - coo[0]) == 2:  # can add then tensor (faster)
-                yield eyepad(sum(op & eye(2) & op for op in ps), dims, coo)
+                yield eyepad(sum(op & eye(2) & op for op in sxyz), dims, coo)
             else:
-                yield sum(eyepad(op, dims, coo) for op in ps)
+                yield sum(eyepad(op, dims, coo) for op in sxyz)
 
-    gen_bz = (eyepad([ps[2]], dims, i) for i in range(n))
+    gen_bz = (eyepad([sxyz[2]], dims, i) for i in range(n))
 
     ham = j1 * sum(j1_terms()) + j2 * sum(j2_terms())
     if bz != 0:

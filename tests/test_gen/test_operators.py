@@ -10,7 +10,7 @@ from quimb import (
     singlet,
     seigvals,
     spin_operator,
-    sig,
+    pauli,
     controlled,
     ham_heis,
     ham_j1j2,
@@ -47,29 +47,29 @@ class TestSpinOperator:
         assert_allclose(eigvals(op), np.linspace(-S, S, D), atol=1e-13)
 
 
-class TestSig:
-    def test_sig_dim2(self):
+class TestPauli:
+    def test_pauli_dim2(self):
         for dir in (1, 'x', 'X',
                     2, 'y', 'Y',
                     3, 'z', 'Z'):
-            x = sig(dir)
+            x = pauli(dir)
             assert_allclose(eigvals(x), [-1, 1])
 
-    def test_sig_dim3(self):
+    def test_pauli_dim3(self):
         for dir in (1, 'x', 'X',
                     2, 'y', 'Y',
                     3, 'z', 'Z'):
-            x = sig(dir, dim=3)
+            x = pauli(dir, dim=3)
             assert_allclose(eigvals(x), [-1, 0, 1],
                             atol=1e-15)
 
-    def test_sig_bad_dim(self):
+    def test_pauli_bad_dim(self):
         with pytest.raises(KeyError):
-            sig('x', 4)
+            pauli('x', 4)
 
-    def test_sig_bad_dir(self):
+    def test_pauli_bad_dir(self):
         with pytest.raises(KeyError):
-            sig('w', 2)
+            pauli('w', 2)
 
 
 class TestControlledZ:
@@ -87,7 +87,7 @@ class TestHamHeis:
     def test_ham_heis_2(self):
         h = ham_heis(2, cyclic=False)
         evals = eigvals(h)
-        assert_allclose(evals, [-3, 1, 1, 1])
+        assert_allclose(evals, [-0.75, 0.25, 0.25, 0.25])
         gs = groundstate(h)
         assert_allclose(expec(gs, singlet()), 1.)
 
@@ -95,12 +95,12 @@ class TestHamHeis:
     def test_ham_heis_sparse_cyclic_4(self, parallel):
         h = ham_heis(4, sparse=True, cyclic=True, parallel=parallel)
         lk = seigvals(h, 4)
-        assert_allclose(lk, [-8, -4, -4, -4])
+        assert_allclose(lk, [-2, -1, -1, -1])
 
     def test_ham_heis_bz(self):
-        h = ham_heis(2, cyclic=False, b=2)
+        h = ham_heis(2, cyclic=False, b=1)
         evals = eigvals(h)
-        assert_allclose(evals, [-3, -3, 1, 5])
+        assert_allclose(evals, [-3 / 4, -3 / 4, 1 / 4, 5 / 4])
 
     @pytest.mark.parametrize("stype", ["coo", "csr", "csc", "bsr"])
     def test_sformat_construct(self, stype):
@@ -117,16 +117,17 @@ class TestHamJ1J2:
     def test_ham_j1j2_6_sparse_cyc(self):
         h = ham_j1j2(6, j2=0.5, sparse=True, cyclic=True)
         lk = seigvals(h, 5)
-        assert_allclose(lk, [-9, -9, -7, -7, -7])
+        assert_allclose(lk, [-9 / 4, -9 / 4, -7 / 4, -7 / 4, -7 / 4])
 
     def test_ham_j1j2_4_bz(self):
         h = ham_j1j2(4, j2=0.5, cyclic=True, bz=0)
         lk = seigvals(h, 11)
-        assert_allclose(lk, [-6, -6, -2, -2, -2, -2, -2, -2, -2, -2, -2])
-        h = ham_j1j2(4, j2=0.5, cyclic=True, bz=0.1)
+        assert_allclose(lk, [-1.5, -1.5, -0.5, -0.5, -0.5, -0.5,
+                             -0.5, -0.5, -0.5, -0.5, -0.5])
+        h = ham_j1j2(4, j2=0.5, cyclic=True, bz=0.05)
         lk = seigvals(h, 11)
-        assert_allclose(lk, [-6, -6, -2.2, -2.2, -2.2,
-                             -2.0, -2.0, -2.0, -1.8, -1.8, -1.8])
+        assert_allclose(lk, [-1.5, -1.5, -0.55, -0.55, -0.55,
+                             -0.5, -0.5, -0.5, -0.45, -0.45, -0.45])
 
 
 class TestSpinZProjector:

@@ -46,7 +46,7 @@ from .linalg.approx_spectral import (
     logneg_subsys_approx,
     gen_bipartite_spectral_fn,
 )
-from .gen.operators import sig
+from .gen.operators import pauli
 from .gen.states import (
     basis_vec,
     bell_state,
@@ -556,12 +556,15 @@ def concurrence(p, dims=(2, 2), sysa=0, sysb=1):
     """
     if len(dims) > 2:
         p = ptr(p, dims, (sysa, sysb))
+
+    Y = pauli('Y')
+
     if isop(p):
-        pt = dot(kron(sig(2), sig(2)), dot(p.conj(), kron(sig(2), sig(2))))
+        pt = dot(kron(Y, Y), dot(p.conj(), kron(Y, Y)))
         evals = (nla.eigvals(dot(p, pt)).real**2)**0.25
         return max(0, 2 * np.max(evals) - np.sum(evals))
     else:
-        pt = dot(kron(sig(2), sig(2)), p.conj())
+        pt = dot(kron(Y, Y), p.conj())
         c = np.real(abs(dot(p.H, pt))).item(0)
         return max(0, c)
 
@@ -730,7 +733,7 @@ def decomp(a, fn, fn_args, fn_d, nmlz_func, mode="p", tol=1e-3):
 
 
 pauli_decomp = functools.partial(decomp,
-                                 fn=sig,
+                                 fn=pauli,
                                  fn_args='IXYZ',
                                  fn_d=2,
                                  nmlz_func=lambda n: 2**-n)
@@ -825,7 +828,7 @@ def pauli_correlations(p, ss=("xx", "yy", "zz"), sysa=0, sysb=1,
     """
     def gen_corr_list():
         for s1, s2 in ss:
-            yield correlation(p, sig(s1), sig(s2), sysa, sysb,
+            yield correlation(p, pauli(s1), pauli(s2), sysa, sysb,
                               precomp_func=precomp_func)
 
     if sum_abs:
@@ -920,7 +923,7 @@ def qid(p, dims, inds, precomp_func=False, sparse_comp=True,
     inds = (inds,) if isinstance(inds, numbers.Number) else inds
 
     # Construct operators
-    ops_i = tuple(tuple(eyepad(sig(s), dims, ind, sparse=sparse_comp)
+    ops_i = tuple(tuple(eyepad(pauli(s), dims, ind, sparse=sparse_comp)
                         for s in "xyz")
                   for ind in inds)
 

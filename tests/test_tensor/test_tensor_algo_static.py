@@ -156,9 +156,9 @@ class TestDMRG1:
 
         # check against actual MPO_ham
         if MPO_ham is MPO_ham_XY:
-            ham_dense = ham_heis(6, cyclic=False, j=(1.0, 1.0, 0.0)) / 4
+            ham_dense = ham_heis(6, cyclic=False, j=(1.0, 1.0, 0.0))
         elif MPO_ham is MPO_ham_heis:
-            ham_dense = ham_heis(6, cyclic=False) / 4
+            ham_dense = ham_heis(6, cyclic=False)
 
         actual_e, gs = seigsys(ham_dense, k=1)
         assert_allclose(actual_e, eff_e)
@@ -209,9 +209,9 @@ class TestDMRG2:
 
         # check against actual MPO_ham
         if MPO_ham is MPO_ham_XY:
-            ham_dense = ham_heis(6, cyclic=False, j=(1.0, 1.0, 0.0)) / 4
+            ham_dense = ham_heis(6, cyclic=False, j=(1.0, 1.0, 0.0))
         elif MPO_ham is MPO_ham_heis:
-            ham_dense = ham_heis(6, cyclic=False) / 4
+            ham_dense = ham_heis(6, cyclic=False)
 
         actual_e, gs = seigsys(ham_dense, k=1)
         assert_allclose(actual_e, eff_e)

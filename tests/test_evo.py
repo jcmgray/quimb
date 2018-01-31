@@ -18,7 +18,7 @@ from quimb import (
     up,
     down,
     eyepad,
-    sig,
+    pauli,
     logneg,
 )
 from quimb.evo import (
@@ -284,8 +284,8 @@ class TestQuEvo:
         sim = QuEvo(p0, ham, method='solve')
         ts = np.linspace(0, 10)
         for t, pt in zip(ts, sim.at_times(ts)):
-            x = cos(4 * t)
-            y = expec(pt, eyepad(sig('z'), [2, 2], 0))
+            x = cos(t)
+            y = expec(pt, eyepad(pauli('z'), [2, 2], 0))
             assert_allclose(x, y, atol=1e-15)
 
     @mark.parametrize("qtype", ['ket', 'dop'])

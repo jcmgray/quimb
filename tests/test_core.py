@@ -18,7 +18,7 @@ from quimb import (
     up,
     plus,
     yplus,
-    sig,
+    pauli,
     singlet,
     qu,
     infer_size,
@@ -517,9 +517,9 @@ class TestPermute:
         assert_allclose(b, yplus() & up() & plus())
 
     def test_permute_op(self):
-        a = sig('x') & sig('y') & sig('z')
+        a = pauli('x') & pauli('y') & pauli('z')
         b = permute(a, [2, 2, 2], [2, 0, 1])
-        assert_allclose(b, sig('z') & sig('x') & sig('y'))
+        assert_allclose(b, pauli('z') & pauli('x') & pauli('y'))
 
     def test_entangled_permute(self):
         dims = [2, 2, 2]
@@ -784,5 +784,5 @@ class TestOverlap:
     @mark.parametrize("s", ['x', 'y', 'z'])
     def test_negative_expec(self, qtype, sparse, s):
         a = singlet(qtype=qtype)
-        b = sig(s, sparse=sparse) & sig(s, sparse=sparse)
+        b = pauli(s, sparse=sparse) & pauli(s, sparse=sparse)
         assert_allclose(expec(a, b), -1)

@@ -23,7 +23,7 @@ from quimb import (
     ham_j1j2,
     rand_herm,
     graph_state_1d,
-    sig,
+    pauli,
     levi_civita,
     bloch_state,
     bell_state,
@@ -53,27 +53,27 @@ class TestBasisVec:
 class TestBasicStates:
     def test_up(self):
         p = up(qtype='dop')
-        assert_allclose(tr(p @ sig('z')), 1.0)
+        assert_allclose(tr(p @ pauli('z')), 1.0)
 
     def test_down(self):
         p = down(qtype='dop')
-        assert_allclose(tr(p @ sig('z')), -1.0)
+        assert_allclose(tr(p @ pauli('z')), -1.0)
 
     def test_plus(self):
         p = plus(qtype='dop')
-        assert_allclose(tr(p @ sig('x')), 1.0)
+        assert_allclose(tr(p @ pauli('x')), 1.0)
 
     def test_minus(self):
         p = minus(qtype='dop')
-        assert_allclose(tr(p @ sig('x')), -1.0)
+        assert_allclose(tr(p @ pauli('x')), -1.0)
 
     def test_yplus(self):
         p = yplus(qtype='dop')
-        assert_allclose(tr(p @ sig('y')), 1.0)
+        assert_allclose(tr(p @ pauli('y')), 1.0)
 
     def test_yminus(self):
         p = yminus(qtype='dop')
-        assert_allclose(tr(p @ sig('y')), -1.0)
+        assert_allclose(tr(p @ pauli('y')), -1.0)
 
 
 class TestBlochState:
@@ -82,7 +82,7 @@ class TestBlochState:
                                  (-1, 0, 0), (0, -1, 0), (0, 0, -1)),
                                 ("x", "y", "z", "x", "y", "z"),
                                 (1, 1, 1, -1, -1, -1)):
-            x = tr(bloch_state(*vec) @ sig(op))
+            x = tr(bloch_state(*vec) @ pauli(op))
             assert_allclose(x, val)
 
     def test_mixed(self):
@@ -90,7 +90,7 @@ class TestBlochState:
                                  (-.5, 0, 0), (0, -.5, 0), (0, 0, -.5)),
                                 ("x", "y", "z", "x", "y", "z"),
                                 (.5, .5, .5, -.5, -.5, -.5)):
-            x = tr(bloch_state(*vec) @ sig(op))
+            x = tr(bloch_state(*vec) @ pauli(op))
             assert_allclose(x, val)
 
     def test_purify(self):
@@ -98,7 +98,7 @@ class TestBlochState:
                                  (-.5, 0, 0), (0, -.5, 0), (0, 0, -.5)),
                                 ("x", "y", "z", "x", "y", "z"),
                                 (1, 1, 1, -1, -1, -1)):
-            x = tr(bloch_state(*vec, purified=True) @ sig(op))
+            x = tr(bloch_state(*vec, purified=True) @ pauli(op))
             assert_allclose(x, val)
 
 
@@ -232,7 +232,7 @@ class TestGraphState:
         n = 5
         p = graph_state_1d(n, cyclic=True)
         for j in range(n):
-            k = eyepad([sig('x'), sig('z'), sig('z')], [2] * n,
+            k = eyepad([pauli('x'), pauli('z'), pauli('z')], [2] * n,
                        (j, (j - 1) % n, (j + 1) % n))
             o = p.H @ k @ p
             np.testing.assert_allclose(o, 1)
