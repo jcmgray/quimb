@@ -1,7 +1,7 @@
 Welcome to quimb's documentation!
 =================================
 
-.. image:: https://img.shields.io/travis/jcmgray/quimb/develop.svg
+.. image:: https://img.shields.io/travis/jcmgray/quimb/stable.svg
     :target: https://travis-ci.org/jcmgray/quimb
 .. image:: https://img.shields.io/codecov/c/github/jcmgray/quimb/develop.svg
   :target: https://codecov.io/gh/jcmgray/quimb
@@ -10,7 +10,7 @@ Welcome to quimb's documentation!
 .. image:: https://landscape.io/github/jcmgray/quimb/develop/landscape.svg?style=flat
    :target: https://landscape.io/github/jcmgray/quimb/develop
    :alt: Code Health
-.. image:: https://img.shields.io/readthedocs/pip/latest.svg
+.. image:: https://img.shields.io/readthedocs/quimb/stable.svg
    :target: http://quimb.readthedocs.io/en/latest/?badge=latest
    :alt: Documentation Status
 
