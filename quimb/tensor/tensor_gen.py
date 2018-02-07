@@ -10,15 +10,19 @@ from .tensor_core import Tensor
 from .tensor_1d import MatrixProductState, MatrixProductOperator
 
 
+def randn(shape, dtype):
+    if dtype in (float, np.float_):
+        return np.random.randn(*shape)
+    elif dtype in (complex, np.complex_):
+        return np.random.randn(*shape) + 1.0j * np.random.randn(*shape)
+    else:
+        raise TypeError("dtype not understood - should be float or complex.")
+
+
 def rand_tensor(shape, inds, tags=None, dtype=complex):
     """Generate a random (complex) tensor with specified shape and inds.
     """
-    if dtype in (float, np.float_):
-        data = np.random.randn(*shape)
-    elif dtype in (complex, np.complex_):
-        data = np.random.randn(*shape) + 1.0j * np.random.randn(*shape)
-    else:
-        raise TypeError("dtype not understood - should be float or complex.")
+    data = randn(shape, dtype=dtype)
     return Tensor(data=data, inds=inds, tags=tags)
 
 
@@ -51,14 +55,8 @@ def MPS_rand_state(n, bond_dim, phys_dim=2, normalize=True, cyclic=False,
             yield (bond_dim, bond_dim, phys_dim)
         yield cyc_dim + (bond_dim, phys_dim)
 
-    if dtype in (float, np.float_):
-        def gen_data(shape):
-            return np.random.randn(*shape)
-    elif dtype in (complex, np.complex_):
-        def gen_data(shape):
-            return np.random.randn(*shape) + 1.0j * np.random.randn(*shape)
-    else:
-        raise TypeError("dtype not understood - should be float or complex.")
+    def gen_data(shape):
+        return randn(shape, dtype=dtype)
 
     arrays = \
         map(lambda x: x / norm_fro_dense(x)**(1 / (x.ndim - 1)),
@@ -219,30 +217,13 @@ def MPO_rand(n, bond_dim, phys_dim=2, normalize=True,
               *((bond_dim, bond_dim, phys_dim, phys_dim),) * (n - 2),
               (bond_dim, phys_dim, phys_dim)]
 
-    if dtype in (float, np.float_):
+    def gen_data(shape):
+        data = randn(shape, dtype=dtype)
+        if not herm:
+            return data
 
-        def gen_data(shape):
-            data = np.random.randn(*shape)
-
-            if not herm:
-                return data
-
-            trans = (0, 2, 1) if len(shape) == 3 else (0, 1, 3, 2)
-            return data + data.transpose(*trans)
-
-    elif dtype in (complex, np.complex_):
-
-        def gen_data(shape):
-            data = np.random.randn(*shape) + 1.0j * np.random.randn(*shape)
-
-            if not herm:
-                return data
-
-            trans = (0, 2, 1) if len(shape) == 3 else (0, 1, 3, 2)
-            return data + data.transpose(trans).conj()
-
-    else:
-        raise TypeError("dtype not understood - should be float or complex.")
+        trans = (0, 2, 1) if len(shape) == 3 else (0, 1, 3, 2)
+        return data + data.transpose(*trans).conj()
 
     arrays = map(lambda x: x / norm_fro_dense(x)**(1 / (x.ndim - 1)),
                  map(gen_data, shapes))

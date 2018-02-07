@@ -393,7 +393,7 @@ class TestTensorNetwork:
             tn['red'] = 1
 
         tn.add_tag('foo')
-        # assert len(tn['foo']) == 2
+        assert len(tn['foo']) == 2
         with pytest.raises(KeyError):
             tn['foo'] = c
 
@@ -401,6 +401,8 @@ class TestTensorNetwork:
         assert 'c' in tn.tags
         assert tn[('blue', 'c')] is c
 
+
+        assert 'red' in tn.tags
         del tn['red']
         assert 'red' not in tn.tags
 
@@ -646,3 +648,67 @@ class TestTensorNetwork:
         for t1, t2 in zip(tn1.tensors_sorted(), tn2.tensors_sorted()):
             assert t1.tags == t2.tags
             assert t1.almost_equals(t2)
+
+    def test_select_tensors_mode(self):
+        A, B, C = (rand_tensor((2, 2), 'ab', tags={'0', 'X'}),
+                   rand_tensor((2, 2), 'bc', tags={'1', 'X', 'Y'}),
+                   rand_tensor((2, 3), 'cd', tags={'2', 'Y'}))
+        tn = A & B & C
+
+        ts = tn.select_tensors(('X', 'Y'), mode='all')
+        assert len(ts) == 1
+        assert not any(map(A.almost_equals, ts))
+        assert any(map(B.almost_equals, ts))
+        assert not any(map(C.almost_equals, ts))
+
+        ts = tn.select_tensors(('X', 'Y'), mode='any')
+        assert len(ts) == 3
+        assert any(map(A.almost_equals, ts))
+        assert any(map(B.almost_equals, ts))
+        assert any(map(C.almost_equals, ts))
+
+    def test_replace_with_identity(self):
+        A, B, C, D = (rand_tensor((2, 3, 4), 'abc', tags=['I0']),
+                      rand_tensor((4, 5, 6), 'cde', tags=['I1']),
+                      rand_tensor((5, 6, 7), 'def', tags=['I2']),
+                      rand_tensor((7,), 'f', tags=['I3']))
+
+        tn = (A & B & C & D)
+
+        with pytest.raises(ValueError):
+            tn.replace_with_identity(('I1', 'I2'), inplace=True)
+
+        tn['I2'] = rand_tensor((5, 6, 4), 'def', tags=['I2'])
+        tn['I3'] = rand_tensor((4,), 'f', tags=['I3'])
+
+        tn1 = tn.replace_with_identity(('I1', 'I2'))
+        assert len(tn1.tensors) == 2
+        x = tn1 ^ ...
+        assert set(x.inds) == {'a', 'b'}
+
+        A, B, C = (rand_tensor((2, 2), 'ab', tags={'0'}),
+                   rand_tensor((2, 2), 'bc', tags={'1'}),
+                   rand_tensor((2, 3), 'cd', tags={'2'}))
+
+        tn = A & B & C
+
+        tn2 = tn.replace_with_identity('1')
+        assert len(tn2.tensors) == 2
+        x = tn2 ^ ...
+        assert set(x.inds) == {'a', 'd'}
+
+    def test_partition(self):
+        k = MPS_rand_state(10, 7, site_tag_id='Q{}', structure_bsz=4)
+        where = ['Q{}'.format(i) for i in range(10) if i % 2 == 1]
+        k.add_tag('odd', where=where, mode='any')
+
+        tn_even, tn_odd = k.partition('odd')
+
+        assert len(tn_even.tensors) == len(tn_odd.tensors) == 5
+
+        assert tn_even.structure == 'Q{}'
+        assert tn_even.structure_bsz == 4
+        assert tn_odd.structure == 'Q{}'
+        assert tn_odd.structure_bsz == 4
+
+        assert (tn_even & tn_odd).sites == range(10)

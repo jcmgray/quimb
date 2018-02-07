@@ -158,3 +158,20 @@ def three_line_multi_print(l1, l2, l3, max_width=None):
                 print("...", l2[i * max_width:(i + 1) * max_width], "...")
                 print("   ", l3[i * max_width:(i + 1) * max_width], "   ")
                 print(("{:^" + str(max_width) + "}").format("..."))
+
+
+def functions_equal(fn1, fn2):
+    """Check equality of the code in ``fn1`` and ``fn2``.
+    """
+
+    try:
+        code1 = fn1.__code__.co_code
+    except AttributeError:
+        code1 = fn1.__func__.__code__.co_code
+
+    try:
+        code2 = fn2.__code__.co_code
+    except AttributeError:
+        code2 = fn2.__func__.__code__.co_code
+
+    return code1 == code2

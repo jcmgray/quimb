@@ -7,7 +7,7 @@ import copy
 import itertools
 import string
 import uuid
-import fnmatch
+import re
 
 from cytoolz import (
     unique,
@@ -20,7 +20,7 @@ import numpy as np
 
 from ..accel import prod, njit, realify_scalar
 from ..linalg.base_linalg import norm_fro_dense
-from ..utils import raise_cant_find_library_function
+from ..utils import raise_cant_find_library_function, functions_equal
 
 try:
     import opt_einsum
@@ -120,7 +120,7 @@ def cached_einsum_expr(contract_str, *shapes):
                              memory_limit=2**28, optimize='greedy')
 
 
-def tensor_contract(*tensors, output_inds=None):
+def tensor_contract(*tensors, output_inds=None, return_expression=False):
     """Efficiently contract multiple tensors, combining their tags.
 
     Parameters
@@ -130,6 +130,9 @@ def tensor_contract(*tensors, output_inds=None):
     output_inds : sequence
         If given, the desired order of output indices, else defaults to the
         order they occur in the input indices.
+    return_expression : bool, optional
+        If ``True``, return the expression that performs the contraction, for
+        e.g. inspection of the order chosen.
 
     Returns
     -------
@@ -149,6 +152,10 @@ def tensor_contract(*tensors, output_inds=None):
 
     # perform the contraction
     expression = cached_einsum_expr(contract_str, *(t.shape for t in tensors))
+
+    if return_expression:
+        return expression
+
     o_array = expression(*(t.data for t in tensors))
 
     if not o_ix:
@@ -845,6 +852,11 @@ class Tensor(object):
         """
         return tensor_contract(self, other)
 
+    def graph(self, *args, **kwargs):
+        """Plot a graph of this tensor and its indices.
+        """
+        TensorNetwork((self,)).graph(*args, **kwargs)
+
     def __repr__(self):
         return "Tensor(shape={}, inds={}, tags={})".format(
             self.data.shape,
@@ -1030,7 +1042,7 @@ class TensorNetwork(object):
 
             if not (istensor or istensornetwork):
                 raise TypeError("TensorNetwork should be called as "
-                                "'TensorNetwork(tensors, ...)', where each "
+                                "`TensorNetwork(tensors, ...)`, where each "
                                 "object in 'tensors' is a Tensor or "
                                 "TensorNetwork.")
 
@@ -1047,21 +1059,7 @@ class TensorNetwork(object):
                 continue
 
             self._combine_sites(t)
-
-            for x in ('structure', 'nsites', 'structure_bsz'):
-                # check whether to inherit ... or compare properties
-                if getattr(t, x) is not None:
-
-                    # don't have prop yet -> inherit
-                    if getattr(self, x) is None:
-                        setattr(self, x, getattr(t, x))
-
-                    # both have prop, and don't match -> raise
-                    elif getattr(t, x) != getattr(self, x):
-                        raise ValueError(
-                            "Conflicting values found on tensor networks for "
-                            "property {}. First value: {}, second value: {}"
-                            .format(x, getattr(self, x), getattr(t, x)))
+            self._combine_properties(t)
 
             if check_collisions:
                 for nm, tsr in t.tensor_index.items():
@@ -1081,13 +1079,36 @@ class TensorNetwork(object):
             else:
                 if self.nsites is None:
                     raise ValueError("The total number of sites, ``nsites`` "
-                                     "must be specifed when a custom subset, "
+                                     "must be specified when a custom subset, "
                                      "i.e. ``sites``, is.")
                 self.sites = self.sites
 
             # set default blocksize
             if self.structure_bsz is None:
-                self.structure_bsz = 3
+                self.structure_bsz = 5
+
+    def _combine_properties(self, other):
+        props_equals = (('structure', lambda u, v: u == v),
+                        ('nsites', lambda u, v: u == v),
+                        ('structure_bsz', lambda u, v: u == v),
+                        ('contract_structured_all', functions_equal))
+
+        for prop, equal in props_equals:
+
+            # check whether to inherit ... or compare properties
+            u, v = getattr(self, prop, None), getattr(other, prop, None)
+
+            if v is not None:
+                # don't have prop yet -> inherit
+                if u is None:
+                    setattr(self, prop, v)
+
+                # both have prop, and don't match -> raise
+                elif not equal(u, v):
+                    raise ValueError(
+                        "Conflicting values found on tensor networks for "
+                        "property {}. First value: {}, second value: {}"
+                        .format(prop, u, v))
 
     def __and__(self, other):
         """Combine this tensor network with more tensors, without contracting.
@@ -1149,129 +1170,24 @@ class TensorNetwork(object):
         self.add_tensor(tensor, virtual=True)
         return self
 
-    def pop_tensor(self, name):
-        """Remove a tensor from this network, returning said tensor.
+    def calc_nsites(self):
+        """Calculate how many tags there are which match ``structure``.
         """
-        # remove the tensor from the tag index
-        for tag in self.tensor_index[name].tags:
-            self.tag_index[tag].discard(name)
+        return len(re.findall(self.structure.format("(\d+)"), str(self.tags)))
 
-        # pop the tensor itself
-        return self.tensor_index.pop(name)
-
-    def del_tensor(self, name):
-        """Delete a tensor from this network.
+    def calc_sites(self):
+        """Calculate with sites this TensorNetwork contain based on its
+        ``structure``.
         """
-        # remove the tensor from the tag index
-        for tag in self.tensor_index[name].tags:
-            tagged_names = self.tag_index[tag]
-            tagged_names.discard(name)
-            if not tagged_names:
-                del self.tag_index[tag]
+        matches = re.findall(self.structure.format("(\d+)"), str(self.tags))
+        sites = sorted(map(int, matches))
 
-        # delete the tensor itself
-        del self.tensor_index[name]
+        # check if can convert to contiguous range
+        mn, mx = min(sites), max(sites) + 1
+        if len(sites) == mx - mn:
+            sites = range(mn, mx)
 
-    def add_tag(self, tag):
-        """Add tag to every tensor in this network.
-        """
-        names = set()
-        for n, t in self.tensor_index.items():
-            names.add(n)
-            t.tags.add(tag)
-        self.tag_index[tag] = names
-
-    def drop_tags(self, tags):
-        """Remove a tag from any tensors in this network which have it.
-        """
-        for t in self.tensor_index.values():
-            t.drop_tags(tags)
-        if isinstance(tags, str):
-            del self.tag_index[tags]
-        else:
-            for tag in tags:
-                del self.tag_index[tag]
-
-    @property
-    def tags(self):
-        return tuple(self.tag_index.keys())
-
-    @property
-    def tensors(self):
-        return tuple(self.tensor_index.values())
-
-    def tensors_sorted(self):
-        """Return a tuple of tensors sorted by their respective tags, such that
-        the tensors of two networks with the same tag structure can be
-        iterated over pairwise.
-        """
-        ts_and_sorted_tags = [(tensor, sorted(tensor.tags))
-                              for tensor in self.tensor_index.values()]
-        ts_and_sorted_tags.sort(key=lambda x: x[1])
-        return tuple(x[0] for x in ts_and_sorted_tags)
-
-    def __getitem__(self, tags):
-        """Get the tensor(s) associated with ``tags``.
-
-        Parameters
-        ----------
-        tags : str or sequence of str
-            The tags used to select the tensor(s)
-
-        Returns
-        -------
-        Tensor or sequence of Tensors
-        """
-        try:
-            names = self.tag_index[tags]
-        except (KeyError, TypeError):
-            names = functools.reduce(
-                operator.and_, (self.tag_index[t] for t in tags))
-
-        tensors = tuple(self.tensor_index[name] for name in names)
-
-        if len(names) == 1:
-            return tensors[0]
-
-        return tensors
-
-    def __setitem__(self, tags, tensor):
-        """Set the single tensor uniquely associated with ``tags``.
-        """
-        try:
-            names = self.tag_index[tags]
-        except (KeyError, TypeError):
-            names = functools.reduce(
-                operator.and_, (self.tag_index[t] for t in tags))
-
-        if len(names) != 1:
-            raise KeyError("'TensorNetwork.__setitem__' is meant for a single "
-                           "existing tensor only - found {} with tag(s) '{}'."
-                           .format(len(names), tags))
-
-        if not isinstance(tensor, Tensor):
-            raise TypeError("Can only set value with a new 'Tensor'.")
-
-        name, = names
-
-        # check if tags match, else need to modify TN structure
-        if self.tensor_index[name].tags != tensor.tags:
-            self.del_tensor(name)
-            self.add_tensor(tensor, name, virtual=True)
-        else:
-            self.tensor_index[name] = tensor
-
-    def __delitem__(self, tags):
-        """Delete any tensors associated with ``tags``.
-        """
-        try:
-            names = self.tag_index[tags]
-        except (KeyError, TypeError):
-            names = functools.reduce(
-                operator.and_, (self.tag_index[t] for t in tags))
-
-        for name in copy.copy(names):
-            self.del_tensor(name)
+        return sites
 
     def _combine_sites(self, other):
         """Correctly combine the sites list of two TNs.
@@ -1286,195 +1202,58 @@ class TensorNetwork(object):
                 if len(self.sites) == mx - mn:
                     self.sites = range(mn, mx)
 
-    def calc_nsites(self):
-        """Calculate how many tags there are which match ``structure``.
+    def _pop_tensor(self, name):
+        """Remove a tensor from this network, returning said tensor.
         """
-        return len(fnmatch.filter(self.tag_index.keys(),
-                                  self.structure.format("*")))
+        # remove the tensor from the tag index
+        for tag in self.tensor_index[name].tags:
+            tagged_names = self.tag_index[tag]
+            tagged_names.discard(name)
+            if not tagged_names:
+                del self.tag_index[tag]
 
-    def filter_by_tags(self, tags, inplace=False):
-        """Split this TN into a list of tensors containing any of ``tags`` and
-        a TensorNetwork of the the rest.
+        # pop the tensor itself
+        return self.tensor_index.pop(name)
 
-        Parameters
-        ----------
-        tags : sequence of hashable
-            The list of tags to filter the tensors by. Use ``...``
-            (``Ellipsis``) to contract all.
-        inplace : bool, optional
-            If true, remove tagged tensors from self, else create a new network
-            with the tensors removed.
-
-        Returns
-        -------
-        (u_tn, t_ts) : (TensorNetwork, Tensor sequence)
-            The untagged tensor network, and the sequence of Tensors to
-            contract.
+    def _del_tensor(self, name):
+        """Delete a tensor from this network.
         """
+        # remove the tensor from the tag index
+        for tag in self.tensor_index[name].tags:
+            tagged_names = self.tag_index[tag]
+            tagged_names.discard(name)
+            if not tagged_names:
+                del self.tag_index[tag]
 
-        # contract all
-        if tags is ...:
-            return None, self.tensor_index.values()
+        # delete the tensor itself
+        del self.tensor_index[name]
 
-        # Else get the locations of where each tag is found on tensor
+    def add_tag(self, tag, where=None, mode='all'):
+        """Add tag to every tensor in this network, or if ``where`` is
+        specified, the tensors matching those tags -- i.e. adds the tag to
+        all tensors in ``self.select_tensors(where, mode=mode)``.
+        """
+        names = self._get_names_from_tags(where, mode=mode)
+        names_tensors = ((n, self.tensor_index[n]) for n in names)
+
+        for n, t in names_tensors:
+            t.tags.add(tag)
+
+        try:
+            self.tag_index[tag] |= names
+        except KeyError:
+            self.tag_index[tag] = set(names)
+
+    def drop_tags(self, tags):
+        """Remove a tag from any tensors in this network which have it.
+        """
+        for t in self.tensor_index.values():
+            t.drop_tags(tags)
         if isinstance(tags, str):
-            tagged_names = self.tag_index[tags]
+            del self.tag_index[tags]
         else:
-            tagged_names = set_join(self.tag_index[t] for t in tags)
-
-        # check if all tensors have been tagged
-        if len(tagged_names) == len(self.tensor_index):
-            return None, self.tensor_index.values()
-
-        # Copy untagged to new network, and pop tagged tensors from this
-        if inplace:
-            untagged_tn = self
-        else:
-            untagged_tn = self.copy()
-        tagged_ts = tuple(map(untagged_tn.pop_tensor, sorted(tagged_names)))
-
-        return untagged_tn, tagged_ts
-
-    def _contract_tags(self, tags, inplace=False):
-        untagged_tn, tagged_ts = self.filter_by_tags(tags, inplace=inplace)
-
-        if not tagged_ts:
-            raise ValueError("No tags were found - nothing to contract. "
-                             "(Change this to a no-op maybe?)")
-
-        if untagged_tn:
-            untagged_tn.add_tensor(tensor_contract(*tagged_ts), virtual=True)
-            return untagged_tn
-
-        return tensor_contract(*tagged_ts)
-
-    def parse_tag_slice(self, tag_slice):
-        """Take a slice object, and work out its implied start stop and step,
-        taking into account counting negatively from the end etc.
-        """
-        if tag_slice.start is None:
-            start = 0
-        elif tag_slice.start is ...:
-            start = self.nsites - 1
-        elif tag_slice.start < 0:
-            start = self.nsites + tag_slice.start
-        else:
-            start = tag_slice.start
-
-        if (tag_slice.stop is ...) or (tag_slice.stop is None):
-            stop = self.nsites
-        elif tag_slice.stop < 0:
-            stop = self.nsites + tag_slice.stop
-        else:
-            stop = tag_slice.stop
-
-        step = 1 if stop > start else -1
-        return start, stop, step
-
-    def cumulative_contract(self, tags_seq, inplace=False):
-        """Cumulative contraction of tensor network. Contract the first set of
-        tags, then that set with the next set, then both of those with the next
-        and so forth. Could also be described as an manually ordered
-        contraction of all tags in ``tags_seq``.
-
-        Parameters
-        ----------
-        tags_seq : sequence of sequence of hashable
-            The list of tag-groups to cumulatively contract.
-
-        Returns
-        -------
-        TensorNetwork, Tensor or Scalar
-            The result of the contraction, still a TensorNetwork if the
-            contraction was only partial.
-        """
-        new_tn = self if inplace else self.copy()
-        ctags = set()
-
-        for tags in tags_seq:
-            # accumulate tags from each contractions
-            if isinstance(tags, str):
-                tags = {tags}
-            else:
-                tags = set(tags)
-
-            ctags |= tags
-
-            # peform the next contraction
-            new_tn = new_tn._contract_tags(ctags, inplace=True)
-
-            if isinstance(new_tn, Tensor) or np.isscalar(new_tn):
-                # nothing more to contract
-                break
-
-        return new_tn
-
-    def __rshift__(self, tags_seq):
-        """Overload of '>>' for TensorNetwork.cumulative_contract.
-        """
-        return self.cumulative_contract(tags_seq)
-
-    def __irshift__(self, tags_seq):
-        """Overload of '>>=' for inplace TensorNetwork.cumulative_contract.
-        """
-        return self.cumulative_contract(tags_seq, inplace=True)
-
-    def _structured_contract(self, tags, inplace=False):
-        # check for all sites
-        if tags is ...:
-            tags = slice(0, self.nsites)
-
-        # filter sites by the slice, but also which sites are present at all
-        tags_seq = (self.structure.format(i)
-                    for i in range(*self.parse_tag_slice(tags))
-                    if i in self.sites)
-
-        # partition sites into `structure_bsz` groups
-        if self.structure_bsz > 1:
-            tags_seq = partition_all(self.structure_bsz, tags_seq)
-
-        # contract each block of sites cumulatively
-        return self.cumulative_contract(tags_seq, inplace=inplace)
-
-    def contract(self, tags=..., inplace=False):
-        """Contract some, or all, of the tensors in this network.
-
-        Parameters
-        ----------
-        tags : sequence of hashable
-            Any tensors with any of these tags with be contracted. Set to
-            ``...`` (``Ellipsis``) to contract all tensors, the default.
-
-        Returns
-        -------
-        TensorNetwork, Tensor or Scalar
-            The result of the contraction, still a TensorNetwork if the
-            contraction was only partial.
-        """
-
-        # Check for a structured strategy for performing contraction...
-        if self.structure is not None:
-            # ... but only use for total or slice tags
-            if (tags is ...) or isinstance(tags, slice):
-                return self._structured_contract(tags, inplace=inplace)
-
-        # Else just contract those tensors specified by tags.
-        return self._contract_tags(tags, inplace=inplace)
-
-    def __xor__(self, tags):
-        """Overload of '^' for TensorNetwork.contract.
-        """
-        return self.contract(tags)
-
-    def __ixor__(self, tags):
-        """Overload of '^=' for inplace TensorNetwork.contract.
-        """
-        return self.contract(tags, inplace=True)
-
-    def __matmul__(self, other):
-        """Overload "@" to mean full contraction with another network.
-        """
-        return TensorNetwork((self, other)) ^ ...
+            for tag in tags:
+                del self.tag_index[tag]
 
     def retag(self, tag_map, inplace=False):
         """Rename tags for all tensors in this network, optionally in-place.
@@ -1541,14 +1320,6 @@ class TensorNetwork(object):
         tensor.modify(data=tensor.data * x)
         return multiplied
 
-    def squeeze(self, inplace=False):
-        """Drop singlet bonds and dimensions from this tensor network.
-        """
-        tn = self if inplace else self.copy()
-        for t in tn.tensor_index.values():
-            t.squeeze(inplace=True)
-        return tn
-
     def __mul__(self, other):
         """Scalar multiplication.
         """
@@ -1574,7 +1345,437 @@ class TensorNetwork(object):
         """
         return self.multiply(1 / other, inplace=True)
 
+    @property
+    def tensors(self):
+        return tuple(self.tensor_index.values())
+
+    def tensors_sorted(self):
+        """Return a tuple of tensors sorted by their respective tags, such that
+        the tensors of two networks with the same tag structure can be
+        iterated over pairwise.
+        """
+        ts_and_sorted_tags = [(tensor, sorted(tensor.tags))
+                              for tensor in self.tensor_index.values()]
+        ts_and_sorted_tags.sort(key=lambda x: x[1])
+        return tuple(x[0] for x in ts_and_sorted_tags)
+
+    # ----------------- selecting and splitting the network ----------------- #
+
+    def _get_names_from_tags(self, tags, mode='all'):
+        """Return the set of names that match ``tags``. If ``mode='all'``,
+        each tensor must contain every tag. If ``mode='any'``, each tensor
+        only need contain one of the tags.
+        """
+        if tags is None:
+            return set(self.tensor_index)
+
+        try:
+            return self.tag_index[tags]
+        except (KeyError, TypeError):
+            combine = {'all': operator.and_, 'any': operator.or_}[mode]
+            return functools.reduce(combine, (self.tag_index[t] for t in tags))
+
+    def select_tensors(self, tags, mode='all'):
+        """Return the sequence of tensors that match ``tags``. If
+        ``mode='all'``, each tensor must contain every tag. If ``mode='any'``,
+        each tensor can contain any of the tags.
+
+        Parameters
+        ----------
+        tags : hashable or sequence of hashable
+            The tag or tag sequence.
+        mode : {'all', 'any'}
+            Whether to require matching all or any of the tags.
+
+        Returns
+        -------
+        tagged_tensors : tuple of Tensor
+            The tagged tensors.
+
+        See Also
+        --------
+        partition, filter_by_tags
+        """
+        names = self._get_names_from_tags(tags, mode=mode)
+        return tuple(self.tensor_index[n] for n in names)
+
+    def __getitem__(self, tags):
+        """Get the tensor(s) associated with ``tags``. Only returns tensors
+        which match *all* of the tags.
+
+        Parameters
+        ----------
+        tags : str or sequence of str
+            The tags used to select the tensor(s)
+
+        Returns
+        -------
+        Tensor or sequence of Tensors
+        """
+        tensors = self.select_tensors(tags, mode='all')
+
+        if len(tensors) == 1:
+            return tensors[0]
+
+        return tensors
+
+    def __setitem__(self, tags, tensor):
+        """Set the single tensor uniquely associated with ``tags``.
+        """
+        names = self._get_names_from_tags(tags, mode='all')
+        if len(names) != 1:
+            raise KeyError("'TensorNetwork.__setitem__' is meant for a single "
+                           "existing tensor only - found {} with tag(s) '{}'."
+                           .format(len(names), tags))
+
+        if not isinstance(tensor, Tensor):
+            raise TypeError("Can only set value with a new 'Tensor'.")
+
+        name, = names
+
+        # check if tags match, else need to modify TN structure
+        if self.tensor_index[name].tags != tensor.tags:
+            self._del_tensor(name)
+            self.add_tensor(tensor, name, virtual=True)
+        else:
+            self.tensor_index[name] = tensor
+
+    def __delitem__(self, tags):
+        """Delete any tensors associated with ``tags``.
+        """
+        names = self._get_names_from_tags(tags, mode='all')
+        for name in tuple(names):
+            self._del_tensor(name)
+
+    def partition(self, tags, mode='any'):
+        """Split this TN into two, based on which tensors have any or all of
+        ``tags``. Unlike ``filter_by_tags``, both results are TNs which
+        inherit the structure of the initial TN.
+
+        Parameters
+        ----------
+        tags : sequence of hashable
+            The tags to split the network with.
+        mode : {'any', 'all'}
+            Whether to split based on matching any or all of the tags.
+
+        Returns
+        -------
+        untagged_tn, tagged_tn : (TensorNetwork, TensorNetwork)
+            The untagged and tagged tensor networs.
+
+        See Also
+        --------
+        filter_by_tags, select_tensors
+        """
+        tagged_names = self._get_names_from_tags(tags, mode=mode)
+
+        t1s, t2s = [], []
+        for name, tensor in self.tensor_index.items():
+            (t2s if name in tagged_names else t1s).append(tensor)
+
+        kws = {'check_collisions': False, 'structure': self.structure,
+               'structure_bsz': self.structure_bsz, 'nsites': self.nsites}
+
+        t1, t2 = TensorNetwork(t1s, **kws), TensorNetwork(t2s, **kws)
+
+        if self.structure is not None:
+            t1.sites = t1.calc_sites()
+            t2.sites = t2.calc_sites()
+
+        return t1, t2
+
+    def filter_by_tags(self, tags, inplace=False, mode='any'):
+        """Split this TN into a list of tensors containing any or all of
+        ``tags`` and a ``TensorNetwork`` of the the rest.
+
+        Parameters
+        ----------
+        tags : sequence of hashable
+            The list of tags to filter the tensors by. Use ``...``
+            (``Ellipsis``) to filter all.
+        inplace : bool, optional
+            If true, remove tagged tensors from self, else create a new network
+            with the tensors removed.
+        mode : {'all', 'any'}
+            Whether to require matching all or any of the tags.
+
+        Returns
+        -------
+        (u_tn, t_ts) : (TensorNetwork, tuple of Tensors)
+            The untagged tensor network, and the sequence of Tensors to
+            contract.
+
+        See Also
+        --------
+        partition, select_tensors
+        """
+
+        # contract all
+        if tags is ...:
+            return None, self.tensor_index.values()
+
+        # Else get the locations of where each tag is found on tensor
+        tagged_names = self._get_names_from_tags(tags, mode=mode)
+
+        # check if all tensors have been tagged
+        if len(tagged_names) == len(self.tensor_index):
+            return None, self.tensor_index.values()
+
+        # Copy untagged to new network, and pop tagged tensors from this
+        if inplace:
+            untagged_tn = self
+        else:
+            untagged_tn = self.copy()
+        tagged_ts = tuple(map(untagged_tn._pop_tensor, sorted(tagged_names)))
+
+        return untagged_tn, tagged_ts
+
+    def replace_with_identity(self, where, inplace=False, mode='any'):
+        """Replace all tensors marked by ``where`` with an
+        identity. E.g. if ``X`` denote ``where`` tensors::
+
+
+            ---1  X--X--2---         ---1---2---
+               |  |  |  |      -->          |
+               X--X--X  |                   |
+
+        """
+        tn = self if inplace else self.copy()
+
+        if not where:
+            return tn
+
+        (dl, il), (dr, ir) = TensorNetwork(
+            self.select_tensors(where, mode=mode)).outer_dims_inds()
+
+        if dl != dr:
+            raise ValueError(
+                "Can only replace_with_identity when the remaining indices "
+                "have matching dimensions, but {} != {}.".format(dl, dr))
+
+        for t in where:
+            del tn[t]
+
+        tn.reindex({il: ir}, inplace=True)
+        return tn
+
+    # ----------------------- contracting the network ----------------------- #
+
+    def contract_tags(self, tags, inplace=False, mode='any', **opts):
+        """Contract the tensors that match any or all of ``tags``.
+
+        Parameters
+        ----------
+        tags : sequence of hashable
+            The list of tags to filter the tensors by. Use ``...``
+            (``Ellipsis``) to contract all.
+        inplace : bool, optional
+            Whether to perform the contraction inplace.
+        mode : {'all', 'any'}
+            Whether to require matching all or any of the tags.
+
+        Returns
+        -------
+        TensorNetwork, Tensor or scalar
+            The result of the contraction, still a ``TensorNetwork`` if the
+            contraction was only partial.
+
+        See Also
+        --------
+        contract, contract_cumulative, contract_structured
+        """
+        untagged_tn, tagged_ts = self.filter_by_tags(
+            tags, inplace=inplace, mode=mode)
+
+        if not tagged_ts:
+            raise ValueError("No tags were found - nothing to contract. "
+                             "(Change this to a no-op maybe?)")
+
+        contracted = tensor_contract(*tagged_ts, **opts)
+
+        if untagged_tn is None:
+            return contracted
+
+        untagged_tn.add_tensor(contracted, virtual=True)
+        return untagged_tn
+
+    def contract_cumulative(self, tags_seq, inplace=False, **opts):
+        """Cumulative contraction of tensor network. Contract the first set of
+        tags, then that set with the next set, then both of those with the next
+        and so forth. Could also be described as an manually ordered
+        contraction of all tags in ``tags_seq``.
+
+        Parameters
+        ----------
+        tags_seq : sequence of sequence of hashable
+            The list of tag-groups to cumulatively contract.
+        inplace : bool, optional
+            Whether to perform the contraction inplace.
+
+        Returns
+        -------
+        TensorNetwork, Tensor or scalar
+            The result of the contraction, still a ``TensorNetwork`` if the
+            contraction was only partial.
+
+        See Also
+        --------
+        contract, contract_tags, contract_structured
+        """
+        tn = self if inplace else self.copy()
+        ctags = set()
+
+        for tags in tags_seq:
+            # accumulate tags from each contractions
+            if isinstance(tags, str):
+                tags = {tags}
+            else:
+                tags = set(tags)
+
+            ctags |= tags
+
+            # peform the next contraction
+            tn = tn.contract_tags(ctags, inplace=True, mode='any', **opts)
+
+            if isinstance(tn, Tensor) or np.isscalar(tn):
+                # nothing more to contract
+                break
+
+        return tn
+
+    def parse_tag_slice(self, tag_slice):
+        """Take a slice object, and work out its implied start, stop and step,
+        taking into account counting negatively from the end etc.
+        """
+        if tag_slice.start is None:
+            start = 0
+        elif tag_slice.start is ...:
+            start = self.nsites - 1
+        elif tag_slice.start < 0:
+            start = self.nsites + tag_slice.start
+        else:
+            start = tag_slice.start
+
+        if (tag_slice.stop is ...) or (tag_slice.stop is None):
+            stop = self.nsites
+        elif tag_slice.stop < 0:
+            stop = self.nsites + tag_slice.stop
+        else:
+            stop = tag_slice.stop
+
+        step = 1 if stop > start else -1
+        return start, stop, step
+
+    def contract_structured(self, tag_slice, inplace=False, **opts):
+        """Perform a structured contraction, translating ``tag_slice`` from a
+        ``slice`` or `...` to a cumulative sequence of tags.
+
+        Parameters
+        ----------
+        tag_slice : slice or ...
+            The range of sites, or `...` for all.
+        inplace : bool, optional
+            Whether to perform the contraction inplace.
+
+        Returns
+        -------
+        TensorNetwork, Tensor or scalar
+            The result of the contraction, still a ``TensorNetwork`` if the
+            contraction was only partial.
+
+        See Also
+        --------
+        contract, contract_tags, contract_cumulative
+        """
+        # check for all sites
+        if tag_slice is ...:
+
+            # check for a custom structured full contract sequence
+            if hasattr(self, "contract_structured_all"):
+                return self.contract_structured_all(
+                    self, inplace=inplace, **opts)
+
+            # else slice over all sites
+            tag_slice = slice(0, self.nsites)
+
+        # filter sites by the slice, but also which sites are present at all
+        tags_seq = (self.structure.format(i)
+                    for i in range(*self.parse_tag_slice(tag_slice))
+                    if i in self.sites)
+
+        # partition sites into `structure_bsz` groups
+        if self.structure_bsz > 1:
+            tags_seq = partition_all(self.structure_bsz, tags_seq)
+
+        # contract each block of sites cumulatively
+        return self.contract_cumulative(tags_seq, inplace=inplace, **opts)
+
+    def contract(self, tags=..., inplace=False, **opts):
+        """Contract some, or all, of the tensors in this network. This method
+        dispatches to ``contract_structured`` or ``contract_tags``.
+
+        Parameters
+        ----------
+        tags : sequence of hashable
+            Any tensors with any of these tags with be contracted. Set to
+            ``...`` (``Ellipsis``) to contract all tensors, the default.
+        inplace : bool, optional
+            Whether to perform the contraction inplace.
+        opts
+            Passed to ``tensor_contract``.
+
+        Returns
+        -------
+        TensorNetwork, Tensor or scalar
+            The result of the contraction, still a ``TensorNetwork`` if the
+            contraction was only partial.
+
+        See Also
+        --------
+        contract_structured, contract_tags, contract_cumulative
+        """
+
+        # Check for a structured strategy for performing contraction...
+        if self.structure is not None:
+
+            # but only use for total or slice tags
+            if (tags is ...) or isinstance(tags, slice):
+                return self.contract_structured(tags, inplace=inplace, **opts)
+
+        # Else just contract those tensors specified by tags.
+        return self.contract_tags(tags, inplace=inplace, **opts)
+
+    def __rshift__(self, tags_seq):
+        """Overload of '>>' for TensorNetwork.contract_cumulative.
+        """
+        return self.contract_cumulative(tags_seq)
+
+    def __irshift__(self, tags_seq):
+        """Overload of '>>=' for inplace TensorNetwork.contract_cumulative.
+        """
+        return self.contract_cumulative(tags_seq, inplace=True)
+
+    def __xor__(self, tags):
+        """Overload of '^' for TensorNetwork.contract.
+        """
+        return self.contract(tags)
+
+    def __ixor__(self, tags):
+        """Overload of '^=' for inplace TensorNetwork.contract.
+        """
+        return self.contract(tags, inplace=True)
+
+    def __matmul__(self, other):
+        """Overload "@" to mean full contraction with another network.
+        """
+        return TensorNetwork((self, other)) ^ ...
+
     # --------------- information about indices and dimensions -------------- #
+
+    @property
+    def tags(self):
+        return tuple(self.tag_index.keys())
 
     def all_dims_inds(self):
         """Return a list of all dimensions, and the corresponding list of
@@ -1606,6 +1807,14 @@ class TensorNetwork(object):
         """
         return tuple(di[1] for di in self.outer_dims_inds())
 
+    def squeeze(self, inplace=False):
+        """Drop singlet bonds and dimensions from this tensor network.
+        """
+        tn = self if inplace else self.copy()
+        for t in tn.tensor_index.values():
+            t.squeeze(inplace=True)
+        return tn
+
     def max_bond(self):
         """Return the size of the largest bond in this network.
         """
@@ -1620,7 +1829,7 @@ class TensorNetwork(object):
     # ------------------------------ printing ------------------------------- #
 
     def graph(tn, color=None, label_inds=None, label_tags=None,
-              iterations=200, figsize=(6, 6), **plot_opts):
+              iterations=200, figsize=(6, 6), legend=True, **plot_opts):
         """Plot this tensor network as a networkx graph using matplotlib,
         with edge width corresponding to bond dimension.
 
@@ -1685,8 +1894,24 @@ class TensorNetwork(object):
         elif isinstance(color, str):
             colors = {color: plt.get_cmap('tab10').colors[0]}
         else:
-            colors = {tag: c for
-                      tag, c in zip(color, plt.get_cmap('tab10').colors)}
+
+            # choose longest nice seq of colors
+            if len(color) > 10:
+                rgbs = plt.get_cmap('tab20').colors
+            else:
+                rgbs = plt.get_cmap('tab10').colors
+
+            # extend
+            extras = [plt.get_cmap(i).colors
+                      for i in ('Dark2', 'Set2', 'Set3', 'Accent', 'Set1')]
+
+            # but also resort to random if too long
+            def get_rand_colors():
+                while True:
+                    yield tuple(np.random.rand(3))
+            rgbs = concat((rgbs, *extras, get_rand_colors()))
+
+            colors = {tag: c for tag, c in zip(color, rgbs)}
 
         for i, t1 in enumerate(ts):
             G.node[i]['color'] = None
@@ -1725,7 +1950,7 @@ class TensorNetwork(object):
                 with_labels=True, width=edge_weights, **plot_opts)
 
         # create legend
-        if colors:
+        if colors and legend:
             handles = []
             for color in colors.values():
                 handles += [plt.Line2D([0], [0], marker='o', color=color,
@@ -1734,8 +1959,8 @@ class TensorNetwork(object):
             # needed in case '_' is the first character
             lbls = [" {}".format(l) for l in colors]
 
-            plt.legend(handles, lbls, loc='center left',
-                       bbox_to_anchor=(1, 0.5))
+            plt.legend(handles, lbls, ncol=max(int(len(handles) / 20), 1),
+                       loc='center left', bbox_to_anchor=(1, 0.5))
 
         plt.show()
 
