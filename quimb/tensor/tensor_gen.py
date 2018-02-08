@@ -10,13 +10,29 @@ from .tensor_core import Tensor
 from .tensor_1d import MatrixProductState, MatrixProductOperator
 
 
-def randn(shape, dtype):
-    if dtype in (float, np.float_):
-        return np.random.randn(*shape)
-    elif dtype in (complex, np.complex_):
-        return np.random.randn(*shape) + 1.0j * np.random.randn(*shape)
+def randn(shape, dtype=np.complex128):
+    """Generate normally distributed random array of certain shape and dtype.
+    """
+    # real datatypes
+    if dtype in (float, np.float64, np.float32, np.float16, np.float128):
+        x = np.random.randn(*shape)
+
+        # convert type if not the default
+        if dtype not in (float, np.float_):
+            x = x.astype(dtype)
+
+    # complex datatypes
+    elif dtype in (complex, np.complex128, np.complex64, np.complex256):
+        x = np.random.randn(*shape) + 1.0j * np.random.randn(*shape)
+
+        # convert type if not the default
+        if dtype not in (complex, np.complex_):
+            x = x.astype(dtype)
+
     else:
         raise TypeError("dtype not understood - should be float or complex.")
+
+    return x
 
 
 def rand_tensor(shape, inds, tags=None, dtype=complex):
