@@ -159,7 +159,9 @@ def tensor_contract(*tensors, output_inds=None, return_expression=False):
     o_array = expression(*(t.data for t in tensors))
 
     if not o_ix:
-        return realify_scalar(np.asscalar(o_array))
+        if isinstance(o_array, np.ndarray):
+            o_array = np.asscalar(o_array)
+        return realify_scalar(o_array)
 
     # unison of all tags
     o_tags = set_join(t.tags for t in tensors)

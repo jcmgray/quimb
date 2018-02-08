@@ -401,7 +401,6 @@ class TestTensorNetwork:
         assert 'c' in tn.tags
         assert tn[('blue', 'c')] is c
 
-
         assert 'red' in tn.tags
         del tn['red']
         assert 'red' not in tn.tags
@@ -629,7 +628,7 @@ class TestTensorNetwork:
         assert stn['I2'].shape == (4,)
 
         x2 = stn ^ ...
-        assert_allclose(x1.data, x2.data)
+        assert_allclose(x1.data, x2)  # x2 should be scalar already
 
     def test_tensors_sorted(self):
         tn1, tn2 = TensorNetwork([]), TensorNetwork([])
