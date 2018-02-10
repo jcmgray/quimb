@@ -10,7 +10,7 @@ from .tensor_core import Tensor
 from .tensor_1d import MatrixProductState, MatrixProductOperator
 
 
-def randn(shape, dtype=np.complex128):
+def randn(shape, dtype=float):
     """Generate normally distributed random array of certain shape and dtype.
     """
     # real datatypes
@@ -35,7 +35,7 @@ def randn(shape, dtype=np.complex128):
     return x
 
 
-def rand_tensor(shape, inds, tags=None, dtype=complex):
+def rand_tensor(shape, inds, tags=None, dtype=float):
     """Generate a random (complex) tensor with specified shape and inds.
     """
     data = randn(shape, dtype=dtype)
@@ -47,7 +47,7 @@ def rand_tensor(shape, inds, tags=None, dtype=complex):
 # --------------------------------------------------------------------------- #
 
 def MPS_rand_state(n, bond_dim, phys_dim=2, normalize=True, cyclic=False,
-                   dtype=complex, **mps_opts):
+                   dtype=float, **mps_opts):
     """Generate a random matrix product state.
 
     Parameters
@@ -102,7 +102,7 @@ def MPS_product_state(arrays, **mps_opts):
     return MatrixProductState(mps_arrays, shape='lrp', **mps_opts)
 
 
-def MPS_computational_state(binary_str, **mps_opts):
+def MPS_computational_state(binary_str, dtype=float, **mps_opts):
     """A computational basis state in Matrix Product State form.
 
     Parameters
@@ -113,8 +113,8 @@ def MPS_computational_state(binary_str, **mps_opts):
         Supplied to MatrixProductState constructor.
     """
     array_map = {
-        '0': np.array([1., 0.]),
-        '1': np.array([0., 1.]),
+        '0': np.array([1., 0.], dtype=dtype),
+        '1': np.array([0., 1.], dtype=dtype),
     }
 
     def gen_arrays():
@@ -124,7 +124,7 @@ def MPS_computational_state(binary_str, **mps_opts):
     return MPS_product_state(tuple(gen_arrays()), **mps_opts)
 
 
-def MPS_neel_state(n, down_first=False, **mps_opts):
+def MPS_neel_state(n, down_first=False, dtype=float, **mps_opts):
     """Generate the neel state in Matrix Product State form.
 
     Parameters
@@ -139,25 +139,25 @@ def MPS_neel_state(n, down_first=False, **mps_opts):
     binary_str = "01" * (n // 2) + (n % 2 == 1) * "0"
     if down_first:
         binary_str = "1" + binary_str[:-1]
-    return MPS_computational_state(binary_str, **mps_opts)
+    return MPS_computational_state(binary_str, dtype=dtype, **mps_opts)
 
 
-def MPS_rand_computational_state(n, seed=None, **mps_opts):
+def MPS_rand_computational_state(n, seed=None, dtype=float, **mps_opts):
     if seed is not None:
         random.seed(seed)
 
     cstr = "".join(random.choice(('0', '1')) for _ in range(n))
-    return MPS_computational_state(cstr, **mps_opts)
+    return MPS_computational_state(cstr, dtype=dtype, **mps_opts)
 
 
-def MPS_zero_state(n, bond_dim=1, phys_dim=2, **mps_opts):
+def MPS_zero_state(n, bond_dim=1, phys_dim=2, dtype=float, **mps_opts):
     """The all-zeros MPS state, of given bond-dimension.
     """
     def gen_arrays():
-        yield np.zeros((bond_dim, phys_dim))
+        yield np.zeros((bond_dim, phys_dim), dtype=dtype)
         for _ in range(n - 2):
-            yield np.zeros((bond_dim, bond_dim, phys_dim))
-        yield np.zeros((bond_dim, phys_dim))
+            yield np.zeros((bond_dim, bond_dim, phys_dim), dtype=dtype)
+        yield np.zeros((bond_dim, phys_dim), dtype=dtype)
 
     return MatrixProductState(gen_arrays(), **mps_opts)
 
@@ -166,14 +166,16 @@ def MPS_zero_state(n, bond_dim=1, phys_dim=2, **mps_opts):
 #                                    MPOs                                     #
 # --------------------------------------------------------------------------- #
 
-def MPO_identity(n, phys_dim=2, **mpo_opts):
+def MPO_identity(n, phys_dim=2, dtype=float, **mpo_opts):
     """Generate an identity MPO of size ``n``.
     """
+    II = np.identity(phys_dim, dtype=dtype)
+
     def gen_arrays():
-        yield np.identity(phys_dim).reshape(1, phys_dim, phys_dim)
+        yield II.reshape(1, phys_dim, phys_dim)
         for _ in range(n - 2):
-            yield np.identity(phys_dim).reshape(1, 1, phys_dim, phys_dim)
-        yield np.identity(phys_dim).reshape(1, phys_dim, phys_dim)
+            yield II.reshape(1, 1, phys_dim, phys_dim)
+        yield II.reshape(1, phys_dim, phys_dim)
 
     return MatrixProductOperator(gen_arrays(), **mpo_opts)
 
@@ -182,20 +184,20 @@ def MPO_identity_like(mpo, **mpo_opts):
     """Return an identity matrix operator with the same physical index and
     inds/tags as ``mpo``.
     """
-    return MPO_identity(n=mpo.nsites, phys_dim=mpo.phys_dim(),
+    return MPO_identity(n=mpo.nsites, phys_dim=mpo.phys_dim(), dtype=mpo.dtype,
                         site_tag_id=mpo.site_tag_id,
                         upper_ind_id=mpo.upper_ind_id,
                         lower_ind_id=mpo.lower_ind_id, **mpo_opts)
 
 
-def MPO_zeros(n, phys_dim=2, **mpo_opts):
+def MPO_zeros(n, phys_dim=2, dtype=float, **mpo_opts):
     """Generate a zeros MPO of size ``n``.
     """
     def gen_arrays():
-        yield np.zeros((1, phys_dim, phys_dim))
+        yield np.zeros((1, phys_dim, phys_dim), dtype=dtype)
         for _ in range(n - 2):
-            yield np.zeros((1, 1, phys_dim, phys_dim))
-        yield np.zeros((1, phys_dim, phys_dim))
+            yield np.zeros((1, 1, phys_dim, phys_dim), dtype=dtype)
+        yield np.zeros((1, phys_dim, phys_dim), dtype=dtype)
 
     return MatrixProductOperator(gen_arrays(), **mpo_opts)
 
@@ -205,13 +207,13 @@ def MPO_zeros_like(mpo, **mpo_opts):
     inds/tags as ``mpo``.
     """
     return MPO_zeros(n=mpo.nsites, phys_dim=mpo.phys_dim(),
-                     site_tag_id=mpo.site_tag_id,
+                     dtype=mpo.dtype, site_tag_id=mpo.site_tag_id,
                      upper_ind_id=mpo.upper_ind_id,
                      lower_ind_id=mpo.lower_ind_id, **mpo_opts)
 
 
 def MPO_rand(n, bond_dim, phys_dim=2, normalize=True,
-             dtype=complex, herm=False, **mpo_opts):
+             herm=False, dtype=float, **mpo_opts):
     """Generate a random matrix product state.
 
     Parameters
@@ -253,7 +255,7 @@ def MPO_rand(n, bond_dim, phys_dim=2, normalize=True,
 
 
 def MPO_rand_herm(n, bond_dim, phys_dim=2, normalize=True,
-                  dtype=complex, **mpo_opts):
+                  dtype=float, **mpo_opts):
     """Generate a random hermitian matrix product operator.
     See :class:`~quimb.tensor.tensor_gen.MPO_rand`.
     """

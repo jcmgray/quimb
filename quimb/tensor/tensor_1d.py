@@ -8,7 +8,6 @@ from .tensor_core import (
     Tensor,
     TensorNetwork,
     rand_uuid,
-    tensor_direct_product,
 )
 try:
     from opt_einsum import parser
@@ -631,6 +630,15 @@ class MatrixProductState(TensorNetwork1D):
         super().__init__(gen_tensors(), structure=site_tag_id, sites=sites,
                          nsites=nsites, check_collisions=False, **tn_opts)
 
+    _EXTRA_PROPS = ('_site_ind_id', '_site_tag_id')
+
+    def imprint(self, other):
+        """Coerce ``other'' into a ``MatrixProductState'' like ``self''.
+        """
+        for p in MatrixProductState._EXTRA_PROPS:
+            setattr(other, p, getattr(self, p))
+        other.__class__ = MatrixProductState
+
     def reindex_sites(self, new_id, where=None, inplace=False):
         """Update the physical site index labels to a new string specifier.
         Note that this doesn't change the stored id string with the TN.
@@ -697,8 +705,8 @@ class MatrixProductState(TensorNetwork1D):
                     reindex_map[other.bond(i, i + 1)] = summed.bond(i, i + 1)
                 other_tensor = other_tensor.reindex(reindex_map)
 
-            tensor_direct_product(summed_tensor, other_tensor, inplace=True,
-                                  sum_inds=summed.site_ind(i))
+            summed_tensor.direct_product(other_tensor, inplace=True,
+                                         sum_inds=summed.site_ind(i))
 
         if compress:
             summed.compress(**compress_opts)
@@ -1092,9 +1100,9 @@ class MatrixProductOperator(TensorNetwork1D):
                     reindex_map[other.bond(i, i + 1)] = summed.bond(i, i + 1)
                 other_tensor = other_tensor.reindex(reindex_map)
 
-            tensor_direct_product(summed_tensor, other_tensor, inplace=True,
-                                  sum_inds=(summed.upper_ind(i),
-                                            summed.lower_ind(i)))
+            summed_tensor.direct_product(other_tensor, inplace=True,
+                                         sum_inds=(summed.upper_ind(i),
+                                                   summed.lower_ind(i)))
 
         if compress:
             summed.compress(**compress_opts)

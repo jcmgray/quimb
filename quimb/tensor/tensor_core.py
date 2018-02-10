@@ -361,10 +361,6 @@ def _array_split_lq(x):
     return L.T, Q.T
 
 
-class BondError(Exception):
-    pass
-
-
 def array_direct_product(X, Y, sum_axes=()):
     """Direct product of two numpy.ndarrays.
 
@@ -607,8 +603,13 @@ class Tensor(object):
         return tn
 
     @functools.wraps(tensor_contract)
-    def contract(self, *others, output_inds=None):
-        return tensor_contract(self, *others, output_inds=output_inds)
+    def contract(self, *others, output_inds=None, **opts):
+        return tensor_contract(self, *others, output_inds=output_inds, **opts)
+
+    @functools.wraps(tensor_direct_product)
+    def direct_product(self, other, sum_inds=(), inplace=False):
+        return tensor_direct_product(
+            self, other, sum_inds=sum_inds, inplace=inplace)
 
     def split(self, left_inds, method='svd', cutoff=1e-10, cutoff_mode='sum2',
               max_bond=None, absorb='both', get=None):
@@ -959,12 +960,6 @@ class TensorNetwork(object):
     tensors : sequence of Tensor or TensorNetwork
         The objects to combine. The new network will be a *view* onto these
         constituent tensors unless explicitly copied.
-    check_collisions : bool, optional
-        If True, the default, then Tensors and TensorNetworks with double
-        indices which match another Tensor or TensorNetworks double indices
-        will have those indices' names mangled. Should be explicily turned off
-        when it is known that no collisions will take place -- i.e. when not
-        adding any new tensors.
     structure : str, optional
         A string, with integer format specifier, that describes how to range
         over the network's tags in order to contract it.
@@ -986,6 +981,12 @@ class TensorNetwork(object):
         The indices of the sites present in this network, defaults to
         ``range(nsites)``. But could be e.g. ``[0, 1, 4, 5, 7]`` if some sites
         have been removed.
+    check_collisions : bool, optional
+        If True, the default, then Tensors and TensorNetworks with double
+        indices which match another Tensor or TensorNetworks double indices
+        will have those indices' names mangled. Should be explicily turned off
+        when it is known that no collisions will take place -- i.e. when not
+        adding any new tensors.
     virtual : bool, optional
         Whether the TensorNetwork should be a *view* onto the tensors it is
         given, or a copy of them. E.g. if a virtual TN is constructed, any
@@ -1035,42 +1036,10 @@ class TensorNetwork(object):
         self.tensor_index = {}
         self.tag_index = {}
 
-        current_inner_inds = set()
-
+        inner_inds = set()
         for t in tensors:
-
-            istensor = isinstance(t, Tensor)
-            istensornetwork = isinstance(t, TensorNetwork)
-
-            if not (istensor or istensornetwork):
-                raise TypeError("TensorNetwork should be called as "
-                                "`TensorNetwork(tensors, ...)`, where each "
-                                "object in 'tensors' is a Tensor or "
-                                "TensorNetwork.")
-
-            if check_collisions:
-                # check for matching inner_indices -> need to re-index
-                new_inner_inds = set(t.inner_inds())
-                if current_inner_inds & new_inner_inds:  # any overlap
-                    t.reindex({old: rand_uuid() for old in new_inner_inds},
-                              inplace=True)
-                current_inner_inds |= t.inner_inds()
-
-            if istensor:
-                self.add_tensor(t, virtual=virtual)
-                continue
-
-            self._combine_sites(t)
-            self._combine_properties(t)
-
-            if check_collisions:
-                for nm, tsr in t.tensor_index.items():
-                    self.add_tensor(tsr, virtual=virtual, name=nm)
-            else:
-                for nm, tsr in t.tensor_index.items():
-                    self.tensor_index[nm] = tsr if virtual else tsr.copy()
-                self.tag_index = merge_with(
-                    set_join, self.tag_index, t.tag_index)
+            self.add(t, virtual=virtual, inner_inds=inner_inds,
+                     check_collisions=check_collisions)
 
         if self.structure:
             # set the list of indices of sites which are present
@@ -1158,18 +1127,73 @@ class TensorNetwork(object):
             except (KeyError, TypeError):
                 self.tag_index[tag] = {name}
 
-    def __iand__(self, tensor):
-        """Inplace, but non-virtual, addition of tensor to this network. It
-        should not have any conflicting indices.
+    def add_tensor_network(self, tn, virtual=False, check_collisions=True,
+                           inner_inds=None):
         """
-        self.add_tensor(tensor, virtual=False)
+        """
+        self._combine_sites(tn)
+        self._combine_properties(tn)
+
+        if check_collisions:  # add tensors individually
+            if inner_inds is None:
+                inner_inds = set(self.inner_inds())
+
+            # check for matching inner_indices -> need to re-index
+            tn_iix = set(tn.inner_inds())
+            b_ix = inner_inds & tn_iix
+
+            if b_ix:
+                g_ix = tn_iix - inner_inds
+                new_inds = {rand_uuid() for _ in range(len(b_ix))}
+                reind_map = dict(zip(b_ix, new_inds))
+                inner_inds |= new_inds
+                inner_inds |= g_ix
+            else:
+                inner_inds |= tn_iix
+
+            # add tensors, reindexing if necessary
+            for nm, tsr in tn.tensor_index.items():
+                if b_ix and any(i in reind_map for i in tsr.inds):
+                    tsr = tsr.reindex(reind_map, inplace=virtual)
+                self.add_tensor(tsr, virtual=virtual, name=nm)
+
+        else:  # directly add tensor/tag indexes
+            for nm, tsr in tn.tensor_index.items():
+                self.tensor_index[nm] = tsr if virtual else tsr.copy()
+
+            self.tag_index = merge_with(
+                set_join, self.tag_index, tn.tag_index)
+
+    def add(self, t, virtual=False, check_collisions=True, inner_inds=None):
+        """
+        """
+        istensor = isinstance(t, Tensor)
+        istensornetwork = isinstance(t, TensorNetwork)
+
+        if not (istensor or istensornetwork):
+            raise TypeError("TensorNetwork should be called as "
+                            "`TensorNetwork(tensors, ...)`, where each "
+                            "object in 'tensors' is a Tensor or "
+                            "TensorNetwork.")
+
+        if istensor:
+            self.add_tensor(t, virtual=virtual)
+        else:
+            self.add_tensor_network(t, virtual=virtual, inner_inds=inner_inds,
+                                    check_collisions=check_collisions)
+
+    def __iand__(self, tensor):
+        """Inplace, but non-virtual, addition of a Tensor or TensorNetwork to
+        this network. It should not have any conflicting indices.
+        """
+        self.add(tensor, virtual=False)
         return self
 
     def __ior__(self, tensor):
-        """Inplace, virtual, addition of tensor to this network. It
-        should not have any conflicting indices.
+        """Inplace, virtual, addition of a Tensor or TensorNetwork to this
+        network. It should not have any conflicting indices.
         """
-        self.add_tensor(tensor, virtual=True)
+        self.add(tensor, virtual=True)
         return self
 
     def calc_nsites(self):
@@ -1248,14 +1272,23 @@ class TensorNetwork(object):
 
     def drop_tags(self, tags):
         """Remove a tag from any tensors in this network which have it.
+        Inplace operation.
+
+        Parameters
+        ----------
+        tags : str or sequence of str
+            The tag or tags to drop.
         """
+        if isinstance(tags, str):
+            tags = (tags,)
+        else:
+            tags = tuple(tags)  # need to iterate over twice
+
         for t in self.tensor_index.values():
             t.drop_tags(tags)
-        if isinstance(tags, str):
-            del self.tag_index[tags]
-        else:
-            for tag in tags:
-                del self.tag_index[tag]
+
+        for tag in tags:
+            del self.tag_index[tag]
 
     def retag(self, tag_map, inplace=False):
         """Rename tags for all tensors in this network, optionally in-place.
@@ -1827,6 +1860,13 @@ class TensorNetwork(object):
         """Actual, i.e. exterior, shape of this TensorNetwork.
         """
         return tuple(di[0] for di in self.outer_dims_inds())
+
+    @property
+    def dtype(self):
+        """The dtype of this TensorNetwork, note this just randomly samples the
+        dtype of *one* tensor and thus assumes they all have the same dtype.
+        """
+        return next(iter(self.tensor_index.values())).dtype
 
     # ------------------------------ printing ------------------------------- #
 

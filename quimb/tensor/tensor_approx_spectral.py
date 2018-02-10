@@ -55,7 +55,7 @@ def construct_lanczos_tridiag_MPO(
                    np.copy(beta[1])**2 / bsz)
 
 
-class EMPS(MatrixProductState):
+class EEMPS(MatrixProductState):
     """Environment matrix product state::
 
          -------------E--------------
@@ -69,8 +69,8 @@ class EMPS(MatrixProductState):
     def __init__(self, arrays, env=None, sysa=None, sysb=None,
                  nsites=None, **mps_opts):
 
-        # short-circuit for copying EMPSs
-        if isinstance(arrays, EMPS):
+        # short-circuit for copying EEMPSs
+        if isinstance(arrays, EEMPS):
             super().__init__(arrays)
             self.sysa, self.sysb = list(arrays.sysa), list(arrays.sysb)
             return
@@ -99,11 +99,21 @@ class EMPS(MatrixProductState):
         t2.reindex({old_ind: bi}, inplace=True)
 
         # add the env in that gap
-        self.add_tensor(Tensor(env, inds=(ai, af, bi, bf), tags={'_ENV'}))
+        self |= Tensor(env, inds=(ai, af, bi, bf), tags={'_ENV'})
 
         # tag the subsystems
         self.add_tag('_SYSA', where=map(self.site_tag, sysa), mode='any')
         self.add_tag('_SYSB', where=map(self.site_tag, sysb), mode='any')
+
+    _EXTRA_PROPS = ('sysa', 'sysb')
+
+    def imprint(self, other):
+        """Coerce
+        """
+        for p in EEMPS._EXTRA_PROPS:
+            setattr(other, p, getattr(self, p))
+        super().imprint(other)
+        other.__class__ = EEMPS
 
     def contract_structured_all(self, old, inplace=False):
         new = old if inplace else old.copy()
@@ -111,21 +121,84 @@ class EMPS(MatrixProductState):
         new ^= slice(self.sysb[0], self.sysb[-1])
         return new.contract_tags(...)
 
-    def __mul__(self, x):
-        pass
+    def add_EEMPS(self, other, inplace=False):
+        """Add another EEMPS.
+        """
+        self = self if inplace else self.copy()
 
-    def __div__(self, x):
-        pass
+        # for storing the bonds to the effective envinroment
+        env_reindex_map = {}
 
-    def add_EMPS(self, other):
-        pass
+        for i in self.sites:
+
+            t1, t2 = self.site[i], other.site[i]
+
+            # Check if need to use bonds to match indices
+            if set(t1.inds) != set(t2.inds):
+                reindex_map = {}
+                edge = True
+
+                # bond to left
+                if i not in (self.sysa[0], self.sysb[0]):
+                    reindex_map[other.bond(i - 1, i)] = self.bond(i - 1, i)
+                else:
+                    edge = True
+
+                # bond to right
+                if i not in (self.sysa[-1], self.sysb[-1]):
+                    reindex_map[other.bond(i, i + 1)] = self.bond(i, i + 1)
+                else:
+                    edge = True
+
+                # bond to eff env
+                if edge:
+                    s_env_bnds = t1.shared_inds(self['_ENV'])
+                    o_env_bnds = t2.shared_inds(other['_ENV'])
+
+                    for sb, ob in zip(s_env_bnds, o_env_bnds):
+                        reindex_map[ob] = sb
+                        env_reindex_map[ob] = sb
+
+            t1.direct_product(t2.reindex(reindex_map), inplace=True,
+                              sum_inds=self.site_ind(i))
+
+        # treat effective envinroment tensor last
+        t1, t2 = self['_ENV'], other['_ENV']
+        t1.direct_product(t2.reindex(env_reindex_map), inplace=True)
+
+        return self
+
+    def __add__(self, other):
+        """EEMPS addition.
+        """
+        return self.add_EEMPS(other, inplace=False)
+
+    def __iadd__(self, other):
+        """In-place EEMPS addition.
+        """
+        return self.add_EEMPS(other, inplace=True)
+
+    def __sub__(self, other):
+        """EEMPS subtraction.
+        """
+        return self.add_EEMPS(other * -1, inplace=False)
+
+    def __isub__(self, other):
+        """In-place EEMPS subtraction.
+        """
+        return self.add_EEMPS(other * -1, inplace=True)
+
+    def to_dense(self):
+        t = self.contract_tags(...)
+        t.fuse([('k', list(map(self.site_ind_id.format, self.sites)))],
+               inplace=True)
+        return np.asmatrix(t.data.reshape(-1, 1))
 
 
-def EMPS_rand_state(sysa, sysb, nsites, bond_dim, phys_dim=2,
-                    normalize=True, dtype=complex, **mps_opts):
+def EEMPS_rand_state(sysa, sysb, nsites, bond_dim, phys_dim=2,
+                     normalize=True, dtype=float, **mps_opts):
     """
     """
-
     # physical sites
     arrays = (randn((bond_dim, bond_dim, phys_dim), dtype=dtype)
               for _ in range(len(sysa) + len(sysb)))
@@ -133,8 +206,8 @@ def EMPS_rand_state(sysa, sysb, nsites, bond_dim, phys_dim=2,
     # environment tensor
     env = randn((bond_dim,) * 4, dtype=dtype)
 
-    emps = EMPS(arrays, env=env, sysa=sysa, sysb=sysb,
-                nsites=nsites, **mps_opts)
+    emps = EEMPS(arrays, env=env, sysa=sysa, sysb=sysb,
+                 nsites=nsites, **mps_opts)
 
     if normalize:
         emps['_ENV'] /= (emps.H @ emps)**0.5
@@ -142,8 +215,34 @@ def EMPS_rand_state(sysa, sysb, nsites, bond_dim, phys_dim=2,
     return emps
 
 
-def EMPS_zeros(sysa, sysb, nsites, phys_dim=2, **mps_opts):
-    pass
+def EEMPS_rand_like(other, bond_dim, **mps_opts):
+    """Return a random EEMPS state with the same parameters as ``other`` and
+    bond dimension ``bond_dim``.
+    """
+    return EEMPS_rand_state(sysa=other.sysa, sysb=other.sysb,
+                            nsites=other.nsites, phys_dim=other.phys_dim,
+                            dtype=other.dtype, bond_dim=bond_dim, **mps_opts)
+
+
+def EEMPS_zeros(sysa, sysb, nsites, phys_dim=2, dtype=float, **mps_opts):
+    """Return the 'zero' EEMPS state.
+    """
+    # physical sites
+    arrays = (np.zeros((1, 1, phys_dim), dtype=dtype)
+              for _ in range(len(sysa) + len(sysb)))
+
+    # environment tensor
+    env = np.zeros((1,) * 4, dtype=dtype)
+
+    return EEMPS(arrays, env=env, sysa=sysa, sysb=sysb,
+                 nsites=nsites, **mps_opts)
+
+
+def EEMPS_zeros_like(other, **mps_opts):
+    """Return the 'zero' EEMPS state with the same parameters as ``other``.
+    """
+    return EEMPS_zeros(sysa=other.sysa, sysb=other.sysb, nsites=other.nsites,
+                       phys_dim=other.phys_dim, dtype=other.dtype, **mps_opts)
 
 
 class MPSPTPT:
@@ -166,9 +265,11 @@ class MPSPTPT:
     def __init__(self, mps, sysa, sysb, upper_ind_id='b{}'):
         n = mps.nsites
 
-        # parse sysa and sysb
+        # parse sysa and sysb ranges
         self.sysa_i, self.sysa_f = min(sysa), max(sysa) + 1
         self.sysb_i, self.sysb_f = min(sysb), max(sysb) + 1
+        self.sysa = range(self.sysa_i, self.sysa_f)
+        self.sysb = range(self.sysb_i, self.sysb_f)
 
         if len(sysa) != len(range(self.sysa_i, self.sysa_f)):
             raise ValueError("``sysa`` must be contiguous.")
@@ -178,10 +279,10 @@ class MPSPTPT:
 
         ket = mps.copy()
         for i in sysa:
-            ket.add_tag('sysa', where=ket.site_tag(i))
+            ket.add_tag('_SYSA', where=ket.site_tag(i))
 
         for i in sysb:
-            ket.add_tag('sysb', where=ket.site_tag(i))
+            ket.add_tag('_SYSB', where=ket.site_tag(i))
 
         # mixed canonize
         ket.left_canonize(stop=self.sysa_i)
@@ -194,9 +295,18 @@ class MPSPTPT:
         ket.reindex({ket.site_ind(i): upper_ind_id.format(i)
                      for i in sysb}, inplace=True)
 
-        ket.add_tag('_KET')
-        bra.add_tag('_BRA')
-        self.X = ket & bra
+        self.lower_ind_id = ket.site_ind_id
+        self.upper_ind_id = upper_ind_id
+
+        for i in self.sysa:
+            ket.add_tag('_KET', where=ket.site_tag(i))
+            bra.add_tag('_BRA', where=ket.site_tag(i))
+        for i in self.sysb:
+            # reverse tagging for partial transpose
+            ket.add_tag('_BRA', where=ket.site_tag(i))
+            bra.add_tag('_KET', where=ket.site_tag(i))
+
+        self.X = ket | bra
 
         # replace left and right envs with identity since canonized
         le = [self.X.structure.format(i) for i in range(0, self.sysa_i)]
@@ -204,11 +314,56 @@ class MPSPTPT:
         self.X.replace_with_identity(le, inplace=True)
         self.X.replace_with_identity(re, inplace=True)
 
-        # contract middle env
-        self.X ^= slice(self.sysa_f, self.sysb_i)
+        # contract middle env if there is one
+        if self.sysa_f != self.sysb_i:
+            self.X ^= slice(self.sysa_f, self.sysb_i)
+            self.X.add_tag('_ENV', where=ket.site_tag(self.sysa_f))
+
+        # drop its site tags
+        self.X.drop_tags(map(ket.site_tag, range(self.sysa_f, self.sysb_i)))
+        self.X.sites = self.X.calc_sites()
+
+    def to_dense(self):
+        t = self.X.contract_tags(...)
+        t.fuse([('k', list(map(self.lower_ind_id.format, self.X.sites))),
+                ('b', list(map(self.upper_ind_id.format, self.X.sites)))],
+               inplace=True)
+        return np.asmatrix(t.data)
 
     def apply(self, other):
-        """Apply this operator to a vector.
+        """Apply this operator to a EEMPS vector::
+
+               -----------X----------   :
+              /   sysa   / \    sysb \  : _VEC
+              a-a-a-a-a-a   b-b-b-b-b-b :         -----------Y----------
+            : | | | | | |   | | | | | |          /   sysa   / \    sysb \
+        _BRA: A-A-A-A-A-A\ /B-B-B-B-B-B   -->    A-A-A-A-A-A   B-B-B-B-B-B
+            : |           E           | :        | | | | | |   | | | | | |
+              A-A-A-A-A-A/ \B-B-B-B-B-B : _KET
+              | | | | | |   | | | | | | :               *New vector*
+
         """
+        # import pdb; pdb.set_trace()
+
         v = other.copy()
         v.add_tag('_VEC')
+
+        # align them
+        v.site_ind_id = self.upper_ind_id
+
+        # split bra and operator env off to be contracted with vector
+        leave, remove = self.X.partition(['_BRA', '_ENV'])
+
+        remove |= v
+        remove = remove.contract(..., inplace=True)
+        remove.drop_tags()
+        remove.tags.add('_ENV')
+
+        leave |= remove
+
+        # import pdb; pdb.set_trace()
+
+        # 'upcast' leave from TensorNetwork to EEMPS
+        v.imprint(leave)
+        leave.site_ind_id = other.site_ind_id
+        return leave

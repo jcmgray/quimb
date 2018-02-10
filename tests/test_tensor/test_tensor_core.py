@@ -312,7 +312,7 @@ class TestTensorFunctions:
         assert d1.almost_equals(d2)
 
     @pytest.mark.parametrize("dtype", [float, complex, np.complex128,
-                                       np.float_, 'raise'])
+                                       np.float_, np.float32, 'raise'])
     def test_rand_tensor(self, dtype):
         if dtype == 'raise':
             with pytest.raises(TypeError):
@@ -320,6 +320,9 @@ class TestTensorFunctions:
         else:
             t = rand_tensor((2, 3, 4), 'abc', dtype=dtype)
             assert t.dtype == dtype
+
+            tn = t & t
+            assert tn.dtype == dtype
 
     def test_squeeze(self):
         a = rand_tensor((1, 2, 3, 1, 4), inds='abcde', tags=['hello'])
@@ -636,13 +639,13 @@ class TestTensorNetwork:
                    rand_tensor((2, 3, 4), 'bcd', tags=['I1']),
                    rand_tensor((4, 1, 1), 'dae', tags=['I2']))
 
-        tn1.add_tensor(A)
-        tn1.add_tensor(B)
-        tn1.add_tensor(C)
+        tn1 &= A
+        tn1 &= B
+        tn1 &= C
 
-        tn2.add_tensor(C)
-        tn2.add_tensor(A)
-        tn2.add_tensor(B)
+        tn2 &= C
+        tn2 &= A
+        tn2 &= B
 
         for t1, t2 in zip(tn1.tensors_sorted(), tn2.tensors_sorted()):
             assert t1.tags == t2.tags
