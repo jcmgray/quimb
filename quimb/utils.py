@@ -141,7 +141,7 @@ def three_line_multi_print(l1, l2, l3, max_width=None):
         print(l2)
         print(l3)
     else:  # pragma: no cover
-        max_width -= 8  # for ellipses
+        max_width -= 10  # for ellipses and pad
         n_lines = (len(l2) - 1) // max_width + 1
         for i in range(n_lines):
             if i == 0:

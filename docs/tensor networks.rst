@@ -12,10 +12,11 @@ To perform groups of tensor contractions efficiently and decomposed into BLAS op
 Features
 ~~~~~~~~
 
-- Auto optimized tensor contractions using BLAS for small to medium groups of tensors - no need to ever think about contraction order, best scaling etc.
+- Auto optimized tensor contractions using BLAS for expressions using 100s of tensors - no need to ever think about contraction order, best scaling etc.
 - Completely geometry free underlying representation of networks.
 - Plot the graph of any tensor network - with bond dimension edge weighting and other coloring.
 - Multiple Tensors and Networks can be views of the same underlying data to save memory.
+- Treat any network as a :class:`scipy.sparse.linalg.LinearOperator` for solving, factorizing etc.
 - Fully unit tested.
 
 
@@ -38,7 +39,11 @@ Should be fairly easily to implement / planned:
 Basic Manipulations
 -------------------
 
-pass
+Creating a tensors.
+Combining tensors as a network.
+Split tensors.
+Manipulating tensor networks.
+Contracting tensor networks.
 
 
 Building Hamiltonians
@@ -96,3 +101,11 @@ Example of DMRG2 calcuation
         2 95 96 96 96 96 96 95 92 90 87 83 78 73 64 53 27 9 3
     ... ->-->-->-->-->-->-->-->-->-->-->-->-->-->-->-->-->->-o
          |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  | | |
+
+
+Performance tips
+----------------
+
+    1. Make sure numpy is linked to a fast BLAS (e.g. MKL version that comes with conda).
+    2. Install slepc4py, to use as the iterative eigensolver, it's faster than scipy.
+    3. If the hamiltonian is real, compile and use a real version of SLEPC (set the environment variable PETSC_ARCH before launch).

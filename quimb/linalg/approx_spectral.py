@@ -10,12 +10,16 @@ import scipy.linalg as scla
 import scipy.sparse.linalg as spla
 
 from ..core import ptr
-from ..tensor.tensor_core import einsum, einsum_path, HuskArray
-from ..tensor.tensor_1d import MatrixProductOperator
-from ..tensor.tensor_approx_spectral import construct_lanczos_tridiag_MPO
 from ..accel import prod, vdot
 from ..utils import int2tup
 from ..linalg.mpi_launcher import get_mpi_pool
+from ..tensor.tensor_core import einsum, einsum_path, HuskArray
+from ..tensor.tensor_1d import MatrixProductOperator
+from ..tensor.tensor_approx_spectral import (
+    construct_lanczos_tridiag_MPO,
+    PTPTLazyMPS,
+    construct_lanczos_tridiag_PTPTLazyMPS,
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -647,6 +651,9 @@ def _single_random_estimate(A, K, bsz, beta_tol, v0, fn, pos,
     # choose normal (any LinearOperator) or MPO lanczos tridiag construction
     if isinstance(A, MatrixProductOperator):
         lanc_fn = construct_lanczos_tridiag_MPO
+        lanc_opts = {'max_bond': None, 'initial_bond_dim': None}
+    elif isinstance(A, PTPTLazyMPS):
+        lanc_fn = construct_lanczos_tridiag_PTPTLazyMPS
         lanc_opts = {'max_bond': None, 'initial_bond_dim': None}
     else:
         lanc_fn = construct_lanczos_tridiag

@@ -4,7 +4,7 @@ import operator
 import numpy as np
 from numpy.testing import assert_allclose
 
-from quimb import entropy
+from quimb import entropy, svds
 from quimb.tensor import (
     tensor_contract,
     tensor_direct_product,
@@ -216,7 +216,7 @@ class TestBasicTensorOperations:
 
 
 class TestTensorFunctions:
-    @pytest.mark.parametrize('method', ['svd', 'eig'])
+    @pytest.mark.parametrize('method', ['svd', 'eig', 'isvd', 'svds'])
     @pytest.mark.parametrize('linds', ['abd', 'ce'])
     @pytest.mark.parametrize('cutoff', [-1.0, 1e-13, 1e-10])
     @pytest.mark.parametrize('cutoff_mode', ['abs', 'rel', 'sum2'])
@@ -714,3 +714,66 @@ class TestTensorNetwork:
         assert tn_odd.structure_bsz == 4
 
         assert (tn_even & tn_odd).sites == range(10)
+
+    @pytest.mark.parametrize("backend", ['svd', 'eig', 'isvd', 'svds'])
+    def test_compress_between(self, backend):
+        A = rand_tensor((3, 4, 5), 'abd', tags={'T1'})
+        tensor_direct_product(A, A, inplace=True)
+        B = rand_tensor((5, 6), 'dc', tags={'T2'})
+        tensor_direct_product(B, B, inplace=True)
+        tn = A & B
+
+        assert A.bond_size(B) == 10
+
+        tn.compress_between('T1', 'T2', backend=backend)
+
+    @pytest.mark.parametrize("backend", ['svd', 'eig', 'isvd', 'svds'])
+    def compress_all(self, backend):
+        k = MPS_rand_state(10, 7)
+        k += k
+        k /= 2
+        k.compress_all(max_bond=5, backend=backend)
+        assert k.max_bond() == 5
+        assert_allclose(k.H @ k, 1.0)
+
+
+class TestTensorNetworkAsLinearOperator:
+
+    def test_against_dense(self):
+        A, B, C, D = (
+            rand_tensor([3, 5, 5], 'aef'),
+            rand_tensor([3, 5, 5], 'beg'),
+            rand_tensor([3, 5, 5], 'cfh'),
+            rand_tensor([3, 5, 5], 'dhg'),
+        )
+
+        tn = A & B & C & D
+        tn_lo = tn.aslinearoperator(('a', 'b'), ('c', 'd'))
+        tn_d = (tn ^ ...).fuse([('u', ['a', 'b']), ('l', ['c', 'd'])]).data
+
+        u, s, v = svds(tn_lo, k=5, backend='scipy')
+        ud, sd, vd = svds(tn_d, k=5, backend='scipy')
+
+        assert_allclose(s, sd)
+
+    @pytest.mark.parametrize("dtype", (float, complex))
+    def test_replace_with_svd_using_linear_operator(self, dtype):
+        k = MPS_rand_state(100, 10, dtype=dtype, cyclic=True)
+        b = k.H
+        b.expand_bond_dimension(11)
+        k.add_tag('_KET')
+        b.add_tag('_BRA')
+        tn = b & k
+
+        x1 = tn ^ ...
+
+        ul, = tn['_KET', 'I1'].shared_inds(tn['_KET', 'I2'])
+        ll, = tn['_BRA', 'I1'].shared_inds(tn['_BRA', 'I2'])
+
+        where = [f'I{i}' for i in range(2, 40)]
+
+        tn.replace_with_svd(where, left_inds=(ul, ll), eps=1e-3, inplace=True)
+        tn.structure = None
+        x2 = tn ^ ...
+
+        assert_allclose(x1, x2, rtol=1e-4)

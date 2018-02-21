@@ -1,53 +1,18 @@
 """DMRG-like variational algorithms, but in tensor network language.
 """
 import numpy as np
-import scipy.sparse.linalg as spla
 import itertools
 
 from ..utils import progbar
 from ..accel import prod
 from ..linalg.base_linalg import eigsys, seigsys
-from .tensor_core import Tensor, TensorNetwork, tensor_contract
+from .tensor_core import (
+    Tensor,
+    TensorNetwork,
+    tensor_contract,
+    TNLinearOperator
+)
 from .tensor_gen import MPS_rand_state
-
-
-class EffHamOp(spla.LinearOperator):
-    """Get a linear operator - something that replicates the matrix-vector
-    operation - for an arbitrary *uncontracted* hamiltonian operator, e.g:
-
-         / | | \
-        L--H-H--R  <- tensors should be tagged with "__ham__"
-         \ | | /
-
-    This can then be supplied to scipy's sparse linear algebra routines.
-
-    Parameters
-    ----------
-    TN_ham : TensorNetwork
-        A representation of the hamiltonian
-    upper_inds : sequence of hashable
-        The upper inds of the effective hamiltonian network.
-    lower_inds : sequence of hashable
-        The lower inds of the effective hamiltonian network. These should be
-        ordered the same way as ``upper_inds``.
-    dims : tuple of int
-        The dimensions corresponding to the inds.
-    """
-
-    def __init__(self, TN_ham, upper_inds, lower_inds, dims):
-        self.eff_ham_tensors = TN_ham["__ham__"]
-        dtype = self.eff_ham_tensors[0].dtype
-        self.upper_inds = upper_inds
-        self.lower_inds = lower_inds
-        self.dims = dims
-        self.d = prod(dims)
-        super().__init__(dtype=dtype, shape=(self.d, self.d))
-
-    def _matvec(self, vec):
-        v = Tensor(vec.reshape(*self.dims), inds=self.upper_inds)
-        v_out = tensor_contract(*self.eff_ham_tensors, v,
-                                output_inds=self.lower_inds).data
-        return v_out.reshape(*vec.shape)
 
 
 class MovingEnvironment:
@@ -279,7 +244,7 @@ class DMRG:
                                      dtype=dtype)
         self._b = self._k.H
         self.ham = ham.copy()
-        self.ham.add_tag("__ham__")
+        self.ham.add_tag("_HAM")
 
         # Line up and overlap for energy calc
         self._k.align(self.ham, self._b, inplace=True)
@@ -291,7 +256,7 @@ class DMRG:
 
         self.opts = {
             'eff_eig_bkd': "AUTO",
-            'eff_eig_tol': 1e-1,
+            'eff_eig_tol': 1e-3,
             'eff_eig_ncv': 4,
             'eff_eig_maxiter': None,
             'eff_eig_dense': None,
@@ -362,12 +327,12 @@ class DMRG:
 
         if dense:
             # contract remaining hamiltonian and get its dense representation
-            eff_ham = (self._eff_ham ^ '__ham__')['__ham__']
+            eff_ham = (self._eff_ham ^ '_HAM')['_HAM']
             eff_ham.fuse((('lower', lix), ('upper', uix)), inplace=True)
             A = eff_ham.data
         else:
-            A = EffHamOp(self._eff_ham, dims=dims,
-                         upper_inds=uix, lower_inds=lix)
+            A = TNLinearOperator(self._eff_ham['_HAM'], udims=dims, ldims=dims,
+                                 upper_inds=uix, lower_inds=lix)
 
         eff_e, eff_gs = self._seigsys(A, v0=self._k.site[i].data)
 
@@ -402,12 +367,12 @@ class DMRG:
         # form the local operator to find ground-state of
         if dense:
             # contract remaining hamiltonian and get its dense representation
-            eff_ham = (self._eff_ham ^ '__ham__')['__ham__']
+            eff_ham = (self._eff_ham ^ '_HAM')['_HAM']
             eff_ham.fuse((('lower', lix), ('upper', uix)), inplace=True)
             A = eff_ham.data
         else:
-            A = EffHamOp(self._eff_ham, upper_inds=uix,
-                         lower_inds=lix, dims=dims)
+            A = TNLinearOperator(self._eff_ham['_HAM'], udims=dims, ldims=dims,
+                                 upper_inds=uix, lower_inds=lix)
 
         # find the 2-site local groundstate using previous as initial guess
         v0 = self._k.site[i].contract(self._k.site[i + 1],
@@ -695,7 +660,7 @@ class DMRGX(DMRG):
         dims = self._k.site[i].shape
 
         # contract remaining hamiltonian and get its dense representation
-        eff_ham = (self._eff_ham ^ '__ham__')['__ham__']
+        eff_ham = (self._eff_ham ^ '_HAM')['_HAM']
         eff_ham.fuse((('lower', lix), ('upper', uix)), inplace=True)
         A = eff_ham.data
 
@@ -791,7 +756,7 @@ class DMRGX(DMRG):
             parse_2site_inds_dims(self._k, self._b, i)
 
         # contract remaining hamiltonian and get its dense representation
-        eff_ham = (self._eff_ham ^ '__ham__')['__ham__']
+        eff_ham = (self._eff_ham ^ '_HAM')['_HAM']
         eff_ham.fuse((('lower', lix), ('upper', uix)), inplace=True)
         A = eff_ham.data
 

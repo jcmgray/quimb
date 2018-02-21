@@ -17,6 +17,8 @@ from cytoolz import (
     merge_with,
 )
 import numpy as np
+import scipy.sparse.linalg as spla
+import scipy.linalg.interpolative as sli
 
 from ..accel import prod, njit, realify_scalar
 from ..linalg.base_linalg import norm_fro_dense
@@ -230,11 +232,7 @@ def _renorm_singular_vals(s, n_chi):
 
 
 @njit  # pragma: no cover
-def _array_split_svd(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0):
-    """SVD-decomposition.
-    """
-    U, s, V = np.linalg.svd(x, full_matrices=False)
-
+def _trim_and_renorm_SVD(U, s, V, cutoff, cutoff_mode, max_bond, absorb):
     if cutoff > 0.0:
         n_chi = _trim_singular_vals(s, cutoff, cutoff_mode)
 
@@ -257,6 +255,14 @@ def _array_split_svd(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0):
         V *= s.reshape((-1, 1))
 
     return U, V
+
+
+@njit  # pragma: no cover
+def _array_split_svd(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0):
+    """SVD-decomposition.
+    """
+    U, s, V = np.linalg.svd(x, full_matrices=False)
+    return _trim_and_renorm_SVD(U, s, V, cutoff, cutoff_mode, max_bond, absorb)
 
 
 def _array_split_svdvals(x):
@@ -345,6 +351,46 @@ def _array_split_svdvals_eig(x):
     return s2**0.5
 
 
+def _array_split_svds(x, cutoff=0.0, cutoff_mode=3, max_bond=-1, absorb=0):
+    """SVD-decomposition using iterative methods. Allows the
+    computation of only a certain number of singular values, e.g. max_bond,
+    from the get-go, and is thus more efficient. Can also supply LinearOperator.
+    """
+    d = min(x.shape)
+
+    if max_bond < 0:
+        k = sli.estimate_rank(x, eps=cutoff)
+    else:
+        k = min(d, max_bond)
+
+    if k == d:
+        return _array_split_svd(x, cutoff, cutoff_mode, max_bond, absorb)
+
+    U, s, V = spla.svds(x, k=k)
+    return _trim_and_renorm_SVD(U, s, V, cutoff, cutoff_mode, max_bond, absorb)
+
+
+def _array_split_isvd(x, cutoff=0.0, cutoff_mode=3, max_bond=-1, absorb=0):
+    """SVD-decomposition using interpolative matrix random methods. Allows the
+    computation of only a certain number of singular values, e.g. max_bond,
+    from the get-go, and is thus more efficient. Can also supply LinearOperator.
+    """
+    d = min(x.shape)
+
+    if max_bond < 0:
+        k = sli.estimate_rank(x, eps=cutoff)
+    else:
+        k = min(d, max_bond)
+
+    if k == d:
+        return _array_split_svd(x, cutoff, cutoff_mode, max_bond, absorb)
+
+    U, s, V = sli.svd(x, k)
+    V = V.conj().T
+
+    return _trim_and_renorm_SVD(U, s, V, cutoff, cutoff_mode, max_bond, absorb)
+
+
 @njit  # pragma: no cover
 def _array_split_qr(x):
     """QR-decomposition.
@@ -359,6 +405,141 @@ def _array_split_lq(x):
     """
     Q, L = np.linalg.qr(x.T)
     return L.T, Q.T
+
+
+def tensor_split(T, left_inds, method='svd', max_bond=None, absorb='both',
+                 cutoff=1e-10, cutoff_mode='sum2', get=None):
+    """Decompose this tensor into two tensors.
+
+    Parameters
+    ----------
+    T : Tensor
+        The tensor to split.
+    left_inds : sequence of hashable
+        The sequence of inds, which ``tensor`` should already have, to split to
+        the 'left'.
+    method : {'svd', 'eig', 'isvd', 'svds', qr', 'lq'}, optional
+        How to split the tensor.
+    cutoff : float, optional
+        The threshold below which to discard singular values, only applies to
+        ``method='svd'`` and ``method='eig'``.
+    cutoff_mode : {'sum2', 'rel', 'abs'}
+        Method with which to apply the cutoff threshold:
+
+            - 'sum2': sum squared of values discarded must be ``< cutoff``.
+            - 'rel': values less than ``cutoff * s[0]`` discarded.
+            - 'abs': values less than ``cutoff`` discarded.
+
+    max_bond: None or int
+        If integer, the maxmimum number of singular values to keep, regardless
+        of ``cutoff``.
+    absorb = {'both', 'left', 'right'}
+        Whether to absorb the singular values into both, the left or right
+        unitary matrix respectively.
+    get : {None, 'arrays', 'tensors', 'values'}
+        If given, what to return instead of a TN describing the split.
+
+    Returns
+    -------
+    TensorNetwork or (Tensor, Tensor) or (array, array) or 1D-array
+        Respectively if get={None, 'tensors', 'arrays', 'values'}.
+    """
+    left_inds = tuple(left_inds)
+    right_inds = tuple(x for x in T.inds if x not in left_inds)
+
+    TT = T.transpose(*left_inds, *right_inds)
+
+    left_dims = TT.shape[:len(left_inds)]
+    right_dims = TT.shape[len(left_inds):]
+
+    array = TT.data.reshape(prod(left_dims), prod(right_dims))
+
+    if get == 'values':
+        return {'svd': _array_split_svdvals,
+                'eig': _array_split_svdvals_eig}[method](array)
+
+    opts = {}
+    if method not in ('qr', 'lq'):
+        # Convert defaults and settings to numeric type for numba funcs
+        opts['cutoff'] = {None: -1.0}.get(cutoff, cutoff)
+        opts['absorb'] = {'left': -1, 'both': 0, 'right': 1}[absorb]
+        opts['max_bond'] = {None: -1}.get(max_bond, max_bond)
+        opts['cutoff_mode'] = {'abs': 1, 'rel': 2, 'sum2': 3}[cutoff_mode]
+
+    left, right = {'svd': _array_split_svd,
+                   'eig': _array_split_eig,
+                   'isvd': _array_split_isvd,
+                   'svds': _array_split_svds,
+                   'qr': _array_split_qr,
+                   'lq': _array_split_lq}[method](array, **opts)
+
+    left = left.reshape(*left_dims, -1)
+    right = right.reshape(-1, *right_dims)
+
+    if get == 'arrays':
+        return left, right
+
+    bond_ind = rand_uuid()
+
+    Tl = Tensor(data=left, inds=(*left_inds, bond_ind), tags=T.tags)
+    Tr = Tensor(data=right, inds=(bond_ind, *right_inds), tags=T.tags)
+
+    if get == 'tensors':
+        return Tl, Tr
+
+    return TensorNetwork((Tl, Tr), check_collisions=False)
+
+
+def tensor_compress_bond(T1, T2, **compress_opts):
+    """Inplace compress between the two single tensors. It follows the
+    following steps to minimize the size of SVD performed::
+
+        a)|   |        b)|            |        c)|       |
+        --1---2--  ->  --1L~~1R--2L~~2R--  ->  --1L~~M~~2R--
+          |   |          |   ......   |          |       |
+         <*> <*>              >  <                  <*>
+
+                  d)|            |        e)|     |
+              ->  --1L~~ML~~MR~~2R--  ->  --1C~~~2C--
+                    |....    ....|          |     |
+                     >  <    >  <              ^compressed bond
+    """
+    s_ix, t1_ix = T1.filter_shared_inds(T2)
+
+    if not s_ix:
+        raise ValueError("The tensors specified don't share an bond.")
+    # a) -> b)
+    T1_L, T1_R = T1.split(left_inds=t1_ix, get='tensors',
+                          absorb='right', **compress_opts)
+    T2_L, T2_R = T2.split(left_inds=s_ix, get='tensors',
+                          absorb='left', **compress_opts)
+    # b) -> c)
+    M = (T1_R @ T2_L)
+    M.drop_tags()
+    # c) -> d)
+    M_L, M_R = M.split(left_inds=T1_L.shared_inds(M), get='tensors',
+                       absorb='both', **compress_opts)
+
+    # make sure old bond being used
+    ns_ix, = M_L.shared_inds(M_R)
+    M_L.reindex({ns_ix: s_ix[0]}, inplace=True)
+    M_R.reindex({ns_ix: s_ix[0]}, inplace=True)
+
+    # d) -> e)
+    T1C = T1_L.contract(M_L, output_inds=T1.inds)
+    T2C = M_R.contract(T2_R, output_inds=T2.inds)
+
+    # update with the new compressed data
+    T1.modify(data=T1C.data)
+    T2.modify(data=T2C.data)
+
+
+def tensor_add_bond(T1, T2):
+    """Inplace addition of a dummy bond between ``T1`` and ``T2``.
+    """
+    bnd = rand_uuid()
+    T1.modify(data=T1.data[..., np.newaxis], inds=(*T1.inds, bnd))
+    T2.modify(data=T2.data[..., np.newaxis], inds=(*T2.inds, bnd))
 
 
 def array_direct_product(X, Y, sum_axes=()):
@@ -415,10 +596,10 @@ def array_direct_product(X, Y, sum_axes=()):
 
 def tensor_direct_product(T1, T2, sum_inds=(), inplace=False):
     """Direct product of two Tensors. Any axes included in ``sum_inds`` must be
-    the same size and will be summed over rather than concatenated.
-    Summing over contractions of TensorNetworks equates to contracting a
-    TensorNetwork made of direct products of each set of tensors.
-    I.e. (a1 @ b1) + (a2 @ b2) == (a1 (+) a2) @ (b1 (+) b2).
+    the same size and will be summed over rather than concatenated. Summing
+    over contractions of TensorNetworks equates to contracting a TensorNetwork
+    made of direct products of each set of tensors. I.e. (a1 @ b1) + (a2 @ b2)
+    == (a1 (+) a2) @ (b1 (+) b2).
 
     Parameters
     ----------
@@ -549,6 +730,10 @@ class Tensor(object):
         return self._data.shape
 
     @property
+    def ndim(self):
+        return self._data.ndim
+
+    @property
     def size(self):
         return self._data.size
 
@@ -570,7 +755,7 @@ class Tensor(object):
         """
         """
         ind_freqs = frequencies(self.inds)
-        return set(i for i in self.inds if ind_freqs[i] == 2)
+        return tuple(i for i in self.inds if ind_freqs[i] == 2)
 
     def transpose(self, *output_inds, inplace=False):
         """Transpose this tensor.
@@ -611,84 +796,9 @@ class Tensor(object):
         return tensor_direct_product(
             self, other, sum_inds=sum_inds, inplace=inplace)
 
-    def split(self, left_inds, method='svd', cutoff=1e-10, cutoff_mode='sum2',
-              max_bond=None, absorb='both', get=None):
-        """Decompose this tensor into two tensors.
-
-        Parameters
-        ----------
-        left_inds : sequence of hashable
-            The sequence of inds, which ``tensor`` should already have, to
-            split to the 'left'.
-        method : {'svd', 'eig', 'qr', 'lq'}, optional
-            How to split the tensor.
-        cutoff : float, optional
-            The threshold below which to discard singular values, only applies
-            to ``method='svd'`` and ``method='eig'``.
-        cutoff_mode : {'sum2', 'rel', 'abs'}
-            Method with which to apply the cutoff threshold:
-
-                - 'sum2': sum squared of values discarded must be ``< cutoff``.
-                - 'rel': values less than ``cutoff * s[0]`` discarded.
-                - 'abs': values less than ``cutoff`` discarded.
-
-        max_bond: None or int
-            If integer, the maxmimum number of singular values to keep,
-            regardless of ``cutoff``.
-        absorb = {'both', 'left', 'right'}
-            Whether to absorb the singular values into both, the left or right
-            unitary matrix respectively.
-        get : {None, 'arrays', 'tensors', 'values'}
-            If given, what to return instead of the TensorNetwork describing
-            the split.
-
-        Returns
-        -------
-        TensorNetwork or (Tensor, Tensor) or (array, array) or 1D-array
-            Respectively if get={None, 'tensors', 'arrays', 'values'}.
-        """
-        left_inds = tuple(left_inds)
-        right_inds = tuple(x for x in self.inds if x not in left_inds)
-
-        TT = self.transpose(*left_inds, *right_inds)
-
-        left_dims = TT.shape[:len(left_inds)]
-        right_dims = TT.shape[len(left_inds):]
-
-        array = TT.data.reshape(prod(left_dims), prod(right_dims))
-
-        if get == 'values':
-            return {'svd': _array_split_svdvals,
-                    'eig': _array_split_svdvals_eig}[method](array)
-
-        opts = {}
-        if method in ('svd', 'eig'):
-            # Convert defaults and settings to numeric type for numba funcs
-            opts['cutoff'] = {None: -1.0}.get(cutoff, cutoff)
-            opts['absorb'] = {'left': -1, 'both': 0, 'right': 1}[absorb]
-            opts['max_bond'] = {None: -1}.get(max_bond, max_bond)
-            opts['cutoff_mode'] = {'abs': 1, 'rel': 2, 'sum2': 3}[cutoff_mode]
-
-        left, right = {'svd': _array_split_svd,
-                       'eig': _array_split_eig,
-                       'qr': _array_split_qr,
-                       'lq': _array_split_lq}[method](array, **opts)
-
-        left = left.reshape(*left_dims, -1)
-        right = right.reshape(-1, *right_dims)
-
-        if get == 'arrays':
-            return left, right
-
-        bond_ind = rand_uuid()
-
-        Tl = Tensor(data=left, inds=(*left_inds, bond_ind), tags=self.tags)
-        Tr = Tensor(data=right, inds=(bond_ind, *right_inds), tags=self.tags)
-
-        if get == 'tensors':
-            return Tl, Tr
-
-        return TensorNetwork((Tl, Tr), check_collisions=False)
+    @functools.wraps(tensor_split)
+    def split(self, *args, **kwargs):
+        return tensor_split(self, *args, **kwargs)
 
     def singular_values(self, left_inds, method='svd'):
         """Return the singular values associated with splitting this tensor
@@ -922,6 +1032,66 @@ for meth_name, op in [('__radd__', operator.__add__),
     setattr(Tensor, meth_name, _make_rhand_array_promote_func(op, meth_name))
 
 
+class TNLinearOperator(spla.LinearOperator):
+    """Get a linear operator - something that replicates the matrix-vector
+    operation - for an arbitrary *uncontracted* TensorNetwork, e.g:
+
+         / | | \   -> upper_inds
+        L--H-H--R
+         \ | | /   -> lower_inds
+
+    This can then be supplied to scipy's sparse linear algebra routines. This
+    currently assumes the effective operator is square.
+
+    Parameters
+    ----------
+    tns : sequence of Tensors or TensorNetwork
+        A representation of the hamiltonian
+    upper_inds : sequence of hashable
+        The upper inds of the effective hamiltonian network.
+    lower_inds : sequence of hashable
+        The lower inds of the effective hamiltonian network. These should be
+        ordered the same way as ``upper_inds``.
+    dims : tuple of int, or None
+        The dimensions corresponding to the inds. Will figure out if None.
+    """
+
+    def __init__(self, tns, upper_inds, lower_inds, udims=None, ldims=None):
+
+        if isinstance(tns, TensorNetwork):
+            self._tensors = tns.tensors
+
+            if udims is None or ldims is None:
+                ix_sz = tns.ind_sizes()
+                udims = tuple(ix_sz[i] for i in upper_inds)
+                ldims = tuple(ix_sz[i] for i in lower_inds)
+
+        else:
+            self._tensors = tuple(tns)
+
+            if udims is None or ldims is None:
+                ix_sz = dict(zip(concat((t.inds, t.shape) for t in tns)))
+                udims = tuple(ix_sz[i] for i in upper_inds)
+                ldims = tuple(ix_sz[i] for i in lower_inds)
+
+        self.upper_inds, self.lower_inds = upper_inds, lower_inds
+        self.udims, self.ud = udims, prod(udims)
+        self.ldims, self.ld = ldims, prod(ldims)
+
+        super().__init__(dtype=self._tensors[0].dtype,
+                         shape=(self.ud, self.ld))
+
+    def _matvec(self, vec):
+        iT = Tensor(vec.reshape(*self.udims), inds=self.upper_inds)
+        oT = tensor_contract(*self._tensors, iT, output_inds=self.lower_inds)
+        return oT.data.reshape(*vec.shape)
+
+    def _rmatvec(self, vec):
+        iT = Tensor(vec.conj().reshape(*self.ldims), inds=self.lower_inds)
+        oT = tensor_contract(*self._tensors, iT, output_inds=self.upper_inds)
+        return oT.data.conj().reshape(*vec.shape)
+
+
 # --------------------------------------------------------------------------- #
 #                            Tensor Network Class                             #
 # --------------------------------------------------------------------------- #
@@ -975,8 +1145,16 @@ class TensorNetwork(object):
         Should not require tensor contractions with more than 52 unique
         indices.
     nsites : int, optional
-        The number of sites, if explicitly known. This will be calculated
-        using `structure` if needed but not specified.
+        The total number of sites, if explicitly known. This will be calculated
+        using `structure` if needed but not specified. When the network is not
+        dense in sites, i.e. ``sites != range(nsites)``, this should be the
+        total number of sites the network is embedded in::
+
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10  :-> nsites=10
+
+                  0--0--0--------0--0         :-> sites=(2, 3, 4, 7, 8)
+                  |  |  |        |  |
+
     sites : sequence of int, optional
         The indices of the sites present in this network, defaults to
         ``range(nsites)``. But could be e.g. ``[0, 1, 4, 5, 7]`` if some sites
@@ -995,8 +1173,6 @@ class TensorNetwork(object):
 
     Members
     -------
-    tensors : sequence of Tensor
-        The tensors in this network.
     tensor_index : dict
         Mapping of unique ids to tensors, like``{tensor_id: tensor, ...}``.
         I.e. this is where the tensors are 'stored' by the network.
@@ -1429,10 +1605,43 @@ class TensorNetwork(object):
 
         See Also
         --------
-        partition, filter_by_tags
+        select, partition, partition_tensors
         """
         names = self._get_names_from_tags(tags, mode=mode)
         return tuple(self.tensor_index[n] for n in names)
+
+    def select(self, tags, mode='all'):
+        """Get a TensorNetwork comprising tensors that match all or any of
+        ``tags``, inherit the network properties/structure from ``self``.
+
+        Parameters
+        ----------
+        tags : hashable or sequence of hashable
+            The tag or tag sequence.
+        mode : {'all', 'any'}
+            Whether to require matching all or any of the tags.
+
+        Returns
+        -------
+        tagged_tensors : tuple of Tensor
+            The tagged tensors.
+
+        See Also
+        --------
+        select_tensors, partition, partition_tensors
+        """
+        tagged_names = self._get_names_from_tags(tags, mode=mode)
+        ts = (self.tensor_index[n] for n in tagged_names)
+
+        kws = {'check_collisions': False, 'structure': self.structure,
+               'structure_bsz': self.structure_bsz, 'nsites': self.nsites}
+
+        tn = TensorNetwork(ts, **kws)
+
+        if self.structure is not None:
+            tn.sites = tn.calc_sites()
+
+        return tn
 
     def __getitem__(self, tags):
         """Get the tensor(s) associated with ``tags``. Only returns tensors
@@ -1482,45 +1691,7 @@ class TensorNetwork(object):
         for name in tuple(names):
             self._del_tensor(name)
 
-    def partition(self, tags, mode='any'):
-        """Split this TN into two, based on which tensors have any or all of
-        ``tags``. Unlike ``filter_by_tags``, both results are TNs which
-        inherit the structure of the initial TN.
-
-        Parameters
-        ----------
-        tags : sequence of hashable
-            The tags to split the network with.
-        mode : {'any', 'all'}
-            Whether to split based on matching any or all of the tags.
-
-        Returns
-        -------
-        untagged_tn, tagged_tn : (TensorNetwork, TensorNetwork)
-            The untagged and tagged tensor networs.
-
-        See Also
-        --------
-        filter_by_tags, select_tensors
-        """
-        tagged_names = self._get_names_from_tags(tags, mode=mode)
-
-        t1s, t2s = [], []
-        for name, tensor in self.tensor_index.items():
-            (t2s if name in tagged_names else t1s).append(tensor)
-
-        kws = {'check_collisions': False, 'structure': self.structure,
-               'structure_bsz': self.structure_bsz, 'nsites': self.nsites}
-
-        t1, t2 = TensorNetwork(t1s, **kws), TensorNetwork(t2s, **kws)
-
-        if self.structure is not None:
-            t1.sites = t1.calc_sites()
-            t2.sites = t2.calc_sites()
-
-        return t1, t2
-
-    def filter_by_tags(self, tags, inplace=False, mode='any'):
+    def partition_tensors(self, tags, inplace=False, mode='any'):
         """Split this TN into a list of tensors containing any or all of
         ``tags`` and a ``TensorNetwork`` of the the rest.
 
@@ -1538,12 +1709,11 @@ class TensorNetwork(object):
         Returns
         -------
         (u_tn, t_ts) : (TensorNetwork, tuple of Tensors)
-            The untagged tensor network, and the sequence of Tensors to
-            contract.
+            The untagged tensor network, and the sequence of tagged Tensors.
 
         See Also
         --------
-        partition, select_tensors
+        partition, select, select_tensors
         """
 
         # contract all
@@ -1566,7 +1736,55 @@ class TensorNetwork(object):
 
         return untagged_tn, tagged_ts
 
-    def replace_with_identity(self, where, inplace=False, mode='any'):
+    def partition(self, tags, mode='any', inplace=False, calc_sites=True):
+        """Split this TN into two, based on which tensors have any or all of
+        ``tags``. Unlike ``partition_tensors``, both results are TNs which
+        inherit the structure of the initial TN.
+
+        Parameters
+        ----------
+        tags : sequence of hashable
+            The tags to split the network with.
+        mode : {'any', 'all'}
+            Whether to split based on matching any or all of the tags.
+        inplace : bool
+            If True, actually remove the tagged tensors from self.
+        calc_sites : bool
+            If True, calculate which sites belong to which network.
+
+        Returns
+        -------
+        untagged_tn, tagged_tn : (TensorNetwork, TensorNetwork)
+            The untagged and tagged tensor networs.
+
+        See Also
+        --------
+        partition_tensors, select, select_tensors
+        """
+        tagged_names = self._get_names_from_tags(tags, mode=mode)
+
+        kws = {'check_collisions': False, 'structure': self.structure,
+               'structure_bsz': self.structure_bsz, 'nsites': self.nsites}
+
+        if inplace:
+            t1 = self
+            t2s = [t1._pop_tensor(name) for name in tagged_names]
+            t2 = TensorNetwork(t2s, **kws)
+
+        else:  # rebuild both -> quicker
+            t1s, t2s = [], []
+            for name, tensor in self.tensor_index.items():
+                (t2s if name in tagged_names else t1s).append(tensor)
+
+            t1, t2 = TensorNetwork(t1s, **kws), TensorNetwork(t2s, **kws)
+
+        if calc_sites and self.structure is not None:
+            t1.sites = t1.calc_sites()
+            t2.sites = t2.calc_sites()
+
+        return t1, t2
+
+    def replace_with_identity(self, where, mode='any', inplace=False):
         """Replace all tensors marked by ``where`` with an
         identity. E.g. if ``X`` denote ``where`` tensors::
 
@@ -1575,6 +1793,23 @@ class TensorNetwork(object):
                |  |  |  |      -->          |
                X--X--X  |                   |
 
+        Parameters
+        ----------
+        where : tag or seq of tags
+            Tags specifying the tensors to replace.
+        mode : {'any', 'all'}
+            Whether to replace tensors matching any or all the tags ``where``.
+        inplace : bool
+            Perform operation in place.
+
+        Returns
+        -------
+        TensorNetwork
+            The TN, with section replaced with identity.
+
+        See Also
+        --------
+        replace_with_svd
         """
         tn = self if inplace else self.copy()
 
@@ -1594,6 +1829,109 @@ class TensorNetwork(object):
 
         tn.reindex({il: ir}, inplace=True)
         return tn
+
+    def replace_with_svd(self, where, left_inds, eps,
+                         mode='any', inplace=False):
+        """Replace all tensors marked by ``where`` with an iteratively
+        constructed SVD. E.g. if ``X`` denote ``where`` tensors::
+
+                                     __       __
+            ---X  X--X  X---           \     /
+               |  |  |  |      -->      U~s~VH
+            ---X--X--X--X            __/     \
+                  |     +---     left_inds    \__
+                  X
+
+        Parameters
+        ----------
+        where : tag or seq of tags
+            Tags specifying the tensors to replace.
+        left_inds : ind or sequence of inds
+            The indices defining the left hand side of the SVD.
+        eps : float
+            The tolerance to perform the SVD with, affects the number of
+            singular values kept. See
+            :func:`scipy.linalg.interpolative.estimate_rank`.
+        mode : {'any', 'all'}
+            Whether to replace tensors matching any or all the tags ``where``.
+        inplace : bool
+            Perform operation in place.
+
+        Returns
+        -------
+
+        See Also
+        --------
+        replace_with_identity
+        """
+        leave, svd_section = self.partition(where, mode=mode, inplace=inplace,
+                                            calc_sites=False)
+
+        left_shp, rght_shp, _left_inds, rght_inds = [], [], [], []
+        for d, i in svd_section.outer_dims_inds():
+            if i in left_inds:
+                left_shp.append(d)
+                _left_inds.append(i)
+            else:
+                rght_shp.append(d)
+                rght_inds.append(i)
+
+        left_inds = _left_inds
+
+        A = svd_section.aslinearoperator(upper_inds=rght_inds, udims=rght_shp,
+                                         lower_inds=left_inds, ldims=left_shp)
+
+        U, V = _array_split_isvd(A, cutoff=eps)
+        U = U.reshape(*left_shp, -1)
+        V = V.reshape(-1, *rght_shp)
+
+        new_bnd = rand_uuid()
+        tags = svd_section.tags
+
+        # Add the new, compressed tensors back in
+        leave |= Tensor(U, inds=(*left_inds, new_bnd), tags=tags)
+        leave |= Tensor(V, inds=(new_bnd, *rght_inds), tags=tags)
+
+        return leave
+
+    def convert_to_zero(self):
+        """Inplace conversion of this network to an all zero tensor network.
+        """
+        outer_inds = self.outer_inds()
+
+        for T in self.tensors:
+            new_shape = tuple(d if i in outer_inds else 1
+                              for d, i in zip(T.shape, T.inds))
+            T.modify(data=np.zeros(new_shape, dtype=T.dtype))
+
+    def compress_between(self, tags1, tags2, **compress_opts):
+        """Compress the bond between the two single tensors in this network
+        specified by ``tags1`` and ``tags2`` using ``tensor_compress_bond``.
+        This is an inplace operation.
+        """
+        n1, = self._get_names_from_tags(tags1, mode='all')
+        n2, = self._get_names_from_tags(tags2, mode='all')
+        tensor_compress_bond(self.tensor_index[n1], self.tensor_index[n2])
+
+    def compress_all(self, **compress_opts):
+        """Inplace compress all bonds in this network.
+        """
+        for T1, T2 in itertools.combinations(self.tensors, 2):
+            try:
+                tensor_compress_bond(T1, T2, **compress_opts)
+            except ValueError:
+                continue
+            except ZeroDivisionError:
+                self.convert_to_zero()
+                break
+
+    def add_bond_between(self, tags1, tags2):
+        """Inplace addition of a dummmy (size 1) bond between the single
+        tensors specified by by ``tags1`` and ``tags2``.
+        """
+        n1, = self._get_names_from_tags(tags1, mode='all')
+        n2, = self._get_names_from_tags(tags2, mode='all')
+        tensor_add_bond(self.tensor_index[n1], self.tensor_index[n2])
 
     # ----------------------- contracting the network ----------------------- #
 
@@ -1620,7 +1958,7 @@ class TensorNetwork(object):
         --------
         contract, contract_cumulative, contract_structured
         """
-        untagged_tn, tagged_ts = self.filter_by_tags(
+        untagged_tn, tagged_ts = self.partition_tensors(
             tags, inplace=inplace, mode=mode)
 
         if not tagged_ts:
@@ -1806,34 +2144,46 @@ class TensorNetwork(object):
         """
         return TensorNetwork((self, other)) ^ ...
 
+    @functools.wraps(TNLinearOperator)
+    def aslinearoperator(self, upper_inds, lower_inds, udims=None, ldims=None):
+        return TNLinearOperator(self, upper_inds, lower_inds, udims, ldims)
+
     # --------------- information about indices and dimensions -------------- #
 
     @property
     def tags(self):
         return tuple(self.tag_index.keys())
 
-    def all_dims_inds(self):
-        """Return a list of all dimensions, and the corresponding list of
-        indices from the tensor network.
+    def ind_sizes(self):
+        """Get dict of each index mapped to its size.
         """
-        return zip(*concat(zip(t.shape, t.inds)
+        ix_szs = (zip(t.inds, t.shape) for t in self.tensor_index.values())
+        return dict(concat(ix_szs))
+
+    def all_inds_dims(self):
+        """Return a list of all indices, and the corresponding list of
+        dimensions from the tensor network.
+        """
+        return zip(*concat(zip(t.inds, t.shape)
                            for t in self.tensor_index.values()))
 
     def all_inds(self):
-        return concat(t.inds for t in self.tensor_index.values())
+        """Return a tuple of all indices (with repetition) in this network.
+        """
+        return tuple(concat(t.inds for t in self.tensor_index.values()))
 
     def inner_inds(self):
-        """Return set of all inner indices, i.e. those that appear twice.
+        """Return tuple of all inner indices, i.e. those that appear twice.
         """
-        all_inds = tuple(self.all_inds())
+        all_inds = self.all_inds()
         ind_freqs = frequencies(all_inds)
-        return set(i for i in all_inds if ind_freqs[i] == 2)
+        return tuple(i for i in all_inds if ind_freqs[i] == 2)
 
     def outer_dims_inds(self):
         """Get the 'outer' pairs of dimension and indices, i.e. as if this
         tensor network was fully contracted.
         """
-        dims, inds = self.all_dims_inds()
+        inds, dims = self.all_inds_dims()
         ind_freqs = frequencies(inds)
         return tuple((d, i) for d, i in zip(dims, inds) if ind_freqs[i] == 1)
 

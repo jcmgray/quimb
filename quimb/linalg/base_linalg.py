@@ -360,25 +360,44 @@ def eigvecs_window(*args, **kwargs):
 # -------------------------------------------------------------------------- #
 
 def svd(a, return_vecs=True):
-    """Compute full singular value decomposition of matrix.
+    """Compute full singular value decomposition of matrix, using numpy.
+
+    Parameters
+    ----------
+    a : dense matrix
+        The operator.
+    return_vecs : bool, optional
+        Whether to return the singular vectors.
+
+    Returns
+    -------
+    (U,) s (, VH) :
+        Singular value(s) (and vectors) such that ``U @ np.diag(s) @ VH = a``.
     """
     return nla.svd(a, full_matrices=False, compute_uv=return_vecs)
 
 
 def svds(a, k=6, ncv=None, return_vecs=True, backend='AUTO', **kwargs):
-    """Compute the partial singular value decomposition of a matrix.
+    """Compute the partial singular value decomposition of an operator.
 
     Parameters
     ----------
-        a: operator to partially decompose
-        k: number of singular value (triplets) to retrieve
-        ncv: number of lanczos vectors to use in decomposition
-        return_vecs: whether to return the left and right vectors
-        backend: which solver to use to perform decomposition
+    a : Matrix or LinearOperator
+        The operator to decompose.
+    k : int, optional
+        number of singular value (triplets) to retrieve
+    ncv : int, optional
+        Number of lanczos vectors to use performing decomposition.
+    return_vecs : bool, optional
+        Whether to return the left and right vectors
+    backend : {'AUTO', 'SCIPY', 'SLEPC', 'SLEPC-NOMPI', 'NUMPY'}, optional
+        Which solver to use to perform decomposition.
 
     Returns
     -------
-        (uk,) sk (, vk): singular value(s) (and vectors)
+    (Uk,) sk (, VHk) :
+        Singular value(s) (and vectors) such that ``Uk @ np.diag(sk) @ VHk``
+        approximates ``a``.
     """
     settings = {
         'k': k,

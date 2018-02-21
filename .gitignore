@@ -111,3 +111,5 @@ $RECYCLE.BIN/
 docs/_autosummary/
 
 .fuse_hidden*
+
+\.pytest_cache/

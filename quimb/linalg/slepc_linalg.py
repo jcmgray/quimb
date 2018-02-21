@@ -79,6 +79,9 @@ class PetscLinearOperatorContext:
     def mult(self, _, x, y):
         y[:] = self.lo.matvec(x[:])
 
+    def multHermitian(self, _, x, y):
+        y[:] = self.lo.rmatvec(x[:])
+
 
 def linear_operator_2_petsc_shell(lo, comm=None):
     PETSc, comm = get_petsc(comm=comm)
@@ -407,7 +410,7 @@ def _init_eigensolver(k=6, which='LM', sigma=None, isherm=True,
     eigensolver.setProblemType(SLEPc.EPS.ProblemType.HEP if isherm else
                                SLEPc.EPS.ProblemType.NHEP)
     eigensolver.setWhichEigenpairs(_which_scipy_to_slepc(which))
-    eigensolver.setConvergenceTest(SLEPc.EPS.Conv.ABS)
+    eigensolver.setConvergenceTest(SLEPc.EPS.Conv.REL)
     eigensolver.setTolerances(tol=tol, max_it=maxiter)
     eigensolver.setFromOptions()
     return eigensolver

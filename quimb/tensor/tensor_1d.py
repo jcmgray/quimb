@@ -178,7 +178,7 @@ class TensorNetwork1D(TensorNetwork):
         """
         self._right_decomp_site(i, bra=bra, method='lq')
 
-    def left_canonize(self, start=None, stop=None, normalize=False, bra=None):
+    def left_canonize(self, stop=None, start=None, normalize=False, bra=None):
         """Left canonize all or a portion of this TN. If this is a MPS,
         this implies that::
 
@@ -213,7 +213,7 @@ class TensorNetwork1D(TensorNetwork):
             if bra is not None:
                 bra.site[-1] /= factor
 
-    def right_canonize(self, start=None, stop=None, normalize=False, bra=None):
+    def right_canonize(self, stop=None, start=None, normalize=False, bra=None):
         """Right canonize all or a portion of this TN. If this is a MPS,
         this implies that::
 
@@ -633,7 +633,7 @@ class MatrixProductState(TensorNetwork1D):
     _EXTRA_PROPS = ('_site_ind_id', '_site_tag_id')
 
     def imprint(self, other):
-        """Coerce ``other'' into a ``MatrixProductState'' like ``self''.
+        """Cast ``other'' into a ``MatrixProductState'' like ``self''.
         """
         for p in MatrixProductState._EXTRA_PROPS:
             setattr(other, p, getattr(self, p))
@@ -896,7 +896,9 @@ class MatrixProductState(TensorNetwork1D):
                            .fuse({'all': self.site_inds})
                            .data.reshape(-1, 1))
 
-    def phys_dim(self, i=0):
+    def phys_dim(self, i=None):
+        if i is None:
+            i = self.sites[0]
         return self.site[i].ind_size(self.site_ind(i))
 
     @functools.wraps(align_TN_1D)
@@ -997,6 +999,15 @@ class MatrixProductOperator(TensorNetwork1D):
 
         super().__init__(gen_tensors(), structure=site_tag_id, sites=sites,
                          nsites=nsites, check_collisions=False, **tn_opts)
+
+    _EXTRA_PROPS = ('_upper_ind_id', '_lower_ind_id', '_site_tag_id')
+
+    def imprint(self, other):
+        """Cast ``other'' into a ``MatrixProductOperator'' like ``self''.
+        """
+        for p in MatrixProductOperator._EXTRA_PROPS:
+            setattr(other, p, getattr(self, p))
+        other.__class__ = MatrixProductOperator
 
     def reindex_lower_sites(self, new_id, where=None, inplace=False):
         """Update the lower site index labels to a new string specifier.
@@ -1229,7 +1240,9 @@ class MatrixProductOperator(TensorNetwork1D):
         d = int(data.size**0.5)
         return np.matrix(data.reshape(d, d))
 
-    def phys_dim(self, i=0):
+    def phys_dim(self, i=None):
+        if i is None:
+            i = self.sites[0]
         return self.site[i].ind_size(self.upper_ind(i))
 
     def show(self, max_width=None):

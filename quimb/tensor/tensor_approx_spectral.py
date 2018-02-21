@@ -16,12 +16,12 @@ def construct_lanczos_tridiag_MPO(
     """
     """
     if initial_bond_dim is None:
-        initial_bond_dim = 2
+        initial_bond_dim = 3
     if max_bond is None:
-        max_bond = 4
+        max_bond = 9
 
     if v0 is None:
-        V = MPO_rand(A.nsites, initial_bond_dim, phys_dim=A.phys_dim(0))
+        V = MPO_rand(A.nsites, initial_bond_dim, phys_dim=A.phys_dim())
     else:  # normalize
         V = v0 / (v0.H @ v0)**0.5
     Vm1 = MPO_zeros_like(V)
@@ -30,11 +30,12 @@ def construct_lanczos_tridiag_MPO(
     beta = np.zeros(K + 2)
 
     bsz = A.phys_dim()**A.nsites
-    beta[1] = A.phys_dim()**A.nsites
+    beta[1] = bsz  # == sqrt(prod(A.shape))
 
-    compress_kws = {'max_bond': max_bond, 'method': 'eig'}
+    compress_kws = {'max_bond': max_bond, 'method': 'isvd'}
 
     for j in range(1, K + 1):
+
         Vt = A.apply(V, compress=True, **compress_kws)
         Vt.add_MPO(-beta[j] * Vm1, inplace=True, compress=True, **compress_kws)
         alpha[j] = (V.H @ Vt).real
@@ -117,8 +118,6 @@ class EEMPS(MatrixProductState):
 
     def contract_structured_all(self, old, inplace=False):
         new = old if inplace else old.copy()
-        new ^= slice(self.sysa[0], self.sysa[-1])
-        new ^= slice(self.sysb[0], self.sysb[-1])
         return new.contract_tags(...)
 
     def add_EEMPS(self, other, inplace=False):
@@ -159,8 +158,9 @@ class EEMPS(MatrixProductState):
                         reindex_map[ob] = sb
                         env_reindex_map[ob] = sb
 
-            t1.direct_product(t2.reindex(reindex_map), inplace=True,
-                              sum_inds=self.site_ind(i))
+                t2 = t2.reindex(reindex_map)
+
+            t1.direct_product(t2, inplace=True, sum_inds=self.site_ind(i))
 
         # treat effective envinroment tensor last
         t1, t2 = self['_ENV'], other['_ENV']
@@ -220,7 +220,7 @@ def EEMPS_rand_like(other, bond_dim, **mps_opts):
     bond dimension ``bond_dim``.
     """
     return EEMPS_rand_state(sysa=other.sysa, sysb=other.sysb,
-                            nsites=other.nsites, phys_dim=other.phys_dim,
+                            nsites=other.nsites, phys_dim=other.phys_dim(),
                             dtype=other.dtype, bond_dim=bond_dim, **mps_opts)
 
 
@@ -241,11 +241,12 @@ def EEMPS_zeros(sysa, sysb, nsites, phys_dim=2, dtype=float, **mps_opts):
 def EEMPS_zeros_like(other, **mps_opts):
     """Return the 'zero' EEMPS state with the same parameters as ``other``.
     """
-    return EEMPS_zeros(sysa=other.sysa, sysb=other.sysb, nsites=other.nsites,
-                       phys_dim=other.phys_dim, dtype=other.dtype, **mps_opts)
+    return EEMPS_zeros(sysa=other.sysa, sysb=other.sysb, dtype=other.dtype,
+                       phys_dim=other.phys_dim(), nsites=other.nsites,
+                       **mps_opts)
 
 
-class MPSPTPT:
+class PTPTLazyMPS:
     """Turn a MPS into an effective operator by partially tracing and partially
     transposing like so::
 
@@ -286,7 +287,7 @@ class MPSPTPT:
 
         # mixed canonize
         ket.left_canonize(stop=self.sysa_i)
-        ket.right_canonize(stop=self.sysb_f)
+        ket.right_canonize(stop=self.sysb_f - 1)
 
         # make bra and reindex non traced out sites and do partial transpose
         bra = ket.H
@@ -297,6 +298,7 @@ class MPSPTPT:
 
         self.lower_ind_id = ket.site_ind_id
         self.upper_ind_id = upper_ind_id
+        self._phys_dim = ket.phys_dim()
 
         for i in self.sysa:
             ket.add_tag('_KET', where=ket.site_tag(i))
@@ -306,29 +308,57 @@ class MPSPTPT:
             ket.add_tag('_BRA', where=ket.site_tag(i))
             bra.add_tag('_KET', where=ket.site_tag(i))
 
-        self.X = ket | bra
+        self.TN = ket | bra
 
         # replace left and right envs with identity since canonized
-        le = [self.X.structure.format(i) for i in range(0, self.sysa_i)]
-        re = [self.X.structure.format(i) for i in range(self.sysb_f, n)]
-        self.X.replace_with_identity(le, inplace=True)
-        self.X.replace_with_identity(re, inplace=True)
+        #    but also make sure all env bonds exist regardless of geometry
+        le = [ket.site_tag(i) for i in range(0, self.sysa_i)]
+        re = [ket.site_tag(i) for i in range(self.sysb_f, n)]
+        if le:
+            self.TN.replace_with_identity(le, inplace=True)
+        else:
+            self.TN.add_bond_between([ket.site_tag(0), '_KET'],
+                                     [ket.site_tag(0), '_BRA'])
+        if re:
+            self.TN.replace_with_identity(re, inplace=True)
+        else:
+            self.TN.add_bond_between([ket.site_tag(n - 1), '_KET'],
+                                     [ket.site_tag(n - 1), '_BRA'])
 
         # contract middle env if there is one
         if self.sysa_f != self.sysb_i:
-            self.X ^= slice(self.sysa_f, self.sysb_i)
-            self.X.add_tag('_ENV', where=ket.site_tag(self.sysa_f))
+            self.TN ^= slice(self.sysa_f, self.sysb_i)
+            self.TN.add_tag('_ENV', where=ket.site_tag(self.sysa_f))
 
         # drop its site tags
-        self.X.drop_tags(map(ket.site_tag, range(self.sysa_f, self.sysb_i)))
-        self.X.sites = self.X.calc_sites()
+        self.TN.drop_tags(map(ket.site_tag, range(self.sysa_f, self.sysb_i)))
+        self.TN.sites = self.TN.calc_sites()
+
+    def phys_dim(self):
+        return self._phys_dim
 
     def to_dense(self):
-        t = self.X.contract_tags(...)
-        t.fuse([('k', list(map(self.lower_ind_id.format, self.X.sites))),
-                ('b', list(map(self.upper_ind_id.format, self.X.sites)))],
+        t = self.TN.contract_tags(...)
+        t.fuse([('k', list(map(self.lower_ind_id.format, self.TN.sites))),
+                ('b', list(map(self.upper_ind_id.format, self.TN.sites)))],
                inplace=True)
         return np.asmatrix(t.data)
+
+    @property
+    def shape(self):
+        d = self.phys_dim() ** len(self.TN.sites)
+        return (d, d)
+
+    def dot(self, vector):
+        """Dot with a dense vector.
+        """
+        dims = [self.phys_dim()] * len(self.TN.sites)
+        u_ix = [self.upper_ind_id.format(i) for i in self.TN.sites]
+        l_ix = [self.lower_ind_id.format(i) for i in self.TN.sites]
+        vecT = Tensor(vector.reshape(*dims), u_ix)
+        outT = (self.TN | vecT).contract_tags(...)
+        outT.fuse({'k': l_ix}, inplace=True)
+        return outT.data.reshape(*vector.shape)
 
     def apply(self, other):
         """Apply this operator to a EEMPS vector::
@@ -352,18 +382,74 @@ class MPSPTPT:
         v.site_ind_id = self.upper_ind_id
 
         # split bra and operator env off to be contracted with vector
-        leave, remove = self.X.partition(['_BRA', '_ENV'])
+        leave, remove = (self.TN | v).partition(['_BRA', '_ENV', '_VEC'])
 
-        remove |= v
-        remove = remove.contract(..., inplace=True)
+        remove = remove.contract_tags(..., inplace=True)
         remove.drop_tags()
         remove.tags.add('_ENV')
 
         leave |= remove
 
-        # import pdb; pdb.set_trace()
-
         # 'upcast' leave from TensorNetwork to EEMPS
+        #     already has the correct structure
         v.imprint(leave)
         leave.site_ind_id = other.site_ind_id
         return leave
+
+    def rand_state(self, bond_dim, **mps_opts):
+        """
+        """
+        return EEMPS_rand_state(self.sysa, self.sysb, self.TN.nsites,
+                                phys_dim=self.phys_dim(), dtype=self.TN.dtype,
+                                bond_dim=bond_dim, **mps_opts)
+
+
+def construct_lanczos_tridiag_PTPTLazyMPS(
+        A,
+        K,
+        v0=None,
+        initial_bond_dim=None,
+        beta_tol=1e-12,
+        max_bond=None,
+        seed=None):
+    """
+    """
+    if initial_bond_dim is None:
+        initial_bond_dim = 4
+    if max_bond is None:
+        max_bond = 8
+
+    if v0 is None:
+        V = A.rand_state(bond_dim=initial_bond_dim)
+    else:  # normalize
+        V = v0 / (v0.H @ v0)**0.5
+    Vm1 = EEMPS_zeros_like(V)
+
+    alpha = np.zeros(K + 1)
+    beta = np.zeros(K + 2)
+
+    beta[1] = A.phys_dim()**((len(A.sysa) + len(A.sysb)) / 2)
+
+    compress_kws = {'max_bond': max_bond, 'method': 'isvd'}
+
+    for j in range(1, K + 1):
+        Vt = A.apply(V)
+        Vt -= beta[j] * Vm1
+        Vt.compress_all(**compress_kws)
+        alpha[j] = (V.H @ Vt).real
+        Vt -= alpha[j] * V
+        beta[j + 1] = ((Vt.H @ Vt)**0.5).real
+        Vt.compress_all(**compress_kws)
+
+        # check for convergence
+        if abs(beta[j + 1]) < beta_tol:
+            yield alpha[1:j + 1], beta[2:j + 2], beta[1]**2
+            break
+
+        Vm1 = V.copy()
+        V = Vt / beta[j + 1]
+
+        if j > 3:
+            yield (np.copy(alpha[1:j + 1]),
+                   np.copy(beta[2:j + 2]),
+                   np.copy(beta[1])**2)
