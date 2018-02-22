@@ -55,21 +55,28 @@ pass
 Example of DMRG2 calcuation
 ---------------------------
 
+Build a Hamiltonian term by term and setup a DMRG solver:
+
 .. code-block:: python
 
     In [1]: from quimb.tensor import *
 
     In [2]: builder = MPOSpinHam(S=1)
 
-    In [3]: builder.add_term(0.5, '+', '-')
+    In [3]: builder.add_term(1/2, '+', '-')
 
-    In [4]: builder.add_term(0.5, '-', '+')
+    In [4]: builder.add_term(1/2, '-', '+')
 
-    In [5]: builder.add_term(1.0, 'Z', 'Z')
+    In [5]: builder.add_term(1, 'Z', 'Z')
 
     In [6]: ham = builder.build(n=100)
 
     In [7]: dmrg = DMRG2(ham, bond_dims=[10, 20, 100, 100, 200], cutoffs=1e-10)
+
+
+Now solve to a certain relative energy tolerance, showing progress and a schematic of the final state:
+
+.. code-block:: guess
 
     In [8]: dmrg.solve(tol=1e-6, verbose=True)
     SWEEP-1, direction=R, max_bond=10, cutoff:1e-10
