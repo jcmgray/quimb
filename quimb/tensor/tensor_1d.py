@@ -558,7 +558,7 @@ class MatrixProductState(TensorNetwork1D):
         A string specifiying how to tag the tensors at each site. Should
         contain a ``'{}'`` placeholder. It is used to generate the actual tags
         like: ``map(site_tag_id.format, range(len(arrays)))``.
-    tags : str or sequence of hashable, optional
+    tags : str or sequence of str, optional
         Global tags to attach to all tensors.
     bond_name : str, optional
         The base name of the bond indices, onto which uuids will be added.
@@ -930,7 +930,7 @@ class MatrixProductOperator(TensorNetwork1D):
         A string specifiying how to tag the tensors at each site. Should
         contain a ``'{}'`` placeholder. It is used to generate the actual tags
         like: ``map(site_tag_id.format, range(len(arrays)))``.
-    tags : str or sequence of hashable, optional
+    tags : str or sequence of str, optional
         Global tags to attach to all tensors.
     bond_name : str, optional
         The base name of the bond indices, onto which uuids will be added.

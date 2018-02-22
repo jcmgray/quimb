@@ -415,7 +415,7 @@ def tensor_split(T, left_inds, method='svd', max_bond=None, absorb='both',
     ----------
     T : Tensor
         The tensor to split.
-    left_inds : sequence of hashable
+    left_inds : sequence of str
         The sequence of inds, which ``tensor`` should already have, to split to
         the 'left'.
     method : {'svd', 'eig', 'isvd', 'svds', qr', 'lq'}, optional
@@ -607,7 +607,7 @@ def tensor_direct_product(T1, T2, sum_inds=(), inplace=False):
         The first tensor.
     T2 : Tensor
         The second tensor, with matching indices and dimensions to ``T1``.
-    sum_inds : sequence of hashable, optional
+    sum_inds : sequence of str, optional
         Axes to sum over rather than combine, e.g. physical indices when
         adding tensor networks.
     inplace : bool, optional
@@ -638,6 +638,19 @@ def tensor_direct_product(T1, T2, sum_inds=(), inplace=False):
     return new_T
 
 
+def tags2set(tags):
+    """Parse a ``tags`` argument into a set - leave if already one.
+    """
+    if isinstance(tags, set):
+        return tags
+    elif tags is None:
+        return set()
+    elif isinstance(tags, str):
+        return {tags}
+    else:
+        return set(tags)
+
+
 # --------------------------------------------------------------------------- #
 #                                Tensor Class                                 #
 # --------------------------------------------------------------------------- #
@@ -649,9 +662,9 @@ class Tensor(object):
     ----------
     data : numpy.ndarray
         The n-dimensions data.
-    inds : sequence of hashable
+    inds : sequence of str
         The index labels for each dimension.
-    tags : sequence of hashable
+    tags : sequence of str
         Tags with which to select and filter from multiple tensors.
     """
 
@@ -671,9 +684,7 @@ class Tensor(object):
                 "Wrong number of inds, {}, supplied for array"
                 " of shape {}.".format(self.inds, self._data.shape))
 
-        self.tags = (set() if tags is None else
-                     {tags} if isinstance(tags, str) else
-                     set(tags))
+        self.tags = tags2set(tags)
 
     def copy(self, deep=False):
         """
@@ -705,7 +716,7 @@ class Tensor(object):
         if inds is not None:
             self.inds = inds
         if tags is not None:
-            self.tags = tags
+            self.tags = tags2set(tags)
         if len(self.inds) != self.data.ndim:
             raise ValueError("Mismatch between number of data dimensions and "
                              "number of indices supplied.")
@@ -762,7 +773,7 @@ class Tensor(object):
 
         Parameters
         ----------
-        output_inds : sequence of hashable
+        output_inds : sequence of str
             The desired output sequence of indices.
 
         Returns
@@ -806,7 +817,7 @@ class Tensor(object):
 
         Parameters
         ----------
-        left_inds : sequence of hashable
+        left_inds : sequence of str
             A subset of this tensors indices that defines 'left'.
         method : {'svd', 'eig'}
             Whether to use the SVD or eigenvalue decomposition to get the
@@ -825,7 +836,7 @@ class Tensor(object):
 
         Parameters
         ----------
-        left_inds : sequence of hashable
+        left_inds : sequence of str
             A subset of this tensors indices that defines 'left'.
         method : {'svd', 'eig'}
             Whether to use the SVD or eigenvalue decomposition to get the
@@ -927,13 +938,7 @@ class Tensor(object):
     def drop_tags(self, tags=None):
         """Drop certain tags, defaulting to all, from this tensor.
         """
-        if tags is None:
-            self.tags = set()
-        elif isinstance(tags, str):
-            self.tags.discard(tags)
-        else:
-            for tag in tags:
-                self.tags.discard(tag)
+        self.tags.difference_update(tags2set(tags))
 
     def shared_inds(self, other):
         """Return a tuple of the shared indices between this tensor
@@ -1040,20 +1045,21 @@ class TNLinearOperator(spla.LinearOperator):
         L--H-H--R
          \ | | /   -> lower_inds
 
-    This can then be supplied to scipy's sparse linear algebra routines. This
-    currently assumes the effective operator is square.
+    This can then be supplied to scipy's sparse linear algebra routines.
 
     Parameters
     ----------
     tns : sequence of Tensors or TensorNetwork
         A representation of the hamiltonian
-    upper_inds : sequence of hashable
+    upper_inds : sequence of str
         The upper inds of the effective hamiltonian network.
-    lower_inds : sequence of hashable
+    lower_inds : sequence of str
         The lower inds of the effective hamiltonian network. These should be
         ordered the same way as ``upper_inds``.
-    dims : tuple of int, or None
-        The dimensions corresponding to the inds. Will figure out if None.
+    udims : tuple of int, or None
+        The dimensions corresponding to upper_inds. Will figure out if None.
+    ldims : tuple of int, or None
+        The dimensions corresponding to upper_inds. Will figure out if None.
     """
 
     def __init__(self, tns, upper_inds, lower_inds, udims=None, ldims=None):
@@ -1430,6 +1436,20 @@ class TensorNetwork(object):
         # delete the tensor itself
         del self.tensor_index[name]
 
+    def delete(self, tags, mode='all'):
+        """Delete any tensors which match all or any of ``tags``.
+
+        Parameters
+        ----------
+        tags : str or sequence of str
+            The tags to match.
+        mode : {'all', 'any'}, optional
+            Whether to match all or any of the tags.
+        """
+        names = self._get_names_from_tags(tags, mode=mode)
+        for name in tuple(names):
+            self._del_tensor(name)
+
     def add_tag(self, tag, where=None, mode='all'):
         """Add tag to every tensor in this network, or if ``where`` is
         specified, the tensors matching those tags -- i.e. adds the tag to
@@ -1455,10 +1475,7 @@ class TensorNetwork(object):
         tags : str or sequence of str
             The tag or tags to drop.
         """
-        if isinstance(tags, str):
-            tags = (tags,)
-        else:
-            tags = tuple(tags)  # need to iterate over twice
+        tags = tags2set(tags)
 
         for t in self.tensor_index.values():
             t.drop_tags(tags)
@@ -1580,11 +1597,9 @@ class TensorNetwork(object):
         if tags is None:
             return set(self.tensor_index)
 
-        try:
-            return self.tag_index[tags]
-        except (KeyError, TypeError):
-            combine = {'all': operator.and_, 'any': operator.or_}[mode]
-            return functools.reduce(combine, (self.tag_index[t] for t in tags))
+        tags = tags2set(tags)
+        combine = {'all': operator.and_, 'any': operator.or_}[mode]
+        return functools.reduce(combine, (self.tag_index[t] for t in tags))
 
     def select_tensors(self, tags, mode='all'):
         """Return the sequence of tensors that match ``tags``. If
@@ -1593,7 +1608,7 @@ class TensorNetwork(object):
 
         Parameters
         ----------
-        tags : hashable or sequence of hashable
+        tags : str or sequence of str
             The tag or tag sequence.
         mode : {'all', 'any'}
             Whether to require matching all or any of the tags.
@@ -1616,7 +1631,7 @@ class TensorNetwork(object):
 
         Parameters
         ----------
-        tags : hashable or sequence of hashable
+        tags : str or sequence of str
             The tag or tag sequence.
         mode : {'all', 'any'}
             Whether to require matching all or any of the tags.
@@ -1685,7 +1700,7 @@ class TensorNetwork(object):
             self.tensor_index[name] = tensor
 
     def __delitem__(self, tags):
-        """Delete any tensors associated with ``tags``.
+        """Delete any tensors which have all of ``tags``.
         """
         names = self._get_names_from_tags(tags, mode='all')
         for name in tuple(names):
@@ -1697,7 +1712,7 @@ class TensorNetwork(object):
 
         Parameters
         ----------
-        tags : sequence of hashable
+        tags : sequence of str
             The list of tags to filter the tensors by. Use ``...``
             (``Ellipsis``) to filter all.
         inplace : bool, optional
@@ -1743,7 +1758,7 @@ class TensorNetwork(object):
 
         Parameters
         ----------
-        tags : sequence of hashable
+        tags : sequence of str
             The tags to split the network with.
         mode : {'any', 'all'}
             Whether to split based on matching any or all of the tags.
@@ -1824,14 +1839,13 @@ class TensorNetwork(object):
                 "Can only replace_with_identity when the remaining indices "
                 "have matching dimensions, but {} != {}.".format(dl, dr))
 
-        for t in where:
-            del tn[t]
+        tn.delete(where, mode=mode)
 
         tn.reindex({il: ir}, inplace=True)
         return tn
 
-    def replace_with_svd(self, where, left_inds, eps,
-                         mode='any', inplace=False):
+    def replace_with_svd(self, where, left_inds, eps, mode='any',
+                         ltags=None, rtags=None, inplace=False):
         """Replace all tensors marked by ``where`` with an iteratively
         constructed SVD. E.g. if ``X`` denote ``where`` tensors::
 
@@ -1854,6 +1868,10 @@ class TensorNetwork(object):
             :func:`scipy.linalg.interpolative.estimate_rank`.
         mode : {'any', 'all'}
             Whether to replace tensors matching any or all the tags ``where``.
+        ltags : sequence of str, optional
+            Tags to add to the left tensor.
+        rtags : sequence of str, optional
+            Tags to add to the right tensor.
         inplace : bool
             Perform operation in place.
 
@@ -1885,12 +1903,15 @@ class TensorNetwork(object):
         U = U.reshape(*left_shp, -1)
         V = V.reshape(-1, *rght_shp)
 
-        new_bnd = rand_uuid()
         tags = svd_section.tags
+        ltags = tags2set(ltags)
+        rtags = tags2set(rtags)
+
+        new_bnd = rand_uuid()
 
         # Add the new, compressed tensors back in
-        leave |= Tensor(U, inds=(*left_inds, new_bnd), tags=tags)
-        leave |= Tensor(V, inds=(new_bnd, *rght_inds), tags=tags)
+        leave |= Tensor(U, inds=(*left_inds, new_bnd), tags=tags | ltags)
+        leave |= Tensor(V, inds=(new_bnd, *rght_inds), tags=tags | rtags)
 
         return leave
 
@@ -1940,7 +1961,7 @@ class TensorNetwork(object):
 
         Parameters
         ----------
-        tags : sequence of hashable
+        tags : sequence of str
             The list of tags to filter the tensors by. Use ``...``
             (``Ellipsis``) to contract all.
         inplace : bool, optional
@@ -1981,7 +2002,7 @@ class TensorNetwork(object):
 
         Parameters
         ----------
-        tags_seq : sequence of sequence of hashable
+        tags_seq : sequence of sequence of str
             The list of tag-groups to cumulatively contract.
         inplace : bool, optional
             Whether to perform the contraction inplace.
@@ -2090,7 +2111,7 @@ class TensorNetwork(object):
 
         Parameters
         ----------
-        tags : sequence of hashable
+        tags : sequence of str
             Any tensors with any of these tags with be contracted. Set to
             ``...`` (``Ellipsis``) to contract all tensors, the default.
         inplace : bool, optional
@@ -2152,7 +2173,7 @@ class TensorNetwork(object):
 
     @property
     def tags(self):
-        return tuple(self.tag_index.keys())
+        return set(self.tag_index.keys())
 
     def ind_sizes(self):
         """Get dict of each index mapped to its size.

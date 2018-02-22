@@ -420,19 +420,19 @@ class TestTensorNetwork:
         b_data = np.random.randn(3, 4, 5) + 1.0j * np.random.randn(3, 4, 5)
         c_data = np.random.randn(5, 2, 6) + 1.0j * np.random.randn(5, 2, 6)
 
-        a = Tensor(a_data, inds=[0, 1, 2], tags={'red', 0})
-        b = Tensor(b_data, inds=[1, 2, 3], tags={'blue', 1})
-        c = Tensor(c_data, inds=[3, 0, 4], tags={'blue', 2})
+        a = Tensor(a_data, inds=[0, 1, 2], tags={'red', '0'})
+        b = Tensor(b_data, inds=[1, 2, 3], tags={'blue', '1'})
+        c = Tensor(c_data, inds=[3, 0, 4], tags={'blue', '2'})
 
         tn = a & b & c
         new_tn = tn.conj()
 
         for i, arr in enumerate((a_data, b_data, c_data)):
-            assert_allclose(new_tn[i].data, arr.conj())
+            assert_allclose(new_tn[str(i)].data, arr.conj())
 
         # make sure original network unchanged
         for i, arr in enumerate((a_data, b_data, c_data)):
-            assert_allclose(tn[i].data, arr)
+            assert_allclose(tn[str(i)].data, arr)
 
     def test_conj_inplace(self):
         a_data = np.random.randn(2, 3, 4) + 1.0j * np.random.randn(2, 3, 4)
@@ -772,8 +772,13 @@ class TestTensorNetworkAsLinearOperator:
 
         where = [f'I{i}' for i in range(2, 40)]
 
-        tn.replace_with_svd(where, left_inds=(ul, ll), eps=1e-3, inplace=True)
+        tn.replace_with_svd(where, left_inds=(ul, ll), eps=1e-3,
+                            inplace=True, ltags='_U', rtags='_V')
         tn.structure = None
         x2 = tn ^ ...
+
+        # check ltags and rtags have gone in
+        assert isinstance(tn['_U'], Tensor)
+        assert isinstance(tn['_V'], Tensor)
 
         assert_allclose(x1, x2, rtol=1e-4)
