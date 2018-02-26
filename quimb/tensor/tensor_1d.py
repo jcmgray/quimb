@@ -920,17 +920,27 @@ class MatrixProductState(TensorNetwork1D):
             +/     \-------A-------/   \-----B-----/               \+
                            |                 |
         """
-        # the sequence of sites in each of the 'environment' sections
         N = self.nsites
-
         if len(sysa) + len(sysb) == N:
             raise ValueError("Nothing to trace out.")
 
+        # parse horizntal and vertial svd tolerances and methods
+        try:
+            heps, veps = eps
+        except (ValueError, TypeError):
+            heps = veps = eps
+        try:
+            hmethod, vmethod = method
+        except (ValueError, TypeError):
+            hmethod = vmethod = method
+
+        # the sequence of sites in each of the 'environment' sections
         envm = range(max(sysa) + 1, min(sysb))
         envl = range(0, min(sysa))
         envr = range(max(sysb) + 1, N)
 
-        # spread norm, and if not cyclic put in mixed canonical form
+        # spread norm, and if not cyclic put in mixed canonical form, taking
+        # care that the orthogonality centre is in right place to use identity
         k = self.copy()
         k.left_canonize()
         k.right_canonize(max(sysa) + (bool(envm) or bool(envr)))
@@ -942,8 +952,8 @@ class MatrixProductState(TensorNetwork1D):
         kb = k | b
 
         # label the various partitions
-        for name, where in [('_ENVL', envl), ('_SYSA', sysa), ('_ENVM', envm),
-                            ('_SYSB', sysb), ('_ENVR', envr)]:
+        names = ('_ENVL', '_SYSA', '_ENVM', '_SYSB', '_ENVR')
+        for name, where in zip(names, (envl, sysa, envm, sysb, envr)):
             if where:
                 kb.add_tag(name, where=map(self.site_tag, where), mode='any')
 
@@ -951,21 +961,13 @@ class MatrixProductState(TensorNetwork1D):
             sections = [envm, sysa, sysb, (*envr, *envl)]
         else:
             sections = [envm]
-            if 0 in sysa:
-                # compressed sysa is double identity since canonized
-                pass
-            else:
-                # contract left side
-                kb ^= slice(envl.start, envl.stop)
+            # if either system includes end, can ignore and use identity
+            if 0 not in sysa:
                 sections.append(sysa)
-
-            if N - 1 in sysb:
-                # compressed sysb is double identity since canonized
-                pass
-            else:
-                kb ^= slice(envr.start, envr.stop)
+            if N - 1 not in sysb:
                 sections.append(sysb)
 
+        # ignore empty sections
         sections = [s for s in sections if len(s) > 0]
 
         ul_ur_ll_lrs = []
@@ -996,8 +998,8 @@ class MatrixProductState(TensorNetwork1D):
             #       | | | | | | | | |   -->       0~~~~0
             #   ll -o-o-o-o-o-o-o-o-o-       ll -/      \-
 
-            kb.replace_with_svd(section_tags, (ul, ll), eps, inplace=True,
-                                ltags='_LEFT', rtags='_RIGHT', method=method)
+            kb.replace_with_svd(section_tags, (ul, ll), heps, inplace=True,
+                                ltags='_LEFT', rtags='_RIGHT', method=hmethod)
 
         # vertical compress and unfold system sections only
         for section, (ul, ur, _, _) in zip(sections, ul_ur_ll_lrs):
@@ -1016,8 +1018,8 @@ class MatrixProductState(TensorNetwork1D):
 
             # do vertical SVD
             section_tags = map(self.site_tag, section)
-            kb.replace_with_svd(section_tags, (ul, ur), eps, inplace=True,
-                                ltags='_UP', rtags='_DOWN', method=method)
+            kb.replace_with_svd(section_tags, (ul, ur), veps, inplace=True,
+                                ltags='_UP', rtags='_DOWN', method=vmethod)
 
             # cut joined bond by reindexing to upper- and lower- ind_id.
             T_UP = kb[self.site_tag(section[0]), '_UP']
@@ -1026,41 +1028,52 @@ class MatrixProductState(TensorNetwork1D):
             T_UP.reindex({bnd: self.site_ind(label)}, inplace=True)
             T_DN.reindex({bnd: lower_ind_id.format(label)}, inplace=True)
 
-        # check if either system is at end, and thus reduces to identities
-        #
-        #  A-A-A-A-A-A-A-o-o-o-            \-o-o-o-
-        #  | | | | | | | | | |  ...  -->     | | |  ...
-        #  A-A-A-A-A-A-A-o-o-o-            /-o-o-o-
-        #
-        if not self.cyclic and (0 in sysa):
-            # get neighbouring tensor
-            if envm:
-                TU = TD = kb['_ENVM', '_LEFT']
+        if not self.cyclic:
+            # check if either system is at end, and thus reduces to identities
+            #
+            #  A-A-A-A-A-A-A-m-m-m-            \-m-m-m-
+            #  | | | | | | | | | |  ...  -->     | | |  ...
+            #  A-A-A-A-A-A-A-m-m-m-            /-m-m-m-
+            #
+            if 0 in sysa:
+                # get neighbouring tensor
+                if envm:
+                    TU = TD = kb['_ENVM', '_LEFT']
+                else:
+                    TU = kb['_SYSB', '_UP']
+                    TD = kb['_SYSB', '_DOWN']
+                ubnd, = kb['_KET', self.site_tag(sysa[-1])].shared_inds(TU)
+                lbnd, = kb['_BRA', self.site_tag(sysa[-1])].shared_inds(TD)
+
+                # delete the A system
+                kb.delete('_SYSA')
+                TU.reindex({ubnd: self.site_ind(0)}, inplace=True)
+                TD.reindex({lbnd: lower_ind_id.format(0)}, inplace=True)
             else:
-                TU = kb['_SYSB', '_UP']
-                TD = kb['_SYSB', '_DOWN']
-            ubnd, = kb['_KET', self.site_tag(sysa[-1])].shared_inds(TU)
-            lbnd, = kb['_BRA', self.site_tag(sysa[-1])].shared_inds(TD)
+                # or else replace the left or right envs with identites since
+                #
+                #  >->->->-A-A-A-A-           +-A-A-A-A-
+                #  | | | | | | | |  ...  -->  | | | | |
+                #  >->->->-A-A-A-A-           +-A-A-A-A-
+                #
+                kb.replace_with_identity('_ENVL', inplace=True)
 
-            # delete the A system
-            kb.delete('_SYSA')
-            TU.reindex({ubnd: self.site_ind(0)}, inplace=True)
-            TD.reindex({lbnd: lower_ind_id.format(0)}, inplace=True)
+            if N - 1 in sysb:
+                # get neighbouring tensor
+                if envm:
+                    TU = TD = kb['_ENVM', '_RIGHT']
+                else:
+                    TU = kb['_SYSA', '_UP']
+                    TD = kb['_SYSA', '_DOWN']
+                ubnd, = kb['_KET', self.site_tag(sysb[0])].shared_inds(TU)
+                lbnd, = kb['_BRA', self.site_tag(sysb[0])].shared_inds(TD)
 
-        if not self.cyclic and (N - 1 in sysb):
-            # get neighbouring tensor
-            if envm:
-                TU = TD = kb['_ENVM', '_RIGHT']
+                # delete the B system
+                kb.delete('_SYSB')
+                TU.reindex({ubnd: self.site_ind(1)}, inplace=True)
+                TD.reindex({lbnd: lower_ind_id.format(1)}, inplace=True)
             else:
-                TU = kb['_SYSA', '_UP']
-                TD = kb['_SYSA', '_DOWN']
-            ubnd, = kb['_KET', self.site_tag(sysb[0])].shared_inds(TU)
-            lbnd, = kb['_BRA', self.site_tag(sysb[0])].shared_inds(TD)
-
-            # delete the B system
-            kb.delete('_SYSB')
-            TU.reindex({ubnd: self.site_ind(1)}, inplace=True)
-            TD.reindex({lbnd: lower_ind_id.format(1)}, inplace=True)
+                kb.replace_with_identity('_ENVR', inplace=True)
 
         return kb
 

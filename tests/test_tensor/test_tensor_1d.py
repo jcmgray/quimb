@@ -346,7 +346,7 @@ class TestMatrixProductState:
         assert set(rhoc_ab.outer_inds()) == {'k0', 'k1', 'b0', 'b1'}
         inds = ['k0', 'k1'], ['b0', 'b1']
         x = rhoc_ab.trace(*inds)
-        assert_allclose(1.0, x, rtol=5e-3)
+        assert_allclose(1.0, x, rtol=0.01)
 
 
 class TestMatrixProductOperator:

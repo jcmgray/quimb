@@ -60,7 +60,7 @@ def set_join(sets):
 
 
 def _gen_output_inds(all_inds):
-    """Generate the output, i.e. unnique, indices from the set ``inds``. Raise
+    """Generate the output, i.e. unique, indices from the set ``inds``. Raise
     if any index found more than twice.
     """
     for ind, freq in frequencies(all_inds).items():
@@ -2037,19 +2037,14 @@ class TensorNetwork(object):
         contract, contract_tags, contract_structured
         """
         tn = self if inplace else self.copy()
-        ctags = set()
+        c_tags = set()
 
         for tags in tags_seq:
             # accumulate tags from each contractions
-            if isinstance(tags, str):
-                tags = {tags}
-            else:
-                tags = set(tags)
-
-            ctags |= tags
+            c_tags |= tags2set(tags)
 
             # peform the next contraction
-            tn = tn.contract_tags(ctags, inplace=True, mode='any', **opts)
+            tn = tn.contract_tags(c_tags, inplace=True, mode='any', **opts)
 
             if isinstance(tn, Tensor) or np.isscalar(tn):
                 # nothing more to contract
