@@ -8,6 +8,7 @@ from .tensor_core import (
     Tensor,
     TensorNetwork,
     rand_uuid,
+    find_shared_inds,
 )
 try:
     from opt_einsum import parser
@@ -84,7 +85,7 @@ class TensorNetwork1D(TensorNetwork):
     def site_tag(self, i):
         """The name of the tag specifiying the tensor at site ``i``.
         """
-        return self.site_tag_id.format(i)
+        return self.site_tag_id.format(i % self.nsites)
 
     @property
     def site_tags(self):
@@ -598,20 +599,20 @@ class MatrixProductState(TensorNetwork1D):
 
             site_tags = tuple({st} | tags for st in site_tags)
 
-        cyclic = (arrays[0].ndim == 3)
+        self.cyclic = (arrays[0].ndim == 3)
 
         # transpose arrays to 'lrp' order.
         def gen_orders():
             lp_ord = tuple(shape.replace('r', "").find(x) for x in 'lp')
             lrp_ord = tuple(shape.find(x) for x in 'lrp')
             rp_ord = tuple(shape.replace('l', "").find(x) for x in 'rp')
-            yield lp_ord if not cyclic else lrp_ord
+            yield lp_ord if not self.cyclic else lrp_ord
             for _ in range(len(sites) - 2):
                 yield lrp_ord
-            yield rp_ord if not cyclic else lrp_ord
+            yield rp_ord if not self.cyclic else lrp_ord
 
         def gen_inds():
-            cyc_bond = (rand_uuid(base=bond_name),) if cyclic else ()
+            cyc_bond = (rand_uuid(base=bond_name),) if self.cyclic else ()
 
             nbond = rand_uuid(base=bond_name)
             yield cyc_bond + (nbond, next(site_inds))
@@ -630,7 +631,7 @@ class MatrixProductState(TensorNetwork1D):
         super().__init__(gen_tensors(), structure=site_tag_id, sites=sites,
                          nsites=nsites, check_collisions=False, **tn_opts)
 
-    _EXTRA_PROPS = ('_site_ind_id', '_site_tag_id')
+    _EXTRA_PROPS = ('_site_ind_id', '_site_tag_id', 'cyclic')
 
     def imprint(self, other):
         """Cast ``other'' into a ``MatrixProductState'' like ``self''.
@@ -887,6 +888,181 @@ class MatrixProductState(TensorNetwork1D):
     def ptr(self, keep, upper_ind_id="b{}", rescale_sites=True):
         return self.partial_trace(keep, upper_ind_id,
                                   rescale_sites=rescale_sites)
+
+    def partial_trace_compress(self, sysa, sysb, eps=1e-6,
+                               lower_ind_id='b{}', method='isvd'):
+        """Perform a compressed partial trace using singular value
+        lateral then vertical decompositions of transfer matrix products::
+
+
+                    .....sysa......     ...sysb....
+            o-o-o-o-A-A-A-A-A-A-A-A-o-o-B-B-B-B-B-B-o-o-o-o-o-o-o-o-o
+            | | | | | | | | | | | | | | | | | | | | | | | | | | | | |
+
+                                      --> form inner product
+
+            o-o-o-o-A-A-A-A-A-A-A-A-o-o-B-B-B-B-B-B-o-o-o-o-o-o-o-o-o
+            | | | | | | | | | | | | | | | | | | | | | | | | | | | | |
+            o-o-o-o-A-A-A-A-A-A-A-A-o-o-B-B-B-B-B-B-o-o-o-o-o-o-o-o-o
+
+                                      --> lateral SVD on each section
+
+                    .....sysa......     ...sysb....
+            +\     /\             /\   /\         /\               /+
+            | E~~~E  A~~~~~~~~~~~A  E~E  B~~~~~~~B  E~~~~~~~~~~~~~E |
+            +/     \/             \/   \/         \/               \+
+
+                                      --> vertical SVD and unfold on A & B
+
+                           |                 |
+            +\     /-------A-------\   /-----B-----\               /+
+            | E~~~E                 E~E             E~~~~~~~~~~~~~E |
+            +/     \-------A-------/   \-----B-----/               \+
+                           |                 |
+        """
+        # the sequence of sites in each of the 'environment' sections
+        N = self.nsites
+
+        if len(sysa) + len(sysb) == N:
+            raise ValueError("Nothing to trace out.")
+
+        envm = range(max(sysa) + 1, min(sysb))
+        envl = range(0, min(sysa))
+        envr = range(max(sysb) + 1, N)
+
+        # spread norm, and if not cyclic put in mixed canonical form
+        k = self.copy()
+        k.left_canonize()
+        k.right_canonize(max(sysa) + (bool(envm) or bool(envr)))
+
+        # form the inner product
+        b = k.conj()
+        k.add_tag('_KET')
+        b.add_tag('_BRA')
+        kb = k | b
+
+        # label the various partitions
+        for name, where in [('_ENVL', envl), ('_SYSA', sysa), ('_ENVM', envm),
+                            ('_SYSB', sysb), ('_ENVR', envr)]:
+            if where:
+                kb.add_tag(name, where=map(self.site_tag, where), mode='any')
+
+        if self.cyclic:
+            sections = [envm, sysa, sysb, (*envr, *envl)]
+        else:
+            sections = [envm]
+            if 0 in sysa:
+                # compressed sysa is double identity since canonized
+                pass
+            else:
+                # contract left side
+                kb ^= slice(envl.start, envl.stop)
+                sections.append(sysa)
+
+            if N - 1 in sysb:
+                # compressed sysb is double identity since canonized
+                pass
+            else:
+                kb ^= slice(envr.start, envr.stop)
+                sections.append(sysb)
+
+        sections = [s for s in sections if len(s) > 0]
+
+        ul_ur_ll_lrs = []
+        for section in sections:
+
+            #          ...section[i]....
+            #   ul[i] -o-o-o-o-o-o-o-o-o- ur[i]
+            #          | | | | | | | | |
+            #   ll[i] -o-o-o-o-o-o-o-o-o- lr[i]
+
+            st_left = self.site_tag((section[0] - 1) % N)
+            st_right = self.site_tag(section[0])
+            ul, = find_shared_inds(kb['_KET', st_left], kb['_KET', st_right])
+            ll, = find_shared_inds(kb['_BRA', st_left], kb['_BRA', st_right])
+
+            st_left = self.site_tag(section[-1])
+            st_right = self.site_tag((section[-1] + 1) % N)
+            ur, = find_shared_inds(kb['_KET', st_left], kb['_KET', st_right])
+            lr, = find_shared_inds(kb['_BRA', st_left], kb['_BRA', st_right])
+
+            ul_ur_ll_lrs.append((ul, ur, ll, lr))
+
+        # lateral compress all sections
+        for section, (ul, _, ll, _) in zip(sections, ul_ur_ll_lrs):
+            section_tags = map(self.site_tag, section)
+
+            #   ul -o-o-o-o-o-o-o-o-o-       ul -\      /-
+            #       | | | | | | | | |   -->       0~~~~0
+            #   ll -o-o-o-o-o-o-o-o-o-       ll -/      \-
+
+            kb.replace_with_svd(section_tags, (ul, ll), eps, inplace=True,
+                                ltags='_LEFT', rtags='_RIGHT', method=method)
+
+        # vertical compress and unfold system sections only
+        for section, (ul, ur, _, _) in zip(sections, ul_ur_ll_lrs):
+            if section == sysa:
+                label = 0
+            elif section == sysb:
+                label = 1
+            else:
+                continue
+
+            #                    ----1----             )
+            #  -\      /-            (             ----1----
+            #    0~~~~0     -->      )       -->
+            #  -/      \-            (             ----1----
+            #                    ----1----             (
+
+            # do vertical SVD
+            section_tags = map(self.site_tag, section)
+            kb.replace_with_svd(section_tags, (ul, ur), eps, inplace=True,
+                                ltags='_UP', rtags='_DOWN', method=method)
+
+            # cut joined bond by reindexing to upper- and lower- ind_id.
+            T_UP = kb[self.site_tag(section[0]), '_UP']
+            T_DN = kb[self.site_tag(section[0]), '_DOWN']
+            bnd, = T_UP.shared_inds(T_DN)
+            T_UP.reindex({bnd: self.site_ind(label)}, inplace=True)
+            T_DN.reindex({bnd: lower_ind_id.format(label)}, inplace=True)
+
+        # check if either system is at end, and thus reduces to identities
+        #
+        #  A-A-A-A-A-A-A-o-o-o-            \-o-o-o-
+        #  | | | | | | | | | |  ...  -->     | | |  ...
+        #  A-A-A-A-A-A-A-o-o-o-            /-o-o-o-
+        #
+        if not self.cyclic and (0 in sysa):
+            # get neighbouring tensor
+            if envm:
+                TU = TD = kb['_ENVM', '_LEFT']
+            else:
+                TU = kb['_SYSB', '_UP']
+                TD = kb['_SYSB', '_DOWN']
+            ubnd, = kb['_KET', self.site_tag(sysa[-1])].shared_inds(TU)
+            lbnd, = kb['_BRA', self.site_tag(sysa[-1])].shared_inds(TD)
+
+            # delete the A system
+            kb.delete('_SYSA')
+            TU.reindex({ubnd: self.site_ind(0)}, inplace=True)
+            TD.reindex({lbnd: lower_ind_id.format(0)}, inplace=True)
+
+        if not self.cyclic and (N - 1 in sysb):
+            # get neighbouring tensor
+            if envm:
+                TU = TD = kb['_ENVM', '_RIGHT']
+            else:
+                TU = kb['_SYSA', '_UP']
+                TD = kb['_SYSA', '_DOWN']
+            ubnd, = kb['_KET', self.site_tag(sysb[0])].shared_inds(TU)
+            lbnd, = kb['_BRA', self.site_tag(sysb[0])].shared_inds(TD)
+
+            # delete the B system
+            kb.delete('_SYSB')
+            TU.reindex({ubnd: self.site_ind(1)}, inplace=True)
+            TD.reindex({lbnd: lower_ind_id.format(1)}, inplace=True)
+
+        return kb
 
     def to_dense(self):
         """Return the dense ket version of this MPS, i.e. a ``numpy.matrix``

@@ -329,6 +329,25 @@ class TestMatrixProductState:
         k = MPS_rand_state(5, 7, cyclic=cyclic, sites=sites, nsites=20)
         assert set(k.tags) == {'I{}'.format(i) for i in sites}
 
+    @pytest.mark.parametrize("method", ['isvd', 'svds'])
+    @pytest.mark.parametrize("cyclic", [True, False])
+    @pytest.mark.parametrize("sysa", [range(0, 10), range(10, 20),
+                                      range(20, 30), range(0, 30)])
+    @pytest.mark.parametrize("sysb", [range(30, 40), range(40, 50),
+                                      range(50, 60), range(30, 60)])
+    def test_partial_trace_compress(self, method, cyclic, sysa, sysb):
+        k = MPS_rand_state(60, 8, cyclic=cyclic)
+        kws = dict(sysa=sysa, sysb=sysb, eps=1e-6, method=method)
+        if len(sysa) + len(sysb) == 60:
+            with pytest.raises(ValueError):
+                k.partial_trace_compress(**kws)
+            return
+        rhoc_ab = k.partial_trace_compress(**kws)
+        assert set(rhoc_ab.outer_inds()) == {'k0', 'k1', 'b0', 'b1'}
+        inds = ['k0', 'k1'], ['b0', 'b1']
+        x = rhoc_ab.trace(*inds)
+        assert_allclose(1.0, x, rtol=5e-3)
+
 
 class TestMatrixProductOperator:
     def test_matrix_product_operator(self):

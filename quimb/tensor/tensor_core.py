@@ -364,7 +364,9 @@ def _array_split_svds(x, cutoff=0.0, cutoff_mode=3, max_bond=-1, absorb=0):
         k = min(d, max_bond)
 
     if k == d:
-        return _array_split_svd(x, cutoff, cutoff_mode, max_bond, absorb)
+        if isinstance(x, np.ndarray):
+            return _array_split_svd(x, cutoff, cutoff_mode, max_bond, absorb)
+        k = d - 1
 
     U, s, V = spla.svds(x, k=k)
     return _trim_and_renorm_SVD(U, s, V, cutoff, cutoff_mode, max_bond, absorb)
@@ -382,7 +384,7 @@ def _array_split_isvd(x, cutoff=0.0, cutoff_mode=3, max_bond=-1, absorb=0):
     else:
         k = min(d, max_bond)
 
-    if k == d:
+    if k == d and isinstance(x, np.ndarray):
         return _array_split_svd(x, cutoff, cutoff_mode, max_bond, absorb)
 
     U, s, V = sli.svd(x, k)
@@ -638,6 +640,22 @@ def tensor_direct_product(T1, T2, sum_inds=(), inplace=False):
     return new_T
 
 
+def find_shared_inds(t1, t2):
+    """
+    """
+    if isinstance(t1, Tensor):
+        ix1 = set(t1.inds)
+    else:
+        ix1 = set(concat(t.inds for t in t1))
+
+    if isinstance(t2, Tensor):
+        ix2 = set(t2.inds)
+    else:
+        ix2 = set(concat(t.inds for t in t2))
+
+    return ix1 & ix2
+
+
 def tags2set(tags):
     """Parse a ``tags`` argument into a set - leave if already one.
     """
@@ -861,11 +879,7 @@ class Tensor(object):
             If ``False`` (the default), a copy of this tensor with the changed
             inds will be returned.
         """
-        if inplace:
-            new = self
-        else:
-            new = self.copy()
-
+        new = self if inplace else self.copy()
         new.inds = tuple(index_map.get(ind, ind) for ind in new.inds)
         return new
 
@@ -1587,6 +1601,9 @@ class TensorNetwork(object):
         ts_and_sorted_tags.sort(key=lambda x: x[1])
         return tuple(x[0] for x in ts_and_sorted_tags)
 
+    def __iter__(self):
+        return iter(self.tensor_index.values())
+
     # ----------------- selecting and splitting the network ----------------- #
 
     def _get_names_from_tags(self, tags, mode='all'):
@@ -1845,7 +1862,7 @@ class TensorNetwork(object):
         return tn
 
     def replace_with_svd(self, where, left_inds, eps, mode='any',
-                         ltags=None, rtags=None, inplace=False):
+                         method='isvd', ltags=None, rtags=None, inplace=False):
         """Replace all tensors marked by ``where`` with an iteratively
         constructed SVD. E.g. if ``X`` denote ``where`` tensors::
 
@@ -1899,7 +1916,9 @@ class TensorNetwork(object):
         A = svd_section.aslinearoperator(upper_inds=rght_inds, udims=rght_shp,
                                          lower_inds=left_inds, ldims=left_shp)
 
-        U, V = _array_split_isvd(A, cutoff=eps)
+        U, V = {'isvd': _array_split_isvd,
+                'svds': _array_split_svds}[method](A, cutoff=eps)
+
         U = U.reshape(*left_shp, -1)
         V = V.reshape(-1, *rght_shp)
 
@@ -1920,7 +1939,7 @@ class TensorNetwork(object):
         """
         outer_inds = self.outer_inds()
 
-        for T in self.tensors:
+        for T in self:
             new_shape = tuple(d if i in outer_inds else 1
                               for d, i in zip(T.shape, T.inds))
             T.modify(data=np.zeros(new_shape, dtype=T.dtype))
@@ -2169,6 +2188,22 @@ class TensorNetwork(object):
     def aslinearoperator(self, upper_inds, lower_inds, udims=None, ldims=None):
         return TNLinearOperator(self, upper_inds, lower_inds, udims, ldims)
 
+    def trace(self, upper_inds, lower_inds):
+        """Trace over upper_inds joined with lower_inds
+        """
+        tn = self.reindex({u: l for u, l in zip(upper_inds, lower_inds)})
+        return tn.contract_tags(...)
+
+    def to_dense(self, *inds_seq):
+        """Convert this network to an dnese array, with a single dimension
+        for each of inds in ``inds_seqs``. E.g. to convert several sites
+        into a density matrix: ``TN.to_dense(('k0', 'k1'), ('b0', 'b1'))``.
+        """
+        T = self ^ ...
+        fuse_map = [(str(i), inds) for i, inds in enumerate(inds_seq)]
+        T.fuse(fuse_map, inplace=True)
+        return T.array
+
     # --------------- information about indices and dimensions -------------- #
 
     @property
@@ -2180,6 +2215,13 @@ class TensorNetwork(object):
         """
         ix_szs = (zip(t.inds, t.shape) for t in self.tensor_index.values())
         return dict(concat(ix_szs))
+
+    def ind_size(self, ind):
+        """Find the size of ``ind``.
+        """
+        for t in self:
+            if ind in t.inds:
+                return t.ind_size(ind)
 
     def all_inds_dims(self):
         """Return a list of all indices, and the corresponding list of

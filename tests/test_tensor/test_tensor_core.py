@@ -571,7 +571,7 @@ class TestTensorNetwork:
         assert 'green' in tn['red'].tags
         assert 'green' in tn['blue'].tags
         tn.add_tag('blue')
-        for t in tn.tensors:
+        for t in tn:
             assert 'blue' in t.tags
 
     def test_index_by_site(self):
