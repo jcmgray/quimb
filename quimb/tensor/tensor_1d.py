@@ -574,6 +574,7 @@ class MatrixProductState(TensorNetwork1D):
             super().__init__(arrays)
             self._site_ind_id = copy.copy(arrays.site_ind_id)
             self._site_tag_id = copy.copy(arrays.site_tag_id)
+            self.cyclic = arrays.cyclic
             return
 
         arrays = tuple(arrays)
@@ -889,8 +890,8 @@ class MatrixProductState(TensorNetwork1D):
         return self.partial_trace(keep, upper_ind_id,
                                   rescale_sites=rescale_sites)
 
-    def partial_trace_compress(self, sysa, sysb, eps=1e-6,
-                               lower_ind_id='b{}', method='isvd'):
+    def partial_trace_compress(self, sysa, sysb, eps=1e-6, method='isvd',
+                               lower_ind_id='b{}', **compress_opts):
         """Perform a compressed partial trace using singular value
         lateral then vertical decompositions of transfer matrix products::
 
@@ -999,7 +1000,8 @@ class MatrixProductState(TensorNetwork1D):
             #   ll -o-o-o-o-o-o-o-o-o-       ll -/      \-
 
             kb.replace_with_svd(section_tags, (ul, ll), heps, inplace=True,
-                                ltags='_LEFT', rtags='_RIGHT', method=hmethod)
+                                ltags='_LEFT', rtags='_RIGHT', method=hmethod,
+                                **compress_opts)
 
         # vertical compress and unfold system sections only
         for section, (ul, ur, _, _) in zip(sections, ul_ur_ll_lrs):
@@ -1019,7 +1021,8 @@ class MatrixProductState(TensorNetwork1D):
             # do vertical SVD
             section_tags = map(self.site_tag, section)
             kb.replace_with_svd(section_tags, (ul, ur), veps, inplace=True,
-                                ltags='_UP', rtags='_DOWN', method=vmethod)
+                                ltags='_UP', rtags='_DOWN', method=vmethod,
+                                **compress_opts)
 
             # cut joined bond by reindexing to upper- and lower- ind_id.
             T_UP = kb[self.site_tag(section[0]), '_UP']

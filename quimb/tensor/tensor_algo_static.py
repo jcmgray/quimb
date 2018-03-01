@@ -327,9 +327,7 @@ class DMRG:
 
         if dense:
             # contract remaining hamiltonian and get its dense representation
-            eff_ham = (self._eff_ham ^ '_HAM')['_HAM']
-            eff_ham.fuse((('lower', lix), ('upper', uix)), inplace=True)
-            A = eff_ham.data
+            A = (self._eff_ham ^ '_HAM')['_HAM'].to_dense(lix, uix)
         else:
             A = TNLinearOperator(self._eff_ham['_HAM'], udims=dims, ldims=dims,
                                  upper_inds=uix, lower_inds=lix)
@@ -660,9 +658,7 @@ class DMRGX(DMRG):
         dims = self._k.site[i].shape
 
         # contract remaining hamiltonian and get its dense representation
-        eff_ham = (self._eff_ham ^ '_HAM')['_HAM']
-        eff_ham.fuse((('lower', lix), ('upper', uix)), inplace=True)
-        A = eff_ham.data
+        A = (self._eff_ham ^ '_HAM')['_HAM'].to_dense(lix, uix)
 
         # eigen-decompose and reshape eigenvectors thus::
         #

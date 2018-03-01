@@ -3,7 +3,7 @@ which has an efficient representation of its linear action on a vector.
 """
 import functools
 from math import sqrt, log2, exp
-import time
+import random
 
 import numpy as np
 import scipy.linalg as scla
@@ -13,7 +13,7 @@ from ..core import ptr
 from ..accel import prod, vdot
 from ..utils import int2tup
 from ..linalg.mpi_launcher import get_mpi_pool
-from ..tensor.tensor_core import einsum, einsum_path, HuskArray
+from ..tensor.tensor_core import contract, contract_path, HuskArray
 from ..tensor.tensor_1d import MatrixProductOperator
 from ..tensor.tensor_approx_spectral import (
     construct_lanczos_tridiag_MPO,
@@ -93,7 +93,7 @@ def prepare_lazy_ptr_dot(psi_a_shape, dims=None, sysa=0):
 @functools.lru_cache(128)
 def get_path_lazy_ptr_dot(psi_ab_tensor_shape, psi_a_tensor_shape,
                           inds_a_ket, inds_ab_bra, inds_ab_ket):
-    return einsum_path(
+    return contract_path(
         HuskArray(psi_a_tensor_shape), inds_a_ket,
         HuskArray(psi_ab_tensor_shape), inds_ab_bra,
         HuskArray(psi_ab_tensor_shape), inds_ab_ket,
@@ -111,7 +111,7 @@ def do_lazy_ptr_dot(psi_ab_tensor, psi_ab_tensor_conj, psi_a_tensor,
     if out is None:
         out = np.empty_like(psi_a_tensor)
 
-    return einsum(
+    return contract(
         psi_a_tensor, inds_a_ket,
         psi_ab_tensor_conj, inds_ab_bra,
         psi_ab_tensor, inds_ab_ket,
@@ -323,7 +323,7 @@ def prepare_lazy_ptr_ppt_dot(psi_ab_shape, dims, sysa, sysb):
 def get_path_lazy_ptr_ppt_dot(psi_abc_tensor_shape, psi_ab_tensor_shape,
                               inds_ab_ket, inds_abc_bra,
                               inds_abc_ket, inds_out):
-    return einsum_path(
+    return contract_path(
         HuskArray(psi_ab_tensor_shape), inds_ab_ket,
         HuskArray(psi_abc_tensor_shape), inds_abc_bra,
         HuskArray(psi_abc_tensor_shape), inds_abc_ket,
@@ -341,7 +341,7 @@ def do_lazy_ptr_ppt_dot(psi_ab_tensor, psi_abc_tensor, psi_abc_tensor_conj,
 
     # must have ``inds_out`` as resulting indices are not ordered
     # in the same way as input due to partial tranpose.
-    return einsum(
+    return contract(
         psi_ab_tensor, inds_ab_ket,
         psi_abc_tensor_conj, inds_abc_bra,
         psi_abc_tensor, inds_abc_ket,
@@ -550,7 +550,8 @@ def construct_lanczos_tridiag(
 
     if v0 is None:
         if seed is not None:
-            np.random.seed(int(time.time() * 1e7 % (2**32 - 1)) + seed)
+            # needs to be truly random so MPI processes don't overlap
+            np.random.seed(random.SystemRandom().randint(0, 2**32 - 1))
         V = np.random.choice([-1, 1, 1j, -1j], v_shp)
         V /= beta[1]  # normalize
     else:
@@ -647,7 +648,7 @@ def ext_per_trim(x, p=0.6, s=1.0):
 
 
 def _single_random_estimate(A, K, bsz, beta_tol, v0, fn, pos,
-                            tau, tol_scale, seed=None):
+                            tau, tol_scale, verbosity=0, *, seed=None):
     # choose normal (any LinearOperator) or MPO lanczos tridiag construction
     if isinstance(A, MatrixProductOperator):
         lanc_fn = construct_lanczos_tridiag_MPO
@@ -665,9 +666,9 @@ def _single_random_estimate(A, K, bsz, beta_tol, v0, fn, pos,
             A, K=K, beta_tol=beta_tol, seed=seed,
             v0=v0() if callable(v0) else v0, **lanc_opts):
 
-        try:  # First bound
-            Gf = scaling * calc_trace_fn_tridiag(*lanczos_tridiag_eig(
-                alpha, beta, check_finite=False), fn=fn, pos=pos)
+        try:  # First bound]
+            Tl, Tv = lanczos_tridiag_eig(alpha, beta, check_finite=False)
+            Gf = scaling * calc_trace_fn_tridiag(Tl, Tv, fn=fn, pos=pos)
         except scla.LinAlgError:
             import warnings
             warnings.warn("Approx Spectral Gf tri-eig didn't converge.")
@@ -676,10 +677,11 @@ def _single_random_estimate(A, K, bsz, beta_tol, v0, fn, pos,
         # check for break-down convergence (e.g. found entire non-null)
         if abs(beta[-1]) < beta_tol:
             estimate = Gf
+            if verbosity >= 2:
+                print("k={}: Beta breadown.".format(beta.size))
             break
 
         try:  # second bound
-            beta[-1] = beta[0]
             Rf = scaling * calc_trace_fn_tridiag(*lanczos_tridiag_eig(
                 np.append(alpha, alpha[0]), beta, check_finite=False),
                 fn=fn, pos=pos)
@@ -688,14 +690,22 @@ def _single_random_estimate(A, K, bsz, beta_tol, v0, fn, pos,
             warnings.warn("Approx Spectral Rf tri-eig didn't converge.")
             continue
 
+        if verbosity >= 2:
+            print("k={}: Gf={}, Rf={}.".format(beta.size, Gf, Rf))
+
         # check for error bound convergence
         if abs(Rf - Gf) < 2 * tau * (abs(Gf) + tol_scale):
             estimate = (Gf + Rf) / 2
+            if verbosity >= 2:
+                print("k={}: Converged to tau {}.".format(beta.size, tau))
             break
 
     # didn't converge, use best estimate
     if estimate is None:
         estimate = (Gf + Rf) / 2
+
+    if verbosity >= 1:
+        print("k={}: Returning estimate {}.".format(beta.size, estimate))
 
     return estimate
 
@@ -713,7 +723,8 @@ def approx_spectral_function(
         beta_tol=1e-6,
         mean_p=0.7,
         mean_s=1.0,
-        mpi=False):
+        mpi=False,
+        verbosity=0):
     """Approximate a spectral function, that is, the quantity ``Tr(fn(A))``.
 
     Parameters
@@ -777,7 +788,7 @@ def approx_spectral_function(
         R = max(1, int(R / bsz))
 
     # generate repeat estimates
-    args = (A, K, bsz, beta_tol, v0, fn, pos, tau, tol_scale)
+    args = (A, K, bsz, beta_tol, v0, fn, pos, tau, tol_scale, verbosity)
     if not mpi:
         results = iter(_single_random_estimate(*args) for _ in range(R))
     else:
@@ -793,6 +804,10 @@ def approx_spectral_function(
         samples.append(next(results))
         r = len(samples)
 
+        if verbosity >= 1:
+            print("Repeat {}: estimate is {}"
+                  "".format(len(samples), samples[-1]))
+
         # wait a few iterations before checking error on mean breakout
         if r >= 4:
             xtrim = ext_per_trim(samples, p=mean_p, s=mean_s)
@@ -803,13 +818,24 @@ def approx_spectral_function(
                 estimate, sdev = np.mean(xtrim), np.std(xtrim)
             err = sdev / (r - 1) ** 0.5
             if err < tol * (abs(estimate) + tol_scale):
-                return estimate
+
+                if verbosity >= 1:
+                    print("Repeat {}: converged to tol {}"
+                          "".format(len(samples), tol))
+
+                break
 
     if mpi:
         for f in fs:
             f.cancel()
 
-    return np.mean(samples) if estimate is None else estimate
+    if estimate is None:
+        estimate = np.mean(samples)
+
+    if verbosity >= 1:
+        print("ESTIMATE is {}".format(estimate))
+
+    return estimate
 
 
 @functools.wraps(approx_spectral_function)

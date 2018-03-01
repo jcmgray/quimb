@@ -375,7 +375,7 @@ class TestLanczosApprox:
         pos = fn == np.sqrt
         actual_x = sum(fn(eigvals(a)))
         approx_x = approx_spectral_function(a, fn, K=20, R=20, mpi=mpi,
-                                            pos=pos, bsz=bsz)
+                                            pos=pos, bsz=bsz, verbosity=2)
         assert_allclose(actual_x, approx_x, rtol=rtol)
 
     @pytest.mark.parametrize("bsz", [1, 2, 5])
@@ -397,7 +397,7 @@ class TestLanczosApprox:
         v0 = v0.A.reshape(-1)
         pos = fn == np.sqrt
         approx_x = approx_spectral_function(a, fn, K=20, v0=v0, pos=pos,
-                                            bsz=bsz)
+                                            bsz=bsz, verbosity=2)
         assert_allclose(actual_x, approx_x, rtol=rtol)
 
     @pytest.mark.parametrize("bsz", [1, 2, 5])
@@ -412,7 +412,7 @@ class TestLanczosApprox:
         rho_ab = psi_abc.ptr(DIMS, sysa)
         actual_x = sum(fn(eigvals(rho_ab)))
         lo = LazyPtrOperator(psi_abc, DIMS, sysa)
-        approx_x = approx(lo, R=50, bsz=bsz)
+        approx_x = approx(lo, R=50, bsz=bsz, verbosity=2)
         assert_allclose(actual_x, approx_x, rtol=rtol)
 
     @pytest.mark.parametrize("bsz", [1, 2, 5])

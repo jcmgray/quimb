@@ -26,24 +26,36 @@ from ..utils import raise_cant_find_library_function, functions_equal
 
 try:
     import opt_einsum
-    einsum = opt_einsum.contract
+    contract = opt_einsum.contract
 
     @functools.wraps(opt_einsum.contract_path)
-    def einsum_path(*args, optimize='greedy', memory_limit=2**28, **kwargs):
+    def contract_path(*args, optimize='greedy', memory_limit=2**30, **kwargs):
         return opt_einsum.contract_path(
             *args, path=optimize, memory_limit=memory_limit, **kwargs)
 
     try:
-        einsum_expression = opt_einsum.contract_expression
+        contract_expression = opt_einsum.contract_expression
     except AttributeError:
-        einsum_expression = raise_cant_find_library_function(
+        contract_expression = raise_cant_find_library_function(
             "opt_einsum", "Or a more recent (github?) version is needed for "
             "caching tensor contractions.")
 
 except ImportError:
     extra_msg = "Needed for optimized tensor contractions."
-    einsum = einsum_expression = einsum_path = \
+    contract = contract_expression = contract_path = \
         raise_cant_find_library_function("opt_einsum", extra_msg)
+
+
+@functools.lru_cache(4096)
+def get_contract_expr(contract_str, *shapes, memory_limit=None, **kwargs):
+
+    # choose how large intermediate arrays can be
+    if memory_limit is None:
+        memory_limit = max(prod(shp) for shp in shapes)**2
+        memory_limit = max(2**20, memory_limit)
+    kwargs['memory_limit'] = memory_limit
+
+    return contract_expression(contract_str, *shapes, **kwargs)
 
 
 # --------------------------------------------------------------------------- #
@@ -116,13 +128,8 @@ class HuskArray(np.ndarray):
         self.shape = shape
 
 
-@functools.lru_cache(4096)
-def cached_einsum_expr(contract_str, *shapes):
-    return einsum_expression(contract_str, *shapes,
-                             memory_limit=2**28, optimize='greedy')
-
-
-def tensor_contract(*tensors, output_inds=None, return_expression=False):
+def tensor_contract(*tensors, output_inds=None,
+                    return_expression=False, **contract_opts):
     """Efficiently contract multiple tensors, combining their tags.
 
     Parameters
@@ -153,7 +160,8 @@ def tensor_contract(*tensors, output_inds=None, return_expression=False):
     contract_str = _maybe_map_indices_to_alphabet([*unique(a_ix)], i_ix, o_ix)
 
     # perform the contraction
-    expression = cached_einsum_expr(contract_str, *(t.shape for t in tensors))
+    shapes = (t.shape for t in tensors)
+    expression = get_contract_expr(contract_str, *shapes, **contract_opts)
 
     if return_expression:
         return expression
@@ -244,6 +252,8 @@ def _trim_and_renorm_SVD(U, s, V, cutoff, cutoff_mode, max_bond, absorb):
             s = s[:n_chi] * norm
             U = U[..., :n_chi]
             V = V[:n_chi, ...]
+
+    s = np.ascontiguousarray(s)
 
     if absorb == -1:
         U *= s.reshape((1, -1))
@@ -351,11 +361,18 @@ def _array_split_svdvals_eig(x):
     return s2**0.5
 
 
-def _array_split_svds(x, cutoff=0.0, cutoff_mode=3, max_bond=-1, absorb=0):
-    """SVD-decomposition using iterative methods. Allows the
-    computation of only a certain number of singular values, e.g. max_bond,
-    from the get-go, and is thus more efficient. Can also supply LinearOperator.
+@njit  # pragma: no cover
+def _array_split_eigh(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0):
+    """SVD-decomposition, using hermitian eigen-decomposition, only works if
+    ``x`` is symmetric-positive.
     """
+    s, U = np.linalg.eigh(x)
+    s, U = s[::-1], U[:, ::-1]  # make sure largest singular value first
+    V = dag(U)
+    return _trim_and_renorm_SVD(U, s, V, cutoff, cutoff_mode, max_bond, absorb)
+
+
+def _choose_k(x, cutoff, max_bond):
     d = min(x.shape)
 
     if max_bond < 0:
@@ -363,33 +380,60 @@ def _array_split_svds(x, cutoff=0.0, cutoff_mode=3, max_bond=-1, absorb=0):
     else:
         k = min(d, max_bond)
 
-    if k == d:
-        if isinstance(x, np.ndarray):
-            return _array_split_svd(x, cutoff, cutoff_mode, max_bond, absorb)
-        k = d - 1
+    return 'full' if k > d // 2 else k
+
+
+def _array_split_svds(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0):
+    """SVD-decomposition using iterative methods. Allows the
+    computation of only a certain number of singular values, e.g. max_bond,
+    from the get-go, and is thus more efficient. Can also supply
+    ``scipy.sparse.linalg.LinearOperator``.
+    """
+    k = _choose_k(x, cutoff, max_bond)
+
+    if k == 'full':
+        if not isinstance(x, np.ndarray):
+            x = x.to_dense()
+        return _array_split_svd(x, cutoff, cutoff_mode, max_bond, absorb)
 
     U, s, V = spla.svds(x, k=k)
     return _trim_and_renorm_SVD(U, s, V, cutoff, cutoff_mode, max_bond, absorb)
 
 
-def _array_split_isvd(x, cutoff=0.0, cutoff_mode=3, max_bond=-1, absorb=0):
+def _array_split_isvd(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0):
     """SVD-decomposition using interpolative matrix random methods. Allows the
     computation of only a certain number of singular values, e.g. max_bond,
-    from the get-go, and is thus more efficient. Can also supply LinearOperator.
+    from the get-go, and is thus more efficient. Can also supply
+    ``scipy.sparse.linalg.LinearOperator``.
     """
-    d = min(x.shape)
+    k = _choose_k(x, cutoff, max_bond)
 
-    if max_bond < 0:
-        k = sli.estimate_rank(x, eps=cutoff)
-    else:
-        k = min(d, max_bond)
-
-    if k == d and isinstance(x, np.ndarray):
+    if k == 'full':
+        if not isinstance(x, np.ndarray):
+            x = x.to_dense()
         return _array_split_svd(x, cutoff, cutoff_mode, max_bond, absorb)
 
     U, s, V = sli.svd(x, k)
     V = V.conj().T
+    return _trim_and_renorm_SVD(U, s, V, cutoff, cutoff_mode, max_bond, absorb)
 
+
+def _array_split_eigsh(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0):
+    """SVD-decomposition using iterative hermitian eigen decomp, thus assuming
+    that ``x`` is positive. Allows the computation of only a certain number of
+    singular values, e.g. max_bond, from the get-go, and is thus more
+    efficient. Can also supply ``scipy.sparse.linalg.LinearOperator``.
+    """
+    k = _choose_k(x, cutoff, max_bond)
+
+    if k == 'full':
+        if not isinstance(x, np.ndarray):
+            x = x.to_dense()
+        return _array_split_eigh(x, cutoff, cutoff_mode, max_bond, absorb)
+
+    s, U = spla.eigsh(x, k=k)
+    s, U = s[::-1], U[:, ::-1]  # make sure largest singular value first
+    V = dag(U)
     return _trim_and_renorm_SVD(U, s, V, cutoff, cutoff_mode, max_bond, absorb)
 
 
@@ -420,7 +464,7 @@ def tensor_split(T, left_inds, method='svd', max_bond=None, absorb='both',
     left_inds : sequence of str
         The sequence of inds, which ``tensor`` should already have, to split to
         the 'left'.
-    method : {'svd', 'eig', 'isvd', 'svds', qr', 'lq'}, optional
+    method : {'svd', 'eig', 'isvd', 'svds', qr', 'lq', 'eigh', 'eigsh'}
         How to split the tensor.
     cutoff : float, optional
         The threshold below which to discard singular values, only applies to
@@ -470,10 +514,12 @@ def tensor_split(T, left_inds, method='svd', max_bond=None, absorb='both',
 
     left, right = {'svd': _array_split_svd,
                    'eig': _array_split_eig,
+                   'qr': _array_split_qr,
+                   'lq': _array_split_lq,
+                   'eigh': _array_split_eigh,
                    'isvd': _array_split_isvd,
                    'svds': _array_split_svds,
-                   'qr': _array_split_qr,
-                   'lq': _array_split_lq}[method](array, **opts)
+                   'eigsh': _array_split_eigsh}[method](array, **opts)
 
     left = left.reshape(*left_dims, -1)
     right = right.reshape(-1, *right_dims)
@@ -770,6 +816,13 @@ class Tensor(object):
     def dtype(self):
         return self._data.dtype
 
+    def astype(self, dtype, inplace=False):
+        """Change the type of this tensor to ``dtype``.
+        """
+        T = self if inplace else self.copy()
+        T.modify(data=self.data.astype(dtype))
+        return T
+
     def ind_size(self, ind):
         """Return the size of dimension corresponding to ``ind``.
         """
@@ -925,6 +978,13 @@ class Tensor(object):
                   inds=(*new_fused_inds, *unfused_inds))
         return tn
 
+    def to_dense(self, *inds_seq):
+        """Convert this Tensor into an dense array, with a single dimension
+        for each of inds in ``inds_seqs``. E.g. to convert several sites
+        into a density matrix: ``T.to_dense(('k0', 'k1'), ('b0', 'b1'))``.
+        """
+        return self.fuse([(str(i), ix) for i, ix in enumerate(inds_seq)]).data
+
     def squeeze(self, inplace=False):
         """Drop any singlet dimensions from this tensor.
         """
@@ -952,6 +1012,8 @@ class Tensor(object):
     def drop_tags(self, tags=None):
         """Drop certain tags, defaulting to all, from this tensor.
         """
+        if tags is None:
+            tags = self.tags
         self.tags.difference_update(tags2set(tags))
 
     def shared_inds(self, other):
@@ -1102,14 +1164,36 @@ class TNLinearOperator(spla.LinearOperator):
                          shape=(self.ud, self.ld))
 
     def _matvec(self, vec):
-        iT = Tensor(vec.reshape(*self.udims), inds=self.upper_inds)
-        oT = tensor_contract(*self._tensors, iT, output_inds=self.lower_inds)
-        return oT.data.reshape(*vec.shape)
+        in_data = vec.reshape(*self.udims)
+
+        if not hasattr(self, '_matvec_fn'):
+            # generate a expression that acts directly on the data
+            iT = Tensor(in_data, inds=self.upper_inds)
+            self._matvec_fn = tensor_contract(*self._tensors, iT,
+                                              return_expression=True,
+                                              output_inds=self.lower_inds)
+
+        out_data = self._matvec_fn(*(t.data for t in self._tensors), in_data)
+        return out_data.reshape(*vec.shape)
 
     def _rmatvec(self, vec):
-        iT = Tensor(vec.conj().reshape(*self.ldims), inds=self.lower_inds)
-        oT = tensor_contract(*self._tensors, iT, output_inds=self.upper_inds)
-        return oT.data.conj().reshape(*vec.shape)
+        in_data = vec.conj().reshape(*self.ldims)
+
+        if not hasattr(self, '_rmatvec_fn'):
+            # generate a expression that acts directly on the data
+            iT = Tensor(in_data, inds=self.lower_inds)
+            self._rmatvec_fn = tensor_contract(*self._tensors, iT,
+                                               return_expression=True,
+                                               output_inds=self.upper_inds)
+
+        out_data = self._rmatvec_fn(*(t.data for t in self._tensors), in_data)
+        return out_data.conj().reshape(*vec.shape)
+
+    def to_dense(self):
+        """Convert this TNLinearOperator into a dense array.
+        """
+        return tensor_contract(*self._tensors).to_dense(self.lower_inds,
+                                                        self.upper_inds)
 
 
 # --------------------------------------------------------------------------- #
@@ -1611,7 +1695,7 @@ class TensorNetwork(object):
         each tensor must contain every tag. If ``mode='any'``, each tensor
         only need contain one of the tags.
         """
-        if tags is None:
+        if tags in (None, ...):
             return set(self.tensor_index)
 
         tags = tags2set(tags)
@@ -1862,7 +1946,8 @@ class TensorNetwork(object):
         return tn
 
     def replace_with_svd(self, where, left_inds, eps, mode='any',
-                         method='isvd', ltags=None, rtags=None, inplace=False):
+                         method='isvd', ltags=None, rtags=None, inplace=False,
+                         max_bond=None):
         """Replace all tensors marked by ``where`` with an iteratively
         constructed SVD. E.g. if ``X`` denote ``where`` tensors::
 
@@ -1916,8 +2001,18 @@ class TensorNetwork(object):
         A = svd_section.aslinearoperator(upper_inds=rght_inds, udims=rght_shp,
                                          lower_inds=left_inds, ldims=left_shp)
 
-        U, V = {'isvd': _array_split_isvd,
-                'svds': _array_split_svds}[method](A, cutoff=eps)
+        opts = {}
+        opts['max_bond'] = {None: -1}.get(max_bond, max_bond)
+
+        if method in ('svd', 'eig', 'eigh') and not isinstance(A, np.ndarray):
+            A = A.to_dense()
+
+        U, V = {'svd': _array_split_svd,
+                'eig': _array_split_eig,
+                'eigh': _array_split_eigh,
+                'isvd': _array_split_isvd,
+                'svds': _array_split_svds,
+                'eigsh': _array_split_eigsh}[method](A, cutoff=eps, **opts)
 
         U = U.reshape(*left_shp, -1)
         V = V.reshape(-1, *rght_shp)
@@ -2190,14 +2285,11 @@ class TensorNetwork(object):
         return tn.contract_tags(...)
 
     def to_dense(self, *inds_seq):
-        """Convert this network to an dnese array, with a single dimension
+        """Convert this network into an dense array, with a single dimension
         for each of inds in ``inds_seqs``. E.g. to convert several sites
         into a density matrix: ``TN.to_dense(('k0', 'k1'), ('b0', 'b1'))``.
         """
-        T = self ^ ...
-        fuse_map = [(str(i), inds) for i, inds in enumerate(inds_seq)]
-        T.fuse(fuse_map, inplace=True)
-        return T.array
+        return (self ^ ...).to_dense(*inds_seq)
 
     # --------------- information about indices and dimensions -------------- #
 
@@ -2275,6 +2367,14 @@ class TensorNetwork(object):
         dtype of *one* tensor and thus assumes they all have the same dtype.
         """
         return next(iter(self.tensor_index.values())).dtype
+
+    def astype(self, dtype, inplace=False):
+        """Convert the type of all tensors in this network to ``dtype``.
+        """
+        TN = self if inplace else self.copy()
+        for t in TN:
+            t.astype(dtype, inplace=True)
+        return TN
 
     # ------------------------------ printing ------------------------------- #
 

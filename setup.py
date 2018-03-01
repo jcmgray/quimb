@@ -13,7 +13,7 @@ setup(
     install_requires=[
         'numpy>=1.10',
         'scipy>=0.15',
-        'numba>=0.22',
+        'numba>=0.37',
         'numexpr>=2.3',
         'psutil>=4.3.1',
         'cytoolz>=0.8.0',

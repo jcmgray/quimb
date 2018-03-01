@@ -1,4 +1,5 @@
 import numpy as np
+import random
 
 from .tensor_core import rand_uuid, Tensor
 from .tensor_1d import MatrixProductState
@@ -16,11 +17,14 @@ def construct_lanczos_tridiag_MPO(
     """
     """
     if initial_bond_dim is None:
-        initial_bond_dim = 3
+        initial_bond_dim = 8
     if max_bond is None:
-        max_bond = 9
+        max_bond = 8
 
     if v0 is None:
+        if seed is not None:
+            # needs to be truly random so MPI processes don't overlap
+            np.random.seed(random.SystemRandom().randint(0, 2**32 - 1))
         V = MPO_rand(A.nsites, initial_bond_dim, phys_dim=A.phys_dim())
     else:  # normalize
         V = v0 / (v0.H @ v0)**0.5
@@ -32,7 +36,7 @@ def construct_lanczos_tridiag_MPO(
     bsz = A.phys_dim()**A.nsites
     beta[1] = bsz  # == sqrt(prod(A.shape))
 
-    compress_kws = {'max_bond': max_bond, 'method': 'isvd'}
+    compress_kws = {'max_bond': max_bond, 'method': 'svd'}
 
     for j in range(1, K + 1):
 
@@ -415,11 +419,14 @@ def construct_lanczos_tridiag_PTPTLazyMPS(
     """
     """
     if initial_bond_dim is None:
-        initial_bond_dim = 4
+        initial_bond_dim = 16
     if max_bond is None:
-        max_bond = 8
+        max_bond = 16
 
     if v0 is None:
+        if seed is not None:
+            # needs to be truly random so MPI processes don't overlap
+            np.random.seed(random.SystemRandom().randint(0, 2**32 - 1))
         V = A.rand_state(bond_dim=initial_bond_dim)
     else:  # normalize
         V = v0 / (v0.H @ v0)**0.5
@@ -430,7 +437,7 @@ def construct_lanczos_tridiag_PTPTLazyMPS(
 
     beta[1] = A.phys_dim()**((len(A.sysa) + len(A.sysb)) / 2)
 
-    compress_kws = {'max_bond': max_bond, 'method': 'isvd'}
+    compress_kws = {'max_bond': max_bond, 'method': 'svd'}
 
     for j in range(1, K + 1):
         Vt = A.apply(V)

@@ -1,10 +1,11 @@
 from .tensor_core import (
-    einsum,
-    einsum_path,
+    contract,
+    contract_path,
     tensor_contract,
     tensor_direct_product,
     Tensor,
     TensorNetwork,
+    find_shared_inds,
 )
 from .tensor_gen import (
     rand_tensor,
@@ -41,12 +42,13 @@ from .tensor_algo_static import (
 
 
 __all__ = (
-    "einsum",
-    "einsum_path",
+    "contract",
+    "contract_path",
     "tensor_contract",
     "tensor_direct_product",
     "Tensor",
     "TensorNetwork",
+    "find_shared_inds",
     "rand_tensor",
     "MPS_rand_state",
     "MPS_product_state",
