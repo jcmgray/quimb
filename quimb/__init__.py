@@ -179,6 +179,9 @@ from .linalg.approx_spectral import (
 )
 
 
+# some useful math
+from math import pi, cos, sin, tan, exp, log, log2, sqrt
+
 __all__ = [
     # Accel ----------------------------------------------------------------- #
     'prod',
@@ -331,6 +334,15 @@ __all__ = [
     'entropy_subsys_approx',
     'logneg_subsys_approx',
     'negativity_subsys_approx',
+    # Some misc useful math ------------------------------------------------- #
+    'pi',
+    'cos',
+    'sin',
+    'tan',
+    'exp',
+    'log',
+    'log2',
+    'sqrt',
 ]
 
 from ._version import get_versions
