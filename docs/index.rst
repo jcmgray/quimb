@@ -30,6 +30,8 @@ Welcome to quimb's documentation!
    distributed parallelism - mpi
    dynamics and evolution
    tensor networks
+   tensor basics
+   tensor algorithms
    develop
 
 

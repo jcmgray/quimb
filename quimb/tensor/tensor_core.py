@@ -19,17 +19,23 @@ from cytoolz import (
 import numpy as np
 import scipy.sparse.linalg as spla
 import scipy.linalg.interpolative as sli
+import psutil
 
 from ..accel import prod, njit, realify_scalar
 from ..linalg.base_linalg import norm_fro_dense
 from ..utils import raise_cant_find_library_function, functions_equal
+
+
+# Maximum size of a tensor - / 32 to account for bytes + extra space
+MAXT = psutil.virtual_memory().total / 32
+
 
 try:
     import opt_einsum
     contract = opt_einsum.contract
 
     @functools.wraps(opt_einsum.contract_path)
-    def contract_path(*args, optimize='greedy', memory_limit=2**30, **kwargs):
+    def contract_path(*args, optimize='greedy', memory_limit=MAXT, **kwargs):
         return opt_einsum.contract_path(
             *args, path=optimize, memory_limit=memory_limit, **kwargs)
 
@@ -51,8 +57,8 @@ def get_contract_expr(contract_str, *shapes, memory_limit=None, **kwargs):
 
     # choose how large intermediate arrays can be
     if memory_limit is None:
-        memory_limit = max(prod(shp) for shp in shapes)**2
-        memory_limit = max(2**20, memory_limit)
+        memory_limit = MAXT
+
     kwargs['memory_limit'] = memory_limit
 
     return contract_expression(contract_str, *shapes, **kwargs)
@@ -1157,11 +1163,10 @@ class TNLinearOperator(spla.LinearOperator):
                 ldims = tuple(ix_sz[i] for i in lower_inds)
 
         self.upper_inds, self.lower_inds = upper_inds, lower_inds
-        self.udims, self.ud = udims, prod(udims)
-        self.ldims, self.ld = ldims, prod(ldims)
+        self.udims, ud = udims, prod(udims)
+        self.ldims, ld = ldims, prod(ldims)
 
-        super().__init__(dtype=self._tensors[0].dtype,
-                         shape=(self.ud, self.ld))
+        super().__init__(dtype=self._tensors[0].dtype, shape=(ld, ud))
 
     def _matvec(self, vec):
         in_data = vec.reshape(*self.udims)
@@ -1174,7 +1179,7 @@ class TNLinearOperator(spla.LinearOperator):
                                               output_inds=self.lower_inds)
 
         out_data = self._matvec_fn(*(t.data for t in self._tensors), in_data)
-        return out_data.reshape(*vec.shape)
+        return out_data.ravel()
 
     def _rmatvec(self, vec):
         in_data = vec.conj().reshape(*self.ldims)
@@ -1187,7 +1192,7 @@ class TNLinearOperator(spla.LinearOperator):
                                                output_inds=self.upper_inds)
 
         out_data = self._rmatvec_fn(*(t.data for t in self._tensors), in_data)
-        return out_data.conj().reshape(*vec.shape)
+        return out_data.conj().ravel()
 
     def to_dense(self):
         """Convert this TNLinearOperator into a dense array.
@@ -1236,7 +1241,7 @@ class TensorNetwork(object):
         constituent tensors unless explicitly copied.
     structure : str, optional
         A string, with integer format specifier, that describes how to range
-        over the network's tags in order to contract it.
+        over the network's tags in order to contract it. Not needed.
     structure_bsz : int, optional
         How many sites to group together when auto contracting. Eg for 3 (with
         the dotted lines denoting vertical strips of tensors to be contracted):
@@ -1255,7 +1260,7 @@ class TensorNetwork(object):
         total number of sites the network is embedded in::
 
             0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10  :-> nsites=10
-
+            .  .  .  .  .  .  .  .  .  .  .
                   0--0--0--------0--0         :-> sites=(2, 3, 4, 7, 8)
                   |  |  |        |  |
 
@@ -1700,7 +1705,8 @@ class TensorNetwork(object):
 
         tags = tags2set(tags)
         combine = {'all': operator.and_, 'any': operator.or_}[mode]
-        return functools.reduce(combine, (self.tag_index[t] for t in tags))
+        name_sets = (self.tag_index[t].copy() for t in tags)
+        return functools.reduce(combine, name_sets)
 
     def select_tensors(self, tags, mode='all'):
         """Return the sequence of tensors that match ``tags``. If

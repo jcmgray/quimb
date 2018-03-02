@@ -369,9 +369,10 @@ Tensor Networks
 .. autosummary::
     :toctree: _autosummary
 
-    einsum
-    einsum_path
+    contract
+    contract_path
     tensor_contract
+    tensor_split
     tensor_direct_product
     Tensor
     TensorNetwork

@@ -3,7 +3,13 @@ import pytest
 import numpy as np
 from numpy.testing import assert_allclose
 
-from quimb import approx_spectral_function, eigvals, logneg_subsys
+from quimb import (
+    approx_spectral_function,
+    eigvals,
+    ham_heis,
+    groundstate,
+    logneg_subsys,
+)
 from quimb.tensor import MPO_rand_herm, MPO_ham_heis, DMRG2, MPS_rand_state
 from quimb.tensor.tensor_approx_spectral import (
     construct_lanczos_tridiag_MPO,
@@ -140,3 +146,33 @@ class TestPTPTLazyMPSSpectralApprox:
         lnx = log2(approx_spectral_function(rho_ab_pt, abs, tol=0.1,
                                             verbosity=2))
         assert_allclose(lne, lnx, rtol=0.5, atol=0.1)
+
+
+class TestPartialTraceCompress:
+
+    @pytest.mark.parametrize("n", [12])
+    @pytest.mark.parametrize("l", [1, 2, 3, 5])
+    @pytest.mark.parametrize("gap", [0, 1, 2])
+    def test_heisenberg(self, n, l, gap):
+
+        ham = MPO_ham_heis(n)
+        dmrg = DMRG2(ham)
+        dmrg.solve()
+
+        g = gap // 2
+        m = n // 2 + g + gap % 2
+
+        sysa = range(m - l - g, m - g)
+        sysb = range(m, m + l)
+
+        rho_ab = dmrg.state.partial_trace_compress(sysa, sysb)
+
+        rho_ab_pt_lo = rho_ab.aslinearoperator(['k0', 'b1'], ['b0', 'k1'])
+
+        ln = log2(approx_spectral_function(rho_ab_pt_lo, abs))
+
+        # exact
+        lne = logneg_subsys(groundstate(ham_heis(n, cyclic=False)),
+                            [2] * n, sysa, sysb)
+
+        assert_allclose(lne, ln, rtol=0.05, atol=0.05)
