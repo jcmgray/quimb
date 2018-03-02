@@ -137,7 +137,7 @@ class TestPTPTLazyMPSSpectralApprox:
         sysa, sysb = range(3, 6), range(6, 8)
 
         ham = MPO_ham_heis(n)
-        dmrg = DMRG2(ham, bond_dims=[10, 20, 40, 80])
+        dmrg = DMRG2(ham, bond_dims=[10, 20])
         dmrg.solve()
         rho_ab_pt = PTPTLazyMPS(dmrg.state, sysa, sysb)
 
