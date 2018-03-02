@@ -159,11 +159,14 @@ class TestPartialTraceCompress:
         dmrg = DMRG2(ham)
         dmrg.solve()
 
-        g = gap // 2
-        m = n // 2 + g + gap % 2
+        gl = gap // 2
+        gr = gap // 2 + gap % 2
+        m = n // 2
 
-        sysa = range(m - l - g, m - g)
-        sysb = range(m, m + l)
+        sysa = range(m - l - gl, m - gl)
+        sysb = range(m + gr, m + l + gr)
+
+        assert max(sysa) + gap + 1 == min(sysb)
 
         rho_ab = dmrg.state.partial_trace_compress(sysa, sysb)
 
