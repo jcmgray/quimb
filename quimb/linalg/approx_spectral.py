@@ -498,13 +498,7 @@ def norm_fro(a):
     return sqrt(inner(a, a))
 
 
-def construct_lanczos_tridiag(
-        A,
-        K,
-        v0=None,
-        bsz=1,
-        beta_tol=1e-6,
-        seed=None):
+def construct_lanczos_tridiag(A, K, v0=None, bsz=1, beta_tol=1e-6, seed=False):
     """Construct the tridiagonal lanczos matrix using only matvec operators.
     This is a generator that iteratively yields the alpha and beta digaonals
     at each step.
@@ -549,9 +543,10 @@ def construct_lanczos_tridiag(
     beta[1] = sqrt(prod(v_shp))  # by construction
 
     if v0 is None:
-        if seed is not None:
+        if seed:
             # needs to be truly random so MPI processes don't overlap
             np.random.seed(random.SystemRandom().randint(0, 2**32 - 1))
+
         V = np.random.choice([-1, 1, 1j, -1j], v_shp)
         V /= beta[1]  # normalize
     else:
@@ -647,18 +642,16 @@ def ext_per_trim(x, p=0.6, s=1.0):
     return trimmed_x
 
 
-def _single_random_estimate(A, K, bsz, beta_tol, v0, fn, pos,
-                            tau, tol_scale, verbosity=0, *, seed=None):
+def _single_random_estimate(A, K, bsz, beta_tol, v0, fn, pos, tau, tol_scale,
+                            verbosity=0, *, seed=None, **lanc_opts):
     # choose normal (any LinearOperator) or MPO lanczos tridiag construction
     if isinstance(A, MatrixProductOperator):
         lanc_fn = construct_lanczos_tridiag_MPO
-        lanc_opts = {'max_bond': None, 'initial_bond_dim': None}
     elif isinstance(A, PTPTLazyMPS):
         lanc_fn = construct_lanczos_tridiag_PTPTLazyMPS
-        lanc_opts = {'max_bond': None, 'initial_bond_dim': None}
     else:
         lanc_fn = construct_lanczos_tridiag
-        lanc_opts = {'bsz': bsz}
+        lanc_opts['bsz'] = bsz
 
     # iteratively build the lanczos matrix, checking for convergence
     estimate = None
@@ -710,21 +703,10 @@ def _single_random_estimate(A, K, bsz, beta_tol, v0, fn, pos,
     return estimate
 
 
-def approx_spectral_function(
-        A, fn,
-        tol=5e-3,
-        K=128,
-        R=1024,
-        bsz=1,
-        v0=None,
-        pos=False,
-        tau=1e-3,
-        tol_scale=1,
-        beta_tol=1e-6,
-        mean_p=0.7,
-        mean_s=1.0,
-        mpi=False,
-        verbosity=0):
+def approx_spectral_function(A, fn, tol=5e-3, K=128, R=1024, bsz=1, v0=None,
+                             pos=False, tau=1e-3, tol_scale=1, beta_tol=1e-6,
+                             mean_p=0.7, mean_s=1.0, mpi=False, verbosity=0,
+                             **kwargs):
     """Approximate a spectral function, that is, the quantity ``Tr(fn(A))``.
 
     Parameters
@@ -790,11 +772,12 @@ def approx_spectral_function(
     # generate repeat estimates
     args = (A, K, bsz, beta_tol, v0, fn, pos, tau, tol_scale, verbosity)
     if not mpi:
-        results = iter(_single_random_estimate(*args) for _ in range(R))
+        results = iter(_single_random_estimate(*args, **kwargs)
+                       for _ in range(R))
     else:
         mpi_pool = get_mpi_pool()
-        fs = [mpi_pool.submit(_single_random_estimate, *args, seed=i)
-              for i in range(R)]
+        fs = [mpi_pool.submit(_single_random_estimate, *args,
+                              seed=True, **kwargs) for i in range(R)]
         results = iter(f.result() for f in fs)
 
     # iterate through estimates, waiting for convergence

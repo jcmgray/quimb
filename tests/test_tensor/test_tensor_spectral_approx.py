@@ -19,6 +19,9 @@ from quimb.tensor.tensor_approx_spectral import (
 )
 
 
+np.random.seed(42)
+
+
 class TestMPOSpectralApprox:
 
     def test_constructing_tridiag_works(self):
@@ -35,7 +38,7 @@ class TestMPOSpectralApprox:
 
     def test_realistic(self):
         ham = MPO_ham_heis(20)
-        dmrg = DMRG2(ham, bond_dims=4)
+        dmrg = DMRG2(ham, bond_dims=8)
         dmrg.solve()
         rho_ab = dmrg.state.ptr(range(6, 14))
         xf = approx_spectral_function(rho_ab, lambda x: x,
@@ -124,12 +127,12 @@ class TestPTPTLazyMPSSpectralApprox:
 
     def test_realistic(self):
         ham = MPO_ham_heis(20)
-        dmrg = DMRG2(ham, bond_dims=16)
+        dmrg = DMRG2(ham, bond_dims=[5, 10])
         dmrg.solve()
         sysa, sysb = range(2, 9), range(12, 18)
         rho_ab_pt = PTPTLazyMPS(dmrg.state, sysa, sysb)
         xf = approx_spectral_function(rho_ab_pt, lambda x: x,
-                                      tol=0.1, verbosity=2)
+                                      tol=0.1, verbosity=2, max_bond=10)
         assert_allclose(1, xf, rtol=0.5, atol=0.1)
 
     def test_realistic_ent(self):
@@ -172,7 +175,7 @@ class TestPartialTraceCompress:
 
         rho_ab_pt_lo = rho_ab.aslinearoperator(['k0', 'b1'], ['b0', 'k1'])
 
-        ln = log2(approx_spectral_function(rho_ab_pt_lo, abs))
+        ln = log2(approx_spectral_function(rho_ab_pt_lo, abs, verbosity=2))
 
         # exact
         lne = logneg_subsys(groundstate(ham_heis(n, cyclic=False)),

@@ -6,14 +6,8 @@ from .tensor_1d import MatrixProductState
 from .tensor_gen import MPO_rand, MPO_zeros_like, randn
 
 
-def construct_lanczos_tridiag_MPO(
-        A,
-        K,
-        v0=None,
-        initial_bond_dim=None,
-        beta_tol=1e-6,
-        max_bond=None,
-        seed=None):
+def construct_lanczos_tridiag_MPO(A, K, v0=None, initial_bond_dim=None,
+                                  beta_tol=1e-6, max_bond=None, seed=False):
     """
     """
     if initial_bond_dim is None:
@@ -22,9 +16,10 @@ def construct_lanczos_tridiag_MPO(
         max_bond = 8
 
     if v0 is None:
-        if seed is not None:
+        if seed:
             # needs to be truly random so MPI processes don't overlap
             np.random.seed(random.SystemRandom().randint(0, 2**32 - 1))
+
         V = MPO_rand(A.nsites, initial_bond_dim, phys_dim=A.phys_dim())
     else:  # normalize
         V = v0 / (v0.H @ v0)**0.5
@@ -408,14 +403,9 @@ class PTPTLazyMPS:
                                 bond_dim=bond_dim, **mps_opts)
 
 
-def construct_lanczos_tridiag_PTPTLazyMPS(
-        A,
-        K,
-        v0=None,
-        initial_bond_dim=None,
-        beta_tol=1e-12,
-        max_bond=None,
-        seed=None):
+def construct_lanczos_tridiag_PTPTLazyMPS(A, K, v0=None, initial_bond_dim=None,
+                                          beta_tol=1e-12, max_bond=None,
+                                          seed=False):
     """
     """
     if initial_bond_dim is None:
@@ -424,9 +414,10 @@ def construct_lanczos_tridiag_PTPTLazyMPS(
         max_bond = 16
 
     if v0 is None:
-        if seed is not None:
+        if seed:
             # needs to be truly random so MPI processes don't overlap
             np.random.seed(random.SystemRandom().randint(0, 2**32 - 1))
+
         V = A.rand_state(bond_dim=initial_bond_dim)
     else:  # normalize
         V = v0 / (v0.H @ v0)**0.5
