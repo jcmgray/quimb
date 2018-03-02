@@ -18,7 +18,7 @@ Steps:
 
 1. Ensure function has numpy style docstring.
 2. Make sure function is unit tested.
-3. Document function at least in ``docs/api.rst``.
+3. If module, add to ``docs/api.rst`` for autosummarizing.
 4. Add to ``quimb/__init__.py`` and ``"__all__"`` if appropriate.
 
 

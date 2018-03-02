@@ -17,7 +17,7 @@ except ImportError:
 
 
 def align_TN_1D(*tns, ind_ids=None, inplace=False):
-    """Align an arbitrary number of 1D tensor networks in a stack-like
+    r"""Align an arbitrary number of 1D tensor networks in a stack-like
     geometry::
 
         a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a
@@ -146,7 +146,7 @@ class TensorNetwork1D(TensorNetwork):
             bra.site[i].modify(data=Q.data.conj())
 
     def left_canonize_site(self, i, bra=None):
-        """Left canonize this TN's ith site, inplace::
+        r"""Left canonize this TN's ith site, inplace::
 
                 i                i
                -o-o-            ->-s-
@@ -163,7 +163,7 @@ class TensorNetwork1D(TensorNetwork):
         self._left_decomp_site(i, bra=bra, method='qr')
 
     def right_canonize_site(self, i, bra=None):
-        """Right canonize this TN's ith site, inplace::
+        r"""Right canonize this TN's ith site, inplace::
 
                   i                i
                -o-o-            -s-<-
@@ -180,7 +180,7 @@ class TensorNetwork1D(TensorNetwork):
         self._right_decomp_site(i, bra=bra, method='lq')
 
     def left_canonize(self, stop=None, start=None, normalize=False, bra=None):
-        """Left canonize all or a portion of this TN. If this is a MPS,
+        r"""Left canonize all or a portion of this TN. If this is a MPS,
         this implies that::
 
                           i              i
@@ -215,7 +215,7 @@ class TensorNetwork1D(TensorNetwork):
                 bra.site[-1] /= factor
 
     def right_canonize(self, stop=None, start=None, normalize=False, bra=None):
-        """Right canonize all or a portion of this TN. If this is a MPS,
+        r"""Right canonize all or a portion of this TN. If this is a MPS,
         this implies that::
 
                    i                           i
@@ -251,7 +251,7 @@ class TensorNetwork1D(TensorNetwork):
                 bra.site[0] /= factor
 
     def canonize(self, orthogonality_center, bra=None):
-        """Mixed canonize this TN. If this is a MPS, this implies that:
+        r"""Mixed canonize this TN. If this is a MPS, this implies that:
 
                           i                      i
             >->->->->- ->-o-<- -<-<-<-<-<      +-o-+
@@ -431,7 +431,7 @@ class TensorNetwork1D(TensorNetwork):
         return tn
 
     def singular_values(self, i, current_orthog_centre=None, method='svd'):
-        """Find the singular values associated with the ith bond::
+        r"""Find the singular values associated with the ith bond::
 
             ....L....   i
             o-o-o-o-o-l-o-o-o-o-o-o-o-o-o-o-o
@@ -736,7 +736,7 @@ class MatrixProductState(TensorNetwork1D):
         return self.add_MPS(other * -1, inplace=True)
 
     def schmidt_values(self, i, current_orthog_centre=None, method='svd'):
-        """Find the schmidt values associated with the bipartition of this
+        r"""Find the schmidt values associated with the bipartition of this
         MPS between sites on either site of ``i``. In other words, ``i`` is the
         number of sites in the left hand partition::
 
@@ -806,7 +806,7 @@ class MatrixProductState(TensorNetwork1D):
         return S[0] - S[1]
 
     def partial_trace(self, keep, upper_ind_id="b{}", rescale_sites=True):
-        """Partially trace this matrix product state, producing a matrix
+        r"""Partially trace this matrix product state, producing a matrix
         product operator.
 
         Parameters
@@ -892,7 +892,7 @@ class MatrixProductState(TensorNetwork1D):
 
     def partial_trace_compress(self, sysa, sysb, eps=1e-6, method='isvd',
                                lower_ind_id='b{}', **compress_opts):
-        """Perform a compressed partial trace using singular value
+        r"""Perform a compressed partial trace using singular value
         lateral then vertical decompositions of transfer matrix products::
 
 

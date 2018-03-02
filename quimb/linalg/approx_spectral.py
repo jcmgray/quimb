@@ -614,9 +614,9 @@ def calc_trace_fn_tridiag(tl, tv, fn, pos=True):
 
 
 def ext_per_trim(x, p=0.6, s=1.0):
-    """Extended percentile trimmed-mean. Makes the mean robust to asymmetric
+    r"""Extended percentile trimmed-mean. Makes the mean robust to asymmetric
     outliers, while using all data when it is nicely clustered. This can be
-    visualized roughly as:
+    visualized roughly as::
 
             |--------|=========|--------|
         x     x   xx xx xxxxx xxx   xx     x      x           x

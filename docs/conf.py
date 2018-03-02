@@ -51,6 +51,7 @@ napoleon_use_admonition_for_notes = True
 napoleon_include_init_with_doc = False
 
 autosummary_generate = True
+autodoc_default_flags = ['members']
 
 # numpydoc_class_members_toctree = True
 

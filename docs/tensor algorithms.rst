@@ -6,7 +6,7 @@ Tensor Algorithms
 1D tensor networks
 ------------------
 
-Generate a random matrix product state, and contract its inner product:
+Generate a random :class:`~quimb.tensor.tensor_1d.MatrixProductState`, and contract its inner product:
 
 .. code-block:: python
 
@@ -46,7 +46,7 @@ Add MPS and compress:
     >>> p2.H @ p2
     0.9999999999999998
 
-Find the overlap with a random hermitian MPO
+Find the overlap with a random hermitian :class:`~quimb.tensor.tensor_1d.MatrixProductOperator`
 
 .. code-block:: python
 
@@ -60,7 +60,7 @@ Find the overlap with a random hermitian MPO
 Building Hamiltonians
 ---------------------
 
-pass
+See :class:`~quimb.tensor.tensor_gen.MPOSpinHam`.
 
 
 Example of DMRG2 calcuation

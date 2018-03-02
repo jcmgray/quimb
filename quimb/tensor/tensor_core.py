@@ -545,7 +545,7 @@ def tensor_split(T, left_inds, method='svd', max_bond=None, absorb='both',
 
 
 def tensor_compress_bond(T1, T2, **compress_opts):
-    """Inplace compress between the two single tensors. It follows the
+    r"""Inplace compress between the two single tensors. It follows the
     following steps to minimize the size of SVD performed::
 
         a)|   |        b)|            |        c)|       |
@@ -693,7 +693,8 @@ def tensor_direct_product(T1, T2, sum_inds=(), inplace=False):
 
 
 def find_shared_inds(t1, t2):
-    """
+    """Getting any indices connecting the Tensor(s) or TensorNetwork(s) ``t1``
+    and ``t2``.
     """
     if isinstance(t1, Tensor):
         ix1 = set(t1.inds)
@@ -1120,8 +1121,8 @@ for meth_name, op in [('__radd__', operator.__add__),
 
 
 class TNLinearOperator(spla.LinearOperator):
-    """Get a linear operator - something that replicates the matrix-vector
-    operation - for an arbitrary *uncontracted* TensorNetwork, e.g:
+    r"""Get a linear operator - something that replicates the matrix-vector
+    operation - for an arbitrary *uncontracted* TensorNetwork, e.g::
 
          / | | \   -> upper_inds
         L--H-H--R
@@ -1232,7 +1233,7 @@ class SiteIndexer(object):
 
 
 class TensorNetwork(object):
-    """A collection of (as yet uncontracted) Tensors.
+    r"""A collection of (as yet uncontracted) Tensors.
 
     Parameters
     ----------
@@ -1907,7 +1908,7 @@ class TensorNetwork(object):
         return t1, t2
 
     def replace_with_identity(self, where, mode='any', inplace=False):
-        """Replace all tensors marked by ``where`` with an
+        r"""Replace all tensors marked by ``where`` with an
         identity. E.g. if ``X`` denote ``where`` tensors::
 
 
@@ -1954,7 +1955,7 @@ class TensorNetwork(object):
     def replace_with_svd(self, where, left_inds, eps, mode='any',
                          method='isvd', ltags=None, rtags=None, inplace=False,
                          max_bond=None):
-        """Replace all tensors marked by ``where`` with an iteratively
+        r"""Replace all tensors marked by ``where`` with an iteratively
         constructed SVD. E.g. if ``X`` denote ``where`` tensors::
 
                                      __       __

@@ -16,7 +16,7 @@ from .tensor_gen import MPS_rand_state
 
 
 class MovingEnvironment:
-    """Helper class for efficiently moving the effective 'environment' of a
+    r"""Helper class for efficiently moving the effective 'environment' of a
     few sites in a 1D tensor network. E.g. for ``start='left', bsz=2``, this
     initializes the right environments like so::
 
@@ -191,7 +191,7 @@ def parse_2site_inds_dims(k, b, i):
 
 
 class DMRG:
-    """Density Matrix Renormalization Group variational groundstate search.
+    r"""Density Matrix Renormalization Group variational groundstate search.
     Some initialising arguments act as defaults, but can be overidden with
     each solve or sweep.
 
@@ -305,7 +305,7 @@ class DMRG:
             maxiter=self.opts['eff_eig_maxiter'])
 
     def _update_local_state_1site(self, i, direction, **compress_opts):
-        """Find the single site effective tensor groundstate of::
+        r"""Find the single site effective tensor groundstate of::
 
             >->->->->-/|\-<-<-<-<-<-<-<-<          /|\
             | | | | |  |  | | | | | | | |         / | \
@@ -342,7 +342,7 @@ class DMRG:
         return eff_e[0]
 
     def _update_local_state_2site(self, i, direction, **compress_opts):
-        """Find the 2-site effective tensor groundstate of::
+        r"""Find the 2-site effective tensor groundstate of::
 
             >->->->->-/| |\-<-<-<-<-<-<-<-<          /| |\
             | | | | |  | |  | | | | | | | |         / | | \
@@ -397,7 +397,7 @@ class DMRG:
         }[self.bsz](i, **update_opts)
 
     def sweep(self, direction, canonize=True, verbose=False, **update_opts):
-        """Perform a sweep of optimizations rightwards (`direction='R'`)::
+        r"""Perform a sweep of optimizations rightwards (`direction='R'`)::
 
               optimize -->
                 ...

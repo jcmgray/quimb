@@ -10,7 +10,7 @@ The tensor functionality is stored in ``quimb.tensor`` and not imported by defau
     >>> from quimb import *
     >>> from quimb.tensor import *
 
-The core functions of note are :class:`~quimb.tensor.Tensor`, :class:`~quimb.tensor.TensorNetwork`, :func:`~quimb.tensor.tensor_contract`, and :func:`~quimb.tensor.tensor_split`.
+The core functions of note are :class:`~quimb.tensor.tensor_core.Tensor`, :class:`~quimb.tensor.tensor_core.TensorNetwork`, :func:`~quimb.tensor.tensor_core.tensor_contract`, and :func:`~quimb.tensor.tensor_core.tensor_split`.
 
 
 Requirements
@@ -36,9 +36,9 @@ Currently implemented algorithms
 
 Static:
 
-    - 1-site :class:`~quimb.tensor.DMRG1`
-    - 2-site :class:`~quimb.tensor.DMRG2`
-    - 1-site :class:`~quimb.tensor.DMRGX`
+    - 1-site :class:`~quimb.tensor.tensor_algo_static.DMRG1`
+    - 2-site :class:`~quimb.tensor.tensor_algo_static.DMRG2`
+    - 1-site :class:`~quimb.tensor.tensor_algo_static.DMRGX`
 
 Should be fairly easily to implement / planned:
 
