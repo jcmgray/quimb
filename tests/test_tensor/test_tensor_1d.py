@@ -4,6 +4,7 @@ import numpy as np
 from numpy.testing import assert_allclose
 
 from quimb import (
+    eigvals,
     entropy_subsys,
     schmidt_gap,
     isherm,
@@ -385,8 +386,9 @@ class TestMatrixProductOperator:
         assert_allclose(h2 @ h2.H, (hd @ hd.H).tr() * 4)
         assert max(h2['I3'].shape) == 5
 
-    def test_subtract_mpo(self):
-        a, b = MPO_rand(13, 7), MPO_rand(13, 7)
+    @pytest.mark.parametrize("cyclic", (False, True))
+    def test_subtract_mpo(self, cyclic):
+        a, b = MPO_rand(13, 7, cyclic=cyclic), MPO_rand(13, 7, cyclic=cyclic)
         x1 = a.trace() - b.trace()
         assert_allclose(x1, (a - b).trace())
         a -= b
@@ -418,16 +420,20 @@ class TestMatrixProductOperator:
         o2 = (k & i & b) ^ ...
         assert_allclose(o1, o2)
 
+    @pytest.mark.parametrize("cyclic", [False, True])
     @pytest.mark.parametrize("dtype", (complex, float))
-    def test_mpo_rand_herm_and_trace(self, dtype):
-        op = MPO_rand_herm(20, bond_dim=5, phys_dim=3, dtype=dtype)
+    def test_mpo_rand_herm_and_trace(self, dtype, cyclic):
+        op = MPO_rand_herm(20, bond_dim=5, phys_dim=3,
+                           dtype=dtype, cyclic=cyclic)
         assert_allclose(op.H @ op, 1.0)
         tr_val = op.trace()
         assert tr_val != 0.0
         assert_allclose(tr_val.imag, 0.0, atol=1e-14)
 
-    def test_mpo_rand_herm_trace_and_identity_like(self):
-        op = MPO_rand_herm(20, bond_dim=5, phys_dim=3, upper_ind_id='foo{}')
+    @pytest.mark.parametrize("cyclic", [False, True])
+    def test_mpo_rand_herm_trace_and_identity_like(self, cyclic):
+        op = MPO_rand_herm(20, bond_dim=5, phys_dim=3, upper_ind_id='foo{}',
+                           cyclic=cyclic)
         t = op.trace()
         assert t != 0.0
         Id = MPO_identity_like(op)
@@ -455,9 +461,11 @@ class TestMatrixProductOperator:
         assert isherm(rptd)
         assert not ispos(rptd)
 
-    def test_dot_mpo(self):
-        A, B = MPO_rand(8, 5), MPO_rand(8, 5, upper_ind_id='q{}',
-                                        lower_ind_id='w{}')
+    @pytest.mark.parametrize("cyclic", (False, True))
+    def test_dot_mpo(self, cyclic):
+        A = MPO_rand(8, 5, cyclic=cyclic)
+        B = MPO_rand(8, 5, upper_ind_id='q{}',
+                     lower_ind_id='w{}', cyclic=cyclic)
         C = A.apply(B)
         assert C.max_bond() == 25
         assert C.upper_ind_id == 'q{}'
@@ -465,9 +473,10 @@ class TestMatrixProductOperator:
         Ad, Bd, Cd = A.to_dense(), B.to_dense(), C.to_dense()
         assert_allclose(Ad @ Bd, Cd)
 
-    def test_sites_mpo_mps_product(self):
-        k = MPS_rand_state(13, 7)
-        X = MPO_rand_herm(3, 5, sites=[3, 6, 7], nsites=13)
+    @pytest.mark.parametrize("cyclic", (False, True))
+    def test_sites_mpo_mps_product(self, cyclic):
+        k = MPS_rand_state(13, 7, cyclic=cyclic)
+        X = MPO_rand_herm(3, 5, sites=[3, 6, 7], nsites=13, cyclic=cyclic)
         b = k.H
         align_TN_1D(k, X, b, inplace=True)
         assert (k & X & b) ^ ...
@@ -513,26 +522,30 @@ class TestSpecificStatesOperators:
         assert max(zp.site[13].shape) == 20
         assert_allclose(zp.H @ p, 1.0)
 
-    def test_mpo_site_ham_heis(self):
-        hh_mpo = MPO_ham_heis(5, tags=['foo'])
+    @pytest.mark.parametrize("cyclic", [False, True])
+    @pytest.mark.parametrize("j", [7 / 11, 1, (0.2, 0.3, 0.4)])
+    @pytest.mark.parametrize("bz", [0, 7 / 11, 1])
+    @pytest.mark.parametrize("n", [2, 3, 4])
+    def test_mpo_site_ham_heis(self, cyclic, j, bz, n):
+        hh_mpo = MPO_ham_heis(n, tags=['foo'], cyclic=cyclic, j=j, bz=bz)
         assert hh_mpo.site[0].tags == {'I0', 'foo'}
-        assert hh_mpo.site[3].tags == {'I3', 'foo'}
-        assert hh_mpo.site[-1].tags == {'I4', 'foo'}
-        assert hh_mpo.shape == (2,) * 10
-        hh_ = (hh_mpo ^ ...).fuse({'k': ['k0', 'k1', 'k2', 'k3', 'k4'],
-                                   'b': ['b0', 'b1', 'b2', 'b3', 'b4']})
-        hh = ham_heis(5, cyclic=False)
-        assert_allclose(hh, hh_.data)
+        assert hh_mpo.site[1].tags == {'I1', 'foo'}
+        assert hh_mpo.site[-1].tags == {'I{}'.format(n - 1), 'foo'}
+        assert hh_mpo.shape == (2,) * 2 * n
+        hh_ex = ham_heis(n, cyclic=cyclic, j=j, b=bz)
+        assert_allclose(eigvals(hh_ex), eigvals(hh_mpo.to_dense()), atol=1e-13)
 
     def test_mpo_zeros(self):
         mpo0 = MPO_zeros(10)
         assert mpo0.trace() == 0.0
         assert mpo0.H @ mpo0 == 0.0
 
-    def test_mpo_zeros_like(self):
-        A = MPO_rand(10, 7, phys_dim=3, normalize=False)
+    @pytest.mark.parametrize("cyclic", (False, True))
+    def test_mpo_zeros_like(self, cyclic):
+        A = MPO_rand(10, 7, phys_dim=3, normalize=False, cyclic=cyclic)
         Z = MPO_zeros_like(A)
         assert A @ Z == 0.0
+        assert Z.cyclic == cyclic
         x1 = A.trace()
         x2 = (A + Z).trace()
         assert_allclose(x1, x2)

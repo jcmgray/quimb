@@ -1,7 +1,6 @@
 """Classes and algorithms related to 1d tensor networks.
 """
 import functools
-import copy
 import numpy as np
 from ..utils import three_line_multi_print, pairwise
 from .tensor_core import (
@@ -94,8 +93,10 @@ class TensorNetwork1D(TensorNetwork):
         return tuple(self.site_tag(i) for i in self.sites)
 
     def _left_decomp_site(self, i, bra=None, **split_opts):
+        N = self.nsites
+
         T1 = self.site[i]
-        T2 = self.site[i + 1]
+        T2 = self.site[(i + 1) % N]
 
         t1_inds_set = set(T1.inds)
         t2_inds_set = set(T2.inds)
@@ -113,15 +114,17 @@ class TensorNetwork1D(TensorNetwork):
         R.transpose(*T2.inds, inplace=True)
 
         self.site[i].modify(data=Q.data)
-        self.site[i + 1].modify(data=R.data)
+        self.site[(i + 1) % N].modify(data=R.data)
 
         if bra is not None:
             bra.site[i].modify(data=Q.data.conj())
-            bra.site[i + 1].modify(data=R.data.conj())
+            bra.site[(i + 1) % N].modify(data=R.data.conj())
 
     def _right_decomp_site(self, i, bra=None, **split_opts):
+        N = self.nsites
+
         T1 = self.site[i]
-        T2 = self.site[i - 1]
+        T2 = self.site[(i - 1) % N]
 
         t1_inds_set = set(T1.inds)
         t2_inds_set = set(T2.inds)
@@ -138,11 +141,11 @@ class TensorNetwork1D(TensorNetwork):
         Q.reindex({new_shared_bond: old_shared_bond}, inplace=True)
         Q.transpose(*T1.inds, inplace=True)
 
-        self.site[i - 1].modify(data=L.data)
+        self.site[(i - 1) % N].modify(data=L.data)
         self.site[i].modify(data=Q.data)
 
         if bra is not None:
-            bra.site[i - 1].modify(data=L.data.conj())
+            bra.site[(i - 1) % N].modify(data=L.data.conj())
             bra.site[i].modify(data=Q.data.conj())
 
     def left_canonize_site(self, i, bra=None):
@@ -565,6 +568,8 @@ class MatrixProductState(TensorNetwork1D):
         The base name of the bond indices, onto which uuids will be added.
     """
 
+    _EXTRA_PROPS = ('_site_ind_id', '_site_tag_id', 'cyclic')
+
     def __init__(self, arrays, *, shape='lrp', tags=None, bond_name="",
                  site_ind_id='k{}', site_tag_id='I{}', sites=None, nsites=None,
                  **tn_opts):
@@ -572,9 +577,8 @@ class MatrixProductState(TensorNetwork1D):
         # short-circuit for copying MPSs
         if isinstance(arrays, MatrixProductState):
             super().__init__(arrays)
-            self._site_ind_id = copy.copy(arrays.site_ind_id)
-            self._site_tag_id = copy.copy(arrays.site_tag_id)
-            self.cyclic = arrays.cyclic
+            for ep in MatrixProductState._EXTRA_PROPS:
+                setattr(self, ep, getattr(arrays, ep))
             return
 
         arrays = tuple(arrays)
@@ -632,8 +636,6 @@ class MatrixProductState(TensorNetwork1D):
         super().__init__(gen_tensors(), structure=site_tag_id, sites=sites,
                          nsites=nsites, check_collisions=False, **tn_opts)
 
-    _EXTRA_PROPS = ('_site_ind_id', '_site_tag_id', 'cyclic')
-
     def imprint(self, other):
         """Cast ``other'' into a ``MatrixProductState'' like ``self''.
         """
@@ -689,26 +691,31 @@ class MatrixProductState(TensorNetwork1D):
     def add_MPS(self, other, inplace=False, compress=False, **compress_opts):
         """Add another MatrixProductState to this one.
         """
-        if self.nsites != other.nsites:
+        N = self.nsites
+
+        if N != other.nsites:
             raise ValueError("Can't add MPS with another of different length.")
 
         summed = self if inplace else self.copy()
 
         for i in summed.sites:
-            summed_tensor = summed.site[i]
-            other_tensor = other.site[i]
+            t1, t2 = summed.site[i], other.site[i]
 
-            if set(summed_tensor.inds) != set(other_tensor.inds):
+            if set(t1.inds) != set(t2.inds):
                 # Need to use bonds to match indices
                 reindex_map = {}
-                if i > 0:
-                    reindex_map[other.bond(i - 1, i)] = summed.bond(i - 1, i)
-                if i < summed.nsites - 1:
-                    reindex_map[other.bond(i, i + 1)] = summed.bond(i, i + 1)
-                other_tensor = other_tensor.reindex(reindex_map)
 
-            summed_tensor.direct_product(other_tensor, inplace=True,
-                                         sum_inds=summed.site_ind(i))
+                if i > 0 or self.cyclic:
+                    pair = ((i - 1) % N, i)
+                    reindex_map[other.bond(*pair)] = summed.bond(*pair)
+
+                if i < summed.nsites - 1 or self.cyclic:
+                    pair = (i, (i + 1) % N)
+                    reindex_map[other.bond(*pair)] = summed.bond(*pair)
+
+                t2 = t2.reindex(reindex_map)
+
+            t1.direct_product(t2, inplace=True, sum_inds=summed.site_ind(i))
 
         if compress:
             summed.compress(**compress_opts)
@@ -863,7 +870,7 @@ class MatrixProductState(TensorNetwork1D):
 
         # transpose upper and lower tags to match other MPOs
         rho = view_TN_as_MPO(rho, lower_ind_id=upper_ind_id,
-                             upper_ind_id=self.site_ind_id,
+                             upper_ind_id=self.site_ind_id, cyclic=self.cyclic,
                              site_tag_id=self.site_tag_id, inplace=True)
 
         if rescale_sites:
@@ -1128,15 +1135,16 @@ class MatrixProductOperator(TensorNetwork1D):
         The base name of the bond indices, onto which uuids will be added.
     """
 
+    _EXTRA_PROPS = ('_upper_ind_id', '_lower_ind_id', '_site_tag_id', 'cyclic')
+
     def __init__(self, arrays, shape='lrud', site_tag_id='I{}', tags=None,
                  upper_ind_id='k{}', lower_ind_id='b{}', bond_name="",
                  sites=None, nsites=None, **tn_opts):
         # short-circuit for copying
         if isinstance(arrays, MatrixProductOperator):
             super().__init__(arrays)
-            self._upper_ind_id = copy.copy(arrays.upper_ind_id)
-            self._lower_ind_id = copy.copy(arrays.lower_ind_id)
-            self._site_tag_id = copy.copy(arrays.site_tag_id)
+            for ep in MatrixProductOperator._EXTRA_PROPS:
+                setattr(self, ep, getattr(arrays, ep))
             return
 
         arrays = tuple(arrays)
@@ -1163,25 +1171,29 @@ class MatrixProductOperator(TensorNetwork1D):
 
             site_tags = tuple((st,) + tags for st in site_tags)
 
+        self.cyclic = (arrays[0].ndim == 4)
+
         # transpose arrays to 'lrud' order.
         def gen_orders():
             lud_ord = tuple(shape.replace('r', "").find(x) for x in 'lud')
             rud_ord = tuple(shape.replace('l', "").find(x) for x in 'rud')
             lrud_ord = tuple(map(shape.find, 'lrud'))
-            yield lud_ord
+            yield rud_ord if not self.cyclic else lrud_ord
             for _ in range(len(sites) - 2):
                 yield lrud_ord
-            yield rud_ord
+            yield lud_ord if not self.cyclic else lrud_ord
 
         def gen_inds():
+            cyc_bond = (rand_uuid(base=bond_name),) if self.cyclic else ()
+
             nbond = rand_uuid(base=bond_name)
-            yield (nbond, next(upper_inds), next(lower_inds))
+            yield (*cyc_bond, nbond, next(upper_inds), next(lower_inds))
             pbond = nbond
             for _ in range(len(sites) - 2):
                 nbond = rand_uuid(base=bond_name)
                 yield (pbond, nbond, next(upper_inds), next(lower_inds))
                 pbond = nbond
-            yield (pbond, next(upper_inds), next(lower_inds))
+            yield (pbond, *cyc_bond, next(upper_inds), next(lower_inds))
 
         def gen_tensors():
             for array, site_tag, inds, order in zip(arrays, site_tags,
@@ -1191,8 +1203,6 @@ class MatrixProductOperator(TensorNetwork1D):
 
         super().__init__(gen_tensors(), structure=site_tag_id, sites=sites,
                          nsites=nsites, check_collisions=False, **tn_opts)
-
-    _EXTRA_PROPS = ('_upper_ind_id', '_lower_ind_id', '_site_tag_id')
 
     def imprint(self, other):
         """Cast ``other'' into a ``MatrixProductOperator'' like ``self''.
@@ -1282,30 +1292,33 @@ class MatrixProductOperator(TensorNetwork1D):
     def add_MPO(self, other, inplace=False, compress=False, **compress_opts):
         """Add another MatrixProductState to this one.
         """
-        if self.nsites != other.nsites:
-            raise ValueError("Can't add MPO with another of different length.")
+        N = self.nsites
 
-        if inplace:
-            summed = self
-        else:
-            summed = self.copy()
+        if N != other.nsites:
+            raise ValueError("Can't add MPO with another of different length."
+                             "Got lengths {} and {}".format(N, other.nsites))
+
+        summed = self if inplace else self.copy()
 
         for i in summed.sites:
-            summed_tensor = summed.site[i]
-            other_tensor = other.site[i]
+            t1, t2 = summed.site[i], other.site[i]
 
-            if set(summed_tensor.inds) != set(other_tensor.inds):
+            if set(t1.inds) != set(t2.inds):
                 # Need to use bonds to match indices
                 reindex_map = {}
-                if i > 0:
-                    reindex_map[other.bond(i - 1, i)] = summed.bond(i - 1, i)
-                if i < summed.nsites - 1:
-                    reindex_map[other.bond(i, i + 1)] = summed.bond(i, i + 1)
-                other_tensor = other_tensor.reindex(reindex_map)
 
-            summed_tensor.direct_product(other_tensor, inplace=True,
-                                         sum_inds=(summed.upper_ind(i),
-                                                   summed.lower_ind(i)))
+                if i > 0 or self.cyclic:
+                    pair = ((i - 1) % N, i)
+                    reindex_map[other.bond(*pair)] = summed.bond(*pair)
+
+                if i < summed.nsites - 1 or self.cyclic:
+                    pair = (i, (i + 1) % N)
+                    reindex_map[other.bond(*pair)] = summed.bond(*pair)
+
+                t2 = t2.reindex(reindex_map)
+
+            sum_inds = (summed.upper_ind(i), summed.lower_ind(i))
+            t1.direct_product(t2, inplace=True, sum_inds=sum_inds)
 
         if compress:
             summed.compress(**compress_opts)
@@ -1328,7 +1341,8 @@ class MatrixProductOperator(TensorNetwork1D):
             both ^= A.site_tag(i)
 
         # convert back to MPO and fuse the double bonds
-        out = view_TN_as_MPO(both, inplace=True, site_tag_id=A.site_tag_id,
+        out = view_TN_as_MPO(both, inplace=True, cyclic=self.cyclic,
+                             site_tag_id=A.site_tag_id,
                              upper_ind_id=B.upper_ind_id,
                              lower_ind_id=A.lower_ind_id)
 
@@ -1458,7 +1472,8 @@ class MatrixProductOperator(TensorNetwork1D):
         three_line_multi_print(l1, l2, l3, max_width=max_width)
 
 
-def view_TN_as_MPO(tn, upper_ind_id, lower_ind_id, site_tag_id, inplace=False):
+def view_TN_as_MPO(tn, upper_ind_id, lower_ind_id, site_tag_id,
+                   cyclic=False, inplace=False):
     """Convert a TensorNetwork into a MatrixProductOperator, assuming it has
     the appropirate underlying structure.
 
@@ -1484,4 +1499,5 @@ def view_TN_as_MPO(tn, upper_ind_id, lower_ind_id, site_tag_id, inplace=False):
     tn._upper_ind_id = upper_ind_id
     tn._lower_ind_id = lower_ind_id
     tn._site_tag_id = site_tag_id
+    tn.cyclic = cyclic
     return tn

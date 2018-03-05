@@ -66,10 +66,10 @@ def MPS_rand_state(n, bond_dim, phys_dim=2, normalize=True, cyclic=False,
     cyc_dim = (bond_dim,) if cyclic else ()
 
     def gen_shapes():
-        yield cyc_dim + (bond_dim, phys_dim)
+        yield (*cyc_dim, bond_dim, phys_dim)
         for _ in range(n - 2):
             yield (bond_dim, bond_dim, phys_dim)
-        yield cyc_dim + (bond_dim, phys_dim)
+        yield (bond_dim, *cyc_dim, phys_dim)
 
     def gen_data(shape):
         return randn(shape, dtype=dtype)
@@ -143,6 +143,8 @@ def MPS_neel_state(n, down_first=False, dtype=float, **mps_opts):
 
 
 def MPS_rand_computational_state(n, seed=None, dtype=float, **mps_opts):
+    """
+    """
     if seed is not None:
         random.seed(seed)
 
@@ -150,14 +152,17 @@ def MPS_rand_computational_state(n, seed=None, dtype=float, **mps_opts):
     return MPS_computational_state(cstr, dtype=dtype, **mps_opts)
 
 
-def MPS_zero_state(n, bond_dim=1, phys_dim=2, dtype=float, **mps_opts):
+def MPS_zero_state(n, bond_dim=1, phys_dim=2, dtype=float,
+                   cyclic=False, **mps_opts):
     """The all-zeros MPS state, of given bond-dimension.
     """
+    cyc_dim = (bond_dim,) if cyclic else ()
+
     def gen_arrays():
-        yield np.zeros((bond_dim, phys_dim), dtype=dtype)
+        yield np.zeros((*cyc_dim, bond_dim, phys_dim), dtype=dtype)
         for _ in range(n - 2):
             yield np.zeros((bond_dim, bond_dim, phys_dim), dtype=dtype)
-        yield np.zeros((bond_dim, phys_dim), dtype=dtype)
+        yield np.zeros((bond_dim, *cyc_dim, phys_dim), dtype=dtype)
 
     return MatrixProductState(gen_arrays(), **mps_opts)
 
@@ -166,16 +171,17 @@ def MPS_zero_state(n, bond_dim=1, phys_dim=2, dtype=float, **mps_opts):
 #                                    MPOs                                     #
 # --------------------------------------------------------------------------- #
 
-def MPO_identity(n, phys_dim=2, dtype=float, **mpo_opts):
+def MPO_identity(n, phys_dim=2, dtype=float, cyclic=False, **mpo_opts):
     """Generate an identity MPO of size ``n``.
     """
     II = np.identity(phys_dim, dtype=dtype)
+    cyc_dim = (1,) if cyclic else ()
 
     def gen_arrays():
-        yield II.reshape(1, phys_dim, phys_dim)
+        yield II.reshape(*cyc_dim, 1, phys_dim, phys_dim)
         for _ in range(n - 2):
             yield II.reshape(1, 1, phys_dim, phys_dim)
-        yield II.reshape(1, phys_dim, phys_dim)
+        yield II.reshape(1, *cyc_dim, phys_dim, phys_dim)
 
     return MatrixProductOperator(gen_arrays(), **mpo_opts)
 
@@ -185,19 +191,21 @@ def MPO_identity_like(mpo, **mpo_opts):
     inds/tags as ``mpo``.
     """
     return MPO_identity(n=mpo.nsites, phys_dim=mpo.phys_dim(), dtype=mpo.dtype,
-                        site_tag_id=mpo.site_tag_id,
+                        site_tag_id=mpo.site_tag_id, cyclic=mpo.cyclic,
                         upper_ind_id=mpo.upper_ind_id,
                         lower_ind_id=mpo.lower_ind_id, **mpo_opts)
 
 
-def MPO_zeros(n, phys_dim=2, dtype=float, **mpo_opts):
+def MPO_zeros(n, phys_dim=2, dtype=float, cyclic=False, **mpo_opts):
     """Generate a zeros MPO of size ``n``.
     """
+    cyc_dim = (1,) if cyclic else ()
+
     def gen_arrays():
-        yield np.zeros((1, phys_dim, phys_dim), dtype=dtype)
+        yield np.zeros((*cyc_dim, 1, phys_dim, phys_dim), dtype=dtype)
         for _ in range(n - 2):
             yield np.zeros((1, 1, phys_dim, phys_dim), dtype=dtype)
-        yield np.zeros((1, phys_dim, phys_dim), dtype=dtype)
+        yield np.zeros((1, *cyc_dim, phys_dim, phys_dim), dtype=dtype)
 
     return MatrixProductOperator(gen_arrays(), **mpo_opts)
 
@@ -208,11 +216,11 @@ def MPO_zeros_like(mpo, **mpo_opts):
     """
     return MPO_zeros(n=mpo.nsites, phys_dim=mpo.phys_dim(),
                      dtype=mpo.dtype, site_tag_id=mpo.site_tag_id,
-                     upper_ind_id=mpo.upper_ind_id,
+                     upper_ind_id=mpo.upper_ind_id, cyclic=mpo.cyclic,
                      lower_ind_id=mpo.lower_ind_id, **mpo_opts)
 
 
-def MPO_rand(n, bond_dim, phys_dim=2, normalize=True,
+def MPO_rand(n, bond_dim, phys_dim=2, normalize=True, cyclic=False,
              herm=False, dtype=float, **mpo_opts):
     """Generate a random matrix product state.
 
@@ -231,9 +239,11 @@ def MPO_rand(n, bond_dim, phys_dim=2, normalize=True,
     mpo_opts
         Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductOperator`.
     """
-    shapes = [(bond_dim, phys_dim, phys_dim),
+    cyc_shp = (bond_dim,) if cyclic else ()
+
+    shapes = [(*cyc_shp, bond_dim, phys_dim, phys_dim),
               *((bond_dim, bond_dim, phys_dim, phys_dim),) * (n - 2),
-              (bond_dim, phys_dim, phys_dim)]
+              (bond_dim, *cyc_shp, phys_dim, phys_dim)]
 
     def gen_data(shape):
         data = randn(shape, dtype=dtype)
@@ -265,7 +275,8 @@ def MPO_rand_herm(n, bond_dim, phys_dim=2, normalize=True,
 
 # ---------------------------- MPO hamiltonians ----------------------------- #
 
-def spin_ham_mpo_tensor(one_site_terms, two_site_terms, S=1 / 2, which=None):
+def spin_ham_mpo_tensor(one_site_terms, two_site_terms, S=1 / 2,
+                        which=None, cyclic=False):
     """Generate tensor(s) for a spin hamiltonian MPO.
 
     Parameters
@@ -282,6 +293,8 @@ def spin_ham_mpo_tensor(one_site_terms, two_site_terms, S=1 / 2, which=None):
     which : {None, 'L', 'R', 'A'}, optional
         If ``None``, generate the middle tensor, if 'L' a left-end tensor, if
         'R' a right-end tensor and if 'A' all three.
+    cyclic : bool, optional
+        Whether to use periodic boundary conditions - default False.
 
     Returns
     -------
@@ -294,6 +307,12 @@ def spin_ham_mpo_tensor(one_site_terms, two_site_terms, S=1 / 2, which=None):
 
     H = np.zeros((B, B, D, D), dtype=complex)
 
+    # add one-body terms
+    for factor, s in one_site_terms:
+        if isinstance(s, str):
+            s = spin_operator(s, S=S)
+        H[B - 1, 0, :, :] += factor * s
+
     # add two-body terms
     for i, (factor, s1, s2) in enumerate(two_site_terms):
         if isinstance(s1, str):
@@ -303,12 +322,6 @@ def spin_ham_mpo_tensor(one_site_terms, two_site_terms, S=1 / 2, which=None):
         H[1 + i, 0, :, :] = s1
         H[-1, 1 + i, :, :] = factor * s2
 
-    # add one-body terms
-    for factor, s in one_site_terms:
-        if isinstance(s, str):
-            s = spin_operator(s, S=S)
-        H[B - 1, 0, :, :] += factor * s
-
     H[0, 0, :, :] = eye(D)
     H[B - 1, B - 1, :, :] = eye(D)
 
@@ -317,14 +330,25 @@ def spin_ham_mpo_tensor(one_site_terms, two_site_terms, S=1 / 2, which=None):
 
     make_immutable(H)
 
-    if which == 'L':
-        return H[-1, :, :, :]
-    elif which == 'R':
-        return H[:, 0, :, :]
-    elif which == 'A':
-        return H[-1, :, :, :], H, H[:, 0, :, :]
+    if which in {None, 'M'}:
+        return H
 
-    return H
+    if cyclic:
+        # need special conditions for first MPO matrix
+        HL = np.zeros_like(H)
+        HL[0, :, :, :] = H[-1, :, :, :]
+        HL[1:-1, -1, :, :] = H[1:-1, 0, :, :]
+        HR = H
+    else:
+        HL = H[-1, :, :, :]
+        HR = H[:, 0, :, :]
+
+    if which == 'L':
+        return HL
+    elif which == 'R':
+        return HR
+    elif which == 'A':
+        return HL, H, HR
 
 
 class MPOSpinHam:
@@ -334,8 +358,10 @@ class MPOSpinHam:
 
     Parameters
     ----------
-    S : float
-        The type of spin.
+    S : float, optional
+        The type of spin, defaults to 1/2.
+    cyclic : bool, optional
+        Whether to use periodic boundary conditions - default is False.
 
     Example
     -------
@@ -347,10 +373,11 @@ class MPOSpinHam:
     >>> mpo_ham = builder.build(100)
     """
 
-    def __init__(self, S=1 / 2):
+    def __init__(self, S=1 / 2, cyclic=False):
         self.S = S
         self.one_site_terms = []
         self.two_site_terms = []
+        self.cyclic = cyclic
 
     def add_term(self, factor, *operators):
         """Add another term to the expression to be built.
@@ -377,10 +404,11 @@ class MPOSpinHam:
         """Build an instance of this MPO of size ``n``. See also
         ``MatrixProductOperator``.
         """
-        left, middle, right = spin_ham_mpo_tensor(
-            self.one_site_terms, self.two_site_terms, S=self.S, which='A')
+        HL, H, HR = spin_ham_mpo_tensor(
+            self.one_site_terms, self.two_site_terms,
+            S=self.S, which='A', cyclic=self.cyclic)
 
-        arrays = (left, *[middle] * (n - 2), right)
+        arrays = (HL, *[H] * (n - 2), HR)
 
         return MatrixProductOperator(arrays=arrays, bond_name=bond_name,
                                      upper_ind_id=upper_ind_id,
@@ -388,27 +416,19 @@ class MPOSpinHam:
                                      site_tag_id=site_tag_id, tags=tags)
 
 
-def MPO_ham_ising(n, j=1.0, bx=0.0,
-                  upper_ind_id='k{}',
-                  lower_ind_id='b{}',
-                  site_tag_id='I{}',
-                  tags=None,
-                  bond_name=""):
+def MPO_ham_ising(n, j=1.0, bx=0.0, *, cyclic=False, tags=None, bond_name="",
+                  upper_ind_id='k{}', lower_ind_id='b{}', site_tag_id='I{}'):
     """Ising Hamiltonian in matrix product operator form.
     """
-    H = MPOSpinHam(S=1 / 2)
+    H = MPOSpinHam(S=1 / 2, cyclic=cyclic)
     H.add_term(j, 'Z', 'Z')
     H.add_term(-bx, 'X')
     return H.build(n, site_tag_id=site_tag_id, tags=tags, bond_name=bond_name,
                    upper_ind_id=upper_ind_id, lower_ind_id=lower_ind_id)
 
 
-def MPO_ham_XY(n, j=1.0, bz=0.0,
-               upper_ind_id='k{}',
-               lower_ind_id='b{}',
-               site_tag_id='I{}',
-               tags=None,
-               bond_name=""):
+def MPO_ham_XY(n, j=1.0, bz=0.0, *, cyclic=False, tags=None, bond_name="",
+               upper_ind_id='k{}', lower_ind_id='b{}', site_tag_id='I{}'):
     """XY-Hamiltonian in matrix product operator form.
     """
     try:
@@ -416,7 +436,7 @@ def MPO_ham_XY(n, j=1.0, bz=0.0,
     except (TypeError, ValueError):
         jx = jy = j
 
-    H = MPOSpinHam(S=1 / 2)
+    H = MPOSpinHam(S=1 / 2, cyclic=cyclic)
     if jx == jy:
         # easy way to enforce realness
         H.add_term(jx / 2, '+', '-')
@@ -429,12 +449,8 @@ def MPO_ham_XY(n, j=1.0, bz=0.0,
                    upper_ind_id=upper_ind_id, lower_ind_id=lower_ind_id)
 
 
-def MPO_ham_heis(n, j=1.0, bz=0.0,
-                 upper_ind_id='k{}',
-                 lower_ind_id='b{}',
-                 site_tag_id='I{}',
-                 tags=None,
-                 bond_name=""):
+def MPO_ham_heis(n, j=1.0, bz=0.0, *, cyclic=False, tags=None, bond_name="",
+                 upper_ind_id='k{}', lower_ind_id='b{}', site_tag_id='I{}'):
     """Heisenberg Hamiltonian in matrix product operator form.
     """
     try:
@@ -442,7 +458,7 @@ def MPO_ham_heis(n, j=1.0, bz=0.0,
     except (TypeError, ValueError):
         jx = jy = jz = j
 
-    H = MPOSpinHam(S=1 / 2)
+    H = MPOSpinHam(S=1 / 2, cyclic=cyclic)
     if jx == jy:
         # easy way to enforce realness
         H.add_term(jx / 2, '+', '-')
@@ -456,8 +472,8 @@ def MPO_ham_heis(n, j=1.0, bz=0.0,
                    upper_ind_id=upper_ind_id, lower_ind_id=lower_ind_id)
 
 
-def MPO_ham_mbl(n, dh, j=1.0, run=None, S=1 / 2, dh_dist='s',
-                dh_dim=1, beta=None, **mpo_opts):
+def MPO_ham_mbl(n, dh, j=1.0, run=None, S=1 / 2, *, cyclic=False,
+                dh_dist='s', dh_dim=1, beta=None, **mpo_opts):
     """The many-body-localized spin hamiltonian.
 
     Parameters
@@ -472,6 +488,12 @@ def MPO_ham_mbl(n, dh, j=1.0, run=None, S=1 / 2, dh_dist='s',
         Random number to seed the noise with.
     S : float
         The underlying spin of the system, defaults to 1/2.
+    cyclic : bool, optional
+        Whether to use periodic boundary conditions - default is False.
+    dh_dist : {'s', 'g', 'qr'}, optional
+        Whether to use sqaure, guassian or quasirandom noise.
+    beta : float, optional
+        Frequency of the quasirandom noise, only if ``dh_dist='qr'``.
     mpo_opts
         Supplied to :class:`MatrixProductOperator`.
     """
@@ -521,9 +543,11 @@ def MPO_ham_mbl(n, dh, j=1.0, run=None, S=1 / 2, dh_dist='s',
     dh_terms = iter(single_site_terms())
 
     def gen_arrays():
-        yield spin_ham_mpo_tensor(next(dh_terms), interaction, which='L', S=S)
+        yield spin_ham_mpo_tensor(next(dh_terms), interaction, S=S,
+                                  which='L' if not cyclic else None)
         for _ in range(n - 2):
             yield spin_ham_mpo_tensor(next(dh_terms), interaction, S=S)
-        yield spin_ham_mpo_tensor(next(dh_terms), interaction, which='R', S=S)
+        yield spin_ham_mpo_tensor(next(dh_terms), interaction, S=S,
+                                  which='R' if not cyclic else None)
 
     return MatrixProductOperator(gen_arrays(), **mpo_opts)
