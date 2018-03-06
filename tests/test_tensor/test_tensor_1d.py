@@ -349,6 +349,14 @@ class TestMatrixProductState:
         x = rhoc_ab.trace(*inds)
         assert_allclose(1.0, x, rtol=1e-3)
 
+    @pytest.mark.parametrize("cyclic", [True, False])
+    def test_known_bad_case(self, cyclic):
+        k = MPS_rand_state(5, 10, cyclic=cyclic)
+        rhoc_ab = k.partial_trace_compress(sysa=range(2), sysb=range(2, 4))
+        inds = ['k0', 'k1'], ['b0', 'b1']
+        x = rhoc_ab.trace(*inds)
+        assert_allclose(1.0, x, rtol=1e-3)
+
 
 class TestMatrixProductOperator:
     def test_matrix_product_operator(self):

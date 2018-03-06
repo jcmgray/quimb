@@ -1035,8 +1035,8 @@ class MatrixProductState(TensorNetwork1D):
             T_UP = kb[self.site_tag(section[0]), '_UP']
             T_DN = kb[self.site_tag(section[0]), '_DOWN']
             bnd, = T_UP.shared_inds(T_DN)
-            T_UP.reindex({bnd: self.site_ind(label)}, inplace=True)
-            T_DN.reindex({bnd: lower_ind_id.format(label)}, inplace=True)
+            T_UP.reindex({bnd: "_tmp_ind_u{}".format(label)}, inplace=True)
+            T_DN.reindex({bnd: "_tmp_ind_l{}".format(label)}, inplace=True)
 
         if not self.cyclic:
             # check if either system is at end, and thus reduces to identities
@@ -1057,8 +1057,8 @@ class MatrixProductState(TensorNetwork1D):
 
                 # delete the A system
                 kb.delete('_SYSA')
-                TU.reindex({ubnd: self.site_ind(0)}, inplace=True)
-                TD.reindex({lbnd: lower_ind_id.format(0)}, inplace=True)
+                TU.reindex({ubnd: "_tmp_ind_u0"}, inplace=True)
+                TD.reindex({lbnd: "_tmp_ind_l0"}, inplace=True)
             else:
                 # or else replace the left or right envs with identites since
                 #
@@ -1080,12 +1080,20 @@ class MatrixProductState(TensorNetwork1D):
 
                 # delete the B system
                 kb.delete('_SYSB')
-                TU.reindex({ubnd: self.site_ind(1)}, inplace=True)
-                TD.reindex({lbnd: lower_ind_id.format(1)}, inplace=True)
+                TU.reindex({ubnd: "_tmp_ind_u1"}, inplace=True)
+                TD.reindex({lbnd: "_tmp_ind_l1"}, inplace=True)
             else:
                 kb.replace_with_identity('_ENVR', inplace=True)
 
+        kb.reindex({
+            '_tmp_ind_u0': self.site_ind(0),
+            '_tmp_ind_l0': lower_ind_id.format(0),
+            '_tmp_ind_u1': self.site_ind(1),
+            '_tmp_ind_l1': lower_ind_id.format(1),
+        }, inplace=True)
+
         return kb
+
 
     def to_dense(self):
         """Return the dense ket version of this MPS, i.e. a ``numpy.matrix``
