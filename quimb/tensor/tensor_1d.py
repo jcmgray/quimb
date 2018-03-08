@@ -1,18 +1,22 @@
 """Classes and algorithms related to 1d tensor networks.
 """
 import functools
+from math import log2
+
 import numpy as np
+try:
+    from opt_einsum import parser
+except ImportError:
+    pass
+
 from ..utils import three_line_multi_print, pairwise
+import quimb as qu
 from .tensor_core import (
     Tensor,
     TensorNetwork,
     rand_uuid,
     find_shared_inds,
 )
-try:
-    from opt_einsum import parser
-except ImportError:
-    pass
 
 
 def align_TN_1D(*tns, ind_ids=None, inplace=False):
@@ -254,7 +258,7 @@ class TensorNetwork1D(TensorNetwork):
                 bra.site[0] /= factor
 
     def canonize(self, orthogonality_center, bra=None):
-        r"""Mixed canonize this TN. If this is a MPS, this implies that:
+        r"""Mixed canonize this TN. If this is a MPS, this implies that::
 
                           i                      i
             >->->->->- ->-o-<- -<-<-<-<-<      +-o-+
@@ -927,6 +931,24 @@ class MatrixProductState(TensorNetwork1D):
             | E~~~E                 E~E             E~~~~~~~~~~~~~E |
             +/     \-------A-------/   \-----B-----/               \+
                            |                 |
+
+        Parameters
+        ----------
+        sysa :  sequence of int
+            The sites, which should be contiguous, defining subsystem A.
+        sysb :  sequence of int
+            The sites, which should be contiguous, defining subsystem B.
+        eps : float, optional
+            Tolerance to use when compressing the subsystem transfer matrices.
+        method : str or (str, str), optional
+            Method(s) to use for laterally compressing the state then
+            vertially compressing subsytems.
+        lower_ind_id : str, optional
+            The index id to create for the new density matrix, the upper_ind_id
+            is automatically taken as the current site_ind_id.
+        compress_opts : dict, optional
+            If given, supplied to ``partial_trace_compress`` to govern how
+            singular values are treated. See ``tensor_split``.
         """
         N = self.nsites
         if len(sysa) + len(sysb) == N:
@@ -1094,6 +1116,56 @@ class MatrixProductState(TensorNetwork1D):
 
         return kb
 
+    def logneg_subsys(self, sysa, sysb, eps=1e-6, method=('isvd', 'eigh'),
+                      compress_opts=None, **approx_spectral_opts):
+        r"""Compute the logarithmic negativity between subsytem blocks, e.g.::
+
+                               sysa         sysb
+                             .........       .....
+            ... -o-o-o-o-o-o-A-A-A-A-A-o-o-o-B-B-B-o-o-o-o-o-o-o- ...
+                 | | | | | | | | | | | | | | | | | | | | | | | |
+
+        Parameters
+        ----------
+        sysa :  sequence of int
+            The sites, which should be contiguous, defining subsystem A.
+        sysb :  sequence of int
+            The sites, which should be contiguous, defining subsystem B.
+        eps : float, optional
+            Tolerance to use when compressing the subsystem transfer matrices.
+        method : str or (str, str), optional
+            Method(s) to use for laterally compressing the state then
+            vertially compressing subsytems.
+        compress_opts : dict, optional
+            If given, supplied to ``partial_trace_compress`` to govern how
+            singular values are treated. See ``tensor_split``.
+        approx_spectral_opts
+            Supplied to :func:`~quimb.approx_spectral_function`.
+
+        Returns
+        -------
+        ln : float
+            The logarithmic negativity.
+
+        See Also
+        --------
+        MatrixProductState.partial_trace_compress, approx_spectral_function
+        """
+        compress_opts = {} if compress_opts is None else compress_opts
+
+        # form the compressed density matrix representation
+        rho_ab = self.partial_trace_compress(
+            sysa, sysb, eps=eps, method=method, **compress_opts)
+
+        # view it as a operator
+        rho_ab_pt_lo = rho_ab.aslinearoperator(['k0', 'b1'], ['b0', 'k1'])
+
+        # estimate its spectrum and sum the abs(eigenvalues)
+        tr_norm = qu.approx_spectral_function(
+            rho_ab_pt_lo, abs, **approx_spectral_opts)
+
+        # clip below 0
+        return max(0, log2(tr_norm))
 
     def to_dense(self):
         """Return the dense ket version of this MPS, i.e. a ``numpy.matrix``

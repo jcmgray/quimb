@@ -171,11 +171,7 @@ class TestPartialTraceCompress:
 
         assert max(sysa) + gap + 1 == min(sysb)
 
-        rho_ab = dmrg.state.partial_trace_compress(sysa, sysb)
-
-        rho_ab_pt_lo = rho_ab.aslinearoperator(['k0', 'b1'], ['b0', 'k1'])
-
-        ln = log2(approx_spectral_function(rho_ab_pt_lo, abs, verbosity=2))
+        ln = dmrg.state.logneg_subsys(sysa, sysb, verbosity=2)
 
         # exact
         lne = logneg_subsys(groundstate(ham_heis(n, cyclic=False)),

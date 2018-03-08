@@ -27,7 +27,7 @@ Features
 - Plot the graph of any tensor network - with bond dimension edge weighting and other coloring.
 - Multiple Tensors and Networks can be views of the same underlying data to save memory.
 - Treat any network as a :class:`scipy.sparse.linalg.LinearOperator` for solving, factorizing etc.
-- Form compressed density matrices from PBC or OBC MPS states, and thus compute entanglement measures.
+- Form compressed density matrices from PBC or OBC MPS states, and thus compute entanglement measures (e.g. :meth:`~quimb.tensor.tensor_1d.MatrixProductState.logneg_subsys`).
 - Fully unit tested.
 
 
