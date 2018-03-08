@@ -1,5 +1,6 @@
 """Classes and algorithms related to 1d tensor networks.
 """
+
 import functools
 from math import log2
 
@@ -641,7 +642,7 @@ class MatrixProductState(TensorNetwork1D):
                          nsites=nsites, check_collisions=False, **tn_opts)
 
     def imprint(self, other):
-        """Cast ``other'' into a ``MatrixProductState'' like ``self''.
+        """Cast ``other`` into a ``MatrixProductState`` like ``self``.
         """
         for p in MatrixProductState._EXTRA_PROPS:
             setattr(other, p, getattr(self, p))
@@ -1285,7 +1286,7 @@ class MatrixProductOperator(TensorNetwork1D):
                          nsites=nsites, check_collisions=False, **tn_opts)
 
     def imprint(self, other):
-        """Cast ``other'' into a ``MatrixProductOperator'' like ``self''.
+        """Cast ``other`` into a ``MatrixProductOperator`` like ``self``.
         """
         for p in MatrixProductOperator._EXTRA_PROPS:
             setattr(other, p, getattr(self, p))

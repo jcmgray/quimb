@@ -1,5 +1,6 @@
 """DMRG-like variational algorithms, but in tensor network language.
 """
+
 import numpy as np
 import itertools
 
@@ -160,11 +161,12 @@ class MovingEnvironment:
 
 
 def parse_2site_inds_dims(k, b, i):
-    """Sort out the dims and inds of::
+    r"""Sort out the dims and inds of::
 
         ---O---O---
            |   |
 
+    For use in 2 site algorithms.
     """
     u_bond_ind = k.bond(i, i + 1)
     dims_L, uix_L = zip(*(

@@ -1,3 +1,6 @@
+"""Approximating spectral functions with tensor networks.
+"""
+
 import numpy as np
 import random
 
@@ -56,14 +59,14 @@ def construct_lanczos_tridiag_MPO(A, K, v0=None, initial_bond_dim=None,
 
 
 class EEMPS(MatrixProductState):
-    """Environment matrix product state::
+    r"""Environment matrix product state::
 
          -------------E--------------
         /   sysa     / \    sysb     \
         o-o-o-o-o-o-o   o-o-o-o-o-o-o-o
         | | | | | | |   | | | | | | | |
 
-
+    Used to estimate spectral quantities in subsystems of MPS.
     """
 
     def __init__(self, arrays, env=None, sysa=None, sysb=None,
@@ -246,8 +249,8 @@ def EEMPS_zeros_like(other, **mps_opts):
 
 
 class PTPTLazyMPS:
-    """Turn a MPS into an effective operator by partially tracing and partially
-    transposing like so::
+    r"""Turn a MPS into an effective operator by partially tracing and
+    partially transposing like so::
 
                  sysa            sysb
         >->->-A-A-A-A-A-o-o-o-o-B-B-B-B-<-<-<-<-<
@@ -260,6 +263,8 @@ class PTPTLazyMPS:
                |         E=x       |
                A-A-A-A-A/   \B-B-B-B
                | | | | |     | | | |
+
+    Which can then act as an operator on EEMPS.
     """
 
     def __init__(self, mps, sysa, sysb, upper_ind_id='b{}'):
@@ -360,19 +365,19 @@ class PTPTLazyMPS:
         return outT.data.reshape(*vector.shape)
 
     def apply(self, other):
-        """Apply this operator to a EEMPS vector::
+        r"""Apply this operator to a EEMPS vector::
 
-               -----------X----------   :
-              /   sysa   / \    sysb \  : _VEC
-              a-a-a-a-a-a   b-b-b-b-b-b :         -----------Y----------
-            : | | | | | |   | | | | | |          /   sysa   / \    sysb \
-        _BRA: A-A-A-A-A-A\ /B-B-B-B-B-B   -->    A-A-A-A-A-A   B-B-B-B-B-B
-            : |           E           | :        | | | | | |   | | | | | |
-              A-A-A-A-A-A/ \B-B-B-B-B-B : _KET
-              | | | | | |   | | | | | | :               *New vector*
+                   -----------X----------   :
+                  /   sysa   / \    sysb \  : _VEC
+                  a-a-a-a-a-a   b-b-b-b-b-b :         -----------Y----------
+                : | | | | | |   | | | | | |          /   sysa   / \    sysb \
+            _BRA: A-A-A-A-A-A\ /B-B-B-B-B-B   -->    A-A-A-A-A-A   B-B-B-B-B-B
+                : |           E           | :        | | | | | |   | | | | | |
+                  A-A-A-A-A-A/ \B-B-B-B-B-B : _KET
+                  | | | | | |   | | | | | | :               *New vector*
 
+        To create a new EEMPS.
         """
-        # import pdb; pdb.set_trace()
 
         v = other.copy()
         v.add_tag('_VEC')
