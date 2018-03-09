@@ -71,7 +71,7 @@ master_doc = 'index'
 
 # General information about the project.
 project = 'quimb'
-copyright = '2017, Johnnie Gray'
+copyright = '2018, Johnnie Gray'
 author = 'Johnnie Gray'
 
 # The version info for the project you're documenting, acts as replacement for

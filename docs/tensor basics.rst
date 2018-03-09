@@ -81,6 +81,6 @@ Internal Structure
 
 A :class:`~quimb.tensor.tensor_core.TensorNetwork` keeps its tensors as a mapping of tags to the set of tensors with that tag. The geometry (i.e. graph edges) is defined completely from whichever indices appear twice and not kept track of. Indices connecting Tensors or TensorNetworks can be found using :func:`~quimb.tensor.tensor_core.find_shared_inds`.
 
-Any tagging strategy/structure can be used to place/reference/remove tensors etc. For example the default tags a 1D tensor network uses are ```('I0', 'I1', 'I2', ...) ```. A 2D network might use ```('I0J0', 'I1J0', 'I2J0', 'I0J1', ...)``` etc.
+Any tagging strategy/structure can be used to place/reference/remove tensors etc. For example the default tags of a 1D tensor network uses are ```('I0', 'I1', 'I2', ...) ```. A 2D network might use ```('I0J0', 'I1J0', 'I2J0', 'I0J1', ...)``` etc.
 
 To select a subset or partition a network into tensors that match any or all of a set of tags see :func:`~quimb.tensor.tensor_core.TensorNetwork.select` or :func:`~quimb.tensor.tensor_core.TensorNetwork.partition`.
