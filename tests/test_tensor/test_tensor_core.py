@@ -580,9 +580,9 @@ class TestTensorNetwork:
         a = Tensor(a_data, inds='abc', tags={'I0'})
         b = Tensor(b_data, inds='abc', tags={'I1'})
         tn = TensorNetwork((a, b), structure="I{}")
-        assert_allclose(tn.site[0].data, a_data)
+        assert_allclose(tn[0].data, a_data)
         new_data = np.random.randn(2, 3, 4)
-        tn.site[1] = Tensor(new_data, inds='abc', tags={'I1', 'red'})
+        tn[1] = Tensor(new_data, inds='abc', tags={'I1', 'red'})
         assert_allclose(tn['I1'].data, new_data)
         assert 'red' in tn['I1'].tags
 
@@ -592,9 +592,9 @@ class TestTensorNetwork:
         a = Tensor(a_data, inds='abc', tags={'I0'})
         b = Tensor(b_data, inds='abc', tags={'I1'})
         tn = TensorNetwork((a, b), structure="I{}")
-        assert_allclose(tn.site[0].data, a_data)
+        assert_allclose(tn[0].data, a_data)
         new_data = np.random.randn(24)
-        tn.site[1].data = new_data
+        tn[1].data = new_data
         assert_allclose(tn['I1'].data, new_data.reshape(2, 3, 4))
 
     def test_combining_with_no_check_collisions(self):

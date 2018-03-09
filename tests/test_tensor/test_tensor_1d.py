@@ -60,8 +60,8 @@ class TestMatrixProductState:
                 MPS_rand_state(10, 7, dtype=dtype)
         else:
             p = MPS_rand_state(10, 7, dtype=dtype)
-            assert p.site[0].dtype == dtype
-            assert p.site[7].dtype == dtype
+            assert p[0].dtype == dtype
+            assert p[7].dtype == dtype
 
     def test_left_canonize_site(self):
         a = np.random.randn(7, 2) + 1.0j * np.random.randn(7, 2)
@@ -184,7 +184,7 @@ class TestMatrixProductState:
     def test_can_change_data(self):
         p = MPS_rand_state(3, 10)
         assert_allclose(p.H @ p, 1)
-        p.site[1].data = np.random.randn(200)
+        p[1].data = np.random.randn(200)
         assert abs(p.H @ p - 1) > 1e-13
 
     def test_can_change_data_using_subnetwork(self):
@@ -196,7 +196,7 @@ class TestMatrixProductState:
         assert_allclose((tn ^ ...), 1)
         assert_allclose(tn[('__ket__', 'I1')].data,
                         tn[('__bra__', 'I1')].data.conj())
-        p.site[1].data = np.random.randn(200)
+        p[1].data = np.random.randn(200)
         assert abs((tn ^ ...) - 1) > 1e-13
         assert not np.allclose(tn[('__ket__', 'I1')].data,
                                tn[('__bra__', 'I1')].data.conj())
@@ -377,7 +377,7 @@ class TestMatrixProductOperator:
     def test_add_mpo(self):
         h = MPO_ham_heis(12)
         h2 = h + h
-        assert max(h2.site[6].shape) == 10
+        assert max(h2[6].shape) == 10
         h.lower_ind_id = h.upper_ind_id
         t = h ^ ...
         h2.upper_ind_id = h2.lower_ind_id
@@ -404,10 +404,10 @@ class TestMatrixProductOperator:
 
     def test_expand_mpo(self):
         h = MPO_ham_heis(12)
-        assert h.site[0].dtype == float
+        assert h[0].dtype == float
         he = h.expand_bond_dimension(13)
-        assert h.site[0].dtype == float
-        assert max(he.site[6].shape) == 13
+        assert h[0].dtype == float
+        assert max(he[6].shape) == 13
         h.lower_ind_id = h.upper_ind_id
         t = h ^ ...
         he.upper_ind_id = he.lower_ind_id
@@ -417,7 +417,7 @@ class TestMatrixProductOperator:
     def test_expand_mpo_limited(self):
         h = MPO_ham_heis(12)
         he = h.expand_bond_dimension(3)  # should do nothing
-        assert max(he.site[6].shape) == 5
+        assert max(he[6].shape) == 5
 
     def test_mpo_identity(self):
         k = MPS_rand_state(13, 7)
@@ -446,7 +446,7 @@ class TestMatrixProductOperator:
         assert t != 0.0
         Id = MPO_identity_like(op)
         assert_allclose(Id.trace(), 3**20)
-        Id.site[0] *= 3 / 3**20
+        Id[0] *= 3 / 3**20
         op += Id
         assert_allclose(op.trace(), t + 3)
 
@@ -501,9 +501,9 @@ class TestSpecificStatesOperators:
         n = 10
         rmps = MPS_rand_state(n, 10, site_tag_id="foo{}",
                               tags='bar', cyclic=cyclic)
-        assert rmps.site[0].tags == {'foo0', 'bar'}
-        assert rmps.site[3].tags == {'foo3', 'bar'}
-        assert rmps.site[-1].tags == {'foo9', 'bar'}
+        assert rmps[0].tags == {'foo0', 'bar'}
+        assert rmps[3].tags == {'foo3', 'bar'}
+        assert rmps[-1].tags == {'foo9', 'bar'}
 
         rmpsH_rmps = rmps.H & rmps
         assert len(rmpsH_rmps.tag_index['foo0']) == 2
@@ -513,8 +513,8 @@ class TestSpecificStatesOperators:
         c = (rmps.H & rmps) ^ slice(0, 5) ^ slice(9, 4, -1) ^ slice(4, 6)
         assert_allclose(c, 1)
 
-        assert rmps.site[0].data.ndim == (3 if cyclic else 2)
-        assert rmps.site[-1].data.ndim == (3 if cyclic else 2)
+        assert rmps[0].data.ndim == (3 if cyclic else 2)
+        assert rmps[-1].data.ndim == (3 if cyclic else 2)
 
     def test_mps_computation_state(self):
         p = MPS_neel_state(10)
@@ -527,7 +527,7 @@ class TestSpecificStatesOperators:
         assert_allclose(p.H @ z, 0.0)
         assert_allclose(p.H @ p, 1.0)
         zp = z + p
-        assert max(zp.site[13].shape) == 20
+        assert max(zp[13].shape) == 20
         assert_allclose(zp.H @ p, 1.0)
 
     @pytest.mark.parametrize("cyclic", [False, True])
@@ -536,9 +536,9 @@ class TestSpecificStatesOperators:
     @pytest.mark.parametrize("n", [2, 3, 4])
     def test_mpo_site_ham_heis(self, cyclic, j, bz, n):
         hh_mpo = MPO_ham_heis(n, tags=['foo'], cyclic=cyclic, j=j, bz=bz)
-        assert hh_mpo.site[0].tags == {'I0', 'foo'}
-        assert hh_mpo.site[1].tags == {'I1', 'foo'}
-        assert hh_mpo.site[-1].tags == {'I{}'.format(n - 1), 'foo'}
+        assert hh_mpo[0].tags == {'I0', 'foo'}
+        assert hh_mpo[1].tags == {'I1', 'foo'}
+        assert hh_mpo[-1].tags == {'I{}'.format(n - 1), 'foo'}
         assert hh_mpo.shape == (2,) * 2 * n
         hh_ex = ham_heis(n, cyclic=cyclic, j=j, b=bz)
         assert_allclose(eigvals(hh_ex), eigvals(hh_mpo.to_dense()), atol=1e-13)

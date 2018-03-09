@@ -100,8 +100,7 @@ class TensorNetwork1D(TensorNetwork):
     def _left_decomp_site(self, i, bra=None, **split_opts):
         N = self.nsites
 
-        T1 = self.site[i]
-        T2 = self.site[(i + 1) % N]
+        T1, T2 = self[i], self[(i + 1) % N]
 
         t1_inds_set = set(T1.inds)
         t2_inds_set = set(T2.inds)
@@ -118,18 +117,17 @@ class TensorNetwork1D(TensorNetwork):
         R.reindex({new_shared_bond: old_shared_bond}, inplace=True)
         R.transpose(*T2.inds, inplace=True)
 
-        self.site[i].modify(data=Q.data)
-        self.site[(i + 1) % N].modify(data=R.data)
+        self[i].modify(data=Q.data)
+        self[(i + 1) % N].modify(data=R.data)
 
         if bra is not None:
-            bra.site[i].modify(data=Q.data.conj())
-            bra.site[(i + 1) % N].modify(data=R.data.conj())
+            bra[i].modify(data=Q.data.conj())
+            bra[(i + 1) % N].modify(data=R.data.conj())
 
     def _right_decomp_site(self, i, bra=None, **split_opts):
         N = self.nsites
 
-        T1 = self.site[i]
-        T2 = self.site[(i - 1) % N]
+        T1, T2 = self[i], self[(i - 1) % N]
 
         t1_inds_set = set(T1.inds)
         t2_inds_set = set(T2.inds)
@@ -146,12 +144,12 @@ class TensorNetwork1D(TensorNetwork):
         Q.reindex({new_shared_bond: old_shared_bond}, inplace=True)
         Q.transpose(*T1.inds, inplace=True)
 
-        self.site[(i - 1) % N].modify(data=L.data)
-        self.site[i].modify(data=Q.data)
+        self[(i - 1) % N].modify(data=L.data)
+        self[i].modify(data=Q.data)
 
         if bra is not None:
-            bra.site[(i - 1) % N].modify(data=L.data.conj())
-            bra.site[i].modify(data=Q.data.conj())
+            bra[(i - 1) % N].modify(data=L.data.conj())
+            bra[i].modify(data=Q.data.conj())
 
     def left_canonize_site(self, i, bra=None):
         r"""Left canonize this TN's ith site, inplace::
@@ -217,10 +215,10 @@ class TensorNetwork1D(TensorNetwork):
             self.left_canonize_site(i, bra=bra)
 
         if normalize:
-            factor = self.site[-1].norm()
-            self.site[-1] /= factor
+            factor = self[-1].norm()
+            self[-1] /= factor
             if bra is not None:
-                bra.site[-1] /= factor
+                bra[-1] /= factor
 
     def right_canonize(self, stop=None, start=None, normalize=False, bra=None):
         r"""Right canonize all or a portion of this TN. If this is a MPS,
@@ -253,10 +251,10 @@ class TensorNetwork1D(TensorNetwork):
             self.right_canonize_site(i, bra=bra)
 
         if normalize:
-            factor = self.site[0].norm()
-            self.site[0] /= factor
+            factor = self[0].norm()
+            self[0] /= factor
             if bra is not None:
-                bra.site[0] /= factor
+                bra[0] /= factor
 
     def canonize(self, orthogonality_center, bra=None):
         r"""Mixed canonize this TN. If this is a MPS, this implies that::
@@ -416,14 +414,14 @@ class TensorNetwork1D(TensorNetwork):
     def bond(self, i, j):
         """Get the name of the index defining the bond between sites i and j.
         """
-        bond, = self.site[i].shared_inds(self.site[j])
+        bond, = self[i].shared_inds(self[j])
         return bond
 
     def bond_dim(self, i, j):
         """Return the size of the bond between site ``i`` and ``j``.
         """
         b_ix = self.bond(i, j)
-        return self.site[i].ind_size(b_ix)
+        return self[i].ind_size(b_ix)
 
     def fuse_multibonds(self, inplace=False):
         """Fuse any double/triple etc bonds between neighbours
@@ -431,7 +429,7 @@ class TensorNetwork1D(TensorNetwork):
         tn = self if inplace else self.copy()
 
         for i, j in pairwise(tn.sites):
-            T1, T2 = tn.site[i], tn.site[j]
+            T1, T2 = tn[i], tn[j]
             dbnds = T1.shared_inds(T2)
             T1.fuse({dbnds[0]: dbnds}, inplace=True)
             T2.fuse({dbnds[0]: dbnds}, inplace=True)
@@ -472,8 +470,8 @@ class TensorNetwork1D(TensorNetwork):
         else:
             self.shift_orthogonality_center(current_orthog_centre, i)
 
-        Tm1 = self.site[i]
-        left_inds = Tm1.shared_inds(self.site[i - 1])
+        Tm1 = self[i]
+        left_inds = Tm1.shared_inds(self[i - 1])
         return Tm1.singular_values(left_inds, method=method)
 
     def expand_bond_dimension(self, new_bond_dim, inplace=True, bra=None):
@@ -486,7 +484,7 @@ class TensorNetwork1D(TensorNetwork):
             expanded = self.copy()
 
         for i in self.sites:
-            tensor = expanded.site[i]
+            tensor = expanded[i]
             to_expand = []
 
             if i > 0:
@@ -501,7 +499,7 @@ class TensorNetwork1D(TensorNetwork):
             tensor.modify(data=np.pad(tensor.data, pads, mode='constant'))
 
             if bra is not None:
-                bra.site[i].modify(data=tensor.data.conj())
+                bra[i].modify(data=tensor.data.conj())
 
         return expanded
 
@@ -512,7 +510,7 @@ class TensorNetwork1D(TensorNetwork):
 
         for i in range(self.nsites - 1):
             ov ^= slice(0, i + 1)
-            x = ov.site[i].data
+            x = ov[i].data
             if np.allclose(x, np.eye(x.shape[0]), **allclose_opts):
                 num_can_l += 1
             else:
@@ -520,7 +518,7 @@ class TensorNetwork1D(TensorNetwork):
 
         for j in reversed(range(i + 1, self.nsites)):
             ov ^= slice(j, ...)
-            x = ov.site[j].data
+            x = ov[j].data
             if np.allclose(x, np.eye(x.shape[0]), **allclose_opts):
                 num_can_r += 1
             else:
@@ -704,7 +702,7 @@ class MatrixProductState(TensorNetwork1D):
         summed = self if inplace else self.copy()
 
         for i in summed.sites:
-            t1, t2 = summed.site[i], other.site[i]
+            t1, t2 = summed[i], other[i]
 
             if set(t1.inds) != set(t2.inds):
                 # Need to use bonds to match indices
@@ -1179,7 +1177,7 @@ class MatrixProductState(TensorNetwork1D):
     def phys_dim(self, i=None):
         if i is None:
             i = self.sites[0]
-        return self.site[i].ind_size(self.site_ind(i))
+        return self[i].ind_size(self.site_ind(i))
 
     @functools.wraps(align_TN_1D)
     def align(self, *args, inplace=True):
@@ -1382,7 +1380,7 @@ class MatrixProductOperator(TensorNetwork1D):
         summed = self if inplace else self.copy()
 
         for i in summed.sites:
-            t1, t2 = summed.site[i], other.site[i]
+            t1, t2 = summed[i], other[i]
 
             if set(t1.inds) != set(t2.inds):
                 # Need to use bonds to match indices
@@ -1530,7 +1528,7 @@ class MatrixProductOperator(TensorNetwork1D):
     def phys_dim(self, i=None):
         if i is None:
             i = self.sites[0]
-        return self.site[i].ind_size(self.upper_ind(i))
+        return self[i].ind_size(self.upper_ind(i))
 
     def show(self, max_width=None):
         l1 = ""

@@ -114,8 +114,8 @@ class MovingEnvironment:
         if i > 1:
             # replace left env with new effective left env
             for j in range(i - 1):
-                del self.envs[i].site[j]
-            self.envs[i] |= self.envs[i - 1].site[i - 2]
+                del self.envs[i][j]
+            self.envs[i] |= self.envs[i - 1][i - 2]
 
         if i > 0:
             # contract left env with new minimized, canonized site
@@ -129,8 +129,8 @@ class MovingEnvironment:
         if i < self.n - self.bsz - 1:
             # replace right env with new effective right env
             for j in range(self.n - 1, i + self.bsz, -1):
-                del self.envs[i].site[j]
-            self.envs[i] |= self.envs[i + 1].site[i + self.bsz + 1]
+                del self.envs[i][j]
+            self.envs[i] |= self.envs[i + 1][i + self.bsz + 1]
 
         if i < self.n - self.bsz:
             # contract right env with new minimized, canonized site
@@ -171,20 +171,20 @@ def parse_2site_inds_dims(k, b, i):
     u_bond_ind = k.bond(i, i + 1)
     dims_L, uix_L = zip(*(
         (d, ix)
-        for d, ix in zip(k.site[i].shape, k.site[i].inds)
+        for d, ix in zip(k[i].shape, k[i].inds)
         if ix != u_bond_ind
     ))
     dims_R, uix_R = zip(*(
         (d, ix)
-        for d, ix in zip(k.site[i + 1].shape,
-                         k.site[i + 1].inds)
+        for d, ix in zip(k[i + 1].shape,
+                         k[i + 1].inds)
         if ix != u_bond_ind
     ))
     uix = uix_L + uix_R
 
     l_bond_ind = b.bond(i, i + 1)
-    lix_L = tuple(i for i in b.site[i].inds if i != l_bond_ind)
-    lix_R = tuple(i for i in b.site[i + 1].inds if i != l_bond_ind)
+    lix_L = tuple(i for i in b[i].inds if i != l_bond_ind)
+    lix_R = tuple(i for i in b[i + 1].inds if i != l_bond_ind)
     lix = lix_L + lix_R
 
     dims = dims_L + dims_R
@@ -229,9 +229,9 @@ class DMRG:
     """
 
     def __init__(self, ham, bond_dims,
-                 bsz=1, cutoffs=1e-8, which='SA', p0=None):
+                 bsz=2, cutoffs=1e-9, which='SA', p0=None):
         self.n = ham.nsites
-        self.phys_dim = ham.phys_dim(0)
+        self.phys_dim = ham.phys_dim()
         self.bsz = bsz
         self.which = which
         self._set_bond_dim_seq(bond_dims)
@@ -241,7 +241,7 @@ class DMRG:
         if p0 is not None:
             self._k = p0.copy()
         else:
-            dtype = ham.site[0].dtype
+            dtype = ham[0].dtype
             self._k = MPS_rand_state(self.n, self._bond_dim0, self.phys_dim,
                                      dtype=dtype)
         self._b = self._k.H
@@ -318,9 +318,8 @@ class DMRG:
         And insert it back into the states ``k`` and ``b``, and thus
         ``TN_energy``.
         """
-        uix = self._k.site[i].inds
-        lix = self._b.site[i].inds
-        dims = self._k.site[i].shape
+        uix, lix = self._k[i].inds, self._b[i].inds
+        dims = self._k[i].shape
 
         # choose a rough value at which dense effective ham should not be used
         dense = self.opts['eff_eig_dense']
@@ -334,11 +333,11 @@ class DMRG:
             A = TNLinearOperator(self._eff_ham['_HAM'], udims=dims, ldims=dims,
                                  upper_inds=uix, lower_inds=lix)
 
-        eff_e, eff_gs = self._seigsys(A, v0=self._k.site[i].data)
+        eff_e, eff_gs = self._seigsys(A, v0=self._k[i].data)
 
         eff_gs = eff_gs.A
-        self._k.site[i].data = eff_gs
-        self._b.site[i].data = eff_gs.conj()
+        self._k[i].data = eff_gs
+        self._b[i].data = eff_gs.conj()
 
         self._compress_after_1site_update(direction, i, **compress_opts)
         return eff_e[0]
@@ -375,8 +374,7 @@ class DMRG:
                                  upper_inds=uix, lower_inds=lix)
 
         # find the 2-site local groundstate using previous as initial guess
-        v0 = self._k.site[i].contract(self._k.site[i + 1],
-                                      output_inds=uix).data
+        v0 = self._k[i].contract(self._k[i + 1], output_inds=uix).data
 
         eff_e, eff_gs = self._seigsys(A, v0=v0)
 
@@ -385,10 +383,10 @@ class DMRG:
         L, R = T_AB.split(left_inds=uix_L, get='arrays', absorb=direction,
                           **compress_opts)
 
-        self._k.site[i].modify(data=L, inds=(*uix_L, u_bond_ind))
-        self._b.site[i].modify(data=L.conj(), inds=(*lix_L, l_bond_ind))
-        self._k.site[i + 1].modify(data=R, inds=(u_bond_ind, *uix_R))
-        self._b.site[i + 1].modify(data=R.conj(), inds=(l_bond_ind, *lix_R))
+        self._k[i].modify(data=L, inds=(*uix_L, u_bond_ind))
+        self._b[i].modify(data=L.conj(), inds=(*lix_L, l_bond_ind))
+        self._k[i + 1].modify(data=R, inds=(u_bond_ind, *uix_R))
+        self._b[i + 1].modify(data=R.conj(), inds=(l_bond_ind, *lix_R))
 
         return eff_e[0]
 
@@ -655,9 +653,9 @@ class DMRGX(DMRG):
         """Like ``_update_local_state``, but re-insert all eigenvectors, then
         choose the one with best overlap with ``eff_ovlp``.
         """
-        uix = self._k.site[i].inds
-        lix = self._b.site[i].inds
-        dims = self._k.site[i].shape
+        uix = self._k[i].inds
+        lix = self._b[i].inds
+        dims = self._k[i].shape
 
         # contract remaining hamiltonian and get its dense representation
         A = (self._eff_ham ^ '_HAM')['_HAM'].to_dense(lix, uix)
@@ -678,15 +676,15 @@ class DMRGX(DMRG):
                 k = self.opts['eff_eig_partial_k']
 
             evals, evecs = seigsys(
-                A, sigma=self._target_energy, v0=self._k.site[i].data,
+                A, sigma=self._target_energy, v0=self._k[i].data,
                 k=k, tol=self.opts['eff_eig_tol'], backend='scipy')
 
         evecs = np.asarray(evecs).reshape(*dims, -1)
         evecs_c = evecs.conj()
 
         # update tensor at site i with all evecs -> need dummy index
-        ki = self._k.site[i]
-        bi = self._b.site[i]
+        ki = self._k[i]
+        bi = self._b[i]
         ki.modify(data=evecs, inds=(*uix, '__ev_ind__'))
 
         # find the index of the highest overlap eigenvector, by contracting::
@@ -774,8 +772,7 @@ class DMRGX(DMRG):
                 k = self.opts['eff_eig_partial_k']
 
             # find the 2-site local state using previous as initial guess
-            v0 = self._k.site[i].contract(self._k.site[i + 1],
-                                          output_inds=uix).data
+            v0 = self._k[i].contract(self._k[i + 1], output_inds=uix).data
 
             evals, evecs = seigsys(
                 A, sigma=self.energies[-1], v0=v0,

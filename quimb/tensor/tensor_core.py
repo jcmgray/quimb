@@ -1206,32 +1206,6 @@ class TNLinearOperator(spla.LinearOperator):
 #                            Tensor Network Class                             #
 # --------------------------------------------------------------------------- #
 
-class SiteIndexer(object):
-    """
-    """
-
-    def __init__(self, tn):
-        self.tn = tn
-
-    def __getitem__(self, site):
-        if site < 0:
-            site = self.tn.nsites + site
-        site_tag = self.tn.structure.format(site)
-        return self.tn[site_tag]
-
-    def __setitem__(self, site, tensor):
-        if site < 0:
-            site = self.tn.nsites + site
-        site_tag = self.tn.structure.format(site)
-        self.tn[site_tag] = tensor
-
-    def __delitem__(self, site):
-        if site < 0:
-            site = self.tn.nsites + site
-        site_tag = self.tn.structure.format(site)
-        del self.tn[site_tag]
-
-
 class TensorNetwork(object):
     r"""A collection of (as yet uncontracted) Tensors.
 
@@ -1299,9 +1273,6 @@ class TensorNetwork(object):
                  nsites=None,
                  sites=None,
                  virtual=False):
-
-        self.site = SiteIndexer(self)
-
         # short-circuit for copying TensorNetworks
         if isinstance(tensors, TensorNetwork):
             self.structure = tensors.structure
@@ -1696,6 +1667,53 @@ class TensorNetwork(object):
 
     # ----------------- selecting and splitting the network ----------------- #
 
+    def parse_tag_slice(self, tag_slice):
+        """Take a slice object, and work out its implied start, stop and step,
+        taking into account counting negatively from the end etc.
+        """
+        if tag_slice.start is None:
+            start = 0
+        elif tag_slice.start is ...:
+            start = self.nsites - 1
+        elif tag_slice.start < 0:
+            start = self.nsites + tag_slice.start
+        else:
+            start = tag_slice.start
+
+        if (tag_slice.stop is ...) or (tag_slice.stop is None):
+            stop = self.nsites
+        elif tag_slice.stop < 0:
+            stop = self.nsites + tag_slice.stop
+        else:
+            stop = tag_slice.stop
+
+        step = 1 if stop > start else -1
+        return start, stop, step
+
+    def sites2tags(self, sites):
+        """Take a integer or slice and produce the correct set of tags.
+
+        Parameters
+        ----------
+        sites : int or slice
+            The site(s). If ``slice``, non inclusive of end.
+
+        Returns
+        -------
+        tags : set
+            The correct tags describing those sites.
+        """
+        if isinstance(sites, int):
+            if sites < 0:
+                sites = self.nsites + sites
+            return {self.structure.format(sites)}
+        elif isinstance(sites, slice):
+            sites = range(*self.parse_tag_slice(sites))
+            return set(map(self.structure.format, sites))
+        else:
+            raise TypeError("``sites2tags`` needs an integer or a slice"
+                            ", but got {}".format(sites))
+
     def _get_names_from_tags(self, tags, mode='all'):
         """Return the set of names that match ``tags``. If ``mode='all'``,
         each tensor must contain every tag. If ``mode='any'``, each tensor
@@ -1703,11 +1721,14 @@ class TensorNetwork(object):
         """
         if tags in (None, ...):
             return set(self.tensor_index)
+        elif isinstance(tags, (int, slice)):
+            tags = self.sites2tags(tags)
+        else:
+            tags = tags2set(tags)
 
-        tags = tags2set(tags)
         combine = {'all': operator.and_, 'any': operator.or_}[mode]
-        name_sets = (self.tag_index[t].copy() for t in tags)
-        return functools.reduce(combine, name_sets)
+        name_sets = (self.tag_index[t] for t in tags)
+        return functools.reduce(combine, name_sets).copy()
 
     def select_tensors(self, tags, mode='all'):
         """Return the sequence of tensors that match ``tags``. If
@@ -1779,12 +1800,15 @@ class TensorNetwork(object):
         -------
         Tensor or sequence of Tensors
         """
-        tensors = self.select_tensors(tags, mode='all')
+        if isinstance(tags, slice):
+            return self.select(self.sites2tags(tags), mode='any')
 
-        if len(tensors) == 1:
-            return tensors[0]
+        if isinstance(tags, int):
+            tensors = self.select_tensors(self.sites2tags(tags), mode='any')
+        else:
+            tensors = self.select_tensors(tags, mode='all')
 
-        return tensors
+        return tensors[0] if len(tensors) == 1 else tensors
 
     def __setitem__(self, tags, tensor):
         """Set the single tensor uniquely associated with ``tags``.
@@ -2153,29 +2177,6 @@ class TensorNetwork(object):
                 break
 
         return tn
-
-    def parse_tag_slice(self, tag_slice):
-        """Take a slice object, and work out its implied start, stop and step,
-        taking into account counting negatively from the end etc.
-        """
-        if tag_slice.start is None:
-            start = 0
-        elif tag_slice.start is ...:
-            start = self.nsites - 1
-        elif tag_slice.start < 0:
-            start = self.nsites + tag_slice.start
-        else:
-            start = tag_slice.start
-
-        if (tag_slice.stop is ...) or (tag_slice.stop is None):
-            stop = self.nsites
-        elif tag_slice.stop < 0:
-            stop = self.nsites + tag_slice.stop
-        else:
-            stop = tag_slice.stop
-
-        step = 1 if stop > start else -1
-        return start, stop, step
 
     def contract_structured(self, tag_slice, inplace=False, **opts):
         """Perform a structured contraction, translating ``tag_slice`` from a

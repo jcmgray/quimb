@@ -90,13 +90,13 @@ class EEMPS(MatrixProductState):
         ai, af, bi, bf = rand_uuid(), rand_uuid(), rand_uuid(), rand_uuid()
 
         # cut bond between sysa start and sysb end
-        t1, t2 = self.site[self.sysa[0]], self.site[self.sysb[-1]]
+        t1, t2 = self[self.sysa[0]], self[self.sysb[-1]]
         old_ind, = t1.shared_inds(t2)
         t1.reindex({old_ind: ai}, inplace=True)
         t2.reindex({old_ind: bf}, inplace=True)
 
         # cut bond between sysa end and sysb start
-        t1, t2 = self.site[self.sysa[-1]], self.site[self.sysb[0]]
+        t1, t2 = self[self.sysa[-1]], self[self.sysb[0]]
         old_ind, = t1.shared_inds(t2)
         t1.reindex({old_ind: af}, inplace=True)
         t2.reindex({old_ind: bi}, inplace=True)
@@ -132,7 +132,7 @@ class EEMPS(MatrixProductState):
 
         for i in self.sites:
 
-            t1, t2 = self.site[i], other.site[i]
+            t1, t2 = self[i], other[i]
 
             # Check if need to use bonds to match indices
             if set(t1.inds) != set(t2.inds):

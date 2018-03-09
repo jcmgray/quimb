@@ -97,7 +97,7 @@ class TestDMRG1:
     def test_single_explicit_sweep(self):
         h = MPO_ham_heis(5)
         dmrg = DMRG1(h, bond_dims=3)
-        assert dmrg._k.site[0].dtype == float
+        assert dmrg._k[0].dtype == float
 
         energy_tn = (dmrg._b | dmrg.ham | dmrg._k)
 
@@ -126,7 +126,7 @@ class TestDMRG1:
         assert abs(e2.imag) < 1e-13
 
         # test still normalized
-        assert dmrg._k.site[0].dtype == float
+        assert dmrg._k[0].dtype == float
         align_TN_1D(dmrg._k, dmrg._b, inplace=True)
         assert_allclose(abs(dmrg._b @ dmrg._k), 1)
 
@@ -188,12 +188,12 @@ class TestDMRG2:
     def test_matches_exact(self, dense, MPO_ham):
         h = MPO_ham(6)
         dmrg = DMRG2(h, bond_dims=8)
-        assert dmrg._k.site[0].dtype == float
+        assert dmrg._k[0].dtype == float
         dmrg.opts['eff_eig_dense'] = dense
         assert dmrg.solve()
 
         # XXX: need to dispatch SLEPc seigsys on real input
-        # assert dmrg._k.site[0].dtype == float
+        # assert dmrg._k[0].dtype == float
 
         eff_e, mps_gs = dmrg.energy, dmrg.state
         mps_gs_dense = mps_gs.to_dense()
@@ -267,4 +267,4 @@ class TestDMRGX:
         p0 = MPS_computational_state('00110111000101')
         dmrgx = DMRGX(ham, p0, chi)
         assert dmrgx.solve(tol=1e-5, sweep_sequence='R')
-        assert dmrgx.state.site[0].dtype == float
+        assert dmrgx.state[0].dtype == float
