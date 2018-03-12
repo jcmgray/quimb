@@ -46,7 +46,7 @@ _EIGSYS_METHODS = {
 }
 
 
-def eigsys(a, sort=True, isherm=True, backend='NUMPY', **kwargs):
+def eigsys(a, *, sort=True, isherm=True, backend='NUMPY', **kwargs):
     """Find all eigenpairs of a dense matrix.
 
     Parameters
@@ -79,7 +79,7 @@ _EIGVALS_METHODS = {
 }
 
 
-def eigvals(a, sort=True, isherm=True, backend='numpy', **kwargs):
+def eigvals(a, *, sort=True, isherm=True, backend='numpy', **kwargs):
     """Find all eigenvalues of dense matrix.
 
     Parameters
@@ -104,7 +104,7 @@ def eigvals(a, sort=True, isherm=True, backend='numpy', **kwargs):
     return fn(a, sort=sort, isherm=isherm, **kwargs)
 
 
-def eigvecs(a, sort=True, isherm=True, backend='numpy', **kwargs):
+def eigvecs(a, *, sort=True, isherm=True, backend='numpy', **kwargs):
     """Find all eigenvectors of a dense matrix.
 
     Parameters
@@ -142,29 +142,31 @@ _SEIGSYS_METHODS = {
 }
 
 
-def _choose_backend(a, k, int_eps=False):
+def _choose_backend(A, k, int_eps=False, B=None):
     """Pick a backend automatically for partial decompositions.
     """
     # LinOps -> not possible to simply convert to dense or use MPI processes
-    islinop = isinstance(a, spla.LinearOperator)
+    islinop = isinstance(A, spla.LinearOperator)
+    islinopB = isinstance(B, spla.LinearOperator)
 
     # small matrix or large part of subspace requested
-    small_d_big_k = a.shape[0] ** 2 / k < (10000 if int_eps else 2000)
+    small_d_big_k = A.shape[0] ** 2 / k < (10000 if int_eps else 2000)
 
-    if small_d_big_k and not islinop:
+    if small_d_big_k and not (islinop or islinopB):
         return "NUMPY"
 
     # slepc seems faster for sparse, dense and LinearOperators
-    if SLEPC4PY_FOUND:
+    if SLEPC4PY_FOUND and not islinopB:
         # only spool up an mpi pool for big matrices though
-        if issparse(a) and a.nnz > 10000:
+        if issparse(A) and A.nnz > 10000:
             return 'SLEPC'
         return 'SLEPC-NOMPI'
 
     return 'SCIPY'
 
 
-def seigsys(a, k=6,
+def seigsys(A, k=6, *,
+            B=None,
             which=None,
             return_vecs=True,
             isherm=True,
@@ -179,10 +181,12 @@ def seigsys(a, k=6,
 
     Parameters
     ----------
-    a : sparse matrix-like, dense matrix-like, or LinearOperator
+    A : sparse matrix-like, dense matrix-like, or LinearOperator
         The operator to solve for.
     k : int, optional
         Number of eigenpairs to return (default=6).
+    B : sparse matrix-like, dense matrix-like, or LinearOperator, optional
+        If given, the RHS matrix defining a generalized eigen problem.
     which : {'SA', 'LA', 'LM', 'SM', 'TR'}
         Where in spectrum to take eigenvalues from (see
         :func:``scipy.sparse.linalg.eigsh``)
@@ -214,6 +218,7 @@ def seigsys(a, k=6,
     """
     settings = {
         'k': k,
+        'B': B,
         'which': ("SA" if (which is None) and (sigma is None) else
                   "TR" if (which is None) and (sigma is not None) else
                   which),
@@ -229,9 +234,9 @@ def seigsys(a, k=6,
     # Choose backend to perform the decompostion
     bkd = backend.upper()
     if bkd == 'AUTO':
-        bkd = _choose_backend(a, k, sigma is not None)
+        bkd = _choose_backend(A, k, sigma is not None, B=B)
 
-    return _SEIGSYS_METHODS[bkd](a, **settings, **backend_opts)
+    return _SEIGSYS_METHODS[bkd](A, **settings, **backend_opts)
 
 
 def seigvals(a, k=6, **kwargs):

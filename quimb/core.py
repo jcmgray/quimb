@@ -35,7 +35,7 @@ _SPARSE_CONSTRUCTORS = {"csr": sp.csr_matrix,
                         "coo": sp.coo_matrix}
 
 
-def sparse_matrix(data, stype="csr"):
+def sparse_matrix(data, stype="csr", dtype=complex):
     """Construct a sparse matrix of a particular format.
 
     Parameters
@@ -50,7 +50,7 @@ def sparse_matrix(data, stype="csr"):
     scipy sparse matrix
         Of format ``stype``.
     """
-    return _SPARSE_CONSTRUCTORS[stype](data, dtype=complex)
+    return _SPARSE_CONSTRUCTORS[stype](data, dtype=dtype)
 
 
 def normalize(qob, inplace=True):

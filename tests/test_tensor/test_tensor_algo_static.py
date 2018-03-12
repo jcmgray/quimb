@@ -137,11 +137,13 @@ class TestDMRG1:
 
     @pytest.mark.parametrize("dense", [False, True])
     @pytest.mark.parametrize("MPO_ham", [MPO_ham_XY, MPO_ham_heis])
-    def test_ground_state_matches(self, dense, MPO_ham):
-        h = MPO_ham(6)
+    @pytest.mark.parametrize("cyclic", [False, True])
+    def test_ground_state_matches(self, dense, MPO_ham, cyclic):
+        h = MPO_ham(6, cyclic=cyclic)
         dmrg = DMRG1(h, bond_dims=8)
         dmrg.opts['eff_eig_dense'] = dense
-        assert dmrg.solve()
+        assert dmrg.solve(tol=1e-6)
+        assert dmrg.state.cyclic == cyclic
         eff_e, mps_gs = dmrg.energy, dmrg.state
         mps_gs_dense = mps_gs.to_dense()
 
@@ -156,12 +158,12 @@ class TestDMRG1:
 
         # check against actual MPO_ham
         if MPO_ham is MPO_ham_XY:
-            ham_dense = ham_heis(6, cyclic=False, j=(1.0, 1.0, 0.0))
+            ham_dense = ham_heis(6, cyclic=cyclic, j=(1.0, 1.0, 0.0))
         elif MPO_ham is MPO_ham_heis:
-            ham_dense = ham_heis(6, cyclic=False)
+            ham_dense = ham_heis(6, cyclic=cyclic)
 
         actual_e, gs = seigsys(ham_dense, k=1)
-        assert_allclose(actual_e, eff_e)
+        assert_allclose(actual_e, eff_e, rtol=1e-6)
         assert_allclose(abs(expec(mps_gs_dense, gs)), 1.0)
 
     def test_ising_and_MPS_product_state(self):
@@ -185,12 +187,17 @@ class TestDMRG1:
 class TestDMRG2:
     @pytest.mark.parametrize("dense", [False, True])
     @pytest.mark.parametrize("MPO_ham", [MPO_ham_XY, MPO_ham_heis])
-    def test_matches_exact(self, dense, MPO_ham):
-        h = MPO_ham(6)
+    @pytest.mark.parametrize("cyclic", [False, True])
+    def test_matches_exact(self, dense, MPO_ham, cyclic):
+        n = 6
+        h = MPO_ham(n, cyclic=cyclic)
+
+        tol = 3e-2 if cyclic else 1e-4
+
         dmrg = DMRG2(h, bond_dims=8)
         assert dmrg._k[0].dtype == float
         dmrg.opts['eff_eig_dense'] = dense
-        assert dmrg.solve()
+        assert dmrg.solve(tol=1e-5)
 
         # XXX: need to dispatch SLEPc seigsys on real input
         # assert dmrg._k[0].dtype == float
@@ -198,30 +205,29 @@ class TestDMRG2:
         eff_e, mps_gs = dmrg.energy, dmrg.state
         mps_gs_dense = mps_gs.to_dense()
 
-        assert_allclose(mps_gs_dense.H @ mps_gs_dense, 1.0)
+        assert_allclose(expec(mps_gs_dense, mps_gs_dense), 1.0, rtol=tol)
 
         h_dense = h.to_dense()
 
         # check against dense form
         actual_e, gs = seigsys(h_dense, k=1)
-        assert_allclose(actual_e, eff_e)
-        assert_allclose(abs(expec(mps_gs_dense, gs)), 1.0)
+        assert_allclose(actual_e, eff_e, rtol=tol)
+        assert_allclose(abs(expec(mps_gs_dense, gs)), 1.0, rtol=tol)
 
         # check against actual MPO_ham
         if MPO_ham is MPO_ham_XY:
-            ham_dense = ham_heis(6, cyclic=False, j=(1.0, 1.0, 0.0))
+            ham_dense = ham_heis(n, cyclic=cyclic, j=(1.0, 1.0, 0.0))
         elif MPO_ham is MPO_ham_heis:
-            ham_dense = ham_heis(6, cyclic=False)
+            ham_dense = ham_heis(n, cyclic=cyclic)
 
         actual_e, gs = seigsys(ham_dense, k=1)
-        assert_allclose(actual_e, eff_e)
-        assert_allclose(abs(expec(mps_gs_dense, gs)), 1.0)
+        assert_allclose(actual_e, eff_e, rtol=tol)
+        assert_allclose(abs(expec(mps_gs_dense, gs)), 1.0, rtol=tol)
 
 
 class TestDMRGX:
 
     def test_explicit_sweeps(self):
-        # import pdb; pdb.set_trace()
         n = 8
         chi = 16
         ham = MPO_ham_mbl(n, dh=5, run=42)

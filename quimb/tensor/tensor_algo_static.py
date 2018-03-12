@@ -5,15 +5,15 @@ import numpy as np
 import itertools
 
 from ..utils import progbar
+from ..core import sparse_matrix
 from ..accel import prod
 from ..linalg.base_linalg import eigsys, seigsys
 from .tensor_core import (
     Tensor,
     TensorNetwork,
     tensor_contract,
-    TNLinearOperator
+    TNLinearOperator,
 )
-from .tensor_gen import MPS_rand_state
 
 
 class MovingEnvironment:
@@ -77,14 +77,14 @@ class MovingEnvironment:
         Defaults to 1, but would be 2 for DMRG2 etc.
     """
 
-    def __init__(self, tn, n, start, bsz=1):
+    def __init__(self, tn, n, start, bsz=1, cyclic=False):
         self.n = n
         self.start = start
         self.bsz = bsz
-        self.num_blocks = self.n - self.bsz + 1
+        self.num_blocks = self.n - (0 if cyclic else self.bsz - 1)
 
         if start == 'left':
-            initial_j = n - self.bsz
+            initial_j = n - (1 if cyclic else self.bsz)
             sweep = reversed(range(0, self.num_blocks - 1))
             previous_step = 1
             self.pos = 0
@@ -135,7 +135,7 @@ class MovingEnvironment:
         if i < self.n - self.bsz:
             # contract right env with new minimized, canonized site
             self.envs[i] ^= slice(min(self.n - 1, i + self.bsz + 1),
-                                  i + self.bsz - 1)
+                                  i + self.bsz - 1, -1)
         self.pos -= 1
 
     def move_to(self, i):
@@ -234,6 +234,7 @@ class DMRG:
         self.phys_dim = ham.phys_dim()
         self.bsz = bsz
         self.which = which
+        self.cyclic = ham.cyclic
         self._set_bond_dim_seq(bond_dims)
         self._set_cutoff_seq(cutoffs)
 
@@ -241,9 +242,7 @@ class DMRG:
         if p0 is not None:
             self._k = p0.copy()
         else:
-            dtype = ham[0].dtype
-            self._k = MPS_rand_state(self.n, self._bond_dim0, self.phys_dim,
-                                     dtype=dtype)
+            self._k = ham.rand_state(self._bond_dim0)
         self._b = self._k.H
         self.ham = ham.copy()
         self.ham.add_tag("_HAM")
@@ -256,6 +255,12 @@ class DMRG:
         self.TN_energy = self._b | self.ham | self._k
         self.energies = [self.TN_energy ^ ...]
 
+        # if cyclic need to keep track of normalization
+        if self.cyclic:
+            eye = self.ham.identity()
+            eye.add_tag('_EYE')
+            self.TN_norm = self._b | eye | self._k
+
         self.opts = {
             'eff_eig_bkd': "AUTO",
             'eff_eig_tol': 1e-3,
@@ -266,6 +271,7 @@ class DMRG:
             'compress_method': 'svd',
             'compress_cutoff_mode': 'sum2',
             'default_sweep_sequence': 'R',
+            'bond_expand_rand_strength': 1e-9,
         }
 
     def _set_bond_dim_seq(self, bond_dims):
@@ -295,11 +301,11 @@ class DMRG:
         elif (direction == 'left') and (i > 0):
             self._k.right_compress_site(i, bra=self._b, **compress_opts)
 
-    def _seigsys(self, A, v0=None):
+    def _seigsys(self, A, B=None, v0=None):
         """Find single eigenpair, using all the internal settings.
         """
         return seigsys(
-            A, k=1, which=self.which, v0=v0,
+            A, k=1, B=B, which=self.which, v0=v0,
             backend=self.opts['eff_eig_bkd'],
             EPSType=self.opts['eff_eig_EPSType'],
             ncv=self.opts['eff_eig_ncv'],
@@ -333,7 +339,17 @@ class DMRG:
             A = TNLinearOperator(self._eff_ham['_HAM'], udims=dims, ldims=dims,
                                  upper_inds=uix, lower_inds=lix)
 
-        eff_e, eff_gs = self._seigsys(A, v0=self._k[i].data)
+        if self.cyclic:
+            B = (self._eff_norm ^ '_EYE')['_EYE'].to_dense(lix, uix)
+            # B = TNLinearOperator(self._eff_norm['_EYE'], udims=dims,
+            #                      ldims=dims, upper_inds=uix, lower_inds=lix)
+            B += 1e-12 * np.eye(B.shape[0])
+            if not dense:
+                B = sparse_matrix(B)
+        else:
+            B = None
+
+        eff_e, eff_gs = self._seigsys(A, B=B, v0=self._k[i].data)
 
         eff_gs = eff_gs.A
         self._k[i].data = eff_gs
@@ -366,17 +382,25 @@ class DMRG:
         # form the local operator to find ground-state of
         if dense:
             # contract remaining hamiltonian and get its dense representation
-            eff_ham = (self._eff_ham ^ '_HAM')['_HAM']
-            eff_ham.fuse((('lower', lix), ('upper', uix)), inplace=True)
-            A = eff_ham.data
+            A = (self._eff_ham ^ '_HAM')['_HAM'].to_dense(lix, uix)
         else:
-            A = TNLinearOperator(self._eff_ham['_HAM'], udims=dims, ldims=dims,
-                                 upper_inds=uix, lower_inds=lix)
+            A = TNLinearOperator(self._eff_ham['_HAM'], ldims=dims, udims=dims,
+                                 lower_inds=lix, upper_inds=uix)
+
+        if self.cyclic:
+            B = (self._eff_norm ^ '_EYE')['_EYE'].to_dense(lix, uix)
+            # B = TNLinearOperator(self._eff_norm['_EYE'], udims=dims,
+            #                      ldims=dims, upper_inds=uix, lower_inds=lix)
+            B += 1e-12 * np.eye(B.shape[0])
+            if not dense:
+                B = sparse_matrix(B)
+        else:
+            B = None
 
         # find the 2-site local groundstate using previous as initial guess
         v0 = self._k[i].contract(self._k[i + 1], output_inds=uix).data
 
-        eff_e, eff_gs = self._seigsys(A, v0=v0)
+        eff_e, eff_gs = self._seigsys(A, B=B, v0=v0)
 
         # split the two site local groundstate
         T_AB = Tensor(eff_gs.A.reshape(dims), uix)
@@ -441,6 +465,8 @@ class DMRG:
 
         eff_args = {'n': self.n, 'start': eff_start, 'bsz': self.bsz}
         eff_hams = MovingEnvironment(self.TN_energy, **eff_args)
+        if self.cyclic:
+            eff_norms = MovingEnvironment(self.TN_norm, **eff_args)
 
         if verbose:
             sweep = progbar(sweep, ncols=80, total=self.n - self.bsz + 1)
@@ -448,6 +474,11 @@ class DMRG:
         for i in sweep:
             eff_hams.move_to(i)
             self._eff_ham = eff_hams()
+
+            if self.cyclic:
+                eff_norms.move_to(i)
+                self._eff_norm = eff_norms()
+
             en = self._update_local_state(
                 i, direction=direction, **update_opts)
 
@@ -541,7 +572,9 @@ class DMRG:
             canonize = False if LR + previous_LR in {'LR', 'RL'} else True
             # need to manually expand bond dimension for DMRG1
             if self.bsz == 1:
-                self._k.expand_bond_dimension(bd, bra=self._b)
+                self._k.expand_bond_dimension(
+                    bd, bra=self._b,
+                    rand_strength=self.opts['bond_expand_rand_strength'])
 
             # inject all options and defaults
             sweep_opts = {
@@ -643,6 +676,7 @@ class DMRGX(DMRG):
             'compress_method': 'svd',
             'compress_cutoff_mode': 'sum2',
             'default_sweep_sequence': 'RRLL',
+            'bond_expand_rand_strength': 1e-9,
         }
 
     @property

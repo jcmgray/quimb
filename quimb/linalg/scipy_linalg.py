@@ -5,21 +5,27 @@ import numpy as np
 import scipy.sparse.linalg as spla
 
 
-def seigsys_scipy(a, k=6, *, which=None, return_vecs=True, sigma=None,
+def seigsys_scipy(A, k=6, *, B=None, which=None, return_vecs=True, sigma=None,
                   isherm=True, sort=True, tol=None, **eigs_opts):
     """Returns a few eigenpairs from a possibly sparse hermitian operator
 
     Parameters
     ----------
-        a: matrix, probably sparse, hermitian
-        k: number of eigenpairs to return
-        which: where in spectrum to take eigenvalues from (see scipy eigsh)
-        nvc: number of lanczos vectors, can use to optimise speed
+    A : sparse matrix-like, dense matrix-like, or LinearOperator
+        The operator to solve for.
+    k : int, optional
+        Number of eigenpairs to return
+    B : sparse matrix-like, dense matrix-like, or LinearOperator, optional
+        If given, the RHS matrix defining a generalized eigen problem.
+    which : str, optional
+        where in spectrum to take eigenvalues from (see scipy eigsh)
+    ncv: int, optional
+        Number of lanczos vectors, can use to optimise speed
 
     Returns
     -------
-        lk: array of eigenvalues
-        vk: matrix of eigenvectors as columns
+    lk[, vk] : numpy.ndarray[, numpy.matrix]
+        lk: array of eigenvalues, vk: matrix of eigenvectors as columns.
     """
     # Options that might get passed that scipy doesn't support
     eigs_opts.pop('EPSType', None)
@@ -27,6 +33,7 @@ def seigsys_scipy(a, k=6, *, which=None, return_vecs=True, sigma=None,
     # convert certain options for scipy
     settings = {
         'k': k,
+        'M': B,
         'which': ('SA' if (which is None) and (sigma is None) else
                   'LM' if (which is None) and (sigma is not None) else
                   # For target using shift-invert scipy requires 'LM' ->
@@ -40,11 +47,11 @@ def seigsys_scipy(a, k=6, *, which=None, return_vecs=True, sigma=None,
     fn = spla.eigsh if isherm else spla.eigs
 
     if return_vecs:
-        lk, vk = fn(a, **settings, **eigs_opts)
+        lk, vk = fn(A, **settings, **eigs_opts)
         sortinds = np.argsort(lk)
         return lk[sortinds], np.asmatrix(vk[:, sortinds])
     else:
-        lk = fn(a, **settings, **eigs_opts)
+        lk = fn(A, **settings, **eigs_opts)
         return np.sort(lk) if sort else lk
 
 

@@ -73,6 +73,17 @@ def align_TN_1D(*tns, ind_ids=None, inplace=False):
     return tns
 
 
+def rand_padder(vector, pad_width, iaxis, kwargs):
+    """Helper function for padding tensor with random entries.
+    """
+    rand_strength = kwargs.get('rand_strength')
+    if pad_width[0]:
+        vector[:pad_width[0]] = rand_strength * np.random.randn(pad_width[0])
+    if pad_width[1]:
+        vector[-pad_width[1]:] = rand_strength * np.random.randn(pad_width[1])
+    return vector
+
+
 class TensorNetwork1D(TensorNetwork):
     """Base class for tensor networks with a one-dimensional structure.
     """
@@ -256,7 +267,51 @@ class TensorNetwork1D(TensorNetwork):
             if bra is not None:
                 bra[0] /= factor
 
-    def canonize(self, orthogonality_center, bra=None):
+    def canonize_cyclic(self, i):
+        """Bring this MatrixProductState into (possibly only approximate)
+        canonical form at site(s) ``i``.
+
+        Parameters
+        ----------
+        i :  int or slice
+            The site or range of sites to make canonical.
+        """
+        if isinstance(i, int):
+            start, stop = i, i + 1
+        elif isinstance(i, slice):
+            start, stop = i.start, i.stop
+        else:
+            start, stop = min(i), max(i) + 1
+            if tuple(i) != tuple(range(start, stop)):
+                raise ValueError("Parameter ``i`` should be an integer or "
+                                 "contiguous block of integers, got {}."
+                                 "".format(i))
+
+        k = self.copy()
+        b = k.H
+        k.add_tag('_KET')
+        b.add_tag('_BRA')
+        kb = k & b
+
+        lix = find_shared_inds(kb[start - 1], kb[start])
+
+        # approximate the rest of the chain with a bond 1 SVD
+        kbc = kb.replace_with_svd(slice(start, stop), lix, eps=1e-6,
+                                  mode='!any', method='isvd', max_bond=1,
+                                  ltags='_LEFT', rtags='_RIGHT')
+
+        EL = kbc['_LEFT'].squeeze()
+        EL_lix, = EL.shared_inds(kbc[k.site_tag(start), '_BRA'])
+        _, x = EL.split(EL_lix, method='eigh', cutoff=-1, get='arrays')
+
+        ER = kbc['_RIGHT'].squeeze()
+        ER_lix, = ER.shared_inds(kbc[k.site_tag(stop - 1), '_BRA'])
+        _, y = ER.split(ER_lix, method='eigh', cutoff=-1, get='arrays')
+
+        self.insert_gauge(x.T, start - 1, start)
+        self.insert_gauge(y.T, stop, stop - 1)
+
+    def canonize(self, orthogonality_center, bra=None, normalize=False):
         r"""Mixed canonize this TN. If this is a MPS, this implies that::
 
                           i                      i
@@ -272,7 +327,8 @@ class TensorNetwork1D(TensorNetwork):
             If supplied, simultaneously mixed canonize this MPS too, assuming
             it to be the conjugate state.
         """
-        self.left_canonize(stop=orthogonality_center, bra=bra)
+        self.left_canonize(stop=orthogonality_center,
+                           bra=bra, normalize=normalize)
         self.right_canonize(stop=orthogonality_center, bra=bra)
 
     def shift_orthogonality_center(self, current, new, bra=None):
@@ -474,9 +530,27 @@ class TensorNetwork1D(TensorNetwork):
         left_inds = Tm1.shared_inds(self[i - 1])
         return Tm1.singular_values(left_inds, method=method)
 
-    def expand_bond_dimension(self, new_bond_dim, inplace=True, bra=None):
+    def expand_bond_dimension(self, new_bond_dim, inplace=True, bra=None,
+                              rand_strength=0.0):
         """Expand the bond dimensions of this 1D tensor network to at least
         ``new_bond_dim``.
+
+        Parameters
+        ----------
+        new_bond_dim : int
+            Minimum bond dimension to expand to.
+        inplace : bool, optional
+            Whether to perform the expansion in place.
+        bra : MatrixProductState, optional
+            Mirror the changes to ``bra`` inplace, treating it as the conjugate
+            state.
+        rand_strength : float, optional
+            If ``rand_strength > 0``, fill the new tensor entries with gaussian
+            noise of strength ``rand_strength``.
+
+        Returns
+        -------
+        MatrixProductState
         """
         if inplace:
             expanded = self
@@ -487,16 +561,22 @@ class TensorNetwork1D(TensorNetwork):
             tensor = expanded[i]
             to_expand = []
 
-            if i > 0:
+            if i > 0 or self.cyclic:
                 to_expand.append(self.bond(i - 1, i))
-            if i < self.nsites - 1:
+            if i < self.nsites - 1 or self.cyclic:
                 to_expand.append(self.bond(i, i + 1))
 
             pads = [(0, 0) if i not in to_expand else
                     (0, max(new_bond_dim - d, 0))
                     for d, i in zip(tensor.shape, tensor.inds)]
 
-            tensor.modify(data=np.pad(tensor.data, pads, mode='constant'))
+            if rand_strength > 0:
+                edata = np.pad(tensor.data, pads, mode=rand_padder,
+                               rand_strength=rand_strength)
+            else:
+                edata = np.pad(tensor.data, pads, mode='constant')
+
+            tensor.modify(data=edata)
 
             if bra is not None:
                 bra[i].modify(data=tensor.data.conj())
@@ -504,6 +584,9 @@ class TensorNetwork1D(TensorNetwork):
         return expanded
 
     def count_canonized(self, **allclose_opts):
+        if self.cyclic:
+            return 0, 0
+
         ov = self.H & self
         num_can_l = 0
         num_can_r = 0
@@ -531,17 +614,26 @@ class TensorNetwork1D(TensorNetwork):
         l2 = ""
         l3 = ""
         num_can_l, num_can_r = self.count_canonized()
-        for i in range(self.nsites - 1):
-            bdim = self.bond_dim(i, i + 1)
+        for i in range(len(self.sites) - 1):
+            bdim = self.bond_dim(self.sites[i], self.sites[i + 1])
             strl = len(str(bdim))
             l1 += " {}".format(bdim)
             l2 += (">" if i < num_can_l else
                    "<" if i >= self.nsites - num_can_r else
                    "o") + ("-" if bdim < 100 else "=") * strl
             l3 += "|" + " " * strl
+            strl = len(str(bdim))
 
+        l1 += " "
         l2 += "<" if num_can_r > 0 else "o"
         l3 += "|"
+
+        if self.cyclic:
+            bdim = self.bond_dim(self.sites[0], self.sites[-1])
+            bnd_str = ("-" if bdim < 100 else "=") * strl
+            l1 = " {}{}{} ".format(bdim, l1, bdim)
+            l2 = "+{}{}{}+".format(bnd_str, l2, bnd_str)
+            l3 = " {}{}{} ".format(" " * strl, l3, " " * strl)
 
         three_line_multi_print(l1, l2, l3, max_width=max_width)
 
@@ -663,9 +755,7 @@ class MatrixProductState(TensorNetwork1D):
         if where is None:
             indices = range(0, self.nsites)
         elif isinstance(where, slice):
-            start = 0 if where.start is None else where.start
-            stop = self.nsites if where.stop is ... else where.stop
-            indices = range(start, stop)
+            indices = self.slice2sites(where)
         else:
             indices = where
 
@@ -846,7 +936,7 @@ class MatrixProductState(TensorNetwork1D):
         #     | |     |   |
 
         if isinstance(keep, slice):
-            keep = range(*self.parse_tag_slice(keep))
+            keep = self.slice2sites(keep)
 
         keep = sorted(keep)
         n = len(keep)
@@ -1530,6 +1620,18 @@ class MatrixProductOperator(TensorNetwork1D):
             i = self.sites[0]
         return self[i].ind_size(self.upper_ind(i))
 
+    def rand_state(self, bond_dim, **mps_opts):
+        """Get a random vector matching this MPO.
+        """
+        return qu.tensor.MPS_rand_state(self.nsites, bond_dim, self.phys_dim(),
+                                        dtype=self.dtype, cyclic=self.cyclic,
+                                        **mps_opts)
+
+    def identity(self, **mpo_opts):
+        """Get a identity matching this MPO.
+        """
+        return qu.tensor.MPO_identity_like(self, **mpo_opts)
+
     def show(self, max_width=None):
         l1 = ""
         l2 = ""
@@ -1547,6 +1649,13 @@ class MatrixProductOperator(TensorNetwork1D):
         l1 += "|"
         l2 += "<" if num_can_r > 0 else "O"
         l3 += "|"
+
+        if self.cyclic:
+            bdim = self.bond_dim(self.sites[0], self.sites[-1])
+            bnd_str = ("-" if bdim < 100 else "=") * strl
+            l1 = " {}{}{} ".format(bdim, l1, bdim)
+            l2 = "+{}{}{}+".format(bnd_str, l2, bnd_str)
+            l3 = " {}{}{} ".format(" " * strl, l3, " " * strl)
 
         three_line_multi_print(l1, l2, l3, max_width=max_width)
 

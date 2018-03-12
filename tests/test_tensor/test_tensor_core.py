@@ -217,7 +217,7 @@ class TestBasicTensorOperations:
 
 class TestTensorFunctions:
     @pytest.mark.parametrize('method', ['svd', 'eig', 'isvd', 'svds'])
-    @pytest.mark.parametrize('linds', ['abd', 'ce'])
+    @pytest.mark.parametrize('linds', [('a', 'b', 'd'), ('c', 'e')])
     @pytest.mark.parametrize('cutoff', [-1.0, 1e-13, 1e-10])
     @pytest.mark.parametrize('cutoff_mode', ['abs', 'rel', 'sum2'])
     @pytest.mark.parametrize('absorb', ['left', 'both', 'right'])
@@ -236,7 +236,7 @@ class TestTensorFunctions:
         assert (a_split ^ ...).almost_equals(a)
 
     @pytest.mark.parametrize('method', ['qr', 'lq'])
-    @pytest.mark.parametrize('linds', ['abd', 'ce'])
+    @pytest.mark.parametrize('linds', [('a', 'b', 'd'), ('c', 'e')])
     def test_split_tensor_no_vals(self, method, linds):
         a = rand_tensor((2, 3, 4, 5, 6), inds='abcde', tags='red')
         a_split = a.split(linds, method=method)
@@ -536,10 +536,10 @@ class TestTensorNetwork:
         tn = TensorNetwork((a, b, c, d), structure="I{}")
 
         assert len((tn ^ slice(2)).tensors) == 3
-        assert len((tn ^ slice(..., 1)).tensors) == 3
-        assert len((tn ^ slice(-1, 0)).tensors) == 2
-        assert len((tn ^ slice(None, -2)).tensors) == 3
-        assert len((tn ^ slice(-2, ...)).tensors) == 3
+        assert len((tn ^ slice(..., 1, -1)).tensors) == 3
+        assert len((tn ^ slice(-1, 1)).tensors) == 3
+        assert len((tn ^ slice(None, -2, -1)).tensors) == 3
+        assert len((tn ^ slice(-2, 0)).tensors) == 3
 
     def test_reindex(self):
         a = Tensor(np.random.randn(2, 3, 4), inds=[0, 1, 2], tags='red')
@@ -735,6 +735,24 @@ class TestTensorNetwork:
         k.compress_all(max_bond=5, backend=backend)
         assert k.max_bond() == 5
         assert_allclose(k.H @ k, 1.0)
+
+    @pytest.mark.parametrize("dtype", (float, complex))
+    def test_insert_gauge(self, dtype):
+        k = MPS_rand_state(10, 7, dtype=dtype, normalize=False)
+        kU = k.copy()
+
+        U = rand_tensor((7, 7), dtype=dtype, inds='ab').data
+        kU.insert_gauge(U, 4, 5)
+
+        assert k[3].almost_equals(kU[3])
+        assert not k[4].almost_equals(kU[4])
+        assert not k[5].almost_equals(kU[5])
+        assert k[6].almost_equals(kU[6])
+
+        assert k[4].inds == kU[4].inds
+        assert k[5].inds == kU[5].inds
+
+        assert_allclose(k.H @ k, kU.H @ kU)
 
 
 class TestTensorNetworkAsLinearOperator:

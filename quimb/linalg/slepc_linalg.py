@@ -346,7 +346,7 @@ def _which_scipy_to_slepc(which):
     return getattr(SLEPc.EPS.Which, _WHICH_SCIPY_TO_SLEPC[which.upper()])
 
 
-def _init_eigensolver(k=6, which='LM', sigma=None, isherm=True,
+def _init_eigensolver(k=6, which='LM', sigma=None, isherm=True, isgen=False,
                       EPSType=None, st_opts=None, tol=None, is_linop=False,
                       maxiter=None, ncv=None, l_win=None, comm=None):
     """Create an advanced eigensystem solver
@@ -406,9 +406,15 @@ def _init_eigensolver(k=6, which='LM', sigma=None, isherm=True,
             if is_linop:
                 st.setMatMode(SLEPc.ST.MatMode.SHELL)
 
+    _EPS_PROB_TYPES = {
+        (False, False): SLEPc.EPS.ProblemType.NHEP,
+        (True, False): SLEPc.EPS.ProblemType.HEP,
+        (False, True): SLEPc.EPS.ProblemType.GNHEP,
+        (True, True): SLEPc.EPS.ProblemType.GHEP,
+    }
+
     eigensolver.setType(EPSType)
-    eigensolver.setProblemType(SLEPc.EPS.ProblemType.HEP if isherm else
-                               SLEPc.EPS.ProblemType.NHEP)
+    eigensolver.setProblemType(_EPS_PROB_TYPES[(isherm, isgen)])
     eigensolver.setWhichEigenpairs(_which_scipy_to_slepc(which))
     eigensolver.setConvergenceTest(SLEPc.EPS.Conv.REL)
     eigensolver.setTolerances(tol=tol, max_it=maxiter)
@@ -416,7 +422,8 @@ def _init_eigensolver(k=6, which='LM', sigma=None, isherm=True,
     return eigensolver
 
 
-def seigsys_slepc(mat, k=6, *,
+def seigsys_slepc(A, k=6, *,
+                  B=None,
                   which=None,
                   sigma=None,
                   isherm=True,
@@ -435,7 +442,7 @@ def seigsys_slepc(mat, k=6, *,
 
     Parameters
     ----------
-    mat : sparse matrix in csr format
+    A : sparse matrix in csr format
         Operator to solve.
     k : int, optional
         Number of requested eigenpairs.
@@ -477,17 +484,22 @@ def seigsys_slepc(mat, k=6, *,
     if comm is None:
         comm = get_default_comm()
 
+    is_linop = isinstance(A, sp.linalg.LinearOperator)
+    isgen = B is not None
+
     eigensolver = _init_eigensolver(
         which=("SA" if (which is None) and (sigma is None) else
-               "TR" if (which is None) and (sigma is not None) else
-               which),
+               "TR" if (which is None) and (sigma is not None) else which),
         EPSType=EPSType, k=k, sigma=sigma, isherm=isherm, tol=tol, ncv=ncv,
-        maxiter=maxiter, st_opts=st_opts, comm=comm, l_win=l_win,
-        is_linop=isinstance(mat, sp.linalg.LinearOperator))
+        maxiter=maxiter, st_opts=st_opts, comm=comm, l_win=l_win, isgen=isgen,
+        is_linop=is_linop)
 
-    # set up the initial operators and solve
-    mat = convert_mat_to_petsc(mat, comm=comm)
-    eigensolver.setOperators(mat)
+    # set up the initial operators and solver
+    A = convert_mat_to_petsc(A, comm=comm)
+    if isgen:
+        B = convert_mat_to_petsc(B, comm=comm)
+
+    eigensolver.setOperators(A, B)
     if v0 is not None:
         eigensolver.setInitialSpace(convert_vec_to_petsc(v0, comm=comm))
     eigensolver.solve()
@@ -509,7 +521,7 @@ def seigsys_slepc(mat, k=6, *,
 
     # gather eigenvectors
     if return_vecs:
-        pvec = mat.getVecLeft()
+        pvec = A.getVecLeft()
 
         def get_vecs_local():
             for i in range(k):

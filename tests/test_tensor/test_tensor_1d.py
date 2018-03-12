@@ -27,6 +27,7 @@ from quimb.tensor import (
     MPO_ham_heis,
     MPS_neel_state,
     MPS_zero_state,
+    find_shared_inds,
 )
 
 
@@ -141,7 +142,7 @@ class TestMatrixProductState:
                            tags='bar', normalize=False)
         k.right_canonize(normalize=True)
         assert_allclose(k.H @ k, 1)
-        p_tn = (k.H & k) ^ slice(..., 0)
+        p_tn = (k.H & k) ^ slice(..., 0, -1)
         assert_allclose(p_tn['foo1'].data, np.eye(10), atol=1e-13)
 
     def test_rand_mps_right_canonize_with_bra(self):
@@ -151,7 +152,7 @@ class TestMatrixProductState:
         b = k.H
         k.right_canonize(normalize=True, bra=b)
         assert_allclose(b @ k, 1)
-        p_tn = (b & k) ^ slice(..., 0)
+        p_tn = (b & k) ^ slice(..., 0, -1)
         assert_allclose(p_tn['foo1'].data, np.eye(10), atol=1e-13)
 
     def test_rand_mps_mixed_canonize(self):
@@ -163,21 +164,21 @@ class TestMatrixProductState:
         rmps.canonize(orthogonality_center=4)
         assert rmps.count_canonized() == (4, 5)
         assert_allclose(rmps.H @ rmps, 1)
-        p_tn = (rmps.H & rmps) ^ slice(0, 4) ^ slice(..., 4)
+        p_tn = (rmps.H & rmps) ^ slice(0, 4) ^ slice(..., 4, -1)
         assert_allclose(p_tn['foo3'].data, np.eye(10), atol=1e-13)
         assert_allclose(p_tn['foo5'].data, np.eye(10), atol=1e-13)
 
         # try shifting to the right
         rmps.shift_orthogonality_center(current=4, new=8)
         assert_allclose(rmps.H @ rmps, 1)
-        p_tn = (rmps.H & rmps) ^ slice(0, 8) ^ slice(..., 8)
+        p_tn = (rmps.H & rmps) ^ slice(0, 8) ^ slice(..., 8, -1)
         assert_allclose(p_tn['foo7'].data, np.eye(4), atol=1e-13)
         assert_allclose(p_tn['foo9'].data, np.eye(2), atol=1e-13)
 
         # try shifting to the left
         rmps.shift_orthogonality_center(current=8, new=6)
         assert_allclose(rmps.H @ rmps, 1)
-        p_tn = (rmps.H & rmps) ^ slice(0, 6) ^ slice(..., 6)
+        p_tn = (rmps.H & rmps) ^ slice(0, 6) ^ slice(..., 6, -1)
         assert_allclose(p_tn['foo5'].data, np.eye(10), atol=1e-13)
         assert_allclose(p_tn['foo7'].data, np.eye(8), atol=1e-13)
 
@@ -306,22 +307,27 @@ class TestMatrixProductState:
         assert_allclose(ex_sgs, sgs)
 
     @pytest.mark.parametrize("rescale", [False, True])
-    def test_partial_trace(self, rescale):
+    @pytest.mark.parametrize("keep", [(2, 3, 4, 6, 8),
+                                      slice(-2, 4), slice(3, -1, -1)])
+    def test_partial_trace(self, rescale, keep):
         n = 10
         p = MPS_rand_state(n, 7)
-        r = p.ptr(keep=[2, 3, 4, 6, 8], upper_ind_id='u{}',
+        r = p.ptr(keep=keep, upper_ind_id='u{}',
                   rescale_sites=rescale)
         rd = r.to_dense()
-        if rescale:
-            assert r.lower_inds == ('u0', 'u1', 'u2', 'u3', 'u4')
-            assert r.upper_inds == ('k0', 'k1', 'k2', 'k3', 'k4')
+        if isinstance(keep, slice):
+            keep = p.slice2sites(keep)
         else:
-            assert r.lower_inds == ('u2', 'u3', 'u4', 'u6', 'u8')
-            assert r.upper_inds == ('k2', 'k3', 'k4', 'k6', 'k8')
+            if rescale:
+                assert r.lower_inds == ('u0', 'u1', 'u2', 'u3', 'u4')
+                assert r.upper_inds == ('k0', 'k1', 'k2', 'k3', 'k4')
+            else:
+                assert r.lower_inds == ('u2', 'u3', 'u4', 'u6', 'u8')
+                assert r.upper_inds == ('k2', 'k3', 'k4', 'k6', 'k8')
         assert_allclose(r.trace(), 1.0)
         assert isherm(rd)
         pd = p.to_dense()
-        rdd = pd.ptr([2] * n, keep=[2, 3, 4, 6, 8])
+        rdd = pd.ptr([2] * n, keep=keep)
         assert_allclose(rd, rdd)
 
     @pytest.mark.parametrize("cyclic", [False, True])
@@ -330,7 +336,9 @@ class TestMatrixProductState:
         k = MPS_rand_state(5, 7, cyclic=cyclic, sites=sites, nsites=20)
         assert set(k.tags) == {'I{}'.format(i) for i in sites}
 
-    @pytest.mark.parametrize("method", ['isvd', 'svds', ('isvd', 'eigsh')])
+    @pytest.mark.parametrize("method", ['isvd', 'svds',
+                                        ('isvd', 'eigsh'),
+                                        ('isvd', 'cholesky')])
     @pytest.mark.parametrize("cyclic", [True, False])
     @pytest.mark.parametrize("sysa", [range(0, 10), range(10, 20),
                                       range(20, 30), range(0, 30)])
@@ -356,6 +364,42 @@ class TestMatrixProductState:
         inds = ['k0', 'k1'], ['b0', 'b1']
         x = rhoc_ab.trace(*inds)
         assert_allclose(1.0, x, rtol=1e-3)
+
+    @pytest.mark.parametrize("block", [0, 20, 39, slice(0, 5), slice(20, 25),
+                                       slice(35, 40), slice(38, 42),
+                                       slice(-3, 2)])
+    @pytest.mark.parametrize("dtype", [float, complex])
+    def test_canonize_cyclic(self, dtype, block):
+        p = MPS_rand_state(40, 10, dtype=dtype, cyclic=True)
+        assert not np.allclose(p[block].H @ p[block], 1.0)
+        p.canonize_cyclic(block)
+        assert_allclose(p[block].H @ p[block], 1.0, rtol=2e-4)
+
+        k = p.copy()
+        b = k.H
+        k.add_tag('KET')
+        b.add_tag('BRA')
+        kb = (b & k)
+        ii = kb.select(block, mode='!any') ^ None
+
+        if isinstance(block, slice):
+            start, stop = block.start, block.stop
+        else:
+            start, stop = block, block + 1
+
+        assert len(kb.select_tensors(block, 'any')) == 2 * (stop - start)
+
+        ul, = find_shared_inds(kb[k.site_tag(start - 1), 'BRA'],
+                               kb[k.site_tag(start), 'BRA'])
+        ur, = find_shared_inds(kb[k.site_tag(stop - 1), 'BRA'],
+                               kb[k.site_tag(stop), 'BRA'])
+        ll, = find_shared_inds(kb[k.site_tag(start - 1), 'KET'],
+                               kb[k.site_tag(start), 'KET'])
+        lr, = find_shared_inds(kb[k.site_tag(stop - 1), 'KET'],
+                               kb[k.site_tag(stop), 'KET'])
+
+        ii = ii.to_dense((ul, ur), (ll, lr))
+        assert_allclose(ii, np.eye(ii.shape[0]), rtol=2e-4, atol=2e-4)
 
 
 class TestMatrixProductOperator:
@@ -402,21 +446,30 @@ class TestMatrixProductOperator:
         a -= b
         assert_allclose(x1, a.trace())
 
-    def test_expand_mpo(self):
-        h = MPO_ham_heis(12)
+    @pytest.mark.parametrize("cyclic", (False, True))
+    @pytest.mark.parametrize("rand_strength", (0, 1e-9))
+    def test_expand_mpo(self, cyclic, rand_strength):
+        h = MPO_ham_heis(12, cyclic=cyclic)
         assert h[0].dtype == float
-        he = h.expand_bond_dimension(13)
+        he = h.expand_bond_dimension(13, rand_strength=rand_strength)
         assert h[0].dtype == float
         assert max(he[6].shape) == 13
+
+        if cyclic:
+            assert he.bond_dim(0, -1) == 13
+
         h.lower_ind_id = h.upper_ind_id
         t = h ^ ...
         he.upper_ind_id = he.lower_ind_id
         te = he ^ ...
         assert_allclose(t, te)
 
-    def test_expand_mpo_limited(self):
-        h = MPO_ham_heis(12)
-        he = h.expand_bond_dimension(3)  # should do nothing
+    @pytest.mark.parametrize("cyclic", (False, True))
+    @pytest.mark.parametrize("rand_strength", (0, 1e-9))
+    def test_expand_mpo_limited(self, cyclic, rand_strength):
+        h = MPO_ham_heis(12, cyclic=cyclic)
+        he = h.expand_bond_dimension(3, rand_strength=rand_strength)
+        # should do nothing
         assert max(he[6].shape) == 5
 
     def test_mpo_identity(self):

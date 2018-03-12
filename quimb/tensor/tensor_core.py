@@ -374,8 +374,19 @@ def _array_split_eigh(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0):
     """
     s, U = np.linalg.eigh(x)
     s, U = s[::-1], U[:, ::-1]  # make sure largest singular value first
+    s = np.abs(s)
+
     V = dag(U)
     return _trim_and_renorm_SVD(U, s, V, cutoff, cutoff_mode, max_bond, absorb)
+
+
+@njit  # pragma: no cover
+def _array_split_cholesky(x, cutoff=-1, cutoff_mode=3, max_bond=-1, absorb=0):
+    """SVD-decomposition, using cholesky decomposition, only works if
+    ``x`` is symmetric-positive.
+    """
+    L = np.linalg.cholesky(x)
+    return L, dag(L)
 
 
 def _choose_k(x, cutoff, max_bond):
@@ -460,18 +471,31 @@ def _array_split_lq(x):
 
 
 def tensor_split(T, left_inds, method='svd', max_bond=None, absorb='both',
-                 cutoff=1e-10, cutoff_mode='sum2', get=None):
+                 cutoff=1e-10, cutoff_mode='sum2', get=None,
+                 ltags=None, rtags=None):
     """Decompose this tensor into two tensors.
 
     Parameters
     ----------
     T : Tensor
         The tensor to split.
-    left_inds : sequence of str
-        The sequence of inds, which ``tensor`` should already have, to split to
-        the 'left'.
-    method : {'svd', 'eig', 'isvd', 'svds', qr', 'lq', 'eigh', 'eigsh'}
-        How to split the tensor.
+    left_inds : str or sequence of str
+        The index or sequence of inds, which ``tensor`` should already have, to
+        split to the 'left'.
+    method : str, optional
+        How to split the tensor, only some methods allow bond truncation:
+
+            - 'svd': full SVD, allows truncation.
+            - 'eig': full SVD via eigendecomp, allows truncation.
+            - 'svds': iterative svd, allows truncation.
+            - 'isvd': iterative svd using interpolative methods, allows
+              truncation.
+            - 'qr': full QR decomposition.
+            - 'lq': full LR decomposition.
+            - 'eigh': full eigen-decomposition, tensor must he hermitian.
+            - 'eigsh': iterative eigen-decomposition, tensor must he hermitian.
+            - 'cholesky': full cholesky decomposition
+
     cutoff : float, optional
         The threshold below which to discard singular values, only applies to
         ``method='svd'`` and ``method='eig'``.
@@ -496,7 +520,11 @@ def tensor_split(T, left_inds, method='svd', max_bond=None, absorb='both',
     TensorNetwork or (Tensor, Tensor) or (array, array) or 1D-array
         Respectively if get={None, 'tensors', 'arrays', 'values'}.
     """
-    left_inds = tuple(left_inds)
+    if isinstance(left_inds, str):
+        left_inds = (left_inds,)
+    else:
+        left_inds = tuple(left_inds)
+
     right_inds = tuple(x for x in T.inds if x not in left_inds)
 
     TT = T.transpose(*left_inds, *right_inds)
@@ -523,6 +551,7 @@ def tensor_split(T, left_inds, method='svd', max_bond=None, absorb='both',
                    'qr': _array_split_qr,
                    'lq': _array_split_lq,
                    'eigh': _array_split_eigh,
+                   'cholesky': _array_split_cholesky,
                    'isvd': _array_split_isvd,
                    'svds': _array_split_svds,
                    'eigsh': _array_split_eigsh}[method](array, **opts)
@@ -535,8 +564,10 @@ def tensor_split(T, left_inds, method='svd', max_bond=None, absorb='both',
 
     bond_ind = rand_uuid()
 
-    Tl = Tensor(data=left, inds=(*left_inds, bond_ind), tags=T.tags)
-    Tr = Tensor(data=right, inds=(bond_ind, *right_inds), tags=T.tags)
+    ltags, rtags = tags2set(ltags) | T.tags, tags2set(rtags) | T.tags
+
+    Tl = Tensor(data=left, inds=(*left_inds, bond_ind), tags=ltags)
+    Tr = Tensor(data=right, inds=(bond_ind, *right_inds), tags=rtags)
 
     if get == 'tensors':
         return Tl, Tr
@@ -858,10 +889,7 @@ class Tensor(object):
         -------
         Tensor
         """
-        if inplace:
-            tn = self
-        else:
-            tn = self.copy()
+        tn = self if inplace else self.copy()
 
         output_inds = tuple(output_inds)  # need to re-use this.
 
@@ -874,6 +902,30 @@ class Tensor(object):
         out_shape = tuple(current_ind_map[i] for i in output_inds)
 
         tn.modify(data=tn.data.transpose(*out_shape), inds=output_inds)
+        return tn
+
+    def transpose_like(self, other, inplace=False):
+        """Tranpose this tensor to match the indices of ``other``, allowing for
+        one index to be different. E.g. if ``self.inds = ('a', 'b', 'c', 'x')``
+        and ``other.inds = ('b', 'a', 'd', 'c')`` the output inds will be
+        ``('b', 'a', 'x', 'c')``.
+        """
+        tn = self if inplace else self.copy()
+        diff_ix = set(tn.inds) - set(other.inds)
+
+        if len(diff_ix) > 1:
+            raise ValueError("More than one index don't match, the tranpose "
+                             "is therefore not well-defined.")
+
+        # if their indices match, just plain transpose
+        if not diff_ix:
+            tn.transpose(*other.inds, inplace=True)
+
+        else:
+            di, = diff_ix
+            new_ix = (i if i in tn.inds else di for i in other.inds)
+            tn.transpose(*new_ix, inplace=True)
+
         return tn
 
     @functools.wraps(tensor_contract)
@@ -1360,29 +1412,29 @@ class TensorNetwork(object):
             return copy.deepcopy(self)
         return self.__class__(self, virtual=virtual)
 
-    def add_tensor(self, tensor, name=None, virtual=False):
-        """Add a single tensor to this network - mangle its name if neccessary.
+    def add_tensor(self, tensor, tid=None, virtual=False):
+        """Add a single tensor to this network - mangle its tid if neccessary.
         """
-        # check for name conflict
-        if name is None:
-            name = rand_uuid(base="_T")
+        # check for tid conflict
+        if tid is None:
+            tid = rand_uuid(base="_T")
         else:
             try:
-                self.tensor_index[name]
-                name = rand_uuid(base="_T")
+                self.tensor_index[tid]
+                tid = rand_uuid(base="_T")
             except KeyError:
-                # name is fine to keep
+                # tid is fine to keep
                 pass
 
         # add tensor to the main index
-        self.tensor_index[name] = tensor if virtual else tensor.copy()
+        self.tensor_index[tid] = tensor if virtual else tensor.copy()
 
-        # add its name to the relevant tags, or create a new tag
+        # add its tid to the relevant tags, or create a new tag
         for tag in tensor.tags:
             try:
-                self.tag_index[tag].add(name)
+                self.tag_index[tag].add(tid)
             except (KeyError, TypeError):
-                self.tag_index[tag] = {name}
+                self.tag_index[tag] = {tid}
 
     def add_tensor_network(self, tn, virtual=False, check_collisions=True,
                            inner_inds=None):
@@ -1412,7 +1464,7 @@ class TensorNetwork(object):
             for nm, tsr in tn.tensor_index.items():
                 if b_ix and any(i in reind_map for i in tsr.inds):
                     tsr = tsr.reindex(reind_map, inplace=virtual)
-                self.add_tensor(tsr, virtual=virtual, name=nm)
+                self.add_tensor(tsr, virtual=virtual, tid=nm)
 
         else:  # directly add tensor/tag indexes
             for nm, tsr in tn.tensor_index.items():
@@ -1485,31 +1537,31 @@ class TensorNetwork(object):
                 if len(self.sites) == mx - mn:
                     self.sites = range(mn, mx)
 
-    def _pop_tensor(self, name):
+    def _pop_tensor(self, tid):
         """Remove a tensor from this network, returning said tensor.
         """
         # remove the tensor from the tag index
-        for tag in self.tensor_index[name].tags:
-            tagged_names = self.tag_index[tag]
-            tagged_names.discard(name)
-            if not tagged_names:
+        for tag in self.tensor_index[tid].tags:
+            tagged_tids = self.tag_index[tag]
+            tagged_tids.discard(tid)
+            if not tagged_tids:
                 del self.tag_index[tag]
 
         # pop the tensor itself
-        return self.tensor_index.pop(name)
+        return self.tensor_index.pop(tid)
 
-    def _del_tensor(self, name):
+    def _del_tensor(self, tid):
         """Delete a tensor from this network.
         """
         # remove the tensor from the tag index
-        for tag in self.tensor_index[name].tags:
-            tagged_names = self.tag_index[tag]
-            tagged_names.discard(name)
-            if not tagged_names:
+        for tag in self.tensor_index[tid].tags:
+            tagged_tids = self.tag_index[tag]
+            tagged_tids.discard(tid)
+            if not tagged_tids:
                 del self.tag_index[tag]
 
         # delete the tensor itself
-        del self.tensor_index[name]
+        del self.tensor_index[tid]
 
     def delete(self, tags, mode='all'):
         """Delete any tensors which match all or any of ``tags``.
@@ -1521,25 +1573,25 @@ class TensorNetwork(object):
         mode : {'all', 'any'}, optional
             Whether to match all or any of the tags.
         """
-        names = self._get_names_from_tags(tags, mode=mode)
-        for name in tuple(names):
-            self._del_tensor(name)
+        tids = self._get_tids_from_tags(tags, mode=mode)
+        for tid in tuple(tids):
+            self._del_tensor(tid)
 
     def add_tag(self, tag, where=None, mode='all'):
         """Add tag to every tensor in this network, or if ``where`` is
         specified, the tensors matching those tags -- i.e. adds the tag to
         all tensors in ``self.select_tensors(where, mode=mode)``.
         """
-        names = self._get_names_from_tags(where, mode=mode)
-        names_tensors = ((n, self.tensor_index[n]) for n in names)
+        tids = self._get_tids_from_tags(where, mode=mode)
+        tids_tensors = ((n, self.tensor_index[n]) for n in tids)
 
-        for n, t in names_tensors:
+        for n, t in tids_tensors:
             t.tags.add(tag)
 
         try:
-            self.tag_index[tag] |= names
+            self.tag_index[tag] |= tids
         except KeyError:
-            self.tag_index[tag] = set(names)
+            self.tag_index[tag] = set(tids)
 
     def drop_tags(self, tags):
         """Remove a tag from any tensors in this network which have it.
@@ -1667,28 +1719,55 @@ class TensorNetwork(object):
 
     # ----------------- selecting and splitting the network ----------------- #
 
-    def parse_tag_slice(self, tag_slice):
+    def slice2sites(self, tag_slice):
         """Take a slice object, and work out its implied start, stop and step,
-        taking into account counting negatively from the end etc.
+        taking into account cyclic boundary conditions.
+
+        Examples
+        --------
+        Normal slicing:
+
+            >>> p = MPS_rand_state(10, bond_dim=7)
+            >>> p.slice2sites(slice(5))
+            (0, 1, 2, 3, 4)
+
+            >>> p.slice2sites(slice(4, 8))
+            (4, 5, 6, 7)
+
+        Slicing from end backwards:
+
+            >>> p.slice2sites(slice(..., -3, -1))
+            (9, 8)
+
+        Slicing round the end:
+
+            >>> p.slice2sites(slice(7, 12))
+            (7, 8, 9, 0, 1)
+
+            >>> p.slice2sites(slice(-3, 2))
+            (7, 8, 9, 0, 1)
+
+        If the start point is > end point (*before* modulo n), then step needs
+        to be negative to yield give anything.
         """
         if tag_slice.start is None:
             start = 0
         elif tag_slice.start is ...:
-            start = self.nsites - 1
-        elif tag_slice.start < 0:
-            start = self.nsites + tag_slice.start
+            if tag_slice.step == -1:
+                start = self.nsites - 1
+            else:
+                start = -1
         else:
             start = tag_slice.start
 
-        if (tag_slice.stop is ...) or (tag_slice.stop is None):
+        if tag_slice.stop in (..., None):
             stop = self.nsites
-        elif tag_slice.stop < 0:
-            stop = self.nsites + tag_slice.stop
         else:
             stop = tag_slice.stop
 
-        step = 1 if stop > start else -1
-        return start, stop, step
+        step = 1 if tag_slice.step is None else tag_slice.step
+
+        return tuple(s % self.nsites for s in range(start, stop, step))
 
     def sites2tags(self, sites):
         """Take a integer or slice and produce the correct set of tags.
@@ -1704,20 +1783,31 @@ class TensorNetwork(object):
             The correct tags describing those sites.
         """
         if isinstance(sites, int):
-            if sites < 0:
-                sites = self.nsites + sites
-            return {self.structure.format(sites)}
+            return {self.structure.format(sites % self.nsites)}
         elif isinstance(sites, slice):
-            sites = range(*self.parse_tag_slice(sites))
-            return set(map(self.structure.format, sites))
+            return set(map(self.structure.format, self.slice2sites(sites)))
         else:
             raise TypeError("``sites2tags`` needs an integer or a slice"
                             ", but got {}".format(sites))
 
-    def _get_names_from_tags(self, tags, mode='all'):
-        """Return the set of names that match ``tags``. If ``mode='all'``,
-        each tensor must contain every tag. If ``mode='any'``, each tensor
-        only need contain one of the tags.
+    def _get_tids_from_tags(self, tags, mode='all'):
+        """Return the set of tensor ids that match ``tags``.
+
+        Parameters
+        ----------
+        tags : seq or str, str, None, ..., int, slice
+            Tag specifier(s).
+        mode : {'all', 'any', '!all', '!any'}
+            How to select based on the tags, if:
+
+                - 'all': get ids of tensors matching all tags
+                - 'any': get ids of tensors matching any tags
+                - '!all': get ids of tensors *not* matching all tags
+                - '!any': get ids of tensors *not* matching any tags
+
+        Returns
+        -------
+        set[str]
         """
         if tags in (None, ...):
             return set(self.tensor_index)
@@ -1726,9 +1816,18 @@ class TensorNetwork(object):
         else:
             tags = tags2set(tags)
 
+        inverse = mode[0] == '!'
+        if inverse:
+            mode = mode[1:]
+
         combine = {'all': operator.and_, 'any': operator.or_}[mode]
-        name_sets = (self.tag_index[t] for t in tags)
-        return functools.reduce(combine, name_sets).copy()
+        tid_sets = (self.tag_index[t] for t in tags)
+        tids = functools.reduce(combine, tid_sets).copy()
+
+        if inverse:
+            return set(self.tensor_index) - tids
+
+        return tids
 
     def select_tensors(self, tags, mode='all'):
         """Return the sequence of tensors that match ``tags``. If
@@ -1751,8 +1850,8 @@ class TensorNetwork(object):
         --------
         select, partition, partition_tensors
         """
-        names = self._get_names_from_tags(tags, mode=mode)
-        return tuple(self.tensor_index[n] for n in names)
+        tids = self._get_tids_from_tags(tags, mode=mode)
+        return tuple(self.tensor_index[n] for n in tids)
 
     def select(self, tags, mode='all'):
         """Get a TensorNetwork comprising tensors that match all or any of
@@ -1774,8 +1873,8 @@ class TensorNetwork(object):
         --------
         select_tensors, partition, partition_tensors
         """
-        tagged_names = self._get_names_from_tags(tags, mode=mode)
-        ts = (self.tensor_index[n] for n in tagged_names)
+        tagged_tids = self._get_tids_from_tags(tags, mode=mode)
+        ts = (self.tensor_index[n] for n in tagged_tids)
 
         kws = {'check_collisions': False, 'structure': self.structure,
                'structure_bsz': self.structure_bsz, 'nsites': self.nsites}
@@ -1813,30 +1912,30 @@ class TensorNetwork(object):
     def __setitem__(self, tags, tensor):
         """Set the single tensor uniquely associated with ``tags``.
         """
-        names = self._get_names_from_tags(tags, mode='all')
-        if len(names) != 1:
+        tids = self._get_tids_from_tags(tags, mode='all')
+        if len(tids) != 1:
             raise KeyError("'TensorNetwork.__setitem__' is meant for a single "
                            "existing tensor only - found {} with tag(s) '{}'."
-                           .format(len(names), tags))
+                           .format(len(tids), tags))
 
         if not isinstance(tensor, Tensor):
             raise TypeError("Can only set value with a new 'Tensor'.")
 
-        name, = names
+        tid, = tids
 
         # check if tags match, else need to modify TN structure
-        if self.tensor_index[name].tags != tensor.tags:
-            self._del_tensor(name)
-            self.add_tensor(tensor, name, virtual=True)
+        if self.tensor_index[tid].tags != tensor.tags:
+            self._del_tensor(tid)
+            self.add_tensor(tensor, tid, virtual=True)
         else:
-            self.tensor_index[name] = tensor
+            self.tensor_index[tid] = tensor
 
     def __delitem__(self, tags):
         """Delete any tensors which have all of ``tags``.
         """
-        names = self._get_names_from_tags(tags, mode='all')
-        for name in tuple(names):
-            self._del_tensor(name)
+        tids = self._get_tids_from_tags(tags, mode='all')
+        for tid in tuple(tids):
+            self._del_tensor(tid)
 
     def partition_tensors(self, tags, inplace=False, mode='any'):
         """Split this TN into a list of tensors containing any or all of
@@ -1868,10 +1967,10 @@ class TensorNetwork(object):
             return None, self.tensor_index.values()
 
         # Else get the locations of where each tag is found on tensor
-        tagged_names = self._get_names_from_tags(tags, mode=mode)
+        tagged_tids = self._get_tids_from_tags(tags, mode=mode)
 
         # check if all tensors have been tagged
-        if len(tagged_names) == len(self.tensor_index):
+        if len(tagged_tids) == len(self.tensor_index):
             return None, self.tensor_index.values()
 
         # Copy untagged to new network, and pop tagged tensors from this
@@ -1879,7 +1978,7 @@ class TensorNetwork(object):
             untagged_tn = self
         else:
             untagged_tn = self.copy()
-        tagged_ts = tuple(map(untagged_tn._pop_tensor, sorted(tagged_names)))
+        tagged_ts = tuple(map(untagged_tn._pop_tensor, sorted(tagged_tids)))
 
         return untagged_tn, tagged_ts
 
@@ -1908,20 +2007,20 @@ class TensorNetwork(object):
         --------
         partition_tensors, select, select_tensors
         """
-        tagged_names = self._get_names_from_tags(tags, mode=mode)
+        tagged_tids = self._get_tids_from_tags(tags, mode=mode)
 
         kws = {'check_collisions': False, 'structure': self.structure,
                'structure_bsz': self.structure_bsz, 'nsites': self.nsites}
 
         if inplace:
             t1 = self
-            t2s = [t1._pop_tensor(name) for name in tagged_names]
+            t2s = [t1._pop_tensor(tid) for tid in tagged_tids]
             t2 = TensorNetwork(t2s, **kws)
 
         else:  # rebuild both -> quicker
             t1s, t2s = [], []
-            for name, tensor in self.tensor_index.items():
-                (t2s if name in tagged_names else t1s).append(tensor)
+            for tid, tensor in self.tensor_index.items():
+                (t2s if tid in tagged_tids else t1s).append(tensor)
 
             t1, t2 = TensorNetwork(t1s, **kws), TensorNetwork(t2s, **kws)
 
@@ -2035,15 +2134,17 @@ class TensorNetwork(object):
         opts = {}
         opts['max_bond'] = {None: -1}.get(max_bond, max_bond)
 
-        if method in ('svd', 'eig', 'eigh') and not isinstance(A, np.ndarray):
-            A = A.to_dense()
+        if method in ('svd', 'eig', 'eigh', 'cholesky'):
+            if not isinstance(A, np.ndarray):
+                A = A.to_dense()
 
         U, V = {'svd': _array_split_svd,
                 'eig': _array_split_eig,
                 'eigh': _array_split_eigh,
                 'isvd': _array_split_isvd,
                 'svds': _array_split_svds,
-                'eigsh': _array_split_eigsh}[method](A, cutoff=eps, **opts)
+                'eigsh': _array_split_eigsh,
+                'cholesky': _array_split_eigsh}[method](A, cutoff=eps, **opts)
 
         U = U.reshape(*left_shp, -1)
         V = V.reshape(-1, *rght_shp)
@@ -2075,8 +2176,8 @@ class TensorNetwork(object):
         specified by ``tags1`` and ``tags2`` using ``tensor_compress_bond``.
         This is an inplace operation.
         """
-        n1, = self._get_names_from_tags(tags1, mode='all')
-        n2, = self._get_names_from_tags(tags2, mode='all')
+        n1, = self._get_tids_from_tags(tags1, mode='all')
+        n2, = self._get_tids_from_tags(tags2, mode='all')
         tensor_compress_bond(self.tensor_index[n1], self.tensor_index[n2])
 
     def compress_all(self, **compress_opts):
@@ -2095,9 +2196,44 @@ class TensorNetwork(object):
         """Inplace addition of a dummmy (size 1) bond between the single
         tensors specified by by ``tags1`` and ``tags2``.
         """
-        n1, = self._get_names_from_tags(tags1, mode='all')
-        n2, = self._get_names_from_tags(tags2, mode='all')
+        n1, = self._get_tids_from_tags(tags1, mode='all')
+        n2, = self._get_tids_from_tags(tags2, mode='all')
         tensor_add_bond(self.tensor_index[n1], self.tensor_index[n2])
+
+    def insert_gauge(self, U, tags1, tags2, Ui=None):
+        """Insert the gauge transformation ``U @ U^-1`` into the bond between
+        the tensors, ``T1`` and ``T2``, defined by ``tags1`` and ``tags2``.
+        The resulting tensors at those locations will be ``T1 @ U^-1`` and
+        ``T2 @ U``.
+
+        Parameters
+        ----------
+        U : np.ndarray
+            The gauge to insert.
+        tags1 : str, sequence of str, or int
+            Tags defining the location of the 'left' tensor.
+        tags2 : str, sequence of str, or int
+            Tags defining the location of the 'right' tensor.
+        Ui : np.ndarray
+            The inverse gauge, ``U @ Ui == Ui @ U == eye``, to insert. If not
+            given will be calculated using :func:`numpy.linag.inv`.
+        """
+        n1, = self._get_tids_from_tags(tags1, mode='all')
+        n2, = self._get_tids_from_tags(tags2, mode='all')
+        T1, T2 = self.tensor_index[n1], self.tensor_index[n2]
+        bnd, = T1.shared_inds(T2)
+
+        if Ui is None:
+            Ui = np.linalg.inv(U)
+
+        T1Ui = Tensor(Ui, inds=('__dummy__', bnd)) @ T1
+        T2U = Tensor(U, inds=(bnd, '__dummy__')) @ T2
+
+        T1Ui.transpose_like(T1, inplace=True)
+        T2U.transpose_like(T2, inplace=True)
+
+        T1.modify(data=T1Ui.data)
+        T2.modify(data=T2U.data)
 
     # ----------------------- contracting the network ----------------------- #
 
@@ -2211,9 +2347,8 @@ class TensorNetwork(object):
             tag_slice = slice(0, self.nsites)
 
         # filter sites by the slice, but also which sites are present at all
-        tags_seq = (self.structure.format(i)
-                    for i in range(*self.parse_tag_slice(tag_slice))
-                    if i in self.sites)
+        sites = self.slice2sites(tag_slice)
+        tags_seq = (self.structure.format(s) for s in sites if s in self.sites)
 
         # partition sites into `structure_bsz` groups
         if self.structure_bsz > 1:

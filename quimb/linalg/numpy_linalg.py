@@ -3,6 +3,7 @@
 
 import numpy as np
 import numpy.linalg as nla
+import scipy.linalg as scla
 
 from ..accel import issparse
 
@@ -80,16 +81,30 @@ def sort_inds(a, method, sigma=None):
     return np.argsort(_SORT_FUNCS[method.upper()](a))
 
 
-def seigsys_numpy(a, k=6, which=None, return_vecs=True, sigma=None,
+_DENSE_EIG_METHODS = {
+    (True, True, False): nla.eigh,
+    (True, False, False): nla.eigvalsh,
+    (False, True, False): nla.eig,
+    (False, False, False): nla.eigvals,
+    (True, True, True): scla.eigh,
+    (True, False, True): scla.eigvalsh,
+    (False, True, True): scla.eig,
+    (False, False, True): scla.eigvals,
+}
+
+
+def seigsys_numpy(A, k=6, B=None, which=None, return_vecs=True, sigma=None,
                   isherm=True, sort=True, **eig_opts):
     """Partial eigen-decomposition using numpy's dense linear algebra.
 
     Parameters
     ----------
-    a : matrix-like
+    A : matrix-like
         Operator to partially eigen-decompose.
     k : int, optional
         Number of eigenpairs to return.
+    B : matrix-like
+        If given, the RHS matrix defining a generalized eigen problem.
     which : str, optional
         Which part of the spectrum to target.
     return_vecs : bool, optional
@@ -107,10 +122,12 @@ def seigsys_numpy(a, k=6, which=None, return_vecs=True, sigma=None,
     -------
         lk, (vk): k eigenvalues (and eigenvectors) sorted according to which
     """
-    fn = {(True, True): nla.eigh,
-          (True, False): nla.eigvalsh,
-          (False, True): nla.eig,
-          (False, False): nla.eigvals}[(isherm, return_vecs)]
+    generalized = B is not None
+
+    eig_fn = _DENSE_EIG_METHODS[(isherm, return_vecs, generalized)]
+
+    if generalized:
+        eig_opts['b'] = B
 
     # these might be given by seigsys but not relevant for numpy
     eig_opts.pop('ncv', None)
@@ -120,17 +137,29 @@ def seigsys_numpy(a, k=6, which=None, return_vecs=True, sigma=None,
     eig_opts.pop('EPSType', None)
 
     if return_vecs:
-        evals, evecs = fn(a.A if issparse(a) else a, **eig_opts)
+        # get all eigenpairs
+        evals, evecs = eig_fn(A.A if issparse(A) else A, **eig_opts)
+
+        # sort and trim according to which k we want
         sk = sort_inds(evals, method=which, sigma=sigma)[:k]
         evals, evecs = evals[sk], np.asmatrix(evecs[:, sk])
+
+        # also potentially sort into ascending order
         if sort:
             so = np.argsort(evals)
             return evals[so], evecs[:, so]
+
         return evals, evecs
+
     else:
-        evals = fn(a.A if issparse(a) else a, **eig_opts)
+        # get all eigenvalues
+        evals = eig_fn(A.A if issparse(A) else A, **eig_opts)
+
+        # sort and trim according to which k we want
         sk = sort_inds(evals, method=which, sigma=sigma)[:k]
         evals = evals[sk]
+
+        # also potentially sort into ascending order
         return np.sort(evals) if sort else evals
 
 
