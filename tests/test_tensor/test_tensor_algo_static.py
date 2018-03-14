@@ -189,7 +189,7 @@ class TestDMRG2:
     @pytest.mark.parametrize("MPO_ham", [MPO_ham_XY, MPO_ham_heis])
     @pytest.mark.parametrize("cyclic", [False, True])
     def test_matches_exact(self, dense, MPO_ham, cyclic):
-        n = 6
+        n = 12
         h = MPO_ham(n, cyclic=cyclic)
 
         tol = 3e-2 if cyclic else 1e-4

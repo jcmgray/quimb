@@ -267,7 +267,7 @@ class TensorNetwork1D(TensorNetwork):
             if bra is not None:
                 bra[0] /= factor
 
-    def canonize_cyclic(self, i):
+    def canonize_cyclic(self, i, bra=None):
         """Bring this MatrixProductState into (possibly only approximate)
         canonical form at site(s) ``i``.
 
@@ -310,6 +310,10 @@ class TensorNetwork1D(TensorNetwork):
 
         self.insert_gauge(x.T, start - 1, start)
         self.insert_gauge(y.T, stop, stop - 1)
+
+        if bra is not None:
+            for i in {start - 1, start, stop, stop - 1}:
+                bra[i].modify(data=self[i].data.conj())
 
     def canonize(self, orthogonality_center, bra=None, normalize=False):
         r"""Mixed canonize this TN. If this is a MPS, this implies that::

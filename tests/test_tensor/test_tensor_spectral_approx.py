@@ -61,7 +61,7 @@ class TestMPOSpectralApprox:
         rho_ab_pt = rho_ab.partial_transpose(range(3))
         lnx = log2(approx_spectral_function(rho_ab_pt, abs,
                                             tol=0.1, verbosity=2))
-        assert_allclose(lne, lnx, rtol=0.5, atol=0.1)
+        assert_allclose(lne, lnx, rtol=0.6, atol=0.1)
 
 
 sysa_sysb_configs = ([(3, 4, 5), (7, 8, 9)],

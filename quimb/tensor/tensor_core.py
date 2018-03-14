@@ -2521,7 +2521,7 @@ class TensorNetwork(object):
 
     # ------------------------------ printing ------------------------------- #
 
-    def graph(tn, color=None, label_inds=None, label_tags=None,
+    def graph(tn, color=None, show_inds=None, show_tags=None,
               iterations=200, figsize=(6, 6), legend=True, **plot_opts):
         """Plot this tensor network as a networkx graph using matplotlib,
         with edge width corresponding to bond dimension.
@@ -2550,9 +2550,9 @@ class TensorNetwork(object):
         ts = list(tn.tensors)
         n = len(ts)
 
-        if label_inds is None:
-            label_inds = (n <= 20)
-            label_tags = (n <= 20)
+        if show_inds is None:
+            show_inds = (n <= 20)
+            show_tags = (n <= 20)
 
         labels = {}
 
@@ -2576,7 +2576,7 @@ class TensorNetwork(object):
                     G.add_edge(i, ext_lbl, weight=t1.ind_size(ix))
 
                     # optionally label the external index
-                    if label_inds:
+                    if show_inds:
                         labels[ext_lbl] = ix
 
         edge_weights = [x[2]['weight'] for x in G.edges(data=True)]
@@ -2613,7 +2613,7 @@ class TensorNetwork(object):
                     G.node[i]['color'] = colors[tag]
 
             # optionally label the tensor's tags
-            if label_tags:
+            if show_tags:
                 labels[i] = str(t1.tags)
 
         # Set the size of the nodes, so that dangling inds appear so.

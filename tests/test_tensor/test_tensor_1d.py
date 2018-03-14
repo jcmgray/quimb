@@ -370,16 +370,18 @@ class TestMatrixProductState:
                                        slice(-3, 2)])
     @pytest.mark.parametrize("dtype", [float, complex])
     def test_canonize_cyclic(self, dtype, block):
-        p = MPS_rand_state(40, 10, dtype=dtype, cyclic=True)
-        assert not np.allclose(p[block].H @ p[block], 1.0)
-        p.canonize_cyclic(block)
-        assert_allclose(p[block].H @ p[block], 1.0, rtol=2e-4)
-
-        k = p.copy()
+        k = MPS_rand_state(40, 10, dtype=dtype, cyclic=True)
         b = k.H
         k.add_tag('KET')
         b.add_tag('BRA')
-        kb = (b & k)
+        kb = (b | k)
+
+        assert not np.allclose(k[block].H @ k[block], 1.0)
+        assert not np.allclose(b[block].H @ b[block], 1.0)
+        k.canonize_cyclic(block, bra=b)
+        assert_allclose(k[block].H @ k[block], 1.0, rtol=2e-4)
+        assert_allclose(b[block].H @ b[block], 1.0, rtol=2e-4)
+
         ii = kb.select(block, mode='!any') ^ None
 
         if isinstance(block, slice):
