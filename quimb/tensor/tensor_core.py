@@ -1181,6 +1181,10 @@ class TNLinearOperator(spla.LinearOperator):
          \ | | /   -> lower_inds
 
     This can then be supplied to scipy's sparse linear algebra routines.
+    The ``upper_inds`` / ``lower_inds`` convention is that the linear operator
+    will have shape matching (*upper_inds, *lower_inds), so that the
+    ``lower_inds`` are those that will be contracted in a normal
+    matvec / matmat operation.
 
     Parameters
     ----------
@@ -1222,36 +1226,50 @@ class TNLinearOperator(spla.LinearOperator):
         super().__init__(dtype=self._tensors[0].dtype, shape=(ld, ud))
 
     def _matvec(self, vec):
-        in_data = vec.reshape(*self.udims)
+        in_data = vec.reshape(*self.ldims)
 
         if not hasattr(self, '_matvec_fn'):
             # generate a expression that acts directly on the data
-            iT = Tensor(in_data, inds=self.upper_inds)
+            iT = Tensor(in_data, inds=self.lower_inds)
             self._matvec_fn = tensor_contract(*self._tensors, iT,
                                               return_expression=True,
-                                              output_inds=self.lower_inds)
+                                              output_inds=self.upper_inds)
 
         out_data = self._matvec_fn(*(t.data for t in self._tensors), in_data)
         return out_data.ravel()
 
     def _rmatvec(self, vec):
-        in_data = vec.conj().reshape(*self.ldims)
+        in_data = vec.conj().reshape(*self.udims)
 
         if not hasattr(self, '_rmatvec_fn'):
             # generate a expression that acts directly on the data
-            iT = Tensor(in_data, inds=self.lower_inds)
+            iT = Tensor(in_data, inds=self.upper_inds)
             self._rmatvec_fn = tensor_contract(*self._tensors, iT,
                                                return_expression=True,
-                                               output_inds=self.upper_inds)
+                                               output_inds=self.lower_inds)
 
         out_data = self._rmatvec_fn(*(t.data for t in self._tensors), in_data)
         return out_data.conj().ravel()
 
+    def _matmat(self, mat):
+        d = mat.shape[-1]
+        in_data = mat.reshape(*self.ldims, d)
+
+        if not hasattr(self, '_matmat_fn'):
+            # generate a expression that acts directly on the data
+            iT = Tensor(in_data, inds=(*self.lower_inds, '__mat_ix__'))
+            self._matmat_fn = tensor_contract(
+                *self._tensors, iT, return_expression=True,
+                output_inds=(*self.upper_inds, '__mat_ix__'))
+
+        out_data = self._matmat_fn(*(t.data for t in self._tensors), in_data)
+        return out_data.reshape(-1, d)
+
     def to_dense(self):
         """Convert this TNLinearOperator into a dense array.
         """
-        return tensor_contract(*self._tensors).to_dense(self.lower_inds,
-                                                        self.upper_inds)
+        return tensor_contract(*self._tensors).to_dense(self.upper_inds,
+                                                        self.lower_inds)
 
 
 # --------------------------------------------------------------------------- #
@@ -2128,8 +2146,8 @@ class TensorNetwork(object):
 
         left_inds = _left_inds
 
-        A = svd_section.aslinearoperator(upper_inds=rght_inds, udims=rght_shp,
-                                         lower_inds=left_inds, ldims=left_shp)
+        A = svd_section.aslinearoperator(upper_inds=left_inds, udims=left_shp,
+                                         lower_inds=rght_inds, ldims=rght_shp)
 
         opts = {}
         opts['max_bond'] = {None: -1}.get(max_bond, max_bond)

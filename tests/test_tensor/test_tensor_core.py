@@ -767,12 +767,16 @@ class TestTensorNetworkAsLinearOperator:
 
         tn = A & B & C & D
         tn_lo = tn.aslinearoperator(('a', 'b'), ('c', 'd'))
-        tn_d = (tn ^ ...).fuse([('u', ['a', 'b']), ('l', ['c', 'd'])]).data
+        tn_d = tn.to_dense(['a', 'b'], ['c', 'd'])
 
         u, s, v = svds(tn_lo, k=5, backend='scipy')
         ud, sd, vd = svds(tn_d, k=5, backend='scipy')
 
         assert_allclose(s, sd)
+
+        # test matmat
+        X = np.random.randn(9, 8) + 1.0j * np.random.randn(9, 8)
+        assert_allclose(tn_lo.dot(X), tn_d.dot(X))
 
     @pytest.mark.parametrize("dtype", (float, complex))
     def test_replace_with_svd_using_linear_operator(self, dtype):
