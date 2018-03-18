@@ -134,8 +134,8 @@ class HuskArray(np.ndarray):
         self.shape = shape
 
 
-def tensor_contract(*tensors, output_inds=None,
-                    return_expression=False, **contract_opts):
+def tensor_contract(*tensors, output_inds=None, return_expression=False,
+                    backend='numpy', **contract_opts):
     """Efficiently contract multiple tensors, combining their tags.
 
     Parameters
@@ -172,7 +172,7 @@ def tensor_contract(*tensors, output_inds=None,
     if return_expression:
         return expression
 
-    o_array = expression(*(t.data for t in tensors))
+    o_array = expression(*(t.data for t in tensors), backend=backend)
 
     if not o_ix:
         if isinstance(o_array, np.ndarray):
