@@ -596,7 +596,7 @@ class TensorNetwork1D(TensorNetwork):
         num_can_r = 0
 
         for i in range(self.nsites - 1):
-            ov ^= slice(0, i + 1)
+            ov ^= slice(max(0, i - 1), i + 1)
             x = ov[i].data
             if np.allclose(x, np.eye(x.shape[0]), **allclose_opts):
                 num_can_l += 1
@@ -604,7 +604,7 @@ class TensorNetwork1D(TensorNetwork):
                 break
 
         for j in reversed(range(i + 1, self.nsites)):
-            ov ^= slice(j, ...)
+            ov ^= slice(j, min(self.nsites, j + 2))
             x = ov[j].data
             if np.allclose(x, np.eye(x.shape[0]), **allclose_opts):
                 num_can_r += 1
