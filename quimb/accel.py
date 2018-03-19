@@ -407,7 +407,8 @@ def vdot(a, b):  # pragma: no cover
 
     In other words, ``b`` here will be conjugated by the function.
     """
-    return np.vdot(a.reshape(-1), b.reshape(-1))
+    return np.vdot(np.ascontiguousarray(a).reshape(-1),
+                   np.ascontiguousarray(b).reshape(-1))
 
 
 @realify

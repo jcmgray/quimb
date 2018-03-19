@@ -7,13 +7,12 @@ import random
 
 import numpy as np
 import scipy.linalg as scla
-import scipy.sparse.linalg as spla
 
 from ..core import ptr
 from ..accel import prod, vdot
 from ..utils import int2tup
 from ..linalg.mpi_launcher import get_mpi_pool
-from ..tensor.tensor_core import contract, contract_path, HuskArray
+from ..tensor.tensor_core import Tensor
 from ..tensor.tensor_1d import MatrixProductOperator
 from ..tensor.tensor_approx_spectral import (
     construct_lanczos_tridiag_MPO,
@@ -26,105 +25,10 @@ from ..tensor.tensor_approx_spectral import (
 #                  'Lazy' representation tensor contractions                  #
 # --------------------------------------------------------------------------- #
 
-@functools.lru_cache(128)
-def get_cntrct_inds_ptr_dot(ndim_ab, sysa, matmat=False):
-    """Find the correct integer contraction labels for ``lazy_ptr_dot``.
 
-    Parameters
-    ----------
-    ndim_ab : int
-        The total number of subsystems (dimensions) in 'ab'.
-    sysa : int or sequence of int, optional
-            Index(es) of the 'a' subsystem(s) to keep.
-    matmat : bool, optional
-        Whether to output indices corresponding to a matrix-vector or
-        matrix-matrix opertion.
-
-    Returns
-    -------
-    inds_a_ket : sequence of int
-        The tensor index labels for the ket on subsystem 'a'.
-    inds_ab_bra : sequence of int
-        The tensor index labels for the bra on subsystems 'ab'.
-    inds_ab_ket : sequence of int
-        The tensor index labels for the ket on subsystems 'ab'.
-    """
-    inds_a_ket = []
-    inds_ab_bra = []
-    inds_ab_ket = []
-
-    upper_inds = iter(range(ndim_ab, 2 * ndim_ab))
-
-    for i in range(ndim_ab):
-        if i in sysa:
-            inds_a_ket.append(i)
-            inds_ab_bra.append(i)
-            inds_ab_ket.append(next(upper_inds))
-        else:
-            inds_ab_bra.append(i)
-            inds_ab_ket.append(i)
-
-    if matmat:
-        inds_a_ket.append(2 * ndim_ab)
-
-    return tuple(inds_a_ket), tuple(inds_ab_bra), tuple(inds_ab_ket)
-
-
-@functools.lru_cache(128)
-def prepare_lazy_ptr_dot(psi_a_shape, dims=None, sysa=0):
-    """Pre-calculate the arrays and indexes etc for ``lazy_ptr_dot``.
-    """
-    mat_size = psi_a_shape[1] if len(psi_a_shape) > 1 else 1
-
-    # convert to tuple so can always cache
-    sysa = int2tup(sysa)
-
-    ndim_ab = len(dims)
-    inds_a_ket, inds_ab_bra, inds_ab_ket = get_cntrct_inds_ptr_dot(
-        ndim_ab, sysa, matmat=mat_size > 1)
-
-    dims_a = tuple(d for i, d in enumerate(dims) if i in sysa)
-    if mat_size > 1:
-        dims_a = dims_a + (mat_size,)
-
-    return dims_a, inds_a_ket, inds_ab_bra, inds_ab_ket
-
-
-@functools.lru_cache(128)
-def get_path_lazy_ptr_dot(psi_ab_tensor_shape, psi_a_tensor_shape,
-                          inds_a_ket, inds_ab_bra, inds_ab_ket):
-    return contract_path(
-        HuskArray(psi_a_tensor_shape), inds_a_ket,
-        HuskArray(psi_ab_tensor_shape), inds_ab_bra,
-        HuskArray(psi_ab_tensor_shape), inds_ab_ket,
-        optimize='optimal',
-        memory_limit=-1,
-    )[0]
-
-
-def do_lazy_ptr_dot(psi_ab_tensor, psi_ab_tensor_conj, psi_a_tensor,
-                    inds_a_ket, inds_ab_bra, inds_ab_ket,
-                    path, out=None):
-    """Perform ``lazy_ptr_dot`` with the pre-calculated indexes etc from
-    ``prepare_lazy_ptr_dot``.
-    """
-    if out is None:
-        out = np.empty_like(psi_a_tensor)
-
-    return contract(
-        psi_a_tensor, inds_a_ket,
-        psi_ab_tensor_conj, inds_ab_bra,
-        psi_ab_tensor, inds_ab_ket,
-        optimize=path,
-        out=out,
-    )
-
-
-def lazy_ptr_dot(psi_ab, psi_a, dims=None, sysa=0, out=None):
-    r"""Perform the 'lazy' evalution of ``ptr(psi_ab, ...) @ psi_a``,
-    that is, contract the tensor diagram in an efficient way that does not
-    necessarily construct the explicit reduced density matrix. In tensor
-    diagram notation::
+def lazy_ptr_linop(psi_ab, dims, sysa):
+    r"""A linear operator representing action of partially tracing a bipartite
+    state, then multiplying another 'unipartite' state::
 
           ( | )
         +-------+
@@ -141,58 +45,6 @@ def lazy_ptr_dot(psi_ab, psi_a, dims=None, sysa=0, out=None):
            a|      |b     |
             |      \______/
 
-
-    Parameters
-    ----------
-    psi_ab : ket
-        State to partially trace and dot with another ket, with
-        size ``prod(dims)``.
-    psi_a : ket or sequence of kets
-        State to act on with the dot product, of size ``prod(dims[sysa])``, or
-        several states to act on at once, then rectangular matrix of size
-        ``(prod(dims[sysa]), nstates)``.
-    dims : sequence of int, optional
-        The sub dimensions of ``psi_ab``, inferred as bipartite if not given,
-        i.e. ``(psi_a.size, psi_ab.size // psi_a.size)``.
-    sysa : int or sequence of int, optional
-        Index(es) of the 'a' subsystem(s) to keep.
-    out : array, optional
-        If provided, the calculation is done into this array.
-
-    Returns
-    -------
-    ket
-    """
-    if dims is None:
-        da = psi_a.shape[0]
-        d = psi_ab.size
-        dims = (da, d // da)
-    else:
-        dims = int2tup(dims)
-    sysa = int2tup(sysa)
-
-    # prepare shapes and indexes -- cached
-    dims_a, inds_a_ket, inds_ab_bra, inds_ab_ket = \
-        prepare_lazy_ptr_dot(psi_a.shape, dims=dims, sysa=sysa)
-    psi_ab_tensor = np.asarray(psi_ab).reshape(dims)
-    psi_a_tensor = np.asarray(psi_a).reshape(dims_a)
-
-    # find the optimal path -- cached
-    path = get_path_lazy_ptr_dot(
-        psi_ab_tensor.shape, psi_a_tensor.shape,
-        inds_a_ket, inds_ab_bra, inds_ab_ket)
-
-    # perform the contraction
-    return do_lazy_ptr_dot(
-        psi_ab_tensor, psi_ab_tensor.conjugate(), psi_a_tensor,
-        inds_a_ket, inds_ab_bra, inds_ab_ket,
-        path=path, out=out).reshape(psi_a.shape)
-
-
-class LazyPtrOperator(spla.LinearOperator):
-    """A linear operator representing action of partially tracing a bipartite
-    state, then multiplying another 'unipartite' state.
-
     Parameters
     ----------
     psi_ab : ket
@@ -203,161 +55,26 @@ class LazyPtrOperator(spla.LinearOperator):
     sysa : int or sequence of int, optional
         Index(es) of the 'a' subsystem(s) to keep.
     """
+    sysa = int2tup(sysa)
 
-    def __init__(self, psi_ab, dims, sysa):
-        self.psi_ab_tensor = np.asarray(psi_ab).reshape(dims)
-        self.psi_ab_tensor_conj = self.psi_ab_tensor.conjugate()
-        self.dims = int2tup(dims)
-        self.sysa = int2tup(sysa)
-        dims_a = [d for i, d in enumerate(dims) if i in self.sysa]
-        sz_a = prod(dims_a)
-        super().__init__(dtype=psi_ab.dtype, shape=(sz_a, sz_a))
+    Kab = Tensor(np.asarray(psi_ab).reshape(dims),
+                 inds=[('kA{}' if i in sysa else 'xB{}').format(i)
+                       for i in range(len(dims))])
 
-    def _matvec(self, vecs):
-        # prepare shapes and indexes -- cached
-        dims_a, inds_a_ket, inds_ab_bra, inds_ab_ket = \
-            prepare_lazy_ptr_dot(vecs.shape, dims=self.dims, sysa=self.sysa)
+    Bab = Tensor(Kab.data.conjugate(),
+                 inds=[('bA{}' if i in sysa else 'xB{}').format(i)
+                       for i in range(len(dims))])
 
-        # have to do this each time?
-        psi_a_tensor = np.asarray(vecs).reshape(dims_a)
-
-        # find the optimal path -- cached
-        path = get_path_lazy_ptr_dot(
-            self.psi_ab_tensor.shape, psi_a_tensor.shape,
-            inds_a_ket, inds_ab_bra, inds_ab_ket)
-
-        # perform the contraction
-        return do_lazy_ptr_dot(
-            self.psi_ab_tensor, self.psi_ab_tensor_conj, psi_a_tensor,
-            inds_a_ket, inds_ab_bra, inds_ab_ket,
-            path=path).reshape(vecs.shape)
-
-    def _matmat(self, vecs):
-        return self._matvec(vecs)
-
-    def _adjoint(self):
-        return self.__class__(self.psi_ab_tensor.conjugate(),
-                              self.dims, self.sysa)
-
-
-@functools.lru_cache(128)
-def get_cntrct_inds_ptr_ppt_dot(ndim_abc, sysa, sysb, matmat=False):
-    """Find the correct integer contraction labels for ``lazy_ptr_ppt_dot``.
-
-    Parameters
-    ----------
-    ndim_abc : int
-        The total number of subsystems (dimensions) in 'abc'.
-    sysa : int or sequence of int, optional
-        Index(es) of the 'a' subsystem(s) to keep, with respect to all
-        the dimensions, ``dims``, (i.e. pre-partial trace).
-    sysa : int or sequence of int, optional
-        Index(es) of the 'b' subsystem(s) to keep, with respect to all
-        the dimensions, ``dims``, (i.e. pre-partial trace).
-    matmat : bool, optional
-        Whether to output indices corresponding to a matrix-vector or
-        matrix-matrix opertion.
-
-    Returns
-    -------
-    inds_ab_ket : sequence of int
-        The tensor index labels for the ket on subsystems 'ab'.
-    inds_abc_bra : sequence of int
-        The tensor index labels for the bra on subsystems 'abc'.
-    inds_abc_ket : sequence of int
-        The tensor index labels for the ket on subsystems 'abc'.
-    inds_out : sequence of int
-        The tensor indices of the resulting ket, important as these might
-        no longer be ordered.
-    """
-    inds_ab_ket = []
-    inds_abc_bra = []
-    inds_abc_ket = []
-    inds_out = []
-
-    upper_inds = iter(range(ndim_abc, 2 * ndim_abc))
-
-    for i in range(ndim_abc):
-        if i in sysa:
-            up_ind = next(upper_inds)
-            inds_ab_ket.append(i)
-            inds_abc_bra.append(up_ind)
-            inds_abc_ket.append(i)
-            inds_out.append(up_ind)
-        elif i in sysb:
-            up_ind = next(upper_inds)
-            inds_ab_ket.append(up_ind)
-            inds_abc_bra.append(up_ind)
-            inds_abc_ket.append(i)
-            inds_out.append(i)
-        else:
-            inds_abc_bra.append(i)
-            inds_abc_ket.append(i)
-
-    if matmat:
-        inds_ab_ket.append(2 * ndim_abc)
-        inds_out.append(2 * ndim_abc)
-
-    return (tuple(inds_ab_ket), tuple(inds_abc_bra),
-            tuple(inds_abc_ket), tuple(inds_out))
-
-
-@functools.lru_cache(128)
-def prepare_lazy_ptr_ppt_dot(psi_ab_shape, dims, sysa, sysb):
-    """Pre-calculate the arrays and indexes etc for ``lazy_ptr_ppt_dot``.
-    """
-    mat_size = psi_ab_shape[1] if len(psi_ab_shape) > 1 else 1
-
-    inds_ab_ket, inds_abc_bra, inds_abc_ket, inds_out = \
-        get_cntrct_inds_ptr_ppt_dot(len(dims), sysa, sysb, matmat=mat_size > 1)
-
-    dims_ab = tuple(d for i, d in enumerate(dims)
-                    if (i in sysa) or (i in sysb))
-    if mat_size > 1:
-        dims_ab = dims_ab + (mat_size,)
-
-    return dims_ab, inds_ab_ket, inds_abc_bra, inds_abc_ket, inds_out
-
-
-@functools.lru_cache(128)
-def get_path_lazy_ptr_ppt_dot(psi_abc_tensor_shape, psi_ab_tensor_shape,
-                              inds_ab_ket, inds_abc_bra,
-                              inds_abc_ket, inds_out):
-    return contract_path(
-        HuskArray(psi_ab_tensor_shape), inds_ab_ket,
-        HuskArray(psi_abc_tensor_shape), inds_abc_bra,
-        HuskArray(psi_abc_tensor_shape), inds_abc_ket,
-        inds_out,
-        optimize='optimal',
-        memory_limit=-1,
-    )[0]
-
-
-def do_lazy_ptr_ppt_dot(psi_ab_tensor, psi_abc_tensor, psi_abc_tensor_conj,
-                        inds_ab_ket, inds_abc_bra, inds_abc_ket, inds_out,
-                        path, out=None):
-    if out is None:
-        out = np.empty_like(psi_ab_tensor)
-
-    # must have ``inds_out`` as resulting indices are not ordered
-    # in the same way as input due to partial tranpose.
-    return contract(
-        psi_ab_tensor, inds_ab_ket,
-        psi_abc_tensor_conj, inds_abc_bra,
-        psi_abc_tensor, inds_abc_ket,
-        inds_out,
-        optimize=path,
-        out=out,
+    return (Kab & Bab).aslinearoperator(
+        ['kA{}'.format(i) for i in sysa],
+        ['bA{}'.format(i) for i in sysa],
     )
 
 
-def lazy_ptr_ppt_dot(psi_abc, psi_ab, dims, sysa, sysb, out=None):
-    r"""Perform the 'lazy' evalution of
-    ``partial_transpose(ptr(psi_abc, ...)) @ psi_ab``, that is, contract the
-    tensor diagram in an efficient way that does not necessarily construct
-    the explicit reduced density matrix. For a tripartite system, the partial
-    trace is with respect to ``c``, while the partial tranpose is with
-    respect to ``a/b``. In tensor diagram notation::
+def lazy_ptr_ppt_linop(psi_abc, dims, sysa, sysb):
+    r"""A linear operator representing action of partially tracing a tripartite
+    state, partially transposing the remaining bipartite state, then
+    multiplying another bipartite state::
 
              ( | )
         +--------------+
@@ -375,60 +92,6 @@ def lazy_ptr_ppt_dot(psi_abc, psi_ab, dims, sysa, sysb, out=None):
           | \____/a  |b  |c    |
          a|          |   \_____/
 
-
-    Parameters
-    ----------
-    psi_abc : ket
-        State to partially trace, partially tranpose, then dot with another
-        ket, with size ``prod(dims)``.
-    psi_ab : ket, sequence of kets
-        State to act on with the dot product, of size
-        , or series of states to ac
-        State to act on with the dot product, of size
-        ``prod(dims[sysa] + dims[sysb])``, or several states to act on at once,
-        then rectangular matrix of size
-        ``(prod(dims[sysa] + dims[sysb]), nstates)``.
-    dims : sequence of int
-        The sub dimensions of ``psi_abc``.
-    sysa : int or sequence of int, optional
-        Index(es) of the 'a' subsystem(s) to keep, with respect to all
-        the dimensions, ``dims``, (i.e. pre-partial trace).
-    sysa : int or sequence of int, optional
-        Index(es) of the 'b' subsystem(s) to keep, with respect to all
-        the dimensions, ``dims``, (i.e. pre-partial trace).
-    out : array, optional
-        If provided, the calculation is done into this array.
-
-    Returns
-    -------
-    ket
-    """
-    # convert to tuple so can always cache
-    dims, sysa, sysb = int2tup(dims), int2tup(sysa), int2tup(sysb)
-
-    # prepare shapes and indexes -- cached
-    dims_ab, inds_ab_ket, inds_abc_bra, inds_abc_ket, inds_out = \
-        prepare_lazy_ptr_ppt_dot(psi_ab.shape, dims, sysa, sysb)
-    psi_ab_tensor = np.asarray(psi_ab).reshape(dims_ab)
-    psi_abc_tensor = np.asarray(psi_abc).reshape(dims)
-
-    # find the optimal path -- cached
-    path = get_path_lazy_ptr_ppt_dot(
-        psi_abc_tensor.shape, psi_ab_tensor.shape,
-        inds_ab_ket, inds_abc_bra, inds_abc_ket, inds_out)
-
-    # perform contraction
-    return do_lazy_ptr_ppt_dot(
-        psi_ab_tensor, psi_abc_tensor, psi_abc_tensor.conjugate(),
-        inds_ab_ket, inds_abc_bra, inds_abc_ket, inds_out,
-        path, out=out).reshape(psi_ab.shape)
-
-
-class LazyPtrPptOperator(spla.LinearOperator):
-    """A linear operator representing action of partially tracing a tripartite
-    state, partially transposing the remaining bipartite state, then
-    multiplying another bipartite state.
-
     Parameters
     ----------
     psi_abc : ket
@@ -444,42 +107,21 @@ class LazyPtrPptOperator(spla.LinearOperator):
         Index(es) of the 'b' subsystem(s) to keep, with respect to all
         the dimensions, ``dims``, (i.e. pre-partial trace).
     """
+    sysa, sysb = int2tup(sysa), int2tup(sysb)
+    sys_ab = sorted(sysa + sysb)
 
-    def __init__(self, psi_abc, dims, sysa, sysb):
-        self.psi_abc_tensor = np.asarray(psi_abc).reshape(dims)
-        self.psi_abc_tensor_conj = self.psi_abc_tensor.conjugate()
-        self.dims = int2tup(dims)
-        self.sysa, self.sysb = int2tup(sysa), int2tup(sysb)
-        sys_ab = self.sysa + self.sysb
-        sz_ab = prod([d for i, d in enumerate(dims) if i in sys_ab])
-        super().__init__(dtype=psi_abc.dtype, shape=(sz_ab, sz_ab))
+    Kabc = Tensor(np.asarray(psi_abc).reshape(dims),
+                  inds=[('kA{}' if i in sysa else 'kB{}' if i in sysb else
+                         'xC{}').format(i) for i in range(len(dims))])
 
-    def _matvec(self, vecs):
-        # prepare shapes and indexes -- cached
-        dims_ab, inds_ab_ket, inds_abc_bra, inds_abc_ket, inds_out = \
-            prepare_lazy_ptr_ppt_dot(vecs.shape, self.dims,
-                                     self.sysa, self.sysb)
+    Babc = Tensor(Kabc.data.conjugate(),
+                  inds=[('bA{}' if i in sysa else 'bB{}' if i in sysb else
+                         'xC{}').format(i) for i in range(len(dims))])
 
-        # do each time
-        psi_ab_tensor = np.asarray(vecs).reshape(dims_ab)
-
-        # find the optimal path -- cached
-        path = get_path_lazy_ptr_ppt_dot(
-            self.psi_abc_tensor.shape, psi_ab_tensor.shape,
-            inds_ab_ket, inds_abc_bra, inds_abc_ket, inds_out)
-
-        # perform contraction
-        return do_lazy_ptr_ppt_dot(
-            psi_ab_tensor, self.psi_abc_tensor, self.psi_abc_tensor_conj,
-            inds_ab_ket, inds_abc_bra, inds_abc_ket, inds_out,
-            path).reshape(vecs.shape)
-
-    def _matmat(self, vecs):
-        return self._matvec(vecs)
-
-    def _adjoint(self):
-        return self.__class__(self.psi_abc_tensor.conjugate(), self.dims,
-                              self.sysa, self.sysb)
+    return (Kabc & Babc).aslinearoperator(
+        [('bA{}' if i in sysa else 'kB{}').format(i) for i in sys_ab],
+        [('kA{}' if i in sysa else 'bB{}').format(i) for i in sys_ab],
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -876,7 +518,7 @@ def entropy_subsys_approx(psi_ab, dims, sysa, bsz=None, **kwargs):
     **kwargs
         See :func:`approx_spectral_function`.
     """
-    lo = LazyPtrOperator(psi_ab, dims=dims, sysa=sysa)
+    lo = lazy_ptr_linop(psi_ab, dims=dims, sysa=sysa)
 
     if bsz is None:
         bsz = choose_bsz_from_dims(dims, sysa)
@@ -901,7 +543,7 @@ def tr_sqrt_subsys_approx(psi_ab, dims, sysa, bsz=None, **kwargs):
     **kwargs
         See :func:`approx_spectral_function`.
     """
-    lo = LazyPtrOperator(psi_ab, dims=dims, sysa=sysa)
+    lo = lazy_ptr_linop(psi_ab, dims=dims, sysa=sysa)
 
     if bsz is None:
         bsz = choose_bsz_from_dims(dims, sysa)
@@ -912,7 +554,7 @@ def tr_sqrt_subsys_approx(psi_ab, dims, sysa, bsz=None, **kwargs):
 def norm_ppt_subsys_approx(psi_abc, dims, sysa, sysb, bsz=None, **kwargs):
     """Estimate the norm of the partial tranpose of a pure state's subsystem.
     """
-    lo = LazyPtrPptOperator(psi_abc, dims=dims, sysa=sysa, sysb=sysb)
+    lo = lazy_ptr_ppt_linop(psi_abc, dims=dims, sysa=sysa, sysb=sysb)
 
     if bsz is None:
         bsz = choose_bsz_from_dims(dims, sysa + sysb)
