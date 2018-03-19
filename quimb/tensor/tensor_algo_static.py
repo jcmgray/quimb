@@ -332,22 +332,22 @@ class DMRG:
         if dense is None:
             dense = prod(dims) < 800
 
+        if self.cyclic:
+            B = (self._eff_norm ^ '_EYE')['_EYE'].to_dense(lix, uix)
+            # B = TNLinearOperator(self._eff_norm['_EYE'], udims=dims,
+            #                      ldims=dims, upper_inds=uix, lower_inds=lix)
+            # B += 1e-12 * np.eye(B.shape[0])
+            if not dense:
+                B = sparse_matrix(B)
+        else:
+            B = None
+
         if dense:
             # contract remaining hamiltonian and get its dense representation
             A = (self._eff_ham ^ '_HAM')['_HAM'].to_dense(lix, uix)
         else:
             A = TNLinearOperator(self._eff_ham['_HAM'], udims=dims, ldims=dims,
                                  upper_inds=uix, lower_inds=lix)
-
-        if self.cyclic:
-            B = (self._eff_norm ^ '_EYE')['_EYE'].to_dense(lix, uix)
-            # B = TNLinearOperator(self._eff_norm['_EYE'], udims=dims,
-            #                      ldims=dims, upper_inds=uix, lower_inds=lix)
-            B += 1e-12 * np.eye(B.shape[0])
-            if not dense:
-                B = sparse_matrix(B)
-        else:
-            B = None
 
         eff_e, eff_gs = self._seigsys(A, B=B, v0=self._k[i].data)
 
@@ -379,6 +379,16 @@ class DMRG:
         if dense is None:
             dense = prod(dims) < 800
 
+        if self.cyclic:
+            B = (self._eff_norm ^ '_EYE')['_EYE'].to_dense(lix, uix)
+            # B = TNLinearOperator(self._eff_norm['_EYE'], udims=dims,
+            #                      ldims=dims, upper_inds=uix, lower_inds=lix)
+            # B += 1e-12 * np.eye(B.shape[0])
+            if not dense:
+                B = sparse_matrix(B)
+        else:
+            B = None
+
         # form the local operator to find ground-state of
         if dense:
             # contract remaining hamiltonian and get its dense representation
@@ -386,16 +396,6 @@ class DMRG:
         else:
             A = TNLinearOperator(self._eff_ham['_HAM'], ldims=dims, udims=dims,
                                  lower_inds=lix, upper_inds=uix)
-
-        if self.cyclic:
-            B = (self._eff_norm ^ '_EYE')['_EYE'].to_dense(lix, uix)
-            # B = TNLinearOperator(self._eff_norm['_EYE'], udims=dims,
-            #                      ldims=dims, upper_inds=uix, lower_inds=lix)
-            B += 1e-12 * np.eye(B.shape[0])
-            if not dense:
-                B = sparse_matrix(B)
-        else:
-            B = None
 
         # find the 2-site local groundstate using previous as initial guess
         v0 = self._k[i].contract(self._k[i + 1], output_inds=uix).data
@@ -472,12 +472,13 @@ class DMRG:
             sweep = progbar(sweep, ncols=80, total=self.n - self.bsz + 1)
 
         for i in sweep:
-            eff_hams.move_to(i)
-            self._eff_ham = eff_hams()
-
             if self.cyclic:
+                # self._k.canonize_cyclic(slice(i, i + self.bsz), bra=self._b)
                 eff_norms.move_to(i)
                 self._eff_norm = eff_norms()
+
+            eff_hams.move_to(i)
+            self._eff_ham = eff_hams()
 
             en = self._update_local_state(
                 i, direction=direction, **update_opts)
