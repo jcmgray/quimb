@@ -23,6 +23,7 @@ from quimb.tensor import (
     MPO_ham_heis,
     MPO_ham_mbl,
     MovingEnvironment,
+    MovingEnvironmentCyclic,
     DMRG1,
     DMRG2,
     DMRGX,
@@ -32,7 +33,7 @@ from quimb.tensor import (
 class TestMovingEnvironment:
     def test_bsz1_start_left(self):
         tn = MPS_rand_state(6, bond_dim=7)
-        env = MovingEnvironment(tn, n=6, start='left', bsz=1)
+        env = MovingEnvironment(tn, n=6, begin='left', bsz=1)
         assert env.pos == 0
         assert len(env().tensors) == 2
         env.move_right()
@@ -47,7 +48,7 @@ class TestMovingEnvironment:
 
     def test_bsz1_start_right(self):
         tn = MPS_rand_state(6, bond_dim=7)
-        env = MovingEnvironment(tn, n=6, start='right', bsz=1)
+        env = MovingEnvironment(tn, n=6, begin='right', bsz=1)
         assert env.pos == 5
         assert len(env().tensors) == 2
         env.move_left()
@@ -62,7 +63,7 @@ class TestMovingEnvironment:
 
     def test_bsz2_start_left(self):
         tn = MPS_rand_state(6, bond_dim=7)
-        env = MovingEnvironment(tn, n=6, start='left', bsz=2)
+        env = MovingEnvironment(tn, n=6, begin='left', bsz=2)
         assert len(env().tensors) == 3
         env.move_right()
         assert len(env().tensors) == 4
@@ -76,7 +77,7 @@ class TestMovingEnvironment:
 
     def test_bsz2_start_right(self):
         tn = MPS_rand_state(6, bond_dim=7)
-        env = MovingEnvironment(tn, n=6, start='right', bsz=2)
+        env = MovingEnvironment(tn, n=6, begin='right', bsz=2)
         assert env.pos == 4
         assert len(env().tensors) == 3
         env.move_left()
@@ -90,6 +91,32 @@ class TestMovingEnvironment:
         env.move_to(0)
         assert env.pos == 0
         assert len(env().tensors) == 3
+
+    def test_cyclic_moving_env_init_left(self):
+        n = 20
+        bsz = 2
+        p = MPS_rand_state(n, 4, cyclic=True)
+        norm = p.H & p
+        mes = MovingEnvironmentCyclic(norm, n, 'left', bsz=bsz)
+        assert len(mes.envs) == n // 2
+        assert mes.pos == 0
+        assert len(mes.envs[0].tensors) == 2 * bsz + 2
+        assert len(mes.envs[n // 2 - 1].tensors) == 2 * (n // 2 + bsz // 2) + 2
+        assert n // 2 not in mes.envs
+        assert n - 1 not in mes.envs
+
+    def test_cyclic_moving_env_init_right(self):
+        n = 20
+        bsz = 2
+        p = MPS_rand_state(n, 4, cyclic=True)
+        norm = p.H & p
+        mes = MovingEnvironmentCyclic(norm, n, 'right', bsz=bsz)
+        assert len(mes.envs) == n // 2
+        assert mes.pos == n - 1
+        assert len(mes.envs[n - 1].tensors) == 2 * bsz + 2
+        assert len(mes.envs[n // 2].tensors) == 2 * (n // 2 + bsz // 2) + 2
+        assert 0 not in mes.envs
+        assert n // 2 - 1 not in mes.envs
 
 
 class TestDMRG1:

@@ -2098,9 +2098,9 @@ class TensorNetwork(object):
         tn.reindex({il: ir}, inplace=True)
         return tn
 
-    def replace_with_svd(self, where, left_inds, eps, mode='any',
-                         method='isvd', ltags=None, rtags=None, inplace=False,
-                         max_bond=None):
+    def replace_with_svd(self, where, left_inds, eps, *, mode='any',
+                         method='isvd', max_bond=None, inplace=False,
+                         ltags=None, rtags=None, keep_tags=True):
         r"""Replace all tensors marked by ``where`` with an iteratively
         constructed SVD. E.g. if ``X`` denote ``where`` tensors::
 
@@ -2121,14 +2121,24 @@ class TensorNetwork(object):
             The tolerance to perform the SVD with, affects the number of
             singular values kept. See
             :func:`scipy.linalg.interpolative.estimate_rank`.
-        mode : {'any', 'all'}
-            Whether to replace tensors matching any or all the tags ``where``.
+        mode : {'any', 'all', '!any', '!all'}, optional
+            Whether to replace tensors matching any or all the tags ``where``,
+            prefix with '!' to invert the selection.
+        method : {'isvd', 'eig', 'eigh', 'svd', 'svds', 'eigsh', 'cholesky'}
+            How to perform the decomposition, if not an iterative method
+            ('isvd', 'svds', 'eigsh'), the subnetwork dense tensor will be
+            formed first.
+        max_bond : int, optional
+            The maximum bond to keep, defaults to no maximum (-1).
+        inplace : bool, optional
+            Perform operation in place.
         ltags : sequence of str, optional
             Tags to add to the left tensor.
         rtags : sequence of str, optional
             Tags to add to the right tensor.
-        inplace : bool
-            Perform operation in place.
+        keep_tags : bool, optional
+            Whether to propagate tags found in the subnetwork to both new
+            tensors or drop them, defaults to True.
 
         Returns
         -------
@@ -2172,7 +2182,7 @@ class TensorNetwork(object):
         U = U.reshape(*left_shp, -1)
         V = V.reshape(-1, *rght_shp)
 
-        tags = svd_section.tags
+        tags = svd_section.tags if keep_tags else set()
         ltags = tags2set(ltags)
         rtags = tags2set(rtags)
 

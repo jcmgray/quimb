@@ -13,6 +13,7 @@ from .tensor_core import (
     TensorNetwork,
     tensor_contract,
     TNLinearOperator,
+    find_shared_inds,
 )
 
 
@@ -77,24 +78,24 @@ class MovingEnvironment:
         Defaults to 1, but would be 2 for DMRG2 etc.
     """
 
-    def __init__(self, tn, n, start, bsz=1, cyclic=False):
+    def __init__(self, tn, n, begin, bsz=1):
         self.n = n
-        self.start = start
+        self.begin = begin
         self.bsz = bsz
-        self.num_blocks = self.n - (0 if cyclic else self.bsz - 1)
+        self.num_blocks = self.n - self.bsz + 1
 
-        if start == 'left':
-            initial_j = n - (1 if cyclic else self.bsz)
+        if begin == 'left':
+            initial_j = n - self.bsz
             sweep = reversed(range(0, self.num_blocks - 1))
             previous_step = 1
             self.pos = 0
-        elif start == 'right':
+        elif begin == 'right':
             initial_j = 0
             sweep = range(1, self.num_blocks)
             previous_step = -1
             self.pos = n - self.bsz
         else:
-            raise ValueError("'start' must be one of {'left', 'right'}.")
+            raise ValueError("'begin' must be one of {'left', 'right'}.")
 
         self.envs = {initial_j: tn.copy(virtual=True)}
         for j in sweep:
@@ -102,7 +103,7 @@ class MovingEnvironment:
             env = self.envs[j + previous_step].copy(virtual=True)
 
             # contract it with one more site, no-op if near end, to get jth env
-            if start == 'left':
+            if begin == 'left':
                 env ^= slice(j + self.bsz, min(n, j + self.bsz + 2))
             else:
                 env ^= slice(max(0, j - 2), j)
@@ -153,6 +154,73 @@ class MovingEnvironment:
         """Get the current environment.
         """
         return self.envs[self.pos]
+
+
+class MovingEnvironmentCyclic:
+    r"""
+    Approximate segment B (to arbitrary precision)::
+
+        /-----------------------------------------------\
+        +-A-A-A-A-A-A-A-A-A-A-A-A-B-B-B-B-B-B-B-B-B-B-B-+
+          | | | | | | | | | | | | | | | | | | | | | | |           -->
+        +-A-A-A-A-A-A-A-A-A-A-A-A-B-B-B-B-B-B-B-B-B-B-B-+
+        \-----------------------------------------------/
+
+               +~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~+
+               |   /-A-A-A-A-A-A-A-A-A-A-A-A-\   |
+               +~<BL | | | | | | | | | | | | BR>~+
+                   \-A-A-A-A-A-A-A-A-A-A-A-A-/
+
+    Then store left and right environments for efficient sweeping like in
+    non periodic case.
+    """
+
+    def __init__(self, tn, n, begin, bsz, eps=1e-9):
+        self.n = n
+        self.begin = begin
+        self.bsz = bsz
+        self.eps = eps
+        self.tn = tn.copy(virtual=True)
+        self.site_tag = lambda i: tn.structure.format(i % n)
+
+        start, stop = {'left': (0, n // 2), 'right': (n // 2, n)}[begin]
+        self.init_segment(begin, start, stop)
+
+    def init_segment(self, begin, start, stop):
+        """Initialize the environments in ``range(start, stop)`` so that one
+        can start sweeping from the side defined by ``begin``.
+        """
+        self.segment = range(start, stop)
+        self.compress_rest(start, stop + self.bsz // 2)
+
+        if begin == 'left':
+            self.envs = {stop - 1: self.tnc}
+            for i in reversed(range(start, stop - 1)):
+                env = self.envs[i + 1].copy(virtual=True)
+                env ^= ['_RIGHT', self.site_tag(i + self.bsz)]
+                self.envs[i] = env
+            self.pos = start
+
+        elif begin == 'right':
+            self.envs = {start: self.tnc}
+            for i in range(start + 1, stop):
+                env = self.envs[i - 1].copy(virtual=True)
+                env ^= ['_LEFT', self.site_tag(i - 1)]
+                self.envs[i] = env
+            self.pos = stop - 1
+
+        else:
+            raise ValueError("``begin`` must be 'left' or 'right'.")
+
+    def compress_rest(self, start, stop):
+        """Compress and label the effective env not in ``range(start, stop)``.
+        """
+        self.tnc = self.tn.copy(virtual=True)
+        lix = find_shared_inds(self.tnc[start - 1], self.tnc[start])
+        where = slice(start, stop)
+        self.tnc.replace_with_svd(where, left_inds=lix, eps=self.eps,
+                                  mode='!any', ltags='_LEFT', rtags='_RIGHT',
+                                  inplace=True, method='isvd', keep_tags=False)
 
 
 # --------------------------------------------------------------------------- #
@@ -463,7 +531,7 @@ class DMRG:
             'L': ('left', 'right', reversed(range(0, self.n - self.bsz + 1))),
         }[direction]
 
-        eff_args = {'n': self.n, 'start': eff_start, 'bsz': self.bsz}
+        eff_args = {'n': self.n, 'begin': eff_start, 'bsz': self.bsz}
         eff_hams = MovingEnvironment(self.TN_energy, **eff_args)
         if self.cyclic:
             eff_norms = MovingEnvironment(self.TN_norm, **eff_args)
@@ -845,7 +913,7 @@ class DMRGX(DMRG):
             'L': ('left', 'right', reversed(range(0, self.n - self.bsz + 1))),
         }[direction]
 
-        eff_args = {'n': self.n, 'start': eff_start, 'bsz': self.bsz}
+        eff_args = {'n': self.n, 'begin': eff_start, 'bsz': self.bsz}
         eff_hams = MovingEnvironment(self.TN_energy, **eff_args)
         eff_ham2s = MovingEnvironment(self.TN_energy2, **eff_args)
         eff_ovlps = MovingEnvironment(TN_overlap, **eff_args)
