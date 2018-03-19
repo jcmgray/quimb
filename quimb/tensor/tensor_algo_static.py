@@ -334,8 +334,8 @@ class DMRG:
 
         if self.cyclic:
             B = (self._eff_norm ^ '_EYE')['_EYE'].to_dense(lix, uix)
-            # B = TNLinearOperator(self._eff_norm['_EYE'], udims=dims,
-            #                      ldims=dims, upper_inds=uix, lower_inds=lix)
+            # B = TNLinearOperator(self._eff_norm['_EYE'], ldims=dims,
+            #                      rdims=dims, left_inds=lix, right_inds=uix)
             # B += 1e-12 * np.eye(B.shape[0])
             if not dense:
                 B = sparse_matrix(B)
@@ -346,8 +346,8 @@ class DMRG:
             # contract remaining hamiltonian and get its dense representation
             A = (self._eff_ham ^ '_HAM')['_HAM'].to_dense(lix, uix)
         else:
-            A = TNLinearOperator(self._eff_ham['_HAM'], udims=dims, ldims=dims,
-                                 upper_inds=uix, lower_inds=lix)
+            A = TNLinearOperator(self._eff_ham['_HAM'], ldims=dims, rdims=dims,
+                                 left_inds=lix, right_inds=uix)
 
         eff_e, eff_gs = self._seigsys(A, B=B, v0=self._k[i].data)
 
@@ -381,8 +381,8 @@ class DMRG:
 
         if self.cyclic:
             B = (self._eff_norm ^ '_EYE')['_EYE'].to_dense(lix, uix)
-            # B = TNLinearOperator(self._eff_norm['_EYE'], udims=dims,
-            #                      ldims=dims, upper_inds=uix, lower_inds=lix)
+            # B = TNLinearOperator(self._eff_norm['_EYE'], ldims=dims,
+            #                      rdims=dims, left_inds=lix, right_inds=rix)
             # B += 1e-12 * np.eye(B.shape[0])
             if not dense:
                 B = sparse_matrix(B)
@@ -394,8 +394,8 @@ class DMRG:
             # contract remaining hamiltonian and get its dense representation
             A = (self._eff_ham ^ '_HAM')['_HAM'].to_dense(lix, uix)
         else:
-            A = TNLinearOperator(self._eff_ham['_HAM'], ldims=dims, udims=dims,
-                                 lower_inds=lix, upper_inds=uix)
+            A = TNLinearOperator(self._eff_ham['_HAM'], ldims=dims, rdims=dims,
+                                 left_inds=lix, right_inds=uix)
 
         # find the 2-site local groundstate using previous as initial guess
         v0 = self._k[i].contract(self._k[i + 1], output_inds=uix).data
