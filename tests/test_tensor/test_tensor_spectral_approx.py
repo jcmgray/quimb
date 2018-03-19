@@ -38,11 +38,11 @@ class TestMPOSpectralApprox:
 
     def test_realistic(self):
         ham = MPO_ham_heis(20)
-        dmrg = DMRG2(ham, bond_dims=8)
+        dmrg = DMRG2(ham, bond_dims=[2, 4, 8])
         dmrg.solve()
         rho_ab = dmrg.state.ptr(range(6, 14))
         xf = approx_spectral_function(rho_ab, lambda x: x,
-                                      tol=0.1, verbosity=2)
+                                      tol=0.05, verbosity=2)
         assert_allclose(1.0, xf, rtol=0.5, atol=0.001)
 
     def test_realistic_ent(self):
