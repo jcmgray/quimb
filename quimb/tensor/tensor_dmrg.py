@@ -336,7 +336,7 @@ class DMRG:
             B = (self._eff_norm ^ '_EYE')['_EYE'].to_dense(lix, uix)
             # B = TNLinearOperator(self._eff_norm['_EYE'], ldims=dims,
             #                      rdims=dims, left_inds=lix, right_inds=uix)
-            # B += 1e-12 * np.eye(B.shape[0])
+            B += 1e-12 * np.eye(B.shape[0])
             if not dense:
                 B = sparse_matrix(B)
         else:
@@ -349,7 +349,7 @@ class DMRG:
             A = TNLinearOperator(self._eff_ham['_HAM'], ldims=dims, rdims=dims,
                                  left_inds=lix, right_inds=uix)
 
-        eff_e, eff_gs = self._seigsys(A, B=B, v0=self._k[i].data)
+        eff_e, eff_gs = self._seigsys(A, B=B, v0=self._k[i].data.ravel())
 
         eff_gs = eff_gs.A
         self._k[i].data = eff_gs
@@ -383,7 +383,7 @@ class DMRG:
             B = (self._eff_norm ^ '_EYE')['_EYE'].to_dense(lix, uix)
             # B = TNLinearOperator(self._eff_norm['_EYE'], ldims=dims,
             #                      rdims=dims, left_inds=lix, right_inds=rix)
-            # B += 1e-12 * np.eye(B.shape[0])
+            B += 1e-12 * np.eye(B.shape[0])
             if not dense:
                 B = sparse_matrix(B)
         else:
@@ -398,7 +398,7 @@ class DMRG:
                                  left_inds=lix, right_inds=uix)
 
         # find the 2-site local groundstate using previous as initial guess
-        v0 = self._k[i].contract(self._k[i + 1], output_inds=uix).data
+        v0 = self._k[i].contract(self._k[i + 1], output_inds=uix).data.ravel()
 
         eff_e, eff_gs = self._seigsys(A, B=B, v0=v0)
 

@@ -33,7 +33,7 @@ from .tensor_1d import (
     MatrixProductOperator,
     align_TN_1D,
 )
-from .tensor_algo_static import (
+from .tensor_dmrg import (
     MovingEnvironment,
     DMRG,
     DMRG1,

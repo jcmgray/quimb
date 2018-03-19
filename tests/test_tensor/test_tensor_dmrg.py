@@ -194,7 +194,7 @@ class TestDMRG2:
 
         tol = 3e-2 if cyclic else 1e-4
 
-        dmrg = DMRG2(h, bond_dims=8)
+        dmrg = DMRG2(h, bond_dims=[4, 8, 16])
         assert dmrg._k[0].dtype == float
         dmrg.opts['eff_eig_dense'] = dense
         assert dmrg.solve(tol=1e-5)

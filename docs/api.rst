@@ -33,7 +33,7 @@ Modules
     quimb.tensor.tensor_core
     quimb.tensor.tensor_gen
     quimb.tensor.tensor_1d
-    quimb.tensor.tensor_algo_static
+    quimb.tensor.tensor_dmrg
     quimb.tensor.tensor_approx_spectral
 
 

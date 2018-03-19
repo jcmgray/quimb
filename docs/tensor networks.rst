@@ -36,9 +36,9 @@ Currently implemented algorithms
 
 Static:
 
-    - 1-site :class:`~quimb.tensor.tensor_algo_static.DMRG1`
-    - 2-site :class:`~quimb.tensor.tensor_algo_static.DMRG2`
-    - 1-site :class:`~quimb.tensor.tensor_algo_static.DMRGX`
+    - 1-site :class:`~quimb.tensor.tensor_dmrg.DMRG1`
+    - 2-site :class:`~quimb.tensor.tensor_dmrg.DMRG2`
+    - 1-site :class:`~quimb.tensor.tensor_dmrg.DMRGX`
 
 Should be fairly easily to implement / planned:
 
