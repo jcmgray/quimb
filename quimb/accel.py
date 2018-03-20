@@ -225,7 +225,20 @@ def issparse(qob):
     return isinstance(qob, sp.spmatrix)
 
 
-def isherm(qob):
+def isreal(qob, **allclose_opts):
+    """Checks if ``qob`` is approximately real.
+    """
+    data = qob.data if issparse(qob) else qob
+
+    # check dtype
+    if np.isrealobj(data):
+        return True
+
+    # else check explicitly
+    return np.allclose(data.imag, 0.0, **allclose_opts)
+
+
+def isherm(qob, **allclose_opts):
     """Checks if ``qob`` is hermitian.
 
     Parameters
@@ -238,7 +251,7 @@ def isherm(qob):
     bool
     """
     return ((qob != qob.H).nnz == 0 if issparse(qob) else
-            np.allclose(qob, qob.H))
+            np.allclose(qob, qob.conj().T, **allclose_opts))
 
 
 def ispos(qob, tol=1e-15):
@@ -266,6 +279,7 @@ def ispos(qob, tol=1e-15):
 # --------------------------------------------------------------------------- #
 
 @matrixify
+@upcast
 @njit
 def mul_dense(x, y):  # pragma: no cover
     """Numba-accelerated element-wise multiplication of two dense matrices.
@@ -298,6 +312,7 @@ def mul(x, y):
 
 
 @matrixify
+@upcast
 @njit
 def dot_dense(a, b):  # pragma: no cover
     """Accelerated dense dot product of matrices
@@ -412,6 +427,7 @@ def vdot(a, b):  # pragma: no cover
 
 
 @realify
+@upcast
 @njit
 def rdot(a, b):  # pragma: no cover
     """Real dot product of two dense vectors.
@@ -558,6 +574,7 @@ def reshape_for_kron(a, b):  # pragma: no cover
 
 
 @matrixify
+@upcast
 @njit
 def kron_dense(a, b):  # pragma: no cover
     """Tensor (kronecker) product of two dense arrays.

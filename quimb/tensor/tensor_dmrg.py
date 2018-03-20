@@ -5,7 +5,6 @@ import numpy as np
 import itertools
 
 from ..utils import progbar
-from ..core import sparse_matrix
 from ..accel import prod
 from ..linalg.base_linalg import eigsys, seigsys
 from .tensor_core import (
@@ -19,7 +18,7 @@ from .tensor_core import (
 
 class MovingEnvironment:
     r"""Helper class for efficiently moving the effective 'environment' of a
-    few sites in a 1D tensor network. E.g. for ``start='left', bsz=2``, this
+    few sites in a 1D tensor network. E.g. for ``begin='left', bsz=2``, this
     initializes the right environments like so::
 
         n - 1: o-o-o-     -o-o-o
@@ -50,7 +49,7 @@ class MovingEnvironment:
 
     which can then be used to efficiently generate the left environments as
     each site is updated. For example if ``bsz=2`` and the environements have
-    been shifted many sites into the middle, then ``MovingEnvironment[i]``
+    been shifted many sites into the middle, then ``MovingEnvironment()``
     returns something like::
 
              <---> bsz sites
@@ -61,107 +60,7 @@ class MovingEnvironment:
              \o-o/
         0 ... i i+1 ... n-1
 
-    Does not necessarily need to be an operator overlap tensor network. Useful
-    for any kind of sweep where only local tensor updates are being made. Note
-    that *only* the current site is completely up-to-date.
-
-    Parameters
-    ----------
-    tn : TensorNetwork
-        A 1d-ish tensor network.
-    n : int
-        Number of sites.
-    start : {'left', 'right'}
-        Which side to start at, e.g. 'left' for diagram above.
-    bsz : int
-        Number of local sites to keep un-contracted from the environment.
-        Defaults to 1, but would be 2 for DMRG2 etc.
-    """
-
-    def __init__(self, tn, begin, bsz=1):
-        self.n = tn.nsites
-        self.begin = begin
-        self.bsz = bsz
-        self.num_blocks = self.n - self.bsz + 1
-
-        if begin == 'left':
-            initial_j = self.n - self.bsz
-            sweep = reversed(range(0, self.num_blocks - 1))
-            previous_step = 1
-            self.pos = 0
-        elif begin == 'right':
-            initial_j = 0
-            sweep = range(1, self.num_blocks)
-            previous_step = -1
-            self.pos = self.n - self.bsz
-        else:
-            raise ValueError("'begin' must be one of {'left', 'right'}.")
-
-        self.envs = {initial_j: tn.copy(virtual=True)}
-        for j in sweep:
-            # get the env from previous step
-            env = self.envs[j + previous_step].copy(virtual=True)
-
-            # contract it with one more site, no-op if near end, to get jth env
-            if begin == 'left':
-                env ^= slice(j + self.bsz, min(self.n, j + self.bsz + 2))
-            else:
-                env ^= slice(max(0, j - 2), j)
-            self.envs[j] = env
-
-    def move_right(self):
-        i = self.pos + 1
-
-        if i >= 2:
-            # replace left env with new effective left env
-            self.envs[i].delete(slice(i - 1), mode='any')
-            self.envs[i] |= self.envs[i - 1][i - 2]
-
-        if i >= 1:
-            # contract left env with new minimized, canonized site
-            self.envs[i] ^= slice(max(0, i - 2), i)
-
-        self.pos += 1
-
-    def move_left(self):
-        i = self.pos - 1
-
-        if i < self.n - self.bsz - 1:
-            # replace right env with new effective right env
-            self.envs[i].delete(slice(i + self.bsz + 1, self.n), mode='any')
-            self.envs[i] |= self.envs[i + 1][i + self.bsz + 1]
-
-        if i < self.n - self.bsz:
-            # contract right env with new minimized, canonized site
-            self.envs[i] ^= slice(min(self.n - 1, i + self.bsz + 1),
-                                  i + self.bsz - 1, -1)
-        self.pos -= 1
-
-    def move(self, direction):
-        {'left': self.move_left, 'right': self.move_right}[direction]()
-
-    def move_to(self, i):
-        if not (0 <= i < self.num_blocks):
-            raise ValueError("Condition 0 <= {} < {} not satisfied"
-                             "".format(i, self.num_blocks))
-        if i > self.pos:
-            direction = 'right'
-        else:
-            direction = 'left'
-
-        while self.pos != i:
-            self.move(direction)
-
-    def __call__(self):
-        """Get the current environment.
-        """
-        return self.envs[self.pos]
-
-
-class MovingEnvironmentCyclic:
-    r"""Helper class for efficiently moving the effective 'environment' of any
-    closed cyclic, 1D tensor network.
-    Like :class:`~quimb.tensor.MovingEnvironment` but approximates the 'long
+    For periodic systems ``MovingEnvironment`` approximates the 'long
     way round' transfer matrices. E.g consider replacing segment B
     (to arbitrary precision) with an SVD::
 
@@ -189,6 +88,7 @@ class MovingEnvironmentCyclic:
         |               /-A-A-\           |                       -->
         +~<BLAAAAAAAAAAA  | |  AAAAAAABR>~+
                         \-A-A-/
+                          i i+1
              -----sweep--------->
 
     Can then contract and store left and right environments for efficient
@@ -210,23 +110,36 @@ class MovingEnvironmentCyclic:
     eps : float, optional
         The tolerance to approximate the transfer matrix with. See
         :meth:`~quimb.tensor.TensorNetwork.replace_with_svd`.
+
+    Notes
+    -----
+    Does not necessarily need to be an operator overlap tensor network. Useful
+    for any kind of sweep where only local tensor updates are being made. Note
+    that *only* the current site is completely up-to-date and can be modified
+    with changes meant to propagate.
     """
 
-    def __init__(self, tn, begin, bsz, ssz=0.5, eps=1e-8):
+    def __init__(self, tn, begin, bsz, cyclic=False, ssz=0.5, eps=1e-8):
         self.n = tn.nsites
         self.begin = begin
         self.bsz = bsz
+        self.cyclic = cyclic
         self.eps = eps
         self.tn = tn.copy(virtual=True)
         self.site_tag = lambda i: tn.structure.format(i % self.n)
 
-        if isinstance(ssz, float):
-            self.ssz = int(self.n * ssz)
-        else:
-            self.ssz = ssz
+        if self.cyclic:
+            if isinstance(ssz, float):
+                self.ssz = int(self.n * ssz)
+            else:
+                self.ssz = ssz
 
-        start, stop = {'left': (0, self.ssz),
-                       'right': (self.n - self.ssz, self.n)}[begin]
+            start, stop = {'left': (0, self.ssz),
+                           'right': (self.n - self.ssz, self.n)}[begin]
+
+        else:
+            start, stop = (0, self.n - self.bsz + 1)
+
         self.init_segment(begin, start, stop)
 
     def init_segment(self, begin, start, stop):
@@ -237,7 +150,8 @@ class MovingEnvironmentCyclic:
             start, stop = start % self.n, stop % self.n
 
         self.segment = range(start, stop)
-        self.compress_rest(start, stop + self.bsz // 2)
+
+        self.prepare_LR_envs(start, stop + self.bsz // 2)
 
         if begin == 'left':
             self.envs = {stop - 1: self.tnc}
@@ -258,14 +172,26 @@ class MovingEnvironmentCyclic:
         else:
             raise ValueError("``begin`` must be 'left' or 'right'.")
 
-    def compress_rest(self, start, stop):
-        """Compress and label the effective env not in ``range(start, stop)``.
+    def prepare_LR_envs(self, start, stop):
+        """Compress and label the effective env not in ``range(start, stop)``
+        if cyclic, else just add some dummy left and right end pieces.
         """
         self.tnc = self.tn.copy(virtual=True)
+        ltags = {'_LEFT', *self.tnc.select(start).tags}
+        rtags = {'_RIGHT', *self.tnc.select(stop - 1).tags}
+
+        if not self.cyclic:
+            # generate dummy left and right envs
+            self.tnc |= Tensor(1.0, (), ltags)
+            self.tnc |= Tensor(1.0, (), rtags)
+            # self.tnc.add_tag('_LEFT', 0, mode='any')
+            # self.tnc.add_tag('_RIGHT', -1, mode='any')
+            return
+
         lix = find_shared_inds(self.tnc[start - 1], self.tnc[start])
         where = slice(start, stop)
         self.tnc.replace_with_svd(where, left_inds=lix, eps=self.eps,
-                                  mode='!any', ltags='_LEFT', rtags='_RIGHT',
+                                  mode='!any', ltags=ltags, rtags=rtags,
                                   inplace=True, method='isvd', keep_tags=False)
 
     def move_right(self):
@@ -273,6 +199,8 @@ class MovingEnvironmentCyclic:
 
         # generate a new segment if we go over the border
         if i not in self.segment:
+            if not self.cyclic:
+                raise ValueError("For OBC, ``0 <= position <= n - bsz``.")
             self.init_segment('left', i, i + self.ssz)
         else:
             self.pos = i % self.n
@@ -281,8 +209,8 @@ class MovingEnvironmentCyclic:
 
         if i >= i0 + 2:
             # delete the old left environment
-            self.envs[i].delete('_LEFT', mode='any')
-            self.envs[i].delete(slice(i0, i - 1), mode='any')
+            where = ['_LEFT'] + [self.site_tag(i) for i in range(i0, i - 1)]
+            self.envs[i].delete(where, mode='any')
 
             # insert the updated left env from previous step
             self.envs[i] |= self.envs[i - 1]['_LEFT']
@@ -296,6 +224,8 @@ class MovingEnvironmentCyclic:
 
         # generate a new segment if we go over the border
         if i not in self.segment:
+            if not self.cyclic:
+                raise ValueError("For OBC, ``0 <= position <= n - bsz``.")
             self.init_segment('right', i - self.ssz + 1, i + 1)
         else:
             self.pos = i % self.n
@@ -304,9 +234,9 @@ class MovingEnvironmentCyclic:
 
         if i <= iN - 3:
             # delete the old right environment
-            self.envs[i].delete('_RIGHT', mode='any')
-            self.envs[i].delete(slice(i + self.bsz + 1, iN + self.bsz - 1),
-                                mode='any')
+            where = ['_RIGHT'] + [self.site_tag(i) for i in
+                                  range(i + self.bsz + 1, iN + self.bsz - 1)]
+            self.envs[i].delete(where, mode='any')
 
             # insert the updated right env from previous step
             self.envs[i] |= self.envs[i + 1]['_RIGHT']
@@ -319,12 +249,16 @@ class MovingEnvironmentCyclic:
         {'left': self.move_left, 'right': self.move_right}[direction]()
 
     def move_to(self, i):
-        if i % self.n - self.pos <= self.n // 2:
-            direction = 'right'
-        else:
-            direction = 'left'
 
-        while self.pos != i:
+        if self.cyclic:
+            # to take account of PBC, rescale so that current pos == n // 2,
+            #     then work out if desired i is lower or higher
+            ri = (i + (self.n // 2 - self.pos)) % self.n
+            direction = 'left' if ri <= self.n // 2 else 'right'
+        else:
+            direction = 'left' if i < self.pos else 'right'
+
+        while self.pos != i % self.n:
             self.move(direction)
 
     def __call__(self):
@@ -422,6 +356,8 @@ class DMRG:
             self._k = ham.rand_state(self._bond_dim0)
         self._b = self._k.H
         self.ham = ham.copy()
+        self._k.add_tag("_KET")
+        self._b.add_tag("_BRA")
         self.ham.add_tag("_HAM")
 
         # Line up and overlap for energy calc
@@ -482,9 +418,13 @@ class DMRG:
     def _seigsys(self, A, B=None, v0=None):
         """Find single eigenpair, using all the internal settings.
         """
+        backend = self.opts['eff_eig_bkd']
+        if backend in (None, 'AUTO') and B is not None:
+            backend = 'scipy'
+
         return seigsys(
             A, k=1, B=B, which=self.which, v0=v0,
-            backend=self.opts['eff_eig_bkd'],
+            backend=backend,
             EPSType=self.opts['eff_eig_EPSType'],
             ncv=self.opts['eff_eig_ncv'],
             tol=self.opts['eff_eig_tol'],
@@ -514,9 +454,8 @@ class DMRG:
             B = (self._eff_norm ^ '_EYE')['_EYE'].to_dense(lix, uix)
             # B = TNLinearOperator(self._eff_norm['_EYE'], ldims=dims,
             #                      rdims=dims, left_inds=lix, right_inds=uix)
+            # B = (B.conj().T + B) / 2
             B += 1e-12 * np.eye(B.shape[0])
-            if not dense:
-                B = sparse_matrix(B)
         else:
             B = None
 
@@ -560,10 +499,9 @@ class DMRG:
         if self.cyclic:
             B = (self._eff_norm ^ '_EYE')['_EYE'].to_dense(lix, uix)
             # B = TNLinearOperator(self._eff_norm['_EYE'], ldims=dims,
-            #                      rdims=dims, left_inds=lix, right_inds=rix)
+            #                      rdims=dims, left_inds=lix, right_inds=uix)
+            # B = (B.conj().T + B) / 2
             B += 1e-12 * np.eye(B.shape[0])
-            if not dense:
-                B = sparse_matrix(B)
         else:
             B = None
 
@@ -641,7 +579,7 @@ class DMRG:
             'L': ('left', 'right', reversed(range(0, self.n - self.bsz + 1))),
         }[direction]
 
-        eff_args = {'begin': eff_start, 'bsz': self.bsz}
+        eff_args = {'begin': eff_start, 'bsz': self.bsz, 'cyclic': self.cyclic}
         eff_hams = MovingEnvironment(self.TN_energy, **eff_args)
         if self.cyclic:
             eff_norms = MovingEnvironment(self.TN_norm, **eff_args)
@@ -1023,7 +961,7 @@ class DMRGX(DMRG):
             'L': ('left', 'right', reversed(range(0, self.n - self.bsz + 1))),
         }[direction]
 
-        eff_args = {'begin': eff_start, 'bsz': self.bsz}
+        eff_args = {'begin': eff_start, 'bsz': self.bsz, 'cyclic': self.cyclic}
         eff_hams = MovingEnvironment(self.TN_energy, **eff_args)
         eff_ham2s = MovingEnvironment(self.TN_energy2, **eff_args)
         eff_ovlps = MovingEnvironment(TN_overlap, **eff_args)

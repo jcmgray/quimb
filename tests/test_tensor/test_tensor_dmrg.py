@@ -23,7 +23,6 @@ from quimb.tensor import (
     MPO_ham_heis,
     MPO_ham_mbl,
     MovingEnvironment,
-    MovingEnvironmentCyclic,
     DMRG1,
     DMRG2,
     DMRGX,
@@ -35,7 +34,7 @@ class TestMovingEnvironment:
         tn = MPS_rand_state(6, bond_dim=7)
         env = MovingEnvironment(tn, begin='left', bsz=1)
         assert env.pos == 0
-        assert len(env().tensors) == 2
+        assert len(env().tensors) == 3
         env.move_right()
         assert env.pos == 1
         assert len(env().tensors) == 3
@@ -44,13 +43,13 @@ class TestMovingEnvironment:
         assert len(env().tensors) == 3
         env.move_to(5)
         assert env.pos == 5
-        assert len(env().tensors) == 2
+        assert len(env().tensors) == 3
 
     def test_bsz1_start_right(self):
         tn = MPS_rand_state(6, bond_dim=7)
         env = MovingEnvironment(tn, begin='right', bsz=1)
         assert env.pos == 5
-        assert len(env().tensors) == 2
+        assert len(env().tensors) == 3
         env.move_left()
         assert env.pos == 4
         assert len(env().tensors) == 3
@@ -59,12 +58,12 @@ class TestMovingEnvironment:
         assert len(env().tensors) == 3
         env.move_to(0)
         assert env.pos == 0
-        assert len(env().tensors) == 2
+        assert len(env().tensors) == 3
 
     def test_bsz2_start_left(self):
         tn = MPS_rand_state(6, bond_dim=7)
         env = MovingEnvironment(tn, begin='left', bsz=2)
-        assert len(env().tensors) == 3
+        assert len(env().tensors) == 4
         env.move_right()
         assert len(env().tensors) == 4
         env.move_right()
@@ -73,13 +72,13 @@ class TestMovingEnvironment:
             env.move_to(5)
         env.move_to(4)
         assert env.pos == 4
-        assert len(env().tensors) == 3
+        assert len(env().tensors) == 4
 
     def test_bsz2_start_right(self):
         tn = MPS_rand_state(6, bond_dim=7)
         env = MovingEnvironment(tn, begin='right', bsz=2)
         assert env.pos == 4
-        assert len(env().tensors) == 3
+        assert len(env().tensors) == 4
         env.move_left()
         assert env.pos == 3
         assert len(env().tensors) == 4
@@ -90,14 +89,14 @@ class TestMovingEnvironment:
             env.move_to(-1)
         env.move_to(0)
         assert env.pos == 0
-        assert len(env().tensors) == 3
+        assert len(env().tensors) == 4
 
     @pytest.mark.parametrize("n", [20, 19])
     @pytest.mark.parametrize("bsz", [1, 2])
     def test_cyclic_moving_env_init_left(self, n, bsz):
         p = MPS_rand_state(n, 4, cyclic=True)
         norm = p.H & p
-        mes = MovingEnvironmentCyclic(norm, begin='left', bsz=bsz)
+        mes = MovingEnvironment(norm, begin='left', bsz=bsz, cyclic=True)
         assert len(mes.envs) == n // 2
         assert mes.pos == 0
         assert len(mes.envs[0].tensors) == 2 * bsz + 2
@@ -117,7 +116,7 @@ class TestMovingEnvironment:
     def test_cyclic_moving_env_init_right(self, n, bsz):
         p = MPS_rand_state(n, 4, cyclic=True)
         norm = p.H | p
-        mes = MovingEnvironmentCyclic(norm, begin='right', bsz=bsz)
+        mes = MovingEnvironment(norm, begin='right', bsz=bsz, cyclic=True)
         assert len(mes.envs) == n // 2
         assert mes.pos == n - 1
         assert len(mes.envs[n - 1].tensors) == 2 * bsz + 2

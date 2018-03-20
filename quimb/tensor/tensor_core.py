@@ -1059,6 +1059,17 @@ class Tensor(object):
         """
         return norm_fro_dense(self.data.reshape(-1))
 
+    def symmetrize(self, ind1, ind2, inplace=False):
+        """Hermitian symmetrize this tensor for indices ``ind1`` and ``ind2``.
+        I.e. ``T = (T + T.conj().T) / 2``, where the transpose is taken only
+        over the specified indices.
+        """
+        T = self if inplace else self.copy()
+        Hinds = [{ind1: ind2, ind2: ind1}.get(i, i) for i in self.inds]
+        TH = T.conj().transpose(*Hinds)
+        T.modify(data=(T.data + TH.data) / 2)
+        return T
+
     def almost_equals(self, other, **kwargs):
         """Check if this tensor is almost the same as another.
         """

@@ -35,7 +35,6 @@ from .tensor_1d import (
 )
 from .tensor_dmrg import (
     MovingEnvironment,
-    MovingEnvironmentCyclic,
     DMRG,
     DMRG1,
     DMRG2,
@@ -74,7 +73,6 @@ __all__ = (
     "MatrixProductOperator",
     "align_TN_1D",
     "MovingEnvironment",
-    "MovingEnvironmentCyclic",
     "DMRG",
     "DMRG1",
     "DMRG2",

@@ -7,7 +7,7 @@ from cytoolz import isiterable, concat, unique
 import numpy as np
 import scipy.sparse as sp
 
-from ..accel import njit, make_immutable, get_thread_pool, par_reduce
+from ..accel import njit, make_immutable, get_thread_pool, par_reduce, isreal
 from ..core import qu, eye, kron, eyepad
 
 
@@ -238,6 +238,9 @@ def ham_heis(n, j=1.0, b=0.0, cyclic=True, sparse=False, stype="csr",
         ham = np.asmatrix(ham.todense())
     elif ham.format != stype:
         ham = ham.asformat(stype)
+
+    if isreal(ham):
+        ham = ham.real
 
     make_immutable(ham)
     return ham
