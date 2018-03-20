@@ -436,9 +436,9 @@ class DMRG:
             self.TN_norm = self._b | eye | self._k
 
         self.opts = {
-            'eff_eig_bkd': "AUTO",
             'eff_eig_tol': 1e-3,
             'eff_eig_ncv': 4,
+            'eff_eig_bkd': None,
             'eff_eig_maxiter': None,
             'eff_eig_dense': None,
             'eff_eig_EPSType': 'krylovschur',
@@ -446,6 +446,7 @@ class DMRG:
             'compress_cutoff_mode': 'sum2',
             'default_sweep_sequence': 'R',
             'bond_expand_rand_strength': 1e-9,
+            'periodic_compress_tol': 1e-8,
         }
 
     def _set_bond_dim_seq(self, bond_dims):

@@ -175,7 +175,7 @@ def seigsys(A, k=6, *,
             tol=None,
             v0=None,
             sort=True,
-            backend='AUTO',
+            backend=None,
             **backend_opts):
     """Return a few eigenpairs from an operator.
 
@@ -232,7 +232,7 @@ def seigsys(A, k=6, *,
     }
 
     # Choose backend to perform the decompostion
-    bkd = backend.upper()
+    bkd = 'AUTO' if backend is None else backend.upper()
     if bkd == 'AUTO':
         bkd = _choose_backend(A, k, sigma is not None, B=B)
 
