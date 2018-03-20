@@ -105,9 +105,9 @@ class TestMovingEnvironment:
         assert n // 2 not in mes.envs
         assert n - 1 not in mes.envs
 
-        for i in range(1, n):
+        for i in range(1, 2 * n):
             mes.move_right()
-            assert mes.pos == i
+            assert mes.pos == i % n
             cur_env = mes()
             assert len(cur_env.tensors) == 2 * bsz + 2
             assert (cur_env ^ None) == pytest.approx(1.0)
@@ -125,9 +125,9 @@ class TestMovingEnvironment:
         assert 0 not in mes.envs
         assert n // 2 - 1 not in mes.envs
 
-        for i in reversed(range(0, n - 1)):
+        for i in reversed(range(-n, n - 1)):
             mes.move_left()
-            assert mes.pos == i
+            assert mes.pos == i % n
             cur_env = mes()
             assert len(cur_env.tensors) == 2 * bsz + 2
             assert (cur_env ^ None) == pytest.approx(1.0)

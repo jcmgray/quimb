@@ -233,6 +233,9 @@ class MovingEnvironmentCyclic:
         """Initialize the environments in ``range(start, stop)`` so that one
         can start sweeping from the side defined by ``begin``.
         """
+        if (start >= self.n) or (stop < 0):
+            start, stop = start % self.n, stop % self.n
+
         self.segment = range(start, stop)
         self.compress_rest(start, stop + self.bsz // 2)
 
@@ -266,7 +269,7 @@ class MovingEnvironmentCyclic:
                                   inplace=True, method='isvd', keep_tags=False)
 
     def move_right(self):
-        i = self.pos + 1
+        i = (self.pos + 1) % self.n
 
         # generate a new segment if we go over the border
         if i not in self.segment:
@@ -289,7 +292,7 @@ class MovingEnvironmentCyclic:
             self.envs[i] ^= ['_LEFT', self.site_tag(i - 1)]
 
     def move_left(self):
-        i = self.pos - 1
+        i = (self.pos - 1) % self.n
 
         # generate a new segment if we go over the border
         if i not in self.segment:
