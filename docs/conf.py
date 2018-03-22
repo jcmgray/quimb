@@ -143,11 +143,12 @@ import sphinx_bootstrap_theme
 html_theme = 'bootstrap'
 html_theme_path = sphinx_bootstrap_theme.get_html_theme_path()
 html_theme_options = {
-    'bootswatch_theme': "journal",
-    'navbar_site_name': "Guides",
+    'bootswatch_theme': "paper",
+    'navbar_site_name': "Site",
     'nosidebar': True,
+    'source_link_position': "",
+    'navbar_fixed_top': "false",
 }
-
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
 # documentation.
@@ -179,6 +180,8 @@ html_static_path = ['_static']
 
 def setup(app):
     app.add_stylesheet("my-styles.css")
+
+html_logo = "_static/quimb_logo.png"
 
 # Add any extra paths that contain custom files (such as robots.txt or
 # .htaccess) here, relative to this directory. These files are copied

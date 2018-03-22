@@ -3,16 +3,34 @@
 
 code {
     font-family: 'Roboto Mono', monospace;
+    font-size: 16px;
+    line-height: 25px;
 }
 
 code, kbd, pre, samp {
     font-family: 'Roboto Mono', monospace;
+    font-size: 16px;
+    line-height: 25px;
 }
 
 blockquote {
-    font-size: 15px;
+    font-size: 17px;
 }
 
 body {
     font-family: 'Roboto', sans-serif;
+    font-size: 17px;
+    line-height: 25px;
+}
+
+
+h2 {
+    font-size: 30px;
+    font-weight: bold;
+}
+
+
+h1 {
+    font-size: 50px;
+    font-weight: bold;
 }
