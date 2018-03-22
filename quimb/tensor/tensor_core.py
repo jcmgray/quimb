@@ -21,7 +21,7 @@ import scipy.sparse.linalg as spla
 import scipy.linalg.interpolative as sli
 import psutil
 
-from ..accel import prod, njit, realify_scalar
+from ..accel import prod, njit, realify_scalar, vdot
 from ..linalg.base_linalg import norm_fro_dense
 from ..utils import raise_cant_find_library_function, functions_equal
 
@@ -208,6 +208,9 @@ def rand_uuid(base=""):
 
 @njit  # pragma: no cover
 def _trim_singular_vals(s, cutoff, cutoff_mode):
+    """Find the number of singular values to keep of ``s`` given ``cutoff`` and
+    ``cutoff_mode``.
+    """
     if cutoff_mode == 1:
         n_chi = np.sum(s > cutoff)
     elif cutoff_mode == 2:
@@ -2244,7 +2247,7 @@ class TensorNetwork(object):
         n2, = self._get_tids_from_tags(tags2, mode='all')
         tensor_add_bond(self.tensor_index[n1], self.tensor_index[n2])
 
-    def insert_gauge(self, U, tags1, tags2, Ui=None):
+    def insert_gauge(self, U, tags1, tags2, Uinv=None):
         """Insert the gauge transformation ``U @ U^-1`` into the bond between
         the tensors, ``T1`` and ``T2``, defined by ``tags1`` and ``tags2``.
         The resulting tensors at those locations will be ``T1 @ U^-1`` and
@@ -2258,19 +2261,22 @@ class TensorNetwork(object):
             Tags defining the location of the 'left' tensor.
         tags2 : str, sequence of str, or int
             Tags defining the location of the 'right' tensor.
-        Ui : np.ndarray
-            The inverse gauge, ``U @ Ui == Ui @ U == eye``, to insert. If not
-            given will be calculated using :func:`numpy.linag.inv`.
+        Uinv : np.ndarray
+            The inverse gauge, ``U @ Uinv == Uinv @ U == eye``, to insert.
+            If not given will be calculated using :func:`numpy.linalg.inv`.
         """
         n1, = self._get_tids_from_tags(tags1, mode='all')
         n2, = self._get_tids_from_tags(tags2, mode='all')
         T1, T2 = self.tensor_index[n1], self.tensor_index[n2]
         bnd, = T1.shared_inds(T2)
 
-        if Ui is None:
-            Ui = np.linalg.inv(U)
+        if Uinv is None:
+            Uinv = np.linalg.inv(U)
 
-        T1Ui = Tensor(Ui, inds=('__dummy__', bnd)) @ T1
+        if vdot(Uinv, Uinv) > 1e20:
+            raise np.linalg.LinalgError("Gauge was probably almost singular.")
+
+        T1Ui = Tensor(Uinv, inds=('__dummy__', bnd)) @ T1
         T2U = Tensor(U, inds=(bnd, '__dummy__')) @ T2
 
         T1Ui.transpose_like(T1, inplace=True)

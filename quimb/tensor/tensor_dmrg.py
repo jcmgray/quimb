@@ -6,7 +6,7 @@ import itertools
 
 from ..utils import progbar
 from ..accel import prod
-from ..linalg.base_linalg import eigsys, seigsys
+from ..linalg.base_linalg import eigsys, seigsys, IdentityLinearOperator
 from .tensor_core import (
     Tensor,
     TensorNetwork,
@@ -14,6 +14,72 @@ from .tensor_core import (
     TNLinearOperator,
     find_shared_inds,
 )
+
+
+def get_default_opts(cyclic=False):
+    """Get the default advanced settings for DMRG.
+
+    Parameters
+    ----------
+    default_sweep_sequence : str
+        How to sweep. Will be repeated, e.g. "RRL" -> RRLRRLRRL..., default: R.
+    eff_eig_tol : float
+        Relative tolerance to solve inner eigenproblem to, larger = quicker but
+        more unstable, default: 1e-3.
+    eff_eig_ncv : int
+        Number of inner eigenproblem lanczos vectors. Smaller can mean quicker.
+    eff_eig_bkd : {None, 'AUTO', 'SCIPY', 'SLEPC'}
+        Which to backend to use for the inner eigenproblem. None or 'AUTO' to
+        choose best. Generally 'SLEPC' best if available for large problems.
+    eff_eig_maxiter : int
+        Maximum number of inner eigenproblem iterations.
+    eff_eig_dense : bool
+        Use dense representation of the effective hamiltonian (and norm).
+    eff_eig_EPSType : {'krylovschur', 'gd', 'jd', ...}
+        Eigensovler tpye if ``eff_eig_bkd='slepc'``.
+    compress_method : {'svd', 'eig', ...}
+        Method used to compress sites after update.
+    compress_cutoff_mode : {'sum2', 'abs', 'rel'}
+        How to perform compression truncation.
+    bond_expand_rand_strength : float
+        In DMRG1, strength of randomness to expand bonds with. Needed to avoid
+        singular matrices after expansion.
+    periodic_segment_size : float or int
+        How large (as a proportion if float) to make the 'segments' in periodic
+        DMRG. During a sweep everything outside this (the 'long way round') is
+        compressed so the effective energy and norm can be efficiently formed.
+        Tradeoff: longer segments means having to compress less, but also
+        having a shorter 'long way round', meaning that it needs a larger bond
+        to represent it and can be 'pseudo-orthogonalized' less effectively.
+    periodic_compress_method : {'isvd', 'svds'}
+        Which method to perform the transfer matrix compression with.
+    periodic_compress_norm_eps : float
+        Precision to compress the norm transfer matrix in periodic systems.
+    periodic_compress_energy_eps : float
+        Precision to compress the energy transfer matrix in periodic systems.
+    periodic_compress_max_bond : int
+        The maximum bond to use when compressing transfer matrices.
+    periodic_nullspace_fudge_factor : float
+        Factor to add to ``Heff`` and ``Neff`` to remove nullspace.
+    """
+    return {
+        'default_sweep_sequence': 'R',
+        'eff_eig_tol': 1e-3,
+        'eff_eig_ncv': 4,
+        'eff_eig_bkd': None,
+        'eff_eig_maxiter': None,
+        'eff_eig_dense': None,
+        'eff_eig_EPSType': 'krylovschur',
+        'compress_method': 'svd',
+        'compress_cutoff_mode': 'sum2',
+        'bond_expand_rand_strength': 1e-6,
+        'periodic_segment_size': 0.34,
+        'periodic_compress_method': 'isvd',
+        'periodic_compress_norm_eps': 1e-9,
+        'periodic_compress_energy_eps': 1e-6,
+        'periodic_compress_max_bond': -1,
+        'periodic_nullspace_fudge_factor': 1e-12,
+    }
 
 
 class MovingEnvironment:
@@ -119,16 +185,27 @@ class MovingEnvironment:
     with changes meant to propagate.
     """
 
-    def __init__(self, tn, begin, bsz, cyclic=False, ssz=0.5, eps=1e-8):
-        self.n = tn.nsites
+    def __init__(self, tn, begin, bsz, *, cyclic=False, segment_callbacks=None,
+                 ssz=0.5, eps=1e-8, method='isvd', max_bond=32, norm=False):
+        self.tn = tn.copy(virtual=True)
         self.begin = begin
         self.bsz = bsz
         self.cyclic = cyclic
-        self.eps = eps
-        self.tn = tn.copy(virtual=True)
+
+        if callable(segment_callbacks):
+            self.segment_callbacks = (segment_callbacks,)
+        else:
+            self.segment_callbacks = segment_callbacks
+
+        self.n = tn.nsites
         self.site_tag = lambda i: tn.structure.format(i % self.n)
 
         if self.cyclic:
+            self.eps = eps
+            self.method = method
+            self.max_bond = max_bond
+            self.norm = norm
+
             if isinstance(ssz, float):
                 self.ssz = int(self.n * ssz)
             else:
@@ -150,13 +227,14 @@ class MovingEnvironment:
             start, stop = start % self.n, stop % self.n
 
         self.segment = range(start, stop)
-
-        self.prepare_LR_envs(start, stop + self.bsz // 2)
+        self.init_non_segment(start, stop + self.bsz // 2)
 
         if begin == 'left':
             self.envs = {stop - 1: self.tnc}
             for i in reversed(range(start, stop - 1)):
+                # get the env from the previous site
                 env = self.envs[i + 1].copy(virtual=True)
+                # contract the right end with the previous site
                 env ^= ['_RIGHT', self.site_tag(i + self.bsz)]
                 self.envs[i] = env
             self.pos = start
@@ -164,7 +242,9 @@ class MovingEnvironment:
         elif begin == 'right':
             self.envs = {start: self.tnc}
             for i in range(start + 1, stop):
+                # get the env from the previous site
                 env = self.envs[i - 1].copy(virtual=True)
+                # contract the right end with the previous site
                 env ^= ['_LEFT', self.site_tag(i - 1)]
                 self.envs[i] = env
             self.pos = stop - 1
@@ -172,27 +252,52 @@ class MovingEnvironment:
         else:
             raise ValueError("``begin`` must be 'left' or 'right'.")
 
-    def prepare_LR_envs(self, start, stop):
+    def init_non_segment(self, start, stop):
         """Compress and label the effective env not in ``range(start, stop)``
         if cyclic, else just add some dummy left and right end pieces.
         """
         self.tnc = self.tn.copy(virtual=True)
-        ltags = {'_LEFT', *self.tnc.select(start).tags}
-        rtags = {'_RIGHT', *self.tnc.select(stop - 1).tags}
 
-        if not self.cyclic:
+        if not self.cyclic or self.ssz == self.n:
             # generate dummy left and right envs
-            self.tnc |= Tensor(1.0, (), ltags)
-            self.tnc |= Tensor(1.0, (), rtags)
-            # self.tnc.add_tag('_LEFT', 0, mode='any')
-            # self.tnc.add_tag('_RIGHT', -1, mode='any')
+            self.tnc |= Tensor(1.0, (), {'_LEFT'})
+            self.tnc |= Tensor(1.0, (), {'_RIGHT'})
             return
+
+        # replicate all tags on end pieces apart from site number
+        ltags = {'_LEFT', *self.tnc.select(start - 1).tags}
+        ltags.remove(self.site_tag(start - 1))
+        rtags = {'_RIGHT', *self.tnc.select(stop).tags}
+        rtags.remove(self.site_tag(stop))
+
+        # for example, pseudo orthogonalization if cyclic
+        if self.segment_callbacks is not None:
+            for callback in self.segment_callbacks:
+                callback(start, stop, self.begin)
 
         lix = find_shared_inds(self.tnc[start - 1], self.tnc[start])
         where = slice(start, stop)
-        self.tnc.replace_with_svd(where, left_inds=lix, eps=self.eps,
-                                  mode='!any', ltags=ltags, rtags=rtags,
-                                  inplace=True, method='isvd', keep_tags=False)
+
+        opts = {
+            'left_inds': lix,
+            'keep_tags': False,
+            'ltags': ltags,
+            'rtags': rtags,
+            'eps': self.eps,
+            'method': self.method,
+            'max_bond': self.max_bond,
+            'inplace': True,
+        }
+
+        self.tnc.replace_with_svd(where, mode='!any', **opts)
+
+        print("bond approx:", self.tnc['_LEFT'].bond_size(self.tnc['_RIGHT']))
+
+        # ensure that expectation still = 1 after approximation
+        if self.norm:
+            norm = (self.tnc ^ None) ** 0.5
+            self.tnc['_LEFT'] /= norm
+            self.tnc['_RIGHT'] /= norm
 
     def move_right(self):
         i = (self.pos + 1) % self.n
@@ -267,6 +372,29 @@ class MovingEnvironment:
         return self.envs[self.pos]
 
 
+def get_normalizer(k, b):
+    """
+    """
+    def normalizer(*_):
+        k.normalize(bra=b)
+
+    return normalizer
+
+
+def get_cyclic_canonizer(k, b):
+    """Get a function to use as a callback for ``MovingEnvironment`` that
+    approximately orthogonalizes the segments of periodic MPS.
+    """
+    def cyclic_canonizer(start, stop, begin):
+        k.canonize_cyclic(slice(start, stop), bra=b)
+        if begin == 'left':
+            k.right_canonize(start=stop - 1, stop=start, bra=b)
+        else:
+            k.left_canonize(start=start, stop=stop - 1, bra=b)
+
+    return cyclic_canonizer
+
+
 # --------------------------------------------------------------------------- #
 #                                  DMRG Base                                  #
 # --------------------------------------------------------------------------- #
@@ -301,6 +429,10 @@ def parse_2site_inds_dims(k, b, i):
     dims = dims_L + dims_R
 
     return dims, lix_L, lix_R, lix, uix_L, uix_R, uix, l_bond_ind, u_bond_ind
+
+
+class DMRGError(Exception):
+    pass
 
 
 class DMRG:
@@ -374,19 +506,7 @@ class DMRG:
             eye.add_tag('_EYE')
             self.TN_norm = self._b | eye | self._k
 
-        self.opts = {
-            'eff_eig_tol': 1e-3,
-            'eff_eig_ncv': 4,
-            'eff_eig_bkd': None,
-            'eff_eig_maxiter': None,
-            'eff_eig_dense': None,
-            'eff_eig_EPSType': 'krylovschur',
-            'compress_method': 'svd',
-            'compress_cutoff_mode': 'sum2',
-            'default_sweep_sequence': 'R',
-            'bond_expand_rand_strength': 1e-9,
-            'periodic_compress_tol': 1e-8,
-        }
+        self.opts = get_default_opts(self.cyclic)
 
     def _set_bond_dim_seq(self, bond_dims):
         bds = (bond_dims,) if isinstance(bond_dims, int) else tuple(bond_dims)
@@ -403,32 +523,94 @@ class DMRG:
 
     @property
     def state(self):
-        return self._k.copy()
+        copy = self._k.copy()
+        copy.drop_tags('_KET')
+        return copy
 
     # -------------------- standard DMRG update methods --------------------- #
 
     def _compress_after_1site_update(self, direction, i, **compress_opts):
-        """Compress a site having updated it.
+        """Compress a site having updated it. Also serves to move the
+        orthogonality center along.
         """
-        if (direction == 'right') and (i < self.n - 1):
+        if (direction == 'right') and ((i < self.n - 1) or self.cyclic):
             self._k.left_compress_site(i, bra=self._b, **compress_opts)
-        elif (direction == 'left') and (i > 0):
+        elif (direction == 'left') and ((i > 0) or self.cyclic):
             self._k.right_compress_site(i, bra=self._b, **compress_opts)
 
     def _seigsys(self, A, B=None, v0=None):
         """Find single eigenpair, using all the internal settings.
         """
-        backend = self.opts['eff_eig_bkd']
-        if backend in (None, 'AUTO') and B is not None:
-            backend = 'scipy'
-
         return seigsys(
             A, k=1, B=B, which=self.which, v0=v0,
-            backend=backend,
+            backend=self.opts['eff_eig_bkd'],
             EPSType=self.opts['eff_eig_EPSType'],
             ncv=self.opts['eff_eig_ncv'],
             tol=self.opts['eff_eig_tol'],
             maxiter=self.opts['eff_eig_maxiter'])
+
+    def form_local_ops(self, i, dims, lix, uix):
+        """Construct the effective Hamiltonian, and if needed, norm.
+        """
+        # choose a rough value at which dense effective ham should not be used
+        dense = self.opts['eff_eig_dense']
+        if dense is None:
+            dense = prod(dims) < 800
+
+        dims_inds = {'ldims': dims, 'rdims': dims,
+                     'left_inds': lix, 'right_inds': uix}
+
+        # form effective hamiltonian
+        if dense:
+            # contract remaining hamiltonian and get its dense representation
+            Heff = (self._eff_ham ^ '_HAM')['_HAM'].to_dense(lix, uix)
+        else:
+            Heff = TNLinearOperator(self._eff_ham['_HAM'], **dims_inds)
+
+        # form effective norm
+        if self.cyclic:
+            fudge = self.opts['periodic_nullspace_fudge_factor']
+
+            # Check if site already pseudo-orthonogal
+            site_norm = self._k[i:i + self.bsz].H @ self._k[i:i + self.bsz]
+            if abs(site_norm - 1) < 1e-8:
+                Neff = None
+            elif dense:
+                Neff = (self._eff_norm ^ '_EYE')['_EYE'].to_dense(lix, uix)
+                np.fill_diagonal(Neff, (1 + fudge) * Neff.diagonal())
+                np.fill_diagonal(Heff, (1 + fudge**0.5) * Heff.diagonal())
+
+                # if dense:
+                #     np.fill_diagonal(Heff, (1 + fudge**0.5) * Heff.diagonal())
+                # else:
+                #     Heff += IdentityLinearOperator(Heff.shape[0], fudge**0.5)
+            else:
+                Neff = TNLinearOperator(self._eff_norm['_EYE'], **dims_inds)
+                Heff += IdentityLinearOperator(Heff.shape[0], fudge**0.5)
+                Neff += IdentityLinearOperator(Neff.shape[0], fudge)
+
+            print("RealN: {}, EffvN: {}, SiteN: {}"
+                  "".format(self._k.H @ self._k, self._eff_norm ^ None,
+                            site_norm))
+        else:
+            Neff = None
+
+        return Heff, Neff
+
+    def post_check(self, i, Neff, eff_gs, eff_e):
+        """Perform some checks on the output of the local eigensolve.
+        """
+        if self.cyclic:
+            if Neff is None:
+                # try performing leading correction to norm from site_norm
+                site_norm = self._k[i:i + self.bsz].H @ self._k[i:i + self.bsz]
+                eff_gs *= site_norm ** 0.5
+            else:
+                eff_e -= self.opts['periodic_nullspace_fudge_factor']**0.5
+                Neffnorm = eff_gs.H @ (Neff @ eff_gs)
+                if abs(Neffnorm - 1) > self.opts['eff_eig_tol']:
+                    raise DMRGError("Effective norm diverged to {}, check the "
+                                    "Neff is positive?".format(Neffnorm))
 
     def _update_local_state_1site(self, i, direction, **compress_opts):
         r"""Find the single site effective tensor groundstate of::
@@ -445,28 +627,10 @@ class DMRG:
         uix, lix = self._k[i].inds, self._b[i].inds
         dims = self._k[i].shape
 
-        # choose a rough value at which dense effective ham should not be used
-        dense = self.opts['eff_eig_dense']
-        if dense is None:
-            dense = prod(dims) < 800
+        Heff, Neff = self.form_local_ops(i, dims, lix, uix)
 
-        if self.cyclic:
-            B = (self._eff_norm ^ '_EYE')['_EYE'].to_dense(lix, uix)
-            # B = TNLinearOperator(self._eff_norm['_EYE'], ldims=dims,
-            #                      rdims=dims, left_inds=lix, right_inds=uix)
-            # B = (B.conj().T + B) / 2
-            B += 1e-12 * np.eye(B.shape[0])
-        else:
-            B = None
-
-        if dense:
-            # contract remaining hamiltonian and get its dense representation
-            A = (self._eff_ham ^ '_HAM')['_HAM'].to_dense(lix, uix)
-        else:
-            A = TNLinearOperator(self._eff_ham['_HAM'], ldims=dims, rdims=dims,
-                                 left_inds=lix, right_inds=uix)
-
-        eff_e, eff_gs = self._seigsys(A, B=B, v0=self._k[i].data.ravel())
+        eff_e, eff_gs = self._seigsys(Heff, B=Neff, v0=self._k[i].data.ravel())
+        self.post_check(i, Neff, eff_gs, eff_e)
 
         eff_gs = eff_gs.A
         self._k[i].data = eff_gs
@@ -491,32 +655,14 @@ class DMRG:
         dims, lix_L, lix_R, lix, uix_L, uix_R, uix, l_bond_ind, u_bond_ind = \
             parse_2site_inds_dims(self._k, self._b, i)
 
-        # choose a rough value at which dense effective ham should not be used
-        dense = self.opts['eff_eig_dense']
-        if dense is None:
-            dense = prod(dims) < 800
-
-        if self.cyclic:
-            B = (self._eff_norm ^ '_EYE')['_EYE'].to_dense(lix, uix)
-            # B = TNLinearOperator(self._eff_norm['_EYE'], ldims=dims,
-            #                      rdims=dims, left_inds=lix, right_inds=uix)
-            # B = (B.conj().T + B) / 2
-            B += 1e-12 * np.eye(B.shape[0])
-        else:
-            B = None
-
-        # form the local operator to find ground-state of
-        if dense:
-            # contract remaining hamiltonian and get its dense representation
-            A = (self._eff_ham ^ '_HAM')['_HAM'].to_dense(lix, uix)
-        else:
-            A = TNLinearOperator(self._eff_ham['_HAM'], ldims=dims, rdims=dims,
-                                 left_inds=lix, right_inds=uix)
+        # get local operators
+        Heff, Neff = self.form_local_ops(i, dims, lix, uix)
 
         # find the 2-site local groundstate using previous as initial guess
         v0 = self._k[i].contract(self._k[i + 1], output_inds=uix).data.ravel()
 
-        eff_e, eff_gs = self._seigsys(A, B=B, v0=v0)
+        eff_e, eff_gs = self._seigsys(Heff, B=Neff, v0=v0)
+        self.post_check(i, Neff, eff_gs, eff_e)
 
         # split the two site local groundstate
         T_AB = Tensor(eff_gs.A.reshape(dims), uix)
@@ -537,7 +683,7 @@ class DMRG:
         }[self.bsz](i, **update_opts)
 
     def sweep(self, direction, canonize=True, verbose=False, **update_opts):
-        r"""Perform a sweep of optimizations rightwards (`direction='R'`)::
+        r"""Perform a sweep of optimizations, either rightwards::
 
               optimize -->
                 ...
@@ -574,22 +720,42 @@ class DMRG:
             {'R': self._k.right_canonize,
              'L': self._k.left_canonize}[direction](bra=self._b)
 
-        direction, eff_start, sweep = {
-            'R': ('right', 'left', range(0, self.n - self.bsz + 1)),
-            'L': ('left', 'right', reversed(range(0, self.n - self.bsz + 1))),
-        }[direction]
+        n, bsz = self.n, self.bsz
 
-        eff_args = {'begin': eff_start, 'bsz': self.bsz, 'cyclic': self.cyclic}
-        eff_hams = MovingEnvironment(self.TN_energy, **eff_args)
+        direction, begin, sweep = {
+            ('R', False): ('right', 'left', range(0, n - bsz + 1)),
+            ('L', False): ('left', 'right', reversed(range(0, n - bsz + 1))),
+            ('R', True): ('right', 'left', range(0, n)),
+            ('L', True): ('left', 'right', reversed(range(0, n))),
+        }[direction, self.cyclic]
+
+        eff_opts = {'begin': begin, 'bsz': bsz, 'cyclic': self.cyclic,
+                    'ssz': self.opts['periodic_segment_size'],
+                    'method': self.opts['periodic_compress_method'],
+                    'max_bond': self.opts['periodic_compress_max_bond']}
+
         if self.cyclic:
-            eff_norms = MovingEnvironment(self.TN_norm, **eff_args)
+            # setup moving norm environment
+            nm_opts = {
+                'norm': True,
+                'eps': self.opts['periodic_compress_norm_eps'],
+                'segment_callbacks': (get_cyclic_canonizer(self._k, self._b),
+                                      get_normalizer(self._k, self._b)),
+            }
+            eff_norms = MovingEnvironment(self.TN_norm, **eff_opts, **nm_opts)
+
+        # setup moving energy environment
+        en_opts = {
+            'eps': self.opts['periodic_compress_energy_eps']
+        }
+        eff_hams = MovingEnvironment(self.TN_energy, **eff_opts, **en_opts)
 
         if verbose:
-            sweep = progbar(sweep, ncols=80, total=self.n - self.bsz + 1)
+            sweep = progbar(sweep, ncols=80, total=len(sweep))
 
         for i in sweep:
+            # move effective norm first so it can trigger canonize_cyclic
             if self.cyclic:
-                # self._k.canonize_cyclic(slice(i, i + self.bsz), bra=self._b)
                 eff_norms.move_to(i)
                 self._eff_norm = eff_norms()
 
@@ -846,7 +1012,7 @@ class DMRGX(DMRG):
         #     0-0-0-0-0-0-0-0-0-0-0  <- state from previous step
         #
         # choose the eigenvectors with best overlap
-        overlaps = np.abs((self._eff_ovlp ^ ...).data)
+        overlaps = np.abs((self._eff_ovlp ^ None).data)
 
         if self.opts['overlap_thresh'] == 1:
             # just choose the maximum overlap state
@@ -956,15 +1122,15 @@ class DMRGX(DMRG):
             {'R': self._k.right_canonize,
              'L': self._k.left_canonize}[direction](bra=self._b)
 
-        direction, eff_start, sweep = {
+        direction, begin, sweep = {
             'R': ('right', 'left', range(0, self.n - self.bsz + 1)),
             'L': ('left', 'right', reversed(range(0, self.n - self.bsz + 1))),
         }[direction]
 
-        eff_args = {'begin': eff_start, 'bsz': self.bsz, 'cyclic': self.cyclic}
-        eff_hams = MovingEnvironment(self.TN_energy, **eff_args)
-        eff_ham2s = MovingEnvironment(self.TN_energy2, **eff_args)
-        eff_ovlps = MovingEnvironment(TN_overlap, **eff_args)
+        eff_opts = {'begin': begin, 'bsz': self.bsz, 'cyclic': self.cyclic}
+        eff_hams = MovingEnvironment(self.TN_energy, **eff_opts)
+        eff_ham2s = MovingEnvironment(self.TN_energy2, **eff_opts)
+        eff_ovlps = MovingEnvironment(TN_overlap, **eff_opts)
 
         if verbose:
             sweep = progbar(sweep, ncols=80, total=self.n - self.bsz + 1)

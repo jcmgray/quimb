@@ -559,3 +559,37 @@ def sqrtm(a, herm=True):
         evals, evecs = eigsys(a)
         return dot_dense(evecs, ldmul(np.sqrt(evals.astype(complex)),
                                       evecs.H))
+
+
+class IdentityLinearOperator(spla.LinearOperator):
+    """Get a ``LinearOperator`` representation of the identity operator,
+    scaled by ``factor``.
+
+    Parameters
+    ----------
+    size : int
+        The size of the identity.
+    factor : float
+        The coefficient of the identity.
+
+    Examples
+    --------
+
+    >>> I3 = IdentityLinearOperator(100, 1/3)
+    >>> p = rand_ket(100)
+    >>> np.allclose(I3 @ p, p / 3)
+    True
+    """
+
+    def __init__(self, size, factor=1):
+        self.factor = factor
+        super().__init__(dtype=np.array(factor).dtype, shape=(size, size))
+
+    def _matvec(self, vec):
+        return self.factor * vec
+
+    def _rmatvec(self, vec):
+        return self.factor * vec
+
+    def _matmat(self, mat):
+        return self.factor * mat

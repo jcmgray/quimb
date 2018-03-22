@@ -212,7 +212,7 @@ class TensorNetwork1D(TensorNetwork):
         stop : int, optional
             If given, the site to stop left canonizing at.
         normalize : bool, optional
-            Whether to normalize the state.
+            Whether to normalize the state, only works for OBC.
         bra : MatrixProductState, optional
             If supplied, simultaneously left canonize this MPS too, assuming it
             to be the conjugate state.
@@ -267,7 +267,7 @@ class TensorNetwork1D(TensorNetwork):
             if bra is not None:
                 bra[0] /= factor
 
-    def canonize_cyclic(self, i, bra=None):
+    def canonize_cyclic(self, i, bra=None, method='isvd'):
         """Bring this MatrixProductState into (possibly only approximate)
         canonical form at site(s) ``i``.
 
@@ -287,6 +287,9 @@ class TensorNetwork1D(TensorNetwork):
                                  "contiguous block of integers, got {}."
                                  "".format(i))
 
+        mid = (start + stop) // 2
+        self.left_canonize(start=mid, stop=mid + self.nsites, bra=bra)
+
         k = self.copy()
         b = k.H
         k.add_tag('_KET')
@@ -296,17 +299,17 @@ class TensorNetwork1D(TensorNetwork):
         lix = find_shared_inds(kb[start - 1], kb[start])
 
         # approximate the rest of the chain with a bond 1 SVD
-        kbc = kb.replace_with_svd(slice(start, stop), lix, eps=1e-6,
-                                  mode='!any', method='isvd', max_bond=1,
+        kbc = kb.replace_with_svd(slice(start, stop), lix, eps=0.0,
+                                  mode='!any', method=method, max_bond=1,
                                   ltags='_LEFT', rtags='_RIGHT')
 
         EL = kbc['_LEFT'].squeeze()
         EL_lix, = EL.shared_inds(kbc[k.site_tag(start), '_BRA'])
-        _, x = EL.split(EL_lix, method='eigh', cutoff=-1, get='arrays')
+        _, x = EL.split(EL_lix, method='cholesky', cutoff=-1, get='arrays')
 
         ER = kbc['_RIGHT'].squeeze()
         ER_lix, = ER.shared_inds(kbc[k.site_tag(stop - 1), '_BRA'])
-        _, y = ER.split(ER_lix, method='eigh', cutoff=-1, get='arrays')
+        _, y = ER.split(ER_lix, method='cholesky', cutoff=-1, get='arrays')
 
         self.insert_gauge(x.T, start - 1, start)
         self.insert_gauge(y.T, stop, stop - 1)
@@ -838,6 +841,14 @@ class MatrixProductState(TensorNetwork1D):
         """In-place MPS subtraction.
         """
         return self.add_MPS(other * -1, inplace=True)
+
+    def normalize(self, bra=None):
+        """Normalize this MPS, optional with co-vector ``bra``.
+        """
+        norm = self.H @ self
+        self /= norm ** 0.5
+        if bra is not None:
+            bra /= norm ** 0.5
 
     def schmidt_values(self, i, current_orthog_centre=None, method='svd'):
         r"""Find the schmidt values associated with the bipartition of this
