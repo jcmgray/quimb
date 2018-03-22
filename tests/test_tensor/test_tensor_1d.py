@@ -344,7 +344,9 @@ class TestMatrixProductState:
                                       range(20, 30), range(0, 30)])
     @pytest.mark.parametrize("sysb", [range(30, 40), range(40, 50),
                                       range(50, 60), range(30, 60)])
-    def test_partial_trace_compress(self, method, cyclic, sysa, sysb):
+    @pytest.mark.parametrize('lateral_cutoff', [False, True])
+    def test_partial_trace_compress(self, method, cyclic,
+                                    sysa, sysb, lateral_cutoff):
         k = MPS_rand_state(60, 8, cyclic=cyclic)
         kws = dict(sysa=sysa, sysb=sysb, eps=1e-4, method=method)
         if len(sysa) + len(sysb) == 60:
@@ -352,8 +354,8 @@ class TestMatrixProductState:
                 k.partial_trace_compress(**kws)
             return
         rhoc_ab = k.partial_trace_compress(**kws)
-        assert set(rhoc_ab.outer_inds()) == {'k0', 'k1', 'b0', 'b1'}
-        inds = ['k0', 'k1'], ['b0', 'b1']
+        assert set(rhoc_ab.outer_inds()) == {'kA', 'kB', 'bA', 'bB'}
+        inds = ['kA', 'kB'], ['bA', 'bB']
         x = rhoc_ab.trace(*inds)
         assert_allclose(1.0, x, rtol=1e-3)
 
@@ -361,7 +363,7 @@ class TestMatrixProductState:
     def test_known_bad_case(self, cyclic):
         k = MPS_rand_state(5, 10, cyclic=cyclic)
         rhoc_ab = k.partial_trace_compress(sysa=range(2), sysb=range(2, 4))
-        inds = ['k0', 'k1'], ['b0', 'b1']
+        inds = ['kA', 'kB'], ['bA', 'bB']
         x = rhoc_ab.trace(*inds)
         assert_allclose(1.0, x, rtol=1e-3)
 

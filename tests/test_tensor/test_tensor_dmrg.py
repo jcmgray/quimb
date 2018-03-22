@@ -184,10 +184,9 @@ class TestDMRG1:
         tol = 3e-2 if cyclic else 1e-4
 
         h = MPO_ham(n, cyclic=cyclic)
-        dmrg = DMRG1(h, bond_dims=[2, 4, 8])
+        dmrg = DMRG1(h, bond_dims=[2, 4, 8, 12])
         dmrg.opts['eff_eig_dense'] = dense
-        dmrg.opts['eff_eig_tol'] = 1e-6
-        # dmrg.opts['eff_eig_bkd'] = 'slepc'
+        dmrg.opts['eff_eig_bkd'] = 'scipy'
         dmrg.opts['periodic_segment_size'] = 2
         assert dmrg.solve(tol=1e-5)
         assert dmrg.state.cyclic == cyclic
@@ -242,10 +241,9 @@ class TestDMRG2:
 
         tol = 3e-2 if cyclic else 1e-4
 
-        dmrg = DMRG2(h, bond_dims=[2, 4, 8])
+        dmrg = DMRG2(h, bond_dims=[2, 4, 8, 12])
         assert dmrg._k[0].dtype == float
         dmrg.opts['eff_eig_dense'] = dense
-        dmrg.opts['eff_eig_tol'] = 1e-6
         dmrg.opts['eff_eig_bkd'] = 'scipy'
         dmrg.opts['periodic_segment_size'] = 2
 

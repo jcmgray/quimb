@@ -373,13 +373,13 @@ def _array_split_svdvals_eig(x):
 @njit  # pragma: no cover
 def _array_split_eigh(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0):
     """SVD-decomposition, using hermitian eigen-decomposition, only works if
-    ``x`` is symmetric-positive.
+    ``x`` is hermitian.
     """
     s, U = np.linalg.eigh(x)
     s, U = s[::-1], U[:, ::-1]  # make sure largest singular value first
-    s = np.abs(s)
 
-    V = dag(U)
+    V = np.sign(s).reshape(-1, 1) * dag(U)
+    s = np.abs(s)
     return _trim_and_renorm_SVD(U, s, V, cutoff, cutoff_mode, max_bond, absorb)
 
 
@@ -440,7 +440,7 @@ def _array_split_isvd(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0):
 
 def _array_split_eigsh(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0):
     """SVD-decomposition using iterative hermitian eigen decomp, thus assuming
-    that ``x`` is positive. Allows the computation of only a certain number of
+    that ``x`` is hermitian. Allows the computation of only a certain number of
     singular values, e.g. max_bond, from the get-go, and is thus more
     efficient. Can also supply ``scipy.sparse.linalg.LinearOperator``.
     """
@@ -453,7 +453,8 @@ def _array_split_eigsh(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0):
 
     s, U = spla.eigsh(x, k=k)
     s, U = s[::-1], U[:, ::-1]  # make sure largest singular value first
-    V = dag(U)
+    V = np.sign(s).reshape(-1, 1) * dag(U)
+    s = np.abs(s)
     return _trim_and_renorm_SVD(U, s, V, cutoff, cutoff_mode, max_bond, absorb)
 
 
@@ -2113,24 +2114,28 @@ class TensorNetwork(object):
         return tn
 
     def replace_with_svd(self, where, left_inds, eps, *, mode='any',
-                         method='isvd', max_bond=None, inplace=False,
-                         ltags=None, rtags=None, keep_tags=True):
+                         right_inds=None, method='isvd', keep_tags=True,
+                         inplace=False, ltags=None, rtags=None, max_bond=None):
         r"""Replace all tensors marked by ``where`` with an iteratively
         constructed SVD. E.g. if ``X`` denote ``where`` tensors::
 
-                                     __       __
-            ---X  X--X  X---           \     /
-               |  |  |  |      -->      U~s~VH
-            ---X--X--X--X            __/     \
-                  |     +---     left_inds    \__
-                  X
-
+                                    :__       ___:
+            ---X  X--X  X---        :  \     /   :
+               |  |  |  |      -->  :   U~s~VH---:
+            ---X--X--X--X---        :__/     \   :
+                  |     +---        :         \__:
+                  X              left_inds       :
+                                             right_inds
         Parameters
         ----------
         where : tag or seq of tags
             Tags specifying the tensors to replace.
         left_inds : ind or sequence of inds
             The indices defining the left hand side of the SVD.
+        right_inds : ind or sequence of inds, optional
+            The indices defining the right hand side of the SVD, these can be
+            automatically worked out, but for hermitian decompositions the
+            order is important and thus can be given here explicitly.
         eps : float
             The tolerance to perform the SVD with, affects the number of
             singular values kept. See
@@ -2164,19 +2169,15 @@ class TensorNetwork(object):
         leave, svd_section = self.partition(where, mode=mode, inplace=inplace,
                                             calc_sites=False)
 
-        left_shp, rght_shp, _left_inds, rght_inds = [], [], [], []
-        for d, i in svd_section.outer_dims_inds():
-            if i in left_inds:
-                left_shp.append(d)
-                _left_inds.append(i)
-            else:
-                rght_shp.append(d)
-                rght_inds.append(i)
+        if right_inds is None:
+            # compute
+            right_inds = tuple(i for i in svd_section.outer_inds()
+                               if i not in left_inds)
 
-        left_inds = _left_inds
+        A = svd_section.aslinearoperator(left_inds=left_inds,
+                                         right_inds=right_inds)
 
-        A = svd_section.aslinearoperator(left_inds=left_inds, ldims=left_shp,
-                                         right_inds=rght_inds, rdims=rght_shp)
+        left_shp, right_shp = A.ldims, A.rdims
 
         opts = {}
         opts['max_bond'] = {None: -1}.get(max_bond, max_bond)
@@ -2188,13 +2189,13 @@ class TensorNetwork(object):
         U, V = {'svd': _array_split_svd,
                 'eig': _array_split_eig,
                 'eigh': _array_split_eigh,
+                'cholesky': _array_split_cholesky,
                 'isvd': _array_split_isvd,
                 'svds': _array_split_svds,
-                'eigsh': _array_split_eigsh,
-                'cholesky': _array_split_eigsh}[method](A, cutoff=eps, **opts)
+                'eigsh': _array_split_eigsh}[method](A, cutoff=eps, **opts)
 
         U = U.reshape(*left_shp, -1)
-        V = V.reshape(-1, *rght_shp)
+        V = V.reshape(-1, *right_shp)
 
         tags = svd_section.tags if keep_tags else set()
         ltags = tags2set(ltags)
@@ -2204,7 +2205,7 @@ class TensorNetwork(object):
 
         # Add the new, compressed tensors back in
         leave |= Tensor(U, inds=(*left_inds, new_bnd), tags=tags | ltags)
-        leave |= Tensor(V, inds=(new_bnd, *rght_inds), tags=tags | rtags)
+        leave |= Tensor(V, inds=(new_bnd, *right_inds), tags=tags | rtags)
 
         return leave
 
@@ -2247,7 +2248,7 @@ class TensorNetwork(object):
         n2, = self._get_tids_from_tags(tags2, mode='all')
         tensor_add_bond(self.tensor_index[n1], self.tensor_index[n2])
 
-    def insert_gauge(self, U, tags1, tags2, Uinv=None):
+    def insert_gauge(self, U, tags1, tags2, Uinv=None, tol=1e-10):
         """Insert the gauge transformation ``U @ U^-1`` into the bond between
         the tensors, ``T1`` and ``T2``, defined by ``tags1`` and ``tags2``.
         The resulting tensors at those locations will be ``T1 @ U^-1`` and
@@ -2273,8 +2274,13 @@ class TensorNetwork(object):
         if Uinv is None:
             Uinv = np.linalg.inv(U)
 
-        if vdot(Uinv, Uinv) > 1e20:
-            raise np.linalg.LinalgError("Gauge was probably almost singular.")
+            # if we get wildly larger inverse due to singular U, try pseudo-inv
+            if vdot(Uinv, Uinv) / vdot(U, U) > 1 / tol:
+                Uinv = np.linalg.pinv(U, rcond=tol**0.5)
+
+            # if still wildly larger inverse raise an error
+            if vdot(Uinv, Uinv) / vdot(U, U) > 1 / tol:
+                raise np.linalg.LinalgError("Numerically unstable inverse.")
 
         T1Ui = Tensor(Uinv, inds=('__dummy__', bnd)) @ T1
         T2U = Tensor(U, inds=(bnd, '__dummy__')) @ T2

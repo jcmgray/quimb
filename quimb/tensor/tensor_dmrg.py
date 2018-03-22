@@ -79,6 +79,7 @@ def get_default_opts(cyclic=False):
         'periodic_compress_energy_eps': 1e-6,
         'periodic_compress_max_bond': -1,
         'periodic_nullspace_fudge_factor': 1e-12,
+        'periodic_canonize_inv_tol': 1e-10,
     }
 
 
@@ -381,12 +382,12 @@ def get_normalizer(k, b):
     return normalizer
 
 
-def get_cyclic_canonizer(k, b):
+def get_cyclic_canonizer(k, b, inv_tol=1e-6):
     """Get a function to use as a callback for ``MovingEnvironment`` that
     approximately orthogonalizes the segments of periodic MPS.
     """
     def cyclic_canonizer(start, stop, begin):
-        k.canonize_cyclic(slice(start, stop), bra=b)
+        k.canonize_cyclic(slice(start, stop), bra=b, inv_tol=inv_tol)
         if begin == 'left':
             k.right_canonize(start=stop - 1, stop=start, bra=b)
         else:
@@ -549,6 +550,19 @@ class DMRG:
             tol=self.opts['eff_eig_tol'],
             maxiter=self.opts['eff_eig_maxiter'])
 
+    def print_norm_info(self, i=None):
+        sweep_num = len(self.energies)
+        full_n = self._k.H @ self._k
+        effv_n = self._eff_norm ^ None
+
+        if i is None:
+            site_norm = [self._k[i].H @ self._k[i] for i in range(self.n)]
+        else:
+            site_norm = self._k[i].H @ self._k[i]
+
+        print("sweep {} -- fullN{} effvN={} siteN={}"
+              "".format(sweep_num, full_n, effv_n, site_norm))
+
     def form_local_ops(self, i, dims, lix, uix):
         """Construct the effective Hamiltonian, and if needed, norm.
         """
@@ -577,21 +591,13 @@ class DMRG:
                 Neff = None
             elif dense:
                 Neff = (self._eff_norm ^ '_EYE')['_EYE'].to_dense(lix, uix)
-                np.fill_diagonal(Neff, (1 + fudge) * Neff.diagonal())
-                np.fill_diagonal(Heff, (1 + fudge**0.5) * Heff.diagonal())
-
-                # if dense:
-                #     np.fill_diagonal(Heff, (1 + fudge**0.5) * Heff.diagonal())
-                # else:
-                #     Heff += IdentityLinearOperator(Heff.shape[0], fudge**0.5)
+                np.fill_diagonal(Neff, Neff.diagonal() + fudge)
+                np.fill_diagonal(Heff, Heff.diagonal() + fudge**0.5)
             else:
                 Neff = TNLinearOperator(self._eff_norm['_EYE'], **dims_inds)
-                Heff += IdentityLinearOperator(Heff.shape[0], fudge**0.5)
                 Neff += IdentityLinearOperator(Neff.shape[0], fudge)
+                Heff += IdentityLinearOperator(Heff.shape[0], fudge**0.5)
 
-            print("RealN: {}, EffvN: {}, SiteN: {}"
-                  "".format(self._k.H @ self._k, self._eff_norm ^ None,
-                            site_norm))
         else:
             Neff = None
 
@@ -674,6 +680,8 @@ class DMRG:
         self._k[i + 1].modify(data=R, inds=(u_bond_ind, *uix_R))
         self._b[i + 1].modify(data=R.conj(), inds=(l_bond_ind, *lix_R))
 
+        self.print_norm_info(i)
+
         return eff_e[0]
 
     def _update_local_state(self, i, **update_opts):
@@ -739,8 +747,12 @@ class DMRG:
             nm_opts = {
                 'norm': True,
                 'eps': self.opts['periodic_compress_norm_eps'],
-                'segment_callbacks': (get_cyclic_canonizer(self._k, self._b),
-                                      get_normalizer(self._k, self._b)),
+                'segment_callbacks': (
+                    get_cyclic_canonizer(
+                        self._k, self._b,
+                        inv_tol=self.opts['periodic_canonize_inv_tol']),
+                    get_normalizer(self._k, self._b)
+                ),
             }
             eff_norms = MovingEnvironment(self.TN_norm, **eff_opts, **nm_opts)
 

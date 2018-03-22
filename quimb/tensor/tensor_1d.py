@@ -267,7 +267,7 @@ class TensorNetwork1D(TensorNetwork):
             if bra is not None:
                 bra[0] /= factor
 
-    def canonize_cyclic(self, i, bra=None, method='isvd'):
+    def canonize_cyclic(self, i, bra=None, method='isvd', inv_tol=1e-6):
         """Bring this MatrixProductState into (possibly only approximate)
         canonical form at site(s) ``i``.
 
@@ -275,6 +275,13 @@ class TensorNetwork1D(TensorNetwork):
         ----------
         i :  int or slice
             The site or range of sites to make canonical.
+        bra : MatrixProductState, optional
+            Simultaneously canonize this state as well, assuming it to be the
+            co-vector.
+        method : {'isvd', 'svds', ...}, optional
+            How to perform the lateral compression.
+        inv_tol : float, optional
+            Tolerance with which to invert the gauge.
         """
         if isinstance(i, int):
             start, stop = i, i + 1
@@ -286,9 +293,6 @@ class TensorNetwork1D(TensorNetwork):
                 raise ValueError("Parameter ``i`` should be an integer or "
                                  "contiguous block of integers, got {}."
                                  "".format(i))
-
-        mid = (start + stop) // 2
-        self.left_canonize(start=mid, stop=mid + self.nsites, bra=bra)
 
         k = self.copy()
         b = k.H
@@ -304,15 +308,23 @@ class TensorNetwork1D(TensorNetwork):
                                   ltags='_LEFT', rtags='_RIGHT')
 
         EL = kbc['_LEFT'].squeeze()
+        # explicitly symmetrize to hermitian
+        EL.data /= 2
+        EL.data += EL.data.conj().T
+        # split into upper 'ket' part and lower 'bra' part, symmetric
         EL_lix, = EL.shared_inds(kbc[k.site_tag(start), '_BRA'])
-        _, x = EL.split(EL_lix, method='cholesky', cutoff=-1, get='arrays')
+        _, x = EL.split(EL_lix, method='eigh', cutoff=-1, get='arrays')
 
         ER = kbc['_RIGHT'].squeeze()
+        # explicitly symmetrize to hermitian
+        ER.data /= 2
+        ER.data += ER.data.conj().T
+        # split into upper 'ket' part and lower 'bra' part, symmetric
         ER_lix, = ER.shared_inds(kbc[k.site_tag(stop - 1), '_BRA'])
-        _, y = ER.split(ER_lix, method='cholesky', cutoff=-1, get='arrays')
+        _, y = ER.split(ER_lix, method='eigh', cutoff=-1, get='arrays')
 
-        self.insert_gauge(x.T, start - 1, start)
-        self.insert_gauge(y.T, stop, stop - 1)
+        self.insert_gauge(x.T, start - 1, start, tol=inv_tol)
+        self.insert_gauge(y.T, stop, stop - 1, tol=inv_tol)
 
         if bra is not None:
             for i in {start - 1, start, stop, stop - 1}:
@@ -1005,8 +1017,9 @@ class MatrixProductState(TensorNetwork1D):
         return self.partial_trace(keep, upper_ind_id,
                                   rescale_sites=rescale_sites)
 
-    def partial_trace_compress(self, sysa, sysb, eps=1e-6, method='isvd',
-                               lower_ind_id='b{}', **compress_opts):
+    def partial_trace_compress(self, sysa, sysb, eps=1e-8, lower_ind_id='b{}',
+                               method=('isvd', 'eigh'), lateral_cutoff=True,
+                               **compress_opts):
         r"""Perform a compressed partial trace using singular value
         lateral then vertical decompositions of transfer matrix products::
 
@@ -1023,18 +1036,18 @@ class MatrixProductState(TensorNetwork1D):
 
                                       --> lateral SVD on each section
 
-                    .....sysa......     ...sysb....
-            +\     /\             /\   /\         /\               /+
-            | E~~~E  A~~~~~~~~~~~A  E~E  B~~~~~~~B  E~~~~~~~~~~~~~E |
-            +/     \/             \/   \/         \/               \+
+                      .....sysa......     ...sysb....
+                      /\             /\   /\         /\
+              ... ~~~E  A~~~~~~~~~~~A  E~E  B~~~~~~~B  E~~~ ...
+                      \/             \/   \/         \/
 
                                       --> vertical SVD and unfold on A & B
 
-                           |                 |
-            +\     /-------A-------\   /-----B-----\               /+
-            | E~~~E                 E~E             E~~~~~~~~~~~~~E |
-            +/     \-------A-------/   \-----B-----/               \+
-                           |                 |
+                              |                 |
+                      /-------A-------\   /-----B-----\
+              ... ~~~E                 E~E             E~~~ ...
+                      \-------A-------/   \-----B-----/
+                              |                 |
 
         Parameters
         ----------
@@ -1053,6 +1066,12 @@ class MatrixProductState(TensorNetwork1D):
         compress_opts : dict, optional
             If given, supplied to ``partial_trace_compress`` to govern how
             singular values are treated. See ``tensor_split``.
+
+        Returns
+        -------
+        rho_ab : TensorNetwork
+            Density matrix tensor network with
+            ``outer_inds = ('k0', 'k1', 'b0', 'b1')`` for example.
         """
         N = self.nsites
         if len(sysa) + len(sysb) == N:
@@ -1112,13 +1131,13 @@ class MatrixProductState(TensorNetwork1D):
             #          | | | | | | | | |
             #   ll[i] -o-o-o-o-o-o-o-o-o- lr[i]
 
-            st_left = self.site_tag((section[0] - 1) % N)
+            st_left = self.site_tag(section[0] - 1)
             st_right = self.site_tag(section[0])
             ul, = find_shared_inds(kb['_KET', st_left], kb['_KET', st_right])
             ll, = find_shared_inds(kb['_BRA', st_left], kb['_BRA', st_right])
 
             st_left = self.site_tag(section[-1])
-            st_right = self.site_tag((section[-1] + 1) % N)
+            st_right = self.site_tag(section[-1] + 1)
             ur, = find_shared_inds(kb['_KET', st_left], kb['_KET', st_right])
             lr, = find_shared_inds(kb['_BRA', st_left], kb['_BRA', st_right])
 
@@ -1126,6 +1145,17 @@ class MatrixProductState(TensorNetwork1D):
 
         # lateral compress all sections
         for section, (ul, _, ll, _) in zip(sections, ul_ur_ll_lrs):
+
+            if lateral_cutoff:
+                # if section is short doesn't make sense to lateral compress
+                #     work out roughly when this occurs by comparing bond size
+                left_sz = self.bond_dim(section[0] - 1, section[0]) ** 2
+                right_sz = self.bond_dim(section[-1], section[-1] + 1) ** 2
+
+                if left_sz * right_sz > self.phys_dim() ** len(section):
+                    # import pdb; pdb.set_trace()
+                    continue
+
             section_tags = map(self.site_tag, section)
 
             #   ul -o-o-o-o-o-o-o-o-o-       ul -\      /-
@@ -1137,11 +1167,11 @@ class MatrixProductState(TensorNetwork1D):
                                 **compress_opts)
 
         # vertical compress and unfold system sections only
-        for section, (ul, ur, _, _) in zip(sections, ul_ur_ll_lrs):
+        for section, (ul, ur, ll, lr) in zip(sections, ul_ur_ll_lrs):
             if section == sysa:
-                label = 0
+                label = 'A'
             elif section == sysb:
-                label = 1
+                label = 'B'
             else:
                 continue
 
@@ -1153,9 +1183,9 @@ class MatrixProductState(TensorNetwork1D):
 
             # do vertical SVD
             section_tags = map(self.site_tag, section)
-            kb.replace_with_svd(section_tags, (ul, ur), veps, inplace=True,
-                                ltags='_UP', rtags='_DOWN', method=vmethod,
-                                **compress_opts)
+            kb.replace_with_svd(section_tags, (ul, ur), right_inds=(ll, lr),
+                                inplace=True, ltags='_UP', rtags='_DOWN',
+                                method=vmethod, eps=veps, **compress_opts)
 
             # cut joined bond by reindexing to upper- and lower- ind_id.
             T_UP = kb[self.site_tag(section[0]), '_UP']
@@ -1174,7 +1204,12 @@ class MatrixProductState(TensorNetwork1D):
             if 0 in sysa:
                 # get neighbouring tensor
                 if envm:
-                    TU = TD = kb['_ENVM', '_LEFT']
+                    try:
+                        TU = TD = kb['_ENVM', '_LEFT']
+                    except KeyError:
+                        # didn't lateral compress
+                        TU = kb['_ENVM', '_KET', self.site_tag(envm[0])]
+                        TD = kb['_ENVM', '_BRA', self.site_tag(envm[0])]
                 else:
                     TU = kb['_SYSB', '_UP']
                     TD = kb['_SYSB', '_DOWN']
@@ -1183,8 +1218,8 @@ class MatrixProductState(TensorNetwork1D):
 
                 # delete the A system
                 kb.delete('_SYSA')
-                TU.reindex({ubnd: "_tmp_ind_u0"}, inplace=True)
-                TD.reindex({lbnd: "_tmp_ind_l0"}, inplace=True)
+                TU.reindex({ubnd: "_tmp_ind_uA"}, inplace=True)
+                TD.reindex({lbnd: "_tmp_ind_lA"}, inplace=True)
             else:
                 # or else replace the left or right envs with identites since
                 #
@@ -1197,7 +1232,12 @@ class MatrixProductState(TensorNetwork1D):
             if N - 1 in sysb:
                 # get neighbouring tensor
                 if envm:
-                    TU = TD = kb['_ENVM', '_RIGHT']
+                    try:
+                        TU = TD = kb['_ENVM', '_RIGHT']
+                    except KeyError:
+                        # didn't lateral compress
+                        TU = kb['_ENVM', '_KET', self.site_tag(envm[-1])]
+                        TD = kb['_ENVM', '_BRA', self.site_tag(envm[-1])]
                 else:
                     TU = kb['_SYSA', '_UP']
                     TD = kb['_SYSA', '_DOWN']
@@ -1206,16 +1246,16 @@ class MatrixProductState(TensorNetwork1D):
 
                 # delete the B system
                 kb.delete('_SYSB')
-                TU.reindex({ubnd: "_tmp_ind_u1"}, inplace=True)
-                TD.reindex({lbnd: "_tmp_ind_l1"}, inplace=True)
+                TU.reindex({ubnd: "_tmp_ind_uB"}, inplace=True)
+                TD.reindex({lbnd: "_tmp_ind_lB"}, inplace=True)
             else:
                 kb.replace_with_identity('_ENVR', inplace=True)
 
         kb.reindex({
-            '_tmp_ind_u0': self.site_ind(0),
-            '_tmp_ind_l0': lower_ind_id.format(0),
-            '_tmp_ind_u1': self.site_ind(1),
-            '_tmp_ind_l1': lower_ind_id.format(1),
+            '_tmp_ind_uA': self.site_ind('A'),
+            '_tmp_ind_lA': lower_ind_id.format('A'),
+            '_tmp_ind_uB': self.site_ind('B'),
+            '_tmp_ind_lB': lower_ind_id.format('B'),
         }, inplace=True)
 
         return kb
@@ -1262,7 +1302,7 @@ class MatrixProductState(TensorNetwork1D):
             sysa, sysb, eps=eps, method=method, **compress_opts)
 
         # view it as a operator
-        rho_ab_pt_lo = rho_ab.aslinearoperator(['k0', 'b1'], ['b0', 'k1'])
+        rho_ab_pt_lo = rho_ab.aslinearoperator(['kA', 'bB'], ['bA', 'kB'])
 
         # estimate its spectrum and sum the abs(eigenvalues)
         tr_norm = qu.approx_spectral_function(
