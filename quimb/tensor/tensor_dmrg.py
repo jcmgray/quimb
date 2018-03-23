@@ -12,7 +12,6 @@ from .tensor_core import (
     TensorNetwork,
     tensor_contract,
     TNLinearOperator,
-    find_shared_inds,
 )
 
 
@@ -61,6 +60,15 @@ def get_default_opts(cyclic=False):
         The maximum bond to use when compressing transfer matrices.
     periodic_nullspace_fudge_factor : float
         Factor to add to ``Heff`` and ``Neff`` to remove nullspace.
+    periodic_canonize_inv_tol : float
+        When psuedo-orthogonalizing, an inverse gauge is generated that can be
+        very ill-conditioned. This factor controls cutting off the small
+        singular values of the gauge to stop this.
+    periodic_gen_eig_tol : float
+        When psuedo-orthogonalizing, if the local norm is within this
+        distance to 1 (pseudo-orthogonoalized), then the generalized eigen
+        decomposition is *not* used, which is much more efficient. If too large
+        the total normalization can become unstable.
     """
     return {
         'default_sweep_sequence': 'R',
@@ -80,6 +88,7 @@ def get_default_opts(cyclic=False):
         'periodic_compress_max_bond': -1,
         'periodic_nullspace_fudge_factor': 1e-12,
         'periodic_canonize_inv_tol': 1e-10,
+        'periodic_gen_eig_tol': 1e-8,
     }
 
 
@@ -276,11 +285,7 @@ class MovingEnvironment:
             for callback in self.segment_callbacks:
                 callback(start, stop, self.begin)
 
-        lix = find_shared_inds(self.tnc[start - 1], self.tnc[start])
-        where = slice(start, stop)
-
         opts = {
-            'left_inds': lix,
             'keep_tags': False,
             'ltags': ltags,
             'rtags': rtags,
@@ -290,9 +295,7 @@ class MovingEnvironment:
             'inplace': True,
         }
 
-        self.tnc.replace_with_svd(where, mode='!any', **opts)
-
-        print("bond approx:", self.tnc['_LEFT'].bond_size(self.tnc['_RIGHT']))
+        self.tnc.replace_section_with_svd(start, stop, mode='!any', **opts)
 
         # ensure that expectation still = 1 after approximation
         if self.norm:
@@ -374,7 +377,7 @@ class MovingEnvironment:
 
 
 def get_normalizer(k, b):
-    """
+    """Function that normalizes ``k`` and ``b`` when called.
     """
     def normalizer(*_):
         k.normalize(bra=b)
@@ -382,7 +385,7 @@ def get_normalizer(k, b):
     return normalizer
 
 
-def get_cyclic_canonizer(k, b, inv_tol=1e-6):
+def get_cyclic_canonizer(k, b, inv_tol=1e-10):
     """Get a function to use as a callback for ``MovingEnvironment`` that
     approximately orthogonalizes the segments of periodic MPS.
     """
@@ -553,7 +556,11 @@ class DMRG:
     def print_norm_info(self, i=None):
         sweep_num = len(self.energies)
         full_n = self._k.H @ self._k
-        effv_n = self._eff_norm ^ None
+
+        if self.cyclic:
+            effv_n = self._eff_norm ^ None
+        else:
+            effv_n = 'OBC'
 
         if i is None:
             site_norm = [self._k[i].H @ self._k[i] for i in range(self.n)]
@@ -587,8 +594,10 @@ class DMRG:
 
             # Check if site already pseudo-orthonogal
             site_norm = self._k[i:i + self.bsz].H @ self._k[i:i + self.bsz]
-            if abs(site_norm - 1) < 1e-8:
+            if abs(site_norm - 1) < self.opts['periodic_gen_eig_tol']:
                 Neff = None
+
+            # else contruct RHS normalization operator
             elif dense:
                 Neff = (self._eff_norm ^ '_EYE')['_EYE'].to_dense(lix, uix)
                 np.fill_diagonal(Neff, Neff.diagonal() + fudge)
@@ -679,8 +688,6 @@ class DMRG:
         self._b[i].modify(data=L.conj(), inds=(*lix_L, l_bond_ind))
         self._k[i + 1].modify(data=R, inds=(u_bond_ind, *uix_R))
         self._b[i + 1].modify(data=R.conj(), inds=(l_bond_ind, *lix_R))
-
-        self.print_norm_info(i)
 
         return eff_e[0]
 

@@ -267,7 +267,7 @@ class TensorNetwork1D(TensorNetwork):
             if bra is not None:
                 bra[0] /= factor
 
-    def canonize_cyclic(self, i, bra=None, method='isvd', inv_tol=1e-6):
+    def canonize_cyclic(self, i, bra=None, method='isvd', inv_tol=1e-10):
         """Bring this MatrixProductState into (possibly only approximate)
         canonical form at site(s) ``i``.
 
@@ -300,12 +300,10 @@ class TensorNetwork1D(TensorNetwork):
         b.add_tag('_BRA')
         kb = k & b
 
-        lix = find_shared_inds(kb[start - 1], kb[start])
-
         # approximate the rest of the chain with a bond 1 SVD
-        kbc = kb.replace_with_svd(slice(start, stop), lix, eps=0.0,
-                                  mode='!any', method=method, max_bond=1,
-                                  ltags='_LEFT', rtags='_RIGHT')
+        kbc = kb.replace_section_with_svd(start, stop, eps=0.0, mode='!any',
+                                          method=method, max_bond=1,
+                                          ltags='_LEFT', rtags='_RIGHT')
 
         EL = kbc['_LEFT'].squeeze()
         # explicitly symmetrize to hermitian
@@ -854,10 +852,26 @@ class MatrixProductState(TensorNetwork1D):
         """
         return self.add_MPS(other * -1, inplace=True)
 
-    def normalize(self, bra=None):
-        """Normalize this MPS, optional with co-vector ``bra``.
+    def normalize(self, bra=None, eps=1e-14):
+        """Normalize this MPS, optional with co-vector ``bra``. For periodic
+        MPS this uses transfer matrix SVD approximation with precision ``eps``
+        in order to be efficient. Inplace.
+
+        Parameters
+        ----------
+        bra : MatrixProductState, optional
+            If given, normalize this MPS with the same factor.
+        eps : float, optional
+            If cyclic, precision to approximation transfer matrix with.
+            Default: 1e-14.
         """
-        norm = self.H @ self
+        if not self.cyclic:
+            norm = self.H @ self
+        else:
+            pp = self.H & self
+            pp.replace_section_with_svd(1, self.nsites, eps, inplace=True)
+            norm = pp ^ None
+
         self /= norm ** 0.5
         if bra is not None:
             bra /= norm ** 0.5
@@ -1012,8 +1026,9 @@ class MatrixProductState(TensorNetwork1D):
         rho.fuse_multibonds(inplace=True)
         return rho
 
-    @functools.wraps(partial_trace)
     def ptr(self, keep, upper_ind_id="b{}", rescale_sites=True):
+        """Alias of :meth:`~quimb.tensor.MatrixProductState.partial_trace`.
+        """
         return self.partial_trace(keep, upper_ind_id,
                                   rescale_sites=rescale_sites)
 

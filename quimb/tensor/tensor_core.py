@@ -2209,6 +2209,28 @@ class TensorNetwork(object):
 
         return leave
 
+    def replace_section_with_svd(self, start, stop, eps, **kwargs):
+        """Take a 1D tensor network, and replace a section with a SVD.
+        See :meth:`~quimb.tensor.TensorNetwork.replace_with_svd`.
+
+        Parameters
+        ----------
+        start : int
+            Section start.
+        stop : int
+            Section stop, non-inclusive.
+        eps : float
+            Precision of SVD
+        kwargs
+            Supplied to :meth:`~quimb.tensor.TensorNetwork.replace_with_svd`.
+
+        Returns
+        -------
+        TensorNetwork
+        """
+        lix = find_shared_inds(self[start - 1], self[start])
+        return self.replace_with_svd(slice(start, stop), lix, eps, **kwargs)
+
     def convert_to_zero(self):
         """Inplace conversion of this network to an all zero tensor network.
         """
@@ -2280,7 +2302,7 @@ class TensorNetwork(object):
 
             # if still wildly larger inverse raise an error
             if vdot(Uinv, Uinv) / vdot(U, U) > 1 / tol:
-                raise np.linalg.LinalgError("Numerically unstable inverse.")
+                raise np.linalg.LinAlgError("Ill conditioned inverse.")
 
         T1Ui = Tensor(Uinv, inds=('__dummy__', bnd)) @ T1
         T2U = Tensor(U, inds=(bnd, '__dummy__')) @ T2
