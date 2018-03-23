@@ -1,6 +1,11 @@
-#######
-*QUIMB*
-#######
+##############
+*QUIMB* |LOGO|
+##############
+
+
+.. |LOGO| image:: docs/_static/quimb_logo_small.png
+    :height: 24px
+    :width: 24px
 
 .. image:: https://img.shields.io/travis/jcmgray/quimb/stable.svg
     :target: https://travis-ci.org/jcmgray/quimb
