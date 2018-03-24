@@ -1019,3 +1019,30 @@ def page_entropy(sz_subsys, sz_total):  # pragma: no cover
 
     # Normalize into bits of entropy
     return s / log(2)
+
+
+def heisenberg_energy(L):
+    """Get the analytic isotropic heisenberg chain ground energy for length L.
+    Useful for testing. Assumes the heisenberg model is defined with spin
+    operators not pauli matrices (overall factor of 2 smaller). Taken from [1].
+
+    [1] Nickel, Bernie. "Scaling corrections to the ground state energy
+    of the spin-½ isotropic anti-ferromagnetic Heisenberg chain." Journal of
+    Physics Communications 1.5 (2017): 055021
+
+    Parameters
+    ----------
+    L : int
+        The length of the chain.
+
+    Returns
+    -------
+    energy : float
+        The ground state energy.
+    """
+    from math import log, pi
+
+    Einf = (0.5 - 2 * log(2)) * L
+    Efinite = pi**2 / (6 * L)
+    correction = 1 + 0.375 / log(L)**3
+    return (Einf - Efinite * correction) / 2

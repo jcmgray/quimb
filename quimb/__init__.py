@@ -163,6 +163,7 @@ from .calc import (
     is_degenerate,
     is_eigenvector,
     page_entropy,
+    heisenberg_energy,
 )
 
 # Evolution class and methods
@@ -325,6 +326,7 @@ __all__ = [
     'is_degenerate',
     'is_eigenvector',
     'page_entropy',
+    'heisenberg_energy',
     # Evo ------------------------------------------------------------------- #
     'QuEvo',
     # Approx spectral ------------------------------------------------------- #
