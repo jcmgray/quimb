@@ -10,6 +10,7 @@ from quimb import (
     plus,
     is_eigenvector,
     eigsys,
+    heisenberg_energy,
 )
 
 from quimb.tensor import (
@@ -282,6 +283,15 @@ class TestDMRG2:
         assert_allclose(actual_e, eff_e, rtol=tol)
         assert_allclose(abs(expec(mps_gs_dense, gs)), 1.0, rtol=tol)
 
+    def test_cyclic_solve_big_with_segmenting(self):
+        n = 150
+        ham = MPO_ham_heis(n, cyclic=True)
+        dmrg = DMRG2(ham, bond_dims=range(10, 30, 2))
+        dmrg.opts['periodic_segment_size'] = 1 / 3
+        dmrg.opts['eff_eig_backend'] = 'scipy'
+        assert dmrg.solve(tol=0.1, verbose=2)
+        assert dmrg.energy == pytest.approx(heisenberg_energy(n), 1e-3)
+
 
 class TestDMRGX:
 
@@ -322,7 +332,7 @@ class TestDMRGX:
         assert_allclose(big_ovlps, [1])
 
         # check fully
-        assert is_eigenvector(k, h)
+        assert is_eigenvector(k, h, atol=1e-14, rtol=1e-12)
 
     def test_solve_bigger(self):
         n = 14
