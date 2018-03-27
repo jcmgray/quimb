@@ -18,24 +18,27 @@ from .tensor_core import (
 def get_default_opts(cyclic=False):
     """Get the default advanced settings for DMRG.
 
-    Parameters
-    ----------
+    Returns
+    -------
     default_sweep_sequence : str
         How to sweep. Will be repeated, e.g. "RRL" -> RRLRRLRRL..., default: R.
     eff_eig_tol : float
         Relative tolerance to solve inner eigenproblem to, larger = quicker but
-        more unstable, default: 1e-3.
+        more unstable, default: 1e-3. Note this can be much looser than the
+        overall tolerance, the starting point for each local solve is the
+        previous state, and the overall accuracy comes from multiple sweeps.
     eff_eig_ncv : int
         Number of inner eigenproblem lanczos vectors. Smaller can mean quicker.
-    eff_eig_bkd : {None, 'AUTO', 'SCIPY', 'SLEPC'}
+    eff_eig_backend : {None, 'AUTO', 'SCIPY', 'SLEPC'}
         Which to backend to use for the inner eigenproblem. None or 'AUTO' to
-        choose best. Generally 'SLEPC' best if available for large problems.
+        choose best. Generally 'SLEPC' best if available for large problems,
+        but it can't currently handle ``LinearOperator`` Neff.
     eff_eig_maxiter : int
         Maximum number of inner eigenproblem iterations.
     eff_eig_dense : bool
         Use dense representation of the effective hamiltonian (and norm).
     eff_eig_EPSType : {'krylovschur', 'gd', 'jd', ...}
-        Eigensovler tpye if ``eff_eig_bkd='slepc'``.
+        Eigensovler tpye if ``eff_eig_backend='slepc'``.
     compress_method : {'svd', 'eig', ...}
         Method used to compress sites after update.
     compress_cutoff_mode : {'sum2', 'abs', 'rel'}
@@ -50,11 +53,13 @@ def get_default_opts(cyclic=False):
         Tradeoff: longer segments means having to compress less, but also
         having a shorter 'long way round', meaning that it needs a larger bond
         to represent it and can be 'pseudo-orthogonalized' less effectively.
+        0.5 is the largest fraction that makes sense. Set to >= 1.0 to not
+        use segmentation at all, which is better for small systems.
     periodic_compress_method : {'isvd', 'svds'}
         Which method to perform the transfer matrix compression with.
     periodic_compress_norm_eps : float
         Precision to compress the norm transfer matrix in periodic systems.
-    periodic_compress_energy_eps : float
+    periodic_compress_ham_eps : float
         Precision to compress the energy transfer matrix in periodic systems.
     periodic_compress_max_bond : int
         The maximum bond to use when compressing transfer matrices.
@@ -64,31 +69,31 @@ def get_default_opts(cyclic=False):
         When psuedo-orthogonalizing, an inverse gauge is generated that can be
         very ill-conditioned. This factor controls cutting off the small
         singular values of the gauge to stop this.
-    periodic_gen_eig_tol : float
+    periodic_orthog_tol : float
         When psuedo-orthogonalizing, if the local norm is within this
         distance to 1 (pseudo-orthogonoalized), then the generalized eigen
-        decomposition is *not* used, which is much more efficient. If too large
-        the total normalization can become unstable.
+        decomposition is *not* used, which is much more efficient. If set too
+        large the total normalization can become unstable.
     """
     return {
         'default_sweep_sequence': 'R',
         'eff_eig_tol': 1e-3,
         'eff_eig_ncv': 4,
-        'eff_eig_bkd': None,
+        'eff_eig_backend': None,
         'eff_eig_maxiter': None,
         'eff_eig_dense': None,
         'eff_eig_EPSType': 'krylovschur',
         'compress_method': 'svd',
         'compress_cutoff_mode': 'sum2',
         'bond_expand_rand_strength': 1e-6,
-        'periodic_segment_size': 0.34,
+        'periodic_segment_size': 1 / 3,
         'periodic_compress_method': 'isvd',
-        'periodic_compress_norm_eps': 1e-9,
-        'periodic_compress_energy_eps': 1e-6,
+        'periodic_compress_norm_eps': 1e-8,
+        'periodic_compress_ham_eps': 1e-6,
         'periodic_compress_max_bond': -1,
         'periodic_nullspace_fudge_factor': 1e-12,
         'periodic_canonize_inv_tol': 1e-10,
-        'periodic_gen_eig_tol': 1e-8,
+        'periodic_orthog_tol': 1e-8,
     }
 
 
@@ -186,6 +191,19 @@ class MovingEnvironment:
     eps : float, optional
         The tolerance to approximate the transfer matrix with. See
         :meth:`~quimb.tensor.TensorNetwork.replace_with_svd`.
+    cyclic : bool, optional
+        Whether this is a periodic ``MovingEnvironment``.
+    segment_callbacks : sequence of callable, optional
+        Functions with signature ``callback(start, stop, self.begin)``, to be
+        called every time a new segment is initialized.
+    method : {'isvd', 'svds', ...}, optional
+        How to performt the transfer matrix compression. See
+        :meth:`~quimb.tensor.TensorNetwork.replace_with_svd`.
+    max_bond : , optional
+        If > 0, the maximum bond of the compressed transfer matrix.
+    norm : bool, optional
+        If True, treat this ``MovingEnvironment`` as the state overlap, which
+        enables a few extra checks.
 
     Notes
     -----
@@ -196,7 +214,8 @@ class MovingEnvironment:
     """
 
     def __init__(self, tn, begin, bsz, *, cyclic=False, segment_callbacks=None,
-                 ssz=0.5, eps=1e-8, method='isvd', max_bond=32, norm=False):
+                 ssz=0.5, eps=1e-8, method='isvd', max_bond=-1, norm=False):
+
         self.tn = tn.copy(virtual=True)
         self.begin = begin
         self.bsz = bsz
@@ -217,14 +236,24 @@ class MovingEnvironment:
             self.norm = norm
 
             if isinstance(ssz, float):
-                self.ssz = int(self.n * ssz)
+                # this logic essentially makes sure that segments prefer
+                #     overshooting e.g ssz=1/3 with n=100 produces segments of
+                #     length 34, to avoid a final segement of length 1.
+                self._ssz = int(self.n * ssz + self.n % int(1 / ssz))
             else:
-                self.ssz = ssz
+                self._ssz = ssz
 
-            start, stop = {'left': (0, self.ssz),
-                           'right': (self.n - self.ssz, self.n)}[begin]
+            self.segmented = self._ssz < self.n
+            # will still split system in half but no compression or callbacks
+            if not self.segmented:
+                self._ssz = int(self.n / 2 + self.n % 2)
 
+            start, stop = {
+                'left': (0, self._ssz),
+                'right': (self.n - self._ssz, self.n)
+            }[begin]
         else:
+            self.segmented = False
             start, stop = (0, self.n - self.bsz + 1)
 
         self.init_segment(begin, start, stop)
@@ -268,10 +297,17 @@ class MovingEnvironment:
         """
         self.tnc = self.tn.copy(virtual=True)
 
-        if not self.cyclic or self.ssz == self.n:
-            # generate dummy left and right envs
+        if not self.segmented:
+            if not self.cyclic:
+                # generate dummy left and right envs
+                self.tnc |= Tensor(1.0, (), {'_LEFT'})
+                self.tnc |= Tensor(1.0, (), {'_RIGHT'})
+                return
+
+            # if cyclic just contract other section and tag
             self.tnc |= Tensor(1.0, (), {'_LEFT'})
-            self.tnc |= Tensor(1.0, (), {'_RIGHT'})
+            self.tnc.contract(slice(stop, start + self.n), inplace=True)
+            self.tnc.add_tag('_RIGHT', where=stop + 1)
             return
 
         # replicate all tags on end pieces apart from site number
@@ -299,7 +335,7 @@ class MovingEnvironment:
 
         # ensure that expectation still = 1 after approximation
         if self.norm:
-            norm = (self.tnc ^ None) ** 0.5
+            norm = (self.tnc ^ all) ** 0.5
             self.tnc['_LEFT'] /= norm
             self.tnc['_RIGHT'] /= norm
 
@@ -310,7 +346,7 @@ class MovingEnvironment:
         if i not in self.segment:
             if not self.cyclic:
                 raise ValueError("For OBC, ``0 <= position <= n - bsz``.")
-            self.init_segment('left', i, i + self.ssz)
+            self.init_segment('left', i, i + self._ssz)
         else:
             self.pos = i % self.n
 
@@ -335,7 +371,7 @@ class MovingEnvironment:
         if i not in self.segment:
             if not self.cyclic:
                 raise ValueError("For OBC, ``0 <= position <= n - bsz``.")
-            self.init_segment('right', i - self.ssz + 1, i + 1)
+            self.init_segment('right', i - self._ssz + 1, i + 1)
         else:
             self.pos = i % self.n
 
@@ -354,10 +390,9 @@ class MovingEnvironment:
             # contract right env with updated site just to right
             self.envs[i] ^= ['_RIGHT', self.site_tag(i + self.bsz)]
 
-    def move(self, direction):
-        {'left': self.move_left, 'right': self.move_right}[direction]()
-
     def move_to(self, i):
+        """Move this effective environment to site ``i``.
+        """
 
         if self.cyclic:
             # to take account of PBC, rescale so that current pos == n // 2,
@@ -368,21 +403,12 @@ class MovingEnvironment:
             direction = 'left' if i < self.pos else 'right'
 
         while self.pos != i % self.n:
-            self.move(direction)
+            {'left': self.move_left, 'right': self.move_right}[direction]()
 
     def __call__(self):
         """Get the current environment.
         """
         return self.envs[self.pos]
-
-
-def get_normalizer(k, b):
-    """Function that normalizes ``k`` and ``b`` when called.
-    """
-    def normalizer(*_):
-        k.normalize(bra=b)
-
-    return normalizer
 
 
 def get_cyclic_canonizer(k, b, inv_tol=1e-10):
@@ -442,7 +468,8 @@ class DMRGError(Exception):
 class DMRG:
     r"""Density Matrix Renormalization Group variational groundstate search.
     Some initialising arguments act as defaults, but can be overidden with
-    each solve or sweep.
+    each solve or sweep. See :func:`~quimb.tensor.tensor_dmrg.get_default_opts`
+    for the list of advanced options initialized in the ``opts`` attribute.
 
     Parameters
     ----------
@@ -462,21 +489,30 @@ class DMRG:
         Number of sites to optimize for locally i.e. DMRG1 or DMRG2.
     which : {'SA', 'LA'}, optional
         Whether to search for smallest or largest real part eigenvectors.
+    p0 : MatrixProductState, optional
+        If given, use as the initial state.
 
     Attributes
     ----------
-    energy : float
-        The current most optimized energy.
     state : MatrixProductState
         The current, optimized state.
+    energy : float
+        The current most optimized energy.
     energies : list of float
-        The list of energies after each sweep.
+        The total energy after each sweep.
+    local_energies : list of list of float
+        The local energies per sweep: ``local_energies[i, j]`` contains the
+        local energy found at the jth step of the (i+1)th sweep.
+    total_energies : list of list of float
+        The total energies per sweep: ``local_energies[i, j]`` contains the
+        total energy after the jth step of the (i+1)th sweep.
     opts : dict
-        Advanced options e.g. relating to the inner eigensolve or compression.
+        Advanced options e.g. relating to the inner eigensolve or compression,
+        see :func:`~quimb.tensor.tensor_dmrg.get_default_opts`.
     """
 
-    def __init__(self, ham, bond_dims,
-                 bsz=2, cutoffs=1e-9, which='SA', p0=None):
+    def __init__(self, ham, bond_dims, cutoffs=1e-9,
+                 bsz=2, which='SA', p0=None):
         self.n = ham.nsites
         self.phys_dim = ham.phys_dim()
         self.bsz = bsz
@@ -502,7 +538,9 @@ class DMRG:
         # want to contract this multiple times while
         #   manipulating k/b -> make virtual
         self.TN_energy = self._b | self.ham | self._k
-        self.energies = [self.TN_energy ^ ...]
+        self.energies = []
+        self.local_energies = []
+        self.total_energies = []
 
         # if cyclic need to keep track of normalization
         if self.cyclic:
@@ -533,32 +571,45 @@ class DMRG:
 
     # -------------------- standard DMRG update methods --------------------- #
 
-    def _compress_after_1site_update(self, direction, i, **compress_opts):
+    def _canonize_after_1site_update(self, direction, i):
         """Compress a site having updated it. Also serves to move the
         orthogonality center along.
         """
         if (direction == 'right') and ((i < self.n - 1) or self.cyclic):
-            self._k.left_compress_site(i, bra=self._b, **compress_opts)
+            self._k.left_canonize_site(i, bra=self._b)
         elif (direction == 'left') and ((i > 0) or self.cyclic):
-            self._k.right_compress_site(i, bra=self._b, **compress_opts)
+            self._k.right_canonize_site(i, bra=self._b)
 
     def _seigsys(self, A, B=None, v0=None):
         """Find single eigenpair, using all the internal settings.
         """
         return seigsys(
             A, k=1, B=B, which=self.which, v0=v0,
-            backend=self.opts['eff_eig_bkd'],
+            backend=self.opts['eff_eig_backend'],
             EPSType=self.opts['eff_eig_EPSType'],
             ncv=self.opts['eff_eig_ncv'],
             tol=self.opts['eff_eig_tol'],
             maxiter=self.opts['eff_eig_maxiter'])
 
+    def print_energy_info(self, Heff=None, loc_gs=None):
+        sweep_num = len(self.energies) + 1
+        full_en = self.TN_energy ^ ...
+        effv_en = self._eff_ham ^ all
+
+        if Heff is None:
+            site_en = "N/A"
+        else:
+            site_en = np.asscalar(loc_gs.H @ (Heff @ loc_gs))
+
+        print("Sweep {} -- fullE={} effcE={} siteE={}"
+              "".format(sweep_num, full_en, effv_en, site_en))
+
     def print_norm_info(self, i=None):
-        sweep_num = len(self.energies)
+        sweep_num = len(self.energies) + 1
         full_n = self._k.H @ self._k
 
         if self.cyclic:
-            effv_n = self._eff_norm ^ None
+            effv_n = self._eff_norm ^ all
         else:
             effv_n = 'OBC'
 
@@ -567,12 +618,16 @@ class DMRG:
         else:
             site_norm = self._k[i].H @ self._k[i]
 
-        print("sweep {} -- fullN{} effvN={} siteN={}"
+        print("Sweep {} -- fullN={} effvN={} siteN={}"
               "".format(sweep_num, full_n, effv_n, site_norm))
 
     def form_local_ops(self, i, dims, lix, uix):
         """Construct the effective Hamiltonian, and if needed, norm.
         """
+        if self.cyclic:
+            self._eff_norm = self.ME_eff_norm()
+        self._eff_ham = self.ME_eff_ham()
+
         # choose a rough value at which dense effective ham should not be used
         dense = self.opts['eff_eig_dense']
         if dense is None:
@@ -594,7 +649,7 @@ class DMRG:
 
             # Check if site already pseudo-orthonogal
             site_norm = self._k[i:i + self.bsz].H @ self._k[i:i + self.bsz]
-            if abs(site_norm - 1) < self.opts['periodic_gen_eig_tol']:
+            if abs(site_norm - 1) < self.opts['periodic_orthog_tol']:
                 Neff = None
 
             # else contruct RHS normalization operator
@@ -612,29 +667,34 @@ class DMRG:
 
         return Heff, Neff
 
-    def post_check(self, i, Neff, eff_gs, eff_e):
+    def post_check(self, i, Neff, loc_gs, loc_en, loc_gs_old):
         """Perform some checks on the output of the local eigensolve.
         """
         if self.cyclic:
+            # pseudo-orthogonal
             if Neff is None:
-                # try performing leading correction to norm from site_norm
+                # just perform leading correction to norm from site_norm
                 site_norm = self._k[i:i + self.bsz].H @ self._k[i:i + self.bsz]
-                eff_gs *= site_norm ** 0.5
-            else:
-                eff_e -= self.opts['periodic_nullspace_fudge_factor']**0.5
-                Neffnorm = eff_gs.H @ (Neff @ eff_gs)
-                if abs(Neffnorm - 1) > self.opts['eff_eig_tol']:
-                    raise DMRGError("Effective norm diverged to {}, check the "
-                                    "Neff is positive?".format(Neffnorm))
+                loc_gs = loc_gs * site_norm ** 0.5
+                loc_en *= site_norm
+                return
+
+            loc_en -= self.opts['periodic_nullspace_fudge_factor']**0.5
+
+            # this is helpful for identifying badly behaved numerics
+            Neffnorm = np.asscalar(loc_gs.H @ (Neff @ loc_gs))
+            if abs(Neffnorm - 1) > 10 * self.opts['eff_eig_tol']:
+                raise DMRGError("Effective norm diverged to {}, check "
+                                "that Neff is positive?".format(Neffnorm))
 
     def _update_local_state_1site(self, i, direction, **compress_opts):
         r"""Find the single site effective tensor groundstate of::
 
-            >->->->->-/|\-<-<-<-<-<-<-<-<          /|\
+            >->->->->-/|\-<-<-<-<-<-<-<-<          /|\       <-- uix
             | | | | |  |  | | | | | | | |         / | \
             H-H-H-H-H--H--H-H-H-H-H-H-H-H   =    L--H--R
             | | | | | i|  | | | | | | | |         \i| /
-            >->->->->-\|/-<-<-<-<-<-<-<-<          \|/
+            >->->->->-\|/-<-<-<-<-<-<-<-<          \|/       <-- lix
 
         And insert it back into the states ``k`` and ``b``, and thus
         ``TN_energy``.
@@ -642,17 +702,34 @@ class DMRG:
         uix, lix = self._k[i].inds, self._b[i].inds
         dims = self._k[i].shape
 
+        # get local operators
         Heff, Neff = self.form_local_ops(i, dims, lix, uix)
 
-        eff_e, eff_gs = self._seigsys(Heff, B=Neff, v0=self._k[i].data.ravel())
-        self.post_check(i, Neff, eff_gs, eff_e)
+        # get the old local groundstate to use as initial guess
+        loc_gs_old = self._k[i].data.ravel()
 
-        eff_gs = eff_gs.A
-        self._k[i].data = eff_gs
-        self._b[i].data = eff_gs.conj()
+        # find the local energy and groundstate
+        loc_en, loc_gs = self._seigsys(Heff, B=Neff, v0=loc_gs_old)
 
-        self._compress_after_1site_update(direction, i, **compress_opts)
-        return eff_e[0]
+        # perform some minor checks and corrections
+        self.post_check(i, Neff, loc_gs, loc_en, loc_gs_old)
+
+        # insert back into state and all tensor networks viewing it
+        loc_gs = loc_gs.A
+        self._k[i].data = loc_gs
+        self._b[i].data = loc_gs.conj()
+
+        # normalize - necessary due to loose tolerance eigensolve
+        if self.cyclic:
+            norm = (self._eff_norm ^ all) ** 0.5
+            self._k[i].modify(data=self._k[i].data / norm)
+            self._b[i].modify(data=self._b[i].data / norm)
+
+        tot_en = self._eff_ham ^ all
+
+        self._canonize_after_1site_update(direction, i)
+
+        return np.asscalar(loc_en), tot_en
 
     def _update_local_state_2site(self, i, direction, **compress_opts):
         r"""Find the 2-site effective tensor groundstate of::
@@ -673,25 +750,54 @@ class DMRG:
         # get local operators
         Heff, Neff = self.form_local_ops(i, dims, lix, uix)
 
-        # find the 2-site local groundstate using previous as initial guess
-        v0 = self._k[i].contract(self._k[i + 1], output_inds=uix).data.ravel()
+        # get the old 2-site local groundstate to use as initial guess
+        loc_gs_old = self._k[i].contract(self._k[i + 1]).to_dense(uix)
 
-        eff_e, eff_gs = self._seigsys(Heff, B=Neff, v0=v0)
-        self.post_check(i, Neff, eff_gs, eff_e)
+        # find the 2-site local groundstate and energy
+        loc_en, loc_gs = self._seigsys(Heff, B=Neff, v0=loc_gs_old)
+
+        # perform some minor checks and corrections
+        self.post_check(i, Neff, loc_gs, loc_en, loc_gs_old)
+
+        if not np.allclose(self._k.H @ self._k, 1.0):
+            raise DMRGError("Bad norm.")
 
         # split the two site local groundstate
-        T_AB = Tensor(eff_gs.A.reshape(dims), uix)
+        T_AB = Tensor(loc_gs.A.reshape(dims), uix)
         L, R = T_AB.split(left_inds=uix_L, get='arrays', absorb=direction,
-                          **compress_opts)
+                          right_inds=uix_R, **compress_opts)
 
+        # insert back into state and all tensor networks viewing it
         self._k[i].modify(data=L, inds=(*uix_L, u_bond_ind))
         self._b[i].modify(data=L.conj(), inds=(*lix_L, l_bond_ind))
         self._k[i + 1].modify(data=R, inds=(u_bond_ind, *uix_R))
         self._b[i + 1].modify(data=R.conj(), inds=(l_bond_ind, *lix_R))
 
-        return eff_e[0]
+        # normalize due to compression and insert factor at the correct site
+        if self.cyclic:
+            #   Right         Left
+            #   i  i+1        i  i+1
+            # -->~~o--  or  --o~~<--
+            #   |  |          |  |
+            norm = (self.ME_eff_norm() ^ all) ** 0.5
+            next_site = {'right': i + 1, 'left': i}[direction]
+
+            self._k[next_site].modify(data=self._k[next_site].data / norm)
+            self._b[next_site].modify(data=self._b[next_site].data / norm)
+
+        tot_en = self._eff_ham ^ all
+
+        return np.asscalar(loc_en), tot_en
 
     def _update_local_state(self, i, **update_opts):
+        """Move envs to site ``i`` and dispatch to the correct local updater.
+        """
+        if self.cyclic:
+            # move effective norm first as it can trigger canonize_cyclic etc.
+            self.ME_eff_norm.move_to(i)
+
+        self.ME_eff_ham.move_to(i)
+
         return {
             1: self._update_local_state_1site,
             2: self._update_local_state_2site,
@@ -739,12 +845,15 @@ class DMRG:
 
         direction, begin, sweep = {
             ('R', False): ('right', 'left', range(0, n - bsz + 1)),
-            ('L', False): ('left', 'right', reversed(range(0, n - bsz + 1))),
+            ('L', False): ('left', 'right', range(n - bsz, -1, -1)),
             ('R', True): ('right', 'left', range(0, n)),
-            ('L', True): ('left', 'right', reversed(range(0, n))),
+            ('L', True): ('left', 'right', range(n - 1, -1, -1)),
         }[direction, self.cyclic]
 
-        eff_opts = {'begin': begin, 'bsz': bsz, 'cyclic': self.cyclic,
+        if verbose:
+            sweep = progbar(sweep, ncols=80, total=len(sweep))
+
+        env_opts = {'begin': begin, 'bsz': bsz, 'cyclic': self.cyclic,
                     'ssz': self.opts['periodic_segment_size'],
                     'method': self.opts['periodic_compress_method'],
                     'max_bond': self.opts['periodic_compress_max_bond']}
@@ -752,39 +861,26 @@ class DMRG:
         if self.cyclic:
             # setup moving norm environment
             nm_opts = {
-                'norm': True,
+                **env_opts, 'norm': True,
                 'eps': self.opts['periodic_compress_norm_eps'],
-                'segment_callbacks': (
-                    get_cyclic_canonizer(
-                        self._k, self._b,
-                        inv_tol=self.opts['periodic_canonize_inv_tol']),
-                    get_normalizer(self._k, self._b)
-                ),
+                'segment_callbacks': get_cyclic_canonizer(
+                    self._k, self._b,
+                    inv_tol=self.opts['periodic_canonize_inv_tol']),
             }
-            eff_norms = MovingEnvironment(self.TN_norm, **eff_opts, **nm_opts)
+            self.ME_eff_norm = MovingEnvironment(self.TN_norm, **nm_opts)
 
         # setup moving energy environment
-        en_opts = {
-            'eps': self.opts['periodic_compress_energy_eps']
-        }
-        eff_hams = MovingEnvironment(self.TN_energy, **eff_opts, **en_opts)
+        en_opts = {**env_opts, 'eps': self.opts['periodic_compress_ham_eps']}
+        self.ME_eff_ham = MovingEnvironment(self.TN_energy, **en_opts)
 
-        if verbose:
-            sweep = progbar(sweep, ncols=80, total=len(sweep))
+        # perform the sweep, collecting local and total energies
+        local_ens, tot_ens = zip(*[
+            self._update_local_state(i, direction=direction, **update_opts)
+            for i in sweep])
+        self.local_energies.append(local_ens)
+        self.total_energies.append(tot_ens)
 
-        for i in sweep:
-            # move effective norm first so it can trigger canonize_cyclic
-            if self.cyclic:
-                eff_norms.move_to(i)
-                self._eff_norm = eff_norms()
-
-            eff_hams.move_to(i)
-            self._eff_ham = eff_hams()
-
-            en = self._update_local_state(
-                i, direction=direction, **update_opts)
-
-        return en
+        return tot_ens[-1]
 
     def sweep_right(self, canonize=True, verbose=False, **update_opts):
         return self.sweep(direction='R', canonize=canonize,
@@ -814,13 +910,15 @@ class DMRG:
         if verbose > 1:
             self._k.show()
         if verbose > 0:
-            msg = f"Energy: {self.energy} ... " + ("converged!" if converged
-                                                   else "not converged")
+            msg = "Energy: {} ... {}".format(self.energy, "converged!" if
+                                             converged else "not converged.")
             print(msg, flush=True)
 
     def _check_convergence(self, tol):
-        """By default check the aboslute change in energy.
+        """By default check the absolute change in energy.
         """
+        if len(self.energies) < 2:
+            return False
         return abs(self.energies[-2] - self.energies[-1]) < tol
 
     # -------------------------- main solve driver -------------------------- #
@@ -830,7 +928,7 @@ class DMRG:
               bond_dims=None,
               cutoffs=None,
               sweep_sequence=None,
-              max_sweeps=8,
+              max_sweeps=10,
               verbose=0):
         """Solve the system with a sequence of sweeps, up to a certain
         absolute tolerance in the energy or maximum number of sweeps.
@@ -848,6 +946,13 @@ class DMRG:
             The sequence will be repeated until ``max_sweeps`` is reached.
         max_sweeps : int, optional
             The maximum number of sweeps to perform.
+        verbose : {0, 1, 2}, optional
+            How much information to print about progress.
+
+        Returns
+        -------
+        converged : bool
+            Whether the algorithm has converged to ``tol`` yet.
         """
         verbose = {False: 0, True: 1}.get(verbose, verbose)
 
@@ -865,9 +970,6 @@ class DMRG:
         for i in range(max_sweeps):
             # Get the next direction, bond dimension and cutoff
             LR, bd, ctf = next(RLs), next(self._bond_dims), next(self._cutoffs)
-            if LR == 'X':
-                import random
-                LR = random.choice(('R', 'L'))
             self._print_pre_sweep(i, LR, bd, ctf, verbose=verbose)
 
             # if last sweep was in opposite direction no need to canonize
@@ -885,17 +987,19 @@ class DMRG:
                 'cutoff': ctf,
                 'cutoff_mode': self.opts['compress_cutoff_mode'],
                 'method': self.opts['compress_method'],
-                'verbose': verbose
+                'verbose': verbose,
             }
 
-            # perform sweep, computations and convergence test
-            self.energies += [self.sweep(direction=LR, **sweep_opts)]
+            # perform sweep, any pluging computations
+            self.energies.append(self.sweep(direction=LR, **sweep_opts))
             self._compute_post_sweep()
+
+            # check convergence
             converged = self._check_convergence(tol)
             self._print_post_sweep(converged, verbose=verbose)
-
             if converged:
                 break
+
             previous_LR = LR
 
         return converged
@@ -942,7 +1046,7 @@ class DMRGX(DMRG):
     ham : MatrixProductOperator
         The hamiltonian in MPO form, should have ~area-law eigenstates.
     p0 : MatrixProductState
-        The intial MPS guess, e.g. a computation basis state.
+        The initial MPS guess, e.g. a computation basis state.
     bond_dims : int or sequence of int
         See :class:`DMRG`.
     cutoffs : float or sequence of float
@@ -967,6 +1071,7 @@ class DMRGX(DMRG):
         var_ham2.upper_ind_id = "__ham2{}__"
         var_ham2.lower_ind_id = self._b.site_ind_id
         self.TN_energy2 = self._k | var_ham1 | var_ham2 | self._b
+        self.energies.append(self.TN_energy ^ ...)
         self.variances = [(self.TN_energy2 ^ ...) - self.energies[-1]**2]
         self._target_energy = self.energies[-1]
 
@@ -1031,7 +1136,7 @@ class DMRGX(DMRG):
         #     0-0-0-0-0-0-0-0-0-0-0  <- state from previous step
         #
         # choose the eigenvectors with best overlap
-        overlaps = np.abs((self._eff_ovlp ^ None).data)
+        overlaps = np.abs((self._eff_ovlp ^ all).data)
 
         if self.opts['overlap_thresh'] == 1:
             # just choose the maximum overlap state
@@ -1079,45 +1184,45 @@ class DMRGX(DMRG):
         # store the current effective energy for possibly targeted seigsys
         self._target_energy = evals[best]
 
-        self._compress_after_1site_update(direction, i, **compress_opts)
+        self._canonize_after_1site_update(direction, i)
         return evals[best]
 
-    def _update_local_state_2site_dmrgx(self, i, direction, **compress_opts):
-        raise NotImplementedError("2-site DMRGX not implemented yet.")
-        dims, lix_L, lix_R, lix, uix_L, uix_R, uix, l_bond_ind, u_bond_ind = \
-            parse_2site_inds_dims(self._k, self._b, i)
+    # def _update_local_state_2site_dmrgx(self, i, direction, **compress_opts):
+    #     raise NotImplementedError("2-site DMRGX not implemented yet.")
+    #     dims, lix_L, lix_R, lix, uix_L, uix_R, uix, l_bond_ind, u_bond_ind =\
+    #         parse_2site_inds_dims(self._k, self._b, i)
 
-        # contract remaining hamiltonian and get its dense representation
-        eff_ham = (self._eff_ham ^ '_HAM')['_HAM']
-        eff_ham.fuse((('lower', lix), ('upper', uix)), inplace=True)
-        A = eff_ham.data
+    #     # contract remaining hamiltonian and get its dense representation
+    #     eff_ham = (self._eff_ham ^ '_HAM')['_HAM']
+    #     eff_ham.fuse((('lower', lix), ('upper', uix)), inplace=True)
+    #     A = eff_ham.data
 
-        # eigen-decompose and reshape eigenvectors thus::
-        #
-        #    ||'__ev_ind__'
-        #    EE
-        #   /||\
-        #
-        D = prod(dims)
-        if D <= self.opts['eff_eig_partial_cutoff']:
-            evals, evecs = eigsys(A)
-        else:
-            if isinstance(self.opts['eff_eig_partial_k'], float):
-                k = int(self.opts['eff_eig_partial_k'] * D)
-            else:
-                k = self.opts['eff_eig_partial_k']
+    #     # eigen-decompose and reshape eigenvectors thus::
+    #     #
+    #     #    ||'__ev_ind__'
+    #     #    EE
+    #     #   /||\
+    #     #
+    #     D = prod(dims)
+    #     if D <= self.opts['eff_eig_partial_cutoff']:
+    #         evals, evecs = eigsys(A)
+    #     else:
+    #         if isinstance(self.opts['eff_eig_partial_k'], float):
+    #             k = int(self.opts['eff_eig_partial_k'] * D)
+    #         else:
+    #             k = self.opts['eff_eig_partial_k']
 
-            # find the 2-site local state using previous as initial guess
-            v0 = self._k[i].contract(self._k[i + 1], output_inds=uix).data
+    #         # find the 2-site local state using previous as initial guess
+    #         v0 = self._k[i].contract(self._k[i + 1], output_inds=uix).data
 
-            evals, evecs = seigsys(
-                A, sigma=self.energies[-1], v0=v0,
-                k=k, tol=self.opts['eff_eig_tol'], backend='scipy')
+    #         evals, evecs = seigsys(
+    #             A, sigma=self.energies[-1], v0=v0,
+    #             k=k, tol=self.opts['eff_eig_tol'], backend='scipy')
 
     def _update_local_state_dmrgx(self, i, **update_opts):
         return {
             1: self._update_local_state_1site_dmrgx,
-            2: self._update_local_state_2site_dmrgx,
+            # 2: self._update_local_state_2site_dmrgx,
         }[self.bsz](i, **update_opts)
 
     def sweep(self, direction, canonize=True, verbose=False, **update_opts):
@@ -1174,8 +1279,9 @@ class DMRGX(DMRG):
         if verbose > 1:
             self._k.show()
         if verbose > 0:
-            msg = (f"Energy={self.energy}, Variance={self.variance} ... " +
-                   "converged!" if converged else "not converged")
+            msg = "Energy={}, Variance={} ... {}"
+            msg = msg.format(self.energy, self.variance, "converged!"
+                             if converged else "not converged.")
             print(msg, flush=True)
 
     def _check_convergence(self, tol):

@@ -93,31 +93,37 @@ class TestMovingEnvironment:
 
     @pytest.mark.parametrize("n", [20, 19])
     @pytest.mark.parametrize("bsz", [1, 2])
-    def test_cyclic_moving_env_init_left(self, n, bsz):
+    @pytest.mark.parametrize("ssz", [1 / 2, 1.0])
+    def test_cyclic_moving_env_init_left(self, n, bsz, ssz):
+        nenv = 2
         p = MPS_rand_state(n, 4, cyclic=True)
         norm = p.H & p
-        mes = MovingEnvironment(norm, begin='left', bsz=bsz, cyclic=True)
-        assert len(mes.envs) == n // 2
+        mes = MovingEnvironment(norm, begin='left', bsz=bsz,
+                                cyclic=True, ssz=ssz)
+        assert len(mes.envs) == n // 2 + n % 2
         assert mes.pos == 0
-        assert len(mes.envs[0].tensors) == 2 * bsz + 2
-        assert len(mes.envs[n // 2 - 1].tensors) == 2 * (n // 2 + bsz // 2) + 2
-        assert n // 2 not in mes.envs
+        assert len(mes.envs[0].tensors) == 2 * bsz + nenv
+        assert (len(mes.envs[n // 2 - 1].tensors) ==
+                2 * (n // 2 + bsz // 2) + nenv)
+        assert n // 2 + n % 2 not in mes.envs
         assert n - 1 not in mes.envs
 
         for i in range(1, 2 * n):
             mes.move_right()
             assert mes.pos == i % n
             cur_env = mes()
-            assert len(cur_env.tensors) == 2 * bsz + 2
-            assert (cur_env ^ None) == pytest.approx(1.0)
+            assert len(cur_env.tensors) == 2 * bsz + nenv
+            assert (cur_env ^ all) == pytest.approx(1.0)
 
     @pytest.mark.parametrize("n", [20, 19])
     @pytest.mark.parametrize("bsz", [1, 2])
-    def test_cyclic_moving_env_init_right(self, n, bsz):
+    @pytest.mark.parametrize("ssz", [1 / 2, 1.0])
+    def test_cyclic_moving_env_init_right(self, n, bsz, ssz):
         p = MPS_rand_state(n, 4, cyclic=True)
         norm = p.H | p
-        mes = MovingEnvironment(norm, begin='right', bsz=bsz, cyclic=True)
-        assert len(mes.envs) == n // 2
+        mes = MovingEnvironment(norm, begin='right', bsz=bsz,
+                                cyclic=True, ssz=ssz)
+        assert len(mes.envs) == n // 2 + n % 2
         assert mes.pos == n - 1
         assert len(mes.envs[n - 1].tensors) == 2 * bsz + 2
         assert len(mes.envs[n - n // 2].tensors) == 2 * (n // 2 + bsz // 2) + 2
@@ -129,7 +135,7 @@ class TestMovingEnvironment:
             assert mes.pos == i % n
             cur_env = mes()
             assert len(cur_env.tensors) == 2 * bsz + 2
-            assert (cur_env ^ None) == pytest.approx(1.0)
+            assert (cur_env ^ all) == pytest.approx(1.0)
 
 
 class TestDMRG1:
@@ -179,16 +185,17 @@ class TestDMRG1:
     @pytest.mark.parametrize("MPO_ham", [MPO_ham_XY, MPO_ham_heis])
     @pytest.mark.parametrize("cyclic", [False, True])
     def test_ground_state_matches(self, dense, MPO_ham, cyclic):
-        n = 6
+        n = 10
 
         tol = 3e-2 if cyclic else 1e-4
 
         h = MPO_ham(n, cyclic=cyclic)
-        dmrg = DMRG1(h, bond_dims=[2, 4, 8, 12])
+        dmrg = DMRG1(h, bond_dims=[4, 8, 12])
         dmrg.opts['eff_eig_dense'] = dense
-        dmrg.opts['eff_eig_bkd'] = 'scipy'
-        dmrg.opts['periodic_segment_size'] = 2
-        assert dmrg.solve(tol=1e-5)
+        dmrg.opts['eff_eig_backend'] = 'scipy'
+        dmrg.opts['periodic_segment_size'] = 1.0
+        dmrg.opts['periodic_nullspace_fudge_factor'] = 1e-8
+        assert dmrg.solve(tol=tol / 10, verbose=1)
         assert dmrg.state.cyclic == cyclic
         eff_e, mps_gs = dmrg.energy, dmrg.state
         mps_gs_dense = mps_gs.to_dense()
@@ -199,7 +206,7 @@ class TestDMRG1:
 
         # check against dense form
         actual_e, gs = seigsys(h_dense, k=1)
-        assert_allclose(actual_e, eff_e)
+        assert_allclose(actual_e, eff_e, rtol=tol)
         assert_allclose(abs(expec(mps_gs_dense, gs)), 1.0, rtol=tol)
 
         # check against actual MPO_ham
@@ -216,7 +223,7 @@ class TestDMRG1:
     def test_ising_and_MPS_product_state(self):
         h = MPO_ham_ising(6, bx=2.0, j=0.1)
         dmrg = DMRG1(h, bond_dims=8)
-        assert dmrg.solve()
+        assert dmrg.solve(verbose=1)
         eff_e, mps_gs = dmrg.energy, dmrg.state
         mps_gs_dense = mps_gs.to_dense()
         assert_allclose(mps_gs_dense.H @ mps_gs_dense, 1.0)
@@ -241,13 +248,14 @@ class TestDMRG2:
 
         tol = 3e-2 if cyclic else 1e-4
 
-        dmrg = DMRG2(h, bond_dims=[2, 4, 8, 12])
+        dmrg = DMRG2(h, bond_dims=[4, 8, 12])
         assert dmrg._k[0].dtype == float
         dmrg.opts['eff_eig_dense'] = dense
-        dmrg.opts['eff_eig_bkd'] = 'scipy'
-        dmrg.opts['periodic_segment_size'] = 2
+        dmrg.opts['eff_eig_backend'] = 'scipy'
+        dmrg.opts['periodic_segment_size'] = 1.0
+        dmrg.opts['periodic_nullspace_fudge_factor'] = 1e-8
 
-        assert dmrg.solve(tol=1e-5)
+        assert dmrg.solve(tol=tol / 10, verbose=1)
 
         # XXX: need to dispatch SLEPc seigsys on real input
         # assert dmrg._k[0].dtype == float
@@ -285,7 +293,7 @@ class TestDMRGX:
 
         b0 = p0.H
         align_TN_1D(p0, ham, b0, inplace=True)
-        en0 = np.asscalar(p0 & ham & b0 ^ ...)
+        en0 = (p0 & ham & b0) ^ ...
 
         dmrgx = DMRGX(ham, p0, chi)
         dmrgx.sweep_right()

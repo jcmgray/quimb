@@ -1,4 +1,6 @@
 from .tensor_core import (
+    get_tensor_backend,
+    set_tensor_backend,
     contract,
     contract_path,
     tensor_contract,
@@ -32,6 +34,7 @@ from .tensor_1d import (
     MatrixProductState,
     MatrixProductOperator,
     align_TN_1D,
+    expec_TN_1D,
 )
 from .tensor_dmrg import (
     MovingEnvironment,
@@ -43,6 +46,8 @@ from .tensor_dmrg import (
 
 
 __all__ = (
+    "get_tensor_backend",
+    "set_tensor_backend",
     "contract",
     "contract_path",
     "tensor_contract",
@@ -72,6 +77,7 @@ __all__ = (
     "MatrixProductState",
     "MatrixProductOperator",
     "align_TN_1D",
+    "expec_TN_1D",
     "MovingEnvironment",
     "DMRG",
     "DMRG1",

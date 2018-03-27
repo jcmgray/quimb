@@ -384,7 +384,7 @@ class TestMatrixProductState:
         assert_allclose(k[block].H @ k[block], 1.0, rtol=2e-4)
         assert_allclose(b[block].H @ b[block], 1.0, rtol=2e-4)
 
-        ii = kb.select(block, mode='!any') ^ None
+        ii = kb.select(block, mode='!any') ^ all
 
         if isinstance(block, slice):
             start, stop = block.start, block.stop

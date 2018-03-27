@@ -60,8 +60,8 @@ def align_TN_1D(*tns, ind_ids=None, inplace=False):
             elif i == len(tns) - 1:
                 tn.site_ind_id = ind_ids[i - 1]
             else:
-                raise ValueError("An MPS can only be aligned as the first or "
-                                 "last TN in a sequence.")
+                raise ValueError("An MPS can only be aligned as the "
+                                 "first or last TN in a sequence.")
 
         elif isinstance(tn, MatrixProductOperator):
             tn.upper_ind_id = ind_ids[i - 1]
@@ -71,6 +71,42 @@ def align_TN_1D(*tns, ind_ids=None, inplace=False):
             raise ValueError("Can only align MPS and MPOs currently.")
 
     return tns
+
+
+def expec_TN_1D(*tns, compress=None, eps=1e-15):
+    """Compute the expectation of several 1D TNs, using transfer matrix
+    compression if any are periodic.
+
+    Parameters
+    ----------
+    tns : sequence of TensorNetwork1D
+        The MPS and MPO to find expectation of. Should start and begin with
+        an MPS e.g. ``(MPS, MPO, ...,  MPS)``.
+    compress : {None, False, True}, optional
+        Whether to perform transfer matrix compression on cyclic systems. If
+        set to ``None`` (the default), decide heuristically.
+    eps : float, optional
+        The accuracy of the transfer matrix compression.
+    """
+    expec_tn = TensorNetwork(align_TN_1D(*tns))
+
+    # if OBC or <= 0.0 specified use exact contraction
+    cyclic = any(tn.cyclic for tn in tns)
+    if not cyclic:
+        compress = False
+
+    # work out whether to compress, could definitely be improved ...
+    if compress is None:
+        # compression only worth it for long, high bond dimension TNs.
+        n = expec_tn.nsites
+        total_bd = qu.prod(tn.bond_dim(0, 1) for tn in tns)
+        compress = (n >= 100) and (total_bd >= 1000)
+
+    if compress:
+        expec_tn.replace_section_with_svd(1, n, eps=eps, inplace=True)
+        return expec_tn ^ all
+
+    return expec_tn ^ ...
 
 
 def rand_padder(vector, pad_width, iaxis, kwargs):
@@ -783,8 +819,9 @@ class MatrixProductState(TensorNetwork1D):
         return self._site_ind_id
 
     def _set_site_ind_id(self, new_id):
-        self.reindex_sites(new_id, inplace=True)
-        self._site_ind_id = new_id
+        if self._site_ind_id != new_id:
+            self.reindex_sites(new_id, inplace=True)
+            self._site_ind_id = new_id
 
     site_ind_id = property(_get_site_ind_id, _set_site_ind_id,
                            doc="The string specifier for the physical indices")
@@ -852,7 +889,7 @@ class MatrixProductState(TensorNetwork1D):
         """
         return self.add_MPS(other * -1, inplace=True)
 
-    def normalize(self, bra=None, eps=1e-14):
+    def normalize(self, bra=None, eps=1e-15, insert=None):
         """Normalize this MPS, optional with co-vector ``bra``. For periodic
         MPS this uses transfer matrix SVD approximation with precision ``eps``
         in order to be efficient. Inplace.
@@ -864,17 +901,25 @@ class MatrixProductState(TensorNetwork1D):
         eps : float, optional
             If cyclic, precision to approximation transfer matrix with.
             Default: 1e-14.
-        """
-        if not self.cyclic:
-            norm = self.H @ self
-        else:
-            pp = self.H & self
-            pp.replace_section_with_svd(1, self.nsites, eps, inplace=True)
-            norm = pp ^ None
+        insert : int, optional
+            Insert the corrective normalization on this site, random if
+            not given.
 
-        self /= norm ** 0.5
+        Returns
+        -------
+        old_norm : float
+            The old norm ``self.H @ self``.
+        """
+        norm = expec_TN_1D(self.H, self, eps=eps)
+
+        if insert is None:
+            insert = -1
+
+        self[insert].modify(data=self[insert].data / norm ** 0.5)
         if bra is not None:
-            bra /= norm ** 0.5
+            bra[insert].modify(data=bra[insert].data / norm ** 0.5)
+
+        return norm
 
     def schmidt_values(self, i, current_orthog_centre=None, method='svd'):
         r"""Find the schmidt values associated with the bipartition of this
@@ -1500,8 +1545,9 @@ class MatrixProductOperator(TensorNetwork1D):
         return self._lower_ind_id
 
     def _set_lower_ind_id(self, new_id):
-        self.reindex_lower_sites(new_id, inplace=True)
-        self._lower_ind_id = new_id
+        if self._lower_ind_id != new_id:
+            self.reindex_lower_sites(new_id, inplace=True)
+            self._lower_ind_id = new_id
 
     lower_ind_id = property(_get_lower_ind_id, _set_lower_ind_id,
                             doc="The string specifier for the lower phyiscal "
@@ -1516,8 +1562,9 @@ class MatrixProductOperator(TensorNetwork1D):
         return self._upper_ind_id
 
     def _set_upper_ind_id(self, new_id):
-        self.reindex_upper_sites(new_id, inplace=True)
-        self._upper_ind_id = new_id
+        if self._upper_ind_id != new_id:
+            self.reindex_upper_sites(new_id, inplace=True)
+            self._upper_ind_id = new_id
 
     upper_ind_id = property(_get_upper_ind_id, _set_upper_ind_id,
                             doc="The string specifier for the upper phyiscal "

@@ -25,10 +25,8 @@ from ..accel import prod, njit, realify_scalar, vdot
 from ..linalg.base_linalg import norm_fro_dense
 from ..utils import raise_cant_find_library_function, functions_equal
 
-
 # Maximum size of a tensor - / 32 to account for bytes + extra space
 MAXT = psutil.virtual_memory().total / 32
-
 
 try:
     import opt_einsum
@@ -62,6 +60,18 @@ def get_contract_expr(contract_str, *shapes, memory_limit=None, **kwargs):
     kwargs['memory_limit'] = memory_limit
 
     return contract_expression(contract_str, *shapes, **kwargs)
+
+
+_TENSOR_BACKEND = 'numpy'
+
+
+def get_tensor_backend():
+    return _TENSOR_BACKEND
+
+
+def set_tensor_backend(backend):
+    global _TENSOR_BACKEND
+    _TENSOR_BACKEND = backend
 
 
 # --------------------------------------------------------------------------- #
@@ -135,7 +145,7 @@ class HuskArray(np.ndarray):
 
 
 def tensor_contract(*tensors, output_inds=None, return_expression=False,
-                    backend='numpy', **contract_opts):
+                    backend=None, **contract_opts):
     """Efficiently contract multiple tensors, combining their tags.
 
     Parameters
@@ -153,6 +163,9 @@ def tensor_contract(*tensors, output_inds=None, return_expression=False,
     -------
     scalar or Tensor
     """
+    if backend is None:
+        backend = _TENSOR_BACKEND
+
     i_ix = tuple(t.inds for t in tensors)  # input indices per tensor
     a_ix = tuple(concat(i_ix))  # list of all input indices
 
@@ -476,7 +489,7 @@ def _array_split_lq(x):
 
 def tensor_split(T, left_inds, method='svd', max_bond=None, absorb='both',
                  cutoff=1e-10, cutoff_mode='sum2', get=None,
-                 ltags=None, rtags=None):
+                 ltags=None, rtags=None, right_inds=None):
     """Decompose this tensor into two tensors.
 
     Parameters
@@ -529,7 +542,8 @@ def tensor_split(T, left_inds, method='svd', max_bond=None, absorb='both',
     else:
         left_inds = tuple(left_inds)
 
-    right_inds = tuple(x for x in T.inds if x not in left_inds)
+    if right_inds is None:
+        right_inds = tuple(x for x in T.inds if x not in left_inds)
 
     TT = T.transpose(*left_inds, *right_inds)
 
@@ -1221,7 +1235,9 @@ class TNLinearOperator(spla.LinearOperator):
         The dimensions corresponding to right_inds. Will figure out if None.
     """
 
-    def __init__(self, tns, left_inds, right_inds, ldims=None, rdims=None):
+    def __init__(self, tns, left_inds, right_inds, ldims=None, rdims=None,
+                 backend=None):
+        self.backend = _TENSOR_BACKEND if backend is None else backend
 
         if isinstance(tns, TensorNetwork):
             self._tensors = tns.tensors
@@ -1255,7 +1271,8 @@ class TNLinearOperator(spla.LinearOperator):
                                               return_expression=True,
                                               output_inds=self.left_inds)
 
-        out_data = self._matvec_fn(*(t.data for t in self._tensors), in_data)
+        out_data = self._matvec_fn(*(t.data for t in self._tensors), in_data,
+                                   backend=self.backend)
         return out_data.ravel()
 
     def _rmatvec(self, vec):
@@ -1268,7 +1285,8 @@ class TNLinearOperator(spla.LinearOperator):
                                                return_expression=True,
                                                output_inds=self.right_inds)
 
-        out_data = self._rmatvec_fn(*(t.data for t in self._tensors), in_data)
+        out_data = self._rmatvec_fn(*(t.data for t in self._tensors), in_data,
+                                    backend=self.backend)
         return out_data.conj().ravel()
 
     def _matmat(self, mat):
@@ -1282,7 +1300,8 @@ class TNLinearOperator(spla.LinearOperator):
                 *self._tensors, iT, return_expression=True,
                 output_inds=(*self.left_inds, '__mat_ix__'))
 
-        out_data = self._matmat_fn(*(t.data for t in self._tensors), in_data)
+        out_data = self._matmat_fn(*(t.data for t in self._tensors), in_data,
+                                   backend=self.backend)
         return out_data.reshape(-1, d)
 
     def to_dense(self):
@@ -1403,7 +1422,7 @@ class TensorNetwork(object):
 
             # set default blocksize
             if self.structure_bsz is None:
-                self.structure_bsz = 5
+                self.structure_bsz = 10
 
     def _combine_properties(self, other):
         props_equals = (('structure', lambda u, v: u == v),
@@ -1847,7 +1866,7 @@ class TensorNetwork(object):
         -------
         set[str]
         """
-        if tags in (None, ...):
+        if tags in (None, ..., all):
             return set(self.tensor_index)
         elif isinstance(tags, (int, slice)):
             tags = self.sites2tags(tags)
@@ -1999,12 +2018,6 @@ class TensorNetwork(object):
         --------
         partition, select, select_tensors
         """
-
-        # contract all
-        if tags is ...:
-            return None, self.tensor_index.values()
-
-        # Else get the locations of where each tag is found on tensor
         tagged_tids = self._get_tids_from_tags(tags, mode=mode)
 
         # check if all tensors have been tagged
@@ -2635,6 +2648,12 @@ class TensorNetwork(object):
         labels = {}
 
         for i, t1 in enumerate(ts):
+
+            if not t1.inds:
+                # is a scalar
+                G.add_node(i)
+                continue
+
             for ix in t1.inds:
                 found_ind = False
 
