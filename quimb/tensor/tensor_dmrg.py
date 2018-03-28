@@ -86,14 +86,14 @@ def get_default_opts(cyclic=False):
         'compress_method': 'svd',
         'compress_cutoff_mode': 'sum2',
         'bond_expand_rand_strength': 1e-6,
-        'periodic_segment_size': 1 / 3,
+        'periodic_segment_size': 1 / 2,
         'periodic_compress_method': 'isvd',
-        'periodic_compress_norm_eps': 1e-8,
+        'periodic_compress_norm_eps': 1e-6,
         'periodic_compress_ham_eps': 1e-6,
         'periodic_compress_max_bond': -1,
         'periodic_nullspace_fudge_factor': 1e-12,
         'periodic_canonize_inv_tol': 1e-10,
-        'periodic_orthog_tol': 1e-8,
+        'periodic_orthog_tol': 1e-6,
     }
 
 
@@ -759,9 +759,6 @@ class DMRG:
         # perform some minor checks and corrections
         self.post_check(i, Neff, loc_gs, loc_en, loc_gs_old)
 
-        if not np.allclose(self._k.H @ self._k, 1.0):
-            raise DMRGError("Bad norm.")
-
         # split the two site local groundstate
         T_AB = Tensor(loc_gs.A.reshape(dims), uix)
         L, R = T_AB.split(left_inds=uix_L, get='arrays', absorb=direction,
@@ -924,7 +921,7 @@ class DMRG:
     # -------------------------- main solve driver -------------------------- #
 
     def solve(self,
-              tol=1e-8,
+              tol=1e-4,
               bond_dims=None,
               cutoffs=None,
               sweep_sequence=None,
@@ -1010,8 +1007,11 @@ class DMRG1(DMRG):
     """
     __doc__ += DMRG.__doc__
 
-    def __init__(self, ham, which='SA',
-                 bond_dims=(8, 16, 32, 64), cutoffs=1e-8):
+    def __init__(self, ham, which='SA', bond_dims=None, cutoffs=1e-8):
+
+        if bond_dims is None:
+            bond_dims = range(10, 1001, 10)
+
         super().__init__(ham, bond_dims=bond_dims, cutoffs=cutoffs,
                          which=which, bsz=1)
 
@@ -1021,8 +1021,11 @@ class DMRG2(DMRG):
     """
     __doc__ += DMRG.__doc__
 
-    def __init__(self, ham, which='SA',
-                 bond_dims=(10, 20, 50, 100), cutoffs=1e-8):
+    def __init__(self, ham, which='SA', bond_dims=None, cutoffs=1e-8):
+
+        if bond_dims is None:
+            bond_dims = [8, 16, 32, 64, 128, 256, 512, 1024]
+
         super().__init__(ham, bond_dims=bond_dims, cutoffs=cutoffs,
                          which=which, bsz=2)
 
