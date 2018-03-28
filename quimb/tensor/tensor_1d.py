@@ -1171,6 +1171,7 @@ class MatrixProductState(TensorNetwork1D):
                 kb.add_tag(name, where=map(self.site_tag, where), mode='any')
 
         if self.cyclic:
+            # can combine right and left envs
             sections = [envm, sysa, sysb, (*envr, *envl)]
         else:
             sections = [envm]
@@ -1181,8 +1182,9 @@ class MatrixProductState(TensorNetwork1D):
                 sections.append(sysb)
 
         # ignore empty sections
-        sections = [s for s in sections if len(s) > 0]
+        sections = list(filter(len, sections))
 
+        # figure out the various indices
         ul_ur_ll_lrs = []
         for section in sections:
 
@@ -1203,17 +1205,17 @@ class MatrixProductState(TensorNetwork1D):
 
             ul_ur_ll_lrs.append((ul, ur, ll, lr))
 
-        # lateral compress all sections
+        # lateral compress sections if long
+        compressed = []
         for section, (ul, _, ll, _) in zip(sections, ul_ur_ll_lrs):
 
             if lateral_cutoff:
                 # if section is short doesn't make sense to lateral compress
                 #     work out roughly when this occurs by comparing bond size
-                left_sz = self.bond_dim(section[0] - 1, section[0]) ** 2
-                right_sz = self.bond_dim(section[-1], section[-1] + 1) ** 2
+                left_sz = self.bond_dim(section[0] - 1, section[0])
+                right_sz = self.bond_dim(section[-1], section[-1] + 1)
 
-                if left_sz * right_sz > self.phys_dim() ** len(section):
-                    # import pdb; pdb.set_trace()
+                if self.phys_dim() ** len(section) <= left_sz * right_sz:
                     continue
 
             section_tags = map(self.site_tag, section)
@@ -1225,6 +1227,7 @@ class MatrixProductState(TensorNetwork1D):
             kb.replace_with_svd(section_tags, (ul, ll), heps, inplace=True,
                                 ltags='_LEFT', rtags='_RIGHT', method=hmethod,
                                 **compress_opts)
+            compressed.append(section)
 
         # vertical compress and unfold system sections only
         for section, (ul, ur, ll, lr) in zip(sections, ul_ur_ll_lrs):
@@ -1235,24 +1238,47 @@ class MatrixProductState(TensorNetwork1D):
             else:
                 continue
 
-            #                    ----1----             )
-            #  -\      /-            (             ----1----
-            #    0~~~~0     -->      )       -->
-            #  -/      \-            (             ----1----
-            #                    ----1----             (
+            section_tags = [self.site_tag(i) for i in section]
 
-            # do vertical SVD
-            section_tags = map(self.site_tag, section)
-            kb.replace_with_svd(section_tags, (ul, ur), right_inds=(ll, lr),
-                                inplace=True, ltags='_UP', rtags='_DOWN',
-                                method=vmethod, eps=veps, **compress_opts)
+            if section in compressed:
+                #                    ----U----             |
+                #  -\      /-            /             ----U----
+                #    L~~~~R     -->      \       -->
+                #  -/      \-            /             ----D----
+                #                    ----D----             |
 
-            # cut joined bond by reindexing to upper- and lower- ind_id.
-            T_UP = kb[self.site_tag(section[0]), '_UP']
-            T_DN = kb[self.site_tag(section[0]), '_DOWN']
-            bnd, = T_UP.shared_inds(T_DN)
-            T_UP.reindex({bnd: "_tmp_ind_u{}".format(label)}, inplace=True)
-            T_DN.reindex({bnd: "_tmp_ind_l{}".format(label)}, inplace=True)
+                # do vertical SVD
+                kb.replace_with_svd(
+                    section_tags, (ul, ur), right_inds=(ll, lr), eps=veps,
+                    ltags='_UP', rtags='_DOWN', method=vmethod, inplace=True,
+                    **compress_opts)
+
+                # cut joined bond by reindexing to upper- and lower- ind_id.
+                T_UP = kb[self.site_tag(section[0]), '_UP']
+                T_DN = kb[self.site_tag(section[0]), '_DOWN']
+                bnd, = T_UP.shared_inds(T_DN)
+                T_UP.reindex({bnd: "_tmp_ind_u{}".format(label)}, inplace=True)
+                T_DN.reindex({bnd: "_tmp_ind_l{}".format(label)}, inplace=True)
+
+            else:
+                # just unfold and fuse physical indices:
+                #                              |
+                #   -A-A-A-A-A-A-A-        -AAAAAAA-
+                #    | | | | | | |   --->
+                #   -A-A-A-A-A-A-A-        -AAAAAAA-
+                #                              |
+                kb, sec = kb.partition(section_tags, inplace=True)
+                sec_l, sec_u = sec.partition('_KET', inplace=True)
+                T_UP = (sec_u ^ all)
+                T_UP.tags.add('_UP')
+                T_UP.fuse({"_tmp_ind_u{}".format(label):
+                           [self.site_ind(i) for i in section]}, inplace=True)
+                T_DN = (sec_l ^ all)
+                T_DN.tags.add('_DOWN')
+                T_DN.fuse({"_tmp_ind_l{}".format(label):
+                           [self.site_ind(i) for i in section]}, inplace=True)
+                kb |= T_UP
+                kb |= T_DN
 
         if not self.cyclic:
             # check if either system is at end, and thus reduces to identities

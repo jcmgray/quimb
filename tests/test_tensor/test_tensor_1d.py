@@ -344,7 +344,6 @@ class TestMatrixProductState:
                                       range(20, 30), range(0, 30)])
     @pytest.mark.parametrize("sysb", [range(30, 40), range(40, 50),
                                       range(50, 60), range(30, 60)])
-    @pytest.mark.parametrize('lateral_cutoff', [False, True])
     def test_partial_trace_compress(self, method, cyclic,
                                     sysa, sysb, lateral_cutoff):
         k = MPS_rand_state(60, 8, cyclic=cyclic)
