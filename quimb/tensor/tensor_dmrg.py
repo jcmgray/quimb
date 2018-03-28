@@ -227,7 +227,7 @@ class MovingEnvironment:
             self.segment_callbacks = segment_callbacks
 
         self.n = tn.nsites
-        self.site_tag = lambda i: tn.structure.format(i % self.n)
+        self.structure = tn.structure
 
         if self.cyclic:
             self.eps = eps
@@ -257,6 +257,9 @@ class MovingEnvironment:
             start, stop = (0, self.n - self.bsz + 1)
 
         self.init_segment(begin, start, stop)
+
+    def site_tag(self, i):
+        return self.structure.format(i % self.n)
 
     def init_segment(self, begin, start, stop):
         """Initialize the environments in ``range(start, stop)`` so that one
