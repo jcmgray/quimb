@@ -140,7 +140,8 @@ def norm_fro(a):
     return sqrt(inner(a, a))
 
 
-def construct_lanczos_tridiag(A, K, v0=None, bsz=1, beta_tol=1e-6, seed=False):
+def construct_lanczos_tridiag(A, K, v0=None, bsz=1, k_min=4,
+                              beta_tol=1e-6, seed=False):
     """Construct the tridiagonal lanczos matrix using only matvec operators.
     This is a generator that iteratively yields the alpha and beta digaonals
     at each step.
@@ -160,6 +161,8 @@ def construct_lanczos_tridiag(A, K, v0=None, bsz=1, beta_tol=1e-6, seed=False):
         The 'breakdown' tolerance. If the next beta ceofficient in the lanczos
         matrix is less that this, implying that the full non-null space has
         been found, terminate early.
+    k_min : int, optional
+        The minimum size of the krylov subspace for form.
 
     Yields
     ------
@@ -212,7 +215,7 @@ def construct_lanczos_tridiag(A, K, v0=None, bsz=1, beta_tol=1e-6, seed=False):
         Vm1[...] = V[...]
         np.divide(Vt, beta[j + 1], out=V)
 
-        if j > 3:
+        if j >= k_min:
             yield (np.copy(alpha[1:j + 1]),
                    np.copy(beta[2:j + 2]),
                    np.copy(beta[1])**2 / bsz)
@@ -245,9 +248,13 @@ def lanczos_tridiag_eig(alpha, beta, check_finite=True):
     return tl, tv
 
 
-def calc_trace_fn_tridiag(tl, tv, fn, pos=True):
-    return sum(fn(max(tl[i], 0.0) if pos else tl[i]) * tv[0, i]**2
-               for i in range(tl.size))
+def calc_trace_fn_tridiag(tl, tv, f, pos=True):
+    """Spectral ritz function sum, weighted by ritz vectors.
+    """
+    return sum(
+        tv[0, i]**2 * f(max(tl[i], 0.0) if pos else tl[i])
+        for i in range(tl.size)
+    )
 
 
 def ext_per_trim(x, p=0.6, s=1.0):
@@ -284,8 +291,8 @@ def ext_per_trim(x, p=0.6, s=1.0):
     return trimmed_x
 
 
-def _single_random_estimate(A, K, bsz, beta_tol, v0, fn, pos, tau, tol_scale,
-                            verbosity=0, *, seed=None, **lanc_opts):
+def _single_random_estimate(A, K, bsz, beta_tol, v0, f, pos, tau, tol_scale,
+                            k_min=4, verbosity=0, *, seed=None, **lanc_opts):
     # choose normal (any LinearOperator) or MPO lanczos tridiag construction
     if isinstance(A, MatrixProductOperator):
         lanc_fn = construct_lanczos_tridiag_MPO
@@ -298,12 +305,12 @@ def _single_random_estimate(A, K, bsz, beta_tol, v0, fn, pos, tau, tol_scale,
     # iteratively build the lanczos matrix, checking for convergence
     estimate = None
     for alpha, beta, scaling in lanc_fn(
-            A, K=K, beta_tol=beta_tol, seed=seed,
+            A, K=K, beta_tol=beta_tol, seed=seed, k_min=k_min,
             v0=v0() if callable(v0) else v0, **lanc_opts):
 
         try:  # First bound]
             Tl, Tv = lanczos_tridiag_eig(alpha, beta, check_finite=False)
-            Gf = scaling * calc_trace_fn_tridiag(Tl, Tv, fn=fn, pos=pos)
+            Gf = scaling * calc_trace_fn_tridiag(Tl, Tv, f=f, pos=pos)
         except scla.LinAlgError:
             import warnings
             warnings.warn("Approx Spectral Gf tri-eig didn't converge.")
@@ -319,7 +326,7 @@ def _single_random_estimate(A, K, bsz, beta_tol, v0, fn, pos, tau, tol_scale,
         try:  # second bound
             Rf = scaling * calc_trace_fn_tridiag(*lanczos_tridiag_eig(
                 np.append(alpha, alpha[0]), beta, check_finite=False),
-                fn=fn, pos=pos)
+                f=f, pos=pos)
         except scla.LinAlgError:
             import warnings
             warnings.warn("Approx Spectral Rf tri-eig didn't converge.")
@@ -345,19 +352,37 @@ def _single_random_estimate(A, K, bsz, beta_tol, v0, fn, pos, tau, tol_scale,
     return estimate
 
 
-def approx_spectral_function(A, fn, tol=5e-3, K=128, R=1024, bsz=1, v0=None,
-                             pos=False, tau=1e-3, tol_scale=1, beta_tol=1e-6,
-                             mean_p=0.7, mean_s=1.0, mpi=False, verbosity=0,
-                             **kwargs):
-    """Approximate a spectral function, that is, the quantity ``Tr(fn(A))``.
+def calc_stats(samples, mean_p, mean_s, tol, tol_scale):
+    """Get an estimate from samples.
+    """
+    xtrim = ext_per_trim(samples, p=mean_p, s=mean_s)
+
+    # sometimes everything is an outlier...
+    if xtrim.size == 0:  # pragma: no cover
+        estimate, sdev = np.mean(samples), np.std(samples)
+    else:
+        estimate, sdev = np.mean(xtrim), np.std(xtrim)
+
+    err = sdev / len(samples) ** 0.5
+
+    converged = err < tol * (abs(estimate) + tol_scale)
+
+    return estimate, err, converged
+
+
+def approx_spectral_function(A, f, tol=1e-2, *, bsz=1, R=1024, tol_scale=1,
+                             tau=1e-2, k_min=4, k_max=128, beta_tol=1e-6,
+                             mpi=False, mean_p=0.7, mean_s=1.0,
+                             v0=None, pos=False, verbosity=0, **kwargs):
+    """Approximate a spectral function, that is, the quantity ``Tr(f(A))``.
 
     Parameters
     ----------
     A : matrix-like or LinearOperator
         Operator to approximate spectral function for. Should implement
         ``A.dot(vec)``.
-    fn : callable
-        Scalar function with with to act on approximate eigenvalues.
+    f : callable
+        Scalar function with which to act on approximate eigenvalues.
     tol : float, optional
         Convergence tolerance threshold for error on mean of repeats. This can
         pretty much be relied on as the overall accuracy. See also
@@ -366,27 +391,25 @@ def approx_spectral_function(A, fn, tol=5e-3, K=128, R=1024, bsz=1, v0=None,
         The size of the tri-diagonal lanczos matrix to form. Cost of algorithm
         scales linearly with ``K``. If ``tau`` is non-zero, this is the
         maximum size matrix to form. Default: 100.
+    bsz : int, optional
+        Number of simultenous vector columns to use at once, 1 equating to the
+        standard lanczos method. If ``bsz > 1`` then ``A`` must implement
+        matrix-matrix multiplication. This is a more performant way of
+        essentially increasing ``R``, at the cost of more memory. Default: 1.
     R : int, optional
         The number of repeats with different initial random vectors to perform.
         Increasing this should increase accuracy as ``sqrt(R)``. Cost of
         algorithm thus scales linearly with ``R``. If ``tol`` is non-zero, this
         is the maximum number of repeats. Default: 100.
-    bsz : int, optional
-        Number of simultenous vector columns to use at once, 1 equating to the
-        standard lanczos method. If ``bsz > 1`` then ``A`` must implement
-        matrix-matrix multiplication. This is a more performant way of
-        essentially increasing ``R``, at the cost of more memory. Default: 10.
-    v0 : vector, or callable
-        Initial vector to iterate with, sets ``R=1`` if given. If callable, the
-        function to produce a random intial vector (sequence).
-    pos : bool, optional
-        If True, make sure any approximate eigenvalues are positive by
-        clipping below 0.
+    mpi : bool, optional
+        Whether to parallelize repeat runs over MPI processes.
     tau : float, optional
         The relative tolerance required for a single lanczos run to converge.
         This needs to be small enough that each estimate with a single random
         vector produces an unbiased sample of the operators spectrum.
         Default: 0.05%.
+    k_min : int, optional
+        The minimum size of the krlov subspace to form for each sample.
     tol_scale : float, optional
         This sets the overall expected scale of each estimate, so that an
         absolute tolerance can be used for values near zero. Default: 1.
@@ -400,11 +423,18 @@ def approx_spectral_function(A, fn, tol=5e-3, K=128, R=1024, bsz=1, v0=None,
     mean_s : float, optional
         Factor for robustly finding mean and err of repeat estimates,
         see :func:`ext_per_trim`.
+    v0 : vector, or callable
+        Initial vector to iterate with, sets ``R=1`` if given. If callable, the
+        function to produce a random intial vector (sequence).
+    pos : bool, optional
+        If True, make sure any approximate eigenvalues are positive by
+        clipping below 0.
+    verbosity
 
     Returns
     -------
     scalar
-        The approximate value ``Tr(fn(a))``.
+        The approximate value ``Tr(f(a))``.
     """
     if (v0 is not None) and not callable(v0):
         R = 1
@@ -412,70 +442,85 @@ def approx_spectral_function(A, fn, tol=5e-3, K=128, R=1024, bsz=1, v0=None,
         R = max(1, int(R / bsz))
 
     # generate repeat estimates
-    args = (A, K, bsz, beta_tol, v0, fn, pos, tau, tol_scale, verbosity)
+    kwargs = {'A': A, 'K': k_max, 'bsz': bsz, 'beta_tol': beta_tol,
+              'v0': v0, 'f': f, 'pos': pos, 'tau': tau, 'k_min': k_min,
+              'tol_scale': tol_scale, 'verbosity': verbosity, **kwargs}
+
     if not mpi:
-        results = iter(_single_random_estimate(*args, **kwargs)
-                       for _ in range(R))
+        def gen_results():
+            for _ in range(R):
+                yield _single_random_estimate(**kwargs)
     else:
-        mpi_pool = get_mpi_pool()
-        fs = [mpi_pool.submit(_single_random_estimate, *args,
-                              seed=True, **kwargs) for i in range(R)]
-        results = iter(f.result() for f in fs)
+        pool = get_mpi_pool()
+        kwargs['seed'] = True
+        fs = [pool.submit(_single_random_estimate, **kwargs) for _ in range(R)]
+
+        def gen_results():
+            for f in fs:
+                yield f.result()
 
     # iterate through estimates, waiting for convergence
+    results = gen_results()
     estimate = None
     samples = []
     for _ in range(R):
         samples.append(next(results))
-        r = len(samples)
 
         if verbosity >= 1:
             print("Repeat {}: estimate is {}"
                   "".format(len(samples), samples[-1]))
 
         # wait a few iterations before checking error on mean breakout
-        if r >= 4:
-            xtrim = ext_per_trim(samples, p=mean_p, s=mean_s)
-            # sometimes everything is an outlier...
-            if xtrim.size == 0:  # pragma: no cover
-                estimate, sdev = np.mean(samples), np.std(samples)
-            else:
-                estimate, sdev = np.mean(xtrim), np.std(xtrim)
-            err = sdev / (r - 1) ** 0.5
-            if err < tol * (abs(estimate) + tol_scale):
+        if len(samples) >= 4:
+            estimate, err, converged = calc_stats(
+                samples, mean_p, mean_s, tol, tol_scale)
 
+            if verbosity >= 1:
+                print("Total estimate = {} ± {}".format(estimate, err))
+
+            if converged:
                 if verbosity >= 1:
                     print("Repeat {}: converged to tol {}"
                           "".format(len(samples), tol))
-
                 break
 
     if mpi:
+        # deal with remaining futures
+        extra_futures = []
         for f in fs:
-            f.cancel()
+            if f.done() or f.running():
+                extra_futures.append(f)
+            else:
+                f.cancel()
+
+        if extra_futures:
+            samples.extend(f.result() for f in extra_futures)
+            estimate, err, converged = calc_stats(
+                samples, mean_p, mean_s, tol, tol_scale)
 
     if estimate is None:
-        estimate = np.mean(samples)
+        estimate, err, _ = calc_stats(
+            samples, mean_p, mean_s, tol, tol_scale)
 
     if verbosity >= 1:
-        print("ESTIMATE is {}".format(estimate))
+        print("ESTIMATE is {} ± {}".format(estimate, err))
 
     return estimate
 
 
 @functools.wraps(approx_spectral_function)
 def tr_abs_approx(*args, **kwargs):
-    return approx_spectral_function(*args, fn=abs, **kwargs)
+    return approx_spectral_function(*args, f=abs, **kwargs)
 
 
 @functools.wraps(approx_spectral_function)
 def tr_exp_approx(*args, **kwargs):
-    return approx_spectral_function(*args, fn=exp, **kwargs)
+    return approx_spectral_function(*args, f=exp, **kwargs)
 
 
 @functools.wraps(approx_spectral_function)
 def tr_sqrt_approx(*args, **kwargs):
-    return approx_spectral_function(*args, fn=sqrt, pos=True, **kwargs)
+    return approx_spectral_function(*args, f=sqrt, pos=True, **kwargs)
 
 
 def xlogx(x):
@@ -484,7 +529,7 @@ def xlogx(x):
 
 @functools.wraps(approx_spectral_function)
 def tr_xlogx_approx(*args, **kwargs):
-    return approx_spectral_function(*args, fn=xlogx, **kwargs)
+    return approx_spectral_function(*args, f=xlogx, **kwargs)
 
 
 # --------------------------------------------------------------------------- #
