@@ -175,3 +175,17 @@ def functions_equal(fn1, fn2):
         code2 = fn2.__func__.__code__.co_code
 
     return code1 == code2
+
+
+def save_to_disk(obj, fname, **dump_opts):
+    """Save an object to disk using joblib.dump.
+    """
+    import joblib
+    return joblib.dump(obj, fname, **dump_opts)
+
+
+def load_from_disk(fname, **load_opts):
+    """Load an object form disk using joblib.load.
+    """
+    import joblib
+    return joblib.load(fname, **load_opts)

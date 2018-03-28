@@ -179,7 +179,10 @@ from .linalg.approx_spectral import (
     logneg_subsys_approx,
     negativity_subsys_approx,
 )
-
+from .utils import (
+    save_to_disk,
+    load_from_disk,
+)
 
 # some useful math
 from math import pi, cos, sin, tan, exp, log, log2, sqrt
@@ -347,6 +350,9 @@ __all__ = [
     'log',
     'log2',
     'sqrt',
+    # Utils
+    'save_to_disk',
+    'load_from_disk',
 ]
 
 from ._version import get_versions
