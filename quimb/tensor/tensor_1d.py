@@ -1078,7 +1078,7 @@ class MatrixProductState(TensorNetwork1D):
                                   rescale_sites=rescale_sites)
 
     def partial_trace_compress(self, sysa, sysb, eps=1e-8, lower_ind_id='b{}',
-                               method=('isvd', 'eigh'), lateral_cutoff=True,
+                               method=('isvd', None), lateral_cutoff=True,
                                **compress_opts):
         r"""Perform a compressed partial trace using singular value
         lateral then vertical decompositions of transfer matrix products::
@@ -1246,6 +1246,15 @@ class MatrixProductState(TensorNetwork1D):
                 #    L~~~~R     -->      \       -->
                 #  -/      \-            /             ----D----
                 #                    ----D----             |
+
+                # try and choose a sensible method
+                if vmethod is None:
+                    left_sz = self.bond_size(section[0] - 1, section[0])
+                    right_sz = self.bond_size(section[-1], section[-1] + 1)
+                    if left_sz * right_sz <= 2**12:
+                        vmethod = 'cholesky'
+                    else:
+                        vmethod = 'isvd'
 
                 # do vertical SVD
                 kb.replace_with_svd(
