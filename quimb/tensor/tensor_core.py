@@ -66,10 +66,14 @@ _TENSOR_BACKEND = 'numpy'
 
 
 def get_tensor_backend():
+    """Get the default backend used for tensor contractions, via 'opt_einsum'.
+    """
     return _TENSOR_BACKEND
 
 
 def set_tensor_backend(backend):
+    """Set the default backend used for tensor contractions, via 'opt_einsum'.
+    """
     global _TENSOR_BACKEND
     _TENSOR_BACKEND = backend
 
@@ -607,7 +611,7 @@ def tensor_compress_bond(T1, T2, **compress_opts):
                     |....    ....|          |     |
                      >  <    >  <              ^compressed bond
     """
-    s_ix, t1_ix = T1.filter_shared_inds(T2)
+    s_ix, t1_ix = T1.filter_bonds(T2)
 
     if not s_ix:
         raise ValueError("The tensors specified don't share an bond.")
@@ -620,11 +624,11 @@ def tensor_compress_bond(T1, T2, **compress_opts):
     M = (T1_R @ T2_L)
     M.drop_tags()
     # c) -> d)
-    M_L, M_R = M.split(left_inds=T1_L.shared_inds(M), get='tensors',
+    M_L, M_R = M.split(left_inds=T1_L.bonds(M), get='tensors',
                        absorb='both', **compress_opts)
 
     # make sure old bond being used
-    ns_ix, = M_L.shared_inds(M_R)
+    ns_ix, = M_L.bonds(M_R)
     M_L.reindex({ns_ix: s_ix[0]}, inplace=True)
     M_R.reindex({ns_ix: s_ix[0]}, inplace=True)
 
@@ -741,7 +745,7 @@ def tensor_direct_product(T1, T2, sum_inds=(), inplace=False):
     return new_T
 
 
-def find_shared_inds(t1, t2):
+def bonds(t1, t2):
     """Getting any indices connecting the Tensor(s) or TensorNetwork(s) ``t1``
     and ``t2``.
     """
@@ -884,10 +888,10 @@ class Tensor(object):
         """
         return self.shape[self.inds.index(ind)]
 
-    def bond_size(self, other):
+    def shared_bond_size(self, other):
         """Get the total size of the shared index(es) with ``other``.
         """
-        return prod(self.ind_size(i) for i in self.shared_inds(other))
+        return prod(self.ind_size(i) for i in self.bonds(other))
 
     def inner_inds(self):
         """
@@ -1104,13 +1108,13 @@ class Tensor(object):
             tags = self.tags
         self.tags.difference_update(tags2set(tags))
 
-    def shared_inds(self, other):
+    def bonds(self, other):
         """Return a tuple of the shared indices between this tensor
         and ``other``.
         """
-        return tuple(i for i in self.inds if i in other.inds)
+        return bonds(self, other)
 
-    def filter_shared_inds(self, other):
+    def filter_bonds(self, other):
         """Sort this tensor's indices into a list of those that it shares and
         doesn't share with another tensor.
         """
@@ -1620,26 +1624,26 @@ class TensorNetwork(object):
         # delete the tensor itself
         del self.tensor_index[tid]
 
-    def delete(self, tags, mode='all'):
+    def delete(self, tags, which='all'):
         """Delete any tensors which match all or any of ``tags``.
 
         Parameters
         ----------
         tags : str or sequence of str
             The tags to match.
-        mode : {'all', 'any'}, optional
+        which : {'all', 'any'}, optional
             Whether to match all or any of the tags.
         """
-        tids = self._get_tids_from_tags(tags, mode=mode)
+        tids = self._get_tids_from_tags(tags, which=which)
         for tid in tuple(tids):
             self._del_tensor(tid)
 
-    def add_tag(self, tag, where=None, mode='all'):
+    def add_tag(self, tag, where=None, which='all'):
         """Add tag to every tensor in this network, or if ``where`` is
         specified, the tensors matching those tags -- i.e. adds the tag to
-        all tensors in ``self.select_tensors(where, mode=mode)``.
+        all tensors in ``self.select_tensors(where, which=which)``.
         """
-        tids = self._get_tids_from_tags(where, mode=mode)
+        tids = self._get_tids_from_tags(where, which=which)
         tids_tensors = ((n, self.tensor_index[n]) for n in tids)
 
         for n, t in tids_tensors:
@@ -1847,14 +1851,14 @@ class TensorNetwork(object):
             raise TypeError("``sites2tags`` needs an integer or a slice"
                             ", but got {}".format(sites))
 
-    def _get_tids_from_tags(self, tags, mode='all'):
+    def _get_tids_from_tags(self, tags, which='all'):
         """Return the set of tensor ids that match ``tags``.
 
         Parameters
         ----------
         tags : seq or str, str, None, ..., int, slice
             Tag specifier(s).
-        mode : {'all', 'any', '!all', '!any'}
+        which : {'all', 'any', '!all', '!any'}
             How to select based on the tags, if:
 
                 - 'all': get ids of tensors matching all tags
@@ -1873,11 +1877,11 @@ class TensorNetwork(object):
         else:
             tags = tags2set(tags)
 
-        inverse = mode[0] == '!'
+        inverse = which[0] == '!'
         if inverse:
-            mode = mode[1:]
+            which = which[1:]
 
-        combine = {'all': operator.and_, 'any': operator.or_}[mode]
+        combine = {'all': operator.and_, 'any': operator.or_}[which]
         tid_sets = (self.tag_index[t] for t in tags)
         tids = functools.reduce(combine, tid_sets).copy()
 
@@ -1886,16 +1890,16 @@ class TensorNetwork(object):
 
         return tids
 
-    def select_tensors(self, tags, mode='all'):
+    def select_tensors(self, tags, which='all'):
         """Return the sequence of tensors that match ``tags``. If
-        ``mode='all'``, each tensor must contain every tag. If ``mode='any'``,
-        each tensor can contain any of the tags.
+        ``which='all'``, each tensor must contain every tag. If
+        ``which='any'``, each tensor can contain any of the tags.
 
         Parameters
         ----------
         tags : str or sequence of str
             The tag or tag sequence.
-        mode : {'all', 'any'}
+        which : {'all', 'any'}
             Whether to require matching all or any of the tags.
 
         Returns
@@ -1907,10 +1911,10 @@ class TensorNetwork(object):
         --------
         select, partition, partition_tensors
         """
-        tids = self._get_tids_from_tags(tags, mode=mode)
+        tids = self._get_tids_from_tags(tags, which=which)
         return tuple(self.tensor_index[n] for n in tids)
 
-    def select(self, tags, mode='all'):
+    def select(self, tags, which='all'):
         """Get a TensorNetwork comprising tensors that match all or any of
         ``tags``, inherit the network properties/structure from ``self``.
 
@@ -1918,7 +1922,7 @@ class TensorNetwork(object):
         ----------
         tags : str or sequence of str
             The tag or tag sequence.
-        mode : {'all', 'any'}
+        which : {'all', 'any'}
             Whether to require matching all or any of the tags.
 
         Returns
@@ -1930,7 +1934,7 @@ class TensorNetwork(object):
         --------
         select_tensors, partition, partition_tensors
         """
-        tagged_tids = self._get_tids_from_tags(tags, mode=mode)
+        tagged_tids = self._get_tids_from_tags(tags, which=which)
         ts = (self.tensor_index[n] for n in tagged_tids)
 
         kws = {'check_collisions': False, 'structure': self.structure,
@@ -1957,19 +1961,19 @@ class TensorNetwork(object):
         Tensor or sequence of Tensors
         """
         if isinstance(tags, slice):
-            return self.select(self.sites2tags(tags), mode='any')
+            return self.select(self.sites2tags(tags), which='any')
 
         if isinstance(tags, int):
-            tensors = self.select_tensors(self.sites2tags(tags), mode='any')
+            tensors = self.select_tensors(self.sites2tags(tags), which='any')
         else:
-            tensors = self.select_tensors(tags, mode='all')
+            tensors = self.select_tensors(tags, which='all')
 
         return tensors[0] if len(tensors) == 1 else tensors
 
     def __setitem__(self, tags, tensor):
         """Set the single tensor uniquely associated with ``tags``.
         """
-        tids = self._get_tids_from_tags(tags, mode='all')
+        tids = self._get_tids_from_tags(tags, which='all')
         if len(tids) != 1:
             raise KeyError("'TensorNetwork.__setitem__' is meant for a single "
                            "existing tensor only - found {} with tag(s) '{}'."
@@ -1990,11 +1994,11 @@ class TensorNetwork(object):
     def __delitem__(self, tags):
         """Delete any tensors which have all of ``tags``.
         """
-        tids = self._get_tids_from_tags(tags, mode='all')
+        tids = self._get_tids_from_tags(tags, which='all')
         for tid in tuple(tids):
             self._del_tensor(tid)
 
-    def partition_tensors(self, tags, inplace=False, mode='any'):
+    def partition_tensors(self, tags, inplace=False, which='any'):
         """Split this TN into a list of tensors containing any or all of
         ``tags`` and a ``TensorNetwork`` of the the rest.
 
@@ -2006,7 +2010,7 @@ class TensorNetwork(object):
         inplace : bool, optional
             If true, remove tagged tensors from self, else create a new network
             with the tensors removed.
-        mode : {'all', 'any'}
+        which : {'all', 'any'}
             Whether to require matching all or any of the tags.
 
         Returns
@@ -2018,7 +2022,7 @@ class TensorNetwork(object):
         --------
         partition, select, select_tensors
         """
-        tagged_tids = self._get_tids_from_tags(tags, mode=mode)
+        tagged_tids = self._get_tids_from_tags(tags, which=which)
 
         # check if all tensors have been tagged
         if len(tagged_tids) == len(self.tensor_index):
@@ -2033,7 +2037,7 @@ class TensorNetwork(object):
 
         return untagged_tn, tagged_ts
 
-    def partition(self, tags, mode='any', inplace=False, calc_sites=True):
+    def partition(self, tags, which='any', inplace=False, calc_sites=True):
         """Split this TN into two, based on which tensors have any or all of
         ``tags``. Unlike ``partition_tensors``, both results are TNs which
         inherit the structure of the initial TN.
@@ -2042,7 +2046,7 @@ class TensorNetwork(object):
         ----------
         tags : sequence of str
             The tags to split the network with.
-        mode : {'any', 'all'}
+        which : {'any', 'all'}
             Whether to split based on matching any or all of the tags.
         inplace : bool
             If True, actually remove the tagged tensors from self.
@@ -2058,7 +2062,7 @@ class TensorNetwork(object):
         --------
         partition_tensors, select, select_tensors
         """
-        tagged_tids = self._get_tids_from_tags(tags, mode=mode)
+        tagged_tids = self._get_tids_from_tags(tags, which=which)
 
         kws = {'check_collisions': False, 'structure': self.structure,
                'structure_bsz': self.structure_bsz, 'nsites': self.nsites}
@@ -2081,7 +2085,7 @@ class TensorNetwork(object):
 
         return t1, t2
 
-    def replace_with_identity(self, where, mode='any', inplace=False):
+    def replace_with_identity(self, where, which='any', inplace=False):
         r"""Replace all tensors marked by ``where`` with an
         identity. E.g. if ``X`` denote ``where`` tensors::
 
@@ -2094,7 +2098,7 @@ class TensorNetwork(object):
         ----------
         where : tag or seq of tags
             Tags specifying the tensors to replace.
-        mode : {'any', 'all'}
+        which : {'any', 'all'}
             Whether to replace tensors matching any or all the tags ``where``.
         inplace : bool
             Perform operation in place.
@@ -2114,19 +2118,19 @@ class TensorNetwork(object):
             return tn
 
         (dl, il), (dr, ir) = TensorNetwork(
-            self.select_tensors(where, mode=mode)).outer_dims_inds()
+            self.select_tensors(where, which=which)).outer_dims_inds()
 
         if dl != dr:
             raise ValueError(
                 "Can only replace_with_identity when the remaining indices "
                 "have matching dimensions, but {} != {}.".format(dl, dr))
 
-        tn.delete(where, mode=mode)
+        tn.delete(where, which=which)
 
         tn.reindex({il: ir}, inplace=True)
         return tn
 
-    def replace_with_svd(self, where, left_inds, eps, *, mode='any',
+    def replace_with_svd(self, where, left_inds, eps, *, which='any',
                          right_inds=None, method='isvd', keep_tags=True,
                          inplace=False, ltags=None, rtags=None, max_bond=None):
         r"""Replace all tensors marked by ``where`` with an iteratively
@@ -2153,7 +2157,7 @@ class TensorNetwork(object):
             The tolerance to perform the SVD with, affects the number of
             singular values kept. See
             :func:`scipy.linalg.interpolative.estimate_rank`.
-        mode : {'any', 'all', '!any', '!all'}, optional
+        which : {'any', 'all', '!any', '!all'}, optional
             Whether to replace tensors matching any or all the tags ``where``,
             prefix with '!' to invert the selection.
         method : {'isvd', 'eig', 'eigh', 'svd', 'svds', 'eigsh', 'cholesky'}
@@ -2179,8 +2183,8 @@ class TensorNetwork(object):
         --------
         replace_with_identity
         """
-        leave, svd_section = self.partition(where, mode=mode, inplace=inplace,
-                                            calc_sites=False)
+        leave, svd_section = self.partition(where, which=which,
+                                            inplace=inplace, calc_sites=False)
 
         if right_inds is None:
             # compute
@@ -2241,7 +2245,7 @@ class TensorNetwork(object):
         -------
         TensorNetwork
         """
-        lix = find_shared_inds(self[start - 1], self[start])
+        lix = bonds(self[start - 1], self[start])
         return self.replace_with_svd(slice(start, stop), lix, eps, **kwargs)
 
     def convert_to_zero(self):
@@ -2259,8 +2263,8 @@ class TensorNetwork(object):
         specified by ``tags1`` and ``tags2`` using ``tensor_compress_bond``.
         This is an inplace operation.
         """
-        n1, = self._get_tids_from_tags(tags1, mode='all')
-        n2, = self._get_tids_from_tags(tags2, mode='all')
+        n1, = self._get_tids_from_tags(tags1, which='all')
+        n2, = self._get_tids_from_tags(tags2, which='all')
         tensor_compress_bond(self.tensor_index[n1], self.tensor_index[n2])
 
     def compress_all(self, **compress_opts):
@@ -2275,12 +2279,12 @@ class TensorNetwork(object):
                 self.convert_to_zero()
                 break
 
-    def add_bond_between(self, tags1, tags2):
+    def add_bond(self, tags1, tags2):
         """Inplace addition of a dummmy (size 1) bond between the single
         tensors specified by by ``tags1`` and ``tags2``.
         """
-        n1, = self._get_tids_from_tags(tags1, mode='all')
-        n2, = self._get_tids_from_tags(tags2, mode='all')
+        n1, = self._get_tids_from_tags(tags1, which='all')
+        n2, = self._get_tids_from_tags(tags2, which='all')
         tensor_add_bond(self.tensor_index[n1], self.tensor_index[n2])
 
     def insert_gauge(self, U, tags1, tags2, Uinv=None, tol=1e-10):
@@ -2301,10 +2305,10 @@ class TensorNetwork(object):
             The inverse gauge, ``U @ Uinv == Uinv @ U == eye``, to insert.
             If not given will be calculated using :func:`numpy.linalg.inv`.
         """
-        n1, = self._get_tids_from_tags(tags1, mode='all')
-        n2, = self._get_tids_from_tags(tags2, mode='all')
+        n1, = self._get_tids_from_tags(tags1, which='all')
+        n2, = self._get_tids_from_tags(tags2, which='all')
         T1, T2 = self.tensor_index[n1], self.tensor_index[n2]
-        bnd, = T1.shared_inds(T2)
+        bnd, = T1.bonds(T2)
 
         if Uinv is None:
             Uinv = np.linalg.inv(U)
@@ -2328,7 +2332,7 @@ class TensorNetwork(object):
 
     # ----------------------- contracting the network ----------------------- #
 
-    def contract_tags(self, tags, inplace=False, mode='any', **opts):
+    def contract_tags(self, tags, inplace=False, which='any', **opts):
         """Contract the tensors that match any or all of ``tags``.
 
         Parameters
@@ -2338,7 +2342,7 @@ class TensorNetwork(object):
             (``Ellipsis``) to contract all.
         inplace : bool, optional
             Whether to perform the contraction inplace.
-        mode : {'all', 'any'}
+        which : {'all', 'any'}
             Whether to require matching all or any of the tags.
 
         Returns
@@ -2352,7 +2356,7 @@ class TensorNetwork(object):
         contract, contract_cumulative, contract_structured
         """
         untagged_tn, tagged_ts = self.partition_tensors(
-            tags, inplace=inplace, mode=mode)
+            tags, inplace=inplace, which=which)
 
         if not tagged_ts:
             raise ValueError("No tags were found - nothing to contract. "
@@ -2397,7 +2401,7 @@ class TensorNetwork(object):
             c_tags |= tags2set(tags)
 
             # peform the next contraction
-            tn = tn.contract_tags(c_tags, inplace=True, mode='any', **opts)
+            tn = tn.contract_tags(c_tags, inplace=True, which='any', **opts)
 
             if isinstance(tn, Tensor) or np.isscalar(tn):
                 # nothing more to contract
@@ -2665,7 +2669,7 @@ class TensorNetwork(object):
                     t2 = ts[j]
                     if ix in t2.inds:
                         found_ind = True
-                        G.add_edge(i, j, weight=t1.bond_size(t2))
+                        G.add_edge(i, j, weight=t1.shared_bond_size(t2))
 
                 # else it must be an 'external' index
                 if not found_ind:

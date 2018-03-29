@@ -16,7 +16,7 @@ from .tensor_core import (
     Tensor,
     TensorNetwork,
     rand_uuid,
-    find_shared_inds,
+    bonds,
 )
 
 
@@ -99,7 +99,7 @@ def expec_TN_1D(*tns, compress=None, eps=1e-15):
     if compress is None:
         # compression only worth it for long, high bond dimension TNs.
         n = expec_tn.nsites
-        total_bd = qu.prod(tn.bond_dim(0, 1) for tn in tns)
+        total_bd = qu.prod(tn.bond_size(0, 1) for tn in tns)
         compress = (n >= 100) and (total_bd >= 1000)
 
     if compress:
@@ -337,7 +337,7 @@ class TensorNetwork1D(TensorNetwork):
         kb = k & b
 
         # approximate the rest of the chain with a bond 1 SVD
-        kbc = kb.replace_section_with_svd(start, stop, eps=0.0, mode='!any',
+        kbc = kb.replace_section_with_svd(start, stop, eps=0.0, which='!any',
                                           method=method, max_bond=1,
                                           ltags='_LEFT', rtags='_RIGHT')
 
@@ -346,7 +346,7 @@ class TensorNetwork1D(TensorNetwork):
         EL.data /= 2
         EL.data += EL.data.conj().T
         # split into upper 'ket' part and lower 'bra' part, symmetric
-        EL_lix, = EL.shared_inds(kbc[k.site_tag(start), '_BRA'])
+        EL_lix, = EL.bonds(kbc[k.site_tag(start), '_BRA'])
         _, x = EL.split(EL_lix, method='eigh', cutoff=-1, get='arrays')
 
         ER = kbc['_RIGHT'].squeeze()
@@ -354,7 +354,7 @@ class TensorNetwork1D(TensorNetwork):
         ER.data /= 2
         ER.data += ER.data.conj().T
         # split into upper 'ket' part and lower 'bra' part, symmetric
-        ER_lix, = ER.shared_inds(kbc[k.site_tag(stop - 1), '_BRA'])
+        ER_lix, = ER.bonds(kbc[k.site_tag(stop - 1), '_BRA'])
         _, y = ER.split(ER_lix, method='eigh', cutoff=-1, get='arrays')
 
         self.insert_gauge(x.T, start - 1, start, tol=inv_tol)
@@ -523,10 +523,10 @@ class TensorNetwork1D(TensorNetwork):
     def bond(self, i, j):
         """Get the name of the index defining the bond between sites i and j.
         """
-        bond, = self[i].shared_inds(self[j])
+        bond, = self[i].bonds(self[j])
         return bond
 
-    def bond_dim(self, i, j):
+    def bond_size(self, i, j):
         """Return the size of the bond between site ``i`` and ``j``.
         """
         b_ix = self.bond(i, j)
@@ -539,7 +539,7 @@ class TensorNetwork1D(TensorNetwork):
 
         for i, j in pairwise(tn.sites):
             T1, T2 = tn[i], tn[j]
-            dbnds = T1.shared_inds(T2)
+            dbnds = tuple(T1.bonds(T2))
             T1.fuse({dbnds[0]: dbnds}, inplace=True)
             T2.fuse({dbnds[0]: dbnds}, inplace=True)
 
@@ -580,7 +580,7 @@ class TensorNetwork1D(TensorNetwork):
             self.shift_orthogonality_center(current_orthog_centre, i)
 
         Tm1 = self[i]
-        left_inds = Tm1.shared_inds(self[i - 1])
+        left_inds = Tm1.bonds(self[i - 1])
         return Tm1.singular_values(left_inds, method=method)
 
     def expand_bond_dimension(self, new_bond_dim, inplace=True, bra=None,
@@ -668,7 +668,7 @@ class TensorNetwork1D(TensorNetwork):
         l3 = ""
         num_can_l, num_can_r = self.count_canonized()
         for i in range(len(self.sites) - 1):
-            bdim = self.bond_dim(self.sites[i], self.sites[i + 1])
+            bdim = self.bond_size(self.sites[i], self.sites[i + 1])
             strl = len(str(bdim))
             l1 += " {}".format(bdim)
             l2 += (">" if i < num_can_l else
@@ -682,7 +682,7 @@ class TensorNetwork1D(TensorNetwork):
         l3 += "|"
 
         if self.cyclic:
-            bdim = self.bond_dim(self.sites[0], self.sites[-1])
+            bdim = self.bond_size(self.sites[0], self.sites[-1])
             bnd_str = ("-" if bdim < 100 else "=") * strl
             l1 = " {}{}{} ".format(bdim, l1, bdim)
             l2 = "+{}{}{}+".format(bnd_str, l2, bnd_str)
@@ -1168,7 +1168,7 @@ class MatrixProductState(TensorNetwork1D):
         names = ('_ENVL', '_SYSA', '_ENVM', '_SYSB', '_ENVR')
         for name, where in zip(names, (envl, sysa, envm, sysb, envr)):
             if where:
-                kb.add_tag(name, where=map(self.site_tag, where), mode='any')
+                kb.add_tag(name, where=map(self.site_tag, where), which='any')
 
         if self.cyclic:
             # can combine right and left envs
@@ -1195,13 +1195,13 @@ class MatrixProductState(TensorNetwork1D):
 
             st_left = self.site_tag(section[0] - 1)
             st_right = self.site_tag(section[0])
-            ul, = find_shared_inds(kb['_KET', st_left], kb['_KET', st_right])
-            ll, = find_shared_inds(kb['_BRA', st_left], kb['_BRA', st_right])
+            ul, = bonds(kb['_KET', st_left], kb['_KET', st_right])
+            ll, = bonds(kb['_BRA', st_left], kb['_BRA', st_right])
 
             st_left = self.site_tag(section[-1])
             st_right = self.site_tag(section[-1] + 1)
-            ur, = find_shared_inds(kb['_KET', st_left], kb['_KET', st_right])
-            lr, = find_shared_inds(kb['_BRA', st_left], kb['_BRA', st_right])
+            ur, = bonds(kb['_KET', st_left], kb['_KET', st_right])
+            lr, = bonds(kb['_BRA', st_left], kb['_BRA', st_right])
 
             ul_ur_ll_lrs.append((ul, ur, ll, lr))
 
@@ -1212,8 +1212,8 @@ class MatrixProductState(TensorNetwork1D):
             if lateral_cutoff:
                 # if section is short doesn't make sense to lateral compress
                 #     work out roughly when this occurs by comparing bond size
-                left_sz = self.bond_dim(section[0] - 1, section[0])
-                right_sz = self.bond_dim(section[-1], section[-1] + 1)
+                left_sz = self.bond_size(section[0] - 1, section[0])
+                right_sz = self.bond_size(section[-1], section[-1] + 1)
 
                 if self.phys_dim() ** len(section) <= left_sz * right_sz:
                     continue
@@ -1256,7 +1256,7 @@ class MatrixProductState(TensorNetwork1D):
                 # cut joined bond by reindexing to upper- and lower- ind_id.
                 T_UP = kb[self.site_tag(section[0]), '_UP']
                 T_DN = kb[self.site_tag(section[0]), '_DOWN']
-                bnd, = T_UP.shared_inds(T_DN)
+                bnd, = T_UP.bonds(T_DN)
                 T_UP.reindex({bnd: "_tmp_ind_u{}".format(label)}, inplace=True)
                 T_DN.reindex({bnd: "_tmp_ind_l{}".format(label)}, inplace=True)
 
@@ -1299,8 +1299,8 @@ class MatrixProductState(TensorNetwork1D):
                 else:
                     TU = kb['_SYSB', '_UP']
                     TD = kb['_SYSB', '_DOWN']
-                ubnd, = kb['_KET', self.site_tag(sysa[-1])].shared_inds(TU)
-                lbnd, = kb['_BRA', self.site_tag(sysa[-1])].shared_inds(TD)
+                ubnd, = kb['_KET', self.site_tag(sysa[-1])].bonds(TU)
+                lbnd, = kb['_BRA', self.site_tag(sysa[-1])].bonds(TD)
 
                 # delete the A system
                 kb.delete('_SYSA')
@@ -1327,8 +1327,8 @@ class MatrixProductState(TensorNetwork1D):
                 else:
                     TU = kb['_SYSA', '_UP']
                     TD = kb['_SYSA', '_DOWN']
-                ubnd, = kb['_KET', self.site_tag(sysb[0])].shared_inds(TU)
-                lbnd, = kb['_BRA', self.site_tag(sysb[0])].shared_inds(TD)
+                ubnd, = kb['_KET', self.site_tag(sysb[0])].bonds(TU)
+                lbnd, = kb['_BRA', self.site_tag(sysb[0])].bonds(TD)
 
                 # delete the B system
                 kb.delete('_SYSB')
@@ -1781,7 +1781,7 @@ class MatrixProductOperator(TensorNetwork1D):
         l3 = ""
         num_can_l, num_can_r = self.count_canonized()
         for i in range(len(self.sites) - 1):
-            bdim = self.bond_dim(self.sites[i], self.sites[i + 1])
+            bdim = self.bond_size(self.sites[i], self.sites[i + 1])
             strl = len(str(bdim))
             l1 += "|{}".format(bdim)
             l2 += (">" if i < num_can_l else
@@ -1794,7 +1794,7 @@ class MatrixProductOperator(TensorNetwork1D):
         l3 += "|"
 
         if self.cyclic:
-            bdim = self.bond_dim(self.sites[0], self.sites[-1])
+            bdim = self.bond_size(self.sites[0], self.sites[-1])
             bnd_str = ("-" if bdim < 100 else "=") * strl
             l1 = " {}{}{} ".format(bdim, l1, bdim)
             l2 = "+{}{}{}+".format(bnd_str, l2, bnd_str)

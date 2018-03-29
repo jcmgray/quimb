@@ -334,7 +334,7 @@ class MovingEnvironment:
             'inplace': True,
         }
 
-        self.tnc.replace_section_with_svd(start, stop, mode='!any', **opts)
+        self.tnc.replace_section_with_svd(start, stop, which='!any', **opts)
 
         # ensure that expectation still = 1 after approximation
         if self.norm:
@@ -358,7 +358,7 @@ class MovingEnvironment:
         if i >= i0 + 2:
             # delete the old left environment
             where = ['_LEFT'] + [self.site_tag(i) for i in range(i0, i - 1)]
-            self.envs[i].delete(where, mode='any')
+            self.envs[i].delete(where, which='any')
 
             # insert the updated left env from previous step
             self.envs[i] |= self.envs[i - 1]['_LEFT']
@@ -384,7 +384,7 @@ class MovingEnvironment:
             # delete the old right environment
             where = ['_RIGHT'] + [self.site_tag(i) for i in
                                   range(i + self.bsz + 1, iN + self.bsz - 1)]
-            self.envs[i].delete(where, mode='any')
+            self.envs[i].delete(where, which='any')
 
             # insert the updated right env from previous step
             self.envs[i] |= self.envs[i + 1]['_RIGHT']

@@ -10,7 +10,8 @@ from .tensor_gen import MPO_rand, MPO_zeros_like, randn
 
 
 def construct_lanczos_tridiag_MPO(A, K, v0=None, initial_bond_dim=None,
-                                  beta_tol=1e-6, max_bond=None, seed=False):
+                                  beta_tol=1e-6, max_bond=None, seed=False,
+                                  k_min=4):
     """
     """
     if initial_bond_dim is None:
@@ -52,7 +53,7 @@ def construct_lanczos_tridiag_MPO(A, K, v0=None, initial_bond_dim=None,
         Vm1 = V.copy()
         V = Vt / beta[j + 1]
 
-        if j > 3:
+        if j >= k_min:
             yield (np.copy(alpha[1:j + 1]),
                    np.copy(beta[2:j + 2]),
                    np.copy(beta[1])**2 / bsz)
@@ -91,13 +92,13 @@ class EEMPS(MatrixProductState):
 
         # cut bond between sysa start and sysb end
         t1, t2 = self[self.sysa[0]], self[self.sysb[-1]]
-        old_ind, = t1.shared_inds(t2)
+        old_ind, = t1.bonds(t2)
         t1.reindex({old_ind: ai}, inplace=True)
         t2.reindex({old_ind: bf}, inplace=True)
 
         # cut bond between sysa end and sysb start
         t1, t2 = self[self.sysa[-1]], self[self.sysb[0]]
-        old_ind, = t1.shared_inds(t2)
+        old_ind, = t1.bonds(t2)
         t1.reindex({old_ind: af}, inplace=True)
         t2.reindex({old_ind: bi}, inplace=True)
 
@@ -105,8 +106,8 @@ class EEMPS(MatrixProductState):
         self |= Tensor(env, inds=(ai, af, bi, bf), tags={'_ENV'})
 
         # tag the subsystems
-        self.add_tag('_SYSA', where=map(self.site_tag, sysa), mode='any')
-        self.add_tag('_SYSB', where=map(self.site_tag, sysb), mode='any')
+        self.add_tag('_SYSA', where=map(self.site_tag, sysa), which='any')
+        self.add_tag('_SYSB', where=map(self.site_tag, sysb), which='any')
 
     _EXTRA_PROPS = ('sysa', 'sysb')
 
@@ -153,8 +154,8 @@ class EEMPS(MatrixProductState):
 
                 # bond to eff env
                 if edge:
-                    s_env_bnds = t1.shared_inds(self['_ENV'])
-                    o_env_bnds = t2.shared_inds(other['_ENV'])
+                    s_env_bnds = t1.bonds(self['_ENV'])
+                    o_env_bnds = t2.bonds(other['_ENV'])
 
                     for sb, ob in zip(s_env_bnds, o_env_bnds):
                         reindex_map[ob] = sb
@@ -321,13 +322,13 @@ class PTPTLazyMPS:
         if le:
             self.TN.replace_with_identity(le, inplace=True)
         else:
-            self.TN.add_bond_between([ket.site_tag(0), '_KET'],
-                                     [ket.site_tag(0), '_BRA'])
+            self.TN.add_bond([ket.site_tag(0), '_KET'],
+                             [ket.site_tag(0), '_BRA'])
         if re:
             self.TN.replace_with_identity(re, inplace=True)
         else:
-            self.TN.add_bond_between([ket.site_tag(n - 1), '_KET'],
-                                     [ket.site_tag(n - 1), '_BRA'])
+            self.TN.add_bond([ket.site_tag(n - 1), '_KET'],
+                             [ket.site_tag(n - 1), '_BRA'])
 
         # contract middle env if there is one
         if self.sysa_f != self.sysb_i:
@@ -409,8 +410,8 @@ class PTPTLazyMPS:
 
 
 def construct_lanczos_tridiag_PTPTLazyMPS(A, K, v0=None, initial_bond_dim=None,
-                                          beta_tol=1e-12, max_bond=None,
-                                          seed=False):
+                                          beta_tol=1e-6, max_bond=None,
+                                          k_min=4, seed=False):
     """
     """
     if initial_bond_dim is None:
@@ -452,7 +453,7 @@ def construct_lanczos_tridiag_PTPTLazyMPS(A, K, v0=None, initial_bond_dim=None,
         Vm1 = V.copy()
         V = Vt / beta[j + 1]
 
-        if j > 3:
+        if j >= k_min:
             yield (np.copy(alpha[1:j + 1]),
                    np.copy(beta[2:j + 2]),
                    np.copy(beta[1])**2)

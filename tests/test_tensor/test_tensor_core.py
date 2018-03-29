@@ -111,7 +111,7 @@ class TestBasicTensorOperations:
         a = Tensor(np.random.randn(2, 3, 4), inds=[0, 1, 2])
         b = Tensor(np.random.randn(3, 4, 5), inds=[1, 2, 3])
 
-        assert a.bond_size(b) == 12
+        assert a.shared_bond_size(b) == 12
 
         c = a @ b
 
@@ -657,13 +657,13 @@ class TestTensorNetwork:
                    rand_tensor((2, 3), 'cd', tags={'2', 'Y'}))
         tn = A & B & C
 
-        ts = tn.select_tensors(('X', 'Y'), mode='all')
+        ts = tn.select_tensors(('X', 'Y'), which='all')
         assert len(ts) == 1
         assert not any(map(A.almost_equals, ts))
         assert any(map(B.almost_equals, ts))
         assert not any(map(C.almost_equals, ts))
 
-        ts = tn.select_tensors(('X', 'Y'), mode='any')
+        ts = tn.select_tensors(('X', 'Y'), which='any')
         assert len(ts) == 3
         assert any(map(A.almost_equals, ts))
         assert any(map(B.almost_equals, ts))
@@ -702,7 +702,7 @@ class TestTensorNetwork:
     def test_partition(self):
         k = MPS_rand_state(10, 7, site_tag_id='Q{}', structure_bsz=4)
         where = ['Q{}'.format(i) for i in range(10) if i % 2 == 1]
-        k.add_tag('odd', where=where, mode='any')
+        k.add_tag('odd', where=where, which='any')
 
         tn_even, tn_odd = k.partition('odd')
 
@@ -723,7 +723,7 @@ class TestTensorNetwork:
         tensor_direct_product(B, B, inplace=True)
         tn = A & B
 
-        assert A.bond_size(B) == 10
+        assert A.shared_bond_size(B) == 10
 
         tn.compress_between('T1', 'T2', backend=backend)
 
@@ -789,8 +789,8 @@ class TestTensorNetworkAsLinearOperator:
 
         x1 = tn ^ ...
 
-        ul, = tn['_KET', 'I1'].shared_inds(tn['_KET', 'I2'])
-        ll, = tn['_BRA', 'I1'].shared_inds(tn['_BRA', 'I2'])
+        ul, = tn['_KET', 'I1'].bonds(tn['_KET', 'I2'])
+        ll, = tn['_BRA', 'I1'].bonds(tn['_BRA', 'I2'])
 
         where = [f'I{i}' for i in range(2, 40)]
 

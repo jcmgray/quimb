@@ -27,7 +27,7 @@ from quimb.tensor import (
     MPO_ham_heis,
     MPS_neel_state,
     MPS_zero_state,
-    find_shared_inds,
+    bonds,
 )
 
 
@@ -344,8 +344,7 @@ class TestMatrixProductState:
                                       range(20, 30), range(0, 30)])
     @pytest.mark.parametrize("sysb", [range(30, 40), range(40, 50),
                                       range(50, 60), range(30, 60)])
-    def test_partial_trace_compress(self, method, cyclic,
-                                    sysa, sysb, lateral_cutoff):
+    def test_partial_trace_compress(self, method, cyclic, sysa, sysb):
         k = MPS_rand_state(60, 8, cyclic=cyclic)
         kws = dict(sysa=sysa, sysb=sysb, eps=1e-4, method=method)
         if len(sysa) + len(sysb) == 60:
@@ -383,7 +382,7 @@ class TestMatrixProductState:
         assert_allclose(k[block].H @ k[block], 1.0, rtol=2e-4)
         assert_allclose(b[block].H @ b[block], 1.0, rtol=2e-4)
 
-        ii = kb.select(block, mode='!any') ^ all
+        ii = kb.select(block, which='!any') ^ all
 
         if isinstance(block, slice):
             start, stop = block.start, block.stop
@@ -392,14 +391,14 @@ class TestMatrixProductState:
 
         assert len(kb.select_tensors(block, 'any')) == 2 * (stop - start)
 
-        ul, = find_shared_inds(kb[k.site_tag(start - 1), 'BRA'],
-                               kb[k.site_tag(start), 'BRA'])
-        ur, = find_shared_inds(kb[k.site_tag(stop - 1), 'BRA'],
-                               kb[k.site_tag(stop), 'BRA'])
-        ll, = find_shared_inds(kb[k.site_tag(start - 1), 'KET'],
-                               kb[k.site_tag(start), 'KET'])
-        lr, = find_shared_inds(kb[k.site_tag(stop - 1), 'KET'],
-                               kb[k.site_tag(stop), 'KET'])
+        ul, = bonds(kb[k.site_tag(start - 1), 'BRA'],
+                    kb[k.site_tag(start), 'BRA'])
+        ur, = bonds(kb[k.site_tag(stop - 1), 'BRA'],
+                    kb[k.site_tag(stop), 'BRA'])
+        ll, = bonds(kb[k.site_tag(start - 1), 'KET'],
+                    kb[k.site_tag(start), 'KET'])
+        lr, = bonds(kb[k.site_tag(stop - 1), 'KET'],
+                    kb[k.site_tag(stop), 'KET'])
 
         ii = ii.to_dense((ul, ur), (ll, lr))
         assert_allclose(ii, np.eye(ii.shape[0]), rtol=2e-4, atol=2e-4)
@@ -459,7 +458,7 @@ class TestMatrixProductOperator:
         assert max(he[6].shape) == 13
 
         if cyclic:
-            assert he.bond_dim(0, -1) == 13
+            assert he.bond_size(0, -1) == 13
 
         h.lower_ind_id = h.upper_ind_id
         t = h ^ ...

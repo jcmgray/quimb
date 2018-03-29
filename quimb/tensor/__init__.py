@@ -6,9 +6,9 @@ from .tensor_core import (
     tensor_contract,
     tensor_split,
     tensor_direct_product,
+    bonds,
     Tensor,
     TensorNetwork,
-    find_shared_inds,
 )
 from .tensor_gen import (
     rand_tensor,
@@ -53,9 +53,9 @@ __all__ = (
     "tensor_contract",
     "tensor_split",
     "tensor_direct_product",
+    "bonds",
     "Tensor",
     "TensorNetwork",
-    "find_shared_inds",
     "rand_tensor",
     "MPS_rand_state",
     "MPS_product_state",
