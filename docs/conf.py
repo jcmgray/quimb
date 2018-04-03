@@ -147,8 +147,9 @@ html_theme_options = {
     'navbar_site_name': "Site",
     'nosidebar': True,
     'source_link_position': "",
-    'navbar_fixed_top': "false",
+    # 'navbar_fixed_top': "false",
 }
+
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
 # documentation.
