@@ -140,8 +140,46 @@ def norm_fro(a):
     return sqrt(inner(a, a))
 
 
-def construct_lanczos_tridiag(A, K, v0=None, bsz=1, k_min=4,
-                              beta_tol=1e-6, seed=False):
+def random_rect(shape, dist='rademacher', orthog=False, norm=True, seed=False):
+    """Generate a random matrix optionally orthogonal.
+
+    Parameters
+    ----------
+    shape : tuple of int
+        The shape of matrix.
+    dist : {'guassian', 'rademacher'}
+        Distribution of the random variables.
+    orthog : bool or operator.
+        Orthogonalize the columns if more than one.
+    norm : bool
+        Explicitly normalize the frobenius norm to 1.
+    """
+    if seed:
+        # needs to be truly random so MPI processes don't overlap
+        np.random.seed(random.SystemRandom().randint(0, 2**32 - 1))
+
+    if dist == 'rademacher':
+        # already normalized
+        entries = np.array([1.0, -1.0, 1.0j, -1.0j]) / sqrt(prod(shape))
+        V = np.random.choice(entries, shape)
+    elif dist == 'gaussian':
+        scale = 1 / (prod(shape)**0.5 * 2**0.5)
+        V = (np.random.normal(scale=scale, size=shape) +
+             1.0j * np.random.normal(scale=scale, size=shape))
+        if norm:
+            V /= norm_fro(V)
+    else:
+        raise ValueError("`dist={}` not understood.".format(dist))
+
+    if orthog and min(shape) > 1:
+        V = scla.orth(V)
+        V /= sqrt(min(V.shape))
+
+    return V
+
+
+def construct_lanczos_tridiag(A, K, v0=None, bsz=1, k_min=10,
+                              beta_tol=1e-6, seed=False, v0_opts=None):
     """Construct the tridiagonal lanczos matrix using only matvec operators.
     This is a generator that iteratively yields the alpha and beta digaonals
     at each step.
@@ -188,12 +226,9 @@ def construct_lanczos_tridiag(A, K, v0=None, bsz=1, k_min=4,
     beta[1] = sqrt(prod(v_shp))  # by construction
 
     if v0 is None:
-        if seed:
-            # needs to be truly random so MPI processes don't overlap
-            np.random.seed(random.SystemRandom().randint(0, 2**32 - 1))
-
-        V = np.random.choice([-1, 1, 1j, -1j], v_shp)
-        V /= beta[1]  # normalize
+        if v0_opts is None:
+            v0_opts = {}
+        V = random_rect(v_shp, **v0_opts)
     else:
         V = v0.astype(np.complex128)
         V /= norm_fro(V)  # normalize (make sure has unit variance)
@@ -209,7 +244,9 @@ def construct_lanczos_tridiag(A, K, v0=None, bsz=1, k_min=4,
 
         # check for convergence
         if abs(beta[j + 1]) < beta_tol:
-            yield alpha[1:j + 1], beta[2:j + 2], beta[1]**2 / bsz
+            yield (np.copy(alpha[1:j + 1]),
+                   np.copy(beta[2:j + 2]),
+                   np.copy(beta[1])**2 / bsz)
             break
 
         Vm1[...] = V[...]
@@ -292,7 +329,8 @@ def ext_per_trim(x, p=0.6, s=1.0):
 
 
 def _single_random_estimate(A, K, bsz, beta_tol, v0, f, pos, tau, tol_scale,
-                            k_min=4, verbosity=0, *, seed=None, **lanc_opts):
+                            k_min=10, verbosity=0, *, seed=None,
+                            v0_opts=None, **lanc_opts):
     # choose normal (any LinearOperator) or MPO lanczos tridiag construction
     if isinstance(A, MatrixProductOperator):
         lanc_fn = construct_lanczos_tridiag_MPO
@@ -306,9 +344,9 @@ def _single_random_estimate(A, K, bsz, beta_tol, v0, f, pos, tau, tol_scale,
     estimate = None
     for alpha, beta, scaling in lanc_fn(
             A, K=K, beta_tol=beta_tol, seed=seed, k_min=k_min,
-            v0=v0() if callable(v0) else v0, **lanc_opts):
+            v0=v0() if callable(v0) else v0, v0_opts=v0_opts, **lanc_opts):
 
-        try:  # First bound]
+        try:  # First bound
             Tl, Tv = lanczos_tridiag_eig(alpha, beta, check_finite=False)
             Gf = scaling * calc_trace_fn_tridiag(Tl, Tv, f=f, pos=pos)
         except scla.LinAlgError:
@@ -371,9 +409,9 @@ def calc_stats(samples, mean_p, mean_s, tol, tol_scale):
 
 
 def approx_spectral_function(A, f, tol=1e-2, *, bsz=1, R=1024, tol_scale=1,
-                             tau=1e-2, k_min=4, k_max=128, beta_tol=1e-6,
-                             mpi=False, mean_p=0.7, mean_s=1.0,
-                             v0=None, pos=False, verbosity=0, **kwargs):
+                             tau=1e-2, k_min=10, k_max=128, beta_tol=1e-6,
+                             mpi=False, mean_p=0.7, mean_s=1.0, pos=False,
+                             v0=None, verbosity=0, **kwargs):
     """Approximate a spectral function, that is, the quantity ``Tr(f(A))``.
 
     Parameters
