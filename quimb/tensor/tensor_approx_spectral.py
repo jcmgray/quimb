@@ -11,7 +11,7 @@ from .tensor_gen import MPO_rand, MPO_zeros_like, randn
 
 def construct_lanczos_tridiag_MPO(A, K, v0=None, initial_bond_dim=None,
                                   beta_tol=1e-6, max_bond=None, seed=False,
-                                  k_min=4):
+                                  v0_opts=None, k_min=10):
     """
     """
     if initial_bond_dim is None:
@@ -411,7 +411,7 @@ class PTPTLazyMPS:
 
 def construct_lanczos_tridiag_PTPTLazyMPS(A, K, v0=None, initial_bond_dim=None,
                                           beta_tol=1e-6, max_bond=None,
-                                          k_min=4, seed=False):
+                                          v0_opts=None, k_min=10, seed=False):
     """
     """
     if initial_bond_dim is None:

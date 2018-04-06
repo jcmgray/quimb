@@ -401,12 +401,23 @@ def _array_split_eigh(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0):
 
 
 @njit  # pragma: no cover
-def _array_split_cholesky(x, cutoff=-1, cutoff_mode=3, max_bond=-1, absorb=0):
+def _numba_cholesky(x, cutoff=-1, cutoff_mode=3, max_bond=-1, absorb=0):
     """SVD-decomposition, using cholesky decomposition, only works if
     ``x`` is symmetric-positive.
     """
     L = np.linalg.cholesky(x)
     return L, dag(L)
+
+
+def _array_split_cholesky(x, cutoff=-1, cutoff_mode=3, max_bond=-1, absorb=0):
+    try:
+        return _numba_cholesky(x, cutoff, cutoff_mode, max_bond, absorb)
+    except np.linalg.LinAlgError as e:
+        if cutoff < 0:
+            raise e
+        # try adding cutoff identity - assuming it is approx allowable error
+        xi = x + 2 * cutoff * np.eye(x.shape[0])
+        return _numba_cholesky(xi, cutoff, cutoff_mode, max_bond, absorb)
 
 
 def _choose_k(x, cutoff, max_bond):
