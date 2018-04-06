@@ -179,7 +179,7 @@ def thermal_state(ham, beta, precomp_func=False):
     ham : matrix or (1d-array, matrix)
         Hamiltonian, either full or tuple of (evals, evecs).
     beta : float
-        Inverse temperatre of state.
+        Inverse temperature of state.
     precomp_func : bool, optional
         If True, return a function that takes ``beta``
         only and is closed over the solved hamiltonian.
@@ -194,7 +194,7 @@ def thermal_state(ham, beta, precomp_func=False):
         evals, evecs = ham
     else:
         evals, evecs = eigsys(ham)
-    evals = evals - min(evals)  # offset by min to avoid numeric problems
+    evals -= evals.min()  # offset by min to avoid numeric problems
 
     def gen_state(b):
         el = np.exp(-b * evals)

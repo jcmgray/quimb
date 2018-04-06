@@ -410,13 +410,23 @@ def _array_split_cholesky(x, cutoff=-1, cutoff_mode=3, max_bond=-1, absorb=0):
 
 
 def _choose_k(x, cutoff, max_bond):
+    """Choose the number of singular values to target.
+    """
     d = min(x.shape)
 
+    # choose based on cutoff only
     if max_bond < 0:
         k = sli.estimate_rank(x, eps=cutoff)
+
+    # choose based on both cutoff and max_bond
+    elif cutoff != 0.0:
+        k = min(sli.estimate_rank(x, eps=cutoff), max_bond)
+
+    # Just choose based on max_bond
     else:
         k = min(d, max_bond)
 
+    # if computing more than half of spectrum then just use dense method
     return 'full' if k > d // 2 else k
 
 

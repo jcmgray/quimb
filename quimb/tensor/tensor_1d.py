@@ -1077,9 +1077,10 @@ class MatrixProductState(TensorNetwork1D):
         return self.partial_trace(keep, upper_ind_id,
                                   rescale_sites=rescale_sites)
 
-    def partial_trace_compress(self, sysa, sysb, eps=1e-8, lower_ind_id='b{}',
-                               method=('isvd', None), lateral_cutoff=True,
-                               **compress_opts):
+    def partial_trace_compress(self, sysa, sysb, eps=1e-8,
+                               method=('isvd', None), max_bond=(None, 1024),
+                               leave_short=True, renorm=True,
+                               lower_ind_id='b{}', **compress_opts):
         r"""Perform a compressed partial trace using singular value
         lateral then vertical decompositions of transfer matrix products::
 
@@ -1120,6 +1121,13 @@ class MatrixProductState(TensorNetwork1D):
         method : str or (str, str), optional
             Method(s) to use for laterally compressing the state then
             vertially compressing subsytems.
+        max_bond : int or (int, int), optional
+            The maximum bond to keep for laterally compressing the state then
+            vertially compressing subsytems.
+        leave_short : bool, optional
+            If True (the default), don't try to compress short sections.
+        renorm : bool, optional
+            If True (the default), renomalize the state so that ``tr(rho)==1``.
         lower_ind_id : str, optional
             The index id to create for the new density matrix, the upper_ind_id
             is automatically taken as the current site_ind_id.
@@ -1146,6 +1154,10 @@ class MatrixProductState(TensorNetwork1D):
             hmethod, vmethod = method
         except (ValueError, TypeError):
             hmethod = vmethod = method
+        try:
+            hmax_bond, vmax_bond = max_bond
+        except (ValueError, TypeError):
+            hmax_bond = vmax_bond = max_bond
 
         # the sequence of sites in each of the 'environment' sections
         envm = range(max(sysa) + 1, min(sysb))
@@ -1209,7 +1221,7 @@ class MatrixProductState(TensorNetwork1D):
         compressed = []
         for section, (ul, _, ll, _) in zip(sections, ul_ur_ll_lrs):
 
-            if lateral_cutoff:
+            if leave_short:
                 # if section is short doesn't make sense to lateral compress
                 #     work out roughly when this occurs by comparing bond size
                 left_sz = self.bond_size(section[0] - 1, section[0])
@@ -1226,7 +1238,7 @@ class MatrixProductState(TensorNetwork1D):
 
             kb.replace_with_svd(section_tags, (ul, ll), heps, inplace=True,
                                 ltags='_LEFT', rtags='_RIGHT', method=hmethod,
-                                **compress_opts)
+                                max_bond=hmax_bond, **compress_opts)
             compressed.append(section)
 
         # vertical compress and unfold system sections only
@@ -1251,7 +1263,7 @@ class MatrixProductState(TensorNetwork1D):
                 if vmethod is None:
                     left_sz = self.bond_size(section[0] - 1, section[0])
                     right_sz = self.bond_size(section[-1], section[-1] + 1)
-                    if left_sz * right_sz <= 2**12:
+                    if left_sz * right_sz <= 2**13:
                         vmethod = 'cholesky'
                     else:
                         vmethod = 'isvd'
@@ -1260,7 +1272,7 @@ class MatrixProductState(TensorNetwork1D):
                 kb.replace_with_svd(
                     section_tags, (ul, ur), right_inds=(ll, lr), eps=veps,
                     ltags='_UP', rtags='_DOWN', method=vmethod, inplace=True,
-                    **compress_opts)
+                    max_bond=vmax_bond, **compress_opts)
 
                 # cut joined bond by reindexing to upper- and lower- ind_id.
                 T_UP = kb[self.site_tag(section[0]), '_UP']
@@ -1353,10 +1365,34 @@ class MatrixProductState(TensorNetwork1D):
             '_tmp_ind_lB': lower_ind_id.format('B'),
         }, inplace=True)
 
+        if renorm:
+            # normalize
+            norm = kb.trace(['kA', 'kB'], ['bA', 'bB'])
+            ts = []
+            tags = kb.tags
+
+            # check if we have system A
+            if '_SYSA' in tags:
+                ts.extend([kb['_SYSA', '_UP'], kb['_SYSA', '_DOWN']])
+
+            # check if we have system B
+            if '_SYSB' in tags:
+                ts.extend([kb['_SYSB', '_UP'], kb['_SYSB', '_DOWN']])
+
+            # If we dont' have either (OBC with both at ends) use iddle envm
+            if len(ts) == 0:
+                ts.extend([kb['_ENVM', '_LEFT'], kb['_ENVM', '_RIGHT']])
+
+            nt = len(ts)
+
+            # now spread the norm out among tensors
+            for t in ts:
+                t.modify(data=t.data / norm**(1 / nt))
+
         return kb
 
-    def logneg_subsys(self, sysa, sysb, eps=1e-6, method=('isvd', 'eigh'),
-                      compress_opts=None, **approx_spectral_opts):
+    def logneg_subsys(self, sysa, sysb, compress_opts=None,
+                      approx_spectral_opts=None):
         r"""Compute the logarithmic negativity between subsytem blocks, e.g.::
 
                                sysa         sysb
@@ -1390,13 +1426,15 @@ class MatrixProductState(TensorNetwork1D):
         --------
         MatrixProductState.partial_trace_compress, approx_spectral_function
         """
-        compress_opts = {} if compress_opts is None else compress_opts
+        if compress_opts is None:
+            compress_opts = {}
+        if approx_spectral_opts is None:
+            approx_spectral_opts = {}
 
         # form the compressed density matrix representation
-        rho_ab = self.partial_trace_compress(
-            sysa, sysb, eps=eps, method=method, **compress_opts)
+        rho_ab = self.partial_trace_compress(sysa, sysb, **compress_opts)
 
-        # view it as a operator
+        # view it as an operator
         rho_ab_pt_lo = rho_ab.aslinearoperator(['kA', 'bB'], ['bA', 'kB'])
 
         # estimate its spectrum and sum the abs(eigenvalues)
