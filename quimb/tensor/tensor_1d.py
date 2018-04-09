@@ -1373,15 +1373,15 @@ class MatrixProductState(TensorNetwork1D):
 
             # check if we have system A
             if '_SYSA' in tags:
-                ts.extend([kb['_SYSA', '_UP'], kb['_SYSA', '_DOWN']])
+                ts.extend(kb[sysa[0]])
 
             # check if we have system B
             if '_SYSB' in tags:
-                ts.extend([kb['_SYSB', '_UP'], kb['_SYSB', '_DOWN']])
+                ts.extend(kb[sysb[0]])
 
-            # If we dont' have either (OBC with both at ends) use iddle envm
+            # If we dont' have either (OBC with both at ends) use middle envm
             if len(ts) == 0:
-                ts.extend([kb['_ENVM', '_LEFT'], kb['_ENVM', '_RIGHT']])
+                ts.extend(kb[envm[0]])
 
             nt = len(ts)
 

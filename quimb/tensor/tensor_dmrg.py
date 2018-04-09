@@ -35,8 +35,8 @@ def get_default_opts(cyclic=False):
         but it can't currently handle ``LinearOperator`` Neff.
     eff_eig_maxiter : int
         Maximum number of inner eigenproblem iterations.
-    eff_eig_dense : bool
-        Use dense representation of the effective hamiltonian (and norm).
+    eff_eig_ham_dense : bool
+        Force dense representation of the effective hamiltonian.
     eff_eig_EPSType : {'krylovschur', 'gd', 'jd', ...}
         Eigensovler tpye if ``eff_eig_backend='slepc'``.
     compress_method : {'svd', 'eig', ...}
@@ -74,6 +74,8 @@ def get_default_opts(cyclic=False):
         distance to 1 (pseudo-orthogonoalized), then the generalized eigen
         decomposition is *not* used, which is much more efficient. If set too
         large the total normalization can become unstable.
+    eff_eig_norm_dense : bool
+        Force dense representation of the effective norm.
     """
     return {
         'default_sweep_sequence': 'R',
@@ -81,7 +83,7 @@ def get_default_opts(cyclic=False):
         'eff_eig_ncv': 4,
         'eff_eig_backend': None,
         'eff_eig_maxiter': None,
-        'eff_eig_dense': None,
+        'eff_eig_ham_dense': None,
         'eff_eig_EPSType': 'krylovschur',
         'compress_method': 'svd',
         'compress_cutoff_mode': 'sum2',
@@ -94,6 +96,7 @@ def get_default_opts(cyclic=False):
         'periodic_nullspace_fudge_factor': 1e-12,
         'periodic_canonize_inv_tol': 1e-10,
         'periodic_orthog_tol': 1e-6,
+        'eff_eig_norm_dense': True,
     }
 
 
@@ -338,7 +341,11 @@ class MovingEnvironment:
 
         # ensure that expectation still = 1 after approximation
         if self.norm:
+
+
             norm = (self.tnc ^ all) ** 0.5
+
+
             self.tnc['_LEFT'] /= norm
             self.tnc['_RIGHT'] /= norm
 
@@ -632,7 +639,7 @@ class DMRG:
         self._eff_ham = self.ME_eff_ham()
 
         # choose a rough value at which dense effective ham should not be used
-        dense = self.opts['eff_eig_dense']
+        dense = self.opts['eff_eig_ham_dense']
         if dense is None:
             dense = prod(dims) < 800
 
@@ -649,6 +656,10 @@ class DMRG:
         # form effective norm
         if self.cyclic:
             fudge = self.opts['periodic_nullspace_fudge_factor']
+
+            neff_dense = self.opts['eff_eig_norm_dense']
+            if neff_dense is None:
+                neff_dense = dense
 
             # Check if site already pseudo-orthonogal
             site_norm = self._k[i:i + self.bsz].H @ self._k[i:i + self.bsz]

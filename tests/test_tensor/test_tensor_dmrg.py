@@ -30,6 +30,9 @@ from quimb.tensor import (
 )
 
 
+np.random.seed(42)
+
+
 class TestMovingEnvironment:
     def test_bsz1_start_left(self):
         tn = MPS_rand_state(6, bond_dim=7)
@@ -192,7 +195,7 @@ class TestDMRG1:
 
         h = MPO_ham(n, cyclic=cyclic)
         dmrg = DMRG1(h, bond_dims=[4, 8, 12])
-        dmrg.opts['eff_eig_dense'] = dense
+        dmrg.opts['eff_eig_ham_dense'] = dense
         dmrg.opts['eff_eig_backend'] = 'scipy'
         dmrg.opts['periodic_segment_size'] = 1.0
         dmrg.opts['periodic_nullspace_fudge_factor'] = 1e-8
@@ -251,7 +254,7 @@ class TestDMRG2:
 
         dmrg = DMRG2(h, bond_dims=[4, 8, 12])
         assert dmrg._k[0].dtype == float
-        dmrg.opts['eff_eig_dense'] = dense
+        dmrg.opts['eff_eig_ham_dense'] = dense
         dmrg.opts['eff_eig_backend'] = 'scipy'
         dmrg.opts['periodic_segment_size'] = 1.0
         dmrg.opts['periodic_nullspace_fudge_factor'] = 1e-8
