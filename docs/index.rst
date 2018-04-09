@@ -36,14 +36,6 @@ Welcome to quimb's documentation!
   develop
 
 
-.. rubric:: Complete list of modules, functions and classes:
-
-.. toctree::
-  :maxdepth: 1
-
-  api
-
-
 Indices and tables
 ==================
 
