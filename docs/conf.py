@@ -146,6 +146,7 @@ html_theme_options = {
     'bootswatch_theme': "paper",
     'navbar_site_name': "Site",
     'nosidebar': True,
+    'navbar_title': " ",
     'source_link_position': "",
     # 'navbar_fixed_top': "false",
 }
@@ -182,7 +183,7 @@ html_static_path = ['_static']
 def setup(app):
     app.add_stylesheet("my-styles.css")
 
-html_logo = "_static/quimb_logo.png"
+html_logo = "_static/quimb_logo_title.png"
 
 # Add any extra paths that contain custom files (such as robots.txt or
 # .htaccess) here, relative to this directory. These files are copied
