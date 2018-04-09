@@ -1,6 +1,6 @@
 .. raw:: html
 
-    <img src="https://github.com/jcmgray/quimb/blob/develop/docs/_static/quimb_logo_title.png" height="128px">
+    <img src="https://github.com/jcmgray/quimb/blob/develop/docs/_static/quimb_logo_title.png" width="450px">
 
 .. image:: https://img.shields.io/travis/jcmgray/quimb/stable.svg
     :target: https://travis-ci.org/jcmgray/quimb
