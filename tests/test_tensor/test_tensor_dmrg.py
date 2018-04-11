@@ -18,7 +18,6 @@ from quimb.tensor import (
     MPS_rand_state,
     MPS_product_state,
     MPS_computational_state,
-    MPS_neel_state,
     MPO_ham_ising,
     MPO_ham_XY,
     MPO_ham_heis,
@@ -198,7 +197,7 @@ class TestDMRG1:
         dmrg.opts['eff_eig_ham_dense'] = dense
         dmrg.opts['eff_eig_backend'] = 'scipy'
         dmrg.opts['periodic_segment_size'] = 1.0
-        dmrg.opts['periodic_nullspace_fudge_factor'] = 1e-8
+        dmrg.opts['periodic_nullspace_fudge_factor'] = 1e-6
         assert dmrg.solve(tol=tol / 10, verbose=1)
         assert dmrg.state.cyclic == cyclic
         eff_e, mps_gs = dmrg.energy, dmrg.state
@@ -257,7 +256,7 @@ class TestDMRG2:
         dmrg.opts['eff_eig_ham_dense'] = dense
         dmrg.opts['eff_eig_backend'] = 'scipy'
         dmrg.opts['periodic_segment_size'] = 1.0
-        dmrg.opts['periodic_nullspace_fudge_factor'] = 1e-8
+        dmrg.opts['periodic_nullspace_fudge_factor'] = 1e-6
 
         assert dmrg.solve(tol=tol / 10, verbose=1)
 
@@ -301,13 +300,12 @@ class TestDMRGX:
     def test_explicit_sweeps(self):
         n = 8
         chi = 16
-        ham = MPO_ham_mbl(n, dh=5, run=42)
-        p0 = MPS_neel_state(n).expand_bond_dimension(chi)
+        ham = MPO_ham_mbl(n, dh=4, run=42)
+        p0 = MPS_rand_state(n, 2).expand_bond_dimension(chi)
 
         b0 = p0.H
         align_TN_1D(p0, ham, b0, inplace=True)
         en0 = (p0 & ham & b0) ^ ...
-
         dmrgx = DMRGX(ham, p0, chi)
         dmrgx.sweep_right()
         en1 = dmrgx.sweep_left(canonize=False)

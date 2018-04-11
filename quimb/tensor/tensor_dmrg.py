@@ -887,7 +887,9 @@ class DMRG:
         # perform the sweep, collecting local and total energies
         local_ens, tot_ens = zip(*[
             self._update_local_state(i, direction=direction, **update_opts)
-            for i in sweep])
+            for i in sweep
+        ])
+
         self.local_energies.append(local_ens)
         self.total_energies.append(tot_ens)
 
@@ -1001,7 +1003,7 @@ class DMRG:
                 'verbose': verbose,
             }
 
-            # perform sweep, any pluging computations
+            # perform sweep, any plugin computations
             self.energies.append(self.sweep(direction=LR, **sweep_opts))
             self._compute_post_sweep()
 
@@ -1107,16 +1109,24 @@ class DMRGX(DMRG):
     def variance(self):
         return self.variances[-1]
 
+    def form_local_ops(self, i, dims, lix, uix):
+        self._eff_ham = self.ME_eff_ham()
+        self._eff_ovlp = self.ME_eff_ovlp()
+        self._eff_ham2 = self.ME_eff_ham2()
+
+        Heff = (self._eff_ham ^ '_HAM')['_HAM'].to_dense(lix, uix)
+
+        return Heff
+
     def _update_local_state_1site_dmrgx(self, i, direction, **compress_opts):
         """Like ``_update_local_state``, but re-insert all eigenvectors, then
         choose the one with best overlap with ``eff_ovlp``.
         """
-        uix = self._k[i].inds
-        lix = self._b[i].inds
+        uix, lix = self._k[i].inds, self._b[i].inds
         dims = self._k[i].shape
 
         # contract remaining hamiltonian and get its dense representation
-        A = (self._eff_ham ^ '_HAM')['_HAM'].to_dense(lix, uix)
+        Heff = self.form_local_ops(i, dims, lix, uix)
 
         # eigen-decompose and reshape eigenvectors thus::
         #
@@ -1126,7 +1136,7 @@ class DMRGX(DMRG):
         #
         D = prod(dims)
         if D <= self.opts['eff_eig_partial_cutoff']:
-            evals, evecs = eigsys(A)
+            evals, evecs = eigsys(Heff)
         else:
             if isinstance(self.opts['eff_eig_partial_k'], float):
                 k = int(self.opts['eff_eig_partial_k'] * D)
@@ -1134,7 +1144,7 @@ class DMRGX(DMRG):
                 k = self.opts['eff_eig_partial_k']
 
             evals, evecs = seigsys(
-                A, sigma=self._target_energy, v0=self._k[i].data,
+                Heff, sigma=self._target_energy, v0=self._k[i].data,
                 k=k, tol=self.opts['eff_eig_tol'], backend='scipy')
 
         evecs = np.asarray(evecs).reshape(*dims, -1)
@@ -1201,8 +1211,11 @@ class DMRGX(DMRG):
         # store the current effective energy for possibly targeted seigsys
         self._target_energy = evals[best]
 
+        tot_en = self._eff_ham ^ all
+
         self._canonize_after_1site_update(direction, i)
-        return evals[best]
+
+        return evals[best], tot_en
 
     # def _update_local_state_2site_dmrgx(self, i, direction, **compress_opts):
     #     raise NotImplementedError("2-site DMRGX not implemented yet.")
@@ -1236,7 +1249,11 @@ class DMRGX(DMRG):
     #             A, sigma=self.energies[-1], v0=v0,
     #             k=k, tol=self.opts['eff_eig_tol'], backend='scipy')
 
-    def _update_local_state_dmrgx(self, i, **update_opts):
+    def _update_local_state(self, i, **update_opts):
+        self.ME_eff_ham.move_to(i)
+        self.ME_eff_ham2.move_to(i)
+        self.ME_eff_ovlp.move_to(i)
+
         return {
             1: self._update_local_state_1site_dmrgx,
             # 2: self._update_local_state_2site_dmrgx,
@@ -1269,24 +1286,22 @@ class DMRGX(DMRG):
         }[direction]
 
         eff_opts = {'begin': begin, 'bsz': self.bsz, 'cyclic': self.cyclic}
-        eff_hams = MovingEnvironment(self.TN_energy, **eff_opts)
-        eff_ham2s = MovingEnvironment(self.TN_energy2, **eff_opts)
-        eff_ovlps = MovingEnvironment(TN_overlap, **eff_opts)
+        self.ME_eff_ham = MovingEnvironment(self.TN_energy, **eff_opts)
+        self.ME_eff_ham2 = MovingEnvironment(self.TN_energy2, **eff_opts)
+        self.ME_eff_ovlp = MovingEnvironment(TN_overlap, **eff_opts)
 
         if verbose:
             sweep = progbar(sweep, ncols=80, total=self.n - self.bsz + 1)
 
-        for i in sweep:
-            eff_hams.move_to(i)
-            eff_ham2s.move_to(i)
-            eff_ovlps.move_to(i)
-            self._eff_ham = eff_hams()
-            self._eff_ovlp = eff_ovlps()
-            self._eff_ham2 = eff_ham2s()
-            en = self._update_local_state_dmrgx(
-                i, direction=direction, **update_opts)
+        local_ens, tot_ens = zip(*[
+            self._update_local_state(i, direction=direction, **update_opts)
+            for i in sweep
+        ])
 
-        return en
+        self.local_energies.append(local_ens)
+        self.total_energies.append(tot_ens)
+
+        return tot_ens[-1]
 
     def _compute_post_sweep(self):
         en_var = (self.TN_energy2 ^ ...) - self.energies[-1]**2
