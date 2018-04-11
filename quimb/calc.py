@@ -221,7 +221,7 @@ def mutinf(p, dims=(2, 2), sysa=0, rank=None):
 mutual_information = mutinf
 
 
-def mutinf_subsys(psi_abc, dims, sysa, sysb, approx_thresh=2**12,
+def mutinf_subsys(psi_abc, dims, sysa, sysb, approx_thresh=2**13,
                   **approx_opts):
     """Calculate the mutual information of two subsystems of a pure state,
     possibly using an approximate lanczos method for large subsytems.
@@ -443,7 +443,7 @@ logarithmic_negativity = logneg
 
 
 def logneg_subsys(psi_abc, dims, sysa, sysb,
-                  approx_thresh=2**12, **approx_opts):
+                  approx_thresh=2**13, **approx_opts):
     """Compute the logarithmic negativity between two subsystems of a pure
     state, possibly using an approximate lanczos for large subsystems. Uses
     a special method if the two subsystems form a bipartition of the state.

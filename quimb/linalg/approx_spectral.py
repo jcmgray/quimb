@@ -328,6 +328,15 @@ def ext_per_trim(x, p=0.6, s=1.0):
     return trimmed_x
 
 
+def std(xs):
+    """Simple standard deviation - don't invoke numpy for small lists.
+    """
+    N = len(xs)
+    xm = sum(xs) / N
+    var = sum((x - xm)**2 for x in xs) / (N - 1)
+    return var**0.5
+
+
 def _single_random_estimate(A, K, bsz, beta_tol, v0, f, pos, tau, tol_scale,
                             k_min=10, verbosity=0, *, seed=None,
                             v0_opts=None, **lanc_opts):
@@ -340,10 +349,14 @@ def _single_random_estimate(A, K, bsz, beta_tol, v0, f, pos, tau, tol_scale,
         lanc_fn = construct_lanczos_tridiag
         lanc_opts['bsz'] = bsz
 
+    estimates = []
+
+    # the number of samples to check standard deviation convergence with
+    conv_n = 4
+
     # iteratively build the lanczos matrix, checking for convergence
-    estimate = None
     for alpha, beta, scaling in lanc_fn(
-            A, K=K, beta_tol=beta_tol, seed=seed, k_min=k_min,
+            A, K=K, beta_tol=beta_tol, seed=seed, k_min=k_min - conv_n,
             v0=v0() if callable(v0) else v0, v0_opts=v0_opts, **lanc_opts):
 
         try:  # First bound
@@ -356,38 +369,26 @@ def _single_random_estimate(A, K, bsz, beta_tol, v0, f, pos, tau, tol_scale,
 
         # check for break-down convergence (e.g. found entire non-null)
         if abs(beta[-1]) < beta_tol:
-            estimate = Gf
             if verbosity >= 2:
                 print("k={}: Beta breadown.".format(beta.size))
             break
 
-        try:  # second bound
-            Rf = scaling * calc_trace_fn_tridiag(*lanczos_tridiag_eig(
-                np.append(alpha, alpha[0]), beta, check_finite=False),
-                f=f, pos=pos)
-        except scla.LinAlgError:
-            import warnings
-            warnings.warn("Approx Spectral Rf tri-eig didn't converge.")
-            continue
+        estimates.append(Gf)
 
         if verbosity >= 2:
-            print("k={}: Gf={}, Rf={}.".format(beta.size, Gf, Rf))
+            print("k={}: Gf={}".format(beta.size, Gf))
 
-        # check for error bound convergence
-        if abs(Rf - Gf) < 2 * tau * (abs(Gf) + tol_scale):
-            estimate = (Gf + Rf) / 2
-            if verbosity >= 2:
-                print("k={}: Converged to tau {}.".format(beta.size, tau))
-            break
-
-    # didn't converge, use best estimate
-    if estimate is None:
-        estimate = (Gf + Rf) / 2
+        # check for convergence using standard deviation of last 3 estimates
+        if len(estimates) >= conv_n:
+            if (std(estimates[-conv_n:]) < tau * (abs(Gf) + tol_scale)):
+                if verbosity >= 2:
+                    print("k={}: Converged to tau {}.".format(beta.size, tau))
+                break
 
     if verbosity >= 1:
-        print("k={}: Returning estimate {}.".format(beta.size, estimate))
+        print("k={}: Returning estimate {}.".format(beta.size, Gf))
 
-    return estimate
+    return Gf
 
 
 def calc_stats(samples, mean_p, mean_s, tol, tol_scale):
@@ -409,7 +410,7 @@ def calc_stats(samples, mean_p, mean_s, tol, tol_scale):
 
 
 def approx_spectral_function(A, f, tol=1e-2, *, bsz=1, R=1024, tol_scale=1,
-                             tau=1e-2, k_min=10, k_max=128, beta_tol=1e-6,
+                             tau=1e-3, k_min=10, k_max=128, beta_tol=1e-6,
                              mpi=False, mean_p=0.7, mean_s=1.0, pos=False,
                              v0=None, verbosity=0, **kwargs):
     """Approximate a spectral function, that is, the quantity ``Tr(f(A))``.
@@ -478,6 +479,10 @@ def approx_spectral_function(A, f, tol=1e-2, *, bsz=1, R=1024, tol_scale=1,
         R = 1
     else:
         R = max(1, int(R / bsz))
+
+    if verbosity:
+        print("LANCZOS f(A) CALC: tol={}, tau={}, R={}, bsz={}"
+              "".format(tol, tau, R, bsz))
 
     # generate repeat estimates
     kwargs = {'A': A, 'K': k_max, 'bsz': bsz, 'beta_tol': beta_tol,
@@ -718,9 +723,9 @@ def gen_bipartite_spectral_fn(exact_fn, approx_fn, pure_default):
     -------
     bipartite_spectral_fn : callable
         The function, with signature:
-        ``(psi_ab, dims, sysa, approx_thresh=2**12, **approx_opts)``
+        ``(psi_ab, dims, sysa, approx_thresh=2**13, **approx_opts)``
     """
-    def bipartite_spectral_fn(psi_ab, dims, sysa, approx_thresh=2**12,
+    def bipartite_spectral_fn(psi_ab, dims, sysa, approx_thresh=2**13,
                               **approx_opts):
         sysa = int2tup(sysa)
         sz_a = prod(d for i, d in enumerate(dims) if i in sysa)
