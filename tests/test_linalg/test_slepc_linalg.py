@@ -98,11 +98,15 @@ class TestSlepcSeigsys:
         lk = seigsys_slepc(a, k=1, which=which, return_vecs=False)
         assert_allclose(lk, output)
 
-    def test_seigsys_slepc_eigvecs(self):
+    @mark.parametrize("dtype", ['real', 'complex'])
+    def test_seigsys_slepc_eigvecs(self, dtype):
         h = rand_herm(100, sparse=True, density=0.2)
+        if dtype == 'real':
+            h = h.real
         lks, vks = seigsys_slepc(h, k=5)
         lka, vka = seigsys(h, k=5)
         assert vks.shape == vka.shape
+        assert h.dtype == vks.dtype
         for ls, vs, la, va in zip(lks, vks.T, lka, vka.T):
             assert_allclose(ls, la)
             assert_allclose(expec(vs, va), 1.0)

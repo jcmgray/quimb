@@ -5,6 +5,7 @@
 
 import numpy as np
 import scipy.sparse as sp
+import quimb as qu
 
 
 # --------------------------------------------------------------------------- #
@@ -275,6 +276,19 @@ def gather_petsc_array(x, comm, out_shape=None, matrix=False):
     return ax
 
 
+def normalize_real_part(vecs, transposed=False):
+    """Take the real part of a set of vectors and normalize it.
+    """
+    k = vecs.shape[0] if transposed else vecs.shape[1]
+
+    rvecs = vecs.real
+
+    for i in range(k):
+        where = (i, slice(None)) if transposed else (slice(None), i)
+        qu.nmlz(rvecs[where], inplace=True)
+
+    return rvecs
+
 # --------------------------------------------------------------------------- #
 #                               SLEPc FUNCTIONS                               #
 # --------------------------------------------------------------------------- #
@@ -495,11 +509,10 @@ def seigsys_slepc(A, k=6, *,
         is_linop=is_linop)
 
     # set up the initial operators and solver
-    A = convert_mat_to_petsc(A, comm=comm)
-    if isgen:
-        B = convert_mat_to_petsc(B, comm=comm)
+    pA = convert_mat_to_petsc(A, comm=comm)
+    pB = convert_mat_to_petsc(B, comm=comm) if isgen else None
 
-    eigensolver.setOperators(A, B)
+    eigensolver.setOperators(pA, pB)
     if v0 is not None:
         eigensolver.setInitialSpace(convert_vec_to_petsc(v0, comm=comm))
     eigensolver.solve()
@@ -521,7 +534,7 @@ def seigsys_slepc(A, k=6, *,
 
     # gather eigenvectors
     if return_vecs:
-        pvec = A.getVecLeft()
+        pvec = pA.getVecLeft()
 
         def get_vecs_local():
             for i in range(k):
@@ -534,6 +547,14 @@ def seigsys_slepc(A, k=6, *,
             if sort:
                 sortinds = np.argsort(lk)
                 lk, vk = lk[sortinds], np.asmatrix(vk[:, sortinds])
+
+            # check if input matrix was real -> use real output when
+            #   petsc compiled with complex scalars and thus outputs complex
+            convert = (isherm and np.issubdtype(A.dtype, np.floating) and
+                       np.issubdtype(vk.dtype, np.complexfloating))
+            if convert:
+                vk = normalize_real_part(vk)
+
             res = lk, np.asmatrix(vk)
     elif rank == 0:
         res = np.sort(lk) if sort else lk
@@ -555,13 +576,13 @@ def _init_svd_solver(nsv=6, SVDType='cross', tol=None, maxiter=None,
     return svd_solver
 
 
-def svds_slepc(mat, k=6, ncv=None, return_vecs=True, SVDType='cross',
+def svds_slepc(A, k=6, ncv=None, return_vecs=True, SVDType='cross',
                return_all_conv=False, tol=None, maxiter=None, comm=None):
     """Find the singular values for sparse matrix `a`.
 
     Parameters
     ----------
-    mat : sparse matrix in csr format
+    A : sparse matrix in csr format
         The matrix to solve.
     k : int
         Number of requested singular values.
@@ -578,11 +599,11 @@ def svds_slepc(mat, k=6, ncv=None, return_vecs=True, SVDType='cross',
     if comm is None:
         comm = get_default_comm()
 
-    mat = convert_mat_to_petsc(mat, comm=comm)
+    pA = convert_mat_to_petsc(A, comm=comm)
 
     svd_solver = _init_svd_solver(nsv=k, SVDType=SVDType, tol=tol,
                                   maxiter=maxiter, ncv=ncv, comm=comm)
-    svd_solver.setOperator(mat)
+    svd_solver.setOperator(pA)
     svd_solver.solve()
 
     nconv = svd_solver.getConverged()
@@ -595,7 +616,7 @@ def svds_slepc(mat, k=6, ncv=None, return_vecs=True, SVDType='cross',
 
     if return_vecs:
         def usv_getter():
-            v, u = mat.createVecs()
+            v, u = pA.createVecs()
             for i in range(k):
                 s = svd_solver.getSingularTriplet(i, u, v)
                 lu = gather_petsc_array(u, comm=comm, out_shape=(-1, 1))
@@ -608,6 +629,15 @@ def svds_slepc(mat, k=6, ncv=None, return_vecs=True, SVDType='cross',
         if rank == 0:
             uk = np.asmatrix(np.concatenate(lus, axis=1))
             vtk = np.asmatrix(np.concatenate(lvs, axis=0).conjugate())
+
+            # # check if input matrix was real -> use real output when
+            # #   petsc compiled with complex scalars and thus outputs complex
+            # convert = (np.issubdtype(A.dtype, np.floating) and
+            #            np.issubdtype(uk.dtype, np.complexfloating))
+            # if convert:
+            #     uk = normalize_real_part(uk)
+            #     vtk = normalize_real_part(uk, transposed=True)
+
             res = uk, sk, vtk
     else:
         res = np.asarray([svd_solver.getValue(i) for i in range(k)])
