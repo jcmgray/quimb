@@ -18,7 +18,11 @@ from .numpy_linalg import (
     seigsys_numpy,
     numpy_svds,
 )
-from .scipy_linalg import seigsys_scipy, scipy_svds
+from .scipy_linalg import (
+    seigsys_scipy,
+    seigsys_lobpcg,
+    scipy_svds,
+)
 from . import SLEPC4PY_FOUND
 
 if SLEPC4PY_FOUND:
@@ -137,29 +141,32 @@ _SEIGSYS_METHODS = {
     'NUMPY': seigsys_numpy,
     'DENSE': seigsys_numpy,
     'SCIPY': seigsys_scipy,
+    'LOBPCG': seigsys_lobpcg,
     'SLEPC': seigsys_slepc_spawn,
     'SLEPC-NOMPI': seigsys_slepc,
 }
 
 
-def _choose_backend(A, k, int_eps=False, B=None):
+def choose_backend(A, k, int_eps=False, B=None):
     """Pick a backend automatically for partial decompositions.
     """
     # LinOps -> not possible to simply convert to dense or use MPI processes
-    islinop = isinstance(A, spla.LinearOperator)
-    islinopB = isinstance(B, spla.LinearOperator)
+    A_is_linop = isinstance(A, spla.LinearOperator)
+    B_is_linop = isinstance(B, spla.LinearOperator)
 
     # small matrix or large part of subspace requested
     small_d_big_k = A.shape[0] ** 2 / k < (10000 if int_eps else 2000)
 
-    if small_d_big_k and not (islinop or islinopB):
+    if small_d_big_k and not (A_is_linop or B_is_linop):
         return "NUMPY"
 
     # slepc seems faster for sparse, dense and LinearOperators
-    if SLEPC4PY_FOUND and not islinopB:
-        # only spool up an mpi pool for big matrices though
+    if SLEPC4PY_FOUND and not B_is_linop:
+
+        # only spool up an mpi pool for big sparse matrices though
         if issparse(A) and A.nnz > 10000:
             return 'SLEPC'
+
         return 'SLEPC-NOMPI'
 
     return 'SCIPY'
@@ -234,7 +241,7 @@ def seigsys(A, k=6, *,
     # Choose backend to perform the decompostion
     bkd = 'AUTO' if backend is None else backend.upper()
     if bkd == 'AUTO':
-        bkd = _choose_backend(A, k, sigma is not None, B=B)
+        bkd = choose_backend(A, k, sigma is not None, B=B)
 
     return _SEIGSYS_METHODS[bkd](A, **settings, **backend_opts)
 
@@ -408,7 +415,7 @@ def svds(a, k=6, ncv=None, return_vecs=True, backend='AUTO', **kwargs):
         'k': k,
         'ncv': ncv,
         'return_vecs': return_vecs}
-    bkd = (_choose_backend(a, k, False) if backend in {'auto', 'AUTO'} else
+    bkd = (choose_backend(a, k, False) if backend in {'auto', 'AUTO'} else
            backend.upper())
     svds_func = (svds_slepc_spawn if bkd == 'SLEPC' else
                  svds_slepc if bkd == 'SLEPC-NOMPI' else

@@ -195,7 +195,7 @@ class TestDMRG1:
         h = MPO_ham(n, cyclic=cyclic)
         dmrg = DMRG1(h, bond_dims=[4, 8, 12])
         dmrg.opts['eff_eig_ham_dense'] = dense
-        dmrg.opts['eff_eig_backend'] = 'scipy'
+        dmrg.opts['eff_eig_backend'] = 'lobpcg'
         dmrg.opts['periodic_segment_size'] = 1.0
         dmrg.opts['periodic_nullspace_fudge_factor'] = 1e-6
         assert dmrg.solve(tol=tol / 10, verbose=1)
@@ -254,7 +254,7 @@ class TestDMRG2:
         dmrg = DMRG2(h, bond_dims=[4, 8, 12])
         assert dmrg._k[0].dtype == float
         dmrg.opts['eff_eig_ham_dense'] = dense
-        dmrg.opts['eff_eig_backend'] = 'scipy'
+        dmrg.opts['eff_eig_backend'] = 'lobpcg'
         dmrg.opts['periodic_segment_size'] = 1.0
         dmrg.opts['periodic_nullspace_fudge_factor'] = 1e-6
 
@@ -333,7 +333,7 @@ class TestDMRGX:
         assert_allclose(big_ovlps, [1])
 
         # check fully
-        assert is_eigenvector(k, h, atol=1e-14, rtol=1e-12)
+        assert is_eigenvector(k, h, atol=1e-12, rtol=1e-12)
 
     def test_solve_bigger(self):
         n = 14

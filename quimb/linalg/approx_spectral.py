@@ -337,9 +337,9 @@ def std(xs):
     return var**0.5
 
 
-def _single_random_estimate(A, K, bsz, beta_tol, v0, f, pos, tau, tol_scale,
-                            k_min=10, verbosity=0, *, seed=None,
-                            v0_opts=None, **lanc_opts):
+def single_random_estimate(A, K, bsz, beta_tol, v0, f, pos, tau, tol_scale,
+                           k_min=10, verbosity=0, *, seed=None,
+                           v0_opts=None, **lanc_opts):
     # choose normal (any LinearOperator) or MPO lanczos tridiag construction
     if isinstance(A, MatrixProductOperator):
         lanc_fn = construct_lanczos_tridiag_MPO
@@ -350,45 +350,59 @@ def _single_random_estimate(A, K, bsz, beta_tol, v0, f, pos, tau, tol_scale,
         lanc_opts['bsz'] = bsz
 
     estimates = []
+    pair_ests = []
 
     # the number of samples to check standard deviation convergence with
     conv_n = 4
 
     # iteratively build the lanczos matrix, checking for convergence
     for alpha, beta, scaling in lanc_fn(
-            A, K=K, beta_tol=beta_tol, seed=seed, k_min=k_min - conv_n,
+            A, K=K, beta_tol=beta_tol, seed=seed, k_min=k_min - 2 * conv_n,
             v0=v0() if callable(v0) else v0, v0_opts=v0_opts, **lanc_opts):
 
-        try:  # First bound
+        try:
             Tl, Tv = lanczos_tridiag_eig(alpha, beta, check_finite=False)
             Gf = scaling * calc_trace_fn_tridiag(Tl, Tv, f=f, pos=pos)
         except scla.LinAlgError:
             import warnings
             warnings.warn("Approx Spectral Gf tri-eig didn't converge.")
+            estimates.append(np.nan)
             continue
 
-        # check for break-down convergence (e.g. found entire non-null)
+        k = alpha.size
+
+        # check for break-down convergence (e.g. found entire subspace)
         if abs(beta[-1]) < beta_tol:
             if verbosity >= 2:
-                print("k={}: Beta breadown.".format(beta.size))
-            break
+                print("k={}: Beta breadown, returning {}.".format(k, Gf))
+            return Gf
 
         estimates.append(Gf)
 
+        # estimates alternate between upper and lower bounds -> take average
+        if len(estimates) % 2 == 1:
+            continue
+        cur_estimate = (estimates[-1] + estimates[-2]) / 2
+        pair_ests.append(cur_estimate)
+
         if verbosity >= 2:
-            print("k={}: Gf={}".format(beta.size, Gf))
+            print("k={}: Gf={}".format(k, cur_estimate))
 
         # check for convergence using standard deviation of last 3 estimates
-        if len(estimates) >= conv_n:
-            if (std(estimates[-conv_n:]) < tau * (abs(Gf) + tol_scale)):
-                if verbosity >= 2:
-                    print("k={}: Converged to tau {}.".format(beta.size, tau))
-                break
+        converged = (
+            len(pair_ests) >= conv_n and
+            std(pair_ests[-conv_n:]) < tau * (abs(cur_estimate) + tol_scale)
+        )
+
+        if converged:
+            if verbosity >= 2:
+                print("k={}: Converged to tau {}.".format(k, tau))
+            break
 
     if verbosity >= 1:
-        print("k={}: Returning estimate {}.".format(beta.size, Gf))
+        print("k={}: Returning estimate {}.".format(k, cur_estimate))
 
-    return Gf
+    return cur_estimate
 
 
 def calc_stats(samples, mean_p, mean_s, tol, tol_scale):
@@ -410,7 +424,7 @@ def calc_stats(samples, mean_p, mean_s, tol, tol_scale):
 
 
 def approx_spectral_function(A, f, tol=1e-2, *, bsz=1, R=1024, tol_scale=1,
-                             tau=1e-3, k_min=10, k_max=128, beta_tol=1e-6,
+                             tau=None, k_min=10, k_max=128, beta_tol=1e-6,
                              mpi=False, mean_p=0.7, mean_s=1.0, pos=False,
                              v0=None, verbosity=0, **kwargs):
     """Approximate a spectral function, that is, the quantity ``Tr(f(A))``.
@@ -425,11 +439,7 @@ def approx_spectral_function(A, f, tol=1e-2, *, bsz=1, R=1024, tol_scale=1,
     tol : float, optional
         Convergence tolerance threshold for error on mean of repeats. This can
         pretty much be relied on as the overall accuracy. See also
-        ``tol_scale`` and ``tau``. Default: 0.5%.
-    K : int, optional
-        The size of the tri-diagonal lanczos matrix to form. Cost of algorithm
-        scales linearly with ``K``. If ``tau`` is non-zero, this is the
-        maximum size matrix to form. Default: 100.
+        ``tol_scale`` and ``tau``. Default: 1%.
     bsz : int, optional
         Number of simultenous vector columns to use at once, 1 equating to the
         standard lanczos method. If ``bsz > 1`` then ``A`` must implement
@@ -446,9 +456,13 @@ def approx_spectral_function(A, f, tol=1e-2, *, bsz=1, R=1024, tol_scale=1,
         The relative tolerance required for a single lanczos run to converge.
         This needs to be small enough that each estimate with a single random
         vector produces an unbiased sample of the operators spectrum.
-        Default: 0.05%.
+        Defaults to ``tol``.
     k_min : int, optional
         The minimum size of the krlov subspace to form for each sample.
+    k_max : int, optional
+        The size of the tri-diagonal lanczos matrix to form. Cost of algorithm
+        scales linearly with ``K``. If ``tau`` is non-zero, this is the
+        maximum size matrix to form. Default: 100.
     tol_scale : float, optional
         This sets the overall expected scale of each estimate, so that an
         absolute tolerance can be used for values near zero. Default: 1.
@@ -468,7 +482,8 @@ def approx_spectral_function(A, f, tol=1e-2, *, bsz=1, R=1024, tol_scale=1,
     pos : bool, optional
         If True, make sure any approximate eigenvalues are positive by
         clipping below 0.
-    verbosity
+    verbosity : {0, 1, 2}, optional
+        How much information to print while computing.
 
     Returns
     -------
@@ -479,6 +494,9 @@ def approx_spectral_function(A, f, tol=1e-2, *, bsz=1, R=1024, tol_scale=1,
         R = 1
     else:
         R = max(1, int(R / bsz))
+
+    if tau is None:
+        tau = tol / 2
 
     if verbosity:
         print("LANCZOS f(A) CALC: tol={}, tau={}, R={}, bsz={}"
@@ -492,11 +510,11 @@ def approx_spectral_function(A, f, tol=1e-2, *, bsz=1, R=1024, tol_scale=1,
     if not mpi:
         def gen_results():
             for _ in range(R):
-                yield _single_random_estimate(**kwargs)
+                yield single_random_estimate(**kwargs)
     else:
         pool = get_mpi_pool()
         kwargs['seed'] = True
-        fs = [pool.submit(_single_random_estimate, **kwargs) for _ in range(R)]
+        fs = [pool.submit(single_random_estimate, **kwargs) for _ in range(R)]
 
         def gen_results():
             for f in fs:

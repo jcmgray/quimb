@@ -84,7 +84,7 @@ def get_default_opts(cyclic=False):
         'eff_eig_backend': None,
         'eff_eig_maxiter': None,
         'eff_eig_ham_dense': None,
-        'eff_eig_EPSType': 'krylovschur',
+        'eff_eig_EPSType': None,
         'compress_method': 'svd',
         'compress_cutoff_mode': 'sum2',
         'bond_expand_rand_strength': 1e-6,

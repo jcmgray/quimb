@@ -224,7 +224,7 @@ class TestMutualInformation:
         mi1 = mutinf_subsys(p, dims, sysa=0, sysb=1, approx_thresh=1e30)
         assert_allclose(mi1, mi0)
         # approx
-        mi2 = mutinf_subsys(p, dims, sysa=0, sysb=1, approx_thresh=1)
+        mi2 = mutinf_subsys(p, dims, sysa=0, sysb=1, approx_thresh=1, tol=5e-3)
         assert_allclose(mi1, mi2, rtol=5e-2)
 
 
@@ -317,7 +317,7 @@ class TestLogarithmicNegativity:
         ln1 = logneg_subsys(p, dims, sysa, sysb, approx_thresh=1e30)
         assert_allclose(ln0, ln1)
         # approx
-        ln2 = logneg_subsys(p, dims, sysa, sysb, approx_thresh=1)
+        ln2 = logneg_subsys(p, dims, sysa, sysb, approx_thresh=1, tol=5e-3)
         assert ln1 != ln2
         assert_allclose(ln1, ln2, rtol=5e-2)
 

@@ -361,8 +361,9 @@ def _which_scipy_to_slepc(which):
 
 
 def _init_eigensolver(k=6, which='LM', sigma=None, isherm=True, isgen=False,
-                      EPSType=None, st_opts=None, tol=None, is_linop=False,
-                      maxiter=None, ncv=None, l_win=None, comm=None):
+                      EPSType=None, st_opts=None, tol=None, A_is_linop=False,
+                      B_is_linop=False, maxiter=None, ncv=None, l_win=None,
+                      comm=None):
     """Create an advanced eigensystem solver
 
     Parameters
@@ -392,8 +393,14 @@ def _init_eigensolver(k=6, which='LM', sigma=None, isherm=True, isgen=False,
     else:
         eigensolver.setDimensions(k, ncv)
 
+    internal = (sigma is not None) or (l_win is not None)
+
+    # pick right backend
     if EPSType is None:
-        EPSType = {False: 'krylovschur', True: 'gd'}[is_linop]
+        if (isgen and B_is_linop) or (internal and A_is_linop):
+            EPSType = 'gd'
+        else:
+            EPSType = 'krylovschur'
 
     # set some preconditioning defaults for 'gd' and 'lobpcg'
     if EPSType in ('gd', 'lobpcg'):
@@ -408,7 +415,7 @@ def _init_eigensolver(k=6, which='LM', sigma=None, isherm=True, isgen=False,
         st_opts['PCType'] = st_opts.get('PCType', 'none')
 
     # set the spectral inverter / preconditioner.
-    if st_opts or (sigma is not None):
+    if st_opts or internal:
         st = _init_spectral_inverter(comm=comm, **st_opts)
         eigensolver.setST(st)
 
@@ -417,7 +424,7 @@ def _init_eigensolver(k=6, which='LM', sigma=None, isherm=True, isgen=False,
             which = "TR"
             eigensolver.setTarget(sigma)
 
-            if is_linop:
+            if A_is_linop:
                 st.setMatMode(SLEPc.ST.MatMode.SHELL)
 
     _EPS_PROB_TYPES = {
@@ -498,7 +505,8 @@ def seigsys_slepc(A, k=6, *,
     if comm is None:
         comm = get_default_comm()
 
-    is_linop = isinstance(A, sp.linalg.LinearOperator)
+    A_is_linop = isinstance(A, sp.linalg.LinearOperator)
+    B_is_linop = isinstance(B, sp.linalg.LinearOperator)
     isgen = B is not None
 
     eigensolver = _init_eigensolver(
@@ -506,7 +514,7 @@ def seigsys_slepc(A, k=6, *,
                "TR" if (which is None) and (sigma is not None) else which),
         EPSType=EPSType, k=k, sigma=sigma, isherm=isherm, tol=tol, ncv=ncv,
         maxiter=maxiter, st_opts=st_opts, comm=comm, l_win=l_win, isgen=isgen,
-        is_linop=is_linop)
+        A_is_linop=A_is_linop, B_is_linop=B_is_linop)
 
     # set up the initial operators and solver
     pA = convert_mat_to_petsc(A, comm=comm)

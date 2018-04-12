@@ -131,8 +131,8 @@ class TestPTPTLazyMPSSpectralApprox:
         dmrg.solve()
         sysa, sysb = range(2, 9), range(12, 18)
         rho_ab_pt = PTPTLazyMPS(dmrg.state, sysa, sysb)
-        xf = approx_spectral_function(rho_ab_pt, lambda x: x,
-                                      tol=0.1, verbosity=2, max_bond=10)
+        xf = approx_spectral_function(rho_ab_pt, lambda x: x, beta_tol=1e-6,
+                                      tol=0.05, verbosity=2, max_bond=20)
         assert_allclose(1, xf, rtol=0.5, atol=0.1)
 
     def test_realistic_ent(self):
@@ -171,8 +171,8 @@ class TestPartialTraceCompress:
 
         assert max(sysa) + gap + 1 == min(sysb)
 
-        ln = dmrg.state.logneg_subsys(sysa, sysb,
-                                      approx_spectral_opts={'verbosity': 2})
+        ln = dmrg.state.logneg_subsys(
+            sysa, sysb, approx_spectral_opts={'verbosity': 2, 'bsz': 16})
 
         # exact
         lne = logneg_subsys(groundstate(ham_heis(n, cyclic=False)),

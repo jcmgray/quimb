@@ -227,8 +227,8 @@ class TestLanczosApprox:
         a = matrix(2**7)
         pos = fn == np.sqrt
         actual_x = sum(fn(eigvals(a)))
-        approx_x = approx_spectral_function(a, fn, K=20, R=20, mpi=mpi,
-                                            pos=pos, bsz=bsz, verbosity=2)
+        approx_x = approx_spectral_function(a, fn, mpi=mpi, pos=pos,
+                                            bsz=bsz, verbosity=2)
         assert_allclose(actual_x, approx_x, rtol=rtol)
 
     @pytest.mark.parametrize("bsz", [1, 2, 5])
