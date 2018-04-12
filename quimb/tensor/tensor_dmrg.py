@@ -1,8 +1,8 @@
 """DMRG-like variational algorithms, but in tensor network language.
 """
 
-import numpy as np
 import itertools
+import numpy as np
 
 from ..utils import progbar
 from ..accel import prod
@@ -22,23 +22,23 @@ def get_default_opts(cyclic=False):
     -------
     default_sweep_sequence : str
         How to sweep. Will be repeated, e.g. "RRL" -> RRLRRLRRL..., default: R.
-    eff_eig_tol : float
+    local_eig_tol : float
         Relative tolerance to solve inner eigenproblem to, larger = quicker but
         more unstable, default: 1e-3. Note this can be much looser than the
         overall tolerance, the starting point for each local solve is the
         previous state, and the overall accuracy comes from multiple sweeps.
-    eff_eig_ncv : int
+    local_eig_ncv : int
         Number of inner eigenproblem lanczos vectors. Smaller can mean quicker.
-    eff_eig_backend : {None, 'AUTO', 'SCIPY', 'SLEPC'}
+    local_eig_backend : {None, 'AUTO', 'SCIPY', 'SLEPC'}
         Which to backend to use for the inner eigenproblem. None or 'AUTO' to
         choose best. Generally 'SLEPC' best if available for large problems,
         but it can't currently handle ``LinearOperator`` Neff.
-    eff_eig_maxiter : int
+    local_eig_maxiter : int
         Maximum number of inner eigenproblem iterations.
-    eff_eig_ham_dense : bool
+    local_eig_ham_dense : bool
         Force dense representation of the effective hamiltonian.
-    eff_eig_EPSType : {'krylovschur', 'gd', 'jd', ...}
-        Eigensovler tpye if ``eff_eig_backend='slepc'``.
+    local_eig_EPSType : {'krylovschur', 'gd', 'jd', ...}
+        Eigensovler tpye if ``local_eig_backend='slepc'``.
     compress_method : {'svd', 'eig', ...}
         Method used to compress sites after update.
     compress_cutoff_mode : {'sum2', 'abs', 'rel'}
@@ -74,17 +74,17 @@ def get_default_opts(cyclic=False):
         distance to 1 (pseudo-orthogonoalized), then the generalized eigen
         decomposition is *not* used, which is much more efficient. If set too
         large the total normalization can become unstable.
-    eff_eig_norm_dense : bool
+    local_eig_norm_dense : bool
         Force dense representation of the effective norm.
     """
     return {
         'default_sweep_sequence': 'R',
-        'eff_eig_tol': 1e-3,
-        'eff_eig_ncv': 4,
-        'eff_eig_backend': None,
-        'eff_eig_maxiter': None,
-        'eff_eig_ham_dense': None,
-        'eff_eig_EPSType': None,
+        'local_eig_tol': 1e-3,
+        'local_eig_ncv': 4,
+        'local_eig_backend': None,
+        'local_eig_maxiter': None,
+        'local_eig_ham_dense': None,
+        'local_eig_EPSType': None,
         'compress_method': 'svd',
         'compress_cutoff_mode': 'sum2',
         'bond_expand_rand_strength': 1e-6,
@@ -96,7 +96,7 @@ def get_default_opts(cyclic=False):
         'periodic_nullspace_fudge_factor': 1e-12,
         'periodic_canonize_inv_tol': 1e-10,
         'periodic_orthog_tol': 1e-6,
-        'eff_eig_norm_dense': True,
+        'local_eig_norm_dense': True,
     }
 
 
@@ -593,13 +593,18 @@ class DMRG:
     def _seigsys(self, A, B=None, v0=None):
         """Find single eigenpair, using all the internal settings.
         """
+        # intercept generalized eigen
+        backend = self.opts['local_eig_backend']
+        if (backend is None) and (B is not None):
+            backend = 'LOBPCG'
+
         return seigsys(
             A, k=1, B=B, which=self.which, v0=v0,
-            backend=self.opts['eff_eig_backend'],
-            EPSType=self.opts['eff_eig_EPSType'],
-            ncv=self.opts['eff_eig_ncv'],
-            tol=self.opts['eff_eig_tol'],
-            maxiter=self.opts['eff_eig_maxiter'])
+            backend=backend,
+            EPSType=self.opts['local_eig_EPSType'],
+            ncv=self.opts['local_eig_ncv'],
+            tol=self.opts['local_eig_tol'],
+            maxiter=self.opts['local_eig_maxiter'])
 
     def print_energy_info(self, Heff=None, loc_gs=None):
         sweep_num = len(self.energies) + 1
@@ -639,7 +644,7 @@ class DMRG:
         self._eff_ham = self.ME_eff_ham()
 
         # choose a rough value at which dense effective ham should not be used
-        dense = self.opts['eff_eig_ham_dense']
+        dense = self.opts['local_eig_ham_dense']
         if dense is None:
             dense = prod(dims) < 800
 
@@ -657,7 +662,7 @@ class DMRG:
         if self.cyclic:
             fudge = self.opts['periodic_nullspace_fudge_factor']
 
-            neff_dense = self.opts['eff_eig_norm_dense']
+            neff_dense = self.opts['local_eig_norm_dense']
             if neff_dense is None:
                 neff_dense = dense
 
@@ -697,7 +702,7 @@ class DMRG:
 
             # this is helpful for identifying badly behaved numerics
             Neffnorm = np.asscalar(loc_gs.H @ (Neff @ loc_gs))
-            if abs(Neffnorm - 1) > 10 * self.opts['eff_eig_tol']:
+            if abs(Neffnorm - 1) > 10 * self.opts['local_eig_tol']:
                 raise DMRGError("Effective norm diverged to {}, check "
                                 "that Neff is positive?".format(Neffnorm))
 
@@ -1095,9 +1100,9 @@ class DMRGX(DMRG):
         self._target_energy = self.energies[-1]
 
         self.opts = {
-            'eff_eig_partial_cutoff': 2**11,
-            'eff_eig_partial_k': 0.02,
-            'eff_eig_tol': 1e-1,
+            'local_eig_partial_cutoff': 2**11,
+            'local_eig_partial_k': 0.02,
+            'local_eig_tol': 1e-1,
             'overlap_thresh': 2 / 3,
             'compress_method': 'svd',
             'compress_cutoff_mode': 'sum2',
@@ -1135,17 +1140,17 @@ class DMRGX(DMRG):
         #   /|\
         #
         D = prod(dims)
-        if D <= self.opts['eff_eig_partial_cutoff']:
+        if D <= self.opts['local_eig_partial_cutoff']:
             evals, evecs = eigsys(Heff)
         else:
-            if isinstance(self.opts['eff_eig_partial_k'], float):
-                k = int(self.opts['eff_eig_partial_k'] * D)
+            if isinstance(self.opts['local_eig_partial_k'], float):
+                k = int(self.opts['local_eig_partial_k'] * D)
             else:
-                k = self.opts['eff_eig_partial_k']
+                k = self.opts['local_eig_partial_k']
 
             evals, evecs = seigsys(
                 Heff, sigma=self._target_energy, v0=self._k[i].data,
-                k=k, tol=self.opts['eff_eig_tol'], backend='scipy')
+                k=k, tol=self.opts['local_eig_tol'], backend='scipy')
 
         evecs = np.asarray(evecs).reshape(*dims, -1)
         evecs_c = evecs.conj()
@@ -1234,20 +1239,20 @@ class DMRGX(DMRG):
     #     #   /||\
     #     #
     #     D = prod(dims)
-    #     if D <= self.opts['eff_eig_partial_cutoff']:
+    #     if D <= self.opts['local_eig_partial_cutoff']:
     #         evals, evecs = eigsys(A)
     #     else:
-    #         if isinstance(self.opts['eff_eig_partial_k'], float):
-    #             k = int(self.opts['eff_eig_partial_k'] * D)
+    #         if isinstance(self.opts['local_eig_partial_k'], float):
+    #             k = int(self.opts['local_eig_partial_k'] * D)
     #         else:
-    #             k = self.opts['eff_eig_partial_k']
+    #             k = self.opts['local_eig_partial_k']
 
     #         # find the 2-site local state using previous as initial guess
     #         v0 = self._k[i].contract(self._k[i + 1], output_inds=uix).data
 
     #         evals, evecs = seigsys(
     #             A, sigma=self.energies[-1], v0=v0,
-    #             k=k, tol=self.opts['eff_eig_tol'], backend='scipy')
+    #             k=k, tol=self.opts['local_eig_tol'], backend='scipy')
 
     def _update_local_state(self, i, **update_opts):
         self.ME_eff_ham.move_to(i)

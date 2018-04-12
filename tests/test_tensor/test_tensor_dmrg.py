@@ -194,8 +194,7 @@ class TestDMRG1:
 
         h = MPO_ham(n, cyclic=cyclic)
         dmrg = DMRG1(h, bond_dims=[4, 8, 12])
-        dmrg.opts['eff_eig_ham_dense'] = dense
-        dmrg.opts['eff_eig_backend'] = 'lobpcg'
+        dmrg.opts['local_eig_ham_dense'] = dense
         dmrg.opts['periodic_segment_size'] = 1.0
         dmrg.opts['periodic_nullspace_fudge_factor'] = 1e-6
         assert dmrg.solve(tol=tol / 10, verbose=1)
@@ -253,8 +252,7 @@ class TestDMRG2:
 
         dmrg = DMRG2(h, bond_dims=[4, 8, 12])
         assert dmrg._k[0].dtype == float
-        dmrg.opts['eff_eig_ham_dense'] = dense
-        dmrg.opts['eff_eig_backend'] = 'lobpcg'
+        dmrg.opts['local_eig_ham_dense'] = dense
         dmrg.opts['periodic_segment_size'] = 1.0
         dmrg.opts['periodic_nullspace_fudge_factor'] = 1e-6
 
@@ -290,7 +288,6 @@ class TestDMRG2:
         ham = MPO_ham_heis(n, cyclic=True)
         dmrg = DMRG2(ham, bond_dims=range(10, 30, 2))
         dmrg.opts['periodic_segment_size'] = 1 / 3
-        dmrg.opts['eff_eig_backend'] = 'scipy'
         assert dmrg.solve(tol=0.1, verbose=2)
         assert dmrg.energy == pytest.approx(heisenberg_energy(n), 1e-3)
 
