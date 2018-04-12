@@ -129,7 +129,7 @@ class TestPTPTLazyMPSSpectralApprox:
         ham = MPO_ham_heis(20)
         dmrg = DMRG2(ham, bond_dims=[5, 10])
         dmrg.solve()
-        sysa, sysb = range(2, 9), range(12, 18)
+        sysa, sysb = range(3, 9), range(12, 17)
         rho_ab_pt = PTPTLazyMPS(dmrg.state, sysa, sysb)
         xf = approx_spectral_function(rho_ab_pt, lambda x: x, beta_tol=1e-6,
                                       tol=0.05, verbosity=2, max_bond=20)
