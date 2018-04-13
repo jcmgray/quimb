@@ -22,6 +22,13 @@ def get_default_opts(cyclic=False):
     -------
     default_sweep_sequence : str
         How to sweep. Will be repeated, e.g. "RRL" -> RRLRRLRRL..., default: R.
+    compress_method : {'svd', 'eig', ...}
+        Method used to compress sites after update.
+    compress_cutoff_mode : {'sum2', 'abs', 'rel'}
+        How to perform compression truncation.
+    bond_expand_rand_strength : float
+        In DMRG1, strength of randomness to expand bonds with. Needed to avoid
+        singular matrices after expansion.
     local_eig_tol : float
         Relative tolerance to solve inner eigenproblem to, larger = quicker but
         more unstable, default: 1e-3. Note this can be much looser than the
@@ -39,13 +46,8 @@ def get_default_opts(cyclic=False):
         Force dense representation of the effective hamiltonian.
     local_eig_EPSType : {'krylovschur', 'gd', 'jd', ...}
         Eigensovler tpye if ``local_eig_backend='slepc'``.
-    compress_method : {'svd', 'eig', ...}
-        Method used to compress sites after update.
-    compress_cutoff_mode : {'sum2', 'abs', 'rel'}
-        How to perform compression truncation.
-    bond_expand_rand_strength : float
-        In DMRG1, strength of randomness to expand bonds with. Needed to avoid
-        singular matrices after expansion.
+    local_eig_norm_dense : bool
+        Force dense representation of the effective norm.
     periodic_segment_size : float or int
         How large (as a proportion if float) to make the 'segments' in periodic
         DMRG. During a sweep everything outside this (the 'long way round') is
@@ -74,20 +76,19 @@ def get_default_opts(cyclic=False):
         distance to 1 (pseudo-orthogonoalized), then the generalized eigen
         decomposition is *not* used, which is much more efficient. If set too
         large the total normalization can become unstable.
-    local_eig_norm_dense : bool
-        Force dense representation of the effective norm.
     """
     return {
         'default_sweep_sequence': 'R',
+        'compress_method': 'svd',
+        'compress_cutoff_mode': 'sum2',
+        'bond_expand_rand_strength': 1e-6,
         'local_eig_tol': 1e-3,
         'local_eig_ncv': 4,
         'local_eig_backend': None,
         'local_eig_maxiter': None,
-        'local_eig_ham_dense': None,
         'local_eig_EPSType': None,
-        'compress_method': 'svd',
-        'compress_cutoff_mode': 'sum2',
-        'bond_expand_rand_strength': 1e-6,
+        'local_eig_ham_dense': None,
+        'local_eig_norm_dense': None,
         'periodic_segment_size': 1 / 2,
         'periodic_compress_method': 'isvd',
         'periodic_compress_norm_eps': 1e-6,
@@ -96,7 +97,6 @@ def get_default_opts(cyclic=False):
         'periodic_nullspace_fudge_factor': 1e-12,
         'periodic_canonize_inv_tol': 1e-10,
         'periodic_orthog_tol': 1e-6,
-        'local_eig_norm_dense': True,
     }
 
 
