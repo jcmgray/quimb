@@ -6,7 +6,6 @@ from quimb import (
     isherm,
     ispos,
     eye,
-    chop,
     tr,
     ptr,
     expec,
@@ -28,81 +27,105 @@ from quimb import (
 )
 
 
+dtypes = [np.float32, np.float64, np.complex128, np.complex64]
+
+
+@pytest.mark.parametrize('dtype', dtypes)
 class TestRandMatrix:
-    def test_rand_matrix(self):
-        a = rand_matrix(3, scaled=True)
+    def test_rand_matrix(self, dtype):
+        a = rand_matrix(3, scaled=True, dtype=dtype)
         assert a.shape == (3, 3)
         assert type(a) == np.matrix
-        assert a.dtype == complex
+        assert a.dtype == dtype
 
-    def test_rand_matrix_sparse(self):
-        a = rand_matrix(3, sparse=True)
+    def test_rand_matrix_sparse(self, dtype):
+        a = rand_matrix(3, sparse=True, dtype=dtype)
         assert a.shape == (3, 3)
         assert type(a) == sp.csr_matrix
-        assert a.dtype == complex
+        assert a.dtype == dtype
 
-    def test_rand_matrix_sparse_density(self):
-        a = rand_matrix(3, sparse=True, density=1 / 9)
+    def test_rand_matrix_sparse_density(self, dtype):
+        a = rand_matrix(3, sparse=True, density=1 / 9, dtype=dtype)
         assert a.nnz == 1
-        a = rand_matrix(3, sparse=True, density=7 / 9)
+        a = rand_matrix(3, sparse=True, density=7 / 9, dtype=dtype)
         assert a.nnz == 7
 
-    def test_rand_matrix_bsr(self):
-        a = rand_matrix(10, sparse=True, density=0.2, stype='bsr')
+    def test_rand_matrix_bsr(self, dtype):
+        a = rand_matrix(10, sparse=True, density=0.2, stype='bsr', dtype=dtype)
         assert a.shape == (10, 10)
         assert type(a) == sp.bsr_matrix
-        assert a.dtype == complex
+        assert a.dtype == dtype
 
 
+@pytest.mark.parametrize('dtype', dtypes)
 class TestRandHerm:
-    def test_rand_herm(self):
-        a = rand_herm(3)
+    def test_rand_herm(self, dtype):
+        a = rand_herm(3, dtype=dtype)
         assert a.shape == (3, 3)
         assert type(a) == np.matrix
+        assert a.dtype == dtype
         assert_allclose(a, a.H)
         evals = np.linalg.eigvals(a)
         assert_allclose(evals.imag, [0, 0, 0], atol=1e-14)
 
-    def test_rand_herm_sparse(self):
-        a = rand_herm(3, sparse=True, density=0.3)
+    def test_rand_herm_sparse(self, dtype):
+        a = rand_herm(3, sparse=True, density=0.3, dtype=dtype)
         assert a.shape == (3, 3)
         assert type(a) == sp.csr_matrix
         assert isherm(a)
+        assert a.dtype == dtype
         evals = np.linalg.eigvals(a.A)
         assert_allclose(evals.imag, [0, 0, 0], atol=1e-14)
 
 
+@pytest.mark.parametrize('dtype', dtypes)
 class TestRandPos:
-    def test_rand_pos(self):
-        a = rand_pos(3)
+    def test_rand_pos(self, dtype):
+        a = rand_pos(3, dtype=dtype)
         assert ispos(a)
         assert a.shape == (3, 3)
         assert type(a) == np.matrix
+        assert a.dtype == dtype
         evals = np.linalg.eigvals(a)
-        assert_allclose(evals.imag, [0, 0, 0], atol=1e-14)
+        assert_allclose(evals.imag, [0, 0, 0], atol=1e-7)
         assert np.all(evals.real >= 0)
 
-    def test_rand_pos_sparse(self):
-        a = rand_pos(3, sparse=True, density=0.3)
+    def test_rand_pos_sparse(self, dtype):
+        a = rand_pos(3, sparse=True, density=0.3, dtype=dtype)
         assert a.shape == (3, 3)
         assert type(a) == sp.csr_matrix
+        assert a.dtype == dtype
         evals = np.linalg.eigvals(a.A)
-        assert_allclose(evals.imag, [0, 0, 0], atol=1e-14)
+        assert_allclose(evals.imag, [0, 0, 0], atol=1e-7)
         assert np.all(evals.real >= -1e-15)
 
 
+@pytest.mark.parametrize('dtype', dtypes)
 class TestRandRho:
-    def test_rand_rho(self):
-        rho = rand_rho(3)
+    def test_rand_rho(self, dtype):
+        rho = rand_rho(3, dtype=dtype)
         assert rho.shape == (3, 3)
         assert type(rho) == np.matrix
+        assert rho.dtype == dtype
         assert_almost_equal(tr(rho), 1.0)
 
-    def test_rand_rho_sparse(self):
-        rho = rand_rho(3, sparse=True, density=0.3)
+    def test_rand_rho_sparse(self, dtype):
+        rho = rand_rho(3, sparse=True, density=0.3, dtype=dtype)
         assert rho.shape == (3, 3)
         assert type(rho) == sp.csr_matrix
+        assert rho.dtype == dtype
         assert_almost_equal(tr(rho), 1.0)
+
+
+@pytest.mark.parametrize('dtype', dtypes)
+class TestRandUni:
+    def test_rand_uni(self, dtype):
+        u = rand_uni(3, dtype=dtype)
+        assert u.shape == (3, 3)
+        assert type(u) == np.matrix
+        assert u.dtype == dtype
+        assert_allclose(eye(3), u @ u.H, atol=1e-7)
+        assert_allclose(eye(3), u.H @ u, atol=1e-7)
 
 
 class TestRandKet:
@@ -111,15 +134,6 @@ class TestRandKet:
         assert ket.shape == (3, 1)
         assert type(ket) == np.matrix
         assert_almost_equal(tr(ket.H @ ket), 1.0)
-
-
-class TestRandUni:
-    def test_rand_uni(self):
-        u = rand_uni(3)
-        assert u.shape == (3, 3)
-        assert type(u) == np.matrix
-        assert_allclose(eye(3), chop(u @ u.H, inplace=False))
-        assert_allclose(eye(3), chop(u.H @ u, inplace=False))
 
 
 class TestRandHaarState:

@@ -7,6 +7,7 @@ from quimb import (
     qu,
     eye,
     ldmul,
+    rand_herm,
     rand_uni,
     issparse,
     rand_product_state,
@@ -32,10 +33,10 @@ from quimb.linalg.base_linalg import _rel_window_to_abs_window
 
 # TODO: reinstate slepc svd tests ******************************************* #
 
-backends = ["auto", "dense", "scipy"]
+eigs_backends = ["auto", "dense", "scipy"]
 svds_backends = ["dense", "scipy"]
 if SLEPC4PY_FOUND:
-    backends += ["slepc-nompi", "slepc"]
+    eigs_backends += ["slepc-nompi", "slepc"]
     svds_backends += ["slepc-nompi", "slepc"]
 
 dense_backends = ["numpy"]
@@ -99,8 +100,8 @@ def ham2():
 #                              Tests                                          #
 # --------------------------------------------------------------------------- #
 
+@mark.parametrize("bkd", dense_backends)
 class TestEigh:
-    @mark.parametrize("bkd", dense_backends)
     def test_eigsys(self, mat_herm_dense, bkd):
         u, a = mat_herm_dense
         evals, v = eigsys(a, backend=bkd)
@@ -110,13 +111,11 @@ class TestEigh:
             o = u[:, i].H @ v[:, j]
             assert_allclose(abs(o), 1.)
 
-    @mark.parametrize("bkd", dense_backends)
     def test_eigvals(self, mat_herm_dense, bkd):
         _, a = mat_herm_dense
         evals = eigvals(a, backend=bkd)
         assert_allclose(evals, [-3, -1, 2, 4])
 
-    @mark.parametrize("bkd", dense_backends)
     def test_eigvecs(self, mat_herm_dense, bkd):
         u, a = mat_herm_dense
         v = eigvecs(a, backend=bkd)
@@ -126,7 +125,7 @@ class TestEigh:
 
 
 class TestSeigs:
-    @mark.parametrize("backend", backends)
+    @mark.parametrize("backend", eigs_backends)
     def test_seigsys_small_dense_wvecs(self, mat_herm_dense, backend):
         u, a = mat_herm_dense
         assert not issparse(a)
@@ -140,14 +139,14 @@ class TestSeigs:
             o = u[:, i].H @ vk[:, j]
             assert_allclose(abs(o), 1.)
 
-    @mark.parametrize("backend", backends)
+    @mark.parametrize("backend", eigs_backends)
     def test_seigsys_small_dense_novecs(self, mat_herm_dense, backend):
         _, a = mat_herm_dense
         assert not issparse(a)
         lk = seigvals(a, k=2, backend=backend)
         assert_allclose(lk, (-3, -1))
 
-    @mark.parametrize("backend", backends)
+    @mark.parametrize("backend", eigs_backends)
     def test_seigsys_sparse_wvecs(self, mat_herm_sparse, backend):
         u, a = mat_herm_sparse
         assert issparse(a)
@@ -161,20 +160,20 @@ class TestSeigs:
             o = u[:, i].H @ vk[:, j]
             assert_allclose(abs(o), 1.)
 
-    @mark.parametrize("backend", backends)
+    @mark.parametrize("backend", eigs_backends)
     def test_seigsys_small_sparse_novecs(self, mat_herm_sparse, backend):
         _, a = mat_herm_sparse
         assert issparse(a)
         lk = seigvals(a, k=2, backend=backend)
         assert_allclose(lk, (-3, -1))
 
-    @mark.parametrize("backend", backends)
+    @mark.parametrize("backend", eigs_backends)
     def test_groundstate(self, mat_herm_dense, backend):
         u, a = mat_herm_dense
         gs = groundstate(a, backend=backend)
         assert_allclose(abs(u[:, 3].H @ gs), 1.)
 
-    @mark.parametrize("backend", backends)
+    @mark.parametrize("backend", eigs_backends)
     def test_groundenergy(self, mat_herm_dense, backend):
         _, a = mat_herm_dense
         ge = groundenergy(a, backend=backend)
@@ -186,15 +185,24 @@ class TestSeigs:
         _, a = mat_herm_sparse
         sigma = 1 if which in {None, "TR"} else None
         lks, vks = zip(*(seigsys(a, k=k, which=which, sigma=sigma, backend=b)
-                         for b in backends))
+                         for b in eigs_backends))
         lks, vks = tuple(lks), tuple(vks)
         for i in range(len(lks) - 1):
             assert_allclose(lks[i], lks[i + 1])
             assert_allclose(abs(vks[i].H @ vks[i + 1]), eye(k), atol=1e-14)
 
 
+class TestLOBPCG:
+    def test_against_arpack(self):
+        A = rand_herm(32, dtype=float)
+        lk, vk = seigsys(A, backend='lobpcg')
+        slk, svk = seigsys(A, backend='scipy')
+        assert_allclose(lk, slk)
+        assert_allclose(np.eye(6), abs(vk.H @ svk), atol=1e-10)
+
+
 class TestEvalsWindowed:
-    @mark.parametrize("backend", backends)
+    @mark.parametrize("backend", eigs_backends)
     def test_bound_spectrum(self, ham1, backend):
         h = ham1
         lmin, lmax = bound_spectrum(h, backend=backend)
@@ -216,7 +224,7 @@ class TestEvalsWindowed:
         el = eigvals_window(h, 0.5, 5, w_sz=0.3)
         assert_allclose(el, [1, 2, 3])
 
-    @mark.parametrize("backend", backends)
+    @mark.parametrize("backend", eigs_backends)
     def test_sparse(self, ham2, backend):
         h = qu(ham2, sparse=True)
         el = eigvals_window(h, 0.5, 2, w_sz=0.1, backend=backend)

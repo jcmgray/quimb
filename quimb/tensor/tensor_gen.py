@@ -14,7 +14,7 @@ def randn(shape, dtype=float):
     """Generate normally distributed random array of certain shape and dtype.
     """
     # real datatypes
-    if dtype in (float, np.float64, np.float32, np.float16):
+    if np.issubdtype(dtype, np.floating):
         x = np.random.randn(*shape)
 
         # convert type if not the default
@@ -22,7 +22,7 @@ def randn(shape, dtype=float):
             x = x.astype(dtype)
 
     # complex datatypes
-    elif dtype in (complex, np.complex128, np.complex64):
+    elif np.issubdtype(dtype, np.complexfloating):
         x = np.random.randn(*shape) + 1.0j * np.random.randn(*shape)
 
         # convert type if not the default
@@ -30,7 +30,8 @@ def randn(shape, dtype=float):
             x = x.astype(dtype)
 
     else:
-        raise TypeError("dtype not understood - should be float or complex.")
+        raise TypeError("dtype {} not understood - should be float or complex."
+                        "".format(dtype))
 
     return x
 

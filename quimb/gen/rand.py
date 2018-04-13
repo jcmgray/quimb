@@ -11,72 +11,136 @@ from ..accel import rdmul, dot, matrixify
 from ..core import qu, ptr, kron, nmlz
 
 
-def rand_matrix(d, scaled=True, sparse=False, stype='csr', density=None):
+def rand_matrix(d, scaled=True, sparse=False, stype='csr',
+                density=None, dtype=complex):
     """Generate a random complex matrix of order `d` with normally distributed
     entries. If `scaled` is `True`, then in the limit of large `d` the
     eigenvalues will be distributed on the unit complex disk.
 
     Parameters
     ----------
-        d: matrix dimension
-        scaled: whether to scale the matrices values such that its spectrum
-            approximately lies on the unit disk (for dense matrices)
-        sparse: whether to produce a sparse matrix
-        stype: the type of sparse matrix if so
-        density: target density for the sparse matrix
+    d : int
+        Matrix dimension.
+    scaled : bool, optional
+        Whether to scale the matrices values such that its spectrum
+        approximately lies on the unit disk (for dense matrices).
+    sparse : bool, optional
+        Whether to produce a sparse matrix.
+    stype : {'csr', 'csc', 'coo', ...}, optional
+        The type of sparse matrix if ``sparse=True``.
+    density : float, optional
+        Target density of non-zero elements for the sparse matrix.
+    dtype : {complex, float}, optional
+        The data type of the matrix elements.
 
     Returns
     -------
         mat: random matrix
     """
+    if np.issubdtype(dtype, np.floating):
+        iscomplex = False
+    elif np.issubdtype(dtype, np.complexfloating):
+        iscomplex = True
+    else:
+        raise TypeError("dtype {} not understood - should be "
+                        "float or complex.".format(dtype))
+
     if sparse:
         # Aim for 10 non-zero values per row, but betwen 1 and d/2
         density = 10 / d if density is None else density
         density = min(max(density, d**-2), 1 - d**-2)
+
         mat = sp.random(d, d, format=stype, density=density)
-        mat.data = np.random.randn(mat.nnz) + 1.0j * np.random.randn(mat.nnz)
+        nnz = mat.nnz
+
+        mat.data = np.random.randn(nnz).astype(dtype)
+        if iscomplex:
+            mat.data += 1.0j * np.random.randn(nnz)
+
     else:
         density = 1.0
-        mat = np.random.randn(d, d) + 1.0j * np.random.randn(d, d)
+        mat = np.random.randn(d, d).astype(dtype)
+        if iscomplex:
+            mat += 1.0j * np.random.randn(d, d)
+
         mat = np.asmatrix(mat)
+
     if scaled:
-        mat /= (2 * d * density)**0.5
+        mat /= ((2 if iscomplex else 1) * d * density)**0.5
+
     return mat
 
 
-def rand_herm(d, sparse=False, density=None):
+def rand_herm(d, sparse=False, density=None, dtype=complex):
     """Generate a random hermitian matrix of order `d` with normally
     distributed entries. In the limit of large `d` the spectrum will be a
     semi-circular distribution between [-1, 1].
+
+    See Also
+    --------
+    rand_matrix, rand_pos, rand_rho, rand_uni
     """
     if sparse:
         density = 10 / d if density is None else density
         density = min(max(density, d**-2), 1 - d**-2)
         density /= 2  # to account of herm construction
+
     herm = rand_matrix(d, scaled=True, sparse=sparse,
-                       density=density) / (2**1.5)
+                       density=density, dtype=dtype)
+
+    if sparse:
+        herm.data /= (2**1.5)
+    else:
+        herm /= (2**1.5)
+
     herm += herm.H
+
     return herm
 
 
-def rand_pos(d, sparse=False, density=None):
+def rand_pos(d, sparse=False, density=None, dtype=complex):
     """Generate a random positive matrix of order `d`, with normally
     distributed entries. In the limit of large `d` the spectrum will lie
     between [0, 1].
+
+    See Also
+    --------
+    rand_matrix, rand_herm, rand_rho, rand_uni
     """
     if sparse:
         density = 10 / d if density is None else density
         density = min(max(density, d**-2), 1 - d**-2)
         density = 0.5 * (density / d)**0.5  # to account for pos construction
-    pos = rand_matrix(d, scaled=True, sparse=sparse, density=density)
+
+    pos = rand_matrix(d, scaled=True, sparse=sparse,
+                      density=density, dtype=dtype)
+
     return dot(pos, pos.H)
 
 
-def rand_rho(d, sparse=False, density=None):
+def rand_rho(d, sparse=False, density=None, dtype=complex):
     """Generate a random positive matrix of order `d` with normally
     distributed entries and unit trace.
+
+    See Also
+    --------
+    rand_matrix, rand_herm, rand_pos, rand_uni
     """
-    return nmlz(rand_pos(d, sparse=sparse, density=density))
+    return nmlz(rand_pos(d, sparse=sparse, density=density, dtype=dtype))
+
+
+def rand_uni(d, dtype=complex):
+    """Generate a random unitary matrix of order `d`, distributed according to
+    the Haar measure.
+
+    See Also
+    --------
+    rand_matrix, rand_herm, rand_pos, rand_rho
+    """
+    q, r = np.linalg.qr(rand_matrix(d, dtype=dtype))
+    r = np.diagonal(r)
+    r = r / np.abs(r)
+    return rdmul(q, r)
 
 
 def rand_ket(d, sparse=False, stype='csr', density=0.01):
@@ -89,16 +153,6 @@ def rand_ket(d, sparse=False, stype='csr', density=0.01):
         ket = np.asmatrix(np.random.randn(d, 1) +
                           1.0j * np.random.randn(d, 1))
     return nmlz(ket)
-
-
-def rand_uni(d):
-    """Generate a random unitary matrix of order `d`, distributed according to
-    the Haar measure.
-    """
-    q, r = np.linalg.qr(rand_matrix(d))
-    r = np.diagonal(r)
-    r = r / np.abs(r)
-    return rdmul(q, r)
 
 
 def rand_haar_state(d):
