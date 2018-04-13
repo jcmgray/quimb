@@ -178,4 +178,4 @@ class TestPartialTraceCompress:
         lne = logneg_subsys(groundstate(ham_heis(n, cyclic=False)),
                             [2] * n, sysa, sysb)
 
-        assert_allclose(lne, ln, rtol=0.05, atol=0.05)
+        assert_allclose(lne, ln, rtol=0.05, atol=0.06)

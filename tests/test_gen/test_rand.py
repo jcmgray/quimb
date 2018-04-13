@@ -124,8 +124,9 @@ class TestRandUni:
         assert u.shape == (3, 3)
         assert type(u) == np.matrix
         assert u.dtype == dtype
-        assert_allclose(eye(3), u @ u.H, atol=1e-7)
-        assert_allclose(eye(3), u.H @ u, atol=1e-7)
+        # low tolerances for float32 etc
+        assert_allclose(eye(3), u @ u.H, atol=1e-7, rtol=1e-5)
+        assert_allclose(eye(3), u.H @ u, atol=1e-7, rtol=1e-5)
 
 
 class TestRandKet:
