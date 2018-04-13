@@ -1228,7 +1228,7 @@ for meth_name, op in [('__radd__', operator.__add__),
 
 class TNLinearOperator(spla.LinearOperator):
     r"""Get a linear operator - something that replicates the matrix-vector
-    operation - for an arbitrary *uncontracted* TensorNetwork, e.g::
+    operation - for an arbitrary uncontracted TensorNetwork, e.g::
 
         --O--O--+ +--
           |     | |
@@ -1239,7 +1239,7 @@ class TNLinearOperator(spla.LinearOperator):
 
     This can then be supplied to scipy's sparse linear algebra routines.
     The ``left_inds`` / ``right_inds`` convention is that the linear operator
-    will have shape matching (*left_inds, *right_inds), so that the
+    will have shape matching ``(*left_inds, *right_inds)``, so that the
     ``right_inds`` are those that will be contracted in a normal
     matvec / matmat operation::
 
@@ -2164,6 +2164,7 @@ class TensorNetwork(object):
                   |     +---        :         \__:
                   X              left_inds       :
                                              right_inds
+
         Parameters
         ----------
         where : tag or seq of tags

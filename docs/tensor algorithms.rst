@@ -13,6 +13,7 @@ Generate a random :class:`~quimb.tensor.tensor_1d.MatrixProductState`, and contr
     >>> p = MPS_rand_state(n=30, bond_dim=50)
     >>> p.H @ p
     1.0000000000000009
+
     >>> p.show()
      50 50 50 50 50 50 50 50 50 50 50 50 50 50 50 50 50 50 50 50 50 50 50 50 50 50 50 50 50
     o--o--o--o--o--o--o--o--o--o--o--o--o--o--o--o--o--o--o--o--o--o--o--o--o--o--o--o--o--o
@@ -70,26 +71,19 @@ Build a Hamiltonian term by term and setup a DMRG solver:
 
 .. code-block:: python
 
-    In [1]: from quimb.tensor import *
-
-    In [2]: builder = MPOSpinHam(S=1)
-
-    In [3]: builder.add_term(1/2, '+', '-')
-
-    In [4]: builder.add_term(1/2, '-', '+')
-
-    In [5]: builder.add_term(1, 'Z', 'Z')
-
-    In [6]: ham = builder.build(n=100)
-
-    In [7]: dmrg = DMRG2(ham, bond_dims=[10, 20, 100, 100, 200], cutoffs=1e-10)
-
+    from quimb.tensor import *
+    builder = MPOSpinHam(S=1)
+    builder.add_term(1/2, '+', '-')
+    builder.add_term(1/2, '-', '+')
+    builder.add_term(1, 'Z', 'Z')
+    ham = builder.build(n=100)
+    dmrg = DMRG2(ham, bond_dims=[10, 20, 100, 100, 200], cutoffs=1e-10)
 
 Now solve to a certain relative energy tolerance, showing progress and a schematic of the final state:
 
-.. code-block:: guess
+.. code-block:: python
 
-    In [8]: dmrg.solve(tol=1e-6, verbose=True)
+    >>> dmrg.solve(tol=1e-6, verbose=True)
     SWEEP-1, direction=R, max_bond=10, cutoff:1e-10
     100%|███████████████████████████████████████████| 99/99 [00:01<00:00, 75.66it/s]
     Energy: -138.73797893126138 ... not converged
@@ -107,7 +101,7 @@ Now solve to a certain relative energy tolerance, showing progress and a schemat
     Energy: -138.9400860644765 ... converged!
     Out[8]: True
 
-    In [9]: dmrg.state.show()
+    >>> dmrg.state.show()
          3 9 27 55 65 74 79 84 87 89 91 93 94 95 95 95 95 94 94 94 93 93 92 92 91 91 90 90 90 90 90 90 90 90 90 90 90 90 90 90 9
         >->->-->-->-->-->-->-->-->-->-->-->-->-->-->-->-->-->-->-->-->-->-->-->-->-->-->-->-->-->-->-->-->-->-->-->-->-->-->-->- ...
         | | |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |
