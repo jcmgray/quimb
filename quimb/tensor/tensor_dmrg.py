@@ -38,8 +38,9 @@ def get_default_opts(cyclic=False):
         Number of inner eigenproblem lanczos vectors. Smaller can mean quicker.
     local_eig_backend : {None, 'AUTO', 'SCIPY', 'SLEPC'}
         Which to backend to use for the inner eigenproblem. None or 'AUTO' to
-        choose best. Generally 'SLEPC' best if available for large problems,
-        but it can't currently handle ``LinearOperator`` Neff.
+        choose best. Generally ``'SLEPC'`` best if available for large
+        problems, but it can't currently handle ``LinearOperator`` Neff as well
+        as ``'lobpcg'``.
     local_eig_maxiter : int
         Maximum number of inner eigenproblem iterations.
     local_eig_ham_dense : bool

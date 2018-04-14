@@ -1230,12 +1230,12 @@ class TNLinearOperator(spla.LinearOperator):
     r"""Get a linear operator - something that replicates the matrix-vector
     operation - for an arbitrary uncontracted TensorNetwork, e.g::
 
-        --O--O--+ +--
-          |     | |
-        --O--O--O-O--           ==              --0--
-          |     |                      left_inds^   ^right_inds
-        --+     +----
-        ^left_inds  ^right_inds
+                 : --O--O--+ +-- :                 --+
+                 :   |     | |   :                   |
+                 : --O--O--O-O-- :    acting on    --V
+                 :   |     |     :                   |
+                 : --+     +---- :                 --+
+        left_inds^               ^right_inds
 
     This can then be supplied to scipy's sparse linear algebra routines.
     The ``left_inds`` / ``right_inds`` convention is that the linear operator
@@ -1350,7 +1350,8 @@ class TensorNetwork(object):
         constituent tensors unless explicitly copied.
     structure : str, optional
         A string, with integer format specifier, that describes how to range
-        over the network's tags in order to contract it. Not needed.
+        over the network's tags in order to contract it. Also allows integer
+        indexing rather than having to explcitly use tags.
     structure_bsz : int, optional
         How many sites to group together when auto contracting. Eg for 3 (with
         the dotted lines denoting vertical strips of tensors to be contracted):
@@ -1830,7 +1831,7 @@ class TensorNetwork(object):
             (7, 8, 9, 0, 1)
 
         If the start point is > end point (*before* modulo n), then step needs
-        to be negative to yield give anything.
+        to be negative to return anything.
         """
         if tag_slice.start is None:
             start = 0
@@ -1851,6 +1852,12 @@ class TensorNetwork(object):
 
         return tuple(s % self.nsites for s in range(start, stop, step))
 
+    def site_tag(self, i):
+        """Get the tag corresponding to site ``i``, taking into account
+        periodic boundary conditions.
+        """
+        return self.structure.format(i % self.nsites)
+
     def sites2tags(self, sites):
         """Take a integer or slice and produce the correct set of tags.
 
@@ -1865,7 +1872,7 @@ class TensorNetwork(object):
             The correct tags describing those sites.
         """
         if isinstance(sites, int):
-            return {self.structure.format(sites % self.nsites)}
+            return {self.site_tag(sites)}
         elif isinstance(sites, slice):
             return set(map(self.structure.format, self.slice2sites(sites)))
         else:
@@ -1882,10 +1889,10 @@ class TensorNetwork(object):
         which : {'all', 'any', '!all', '!any'}
             How to select based on the tags, if:
 
-                - 'all': get ids of tensors matching all tags
-                - 'any': get ids of tensors matching any tags
-                - '!all': get ids of tensors *not* matching all tags
-                - '!any': get ids of tensors *not* matching any tags
+            - 'all': get ids of tensors matching all tags
+            - 'any': get ids of tensors matching any tags
+            - '!all': get ids of tensors *not* matching all tags
+            - '!any': get ids of tensors *not* matching any tags
 
         Returns
         -------
@@ -2780,7 +2787,7 @@ class TensorNetwork(object):
 
         plt.show()
 
-    def __repr__(self):
+    def __str__(self):
         return "{}([{}{}{}]{}{})".format(
             self.__class__.__name__,
             os.linesep,
@@ -2791,3 +2798,13 @@ class TensorNetwork(object):
             self.structure is not None else "",
             ", nsites={}".format(self.nsites) if
             self.nsites is not None else "")
+
+    def __repr__(self):
+        rep = "<{}(tensors={}".format(self.__class__.__name__,
+                                      len(self.tensor_index))
+        if self.structure:
+            rep += ", structure='{}', nsites={}".format(self.structure,
+                                                        self.nsites)
+
+        return rep + ")>"
+
