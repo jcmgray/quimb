@@ -1028,13 +1028,13 @@ class DMRG1(DMRG):
     """
     __doc__ += DMRG.__doc__
 
-    def __init__(self, ham, which='SA', bond_dims=None, cutoffs=1e-8):
+    def __init__(self, ham, which='SA', bond_dims=None, cutoffs=1e-8, p0=None):
 
         if bond_dims is None:
             bond_dims = range(10, 1001, 10)
 
         super().__init__(ham, bond_dims=bond_dims, cutoffs=cutoffs,
-                         which=which, bsz=1)
+                         which=which, p0=p0, bsz=1)
 
 
 class DMRG2(DMRG):
@@ -1042,13 +1042,13 @@ class DMRG2(DMRG):
     """
     __doc__ += DMRG.__doc__
 
-    def __init__(self, ham, which='SA', bond_dims=None, cutoffs=1e-8):
+    def __init__(self, ham, which='SA', bond_dims=None, cutoffs=1e-8, p0=None):
 
         if bond_dims is None:
             bond_dims = [8, 16, 32, 64, 128, 256, 512, 1024]
 
         super().__init__(ham, bond_dims=bond_dims, cutoffs=cutoffs,
-                         which=which, bsz=2)
+                         which=which, p0=p0, bsz=2)
 
 
 # --------------------------------------------------------------------------- #
