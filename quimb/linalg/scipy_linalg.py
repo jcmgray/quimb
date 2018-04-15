@@ -113,9 +113,9 @@ def seigsys_lobpcg(A, k=6, *, B=None, v0=None, which=None, return_vecs=True,
     lobpcg_opts.pop('EPSType', None)
 
     # convert some arguments and defaults
-    lobpcg_opts.setdefault('maxiter', 40)
+    lobpcg_opts.setdefault('maxiter', 30)
     if lobpcg_opts['maxiter'] is None:
-        lobpcg_opts['maxiter'] = 40
+        lobpcg_opts['maxiter'] = 30
     largest = {'SA': False, 'LA': True}[which]
 
     n = A.shape[0]

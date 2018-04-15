@@ -9,6 +9,7 @@ from .tensor_core import (
     bonds,
     Tensor,
     TensorNetwork,
+    TransferOperator,
 )
 from .tensor_gen import (
     rand_tensor,
@@ -56,6 +57,7 @@ __all__ = (
     "bonds",
     "Tensor",
     "TensorNetwork",
+    "TransferOperator",
     "rand_tensor",
     "MPS_rand_state",
     "MPS_product_state",

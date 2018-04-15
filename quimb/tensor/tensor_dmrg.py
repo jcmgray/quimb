@@ -342,10 +342,11 @@ class MovingEnvironment:
 
         # ensure that expectation still = 1 after approximation
         if self.norm:
-
-
-            norm = (self.tnc ^ all) ** 0.5
-
+            # section left can still be pretty long so do structured contract
+            tnn = self.tnc.copy()
+            tnn ^= ['_LEFT', self.site_tag(start)]
+            tnn ^= ['_RIGHT', self.site_tag(stop - 1)]
+            norm = (tnn ^ slice(start, stop)) ** 0.5
 
             self.tnc['_LEFT'] /= norm
             self.tnc['_RIGHT'] /= norm

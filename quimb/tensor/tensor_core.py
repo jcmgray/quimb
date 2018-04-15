@@ -1258,6 +1258,10 @@ class TNLinearOperator(spla.LinearOperator):
         The dimensions corresponding to left_inds. Will figure out if None.
     rdims : tuple of int, or None
         The dimensions corresponding to right_inds. Will figure out if None.
+
+    See Also
+    --------
+    TransferOperator
     """
 
     def __init__(self, tns, left_inds, right_inds, ldims=None, rdims=None,
@@ -2159,8 +2163,9 @@ class TensorNetwork(object):
         return tn
 
     def replace_with_svd(self, where, left_inds, eps, *, which='any',
-                         right_inds=None, method='isvd', keep_tags=True,
-                         inplace=False, ltags=None, rtags=None, max_bond=None):
+                         right_inds=None, method='isvd', max_bond=None,
+                         ltags=None, rtags=None, keep_tags=True,
+                         start=None, stop=None, inplace=False,):
         r"""Replace all tensors marked by ``where`` with an iteratively
         constructed SVD. E.g. if ``X`` denote ``where`` tensors::
 
@@ -2178,10 +2183,6 @@ class TensorNetwork(object):
             Tags specifying the tensors to replace.
         left_inds : ind or sequence of inds
             The indices defining the left hand side of the SVD.
-        right_inds : ind or sequence of inds, optional
-            The indices defining the right hand side of the SVD, these can be
-            automatically worked out, but for hermitian decompositions the
-            order is important and thus can be given here explicitly.
         eps : float
             The tolerance to perform the SVD with, affects the number of
             singular values kept. See
@@ -2189,21 +2190,29 @@ class TensorNetwork(object):
         which : {'any', 'all', '!any', '!all'}, optional
             Whether to replace tensors matching any or all the tags ``where``,
             prefix with '!' to invert the selection.
+        right_inds : ind or sequence of inds, optional
+            The indices defining the right hand side of the SVD, these can be
+            automatically worked out, but for hermitian decompositions the
+            order is important and thus can be given here explicitly.
         method : {'isvd', 'eig', 'eigh', 'svd', 'svds', 'eigsh', 'cholesky'}
             How to perform the decomposition, if not an iterative method
             ('isvd', 'svds', 'eigsh'), the subnetwork dense tensor will be
             formed first.
         max_bond : int, optional
             The maximum bond to keep, defaults to no maximum (-1).
-        inplace : bool, optional
-            Perform operation in place.
         ltags : sequence of str, optional
             Tags to add to the left tensor.
         rtags : sequence of str, optional
             Tags to add to the right tensor.
         keep_tags : bool, optional
             Whether to propagate tags found in the subnetwork to both new
-            tensors or drop them, defaults to True.
+            tensors or drop them, defaults to ``True``.
+        start : int, optional
+            If given, assume can use ``TransferOperator``.
+        stop :  int, optional
+            If given, assume can use ``TransferOperator``.
+        inplace : bool, optional
+            Perform operation in place.
 
         Returns
         -------
@@ -2220,8 +2229,17 @@ class TensorNetwork(object):
             right_inds = tuple(i for i in svd_section.outer_inds()
                                if i not in left_inds)
 
-        A = svd_section.aslinearoperator(left_inds=left_inds,
-                                         right_inds=right_inds)
+        if (start is None) and (stop is None):
+            A = svd_section.aslinearoperator(left_inds=left_inds,
+                                             right_inds=right_inds)
+        else:
+            # check if need to invert start stop as well
+            if '!' in which:
+                start, stop = stop, start + self.nsites
+                left_inds, right_inds = right_inds, left_inds
+
+            A = TransferOperator(svd_section, start=start, stop=stop,
+                                 left_inds=left_inds, right_inds=right_inds)
 
         left_shp, right_shp = A.ldims, A.rdims
 
@@ -2275,7 +2293,8 @@ class TensorNetwork(object):
         TensorNetwork
         """
         lix = bonds(self[start - 1], self[start])
-        return self.replace_with_svd(slice(start, stop), lix, eps, **kwargs)
+        return self.replace_with_svd(slice(start, stop), lix, eps,
+                                     start=start, stop=stop, **kwargs)
 
     def convert_to_zero(self):
         """Inplace conversion of this network to an all zero tensor network.
@@ -2808,3 +2827,82 @@ class TensorNetwork(object):
 
         return rep + ")>"
 
+
+class TransferOperator(spla.LinearOperator):
+    r"""A 1D tensor network linear operator like::
+
+                 start                 stop - 1
+                   .                     .
+                 :-O-O-O-O-O-O-O-O-O-O-O-O-:                 --+
+                 : | | | | | | | | | | | | :                   |
+                 :-H-H-H-H-H-H-H-H-H-H-H-H-:    acting on    --V
+                 : | | | | | | | | | | | | :                   |
+                 :-O-O-O-O-O-O-O-O-O-O-O-O-:                 --+
+        left_inds^                         ^right_inds
+
+    Like :class:`~quimb.tensor.tensor_core.TNLinearOperator`, but performs a
+    structured contract from one end to the other than can handle very long
+    chain more efficiently.
+
+
+    Parameters
+    ----------
+    tn : TensorNetwork
+        The tensor network to turn into a ``LinearOperator``.
+    left_inds : sequence of str
+        The left indicies.
+    right_inds : sequence of str
+        The right indicies.
+    start : int
+        Index of starting site.
+    stop : int
+        Index of stopping site (does not include this site).
+    ldims : tuple of int, optional
+        If known, the dimensions corresponding to ``left_inds``.
+    rdims : tuple of int, optional
+        If known, the dimensions corresponding to ``right_inds``.
+
+    See Also
+    --------
+    TNLinearOperator
+    """
+
+    def __init__(self, tn, left_inds, right_inds, start, stop,
+                 ldims=None, rdims=None):
+        self.tn = tn
+        self.start, self.stop = start, stop
+
+        if ldims is None or rdims is None:
+            ind_sizes = tn.ind_sizes()
+            ldims = tuple(ind_sizes[i] for i in left_inds)
+            rdims = tuple(ind_sizes[i] for i in right_inds)
+
+        self.left_inds, self.right_inds = left_inds, right_inds
+        self.ldims, ld = ldims, prod(ldims)
+        self.rdims, rd = rdims, prod(rdims)
+
+        super().__init__(dtype=self.tn.dtype, shape=(ld, rd))
+
+    def _matvec(self, vec):
+        in_data = vec.reshape(*self.rdims)
+        in_T = Tensor(in_data, self.right_inds, tags=['_RIGHT'])
+
+        tnc = self.tn | in_T
+        tnc ^= ['_RIGHT', self.tn.site_tag(self.stop - 1)]
+        out_T = tnc ^ slice(self.stop - 1, self.start - 1, -1)
+
+        return out_T.transpose(*self.left_inds, inplace=True).data.ravel()
+
+    def _rmatvec(self, vec):
+        in_data = vec.conj().reshape(*self.ldims)
+        in_T = Tensor(in_data, self.left_inds, tags=['_LEFT'])
+
+        tnc = self.tn | in_T
+        tnc ^= ['_LEFT', self.tn.site_tag(self.start)]
+        out_T = tnc ^ slice(self.start, self.stop)
+
+        return out_T.transpose(*self.right_inds, inplace=True).data.ravel()
+
+    def to_dense(self):
+        T = self.tn ^ slice(self.start, self.stop)
+        return T.to_dense(self.left_inds, self.right_inds)

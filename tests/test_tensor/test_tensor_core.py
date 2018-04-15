@@ -3,15 +3,18 @@ import operator
 
 import numpy as np
 from numpy.testing import assert_allclose
+import scipy.sparse.linalg as spla
 
 from quimb import entropy, svds
 from quimb.tensor import (
+    bonds,
     tensor_contract,
     tensor_direct_product,
     Tensor,
     TensorNetwork,
     rand_tensor,
     MPS_rand_state,
+    TransferOperator,
 )
 from quimb.tensor.tensor_core import _trim_singular_vals
 
@@ -804,3 +807,20 @@ class TestTensorNetworkAsLinearOperator:
         assert isinstance(tn['_V'], Tensor)
 
         assert_allclose(x1, x2, rtol=1e-4)
+
+    def test_TransferOperator(self):
+        p = MPS_rand_state(40, 10)
+        pp = p.H & p
+        start, stop = 10, 30
+        lix = bonds(pp[start - 1], pp[start])
+        rix = bonds(pp[stop - 1], pp[stop])
+
+        sec = pp[start:stop]
+
+        A = TransferOperator(sec, lix, rix, start, stop)
+        B = sec.aslinearoperator(lix, rix)
+
+        s1 = spla.svds(A)[1]
+        s2 = spla.svds(B)[1]
+
+        assert_allclose(s1, s2)
