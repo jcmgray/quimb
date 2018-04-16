@@ -87,6 +87,11 @@ def expec_TN_1D(*tns, compress=None, eps=1e-15):
         set to ``None`` (the default), decide heuristically.
     eps : float, optional
         The accuracy of the transfer matrix compression.
+
+    Returns
+    -------
+    x : float
+        The expectation value.
     """
     expec_tn = TensorNetwork(align_TN_1D(*tns))
 

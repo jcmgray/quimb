@@ -795,7 +795,7 @@ class TestTensorNetworkAsLinearOperator:
         ul, = tn['_KET', 'I1'].bonds(tn['_KET', 'I2'])
         ll, = tn['_BRA', 'I1'].bonds(tn['_BRA', 'I2'])
 
-        where = [f'I{i}' for i in range(2, 40)]
+        where = ['I{}'.format(i) for i in range(2, 40)]
 
         tn.replace_with_svd(where, left_inds=(ul, ll), eps=1e-3,
                             inplace=True, ltags='_U', rtags='_V')

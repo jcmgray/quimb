@@ -403,7 +403,7 @@ def _array_split_eigh(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0):
 @njit  # pragma: no cover
 def _numba_cholesky(x, cutoff=-1, cutoff_mode=3, max_bond=-1, absorb=0):
     """SVD-decomposition, using cholesky decomposition, only works if
-    ``x`` is symmetric-positive.
+    ``x`` is positive definite.
     """
     L = np.linalg.cholesky(x)
     return L, dag(L)
@@ -2165,7 +2165,7 @@ class TensorNetwork(object):
     def replace_with_svd(self, where, left_inds, eps, *, which='any',
                          right_inds=None, method='isvd', max_bond=None,
                          ltags=None, rtags=None, keep_tags=True,
-                         start=None, stop=None, inplace=False,):
+                         start=None, stop=None, inplace=False):
         r"""Replace all tensors marked by ``where`` with an iteratively
         constructed SVD. E.g. if ``X`` denote ``where`` tensors::
 
@@ -2243,8 +2243,7 @@ class TensorNetwork(object):
 
         left_shp, right_shp = A.ldims, A.rdims
 
-        opts = {}
-        opts['max_bond'] = {None: -1}.get(max_bond, max_bond)
+        opts = {'max_bond': -1 if max_bond is None else max_bond}
 
         if method in ('svd', 'eig', 'eigh', 'cholesky'):
             if not isinstance(A, np.ndarray):

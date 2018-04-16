@@ -75,9 +75,10 @@ def MPS_rand_state(n, bond_dim, phys_dim=2, normalize=True, cyclic=False,
     def gen_data(shape):
         return randn(shape, dtype=dtype)
 
-    arrays = \
-        map(lambda x: x / norm_fro_dense(x)**(1 / (x.ndim - 1)),
-            map(gen_data, gen_shapes()))
+    def scale(x):
+        return x / norm_fro_dense(x)**(1 / (x.ndim - 1))
+
+    arrays = map(scale, map(gen_data, gen_shapes()))
 
     rmps = MatrixProductState(arrays, **mps_opts)
 

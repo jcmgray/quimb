@@ -713,13 +713,15 @@ def _permute_dense(p, dims, perm):
     """
     p, perm = np.asarray(p), np.asarray(perm)
     d = prod(dims)
+
     if isop(p):
-        return p.reshape((*dims, *dims)) \
-                .transpose((*perm, *(perm + len(dims)))) \
-                .reshape((d, d))
-    return p.reshape(dims) \
-            .transpose(perm) \
-            .reshape((d, 1))
+        return (p.reshape([*dims, *dims])
+                .transpose([*perm, *(perm + len(dims))])
+                .reshape([d, d]))
+
+    return (p.reshape(dims)
+            .transpose(perm)
+            .reshape([d, 1]))
 
 
 def _permute_sparse(a, dims, perm):

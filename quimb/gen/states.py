@@ -253,14 +253,14 @@ def werner_state(p, **kwargs):
     p : float
         Singlet Fraction.
     kwargs
-        Supplied to ``qu`` called on state.
+        Supplied to :func:`~quimb.qu` called on state.
 
     Returns
     -------
     matrix
     """
-    return p * bell_state('psi-', qtype="dop", **kwargs) +  \
-        (1 - p) * eye(4, **kwargs) / 4
+    return (p * bell_state('psi-', qtype="dop", **kwargs) +
+            (1 - p) * eye(4, **kwargs) / 4)
 
 
 def ghz_state(n, **kwargs):
