@@ -288,7 +288,7 @@ class TestDMRG2:
         ham = MPO_ham_heis(n, cyclic=True)
         dmrg = DMRG2(ham, bond_dims=range(10, 30, 2))
         dmrg.opts['periodic_segment_size'] = 1 / 3
-        assert dmrg.solve(tol=0.1, verbose=2)
+        assert dmrg.solve(tol=1, verbose=2)
         assert dmrg.energy == pytest.approx(heisenberg_energy(n), 1e-3)
 
 
