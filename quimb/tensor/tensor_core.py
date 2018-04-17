@@ -2673,16 +2673,22 @@ class TensorNetwork(object):
 
         Parameters
         ----------
+        color : sequence of tags, optional
+            If given, uniquely color any tensors which have each of the tags.
+            If some tensors have more than of the tags, only one color will
+        show_inds : bool, optional
+            Explicitly turn on labels for each tensors indices.
+        show_tags : bool, optional
+            Explicitly turn on labels for each tensors tags.
         iterations : int, optional
             How many iterations to perform when when finding the best layout
             using node repulsion. Ramp this up if the graph is drawing
             messily.
-        color : sequence of tags, optional
-            If given, uniquely color any tensors which have each of the tags.
-            If some tensors have more than of the tags, only one color will
             be shown.
         figsize : tuple of int
             The size of the drawing.
+        legend : bool, optional
+            Whether to draw a legend for the colored tags.
         plot_opts
             Supplied to ``networkx.draw``.
         """
@@ -2771,7 +2777,7 @@ class TensorNetwork(object):
         # Also set the colors of any tagged tensors.
         szs = []
         crs = []
-        for nd in G.nodes:
+        for nd in G.nodes():
             if isinstance(nd, str):
                 szs += [0]
                 crs += [(1.0, 1.0, 1.0)]

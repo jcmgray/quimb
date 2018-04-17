@@ -757,6 +757,12 @@ class TestTensorNetwork:
 
         assert_allclose(k.H @ k, kU.H @ kU)
 
+    def test_graph(self):
+        import matplotlib
+        matplotlib.use('Template')
+        k = MPS_rand_state(10, 7, normalize=False)
+        k.graph(color=['I0', 'I2'])
+
 
 class TestTensorNetworkAsLinearOperator:
 
