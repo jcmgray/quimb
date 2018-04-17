@@ -443,7 +443,7 @@ def _init_eigensolver(k=6, which='LM', sigma=None, isherm=True, isgen=False,
     return eigensolver
 
 
-def seigsys_slepc(A, k=6, *,
+def seigsys_slepc(A, k, *,
                   B=None,
                   which=None,
                   sigma=None,

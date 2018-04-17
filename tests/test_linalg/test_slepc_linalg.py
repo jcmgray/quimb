@@ -268,7 +268,7 @@ class TestCISS:
         offset = norm(a, 'fro')
         a = a + offset * sp.eye(a.shape[0])
 
-        sl, sv = seigsys_slepc(a, l_win=(-0.2 + offset, 0.2 + offset))
+        sl, sv = seigsys_slepc(a, k=6, l_win=(-0.2 + offset, 0.2 + offset))
         sl -= offset
         assert_allclose(el, sl)
         assert_allclose(np.abs(sv.H @ ev), np.eye(el.size), atol=1e-11)

@@ -93,7 +93,7 @@ _DENSE_EIG_METHODS = {
 }
 
 
-def seigsys_numpy(A, k=6, B=None, which=None, return_vecs=True, sigma=None,
+def seigsys_numpy(A, k, B=None, which=None, return_vecs=True, sigma=None,
                   isherm=True, sort=True, **eig_opts):
     """Partial eigen-decomposition using numpy's dense linear algebra.
 

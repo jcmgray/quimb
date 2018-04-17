@@ -33,8 +33,9 @@ from quimb.linalg.base_linalg import _rel_window_to_abs_window
 
 # TODO: reinstate slepc svd tests ******************************************* #
 
-eigs_backends = ["auto", "dense", "scipy"]
-svds_backends = ["dense", "scipy"]
+eigs_backends = ["auto", "numpy", "scipy"]
+svds_backends = ["numpy", "scipy"]
+
 if SLEPC4PY_FOUND:
     eigs_backends += ["slepc-nompi", "slepc"]
     svds_backends += ["slepc-nompi", "slepc"]
@@ -195,10 +196,10 @@ class TestSeigs:
 class TestLOBPCG:
     def test_against_arpack(self):
         A = rand_herm(32, dtype=float)
-        lk, vk = seigsys(A, backend='lobpcg')
-        slk, svk = seigsys(A, backend='scipy')
+        lk, vk = seigsys(A, k=6, backend='lobpcg')
+        slk, svk = seigsys(A, k=6, backend='scipy')
         assert_allclose(lk, slk)
-        assert_allclose(np.eye(6), abs(vk.H @ svk), atol=1e-10)
+        assert_allclose(np.eye(6), abs(vk.H @ svk), atol=1e-9, rtol=1e-9)
 
 
 class TestEvalsWindowed:

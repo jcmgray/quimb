@@ -6,7 +6,6 @@
 
 import functools
 import numpy as np
-import numpy.linalg as nla
 import scipy.linalg as sla
 import scipy.sparse.linalg as spla
 
@@ -50,32 +49,32 @@ _EIGSYS_METHODS = {
 }
 
 
-def eigsys(a, *, sort=True, isherm=True, backend='NUMPY', **kwargs):
+def eigsys(A, *, sort=True, isherm=True, backend='NUMPY', **kwargs):
     """Find all eigenpairs of a dense matrix.
 
     Parameters
     ----------
-        a : matrix-like
-            The matrix of decompose.
-        sort : bool, optional
-            Whether to sort the eigenpairs in ascending eigenvalue order.
-        isherm : bool, optional
-            Whether the matrix is assumed to be hermitian or not.
-        backend : {'numpy'}, optional
-            Which backend to use to solve the system.
-        **kwargs
-            Supplied to the backend function.
+    A : matrix-like
+        The matrix to decompose.
+    sort : bool, optional
+        Whether to sort the eigenpairs in ascending eigenvalue order.
+    isherm : bool, optional
+        Whether the matrix is assumed to be hermitian or not.
+    backend : {'numpy'}, optional
+        Which backend to use to solve the system.
+    kwargs
+        Supplied to the backend function.
 
     Returns
     -------
-        evals : 1d-array
-            Eigenvalues.
-        evecs : np.matrix
-            Corresponding eigenvectors as columns of matrix, such that
-            ``evecs @ evals @ evecs.H == a``.
+    el : 1d-array
+        Eigenvalues.
+    ev : numpy.matrix
+        Corresponding eigenvectors as columns of matrix, such that
+        ``ev @ diag(el) @ ev.H == A``.
     """
     fn = _EIGSYS_METHODS[backend.upper()]
-    return fn(a, sort=sort, isherm=isherm, **kwargs)
+    return fn(A, sort=sort, isherm=isherm, **kwargs)
 
 
 _EIGVALS_METHODS = {
@@ -83,69 +82,58 @@ _EIGVALS_METHODS = {
 }
 
 
-def eigvals(a, *, sort=True, isherm=True, backend='numpy', **kwargs):
+def eigvals(A, *, sort=True, isherm=True, backend='numpy', **kwargs):
     """Find all eigenvalues of dense matrix.
 
     Parameters
     ----------
-        a : matrix-like
-            The matrix to find eigenvalues of.
-        sort : bool, optional
-            Whether to sort the eigenvalues in ascending order.
-        isherm : bool, optional
-            Whether the matrix is assumed to be hermitian or not.
-        backend : {'numpy'}, optional
-            Which backend to use to solve the system.
-        **kwargs
-            Supplied to the backend function.
+    A : matrix-like
+        The matrix to find eigenvalues of.
+    sort : bool, optional
+        Whether to sort the eigenvalues in ascending order.
+    isherm : bool, optional
+        Whether the matrix is assumed to be hermitian or not.
+    backend : {'numpy'}, optional
+        Which backend to use to solve the system.
+    kwargs
+        Supplied to the backend function.
 
     Returns
     -------
-        evals : 1d-array
-            Eigenvalues.
+    el : 1d-array
+        Eigenvalues.
     """
     fn = _EIGVALS_METHODS[backend.upper()]
-    return fn(a, sort=sort, isherm=isherm, **kwargs)
+    return fn(A, sort=sort, isherm=isherm, **kwargs)
 
 
-def eigvecs(a, *, sort=True, isherm=True, backend='numpy', **kwargs):
+def eigvecs(A, *, sort=True, isherm=True, backend='numpy', **kwargs):
     """Find all eigenvectors of a dense matrix.
 
     Parameters
     ----------
-        a : matrix-like
-            The matrix of decompose.
-        sort : bool, optional
-            Whether to sort the eigenpairs in ascending eigenvalue order.
-        isherm : bool, optional
-            Whether the matrix is assumed to be hermitian or not.
-        backend : {'numpy'}, optional
-            Which backend to use to solve the system.
-        **kwargs
-            Supplied to the backend function.
+    A : matrix-like
+        The matrix of decompose.
+    sort : bool, optional
+        Whether to sort the eigenpairs in ascending eigenvalue order.
+    isherm : bool, optional
+        Whether the matrix is assumed to be hermitian or not.
+    backend : {'numpy'}, optional
+        Which backend to use to solve the system.
+    kwargs
+        Supplied to the backend function.
 
     Returns
     -------
-        evecs : np.matrix
-            Eigenvectors as columns of matrix.
+    ev : np.matrix
+        Eigenvectors as columns of matrix.
     """
-    return eigsys(a, sort=sort, isherm=isherm, backend=backend, **kwargs)[1]
+    return eigsys(A, sort=sort, isherm=isherm, backend=backend, **kwargs)[1]
 
 
 # --------------------------------------------------------------------------- #
 #                          Partial eigendecomposition                         #
 # --------------------------------------------------------------------------- #
-
-
-_SEIGSYS_METHODS = {
-    'NUMPY': seigsys_numpy,
-    'DENSE': seigsys_numpy,
-    'SCIPY': seigsys_scipy,
-    'LOBPCG': seigsys_lobpcg,
-    'SLEPC': seigsys_slepc_spawn,
-    'SLEPC-NOMPI': seigsys_slepc,
-}
-
 
 def choose_backend(A, k, int_eps=False, B=None):
     """Pick a backend automatically for partial decompositions.
@@ -172,7 +160,16 @@ def choose_backend(A, k, int_eps=False, B=None):
     return 'SCIPY'
 
 
-def seigsys(A, k=6, *,
+_SEIGSYS_METHODS = {
+    'NUMPY': seigsys_numpy,
+    'SCIPY': seigsys_scipy,
+    'LOBPCG': seigsys_lobpcg,
+    'SLEPC': seigsys_slepc_spawn,
+    'SLEPC-NOMPI': seigsys_slepc,
+}
+
+
+def seigsys(A, k, *,
             B=None,
             which=None,
             return_vecs=True,
@@ -210,18 +207,19 @@ def seigsys(A, k=6, *,
     v0 : None or 1D-array like
         An initial vector guess to iterate with.
     sort : bool, optional
-        Whether to sort by ascending eigenvalue order.
-    backend : {'AUTO', 'NUMPY', 'SCIPY', 'SLEPC', 'SLEPC-NOMPI'}, optional
+        Whether to explicitly sort by ascending eigenvalue order.
+    backend : {'AUTO', 'NUMPY', 'SCIPY',
+               'LOBPCG', 'SLEPC', 'SLEPC-NOMPI'}, optional
         Which solver to use.
     backend_opts
         Supplied to the backend solver.
 
     Returns
     -------
-    lk : 1d-array
+    elk : 1d-array
         The ``k`` eigenvalues.
-    {vk : 2d-matrix
-        matrix with ``k`` eigenvectors as columns if ``return_vecs``}
+    evk : 2d-matrix
+        matrix with ``k`` eigenvectors as columns if ``return_vecs``.
     """
     settings = {
         'k': k,
@@ -243,19 +241,28 @@ def seigsys(A, k=6, *,
     if bkd == 'AUTO':
         bkd = choose_backend(A, k, sigma is not None, B=B)
 
-    return _SEIGSYS_METHODS[bkd](A, **settings, **backend_opts)
+    try:
+        return _SEIGSYS_METHODS[bkd](A, **settings, **backend_opts)
+
+    # sometimes e.g. lobpcg fails, worth trying scipy
+    except np.linalg.LinAlgError:
+        import warnings
+        warnings.warn("seigsys with backend {} failed, trying again with"
+                      "scipy.".format(bkd))
+
+        return seigsys_scipy(A, **settings, **backend_opts)
 
 
-def seigvals(a, k=6, **kwargs):
+def seigvals(A, k, **kwargs):
     """Seigsys alias for finding eigenvalues only.
     """
-    return seigsys(a, k=k, return_vecs=False, **kwargs)
+    return seigsys(A, k=k, return_vecs=False, **kwargs)
 
 
-def seigvecs(a, k=6, **kwargs):
+def seigvecs(A, k, **kwargs):
     """Seigsys alias for finding eigenvectors only.
     """
-    return seigsys(a, k=k, return_vecs=True, **kwargs)[1]
+    return seigsys(A, k=k, return_vecs=True, **kwargs)[1]
 
 
 def groundstate(ham, **kwargs):
@@ -270,11 +277,11 @@ def groundenergy(ham, **kwargs):
     return seigvals(ham, k=1, which='SA', **kwargs)[0]
 
 
-def bound_spectrum(a, backend='auto', **kwargs):
-    """Return the smallest and largest eigenvalue of operator `a`.
+def bound_spectrum(A, backend='auto', **kwargs):
+    """Return the smallest and largest eigenvalue of operator `A`.
     """
-    el_min = seigvals(a, k=1, which='SA', backend=backend, **kwargs)[0]
-    el_max = seigvals(a, k=1, which='LA', backend=backend, **kwargs)[0]
+    el_min = seigvals(A, k=1, which='SA', backend=backend, **kwargs)[0]
+    el_max = seigvals(A, k=1, which='LA', backend=backend, **kwargs)[0]
     return el_min, el_max
 
 
@@ -283,20 +290,20 @@ def _rel_window_to_abs_window(el_min, el_max, w_0, w_sz=None):
 
     Parameters
     ----------
-        el_min : float
-            Smallest eigenvalue.
-        el_max : float
-            Largest eigenvalue.
-        w_0 : float [0.0 - 1.0]
-            Relative window centre.
-        w_sz : float (None)
-            Relative window width.
+    el_min : float
+        Smallest eigenvalue.
+    el_max : float
+        Largest eigenvalue.
+    w_0 : float [0.0 - 1.0]
+        Relative window centre.
+    w_sz : float, optional
+        Relative window width.
 
     Returns
     -------
-        l_0[, l_min, l_max]:
-            Absolute value of centre of window, lower and upper intervals if a
-            window size is specified.
+    l_0[, l_min, l_max]:
+        Absolute value of centre of window, lower and upper intervals if a
+        window size is specified.
     """
     el_range = el_max - el_min
     el_w_0 = el_min + w_0 * el_range
@@ -307,51 +314,61 @@ def _rel_window_to_abs_window(el_min, el_max, w_0, w_sz=None):
     return el_w_0
 
 
-def eigsys_window(a, w_0, w_n=6, w_sz=None, backend='AUTO',
+def eigsys_window(A, w_0, w_n=6, w_sz=None, backend='AUTO',
                   return_vecs=True, offset_const=1 / 104729, **kwargs):
     """ Return eigenpairs internally from a hermitian matrix.
 
     Parameters
     ----------
-        a : operator
-            Operator to retrieve eigenpairs from.
-        w_0 : float [0.0 - 1.0]
-            Relative window centre to retrieve eigenpairs from.
-        w_n : int
-            Target number of eigenpairs to retrieve.
-        w_sz : float (optional)
-            Relative maximum window width within which to keep eigenpairs.
-        backend : str
-        return_vecs : bool
-        offset_const : float
+    A : operator
+        Operator to retrieve eigenpairs from.
+    w_0 : float [0.0 - 1.0]
+        Relative window centre to retrieve eigenpairs from.
+    w_n : int, optional
+        Target number of eigenpairs to retrieve.
+    w_sz : float, optional
+        Relative maximum window width within which to keep eigenpairs.
+    backend : str, optional
+        Which :func:`~quimb.seigsys` backend to use.
+    return_vecs : bool, optional
+        Whether to return eigenvectors as well.
+    offset_const : float, optional
+        Small fudge factor (relative to window range) to avoid 1 / 0 issues.
 
     Returns
     -------
-        ls: eigenvalues around w_0
+    el : 1d-array
+        Eigenvalues around w_0.
+    ev : 2d-matrix
+        The eigenvectors, if ``return_vecs=True``.
     """
     w_sz = w_sz if w_sz is not None else 1.1
 
-    if not issparse(a) or backend == "dense":
+    if not issparse(A) or backend.upper() == 'NUMPY':
         if return_vecs:
-            lk, vk = eigsys(a.A if issparse(a) else a, **kwargs)
+            lk, vk = eigsys(A.A if issparse(A) else A, **kwargs)
         else:
-            lk = eigvals(a.A if issparse(a) else a, **kwargs)
+            lk = eigvals(A.A if issparse(A) else A, **kwargs)
+
         lmin, lmax = lk[0], lk[-1]
         l_w0, l_wmin, l_wmax = _rel_window_to_abs_window(lmin, lmax, w_0, w_sz)
 
     else:
-        lmin, lmax = bound_spectrum(a, backend=backend, **kwargs)
+        lmin, lmax = bound_spectrum(A, backend=backend, **kwargs)
         l_w0, l_wmin, l_wmax = _rel_window_to_abs_window(lmin, lmax, w_0, w_sz)
         l_w0 += (lmax - lmin) * offset_const  # for 1/0 issues
+
         if return_vecs:
-            lk, vk = seigsys(a, k=w_n, sigma=l_w0, backend=backend, **kwargs)
+            lk, vk = seigsys(A, k=w_n, sigma=l_w0, backend=backend, **kwargs)
         else:
-            lk = seigvals(a, k=w_n, sigma=l_w0, backend=backend, **kwargs)
+            lk = seigvals(A, k=w_n, sigma=l_w0, backend=backend, **kwargs)
 
     # Trim eigenpairs from beyond window
     in_window = (lk > l_wmin) & (lk < l_wmax)
+
     if return_vecs:
         return lk[in_window], vk[:, in_window]
+
     return lk[in_window]
 
 
@@ -371,12 +388,12 @@ def eigvecs_window(*args, **kwargs):
 # Partial singular value decomposition                                       #
 # -------------------------------------------------------------------------- #
 
-def svd(a, return_vecs=True):
+def svd(A, return_vecs=True):
     """Compute full singular value decomposition of matrix, using numpy.
 
     Parameters
     ----------
-    a : dense matrix
+    A : dense matrix
         The operator.
     return_vecs : bool, optional
         Whether to return the singular vectors.
@@ -384,17 +401,25 @@ def svd(a, return_vecs=True):
     Returns
     -------
     (U,) s (, VH) :
-        Singular value(s) (and vectors) such that ``U @ np.diag(s) @ VH = a``.
+        Singular value(s) (and vectors) such that ``U @ np.diag(s) @ VH = A``.
     """
-    return nla.svd(a, full_matrices=False, compute_uv=return_vecs)
+    return np.linalg.svd(A, full_matrices=False, compute_uv=return_vecs)
 
 
-def svds(a, k=6, ncv=None, return_vecs=True, backend='AUTO', **kwargs):
+_SVDS_METHODS = {
+    'SLEPC': svds_slepc_spawn,
+    'SLEPC-NOMPI': svds_slepc,
+    'NUMPY': numpy_svds,
+    'SCIPY': scipy_svds,
+}
+
+
+def svds(A, k, ncv=None, return_vecs=True, backend='AUTO', **kwargs):
     """Compute the partial singular value decomposition of an operator.
 
     Parameters
     ----------
-    a : Matrix or LinearOperator
+    A : Matrix or LinearOperator
         The operator to decompose.
     k : int, optional
         number of singular value (triplets) to retrieve
@@ -409,56 +434,60 @@ def svds(a, k=6, ncv=None, return_vecs=True, backend='AUTO', **kwargs):
     -------
     (Uk,) sk (, VHk) :
         Singular value(s) (and vectors) such that ``Uk @ np.diag(sk) @ VHk``
-        approximates ``a``.
+        approximates ``A``.
     """
     settings = {
         'k': k,
         'ncv': ncv,
         'return_vecs': return_vecs}
-    bkd = (choose_backend(a, k, False) if backend in {'auto', 'AUTO'} else
+
+    bkd = (choose_backend(A, k, False) if backend in {'auto', 'AUTO'} else
            backend.upper())
-    svds_func = (svds_slepc_spawn if bkd == 'SLEPC' else
-                 svds_slepc if bkd == 'SLEPC-NOMPI' else
-                 numpy_svds if bkd in {'NUMPY', 'DENSE'} else
-                 scipy_svds if bkd == 'SCIPY' else
-                 None)
-    return svds_func(a, **settings, **kwargs)
+    svds_func = _SVDS_METHODS[bkd.upper()]
+
+    return svds_func(A, **settings, **kwargs)
 
 
 # -------------------------------------------------------------------------- #
 # Norms and other quantities based on decompositions                         #
 # -------------------------------------------------------------------------- #
 
-def norm_2(a, **kwargs):
-    """Return the 2-norm of matrix, a, i.e. the largest singular value.
+def norm_2(A, **kwargs):
+    """Return the 2-norm of matrix, ``A``, i.e. the largest singular value.
     """
-    return svds(a, k=1, return_vecs=False, **kwargs)[0]
+    return svds(A, k=1, return_vecs=False, **kwargs)[0]
 
 
-def norm_fro_dense(a):
+def norm_fro_dense(A):
     """Frobenius norm for dense matrices
     """
-    return vdot(a, a).real**0.5
+    return vdot(A, A).real**0.5
 
 
-def norm_fro_sparse(a):
-    return vdot(a.data, a.data).real**0.5
+def norm_fro_sparse(A):
+    return vdot(A.data, A.data).real**0.5
 
 
-def norm_trace_dense(a, isherm=True):
-    """Returns the trace norm of operator a, that is,
+def norm_trace_dense(A, isherm=True):
+    """Returns the trace norm of operator ``A``, that is,
     the sum of abs eigvals.
     """
-    return np.sum(np.absolute(eigvals(a, sort=False, isherm=isherm)))
+    return np.sum(np.absolute(eigvals(A, sort=False, isherm=isherm)))
 
 
-def norm(a, ntype=2, **kwargs):
+def norm(A, ntype=2, **kwargs):
     """Operator norms.
 
     Parameters
     ----------
-        a: matrix, dense or sparse
-        ntype: norm to calculate
+    A : matrix-like
+        The operator to find norm of.
+    ntype : str
+        Norm to calculate, if any of:
+
+        - {2, '2', 'spectral'}: largest singular value
+        - {'f', 'fro'}: frobenius norm
+        - {'t', 'nuc', 'tr', 'trace'}: sum of singular values
 
     Returns
     -------
@@ -472,35 +501,35 @@ def norm(a, ntype=2, **kwargs):
                ('t', 0): norm_trace_dense,
                ('f', 0): norm_fro_dense,
                ('f', 1): norm_fro_sparse}
-    return methods[(types[ntype], issparse(a))](a, **kwargs)
+    return methods[(types[ntype], issparse(A))](A, **kwargs)
 
 
 # --------------------------------------------------------------------------- #
 #                               Matrix functions                              #
 # --------------------------------------------------------------------------- #
 
-def expm(a, herm=False):
+def expm(A, herm=False):
     """Matrix exponential, can be accelerated if explicitly hermitian.
 
     Parameters
     ----------
-    a : dense or sparse matrix
+    A : dense or sparse matrix
         Matrix to exponentiate.
     herm : bool, optional
-        If True (not default), and ``a`` is dense, digonalize the matrix
+        If True (not default), and ``A`` is dense, digonalize the matrix
         in order to perform the exponential.
 
     Returns
     -------
     matrix
     """
-    if issparse(a):
+    if issparse(A):
         # convert to and from csc to suppress scipy warning
-        return spla.expm(a.tocsc()).tocsr()
+        return spla.expm(A.tocsc()).tocsr()
     elif not herm:
-        return np.asmatrix(spla.expm(a))
+        return np.asmatrix(spla.expm(A))
     else:
-        evals, evecs = eigsys(a)
+        evals, evecs = eigsys(A)
         return dot_dense(evecs, ldmul(np.exp(evals), evecs.H))
 
 
@@ -543,27 +572,27 @@ def expm_multiply(mat, vec, backend="AUTO", **kwargs):
     return _EXPM_MULTIPLY_METHODS[backend.upper()](mat, vec, **kwargs)
 
 
-def sqrtm(a, herm=True):
+def sqrtm(A, herm=True):
     """Matrix square root, can be accelerated if explicitly hermitian.
 
     Parameters
     ----------
-    a : dense or sparse matrix
+    A : dense or sparse matrix
         Matrix to take square root of.
     herm : bool, optional
-        If True (the default), and ``a`` is dense, digonalize the matrix
+        If True (the default), and ``A`` is dense, digonalize the matrix
         in order to take the square root.
 
     Returns
     -------
     matrix
     """
-    if issparse(a):
+    if issparse(A):
         raise NotImplementedError("No sparse sqrtm available.")
     elif not herm:
-        return np.asmatrix(sla.sqrtm(a))
+        return np.asmatrix(sla.sqrtm(A))
     else:
-        evals, evecs = eigsys(a)
+        evals, evecs = eigsys(A)
         return dot_dense(evecs, ldmul(np.sqrt(evals.astype(complex)),
                                       evecs.H))
 

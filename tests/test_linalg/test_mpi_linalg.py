@@ -58,11 +58,12 @@ class TestSLEPcMPI:
                 num_workers > 1 and
                 num_workers != NUM_MPI_WORKERS):
             with pytest.raises(ValueError):
-                seigsys_slepc_spawn(bigsparsemat, num_workers=num_workers)
+                seigsys_slepc_spawn(bigsparsemat, k=6, num_workers=num_workers)
 
         else:
-            el, ev = seigsys_slepc_spawn(bigsparsemat, num_workers=num_workers)
-            elex, evex = seigsys_scipy(bigsparsemat)
+            el, ev = seigsys_slepc_spawn(bigsparsemat, k=6,
+                                         num_workers=num_workers)
+            elex, evex = seigsys_scipy(bigsparsemat, k=6)
             assert_allclose(el, elex)
             assert_allclose(np.abs(ev.H @ evex), np.eye(6), atol=1e-7)
 
@@ -104,10 +105,9 @@ class TestSLEPcMPI:
 class TestMPIPool:
     def test_spawning_pool_in_pool(self, bigsparsemat):
         from quimb.linalg.mpi_launcher import get_mpi_pool
-        l1 = seigsys_slepc_spawn(bigsparsemat, return_vecs=False)
+        l1 = seigsys_slepc_spawn(bigsparsemat, k=6, return_vecs=False)
         pool = get_mpi_pool()
-        f = pool.submit(seigsys_slepc_spawn,
-                        bigsparsemat, return_vecs=False,
-                        num_workers=1)
+        f = pool.submit(seigsys_slepc_spawn, bigsparsemat,
+                        k=6, return_vecs=False, num_workers=1)
         l2 = f.result()
         assert_allclose(l1, l2)

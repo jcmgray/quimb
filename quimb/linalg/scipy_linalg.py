@@ -5,7 +5,7 @@ import numpy as np
 import scipy.sparse.linalg as spla
 
 
-def seigsys_scipy(A, k=6, *, B=None, which=None, return_vecs=True, sigma=None,
+def seigsys_scipy(A, k, *, B=None, which=None, return_vecs=True, sigma=None,
                   isherm=True, sort=True, tol=None, **eigs_opts):
     """Returns a few eigenpairs from a possibly sparse hermitian operator
 
@@ -55,7 +55,7 @@ def seigsys_scipy(A, k=6, *, B=None, which=None, return_vecs=True, sigma=None,
         return np.sort(lk) if sort else lk
 
 
-def seigsys_lobpcg(A, k=6, *, B=None, v0=None, which=None, return_vecs=True,
+def seigsys_lobpcg(A, k, *, B=None, v0=None, which=None, return_vecs=True,
                    sigma=None, isherm=True, sort=True, **lobpcg_opts):
     """Interface to scipy's lobpcg eigensolver, which can be good for
     generalized eigenproblems with matrix-free operators. Seems to a be a bit
