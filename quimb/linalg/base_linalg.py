@@ -247,7 +247,7 @@ def seigsys(A, k, *,
     # sometimes e.g. lobpcg fails, worth trying scipy
     except np.linalg.LinAlgError:
         import warnings
-        warnings.warn("seigsys with backend {} failed, trying again with"
+        warnings.warn("seigsys with backend {} failed, trying again with "
                       "scipy.".format(bkd))
 
         return seigsys_scipy(A, **settings, **backend_opts)
