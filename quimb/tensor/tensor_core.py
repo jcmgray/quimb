@@ -1261,7 +1261,7 @@ class TNLinearOperator(spla.LinearOperator):
 
     See Also
     --------
-    TransferOperator
+    TNLinearOperator1D
     """
 
     def __init__(self, tns, left_inds, right_inds, ldims=None, rdims=None,
@@ -2208,9 +2208,9 @@ class TensorNetwork(object):
             Whether to propagate tags found in the subnetwork to both new
             tensors or drop them, defaults to ``True``.
         start : int, optional
-            If given, assume can use ``TransferOperator``.
+            If given, assume can use ``TNLinearOperator1D``.
         stop :  int, optional
-            If given, assume can use ``TransferOperator``.
+            If given, assume can use ``TNLinearOperator1D``.
         inplace : bool, optional
             Perform operation in place.
 
@@ -2223,6 +2223,10 @@ class TensorNetwork(object):
         """
         leave, svd_section = self.partition(where, which=which,
                                             inplace=inplace, calc_sites=False)
+
+        tags = svd_section.tags if keep_tags else set()
+        ltags = tags2set(ltags)
+        rtags = tags2set(rtags)
 
         if right_inds is None:
             # compute
@@ -2237,9 +2241,10 @@ class TensorNetwork(object):
             if '!' in which:
                 start, stop = stop, start + self.nsites
                 left_inds, right_inds = right_inds, left_inds
+                ltags, rtags = rtags, ltags
 
-            A = TransferOperator(svd_section, start=start, stop=stop,
-                                 left_inds=left_inds, right_inds=right_inds)
+            A = TNLinearOperator1D(svd_section, start=start, stop=stop,
+                                   left_inds=left_inds, right_inds=right_inds)
 
         left_shp, right_shp = A.ldims, A.rdims
 
@@ -2260,10 +2265,6 @@ class TensorNetwork(object):
         U = U.reshape(*left_shp, -1)
         V = V.reshape(-1, *right_shp)
 
-        tags = svd_section.tags if keep_tags else set()
-        ltags = tags2set(ltags)
-        rtags = tags2set(rtags)
-
         new_bnd = rand_uuid()
 
         # Add the new, compressed tensors back in
@@ -2272,28 +2273,30 @@ class TensorNetwork(object):
 
         return leave
 
-    def replace_section_with_svd(self, start, stop, eps, **kwargs):
+    def replace_section_with_svd(self, start, stop, eps,
+                                 **replace_with_svd_opts):
         """Take a 1D tensor network, and replace a section with a SVD.
         See :meth:`~quimb.tensor.TensorNetwork.replace_with_svd`.
 
         Parameters
         ----------
         start : int
-            Section start.
+            Section start index.
         stop : int
-            Section stop, non-inclusive.
+            Section stop index, not included itself.
         eps : float
-            Precision of SVD
-        kwargs
+            Precision of SVD.
+        replace_with_svd_opts
             Supplied to :meth:`~quimb.tensor.TensorNetwork.replace_with_svd`.
 
         Returns
         -------
         TensorNetwork
         """
-        lix = bonds(self[start - 1], self[start])
-        return self.replace_with_svd(slice(start, stop), lix, eps,
-                                     start=start, stop=stop, **kwargs)
+        return self.replace_with_svd(
+            where=slice(start, stop), start=start, stop=stop,
+            left_inds=bonds(self[start - 1], self[start]), eps=eps,
+            **replace_with_svd_opts)
 
     def convert_to_zero(self):
         """Inplace conversion of this network to an all zero tensor network.
@@ -2827,7 +2830,7 @@ class TensorNetwork(object):
         return rep + ")>"
 
 
-class TransferOperator(spla.LinearOperator):
+class TNLinearOperator1D(spla.LinearOperator):
     r"""A 1D tensor network linear operator like::
 
                  start                 stop - 1
@@ -2841,7 +2844,7 @@ class TransferOperator(spla.LinearOperator):
 
     Like :class:`~quimb.tensor.tensor_core.TNLinearOperator`, but performs a
     structured contract from one end to the other than can handle very long
-    chain more efficiently.
+    chains possibly more efficiently by contracting in blocks from one end.
 
 
     Parameters
@@ -2899,8 +2902,9 @@ class TransferOperator(spla.LinearOperator):
         tnc = self.tn | in_T
         tnc ^= ['_LEFT', self.tn.site_tag(self.start)]
         out_T = tnc ^ slice(self.start, self.stop)
+        out_T.transpose(*self.right_inds, inplace=True)
 
-        return out_T.transpose(*self.right_inds, inplace=True).data.ravel()
+        return out_T.data.conj().ravel()
 
     def to_dense(self):
         T = self.tn ^ slice(self.start, self.stop)

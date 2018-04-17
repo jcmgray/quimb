@@ -14,7 +14,7 @@ from quimb.tensor import (
     TensorNetwork,
     rand_tensor,
     MPS_rand_state,
-    TransferOperator,
+    TNLinearOperator1D,
 )
 from quimb.tensor.tensor_core import _trim_singular_vals
 
@@ -808,8 +808,8 @@ class TestTensorNetworkAsLinearOperator:
 
         assert_allclose(x1, x2, rtol=1e-4)
 
-    def test_TransferOperator(self):
-        p = MPS_rand_state(40, 10)
+    def test_TNLinearOperator1D(self):
+        p = MPS_rand_state(40, 10, dtype=complex)
         pp = p.H & p
         start, stop = 10, 30
         lix = bonds(pp[start - 1], pp[start])
@@ -817,7 +817,7 @@ class TestTensorNetworkAsLinearOperator:
 
         sec = pp[start:stop]
 
-        A = TransferOperator(sec, lix, rix, start, stop)
+        A = TNLinearOperator1D(sec, lix, rix, start, stop)
         B = sec.aslinearoperator(lix, rix)
 
         s1 = spla.svds(A)[1]

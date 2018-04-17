@@ -341,7 +341,7 @@ class TensorNetwork1D(TensorNetwork):
         b.add_tag('_BRA')
         kb = k & b
 
-        # approximate the rest of the chain with a bond 1 SVD
+        # approximate the rest of the chain with a separable transfer operator
         kbc = kb.replace_section_with_svd(start, stop, eps=0.0, which='!any',
                                           method=method, max_bond=1,
                                           ltags='_LEFT', rtags='_RIGHT')
@@ -366,7 +366,7 @@ class TensorNetwork1D(TensorNetwork):
         self.insert_gauge(y.T, stop, stop - 1, tol=inv_tol)
 
         if bra is not None:
-            for i in {start - 1, start, stop, stop - 1}:
+            for i in (start - 1, start, stop, stop - 1):
                 bra[i].modify(data=self[i].data.conj())
 
     def canonize(self, orthogonality_center, bra=None, normalize=False):
