@@ -28,6 +28,7 @@ else
   conda update -q conda
   source activate test-environment
   conda update -q --all
+  conda env update --file $DIR/requirements-py3.yml
   pip install -U codeclimate-test-reporter codacy-coverage
   pip install -U git+https://github.com/jcmgray/opt_einsum.git
   pip uninstall --yes quimb
