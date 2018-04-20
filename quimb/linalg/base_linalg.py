@@ -242,9 +242,9 @@ def seigsys(A, k, *, B=None, which=None, return_vecs=True, isherm=True,
     except Exception as e:  # sometimes e.g. lobpcg fails, worth trying scipy
 
         if fallback_to_scipy and (bkd != 'SCIPY'):
-            warnings.warn("seigsys with backend '{}'' failed, trying again "
+            warnings.warn("seigsys with backend '{}' failed, trying again "
                           "with scipy. Set ``fallback_to_scipy=False`` to "
-                          "avoid this and see the full error. ".format(bkd, e))
+                          "avoid this and see the full error. ".format(bkd))
 
             return seigsys_scipy(A, **settings, **backend_opts)
         else:
