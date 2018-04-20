@@ -30,6 +30,7 @@ cache:
     - $HOME/conda
     - $HOME/petsc_and_slepc
     - $HOME/mpi_stuff
+  timeout: 1000
 
 before_install:
   - function chronic { /bin/rm --force /tmp/surpress.out 2> /dev/null; $* 2>&1 > /tmp/surpress.out || cat /tmp/surpress.out; /bin/rm /tmp/surpress.out; }
