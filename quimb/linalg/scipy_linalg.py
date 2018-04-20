@@ -102,12 +102,6 @@ def seigsys_lobpcg(A, k, *, B=None, v0=None, which=None, return_vecs=True,
     if sigma is not None:
         raise ValueError("lobpcg can only solve extremal eigenvalues.")
 
-    if not np.issubdtype(A.dtype, np.floating):
-        raise ValueError("lobpcg can only solve real problems.")
-
-    if (B is not None) and (not np.issubdtype(B.dtype, np.floating)):
-        raise ValueError("lobpcg can only solve real problems.")
-
     # remove invalid options for lobpcg
     lobpcg_opts.pop('ncv', None)
     lobpcg_opts.pop('EPSType', None)

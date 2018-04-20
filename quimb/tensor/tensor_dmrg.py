@@ -238,6 +238,7 @@ class MovingEnvironment:
             self.method = method
             self.max_bond = max_bond
             self.norm = norm
+            self.bond_sizes = []
 
             if isinstance(ssz, float):
                 # this logic essentially makes sure that segments prefer
@@ -340,8 +341,11 @@ class MovingEnvironment:
 
         self.tnc.replace_section_with_svd(start, stop, which='!any', **opts)
 
-        # ensure that expectation still = 1 after approximation
+        self.bond_sizes.append(
+            self.tnc['_LEFT'].shared_bond_size(self.tnc['_RIGHT']))
+
         if self.norm:
+            # ensure that expectation still = 1 after approximation
             # section left can still be pretty long so do structured contract
             tnn = self.tnc.copy()
             tnn ^= ['_LEFT', self.site_tag(start)]
@@ -521,6 +525,12 @@ class DMRG:
     opts : dict
         Advanced options e.g. relating to the inner eigensolve or compression,
         see :func:`~quimb.tensor.tensor_dmrg.get_default_opts`.
+    (bond_sizes_ham) : list[list[int]]
+        If cyclic, the sizes of the energy environement transfer matrix bonds,
+        per segment, per sweep.
+    (bond_sizes_norm) : list[list[int]]
+        If cyclic, the sizes of the norm environement transfer matrix bonds,
+        per segment, per sweep.
     """
 
     def __init__(self, ham, bond_dims, cutoffs=1e-9,
@@ -559,6 +569,9 @@ class DMRG:
             eye = self.ham.identity()
             eye.add_tag('_EYE')
             self.TN_norm = self._b | eye | self._k
+
+            self.bond_sizes_ham = []
+            self.bond_sizes_norm = []
 
         self.opts = get_default_opts(self.cyclic)
 
@@ -899,6 +912,10 @@ class DMRG:
 
         self.local_energies.append(local_ens)
         self.total_energies.append(tot_ens)
+
+        if self.cyclic:
+            self.bond_sizes_ham.append(self.ME_eff_ham.bond_sizes)
+            self.bond_sizes_norm.append(self.ME_eff_norm.bond_sizes)
 
         return tot_ens[-1]
 

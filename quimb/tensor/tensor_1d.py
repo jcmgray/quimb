@@ -100,10 +100,11 @@ def expec_TN_1D(*tns, compress=None, eps=1e-15):
     if not cyclic:
         compress = False
 
+    n = expec_tn.nsites
+
     # work out whether to compress, could definitely be improved ...
     if compress is None:
         # compression only worth it for long, high bond dimension TNs.
-        n = expec_tn.nsites
         total_bd = qu.prod(tn.bond_size(0, 1) for tn in tns)
         compress = (n >= 100) and (total_bd >= 1000)
 

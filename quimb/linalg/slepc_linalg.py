@@ -106,16 +106,16 @@ def convert_mat_to_petsc(mat, comm=None):
 
     Parameters
     ----------
-        mat : matrix-like
-            Matrix, dense or sparse.
-        comm : mpi4py.MPI.Comm instance
-            The mpi communicator.
+    mat : matrix-like
+        Matrix, dense or sparse.
+    comm : mpi4py.MPI.Comm instance
+        The mpi communicator.
 
     Returns
     -------
-        pmat : petsc4py.PETSc.Mat
-            The matrix in petsc form - only the local part if running
-            across several mpi processes.
+    pmat : petsc4py.PETSc.Mat
+        The matrix in petsc form - only the local part if running
+        across several mpi processes.
     """
     if isinstance(mat, sp.linalg.LinearOperator):
         return linear_operator_2_petsc_shell(mat, comm=comm)
@@ -166,16 +166,16 @@ def convert_vec_to_petsc(vec, comm=None):
 
     Parameters
     ----------
-        vec : vector-like
-            Numpy array, will be unravelled to one dimension.
-        comm : mpi4py.MPI.Comm instance
-            The mpi communicator.
+    vec : vector-like
+        Numpy array, will be unravelled to one dimension.
+    comm : mpi4py.MPI.Comm instance
+        The mpi communicator.
 
     Returns
     -------
-        pvec : petsc4py.PETSc.Vec
-            The vector in petsc form - only the local part if running
-            across several mpi processes.
+    pvec : petsc4py.PETSc.Vec
+        The vector in petsc form - only the local part if running
+        across several mpi processes.
     """
     PETSc, comm = get_petsc(comm=comm)
     mpi_sz = comm.Get_size()
@@ -201,16 +201,16 @@ def new_petsc_vec(d, comm=None):
 
     Parameters
     ----------
-        d : int
-            Dimension of vector, i.e. the global size.
-        comm : mpi4py.MPI.Comm instance
-            The mpi communicator.
+    d : int
+        Dimension of vector, i.e. the global size.
+    comm : mpi4py.MPI.Comm instance
+        The mpi communicator.
 
     Returns
     -------
-        pvec : petsc4py.PETSc.Vec
-            An empty vector in petsc form - only the local part if running
-            across several mpi processes.
+    pvec : petsc4py.PETSc.Vec
+        An empty vector in petsc form - only the local part if running
+        across several mpi processes.
     """
     PETSc, comm = get_petsc(comm=comm)
     pvec = PETSc.Vec()
@@ -277,7 +277,8 @@ def gather_petsc_array(x, comm, out_shape=None, matrix=False):
 
 
 def normalize_real_part(vecs, transposed=False):
-    """Take the real part of a set of vectors and normalize it.
+    """Take the real part of a set of vectors and normalize it. This is used
+    for returning real eigenvectors even when the PETSc scalar type is complex.
     """
     k = vecs.shape[0] if transposed else vecs.shape[1]
 
@@ -403,16 +404,16 @@ def _init_eigensolver(k=6, which='LM', sigma=None, isherm=True, isgen=False,
             EPSType = 'krylovschur'
 
     # set some preconditioning defaults for 'gd' and 'lobpcg'
-    if EPSType in ('gd', 'lobpcg'):
-        st_opts['STType'] = st_opts.get('STType', 'precond')
-        st_opts['KSPType'] = st_opts.get('KSPType', 'preonly')
-        st_opts['PCType'] = st_opts.get('PCType', 'none')
+    if EPSType in ('gd', 'lobpcg', 'blopex', 'primme'):
+        st_opts.setdefault('STType', 'precond')
+        st_opts.setdefault('KSPType', 'preonly')
+        st_opts.setdefault('PCType', 'none')
 
     # set some preconditioning defaults for 'jd'
     elif EPSType == 'jd':
-        st_opts['STType'] = st_opts.get('STType', 'precond')
-        st_opts['KSPType'] = st_opts.get('KSPType', 'bcgs')
-        st_opts['PCType'] = st_opts.get('PCType', 'none')
+        st_opts.setdefault('STType', 'precond')
+        st_opts.setdefault('KSPType', 'bcgs')
+        st_opts.setdefault('PCType', 'none')
 
     # set the spectral inverter / preconditioner.
     if st_opts or internal:

@@ -5,6 +5,8 @@
 # TODO: test non-herm
 
 import functools
+import warnings
+
 import numpy as np
 import scipy.linalg as sla
 import scipy.sparse.linalg as spla
@@ -169,18 +171,9 @@ _SEIGSYS_METHODS = {
 }
 
 
-def seigsys(A, k, *,
-            B=None,
-            which=None,
-            return_vecs=True,
-            isherm=True,
-            sigma=None,
-            ncv=None,
-            tol=None,
-            v0=None,
-            sort=True,
-            backend=None,
-            **backend_opts):
+def seigsys(A, k, *, B=None, which=None, return_vecs=True, isherm=True,
+            sigma=None, ncv=None, tol=None, v0=None, sort=True, backend=None,
+            fallback_to_scipy=True, **backend_opts):
     """Return a few eigenpairs from an operator.
 
     Parameters
@@ -211,6 +204,8 @@ def seigsys(A, k, *,
     backend : {'AUTO', 'NUMPY', 'SCIPY',
                'LOBPCG', 'SLEPC', 'SLEPC-NOMPI'}, optional
         Which solver to use.
+    fallback_to_scipy : bool, optional
+        If an error occurs and scipy is not being used, try using scipy.
     backend_opts
         Supplied to the backend solver.
 
@@ -244,13 +239,16 @@ def seigsys(A, k, *,
     try:
         return _SEIGSYS_METHODS[bkd](A, **settings, **backend_opts)
 
-    # sometimes e.g. lobpcg fails, worth trying scipy
-    except np.linalg.LinAlgError:
-        import warnings
-        warnings.warn("seigsys with backend {} failed, trying again with "
-                      "scipy.".format(bkd))
+    except Exception as e:  # sometimes e.g. lobpcg fails, worth trying scipy
 
-        return seigsys_scipy(A, **settings, **backend_opts)
+        if fallback_to_scipy and (bkd != 'SCIPY'):
+            warnings.warn("seigsys with backend '{}'' failed, trying again "
+                          "with scipy. Set ``fallback_to_scipy=False`` to "
+                          "avoid this and see the full error. ".format(bkd, e))
+
+            return seigsys_scipy(A, **settings, **backend_opts)
+        else:
+            raise e
 
 
 def seigvals(A, k, **kwargs):

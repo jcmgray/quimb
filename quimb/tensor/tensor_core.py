@@ -897,6 +897,12 @@ class Tensor(object):
     def dtype(self):
         return self._data.dtype
 
+    def isreal(self):
+        return np.issubdtype(self.dtype, np.floating)
+
+    def iscomplex(self):
+        return np.issubdtype(self.dtype, np.complexfloating)
+
     def astype(self, dtype, inplace=False):
         """Change the type of this tensor to ``dtype``.
         """
@@ -2655,6 +2661,12 @@ class TensorNetwork(object):
         dtype of *one* tensor and thus assumes they all have the same dtype.
         """
         return next(iter(self.tensor_index.values())).dtype
+
+    def isreal(self):
+        return np.issubdtype(self.dtype, np.floating)
+
+    def iscomplex(self):
+        return np.issubdtype(self.dtype, np.complexfloating)
 
     def astype(self, dtype, inplace=False):
         """Convert the type of all tensors in this network to ``dtype``.
