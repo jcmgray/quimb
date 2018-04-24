@@ -35,7 +35,8 @@ The tensor network module ``quimb.tensor``:
 * Can perform DMRG1, DMRG2 and DMRGX, in matrix product state language.
 * Has tools to efficiently address periodic problems (transfer matrix compression and pseudo-orthognolization)
 
-.. image:: ./_static/mps_en_overlap_cyclic_compressed.png
-  :width: 300px
+.. raw:: html
+
+    <img src="https://github.com/jcmgray/quimb/blob/develop/docs/_static/mps_en_overlap_cyclic_compressed.png" width="300px">
 
 The full documentation can be found at: `<http://quimb.readthedocs.io/en/latest/>`_.
