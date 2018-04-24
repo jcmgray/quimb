@@ -1,6 +1,6 @@
-######
-States
-######
+##################
+States & Operators
+##################
 
 Basic Representation
 ====================

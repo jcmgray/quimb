@@ -16,13 +16,13 @@ Welcome to quimb's documentation!
 
 ----------------------------------------------------------------------------------
 
-`quimb <https://github.com/jcmgray/quimb>`_ is a performant library for quantum information and many-body calculations. It is also thoroughly unit-tested and the tests are probably the best place to look for detailed documentation. Do please submit any issues or pull requests etc. on `github <https://github.com/jcmgray/quimb/issues>`_.
+`quimb <https://github.com/jcmgray/quimb>`_ is an easy but fast python library for quantum information and many-body calculations. The code is hosted on `github <https://github.com/jcmgray/quimb>`_, do please submit any issues or pull requests there. It is also thoroughly unit-tested and the tests are probably the best place to look for detailed documentation.
 
 .. rubric:: Guides:
 
 .. toctree::
   :numbered:
-  :maxdepth: 2
+  :maxdepth: 1
 
   installation
   states
@@ -35,9 +35,20 @@ Welcome to quimb's documentation!
   tensor algorithms
   develop
 
+.. image:: ./_static/mps_en_overlap_cyclic_compressed.png
+  :width: 300px
+
+.. rubric:: Examples:
+
+.. toctree::
+
+  ex_core
+  ex_tensor_network
+  ex_dmrg
+
 
 Indices and tables
-==================
+------------------
 
 * :ref:`genindex`
 * :ref:`modindex`
