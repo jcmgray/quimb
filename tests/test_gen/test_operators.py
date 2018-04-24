@@ -3,12 +3,11 @@ import numpy as np
 from numpy.testing import assert_allclose
 from quimb import (
     issparse,
-    eigvals,
-    eigvecs,
+    eigvalsh,
+    eigvecsh,
     groundstate,
     expec,
     singlet,
-    seigvals,
     spin_operator,
     pauli,
     controlled,
@@ -44,7 +43,7 @@ class TestSpinOperator:
     def test_spin_high(self, label, S):
         D = int(2 * S + 1)
         op = spin_operator(label, S)
-        assert_allclose(eigvals(op), np.linspace(-S, S, D), atol=1e-13)
+        assert_allclose(eigvalsh(op), np.linspace(-S, S, D), atol=1e-13)
 
 
 class TestPauli:
@@ -53,14 +52,14 @@ class TestPauli:
                     2, 'y', 'Y',
                     3, 'z', 'Z'):
             x = pauli(dir)
-            assert_allclose(eigvals(x), [-1, 1])
+            assert_allclose(eigvalsh(x), [-1, 1])
 
     def test_pauli_dim3(self):
         for dir in (1, 'x', 'X',
                     2, 'y', 'Y',
                     3, 'z', 'Z'):
             x = pauli(dir, dim=3)
-            assert_allclose(eigvals(x), [-1, 0, 1],
+            assert_allclose(eigvalsh(x), [-1, 0, 1],
                             atol=1e-15)
 
     def test_pauli_bad_dim(self):
@@ -86,7 +85,7 @@ class TestControlledZ:
 class TestHamHeis:
     def test_ham_heis_2(self):
         h = ham_heis(2, cyclic=False)
-        evals = eigvals(h)
+        evals = eigvalsh(h)
         assert_allclose(evals, [-0.75, 0.25, 0.25, 0.25])
         gs = groundstate(h)
         assert_allclose(expec(gs, singlet()), 1.)
@@ -94,12 +93,12 @@ class TestHamHeis:
     @pytest.mark.parametrize("parallel", [False, True])
     def test_ham_heis_sparse_cyclic_4(self, parallel):
         h = ham_heis(4, sparse=True, cyclic=True, parallel=parallel)
-        lk = seigvals(h, 4)
+        lk = eigvalsh(h, k=4)
         assert_allclose(lk, [-2, -1, -1, -1])
 
     def test_ham_heis_bz(self):
         h = ham_heis(2, cyclic=False, b=1)
-        evals = eigvals(h)
+        evals = eigvalsh(h)
         assert_allclose(evals, [-3 / 4, -3 / 4, 1 / 4, 5 / 4])
 
     @pytest.mark.parametrize("stype", ["coo", "csr", "csc", "bsr"])
@@ -116,16 +115,16 @@ class TestHamJ1J2:
 
     def test_ham_j1j2_6_sparse_cyc(self):
         h = ham_j1j2(6, j2=0.5, sparse=True, cyclic=True)
-        lk = seigvals(h, 5)
+        lk = eigvalsh(h, k=5)
         assert_allclose(lk, [-9 / 4, -9 / 4, -7 / 4, -7 / 4, -7 / 4])
 
     def test_ham_j1j2_4_bz(self):
         h = ham_j1j2(4, j2=0.5, cyclic=True, bz=0)
-        lk = seigvals(h, 11)
+        lk = eigvalsh(h, k=11)
         assert_allclose(lk, [-1.5, -1.5, -0.5, -0.5, -0.5, -0.5,
                              -0.5, -0.5, -0.5, -0.5, -0.5])
         h = ham_j1j2(4, j2=0.5, cyclic=True, bz=0.05)
-        lk = seigvals(h, 11)
+        lk = eigvalsh(h, k=11)
         assert_allclose(lk, [-1.5, -1.5, -0.55, -0.55, -0.55,
                              -0.5, -0.5, -0.5, -0.45, -0.45, -0.45])
 
@@ -136,7 +135,7 @@ class TestSpinZProjector:
         prj = zspin_projector(4, sz)
         h = ham_heis(4)
         h0 = prj @ h @ prj.H
-        v0s = eigvecs(h0)
+        v0s = eigvecsh(h0)
         for v0 in v0s.T:
             vf = prj.H @ v0.T
             prjv = vf @ vf.H
@@ -160,7 +159,7 @@ class TestSpinZProjector:
         prj = zspin_projector(5, sz)
         h = ham_heis(5)
         h0 = prj @ h @ prj.H
-        v0s = eigvecs(h0)
+        v0s = eigvecsh(h0)
         for v0 in v0s.T:
             vf = prj.H @ v0.T
             prjv = vf @ vf.H

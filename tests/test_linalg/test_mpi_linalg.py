@@ -5,15 +5,15 @@ from numpy.testing import assert_allclose
 from quimb import (
     rand_herm,
     rand_ket,
-    eigsys,
+    eigh,
 )
 
 from quimb.linalg import SLEPC4PY_FOUND
-from quimb.linalg.scipy_linalg import seigsys_scipy
+from quimb.linalg.scipy_linalg import eigs_scipy
 
 if SLEPC4PY_FOUND:
     from quimb.linalg.mpi_launcher import (
-        seigsys_slepc_spawn,
+        eigs_slepc_spawn,
         svds_slepc_spawn,
         mfn_multiply_slepc_spawn,
         ALREADY_RUNNING_AS_MPI,
@@ -51,19 +51,19 @@ def big_vec():
 @slepc4py_test
 class TestSLEPcMPI:
     @pytest.mark.parametrize("num_workers", num_workers_to_try)
-    def test_seigsys(self, num_workers, bigsparsemat):
+    def test_eigs(self, num_workers, bigsparsemat):
 
         if ((num_workers is not None) and
                 ALREADY_RUNNING_AS_MPI and
                 num_workers > 1 and
                 num_workers != NUM_MPI_WORKERS):
             with pytest.raises(ValueError):
-                seigsys_slepc_spawn(bigsparsemat, k=6, num_workers=num_workers)
+                eigs_slepc_spawn(bigsparsemat, k=6, num_workers=num_workers)
 
         else:
-            el, ev = seigsys_slepc_spawn(bigsparsemat, k=6,
-                                         num_workers=num_workers)
-            elex, evex = seigsys_scipy(bigsparsemat, k=6)
+            el, ev = eigs_slepc_spawn(bigsparsemat, k=6,
+                                      num_workers=num_workers)
+            elex, evex = eigs_scipy(bigsparsemat, k=6)
             assert_allclose(el, elex)
             assert_allclose(np.abs(ev.H @ evex), np.eye(6), atol=1e-7)
 
@@ -81,7 +81,7 @@ class TestSLEPcMPI:
 
         else:
             out = mfn_multiply_slepc_spawn(a, k, num_workers=num_workers)
-            al, av = eigsys(a.A)
+            al, av = eigh(a.A)
             expected = av @ np.diag(np.exp(al)) @ av.conj().T @ k
             assert_allclose(out, expected)
 
@@ -105,9 +105,9 @@ class TestSLEPcMPI:
 class TestMPIPool:
     def test_spawning_pool_in_pool(self, bigsparsemat):
         from quimb.linalg.mpi_launcher import get_mpi_pool
-        l1 = seigsys_slepc_spawn(bigsparsemat, k=6, return_vecs=False)
+        l1 = eigs_slepc_spawn(bigsparsemat, k=6, return_vecs=False)
         pool = get_mpi_pool()
-        f = pool.submit(seigsys_slepc_spawn, bigsparsemat,
+        f = pool.submit(eigs_slepc_spawn, bigsparsemat,
                         k=6, return_vecs=False, num_workers=1)
         l2 = f.result()
         assert_allclose(l1, l2)

@@ -4,7 +4,7 @@
 Distributed Parallelism - MPI
 #############################
 
-The ``slepc`` and ``petsc`` parts of ``quimb`` (``seigsys(..., method='slepc')``, ``svds(..., method='slepc')``, ``expm(..., method='slepc')``) generally perform best when run on multiple, single-threaded MPI processes, whereas ``numpy`` and ``scipy`` need single-process multi-threaded exectution to parallize (via BLAS).
+The ``slepc`` and ``petsc`` parts of ``quimb`` (``eigh(..., k=..., method='slepc')``, ``svds(..., method='slepc')``, ``expm(..., method='slepc')``) generally perform best when run on multiple, single-threaded MPI processes, whereas ``numpy`` and ``scipy`` need single-process multi-threaded exectution to parallize (via BLAS).
 
 By default, ``quimb`` thus switches between standard execution and a cached pool of MPI processes when required.
 

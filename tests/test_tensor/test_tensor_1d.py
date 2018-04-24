@@ -4,7 +4,7 @@ import numpy as np
 from numpy.testing import assert_allclose
 
 from quimb import (
-    eigvals,
+    eigvalsh,
     entropy_subsys,
     schmidt_gap,
     isherm,
@@ -596,7 +596,8 @@ class TestSpecificStatesOperators:
         assert hh_mpo[-1].tags == {'I{}'.format(n - 1), 'foo'}
         assert hh_mpo.shape == (2,) * 2 * n
         hh_ex = ham_heis(n, cyclic=cyclic, j=j, b=bz)
-        assert_allclose(eigvals(hh_ex), eigvals(hh_mpo.to_dense()), atol=1e-13)
+        assert_allclose(eigvalsh(hh_ex),
+                        eigvalsh(hh_mpo.to_dense()), atol=1e-13)
 
     def test_mpo_zeros(self):
         mpo0 = MPO_zeros(10)

@@ -8,28 +8,45 @@ import scipy.linalg as scla
 from ..accel import issparse
 
 
-def eigsys_numpy(a, sort=True, isherm=True):
+_NUMPY_EIG_FUNCS = {
+    (True, True): nla.eigh,
+    (True, False): nla.eig,
+    (False, True): nla.eigvalsh,
+    (False, False): nla.eigvals,
+}
+
+
+def eig_numpy(A, sort=True, isherm=True, return_vecs=True):
     """Numpy based dense eigensolve.
+
+    Parameters
+    ----------
+    A : matrix_like
+        The operator to decompose.
+    sort : bool, optional
+        Whether to sort into ascending order.
+    isherm : bool, optional
+        Whether ``A`` is hermitian.
+    return_vecs : bool, optional
+        Whether to return the eigenvectors.
+
+    Returns
+    -------
+    evals : 1D-array
+        The eigenvalues.
+    evecs : matrix
+        If ``return_vecs=True``, the eigenvectors.
     """
-    if isherm:
-        evals, evecs = nla.eigh(a)
-    else:
-        evals, evecs = nla.eig(a)
+    evals = _NUMPY_EIG_FUNCS[return_vecs, isherm](A)
 
-    if sort:
-        sortinds = np.argsort(evals)
-        return evals[sortinds], np.asmatrix(evecs[:, sortinds])
+    if return_vecs:
+        evals, evecs = evals
 
-    return evals, np.asmatrix(evecs)
+        if sort:
+            sortinds = np.argsort(evals)
+            return evals[sortinds], np.asmatrix(evecs[:, sortinds])
 
-
-def eigvals_numpy(a, sort=True, isherm=True):
-    """Numpy based dense eigenvalues.
-    """
-    if isherm:
-        evals = nla.eigvalsh(a)
-    else:
-        evals = nla.eigvals(a)
+        return evals, np.asmatrix(evecs)
 
     if sort:
         return np.sort(evals)
@@ -93,8 +110,8 @@ _DENSE_EIG_METHODS = {
 }
 
 
-def seigsys_numpy(A, k, B=None, which=None, return_vecs=True, sigma=None,
-                  isherm=True, sort=True, **eig_opts):
+def eigs_numpy(A, k, B=None, which=None, return_vecs=True,
+               sigma=None, isherm=True, sort=True, **eig_opts):
     """Partial eigen-decomposition using numpy's dense linear algebra.
 
     Parameters
@@ -129,7 +146,7 @@ def seigsys_numpy(A, k, B=None, which=None, return_vecs=True, sigma=None,
     if generalized:
         eig_opts['b'] = B
 
-    # these might be given by seigsys but not relevant for numpy
+    # these might be given for partial eigsys but not relevant for numpy
     eig_opts.pop('ncv', None)
     eig_opts.pop('v0', None)
     eig_opts.pop('tol', None)
@@ -163,20 +180,23 @@ def seigsys_numpy(A, k, B=None, which=None, return_vecs=True, sigma=None,
         return np.sort(evals) if sort else evals
 
 
-def numpy_svds(a, k=6, return_vecs=True, **_):
+def svds_numpy(a, k, return_vecs=True, **_):
     """Partial singular value decomposition using numpys (full) singular value
     decomposition.
 
     Parameters
     ----------
-        a: operator decompose
-        k: number of singular value triplets to retrieve
-        return_vecs: whether to return the computed vecs or values only
-        ncv: redundant, for compatibility only.
+    a : matrix_like
+        Operator to decompose.
+    k : int, optional
+        Number of singular value triplets to retrieve.
+    return_vecs : bool, optional
+        whether to return the computed vecs or values only
 
     Returns
     -------
-        (uk,) sk (, vkt): singlar value triplets
+    (uk,) sk (, vkt) :
+        Singlar value triplets.
     """
     if return_vecs:
         uk, sk, vkt = nla.svd(a.A if issparse(a) else a, compute_uv=True)

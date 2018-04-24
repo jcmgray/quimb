@@ -444,22 +444,10 @@ def _init_eigensolver(k=6, which='LM', sigma=None, isherm=True, isgen=False,
     return eigensolver
 
 
-def seigsys_slepc(A, k, *,
-                  B=None,
-                  which=None,
-                  sigma=None,
-                  isherm=True,
-                  v0=None,
-                  ncv=None,
-                  return_vecs=True,
-                  sort=True,
-                  EPSType=None,
-                  return_all_conv=False,
-                  st_opts=None,
-                  tol=None,
-                  maxiter=None,
-                  l_win=None,
-                  comm=None):
+def eigs_slepc(A, k, *, B=None, which=None, sigma=None, isherm=True, v0=None,
+               ncv=None, return_vecs=True, sort=True, EPSType=None,
+               return_all_conv=False, st_opts=None, tol=None, maxiter=None,
+               l_win=None, comm=None):
     """Solve a matrix using the advanced eigensystem solver
 
     Parameters

@@ -6,10 +6,9 @@ from numpy.testing import assert_allclose
 from quimb import (
     ham_heis,
     expec,
-    seigsys,
     plus,
     is_eigenvector,
-    eigsys,
+    eigh,
     heisenberg_energy,
 )
 
@@ -207,7 +206,7 @@ class TestDMRG1:
         h_dense = h.to_dense()
 
         # check against dense form
-        actual_e, gs = seigsys(h_dense, k=1)
+        actual_e, gs = eigh(h_dense, k=1)
         assert_allclose(actual_e, eff_e, rtol=tol)
         assert_allclose(abs(expec(mps_gs_dense, gs)), 1.0, rtol=tol)
 
@@ -218,7 +217,7 @@ class TestDMRG1:
         elif MPO_ham is MPO_ham_heis:
             ham_dense = ham_heis(n, cyclic=cyclic, sparse=True)
 
-        actual_e, gs = seigsys(ham_dense, k=1)
+        actual_e, gs = eigh(ham_dense, k=1)
         assert_allclose(actual_e, eff_e, rtol=tol)
         assert_allclose(abs(expec(mps_gs_dense, gs)), 1.0, rtol=tol)
 
@@ -232,7 +231,7 @@ class TestDMRG1:
 
         # check against dense
         h_dense = h.to_dense()
-        actual_e, gs = seigsys(h_dense, k=1)
+        actual_e, gs = eigh(h_dense, k=1)
         assert_allclose(actual_e, eff_e)
         assert_allclose(abs(expec(mps_gs_dense, gs)), 1.0)
 
@@ -258,7 +257,7 @@ class TestDMRG2:
 
         assert dmrg.solve(tol=tol / 10, verbose=1)
 
-        # XXX: need to dispatch SLEPc seigsys on real input
+        # XXX: need to dispatch SLEPc eigh on real input
         # assert dmrg._k[0].dtype == float
 
         eff_e, mps_gs = dmrg.energy, dmrg.state
@@ -269,7 +268,7 @@ class TestDMRG2:
         h_dense = h.to_dense()
 
         # check against dense form
-        actual_e, gs = seigsys(h_dense, k=1)
+        actual_e, gs = eigh(h_dense, k=1)
         assert_allclose(actual_e, eff_e, rtol=tol)
         assert_allclose(abs(expec(mps_gs_dense, gs)), 1.0, rtol=tol)
 
@@ -279,7 +278,7 @@ class TestDMRG2:
         elif MPO_ham is MPO_ham_heis:
             ham_dense = ham_heis(n, cyclic=cyclic)
 
-        actual_e, gs = seigsys(ham_dense, k=1)
+        actual_e, gs = eigh(ham_dense, k=1)
         assert_allclose(actual_e, eff_e, rtol=tol)
         assert_allclose(abs(expec(mps_gs_dense, gs)), 1.0, rtol=tol)
 
@@ -316,7 +315,7 @@ class TestDMRGX:
 
         k = dmrgx._k.to_dense()
         h = ham.to_dense()
-        el, ev = eigsys(h)
+        el, ev = eigh(h)
 
         # check variance very low
         assert np.abs((k.H @ h @ h @ k) - (k.H @ h @ k)**2) < 1e-12

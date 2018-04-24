@@ -9,7 +9,7 @@ from quimb import (
     rand_pos,
     rand_herm,
     partial_transpose,
-    eigvals,
+    eigvalsh,
     neel_state,
     ham_heis,
     logneg,
@@ -226,7 +226,7 @@ class TestLanczosApprox:
         fn, matrix, rtol = fn_matrix_rtol
         a = matrix(2**7)
         pos = fn == np.sqrt
-        actual_x = sum(fn(eigvals(a)))
+        actual_x = sum(fn(eigvalsh(a)))
         approx_x = approx_spectral_function(a, fn, mpi=mpi, pos=pos,
                                             bsz=bsz, verbosity=2)
         assert_allclose(actual_x, approx_x, rtol=rtol)
@@ -244,7 +244,7 @@ class TestLanczosApprox:
     def test_approx_spectral_function_with_v0(self, fn_matrix_rtol, bsz):
         fn, matrix, rtol = fn_matrix_rtol
         a = matrix(2**7)
-        actual_x = sum(fn(eigvals(a)))
+        actual_x = sum(fn(eigvalsh(a)))
         # check un-normalized state work properly
         v0 = (neel_state(7) + neel_state(7, down_first=True))
         v0 = v0.A.reshape(-1)
@@ -263,7 +263,7 @@ class TestLanczosApprox:
         fn, approx, rtol = fn_approx_rtol
         sysa = [0, 1]
         rho_ab = psi_abc.ptr(DIMS, sysa)
-        actual_x = sum(fn(eigvals(rho_ab)))
+        actual_x = sum(fn(eigvalsh(rho_ab)))
         lo = lazy_ptr_linop(psi_abc, DIMS, sysa)
         approx_x = approx(lo, R=50, bsz=bsz, verbosity=2)
         assert_allclose(actual_x, approx_x, rtol=rtol)
@@ -276,7 +276,7 @@ class TestLanczosApprox:
                                                      psi_abc, psi_ab, bsz):
         fn, approx, rtol = fn_approx_rtol
         rho_ab_ppt = partial_transpose(psi_abc.ptr(DIMS, [0, 1]), DIMS[:-1], 0)
-        actual_x = sum(fn(eigvals(rho_ab_ppt)))
+        actual_x = sum(fn(eigvalsh(rho_ab_ppt)))
         lo = lazy_ptr_ppt_linop(psi_abc, DIMS, sysa=0, sysb=1)
         approx_x = approx_spectral_function(lo, fn, K=20, R=20, bsz=bsz)
         assert_allclose(actual_x, approx_x, rtol=rtol)
@@ -285,7 +285,7 @@ class TestLanczosApprox:
     def test_approx_spectral_subspaces_with_heis_partition(self, bsz):
         h = ham_heis(10, sparse=True)
         beta = 0.01
-        actual_Z = sum(np.exp(-beta * eigvals(h.A)))
+        actual_Z = sum(np.exp(-beta * eigvalsh(h.A)))
         approx_Z = tr_exp_approx(-beta * h, bsz=bsz)
         assert_allclose(actual_Z, approx_Z, rtol=3e-2)
 

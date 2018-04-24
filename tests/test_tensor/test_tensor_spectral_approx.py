@@ -5,7 +5,7 @@ from numpy.testing import assert_allclose
 
 from quimb import (
     approx_spectral_function,
-    eigvals,
+    eigvalsh,
     ham_heis,
     groundstate,
     logneg_subsys,
@@ -32,7 +32,7 @@ class TestMPOSpectralApprox:
     @pytest.mark.parametrize("fn", [abs, np.cos, lambda x: np.sin(x)**2])
     def test_approx_fn(self, fn):
         A = MPO_rand_herm(10, 7, normalize=True)
-        xe = sum(fn(eigvals(A.to_dense())))
+        xe = sum(fn(eigvalsh(A.to_dense())))
         xf = approx_spectral_function(A, fn, tol=0.1, verbosity=2)
         assert_allclose(xe, xf, rtol=0.5)
 

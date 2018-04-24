@@ -14,123 +14,31 @@ import scipy.sparse.linalg as spla
 from ..utils import raise_cant_find_library_function
 from ..accel import issparse, vdot, dot_dense, ldmul
 from .numpy_linalg import (
-    eigsys_numpy,
-    eigvals_numpy,
-    seigsys_numpy,
-    numpy_svds,
+    eig_numpy,
+    eigs_numpy,
+    svds_numpy,
 )
 from .scipy_linalg import (
-    seigsys_scipy,
-    seigsys_lobpcg,
-    scipy_svds,
+    eigs_scipy,
+    eigs_lobpcg,
+    svds_scipy,
 )
 from . import SLEPC4PY_FOUND
 
 if SLEPC4PY_FOUND:
     from .mpi_launcher import (
-        seigsys_slepc_spawn,
+        eigs_slepc_spawn,
         mfn_multiply_slepc_spawn,
         svds_slepc_spawn,
     )
-    from .slepc_linalg import seigsys_slepc, svds_slepc, mfn_multiply_slepc
+    from .slepc_linalg import eigs_slepc, svds_slepc, mfn_multiply_slepc
 else:
-    seigsys_slepc = raise_cant_find_library_function("slepc4py")
-    seigsys_slepc_spawn = raise_cant_find_library_function("slepc4py")
+    eigs_slepc = raise_cant_find_library_function("slepc4py")
+    eigs_slepc_spawn = raise_cant_find_library_function("slepc4py")
     svds_slepc = raise_cant_find_library_function("slepc4py")
     svds_slepc_spawn = raise_cant_find_library_function("slepc4py")
     mfn_multiply_slepc = raise_cant_find_library_function("slepc4py")
     mfn_multiply_slepc_spawn = raise_cant_find_library_function("slepc4py")
-
-
-# --------------------------------------------------------------------------- #
-#                        Full eigendecomposition                              #
-# --------------------------------------------------------------------------- #
-
-_EIGSYS_METHODS = {
-    'NUMPY': eigsys_numpy,
-}
-
-
-def eigsys(A, *, sort=True, isherm=True, backend='NUMPY', **kwargs):
-    """Find all eigenpairs of a dense matrix.
-
-    Parameters
-    ----------
-    A : matrix-like
-        The matrix to decompose.
-    sort : bool, optional
-        Whether to sort the eigenpairs in ascending eigenvalue order.
-    isherm : bool, optional
-        Whether the matrix is assumed to be hermitian or not.
-    backend : {'numpy'}, optional
-        Which backend to use to solve the system.
-    kwargs
-        Supplied to the backend function.
-
-    Returns
-    -------
-    el : 1d-array
-        Eigenvalues.
-    ev : numpy.matrix
-        Corresponding eigenvectors as columns of matrix, such that
-        ``ev @ diag(el) @ ev.H == A``.
-    """
-    fn = _EIGSYS_METHODS[backend.upper()]
-    return fn(A, sort=sort, isherm=isherm, **kwargs)
-
-
-_EIGVALS_METHODS = {
-    'NUMPY': eigvals_numpy,
-}
-
-
-def eigvals(A, *, sort=True, isherm=True, backend='numpy', **kwargs):
-    """Find all eigenvalues of dense matrix.
-
-    Parameters
-    ----------
-    A : matrix-like
-        The matrix to find eigenvalues of.
-    sort : bool, optional
-        Whether to sort the eigenvalues in ascending order.
-    isherm : bool, optional
-        Whether the matrix is assumed to be hermitian or not.
-    backend : {'numpy'}, optional
-        Which backend to use to solve the system.
-    kwargs
-        Supplied to the backend function.
-
-    Returns
-    -------
-    el : 1d-array
-        Eigenvalues.
-    """
-    fn = _EIGVALS_METHODS[backend.upper()]
-    return fn(A, sort=sort, isherm=isherm, **kwargs)
-
-
-def eigvecs(A, *, sort=True, isherm=True, backend='numpy', **kwargs):
-    """Find all eigenvectors of a dense matrix.
-
-    Parameters
-    ----------
-    A : matrix-like
-        The matrix of decompose.
-    sort : bool, optional
-        Whether to sort the eigenpairs in ascending eigenvalue order.
-    isherm : bool, optional
-        Whether the matrix is assumed to be hermitian or not.
-    backend : {'numpy'}, optional
-        Which backend to use to solve the system.
-    kwargs
-        Supplied to the backend function.
-
-    Returns
-    -------
-    ev : np.matrix
-        Eigenvectors as columns of matrix.
-    """
-    return eigsys(A, sort=sort, isherm=isherm, backend=backend, **kwargs)[1]
 
 
 # --------------------------------------------------------------------------- #
@@ -162,18 +70,18 @@ def choose_backend(A, k, int_eps=False, B=None):
     return 'SCIPY'
 
 
-_SEIGSYS_METHODS = {
-    'NUMPY': seigsys_numpy,
-    'SCIPY': seigsys_scipy,
-    'LOBPCG': seigsys_lobpcg,
-    'SLEPC': seigsys_slepc_spawn,
-    'SLEPC-NOMPI': seigsys_slepc,
+_EIGS_METHODS = {
+    'NUMPY': eigs_numpy,
+    'SCIPY': eigs_scipy,
+    'LOBPCG': eigs_lobpcg,
+    'SLEPC': eigs_slepc_spawn,
+    'SLEPC-NOMPI': eigs_slepc,
 }
 
 
-def seigsys(A, k, *, B=None, which=None, return_vecs=True, isherm=True,
-            sigma=None, ncv=None, tol=None, v0=None, sort=True, backend=None,
-            fallback_to_scipy=True, **backend_opts):
+def eigensystem_partial(A, k, isherm, *, B=None, which=None, return_vecs=True,
+                        sigma=None, ncv=None, tol=None, v0=None, sort=True,
+                        backend=None, fallback_to_scipy=True, **backend_opts):
     """Return a few eigenpairs from an operator.
 
     Parameters
@@ -237,49 +145,91 @@ def seigsys(A, k, *, B=None, which=None, return_vecs=True, isherm=True,
         bkd = choose_backend(A, k, sigma is not None, B=B)
 
     try:
-        return _SEIGSYS_METHODS[bkd](A, **settings, **backend_opts)
+        return _EIGS_METHODS[bkd](A, **settings, **backend_opts)
 
     except Exception as e:  # sometimes e.g. lobpcg fails, worth trying scipy
 
         if fallback_to_scipy and (bkd != 'SCIPY'):
-            warnings.warn("seigsys with backend '{}' failed, trying again "
-                          "with scipy. Set ``fallback_to_scipy=False`` to "
-                          "avoid this and see the full error. ".format(bkd))
+            warnings.warn("`eigensystem_partial` with backend '{}' failed, "
+                          "trying again with scipy. Set "
+                          "``fallback_to_scipy=False`` to avoid this and see "
+                          "the full error. ".format(bkd))
 
-            return seigsys_scipy(A, **settings, **backend_opts)
+            return eigs_scipy(A, **settings, **backend_opts)
         else:
             raise e
 
 
-def seigvals(A, k, **kwargs):
-    """Seigsys alias for finding eigenvalues only.
+# --------------------------------------------------------------------------- #
+#                        Full eigendecomposition                              #
+# --------------------------------------------------------------------------- #
+
+def eigensystem(A, isherm, *, k=-1, sort=True, return_vecs=True, **kwargs):
+    """Find all or some eigenpairs of an operator.
+
+    Parameters
+    ----------
+    A : matrix-like
+        The matrix to decompose.
+    isherm : bool, optional
+        Whether the matrix is assumed to be hermitian or not.
+    k : int, optional
+        If negative, find all eigenpairs, else perform partial
+        eigendecomposition and find ``k`` pairs. See
+        :func:`~quimb.linalg.base_linalg.eigensystem_partial`.
+    sort : bool, optional
+        Whether to sort the eigenpairs in ascending eigenvalue order.
+    kwargs
+        Supplied to the backend function.
+
+    Returns
+    -------
+    el : 1d-array
+        Eigenvalues.
+    ev : numpy.matrix
+        Corresponding eigenvectors as columns of matrix, such that
+        ``ev @ diag(el) @ ev.H == A``.
     """
-    return seigsys(A, k=k, return_vecs=False, **kwargs)
+    if k < 0:
+        return eig_numpy(A, isherm=isherm, sort=sort,
+                         return_vecs=return_vecs, **kwargs)
+
+    return eigensystem_partial(A, k=k, isherm=isherm, sort=sort,
+                               return_vecs=return_vecs, **kwargs)
 
 
-def seigvecs(A, k, **kwargs):
-    """Seigsys alias for finding eigenvectors only.
-    """
-    return seigsys(A, k=k, return_vecs=True, **kwargs)[1]
+eig = functools.partial(eigensystem, isherm=False, return_vecs=True)
+eigh = functools.partial(eigensystem, isherm=True, return_vecs=True)
+eigvals = functools.partial(eigensystem, isherm=False, return_vecs=False)
+eigvalsh = functools.partial(eigensystem, isherm=True, return_vecs=False)
+
+
+@functools.wraps(eigensystem)
+def eigenvectors(A, isherm, *, sort=True, **kwargs):
+    return eigensystem(A, isherm=isherm, sort=sort, **kwargs)[1]
+
+
+eigvecs = functools.partial(eigenvectors, isherm=False)
+eigvecsh = functools.partial(eigenvectors, isherm=True)
 
 
 def groundstate(ham, **kwargs):
     """Alias for finding lowest eigenvector only.
     """
-    return seigvecs(ham, k=1, which='SA', **kwargs)
+    return eigvecsh(ham, k=1, which='SA', **kwargs)
 
 
 def groundenergy(ham, **kwargs):
     """Alias for finding lowest eigenvalue only.
     """
-    return seigvals(ham, k=1, which='SA', **kwargs)[0]
+    return eigvalsh(ham, k=1, which='SA', **kwargs)[0]
 
 
 def bound_spectrum(A, backend='auto', **kwargs):
-    """Return the smallest and largest eigenvalue of operator `A`.
+    """Return the smallest and largest eigenvalue of hermitian operator ``A``.
     """
-    el_min = seigvals(A, k=1, which='SA', backend=backend, **kwargs)[0]
-    el_max = seigvals(A, k=1, which='LA', backend=backend, **kwargs)[0]
+    el_min = eigvalsh(A, k=1, which='SA', backend=backend, **kwargs)[0]
+    el_max = eigvalsh(A, k=1, which='LA', backend=backend, **kwargs)[0]
     return el_min, el_max
 
 
@@ -312,8 +262,8 @@ def _rel_window_to_abs_window(el_min, el_max, w_0, w_sz=None):
     return el_w_0
 
 
-def eigsys_window(A, w_0, w_n=6, w_sz=None, backend='AUTO',
-                  return_vecs=True, offset_const=1 / 104729, **kwargs):
+def eigh_window(A, w_0, w_n=6, w_sz=None, backend='AUTO',
+                return_vecs=True, offset_const=1 / 104729, **kwargs):
     """ Return eigenpairs internally from a hermitian matrix.
 
     Parameters
@@ -327,7 +277,7 @@ def eigsys_window(A, w_0, w_n=6, w_sz=None, backend='AUTO',
     w_sz : float, optional
         Relative maximum window width within which to keep eigenpairs.
     backend : str, optional
-        Which :func:`~quimb.seigsys` backend to use.
+        Which :func:`~quimb.eigh` backend to use.
     return_vecs : bool, optional
         Whether to return eigenvectors as well.
     offset_const : float, optional
@@ -344,9 +294,9 @@ def eigsys_window(A, w_0, w_n=6, w_sz=None, backend='AUTO',
 
     if not issparse(A) or backend.upper() == 'NUMPY':
         if return_vecs:
-            lk, vk = eigsys(A.A if issparse(A) else A, **kwargs)
+            lk, vk = eigh(A.A if issparse(A) else A, **kwargs)
         else:
-            lk = eigvals(A.A if issparse(A) else A, **kwargs)
+            lk = eigvalsh(A.A if issparse(A) else A, **kwargs)
 
         lmin, lmax = lk[0], lk[-1]
         l_w0, l_wmin, l_wmax = _rel_window_to_abs_window(lmin, lmax, w_0, w_sz)
@@ -357,9 +307,9 @@ def eigsys_window(A, w_0, w_n=6, w_sz=None, backend='AUTO',
         l_w0 += (lmax - lmin) * offset_const  # for 1/0 issues
 
         if return_vecs:
-            lk, vk = seigsys(A, k=w_n, sigma=l_w0, backend=backend, **kwargs)
+            lk, vk = eigh(A, k=w_n, sigma=l_w0, backend=backend, **kwargs)
         else:
-            lk = seigvals(A, k=w_n, sigma=l_w0, backend=backend, **kwargs)
+            lk = eigvalsh(A, k=w_n, sigma=l_w0, backend=backend, **kwargs)
 
     # Trim eigenpairs from beyond window
     in_window = (lk > l_wmin) & (lk < l_wmax)
@@ -370,16 +320,16 @@ def eigsys_window(A, w_0, w_n=6, w_sz=None, backend='AUTO',
     return lk[in_window]
 
 
-def eigvals_window(*args, **kwargs):
+def eigvalsh_window(*args, **kwargs):
     """Alias for only finding the eigenvalues in a relative window.
     """
-    return eigsys_window(*args, return_vecs=False, **kwargs)
+    return eigh_window(*args, return_vecs=False, **kwargs)
 
 
-def eigvecs_window(*args, **kwargs):
+def eigvecsh_window(*args, **kwargs):
     """Alias for only finding the eigenvectors in a relative window.
     """
-    return eigsys_window(*args, return_vecs=True, **kwargs)[1]
+    return eigh_window(*args, return_vecs=True, **kwargs)[1]
 
 
 # -------------------------------------------------------------------------- #
@@ -407,8 +357,8 @@ def svd(A, return_vecs=True):
 _SVDS_METHODS = {
     'SLEPC': svds_slepc_spawn,
     'SLEPC-NOMPI': svds_slepc,
-    'NUMPY': numpy_svds,
-    'SCIPY': scipy_svds,
+    'NUMPY': svds_numpy,
+    'SCIPY': svds_scipy,
 }
 
 
@@ -468,9 +418,9 @@ def norm_fro_sparse(A):
 
 def norm_trace_dense(A, isherm=True):
     """Returns the trace norm of operator ``A``, that is,
-    the sum of abs eigvals.
+    the sum of the absolute eigenvalues.
     """
-    return np.sum(np.absolute(eigvals(A, sort=False, isherm=isherm)))
+    return np.sum(np.absolute(eigvalsh(A, sort=False, isherm=isherm)))
 
 
 def norm(A, ntype=2, **kwargs):
@@ -527,7 +477,7 @@ def expm(A, herm=False):
     elif not herm:
         return np.asmatrix(spla.expm(A))
     else:
-        evals, evecs = eigsys(A)
+        evals, evecs = eigh(A)
         return dot_dense(evecs, ldmul(np.exp(evals), evecs.H))
 
 
@@ -590,7 +540,7 @@ def sqrtm(A, herm=True):
     elif not herm:
         return np.asmatrix(sla.sqrtm(A))
     else:
-        evals, evecs = eigsys(A)
+        evals, evecs = eigh(A)
         return dot_dense(evecs, ldmul(np.sqrt(evals.astype(complex)),
                                       evecs.H))
 

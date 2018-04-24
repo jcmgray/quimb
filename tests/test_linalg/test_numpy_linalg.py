@@ -9,7 +9,7 @@ from quimb import (
 )
 from quimb.linalg.numpy_linalg import (
     sort_inds,
-    seigsys_numpy,
+    eigs_numpy,
 )
 
 
@@ -43,20 +43,20 @@ class TestSortInds:
         assert_equal(sort_inds(xs, method, sigma), inds)
 
 
-class TestNumpySeigsys:
+class TestNumpyEigk:
     @mark.parametrize("which, k, ls, sigma",
                       [("lm", 3, [-5, 4, -3], None),
                        ("sm", 3, [0.1, 2, -3], None),
                        ("tm", 3, [-3, 2, 4], 2.9)])
     def test_evals(self, ham1, which, k, ls, sigma):
-        lk = seigsys_numpy(ham1, k=k, which=which, return_vecs=False,
-                           sigma=sigma, sort=False)
+        lk = eigs_numpy(ham1, k=k, which=which, return_vecs=False,
+                        sigma=sigma, sort=False)
         assert_allclose(lk, ls)
 
     @mark.parametrize("which, k, sigma",
                       [("sa", 5, None)])
     def test_evecs(self, ham1, which, k, sigma):
-        lk, vk = seigsys_numpy(ham1, k=k, which=which, return_vecs=True,
-                               sigma=sigma, sort=False)
+        lk, vk = eigs_numpy(ham1, k=k, which=which, return_vecs=True,
+                            sigma=sigma, sort=False)
         assert isinstance(vk, np.matrix)
         assert_allclose(dot(vk, ldmul(lk, vk.H)), ham1)

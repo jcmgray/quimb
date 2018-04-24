@@ -11,7 +11,7 @@ The module :py:mod:`~quimb.linalg.approx_spectral`, contains a Lanczos method fo
 .. code-block:: python
 
     >>> rho = rand_rho(2**12)
-    >>> np.sum(np.sqrt(eigvals(rho)))
+    >>> np.sum(np.sqrt(eigvalsh(rho)))
     54.324631408257559
 
     >>> tr_sqrt_approx(rho)

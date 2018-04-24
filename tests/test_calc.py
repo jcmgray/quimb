@@ -9,7 +9,7 @@ from quimb import (
     rand_product_state,
     bell_state,
     up,
-    eigvecs,
+    eigvecsh,
     rand_mix,
     rand_rho,
     rand_ket,
@@ -48,7 +48,6 @@ from quimb import (
     is_eigenvector,
     page_entropy,
     rand_herm,
-    seigvecs,
     permute,
 )
 
@@ -76,7 +75,7 @@ def k2():
 @pytest.fixture
 def orthog_ks():
     p = rand_rho(3)
-    v = eigvecs(p)
+    v = eigvecsh(p)
     return (v[:, 0], v[:, 1], v[:, 2])
 
 
@@ -597,7 +596,7 @@ class TestIsEigenvector:
 
     def test_dense_true(self):
         a = rand_herm(10)
-        v = eigvecs(a)
+        v = eigvecsh(a)
         for i in range(10):
             assert is_eigenvector(v[:, i], a)
 
@@ -608,7 +607,7 @@ class TestIsEigenvector:
 
     def test_sparse(self):
         a = rand_herm(10, sparse=True, density=0.9)
-        vt = seigvecs(a, sigma=0, k=1)
+        vt = eigvecsh(a, sigma=0, k=1)
         assert is_eigenvector(vt, a)
         vf = rand_ket(10)
         assert not is_eigenvector(vf, a)

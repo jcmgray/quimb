@@ -9,7 +9,7 @@ from quimb import (
     tr,
     ptr,
     expec,
-    eigvals,
+    eigvalsh,
     mutual_information,
     logneg,
     rand_matrix,
@@ -65,7 +65,7 @@ class TestRandHerm:
         assert type(a) == np.matrix
         assert a.dtype == dtype
         assert_allclose(a, a.H)
-        evals = np.linalg.eigvals(a)
+        evals = np.linalg.eigvalsh(a)
         assert_allclose(evals.imag, [0, 0, 0], atol=1e-14)
 
     def test_rand_herm_sparse(self, dtype):
@@ -74,7 +74,7 @@ class TestRandHerm:
         assert type(a) == sp.csr_matrix
         assert isherm(a)
         assert a.dtype == dtype
-        evals = np.linalg.eigvals(a.A)
+        evals = np.linalg.eigvalsh(a.A)
         assert_allclose(evals.imag, [0, 0, 0], atol=1e-14)
 
 
@@ -86,7 +86,7 @@ class TestRandPos:
         assert a.shape == (3, 3)
         assert type(a) == np.matrix
         assert a.dtype == dtype
-        evals = np.linalg.eigvals(a)
+        evals = np.linalg.eigvalsh(a)
         assert_allclose(evals.imag, [0, 0, 0], atol=1e-7)
         assert np.all(evals.real >= 0)
 
@@ -95,7 +95,7 @@ class TestRandPos:
         assert a.shape == (3, 3)
         assert type(a) == sp.csr_matrix
         assert a.dtype == dtype
-        evals = np.linalg.eigvals(a.A)
+        evals = np.linalg.eigvalsh(a.A)
         assert_allclose(evals.imag, [0, 0, 0], atol=1e-7)
         assert np.all(evals.real >= -1e-15)
 
@@ -193,7 +193,7 @@ class TestRandMPS:
         psi = rand_matrix_product_state(
             2, 10, bond_dim, cyclic=cyclic)
         rhoa = ptr(psi, [2] * 10, [0, 1, 2, 3])
-        el = eigvals(rhoa)
+        el = eigvalsh(rhoa)
         # bond_dim squared as cyclic mps is generated
         assert sum(el > 1e-12) == bond_dim ** (2 if cyclic else 1)
 
@@ -210,6 +210,6 @@ class TestRandSeperable:
 
         rho_a = ptr(rho, [2, 3, 2], 1)
 
-        el = eigvals(rho_a)
+        el = eigvalsh(rho_a)
         assert np.all(el < 1 - 1e-12)
         assert np.all(el > 1e-12)

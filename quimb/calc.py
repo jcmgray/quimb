@@ -34,10 +34,9 @@ from .core import (
     dop,
 )
 from .linalg.base_linalg import (
-    eigsys,
-    eigvals,
+    eigh,
+    eigvalsh,
     norm,
-    seigvals,
     sqrtm,
 )
 from .linalg.approx_spectral import (
@@ -93,7 +92,7 @@ def purify(rho):
     """
     # TODO: trim zeros?
     d = rho.shape[0]
-    evals, vs = eigsys(rho)
+    evals, vs = eigh(rho)
     evals = np.sqrt(np.clip(evals, 0, 1))
     psi = np.zeros(shape=(d**2, 1), dtype=complex)
     for i, evals in enumerate(evals.flat):
@@ -127,9 +126,9 @@ def entropy(a, rank=None):
         evals = a
     else:
         if rank is None:
-            evals = eigvals(a)
+            evals = eigvalsh(a)
         else:  # know that not all eigenvalues needed
-            evals = seigvals(a, k=rank, which='LM', backend='AUTO')
+            evals = eigvalsh(a, k=rank, which='LM', backend='AUTO')
 
     evals = evals[evals > 0.0]
     return np.sum(-evals * np.log2(evals))
@@ -303,7 +302,7 @@ def schmidt_gap(psi_ab, dims, sysa):
         sysa = sysb
 
     rho_a = ptr(psi_ab, dims, sysa)
-    el = seigvals(rho_a, k=2, which='LM')
+    el = eigvalsh(rho_a, k=2, which='LM')
     return abs(el[0] - el[1])
 
 
@@ -311,9 +310,9 @@ def tr_sqrt(a, rank=None):
     """Return the trace of the sqrt of a positive semidefinite matrix.
     """
     if rank is None:
-        el = eigvals(a, sort=False)
+        el = eigvalsh(a, sort=False)
     else:
-        el = seigvals(a, k=rank, which='LM', backend='AUTO')
+        el = eigvalsh(a, k=rank, which='LM', backend='AUTO')
     return np.sum(np.sqrt(el[el > 0.0]))
 
 
@@ -561,7 +560,7 @@ def concurrence(p, dims=(2, 2), sysa=0, sysb=1):
 
     if isop(p):
         pt = dot(kron(Y, Y), dot(p.conj(), kron(Y, Y)))
-        evals = (nla.eigvals(dot(p, pt)).real**2)**0.25
+        evals = (nla.eigvalsh(dot(p, pt)).real**2)**0.25
         return max(0, 2 * np.max(evals) - np.sum(evals))
     else:
         pt = dot(kron(Y, Y), p.conj())
@@ -957,7 +956,7 @@ def is_degenerate(op, tol=1e-12):
     """
     op = np.asarray(op)
     if op.ndim != 1:
-        evals = eigvals(op)
+        evals = eigvalsh(op)
     else:
         evals = op
     l_gaps = evals[1:] - evals[:-1]

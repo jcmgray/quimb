@@ -18,7 +18,7 @@ from scipy.integrate import complex_ode
 
 from .accel import isop, ldmul, rdmul, explt, dot, issparse, dot_dense
 from .core import qu, eye
-from .linalg.base_linalg import eigsys, norm, expm_multiply
+from .linalg.base_linalg import eigh, norm, expm_multiply
 from .utils import continuous_progbar, progbar
 
 
@@ -331,7 +331,7 @@ class QuEvo(object):
             self._evals, self._evecs = ham
             self.method = 'solve'
         except ValueError:
-            self._evals, self._evecs = eigsys(ham.A)
+            self._evals, self._evecs = eigh(ham.A)
 
         # Find initial state in energy eigenbasis at t0
         if self._isdop:

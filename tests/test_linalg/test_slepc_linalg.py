@@ -14,17 +14,16 @@ from quimb import (
     rand_herm,
     rand_pos,
     rand_ket,
-    eigsys,
-    seigsys,
+    eigh,
     expec,
     eye,
     norm,
 )
 from quimb.linalg import SLEPC4PY_FOUND
-from quimb.linalg.scipy_linalg import scipy_svds
+from quimb.linalg.scipy_linalg import svds_scipy
 if SLEPC4PY_FOUND:
     from quimb.linalg.slepc_linalg import (
-        seigsys_slepc,
+        eigs_slepc,
         svds_slepc,
         convert_mat_to_petsc,
         new_petsc_vec,
@@ -83,28 +82,28 @@ class TestConvertToPETScConversion:
 
 
 @slepc4py_test
-class TestSlepcSeigsys:
+class TestSlepceigs:
     def test_internal_eigvals(self, prematsparse):
         u, a = prematsparse
-        lk = seigsys_slepc(a, k=2, sigma=0.5, return_vecs=False)
+        lk = eigs_slepc(a, k=2, sigma=0.5, return_vecs=False)
         assert_allclose(lk, [-1, 2])
 
     @mark.parametrize("which, output", [
         ('lm', 4),
         ("sa", -3),
     ])
-    def test_seigsys_slepc_groundenergy(self, prematsparse, which, output):
+    def test_eigs_slepc_groundenergy(self, prematsparse, which, output):
         u, a = prematsparse
-        lk = seigsys_slepc(a, k=1, which=which, return_vecs=False)
+        lk = eigs_slepc(a, k=1, which=which, return_vecs=False)
         assert_allclose(lk, output)
 
     @mark.parametrize("dtype", ['real', 'complex'])
-    def test_seigsys_slepc_eigvecs(self, dtype):
+    def test_eigs_slepc_eigvecs(self, dtype):
         h = rand_herm(100, sparse=True, density=0.2)
         if dtype == 'real':
             h = h.real
-        lks, vks = seigsys_slepc(h, k=5)
-        lka, vka = seigsys(h, k=5)
+        lks, vks = eigs_slepc(h, k=5)
+        lka, vka = eigh(h, k=5)
         assert vks.shape == vka.shape
         assert h.dtype == vks.dtype
         for ls, vs, la, va in zip(lks, vks.T, lka, vka.T):
@@ -128,7 +127,7 @@ class TestSlepcSvds:
     def test_random_compare_scipy(self, bigsparsemat, SVDType):
         a = bigsparsemat
         lk = svds_slepc(a, k=5, return_vecs=False, SVDType=SVDType)
-        ls = scipy_svds(a, k=5, return_vecs=False)
+        ls = svds_scipy(a, k=5, return_vecs=False)
         assert_allclose(lk, ls)
 
     @mark.parametrize("SVDType", ['cross', 'lanczos'])
@@ -137,7 +136,7 @@ class TestSlepcSvds:
         uk, sk, vk = svds_slepc(a, k=10, return_vecs=True, SVDType=SVDType)
         assert_allclose(uk.H @ uk, eye(10), atol=1e-6)
         assert_allclose(vk @ vk.H, eye(10), atol=1e-6)
-        pk, lk, qk = scipy_svds(a, k=10, return_vecs=True)
+        pk, lk, qk = svds_scipy(a, k=10, return_vecs=True)
         assert_allclose(sk, lk)
         assert pk.shape == uk.shape
         assert vk.shape == qk.shape
@@ -155,7 +154,7 @@ class TestSlepcMfnMultiply:
 
         out = mfn_multiply_slepc(a, k)
 
-        al, av = eigsys(a.A)
+        al, av = eigh(a.A)
         expected = av @ np.diag(np.exp(al)) @ av.conj().T @ k
 
         assert_allclose(out, expected)
@@ -169,7 +168,7 @@ class TestSlepcMfnMultiply:
 
         out = mfn_multiply_slepc(a, k, fntype='sqrt', isherm=True)
 
-        al, av = eigsys(a.A)
+        al, av = eigh(a.A)
         al[al < 0] = 0.0  # very small neg values spoil sqrt
         expected = av @ np.diag(np.sqrt(al)) @ av.conj().T @ k
 
@@ -184,13 +183,13 @@ class TestShellMatrix:
         alo = sp.linalg.aslinearoperator(a)
 
         el_us, ev_us = sp.linalg.eigsh(alo, k=1, which='LA')
-        el_u, ev_u = seigsys_slepc(alo, k=1, which='LA')
+        el_u, ev_u = eigs_slepc(alo, k=1, which='LA')
 
         assert_allclose(el_us, el_u)
         assert_allclose(np.abs(ev_us.conj().T @ ev_u), 1.0)
 
         el_ls, ev_ls = sp.linalg.eigsh(alo, k=1, which='SA')
-        el_l, ev_l = seigsys_slepc(alo, k=1, which='SA')
+        el_l, ev_l = eigs_slepc(alo, k=1, which='SA')
 
         assert_allclose(el_ls, el_l)
         assert_allclose(np.abs(ev_ls.conj().T @ ev_l), 1.0)
@@ -198,7 +197,7 @@ class TestShellMatrix:
     def test_internal_interior_default(self):
         a = rand_herm(100, sparse=True)
         alo = sp.linalg.aslinearoperator(a)
-        el, ev = seigsys_slepc(alo, k=1, which='TR', sigma=0.0)
+        el, ev = eigs_slepc(alo, k=1, which='TR', sigma=0.0)
         el_s, ev_s = sp.linalg.eigsh(a.tocsc(), k=1, which='LM', sigma=0.0)
 
         assert_allclose(el_s, el, rtol=1e-5)
@@ -214,8 +213,8 @@ class TestShellMatrix:
             'PCType': 'none',
         }
 
-        el, ev = seigsys_slepc(alo, k=1, which='TR', sigma=0.0,
-                               st_opts=st_opts, EPSType='krylovschur')
+        el, ev = eigs_slepc(alo, k=1, which='TR', sigma=0.0,
+                            st_opts=st_opts, EPSType='krylovschur')
         el_s, ev_s = sp.linalg.eigsh(a.tocsc(), k=1, which='LM', sigma=0.0)
 
         assert_allclose(el_s, el, rtol=1e-5)
@@ -231,8 +230,8 @@ class TestShellMatrix:
             'PCType': 'none',
         }
 
-        el, ev = seigsys_slepc(alo, k=1, which='TR', sigma=0.0,
-                               st_opts=st_opts, EPSType='gd')
+        el, ev = eigs_slepc(alo, k=1, which='TR', sigma=0.0,
+                            st_opts=st_opts, EPSType='gd')
         el_s, ev_s = sp.linalg.eigsh(a.tocsc(), k=1, which='LM', sigma=0.0)
 
         assert_allclose(el_s, el, rtol=1e-6)
@@ -248,8 +247,8 @@ class TestShellMatrix:
             'PCType': 'none',
         }
 
-        el, ev = seigsys_slepc(alo, k=1, which='TR', sigma=0.0,
-                               st_opts=st_opts, EPSType='jd')
+        el, ev = eigs_slepc(alo, k=1, which='TR', sigma=0.0,
+                            st_opts=st_opts, EPSType='jd')
         el_s, ev_s = sp.linalg.eigsh(a.tocsc(), k=1, which='LM', sigma=0.0)
 
         assert_allclose(el_s, el, rtol=1e-6)
@@ -261,14 +260,14 @@ class TestCISS:
 
     def test_1(self):
         a = rand_herm(100, sparse=True)
-        el, ev = eigsys(a.A)
+        el, ev = eigh(a.A)
         which = abs(el) < 0.2
         el, ev = el[which], ev[:, which]
 
         offset = norm(a, 'fro')
         a = a + offset * sp.eye(a.shape[0])
 
-        sl, sv = seigsys_slepc(a, k=6, l_win=(-0.2 + offset, 0.2 + offset))
+        sl, sv = eigs_slepc(a, k=6, l_win=(-0.2 + offset, 0.2 + offset))
         sl -= offset
         assert_allclose(el, sl)
         assert_allclose(np.abs(sv.H @ ev), np.eye(el.size), atol=1e-11)

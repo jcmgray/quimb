@@ -7,7 +7,7 @@ import numpy as np
 from numpy.testing import assert_allclose
 
 from quimb import (
-    qu, eigsys,
+    qu, eigh,
     rand_ket,
     rand_rho,
     rand_herm,
@@ -238,7 +238,7 @@ class TestQuEvo:
         ham, trc, p0, tm, pm = ham_rcr_psi
         ham = qu(ham, sparse=sparse)
         if presolve:
-            l, v = eigsys(ham)
+            l, v = eigh(ham)
             sim = QuEvo(p0, (l, v))
             assert sim._solved
         else:

@@ -18,9 +18,10 @@ from .core import (
 
 # Linear algebra functions
 from .linalg.base_linalg import (
-    eigsys, eigvals, eigvecs, seigsys, seigvals, seigvecs, groundstate,
-    groundenergy, bound_spectrum, eigsys_window, eigvals_window,
-    eigvecs_window, svd, svds, norm, expm, sqrtm, expm_multiply,
+    eigensystem, eig, eigh, eigvals, eigvalsh,
+    eigvecs, eigvecsh, eigensystem_partial, groundstate, groundenergy,
+    bound_spectrum, eigh_window, eigvalsh_window, eigvecsh_window,
+    svd, svds, norm, expm, sqrtm, expm_multiply,
 )
 
 # Generating objects
@@ -77,9 +78,9 @@ __all__ = [
     'itrace', 'partial_trace', 'expectation', 'expec', 'overlap', 'nmlz',
     'tr', 'ptr',
     # Linalg ---------------------------------------------------------------- #
-    'eigsys', 'eigvals', 'eigvecs', 'seigsys', 'seigvals', 'seigvecs',
-    'groundstate', 'groundenergy', 'bound_spectrum', 'eigsys_window',
-    'eigvals_window', 'eigvecs_window', 'svd', 'svds', 'norm',
+    'eigensystem', 'eig', 'eigh', 'eigvals', 'eigvalsh', 'eigvecs', 'eigvecsh',
+    'eigensystem_partial', 'groundstate', 'groundenergy', 'bound_spectrum',
+    'eigh_window', 'eigvalsh_window', 'eigvecsh_window', 'svd', 'svds', 'norm',
     # Gen ------------------------------------------------------------------- #
     'spin_operator', 'pauli', 'hadamard', 'phase_gate', 'swap', 'controlled',
     'ham_heis', 'ham_ising', 'ham_j1j2', 'zspin_projector', 'basis_vec', 'up',

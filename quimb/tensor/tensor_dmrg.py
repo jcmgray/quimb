@@ -6,7 +6,7 @@ import numpy as np
 
 from ..utils import progbar
 from ..accel import prod
-from ..linalg.base_linalg import eigsys, seigsys, IdentityLinearOperator
+from ..linalg.base_linalg import eigh, IdentityLinearOperator
 from .tensor_core import (
     Tensor,
     TensorNetwork,
@@ -605,7 +605,7 @@ class DMRG:
         elif (direction == 'left') and ((i > 0) or self.cyclic):
             self._k.right_canonize_site(i, bra=self._b)
 
-    def _seigsys(self, A, B=None, v0=None):
+    def _eigs(self, A, B=None, v0=None):
         """Find single eigenpair, using all the internal settings.
         """
         # intercept generalized eigen
@@ -613,7 +613,7 @@ class DMRG:
         if (backend is None) and (B is not None):
             backend = 'LOBPCG'
 
-        return seigsys(
+        return eigh(
             A, k=1, B=B, which=self.which, v0=v0,
             backend=backend,
             EPSType=self.opts['local_eig_EPSType'],
@@ -743,7 +743,7 @@ class DMRG:
         loc_gs_old = self._k[i].data.ravel()
 
         # find the local energy and groundstate
-        loc_en, loc_gs = self._seigsys(Heff, B=Neff, v0=loc_gs_old)
+        loc_en, loc_gs = self._eigs(Heff, B=Neff, v0=loc_gs_old)
 
         # perform some minor checks and corrections
         self.post_check(i, Neff, loc_gs, loc_en, loc_gs_old)
@@ -788,7 +788,7 @@ class DMRG:
         loc_gs_old = self._k[i].contract(self._k[i + 1]).to_dense(uix)
 
         # find the 2-site local groundstate and energy
-        loc_en, loc_gs = self._seigsys(Heff, B=Neff, v0=loc_gs_old)
+        loc_en, loc_gs = self._eigs(Heff, B=Neff, v0=loc_gs_old)
 
         # perform some minor checks and corrections
         self.post_check(i, Neff, loc_gs, loc_en, loc_gs_old)
@@ -1160,14 +1160,14 @@ class DMRGX(DMRG):
         #
         D = prod(dims)
         if D <= self.opts['local_eig_partial_cutoff']:
-            evals, evecs = eigsys(Heff)
+            evals, evecs = eigh(Heff)
         else:
             if isinstance(self.opts['local_eig_partial_k'], float):
                 k = int(self.opts['local_eig_partial_k'] * D)
             else:
                 k = self.opts['local_eig_partial_k']
 
-            evals, evecs = seigsys(
+            evals, evecs = eigh(
                 Heff, sigma=self._target_energy, v0=self._k[i].data,
                 k=k, tol=self.opts['local_eig_tol'], backend='scipy')
 
@@ -1232,7 +1232,7 @@ class DMRGX(DMRG):
         # update site i with the data and drop dummy index too
         ki.modify(data=evecs[..., best], inds=uix)
         bi.modify(data=evecs_c[..., best], inds=lix)
-        # store the current effective energy for possibly targeted seigsys
+        # store the current effective energy for possibly targeted eigh
         self._target_energy = evals[best]
 
         tot_en = self._eff_ham ^ all
@@ -1259,7 +1259,7 @@ class DMRGX(DMRG):
     #     #
     #     D = prod(dims)
     #     if D <= self.opts['local_eig_partial_cutoff']:
-    #         evals, evecs = eigsys(A)
+    #         evals, evecs = eigh(A)
     #     else:
     #         if isinstance(self.opts['local_eig_partial_k'], float):
     #             k = int(self.opts['local_eig_partial_k'] * D)
@@ -1269,7 +1269,7 @@ class DMRGX(DMRG):
     #         # find the 2-site local state using previous as initial guess
     #         v0 = self._k[i].contract(self._k[i + 1], output_inds=uix).data
 
-    #         evals, evecs = seigsys(
+    #         evals, evecs = eigh(
     #             A, sigma=self.energies[-1], v0=v0,
     #             k=k, tol=self.opts['local_eig_tol'], backend='scipy')
 

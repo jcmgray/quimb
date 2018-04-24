@@ -11,7 +11,7 @@ import scipy.sparse as sp
 
 from ..accel import ldmul, dot, make_immutable
 from ..core import qu, kron, eye, eyepad, kronpow
-from ..linalg.base_linalg import eigsys
+from ..linalg.base_linalg import eigh
 from .operators import pauli, controlled
 
 
@@ -194,7 +194,7 @@ def thermal_state(ham, beta, precomp_func=False):
     if isinstance(ham, (list, tuple)):  # solved already
         evals, evecs = ham
     else:
-        evals, evecs = eigsys(ham)
+        evals, evecs = eigh(ham)
     evals -= evals.min()  # offset by min to avoid numeric problems
 
     def gen_state(b):

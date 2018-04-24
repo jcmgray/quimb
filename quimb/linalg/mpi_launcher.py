@@ -7,7 +7,7 @@
 import os
 import functools
 from .slepc_linalg import (
-    seigsys_slepc,
+    eigs_slepc,
     svds_slepc,
     mfn_multiply_slepc,
     ssolve_slepc,
@@ -256,10 +256,10 @@ class SpawnMPIProcessesFunc(object):
 
 # ---------------------------------- SLEPC ---------------------------------- #
 
-seigsys_slepc_mpi = functools.wraps(seigsys_slepc)(
-    GetMPIBeforeCall(seigsys_slepc))
-seigsys_slepc_spawn = functools.wraps(seigsys_slepc)(
-    SpawnMPIProcessesFunc(seigsys_slepc_mpi))
+eigs_slepc_mpi = functools.wraps(eigs_slepc)(
+    GetMPIBeforeCall(eigs_slepc))
+eigs_slepc_spawn = functools.wraps(eigs_slepc)(
+    SpawnMPIProcessesFunc(eigs_slepc_mpi))
 
 svds_slepc_mpi = functools.wraps(svds_slepc)(
     GetMPIBeforeCall(svds_slepc))

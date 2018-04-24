@@ -8,7 +8,7 @@ from quimb import (
     eyepad,
     expec,
     ptr,
-    eigsys,
+    eigh,
     groundstate,
     concurrence,
     basis_vec,
@@ -127,7 +127,7 @@ class TestThermalState:
 
     def test_thermal_state_tuple(self):
         full = rand_herm(2**4)
-        l, v = eigsys(full)
+        l, v = eigh(full)
         for beta in (0, 0.5, 1, 10):
             rhoth1 = thermal_state(full, beta)
             rhoth2 = thermal_state((l, v), beta)

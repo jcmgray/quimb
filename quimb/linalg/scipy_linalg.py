@@ -5,8 +5,8 @@ import numpy as np
 import scipy.sparse.linalg as spla
 
 
-def seigsys_scipy(A, k, *, B=None, which=None, return_vecs=True, sigma=None,
-                  isherm=True, sort=True, tol=None, **eigs_opts):
+def eigs_scipy(A, k, *, B=None, which=None, return_vecs=True, sigma=None,
+               isherm=True, sort=True, tol=None, **eigs_opts):
     """Returns a few eigenpairs from a possibly sparse hermitian operator
 
     Parameters
@@ -55,12 +55,13 @@ def seigsys_scipy(A, k, *, B=None, which=None, return_vecs=True, sigma=None,
         return np.sort(lk) if sort else lk
 
 
-def seigsys_lobpcg(A, k, *, B=None, v0=None, which=None, return_vecs=True,
-                   sigma=None, isherm=True, sort=True, **lobpcg_opts):
+def eigs_lobpcg(A, k, *, B=None, v0=None, which=None, return_vecs=True,
+                sigma=None, isherm=True, sort=True, **lobpcg_opts):
     """Interface to scipy's lobpcg eigensolver, which can be good for
     generalized eigenproblems with matrix-free operators. Seems to a be a bit
     innacurate though (e.g. on the order of ~ 1e-6 for eigenvalues). Also only
-    takes real, symmetric problems, targeting smallest eigenvalues.
+    takes real, symmetric problems, targeting smallest eigenvalues (though
+    scipy will soon have complex support, and its easy to add oneself).
 
     Note that the slepc eigensolver also has a lobpcg backend
     (``EPSType='lobpcg'``) which accepts complex input and is more accurate -
@@ -94,7 +95,7 @@ def seigsys_lobpcg(A, k, *, B=None, v0=None, which=None, return_vecs=True,
 
     See Also
     --------
-    seigsys_scipy, seigsys_numpy, seigsys_slepc
+    eigs_scipy, eigs_numpy, eigs_slepc
     """
     if not isherm:
         raise ValueError("lobpcg can only solve symmetric problems.")
@@ -131,7 +132,7 @@ def seigsys_lobpcg(A, k, *, B=None, v0=None, which=None, return_vecs=True,
         return np.sort(lk) if sort else lk
 
 
-def scipy_svds(a, k=6, *, return_vecs=True, **kwargs):
+def svds_scipy(a, k=6, *, return_vecs=True, **svds_opts):
     """Compute a number of singular value pairs
     """
     settings = {
@@ -139,9 +140,9 @@ def scipy_svds(a, k=6, *, return_vecs=True, **kwargs):
         'return_singular_vectors': return_vecs
     }
     if return_vecs:
-        uk, sk, vtk = spla.svds(a, **settings, **kwargs)
+        uk, sk, vtk = spla.svds(a, **settings, **svds_opts)
         so = np.argsort(-sk)
         return np.asmatrix(uk[:, so]), sk[so], np.asmatrix(vtk[so, :])
     else:
-        sk = spla.svds(a, **settings, **kwargs)
+        sk = spla.svds(a, **settings, **svds_opts)
         return sk[np.argsort(-sk)]
