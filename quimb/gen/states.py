@@ -129,7 +129,7 @@ def bloch_state(ax, ay, az, purified=False, **kwargs):
 
 @functools.lru_cache(maxsize=8)
 def bell_state(s, **kwargs):
-    """One of the four bell-states.
+    r"""One of the four bell-states.
 
     If n = 2**-0.5, they are:
 
@@ -149,7 +149,8 @@ def bell_state(s, **kwargs):
 
     Returns
     -------
-    immutable vector
+    p : immutable vector
+        The bell-state ``s``.
     """
     keymap = {"psi-": "psi-", 0: "psi-", "psim": "psi-",
               "psi+": "psi+", 1: "psi+", "psip": "psi+",
@@ -373,11 +374,14 @@ def graph_state_1d(n, cyclic=True, sparse=False):
         The 1d-graph state.
     """
     p = kronpow(plus(sparse=sparse), n)
+
     for i in range(n - 1):
         p = eyepad(controlled("z", sparse=True), [2] * n, (i, i + 1)) @ p
+
     if cyclic:
         p = ((eye(2, sparse=True) & eye(2**(n - 2), sparse=True) &
               qu([1, 0], qtype="dop", sparse=True)) +
              (pauli("z", sparse=True) & eye(2**(n - 2), sparse=True) &
               qu([0, 1], qtype="dop", sparse=True))) @ p
+
     return p

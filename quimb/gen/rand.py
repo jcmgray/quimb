@@ -212,7 +212,7 @@ def rand_product_state(n, qtype=None):
 def rand_matrix_product_state(phys_dim, n, bond_dim,
                               cyclic=False, trans_invar=False):
     """Generate a random matrix product state (in dense form, see
-    :func:`~quimb.tensor_networks.MPS_rand_state` for tensor network form).
+    :func:`~quimb.tensor.MPS_rand_state` for tensor network form).
 
     Parameters
     ----------

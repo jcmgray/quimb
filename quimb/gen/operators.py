@@ -1,6 +1,7 @@
 """Functions for generating quantum operators.
 """
 from operator import add
+import math
 from functools import lru_cache
 
 from cytoolz import isiterable, concat, unique
@@ -120,6 +121,39 @@ def pauli(xyz, dim=2, **kwargs):
     # Operator is cached, so make sure it cannot be modified
     make_immutable(op)
     return op
+
+
+@lru_cache(1)
+def hadamard():
+    """The Hadamard gate.
+    """
+    H = qu([[1., 1.],
+            [1., -1.]]) / 2**0.5
+    make_immutable(H)
+    return H
+
+
+@lru_cache(128)
+def phase_gate(phi):
+    """The phase shift gate.
+    """
+    R = qu([[1., 0.],
+            [0., math.e**(1.0j * phi)]])
+    make_immutable(R)
+    return R
+
+
+@lru_cache(maxsize=8)
+def swap(dim=2, **kwargs):
+    """The SWAP operator acting on subsystems of dimension `dim`.
+    """
+    S = np.identity(dim**2, dtype=complex)
+    S = (S.reshape([dim, dim, dim, dim])
+          .transpose([0, 3, 1, 2])
+          .reshape([dim**2, dim**2]))
+    S = qu(S, **kwargs)
+    make_immutable(S)
+    return S
 
 
 @lru_cache(maxsize=8)
@@ -393,16 +427,3 @@ def zspin_projector(n, sz=0, stype="csr"):
     prj = qu(prj, stype=stype)
     make_immutable(prj)
     return prj
-
-
-@lru_cache(maxsize=8)
-def swap(dim=2, **kwargs):
-    """The SWAP operator acting on subsystems of dimension `dim`.
-    """
-    a = np.identity(dim**2, dtype=complex)
-    a = (a.reshape([dim, dim, dim, dim])
-          .transpose([0, 3, 1, 2])
-          .reshape([dim**2, dim**2]))
-    a = qu(a, **kwargs)
-    make_immutable(a)
-    return a

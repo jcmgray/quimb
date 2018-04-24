@@ -13,18 +13,8 @@ from numpy.matlib import zeros
 import scipy.sparse as sp
 
 from .accel import (
-    njit,
-    par_reduce,
-    matrixify,
-    realify,
-    issparse,
-    isop,
-    vdot,
-    dot,
-    prod,
-    dot_dense,
-    kron_dispatch,
-    isvec
+    njit, par_reduce, matrixify, realify, issparse, isop, vdot, dot, prod,
+    dot_dense, kron_dispatch, isvec
 )
 from .utils import deprecated
 

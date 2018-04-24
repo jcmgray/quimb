@@ -26,6 +26,7 @@ Welcome to quimb's documentation!
 
   installation
   states
+  generate
   calculating quantities
   solving systems
   distributed parallelism - mpi
