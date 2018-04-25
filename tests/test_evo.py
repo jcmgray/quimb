@@ -27,7 +27,7 @@ from quimb.evo import (
     schrodinger_eq_dop_vectorized,
     lindblad_eq,
     lindblad_eq_vectorized,
-    QuEvo,
+    Evolution,
 )
 from .test_linalg.test_slepc_linalg import slepc4py_test
 
@@ -239,10 +239,10 @@ class TestQuEvo:
         ham = qu(ham, sparse=sparse)
         if presolve:
             l, v = eigh(ham)
-            sim = QuEvo(p0, (l, v))
+            sim = Evolution(p0, (l, v))
             assert sim._solved
         else:
-            sim = QuEvo(p0, ham, method='solve')
+            sim = Evolution(p0, ham, method='solve')
         sim.update_to(tm)
         assert_allclose(sim.pt, pm)
         assert expec(sim.pt, p0) < 1.0
@@ -265,11 +265,11 @@ class TestQuEvo:
 
         if method == 'bad':
             with raises(ValueError):
-                QuEvo(p0, ham, method=method)
+                Evolution(p0, ham, method=method)
             return
 
         ham = qu(ham, sparse=sparse)
-        sim = QuEvo(p0, ham, method=method)
+        sim = Evolution(p0, ham, method=method)
         sim.update_to(tm)
         assert_allclose(sim.pt, pm, rtol=1e-4)
         assert expec(sim.pt, p0) < 1.0
@@ -281,7 +281,7 @@ class TestQuEvo:
     def test_quevo_at_times(self):
         ham = ham_heis(2, cyclic=False)
         p0 = up() & down()
-        sim = QuEvo(p0, ham, method='solve')
+        sim = Evolution(p0, ham, method='solve')
         ts = np.linspace(0, 10)
         for t, pt in zip(ts, sim.at_times(ts)):
             x = cos(t)
@@ -297,7 +297,7 @@ class TestQuEvo:
         def some_quantity(t, pt):
             return t, logneg(pt)
 
-        evo = QuEvo(p0, ham, method=method, compute=some_quantity)
+        evo = Evolution(p0, ham, method=method, compute=some_quantity)
         manual_lns = []
         for pt in evo.at_times(np.linspace(0, 1, 6)):
             manual_lns.append(logneg(pt))
@@ -324,9 +324,9 @@ class TestQuEvo:
         def some_other_quantity(_, pt):
             return logneg(pt)
 
-        evo = QuEvo(p0, ham, method=method,
-                    compute={'t': some_quantity,
-                             'logneg': some_other_quantity})
+        evo = Evolution(p0, ham, method=method,
+                        compute={'t': some_quantity,
+                                 'logneg': some_other_quantity})
         manual_lns = []
         for pt in evo.at_times(np.linspace(0, 1, 6)):
             manual_lns.append(logneg(pt))
@@ -345,11 +345,11 @@ class TestQuEvo:
     def test_expm_krylov_expokit(self):
         ham = rand_herm(100, sparse=True, density=0.8)
         psi = rand_ket(100)
-        evo_exact = QuEvo(psi, ham, method='solve')
-        evo_krylov = QuEvo(psi, ham, method='expm',
-                           expm_backend='slepc-krylov')
-        evo_expokit = QuEvo(psi, ham, method='expm',
-                            expm_backend='slepc-expokit')
+        evo_exact = Evolution(psi, ham, method='solve')
+        evo_krylov = Evolution(psi, ham, method='expm',
+                               expm_backend='slepc-krylov')
+        evo_expokit = Evolution(psi, ham, method='expm',
+                                expm_backend='slepc-expokit')
         ts = np.linspace(0, 100, 21)
         for p1, p2, p3 in zip(evo_exact.at_times(ts),
                               evo_krylov.at_times(ts),
@@ -360,7 +360,7 @@ class TestQuEvo:
     def test_progbar_update_to_integrate(self, capsys):
         ham = ham_heis(2, cyclic=False)
         p0 = up() & down()
-        sim = QuEvo(p0, ham, method='integrate', progbar=True)
+        sim = Evolution(p0, ham, method='integrate', progbar=True)
         sim.update_to(100)
         # check something as been printed
         _, err = capsys.readouterr()
@@ -369,7 +369,7 @@ class TestQuEvo:
     def test_progbar_at_times_solve(self, capsys):
         ham = ham_heis(2, cyclic=False)
         p0 = up() & down()
-        sim = QuEvo(p0, ham, method='solve', progbar=True)
+        sim = Evolution(p0, ham, method='solve', progbar=True)
         for _ in sim.at_times(np.linspace(0, 100, 11)):
             pass
         # check something as been printed
@@ -379,7 +379,7 @@ class TestQuEvo:
     def test_progbar_at_times_expm(self, capsys):
         ham = ham_heis(2, cyclic=False)
         p0 = up() & down()
-        sim = QuEvo(p0, ham, method='expm', progbar=True)
+        sim = Evolution(p0, ham, method='expm', progbar=True)
         for _ in sim.at_times(np.linspace(0, 100, 11)):
             pass
         # check something as been printed

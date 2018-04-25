@@ -3,6 +3,22 @@ Tensor Algorithms
 #################
 
 
+Currently implemented algorithms
+--------------------------------
+
+Static:
+
+    * 1-site :class:`~quimb.tensor.tensor_dmrg.DMRG1` (OBC and PBC)
+    * 2-site :class:`~quimb.tensor.tensor_dmrg.DMRG2` (OBC and PBC)
+    * 1-site :class:`~quimb.tensor.tensor_dmrg.DMRGX`
+
+Should be fairly easily to implement / planned:
+
+    *- 2-site DMRG-X
+    *- 1-site TDVP
+    *- 2-site TDVP
+
+
 1D tensor networks
 ------------------
 
@@ -28,7 +44,17 @@ Generate a random :class:`~quimb.tensor.tensor_1d.MatrixProductState`, and contr
     >>> p.H @ p
     0.9999999999999991
 
-Add MPS and compress:
+The ``show`` method is specific to 1D networks. We can also plot a graph, as with any network, of the uncontracted inner product of the MPS with itself:
+
+.. code-block:: python
+
+    (p.H & p).graph(color=[f'I{i}' for i in range(30)])
+
+.. image:: ./_static/tensor_algorithms_mps_graph.png
+
+Here we used the fact that 1D tensor networks are tagged with the structure ``"I{}"`` denoting their sites.
+
+We can also add MPS and compress:
 
 .. code-block:: python
 
@@ -79,11 +105,11 @@ Build a Hamiltonian term by term and setup a DMRG solver:
     ham = builder.build(n=100)
     dmrg = DMRG2(ham, bond_dims=[10, 20, 100, 100, 200], cutoffs=1e-10)
 
-Now solve to a certain relative energy tolerance, showing progress and a schematic of the final state:
+Now solve to a certain absolute energy tolerance, showing progress and a schematic of the final state:
 
 .. code-block:: python
 
-    >>> dmrg.solve(tol=1e-6, verbose=True)
+    >>> dmrg.solve(tol=1e-6, verbosity=True)
     SWEEP-1, direction=R, max_bond=10, cutoff:1e-10
     100%|███████████████████████████████████████████| 99/99 [00:01<00:00, 75.66it/s]
     Energy: -138.73797893126138 ... not converged

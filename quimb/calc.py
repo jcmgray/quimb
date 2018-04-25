@@ -220,6 +220,18 @@ def mutinf(p, dims=(2, 2), sysa=0, rank=None):
 mutual_information = mutinf
 
 
+def check_dims_and_indices(dims, *syss):
+    """Make sure all indices found in the tuples ``syss`` are in
+    ``range(len(dims))``.
+    """
+    nsys = len(dims)
+    all_sys = sum(syss, ())
+
+    if not all(0 <= i < nsys for i in all_sys):
+        raise ValueError("Indices specified in `sysa` and `sysb` must be "
+                         "in range({}) for dims {}.".format(nsys, dims))
+
+
 def mutinf_subsys(psi_abc, dims, sysa, sysb, approx_thresh=2**13,
                   **approx_opts):
     """Calculate the mutual information of two subsystems of a pure state,
@@ -251,6 +263,9 @@ def mutinf_subsys(psi_abc, dims, sysa, sysb, approx_thresh=2**13,
     mutinf, entropy_subsys, entropy_subsys_approx, logneg_subsys
     """
     sysa, sysb = int2tup(sysa), int2tup(sysb)
+
+    check_dims_and_indices(dims, sysa, sysb)
+
     sz_a = prod(d for i, d in enumerate(dims) if i in sysa)
     sz_b = prod(d for i, d in enumerate(dims) if i in sysb)
     sz_c = prod(dims) // (sz_a * sz_b)
@@ -473,6 +488,9 @@ def logneg_subsys(psi_abc, dims, sysa, sysb,
     logneg, mutinf_subsys, logneg_subsys_approx
     """
     sysa, sysb = int2tup(sysa), int2tup(sysb)
+
+    check_dims_and_indices(dims, sysa, sysb)
+
     sz_a = prod(d for i, d in enumerate(dims) if i in sysa)
     sz_b = prod(d for i, d in enumerate(dims) if i in sysb)
     sz_ab = sz_a * sz_b

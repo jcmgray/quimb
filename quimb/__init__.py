@@ -53,7 +53,7 @@ from .calc import (
 )
 
 # Evolution class and methods
-from .evo import QuEvo
+from .evo import Evolution
 
 from .linalg.approx_spectral import (
     approx_spectral_function, tr_abs_approx, tr_exp_approx, tr_sqrt_approx,
@@ -101,7 +101,7 @@ __all__ = [
     'pauli_correlations', 'ent_cross_matrix', 'qid', 'is_degenerate',
     'is_eigenvector', 'page_entropy', 'heisenberg_energy',
     # Evo ------------------------------------------------------------------- #
-    'QuEvo',
+    'Evolution',
     # Approx spectral ------------------------------------------------------- #
     'approx_spectral_function', 'tr_abs_approx', 'tr_exp_approx',
     'tr_sqrt_approx', 'tr_xlogx_approx', 'entropy_subsys_approx',

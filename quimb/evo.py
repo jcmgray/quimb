@@ -1,6 +1,6 @@
 """Easy and efficient time evolutions.
 
-Contains an evolution class, QuEvo to easily and efficiently manage time
+Contains an evolution class, Evolution to easily and efficiently manage time
 evolution of quantum states according to the Schrodinger equation,
 and related functions.
 """
@@ -194,7 +194,7 @@ def _calc_evo_eq(isdop, issparse, isopen=False):
 # Quantum Evolution Class                                                     #
 # --------------------------------------------------------------------------- #
 
-class QuEvo(object):
+class Evolution(object):
     """A class for evolving quantum systems according to Schrodinger equation.
 
     The evolution can be performed in a number of ways:
@@ -218,11 +218,11 @@ class QuEvo(object):
         Function(s) to compute on the state at each time step, called
         with args (t, pt). If supplied with:
 
-            - single callable : ``QuEvo.results`` will contain the results as a
-              list,
-            - dict of callables : ``QuEvo.results`` will contain the results as
-              a dict of lists with corresponding keys to those given in
-              ``compute``.
+            - single callable : ``Evolution.results`` will contain the results
+              as a list,
+            - dict of callables : ``Evolution.results`` will contain the
+              results as a dict of lists with corresponding keys to those
+              given in ``compute``.
 
     method : {'integrate', 'solve', 'expm'}
         How to evolve the system:
@@ -266,7 +266,7 @@ class QuEvo(object):
         self._progbar = progbar
 
         self._setup_callback(compute)
-        self.method = method
+        self._method = method
 
         if method == 'solve' or isinstance(ham, (tuple, list)):
             self._solve_ham(ham)
@@ -299,7 +299,7 @@ class QuEvo(object):
                     self._results[k].append(v(t, pt))
 
             # For the integration callback, additionally need to convert
-            #   back to 'quantum' form
+            #   back to 'quantum' [(d, 1)-matrix] form
             @functools.wraps(fn)
             def int_step_callback(t, y):
                 pt = np.asmatrix(y.reshape(self._d, -1))
@@ -329,7 +329,7 @@ class QuEvo(object):
         # See if already solved from tuple
         try:
             self._evals, self._evecs = ham
-            self.method = 'solve'
+            self._method = 'solve'
         except ValueError:
             self._evals, self._evecs = eigh(ham.A)
 
@@ -458,8 +458,8 @@ class QuEvo(object):
         -----
         If integrating, currently any compute callbacks will be called at every
         *integration* step, not just the times `ts` -- i.e. in general
-        len(QuEvo.results) != len(ts) and if the adaptive step times are needed
-        they should be added as a callback, e.g.
+        len(Evolution.results) != len(ts) and if the adaptive step times are
+        needed they should be added as a callback, e.g.
         ``compute['t'] = lambda t, _: return t``.
         """
         if self._progbar:
@@ -475,13 +475,13 @@ class QuEvo(object):
     def t(self):
         """float : Current time of simulation.
         """
-        return self._stepper.t if self.method == 'integrate' else self._t
+        return self._stepper.t if self._method == 'integrate' else self._t
 
     @property
     def pt(self):
         """quantum state : State of the system at the current time (t).
         """
-        if self.method == 'integrate':
+        if self._method == 'integrate':
             return np.asmatrix(self._stepper.y.reshape(self._d, -1))
         else:
             return self._pt

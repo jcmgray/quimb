@@ -1,4 +1,0 @@
-DMRG example
-------------
-
-To do.

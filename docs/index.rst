@@ -18,6 +18,25 @@ Welcome to quimb's documentation!
 
 `quimb <https://github.com/jcmgray/quimb>`_ is an easy but fast python library for quantum information and many-body calculations. The code is hosted on `github <https://github.com/jcmgray/quimb>`_, do please submit any issues or pull requests there. It is also thoroughly unit-tested and the tests are probably the best place to look for detailed documentation.
 
+The core ``quimb`` module:
+
+* Uses `numpy` and `scipy.sparse` matrices as quantum objects
+* Accelerates many operations using `numba` and `numexpr`
+* Makes it easy to construct operators in large tensor spaces
+* Uses efficient methods to compute various quantities including entanglement measures
+* Can generate a variety of random states and operators
+* Can perform evolutions with several methods, computing quantities on the fly
+* Has an optional `slepc4py` interface for easy distributed (MPI) linear algebra. This can massively increase the performance when seeking, for example, mid-spectrum eigenstates.
+
+The tensor network module ``quimb.tensor``:
+
+* Uses a geometry free representation of tensor networks
+* Uses `opt_einsum <https://github.com/dgasmith/opt_einsum>`_ to find efficient contraction orders for hundreds of tensors, and perform those contractions potentially on the GPU
+* Can plot any network, color-coded, with bond size represented
+* Can treat any network as a scipy ``LinearOperator``, allowing many decompositions
+* Can perform DMRG1, DMRG2 and DMRGX, in matrix product state language.
+* Has tools to efficiently address periodic problems (transfer matrix compression and pseudo-orthognolization)
+
 .. rubric:: Guides:
 
 .. toctree::
@@ -25,13 +44,12 @@ Welcome to quimb's documentation!
   :maxdepth: 1
 
   installation
-  states
+  basics
   generate
   calculating quantities
   solving systems
   distributed parallelism - mpi
   dynamics and evolution
-  tensor networks
   tensor basics
   tensor algorithms
   develop
@@ -42,10 +60,10 @@ Welcome to quimb's documentation!
 .. rubric:: Examples:
 
 .. toctree::
+  :maxdepth: 1
 
-  ex_core
-  ex_tensor_network
-  ex_dmrg
+  ex_quench
+  ex_dmrg_pbc
 
 
 Indices and tables

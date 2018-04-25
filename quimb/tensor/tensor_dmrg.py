@@ -22,9 +22,9 @@ def get_default_opts(cyclic=False):
     -------
     default_sweep_sequence : str
         How to sweep. Will be repeated, e.g. "RRL" -> RRLRRLRRL..., default: R.
-    compress_method : {'svd', 'eig', ...}
+    bond_compress_method : {'svd', 'eig', ...}
         Method used to compress sites after update.
-    compress_cutoff_mode : {'sum2', 'abs', 'rel'}
+    bond_compress_cutoff_mode : {'sum2', 'abs', 'rel'}
         How to perform compression truncation.
     bond_expand_rand_strength : float
         In DMRG1, strength of randomness to expand bonds with. Needed to avoid
@@ -80,8 +80,8 @@ def get_default_opts(cyclic=False):
     """
     return {
         'default_sweep_sequence': 'R',
-        'compress_method': 'svd',
-        'compress_cutoff_mode': 'sum2',
+        'bond_compress_method': 'svd',
+        'bond_compress_cutoff_mode': 'rel' if cyclic else 'sum2',
         'bond_expand_rand_strength': 1e-6,
         'local_eig_tol': 1e-3,
         'local_eig_ncv': 4,
@@ -834,7 +834,7 @@ class DMRG:
             2: self._update_local_state_2site,
         }[self.bsz](i, **update_opts)
 
-    def sweep(self, direction, canonize=True, verbose=False, **update_opts):
+    def sweep(self, direction, canonize=True, verbosity=0, **update_opts):
         r"""Perform a sweep of optimizations, either rightwards::
 
               optimize -->
@@ -863,7 +863,7 @@ class DMRG:
             Sweep from left to right (->) or right to left (<-) respectively.
         canonize : bool, optional
             Canonize the state first, not needed if doing alternate sweeps.
-        verbose : bool, optional
+        verbosity : {0, 1, 2}, optional
             Show a progress bar for the sweep.
         update_opts :
             Supplied to ``self._update_local_state``.
@@ -881,7 +881,7 @@ class DMRG:
             ('L', True): ('left', 'right', range(n - 1, -1, -1)),
         }[direction, self.cyclic]
 
-        if verbose:
+        if verbosity:
             sweep = progbar(sweep, ncols=80, total=len(sweep))
 
         env_opts = {'begin': begin, 'bsz': bsz, 'cyclic': self.cyclic,
@@ -919,20 +919,20 @@ class DMRG:
 
         return tot_ens[-1]
 
-    def sweep_right(self, canonize=True, verbose=False, **update_opts):
+    def sweep_right(self, canonize=True, verbosity=0, **update_opts):
         return self.sweep(direction='R', canonize=canonize,
-                          verbose=verbose, **update_opts)
+                          verbosity=verbosity, **update_opts)
 
-    def sweep_left(self, canonize=True, verbose=False, **update_opts):
+    def sweep_left(self, canonize=True, verbosity=0, **update_opts):
         return self.sweep(direction='L', canonize=canonize,
-                          verbose=verbose, **update_opts)
+                          verbosity=verbosity, **update_opts)
 
     # ----------------- overloadable 'plugin' style methods ----------------- #
 
-    def _print_pre_sweep(self, i, LR, bd, ctf, verbose=0):
+    def _print_pre_sweep(self, i, LR, bd, ctf, verbosity=0):
         """Print this before each sweep.
         """
-        if verbose > 0:
+        if verbosity > 0:
             msg = "SWEEP-{}, direction={}, max_bond={}, cutoff:{}"
             print(msg.format(i + 1, LR, bd, ctf), flush=True)
 
@@ -941,12 +941,12 @@ class DMRG:
         """
         pass
 
-    def _print_post_sweep(self, converged, verbose=0):
+    def _print_post_sweep(self, converged, verbosity=0):
         """Print this after each sweep.
         """
-        if verbose > 1:
+        if verbosity > 1:
             self._k.show()
-        if verbose > 0:
+        if verbosity > 0:
             msg = "Energy: {} ... {}".format(self.energy, "converged!" if
                                              converged else "not converged.")
             print(msg, flush=True)
@@ -966,7 +966,7 @@ class DMRG:
               cutoffs=None,
               sweep_sequence=None,
               max_sweeps=10,
-              verbose=0):
+              verbosity=0):
         """Solve the system with a sequence of sweeps, up to a certain
         absolute tolerance in the energy or maximum number of sweeps.
 
@@ -983,7 +983,7 @@ class DMRG:
             The sequence will be repeated until ``max_sweeps`` is reached.
         max_sweeps : int, optional
             The maximum number of sweeps to perform.
-        verbose : {0, 1, 2}, optional
+        verbosity : {0, 1, 2}, optional
             How much information to print about progress.
 
         Returns
@@ -991,7 +991,7 @@ class DMRG:
         converged : bool
             Whether the algorithm has converged to ``tol`` yet.
         """
-        verbose = {False: 0, True: 1}.get(verbose, verbose)
+        verbosity = int(verbosity)
 
         # Possibly overide the default bond dimension, cutoff, LR sequences.
         if bond_dims is not None:
@@ -1007,7 +1007,7 @@ class DMRG:
         for i in range(max_sweeps):
             # Get the next direction, bond dimension and cutoff
             LR, bd, ctf = next(RLs), next(self._bond_dims), next(self._cutoffs)
-            self._print_pre_sweep(i, LR, bd, ctf, verbose=verbose)
+            self._print_pre_sweep(i, LR, bd, ctf, verbosity=verbosity)
 
             # if last sweep was in opposite direction no need to canonize
             canonize = False if LR + previous_LR in {'LR', 'RL'} else True
@@ -1022,9 +1022,9 @@ class DMRG:
                 'canonize': canonize,
                 'max_bond': bd,
                 'cutoff': ctf,
-                'cutoff_mode': self.opts['compress_cutoff_mode'],
-                'method': self.opts['compress_method'],
-                'verbose': verbose,
+                'cutoff_mode': self.opts['bond_compress_cutoff_mode'],
+                'method': self.opts['bond_compress_method'],
+                'verbosity': verbosity,
             }
 
             # perform sweep, any plugin computations
@@ -1033,7 +1033,7 @@ class DMRG:
 
             # check convergence
             converged = self._check_convergence(tol)
-            self._print_post_sweep(converged, verbose=verbose)
+            self._print_post_sweep(converged, verbosity=verbosity)
             if converged:
                 break
 
@@ -1123,8 +1123,8 @@ class DMRGX(DMRG):
             'local_eig_partial_k': 0.02,
             'local_eig_tol': 1e-1,
             'overlap_thresh': 2 / 3,
-            'compress_method': 'svd',
-            'compress_cutoff_mode': 'sum2',
+            'bond_compress_method': 'svd',
+            'bond_compress_cutoff_mode': 'sum2',
             'default_sweep_sequence': 'RRLL',
             'bond_expand_rand_strength': 1e-9,
         }
@@ -1283,7 +1283,7 @@ class DMRGX(DMRG):
             # 2: self._update_local_state_2site_dmrgx,
         }[self.bsz](i, **update_opts)
 
-    def sweep(self, direction, canonize=True, verbose=False, **update_opts):
+    def sweep(self, direction, canonize=True, verbosity=0, **update_opts):
         """Perform a sweep of the algorithm.
 
         Parameters
@@ -1292,7 +1292,7 @@ class DMRGX(DMRG):
             Sweep from left to right (->) or right to left (<-) respectively.
         canonize : bool, optional
             Canonize the state first, not needed if doing alternate sweeps.
-        verbose : bool, optional
+        verbosity : {0, 1, 2}, optional
             Show a progress bar for the sweep.
         update_opts :
             Supplied to ``self._update_local_state``.
@@ -1314,7 +1314,7 @@ class DMRGX(DMRG):
         self.ME_eff_ham2 = MovingEnvironment(self.TN_energy2, **eff_opts)
         self.ME_eff_ovlp = MovingEnvironment(TN_overlap, **eff_opts)
 
-        if verbose:
+        if verbosity:
             sweep = progbar(sweep, ncols=80, total=self.n - self.bsz + 1)
 
         local_ens, tot_ens = zip(*[
@@ -1331,10 +1331,10 @@ class DMRGX(DMRG):
         en_var = (self.TN_energy2 ^ ...) - self.energies[-1]**2
         self.variances.append(en_var)
 
-    def _print_post_sweep(self, converged, verbose=0):
-        if verbose > 1:
+    def _print_post_sweep(self, converged, verbosity=0):
+        if verbosity > 1:
             self._k.show()
-        if verbose > 0:
+        if verbosity > 0:
             msg = "Energy={}, Variance={} ... {}"
             msg = msg.format(self.energy, self.variance, "converged!"
                              if converged else "not converged.")

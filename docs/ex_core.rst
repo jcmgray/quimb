@@ -1,4 +1,0 @@
-Basic Example
--------------
-
-To do.

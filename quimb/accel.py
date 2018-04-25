@@ -327,7 +327,7 @@ def dot_csr_matvec(data, indptr, indices, vec, out, k1k2):
     for i in range(*k1k2):
         ri = indptr[i]
         rf = indptr[i + 1]
-        isum = 0.0j
+        isum = 0.0
         for j in range(rf - ri):
             ri_j = ri + j
             isum += data[ri_j] * vec[indices[ri_j]]

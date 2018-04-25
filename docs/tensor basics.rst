@@ -1,6 +1,16 @@
-#############
-Tensor Basics
-#############
+#####################
+Tensor Network Basics
+#####################
+
+The tensor functionality is stored in ``quimb.tensor`` and not imported by default.
+
+.. code-block:: python
+
+    >>> from quimb import *
+    >>> from quimb.tensor import *
+
+The core functions of note are :class:`~quimb.tensor.tensor_core.Tensor`, :class:`~quimb.tensor.tensor_core.TensorNetwork`, :func:`~quimb.tensor.tensor_core.tensor_contract`, and :func:`~quimb.tensor.tensor_core.tensor_split`.
+
 
 Basic Manipulations
 -------------------
@@ -9,22 +19,24 @@ Creating a :class:`~quimb.tensor.tensor_core.Tensor`:
 
 .. code-block:: python
 
-    >>> ket = Tensor(bell_state('psi-').reshape(2, 2), inds=('k0', 'k1'), tags={'ket'})
-    >>> X = Tensor(pauli('X'), inds=('k0', 'b0'), tags={'pauli', 'X', '0'})
-    >>> Y = Tensor(pauli('Y'), inds=('k1', 'b1'), tags={'pauli', 'Y', '1'})
-    >>> bra = Tensor(rand_ket(4).reshape(2, 2), inds=('b0', 'b1'), tags={'bra'})
+    ket = Tensor(bell_state('psi-').reshape(2, 2), inds=('k0', 'k1'), tags={'ket'})
+    X = Tensor(pauli('X'), inds=('k0', 'b0'), tags={'pauli', 'X', '0'})
+    Y = Tensor(pauli('Y'), inds=('k1', 'b1'), tags={'pauli', 'Y', '1'})
+    bra = Tensor(rand_ket(4).reshape(2, 2), inds=('b0', 'b1'), tags={'bra'})
 
 Can now combine these into a network (``.H`` conjugates the data).
 
 .. code-block:: python
 
-    >>> TN = ket.H X & Y & bra
+    TN = ket.H & X & Y & bra
 
 Plot your creation:
 
 .. code-block:: python
 
-    >>> TN.graph(color=['ket', 'X', 'Y', 'bra'])
+    TN.graph(color=['ket', 'X', 'Y', 'bra'])
+
+.. image:: ./_static/tensor_basics_plot_1.png
 
 Contract everything (with optimized contraction order):
 
@@ -37,7 +49,7 @@ Or just the paulis:
 
 .. code-block:: python
 
-    >>> TN ^ 'pauli'
+    >>> print(TN ^ 'pauli')
     TensorNetwork([
         Tensor(shape=(2, 2), inds=('k0', 'k1'), tags={'ket'}),
         Tensor(shape=(2, 2), inds=('b0', 'b1'), tags={'bra'}),
@@ -49,7 +61,7 @@ Get the ket, split it in half and replace the original:
 .. code-block:: python
 
     >>> Tk_s = TN['ket'].split(left_inds=['k0'])
-    >>> Tk_s  # note new index created
+    >>> print(Tk_s)  # note new index created
     TensorNetwork([
         Tensor(shape=(2, 2), inds=('k0', '_89dcdf0000016'), tags={'ket'}),
         Tensor(shape=(2, 2), inds=('_89dcdf0000016', 'k1'), tags={'ket'}),

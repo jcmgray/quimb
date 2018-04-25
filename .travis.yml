@@ -45,7 +45,7 @@ before_install:
   - "if [ ${BUILD_SLEPC:-ON} = ON ]; then chronic bash deps/travis-install-slepc4py.sh; fi"
 
 install:
-  - pip install -U .
+  - pip install -U --no-deps .
 
 script:
   - "if [ ${TEST_QUIMB:-ON} = ON ]; then export OMP_NUM_THREADS=2; fi"

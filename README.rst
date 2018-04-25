@@ -17,7 +17,7 @@
 
 `quimb <https://github.com/jcmgray/quimb>`_ is an easy but fast python library for quantum information and many-body calculations. The main docs are hosted on `readthedocs <http://quimb.readthedocs.io>`_. It is also thoroughly unit-tested and the tests are probably the best place to look for detailed documentation.
 
-The core package:
+The core ``quimb`` module:
 
 * Uses `numpy` and `scipy.sparse` matrices as quantum objects
 * Accelerates many operations using `numba` and `numexpr`
@@ -30,6 +30,7 @@ The core package:
 The tensor network module ``quimb.tensor``:
 
 * Uses a geometry free representation of tensor networks
+* Uses `opt_einsum <https://github.com/dgasmith/opt_einsum>`_ to find efficient contraction orders for hundreds of tensors, and perform those contractions potentially on the GPU
 * Can plot any network, color-coded, with bond size represented
 * Can treat any network as a scipy ``LinearOperator``, allowing many decompositions
 * Can perform DMRG1, DMRG2 and DMRGX, in matrix product state language.

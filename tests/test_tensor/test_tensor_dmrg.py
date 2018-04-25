@@ -196,7 +196,7 @@ class TestDMRG1:
         dmrg.opts['local_eig_ham_dense'] = dense
         dmrg.opts['periodic_segment_size'] = 1.0
         dmrg.opts['periodic_nullspace_fudge_factor'] = 1e-6
-        assert dmrg.solve(tol=tol / 10, verbose=1)
+        assert dmrg.solve(tol=tol / 10, verbosity=1)
         assert dmrg.state.cyclic == cyclic
         eff_e, mps_gs = dmrg.energy, dmrg.state
         mps_gs_dense = mps_gs.to_dense()
@@ -224,7 +224,7 @@ class TestDMRG1:
     def test_ising_and_MPS_product_state(self):
         h = MPO_ham_ising(6, bx=2.0, j=0.1)
         dmrg = DMRG1(h, bond_dims=8)
-        assert dmrg.solve(verbose=1)
+        assert dmrg.solve(verbosity=1)
         eff_e, mps_gs = dmrg.energy, dmrg.state
         mps_gs_dense = mps_gs.to_dense()
         assert_allclose(mps_gs_dense.H @ mps_gs_dense, 1.0)
@@ -255,7 +255,7 @@ class TestDMRG2:
         dmrg.opts['periodic_segment_size'] = 1.0
         dmrg.opts['periodic_nullspace_fudge_factor'] = 1e-6
 
-        assert dmrg.solve(tol=tol / 10, verbose=1)
+        assert dmrg.solve(tol=tol / 10, verbosity=1)
 
         # XXX: need to dispatch SLEPc eigh on real input
         # assert dmrg._k[0].dtype == float
@@ -287,7 +287,7 @@ class TestDMRG2:
         ham = MPO_ham_heis(n, cyclic=True)
         dmrg = DMRG2(ham, bond_dims=range(10, 30, 2))
         dmrg.opts['periodic_segment_size'] = 1 / 3
-        assert dmrg.solve(tol=1, verbose=2)
+        assert dmrg.solve(tol=1, verbosity=2)
         assert dmrg.energy == pytest.approx(heisenberg_energy(n), 1e-3)
 
 

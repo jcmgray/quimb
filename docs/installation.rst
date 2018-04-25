@@ -26,13 +26,15 @@ For ease and performance (i.e. mkl compiled libraries), `conda <https://conda.io
 Optional Dependencies
 =====================
 
-The optional dependencies can improve performance considerably in a number of situations.
-
-The tensor network routines benefit greatly from:
+The tensor network library requires:
 
   * `opt_einsum <https://github.com/dgasmith/opt_einsum>`_
 
 which efficiently optimizes tensor contraction expressions.
+To plot tensor networks as a graph requires:
+
+  * `matplotlib <https://matplotlib.org/>`_
+  * `networkx <https://networkx.github.io/>`_
 
 Fast and optionally distributed partial eigen-solving, SVD, exponentiation etc. can be accelerated with ``slepc4py`` and its dependencies:
 

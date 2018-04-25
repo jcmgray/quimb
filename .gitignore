@@ -113,3 +113,5 @@ docs/_autosummary/
 .fuse_hidden*
 
 \.pytest_cache/
+
+examples/\.ipynb_checkpoints/
