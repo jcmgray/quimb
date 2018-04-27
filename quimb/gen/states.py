@@ -1,7 +1,6 @@
 """
 Functions for generating quantum states.
 """
-# TODO: Graph states, cluster states, multidimensional
 
 import itertools
 import functools
@@ -10,7 +9,7 @@ import numpy as np
 import scipy.sparse as sp
 
 from ..accel import ldmul, dot, make_immutable
-from ..core import qu, kron, eye, eyepad, kronpow
+from ..core import qu, kron, eye, ikron, kronpow
 from ..linalg.base_linalg import eigh
 from .operators import pauli, controlled
 
@@ -376,7 +375,7 @@ def graph_state_1d(n, cyclic=True, sparse=False):
     p = kronpow(plus(sparse=sparse), n)
 
     for i in range(n - 1):
-        p = eyepad(controlled("z", sparse=True), [2] * n, (i, i + 1)) @ p
+        p = ikron(controlled("z", sparse=True), [2] * n, (i, i + 1)) @ p
 
     if cyclic:
         p = ((eye(2, sparse=True) & eye(2**(n - 2), sparse=True) &

@@ -120,23 +120,23 @@ This can also be done using the ``&`` overload on numpy and scipy matrices:
 
     When :mod:`quimb` is imported, it overloads the ``&``/``__and__`` of :class:`numpy.matrix` which replaces the overload of :func:`numpy.bitwise_and`.
 
-Often one wants to sandwich an operator with many identities, :py:func:`~quimb.core.eyepad` can be used for this:
+Often one wants to sandwich an operator with many identities, :py:func:`~quimb.core.ikron` can be used for this:
 
 .. code-block:: python
 
     >>> dims = [2] * 10  # overall space of 10 qubits
     >>> X = qu([[0, 1], [1, 0]])  # pauli-X
-    >>> IIIXXIIIII = eyepad(X, dims, inds=[3, 4])  # act on 4th and 5th spin only
+    >>> IIIXXIIIII = ikron(X, dims, inds=[3, 4])  # act on 4th and 5th spin only
     >>> IIIXXIIIII.shape
     (1024, 1024)
 
-For more advanced tensor constructions, such as reversing and interleaving identities within operators :py:func:`~quimb.core.perm_eyepad` can be used:
+For more advanced tensor constructions, such as reversing and interleaving identities within operators :py:func:`~quimb.core.pkron` can be used:
 
 .. code-block:: python
 
     >>> dims = [2] * 3
     >>> XZ = pauli('X') & pauli('Z')
-    >>> ZIX = perm_eyepad(op, dims, inds=[2, 0])  # now acts with Z on first spin, and X on 3rd
+    >>> ZIX = pkron(op, dims, inds=[2, 0])  # now acts with Z on first spin, and X on 3rd
 
 
 Removing Objects - Partial Trace

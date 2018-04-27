@@ -3,13 +3,14 @@
 from operator import add
 import math
 from functools import lru_cache
+import itertools
 
 from cytoolz import isiterable, concat, unique
 import numpy as np
 import scipy.sparse as sp
 
 from ..accel import njit, make_immutable, get_thread_pool, par_reduce, isreal
-from ..core import qu, eye, kron, eyepad
+from ..core import qu, eye, kron, ikron
 
 
 @lru_cache(maxsize=16)
@@ -33,8 +34,12 @@ def spin_operator(label, S=1 / 2, **kwargs):
 
     Returns
     -------
-    immutable matrix
+    S : immutable matrix
         The spin operator.
+
+    See Also
+    --------
+    pauli
     """
 
     D = int(2 * S + 1)
@@ -89,12 +94,12 @@ def pauli(xyz, dim=2, **kwargs):
 
     Returns
     -------
-    immutable matrix
+    P : immutable matrix
+        The pauli operator.
 
-    Notes
-    -----
-    The operators return are un-normalized in the sense that they are are not
-    spin operators.
+    See Also
+    --------
+    spin_operator
     """
     xyzmap = {0: 'i', 'i': 'i', 'I': 'i',
               1: 'x', 'x': 'x', 'X': 'x',
@@ -169,7 +174,8 @@ def controlled(s, sparse=False):
 
     Returns
     -------
-    immutable matrix
+    C : immutable matrix
+        The controlled two-qubit gate operator.
     """
     keymap = {'x': 'x', 'not': 'x',
               'y': 'y',
@@ -212,7 +218,7 @@ def ham_heis(n, j=1.0, b=0.0, cyclic=True, sparse=False, stype="csr",
 
     Returns
     -------
-    immutable matrix
+    H : immutable matrix
         The Hamiltonian.
     """
     dims = (2,) * n
@@ -247,17 +253,17 @@ def ham_heis(n, j=1.0, b=0.0, cyclic=True, sparse=False, stype="csr",
     def gen_term(i):
         # special case: the last b term needs to be added manually
         if i == -1:
-            return eyepad(single_site_b, dims, n - 1, **kron_kws)
+            return ikron(single_site_b, dims, n - 1, **kron_kws)
 
         # special case: the interaction between first and last spins if cyclic
         if i == n - 1:
             return sum(
-                j * eyepad(spin_operator(s, **op_kws),
-                           dims, [0, n - 1], **kron_kws)
+                j * ikron(spin_operator(s, **op_kws),
+                          dims, [0, n - 1], **kron_kws)
                 for j, s in zip((jx, jy, jz), 'xyz') if j != 0.0)
 
         # General term, on-site b-field plus interaction with next site
-        return eyepad(two_site_term, dims, [i, i + 1], **kron_kws)
+        return ikron(two_site_term, dims, [i, i + 1], **kron_kws)
 
     terms_needed = range(0 if single_site_b is 0 else -1,
                          n if cyclic else n - 1)
@@ -281,7 +287,8 @@ def ham_heis(n, j=1.0, b=0.0, cyclic=True, sparse=False, stype="csr",
 
 
 def ham_ising(n, jz=1.0, bx=1.0, **kwargs):
-    """Generate the quantum transverse field ising model hamiltonian.
+    """Generate the quantum transverse field ising model hamiltonian. This is a
+    simple alias for :func:`~quimb.gen.operators.ham_heis`.
     """
     return ham_heis(n, j=(0, 0, jz), b=(bx, 0, 0), **kwargs)
 
@@ -308,7 +315,7 @@ def ham_j1j2(n, j1=1.0, j2=0.5, bz=0.0, cyclic=True, sparse=False):
 
     Returns
     -------
-    immutable matrix
+    H : immutable matrix
         The Hamiltonian.
     """
     dims = (2,) * n
@@ -325,18 +332,18 @@ def ham_j1j2(n, j1=1.0, j2=0.5, bz=0.0, cyclic=True, sparse=False):
     def j1_terms():
         for coo in coosj1:
             if abs(coo[1] - coo[0]) == 1:  # can sum then tensor (faster)
-                yield eyepad(sum(op & op for op in sxyz), dims, coo)
+                yield ikron(sum(op & op for op in sxyz), dims, coo)
             else:  # tensor then sum (slower)
-                yield sum(eyepad(op, dims, coo) for op in sxyz)
+                yield sum(ikron(op, dims, coo) for op in sxyz)
 
     def j2_terms():
         for coo in coosj2:
             if abs(coo[1] - coo[0]) == 2:  # can add then tensor (faster)
-                yield eyepad(sum(op & eye(2) & op for op in sxyz), dims, coo)
+                yield ikron(sum(op & eye(2) & op for op in sxyz), dims, coo)
             else:
-                yield sum(eyepad(op, dims, coo) for op in sxyz)
+                yield sum(ikron(op, dims, coo) for op in sxyz)
 
-    gen_bz = (eyepad([sxyz[2]], dims, i) for i in range(n))
+    gen_bz = (ikron([sxyz[2]], dims, i) for i in range(n))
 
     ham = j1 * sum(j1_terms()) + j2 * sum(j2_terms())
     if bz != 0:
@@ -345,6 +352,205 @@ def ham_j1j2(n, j1=1.0, j2=0.5, bz=0.0, cyclic=True, sparse=False):
         ham = ham.todense()
     make_immutable(ham)
     return ham
+
+
+def ham_mbl(n, dh, j=1.0, bz=0.0, cyclic=True, sparse=False,
+            run=None, dh_dist="s", stype="csr", dh_dim=1, beta=None):
+    """ Constructs a heisenberg hamiltonian with isotropic coupling and
+    random fields acting on each spin - the many-body localized (MBL)
+    spin hamiltonian.
+
+    Parameters
+    ----------
+    n : int
+        Number of spins.
+    dh : float or (float, float, float)
+        Strength of random fields (stdev of gaussian distribution), can be
+        scalar (isotropic noise) or 3-vector for (x, y, z) directions.
+    j : float or (float, float, float), optional
+        Coupling strength, can be scalar (isotropic) or 3-vector.
+    bz : float, optional
+        Global magnetic field (in z-direction).
+    cyclic : bool, optional
+        Whether to use periodic boundary conditions.
+    sparse : bool, optional
+        Generate the hamiltonian in sparse form.
+    run : int, optional
+        Number to seed random number generator with.
+    dh_dist : {'g', 's', 'qr'}, optional
+        Type of random distribution for the noise:
+
+        - "s": square, with bounds ``(-dh, dh)``
+        - "g": gaussian, with standard deviation ``dh``
+        - "qp": quasi periodic, with amplitude ``dh`` and
+          'wavenumber' ``beta`` so that the field at site ``i`` is
+          ``dh * cos(2 * pi * beta * i + delta)`` with ``delta`` a random
+          offset between ``(0, 2 * pi)``, possibly seeded by ``run``.
+
+    stype = {'csr', 'csc', 'coo'}, optional
+        The type of sparse matrix.
+    dh_dim : {1, 2, 3} or str, optional
+        The number of dimensions the noise acts in, or string
+        specifier like ``'yz'``.
+    beta : float, optional
+        The wave number if ``dh_dist='qr'``, defaults to the golden
+        ratio``(5**0.5 - 1) / 2``.
+
+    Returns
+    -------
+    H : matrix_like
+        The MBL hamiltonian for spin-1/2.
+
+    See Also
+    --------
+    MPO_ham_mbl
+    """
+    ham = ham_heis(n=n, j=j, b=bz, cyclic=cyclic, sparse=True, stype='csr')
+
+    if isinstance(dh, (tuple, list)):
+        dhds = dh
+    else:
+        dh_dim = ('' if dh_dim == 0 else
+                  'z' if dh_dim == 1 else
+                  'xz' if dh_dim == 2 else
+                  'xyz' if dh_dim == 3 else dh_dim)
+        dhds = tuple((dh if d in dh_dim else 0) for d in 'xyz')
+
+    if run is not None:
+        np.random.seed(run)
+
+    if dh_dist in {'g', 'gauss', 'gaussian', 'normal'}:
+        rs = np.random.randn(3, n)
+
+    elif dh_dist in {'s', 'flat', 'square', 'uniform', 'box'}:
+        rs = 2.0 * np.random.rand(3, n) - 1.0
+
+    elif dh_dist in {'qp', 'quasiperiodic'}:
+        if dh_dim is not 'z':
+            raise ValueError("dh_dim should be 1 or 'z' for dh_dist='qp'.")
+
+        if beta is None:
+            beta = (5**0.5 - 1) / 2
+
+        # the random phase
+        delta = 2 * np.pi * np.random.rand()
+
+        # make sure get 3 by n different strengths
+        inds = np.broadcast_to(range(n), (3, n))
+
+        rs = np.cos(2 * np.pi * beta * inds + delta)
+
+    def dh_terms():
+        for i in range(n):
+            # dhd - the total strength in direction x, y, or z
+            # r - the random strength in direction x, y, or z for site i
+            hdh = sum(dhd * r * spin_operator(s, sparse=True, stype='csr')
+                      for dhd, r, s in zip(dhds, rs[:, i], 'xyz'))
+            yield ikron(hdh, (2,) * n, i, coo_build=True, stype='csr')
+
+    ham = ham + sum(dh_terms())
+
+    if not sparse:
+        return np.asmatrix(ham.todense())
+    elif ham.format != stype:
+        return ham.asformat(stype)
+    else:
+        return ham
+
+
+def ham_heis_2D(n, m, j=1.0, bz=0.0, sparse=True, stype='csr',
+                cyclic=False, parallel=False):
+    """Construct the 2D spin-1/2 heisenberg model hamiltonian.
+
+    Parameters
+    ----------
+    n : int
+        The number of rows.
+    m : int
+        The number of columns.
+    j : float or (float, float, float), optional
+        The coupling strength(s). Isotropic if scalar else if
+        vector ``(Jx, Jy, Jz) = j``.
+    bz : float, optional
+        The z direction magnetic field.
+    sparse : bool, optional
+        Whether to construct the hamiltonian in sparse form.
+    stype : {'csr', 'csc', 'coo'}, optional
+        The sparse format.
+    cyclic : bool, optional
+        Whether to use periodic boundary conditions.
+    parallel : bool, optional
+        Construct the hamiltonian in parallel. Faster but might use more
+        memory.
+
+    Returns
+    -------
+    H : matrix
+        The hamiltonian.
+    """
+
+    # parse interaction strengths
+    try:
+        jx, jy, jz = j
+    except (TypeError, ValueError):
+        jx = jy = jz = j
+
+    dims = [[2] * m] * n  # shape (n, m)
+
+    sites = tuple(itertools.product(range(n), range(m)))
+
+    # generate neighbouring pair coordinates
+    def gen_pairs():
+        for i, j in sites:
+            above, right = (i + 1) % n, (j + 1) % m
+            # ignore wraparound coordinates if not cyclic
+            if cyclic or above != 0:
+                yield ((i, j), (above, j))
+            if cyclic or right != 0:
+                yield ((i, j), (i, right))
+
+    # build the hamiltonian in sparse 'coo' format always for efficiency
+    op_kws = {'stype': 'coo'}
+    kron_kws = {'stype': 'coo', 'coo_build': True}
+
+    # generate all pairs of coordinates and directions
+    pairs_ss = tuple(itertools.product(gen_pairs(), 'xyz'))
+
+    # generate XX, YY and ZZ interaction from
+    #     e.g. arg ([(3, 4), (3, 5)], 'z')
+    def interactions(pair_s):
+        pair, s = pair_s
+        Sxyz = spin_operator(s, **op_kws)
+        J = {'x': jx, 'y': jy, 'z': jz}[s]
+        return ikron(J * Sxyz, dims, inds=pair, **kron_kws)
+
+    # generate Z field
+    def fields(site):
+        Sz = spin_operator('z', **op_kws)
+        return ikron(bz * Sz, dims, inds=[site], **kron_kws)
+
+    if not parallel:
+        # combine all terms
+        all_terms = itertools.chain(
+            map(interactions, pairs_ss),
+            map(fields, sites) if bz != 0.0 else ())
+        H = sum(all_terms)
+    else:
+        pool = get_thread_pool()
+        all_terms = itertools.chain(
+            pool.map(interactions, pairs_ss),
+            pool.map(fields, sites) if bz != 0.0 else ())
+        H = par_reduce(add, all_terms)
+
+    if not sparse:
+        H = np.asmatrix(H.todense())
+    elif H.format != stype:
+        H = H.asformat(stype)
+
+    if isreal(H):
+        H = H.real
+
+    return H
 
 
 @njit
@@ -388,7 +594,7 @@ def zspin_projector(n, sz=0, stype="csr"):
 
     Returns
     -------
-    immutable sparse matrix
+    prj : immutable sparse matrix
         The (non-square) projector onto the specified subspace(s).
 
     Examples

@@ -1,5 +1,5 @@
-Quench Example
-==============
+Quench Evolution Example
+========================
 
 Setup
 -----

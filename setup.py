@@ -1,9 +1,16 @@
 from setuptools import setup, find_packages
 import versioneer
 
+
+def readme():
+    with open('README.rst') as f:
+        return f.read()
+
+
 setup(
     name='quimb',
     description='Quantum information and many-body library.',
+    long_description=readme(),
     url='http://quimb.readthedocs.io',
     version=versioneer.get_version(),
     cmdclass=versioneer.get_cmdclass(),
@@ -34,6 +41,7 @@ setup(
         'tensor': [
             'opt_einsum',
             'matplotlib',
+            'networkx',
         ]
     },
     scripts=['bin/quimb-mpi-python'],

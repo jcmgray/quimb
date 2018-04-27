@@ -34,7 +34,7 @@ The tensor network module ``quimb.tensor``:
 * Can plot any network, color-coded, with bond size represented
 * Can treat any network as a scipy ``LinearOperator``, allowing many decompositions
 * Can perform DMRG1, DMRG2 and DMRGX, in matrix product state language.
-* Has tools to efficiently address periodic problems (transfer matrix compression and pseudo-orthognolization)
+* Has tools to efficiently address periodic problems (transfer matrix compression and pseudo-orthogonalization)
 
 .. raw:: html
 

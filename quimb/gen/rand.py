@@ -1,12 +1,9 @@
 """Functions for generating random quantum objects and states.
 """
-
-# TODO: Test density -------------------------------------------------------- #
-# TODO: make sure eigen spectrum is correct ... ----------------------------- #
-
 from functools import reduce
 import numpy as np
 import scipy.sparse as sp
+
 from ..accel import rdmul, dot, matrixify
 from ..core import qu, ptr, kron, nmlz
 

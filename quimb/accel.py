@@ -2,8 +2,6 @@
 
 These in general do not need to be called directly.
 """
-# TODO: merge kron, eyepad --> tensor
-
 import cmath
 import functools
 import operator
@@ -98,7 +96,7 @@ def par_reduce(fn, seq, nthreads=_NUM_THREAD_WORKERS):
         singlet, on each of which `fn` is performed to create
         a new sequence.
         """
-        if len(x) < 3:
+        if len(x) <= 2:
             return _sfn(x)
         paired_x = partition_all(2, x)
         new_x = tuple(pool.map(_sfn, paired_x))
@@ -303,7 +301,6 @@ def mul(x, y):
     dense or sparse matrix
         Element wise product of ``x`` and ``y``.
     """
-    # TODO: add sparse, dense -> sparse w/ broadcasting
     if issparse(x):
         return x.multiply(y)
     elif issparse(y):

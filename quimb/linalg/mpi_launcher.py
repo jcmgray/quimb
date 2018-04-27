@@ -1,16 +1,11 @@
 """Manages the spawning of mpi processes to send to the various solvers.
 """
-# TODO: don't send whole matrix? only marginal time savings but memory better?
-#    Currently, hamiltonian construction etc. seems to be a small proportion of
-#    time and memory.
 
 import os
 import functools
+
 from .slepc_linalg import (
-    eigs_slepc,
-    svds_slepc,
-    mfn_multiply_slepc,
-    ssolve_slepc,
+    eigs_slepc, svds_slepc, mfn_multiply_slepc, ssolve_slepc,
 )
 from ..accel import _NUM_THREAD_WORKERS
 

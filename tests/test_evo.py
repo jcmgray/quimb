@@ -17,7 +17,7 @@ from quimb import (
     ham_heis,
     up,
     down,
-    eyepad,
+    ikron,
     pauli,
     logneg,
 )
@@ -285,7 +285,7 @@ class TestQuEvo:
         ts = np.linspace(0, 10)
         for t, pt in zip(ts, sim.at_times(ts)):
             x = cos(t)
-            y = expec(pt, eyepad(pauli('z'), [2, 2], 0))
+            y = expec(pt, ikron(pauli('z'), [2, 2], 0))
             assert_allclose(x, y, atol=1e-15)
 
     @mark.parametrize("qtype", ['ket', 'dop'])

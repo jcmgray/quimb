@@ -492,8 +492,8 @@ def MPO_ham_mbl(n, dh, j=1.0, run=None, S=1 / 2, *, cyclic=False,
         The underlying spin of the system, defaults to 1/2.
     cyclic : bool, optional
         Whether to use periodic boundary conditions - default is False.
-    dh_dist : {'s', 'g', 'qr'}, optional
-        Whether to use sqaure, guassian or quasirandom noise.
+    dh_dist : {'s', 'g', 'qp'}, optional
+        Whether to use sqaure, guassian or quasiperiodic noise.
     beta : float, optional
         Frequency of the quasirandom noise, only if ``dh_dist='qr'``.
     mpo_opts
@@ -524,16 +524,24 @@ def MPO_ham_mbl(n, dh, j=1.0, run=None, S=1 / 2, *, cyclic=False,
     # sort out the noise distribution
     if dh_dist in {'g', 'gauss', 'gaussian', 'normal'}:
         rs = np.random.randn(3, n)
+
     elif dh_dist in {'s', 'flat', 'square', 'uniform', 'box'}:
         rs = 2.0 * np.random.rand(3, n) - 1.0
-    elif dh_dist in {'qr', 'quasirandom'}:
-        assert dh_dim == 'z'
+
+    elif dh_dist in {'qp', 'quasiperiodic'}:
+        if dh_dim is not 'z':
+            raise ValueError("dh_dim should be 1 or 'z' for dh_dist='qp'.")
+
         if beta is None:
             beta = (5**0.5 - 1) / 2
-        delta = np.random.rand() / beta
-        inds = np.arange(0, n)
-        inds = np.stack([inds, inds, inds], axis=0)
-        rs = np.cos(2 * np.pi * beta * (inds + delta))
+
+        # the random phase
+        delta = 2 * np.pi * np.random.rand()
+
+        # make sure get 3 by n different strengths
+        inds = np.broadcast_to(range(n), (3, 10))
+
+        rs = np.cos(2 * np.pi * beta * inds + delta)
 
     # generate noise, potentially in all directions, each with own strength
     def single_site_terms():

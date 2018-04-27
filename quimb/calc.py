@@ -12,44 +12,21 @@ import numpy.linalg as nla
 from scipy.optimize import minimize
 
 from .accel import (
-    njit,
-    issparse,
-    isop,
-    zeroify,
-    realify,
-    prod,
-    isvec,
-    dot,
-    matrixify,
+    njit, issparse, isop, zeroify, realify, prod, isvec, dot, matrixify,
 )
 from .core import (
-    qu,
-    kron,
-    eye,
-    eyepad,
-    tr,
-    ptr,
-    infer_size,
-    expec,
-    dop,
+    qu, kron, eye, ikron, tr, ptr, infer_size, expec, dop,
 )
 from .linalg.base_linalg import (
-    eigh,
-    eigvalsh,
-    norm,
-    sqrtm,
+    eigh, eigvalsh, norm, sqrtm,
 )
 from .linalg.approx_spectral import (
-    entropy_subsys_approx,
-    tr_sqrt_subsys_approx,
-    logneg_subsys_approx,
-    gen_bipartite_spectral_fn,
+    entropy_subsys_approx, tr_sqrt_subsys_approx,
+    logneg_subsys_approx, gen_bipartite_spectral_fn,
 )
 from .gen.operators import pauli
 from .gen.states import (
-    basis_vec,
-    bell_state,
-    bloch_state,
+    basis_vec, bell_state, bloch_state,
 )
 from .utils import int2tup
 
@@ -90,7 +67,6 @@ def purify(rho):
     vector :
         The purified ket.
     """
-    # TODO: trim zeros?
     d = rho.shape[0]
     evals, vs = eigh(rho)
     evals = np.sqrt(np.clip(evals, 0, 1))
@@ -804,9 +780,9 @@ def correlation(p, opa, opb, sysa, sysb, dims=None, sparse=None,
     opts = {'sparse': sparse,
             'coo_build': sparse,
             'stype': 'csr' if sparse else None}
-    opab = eyepad((opa, opb), dims, (sysa, sysb), **opts)
-    opa = eyepad((opa,), dims, sysa, **opts)
-    opb = eyepad((opb,), dims, sysb, **opts)
+    opab = ikron((opa, opb), dims, (sysa, sysb), **opts)
+    opa = ikron((opa,), dims, sysa, **opts)
+    opb = ikron((opb,), dims, sysb, **opts)
 
     @realify
     def corr(state):
@@ -940,7 +916,7 @@ def qid(p, dims, inds, precomp_func=False, sparse_comp=True,
     inds = (inds,) if isinstance(inds, numbers.Number) else inds
 
     # Construct operators
-    ops_i = tuple(tuple(eyepad(pauli(s), dims, ind, sparse=sparse_comp)
+    ops_i = tuple(tuple(ikron(pauli(s), dims, ind, sparse=sparse_comp)
                         for s in "xyz")
                   for ind in inds)
 

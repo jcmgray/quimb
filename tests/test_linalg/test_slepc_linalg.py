@@ -1,34 +1,18 @@
-# TODO: TEST NON_HERMITIAN
-# TODO: TEST multiprocessing throws no error with petsc
-
 from pytest import fixture, mark
 import numpy as np
 import scipy.sparse as sp
 from numpy.testing import assert_allclose
 
 from quimb import (
-    qu,
-    rand_uni,
-    ldmul,
-    rand_matrix,
-    rand_herm,
-    rand_pos,
-    rand_ket,
-    eigh,
-    expec,
-    eye,
-    norm,
+    qu, rand_uni, ldmul, rand_matrix, rand_herm, rand_pos, rand_ket, eigh,
+    expec, eye, norm,
 )
 from quimb.linalg import SLEPC4PY_FOUND
 from quimb.linalg.scipy_linalg import svds_scipy
 if SLEPC4PY_FOUND:
     from quimb.linalg.slepc_linalg import (
-        eigs_slepc,
-        svds_slepc,
-        convert_mat_to_petsc,
-        new_petsc_vec,
-        mfn_multiply_slepc,
-        ssolve_slepc,
+        eigs_slepc, svds_slepc, convert_mat_to_petsc, new_petsc_vec,
+        mfn_multiply_slepc, ssolve_slepc,
     )
 
 

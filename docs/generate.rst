@@ -35,8 +35,10 @@ Operators
 - :func:`~quimb.gen.operators.swap`
 - :func:`~quimb.gen.operators.controlled`
 - :func:`~quimb.gen.operators.ham_heis`
+- :func:`~quimb.gen.operators.ham_heis_2D`
 - :func:`~quimb.gen.operators.ham_ising`
 - :func:`~quimb.gen.operators.ham_j1j2`
+- :func:`~quimb.gen.operators.ham_mbl`
 - :func:`~quimb.gen.operators.zspin_projector`
 
 Random States & Operators

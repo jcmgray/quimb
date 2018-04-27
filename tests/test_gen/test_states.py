@@ -5,7 +5,7 @@ from quimb import (
     tr,
     eye,
     chop,
-    eyepad,
+    ikron,
     expec,
     ptr,
     eigh,
@@ -232,7 +232,8 @@ class TestGraphState:
         n = 5
         p = graph_state_1d(n, cyclic=True)
         for j in range(n):
-            k = eyepad([pauli('x'), pauli('z'), pauli('z')], [2] * n,
-                       (j, (j - 1) % n, (j + 1) % n))
+            k = ikron([pauli('x'), pauli('z'), pauli('z')],
+                      dims=[2] * n,
+                      inds=(j, (j - 1) % n, (j + 1) % n))
             o = p.H @ k @ p
             np.testing.assert_allclose(o, 1)

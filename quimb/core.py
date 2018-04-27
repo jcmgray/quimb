@@ -1,14 +1,11 @@
 """Core functions for manipulating quantum objects.
 """
-# TODO: move identity, trace to accel
-# TODO: refactor eyepad -> itensor
 
 import math
 import itertools
 import functools
 
 import numpy as np
-from numba import jit
 from numpy.matlib import zeros
 import scipy.sparse as sp
 
@@ -500,9 +497,21 @@ def dim_map(dims, coos, cyclic=False, trim=False):
     return tuple(dims), tuple(inds)
 
 
-@jit(nopython=True)
+@njit
 def _dim_compressor(dims, inds):  # pragma: no cover
     """Helper function for ``dim_compress`` that does the heavy lifting.
+
+    Parameters
+    ----------
+    dims : sequence of int
+        The subsystem dimensions.
+    inds : sequence of int
+        The indices of the 'marked' subsystems.
+
+    Returns
+    -------
+    generator of (int, int)
+        Sequence of pairs of new dimension subsystem with marked flag {0, 1}.
     """
     blocksize_id = blocksize_op = 1
     autoplace_count = 0
@@ -571,23 +580,17 @@ def dim_compress(dims, inds):
     >>> compressed_inds
     (1,)
     """
-    # TODO: turn off ind compress
-    # TODO: put yield (autoplace_count, False) --- no need?
-    # TODO: handle empty inds = () / [] etc.
-    # TODO: don't compress auto (-ve.) so as to allow multiple operators
     if isinstance(inds, int):
         inds = (inds,)
+
     dims, inds = zip(*_dim_compressor(dims, inds))
     inds = tuple(i for i, b in enumerate(inds) if b)
+
     return dims, inds
 
 
-def eyepad(ops, dims, inds, sparse=None, stype=None, coo_build=False,
-           parallel=False):
-    # TODO: rename? itensor, tensor, ikron,
-    # TODO: test 2d+ dims and coos
-    # TODO: simplify  with compress coords?
-    # TODO: allow -1 in dims to auto place *without* ind? one or other
+def ikron(ops, dims, inds, sparse=None, stype=None,
+          coo_build=False, parallel=False):
     """Tensor an operator into a larger space by padding with identities.
 
     Automatically placing a large operator over several dimensions is allowed
@@ -625,29 +628,32 @@ def eyepad(ops, dims, inds, sparse=None, stype=None, coo_build=False,
 
     See Also
     --------
-    perm_eyepad
+    kron, pkron
 
     Examples
     --------
     Place an operator between two identities:
 
-    >>> IZI = eyepad(pauli('z'), [2, 2, 2], 1)
+    >>> IZI = ikron(pauli('z'), [2, 2, 2], 1)
     >>> np.allclose(IZI, eye(2) & pauli('z') & eye(2))
     True
 
     Overlay a large operator on several sites:
 
     >>> rho_ab = rand_rho(4)
-    >>> rho_abc = eyepad(rho_ab, [5, 2, 2, 7], [1, 2])  # overlay both 2s
+    >>> rho_abc = ikron(rho_ab, [5, 2, 2, 7], [1, 2])  # overlay both 2s
     >>> rho_abc.shape
     (140, 140)
 
     Place an operator at specified sites, regardless of size:
 
     >>> A = rand_herm(5)
-    >>> eyepad(A, [2, -1, 2, -1, 2, -1], [1, 3, 5]).shape
+    >>> ikron(A, [2, -1, 2, -1, 2, -1], [1, 3, 5]).shape
     (1000, 1000)
     """
+    # TODO: test 2d+ dims and coos
+    # TODO: simplify  with compress coords?
+    # TODO: allow -1 in dims to auto place *without* ind? one or other
 
     # Make sure `ops` islist
     if isinstance(ops, (np.ndarray, sp.spmatrix)):
@@ -672,29 +678,42 @@ def eyepad(ops, dims, inds, sparse=None, stype=None, coo_build=False,
         cff_id = 1  # keeps track of compressing adjacent identities
         cff_ov = 1  # keeps track of overlaying op on multiple dimensions
         for ind, dim in enumerate(dims):
-            if ind in inds:  # op should be placed here
-                if cff_id > 1:  # need preceding identities
+
+            # check if op should be placed here
+            if ind in inds:
+
+                # check if need preceding identities
+                if cff_id > 1:
                     yield eye(cff_id, sparse=sparse, stype="coo")
                     cff_id = 1  # reset cumulative identity size
-                if cff_ov == 1:  # first dim in placement block
+
+                # check if first subsystem in placement block
+                if cff_ov == 1:
                     op = next(ops)
                     sz_op = op.shape[0]
-                if cff_ov * dim == sz_op or dim == -1:  # final dim-> place op
+
+                # final dim (of block or total) -> place op
+                if cff_ov * dim == sz_op or dim == -1:
                     yield op
                     cff_ov = 1
-                else:  # accumulate sub-dims
+                # accumulate sub-dims
+                else:
                     cff_ov *= dim
-            elif cff_ov > 1:  # mid placing large operator
+
+            # check if midway through placing operator over several subsystems
+            elif cff_ov > 1:
                 cff_ov *= dim
-            else:  # accumulate adjacent identites
+
+            # else accumulate adjacent identites
+            else:
                 cff_id *= dim
-        if cff_id > 1:  # trailing identities
+
+        # check if trailing identity needed
+        if cff_id > 1:
             yield eye(cff_id, sparse=sparse, stype="coo")
 
-    return kron(*gen_ops(),
-                stype=stype,
-                coo_build=coo_build,
-                parallel=parallel)
+    return kron(*gen_ops(), stype=stype,
+                coo_build=coo_build, parallel=parallel)
 
 
 @matrixify
@@ -758,7 +777,7 @@ def permute(p, dims, perm):
 
     See Also
     --------
-    perm_eyepad
+    pkron
 
     Examples
     --------
@@ -773,7 +792,7 @@ def permute(p, dims, perm):
     return _permute_dense(p, dims, perm)
 
 
-def perm_eyepad(op, dims, inds, **kwargs):
+def pkron(op, dims, inds, **ikron_opts):
     # TODO: multiple ops
     # TODO: coo map, coo compress
     # TODO: sparse, stype, coo_build?
@@ -809,7 +828,7 @@ def perm_eyepad(op, dims, inds, **kwargs):
 
     See Also
     --------
-    eyepad, permute
+    ikron, permute
 
     Examples
     --------
@@ -819,7 +838,7 @@ def perm_eyepad(op, dims, inds, **kwargs):
     identity between the two sites it acts on.
 
     >>> XZ = pauli('X') & pauli('Z')
-    >>> ZIX = perm_eyepad(XZ, dims=[2, 3, 2], inds=[2, 0])
+    >>> ZIX = pkron(XZ, dims=[2, 3, 2], inds=[2, 0])
     >>> np.allclose(ZIX, pauli('Z') & eye(3) & pauli('X'))
     True
     """
@@ -834,7 +853,7 @@ def perm_eyepad(op, dims, inds, **kwargs):
     sz_in = prod(dims_in)
 
     # construct pre-permuted full operator
-    b = eyepad(op, [sz_in, sz // sz_in], 0, **kwargs)
+    b = ikron(op, [sz_in, sz // sz_in], 0, **ikron_opts)
 
     # inverse of inds
     inds_out, dims_out = zip(
@@ -1028,6 +1047,10 @@ def partial_trace(p, dims, keep):
     >>> rho_ab.shape
     (12, 12)
     """
+    # map 2D+ systems into flat hilbert space
+    if not isinstance(dims[0], int):
+        dims, keep = dim_map(dims, keep)
+
     if issparse(p):
         return _partial_trace_simple(p, dims, keep)
     return _partial_trace_dense(p, dims, keep)

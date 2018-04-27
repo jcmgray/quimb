@@ -1,9 +1,5 @@
 """Backend agnostic functions for solving matrices either fully or partially.
 """
-
-# TODO: restart eigen and svd - up to tol
-# TODO: test non-herm
-
 import functools
 import warnings
 

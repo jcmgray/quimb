@@ -28,8 +28,6 @@ from quimb import (
 from quimb.linalg import SLEPC4PY_FOUND
 from quimb.linalg.base_linalg import _rel_window_to_abs_window
 
-# TODO: reinstate slepc svd tests ******************************************* #
-
 eigs_backends = ["auto", "numpy", "scipy"]
 svds_backends = ["numpy", "scipy"]
 

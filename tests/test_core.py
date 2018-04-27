@@ -29,8 +29,8 @@ from quimb import (
     dim_map,
     dim_compress,
     eye,
-    eyepad,
-    perm_eyepad,
+    ikron,
+    pkron,
     permute,
     partial_trace,
     chop,
@@ -359,20 +359,20 @@ class TestKron:
         assert_allclose(t, a & b & c & d)
 
 
-class TestEyepad:
+class Testikron:
     def test_basic(self):
         a = rand_matrix(2)
         i = eye(2)
         dims = [2, 2, 2]
-        b = eyepad([a], dims, [0])
+        b = ikron([a], dims, [0])
         assert_allclose(b, a & i & i)
-        b = eyepad([a], dims, [1])
+        b = ikron([a], dims, [1])
         assert_allclose(b, i & a & i)
-        b = eyepad([a], dims, [2])
+        b = ikron([a], dims, [2])
         assert_allclose(b, i & i & a)
-        b = eyepad([a], dims, [0, 2])
+        b = ikron([a], dims, [0, 2])
         assert_allclose(b, a & i & a)
-        b = eyepad([a], dims, [0, 1, 2])
+        b = ikron([a], dims, [0, 1, 2])
         assert_allclose(b, a & a & a)
 
     def test_mid_multi(self):
@@ -380,7 +380,7 @@ class TestEyepad:
         i = eye(2)
         dims = [2, 2, 2, 2, 2, 2]
         inds = [1, 2, 4]
-        b = eyepad(a, dims, inds)
+        b = ikron(a, dims, inds)
         assert_allclose(b, i & a[0] & a[1] & i & a[2] & i)
 
     def test_mid_multi_reverse(self):
@@ -388,61 +388,61 @@ class TestEyepad:
         i = eye(2)
         dims = [2, 2, 2, 2, 2, 2]
         inds = [5, 4, 1]
-        b = eyepad(a, dims, inds)
+        b = ikron(a, dims, inds)
         assert_allclose(b, i & a[2] & i & i & a[1] & a[0])
 
     def test_auto(self):
         a = rand_matrix(2)
         i = eye(2)
-        b = eyepad([a], (2, -1, 2), [1])
+        b = ikron([a], (2, -1, 2), [1])
         assert_allclose(b, i & a & i)
 
     def test_ndarrays(self):
         a = rand_matrix(2)
         i = eye(2)
-        b = eyepad([a], np.array([2, 2, 2]), [0, 2])
+        b = ikron([a], np.array([2, 2, 2]), [0, 2])
         assert_allclose(b, a & i & a)
-        b = eyepad([a], [2, 2, 2], np.array([0, 2]))
+        b = ikron([a], [2, 2, 2], np.array([0, 2]))
         assert_allclose(b, a & i & a)
 
     def test_overlap(self):
         a = [rand_matrix(4) for i in range(2)]
         dims1 = [2, 2, 2, 2, 2, 2]
         dims2 = [2, 4, 4, 2]
-        b = eyepad(a, dims1, [1, 2, 3, 4])
-        c = eyepad(a, dims2, [1, 2])
+        b = ikron(a, dims1, [1, 2, 3, 4])
+        c = ikron(a, dims2, [1, 2])
         assert_allclose(c, b)
         dims2 = [4, 2, 2, 4]
-        b = eyepad(a, dims1, [0, 1, 4, 5])
-        c = eyepad(a, dims2, [0, 3])
+        b = ikron(a, dims1, [0, 1, 4, 5])
+        c = ikron(a, dims2, [0, 3])
         assert_allclose(c, b)
 
     def test_holey_overlap(self):
         a = rand_matrix(8)
         dims1 = (2, 2, 2, 2, 2)
         dims2 = (2, 8, 2)
-        b = eyepad(a, dims1, (1, 3))
-        c = eyepad(a, dims2, 1)
+        b = ikron(a, dims1, (1, 3))
+        c = ikron(a, dims2, 1)
         assert_allclose(b, c)
         dims1 = (2, 2, 2, 2, 2)
         dims2 = (2, 2, 8)
-        b = eyepad(a, dims1, (2, 4))
-        c = eyepad(a, dims2, 2)
+        b = ikron(a, dims1, (2, 4))
+        c = ikron(a, dims2, 2)
         assert_allclose(b, c)
         dims1 = (2, 2, 2, 2, 2)
         dims2 = (8, 2, 2)
-        b = eyepad(a, dims1, (0, 2))
-        c = eyepad(a, dims2, 0)
+        b = ikron(a, dims1, (0, 2))
+        c = ikron(a, dims2, 0)
         assert_allclose(b, c)
 
     def test_sparse(self):
         i = eye(2, sparse=True)
         a = qu(rand_matrix(2), sparse=True)
-        b = eyepad(a, [2, 2, 2], 1)  # infer sparse
+        b = ikron(a, [2, 2, 2], 1)  # infer sparse
         assert(issparse(b))
         assert_allclose(b.A, (i & a & i).A)
         a = rand_matrix(2)
-        b = eyepad(a, [2, 2, 2], 1, sparse=True)  # explicit sparse
+        b = ikron(a, [2, 2, 2], 1, sparse=True)  # explicit sparse
         assert(issparse(b))
         assert_allclose(b.A, (i & a & i).A)
 
@@ -450,7 +450,7 @@ class TestEyepad:
         a = (rand_matrix(2), rand_matrix(2))
         dims = ((2, 3), (3, 2))
         inds = ((0, 0), (1, 1))
-        b = eyepad(a, dims, inds)
+        b = ikron(a, dims, inds)
         assert b.shape == (36, 36)
         assert_allclose(b, a[0] & eye(9) & a[1])
 
@@ -462,8 +462,8 @@ class TestEyepad:
                               (0, 2)])
     @mark.parametrize("coo_build", [False, True])
     def test_sparse_format_outputs(self, os1, stype, pos, coo_build):
-        x = eyepad(os1, [3, 3, 3], pos,
-                   stype=stype, coo_build=coo_build)
+        x = ikron(os1, [3, 3, 3], pos,
+                  stype=stype, coo_build=coo_build)
         assert x.format == "csr" if stype is None else stype
 
     @mark.parametrize("stype", (None,) + stypes)
@@ -475,8 +475,8 @@ class TestEyepad:
     @mark.parametrize("coo_build", [False, True])
     def test_sparse_format_outputs_with_dense(self, od1, stype, pos,
                                               coo_build):
-        x = eyepad(od1, [3, 3, 3], pos, sparse=True,
-                   stype=stype, coo_build=coo_build)
+        x = ikron(od1, [3, 3, 3], pos, sparse=True,
+                  stype=stype, coo_build=coo_build)
         try:
             default = "bsr" if (2 in pos and not coo_build) else "csr"
         except TypeError:
@@ -484,10 +484,10 @@ class TestEyepad:
         assert x.format == default if stype is None else stype
 
 
-class TestPermEyepad:
+class TestPermikron:
     def test_dop_spread(self):
         a = rand_rho(4)
-        b = perm_eyepad(a, [2, 2, 2], [0, 2])
+        b = pkron(a, [2, 2, 2], [0, 2])
         c = ((a & eye(2)).A
              .reshape([2, 2, 2, 2, 2, 2])
              .transpose([0, 2, 1, 3, 5, 4])
@@ -496,7 +496,7 @@ class TestPermEyepad:
 
     def test_dop_reverse(self):
         a = rand_rho(4)
-        b = perm_eyepad(a, np.array([2, 2, 2]), [2, 0])
+        b = pkron(a, np.array([2, 2, 2]), [2, 0])
         c = ((a & eye(2)).A.reshape([2, 2, 2, 2, 2, 2])
                            .transpose([1, 2, 0, 4, 5, 3])
                            .reshape([8, 8]))
@@ -504,7 +504,7 @@ class TestPermEyepad:
 
     def test_dop_reverse_sparse(self):
         a = rand_rho(4, sparse=True, density=0.5)
-        b = perm_eyepad(a, np.array([2, 2, 2]), [2, 0])
+        b = pkron(a, np.array([2, 2, 2]), [2, 0])
         c = ((a & eye(2)).A.reshape([2, 2, 2, 2, 2, 2])
                            .transpose([1, 2, 0, 4, 5, 3])
                            .reshape([8, 8]))

@@ -14,9 +14,9 @@ Static:
 
 Should be fairly easily to implement / planned:
 
-    *- 2-site DMRG-X
-    *- 1-site TDVP
-    *- 2-site TDVP
+    * 2-site DMRG-X
+    * 1-site TDVP
+    * 2-site TDVP
 
 
 1D tensor networks

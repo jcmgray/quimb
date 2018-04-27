@@ -5,12 +5,6 @@ evolution of quantum states according to the Schrodinger equation,
 and related functions.
 """
 
-# TODO: setter/update pt
-# TODO: setter for compute?
-# TODO: test known lindlbad evolution
-# TODO: QuEvoTimeDepend?
-# TODO: slepc krylov method
-
 import functools
 
 import numpy as np

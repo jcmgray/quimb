@@ -1,10 +1,9 @@
 """Interface to slepc4py for solving advanced eigenvalue problems.
 """
-# TODO: FEAST / other contour solvers?
-# TODO: pre-sliced and/or un-constructed matrices?
 
 import numpy as np
 import scipy.sparse as sp
+
 import quimb as qu
 
 
