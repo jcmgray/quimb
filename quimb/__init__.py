@@ -12,8 +12,7 @@ from .accel import (
 from .core import (
     normalize, chop, quimbify, qu, ket, bra, dop, sparse, infer_size, trace,
     identity, eye, speye, dim_map, dim_compress, kron, kronpow, ikron,
-    pkron, permute, itrace, partial_trace, expectation, expec, overlap,
-    nmlz, tr, ptr,
+    pkron, permute, itrace, partial_trace, expectation, expec, nmlz, tr, ptr,
 )
 
 # Linear algebra functions
@@ -75,8 +74,7 @@ __all__ = [
     'normalize', 'chop', 'quimbify', 'qu', 'ket', 'bra', 'dop', 'sparse',
     'infer_size', 'trace', 'identity', 'eye', 'speye', 'dim_map',
     'dim_compress', 'kron', 'kronpow', 'ikron', 'pkron', 'permute',
-    'itrace', 'partial_trace', 'expectation', 'expec', 'overlap', 'nmlz',
-    'tr', 'ptr',
+    'itrace', 'partial_trace', 'expectation', 'expec', 'nmlz', 'tr', 'ptr',
     # Linalg ---------------------------------------------------------------- #
     'eigensystem', 'eig', 'eigh', 'eigvals', 'eigvalsh', 'eigvecs', 'eigvecsh',
     'eigensystem_partial', 'groundstate', 'groundenergy', 'bound_spectrum',

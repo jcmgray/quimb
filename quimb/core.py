@@ -9,11 +9,8 @@ import numpy as np
 from numpy.matlib import zeros
 import scipy.sparse as sp
 
-from .accel import (
-    njit, par_reduce, matrixify, realify, issparse, isop, vdot, dot, prod,
-    dot_dense, kron_dispatch, isvec
-)
-from .utils import deprecated
+from .accel import (njit, par_reduce, matrixify, realify, issparse, isop, vdot,
+                    dot, prod, dot_dense, kron_dispatch, isvec)
 
 
 _SPARSE_CONSTRUCTORS = {"csr": sp.csr_matrix,
@@ -40,6 +37,53 @@ def sparse_matrix(data, stype="csr", dtype=complex):
     return _SPARSE_CONSTRUCTORS[stype](data, dtype=dtype)
 
 
+_EXPEC_METHODS = {
+    # [isop(a), isop(b), issparse(a) or issparse(b)]
+    (0, 0, 0): lambda a, b: abs(vdot(a, b))**2,
+    (0, 1, 0): lambda a, b: vdot(a, dot_dense(b, a)),
+    (1, 0, 0): lambda a, b: vdot(b, dot_dense(a, b)),
+    (1, 1, 0): lambda a, b: _trace_dense(dot_dense(a, b)),
+    (0, 0, 1): lambda a, b: abs(dot(a.H, b)[0, 0])**2,
+    (0, 1, 1): realify(lambda a, b: dot(a.H, dot(b, a))[0, 0]),
+    (1, 0, 1): realify(lambda a, b: dot(b.H, dot(a, b))[0, 0]),
+    (1, 1, 1): lambda a, b: _trace_sparse(dot(a, b)),
+}
+
+
+def expectation(a, b):
+    """'Expectation' between a vector/operator and another vector/operator.
+
+    The 'operator' inner product between ``a`` and ``b``, but also for vectors.
+    This means that for consistency:
+
+    - for two vectors it will be the absolute expec squared ``|<a|b><b|a>|``,
+      *not* ``<a|b>``.
+    - for a vector and an operator its will be ``<a|b|a>``
+    - for two operators it will be the Hilbert-schmidt inner product
+      ``tr(A @ B)``
+
+    In this way ``expectation(a, b) == expectation(dop(a), b) ==
+    expectation(dop(a), dop(b))``.
+
+    Parameters
+    ----------
+    a : vector or operator
+        First state or operator - assumed to be ket if vector.
+    b : vector or operator
+        Second state or operator - assumed to be ket if vector.
+
+    Returns
+    -------
+    x : float
+        'Expectation' of ``a`` with ``b``.
+    """
+    return _EXPEC_METHODS[isop(a), isop(b), issparse(a) or issparse(b)](a, b)
+
+
+expec = expectation
+"""Alias for :func:`expectation`."""
+
+
 def normalize(qob, inplace=True):
     """Normalize a quantum object.
 
@@ -55,10 +99,15 @@ def normalize(qob, inplace=True):
     dense or sparse, matrix or vector
         Normalized quantum object.
     """
-    n_factor = qob.tr() if isop(qob) else expectation(qob, qob)**0.25
+    if isop(qob):
+        n_factor = qob.tr()
+    else:
+        n_factor = expectation(qob, qob)**0.25
+
     if inplace:
         qob /= n_factor
         return qob
+
     return qob / n_factor
 
 
@@ -291,7 +340,78 @@ speye = functools.partial(identity, sparse=True)
 """Sparse identity."""
 
 
-def kron(*ops, stype=None, coo_build=False, parallel=False):
+def _kron_core(*ops, stype=None, coo_build=False, parallel=False):
+    """Core kronecker product for a sequence of objects.
+    """
+    tmp_stype = "coo" if coo_build or stype == "coo" else None
+
+    reducer = par_reduce if parallel else functools.reduce
+
+    x = reducer(functools.partial(kron_dispatch, stype=tmp_stype), ops)
+
+    if stype is not None:
+        return x.asformat(stype)
+    if coo_build or (issparse(x) and x.format == "coo"):
+        return x.asformat("csr")
+
+    return x
+
+
+def dynal(x, bases):
+    """Generate 'dynamic decimal' for ``x`` given ``dims``.
+
+    Examples
+    --------
+    >>> dims = [13, 2, 7, 3, 10]
+    >>> prod(dims)  # total hilbert space size
+    5460
+
+    >>> x = 3279
+    >>> drep = list(dyn_bin(x, dims))  # dyn bases repr
+    >>> drep
+    [7, 1, 4, 0, 9]
+
+    >>> bs_szs = [prod(dims[i + 1:]) for i in range(len(dims))]
+    >>> bs_szs
+    [420, 210, 30, 10, 1]
+
+    >>> # reconstruct x
+    >>> sum(d * b for d, b in zip(drep, bs_szs))
+    3279
+    """
+    bs_szs = [prod(bases[i + 1:]) for i in range(len(bases))]
+
+    for b in bs_szs:
+        div = x // b
+        yield div
+        x -= div * b
+
+
+def gen_matching_dynal(ri, rf, dims):
+    """Return the matching dynal part of ``ri`` and ``rf``, plus the first pair
+    that don't match.
+    """
+    for d1, d2 in zip(dynal(ri, dims), dynal(rf, dims)):
+        if d1 == d2:
+            yield (d1, d2)
+        else:
+            yield (d1, d2)
+            break
+
+
+def gen_ops_maybe_sliced(ops, ix):
+    """Take ``ops`` and slice the first few, according to the length of ``ix``
+    and with ``ix``, and leave the rest.
+    """
+    for op, i in itertools.zip_longest(ops, ix):
+        if i is not None:
+            d1, d2 = i
+            yield op[slice(d1, d2 + 1), :]
+        else:
+            yield op
+
+
+def kron(*ops, stype=None, coo_build=False, parallel=False, ownership=None):
     """Tensor (kronecker) product of variable number of arguments.
 
     Parameters
@@ -305,36 +425,76 @@ def kron(*ops, stype=None, coo_build=False, parallel=False):
     coo_build : bool, optional
         Whether to force sparse construction to use the ``'coo'``
         format (only for sparse matrices in the first place.).
+    parallel : bool, optional
+        Perform a parallel reduce on the operators, can be quicker.
+    ownership : (int, int), optional
+        If given, only construct the rows in ``range(*ownership)``. Such that
+        the  final operator is actually ``X[slice(*ownership), :]``. Useful for
+        constructing operators in parallel, e.g. for MPI.
 
     Returns
     -------
-    dense or sparse vector or matrix
-        Tensor product of ``*ops``.
+    X : dense or sparse vector or matrix
+        Tensor product of ``ops``.
 
     Notes
     -----
-     1. The product is performed as ``(a & (b & (c & ...)))``
+    1. The product is performed as ``(a & (b & (c & ...)))``
+
+    Examples
+    --------
+    Simple example:
+
+    >>> a = np.array([[1, 2], [3, 4]])
+    >>> b = np.array([[1., 1.1], [1.11, 1.111]])
+    >>> kron(a, b)
+    matrix([[1.   , 1.1  , 2.   , 2.2  ],
+            [1.11 , 1.111, 2.22 , 2.222],
+            [3.   , 3.3  , 4.   , 4.4  ],
+            [3.33 , 3.333, 4.44 , 4.444]])
+
+    Partial construction of rows:
+
+    >>> ops = [rand_matrix(2, sparse=True) for _ in range(10)]
+    >>> kron(*ops, ownership=(256, 512))
+    <256x1024 sparse matrix of type '<class 'numpy.complex128'>'
+            with 13122 stored elements in Compressed Sparse Row format>
     """
-    opts = {"stype": "coo" if coo_build or stype == "coo" else None}
+    core_kws = {'coo_build': coo_build, 'stype': stype, 'parallel': parallel}
 
-    if parallel:
-        reducer = par_reduce
+    if ownership is None:
+        return _kron_core(*ops, **core_kws)
+
+    ri, rf = ownership
+    dims = [op.shape[0] for op in ops]
+
+    D = prod(dims)
+    if not ((0 <= ri < D) and ((0 < rf <= D))):
+        raise ValueError(
+            "Ownership ({}, {}) not in range [0-{}].".format(ri, rf, D))
+
+    matching_dyn = tuple(gen_matching_dynal(ri, rf - 1, dims))
+    sliced_ops = list(gen_ops_maybe_sliced(ops, matching_dyn))
+    full_op = _kron_core(*sliced_ops, **core_kws)
+
+    # check if the kron has naturally oversliced
+    if matching_dyn:
+        matching_bszs = [prod(dims[i + 1:]) for i in range(len(matching_dyn))]
+        coeffs_bases = tuple(zip(matching_bszs, matching_dyn))
+        ri_got = sum(d * b[0] for d, b in coeffs_bases)
+        rf_got = sum(d * b[1] for d, b in coeffs_bases) + matching_bszs[-1]
     else:
-        reducer = functools.reduce
+        ri_got, rf_got = 0, D
 
-    x = reducer(
-        functools.partial(kron_dispatch, **opts),
-        ops,
-    )
+    # slice the desired rows only using the difference between indices
+    di, df = ri - ri_got, rf - rf_got
+    if di or df:
+        return full_op[di:(None if df == 0 else df), :]
 
-    if stype is not None:
-        return x.asformat(stype)
-    if coo_build or (issparse(x) and x.format == "coo"):
-        return x.asformat("csr")
-    return x
+    return full_op
 
 
-def kronpow(a, p, stype=None, coo_build=False):
+def kronpow(a, p, **kron_opts):
     """Returns `a` tensored with itself `p` times
 
     Equivalent to ``reduce(lambda x, y: x & y, [a] * p)``.
@@ -345,18 +505,15 @@ def kronpow(a, p, stype=None, coo_build=False):
         Object to tensor power.
     p : int
         Tensor power.
-    stype : str, optional
-        Desired output format if resultant object is sparse. Should be one
-        of {``'csr'``, ``'bsr'``, ``'coo'``, ``'csc'``}.
-    coo_build : bool, optional
-        Whether to force sparse construction to use the ``'coo'``
-        format (only for sparse matrices in the first place.).
+    kron_opts :
+        Supplied to :func:`~quimb.kron`.
 
     Returns
     -------
     dense or sparse matrix or vector
     """
-    return kron(*(a for _ in range(p)), stype=stype, coo_build=coo_build)
+    ops = (a,) * p
+    return kron(*ops, **kron_opts)
 
 
 def _find_shape_of_nested_int_array(x):
@@ -590,7 +747,7 @@ def dim_compress(dims, inds):
 
 
 def ikron(ops, dims, inds, sparse=None, stype=None,
-          coo_build=False, parallel=False):
+          coo_build=False, parallel=False, ownership=None):
     """Tensor an operator into a larger space by padding with identities.
 
     Automatically placing a large operator over several dimensions is allowed
@@ -600,15 +757,14 @@ def ikron(ops, dims, inds, sparse=None, stype=None,
     ----------
     op : matrix-like or tuple of matrix-like
         Operator(s) to place into the tensor space. If more than one, these
-        are cyclically placed at each of the ``dims`` specified by
-        ``inds``.
-    dims : tuple of int
-        Dimensions of tensor space, use -1 to ignore dimension matching.
-    inds : tuple of int
-        Indices of the dimensions to place operator on. Each dimension
-        specified can be smaller than the size of ``op`` (as long as it
-        factorizes it), and can be disjoint from other dimensions when
-        ``op`` will be placed.
+        are cyclically placed at each of the ``dims`` specified by ``inds``.
+    dims : sequence of int or nested sequences of int
+        The subsystem dimensions. If treated as an array, should have the same
+        number of dimensions as the system.
+    inds : tuple of int, or sequence of tuple of int
+        Indices, or coordinates, of the dimensions to place operator(s) on.
+        Each dimension specified can be smaller than the size of ``op`` (as
+        long as it factorizes it).
     sparse : bool, optional
         Whether to construct the new operator in sparse form.
     stype : str, optional
@@ -620,6 +776,8 @@ def ikron(ops, dims, inds, sparse=None, stype=None,
     parallel : bool, optional
         Whether to build the operator in parallel using threads (only good
         for big (d > 2**16) operators).
+    ownership : (int, int), optional
+        If given, the range of rows to construct.
 
     Returns
     -------
@@ -674,6 +832,9 @@ def ikron(ops, dims, inds, sparse=None, stype=None,
     inds, ops = zip(*sorted(zip(inds, itertools.cycle(ops))))
     inds, ops = set(inds), iter(ops)
 
+    # can't slice "coo" format so use "csr" if ownership specified
+    eye_kws = {'sparse': sparse, 'stype': "csr" if ownership else "coo"}
+
     def gen_ops():
         cff_id = 1  # keeps track of compressing adjacent identities
         cff_ov = 1  # keeps track of overlaying op on multiple dimensions
@@ -684,7 +845,7 @@ def ikron(ops, dims, inds, sparse=None, stype=None,
 
                 # check if need preceding identities
                 if cff_id > 1:
-                    yield eye(cff_id, sparse=sparse, stype="coo")
+                    yield eye(cff_id, **eye_kws)
                     cff_id = 1  # reset cumulative identity size
 
                 # check if first subsystem in placement block
@@ -710,10 +871,10 @@ def ikron(ops, dims, inds, sparse=None, stype=None,
 
         # check if trailing identity needed
         if cff_id > 1:
-            yield eye(cff_id, sparse=sparse, stype="coo")
+            yield eye(cff_id, **eye_kws)
 
-    return kron(*gen_ops(), stype=stype,
-                coo_build=coo_build, parallel=parallel)
+    return kron(*gen_ops(), stype=stype, coo_build=coo_build,
+                parallel=parallel, ownership=ownership)
 
 
 @matrixify
@@ -1017,10 +1178,13 @@ def partial_trace(p, dims, keep):
     ----------
     p : ket or density matrix
         State to perform partial trace on - can be sparse.
-    dims : tuple of int
-        List of subsystem dimensions.
-    keep : int or tuple of int
-        Index or indices of subsytem(s) to keep.
+    dims : sequence of int or nested sequences of int
+        The subsystem dimensions. If treated as an array, should have the same
+        number of dimensions as the system.
+    keep : int, sequence of int or sequence of Tuple[int]
+        Index or indices of subsytem(s) to keep. If a sequence of integer
+        tuples, each should be a coordinate such that the length matches the
+        number of dimensions of the system.
 
     Returns
     -------
@@ -1046,62 +1210,30 @@ def partial_trace(p, dims, keep):
     >>> rho_ab = partial_trace(rho_abc, [3, 4, 5], keep=[0, 1])
     >>> rho_ab.shape
     (12, 12)
+
+    Trace out qutrits from a 2D system:
+
+    >>> psi_abcd = rand_ket(3 ** 4)
+    >>> dims = [[3, 3],
+    ...         [3, 3]]
+    >>> keep = [(0, 0), (1, 1)]
+    >>> rho_ac = partial_trace(psi_abcd, dims, keep)
+    >>> rho_ac.shape
+    (9, 9)
     """
     # map 2D+ systems into flat hilbert space
-    if not isinstance(dims[0], int):
+    try:
+        ndim = dims.ndim
+    except AttributeError:
+        ndim = len(_find_shape_of_nested_int_array(dims))
+
+    if ndim >= 2:
         dims, keep = dim_map(dims, keep)
 
     if issparse(p):
         return _partial_trace_simple(p, dims, keep)
+
     return _partial_trace_dense(p, dims, keep)
-
-
-_EXPEC_METHODS = {
-    # [isop(a), isop(b), issparse(a) or issparse(b)]
-    (0, 0, 0): lambda a, b: abs(vdot(a, b))**2,
-    (0, 1, 0): lambda a, b: vdot(a, dot_dense(b, a)),
-    (1, 0, 0): lambda a, b: vdot(b, dot_dense(a, b)),
-    (1, 1, 0): lambda a, b: _trace_dense(dot_dense(a, b)),
-    (0, 0, 1): lambda a, b: abs(dot(a.H, b)[0, 0])**2,
-    (0, 1, 1): realify(lambda a, b: dot(a.H, dot(b, a))[0, 0]),
-    (1, 0, 1): realify(lambda a, b: dot(b.H, dot(a, b))[0, 0]),
-    (1, 1, 1): lambda a, b: _trace_sparse(dot(a, b)),
-}
-
-
-def expectation(a, b):
-    """'Overlap' between a vector/operator and another vector/operator.
-
-    The 'operator' inner product between ``a`` and ``b``, but also for vectors.
-    This means that for consistency:
-    * for two vectors it will be the absolute expec squared ``|<a|b><b|a>|``,
-    *not* ``<a|b>``
-    * for a vector and an operator its will be ``<a|b|a>``
-    * for two operators it will be the Hilbert-schmidt inner product
-    ``tr(A @ B)``
-
-    In this way ``expectation(a, b) == expectation(dop(a), b) ==
-    expectation(dop(a), dop(b))``.
-
-    Parameters
-    ----------
-    a : vector or operator
-        First state or operator - assumed to be ket if vector.
-    b : vector or operator
-        Second state or operator - assumed to be ket if vector.
-
-    Returns
-    -------
-    x : float
-        'Overlap' between ``a`` and ``b``.
-    """
-    return _EXPEC_METHODS[isop(a), isop(b), issparse(a) or issparse(b)](a, b)
-
-
-expec = expectation
-"""Alias for :func:`expectation`."""
-
-overlap = deprecated(expectation, "'overlap'", "'expectation' or 'expec'")
 
 
 # --------------------------------------------------------------------------- #
