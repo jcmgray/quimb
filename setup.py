@@ -4,7 +4,11 @@ import versioneer
 
 def readme():
     with open('README.rst') as f:
-        return f.read()
+        import re
+        long_desc = f.read()
+        # strip out the raw html images
+        long_desc = re.sub('\.\. raw::[\S\s]*?>\n\n', "", long_desc)
+        return long_desc
 
 
 setup(
@@ -15,6 +19,7 @@ setup(
     version=versioneer.get_version(),
     cmdclass=versioneer.get_cmdclass(),
     author='Johnnie Gray',
+    author_email="john.gray.14@ucl.ac.uk",
     license='MIT',
     packages=find_packages(exclude=['deps', 'tests*']),
     install_requires=[
