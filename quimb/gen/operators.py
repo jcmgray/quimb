@@ -2,7 +2,7 @@
 """
 from operator import add
 import math
-from functools import lru_cache
+import functools
 import itertools
 
 from cytoolz import isiterable, concat, unique
@@ -13,7 +13,7 @@ from ..accel import njit, make_immutable, get_thread_pool, par_reduce, isreal
 from ..core import qu, eye, kron, ikron
 
 
-@lru_cache(maxsize=16)
+@functools.lru_cache(maxsize=16)
 def spin_operator(label, S=1 / 2, **kwargs):
     """Generate a general spin-operator.
 
@@ -77,7 +77,7 @@ def spin_operator(label, S=1 / 2, **kwargs):
     return op
 
 
-@lru_cache(maxsize=8)
+@functools.lru_cache(maxsize=8)
 def pauli(xyz, dim=2, **kwargs):
     """Generates the pauli operators for dimension 2 or 3.
 
@@ -128,17 +128,17 @@ def pauli(xyz, dim=2, **kwargs):
     return op
 
 
-@lru_cache(1)
-def hadamard():
+@functools.lru_cache(2)
+def hadamard(dtype=complex):
     """The Hadamard gate.
     """
     H = qu([[1., 1.],
-            [1., -1.]]) / 2**0.5
+            [1., -1.]], dtype=dtype) / 2**0.5
     make_immutable(H)
     return H
 
 
-@lru_cache(128)
+@functools.lru_cache(128)
 def phase_gate(phi):
     """The phase shift gate.
     """
@@ -148,20 +148,20 @@ def phase_gate(phi):
     return R
 
 
-@lru_cache(maxsize=8)
-def swap(dim=2, **kwargs):
+@functools.lru_cache(maxsize=8)
+def swap(dim=2, dtype=complex, **kwargs):
     """The SWAP operator acting on subsystems of dimension `dim`.
     """
-    S = np.identity(dim**2, dtype=complex)
+    S = np.identity(dim**2, dtype=dtype)
     S = (S.reshape([dim, dim, dim, dim])
           .transpose([0, 3, 1, 2])
           .reshape([dim**2, dim**2]))
-    S = qu(S, **kwargs)
+    S = qu(S, dtype=dtype, **kwargs)
     make_immutable(S)
     return S
 
 
-@lru_cache(maxsize=8)
+@functools.lru_cache(maxsize=8)
 def controlled(s, sparse=False):
     """Construct a controlled pauli gate for two qubits.
 
@@ -177,9 +177,8 @@ def controlled(s, sparse=False):
     C : immutable matrix
         The controlled two-qubit gate operator.
     """
-    keymap = {'x': 'x', 'not': 'x',
-              'y': 'y',
-              'z': 'z'}
+    keymap = {'x': 'x', 'not': 'x', 'y': 'y', 'z': 'z'}
+
     op = ((qu([1, 0], qtype='dop', sparse=sparse) &
            eye(2, sparse=sparse)) +
           (qu([0, 1], qtype='dop', sparse=sparse) &
@@ -188,11 +187,40 @@ def controlled(s, sparse=False):
     return op
 
 
-@lru_cache(maxsize=8)
-def ham_heis(n, j=1.0, b=0.0, cyclic=True, sparse=False, stype="csr",
-             parallel=None, nthreads=None):
-    """Constructs the nearest neighbour 1d heisenberg spin-1/2 hamiltonian.
+def hamiltonian(fn):
+    """Wrap a function to perform some generic postprocessing. This assumes the
+    core function always builds the hamiltonian in sparse form. The wrapper
+    then:
 
+    1. Checks if the operator is real
+    2. Converts the operator to dense or the correct sparse form
+    3. Makes the operator immutable so it can be cached
+    """
+
+    @functools.wraps(fn)
+    def ham_fn(*args, stype='csr', sparse=False, **kwargs):
+        H = fn(*args, **kwargs)
+
+        if isreal(H):
+            H = H.real
+
+        if not sparse:
+            H = np.asmatrix(H.todense())
+        elif H.format != stype:
+            H = H.asformat(stype)
+
+        make_immutable(H)
+
+        return H
+
+    return ham_fn
+
+
+@functools.lru_cache(maxsize=8)
+@hamiltonian
+def ham_heis(n, j=1.0, b=0.0, cyclic=True,
+             parallel=None, nthreads=None, ownership=None):
+    """Constructs the nearest neighbour 1d heisenberg spin-1/2 hamiltonian.
 
     Parameters
     ----------
@@ -215,6 +243,8 @@ def ham_heis(n, j=1.0, b=0.0, cyclic=True, sparse=False, stype="csr",
         for n > 16.
     nthreads : int optional
         How mny threads to use in parallel to build the matrix.
+    ownership : (int, int), optional
+        If given, which range of rows to generate.
 
     Returns
     -------
@@ -236,7 +266,8 @@ def ham_heis(n, j=1.0, b=0.0, cyclic=True, sparse=False, stype="csr",
     parallel = (n > 16) if parallel is None else parallel
 
     op_kws = {'sparse': True, 'stype': 'coo'}
-    kron_kws = {"sparse": True, "stype": "coo", "coo_build": True}
+    ikron_kws = {'sparse': True, 'stype': 'coo',
+                 'coo_build': True, 'ownership': ownership}
 
     # The basic operator (interaction and single b-field) that can be repeated.
     two_site_term = sum(
@@ -253,17 +284,17 @@ def ham_heis(n, j=1.0, b=0.0, cyclic=True, sparse=False, stype="csr",
     def gen_term(i):
         # special case: the last b term needs to be added manually
         if i == -1:
-            return ikron(single_site_b, dims, n - 1, **kron_kws)
+            return ikron(single_site_b, dims, n - 1, **ikron_kws)
 
         # special case: the interaction between first and last spins if cyclic
         if i == n - 1:
             return sum(
                 j * ikron(spin_operator(s, **op_kws),
-                          dims, [0, n - 1], **kron_kws)
+                          dims, [0, n - 1], **ikron_kws)
                 for j, s in zip((jx, jy, jz), 'xyz') if j != 0.0)
 
         # General term, on-site b-field plus interaction with next site
-        return ikron(two_site_term, dims, [i, i + 1], **kron_kws)
+        return ikron(two_site_term, dims, [i, i + 1], **ikron_kws)
 
     terms_needed = range(0 if single_site_b is 0 else -1,
                          n if cyclic else n - 1)
@@ -274,27 +305,20 @@ def ham_heis(n, j=1.0, b=0.0, cyclic=True, sparse=False, stype="csr",
     else:
         ham = sum(map(gen_term, terms_needed))
 
-    if not sparse:
-        ham = np.asmatrix(ham.todense())
-    elif ham.format != stype:
-        ham = ham.asformat(stype)
-
-    if isreal(ham):
-        ham = ham.real
-
-    make_immutable(ham)
     return ham
 
 
 def ham_ising(n, jz=1.0, bx=1.0, **kwargs):
     """Generate the quantum transverse field ising model hamiltonian. This is a
-    simple alias for :func:`~quimb.gen.operators.ham_heis`.
+    simple alias for :func:`~quimb.gen.operators.ham_heis` with z-interactions
+    and an x-field.
     """
     return ham_heis(n, j=(0, 0, jz), b=(bx, 0, 0), **kwargs)
 
 
-@lru_cache(maxsize=8)
-def ham_j1j2(n, j1=1.0, j2=0.5, bz=0.0, cyclic=True, sparse=False):
+@functools.lru_cache(maxsize=8)
+@hamiltonian
+def ham_j1j2(n, j1=1.0, j2=0.5, bz=0.0, cyclic=True, ownership=None):
     """Generate the j1-j2 hamiltonian, i.e. next nearest neighbour
     interactions.
 
@@ -312,6 +336,8 @@ def ham_j1j2(n, j1=1.0, j2=0.5, bz=0.0, cyclic=True, sparse=False):
         Cyclic boundary conditions.
     sparse : bool, optional
         Return hamtiltonian as sparse-csr matrix.
+    ownership : (int, int), optional
+        If given, which range of rows to generate.
 
     Returns
     -------
@@ -319,7 +345,12 @@ def ham_j1j2(n, j1=1.0, j2=0.5, bz=0.0, cyclic=True, sparse=False):
         The Hamiltonian.
     """
     dims = (2,) * n
-    sxyz = [spin_operator(i, sparse=True) for i in 'xyz']
+
+    op_kws = {'sparse': True, 'stype': 'coo'}
+    ikron_kws = {'sparse': True, 'stype': 'coo',
+                 'coo_build': True, 'ownership': ownership}
+
+    sxyz = [spin_operator(i, **op_kws) for i in 'xyz']
 
     coosj1 = np.array([(i, i + 1) for i in range(n)])
     coosj2 = np.array([(i, i + 2) for i in range(n)])
@@ -332,30 +363,31 @@ def ham_j1j2(n, j1=1.0, j2=0.5, bz=0.0, cyclic=True, sparse=False):
     def j1_terms():
         for coo in coosj1:
             if abs(coo[1] - coo[0]) == 1:  # can sum then tensor (faster)
-                yield ikron(sum(op & op for op in sxyz), dims, coo)
+                yield ikron(sum(op & op for op in sxyz),
+                            dims, coo, **ikron_kws)
             else:  # tensor then sum (slower)
-                yield sum(ikron(op, dims, coo) for op in sxyz)
+                yield sum(ikron(op, dims, coo, **ikron_kws) for op in sxyz)
 
     def j2_terms():
         for coo in coosj2:
             if abs(coo[1] - coo[0]) == 2:  # can add then tensor (faster)
-                yield ikron(sum(op & eye(2) & op for op in sxyz), dims, coo)
+                yield ikron(sum(op & eye(2, **op_kws) & op for op in sxyz),
+                            dims, coo, **ikron_kws)
             else:
-                yield sum(ikron(op, dims, coo) for op in sxyz)
-
-    gen_bz = (ikron([sxyz[2]], dims, i) for i in range(n))
+                yield sum(ikron(op, dims, coo, **ikron_kws) for op in sxyz)
 
     ham = j1 * sum(j1_terms()) + j2 * sum(j2_terms())
+
     if bz != 0:
+        gen_bz = (ikron([sxyz[2]], dims, i, **ikron_kws) for i in range(n))
         ham += bz * sum(gen_bz)
-    if not sparse:
-        ham = ham.todense()
-    make_immutable(ham)
+
     return ham
 
 
-def ham_mbl(n, dh, j=1.0, bz=0.0, cyclic=True, sparse=False,
-            run=None, dh_dist="s", stype="csr", dh_dim=1, beta=None):
+@hamiltonian
+def ham_mbl(n, dh, j=1.0, bz=0.0, cyclic=True,
+            run=None, dh_dist="s", dh_dim=1, beta=None, ownership=None):
     """ Constructs a heisenberg hamiltonian with isotropic coupling and
     random fields acting on each spin - the many-body localized (MBL)
     spin hamiltonian.
@@ -373,8 +405,6 @@ def ham_mbl(n, dh, j=1.0, bz=0.0, cyclic=True, sparse=False,
         Global magnetic field (in z-direction).
     cyclic : bool, optional
         Whether to use periodic boundary conditions.
-    sparse : bool, optional
-        Generate the hamiltonian in sparse form.
     run : int, optional
         Number to seed random number generator with.
     dh_dist : {'g', 's', 'qr'}, optional
@@ -387,14 +417,18 @@ def ham_mbl(n, dh, j=1.0, bz=0.0, cyclic=True, sparse=False,
           ``dh * cos(2 * pi * beta * i + delta)`` with ``delta`` a random
           offset between ``(0, 2 * pi)``, possibly seeded by ``run``.
 
-    stype = {'csr', 'csc', 'coo'}, optional
-        The type of sparse matrix.
     dh_dim : {1, 2, 3} or str, optional
         The number of dimensions the noise acts in, or string
         specifier like ``'yz'``.
     beta : float, optional
         The wave number if ``dh_dist='qr'``, defaults to the golden
         ratio``(5**0.5 - 1) / 2``.
+    sparse : bool, optional
+        Whether to construct the hamiltonian in sparse form.
+    stype : {'csr', 'csc', 'coo'}, optional
+        The sparse format.
+    ownership : (int, int), optional
+        If given, which range of rows to generate.
 
     Returns
     -------
@@ -405,8 +439,6 @@ def ham_mbl(n, dh, j=1.0, bz=0.0, cyclic=True, sparse=False,
     --------
     MPO_ham_mbl
     """
-    ham = ham_heis(n=n, j=j, b=bz, cyclic=cyclic, sparse=True, stype='csr')
-
     if isinstance(dh, (tuple, list)):
         dhds = dh
     else:
@@ -440,26 +472,30 @@ def ham_mbl(n, dh, j=1.0, bz=0.0, cyclic=True, sparse=False,
 
         rs = np.cos(2 * np.pi * beta * inds + delta)
 
+    # the base hamiltonian ('csr' is most efficient format to add with)
+    ham = ham_heis(n=n, j=j, b=bz, cyclic=cyclic,
+                   sparse=True, stype='csr', ownership=ownership)
+
+    op_kws = {'sparse': True, 'stype': 'coo'}
+    ikron_kws = {'sparse': True, 'stype': 'coo',
+                 'coo_build': True, 'ownership': ownership}
+
     def dh_terms():
         for i in range(n):
             # dhd - the total strength in direction x, y, or z
             # r - the random strength in direction x, y, or z for site i
-            hdh = sum(dhd * r * spin_operator(s, sparse=True, stype='csr')
+            hdh = sum(dhd * r * spin_operator(s, **op_kws)
                       for dhd, r, s in zip(dhds, rs[:, i], 'xyz'))
-            yield ikron(hdh, (2,) * n, i, coo_build=True, stype='csr')
+            yield ikron(hdh, (2,) * n, i, **ikron_kws)
 
     ham = ham + sum(dh_terms())
 
-    if not sparse:
-        return np.asmatrix(ham.todense())
-    elif ham.format != stype:
-        return ham.asformat(stype)
-    else:
-        return ham
+    return ham
 
 
-def ham_heis_2D(n, m, j=1.0, bz=0.0, sparse=True, stype='csr',
-                cyclic=False, parallel=False):
+@hamiltonian
+def ham_heis_2D(n, m, j=1.0, bz=0.0, cyclic=False,
+                parallel=False, ownership=None):
     """Construct the 2D spin-1/2 heisenberg model hamiltonian.
 
     Parameters
@@ -473,15 +509,17 @@ def ham_heis_2D(n, m, j=1.0, bz=0.0, sparse=True, stype='csr',
         vector ``(Jx, Jy, Jz) = j``.
     bz : float, optional
         The z direction magnetic field.
+    cyclic : bool, optional
+        Whether to use periodic boundary conditions.
     sparse : bool, optional
         Whether to construct the hamiltonian in sparse form.
     stype : {'csr', 'csc', 'coo'}, optional
         The sparse format.
-    cyclic : bool, optional
-        Whether to use periodic boundary conditions.
     parallel : bool, optional
         Construct the hamiltonian in parallel. Faster but might use more
         memory.
+    ownership : (int, int), optional
+        If given, which range of rows to generate.
 
     Returns
     -------
@@ -510,8 +548,9 @@ def ham_heis_2D(n, m, j=1.0, bz=0.0, sparse=True, stype='csr',
                 yield ((i, j), (i, right))
 
     # build the hamiltonian in sparse 'coo' format always for efficiency
-    op_kws = {'stype': 'coo'}
-    kron_kws = {'stype': 'coo', 'coo_build': True}
+    op_kws = {'sparse': True, 'stype': 'coo'}
+    ikron_kws = {'sparse': True, 'stype': 'coo',
+                 'coo_build': True, 'ownership': ownership}
 
     # generate all pairs of coordinates and directions
     pairs_ss = tuple(itertools.product(gen_pairs(), 'xyz'))
@@ -522,12 +561,12 @@ def ham_heis_2D(n, m, j=1.0, bz=0.0, sparse=True, stype='csr',
         pair, s = pair_s
         Sxyz = spin_operator(s, **op_kws)
         J = {'x': jx, 'y': jy, 'z': jz}[s]
-        return ikron(J * Sxyz, dims, inds=pair, **kron_kws)
+        return ikron(J * Sxyz, dims, inds=pair, **ikron_kws)
 
     # generate Z field
     def fields(site):
         Sz = spin_operator('z', **op_kws)
-        return ikron(bz * Sz, dims, inds=[site], **kron_kws)
+        return ikron(bz * Sz, dims, inds=[site], **ikron_kws)
 
     if not parallel:
         # combine all terms
@@ -541,14 +580,6 @@ def ham_heis_2D(n, m, j=1.0, bz=0.0, sparse=True, stype='csr',
             pool.map(interactions, pairs_ss),
             pool.map(fields, sites) if bz != 0.0 else ())
         H = par_reduce(add, all_terms)
-
-    if not sparse:
-        H = np.asmatrix(H.todense())
-    elif H.format != stype:
-        H = H.asformat(stype)
-
-    if isreal(H):
-        H = H.real
 
     return H
 
@@ -567,6 +598,16 @@ def cmbn(n, k):  # pragma: no cover
 
 def uniq_perms(xs):
     """Generate all the unique permutations of sequence ``xs``.
+
+    Examples
+    --------
+    >>> list(uniq_perms('0011'))
+    [('0', '0', '1', '1'),
+     ('0', '1', '0', '1'),
+     ('0', '1', '1', '0'),
+     ('1', '0', '0', '1'),
+     ('1', '0', '1', '0'),
+     ('1', '1', '0', '0')]
     """
     if len(xs) == 1:
         yield (xs[0],)
@@ -579,8 +620,8 @@ def uniq_perms(xs):
                 yield (first_x,) + sub_perm
 
 
-@lru_cache(maxsize=8)
-def zspin_projector(n, sz=0, stype="csr"):
+@functools.lru_cache(maxsize=8)
+def zspin_projector(n, sz=0, stype="csr", dtype=float):
     """Construct the projector onto spin-z subpspaces.
 
     Parameters
@@ -591,18 +632,34 @@ def zspin_projector(n, sz=0, stype="csr"):
         Spin-z value(s) subspace(s) to find projector for.
     stype : str
         Sparse format of the output matrix.
+    dtype : {float, complex}, optional
+        The data type of the matrix to generate.
 
     Returns
     -------
-    prj : immutable sparse matrix
-        The (non-square) projector onto the specified subspace(s).
+    prj : immutable sparse matrix, shape (2**n, D)
+        The (non-square) projector onto the specified subspace(s). The subspace
+        size ``D`` is given by ``n choose (n / 2 + s)`` for each ``s``
+        specified in ``sz``.
 
     Examples
     --------
-    >>> zspin_projector(2, 0).A
-    array([[ 0.+0.j,  0.+0.j,  1.+0.j,  0.+0.j],
-           [ 0.+0.j,  1.+0.j,  0.+0.j,  0.+0.j]])
+    >>> zspin_projector(n=2, sz=0).A
+    array([[0., 0.],
+           [1., 0.],
+           [0., 1.],
+           [0., 0.]]
 
+    Project a 9-spin Heisenberg-Hamiltonian into its spin-1/2 subspace:
+
+    >>> H = ham_heis(9, sparse=True)
+    >>> H.shape
+    (512, 512)
+
+    >>> P = zspin_projector(n=9, sz=1 / 2)
+    >>> H0 = P.T @ H @ P
+    >>> H0.shape
+    (126, 126)
     """
     if not isiterable(sz):
         sz = (sz,)
@@ -628,8 +685,8 @@ def zspin_projector(n, sz=0, stype="csr"):
     cjs = tuple(int("".join(perm), 2) for perm in concat(all_perms))
 
     # Construct matrix which prjects only on to these basis states
-    prj = sp.coo_matrix((np.ones(p, dtype=complex), (cis, cjs)),
-                        shape=(p, 2**n), dtype=complex)
-    prj = qu(prj, stype=stype)
+    prj = sp.coo_matrix((np.ones(p, dtype=dtype), (cjs, cis)),
+                        shape=(2**n, p), dtype=dtype)
+    prj = qu(prj, stype=stype, dtype=dtype)
     make_immutable(prj)
     return prj

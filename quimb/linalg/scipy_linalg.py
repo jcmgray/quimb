@@ -5,22 +5,47 @@ import numpy as np
 import scipy.sparse.linalg as spla
 
 
+def maybe_sort_and_project(lk, vk, P, sort=True):
+    if sort:
+        sortinds = np.argsort(lk)
+        lk, vk = lk[sortinds], np.asmatrix(vk[:, sortinds])
+
+    # map eigenvectors out of subspace
+    if P is not None:
+        vk = P @ vk
+
+    return lk, vk
+
+
 def eigs_scipy(A, k, *, B=None, which=None, return_vecs=True, sigma=None,
-               isherm=True, sort=True, tol=None, **eigs_opts):
+               isherm=True, sort=True, P=None, tol=None, **eigs_opts):
     """Returns a few eigenpairs from a possibly sparse hermitian operator
 
     Parameters
     ----------
-    A : sparse matrix-like, dense matrix-like, or LinearOperator
+    A : dense-matrix, sparse-matrix, LinearOperator or callable
         The operator to solve for.
-    k : int, optional
+    k : int
         Number of eigenpairs to return
-    B : sparse matrix-like, dense matrix-like, or LinearOperator, optional
-        If given, the RHS matrix defining a generalized eigen problem.
+    B : dense-matrix, sparse-matrix, LinearOperator or callable, optional
+        If given, the RHS matrix (which should be positive) defining a
+        generalized eigen problem.
     which : str, optional
-        where in spectrum to take eigenvalues from (see scipy eigsh)
-    ncv: int, optional
-        Number of lanczos vectors, can use to optimise speed
+        where in spectrum to take eigenvalues from (see
+        :func:`scipy.sparse.linalg.eigsh`).
+    return_vecs : bool, optional
+        Whether to return the eigenvectors as well.
+    sigma : float, optional
+        Shift, if targeting interior eigenpairs.
+    isherm : bool, optional
+        Whether ``A`` is hermitian.
+    P : dense-matrix, sparse-matrix, LinearOperator or callable, optional
+        Perform the eigensolve in the subspace defined by this projector.
+    sort : bool, optional
+        Whether to ensure the eigenvalues are sorted in ascending value.
+    eigs_opts
+        Supplied to :func:`scipy.sparse.linalg.eigsh` or
+        :func:`scipy.sparse.linalg.eigs`.
 
     Returns
     -------
@@ -44,19 +69,29 @@ def eigs_scipy(A, k, *, B=None, which=None, return_vecs=True, sigma=None,
         'tol': 0 if tol is None else tol
     }
 
+    if callable(A):
+        A = A()
+    if callable(B):
+        B = B()
+    if callable(P):
+        P = P()
+
     eig_fn = spla.eigsh if isherm else spla.eigs
+
+    # project into subspace
+    if P is not None:
+        A = P.H @ (A @ P)
 
     if return_vecs:
         lk, vk = eig_fn(A, **settings, **eigs_opts)
-        sortinds = np.argsort(lk)
-        return lk[sortinds], np.asmatrix(vk[:, sortinds])
+        return maybe_sort_and_project(lk, vk, P, sort)
     else:
         lk = eig_fn(A, **settings, **eigs_opts)
         return np.sort(lk) if sort else lk
 
 
 def eigs_lobpcg(A, k, *, B=None, v0=None, which=None, return_vecs=True,
-                sigma=None, isherm=True, sort=True, **lobpcg_opts):
+                sigma=None, isherm=True, P=None, sort=True, **lobpcg_opts):
     """Interface to scipy's lobpcg eigensolver, which can be good for
     generalized eigenproblems with matrix-free operators. Seems to a be a bit
     innacurate though (e.g. on the order of ~ 1e-6 for eigenvalues). Also only
@@ -69,18 +104,21 @@ def eigs_lobpcg(A, k, *, B=None, v0=None, which=None, return_vecs=True,
 
     Parameters
     ----------
-    A : operator (n, n)
-        The main operator, can be dense, sparse or a LinearOperator.
-    k : int, optional
-        Number of eigenvalues to find.
-    B : operator (n, n), optional
-        The RHS operator.
-    v0 : array_like (n, k), optional
+    A : dense-matrix, sparse-matrix, LinearOperator or callable
+        The operator to solve for.
+    k : int
+        Number of eigenpairs to return
+    B : dense-matrix, sparse-matrix, LinearOperator or callable, optional
+        If given, the RHS matrix (which should be positive) defining a
+        generalized eigen problem.
+    v0 : array_like (d, k), optional
         The initial subspace to iterate with.
     which : {'SA', 'LA'}, optional
         Find the smallest or largest eigenvalues.
     return_vecs : bool, optional
         Whether to return the eigenvectors found.
+    P : dense-matrix, sparse-matrix, LinearOperator or callable, optional
+        Perform the eigensolve in the subspace defined by this projector.
     sort : bool, optional
         Whether to ensure the eigenvalues are sorted in ascending value.
     lobpcg_opts
@@ -90,7 +128,7 @@ def eigs_lobpcg(A, k, *, B=None, v0=None, which=None, return_vecs=True,
     -------
     lk : array_like (k,)
         The eigenvalues.
-    vk : array_like (n, k)
+    vk : array_like (d, k)
         The eigenvectors, if `return_vecs=True`.
 
     See Also
@@ -113,21 +151,37 @@ def eigs_lobpcg(A, k, *, B=None, v0=None, which=None, return_vecs=True,
         lobpcg_opts['maxiter'] = 30
     largest = {'SA': False, 'LA': True}[which]
 
-    n = A.shape[0]
+    if callable(A):
+        A = A()
+    if callable(B):
+        B = B()
+    if callable(P):
+        P = P()
 
+    # project into subspace
+    if P is not None:
+        A = P.H @ (A @ P)
+
+    d = A.shape[0]
+
+    # set up the initial subsspace to iterate with
     if v0 is None:
-        v0 = np.random.choice([1.0, -1.0], size=(n, k))
+        v0 = np.random.choice([1.0, -1.0], size=(d, k))
     else:
-        v0 = v0.reshape(n, -1)
+        # check if intial space should be projected too
+        if P is not None and v0.shape[0] != d:
+            v0 = P.H @ v0
 
-    if v0.shape[1] != k:
-        v0 = np.concatenate(v0, np.random.randn(n, k - v0.shape[1]), axis=1)
+        v0 = v0.reshape(d, -1)
+
+        # if not enough initial states given, flesh out with random
+        if v0.shape[1] != k:
+            v0 = np.hstack(v0, np.random.randn(d, k - v0.shape[1]))
 
     lk, vk = spla.lobpcg(A=A, X=v0, B=B, largest=largest, **lobpcg_opts)
 
     if return_vecs:
-        sortinds = np.argsort(lk)
-        return lk[sortinds], np.asmatrix(vk[:, sortinds])
+        return maybe_sort_and_project(lk, vk, P, sort)
     else:
         return np.sort(lk) if sort else lk
 

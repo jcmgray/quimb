@@ -111,14 +111,14 @@ _DENSE_EIG_METHODS = {
 
 
 def eigs_numpy(A, k, B=None, which=None, return_vecs=True,
-               sigma=None, isherm=True, sort=True, **eig_opts):
+               sigma=None, isherm=True, P=None, sort=True, **eig_opts):
     """Partial eigen-decomposition using numpy's dense linear algebra.
 
     Parameters
     ----------
     A : matrix-like
         Operator to partially eigen-decompose.
-    k : int, optional
+    k : int
         Number of eigenpairs to return.
     B : matrix-like
         If given, the RHS matrix defining a generalized eigen problem.
@@ -130,6 +130,8 @@ def eigs_numpy(A, k, B=None, which=None, return_vecs=True,
         Target eigenvalue.
     isherm : bool, optional
         Whether `a` is hermitian.
+    P : dense-matrix or callable
+        Perform the eigensolve in the subspace defined by this projector.
     sort : bool, optional
         Whether to sort reduced list of eigenpairs into ascending order.
     eig_opts
@@ -139,6 +141,17 @@ def eigs_numpy(A, k, B=None, which=None, return_vecs=True,
     -------
         lk, (vk): k eigenvalues (and eigenvectors) sorted according to which
     """
+    if callable(A):
+        A = A()
+    if callable(B):
+        B = B()
+    if callable(P):
+        P = P()
+
+    # project into subspace
+    if P is not None:
+        A = P.H @ (A @ P)
+
     generalized = B is not None
 
     eig_fn = _DENSE_EIG_METHODS[(isherm, return_vecs, generalized)]
@@ -155,29 +168,33 @@ def eigs_numpy(A, k, B=None, which=None, return_vecs=True,
 
     if return_vecs:
         # get all eigenpairs
-        evals, evecs = eig_fn(A.A if issparse(A) else A, **eig_opts)
+        lk, vk = eig_fn(A.A if issparse(A) else A, **eig_opts)
 
         # sort and trim according to which k we want
-        sk = sort_inds(evals, method=which, sigma=sigma)[:k]
-        evals, evecs = evals[sk], np.asmatrix(evecs[:, sk])
+        sk = sort_inds(lk, method=which, sigma=sigma)[:k]
+        lk, vk = lk[sk], np.asmatrix(vk[:, sk])
 
         # also potentially sort into ascending order
         if sort:
-            so = np.argsort(evals)
-            return evals[so], evecs[:, so]
+            so = np.argsort(lk)
+            lk, vk = lk[so], vk[:, so]
 
-        return evals, evecs
+        # map eigenvectors out of subspace
+        if P is not None:
+            vk = P @ vk
+
+        return lk, vk
 
     else:
         # get all eigenvalues
-        evals = eig_fn(A.A if issparse(A) else A, **eig_opts)
+        lk = eig_fn(A.A if issparse(A) else A, **eig_opts)
 
         # sort and trim according to which k we want
-        sk = sort_inds(evals, method=which, sigma=sigma)[:k]
-        evals = evals[sk]
+        sk = sort_inds(lk, method=which, sigma=sigma)[:k]
+        lk = lk[sk]
 
         # also potentially sort into ascending order
-        return np.sort(evals) if sort else evals
+        return np.sort(lk) if sort else lk
 
 
 def svds_numpy(a, k, return_vecs=True, **_):

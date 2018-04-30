@@ -142,7 +142,7 @@ def chop(qob, tol=1.0e-15, inplace=True):
 
 
 def quimbify(data, qtype=None, normalized=False, chopped=False,
-             sparse=None, stype=None):
+             sparse=None, stype=None, dtype=complex):
     """Converts data to 'quantum' i.e. complex matrices, kets being columns.
 
     Parameters
@@ -189,20 +189,23 @@ def quimbify(data, qtype=None, normalized=False, chopped=False,
 
     if qtype is not None:
         # Must be dense to reshape
-        data = np.asmatrix(data.A if sparse_input else data, dtype=complex)
+        data = np.asmatrix(data.A if sparse_input else data)
         if qtype in {"k", "ket"}:
             data = data.reshape((prod(data.shape), 1))
         elif qtype in {"b", "bra"}:
             data = data.reshape((1, prod(data.shape))).conj()
         elif qtype in {"d", "r", "rho", "op", "dop"} and isvec(data):
             data = dot(quimbify(data, "k"), quimbify(data, "k").H)
+        data = data.astype(dtype)
+
     # Just cast as numpy matrix
     elif not sparse_output:
-        data = np.asmatrix(data.A if sparse_input else data, dtype=complex)
+        data = np.asmatrix(data.A if sparse_input else data, dtype=dtype)
 
     # Check if already sparse matrix, or wanted to be one
     if sparse_output:
-        data = sparse_matrix(data, (stype if stype is not None else "csr"))
+        data = sparse_matrix(data, dtype=dtype,
+                             stype=(stype if stype is not None else "csr"))
 
     # Optionally normalize and chop small components
     if normalized:
@@ -344,17 +347,8 @@ def _kron_core(*ops, stype=None, coo_build=False, parallel=False):
     """Core kronecker product for a sequence of objects.
     """
     tmp_stype = "coo" if coo_build or stype == "coo" else None
-
     reducer = par_reduce if parallel else functools.reduce
-
-    x = reducer(functools.partial(kron_dispatch, stype=tmp_stype), ops)
-
-    if stype is not None:
-        return x.asformat(stype)
-    if coo_build or (issparse(x) and x.format == "coo"):
-        return x.asformat("csr")
-
-    return x
+    return reducer(functools.partial(kron_dispatch, stype=tmp_stype), ops)
 
 
 def dynal(x, bases):
@@ -406,7 +400,11 @@ def gen_ops_maybe_sliced(ops, ix):
     for op, i in itertools.zip_longest(ops, ix):
         if i is not None:
             d1, d2 = i
-            yield op[slice(d1, d2 + 1), :]
+            # can't slice coo matrices
+            if sp.isspmatrix_coo(op):
+                yield op.tocsr()[slice(d1, d2 + 1), :].tocoo()
+            else:
+                yield op[slice(d1, d2 + 1), :]
         else:
             yield op
 
@@ -463,35 +461,43 @@ def kron(*ops, stype=None, coo_build=False, parallel=False, ownership=None):
     core_kws = {'coo_build': coo_build, 'stype': stype, 'parallel': parallel}
 
     if ownership is None:
-        return _kron_core(*ops, **core_kws)
-
-    ri, rf = ownership
-    dims = [op.shape[0] for op in ops]
-
-    D = prod(dims)
-    if not ((0 <= ri < D) and ((0 < rf <= D))):
-        raise ValueError(
-            "Ownership ({}, {}) not in range [0-{}].".format(ri, rf, D))
-
-    matching_dyn = tuple(gen_matching_dynal(ri, rf - 1, dims))
-    sliced_ops = list(gen_ops_maybe_sliced(ops, matching_dyn))
-    full_op = _kron_core(*sliced_ops, **core_kws)
-
-    # check if the kron has naturally oversliced
-    if matching_dyn:
-        matching_bszs = [prod(dims[i + 1:]) for i in range(len(matching_dyn))]
-        coeffs_bases = tuple(zip(matching_bszs, matching_dyn))
-        ri_got = sum(d * b[0] for d, b in coeffs_bases)
-        rf_got = sum(d * b[1] for d, b in coeffs_bases) + matching_bszs[-1]
+        X = _kron_core(*ops, **core_kws)
     else:
-        ri_got, rf_got = 0, D
+        ri, rf = ownership
+        dims = [op.shape[0] for op in ops]
 
-    # slice the desired rows only using the difference between indices
-    di, df = ri - ri_got, rf - rf_got
-    if di or df:
-        return full_op[di:(None if df == 0 else df), :]
+        D = prod(dims)
+        if not ((0 <= ri < D) and ((0 < rf <= D))):
+            raise ValueError(
+                "Ownership ({}, {}) not in range [0-{}].".format(ri, rf, D))
 
-    return full_op
+        matching_dyn = tuple(gen_matching_dynal(ri, rf - 1, dims))
+        sliced_ops = list(gen_ops_maybe_sliced(ops, matching_dyn))
+        X = _kron_core(*sliced_ops, **core_kws)
+
+        # check if the kron has naturally oversliced
+        if matching_dyn:
+            mtchn_bs = [prod(dims[i + 1:]) for i in range(len(matching_dyn))]
+            coeffs_bases = tuple(zip(mtchn_bs, matching_dyn))
+            ri_got = sum(d * b[0] for d, b in coeffs_bases)
+            rf_got = sum(d * b[1] for d, b in coeffs_bases) + mtchn_bs[-1]
+        else:
+            ri_got, rf_got = 0, D
+
+        # slice the desired rows only using the difference between indices
+        di, df = ri - ri_got, rf - rf_got
+        if di or df:
+            # we can't slice 'coo' matrices -> convert to 'csr'
+            if sp.isspmatrix_coo(X):
+                X = X.tocsr()
+            X = X[di:(None if df == 0 else df), :]
+
+    if stype is not None:
+        return X.asformat(stype)
+    if coo_build or (issparse(X) and X.format == "coo"):
+        return X.asformat("csr")
+
+    return X
 
 
 def kronpow(a, p, **kron_opts):

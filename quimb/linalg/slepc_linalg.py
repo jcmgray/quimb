@@ -106,7 +106,7 @@ def convert_mat_to_petsc(mat, comm=None):
     Parameters
     ----------
     mat : matrix-like
-        Matrix, dense or sparse.
+        Matrix, dense or sparse, or ``scipy.sparse.linalg.LinearOperator``.
     comm : mpi4py.MPI.Comm instance
         The mpi communicator.
 
@@ -123,35 +123,41 @@ def convert_mat_to_petsc(mat, comm=None):
     mpi_sz = comm.Get_size()
     pmat = PETSc.Mat()
 
-    if mpi_sz > 1:
-        pmat.create(comm=comm)
-        pmat.setSizes(mat.shape)
-        pmat.setFromOptions()
-        pmat.setUp()
-        ri, rf = pmat.getOwnershipRange()
+    pmat.create(comm=comm)
+    pmat.setSizes(mat.shape)
+    pmat.setFromOptions()
+    pmat.setUp()
+    ri, rf = pmat.getOwnershipRange()
 
-    # Sparse block row matrix
-    if sp.isspmatrix_bsr(mat):
+    # only consider the operator already sliced if owns whole
+    sliced = (mpi_sz == 1)
+    if callable(mat):
+        # operator hasn't been constructed yet
+        try:
+            # try and and lazily construct with slicing
+            mat = mat(owernership=(ri, rf))
+            sliced = True
+        except TypeError:
+            mat = mat()
+
+    # Sparse compressed or block row matrix
+    if sp.issparse(mat):
         mat.sort_indices()
-        if mpi_sz > 1:
+
+        if mpi_sz > 1 and not sliced:
             csr = slice_sparse_matrix_to_components(mat, ri, rf)
         else:
             csr = (mat.indptr, mat.indices, mat.data)
-        pmat.createBAIJ(size=mat.shape, bsize=mat.blocksize,
-                        nnz=mat.nnz, csr=csr, comm=comm)
 
-    # Sparse compressed row matrix
-    elif sp.isspmatrix_csr(mat):
-        mat.sort_indices()
-        if mpi_sz > 1:
-            csr = slice_sparse_matrix_to_components(mat, ri, rf)
-        else:
-            csr = (mat.indptr, mat.indices, mat.data)
-        pmat.createAIJ(size=mat.shape, nnz=mat.nnz, csr=csr, comm=comm)
+        if sp.isspmatrix_csr(mat):
+            pmat.createAIJ(size=mat.shape, nnz=mat.nnz, csr=csr, comm=comm)
+        elif sp.isspmatrix_bsr(mat):
+            pmat.createBAIJ(size=mat.shape, bsize=mat.blocksize,
+                            nnz=mat.nnz, csr=csr, comm=comm)
 
     # Dense matrix
     else:
-        if mpi_sz > 1:
+        if mpi_sz > 1 and not sliced:
             pmat.createDense(size=mat.shape, array=mat[ri:rf, :], comm=comm)
         else:
             pmat.createDense(size=mat.shape, array=mat, comm=comm)
@@ -443,18 +449,20 @@ def _init_eigensolver(k=6, which='LM', sigma=None, isherm=True, isgen=False,
     return eigensolver
 
 
-def eigs_slepc(A, k, *, B=None, which=None, sigma=None, isherm=True, v0=None,
-               ncv=None, return_vecs=True, sort=True, EPSType=None,
+def eigs_slepc(A, k, *, B=None, which=None, sigma=None, isherm=True, P=None,
+               v0=None, ncv=None, return_vecs=True, sort=True, EPSType=None,
                return_all_conv=False, st_opts=None, tol=None, maxiter=None,
                l_win=None, comm=None):
     """Solve a matrix using the advanced eigensystem solver
 
     Parameters
     ----------
-    A : sparse matrix in csr format
+    A : dense-matrix, sparse-matrix, LinearOperator or callable
         Operator to solve.
     k : int, optional
         Number of requested eigenpairs.
+    B : dense-matrix, sparse-matrix, LinearOperator or callable
+        The RHS operator defining a generalized eigenproblem.
     which : {"LM": "SM", "LR", "LA", "SR", "SA", "LI", "SI", "TM", "TR", "TI"}
         Which eigenpairs to target. See :func:`scipy.sparse.linalg.eigs`.
     sigma : float, optional
@@ -462,6 +470,8 @@ def eigs_slepc(A, k, *, B=None, which=None, sigma=None, isherm=True, v0=None,
         ``sigma`` is.
     isherm : bool, optional
         Whether problem is hermitian or not.
+    P : dense-matrix, sparse-matrix, LinearOperator or callable
+        Perform the eigensolve in the subspace defined by this projector.
     v0 : 1D-array like, optional
         Initial iteration vector, e.g., informed guess at eigenvector.
     ncv : int, optional
@@ -508,6 +518,10 @@ def eigs_slepc(A, k, *, B=None, which=None, sigma=None, isherm=True, v0=None,
     pA = convert_mat_to_petsc(A, comm=comm)
     pB = convert_mat_to_petsc(B, comm=comm) if isgen else None
 
+    if P is not None:
+        pP = convert_mat_to_petsc(P, comm=comm)
+        pA = pP.transposeMatMult(pA.matMult(pP))
+
     eigensolver.setOperators(pA, pB)
     if v0 is not None:
         eigensolver.setInitialSpace(convert_vec_to_petsc(v0, comm=comm))
@@ -535,7 +549,14 @@ def eigs_slepc(A, k, *, B=None, which=None, sigma=None, isherm=True, v0=None,
         def get_vecs_local():
             for i in range(k):
                 eigensolver.getEigenvector(i, pvec)
-                yield gather_petsc_array(pvec, comm=comm, out_shape=(-1, 1))
+
+                if P is not None:
+                    pvecP = pP.getVecLeft()
+                    pP.mult(pvec, pvecP)
+
+                yield gather_petsc_array(
+                    pvecP if P is not None else pvec,
+                    comm=comm, out_shape=(-1, 1))
 
         lvecs = list(get_vecs_local())
         if rank == 0:
@@ -710,7 +731,6 @@ def mfn_multiply_slepc(mat, vec,
 
 
 # -------------------- solve linear system of equations --------------------- #
-
 
 def lookup_ksp_error(i):
     """Look up PETSc error to print when raising after not converging.

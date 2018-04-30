@@ -20,7 +20,7 @@ from .linalg.base_linalg import (
     eigensystem, eig, eigh, eigvals, eigvalsh,
     eigvecs, eigvecsh, eigensystem_partial, groundstate, groundenergy,
     bound_spectrum, eigh_window, eigvalsh_window, eigvecsh_window,
-    svd, svds, norm, expm, sqrtm, expm_multiply,
+    svd, svds, norm, expm, sqrtm, expm_multiply, Lazy,
 )
 
 # Generating objects
@@ -79,6 +79,7 @@ __all__ = [
     'eigensystem', 'eig', 'eigh', 'eigvals', 'eigvalsh', 'eigvecs', 'eigvecsh',
     'eigensystem_partial', 'groundstate', 'groundenergy', 'bound_spectrum',
     'eigh_window', 'eigvalsh_window', 'eigvecsh_window', 'svd', 'svds', 'norm',
+    'Lazy',
     # Gen ------------------------------------------------------------------- #
     'spin_operator', 'pauli', 'hadamard', 'phase_gate', 'swap', 'controlled',
     'ham_heis', 'ham_ising', 'ham_j1j2', 'ham_mbl', 'ham_heis_2D',

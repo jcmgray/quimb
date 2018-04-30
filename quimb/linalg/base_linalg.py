@@ -77,7 +77,7 @@ _EIGS_METHODS = {
 
 def eigensystem_partial(A, k, isherm, *, B=None, which=None, return_vecs=True,
                         sigma=None, ncv=None, tol=None, v0=None, sort=True,
-                        backend=None, fallback_to_scipy=True, **backend_opts):
+                        backend=None, fallback_to_scipy=False, **backend_opts):
     """Return a few eigenpairs from an operator.
 
     Parameters
@@ -144,12 +144,11 @@ def eigensystem_partial(A, k, isherm, *, B=None, which=None, return_vecs=True,
         return _EIGS_METHODS[bkd](A, **settings, **backend_opts)
 
     except Exception as e:  # sometimes e.g. lobpcg fails, worth trying scipy
-
         if fallback_to_scipy and (bkd != 'SCIPY'):
-            warnings.warn("`eigensystem_partial` with backend '{}' failed, "
-                          "trying again with scipy. Set "
-                          "``fallback_to_scipy=False`` to avoid this and see "
-                          "the full error. ".format(bkd))
+            warnings.warn(
+                "`eigensystem_partial` with backend '{}' failed, trying again "
+                "with scipy. Set ``fallback_to_scipy=False`` to avoid this and"
+                " see the full error. ".format(bkd))
 
             return eigs_scipy(A, **settings, **backend_opts)
         else:
@@ -573,3 +572,62 @@ class IdentityLinearOperator(spla.LinearOperator):
 
     def _matmat(self, mat):
         return self.factor * mat
+
+
+class Lazy:
+    """A simple class representing an unconstructed matrix. This can be passed
+    to, for example, MPI workers, who can then construct the matrix themselves.
+    The main function ``fn`` should ideally take an ``ownership`` keyword to
+    avoid forming every row.
+
+    This is essentially like using ``functools.partial`` and assigning the
+    ``shape`` attribute.
+
+    Parameters
+    ----------
+    fn : callable
+        A function that constructs an operator.
+    shape :
+        Shape of the constructed operator.
+    args
+        Supplied to ``fn``.
+    kwargs
+        Supplied to ``fn``.
+
+    Returns
+    -------
+    Lazy : callable
+
+    Examples
+    --------
+    Setup the lazy operator:
+
+    >>> H_lazy = Lazy(ham_heis, n=10, shape=(2**10, 2**10), sparse=True)
+    >>> H_lazy
+    <Lazy(ham_heis, shape=(1024, 1024), dtype=None)>
+
+    Build a matrix slice (usually done automatically by e.g. ``eigs``):
+
+    >>> H_lazy(ownership=(256, 512))
+    <256x1024 sparse matrix of type '<class 'numpy.float64'>'
+            with 1664 stored elements in Compressed Sparse Row format>
+    """
+
+    def __init__(self, fn, *args, shape=None, **kwargs):
+        if shape is None:
+            raise TypeError("`shape` must be specified.")
+        self.fn = fn
+        self.args = args
+        self.kwargs = kwargs
+        self.shape = shape
+        self.dtype = None
+
+    def __call__(self, **kwargs):
+        A = self.fn(*self.args, **self.kwargs, **kwargs)
+        # helpful to store dtype once constructed
+        self.dtype = A.dtype
+        return A
+
+    def __repr__(self):
+        s = "<Lazy({}, shape={}, dtype={})>"
+        return s.format(self.fn.__name__, self.shape, self.dtype)

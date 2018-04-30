@@ -29,11 +29,8 @@ for _NUM_MPI_WORKERS_VAR in ['QUIMB_NUM_MPI_WORKERS',
                              'OMP_NUM_THREADS']:
     if _NUM_MPI_WORKERS_VAR in os.environ:
         NUM_MPI_WORKERS = int(os.environ[_NUM_MPI_WORKERS_VAR])
-        NUM_MPI_WORKERS_SET = True
         break
-    NUM_MPI_WORKERS_SET = False
-
-if not NUM_MPI_WORKERS_SET:
+else:
     import psutil
     _NUM_MPI_WORKERS_VAR = 'psutil'
     NUM_MPI_WORKERS = psutil.cpu_count(logical=False)

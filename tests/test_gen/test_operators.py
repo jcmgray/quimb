@@ -142,17 +142,17 @@ class TestSpinZProjector:
     def test_works(self, sz):
         prj = qu.zspin_projector(4, sz)
         h = qu.ham_heis(4)
-        h0 = prj @ h @ prj.H
+        h0 = prj.T @ h @ prj
         v0s = qu.eigvecsh(h0)
         for v0 in v0s.T:
-            vf = prj.H @ v0.T
+            vf = prj @ v0.T
             prjv = vf @ vf.H
             # Check reconstructed full eigenvectors commute with full ham
             assert_allclose(prjv @ h, h @ prjv, atol=1e-13)
         if sz == 0:
             # Groundstate must be in most symmetric subspace
             gs = qu.groundstate(h)
-            gs0 = prj .H @ v0s[:, 0]
+            gs0 = prj @ v0s[:, 0]
             assert_allclose(qu.expec(gs, gs0), 1.0)
             assert_allclose(qu.expec(h, gs0), qu.expec(h, gs))
 
@@ -166,17 +166,17 @@ class TestSpinZProjector:
     def test_spin_half_double_space(self, sz):
         prj = qu.zspin_projector(5, sz)
         h = qu.ham_heis(5)
-        h0 = prj @ h @ prj.H
+        h0 = prj.T @ h @ prj
         v0s = qu.eigvecsh(h0)
         for v0 in v0s.T:
-            vf = prj.H @ v0.T
+            vf = prj @ v0.T
             prjv = vf @ vf.H
             # Check reconstructed full eigenvectors commute with full ham
             assert_allclose(prjv @ h, h @ prjv, atol=1e-13)
         if sz == 0:
             # Groundstate must be in most symmetric subspace
             gs = qu.groundstate(h)
-            gs0 = prj .H @ v0s[:, 0]
+            gs0 = prj @ v0s[:, 0]
             assert_allclose(qu.expec(gs, gs0), 1.0)
             assert_allclose(qu.expec(h, gs0), qu.expec(h, gs))
 

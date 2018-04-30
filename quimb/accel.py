@@ -18,11 +18,8 @@ for env_var in ['QUIMB_NUM_THREAD_WORKERS',
                 'OMP_NUM_THREADS']:
     if env_var in os.environ:
         _NUM_THREAD_WORKERS = int(os.environ[env_var])
-        _NUM_THREAD_WORKERS_SET = True
         break
-    _NUM_THREAD_WORKERS_SET = False
-
-if not _NUM_THREAD_WORKERS_SET:
+else:
     import psutil
     _NUM_THREAD_WORKERS = psutil.cpu_count(logical=False)
 

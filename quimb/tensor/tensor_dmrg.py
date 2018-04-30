@@ -619,7 +619,8 @@ class DMRG:
             EPSType=self.opts['local_eig_EPSType'],
             ncv=self.opts['local_eig_ncv'],
             tol=self.opts['local_eig_tol'],
-            maxiter=self.opts['local_eig_maxiter'])
+            maxiter=self.opts['local_eig_maxiter'],
+            fallback_to_scipy=True)
 
     def print_energy_info(self, Heff=None, loc_gs=None):
         sweep_num = len(self.energies) + 1

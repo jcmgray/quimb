@@ -97,15 +97,28 @@ class TestQuimbify:
                                         [3j, 0, 6j, 9]])))
     @mark.parametrize("format_in", stypes)
     @mark.parametrize("format_out", (None,) + stypes)
-    def test_reshape_sparse(self, qtype, shape, out, format_in, format_out):
-        x = qu.core.sparse_matrix([[1], [0], [2], [3j]], format_in)
-        y = qu.qu(x, qtype=qtype, stype=format_out)
+    @mark.parametrize("dtype", [float, complex, np.float_, np.complex_])
+    def test_reshape_sparse(self, qtype, shape, out,
+                            format_in, format_out, dtype):
+        import warnings
+
+        in_ = [[1], [0], [2], [3j]]
+        x = qu.core.sparse_matrix(in_, stype=format_in)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            y = qu.qu(x, qtype=qtype, stype=format_out, dtype=dtype)
+
         assert y.shape == shape
-        assert y.dtype == complex
+        assert y.dtype == dtype
         if format_out is None:
             format_out = format_in
         assert y.format == format_out
-        assert_allclose(y.A, out)
+
+        if np.issubdtype(dtype, np.floating):
+            assert_allclose(y.A, np.real(out), atol=1e-12)
+        else:
+            assert_allclose(y.A, out)
 
     @mark.parametrize("qtype, shape, out",
                       (("bra", (1, 4), [[1, 0, 2, -3j]]),
