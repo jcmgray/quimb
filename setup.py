@@ -31,7 +31,7 @@ setup(
         'cytoolz>=0.8.0',
     ],
     extras_require={
-        'test': [
+        'tests': [
             'coverage',
             'pytest',
             'pytest-cov',

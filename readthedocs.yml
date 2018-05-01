@@ -1,7 +1,9 @@
 conda:
     file: deps/requirements-rtd.yml
 python:
-    version: 3
-    setup_py_install: true
+    version: 3.6
+    pip_install: true
     extra_requirements:
           - docs
+build:
+    image: latest

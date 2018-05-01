@@ -15,5 +15,6 @@ dependencies:
   - sphinx
   - sphinx_bootstrap_theme
   - nbsphinx
+  - versioneer
   - pip:
     - "git+https://github.com/jcmgray/opt_einsum.git"
