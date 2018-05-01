@@ -621,8 +621,8 @@ def entropy_subsys_approx(psi_ab, dims, sysa, bsz=None, **kwargs):
     bsz : int, optional
         The size of the lanczos vector blocks to use. If None, guess a good
         value based on the effective rank of the subsystem.
-    **kwargs
-        See :func:`approx_spectral_function`.
+    kwargs
+        Supplied to :func:`approx_spectral_function`.
     """
     lo = lazy_ptr_linop(psi_ab, dims=dims, sysa=sysa)
 
@@ -646,8 +646,8 @@ def tr_sqrt_subsys_approx(psi_ab, dims, sysa, bsz=None, **kwargs):
     bsz : int, optional
         The size of the lanczos vector blocks to use. If None, guess a good
         value based on the effective rank of the subsystem.
-    **kwargs
-        See :func:`approx_spectral_function`.
+    kwargs
+        Supplied to :func:`approx_spectral_function`.
     """
     lo = lazy_ptr_linop(psi_ab, dims=dims, sysa=sysa)
 
@@ -687,8 +687,8 @@ def logneg_subsys_approx(psi_abc, dims, sysa, sysb, bsz=None, **kwargs):
     bsz : int, optional
         The size of the lanczos vector blocks to use. If None, guess a good
         value based on the effective rank of the subsystem.
-    **kwargs
-        See :func:`approx_spectral_function`.
+    kwargs
+        Supplied to :func:`approx_spectral_function`.
     """
     return max(log2(norm_ppt_subsys_approx(psi_abc, dims, sysa, sysb,
                                            bsz=bsz, **kwargs)), 0.0)
@@ -713,8 +713,8 @@ def negativity_subsys_approx(psi_abc, dims, sysa, sysb, bsz=None, **kwargs):
     bsz : int, optional
         The size of the lanczos vector blocks to use. If None, guess a good
         value based on the effective rank of the subsystem.
-    **kwargs
-        See :func:`approx_spectral_function`.
+    kwargs
+        Supplied to :func:`approx_spectral_function`.
     """
     return max((norm_ppt_subsys_approx(psi_abc, dims, sysa, sysb,
                                        bsz=bsz, **kwargs) - 1) / 2, 0.0)

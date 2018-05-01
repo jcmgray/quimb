@@ -11,7 +11,9 @@ dependencies:
   - psutil
   - cytoolz
   - tqdm
+  - ipython
   - sphinx
   - sphinx_bootstrap_theme
+  - nbsphinx
   - pip:
     - "git+https://github.com/jcmgray/opt_einsum.git"

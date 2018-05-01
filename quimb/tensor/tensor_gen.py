@@ -53,14 +53,19 @@ def MPS_rand_state(n, bond_dim, phys_dim=2, normalize=True, cyclic=False,
 
     Parameters
     ----------
+    n : int
+        The number of sites.
     bond_dim : int
         The bond dimension.
     phys_dim : int, optional
         The physical (site) dimensions, defaults to 2.
     normalize : bool, optional
         Whether to normalize the state.
-    dtype : {complex, float}, optional
-        What dtype to use.
+    cyclic : bool, optional
+        Generate a MPS with periodic boundary conditions or not, default is
+        open boundary conditions.
+    dtype : {float, complex} or numpy dtype, optional
+        Data type of the tensor network.
     mps_opts
         Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductState`.
     """
@@ -134,7 +139,7 @@ def MPS_neel_state(n, down_first=False, dtype=float, **mps_opts):
     n : int
         The number of spins.
     down_first : bool, optional
-        Whether to start with '1' or '0' first.
+        Whether to start with '1' (down) or '0' (up) first.
     mps_opts
         Supplied to MatrixProductState constructor.
     """
@@ -145,7 +150,18 @@ def MPS_neel_state(n, down_first=False, dtype=float, **mps_opts):
 
 
 def MPS_rand_computational_state(n, seed=None, dtype=float, **mps_opts):
-    """
+    """Generate a random computation basis state, like '01101001010'.
+
+    Parameters
+    ----------
+    n : int
+        The number of qubits.
+    seed : int, optional
+        The seed to use.
+    dtype : {float, complex} or numpy dtype, optional
+        Data type of the tensor network.
+    mps_opts
+        Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductState`.
     """
     if seed is not None:
         random.seed(seed)
@@ -154,9 +170,25 @@ def MPS_rand_computational_state(n, seed=None, dtype=float, **mps_opts):
     return MPS_computational_state(cstr, dtype=dtype, **mps_opts)
 
 
-def MPS_zero_state(n, bond_dim=1, phys_dim=2, dtype=float,
-                   cyclic=False, **mps_opts):
+def MPS_zero_state(n, bond_dim=1, phys_dim=2, cyclic=False,
+                   dtype=float, **mps_opts):
     """The all-zeros MPS state, of given bond-dimension.
+
+    Parameters
+    ----------
+    n : int
+        The number of sites.
+    bond_dim : int, optional
+        The bond dimension, defaults to 1.
+    phys_dim : int, optional
+        The physical (site) dimensions, defaults to 2.
+    cyclic : bool, optional
+        Generate a MPS with periodic boundary conditions or not, default is
+        open boundary conditions.
+    dtype : {float, complex} or numpy dtype, optional
+        Data type of the tensor network.
+    mps_opts
+        Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductState`.
     """
     cyc_dim = (bond_dim,) if cyclic else ()
 
@@ -175,6 +207,20 @@ def MPS_zero_state(n, bond_dim=1, phys_dim=2, dtype=float,
 
 def MPO_identity(n, phys_dim=2, dtype=float, cyclic=False, **mpo_opts):
     """Generate an identity MPO of size ``n``.
+
+    Parameters
+    ----------
+    n : int
+        The number of sites.
+    phys_dim : int, optional
+        The physical (site) dimensions, defaults to 2.
+    dtype : {float, complex} or numpy dtype, optional
+        Data type of the tensor network.
+    cyclic : bool, optional
+        Generate a MPO with periodic boundary conditions or not, default is
+        open boundary conditions.
+    mpo_opts
+        Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductOperator`.
     """
     II = np.identity(phys_dim, dtype=dtype)
     cyc_dim = (1,) if cyclic else ()
@@ -200,6 +246,20 @@ def MPO_identity_like(mpo, **mpo_opts):
 
 def MPO_zeros(n, phys_dim=2, dtype=float, cyclic=False, **mpo_opts):
     """Generate a zeros MPO of size ``n``.
+
+    Parameters
+    ----------
+    n : int
+        The number of sites.
+    phys_dim : int, optional
+        The physical (site) dimensions, defaults to 2.
+    dtype : {float, complex} or numpy dtype, optional
+        Data type of the tensor network.
+    cyclic : bool, optional
+        Generate a MPO with periodic boundary conditions or not, default is
+        open boundary conditions.
+    mpo_opts
+        Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductOperator`.
     """
     cyc_dim = (1,) if cyclic else ()
 
@@ -228,14 +288,19 @@ def MPO_rand(n, bond_dim, phys_dim=2, normalize=True, cyclic=False,
 
     Parameters
     ----------
+    n : int
+        The number of sites.
     bond_dim : int
         The bond dimension.
     phys_dim : int, optional
         The physical (site) dimensions, defaults to 2.
     normalize : bool, optional
         Whether to normalize the operator such that ``trace(A.H @ A) == 1``.
-    dtype : {complex, float}, optional
-        What dtype to use.
+    cyclic : bool, optional
+        Generate a MPO with periodic boundary conditions or not, default is
+        open boundary conditions.
+    dtype : {float, complex} or numpy dtype, optional
+        Data type of the tensor network.
     herm : bool, optional
         Whether to make the matrix hermitian (or symmetric if real) or not.
     mpo_opts
@@ -373,6 +438,8 @@ class MPOSpinHam:
     >>> builder.add_term(0.5, '-', '+')
     >>> builder.add_term(1.0, 'Z', 'Z')
     >>> mpo_ham = builder.build(100)
+    >>> mpo_ham
+    <MatrixProductOperator(tensors=100, structure='I{}', nsites=100)>
     """
 
     def __init__(self, S=1 / 2, cyclic=False):
@@ -418,27 +485,65 @@ class MPOSpinHam:
                                      site_tag_id=site_tag_id, tags=tags)
 
 
-def MPO_ham_ising(n, j=1.0, bx=0.0, *, cyclic=False, tags=None, bond_name="",
-                  upper_ind_id='k{}', lower_ind_id='b{}', site_tag_id='I{}'):
+def MPO_ham_ising(n, j=1.0, bx=0.0, *, S=1 / 2, cyclic=False, **mpo_opts):
     """Ising Hamiltonian in matrix product operator form.
+
+    Parameters
+    ----------
+    n : int
+        The number of sites.
+    j : float, optional
+        The ZZ interaction strength.
+    bx : float, optional
+        The X-magnetic field strength.
+    S : {1/2, 1, 3/2, ...}, optional
+        The underlying spin of the system, defaults to 1/2.
+    cyclic : bool, optional
+        Generate a MPO with periodic boundary conditions or not, default is
+        open boundary conditions.
+    mpo_opts
+        Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductOperator`.
+
+    Returns
+    -------
+    MatrixProductOperator
     """
     H = MPOSpinHam(S=1 / 2, cyclic=cyclic)
     H.add_term(j, 'Z', 'Z')
     H.add_term(-bx, 'X')
-    return H.build(n, site_tag_id=site_tag_id, tags=tags, bond_name=bond_name,
-                   upper_ind_id=upper_ind_id, lower_ind_id=lower_ind_id)
+
+    return H.build(n, **mpo_opts)
 
 
-def MPO_ham_XY(n, j=1.0, bz=0.0, *, cyclic=False, tags=None, bond_name="",
-               upper_ind_id='k{}', lower_ind_id='b{}', site_tag_id='I{}'):
+def MPO_ham_XY(n, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **mpo_opts):
     """XY-Hamiltonian in matrix product operator form.
+
+    Parameters
+    ----------
+    n : int
+        The number of sites.
+    j : float or (float, float), optional
+        The XX and YY interaction strength.
+    bz : float, optional
+        The Z-magnetic field strength.
+    S : {1/2, 1, 3/2, ...}, optional
+        The underlying spin of the system, defaults to 1/2.
+    cyclic : bool, optional
+        Generate a MPO with periodic boundary conditions or not, default is
+        open boundary conditions.
+    mpo_opts
+        Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductOperator`.
+
+    Returns
+    -------
+    MatrixProductOperator
     """
     try:
         jx, jy = j
     except (TypeError, ValueError):
         jx = jy = j
 
-    H = MPOSpinHam(S=1 / 2, cyclic=cyclic)
+    H = MPOSpinHam(S=S, cyclic=cyclic)
     if jx == jy:
         # easy way to enforce realness
         H.add_term(jx / 2, '+', '-')
@@ -447,20 +552,39 @@ def MPO_ham_XY(n, j=1.0, bz=0.0, *, cyclic=False, tags=None, bond_name="",
         H.add_term(jx, 'X', 'X')
         H.add_term(jy, 'Y', 'Y')
     H.add_term(-bz, 'Z')
-    return H.build(n, site_tag_id=site_tag_id, tags=tags, bond_name=bond_name,
-                   upper_ind_id=upper_ind_id, lower_ind_id=lower_ind_id)
+
+    return H.build(n, **mpo_opts)
 
 
-def MPO_ham_heis(n, j=1.0, bz=0.0, *, cyclic=False, tags=None, bond_name="",
-                 upper_ind_id='k{}', lower_ind_id='b{}', site_tag_id='I{}'):
+def MPO_ham_heis(n, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **mpo_opts):
     """Heisenberg Hamiltonian in matrix product operator form.
+
+    Parameters
+    ----------
+    n : int
+        The number of sites.
+    j : float or (float, float, float), optional
+        The XX, YY and ZZ interaction strength.
+    bz : float, optional
+        The Z-magnetic field strength.
+    S : {1/2, 1, 3/2, ...}, optional
+        The underlying spin of the system, defaults to 1/2.
+    cyclic : bool, optional
+        Generate a MPO with periodic boundary conditions or not, default is
+        open boundary conditions.
+    mpo_opts
+        Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductOperator`.
+
+    Returns
+    -------
+    MatrixProductOperator
     """
     try:
         jx, jy, jz = j
     except (TypeError, ValueError):
         jx = jy = jz = j
 
-    H = MPOSpinHam(S=1 / 2, cyclic=cyclic)
+    H = MPOSpinHam(S=S, cyclic=cyclic)
     if jx == jy:
         # easy way to enforce realness
         H.add_term(jx / 2, '+', '-')
@@ -470,8 +594,8 @@ def MPO_ham_heis(n, j=1.0, bz=0.0, *, cyclic=False, tags=None, bond_name="",
         H.add_term(jy, 'Y', 'Y')
     H.add_term(jz, 'Z', 'Z')
     H.add_term(-bz, 'Z')
-    return H.build(n, site_tag_id=site_tag_id, tags=tags, bond_name=bond_name,
-                   upper_ind_id=upper_ind_id, lower_ind_id=lower_ind_id)
+
+    return H.build(n, **mpo_opts)
 
 
 def MPO_ham_mbl(n, dh, j=1.0, run=None, S=1 / 2, *, cyclic=False,
@@ -484,11 +608,11 @@ def MPO_ham_mbl(n, dh, j=1.0, run=None, S=1 / 2, *, cyclic=False,
         Number of spins.
     dh : float
         Random noise strength.
-    j : float, sequence of float
+    j : float, or (float, float, float), optional
         Interaction strength(s) e.g. 1 or (1., 1., 0.5).
-    run : int
+    run : int, optional
         Random number to seed the noise with.
-    S : float
+    S : {1/2, 1, 3/2, ...}, optional
         The underlying spin of the system, defaults to 1/2.
     cyclic : bool, optional
         Whether to use periodic boundary conditions - default is False.
@@ -498,6 +622,10 @@ def MPO_ham_mbl(n, dh, j=1.0, run=None, S=1 / 2, *, cyclic=False,
         Frequency of the quasirandom noise, only if ``dh_dist='qr'``.
     mpo_opts
         Supplied to :class:`MatrixProductOperator`.
+
+    Returns
+    -------
+    MatrixProductOperator
     """
     # Parse the interaction term and strengths
     try:

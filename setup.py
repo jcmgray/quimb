@@ -39,8 +39,12 @@ setup(
         'docs': [
             'sphinx',
             'sphinx_bootstrap_theme',
+            'nbsphinx',
+            'ipython',
         ],
         'advanced_solvers': [
+            'mpi4py',
+            'petsc4py',
             'slepc4py',
         ],
         'tensor': [

@@ -2,6 +2,32 @@
 Calculating Quantities
 ######################
 
+There are various built-in functions to calculate quantities, not limited to:
+
+- :func:`~quimb.calc.fidelity`
+- :func:`~quimb.calc.purify`
+- :func:`~quimb.calc.entropy`
+- :func:`~quimb.calc.mutinf`
+- :func:`~quimb.calc.mutinf_subsys`
+- :func:`~quimb.calc.schmidt_gap`
+- :func:`~quimb.calc.tr_sqrt`
+- :func:`~quimb.calc.partial_transpose`
+- :func:`~quimb.calc.logneg`
+- :func:`~quimb.calc.logneg_subsys`
+- :func:`~quimb.calc.negativity`
+- :func:`~quimb.calc.concurrence`
+- :func:`~quimb.calc.one_way_classical_information`
+- :func:`~quimb.calc.quantum_discord`
+- :func:`~quimb.calc.trace_distance`
+- :func:`~quimb.calc.decomp`
+- :func:`~quimb.calc.correlation`
+- :func:`~quimb.calc.pauli_correlations`
+- :func:`~quimb.calc.ent_cross_matrix`
+- :func:`~quimb.calc.is_degenerate`
+- :func:`~quimb.calc.is_eigenvector`
+- :func:`~quimb.calc.page_entropy`
+- :func:`~quimb.calc.heisenberg_energy`
+
 
 Approximate Spectral Functions
 ==============================

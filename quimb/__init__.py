@@ -5,7 +5,7 @@ Quantum Information for Many-Body calculations.
 # Accelerated basic linalg operations
 from .accel import (
     prod, isket, isbra, isop, isvec, issparse, isreal, isherm, ispos, mul, dot,
-    vdot, rdot, ldmul, rdmul, outer, explt,
+    vdot, rdot, ldmul, rdmul, outer, explt, get_thread_pool,
 )
 
 # Core functions
@@ -22,6 +22,7 @@ from .linalg.base_linalg import (
     bound_spectrum, eigh_window, eigvalsh_window, eigvecsh_window,
     svd, svds, norm, expm, sqrtm, expm_multiply, Lazy,
 )
+from .linalg.mpi_launcher import get_mpi_pool
 
 # Generating objects
 from .gen.operators import (
@@ -108,7 +109,7 @@ __all__ = [
     # Some misc useful math ------------------------------------------------- #
     'pi', 'cos', 'sin', 'tan', 'exp', 'log', 'log2', 'sqrt',
     # Utils
-    'save_to_disk', 'load_from_disk',
+    'save_to_disk', 'load_from_disk', 'get_thread_pool', 'get_mpi_pool',
 ]
 
 from ._version import get_versions

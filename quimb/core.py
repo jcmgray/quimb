@@ -783,7 +783,9 @@ def ikron(ops, dims, inds, sparse=None, stype=None,
         Whether to build the operator in parallel using threads (only good
         for big (d > 2**16) operators).
     ownership : (int, int), optional
-        If given, the range of rows to construct.
+        If given, only construct the rows in ``range(*ownership)``. Such that
+        the  final operator is actually ``X[slice(*ownership), :]``. Useful for
+        constructing operators in parallel, e.g. for MPI.
 
     Returns
     -------

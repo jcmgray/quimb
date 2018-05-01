@@ -5,7 +5,7 @@ import numpy as np
 import numpy.linalg as nla
 import scipy.linalg as scla
 
-from ..accel import issparse
+import quimb as qu
 
 
 _NUMPY_EIG_FUNCS = {
@@ -116,11 +116,11 @@ def eigs_numpy(A, k, B=None, which=None, return_vecs=True,
 
     Parameters
     ----------
-    A : matrix-like
+    A : matrix-like or quimb.Lazy
         Operator to partially eigen-decompose.
     k : int
         Number of eigenpairs to return.
-    B : matrix-like
+    B : matrix-like or quimb.Lazy
         If given, the RHS matrix defining a generalized eigen problem.
     which : str, optional
         Which part of the spectrum to target.
@@ -130,7 +130,7 @@ def eigs_numpy(A, k, B=None, which=None, return_vecs=True,
         Target eigenvalue.
     isherm : bool, optional
         Whether `a` is hermitian.
-    P : dense-matrix or callable
+    P : matrix-like or quimb.Lazy
         Perform the eigensolve in the subspace defined by this projector.
     sort : bool, optional
         Whether to sort reduced list of eigenpairs into ascending order.
@@ -141,11 +141,11 @@ def eigs_numpy(A, k, B=None, which=None, return_vecs=True,
     -------
         lk, (vk): k eigenvalues (and eigenvectors) sorted according to which
     """
-    if callable(A):
+    if isinstance(A, qu.Lazy):
         A = A()
-    if callable(B):
+    if isinstance(B, qu.Lazy):
         B = B()
-    if callable(P):
+    if isinstance(P, qu.Lazy):
         P = P()
 
     # project into subspace
@@ -168,7 +168,7 @@ def eigs_numpy(A, k, B=None, which=None, return_vecs=True,
 
     if return_vecs:
         # get all eigenpairs
-        lk, vk = eig_fn(A.A if issparse(A) else A, **eig_opts)
+        lk, vk = eig_fn(A.A if qu.issparse(A) else A, **eig_opts)
 
         # sort and trim according to which k we want
         sk = sort_inds(lk, method=which, sigma=sigma)[:k]
@@ -187,7 +187,7 @@ def eigs_numpy(A, k, B=None, which=None, return_vecs=True,
 
     else:
         # get all eigenvalues
-        lk = eig_fn(A.A if issparse(A) else A, **eig_opts)
+        lk = eig_fn(A.A if qu.issparse(A) else A, **eig_opts)
 
         # sort and trim according to which k we want
         sk = sort_inds(lk, method=which, sigma=sigma)[:k]
@@ -216,8 +216,8 @@ def svds_numpy(a, k, return_vecs=True, **_):
         Singlar value triplets.
     """
     if return_vecs:
-        uk, sk, vkt = nla.svd(a.A if issparse(a) else a, compute_uv=True)
+        uk, sk, vkt = nla.svd(a.A if qu.issparse(a) else a, compute_uv=True)
         return np.asmatrix(uk[:, :k]), sk[:k], np.asmatrix(vkt[:k, :])
     else:
-        sk = nla.svd(a.A if issparse(a) else a, compute_uv=False)
+        sk = nla.svd(a.A if qu.issparse(a) else a, compute_uv=False)
         return sk[:k]

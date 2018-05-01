@@ -105,8 +105,8 @@ def convert_mat_to_petsc(mat, comm=None):
 
     Parameters
     ----------
-    mat : matrix-like
-        Matrix, dense or sparse, or ``scipy.sparse.linalg.LinearOperator``.
+    mat : dense, sparse, LinearOperator or Lazy matrix.
+        The operator to convert.
     comm : mpi4py.MPI.Comm instance
         The mpi communicator.
 
@@ -131,7 +131,7 @@ def convert_mat_to_petsc(mat, comm=None):
 
     # only consider the operator already sliced if owns whole
     sliced = (mpi_sz == 1)
-    if callable(mat):
+    if isinstance(mat, qu.Lazy):
         # operator hasn't been constructed yet
         try:
             # try and and lazily construct with slicing

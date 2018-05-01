@@ -67,12 +67,20 @@ _TENSOR_BACKEND = 'numpy'
 
 def get_tensor_backend():
     """Get the default backend used for tensor contractions, via 'opt_einsum'.
+
+    See Also
+    --------
+    set_tensor_backend, tensor_contract
     """
     return _TENSOR_BACKEND
 
 
 def set_tensor_backend(backend):
     """Set the default backend used for tensor contractions, via 'opt_einsum'.
+
+    See Also
+    --------
+    get_tensor_backend, tensor_contract
     """
     global _TENSOR_BACKEND
     _TENSOR_BACKEND = backend

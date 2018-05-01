@@ -2,23 +2,31 @@
 Installation
 ############
 
-``quimb`` is hosted on `github <https://github.com/jcmgray/quimb>`_. If the dependencies are satisfied, it can be installed with pip directly from there:
+:mod:`quimb` itself is a pure python package and can now be found on PyPI:
 
 .. code-block:: bash
 
-    pip install git+git://github.com/jcmgray/quimb.git@develop
+    pip install quimb
+
+However it is recommended to first install the main dependencies using e.g. ``conda``, as below.
+The code is hosted on `github <https://github.com/jcmgray/quimb>`_ and if the dependencies are satisfied, a development version can be installed with pip directly from there:
+
+.. code-block:: bash
+
+    pip install --no-deps -U git+git://github.com/jcmgray/quimb.git@develop
+
 
 Required Dependencies
 =====================
 
 The core packages ``quimb`` requires are:
 
-    * python 3.5+
-    * `numpy <http://www.numpy.org/>`_
-    * `scipy <https://www.scipy.org/>`_
-    * `numba <http://numba.pydata.org/>`_
-    * `numexpr <https://github.com/pydata/numexpr>`_
-    * `cytoolz <https://github.com/pytoolz/cytoolz>`_
+* python 3.5+
+* `numpy <http://www.numpy.org/>`_
+* `scipy <https://www.scipy.org/>`_
+* `numba <http://numba.pydata.org/>`_
+* `numexpr <https://github.com/pydata/numexpr>`_
+* `cytoolz <https://github.com/pytoolz/cytoolz>`_
 
 For ease and performance (i.e. mkl compiled libraries), `conda <https://conda.io/miniconda.html/>`_ is the recommended distribution with which to install these.
 
@@ -28,22 +36,22 @@ Optional Dependencies
 
 The tensor network library requires:
 
-  * `opt_einsum <https://github.com/dgasmith/opt_einsum>`_
+* `opt_einsum <https://github.com/dgasmith/opt_einsum>`_
 
 which efficiently optimizes tensor contraction expressions.
-To plot tensor networks as a graph requires:
+To plot tensor networks as colored graphs with weighted edges requires:
 
-  * `matplotlib <https://matplotlib.org/>`_
-  * `networkx <https://networkx.github.io/>`_
+* `matplotlib <https://matplotlib.org/>`_
+* `networkx <https://networkx.github.io/>`_
 
 Fast and optionally distributed partial eigen-solving, SVD, exponentiation etc. can be accelerated with ``slepc4py`` and its dependencies:
 
-    * `slepc4py <https://bitbucket.org/slepc/slepc4py>`_
-    * `slepc <http://slepc.upv.es/>`_
-    * `petsc4py <https://bitbucket.org/petsc/petsc4py>`_
-    * `petsc <http://www.mcs.anl.gov/petsc/>`_
-    * `mpi4py <http://mpi4py.readthedocs.io/en/latest/>`_ (v2.1.0+)
-    * An MPI implementation (`OpenMPI <https://www.open-mpi.org/>`_ recommended, the 1.10.x series seems most robust for spawning processes)
+* `slepc4py <https://bitbucket.org/slepc/slepc4py>`_
+* `slepc <http://slepc.upv.es/>`_
+* `petsc4py <https://bitbucket.org/petsc/petsc4py>`_
+* `petsc <http://www.mcs.anl.gov/petsc/>`_
+* `mpi4py <http://mpi4py.readthedocs.io/en/latest/>`_ (v2.1.0+)
+* An MPI implementation (`OpenMPI <https://www.open-mpi.org/>`_ recommended, the 1.10.x series seems most robust for spawning processes)
 
 It is recommended to compile and install these (apart from MPI if you are e.g. on a cluster) yourself (see below).
 

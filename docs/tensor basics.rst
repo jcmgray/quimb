@@ -96,3 +96,9 @@ A :class:`~quimb.tensor.tensor_core.TensorNetwork` keeps its tensors as a mappin
 Any tagging strategy/structure can be used to place/reference/remove tensors etc. For example the default tags of a 1D tensor network uses are ```('I0', 'I1', 'I2', ...) ```. A 2D network might use ```('I0J0', 'I1J0', 'I2J0', 'I0J1', ...)``` etc.
 
 To select a subset or partition a network into tensors that match any or all of a set of tags see :func:`~quimb.tensor.tensor_core.TensorNetwork.select` or :func:`~quimb.tensor.tensor_core.TensorNetwork.partition`.
+
+
+Contraction Backend
+-------------------
+
+The tensor contractions can be performed with any backend supported by `opt_einsum <http://opt-einsum-jcmgray.readthedocs.io/en/latest/backends.html>`_, including several which use the GPU. These are specified with the ``backend`` argument to :func:`~quimb.tensor.tensor_core.tensor_contract` and any related functions, or by setting a default backend using :func:`~quimb.tensor.tensor_core.set_tensor_backend`.

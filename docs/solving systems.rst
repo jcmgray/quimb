@@ -45,7 +45,6 @@ The possible partical decompositions are:
     - :func:`~quimb.linalg.base_linalg.eigensystem_partial`
     - :func:`~quimb.linalg.base_linalg.svds`
 
-
 Interior eigen-solving
 ~~~~~~~~~~~~~~~~~~~~~~
 

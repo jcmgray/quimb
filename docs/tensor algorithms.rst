@@ -73,13 +73,19 @@ We can also add MPS and compress:
     >>> p2.H @ p2
     0.9999999999999998
 
-Find the overlap with a random hermitian :class:`~quimb.tensor.tensor_1d.MatrixProductOperator`
+Generate a random hermitian :class:`~quimb.tensor.tensor_1d.MatrixProductOperator` and form a 'overlap' network with our MPS:
 
 .. code-block:: python
 
-    >>> A = MPO_rand_herm(30, bond_dim=7)
+    >>> A = MPO_rand_herm(30, bond_dim=7, tags=['_HAM'])
     >>> pH = p.H
     >>> align_TN_1D(pH, A, p, inplace=True);
+    >>> (pH & A & p).graph(color='_HAM')
+
+.. image:: ./_static/tensor_algorithms_MPO_expec.png
+
+Compute the actual contraction:
+
     >>> (pH & A & p) ^ ...
     -1.2069781127179028e-29
 
@@ -87,29 +93,43 @@ Find the overlap with a random hermitian :class:`~quimb.tensor.tensor_1d.MatrixP
 Building Hamiltonians
 ---------------------
 
-See :class:`~quimb.tensor.tensor_gen.MPOSpinHam`.
+There a few built-in MPO hamiltoanians:
+
+* :class:`~quimb.tensor.tensor_gen.MPO_ham_heis`
+* :class:`~quimb.tensor.tensor_gen.MPO_ham_ising`
+* :class:`~quimb.tensor.tensor_gen.MPO_ham_XY`
+* :class:`~quimb.tensor.tensor_gen.MPO_ham_mbl`
+
+These all accept a ``cyclic`` argument to enable periodic boundary conditions (PBC), and a ``S`` argument to set the size of spin.
+
+For generating other spin Hamiltonians see :class:`~quimb.tensor.tensor_gen.MPOSpinHam`, or consider using the raw constructor of :class:`~quimb.tensor.tensor_1d.MatrixProductOperator`.
 
 
 Example of DMRG2 calcuation
 ---------------------------
 
-Build a Hamiltonian term by term and setup a DMRG solver:
+First we build a Hamiltonian term by term (though we could just use :class:`~quimb.tensor.tensor_gen.MPO_ham_heis`:
 
 .. code-block:: python
 
-    from quimb.tensor import *
+    from quimb.tensor import MPOSpinHam, DMRG2
     builder = MPOSpinHam(S=1)
     builder.add_term(1/2, '+', '-')
     builder.add_term(1/2, '-', '+')
     builder.add_term(1, 'Z', 'Z')
     ham = builder.build(n=100)
-    dmrg = DMRG2(ham, bond_dims=[10, 20, 100, 100, 200], cutoffs=1e-10)
 
-Now solve to a certain absolute energy tolerance, showing progress and a schematic of the final state:
+Then we construct the 2-site DMRG object (:class:`~quimb.tensor.tensor_dmrg.DMRG2`), with a default sequence of maximum bond dimensions and a bond compression cutoff:
 
 .. code-block:: python
 
-    >>> dmrg.solve(tol=1e-6, verbosity=True)
+    dmrg = DMRG2(ham, bond_dims=[10, 20, 100, 100, 200], cutoffs=1e-10)
+
+The ``DMRG`` object will automatically detect OBC/PBC. Now we can solve to a certain absolute energy tolerance, showing progress and a schematic of the final state:
+
+.. code-block:: python
+
+    >>> dmrg.solve(tol=1e-6, verbosity=1)
     SWEEP-1, direction=R, max_bond=10, cutoff:1e-10
     100%|███████████████████████████████████████████| 99/99 [00:01<00:00, 75.66it/s]
     Energy: -138.73797893126138 ... not converged
@@ -139,6 +159,8 @@ Now solve to a certain absolute energy tolerance, showing progress and a schemat
         2 95 96 96 96 96 96 95 92 90 87 83 78 73 64 53 27 9 3
     ... ->-->-->-->-->-->-->-->-->-->-->-->-->-->-->-->-->->-o
          |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  | | |
+
+There are many options stored in the dict ``DMRG.opts`` - an explanation of each of these is given in :func:`~quimb.tensor.tensor_dmrg.get_default_opts`, and it may be neccesarry to tweak these to achieve the best performance/accuracy, especially for PBC (see :ref:`examples`).
 
 
 Performance tips

@@ -114,4 +114,4 @@ docs/_autosummary/
 
 \.pytest_cache/
 
-examples/\.ipynb_checkpoints/
+*.ipynb_checkpoints/

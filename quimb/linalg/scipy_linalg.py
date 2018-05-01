@@ -4,6 +4,8 @@
 import numpy as np
 import scipy.sparse.linalg as spla
 
+import quimb as qu
+
 
 def maybe_sort_and_project(lk, vk, P, sort=True):
     if sort:
@@ -23,11 +25,11 @@ def eigs_scipy(A, k, *, B=None, which=None, return_vecs=True, sigma=None,
 
     Parameters
     ----------
-    A : dense-matrix, sparse-matrix, LinearOperator or callable
+    A : dense-matrix, sparse-matrix, LinearOperator or quimb.Lazy
         The operator to solve for.
     k : int
         Number of eigenpairs to return
-    B : dense-matrix, sparse-matrix, LinearOperator or callable, optional
+    B : dense-matrix, sparse-matrix, LinearOperator or quimb.Lazy, optional
         If given, the RHS matrix (which should be positive) defining a
         generalized eigen problem.
     which : str, optional
@@ -39,7 +41,7 @@ def eigs_scipy(A, k, *, B=None, which=None, return_vecs=True, sigma=None,
         Shift, if targeting interior eigenpairs.
     isherm : bool, optional
         Whether ``A`` is hermitian.
-    P : dense-matrix, sparse-matrix, LinearOperator or callable, optional
+    P : dense-matrix, sparse-matrix, LinearOperator or quimb.Lazy, optional
         Perform the eigensolve in the subspace defined by this projector.
     sort : bool, optional
         Whether to ensure the eigenvalues are sorted in ascending value.
@@ -69,11 +71,11 @@ def eigs_scipy(A, k, *, B=None, which=None, return_vecs=True, sigma=None,
         'tol': 0 if tol is None else tol
     }
 
-    if callable(A):
+    if isinstance(A, qu.Lazy):
         A = A()
-    if callable(B):
+    if isinstance(B, qu.Lazy):
         B = B()
-    if callable(P):
+    if isinstance(P, qu.Lazy):
         P = P()
 
     eig_fn = spla.eigsh if isherm else spla.eigs
@@ -151,11 +153,11 @@ def eigs_lobpcg(A, k, *, B=None, v0=None, which=None, return_vecs=True,
         lobpcg_opts['maxiter'] = 30
     largest = {'SA': False, 'LA': True}[which]
 
-    if callable(A):
+    if isinstance(A, qu.Lazy):
         A = A()
-    if callable(B):
+    if isinstance(B, qu.Lazy):
         B = B()
-    if callable(P):
+    if isinstance(P, qu.Lazy):
         P = P()
 
     # project into subspace
