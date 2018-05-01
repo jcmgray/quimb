@@ -56,6 +56,15 @@ class TestRandMatrix:
         assert type(a) == sp.bsr_matrix
         assert a.dtype == dtype
 
+    @pytest.mark.parametrize('sparse', [False, True])
+    def test_seed(self, dtype, sparse):
+        a = rand_matrix(10, sparse=sparse, dtype=dtype, seed=42)
+        b = rand_matrix(10, sparse=sparse, dtype=dtype, seed=42)
+        if sparse:
+            assert_allclose(a.data, b.data)
+        else:
+            assert_allclose(a, b)
+
 
 @pytest.mark.parametrize('dtype', dtypes)
 class TestRandHerm:

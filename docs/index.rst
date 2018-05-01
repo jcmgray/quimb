@@ -20,13 +20,13 @@ Welcome to quimb's documentation!
 
 The core ``quimb`` module:
 
-* Uses `numpy` and `scipy.sparse` matrices as quantum objects
-* Accelerates many operations using `numba` and `numexpr`
-* Makes it easy to construct operators in large tensor spaces
+* Uses ``numpy`` and ``scipy.sparse`` matrices as quantum objects
+* Accelerates many operations using `numba <https://numba.pydata.org>`_ and `numexpr <https://github.com/pydata/numexpr>`_
+* Makes it easy to construct operators in large tensor spaces (e.g. 2D lattices).
 * Uses efficient methods to compute various quantities including entanglement measures
 * Can generate a variety of random states and operators
 * Can perform evolutions with several methods, computing quantities on the fly
-* Has an optional `slepc4py` interface for easy distributed (MPI) linear algebra. This can massively increase the performance when seeking, for example, mid-spectrum eigenstates.
+* Has an optional `slepc4py <https://bitbucket.org/slepc/slepc4py>`_ interface for easy distributed (MPI) linear algebra. This can massively increase the performance when seeking, for example, mid-spectrum eigenstates.
 
 The tensor network module ``quimb.tensor``:
 

@@ -1,6 +1,6 @@
 """Functions for generating random quantum objects and states.
 """
-from functools import reduce
+from functools import reduce, wraps
 import numpy as np
 import scipy.sparse as sp
 
@@ -8,6 +8,21 @@ from ..accel import rdmul, dot, matrixify
 from ..core import qu, ptr, kron, nmlz
 
 
+def accept_rand_seed(fn):
+    """Modify ``fn`` to take a ``seed`` argument with which call
+    :func:`numpy.random.seed`.
+    """
+
+    @wraps(fn)
+    def wrapped_fn(*args, seed=None, **kwargs):
+        if seed is not None:
+            np.random.seed(seed)
+        return fn(*args, **kwargs)
+
+    return wrapped_fn
+
+
+@accept_rand_seed
 def rand_matrix(d, scaled=True, sparse=False, stype='csr',
                 density=None, dtype=complex):
     """Generate a random complex matrix of order `d` with normally distributed
@@ -68,6 +83,7 @@ def rand_matrix(d, scaled=True, sparse=False, stype='csr',
     return mat
 
 
+@accept_rand_seed
 def rand_herm(d, sparse=False, density=None, dtype=complex):
     """Generate a random hermitian matrix of order `d` with normally
     distributed entries. In the limit of large `d` the spectrum will be a
@@ -95,6 +111,7 @@ def rand_herm(d, sparse=False, density=None, dtype=complex):
     return herm
 
 
+@accept_rand_seed
 def rand_pos(d, sparse=False, density=None, dtype=complex):
     """Generate a random positive matrix of order `d`, with normally
     distributed entries. In the limit of large `d` the spectrum will lie
@@ -115,6 +132,7 @@ def rand_pos(d, sparse=False, density=None, dtype=complex):
     return dot(pos, pos.H)
 
 
+@accept_rand_seed
 def rand_rho(d, sparse=False, density=None, dtype=complex):
     """Generate a random positive matrix of order `d` with normally
     distributed entries and unit trace.
@@ -126,6 +144,7 @@ def rand_rho(d, sparse=False, density=None, dtype=complex):
     return nmlz(rand_pos(d, sparse=sparse, density=density, dtype=dtype))
 
 
+@accept_rand_seed
 def rand_uni(d, dtype=complex):
     """Generate a random unitary matrix of order `d`, distributed according to
     the Haar measure.
@@ -140,6 +159,7 @@ def rand_uni(d, dtype=complex):
     return rdmul(q, r)
 
 
+@accept_rand_seed
 def rand_ket(d, sparse=False, stype='csr', density=0.01):
     """Generates a ket of length `d` with normally distributed entries.
     """
@@ -152,6 +172,7 @@ def rand_ket(d, sparse=False, stype='csr', density=0.01):
     return nmlz(ket)
 
 
+@accept_rand_seed
 def rand_haar_state(d):
     """Generate a random state of dimension `d` according to the Haar
     distribution.
@@ -160,6 +181,7 @@ def rand_haar_state(d):
     return u[:, 0]
 
 
+@accept_rand_seed
 def gen_rand_haar_states(d, reps):
     """Generate many random Haar states, recycling a random unitary matrix
     by using all of its columns (not a good idea?).
@@ -171,6 +193,7 @@ def gen_rand_haar_states(d, reps):
         yield u[:, cyc]
 
 
+@accept_rand_seed
 def rand_mix(d, tr_d_min=None, tr_d_max=None, mode='rand'):
     """Constructs a random mixed state by tracing out a random ket
     where the composite system varies in size between 2 and d. This produces
@@ -190,6 +213,7 @@ def rand_mix(d, tr_d_min=None, tr_d_max=None, mode='rand'):
     return ptr(psi, [d, m], 0)
 
 
+@accept_rand_seed
 def rand_product_state(n, qtype=None):
     """Generates a ket of `n` many random pure qubits.
     """
@@ -206,6 +230,7 @@ def rand_product_state(n, qtype=None):
 
 
 @matrixify
+@accept_rand_seed
 def rand_matrix_product_state(phys_dim, n, bond_dim,
                               cyclic=False, trans_invar=False):
     """Generate a random matrix product state (in dense form, see
@@ -260,6 +285,7 @@ def rand_matrix_product_state(phys_dim, n, bond_dim,
 rand_mps = rand_matrix_product_state
 
 
+@accept_rand_seed
 def rand_seperable(dims, num_mix=10):
     """Generate a random, mixed, seperable state. E.g rand_seperable([2, 2])
     for a mixed two qubit state with no entanglement.

@@ -189,3 +189,29 @@ def load_from_disk(fname, **load_opts):
     """
     import joblib
     return joblib.load(fname, **load_opts)
+
+
+class Verbosify:
+    """Decorator for making functions print their inputs.
+    """
+
+    def __init__(self, fn, highlight=None, mpi=False):
+        self.fn = fn
+        self.highlight = highlight
+        self.mpi = mpi
+
+    def __call__(self, *args, **kwargs):
+        """ham_heis but print ownership
+        """
+        if self.mpi:
+            from mpi4py import MPI
+            pre_msg = "{}: ".format(MPI.COMM_WORLD.Get_rank())
+        else:
+            pre_msg = ""
+
+        if self.highlight is None:
+            print("{}args {}, kwargs {}".format(pre_msg, args, kwargs))
+        else:
+            print("{}{}={}".format(pre_msg, self.highlight,
+                                   kwargs[self.highlight]))
+        return self.fn(*args, **kwargs)

@@ -123,8 +123,11 @@ def convert_mat_to_petsc(mat, comm=None):
     mpi_sz = comm.Get_size()
     pmat = PETSc.Mat()
 
+    # retrieve before mat is possibly built into sliced matrix
+    shape = mat.shape
+
     pmat.create(comm=comm)
-    pmat.setSizes(mat.shape)
+    pmat.setSizes(shape)
     pmat.setFromOptions()
     pmat.setUp()
     ri, rf = pmat.getOwnershipRange()
@@ -135,7 +138,7 @@ def convert_mat_to_petsc(mat, comm=None):
         # operator hasn't been constructed yet
         try:
             # try and and lazily construct with slicing
-            mat = mat(owernership=(ri, rf))
+            mat = mat(ownership=(ri, rf))
             sliced = True
         except TypeError:
             mat = mat()
@@ -144,23 +147,23 @@ def convert_mat_to_petsc(mat, comm=None):
     if sp.issparse(mat):
         mat.sort_indices()
 
-        if mpi_sz > 1 and not sliced:
-            csr = slice_sparse_matrix_to_components(mat, ri, rf)
-        else:
+        if sliced:
             csr = (mat.indptr, mat.indices, mat.data)
+        else:
+            csr = slice_sparse_matrix_to_components(mat, ri, rf)
 
         if sp.isspmatrix_csr(mat):
-            pmat.createAIJ(size=mat.shape, nnz=mat.nnz, csr=csr, comm=comm)
+            pmat.createAIJ(size=shape, nnz=mat.nnz, csr=csr, comm=comm)
         elif sp.isspmatrix_bsr(mat):
-            pmat.createBAIJ(size=mat.shape, bsize=mat.blocksize,
+            pmat.createBAIJ(size=shape, bsize=mat.blocksize,
                             nnz=mat.nnz, csr=csr, comm=comm)
 
     # Dense matrix
     else:
         if mpi_sz > 1 and not sliced:
-            pmat.createDense(size=mat.shape, array=mat[ri:rf, :], comm=comm)
+            pmat.createDense(size=shape, array=mat[ri:rf, :], comm=comm)
         else:
-            pmat.createDense(size=mat.shape, array=mat, comm=comm)
+            pmat.createDense(size=shape, array=mat, comm=comm)
 
     pmat.assemble()
     return pmat
@@ -698,8 +701,10 @@ def mfn_multiply_slepc(mat, vec,
     SLEPc, comm = get_slepc(comm=comm)
 
     mat = convert_mat_to_petsc(mat, comm=comm)
+
     if isherm:
         mat.setOption(mat.Option.HERMITIAN, True)
+
     vec = convert_vec_to_petsc(vec, comm=comm)
     out = new_petsc_vec(vec.size, comm=comm)
 

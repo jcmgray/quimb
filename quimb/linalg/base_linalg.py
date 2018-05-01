@@ -613,21 +613,52 @@ class Lazy:
             with 1664 stored elements in Compressed Sparse Row format>
     """
 
-    def __init__(self, fn, *args, shape=None, **kwargs):
+    def __init__(self, fn, *args, shape=None, factor=None, **kwargs):
         if shape is None:
             raise TypeError("`shape` must be specified.")
         self.fn = fn
         self.args = args
         self.kwargs = kwargs
         self.shape = shape
+        self.factor = factor
         self.dtype = None
+
+    def __imul__(self, x):
+        if self.factor is None:
+            self.factor = x
+        else:
+            self.factor = self.factor * x
+
+    def __mul__(self, x):
+        if self.factor is not None:
+            x = x * self.factor
+        return Lazy(self.fn, *self.args, shape=self.shape,
+                    factor=x, **self.kwargs)
+
+    def __rmul__(self, x):
+        return self.__mul__(x)
 
     def __call__(self, **kwargs):
         A = self.fn(*self.args, **self.kwargs, **kwargs)
+
+        # check if any prefactors have been set
+        if self.factor is not None:
+            # try inplace first
+            try:
+                A *= self.factor
+            except (ValueError, TypeError):
+                A = self.factor * A
+
         # helpful to store dtype once constructed
         self.dtype = A.dtype
         return A
 
     def __repr__(self):
-        s = "<Lazy({}, shape={}, dtype={})>"
-        return s.format(self.fn.__name__, self.shape, self.dtype)
+        s = "<Lazy({}, shape={}{}{})>"
+
+        s_dtype = (', dtype={}'.format(self.dtype)
+                   if self.dtype is not None else '')
+        s_factor = (', factor={}'.format(self.factor)
+                    if self.factor is not None else '')
+
+        return s.format(self.fn.__name__, self.shape, s_dtype, s_factor)
