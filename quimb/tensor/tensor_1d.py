@@ -1516,9 +1516,6 @@ class MatrixProductState(TensorNetwork1D):
 
         dp = p.phys_dim()
         tags = tags2set(tags)
-        if (not tags) and propagate_tags:
-            raise ValueError("You should supply a unique tag for this "
-                             "new gate in order to propagate tags.")
 
         if isinstance(where, int):
             where = (where,)
@@ -1534,17 +1531,21 @@ class MatrixProductState(TensorNetwork1D):
                              "".format(G.shape, where))
 
         bnds = [rand_uuid() for _ in range(ns)]
+        site_tags = [p.site_tag(i) for i in where]
         site_ix = [p.site_ind(i) for i in where]
         gate_ix = site_ix + bnds
 
         p.reindex(dict(zip(site_ix, bnds)), inplace=True)
         TG = Tensor(G, gate_ix, tags=tags)
-        p |= TG
 
         if contract:
-            p ^= (p.site_tag(i) for i in where)
-        elif propagate_tags:
-            TG.tags |= get_tags(p.select_neighbors(tags))
+            # pop the sites, contract, then re-add
+            p, pts = p.partition_tensors(site_tags, inplace=True)
+            p |= TG.contract(*pts)
+        else:
+            p |= TG
+            if propagate_tags:
+                TG.tags.update(get_tags(p.select_neighbors(tags)))
 
         return p
 
