@@ -43,7 +43,7 @@ class TestBasicTensorOperations:
         b = a.copy()
         b.tags.add('foo')
         assert 'foo' not in a.tags
-        b.data /= 2
+        b.data[:] = b.data / 2
         # still reference the same underlying array
         assert_allclose(a.data, b.data)
 
@@ -52,7 +52,7 @@ class TestBasicTensorOperations:
         b = a.copy(deep=True)
         b.tags.add('foo')
         assert 'foo' not in a.tags
-        b.data /= 2
+        b.data[:] = b.data / 2
         # still reference the same underlying array
         assert_allclose(a.data / 2, b.data)
 
@@ -97,7 +97,7 @@ class TestBasicTensorOperations:
         a = Tensor(np.random.rand(2, 3, 4), inds=[0, 1, 2], tags='blue')
         b = Tensor(np.random.rand(2, 3, 4), inds=[0, 1, 2], tags='red')
         if mismatch:
-            b.inds = (0, 1, 3)
+            b.modify(inds=(0, 1, 3))
             with pytest.raises(ValueError):
                 op(a, b)
         else:
@@ -362,13 +362,13 @@ class TestTensorNetwork:
         tn1 = TensorNetwork((a, b))
         tn2 = tn1.copy()
         # check can modify tensor structure
-        tn2['t1'].inds = ('a', 'b', 'X')
+        tn2['t1'].modify(inds=('a', 'b', 'X'))
         assert tn1['t1'] is not tn2['t1']
         assert tn2['t1'].inds == ('a', 'b', 'X')
         assert tn1['t1'].inds == ('a', 'b', 'd')
         # but that data remains the same
         assert tn1['t1'].data is tn2['t1'].data
-        tn2['t1'].data /= 2
+        tn2['t1'].data[:] /= 2
         assert_allclose(tn1['t1'].data, tn2['t1'].data)
 
     def test_copy_deep(self):
@@ -377,13 +377,13 @@ class TestTensorNetwork:
         tn1 = TensorNetwork((a, b))
         tn2 = tn1.copy(deep=True)
         # check can modify tensor structure
-        tn2['t1'].inds = ('a', 'b', 'X')
+        tn2['t1'].modify(inds=('a', 'b', 'X'))
         assert tn1['t1'] is not tn2['t1']
         assert tn2['t1'].inds == ('a', 'b', 'X')
         assert tn1['t1'].inds == ('a', 'b', 'd')
         # and that data is not the same
         assert tn1['t1'].data is not tn2['t1'].data
-        tn2['t1'].data /= 2
+        tn2['t1'].data[:] /= 2
         assert_allclose(tn1['t1'].data / 2, tn2['t1'].data)
 
     def test_TensorNetwork_init_checks(self):
@@ -596,9 +596,9 @@ class TestTensorNetwork:
         b = Tensor(b_data, inds='abc', tags={'I1'})
         tn = TensorNetwork((a, b), structure="I{}")
         assert_allclose(tn[0].data, a_data)
-        new_data = np.random.randn(24)
-        tn[1].data = new_data
-        assert_allclose(tn['I1'].data, new_data.reshape(2, 3, 4))
+        new_data = np.random.randn(2, 3, 4)
+        tn[1].modify(data=new_data)
+        assert_allclose(tn['I1'].data, new_data)
 
     def test_combining_with_no_check_collisions(self):
         p1 = MPS_rand_state(5, 3, phys_dim=3)

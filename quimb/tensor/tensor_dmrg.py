@@ -750,9 +750,9 @@ class DMRG:
         self.post_check(i, Neff, loc_gs, loc_en, loc_gs_old)
 
         # insert back into state and all tensor networks viewing it
-        loc_gs = loc_gs.A
-        self._k[i].data = loc_gs
-        self._b[i].data = loc_gs.conj()
+        loc_gs = loc_gs.A.reshape(dims)
+        self._k[i].modify(data=loc_gs)
+        self._b[i].modify(data=loc_gs.conj())
 
         # normalize - necessary due to loose tolerance eigensolve
         if self.cyclic:

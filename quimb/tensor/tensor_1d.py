@@ -351,16 +351,14 @@ class TensorNetwork1D(TensorNetwork):
 
         EL = kbc['_LEFT'].squeeze()
         # explicitly symmetrize to hermitian
-        EL.data /= 2
-        EL.data += EL.data.conj().T
+        EL.modify(data=(EL.data + EL.data.conj().T) / 2)
         # split into upper 'ket' part and lower 'bra' part, symmetric
         EL_lix, = EL.bonds(kbc[k.site_tag(start), '_BRA'])
         _, x = EL.split(EL_lix, method='eigh', cutoff=-1, get='arrays')
 
         ER = kbc['_RIGHT'].squeeze()
         # explicitly symmetrize to hermitian
-        ER.data /= 2
-        ER.data += ER.data.conj().T
+        ER.modify(data=(ER.data + ER.data.conj().T) / 2)
         # split into upper 'ket' part and lower 'bra' part, symmetric
         ER_lix, = ER.bonds(kbc[k.site_tag(stop - 1), '_BRA'])
         _, y = ER.split(ER_lix, method='eigh', cutoff=-1, get='arrays')

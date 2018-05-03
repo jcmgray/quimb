@@ -185,7 +185,7 @@ class TestMatrixProductState:
     def test_can_change_data(self):
         p = MPS_rand_state(3, 10)
         assert_allclose(p.H @ p, 1)
-        p[1].data = np.random.randn(200)
+        p[1].modify(data=np.random.randn(10, 10, 2))
         assert abs(p.H @ p - 1) > 1e-13
 
     def test_can_change_data_using_subnetwork(self):
@@ -197,7 +197,7 @@ class TestMatrixProductState:
         assert_allclose((tn ^ ...), 1)
         assert_allclose(tn[('__ket__', 'I1')].data,
                         tn[('__bra__', 'I1')].data.conj())
-        p[1].data = np.random.randn(200)
+        p[1].modify(data=np.random.randn(10, 10, 2))
         assert abs((tn ^ ...) - 1) > 1e-13
         assert not np.allclose(tn[('__ket__', 'I1')].data,
                                tn[('__bra__', 'I1')].data.conj())

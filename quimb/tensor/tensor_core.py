@@ -832,19 +832,19 @@ class Tensor(object):
         # Short circuit for copying Tensors
         if isinstance(data, Tensor):
             self._data = data.data
-            self.inds = data.inds
-            self.tags = data.tags.copy()
+            self._inds = data.inds
+            self._tags = data.tags.copy()
             return
 
         self._data = np.asarray(data)
-        self.inds = tuple(inds)
+        self._inds = tuple(inds)
 
         if self._data.ndim != len(self.inds):
             raise ValueError(
                 "Wrong number of inds, {}, supplied for array"
                 " of shape {}.".format(self.inds, self._data.shape))
 
-        self.tags = tags2set(tags)
+        self._tags = tags2set(tags)
 
     def copy(self, deep=False):
         """
@@ -854,19 +854,17 @@ class Tensor(object):
         else:
             return Tensor(self, None)
 
-    def get_data(self):
+    @property
+    def data(self):
         return self._data
 
-    def set_data(self, data):
-        if data.size != self.size:
-            raise ValueError("Cannot set - array size does not match Tensor.")
-        elif data.shape != self.shape:
-            self._data = data.reshape(self.shape)
-        else:
-            self._data = data
+    @property
+    def inds(self):
+        return self._inds
 
-    data = property(get_data, set_data,
-                    doc="The numpy.ndarray with this Tensors' numeric data.")
+    @property
+    def tags(self):
+        return self._tags
 
     def modify(self, data=None, inds=None, tags=None):
         """Overwrite the data of this tensor.
@@ -874,9 +872,9 @@ class Tensor(object):
         if data is not None:
             self._data = np.asarray(data)
         if inds is not None:
-            self.inds = inds
+            self._inds = inds
         if tags is not None:
-            self.tags = tags2set(tags)
+            self._tags = tags2set(tags)
         if len(self.inds) != self.data.ndim:
             raise ValueError("Mismatch between number of data dimensions and "
                              "number of indices supplied.")
@@ -1056,7 +1054,7 @@ class Tensor(object):
             inds will be returned.
         """
         new = self if inplace else self.copy()
-        new.inds = tuple(index_map.get(ind, ind) for ind in new.inds)
+        new.modify(inds=tuple(index_map.get(ind, ind) for ind in new.inds))
         return new
 
     def fuse(self, fuse_map, inplace=False):
@@ -1526,9 +1524,7 @@ class TensorNetwork(object):
         """Add a single tensor to this network - mangle its tid if neccessary.
         """
         # check for tid conflict
-        if tid is None:
-            tid = rand_uuid(base="_T")
-        elif tid in self.tensor_map:
+        if (tid is None) or (tid in self.tensor_map):
             tid = rand_uuid(base="_T")
 
         # add tensor to the main index
@@ -1666,7 +1662,7 @@ class TensorNetwork(object):
     def _del_tensor(self, tid):
         """Delete a tensor from this network.
         """
-        self._pop_tensor(self, tid)
+        self._pop_tensor(tid)
 
     def delete(self, tags, which='all'):
         """Delete any tensors which match all or any of ``tags``.
@@ -1708,7 +1704,7 @@ class TensorNetwork(object):
         """
         tags = tags2set(tags)
 
-        for t in self.tensor_map.values():
+        for t in self:
             t.drop_tags(tags)
 
         for tag in tags:
@@ -1751,7 +1747,7 @@ class TensorNetwork(object):
         """
         new_tn = self if inplace else self.copy()
 
-        for t in new_tn.tensor_index.values():
+        for t in new_tn:
             t.reindex(index_map, inplace=True)
         return new_tn
 
@@ -1760,7 +1756,7 @@ class TensorNetwork(object):
         """
         new_tn = self if inplace else self.copy()
 
-        for t in new_tn.tensor_map.values():
+        for t in new_tn:
             t.conj(inplace=True)
 
         return new_tn
@@ -1775,7 +1771,7 @@ class TensorNetwork(object):
         """Scalar multiplication of this tensor network with ``x``.
         """
         multiplied = self if inplace else self.copy()
-        tensor = next(iter(multiplied.tensor_map.values()))
+        tensor = next(iter(multiplied))
         tensor.modify(data=tensor.data * x)
         return multiplied
 
@@ -1806,15 +1802,14 @@ class TensorNetwork(object):
 
     @property
     def tensors(self):
-        return tuple(self.tensor_map.values())
+        return tuple(self)
 
     def tensors_sorted(self):
         """Return a tuple of tensors sorted by their respective tags, such that
         the tensors of two networks with the same tag structure can be
         iterated over pairwise.
         """
-        ts_and_sorted_tags = [(tensor, sorted(tensor.tags))
-                              for tensor in self.tensor_map.values()]
+        ts_and_sorted_tags = [(t, sorted(t.tags)) for t in self]
         ts_and_sorted_tags.sort(key=lambda x: x[1])
         return tuple(x[0] for x in ts_and_sorted_tags)
 
@@ -2610,7 +2605,7 @@ class TensorNetwork(object):
     def ind_sizes(self):
         """Get dict of each index mapped to its size.
         """
-        ix_szs = (zip(t.inds, t.shape) for t in self.tensor_index.values())
+        ix_szs = (zip(t.inds, t.shape) for t in self)
         return dict(concat(ix_szs))
 
     def ind_size(self, ind):
@@ -2624,13 +2619,12 @@ class TensorNetwork(object):
         """Return a list of all indices, and the corresponding list of
         dimensions from the tensor network.
         """
-        return zip(*concat(zip(t.inds, t.shape)
-                           for t in self.tensor_index.values()))
+        return zip(*concat(zip(t.inds, t.shape) for t in self))
 
     def all_inds(self):
         """Return a tuple of all indices (with repetition) in this network.
         """
-        return tuple(concat(t.inds for t in self.tensor_index.values()))
+        return tuple(concat(t.inds for t in self))
 
     def inner_inds(self):
         """Return tuple of all inner indices, i.e. those that appear twice.
@@ -2656,14 +2650,14 @@ class TensorNetwork(object):
         """Drop singlet bonds and dimensions from this tensor network.
         """
         tn = self if inplace else self.copy()
-        for t in tn.tensor_map.values():
+        for t in tn:
             t.squeeze(inplace=True)
         return tn
 
     def max_bond(self):
         """Return the size of the largest bond in this network.
         """
-        return max(max(t.shape) for t in self.tensor_map.values())
+        return max(max(t.shape) for t in self)
 
     @property
     def shape(self):
@@ -2676,7 +2670,7 @@ class TensorNetwork(object):
         """The dtype of this TensorNetwork, note this just randomly samples the
         dtype of *one* tensor and thus assumes they all have the same dtype.
         """
-        return next(iter(self.tensor_map.values())).dtype
+        return next(iter(self)).dtype
 
     def isreal(self):
         return np.issubdtype(self.dtype, np.floating)
