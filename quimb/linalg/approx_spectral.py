@@ -532,7 +532,7 @@ def approx_spectral_function(A, f, tol=1e-2, *, bsz=1, R=1024, tol_scale=1,
                   "".format(len(samples), samples[-1]))
 
         # wait a few iterations before checking error on mean breakout
-        if len(samples) >= 4:
+        if len(samples) >= 3:
             estimate, err, converged = calc_stats(
                 samples, mean_p, mean_s, tol, tol_scale)
 

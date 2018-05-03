@@ -58,7 +58,7 @@ from .evo import Evolution
 from .linalg.approx_spectral import (
     approx_spectral_function, tr_abs_approx, tr_exp_approx, tr_sqrt_approx,
     tr_xlogx_approx, entropy_subsys_approx, logneg_subsys_approx,
-    negativity_subsys_approx,
+    negativity_subsys_approx, xlogx,
 )
 from .utils import (
     save_to_disk, load_from_disk,
@@ -107,7 +107,7 @@ __all__ = [
     'tr_sqrt_approx', 'tr_xlogx_approx', 'entropy_subsys_approx',
     'logneg_subsys_approx', 'negativity_subsys_approx',
     # Some misc useful math ------------------------------------------------- #
-    'pi', 'cos', 'sin', 'tan', 'exp', 'log', 'log2', 'sqrt',
+    'pi', 'cos', 'sin', 'tan', 'exp', 'log', 'log2', 'sqrt', 'xlogx',
     # Utils
     'save_to_disk', 'load_from_disk', 'get_thread_pool', 'get_mpi_pool',
 ]

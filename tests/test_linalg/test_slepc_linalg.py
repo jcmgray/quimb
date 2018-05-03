@@ -83,11 +83,11 @@ class TestSlepceigs:
 
     @mark.parametrize("dtype", ['real', 'complex'])
     def test_eigs_slepc_eigvecs(self, dtype):
-        h = rand_herm(100, sparse=True, density=0.2)
+        h = rand_herm(32, sparse=True, density=0.5)
         if dtype == 'real':
             h = h.real
         lks, vks = eigs_slepc(h, k=5)
-        lka, vka = eigh(h, k=5)
+        lka, vka = eigh(h, k=5, backend='scipy')
         assert vks.shape == vka.shape
         assert h.dtype == vks.dtype
         for ls, vs, la, va in zip(lks, vks.T, lka, vka.T):

@@ -17,6 +17,8 @@ from .tensor_core import (
     TensorNetwork,
     rand_uuid,
     bonds,
+    tags2set,
+    get_tags,
 )
 
 
@@ -833,6 +835,8 @@ class MatrixProductState(TensorNetwork1D):
                            doc="The string specifier for the physical indices")
 
     def site_ind(self, i):
+        if isinstance(i, int):
+            i = i % self.nsites
         return self.site_ind_id.format(i)
 
     @property
@@ -849,10 +853,10 @@ class MatrixProductState(TensorNetwork1D):
         if N != other.nsites:
             raise ValueError("Can't add MPS with another of different length.")
 
-        summed = self if inplace else self.copy()
+        new_mps = self if inplace else self.copy()
 
-        for i in summed.sites:
-            t1, t2 = summed[i], other[i]
+        for i in new_mps.sites:
+            t1, t2 = new_mps[i], other[i]
 
             if set(t1.inds) != set(t2.inds):
                 # Need to use bonds to match indices
@@ -860,20 +864,20 @@ class MatrixProductState(TensorNetwork1D):
 
                 if i > 0 or self.cyclic:
                     pair = ((i - 1) % N, i)
-                    reindex_map[other.bond(*pair)] = summed.bond(*pair)
+                    reindex_map[other.bond(*pair)] = new_mps.bond(*pair)
 
-                if i < summed.nsites - 1 or self.cyclic:
+                if i < new_mps.nsites - 1 or self.cyclic:
                     pair = (i, (i + 1) % N)
-                    reindex_map[other.bond(*pair)] = summed.bond(*pair)
+                    reindex_map[other.bond(*pair)] = new_mps.bond(*pair)
 
                 t2 = t2.reindex(reindex_map)
 
-            t1.direct_product(t2, inplace=True, sum_inds=summed.site_ind(i))
+            t1.direct_product(t2, inplace=True, sum_inds=new_mps.site_ind(i))
 
         if compress:
-            summed.compress(**compress_opts)
+            new_mps.compress(**compress_opts)
 
-        return summed
+        return new_mps
 
     def __add__(self, other):
         """MPS addition.
@@ -1060,14 +1064,14 @@ class MatrixProductState(TensorNetwork1D):
 
         if rescale_sites:
             # e.g. [3, 4, 5, 7, 9] -> [0, 1, 2, 3, 4]
-            tag_map, ind_map = {}, {}
+            retag, reind = {}, {}
             for new, old in enumerate(keep):
-                tag_map[self.site_tag(old)] = self.site_tag(new)
-                ind_map[rho.lower_ind(old)] = rho.lower_ind(new)
-                ind_map[rho.upper_ind(old)] = rho.upper_ind(new)
+                retag[self.site_tag(old)] = self.site_tag(new)
+                reind[rho.lower_ind(old)] = rho.lower_ind(new)
+                reind[rho.upper_ind(old)] = rho.upper_ind(new)
 
-            rho.retag(tag_map, inplace=True)
-            rho.reindex(ind_map, inplace=True)
+            rho.retag(retag, inplace=True)
+            rho.reindex(reind, inplace=True)
 
             rho.nsites = n
             rho.sites = range(n)
@@ -1461,7 +1465,90 @@ class MatrixProductState(TensorNetwork1D):
     def phys_dim(self, i=None):
         if i is None:
             i = self.sites[0]
-        return self[i].ind_size(self.site_ind(i))
+        try:
+            return self[i].ind_size(self.site_ind(i))
+        except (ValueError, AttributeError):
+            # site i not longer has the site ind i (e.g. gate acted on?)
+            return self.ind_size(self.site_ind(i))
+
+    def gate(self, G, where, contract=False, inplace=False,
+             tags=None, propagate_tags=True):
+        r"""Act with the gate ``g`` on sites ``where``, maintaining the outer
+        indices of the MPS:
+
+            contract=False     contract=True
+                ...                  ...         <- where
+            0-0-0-0-0-0-0      0-0-0-GGG-0-0-0
+            | | | | | | |      | | | / \ | | |
+                GGG
+                | |
+
+        Parameters
+        ----------
+        G : array
+            A square array to act with on sites ``where``. It should have
+            twice the number of dimensions as the number of sites. The second
+            half of these will be contracted with the MPS, and the first half
+            indexed with the correct ``site_ind_id``. Sites are read left to
+            right from the shape.
+        where : int or sequence of int
+            Where the gate should act.
+        contract, bool, optional
+            Contract the gate in, or leave it uncontracted.
+        inplace, bool, optional
+            Perform the gate in place, default: True.
+        tags : str, sequence of str, optional
+            Tag the new gate tensor with these tags.
+        propagate_tags : bool, optional
+            Add any tags from the sites to the new gate tensor
+            (only matters if ``contract=False`` else tags are merged anyway).
+
+        Returns
+        -------
+        MatrixProductState
+
+        Examples
+        --------
+        >>> p = MPS_rand_state(3, 7)
+        >>> pg = p.gate(spin_operator('X'), where=1, tags=['GX'])
+        >>> pg
+        <MatrixProductState(tensors=4, structure='I{}', nsites=3)>
+        """
+        p = self if inplace else self.copy()
+
+        dp = p.phys_dim()
+        tags = tags2set(tags)
+        if (not tags) and propagate_tags:
+            raise ValueError("You should supply a unique tag for this "
+                             "new gate in order to propagate tags.")
+
+        if isinstance(where, int):
+            where = (where,)
+        ns = len(where)
+
+        shape_matches_2d = (G.ndim == 2) and (G.shape[1] == dp ** len(where))
+        shape_maches_nd = all(d == dp for d in G.shape)
+
+        if shape_matches_2d:
+            G = np.asarray(G).reshape([dp] * 2 * len(where))
+        elif not shape_maches_nd:
+            raise ValueError("Gate with shape {} doesn't match sites {}"
+                             "".format(G.shape, where))
+
+        bnds = [rand_uuid() for _ in range(ns)]
+        site_ix = [p.site_ind(i) for i in where]
+        gate_ix = site_ix + bnds
+
+        p.reindex(dict(zip(site_ix, bnds)), inplace=True)
+        TG = Tensor(G, gate_ix, tags=tags)
+        p |= TG
+
+        if contract:
+            p ^= (p.site_tag(i) for i in where)
+        elif propagate_tags:
+            TG.tags |= get_tags(p.select_neighbors(tags))
+
+        return p
 
     @functools.wraps(align_TN_1D)
     def align(self, *args, inplace=True):

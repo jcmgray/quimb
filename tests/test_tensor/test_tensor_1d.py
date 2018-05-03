@@ -561,8 +561,8 @@ class TestSpecificStatesOperators:
         assert rmps[-1].tags == {'foo9', 'bar'}
 
         rmpsH_rmps = rmps.H & rmps
-        assert len(rmpsH_rmps.tag_index['foo0']) == 2
-        assert len(rmpsH_rmps.tag_index['bar']) == n * 2
+        assert len(rmpsH_rmps.tag_map['foo0']) == 2
+        assert len(rmpsH_rmps.tag_map['bar']) == n * 2
 
         assert_allclose(rmps.H @ rmps, 1)
         c = (rmps.H & rmps) ^ slice(0, 5) ^ slice(9, 4, -1) ^ slice(4, 6)

@@ -44,7 +44,6 @@ extensions = [
     'sphinx.ext.intersphinx',
     'nbsphinx',
     'sphinx.ext.mathjax',
-    # 'numpydoc'
 ]
 
 napoleon_google_docstring = False

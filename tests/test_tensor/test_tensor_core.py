@@ -411,12 +411,12 @@ class TestTensorNetwork:
         del tn['red']
         assert 'red' not in tn.tags
 
-        assert set(tn.tag_index.keys()) == {'blue', 'c'}
+        assert set(tn.tag_map.keys()) == {'blue', 'c'}
 
         tn.drop_tags('c')
-        assert set(tn.tag_index.keys()) == {'blue'}
+        assert set(tn.tag_map.keys()) == {'blue'}
         tn.drop_tags(['blue'])
-        assert set(tn.tag_index.keys()) == set()
+        assert set(tn.tag_map.keys()) == set()
 
     def test_conj(self):
         a_data = np.random.randn(2, 3, 4) + 1.0j * np.random.randn(2, 3, 4)
@@ -524,8 +524,8 @@ class TestTensorNetwork:
         assert cd.inds == (4,)
 
         # make sure inplace operations didn't effect original tensor
-        for tag, names in d2.tag_index.items():
-            assert d.tag_index[tag] == names
+        for tag, names in d2.tag_map.items():
+            assert d.tag_map[tag] == names
 
         # test inplace
         d >>= ['red', 'green', 'blue']
@@ -570,7 +570,7 @@ class TestTensorNetwork:
         b = rand_tensor((2, 3, 4), inds='abc', tags={'blue'})
         tn = a & b
         tn.add_tag('green')
-        assert 'green' in tn.tag_index
+        assert 'green' in tn.tag_map
         assert 'green' in tn['red'].tags
         assert 'green' in tn['blue'].tags
         tn.add_tag('blue')
@@ -614,7 +614,7 @@ class TestTensorNetwork:
         z = rand_tensor((5, 3), inds='de', tags={'Z', 'I2'})
         tn = TensorNetwork((x, y, z))
         tn.retag({"I0": "I1", "I1": "I2", "I2": "I3", "Z": "A"}, inplace=True)
-        assert set(tn.tag_index.keys()) == {'X', 'I1', 'I2', 'I3', 'Y', 'A'}
+        assert set(tn.tag_map.keys()) == {'X', 'I1', 'I2', 'I3', 'Y', 'A'}
 
     def test_squeeze(self):
         A, B, C = (rand_tensor((1, 2, 3), 'abc', tags=['I0']),
@@ -762,6 +762,14 @@ class TestTensorNetwork:
         matplotlib.use('Template')
         k = MPS_rand_state(10, 7, normalize=False)
         k.graph(color=['I0', 'I2'])
+
+    def test_graph_with_fixed_pos(self):
+        n = 7
+        p = MPS_rand_state(n, 7, tags='KET')
+        q = MPS_rand_state(n, 7, tags='BRA')
+        fix = {**{('KET', 'I{}'.format(i)): (i, 0) for i in range(n)},
+               **{('BRA', 'I{}'.format(i)): (i, 1) for i in range(n)}}
+        (q | p).graph(colors=['KET', 'BRA'], fix=fix)
 
 
 class TestTensorNetworkAsLinearOperator:

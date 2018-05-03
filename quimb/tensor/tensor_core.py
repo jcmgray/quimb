@@ -15,18 +15,20 @@ from cytoolz import (
     frequencies,
     partition_all,
     merge_with,
+    valmap,
 )
 import numpy as np
 import scipy.sparse.linalg as spla
 import scipy.linalg.interpolative as sli
-import psutil
 
 from ..accel import prod, njit, realify_scalar, vdot
 from ..linalg.base_linalg import norm_fro_dense
 from ..utils import raise_cant_find_library_function, functions_equal
 
-# Maximum size of a tensor - / 32 to account for bytes + extra space
-MAXT = psutil.virtual_memory().total / 32
+# import psutil
+# # Maximum size of a tensor - / 32 to account for bytes + extra space
+# MAXT = psutil.virtual_memory().total / 32
+MAXT = -1
 
 try:
     import opt_einsum
@@ -145,15 +147,6 @@ def _maybe_map_indices_to_alphabet(a_ix, i_ix, o_ix):
         out_str = "".join(o_ix)
 
     return ",".join(in_str) + "->" + out_str
-
-
-class HuskArray(np.ndarray):
-    """Just an ndarray with only shape defined, so as to allow caching on shape
-    alone.
-    """
-
-    def __init__(self, shape):
-        self.shape = shape
 
 
 def tensor_contract(*tensors, output_inds=None, return_expression=False,
@@ -791,6 +784,20 @@ def bonds(t1, t2):
     return ix1 & ix2
 
 
+def get_tags(ts):
+    """Return all the tags in found in ``ts``.
+
+    Parameters
+    ----------
+    ts :  Tensor, TensorNetwork or sequence of either
+        The objects to combine tags from.
+    """
+    if isinstance(ts, (TensorNetwork, Tensor)):
+        ts = (ts,)
+
+    return set().union(*[t.tags for t in ts])
+
+
 def tags2set(tags):
     """Parse a ``tags`` argument into a set - leave if already one.
     """
@@ -1363,7 +1370,7 @@ class TensorNetwork(object):
 
     Parameters
     ----------
-    tensors : sequence of Tensor or TensorNetwork
+    ts : sequence of Tensor or TensorNetwork
         The objects to combine. The new network will be a *view* onto these
         constituent tensors unless explicitly copied.
     structure : str, optional
@@ -1408,46 +1415,48 @@ class TensorNetwork(object):
         changes to a Tensor's indices will propagate to all TNs viewing that
         Tensor.
 
-    Members
-    -------
-    tensor_index : dict
+    Attributes
+    ----------
+    tensor_map : dict
         Mapping of unique ids to tensors, like``{tensor_id: tensor, ...}``.
         I.e. this is where the tensors are 'stored' by the network.
-    tag_index : dict
+    tag_map : dict
         Mapping of tags to a set of tensor ids which have those tags. I.e.
         ``{tag: {tensor_id_1, tensor_id_2, ...}}``. Thus to select those
-        tensors could do: ``map(tensor_index.__getitem__, tag_index[tag])``.
+        tensors could do: ``map(tensor_map.__getitem__, tag_map[tag])``.
     """
 
-    def __init__(self, tensors, *,
+    def __init__(self, ts, *,
                  check_collisions=True,
                  structure=None,
                  structure_bsz=None,
                  nsites=None,
                  sites=None,
                  virtual=False):
+
         # short-circuit for copying TensorNetworks
-        if isinstance(tensors, TensorNetwork):
-            self.structure = tensors.structure
-            self.nsites = tensors.nsites
-            self.sites = tensors.sites
-            self.structure_bsz = tensors.structure_bsz
-            self.tag_index = {
-                tg: nms.copy() for tg, nms in tensors.tag_index.items()}
-            self.tensor_index = {nm: tsr if virtual else tsr.copy()
-                                 for nm, tsr in tensors.tensor_index.items()}
+        if isinstance(ts, TensorNetwork):
+            self.structure = ts.structure
+            self.nsites = ts.nsites
+            self.sites = ts.sites
+            self.structure_bsz = ts.structure_bsz
+            self.tensor_map = valmap(lambda t: t if virtual else t.copy(),
+                                     ts.tensor_map)
+            self.tag_map = valmap(lambda tid: tid.copy(), ts.tag_map)
             return
 
+        # parameters
         self.structure = structure
         self.structure_bsz = structure_bsz
         self.nsites = nsites
         self.sites = sites
 
-        self.tensor_index = {}
-        self.tag_index = {}
+        # internal structure
+        self.tensor_map = {}
+        self.tag_map = {}
 
         inner_inds = set()
-        for t in tensors:
+        for t in ts:
             self.add(t, virtual=virtual, inner_inds=inner_inds,
                      check_collisions=check_collisions)
 
@@ -1519,23 +1528,18 @@ class TensorNetwork(object):
         # check for tid conflict
         if tid is None:
             tid = rand_uuid(base="_T")
-        else:
-            try:
-                self.tensor_index[tid]
-                tid = rand_uuid(base="_T")
-            except KeyError:
-                # tid is fine to keep
-                pass
+        elif tid in self.tensor_map:
+            tid = rand_uuid(base="_T")
 
         # add tensor to the main index
-        self.tensor_index[tid] = tensor if virtual else tensor.copy()
+        self.tensor_map[tid] = tensor if virtual else tensor.copy()
 
         # add its tid to the relevant tags, or create a new tag
         for tag in tensor.tags:
             try:
-                self.tag_index[tag].add(tid)
+                self.tag_map[tag].add(tid)
             except (KeyError, TypeError):
-                self.tag_index[tag] = {tid}
+                self.tag_map[tag] = {tid}
 
     def add_tensor_network(self, tn, virtual=False, check_collisions=True,
                            inner_inds=None):
@@ -1555,24 +1559,23 @@ class TensorNetwork(object):
             if b_ix:
                 g_ix = tn_iix - inner_inds
                 new_inds = {rand_uuid() for _ in range(len(b_ix))}
-                reind_map = dict(zip(b_ix, new_inds))
+                reind = dict(zip(b_ix, new_inds))
                 inner_inds |= new_inds
                 inner_inds |= g_ix
             else:
                 inner_inds |= tn_iix
 
             # add tensors, reindexing if necessary
-            for nm, tsr in tn.tensor_index.items():
-                if b_ix and any(i in reind_map for i in tsr.inds):
-                    tsr = tsr.reindex(reind_map, inplace=virtual)
-                self.add_tensor(tsr, virtual=virtual, tid=nm)
+            for tid, tsr in tn.tensor_map.items():
+                if b_ix and any(i in reind for i in tsr.inds):
+                    tsr = tsr.reindex(reind, inplace=virtual)
+                self.add_tensor(tsr, virtual=virtual, tid=tid)
 
         else:  # directly add tensor/tag indexes
-            for nm, tsr in tn.tensor_index.items():
-                self.tensor_index[nm] = tsr if virtual else tsr.copy()
+            for tid, tsr in tn.tensor_map.items():
+                self.tensor_map[tid] = tsr if virtual else tsr.copy()
 
-            self.tag_index = merge_with(
-                set_join, self.tag_index, tn.tag_index)
+            self.tag_map = merge_with(set_join, self.tag_map, tn.tag_map)
 
     def add(self, t, virtual=False, check_collisions=True, inner_inds=None):
         """
@@ -1582,8 +1585,8 @@ class TensorNetwork(object):
 
         if not (istensor or istensornetwork):
             raise TypeError("TensorNetwork should be called as "
-                            "`TensorNetwork(tensors, ...)`, where each "
-                            "object in 'tensors' is a Tensor or "
+                            "`TensorNetwork(ts, ...)`, where each "
+                            "object in 'ts' is a Tensor or "
                             "TensorNetwork.")
 
         if istensor:
@@ -1638,31 +1641,32 @@ class TensorNetwork(object):
                 if len(self.sites) == mx - mn:
                     self.sites = range(mn, mx)
 
+    @staticmethod
+    def _remove_tid(xs, x_map, tid):
+        """Remove tid from the relevant map.
+        """
+        for x in xs:
+            tids = x_map[x]
+            tids.discard(tid)
+            if not tids:
+                # tid was last tensor -> delete entry
+                del x_map[x]
+
     def _pop_tensor(self, tid):
         """Remove a tensor from this network, returning said tensor.
         """
-        # remove the tensor from the tag index
-        for tag in self.tensor_index[tid].tags:
-            tagged_tids = self.tag_index[tag]
-            tagged_tids.discard(tid)
-            if not tagged_tids:
-                del self.tag_index[tag]
-
         # pop the tensor itself
-        return self.tensor_index.pop(tid)
+        t = self.tensor_map.pop(tid)
+
+        # remove the tid from the tag and ind maps
+        self._remove_tid(t.tags, self.tag_map, tid)
+
+        return t
 
     def _del_tensor(self, tid):
         """Delete a tensor from this network.
         """
-        # remove the tensor from the tag index
-        for tag in self.tensor_index[tid].tags:
-            tagged_tids = self.tag_index[tag]
-            tagged_tids.discard(tid)
-            if not tagged_tids:
-                del self.tag_index[tag]
-
-        # delete the tensor itself
-        del self.tensor_index[tid]
+        self._pop_tensor(self, tid)
 
     def delete(self, tags, which='all'):
         """Delete any tensors which match all or any of ``tags``.
@@ -1684,15 +1688,14 @@ class TensorNetwork(object):
         all tensors in ``self.select_tensors(where, which=which)``.
         """
         tids = self._get_tids_from_tags(where, which=which)
-        tids_tensors = ((n, self.tensor_index[n]) for n in tids)
 
-        for n, t in tids_tensors:
-            t.tags.add(tag)
+        for tid in tids:
+            self.tensor_map[tid].tags.add(tag)
 
         try:
-            self.tag_index[tag] |= tids
+            self.tag_map[tag] |= tids
         except KeyError:
-            self.tag_index[tag] = set(tids)
+            self.tag_map[tag] = set(tids)
 
     def drop_tags(self, tags):
         """Remove a tag from any tensors in this network which have it.
@@ -1705,11 +1708,11 @@ class TensorNetwork(object):
         """
         tags = tags2set(tags)
 
-        for t in self.tensor_index.values():
+        for t in self.tensor_map.values():
             t.drop_tags(tags)
 
         for tag in tags:
-            del self.tag_index[tag]
+            del self.tag_map[tag]
 
     def retag(self, tag_map, inplace=False):
         """Rename tags for all tensors in this network, optionally in-place.
@@ -1725,16 +1728,16 @@ class TensorNetwork(object):
             # for each remapping pair
             for old_tag, new_tag in tag_map.items():
                 # get each tensor with that tag
-                for tensor in retagged.tag_index[old_tag]:
-                    retagged.tensor_index[tensor].tags.remove(old_tag)
-                    retagged.tensor_index[tensor].tags.add(new_tag)
+                for tensor in retagged.tag_map[old_tag]:
+                    retagged.tensor_map[tensor].tags.remove(old_tag)
+                    retagged.tensor_map[tensor].tags.add(new_tag)
                 # and update the tag index
-                retagged.tag_index[new_tag] = retagged.tag_index.pop(old_tag)
+                retagged.tag_map[new_tag] = retagged.tag_map.pop(old_tag)
 
         # to avoid muddling tags e.g. when swapping, need intermediary step
-        midtags = [rand_uuid() for _ in range(len(tag_map))]
-        _retag_single({ot: mt for ot, mt in zip(tag_map.keys(), midtags)})
-        _retag_single({mt: nt for mt, nt in zip(midtags, tag_map.values())})
+        tmp_tags = [rand_uuid() for _ in range(len(tag_map))]
+        _retag_single(dict(zip(tag_map.keys(), tmp_tags)))
+        _retag_single(dict(zip(tmp_tags, tag_map.values())))
 
         return retagged
 
@@ -1757,7 +1760,7 @@ class TensorNetwork(object):
         """
         new_tn = self if inplace else self.copy()
 
-        for t in new_tn.tensor_index.values():
+        for t in new_tn.tensor_map.values():
             t.conj(inplace=True)
 
         return new_tn
@@ -1772,7 +1775,7 @@ class TensorNetwork(object):
         """Scalar multiplication of this tensor network with ``x``.
         """
         multiplied = self if inplace else self.copy()
-        tensor = next(iter(multiplied.tensor_index.values()))
+        tensor = next(iter(multiplied.tensor_map.values()))
         tensor.modify(data=tensor.data * x)
         return multiplied
 
@@ -1803,7 +1806,7 @@ class TensorNetwork(object):
 
     @property
     def tensors(self):
-        return tuple(self.tensor_index.values())
+        return tuple(self.tensor_map.values())
 
     def tensors_sorted(self):
         """Return a tuple of tensors sorted by their respective tags, such that
@@ -1811,12 +1814,12 @@ class TensorNetwork(object):
         iterated over pairwise.
         """
         ts_and_sorted_tags = [(tensor, sorted(tensor.tags))
-                              for tensor in self.tensor_index.values()]
+                              for tensor in self.tensor_map.values()]
         ts_and_sorted_tags.sort(key=lambda x: x[1])
         return tuple(x[0] for x in ts_and_sorted_tags)
 
     def __iter__(self):
-        return iter(self.tensor_index.values())
+        return iter(self.tensor_map.values())
 
     # ----------------- selecting and splitting the network ----------------- #
 
@@ -1917,7 +1920,7 @@ class TensorNetwork(object):
         set[str]
         """
         if tags in (None, ..., all):
-            return set(self.tensor_index)
+            return set(self.tensor_map)
         elif isinstance(tags, (int, slice)):
             tags = self.sites2tags(tags)
         else:
@@ -1928,11 +1931,11 @@ class TensorNetwork(object):
             which = which[1:]
 
         combine = {'all': operator.and_, 'any': operator.or_}[which]
-        tid_sets = (self.tag_index[t] for t in tags)
+        tid_sets = (self.tag_map[t] for t in tags)
         tids = functools.reduce(combine, tid_sets).copy()
 
         if inverse:
-            return set(self.tensor_index) - tids
+            return set(self.tensor_map) - tids
 
         return tids
 
@@ -1958,7 +1961,7 @@ class TensorNetwork(object):
         select, partition, partition_tensors
         """
         tids = self._get_tids_from_tags(tags, which=which)
-        return tuple(self.tensor_index[n] for n in tids)
+        return tuple(self.tensor_map[n] for n in tids)
 
     def select(self, tags, which='all'):
         """Get a TensorNetwork comprising tensors that match all or any of
@@ -1981,7 +1984,7 @@ class TensorNetwork(object):
         select_tensors, partition, partition_tensors
         """
         tagged_tids = self._get_tids_from_tags(tags, which=which)
-        ts = (self.tensor_index[n] for n in tagged_tids)
+        ts = (self.tensor_map[n] for n in tagged_tids)
 
         kws = {'check_collisions': False, 'structure': self.structure,
                'structure_bsz': self.structure_bsz, 'nsites': self.nsites}
@@ -1992,6 +1995,11 @@ class TensorNetwork(object):
             tn.sites = tn.calc_sites()
 
         return tn
+
+    def select_neighbors(self, tags, which='any'):
+        utn, ttn = self.partition(tags, which=which, calc_sites=False)
+        joining_inds = ttn.outer_inds()
+        return tuple(t for t in utn if any(i in joining_inds for i in t.inds))
 
     def __getitem__(self, tags):
         """Get the tensor(s) associated with ``tags``. Only returns tensors
@@ -2031,11 +2039,11 @@ class TensorNetwork(object):
         tid, = tids
 
         # check if tags match, else need to modify TN structure
-        if self.tensor_index[tid].tags != tensor.tags:
+        if self.tensor_map[tid].tags != tensor.tags:
             self._del_tensor(tid)
             self.add_tensor(tensor, tid, virtual=True)
         else:
-            self.tensor_index[tid] = tensor
+            self.tensor_map[tid] = tensor
 
     def __delitem__(self, tags):
         """Delete any tensors which have all of ``tags``.
@@ -2071,8 +2079,8 @@ class TensorNetwork(object):
         tagged_tids = self._get_tids_from_tags(tags, which=which)
 
         # check if all tensors have been tagged
-        if len(tagged_tids) == len(self.tensor_index):
-            return None, self.tensor_index.values()
+        if len(tagged_tids) == len(self.tensor_map):
+            return None, self.tensor_map.values()
 
         # Copy untagged to new network, and pop tagged tensors from this
         if inplace:
@@ -2120,7 +2128,7 @@ class TensorNetwork(object):
 
         else:  # rebuild both -> quicker
             t1s, t2s = [], []
-            for tid, tensor in self.tensor_index.items():
+            for tid, tensor in self.tensor_map.items():
                 (t2s if tid in tagged_tids else t1s).append(tensor)
 
             t1, t2 = TensorNetwork(t1s, **kws), TensorNetwork(t2s, **kws)
@@ -2329,7 +2337,7 @@ class TensorNetwork(object):
         """
         n1, = self._get_tids_from_tags(tags1, which='all')
         n2, = self._get_tids_from_tags(tags2, which='all')
-        tensor_compress_bond(self.tensor_index[n1], self.tensor_index[n2])
+        tensor_compress_bond(self.tensor_map[n1], self.tensor_map[n2])
 
     def compress_all(self, **compress_opts):
         """Inplace compress all bonds in this network.
@@ -2349,7 +2357,7 @@ class TensorNetwork(object):
         """
         n1, = self._get_tids_from_tags(tags1, which='all')
         n2, = self._get_tids_from_tags(tags2, which='all')
-        tensor_add_bond(self.tensor_index[n1], self.tensor_index[n2])
+        tensor_add_bond(self.tensor_map[n1], self.tensor_map[n2])
 
     def insert_gauge(self, U, tags1, tags2, Uinv=None, tol=1e-10):
         """Insert the gauge transformation ``U @ U^-1`` into the bond between
@@ -2371,7 +2379,7 @@ class TensorNetwork(object):
         """
         n1, = self._get_tids_from_tags(tags1, which='all')
         n2, = self._get_tids_from_tags(tags2, which='all')
-        T1, T2 = self.tensor_index[n1], self.tensor_index[n2]
+        T1, T2 = self.tensor_map[n1], self.tensor_map[n2]
         bnd, = T1.bonds(T2)
 
         if Uinv is None:
@@ -2597,7 +2605,7 @@ class TensorNetwork(object):
 
     @property
     def tags(self):
-        return set(self.tag_index.keys())
+        return set(self.tag_map.keys())
 
     def ind_sizes(self):
         """Get dict of each index mapped to its size.
@@ -2648,14 +2656,14 @@ class TensorNetwork(object):
         """Drop singlet bonds and dimensions from this tensor network.
         """
         tn = self if inplace else self.copy()
-        for t in tn.tensor_index.values():
+        for t in tn.tensor_map.values():
             t.squeeze(inplace=True)
         return tn
 
     def max_bond(self):
         """Return the size of the largest bond in this network.
         """
-        return max(max(t.shape) for t in self.tensor_index.values())
+        return max(max(t.shape) for t in self.tensor_map.values())
 
     @property
     def shape(self):
@@ -2668,7 +2676,7 @@ class TensorNetwork(object):
         """The dtype of this TensorNetwork, note this just randomly samples the
         dtype of *one* tensor and thus assumes they all have the same dtype.
         """
-        return next(iter(self.tensor_index.values())).dtype
+        return next(iter(self.tensor_map.values())).dtype
 
     def isreal(self):
         return np.issubdtype(self.dtype, np.floating)
@@ -2848,7 +2856,7 @@ class TensorNetwork(object):
 
     def __repr__(self):
         rep = "<{}(tensors={}".format(self.__class__.__name__,
-                                      len(self.tensor_index))
+                                      len(self.tensor_map))
         if self.structure:
             rep += ", structure='{}', nsites={}".format(self.structure,
                                                         self.nsites)
