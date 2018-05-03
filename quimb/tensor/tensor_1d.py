@@ -1293,11 +1293,10 @@ class MatrixProductState(TensorNetwork1D):
                     max_bond=vmax_bond, **compress_opts)
 
                 # cut joined bond by reindexing to upper- and lower- ind_id.
-                T_UP = kb[self.site_tag(section[0]), '_UP']
-                T_DN = kb[self.site_tag(section[0]), '_DOWN']
-                bnd, = T_UP.bonds(T_DN)
-                T_UP.reindex({bnd: "_tmp_ind_u{}".format(label)}, inplace=True)
-                T_DN.reindex({bnd: "_tmp_ind_l{}".format(label)}, inplace=True)
+                kb.cut_bond((self.site_tag(section[0]), '_UP'),
+                            (self.site_tag(section[0]), '_DOWN'),
+                            "_tmp_ind_u{}".format(label),
+                            "_tmp_ind_l{}".format(label))
 
             else:
                 # just unfold and fuse physical indices:
@@ -1343,8 +1342,8 @@ class MatrixProductState(TensorNetwork1D):
 
                 # delete the A system
                 kb.delete('_SYSA')
-                TU.reindex({ubnd: "_tmp_ind_uA"}, inplace=True)
-                TD.reindex({lbnd: "_tmp_ind_lA"}, inplace=True)
+                kb.reindex({ubnd: "_tmp_ind_uA",
+                            lbnd: "_tmp_ind_lA"}, inplace=True)
             else:
                 # or else replace the left or right envs with identites since
                 #
@@ -1371,8 +1370,8 @@ class MatrixProductState(TensorNetwork1D):
 
                 # delete the B system
                 kb.delete('_SYSB')
-                TU.reindex({ubnd: "_tmp_ind_uB"}, inplace=True)
-                TD.reindex({lbnd: "_tmp_ind_lB"}, inplace=True)
+                kb.reindex({ubnd: "_tmp_ind_uB",
+                            lbnd: "_tmp_ind_lB"}, inplace=True)
             else:
                 kb.replace_with_identity('_ENVR', inplace=True)
 

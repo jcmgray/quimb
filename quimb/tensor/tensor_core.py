@@ -8,15 +8,10 @@ import itertools
 import string
 import uuid
 import re
+import weakref
 
-from cytoolz import (
-    unique,
-    concat,
-    frequencies,
-    partition_all,
-    merge_with,
-    valmap,
-)
+from cytoolz import (unique, concat, frequencies,
+                     partition_all, merge_with, valmap)
 import numpy as np
 import scipy.sparse.linalg as spla
 import scipy.linalg.interpolative as sli
@@ -829,6 +824,8 @@ class Tensor(object):
     """
 
     def __init__(self, data, inds, tags=None):
+        self.owners = []
+
         # Short circuit for copying Tensors
         if isinstance(data, Tensor):
             self._data = data.data
@@ -866,15 +863,30 @@ class Tensor(object):
     def tags(self):
         return self._tags
 
+    def add_owner(self, tn):
+        self.owners.append(weakref.ref(tn))
+
+    def check_owners(self):
+        # parse out dead owners
+        self.owners = [r for r in self.owners if r()]
+        return len(self.owners) > 0
+
     def modify(self, data=None, inds=None, tags=None):
         """Overwrite the data of this tensor.
         """
         if data is not None:
             self._data = np.asarray(data)
+
         if inds is not None:
+            if self.check_owners:
+                raise ValueError("modifying tensor inds with owner!")
             self._inds = inds
+
         if tags is not None:
+            if self.check_owners:
+                raise ValueError("modifying tensor tags with owner!")
             self._tags = tags2set(tags)
+
         if len(self.inds) != self.data.ndim:
             raise ValueError("Mismatch between number of data dimensions and "
                              "number of indices supplied.")
@@ -1422,6 +1434,9 @@ class TensorNetwork(object):
         Mapping of tags to a set of tensor ids which have those tags. I.e.
         ``{tag: {tensor_id_1, tensor_id_2, ...}}``. Thus to select those
         tensors could do: ``map(tensor_map.__getitem__, tag_map[tag])``.
+    ind_map : dict
+        Like ``tag_map`` but for indices. So ``ind_map[ind]]`` returns the
+        tensor ids of those tensors with ``ind``.
     """
 
     def __init__(self, ts, *,
@@ -1441,6 +1456,7 @@ class TensorNetwork(object):
             self.tensor_map = valmap(lambda t: t if virtual else t.copy(),
                                      ts.tensor_map)
             self.tag_map = valmap(lambda tid: tid.copy(), ts.tag_map)
+            self.ind_map = valmap(lambda tid: tid.copy(), ts.ind_map)
             return
 
         # parameters
@@ -1452,6 +1468,7 @@ class TensorNetwork(object):
         # internal structure
         self.tensor_map = {}
         self.tag_map = {}
+        self.ind_map = {}
 
         inner_inds = set()
         for t in ts:
@@ -1528,14 +1545,22 @@ class TensorNetwork(object):
             tid = rand_uuid(base="_T")
 
         # add tensor to the main index
-        self.tensor_map[tid] = tensor if virtual else tensor.copy()
+        T = tensor if virtual else tensor.copy()
+        self.tensor_map[tid] = T
+        T.add_owner(self)
 
         # add its tid to the relevant tags, or create a new tag
-        for tag in tensor.tags:
+        for tag in T.tags:
             try:
                 self.tag_map[tag].add(tid)
             except (KeyError, TypeError):
                 self.tag_map[tag] = {tid}
+
+        for ind in tensor.inds:
+            try:
+                self.ind_map[ind].add(tid)
+            except (KeyError, TypeError):
+                self.ind_map[ind] = {tid}
 
     def add_tensor_network(self, tn, virtual=False, check_collisions=True,
                            inner_inds=None):
@@ -1569,9 +1594,12 @@ class TensorNetwork(object):
 
         else:  # directly add tensor/tag indexes
             for tid, tsr in tn.tensor_map.items():
-                self.tensor_map[tid] = tsr if virtual else tsr.copy()
+                T = tsr if virtual else tsr.copy()
+                self.tensor_map[tid] = T
+                T.add_owner(self)
 
             self.tag_map = merge_with(set_join, self.tag_map, tn.tag_map)
+            self.ind_map = merge_with(set_join, self.ind_map, tn.ind_map)
 
     def add(self, t, virtual=False, check_collisions=True, inner_inds=None):
         """
@@ -1656,6 +1684,7 @@ class TensorNetwork(object):
 
         # remove the tid from the tag and ind maps
         self._remove_tid(t.tags, self.tag_map, tid)
+        self._remove_tid(t.inds, self.ind_map, tid)
 
         return t
 
@@ -1747,8 +1776,16 @@ class TensorNetwork(object):
         """
         new_tn = self if inplace else self.copy()
 
-        for t in new_tn:
-            t.reindex(index_map, inplace=True)
+        tids = set_join(self.ind_map.get(ix, set()) for ix in index_map)
+
+        for tid in tids:
+            new_tn.tensor_map[tid].reindex(index_map, inplace=True)
+
+        new_tn.ind_map = {
+            index_map[i] if i in index_map else i: tids
+            for i, tids in self.ind_map.items()
+        }
+
         return new_tn
 
     def conj(self, inplace=False):
@@ -2351,9 +2388,34 @@ class TensorNetwork(object):
         """Inplace addition of a dummmy (size 1) bond between the single
         tensors specified by by ``tags1`` and ``tags2``.
         """
-        n1, = self._get_tids_from_tags(tags1, which='all')
-        n2, = self._get_tids_from_tags(tags2, which='all')
-        tensor_add_bond(self.tensor_map[n1], self.tensor_map[n2])
+        tid1, = self._get_tids_from_tags(tags1, which='all')
+        tid2, = self._get_tids_from_tags(tags2, which='all')
+
+        T1, T2 = self.tensor_map[tid1], self.tensor_map[tid2]
+        tensor_add_bond(T1, T2)
+
+        bnd, = bonds(T1, T2)
+        self.ind_map[bnd] = {tid1, tid2}
+
+    def cut_bond(self, left_tags, right_tags, left_ind, right_ind):
+        """Cut the bond between the tensors specified by ``left_tags`` and
+        ``right_tags``, giving them the new inds ``left_ind`` and
+        ``right_ind`` respectively.
+        """
+        tid_l = self._get_tids_from_tags(left_tags)
+        tid_r = self._get_tids_from_tags(left_tags)
+
+        TL, TR = self.tensor_map[tid_l], self.tensor_map[tid_r]
+
+        bnd, = bonds(TL, TR)
+
+        TL.reindex({bnd: left_ind}, inplace=True)
+        TR.reindex({bnd: left_ind}, inplace=True)
+
+        # modify the tensornetwork
+        del self.ind_map[bnd]
+        self.ind_map[left_ind] = {tid_l}
+        self.ind_map[right_ind] = {tid_r}
 
     def insert_operator(self, A, where1, where2, tags=None, inplace=False):
         r"""Insert an operator on the bond between the specified tensors, e.g.:
@@ -2639,53 +2701,50 @@ class TensorNetwork(object):
 
     # --------------- information about indices and dimensions -------------- #
 
+    def _check_internal(self):
+        for tid, t in self.tensor_map.items():
+            for ix in t.inds:
+                if tid not in self.ind_map[ix]:
+                    raise ValueError("inds wrong")
+            for tg in t.tags:
+                if tid not in self.tag_map[tg]:
+                    raise ValueError("tags wrong")
+
     @property
     def tags(self):
         return set(self.tag_map.keys())
 
-    def ind_sizes(self):
-        """Get dict of each index mapped to its size.
+    def all_inds(self):
+        """Return a tuple of all indices (with repetition) in this network.
         """
-        ix_szs = (zip(t.inds, t.shape) for t in self)
-        return dict(concat(ix_szs))
+        return tuple(self.ind_map)
+
+    def inner_inds(self):
+        """Tuple of all inner indices, i.e. those that appear twice.
+        """
+        return tuple(i for i, tids in self.ind_map.items() if len(tids) == 2)
+
+    def outer_inds(self):
+        """Tuple of exterior indices, i.e. those that appear once.
+        """
+        return tuple(i for i, tids in self.ind_map.items() if len(tids) == 1)
 
     def ind_size(self, ind):
         """Find the size of ``ind``.
         """
-        for t in self:
-            if ind in t.inds:
-                return t.ind_size(ind)
+        tid = next(iter(self.ind_map[ind]))
+        return self.tensor_map[tid].ind_size(ind)
 
-    def all_inds_dims(self):
-        """Return a list of all indices, and the corresponding list of
-        dimensions from the tensor network.
+    def ind_sizes(self):
+        """Get dict of each index mapped to its size.
         """
-        return zip(*concat(zip(t.inds, t.shape) for t in self))
-
-    def all_inds(self):
-        """Return a tuple of all indices (with repetition) in this network.
-        """
-        return tuple(concat(t.inds for t in self))
-
-    def inner_inds(self):
-        """Return tuple of all inner indices, i.e. those that appear twice.
-        """
-        all_inds = self.all_inds()
-        ind_freqs = frequencies(all_inds)
-        return tuple(i for i in all_inds if ind_freqs[i] == 2)
+        return {i: self.ind_size(i) for i in self.ind_map}
 
     def outer_dims_inds(self):
         """Get the 'outer' pairs of dimension and indices, i.e. as if this
         tensor network was fully contracted.
         """
-        inds, dims = self.all_inds_dims()
-        ind_freqs = frequencies(inds)
-        return tuple((d, i) for d, i in zip(dims, inds) if ind_freqs[i] == 1)
-
-    def outer_inds(self):
-        """Actual, i.e. exterior, indices of this TensorNetwork.
-        """
-        return tuple(di[1] for di in self.outer_dims_inds())
+        return tuple((self.ind_size(i), i) for i in self.outer_inds())
 
     def squeeze(self, inplace=False):
         """Drop singlet bonds and dimensions from this tensor network.

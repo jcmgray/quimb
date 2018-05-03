@@ -4,7 +4,7 @@
 import numpy as np
 import random
 
-from .tensor_core import rand_uuid, Tensor
+from .tensor_core import rand_uuid, Tensor, bonds
 from .tensor_1d import MatrixProductState
 from .tensor_gen import MPO_rand, MPO_zeros_like, randn
 
@@ -91,16 +91,12 @@ class EEMPS(MatrixProductState):
         ai, af, bi, bf = rand_uuid(), rand_uuid(), rand_uuid(), rand_uuid()
 
         # cut bond between sysa start and sysb end
-        t1, t2 = self[self.sysa[0]], self[self.sysb[-1]]
-        old_ind, = t1.bonds(t2)
-        t1.reindex({old_ind: ai}, inplace=True)
-        t2.reindex({old_ind: bf}, inplace=True)
+        old_ind, = bonds(self[self.sysa[0]], self[self.sysb[-1]])
+        self.reindex({old_ind: ai, old_ind: bf}, inplace=True)
 
         # cut bond between sysa end and sysb start
-        t1, t2 = self[self.sysa[-1]], self[self.sysb[0]]
-        old_ind, = t1.bonds(t2)
-        t1.reindex({old_ind: af}, inplace=True)
-        t2.reindex({old_ind: bi}, inplace=True)
+        old_ind, = bonds(self[self.sysa[-1]], self[self.sysb[0]])
+        self.reindex({old_ind: af, old_ind: bi}, inplace=True)
 
         # add the env in that gap
         self |= Tensor(env, inds=(ai, af, bi, bf), tags={'_ENV'})
