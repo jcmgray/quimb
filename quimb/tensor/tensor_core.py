@@ -2694,8 +2694,9 @@ class TensorNetwork(object):
 
     # ------------------------------ printing ------------------------------- #
 
-    def graph(tn, color=None, show_inds=None, show_tags=None,
-              iterations=200, figsize=(6, 6), legend=True, **plot_opts):
+    def graph(tn, color=None, show_inds=None, show_tags=None, node_size=None,
+              iterations=200, k=None, fix=None,
+              figsize=(6, 6), legend=True, **plot_opts):
         """Plot this tensor network as a networkx graph using matplotlib,
         with edge width corresponding to bond dimension.
 
@@ -2713,16 +2714,25 @@ class TensorNetwork(object):
             using node repulsion. Ramp this up if the graph is drawing
             messily.
             be shown.
+        k : float, optional
+            The optimal distance between nodes.
+        fix : dict[tags, (float, float)], optional
+            Used to specify actual relative positions for each tensor node.
+            Each key should be a sequence of tags that uniquely identifies a
+            tensor, and each value should be a x, y coordinate tuple.
         figsize : tuple of int
             The size of the drawing.
         legend : bool, optional
             Whether to draw a legend for the colored tags.
+        node_size : None
+            How big to draw the tensors.
         plot_opts
             Supplied to ``networkx.draw``.
         """
         import networkx as nx
         import matplotlib.pyplot as plt
         import math
+        from collections import OrderedDict
 
         # build the graph
         G = nx.Graph()
@@ -2733,9 +2743,36 @@ class TensorNetwork(object):
             show_inds = (n <= 20)
             show_tags = (n <= 20)
 
-        labels = {}
+        if fix is None:
+            fix = {}
+        else:
+            # find range with which to scale spectral points with
+            xmin, xmax, ymin, ymax = (
+                f(fix.values(), key=lambda xy: xy[i])[i]
+                for f, i in [(min, 0), (max, 0), (min, 1), (max, 1)])
+            if xmin == xmax:
+                xmin, xmax = xmin - 1, xmax + 1
+            if ymin == ymax:
+                ymin, ymax = ymin - 1, ymax + 1
+            xymin, xymax = min(xmin, ymin), max(xmax, ymax)
 
-        for i, t1 in enumerate(ts):
+        # identify tensors by tid
+        fix_tids = {}
+        for tags_or_ind, pos in tuple(fix.items()):
+            try:
+                tid, = tn._get_tids_from_tags(tags_or_ind)
+                fix_tids[tid] = pos
+            except KeyError:
+                # assume index
+                fix_tids["ext{}".format(tags_or_ind)] = pos
+
+        labels = {}
+        fixed_positions = {}
+
+        for i, (tid, t1) in enumerate(tn.tensor_map.items()):
+
+            if tid in fix_tids:
+                fixed_positions[i] = fix_tids[tid]
 
             if not t1.inds:
                 # is a scalar
@@ -2764,6 +2801,9 @@ class TensorNetwork(object):
                     if show_inds:
                         labels[ext_lbl] = ix
 
+                    if ext_lbl in fix_tids:
+                        fixed_positions[ext_lbl] = fix_tids[ext_lbl]
+
         edge_weights = [x[2]['weight'] for x in G.edges(data=True)]
 
         # color the nodes
@@ -2772,37 +2812,34 @@ class TensorNetwork(object):
         elif isinstance(color, str):
             colors = {color: plt.get_cmap('tab10').colors[0]}
         else:
-
             # choose longest nice seq of colors
             if len(color) > 10:
                 rgbs = plt.get_cmap('tab20').colors
             else:
                 rgbs = plt.get_cmap('tab10').colors
-
             # extend
             extras = [plt.get_cmap(i).colors
                       for i in ('Dark2', 'Set2', 'Set3', 'Accent', 'Set1')]
-
             # but also resort to random if too long
-            def get_rand_colors():
-                while True:
-                    yield tuple(np.random.rand(3))
-            rgbs = concat((rgbs, *extras, get_rand_colors()))
-
-            colors = {tag: c for tag, c in zip(color, rgbs)}
+            rand_colors = (tuple(np.random.rand(3)) for _ in range(9999999999))
+            rgbs = concat((rgbs, *extras, rand_colors))
+            # ordered to reliably overcolor tags
+            colors = OrderedDict(zip(color, rgbs))
 
         for i, t1 in enumerate(ts):
             G.node[i]['color'] = None
-            for tag in t1.tags:
-                if tag in colors:
-                    G.node[i]['color'] = colors[tag]
-
+            for col_tag in colors:
+                if col_tag in t1.tags:
+                    G.node[i]['color'] = colors[col_tag]
             # optionally label the tensor's tags
             if show_tags:
                 labels[i] = str(t1.tags)
 
         # Set the size of the nodes, so that dangling inds appear so.
         # Also set the colors of any tagged tensors.
+        if node_size is None:
+            node_size = 600 / n**0.6
+
         szs = []
         crs = []
         for nd in G.nodes():
@@ -2810,7 +2847,7 @@ class TensorNetwork(object):
                 szs += [0]
                 crs += [(1.0, 1.0, 1.0)]
             else:
-                szs += [500 / n**0.6]
+                szs += [node_size]
                 if G.node[nd]['color'] is not None:
                     crs += [G.node[nd]['color']]
                 else:
@@ -2822,10 +2859,23 @@ class TensorNetwork(object):
 
         # use spectral layout as starting point
         pos0 = nx.spectral_layout(G)
-        # but then relax using spring layout
-        pos = nx.spring_layout(G, pos=pos0, iterations=iterations)
+        # scale points to fit with specified positions
+        if fix:
+            # but update with fixed positions
+            pos0.update(valmap(lambda xy: np.array(
+                (2 * (xy[0] - xymin) / (xymax - xymin) - 1,
+                 2 * (xy[1] - xymin) / (xymax - xymin) - 1)), fixed_positions))
+            fixed = fixed_positions.keys()
+        else:
+            fixed = None
+
+        # and then relax remaining using spring layout
+        pos = nx.spring_layout(G, pos=pos0, fixed=fixed,
+                               k=k, iterations=iterations)
+
         nx.draw(G, node_size=szs, node_color=crs, pos=pos, labels=labels,
                 with_labels=True, width=edge_weights, **plot_opts)
+        plt.gca().set_aspect('equal')
 
         # create legend
         if colors and legend:
