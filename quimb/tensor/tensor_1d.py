@@ -957,7 +957,7 @@ class MatrixProductState(TensorNetwork1D):
             The schmidt values.
         """
         if self.cyclic:
-            raise NotImplemented
+            raise NotImplementedError
 
         return self.singular_values(i, current_orthog_centre, method=method)**2
 
@@ -978,7 +978,7 @@ class MatrixProductState(TensorNetwork1D):
         float
         """
         if self.cyclic:
-            raise NotImplemented
+            raise NotImplementedError
 
         S = self.schmidt_values(i, current_orthog_centre=current_orthog_centre,
                                 method=method)
@@ -1002,7 +1002,7 @@ class MatrixProductState(TensorNetwork1D):
         float
         """
         if self.cyclic:
-            raise NotImplemented
+            raise NotImplementedError
 
         S = self.schmidt_values(i, current_orthog_centre=current_orthog_centre,
                                 method=method)
