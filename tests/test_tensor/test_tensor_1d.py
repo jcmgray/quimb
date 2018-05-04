@@ -3,32 +3,13 @@ import pytest
 import numpy as np
 from numpy.testing import assert_allclose
 
-from quimb import (
-    eigvalsh,
-    entropy_subsys,
-    schmidt_gap,
-    isherm,
-    ispos,
-    ham_heis,
-    neel_state,
-)
-
-from quimb.tensor import (
-    MatrixProductState,
-    MatrixProductOperator,
-    align_TN_1D,
-    MPS_rand_state,
-    MPO_identity,
-    MPO_identity_like,
-    MPO_zeros,
-    MPO_zeros_like,
-    MPO_rand,
-    MPO_rand_herm,
-    MPO_ham_heis,
-    MPS_neel_state,
-    MPS_zero_state,
-    bonds,
-)
+import quimb as qu
+from quimb.tensor import (MatrixProductState, MatrixProductOperator,
+                          align_TN_1D, MPS_rand_state, MPO_identity,
+                          MPO_identity_like, MPO_zeros, MPO_zeros_like,
+                          MPO_rand, MPO_rand_herm, MPO_ham_heis,
+                          MPS_neel_state, MPS_zero_state, bonds,
+                          MPS_computational_state)
 
 
 class TestMatrixProductState:
@@ -301,8 +282,9 @@ class TestMatrixProductState:
             svns.append(p.entropy(i, current_orthog_centre=i))
 
         pd = p.to_dense()
-        ex_svns = [entropy_subsys(pd, [2] * n, range(i)) for i in range(1, n)]
-        ex_sgs = [schmidt_gap(pd, [2] * n, range(i)) for i in range(1, n)]
+        ex_svns = [qu.entropy_subsys(pd, [2] * n, range(i))
+                   for i in range(1, n)]
+        ex_sgs = [qu.schmidt_gap(pd, [2] * n, range(i)) for i in range(1, n)]
         assert_allclose(ex_svns, svns)
         assert_allclose(ex_sgs, sgs)
 
@@ -325,7 +307,7 @@ class TestMatrixProductState:
                 assert r.lower_inds == ('u2', 'u3', 'u4', 'u6', 'u8')
                 assert r.upper_inds == ('k2', 'k3', 'k4', 'k6', 'k8')
         assert_allclose(r.trace(), 1.0)
-        assert isherm(rd)
+        assert qu.isherm(rd)
         pd = p.to_dense()
         rdd = pd.ptr([2] * n, keep=keep)
         assert_allclose(rd, rdd)
@@ -402,6 +384,35 @@ class TestMatrixProductState:
 
         ii = ii.to_dense((ul, ur), (ll, lr))
         assert_allclose(ii, np.eye(ii.shape[0]), rtol=2e-4, atol=2e-4)
+
+    @pytest.mark.parametrize("bsz", [1, 2])
+    @pytest.mark.parametrize("propagate_tags", [False, True])
+    @pytest.mark.parametrize("contract", [False, True])
+    def test_gate_no_contract(self, bsz, propagate_tags, contract):
+        p = MPS_rand_state(5, 7)
+        q = p.copy()
+        G = qu.rand_uni(2**bsz)
+        p = p.gate(G, where=[i for i in range(2, 2 + bsz)],
+                   tags='G', contract=contract)
+        TG = p['G']
+        if propagate_tags or contract:
+            assert p.site_tag(2) in TG.tags
+        assert p.H @ p == pytest.approx(1.0)
+        assert abs(q.H @ p) < 1.0
+        assert len(p.tensors) == 6 - int(contract) * bsz
+        assert set(p.outer_inds()) == {'k{}'.format(i) for i in range(5)}
+
+    def test_correlation(self):
+        ghz = (MPS_computational_state('0000') +
+               MPS_computational_state('1111')) / 2**0.5
+
+        assert ghz.correlation(qu.pauli('Z'), 0, 1) == pytest.approx(1.0)
+        assert ghz.correlation(qu.pauli('Z'), 1, 2) == pytest.approx(1.0)
+        assert ghz.correlation(qu.pauli('Z'), 3, 1) == pytest.approx(1.0)
+        assert ghz.correlation(qu.pauli('Z'), 3, 1,
+                               B=qu.pauli('Y')) == pytest.approx(0.0)
+
+        assert ghz.H @ ghz == pytest.approx(1.0)
 
 
 class TestMatrixProductOperator:
@@ -510,8 +521,8 @@ class TestMatrixProductOperator:
         r = p.ptr([2, 3, 4, 5, 6, 7])
         rd = r.to_dense()
 
-        assert isherm(rd)
-        assert ispos(rd)
+        assert qu.isherm(rd)
+        assert qu.ispos(rd)
 
         rpt = r.partial_transpose([0, 1, 2])
         rptd = rpt.to_dense()
@@ -521,8 +532,8 @@ class TestMatrixProductOperator:
         outer_inds = rpt.outer_inds()
         assert all(i in outer_inds for i in upper_inds + lower_inds)
 
-        assert isherm(rptd)
-        assert not ispos(rptd)
+        assert qu.isherm(rptd)
+        assert not qu.ispos(rptd)
 
     @pytest.mark.parametrize("cyclic", (False, True))
     def test_dot_mpo(self, cyclic):
@@ -573,7 +584,7 @@ class TestSpecificStatesOperators:
 
     def test_mps_computation_state(self):
         p = MPS_neel_state(10)
-        pd = neel_state(10)
+        pd = qu.neel_state(10)
         assert_allclose(p.to_dense(), pd)
 
     def test_zero_state(self):
@@ -595,9 +606,9 @@ class TestSpecificStatesOperators:
         assert hh_mpo[1].tags == {'I1', 'foo'}
         assert hh_mpo[-1].tags == {'I{}'.format(n - 1), 'foo'}
         assert hh_mpo.shape == (2,) * 2 * n
-        hh_ex = ham_heis(n, cyclic=cyclic, j=j, b=bz)
-        assert_allclose(eigvalsh(hh_ex),
-                        eigvalsh(hh_mpo.to_dense()), atol=1e-13)
+        hh_ex = qu.ham_heis(n, cyclic=cyclic, j=j, b=bz)
+        assert_allclose(qu.eigvalsh(hh_ex),
+                        qu.eigvalsh(hh_mpo.to_dense()), atol=1e-13)
 
     def test_mpo_zeros(self):
         mpo0 = MPO_zeros(10)

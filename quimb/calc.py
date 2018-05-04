@@ -740,7 +740,7 @@ bell_decomp = functools.partial(decomp,
 """Decompose an operator into bell-states."""
 
 
-def correlation(p, opa, opb, sysa, sysb, dims=None, sparse=None,
+def correlation(p, A, B, sysa, sysb, dims=None, sparse=None,
                 precomp_func=False):
     """Calculate the correlation between two sites given two operators.
 
@@ -748,9 +748,9 @@ def correlation(p, opa, opb, sysa, sysb, dims=None, sparse=None,
     ----------
     p : vector or matrix
         State to compute correlations for, ignored if ``precomp_func=True``.
-    opa : matrix
+    A : matrix
         Operator to act on first subsystem.
-    opb : matrix
+    B : matrix
         Operator to act on second subsystem.
     sysa : int
         Index of first subsystem.
@@ -775,18 +775,18 @@ def correlation(p, opa, opb, sysa, sysb, dims=None, sparse=None,
         sz_p = infer_size(p)
         dims = (2,) * sz_p
     if sparse is None:
-        sparse = issparse(opa) or issparse(opb)
+        sparse = issparse(A) or issparse(B)
 
     opts = {'sparse': sparse,
             'coo_build': sparse,
             'stype': 'csr' if sparse else None}
-    opab = ikron((opa, opb), dims, (sysa, sysb), **opts)
-    opa = ikron((opa,), dims, sysa, **opts)
-    opb = ikron((opb,), dims, sysb, **opts)
+    opab = ikron((A, B), dims, (sysa, sysb), **opts)
+    A = ikron((A,), dims, sysa, **opts)
+    B = ikron((B,), dims, sysb, **opts)
 
     @realify
     def corr(state):
-        return expec(opab, state) - expec(opa, state) * expec(opb, state)
+        return expec(opab, state) - expec(A, state) * expec(B, state)
 
     return corr if precomp_func else corr(p)
 

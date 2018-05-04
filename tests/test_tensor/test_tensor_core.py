@@ -5,7 +5,7 @@ import numpy as np
 from numpy.testing import assert_allclose
 import scipy.sparse.linalg as spla
 
-from quimb import entropy, svds
+import quimb as qu
 from quimb.tensor import (
     bonds,
     tensor_contract,
@@ -269,7 +269,7 @@ class TestTensorFunctions:
     def test_entropy_matches_dense(self, method):
         p = MPS_rand_state(5, 32)
         p_dense = p.to_dense()
-        real_svn = entropy(p_dense.ptr([2] * 5, [0, 1, 2]))
+        real_svn = qu.entropy(p_dense.ptr([2] * 5, [0, 1, 2]))
 
         svn = (p ^ ...).entropy(('k0', 'k1', 'k2'))
         assert_allclose(real_svn, svn)
@@ -739,6 +739,19 @@ class TestTensorNetwork:
         assert k.max_bond() == 5
         assert_allclose(k.H @ k, 1.0)
 
+    def test_insert_operator(self):
+        p = MPS_rand_state(3, 7, tags='KET')
+        q = p.H.retag({'KET': 'BRA'})
+        qp = q & p
+        sz = qu.spin_operator('z').real
+        qp.insert_operator(sz, ('KET', 'I1'), ('BRA', 'I1'),
+                           tags='SZ', inplace=True)
+        assert 'SZ' in qp.tags
+        assert len(qp.tensors) == 7
+        x1 = qp ^ all
+        x2 = qu.expec(p.to_dense(), qu.ikron(sz, [2, 2, 2], inds=1))
+        assert x1 == pytest.approx(x2)
+
     @pytest.mark.parametrize("dtype", (float, complex))
     def test_insert_gauge(self, dtype):
         k = MPS_rand_state(10, 7, dtype=dtype, normalize=False)
@@ -786,8 +799,8 @@ class TestTensorNetworkAsLinearOperator:
         tn_lo = tn.aslinearoperator(('a', 'b'), ('c', 'd'))
         tn_d = tn.to_dense(['a', 'b'], ['c', 'd'])
 
-        u, s, v = svds(tn_lo, k=5, backend='scipy')
-        ud, sd, vd = svds(tn_d, k=5, backend='scipy')
+        u, s, v = qu.svds(tn_lo, k=5, backend='scipy')
+        ud, sd, vd = qu.svds(tn_d, k=5, backend='scipy')
 
         assert_allclose(s, sd)
 

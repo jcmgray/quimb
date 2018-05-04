@@ -911,6 +911,9 @@ class DMRG:
             for i in sweep
         ])
 
+        if verbosity:
+            sweep.close()
+
         self.local_energies.append(local_ens)
         self.total_energies.append(tot_ens)
 

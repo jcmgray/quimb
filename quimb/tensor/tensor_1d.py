@@ -956,6 +956,9 @@ class MatrixProductState(TensorNetwork1D):
         S : 1d-array
             The schmidt values.
         """
+        if self.cyclic:
+            raise NotImplemented
+
         return self.singular_values(i, current_orthog_centre, method=method)**2
 
     def entropy(self, i, current_orthog_centre=None, method='svd'):
@@ -974,6 +977,9 @@ class MatrixProductState(TensorNetwork1D):
         -------
         float
         """
+        if self.cyclic:
+            raise NotImplemented
+
         S = self.schmidt_values(i, current_orthog_centre=current_orthog_centre,
                                 method=method)
         S = S[S > 0.0]
@@ -995,6 +1001,9 @@ class MatrixProductState(TensorNetwork1D):
         -------
         float
         """
+        if self.cyclic:
+            raise NotImplemented
+
         S = self.schmidt_values(i, current_orthog_centre=current_orthog_centre,
                                 method=method)
         return S[0] - S[1]
@@ -1272,7 +1281,8 @@ class MatrixProductState(TensorNetwork1D):
                     left_sz = self.bond_size(section[0] - 1, section[0])
                     right_sz = self.bond_size(section[-1], section[-1] + 1)
                     if left_sz * right_sz <= 2**13:
-                        vmethod = 'cholesky'
+                        # cholesky is not rank revealing
+                        vmethod = 'eigh' if vmax_bond else 'cholesky'
                     else:
                         vmethod = 'isvd'
 
@@ -1469,8 +1479,8 @@ class MatrixProductState(TensorNetwork1D):
             # site i not longer has the site ind i (e.g. gate acted on?)
             return self.ind_size(self.site_ind(i))
 
-    def gate(self, G, where, contract=False, inplace=False,
-             tags=None, propagate_tags=True):
+    def gate(self, G, where, contract=False, tags=None, propagate_tags=True,
+             inplace=False):
         r"""Act with the gate ``g`` on sites ``where``, maintaining the outer
         indices of the MPS:
 
@@ -1492,14 +1502,15 @@ class MatrixProductState(TensorNetwork1D):
         where : int or sequence of int
             Where the gate should act.
         contract, bool, optional
-            Contract the gate in, or leave it uncontracted.
-        inplace, bool, optional
-            Perform the gate in place, default: True.
-        tags : str, sequence of str, optional
+            Contract the gate into the MPS, or leave it uncontracted.
+        tags : str or sequence of str, optional
             Tag the new gate tensor with these tags.
         propagate_tags : bool, optional
             Add any tags from the sites to the new gate tensor
             (only matters if ``contract=False`` else tags are merged anyway).
+            Default: True.
+        inplace, bool, optional
+            Perform the gate in place.
 
         Returns
         -------
@@ -1552,6 +1563,48 @@ class MatrixProductState(TensorNetwork1D):
     @functools.wraps(align_TN_1D)
     def align(self, *args, inplace=True):
         return align_TN_1D(self, *args, inplace=inplace)
+
+    def correlation(self, A, i, j, B=None, **expec_opts):
+        """Correlation of operator ``A`` between ``i`` and ``j``.
+
+        Parameters
+        ----------
+        A : array
+            The operator to act with, can be multi site.
+        i : int or sequence of int
+            The first site(s).
+        j : int or sequence of int
+            The second site(s).
+        expec_opts
+            Supplied to :func:`~quimb.tensor.tensor_1d.expec_TN_1D`.
+
+        Returns
+        -------
+        C : float
+            The correlation <A(i)> + <A(j)> - <A(ij)>.
+
+        Examples
+        --------
+        >>> ghz = (MPS_computational_state('0000') +
+        ...        MPS_computational_state('1111')) / 2**0.5
+        >>> ghz.correlation(pauli('Z'), 0, 1)
+        1.0
+        >>> ghz.correlation(pauli('Z'), 0, 1, B=pauli('X'))
+        0.0
+        """
+        if B is None:
+            B = A
+
+        pA = self.gate(A, i, contract=True)
+        cA = expec_TN_1D(self, pA, **expec_opts)
+
+        pB = self.gate(B, j, contract=True)
+        cB = expec_TN_1D(self, pB, **expec_opts)
+
+        pAB = pA.gate(B, j, inplace=True, contract=True)
+        cAB = expec_TN_1D(self, pAB, **expec_opts)
+
+        return cAB - cA * cB
 
 
 class MatrixProductOperator(TensorNetwork1D):

@@ -2293,7 +2293,7 @@ class TensorNetwork(object):
     def replace_section_with_svd(self, start, stop, eps,
                                  **replace_with_svd_opts):
         """Take a 1D tensor network, and replace a section with a SVD.
-        See :meth:`~quimb.tensor.TensorNetwork.replace_with_svd`.
+        See :meth:`~quimb.tensor.tensor_core.TensorNetwork.replace_with_svd`.
 
         Parameters
         ----------
@@ -2304,7 +2304,8 @@ class TensorNetwork(object):
         eps : float
             Precision of SVD.
         replace_with_svd_opts
-            Supplied to :meth:`~quimb.tensor.TensorNetwork.replace_with_svd`.
+            Supplied to
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.replace_with_svd`.
 
         Returns
         -------
@@ -2354,9 +2355,49 @@ class TensorNetwork(object):
         n2, = self._get_tids_from_tags(tags2, which='all')
         tensor_add_bond(self.tensor_map[n1], self.tensor_map[n2])
 
-    def insert_gauge(self, U, tags1, tags2, Uinv=None, tol=1e-10):
+    def insert_operator(self, A, where1, where2, tags=None, inplace=False):
+        r"""Insert an operator on the bond between the specified tensors, e.g.:
+
+              |   |              |   |
+            --1---2--    ->    --1-A-2--
+              |                  |
+
+        Parameters
+        ----------
+        A : array
+            The operator to insert.
+        where1 : str, sequence of str, or int
+            The tags defining the 'left' tensor.
+        where2 : str, sequence of str, or int
+            The tags defining the 'right' tensor.
+        tags : str or sequence of str
+            Tags to add to the new operator's tensor.
+        inplace : bool, optional
+            Whether to perform the insertion inplace.
+        """
+        tn = self if inplace else self.copy()
+
+        d = A.shape[0]
+
+        T1, T2 = tn[where1], tn[where2]
+        bnd, = bonds(T1, T2)
+        db = T1.ind_size(bnd)
+
+        if d != db:
+            raise ValueError("This operator has dimension {} but needs "
+                             "dimension {}.".format(d, db))
+
+        # reindex one tensor, and add a new A tensor joining the bonds
+        nbnd = rand_uuid()
+        T2.reindex({bnd: nbnd}, inplace=True)
+        TA = Tensor(A, inds=(bnd, nbnd), tags=tags)
+        tn |= TA
+
+        return tn
+
+    def insert_gauge(self, U, where1, where2, Uinv=None, tol=1e-10):
         """Insert the gauge transformation ``U @ U^-1`` into the bond between
-        the tensors, ``T1`` and ``T2``, defined by ``tags1`` and ``tags2``.
+        the tensors, ``T1`` and ``T2``, defined by ``where1`` and ``where2``.
         The resulting tensors at those locations will be ``T1 @ U^-1`` and
         ``T2 @ U``.
 
@@ -2364,16 +2405,16 @@ class TensorNetwork(object):
         ----------
         U : np.ndarray
             The gauge to insert.
-        tags1 : str, sequence of str, or int
+        where1 : str, sequence of str, or int
             Tags defining the location of the 'left' tensor.
-        tags2 : str, sequence of str, or int
+        where2 : str, sequence of str, or int
             Tags defining the location of the 'right' tensor.
         Uinv : np.ndarray
             The inverse gauge, ``U @ Uinv == Uinv @ U == eye``, to insert.
             If not given will be calculated using :func:`numpy.linalg.inv`.
         """
-        n1, = self._get_tids_from_tags(tags1, which='all')
-        n2, = self._get_tids_from_tags(tags2, which='all')
+        n1, = self._get_tids_from_tags(where1, which='all')
+        n2, = self._get_tids_from_tags(where2, which='all')
         T1, T2 = self.tensor_map[n1], self.tensor_map[n2]
         bnd, = T1.bonds(T2)
 
@@ -2832,7 +2873,7 @@ class TensorNetwork(object):
         # Set the size of the nodes, so that dangling inds appear so.
         # Also set the colors of any tagged tensors.
         if node_size is None:
-            node_size = 600 / n**0.6
+            node_size = 1000 / n**0.7
 
         szs = []
         crs = []

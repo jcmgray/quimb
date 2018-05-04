@@ -8,8 +8,9 @@ import itertools
 from cytoolz import isiterable, concat, unique
 import numpy as np
 import scipy.sparse as sp
+from scipy.special import comb
 
-from ..accel import njit, make_immutable, get_thread_pool, par_reduce, isreal
+from ..accel import make_immutable, get_thread_pool, par_reduce, isreal
 from ..core import qu, eye, kron, ikron
 
 
@@ -584,18 +585,6 @@ def ham_heis_2D(n, m, j=1.0, bz=0.0, cyclic=False,
     return H
 
 
-@njit
-def cmbn(n, k):  # pragma: no cover
-    """Integer combinatorial factor.
-    """
-    x = 1.0
-    for _ in range(k):
-        x *= n / k
-        n -= 1
-        k -= 1
-    return x
-
-
 def uniq_perms(xs):
     """Generate all the unique permutations of sequence ``xs``.
 
@@ -675,7 +664,7 @@ def zspin_projector(n, sz=0, stype="csr", dtype=float):
                              "{} spins.".format(s, n))
         k = int(round(k))
         # Size of subspace
-        p += int(round(cmbn(n, k)))
+        p += comb(n, k, exact=True)
         # Find all computational basis states with correct number of 0s and 1s
         base_perm = '0' * (n - k) + '1' * k
         all_perms += [uniq_perms(base_perm)]

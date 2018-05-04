@@ -73,6 +73,15 @@ We can also add MPS and compress:
     >>> p2.H @ p2
     0.9999999999999998
 
+Could also calculate the following:
+
+- :meth:`~quimb.tensor.tensor_1d.MatrixProductState.entropy` (OBC only)
+- :meth:`~quimb.tensor.tensor_1d.MatrixProductState.schmidt_gap` (OBC only)
+- :meth:`~quimb.tensor.tensor_1d.MatrixProductState.correlation`
+- :meth:`~quimb.tensor.tensor_1d.MatrixProductState.logneg_subsys`
+
+and various out quantities such as the mutual information using a combination of - :meth:`~quimb.tensor.tensor_1d.MatrixProductState.partial_trace_compress` and :func:`~quimb.approx_spectral_function` (see :ref:`Examples`).
+
 Generate a random hermitian :class:`~quimb.tensor.tensor_1d.MatrixProductOperator` and form a 'overlap' network with our MPS:
 
 .. code-block:: python
