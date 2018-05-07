@@ -1472,11 +1472,7 @@ class MatrixProductState(TensorNetwork1D):
     def phys_dim(self, i=None):
         if i is None:
             i = self.sites[0]
-        try:
-            return self[i].ind_size(self.site_ind(i))
-        except (ValueError, AttributeError):
-            # site i not longer has the site ind i (e.g. gate acted on?)
-            return self.ind_size(self.site_ind(i))
+        return self.ind_size(self.site_ind(i))
 
     def gate(self, G, where, contract=False, tags=None, propagate_tags=True,
              inplace=False):

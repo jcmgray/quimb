@@ -1654,7 +1654,7 @@ class TensorNetwork(object):
             self.ind_map = merge_with(set_join, self.ind_map, tn.ind_map)
 
     def add(self, t, virtual=False, check_collisions=True, inner_inds=None):
-        """
+        """Add Tensor or TensorNetwork to self.
         """
         istensor = isinstance(t, Tensor)
         istensornetwork = isinstance(t, TensorNetwork)
@@ -2071,18 +2071,39 @@ class TensorNetwork(object):
         return tn
 
     def select_neighbors(self, tags, which='any'):
-        utn, ttn = self.partition(tags, which=which, calc_sites=False)
-        joining_inds = ttn.outer_inds()
-        return tuple(t for t in utn if any(i in joining_inds for i in t.inds))
+        """Select any neighbouring tensors to those specified by ``tags``.self
+
+        Parameters
+        ----------
+        tags : sequence of str, int
+            Tags specifying tensors.
+        which : {'any', 'all'}, optional
+            How to select tensors based on ``tags``.
+
+        Returns
+        -------
+        tuple[Tensor]
+            The neighbouring tensors.
+        """
+
+        # find all the inds in the tagged portion
+        tagged_tids = self._get_tids_from_tags(tags, which)
+        tagged_ts = (self.tensor_map[tid] for tid in tagged_tids)
+        inds = set(concat(t.inds for t in tagged_ts))
+
+        # find all tensors with those inds, and remove the initial tensors
+        inds_tids = set_join(self.ind_map[i] for i in inds)
+        neighbour_tids = inds_tids - tagged_tids
+
+        return tuple(self.tensor_map[tid] for tid in neighbour_tids)
 
     def __getitem__(self, tags):
-        """Get the tensor(s) associated with ``tags``. Only returns tensors
-        which match *all* of the tags.
+        """Get the tensor(s) associated with ``tags``.
 
         Parameters
         ----------
         tags : str or sequence of str
-            The tags used to select the tensor(s)
+            The tags used to select the tensor(s).
 
         Returns
         -------
