@@ -217,6 +217,29 @@ class TestBasicTensorOperations:
         with pytest.raises(ValueError):
             a.transpose(*'cdfebz')
 
+    def test_ownership(self):
+        a = rand_tensor((2, 2), ('a', 'b'), tags={'X', 'Y'})
+        b = rand_tensor((2, 2), ('b', 'c'), tags={'X', 'Z'})
+        assert not a.check_owners()
+        assert not b.check_owners()
+        tn = TensorNetwork((a, b), virtual=True)
+        assert a.check_owners()
+        assert b.check_owners()
+        assert a.owners[0][0]() is tn
+        assert b.owners[0][0]() is tn
+        assert all(map(tn.ind_map.__contains__, ('a', 'b', 'c')))
+        assert all(map(tn.tag_map.__contains__, ('X', 'Y', 'Z')))
+        a.reindex({'a': 'd'}, inplace=True)
+        assert 'a' not in tn.ind_map
+        assert 'd' in tn.ind_map
+        assert len(tn.tag_map['X']) == 2
+        b.retag({'X': 'W'}, inplace=True)
+        assert len(tn.tag_map['X']) == 1
+        assert 'W' in tn.tag_map
+        del tn
+        assert not a.check_owners()
+        assert not b.check_owners()
+
 
 class TestTensorFunctions:
     @pytest.mark.parametrize('method', ['svd', 'eig', 'isvd', 'svds'])

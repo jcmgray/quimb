@@ -4,7 +4,7 @@
 import numpy as np
 import random
 
-from .tensor_core import rand_uuid, Tensor, bonds
+from .tensor_core import rand_uuid, Tensor
 from .tensor_1d import MatrixProductState
 from .tensor_gen import MPO_rand, MPO_zeros_like, randn
 
@@ -90,13 +90,9 @@ class EEMPS(MatrixProductState):
         # generate the four indices for the env
         ai, af, bi, bf = rand_uuid(), rand_uuid(), rand_uuid(), rand_uuid()
 
-        # cut bond between sysa start and sysb end
-        old_ind, = bonds(self[self.sysa[0]], self[self.sysb[-1]])
-        self.reindex({old_ind: ai, old_ind: bf}, inplace=True)
-
-        # cut bond between sysa end and sysb start
-        old_ind, = bonds(self[self.sysa[-1]], self[self.sysb[0]])
-        self.reindex({old_ind: af, old_ind: bi}, inplace=True)
+        # cut bond between sysa start and sysb end, and sysa end and sysb start
+        self.cut_bond(self.sysa[0], self.sysb[-1], ai, bf)
+        self.cut_bond(self.sysa[-1], self.sysb[0], af, bi)
 
         # add the env in that gap
         self |= Tensor(env, inds=(ai, af, bi, bf), tags={'_ENV'})
@@ -375,7 +371,6 @@ class PTPTLazyMPS:
 
         To create a new EEMPS.
         """
-
         v = other.copy()
         v.add_tag('_VEC')
 

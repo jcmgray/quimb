@@ -812,7 +812,7 @@ class MatrixProductState(TensorNetwork1D):
             Whether to reindex in place.
         """
         if where is None:
-            indices = range(0, self.nsites)
+            indices = self.sites
         elif isinstance(where, slice):
             indices = self.slice2sites(where)
         else:

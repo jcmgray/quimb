@@ -824,6 +824,7 @@ class Tensor(object):
     """
 
     def __init__(self, data, inds, tags=None):
+        # a new or copied Tensor always has no owners
         self.owners = []
 
         # Short circuit for copying Tensors
@@ -863,28 +864,54 @@ class Tensor(object):
     def tags(self):
         return self._tags
 
-    def add_owner(self, tn):
-        self.owners.append(weakref.ref(tn))
+    def add_owner(self, tn, tid):
+        """Add ``tn`` as owner of this Tensor - it's tag and ind maps will
+        be updated whenever this tensor is retagged or reindexed.
+        """
+        self.owners.append((weakref.ref(tn), tid))
+
+    def remove_owner(self, tn):
+        """Remove ``tn`` as owner of this Tensor.
+        """
+        self.owners = [(r, t) for r, t in self.owners if r() is not tn]
 
     def check_owners(self):
-        # parse out dead owners
-        self.owners = [r for r in self.owners if r()]
+        """Check if this tensor is 'owned' by any alive TensorNetworks. Also
+        trim any weakrefs to dead TensorNetwork.
+        """
+        # first parse out dead owners
+        self.owners = [ref_tid for ref_tid in self.owners if ref_tid[0]()]
         return len(self.owners) > 0
 
     def modify(self, data=None, inds=None, tags=None):
-        """Overwrite the data of this tensor.
+        """Overwrite the data of this tensor in place.
+
+        Parameters
+        ----------
+        data : array, optional
+            New data.
+        inds : sequence of str, optional
+            New tuple of indices.
+        tags : sequence of str, optional
+            New tags.
         """
         if data is not None:
             self._data = np.asarray(data)
 
         if inds is not None:
-            if self.check_owners:
-                raise ValueError("modifying tensor inds with owner!")
-            self._inds = inds
+            # if this tensor has owners, update their ``ind_map``.
+            if self.check_owners():
+                for ref, tid in self.owners:
+                    ref()._modify_tensor_inds(self.inds, inds, tid)
+
+            self._inds = tuple(inds)
 
         if tags is not None:
-            if self.check_owners:
-                raise ValueError("modifying tensor tags with owner!")
+            # if this tensor has owners, update their ``tag_map``.
+            if self.check_owners():
+                for ref, tid in self.owners:
+                    ref()._modify_tensor_tags(self.tags, tags, tid)
+
             self._tags = tags2set(tags)
 
         if len(self.inds) != self.data.ndim:
@@ -1054,6 +1081,21 @@ class Tensor(object):
         el = el[el > 0.0]
         return np.sum(-el * np.log2(el))
 
+    def retag(self, retag_map, inplace=False):
+        """Rename the tags of this tensor, optionally, in-place.
+
+        Parameters
+        ----------
+        retag_map : dict-like
+            Mapping of pairs ``{old_tag: new_tag, ...}``.
+        inplace : bool, optional
+            If ``False`` (the default), a copy of this tensor with the changed
+            tags will be returned.
+        """
+        new = self if inplace else self.copy()
+        new.modify(tags={retag_map.get(tag, tag) for tag in new.tags})
+        return new
+
     def reindex(self, index_map, inplace=False):
         """Rename the indices of this tensor, optionally in-place.
 
@@ -1085,19 +1127,15 @@ class Tensor(object):
         Tensor
             The transposed, reshaped and re-labeled tensor.
         """
-        if inplace:
-            tn = self
-        else:
-            tn = self.copy()
+        tn = self if inplace else self.copy()
 
         if isinstance(fuse_map, dict):
             new_fused_inds, fused_inds = zip(*fuse_map.items())
         else:
             new_fused_inds, fused_inds = zip(*fuse_map)
 
-        unfused_inds = tuple(
-            i for i in tn.inds if not
-            any(i in fs for fs in fused_inds))
+        unfused_inds = tuple(i for i in tn.inds if not
+                             any(i in fs for fs in fused_inds))
 
         # transpose tensor to bring groups of fused inds to the beginning
         tn.transpose(*concat(fused_inds), *unfused_inds, inplace=True)
@@ -1453,10 +1491,12 @@ class TensorNetwork(object):
             self.nsites = ts.nsites
             self.sites = ts.sites
             self.structure_bsz = ts.structure_bsz
-            self.tensor_map = valmap(lambda t: t if virtual else t.copy(),
-                                     ts.tensor_map)
             self.tag_map = valmap(lambda tid: tid.copy(), ts.tag_map)
             self.ind_map = valmap(lambda tid: tid.copy(), ts.ind_map)
+            self.tensor_map = {}
+            for tid, t in ts.tensor_map.items():
+                self.tensor_map[tid] = t if virtual else t.copy()
+                self.tensor_map[tid].add_owner(self, tid)
             return
 
         # parameters
@@ -1537,6 +1577,27 @@ class TensorNetwork(object):
             return copy.deepcopy(self)
         return self.__class__(self, virtual=virtual)
 
+    @staticmethod
+    def _add_tid(xs, x_map, tid):
+        """Add tid to the relevant map.
+        """
+        for x in xs:
+            if x in x_map:
+                x_map[x].add(tid)
+            else:
+                x_map[x] = {tid}
+
+    @staticmethod
+    def _remove_tid(xs, x_map, tid):
+        """Remove tid from the relevant map.
+        """
+        for x in set(xs):
+            tids = x_map[x]
+            tids.discard(tid)
+            if not tids:
+                # tid was last tensor -> delete entry
+                del x_map[x]
+
     def add_tensor(self, tensor, tid=None, virtual=False):
         """Add a single tensor to this network - mangle its tid if neccessary.
         """
@@ -1547,20 +1608,11 @@ class TensorNetwork(object):
         # add tensor to the main index
         T = tensor if virtual else tensor.copy()
         self.tensor_map[tid] = T
-        T.add_owner(self)
+        T.add_owner(self, tid)
 
-        # add its tid to the relevant tags, or create a new tag
-        for tag in T.tags:
-            try:
-                self.tag_map[tag].add(tid)
-            except (KeyError, TypeError):
-                self.tag_map[tag] = {tid}
-
-        for ind in tensor.inds:
-            try:
-                self.ind_map[ind].add(tid)
-            except (KeyError, TypeError):
-                self.ind_map[ind] = {tid}
+        # add its tid to the relevant tags and inds, or create new entries
+        self._add_tid(T.tags, self.tag_map, tid)
+        self._add_tid(T.inds, self.ind_map, tid)
 
     def add_tensor_network(self, tn, virtual=False, check_collisions=True,
                            inner_inds=None):
@@ -1596,7 +1648,7 @@ class TensorNetwork(object):
             for tid, tsr in tn.tensor_map.items():
                 T = tsr if virtual else tsr.copy()
                 self.tensor_map[tid] = T
-                T.add_owner(self)
+                T.add_owner(self, tid)
 
             self.tag_map = merge_with(set_join, self.tag_map, tn.tag_map)
             self.ind_map = merge_with(set_join, self.ind_map, tn.ind_map)
@@ -1633,6 +1685,14 @@ class TensorNetwork(object):
         self.add(tensor, virtual=True)
         return self
 
+    def _modify_tensor_tags(self, old, new, tid):
+        self._remove_tid((o for o in old if o not in new), self.tag_map, tid)
+        self._add_tid((n for n in new if n not in old), self.tag_map, tid)
+
+    def _modify_tensor_inds(self, old, new, tid):
+        self._remove_tid((o for o in old if o not in new), self.ind_map, tid)
+        self._add_tid((n for n in new if n not in old), self.ind_map, tid)
+
     def calc_nsites(self):
         """Calculate how many tags there are which match ``structure``.
         """
@@ -1665,17 +1725,6 @@ class TensorNetwork(object):
                 if len(self.sites) == mx - mn:
                     self.sites = range(mn, mx)
 
-    @staticmethod
-    def _remove_tid(xs, x_map, tid):
-        """Remove tid from the relevant map.
-        """
-        for x in xs:
-            tids = x_map[x]
-            tids.discard(tid)
-            if not tids:
-                # tid was last tensor -> delete entry
-                del x_map[x]
-
     def _pop_tensor(self, tid):
         """Remove a tensor from this network, returning said tensor.
         """
@@ -1685,6 +1734,9 @@ class TensorNetwork(object):
         # remove the tid from the tag and ind maps
         self._remove_tid(t.tags, self.tag_map, tid)
         self._remove_tid(t.inds, self.ind_map, tid)
+
+        # remove this tensornetwork as an owner
+        t.remove_owner(self)
 
         return t
 
@@ -1746,25 +1798,19 @@ class TensorNetwork(object):
         ----------
         tag_map : dict-like
             Mapping of pairs ``{old_tag: new_tag, ...}``.
+        inplace : bool, optional
+            Perform operation inplace or return copy (default).
         """
-        retagged = self if inplace else self.copy()
+        tn = self if inplace else self.copy()
 
-        def _retag_single(tag_map):
-            # for each remapping pair
-            for old_tag, new_tag in tag_map.items():
-                # get each tensor with that tag
-                for tensor in retagged.tag_map[old_tag]:
-                    retagged.tensor_map[tensor].tags.remove(old_tag)
-                    retagged.tensor_map[tensor].tags.add(new_tag)
-                # and update the tag index
-                retagged.tag_map[new_tag] = retagged.tag_map.pop(old_tag)
+        # get ids of tensors which have any of the tags
+        tids = tn._get_tids_from_tags(tag_map.keys(), which='any')
 
-        # to avoid muddling tags e.g. when swapping, need intermediary step
-        tmp_tags = [rand_uuid() for _ in range(len(tag_map))]
-        _retag_single(dict(zip(tag_map.keys(), tmp_tags)))
-        _retag_single(dict(zip(tmp_tags, tag_map.values())))
+        for tid in tids:
+            t = tn.tensor_map[tid]
+            t.retag(tag_map, inplace=True)
 
-        return retagged
+        return tn
 
     def reindex(self, index_map, inplace=False):
         """Rename indices for all tensors in this network, optionally in-place.
@@ -1774,19 +1820,15 @@ class TensorNetwork(object):
         index_map : dict-like
             Mapping of pairs ``{old_ind: new_ind, ...}``.
         """
-        new_tn = self if inplace else self.copy()
+        tn = self if inplace else self.copy()
 
-        tids = set_join(self.ind_map.get(ix, set()) for ix in index_map)
+        tids = set_join(tn.ind_map.get(ix, set()) for ix in index_map)
 
         for tid in tids:
-            new_tn.tensor_map[tid].reindex(index_map, inplace=True)
+            T = tn.tensor_map[tid]
+            T.reindex(index_map, inplace=True)
 
-        new_tn.ind_map = {
-            index_map[i] if i in index_map else i: tids
-            for i, tids in self.ind_map.items()
-        }
-
-        return new_tn
+        return tn
 
     def conj(self, inplace=False):
         """Conjugate all the tensors in this network (leaves all indices).
@@ -2115,10 +2157,7 @@ class TensorNetwork(object):
             return None, self.tensor_map.values()
 
         # Copy untagged to new network, and pop tagged tensors from this
-        if inplace:
-            untagged_tn = self
-        else:
-            untagged_tn = self.copy()
+        untagged_tn = self if inplace else self.copy()
         tagged_ts = tuple(map(untagged_tn._pop_tensor, sorted(tagged_tids)))
 
         return untagged_tn, tagged_ts
@@ -2402,20 +2441,14 @@ class TensorNetwork(object):
         ``right_tags``, giving them the new inds ``left_ind`` and
         ``right_ind`` respectively.
         """
-        tid_l = self._get_tids_from_tags(left_tags)
-        tid_r = self._get_tids_from_tags(left_tags)
+        tid_l, = self._get_tids_from_tags(left_tags)
+        tid_r, = self._get_tids_from_tags(right_tags)
 
         TL, TR = self.tensor_map[tid_l], self.tensor_map[tid_r]
-
         bnd, = bonds(TL, TR)
 
         TL.reindex({bnd: left_ind}, inplace=True)
-        TR.reindex({bnd: left_ind}, inplace=True)
-
-        # modify the tensornetwork
-        del self.ind_map[bnd]
-        self.ind_map[left_ind] = {tid_l}
-        self.ind_map[right_ind] = {tid_r}
+        TR.reindex({bnd: right_ind}, inplace=True)
 
     def insert_operator(self, A, where1, where2, tags=None, inplace=False):
         r"""Insert an operator on the bond between the specified tensors, e.g.:
