@@ -105,7 +105,7 @@ def normalize(qob, inplace=True):
         n_factor = expectation(qob, qob)**0.25
 
     if inplace:
-        qob /= n_factor
+        qob[:] /= n_factor
         return qob
 
     return qob / n_factor

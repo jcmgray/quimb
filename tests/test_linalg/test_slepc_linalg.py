@@ -3,10 +3,8 @@ import numpy as np
 import scipy.sparse as sp
 from numpy.testing import assert_allclose
 
-from quimb import (
-    qu, rand_uni, ldmul, rand_matrix, rand_herm, rand_pos, rand_ket, eigh,
-    expec, eye, norm,
-)
+from quimb import (qu, rand_uni, ldmul, rand_matrix, rand_herm, rand_pos,
+                   rand_ket, eigh, eye, norm)
 from quimb.linalg import SLEPC4PY_FOUND
 from quimb.linalg.scipy_linalg import svds_scipy
 if SLEPC4PY_FOUND:
@@ -90,14 +88,9 @@ class TestSlepceigs:
         lka, vka = eigh(h, k=5, backend='scipy')
         assert vks.shape == vka.shape
         assert h.dtype == vks.dtype
-        for ls, vs, la, va in zip(lks, vks.T, lka, vka.T):
-            assert_allclose(ls, la)
-            assert_allclose(expec(vs, va), 1.0)
 
-    def test_aeigvals_all_consecutive(self):
-        # TODO ************************************************************** #
-        # h = ham_heis(n=10, sparse=True)
-        pass
+        assert_allclose(lks, lka)
+        assert_allclose(abs(vka.H @ vks), np.eye(5), atol=1e-9)
 
 
 @slepc4py_test

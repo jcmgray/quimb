@@ -201,10 +201,10 @@ def isbra(qob):
 
 
 def isop(qob):
-    """Checks if ``qob`` is an operator -- a square matrix.
+    """Checks if ``qob`` is an operator.
     """
-    m, n = qob.shape
-    return m == n and m > 1  # Square matrix check
+    s = qob.shape
+    return len(s) == 2 and (s[0] > 1) and (s[1] > 1)
 
 
 def isvec(qob):
@@ -416,6 +416,7 @@ def vdot(a, b):  # pragma: no cover
 
     In other words, ``b`` here will be conjugated by the function.
     """
+    # return np.asscalar(np.vdot(a.reshape(-1), b.reshape(-1)))
     return np.vdot(np.ascontiguousarray(a).reshape(-1),
                    np.ascontiguousarray(b).reshape(-1))
 

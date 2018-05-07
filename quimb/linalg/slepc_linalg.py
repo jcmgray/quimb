@@ -290,13 +290,12 @@ def normalize_real_part(vecs, transposed=False):
     """
     k = vecs.shape[0] if transposed else vecs.shape[1]
 
-    rvecs = vecs.real
-
+    vecs = np.ascontiguousarray(vecs.real)
     for i in range(k):
-        where = (i, slice(None)) if transposed else (slice(None), i)
-        qu.nmlz(rvecs[where], inplace=True)
+        where = (i, Ellipsis) if transposed else (Ellipsis, i)
+        qu.nmlz(vecs[where], inplace=True)
 
-    return rvecs
+    return vecs
 
 # --------------------------------------------------------------------------- #
 #                               SLEPc FUNCTIONS                               #
@@ -561,7 +560,7 @@ def eigs_slepc(A, k, *, B=None, which=None, sigma=None, isherm=True, P=None,
                     pvecP if P is not None else pvec,
                     comm=comm, out_shape=(-1, 1))
 
-        lvecs = list(get_vecs_local())
+        lvecs = tuple(get_vecs_local())
         if rank == 0:
             vk = np.concatenate(lvecs, axis=1)
             if sort:

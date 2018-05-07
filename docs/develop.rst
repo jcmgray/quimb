@@ -25,7 +25,7 @@ Steps:
 Building the docs locally
 =========================
 
-Building the docs requires `sphinx <http://www.sphinx-doc.org/en/stable/>`_ and `sphinx_bootstrap_theme <https://ryan-roemer.github.io/sphinx-bootstrap-theme/>`_
+Building the docs requires `sphinx <http://www.sphinx-doc.org/en/stable/>`_, `sphinx_bootstrap_theme <https://ryan-roemer.github.io/sphinx-bootstrap-theme/>`_, and `nbsphinx <https://nbsphinx.readthedocs.io>`_.
 
 1. To start from scratch, remove ``quimb/docs/_autosummary`` and ``quimb/docs/_build``.
 2. Run ``make html`` (``make.bat html`` on windows) in the ``quimb/docs`` folder.

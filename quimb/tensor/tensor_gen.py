@@ -109,13 +109,13 @@ def MPS_product_state(arrays, **mps_opts):
     return MatrixProductState(mps_arrays, shape='lrp', **mps_opts)
 
 
-def MPS_computational_state(binary_str, dtype=float, **mps_opts):
+def MPS_computational_state(binary, dtype=float, **mps_opts):
     """A computational basis state in Matrix Product State form.
 
     Parameters
     ----------
-    binary_str : str
-        String specifying the state, e.g. '00101010111'
+    binary : str or sequence of int
+        String specifying the state, e.g. ``'00101010111'`` or ``[0, 0, 1]``.
     mps_opts
         Supplied to MatrixProductState constructor.
     """
@@ -125,8 +125,8 @@ def MPS_computational_state(binary_str, dtype=float, **mps_opts):
     }
 
     def gen_arrays():
-        for s in binary_str:
-            yield array_map[s]
+        for s in binary:
+            yield array_map[str(s)]
 
     return MPS_product_state(tuple(gen_arrays()), **mps_opts)
 

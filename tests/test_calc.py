@@ -318,7 +318,7 @@ class TestLogarithmicNegativity:
         # approx
         ln2 = logneg_subsys(p, dims, sysa, sysb, approx_thresh=1, tol=5e-3)
         assert ln1 != ln2
-        assert_allclose(ln1, ln2, rtol=5e-2)
+        assert_allclose(ln1, ln2, rtol=1e-1)
 
     def test_logneg_subsys_pure_should_swap_subsys(self):
         p = rand_ket(2**(5 + 2))
@@ -333,7 +333,7 @@ class TestLogarithmicNegativity:
         # approx
         ln2 = logneg_subsys(p, dims, sysa, sysb, approx_thresh=1)
         assert ln1 != ln2
-        assert_allclose(ln1, ln2, rtol=5e-2)
+        assert_allclose(ln1, ln2, rtol=1e-1)
 
 
 class TestConcurrence:
