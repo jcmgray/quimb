@@ -101,13 +101,15 @@ A :class:`~quimb.tensor.tensor_core.TensorNetwork` stores its tensors in three d
 - ``TensorNetwork.ind_map``: a mapping of every index in the network to the set of ``tids``
   corresponding to tensors which that that index.
 
-Each :class:`~quimb.tensor.tensor_core.Tensor` contains a ``weakref.ref`` to each :class:`~quimb.tensor.tensor_core.TensorNetwork` it has been added to (its ``owners``), so that these maps can be updated whenever the tensor is modified directly.
+Thus the tensors with tag ``'HAM'`` in network ``tn`` would be ``(tn.tensor_map[tid] for tid in tn.tag_map['HAM'])`` etc. The geometry of the network can thus be completely defined by which indices appear twice, and how you label the tensors with tags in order to select them.
 
-Thus the tensors with tag ``'HAM'`` in network ``tn`` would be ``(tn.tensor_map[tid] for tid in tn.tag_map['HAM'])`` etc. The geometry of the network is thus completely defined by which indices appear twice, and how you label the tensors with tags in order to select them.
-
-This allows any tagging strategy/structure can be used to place/reference/remove tensors etc. For example the default tags a 1D tensor network uses are ``('I0', 'I1', 'I2', ...)`` with physical inds ``('k0', 'k1', 'k2', ...)``. A 2D network might use  tags ``('I0J0', 'I0J1', 'I0J2', 'I1J0', ...)`` etc.
+This allows any tagging strategy/structure to be used to place/reference/remove tensors etc. For example the default tags a 1D tensor network uses are ``('I0', 'I1', 'I2', ...)`` with physical inds ``('k0', 'k1', 'k2', ...)``. A 2D network might use  tags ``('I0J0', 'I0J1', 'I0J2', 'I1J0', ...)`` etc.
 
 To select a subset or partition a network into tensors that match any or all of a set of tags see :func:`~quimb.tensor.tensor_core.TensorNetwork.select` or :func:`~quimb.tensor.tensor_core.TensorNetwork.partition`.
+
+Fainlly, each :class:`~quimb.tensor.tensor_core.Tensor` also contains a ``weakref.ref`` to each :class:`~quimb.tensor.tensor_core.TensorNetwork` it has been added to (its ``owners``), so that these maps can be updated whenever the tensor is modified directly.
+
+
 
 
 Contraction Backend
