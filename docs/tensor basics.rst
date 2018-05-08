@@ -72,6 +72,8 @@ Get the ket, split it in half and replace the original:
     >>> TN ^ ...
     (0.7212531527120138-0.03982265659016575j)
 
+Indices connecting Tensors or TensorNetworks can also be found using :func:`~quimb.tensor.tensor_core.bonds`.
+
 
 Other overloads
 ---------------
@@ -91,9 +93,19 @@ In this case, the conjugated copy ``ket.H`` has the same outer indices as ``ket`
 Internal Structure
 ------------------
 
-A :class:`~quimb.tensor.tensor_core.TensorNetwork` keeps its tensors as a mapping of tags to the set of tensors with that tag. The geometry (i.e. graph edges) is defined completely from whichever indices appear twice and not kept track of. Indices connecting Tensors or TensorNetworks can be found using :func:`~quimb.tensor.tensor_core.bonds`.
+A :class:`~quimb.tensor.tensor_core.TensorNetwork` stores its tensors in three dictionaries  which allow them to be selected in constant time, regardless of network size, based on their ``tags`` and ``inds``. These are
 
-Any tagging strategy/structure can be used to place/reference/remove tensors etc. For example the default tags of a 1D tensor network uses are ```('I0', 'I1', 'I2', ...) ```. A 2D network might use ```('I0J0', 'I1J0', 'I2J0', 'I0J1', ...)``` etc.
+- ``TensorNetwork.tensor_map``: a mapping of unique string ids (``tids``) to each tensor
+- ``TensorNetwork.tag_map``: a mapping of every tag in the network to the set of ``tids``
+  corresponding to tensors which have that tag.
+- ``TensorNetwork.ind_map``: a mapping of every index in the network to the set of ``tids``
+  corresponding to tensors which that that index.
+
+Each :class:`~quimb.tensor.tensor_core.Tensor` contains a ``weakref.ref`` to each :class:`~quimb.tensor.tensor_core.TensorNetwork` it has been added to (its ``owners``), so that these maps can be updated whenever the tensor is modified directly.
+
+Thus the tensors with tag ``'HAM'`` in network ``tn`` would be ``(tn.tensor_map[tid] for tid in tn.tag_map['HAM'])`` etc. The geometry of the network is thus completely defined by which indices appear twice, and how you label the tensors with tags in order to select them.
+
+This allows any tagging strategy/structure can be used to place/reference/remove tensors etc. For example the default tags a 1D tensor network uses are ``('I0', 'I1', 'I2', ...)`` with physical inds ``('k0', 'k1', 'k2', ...)``. A 2D network might use  tags ``('I0J0', 'I0J1', 'I0J2', 'I1J0', ...)`` etc.
 
 To select a subset or partition a network into tensors that match any or all of a set of tags see :func:`~quimb.tensor.tensor_core.TensorNetwork.select` or :func:`~quimb.tensor.tensor_core.TensorNetwork.partition`.
 

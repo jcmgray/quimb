@@ -1427,7 +1427,8 @@ class TensorNetwork(object):
         indexing rather than having to explcitly use tags.
     structure_bsz : int, optional
         How many sites to group together when auto contracting. Eg for 3 (with
-        the dotted lines denoting vertical strips of tensors to be contracted):
+        the dotted lines denoting vertical strips of tensors to be
+        contracted)::
 
             .....       i        ........ i        ...i.
             O-O-O-O-O-O-O-        /-O-O-O-O-        /-O-
@@ -2032,7 +2033,7 @@ class TensorNetwork(object):
 
         See Also
         --------
-        select, partition, partition_tensors
+        select, select_neighbors, partition, partition_tensors
         """
         tids = self._get_tids_from_tags(tags, which=which)
         return tuple(self.tensor_map[n] for n in tids)
@@ -2055,7 +2056,7 @@ class TensorNetwork(object):
 
         See Also
         --------
-        select_tensors, partition, partition_tensors
+        select_tensors, select_neighbors, partition, partition_tensors
         """
         tagged_tids = self._get_tids_from_tags(tags, which=which)
         ts = (self.tensor_map[n] for n in tagged_tids)
@@ -2084,6 +2085,10 @@ class TensorNetwork(object):
         -------
         tuple[Tensor]
             The neighbouring tensors.
+
+        See Also
+        --------
+        select_tensors, partition_tensors
         """
 
         # find all the inds in the tagged portion
