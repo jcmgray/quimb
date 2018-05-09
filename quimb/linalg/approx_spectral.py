@@ -178,7 +178,7 @@ def random_rect(shape, dist='rademacher', orthog=False, norm=True, seed=False):
     return V
 
 
-def construct_lanczos_tridiag(A, K, v0=None, bsz=1, k_min=10,
+def construct_lanczos_tridiag(A, K, v0=None, bsz=1, k_min=10, orthog=False,
                               beta_tol=1e-6, seed=False, v0_opts=None):
     """Construct the tridiagonal lanczos matrix using only matvec operators.
     This is a generator that iteratively yields the alpha and beta digaonals
@@ -219,6 +219,7 @@ def construct_lanczos_tridiag(A, K, v0=None, bsz=1, k_min=10,
     if bsz == 1:
         v_shp = (d,)
     else:
+        orthog = False
         v_shp = (d, bsz)
 
     alpha = np.zeros(K + 1)
@@ -228,19 +229,27 @@ def construct_lanczos_tridiag(A, K, v0=None, bsz=1, k_min=10,
     if v0 is None:
         if v0_opts is None:
             v0_opts = {}
-        V = random_rect(v_shp, **v0_opts)
+        q = random_rect(v_shp, **v0_opts)
     else:
-        V = v0.astype(np.complex128)
-        V /= norm_fro(V)  # normalize (make sure has unit variance)
-    Vm1 = np.zeros_like(V)
+        q = v0.astype(np.complex128)
+        q /= norm_fro(q)  # normalize (make sure has unit variance)
+    v = np.zeros_like(q)
+
+    if orthog:
+        Q = np.copy(q).reshape(-1, 1)
 
     for j in range(1, K + 1):
 
-        Vt = A.dot(V)
-        Vt -= beta[j] * Vm1
-        alpha[j] = inner(V, Vt)
-        Vt -= alpha[j] * V
-        beta[j + 1] = norm_fro(Vt)
+        r = A.dot(q)
+        r -= beta[j] * v
+        alpha[j] = inner(q, r)
+        r -= alpha[j] * q
+
+        # perform full orthogonalization
+        if orthog:
+            r -= Q.dot(Q.conj().T.dot(r))
+
+        beta[j + 1] = norm_fro(r)
 
         # check for convergence
         if abs(beta[j + 1]) < beta_tol:
@@ -249,8 +258,12 @@ def construct_lanczos_tridiag(A, K, v0=None, bsz=1, k_min=10,
                    np.copy(beta[1])**2 / bsz)
             break
 
-        Vm1[...] = V[...]
-        np.divide(Vt, beta[j + 1], out=V)
+        np.copyto(v, q)
+        np.divide(r, beta[j + 1], out=q)
+
+        # keep all vectors
+        if orthog:
+            Q = np.concatenate((Q, q.reshape(-1, 1)), axis=1)
 
         if j >= k_min:
             yield (np.copy(alpha[1:j + 1]),
@@ -333,7 +346,7 @@ def std(xs):
     """
     N = len(xs)
     xm = sum(xs) / N
-    var = sum((x - xm)**2 for x in xs) / (N - 1)
+    var = sum((x - xm)**2 for x in xs) / N
     return var**0.5
 
 
@@ -350,7 +363,7 @@ def single_random_estimate(A, K, bsz, beta_tol, v0, f, pos, tau, tol_scale,
         lanc_opts['bsz'] = bsz
 
     estimates = []
-    pair_ests = []
+    mean_ests = []
 
     # the number of samples to check standard deviation convergence with
     conv_n = 4
@@ -379,20 +392,25 @@ def single_random_estimate(A, K, bsz, beta_tol, v0, f, pos, tau, tol_scale,
 
         estimates.append(Gf)
 
-        # estimates alternate between upper and lower bounds -> take average
-        if len(estimates) % 2 == 1:
-            continue
-        cur_estimate = (estimates[-1] + estimates[-2]) / 2
-        pair_ests.append(cur_estimate)
+        # Make estimate from mean of last ``m`` samples
+        m_est = min(max(conv_n, len(estimates) // 8), 12)
+
+        cur_estimate = sum(estimates[-m_est:]) / m_est
+        mean_ests.append(cur_estimate)
+
+        if len(estimates) > conv_n:
+            # check for convergence using variance of paired last m estimates
+            # paired because estimates alternate between upper and lower bound
+            paired_ests = [(a + b) / 2 for a, b in
+                           zip(estimates[-m_est::2], estimates[-m_est + 1::2])]
+            serr_est = std(paired_ests) / (m_est / 2) ** 0.5
+            converged = serr_est < tau * (abs(cur_estimate) + tol_scale)
+        else:
+            serr_est = "n/a"
+            converged = False
 
         if verbosity >= 2:
-            print("k={}: Gf={}".format(k, cur_estimate))
-
-        # check for convergence using standard deviation of last 3 estimates
-        converged = (
-            len(pair_ests) >= conv_n and
-            std(pair_ests[-conv_n:]) < tau * (abs(cur_estimate) + tol_scale)
-        )
+            print("k={}: Gf={}, Err={}".format(k, cur_estimate, serr_est))
 
         if converged:
             if verbosity >= 2:
