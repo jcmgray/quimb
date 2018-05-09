@@ -4,6 +4,8 @@ from operator import add
 import math
 import functools
 import itertools
+import operator
+
 
 from cytoolz import isiterable, concat, unique
 import numpy as np
@@ -67,13 +69,16 @@ def spin_operator(label, S=1 / 2, **kwargs):
                 op[i, i + 1] = c
             else:
                 op[i + 1, i] = c
+
     elif label in {'i', 'I'}:
         np.fill_diagonal(op, 1.0)
+
     else:
         raise ValueError("Label '{}'' not understood, should be one of ``['X',"
                          " 'Y', 'Z', '+', '-', 'I']``.".format(label))
 
-    op = qu(op, **kwargs)
+    op = qu(np.real_if_close(op), **kwargs)
+
     make_immutable(op)
     return op
 
@@ -124,8 +129,10 @@ def pauli(xyz, dim=2, **kwargs):
                                    [0, 0, 0],
                                    [0, 0, -1]], **kwargs)}
     op = opmap[(xyzmap[xyz], dim)]()
+
     # Operator is cached, so make sure it cannot be modified
     make_immutable(op)
+
     return op
 
 
@@ -188,14 +195,14 @@ def controlled(s, sparse=False):
     return op
 
 
-def hamiltonian(fn):
-    """Wrap a function to perform some generic postprocessing. This assumes the
-    core function always builds the hamiltonian in sparse form. The wrapper
-    then:
+def hamiltonian_builder(fn):
+    """Wrap a function to perform some generic postprocessing and take the
+    kwargs ``stype`` and ``sparse``. This assumes the core function always
+    builds the hamiltonian in sparse form. The wrapper then:
 
     1. Checks if the operator is real
     2. Converts the operator to dense or the correct sparse form
-    3. Makes the operator immutable so it can be cached
+    3. Makes the operator immutable so it can be safely cached
     """
 
     @functools.wraps(fn)
@@ -218,7 +225,7 @@ def hamiltonian(fn):
 
 
 @functools.lru_cache(maxsize=8)
-@hamiltonian
+@hamiltonian_builder
 def ham_heis(n, j=1.0, b=0.0, cyclic=True,
              parallel=None, nthreads=None, ownership=None):
     """Constructs the nearest neighbour 1d heisenberg spin-1/2 hamiltonian.
@@ -246,6 +253,8 @@ def ham_heis(n, j=1.0, b=0.0, cyclic=True,
         How mny threads to use in parallel to build the matrix.
     ownership : (int, int), optional
         If given, which range of rows to generate.
+    kwargs
+        Supplied to :func:`~quimb.core.quimbify`.
 
     Returns
     -------
@@ -318,7 +327,7 @@ def ham_ising(n, jz=1.0, bx=1.0, **kwargs):
 
 
 @functools.lru_cache(maxsize=8)
-@hamiltonian
+@hamiltonian_builder
 def ham_j1j2(n, j1=1.0, j2=0.5, bz=0.0, cyclic=True, ownership=None):
     """Generate the j1-j2 hamiltonian, i.e. next nearest neighbour
     interactions.
@@ -339,6 +348,8 @@ def ham_j1j2(n, j1=1.0, j2=0.5, bz=0.0, cyclic=True, ownership=None):
         Return hamtiltonian as sparse-csr matrix.
     ownership : (int, int), optional
         If given, which range of rows to generate.
+    kwargs
+        Supplied to :func:`~quimb.core.quimbify`.
 
     Returns
     -------
@@ -386,7 +397,7 @@ def ham_j1j2(n, j1=1.0, j2=0.5, bz=0.0, cyclic=True, ownership=None):
     return ham
 
 
-@hamiltonian
+@hamiltonian_builder
 def ham_mbl(n, dh, j=1.0, bz=0.0, cyclic=True,
             run=None, dh_dist="s", dh_dim=1, beta=None, ownership=None):
     """ Constructs a heisenberg hamiltonian with isotropic coupling and
@@ -430,6 +441,8 @@ def ham_mbl(n, dh, j=1.0, bz=0.0, cyclic=True,
         The sparse format.
     ownership : (int, int), optional
         If given, which range of rows to generate.
+    kwargs
+        Supplied to :func:`~quimb.core.quimbify`.
 
     Returns
     -------
@@ -494,7 +507,7 @@ def ham_mbl(n, dh, j=1.0, bz=0.0, cyclic=True,
     return ham
 
 
-@hamiltonian
+@hamiltonian_builder
 def ham_heis_2D(n, m, j=1.0, bz=0.0, cyclic=False,
                 parallel=False, ownership=None):
     """Construct the 2D spin-1/2 heisenberg model hamiltonian.
@@ -521,6 +534,8 @@ def ham_heis_2D(n, m, j=1.0, bz=0.0, cyclic=False,
         memory.
     ownership : (int, int), optional
         If given, which range of rows to generate.
+    kwargs
+        Supplied to :func:`~quimb.core.quimbify`.
 
     Returns
     -------
@@ -679,3 +694,101 @@ def zspin_projector(n, sz=0, stype="csr", dtype=float):
     prj = qu(prj, stype=stype, dtype=dtype)
     make_immutable(prj)
     return prj
+
+
+@functools.lru_cache(8)
+def create(n=2, **qu_opts):
+    """The creation operator acting on an n-level system.
+    """
+    data = np.zeros((n, n))
+
+    for i in range(n):
+        data[i, i - 1] = i ** 0.5
+
+    ap = qu(data, **qu_opts)
+    make_immutable(ap)
+    return ap
+
+
+@functools.lru_cache(8)
+def destroy(n=2, **qu_opts):
+    """The annihilation operator acting on an n-level system.
+    """
+    am = create(n, **qu_opts).T.copy()
+    make_immutable(am)
+    return am
+
+
+@functools.lru_cache(8)
+def num(n, **qu_opts):
+    """The number operator acting on an n-level system.
+    """
+    ap, am = create(n, **qu_opts), destroy(n, **qu_opts)
+    an = qu(ap @ am, **qu_opts)
+    make_immutable(an)
+    return an
+
+
+@functools.lru_cache(maxsize=8)
+@hamiltonian_builder
+def ham_hubbard_hardcore(n, t=0.5, V=1., mu=1., cyclic=True,
+                         parallel=None, ownership=None):
+    """Generate the spinless fermion hopping hamiltonian.
+
+    Parameters
+    ----------
+    n : int
+        The number of sites.
+    t : float, optional
+        The hopping energy.
+    V : float, optional
+        The interaction energy.
+    mu : float, optional
+        The chemical potential - defaults to half-filling.
+    cyclic : bool, optional
+        Whether to use periodic boundary conditions.
+    parallel : bool, optional
+        Construct the hamiltonian in parallel. Faster but might use more
+        memory.
+    ownership : (int, int), optional
+        If given, which range of rows to generate.
+    kwargs
+        Supplied to :func:`~quimb.core.quimbify`.
+
+    Returns
+    -------
+    H : matrix-like
+        The hamiltonian.
+    """
+
+    op_kws = {'sparse': True, 'stype': 'coo'}
+    ikron_kws = {'sparse': True, 'stype': 'csr',
+                 'coo_build': True, 'ownership': ownership}
+
+    cdag, c, cnum = (f(2, **op_kws) for f in (create, destroy, num))
+    neighbor_term = t * ((cdag & c) + (c & cdag)) + V * (cnum & cnum)
+
+    dims = [2] * n
+
+    def terms():
+        # interacting terms
+        for i, j in [(i, i + 1) for i in range(n - 1)]:
+            yield ikron(neighbor_term, dims, (i, j), **ikron_kws)
+
+        if cyclic:
+            # can't sum terms and kron later since identity in middle
+            yield ikron([t * cdag, c], dims, (0, n - 1), **ikron_kws)
+            yield ikron([t * c, cdag], dims, (0, n - 1), **ikron_kws)
+            yield ikron([V * cnum, cnum], dims, (0, n - 1), **ikron_kws)
+
+        # single site terms
+        for i in range(n):
+            yield ikron(-mu * cnum, dims, i, **ikron_kws)
+
+    if parallel is None:
+        parallel = (n >= 14)
+
+    if parallel:
+        return par_reduce(operator.add, terms())
+
+    return functools.reduce(operator.add, terms())

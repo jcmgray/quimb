@@ -28,6 +28,7 @@ from .linalg.mpi_launcher import get_mpi_pool
 from .gen.operators import (
     spin_operator, pauli, hadamard, phase_gate, swap, controlled, ham_heis,
     ham_ising, ham_j1j2, ham_mbl, ham_heis_2D, zspin_projector,
+    create, destroy, num, ham_hubbard_hardcore,
 )
 from .gen.states import (
     basis_vec, up, zplus, down, zminus, plus, xplus, minus, xminus, yplus,
@@ -84,6 +85,7 @@ __all__ = [
     # Gen ------------------------------------------------------------------- #
     'spin_operator', 'pauli', 'hadamard', 'phase_gate', 'swap', 'controlled',
     'ham_heis', 'ham_ising', 'ham_j1j2', 'ham_mbl', 'ham_heis_2D',
+    'create', 'destroy', 'num', 'ham_hubbard_hardcore',
     'zspin_projector', 'basis_vec', 'up', 'zplus', 'down', 'zminus', 'plus',
     'xplus', 'minus', 'xminus', 'yplus', 'yminus', 'bloch_state', 'bell_state',
     'singlet', 'thermal_state', 'neel_state', 'singlet_pairs', 'werner_state',

@@ -40,6 +40,10 @@ Operators
 - :func:`~quimb.gen.operators.ham_j1j2`
 - :func:`~quimb.gen.operators.ham_mbl`
 - :func:`~quimb.gen.operators.zspin_projector`
+- :func:`~quimb.gen.operators.create`
+- :func:`~quimb.gen.operators.destroy`
+- :func:`~quimb.gen.operators.num`
+- :func:`~quimb.gen.operators.ham_hubbard_hardcore`
 
 Random States & Operators
 -------------------------

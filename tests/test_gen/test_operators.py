@@ -193,3 +193,15 @@ class TestSwap:
         a = qu.rand_ket(9)
         s = qu.swap(3, sparse=sparse)
         assert_allclose(s @ a, a.reshape([3, 3]).T.reshape([9, 1]))
+
+
+class TestHubbardSpinless:
+
+    def test_half_filling_groundstate(self):
+        H = qu.ham_hubbard_hardcore(8, t=0.5, V=1.0, mu=1.0)
+        gs = qu.groundstate(H)
+        dims = [2] * 8
+        cn = qu.num(2)
+        ens = [qu.expec(cn, qu.ptr(gs, dims, i)) for i in range(8)]
+        for en in ens:
+            assert en == pytest.approx(0.5, rel=1e-6)
