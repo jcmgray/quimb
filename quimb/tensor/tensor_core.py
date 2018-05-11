@@ -2117,12 +2117,20 @@ class TensorNetwork(object):
         if isinstance(tags, slice):
             return self.select(self.sites2tags(tags), which='any')
 
-        if isinstance(tags, int):
+        elif isinstance(tags, int):
             tensors = self.select_tensors(self.sites2tags(tags), which='any')
+
         else:
             tensors = self.select_tensors(tags, which='all')
 
-        return tensors[0] if len(tensors) == 1 else tensors
+        if len(tensors) == 0:
+            raise KeyError("Couldn't find any tensors "
+                           "matching {}.".format(tags))
+
+        if len(tensors) == 1:
+            return tensors[0]
+
+        return tensors
 
     def __setitem__(self, tags, tensor):
         """Set the single tensor uniquely associated with ``tags``.
