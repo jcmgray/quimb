@@ -225,8 +225,8 @@ class TestBasicTensorOperations:
         tn = TensorNetwork((a, b), virtual=True)
         assert a.check_owners()
         assert b.check_owners()
-        assert a.owners[0][0]() is tn
-        assert b.owners[0][0]() is tn
+        assert a.owners[hash(tn)][0]() is tn
+        assert b.owners[hash(tn)][0]() is tn
         assert all(map(tn.ind_map.__contains__, ('a', 'b', 'c')))
         assert all(map(tn.tag_map.__contains__, ('X', 'Y', 'Z')))
         a.reindex({'a': 'd'}, inplace=True)

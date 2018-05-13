@@ -105,8 +105,7 @@ class TestMovingEnvironment:
         assert len(mes.envs) == n // 2 + n % 2
         assert mes.pos == 0
         assert len(mes.envs[0].tensors) == 2 * bsz + nenv
-        assert (len(mes.envs[n // 2 - 1].tensors) ==
-                2 * (n // 2 + bsz // 2) + nenv)
+        assert len(mes.envs[n // 2 - 1].tensors) == 2 * bsz + 1
         assert n // 2 + n % 2 not in mes.envs
         assert n - 1 not in mes.envs
 
@@ -128,7 +127,7 @@ class TestMovingEnvironment:
         assert len(mes.envs) == n // 2 + n % 2
         assert mes.pos == n - 1
         assert len(mes.envs[n - 1].tensors) == 2 * bsz + 2
-        assert len(mes.envs[n - n // 2].tensors) == 2 * (n // 2 + bsz // 2) + 2
+        assert len(mes.envs[n - n // 2].tensors) == 2 * bsz + 1
         assert 0 not in mes.envs
         assert n // 2 - 1 not in mes.envs
 

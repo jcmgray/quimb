@@ -87,13 +87,10 @@ def set_tensor_backend(backend):
 #                                Tensor Funcs                                 #
 # --------------------------------------------------------------------------- #
 
-def set_join(sets):
-    """Combine a sequence of sets.
+def set_union(sets):
+    """Non variadic version of set.union.
     """
-    new_set = set()
-    for each_set in sets:
-        new_set |= each_set
-    return new_set
+    return set.union(*sets)
 
 
 def _gen_output_inds(all_inds):
@@ -193,7 +190,7 @@ def tensor_contract(*tensors, output_inds=None, return_expression=False,
         return realify_scalar(o_array)
 
     # unison of all tags
-    o_tags = set_join(t.tags for t in tensors)
+    o_tags = set_union(t.tags for t in tensors)
 
     return Tensor(data=o_array, inds=o_ix, tags=o_tags)
 
@@ -825,7 +822,7 @@ class Tensor(object):
 
     def __init__(self, data, inds, tags=None):
         # a new or copied Tensor always has no owners
-        self.owners = []
+        self.owners = {}
 
         # Short circuit for copying Tensors
         if isinstance(data, Tensor):
@@ -852,6 +849,8 @@ class Tensor(object):
         else:
             return Tensor(self, None)
 
+    __copy__ = copy
+
     @property
     def data(self):
         return self._data
@@ -868,19 +867,25 @@ class Tensor(object):
         """Add ``tn`` as owner of this Tensor - it's tag and ind maps will
         be updated whenever this tensor is retagged or reindexed.
         """
-        self.owners.append((weakref.ref(tn), tid))
+        self.owners[hash(tn)] = (weakref.ref(tn), tid)
 
     def remove_owner(self, tn):
         """Remove ``tn`` as owner of this Tensor.
         """
-        self.owners = [(r, t) for r, t in self.owners if r() is not tn]
+        try:
+            del self.owners[hash(tn)]
+        except KeyError:
+            pass
 
     def check_owners(self):
         """Check if this tensor is 'owned' by any alive TensorNetworks. Also
         trim any weakrefs to dead TensorNetwork.
         """
         # first parse out dead owners
-        self.owners = [ref_tid for ref_tid in self.owners if ref_tid[0]()]
+        for k in tuple(self.owners):
+            if not self.owners[k][0]():
+                del self.owners[k]
+
         return len(self.owners) > 0
 
     def modify(self, data=None, inds=None, tags=None):
@@ -901,7 +906,7 @@ class Tensor(object):
         if inds is not None:
             # if this tensor has owners, update their ``ind_map``.
             if self.check_owners():
-                for ref, tid in self.owners:
+                for ref, tid in self.owners.values():
                     ref()._modify_tensor_inds(self.inds, inds, tid)
 
             self._inds = tuple(inds)
@@ -909,7 +914,7 @@ class Tensor(object):
         if tags is not None:
             # if this tensor has owners, update their ``tag_map``.
             if self.check_owners():
-                for ref, tid in self.owners:
+                for ref, tid in self.owners.values():
                     ref()._modify_tensor_tags(self.tags, tags, tid)
 
             self._tags = tags2set(tags)
@@ -1222,6 +1227,12 @@ class Tensor(object):
         ``TensorNetwork``.
         """
         return TensorNetwork((self, other))
+
+    def __or__(self, other):
+        """Combine virtually (no copies made) with another ``Tensor`` or
+        ``TensorNetwork`` into a new ``TensorNetwork``.
+        """
+        return TensorNetwork((self, other), virtual=True)
 
     def __matmul__(self, other):
         """Explicitly contract with another tensor.
@@ -1578,6 +1589,8 @@ class TensorNetwork(object):
             return copy.deepcopy(self)
         return self.__class__(self, virtual=virtual)
 
+    __copy__ = copy
+
     @staticmethod
     def _add_tid(xs, x_map, tid):
         """Add tid to the relevant map.
@@ -1592,12 +1605,16 @@ class TensorNetwork(object):
     def _remove_tid(xs, x_map, tid):
         """Remove tid from the relevant map.
         """
-        for x in set(xs):
-            tids = x_map[x]
-            tids.discard(tid)
-            if not tids:
-                # tid was last tensor -> delete entry
-                del x_map[x]
+        for x in xs:
+            try:
+                tids = x_map[x]
+                tids.discard(tid)
+                if not tids:
+                    # tid was last tensor -> delete entry
+                    del x_map[x]
+            except KeyError:
+                # tid already removed from x entry - e.g. repeated index
+                pass
 
     def add_tensor(self, tensor, tid=None, virtual=False):
         """Add a single tensor to this network - mangle its tid if neccessary.
@@ -1651,8 +1668,8 @@ class TensorNetwork(object):
                 self.tensor_map[tid] = T
                 T.add_owner(self, tid)
 
-            self.tag_map = merge_with(set_join, self.tag_map, tn.tag_map)
-            self.ind_map = merge_with(set_join, self.ind_map, tn.ind_map)
+            self.tag_map = merge_with(set_union, self.tag_map, tn.tag_map)
+            self.ind_map = merge_with(set_union, self.ind_map, tn.ind_map)
 
     def add(self, t, virtual=False, check_collisions=True, inner_inds=None):
         """Add Tensor or TensorNetwork to self.
@@ -1699,11 +1716,17 @@ class TensorNetwork(object):
         """
         return len(re.findall(self.structure.format("(\d+)"), str(self.tags)))
 
+    @staticmethod
+    @functools.lru_cache(8)
+    def regex_for_calc_sites_cached(structure):
+        return re.compile(structure.format("(\d+)"))
+
     def calc_sites(self):
         """Calculate with sites this TensorNetwork contain based on its
         ``structure``.
         """
-        matches = re.findall(self.structure.format("(\d+)"), str(self.tags))
+        rgx = self.regex_for_calc_sites_cached(self.structure)
+        matches = rgx.findall(str(self.tags))
         sites = sorted(map(int, matches))
 
         # check if can convert to contiguous range
@@ -1741,11 +1764,6 @@ class TensorNetwork(object):
 
         return t
 
-    def _del_tensor(self, tid):
-        """Delete a tensor from this network.
-        """
-        self._pop_tensor(tid)
-
     def delete(self, tags, which='all'):
         """Delete any tensors which match all or any of ``tags``.
 
@@ -1758,7 +1776,7 @@ class TensorNetwork(object):
         """
         tids = self._get_tids_from_tags(tags, which=which)
         for tid in tuple(tids):
-            self._del_tensor(tid)
+            self._pop_tensor(tid)
 
     def add_tag(self, tag, where=None, which='all'):
         """Add tag to every tensor in this network, or if ``where`` is
@@ -1823,7 +1841,7 @@ class TensorNetwork(object):
         """
         tn = self if inplace else self.copy()
 
-        tids = set_join(tn.ind_map.get(ix, set()) for ix in index_map)
+        tids = set_union(tn.ind_map.get(ix, set()) for ix in index_map)
 
         for tid in tids:
             T = tn.tensor_map[tid]
@@ -2005,9 +2023,9 @@ class TensorNetwork(object):
         if inverse:
             which = which[1:]
 
-        combine = {'all': operator.and_, 'any': operator.or_}[which]
+        combine = {'all': set.intersection, 'any': set.union}[which]
         tid_sets = (self.tag_map[t] for t in tags)
-        tids = functools.reduce(combine, tid_sets).copy()
+        tids = combine(*tid_sets)
 
         if inverse:
             return set(self.tensor_map) - tids
@@ -2041,6 +2059,7 @@ class TensorNetwork(object):
     def select(self, tags, which='all'):
         """Get a TensorNetwork comprising tensors that match all or any of
         ``tags``, inherit the network properties/structure from ``self``.
+        This returns a view of the tensors not a copy.
 
         Parameters
         ----------
@@ -2061,10 +2080,9 @@ class TensorNetwork(object):
         tagged_tids = self._get_tids_from_tags(tags, which=which)
         ts = (self.tensor_map[n] for n in tagged_tids)
 
-        kws = {'check_collisions': False, 'structure': self.structure,
-               'structure_bsz': self.structure_bsz, 'nsites': self.nsites}
-
-        tn = TensorNetwork(ts, **kws)
+        tn = TensorNetwork(ts, check_collisions=False, virtual=True,
+                           structure=self.structure, nsites=self.nsites,
+                           structure_bsz=self.structure_bsz)
 
         if self.structure is not None:
             tn.sites = tn.calc_sites()
@@ -2097,7 +2115,7 @@ class TensorNetwork(object):
         inds = set(concat(t.inds for t in tagged_ts))
 
         # find all tensors with those inds, and remove the initial tensors
-        inds_tids = set_join(self.ind_map[i] for i in inds)
+        inds_tids = set_union(self.ind_map[i] for i in inds)
         neighbour_tids = inds_tids - tagged_tids
 
         return tuple(self.tensor_map[tid] for tid in neighbour_tids)
@@ -2148,7 +2166,7 @@ class TensorNetwork(object):
 
         # check if tags match, else need to modify TN structure
         if self.tensor_map[tid].tags != tensor.tags:
-            self._del_tensor(tid)
+            self._pop_tensor(tid)
             self.add_tensor(tensor, tid, virtual=True)
         else:
             self.tensor_map[tid] = tensor
@@ -2158,7 +2176,7 @@ class TensorNetwork(object):
         """
         tids = self._get_tids_from_tags(tags, which='all')
         for tid in tuple(tids):
-            self._del_tensor(tid)
+            self._pop_tensor(tid)
 
     def partition_tensors(self, tags, inplace=False, which='any'):
         """Split this TN into a list of tensors containing any or all of

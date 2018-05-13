@@ -277,23 +277,33 @@ class MovingEnvironment:
         self.init_non_segment(start, stop + self.bsz // 2)
 
         if begin == 'left':
-            self.envs = {stop - 1: self.tnc}
+
+            tags_initital = ['_RIGHT'] + [self.site_tag(stop - 1 + b)
+                                          for b in range(self.bsz)]
+            self.envs = {stop - 1: self.tnc.select(tags_initital, which='any')}
+
             for i in reversed(range(start, stop - 1)):
-                # get the env from the previous site
-                env = self.envs[i + 1].copy(virtual=True)
-                # contract the right end with the previous site
-                env ^= ['_RIGHT', self.site_tag(i + self.bsz)]
-                self.envs[i] = env
+                # add a new site to previous env, and contract one site
+                self.envs[i] = self.envs[i + 1].copy(virtual=True)
+                self.envs[i] |= self.tnc.select(i)
+                self.envs[i] ^= ('_RIGHT', self.site_tag(i + self.bsz))
+
+            self.envs[i] |= self.tnc['_LEFT']
             self.pos = start
 
         elif begin == 'right':
-            self.envs = {start: self.tnc}
+
+            tags_initital = ['_LEFT'] + [self.site_tag(start + b)
+                                         for b in range(self.bsz)]
+            self.envs = {start: self.tnc.select(tags_initital, which='any')}
+
             for i in range(start + 1, stop):
-                # get the env from the previous site
-                env = self.envs[i - 1].copy(virtual=True)
-                # contract the right end with the previous site
-                env ^= ['_LEFT', self.site_tag(i - 1)]
-                self.envs[i] = env
+                # add a new site to previous env, and contract one site
+                self.envs[i] = self.envs[i - 1].copy(virtual=True)
+                self.envs[i] |= self.tnc.select(i + self.bsz - 1)
+                self.envs[i] ^= ('_LEFT', self.site_tag(i - 1))
+
+            self.envs[i] |= self.tnc['_RIGHT']
             self.pos = stop - 1
 
         else:
@@ -368,17 +378,12 @@ class MovingEnvironment:
 
         i0 = self.segment.start
 
-        if i >= i0 + 2:
-            # delete the old left environment
-            where = ['_LEFT'] + [self.site_tag(i) for i in range(i0, i - 1)]
-            self.envs[i].delete(where, which='any')
-
-            # insert the updated left env from previous step
-            self.envs[i] |= self.envs[i - 1]['_LEFT']
-
         if i >= i0 + 1:
+            # insert the updated left env from previous step
             # contract left env with updated site just to left
-            self.envs[i] ^= ['_LEFT', self.site_tag(i - 1)]
+            new_left = self.envs[i - 1].select(
+                ['_LEFT', self.site_tag(i - 1)], which='any')
+            self.envs[i] |= new_left ^ all
 
     def move_left(self):
         i = (self.pos - 1) % self.n
@@ -393,18 +398,12 @@ class MovingEnvironment:
 
         iN = self.segment.stop
 
-        if i <= iN - 3:
-            # delete the old right environment
-            where = ['_RIGHT'] + [self.site_tag(i) for i in
-                                  range(i + self.bsz + 1, iN + self.bsz - 1)]
-            self.envs[i].delete(where, which='any')
-
-            # insert the updated right env from previous step
-            self.envs[i] |= self.envs[i + 1]['_RIGHT']
-
         if i <= iN - 2:
+            # insert the updated right env from previous step
             # contract right env with updated site just to right
-            self.envs[i] ^= ['_RIGHT', self.site_tag(i + self.bsz)]
+            new_right = self.envs[i + 1].select(
+                ['_RIGHT', self.site_tag(i + self.bsz)], which='any')
+            self.envs[i] |= new_right ^ all
 
     def move_to(self, i):
         """Move this effective environment to site ``i``.
@@ -1011,7 +1010,8 @@ class DMRG:
         for i in range(max_sweeps):
             # Get the next direction, bond dimension and cutoff
             LR, bd, ctf = next(RLs), next(self._bond_dims), next(self._cutoffs)
-            self._print_pre_sweep(i, LR, bd, ctf, verbosity=verbosity)
+            self._print_pre_sweep(len(self.energies), LR,
+                                  bd, ctf, verbosity=verbosity)
 
             # if last sweep was in opposite direction no need to canonize
             canonize = False if LR + previous_LR in {'LR', 'RL'} else True

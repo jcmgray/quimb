@@ -166,7 +166,7 @@ def MPS_rand_computational_state(n, seed=None, dtype=float, **mps_opts):
     if seed is not None:
         random.seed(seed)
 
-    cstr = "".join(random.choice(('0', '1')) for _ in range(n))
+    cstr = (random.choice(('0', '1')) for _ in range(n))
     return MPS_computational_state(cstr, dtype=dtype, **mps_opts)
 
 
