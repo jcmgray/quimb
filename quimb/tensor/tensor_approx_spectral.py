@@ -111,9 +111,10 @@ class EEMPS(MatrixProductState):
         super().imprint(other)
         other.__class__ = EEMPS
 
-    def contract_structured_all(self, old, inplace=False):
+    @staticmethod
+    def contract_structured_all(old, inplace=False, **opts):
         new = old if inplace else old.copy()
-        return new.contract_tags(...)
+        return new.contract_tags(all, **opts)
 
     def add_EEMPS(self, other, inplace=False):
         """Add another EEMPS.

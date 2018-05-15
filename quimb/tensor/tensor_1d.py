@@ -38,7 +38,7 @@ def align_TN_1D(*tns, ind_ids=None, inplace=False):
 
     Parameters
     ----------
-    tns : sequence of MatrixProductState and MatrixProductOperator
+    tns : sequence of TensorNetwork1D
         The 1D TNs to align.
     ind_ids : None, or sequence of str
         String with format specifiers to id each level of sites with. Will be
@@ -56,13 +56,13 @@ def align_TN_1D(*tns, ind_ids=None, inplace=False):
         ind_ids = tuple(ind_ids)
 
     for i, tn in enumerate(tns):
-        if isinstance(tn, MatrixProductState):
+        if isinstance(tn, TensorNetwork1DVector):
             if i == 0:
                 tn.site_ind_id = ind_ids[i]
             elif i == len(tns) - 1:
                 tn.site_ind_id = ind_ids[i - 1]
             else:
-                raise ValueError("An MPS can only be aligned as the "
+                raise ValueError("An 1D TN vector can only be aligned as the "
                                  "first or last TN in a sequence.")
 
         elif isinstance(tn, MatrixProductOperator):
@@ -103,9 +103,10 @@ def expec_TN_1D(*tns, compress=None, eps=1e-15):
         compress = False
 
     n = expec_tn.nsites
+    isflat = all(isinstance(tn, TensorNetwork1DFlat) for tn in tns)
 
     # work out whether to compress, could definitely be improved ...
-    if compress is None:
+    if compress is None and isflat:
         # compression only worth it for long, high bond dimension TNs.
         total_bd = qu.prod(tn.bond_size(0, 1) for tn in tns)
         compress = (n >= 100) and (total_bd >= 1000)
@@ -115,6 +116,94 @@ def expec_TN_1D(*tns, compress=None, eps=1e-15):
         return expec_tn ^ all
 
     return expec_tn ^ ...
+
+
+def gate_TN_1D(tn, G, where, contract=False, tags=None,
+               propagate_tags=True, inplace=False):
+    r"""Act with the gate ``g`` on sites ``where``, maintaining the outer
+    indices of the MPS:
+
+        contract=False     contract=True
+            ...                  ...         <- where
+        0-0-0-0-0-0-0      0-0-0-GGG-0-0-0
+        | | | | | | |      | | | / \ | | |
+            GGG
+            | |
+
+    Parameters
+    ----------
+    G : array
+        A square array to act with on sites ``where``. It should have twice the
+        number of dimensions as the number of sites. The second half of these
+        will be contracted with the MPS, and the first half indexed with the
+        correct ``site_ind_id``. Sites are read left to right from the shape.
+    where : int or sequence of int
+        Where the gate should act.
+    contract, bool, optional
+        Contract the gate into the MPS, or leave it uncontracted.
+    tags : str or sequence of str, optional
+        Tag the new gate tensor with these tags.
+    propagate_tags : bool, optional
+        Add any tags from the sites to the new gate tensor (only matters if
+        ``contract=False`` else tags are merged anyway). Default: True.
+    inplace, bool, optional
+        Perform the gate in place.
+
+    Returns
+    -------
+    MatrixProductState
+
+    Examples
+    --------
+    >>> p = MPS_rand_state(3, 7)
+    >>> p.gate(spin_operator('X'), where=1, tags=['GX'])
+    >>> p
+    <MatrixProductState(tensors=4, structure='I{}', nsites=3)>
+
+    >>> p.outer_inds()
+    ('k0', 'k1', 'k2')
+    """
+    p = tn if inplace else tn.copy()
+
+    dp = p.phys_dim()
+    tags = tags2set(tags)
+
+    if isinstance(where, int):
+        where = (where,)
+    ns = len(where)
+
+    shape_matches_2d = (G.ndim == 2) and (G.shape[1] == dp ** len(where))
+    shape_maches_nd = all(d == dp for d in G.shape)
+
+    if shape_matches_2d:
+        G = np.asarray(G).reshape([dp] * 2 * len(where))
+    elif not shape_maches_nd:
+        raise ValueError("Gate with shape {} doesn't match sites {}"
+                         "".format(G.shape, where))
+
+    bnds = [rand_uuid() for _ in range(ns)]
+    # site_tags = [p.site_tag(i) for i in where]
+    site_ix = [p.site_ind(i) for i in where]
+    gate_ix = site_ix + bnds
+
+    p.reindex(dict(zip(site_ix, bnds)), inplace=True)
+
+    # get the sites that used to have the physical indices
+    site_tids = p._get_tids_from_inds(bnds, which='any')
+
+    TG = Tensor(G, gate_ix, tags=tags)
+
+    if contract:
+        # pop the sites, contract, then re-add
+        pts = [p._pop_tensor(tid) for tid in site_tids]
+        p |= TG.contract(*pts)
+    else:
+        p |= TG
+        if propagate_tags:
+            old_tags = get_tags(p.tensor_map[tid] for tid in site_tids)
+            TG.modify(tags=TG.tags | old_tags)
+
+    return p
 
 
 def rand_padder(vector, pad_width, iaxis, kwargs):
@@ -128,12 +217,9 @@ def rand_padder(vector, pad_width, iaxis, kwargs):
     return vector
 
 
-class TensorNetwork1D(TensorNetwork):
+class TensorNetwork1D:
     """Base class for tensor networks with a one-dimensional structure.
     """
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
 
     @property
     def site_tag_id(self):
@@ -151,6 +237,122 @@ class TensorNetwork1D(TensorNetwork):
         """An ordered tuple of the actual site tags.
         """
         return tuple(self.site_tag(i) for i in self.sites)
+
+
+class TensorNetwork1DVector:
+    """1D Tensor network which overall is like a vector with a single type of
+    site ind.
+    """
+
+    def reindex_sites(self, new_id, where=None, inplace=False):
+        """Update the physical site index labels to a new string specifier.
+        Note that this doesn't change the stored id string with the TN.
+
+        Parameters
+        ----------
+        new_id : str
+            A string with a format placeholder to accept an int, e.g. "ket{}".
+        where : None or slice
+            Which sites to update the index labels on. If ``None`` (default)
+            all sites.
+        inplace : bool
+            Whether to reindex in place.
+        """
+        if where is None:
+            indices = self.sites
+        elif isinstance(where, slice):
+            indices = self.slice2sites(where)
+        else:
+            indices = where
+
+        return self.reindex({self.site_ind(i): new_id.format(i)
+                             for i in indices}, inplace=inplace)
+
+    def _get_site_ind_id(self):
+        return self._site_ind_id
+
+    def _set_site_ind_id(self, new_id):
+        if self._site_ind_id != new_id:
+            self.reindex_sites(new_id, inplace=True)
+            self._site_ind_id = new_id
+
+    site_ind_id = property(_get_site_ind_id, _set_site_ind_id,
+                           doc="The string specifier for the physical indices")
+
+    def site_ind(self, i):
+        if isinstance(i, int):
+            i = i % self.nsites
+        return self.site_ind_id.format(i)
+
+    @property
+    def site_inds(self):
+        """An ordered tuple of the actual physical indices.
+        """
+        return tuple(self.site_ind(i) for i in self.sites)
+
+    def phys_dim(self, i=None):
+        if i is None:
+            i = self.sites[0]
+        return self.ind_size(self.site_ind(i))
+
+    @functools.wraps(gate_TN_1D)
+    def gate(self, *args, inplace=True, **kwargs):
+        return gate_TN_1D(self, *args, inplace=inplace, **kwargs)
+
+    @functools.wraps(align_TN_1D)
+    def align(self, *args, inplace=True, **kwargs):
+        return align_TN_1D(self, *args, inplace=inplace, **kwargs)
+
+    @functools.wraps(expec_TN_1D)
+    def expec(self, *args, **kwargs):
+        return expec_TN_1D(self, *args, **kwargs)
+
+    def correlation(self, A, i, j, B=None, **expec_opts):
+        """Correlation of operator ``A`` between ``i`` and ``j``.
+
+        Parameters
+        ----------
+        A : array
+            The operator to act with, can be multi site.
+        i : int or sequence of int
+            The first site(s).
+        j : int or sequence of int
+            The second site(s).
+        expec_opts
+            Supplied to :func:`~quimb.tensor.tensor_1d.expec_TN_1D`.
+
+        Returns
+        -------
+        C : float
+            The correlation <A(i)> + <A(j)> - <A(ij)>.
+
+        Examples
+        --------
+        >>> ghz = (MPS_computational_state('0000') +
+        ...        MPS_computational_state('1111')) / 2**0.5
+        >>> ghz.correlation(pauli('Z'), 0, 1)
+        1.0
+        >>> ghz.correlation(pauli('Z'), 0, 1, B=pauli('X'))
+        0.0
+        """
+        if B is None:
+            B = A
+
+        pA = self.gate(A, i, contract=False, inplace=False)
+        cA = self.expec(pA, **expec_opts)
+
+        pB = self.gate(B, j, contract=False, inplace=False)
+        cB = self.expec(pB, **expec_opts)
+
+        pAB = pA.gate(B, j, contract=False, inplace=True)
+        cAB = self.expec(pAB, **expec_opts)
+
+        return cAB - cA * cB
+
+
+class TensorNetwork1DFlat:
+    """1D Tensor network which has a flat structure.
+    """
 
     def _left_decomp_site(self, i, bra=None, **split_opts):
         N = self.nsites
@@ -697,7 +899,10 @@ class TensorNetwork1D(TensorNetwork):
         three_line_multi_print(l1, l2, l3, max_width=max_width)
 
 
-class MatrixProductState(TensorNetwork1D):
+class MatrixProductState(TensorNetwork,
+                         TensorNetwork1D,
+                         TensorNetwork1DVector,
+                         TensorNetwork1DFlat):
     """Initialise a matrix product state, with auto labelling and tagging.
 
     Parameters
@@ -796,52 +1001,6 @@ class MatrixProductState(TensorNetwork1D):
         for p in MatrixProductState._EXTRA_PROPS:
             setattr(other, p, getattr(self, p))
         other.__class__ = MatrixProductState
-
-    def reindex_sites(self, new_id, where=None, inplace=False):
-        """Update the physical site index labels to a new string specifier.
-        Note that this doesn't change the stored id string with the TN.
-
-        Parameters
-        ----------
-        new_id : str
-            A string with a format placeholder to accept an int, e.g. "ket{}".
-        where : None or slice
-            Which sites to update the index labels on. If ``None`` (default)
-            all sites.
-        inplace : bool
-            Whether to reindex in place.
-        """
-        if where is None:
-            indices = self.sites
-        elif isinstance(where, slice):
-            indices = self.slice2sites(where)
-        else:
-            indices = where
-
-        return self.reindex({self.site_ind(i): new_id.format(i)
-                             for i in indices}, inplace=inplace)
-
-    def _get_site_ind_id(self):
-        return self._site_ind_id
-
-    def _set_site_ind_id(self, new_id):
-        if self._site_ind_id != new_id:
-            self.reindex_sites(new_id, inplace=True)
-            self._site_ind_id = new_id
-
-    site_ind_id = property(_get_site_ind_id, _set_site_ind_id,
-                           doc="The string specifier for the physical indices")
-
-    def site_ind(self, i):
-        if isinstance(i, int):
-            i = i % self.nsites
-        return self.site_ind_id.format(i)
-
-    @property
-    def site_inds(self):
-        """An ordered tuple of the actual physical indices.
-        """
-        return tuple(self.site_ind(i) for i in self.sites)
 
     def add_MPS(self, other, inplace=False, compress=False, **compress_opts):
         """Add another MatrixProductState to this one.
@@ -1469,140 +1628,10 @@ class MatrixProductState(TensorNetwork1D):
                            .fuse({'all': self.site_inds})
                            .data.reshape(-1, 1))
 
-    def phys_dim(self, i=None):
-        if i is None:
-            i = self.sites[0]
-        return self.ind_size(self.site_ind(i))
 
-    def gate(self, G, where, contract=False, tags=None, propagate_tags=True,
-             inplace=False):
-        r"""Act with the gate ``g`` on sites ``where``, maintaining the outer
-        indices of the MPS:
-
-            contract=False     contract=True
-                ...                  ...         <- where
-            0-0-0-0-0-0-0      0-0-0-GGG-0-0-0
-            | | | | | | |      | | | / \ | | |
-                GGG
-                | |
-
-        Parameters
-        ----------
-        G : array
-            A square array to act with on sites ``where``. It should have
-            twice the number of dimensions as the number of sites. The second
-            half of these will be contracted with the MPS, and the first half
-            indexed with the correct ``site_ind_id``. Sites are read left to
-            right from the shape.
-        where : int or sequence of int
-            Where the gate should act.
-        contract, bool, optional
-            Contract the gate into the MPS, or leave it uncontracted.
-        tags : str or sequence of str, optional
-            Tag the new gate tensor with these tags.
-        propagate_tags : bool, optional
-            Add any tags from the sites to the new gate tensor
-            (only matters if ``contract=False`` else tags are merged anyway).
-            Default: True.
-        inplace, bool, optional
-            Perform the gate in place.
-
-        Returns
-        -------
-        MatrixProductState
-
-        Examples
-        --------
-        >>> p = MPS_rand_state(3, 7)
-        >>> pg = p.gate(spin_operator('X'), where=1, tags=['GX'])
-        >>> pg
-        <MatrixProductState(tensors=4, structure='I{}', nsites=3)>
-        """
-        p = self if inplace else self.copy()
-
-        dp = p.phys_dim()
-        tags = tags2set(tags)
-
-        if isinstance(where, int):
-            where = (where,)
-        ns = len(where)
-
-        shape_matches_2d = (G.ndim == 2) and (G.shape[1] == dp ** len(where))
-        shape_maches_nd = all(d == dp for d in G.shape)
-
-        if shape_matches_2d:
-            G = np.asarray(G).reshape([dp] * 2 * len(where))
-        elif not shape_maches_nd:
-            raise ValueError("Gate with shape {} doesn't match sites {}"
-                             "".format(G.shape, where))
-
-        bnds = [rand_uuid() for _ in range(ns)]
-        site_tags = [p.site_tag(i) for i in where]
-        site_ix = [p.site_ind(i) for i in where]
-        gate_ix = site_ix + bnds
-
-        p.reindex(dict(zip(site_ix, bnds)), inplace=True)
-        TG = Tensor(G, gate_ix, tags=tags)
-
-        if contract:
-            # pop the sites, contract, then re-add
-            p, pts = p.partition_tensors(site_tags, inplace=True)
-            p |= TG.contract(*pts)
-        else:
-            p |= TG
-            if propagate_tags:
-                TG.modify(tags=TG.tags | get_tags(p.select_neighbors(tags)))
-
-        return p
-
-    @functools.wraps(align_TN_1D)
-    def align(self, *args, inplace=True):
-        return align_TN_1D(self, *args, inplace=inplace)
-
-    def correlation(self, A, i, j, B=None, **expec_opts):
-        """Correlation of operator ``A`` between ``i`` and ``j``.
-
-        Parameters
-        ----------
-        A : array
-            The operator to act with, can be multi site.
-        i : int or sequence of int
-            The first site(s).
-        j : int or sequence of int
-            The second site(s).
-        expec_opts
-            Supplied to :func:`~quimb.tensor.tensor_1d.expec_TN_1D`.
-
-        Returns
-        -------
-        C : float
-            The correlation <A(i)> + <A(j)> - <A(ij)>.
-
-        Examples
-        --------
-        >>> ghz = (MPS_computational_state('0000') +
-        ...        MPS_computational_state('1111')) / 2**0.5
-        >>> ghz.correlation(pauli('Z'), 0, 1)
-        1.0
-        >>> ghz.correlation(pauli('Z'), 0, 1, B=pauli('X'))
-        0.0
-        """
-        if B is None:
-            B = A
-
-        pA = self.gate(A, i, contract=True)
-        cA = expec_TN_1D(self, pA, **expec_opts)
-
-        pB = self.gate(B, j, contract=True)
-        cB = expec_TN_1D(self, pB, **expec_opts)
-
-        pAB = pA.gate(B, j, inplace=True, contract=True)
-        cAB = expec_TN_1D(self, pAB, **expec_opts)
-
-        return cAB - cA * cB
-
-
-class MatrixProductOperator(TensorNetwork1D):
+class MatrixProductOperator(TensorNetwork,
+                            TensorNetwork1D,
+                            TensorNetwork1DFlat):
     """Initialise a matrix product operator, with auto labelling and tagging.
 
     Parameters
@@ -1864,7 +1893,7 @@ class MatrixProductOperator(TensorNetwork1D):
         compress : bool, optional
             Whether to compress the resulting object.
         compress_opts
-            Supplied to :meth:`TensorNetwork1D.compress`.
+            Supplied to :meth:`TensorNetwork1DFlat.compress`.
         """
         if isinstance(other, MatrixProductOperator):
             return self._apply_mpo(other, compress=compress, **compress_opts)

@@ -1994,6 +1994,20 @@ class TensorNetwork(object):
             raise TypeError("``sites2tags`` needs an integer or a slice"
                             ", but got {}".format(sites))
 
+    def _get_tids_from(self, xmap, xs, which):
+        inverse = which[0] == '!'
+        if inverse:
+            which = which[1:]
+
+        combine = {'all': set.intersection, 'any': set.union}[which]
+        tid_sets = (xmap[x] for x in xs)
+        tids = combine(*tid_sets)
+
+        if inverse:
+            return set(self.tensor_map) - tids
+
+        return tids
+
     def _get_tids_from_tags(self, tags, which='all'):
         """Return the set of tensor ids that match ``tags``.
 
@@ -2020,18 +2034,13 @@ class TensorNetwork(object):
         else:
             tags = tags2set(tags)
 
-        inverse = which[0] == '!'
-        if inverse:
-            which = which[1:]
+        return self._get_tids_from(self.tag_map, tags, which)
 
-        combine = {'all': set.intersection, 'any': set.union}[which]
-        tid_sets = (self.tag_map[t] for t in tags)
-        tids = combine(*tid_sets)
-
-        if inverse:
-            return set(self.tensor_map) - tids
-
-        return tids
+    def _get_tids_from_inds(self, inds, which='all'):
+        """Like ``_get_tids_from_tags`` but specify inds instead.
+        """
+        inds = tags2set(inds)
+        return self._get_tids_from(self.ind_map, inds, which)
 
     def select_tensors(self, tags, which='all'):
         """Return the sequence of tensors that match ``tags``. If

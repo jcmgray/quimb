@@ -36,6 +36,7 @@ from .tensor_1d import (
     MatrixProductOperator,
     align_TN_1D,
     expec_TN_1D,
+    gate_TN_1D,
 )
 from .tensor_dmrg import (
     MovingEnvironment,
@@ -44,7 +45,9 @@ from .tensor_dmrg import (
     DMRG2,
     DMRGX,
 )
-
+from .tensor_mera import (
+    MERA,
+)
 
 __all__ = (
     "get_tensor_backend",
@@ -80,9 +83,11 @@ __all__ = (
     "MatrixProductOperator",
     "align_TN_1D",
     "expec_TN_1D",
+    "gate_TN_1D",
     "MovingEnvironment",
     "DMRG",
     "DMRG1",
     "DMRG2",
     "DMRGX",
+    "MERA",
 )
