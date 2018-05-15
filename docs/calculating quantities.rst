@@ -6,6 +6,7 @@ There are various built-in functions to calculate quantities, not limited to:
 
 - :func:`~quimb.calc.fidelity`
 - :func:`~quimb.calc.purify`
+- :func:`~quimb.calc.dephase`
 - :func:`~quimb.calc.entropy`
 - :func:`~quimb.calc.mutinf`
 - :func:`~quimb.calc.mutinf_subsys`

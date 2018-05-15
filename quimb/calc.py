@@ -76,6 +76,45 @@ def purify(rho):
     return qu(psi)
 
 
+def dephase(rho, p, rand_rank=None):
+    """Dephase ``rho`` by amount ``p``, that is, mix it
+    with the maximally mixed state:
+
+        rho -> (1 - p) * rho + p * I / d
+
+    Parameters
+    ----------
+    rho : matrix
+        The state.
+    p : float
+        The final proportion of identity.
+    rand_rank : int or float, optional
+        If given, dephase with a random diagonal operator with this many
+        non-zero entries. If float, proportion of full size.
+
+    Returns
+    -------
+    rho_dephase : matrix
+        The dephased density matrix.
+    """
+    d = rho.shape[0]
+
+    if (rand_rank is None) or (rand_rank == d) or (rand_rank == 1.0):
+        dephaser = eye(d) / d
+
+    else:
+        if not isinstance(rand_rank, int):
+            rand_rank = int(rand_rank * d)
+        rand_rank = min(max(1, rand_rank), d)
+
+        dephaser = np.zeros((d, d))
+        dephaser_diag = np.einsum("aa->a", dephaser)
+        nnz = np.random.choice(np.arange(d), size=rand_rank, replace=False)
+        dephaser_diag[nnz] = 1 / rand_rank
+
+    return (1 - p) * rho + p * dephaser
+
+
 @zeroify
 def entropy(a, rank=None):
     """Compute the (von Neumann) entropy.

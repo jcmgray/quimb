@@ -3,79 +3,33 @@ import itertools
 import math
 import numpy as np
 from numpy.testing import assert_allclose
-from quimb import (
-    qu,
-    eye,
-    rand_product_state,
-    bell_state,
-    up,
-    eigvecsh,
-    rand_mix,
-    rand_rho,
-    rand_ket,
-    pauli,
-    down,
-    expec,
-    singlet_pairs,
-    dop,
-    singlet,
-    kron,
-    ham_heis,
-    ptr,
-    fidelity,
-    quantum_discord,
-    one_way_classical_information,
-    entropy,
-    entropy_subsys,
-    mutual_information,
-    mutinf_subsys,
-    schmidt_gap,
-    correlation,
-    pauli_correlations,
-    purify,
-    concurrence,
-    tr_sqrt,
-    partial_transpose,
-    negativity,
-    logneg,
-    logneg_subsys,
-    trace_distance,
-    pauli_decomp,
-    bell_decomp,
-    ent_cross_matrix,
-    qid,
-    is_degenerate,
-    is_eigenvector,
-    page_entropy,
-    rand_herm,
-    permute,
-)
+import quimb as qu
 
 
 @pytest.fixture
 def p1():
-    return rand_rho(3)
+    return qu.rand_rho(3)
 
 
 @pytest.fixture
 def p2():
-    return rand_rho(3)
+    return qu.rand_rho(3)
 
 
 @pytest.fixture
 def k1():
-    return rand_ket(3)
+    return qu.rand_ket(3)
 
 
 @pytest.fixture
 def k2():
-    return rand_ket(3)
+    return qu.rand_ket(3)
 
 
 @pytest.fixture
 def orthog_ks():
-    p = rand_rho(3)
-    v = eigvecsh(p)
+    p = qu.rand_rho(3)
+    v = qu.eigvecsh(p)
     return (v[:, 0], v[:, 1], v[:, 2])
 
 
@@ -85,17 +39,17 @@ def orthog_ks():
 
 class TestFidelity:
     def test_both_pure(self, k1, k2):
-        f = fidelity(k1, k1)
+        f = qu.fidelity(k1, k1)
         assert_allclose(f, 1.0)
-        f = fidelity(k1, k2)
+        f = qu.fidelity(k1, k2)
         assert f > 0 and f < 1
 
     def test_both_mixed(self, p1, p2):
-        f = fidelity(eye(3) / 3, eye(3) / 3)
+        f = qu.fidelity(qu.eye(3) / 3, qu.eye(3) / 3)
         assert_allclose(f, 1.0)
-        f = fidelity(p1, p1)
+        f = qu.fidelity(p1, p1)
         assert_allclose(f, 1.0)
-        f = fidelity(p1, p2)
+        f = qu.fidelity(p1, p2)
         assert f > 0 and f < 1
 
     def test_orthog_pure(self, orthog_ks):
@@ -112,135 +66,148 @@ class TestFidelity:
                         [k1 @ k1.H, k2 @ k2.H],
                         [k2 @ k2.H, k3 @ k3.H],
                         [k1 @ k1.H, k3 @ k3.H]):
-            f = fidelity(s1, s2)
+            f = qu.fidelity(s1, s2)
             assert_allclose(f, 0.0, atol=1e-6)
 
 
 class TestPurify:
     def test_d2(self):
-        rho = eye(2) / 2
-        psi = purify(rho)
-        assert expec(psi, bell_state('phi+')) > 1 - 1e-14
+        rho = qu.eye(2) / 2
+        psi = qu.purify(rho)
+        assert qu.expec(psi, qu.bell_state('phi+')) > 1 - 1e-14
 
     def test_pure(self):
-        rho = up(qtype='dop')
-        psi = purify(rho)
-        assert abs(concurrence(psi)) < 1e-14
+        rho = qu.up(qtype='dop')
+        psi = qu.purify(rho)
+        assert abs(qu.concurrence(psi)) < 1e-14
+
+
+class TestDephase:
+    @pytest.mark.parametrize("rand_rank", [None, 0.3, 2])
+    def test_basic(self, rand_rank):
+        rho = qu.rand_rho(9)
+        ln = qu.logneg(rho, [3, 3])
+        for p in (0.2, 0.5, 0.8, 1.0):
+            rho_d = qu.dephase(rho, p, rand_rank=rand_rank)
+            assert qu.logneg(rho_d, [3, 3]) <= ln
+            assert rho_d.tr() == pytest.approx(1.0)
 
 
 class TestEntropy:
     def test_entropy_pure(self):
-        a = bell_state(1, qtype='dop')
-        assert_allclose(0.0, entropy(a), atol=1e-12)
+        a = qu.bell_state(1, qtype='dop')
+        assert_allclose(0.0, qu.entropy(a), atol=1e-12)
 
     def test_entropy_mixed(self):
-        a = 0.5 * (bell_state(1, qtype='dop') +
-                   bell_state(2, qtype='dop'))
-        assert_allclose(1.0, entropy(a), atol=1e-12)
+        a = 0.5 * (qu.bell_state(1, qtype='dop') +
+                   qu.bell_state(2, qtype='dop'))
+        assert_allclose(1.0, qu.entropy(a), atol=1e-12)
 
     @pytest.mark.parametrize("evals, e", [([0, 1, 0, 0], 0),
                                           ([0, 0.5, 0, 0.5], 1),
                                           ([0.25, 0.25, 0.25, 0.25], 2)])
     def test_list(self, evals, e):
-        assert_allclose(entropy(evals), e)
+        assert_allclose(qu.entropy(evals), e)
 
     @pytest.mark.parametrize("evals, e", [([0, 1, 0, 0], 0),
                                           ([0, 0.5, 0, 0.5], 1),
                                           ([0.25, 0.25, 0.25, 0.25], 2)])
     def test_1darray(self, evals, e):
-        assert_allclose(entropy(np.asarray(evals)), e)
+        assert_allclose(qu.entropy(np.asarray(evals)), e)
 
     @pytest.mark.parametrize("m", [1, 2, 3])
     def test_rank(self, m):
-        k = rand_ket(2**4)
-        pab = ptr(k, [2, 2, 2, 2], range(m))
-        ef = entropy(pab)
-        er = entropy(pab, rank=2**m)
+        k = qu.rand_ket(2**4)
+        pab = qu.ptr(k, [2, 2, 2, 2], range(m))
+        ef = qu.entropy(pab)
+        er = qu.entropy(pab, rank=2**m)
         assert_allclose(ef, er)
 
     def test_entropy_subsystem(self):
-        p = rand_ket(2**9)
+        p = qu.rand_ket(2**9)
         # exact
-        e1 = entropy_subsys(p, (2**5, 2**4), 0, approx_thresh=1e30)
+        e1 = qu.entropy_subsys(p, (2**5, 2**4), 0, approx_thresh=1e30)
         # approx
-        e2 = entropy_subsys(p, (2**5, 2**4), 0, approx_thresh=1)
+        e2 = qu.entropy_subsys(p, (2**5, 2**4), 0, approx_thresh=1)
         assert e1 != e2
         assert_allclose(e1, e2, rtol=5e-2)
 
-        assert entropy_subsys(p, (2**5, 2**4), [0, 1], approx_thresh=1) == 0.0
+        assert qu.entropy_subsys(p, (2**5, 2**4), [0, 1],
+                                 approx_thresh=1) == 0.0
 
 
 class TestMutualInformation:
     def test_mutual_information_pure(self):
-        a = bell_state(0)
-        assert_allclose(mutual_information(a), 2.)
-        a = rand_product_state(2)
-        assert_allclose(mutual_information(a), 0., atol=1e-12)
+        a = qu.bell_state(0)
+        assert_allclose(qu.mutual_information(a), 2.)
+        a = qu.rand_product_state(2)
+        assert_allclose(qu.mutual_information(a), 0., atol=1e-12)
 
     def test_mutual_information_pure_sub(self):
-        a = up() & bell_state(1)
-        ixy = mutual_information(a, [2, 2, 2], 0, 1)
+        a = qu.up() & qu.bell_state(1)
+        ixy = qu.mutual_information(a, [2, 2, 2], 0, 1)
         assert_allclose(0.0, ixy, atol=1e-12)
-        ixy = mutual_information(a, [2, 2, 2], 0, 2)
+        ixy = qu.mutual_information(a, [2, 2, 2], 0, 2)
         assert_allclose(0.0, ixy, atol=1e-12)
-        ixy = mutual_information(a, [2, 2, 2], 2, 1)
+        ixy = qu.mutual_information(a, [2, 2, 2], 2, 1)
         assert_allclose(2.0, ixy, atol=1e-12)
 
     @pytest.mark.parametrize('inds', [(0, 1), (1, 2), (0, 2)])
     def test_mixed_sub(self, inds):
-        a = rand_rho(2**3)
-        rho_ab = ptr(a, [2, 2, 2], inds)
-        ixy = mutual_information(rho_ab, (2, 2))
+        a = qu.rand_rho(2**3)
+        rho_ab = qu.ptr(a, [2, 2, 2], inds)
+        ixy = qu.mutual_information(rho_ab, (2, 2))
         assert (0 <= ixy <= 2.0)
 
     def test_mutinf_interleave(self):
-        p = dop(singlet() & singlet())
-        ixy = mutual_information(p, [2] * 4, sysa=(0, 2))
+        p = qu.dop(qu.singlet() & qu.singlet())
+        ixy = qu.mutual_information(p, [2] * 4, sysa=(0, 2))
         assert_allclose(ixy, 4)
 
     def test_mutinf_interleave_pure(self):
-        p = singlet() & singlet()
-        ixy = mutual_information(p, [2] * 4, sysa=(0, 2))
+        p = qu.singlet() & qu.singlet()
+        ixy = qu.mutual_information(p, [2] * 4, sysa=(0, 2))
         assert_allclose(ixy, 4)
 
     def test_mutinf_subsys(self):
-        p = rand_ket(2**9)
+        p = qu.rand_ket(2**9)
         dims = (2**3, 2**2, 2**4)
         # exact
-        rho_ab = ptr(p, dims, [0, 2])
-        mi0 = mutual_information(rho_ab, [8, 16])
-        mi1 = mutinf_subsys(p, dims, sysa=0, sysb=2, approx_thresh=1e30)
+        rho_ab = qu.ptr(p, dims, [0, 2])
+        mi0 = qu.mutual_information(rho_ab, [8, 16])
+        mi1 = qu.mutinf_subsys(p, dims, sysa=0, sysb=2, approx_thresh=1e30)
         assert_allclose(mi1, mi0)
         # approx
-        mi2 = mutinf_subsys(p, dims, sysa=0, sysb=2, approx_thresh=1)
+        mi2 = qu.mutinf_subsys(p, dims, sysa=0, sysb=2, approx_thresh=1)
         assert_allclose(mi1, mi2, rtol=5e-2)
 
     def test_mutinf_subsys_pure(self):
-        p = rand_ket(2**7)
+        p = qu.rand_ket(2**7)
         dims = (2**3, 2**4)
         # exact
-        mi0 = mutual_information(p, dims, sysa=0)
-        mi1 = mutinf_subsys(p, dims, sysa=0, sysb=1, approx_thresh=1e30)
+        mi0 = qu.mutual_information(p, dims, sysa=0)
+        mi1 = qu.mutinf_subsys(p, dims, sysa=0, sysb=1, approx_thresh=1e30)
         assert_allclose(mi1, mi0)
         # approx
-        mi2 = mutinf_subsys(p, dims, sysa=0, sysb=1, approx_thresh=1, tol=5e-3)
+        mi2 = qu.mutinf_subsys(p, dims, sysa=0, sysb=1,
+                               approx_thresh=1, tol=5e-3)
         assert_allclose(mi1, mi2, rtol=5e-2)
 
 
 class TestSchmidtGap:
     def test_bell_state(self):
-        p = bell_state('psi-')
-        assert_allclose(schmidt_gap(p, [2, 2], 0), 0.0)
-        p = up() & down()
-        assert_allclose(schmidt_gap(p, [2, 2], 0), 1.0)
-        p = rand_ket(2**3)
-        assert 0 < schmidt_gap(p, [2] * 3, sysa=[0, 1]) < 1.0
+        p = qu.bell_state('psi-')
+        assert_allclose(qu.schmidt_gap(p, [2, 2], 0), 0.0)
+        p = qu.up() & qu.down()
+        assert_allclose(qu.schmidt_gap(p, [2, 2], 0), 1.0)
+        p = qu.rand_ket(2**3)
+        assert 0 < qu.schmidt_gap(p, [2] * 3, sysa=[0, 1]) < 1.0
 
 
 class TestPartialTranspose:
     def test_partial_transpose(self):
-        a = bell_state(0, qtype='dop')
-        b = partial_transpose(a)
+        a = qu.bell_state(0, qtype='dop')
+        b = qu.partial_transpose(a)
         assert isinstance(b, np.matrix)
         assert_allclose(b, [[0, 0, 0, -0.5],
                             [0, 0.5, 0, 0],
@@ -248,90 +215,91 @@ class TestPartialTranspose:
                             [-0.5, 0, 0, 0]])
 
     def test_tr_sqrt_rank(self):
-        psi = rand_ket(2**5)
+        psi = qu.rand_ket(2**5)
         rhoa = psi.ptr([2] * 5, range(4))
-        assert_allclose(tr_sqrt(rhoa), tr_sqrt(rhoa, rank=2))
+        assert_allclose(qu.tr_sqrt(rhoa), qu.tr_sqrt(rhoa, rank=2))
 
 
 class TestNegativity:
     @pytest.mark.parametrize("bs", ['psi-', 'phi-', 'psi+', 'phi+'])
     @pytest.mark.parametrize("qtype", ['ket', 'dop'])
     def test_simple(self, qtype, bs):
-        p = bell_state(bs, qtype=qtype)
-        assert negativity(p) > 0.5 - 1e-14
+        p = qu.bell_state(bs, qtype=qtype)
+        assert qu.negativity(p) > 0.5 - 1e-14
 
     def test_subsystem(self):
-        p = singlet_pairs(4)
+        p = qu.singlet_pairs(4)
         rhoab = p.ptr([2, 2, 2, 2], [0, 1])
-        assert negativity(rhoab, [2] * 2) > 0.5 - 1e-14
+        assert qu.negativity(rhoab, [2] * 2) > 0.5 - 1e-14
         rhoab = p.ptr([2, 2, 2, 2], [1, 2])
-        assert negativity(rhoab, [2] * 2) < 1e-14
+        assert qu.negativity(rhoab, [2] * 2) < 1e-14
         rhoab = p.ptr([2, 2, 2, 2], [2, 3])
-        assert negativity(rhoab, [2] * 2) > 0.5 - 1e-14
+        assert qu.negativity(rhoab, [2] * 2) > 0.5 - 1e-14
 
 
 class TestLogarithmicNegativity:
     @pytest.mark.parametrize("bs", ['psi-', 'phi-', 'psi+', 'phi+'])
     @pytest.mark.parametrize("qtype", ['ket', 'dop'])
     def test_bell_states(self, qtype, bs):
-        p = bell_state(bs, qtype=qtype)
-        assert logneg(p) > 1.0 - 1e-14
+        p = qu.bell_state(bs, qtype=qtype)
+        assert qu.logneg(p) > 1.0 - 1e-14
 
     def test_subsystem(self):
-        p = singlet_pairs(4)
+        p = qu.singlet_pairs(4)
         rhoab = p.ptr([2, 2, 2, 2], [0, 1])
-        assert logneg(rhoab, [2] * 2) > 1 - 1e-14
+        assert qu.logneg(rhoab, [2] * 2) > 1 - 1e-14
         rhoab = p.ptr([2, 2, 2, 2], [1, 2])
-        assert logneg(rhoab, [2] * 2) < 1e-14
+        assert qu.logneg(rhoab, [2] * 2) < 1e-14
         rhoab = p.ptr([2, 2, 2, 2], [2, 3])
-        assert logneg(rhoab, [2] * 2) > 1 - 1e-14
+        assert qu.logneg(rhoab, [2] * 2) > 1 - 1e-14
 
     def test_interleaving(self):
-        p = permute(singlet() & singlet(), [2, 2, 2, 2], [0, 2, 1, 3])
-        assert logneg(p, [2] * 4, sysa=[0, 3]) > 2 - 1e-13
+        p = qu.permute(qu.singlet() & qu.singlet(),
+                       [2, 2, 2, 2], [0, 2, 1, 3])
+        assert qu.logneg(p, [2] * 4, sysa=[0, 3]) > 2 - 1e-13
 
     def test_logneg_subsys(self):
-        p = rand_ket(2**(2 + 3 + 1 + 2))
+        p = qu.rand_ket(2**(2 + 3 + 1 + 2))
         dims = (2**2, 2**3, 2**1, 2**2)
         sysa = [0, 3]
         sysb = 1
         # exact 1
-        ln0 = logneg(ptr(p, dims, [0, 1, 3]), [4, 8, 4], [0, 2])
+        ln0 = qu.logneg(qu.ptr(p, dims, [0, 1, 3]), [4, 8, 4], [0, 2])
         # exact 2
-        ln1 = logneg_subsys(p, dims, sysa, sysb, approx_thresh=1e30)
+        ln1 = qu.logneg_subsys(p, dims, sysa, sysb, approx_thresh=1e30)
         assert_allclose(ln0, ln1)
         # approx
-        ln2 = logneg_subsys(p, dims, sysa, sysb, approx_thresh=1)
+        ln2 = qu.logneg_subsys(p, dims, sysa, sysb, approx_thresh=1)
         assert ln1 != ln2
         assert_allclose(ln1, ln2, rtol=5e-2)
 
     def test_logneg_subsys_pure(self):
-        p = rand_ket(2**(3 + 4))
+        p = qu.rand_ket(2**(3 + 4))
         dims = (2**3, 2**4)
         sysa = 0
         sysb = 1
         # exact 1
-        ln0 = logneg(p, dims, 0)
+        ln0 = qu.logneg(p, dims, 0)
         # exact 2
-        ln1 = logneg_subsys(p, dims, sysa, sysb, approx_thresh=1e30)
+        ln1 = qu.logneg_subsys(p, dims, sysa, sysb, approx_thresh=1e30)
         assert_allclose(ln0, ln1)
         # approx
-        ln2 = logneg_subsys(p, dims, sysa, sysb, approx_thresh=1, tol=5e-3)
+        ln2 = qu.logneg_subsys(p, dims, sysa, sysb, approx_thresh=1, tol=5e-3)
         assert ln1 != ln2
         assert_allclose(ln1, ln2, rtol=1e-1)
 
     def test_logneg_subsys_pure_should_swap_subsys(self):
-        p = rand_ket(2**(5 + 2))
+        p = qu.rand_ket(2**(5 + 2))
         dims = (2**5, 2**2)
         sysa = 0
         sysb = 1
         # exact 1
-        ln0 = logneg(p, dims, 0)
+        ln0 = qu.logneg(p, dims, 0)
         # exact 2
-        ln1 = logneg_subsys(p, dims, sysa, sysb, approx_thresh=1e30)
+        ln1 = qu.logneg_subsys(p, dims, sysa, sysb, approx_thresh=1e30)
         assert_allclose(ln0, ln1)
         # approx
-        ln2 = logneg_subsys(p, dims, sysa, sysb, approx_thresh=1)
+        ln2 = qu.logneg_subsys(p, dims, sysa, sysb, approx_thresh=1)
         assert ln1 != ln2
         assert_allclose(ln1, ln2, rtol=1e-1)
 
@@ -340,78 +308,79 @@ class TestConcurrence:
     @pytest.mark.parametrize("bs", ['psi-', 'phi-', 'psi+', 'phi+'])
     @pytest.mark.parametrize("qtype", ['ket', 'dop'])
     def test_bell_states(self, qtype, bs):
-        p = bell_state(bs, qtype=qtype)
-        assert concurrence(p) > 1.0 - 1e-14
+        p = qu.bell_state(bs, qtype=qtype)
+        assert qu.concurrence(p) > 1.0 - 1e-14
 
     def test_subsystem(self):
-        p = rand_rho(2**4)
-        e = concurrence(p, [2, 2, 2, 2], 1, 2)
+        p = qu.rand_rho(2**4)
+        e = qu.concurrence(p, [2, 2, 2, 2], 1, 2)
         assert 0 <= e <= 1
 
 
 class TestQuantumDiscord:
     def test_owci(self):
-        a = qu([1, 0], 'op')
-        b = qu([0, 1], 'op')
+        a = qu.qu([1, 0], 'op')
+        b = qu.qu([0, 1], 'op')
         for i in (0, 1, 2, 3):
-            p = rand_product_state(2)
-            ci = one_way_classical_information(p @ p.H, [a, b])
+            p = qu.rand_product_state(2)
+            ci = qu.one_way_classical_information(p @ p.H, [a, b])
             assert_allclose(ci, 0., atol=1e-12)
         for i in (0, 1, 2, 3):
-            p = bell_state(i)
-            ci = one_way_classical_information(p @ p.H, [a, b])
+            p = qu.bell_state(i)
+            ci = qu.one_way_classical_information(p @ p.H, [a, b])
             assert_allclose(ci, 1., atol=1e-12)
 
     def test_quantum_discord_sep(self):
         for i in range(10):
-            p = rand_product_state(2)
+            p = qu.rand_product_state(2)
             p = p @ p.H
-            qd = quantum_discord(p)
+            qd = qu.quantum_discord(p)
             assert_allclose(0.0, qd, atol=1e-12)
 
     def test_quantum_discord_pure(self):
         for i in range(10):
-            p = rand_ket(4)
+            p = qu.rand_ket(4)
             p = p @ p.H
-            iab = mutual_information(p)
-            qd = quantum_discord(p)
+            iab = qu.mutual_information(p)
+            qd = qu.quantum_discord(p)
             assert_allclose(iab / 2, qd)
 
     def test_quantum_discord_mixed(self):
         for i in range(10):
-            p = rand_mix(4)
+            p = qu.rand_mix(4)
             p = p @ p.H
-            qd = quantum_discord(p)
+            qd = qu.quantum_discord(p)
             assert(0 <= qd and qd <= 1)
 
     def test_auto_trace_out(self):
-        p = rand_rho(2**3)
-        qd = quantum_discord(p, [2, 2, 2], 0, 2)
+        p = qu.rand_rho(2**3)
+        qd = qu.quantum_discord(p, [2, 2, 2], 0, 2)
         assert(0 <= qd and qd <= 1)
 
 
 class TestTraceDistance:
     def test_types(self, k1, k2):
-        td1 = trace_distance(k1, k2)
-        td2 = trace_distance(dop(k1), k2)
-        td3 = trace_distance(k1, dop(k2))
-        td4 = trace_distance(dop(k1), dop(k2))
+        td1 = qu.trace_distance(k1, k2)
+        td2 = qu.trace_distance(qu.dop(k1), k2)
+        td3 = qu.trace_distance(k1, qu.dop(k2))
+        td4 = qu.trace_distance(qu.dop(k1), qu.dop(k2))
         assert_allclose([td1] * 3, [td2, td3, td4])
 
     def test_same(self, p1):
-        assert abs(trace_distance(p1, p1)) < 1e-14
+        assert abs(qu.trace_distance(p1, p1)) < 1e-14
 
     @pytest.mark.parametrize("uqtype", ['ket', 'dop'])
     @pytest.mark.parametrize("dqtype", ['ket', 'dop'])
     def test_distinguishable(self, uqtype, dqtype):
-        assert trace_distance(up(qtype=uqtype), down(qtype=dqtype)) > 1 - 1e-10
+        assert qu.trace_distance(qu.up(qtype=uqtype),
+                                 qu.down(qtype=dqtype)) > 1 - 1e-10
 
 
 class TestDecomp:
     @pytest.mark.parametrize("qtype", ['ket', 'dop'])
     def test_pauli_decomp_singlet(self, qtype):
-        p = singlet(qtype=qtype)
-        names_cffs = pauli_decomp(p, mode='cp')
+        p = qu.singlet(qtype=qtype)
+        names_cffs = qu.pauli_decomp(p, mode='cp')
         assert_allclose(names_cffs['II'], 0.25)
         assert_allclose(names_cffs['ZZ'], -0.25)
         assert_allclose(names_cffs['YY'], -0.25)
@@ -420,18 +389,21 @@ class TestDecomp:
             assert_allclose(names_cffs["".join(name)], 0.0)
 
     def test_pauli_reconstruct(self):
-        p1 = rand_rho(4)
-        names_cffs = pauli_decomp(p1, mode='c')
-        pr = sum(kron(*(pauli(s) for s in name)) * names_cffs["".join(name)]
-                 for name in itertools.product('IXYZ', repeat=2))
+        p1 = qu.rand_rho(4)
+        names_cffs = qu.pauli_decomp(p1, mode='c')
+        pr = sum(
+            qu.kron(*(qu.pauli(s) for s in name)) * names_cffs["".join(name)]
+            for name in itertools.product('IXYZ', repeat=2)
+        )
         assert_allclose(pr, p1)
 
-    @pytest.mark.parametrize("state, out",
-                             [(up() & down(), {0: 0.5, 1: 0.5, 2: 0, 3: 0}),
-                              (down() & down(), {0: 0, 1: 0, 2: 0.5, 3: 0.5}),
-                              (singlet() & singlet(), {'00': 1.0, '23': 0.0})])
+    @pytest.mark.parametrize(
+        "state, out",
+        [(qu.up() & qu.down(), {0: 0.5, 1: 0.5, 2: 0, 3: 0}),
+         (qu.down() & qu.down(), {0: 0, 1: 0, 2: 0.5, 3: 0.5}),
+         (qu.singlet() & qu.singlet(), {'00': 1.0, '23': 0.0})])
     def test_bell_decomp(self, state, out):
-        names_cffs = bell_decomp(state, mode='c')
+        names_cffs = qu.bell_decomp(state, mode='c')
         for key in out:
             assert_allclose(names_cffs[str(key)], out[key])
 
@@ -442,91 +414,97 @@ class TestCorrelation:
     @pytest.mark.parametrize("op_sps", [True, False])
     @pytest.mark.parametrize("dims", (None, [2, 2]))
     def test_types(self, dims, op_sps, p_sps, pre_c):
-        p = rand_rho(4, sparse=p_sps)
-        c = correlation(p, pauli('x', sparse=op_sps),
-                        pauli('z', sparse=op_sps),
-                        0, 1, dims=dims, precomp_func=pre_c)
+        p = qu.rand_rho(4, sparse=p_sps)
+        c = qu.correlation(p, qu.pauli('x', sparse=op_sps),
+                           qu.pauli('z', sparse=op_sps),
+                           0, 1, dims=dims, precomp_func=pre_c)
         c = c(p) if pre_c else c
         assert c >= -1.0
         assert c <= 1.0
 
     @pytest.mark.parametrize("pre_c", [False, True])
     @pytest.mark.parametrize("qtype", ["ket", "dop"])
-    @pytest.mark.parametrize("dir", ['x', 'y', 'z'])
-    def test_classically_no_correlated(self, dir, qtype, pre_c):
-        p = up(qtype=qtype) & up(qtype=qtype)
-        c = correlation(p, pauli(dir), pauli(dir), 0, 1, precomp_func=pre_c)
+    @pytest.mark.parametrize("s", ['x', 'y', 'z'])
+    def test_classically_no_correlated(self, s, qtype, pre_c):
+        p = qu.up(qtype=qtype) & qu.up(qtype=qtype)
+        c = qu.correlation(p, qu.pauli(s), qu.pauli(s),
+                           0, 1, precomp_func=pre_c)
         c = c(p) if pre_c else c
         assert_allclose(c, 0.0)
 
     @pytest.mark.parametrize("pre_c", [False, True])
-    @pytest.mark.parametrize("dir, ct", [('x', 0), ('y', 0), ('z', 1)])
-    def test_classically_correlated(self, dir, ct, pre_c):
-        p = 0.5 * ((up(qtype='dop') & up(qtype='dop')) +
-                   (down(qtype='dop') & down(qtype='dop')))
-        c = correlation(p, pauli(dir), pauli(dir), 0, 1, precomp_func=pre_c)
+    @pytest.mark.parametrize("s, ct", [('x', 0), ('y', 0), ('z', 1)])
+    def test_classically_correlated(self, s, ct, pre_c):
+        p = 0.5 * ((qu.up(qtype='dop') & qu.up(qtype='dop')) +
+                   (qu.down(qtype='dop') & qu.down(qtype='dop')))
+        c = qu.correlation(p, qu.pauli(s), qu.pauli(s),
+                           0, 1, precomp_func=pre_c)
         c = c(p) if pre_c else c
         assert_allclose(c, ct)
 
     @pytest.mark.parametrize("pre_c", [False, True])
-    @pytest.mark.parametrize("dir, ct", [('x', -1), ('y', -1), ('z', -1)])
-    def test_entangled(self, dir, ct, pre_c):
-        p = bell_state('psi-')
-        c = correlation(p, pauli(dir), pauli(dir), 0, 1, precomp_func=pre_c)
+    @pytest.mark.parametrize("s, ct", [('x', -1), ('y', -1), ('z', -1)])
+    def test_entangled(self, s, ct, pre_c):
+        p = qu.bell_state('psi-')
+        c = qu.correlation(p, qu.pauli(s), qu.pauli(s),
+                           0, 1, precomp_func=pre_c)
         c = c(p) if pre_c else c
         assert_allclose(c, ct)
 
     def test_reuse_precomp(self):
-        cfn = correlation(None, pauli('z'), pauli('z'), 0, 1, dims=[2, 2],
-                          precomp_func=True)
-        assert_allclose(cfn(bell_state('psi-')), -1.0)
-        assert_allclose(cfn(bell_state('phi+')), 1.0)
+        cfn = qu.correlation(None, qu.pauli('z'), qu.pauli('z'), 0, 1,
+                             dims=[2, 2], precomp_func=True)
+        assert_allclose(cfn(qu.bell_state('psi-')), -1.0)
+        assert_allclose(cfn(qu.bell_state('phi+')), 1.0)
 
     @pytest.mark.parametrize("pre_c", [False, True])
     def test_pauli_correlations_sum_abs(self, pre_c):
-        p = bell_state('psi-')
-        ct = pauli_correlations(p, sum_abs=True, precomp_func=pre_c)
+        p = qu.bell_state('psi-')
+        ct = qu.pauli_correlations(p, sum_abs=True, precomp_func=pre_c)
         ct = ct(p) if pre_c else ct
         assert_allclose(ct, 3.0)
 
     @pytest.mark.parametrize("pre_c", [False, True])
     def test_pauli_correlations_no_sum_abs(self, pre_c):
-        p = bell_state('psi-')
-        ct = pauli_correlations(p, sum_abs=False, precomp_func=pre_c)
+        p = qu.bell_state('psi-')
+        ct = qu.pauli_correlations(p, sum_abs=False, precomp_func=pre_c)
         assert_allclose(list(c(p) for c in ct) if pre_c else ct, (-1, -1, -1))
 
 
 class TestEntCrossMatrix:
     def test_bell_state(self):
-        p = bell_state('phi+')
-        ecm = ent_cross_matrix(p, ent_fn=concurrence, calc_self_ent=True)
+        p = qu.bell_state('phi+')
+        ecm = qu.ent_cross_matrix(p, ent_fn=qu.concurrence, calc_self_ent=True)
         assert_allclose(ecm, [[1, 1], [1, 1]])
 
     def test_bell_state_no_self_ent(self):
-        p = bell_state('phi+')
-        ecm = ent_cross_matrix(p, ent_fn=concurrence, calc_self_ent=False)
+        p = qu.bell_state('phi+')
+        ecm = qu.ent_cross_matrix(p, ent_fn=qu.concurrence,
+                                  calc_self_ent=False)
         assert_allclose(ecm, [[np.nan, 1], [1, np.nan]])
 
     def test_block2(self):
-        p = bell_state('phi+') & bell_state('phi+')
-        ecm = ent_cross_matrix(p, ent_fn=logneg, sz_blc=2)
+        p = qu.bell_state('phi+') & qu.bell_state('phi+')
+        ecm = qu.ent_cross_matrix(p, ent_fn=qu.logneg, sz_blc=2)
         assert_allclose(ecm[1, 1], 0)
         assert_allclose(ecm[0, 1], 0)
         assert_allclose(ecm[1, 0], 0)
 
     def test_block2_no_self_ent(self):
-        p = bell_state('phi+') & bell_state('phi+')
-        ecm = ent_cross_matrix(p, ent_fn=logneg, calc_self_ent=False, sz_blc=2)
+        p = qu.bell_state('phi+') & qu.bell_state('phi+')
+        ecm = qu.ent_cross_matrix(p, ent_fn=qu.logneg,
+                                  calc_self_ent=False, sz_blc=2)
         assert_allclose(ecm[0, 1], 0)
         assert_allclose(ecm[0, 0], np.nan)
         assert_allclose(ecm[1, 0], 0)
 
     def test_block2_upscale(self):
-        p = bell_state('phi+') & bell_state('phi+')
-        ecm = ent_cross_matrix(p, ent_fn=logneg, calc_self_ent=False, sz_blc=2)
+        p = qu.bell_state('phi+') & qu.bell_state('phi+')
+        ecm = qu.ent_cross_matrix(p, ent_fn=qu.logneg,
+                                  calc_self_ent=False, sz_blc=2)
         assert ecm.shape == (2, 2)
-        ecm = ent_cross_matrix(p, ent_fn=logneg, calc_self_ent=False, sz_blc=2,
-                               upscale=True)
+        ecm = qu.ent_cross_matrix(p, ent_fn=qu.logneg, calc_self_ent=False,
+                                  sz_blc=2, upscale=True)
         assert ecm.shape == (4, 4)
 
 
@@ -536,9 +514,9 @@ class TestEntCrossMatrixBlocked:
     @pytest.mark.parametrize("calc_self_ent", [True, False])
     def test_shapes_and_blocks(self, sz_blc, sz_p, calc_self_ent):
         if sz_p // sz_blc > 0:
-            p = rand_rho(2**sz_p)
+            p = qu.rand_rho(2**sz_p)
             n = sz_p // sz_blc
-            ecm = ent_cross_matrix(p, sz_blc, calc_self_ent=calc_self_ent)
+            ecm = qu.ent_cross_matrix(p, sz_blc, calc_self_ent=calc_self_ent)
             assert ecm.shape[0] == n
             if not calc_self_ent:
                 assert_allclose(np.diag(ecm), [np.nan] * n, equal_nan=True)
@@ -548,66 +526,66 @@ class TestQID:
     @pytest.mark.parametrize("bs", [0, 1, 2, 3])
     @pytest.mark.parametrize("pre_c", [False, True])
     def test_bell_state(self, bs, pre_c):
-        p = bell_state(bs)
-        qids = qid(p, dims=[2, 2], inds=[0, 1], precomp_func=pre_c)
+        p = qu.bell_state(bs)
+        qids = qu.qid(p, dims=[2, 2], inds=[0, 1], precomp_func=pre_c)
         assert_allclose(qids(p) if pre_c else qids, [3, 3])
 
     @pytest.mark.parametrize("pre_c", [False, True])
     def test_random_product_state(self, pre_c):
-        p = rand_product_state(3)
-        qids = qid(p, dims=[2, 2, 2], inds=[0, 1, 2], precomp_func=pre_c)
+        p = qu.rand_product_state(3)
+        qids = qu.qid(p, dims=[2, 2, 2], inds=[0, 1, 2], precomp_func=pre_c)
         assert_allclose(qids(p) if pre_c else qids, [2, 2, 2])
 
 
 class TestIsDegenerate:
     def test_known_degenerate(self):
-        h = ham_heis(2)
-        assert is_degenerate(h) == 2
+        h = qu.ham_heis(2)
+        assert qu.is_degenerate(h) == 2
 
     def test_known_nondegen(self):
-        h = ham_heis(2, b=0.3)
-        assert is_degenerate(h) == 0
+        h = qu.ham_heis(2, b=0.3)
+        assert qu.is_degenerate(h) == 0
 
     def test_supply_list(self):
         evals = [0, 1, 2, 2.0, 3]
-        assert is_degenerate(evals)
+        assert qu.is_degenerate(evals)
 
     def test_tol(self):
         evals = [0, 1, 1.001, 3, 4, 5, 6, 7, 8, 9]
-        assert not is_degenerate(evals)
-        assert is_degenerate(evals, tol=1e-2)
+        assert not qu.is_degenerate(evals)
+        assert qu.is_degenerate(evals, tol=1e-2)
 
 
 class TestPageEntropy:
     def test_known_qubit_qubit(self):
-        assert abs(page_entropy(2, 4) - 0.4808983469629878) < 1e-12
+        assert abs(qu.page_entropy(2, 4) - 0.4808983469629878) < 1e-12
 
     def test_large_m_approx(self):
-        pe = page_entropy(2**10, 2**20)
+        pe = qu.page_entropy(2**10, 2**20)
         ae = 0.5 * (20 - math.log2(math.e))
 
         assert abs(pe - ae) < 1e-5
 
     def test_bigger_than_half(self):
-        assert_allclose(page_entropy(4, 24), page_entropy(6, 24))
+        assert_allclose(qu.page_entropy(4, 24), qu.page_entropy(6, 24))
 
 
 class TestIsEigenvector:
 
     def test_dense_true(self):
-        a = rand_herm(10)
-        v = eigvecsh(a)
+        a = qu.rand_herm(10)
+        v = qu.eigvecsh(a)
         for i in range(10):
-            assert is_eigenvector(v[:, i], a)
+            assert qu.is_eigenvector(v[:, i], a)
 
     def test_dense_false(self):
-        a = rand_herm(10)
-        v = rand_ket(10)
-        assert not is_eigenvector(v, a)
+        a = qu.rand_herm(10)
+        v = qu.rand_ket(10)
+        assert not qu.is_eigenvector(v, a)
 
     def test_sparse(self):
-        a = rand_herm(10, sparse=True, density=0.9)
-        vt = eigvecsh(a, sigma=0, k=1)
-        assert is_eigenvector(vt, a)
-        vf = rand_ket(10)
-        assert not is_eigenvector(vf, a)
+        a = qu.rand_herm(10, sparse=True, density=0.9)
+        vt = qu.eigvecsh(a, sigma=0, k=1)
+        assert qu.is_eigenvector(vt, a)
+        vf = qu.rand_ket(10)
+        assert not qu.is_eigenvector(vf, a)

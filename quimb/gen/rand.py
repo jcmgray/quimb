@@ -8,7 +8,7 @@ from ..accel import rdmul, dot, matrixify
 from ..core import qu, ptr, kron, nmlz
 
 
-def accept_rand_seed(fn):
+def random_seed_fn(fn):
     """Modify ``fn`` to take a ``seed`` argument with which call
     :func:`numpy.random.seed`.
     """
@@ -22,7 +22,45 @@ def accept_rand_seed(fn):
     return wrapped_fn
 
 
-@accept_rand_seed
+def randn(shape, dtype=float):
+    """Generate normally distributed random array of certain shape and type.
+    Like :func:`numpy.random.randn` but can specify ``dtype``.
+
+    Parameters
+    ----------
+    shape : tuple[int]
+        The shape of the array.
+    dtype : {float, complex, ...}, optional
+        The numpy data type.
+
+    Returns
+    -------
+    A : array
+    """
+    # real datatypes
+    if np.issubdtype(dtype, np.floating):
+        x = np.random.randn(*shape)
+
+        # convert type if not the default
+        if dtype not in (float, np.float_):
+            x = x.astype(dtype)
+
+    # complex datatypes
+    elif np.issubdtype(dtype, np.complexfloating):
+        x = np.random.randn(*shape) + 1.0j * np.random.randn(*shape)
+
+        # convert type if not the default
+        if dtype not in (complex, np.complex_):
+            x = x.astype(dtype)
+
+    else:
+        raise TypeError("dtype {} not understood - should be float or complex."
+                        "".format(dtype))
+
+    return x
+
+
+@random_seed_fn
 def rand_matrix(d, scaled=True, sparse=False, stype='csr',
                 density=None, dtype=complex):
     """Generate a random complex matrix of order `d` with normally distributed
@@ -83,7 +121,7 @@ def rand_matrix(d, scaled=True, sparse=False, stype='csr',
     return mat
 
 
-@accept_rand_seed
+@random_seed_fn
 def rand_herm(d, sparse=False, density=None, dtype=complex):
     """Generate a random hermitian matrix of order `d` with normally
     distributed entries. In the limit of large `d` the spectrum will be a
@@ -111,7 +149,7 @@ def rand_herm(d, sparse=False, density=None, dtype=complex):
     return herm
 
 
-@accept_rand_seed
+@random_seed_fn
 def rand_pos(d, sparse=False, density=None, dtype=complex):
     """Generate a random positive matrix of order `d`, with normally
     distributed entries. In the limit of large `d` the spectrum will lie
@@ -132,7 +170,7 @@ def rand_pos(d, sparse=False, density=None, dtype=complex):
     return dot(pos, pos.H)
 
 
-@accept_rand_seed
+@random_seed_fn
 def rand_rho(d, sparse=False, density=None, dtype=complex):
     """Generate a random positive matrix of order `d` with normally
     distributed entries and unit trace.
@@ -144,7 +182,7 @@ def rand_rho(d, sparse=False, density=None, dtype=complex):
     return nmlz(rand_pos(d, sparse=sparse, density=density, dtype=dtype))
 
 
-@accept_rand_seed
+@random_seed_fn
 def rand_uni(d, dtype=complex):
     """Generate a random unitary matrix of order `d`, distributed according to
     the Haar measure.
@@ -159,7 +197,7 @@ def rand_uni(d, dtype=complex):
     return rdmul(q, r)
 
 
-@accept_rand_seed
+@random_seed_fn
 def rand_ket(d, sparse=False, stype='csr', density=0.01):
     """Generates a ket of length `d` with normally distributed entries.
     """
@@ -172,7 +210,7 @@ def rand_ket(d, sparse=False, stype='csr', density=0.01):
     return nmlz(ket)
 
 
-@accept_rand_seed
+@random_seed_fn
 def rand_haar_state(d):
     """Generate a random state of dimension `d` according to the Haar
     distribution.
@@ -181,7 +219,7 @@ def rand_haar_state(d):
     return u[:, 0]
 
 
-@accept_rand_seed
+@random_seed_fn
 def gen_rand_haar_states(d, reps):
     """Generate many random Haar states, recycling a random unitary matrix
     by using all of its columns (not a good idea?).
@@ -193,7 +231,7 @@ def gen_rand_haar_states(d, reps):
         yield u[:, cyc]
 
 
-@accept_rand_seed
+@random_seed_fn
 def rand_mix(d, tr_d_min=None, tr_d_max=None, mode='rand'):
     """Constructs a random mixed state by tracing out a random ket
     where the composite system varies in size between 2 and d. This produces
@@ -213,7 +251,7 @@ def rand_mix(d, tr_d_min=None, tr_d_max=None, mode='rand'):
     return ptr(psi, [d, m], 0)
 
 
-@accept_rand_seed
+@random_seed_fn
 def rand_product_state(n, qtype=None):
     """Generates a ket of `n` many random pure qubits.
     """
@@ -230,7 +268,7 @@ def rand_product_state(n, qtype=None):
 
 
 @matrixify
-@accept_rand_seed
+@random_seed_fn
 def rand_matrix_product_state(phys_dim, n, bond_dim,
                               cyclic=False, trans_invar=False):
     """Generate a random matrix product state (in dense form, see
@@ -260,10 +298,11 @@ def rand_matrix_product_state(phys_dim, n, bond_dim,
     if trans_invar and not cyclic:
         raise ValueError("State cannot be translationally invariant"
                          "with open boundary conditions.")
-    elif trans_invar:
-        raise NotImplementedError
 
     tensor_shp = (bond_dim, phys_dim, bond_dim)
+
+    if trans_invar:
+        A = randn(tensor_shp, dtype=complex)
 
     def gen_tensors():
         for i in range(0, n):
@@ -271,7 +310,7 @@ def rand_matrix_product_state(phys_dim, n, bond_dim,
                      tensor_shp[:-1] if i == n - 1 and not cyclic else
                      tensor_shp)
 
-            yield np.random.randn(*shape) + 1.0j * np.random.randn(*shape)
+            yield (A if trans_invar else randn(shape, dtype=complex))
 
     ket_tens = reduce(lambda x, y: np.tensordot(x, y, axes=1), gen_tensors())
     if cyclic:
@@ -285,7 +324,7 @@ def rand_matrix_product_state(phys_dim, n, bond_dim,
 rand_mps = rand_matrix_product_state
 
 
-@accept_rand_seed
+@random_seed_fn
 def rand_seperable(dims, num_mix=10):
     """Generate a random, mixed, seperable state. E.g rand_seperable([2, 2])
     for a mixed two qubit state with no entanglement.

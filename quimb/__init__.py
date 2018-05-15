@@ -37,7 +37,7 @@ from .gen.states import (
     graph_state_1d,
 )
 from .gen.rand import (
-    rand_matrix, rand_herm, rand_pos, rand_rho, rand_ket, rand_uni,
+    randn, rand_matrix, rand_herm, rand_pos, rand_rho, rand_ket, rand_uni,
     rand_haar_state, gen_rand_haar_states, rand_mix, rand_product_state,
     rand_matrix_product_state, rand_mps, rand_seperable,
 )
@@ -50,7 +50,7 @@ from .calc import (
     one_way_classical_information, quantum_discord, trace_distance, decomp,
     pauli_decomp, bell_decomp, correlation, pauli_correlations,
     ent_cross_matrix, qid, is_degenerate, is_eigenvector, page_entropy,
-    heisenberg_energy,
+    heisenberg_energy, dephase,
 )
 
 # Evolution class and methods
@@ -91,7 +91,7 @@ __all__ = [
     'singlet', 'thermal_state', 'neel_state', 'singlet_pairs', 'werner_state',
     'ghz_state', 'w_state', 'levi_civita', 'perm_state', 'graph_state_1d',
     'rand_matrix', 'rand_herm', 'rand_pos', 'rand_rho', 'rand_ket', 'rand_uni',
-    'rand_haar_state', 'gen_rand_haar_states', 'rand_mix', 'rand_mps',
+    'rand_haar_state', 'gen_rand_haar_states', 'rand_mix', 'rand_mps', 'randn',
     'rand_product_state', 'rand_matrix_product_state', 'rand_seperable',
     # Calc ------------------------------------------------------------------ #
     'expm', 'sqrtm', 'expm_multiply', 'fidelity', 'purify', 'entropy',
@@ -101,7 +101,7 @@ __all__ = [
     'concurrence', 'one_way_classical_information', 'quantum_discord',
     'trace_distance', 'decomp', 'pauli_decomp', 'bell_decomp', 'correlation',
     'pauli_correlations', 'ent_cross_matrix', 'qid', 'is_degenerate',
-    'is_eigenvector', 'page_entropy', 'heisenberg_energy',
+    'is_eigenvector', 'page_entropy', 'heisenberg_energy', 'dephase',
     # Evo ------------------------------------------------------------------- #
     'Evolution',
     # Approx spectral ------------------------------------------------------- #

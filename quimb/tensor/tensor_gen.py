@@ -6,34 +6,9 @@ import numpy as np
 from ..accel import make_immutable
 from ..linalg.base_linalg import norm_fro_dense
 from ..gen.operators import spin_operator, eye
+from ..gen.rand import randn
 from .tensor_core import Tensor
 from .tensor_1d import MatrixProductState, MatrixProductOperator
-
-
-def randn(shape, dtype=float):
-    """Generate normally distributed random array of certain shape and dtype.
-    """
-    # real datatypes
-    if np.issubdtype(dtype, np.floating):
-        x = np.random.randn(*shape)
-
-        # convert type if not the default
-        if dtype not in (float, np.float_):
-            x = x.astype(dtype)
-
-    # complex datatypes
-    elif np.issubdtype(dtype, np.complexfloating):
-        x = np.random.randn(*shape) + 1.0j * np.random.randn(*shape)
-
-        # convert type if not the default
-        if dtype not in (complex, np.complex_):
-            x = x.astype(dtype)
-
-    else:
-        raise TypeError("dtype {} not understood - should be float or complex."
-                        "".format(dtype))
-
-    return x
 
 
 def rand_tensor(shape, inds, tags=None, dtype=float):
