@@ -382,7 +382,7 @@ class PTPTLazyMPS:
 
         remove = remove.contract_tags(..., inplace=True)
         remove.drop_tags()
-        remove.tags.add('_ENV')
+        remove.add_tag('_ENV')
 
         leave |= remove
 

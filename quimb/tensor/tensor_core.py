@@ -923,6 +923,12 @@ class Tensor(object):
             raise ValueError("Mismatch between number of data dimensions and "
                              "number of indices supplied.")
 
+    def add_tag(self, tag):
+        """Add a tag to this tensor. Unlike ``self.tags.add`` this also updates
+        any TensorNetworks viewing this Tensor.
+        """
+        self.modify(tags=set.union(self.tags, {tag}))
+
     def conj(self, inplace=False):
         """Conjugate this tensors data (does nothing to indices).
         """
@@ -1201,7 +1207,10 @@ class Tensor(object):
         """
         if tags is None:
             tags = self.tags
-        self.tags.difference_update(tags2set(tags))
+        else:
+            tags = tags2set(tags)
+
+        self.modify(tags=self.tags - tags)
 
     def bonds(self, other):
         """Return a tuple of the shared indices between this tensor
@@ -1786,12 +1795,7 @@ class TensorNetwork(object):
         tids = self._get_tids_from_tags(where, which=which)
 
         for tid in tids:
-            self.tensor_map[tid].tags.add(tag)
-
-        try:
-            self.tag_map[tag] |= tids
-        except KeyError:
-            self.tag_map[tag] = set(tids)
+            self.tensor_map[tid].add_tag(tag)
 
     def drop_tags(self, tags):
         """Remove a tag from any tensors in this network which have it.
@@ -1806,9 +1810,6 @@ class TensorNetwork(object):
 
         for t in self:
             t.drop_tags(tags)
-
-        for tag in tags:
-            del self.tag_map[tag]
 
     def retag(self, tag_map, inplace=False):
         """Rename tags for all tensors in this network, optionally in-place.

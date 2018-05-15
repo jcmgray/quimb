@@ -1308,11 +1308,11 @@ class MatrixProductState(TensorNetwork1D):
                 kb, sec = kb.partition(section_tags, inplace=True)
                 sec_l, sec_u = sec.partition('_KET', inplace=True)
                 T_UP = (sec_u ^ all)
-                T_UP.tags.add('_UP')
+                T_UP.add_tag('_UP')
                 T_UP.fuse({"_tmp_ind_u{}".format(label):
                            [self.site_ind(i) for i in section]}, inplace=True)
                 T_DN = (sec_l ^ all)
-                T_DN.tags.add('_DOWN')
+                T_DN.add_tag('_DOWN')
                 T_DN.fuse({"_tmp_ind_l{}".format(label):
                            [self.site_ind(i) for i in section]}, inplace=True)
                 kb |= T_UP
@@ -1551,7 +1551,7 @@ class MatrixProductState(TensorNetwork1D):
         else:
             p |= TG
             if propagate_tags:
-                TG.tags.update(get_tags(p.select_neighbors(tags)))
+                TG.modify(tags=TG.tags | get_tags(p.select_neighbors(tags)))
 
         return p
 

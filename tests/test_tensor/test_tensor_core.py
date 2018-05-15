@@ -41,7 +41,7 @@ class TestBasicTensorOperations:
     def test_tensor_copy(self):
         a = Tensor(np.random.randn(2, 3, 4), inds=[0, 1, 2], tags='blue')
         b = a.copy()
-        b.tags.add('foo')
+        b.add_tag('foo')
         assert 'foo' not in a.tags
         b.data[:] = b.data / 2
         # still reference the same underlying array
@@ -50,7 +50,7 @@ class TestBasicTensorOperations:
     def test_tensor_deep_copy(self):
         a = Tensor(np.random.randn(2, 3, 4), inds=[0, 1, 2], tags='blue')
         b = a.copy(deep=True)
-        b.tags.add('foo')
+        b.add_tag('foo')
         assert 'foo' not in a.tags
         b.data[:] = b.data / 2
         # still reference the same underlying array
