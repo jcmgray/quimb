@@ -39,7 +39,7 @@ from .gen.states import (
 from .gen.rand import (
     randn, rand_matrix, rand_herm, rand_pos, rand_rho, rand_ket, rand_uni,
     rand_haar_state, gen_rand_haar_states, rand_mix, rand_product_state,
-    rand_matrix_product_state, rand_mps, rand_seperable,
+    rand_matrix_product_state, rand_mps, rand_seperable, rand_iso, rand_mera,
 )
 
 # Functions for calculating properties
@@ -93,6 +93,7 @@ __all__ = [
     'rand_matrix', 'rand_herm', 'rand_pos', 'rand_rho', 'rand_ket', 'rand_uni',
     'rand_haar_state', 'gen_rand_haar_states', 'rand_mix', 'rand_mps', 'randn',
     'rand_product_state', 'rand_matrix_product_state', 'rand_seperable',
+    'rand_iso', 'rand_mera',
     # Calc ------------------------------------------------------------------ #
     'expm', 'sqrtm', 'expm_multiply', 'fidelity', 'purify', 'entropy',
     'entropy_subsys', 'mutual_information', 'mutinf', 'mutinf_subsys',

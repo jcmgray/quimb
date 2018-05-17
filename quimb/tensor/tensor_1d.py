@@ -290,6 +290,16 @@ class TensorNetwork1DVector:
         """
         return tuple(self.site_ind(i) for i in self.sites)
 
+    def to_dense(self, *inds_seq):
+        """Return the dense ket version of this 1D vector, i.e. a
+        ``numpy.matrix`` with shape (-1, 1).
+        """
+        if not inds_seq:
+            # just use list of site indices
+            return np.asmatrix(super().to_dense(self.site_inds).reshape(-1, 1))
+
+        return super().to_dense(self.site_inds)
+
     def phys_dim(self, i=None):
         if i is None:
             i = self.sites[0]
@@ -1619,14 +1629,6 @@ class MatrixProductState(TensorNetwork,
 
         # clip below 0
         return max(0, log2(tr_norm))
-
-    def to_dense(self):
-        """Return the dense ket version of this MPS, i.e. a ``numpy.matrix``
-        with shape (-1, 1).
-        """
-        return np.asmatrix(self.contract(...)
-                           .fuse({'all': self.site_inds})
-                           .data.reshape(-1, 1))
 
 
 class MatrixProductOperator(TensorNetwork,

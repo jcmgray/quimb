@@ -3,20 +3,9 @@ import itertools
 
 import numpy as np
 
+import quimb as qu
 from .tensor_core import rand_uuid, Tensor, TensorNetwork
 from .tensor_1d import TensorNetwork1D, TensorNetwork1DVector
-
-
-def rand_iso(n, m, dtype=complex):
-    """Generate a random isometry.
-    """
-    data = np.random.randn(n, m)
-
-    if np.issubdtype(dtype, np.complexfloating):
-        data = data + 1.0j * np.random.randn(n, m)
-
-    q, r = np.linalg.qr(data if n > m else data.T)
-    return q if n > m else q.T
 
 
 def is_power_of_2(x):
@@ -149,23 +138,38 @@ class MERA(TensorNetwork, TensorNetwork1D, TensorNetwork1DVector):
                         t.add_tag(f'I{j}')
 
     @classmethod
-    def rand_invar(cls, n, phys_dim=2):
-        """Generate a random invariant MERA.
+    def rand(cls, n, phys_dim=2, dtype=float):
+        d = phys_dim
+
+        def gen_unis():
+            while True:
+                uni = qu.rand_iso(d**2, d**2, dtype=dtype)
+                uni.shape = (d, d, d, d)
+                yield uni
+
+        def gen_isos():
+            while True:
+                iso = qu.rand_iso(d**2, d, dtype=dtype)
+                iso.shape = (d, d, d)
+                yield iso
+
+        return cls(n, gen_unis(), gen_isos(), phys_dim=d)
+
+    @classmethod
+    def rand_invar(cls, n, phys_dim=2, dtype=float):
+        """Generate a random translational and scale invariant MERA.
         """
-        iso_shape = (phys_dim, phys_dim, phys_dim)
-        iso = rand_iso(phys_dim**2, phys_dim).reshape(iso_shape)
+        d = phys_dim
 
-        uni_shape = (phys_dim, phys_dim, phys_dim, phys_dim)
-        uni = rand_iso(phys_dim**2, phys_dim**2).reshape(uni_shape)
+        iso = qu.rand_iso(d**2, d, dtype=dtype)
+        iso.shape = (d, d, d)
 
-        return cls(n, uni, iso, phys_dim=phys_dim)
+        uni = qu.rand_iso(d**2, d**2, dtype=dtype)
+        uni.shape = (d, d, d, d)
+
+        return cls(n, uni, iso, phys_dim=d)
 
     @staticmethod
     def contract_structured_all(old, inplace=False, **opts):
         new = old if inplace else old.copy()
         return new.contract_tags(all, **opts)
-
-    def to_dense(self):
-        """Convert this MERA to dense matrix form.
-        """
-        return np.asmatrix(super().to_dense(self.site_inds).reshape(-1, 1))

@@ -354,3 +354,33 @@ def rand_seperable(dims, num_mix=10):
             yield w * kron(*gen_single_sites())
 
     return sum(gen_single_states()) / np.sum(weights)
+
+
+@random_seed_fn
+def rand_iso(n, m, dtype=complex):
+    """Generate a random isometry of shape ``(n, m)``.
+    """
+    data = np.random.randn(n, m)
+
+    if np.issubdtype(dtype, np.complexfloating):
+        data = data + 1.0j * np.random.randn(n, m)
+
+    q, _ = np.linalg.qr(data if n > m else data.T)
+    q = q.astype(dtype)
+
+    return q if (n > m) else q.T
+
+
+@random_seed_fn
+def rand_mera(n, invariant=False, dtype=complex):
+    """Generate a random mera state of ``n`` qubits, which must be a power
+    of 2. This uses ``quimb.tensor``.
+    """
+    import quimb.tensor as qt
+
+    if invariant:
+        constructor = qt.MERA.rand_invar
+    else:
+        constructor = qt.MERA.rand
+
+    return constructor(n, dtype=dtype).to_dense()

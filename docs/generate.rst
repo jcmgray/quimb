@@ -60,3 +60,5 @@ Random States & Operators
 - :func:`~quimb.gen.rand.rand_product_state`
 - :func:`~quimb.gen.rand.rand_matrix_product_state`
 - :func:`~quimb.gen.rand.rand_seperable`
+- :func:`~quimb.gen.rand.rand_iso`
+- :func:`~quimb.gen.rand.rand_mera`
