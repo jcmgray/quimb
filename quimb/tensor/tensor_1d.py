@@ -296,9 +296,10 @@ class TensorNetwork1DVector:
         """
         if not inds_seq:
             # just use list of site indices
-            return np.asmatrix(super().to_dense(self.site_inds).reshape(-1, 1))
+            return np.asmatrix(
+                TensorNetwork.to_dense(self, self.site_inds).reshape(-1, 1))
 
-        return super().to_dense(self.site_inds)
+        return TensorNetwork.to_dense(self, self.site_inds)
 
     def phys_dim(self, i=None):
         if i is None:
@@ -909,10 +910,10 @@ class TensorNetwork1DFlat:
         three_line_multi_print(l1, l2, l3, max_width=max_width)
 
 
-class MatrixProductState(TensorNetwork,
+class MatrixProductState(TensorNetwork1DVector,
+                         TensorNetwork1DFlat,
                          TensorNetwork1D,
-                         TensorNetwork1DVector,
-                         TensorNetwork1DFlat):
+                         TensorNetwork):
     """Initialise a matrix product state, with auto labelling and tagging.
 
     Parameters
@@ -1631,9 +1632,9 @@ class MatrixProductState(TensorNetwork,
         return max(0, log2(tr_norm))
 
 
-class MatrixProductOperator(TensorNetwork,
+class MatrixProductOperator(TensorNetwork1DFlat,
                             TensorNetwork1D,
-                            TensorNetwork1DFlat):
+                            TensorNetwork):
     """Initialise a matrix product operator, with auto labelling and tagging.
 
     Parameters

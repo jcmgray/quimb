@@ -12,7 +12,9 @@ def is_power_of_2(x):
     return ((x & (x - 1)) == 0) and x > 0
 
 
-class MERA(TensorNetwork, TensorNetwork1D, TensorNetwork1DVector):
+class MERA(TensorNetwork1DVector,
+           TensorNetwork1D,
+           TensorNetwork):
     r"""The Multi-scale Entanglement Renormalization Ansatz (MERA) state:
 
             ...     ...     ...     ...     ...     ...
