@@ -16,6 +16,8 @@
 import sys
 import os
 import shlex
+import numpy
+import scipy
 import quimb
 
 # If extensions (or modules to document with autodoc) are in another directory,
@@ -182,6 +184,7 @@ def setup(app):
     app.add_stylesheet("my-styles.css")
 
 html_logo = "_static/quimb_logo_title.png"
+html_favicon = "_static/quimb.ico"
 
 # Add any extra paths that contain custom files (such as robots.txt or
 # .htaccess) here, relative to this directory. These files are copied
@@ -326,10 +329,6 @@ texinfo_documents = [
 
 # If true, do not generate a @detailmenu in the "Top" node's menu.
 # texinfo_no_detailmenu = False
-
-import numpy
-import scipy
-
 
 intersphinx_mapping = {
     'python': ('https://docs.python.org/3.6/', None),
