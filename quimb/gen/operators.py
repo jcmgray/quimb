@@ -320,10 +320,18 @@ def ham_heis(n, j=1.0, b=0.0, cyclic=True,
 
 def ham_ising(n, jz=1.0, bx=1.0, **kwargs):
     """Generate the quantum transverse field ising model hamiltonian. This is a
-    simple alias for :func:`~quimb.gen.operators.ham_heis` with z-interactions
-    and an x-field.
+    simple alias for :func:`~quimb.gen.operators.ham_heis` with Z-interactions
+    and an X-field.
     """
     return ham_heis(n, j=(0, 0, jz), b=(bx, 0, 0), **kwargs)
+
+
+def ham_XY(n, jxy, bz, **kwargs):
+    """Generate the quantum transverse field XY model hamiltonian. This is a
+    simple alias for :func:`~quimb.gen.operators.ham_heis` with
+    X- and Y-interactions and a Z-field.
+    """
+    return ham_heis(n, j=(jxy, jxy, 0), b=(0, 0, bz), **kwargs)
 
 
 @functools.lru_cache(maxsize=8)
