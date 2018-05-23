@@ -103,7 +103,7 @@ def dephase(rho, p, rand_rank=None):
         dephaser = eye(d) / d
 
     else:
-        if not isinstance(rand_rank, int):
+        if not isinstance(rand_rank, (int, np.integer)):
             rand_rank = int(rand_rank * d)
         rand_rank = min(max(1, rand_rank), d)
 
