@@ -2,11 +2,12 @@
 which has an efficient representation of its linear action on a vector.
 """
 import functools
-from math import sqrt, log2, exp
+from math import sqrt, log2, exp, inf, nan
 import random
 
 import numpy as np
 import scipy.linalg as scla
+from scipy.optimize import curve_fit
 
 from ..core import ptr
 from ..accel import prod, vdot
@@ -350,6 +351,63 @@ def std(xs):
     return var**0.5
 
 
+def exp_approach(x, a, b, c):
+    return a * np.exp(-np.array(x) / b) + c
+
+
+def calc_est_fit(estimates, conv_n):
+    """Make estimate by fitting exponential convergence to estimates.
+    """
+    n = len(estimates)
+
+    if n < conv_n:
+        return nan, inf
+
+    try:
+        # initial guess for offset, decay length and equilibrium
+        p0 = (0, n, estimates[-1])
+        ks = np.arange(len(estimates))
+
+        # weight later estimates with less error as well
+        popt, pcov = curve_fit(exp_approach, ks, estimates,
+                               p0=p0, sigma=1 / (1 + ks))
+
+        est = popt[-1]
+        err = abs(pcov[-1, -1])**0.5
+
+    except (ValueError, RuntimeError):
+        est = nan
+        err = inf
+
+    return est, err
+
+
+def calc_est_window(estimates, mean_ests, conv_n):
+    """Make estimate from mean of last ``m`` samples, following:
+
+    1. Take between ``conv_n`` and 12 estimates.
+    2. Pair the estimates as they are alternate upper/lower bounds
+    3. Compute the standard error on the paired estimates.
+    """
+    m_est = min(max(conv_n, len(estimates) // 8), 12)
+
+    est = sum(estimates[-m_est:]) / m_est
+    mean_ests.append(est)
+
+    if len(estimates) > conv_n:
+        # check for convergence using variance of paired last m estimates
+        #   -> paired because estimates alternate between upper and lower bound
+        paired_ests = [
+            (a + b) / 2 for a, b in
+            zip(estimates[-m_est::2], estimates[-m_est + 1::2])
+        ]
+        err = std(paired_ests) / (m_est / 2) ** 0.5
+    else:
+        err = inf
+
+    return est, err
+
+
 def single_random_estimate(A, K, bsz, beta_tol, v0, f, pos, tau, tol_scale,
                            k_min=10, verbosity=0, *, seed=None,
                            v0_opts=None, **lanc_opts):
@@ -383,44 +441,44 @@ def single_random_estimate(A, K, bsz, beta_tol, v0, f, pos, tau, tol_scale,
             continue
 
         k = alpha.size
+        estimates.append(Gf)
 
         # check for break-down convergence (e.g. found entire subspace)
+        #     in which case latest estimate should be accurate
         if abs(beta[-1]) < beta_tol:
             if verbosity >= 2:
                 print("k={}: Beta breadown, returning {}.".format(k, Gf))
             return Gf
 
-        estimates.append(Gf)
+        # compute an estimate and error using a window of the last few results
+        win_est, win_err = calc_est_window(estimates, mean_ests, conv_n)
 
-        # Make estimate from mean of last ``m`` samples
-        m_est = min(max(conv_n, len(estimates) // 8), 12)
+        # try and compute an estimate and error using exponential fit
+        fit_est, fit_err = calc_est_fit(mean_ests, conv_n)
 
-        cur_estimate = sum(estimates[-m_est:]) / m_est
-        mean_ests.append(cur_estimate)
+        # take whichever has lowest error
+        est, err = min((win_est, win_err), (fit_est, fit_err),
+                       key=lambda est_err: est_err[1])
 
-        if len(estimates) > conv_n:
-            # check for convergence using variance of paired last m estimates
-            # paired because estimates alternate between upper and lower bound
-            paired_ests = [(a + b) / 2 for a, b in
-                           zip(estimates[-m_est::2], estimates[-m_est + 1::2])]
-            serr_est = std(paired_ests) / (m_est / 2) ** 0.5
-            converged = serr_est < tau * (abs(cur_estimate) + tol_scale)
-        else:
-            serr_est = "n/a"
-            converged = False
+        converged = err < tau * (abs(est) + tol_scale)
 
         if verbosity >= 2:
-            print("k={}: Gf={}, Err={}".format(k, cur_estimate, serr_est))
+
+            if verbosity >= 3:
+                print("est_win={}, err_win={}".format(win_est, win_err))
+                print("est_fit={}, err_fit={}".format(fit_est, fit_err))
+
+            print("k={}: Gf={}, Est={}, Err={}".format(k, Gf, est, err))
+            if converged:
+                print("k={}: Converged to tau {}.".format(k, tau))
 
         if converged:
-            if verbosity >= 2:
-                print("k={}: Converged to tau {}.".format(k, tau))
             break
 
     if verbosity >= 1:
-        print("k={}: Returning estimate {}.".format(k, cur_estimate))
+        print("k={}: Returning estimate {}.".format(k, est))
 
-    return cur_estimate
+    return est
 
 
 def calc_stats(samples, mean_p, mean_s, tol, tol_scale):
@@ -442,7 +500,7 @@ def calc_stats(samples, mean_p, mean_s, tol, tol_scale):
 
 
 def approx_spectral_function(A, f, tol=1e-2, *, bsz=1, R=1024, tol_scale=1,
-                             tau=None, k_min=10, k_max=128, beta_tol=1e-6,
+                             tau=None, k_min=10, k_max=256, beta_tol=1e-6,
                              mpi=False, mean_p=0.7, mean_s=1.0, pos=False,
                              v0=None, verbosity=0, **kwargs):
     """Approximate a spectral function, that is, the quantity ``Tr(f(A))``.
