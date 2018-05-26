@@ -1579,7 +1579,7 @@ class MatrixProductState(TensorNetwork1DVector,
         return kb
 
     def logneg_subsys(self, sysa, sysb, compress_opts=None,
-                      approx_spectral_opts=None):
+                      approx_spectral_opts=None, approx_thresh=2**12):
         r"""Compute the logarithmic negativity between subsytem blocks, e.g.::
 
                                sysa         sysb
@@ -1624,9 +1624,12 @@ class MatrixProductState(TensorNetwork1DVector,
         # view it as an operator
         rho_ab_pt_lo = rho_ab.aslinearoperator(['kA', 'bB'], ['bA', 'kB'])
 
-        # estimate its spectrum and sum the abs(eigenvalues)
-        tr_norm = qu.approx_spectral_function(
-            rho_ab_pt_lo, abs, **approx_spectral_opts)
+        if rho_ab_pt_lo.shape[0] <= approx_thresh:
+            tr_norm = qu.norm(rho_ab_pt_lo.to_dense(), 'tr')
+        else:
+            # estimate its spectrum and sum the abs(eigenvalues)
+            tr_norm = qu.approx_spectral_function(
+                rho_ab_pt_lo, abs, **approx_spectral_opts)
 
         # clip below 0
         return max(0, log2(tr_norm))
