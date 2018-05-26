@@ -62,7 +62,11 @@ def MPS_rand_state(n, bond_dim, phys_dim=2, normalize=True, cyclic=False,
 
     rmps = MatrixProductState(arrays, **mps_opts)
 
-    if normalize:
+    if normalize == 'left':
+        rmps.left_canonize(normalize=True)
+    elif normalize == 'right':
+        rmps.left_canonize(normalize=True)
+    elif normalize:
         rmps /= (rmps.H @ rmps)**0.5
 
     return rmps
