@@ -1253,6 +1253,13 @@ class Tensor(object):
         """
         TensorNetwork((self,)).graph(*args, **kwargs)
 
+    def __getstate__(self):
+        # This allows pickling, since the copy has no weakrefs.
+        return self.copy().__dict__
+
+    def __setstate(self, state):
+        self.__dict__ = state.copy()
+
     def __repr__(self):
         return "Tensor(shape={}, inds={}, tags={})".format(
             self.data.shape,
@@ -3080,6 +3087,20 @@ class TensorNetwork(object):
                        loc='center left', bbox_to_anchor=(1, 0.5))
 
         plt.show()
+
+    def __getstate__(self):
+        # This allows pickling, by removing all tensor owner weakrefs
+        d = self.__dict__.copy()
+        d['tensor_map'] = {
+            k: t.copy() for k, t in d['tensor_map'].items()
+        }
+        return d
+
+    def __setstate__(self, state):
+        # This allows picklings, by restoring the returned TN as owner
+        self.__dict__ = state.copy()
+        for t in self.__dict__['tensor_map'].values():
+            t.add_owner(self, tid=rand_uuid(base="_T"))
 
     def __str__(self):
         return "{}([{}{}{}]{}{})".format(

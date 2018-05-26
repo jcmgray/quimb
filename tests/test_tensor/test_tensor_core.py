@@ -807,6 +807,24 @@ class TestTensorNetwork:
                **{('BRA', 'I{}'.format(i)): (i, 1) for i in range(n)}}
         (q | p).graph(colors=['KET', 'BRA'], fix=fix)
 
+    def test_pickle(self):
+        import tempfile
+        import os
+
+        pytest.importorskip("joblib")
+
+        tn = MPS_rand_state(10, 7, tags='KET')
+
+        with tempfile.TemporaryDirectory() as tdir:
+            fname = os.path.join(tdir, "tn.dmp")
+            qu.save_to_disk(tn, fname)
+            tn2 = qu.load_from_disk(fname)
+
+        assert tn.H @ tn2 == pytest.approx(1.0)
+
+        assert all(hash(tn) not in t.owners for t in tn2)
+        assert all(hash(tn2) in t.owners for t in tn2)
+
 
 class TestTensorNetworkAsLinearOperator:
 
