@@ -4,6 +4,7 @@ which has an efficient representation of its linear action on a vector.
 import functools
 from math import sqrt, log2, exp, inf, nan
 import random
+import warnings
 
 import numpy as np
 import scipy.linalg as scla
@@ -369,8 +370,12 @@ def calc_est_fit(estimates, conv_n):
         ks = np.arange(len(estimates))
 
         # weight later estimates with less error as well
-        popt, pcov = curve_fit(exp_approach, ks, estimates,
-                               p0=p0, sigma=1 / (1 + ks))
+        sigma = 1 / (1 + ks)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            popt, pcov = curve_fit(exp_approach, ks, estimates,
+                                   p0=p0, sigma=sigma)
 
         est = popt[-1]
         err = abs(pcov[-1, -1])**0.5
