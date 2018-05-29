@@ -1099,6 +1099,54 @@ class MatrixProductState(TensorNetwork1DVector,
 
         return norm
 
+    def gate2split(self, G, where, inplace=True, **compress_opts):
+        r"""Apply a two-site gate and then split resulting tensor to retrieve a
+        MPS form:
+
+            -o-o-A-B-o-o-
+             | | | | | |            -o-o-GGG-o-o-           -o-o-X~Y-o-o-
+             | | GGG | |     -->     | | | | | |     -->     | | | | | |
+             | | | | | |                 i j                     i j
+                 i j
+
+        As might be found in TEBD.
+
+        Parameters
+        ----------
+        G : array
+            The gate, with shape ``(d**2, d**2)`` for physical dimension ``d``.
+        where : (int, int)
+            Indices of the sites to apply the gate to.
+        compress_opts
+            Supplied to :func:`~quimb.tensor.tensor_split`.
+        """
+        tn = self if inplace else self.copy()
+
+        i, j = where
+
+        Ti, Tj = tn[i], tn[j]
+        ix_i, ix_j = tn.site_ind(i), tn.site_ind(j)
+
+        # Make Tensor of gate
+        d = tn.phys_dim(i)
+        TG = Tensor(np.asarray(G).reshape(d, d, d, d),
+                    inds=("_tmpi", "_tmpj", ix_i, ix_j))
+
+        # Contract gate into the two sites
+        TG = TG.contract(Ti, Tj)
+        TG.reindex({"_tmpi": ix_i, "_tmpj": ix_j}, inplace=True)
+
+        # Split the tensor
+        bnd, = Ti.bonds(Tj)
+        left_ix = tuple(ind for ind in Ti.inds if ind != bnd)
+        nTi, nTj = TG.split(left_inds=left_ix, get='tensors', **compress_opts)
+
+        # make sure the new data shape matches and reinsert
+        Ti.modify(data=nTi.transpose_like(Ti, inplace=True).data)
+        Tj.modify(data=nTj.transpose_like(Tj, inplace=True).data)
+
+        return tn
+
     def schmidt_values(self, i, current_orthog_centre=None, method='svd'):
         r"""Find the schmidt values associated with the bipartition of this
         MPS between sites on either site of ``i``. In other words, ``i`` is the

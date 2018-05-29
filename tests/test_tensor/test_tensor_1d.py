@@ -414,6 +414,28 @@ class TestMatrixProductState:
 
         assert ghz.H @ ghz == pytest.approx(1.0)
 
+    def test_gate2split(self):
+        psi = MPS_rand_state(10, 3)
+        psi2 = psi.copy()
+        G = qu.eye(2) & qu.eye(2)
+        psi.gate2split(G, (2, 3), cutoff=0)
+        assert psi.bond_size(2, 3) == 6
+        assert psi.H @ psi2 == pytest.approx(1.0)
+
+        # check a unitary application
+        G = qu.rand_uni(2**2)
+        psi.gate2split(G, (7, 8))
+        psi.compress()
+        assert psi.bond_size(2, 3) == 3
+        assert psi.bond_size(7, 8) > 3
+        assert psi.H @ psi == pytest.approx(1.0)
+        assert abs(psi2.H @ psi) < 1.0
+
+        # check matches dense application of gate
+        psid = psi2.to_dense()
+        Gd = qu.ikron(G, [2]*10, (7, 8))
+        assert psi.to_dense().H @ (Gd @ psid) == pytest.approx(1.0)
+
 
 class TestMatrixProductOperator:
     def test_matrix_product_operator(self):
