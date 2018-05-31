@@ -166,7 +166,7 @@ def bell_state(s, **kwargs):
 
 
 def singlet(**kwargs):
-    """Alias for one of bell-states
+    """Alias for the 'psi-' bell-state.
     """
     return bell_state("psi-", **kwargs)
 
@@ -204,6 +204,42 @@ def thermal_state(ham, beta, precomp_func=False):
     return gen_state if precomp_func else gen_state(beta)
 
 
+def computational_state(binary, **kwargs):
+    """Generate the qubit computational state with ``binary``.
+
+    Parameters
+    ----------
+    binary : sequence of 0s and 1s
+        The binary of the computation state.
+
+    Examples
+    --------
+    >>> computational_state('101'):
+    matrix([[0.+0.j],
+            [0.+0.j],
+            [0.+0.j],
+            [0.+0.j],
+            [0.+0.j],
+            [1.+0.j],
+            [0.+0.j],
+            [0.+0.j]])
+
+    >>> qu.computational_state([0, 1], qtype='dop')
+    matrix([[0.+0.j, 0.+0.j, 0.+0.j, 0.+0.j],
+            [0.+0.j, 1.+0.j, 0.+0.j, 0.+0.j],
+            [0.+0.j, 0.+0.j, 0.+0.j, 0.+0.j],
+            [0.+0.j, 0.+0.j, 0.+0.j, 0.+0.j]])
+
+    See Also
+    --------
+    MPS_computational_state, basic_vec
+    """
+    if not isinstance(binary, str):
+        binary = "".join(map(str, binary))
+
+    return basis_vec(int(binary, 2), 2 ** len(binary), **kwargs)
+
+
 def neel_state(n, down_first=False, **kwargs):
     """Construct Neel state for n spins, i.e. alternating up/down.
 
@@ -216,14 +252,15 @@ def neel_state(n, down_first=False, **kwargs):
     kwargs
         Supplied to ``qu`` called on state.
 
-    Returns
-    -------
-    vector
+    See Also
+    --------
+    computational_state, MPS_neel_state
     """
     binary = "01" * (n // 2) + (n % 2 == 1) * "0"
     if down_first:
         binary = "1" + binary[:-1]
-    return basis_vec(int(binary, 2), 2 ** n, **kwargs)
+
+    return computational_state(binary, **kwargs)
 
 
 def singlet_pairs(n, **kwargs):

@@ -34,7 +34,7 @@ from .gen.states import (
     basis_vec, up, zplus, down, zminus, plus, xplus, minus, xminus, yplus,
     yminus, bloch_state, bell_state, singlet, thermal_state, neel_state,
     singlet_pairs, werner_state, ghz_state, w_state, levi_civita, perm_state,
-    graph_state_1d,
+    graph_state_1d, computational_state,
 )
 from .gen.rand import (
     randn, rand_matrix, rand_herm, rand_pos, rand_rho, rand_ket, rand_uni,
@@ -93,7 +93,7 @@ __all__ = [
     'rand_matrix', 'rand_herm', 'rand_pos', 'rand_rho', 'rand_ket', 'rand_uni',
     'rand_haar_state', 'gen_rand_haar_states', 'rand_mix', 'rand_mps', 'randn',
     'rand_product_state', 'rand_matrix_product_state', 'rand_seperable',
-    'rand_iso', 'rand_mera',
+    'rand_iso', 'rand_mera', 'computational_state',
     # Calc ------------------------------------------------------------------ #
     'expm', 'sqrtm', 'expm_multiply', 'fidelity', 'purify', 'entropy',
     'entropy_subsys', 'mutual_information', 'mutinf', 'mutinf_subsys',

@@ -15,6 +15,7 @@ States
 - :func:`~quimb.gen.states.bell_state`
 - :func:`~quimb.gen.states.singlet`
 - :func:`~quimb.gen.states.thermal_state`
+- :func:`~quimb.gen.states.computational_state`
 - :func:`~quimb.gen.states.neel_state`
 - :func:`~quimb.gen.states.singlet_pairs`
 - :func:`~quimb.gen.states.werner_state`
