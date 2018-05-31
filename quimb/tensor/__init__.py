@@ -48,6 +48,9 @@ from .tensor_dmrg import (
 from .tensor_mera import (
     MERA,
 )
+from .tensor_tebd import (
+    TEBD,
+)
 
 __all__ = (
     "get_tensor_backend",
@@ -90,4 +93,5 @@ __all__ = (
     "DMRG2",
     "DMRGX",
     "MERA",
+    "TEBD",
 )

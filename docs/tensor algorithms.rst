@@ -12,6 +12,10 @@ Static:
     * 2-site :class:`~quimb.tensor.tensor_dmrg.DMRG2` (OBC and PBC)
     * 1-site :class:`~quimb.tensor.tensor_dmrg.DMRGX`
 
+Time Evolving:
+
+    * :class:`~quimb.tensor.tensor_dmrg.TEBD`
+
 Should be fairly easily to implement / planned:
 
     * 2-site DMRG-X
