@@ -281,7 +281,11 @@ class Evolution(object):
         """
         if fn is None:
             step_callback = None
-            int_step_callback = None
+            if not self._progbar:
+                int_step_callback = None
+            else:
+                def int_step_callback(t, y):
+                    pass
 
         # dict of funcs input -> dict of funcs output
         elif isinstance(fn, dict):
@@ -418,19 +422,17 @@ class Evolution(object):
             Time to update the evolution to.
         """
         if self._progbar and hasattr(self, '_stepper'):
+
             with continuous_progbar(self.t, t) as pbar:
-                # def here for the pbar closure
-                def pbar_compute(fn):
-                    @functools.wraps(fn)
-                    def wrapped_fn(t, y):  # pragma: no cover
-                        res = fn(t, y)
+                if self._int_step_callback is not None:
+                    def solout(t, y):
+                        self._int_step_callback(t, y)
                         pbar.cupdate(t)
-                        return res
+                else:
+                    def solout(t, _):
+                        pbar.cupdate(t)
 
-                    return wrapped_fn
-
-                self._stepper.set_solout(
-                    pbar_compute(self._int_step_callback))
+                self._stepper.set_solout(solout)
                 self._update_method(t)
         else:
             self._update_method(t)
