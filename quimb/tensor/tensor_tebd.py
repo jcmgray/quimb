@@ -36,6 +36,13 @@ class TEBD:
 
         self.N = p0.nsites
         self.U_ints = {}
+        self.err = 0.0
+
+    def choose_time_step(self, err, T, order):
+        """Trotter error is ~ (T / dt) * dt **(order + 1). Invert to
+        find desired time step, and scale by norm of interaction term.
+        """
+        return (1 / qu.norm(self.ham_int, 'fro')) * (err / T) ** (1 / order)
 
     def get_gate(self, dt_frac):
         """Get the unitary gate for fraction of timestep ``dt_frac``, cached.
@@ -47,7 +54,7 @@ class TEBD:
             self.U_ints[dt_frac] = U
             return U
 
-    def sweep(self, direction, dt_frac):
+    def sweep(self, direction, dt_frac, dt=None):
         """Perform a single sweep of gates and compression. This shifts the
         orthonognality centre along with the gates as they are applied and
         split.
@@ -59,6 +66,11 @@ class TEBD:
         dt_frac : float
             What fraction of dt substep to take.
         """
+
+        # if custom dt set, scale the dt fraction
+        if dt is not None:
+            dt_frac *= (dt / self.dt)
+
         U = self.get_gate(dt_frac)
         N = self.N
 
@@ -93,40 +105,46 @@ class TEBD:
             # one extra canonicalization not included in last split
             self.pt.right_canonize_site(1)
 
-    def step_order2(self, tau=1):
+    def _step_order2(self, tau=1, dt=None):
         """Perform a single, second order step.
         """
-        self.sweep('right', tau / 2)
-        self.sweep('left', tau)
-        self.sweep('right', tau / 2)
+        self.sweep('right', tau / 2, dt=dt)
+        self.sweep('left', tau, dt=dt)
+        self.sweep('right', tau / 2, dt=dt)
 
-    def step_order4(self):
+    def _step_order4(self, dt=None):
         """Perform a single, fourth order step.
         """
         tau1 = tau2 = 1 / (4 * 4**(1 / 3))
         tau3 = 1 - 2 * tau1 - 2 * tau2
-        self.step_order2(tau1)
-        self.step_order2(tau2)
-        self.step_order2(tau3)
-        self.step_order2(tau2)
-        self.step_order2(tau1)
+        self._step_order2(tau1, dt=dt)
+        self._step_order2(tau2, dt=dt)
+        self._step_order2(tau3, dt=dt)
+        self._step_order2(tau2, dt=dt)
+        self._step_order2(tau1, dt=dt)
 
-    def step(self, order=2):
+    def step(self, order=2, dt=None, pbar=None):
         """Perform a single step of time ``self.dt``.
         """
-        {2: self.step_order2, 4: self.step_order4}[order]()
-        self.t += self.dt
+        {2: self._step_order2, 4: self._step_order4}[order](dt=dt)
+
+        dt = self.dt if dt is None else dt
+        self.t += dt
+        self.err += dt ** (order + 1)
+
+        if pbar is not None:
+            pbar.cupdate(self.t)
 
     def update_to(self, t, order=2):
         """Update the state to time ``t``.
         """
-        if self.progbar:
-            with qu.utils.continuous_progbar(self.t, t) as pbar:
-                while self.t < t - 1e-13:
-                    pbar.cupdate(self.t)
-                    self.step(order=order)
-                pbar.cupdate(t)
+        pbar = qu.utils.continuous_progbar(self.t, t) if self.progbar else None
 
-        else:
-            while self.t < t - 1e-14:
-                self.step(order=order)
+        while self.t < t - 1e-13:
+            # set custom dt if within one step of final time
+            dt = t - self.t if (t - self.t < self.dt) else None
+
+            self.step(order=order, pbar=pbar, dt=dt)
+
+        if self.progbar:
+            pbar.close()
