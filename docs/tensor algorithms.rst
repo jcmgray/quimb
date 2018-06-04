@@ -14,7 +14,7 @@ Static:
 
 Time Evolving:
 
-    * :class:`~quimb.tensor.tensor_dmrg.TEBD`
+    * :class:`~quimb.tensor.tensor_tebd.TEBD`
 
 Should be fairly easily to implement / planned:
 

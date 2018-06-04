@@ -155,6 +155,9 @@ def tensor_contract(*tensors, output_inds=None, return_expression=False,
     return_expression : bool, optional
         If ``True``, return the expression that performs the contraction, for
         e.g. inspection of the order chosen.
+    backend  {'numpy', 'tensorflow', 'cupy', 'theano', ...}, optional
+        Which backend to use to perform the contraction. Must be a valid
+        ``opt_einsum`` backend with the relevant library installed.
 
     Returns
     -------
@@ -813,11 +816,13 @@ class Tensor(object):
     Parameters
     ----------
     data : numpy.ndarray
-        The n-dimensions data.
+        The n-dimensional data.
     inds : sequence of str
-        The index labels for each dimension.
+        The index labels for each dimension. Must match the number of
+        dimensions of ``data``.
     tags : sequence of str
-        Tags with which to select and filter from multiple tensors.
+        Tags with which to identify and group this tensor. These will
+        be converted into a ``set``.
     """
 
     def __init__(self, data, inds, tags=None):
@@ -1446,8 +1451,8 @@ class TensorNetwork(object):
     Parameters
     ----------
     ts : sequence of Tensor or TensorNetwork
-        The objects to combine. The new network will be a *view* onto these
-        constituent tensors unless explicitly copied.
+        The objects to combine. The new network will copy these (but not the
+        underlying data) by default. For a *view* set ``virtual=True``.
     structure : str, optional
         A string, with integer format specifier, that describes how to range
         over the network's tags in order to contract it. Also allows integer
@@ -1482,14 +1487,14 @@ class TensorNetwork(object):
     check_collisions : bool, optional
         If True, the default, then Tensors and TensorNetworks with double
         indices which match another Tensor or TensorNetworks double indices
-        will have those indices' names mangled. Should be explicily turned off
+        will have those indices' names mangled. Can be explicitly turned off
         when it is known that no collisions will take place -- i.e. when not
         adding any new tensors.
     virtual : bool, optional
         Whether the TensorNetwork should be a *view* onto the tensors it is
         given, or a copy of them. E.g. if a virtual TN is constructed, any
-        changes to a Tensor's indices will propagate to all TNs viewing that
-        Tensor.
+        changes to a Tensor's indices or tags will propagate to all TNs viewing
+        that Tensor.
 
     Attributes
     ----------
@@ -1506,12 +1511,12 @@ class TensorNetwork(object):
     """
 
     def __init__(self, ts, *,
-                 check_collisions=True,
+                 virtual=False,
                  structure=None,
                  structure_bsz=None,
                  nsites=None,
                  sites=None,
-                 virtual=False):
+                 check_collisions=True):
 
         # short-circuit for copying TensorNetworks
         if isinstance(ts, TensorNetwork):
