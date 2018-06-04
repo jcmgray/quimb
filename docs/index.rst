@@ -57,7 +57,7 @@ The following guides give a basic introduction to the various parts:
   solving systems
   distributed parallelism - mpi
   dynamics and evolution
-  tensor basics
+  tensor-basics
   tensor algorithms
   develop
 

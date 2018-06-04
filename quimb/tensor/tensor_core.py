@@ -532,7 +532,7 @@ def tensor_split(T, left_inds, method='svd', max_bond=None, absorb='both',
             - 'lq': full LR decomposition.
             - 'eigh': full eigen-decomposition, tensor must he hermitian.
             - 'eigsh': iterative eigen-decomposition, tensor must he hermitian.
-            - 'cholesky': full cholesky decomposition
+            - 'cholesky': full cholesky decomposition, tensor must be positive.
 
     cutoff : float, optional
         The threshold below which to discard singular values, only applies to
@@ -551,7 +551,8 @@ def tensor_split(T, left_inds, method='svd', max_bond=None, absorb='both',
         Whether to absorb the singular values into both, the left or right
         unitary matrix respectively.
     get : {None, 'arrays', 'tensors', 'values'}
-        If given, what to return instead of a TN describing the split.
+        If given, what to return instead of a TN describing the split. The
+        default, ``None``, returns a TensorNetwork of the two tensors.
 
     Returns
     -------
