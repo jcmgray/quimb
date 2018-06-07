@@ -58,7 +58,7 @@ The following guides give a basic introduction to the various parts:
   distributed parallelism - mpi
   dynamics and evolution
   tensor-basics
-  tensor algorithms
+  tensor-algorithms
   develop
 
 .. _examples:

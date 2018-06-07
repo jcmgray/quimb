@@ -1150,6 +1150,12 @@ class MatrixProductState(TensorNetwork1DVector,
     def magnetization(self, i, direction='Z', current_orthog_centre=None):
         """Compute the magnetization at site ``i``.
         """
+        if self.cyclic:
+            msg = ("``magnetization`` currently makes use of orthogonality for"
+                   " efficiencies sake, for cyclic systems is it still "
+                   "possible to compute as a normal expectation.")
+            raise NotImplementedError(msg)
+
         if current_orthog_centre is None:
             self.canonize(i)
         else:
@@ -1217,7 +1223,9 @@ class MatrixProductState(TensorNetwork1DVector,
         float
         """
         if self.cyclic:
-            raise NotImplementedError
+            msg = ("For cyclic systems, try explicitly computing the entropy "
+                   "of the (compressed) reduced density matrix.")
+            raise NotImplementedError(msg)
 
         S = self.schmidt_values(i, current_orthog_centre=current_orthog_centre,
                                 method=method)
