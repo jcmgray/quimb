@@ -5,6 +5,9 @@ from .tensor_core import TensorNetwork
 class TEBD:
     """Class implementing Time Evolving Block Decimation (TEBD) [1].
 
+    [1] Guifré Vidal, Efficient Classical Simulation of Slightly Entangled
+    Quantum Computations, PRL 91, 147902 (2003)
+
     Parameters
     ----------
     p0 : MatrixProductState
@@ -27,43 +30,55 @@ class TEBD:
 
     See Also
     --------
-    Evolution
-
-    [1] Guifré Vidal, Efficient Classical Simulation of Slightly Entangled
-    Quantum Computations, PRL 91, 147902 (2003)
+    quimb.Evolution
     """
 
     def __init__(self, p0, ham_int, dt=None, tol=None, t0=0.0,
                  split_opts=None, progbar=True):
-        self.pt = p0.copy()
-        self.pt.canonize(0)
-        self.N = self.pt.nsites
+        # prepare initial state
+        self._pt = p0.copy()
+        self._pt.canonize(0)
+        self.N = self._pt.nsites
 
+        # handle hamiltonian
         if isinstance(ham_int, TensorNetwork):
             raise TypeError("``ham_int`` should be a 2-site array, "
                             "not a TensorNetwork of any form.")
-        self.ham_int = ham_int
+        self._ham_int = ham_int
+        self._ham_norm = qu.norm(self._ham_int, 'fro')
+        self._U_ints = {}
+        self._err = 0.0
 
+        # set time and tolerance defaults
         self.t0 = self.t = t0
-
         if dt and tol:
             raise ValueError("Can't set default for both ``dt`` and ``tol``.")
         self.dt = self._dt = dt
         self.tol = tol
 
+        # misc other options
         self.progbar = progbar
         self.split_opts = {} if split_opts is None else dict(split_opts)
 
-        self._U_ints = {}
-        self.err = 0.0
+    @property
+    def pt(self):
+        """The MPS state of the system at the current time.
+        """
+        return self._pt.copy()
 
-    T_TOL = 1e-13
+    @property
+    def ham_int(self):
+        return self._ham_int
+
+    @property
+    def err(self):
+        return self._err
 
     def choose_time_step(self, tol, T, order):
         """Trotter error is ~ (T / dt) * dt **(order + 1). Invert to
         find desired time step, and scale by norm of interaction term.
         """
-        return (1 / qu.norm(self.ham_int, 'fro')) * (tol / T) ** (1 / order)
+        return (tol / (T * self._ham_norm)) ** (1 / order)
 
     def get_gate(self, dt_frac):
         """Get the unitary gate for fraction of timestep ``dt_frac``, cached.
@@ -71,7 +86,7 @@ class TEBD:
         try:
             return self._U_ints[dt_frac]
         except KeyError:
-            U = qu.expm(-1.0j * self._dt * dt_frac * self.ham_int)
+            U = qu.expm(-1.0j * self._dt * dt_frac * self._ham_int)
             self._U_ints[dt_frac] = U
             return U
 
@@ -138,9 +153,9 @@ class TEBD:
             #      1   2   3   4   5  ==>
             #
             for i in range(0, N - 1, 2):
-                self.pt.left_canonize(start=max(0, i - 1), stop=i)
-                self.pt.gate2split(U, where=(i, i + 1),
-                                   absorb='right', **self.split_opts)
+                self._pt.left_canonize(start=max(0, i - 1), stop=i)
+                self._pt.gate2split(U, where=(i, i + 1),
+                                    absorb='right', **self.split_opts)
 
         elif direction == 'left':
             # Apply odd gates:
@@ -152,12 +167,12 @@ class TEBD:
             #           <==  4   3   2   1
             #
             for i in reversed(range(1, N - 1, 2)):
-                self.pt.right_canonize(start=min(N - 1, i + 2), stop=i + 1)
-                self.pt.gate2split(U, where=(i, i + 1),
-                                   absorb='left', **self.split_opts)
+                self._pt.right_canonize(start=min(N - 1, i + 2), stop=i + 1)
+                self._pt.gate2split(U, where=(i, i + 1),
+                                    absorb='left', **self.split_opts)
 
             # one extra canonicalization not included in last split
-            self.pt.right_canonize_site(1)
+            self._pt.right_canonize_site(1)
 
     def _step_order2(self, tau=1, **sweep_opts):
         """Perform a single, second order step.
@@ -177,7 +192,7 @@ class TEBD:
         self._step_order2(tau2, **sweep_opts)
         self._step_order2(tau1, **sweep_opts)
 
-    def step(self, order=2, dt=None, pbar=None, **sweep_opts):
+    def step(self, order=2, dt=None, progbar=None, **sweep_opts):
         """Perform a single step of time ``self.dt``.
         """
         {2: self._step_order2,
@@ -185,12 +200,11 @@ class TEBD:
 
         dt = self._dt if dt is None else dt
         self.t += dt
-        self.err += dt ** (order + 1)
+        self._err += self._ham_norm * dt ** (order + 1)
 
-        if pbar is not None:
-            pbar.cupdate(self.t)
-            pbar.set_description(
-                "t={:.4g}, max bond={}".format(self.t, self.pt.max_bond()))
+        if progbar is not None:
+            progbar.cupdate(self.t)
+            self._set_progbar_desc(progbar)
 
     def _compute_sweep_dt_tol(self, T, dt, tol, order):
         # Work out timestep, possibly from target tol, and checking defaults
@@ -209,6 +223,8 @@ class TEBD:
 
         return self._dt
 
+    TARGET_TOL = 1e-13  # tolerance to have 'reached' target time
+
     def update_to(self, T, dt=None, tol=None, order=4, progbar=None):
         """Update the state to time ``T``.
 
@@ -225,16 +241,16 @@ class TEBD:
         progbar : bool, optional
             Manually turn the progress bar off.
         """
-        if T < self.t - self.T_TOL:
+        if T < self.t - self.TARGET_TOL:
             raise NotImplementedError
 
         self._compute_sweep_dt_tol(T, dt, tol, order)
 
         # set up progress bar and start evolution
         progbar = self.progbar if (progbar is None) else progbar
-        pbar = qu.utils.continuous_progbar(self.t, T) if progbar else None
+        progbar = qu.utils.continuous_progbar(self.t, T) if progbar else None
 
-        while self.t < T - self.T_TOL:
+        while self.t < T - self.TARGET_TOL:
             if (T - self.t < self._dt):
                 # set custom dt if within one step of final time
                 dt = T - self.t
@@ -245,10 +261,14 @@ class TEBD:
                 queue = True
 
             # perform a step!
-            self.step(order=order, pbar=pbar, dt=dt, queue=queue)
+            self.step(order=order, progbar=progbar, dt=dt, queue=queue)
 
         if progbar:
-            pbar.close()
+            progbar.close()
+
+    def _set_progbar_desc(self, progbar):
+        msg = "t={:.4g}, max-bond={}".format(self.t, self._pt.max_bond())
+        progbar.set_description(msg)
 
     def at_times(self, ts, dt=None, tol=None, order=4, progbar=None):
         """Generate the time evolved state at each time in ``ts``.
@@ -265,6 +285,12 @@ class TEBD:
             Trotter order to use.
         progbar : bool, optional
             Manually turn the progress bar off.
+
+        Yields
+        ------
+        pt : MatrixProductState
+            The state at each of the times in ``ts``. This is a copy of
+            internal state used, so inplace changes can be made to it.
         """
         # convert ts to list, to to calc range and use progress bar
         ts = sorted(ts)
@@ -282,7 +308,6 @@ class TEBD:
             self.update_to(t, dt=dt, tol=False, order=order, progbar=False)
 
             if progbar:
-                ts.set_description(
-                    "t={:.4g}, max bond={}".format(self.t, self.pt.max_bond()))
+                self._set_progbar_desc(ts)
 
             yield self.pt

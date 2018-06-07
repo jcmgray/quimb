@@ -76,6 +76,7 @@ The following examples, generated from the notebooks in ``docs/examples``, demon
   ./examples/ex_distributed_shift_invert
   ./examples/ex_tn_rand_uni_gate_graphs
   ./examples/ex_dmrg_periodic
+  ./examples/ex_TEBD_evo
 
 
 Indices and tables

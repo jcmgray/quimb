@@ -1147,6 +1147,27 @@ class MatrixProductState(TensorNetwork1DVector,
 
         return tn
 
+    def magnetization(self, i, direction='Z', current_orthog_centre=None):
+        """Compute the magnetization at site ``i``.
+        """
+        if current_orthog_centre is None:
+            self.canonize(i)
+        else:
+            self.shift_orthogonality_center(current_orthog_centre, i)
+
+        # +-k-+
+        # | O |
+        # +-b-+
+
+        Tk = self[i]
+        ind1, ind2 = self.site_ind(i), '__tmp__'
+        Tb = Tk.H.reindex({ind1: ind2}, inplace=False)
+
+        O_data = qu.spin_operator(direction, S=(self.phys_dim(i) - 1) / 2)
+        TO = Tensor(O_data, inds=(ind1, ind2))
+
+        return Tk.contract(TO, Tb)
+
     def schmidt_values(self, i, current_orthog_centre=None, method='svd'):
         r"""Find the schmidt values associated with the bipartition of this
         MPS between sites on either site of ``i``. In other words, ``i`` is the
@@ -1224,6 +1245,10 @@ class MatrixProductState(TensorNetwork1DVector,
 
         S = self.schmidt_values(i, current_orthog_centre=current_orthog_centre,
                                 method=method)
+
+        if len(S) == 1:
+            return S[0]
+
         return S[0] - S[1]
 
     def partial_trace(self, keep, upper_ind_id="b{}", rescale_sites=True):
