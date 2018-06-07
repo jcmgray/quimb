@@ -59,7 +59,7 @@ class TestTEBD:
         assert qu.expec(evo.pt, tebd.pt.to_dense()) == approx(1, rel=1e-5)
 
     @pytest.mark.parametrize('dt,tol', [
-        (0.0759283, None),
+        (0.0659283, None),
         (None, 1e-5),
     ])
     def test_at_times(self, dt, tol):
@@ -71,4 +71,4 @@ class TestTEBD:
         for pt in tebd.at_times([0.1, 0.2, 0.3, 0.4, 0.5]):
             assert pt.H @ pt == approx(1, rel=1e-5)
 
-        assert tebd.err >= 1e-5
+        assert tebd.err <= 1e-5
