@@ -48,7 +48,7 @@ setup(
             'slepc4py',
         ],
         'tensor': [
-            'opt_einsum',
+            'opt_einsum>=2',
             'matplotlib',
             'networkx',
         ]

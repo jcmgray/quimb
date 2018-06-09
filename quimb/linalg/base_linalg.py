@@ -28,7 +28,7 @@ if SLEPC4PY_FOUND:
         svds_slepc_spawn,
     )
     from .slepc_linalg import eigs_slepc, svds_slepc, mfn_multiply_slepc
-else:
+else:  # pragma: no cover
     eigs_slepc = raise_cant_find_library_function("slepc4py")
     eigs_slepc_spawn = raise_cant_find_library_function("slepc4py")
     svds_slepc = raise_cant_find_library_function("slepc4py")
@@ -143,7 +143,8 @@ def eigensystem_partial(A, k, isherm, *, B=None, which=None, return_vecs=True,
     try:
         return _EIGS_METHODS[bkd](A, **settings, **backend_opts)
 
-    except Exception as e:  # sometimes e.g. lobpcg fails, worth trying scipy
+    # sometimes e.g. lobpcg fails, worth trying scipy
+    except Exception as e:  # pragma: no cover
         if fallback_to_scipy and (bkd != 'SCIPY'):
             warnings.warn(
                 "`eigensystem_partial` with backend '{}' failed, trying again "
