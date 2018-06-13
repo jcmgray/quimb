@@ -48,7 +48,7 @@ class MERA(TensorNetwork1DVector,
     def __init__(self, n, uni=None, iso=None, phys_dim=2,
                  site_ind_id="k{}", site_tag_id="I{}", **tn_opts):
 
-        # short-circuit for copying MPSs
+        # short-circuit for copying MERA
         if isinstance(n, MERA):
             super().__init__(n)
             for ep in MERA._EXTRA_PROPS:
@@ -62,7 +62,7 @@ class MERA(TensorNetwork1DVector,
         if not is_power_of_2(n):
             raise ValueError("``n`` should be a power of 2.")
 
-        nlayers = int(log2(n))
+        nlayers = round(log2(n))
 
         if isinstance(uni, np.ndarray):
             uni = (uni,)

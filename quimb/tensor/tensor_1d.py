@@ -1137,8 +1137,7 @@ class MatrixProductState(TensorNetwork1DVector,
         TG.reindex({"_tmpi": ix_i, "_tmpj": ix_j}, inplace=True)
 
         # Split the tensor
-        bnd, = Ti.bonds(Tj)
-        left_ix = tuple(ind for ind in Ti.inds if ind != bnd)
+        _, left_ix = Ti.filter_bonds(Tj)
         nTi, nTj = TG.split(left_inds=left_ix, get='tensors', **compress_opts)
 
         # make sure the new data shape matches and reinsert

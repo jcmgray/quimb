@@ -149,6 +149,9 @@ html_theme_options = {
     'navbar_title': " ",
     'source_link_position': "",
     # 'navbar_fixed_top': "false",
+    'navbar_links': [
+        ("<b>Github</b>", "https://github.com/jcmgray/quimb", True),
+    ],
 }
 
 # Theme options are theme-specific and customize the look and feel of a theme

@@ -223,23 +223,44 @@ def rand_uuid(base=""):
 def _trim_singular_vals(s, cutoff, cutoff_mode):
     """Find the number of singular values to keep of ``s`` given ``cutoff`` and
     ``cutoff_mode``.
+
+    Parameters
+    ----------
+    s : array
+        Singular values.
+    cutoff : float
+        Cutoff.
+    cutoff_mode : {1, 2, 3}
+        How to perfrm the trim:
+
+            - 1: ['abs'], trim values below ``cutoff``
+            - 2: ['rel'], trim values below ``s[0] * cutoff``
+            - 3: ['sum2'], trim s.t. ``sum(s_trim**2) < cutoff``.
+            - 4: ['rsum2'], trim s.t. ``sum(s_trim**2) < sum(s**2) * cutoff``.
     """
     if cutoff_mode == 1:
         n_chi = np.sum(s > cutoff)
+
     elif cutoff_mode == 2:
         n_chi = np.sum(s > cutoff * s[0])
-    elif cutoff_mode == 3:
+
+    elif (cutoff_mode == 3) or (cutoff_mode == 4):
+
+        target = cutoff
+        if cutoff_mode == 4:
+            target *= np.sum(s**2)
+
         n_chi = s.size
         s2s = 0.0
         for i in range(s.size - 1, -1, -1):
             s2 = s[i]**2
             if not np.isnan(s2):
                 s2s += s2
-            if s2s > cutoff:
+            if s2s > target:
                 break
             n_chi -= 1
     else:
-        raise ValueError("``cutoff_mode`` not one of {1, 2, 3}.")
+        raise ValueError("``cutoff_mode`` not one of {1, 2, 3, 4}.")
 
     return max(n_chi, 1)
 
@@ -537,12 +558,14 @@ def tensor_split(T, left_inds, method='svd', max_bond=None, absorb='both',
     cutoff : float, optional
         The threshold below which to discard singular values, only applies to
         ``method='svd'`` and ``method='eig'``.
-    cutoff_mode : {'sum2', 'rel', 'abs'}
+    cutoff_mode : {'sum2', 'rel', 'abs', 'rsum2'}
         Method with which to apply the cutoff threshold:
 
-            - 'sum2': sum squared of values discarded must be ``< cutoff``.
             - 'rel': values less than ``cutoff * s[0]`` discarded.
             - 'abs': values less than ``cutoff`` discarded.
+            - 'sum2': sum squared of values discarded must be ``< cutoff``.
+            - 'rsum2': sum squared of values discarded must be less than
+              ``cutoff`` times the total sum squared values.
 
     max_bond: None or int
         If integer, the maxmimum number of singular values to keep, regardless
@@ -584,7 +607,8 @@ def tensor_split(T, left_inds, method='svd', max_bond=None, absorb='both',
         opts['cutoff'] = {None: -1.0}.get(cutoff, cutoff)
         opts['absorb'] = {'left': -1, 'both': 0, 'right': 1}[absorb]
         opts['max_bond'] = {None: -1}.get(max_bond, max_bond)
-        opts['cutoff_mode'] = {'abs': 1, 'rel': 2, 'sum2': 3}[cutoff_mode]
+        opts['cutoff_mode'] = {'abs': 1, 'rel': 2,
+                               'sum2': 3, 'rsum2': 4}[cutoff_mode]
 
     left, right = {'svd': _array_split_svd,
                    'eig': _array_split_eig,
@@ -1227,6 +1251,16 @@ class Tensor(object):
     def filter_bonds(self, other):
         """Sort this tensor's indices into a list of those that it shares and
         doesn't share with another tensor.
+
+        Parameters
+        ----------
+        other : Tensor
+            The other tensor.
+
+        Returns
+        -------
+        shared, unshared : (tuple[str], tuple[str])
+            The shared and unshared indices.
         """
         shared = []
         unshared = []
@@ -1694,8 +1728,14 @@ class TensorNetwork(object):
             self.ind_map = merge_with(set_union, self.ind_map, tn.ind_map)
 
     def add(self, t, virtual=False, check_collisions=True, inner_inds=None):
-        """Add Tensor or TensorNetwork to self.
+        """Add Tensor, TensorNetwork or sequence thereof to self.
         """
+        if isinstance(t, (tuple, list)):
+            for each_t in t:
+                self.add(each_t, inner_inds=inner_inds, virtual=virtual,
+                         check_collisions=check_collisions)
+            return
+
         istensor = isinstance(t, Tensor)
         istensornetwork = isinstance(t, TensorNetwork)
 
