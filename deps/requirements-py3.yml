@@ -18,7 +18,7 @@ dependencies:
   - pytest-cov
   - coveralls
   - codecov
+  - opt_einsum
   - pip:
     - codeclimate-test-reporter
     - codacy-coverage
-    - "git+https://github.com/jcmgray/opt_einsum.git"
