@@ -881,6 +881,20 @@ class TensorNetwork1DFlat:
 
         return num_can_l, num_can_r
 
+    def as_cyclic(self, inplace=False):
+        """Convert this flat, 1D, TN into cyclic form by adding a dummy bond
+        between the first and last sites.
+        """
+        tn = self if inplace else self.copy()
+
+        # nothing to do
+        if tn.cyclic:
+            return tn
+
+        tn.add_bond(0, -1)
+        tn.cyclic = True
+        return tn
+
     def show(self, max_width=None):
         l1 = ""
         l2 = ""
