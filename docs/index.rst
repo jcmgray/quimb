@@ -18,7 +18,7 @@ Welcome to quimb's documentation!
 
 `quimb <https://github.com/jcmgray/quimb>`_ is an easy but fast python library for quantum information and many-body calculations. The code is hosted on `github <https://github.com/jcmgray/quimb>`_, do please submit any issues or pull requests there. It is also thoroughly unit-tested and the tests are probably the best place to look for detailed documentation.
 
-The core ``quimb`` module:
+The **core** ``quimb`` module:
 
 * Uses ``numpy`` and ``scipy.sparse`` matrices as quantum objects
 * Accelerates many operations using `numba <https://numba.pydata.org>`_ and `numexpr <https://github.com/pydata/numexpr>`_
@@ -28,7 +28,7 @@ The core ``quimb`` module:
 * Can perform evolutions with several methods, computing quantities on the fly
 * Has an optional `slepc4py <https://bitbucket.org/slepc/slepc4py>`_ interface for easy distributed (MPI) linear algebra. This can massively increase the performance when seeking, for example, mid-spectrum eigenstates.
 
-The tensor network module ``quimb.tensor``:
+The **tensor network** submodule ``quimb.tensor``:
 
 * Uses a geometry free representation of tensor networks
 * Uses `opt_einsum <https://github.com/dgasmith/opt_einsum>`_ to find efficient contraction orders for hundreds of tensors, and perform those contractions potentially on the GPU

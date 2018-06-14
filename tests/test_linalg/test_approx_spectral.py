@@ -219,7 +219,7 @@ class TestLanczosApprox:
             (np.abs, rand_herm, 1e-1),
             (np.sqrt, rand_pos, 5e-2),
             (np.log1p, rand_pos, 2e-1),
-            (np.exp, rand_herm, 5e-2),
+            (np.exp, rand_herm, 1e-1),
         ]
     )
     def test_approx_spectral_function(self, fn_matrix_rtol, bsz, mpi):
