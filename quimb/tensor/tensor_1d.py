@@ -1,4 +1,4 @@
-"""Classes and algorithms related to 1d tensor networks.
+"""Classes and algorithms related to 1D tensor networks.
 """
 
 import functools
@@ -121,7 +121,7 @@ def expec_TN_1D(*tns, compress=None, eps=1e-15):
 def gate_TN_1D(tn, G, where, contract=False, tags=None,
                propagate_tags=True, inplace=False):
     r"""Act with the gate ``g`` on sites ``where``, maintaining the outer
-    indices of the MPS:
+    indices of the MPS::
 
         contract=False     contract=True
             ...                  ...         <- where
@@ -152,6 +152,10 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
     Returns
     -------
     MatrixProductState
+
+    See Also
+    --------
+    MatrixProductState.gate2split
 
     Examples
     --------
@@ -335,7 +339,7 @@ class TensorNetwork1DVector:
         Returns
         -------
         C : float
-            The correlation <A(i)> + <A(j)> - <A(ij)>.
+            The correlation ``<A(i)> + <A(j)> - <A(ij)>``.
 
         Examples
         --------
@@ -1115,7 +1119,7 @@ class MatrixProductState(TensorNetwork1DVector,
 
     def gate2split(self, G, where, inplace=True, **compress_opts):
         r"""Apply a two-site gate and then split resulting tensor to retrieve a
-        MPS form:
+        MPS form::
 
             -o-o-A-B-o-o-
              | | | | | |            -o-o-GGG-o-o-           -o-o-X~Y-o-o-

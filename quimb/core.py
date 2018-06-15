@@ -300,23 +300,19 @@ def trace(mat):
 
 
 @matrixify
-@njit
-def _identity_dense(d):  # pragma: no cover
-    """Returns a dense, complex identity of given dimension.
+def _identity_dense(d, dtype=complex):
+    """Returns a dense, identity of given dimension ``d`` and type ``dtype``.
     """
-    x = np.zeros((d, d), dtype=np.complex128)
-    for i in range(d):
-        x[i, i] = 1
-    return x
+    return np.eye(d, dtype=dtype)
 
 
-def _identity_sparse(d, stype="csr"):
+def _identity_sparse(d, stype="csr", dtype=complex):
     """Returns a sparse, complex identity of order d.
     """
-    return sp.eye(d, dtype=complex, format=stype)
+    return sp.eye(d, dtype=dtype, format=stype)
 
 
-def identity(d, sparse=False, stype="csr"):
+def identity(d, sparse=False, stype="csr", dtype=complex):
     """Return identity of size d in complex format, optionally sparse.
 
     Parameters
@@ -333,7 +329,10 @@ def identity(d, sparse=False, stype="csr"):
     id : matrix
         Identity with complex type.
     """
-    return _identity_sparse(d, stype=stype) if sparse else _identity_dense(d)
+    if sparse:
+        return _identity_sparse(d, stype=stype, dtype=dtype)
+
+    return _identity_dense(d, dtype=dtype)
 
 
 eye = identity

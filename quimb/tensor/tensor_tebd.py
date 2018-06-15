@@ -1,5 +1,67 @@
+import numpy as np
+
 import quimb as qu
-from .tensor_core import TensorNetwork
+
+
+class NNI:
+    """An simple interacting hamiltonian object used, for instance, in TEBD.
+
+    Parameters
+    ----------
+    H2 : array_like
+        The sum of interaction terms.
+    H1 : array_like, optional
+        The sum of single site terms.
+    n : int, optional
+        The size of the hamiltonian.
+    cyclic : bool, optional
+        Whether the hamiltonian has periodic boundary conditions or not.
+    """
+
+    def __init__(self, H2, H1=None, n=None, cyclic=False):
+        if (H1 is not None) and (n is None):
+            raise ValueError("Need to specify length ``n`` if one "
+                             "site term ``H1`` is supplied.")
+
+        self.H1 = H1
+        self.H2 = H2
+        self.n = n
+        self.cyclic = cyclic
+
+        self._terms = {}
+
+    def gen_term(self, sites=None):
+        """Generate the interaction term for sites ``sites``.
+        """
+        term = self.H2
+
+        # make sure have sites as (i, i + 1) if supplied
+        if sites is not None:
+            i, j = sorted(sites)
+            if j - i != 1:
+                raise ValueError("Only nearest neighbour interactions are "
+                                 "supported for an ``NNI``.")
+
+        # add single site term to left site if present
+        if self.H1 is not None:
+            I_2 = qu.eye(self.H1.shape[0], dtype=self.H1.dtype)
+            term = term + qu.kron(self.H1, I_2)
+
+            # for the last interaction, add to right site as well
+            if sites and (i == self.n - 2) and (not self.cyclic):
+                term = term + qu.kron(I_2, self.H1)
+
+        return term
+
+    def __call__(self, sites=None):
+        """Get the cached term for sites ``sites``, generate if necessary.
+        """
+        try:
+            return self._terms[sites]
+        except KeyError:
+            term = self.gen_term(sites)
+            self._terms[sites] = term
+            return term
 
 
 class TEBD:
@@ -12,7 +74,7 @@ class TEBD:
     ----------
     p0 : MatrixProductState
         Initial state.
-    ham_int : array_like
+    H : NNI or array_like
         Dense hamiltonian representing the two body interaction. Should have
         shape ``(d * d, d * d)``, where ``d`` is the physical dimension of
         ``p0``.
@@ -33,19 +95,21 @@ class TEBD:
     quimb.Evolution
     """
 
-    def __init__(self, p0, ham_int, dt=None, tol=None, t0=0.0,
+    def __init__(self, p0, H, dt=None, tol=None, t0=0.0,
                  split_opts=None, progbar=True):
         # prepare initial state
         self._pt = p0.copy()
         self._pt.canonize(0)
         self.N = self._pt.nsites
 
-        # handle hamiltonian
-        if isinstance(ham_int, TensorNetwork):
-            raise TypeError("``ham_int`` should be a 2-site array, "
+        # handle hamiltonian -> convert array to NNI
+        if isinstance(H, np.ndarray):
+            H = NNI(H)
+        if not isinstance(H, NNI):
+            raise TypeError("``H`` should be a ``NNI`` or 2-site array, "
                             "not a TensorNetwork of any form.")
-        self._ham_int = ham_int
-        self._ham_norm = qu.norm(self._ham_int, 'fro')
+        self.H = H
+        self._ham_norm = qu.norm(H(), 'fro')
         self._U_ints = {}
         self._err = 0.0
 
@@ -67,27 +131,28 @@ class TEBD:
         return self._pt.copy()
 
     @property
-    def ham_int(self):
-        return self._ham_int
-
-    @property
     def err(self):
         return self._err
 
     def choose_time_step(self, tol, T, order):
-        """Trotter error is ~ (T / dt) * dt **(order + 1). Invert to
+        """Trotter error is ``~ (T / dt) * dt^(order + 1)``. Invert to
         find desired time step, and scale by norm of interaction term.
         """
         return (tol / (T * self._ham_norm)) ** (1 / order)
 
-    def get_gate(self, dt_frac):
-        """Get the unitary gate for fraction of timestep ``dt_frac``, cached.
+    def get_gate(self, dt_frac, sites=None):
+        """Get the unitary gate for fraction of timestep ``dt_frac`` and sites
+        ``sites``, cached.
         """
+        # XXX: currently trans-invar only -> reuse exp-gate apart from last
+        if sites != (self.N - 2, self.N - 1):
+            sites = None
+
         try:
-            return self._U_ints[dt_frac]
+            return self._U_ints[dt_frac, sites]
         except KeyError:
-            U = qu.expm(-1.0j * self._dt * dt_frac * self._ham_int)
-            self._U_ints[dt_frac] = U
+            U = qu.expm(-1.0j * self._dt * dt_frac * self.H(sites))
+            self._U_ints[dt_frac, sites] = U
             return U
 
     def sweep(self, direction, dt_frac, dt=None, queue=False):
@@ -140,9 +205,6 @@ class TEBD:
 
         # ------------------------------------------------------------------- #
 
-        U = self.get_gate(dt_frac)
-        N = self.N
-
         if direction == 'right':
             # Apply even gates:
             #
@@ -152,10 +214,12 @@ class TEBD:
             #     | | | | | | | | | |     | |
             #      1   2   3   4   5  ==>
             #
-            for i in range(0, N - 1, 2):
+            for i in range(0, self.N - 1, 2):
+                sites = (i, i + 1)
+                U = self.get_gate(dt_frac, sites)
                 self._pt.left_canonize(start=max(0, i - 1), stop=i)
-                self._pt.gate2split(U, where=(i, i + 1),
-                                    absorb='right', **self.split_opts)
+                self._pt.gate2split(
+                    U, where=sites, absorb='right', **self.split_opts)
 
         elif direction == 'left':
             # Apply odd gates:
@@ -166,10 +230,13 @@ class TEBD:
             #     | | |     | | | | | | | | |
             #           <==  4   3   2   1
             #
-            for i in reversed(range(1, N - 1, 2)):
-                self._pt.right_canonize(start=min(N - 1, i + 2), stop=i + 1)
-                self._pt.gate2split(U, where=(i, i + 1),
-                                    absorb='left', **self.split_opts)
+            for i in reversed(range(1, self.N - 1, 2)):
+                sites = (i, i + 1)
+                U = self.get_gate(dt_frac, sites)
+                self._pt.right_canonize(
+                    start=min(self.N - 1, i + 2), stop=i + 1)
+                self._pt.gate2split(
+                    U, where=sites, absorb='left', **self.split_opts)
 
             # one extra canonicalization not included in last split
             self._pt.right_canonize_site(1)

@@ -72,3 +72,35 @@ class TestTEBD:
             assert pt.H @ pt == approx(1, rel=1e-5)
 
         assert tebd.err <= 1e-5
+
+    def test_NNI_and_single_site_terms(self):
+        n = 10
+        psi0 = qtn.MPS_neel_state(n)
+        H_nni = qtn.NNI_ham_XY(n, bz=0.9)
+        tebd = qtn.TEBD(psi0, H_nni)
+        tebd.update_to(1.0, tol=1e-5)
+        assert (psi0.H @ tebd.pt) < 1.0
+        assert tebd.pt.entropy(5) > 0.0
+
+        psi0_dns = qu.neel_state(n)
+        H_dns = qu.ham_XY(10, jxy=1.0, bz=0.9, cyclic=False)
+        evo = qu.Evolution(psi0_dns, H_dns)
+        evo.update_to(1.0)
+
+        assert qu.expec(tebd.pt.to_dense(), evo.pt) == pytest.approx(1.0)
+
+    def test_NNI_and_single_site_terms_heis(self):
+        n = 10
+        psi0 = qtn.MPS_neel_state(n)
+        H_nni = qtn.NNI_ham_heis(n, j=(0.7, 0.8, 0.9), bz=0.337)
+        tebd = qtn.TEBD(psi0, H_nni)
+        tebd.update_to(1.0, tol=1e-5)
+        assert (psi0.H @ tebd.pt) < 1.0
+        assert tebd.pt.entropy(5) > 0.0
+
+        psi0_dns = qu.neel_state(n)
+        H_dns = qu.ham_heis(10, j=(0.7, 0.8, 0.9), b=0.337, cyclic=False)
+        evo = qu.Evolution(psi0_dns, H_dns)
+        evo.update_to(1.0)
+
+        assert qu.expec(tebd.pt.to_dense(), evo.pt) == pytest.approx(1.0)

@@ -2566,7 +2566,8 @@ class TensorNetwork(object):
         TR.reindex({bnd: right_ind}, inplace=True)
 
     def insert_operator(self, A, where1, where2, tags=None, inplace=False):
-        r"""Insert an operator on the bond between the specified tensors, e.g.:
+        r"""Insert an operator on the bond between the specified tensors,
+        e.g.::
 
               |   |              |   |
             --1---2--    ->    --1-A-2--

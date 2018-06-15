@@ -43,6 +43,22 @@ def spin_operator(label, S=1 / 2, **kwargs):
     See Also
     --------
     pauli
+
+    Examples
+    --------
+    >>> spin_operator('x')
+    matrix([[0. +0.j, 0.5+0.j],
+            [0.5+0.j, 0. +0.j]])
+
+    >>> qu.spin_operator('+', S=1)
+    matrix([[0.        +0.j, 1.41421356+0.j, 0.        +0.j],
+            [0.        +0.j, 0.        +0.j, 1.41421356+0.j],
+            [0.        +0.j, 0.        +0.j, 0.        +0.j]])
+
+    >>> qu.spin_operator('Y', sparse=True)
+    <2x2 sparse matrix of type '<class 'numpy.complex128'>'
+        with 2 stored elements in Compressed Sparse Row format>
+
     """
 
     D = int(2 * S + 1)
