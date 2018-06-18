@@ -5,7 +5,7 @@ Any contributions to ``quimb`` in the form of [pull requests](https://github.com
 * [Github - Creating a Pull Request](https://help.github.com/articles/creating-a-pull-request/)
 * [Thinkful - Pull Request Tutorial](https://www.thinkful.com/learn/github-pull-request-tutorial/)
 
-Additionally, make sure any new code is properly accompanied by the working through the following checklist:
+Additionally, make sure any new code is properly accompanied by working through the following checklist:
 
   - [ ] Tests have been added for any new functionality in ``quimb/tests``
   - [ ] All other tests still pass (when running ``pytest`` in the root directory)

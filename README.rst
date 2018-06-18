@@ -44,3 +44,4 @@ The **tensor network** submodule ``quimb.tensor``:
     <img src="https://github.com/jcmgray/quimb/blob/develop/docs/_static/mps_en_overlap_cyclic_compressed.png" width="300px">
 
 The full documentation can be found at: `<http://quimb.readthedocs.io/en/latest/>`_.
+Contributions of any sort are very welcome - please see the `contributing guide <https://github.com/jcmgray/quimb/blob/develop/.github/CONTRIBUTING.md>`_.

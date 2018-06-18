@@ -62,5 +62,5 @@ setup(
         'Programming Language :: Python :: 3.5',
         'Programming Language :: Python :: 3.6',
     ],
-    keywords='quantum dmrg tensor',
+    keywords='quantum physics tensor networks tensors dmrg tebd',
 )
