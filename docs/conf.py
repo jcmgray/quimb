@@ -19,6 +19,7 @@ import shlex
 import numpy
 import scipy
 import quimb
+import quimb.tensor
 
 # If extensions (or modules to document with autodoc) are in another directory,
 # add these directories to sys.path here. If the directory is relative to the

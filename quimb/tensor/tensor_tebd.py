@@ -63,6 +63,9 @@ class NNI:
             self._terms[sites] = term
             return term
 
+    def __repr__(self):
+        return "<NNI(n={}, cyclic={})>".format(self.n, self.cyclic)
+
 
 class TEBD:
     """Class implementing Time Evolving Block Decimation (TEBD) [1].

@@ -1,13 +1,12 @@
 """Generate specific tensor network states and operators.
 """
-import functools
 import random
 
 import numpy as np
 
 from ..accel import make_immutable
 from ..linalg.base_linalg import norm_fro_dense
-from ..gen.operators import spin_operator, eye
+from ..gen.operators import spin_operator, eye, _gen_mbl_random_factors
 from ..gen.rand import randn
 from .tensor_core import Tensor
 from .tensor_1d import MatrixProductState, MatrixProductOperator
@@ -355,7 +354,8 @@ def spin_ham_mpo_tensor(one_site_terms, two_site_terms, S=1 / 2,
 
     Returns
     -------
-    numpy.ndarray{, numpy.ndarray, numpy.ndarray}
+    numpy.ndarray[, numpy.ndarray, numpy.ndarray]
+        The middle, left, right or all three MPO tensors.
     """
     # local dimension
     D = int(2 * S + 1)
@@ -407,9 +407,9 @@ def spin_ham_mpo_tensor(one_site_terms, two_site_terms, S=1 / 2,
 
 
 class SpinHam:
-    """Class for easily building translationally invariant spin hamiltonians in
-    MPO or NNI form. Currently limited to nearest neighbour interactions (and
-    single site terms).
+    """Class for easily building custom spin hamiltonians in MPO or NNI form.
+    Currently limited to nearest neighbour interactions (and single site
+    terms).
 
     Parameters
     ----------
@@ -418,16 +418,32 @@ class SpinHam:
     cyclic : bool, optional
         Whether to use periodic boundary conditions - default is False.
 
-    Example
-    -------
-    >>> builder = SpinHam(S=3 / 2)
-    >>> builder.add_term(-0.3, 'Z')
-    >>> builder.add_term(0.5, '+', '-')
-    >>> builder.add_term(0.5, '-', '+')
-    >>> builder.add_term(1.0, 'Z', 'Z')
-    >>> mpo_ham = builder.build_mpo(100)
-    >>> mpo_ham
-    <MatrixProductOperator(tensors=100, structure='I{}', nsites=100)>
+    Examples
+    --------
+    Initialize the spin hamiltonian builder:
+
+        >>> builder = SpinHam(S=3 / 2)
+
+    Add some two-site terms:
+
+        >>> builder += 0.5, '+', '-'
+        >>> builder += 0.5, '-', '+'
+        >>> builder += 1.0, 'Z', 'Z'
+
+    Add a single site term:
+
+        >>> builder -= 0.3, 'Z'
+
+    Build a MPO version of the hamiltonian for use with DMRG:
+
+        >>> mpo_ham = builder.build_mpo(100)
+        >>> mpo_ham
+        <MatrixProductOperator(tensors=100, structure='I{}', nsites=100)>
+
+    Build a NNI version of the hamiltonian for use with TEBD:
+
+        >>> builder.build_nni(100)
+        <NNI(n=100, cyclic=False)>
     """
 
     def __init__(self, S=1 / 2, cyclic=False):
@@ -456,6 +472,19 @@ class SpinHam:
         else:
             raise NotImplementedError("3-body+ terms are not supported yet.")
 
+    def sub_term(self, factor, *operators):
+        """Subtract a term - simple alias that flips sign of ``factor``.
+        """
+        self.add_term(-factor, *operators)
+
+    def __iadd__(self, term):
+        self.add_term(*term)
+        return self
+
+    def __isub__(self, term):
+        self.sub_term(*term)
+        return self
+
     def build_mpo(self, n, upper_ind_id='k{}', lower_ind_id='b{}',
                   site_tag_id='I{}', tags=None, bond_name=""):
         """Build an MPO instance of this spin hamiltonian of size ``n``. See
@@ -474,12 +503,14 @@ class SpinHam:
 
     def build_nni(self, n=None, **nni_opts):
         """Build a nearest neighbour interactor instance of this spin
-        hamiltonian of size ``n``. See also ``NNI``.
+        hamiltonian of size ``n``. See also
+        :class:`~quimb.tensor.tensor_tebd.NNI`.
 
         Parameters
         ----------
         n : int, optional
-            The number of spins.
+            The number of spins, if the hamiltonian only has two-site terms
+            this is optional.
 
         Returns
         -------
@@ -514,7 +545,17 @@ class SpinHam:
 
 
 def _ham_ising(j=1.0, bx=0.0, *, S=1 / 2, cyclic=False):
-    """Ising Hamiltonian in MPO or NNI form.
+    H = SpinHam(S=1 / 2, cyclic=cyclic)
+    H += j, 'Z', 'Z'
+
+    if bx != 0.0:
+        H -= bx, 'X'
+
+    return H
+
+
+def MPO_ham_ising(n, j=1.0, bx=0.0, *, S=1 / 2, cyclic=False, **mpo_opts):
+    """Ising Hamiltonian in MPO form.
 
     Parameters
     ----------
@@ -530,36 +571,67 @@ def _ham_ising(j=1.0, bx=0.0, *, S=1 / 2, cyclic=False):
         Generate a MPO with periodic boundary conditions or not, default is
         open boundary conditions.
     mpo_opts or nni_opts
-        Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductOperator` or
-        Supplied to :class:`~quimb.tensor.tensor_gen.NNI`.
+        Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductOperator`.
 
     Returns
     -------
-    MatrixProductOperator or NNI
+    MatrixProductOperator
     """
-    H = SpinHam(S=1 / 2, cyclic=cyclic)
-    H.add_term(j, 'Z', 'Z')
-
-    if bx != 0.0:
-        H.add_term(-bx, 'X')
-
-    return H
-
-
-@functools.wraps(_ham_ising)
-def MPO_ham_ising(n, j=1.0, bx=0.0, *, S=1 / 2, cyclic=False, **mpo_opts):
     H = _ham_ising(j=j, bx=bx, S=S, cyclic=cyclic)
     return H.build_mpo(n, **mpo_opts)
 
 
-@functools.wraps(_ham_ising)
 def NNI_ham_ising(n=None, j=1.0, bx=0.0, *, S=1 / 2, cyclic=False, **nni_opts):
+    """Ising Hamiltonian in NNI form.
+
+    Parameters
+    ----------
+    n : int
+        The number of sites.
+    j : float, optional
+        The ZZ interaction strength.
+    bx : float, optional
+        The X-magnetic field strength.
+    S : {1/2, 1, 3/2, ...}, optional
+        The underlying spin of the system, defaults to 1/2.
+    cyclic : bool, optional
+        Generate a NNI with periodic boundary conditions or not, default is
+        open boundary conditions.
+    mpo_opts or nni_opts
+        Supplied to :class:`~quimb.tensor.tensor_1d.NNI`.
+
+    Returns
+    -------
+    NNI
+    """
     H = _ham_ising(j=j, bx=bx, S=S, cyclic=cyclic)
     return H.build_nni(n=n, **nni_opts)
 
 
 def _ham_XY(j=1.0, bz=0.0, *, S=1 / 2, cyclic=False):
-    """XY-Hamiltonian in MPO or NNI form.
+    H = SpinHam(S=S, cyclic=cyclic)
+
+    try:
+        jx, jy = j
+    except (TypeError, ValueError):
+        jx = jy = j
+
+    if jx == jy:
+        # easy way to enforce realness
+        H += jx / 2, '+', '-'
+        H += jx / 2, '-', '+'
+    else:
+        H += jx, 'X', 'X'
+        H += jy, 'Y', 'Y'
+
+    if bz != 0.0:
+        H -= bz, 'Z'
+
+    return H
+
+
+def MPO_ham_XY(n, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **mpo_opts):
+    """XY-Hamiltonian in MPO form.
 
     Parameters
     ----------
@@ -575,46 +647,67 @@ def _ham_XY(j=1.0, bz=0.0, *, S=1 / 2, cyclic=False):
         Generate a MPO with periodic boundary conditions or not, default is
         open boundary conditions.
     mpo_opts or nni_opts
-        Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductOperator` or
-        Supplied to :class:`~quimb.tensor.tensor_gen.NNI`.
+        Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductOperator`.
 
     Returns
     -------
-    MatrixProductOperator or NNI
+    MatrixProductOperator
     """
-    try:
-        jx, jy = j
-    except (TypeError, ValueError):
-        jx = jy = j
-
-    H = SpinHam(S=S, cyclic=cyclic)
-    if jx == jy:
-        # easy way to enforce realness
-        H.add_term(jx / 2, '+', '-')
-        H.add_term(jx / 2, '-', '+')
-    else:
-        H.add_term(jx, 'X', 'X')
-        H.add_term(jy, 'Y', 'Y')
-
-    if bz != 0.0:
-        H.add_term(-bz, 'Z')
-
-    return H
-
-
-@functools.wraps(_ham_XY)
-def MPO_ham_XY(n, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **mpo_opts):
     H = _ham_XY(j=j, bz=bz, S=S, cyclic=cyclic)
     return H.build_mpo(n, **mpo_opts)
 
 
-@functools.wraps(_ham_XY)
 def NNI_ham_XY(n=None, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **nni_opts):
+    """XY-Hamiltonian in NNI form.
+
+    Parameters
+    ----------
+    n : int
+        The number of sites.
+    j : float or (float, float), optional
+        The XX and YY interaction strength.
+    bz : float, optional
+        The Z-magnetic field strength.
+    S : {1/2, 1, 3/2, ...}, optional
+        The underlying spin of the system, defaults to 1/2.
+    cyclic : bool, optional
+        Generate a NNI with periodic boundary conditions or not, default is
+        open boundary conditions.
+    nni_opts
+        Supplied to :class:`~quimb.tensor.tensor_1d.NNI`.
+
+    Returns
+    -------
+    NNI
+    """
     H = _ham_XY(j=j, bz=bz, S=S, cyclic=cyclic)
     return H.build_nni(n=n, **nni_opts)
 
 
 def _ham_heis(j=1.0, bz=0.0, *, S=1 / 2, cyclic=False):
+    H = SpinHam(S=S, cyclic=cyclic)
+
+    try:
+        jx, jy, jz = j
+    except (TypeError, ValueError):
+        jx = jy = jz = j
+
+    if jx == jy:
+        # easy way to enforce realness
+        H += jx / 2, '+', '-'
+        H += jx / 2, '-', '+'
+    else:
+        H += jx, 'X', 'X'
+        H += jy, 'Y', 'Y'
+    H += jz, 'Z', 'Z'
+
+    if bz != 0.0:
+        H -= bz, 'Z'
+
+    return H
+
+
+def MPO_ham_heis(n, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **mpo_opts):
     """Heisenberg Hamiltonian in matrix product operator form.
 
     Parameters
@@ -630,43 +723,40 @@ def _ham_heis(j=1.0, bz=0.0, *, S=1 / 2, cyclic=False):
     cyclic : bool, optional
         Generate a MPO with periodic boundary conditions or not, default is
         open boundary conditions.
-    mpo_opts or nni_opts
-        Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductOperator` or
-        Supplied to :class:`~quimb.tensor.tensor_gen.NNI`.
+    mpo_opts
+        Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductOperator`.
 
     Returns
     -------
-    MatrixProductOperator or NNI
+    MatrixProductOperator
     """
-    try:
-        jx, jy, jz = j
-    except (TypeError, ValueError):
-        jx = jy = jz = j
-
-    H = SpinHam(S=S, cyclic=cyclic)
-    if jx == jy:
-        # easy way to enforce realness
-        H.add_term(jx / 2, '+', '-')
-        H.add_term(jx / 2, '-', '+')
-    else:
-        H.add_term(jx, 'X', 'X')
-        H.add_term(jy, 'Y', 'Y')
-    H.add_term(jz, 'Z', 'Z')
-
-    if bz != 0.0:
-        H.add_term(-bz, 'Z')
-
-    return H
-
-
-@functools.wraps(_ham_heis)
-def MPO_ham_heis(n, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **mpo_opts):
     H = _ham_heis(j=j, bz=bz, S=S, cyclic=cyclic)
     return H.build_mpo(n, **mpo_opts)
 
 
-@functools.wraps(_ham_heis)
 def NNI_ham_heis(n=None, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **nni_opts):
+    """Heisenberg Hamiltonian in matrix product operator form.
+
+    Parameters
+    ----------
+    n : int
+        The number of sites.
+    j : float or (float, float, float), optional
+        The XX, YY and ZZ interaction strength.
+    bz : float, optional
+        The Z-magnetic field strength.
+    S : {1/2, 1, 3/2, ...}, optional
+        The underlying spin of the system, defaults to 1/2.
+    cyclic : bool, optional
+        Generate a NNI with periodic boundary conditions or not, default is
+        open boundary conditions.
+    mpo_opts or nni_opts
+        Supplied to :class:`~quimb.tensor.tensor_gen.NNI`.
+
+    Returns
+    -------
+    NNI
+    """
     H = _ham_heis(j=j, bz=bz, S=S, cyclic=cyclic)
     return H.build_nni(n=n, **nni_opts)
 
@@ -712,37 +802,7 @@ def MPO_ham_mbl(n, dh, j=1.0, run=None, S=1 / 2, *, cyclic=False,
     else:
         interaction = [(jx, 'X', 'X'), (jy, 'Y', 'Y'), (jz, 'Z', 'Z')]
 
-    # sort out a vector of noise strengths -> e.g. (0, 0, 1) for z-noise only
-    if isinstance(dh, (tuple, list)):
-        dhds = dh
-    else:
-        dh_dim = {0: '', 1: 'z', 2: 'xy', 3: 'xyz'}.get(dh_dim, dh_dim)
-        dhds = tuple((dh if d in dh_dim else 0) for d in 'xyz')
-
-    if run is not None:
-        np.random.seed(run)
-
-    # sort out the noise distribution
-    if dh_dist in {'g', 'gauss', 'gaussian', 'normal'}:
-        rs = np.random.randn(3, n)
-
-    elif dh_dist in {'s', 'flat', 'square', 'uniform', 'box'}:
-        rs = 2.0 * np.random.rand(3, n) - 1.0
-
-    elif dh_dist in {'qp', 'quasiperiodic'}:
-        if dh_dim is not 'z':
-            raise ValueError("dh_dim should be 1 or 'z' for dh_dist='qp'.")
-
-        if beta is None:
-            beta = (5**0.5 - 1) / 2
-
-        # the random phase
-        delta = 2 * np.pi * np.random.rand()
-
-        # make sure get 3 by n different strengths
-        inds = np.broadcast_to(range(n), (3, 10))
-
-        rs = np.cos(2 * np.pi * beta * inds + delta)
+    dhds, rs = _gen_mbl_random_factors(n, dh, dh_dim, dh_dist, run, beta)
 
     # generate noise, potentially in all directions, each with own strength
     def single_site_terms():

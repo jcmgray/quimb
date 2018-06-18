@@ -1,14 +1,15 @@
 """Core tensor network tools.
 """
 import os
-import functools
-import operator
-import copy
-import itertools
-import string
-import uuid
 import re
+import copy
+import uuid
+import string
 import weakref
+import operator
+import functools
+import itertools
+import collections
 
 from cytoolz import (unique, concat, frequencies,
                      partition_all, merge_with, valmap)
@@ -93,11 +94,16 @@ def set_union(sets):
     return set.union(*sets)
 
 
+class OrderedCounter(collections.Counter, collections.OrderedDict):
+    pass
+
+
 def _gen_output_inds(all_inds):
     """Generate the output, i.e. unique, indices from the set ``inds``. Raise
     if any index found more than twice.
     """
-    for ind, freq in frequencies(all_inds).items():
+    cnts = OrderedCounter(all_inds)
+    for ind, freq in cnts.items():
         if freq > 2:
             raise ValueError("The index {} appears more "
                              "than twice!".format(ind))
@@ -171,11 +177,11 @@ def tensor_contract(*tensors, output_inds=None, return_expression=False,
 
     if output_inds is None:
         # sort output indices  by input order for efficiency and consistency
-        o_ix = tuple(x for x in a_ix if x in [*_gen_output_inds(a_ix)])
+        o_ix = tuple(_gen_output_inds(a_ix))
     else:
         o_ix = output_inds
 
-    # possibly map indices into the 0-52 range needed by einsum
+    # possibly map indices into the range needed by opt- einsum
     contract_str = _maybe_map_indices_to_alphabet([*unique(a_ix)], i_ix, o_ix)
 
     # perform the contraction

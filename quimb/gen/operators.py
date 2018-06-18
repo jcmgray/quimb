@@ -429,6 +429,42 @@ def ham_j1j2(n, j1=1.0, j2=0.5, bz=0.0, cyclic=True, ownership=None):
     return ham
 
 
+def _gen_mbl_random_factors(n, dh, dh_dim, dh_dist, run=None, beta=None):
+    # sort out a vector of noise strengths -> e.g. (0, 0, 1) for z-noise only
+    if isinstance(dh, (tuple, list)):
+        dhds = dh
+    else:
+        dh_dim = {0: '', 1: 'z', 2: 'xy', 3: 'xyz'}.get(dh_dim, dh_dim)
+        dhds = tuple((dh if d in dh_dim else 0) for d in 'xyz')
+
+    if run is not None:
+        np.random.seed(run)
+
+    # sort out the noise distribution
+    if dh_dist in {'g', 'gauss', 'gaussian', 'normal'}:
+        rs = np.random.randn(3, n)
+
+    elif dh_dist in {'s', 'flat', 'square', 'uniform', 'box'}:
+        rs = 2.0 * np.random.rand(3, n) - 1.0
+
+    elif dh_dist in {'qp', 'quasiperiodic'}:
+        if dh_dim is not 'z':
+            raise ValueError("dh_dim should be 1 or 'z' for dh_dist='qp'.")
+
+        if beta is None:
+            beta = (5**0.5 - 1) / 2
+
+        # the random phase
+        delta = 2 * np.pi * np.random.rand()
+
+        # make sure get 3 by n different strengths
+        inds = np.broadcast_to(range(n), (3, 10))
+
+        rs = np.cos(2 * np.pi * beta * inds + delta)
+
+    return dhds, rs
+
+
 @hamiltonian_builder
 def ham_mbl(n, dh, j=1.0, bz=0.0, cyclic=True,
             run=None, dh_dist="s", dh_dim=1, beta=None, ownership=None):
@@ -485,38 +521,7 @@ def ham_mbl(n, dh, j=1.0, bz=0.0, cyclic=True,
     --------
     MPO_ham_mbl
     """
-    if isinstance(dh, (tuple, list)):
-        dhds = dh
-    else:
-        dh_dim = ('' if dh_dim == 0 else
-                  'z' if dh_dim == 1 else
-                  'xz' if dh_dim == 2 else
-                  'xyz' if dh_dim == 3 else dh_dim)
-        dhds = tuple((dh if d in dh_dim else 0) for d in 'xyz')
-
-    if run is not None:
-        np.random.seed(run)
-
-    if dh_dist in {'g', 'gauss', 'gaussian', 'normal'}:
-        rs = np.random.randn(3, n)
-
-    elif dh_dist in {'s', 'flat', 'square', 'uniform', 'box'}:
-        rs = 2.0 * np.random.rand(3, n) - 1.0
-
-    elif dh_dist in {'qp', 'quasiperiodic'}:
-        if dh_dim is not 'z':
-            raise ValueError("dh_dim should be 1 or 'z' for dh_dist='qp'.")
-
-        if beta is None:
-            beta = (5**0.5 - 1) / 2
-
-        # the random phase
-        delta = 2 * np.pi * np.random.rand()
-
-        # make sure get 3 by n different strengths
-        inds = np.broadcast_to(range(n), (3, n))
-
-        rs = np.cos(2 * np.pi * beta * inds + delta)
+    dhds, rs = _gen_mbl_random_factors(n, dh, dh_dim, dh_dist, run, beta)
 
     # the base hamiltonian ('csr' is most efficient format to add with)
     ham = ham_heis(n=n, j=j, b=bz, cyclic=cyclic,
