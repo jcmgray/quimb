@@ -104,3 +104,18 @@ class TestTEBD:
         evo.update_to(1.0)
 
         assert qu.expec(tebd.pt.to_dense(), evo.pt) == pytest.approx(1.0)
+
+    def test_non_trans_invar(self):
+        n = 10
+        tf = 1.0
+        p0 = qtn.MPS_rand_state(n, bond_dim=1)
+        H = qtn.NNI_ham_mbl(n, dh=1.7, cyclic=False, run=42)
+        tebd = qtn.TEBD(p0, H)
+        tebd.update_to(tf, tol=1e-3)
+
+        p0d = p0.to_dense()
+        Hd = qu.ham_mbl(n, dh=1.7, cyclic=False, run=42, sparse=True)
+        evo = qu.Evolution(p0d, Hd)
+        evo.update_to(tf)
+
+        assert qu.expec(tebd.pt.to_dense(), evo.pt) == pytest.approx(1.0)

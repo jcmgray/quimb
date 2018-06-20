@@ -33,6 +33,7 @@ from .tensor_gen import (
     NNI_ham_ising,
     NNI_ham_XY,
     NNI_ham_heis,
+    NNI_ham_mbl,
 )
 from .tensor_1d import (
     MatrixProductState,
@@ -88,6 +89,7 @@ __all__ = (
     "NNI_ham_ising",
     "NNI_ham_XY",
     "NNI_ham_heis",
+    "NNI_ham_mbl",
     "MatrixProductState",
     "MatrixProductOperator",
     "align_TN_1D",

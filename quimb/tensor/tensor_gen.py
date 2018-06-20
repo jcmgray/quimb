@@ -376,8 +376,8 @@ def spin_ham_mpo_tensor(one_site_terms, two_site_terms, S=1 / 2,
             s1 = spin_operator(s1, S=S)
         if isinstance(s2, str):
             s2 = spin_operator(s2, S=S)
-        H[1 + i, 0, :, :] = s1
-        H[-1, 1 + i, :, :] = factor * s2
+        H[1 + i, 0, :, :] = factor * s1
+        H[-1, 1 + i, :, :] = s2
 
     H[0, 0, :, :] = eye(D)
     H[B - 1, B - 1, :, :] = eye(D)
@@ -406,10 +406,34 @@ def spin_ham_mpo_tensor(one_site_terms, two_site_terms, S=1 / 2,
         return HL, H, HR
 
 
+class _TermAdder:
+    """Simple class to allow ``SpinHam`` syntax like
+    ``builder[i, j] += (1/2, 'Z', 'X')``. This object is temporarily created
+    by the getitem call, accumulates the new term, then has its the new
+    combined list of terms extracted in the setitem call.
+    """
+
+    def __init__(self, terms, nsite):
+        self.terms = terms
+        self.nsite = nsite
+
+    def __iadd__(self, new):
+        if len(new) != self.nsite + 1:
+            raise ValueError(
+                "New terms should be of the form")
+
+        if self.terms is None:
+            self.terms = [new]
+        else:
+            self.terms += [new]
+        return self
+
+
 class SpinHam:
     """Class for easily building custom spin hamiltonians in MPO or NNI form.
     Currently limited to nearest neighbour interactions (and single site
-    terms).
+    terms). It is possible to set 'default' translationally invariant terms,
+    but also terms acting on specific sites only (which take precedence).
 
     Parameters
     ----------
@@ -444,6 +468,19 @@ class SpinHam:
 
         >>> builder.build_nni(100)
         <NNI(n=100, cyclic=False)>
+
+    You can also set terms for specific sites (this overides any of the
+    'default', translationally invariant terms set as above):
+
+        >>> builder[10, 11] += 0.75, '+', '-'
+        >>> builder[10, 11] += 0.75, '-', '+'
+        >>> builder[10, 11] += 1.5, 'Z', 'Z'
+
+    Or specific one-site terms (which again overides any default
+    single site terms set above):
+
+        >>> builder[10] += 3.7, 'Z'
+        >>> builder[11] += 0.0, 'I' # '0' term turns off field
     """
 
     def __init__(self, S=1 / 2, cyclic=False):
@@ -451,6 +488,10 @@ class SpinHam:
         self.one_site_terms = []
         self.two_site_terms = []
         self.cyclic = cyclic
+
+        # Holders for any non-translationally invariant terms
+        self.var_one_site_terms = {}
+        self.var_two_site_terms = {}
 
     def add_term(self, factor, *operators):
         """Add another term to the expression to be built.
@@ -485,21 +526,108 @@ class SpinHam:
         self.sub_term(*term)
         return self
 
+    def __getitem__(self, sites):
+        """Part of the machinery that allows terms to be added to specific
+        sites like::
+
+            >>> builder[i] += 1/2, 'X'
+            >>> builder[45, 46] += 1/2, 'Z', 'Z'
+
+        """
+        if isinstance(sites, int):
+            return _TermAdder(self.var_one_site_terms.get(sites, None), 1)
+
+        i, j = sorted(sites)
+        if j - i != 1:
+            raise ValueError("Can only add nearest neighbour terms.")
+
+        return _TermAdder(self.var_two_site_terms.get(sites, None), 2)
+
+    def __setitem__(self, sites, value):
+        """Part of the machinery that allows terms to be added to specific
+        sites like::
+
+            >>> builder[i] += 1/2, 'X'
+            >>> builder[45, 46] += 1/2, 'Z', 'Z'
+
+        Could also be called directly with a list of terms like::
+
+            >>> builder[13, 14] = [(1, 'Z', 'Z'), (0.5, 'X', 'Y')]
+
+        Which would overide any terms set so far.
+        """
+        if isinstance(value, _TermAdder):
+            terms = value.terms
+        else:
+            terms = value
+
+        if isinstance(sites, int):
+            self.var_one_site_terms[sites] = terms
+        else:
+            i, j = sorted(sites)
+            if j - i != 1:
+                raise ValueError("Can only add nearest neighbour terms.")
+            self.var_two_site_terms[sites] = terms
+
     def build_mpo(self, n, upper_ind_id='k{}', lower_ind_id='b{}',
                   site_tag_id='I{}', tags=None, bond_name=""):
         """Build an MPO instance of this spin hamiltonian of size ``n``. See
         also ``MatrixProductOperator``.
         """
-        HL, H, HR = spin_ham_mpo_tensor(
-            self.one_site_terms, self.two_site_terms,
-            S=self.S, which='A', cyclic=self.cyclic)
+        # cache the default term
+        t_defs = {}
 
-        arrays = (HL, *[H] * (n - 2), HR)
+        def get_default_term(which):
+            try:
+                return t_defs[which]
+            except KeyError:
+                t_defs['L'], t_defs[None], t_defs['R'] = spin_ham_mpo_tensor(
+                    self.one_site_terms, self.two_site_terms,
+                    S=self.S, which='A', cyclic=self.cyclic)
+                return t_defs[which]
 
-        return MatrixProductOperator(arrays=arrays, bond_name=bond_name,
+        def gen_tensors():
+            for i in range(n):
+                which = {0: 'L', n - 1: 'R'}.get(i, None)
+
+                var_one = i in self.var_one_site_terms
+                var_two = (i, i + 1) in self.var_two_site_terms
+
+                if not var_one or var_two:
+                    yield get_default_term(which)
+                else:
+                    t1s = self.var_one_site_terms.get(i, self.one_site_terms)
+                    t2s = self.var_two_site_terms.get((i, i + 1),
+                                                      self.two_site_terms)
+
+                    yield spin_ham_mpo_tensor(t1s, t2s, S=self.S,
+                                              which=which, cyclic=self.cyclic)
+
+        return MatrixProductOperator(arrays=gen_tensors(), bond_name=bond_name,
                                      upper_ind_id=upper_ind_id,
                                      lower_ind_id=lower_ind_id,
                                      site_tag_id=site_tag_id, tags=tags)
+
+    def _get_spin_op(self, factor, *ss):
+        if len(ss) == 1:
+            s, = ss
+            if isinstance(s, str):
+                s = spin_operator(s, S=self.S)
+            return factor * s
+
+        if len(ss) == 2:
+            s1, s2 = ss
+            if isinstance(s1, str):
+                s1 = spin_operator(s1, S=self.S)
+            if isinstance(s2, str):
+                s2 = spin_operator(s2, S=self.S)
+            return factor * (s1 & s2)
+
+    def _sum_spin_ops(self, terms):
+        H = sum(self._get_spin_op(*term) for term in terms)
+        H = maybe_make_real(H)
+        make_immutable(H)
+        return H
 
     def build_nni(self, n=None, **nni_opts):
         """Build a nearest neighbour interactor instance of this spin
@@ -516,32 +644,27 @@ class SpinHam:
         -------
         NNI
         """
-        # combine one-body terms
+        H1s, H2s = {}, {}
+
+        # add default two site term
+        if self.two_site_terms:
+            H2s[None] = self._sum_spin_ops(self.two_site_terms)
+
+        # add specific two site terms
+        if self.var_two_site_terms:
+            for sites, terms in self.var_two_site_terms.items():
+                H2s[sites] = self._sum_spin_ops(terms)
+
+        # add default one site term
         if self.one_site_terms:
-            H1 = 0
-            for factor, s in self.one_site_terms:
-                if isinstance(s, str):
-                    s = spin_operator(s, S=self.S)
-                H1 = H1 + factor * s
+            H1s[None] = self._sum_spin_ops(self.one_site_terms)
 
-            H1 = maybe_make_real(H1)
-            make_immutable(H1)
-        else:
-            H1 = None
+        # add specific one site terms
+        if self.var_one_site_terms:
+            for site, terms in self.var_one_site_terms.items():
+                H1s[site] = self._sum_spin_ops(terms)
 
-        # combine two-body terms
-        H2 = 0
-        for factor, s1, s2 in self.two_site_terms:
-            if isinstance(s1, str):
-                s1 = spin_operator(s1, S=self.S)
-            if isinstance(s2, str):
-                s2 = spin_operator(s2, S=self.S)
-            H2 = H2 + factor * (s1 & s2)
-
-        H2 = maybe_make_real(H2)
-        make_immutable(H2)
-
-        return NNI(H2=H2, H1=H1, n=n, cyclic=self.cyclic, **nni_opts)
+        return NNI(H2=H2s, H1=H1s, n=n, cyclic=self.cyclic, **nni_opts)
 
 
 def _ham_ising(j=1.0, bx=0.0, *, S=1 / 2, cyclic=False):
@@ -761,9 +884,26 @@ def NNI_ham_heis(n=None, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **nni_opts):
     return H.build_nni(n=n, **nni_opts)
 
 
+def _ham_mbl(n, dh, j=1.0, run=None, S=1 / 2, *, cyclic=False,
+             dh_dist='s', dh_dim=1, beta=None):
+    # start with the heisenberg builder
+    H = _ham_heis(j, S=S, cyclic=cyclic)
+
+    dhds, rs = _gen_mbl_random_factors(n, dh, dh_dim, dh_dist, run, beta)
+
+    # generate noise, potentially in all directions, each with own strength
+    for i in range(n):
+        dh_r_xyzs = zip(dhds, rs[:, i], 'XYZ')
+        for dh, r, xyz in dh_r_xyzs:
+            if dh != 0:
+                H[i] += dh * r, xyz
+
+    return H
+
+
 def MPO_ham_mbl(n, dh, j=1.0, run=None, S=1 / 2, *, cyclic=False,
                 dh_dist='s', dh_dim=1, beta=None, **mpo_opts):
-    """The many-body-localized spin hamiltonian.
+    """The many-body-localized spin hamiltonian in MPO form.
 
     Parameters
     ----------
@@ -790,34 +930,40 @@ def MPO_ham_mbl(n, dh, j=1.0, run=None, S=1 / 2, *, cyclic=False,
     -------
     MatrixProductOperator
     """
-    # Parse the interaction term and strengths
-    try:
-        jx, jy, jz = j
-    except (TypeError, ValueError):
-        jx = jy = jz = j
+    H = _ham_mbl(n, dh=dh, j=j, run=run, S=S, cyclic=cyclic,
+                 dh_dist=dh_dist, dh_dim=dh_dim, beta=beta)
+    return H.build_mpo(n, **mpo_opts)
 
-    if jy == jx:
-        # can specify specifically real MPO-terms
-        interaction = [(jx / 2, '+', '+'), (jx / 2, '-', '-'), (jz, 'Z', 'Z')]
-    else:
-        interaction = [(jx, 'X', 'X'), (jy, 'Y', 'Y'), (jz, 'Z', 'Z')]
 
-    dhds, rs = _gen_mbl_random_factors(n, dh, dh_dim, dh_dist, run, beta)
+def NNI_ham_mbl(n, dh, j=1.0, run=None, S=1 / 2, *, cyclic=False,
+                dh_dist='s', dh_dim=1, beta=None, **nni_opts):
+    """The many-body-localized spin hamiltonian in NNI form.
 
-    # generate noise, potentially in all directions, each with own strength
-    def single_site_terms():
-        for i in range(n):
-            dh_r_ss = zip(dhds, rs[:, i], 'XYZ')
-            yield [(dh * r, s) for dh, r, s in dh_r_ss if dh != 0]
+    Parameters
+    ----------
+    n : int
+        Number of spins.
+    dh : float
+        Random noise strength.
+    j : float, or (float, float, float), optional
+        Interaction strength(s) e.g. 1 or (1., 1., 0.5).
+    run : int, optional
+        Random number to seed the noise with.
+    S : {1/2, 1, 3/2, ...}, optional
+        The underlying spin of the system, defaults to 1/2.
+    cyclic : bool, optional
+        Whether to use periodic boundary conditions - default is False.
+    dh_dist : {'s', 'g', 'qp'}, optional
+        Whether to use sqaure, guassian or quasiperiodic noise.
+    beta : float, optional
+        Frequency of the quasirandom noise, only if ``dh_dist='qr'``.
+    nni_opts
+        Supplied to :class:`NNI`.
 
-    dh_terms = iter(single_site_terms())
-
-    def gen_arrays():
-        yield spin_ham_mpo_tensor(next(dh_terms), interaction, S=S,
-                                  which='L' if not cyclic else None)
-        for _ in range(n - 2):
-            yield spin_ham_mpo_tensor(next(dh_terms), interaction, S=S)
-        yield spin_ham_mpo_tensor(next(dh_terms), interaction, S=S,
-                                  which='R' if not cyclic else None)
-
-    return MatrixProductOperator(gen_arrays(), **mpo_opts)
+    Returns
+    -------
+    NNI
+    """
+    H = _ham_mbl(n, dh=dh, j=j, run=run, S=S, cyclic=cyclic,
+                 dh_dist=dh_dist, dh_dim=dh_dim, beta=beta)
+    return H.build_nni(n, **nni_opts)

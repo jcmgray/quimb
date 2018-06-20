@@ -8,10 +8,16 @@ class NNI:
 
     Parameters
     ----------
-    H2 : array_like
-        The sum of interaction terms.
-    H1 : array_like, optional
-        The sum of single site terms.
+    H2 : array_like or dict[tuple[int], array_like]
+        The sum of interaction terms. If a dict is given, the keys should be
+        nearest neighbours like ``(10, 11)``, apart from any default term which
+        should have the key ``None``, and the values should be the sum of
+        interaction terms for that interaction.
+    H1 : array_like or dict[int, array_like], optional
+        The sum of single site terms. If a dict is given, the keys should be
+        integer sites, apart from any default term which should have the key
+        ``None``, and the values should be the sum of single site terms for
+        that site.
     n : int, optional
         The size of the hamiltonian.
     cyclic : bool, optional
@@ -19,37 +25,71 @@ class NNI:
     """
 
     def __init__(self, H2, H1=None, n=None, cyclic=False):
-        if (H1 is not None) and (n is None):
-            raise ValueError("Need to specify length ``n`` if one "
-                             "site term ``H1`` is supplied.")
-
-        self.H1 = H1
-        self.H2 = H2
         self.n = n
         self.cyclic = cyclic
+
+        if isinstance(H2, np.ndarray):
+            H2 = {None: H2}
+        if isinstance(H1, np.ndarray):
+            H1 = {None: H1}
+
+        self.H2s = dict(H2)
+        self.H2s.setdefault(None, None)
+
+        if H1 is not None:
+            self.H1s = dict(H1)
+        else:
+            self.H1s = {}
+        self.H1s.setdefault(None, None)
+
+        # sites where the term might be different
+        self.special_sites = {ij for ij in self.H2s if ij is not None}
+        self.special_sites |= {(i, i + 1) for i in self.H1s if i is not None}
+        last_site_diff = (not self.cyclic) and (self.H1s[None] is not None)
+
+        if n is None and (self.special_sites or last_site_diff):
+            raise ValueError("Need to specify ``n`` if this ``NNI`` is "
+                             "anything but completely translationally "
+                             "invariant (including OBC w/ field).")
+
+        if last_site_diff or (self.n - 1 in self.H1s):
+            self.special_sites.add((self.n - 2, self.n - 1))
 
         self._terms = {}
 
     def gen_term(self, sites=None):
-        """Generate the interaction term for sites ``sites``.
+        """Generate the interaction term acting on ``sites``.
         """
-        term = self.H2
-
         # make sure have sites as (i, i + 1) if supplied
         if sites is not None:
-            i, j = sorted(sites)
+            i, j = sites = tuple(sorted(sites))
             if j - i != 1:
                 raise ValueError("Only nearest neighbour interactions are "
                                  "supported for an ``NNI``.")
+        else:
+            i = j = None
+
+        term = self.H2s.get(sites, self.H2s[None])
+        if term is None:
+            raise ValueError("No term has been set for sites {}, either specif"
+                             "ically or via a default term.".format(sites))
 
         # add single site term to left site if present
-        if self.H1 is not None:
-            I_2 = qu.eye(self.H1.shape[0], dtype=self.H1.dtype)
-            term = term + qu.kron(self.H1, I_2)
+        H1 = self.H1s.get(i, self.H1s[None])
 
-            # for the last interaction, add to right site as well
-            if sites and (i == self.n - 2) and (not self.cyclic):
-                term = term + qu.kron(I_2, self.H1)
+        # but only if this site has a term set
+        if H1 is not None:
+            I_2 = qu.eye(H1.shape[0], dtype=H1.dtype)
+            term = term + qu.kron(H1, I_2)
+
+        # if not PBC, for the last interaction, add to right site as well
+        if sites and (j == self.n - 1) and (not self.cyclic):
+            H1 = self.H1s.get(j, self.H1s[None])
+
+            # but again, only if that site has a term set
+            if H1 is not None:
+                I_2 = qu.eye(H1.shape[0], dtype=H1.dtype)
+                term = term + qu.kron(I_2, H1)
 
         return term
 
@@ -62,6 +102,19 @@ class NNI:
             term = self.gen_term(sites)
             self._terms[sites] = term
             return term
+
+    def mean_norm(self, ntype='fro'):
+        """Computes the average frobenius norm of local terms. Also generates
+        all terms if not already cached.
+        """
+        if self.n is None:
+            return qu.norm(self(), ntype)
+
+        nterms = self.n - int(not self.cyclic)
+        return sum(
+            qu.norm(self((i, i + 1)), ntype)
+            for i in range(nterms)
+        ) / nterms
 
     def __repr__(self):
         return "<NNI(n={}, cyclic={})>".format(self.n, self.cyclic)
@@ -112,7 +165,7 @@ class TEBD:
             raise TypeError("``H`` should be a ``NNI`` or 2-site array, "
                             "not a TensorNetwork of any form.")
         self.H = H
-        self._ham_norm = qu.norm(H(), 'fro')
+        self._ham_norm = H.mean_norm()
         self._U_ints = {}
         self._err = 0.0
 
@@ -144,11 +197,10 @@ class TEBD:
         return (tol / (T * self._ham_norm)) ** (1 / order)
 
     def get_gate(self, dt_frac, sites=None):
-        """Get the unitary gate for fraction of timestep ``dt_frac`` and sites
-        ``sites``, cached.
+        """Get the unitary (exponentiated) gate for fraction of timestep
+        ``dt_frac`` and sites ``sites``, cached.
         """
-        # XXX: currently trans-invar only -> reuse exp-gate apart from last
-        if sites != (self.N - 2, self.N - 1):
+        if sites not in self.H.special_sites:
             sites = None
 
         try:
