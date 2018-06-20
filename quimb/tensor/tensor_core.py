@@ -14,6 +14,7 @@ import collections
 from cytoolz import (unique, concat, frequencies,
                      partition_all, merge_with, valmap)
 import numpy as np
+import scipy.linalg as scla
 import scipy.sparse.linalg as spla
 import scipy.linalg.interpolative as sli
 
@@ -312,11 +313,25 @@ def _trim_and_renorm_SVD(U, s, V, cutoff, cutoff_mode, max_bond, absorb):
 
 
 @njit  # pragma: no cover
-def _array_split_svd(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0):
+def _array_split_svd_nb(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0):
     """SVD-decomposition.
     """
     U, s, V = np.linalg.svd(x, full_matrices=False)
     return _trim_and_renorm_SVD(U, s, V, cutoff, cutoff_mode, max_bond, absorb)
+
+
+def _array_split_svd_alt(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0):
+    """SVD-decompt using alternate scipy driver.
+    """
+    U, s, V = scla.svd(x, full_matrices=False, driver='gesvd')
+    return _trim_and_renorm_SVD(U, s, V, cutoff, cutoff_mode, max_bond, absorb)
+
+
+def _array_split_svd(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0):
+    try:
+        return _array_split_svd_nb(x, cutoff, cutoff_mode, max_bond, absorb)
+    except scla.LinAlgError:
+        return _array_split_svd_alt(x, cutoff, cutoff_mode, max_bond, absorb)
 
 
 def _array_split_svdvals(x):
@@ -611,15 +626,17 @@ def tensor_split(T, left_inds, method='svd', max_bond=None, absorb='both',
         opts['cutoff_mode'] = {'abs': 1, 'rel': 2,
                                'sum2': 3, 'rsum2': 4}[cutoff_mode]
 
-    left, right = {'svd': _array_split_svd,
-                   'eig': _array_split_eig,
-                   'qr': _array_split_qr,
-                   'lq': _array_split_lq,
-                   'eigh': _array_split_eigh,
-                   'cholesky': _array_split_cholesky,
-                   'isvd': _array_split_isvd,
-                   'svds': _array_split_svds,
-                   'eigsh': _array_split_eigsh}[method](array, **opts)
+    left, right = {
+        'svd': _array_split_svd,
+        'eig': _array_split_eig,
+        'qr': _array_split_qr,
+        'lq': _array_split_lq,
+        'eigh': _array_split_eigh,
+        'cholesky': _array_split_cholesky,
+        'isvd': _array_split_isvd,
+        'svds': _array_split_svds,
+        'eigsh': _array_split_eigsh,
+    }[method](array, **opts)
 
     left = left.reshape(*left_dims, -1)
     right = right.reshape(-1, *right_dims)
