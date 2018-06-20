@@ -5,6 +5,13 @@ import quimb as qu
 
 class NNI:
     """An simple interacting hamiltonian object used, for instance, in TEBD.
+    Once instantiated, the ``NNI`` hamiltonian can be called like ``H_nni()``
+    to get the default two-site term, or ``H_nni((i, j))`` to get the term
+    specific to sites ``i`` and ``j``.
+
+    If the terms supplied are anything but a single, two-site term, then the
+    length of hamiltonian ``n`` must be specified too as the gates will no
+    longer be completely translationally invariant.
 
     Parameters
     ----------
@@ -22,6 +29,44 @@ class NNI:
         The size of the hamiltonian.
     cyclic : bool, optional
         Whether the hamiltonian has periodic boundary conditions or not.
+
+    Attributes
+    ----------
+    special_sites : set[(int, int)]
+        This keeps track of which pairs of sites don't just have the default
+        term
+
+    Examples
+    --------
+    A simple, translationally invariant, interaction-only ``NNI``::
+
+        >>> XX = pauli('X') & pauli('X')
+        >>> YY = pauli('Y') & pauli('Y')
+        >>> H_nni = NNI(XX + YY)
+
+    The same, but with a translationally invariant field as well (need to set
+    ``n`` since the last gate will be different)::
+
+        >>> Z = pauli('Z')
+        >>> H_nni = NNI(H2=XX + YY, H1=Z, n=100)
+
+    Specifying a default interaction and field, with custom values set for some
+    sites::
+
+        >>> H2 = {None: XX + YY, (49, 50): (XX + YY) / 2}
+        >>> H1 = {None: Z, 49: 2 * Z, 50: 2 * Z}
+        >>> H_nni = NNI(H2=H2, H1=H1, n=100)
+
+    Specifying the hamiltonian entirely through site specific interactions and
+    fields::
+
+        >>> H2 = {(i, i + 1): XX + YY for i in range(99)}
+        >>> H1 = {i: Z for i in range(100)}
+        >>> H_nni = NNI(H2=H2, H1=H1, n=100)
+
+    See Also
+    --------
+    SpinHam
     """
 
     def __init__(self, H2, H1=None, n=None, cyclic=False):
@@ -45,16 +90,22 @@ class NNI:
         # sites where the term might be different
         self.special_sites = {ij for ij in self.H2s if ij is not None}
         self.special_sites |= {(i, i + 1) for i in self.H1s if i is not None}
-        last_site_diff = (not self.cyclic) and (self.H1s[None] is not None)
+        obc_with_field = (not self.cyclic) and (self.H1s[None] is not None)
 
-        if n is None and (self.special_sites or last_site_diff):
-            raise ValueError("Need to specify ``n`` if this ``NNI`` is "
-                             "anything but completely translationally "
-                             "invariant (including OBC w/ field).")
+        # make sure n is supplied if it is needed
+        if n is None:
+            if (self.special_sites or obc_with_field):
+                raise ValueError("Need to specify ``n`` if this ``NNI`` is "
+                                 "anything but completely translationally "
+                                 "invariant (including OBC w/ field).")
 
-        if last_site_diff or (self.n - 1 in self.H1s):
-            self.special_sites.add((self.n - 2, self.n - 1))
+        # manually add the last interaction as a special site for OBC w/ field
+        #     since the last gate has to apply single site field to both sites
+        elif not self.cyclic:
+            if obc_with_field or (self.n - 1 in self.H1s):
+                self.special_sites.add((self.n - 2, self.n - 1))
 
+        # this is the cache for holding generated two-body terms
         self._terms = {}
 
     def gen_term(self, sites=None):

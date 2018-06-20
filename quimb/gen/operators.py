@@ -458,7 +458,7 @@ def _gen_mbl_random_factors(n, dh, dh_dim, dh_dist, run=None, beta=None):
         delta = 2 * np.pi * np.random.rand()
 
         # make sure get 3 by n different strengths
-        inds = np.broadcast_to(range(n), (3, 10))
+        inds = np.broadcast_to(range(n), (3, n))
 
         rs = np.cos(2 * np.pi * beta * inds + delta)
 

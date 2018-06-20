@@ -67,6 +67,7 @@ class TestTEBD:
         psi0 = qtn.MPS_neel_state(n)
         H_int = qu.ham_heis(2, cyclic=False)
         tebd = qtn.TEBD(psi0, H_int, dt=dt, tol=tol)
+        assert tebd.H.special_sites == set()
 
         for pt in tebd.at_times([0.1, 0.2, 0.3, 0.4, 0.5]):
             assert pt.H @ pt == approx(1, rel=1e-5)
@@ -77,6 +78,7 @@ class TestTEBD:
         n = 10
         psi0 = qtn.MPS_neel_state(n)
         H_nni = qtn.NNI_ham_XY(n, bz=0.9)
+        assert H_nni.special_sites == {(8, 9)}
         tebd = qtn.TEBD(psi0, H_nni)
         tebd.update_to(1.0, tol=1e-5)
         assert (psi0.H @ tebd.pt) < 1.0
@@ -110,6 +112,8 @@ class TestTEBD:
         tf = 1.0
         p0 = qtn.MPS_rand_state(n, bond_dim=1)
         H = qtn.NNI_ham_mbl(n, dh=1.7, cyclic=False, run=42)
+        print(H)
+        assert H.special_sites == {(i, i + 1) for i in range(n)}
         tebd = qtn.TEBD(p0, H)
         tebd.update_to(tf, tol=1e-3)
 
