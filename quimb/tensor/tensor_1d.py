@@ -5,14 +5,11 @@ import functools
 from math import log2
 
 import numpy as np
-try:
-    from opt_einsum import parser
-except ImportError:
-    pass
 
 from ..utils import three_line_multi_print, pairwise
 import quimb as qu
 from .tensor_core import (
+    get_symbol,
     Tensor,
     TensorNetwork,
     rand_uuid,
@@ -50,7 +47,7 @@ def align_TN_1D(*tns, ind_ids=None, inplace=False):
 
     if ind_ids is None:
         ind_ids = ([tns[0].site_ind_id] +
-                   ["__ind_{}".format(parser.einsum_symbols[i]) + "{}__"
+                   ["__ind_{}".format(get_symbol(i)) + "{}__"
                     for i in range(len(tns) - 2)])
     else:
         ind_ids = tuple(ind_ids)

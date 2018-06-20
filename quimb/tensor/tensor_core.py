@@ -42,6 +42,12 @@ try:
             "opt_einsum", "Or a more recent (github?) version is needed for "
             "caching tensor contractions.")
 
+    try:
+        get_symbol = opt_einsum.get_symbol
+    except AttributeError:
+        def get_symbol(i):
+            return opt_einsum.parser.einsum_symbols[i]
+
 except ImportError:
     extra_msg = "Needed for optimized tensor contractions."
     contract = contract_expression = contract_path = \
@@ -129,20 +135,9 @@ def _maybe_map_indices_to_alphabet(a_ix, i_ix, o_ix):
     contract_str : str
         The string to feed to einsum/contract.
     """
-    if any(i not in opt_einsum.parser.einsum_symbols_set for i in a_ix):
-        # need to map inds to alphabet
-        if len(a_ix) > len(opt_einsum.parser.einsum_symbols_set):
-            raise ValueError("Too many indices to auto-optimize contraction "
-                             "for at once, try setting a `structure` "
-                             "or do a manual contraction order using tags.")
-
-        amap = dict(zip(a_ix, opt_einsum.parser.einsum_symbols))
-        in_str = ("".join(amap[i] for i in ix) for ix in i_ix)
-        out_str = "".join(amap[o] for o in o_ix)
-
-    else:
-        in_str = ("".join(ix) for ix in i_ix)
-        out_str = "".join(o_ix)
+    amap = {ix: get_symbol(i) for i, ix in enumerate(a_ix)}
+    in_str = ("".join(amap[i] for i in ix) for ix in i_ix)
+    out_str = "".join(amap[o] for o in o_ix)
 
     return ",".join(in_str) + "->" + out_str
 
