@@ -1190,7 +1190,7 @@ def partial_trace(p, dims, keep):
     dims : sequence of int or nested sequences of int
         The subsystem dimensions. If treated as an array, should have the same
         number of dimensions as the system.
-    keep : int, sequence of int or sequence of Tuple[int]
+    keep : int, sequence of int or sequence of tuple[int]
         Index or indices of subsytem(s) to keep. If a sequence of integer
         tuples, each should be a coordinate such that the length matches the
         number of dimensions of the system.
@@ -1215,7 +1215,7 @@ def partial_trace(p, dims, keep):
 
     Trace out multiple subsystems of a density matrix:
 
-    >>> rho_abc = rand_rho(3 *4 * 5)
+    >>> rho_abc = rand_rho(3 * 4 * 5)
     >>> rho_ab = partial_trace(rho_abc, [3, 4, 5], keep=[0, 1])
     >>> rho_ab.shape
     (12, 12)
