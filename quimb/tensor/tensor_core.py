@@ -221,7 +221,7 @@ def rand_uuid(base=""):
     return base + "_" + r_bs_str + next(RAND_UUIDS)
 
 
-@njit  # pragma: no cover
+@njit(['i4(f4[:], f4, i4)', 'i4(f8[:], f8, i4)'])  # pragma: no cover
 def _trim_singular_vals(s, cutoff, cutoff_mode):
     """Find the number of singular values to keep of ``s`` given ``cutoff`` and
     ``cutoff_mode``.
@@ -267,7 +267,7 @@ def _trim_singular_vals(s, cutoff, cutoff_mode):
     return max(n_chi, 1)
 
 
-@njit  # pragma: no cover
+@njit(['f4(f4[:], i4)', 'f8(f8[:], i4)'])  # pragma: no cover
 def _renorm_singular_vals(s, n_chi):
     """Find the normalization constant for ``s`` such that the new sum squared
     of the ``n_chi`` largest values equals the sum squared of all the old ones.

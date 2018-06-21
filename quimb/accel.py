@@ -8,7 +8,7 @@ import operator
 
 import numpy as np
 import scipy.sparse as sp
-from numba import njit, vectorize
+import numba as nb
 from numexpr import evaluate
 from cytoolz import partition_all
 
@@ -22,6 +22,12 @@ for env_var in ['QUIMB_NUM_THREAD_WORKERS',
 else:
     import psutil
     _NUM_THREAD_WORKERS = psutil.cpu_count(logical=False)
+
+
+_NUMBA_CACHE = {
+    'True': True, 'False': False,
+}[os.environ.get('QUIMB_NUMBA_CACHE', 'True')]
+njit = functools.partial(nb.njit, cache=_NUMBA_CACHE)
 
 
 class CacheThreadPool(object):
@@ -544,7 +550,7 @@ def outer(a, b):
     return mul_dense(a, b) if d < 500 else np.asmatrix(evaluate('a * b'))
 
 
-@vectorize(nopython=True)
+@nb.vectorize(nopython=True)
 def explt(l, t):  # pragma: no cover
     """Complex exponenital as used in solution to schrodinger equation.
     """

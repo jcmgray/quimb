@@ -318,12 +318,12 @@ class MovingEnvironment:
         if not self.segmented:
             if not self.cyclic:
                 # generate dummy left and right envs
-                self.tnc |= Tensor(1.0, (), {'_LEFT'})
-                self.tnc |= Tensor(1.0, (), {'_RIGHT'})
+                self.tnc |= Tensor(1.0, (), {'_LEFT'}).astype(self.tn.dtype)
+                self.tnc |= Tensor(1.0, (), {'_RIGHT'}).astype(self.tn.dtype)
                 return
 
             # if cyclic just contract other section and tag
-            self.tnc |= Tensor(1.0, (), {'_LEFT'})
+            self.tnc |= Tensor(1.0, (), {'_LEFT'}).astype(self.tn.dtype)
             self.tnc.contract(slice(stop, start + self.n), inplace=True)
             self.tnc.add_tag('_RIGHT', where=stop + 1)
             return

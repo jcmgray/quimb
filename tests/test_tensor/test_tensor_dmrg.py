@@ -289,6 +289,16 @@ class TestDMRG2:
         assert dmrg.solve(tol=1, verbosity=2)
         assert dmrg.energy == pytest.approx(heisenberg_energy(n), 1e-3)
 
+    @pytest.mark.parametrize("dtype", [np.float32, np.float64,
+                                       np.complex64, np.complex128])
+    def test_dtypes(self, dtype):
+        H = MPO_ham_heis(8).astype(dtype)
+        dmrg = DMRG2(H)
+        dmrg.opts['local_eig_backend'] = 'scipy'
+        dmrg.solve(max_sweeps=3)
+        res_dtype, = {t.dtype for t in dmrg.state}
+        assert res_dtype == dtype
+
 
 class TestDMRGX:
 
