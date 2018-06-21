@@ -5,6 +5,7 @@ import math
 import itertools
 import functools
 
+import numba as nb
 import numpy as np
 from numpy.matlib import zeros
 import scipy.sparse as sp
@@ -659,7 +660,8 @@ def dim_map(dims, coos, cyclic=False, trim=False):
     return tuple(dims), tuple(inds)
 
 
-@njit
+# note bare numba decorator here as can't cache generator
+@nb.njit  # pragma: no cover
 def _dim_compressor(dims, inds):  # pragma: no cover
     """Helper function for ``dim_compress`` that does the heavy lifting.
 
