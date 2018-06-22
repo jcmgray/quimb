@@ -415,7 +415,7 @@ def calc_est_window(estimates, mean_ests, conv_n):
 
 def single_random_estimate(A, K, bsz, beta_tol, v0, f, pos, tau, tol_scale,
                            k_min=10, verbosity=0, *, seed=None,
-                           v0_opts=None, **lanc_opts):
+                           v0_opts=None, **lanczos_opts):
     # choose normal (any LinearOperator) or MPO lanczos tridiag construction
     if isinstance(A, MatrixProductOperator):
         lanc_fn = construct_lanczos_tridiag_MPO
@@ -423,18 +423,18 @@ def single_random_estimate(A, K, bsz, beta_tol, v0, f, pos, tau, tol_scale,
         lanc_fn = construct_lanczos_tridiag_PTPTLazyMPS
     else:
         lanc_fn = construct_lanczos_tridiag
-        lanc_opts['bsz'] = bsz
+        lanczos_opts['bsz'] = bsz
 
     estimates = []
     mean_ests = []
 
     # the number of samples to check standard deviation convergence with
-    conv_n = 4
+    conv_n = 6  # 3 pairs
 
     # iteratively build the lanczos matrix, checking for convergence
     for alpha, beta, scaling in lanc_fn(
             A, K=K, beta_tol=beta_tol, seed=seed, k_min=k_min - 2 * conv_n,
-            v0=v0() if callable(v0) else v0, v0_opts=v0_opts, **lanc_opts):
+            v0=v0() if callable(v0) else v0, v0_opts=v0_opts, **lanczos_opts):
 
         try:
             Tl, Tv = lanczos_tridiag_eig(alpha, beta, check_finite=False)
@@ -507,7 +507,7 @@ def calc_stats(samples, mean_p, mean_s, tol, tol_scale):
 def approx_spectral_function(A, f, tol=1e-2, *, bsz=1, R=1024, tol_scale=1,
                              tau=None, k_min=10, k_max=256, beta_tol=1e-6,
                              mpi=False, mean_p=0.7, mean_s=1.0, pos=False,
-                             v0=None, verbosity=0, **kwargs):
+                             v0=None, verbosity=0, **lanczos_opts):
     """Approximate a spectral function, that is, the quantity ``Tr(f(A))``.
 
     Parameters
@@ -530,20 +530,18 @@ def approx_spectral_function(A, f, tol=1e-2, *, bsz=1, R=1024, tol_scale=1,
         The number of repeats with different initial random vectors to perform.
         Increasing this should increase accuracy as ``sqrt(R)``. Cost of
         algorithm thus scales linearly with ``R``. If ``tol`` is non-zero, this
-        is the maximum number of repeats. Default: 100.
-    mpi : bool, optional
-        Whether to parallelize repeat runs over MPI processes.
+        is the maximum number of repeats.
     tau : float, optional
         The relative tolerance required for a single lanczos run to converge.
         This needs to be small enough that each estimate with a single random
         vector produces an unbiased sample of the operators spectrum.
         Defaults to ``tol``.
     k_min : int, optional
-        The minimum size of the krlov subspace to form for each sample.
+        The minimum size of the krylov subspace to form for each sample.
     k_max : int, optional
-        The size of the tri-diagonal lanczos matrix to form. Cost of algorithm
-        scales linearly with ``K``. If ``tau`` is non-zero, this is the
-        maximum size matrix to form. Default: 100.
+        The maximum size of the kyrlov space to form. Cost of algorithm scales
+        linearly with ``K``. If ``tau`` is non-zero, this is the maximum size
+        matrix to form.
     tol_scale : float, optional
         This sets the overall expected scale of each estimate, so that an
         absolute tolerance can be used for values near zero. Default: 1.
@@ -551,6 +549,8 @@ def approx_spectral_function(A, f, tol=1e-2, *, bsz=1, R=1024, tol_scale=1,
         The 'breakdown' tolerance. If the next beta ceofficient in the lanczos
         matrix is less that this, implying that the full non-null space has
         been found, terminate early. Default: 1e-6.
+    mpi : bool, optional
+        Whether to parallelize repeat runs over MPI processes.
     mean_p : float, optional
         Factor for robustly finding mean and err of repeat estimates,
         see :func:`ext_per_trim`.
@@ -565,11 +565,20 @@ def approx_spectral_function(A, f, tol=1e-2, *, bsz=1, R=1024, tol_scale=1,
         clipping below 0.
     verbosity : {0, 1, 2}, optional
         How much information to print while computing.
+    lanczos_opts
+        Supplied to
+        :func:`~quimb.linalg.approx_spectral.single_random_estimate` or
+        :func:`~quimb.linalg.approx_spectral.construct_lanczos_tridiag`.
+
 
     Returns
     -------
     scalar
         The approximate value ``Tr(f(a))``.
+
+    See Also
+    --------
+    construct_lanczos_tridiag
     """
     if (v0 is not None) and not callable(v0):
         R = 1
@@ -586,7 +595,7 @@ def approx_spectral_function(A, f, tol=1e-2, *, bsz=1, R=1024, tol_scale=1,
     # generate repeat estimates
     kwargs = {'A': A, 'K': k_max, 'bsz': bsz, 'beta_tol': beta_tol,
               'v0': v0, 'f': f, 'pos': pos, 'tau': tau, 'k_min': k_min,
-              'tol_scale': tol_scale, 'verbosity': verbosity, **kwargs}
+              'tol_scale': tol_scale, 'verbosity': verbosity, **lanczos_opts}
 
     if not mpi:
         def gen_results():

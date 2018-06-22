@@ -491,7 +491,7 @@ def logneg_subsys(psi_abc, dims, sysa, sysb,
         The size of subsystem at which to switch to the approximate lanczos
         method. Set to ``None`` to never use the approximation.
     approx_opts
-        Supplied to :func:`logneg_subsys_approx`, if used.
+        Supplied to :func:`~quimb.logneg_subsys_approx`, if used.
 
     Returns
     -------
