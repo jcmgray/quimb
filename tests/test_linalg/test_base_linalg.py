@@ -334,3 +334,13 @@ class TestLazy:
         h = 1 * hl(ownership=ownership)
         h_ex = qu.ham_heis(n=4, sparse=sparse)[slice(*ownership), :]
         assert_allclose(h.A, h_ex.A)
+
+    @pytest.mark.parametrize("backend", ['scipy', 'lobpcg'])
+    def test_project_eig(self, backend):
+        Hl = qu.Lazy(qu.ham_heis, 4, sparse=True, shape=(16, 16))
+        Pl = qu.Lazy(qu.zspin_projector, 4, shape=(16, 6))
+
+        ge, gs = qu.eigh(Hl, P=Pl, k=1, backend=backend)
+
+        assert ge == pytest.approx(-2)
+        assert qu.expec(gs, gs) == pytest.approx(1.0)
