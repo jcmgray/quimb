@@ -1021,6 +1021,93 @@ class MatrixProductState(TensorNetwork1DVector,
         super().__init__(gen_tensors(), structure=site_tag_id, sites=sites,
                          nsites=nsites, check_collisions=False, **tn_opts)
 
+    @classmethod
+    def from_TN(cls, tn, site_ind_id, site_tag_id,
+                cyclic=False, inplace=False):
+        """Convert a ``TensorNetwork`` into a ``MatrixProductState``, assuming
+        it has the appropirate underlying structure.
+
+        Parameters
+        ----------
+        tn : TensorNetwork
+            The tensor network to convert.
+        site_ind_id : str
+            The string formatter that specifies the site indices -- it should
+            match what the tensors of ``tn`` already have.
+        site_tag_id : str
+            The string formatter that specifies the site tags -- it should
+            match what the tensors of ``tn`` already have.
+        inplace : bool, optional
+            If True, perform the conversion in-place.
+        """
+        if not inplace:
+            tn = tn.copy()
+        tn.__class__ = cls
+        tn._site_ind_id = site_ind_id
+        tn._site_tag_id = site_tag_id
+        tn.cyclic = cyclic
+        return tn
+
+    @classmethod
+    def from_dense(cls, psi, dims, site_ind_id='k{}',
+                   site_tag_id='I{}', **split_opts):
+        """Create a ``MatrixProductState`` directly from a dense vector
+
+        Parameters
+        ----------
+        psi : array_like
+            The dense state to convert to MPS from.
+        dims : sequence of int
+            Physical subsystem dimensions of each site.
+        site_ind_id : str, optional
+            How to index the physical sites, see
+            :class:`~quimb.tensor.tensor_1d.MatrixProductState`.
+        site_tag_id : str, optional
+            How to tag the physical sites, see
+            :class:`~quimb.tensor.tensor_1d.MatrixProductState`.
+        split_opts
+            Supplied to :func:`~quimb.tensor.tensor_core.tensor_split` to
+            in order to partition the dense vector into tensors.
+
+        Returns
+        -------
+        MatrixProductState
+
+        Examples
+        --------
+
+            >>> dims = [2, 2, 2, 2, 2, 2]
+            >>> psi = rand_ket(prod(dims))
+            >>> mps = MatrixProductState.from_dense(psi, dims)
+            >>> mps.show()
+             2 4 8 4 2
+            o-o-o-o-o-o
+            | | | | | |
+        """
+        n = len(dims)
+        inds = [site_ind_id.format(i) for i in range(n)]
+
+        T = Tensor(psi.A.reshape(dims), inds=inds)
+
+        def gen_tensors():
+            #           split
+            #       <--  : yield
+            #            : :
+            #     OOOOOOO--O-O-O
+            #     |||||||  | | |
+            #     .......
+            #    left_inds
+            TM = T
+            for i in range(n - 1, 0, -1):
+                TM, TR = TM.split(left_inds=inds[:i], get='tensors',
+                                  rtags={site_tag_id.format(i)}, **split_opts)
+                yield TR
+            TM.tags.add(site_tag_id.format(0))
+            yield TM
+
+        tn = TensorNetwork(gen_tensors(), structure='I{}')
+        return cls.from_TN(tn, site_ind_id, site_tag_id)
+
     def imprint(self, other):
         """Cast ``other`` into a ``MatrixProductState`` like ``self``.
         """
@@ -1330,9 +1417,9 @@ class MatrixProductState(TensorNetwork1DVector,
                 rho.drop_tags(self.site_tag(i))
 
         # transpose upper and lower tags to match other MPOs
-        rho = view_TN_as_MPO(rho, lower_ind_id=upper_ind_id,
-                             upper_ind_id=self.site_ind_id, cyclic=self.cyclic,
-                             site_tag_id=self.site_tag_id, inplace=True)
+        rho = MatrixProductOperator.from_TN(
+            rho, lower_ind_id=upper_ind_id, upper_ind_id=self.site_ind_id,
+            cyclic=self.cyclic, site_tag_id=self.site_tag_id, inplace=True)
 
         if rescale_sites:
             # e.g. [3, 4, 5, 7, 9] -> [0, 1, 2, 3, 4]
@@ -1831,6 +1918,37 @@ class MatrixProductOperator(TensorNetwork1DFlat,
         super().__init__(gen_tensors(), structure=site_tag_id, sites=sites,
                          nsites=nsites, check_collisions=False, **tn_opts)
 
+    @classmethod
+    def from_TN(cls, tn, upper_ind_id, lower_ind_id, site_tag_id,
+                cyclic=False, inplace=False):
+        """Convert a TensorNetwork into a MatrixProductOperator, assuming it
+        has the appropirate underlying structure.
+
+        Parameters
+        ----------
+        tn : TensorNetwork
+            The tensor network to convert.
+        upper_ind_id : str
+            The string formatter that specifies the upper indices -- it should
+            match what the tensors of ``tn`` already have.
+        lower_ind_id : str
+            The string formatter that specifies the lower indices -- it should
+            match what the tensors of ``tn`` already have.
+        site_tag_id : str
+            The string formatter that specifies the site tags -- it should
+            match what the tensors of ``tn`` already have.
+        inplace : bool, optional
+            If True, perform the conversion in-place.
+        """
+        if not inplace:
+            tn = tn.copy()
+        tn.__class__ = cls
+        tn._upper_ind_id = upper_ind_id
+        tn._lower_ind_id = lower_ind_id
+        tn._site_tag_id = site_tag_id
+        tn.cyclic = cyclic
+        return tn
+
     def imprint(self, other):
         """Cast ``other`` into a ``MatrixProductOperator`` like ``self``.
         """
@@ -1970,10 +2088,9 @@ class MatrixProductOperator(TensorNetwork1DFlat,
             both ^= A.site_tag(i)
 
         # convert back to MPO and fuse the double bonds
-        out = view_TN_as_MPO(both, inplace=True, cyclic=self.cyclic,
-                             site_tag_id=A.site_tag_id,
-                             upper_ind_id=B.upper_ind_id,
-                             lower_ind_id=A.lower_ind_id)
+        out = MatrixProductOperator.from_TN(
+            both, upper_ind_id=B.upper_ind_id, lower_ind_id=A.lower_ind_id,
+            inplace=True, cyclic=self.cyclic, site_tag_id=A.site_tag_id)
 
         out.fuse_multibonds(inplace=True)
 
@@ -2118,34 +2235,3 @@ class MatrixProductOperator(TensorNetwork1DFlat,
             l3 = " {}{}{} ".format(" " * strl, l3, " " * strl)
 
         three_line_multi_print(l1, l2, l3, max_width=max_width)
-
-
-def view_TN_as_MPO(tn, upper_ind_id, lower_ind_id, site_tag_id,
-                   cyclic=False, inplace=False):
-    """Convert a TensorNetwork into a MatrixProductOperator, assuming it has
-    the appropirate underlying structure.
-
-    Parameters
-    ----------
-    tn : TensorNetwork
-        The tensor network to convert.
-    upper_ind_id : str
-        The string formatter that specifies the upper indices -- it should
-        match what the tensors of ``tn`` already have.
-    lower_ind_id : str
-        The string formatter that specifies the lower indices -- it should
-        match what the tensors of ``tn`` already have.
-    site_tag_id : str
-        The string formatter that specifies the site tags -- it should
-        match what the tensors of ``tn`` already have.
-    inplace : bool, optional
-        If True, perform the conversion in-place.
-    """
-    if not inplace:
-        tn = tn.copy()
-    tn.__class__ = MatrixProductOperator
-    tn._upper_ind_id = upper_ind_id
-    tn._lower_ind_id = lower_ind_id
-    tn._site_tag_id = site_tag_id
-    tn.cyclic = cyclic
-    return tn

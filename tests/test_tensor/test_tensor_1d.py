@@ -45,6 +45,15 @@ class TestMatrixProductState:
             assert p[0].dtype == dtype
             assert p[7].dtype == dtype
 
+    def test_from_dense(self):
+        psi = qu.rand_ket(2**8)
+        mps = MatrixProductState.from_dense(psi, dims=[2] * 8)
+        assert mps.tags == {'I{}'.format(i) for i in range(8)}
+        assert mps.site_inds == tuple('k{}'.format(i) for i in range(8))
+        assert mps.nsites == 8
+        mpod = mps.to_dense()
+        assert qu.expec(mpod, psi) == pytest.approx(1)
+
     def test_left_canonize_site(self):
         a = np.random.randn(7, 2) + 1.0j * np.random.randn(7, 2)
         b = np.random.randn(7, 7, 2) + 1.0j * np.random.randn(7, 7, 2)
@@ -433,7 +442,7 @@ class TestMatrixProductState:
 
         # check matches dense application of gate
         psid = psi2.to_dense()
-        Gd = qu.ikron(G, [2]*10, (7, 8))
+        Gd = qu.ikron(G, [2] * 10, (7, 8))
         assert psi.to_dense().H @ (Gd @ psid) == pytest.approx(1.0)
 
 
