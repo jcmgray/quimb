@@ -465,7 +465,7 @@ def single_random_estimate(A, K, bsz, beta_tol, v0, f, pos, tau, tol_scale,
         est, err = min((win_est, win_err), (fit_est, fit_err),
                        key=lambda est_err: est_err[1])
 
-        converged = err < tau * (abs(est) + tol_scale)
+        converged = err < tau * (abs(win_est) + tol_scale)
 
         if verbosity >= 2:
 
