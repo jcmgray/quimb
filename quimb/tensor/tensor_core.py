@@ -2913,12 +2913,33 @@ class TensorNetwork(object):
         """
         return tuple((self.ind_size(i), i) for i in self.outer_inds())
 
-    def squeeze(self, inplace=False):
-        """Drop singlet bonds and dimensions from this tensor network.
+    def squeeze(self, fuse=False, inplace=False):
+        """Drop singlet bonds and dimensions from this tensor network. If
+        ``fuse=True`` also fuse all multibonds between tensors.
         """
         tn = self if inplace else self.copy()
         for t in tn:
             t.squeeze(inplace=True)
+
+        if fuse:
+            tn.fuse_multibonds(inplace=True)
+
+        return tn
+
+    def fuse_multibonds(self, inplace=False):
+        tn = self if inplace else self.copy()
+
+        ts = tn.tensors
+        nt = len(ts)
+
+        for i in range(nt):
+            for j in range(i + 1, nt):
+                T1, T2 = ts[i], ts[j]
+                dbnds = tuple(T1.bonds(T2))
+                if dbnds:
+                    T1.fuse({dbnds[0]: dbnds}, inplace=True)
+                    T2.fuse({dbnds[0]: dbnds}, inplace=True)
+
         return tn
 
     def max_bond(self):
