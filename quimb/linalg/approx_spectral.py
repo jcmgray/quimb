@@ -11,7 +11,7 @@ import scipy.linalg as scla
 from scipy.optimize import curve_fit
 
 from ..core import ptr
-from ..accel import prod, vdot
+from ..accel import prod, vdot, vectorize, njit
 from ..utils import int2tup
 from ..linalg.mpi_launcher import get_mpi_pool
 from ..tensor.tensor_core import Tensor
@@ -157,7 +157,7 @@ def random_rect(shape, dist='rademacher', orthog=False, norm=True, seed=False):
         Explicitly normalize the frobenius norm to 1.
     """
     if seed:
-        # needs to be truly random so MPI processes don't overlap
+        # needs to be truly random so e.g. MPI processes don't overlap
         np.random.seed(random.SystemRandom().randint(0, 2**32 - 1))
 
     if dist == 'rademacher':
@@ -197,12 +197,16 @@ def construct_lanczos_tridiag(A, K, v0=None, bsz=1, k_min=10, orthog=False,
         The starting vector to iterate with, default to random.
     bsz : int, optional
         The block size (number of columns) of random vectors to iterate with.
+    k_min : int, optional
+        The minimum size of the krylov subspace for form.
+    orthog : bool, optional
+        If True, perform full re-orthogonalization for each new vector.
     beta_tol : float, optional
         The 'breakdown' tolerance. If the next beta ceofficient in the lanczos
         matrix is less that this, implying that the full non-null space has
         been found, terminate early.
-    k_min : int, optional
-        The minimum size of the krylov subspace for form.
+    seed : bool, optional
+        If True, seed the numpy random generator with a system random int.
 
     Yields
     ------
@@ -231,7 +235,7 @@ def construct_lanczos_tridiag(A, K, v0=None, bsz=1, k_min=10, orthog=False,
     if v0 is None:
         if v0_opts is None:
             v0_opts = {}
-        q = random_rect(v_shp, **v0_opts)
+        q = random_rect(v_shp, seed=seed, **v0_opts)
     else:
         q = v0.astype(np.complex128)
         q /= norm_fro(q)  # normalize (make sure has unit variance)
@@ -309,6 +313,7 @@ def calc_trace_fn_tridiag(tl, tv, f, pos=True):
     )
 
 
+# XXX: this should be jittable post numba-0.39 (-> percentile support)
 def ext_per_trim(x, p=0.6, s=1.0):
     r"""Extended percentile trimmed-mean. Makes the mean robust to asymmetric
     outliers, while using all data when it is nicely clustered. This can be
@@ -343,17 +348,27 @@ def ext_per_trim(x, p=0.6, s=1.0):
     return trimmed_x
 
 
+@njit  # pragma: no cover
+def nbsum(xs):
+    tot = 0
+    for x in xs:
+        tot += x
+    return tot
+
+
+@njit  # pragma: no cover
 def std(xs):
     """Simple standard deviation - don't invoke numpy for small lists.
     """
     N = len(xs)
-    xm = sum(xs) / N
-    var = sum((x - xm)**2 for x in xs) / N
+    xm = nbsum(xs) / N
+    var = nbsum([(x - xm)**2 for x in xs]) / N
     return var**0.5
 
 
+@vectorize  # pragma: no cover
 def exp_approach(x, a, b, c):
-    return a * np.exp(-np.array(x) / b) + c
+    return a * exp(x / b) + c
 
 
 def calc_est_fit(estimates, conv_n):
@@ -493,9 +508,9 @@ def calc_stats(samples, mean_p, mean_s, tol, tol_scale):
 
     # sometimes everything is an outlier...
     if xtrim.size == 0:  # pragma: no cover
-        estimate, sdev = np.mean(samples), np.std(samples)
+        estimate, sdev = np.mean(samples), std(samples)
     else:
-        estimate, sdev = np.mean(xtrim), np.std(xtrim)
+        estimate, sdev = np.mean(xtrim), std(xtrim)
 
     err = sdev / len(samples) ** 0.5
 
@@ -535,7 +550,7 @@ def approx_spectral_function(A, f, tol=1e-2, *, bsz=1, R=1024, tol_scale=1,
         The relative tolerance required for a single lanczos run to converge.
         This needs to be small enough that each estimate with a single random
         vector produces an unbiased sample of the operators spectrum.
-        Defaults to ``tol``.
+        Defaults to ``tol / 2``.
     k_min : int, optional
         The minimum size of the krylov subspace to form for each sample.
     k_max : int, optional
@@ -693,8 +708,9 @@ def choose_bsz_from_dims(dims, subsys):
     on some benchmarks, plus the fact that if bsz is > rank, then the lanczos
     vectors will start to take up the most memory.
     """
-    rank = prod(d for i, d in enumerate(dims) if i not in subsys)
-    return min(max(1, int(rank / 8)), 128)
+    return 1
+    # rank = prod(d for i, d in enumerate(dims) if i not in subsys)
+    # return min(max(1, int(rank / 8)), 128)
 
 
 def entropy_subsys_approx(psi_ab, dims, sysa, bsz=None, **kwargs):

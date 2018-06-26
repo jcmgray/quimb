@@ -28,6 +28,7 @@ _NUMBA_CACHE = {
     'True': True, 'False': False,
 }[os.environ.get('QUIMB_NUMBA_CACHE', 'True')]
 njit = functools.partial(nb.njit, cache=_NUMBA_CACHE)
+vectorize = functools.partial(nb.vectorize, cache=_NUMBA_CACHE)
 
 
 class CacheThreadPool(object):
@@ -550,7 +551,7 @@ def outer(a, b):
     return mul_dense(a, b) if d < 500 else np.asmatrix(evaluate('a * b'))
 
 
-@nb.vectorize(nopython=True)
+@vectorize
 def explt(l, t):  # pragma: no cover
     """Complex exponenital as used in solution to schrodinger equation.
     """

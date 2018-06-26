@@ -527,7 +527,7 @@ def _find_shape_of_nested_int_array(x):
     """
     shape = [len(x)]
     sub_x = x[0]
-    while not isinstance(sub_x, int):
+    while not np.issubdtype(type(sub_x), np.integer):
         shape.append(len(sub_x))
         sub_x = sub_x[0]
     return tuple(shape)
