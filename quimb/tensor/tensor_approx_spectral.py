@@ -365,7 +365,7 @@ class PTPTLazyMPS:
                   /   sysa   / \    sysb \  : _VEC
                   a-a-a-a-a-a   b-b-b-b-b-b :         -----------Y----------
                 : | | | | | |   | | | | | |          /   sysa   / \    sysb \
-            _BRA: A-A-A-A-A-A\ /B-B-B-B-B-B   -->    A-A-A-A-A-A   B-B-B-B-B-B
+            _BRA: A-A-A-A-A-A\ /B-B-B-B-B-B   ==>    A-A-A-A-A-A   B-B-B-B-B-B
                 : |           E           | :        | | | | | |   | | | | | |
                   A-A-A-A-A-A/ \B-B-B-B-B-B : _KET
                   | | | | | |   | | | | | | :               *New vector*

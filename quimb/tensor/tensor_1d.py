@@ -425,7 +425,7 @@ class TensorNetwork1DFlat:
 
                 i                i
                -o-o-            ->-s-
-            ... | | ...  --> ... | | ...
+            ... | | ...  ==> ... | | ...
 
         Parameters
         ----------
@@ -442,7 +442,7 @@ class TensorNetwork1DFlat:
 
                   i                i
                -o-o-            -s-<-
-            ... | | ...  --> ... | | ...
+            ... | | ...  ==> ... | | ...
 
         Parameters
         ----------
@@ -460,7 +460,7 @@ class TensorNetwork1DFlat:
 
                           i              i
             >->->->->->->-o-o-         +-o-o-
-            | | | | | | | | | ...  ->  | | | ...
+            | | | | | | | | | ...  =>  | | | ...
             >->->->->->->-o-o-         +-o-o-
 
         Parameters
@@ -1207,7 +1207,7 @@ class MatrixProductState(TensorNetwork1DVector,
 
             -o-o-A-B-o-o-
              | | | | | |            -o-o-GGG-o-o-           -o-o-X~Y-o-o-
-             | | GGG | |     -->     | | | | | |     -->     | | | | | |
+             | | GGG | |     ==>     | | | | | |     ==>     | | | | | |
              | | | | | |                 i j                     i j
                  i j
 
@@ -1458,26 +1458,31 @@ class MatrixProductState(TensorNetwork1DVector,
             o-o-o-o-A-A-A-A-A-A-A-A-o-o-B-B-B-B-B-B-o-o-o-o-o-o-o-o-o
             | | | | | | | | | | | | | | | | | | | | | | | | | | | | |
 
-                                      --> form inner product
+                                      ==> form inner product
 
+                    ...............     ...........
             o-o-o-o-A-A-A-A-A-A-A-A-o-o-B-B-B-B-B-B-o-o-o-o-o-o-o-o-o
             | | | | | | | | | | | | | | | | | | | | | | | | | | | | |
             o-o-o-o-A-A-A-A-A-A-A-A-o-o-B-B-B-B-B-B-o-o-o-o-o-o-o-o-o
 
-                                      --> lateral SVD on each section
+                                      ==> lateral SVD on each section
 
                       .....sysa......     ...sysb....
                       /\             /\   /\         /\
               ... ~~~E  A~~~~~~~~~~~A  E~E  B~~~~~~~B  E~~~ ...
                       \/             \/   \/         \/
 
-                                      --> vertical SVD and unfold on A & B
+                                      ==> vertical SVD and unfold on A & B
 
                               |                 |
                       /-------A-------\   /-----B-----\
               ... ~~~E                 E~E             E~~~ ...
                       \-------A-------/   \-----B-----/
                               |                 |
+
+        With various special cases including OBC or end spins included in
+        subsytems.
+
 
         Parameters
         ----------
@@ -1590,6 +1595,12 @@ class MatrixProductState(TensorNetwork1DVector,
         compressed = []
         for section, (ul, _, ll, _) in zip(sections, ul_ur_ll_lrs):
 
+            #           section
+            #   ul -o-o-o-o-o-o-o-o-o-       ul -\       /-
+            #       | | | | | | | | |   ==>       0~~~~~0
+            #   ll -o-o-o-o-o-o-o-o-o-       ll -/   :   \-
+            #                                      hmax_bond
+
             if leave_short:
                 # if section is short doesn't make sense to lateral compress
                 #     work out roughly when this occurs by comparing bond size
@@ -1600,11 +1611,6 @@ class MatrixProductState(TensorNetwork1DVector,
                     continue
 
             section_tags = map(self.site_tag, section)
-
-            #   ul -o-o-o-o-o-o-o-o-o-       ul -\      /-
-            #       | | | | | | | | |   -->       0~~~~0
-            #   ll -o-o-o-o-o-o-o-o-o-       ll -/      \-
-
             kb.replace_with_svd(section_tags, (ul, ll), heps, inplace=True,
                                 ltags='_LEFT', rtags='_RIGHT', method=hmethod,
                                 max_bond=hmax_bond, **compress_opts)
@@ -1622,11 +1628,12 @@ class MatrixProductState(TensorNetwork1DVector,
             section_tags = [self.site_tag(i) for i in section]
 
             if section in compressed:
-                #                    ----U----             |
+
+                #                    ----U----             |  <- vmax_bond
                 #  -\      /-            /             ----U----
-                #    L~~~~R     -->      \       -->
+                #    L~~~~R     ==>      \       ==>
                 #  -/      \-            /             ----D----
-                #                    ----D----             |
+                #                    ----D----             |  <- vmax_bond
 
                 # try and choose a sensible method
                 if vmethod is None:
@@ -1654,7 +1661,7 @@ class MatrixProductState(TensorNetwork1DVector,
                 # just unfold and fuse physical indices:
                 #                              |
                 #   -A-A-A-A-A-A-A-        -AAAAAAA-
-                #    | | | | | | |   --->
+                #    | | | | | | |   ===>
                 #   -A-A-A-A-A-A-A-        -AAAAAAA-
                 #                              |
                 kb, sec = kb.partition(section_tags, inplace=True)
@@ -1674,7 +1681,7 @@ class MatrixProductState(TensorNetwork1DVector,
             # check if either system is at end, and thus reduces to identities
             #
             #  A-A-A-A-A-A-A-m-m-m-            \-m-m-m-
-            #  | | | | | | | | | |  ...  -->     | | |  ...
+            #  | | | | | | | | | |  ...  ==>     | | |  ...
             #  A-A-A-A-A-A-A-m-m-m-            /-m-m-m-
             #
             if 0 in sysa:
@@ -1700,7 +1707,7 @@ class MatrixProductState(TensorNetwork1DVector,
                 # or else replace the left or right envs with identites since
                 #
                 #  >->->->-A-A-A-A-           +-A-A-A-A-
-                #  | | | | | | | |  ...  -->  | | | | |
+                #  | | | | | | | |  ...  ==>  | | | | |
                 #  >->->->-A-A-A-A-           +-A-A-A-A-
                 #
                 kb.replace_with_identity('_ENVL', inplace=True)

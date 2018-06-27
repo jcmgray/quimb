@@ -2349,7 +2349,7 @@ class TensorNetwork(object):
 
 
             ---1  X--X--2---         ---1---2---
-               |  |  |  |      -->          |
+               |  |  |  |      ==>          |
                X--X--X  |                   |
 
         Parameters
@@ -2397,7 +2397,7 @@ class TensorNetwork(object):
 
                                     :__       ___:
             ---X  X--X  X---        :  \     /   :
-               |  |  |  |      -->  :   U~s~VH---:
+               |  |  |  |      ==>  :   U~s~VH---:
             ---X--X--X--X---        :__/     \   :
                   |     +---        :         \__:
                   X              left_inds       :
