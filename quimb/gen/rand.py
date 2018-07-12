@@ -22,7 +22,7 @@ def random_seed_fn(fn):
     return wrapped_fn
 
 
-def randn(shape, dtype=float):
+def randn(shape, loc=0.0, scale=1.0, dtype=float):
     """Generate normally distributed random array of certain shape and type.
     Like :func:`numpy.random.randn` but can specify ``dtype``.
 
@@ -39,23 +39,46 @@ def randn(shape, dtype=float):
     """
     # real datatypes
     if np.issubdtype(dtype, np.floating):
-        x = np.random.randn(*shape)
+        x = np.random.normal(loc=loc, scale=scale, size=shape)
 
-        # convert type if not the default
-        if dtype not in (float, np.float_):
-            x = x.astype(dtype)
+        need2convert = dtype not in (float, np.float_)
 
     # complex datatypes
     elif np.issubdtype(dtype, np.complexfloating):
-        x = np.random.randn(*shape) + 1.0j * np.random.randn(*shape)
+        x = (np.random.normal(loc=loc, scale=scale, size=shape) +
+             1.0j * np.random.normal(loc=loc, scale=scale, size=shape))
 
-        # convert type if not the default
-        if dtype not in (complex, np.complex_):
-            x = x.astype(dtype)
+        need2convert = dtype not in (complex, np.complex_)
 
     else:
         raise TypeError("dtype {} not understood - should be float or complex."
                         "".format(dtype))
+
+    if need2convert:
+        x = x.astype(dtype)
+
+    return x
+
+
+@random_seed_fn
+def rand_rademacher(shape, scale=1, dtype=float):
+    """
+    """
+    if np.issubdtype(dtype, np.floating):
+        entries = np.array([1.0, -1.0]) * scale
+        need2convert = dtype not in (float, np.float_)
+
+    elif np.issubdtype(dtype, np.complexfloating):
+        entries = np.array([1.0, -1.0, 1.0j, -1.0j]) * scale
+        need2convert = dtype not in (complex, np.complex_)
+
+    else:
+        raise TypeError("dtype {} not understood - should be float or complex."
+                        "".format(dtype))
+
+    x = np.random.choice(entries, shape)
+    if need2convert:
+        x = x.astype(dtype)
 
     return x
 
@@ -198,15 +221,14 @@ def rand_uni(d, dtype=complex):
 
 
 @random_seed_fn
-def rand_ket(d, sparse=False, stype='csr', density=0.01):
+def rand_ket(d, sparse=False, stype='csr', density=0.01, dtype=complex):
     """Generates a ket of length `d` with normally distributed entries.
     """
     if sparse:
         ket = sp.random(d, 1, format=stype, density=density)
-        ket.data = np.random.randn(ket.nnz) + 1.0j * np.random.randn(ket.nnz)
+        ket.data = randn((ket.nnz,), dtype=dtype)
     else:
-        ket = np.asmatrix(np.random.randn(d, 1) +
-                          1.0j * np.random.randn(d, 1))
+        ket = np.asmatrix(randn((d, 1), dtype=dtype))
     return nmlz(ket)
 
 

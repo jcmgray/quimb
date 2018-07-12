@@ -13,6 +13,7 @@ from scipy.optimize import curve_fit
 from ..core import ptr
 from ..accel import prod, vdot, vectorize, njit
 from ..utils import int2tup
+from ..gen.rand import randn, rand_rademacher
 from ..linalg.mpi_launcher import get_mpi_pool
 from ..tensor.tensor_core import Tensor
 from ..tensor.tensor_1d import MatrixProductOperator
@@ -142,7 +143,8 @@ def norm_fro(a):
     return sqrt(inner(a, a))
 
 
-def random_rect(shape, dist='rademacher', orthog=False, norm=True, seed=False):
+def random_rect(shape, dist='rademacher', orthog=False, norm=True,
+                seed=False, dtype=complex):
     """Generate a random matrix optionally orthogonal.
 
     Parameters
@@ -161,15 +163,14 @@ def random_rect(shape, dist='rademacher', orthog=False, norm=True, seed=False):
         np.random.seed(random.SystemRandom().randint(0, 2**32 - 1))
 
     if dist == 'rademacher':
+        V = rand_rademacher(shape, scale=1 / sqrt(prod(shape)), dtype=dtype)
         # already normalized
-        entries = np.array([1.0, -1.0, 1.0j, -1.0j]) / sqrt(prod(shape))
-        V = np.random.choice(entries, shape)
+
     elif dist == 'gaussian':
-        scale = 1 / (prod(shape)**0.5 * 2**0.5)
-        V = (np.random.normal(scale=scale, size=shape) +
-             1.0j * np.random.normal(scale=scale, size=shape))
+        V = randn(shape, scale=1 / (prod(shape)**0.5 * 2**0.5))
         if norm:
             V /= norm_fro(V)
+
     else:
         raise ValueError("`dist={}` not understood.".format(dist))
 
@@ -235,9 +236,9 @@ def construct_lanczos_tridiag(A, K, v0=None, bsz=1, k_min=10, orthog=False,
     if v0 is None:
         if v0_opts is None:
             v0_opts = {}
-        q = random_rect(v_shp, seed=seed, **v0_opts)
+        q = random_rect(v_shp, seed=seed, dtype=A.dtype, **v0_opts)
     else:
-        q = v0.astype(np.complex128)
+        q = v0.astype(A.dtype)
         q /= norm_fro(q)  # normalize (make sure has unit variance)
     v = np.zeros_like(q)
 
