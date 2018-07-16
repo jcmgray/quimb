@@ -55,16 +55,24 @@ except ImportError:
         raise_cant_find_library_function("opt_einsum", extra_msg)
 
 
-@functools.lru_cache(4096)
-def get_contract_expr(contract_str, *shapes, memory_limit=None, **kwargs):
-
+def _get_contract_expr(contract_str, *shapes, **kwargs):
     # choose how large intermediate arrays can be
-    if memory_limit is None:
-        memory_limit = MAXT
-
-    kwargs['memory_limit'] = memory_limit
-
+    kwargs.setdefault('memory_limit', MAXT)
     return contract_expression(contract_str, *shapes, **kwargs)
+
+
+_get_contract_expr_cached = functools.lru_cache(4096)(_get_contract_expr)
+
+
+def get_contract_expr(contract_str, *shapes, **kwargs):
+    """Get an callable expression that will evaluate ``contract_str`` based on
+    ``shapes``. Cache the result if no constant tensors are involved.
+    """
+    # can only cache if the expression does not involve constant tensors
+    if kwargs.get('constants', None):
+        return _get_contract_expr(contract_str, *shapes, **kwargs)
+
+    return _get_contract_expr_cached(contract_str, *shapes, **kwargs)
 
 
 _TENSOR_BACKEND = 'numpy'
@@ -143,7 +151,7 @@ def _maybe_map_indices_to_alphabet(a_ix, i_ix, o_ix):
     return ",".join(in_str) + "->" + out_str
 
 
-def tensor_contract(*tensors, output_inds=None, return_expression=False,
+def tensor_contract(*tensors, output_inds=None, get=None,
                     backend=None, **contract_opts):
     """Efficiently contract multiple tensors, combining their tags.
 
@@ -154,9 +162,9 @@ def tensor_contract(*tensors, output_inds=None, return_expression=False,
     output_inds : sequence
         If given, the desired order of output indices, else defaults to the
         order they occur in the input indices.
-    return_expression : bool, optional
-        If ``True``, return the expression that performs the contraction, for
-        e.g. inspection of the order chosen.
+    get : {None, 'expression'}, optional
+        If ``'expression'``, return the expression that performs the
+        contraction, for e.g. inspection of the order chosen.
     backend  {'numpy', 'tensorflow', 'cupy', 'theano', ...}, optional
         Which backend to use to perform the contraction. Must be a valid
         ``opt_einsum`` backend with the relevant library installed.
@@ -180,13 +188,20 @@ def tensor_contract(*tensors, output_inds=None, return_expression=False,
     # possibly map indices into the range needed by opt- einsum
     contract_str = _maybe_map_indices_to_alphabet([*unique(a_ix)], i_ix, o_ix)
 
+    if get == 'path':
+        ops = (t.data for t in tensors)
+        return opt_einsum.contract_path(contract_str, *ops)[1]
+
+    if get == 'expression':
+        # account for possible constant tensors
+        cnst = contract_opts.get('constants', ())
+        ops = (t.data if i in cnst else t.shape for i, t in enumerate(tensors))
+        expression = get_contract_expr(contract_str, *ops, **contract_opts)
+        return expression
+
     # perform the contraction
     shapes = (t.shape for t in tensors)
     expression = get_contract_expr(contract_str, *shapes, **contract_opts)
-
-    if return_expression:
-        return expression
-
     o_array = expression(*(t.data for t in tensors), backend=backend)
 
     if not o_ix:
@@ -1450,12 +1465,11 @@ class TNLinearOperator(spla.LinearOperator):
         if not hasattr(self, '_matvec_fn'):
             # generate a expression that acts directly on the data
             iT = Tensor(in_data, inds=self.right_inds)
-            self._matvec_fn = tensor_contract(*self._tensors, iT,
-                                              return_expression=True,
-                                              output_inds=self.left_inds)
+            self._matvec_fn = tensor_contract(
+                *self._tensors, iT, constants=range(len(self._tensors)),
+                get='expression', output_inds=self.left_inds)
 
-        out_data = self._matvec_fn(*(t.data for t in self._tensors), in_data,
-                                   backend=self.backend)
+        out_data = self._matvec_fn(in_data, backend=self.backend)
         return out_data.ravel()
 
     def _rmatvec(self, vec):
@@ -1464,12 +1478,11 @@ class TNLinearOperator(spla.LinearOperator):
         if not hasattr(self, '_rmatvec_fn'):
             # generate a expression that acts directly on the data
             iT = Tensor(in_data, inds=self.left_inds)
-            self._rmatvec_fn = tensor_contract(*self._tensors, iT,
-                                               return_expression=True,
-                                               output_inds=self.right_inds)
+            self._rmatvec_fn = tensor_contract(
+                *self._tensors, iT, constants=range(len(self._tensors)),
+                get='expression', output_inds=self.right_inds)
 
-        out_data = self._rmatvec_fn(*(t.data for t in self._tensors), in_data,
-                                    backend=self.backend)
+        out_data = self._rmatvec_fn(in_data, backend=self.backend)
         return out_data.conj().ravel()
 
     def _matmat(self, mat):
@@ -1479,12 +1492,12 @@ class TNLinearOperator(spla.LinearOperator):
         if not hasattr(self, '_matmat_fn'):
             # generate a expression that acts directly on the data
             iT = Tensor(in_data, inds=(*self.right_inds, '__mat_ix__'))
+            o_ix = (*self.left_inds, '__mat_ix__')
             self._matmat_fn = tensor_contract(
-                *self._tensors, iT, return_expression=True,
-                output_inds=(*self.left_inds, '__mat_ix__'))
+                *self._tensors, iT, constants=range(len(self._tensors)),
+                get='expression', output_inds=o_ix)
 
-        out_data = self._matmat_fn(*(t.data for t in self._tensors), in_data,
-                                   backend=self.backend)
+        out_data = self._matmat_fn(in_data, backend=self.backend)
         return out_data.reshape(-1, d)
 
     def to_dense(self):
@@ -2850,8 +2863,10 @@ class TensorNetwork(object):
         return TensorNetwork((self, other)) ^ ...
 
     @functools.wraps(TNLinearOperator)
-    def aslinearoperator(self, left_inds, right_inds, ldims=None, rdims=None):
-        return TNLinearOperator(self, left_inds, right_inds, ldims, rdims)
+    def aslinearoperator(self, left_inds, right_inds,
+                         ldims=None, rdims=None, backend=None):
+        return TNLinearOperator(self, left_inds, right_inds,
+                                ldims, rdims, backend=backend)
 
     def trace(self, left_inds, right_inds):
         """Trace over ``left_inds`` joined with ``right_inds``
