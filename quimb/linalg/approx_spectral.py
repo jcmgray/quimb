@@ -68,7 +68,7 @@ def lazy_ptr_linop(psi_ab, dims, sysa, **linop_opts):
                  inds=[('bA{}' if i in sysa else 'xB{}').format(i)
                        for i in range(len(dims))])
 
-    return (Kab & Bab).squeeze().aslinearoperator(
+    return (Kab & Bab).aslinearoperator(
         ['kA{}'.format(i) for i in sysa],
         ['bA{}'.format(i) for i in sysa],
         **linop_opts
@@ -122,7 +122,7 @@ def lazy_ptr_ppt_linop(psi_abc, dims, sysa, sysb, **linop_opts):
                   inds=[('bA{}' if i in sysa else 'bB{}' if i in sysb else
                          'xC{}').format(i) for i in range(len(dims))])
 
-    return (Kabc & Babc).squeeze().aslinearoperator(
+    return (Kabc & Babc).aslinearoperator(
         [('bA{}' if i in sysa else 'kB{}').format(i) for i in sys_ab],
         [('kA{}' if i in sysa else 'bB{}').format(i) for i in sys_ab],
         **linop_opts
