@@ -1462,6 +1462,9 @@ class TNLinearOperator(spla.LinearOperator):
         # if recent opt_einsum specify constant tensors
         if hasattr(opt_einsum.backends, 'parse_constants'):
             self._kws['constants'] = range(len(self._tensors))
+            self._ins = ()
+        else:
+            self._ins = tuple(t.data for t in self._tensors)
 
         super().__init__(dtype=self._tensors[0].dtype, shape=(ld, rd))
 
@@ -1474,7 +1477,7 @@ class TNLinearOperator(spla.LinearOperator):
             self._matvec_fn = tensor_contract(
                 *self._tensors, iT, output_inds=self.left_inds, **self._kws)
 
-        out_data = self._matvec_fn(in_data, backend=self.backend)
+        out_data = self._matvec_fn(*self._ins, in_data, backend=self.backend)
         return out_data.ravel()
 
     def _rmatvec(self, vec):
@@ -1486,7 +1489,7 @@ class TNLinearOperator(spla.LinearOperator):
             self._rmatvec_fn = tensor_contract(
                 *self._tensors, iT, output_inds=self.right_inds, **self._kws)
 
-        out_data = self._rmatvec_fn(in_data, backend=self.backend)
+        out_data = self._rmatvec_fn(*self._ins, in_data, backend=self.backend)
         return out_data.conj().ravel()
 
     def _matmat(self, mat):
@@ -1500,7 +1503,7 @@ class TNLinearOperator(spla.LinearOperator):
             self._matmat_fn = tensor_contract(
                 *self._tensors, iT, output_inds=o_ix, **self._kws)
 
-        out_data = self._matmat_fn(in_data, backend=self.backend)
+        out_data = self._matmat_fn(*self._ins, in_data, backend=self.backend)
         return out_data.reshape(-1, d)
 
     def to_dense(self):
