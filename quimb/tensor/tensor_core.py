@@ -1457,6 +1457,12 @@ class TNLinearOperator(spla.LinearOperator):
         self.ldims, ld = ldims, prod(ldims)
         self.rdims, rd = rdims, prod(rdims)
 
+        self._kws = {'get': 'expression'}
+
+        # if recent opt_einsum specify constant tensors
+        if hasattr(opt_einsum.backends, 'parse_constants'):
+            self._kws['constants'] = range(len(self._tensors))
+
         super().__init__(dtype=self._tensors[0].dtype, shape=(ld, rd))
 
     def _matvec(self, vec):
@@ -1466,8 +1472,7 @@ class TNLinearOperator(spla.LinearOperator):
             # generate a expression that acts directly on the data
             iT = Tensor(in_data, inds=self.right_inds)
             self._matvec_fn = tensor_contract(
-                *self._tensors, iT, constants=range(len(self._tensors)),
-                get='expression', output_inds=self.left_inds)
+                *self._tensors, iT, output_inds=self.left_inds, **self._kws)
 
         out_data = self._matvec_fn(in_data, backend=self.backend)
         return out_data.ravel()
@@ -1479,8 +1484,7 @@ class TNLinearOperator(spla.LinearOperator):
             # generate a expression that acts directly on the data
             iT = Tensor(in_data, inds=self.left_inds)
             self._rmatvec_fn = tensor_contract(
-                *self._tensors, iT, constants=range(len(self._tensors)),
-                get='expression', output_inds=self.right_inds)
+                *self._tensors, iT, output_inds=self.right_inds, **self._kws)
 
         out_data = self._rmatvec_fn(in_data, backend=self.backend)
         return out_data.conj().ravel()
@@ -1494,8 +1498,7 @@ class TNLinearOperator(spla.LinearOperator):
             iT = Tensor(in_data, inds=(*self.right_inds, '__mat_ix__'))
             o_ix = (*self.left_inds, '__mat_ix__')
             self._matmat_fn = tensor_contract(
-                *self._tensors, iT, constants=range(len(self._tensors)),
-                get='expression', output_inds=o_ix)
+                *self._tensors, iT, output_inds=o_ix, **self._kws)
 
         out_data = self._matmat_fn(in_data, backend=self.backend)
         return out_data.reshape(-1, d)
