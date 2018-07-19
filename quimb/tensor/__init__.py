@@ -1,6 +1,8 @@
 from .tensor_core import (
-    get_tensor_backend,
-    set_tensor_backend,
+    get_contract_backend,
+    set_contract_backend,
+    get_tensor_linop_backend,
+    set_tensor_linop_backend,
     contract,
     contract_path,
     tensor_contract,
@@ -57,8 +59,10 @@ from .tensor_tebd import (
 )
 
 __all__ = (
-    "get_tensor_backend",
-    "set_tensor_backend",
+    "get_contract_backend",
+    "set_contract_backend",
+    "get_tensor_linop_backend",
+    "set_tensor_linop_backend",
     "contract",
     "contract_path",
     "tensor_contract",

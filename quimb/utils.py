@@ -215,3 +215,8 @@ class Verbosify:
             print("{}{}={}".format(pre_msg, self.highlight,
                                    kwargs[self.highlight]))
         return self.fn(*args, **kwargs)
+
+
+def has_cupy():
+    import importlib
+    return importlib.util.find_spec("cupy") is not None

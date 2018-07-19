@@ -20,19 +20,14 @@ import scipy.linalg.interpolative as sli
 
 from ..accel import prod, njit, realify_scalar, vdot
 from ..linalg.base_linalg import norm_fro_dense
-from ..utils import raise_cant_find_library_function, functions_equal
-
-# import psutil
-# # Maximum size of a tensor - / 32 to account for bytes + extra space
-# MAXT = psutil.virtual_memory().total / 32
-MAXT = -1
+from ..utils import raise_cant_find_library_function, functions_equal, has_cupy
 
 try:
     import opt_einsum
     contract = opt_einsum.contract
 
     @functools.wraps(opt_einsum.contract_path)
-    def contract_path(*args, optimize='greedy', memory_limit=MAXT, **kwargs):
+    def contract_path(*args, optimize='greedy', memory_limit=-1, **kwargs):
         return opt_einsum.contract_path(
             *args, path=optimize, memory_limit=memory_limit, **kwargs)
 
@@ -57,7 +52,7 @@ except ImportError:
 
 def _get_contract_expr(contract_str, *shapes, **kwargs):
     # choose how large intermediate arrays can be
-    kwargs.setdefault('memory_limit', MAXT)
+    kwargs.setdefault('memory_limit', -1)
     return contract_expression(contract_str, *shapes, **kwargs)
 
 
@@ -75,28 +70,58 @@ def get_contract_expr(contract_str, *shapes, **kwargs):
     return _get_contract_expr_cached(contract_str, *shapes, **kwargs)
 
 
-_TENSOR_BACKEND = 'numpy'
+_CONTRACT_BACKEND = 'numpy'
+_TENSOR_LINOP_BACKEND = 'cupy' if has_cupy() else 'numpy'
 
 
-def get_tensor_backend():
+def get_contract_backend():
     """Get the default backend used for tensor contractions, via 'opt_einsum'.
 
     See Also
     --------
-    set_tensor_backend, tensor_contract
+    set_contract_backend, get_tensor_linop_backend, set_tensor_linop_backend,
+    tensor_contract
     """
-    return _TENSOR_BACKEND
+    return _CONTRACT_BACKEND
 
 
-def set_tensor_backend(backend):
+def set_contract_backend(backend):
     """Set the default backend used for tensor contractions, via 'opt_einsum'.
 
     See Also
     --------
-    get_tensor_backend, tensor_contract
+    get_contract_backend, set_tensor_linop_backend, get_tensor_linop_backend,
+    tensor_contract
     """
-    global _TENSOR_BACKEND
-    _TENSOR_BACKEND = backend
+    global _CONTRACT_BACKEND
+    _CONTRACT_BACKEND = backend
+
+
+def get_tensor_linop_backend():
+    """Get the default backend used for tensor network linear operators, via
+    'opt_einsum'. This is different from the default contraction backend as
+    the contractions are likely repeatedly called many times.
+
+    See Also
+    --------
+    set_tensor_linop_backend, set_contract_backend, get_contract_backend,
+    TNLinearOperator
+    """
+    return _TENSOR_LINOP_BACKEND
+
+
+def set_tensor_linop_backend(backend):
+    """Set the default backend used for tensor network linear operators, via
+    'opt_einsum'. This is different from the default contraction backend as
+    the contractions are likely repeatedly called many times.
+
+    See Also
+    --------
+    get_tensor_linop_backend, set_contract_backend, get_contract_backend,
+    TNLinearOperator
+    """
+    global _TENSOR_LINOP_BACKEND
+    _TENSOR_LINOP_BACKEND = backend
 
 
 # --------------------------------------------------------------------------- #
@@ -165,7 +190,7 @@ def tensor_contract(*tensors, output_inds=None, get=None,
     get : {None, 'expression'}, optional
         If ``'expression'``, return the expression that performs the
         contraction, for e.g. inspection of the order chosen.
-    backend  {'numpy', 'tensorflow', 'cupy', 'theano', ...}, optional
+    backend  {'numpy', 'cupy', 'tensorflow', 'theano', ...}, optional
         Which backend to use to perform the contraction. Must be a valid
         ``opt_einsum`` backend with the relevant library installed.
 
@@ -174,7 +199,7 @@ def tensor_contract(*tensors, output_inds=None, get=None,
     scalar or Tensor
     """
     if backend is None:
-        backend = _TENSOR_BACKEND
+        backend = _CONTRACT_BACKEND
 
     i_ix = tuple(t.inds for t in tensors)  # input indices per tensor
     a_ix = tuple(concat(i_ix))  # list of all input indices
@@ -1435,7 +1460,7 @@ class TNLinearOperator(spla.LinearOperator):
 
     def __init__(self, tns, left_inds, right_inds, ldims=None, rdims=None,
                  backend=None):
-        self.backend = _TENSOR_BACKEND if backend is None else backend
+        self.backend = _TENSOR_LINOP_BACKEND if backend is None else backend
 
         if isinstance(tns, TensorNetwork):
             self._tensors = tns.tensors
@@ -1511,6 +1536,15 @@ class TNLinearOperator(spla.LinearOperator):
         """
         return tensor_contract(*self._tensors).to_dense(self.left_inds,
                                                         self.right_inds)
+
+    def astype(self, dtype):
+        """Convert this ``TNLinearOperator`` to type ``dtype``.
+        """
+        return TNLinearOperator(
+            (t.astype(dtype) for t in self._tensors),
+            left_inds=self.left_inds, right_inds=self.right_inds,
+            ldims=self.ldims, rdims=self.rdims, backend=self.backend,
+        )
 
 
 # --------------------------------------------------------------------------- #

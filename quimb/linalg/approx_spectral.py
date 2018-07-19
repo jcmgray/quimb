@@ -522,10 +522,20 @@ def calc_stats(samples, mean_p, mean_s, tol, tol_scale):
     return estimate, err, converged
 
 
+def get_single_precision_dtype(dtype):
+    if np.issubdtype(dtype, np.complexfloating):
+        return np.complex64
+    elif np.issubdtype(dtype, np.floating):
+        return np.float32
+    else:
+        raise ValueError("dtype {} not understood.".format(dtype))
+
+
 def approx_spectral_function(A, f, tol=1e-2, *, bsz=1, R=1024, tol_scale=1,
                              tau=None, k_min=10, k_max=256, beta_tol=1e-6,
                              mpi=False, mean_p=0.7, mean_s=1.0, pos=False,
-                             v0=None, verbosity=0, **lanczos_opts):
+                             v0=None, verbosity=0, single_precision='AUTO',
+                             **lanczos_opts):
     """Approximate a spectral function, that is, the quantity ``Tr(f(A))``.
 
     Parameters
@@ -583,6 +593,11 @@ def approx_spectral_function(A, f, tol=1e-2, *, bsz=1, R=1024, tol_scale=1,
         clipping below 0.
     verbosity : {0, 1, 2}, optional
         How much information to print while computing.
+    single_precision : {'AUTO', False, True}, optional
+        Try and convert the operator to single precision. This can lead to much
+        faster operation, especially if a GPU is available. Additionally,
+        double precision is not really needed given the stochastic nature of
+        the algorithm.
     lanczos_opts
         Supplied to
         :func:`~quimb.linalg.approx_spectral.single_random_estimate` or
@@ -598,6 +613,11 @@ def approx_spectral_function(A, f, tol=1e-2, *, bsz=1, R=1024, tol_scale=1,
     --------
     construct_lanczos_tridiag
     """
+    if single_precision == 'AUTO':
+        single_precision = hasattr(A, 'astype')
+    if single_precision:
+        A = A.astype(get_single_precision_dtype(A.dtype))
+
     if (v0 is not None) and not callable(v0):
         R = 1
     else:
