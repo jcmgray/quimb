@@ -41,11 +41,15 @@ class MERA(TensorNetwork1DVector,
         bottom left to top right in diagram above.
     phys_dim : int, optional
         The dimension of the local hilbert space.
+    dangle : bool, optional
+        Whether to leave a dangling index on the final isometry, in order to
+        maintain perfect scale invariance, else join the final unitaries just
+        with an indentity.
     """
 
     _EXTRA_PROPS = ('_site_ind_id', '_site_tag_id', 'cyclic')
 
-    def __init__(self, n, uni=None, iso=None, phys_dim=2,
+    def __init__(self, n, uni=None, iso=None, phys_dim=2, dangle=False,
                  site_ind_id="k{}", site_tag_id="I{}", **tn_opts):
 
         # short-circuit for copying MERA
@@ -116,12 +120,14 @@ class MERA(TensorNetwork1DVector,
                     inds = (ll, lr, ui)
                     tags = {"_ISO", "_LAYER{}".format(i)}
 
-                    if i == nlayers - 1:
-                        # don't leave dangling index at top
-                        yield Tensor(np.eye(phys_dim) / 2**0.5,
-                                     inds[:-1], tags)
-                    else:
+                    if i < nlayers - 1 or dangle:
                         yield Tensor(next(isos), inds, tags)
+                    else:
+                        # don't leave dangling index at top
+                        yield Tensor(
+                            np.eye(phys_dim, dtype=next(isos).dtype) / 2**0.5,
+                            inds[:-1], tags
+                        )
 
         super().__init__(gen_mera_tensors(), check_collisions=False,
                          structure=site_tag_id)
