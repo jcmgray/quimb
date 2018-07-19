@@ -8,10 +8,10 @@ import warnings
 
 import numpy as np
 import scipy.linalg as scla
-from scipy.optimize import curve_fit
+from scipy.ndimage.filters import uniform_filter1d
 
 from ..core import ptr
-from ..accel import prod, vdot, vectorize, njit
+from ..accel import prod, vdot, njit
 from ..utils import int2tup
 from ..gen.rand import randn, rand_rademacher
 from ..linalg.mpi_launcher import get_mpi_pool
@@ -316,7 +316,7 @@ def calc_trace_fn_tridiag(tl, tv, f, pos=True):
     )
 
 
-# XXX: this should be jittable post numba-0.39 (-> percentile support)
+@njit
 def ext_per_trim(x, p=0.6, s=1.0):
     r"""Extended percentile trimmed-mean. Makes the mean robust to asymmetric
     outliers, while using all data when it is nicely clustered. This can be
@@ -345,7 +345,6 @@ def ext_per_trim(x, p=0.6, s=1.0):
     ub = np.percentile(x, 100 * (1 + p) / 2)
     ib = ub - lb
 
-    x = np.array(x)
     trimmed_x = x[(lb - s * ib < x) & (x < ub + s * ib)]
 
     return trimmed_x
@@ -369,11 +368,6 @@ def std(xs):
     return var**0.5
 
 
-@vectorize  # pragma: no cover
-def exp_approach(x, a, b, c):
-    return a * exp(x / b) + c
-
-
 def calc_est_fit(estimates, conv_n, tau):
     """Make estimate by fitting exponential convergence to estimates.
     """
@@ -382,26 +376,29 @@ def calc_est_fit(estimates, conv_n, tau):
     if n < conv_n:
         return nan, inf
 
+    # iteration number, fit function to inverse this to get k->infinity
+    ks = np.arange(1, len(estimates) + 1)
+
+    # smooth data with a running mean
+    smoothed_estimates = uniform_filter1d(estimates, n // 2)
+
+    # ignore this amount of the initial estimates and fit later part only
+    ni = n // 2
+
     try:
-        # initial guess for offset, decay length and equilibrium
-        p0 = (0, n, (estimates[-2] + estimates[-1]) / 2)
-        ks = np.arange(len(estimates))
-
-        # weight later estimates with less error as well
-        sigma = 1 / (1 + ks)
-
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            popt, pcov = curve_fit(exp_approach, ks, estimates,
-                                   p0=p0, sigma=sigma, method='lm',
-                                   gtol=tau / 10, ftol=tau / 10, xtol=tau / 10)
 
-        est = popt[-1]
-        err = abs(pcov[-1, -1])**0.5
+            # fit the inverse data with a line, weighting recent ests more
+            popt, pcov = np.polyfit(x=(1 / ks[ni:]),
+                                    y=smoothed_estimates[ni:],
+                                    w=ks[ni:], deg=1, cov=True)
+
+        # estimate of function at 1 / k = 0 and standard error
+        est, err = popt[-1], abs(pcov[-1, -1])**0.5
 
     except (ValueError, RuntimeError):
-        est = nan
-        err = inf
+        est, err = nan, inf
 
     return est, err
 
@@ -508,6 +505,8 @@ def single_random_estimate(A, K, bsz, beta_tol, v0, f, pos, tau, tol_scale,
 def calc_stats(samples, mean_p, mean_s, tol, tol_scale):
     """Get an estimate from samples.
     """
+    samples = np.array(samples)
+
     xtrim = ext_per_trim(samples, p=mean_p, s=mean_s)
 
     # sometimes everything is an outlier...

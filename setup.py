@@ -23,9 +23,9 @@ setup(
     license='MIT',
     packages=find_packages(exclude=['deps', 'tests*']),
     install_requires=[
-        'numpy>=1.10',
-        'scipy>=0.15',
-        'numba>=0.37',
+        'numpy>=1.12',
+        'scipy>=1.0.0',
+        'numba>=0.39',
         'numexpr>=2.3',
         'psutil>=4.3.1',
         'cytoolz>=0.8.0',
