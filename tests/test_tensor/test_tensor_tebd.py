@@ -81,7 +81,7 @@ class TestTEBD:
         assert H_nni.special_sites == {(8, 9)}
         tebd = qtn.TEBD(psi0, H_nni)
         tebd.update_to(1.0, tol=1e-5)
-        assert (psi0.H @ tebd.pt) < 1.0
+        assert abs(psi0.H @ tebd.pt) < 1.0
         assert tebd.pt.entropy(5) > 0.0
 
         psi0_dns = qu.neel_state(n)
@@ -97,7 +97,7 @@ class TestTEBD:
         H_nni = qtn.NNI_ham_heis(n, j=(0.7, 0.8, 0.9), bz=0.337)
         tebd = qtn.TEBD(psi0, H_nni)
         tebd.update_to(1.0, tol=1e-5)
-        assert (psi0.H @ tebd.pt) < 1.0
+        assert abs(psi0.H @ tebd.pt) < 1.0
         assert tebd.pt.entropy(5) > 0.0
 
         psi0_dns = qu.neel_state(n)
