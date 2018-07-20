@@ -893,6 +893,12 @@ def tags2set(tags):
 #                                Tensor Class                                 #
 # --------------------------------------------------------------------------- #
 
+def maybe_asarray(data):
+    if hasattr(data, 'shape'):
+        return data
+    return np.asarray(data)
+
+
 class Tensor(object):
     """A labelled, tagged ndarray.
 
@@ -919,7 +925,7 @@ class Tensor(object):
             self._tags = data.tags.copy()
             return
 
-        self._data = np.asarray(data)
+        self._data = maybe_asarray(data)
         self._inds = tuple(inds)
 
         if self._data.ndim != len(self.inds):
@@ -989,7 +995,7 @@ class Tensor(object):
             New tags.
         """
         if data is not None:
-            self._data = np.asarray(data)
+            self._data = maybe_asarray(data)
 
         if inds is not None:
             # if this tensor has owners, update their ``ind_map``.
