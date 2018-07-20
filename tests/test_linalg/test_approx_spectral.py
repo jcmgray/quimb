@@ -217,7 +217,7 @@ class TestLanczosApprox:
         "fn_matrix_rtol",
         [
             (np.abs, rand_herm, 1e-1),
-            (np.sqrt, rand_pos, 5e-2),
+            (np.sqrt, rand_pos, 1e-1),
             (np.log1p, rand_pos, 2e-1),
             (np.exp, rand_herm, 1e-1),
         ]
