@@ -26,8 +26,8 @@ from .linalg.mpi_launcher import get_mpi_pool
 
 # Generating objects
 from .gen.operators import (
-    spin_operator, pauli, hadamard, phase_gate, swap, controlled, ham_heis,
-    ham_ising, ham_XY, ham_XXZ, ham_j1j2, ham_mbl, ham_heis_2D,
+    spin_operator, pauli, hadamard, phase_gate, Rx, Ry, Rz, swap, controlled,
+    ham_heis, ham_ising, ham_XY, ham_XXZ, ham_j1j2, ham_mbl, ham_heis_2D,
     zspin_projector, create, destroy, num, ham_hubbard_hardcore,
 )
 from .gen.states import (
@@ -83,15 +83,16 @@ __all__ = [
     'eigh_window', 'eigvalsh_window', 'eigvecsh_window', 'svd', 'svds', 'norm',
     'Lazy',
     # Gen ------------------------------------------------------------------- #
-    'spin_operator', 'pauli', 'hadamard', 'phase_gate', 'swap', 'controlled',
-    'ham_heis', 'ham_ising', 'ham_XY', 'ham_XXZ', 'ham_j1j2', 'ham_mbl',
-    'ham_heis_2D', 'create', 'destroy', 'num', 'ham_hubbard_hardcore',
-    'zspin_projector', 'basis_vec', 'up', 'zplus', 'down', 'zminus', 'plus',
-    'xplus', 'minus', 'xminus', 'yplus', 'yminus', 'bloch_state', 'bell_state',
-    'singlet', 'thermal_state', 'neel_state', 'singlet_pairs', 'werner_state',
-    'ghz_state', 'w_state', 'levi_civita', 'perm_state', 'graph_state_1d',
-    'rand_matrix', 'rand_herm', 'rand_pos', 'rand_rho', 'rand_ket', 'rand_uni',
-    'rand_haar_state', 'gen_rand_haar_states', 'rand_mix', 'rand_mps', 'randn',
+    'spin_operator', 'pauli', 'hadamard', 'phase_gate', 'Rx', 'Ry', 'Rz',
+    'swap', 'controlled', 'ham_heis', 'ham_ising', 'ham_XY', 'ham_XXZ',
+    'ham_j1j2', 'ham_mbl', 'ham_heis_2D', 'create', 'destroy', 'num',
+    'ham_hubbard_hardcore', 'zspin_projector', 'basis_vec', 'up', 'zplus',
+    'down', 'zminus', 'plus', 'xplus', 'minus', 'xminus', 'yplus', 'yminus',
+    'bloch_state', 'bell_state', 'singlet', 'thermal_state', 'neel_state',
+    'singlet_pairs', 'werner_state', 'ghz_state', 'w_state', 'levi_civita',
+    'perm_state', 'graph_state_1d', 'rand_matrix', 'rand_herm', 'rand_pos',
+    'rand_rho', 'rand_ket', 'rand_uni', 'rand_haar_state',
+    'gen_rand_haar_states', 'rand_mix', 'rand_mps', 'randn',
     'rand_product_state', 'rand_matrix_product_state', 'rand_seperable',
     'rand_iso', 'rand_mera', 'computational_state',
     # Calc ------------------------------------------------------------------ #

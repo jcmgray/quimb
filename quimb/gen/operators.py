@@ -163,13 +163,17 @@ def hadamard(dtype=complex):
 
 
 @functools.lru_cache(128)
-def phase_gate(phi):
+def phase_gate(phi, xyz='Z'):
     """The phase shift gate.
     """
-    R = qu([[1., 0.],
-            [0., math.e**(1.0j * phi)]])
+    R = math.cos(phi / 2) * pauli('I') - 1.0j * math.sin(phi / 2) * pauli(xyz)
     make_immutable(R)
     return R
+
+
+Rx = functools.partial(phase_gate, xyz='X')
+Ry = functools.partial(phase_gate, xyz='Y')
+Rz = functools.partial(phase_gate, xyz='Z')
 
 
 @functools.lru_cache(maxsize=8)

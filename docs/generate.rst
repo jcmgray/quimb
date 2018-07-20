@@ -33,6 +33,9 @@ Operators
 - :func:`~quimb.gen.operators.pauli`
 - :func:`~quimb.gen.operators.hadamard`
 - :func:`~quimb.gen.operators.phase_gate`
+- :func:`~quimb.gen.operators.Rx`
+- :func:`~quimb.gen.operators.Ry`
+- :func:`~quimb.gen.operators.Rz`
 - :func:`~quimb.gen.operators.swap`
 - :func:`~quimb.gen.operators.controlled`
 - :func:`~quimb.gen.operators.ham_heis`
