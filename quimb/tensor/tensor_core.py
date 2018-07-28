@@ -862,6 +862,13 @@ def bonds(t1, t2):
     return ix1 & ix2
 
 
+def bonds_size(t1, t2):
+    """Get the size of the bonds linking tensors or tensor networks ``t1`` and
+    ``t2``.
+    """
+    return prod(t1.ind_size(ix) for ix in bonds(t1, t2))
+
+
 def get_tags(ts):
     """Return all the tags in found in ``ts``.
 
@@ -1075,7 +1082,7 @@ class Tensor(object):
     def shared_bond_size(self, other):
         """Get the total size of the shared index(es) with ``other``.
         """
-        return prod(self.ind_size(i) for i in self.bonds(other))
+        return bonds_size(self, other)
 
     def inner_inds(self):
         """
