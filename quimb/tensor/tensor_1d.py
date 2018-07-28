@@ -367,57 +367,37 @@ class TensorNetwork1DFlat:
     """
 
     def _left_decomp_site(self, i, bra=None, **split_opts):
-        N = self.nsites
+        T1, T2 = self[i], self[i + 1]
+        rix, lix = T1.filter_bonds(T2)
 
-        T1, T2 = self[i], self[(i + 1) % N]
-
-        t1_inds_set = set(T1.inds)
-        t2_inds_set = set(T2.inds)
-
-        old_shared_bond, = t1_inds_set & t2_inds_set
-        left_inds = t1_inds_set - t2_inds_set
-
-        Q, R = T1.split(left_inds, get='tensors', **split_opts)
+        Q, R = T1.split(lix, get='tensors', right_inds=rix, **split_opts)
         R = R @ T2
 
-        new_shared_bond, = (j for j in Q.inds if j not in t1_inds_set)
-        Q.reindex({new_shared_bond: old_shared_bond}, inplace=True)
-        Q.transpose(*T1.inds, inplace=True)
-        R.reindex({new_shared_bond: old_shared_bond}, inplace=True)
-        R.transpose(*T2.inds, inplace=True)
+        Q.transpose_like(T1, inplace=True)
+        R.transpose_like(T2, inplace=True)
 
         self[i].modify(data=Q.data)
-        self[(i + 1) % N].modify(data=R.data)
+        self[i + 1].modify(data=R.data)
 
         if bra is not None:
             bra[i].modify(data=Q.data.conj())
-            bra[(i + 1) % N].modify(data=R.data.conj())
+            bra[i + 1].modify(data=R.data.conj())
 
     def _right_decomp_site(self, i, bra=None, **split_opts):
-        N = self.nsites
+        T1, T2 = self[i], self[i - 1]
+        lix, rix = T1.filter_bonds(T2)
 
-        T1, T2 = self[i], self[(i - 1) % N]
-
-        t1_inds_set = set(T1.inds)
-        t2_inds_set = set(T2.inds)
-
-        left_inds = t1_inds_set & t2_inds_set
-        old_shared_bond, = left_inds
-
-        L, Q = T1.split(left_inds, get='tensors', **split_opts)
+        L, Q = T1.split(lix, get='tensors', right_inds=rix, **split_opts)
         L = T2 @ L
 
-        new_shared_bond, = (j for j in Q.inds if j not in t1_inds_set)
-        L.reindex({new_shared_bond: old_shared_bond}, inplace=True)
-        L.transpose(*T2.inds, inplace=True)
-        Q.reindex({new_shared_bond: old_shared_bond}, inplace=True)
-        Q.transpose(*T1.inds, inplace=True)
+        L.transpose_like(T2, inplace=True)
+        Q.transpose_like(T1, inplace=True)
 
-        self[(i - 1) % N].modify(data=L.data)
+        self[i - 1].modify(data=L.data)
         self[i].modify(data=Q.data)
 
         if bra is not None:
-            bra[(i - 1) % N].modify(data=L.data.conj())
+            bra[i - 1].modify(data=L.data.conj())
             bra[i].modify(data=Q.data.conj())
 
     def left_canonize_site(self, i, bra=None):

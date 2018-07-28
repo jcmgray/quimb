@@ -586,7 +586,7 @@ def _array_split_lq(x):
 
 
 def tensor_split(T, left_inds, method='svd', max_bond=None, absorb='both',
-                 cutoff=1e-10, cutoff_mode='sum2', get=None,
+                 cutoff=1e-10, cutoff_mode='sum2', get=None, bond_ind=None,
                  ltags=None, rtags=None, right_inds=None):
     """Decompose this tensor into two tensors.
 
@@ -611,6 +611,12 @@ def tensor_split(T, left_inds, method='svd', max_bond=None, absorb='both',
             - 'eigsh': iterative eigen-decomposition, tensor must he hermitian.
             - 'cholesky': full cholesky decomposition, tensor must be positive.
 
+    max_bond: None or int
+        If integer, the maxmimum number of singular values to keep, regardless
+        of ``cutoff``.
+    absorb = {'both', 'left', 'right'}
+        Whether to absorb the singular values into both, the left or right
+        unitary matrix respectively.
     cutoff : float, optional
         The threshold below which to discard singular values, only applies to
         ``method='svd'`` and ``method='eig'``.
@@ -623,15 +629,18 @@ def tensor_split(T, left_inds, method='svd', max_bond=None, absorb='both',
             - 'rsum2': sum squared of values discarded must be less than
               ``cutoff`` times the total sum squared values.
 
-    max_bond: None or int
-        If integer, the maxmimum number of singular values to keep, regardless
-        of ``cutoff``.
-    absorb = {'both', 'left', 'right'}
-        Whether to absorb the singular values into both, the left or right
-        unitary matrix respectively.
     get : {None, 'arrays', 'tensors', 'values'}
         If given, what to return instead of a TN describing the split. The
         default, ``None``, returns a TensorNetwork of the two tensors.
+    bond_ind : str, optional
+        Explicitly name the new bond, else a random one will be generated.
+    ltags : sequence of str, optional
+        Add these new tags to the left tensor.
+    rtags : sequence of str, optional
+        Add these new tags to the right tensor.
+    right_inds : sequence of str, optional
+        Explicitly give the right indices, otherwise they will be worked out.
+        This is a minor performance feature.
 
     Returns
     -------
@@ -684,7 +693,7 @@ def tensor_split(T, left_inds, method='svd', max_bond=None, absorb='both',
     if get == 'arrays':
         return left, right
 
-    bond_ind = rand_uuid()
+    bond_ind = rand_uuid() if bond_ind is None else bond_ind
 
     ltags, rtags = tags2set(ltags) | T.tags, tags2set(rtags) | T.tags
 
