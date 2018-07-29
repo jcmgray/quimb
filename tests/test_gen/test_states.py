@@ -43,12 +43,6 @@ class TestBasisVec:
         x = basis_vec(1, 2, qtype='b')
         assert_allclose(x, np.matrix([[0., 1.]]))
 
-    def test_basis_vec_sparse(self):
-        x = basis_vec(4, 100, sparse=True)
-        assert x[4, 0] == 1.
-        assert x.nnz == 1
-        assert x.dtype == complex
-
 
 class TestBasicStates:
     def test_up(self):

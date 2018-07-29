@@ -6,7 +6,6 @@ import itertools
 import functools
 import math
 import numpy as np
-import scipy.sparse as sp
 
 from ..accel import ldmul, dot, make_immutable
 from ..core import qu, kron, eye, ikron, kronpow
@@ -14,7 +13,7 @@ from ..linalg.base_linalg import eigh
 from .operators import pauli, controlled
 
 
-def basis_vec(i, dim, sparse=False, **kwargs):
+def basis_vec(i, dim, ownership=None, **kwargs):
     """Constructs a unit vector ket.
 
     Parameters
@@ -33,12 +32,17 @@ def basis_vec(i, dim, sparse=False, **kwargs):
     vector
         The basis vector.
     """
-    if sparse:
-        return sp.csr_matrix(([1.0], ([i], [0])),
-                             dtype=complex, shape=(dim, 1))
-    else:
-        x = np.zeros([dim, 1], dtype=complex)
+    if ownership is None:
+        shape = (dim, 1)
+        x = np.zeros(shape, dtype=complex)
         x[i] = 1.0
+    else:
+        ri, rf = ownership
+        shape = (rf - ri, 1)
+        x = np.zeros(shape, dtype=complex)
+        if ri <= i < rf:
+            x[i - ri] = 1.0
+
     return qu(x, **kwargs)
 
 

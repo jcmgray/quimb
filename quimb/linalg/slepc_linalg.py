@@ -189,18 +189,32 @@ def convert_vec_to_petsc(vec, comm=None):
     mpi_sz = comm.Get_size()
     pvec = PETSc.Vec()
 
-    flat_vec = np.asarray(vec).reshape(-1)
+    # get shape before slicing
+    size = max(vec.shape)
 
-    if mpi_sz > 1:
-        pvec.create(comm=comm)
-        pvec.setSizes(vec.size)
-        pvec.setFromOptions()
-        pvec.setUp()
-        ri, rf = pvec.getOwnershipRange()
-        pvec.createWithArray(flat_vec[ri:rf], comm=comm)
-    else:
-        pvec.createWithArray(flat_vec, comm=comm)
+    pvec.create(comm=comm)
+    pvec.setSizes(size)
+    pvec.setFromOptions()
+    pvec.setUp()
+    ri, rf = pvec.getOwnershipRange()
 
+    # only consider the vector already sliced if owns whole
+    sliced = (mpi_sz == 1)
+    if isinstance(vec, qu.Lazy):
+        # vector hasn't been constructed yet
+        try:
+            # try and and lazily construct with slicing
+            vec = vec(ownership=(ri, rf))
+            sliced = True
+        except TypeError:
+            vec = vec()
+
+    array = np.asarray(vec).reshape(-1)
+
+    if not sliced:
+        array = array[ri:rf]
+
+    pvec.createWithArray(array, comm=comm)
     return pvec
 
 
