@@ -3070,9 +3070,7 @@ class TensorNetwork(object):
             Explicitly turn on labels for each tensors tags.
         iterations : int, optional
             How many iterations to perform when when finding the best layout
-            using node repulsion. Ramp this up if the graph is drawing
-            messily.
-            be shown.
+            using node repulsion. Ramp this up if the graph is drawing messily.
         k : float, optional
             The optimal distance between nodes.
         fix : dict[tags, (float, float)], optional
