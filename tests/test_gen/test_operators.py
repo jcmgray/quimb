@@ -65,6 +65,22 @@ class TestControlledZ:
         assert_allclose(cz.A, np.diag([1, 1, 1, -1]))
 
 
+class TestParametrizations:
+    @pytest.mark.parametrize("gate", ['Rx', 'Ry', 'Rz', 'T_gate', 'S_gate',
+                                      'CNOT', 'cX', 'cY', 'cZ', 'hadamard',
+                                      'swap'])
+    @pytest.mark.parametrize('dtype', [np.complex64, np.complex128])
+    @pytest.mark.parametrize('sparse', [False, True])
+    def test_construct(self, gate, dtype, sparse):
+        if gate in ['Rx', 'Ry', 'Rz']:
+            args = (0.43827,)
+        else:
+            args = ()
+        G = getattr(qu, gate)(*args, dtype=dtype, sparse=sparse)
+        assert G.dtype == dtype
+        assert qu.issparse(G) is sparse
+
+
 class TestHamHeis:
     def test_ham_heis_2(self):
         h = qu.ham_heis(2, cyclic=False)

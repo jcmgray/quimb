@@ -16,6 +16,10 @@ from ..accel import make_immutable, get_thread_pool, par_reduce, isreal
 from ..core import qu, eye, kron, ikron
 
 
+# --------------------------------------------------------------------------- #
+#                      gates and other simple operators                       #
+# --------------------------------------------------------------------------- #
+
 @functools.lru_cache(maxsize=16)
 def spin_operator(label, S=1 / 2, **kwargs):
     """Generate a general spin-operator.
@@ -152,28 +156,54 @@ def pauli(xyz, dim=2, **kwargs):
     return op
 
 
-@functools.lru_cache(2)
-def hadamard(dtype=complex):
+@functools.lru_cache(8)
+def hadamard(dtype=complex, sparse=False):
     """The Hadamard gate.
     """
     H = qu([[1., 1.],
-            [1., -1.]], dtype=dtype) / 2**0.5
+            [1., -1.]], dtype=dtype, sparse=sparse) / 2**0.5
     make_immutable(H)
     return H
 
 
 @functools.lru_cache(128)
-def phase_gate(phi, xyz='Z'):
-    """The phase shift gate.
+def phase_gate(phi, dtype=complex, sparse=False):
+    """The generalized qubit phase-gate, which adds phase ``phi`` to the
+    |1> state.
+    """
+    Rp = qu([[1., 0.],
+             [0., np.exp(1.0j * phi)]], dtype=dtype, sparse=sparse)
+    make_immutable(Rp)
+    return Rp
+
+
+@functools.lru_cache(8)
+def T_gate(dtype=complex, sparse=False):
+    """The T-gate (pi/8 gate).
+    """
+    return phase_gate(math.pi / 4, dtype=dtype, sparse=sparse)
+
+
+@functools.lru_cache(8)
+def S_gate(dtype=complex, sparse=False):
+    """The S-gate (phase gate).
+    """
+    return phase_gate(math.pi / 2, dtype=dtype, sparse=sparse)
+
+
+@functools.lru_cache(128)
+def rotation(phi, xyz='Z', dtype=complex, sparse=False):
+    """The single qubit rotation gate.
     """
     R = math.cos(phi / 2) * pauli('I') - 1.0j * math.sin(phi / 2) * pauli(xyz)
+    R = qu(R, dtype=dtype, sparse=sparse)
     make_immutable(R)
     return R
 
 
-Rx = functools.partial(phase_gate, xyz='X')
-Ry = functools.partial(phase_gate, xyz='Y')
-Rz = functools.partial(phase_gate, xyz='Z')
+Rx = functools.partial(rotation, xyz='x')
+Ry = functools.partial(rotation, xyz='y')
+Rz = functools.partial(rotation, xyz='z')
 
 
 @functools.lru_cache(maxsize=8)
@@ -189,8 +219,8 @@ def swap(dim=2, dtype=complex, **kwargs):
     return S
 
 
-@functools.lru_cache(maxsize=8)
-def controlled(s, sparse=False):
+@functools.lru_cache(maxsize=16)
+def controlled(s, dtype=complex, sparse=False):
     """Construct a controlled pauli gate for two qubits.
 
     Parameters
@@ -205,14 +235,46 @@ def controlled(s, sparse=False):
     C : immutable matrix
         The controlled two-qubit gate operator.
     """
-    keymap = {'x': 'x', 'not': 'x', 'y': 'y', 'z': 'z'}
-
-    op = ((qu([1, 0], qtype='dop', sparse=sparse) &
-           eye(2, sparse=sparse)) +
-          (qu([0, 1], qtype='dop', sparse=sparse) &
-           pauli(keymap[s], sparse=sparse)))
+    # alias not and NOT to x
+    s = {'NOT': 'x', 'not': 'x'}.get(s, s)
+    kws = {'dtype': dtype, 'sparse': sparse}
+    op = ((qu([1, 0], qtype='dop', **kws) & eye(2, **kws)) +
+          (qu([0, 1], qtype='dop', **kws) & pauli(s, **kws)))
     make_immutable(op)
     return op
+
+
+@functools.lru_cache(8)
+def CNOT(dtype=complex, sparse=False):
+    """The controlled-not gate.
+    """
+    return controlled('not', dtype=dtype, sparse=sparse)
+
+
+@functools.lru_cache(8)
+def cX(dtype=complex, sparse=False):
+    """The controlled-X gate.
+    """
+    return controlled('not', dtype=dtype, sparse=sparse)
+
+
+@functools.lru_cache(8)
+def cY(dtype=complex, sparse=False):
+    """The controlled-Y gate.
+    """
+    return controlled('Y', dtype=dtype, sparse=sparse)
+
+
+@functools.lru_cache(8)
+def cZ(dtype=complex, sparse=False):
+    """The controlled-Z gate.
+    """
+    return controlled('Z', dtype=dtype, sparse=sparse)
+
+
+# --------------------------------------------------------------------------- #
+#                                Hamiltonians                                 #
+# --------------------------------------------------------------------------- #
 
 
 def hamiltonian_builder(fn):

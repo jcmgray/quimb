@@ -29,15 +29,27 @@ States
 Operators
 ---------
 
-- :func:`~quimb.gen.operators.spin_operator`
+Gate operators:
+
 - :func:`~quimb.gen.operators.pauli`
 - :func:`~quimb.gen.operators.hadamard`
 - :func:`~quimb.gen.operators.phase_gate`
+- :func:`~quimb.gen.operators.T_gate`
+- :func:`~quimb.gen.operators.S_gate`
+- :func:`~quimb.gen.operators.rotation`
 - :func:`~quimb.gen.operators.Rx`
 - :func:`~quimb.gen.operators.Ry`
 - :func:`~quimb.gen.operators.Rz`
 - :func:`~quimb.gen.operators.swap`
 - :func:`~quimb.gen.operators.controlled`
+- :func:`~quimb.gen.operators.CNOT`
+- :func:`~quimb.gen.operators.cX`
+- :func:`~quimb.gen.operators.cY`
+- :func:`~quimb.gen.operators.cZ`
+
+Hamiltonians and related operators:
+
+- :func:`~quimb.gen.operators.spin_operator`
 - :func:`~quimb.gen.operators.ham_heis`
 - :func:`~quimb.gen.operators.ham_heis_2D`
 - :func:`~quimb.gen.operators.ham_ising`
@@ -51,20 +63,26 @@ Operators
 - :func:`~quimb.gen.operators.num`
 - :func:`~quimb.gen.operators.ham_hubbard_hardcore`
 
+
 Random States & Operators
 -------------------------
+
+Random pure states:
+
+- :func:`~quimb.gen.rand.rand_ket`
+- :func:`~quimb.gen.rand.rand_haar_state`
+- :func:`~quimb.gen.rand.gen_rand_haar_states`
+- :func:`~quimb.gen.rand.rand_product_state`
+- :func:`~quimb.gen.rand.rand_matrix_product_state`
+- :func:`~quimb.gen.rand.rand_mera`
+
+Random operators:
 
 - :func:`~quimb.gen.rand.rand_matrix`
 - :func:`~quimb.gen.rand.rand_herm`
 - :func:`~quimb.gen.rand.rand_pos`
 - :func:`~quimb.gen.rand.rand_rho`
 - :func:`~quimb.gen.rand.rand_uni`
-- :func:`~quimb.gen.rand.rand_ket`
-- :func:`~quimb.gen.rand.rand_haar_state`
-- :func:`~quimb.gen.rand.gen_rand_haar_states`
 - :func:`~quimb.gen.rand.rand_mix`
-- :func:`~quimb.gen.rand.rand_product_state`
-- :func:`~quimb.gen.rand.rand_matrix_product_state`
 - :func:`~quimb.gen.rand.rand_seperable`
 - :func:`~quimb.gen.rand.rand_iso`
-- :func:`~quimb.gen.rand.rand_mera`
