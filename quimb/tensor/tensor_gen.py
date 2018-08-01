@@ -8,7 +8,7 @@ from ..accel import make_immutable
 from ..linalg.base_linalg import norm_fro_dense
 from ..gen.operators import spin_operator, eye, _gen_mbl_random_factors
 from ..gen.rand import randn
-from .tensor_core import Tensor
+from .tensor_core import Tensor, _asarray
 from .tensor_1d import MatrixProductState, MatrixProductOperator
 from .tensor_tebd import NNI
 
@@ -84,7 +84,7 @@ def MPS_product_state(arrays, **mps_opts):
             yield (1, 1, -1)
         yield (1, -1)
 
-    mps_arrays = (np.asarray(array).reshape(*shape)
+    mps_arrays = (_asarray(array).reshape(*shape)
                   for array, shape in zip(arrays, gen_array_shapes()))
 
     return MatrixProductState(mps_arrays, shape='lrp', **mps_opts)

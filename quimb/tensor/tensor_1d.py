@@ -16,6 +16,7 @@ from .tensor_core import (
     bonds,
     tags2set,
     get_tags,
+    _asarray,
 )
 
 
@@ -177,7 +178,7 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
     shape_maches_nd = all(d == dp for d in G.shape)
 
     if shape_matches_2d:
-        G = np.asarray(G).reshape([dp] * 2 * len(where))
+        G = _asarray(G).reshape([dp] * 2 * len(where))
     elif not shape_maches_nd:
         raise ValueError("Gate with shape {} doesn't match sites {}"
                          "".format(G.shape, where))
@@ -1211,7 +1212,7 @@ class MatrixProductState(TensorNetwork1DVector,
 
         # Make Tensor of gate
         d = tn.phys_dim(i)
-        TG = Tensor(np.asarray(G).reshape(d, d, d, d),
+        TG = Tensor(_asarray(G).reshape(d, d, d, d),
                     inds=("_tmpi", "_tmpj", ix_i, ix_j))
 
         # Contract gate into the two sites

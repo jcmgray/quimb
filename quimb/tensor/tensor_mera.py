@@ -146,7 +146,7 @@ class MERA(TensorNetwork1DVector,
                         t.add_tag(f'I{j}')
 
     @classmethod
-    def rand(cls, n, phys_dim=2, dtype=float):
+    def rand(cls, n, phys_dim=2, dtype=float, **mera_opts):
         d = phys_dim
 
         def gen_unis():
@@ -161,10 +161,10 @@ class MERA(TensorNetwork1DVector,
                 iso.shape = (d, d, d)
                 yield iso
 
-        return cls(n, gen_unis(), gen_isos(), phys_dim=d)
+        return cls(n, gen_unis(), gen_isos(), phys_dim=d, **mera_opts)
 
     @classmethod
-    def rand_invar(cls, n, phys_dim=2, dtype=float):
+    def rand_invar(cls, n, phys_dim=2, dtype=float, **mera_opts):
         """Generate a random translational and scale invariant MERA.
         """
         d = phys_dim
@@ -175,7 +175,7 @@ class MERA(TensorNetwork1DVector,
         uni = qu.rand_iso(d**2, d**2, dtype=dtype)
         uni.shape = (d, d, d, d)
 
-        return cls(n, uni, iso, phys_dim=d)
+        return cls(n, uni, iso, phys_dim=d, **mera_opts)
 
     @staticmethod
     def contract_structured_all(old, inplace=False, **opts):

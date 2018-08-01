@@ -909,10 +909,10 @@ def tags2set(tags):
 #                                Tensor Class                                 #
 # --------------------------------------------------------------------------- #
 
-def maybe_asarray(data):
-    if hasattr(data, 'shape'):
-        return data
-    return np.asarray(data)
+def _asarray(array):
+    if isinstance(array, np.matrix) or not hasattr(array, 'shape'):
+        return np.asarray(array)
+    return array
 
 
 class Tensor(object):
@@ -941,7 +941,7 @@ class Tensor(object):
             self._tags = data.tags.copy()
             return
 
-        self._data = maybe_asarray(data)
+        self._data = _asarray(data)
         self._inds = tuple(inds)
 
         if self._data.ndim != len(self.inds):
@@ -1011,7 +1011,7 @@ class Tensor(object):
             New tags.
         """
         if data is not None:
-            self._data = maybe_asarray(data)
+            self._data = _asarray(data)
 
         if inds is not None:
             # if this tensor has owners, update their ``ind_map``.
