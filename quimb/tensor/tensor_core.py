@@ -2899,6 +2899,14 @@ class TensorNetwork(object):
         # Else just contract those tensors specified by tags.
         return self.contract_tags(tags, inplace=inplace, **opts)
 
+    def contraction_complexity(self):
+        """Compute the 'contraction complexity' of this tensor network. This
+        is simply defined as the maximum tensor rank produced during the
+        'greedy' (so potentially only pseudo-optimal) contraction sequence.
+        """
+        expr = self.contract(all, get='expression')
+        return max(len(c[2].split('->')[-1]) for c in expr.contraction_list)
+
     def __rshift__(self, tags_seq):
         """Overload of '>>' for TensorNetwork.contract_cumulative.
         """
