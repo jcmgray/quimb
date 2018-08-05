@@ -804,8 +804,8 @@ def array_direct_product(X, Y, sum_axes=()):
     Z = np.zeros(final_shape, dtype=new_type)
 
     # Add tensors to the diagonals
-    Z[selectorX] += X
-    Z[selectorY] += Y
+    Z[tuple(selectorX)] += X
+    Z[tuple(selectorY)] += Y
 
     return Z
 
@@ -1507,7 +1507,7 @@ class TNLinearOperator(spla.LinearOperator):
         self._kws = {'get': 'expression'}
 
         # if recent opt_einsum specify constant tensors
-        if hasattr(opt_einsum.backends, 'parse_constants'):
+        if hasattr(opt_einsum.backends, 'evaluate_constants'):
             self._kws['constants'] = range(len(self._tensors))
             self._ins = ()
         else:
