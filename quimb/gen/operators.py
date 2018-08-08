@@ -364,7 +364,7 @@ def ham_heis(n, j=1.0, b=0.0, cyclic=True,
     # The basic operator (interaction and single b-field) that can be repeated.
     two_site_term = sum(
         j * kron(spin_operator(s, **op_kws), spin_operator(s, **op_kws))
-        for j, s in zip((jx, jy, jz), 'xyz') if j != 0.0
+        for j, s in zip((jx, jy, jz), 'xyz')
     ) - sum(
         b * kron(spin_operator(s, **op_kws), eye(2, **op_kws))
         for b, s in zip((bx, by, bz), 'xyz') if b != 0.0
@@ -513,7 +513,7 @@ def _gen_mbl_random_factors(n, dh, dh_dim, dh_dist, run=None, beta=None):
     elif dh_dist in {'s', 'flat', 'square', 'uniform', 'box'}:
         rs = 2.0 * np.random.rand(3, n) - 1.0
 
-    elif dh_dist in {'qp', 'quasiperiodic'}:
+    elif dh_dist in {'qp', 'quasiperiodic', 'qr', 'quasirandom'}:
         if dh_dim is not 'z':
             raise ValueError("dh_dim should be 1 or 'z' for dh_dist='qp'.")
 

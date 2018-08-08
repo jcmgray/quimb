@@ -2061,6 +2061,12 @@ class TensorNetwork(object):
     def __iter__(self):
         return iter(self.tensor_map.values())
 
+    def apply_to_arrays(self, fn):
+        """Modify every tensor's array inplace by applying ``fn`` to it.
+        """
+        for t in self:
+            t.modify(data=fn(t.data))
+
     # ----------------- selecting and splitting the network ----------------- #
 
     def slice2sites(self, tag_slice):
@@ -3062,8 +3068,8 @@ class TensorNetwork(object):
     # ------------------------------ printing ------------------------------- #
 
     def graph(tn, color=None, show_inds=None, show_tags=None, node_size=None,
-              iterations=200, k=None, fix=None,
-              figsize=(6, 6), legend=True, **plot_opts):
+              iterations=200, k=None, fix=None, figsize=(6, 6), legend=True,
+              return_fig=False, **plot_opts):
         """Plot this tensor network as a networkx graph using matplotlib,
         with edge width corresponding to bond dimension.
 
@@ -3220,7 +3226,7 @@ class TensorNetwork(object):
 
         edge_weights = [math.log2(d) for d in edge_weights]
 
-        plt.figure(figsize=figsize)
+        fig = plt.figure(figsize=figsize)
 
         # use spectral layout as starting point
         pos0 = nx.spectral_layout(G)
@@ -3255,7 +3261,10 @@ class TensorNetwork(object):
             plt.legend(handles, lbls, ncol=max(int(len(handles) / 20), 1),
                        loc='center left', bbox_to_anchor=(1, 0.5))
 
-        plt.show()
+        if return_fig:
+            return fig
+        else:
+            plt.show()
 
     def __getstate__(self):
         # This allows pickling, by removing all tensor owner weakrefs
