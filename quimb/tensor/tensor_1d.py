@@ -2234,3 +2234,75 @@ class MatrixProductOperator(TensorNetwork1DFlat,
             l3 = " {}{}{} ".format(" " * strl, l3, " " * strl)
 
         three_line_multi_print(l1, l2, l3, max_width=max_width)
+
+
+class Dense1D(TensorNetwork1DVector,
+              TensorNetwork1D,
+              TensorNetwork):
+    """Mimics other 1D tensor network structures, but really just keeps the
+    full state in a single tensor. This allows e.g. applying gates in the same
+    way for quantum circuit simulation as lazily represented hilbert spaces.
+
+    Parameters
+    ----------
+    array : array_like
+        The full hilbert space vector - assumed to be made of equal hilbert
+        spaces each of size ``phys_dim`` and will be reshaped as such.
+    phys_dim : int, optional
+        The hilbert space size of each site, default: 2.
+    tags : sequence of str, optional
+        Extra tags to add to the tensor network.
+    site_ind_id : str, optional
+        String formatter describing how to label the site indices.
+    site_tag_id : str, optional
+        String formatter describing how to label the site tags.
+    sites : sequence of int, optional
+        The actual sites represented by this tensor network, defaults to
+        ``range(nsites)``.
+    nsites : int, optional
+        The total number of sites, inferred from ``array`` if not given.
+    tn_opts
+        Supplied to :class:`~quimb.tensor.tensor_core.TensorNetwork`.
+    """
+
+    _EXTRA_PROPS = ('_site_ind_id', '_site_tag_id')
+
+    def __init__(self, array, phys_dim=2, tags=None,
+                 site_ind_id='k{}', site_tag_id='I{}',
+                 sites=None, nsites=None,
+                 **tn_opts):
+
+        # copy short-circuit
+        if isinstance(array, Dense1D):
+            super().__init__(array)
+            for ep in Dense1D._EXTRA_PROPS:
+                setattr(self, ep, getattr(array, ep))
+            return
+
+        # work out number of sites and sub-dimensions etc.
+        if nsites is None:
+            nsites = qu.infer_size(array, base=phys_dim)
+        if sites is None:
+            sites = range(nsites)
+        dims = [phys_dim] * len(sites)
+
+        # process site indices
+        self._site_ind_id = site_ind_id
+        site_inds = map(site_ind_id.format, sites)
+
+        # process site tags
+        self._site_tag_id = site_tag_id
+        site_tags = set(map(site_tag_id.format, sites))
+
+        if tags is not None:
+            if isinstance(tags, str):
+                tags = {tags}
+            else:
+                tags = set(tags)
+            site_tags = site_tags | tags
+
+        T = Tensor(_asarray(array).reshape(*dims),
+                   inds=site_inds, tags=site_tags)
+
+        super().__init__([T], structure=site_tag_id, sites=sites,
+                         nsites=nsites, check_collisions=False, **tn_opts)

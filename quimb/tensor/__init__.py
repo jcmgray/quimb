@@ -41,6 +41,7 @@ from .tensor_gen import (
 from .tensor_1d import (
     MatrixProductState,
     MatrixProductOperator,
+    Dense1D,
     align_TN_1D,
     expec_TN_1D,
     gate_TN_1D,
@@ -98,6 +99,7 @@ __all__ = (
     "NNI_ham_mbl",
     "MatrixProductState",
     "MatrixProductOperator",
+    "Dense1D",
     "align_TN_1D",
     "expec_TN_1D",
     "gate_TN_1D",
