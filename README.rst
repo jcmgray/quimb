@@ -11,7 +11,7 @@
 .. image:: https://landscape.io/github/jcmgray/quimb/develop/landscape.svg?style=flat
    :target: https://landscape.io/github/jcmgray/quimb/develop
    :alt: Code Health
-.. image:: https://img.shields.io/readthedocs/quimb/stable.svg
+.. image:: https://img.shields.io/readthedocs/quimb/master.svg
    :target: http://quimb.readthedocs.io/en/latest/?badge=latest
    :alt: Documentation Status
 
