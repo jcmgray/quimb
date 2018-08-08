@@ -3,6 +3,7 @@
 
 import functools
 from math import log2
+import re
 
 import numpy as np
 
@@ -117,9 +118,9 @@ def expec_TN_1D(*tns, compress=None, eps=1e-15):
 
 
 def gate_TN_1D(tn, G, where, contract=False, tags=None,
-               propagate_tags=True, inplace=False):
+               propagate_tags='sites', inplace=False):
     r"""Act with the gate ``g`` on sites ``where``, maintaining the outer
-    indices of the MPS::
+    indices of the 1D tensor netowork::
 
         contract=False     contract=True
             ...                  ...         <- where
@@ -127,6 +128,9 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
         | | | | | | |      | | | / \ | | |
             GGG
             | |
+
+    By default, site tags will be propagated to the gate tensors, identifying
+    a 'light cone'.
 
     Parameters
     ----------
@@ -141,9 +145,10 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
         Contract the gate into the MPS, or leave it uncontracted.
     tags : str or sequence of str, optional
         Tag the new gate tensor with these tags.
-    propagate_tags : bool, optional
+    propagate_tags : {'sites', False, True}, optional
         Add any tags from the sites to the new gate tensor (only matters if
-        ``contract=False`` else tags are merged anyway). Default: True.
+        ``contract=False`` else tags are merged anyway). If ``'sites'``, then
+        only propagate tags matching e.g. 'I{}' and ignore all others.
     inplace, bool, optional
         Perform the gate in place.
 
@@ -165,9 +170,9 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
     >>> p.outer_inds()
     ('k0', 'k1', 'k2')
     """
-    p = tn if inplace else tn.copy()
+    psi = tn if inplace else tn.copy()
 
-    dp = p.phys_dim()
+    dp = psi.phys_dim()
     tags = tags2set(tags)
 
     if isinstance(where, int):
@@ -184,28 +189,34 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
                          "".format(G.shape, where))
 
     bnds = [rand_uuid() for _ in range(ns)]
-    # site_tags = [p.site_tag(i) for i in where]
-    site_ix = [p.site_ind(i) for i in where]
+    # site_tags = [psi.site_tag(i) for i in where]
+    site_ix = [psi.site_ind(i) for i in where]
     gate_ix = site_ix + bnds
 
-    p.reindex(dict(zip(site_ix, bnds)), inplace=True)
+    psi.reindex(dict(zip(site_ix, bnds)), inplace=True)
 
     # get the sites that used to have the physical indices
-    site_tids = p._get_tids_from_inds(bnds, which='any')
+    site_tids = psi._get_tids_from_inds(bnds, which='any')
 
     TG = Tensor(G, gate_ix, tags=tags)
 
     if contract:
         # pop the sites, contract, then re-add
-        pts = [p._pop_tensor(tid) for tid in site_tids]
-        p |= TG.contract(*pts)
+        pts = [psi._pop_tensor(tid) for tid in site_tids]
+        psi |= TG.contract(*pts)
     else:
-        p |= TG
+        psi |= TG
         if propagate_tags:
-            old_tags = get_tags(p.tensor_map[tid] for tid in site_tids)
+            old_tags = get_tags(psi.tensor_map[tid] for tid in site_tids)
+
+            if propagate_tags == 'sites':
+                # use regex to take tags only matching e.g. 'I0', 'I13'
+                rex = re.compile(psi.structure.format("\d+"))
+                old_tags = {t for t in old_tags if rex.match(t)}
+
             TG.modify(tags=TG.tags | old_tags)
 
-    return p
+    return psi
 
 
 def rand_padder(vector, pad_width, iaxis, kwargs):
