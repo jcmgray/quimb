@@ -10,6 +10,7 @@ from quimb import (
 )
 from quimb.accel import (
     issparse,
+    isdense,
     isket,
     isop,
     isbra,
@@ -146,6 +147,7 @@ class TestShapes:
     def test_sparse(self):
         x = np.matrix([[1], [0]])
         assert not issparse(x)
+        assert isdense(x)
         x = sp.csr_matrix(x)
         assert issparse(x)
 
@@ -261,12 +263,14 @@ class TestDot:
         cq = dot(mat_s, ket_d)
         cn = mat_s @ ket_d
         assert not issparse(cq)
+        assert isdense(cq)
         assert_allclose(cq.A, cn)
 
     def test_dot_sparse_dense_ket(self, mat_s, ket_d):
         cq = dot(mat_s, ket_d)
         cn = mat_s @ ket_d
         assert not issparse(cq)
+        assert isdense(cq)
         assert isket(cq)
         assert_allclose(cq.A, cn)
 

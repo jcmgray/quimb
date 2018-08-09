@@ -222,9 +222,15 @@ def isvec(qob):
 
 
 def issparse(qob):
-    """Checks if ``qob`` is sparse.
+    """Checks if ``qob`` is explicitly sparse.
     """
     return isinstance(qob, sp.spmatrix)
+
+
+def isdense(qob):
+    """Checks if ``qob`` is explicitly dense.
+    """
+    return isinstance(qob, np.ndarray)
 
 
 def isreal(qob, **allclose_opts):

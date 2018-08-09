@@ -8,7 +8,7 @@ import scipy.linalg as sla
 import scipy.sparse.linalg as spla
 
 from ..utils import raise_cant_find_library_function
-from ..accel import issparse, vdot, dot_dense, ldmul
+from ..accel import issparse, isdense, vdot, dot_dense, ldmul
 from .numpy_linalg import (
     eig_numpy,
     eigs_numpy,
@@ -258,7 +258,7 @@ def _rel_window_to_abs_window(el_min, el_max, w_0, w_sz=None):
     return el_w_0
 
 
-def eigh_window(A, w_0, w_n=6, w_sz=None, backend='AUTO',
+def eigh_window(A, w_0, k, w_sz=None, backend='AUTO',
                 return_vecs=True, offset_const=1 / 104729, **kwargs):
     """ Return eigenpairs internally from a hermitian matrix.
 
@@ -266,9 +266,9 @@ def eigh_window(A, w_0, w_n=6, w_sz=None, backend='AUTO',
     ----------
     A : operator
         Operator to retrieve eigenpairs from.
-    w_0 : float [0.0 - 1.0]
+    w_0 : float [0.0, 1.0]
         Relative window centre to retrieve eigenpairs from.
-    w_n : int, optional
+    k : int
         Target number of eigenpairs to retrieve.
     w_sz : float, optional
         Relative maximum window width within which to keep eigenpairs.
@@ -288,7 +288,7 @@ def eigh_window(A, w_0, w_n=6, w_sz=None, backend='AUTO',
     """
     w_sz = w_sz if w_sz is not None else 1.1
 
-    if not issparse(A) or backend.upper() == 'NUMPY':
+    if isdense(A) or backend.upper() == 'NUMPY':
         if return_vecs:
             lk, vk = eigh(A.A if issparse(A) else A, **kwargs)
         else:
@@ -303,9 +303,9 @@ def eigh_window(A, w_0, w_n=6, w_sz=None, backend='AUTO',
         l_w0 += (lmax - lmin) * offset_const  # for 1/0 issues
 
         if return_vecs:
-            lk, vk = eigh(A, k=w_n, sigma=l_w0, backend=backend, **kwargs)
+            lk, vk = eigh(A, k=k, sigma=l_w0, backend=backend, **kwargs)
         else:
-            lk = eigvalsh(A, k=w_n, sigma=l_w0, backend=backend, **kwargs)
+            lk = eigvalsh(A, k=k, sigma=l_w0, backend=backend, **kwargs)
 
     # Trim eigenpairs from beyond window
     in_window = (lk > l_wmin) & (lk < l_wmax)

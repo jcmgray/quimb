@@ -495,7 +495,7 @@ def ham_j1j2(n, j1=1.0, j2=0.5, bz=0.0, cyclic=True, ownership=None):
     return ham
 
 
-def _gen_mbl_random_factors(n, dh, dh_dim, dh_dist, run=None, beta=None):
+def _gen_mbl_random_factors(n, dh, dh_dim, dh_dist, seed=None, beta=None):
     # sort out a vector of noise strengths -> e.g. (0, 0, 1) for z-noise only
     if isinstance(dh, (tuple, list)):
         dhds = dh
@@ -503,8 +503,8 @@ def _gen_mbl_random_factors(n, dh, dh_dim, dh_dist, run=None, beta=None):
         dh_dim = {0: '', 1: 'z', 2: 'xy', 3: 'xyz'}.get(dh_dim, dh_dim)
         dhds = tuple((dh if d in dh_dim else 0) for d in 'xyz')
 
-    if run is not None:
-        np.random.seed(run)
+    if seed is not None:
+        np.random.seed(seed)
 
     # sort out the noise distribution
     if dh_dist in {'g', 'gauss', 'gaussian', 'normal'}:
@@ -533,7 +533,7 @@ def _gen_mbl_random_factors(n, dh, dh_dim, dh_dist, run=None, beta=None):
 
 @hamiltonian_builder
 def ham_mbl(n, dh, j=1.0, bz=0.0, cyclic=True,
-            run=None, dh_dist="s", dh_dim=1, beta=None, ownership=None):
+            seed=None, dh_dist="s", dh_dim=1, beta=None, ownership=None):
     """ Constructs a heisenberg hamiltonian with isotropic coupling and
     random fields acting on each spin - the many-body localized (MBL)
     spin hamiltonian.
@@ -551,7 +551,7 @@ def ham_mbl(n, dh, j=1.0, bz=0.0, cyclic=True,
         Global magnetic field (in z-direction).
     cyclic : bool, optional
         Whether to use periodic boundary conditions.
-    run : int, optional
+    seed : int, optional
         Number to seed random number generator with.
     dh_dist : {'g', 's', 'qr'}, optional
         Type of random distribution for the noise:
@@ -561,7 +561,7 @@ def ham_mbl(n, dh, j=1.0, bz=0.0, cyclic=True,
         - "qp": quasi periodic, with amplitude ``dh`` and
           'wavenumber' ``beta`` so that the field at site ``i`` is
           ``dh * cos(2 * pi * beta * i + delta)`` with ``delta`` a random
-          offset between ``(0, 2 * pi)``, possibly seeded by ``run``.
+          offset between ``(0, 2 * pi)``, possibly seeded by ``seed``.
 
     dh_dim : {1, 2, 3} or str, optional
         The number of dimensions the noise acts in, or string
@@ -587,7 +587,7 @@ def ham_mbl(n, dh, j=1.0, bz=0.0, cyclic=True,
     --------
     MPO_ham_mbl
     """
-    dhds, rs = _gen_mbl_random_factors(n, dh, dh_dim, dh_dist, run, beta)
+    dhds, rs = _gen_mbl_random_factors(n, dh, dh_dim, dh_dist, seed, beta)
 
     # the base hamiltonian ('csr' is most efficient format to add with)
     ham = ham_heis(n=n, j=j, b=bz, cyclic=cyclic,
