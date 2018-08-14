@@ -175,7 +175,7 @@ class TestPartialTraceCompress:
         assert max(sysa) + gap + 1 == min(sysb)
 
         ln = dmrg.state.logneg_subsys(
-            sysa, sysb, approx_spectral_opts={'verbosity': 2, 'bsz': 16})
+            sysa, sysb, approx_spectral_opts={'bsz': 16}, verbosity=2)
 
         # exact
         lne = logneg_subsys(groundstate(ham_heis(n, cyclic=False)),

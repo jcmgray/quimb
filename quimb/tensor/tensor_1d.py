@@ -1441,7 +1441,8 @@ class MatrixProductState(TensorNetwork1DVector,
     def partial_trace_compress(self, sysa, sysb, eps=1e-8,
                                method=('isvd', None), max_bond=(None, 1024),
                                leave_short=True, renorm=True,
-                               lower_ind_id='b{}', **compress_opts):
+                               lower_ind_id='b{}', verbosity=0,
+                               **compress_opts):
         r"""Perform a compressed partial trace using singular value
         lateral then vertical decompositions of transfer matrix products::
 
@@ -1482,8 +1483,9 @@ class MatrixProductState(TensorNetwork1DVector,
             The sites, which should be contiguous, defining subsystem A.
         sysb :  sequence of int
             The sites, which should be contiguous, defining subsystem B.
-        eps : float, optional
-            Tolerance to use when compressing the subsystem transfer matrices.
+        eps : float or (float, float), optional
+            Tolerance(s) to use when compressing the subsystem transfer
+            matrices and vertically decomposing.
         method : str or (str, str), optional
             Method(s) to use for laterally compressing the state then
             vertially compressing subsytems.
@@ -1500,6 +1502,9 @@ class MatrixProductState(TensorNetwork1DVector,
         compress_opts : dict, optional
             If given, supplied to ``partial_trace_compress`` to govern how
             singular values are treated. See ``tensor_split``.
+        verbosity : {0, 1}, optional
+            How much information to print while performing the compressed
+            partial trace.
 
         Returns
         -------
@@ -1511,7 +1516,7 @@ class MatrixProductState(TensorNetwork1DVector,
         if len(sysa) + len(sysb) == N:
             raise ValueError("Nothing to trace out.")
 
-        # parse horizntal and vertial svd tolerances and methods
+        # parse horizontal and vertical svd tolerances and methods
         try:
             heps, veps = eps
         except (ValueError, TypeError):
@@ -1600,9 +1605,22 @@ class MatrixProductState(TensorNetwork1DVector,
                 right_sz = self.bond_size(section[-1], section[-1] + 1)
 
                 if self.phys_dim() ** len(section) <= left_sz * right_sz:
+
+                    if verbosity >= 1:
+                        print("Leaving lateral compress of section '{}' as it "
+                              "is too short: length={}, eff size={}."
+                              .format(section, len(section),
+                                      left_sz * right_sz))
+
                     continue
 
             section_tags = map(self.site_tag, section)
+
+            if verbosity >= 1:
+                print("Laterally compresseing section {}. Using options: "
+                      "eps={}, method={}, max_bond={}"
+                      .format(section, heps, hmethod, hmax_bond))
+
             kb.replace_with_svd(section_tags, (ul, ll), heps, inplace=True,
                                 ltags='_LEFT', rtags='_RIGHT', method=hmethod,
                                 max_bond=hmax_bond, **compress_opts)
@@ -1637,6 +1655,11 @@ class MatrixProductState(TensorNetwork1DVector,
                     else:
                         vmethod = 'isvd'
 
+                if verbosity >= 1:
+                    print("Performing vertical decomposition of section {}, "
+                          "using options: eps={}, method={}, max_bond={}."
+                          .format(label, veps, vmethod, vmax_bond))
+
                 # do vertical SVD
                 kb.replace_with_svd(
                     section_tags, (ul, ur), right_inds=(ll, lr), eps=veps,
@@ -1656,6 +1679,10 @@ class MatrixProductState(TensorNetwork1DVector,
                 #    | | | | | | |   ===>
                 #   -A-A-A-A-A-A-A-        -AAAAAAA-
                 #                              |
+
+                if verbosity >= 1:
+                    print("Just vertical unfolding section {}.".format(label))
+
                 kb, sec = kb.partition(section_tags, inplace=True)
                 sec_l, sec_u = sec.partition('_KET', inplace=True)
                 T_UP = (sec_u ^ all)
@@ -1736,6 +1763,7 @@ class MatrixProductState(TensorNetwork1DVector,
         if renorm:
             # normalize
             norm = kb.trace(['kA', 'kB'], ['bA', 'bB'])
+
             ts = []
             tags = kb.tags
 
@@ -1760,7 +1788,8 @@ class MatrixProductState(TensorNetwork1DVector,
         return kb
 
     def logneg_subsys(self, sysa, sysb, compress_opts=None,
-                      approx_spectral_opts=None, approx_thresh=2**12):
+                      approx_spectral_opts=None, verbosity=0,
+                      approx_thresh=2**12):
         r"""Compute the logarithmic negativity between subsytem blocks, e.g.::
 
                                sysa         sysb
@@ -1798,6 +1827,10 @@ class MatrixProductState(TensorNetwork1DVector,
             compress_opts = {}
         if approx_spectral_opts is None:
             approx_spectral_opts = {}
+
+        # set the default verbosity for each method
+        compress_opts.setdefault('verbosity', verbosity)
+        approx_spectral_opts.setdefault('verbosity', verbosity)
 
         # form the compressed density matrix representation
         rho_ab = self.partial_trace_compress(sysa, sysb, **compress_opts)
