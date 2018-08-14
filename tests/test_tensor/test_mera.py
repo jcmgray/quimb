@@ -6,7 +6,7 @@ import quimb.tensor as qt
 class TestMERA:
 
     @pytest.mark.parametrize("dtype", [float, complex])
-    def test_contstruct_random(self, dtype):
+    def test_construct_random(self, dtype):
 
         mera = qt.MERA.rand(16)
 

@@ -10,8 +10,8 @@ class TestSpinHam:
     @pytest.mark.parametrize("cyclic", [False, True])
     def test_var_terms(self, cyclic):
         n = 8
-        Hd = qu.ham_mbl(n, dh=0.77, run=42, cyclic=cyclic)
-        Ht = qtn.MPO_ham_mbl(n, dh=0.77, run=42, cyclic=cyclic).to_dense()
+        Hd = qu.ham_mbl(n, dh=0.77, seed=42, cyclic=cyclic)
+        Ht = qtn.MPO_ham_mbl(n, dh=0.77, seed=42, cyclic=cyclic).to_dense()
         assert_allclose(Hd, Ht)
 
     @pytest.mark.parametrize("var_two", ['none', 'some', 'only'])

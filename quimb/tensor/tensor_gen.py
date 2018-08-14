@@ -884,12 +884,12 @@ def NNI_ham_heis(n=None, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **nni_opts):
     return H.build_nni(n=n, **nni_opts)
 
 
-def _ham_mbl(n, dh, j=1.0, run=None, S=1 / 2, *, cyclic=False,
+def _ham_mbl(n, dh, j=1.0, seed=None, S=1 / 2, *, cyclic=False,
              dh_dist='s', dh_dim=1, beta=None):
     # start with the heisenberg builder
     H = _ham_heis(j, S=S, cyclic=cyclic)
 
-    dhds, rs = _gen_mbl_random_factors(n, dh, dh_dim, dh_dist, run, beta)
+    dhds, rs = _gen_mbl_random_factors(n, dh, dh_dim, dh_dist, seed, beta)
 
     # generate noise, potentially in all directions, each with own strength
     for i in range(n):
@@ -901,7 +901,7 @@ def _ham_mbl(n, dh, j=1.0, run=None, S=1 / 2, *, cyclic=False,
     return H
 
 
-def MPO_ham_mbl(n, dh, j=1.0, run=None, S=1 / 2, *, cyclic=False,
+def MPO_ham_mbl(n, dh, j=1.0, seed=None, S=1 / 2, *, cyclic=False,
                 dh_dist='s', dh_dim=1, beta=None, **mpo_opts):
     """The many-body-localized spin hamiltonian in MPO form.
 
@@ -913,7 +913,7 @@ def MPO_ham_mbl(n, dh, j=1.0, run=None, S=1 / 2, *, cyclic=False,
         Random noise strength.
     j : float, or (float, float, float), optional
         Interaction strength(s) e.g. 1 or (1., 1., 0.5).
-    run : int, optional
+    seed : int, optional
         Random number to seed the noise with.
     S : {1/2, 1, 3/2, ...}, optional
         The underlying spin of the system, defaults to 1/2.
@@ -930,12 +930,12 @@ def MPO_ham_mbl(n, dh, j=1.0, run=None, S=1 / 2, *, cyclic=False,
     -------
     MatrixProductOperator
     """
-    H = _ham_mbl(n, dh=dh, j=j, run=run, S=S, cyclic=cyclic,
+    H = _ham_mbl(n, dh=dh, j=j, seed=seed, S=S, cyclic=cyclic,
                  dh_dist=dh_dist, dh_dim=dh_dim, beta=beta)
     return H.build_mpo(n, **mpo_opts)
 
 
-def NNI_ham_mbl(n, dh, j=1.0, run=None, S=1 / 2, *, cyclic=False,
+def NNI_ham_mbl(n, dh, j=1.0, seed=None, S=1 / 2, *, cyclic=False,
                 dh_dist='s', dh_dim=1, beta=None, **nni_opts):
     """The many-body-localized spin hamiltonian in NNI form.
 
@@ -947,7 +947,7 @@ def NNI_ham_mbl(n, dh, j=1.0, run=None, S=1 / 2, *, cyclic=False,
         Random noise strength.
     j : float, or (float, float, float), optional
         Interaction strength(s) e.g. 1 or (1., 1., 0.5).
-    run : int, optional
+    seed : int, optional
         Random number to seed the noise with.
     S : {1/2, 1, 3/2, ...}, optional
         The underlying spin of the system, defaults to 1/2.
@@ -964,6 +964,6 @@ def NNI_ham_mbl(n, dh, j=1.0, run=None, S=1 / 2, *, cyclic=False,
     -------
     NNI
     """
-    H = _ham_mbl(n, dh=dh, j=j, run=run, S=S, cyclic=cyclic,
+    H = _ham_mbl(n, dh=dh, j=j, seed=seed, S=S, cyclic=cyclic,
                  dh_dist=dh_dist, dh_dim=dh_dim, beta=beta)
     return H.build_nni(n, **nni_opts)

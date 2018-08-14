@@ -209,14 +209,14 @@ class TestEvalsWindowed:
 
     def test_dense_return_vecs(self, mat_herm_dense):
         u, a = mat_herm_dense
-        ev = qu.eigvecsh_window(a, w_0=0.5, w_n=2, w_sz=0.8)
+        ev = qu.eigvecsh_window(a, w_0=0.5, k=2, w_sz=0.8)
         assert ev.shape == (4, 2)
         assert_allclose(abs(u[:, :2].H @ ev[:, ]), [[1, 0], [0, 1]],
                         atol=1e-14)
 
     def test_sparse_return_vecs(self, mat_herm_sparse):
         u, a = mat_herm_sparse
-        ev = qu.eigvecsh_window(a, w_0=0.5, w_n=2, w_sz=0.8)
+        ev = qu.eigvecsh_window(a, w_0=0.5, k=2, w_sz=0.8)
         assert ev.shape == (4, 2)
         assert_allclose(abs(u[:, :2].H @ ev[:, ]), [[1, 0], [0, 1]],
                         atol=1e-14)

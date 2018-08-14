@@ -111,14 +111,14 @@ class TestTEBD:
         n = 10
         tf = 1.0
         p0 = qtn.MPS_rand_state(n, bond_dim=1)
-        H = qtn.NNI_ham_mbl(n, dh=1.7, cyclic=False, run=42)
+        H = qtn.NNI_ham_mbl(n, dh=1.7, cyclic=False, seed=42)
         print(H)
         assert H.special_sites == {(i, i + 1) for i in range(n)}
         tebd = qtn.TEBD(p0, H)
         tebd.update_to(tf, tol=1e-3)
 
         p0d = p0.to_dense()
-        Hd = qu.ham_mbl(n, dh=1.7, cyclic=False, run=42, sparse=True)
+        Hd = qu.ham_mbl(n, dh=1.7, cyclic=False, seed=42, sparse=True)
         evo = qu.Evolution(p0d, Hd)
         evo.update_to(tf)
 

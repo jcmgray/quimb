@@ -305,7 +305,7 @@ class TestDMRGX:
     def test_explicit_sweeps(self):
         n = 8
         chi = 16
-        ham = MPO_ham_mbl(n, dh=4, run=42)
+        ham = MPO_ham_mbl(n, dh=4, seed=42)
         p0 = MPS_rand_state(n, 2).expand_bond_dimension(chi)
 
         b0 = p0.H
@@ -343,7 +343,7 @@ class TestDMRGX:
     def test_solve_bigger(self):
         n = 14
         chi = 16
-        ham = MPO_ham_mbl(n, dh=8, run=42)
+        ham = MPO_ham_mbl(n, dh=8, seed=42)
         p0 = MPS_computational_state('00110111000101')
         dmrgx = DMRGX(ham, p0, chi)
         assert dmrgx.solve(tol=1e-5, sweep_sequence='R')
