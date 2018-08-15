@@ -9,7 +9,7 @@ Basic Usage
 
 Set up the :class:`~quimb.evo.Evolution` object with a initial state and hamiltonian.
 
-.. code-block:: python
+.. code-block:: py3
 
     >>> p0 = rand_ket(2**10)
     >>> h = ham_heis(10, sparse=True)
@@ -17,7 +17,7 @@ Set up the :class:`~quimb.evo.Evolution` object with a initial state and hamilto
 
 Update it in a single shot to a new time and get the state,
 
-.. code-block:: python
+.. code-block:: py3
 
     >>> evo.update_to(1)
     >>> evo.pt
@@ -31,7 +31,7 @@ Update it in a single shot to a new time and get the state,
 
 Lazily generate the state at multiple times,
 
-.. code-block:: python
+.. code-block:: py3
 
     >>> for pt in evo.at_times([2, 3, 4]):
     ...     print(expec(pt, p0))
@@ -57,7 +57,7 @@ Computing on the fly
 Sometimes, if integrating, it is best to just query the state at time-steps chosen dynamically by the adaptive scheme. This is achieved using the ``compute`` keyword supplied to ``Evolution``. It can also just be a convenient way to set up calculations as well:
 
 
-.. code-block:: python
+.. code-block:: py3
 
     >>> p0 = rand_ket(2**10)
     >>> h = ham_heis(10, sparse=True)
@@ -75,7 +75,7 @@ Sometimes, if integrating, it is best to just query the state at time-steps chos
 
 If a dict of callables is supplied to ``compute``, (each should take two arguments, the time, and the state, as above), ``Evolution.results`` will itself be a dictionary containing the results of each function at each time step, under the respective key:
 
-.. code-block:: python
+.. code-block:: py3
 
     >>> p0 = rand_ket(2**10)
     >>> h = ham_heis(10, sparse=True)

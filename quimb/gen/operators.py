@@ -169,7 +169,7 @@ def hadamard(dtype=complex, sparse=False):
 @functools.lru_cache(128)
 def phase_gate(phi, dtype=complex, sparse=False):
     """The generalized qubit phase-gate, which adds phase ``phi`` to the
-    |1> state.
+    ``|1>`` state.
     """
     Rp = qu([[1., 0.],
              [0., np.exp(1.0j * phi)]], dtype=dtype, sparse=sparse)

@@ -1,5 +1,5 @@
-Special States & Operators
-==========================
+Built-in & Random States & Operators
+====================================
 
 States
 ------
@@ -28,8 +28,6 @@ States
 
 Operators
 ---------
-
-Most of these are cached (and immutable), so can be called repeatedly without creating any new objects.
 
 **Gate operators**:
 
@@ -65,11 +63,16 @@ Most of these are cached (and immutable), so can be called repeatedly without cr
 - :func:`~quimb.gen.operators.num`
 - :func:`~quimb.gen.operators.ham_hubbard_hardcore`
 
+Most of these are cached (and immutable), so can be called repeatedly without creating any new objects:
+
+.. code-block:: py3
+
+    >>> pauli('Z') is pauli('Z')
+    True
+
 
 Random States & Operators
 -------------------------
-
-All of these functions accept a ``seed`` argument for replicability.
 
 **Random pure states**:
 
@@ -91,5 +94,35 @@ All of these functions accept a ``seed`` argument for replicability.
 - :func:`~quimb.gen.rand.rand_seperable`
 - :func:`~quimb.gen.rand.rand_iso`
 
+All of these functions accept a ``seed`` argument for replicability:
+
+.. code-block:: py3
+
+    >>> rand_rho(2, seed=42)
+    matrix([[ 0.19676417+7.75822299e-19j, -0.0844203 +2.13363513e-01j],
+            [-0.0844203 -2.13363513e-01j,  0.80323583-2.69158919e-18j]])
+
+    >>> rand_rho(2, seed=42)
+    matrix([[ 0.19676417+7.75822299e-19j, -0.0844203 +2.13363513e-01j],
+            [-0.0844203 -2.13363513e-01j,  0.80323583-2.69158919e-18j]])
+
+
 For some applications, generating random numbers with ``numpy`` alone can be a bottleneck.
 ``quimb`` will instead peform fast, multi-threaded random number generation with `randomgen <https://github.com/bashtage/randomgen>`_ if it is installed, which can potentially offer an order of magnitude better performance. While the random number sequences can be still replicated using the ``seed`` argument, they also depend (deterministically) on the number of threads used, so may vary across machines unless this is set (e.g. with ``'OMP_NUM_THREADS'``). Use of ``randomgen`` can be explicitly turned off with the environment variable ``QUIMB_USE_RANDOMGEN='false'``.
+
+The following gives a quick idea of the speed-ups possible. First random, complex, normally distributed array generation with a naive ``numpy`` method:
+
+.. code-block:: py3
+
+    >>> import numpy as np
+    >>> %timeit np.random.randn(2**22) + 1j * np.random.randn(2**22)
+    297 ms ± 2.09 ms per loop (mean ± std. dev. of 7 runs, 1 loop each)
+
+
+And generation with ``quimb``:
+
+.. code-block:: py3
+
+    >>> import quimb as qu
+    >>> %timeit qu.randn(2**22, dtype=complex)
+    32.1 ms ± 1.39 ms per loop (mean ± std. dev. of 7 runs, 10 loops each)

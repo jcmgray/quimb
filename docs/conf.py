@@ -13,11 +13,7 @@
 # All configuration values have a default; values that are commented out
 # serve to show the default.
 
-import sys
-import os
-import shlex
-import numpy
-import scipy
+import sphinx_bootstrap_theme
 import quimb
 import quimb.tensor
 
@@ -140,7 +136,6 @@ todo_include_todos = False
 # html_theme = 'alabaster'
 # html_theme = 'flask'
 
-import sphinx_bootstrap_theme
 html_theme = 'bootstrap'
 html_theme_path = sphinx_bootstrap_theme.get_html_theme_path()
 html_theme_options = {
@@ -154,6 +149,9 @@ html_theme_options = {
         ("<b>Github</b>", "https://github.com/jcmgray/quimb", True),
     ],
 }
+
+# paraiso-light, pastie, manni
+pygments_style = 'manni'
 
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
@@ -184,8 +182,10 @@ html_theme_options = {
 # so a file named "default.css" will overwrite the builtin "default.css".
 html_static_path = ['_static']
 
+
 def setup(app):
     app.add_stylesheet("my-styles.css")
+
 
 html_logo = "_static/quimb_logo_title.png"
 html_favicon = "_static/quimb.ico"
