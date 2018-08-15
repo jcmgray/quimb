@@ -168,7 +168,7 @@ def eigs_lobpcg(A, k, *, B=None, v0=None, which=None, return_vecs=True,
 
     # set up the initial subsspace to iterate with
     if v0 is None:
-        v0 = np.random.choice([1.0, -1.0], size=(d, k))
+        v0 = qu.randn((d, k), dtype=A.dtype)
     else:
         # check if intial space should be projected too
         if P is not None and v0.shape[0] != d:
@@ -178,7 +178,7 @@ def eigs_lobpcg(A, k, *, B=None, v0=None, which=None, return_vecs=True,
 
         # if not enough initial states given, flesh out with random
         if v0.shape[1] != k:
-            v0 = np.hstack(v0, np.random.randn(d, k - v0.shape[1]))
+            v0 = np.hstack(v0, qu.randn((d, k - v0.shape[1]), dtype=A.dtype))
 
     lk, vk = spla.lobpcg(A=A, X=v0, B=B, largest=largest, **lobpcg_opts)
 

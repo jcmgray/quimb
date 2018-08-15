@@ -4,6 +4,8 @@
 import numpy as np
 import random
 
+import quimb as qu
+
 from .tensor_core import rand_uuid, Tensor
 from .tensor_1d import MatrixProductState
 from .tensor_gen import MPO_rand, MPO_zeros_like, randn
@@ -22,7 +24,7 @@ def construct_lanczos_tridiag_MPO(A, K, v0=None, initial_bond_dim=None,
     if v0 is None:
         if seed:
             # needs to be truly random so MPI processes don't overlap
-            np.random.seed(random.SystemRandom().randint(0, 2**32 - 1))
+            qu.seed_rand(random.SystemRandom().randint(0, 2**32 - 1))
 
         V = MPO_rand(A.nsites, initial_bond_dim, phys_dim=A.phys_dim())
     else:  # normalize
@@ -414,7 +416,7 @@ def construct_lanczos_tridiag_PTPTLazyMPS(A, K, v0=None, initial_bond_dim=None,
     if v0 is None:
         if seed:
             # needs to be truly random so MPI processes don't overlap
-            np.random.seed(random.SystemRandom().randint(0, 2**32 - 1))
+            qu.seed_rand(random.SystemRandom().randint(0, 2**32 - 1))
 
         V = A.rand_state(bond_dim=initial_bond_dim)
     else:  # normalize

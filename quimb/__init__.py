@@ -156,6 +156,7 @@ from .gen.rand import (
     rand_seperable,
     rand_iso,
     rand_mera,
+    seed_rand,
 )
 
 # Functions for calculating properties
@@ -355,6 +356,7 @@ __all__ = [
     'rand_seperable',
     'rand_iso',
     'rand_mera',
+    'seed_rand',
     'computational_state',
     # Calc ------------------------------------------------------------------ #
     'expm',

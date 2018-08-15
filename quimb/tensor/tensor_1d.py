@@ -224,9 +224,11 @@ def rand_padder(vector, pad_width, iaxis, kwargs):
     """
     rand_strength = kwargs.get('rand_strength')
     if pad_width[0]:
-        vector[:pad_width[0]] = rand_strength * np.random.randn(pad_width[0])
+        vector[:pad_width[0]] = rand_strength * qu.randn(pad_width[0],
+                                                         dtype='float32')
     if pad_width[1]:
-        vector[-pad_width[1]:] = rand_strength * np.random.randn(pad_width[1])
+        vector[-pad_width[1]:] = rand_strength * qu.randn(pad_width[1],
+                                                          dtype='float32')
     return vector
 
 

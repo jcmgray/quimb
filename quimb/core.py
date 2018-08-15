@@ -1071,7 +1071,7 @@ def itrace(a, axes=(0, 1)):
     --------
     Trace out a single pair of dimensions:
 
-    >>> a = np.random.rand(2, 3, 4, 2, 3, 4)
+    >>> a = randn(2, 3, 4, 2, 3, 4)
     >>> itrace(a, axes=(0, 3)).shape
     (3, 4, 3, 4)
 

@@ -13,7 +13,7 @@ from scipy.ndimage.filters import uniform_filter1d
 from ..core import ptr
 from ..accel import prod, vdot, njit
 from ..utils import int2tup
-from ..gen.rand import randn, rand_rademacher
+from ..gen.rand import randn, rand_rademacher, seed_rand
 from ..linalg.mpi_launcher import get_mpi_pool
 from ..tensor.tensor_core import Tensor
 from ..tensor.tensor_1d import MatrixProductOperator
@@ -162,7 +162,7 @@ def random_rect(shape, dist='rademacher', orthog=False, norm=True,
     """
     if seed:
         # needs to be truly random so e.g. MPI processes don't overlap
-        np.random.seed(random.SystemRandom().randint(0, 2**32 - 1))
+        seed_rand(random.SystemRandom().randint(0, 2**32 - 1))
 
     if dist == 'rademacher':
         V = rand_rademacher(shape, scale=1 / sqrt(prod(shape)), dtype=dtype)

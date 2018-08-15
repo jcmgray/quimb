@@ -11,6 +11,7 @@ from ..accel import rdmul, dot, matrixify, _NUM_THREAD_WORKERS, get_thread_pool
 from ..core import qu, ptr, kron, nmlz, prod
 
 
+# -------------------------------- RANDOMGEN -------------------------------- #
 if (
     find_spec('randomgen') and
     os.environ.get('QUIMB_USE_RANDOMGEN', '').lower() not in {'false', 'off'}
@@ -20,8 +21,8 @@ if (
 
     @lru_cache(2)
     def _get_randomgens(num_threads):
-        """Cached generation of random number generators, allows
-        ``random_seed_fn`` and greater efficiency.
+        """Cached generation of random number generators, enables
+        ``random_seed_fn`` functionality and greater efficiency.
         """
         global _RANDOM_GENS
 
@@ -35,25 +36,30 @@ if (
 
         return _RANDOM_GENS[:num_threads]
 
-    def random_seed_fn(fn):
-        """Modify ``fn`` to take a ``seed`` argument with which to call
-        the seeder of ``randomgen``.
-        """
+    def seed_rand(seed):
+        # all RNGs inherit state from the first RNG of _get_randomgens
+        _get_randomgens(1)[0].seed(seed)
 
-        @wraps(fn)
-        def wrapped_fn(*args, seed=None, **kwargs):
-            if seed is not None:
-                rg, = _get_randomgens(1)
-                rg.seed(seed)
-            return fn(*args, **kwargs)
-
-        return wrapped_fn
-
-    @random_seed_fn
-    def randn(shape, dtype=complex, num_threads=None, scale=1.0, loc=0.0):
+    def randn(shape, dtype=complex, scale=1.0, loc=0.0,
+              num_threads=None, seed=None):
         """Fast multithreaded generation of random normally distributed data
         using ``randomgen``.
+
+        Parameters
+        ----------
+        shape : tuple[int]
+            The shape of the output random array.
+        dtype : {'complex128', 'float64', 'complex64' 'float32'}, optional
+            The data-type of the output array.
+        scale : float, optional
+            Scale the random distribution by this amount.
+        loc : float, optional
+            Shift the random distribution by this amount.
+        num_threads : int, optional
+            How many threads to use. If ``None``, decide automatically.
         """
+        if seed is not None:
+            seed_rand(seed)
 
         if isinstance(shape, int):
             d = shape
@@ -129,23 +135,22 @@ if (
 
         return out.reshape(shape)
 
+    def rand(*args, **kwargs):
+        return _get_randomgens(1)[0].generator.rand(*args, **kwargs)
+
+    def randint(*args, **kwargs):
+        return _get_randomgens(1)[0].generator.randint(*args, **kwargs)
+
+    def choice(*args, **kwargs):
+        return _get_randomgens(1)[0].generator.choice(*args, **kwargs)
+
+# ---------------------------------- NUMPY ---------------------------------- #
 else:
 
-    def random_seed_fn(fn):
-        """Modify ``fn`` to take a ``seed`` argument with which to call
-        :func:`numpy.random.seed`.
-        """
+    def seed_rand(seed):
+        np.random.seed(seed)
 
-        @wraps(fn)
-        def wrapped_fn(*args, seed=None, **kwargs):
-            if seed is not None:
-                np.random.seed(seed)
-            return fn(*args, **kwargs)
-
-        return wrapped_fn
-
-    @random_seed_fn
-    def randn(shape, loc=0.0, scale=1.0, dtype=float):
+    def randn(shape, loc=0.0, scale=1.0, dtype=float, seed=None):
         """Generate normally distributed random array of certain shape and type.
         Like :func:`numpy.random.randn` but can specify ``dtype``.
 
@@ -160,6 +165,9 @@ else:
         -------
         A : array
         """
+        if seed is not None:
+            seed_rand(seed)
+
         # real datatypes
         if np.issubdtype(dtype, np.floating):
             x = np.random.normal(loc=loc, scale=scale, size=shape)
@@ -178,6 +186,23 @@ else:
 
         return x
 
+    choice = np.random.choice
+    randint = np.random.randint
+    rand = np.random.rand
+
+
+def random_seed_fn(fn):
+    """Modify ``fn`` to take a ``seed`` argument.
+    """
+
+    @wraps(fn)
+    def wrapped_fn(*args, seed=None, **kwargs):
+        if seed is not None:
+            seed_rand(seed)
+        return fn(*args, **kwargs)
+
+    return wrapped_fn
+
 
 @random_seed_fn
 def rand_rademacher(shape, scale=1, dtype=float):
@@ -195,7 +220,7 @@ def rand_rademacher(shape, scale=1, dtype=float):
         raise TypeError("dtype {} not understood - should be float or complex."
                         "".format(dtype))
 
-    x = np.random.choice(entries, shape)
+    x = choice(entries, shape)
     if need2convert:
         x = x.astype(dtype)
 
@@ -377,7 +402,7 @@ def rand_mix(d, tr_d_min=None, tr_d_max=None, mode='rand'):
     if tr_d_max is None:
         tr_d_max = d
 
-    m = np.random.randint(tr_d_min, tr_d_max)
+    m = randint(tr_d_min, tr_d_max)
     if mode == 'rand':
         psi = rand_ket(d * m)
     elif mode == 'haar':
@@ -392,8 +417,8 @@ def rand_product_state(n, qtype=None):
     """
     def gen_rand_pure_qubits(n):
         for _ in range(n):
-            u = np.random.rand()
-            v = np.random.rand()
+            u = rand()
+            v = rand()
             phi = 2 * np.pi * u
             theta = np.arccos(2 * v - 1)
             yield qu([[np.cos(theta / 2.0)],
@@ -482,7 +507,7 @@ def rand_seperable(dims, num_mix=10):
         for dim in dims:
             yield rand_rho(dim)
 
-    weights = np.random.rand(num_mix)
+    weights = rand(num_mix)
 
     def gen_single_states():
         for w in weights:
