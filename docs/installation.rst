@@ -27,6 +27,7 @@ The core packages ``quimb`` requires are:
 * `numba <http://numba.pydata.org/>`_
 * `numexpr <https://github.com/pydata/numexpr>`_
 * `cytoolz <https://github.com/pytoolz/cytoolz>`_
+* `tqdm <https://github.com/tqdm/tqdm>`_
 
 For ease and performance (i.e. mkl compiled libraries), `conda <https://conda.io/miniconda.html/>`_ is the recommended distribution with which to install these.
 
@@ -34,17 +35,22 @@ For ease and performance (i.e. mkl compiled libraries), `conda <https://conda.io
 Optional Dependencies
 =====================
 
-The tensor network library requires:
+The tensor network library, :mod:`quimb.tensor`, requires:
 
 * `opt_einsum <https://github.com/dgasmith/opt_einsum>`_
 
 which efficiently optimizes tensor contraction expressions.
-To plot tensor networks as colored graphs with weighted edges requires:
+
+Plotting tensor networks as colored graphs with weighted edges requires:
 
 * `matplotlib <https://matplotlib.org/>`_
 * `networkx <https://networkx.github.io/>`_
 
-Fast and optionally distributed partial eigen-solving, SVD, exponentiation etc. can be accelerated with ``slepc4py`` and its dependencies:
+Fast, multi-threaded random number generation requires:
+
+* `randomgen <https://github.com/bashtage/randomgen>`_
+
+Finally, fast and optionally distributed partial eigen-solving, SVD, exponentiation etc. can be accelerated with ``slepc4py`` and its dependencies:
 
 * `slepc4py <https://bitbucket.org/slepc/slepc4py>`_
 * `slepc <http://slepc.upv.es/>`_
@@ -54,8 +60,6 @@ Fast and optionally distributed partial eigen-solving, SVD, exponentiation etc. 
 * An MPI implementation (`OpenMPI <https://www.open-mpi.org/>`_ recommended, the 1.10.x series seems most robust for spawning processes)
 
 It is recommended to compile and install these (apart from MPI if you are e.g. on a cluster) yourself (see below).
-
-To show real-time progress on certain operations (evolutions, DMRG, ...), `tqdm <https://github.com/tqdm/tqdm>`_ is needed.
 
 For best performance of some routines, (e.g. shift invert eigen-solving), petsc must be configured with certain options. Here is a rough overview of the steps to installing the above in a directory ``$SRC_DIR``, with MPI and ``mpi4py`` already installed. ``$PATH_TO_YOUR_BLAS_LAPACK_LIB`` should point to e.g. `OpenBLAS <https://github.com/xianyi/OpenBLAS>`_ (``libopenblas.so``) or the MKL library (``libmkl_rt.so``). ``$COMPILE_FLAGS`` should be optimizations chosen for your compiler, e.g. for ``gcc`` ``"-O3 -march=native -s -DNDEBUG"``, or for ``icc`` ``"-O3 -xHost"`` etc.
 

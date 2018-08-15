@@ -29,7 +29,9 @@ States
 Operators
 ---------
 
-Gate operators:
+Most of these are cached (and immutable), so can be called repeatedly without creating any new objects.
+
+**Gate operators**:
 
 - :func:`~quimb.gen.operators.pauli`
 - :func:`~quimb.gen.operators.hadamard`
@@ -47,7 +49,7 @@ Gate operators:
 - :func:`~quimb.gen.operators.cY`
 - :func:`~quimb.gen.operators.cZ`
 
-Hamiltonians and related operators:
+**Hamiltonians and related operators**:
 
 - :func:`~quimb.gen.operators.spin_operator`
 - :func:`~quimb.gen.operators.ham_heis`
@@ -67,7 +69,9 @@ Hamiltonians and related operators:
 Random States & Operators
 -------------------------
 
-Random pure states:
+All of these functions accept a ``seed`` argument for replicability.
+
+**Random pure states**:
 
 - :func:`~quimb.gen.rand.rand_ket`
 - :func:`~quimb.gen.rand.rand_haar_state`
@@ -76,7 +80,7 @@ Random pure states:
 - :func:`~quimb.gen.rand.rand_matrix_product_state`
 - :func:`~quimb.gen.rand.rand_mera`
 
-Random operators:
+**Random operators**:
 
 - :func:`~quimb.gen.rand.rand_matrix`
 - :func:`~quimb.gen.rand.rand_herm`
@@ -86,3 +90,6 @@ Random operators:
 - :func:`~quimb.gen.rand.rand_mix`
 - :func:`~quimb.gen.rand.rand_seperable`
 - :func:`~quimb.gen.rand.rand_iso`
+
+For some applications, generating random numbers with ``numpy`` alone can be a bottleneck.
+``quimb`` will instead peform fast, multi-threaded random number generation with `randomgen <https://github.com/bashtage/randomgen>`_ if it is installed, which can potentially offer an order of magnitude better performance. While the random number sequences can be still replicated using the ``seed`` argument, they also depend (deterministically) on the number of threads used, so may vary across machines unless this is set (e.g. with ``'OMP_NUM_THREADS'``). Use of ``randomgen`` can be explicitly turned off with the environment variable ``QUIMB_USE_RANDOMGEN='false'``.

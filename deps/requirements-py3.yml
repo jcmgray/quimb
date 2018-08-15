@@ -20,5 +20,6 @@ dependencies:
   - codecov
   - opt_einsum
   - pip:
+    - randomgen
     - codeclimate-test-reporter
     - codacy-coverage

@@ -1,63 +1,182 @@
 """Functions for generating random quantum objects and states.
 """
-from functools import reduce, wraps
+from functools import reduce, wraps, lru_cache
 import numpy as np
 import scipy.sparse as sp
+import math
+from importlib.util import find_spec
+import os
 
-from ..accel import rdmul, dot, matrixify
-from ..core import qu, ptr, kron, nmlz
-
-
-def random_seed_fn(fn):
-    """Modify ``fn`` to take a ``seed`` argument with which call
-    :func:`numpy.random.seed`.
-    """
-
-    @wraps(fn)
-    def wrapped_fn(*args, seed=None, **kwargs):
-        if seed is not None:
-            np.random.seed(seed)
-        return fn(*args, **kwargs)
-
-    return wrapped_fn
+from ..accel import rdmul, dot, matrixify, _NUM_THREAD_WORKERS, get_thread_pool
+from ..core import qu, ptr, kron, nmlz, prod
 
 
-def randn(shape, loc=0.0, scale=1.0, dtype=float):
-    """Generate normally distributed random array of certain shape and type.
-    Like :func:`numpy.random.randn` but can specify ``dtype``.
+if (
+    find_spec('randomgen') and
+    os.environ.get('QUIMB_USE_RANDOMGEN', '').lower() not in {'false', 'off'}
+):
 
-    Parameters
-    ----------
-    shape : tuple[int]
-        The shape of the array.
-    dtype : {float, complex, ...}, optional
-        The numpy data type.
+    _RANDOM_GENS = []
 
-    Returns
-    -------
-    A : array
-    """
-    # real datatypes
-    if np.issubdtype(dtype, np.floating):
-        x = np.random.normal(loc=loc, scale=scale, size=shape)
+    @lru_cache(2)
+    def _get_randomgens(num_threads):
+        """Cached generation of random number generators, allows
+        ``random_seed_fn`` and greater efficiency.
+        """
+        global _RANDOM_GENS
 
-        need2convert = dtype not in (float, np.float_)
+        num_gens = len(_RANDOM_GENS)
+        if num_gens < num_threads:
+            from randomgen import Xoroshiro128
 
-    # complex datatypes
-    elif np.issubdtype(dtype, np.complexfloating):
-        x = (np.random.normal(loc=loc, scale=scale, size=shape) +
-             1.0j * np.random.normal(loc=loc, scale=scale, size=shape))
+            # add more generators if not enough
+            for _ in range(num_threads - num_gens):
+                _RANDOM_GENS.append(Xoroshiro128())
 
-        need2convert = dtype not in (complex, np.complex_)
+        return _RANDOM_GENS[:num_threads]
 
-    else:
-        raise TypeError("dtype {} not understood - should be float or complex."
-                        "".format(dtype))
+    def random_seed_fn(fn):
+        """Modify ``fn`` to take a ``seed`` argument with which to call
+        the seeder of ``randomgen``.
+        """
 
-    if need2convert:
-        x = x.astype(dtype)
+        @wraps(fn)
+        def wrapped_fn(*args, seed=None, **kwargs):
+            if seed is not None:
+                rg, = _get_randomgens(1)
+                rg.seed(seed)
+            return fn(*args, **kwargs)
 
-    return x
+        return wrapped_fn
+
+    @random_seed_fn
+    def randn(shape, dtype=complex, num_threads=None, scale=1.0, loc=0.0):
+        """Fast multithreaded generation of random normally distributed data
+        using ``randomgen``.
+        """
+
+        if isinstance(shape, int):
+            d = shape
+            shape = (shape,)
+        else:
+            d = prod(shape)
+
+        if num_threads is None:
+            # only multi-thread for big ``d``
+            if d <= 32768:
+                num_threads = 1
+            else:
+                num_threads = _NUM_THREAD_WORKERS
+
+        rgs = _get_randomgens(num_threads)
+
+        # sequential generation
+        if num_threads <= 1:
+
+            def create(d, dtype):
+                out = np.empty(d, dtype)
+                rgs[0].generator.standard_normal(out=out, dtype=dtype)
+                return out
+
+        # threaded generation
+        else:
+            pool = get_thread_pool()
+
+            # copy state to all RGs and jump to ensure no overlap
+            for rg in rgs[1:]:
+                rg.state = rgs[0].state
+                rgs[0].jump()
+
+            gens = [thread_rg.generator for thread_rg in rgs]
+            S = math.ceil(d / num_threads)
+
+            def _fill(gen, out, dtype, first, last):
+                gen.standard_normal(out=out[first:last], dtype=dtype)
+
+            def create(d, dtype):
+                out = np.empty(d, dtype)
+                # submit thread work
+                fs = [
+                    pool.submit(_fill, gen, out, dtype, i * S, (i + 1) * S)
+                    for i, gen in enumerate(gens)
+                ]
+                # wait for completion
+                [f.result() for f in fs]
+                return out
+
+        if np.issubdtype(dtype, np.floating):
+            out = create(d, dtype)
+
+        elif np.issubdtype(dtype, np.complexfloating):
+            # need to sum two real arrays if generating complex numbers
+            if np.issubdtype(dtype, np.complex64):
+                sub_dtype = np.float32
+            else:
+                sub_dtype = np.float64
+
+            out = create(d, sub_dtype) + 1.0j * create(d, sub_dtype)
+
+        else:
+            raise ValueError("dtype {} not understood.".format(dtype))
+
+        if out.dtype != dtype:
+            out = out.astype(dtype)
+
+        if scale != 1.0:
+            out *= scale
+        if loc != 0.0:
+            out += loc
+
+        return out.reshape(shape)
+
+else:
+
+    def random_seed_fn(fn):
+        """Modify ``fn`` to take a ``seed`` argument with which to call
+        :func:`numpy.random.seed`.
+        """
+
+        @wraps(fn)
+        def wrapped_fn(*args, seed=None, **kwargs):
+            if seed is not None:
+                np.random.seed(seed)
+            return fn(*args, **kwargs)
+
+        return wrapped_fn
+
+    @random_seed_fn
+    def randn(shape, loc=0.0, scale=1.0, dtype=float):
+        """Generate normally distributed random array of certain shape and type.
+        Like :func:`numpy.random.randn` but can specify ``dtype``.
+
+        Parameters
+        ----------
+        shape : tuple[int]
+            The shape of the array.
+        dtype : {float, complex, ...}, optional
+            The numpy data type.
+
+        Returns
+        -------
+        A : array
+        """
+        # real datatypes
+        if np.issubdtype(dtype, np.floating):
+            x = np.random.normal(loc=loc, scale=scale, size=shape)
+
+        # complex datatypes
+        elif np.issubdtype(dtype, np.complexfloating):
+            x = (np.random.normal(loc=loc, scale=scale, size=shape) +
+                 1.0j * np.random.normal(loc=loc, scale=scale, size=shape))
+
+        else:
+            raise TypeError("dtype {} not understood - should be float or "
+                            "complex.".format(dtype))
+
+        if x.dtype != dtype:
+            x = x.astype(dtype)
+
+        return x
 
 
 @random_seed_fn
@@ -126,17 +245,11 @@ def rand_matrix(d, scaled=True, sparse=False, stype='csr',
         mat = sp.random(d, d, format=stype, density=density)
         nnz = mat.nnz
 
-        mat.data = np.random.randn(nnz).astype(dtype)
-        if iscomplex:
-            mat.data += 1.0j * np.random.randn(nnz)
+        mat.data = randn(nnz, dtype=dtype)
 
     else:
         density = 1.0
-        mat = np.random.randn(d, d).astype(dtype)
-        if iscomplex:
-            mat += 1.0j * np.random.randn(d, d)
-
-        mat = np.asmatrix(mat)
+        mat = np.asmatrix(randn((d, d), dtype=dtype))
 
     if scaled:
         mat /= ((2 if iscomplex else 1) * d * density)**0.5
@@ -382,10 +495,7 @@ def rand_seperable(dims, num_mix=10):
 def rand_iso(n, m, dtype=complex):
     """Generate a random isometry of shape ``(n, m)``.
     """
-    data = np.random.randn(n, m)
-
-    if np.issubdtype(dtype, np.complexfloating):
-        data = data + 1.0j * np.random.randn(n, m)
+    data = randn((n, m), dtype=dtype)
 
     q, _ = np.linalg.qr(data if n > m else data.T)
     q = q.astype(dtype)

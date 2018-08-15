@@ -32,6 +32,19 @@ setup(
         'tqdm>=4',
     ],
     extras_require={
+        'tensor': [
+            'opt_einsum>=2',
+            'matplotlib',
+            'networkx',
+        ],
+        'advanced_solvers': [
+            'mpi4py',
+            'petsc4py',
+            'slepc4py',
+        ],
+        'random': [
+            'randomgen>=1.14',
+        ],
         'tests': [
             'coverage',
             'pytest',
@@ -43,16 +56,6 @@ setup(
             'nbsphinx',
             'ipython',
         ],
-        'advanced_solvers': [
-            'mpi4py',
-            'petsc4py',
-            'slepc4py',
-        ],
-        'tensor': [
-            'opt_einsum>=2',
-            'matplotlib',
-            'networkx',
-        ]
     },
     scripts=['bin/quimb-mpi-python'],
     python_requires='>=3.5',
