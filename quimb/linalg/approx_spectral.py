@@ -169,7 +169,7 @@ def random_rect(shape, dist='rademacher', orthog=False, norm=True,
         # already normalized
 
     elif dist == 'gaussian':
-        V = randn(shape, scale=1 / (prod(shape)**0.5 * 2**0.5))
+        V = randn(shape, scale=1 / (prod(shape)**0.5 * 2**0.5), dtype=dtype)
         if norm:
             V /= norm_fro(V)
 

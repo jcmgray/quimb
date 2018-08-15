@@ -1,14 +1,34 @@
 """Functions for generating random quantum objects and states.
 """
 from functools import reduce, wraps, lru_cache
+import math
+import os
+from importlib.util import find_spec
+
 import numpy as np
 import scipy.sparse as sp
-import math
-from importlib.util import find_spec
-import os
+import numexpr as ne
 
 from ..accel import rdmul, dot, matrixify, _NUM_THREAD_WORKERS, get_thread_pool
 from ..core import qu, ptr, kron, nmlz, prod
+
+
+def complex_array(x, y):
+    """Efficient creation of complex array.
+    """
+    d = x.size
+
+    dtype = 'complex64' if x.dtype == 'float32' else 'complex128'
+
+    # XXX: numexpr3 will support complex64 natively
+    if dtype == 'complex128' and d > 32768:
+        z = ne.evaluate("complex(x, y)")
+    else:
+        z = np.empty(x.shape, dtype=dtype)
+        z.real = x
+        z.imag = y
+
+    return z
 
 
 # -------------------------------- RANDOMGEN -------------------------------- #
@@ -40,7 +60,7 @@ if (
         # all RNGs inherit state from the first RNG of _get_randomgens
         _get_randomgens(1)[0].seed(seed)
 
-    def randn(shape, dtype=complex, scale=1.0, loc=0.0,
+    def randn(shape, dtype=float, scale=1.0, loc=0.0,
               num_threads=None, seed=None):
         """Fast multithreaded generation of random normally distributed data
         using ``randomgen``.
@@ -120,7 +140,7 @@ if (
             else:
                 sub_dtype = np.float64
 
-            out = create(d, sub_dtype) + 1.0j * create(d, sub_dtype)
+            out = complex_array(create(d, sub_dtype), create(d, sub_dtype))
 
         else:
             raise ValueError("dtype {} not understood.".format(dtype))
@@ -174,9 +194,10 @@ else:
 
         # complex datatypes
         elif np.issubdtype(dtype, np.complexfloating):
-            x = (np.random.normal(loc=loc, scale=scale, size=shape) +
-                 1.0j * np.random.normal(loc=loc, scale=scale, size=shape))
-
+            x = complex_array(
+                np.random.normal(loc=loc, scale=scale, size=shape),
+                np.random.normal(loc=loc, scale=scale, size=shape),
+            )
         else:
             raise TypeError("dtype {} not understood - should be float or "
                             "complex.".format(dtype))

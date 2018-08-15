@@ -26,7 +26,8 @@ def construct_lanczos_tridiag_MPO(A, K, v0=None, initial_bond_dim=None,
             # needs to be truly random so MPI processes don't overlap
             qu.seed_rand(random.SystemRandom().randint(0, 2**32 - 1))
 
-        V = MPO_rand(A.nsites, initial_bond_dim, phys_dim=A.phys_dim())
+        V = MPO_rand(A.nsites, initial_bond_dim,
+                     phys_dim=A.phys_dim(), dtype=A.dtype)
     else:  # normalize
         V = v0 / (v0.H @ v0)**0.5
     Vm1 = MPO_zeros_like(V)
