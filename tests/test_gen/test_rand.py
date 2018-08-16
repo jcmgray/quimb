@@ -189,7 +189,7 @@ class TestRandMPS:
     ])
     def test_shape(self, d_n_b_e, cyclic):
         d, n, b, e = d_n_b_e
-        psi = qu.rand_matrix_product_state(d, n, b, cyclic=cyclic)
+        psi = qu.rand_matrix_product_state(n, b, d, cyclic=cyclic)
         assert psi.shape == (e, 1)
 
         assert_allclose(qu.expec(psi, psi), 1.0)
@@ -198,7 +198,7 @@ class TestRandMPS:
     @pytest.mark.parametrize("bond_dim", (1, 2, 3))
     def test_rank(self, bond_dim, cyclic):
         psi = qu.rand_matrix_product_state(
-            2, 10, bond_dim, cyclic=cyclic)
+            10, bond_dim, cyclic=cyclic)
         rhoa = qu.ptr(psi, [2] * 10, [0, 1, 2, 3])
         el = qu.eigvalsh(rhoa)
         # bond_dim squared as cyclic mps is generated

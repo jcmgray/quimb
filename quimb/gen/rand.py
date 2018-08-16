@@ -1,6 +1,6 @@
 """Functions for generating random quantum objects and states.
 """
-from functools import reduce, wraps, lru_cache
+from functools import wraps, lru_cache
 import math
 import os
 from importlib.util import find_spec
@@ -450,19 +450,19 @@ def rand_product_state(n, qtype=None):
 
 @matrixify
 @random_seed_fn
-def rand_matrix_product_state(phys_dim, n, bond_dim,
+def rand_matrix_product_state(n, bond_dim, phys_dim=2, dtype=complex,
                               cyclic=False, trans_invar=False):
     """Generate a random matrix product state (in dense form, see
     :func:`~quimb.tensor.MPS_rand_state` for tensor network form).
 
     Parameters
     ----------
-    phys_dim : int
-        Physical dimension of each local site.
     n : int
         Number of sites.
     bond_dim : int
         Dimension of the bond (virtual) indices.
+    phys_dim : int, optional
+        Physical dimension of each local site, defaults to 2 (qubits).
     cyclic : bool (optional)
         Whether to impose cyclic boundary conditions on the entanglement
         structure.
@@ -476,30 +476,11 @@ def rand_matrix_product_state(phys_dim, n, bond_dim,
         The random state, with shape (phys_dim**n, 1)
 
     """
-    if trans_invar and not cyclic:
-        raise ValueError("State cannot be translationally invariant"
-                         "with open boundary conditions.")
+    from quimb.tensor import MPS_rand_state
 
-    tensor_shp = (bond_dim, phys_dim, bond_dim)
-
-    if trans_invar:
-        A = randn(tensor_shp, dtype=complex)
-
-    def gen_tensors():
-        for i in range(0, n):
-            shape = (tensor_shp[1:] if i == 0 and not cyclic else
-                     tensor_shp[:-1] if i == n - 1 and not cyclic else
-                     tensor_shp)
-
-            yield (A if trans_invar else randn(shape, dtype=complex))
-
-    ket_tens = reduce(lambda x, y: np.tensordot(x, y, axes=1), gen_tensors())
-    if cyclic:
-        ket_tens = np.trace(ket_tens, axis1=0, axis2=-1)
-
-    norm = np.tensordot(ket_tens, ket_tens.conj(), n)
-    ket_tens /= norm**0.5
-    return ket_tens.reshape((phys_dim**n, 1))
+    mps = MPS_rand_state(n, bond_dim, phys_dim=phys_dim, dtype=dtype,
+                         cyclic=cyclic, trans_invar=trans_invar)
+    return mps.to_dense()
 
 
 rand_mps = rand_matrix_product_state

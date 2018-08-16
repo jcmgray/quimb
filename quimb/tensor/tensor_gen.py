@@ -25,7 +25,7 @@ def rand_tensor(shape, inds, tags=None, dtype=float):
 # --------------------------------------------------------------------------- #
 
 def MPS_rand_state(n, bond_dim, phys_dim=2, normalize=True, cyclic=False,
-                   dtype=float, **mps_opts):
+                   dtype=float, trans_invar=False, **mps_opts):
     """Generate a random matrix product state.
 
     Parameters
@@ -43,9 +43,16 @@ def MPS_rand_state(n, bond_dim, phys_dim=2, normalize=True, cyclic=False,
         open boundary conditions.
     dtype : {float, complex} or numpy dtype, optional
         Data type of the tensor network.
+    trans_invar : bool (optional)
+        Whether to generate a translationally invariant state,
+        requires cyclic=True.
     mps_opts
         Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductState`.
     """
+    if trans_invar and not cyclic:
+        raise ValueError("State cannot be translationally invariant with open "
+                         "boundary conditions.")
+
     cyc_dim = (bond_dim,) if cyclic else ()
 
     def gen_shapes():
@@ -60,7 +67,11 @@ def MPS_rand_state(n, bond_dim, phys_dim=2, normalize=True, cyclic=False,
     def scale(x):
         return x / norm_fro_dense(x)**(1 / (x.ndim - 1))
 
-    arrays = map(scale, map(gen_data, gen_shapes()))
+    if trans_invar:
+        array = scale(gen_data(next(gen_shapes())))
+        arrays = (array for _ in range(n))
+    else:
+        arrays = map(scale, map(gen_data, gen_shapes()))
 
     rmps = MatrixProductState(arrays, **mps_opts)
 

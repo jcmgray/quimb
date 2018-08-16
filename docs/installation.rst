@@ -31,15 +31,14 @@ The core packages ``quimb`` requires are:
 
 For ease and performance (i.e. mkl compiled libraries), `conda <https://conda.io/miniconda.html/>`_ is the recommended distribution with which to install these.
 
-
-Optional Dependencies
-=====================
-
 The tensor network library, :mod:`quimb.tensor`, requires:
 
 * `opt_einsum <https://github.com/dgasmith/opt_einsum>`_
 
-which efficiently optimizes tensor contraction expressions.
+which efficiently optimizes tensor contraction expressions. It can be installed with ``pip`` or from `conda-forge <https://conda-forge.org>`_ and is a required dependency since various bits of the core ``quimb`` module now make use tensor-network functionality behind the scenes.
+
+Optional Dependencies
+=====================
 
 Plotting tensor networks as colored graphs with weighted edges requires:
 

@@ -229,12 +229,12 @@ def ham_rcr_psi():
     return ham, trc, p0, tm, pm
 
 
-class TestQuEvo:
+class TestEvolution:
     @mark.parametrize("sparse, presolve",
                       [(False, False),
                        (True, False),
                        (False, True)])
-    def test_quevo_ham_dense_ket_solve(self, ham_rcr_psi, sparse, presolve):
+    def test_evo_ham_dense_ket_solve(self, ham_rcr_psi, sparse, presolve):
         ham, trc, p0, tm, pm = ham_rcr_psi
         ham = qu(ham, sparse=sparse)
         if presolve:
@@ -254,7 +254,7 @@ class TestQuEvo:
     @mark.parametrize("dop", [False, True])
     @mark.parametrize("sparse", [False, True])
     @mark.parametrize("method", ["solve", "integrate", 'expm', 'bad'])
-    def test_quevo_ham(self, ham_rcr_psi, sparse, dop, method):
+    def test_evo_ham(self, ham_rcr_psi, sparse, dop, method):
         ham, trc, p0, tm, pm = ham_rcr_psi
         if dop:
             if method == 'expm':
@@ -278,7 +278,7 @@ class TestQuEvo:
         assert isinstance(sim.pt, np.matrix)
         assert sim.t == trc
 
-    def test_quevo_at_times(self):
+    def test_evo_at_times(self):
         ham = ham_heis(2, cyclic=False)
         p0 = up() & down()
         sim = Evolution(p0, ham, method='solve')
@@ -290,7 +290,7 @@ class TestQuEvo:
 
     @mark.parametrize("qtype", ['ket', 'dop'])
     @mark.parametrize("method", ['solve', 'integrate', 'expm'])
-    def test_quevo_compute_callback(self, qtype, method):
+    def test_evo_compute_callback(self, qtype, method):
         ham = ham_heis(2, cyclic=False)
         p0 = qu(up() & down(), qtype=qtype)
 
@@ -313,7 +313,7 @@ class TestQuEvo:
 
     @mark.parametrize("qtype", ['ket', 'dop'])
     @mark.parametrize("method", ['solve', 'integrate', 'expm'])
-    def test_quevo_multi_compute(self, method, qtype):
+    def test_evo_multi_compute(self, method, qtype):
 
         ham = ham_heis(2, cyclic=False)
         p0 = qu(up() & down(), qtype=qtype)

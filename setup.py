@@ -30,10 +30,10 @@ setup(
         'psutil>=4.3.1',
         'cytoolz>=0.8.0',
         'tqdm>=4',
+        'opt_einsum>=2',
     ],
     extras_require={
         'tensor': [
-            'opt_einsum>=2',
             'matplotlib',
             'networkx',
         ],

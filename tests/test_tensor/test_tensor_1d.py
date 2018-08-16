@@ -4,38 +4,34 @@ import numpy as np
 from numpy.testing import assert_allclose
 
 import quimb as qu
-from quimb.tensor import (MatrixProductState, MatrixProductOperator,
-                          align_TN_1D, MPS_rand_state, MPO_identity,
-                          MPO_identity_like, MPO_zeros, MPO_zeros_like,
-                          MPO_rand, MPO_rand_herm, MPO_ham_heis,
-                          MPS_neel_state, MPS_zero_state, bonds,
-                          MPS_computational_state)
+from quimb.tensor import (
+    MatrixProductState, MatrixProductOperator, align_TN_1D, MPS_rand_state,
+    MPO_identity, MPO_identity_like, MPO_zeros, MPO_zeros_like, MPO_rand,
+    MPO_rand_herm, MPO_ham_heis, MPS_neel_state, MPS_zero_state, bonds,
+    MPS_computational_state, expec_TN_1D, gate_TN_1D)
 
 
 class TestMatrixProductState:
-
     def test_matrix_product_state(self):
         tensors = ([np.random.rand(5, 2)] +
-                   [np.random.rand(5, 5, 2) for _ in range(3)] +
-                   [np.random.rand(5, 2)])
+                   [np.random.rand(5, 5, 2)
+                    for _ in range(3)] + [np.random.rand(5, 2)])
         mps = MatrixProductState(tensors)
         assert len(mps.tensors) == 5
         nmps = mps.reindex_sites('foo{}', inplace=False, where=slice(0, 3))
         assert nmps.site_ind_id == "k{}"
         assert isinstance(nmps, MatrixProductState)
-        assert set(nmps.outer_inds()) == {'foo0', 'foo1',
-                                          'foo2', 'k3', 'k4'}
-        assert set(mps.outer_inds()) == {'k0', 'k1',
-                                         'k2', 'k3', 'k4'}
+        assert set(nmps.outer_inds()) == {'foo0', 'foo1', 'foo2', 'k3', 'k4'}
+        assert set(mps.outer_inds()) == {'k0', 'k1', 'k2', 'k3', 'k4'}
         mps.site_ind_id = 'foo{}'
-        assert set(mps.outer_inds()) == {'foo0', 'foo1',
-                                         'foo2', 'foo3', 'foo4'}
+        assert set(
+            mps.outer_inds()) == {'foo0', 'foo1', 'foo2', 'foo3', 'foo4'}
         assert mps.site_inds == ('foo0', 'foo1', 'foo2', 'foo3', 'foo4')
         assert mps.site_ind_id == 'foo{}'
         mps.show()
 
-    @pytest.mark.parametrize("dtype", [float, complex, np.complex128,
-                                       np.float64, 'raise'])
+    @pytest.mark.parametrize(
+        "dtype", [float, complex, np.complex128, np.float64, 'raise'])
     def test_rand_mps_dtype(self, dtype):
         if dtype == 'raise':
             with pytest.raises(TypeError):
@@ -44,6 +40,18 @@ class TestMatrixProductState:
             p = MPS_rand_state(10, 7, dtype=dtype)
             assert p[0].dtype == dtype
             assert p[7].dtype == dtype
+
+    def test_trans_invar(self):
+        with pytest.raises(ValueError):
+            psi = MPS_rand_state(10, 7, cyclic=False, trans_invar=True)
+
+        psi = MPS_rand_state(10, 7, cyclic=True, trans_invar=True)
+        z0 = expec_TN_1D(psi, gate_TN_1D(psi, qu.pauli('Z'), 0, contract=True))
+        z3 = expec_TN_1D(psi, gate_TN_1D(psi, qu.pauli('Z'), 0, contract=True))
+        z7 = expec_TN_1D(psi, gate_TN_1D(psi, qu.pauli('Z'), 0, contract=True))
+
+        assert_allclose(z0, z3)
+        assert_allclose(z3, z7)
 
     def test_from_dense(self):
         psi = qu.rand_ket(2**8)
@@ -106,8 +114,8 @@ class TestMatrixProductState:
 
     def test_rand_mps_left_canonize(self):
         n = 10
-        k = MPS_rand_state(n, 10, site_tag_id="foo{}",
-                           tags='bar', normalize=False)
+        k = MPS_rand_state(
+            n, 10, site_tag_id="foo{}", tags='bar', normalize=False)
         k.left_canonize(normalize=True)
 
         assert k.count_canonized() == (9, 0)
@@ -118,8 +126,8 @@ class TestMatrixProductState:
 
     def test_rand_mps_left_canonize_with_bra(self):
         n = 10
-        k = MPS_rand_state(n, 10, site_tag_id="foo{}",
-                           tags='bar', normalize=False)
+        k = MPS_rand_state(
+            n, 10, site_tag_id="foo{}", tags='bar', normalize=False)
         b = k.H
         k.left_canonize(normalize=True, bra=b)
         assert_allclose(b @ k, 1)
@@ -128,8 +136,8 @@ class TestMatrixProductState:
 
     def test_rand_mps_right_canonize(self):
         n = 10
-        k = MPS_rand_state(n, 10, site_tag_id="foo{}",
-                           tags='bar', normalize=False)
+        k = MPS_rand_state(
+            n, 10, site_tag_id="foo{}", tags='bar', normalize=False)
         k.right_canonize(normalize=True)
         assert_allclose(k.H @ k, 1)
         p_tn = (k.H & k) ^ slice(..., 0, -1)
@@ -137,8 +145,8 @@ class TestMatrixProductState:
 
     def test_rand_mps_right_canonize_with_bra(self):
         n = 10
-        k = MPS_rand_state(n, 10, site_tag_id="foo{}",
-                           tags='bar', normalize=False)
+        k = MPS_rand_state(
+            n, 10, site_tag_id="foo{}", tags='bar', normalize=False)
         b = k.H
         k.right_canonize(normalize=True, bra=b)
         assert_allclose(b @ k, 1)
@@ -147,8 +155,8 @@ class TestMatrixProductState:
 
     def test_rand_mps_mixed_canonize(self):
         n = 10
-        rmps = MPS_rand_state(n, 10, site_tag_id="foo{}",
-                              tags='bar', normalize=True)
+        rmps = MPS_rand_state(
+            n, 10, site_tag_id="foo{}", tags='bar', normalize=True)
 
         # move to the center
         rmps.canonize(orthogonality_center=4)
@@ -185,8 +193,8 @@ class TestMatrixProductState:
         pH.add_tag('__bra__')
         tn = p | pH
         assert_allclose((tn ^ ...), 1)
-        assert_allclose(tn[('__ket__', 'I1')].data,
-                        tn[('__bra__', 'I1')].data.conj())
+        assert_allclose(tn[('__ket__', 'I1')].data, tn[('__bra__',
+                                                        'I1')].data.conj())
         p[1].modify(data=np.random.randn(10, 10, 2))
         assert abs((tn ^ ...) - 1) > 1e-13
         assert not np.allclose(tn[('__ket__', 'I1')].data,
@@ -257,8 +265,8 @@ class TestMatrixProductState:
 
         if form == 'raise':
             with pytest.raises(ValueError):
-                p.add_MPS(p, compress=True, method=method,
-                          form=form, cutoff=1e-6)
+                p.add_MPS(
+                    p, compress=True, method=method, form=form, cutoff=1e-6)
             return
 
         p2 = p.add_MPS(p, compress=True, method=method, form=form, cutoff=1e-6)
@@ -291,20 +299,21 @@ class TestMatrixProductState:
             svns.append(p.entropy(i, current_orthog_centre=i))
 
         pd = p.to_dense()
-        ex_svns = [qu.entropy_subsys(pd, [2] * n, range(i))
-                   for i in range(1, n)]
+        ex_svns = [
+            qu.entropy_subsys(pd, [2] * n, range(i)) for i in range(1, n)
+        ]
         ex_sgs = [qu.schmidt_gap(pd, [2] * n, range(i)) for i in range(1, n)]
         assert_allclose(ex_svns, svns)
         assert_allclose(ex_sgs, sgs)
 
     @pytest.mark.parametrize("rescale", [False, True])
-    @pytest.mark.parametrize("keep", [(2, 3, 4, 6, 8),
-                                      slice(-2, 4), slice(3, -1, -1)])
+    @pytest.mark.parametrize(
+        "keep", [(2, 3, 4, 6, 8),
+                 slice(-2, 4), slice(3, -1, -1)])
     def test_partial_trace(self, rescale, keep):
         n = 10
         p = MPS_rand_state(n, 7)
-        r = p.ptr(keep=keep, upper_ind_id='u{}',
-                  rescale_sites=rescale)
+        r = p.ptr(keep=keep, upper_ind_id='u{}', rescale_sites=rescale)
         rd = r.to_dense()
         if isinstance(keep, slice):
             keep = p.slice2sites(keep)
@@ -327,14 +336,19 @@ class TestMatrixProductState:
         k = MPS_rand_state(5, 7, cyclic=cyclic, sites=sites, nsites=20)
         assert set(k.tags) == {'I{}'.format(i) for i in sites}
 
-    @pytest.mark.parametrize("method", ['isvd', 'svds',
-                                        ('isvd', 'eigsh'),
-                                        ('isvd', 'cholesky')])
+    @pytest.mark.parametrize(
+        "method", ['isvd', 'svds', ('isvd', 'eigsh'), ('isvd', 'cholesky')])
     @pytest.mark.parametrize("cyclic", [True, False])
-    @pytest.mark.parametrize("sysa", [range(0, 10), range(10, 20),
-                                      range(20, 30), range(0, 30)])
-    @pytest.mark.parametrize("sysb", [range(30, 40), range(40, 50),
-                                      range(50, 60), range(30, 60)])
+    @pytest.mark.parametrize(
+        "sysa", [range(0, 10),
+                 range(10, 20),
+                 range(20, 30),
+                 range(0, 30)])
+    @pytest.mark.parametrize(
+        "sysb", [range(30, 40),
+                 range(40, 50),
+                 range(50, 60),
+                 range(30, 60)])
     def test_partial_trace_compress(self, method, cyclic, sysa, sysb):
         k = MPS_rand_state(60, 8, cyclic=cyclic)
         kws = dict(sysa=sysa, sysb=sysb, eps=1e-4, method=method)
@@ -356,9 +370,14 @@ class TestMatrixProductState:
         x = rhoc_ab.trace(*inds)
         assert_allclose(1.0, x, rtol=1e-3)
 
-    @pytest.mark.parametrize("block", [0, 20, 39, slice(0, 5), slice(20, 25),
-                                       slice(35, 40), slice(38, 42),
-                                       slice(-3, 2)])
+    @pytest.mark.parametrize("block", [
+        0, 20, 39,
+        slice(0, 5),
+        slice(20, 25),
+        slice(35, 40),
+        slice(38, 42),
+        slice(-3, 2)
+    ])
     @pytest.mark.parametrize("dtype", [float, complex])
     def test_canonize_cyclic(self, dtype, block):
         k = MPS_rand_state(40, 10, dtype=dtype, cyclic=True)
@@ -401,8 +420,11 @@ class TestMatrixProductState:
         p = MPS_rand_state(5, 7)
         q = p.copy()
         G = qu.rand_uni(2**bsz)
-        p = p.gate(G, where=[i for i in range(2, 2 + bsz)],
-                   tags='G', contract=contract)
+        p = p.gate(
+            G,
+            where=[i for i in range(2, 2 + bsz)],
+            tags='G',
+            contract=contract)
         TG = p['G']
         if propagate_tags or contract:
             assert p.site_tag(2) in TG.tags
@@ -418,8 +440,8 @@ class TestMatrixProductState:
         assert ghz.correlation(qu.pauli('Z'), 0, 1) == pytest.approx(1.0)
         assert ghz.correlation(qu.pauli('Z'), 1, 2) == pytest.approx(1.0)
         assert ghz.correlation(qu.pauli('Z'), 3, 1) == pytest.approx(1.0)
-        assert ghz.correlation(qu.pauli('Z'), 3, 1,
-                               B=qu.pauli('Y')) == pytest.approx(0.0)
+        assert ghz.correlation(
+            qu.pauli('Z'), 3, 1, B=qu.pauli('Y')) == pytest.approx(0.0)
 
         assert ghz.H @ ghz == pytest.approx(1.0)
 
@@ -449,8 +471,8 @@ class TestMatrixProductState:
 class TestMatrixProductOperator:
     def test_matrix_product_operator(self):
         tensors = ([np.random.rand(5, 2, 2)] +
-                   [np.random.rand(5, 5, 2, 2) for _ in range(3)] +
-                   [np.random.rand(5, 2, 2)])
+                   [np.random.rand(5, 5, 2, 2)
+                    for _ in range(3)] + [np.random.rand(5, 2, 2)])
         mpo = MatrixProductOperator(tensors)
 
         mpo.show()
@@ -459,8 +481,9 @@ class TestMatrixProductOperator:
         assert mpo.lower_inds == ('b0', 'b1', 'b2', 'b3', 'b4')
         op = mpo ^ ...
         # this would rely on left to right contraction if not in set form
-        assert set(op.inds) == {'k0', 'b0', 'k1', 'b1', 'k2', 'b2',
-                                'k3', 'b3', 'k4', 'b4'}
+        assert set(op.inds) == {
+            'k0', 'b0', 'k1', 'b1', 'k2', 'b2', 'k3', 'b3', 'k4', 'b4'
+        }
 
     def test_add_mpo(self):
         h = MPO_ham_heis(12)
@@ -528,8 +551,8 @@ class TestMatrixProductOperator:
     @pytest.mark.parametrize("cyclic", [False, True])
     @pytest.mark.parametrize("dtype", (complex, float))
     def test_mpo_rand_herm_and_trace(self, dtype, cyclic):
-        op = MPO_rand_herm(20, bond_dim=5, phys_dim=3,
-                           dtype=dtype, cyclic=cyclic)
+        op = MPO_rand_herm(
+            20, bond_dim=5, phys_dim=3, dtype=dtype, cyclic=cyclic)
         assert_allclose(op.H @ op, 1.0)
         tr_val = op.trace()
         assert tr_val != 0.0
@@ -537,8 +560,8 @@ class TestMatrixProductOperator:
 
     @pytest.mark.parametrize("cyclic", [False, True])
     def test_mpo_rand_herm_trace_and_identity_like(self, cyclic):
-        op = MPO_rand_herm(20, bond_dim=5, phys_dim=3, upper_ind_id='foo{}',
-                           cyclic=cyclic)
+        op = MPO_rand_herm(
+            20, bond_dim=5, phys_dim=3, upper_ind_id='foo{}', cyclic=cyclic)
         t = op.trace()
         assert t != 0.0
         Id = MPO_identity_like(op)
@@ -569,8 +592,8 @@ class TestMatrixProductOperator:
     @pytest.mark.parametrize("cyclic", (False, True))
     def test_dot_mpo(self, cyclic):
         A = MPO_rand(8, 5, cyclic=cyclic)
-        B = MPO_rand(8, 5, upper_ind_id='q{}',
-                     lower_ind_id='w{}', cyclic=cyclic)
+        B = MPO_rand(
+            8, 5, upper_ind_id='q{}', lower_ind_id='w{}', cyclic=cyclic)
         C = A.apply(B)
         assert C.max_bond() == 25
         assert C.upper_ind_id == 'q{}'
@@ -591,13 +614,13 @@ class TestMatrixProductOperator:
 #                         Test specific 1D instances                          #
 # --------------------------------------------------------------------------- #
 
-class TestSpecificStatesOperators:
 
+class TestSpecificStatesOperators:
     @pytest.mark.parametrize("cyclic", [False, True])
     def test_rand_ket_mps(self, cyclic):
         n = 10
-        rmps = MPS_rand_state(n, 10, site_tag_id="foo{}",
-                              tags='bar', cyclic=cyclic)
+        rmps = MPS_rand_state(
+            n, 10, site_tag_id="foo{}", tags='bar', cyclic=cyclic)
         assert rmps[0].tags == {'foo0', 'bar'}
         assert rmps[3].tags == {'foo3', 'bar'}
         assert rmps[-1].tags == {'foo9', 'bar'}
@@ -636,10 +659,10 @@ class TestSpecificStatesOperators:
         assert hh_mpo[0].tags == {'I0', 'foo'}
         assert hh_mpo[1].tags == {'I1', 'foo'}
         assert hh_mpo[-1].tags == {'I{}'.format(n - 1), 'foo'}
-        assert hh_mpo.shape == (2,) * 2 * n
+        assert hh_mpo.shape == (2, ) * 2 * n
         hh_ex = qu.ham_heis(n, cyclic=cyclic, j=j, b=bz)
-        assert_allclose(qu.eigvalsh(hh_ex),
-                        qu.eigvalsh(hh_mpo.to_dense()), atol=1e-13)
+        assert_allclose(
+            qu.eigvalsh(hh_ex), qu.eigvalsh(hh_mpo.to_dense()), atol=1e-13)
 
     def test_mpo_zeros(self):
         mpo0 = MPO_zeros(10)
