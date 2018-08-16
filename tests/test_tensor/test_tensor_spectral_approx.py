@@ -4,6 +4,7 @@ import numpy as np
 from numpy.testing import assert_allclose
 
 from quimb import (
+    seed_rand,
     approx_spectral_function,
     eigvalsh,
     ham_heis,
@@ -40,8 +41,9 @@ class TestMPOSpectralApprox:
         assert_allclose(xe, xf, rtol=0.5)
 
     def test_realistic(self):
+        seed_rand(42)
         ham = MPO_ham_heis(20)
-        dmrg = DMRG2(ham, bond_dims=[2, 4, 8])
+        dmrg = DMRG2(ham, bond_dims=[2, 4])
         dmrg.solve()
         rho_ab = dmrg.state.ptr(range(6, 14))
         xf = approx_spectral_function(rho_ab, lambda x: x,
@@ -143,7 +145,7 @@ class TestPTPTLazyMPSSpectralApprox:
         sysa, sysb = range(3, 6), range(6, 8)
 
         ham = MPO_ham_heis(n)
-        dmrg = DMRG2(ham, bond_dims=[4, 8])
+        dmrg = DMRG2(ham, bond_dims=[2, 4])
         dmrg.solve()
         rho_ab_pt = PTPTLazyMPS(dmrg.state, sysa, sysb)
 
