@@ -15,7 +15,7 @@ def is_power_of_2(x):
 class MERA(TensorNetwork1DVector,
            TensorNetwork1D,
            TensorNetwork):
-    r"""The Multi-scale Entanglement Renormalization Ansatz (MERA) state:
+    r"""The Multi-scale Entanglement Renormalization Ansatz (MERA) state::
 
             ...     ...     ...     ...     ...     ...
          |       |       |       |       |       |       |

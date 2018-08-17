@@ -78,6 +78,7 @@ The following examples, generated from the notebooks in ``docs/examples``, demon
   ./examples/ex_dmrg_periodic
   ./examples/ex_TEBD_evo
   ./examples/ex_quantum_circuit
+  ./examples/ex_MERA
 
 
 Indices and tables
