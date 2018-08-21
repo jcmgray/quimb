@@ -24,14 +24,15 @@ The **core** ``quimb`` module:
 * Accelerates many operations using `numba <https://numba.pydata.org>`_ and `numexpr <https://github.com/pydata/numexpr>`_
 * Makes it easy to construct operators in large tensor spaces (e.g. 2D lattices)
 * Uses efficient methods to compute various quantities including entanglement measures
-* Has a wide variety of built-in states and operators, including those based on fast, multi-threaded random number generation
+* Has many built-in states and operators, including those based on fast, parallel random number generation
 * Can perform evolutions with several methods, computing quantities on the fly
 * Has an optional `slepc4py <https://bitbucket.org/slepc/slepc4py>`_ interface for easy distributed (MPI) linear algebra. This can massively increase the performance when seeking, for example, mid-spectrum eigenstates
 
 The **tensor network** submodule ``quimb.tensor``:
 
 * Uses a geometry free representation of tensor networks
-* Uses `opt_einsum <https://github.com/dgasmith/opt_einsum>`_ to find efficient contraction orders for hundreds of tensors, and perform those contractions potentially on the GPU
+* Uses `opt_einsum <https://github.com/dgasmith/opt_einsum>`_ to find efficient contraction orders for hundreds or thousands of tensors
+* Can perform those contractions on various backends, including with a GPU
 * Can plot any network, color-coded, with bond size represented
 * Can treat any network as a scipy ``LinearOperator``, allowing many decompositions
 * Can perform DMRG1, DMRG2 and DMRGX, in matrix product state language
@@ -83,6 +84,8 @@ The following examples, generated from the notebooks in ``docs/examples``, demon
 
 Indices and tables
 ------------------
+
+The following sections contain the full reference API for the all the functions, classes and modules within ``quimb``.
 
 * :ref:`genindex`
 * :ref:`modindex`
