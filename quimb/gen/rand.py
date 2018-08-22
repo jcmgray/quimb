@@ -60,8 +60,8 @@ if (
         # all RNGs inherit state from the first RNG of _get_randomgens
         _get_randomgens(1)[0].seed(seed)
 
-    def randn(shape, dtype=float, scale=1.0, loc=0.0,
-              num_threads=None, seed=None):
+    def randn(shape=(), dtype=float, scale=1.0, loc=0.0,
+              num_threads=None, seed=None, dist='normal'):
         """Fast multithreaded generation of random normally distributed data
         using ``randomgen``.
 
@@ -72,11 +72,15 @@ if (
         dtype : {'complex128', 'float64', 'complex64' 'float32'}, optional
             The data-type of the output array.
         scale : float, optional
-            Scale the random distribution by this amount.
+            The width of the distribution (standard deviation if
+            ``dist='normal'``).
         loc : float, optional
-            Shift the random distribution by this amount.
+            The location of the distribution (lower limit if
+            ``dist='uniform'``).
         num_threads : int, optional
             How many threads to use. If ``None``, decide automatically.
+        dist : {'normal', 'uniform'}
+            Type of random number to generate.
         """
         if seed is not None:
             seed_rand(seed)
@@ -96,12 +100,17 @@ if (
 
         rgs = _get_randomgens(num_threads)
 
+        gen_method = {
+            'normal': 'standard_normal',
+            'uniform': 'random_sample'
+        }[dist]
+
         # sequential generation
         if num_threads <= 1:
 
             def create(d, dtype):
                 out = np.empty(d, dtype)
-                rgs[0].generator.standard_normal(out=out, dtype=dtype)
+                getattr(rgs[0].generator, gen_method)(out=out, dtype=dtype)
                 return out
 
         # threaded generation
@@ -117,7 +126,7 @@ if (
             S = math.ceil(d / num_threads)
 
             def _fill(gen, out, dtype, first, last):
-                gen.standard_normal(out=out[first:last], dtype=dtype)
+                getattr(gen, gen_method)(out=out[first:last], dtype=dtype)
 
             def create(d, dtype):
                 out = np.empty(d, dtype)
@@ -156,7 +165,7 @@ if (
         return out.reshape(shape)
 
     def rand(*args, **kwargs):
-        return _get_randomgens(1)[0].generator.rand(*args, **kwargs)
+        return randn(*args, dist='uniform', **kwargs)
 
     def randint(*args, **kwargs):
         return _get_randomgens(1)[0].generator.randint(*args, **kwargs)
@@ -170,7 +179,8 @@ else:
     def seed_rand(seed):
         np.random.seed(seed)
 
-    def randn(shape, loc=0.0, scale=1.0, dtype=float, seed=None):
+    def randn(shape=(), dtype=float, scale=1.0, loc=0.0,
+              seed=None, dist='normal'):
         """Generate normally distributed random array of certain shape and type.
         Like :func:`numpy.random.randn` but can specify ``dtype``.
 
@@ -180,6 +190,14 @@ else:
             The shape of the array.
         dtype : {float, complex, ...}, optional
             The numpy data type.
+        scale : float, optional
+            The width of the distribution (standard deviation if
+            ``dist='normal'``).
+        loc : float, optional
+            The location of the distribution (lower limit if
+            ``dist='uniform'``).
+        dist : {'normal', 'uniform'}
+            Type of random number to generate.
 
         Returns
         -------
@@ -188,16 +206,20 @@ else:
         if seed is not None:
             seed_rand(seed)
 
+        def create():
+            if dist == 'normal':
+                return np.random.normal(loc=loc, scale=scale, size=shape)
+            elif dist == 'uniform':
+                return np.random.uniform(low=loc, high=loc + scale, size=shape)
+            else:
+                raise ValueError("Distribution '{}' not valid.".format(dist))
+
         # real datatypes
         if np.issubdtype(dtype, np.floating):
-            x = np.random.normal(loc=loc, scale=scale, size=shape)
-
+            x = create()
         # complex datatypes
         elif np.issubdtype(dtype, np.complexfloating):
-            x = complex_array(
-                np.random.normal(loc=loc, scale=scale, size=shape),
-                np.random.normal(loc=loc, scale=scale, size=shape),
-            )
+            x = complex_array(create(), create())
         else:
             raise TypeError("dtype {} not understood - should be float or "
                             "complex.".format(dtype))
@@ -246,6 +268,35 @@ def rand_rademacher(shape, scale=1, dtype=float):
         x = x.astype(dtype)
 
     return x
+
+
+@random_seed_fn
+def rand_phase(shape, scale=1, dtype=complex):
+    """Generate random complex numbers distributed on the unit sphere.
+    """
+    if not np.issubdtype(dtype, np.complexfloating):
+        raise ValueError("dtype must be complex, got '{}'.".format(dtype))
+
+    if np.issubdtype(dtype, np.complex64):
+        sub_dtype = np.float32
+    else:
+        sub_dtype = np.float64
+
+    x = randn(shape, dtype=sub_dtype, scale=2 * math.pi, dist='uniform')
+
+    # XXX: numexpr 2 doesn't support complex64
+    if (x.size > 4096) and (dtype == 'complex128'):
+        # accelerate with numexpr
+        if scale != 1:
+            return ne.evaluate("scale * (cos(x) + 1j * sin(x))")
+        return ne.evaluate("cos(x) + 1j * sin(x)")
+
+    z = 1j * np.sin(x)
+    z += np.cos(x)
+    if scale != 1:
+        z *= scale
+
+    return z
 
 
 @random_seed_fn
@@ -438,8 +489,8 @@ def rand_product_state(n, qtype=None):
     """
     def gen_rand_pure_qubits(n):
         for _ in range(n):
-            u = rand()
-            v = rand()
+            u, = rand(1)
+            v, = rand(1)
             phi = 2 * np.pi * u
             theta = np.arccos(2 * v - 1)
             yield qu([[np.cos(theta / 2.0)],

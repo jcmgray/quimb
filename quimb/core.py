@@ -5,13 +5,12 @@ import math
 import itertools
 import functools
 
-import numba as nb
 import numpy as np
 from numpy.matlib import zeros
 import scipy.sparse as sp
 
-from .accel import (njit, par_reduce, matrixify, realify, issparse, isop, vdot,
-                    dot, prod, dot_dense, kron_dispatch, isvec)
+from .accel import (njit, njit_nocache, par_reduce, matrixify, realify,
+                    issparse, isop, vdot, dot, prod, kron_dispatch, isvec)
 
 
 _SPARSE_CONSTRUCTORS = {"csr": sp.csr_matrix,
@@ -41,9 +40,9 @@ def sparse_matrix(data, stype="csr", dtype=complex):
 _EXPEC_METHODS = {
     # [isop(a), isop(b), issparse(a) or issparse(b)]
     (0, 0, 0): lambda a, b: abs(vdot(a, b))**2,
-    (0, 1, 0): lambda a, b: vdot(a, dot_dense(b, a)),
-    (1, 0, 0): lambda a, b: vdot(b, dot_dense(a, b)),
-    (1, 1, 0): lambda a, b: _trace_dense(dot_dense(a, b)),
+    (0, 1, 0): lambda a, b: vdot(a, b @ a),
+    (1, 0, 0): lambda a, b: vdot(b, a @ b),
+    (1, 1, 0): lambda a, b: _trace_dense(a @ b),
     (0, 0, 1): lambda a, b: abs(dot(a.H, b)[0, 0])**2,
     (0, 1, 1): realify(lambda a, b: dot(a.H, dot(b, a))[0, 0]),
     (1, 0, 1): realify(lambda a, b: dot(b.H, dot(a, b))[0, 0]),
@@ -660,8 +659,8 @@ def dim_map(dims, coos, cyclic=False, trim=False):
     return tuple(dims), tuple(inds)
 
 
-# note bare numba decorator here as can't cache generator
-@nb.njit  # pragma: no cover
+# numba decorator can't cache generator
+@njit_nocache  # pragma: no cover
 def _dim_compressor(dims, inds):  # pragma: no cover
     """Helper function for ``dim_compress`` that does the heavy lifting.
 

@@ -10,7 +10,7 @@ import functools
 import numpy as np
 from scipy.integrate import complex_ode
 
-from .accel import isop, ldmul, rdmul, explt, dot, issparse, dot_dense
+from .accel import isop, ldmul, rdmul, explt, dot, issparse
 from .core import qu, eye
 from .linalg.base_linalg import eigh, norm, expm_multiply
 from .utils import continuous_progbar, progbar
@@ -389,7 +389,7 @@ class Evolution(object):
         """
         self._t = t
         lt = explt(self._evals, t - self.t0)
-        self._pt = dot_dense(self._evecs, ldmul(lt, self.pe0))
+        self._pt = self._evecs @ ldmul(lt, self.pe0)
 
         # compute any callbacks into -> self._results
         if self._step_callback is not None:
@@ -402,7 +402,7 @@ class Evolution(object):
         self._t = t
         lt = explt(self._evals, t - self.t0)
         lvpvl = rdmul(ldmul(lt, self.pe0), lt.conj())
-        self._pt = dot_dense(self._evecs, dot_dense(lvpvl, self._evecs.H))
+        self._pt = self._evecs @ (lvpvl @ self._evecs.H)
 
         # compute any callbacks into -> self._results
         if self._step_callback is not None:

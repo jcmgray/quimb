@@ -8,7 +8,6 @@ import operator
 
 import numpy as np
 import scipy.sparse as sp
-import numba as nb
 from numexpr import evaluate
 from cytoolz import partition_all
 
@@ -23,11 +22,16 @@ else:
     import psutil
     _NUM_THREAD_WORKERS = psutil.cpu_count(logical=False)
 
+os.environ['NUMBA_NUM_THREADS'] = str(_NUM_THREAD_WORKERS)
+
+# need to set NUMBA_NUM_THREADS first
+import numba as nb  # noqa
 
 _NUMBA_CACHE = {
     'True': True, 'False': False,
 }[os.environ.get('QUIMB_NUMBA_CACHE', 'True')]
 njit = functools.partial(nb.njit, cache=_NUMBA_CACHE)
+njit_nocache = nb.njit
 vectorize = functools.partial(nb.vectorize, cache=_NUMBA_CACHE)
 
 
@@ -318,13 +322,54 @@ def mul(x, y):
     return mul_dense(x, y)
 
 
-@matrixify
-@upcast
 @njit
-def dot_dense(a, b):  # pragma: no cover
-    """Accelerated dense dot product of matrices
+def _nb_subtract_update_(X, c, Y):
+    for i in range(X.size):
+        X[i] -= c * Y[i]
+
+
+@nb.njit(parallel=True)
+def _nb_par_subtract_update_(X, c, Y):
+    for i in nb.prange(X.size):
+        X[i] -= c * Y[i]
+
+
+def subtract_update_(X, c, Y):
+    """Accelerated inplace computation of ``X -= c * Y``.
     """
-    return a @ b
+    if X.ndim > 1:
+        X, Y = X.view(), Y.view()
+        X.shape = Y.shape = (-1,)
+
+    if X.size > 4096:
+        _nb_par_subtract_update_(X, c, Y)
+    else:
+        _nb_subtract_update_(X, c, Y)
+
+
+@njit
+def _nb_divide_update_(X, c, out):
+    for i in range(X.size):
+        out[i] = X[i] / c
+
+
+@nb.njit(parallel=True)
+def _nb_par_divide_update_(X, c, out):
+    for i in nb.prange(X.size):
+        out[i] = X[i] / c
+
+
+def divide_update_(X, c, out):
+    """Accelerated computation of ``X / c`` into ``out``.
+    """
+    if X.ndim > 1:
+        X, out = X.view(), out.view()
+        X.shape = out.shape = (-1,)
+
+    if X.size > 4096:
+        _nb_divide_update_(X, c, out)
+    else:
+        _nb_par_divide_update_(X, c, out)
 
 
 @njit(nogil=True)  # pragma: no cover
@@ -418,7 +463,10 @@ def dot(a, b):
     """
     if issparse(a) or issparse(b):
         return dot_sparse(a, b)
-    return dot_dense(a, b)
+    try:
+        return a.dot(b)
+    except AttributeError:
+        return a @ b
 
 
 @realify

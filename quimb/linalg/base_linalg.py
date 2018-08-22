@@ -8,12 +8,13 @@ import scipy.linalg as sla
 import scipy.sparse.linalg as spla
 
 from ..utils import raise_cant_find_library_function
-from ..accel import issparse, isdense, vdot, dot_dense, ldmul
+from ..accel import issparse, isdense, vdot, ldmul
 from .numpy_linalg import (
     eig_numpy,
     eigs_numpy,
     svds_numpy,
 )
+from ..gen.rand import randn
 from .scipy_linalg import (
     eigs_scipy,
     eigs_lobpcg,
@@ -474,7 +475,7 @@ def expm(A, herm=False):
         return np.asmatrix(spla.expm(A))
     else:
         evals, evecs = eigh(A)
-        return dot_dense(evecs, ldmul(np.exp(evals), evecs.H))
+        return evecs @ ldmul(np.exp(evals), evecs.H)
 
 
 _EXPM_MULTIPLY_METHODS = {
@@ -537,8 +538,7 @@ def sqrtm(A, herm=True):
         return np.asmatrix(sla.sqrtm(A))
     else:
         evals, evecs = eigh(A)
-        return dot_dense(evecs, ldmul(np.sqrt(evals.astype(complex)),
-                                      evecs.H))
+        return evecs @ ldmul(np.sqrt(evals.astype(complex)), evecs.H)
 
 
 class IdentityLinearOperator(spla.LinearOperator):

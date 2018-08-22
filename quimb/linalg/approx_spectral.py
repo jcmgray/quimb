@@ -11,9 +11,9 @@ import scipy.linalg as scla
 from scipy.ndimage.filters import uniform_filter1d
 
 from ..core import ptr
-from ..accel import prod, vdot, njit
+from ..accel import prod, vdot, njit, dot, subtract_update_, divide_update_
 from ..utils import int2tup
-from ..gen.rand import randn, rand_rademacher, seed_rand
+from ..gen.rand import randn, rand_rademacher, rand_phase, seed_rand
 from ..linalg.mpi_launcher import get_mpi_pool
 from ..tensor.tensor_core import Tensor
 from ..tensor.tensor_1d import MatrixProductOperator
@@ -173,6 +173,10 @@ def random_rect(shape, dist='rademacher', orthog=False, norm=True,
         if norm:
             V /= norm_fro(V)
 
+    elif dist == 'phase':
+        V = rand_phase(shape, scale=1 / sqrt(prod(shape)), dtype=dtype)
+        # already normalized
+
     else:
         raise ValueError("`dist={}` not understood.".format(dist))
 
@@ -241,7 +245,7 @@ def construct_lanczos_tridiag(A, K, v0=None, bsz=1, k_min=10, orthog=False,
         q = random_rect(v_shp, seed=seed, dtype=A.dtype, **v0_opts)
     else:
         q = v0.astype(A.dtype)
-        q /= norm_fro(q)  # normalize (make sure has unit variance)
+        divide_update_(q, norm_fro(q), q)
     v = np.zeros_like(q)
 
     if orthog:
@@ -249,10 +253,10 @@ def construct_lanczos_tridiag(A, K, v0=None, bsz=1, k_min=10, orthog=False,
 
     for j in range(1, K + 1):
 
-        r = A.dot(q)
-        r -= beta[j] * v
+        r = dot(A, q)
+        subtract_update_(r, beta[j], v)
         alpha[j] = inner(q, r)
-        r -= alpha[j] * q
+        subtract_update_(r, alpha[j], q)
 
         # perform full orthogonalization
         if orthog:
@@ -262,22 +266,18 @@ def construct_lanczos_tridiag(A, K, v0=None, bsz=1, k_min=10, orthog=False,
 
         # check for convergence
         if abs(beta[j + 1]) < beta_tol:
-            yield (np.copy(alpha[1:j + 1]),
-                   np.copy(beta[2:j + 2]),
-                   np.copy(beta[1])**2 / bsz)
+            yield alpha[1:j + 1].copy(), beta[2:j + 2].copy(), beta[1]**2 / bsz
             break
 
-        np.copyto(v, q)
-        np.divide(r, beta[j + 1], out=q)
+        v[()] = q
+        divide_update_(r, beta[j + 1], q)
 
         # keep all vectors
         if orthog:
             Q = np.concatenate((Q, q.reshape(-1, 1)), axis=1)
 
         if j >= k_min:
-            yield (np.copy(alpha[1:j + 1]),
-                   np.copy(beta[2:j + 2]),
-                   np.copy(beta[1])**2 / bsz)
+            yield alpha[1:j + 1].copy(), beta[2:j + 2].copy(), beta[1]**2 / bsz
 
 
 def lanczos_tridiag_eig(alpha, beta, check_finite=True):
