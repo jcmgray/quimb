@@ -339,11 +339,13 @@ def rand_matrix(d, scaled=True, sparse=False, stype='csr',
         density = 10 / d if density is None else density
         density = min(max(density, d**-2), 1 - d**-2)
 
-        mat = sp.random(d, d, format=stype, density=density)
-        nnz = mat.nnz
+        nnz = round(density * d * d)
 
-        mat.data = randn(nnz, dtype=dtype)
+        i = randint(0, d, size=nnz)
+        j = randint(0, d, size=nnz)
+        data = randn(nnz, dtype=dtype)
 
+        mat = sp.coo_matrix((data, (i, j)), shape=(d, d)).asformat(stype)
     else:
         density = 1.0
         mat = np.asmatrix(randn((d, d), dtype=dtype))
