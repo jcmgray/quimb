@@ -85,7 +85,7 @@ The following examples, generated from the notebooks in ``docs/examples``, demon
 Indices and tables
 ------------------
 
-The following sections contain the full reference API for the all the functions, classes and modules within ``quimb``.
+The following sections contain the complete listing of functions, classes and modules in ``quimb``.
 
 * :ref:`genindex`
 * :ref:`modindex`
