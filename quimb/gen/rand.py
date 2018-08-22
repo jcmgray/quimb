@@ -1,16 +1,17 @@
 """Functions for generating random quantum objects and states.
 """
-from functools import wraps, lru_cache
-import math
 import os
+import math
+import random
 from importlib.util import find_spec
+from functools import wraps, lru_cache
 
 import numpy as np
-import scipy.sparse as sp
 import numexpr as ne
+import scipy.sparse as sp
 
-from ..accel import rdmul, dot, matrixify, _NUM_THREAD_WORKERS, get_thread_pool
 from ..core import qu, ptr, kron, nmlz, prod
+from ..accel import rdmul, dot, matrixify, _NUM_THREAD_WORKERS, get_thread_pool
 
 
 def complex_array(x, y):
@@ -299,9 +300,8 @@ def rand_phase(shape, scale=1, dtype=complex):
     return z
 
 
-@random_seed_fn
 def rand_matrix(d, scaled=True, sparse=False, stype='csr',
-                density=None, dtype=complex):
+                density=None, dtype=complex, seed=None):
     """Generate a random complex matrix of order `d` with normally distributed
     entries. If `scaled` is `True`, then in the limit of large `d` the
     eigenvalues will be distributed on the unit complex disk.
@@ -318,7 +318,8 @@ def rand_matrix(d, scaled=True, sparse=False, stype='csr',
     stype : {'csr', 'csc', 'coo', ...}, optional
         The type of sparse matrix if ``sparse=True``.
     density : float, optional
-        Target density of non-zero elements for the sparse matrix.
+        Target density of non-zero elements for the sparse matrix. By default
+        aims for about 10 entries per row.
     dtype : {complex, float}, optional
         The data type of the matrix elements.
 
@@ -334,17 +335,22 @@ def rand_matrix(d, scaled=True, sparse=False, stype='csr',
         raise TypeError("dtype {} not understood - should be "
                         "float or complex.".format(dtype))
 
+    # manually handle seed since using python random from standard library
+    if seed is not None:
+        seed_rand(seed)
+        if sparse:
+            random.seed(seed)
+
     if sparse:
         # Aim for 10 non-zero values per row, but betwen 1 and d/2
         density = 10 / d if density is None else density
         density = min(max(density, d**-2), 1 - d**-2)
-
         nnz = round(density * d * d)
 
-        i = randint(0, d, size=nnz)
-        j = randint(0, d, size=nnz)
-        data = randn(nnz, dtype=dtype)
+        # want to sample nnz unique (d, d) pairs without building list
+        i, j = np.divmod(random.sample(range(0, d**2), k=nnz), d)
 
+        data = randn(nnz, dtype=dtype)
         mat = sp.coo_matrix((data, (i, j)), shape=(d, d)).asformat(stype)
     else:
         density = 1.0

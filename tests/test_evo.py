@@ -274,7 +274,7 @@ class TestEvolution:
         assert_allclose(sim.pt, pm, rtol=1e-4)
         assert expec(sim.pt, p0) < 1.0
         sim.update_to(trc)
-        assert_allclose(sim.pt, p0, rtol=1e-4)
+        assert_allclose(sim.pt, p0, rtol=1e-4, atol=1e-6)
         assert isinstance(sim.pt, np.matrix)
         assert sim.t == trc
 
