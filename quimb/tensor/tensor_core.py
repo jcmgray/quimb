@@ -1474,6 +1474,8 @@ class TNLinearOperator(spla.LinearOperator):
         The dimensions corresponding to left_inds. Will figure out if None.
     rdims : tuple of int, or None
         The dimensions corresponding to right_inds. Will figure out if None.
+    is_adjoint : bool, optional
+        Whether this object should represent the *adjoint* operator.
 
     See Also
     --------
@@ -1481,7 +1483,7 @@ class TNLinearOperator(spla.LinearOperator):
     """
 
     def __init__(self, tns, left_inds, right_inds, ldims=None, rdims=None,
-                 backend=None):
+                 backend=None, is_adjoint=False):
         self.backend = _TENSOR_LINOP_BACKEND if backend is None else backend
 
         if isinstance(tns, TensorNetwork):
@@ -1513,10 +1515,17 @@ class TNLinearOperator(spla.LinearOperator):
         else:
             self._ins = tuple(t.data for t in self._tensors)
 
+        # conjugate inputs/ouputs trather all tensors if necessary
+        self.is_adjoint = is_adjoint
+        self._adjoint_linop = None
+
         super().__init__(dtype=self._tensors[0].dtype, shape=(ld, rd))
 
     def _matvec(self, vec):
         in_data = vec.reshape(*self.rdims)
+
+        if self.is_adjoint:
+            in_data = in_data.conj()
 
         if not hasattr(self, '_matvec_fn'):
             # generate a expression that acts directly on the data
@@ -1525,23 +1534,18 @@ class TNLinearOperator(spla.LinearOperator):
                 *self._tensors, iT, output_inds=self.left_inds, **self._kws)
 
         out_data = self._matvec_fn(*self._ins, in_data, backend=self.backend)
+
+        if self.is_adjoint:
+            out_data = out_data.conj()
+
         return out_data.ravel()
-
-    def _rmatvec(self, vec):
-        in_data = vec.conj().reshape(*self.ldims)
-
-        if not hasattr(self, '_rmatvec_fn'):
-            # generate a expression that acts directly on the data
-            iT = Tensor(in_data, inds=self.left_inds)
-            self._rmatvec_fn = tensor_contract(
-                *self._tensors, iT, output_inds=self.right_inds, **self._kws)
-
-        out_data = self._rmatvec_fn(*self._ins, in_data, backend=self.backend)
-        return out_data.conj().ravel()
 
     def _matmat(self, mat):
         d = mat.shape[-1]
         in_data = mat.reshape(*self.rdims, d)
+
+        if self.is_adjoint:
+            in_data = in_data.conj()
 
         if not hasattr(self, '_matmat_fn'):
             # generate a expression that acts directly on the data
@@ -1551,13 +1555,33 @@ class TNLinearOperator(spla.LinearOperator):
                 *self._tensors, iT, output_inds=o_ix, **self._kws)
 
         out_data = self._matmat_fn(*self._ins, in_data, backend=self.backend)
+
+        if self.is_adjoint:
+            out_data = out_data.conj()
+
         return out_data.reshape(-1, d)
+
+    def _adjoint(self):
+        """Hermitian conjugate of this TNLO.
+        """
+        # cache the adjoint
+        if self._adjoint_linop is None:
+            self._adjoint_linop = TNLinearOperator(
+                self._tensors, self.right_inds, self.left_inds,
+                self.rdims, self.ldims, backend=self.backend,
+                is_adjoint=not self.is_adjoint)
+
+        return self._adjoint_linop
 
     def to_dense(self):
         """Convert this TNLinearOperator into a dense array.
         """
-        return tensor_contract(*self._tensors).to_dense(self.left_inds,
-                                                        self.right_inds)
+        if self.is_adjoint:
+            ts = (t.conj() for t in self._tensors)
+        else:
+            ts = self._tensors
+
+        return tensor_contract(*ts).to_dense(self.left_inds, self.right_inds)
 
     def astype(self, dtype):
         """Convert this ``TNLinearOperator`` to type ``dtype``.

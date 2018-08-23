@@ -11,26 +11,14 @@ import numexpr as ne
 import scipy.sparse as sp
 
 from ..core import qu, ptr, kron, nmlz, prod
-from ..accel import rdmul, dot, matrixify, _NUM_THREAD_WORKERS, get_thread_pool
-
-
-def complex_array(x, y):
-    """Efficient creation of complex array.
-    """
-    d = x.size
-
-    dtype = 'complex64' if x.dtype == 'float32' else 'complex128'
-
-    # XXX: numexpr3 will support complex64 natively
-    if dtype == 'complex128' and d > 32768:
-        z = ne.evaluate("complex(x, y)")
-    else:
-        z = np.empty(x.shape, dtype=dtype)
-        z.real = x
-        z.imag = y
-
-    return z
-
+from ..accel import (
+    dot,
+    rdmul,
+    matrixify,
+    complex_array,
+    get_thread_pool,
+    _NUM_THREAD_WORKERS,
+)
 
 # -------------------------------- RANDOMGEN -------------------------------- #
 if (
@@ -300,6 +288,7 @@ def rand_phase(shape, scale=1, dtype=complex):
     return z
 
 
+@random_seed_fn
 def rand_matrix(d, scaled=True, sparse=False, stype='csr',
                 density=None, dtype=complex, seed=None):
     """Generate a random complex matrix of order `d` with normally distributed
@@ -335,20 +324,20 @@ def rand_matrix(d, scaled=True, sparse=False, stype='csr',
         raise TypeError("dtype {} not understood - should be "
                         "float or complex.".format(dtype))
 
-    # manually handle seed since using python random from standard library
-    if seed is not None:
-        seed_rand(seed)
-        if sparse:
-            random.seed(seed)
-
     if sparse:
         # Aim for 10 non-zero values per row, but betwen 1 and d/2
         density = min(10, d / 2) / d if density is None else density
         density = min(max(d**-2, density, ), 1.0)
         nnz = round(density * d * d)
 
+        if density > 0.1:
+            # take special care to avoid duplicates
+            ijs = random.sample(range(0, d**2), k=nnz)
+        else:
+            ijs = randint(0, d * d, size=nnz)
+
         # want to sample nnz unique (d, d) pairs without building list
-        i, j = np.divmod(random.sample(range(0, d**2), k=nnz), d)
+        i, j = np.divmod(ijs, d)
 
         data = randn(nnz, dtype=dtype)
         mat = sp.coo_matrix((data, (i, j)), shape=(d, d)).asformat(stype)

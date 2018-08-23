@@ -299,7 +299,7 @@ class TestLogarithmicNegativity:
         ln1 = qu.logneg_subsys(p, dims, sysa, sysb, approx_thresh=1e30)
         assert_allclose(ln0, ln1)
         # approx
-        ln2 = qu.logneg_subsys(p, dims, sysa, sysb, approx_thresh=1)
+        ln2 = qu.logneg_subsys(p, dims, sysa, sysb, approx_thresh=1, tol=0.005)
         assert ln1 != ln2
         assert_allclose(ln1, ln2, rtol=1e-1)
 

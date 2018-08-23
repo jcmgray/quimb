@@ -290,6 +290,23 @@ def ispos(qob, tol=1e-15):
 # Core accelerated numeric functions                                          #
 # --------------------------------------------------------------------------- #
 
+def _nb_complex_base(real, imag):
+    return real + 1j * imag
+
+
+sigs = ['complex64(float32, float32)', 'complex128(float64, float64)']
+_nb_complex_seq = vectorize(sigs)(_nb_complex_base)
+_nb_complex_par = vectorize(sigs, target='parallel')(_nb_complex_base)
+
+
+def complex_array(real, imag):
+    """Accelerated creation of complex array.
+    """
+    if real.size > 50000:
+        return _nb_complex_par(real, imag)
+    return _nb_complex_seq(real, imag)
+
+
 @matrixify
 @upcast
 @njit
