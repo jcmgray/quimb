@@ -343,8 +343,8 @@ def rand_matrix(d, scaled=True, sparse=False, stype='csr',
 
     if sparse:
         # Aim for 10 non-zero values per row, but betwen 1 and d/2
-        density = 10 / d if density is None else density
-        density = min(max(density, d**-2), 1 - d**-2)
+        density = min(10, d / 2) / d if density is None else density
+        density = min(max(d**-2, density, ), 1.0)
         nnz = round(density * d * d)
 
         # want to sample nnz unique (d, d) pairs without building list

@@ -322,54 +322,54 @@ def mul(x, y):
     return mul_dense(x, y)
 
 
-@njit
-def _nb_subtract_update_(X, c, Y):
-    for i in range(X.size):
-        X[i] -= c * Y[i]
+@vectorize(['float32(float32, float32, float32)',
+            'float64(float64, float64, float64)',
+            'complex64(complex64, float32, complex64)',
+            'complex128(complex128, float64, complex128)'],)
+def _nb_subtract_update_(X, c, Z):
+    return X - c * Z
 
 
-@nb.njit(parallel=True)
-def _nb_par_subtract_update_(X, c, Y):
-    for i in nb.prange(X.size):
-        X[i] -= c * Y[i]
+@vectorize(['float32(float32, float32, float32)',
+            'float64(float64, float64, float64)',
+            'complex64(complex64, float32, complex64)',
+            'complex128(complex128, float64, complex128)'], target='parallel')
+def _nb_par_subtract_update_(X, c, Z):
+    return X - c * Z
 
 
 def subtract_update_(X, c, Y):
     """Accelerated inplace computation of ``X -= c * Y``.
     """
-    if X.ndim > 1:
-        X, Y = X.view(), Y.view()
-        X.shape = Y.shape = (-1,)
-
-    if X.size > 4096:
-        _nb_par_subtract_update_(X, c, Y)
+    if X.size > 2048:
+        _nb_par_subtract_update_(X, c, Y, out=X)
     else:
-        _nb_subtract_update_(X, c, Y)
+        _nb_subtract_update_(X, c, Y, out=X)
 
 
-@njit
-def _nb_divide_update_(X, c, out):
-    for i in range(X.size):
-        out[i] = X[i] / c
+@vectorize(['float32(float32, float32)',
+            'float64(float64, float64)',
+            'complex64(complex64, float32)',
+            'complex128(complex128, float64)'],)
+def _nb_divide_update_(X, c):
+    return X / c
 
 
-@nb.njit(parallel=True)
-def _nb_par_divide_update_(X, c, out):
-    for i in nb.prange(X.size):
-        out[i] = X[i] / c
+@vectorize(['float32(float32, float32)',
+            'float64(float64, float64)',
+            'complex64(complex64, float32)',
+            'complex128(complex128, float64)'], target='parallel')
+def _nb_par_divide_update_(X, c):
+    return X / c
 
 
 def divide_update_(X, c, out):
     """Accelerated computation of ``X / c`` into ``out``.
     """
-    if X.ndim > 1:
-        X, out = X.view(), out.view()
-        X.shape = out.shape = (-1,)
-
-    if X.size > 4096:
-        _nb_divide_update_(X, c, out)
+    if X.size > 2048:
+        _nb_divide_update_(X, c, out=out)
     else:
-        _nb_par_divide_update_(X, c, out)
+        _nb_par_divide_update_(X, c, out=out)
 
 
 @njit(nogil=True)  # pragma: no cover

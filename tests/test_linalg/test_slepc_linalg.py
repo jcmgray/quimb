@@ -198,7 +198,7 @@ class TestShellMatrix:
         assert_allclose(np.abs(ev_s.conj().T @ ev), 1.0)
 
     def test_internal_shift_invert_precond(self):
-        a = rand_herm(100, sparse=True)
+        a = rand_herm(20, sparse=True, seed=42)
         alo = sp.linalg.aslinearoperator(a)
 
         st_opts = {
@@ -215,7 +215,7 @@ class TestShellMatrix:
         assert_allclose(np.abs(ev_s.conj().T @ ev), 1.0)
 
     def test_internal_shift_invert_precond_jd(self):
-        a = rand_herm(100, sparse=True)
+        a = rand_herm(20, sparse=True, seed=42)
         alo = sp.linalg.aslinearoperator(a)
 
         st_opts = {
