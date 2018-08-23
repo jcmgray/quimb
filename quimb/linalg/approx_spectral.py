@@ -531,8 +531,8 @@ def get_single_precision_dtype(dtype):
         raise ValueError("dtype {} not understood.".format(dtype))
 
 
-def approx_spectral_function(A, f, tol=1e-2, *, bsz=1, R=1024, tol_scale=1,
-                             tau=None, k_min=10, k_max=256, beta_tol=1e-6,
+def approx_spectral_function(A, f, tol=0.01, *, bsz=1, R=1024, tol_scale=1,
+                             tau=None, k_min=10, k_max=512, beta_tol=1e-6,
                              mpi=False, mean_p=0.7, mean_s=1.0, pos=False,
                              v0=None, verbosity=0, single_precision='AUTO',
                              **lanczos_opts):
@@ -546,8 +546,8 @@ def approx_spectral_function(A, f, tol=1e-2, *, bsz=1, R=1024, tol_scale=1,
     f : callable
         Scalar function with which to act on approximate eigenvalues.
     tol : float, optional
-        Convergence tolerance threshold for error on mean of repeats. This can
-        pretty much be relied on as the overall accuracy. See also
+        Relative convergence tolerance threshold for error on mean of repeats.
+        This can pretty much be relied on as the overall accuracy. See also
         ``tol_scale`` and ``tau``. Default: 1%.
     bsz : int, optional
         Number of simultenous vector columns to use at once, 1 equating to the
@@ -563,7 +563,7 @@ def approx_spectral_function(A, f, tol=1e-2, *, bsz=1, R=1024, tol_scale=1,
         The relative tolerance required for a single lanczos run to converge.
         This needs to be small enough that each estimate with a single random
         vector produces an unbiased sample of the operators spectrum.
-        Defaults to ``tol / 2``.
+        Defaults to ``tol / 3``.
     k_min : int, optional
         The minimum size of the krylov subspace to form for each sample.
     k_max : int, optional
@@ -624,7 +624,7 @@ def approx_spectral_function(A, f, tol=1e-2, *, bsz=1, R=1024, tol_scale=1,
         R = max(1, int(R / bsz))
 
     if tau is None:
-        tau = tol / 2
+        tau = tol / 3
 
     if verbosity:
         print("LANCZOS f(A) CALC: tol={}, tau={}, R={}, bsz={}"

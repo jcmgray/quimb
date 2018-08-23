@@ -130,7 +130,7 @@ class TestEntropy:
         # approx
         e2 = qu.entropy_subsys(p, (2**5, 2**4), 0, approx_thresh=1)
         assert e1 != e2
-        assert_allclose(e1, e2, rtol=5e-2)
+        assert_allclose(e1, e2, rtol=0.1)
 
         assert qu.entropy_subsys(p, (2**5, 2**4), [0, 1],
                                  approx_thresh=1) == 0.0
@@ -179,7 +179,7 @@ class TestMutualInformation:
         assert_allclose(mi1, mi0)
         # approx
         mi2 = qu.mutinf_subsys(p, dims, sysa=0, sysb=2, approx_thresh=1)
-        assert_allclose(mi1, mi2, rtol=5e-2)
+        assert_allclose(mi1, mi2, rtol=0.1)
 
     def test_mutinf_subsys_pure(self):
         p = qu.rand_ket(2**7)
