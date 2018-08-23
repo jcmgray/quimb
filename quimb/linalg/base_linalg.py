@@ -14,7 +14,7 @@ from .numpy_linalg import (
     eigs_numpy,
     svds_numpy,
 )
-from ..gen.rand import randn
+
 from .scipy_linalg import (
     eigs_scipy,
     eigs_lobpcg,
