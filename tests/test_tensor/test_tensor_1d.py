@@ -411,7 +411,7 @@ class TestMatrixProductState:
                     kb[k.site_tag(stop), 'KET'])
 
         ii = ii.to_dense((ul, ur), (ll, lr))
-        assert_allclose(ii, np.eye(ii.shape[0]), rtol=2e-4, atol=2e-4)
+        assert_allclose(ii, np.eye(ii.shape[0]), rtol=0.001, atol=0.001)
 
     @pytest.mark.parametrize("bsz", [1, 2])
     @pytest.mark.parametrize("propagate_tags", [False, True])

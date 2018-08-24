@@ -288,7 +288,6 @@ def rand_phase(shape, scale=1, dtype=complex):
     return z
 
 
-@random_seed_fn
 def rand_matrix(d, scaled=True, sparse=False, stype='csr',
                 density=None, dtype=complex, seed=None):
     """Generate a random complex matrix of order `d` with normally distributed
@@ -324,6 +323,10 @@ def rand_matrix(d, scaled=True, sparse=False, stype='csr',
         raise TypeError("dtype {} not understood - should be "
                         "float or complex.".format(dtype))
 
+    # handle seed manually since standard python random.seed might be called
+    if seed is not None:
+        seed_rand(seed)
+
     if sparse:
         # Aim for 10 non-zero values per row, but betwen 1 and d/2
         density = min(10, d / 2) / d if density is None else density
@@ -332,6 +335,8 @@ def rand_matrix(d, scaled=True, sparse=False, stype='csr',
 
         if density > 0.1:
             # take special care to avoid duplicates
+            if seed is not None:
+                random.seed(seed)
             ijs = random.sample(range(0, d**2), k=nnz)
         else:
             ijs = randint(0, d * d, size=nnz)
