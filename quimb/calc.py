@@ -997,7 +997,7 @@ def is_degenerate(op, tol=1e-12):
     return np.count_nonzero(abs(l_gaps) < l_tol)
 
 
-def is_eigenvector(vec, mat, **kwargs):
+def is_eigenvector(vec, mat, tol=1e-14):
     """Determines whether a vector is an eigenvector of an operator.
 
     Parameters
@@ -1006,20 +1006,18 @@ def is_eigenvector(vec, mat, **kwargs):
         Vector to check.
     mat : matrix
         Matrix to check.
-    kwargs :
-        Supplied to numpy.allclose
+    tol : float, optional
+        The variance must be smaller than this value.
 
     Returns
     -------
     bool
         Whether ``mat @ vec = l * vec`` for some scalar ``l``.
     """
-    vec2 = mat @ vec
-
-    # define scalar factor using largest entry (otherwise can divide by ~zero)
-    largest = np.argmax(vec)
-    factor = np.asscalar(vec2[largest] / vec[largest])
-    return np.allclose(factor * vec, vec2, **kwargs)
+    mat_vec = dot(mat, vec)
+    E = expec(vec, mat_vec)
+    E2 = expec(vec, dot(mat, mat_vec))
+    return abs(E**2 - E2) < tol
 
 
 @njit
