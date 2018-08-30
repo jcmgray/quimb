@@ -623,8 +623,9 @@ def approx_spectral_function(A, f, tol=0.01, *, bsz=1, R=1024, tol_scale=1,
     else:
         R = max(1, int(R / bsz))
 
+    # require better precision for the lanczos procedure, otherwise biased
     if tau is None:
-        tau = tol / 3
+        tau = tol / 4
 
     if verbosity:
         print("LANCZOS f(A) CALC: tol={}, tau={}, R={}, bsz={}"
