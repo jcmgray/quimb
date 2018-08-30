@@ -34,6 +34,7 @@ For these first two modes, only one process ever runs the main script and you do
 * ``quimb-mpi-python --syncro``, "syncro mode": All processes are MPI, are spawned at start and have a single OMP thread. All processes run the main script and have thus have access to the arguments submitted to the mpi pool functions without any communication, but split such work in a round-robin way, and broadcast the result to everyone when the Future's result is called. To maintain syncronicity futures cannot be cancelled. For simple multi-node execution.
 
 .. warning::
+    :class: quimbwarning
 
     In syncro mode, potentially conflicting operations such as IO should be guarded with ``if MPI.COMM_WORLD.Get_rank() == 0`` etc. Additionally, any functions called outside of the MPI pool should be pure to ensure syncronization.
 

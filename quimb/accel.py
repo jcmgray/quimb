@@ -294,9 +294,9 @@ def _nb_complex_base(real, imag):
     return real + 1j * imag
 
 
-sigs = ['complex64(float32, float32)', 'complex128(float64, float64)']
-_nb_complex_seq = vectorize(sigs)(_nb_complex_base)
-_nb_complex_par = vectorize(sigs, target='parallel')(_nb_complex_base)
+_cmplx_sigs = ['complex64(float32, float32)', 'complex128(float64, float64)']
+_nb_complex_seq = vectorize(_cmplx_sigs)(_nb_complex_base)
+_nb_complex_par = vectorize(_cmplx_sigs, target='parallel')(_nb_complex_base)
 
 
 def complex_array(real, imag):
@@ -339,54 +339,51 @@ def mul(x, y):
     return mul_dense(x, y)
 
 
-@vectorize(['float32(float32, float32, float32)',
-            'float64(float64, float64, float64)',
-            'complex64(complex64, float32, complex64)',
-            'complex128(complex128, float64, complex128)'],)
-def _nb_subtract_update_(X, c, Z):
+def _nb_subtract_update_base(X, c, Z):
     return X - c * Z
 
 
-@vectorize(['float32(float32, float32, float32)',
-            'float64(float64, float64, float64)',
-            'complex64(complex64, float32, complex64)',
-            'complex128(complex128, float64, complex128)'], target='parallel')
-def _nb_par_subtract_update_(X, c, Z):
-    return X - c * Z
+_sbtrct_sigs = ['float32(float32, float32, float32)',
+                'float64(float64, float64, float64)',
+                'complex64(complex64, float32, complex64)',
+                'complex128(complex128, float64, complex128)']
+_nb_subtract_update_seq, _nb_subtract_update_par = (
+    vectorize(_sbtrct_sigs, target=target)(_nb_subtract_update_base)
+    for target in ('cpu', 'parallel')
+)
 
 
 def subtract_update_(X, c, Y):
-    """Accelerated inplace computation of ``X -= c * Y``.
+    """Accelerated inplace computation of ``X -= c * Y``. This is mainly
+    for Lanczos iteration.
     """
     if X.size > 2048:
-        _nb_par_subtract_update_(X, c, Y, out=X)
+        _nb_subtract_update_par(X, c, Y, out=X)
     else:
-        _nb_subtract_update_(X, c, Y, out=X)
+        _nb_subtract_update_seq(X, c, Y, out=X)
 
 
-@vectorize(['float32(float32, float32)',
-            'float64(float64, float64)',
-            'complex64(complex64, float32)',
-            'complex128(complex128, float64)'],)
-def _nb_divide_update_(X, c):
+def _nb_divide_update_base(X, c):
     return X / c
 
 
-@vectorize(['float32(float32, float32)',
-            'float64(float64, float64)',
-            'complex64(complex64, float32)',
-            'complex128(complex128, float64)'], target='parallel')
-def _nb_par_divide_update_(X, c):
-    return X / c
+_divd_sigs = ['float32(float32, float32)',
+              'float64(float64, float64)',
+              'complex64(complex64, float32)',
+              'complex128(complex128, float64)']
+_nb_divide_update_seq, _nb_divide_update_par = (
+    vectorize(_divd_sigs, target=target)(_nb_divide_update_base)
+    for target in ('cpu', 'parallel')
+)
 
 
 def divide_update_(X, c, out):
     """Accelerated computation of ``X / c`` into ``out``.
     """
     if X.size > 2048:
-        _nb_divide_update_(X, c, out=out)
+        _nb_divide_update_par(X, c, out=out)
     else:
-        _nb_par_divide_update_(X, c, out=out)
+        _nb_divide_update_seq(X, c, out=out)
 
 
 @njit(nogil=True)  # pragma: no cover

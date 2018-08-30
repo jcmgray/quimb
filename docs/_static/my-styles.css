@@ -34,3 +34,12 @@ h1 {
     font-size: 50px;
     font-weight: bold;
 }
+
+
+.quimbnote {
+    background-color: #008C61;
+}
+
+.quimbwarning {
+    background-color: #FE5A3C;
+}

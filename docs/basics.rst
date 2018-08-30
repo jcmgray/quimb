@@ -56,6 +56,7 @@ The sparse format can be specified with the ``stype`` keyword. The partial funct
 
 
 .. note::
+    :class: quimbnote
 
     If a simple 1d-list is supplied and no ``qtype`` is given, ``'ket'`` is assumed.
 
@@ -117,6 +118,7 @@ This can also be done using the ``&`` overload on numpy and scipy matrices:
     ...
 
 .. warning::
+    :class: quimbwarning
 
     When :mod:`quimb` is imported, it overloads the ``&``/``__and__`` of :class:`numpy.matrix` which replaces the overload of :func:`numpy.bitwise_and`.
 
