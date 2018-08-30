@@ -10,6 +10,7 @@ import operator
 import functools
 import itertools
 import collections
+from numbers import Integral
 
 from cytoolz import (unique, concat, frequencies,
                      partition_all, merge_with, valmap)
@@ -778,7 +779,7 @@ def array_direct_product(X, Y, sum_axes=()):
         two respective dimensions, unless it is included in ``sum_axes``.
     """
 
-    if isinstance(sum_axes, int):
+    if isinstance(sum_axes, Integral):
         sum_axes = (sum_axes,)
 
     # parse the intermediate and final shape doubling the size of any axes that
@@ -835,7 +836,7 @@ def tensor_direct_product(T1, T2, sum_inds=(), inplace=False):
         Like ``T1``, but with each dimension doubled in size if not
         in ``sum_inds``.
     """
-    if isinstance(sum_inds, (str, int)):
+    if isinstance(sum_inds, (str, Integral)):
         sum_inds = (sum_inds,)
 
     if T2.inds != T1.inds:
@@ -2162,7 +2163,7 @@ class TensorNetwork(object):
         tags : set
             The correct tags describing those sites.
         """
-        if isinstance(sites, int):
+        if isinstance(sites, Integral):
             return {self.site_tag(sites)}
         elif isinstance(sites, slice):
             return set(map(self.structure.format, self.slice2sites(sites)))
@@ -2205,7 +2206,7 @@ class TensorNetwork(object):
         """
         if tags in (None, ..., all):
             return set(self.tensor_map)
-        elif isinstance(tags, (int, slice)):
+        elif isinstance(tags, (Integral, slice)):
             tags = self.sites2tags(tags)
         else:
             tags = tags2set(tags)
@@ -2321,7 +2322,7 @@ class TensorNetwork(object):
         if isinstance(tags, slice):
             return self.select(self.sites2tags(tags), which='any')
 
-        elif isinstance(tags, int):
+        elif isinstance(tags, Integral):
             tensors = self.select_tensors(self.sites2tags(tags), which='any')
 
         else:

@@ -5,6 +5,7 @@ import math
 import random
 from importlib.util import find_spec
 from functools import wraps, lru_cache
+from numbers import Integral
 
 import numpy as np
 import numexpr as ne
@@ -74,7 +75,7 @@ if (
         if seed is not None:
             seed_rand(seed)
 
-        if isinstance(shape, int):
+        if isinstance(shape, Integral):
             d = shape
             shape = (shape,)
         else:

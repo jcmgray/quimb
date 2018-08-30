@@ -1,11 +1,11 @@
 """Functions for more advanced calculations of quantities and properties of
 quantum objects.
 """
-from math import sin, cos, pi, log, log2, sqrt
 import numbers
-import collections
 import itertools
 import functools
+import collections
+from math import sin, cos, pi, log, log2, sqrt
 
 import numpy as np
 import numpy.linalg as nla
@@ -103,7 +103,7 @@ def dephase(rho, p, rand_rank=None):
         dephaser = eye(d) / d
 
     else:
-        if not isinstance(rand_rank, (int, np.integer)):
+        if not isinstance(rand_rank, numbers.Integral):
             rand_rank = int(rand_rank * d)
         rand_rank = min(max(1, rand_rank), d)
 

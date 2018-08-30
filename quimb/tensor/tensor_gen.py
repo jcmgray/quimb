@@ -1,6 +1,7 @@
 """Generate specific tensor network states and operators.
 """
 import random
+from numbers import Integral
 
 import numpy as np
 
@@ -545,7 +546,7 @@ class SpinHam:
             >>> builder[45, 46] += 1/2, 'Z', 'Z'
 
         """
-        if isinstance(sites, int):
+        if isinstance(sites, Integral):
             return _TermAdder(self.var_one_site_terms.get(sites, None), 1)
 
         i, j = sorted(sites)
@@ -572,7 +573,7 @@ class SpinHam:
         else:
             terms = value
 
-        if isinstance(sites, int):
+        if isinstance(sites, Integral):
             self.var_one_site_terms[sites] = terms
         else:
             i, j = sorted(sites)

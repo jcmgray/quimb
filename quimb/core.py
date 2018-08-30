@@ -4,6 +4,7 @@
 import math
 import itertools
 import functools
+from numbers import Integral
 
 import numpy as np
 from numpy.matlib import zeros
@@ -642,7 +643,7 @@ def dim_map(dims, coos, cyclic=False, trim=False):
     if ndim == 1:
         if isinstance(coos, np.ndarray):
             coos = coos.ravel()
-        elif not isinstance(coos[0], int):
+        elif not isinstance(coos[0], Integral):
             coos = (c[0] for c in coos)
 
     # Map coordinates to indices
@@ -743,7 +744,7 @@ def dim_compress(dims, inds):
     >>> compressed_inds
     (1,)
     """
-    if isinstance(inds, int):
+    if isinstance(inds, Integral):
         inds = (inds,)
 
     dims, inds = zip(*_dim_compressor(dims, inds))
@@ -1080,7 +1081,7 @@ def itrace(a, axes=(0, 1)):
     (2, 2)
     """
     # Single index pair to trace out
-    if isinstance(axes[0], int):
+    if isinstance(axes[0], Integral):
         return np.trace(a, axis1=axes[0], axis2=axes[1])
     elif len(axes[0]) == 1:
         return np.trace(a, axis1=axes[0][0], axis2=axes[1][0])
@@ -1100,7 +1101,7 @@ def itrace(a, axes=(0, 1)):
 def _partial_trace_dense(p, dims, keep):
     """Perform partial trace of a dense matrix.
     """
-    if isinstance(keep, int):
+    if isinstance(keep, Integral):
         keep = (keep,)
     if isvec(p):  # p = psi
         p = np.asarray(p).reshape(dims)

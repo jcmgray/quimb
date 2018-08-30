@@ -1,9 +1,10 @@
 """Classes and algorithms related to 1D tensor networks.
 """
 
+import re
 import functools
 from math import log2
-import re
+from numbers import Integral
 
 import numpy as np
 
@@ -175,7 +176,7 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
     dp = psi.phys_dim()
     tags = tags2set(tags)
 
-    if isinstance(where, int):
+    if isinstance(where, Integral):
         where = (where,)
     ns = len(where)
 
@@ -295,7 +296,7 @@ class TensorNetwork1DVector:
                            doc="The string specifier for the physical indices")
 
     def site_ind(self, i):
-        if isinstance(i, int):
+        if isinstance(i, Integral):
             i = i % self.nsites
         return self.site_ind_id.format(i)
 
@@ -535,7 +536,7 @@ class TensorNetwork1DFlat:
         inv_tol : float, optional
             Tolerance with which to invert the gauge.
         """
-        if isinstance(i, int):
+        if isinstance(i, Integral):
             start, stop = i, i + 1
         elif isinstance(i, slice):
             start, stop = i.start, i.stop
@@ -715,7 +716,7 @@ class TensorNetwork1DFlat:
             self.left_canonize(bra=compress_opts.get('bra', None))
             self.right_compress(**compress_opts)
 
-        elif isinstance(form, int):
+        elif isinstance(form, Integral):
             self.left_compress(stop=form, **compress_opts)
             self.right_compress(stop=form, **compress_opts)
 
@@ -2175,7 +2176,7 @@ class MatrixProductOperator(TensorNetwork1DFlat,
         """
         tn = self if inplace else self.copy()
 
-        if isinstance(sysa, int):
+        if isinstance(sysa, Integral):
             sysa = (sysa,)
 
         tmp_ind_id = "__tmp_{}__"
