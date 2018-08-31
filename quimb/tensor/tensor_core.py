@@ -1592,6 +1592,10 @@ class TNLinearOperator(spla.LinearOperator):
 
         return tensor_contract(*ts).to_dense(self.left_inds, self.right_inds)
 
+    @property
+    def A(self):
+        return self.to_dense()
+
     def astype(self, dtype):
         """Convert this ``TNLinearOperator`` to type ``dtype``.
         """
@@ -3401,6 +3405,7 @@ class TNLinearOperator1D(spla.LinearOperator):
         return out_T.transpose(*self.left_inds, inplace=True).data.ravel()
 
     def _rmatvec(self, vec):
+        # XXX: use _adjoint / matmat
         in_data = vec.conj().reshape(*self.ldims)
         in_T = Tensor(in_data, self.left_inds, tags=['_LEFT'])
 
@@ -3414,3 +3419,7 @@ class TNLinearOperator1D(spla.LinearOperator):
     def to_dense(self):
         T = self.tn ^ slice(self.start, self.stop)
         return T.to_dense(self.left_inds, self.right_inds)
+
+    @property
+    def A(self):
+        return self.to_dense()
