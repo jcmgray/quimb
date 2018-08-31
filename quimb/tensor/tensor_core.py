@@ -1519,6 +1519,7 @@ class TNLinearOperator(spla.LinearOperator):
         # conjugate inputs/ouputs trather all tensors if necessary
         self.is_adjoint = is_adjoint
         self._adjoint_linop = None
+        self._contractors = {}
 
         super().__init__(dtype=self._tensors[0].dtype, shape=(ld, rd))
 
@@ -1528,13 +1529,15 @@ class TNLinearOperator(spla.LinearOperator):
         if self.is_adjoint:
             in_data = in_data.conj()
 
-        if not hasattr(self, '_matvec_fn'):
+        # cache the contractor
+        if 'matvec' not in self._contractors:
             # generate a expression that acts directly on the data
             iT = Tensor(in_data, inds=self.right_inds)
-            self._matvec_fn = tensor_contract(
+            self._contractors['matvec'] = tensor_contract(
                 *self._tensors, iT, output_inds=self.left_inds, **self._kws)
 
-        out_data = self._matvec_fn(*self._ins, in_data, backend=self.backend)
+        fn = self._contractors['matvec']
+        out_data = fn(*self._ins, in_data, backend=self.backend)
 
         if self.is_adjoint:
             out_data = out_data.conj()
@@ -1548,14 +1551,19 @@ class TNLinearOperator(spla.LinearOperator):
         if self.is_adjoint:
             in_data = in_data.conj()
 
-        if not hasattr(self, '_matmat_fn'):
+        # for matmat need different contraction scheme for different d sizes
+        key = "matmat_{}".format(d)
+
+        # cache the contractor
+        if key not in self._contractors:
             # generate a expression that acts directly on the data
             iT = Tensor(in_data, inds=(*self.right_inds, '__mat_ix__'))
             o_ix = (*self.left_inds, '__mat_ix__')
-            self._matmat_fn = tensor_contract(
+            self._contractors[key] = tensor_contract(
                 *self._tensors, iT, output_inds=o_ix, **self._kws)
 
-        out_data = self._matmat_fn(*self._ins, in_data, backend=self.backend)
+        fn = self._contractors[key]
+        out_data = fn(*self._ins, in_data, backend=self.backend)
 
         if self.is_adjoint:
             out_data = out_data.conj()
