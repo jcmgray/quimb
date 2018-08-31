@@ -191,8 +191,9 @@ def load_from_disk(fname, **load_opts):
     return joblib.load(fname, **load_opts)
 
 
-class Verbosify:
-    """Decorator for making functions print their inputs.
+class Verbosify:  # pragma: no cover
+    """Decorator for making functions print their inputs. Simply for
+    illustrating a MPI example in the docs.
     """
 
     def __init__(self, fn, highlight=None, mpi=False):
@@ -201,8 +202,6 @@ class Verbosify:
         self.mpi = mpi
 
     def __call__(self, *args, **kwargs):
-        """ham_heis but print ownership
-        """
         if self.mpi:
             from mpi4py import MPI
             pre_msg = "{}: ".format(MPI.COMM_WORLD.Get_rank())
