@@ -417,7 +417,7 @@ def norm_trace_dense(A, isherm=True):
     """Returns the trace norm of operator ``A``, that is,
     the sum of the absolute eigenvalues.
     """
-    return np.sum(np.absolute(eigvalsh(A, sort=False, isherm=isherm)))
+    return abs(eigensystem(A, return_vecs=False, isherm=isherm)).sum()
 
 
 def norm(A, ntype=2, **kwargs):

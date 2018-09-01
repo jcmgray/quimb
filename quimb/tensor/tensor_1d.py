@@ -146,10 +146,18 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
         Contract the gate into the MPS, or leave it uncontracted.
     tags : str or sequence of str, optional
         Tag the new gate tensor with these tags.
-    propagate_tags : {'sites', False, True}, optional
+    propagate_tags : {'sites', 'register', False, True}, optional
         Add any tags from the sites to the new gate tensor (only matters if
-        ``contract=False`` else tags are merged anyway). If ``'sites'``, then
-        only propagate tags matching e.g. 'I{}' and ignore all others.
+        ``contract=False`` else tags are merged anyway):
+
+            - If ``'sites'``, then only propagate tags matching e.g. 'I{}' and
+              ignore all others. I.e. just propagate the lightcone.
+            - If ``'register'``, then only propagate tags matching the sites of
+              where this gate was actually applied. I.e. ignore the lightcone,
+              just keep track of which 'registers' the gate was applied to.
+            - If ``False``, propagate nothing.
+            - If ``True``, propagate all atags.
+
     inplace, bool, optional
         Perform the gate in place.
 
@@ -190,7 +198,6 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
                          "".format(G.shape, where))
 
     bnds = [rand_uuid() for _ in range(ns)]
-    # site_tags = [psi.site_tag(i) for i in where]
     site_ix = [psi.site_ind(i) for i in where]
     gate_ix = site_ix + bnds
 
@@ -208,7 +215,10 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
     else:
         psi |= TG
         if propagate_tags:
-            old_tags = get_tags(psi.tensor_map[tid] for tid in site_tids)
+            if propagate_tags == 'register':
+                old_tags = {psi.site_tag(i) for i in where}
+            else:
+                old_tags = get_tags(psi.tensor_map[tid] for tid in site_tids)
 
             if propagate_tags == 'sites':
                 # use regex to take tags only matching e.g. 'I0', 'I13'
