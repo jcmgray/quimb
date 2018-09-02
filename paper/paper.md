@@ -29,7 +29,7 @@ Entanglement is also the key quantity when formulating tensor networks, an effic
 
 The main ``quimb`` module utilizes numpy [@numpy] and scipy [@scipy] sparse matrices to represent quantum states and operators.
 Amongst other things there are tools to: (i) construct states and operators in composite tensor spaces; (ii) generate various special or random states and operators such as Hamiltonians; (iii) perform and compute many operations and quantities on these states; and (iv) efficiently evolve states with a variety of methods.
-Much of this core functionality is accelerated with ``numba`` or ``numexpr``. Additionally, ``quimb`` has an optional ``slepc4py`` [@slepc4py] interface for various linear algebra routines, such as eigen-decomposition. 
+Much of this core functionality is accelerated with ``numba`` or ``numexpr``. Additionally, ``quimb`` has an optional ``slepc4py`` [@hernandez2005slepc; @dalcin2011parallel] interface for various linear algebra routines, such as eigen-decomposition. 
 These are accessed through unified functions so that one can easily switch between ``slepc4py``, ``scipy`` and other backends.
 When required, ``quimb`` handles spawning local ``mpi4py`` [@mpi4py] workers automatically, but there also tools for explicitly running under MPI, for example on a cluster. 
 The following snippet illustrates some basic usage:
