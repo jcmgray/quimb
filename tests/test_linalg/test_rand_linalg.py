@@ -49,8 +49,8 @@ class TestRSVD:
         assert U.dtype == dtype
         assert V.dtype == dtype
 
-        assert_allclose(U.conj().T @ U, np.eye(k), rtol=1e-6, atol=1e-6)
-        assert_allclose(V @ V.conj().T, np.eye(k), rtol=1e-6, atol=1e-6)
+        assert_allclose(U.conj().T @ U, np.eye(k), rtol=1e-5, atol=1e-5)
+        assert_allclose(V @ V.conj().T, np.eye(k), rtol=1e-5, atol=1e-5)
 
         Ue, se, Ve = qu.svds(X, k)
         opt_err = qu.norm(X - usv2dense(Ue, se, Ve), 'fro')
