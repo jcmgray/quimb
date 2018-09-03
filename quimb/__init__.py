@@ -80,6 +80,7 @@ from .linalg.base_linalg import (
     expm_multiply,
     Lazy,
 )
+from .linalg.rand_linalg import rsvd, estimate_rank
 from .linalg.mpi_launcher import get_mpi_pool
 
 # Generating objects
@@ -288,6 +289,8 @@ __all__ = [
     'svds',
     'norm',
     'Lazy',
+    'rsvd',
+    'estimate_rank',
     # Gen ------------------------------------------------------------------- #
     'spin_operator',
     'pauli',

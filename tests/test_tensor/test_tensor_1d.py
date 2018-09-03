@@ -570,7 +570,7 @@ class TestMatrixProductOperator:
         op += Id
         assert_allclose(op.trace(), t + 3)
 
-    def test_partial_tranpose(self):
+    def test_partial_transpose(self):
         p = MPS_rand_state(8, 10)
         r = p.ptr([2, 3, 4, 5, 6, 7])
         rd = r.to_dense()

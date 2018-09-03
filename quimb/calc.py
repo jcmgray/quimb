@@ -371,7 +371,7 @@ float
 
 See Also
 --------
-tr_sqrt, tr_sqrt_subsys_approx, partial_tranpose_norm
+tr_sqrt, tr_sqrt_subsys_approx, partial_transpose_norm
 """
 
 
@@ -416,7 +416,7 @@ def partial_transpose(p, dims=(2, 2), sysa=0):
             .reshape((prod(dims), prod(dims))))
 
 
-def partial_tranpose_norm(p, dims, sysa):
+def partial_transpose_norm(p, dims, sysa):
     """Compute the norm of the partial transpose for (log)-negativity,
     taking a shortcut (trace sqrt of reduced subsytem), when system is a
     vector.
@@ -465,7 +465,7 @@ def logneg(p, dims=(2, 2), sysa=0):
     --------
     negativity, partial_transpose, logneg_subsys_approx
     """
-    return max(0.0, log2(partial_tranpose_norm(p, dims, sysa)))
+    return max(0.0, log2(partial_transpose_norm(p, dims, sysa)))
 
 
 logarithmic_negativity = logneg
@@ -561,7 +561,7 @@ def negativity(p, dims=(2, 2), sysa=0):
     --------
     logneg, partial_transpose, negativity_subsys_approx
     """
-    return max(0.0, (partial_tranpose_norm(p, dims, sysa) - 1) / 2)
+    return max(0.0, (partial_transpose_norm(p, dims, sysa) - 1) / 2)
 
 
 @zeroify

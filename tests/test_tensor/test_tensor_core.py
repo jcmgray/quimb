@@ -741,7 +741,7 @@ class TestTensorNetwork:
 
         assert (tn_even & tn_odd).sites == range(10)
 
-    @pytest.mark.parametrize("backend", ['svd', 'eig', 'isvd', 'svds'])
+    @pytest.mark.parametrize("backend", ['svd', 'eig', 'isvd', 'svds', 'rsvd'])
     def test_compress_between(self, backend):
         A = rand_tensor((3, 4, 5), 'abd', tags={'T1'})
         tensor_direct_product(A, A, inplace=True)
@@ -753,7 +753,7 @@ class TestTensorNetwork:
 
         tn.compress_between('T1', 'T2', backend=backend)
 
-    @pytest.mark.parametrize("backend", ['svd', 'eig', 'isvd', 'svds'])
+    @pytest.mark.parametrize("backend", ['svd', 'eig', 'isvd', 'svds', 'rsvd'])
     def compress_all(self, backend):
         k = MPS_rand_state(10, 7)
         k += k
@@ -850,7 +850,8 @@ class TestTensorNetworkAsLinearOperator:
         assert_allclose(tn_lo.dot(X), tn_d.dot(X))
 
     @pytest.mark.parametrize("dtype", (float, complex))
-    def test_replace_with_svd_using_linear_operator(self, dtype):
+    @pytest.mark.parametrize("method", ('isvd', 'rsvd'))
+    def test_replace_with_svd_using_linear_operator(self, dtype, method):
         k = MPS_rand_state(100, 10, dtype=dtype, cyclic=True)
         b = k.H
         b.expand_bond_dimension(11)
@@ -865,7 +866,7 @@ class TestTensorNetworkAsLinearOperator:
 
         where = ['I{}'.format(i) for i in range(2, 40)]
 
-        tn.replace_with_svd(where, left_inds=(ul, ll), eps=1e-3,
+        tn.replace_with_svd(where, left_inds=(ul, ll), eps=1e-3, method=method,
                             inplace=True, ltags='_U', rtags='_V')
         tn.structure = None
         x2 = tn ^ ...

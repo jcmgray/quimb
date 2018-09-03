@@ -57,3 +57,13 @@ See the following functions:
     - :func:`~quimb.linalg.base_linalg.eigvecsh_window`
 
 With the last three allowing the specification of a window *relative* to the total spectrum of the operator.
+
+
+Fast Randomized Linear Algebra
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``quimb`` has an implementation of a fast randomized SVD - :func:`~quimb.linalg.rand_linalg.rsvd` - 
+that can be significantly quicker than :func:`~quimb.linalg.base_linalg.svd` or :func:`~quimb.linalg.base_linalg.svds`, 
+especially for large ``k``. This might be useful for e.g. tensor network linear operator decompositions. 
+It can perform the SVD rank-adaptively, which allows the efficient estimation of an operator's rank, 
+see :func:`~quimb.linalg.rand_linalg.estimate_rank`.

@@ -99,7 +99,7 @@ def lazy_ptr_ppt_linop(psi_abc, dims, sysa, sysb, **linop_opts):
     Parameters
     ----------
     psi_abc : ket
-        State to partially trace, partially tranpose, then dot with another
+        State to partially trace, partially transpose, then dot with another
         ket, with size ``prod(dims)``.
         ``prod(dims[sysa] + dims[sysb])``.
     dims : sequence of int
@@ -763,7 +763,7 @@ def tr_sqrt_subsys_approx(psi_ab, dims, sysa, backend=None, **kwargs):
 
 
 def norm_ppt_subsys_approx(psi_abc, dims, sysa, sysb, backend=None, **kwargs):
-    """Estimate the norm of the partial tranpose of a pure state's subsystem.
+    """Estimate the norm of the partial transpose of a pure state's subsystem.
     """
     lo = lazy_ptr_ppt_linop(psi_abc, dims=dims, sysa=sysa,
                             sysb=sysb, backend=backend)

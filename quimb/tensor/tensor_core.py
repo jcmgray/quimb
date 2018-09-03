@@ -21,6 +21,7 @@ import scipy.linalg.interpolative as sli
 
 from ..accel import prod, njit, realify_scalar, vdot
 from ..linalg.base_linalg import norm_fro_dense
+from ..linalg.rand_linalg import rsvd, estimate_rank
 from ..utils import raise_cant_find_library_function, functions_equal, has_cupy
 
 try:
@@ -499,15 +500,8 @@ def _choose_k(x, cutoff, max_bond):
     """
     d = min(x.shape)
 
-    # choose based on cutoff only
-    if max_bond < 0:
-        k = sli.estimate_rank(x, eps=cutoff)
-
-    # choose based on both cutoff and max_bond
-    elif cutoff != 0.0:
-        k = min(sli.estimate_rank(x, eps=cutoff), max_bond)
-
-    # Just choose based on max_bond
+    if cutoff != 0.0:
+        k = estimate_rank(x, cutoff, k_max=None if max_bond < 0 else max_bond)
     else:
         k = min(d, max_bond)
 
@@ -547,6 +541,16 @@ def _array_split_isvd(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0):
 
     U, s, V = sli.svd(x, k)
     V = V.conj().T
+    return _trim_and_renorm_SVD(U, s, V, cutoff, cutoff_mode, max_bond, absorb)
+
+
+def _array_split_rsvd(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0):
+    """SVD-decomposition using randomized methods (due to Halko). Allows the
+    computation of only a certain number of singular values, e.g. max_bond,
+    from the get-go, and is thus more efficient. Can also supply
+    ``scipy.sparse.linalg.LinearOperator``.
+    """
+    U, s, V = rsvd(x, cutoff)
     return _trim_and_renorm_SVD(U, s, V, cutoff, cutoff_mode, max_bond, absorb)
 
 
@@ -620,7 +624,7 @@ def tensor_split(T, left_inds, method='svd', max_bond=None, absorb='both',
         unitary matrix respectively.
     cutoff : float, optional
         The threshold below which to discard singular values, only applies to
-        ``method='svd'`` and ``method='eig'``.
+        SVD and eigendecomposition based methods (not QR, LQ, or cholesky).
     cutoff_mode : {'sum2', 'rel', 'abs', 'rsum2'}
         Method with which to apply the cutoff threshold:
 
@@ -685,6 +689,7 @@ def tensor_split(T, left_inds, method='svd', max_bond=None, absorb='both',
         'cholesky': _array_split_cholesky,
         'isvd': _array_split_isvd,
         'svds': _array_split_svds,
+        'rsvd': _array_split_rsvd,
         'eigsh': _array_split_eigsh,
     }[method](array, **opts)
 
@@ -1128,16 +1133,17 @@ class Tensor(object):
         return tn
 
     def transpose_like(self, other, inplace=False):
-        """Tranpose this tensor to match the indices of ``other``, allowing for
-        one index to be different. E.g. if ``self.inds = ('a', 'b', 'c', 'x')``
-        and ``other.inds = ('b', 'a', 'd', 'c')`` the output inds will be
-        ``('b', 'a', 'x', 'c')``.
+        """Transpose this tensor to match the indices of ``other``, allowing
+        for one index to be different. E.g. if
+        ``self.inds = ('a', 'b', 'c', 'x')`` and
+        ``other.inds = ('b', 'a', 'd', 'c')`` then 'x' will be aligned with 'd'
+        and the output inds will be ``('b', 'a', 'x', 'c')``
         """
         tn = self if inplace else self.copy()
         diff_ix = set(tn.inds) - set(other.inds)
 
         if len(diff_ix) > 1:
-            raise ValueError("More than one index don't match, the tranpose "
+            raise ValueError("More than one index don't match, the transpose "
                              "is therefore not well-defined.")
 
         # if their indices match, just plain transpose
@@ -1475,7 +1481,7 @@ class TNLinearOperator(spla.LinearOperator):
         The dimensions corresponding to left_inds. Will figure out if None.
     rdims : tuple of int, or None
         The dimensions corresponding to right_inds. Will figure out if None.
-    is_adjoint : bool, optional
+    is_conj : bool, optional
         Whether this object should represent the *adjoint* operator.
 
     See Also
@@ -1484,7 +1490,7 @@ class TNLinearOperator(spla.LinearOperator):
     """
 
     def __init__(self, tns, left_inds, right_inds, ldims=None, rdims=None,
-                 backend=None, is_adjoint=False):
+                 backend=None, is_conj=False):
         self.backend = _TENSOR_LINOP_BACKEND if backend is None else backend
 
         if isinstance(tns, TensorNetwork):
@@ -1516,9 +1522,11 @@ class TNLinearOperator(spla.LinearOperator):
         else:
             self._ins = tuple(t.data for t in self._tensors)
 
-        # conjugate inputs/ouputs trather all tensors if necessary
-        self.is_adjoint = is_adjoint
+        # conjugate inputs/ouputs rather all tensors if necessary
+        self.is_conj = is_conj
+        self._conj_linop = None
         self._adjoint_linop = None
+        self._transpose_linop = None
         self._contractors = {}
 
         super().__init__(dtype=self._tensors[0].dtype, shape=(ld, rd))
@@ -1526,7 +1534,7 @@ class TNLinearOperator(spla.LinearOperator):
     def _matvec(self, vec):
         in_data = vec.reshape(*self.rdims)
 
-        if self.is_adjoint:
+        if self.is_conj:
             in_data = in_data.conj()
 
         # cache the contractor
@@ -1539,7 +1547,7 @@ class TNLinearOperator(spla.LinearOperator):
         fn = self._contractors['matvec']
         out_data = fn(*self._ins, in_data, backend=self.backend)
 
-        if self.is_adjoint:
+        if self.is_conj:
             out_data = out_data.conj()
 
         return out_data.ravel()
@@ -1548,7 +1556,7 @@ class TNLinearOperator(spla.LinearOperator):
         d = mat.shape[-1]
         in_data = mat.reshape(*self.rdims, d)
 
-        if self.is_adjoint:
+        if self.is_conj:
             in_data = in_data.conj()
 
         # for matmat need different contraction scheme for different d sizes
@@ -1557,35 +1565,57 @@ class TNLinearOperator(spla.LinearOperator):
         # cache the contractor
         if key not in self._contractors:
             # generate a expression that acts directly on the data
-            iT = Tensor(in_data, inds=(*self.right_inds, '__mat_ix__'))
-            o_ix = (*self.left_inds, '__mat_ix__')
+            iT = Tensor(in_data, inds=(*self.right_inds, '_mat_ix'))
+            o_ix = (*self.left_inds, '_mat_ix')
             self._contractors[key] = tensor_contract(
                 *self._tensors, iT, output_inds=o_ix, **self._kws)
 
         fn = self._contractors[key]
         out_data = fn(*self._ins, in_data, backend=self.backend)
 
-        if self.is_adjoint:
+        if self.is_conj:
             out_data = out_data.conj()
 
         return out_data.reshape(-1, d)
+
+    def copy(self, conj=False, transpose=False):
+        if transpose:
+            inds = self.right_inds, self.left_inds
+            dims = self.rdims, self.ldims
+        else:
+            inds = self.left_inds, self.right_inds
+            dims = self.ldims, self.rdims
+
+        if conj:
+            is_conj = not self.is_conj
+        else:
+            is_conj = self.is_conj
+
+        return TNLinearOperator(self._tensors, *inds, *dims,
+                                is_conj=is_conj, backend=self.backend)
+
+    def conj(self):
+        if self._conj_linop is None:
+            self._conj_linop = self.copy(conj=True)
+        return self._conj_linop
+
+    def _transpose(self):
+        if self._transpose_linop is None:
+            self._transpose_linop = self.copy(transpose=True)
+        return self._transpose_linop
 
     def _adjoint(self):
         """Hermitian conjugate of this TNLO.
         """
         # cache the adjoint
         if self._adjoint_linop is None:
-            self._adjoint_linop = TNLinearOperator(
-                self._tensors, self.right_inds, self.left_inds,
-                self.rdims, self.ldims, backend=self.backend,
-                is_adjoint=not self.is_adjoint)
-
+            self._adjoint_linop = self.copy(conj=True, transpose=True)
         return self._adjoint_linop
 
     def to_dense(self):
         """Convert this TNLinearOperator into a dense array.
         """
-        if self.is_adjoint:
+        if self.is_conj:
             ts = (t.conj() for t in self._tensors)
         else:
             ts = self._tensors
@@ -2530,7 +2560,7 @@ class TensorNetwork(object):
         eps : float
             The tolerance to perform the SVD with, affects the number of
             singular values kept. See
-            :func:`scipy.linalg.interpolative.estimate_rank`.
+            :func:`quimb.linalg.rand_linalg.estimate_rank`.
         which : {'any', 'all', '!any', '!all'}, optional
             Whether to replace tensors matching any or all the tags ``where``,
             prefix with '!' to invert the selection.
@@ -2598,13 +2628,16 @@ class TensorNetwork(object):
             if not isinstance(A, np.ndarray):
                 A = A.to_dense()
 
-        U, V = {'svd': _array_split_svd,
-                'eig': _array_split_eig,
-                'eigh': _array_split_eigh,
-                'cholesky': _array_split_cholesky,
-                'isvd': _array_split_isvd,
-                'svds': _array_split_svds,
-                'eigsh': _array_split_eigsh}[method](A, cutoff=eps, **opts)
+        U, V = {
+            'svd': _array_split_svd,
+            'eig': _array_split_eig,
+            'eigh': _array_split_eigh,
+            'cholesky': _array_split_cholesky,
+            'isvd': _array_split_isvd,
+            'svds': _array_split_svds,
+            'rsvd': _array_split_rsvd,
+            'eigsh': _array_split_eigsh,
+        }[method](A, cutoff=eps, **opts)
 
         U = U.reshape(*left_shp, -1)
         V = V.reshape(-1, *right_shp)
@@ -3379,7 +3412,7 @@ class TNLinearOperator1D(spla.LinearOperator):
     """
 
     def __init__(self, tn, left_inds, right_inds, start, stop,
-                 ldims=None, rdims=None):
+                 ldims=None, rdims=None, is_conj=False, is_trans=False):
         self.tn = tn
         self.start, self.stop = start, stop
 
@@ -3392,32 +3425,113 @@ class TNLinearOperator1D(spla.LinearOperator):
         self.ldims, ld = ldims, prod(ldims)
         self.rdims, rd = rdims, prod(rdims)
 
+        # conjugate inputs/ouputs rather all tensors if necessary
+        self.is_conj = is_conj
+        self.is_trans = is_trans
+        self._conj_linop = None
+        self._adjoint_linop = None
+        self._transpose_linop = None
+
         super().__init__(dtype=self.tn.dtype, shape=(ld, rd))
 
     def _matvec(self, vec):
         in_data = vec.reshape(*self.rdims)
-        in_T = Tensor(in_data, self.right_inds, tags=['_RIGHT'])
 
-        tnc = self.tn | in_T
-        tnc ^= ['_RIGHT', self.tn.site_tag(self.stop - 1)]
-        out_T = tnc ^ slice(self.stop - 1, self.start - 1, -1)
+        if self.is_conj:
+            in_data = in_data.conj()
 
-        return out_T.transpose(*self.left_inds, inplace=True).data.ravel()
+        if self.is_trans:
+            i, f, s = self.start, self.stop, 1
+        else:
+            i, f, s = self.stop - 1, self.start - 1, -1
 
-    def _rmatvec(self, vec):
-        # XXX: use _adjoint / matmat
-        in_data = vec.conj().reshape(*self.ldims)
-        in_T = Tensor(in_data, self.left_inds, tags=['_LEFT'])
+        # add the vector to the right of the chain
+        tnc = self.tn | Tensor(in_data, self.right_inds, tags=['_VEC'])
 
-        tnc = self.tn | in_T
-        tnc ^= ['_LEFT', self.tn.site_tag(self.start)]
-        out_T = tnc ^ slice(self.start, self.stop)
-        out_T.transpose(*self.right_inds, inplace=True)
+        # absorb it into the rightmost site
+        tnc ^= ['_VEC', self.tn.site_tag(i)]
 
-        return out_T.data.conj().ravel()
+        # then do a structured contract along the whole chain
+        out_T = tnc ^ slice(i, f, s)
+
+        out_data = out_T.transpose(*self.left_inds, inplace=True).data.ravel()
+        if self.is_conj:
+            out_data = out_data.conj()
+
+        return out_data
+
+    def _matmat(self, mat):
+        d = mat.shape[-1]
+        in_data = mat.reshape(*self.rdims, d)
+
+        if self.is_conj:
+            in_data = in_data.conj()
+
+        if self.is_trans:
+            i, f, s = self.start, self.stop, 1
+        else:
+            i, f, s = self.stop - 1, self.start - 1, -1
+
+        # add the vector to the right of the chain
+        in_ix = (*self.right_inds, '_mat_ix')
+        tnc = self.tn | Tensor(in_data, inds=in_ix, tags=['_VEC'])
+
+        # absorb it into the rightmost site
+        tnc ^= ['_VEC', self.tn.site_tag(i)]
+
+        # then do a structured contract along the whole chain
+        out_T = tnc ^ slice(i, f, s)
+
+        out_ix = (*self.left_inds, '_mat_ix')
+        out_data = out_T.transpose(*out_ix, inplace=True).data.reshape(-1, d)
+        if self.is_conj:
+            out_data = out_data.conj()
+
+        return out_data
+
+    def copy(self, conj=False, transpose=False):
+
+        if transpose:
+            inds = (self.right_inds, self.left_inds)
+            dims = (self.rdims, self.ldims)
+            is_trans = not self.is_trans
+        else:
+            inds = (self.left_inds, self.right_inds)
+            dims = (self.ldims, self.rdims)
+            is_trans = self.is_trans
+
+        if conj:
+            is_conj = not self.is_conj
+        else:
+            is_conj = self.is_conj
+
+        return TNLinearOperator1D(self.tn, *inds, self.start, self.stop, *dims,
+                                  is_conj=is_conj, is_trans=is_trans)
+
+    def conj(self):
+        if self._conj_linop is None:
+            self._conj_linop = self.copy(conj=True)
+        return self._conj_linop
+
+    def _transpose(self):
+        if self._transpose_linop is None:
+            self._transpose_linop = self.copy(transpose=True)
+        return self._transpose_linop
+
+    def _adjoint(self):
+        """Hermitian conjugate of this TNLO.
+        """
+        # cache the adjoint
+        if self._adjoint_linop is None:
+            self._adjoint_linop = self.copy(conj=True, transpose=True)
+        return self._adjoint_linop
 
     def to_dense(self):
         T = self.tn ^ slice(self.start, self.stop)
+
+        if self.is_conj:
+            T = T.conj()
+
         return T.to_dense(self.left_inds, self.right_inds)
 
     @property

@@ -1630,7 +1630,7 @@ class MatrixProductState(TensorNetwork1DVector,
             section_tags = map(self.site_tag, section)
 
             if verbosity >= 1:
-                print("Laterally compresseing section {}. Using options: "
+                print("Laterally compressing section {}. Using options: "
                       "eps={}, method={}, max_bond={}"
                       .format(section, heps, hmethod, hmax_bond))
 
@@ -2170,13 +2170,13 @@ class MatrixProductOperator(TensorNetwork1DFlat,
         return traced ^ ...
 
     def partial_transpose(self, sysa, inplace=False):
-        """Perform the partial tranpose on this MPO by swapping the bra and ket
-        indices on sites in ``sysa``.
+        """Perform the partial transpose on this MPO by swapping the bra and
+        ket indices on sites in ``sysa``.
 
         Parameters
         ----------
         sysa : sequence of int or int
-            The sites to tranpose indices on.
+            The sites to transpose indices on.
         inplace : bool, optional
             Whether to perform the partial transposition inplace.
 
