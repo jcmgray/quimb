@@ -1,6 +1,6 @@
-###############
-Solving Systems
-###############
+####################################
+Eigen-Solving & Other Linear Algebra
+####################################
 
 
 Dense / full decomposition
@@ -45,6 +45,17 @@ The possible partical decompositions are:
     - :func:`~quimb.linalg.base_linalg.eigensystem_partial`
     - :func:`~quimb.linalg.base_linalg.svds`
 
+So for example the :func:`~quimb.linalg.base_linalg.groundstate` function
+for a Hamiltonian ``H`` is an alias to:
+
+.. code:: python
+
+    psi = eigvecsh(H, k=1, which='sa')
+
+[find eigenvectors, Hermitian operator (``h`` post-fix), get ``k=1`` eigenstate,
+and target the '(s)mallest (a)lgebraic' eigenvalue].
+
+
 Interior eigen-solving
 ~~~~~~~~~~~~~~~~~~~~~~
 
@@ -62,8 +73,8 @@ With the last three allowing the specification of a window *relative* to the tot
 Fast Randomized Linear Algebra
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-``quimb`` has an implementation of a fast randomized SVD - :func:`~quimb.linalg.rand_linalg.rsvd` - 
-that can be significantly quicker than :func:`~quimb.linalg.base_linalg.svd` or :func:`~quimb.linalg.base_linalg.svds`, 
-especially for large ``k``. This might be useful for e.g. tensor network linear operator decompositions. 
-It can perform the SVD rank-adaptively, which allows the efficient estimation of an operator's rank, 
+``quimb`` has an implementation of a fast randomized SVD - :func:`~quimb.linalg.rand_linalg.rsvd` -
+that can be significantly quicker than :func:`~quimb.linalg.base_linalg.svd` or :func:`~quimb.linalg.base_linalg.svds`,
+especially for large ``k``. This might be useful for e.g. tensor network linear operator decompositions.
+It can perform the SVD rank-adaptively, which allows the efficient estimation of an operator's rank,
 see :func:`~quimb.linalg.rand_linalg.estimate_rank`.
