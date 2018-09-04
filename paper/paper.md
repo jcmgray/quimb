@@ -22,7 +22,7 @@ bibliography: paper.bib
 
 The language of quantum physics is essentially linear algebra, making it easy to begin simulating using standard numerical routines.
 However, the amount of classical resources required to simulate a quantum system scales exponenially with its size.
-This imposes, in the generic case, dramatic limits on the sizes reachable and requires much care is taken to maximise performance.
+This imposes, in the generic case, dramatic limits on the sizes reachable and requires that great care is taken in order to maximise performance.
 Nonetheless, and in part due to this difficulty, there is much to be learnt from simulating many-body quantum systems.
 One useful set of tools in this case is quantum information inspired quantities such as entanglement meausures.
 Entanglement is also the key quantity when formulating tensor networks, an efficient representation of certain many-body quantum states. ``quimb`` is a pure python library that covers all these areas, with an emphasis on being interactive and easy to use without sacrificing performance.
