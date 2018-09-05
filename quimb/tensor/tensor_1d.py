@@ -1451,6 +1451,53 @@ class MatrixProductState(TensorNetwork1DVector,
         return self.partial_trace(keep, upper_ind_id,
                                   rescale_sites=rescale_sites)
 
+    def bipartite_schmidt_state(self, sz_a, get='ket',
+                                current_orthog_centre=None):
+        r"""Compute the reduced state for a bipartition of an OBC MPS, in terms
+        of the minimal left/right schmidt basis.
+
+                A            B
+            .........     ...........
+            >->->->->--s--<-<-<-<-<-<    ->   +-s-+
+            | | | | |     | | | | | |         |   |
+           k0 k1...                        kA   kB
+
+        Parameters
+        ----------
+        sz_a : int
+            The number of sites in subsystem A, must be ``0 < sz_a < N ``.
+        get : {'ket', 'rho', 'ket-dense', 'rho-dense'}, optional
+            Get the:
+
+                - 'ket': vector form as tensor.
+                - 'rho': density operator form, i.e. vector outer product
+                - 'ket-dense': like 'ket' but return ``numpy.matrix``.
+                - 'rho-dense': like 'rho' but return ``numpy.matrix``.
+
+        current_orthog_centre : int, optional
+            If given, take as the current orthogonality center so as to
+            efficienctly move it a minimal distance.
+        """
+        if self.cyclic:
+            raise NotImplementedError("MPS must have OBC.")
+
+        s = np.diag(self.singular_values(
+            sz_a, current_orthog_centre=current_orthog_centre))
+
+        if 'dense' in get:
+            kd = np.matrix(s.reshape(-1, 1))
+            if 'ket' in get:
+                return kd
+            elif 'rho' in get:
+                return kd @ kd.H
+
+        else:
+            k = Tensor(s, (self.site_ind('A'), self.site_ind('B')))
+            if 'ket' in get:
+                return k
+            elif 'rho' in get:
+                return k & k.reindex({'kA': 'bA', 'kB': 'bB'})
+
     def partial_trace_compress(self, sysa, sysb, eps=1e-8,
                                method=('isvd', None), max_bond=(None, 1024),
                                leave_short=True, renorm=True,
@@ -1526,6 +1573,9 @@ class MatrixProductState(TensorNetwork1DVector,
             ``outer_inds = ('k0', 'k1', 'b0', 'b1')`` for example.
         """
         N = self.nsites
+
+        if (len(sysa) + len(sysb) == N) and not self.cyclic:
+            return self.bipartite_schmidt_state(len(sysa), get='rho')
 
         # parse horizontal and vertical svd tolerances and methods
         try:
@@ -1834,6 +1884,12 @@ class MatrixProductState(TensorNetwork1DVector,
         --------
         MatrixProductState.partial_trace_compress, approx_spectral_function
         """
+        if self.cyclic and (len(sysa) + len(sysb) == self.nsites):
+            # pure bipartition with OBC
+            psi = self.bipartite_schmidt_state(len(sysa), get='ket-dense')
+            d = round(psi.shape[0]**0.5)
+            return qu.logneg(psi, [d, d])
+
         if compress_opts is None:
             compress_opts = {}
         if approx_spectral_opts is None:

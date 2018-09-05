@@ -336,6 +336,27 @@ class TestMatrixProductState:
         k = MPS_rand_state(5, 7, cyclic=cyclic, sites=sites, nsites=20)
         assert set(k.tags) == {'I{}'.format(i) for i in sites}
 
+    def test_bipartite_schmidt_state(self):
+        psi = MPS_rand_state(16, 5)
+        psid = psi.to_dense()
+        eln = qu.logneg(psid, [2**7, 2**9])
+
+        s_d_ket = psi.bipartite_schmidt_state(7, get='ket-dense')
+        ln_d_ket = qu.logneg(s_d_ket, [5, 5])
+        assert_allclose(eln, ln_d_ket, rtol=1e-5)
+
+        s_d_rho = psi.bipartite_schmidt_state(7, get='rho-dense')
+        ln_d_rho = qu.logneg(s_d_rho, [5, 5])
+        assert_allclose(eln, ln_d_rho, rtol=1e-5)
+
+        T_s_ket = psi.bipartite_schmidt_state(7, get='ket')
+        assert set(T_s_ket.inds) == {'kA', 'kB'}
+        assert_allclose(T_s_ket.H @ T_s_ket, 1.0)
+
+        T_s_rho = psi.bipartite_schmidt_state(7, get='rho')
+        assert set(T_s_rho.outer_inds()) == {'kA', 'kB', 'bA', 'bB'}
+        assert_allclose(T_s_rho.H @ T_s_rho, 1.0)
+
     @pytest.mark.parametrize(
         "method", ['isvd', 'svds', ('isvd', 'eigsh'), ('isvd', 'cholesky')])
     @pytest.mark.parametrize("cyclic", [True, False])
@@ -352,10 +373,6 @@ class TestMatrixProductState:
     def test_partial_trace_compress(self, method, cyclic, sysa, sysb):
         k = MPS_rand_state(60, 8, cyclic=cyclic)
         kws = dict(sysa=sysa, sysb=sysb, eps=1e-4, method=method)
-        if len(sysa) + len(sysb) == 60:
-            with pytest.raises(ValueError):
-                k.partial_trace_compress(**kws)
-            return
         rhoc_ab = k.partial_trace_compress(**kws)
         assert set(rhoc_ab.outer_inds()) == {'kA', 'kB', 'bA', 'bB'}
         inds = ['kA', 'kB'], ['bA', 'bB']
