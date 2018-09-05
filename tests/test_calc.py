@@ -191,7 +191,7 @@ class TestMutualInformation:
         # approx
         mi2 = qu.mutinf_subsys(p, dims, sysa=0, sysb=1,
                                approx_thresh=1, tol=5e-3)
-        assert_allclose(mi1, mi2, rtol=5e-2)
+        assert_allclose(mi1, mi2, rtol=0.1)
 
 
 class TestSchmidtGap:

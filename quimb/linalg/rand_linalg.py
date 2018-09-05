@@ -210,7 +210,7 @@ def rsvd_iterate(A, eps, compute_uv=True, q=2, p=0, G0=None,
 
 
 @njit
-def count_svdvals_needed(s, eps):
+def count_svdvals_needed(s, eps):  # pragma: no cover
     n = s.size
     thresh = eps * s[0]
     for i in range(n - 1, 0, -1):

@@ -1,5 +1,5 @@
-"""Use lanczos tri-diagonalization to approximate the spectrum of any operator
-which has an efficient representation of its linear action on a vector.
+"""Use stochastic Lanczos quadrature to approximate spectral function sums of
+any operator which has an efficient representation of action on a vector.
 """
 import functools
 from math import sqrt, log2, exp, inf, nan
@@ -317,7 +317,7 @@ def calc_trace_fn_tridiag(tl, tv, f, pos=True):
 
 
 @njit
-def ext_per_trim(x, p=0.6, s=1.0):
+def ext_per_trim(x, p=0.6, s=1.0):  # pragma: no cover
     r"""Extended percentile trimmed-mean. Makes the mean robust to asymmetric
     outliers, while using all data when it is nicely clustered. This can be
     visualized roughly as::
@@ -455,7 +455,7 @@ def single_random_estimate(A, K, bsz, beta_tol, v0, f, pos, tau, tol_scale,
         try:
             Tl, Tv = lanczos_tridiag_eig(alpha, beta, check_finite=False)
             Gf = scaling * calc_trace_fn_tridiag(Tl, Tv, f=f, pos=pos)
-        except scla.LinAlgError:
+        except scla.LinAlgError:  # pragma: no cover
             warnings.warn("Approx Spectral Gf tri-eig didn't converge.")
             estimates.append(np.nan)
             continue

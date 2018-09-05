@@ -15,6 +15,7 @@ from numbers import Integral
 from cytoolz import (unique, concat, frequencies,
                      partition_all, merge_with, valmap)
 import numpy as np
+import opt_einsum as oe
 import scipy.linalg as scla
 import scipy.sparse.linalg as spla
 import scipy.linalg.interpolative as sli
@@ -22,40 +23,13 @@ import scipy.linalg.interpolative as sli
 from ..accel import prod, njit, realify_scalar, vdot
 from ..linalg.base_linalg import norm_fro_dense
 from ..linalg.rand_linalg import rsvd, estimate_rank
-from ..utils import raise_cant_find_library_function, functions_equal, has_cupy
-
-try:
-    import opt_einsum
-    contract = opt_einsum.contract
-
-    @functools.wraps(opt_einsum.contract_path)
-    def contract_path(*args, optimize='greedy', memory_limit=-1, **kwargs):
-        return opt_einsum.contract_path(
-            *args, path=optimize, memory_limit=memory_limit, **kwargs)
-
-    try:
-        contract_expression = opt_einsum.contract_expression
-    except AttributeError:
-        contract_expression = raise_cant_find_library_function(
-            "opt_einsum", "Or a more recent (github?) version is needed for "
-            "caching tensor contractions.")
-
-    try:
-        get_symbol = opt_einsum.get_symbol
-    except AttributeError:
-        def get_symbol(i):
-            return opt_einsum.parser.einsum_symbols[i]
-
-except ImportError:
-    extra_msg = "Needed for optimized tensor contractions."
-    contract = contract_expression = contract_path = \
-        raise_cant_find_library_function("opt_einsum", extra_msg)
+from ..utils import functions_equal, has_cupy
 
 
 def _get_contract_expr(contract_str, *shapes, **kwargs):
     # choose how large intermediate arrays can be
     kwargs.setdefault('memory_limit', -1)
-    return contract_expression(contract_str, *shapes, **kwargs)
+    return oe.contract_expression(contract_str, *shapes, **kwargs)
 
 
 _get_contract_expr_cached = functools.lru_cache(4096)(_get_contract_expr)
@@ -171,7 +145,7 @@ def _maybe_map_indices_to_alphabet(a_ix, i_ix, o_ix):
     contract_str : str
         The string to feed to einsum/contract.
     """
-    amap = {ix: get_symbol(i) for i, ix in enumerate(a_ix)}
+    amap = {ix: oe.get_symbol(i) for i, ix in enumerate(a_ix)}
     in_str = ("".join(amap[i] for i in ix) for ix in i_ix)
     out_str = "".join(amap[o] for o in o_ix)
 
@@ -217,7 +191,7 @@ def tensor_contract(*tensors, output_inds=None, get=None,
 
     if get == 'path':
         ops = (t.data for t in tensors)
-        return opt_einsum.contract_path(contract_str, *ops)[1]
+        return oe.contract_path(contract_str, *ops)[1]
 
     if get == 'expression':
         # account for possible constant tensors
@@ -452,7 +426,7 @@ def _array_split_eig(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0):
 
 
 @njit
-def _array_split_svdvals_eig(x):
+def _array_split_svdvals_eig(x):  # pragma: no cover
     """SVD-decomposition via eigen, but return singular values only.
     """
     if x.shape[0] > x.shape[1]:
@@ -1516,7 +1490,7 @@ class TNLinearOperator(spla.LinearOperator):
         self._kws = {'get': 'expression'}
 
         # if recent opt_einsum specify constant tensors
-        if hasattr(opt_einsum.backends, 'evaluate_constants'):
+        if hasattr(oe.backends, 'evaluate_constants'):
             self._kws['constants'] = range(len(self._tensors))
             self._ins = ()
         else:
@@ -3092,18 +3066,16 @@ class TensorNetwork(object):
         return tn
 
     def fuse_multibonds(self, inplace=False):
+        """Fuse any multi-bonds (more than one index shared by the same pair
+        of tensors) into a single bond.
+        """
         tn = self if inplace else self.copy()
 
-        ts = tn.tensors
-        nt = len(ts)
-
-        for i in range(nt):
-            for j in range(i + 1, nt):
-                T1, T2 = ts[i], ts[j]
-                dbnds = tuple(T1.bonds(T2))
-                if dbnds:
-                    T1.fuse({dbnds[0]: dbnds}, inplace=True)
-                    T2.fuse({dbnds[0]: dbnds}, inplace=True)
+        for T1, T2 in itertools.combinations(tn.tensors, 2):
+            dbnds = tuple(T1.bonds(T2))
+            if dbnds:
+                T1.fuse({dbnds[0]: dbnds}, inplace=True)
+                T2.fuse({dbnds[0]: dbnds}, inplace=True)
 
         return tn
 

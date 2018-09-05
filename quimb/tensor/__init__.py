@@ -3,8 +3,6 @@ from .tensor_core import (
     set_contract_backend,
     get_tensor_linop_backend,
     set_tensor_linop_backend,
-    contract,
-    contract_path,
     tensor_contract,
     tensor_split,
     tensor_direct_product,

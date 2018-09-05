@@ -56,7 +56,7 @@ class TestRSVD:
         opt_err = qu.norm(X - usv2dense(Ue, se, Ve), 'fro')
         act_err = qu.norm(X - usv2dense(U, s, V), 'fro')
 
-        assert act_err < 1.1 * opt_err
+        assert act_err < 1.2 * opt_err
 
         assert_allclose(s[:k // 2], se[:k // 2], rtol=0.05)
 

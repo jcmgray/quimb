@@ -26,6 +26,19 @@ class TestRandn:
         assert_allclose(np.mean(x), 50, rtol=1e-1)
         assert_allclose(np.std(x), 100, rtol=1e-1)
 
+    @pytest.mark.parametrize("dtype", ['complex64', 'complex128'])
+    def test_rand_phase(self, dtype):
+        x = qu.gen.rand.rand_phase(10, dtype=dtype)
+        assert x.dtype == dtype
+        assert_allclose(np.abs(x), np.ones(10))
+
+    @pytest.mark.parametrize("dtype", ['float32', 'float64',
+                                       'complex64', 'complex128'])
+    def test_rand_rademacher(self, dtype):
+        x = qu.gen.rand.rand_rademacher(10, dtype=dtype)
+        assert x.dtype == dtype
+        assert_allclose(np.abs(x), np.ones(10))
+
 
 @pytest.mark.parametrize('dtype', dtypes)
 class TestRandMatrix:
@@ -220,3 +233,15 @@ class TestRandSeperable:
         el = qu.eigvalsh(rho_a)
         assert np.all(el < 1 - 1e-12)
         assert np.all(el > 1e-12)
+
+
+class TestRandMERA:
+
+    @pytest.mark.parametrize("invariant", [False, True])
+    @pytest.mark.parametrize("dtype", ['float32', 'float64',
+                                       'complex64', 'complex128'])
+    def test_simple(self, invariant, dtype):
+        m = qu.rand_mera(8, invariant=invariant, dtype=dtype)
+        assert m.dtype == dtype
+        assert m.H @ m == pytest.approx(1.0)
+        assert m.shape == (256, 1)

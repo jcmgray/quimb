@@ -164,7 +164,7 @@ if (
         return _get_randomgens(1)[0].generator.choice(*args, **kwargs)
 
 # ---------------------------------- NUMPY ---------------------------------- #
-else:
+else:  # pragma: no cover
 
     def seed_rand(seed):
         np.random.seed(seed)

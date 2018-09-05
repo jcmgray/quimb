@@ -793,6 +793,15 @@ class TestTensorNetwork:
 
         assert_allclose(k.H @ k, kU.H @ kU)
 
+    def test_fuse_multibonds(self):
+        x = rand_tensor((2, 2, 2), ['a', 'b', 'c'])
+        y = rand_tensor((2, 2, 2, 2), ['b', 'c', 'd', 'e'])
+        z = rand_tensor((2, 2, 2), ['a', 'e', 'd'])
+        tn = (x & y & z)
+        assert len(tn.inner_inds()) == 5
+        tn.fuse_multibonds(inplace=True)
+        assert len(tn.inner_inds()) == 3
+
     def test_graph(self):
         import matplotlib
         matplotlib.use('Template')

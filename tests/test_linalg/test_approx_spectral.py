@@ -232,6 +232,7 @@ class TestLanczosApprox:
         assert_allclose(actual_x, approx_x, rtol=rtol)
 
     @pytest.mark.parametrize("bsz", [1, 2, 5])
+    @pytest.mark.parametrize("dist", ['gaussian', 'phase', 'rademacher'])
     @pytest.mark.parametrize(
         "fn_matrix_rtol",
         [
@@ -241,7 +242,7 @@ class TestLanczosApprox:
             (np.exp, rand_herm, 2e-1),
         ]
     )
-    def test_approx_spectral_function_with_v0(self, fn_matrix_rtol, bsz):
+    def test_approx_spectral_function_with_v0(self, dist, fn_matrix_rtol, bsz):
         fn, matrix, rtol = fn_matrix_rtol
         a = matrix(2**7)
         actual_x = sum(fn(eigvalsh(a)))
@@ -249,8 +250,9 @@ class TestLanczosApprox:
         v0 = (neel_state(7) + neel_state(7, down_first=True))
         v0 = v0.A.reshape(-1)
         pos = fn == np.sqrt
-        approx_x = approx_spectral_function(a, fn, K=20, v0=v0, pos=pos,
-                                            bsz=bsz, verbosity=2)
+        v0_opts = {'dist': dist, 'orthog': True}
+        approx_x = approx_spectral_function(a, fn, v0=v0, pos=pos, bsz=bsz,
+                                            K=20, verbosity=2, v0_opts=v0_opts)
         assert_allclose(actual_x, approx_x, rtol=rtol)
 
     @pytest.mark.parametrize("bsz", [1, 2, 5])
