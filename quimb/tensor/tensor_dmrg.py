@@ -933,7 +933,8 @@ class DMRG:
 
     # ----------------- overloadable 'plugin' style methods ----------------- #
 
-    def _print_pre_sweep(self, i, LR, bd, ctf, verbosity=0):
+    @staticmethod
+    def _print_pre_sweep(i, LR, bd, ctf, verbosity=0):
         """Print this before each sweep.
         """
         if verbosity > 0:
@@ -1008,7 +1009,7 @@ class DMRG:
         RLs = itertools.cycle(sweep_sequence)
         previous_LR = '0'
 
-        for i in range(max_sweeps):
+        for _ in range(max_sweeps):
             # Get the next direction, bond dimension and cutoff
             LR, bd, ctf = next(RLs), next(self._bond_dims), next(self._cutoffs)
             self._print_pre_sweep(len(self.energies), LR,

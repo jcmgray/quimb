@@ -217,5 +217,4 @@ class Verbosify:  # pragma: no cover
 
 
 def has_cupy():
-    import importlib
     return importlib.util.find_spec("cupy") is not None

@@ -2,18 +2,22 @@
 
     <img src="https://github.com/jcmgray/quimb/blob/develop/docs/_static/quimb_logo_title.png" width="450px">
 
-.. image:: https://img.shields.io/travis/jcmgray/quimb/stable.svg
-    :target: https://travis-ci.org/jcmgray/quimb
-.. image:: https://img.shields.io/codecov/c/github/jcmgray/quimb/develop.svg
+.. image:: https://travis-ci.org/jcmgray/quimb.svg?branch=master
+  :target: https://travis-ci.org/jcmgray/quimb
+  :alt: Travis-CI
+.. image:: https://codecov.io/gh/jcmgray/quimb/branch/master/graph/badge.svg
   :target: https://codecov.io/gh/jcmgray/quimb
+  :alt: Code Coverage
 .. image:: https://api.codacy.com/project/badge/Grade/490e11dea3984e25aae1f915865f2c3f
-   :target: https://www.codacy.com/app/jcmgray/quimb?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=jcmgray/quimb&amp;utm_campaign=Badge_Grade
-.. image:: https://landscape.io/github/jcmgray/quimb/develop/landscape.svg?style=flat
-   :target: https://landscape.io/github/jcmgray/quimb/develop
-   :alt: Code Health
-.. image:: https://img.shields.io/readthedocs/quimb/master.svg
-   :target: http://quimb.readthedocs.io/en/latest/?badge=latest
-   :alt: Documentation Status
+  :target: https://www.codacy.com/app/jcmgray/quimb?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=jcmgray/quimb&amp;utm_campaign=Badge_Grade
+  :alt: Code Quality
+.. image:: https://readthedocs.org/projects/quimb/badge/?version=latest
+  :target: http://quimb.readthedocs.io/en/latest/?badge=latest
+  :alt: Documentation Status
+.. image:: http://joss.theoj.org/papers/10.21105/joss.00819/status.svg
+  :target: https://doi.org/10.21105/joss.00819
+  :alt: JOSS Paper
+
 
 ----------------------------------------------------------------------------------
 
@@ -42,7 +46,7 @@ The **tensor network** submodule ``quimb.tensor``:
 
 .. raw:: html
 
-    <img src="https://github.com/jcmgray/quimb/blob/develop/docs/_static/mps_en_overlap_cyclic_compressed.png" width="300px">
+    <img src="https://github.com/jcmgray/quimb/blob/develop/docs/_static/montage.png" width="800px">
 
-The full documentation can be found at: `<http://quimb.readthedocs.io/en/latest/>`_.
+The **full documentation** can be found at: `<http://quimb.readthedocs.io/en/latest/>`_.
 Contributions of any sort are very welcome - please see the `contributing guide <https://github.com/jcmgray/quimb/blob/develop/.github/CONTRIBUTING.md>`_.

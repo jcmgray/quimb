@@ -1070,8 +1070,6 @@ def heisenberg_energy(L):
     energy : float
         The ground state energy.
     """
-    from math import log, pi
-
     Einf = (0.5 - 2 * log(2)) * L
     Efinite = pi**2 / (6 * L)
     correction = 1 + 0.375 / log(L)**3

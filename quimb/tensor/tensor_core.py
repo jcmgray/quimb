@@ -1612,15 +1612,19 @@ class TNLinearOperator(spla.LinearOperator):
             self._adjoint_linop = self.copy(conj=True, transpose=True)
         return self._adjoint_linop
 
-    def to_dense(self):
-        """Convert this TNLinearOperator into a dense array.
+    def to_dense(self, *inds_seq):
+        """Convert this TNLinearOperator into a dense array, defaulting to
+        grouping the left and right indices respectively.
         """
         if self.is_conj:
             ts = (t.conj() for t in self._tensors)
         else:
             ts = self._tensors
 
-        return tensor_contract(*ts).to_dense(self.left_inds, self.right_inds)
+        if not inds_seq:
+            inds_seq = self.left_inds, self.right_inds
+
+        return tensor_contract(*ts).to_dense(*inds_seq)
 
     @property
     def A(self):

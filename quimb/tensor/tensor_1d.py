@@ -2231,9 +2231,13 @@ class MatrixProductOperator(TensorNetwork1DFlat,
         """
         return tuple(self.upper_ind(i) for i in self.sites)
 
-    def to_dense(self):
-        data = self.contract(...).fuse((('lower', self.lower_inds),
-                                        ('upper', self.upper_inds))).data
+    def to_dense(self, *inds_seq):
+        if inds_seq:
+            lix, rix = inds_seq
+        else:
+            lix, rix = self.lower_inds, self.upper_inds
+
+        data = self.contract(...).fuse((('lower', lix), ('upper', rix))).data
         d = int(data.size**0.5)
         return np.matrix(data.reshape(d, d))
 

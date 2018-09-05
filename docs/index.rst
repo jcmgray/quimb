@@ -3,16 +3,20 @@ Welcome to quimb's documentation!
 
 .. image:: https://travis-ci.org/jcmgray/quimb.svg?branch=master
   :target: https://travis-ci.org/jcmgray/quimb
+  :alt: Travis-CI
 .. image:: https://codecov.io/gh/jcmgray/quimb/branch/master/graph/badge.svg
   :target: https://codecov.io/gh/jcmgray/quimb
+  :alt: Code Coverage
 .. image:: https://api.codacy.com/project/badge/Grade/490e11dea3984e25aae1f915865f2c3f
   :target: https://www.codacy.com/app/jcmgray/quimb?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=jcmgray/quimb&amp;utm_campaign=Badge_Grade
-.. image:: https://landscape.io/github/jcmgray/quimb/master/landscape.svg?style=flat
-  :target: https://landscape.io/github/jcmgray/quimb/master
-  :alt: Code Health
+  :alt: Code Quality
 .. image:: https://readthedocs.org/projects/quimb/badge/?version=latest
   :target: http://quimb.readthedocs.io/en/latest/?badge=latest
   :alt: Documentation Status
+.. image:: http://joss.theoj.org/papers/10.21105/joss.00819/status.svg
+  :target: https://doi.org/10.21105/joss.00819
+  :alt: JOSS Paper
+
 
 ----------------------------------------------------------------------------------
 
@@ -39,8 +43,8 @@ The **tensor network** submodule ``quimb.tensor``:
 * Has tools to efficiently address periodic problems (transfer matrix compression and pseudo-orthogonalization)
 * Can perform MPS time evolutions with TEBD
 
-.. image:: ./_static/mps_en_overlap_cyclic_compressed.png
-  :width: 300px
+.. image:: ./_static/montage.png
+  :width: 800px
 
 Guides
 ------
@@ -80,6 +84,23 @@ The following examples, generated from the notebooks in ``docs/examples``, demon
   ./examples/ex_TEBD_evo
   ./examples/ex_quantum_circuit
   ./examples/ex_MERA
+
+
+Citing
+------
+
+``quimb`` is published in the Journal of Open Source Software `here <https://doi.org/10.21105/joss.00819>`_ - if it ever useful in research please consider citing it!
+
+.. code-block:: latex
+
+    @article{gray2018quimb,
+      title={quimb: a python library for quantum information and many-body calculations},
+      author={Gray, Johnnie},
+      journal={Journal of Open Source Software},
+      year = {2018},
+      volume={3}, number={29}, pages={819},
+      doi={10.21105/joss.00819},
+    }
 
 
 Indices and tables

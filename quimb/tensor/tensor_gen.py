@@ -1,6 +1,5 @@
 """Generate specific tensor network states and operators.
 """
-import random
 from numbers import Integral
 
 import numpy as np
@@ -8,12 +7,13 @@ import numpy as np
 from ..accel import make_immutable
 from ..linalg.base_linalg import norm_fro_dense
 from ..gen.operators import spin_operator, eye, _gen_mbl_random_factors
-from ..gen.rand import randn
+from ..gen.rand import randn, choice, random_seed_fn
 from .tensor_core import Tensor, _asarray
 from .tensor_1d import MatrixProductState, MatrixProductOperator
 from .tensor_tebd import NNI
 
 
+@random_seed_fn
 def rand_tensor(shape, inds, tags=None, dtype=float):
     """Generate a random (complex) tensor with specified shape and inds.
     """
@@ -25,6 +25,7 @@ def rand_tensor(shape, inds, tags=None, dtype=float):
 #                                    MPSs                                     #
 # --------------------------------------------------------------------------- #
 
+@random_seed_fn
 def MPS_rand_state(n, bond_dim, phys_dim=2, normalize=True, cyclic=False,
                    dtype=float, trans_invar=False, **mps_opts):
     """Generate a random matrix product state.
@@ -142,7 +143,8 @@ def MPS_neel_state(n, down_first=False, dtype=float, **mps_opts):
     return MPS_computational_state(binary_str, dtype=dtype, **mps_opts)
 
 
-def MPS_rand_computational_state(n, seed=None, dtype=float, **mps_opts):
+@random_seed_fn
+def MPS_rand_computational_state(n, dtype=float, **mps_opts):
     """Generate a random computation basis state, like '01101001010'.
 
     Parameters
@@ -156,10 +158,7 @@ def MPS_rand_computational_state(n, seed=None, dtype=float, **mps_opts):
     mps_opts
         Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductState`.
     """
-    if seed is not None:
-        random.seed(seed)
-
-    cstr = (random.choice(('0', '1')) for _ in range(n))
+    cstr = (choice(('0', '1')) for _ in range(n))
     return MPS_computational_state(cstr, dtype=dtype, **mps_opts)
 
 
@@ -275,6 +274,7 @@ def MPO_zeros_like(mpo, **mpo_opts):
                      lower_ind_id=mpo.lower_ind_id, **mpo_opts)
 
 
+@random_seed_fn
 def MPO_rand(n, bond_dim, phys_dim=2, normalize=True, cyclic=False,
              herm=False, dtype=float, **mpo_opts):
     """Generate a random matrix product state.
@@ -324,6 +324,7 @@ def MPO_rand(n, bond_dim, phys_dim=2, normalize=True, cyclic=False,
     return rmpo
 
 
+@random_seed_fn
 def MPO_rand_herm(n, bond_dim, phys_dim=2, normalize=True,
                   dtype=float, **mpo_opts):
     """Generate a random hermitian matrix product operator.

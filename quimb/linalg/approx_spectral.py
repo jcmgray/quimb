@@ -456,7 +456,6 @@ def single_random_estimate(A, K, bsz, beta_tol, v0, f, pos, tau, tol_scale,
             Tl, Tv = lanczos_tridiag_eig(alpha, beta, check_finite=False)
             Gf = scaling * calc_trace_fn_tridiag(Tl, Tv, f=f, pos=pos)
         except scla.LinAlgError:
-            import warnings
             warnings.warn("Approx Spectral Gf tri-eig didn't converge.")
             estimates.append(np.nan)
             continue
