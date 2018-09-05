@@ -89,7 +89,7 @@ The following examples, generated from the notebooks in ``docs/examples``, demon
 Citing
 ------
 
-``quimb`` is published in the Journal of Open Source Software `here <https://doi.org/10.21105/joss.00819>`_ - if it ever useful in research please consider citing it!
+``quimb`` is published in the Journal of Open Source Software `here <https://doi.org/10.21105/joss.00819>`_ - if it's ever useful in research please consider citing it!
 
 .. code-block:: latex
 
