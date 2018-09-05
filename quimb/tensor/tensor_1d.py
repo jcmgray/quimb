@@ -1526,8 +1526,6 @@ class MatrixProductState(TensorNetwork1DVector,
             ``outer_inds = ('k0', 'k1', 'b0', 'b1')`` for example.
         """
         N = self.nsites
-        if len(sysa) + len(sysb) == N:
-            raise ValueError("Nothing to trace out.")
 
         # parse horizontal and vertical svd tolerances and methods
         try:
