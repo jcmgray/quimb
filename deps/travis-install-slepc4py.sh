@@ -3,7 +3,8 @@ set -ex
 
 export INSTALL_DIR=$HOME/petsc_and_slepc
 
-if $(pip list | grep -F slepc4py &>/dev/null); then
+slepc_lib="$INSTALL_DIR/slepc/arch-linux2-c-release/lib/libslepc.so"
+if [ "$(pip list | grep -F slepc4py)" ] && [ -f "$slepc_lib" ]; then
   echo 'slepc4py already installed from cache';
   exit 0
 fi
