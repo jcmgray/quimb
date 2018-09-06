@@ -1884,7 +1884,7 @@ class MatrixProductState(TensorNetwork1DVector,
         --------
         MatrixProductState.partial_trace_compress, approx_spectral_function
         """
-        if self.cyclic and (len(sysa) + len(sysb) == self.nsites):
+        if not self.cyclic and (len(sysa) + len(sysb) == self.nsites):
             # pure bipartition with OBC
             psi = self.bipartite_schmidt_state(len(sysa), get='ket-dense')
             d = round(psi.shape[0]**0.5)
