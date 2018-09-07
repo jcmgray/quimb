@@ -87,14 +87,15 @@ class TestRSVD:
     @pytest.mark.parametrize('dtype', dtypes)
     @pytest.mark.parametrize('shape', [(410, 310), (310, 410)])
     @pytest.mark.parametrize('k_start', [4, 10, 16])
-    def test_estimate_rank(self, dtype, shape, k_start):
+    @pytest.mark.parametrize('use_qb', [False, True])
+    def test_estimate_rank(self, dtype, shape, k_start, use_qb):
         rnk = 100
         X = rand_rank(*shape, rnk, dtype=dtype)
 
         Ue, se, VHe = qu.svd(X)
         assert_allclose(se[rnk:], 0.0, atol=1e-5)
 
-        k = qu.estimate_rank(X, 1e-3, k_start=k_start)
+        k = qu.estimate_rank(X, 1e-3, k_start=k_start, use_qb=use_qb)
         assert_allclose(k, 100, rtol=0.3)
 
         assert qu.estimate_rank(X, 1e-3, k_start=k_start, k_max=50) == 50
