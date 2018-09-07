@@ -1498,6 +1498,114 @@ class MatrixProductState(TensorNetwork1DVector,
             elif 'rho' in get:
                 return k & k.reindex({'kA': 'bA', 'kB': 'bB'})
 
+    @staticmethod
+    def _do_lateral_compress(mps, kb, section, leave_short, ul, ll, heps,
+                             hmethod, hmax_bond, verbosity, compressed,
+                             **compress_opts):
+
+        #           section
+        #   ul -o-o-o-o-o-o-o-o-o-       ul -\       /-
+        #       | | | | | | | | |   ==>       0~~~~~0
+        #   ll -o-o-o-o-o-o-o-o-o-       ll -/   :   \-
+        #                                      hmax_bond
+
+        if leave_short:
+            # if section is short doesn't make sense to lateral compress
+            #     work out roughly when this occurs by comparing bond size
+            left_sz = mps.bond_size(section[0] - 1, section[0])
+            right_sz = mps.bond_size(section[-1], section[-1] + 1)
+
+            if mps.phys_dim() ** len(section) <= left_sz * right_sz:
+                if verbosity >= 1:
+                    print("Leaving lateral compress of section '{}' as it is "
+                          "too short: length={}, eff size={}."
+                          .format(section, len(section), left_sz * right_sz))
+                return
+
+        if verbosity >= 1:
+            print("Laterally compressing section {}. Using options: "
+                  "eps={}, method={}, max_bond={}"
+                  .format(section, heps, hmethod, hmax_bond))
+
+        section_tags = map(mps.site_tag, section)
+        kb.replace_with_svd(section_tags, (ul, ll), heps, inplace=True,
+                            ltags='_LEFT', rtags='_RIGHT', method=hmethod,
+                            max_bond=hmax_bond, **compress_opts)
+
+        compressed.append(section)
+
+    @staticmethod
+    def _do_vertical_decomp(mps, kb, section, sysa, sysb, compressed, ul, ur,
+                            ll, lr, vmethod, vmax_bond, veps, verbosity,
+                            **compress_opts):
+        if section == sysa:
+            label = 'A'
+        elif section == sysb:
+            label = 'B'
+        else:
+            return
+
+        section_tags = [mps.site_tag(i) for i in section]
+
+        if section in compressed:
+
+            #                    ----U----             |  <- vmax_bond
+            #  -\      /-            /             ----U----
+            #    L~~~~R     ==>      \       ==>
+            #  -/      \-            /             ----D----
+            #                    ----D----             |  <- vmax_bond
+
+            # try and choose a sensible method
+            if vmethod is None:
+                left_sz = mps.bond_size(section[0] - 1, section[0])
+                right_sz = mps.bond_size(section[-1], section[-1] + 1)
+                if left_sz * right_sz <= 2**13:
+                    # cholesky is not rank revealing
+                    vmethod = 'eigh' if vmax_bond else 'cholesky'
+                else:
+                    vmethod = 'isvd'
+
+            if verbosity >= 1:
+                print("Performing vertical decomposition of section {}, "
+                      "using options: eps={}, method={}, max_bond={}."
+                      .format(label, veps, vmethod, vmax_bond))
+
+            # do vertical SVD
+            kb.replace_with_svd(
+                section_tags, (ul, ur), right_inds=(ll, lr), eps=veps,
+                ltags='_UP', rtags='_DOWN', method=vmethod, inplace=True,
+                max_bond=vmax_bond, **compress_opts)
+
+            # cut joined bond by reindexing to upper- and lower- ind_id.
+            kb.cut_bond((mps.site_tag(section[0]), '_UP'),
+                        (mps.site_tag(section[0]), '_DOWN'),
+                        "_tmp_ind_u{}".format(label),
+                        "_tmp_ind_l{}".format(label))
+
+        else:
+            # just unfold and fuse physical indices:
+            #                              |
+            #   -A-A-A-A-A-A-A-        -AAAAAAA-
+            #    | | | | | | |   ===>
+            #   -A-A-A-A-A-A-A-        -AAAAAAA-
+            #                              |
+
+            if verbosity >= 1:
+                print("Just vertical unfolding section {}.".format(label))
+
+            kb, sec = kb.partition(section_tags, inplace=True)
+            sec_l, sec_u = sec.partition('_KET', inplace=True)
+            T_UP = (sec_u ^ all)
+            T_UP.add_tag('_UP')
+            T_UP.fuse({"_tmp_ind_u{}".format(label):
+                       [mps.site_ind(i) for i in section]}, inplace=True)
+            T_DN = (sec_l ^ all)
+            T_DN.add_tag('_DOWN')
+            T_DN.fuse({"_tmp_ind_l{}".format(label):
+                       [mps.site_ind(i) for i in section]}, inplace=True)
+            kb |= T_UP
+            kb |= T_DN
+
     def partial_trace_compress(self, sysa, sysb, eps=1e-8,
                                method=('isvd', None), max_bond=(None, 1024),
                                leave_short=True, renorm=True,
@@ -1652,110 +1760,15 @@ class MatrixProductState(TensorNetwork1DVector,
         # lateral compress sections if long
         compressed = []
         for section, (ul, _, ll, _) in zip(sections, ul_ur_ll_lrs):
-
-            #           section
-            #   ul -o-o-o-o-o-o-o-o-o-       ul -\       /-
-            #       | | | | | | | | |   ==>       0~~~~~0
-            #   ll -o-o-o-o-o-o-o-o-o-       ll -/   :   \-
-            #                                      hmax_bond
-
-            if leave_short:
-                # if section is short doesn't make sense to lateral compress
-                #     work out roughly when this occurs by comparing bond size
-                left_sz = self.bond_size(section[0] - 1, section[0])
-                right_sz = self.bond_size(section[-1], section[-1] + 1)
-
-                if self.phys_dim() ** len(section) <= left_sz * right_sz:
-
-                    if verbosity >= 1:
-                        print("Leaving lateral compress of section '{}' as it "
-                              "is too short: length={}, eff size={}."
-                              .format(section, len(section),
-                                      left_sz * right_sz))
-
-                    continue
-
-            section_tags = map(self.site_tag, section)
-
-            if verbosity >= 1:
-                print("Laterally compressing section {}. Using options: "
-                      "eps={}, method={}, max_bond={}"
-                      .format(section, heps, hmethod, hmax_bond))
-
-            kb.replace_with_svd(section_tags, (ul, ll), heps, inplace=True,
-                                ltags='_LEFT', rtags='_RIGHT', method=hmethod,
-                                max_bond=hmax_bond, **compress_opts)
-            compressed.append(section)
+            self._do_lateral_compress(self, kb, section, leave_short, ul, ll,
+                                      heps, hmethod, hmax_bond, verbosity,
+                                      compressed, **compress_opts)
 
         # vertical compress and unfold system sections only
         for section, (ul, ur, ll, lr) in zip(sections, ul_ur_ll_lrs):
-            if section == sysa:
-                label = 'A'
-            elif section == sysb:
-                label = 'B'
-            else:
-                continue
-
-            section_tags = [self.site_tag(i) for i in section]
-
-            if section in compressed:
-
-                #                    ----U----             |  <- vmax_bond
-                #  -\      /-            /             ----U----
-                #    L~~~~R     ==>      \       ==>
-                #  -/      \-            /             ----D----
-                #                    ----D----             |  <- vmax_bond
-
-                # try and choose a sensible method
-                if vmethod is None:
-                    left_sz = self.bond_size(section[0] - 1, section[0])
-                    right_sz = self.bond_size(section[-1], section[-1] + 1)
-                    if left_sz * right_sz <= 2**13:
-                        # cholesky is not rank revealing
-                        vmethod = 'eigh' if vmax_bond else 'cholesky'
-                    else:
-                        vmethod = 'isvd'
-
-                if verbosity >= 1:
-                    print("Performing vertical decomposition of section {}, "
-                          "using options: eps={}, method={}, max_bond={}."
-                          .format(label, veps, vmethod, vmax_bond))
-
-                # do vertical SVD
-                kb.replace_with_svd(
-                    section_tags, (ul, ur), right_inds=(ll, lr), eps=veps,
-                    ltags='_UP', rtags='_DOWN', method=vmethod, inplace=True,
-                    max_bond=vmax_bond, **compress_opts)
-
-                # cut joined bond by reindexing to upper- and lower- ind_id.
-                kb.cut_bond((self.site_tag(section[0]), '_UP'),
-                            (self.site_tag(section[0]), '_DOWN'),
-                            "_tmp_ind_u{}".format(label),
-                            "_tmp_ind_l{}".format(label))
-
-            else:
-                # just unfold and fuse physical indices:
-                #                              |
-                #   -A-A-A-A-A-A-A-        -AAAAAAA-
-                #    | | | | | | |   ===>
-                #   -A-A-A-A-A-A-A-        -AAAAAAA-
-                #                              |
-
-                if verbosity >= 1:
-                    print("Just vertical unfolding section {}.".format(label))
-
-                kb, sec = kb.partition(section_tags, inplace=True)
-                sec_l, sec_u = sec.partition('_KET', inplace=True)
-                T_UP = (sec_u ^ all)
-                T_UP.add_tag('_UP')
-                T_UP.fuse({"_tmp_ind_u{}".format(label):
-                           [self.site_ind(i) for i in section]}, inplace=True)
-                T_DN = (sec_l ^ all)
-                T_DN.add_tag('_DOWN')
-                T_DN.fuse({"_tmp_ind_l{}".format(label):
-                           [self.site_ind(i) for i in section]}, inplace=True)
-                kb |= T_UP
-                kb |= T_DN
+            self._do_vertical_decomp(self, kb, section, sysa, sysb, compressed,
+                                     ul, ur, ll, lr, vmethod, vmax_bond, veps,
+                                     verbosity, **compress_opts)
 
         if not self.cyclic:
             # check if either system is at end, and thus reduces to identities
