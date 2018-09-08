@@ -593,7 +593,7 @@ def concurrence(p, dims=(2, 2), sysa=0, sysb=1):
 
     if isop(p):
         pt = dot(kron(Y, Y), dot(p.conj(), kron(Y, Y)))
-        evals = (nla.eigvalsh(dot(p, pt)).real**2)**0.25
+        evals = (nla.eigvals(dot(p, pt)).real**2)**0.25
         return max(0, 2 * np.max(evals) - np.sum(evals))
     else:
         pt = dot(kron(Y, Y), p.conj())
