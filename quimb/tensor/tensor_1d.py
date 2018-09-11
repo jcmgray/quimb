@@ -119,7 +119,8 @@ def expec_TN_1D(*tns, compress=None, eps=1e-15):
 
 
 def gate_TN_1D(tn, G, where, contract=False, tags=None,
-               propagate_tags='sites', inplace=False):
+               propagate_tags='sites', inplace=False,
+               cur_orthog=None, **compress_opts):
     r"""Act with the gate ``g`` on sites ``where``, maintaining the outer
     indices of the 1D tensor netowork::
 
@@ -142,7 +143,7 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
         correct ``site_ind_id``. Sites are read left to right from the shape.
     where : int or sequence of int
         Where the gate should act.
-    contract, bool, optional
+    contract, {False, True, 'swap+split'}, optional
         Contract the gate into the MPS, or leave it uncontracted.
     tags : str or sequence of str, optional
         Tag the new gate tensor with these tags.
@@ -186,18 +187,25 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
 
     if isinstance(where, Integral):
         where = (where,)
-    ns = len(where)
+    ng = len(where)
 
-    shape_matches_2d = (G.ndim == 2) and (G.shape[1] == dp ** len(where))
+    shape_matches_2d = (G.ndim == 2) and (G.shape[1] == dp ** ng)
     shape_maches_nd = all(d == dp for d in G.shape)
 
     if shape_matches_2d:
-        G = _asarray(G).reshape([dp] * 2 * len(where))
+        G = _asarray(G).reshape([dp] * 2 * ng)
     elif not shape_maches_nd:
         raise ValueError("Gate with shape {} doesn't match sites {}"
                          "".format(G.shape, where))
 
-    bnds = [rand_uuid() for _ in range(ns)]
+    if contract == 'swap+split' and ng > 1:
+        if ng > 2:
+            raise ValueError("Can't use auto-swap gate for more than 2 sites.")
+        psi.gate_with_auto_swap(G, where, cur_orthog=cur_orthog,
+                                inplace=True, **compress_opts)
+        return psi
+
+    bnds = [rand_uuid() for _ in range(ng)]
     site_ix = [psi.site_ind(i) for i in where]
     gate_ix = site_ix + bnds
 
@@ -589,26 +597,6 @@ class TensorNetwork1DFlat:
             for i in (start - 1, start, stop, stop - 1):
                 bra[i].modify(data=self[i].data.conj())
 
-    def canonize(self, orthogonality_center, bra=None, normalize=False):
-        r"""Mixed canonize this TN. If this is a MPS, this implies that::
-
-                          i                      i
-            >->->->->- ->-o-<- -<-<-<-<-<      +-o-+
-            | | | | |...| | |...| | | | |  ->  | | |
-            >->->->->- ->-o-<- -<-<-<-<-<      +-o-+
-
-        Parameters
-        ----------
-        orthogonality_center : int, optional
-            Which site to orthogonalize around.
-        bra : MatrixProductState, optional
-            If supplied, simultaneously mixed canonize this MPS too, assuming
-            it to be the conjugate state.
-        """
-        self.left_canonize(stop=orthogonality_center,
-                           bra=bra, normalize=normalize)
-        self.right_canonize(stop=orthogonality_center, bra=bra)
-
     def shift_orthogonality_center(self, current, new, bra=None):
         """Move the orthogonality center of this MPS.
 
@@ -628,6 +616,65 @@ class TensorNetwork1DFlat:
         else:
             for i in range(current, new, -1):
                 self.right_canonize_site(i, bra=bra)
+
+    def canonize(self, where, cur_orthog='calc', bra=None):
+        r"""Mixed canonize this TN. If this is a MPS, this implies that::
+
+                          i                      i
+            >->->->->- ->-o-<- -<-<-<-<-<      +-o-+
+            | | | | |...| | |...| | | | |  ->  | | |
+            >->->->->- ->-o-<- -<-<-<-<-<      +-o-+
+
+        You can also supply a set of indices to orthogonalize around, and a
+        current location of the orthogonality center for efficiency::
+
+                  current                              where
+                  .......                              .....
+            >->->-c-c-c-c-<-<-<-<-<-<      >->->->->->-w-w-w-<-<-<-<
+            | | | | | | | | | | | | |  ->  | | | | | | | | | | | | |
+            >->->-c-c-c-c-<-<-<-<-<-<      >->->->->->-w-w-w-<-<-<-<
+               cmin     cmax                           i   j
+
+        This would only move ``cmin`` to ``i`` and ``cmax`` to ``j`` if
+        necessary.
+
+        Parameters
+        ----------
+        where : int or sequence of int
+            Which site(s) to orthogonalize around. If a sequence of int then
+            make sure that section from min(where) to max(where) is orthog.
+        cur_orthog : int, sequence of int, or 'calc'
+            If given, the current site(s), so as to shift the orthogonality
+            ceneter as efficiently as possible. If 'calc', calculate the
+            current orthogonality center.
+        bra : MatrixProductState, optional
+            If supplied, simultaneously mixed canonize this MPS too, assuming
+            it to be the conjugate state.
+        """
+        if isinstance(where, int):
+            i = j = where
+        else:
+            i, j = min(where), max(where)
+
+        if cur_orthog == 'calc':
+            cur_orthog = self.calc_current_orthog_center()
+
+        if cur_orthog is not None:
+            if isinstance(cur_orthog, int):
+                cmin = cmax = cur_orthog
+            else:
+                cmin, cmax = min(cur_orthog), max(cur_orthog)
+
+            if cmax > j:
+                self.shift_orthogonality_center(cmax, j, bra=bra)
+            if cmin < i:
+                self.shift_orthogonality_center(cmin, i, bra=bra)
+
+        else:
+            self.left_canonize(i, bra=bra)
+            self.right_canonize(j, bra=bra)
+
+        return self
 
     def left_compress_site(self, i, bra=None, **compress_opts):
         """Left compress this 1D TN's ith site, such that the site is then
@@ -770,7 +817,7 @@ class TensorNetwork1DFlat:
 
         return tn
 
-    def singular_values(self, i, current_orthog_centre=None, method='svd'):
+    def singular_values(self, i, cur_orthog=None, method='svd'):
         r"""Find the singular values associated with the ith bond::
 
             ....L....   i
@@ -785,7 +832,7 @@ class TensorNetwork1DFlat:
         i : int
             Which bond, or equivalently, the number of sites in the
             left partition.
-        current_orthog_centre : int
+        cur_orthog : int
             If given, the known current orthogonality center, to speed up the
             mixed canonization, e.g. if sweeping this function from left to
             right would use ``i - 1``.
@@ -799,10 +846,7 @@ class TensorNetwork1DFlat:
             raise ValueError("Need 0 < i < {}, got i={}."
                              .format(self.nsites, i))
 
-        if current_orthog_centre is None:
-            self.canonize(i)
-        else:
-            self.shift_orthogonality_center(current_orthog_centre, i)
+        self.canonize(i, cur_orthog)
 
         Tm1 = self[i]
         left_inds = Tm1.bonds(self[i - 1])
@@ -861,7 +905,7 @@ class TensorNetwork1DFlat:
 
         return expanded
 
-    def count_canonized(self, **allclose_opts):
+    def count_canonized(self):
         if self.cyclic:
             return 0, 0
 
@@ -869,10 +913,20 @@ class TensorNetwork1DFlat:
         num_can_l = 0
         num_can_r = 0
 
+        def isidentity(x):
+            d = x.shape[0]
+            if x.dtype in ('float32', 'complex64'):
+                rtol, atol = 1e-5, 1e-7
+                idtty = np.eye(d, dtype='float32')
+            else:
+                rtol, atol = 1e-9, 1e-11
+                idtty = np.eye(d, dtype='float64')
+            return np.allclose(x, idtty, rtol=rtol, atol=atol)
+
         for i in range(self.nsites - 1):
             ov ^= slice(max(0, i - 1), i + 1)
             x = ov[i].data
-            if np.allclose(x, np.eye(x.shape[0]), **allclose_opts):
+            if isidentity(x):
                 num_can_l += 1
             else:
                 break
@@ -880,12 +934,24 @@ class TensorNetwork1DFlat:
         for j in reversed(range(i + 1, self.nsites)):
             ov ^= slice(j, min(self.nsites, j + 2))
             x = ov[j].data
-            if np.allclose(x, np.eye(x.shape[0]), **allclose_opts):
+            if isidentity(x):
                 num_can_r += 1
             else:
                 break
 
         return num_can_l, num_can_r
+
+    def calc_current_orthog_center(self):
+        """Calculate the site(s) of the current orthogonality center.
+
+        Returns
+        -------
+        int or (int, int)
+            The site, or min/max, around which this MPS is orthogonal.
+        """
+        lo, ro = self.count_canonized()
+        i, j = lo, self.nsites - ro - 1
+        return i if i == j else i, j
 
     def as_cyclic(self, inplace=False):
         """Convert this flat, 1D, TN into cyclic form by adding a dummy bond
@@ -1253,7 +1319,134 @@ class MatrixProductState(TensorNetwork1DVector,
 
         return tn
 
-    def magnetization(self, i, direction='Z', current_orthog_centre=None):
+    def swap_sites_with_compress(self, i, j, cur_orthog=None,
+                                 inplace=False, **compress_opts):
+        """Swap sites ``i`` and ``j`` by contracting, then splitting with the
+        physical indices swapped.
+
+        Parameters
+        ----------
+        i : int
+            The first site to swap.
+        j : int
+            The second site to swap.
+        cur_orthog : int, sequence of int, or 'calc'
+            If known, the current orthogonality center.
+        inplace : bond, optional
+            Perform the swaps inplace.
+        compress_opts
+            Supplied to :func:`~quimb.tensor.tensor_core.tensor_split`.
+        """
+        i, j = sorted((i, j))
+        if i + 1 != j:
+            raise ValueError("Sites aren't adjacent.")
+
+        mps = self if inplace else self.copy()
+        mps.canonize((i, j), cur_orthog)
+
+        # get site tensors and indices
+        ix_i, ix_j = map(mps.site_ind, (i, j))
+        Ti, Tj = mps[i], mps[j]
+        _, unshared = Ti.filter_bonds(Tj)
+
+        # split the contracted tensor, swapping the site indices
+        Tij = Ti @ Tj
+        lix = [i for i in unshared if i != ix_i] + [ix_j]
+        sTi, sTj = Tij.split(lix, get='tensors', **compress_opts)
+
+        # reindex and tranpose the tensors to directly update original tensors
+        sTi.reindex({ix_j: ix_i}, inplace=True)
+        sTj.reindex({ix_i: ix_j}, inplace=True)
+        sTi.transpose_like(Ti, inplace=True)
+        sTj.transpose_like(Tj, inplace=True)
+
+        Ti.modify(data=sTi.data)
+        Tj.modify(data=sTj.data)
+
+        return mps
+
+    def swap_site_to(self, i, f, cur_orthog=None,
+                     inplace=False, **compress_opts):
+        r"""Swap site ``i`` to site ``f``, compressing the bond after each
+        swap::
+
+                  i       f
+            0 1 2 3 4 5 6 7 8 9      0 1 2 4 5 6 7 3 8 9
+            o-o-o-x-o-o-o-o-o-o      o-o-o-o-o-o-o-x-o-o
+            | | | | | | | | | |  ->  | | | | | | | | | |
+
+
+        Parameters
+        ----------
+        i : int
+            The site to move.
+        f : int
+            The new location for site ``i``.
+        cur_orthog : int, sequence of int, or 'calc'
+            If known, the current orthogonality center.
+        inplace : bond, optional
+            Perform the swaps inplace.
+        compress_opts
+            Supplied to :func:`~quimb.tensor.tensor_core.tensor_split`.
+        """
+        mps = self if inplace else self.copy()
+
+        if i == f:
+            return mps
+        if i < f:
+            js = range(i, f)
+        if f < i:
+            js = range(i - 1, f - 1, -1)
+
+        for j in js:
+            mps.swap_sites_with_compress(
+                j, j + 1, inplace=True, cur_orthog=cur_orthog, **compress_opts)
+            cur_orthog = (j, j + 1)
+
+        return mps
+
+    def gate_with_auto_swap(self, G, where, inplace=False,
+                            cur_orthog=None, **compress_opts):
+        """Perform a two site gate on this MPS by, if necessary, swapping and
+        compressing the sites until they are adjacent, using ``gate2split``,
+        then unswapping the sites back to their original position.
+
+        Parameters
+        ----------
+        G : array
+            The gate, with shape ``(d**2, d**2)`` for physical dimension ``d``.
+        where : (int, int)
+            Indices of the sites to apply the gate to.
+        cur_orthog : int, sequence of int, or 'calc'
+            If known, the current orthogonality center.
+        inplace : bond, optional
+            Perform the swaps inplace.
+        compress_opts
+            Supplied to :func:`~quimb.tensor.tensor_core.tensor_split`.
+        """
+        mps = self if inplace else self.copy()
+
+        i, j = sorted(where)
+        need2swap = i + 1 != j
+
+        # move j site adjacent to i site
+        if need2swap:
+            mps.swap_site_to(j, i + 1, cur_orthog=cur_orthog,
+                             inplace=True, **compress_opts)
+            cur_orthog = (i + 1, i + 2)
+
+        # make sure sites are orthog center, then apply and split
+        mps.canonize((i, i + 1), cur_orthog)
+        mps.gate2split(G, (i, i + 1), inplace=True, **compress_opts)
+
+        # move j site back to original position
+        if need2swap:
+            mps.swap_site_to(i + 1, j, cur_orthog=(i, i + 1),
+                             inplace=True, **compress_opts, )
+
+        return mps
+
+    def magnetization(self, i, direction='Z', cur_orthog=None):
         """Compute the magnetization at site ``i``.
         """
         if self.cyclic:
@@ -1262,10 +1455,7 @@ class MatrixProductState(TensorNetwork1DVector,
                    "possible to compute as a normal expectation.")
             raise NotImplementedError(msg)
 
-        if current_orthog_centre is None:
-            self.canonize(i)
-        else:
-            self.shift_orthogonality_center(current_orthog_centre, i)
+        self.canonize(i, cur_orthog)
 
         # +-k-+
         # | O |
@@ -1280,7 +1470,7 @@ class MatrixProductState(TensorNetwork1DVector,
 
         return Tk.contract(TO, Tb)
 
-    def schmidt_values(self, i, current_orthog_centre=None, method='svd'):
+    def schmidt_values(self, i, cur_orthog=None, method='svd'):
         r"""Find the schmidt values associated with the bipartition of this
         MPS between sites on either site of ``i``. In other words, ``i`` is the
         number of sites in the left hand partition::
@@ -1298,7 +1488,7 @@ class MatrixProductState(TensorNetwork1DVector,
         ----------
         i : int
             The number of sites in the left partition.
-        current_orthog_centre : int
+        cur_orthog : int
             If given, the known current orthogonality center, to speed up the
             mixed canonization.
 
@@ -1310,9 +1500,9 @@ class MatrixProductState(TensorNetwork1DVector,
         if self.cyclic:
             raise NotImplementedError
 
-        return self.singular_values(i, current_orthog_centre, method=method)**2
+        return self.singular_values(i, cur_orthog, method=method)**2
 
-    def entropy(self, i, current_orthog_centre=None, method='svd'):
+    def entropy(self, i, cur_orthog=None, method='svd'):
         """The entropy of bipartition between the left block of ``i`` sites and
         the rest.
 
@@ -1320,7 +1510,7 @@ class MatrixProductState(TensorNetwork1DVector,
         ----------
         i : int
             The number of sites in the left partition.
-        current_orthog_centre : int
+        cur_orthog : int
             If given, the known current orthogonality center, to speed up the
             mixed canonization.
 
@@ -1333,12 +1523,11 @@ class MatrixProductState(TensorNetwork1DVector,
                    "of the (compressed) reduced density matrix.")
             raise NotImplementedError(msg)
 
-        S = self.schmidt_values(i, current_orthog_centre=current_orthog_centre,
-                                method=method)
+        S = self.schmidt_values(i, cur_orthog=cur_orthog, method=method)
         S = S[S > 0.0]
         return np.sum(-S * np.log2(S))
 
-    def schmidt_gap(self, i, current_orthog_centre=None, method='svd'):
+    def schmidt_gap(self, i, cur_orthog=None, method='svd'):
         """The schmidt gap of bipartition between the left block of ``i`` sites
         and the rest.
 
@@ -1346,7 +1535,7 @@ class MatrixProductState(TensorNetwork1DVector,
         ----------
         i : int
             The number of sites in the left partition.
-        current_orthog_centre : int
+        cur_orthog : int
             If given, the known current orthogonality center, to speed up the
             mixed canonization.
 
@@ -1357,8 +1546,7 @@ class MatrixProductState(TensorNetwork1DVector,
         if self.cyclic:
             raise NotImplementedError
 
-        S = self.schmidt_values(i, current_orthog_centre=current_orthog_centre,
-                                method=method)
+        S = self.schmidt_values(i, cur_orthog=cur_orthog, method=method)
 
         if len(S) == 1:
             return S[0]
@@ -1451,8 +1639,7 @@ class MatrixProductState(TensorNetwork1DVector,
         return self.partial_trace(keep, upper_ind_id,
                                   rescale_sites=rescale_sites)
 
-    def bipartite_schmidt_state(self, sz_a, get='ket',
-                                current_orthog_centre=None):
+    def bipartite_schmidt_state(self, sz_a, get='ket', cur_orthog=None):
         r"""Compute the reduced state for a bipartition of an OBC MPS, in terms
         of the minimal left/right schmidt basis.
 
@@ -1474,15 +1661,14 @@ class MatrixProductState(TensorNetwork1DVector,
                 - 'ket-dense': like 'ket' but return ``numpy.matrix``.
                 - 'rho-dense': like 'rho' but return ``numpy.matrix``.
 
-        current_orthog_centre : int, optional
+        cur_orthog : int, optional
             If given, take as the current orthogonality center so as to
             efficienctly move it a minimal distance.
         """
         if self.cyclic:
             raise NotImplementedError("MPS must have OBC.")
 
-        s = np.diag(self.singular_values(
-            sz_a, current_orthog_centre=current_orthog_centre))
+        s = np.diag(self.singular_values(sz_a, cur_orthog=cur_orthog))
 
         if 'dense' in get:
             kd = np.matrix(s.reshape(-1, 1))

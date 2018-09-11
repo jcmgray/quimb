@@ -159,7 +159,7 @@ class TestMatrixProductState:
             n, 10, site_tag_id="foo{}", tags='bar', normalize=True)
 
         # move to the center
-        rmps.canonize(orthogonality_center=4)
+        rmps.canonize(4)
         assert rmps.count_canonized() == (4, 5)
         assert_allclose(rmps.H @ rmps, 1)
         p_tn = (rmps.H & rmps) ^ slice(0, 4) ^ slice(..., 4, -1)
@@ -179,6 +179,17 @@ class TestMatrixProductState:
         p_tn = (rmps.H & rmps) ^ slice(0, 6) ^ slice(..., 6, -1)
         assert_allclose(p_tn['foo5'].data, np.eye(10), atol=1e-13)
         assert_allclose(p_tn['foo7'].data, np.eye(8), atol=1e-13)
+
+    def test_canonize_and_calc_current_orthog_center(self):
+        p = MPS_rand_state(20, 3)
+        co = p.calc_current_orthog_center()
+        assert co == (0, 19)
+        p.canonize((5, 15), co)
+        co = p.calc_current_orthog_center()
+        assert co == (5, 15)
+        p.canonize((8, 11), co)
+        co = p.calc_current_orthog_center()
+        assert co == (8, 11)
 
     def test_can_change_data(self):
         p = MPS_rand_state(3, 10)
@@ -295,8 +306,8 @@ class TestMatrixProductState:
         svns = []
         sgs = []
         for i in range(1, n):
-            sgs.append(p.schmidt_gap(i, current_orthog_centre=i - 1))
-            svns.append(p.entropy(i, current_orthog_centre=i))
+            sgs.append(p.schmidt_gap(i, cur_orthog=i - 1))
+            svns.append(p.entropy(i, cur_orthog=i))
 
         pd = p.to_dense()
         ex_svns = [
@@ -483,6 +494,13 @@ class TestMatrixProductState:
         psid = psi2.to_dense()
         Gd = qu.ikron(G, [2] * 10, (7, 8))
         assert psi.to_dense().H @ (Gd @ psid) == pytest.approx(1.0)
+
+    def test_swap_gating(self):
+        psi0 = MPS_rand_state(20, 5)
+        CNOT = qu.controlled('not')
+        psi0XX = psi0.gate(CNOT, (4, 13), inplace=False)
+        psi0XX_s = psi0.gate_with_auto_swap(CNOT, (4, 13), inplace=False)
+        assert psi0XX.H @ psi0XX_s == pytest.approx(1.0)
 
 
 class TestMatrixProductOperator:

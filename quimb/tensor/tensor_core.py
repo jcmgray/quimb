@@ -339,7 +339,7 @@ def _array_split_svd_nb(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0):
 def _array_split_svd_alt(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0):
     """SVD-decompt using alternate scipy driver.
     """
-    U, s, V = scla.svd(x, full_matrices=False, driver='gesvd')
+    U, s, V = scla.svd(x, full_matrices=False, lapack_driver='gesvd')
     return _trim_and_renorm_SVD(U, s, V, cutoff, cutoff_mode, max_bond, absorb)
 
 
@@ -348,6 +348,11 @@ def _array_split_svd(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0):
         return _array_split_svd_nb(x, cutoff, cutoff_mode, max_bond, absorb)
     except scla.LinAlgError:
         return _array_split_svd_alt(x, cutoff, cutoff_mode, max_bond, absorb)
+    except ValueError as e:
+        if 'converge' in str(e):
+            return _array_split_svd_alt(x, cutoff, cutoff_mode,
+                                        max_bond, absorb)
+        raise e
 
 
 def _array_split_svdvals(x):
