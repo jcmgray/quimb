@@ -189,8 +189,7 @@ class EEMPS(MatrixProductState):
 
     def to_dense(self):
         t = self.contract_tags(...)
-        t.fuse([('k', list(map(self.site_ind_id.format, self.sites)))],
-               inplace=True)
+        t.fuse_([('k', list(map(self.site_ind_id.format, self.sites)))])
         return np.asmatrix(t.data.reshape(-1, 1))
 
 
@@ -292,10 +291,8 @@ class PTPTLazyMPS:
 
         # make bra and reindex non traced out sites and do partial transpose
         bra = ket.H
-        bra.reindex({bra.site_ind(i): upper_ind_id.format(i)
-                     for i in sysa}, inplace=True)
-        ket.reindex({ket.site_ind(i): upper_ind_id.format(i)
-                     for i in sysb}, inplace=True)
+        bra.reindex_({bra.site_ind(i): upper_ind_id.format(i) for i in sysa})
+        ket.reindex_({ket.site_ind(i): upper_ind_id.format(i) for i in sysb})
 
         self.lower_ind_id = ket.site_ind_id
         self.upper_ind_id = upper_ind_id
@@ -340,9 +337,8 @@ class PTPTLazyMPS:
 
     def to_dense(self):
         t = self.TN.contract_tags(...)
-        t.fuse([('k', list(map(self.lower_ind_id.format, self.TN.sites))),
-                ('b', list(map(self.upper_ind_id.format, self.TN.sites)))],
-               inplace=True)
+        t.fuse_([('k', list(map(self.lower_ind_id.format, self.TN.sites))),
+                 ('b', list(map(self.upper_ind_id.format, self.TN.sites)))])
         return np.asmatrix(t.data)
 
     @property
@@ -358,7 +354,7 @@ class PTPTLazyMPS:
         l_ix = [self.lower_ind_id.format(i) for i in self.TN.sites]
         vecT = Tensor(vector.reshape(*dims), u_ix)
         outT = (self.TN | vecT).contract_tags(...)
-        outT.fuse({'k': l_ix}, inplace=True)
+        outT.fuse_({'k': l_ix})
         return outT.data.reshape(*vector.shape)
 
     def apply(self, other):

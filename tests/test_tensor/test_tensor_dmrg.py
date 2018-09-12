@@ -13,7 +13,6 @@ from quimb import (
 )
 
 from quimb.tensor import (
-    align_TN_1D,
     MPS_rand_state,
     MPS_product_state,
     MPS_computational_state,
@@ -174,7 +173,7 @@ class TestDMRG1:
 
         # test still normalized
         assert dmrg._k[0].dtype == float
-        align_TN_1D(dmrg._k, dmrg._b, inplace=True)
+        dmrg._k.align_(dmrg._b)
         assert_allclose(abs(dmrg._b @ dmrg._k), 1)
 
         assert e1.real < e0.real
@@ -309,7 +308,7 @@ class TestDMRGX:
         p0 = MPS_rand_state(n, 2).expand_bond_dimension(chi)
 
         b0 = p0.H
-        align_TN_1D(p0, ham, b0, inplace=True)
+        p0.align_(ham, b0)
         en0 = (p0 & ham & b0) ^ ...
         dmrgx = DMRGX(ham, p0, chi)
         dmrgx.sweep_right()

@@ -555,7 +555,7 @@ class DMRG:
         self.ham.add_tag("_HAM")
 
         # Line up and overlap for energy calc
-        self._k.align(self.ham, self._b, inplace=True)
+        self._k.align_(self.ham, self._b)
 
         # want to contract this multiple times while
         #   manipulating k/b -> make virtual
@@ -1254,7 +1254,7 @@ class DMRGX(DMRG):
 
     #     # contract remaining hamiltonian and get its dense representation
     #     eff_ham = (self._eff_ham ^ '_HAM')['_HAM']
-    #     eff_ham.fuse((('lower', lix), ('upper', uix)), inplace=True)
+    #     eff_ham.fuse_((('lower', lix), ('upper', uix)))
     #     A = eff_ham.data
 
     #     # eigen-decompose and reshape eigenvectors thus::

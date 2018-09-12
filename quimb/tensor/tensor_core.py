@@ -723,8 +723,8 @@ def tensor_compress_bond(T1, T2, **compress_opts):
 
     # make sure old bond being used
     ns_ix, = M_L.bonds(M_R)
-    M_L.reindex({ns_ix: s_ix[0]}, inplace=True)
-    M_R.reindex({ns_ix: s_ix[0]}, inplace=True)
+    M_L.reindex_({ns_ix: s_ix[0]})
+    M_R.reindex_({ns_ix: s_ix[0]})
 
     # d) -> e)
     T1C = T1_L.contract(M_L, output_inds=T1.inds)
@@ -1033,6 +1033,8 @@ class Tensor(object):
         else:
             return Tensor(self._data.conj(), self.inds, self.tags)
 
+    conj_ = functools.partialmethod(conj, inplace=True)
+
     @property
     def H(self):
         """Conjugate this tensors data (does nothing to indices).
@@ -1111,6 +1113,8 @@ class Tensor(object):
         tn.modify(data=tn.data.transpose(*out_shape), inds=output_inds)
         return tn
 
+    transpose_ = functools.partialmethod(transpose, inplace=True)
+
     def transpose_like(self, other, inplace=False):
         """Transpose this tensor to match the indices of ``other``, allowing
         for one index to be different. E.g. if
@@ -1127,14 +1131,16 @@ class Tensor(object):
 
         # if their indices match, just plain transpose
         if not diff_ix:
-            tn.transpose(*other.inds, inplace=True)
+            tn.transpose_(*other.inds)
 
         else:
             di, = diff_ix
             new_ix = (i if i in tn.inds else di for i in other.inds)
-            tn.transpose(*new_ix, inplace=True)
+            tn.transpose_(*new_ix)
 
         return tn
+
+    transpose_like_ = functools.partialmethod(transpose_like, inplace=True)
 
     @functools.wraps(tensor_contract)
     def contract(self, *others, output_inds=None, **opts):
@@ -1203,6 +1209,8 @@ class Tensor(object):
         new.modify(tags={retag_map.get(tag, tag) for tag in new.tags})
         return new
 
+    retag_ = functools.partialmethod(retag, inplace=True)
+
     def reindex(self, index_map, inplace=False):
         """Rename the indices of this tensor, optionally in-place.
 
@@ -1217,6 +1225,8 @@ class Tensor(object):
         new = self if inplace else self.copy()
         new.modify(inds=tuple(index_map.get(ind, ind) for ind in new.inds))
         return new
+
+    reindex_ = functools.partialmethod(reindex, inplace=True)
 
     def fuse(self, fuse_map, inplace=False):
         """Combine groups of indices into single indices.
@@ -1245,7 +1255,7 @@ class Tensor(object):
                              any(i in fs for fs in fused_inds))
 
         # transpose tensor to bring groups of fused inds to the beginning
-        tn.transpose(*concat(fused_inds), *unfused_inds, inplace=True)
+        tn.transpose_(*concat(fused_inds), *unfused_inds)
 
         # for each set of fused dims, group into product, then add remaining
         dims = iter(tn.shape)
@@ -1255,6 +1265,8 @@ class Tensor(object):
         tn.modify(data=tn.data.reshape(*dims),
                   inds=(*new_fused_inds, *unfused_inds))
         return tn
+
+    fuse_ = functools.partialmethod(fuse, inplace=True)
 
     def to_dense(self, *inds_seq):
         """Convert this Tensor into an dense array, with a single dimension
@@ -1272,6 +1284,8 @@ class Tensor(object):
         if len(t.inds) != len(new_inds):
             t.modify(data=t.data.reshape(new_shape), inds=new_inds)
         return t
+
+    squeeze_ = functools.partialmethod(squeeze, inplace=True)
 
     def norm(self):
         """Frobenius norm of this tensor.
@@ -2024,9 +2038,11 @@ class TensorNetwork(object):
 
         for tid in tids:
             t = tn.tensor_map[tid]
-            t.retag(tag_map, inplace=True)
+            t.retag_(tag_map)
 
         return tn
+
+    retag_ = functools.partialmethod(retag, inplace=True)
 
     def reindex(self, index_map, inplace=False):
         """Rename indices for all tensors in this network, optionally in-place.
@@ -2042,9 +2058,11 @@ class TensorNetwork(object):
 
         for tid in tids:
             T = tn.tensor_map[tid]
-            T.reindex(index_map, inplace=True)
+            T.reindex_(index_map)
 
         return tn
+
+    reindex_ = functools.partialmethod(reindex, inplace=True)
 
     def conj(self, inplace=False):
         """Conjugate all the tensors in this network (leaves all indices).
@@ -2052,9 +2070,11 @@ class TensorNetwork(object):
         new_tn = self if inplace else self.copy()
 
         for t in new_tn:
-            t.conj(inplace=True)
+            t.conj_()
 
         return new_tn
+
+    conj_ = functools.partialmethod(conj, inplace=True)
 
     @property
     def H(self):
@@ -2516,7 +2536,7 @@ class TensorNetwork(object):
 
         tn.delete(where, which=which)
 
-        tn.reindex({il: ir}, inplace=True)
+        tn.reindex_({il: ir})
         return tn
 
     def replace_with_svd(self, where, left_inds, eps, *, which='any',
@@ -2714,8 +2734,8 @@ class TensorNetwork(object):
         TL, TR = self.tensor_map[tid_l], self.tensor_map[tid_r]
         bnd, = bonds(TL, TR)
 
-        TL.reindex({bnd: left_ind}, inplace=True)
-        TR.reindex({bnd: right_ind}, inplace=True)
+        TL.reindex_({bnd: left_ind})
+        TR.reindex_({bnd: right_ind})
 
     def insert_operator(self, A, where1, where2, tags=None, inplace=False):
         r"""Insert an operator on the bond between the specified tensors,
@@ -2752,7 +2772,7 @@ class TensorNetwork(object):
 
         # reindex one tensor, and add a new A tensor joining the bonds
         nbnd = rand_uuid()
-        T2.reindex({bnd: nbnd}, inplace=True)
+        T2.reindex_({bnd: nbnd})
         TA = Tensor(A, inds=(bnd, nbnd), tags=tags)
         tn |= TA
 
@@ -2795,8 +2815,8 @@ class TensorNetwork(object):
         T1Ui = Tensor(Uinv, inds=('__dummy__', bnd)) @ T1
         T2U = Tensor(U, inds=(bnd, '__dummy__')) @ T2
 
-        T1Ui.transpose_like(T1, inplace=True)
-        T2U.transpose_like(T2, inplace=True)
+        T1Ui.transpose_like_(T1)
+        T2U.transpose_like_(T2)
 
         T1.modify(data=T1Ui.data)
         T2.modify(data=T2U.data)
@@ -3063,12 +3083,14 @@ class TensorNetwork(object):
         """
         tn = self if inplace else self.copy()
         for t in tn:
-            t.squeeze(inplace=True)
+            t.squeeze_()
 
         if fuse:
             tn.fuse_multibonds(inplace=True)
 
         return tn
+
+    squeeze_ = functools.partialmethod(squeeze, inplace=True)
 
     def fuse_multibonds(self, inplace=False):
         """Fuse any multi-bonds (more than one index shared by the same pair
@@ -3079,8 +3101,8 @@ class TensorNetwork(object):
         for T1, T2 in itertools.combinations(tn.tensors, 2):
             dbnds = tuple(T1.bonds(T2))
             if dbnds:
-                T1.fuse({dbnds[0]: dbnds}, inplace=True)
-                T2.fuse({dbnds[0]: dbnds}, inplace=True)
+                T1.fuse_({dbnds[0]: dbnds})
+                T2.fuse_({dbnds[0]: dbnds})
 
         return tn
 
@@ -3435,7 +3457,7 @@ class TNLinearOperator1D(spla.LinearOperator):
         # then do a structured contract along the whole chain
         out_T = tnc ^ slice(i, f, s)
 
-        out_data = out_T.transpose(*self.left_inds, inplace=True).data.ravel()
+        out_data = out_T.transpose_(*self.left_inds).data.ravel()
         if self.is_conj:
             out_data = out_data.conj()
 
@@ -3464,7 +3486,7 @@ class TNLinearOperator1D(spla.LinearOperator):
         out_T = tnc ^ slice(i, f, s)
 
         out_ix = (*self.left_inds, '_mat_ix')
-        out_data = out_T.transpose(*out_ix, inplace=True).data.reshape(-1, d)
+        out_data = out_T.transpose_(*out_ix).data.reshape(-1, d)
         if self.is_conj:
             out_data = out_data.conj()
 

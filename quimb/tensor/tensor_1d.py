@@ -168,12 +168,12 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
 
     See Also
     --------
-    MatrixProductState.gate2split
+    MatrixProductState.gate_split
 
     Examples
     --------
     >>> p = MPS_rand_state(3, 7)
-    >>> p.gate(spin_operator('X'), where=1, tags=['GX'])
+    >>> p.gate_(spin_operator('X'), where=1, tags=['GX'])
     >>> p
     <MatrixProductState(tensors=4, structure='I{}', nsites=3)>
 
@@ -209,7 +209,7 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
     site_ix = [psi.site_ind(i) for i in where]
     gate_ix = site_ix + bnds
 
-    psi.reindex(dict(zip(site_ix, bnds)), inplace=True)
+    psi.reindex_(dict(zip(site_ix, bnds)))
 
     # get the sites that used to have the physical indices
     site_tids = psi._get_tids_from_inds(bnds, which='any')
@@ -341,12 +341,16 @@ class TensorNetwork1DVector:
         return self.ind_size(self.site_ind(i))
 
     @functools.wraps(gate_TN_1D)
-    def gate(self, *args, inplace=True, **kwargs):
+    def gate(self, *args, inplace=False, **kwargs):
         return gate_TN_1D(self, *args, inplace=inplace, **kwargs)
 
+    gate_ = functools.partialmethod(gate, inplace=True)
+
     @functools.wraps(align_TN_1D)
-    def align(self, *args, inplace=True, **kwargs):
+    def align(self, *args, inplace=False, **kwargs):
         return align_TN_1D(self, *args, inplace=inplace, **kwargs)
+
+    align_ = functools.partialmethod(align, inplace=True)
 
     @functools.wraps(expec_TN_1D)
     def expec(self, *args, **kwargs):
@@ -383,13 +387,13 @@ class TensorNetwork1DVector:
         if B is None:
             B = A
 
-        pA = self.gate(A, i, contract=False, inplace=False)
+        pA = self.gate(A, i, contract=False)
         cA = self.expec(pA, **expec_opts)
 
-        pB = self.gate(B, j, contract=False, inplace=False)
+        pB = self.gate(B, j, contract=False)
         cB = self.expec(pB, **expec_opts)
 
-        pAB = pA.gate(B, j, contract=False, inplace=True)
+        pAB = pA.gate_(B, j, contract=False)
         cAB = self.expec(pAB, **expec_opts)
 
         return cAB - cA * cB
@@ -406,8 +410,8 @@ class TensorNetwork1DFlat:
         Q, R = T1.split(lix, get='tensors', right_inds=rix, **split_opts)
         R = R @ T2
 
-        Q.transpose_like(T1, inplace=True)
-        R.transpose_like(T2, inplace=True)
+        Q.transpose_like_(T1)
+        R.transpose_like_(T2)
 
         self[i].modify(data=Q.data)
         self[i + 1].modify(data=R.data)
@@ -423,8 +427,8 @@ class TensorNetwork1DFlat:
         L, Q = T1.split(lix, get='tensors', right_inds=rix, **split_opts)
         L = T2 @ L
 
-        L.transpose_like(T2, inplace=True)
-        Q.transpose_like(T1, inplace=True)
+        L.transpose_like_(T2)
+        Q.transpose_like_(T1)
 
         self[i - 1].modify(data=L.data)
         self[i].modify(data=Q.data)
@@ -812,8 +816,8 @@ class TensorNetwork1DFlat:
         for i, j in pairwise(tn.sites):
             T1, T2 = tn[i], tn[j]
             dbnds = tuple(T1.bonds(T2))
-            T1.fuse({dbnds[0]: dbnds}, inplace=True)
-            T2.fuse({dbnds[0]: dbnds}, inplace=True)
+            T1.fuse_({dbnds[0]: dbnds})
+            T2.fuse_({dbnds[0]: dbnds})
 
         return tn
 
@@ -1272,7 +1276,7 @@ class MatrixProductState(TensorNetwork1DVector,
 
         return norm
 
-    def gate2split(self, G, where, inplace=True, **compress_opts):
+    def gate_split(self, G, where, inplace=False, **compress_opts):
         r"""Apply a two-site gate and then split resulting tensor to retrieve a
         MPS form::
 
@@ -1292,6 +1296,10 @@ class MatrixProductState(TensorNetwork1DVector,
             Indices of the sites to apply the gate to.
         compress_opts
             Supplied to :func:`~quimb.tensor.tensor_split`.
+
+        See Also
+        --------
+        gate, gate_with_auto_swap
         """
         tn = self if inplace else self.copy()
 
@@ -1307,17 +1315,19 @@ class MatrixProductState(TensorNetwork1DVector,
 
         # Contract gate into the two sites
         TG = TG.contract(Ti, Tj)
-        TG.reindex({"_tmpi": ix_i, "_tmpj": ix_j}, inplace=True)
+        TG.reindex_({"_tmpi": ix_i, "_tmpj": ix_j})
 
         # Split the tensor
         _, left_ix = Ti.filter_bonds(Tj)
         nTi, nTj = TG.split(left_inds=left_ix, get='tensors', **compress_opts)
 
         # make sure the new data shape matches and reinsert
-        Ti.modify(data=nTi.transpose_like(Ti, inplace=True).data)
-        Tj.modify(data=nTj.transpose_like(Tj, inplace=True).data)
+        Ti.modify(data=nTi.transpose_like_(Ti).data)
+        Tj.modify(data=nTj.transpose_like_(Tj).data)
 
         return tn
+
+    gate_split_ = functools.partialmethod(gate_split, inplace=True)
 
     def swap_sites_with_compress(self, i, j, cur_orthog=None,
                                  inplace=False, **compress_opts):
@@ -1355,10 +1365,10 @@ class MatrixProductState(TensorNetwork1DVector,
         sTi, sTj = Tij.split(lix, get='tensors', **compress_opts)
 
         # reindex and tranpose the tensors to directly update original tensors
-        sTi.reindex({ix_j: ix_i}, inplace=True)
-        sTj.reindex({ix_i: ix_j}, inplace=True)
-        sTi.transpose_like(Ti, inplace=True)
-        sTj.transpose_like(Tj, inplace=True)
+        sTi.reindex_({ix_j: ix_i})
+        sTj.reindex_({ix_i: ix_j})
+        sTi.transpose_like_(Ti)
+        sTj.transpose_like_(Tj)
 
         Ti.modify(data=sTi.data)
         Tj.modify(data=sTj.data)
@@ -1408,7 +1418,7 @@ class MatrixProductState(TensorNetwork1DVector,
     def gate_with_auto_swap(self, G, where, inplace=False,
                             cur_orthog=None, **compress_opts):
         """Perform a two site gate on this MPS by, if necessary, swapping and
-        compressing the sites until they are adjacent, using ``gate2split``,
+        compressing the sites until they are adjacent, using ``gate_split``,
         then unswapping the sites back to their original position.
 
         Parameters
@@ -1423,6 +1433,10 @@ class MatrixProductState(TensorNetwork1DVector,
             Perform the swaps inplace.
         compress_opts
             Supplied to :func:`~quimb.tensor.tensor_core.tensor_split`.
+
+        See Also
+        --------
+        gate, gate_split
         """
         mps = self if inplace else self.copy()
 
@@ -1437,7 +1451,7 @@ class MatrixProductState(TensorNetwork1DVector,
 
         # make sure sites are orthog center, then apply and split
         mps.canonize((i, i + 1), cur_orthog)
-        mps.gate2split(G, (i, i + 1), inplace=True, **compress_opts)
+        mps.gate_split_(G, (i, i + 1), **compress_opts)
 
         # move j site back to original position
         if need2swap:
@@ -1463,7 +1477,7 @@ class MatrixProductState(TensorNetwork1DVector,
 
         Tk = self[i]
         ind1, ind2 = self.site_ind(i), '__tmp__'
-        Tb = Tk.H.reindex({ind1: ind2}, inplace=False)
+        Tb = Tk.H.reindex({ind1: ind2})
 
         O_data = qu.spin_operator(direction, S=(self.phys_dim(i) - 1) / 2)
         TO = Tensor(O_data, inds=(ind1, ind2))
@@ -1622,8 +1636,8 @@ class MatrixProductState(TensorNetwork1DVector,
                 reind[rho.lower_ind(old)] = rho.lower_ind(new)
                 reind[rho.upper_ind(old)] = rho.upper_ind(new)
 
-            rho.retag(retag, inplace=True)
-            rho.reindex(reind, inplace=True)
+            rho.retag_(retag)
+            rho.reindex_(reind)
 
             rho.nsites = n
             rho.sites = range(n)
@@ -1783,12 +1797,12 @@ class MatrixProductState(TensorNetwork1DVector,
             sec_l, sec_u = sec.partition('_KET', inplace=True)
             T_UP = (sec_u ^ all)
             T_UP.add_tag('_UP')
-            T_UP.fuse({"_tmp_ind_u{}".format(label):
-                       [mps.site_ind(i) for i in section]}, inplace=True)
+            T_UP.fuse_({"_tmp_ind_u{}".format(label):
+                        [mps.site_ind(i) for i in section]})
             T_DN = (sec_l ^ all)
             T_DN.add_tag('_DOWN')
-            T_DN.fuse({"_tmp_ind_l{}".format(label):
-                       [mps.site_ind(i) for i in section]}, inplace=True)
+            T_DN.fuse_({"_tmp_ind_l{}".format(label):
+                        [mps.site_ind(i) for i in section]})
             kb |= T_UP
             kb |= T_DN
 
@@ -1980,8 +1994,7 @@ class MatrixProductState(TensorNetwork1DVector,
 
                 # delete the A system
                 kb.delete('_SYSA')
-                kb.reindex({ubnd: "_tmp_ind_uA",
-                            lbnd: "_tmp_ind_lA"}, inplace=True)
+                kb.reindex_({ubnd: "_tmp_ind_uA", lbnd: "_tmp_ind_lA"})
             else:
                 # or else replace the left or right envs with identites since
                 #
@@ -2008,17 +2021,16 @@ class MatrixProductState(TensorNetwork1DVector,
 
                 # delete the B system
                 kb.delete('_SYSB')
-                kb.reindex({ubnd: "_tmp_ind_uB",
-                            lbnd: "_tmp_ind_lB"}, inplace=True)
+                kb.reindex_({ubnd: "_tmp_ind_uB", lbnd: "_tmp_ind_lB"})
             else:
                 kb.replace_with_identity('_ENVR', inplace=True)
 
-        kb.reindex({
+        kb.reindex_({
             '_tmp_ind_uA': self.site_ind('A'),
             '_tmp_ind_lA': lower_ind_id.format('A'),
             '_tmp_ind_uB': self.site_ind('B'),
             '_tmp_ind_lB': lower_ind_id.format('B'),
-        }, inplace=True)
+        })
 
         if renorm:
             # normalize
@@ -2444,12 +2456,9 @@ class MatrixProductOperator(TensorNetwork1DFlat,
 
         tmp_ind_id = "__tmp_{}__"
 
-        tn.reindex({tn.upper_ind(i): tmp_ind_id.format(i)
-                    for i in sysa}, inplace=True)
-        tn.reindex({tn.lower_ind(i): tn.upper_ind(i)
-                    for i in sysa}, inplace=True)
-        tn.reindex({tmp_ind_id.format(i): tn.lower_ind(i)
-                    for i in sysa}, inplace=True)
+        tn.reindex_({tn.upper_ind(i): tmp_ind_id.format(i) for i in sysa})
+        tn.reindex_({tn.lower_ind(i): tn.upper_ind(i) for i in sysa})
+        tn.reindex_({tmp_ind_id.format(i): tn.lower_ind(i) for i in sysa})
         return tn
 
     def __add__(self, other):

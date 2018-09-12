@@ -324,7 +324,7 @@ class TEBD:
                 sites = (i, i + 1)
                 U = self.get_gate(dt_frac, sites)
                 self._pt.left_canonize(start=max(0, i - 1), stop=i)
-                self._pt.gate2split(
+                self._pt.gate_split_(
                     U, where=sites, absorb='right', **self.split_opts)
 
         elif direction == 'left':
@@ -341,7 +341,7 @@ class TEBD:
                 U = self.get_gate(dt_frac, sites)
                 self._pt.right_canonize(
                     start=min(self.N - 1, i + 2), stop=i + 1)
-                self._pt.gate2split(
+                self._pt.gate_split_(
                     U, where=sites, absorb='left', **self.split_opts)
 
             # one extra canonicalization not included in last split

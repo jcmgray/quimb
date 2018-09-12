@@ -107,7 +107,7 @@ class TestBasicTensorOperations:
     def test_tensor_conj_inplace(self):
         data = np.random.rand(2, 3, 4) + 1.0j * np.random.rand(2, 3, 4)
         a = Tensor(data, inds=[0, 1, 2], tags='blue')
-        a.conj(inplace=True)
+        a.conj_()
         assert_allclose(data.conj(), a.data)
 
     def test_contract_some(self):
@@ -229,11 +229,11 @@ class TestBasicTensorOperations:
         assert b.owners[hash(tn)][0]() is tn
         assert all(map(tn.ind_map.__contains__, ('a', 'b', 'c')))
         assert all(map(tn.tag_map.__contains__, ('X', 'Y', 'Z')))
-        a.reindex({'a': 'd'}, inplace=True)
+        a.reindex_({'a': 'd'})
         assert 'a' not in tn.ind_map
         assert 'd' in tn.ind_map
         assert len(tn.tag_map['X']) == 2
-        b.retag({'X': 'W'}, inplace=True)
+        b.retag_({'X': 'W'})
         assert len(tn.tag_map['X']) == 1
         assert 'W' in tn.tag_map
         del tn
@@ -470,7 +470,7 @@ class TestTensorNetwork:
         c = Tensor(c_data, inds=[3, 0, 4], tags={'blue', 'I2'})
 
         tn = a & b & c
-        tn.conj(inplace=True)
+        tn.conj_()
 
         for i, arr in enumerate((a_data, b_data, c_data)):
             assert_allclose(tn["I{}".format(i)].data, arr.conj())
@@ -582,7 +582,7 @@ class TestTensorNetwork:
         assert set(d.inner_inds()) == {0, 1, 'bar', 3}
         assert d.tensors[0].inds == (0, 1, 'bar')
 
-        d = a_b_c.reindex({4: 'foo', 2: 'bar'}, inplace=True)
+        d = a_b_c.reindex_({4: 'foo', 2: 'bar'})
 
         assert a_b_c.outer_inds() == ('foo',)
         assert set(d.inner_inds()) == {0, 1, 'bar', 3}
@@ -636,7 +636,7 @@ class TestTensorNetwork:
         y = rand_tensor((4, 2, 5), inds='bcd', tags={'Y', 'I1'})
         z = rand_tensor((5, 3), inds='de', tags={'Z', 'I2'})
         tn = TensorNetwork((x, y, z))
-        tn.retag({"I0": "I1", "I1": "I2", "I2": "I3", "Z": "A"}, inplace=True)
+        tn.retag_({"I0": "I1", "I1": "I2", "I2": "I3", "Z": "A"})
         assert set(tn.tag_map.keys()) == {'X', 'I1', 'I2', 'I3', 'Y', 'A'}
 
     def test_squeeze(self):

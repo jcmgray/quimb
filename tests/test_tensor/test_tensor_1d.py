@@ -8,7 +8,7 @@ from quimb.tensor import (
     MatrixProductState, MatrixProductOperator, align_TN_1D, MPS_rand_state,
     MPO_identity, MPO_identity_like, MPO_zeros, MPO_zeros_like, MPO_rand,
     MPO_rand_herm, MPO_ham_heis, MPS_neel_state, MPS_zero_state, bonds,
-    MPS_computational_state, expec_TN_1D, gate_TN_1D)
+    MPS_computational_state)
 
 
 class TestMatrixProductState:
@@ -46,9 +46,9 @@ class TestMatrixProductState:
             psi = MPS_rand_state(10, 7, cyclic=False, trans_invar=True)
 
         psi = MPS_rand_state(10, 7, cyclic=True, trans_invar=True)
-        z0 = expec_TN_1D(psi, gate_TN_1D(psi, qu.pauli('Z'), 0, contract=True))
-        z3 = expec_TN_1D(psi, gate_TN_1D(psi, qu.pauli('Z'), 0, contract=True))
-        z7 = expec_TN_1D(psi, gate_TN_1D(psi, qu.pauli('Z'), 0, contract=True))
+        z0 = psi.expec(psi.gate(qu.pauli('Z'), 0, contract=True))
+        z3 = psi.expec(psi.gate(qu.pauli('Z'), 0, contract=True))
+        z7 = psi.expec(psi.gate(qu.pauli('Z'), 0, contract=True))
 
         assert_allclose(z0, z3)
         assert_allclose(z3, z7)
@@ -448,7 +448,7 @@ class TestMatrixProductState:
         p = MPS_rand_state(5, 7)
         q = p.copy()
         G = qu.rand_uni(2**bsz)
-        p = p.gate(
+        p = p.gate_(
             G,
             where=[i for i in range(2, 2 + bsz)],
             tags='G',
@@ -473,17 +473,17 @@ class TestMatrixProductState:
 
         assert ghz.H @ ghz == pytest.approx(1.0)
 
-    def test_gate2split(self):
+    def test_gate_split(self):
         psi = MPS_rand_state(10, 3)
         psi2 = psi.copy()
         G = qu.eye(2) & qu.eye(2)
-        psi.gate2split(G, (2, 3), cutoff=0)
+        psi.gate_split_(G, (2, 3), cutoff=0)
         assert psi.bond_size(2, 3) == 6
         assert psi.H @ psi2 == pytest.approx(1.0)
 
         # check a unitary application
         G = qu.rand_uni(2**2)
-        psi.gate2split(G, (7, 8))
+        psi.gate_split_(G, (7, 8))
         psi.compress()
         assert psi.bond_size(2, 3) == 3
         assert psi.bond_size(7, 8) > 3
@@ -498,8 +498,8 @@ class TestMatrixProductState:
     def test_swap_gating(self):
         psi0 = MPS_rand_state(20, 5)
         CNOT = qu.controlled('not')
-        psi0XX = psi0.gate(CNOT, (4, 13), inplace=False)
-        psi0XX_s = psi0.gate_with_auto_swap(CNOT, (4, 13), inplace=False)
+        psi0XX = psi0.gate(CNOT, (4, 13))
+        psi0XX_s = psi0.gate_with_auto_swap(CNOT, (4, 13))
         assert psi0XX.H @ psi0XX_s == pytest.approx(1.0)
 
 
@@ -641,7 +641,7 @@ class TestMatrixProductOperator:
         k = MPS_rand_state(13, 7, cyclic=cyclic)
         X = MPO_rand_herm(3, 5, sites=[3, 6, 7], nsites=13, cyclic=cyclic)
         b = k.H
-        align_TN_1D(k, X, b, inplace=True)
+        k.align_(X, b)
         assert (k & X & b) ^ ...
 
 
