@@ -348,7 +348,15 @@ def svd(A, return_vecs=True):
     (U,) s (, VH) :
         Singular value(s) (and vectors) such that ``U @ np.diag(s) @ VH = A``.
     """
-    return np.linalg.svd(A, full_matrices=False, compute_uv=return_vecs)
+    try:
+        return np.linalg.svd(A, full_matrices=False, compute_uv=return_vecs)
+
+    except np.linalg.linalg.LinAlgError:  # pragma: no cover
+        import warnings
+        warnings.warn("Numpy SVD failed, trying again with different driver.")
+
+        return sla.svd(A, full_matrices=False, compute_uv=return_vecs,
+                       lapack_driver='gesvd')
 
 
 _SVDS_METHODS = {

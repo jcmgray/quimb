@@ -96,11 +96,11 @@ def rsvd_qb(A, k, q, p, state, AH=None):
     QH, BH = dag(Q), dag(B)
     G = possibly_extend_randn(G, k, p, A)
 
-    Qi = orthog(dot(A, G) - dot(Q, dot(B, G)))
+    Qi = orthog(dot(A, G) - dot(Q, dot(B, G)), lu=q > 0)
 
     for i in range(1, q + 1):
-        Qi = orthog(dot(AH, Qi) - dot(BH, dot(QH, Qi)))
-        Qi = orthog(dot(A, Qi) - dot(Q, dot(B, Qi)))
+        Qi = orthog(dot(AH, Qi) - dot(BH, dot(QH, Qi)), lu=True)
+        Qi = orthog(dot(A, Qi) - dot(Q, dot(B, Qi)), lu=i != q)
 
     Qi = orthog(Qi - dot(Q, dot(QH, Qi)))
     Bi = dag(dot(AH, Qi)) - dot(dot(dag(Qi), Q), B)

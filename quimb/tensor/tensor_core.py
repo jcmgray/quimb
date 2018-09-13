@@ -344,14 +344,19 @@ def _array_split_svd_alt(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0):
 
 
 def _array_split_svd(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0):
+    args = (x, cutoff, cutoff_mode, max_bond, absorb)
+
     try:
-        return _array_split_svd_nb(x, cutoff, cutoff_mode, max_bond, absorb)
-    except scla.LinAlgError:
-        return _array_split_svd_alt(x, cutoff, cutoff_mode, max_bond, absorb)
-    except ValueError as e:
-        if 'converge' in str(e):
-            return _array_split_svd_alt(x, cutoff, cutoff_mode,
-                                        max_bond, absorb)
+        return _array_split_svd_nb(*args)
+
+    except (scla.LinAlgError, ValueError) as e:  # pragma: no cover
+
+        if isinstance(e, scla.LinAlgError) or 'converge' in str(e):
+            import warnings
+            warnings.warn("TN SVD failed, trying again with alternate driver.")
+
+            return _array_split_svd_alt(*args)
+
         raise e
 
 
