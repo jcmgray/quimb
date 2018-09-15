@@ -280,8 +280,14 @@ def count_svdvals_needed(s, eps):  # pragma: no cover
     return n
 
 
-def estimate_rank(A, eps, k_max=None, k_start=4, k_incr=1.4, q=0, p=0,
-                  get_vectors=False, G0=None, AH=None, use_qb=False):
+def isdouble(dtype):
+    """Check if ``dtype`` is double precision.
+    """
+    return dtype in ('float64', 'complex128')
+
+
+def estimate_rank(A, eps, k_max=None, use_sli=True, k_start=2, k_incr=1.4,
+                  q=0, p=0, get_vectors=False, G0=None, AH=None, use_qb=20):
     """Estimate the rank of an linear operator. Uses a low quality random
     SVD with a resolution of ~ 10.
 
@@ -294,6 +300,9 @@ def estimate_rank(A, eps, k_max=None, k_start=4, k_incr=1.4, q=0, p=0,
         precision.
     k_max : int, optional
         The maximum rank to find.
+    use_sli : bool, optional
+        Whether to use :func:`scipy.linalg.interpolative.estimate_rank` if
+        possible (double precision and no ``k_max`` set).
     k_start : int, optional
         Begin the adaptive SVD with a block of this size.
     k_incr : float, optional
@@ -316,6 +325,12 @@ def estimate_rank(A, eps, k_max=None, k_start=4, k_incr=1.4, q=0, p=0,
         k_max = min(A.shape)
     if eps <= 0.0:
         return k_max
+
+    use_sli = (use_sli and (k_max == min(A.shape)) and
+               isdouble(A.dtype) and not get_vectors)
+    if use_sli:
+        return sla.interpolative.estimate_rank(A, eps)
+
     if A.shape[0] < A.shape[1]:
         A = A.T
         if get_vectors:
@@ -341,8 +356,8 @@ def maybe_flip(UsV, flipped):
     return V.T, s, U.T
 
 
-def rsvd(A, eps_or_k, compute_uv=True, mode='adapt+block', use_qb=False,
-         q=2, p=0, k_max=None, k_start=4, k_incr=1.4, G0=None, AH=None):
+def rsvd(A, eps_or_k, compute_uv=True, mode='adapt+block', use_qb=20,
+         q=2, p=0, k_max=None, k_start=2, k_incr=1.4, G0=None, AH=None):
     """Fast, randomized, iterative SVD. Adaptive variant of method due
     originally to Halko. This scales as ``log(k)`` rather than ``k`` so can be
     more efficient.
