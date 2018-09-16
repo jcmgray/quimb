@@ -1098,10 +1098,17 @@ class Tensor(object):
         ----------
         output_inds : sequence of str
             The desired output sequence of indices.
+        inplace : bool, optional
+            Perform the tranposition inplace.
 
         Returns
         -------
-        Tensor
+        tt : Tensor
+            The transposed tensor.
+
+        See Also
+        --------
+        transpose_like
         """
         tn = self if inplace else self.copy()
 
@@ -1126,6 +1133,22 @@ class Tensor(object):
         ``self.inds = ('a', 'b', 'c', 'x')`` and
         ``other.inds = ('b', 'a', 'd', 'c')`` then 'x' will be aligned with 'd'
         and the output inds will be ``('b', 'a', 'x', 'c')``
+
+        Parameters
+        ----------
+        other : Tensor
+            The tensor to match.
+        inplace : bool, optional
+            Perform the tranposition inplace.
+
+        Returns
+        -------
+        tt : Tensor
+            The transposed tensor.
+
+        See Also
+        --------
+        transpose
         """
         tn = self if inplace else self.copy()
         diff_ix = set(tn.inds) - set(other.inds)

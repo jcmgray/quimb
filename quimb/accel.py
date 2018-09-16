@@ -30,10 +30,14 @@ import numba as nb  # noqa
 _NUMBA_CACHE = {
     'True': True, 'False': False,
 }[os.environ.get('QUIMB_NUMBA_CACHE', 'True')]
-njit = functools.partial(nb.njit, cache=_NUMBA_CACHE)
-njit_nocache = nb.njit
-vectorize = functools.partial(nb.vectorize, cache=_NUMBA_CACHE)
 
+njit = functools.partial(nb.njit, cache=_NUMBA_CACHE)
+"""Numba no-python jit, but obeying cache setting."""
+
+njit_nocache = nb.njit
+
+vectorize = functools.partial(nb.vectorize, cache=_NUMBA_CACHE)
+"""Numba vectorize, but obeying cache setting."""
 
 class CacheThreadPool(object):
     """

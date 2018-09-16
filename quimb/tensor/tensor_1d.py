@@ -1655,25 +1655,25 @@ class MatrixProductState(TensorNetwork1DVector,
 
     def bipartite_schmidt_state(self, sz_a, get='ket', cur_orthog=None):
         r"""Compute the reduced state for a bipartition of an OBC MPS, in terms
-        of the minimal left/right schmidt basis.
+        of the minimal left/right schmidt basis::
 
                 A            B
             .........     ...........
             >->->->->--s--<-<-<-<-<-<    ->   +-s-+
             | | | | |     | | | | | |         |   |
-           k0 k1...                        kA   kB
+           k0 k1...                          kA   kB
 
         Parameters
         ----------
         sz_a : int
-            The number of sites in subsystem A, must be ``0 < sz_a < N ``.
+            The number of sites in subsystem A, must be ``0 < sz_a < N``.
         get : {'ket', 'rho', 'ket-dense', 'rho-dense'}, optional
             Get the:
 
-                - 'ket': vector form as tensor.
-                - 'rho': density operator form, i.e. vector outer product
-                - 'ket-dense': like 'ket' but return ``numpy.matrix``.
-                - 'rho-dense': like 'rho' but return ``numpy.matrix``.
+            - 'ket': vector form as tensor.
+            - 'rho': density operator form, i.e. vector outer product
+            - 'ket-dense': like 'ket' but return ``numpy.matrix``.
+            - 'rho-dense': like 'rho' but return ``numpy.matrix``.
 
         cur_orthog : int, optional
             If given, take as the current orthogonality center so as to
