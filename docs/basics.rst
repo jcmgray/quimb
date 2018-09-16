@@ -5,8 +5,9 @@ Basics
 Basic Representation
 ====================
 
-States and operators in :py:mod:`quimb` are simply dense numpy or sparse scipy complex matrices.
-The :py:func:`~quimb.core.quimbify` function (aliased to :py:func:`~quimb.core.qu`) can convert between the various representations.
+States and operators in :py:mod:`quimb` are simply dense numpy or sparse scipy
+complex matrices. The :py:func:`~quimb.core.quimbify` function (aliased to
+:py:func:`~quimb.core.qu`) can convert between the various representations.
 
 .. code-block:: py3
 
@@ -47,7 +48,8 @@ Which can also be sparse:
     <3x3 sparse matrix of type '<class 'numpy.complex128'>'
             with 9 stored elements in Compressed Sparse Row format>
 
-The sparse format can be specified with the ``stype`` keyword. The partial function versions of each of the above are also available:
+The sparse format can be specified with the ``stype`` keyword. The partial
+function versions of each of the above are also available:
 
 * :py:func:`~quimb.core.ket()`
 * :py:func:`~quimb.core.bra()`
@@ -58,13 +60,15 @@ The sparse format can be specified with the ``stype`` keyword. The partial funct
 .. note::
     :class: quimbnote
 
-    If a simple 1d-list is supplied and no ``qtype`` is given, ``'ket'`` is assumed.
+    If a simple 1d-list is supplied and no ``qtype`` is given, ``'ket'`` is
+    assumed.
 
 
 Basic Operations
 ================
 
-The 'dagger', or hermitian conjugate, operation is performed with the ``.H`` attribute:
+The 'dagger', or hermitian conjugate, operation is performed with the ``.H``
+attribute:
 
 .. code-block:: py3
 
@@ -76,11 +80,14 @@ The 'dagger', or hermitian conjugate, operation is performed with the ``.H`` att
             [ 0.+0.j        ]])
 
     >>> psi.H
-    matrix([[ 0.-0.j        ,  0.-0.70710678j,  0.+0.70710678j,  0.-0.j        ]])
+    matrix([[ 0.-0.j       ,  0.-0.7071067j,  0.+0.7071067j,  0.-0.j       ]])
 
-This is just the combination of ``.conj()`` and ``.T``, but only available for :mod:`scipy.sparse` matrices  and :class:`numpy.matrix` s (not :class:`numpy.ndarray` s).
+This is just the combination of ``.conj()`` and ``.T``, but only available for
+:mod:`scipy.sparse` matrices  and :class:`numpy.matrix` s (not
+:class:`numpy.ndarray` s).
 
-The product of two quantum objects is the dot or matrix product, which, since python 3.5, has been overloaded with the ``@`` symbol. Using it is recommended:
+The product of two quantum objects is the dot or matrix product, which, since
+python 3.5, has been overloaded with the ``@`` symbol. Using it is recommended:
 
 .. code:: python
 
@@ -101,7 +108,8 @@ The product of two quantum objects is the dot or matrix product, which, since py
 Combining Objects - Tensoring
 =============================
 
-There are a number of ways to combine states and operators, i.e. tensoring them together.
+There are a number of ways to combine states and operators, i.e. tensoring them
+together.
 
 Functional form using :py:func:`~quimb.accel.kron`:
 
@@ -120,9 +128,12 @@ This can also be done using the ``&`` overload on numpy and scipy matrices:
 .. warning::
     :class: quimbwarning
 
-    When :mod:`quimb` is imported, it overloads the ``&``/``__and__`` of :class:`numpy.matrix` which replaces the overload of :func:`numpy.bitwise_and`.
+    When :mod:`quimb` is imported, it overloads the ``&``/``__and__`` of
+    :class:`numpy.matrix` which replaces the overload of
+    :func:`numpy.bitwise_and`.
 
-Often one wants to sandwich an operator with many identities, :py:func:`~quimb.core.ikron` can be used for this:
+Often one wants to sandwich an operator with many identities,
+:py:func:`~quimb.core.ikron` can be used for this:
 
 .. code-block:: py3
 
@@ -132,22 +143,29 @@ Often one wants to sandwich an operator with many identities, :py:func:`~quimb.c
     >>> IIIXXIIIII.shape
     (1024, 1024)
 
-For more advanced tensor constructions, such as reversing and interleaving identities within operators :py:func:`~quimb.core.pkron` can be used:
+For more advanced tensor constructions, such as reversing and interleaving
+identities within operators :py:func:`~quimb.core.pkron` can be used:
 
 .. code-block:: py3
 
     >>> dims = [2] * 3
     >>> XZ = pauli('X') & pauli('Z')
-    >>> ZIX = pkron(op, dims, inds=[2, 0])  # now acts with Z on first spin, and X on 3rd
+    >>> ZIX = pkron(op, dims, inds=[2, 0])
+
+``ZIX`` would then act with Z on first spin, and X on 3rd.
 
 
 Removing Objects - Partial Trace
 ================================
 
-To remove, or ignore, certain parts of a quantum state the partial trace function :func:`~quimb.core.partial_trace` (aliased to :func:`~quimb.core.ptr`) is used.
-Here, the internal dimensions of a state must be supplied as well as the indicies of which of these subsystems to *keep*.
+To remove, or ignore, certain parts of a quantum state the partial trace
+function :func:`~quimb.core.partial_trace` (aliased to :func:`~quimb.core.ptr`)
+is used. Here, the internal dimensions of a state must be supplied as well as
+the indicies of which of these subsystems to *keep*.
 
-For example, if we have a random system of 10 qubits (hilbert space of dimension ``2**10``), and we want just the reduced density matrix describing the first and last spins:
+For example, if we have a random system of 10 qubits (hilbert space of dimension
+``2**10``), and we want just the reduced density matrix describing the first and
+last spins:
 
 .. code-block:: py3
 

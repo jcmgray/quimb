@@ -174,6 +174,33 @@ def quimbify(data, qtype=None, normalized=False, chopped=False,
     3. Will leave operators as is if ``'dop'`` given, but construct one if
        vector given with the assumption that it was a ket.
 
+    Examples
+    --------
+
+    Create a ket (column vector):
+
+    >>> qu([1, 2j, 3])
+    matrix([[1.+0.j],
+            [0.+2.j],
+            [3.+0.j]])
+
+    Create a single precision bra (row vector):
+
+    >>> qu([1, 2j, 3], qtype='bra', dtype='complex64')
+    matrix([[1.-0.j, 0.-2.j, 3.-0.j]], dtype=complex64)
+
+    Create a density operator from a vector:
+
+    >>> qu([1, 2j, 3], qtype='dop')
+    matrix([[1.+0.j, 0.-2.j, 3.+0.j],
+            [0.+2.j, 4.+0.j, 0.+6.j],
+            [3.+0.j, 0.-6.j, 9.+0.j]])
+
+    Create a sparse density operator:
+
+    >>> qu([1, 0, 0], sparse=True, qtype='dop')
+    <3x3 sparse matrix of type '<class 'numpy.complex128'>'
+        with 1 stored elements in Compressed Sparse Row format>
     """
 
     sparse_input = issparse(data)
