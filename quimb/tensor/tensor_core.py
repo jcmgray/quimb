@@ -3169,7 +3169,7 @@ class TensorNetwork(object):
 
     # ------------------------------ printing ------------------------------- #
 
-    def graph(tn, color=None, show_inds=None, show_tags=None, node_size=None,
+    def graph(self, color=None, show_inds=None, show_tags=None, node_size=None,
               iterations=200, k=None, fix=None, figsize=(6, 6), legend=True,
               return_fig=False, **plot_opts):
         """Plot this tensor network as a networkx graph using matplotlib,
@@ -3205,11 +3205,10 @@ class TensorNetwork(object):
         import networkx as nx
         import matplotlib.pyplot as plt
         import math
-        from collections import OrderedDict
 
         # build the graph
         G = nx.Graph()
-        ts = list(tn.tensors)
+        ts = list(self.tensors)
         n = len(ts)
 
         if show_inds is None:
@@ -3233,7 +3232,7 @@ class TensorNetwork(object):
         fix_tids = {}
         for tags_or_ind, pos in tuple(fix.items()):
             try:
-                tid, = tn._get_tids_from_tags(tags_or_ind)
+                tid, = self._get_tids_from_tags(tags_or_ind)
                 fix_tids[tid] = pos
             except KeyError:
                 # assume index
@@ -3242,7 +3241,7 @@ class TensorNetwork(object):
         labels = {}
         fixed_positions = {}
 
-        for i, (tid, t1) in enumerate(tn.tensor_map.items()):
+        for i, (tid, t1) in enumerate(self.tensor_map.items()):
 
             if tid in fix_tids:
                 fixed_positions[i] = fix_tids[tid]
@@ -3297,7 +3296,7 @@ class TensorNetwork(object):
             rand_colors = (tuple(np.random.rand(3)) for _ in range(9999999999))
             rgbs = concat((rgbs, *extras, rand_colors))
             # ordered to reliably overcolor tags
-            colors = OrderedDict(zip(color, rgbs))
+            colors = collections.OrderedDict(zip(color, rgbs))
 
         for i, t1 in enumerate(ts):
             G.node[i]['color'] = None

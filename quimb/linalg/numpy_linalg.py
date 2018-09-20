@@ -150,7 +150,7 @@ def eigs_numpy(A, k, B=None, which=None, return_vecs=True,
 
     # project into subspace
     if P is not None:
-        A = dag(P) @ (A @ P)
+        A = qu.dag(P) @ (A @ P)
 
     generalized = B is not None
 

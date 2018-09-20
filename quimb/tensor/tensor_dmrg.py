@@ -688,7 +688,7 @@ class DMRG:
                 Neff = None
 
             # else contruct RHS normalization operator
-            elif dense:
+            elif neff_dense:
                 Neff = (self._eff_norm ^ '_EYE')['_EYE'].to_dense(lix, uix)
                 np.fill_diagonal(Neff, Neff.diagonal() + fudge)
                 np.fill_diagonal(Heff, Heff.diagonal() + fudge**0.5)

@@ -40,7 +40,7 @@ def trim(arrays, k):
         U, s, VH = arrays
         U, s, VH = U[:, :k], s[:k], VH[:k, :]
         return U, s, VH
-    if isinstance(arrays, tuple) and len(arrays) == 3:
+    if isinstance(arrays, tuple) and len(arrays) == 2:
         # Q, B factors
         Q, B = arrays
         return Q[:, :k], B[:k, :]

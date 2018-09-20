@@ -56,6 +56,21 @@ def eigs_scipy(A, k, *, B=None, which=None, return_vecs=True, sigma=None,
     vk : (m, k) array
         Corresponding eigenvectors (if ``return_vecs=True``).
     """
+    if isinstance(A, qu.Lazy):
+        A = A()
+    if isinstance(B, qu.Lazy):
+        B = B()
+    if isinstance(P, qu.Lazy):
+        P = P()
+
+    # avoid matrix like behaviour
+    if isinstance(A, qu.qarray):
+        A = A.A
+
+    # project into subspace
+    if P is not None:
+        A = qu.dag(P) @ (A @ P)
+
     # Options that might get passed that scipy doesn't support
     eigs_opts.pop('EPSType', None)
 
@@ -73,22 +88,7 @@ def eigs_scipy(A, k, *, B=None, which=None, return_vecs=True, sigma=None,
         'tol': 0 if tol is None else tol
     }
 
-    if isinstance(A, qu.Lazy):
-        A = A()
-    if isinstance(B, qu.Lazy):
-        B = B()
-    if isinstance(P, qu.Lazy):
-        P = P()
-
     eig_fn = spla.eigsh if isherm else spla.eigs
-
-    # project into subspace
-    if P is not None:
-        A = qu.dag(P) @ (A @ P)
-
-    # avoid matrix like behaviour
-    if isinstance(A, qu.qarray):
-        A = A.A
 
     if return_vecs:
         lk, vk = eig_fn(A, **settings, **eigs_opts)

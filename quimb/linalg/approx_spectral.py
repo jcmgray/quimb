@@ -848,7 +848,7 @@ def gen_bipartite_spectral_fn(exact_fn, approx_fn, pure_default):
         # also check if system b is smaller, since spectrum is same for both
         if sz_b < sz_a:
             # if so swap things around
-            sz_a, sz_b = sz_b, sz_a
+            sz_a = sz_b
             sysb = [i for i in range(len(dims)) if i not in sysa]
             sysa = sysb
 

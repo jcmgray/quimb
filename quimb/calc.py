@@ -325,7 +325,6 @@ def schmidt_gap(psi_ab, dims, sysa):
     # also check if system b is smaller, since spectrum is same for both
     if sz_b < sz_a:
         # if so swap things around
-        sz_a, sz_b = sz_b, sz_a
         sysb = [i for i in range(len(dims)) if i not in sysa]
         sysa = sysb
 
@@ -429,7 +428,6 @@ def partial_transpose_norm(p, dims, sysa):
         # check if system b is smaller, since entropy is same for both a & b.
         if sz_b < sz_a:
             # if so swap things around
-            sz_a, sz_b = sz_b, sz_a
             sysb = [i for i in range(len(dims)) if i not in sysa]
             sysa = sysb
 

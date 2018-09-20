@@ -46,11 +46,9 @@ def init_petsc_and_slepc(comm=None):
 
     import petsc4py
     petsc4py.init(args=['-no_signal_handler'], arch=petsc_arch, comm=comm)
-    from petsc4py import PETSc
     import slepc4py
     slepc4py.init(args=['-no_signal_handler'], arch=petsc_arch)
-    from slepc4py import SLEPc
-    return PETSc, SLEPc
+    return petsc4py.PETSc, slepc4py.SLEPc
 
 
 @CacheOnComm

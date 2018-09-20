@@ -337,7 +337,7 @@ class TestDMRGX:
         assert_allclose(big_ovlps, [1])
 
         # check fully
-        assert is_eigenvector(k, h, tol=1e-12)
+        assert is_eigenvector(k, h, tol=1e-10)
 
     def test_solve_bigger(self):
         n = 14
