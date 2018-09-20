@@ -21,7 +21,7 @@ def eig_numpy(A, sort=True, isherm=True, return_vecs=True):
 
     Parameters
     ----------
-    A : matrix_like
+    A : array_like
         The operator to decompose.
     sort : bool, optional
         Whether to sort into ascending order.
@@ -34,7 +34,7 @@ def eig_numpy(A, sort=True, isherm=True, return_vecs=True):
     -------
     evals : 1D-array
         The eigenvalues.
-    evecs : matrix
+    evecs : qarray
         If ``return_vecs=True``, the eigenvectors.
     """
     evals = _NUMPY_EIG_FUNCS[return_vecs, isherm](A)
@@ -44,9 +44,9 @@ def eig_numpy(A, sort=True, isherm=True, return_vecs=True):
 
         if sort:
             sortinds = np.argsort(evals)
-            return evals[sortinds], np.asmatrix(evecs[:, sortinds])
+            evals, evecs = evals[sortinds], evecs[:, sortinds]
 
-        return evals, np.asmatrix(evecs)
+        return evals, qu.qarray(evecs)
 
     if sort:
         return np.sort(evals)
@@ -116,12 +116,12 @@ def eigs_numpy(A, k, B=None, which=None, return_vecs=True,
 
     Parameters
     ----------
-    A : matrix-like or quimb.Lazy
+    A : array_like or quimb.Lazy
         Operator to partially eigen-decompose.
     k : int
         Number of eigenpairs to return.
-    B : matrix-like or quimb.Lazy
-        If given, the RHS matrix defining a generalized eigen problem.
+    B : array_like or quimb.Lazy
+        If given, the RHS operator defining a generalized eigen problem.
     which : str, optional
         Which part of the spectrum to target.
     return_vecs : bool, optional
@@ -130,7 +130,7 @@ def eigs_numpy(A, k, B=None, which=None, return_vecs=True,
         Target eigenvalue.
     isherm : bool, optional
         Whether `a` is hermitian.
-    P : matrix-like or quimb.Lazy
+    P : array_like or quimb.Lazy
         Perform the eigensolve in the subspace defined by this projector.
     sort : bool, optional
         Whether to sort reduced list of eigenpairs into ascending order.
@@ -150,7 +150,7 @@ def eigs_numpy(A, k, B=None, which=None, return_vecs=True,
 
     # project into subspace
     if P is not None:
-        A = P.H @ (A @ P)
+        A = dag(P) @ (A @ P)
 
     generalized = B is not None
 
@@ -172,7 +172,7 @@ def eigs_numpy(A, k, B=None, which=None, return_vecs=True,
 
         # sort and trim according to which k we want
         sk = sort_inds(lk, method=which, sigma=sigma)[:k]
-        lk, vk = lk[sk], np.asmatrix(vk[:, sk])
+        lk, vk = lk[sk], vk[:, sk]
 
         # also potentially sort into ascending order
         if sort:
@@ -183,7 +183,7 @@ def eigs_numpy(A, k, B=None, which=None, return_vecs=True,
         if P is not None:
             vk = P @ vk
 
-        return lk, vk
+        return lk, qu.qarray(vk)
 
     else:
         # get all eigenvalues
@@ -203,7 +203,7 @@ def svds_numpy(a, k, return_vecs=True, **_):
 
     Parameters
     ----------
-    a : matrix_like
+    a : array_like
         Operator to decompose.
     k : int, optional
         Number of singular value triplets to retrieve.
@@ -217,7 +217,7 @@ def svds_numpy(a, k, return_vecs=True, **_):
     """
     if return_vecs:
         uk, sk, vkt = nla.svd(a.A if qu.issparse(a) else a, compute_uv=True)
-        return np.asmatrix(uk[:, :k]), sk[:k], np.asmatrix(vkt[:k, :])
+        return qu.qarray(uk[:, :k]), sk[:k], qu.qarray(vkt[:k, :])
     else:
         sk = nla.svd(a.A if qu.issparse(a) else a, compute_uv=False)
         return sk[:k]

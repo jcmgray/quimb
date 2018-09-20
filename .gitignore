@@ -115,3 +115,5 @@ docs/_autosummary/
 \.pytest_cache/
 
 *.ipynb_checkpoints/
+
+\.vscode/

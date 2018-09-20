@@ -99,12 +99,13 @@ All of these functions accept a ``seed`` argument for replicability:
 .. code-block:: py3
 
     >>> rand_rho(2, seed=42)
-    matrix([[ 0.19676417+7.75822299e-19j, -0.0844203 +2.13363513e-01j],
-            [-0.0844203 -2.13363513e-01j,  0.80323583-2.69158919e-18j]])
+    qarray([[ 0.196764+7.758223e-19j, -0.08442 +2.133635e-01j],
+            [-0.08442 -2.133635e-01j,  0.803236-2.691589e-18j]])
+
 
     >>> rand_rho(2, seed=42)
-    matrix([[ 0.19676417+7.75822299e-19j, -0.0844203 +2.13363513e-01j],
-            [-0.0844203 -2.13363513e-01j,  0.80323583-2.69158919e-18j]])
+    qarray([[ 0.196764+7.758223e-19j, -0.08442 +2.133635e-01j],
+            [-0.08442 -2.133635e-01j,  0.803236-2.691589e-18j]])
 
 
 For some applications, generating random numbers with ``numpy`` alone can be a bottleneck.

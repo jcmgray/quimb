@@ -10,8 +10,7 @@ import numpy as np
 import scipy.linalg as scla
 from scipy.ndimage.filters import uniform_filter1d
 
-from ..core import ptr
-from ..accel import prod, vdot, njit, dot, subtract_update_, divide_update_
+from ..core import ptr, prod, vdot, njit, dot, subtract_update_, divide_update_
 from ..utils import int2tup
 from ..gen.rand import randn, rand_rademacher, rand_phase, seed_rand
 from ..linalg.mpi_launcher import get_mpi_pool
@@ -147,12 +146,12 @@ def norm_fro(a):
 
 def random_rect(shape, dist='rademacher', orthog=False, norm=True,
                 seed=False, dtype=complex):
-    """Generate a random matrix optionally orthogonal.
+    """Generate a random array optionally orthogonal.
 
     Parameters
     ----------
     shape : tuple of int
-        The shape of matrix.
+        The shape of array.
     dist : {'guassian', 'rademacher'}
         Distribution of the random variables.
     orthog : bool or operator.
@@ -195,7 +194,7 @@ def construct_lanczos_tridiag(A, K, v0=None, bsz=1, k_min=10, orthog=False,
 
     Parameters
     ----------
-    A : matrix-like or linear operator
+    A : dense array, sparse matrix or linear operator
         The operator to approximate, must implement ``.dot`` method to compute
         its action on a vector.
     K : int, optional
@@ -225,8 +224,6 @@ def construct_lanczos_tridiag(A, K, v0=None, bsz=1, k_min=10, orthog=False,
     scaling : float
         How to scale the overall weights.
     """
-    if isinstance(A, np.matrix):
-        A = np.asarray(A)
     d = A.shape[0]
 
     if bsz == 1:
@@ -539,7 +536,7 @@ def approx_spectral_function(A, f, tol=0.01, *, bsz=1, R=1024, tol_scale=1,
 
     Parameters
     ----------
-    A : matrix-like or LinearOperator
+    A : dense array, sparse matrix or LinearOperator
         Operator to approximate spectral function for. Should implement
         ``A.dot(vec)``.
     f : callable

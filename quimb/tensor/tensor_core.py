@@ -20,7 +20,7 @@ import scipy.linalg as scla
 import scipy.sparse.linalg as spla
 import scipy.linalg.interpolative as sli
 
-from ..accel import prod, njit, realify_scalar, vdot
+from ..core import qarray, prod, njit, realify_scalar, vdot
 from ..linalg.base_linalg import norm_fro_dense
 from ..linalg.rand_linalg import rsvd, estimate_rank
 from ..utils import functions_equal, has_cupy
@@ -1301,7 +1301,8 @@ class Tensor(object):
         for each of inds in ``inds_seqs``. E.g. to convert several sites
         into a density matrix: ``T.to_dense(('k0', 'k1'), ('b0', 'b1'))``.
         """
-        return self.fuse([(str(i), ix) for i, ix in enumerate(inds_seq)]).data
+        fused = self.fuse([(str(i), ix) for i, ix in enumerate(inds_seq)])
+        return qarray(fused.data)
 
     def squeeze(self, inplace=False):
         """Drop any singlet dimensions from this tensor.

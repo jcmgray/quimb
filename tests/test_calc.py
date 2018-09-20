@@ -30,7 +30,7 @@ def k2():
 def orthog_ks():
     p = qu.rand_rho(3)
     v = qu.eigvecsh(p)
-    return (v[:, 0], v[:, 1], v[:, 2])
+    return (v[:, [0]], v[:, [1]], v[:, [2]])
 
 
 # --------------------------------------------------------------------------- #
@@ -208,11 +208,11 @@ class TestPartialTranspose:
     def test_partial_transpose(self):
         a = qu.bell_state(0, qtype='dop')
         b = qu.partial_transpose(a)
-        assert isinstance(b, np.matrix)
-        assert_allclose(b, [[0, 0, 0, -0.5],
-                            [0, 0.5, 0, 0],
-                            [0, 0, 0.5, 0],
-                            [-0.5, 0, 0, 0]])
+        assert isinstance(b, qu.qarray)
+        assert_allclose(b, np.array([[0, 0, 0, -0.5],
+                                     [0, 0.5, 0, 0],
+                                     [0, 0, 0.5, 0],
+                                     [-0.5, 0, 0, 0]]))
 
     def test_tr_sqrt_rank(self):
         psi = qu.rand_ket(2**5)
@@ -319,9 +319,9 @@ class TestConcurrence:
 
 class TestQuantumDiscord:
     def test_owci(self):
-        a = qu.qu([1, 0], 'op')
-        b = qu.qu([0, 1], 'op')
-        for i in (0, 1, 2, 3):
+        a = qu.qu([1, 0], qtype='op')
+        b = qu.qu([0, 1], qtype='op')
+        for _ in (0, 1, 2, 3):
             p = qu.rand_product_state(2)
             ci = qu.one_way_classical_information(p @ p.H, [a, b])
             assert_allclose(ci, 0., atol=1e-12)
@@ -331,14 +331,14 @@ class TestQuantumDiscord:
             assert_allclose(ci, 1., atol=1e-12)
 
     def test_quantum_discord_sep(self):
-        for i in range(10):
+        for _ in range(10):
             p = qu.rand_product_state(2)
             p = p @ p.H
             qd = qu.quantum_discord(p)
             assert_allclose(0.0, qd, atol=1e-12)
 
     def test_quantum_discord_pure(self):
-        for i in range(10):
+        for _ in range(10):
             p = qu.rand_ket(4)
             p = p @ p.H
             iab = qu.mutual_information(p)
@@ -346,7 +346,7 @@ class TestQuantumDiscord:
             assert_allclose(iab / 2, qd)
 
     def test_quantum_discord_mixed(self):
-        for i in range(10):
+        for _ in range(10):
             p = qu.rand_mix(4)
             p = p @ p.H
             qd = qu.quantum_discord(p)
@@ -576,7 +576,7 @@ class TestIsEigenvector:
         a = qu.rand_herm(10)
         v = qu.eigvecsh(a)
         for i in range(10):
-            assert qu.is_eigenvector(v[:, i], a)
+            assert qu.is_eigenvector(v[:, [i]], a)
 
     def test_dense_false(self):
         a = qu.rand_herm(10)

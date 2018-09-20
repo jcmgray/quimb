@@ -45,7 +45,7 @@ class TestRandMatrix:
     def test_rand_matrix(self, dtype):
         a = qu.rand_matrix(3, scaled=True, dtype=dtype)
         assert a.shape == (3, 3)
-        assert type(a) == np.matrix
+        assert type(a) == qu.qarray
         assert a.dtype == dtype
 
     def test_rand_matrix_sparse(self, dtype):
@@ -82,7 +82,7 @@ class TestRandHerm:
     def test_rand_herm(self, dtype):
         a = qu.rand_herm(3, dtype=dtype)
         assert a.shape == (3, 3)
-        assert type(a) == np.matrix
+        assert type(a) == qu.qarray
         assert a.dtype == dtype
         assert_allclose(a, a.H)
         evals = qu.eigvalsh(a)
@@ -104,7 +104,7 @@ class TestRandPos:
         a = qu.rand_pos(3, dtype=dtype)
         assert qu.ispos(a)
         assert a.shape == (3, 3)
-        assert type(a) == np.matrix
+        assert type(a) == qu.qarray
         assert a.dtype == dtype
         evals = qu.eigvalsh(a)
         assert_allclose(evals.imag, [0, 0, 0], atol=1e-7)
@@ -125,7 +125,7 @@ class TestRandRho:
     def test_rand_rho(self, dtype):
         rho = qu.rand_rho(3, dtype=dtype)
         assert rho.shape == (3, 3)
-        assert type(rho) == np.matrix
+        assert type(rho) == qu.qarray
         assert rho.dtype == dtype
         assert_allclose(qu.tr(rho), 1.0)
 
@@ -142,7 +142,7 @@ class TestRandUni:
     def test_rand_uni(self, dtype):
         u = qu.rand_uni(3, dtype=dtype)
         assert u.shape == (3, 3)
-        assert type(u) == np.matrix
+        assert type(u) == qu.qarray
         assert u.dtype == dtype
         # low tolerances for float32 etc
         assert_allclose(qu.eye(3), u @ u.H, atol=1e-7, rtol=1e-5)
@@ -153,7 +153,7 @@ class TestRandKet:
     def test_rand_ket(self):
         ket = qu.rand_ket(3)
         assert ket.shape == (3, 1)
-        assert type(ket) == np.matrix
+        assert type(ket) == qu.qarray
         assert_allclose(qu.tr(ket.H @ ket), 1.0)
 
 
@@ -161,14 +161,14 @@ class TestRandHaarState:
     def test_rand_haar_state(self):
         ket = qu.rand_haar_state(3)
         assert ket.shape == (3, 1)
-        assert type(ket) == np.matrix
+        assert type(ket) == qu.qarray
         assert_allclose(qu.tr(ket.H @ ket), 1.0)
 
     def test_gen_rand_haar_states(self):
         kets = [*qu.gen_rand_haar_states(3, 6)]
         for ket in kets:
             assert ket.shape == (3, 1)
-            assert type(ket) == np.matrix
+            assert type(ket) == qu.qarray
             assert_allclose(qu.tr(ket.H @ ket), 1.0)
 
 
@@ -177,7 +177,7 @@ class TestRandMix:
     def test_rand_mix(self, mode):
         rho = qu.rand_mix(3, mode=mode)
         assert rho.shape == (3, 3)
-        assert type(rho) == np.matrix
+        assert type(rho) == qu.qarray
         assert_allclose(qu.tr(rho), 1.0)
         mixedness = qu.tr(rho @ rho)
         assert mixedness < 1.0

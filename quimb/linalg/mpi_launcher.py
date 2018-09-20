@@ -7,7 +7,7 @@ import functools
 from .slepc_linalg import (
     eigs_slepc, svds_slepc, mfn_multiply_slepc, ssolve_slepc,
 )
-from ..accel import _NUM_THREAD_WORKERS
+from ..core import _NUM_THREAD_WORKERS
 
 # Work out if already running as mpi
 if ('OMPI_COMM_WORLD_SIZE' in os.environ) or ('PMI_SIZE' in os.environ):

@@ -10,13 +10,13 @@ import quimb as qu
 def maybe_sort_and_project(lk, vk, P, sort=True):
     if sort:
         sortinds = np.argsort(lk)
-        lk, vk = lk[sortinds], np.asmatrix(vk[:, sortinds])
+        lk, vk = lk[sortinds], vk[:, sortinds]
 
     # map eigenvectors out of subspace
     if P is not None:
         vk = P @ vk
 
-    return lk, vk
+    return lk, qu.qarray(vk)
 
 
 def eigs_scipy(A, k, *, B=None, which=None, return_vecs=True, sigma=None,
@@ -25,12 +25,12 @@ def eigs_scipy(A, k, *, B=None, which=None, return_vecs=True, sigma=None,
 
     Parameters
     ----------
-    A : dense-matrix, sparse-matrix, LinearOperator or quimb.Lazy
+    A : array_like, sparse_matrix, LinearOperator or quimb.Lazy
         The operator to solve for.
     k : int
         Number of eigenpairs to return
-    B : dense-matrix, sparse-matrix, LinearOperator or quimb.Lazy, optional
-        If given, the RHS matrix (which should be positive) defining a
+    B : array_like, sparse_matrix, LinearOperator or quimb.Lazy, optional
+        If given, the RHS operator (which should be positive) defining a
         generalized eigen problem.
     which : str, optional
         where in spectrum to take eigenvalues from (see
@@ -41,7 +41,7 @@ def eigs_scipy(A, k, *, B=None, which=None, return_vecs=True, sigma=None,
         Shift, if targeting interior eigenpairs.
     isherm : bool, optional
         Whether ``A`` is hermitian.
-    P : dense-matrix, sparse-matrix, LinearOperator or quimb.Lazy, optional
+    P : array_like, sparse_matrix, LinearOperator or quimb.Lazy, optional
         Perform the eigensolve in the subspace defined by this projector.
     sort : bool, optional
         Whether to ensure the eigenvalues are sorted in ascending value.
@@ -51,8 +51,10 @@ def eigs_scipy(A, k, *, B=None, which=None, return_vecs=True, sigma=None,
 
     Returns
     -------
-    lk[, vk] : numpy.ndarray[, numpy.matrix]
-        lk: array of eigenvalues, vk: matrix of eigenvectors as columns.
+    lk : (k,) array
+        The eigenvalues.
+    vk : (m, k) array
+        Corresponding eigenvectors (if ``return_vecs=True``).
     """
     # Options that might get passed that scipy doesn't support
     eigs_opts.pop('EPSType', None)
@@ -82,10 +84,15 @@ def eigs_scipy(A, k, *, B=None, which=None, return_vecs=True, sigma=None,
 
     # project into subspace
     if P is not None:
-        A = P.H @ (A @ P)
+        A = qu.dag(P) @ (A @ P)
+
+    # avoid matrix like behaviour
+    if isinstance(A, qu.qarray):
+        A = A.A
 
     if return_vecs:
         lk, vk = eig_fn(A, **settings, **eigs_opts)
+        vk = qu.qarray(vk)
         return maybe_sort_and_project(lk, vk, P, sort)
     else:
         lk = eig_fn(A, **settings, **eigs_opts)
@@ -106,12 +113,12 @@ def eigs_lobpcg(A, k, *, B=None, v0=None, which=None, return_vecs=True,
 
     Parameters
     ----------
-    A : dense-matrix, sparse-matrix, LinearOperator or callable
+    A : array_like, sparse_matrix, LinearOperator or callable
         The operator to solve for.
     k : int
         Number of eigenpairs to return
-    B : dense-matrix, sparse-matrix, LinearOperator or callable, optional
-        If given, the RHS matrix (which should be positive) defining a
+    B : array_like, sparse_matrix, LinearOperator or callable, optional
+        If given, the RHS operator (which should be positive) defining a
         generalized eigen problem.
     v0 : array_like (d, k), optional
         The initial subspace to iterate with.
@@ -119,7 +126,7 @@ def eigs_lobpcg(A, k, *, B=None, v0=None, which=None, return_vecs=True,
         Find the smallest or largest eigenvalues.
     return_vecs : bool, optional
         Whether to return the eigenvectors found.
-    P : dense-matrix, sparse-matrix, LinearOperator or callable, optional
+    P : array_like, sparse_matrix, LinearOperator or callable, optional
         Perform the eigensolve in the subspace defined by this projector.
     sort : bool, optional
         Whether to ensure the eigenvalues are sorted in ascending value.
@@ -162,7 +169,11 @@ def eigs_lobpcg(A, k, *, B=None, v0=None, which=None, return_vecs=True,
 
     # project into subspace
     if P is not None:
-        A = P.H @ (A @ P)
+        A = qu.dag(P) @ (A @ P)
+
+    # avoid matrix like behaviour
+    if isinstance(A, qu.qarray):
+        A = A.A
 
     d = A.shape[0]
 
@@ -172,7 +183,7 @@ def eigs_lobpcg(A, k, *, B=None, v0=None, which=None, return_vecs=True,
     else:
         # check if intial space should be projected too
         if P is not None and v0.shape[0] != d:
-            v0 = P.H @ v0
+            v0 = qu.dag(P) @ v0
 
         v0 = v0.reshape(d, -1)
 
@@ -183,22 +194,43 @@ def eigs_lobpcg(A, k, *, B=None, v0=None, which=None, return_vecs=True,
     lk, vk = spla.lobpcg(A=A, X=v0, B=B, largest=largest, **lobpcg_opts)
 
     if return_vecs:
+        vk = qu.qarray(vk)
         return maybe_sort_and_project(lk, vk, P, sort)
     else:
         return np.sort(lk) if sort else lk
 
 
-def svds_scipy(a, k=6, *, return_vecs=True, **svds_opts):
+def svds_scipy(A, k=6, *, return_vecs=True, **svds_opts):
     """Compute a number of singular value pairs
+
+    Parameters
+    ----------
+    A : (m, n) dense, sparse or linear operator.
+        The operator to solve.
+    k : int
+        Number of requested singular values.
+    return_vecs : bool, optional
+        Whether to return the singular vectors.
+
+    Returns
+    -------
+    U : (m, k) array
+        Left singular vectors (if ``return_vecs=True``) as columns.
+    s : (k,) array
+        Singular values.
+    VH : (k, n) array
+        Right singular vectors (if ``return_vecs=True``) as rows.
     """
-    settings = {
-        'k': k,
-        'return_singular_vectors': return_vecs
-    }
+    settings = {'k': k, 'return_singular_vectors': return_vecs, **svds_opts}
+
+    # avoid matrix like behaviour
+    if isinstance(A, qu.qarray):
+        A = A.A
+
     if return_vecs:
-        uk, sk, vtk = spla.svds(a, **settings, **svds_opts)
+        uk, sk, vtk = spla.svds(A, **settings)
         so = np.argsort(-sk)
-        return np.asmatrix(uk[:, so]), sk[so], np.asmatrix(vtk[so, :])
+        return qu.qarray(uk[:, so]), sk[so], qu.qarray(vtk[so, :])
     else:
-        sk = spla.svds(a, **settings, **svds_opts)
+        sk = spla.svds(A, **settings)
         return sk[np.argsort(-sk)]

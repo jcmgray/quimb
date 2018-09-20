@@ -10,8 +10,8 @@ import functools
 import numpy as np
 from scipy.integrate import complex_ode
 
-from .accel import isop, ldmul, rdmul, explt, dot, issparse
-from .core import qu, eye
+from .core import (qarray, isop, ldmul, rdmul, explt,
+                   dot, issparse, qu, eye, dag)
 from .linalg.base_linalg import eigh, norm, expm_multiply
 from .utils import continuous_progbar, progbar
 
@@ -28,7 +28,7 @@ def schrodinger_eq_ket(ham):
 
     Parameters
     ----------
-    ham : matrix
+    ham : operator
         Time-independant Hamiltonian governing evolution.
 
     Returns
@@ -51,7 +51,7 @@ def schrodinger_eq_dop(ham):
 
     Parameters
     ----------
-    ham : matrix
+    ham : operator
         Time-independant Hamiltonian governing evolution.
 
     Returns
@@ -100,7 +100,7 @@ def lindblad_eq(ham, ls, gamma):
 
     Parameters
     ----------
-    ham : matrix
+    ham : operator
         Time-independant hamiltonian governing evolution.
     ls : sequence of matrices
         Lindblad operators.
@@ -114,11 +114,11 @@ def lindblad_eq(ham, ls, gamma):
         output both in ravelled (1D form).
     """
     d = ham.shape[0]
-    lls = tuple(dot(l.H, l) for l in ls)
+    lls = tuple(dot(dag(l), l) for l in ls)
 
     def gen_l_terms(rho):
         for l, ll in zip(ls, lls):
-            yield (dot(l, dot(rho, l.H)) -
+            yield (dot(l, dot(rho, dag(l))) -
                    0.5 * (dot(rho, ll) + dot(ll, rho)))
 
     def rho_dot(_, y):
@@ -138,7 +138,7 @@ def lindblad_eq_vectorized(ham, ls, gamma, sparse=False):
 
     Parameters
     ----------
-    ham : matrix
+    ham : operator
         Time-independant hamiltonian governing evolution.
     ls : sequence of matrices
         Lindblad operators.
@@ -160,8 +160,8 @@ def lindblad_eq_vectorized(ham, ls, gamma, sparse=False):
         for l in ls:
             lb_sparse = issparse(l) or sparse
             idt = eye(d, sparse=lb_sparse)
-            yield ((l & l.conj()) - 0.5 * ((idt & dot(l.H, l).T) +
-                                           (dot(l.H, l) & idt)))
+            yield ((l & l.conj()) - 0.5 * ((idt & dot(dag(l), l).T) +
+                                           (dot(dag(l), l) & idt)))
 
     evo_superop += gamma * sum(gen_lb_terms())
 
@@ -203,7 +203,7 @@ class Evolution(object):
     ----------
     p0 : quantum state
         Inital state, either vector or operator. If vector, converted to ket.
-    ham : matrix-like, or tuple (1d array, matrix-like).
+    ham : operator, or tuple (1d array, operator).
         Governing Hamiltonian, if tuple then assumed to contain
         ``(eigvals, eigvecs)`` of presolved system.
     t0 : float, optional
@@ -228,8 +228,8 @@ class Evolution(object):
               systems and allows arbitrary time steps without loss of
               precision.
             - ``'expm'``: compute the evolved state using the action of the
-              matrix exponential in a 'single shot' style. Only needs action of
-              Hamiltonian, for very large systems can use distributed MPI.
+              operator exponential in a 'single shot' style. Only needs action
+              of Hamiltonian, for very large systems can use distributed MPI.
 
     int_small_step : bool, optional
         If ``method='integrate'``, whether to use a low or high order
@@ -297,10 +297,10 @@ class Evolution(object):
                     self._results[k].append(v(t, pt))
 
             # For the integration callback, additionally need to convert
-            #   back to 'quantum' [(d, 1)-matrix] form
+            #   back to 'quantum' (column vector) form
             @functools.wraps(fn)
             def int_step_callback(t, y):
-                pt = np.asmatrix(y.reshape(self._d, -1))
+                pt = qarray(y.reshape(self._d, -1))
                 for k, v in fn.items():
                     self._results[k].append(v(t, pt))
 
@@ -314,7 +314,7 @@ class Evolution(object):
 
             @functools.wraps(fn)
             def int_step_callback(t, y):
-                pt = np.asmatrix(y.reshape(self._d, -1))
+                pt = qarray(y.reshape(self._d, -1))
                 self._results.append(fn(t, pt))
 
         self._step_callback = step_callback
@@ -333,10 +333,10 @@ class Evolution(object):
 
         # Find initial state in energy eigenbasis at t0
         if self._isdop:
-            self.pe0 = dot(self._evecs.H, dot(self._p0, self._evecs))
+            self.pe0 = dot(dag(self._evecs), dot(self._p0, self._evecs))
             self._update_method = self._update_to_solved_dop
         else:
-            self.pe0 = dot(self._evecs.H, self._p0)
+            self.pe0 = dot(dag(self._evecs), self._p0)
             self._update_method = self._update_to_solved_ket
 
         # Current state (start with same as initial)
@@ -372,7 +372,7 @@ class Evolution(object):
 
     def _update_to_expm_ket(self, t):
         """Update the simulation to time ``t``, without explicitly computing
-        the matrix exponential itself.
+        the operator exponential itself.
         """
         factor = -1j * (t - self.t)
         self._pt = expm_multiply(factor * self.ham, self._pt,
@@ -402,7 +402,7 @@ class Evolution(object):
         self._t = t
         lt = explt(self._evals, t - self.t0)
         lvpvl = rdmul(ldmul(lt, self.pe0), lt.conj())
-        self._pt = self._evecs @ (lvpvl @ self._evecs.H)
+        self._pt = self._evecs @ (lvpvl @ dag(self._evecs))
 
         # compute any callbacks into -> self._results
         if self._step_callback is not None:
@@ -478,7 +478,7 @@ class Evolution(object):
         """quantum state : State of the system at the current time (t).
         """
         if self._method == 'integrate':
-            return np.asmatrix(self._stepper.y.reshape(self._d, -1))
+            return qarray(self._stepper.y.reshape(self._d, -1))
         else:
             return self._pt
 

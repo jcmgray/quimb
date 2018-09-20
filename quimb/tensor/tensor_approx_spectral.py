@@ -190,7 +190,7 @@ class EEMPS(MatrixProductState):
     def to_dense(self):
         t = self.contract_tags(...)
         t.fuse_([('k', list(map(self.site_ind_id.format, self.sites)))])
-        return np.asmatrix(t.data.reshape(-1, 1))
+        return qu.qarray(t.data.reshape(-1, 1))
 
 
 def EEMPS_rand_state(sysa, sysb, nsites, bond_dim, phys_dim=2,
@@ -336,10 +336,12 @@ class PTPTLazyMPS:
         return self._phys_dim
 
     def to_dense(self):
+        """Convert this TN to a dense array.
+        """
         t = self.TN.contract_tags(...)
         t.fuse_([('k', list(map(self.lower_ind_id.format, self.TN.sites))),
                  ('b', list(map(self.upper_ind_id.format, self.TN.sites)))])
-        return np.asmatrix(t.data)
+        return qu.qarray(t.data)
 
     @property
     def shape(self):

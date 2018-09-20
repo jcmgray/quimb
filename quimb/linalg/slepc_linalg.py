@@ -243,7 +243,7 @@ def new_petsc_vec(d, comm=None):
     return pvec
 
 
-def gather_petsc_array(x, comm, out_shape=None, matrix=False):
+def gather_petsc_array(x, comm, out_shape=None):
     """Gather the petsc vector/matrix `x` to a single array on the master
     process, assuming that owernership is sliced along the first dimension.
 
@@ -255,12 +255,10 @@ def gather_petsc_array(x, comm, out_shape=None, matrix=False):
         MPI communicator
     out_shape : tuple, optional
         If not None, reshape the output array to this.
-    matrix : bool, optional
-        Whether to convert the array to a np.matrix.
 
     Returns
     -------
-        np.array or np.matrix on master, None on workers (rank > 0)
+    gathered : np.array master, None on workers (rank > 0)
     """
     # get local numpy array
     lx = x.getArray()
@@ -284,8 +282,6 @@ def gather_petsc_array(x, comm, out_shape=None, matrix=False):
 
         if out_shape is not None:
             ax = ax.reshape(*out_shape)
-        if matrix:
-            ax = np.asmatrix(ax)
 
     # Worker only
     else:
@@ -511,10 +507,10 @@ def eigs_slepc(A, k, *, B=None, which=None, sigma=None, isherm=True, P=None,
 
     Returns
     -------
-    lk : array
+    lk : (k,) array
         The eigenvalues.
-    vk : np.matrix
-        Corresponding eigenvectors (if return_vecs == True)
+    vk : (m, k) array
+        Corresponding eigenvectors (if ``return_vecs=True``).
     """
     if comm is None:
         comm = get_default_comm()
@@ -579,7 +575,7 @@ def eigs_slepc(A, k, *, B=None, which=None, sigma=None, isherm=True, P=None,
             vk = np.concatenate(lvecs, axis=1)
             if sort:
                 sortinds = np.argsort(lk)
-                lk, vk = lk[sortinds], np.asmatrix(vk[:, sortinds])
+                lk, vk = lk[sortinds], vk[:, sortinds]
 
             # check if input matrix was real -> use real output when
             #   petsc compiled with complex scalars and thus outputs complex
@@ -588,7 +584,7 @@ def eigs_slepc(A, k, *, B=None, which=None, sigma=None, isherm=True, P=None,
             if convert:
                 vk = normalize_real_part(vk)
 
-            res = lk, np.asmatrix(vk)
+            res = lk, qu.qarray(vk)
     elif rank == 0:
         res = np.sort(lk) if sort else lk
 
@@ -624,10 +620,12 @@ def svds_slepc(A, k=6, ncv=None, return_vecs=True, SVDType='cross',
 
     Returns
     -------
-    (uk,) sk (, vtk,) : (np.matrix,) np.array (, np.matrix,)
-        Singular values, or if return_vecs=True, the left, unitary matrix
-        singular values, and and transposed right unitary matrix, such that
-        ``a ~ uk @ diag(sk) @ vtk``.
+    U : (m, k) array
+        Left singular vectors (if ``return_vecs=True``) as columns.
+    s : (k,) array
+        Singular values.
+    VH : (k, n) array
+        Right singular vectors (if ``return_vecs=True``) as rows.
     """
     if comm is None:
         comm = get_default_comm()
@@ -660,8 +658,8 @@ def svds_slepc(A, k=6, ncv=None, return_vecs=True, SVDType='cross',
         sk = np.asarray(sk)
 
         if rank == 0:
-            uk = np.asmatrix(np.concatenate(lus, axis=1))
-            vtk = np.asmatrix(np.concatenate(lvs, axis=0).conjugate())
+            uk = qu.qarray(np.concatenate(lus, axis=1))
+            vtk = qu.qarray(np.concatenate(lvs, axis=0).conjugate())
 
             # # check if input matrix was real -> use real output when
             # #   petsc compiled with complex scalars and thus outputs complex
@@ -691,8 +689,8 @@ def mfn_multiply_slepc(mat, vec,
 
     Parameters
     ----------
-    mat : matrix-like
-        Matrix to compute function action of.
+    mat : operator
+        Operator to compute function action of.
     vec : vector-like
         Vector to compute matrix function action on.
     func : {'exp', 'sqrt', 'log'}, optional
@@ -708,7 +706,7 @@ def mfn_multiply_slepc(mat, vec,
 
     Returns
     -------
-    fvec : np.matrix
+    fvec : array
         The vector output of ``func(mat) @ vec``.
     """
     SLEPc, comm = get_slepc(comm=comm)
@@ -740,8 +738,7 @@ def mfn_multiply_slepc(mat, vec,
     mfn.solve(vec, out)
 
     # --> gather the (distributed) petsc vector to a numpy matrix on master
-    all_out = gather_petsc_array(
-        out, comm=comm, out_shape=(-1, 1), matrix=True)
+    all_out = gather_petsc_array(out, comm=comm, out_shape=(-1, 1))
 
     comm.Barrier()
     mfn.destroy()

@@ -32,7 +32,7 @@ class TestQuimbify:
     def test_vector_create(self):
         x = [1, 2, 3j]
         p = qu.qu(x, qtype='ket')
-        assert(type(p) == np.matrix)
+        assert(type(p) == qu.qarray)
         assert(p.dtype == np.complex)
         assert(p.shape == (3, 1))
         p = qu.qu(x, qtype='bra')
@@ -42,14 +42,14 @@ class TestQuimbify:
     def test_dop_create(self):
         x = np.random.randn(3, 3)
         p = qu.qu(x, qtype='dop')
-        assert(type(p) == np.matrix)
+        assert(type(p) == qu.qarray)
         assert(p.dtype == np.complex)
         assert(p.shape == (3, 3))
 
     def test_convert_vector_to_dop(self):
         x = [1, 2, 3j]
         p = qu.qu(x, qtype='r')
-        assert_allclose(p, np.matrix([[1. + 0.j, 2. + 0.j, 0. - 3.j],
+        assert_allclose(p, qu.qarray([[1. + 0.j, 2. + 0.j, 0. - 3.j],
                                       [2. + 0.j, 4. + 0.j, 0. - 6.j],
                                       [0. + 3.j, 0. + 6.j, 9. + 0.j]]))
 
@@ -72,7 +72,7 @@ class TestQuimbify:
     def test_sparse_create(self):
         x = [[1, 0], [3, 0]]
         p = qu.qu(x, 'dop', sparse=False)
-        assert(type(p) == np.matrix)
+        assert(type(p) == qu.qarray)
         p = qu.qu(x, 'dop', sparse=True)
         assert(type(p) == sp.csr_matrix)
         assert(p.dtype == np.complex)
@@ -177,7 +177,6 @@ class TestTrace:
     def test_simple(self, inpt, outpt, sparse, func):
         a = qu.qu(inpt, sparse=sparse)
         assert(qu.trace(a) == outpt)
-        assert(a.tr.__code__.co_code == func.__code__.co_code)
 
 
 class TestITrace:
@@ -314,7 +313,7 @@ class TestEye:
     def test_eye_dense(self):
         a = qu.eye(3, sparse=False)
         assert a.shape == (3, 3)
-        assert isinstance(a, np.matrix)
+        assert isinstance(a, qu.qarray)
         assert a.dtype == complex
 
     def test_eye_sparse(self):
@@ -544,7 +543,7 @@ class TestPartialTraceDense:
     def test_partial_trace_basic(self):
         a = qu.rand_rho(2**2)
         b = qu.partial_trace(a, [2, 2], 0)
-        assert isinstance(b, np.matrix)
+        assert isinstance(b, qu.qarray)
         assert qu.isherm(b)
         assert_allclose(qu.tr(b), 1.0)
 
@@ -568,10 +567,10 @@ class TestPartialTraceDense:
     def test_partial_trace_return_type(self):
         a = qu.qu([0, 2**-0.5, 2**-0.5, 0], 'ket')
         b = qu.partial_trace(a, [2, 2], 1)
-        assert(type(b) == np.matrix)
+        assert(type(b) == qu.qarray)
         a = qu.qu([0, 2**-0.5, 2**-0.5, 0], 'dop')
         b = qu.partial_trace(a, [2, 2], 1)
-        assert(type(b) == np.matrix)
+        assert(type(b) == qu.qarray)
 
     def test_partial_trace_single_ket(self):
         dims = [2, 3, 4]
@@ -698,7 +697,7 @@ class TestPartialTraceSparse:
     def test_partial_trace_sparse_basic(self):
         a = qu.rand_rho(4)
         b = qu.partial_trace(a, [2, 2], 0)
-        assert type(b) == np.matrix
+        assert type(b) == qu.qarray
         assert qu.isherm(b)
         assert_allclose(qu.tr(b), 1.0)
 

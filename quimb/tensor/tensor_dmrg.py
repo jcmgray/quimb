@@ -5,7 +5,7 @@ import itertools
 import numpy as np
 
 from ..utils import progbar
-from ..accel import prod
+from ..core import prod
 from ..linalg.base_linalg import eigh, IdentityLinearOperator
 from .tensor_core import (
     Tensor,

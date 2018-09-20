@@ -326,12 +326,11 @@ class TensorNetwork1DVector:
 
     def to_dense(self, *inds_seq):
         """Return the dense ket version of this 1D vector, i.e. a
-        ``numpy.matrix`` with shape (-1, 1).
+        ``qarray`` with shape (-1, 1).
         """
         if not inds_seq:
             # just use list of site indices
-            return np.asmatrix(
-                TensorNetwork.to_dense(self, self.site_inds).reshape(-1, 1))
+            return TensorNetwork.to_dense(self, self.site_inds).reshape(-1, 1)
 
         return TensorNetwork.to_dense(self, self.site_inds)
 
@@ -387,13 +386,13 @@ class TensorNetwork1DVector:
         if B is None:
             B = A
 
-        pA = self.gate(A, i, contract=False)
+        pA = self.gate(A, i, contract=True)
         cA = self.expec(pA, **expec_opts)
 
-        pB = self.gate(B, j, contract=False)
+        pB = self.gate(B, j, contract=True)
         cB = self.expec(pB, **expec_opts)
 
-        pAB = pA.gate_(B, j, contract=False)
+        pAB = pA.gate_(B, j, contract=True)
         cAB = self.expec(pAB, **expec_opts)
 
         return cAB - cA * cB
@@ -808,6 +807,12 @@ class TensorNetwork1DFlat:
         b_ix = self.bond(i, j)
         return self[i].ind_size(b_ix)
 
+    def bond_sizes(self):
+        bnd_szs = [self.bond_size(i, i + 1) for i in range(self.nsites - 1)]
+        if self.cyclic:
+            bnd_szs.append(self.bond_size(-1, 0))
+        return bnd_szs
+
     def fuse_multibonds(self, inplace=False):
         """Fuse any double/triple etc bonds between neighbours
         """
@@ -920,7 +925,7 @@ class TensorNetwork1DFlat:
         def isidentity(x):
             d = x.shape[0]
             if x.dtype in ('float32', 'complex64'):
-                rtol, atol = 1e-5, 1e-7
+                rtol, atol = 1e-5, 1e-6
                 idtty = np.eye(d, dtype='float32')
             else:
                 rtol, atol = 1e-9, 1e-11
@@ -1685,7 +1690,7 @@ class MatrixProductState(TensorNetwork1DVector,
         s = np.diag(self.singular_values(sz_a, cur_orthog=cur_orthog))
 
         if 'dense' in get:
-            kd = np.matrix(s.reshape(-1, 1))
+            kd = qu.qarray(s.reshape(-1, 1))
             if 'ket' in get:
                 return kd
             elif 'rho' in get:
@@ -2501,7 +2506,7 @@ class MatrixProductOperator(TensorNetwork1DFlat,
 
         data = self.contract(...).fuse((('lower', lix), ('upper', rix))).data
         d = int(data.size**0.5)
-        return np.matrix(data.reshape(d, d))
+        return qu.qarray(data.reshape(d, d))
 
     def phys_dim(self, i=None):
         if i is None:

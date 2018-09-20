@@ -7,19 +7,21 @@ import numpy as np
 from numpy.testing import assert_allclose
 
 from quimb import (
-    qu, eigh,
-    rand_ket,
-    rand_rho,
-    rand_herm,
-    rand_matrix,
-    rand_uni,
-    expec,
-    ham_heis,
+    qu,
     up,
+    eigh,
     down,
     ikron,
     pauli,
+    expec,
+    qarray,
     logneg,
+    rand_ket,
+    rand_rho,
+    rand_uni,
+    rand_herm,
+    ham_heis,
+    rand_matrix,
 )
 from quimb.evo import (
     schrodinger_eq_ket,
@@ -248,7 +250,7 @@ class TestEvolution:
         assert expec(sim.pt, p0) < 1.0
         sim.update_to(trc)
         assert_allclose(sim.pt, p0)
-        assert isinstance(sim.pt, np.matrix)
+        assert isinstance(sim.pt, qarray)
         assert sim.t == trc
 
     @mark.parametrize("dop", [False, True])
@@ -271,11 +273,11 @@ class TestEvolution:
         ham = qu(ham, sparse=sparse)
         sim = Evolution(p0, ham, method=method)
         sim.update_to(tm)
-        assert_allclose(sim.pt, pm, rtol=1e-4)
+        assert_allclose(sim.pt, pm, rtol=1e-4, atol=1e-6)
         assert expec(sim.pt, p0) < 1.0
         sim.update_to(trc)
         assert_allclose(sim.pt, p0, rtol=1e-4, atol=1e-6)
-        assert isinstance(sim.pt, np.matrix)
+        assert isinstance(sim.pt, qarray)
         assert sim.t == trc
 
     def test_evo_at_times(self):

@@ -39,9 +39,9 @@ from quimb import (
 class TestBasisVec:
     def test_basis_vec(self):
         x = basis_vec(1, 2)
-        assert_allclose(x, np.matrix([[0.], [1.]]))
+        assert_allclose(x, [[0.], [1.]])
         x = basis_vec(1, 2, qtype='b')
-        assert_allclose(x, np.matrix([[0., 1.]]))
+        assert_allclose(x, [[0., 1.]])
 
 
 class TestBasicStates:

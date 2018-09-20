@@ -11,11 +11,9 @@ import numpy as np
 import numpy.linalg as nla
 from scipy.optimize import minimize
 
-from .accel import (
-    njit, issparse, isop, zeroify, realify, prod, isvec, dot, matrixify,
-)
 from .core import (
-    qu, kron, eye, ikron, tr, ptr, infer_size, expec, dop,
+    njit, issparse, isop, zeroify, realify, prod, isvec, dot, dag,
+    qu, kron, eye, ikron, tr, ptr, infer_size, expec, dop, ensure_qarray,
 )
 from .linalg.base_linalg import (
     eigh, eigvalsh, norm, sqrtm,
@@ -36,9 +34,9 @@ def fidelity(p1, p2):
 
     Parameters
     ----------
-    p1 : vector or matrix
+    p1 : vector or operator
         First state.
-    p2 : vector or matrix
+    p2 : vector or operator
         Second state.
 
     Returns
@@ -59,8 +57,8 @@ def purify(rho):
 
     Parameters
     ----------
-    rho : matrix
-        Density matrix to purify.
+    rho : operator
+        Density operator to purify.
 
     Returns
     -------
@@ -72,7 +70,7 @@ def purify(rho):
     evals = np.sqrt(np.clip(evals, 0, 1))
     psi = np.zeros(shape=(d**2, 1), dtype=complex)
     for i, evals in enumerate(evals.flat):
-        psi += evals * kron(vs[:, i], basis_vec(i, d))
+        psi += evals * kron(vs[:, [i]], basis_vec(i, d))
     return qu(psi)
 
 
@@ -84,7 +82,7 @@ def dephase(rho, p, rand_rank=None):
 
     Parameters
     ----------
-    rho : matrix
+    rho : operator
         The state.
     p : float
         The final proportion of identity.
@@ -94,8 +92,8 @@ def dephase(rho, p, rand_rank=None):
 
     Returns
     -------
-    rho_dephase : matrix
-        The dephased density matrix.
+    rho_dephase : operator
+        The dephased density operator.
     """
     d = rho.shape[0]
 
@@ -121,7 +119,7 @@ def entropy(a, rank=None):
 
     Parameters
     ----------
-    a : matrix or 1d array
+    a : operator or 1d array
         Positive operator or list of positive eigenvalues.
     rank : int (optional)
         If operator has known rank, then a partial decomposition can be
@@ -187,7 +185,7 @@ def mutinf(p, dims=(2, 2), sysa=0, rank=None):
 
     Parameters
     ----------
-    p : vector or matrix
+    p : vector or operator
         State, can be vector or operator.
     dims : tuple(int), optional
         Internal dimensions of state.
@@ -301,7 +299,7 @@ def mutinf_subsys(psi_abc, dims, sysa, sysb, approx_thresh=2**13,
 def schmidt_gap(psi_ab, dims, sysa):
     """Find the schmidt gap of the bipartition of ``psi_ab``. That is, the
     difference between the two largest eigenvalues of the reduced density
-    matrix.
+    operator.
 
     Parameters
     ----------
@@ -336,13 +334,13 @@ def schmidt_gap(psi_ab, dims, sysa):
     return abs(el[0] - el[1])
 
 
-def tr_sqrt(a, rank=None):
-    """Return the trace of the sqrt of a positive semidefinite matrix.
+def tr_sqrt(A, rank=None):
+    """Return the trace of the sqrt of a positive semidefinite operator.
     """
     if rank is None:
-        el = eigvalsh(a, sort=False)
+        el = eigvalsh(A, sort=False)
     else:
-        el = eigvalsh(a, k=rank, which='LM', backend='AUTO')
+        el = eigvalsh(A, k=rank, which='LM', backend='AUTO')
     return np.sum(np.sqrt(el[el > 0.0]))
 
 
@@ -375,13 +373,13 @@ tr_sqrt, tr_sqrt_subsys_approx, partial_transpose_norm
 """
 
 
-@matrixify
+@ensure_qarray
 def partial_transpose(p, dims=(2, 2), sysa=0):
-    """Partial transpose of a density matrix.
+    """Partial transpose of a density operator.
 
     Parameters
     ----------
-    p : matrix or vector
+    p : operator or vector
         The state to partially transpose.
     dims : tuple(int), optional
         The internal dimensions of the state.
@@ -390,7 +388,7 @@ def partial_transpose(p, dims=(2, 2), sysa=0):
 
     Returns
     -------
-    matrix
+    operator
 
     See Also
     --------
@@ -450,7 +448,7 @@ def logneg(p, dims=(2, 2), sysa=0):
 
     Parameters
     ----------
-    p : matrix or vector
+    p : ket vector or density operator
         State to compute logarithmic negativity for.
     dims : tuple(int), optional
         The internal dimensions of ``p``.
@@ -546,7 +544,7 @@ def negativity(p, dims=(2, 2), sysa=0):
 
     Parameters
     ----------
-    p : matrix or vector
+    p : ket vector or density operator
         State to compute logarithmic negativity for.
     dims : tuple(int), optional
         The internal dimensions of ``p``.
@@ -573,7 +571,7 @@ def concurrence(p, dims=(2, 2), sysa=0, sysb=1):
 
     Parameters
     ----------
-    p : matrix or vector
+    p : ket vector or density operator
         State to compute concurrence for.
     dims : tuple(int), optional
         The internal dimensions of ``p``.
@@ -597,16 +595,16 @@ def concurrence(p, dims=(2, 2), sysa=0, sysb=1):
         return max(0, 2 * np.max(evals) - np.sum(evals))
     else:
         pt = dot(kron(Y, Y), p.conj())
-        c = np.real(abs(dot(p.H, pt))).item(0)
+        c = np.real(abs(dot(dag(p), pt))).item(0)
         return max(0, c)
 
 
 def one_way_classical_information(p_ab, prjs, precomp_func=False):
-    """One way classical information for two qubit density matrix.
+    """One way classical information for two qubit density operator.
 
     Parameters
     ----------
-    p_ab : matrix
+    p_ab : operator
         State of two qubits
     prjs : sequence of matrices
        The POVMs.
@@ -637,14 +635,14 @@ def one_way_classical_information(p_ab, prjs, precomp_func=False):
 
 @zeroify
 def quantum_discord(p, dims=(2, 2), sysa=0, sysb=1):
-    """Quantum Discord for two qubit density matrix.
+    """Quantum Discord for two qubit density operator.
 
     If ``len(dims) > 2``, then the non-target dimensions will be traced out
     first.
 
     Parameters
     ----------
-    p : matrix or vector
+    p : ket vector or density operator
         State to compute quantum discord for.
     dims : tuple(int), optional
         The internal dimensions of ``p``.
@@ -684,9 +682,9 @@ def trace_distance(p1, p2):
 
     Parameters
     ----------
-    p1 : vector or matrix
+    p1 : ket or density operator
         The first state.
-    p2 : vector or matrix
+    p2 : ket or density operator
         The second state.
 
     Returns
@@ -711,7 +709,7 @@ def decomp(a, fn, fn_args, fn_d, nmlz_func, mode="p", tol=1e-3):
 
     Parameters
     ----------
-    a : vector or matrix
+    a : ket or density operator
         Operator to decompose.
     fn : callable
         Function to generate operator/state to decompose with.
@@ -785,11 +783,11 @@ def correlation(p, A, B, sysa, sysb, dims=None, sparse=None,
 
     Parameters
     ----------
-    p : vector or matrix
+    p : ket or density operator
         State to compute correlations for, ignored if ``precomp_func=True``.
-    A : matrix
+    A : operator
         Operator to act on first subsystem.
-    B : matrix
+    B : operator
         Operator to act on second subsystem.
     sysa : int
         Index of first subsystem.
@@ -837,7 +835,7 @@ def pauli_correlations(p, ss=("xx", "yy", "zz"), sysa=0, sysb=1,
 
     Parameters
     ----------
-    p : vector or matrix
+    p : ket or density operator
         State to compute correlations for. Ignored if ``precomp_func=True``.
     ss : tuple or str
         List of pairs specifiying pauli matrices.
@@ -880,7 +878,7 @@ def ent_cross_matrix(p, sz_blc=1, ent_fn=logneg, calc_self_ent=True,
 
     Parameters
     ----------
-    p : matrix-like
+    p : ket or density operator
         State.
     sz_blc : int
         Size of the blocks to partition the state into. If the number of
@@ -898,8 +896,8 @@ def ent_cross_matrix(p, sz_blc=1, ent_fn=logneg, calc_self_ent=True,
 
     Returns
     -------
-    2d-numpy.ndarray
-        matrix of pairwise ent_fn results.
+    2D-array
+        array of pairwise ent_fn results.
     """
 
     sz_p = infer_size(p)
@@ -976,7 +974,7 @@ def is_degenerate(op, tol=1e-12):
 
     Parameters
     ----------
-    op : matrix or 1d-array
+    op : operator or 1d-array
         Operator or assumed eigenvalues to check degeneracy for.
     tol : float
         How much closer than evenly spaced the eigenvalue gap has to be
@@ -997,14 +995,14 @@ def is_degenerate(op, tol=1e-12):
     return np.count_nonzero(abs(l_gaps) < l_tol)
 
 
-def is_eigenvector(vec, mat, tol=1e-14):
+def is_eigenvector(x, A, tol=1e-14):
     """Determines whether a vector is an eigenvector of an operator.
 
     Parameters
     ----------
-    vec : vector
+    x : vector
         Vector to check.
-    mat : matrix
+    A : operator
         Matrix to check.
     tol : float, optional
         The variance must be smaller than this value.
@@ -1012,11 +1010,11 @@ def is_eigenvector(vec, mat, tol=1e-14):
     Returns
     -------
     bool
-        Whether ``mat @ vec = l * vec`` for some scalar ``l``.
+        Whether ``A @ x = l * x`` for some scalar ``l``.
     """
-    mat_vec = dot(mat, vec)
-    E = expec(vec, mat_vec)
-    E2 = expec(vec, dot(mat, mat_vec))
+    mat_vec = dot(A, x)
+    E = expec(x, mat_vec)
+    E2 = expec(x, dot(A, mat_vec))
     return abs(E**2 - E2) < tol
 
 

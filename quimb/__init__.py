@@ -2,8 +2,13 @@
 Quantum Information for Many-Body calculations.
 """
 
-# Accelerated basic linalg operations
-from .accel import (
+import warnings
+warnings.filterwarnings('ignore', message='Caching is not available when ')
+
+
+# Core functions
+from .core import (
+    qarray,
     prod,
     isket,
     isbra,
@@ -15,6 +20,7 @@ from .accel import (
     isherm,
     ispos,
     mul,
+    dag,
     dot,
     vdot,
     rdot,
@@ -23,10 +29,6 @@ from .accel import (
     outer,
     explt,
     get_thread_pool,
-)
-
-# Core functions
-from .core import (
     normalize,
     chop,
     quimbify,
@@ -224,6 +226,7 @@ del get_versions
 
 __all__ = [
     # Accel ----------------------------------------------------------------- #
+    'qarray',
     'prod',
     'isket',
     'isbra',
@@ -235,6 +238,7 @@ __all__ = [
     'isherm',
     'ispos',
     'mul',
+    'dag',
     'dot',
     'vdot',
     'rdot',

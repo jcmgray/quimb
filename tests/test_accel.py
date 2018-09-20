@@ -8,7 +8,9 @@ from quimb import (
     rand_matrix,
     rand_ket,
 )
-from quimb.accel import (
+from quimb.core import (
+    qarray,
+    ensure_qarray,
     issparse,
     isdense,
     isket,
@@ -25,7 +27,6 @@ from quimb.accel import (
     outer,
     explt,
     make_immutable,
-    matrixify,
     realify,
     dot_sparse,
     par_dot_csr_matvec,
@@ -107,18 +108,18 @@ class TestMakeImmutable():
                 mat[-1, -1] = 1
 
 
-class TestMatrixify:
-    def test_matrixify(self):
+class TestEnsureQarray:
+    def test_ensure_qarray(self):
         def foo(n):
             return np.random.randn(n, n)
         a = foo(2)
-        assert not isinstance(a, np.matrix)
+        assert not isinstance(a, qarray)
 
-        @matrixify
-        def foo(n):
+        @ensure_qarray
+        def foo2(n):
             return np.random.randn(n, n)
-        a = foo(2)
-        assert isinstance(a, np.matrix)
+        a = foo2(2)
+        assert isinstance(a, qarray)
 
 
 class TestRealify:
@@ -130,9 +131,9 @@ class TestRealify:
         assert a.imag == 1e-15
 
         @realify
-        def foo(a, b):
+        def foo2(a, b):
             return a + 1j * b
-        a = foo(1, 1e-15)
+        a = foo2(1, 1e-15)
         assert a.real == 1
         assert a.imag == 0
 
@@ -145,14 +146,14 @@ class TestRealify:
 
 class TestShapes:
     def test_sparse(self):
-        x = np.matrix([[1], [0]])
+        x = np.array([[1], [0]])
         assert not issparse(x)
         assert isdense(x)
         x = sp.csr_matrix(x)
         assert issparse(x)
 
     def test_ket(self):
-        x = np.matrix([[1], [0]])
+        x = np.array([[1], [0]])
         assert(isket(x))
         assert(not isbra(x))
         assert(not isop(x))
@@ -164,7 +165,7 @@ class TestShapes:
         assert(not isop(x))
 
     def test_bra(self):
-        x = np.matrix([[1, 0]])
+        x = np.array([[1, 0]])
         assert(not isket(x))
         assert(isbra(x))
         assert(not isop(x))
@@ -176,7 +177,7 @@ class TestShapes:
         assert isvec(x)
 
     def test_op(self):
-        x = np.matrix([[1, 0], [0, 0]])
+        x = np.array([[1, 0], [0, 0]])
         assert(not isket(x))
         assert(not isbra(x))
         assert(isop(x))
@@ -188,11 +189,11 @@ class TestShapes:
         assert (not isvec(x))
 
     def test_isherm(self):
-        a = np.matrix([[1.0, 2.0 + 3.0j],
-                       [2.0 - 3.0j, 1.0]])
+        a = np.array([[1.0, 2.0 + 3.0j],
+                      [2.0 - 3.0j, 1.0]])
         assert(isherm(a))
-        a = np.matrix([[1.0, 2.0 - 3.0j],
-                       [2.0 - 3.0j, 1.0]])
+        a = np.array([[1.0, 2.0 - 3.0j],
+                      [2.0 - 3.0j, 1.0]])
         assert(not isherm(a))
 
     def test_isherm_sparse(self):
@@ -207,17 +208,17 @@ class TestShapes:
 class TestMul:
     def test_mul_dense_same(self, mat_d, mat_d2):
         ca = mul(mat_d, mat_d2)
-        assert isinstance(ca, np.matrix)
+        assert isinstance(ca, qarray)
         cn = np.multiply(mat_d, mat_d2)
         assert_allclose(ca, cn)
 
     def test_mul_broadcast(self, mat_d, ket_d):
         ca = mul(mat_d, ket_d)
-        assert isinstance(ca, np.matrix)
+        assert isinstance(ca, qarray)
         cn = np.multiply(mat_d, ket_d)
         assert_allclose(ca, cn)
         ca = mul(mat_d.H, ket_d)
-        assert isinstance(ca, np.matrix)
+        assert isinstance(ca, qarray)
         cn = np.multiply(mat_d.H, ket_d)
         assert_allclose(ca, cn)
 
@@ -243,13 +244,13 @@ class TestMul:
 class TestDot:
     def test_dot_matrix(self, mat_d, mat_d2):
         ca = dot(mat_d, mat_d2)
-        assert isinstance(ca, np.matrix)
+        assert isinstance(ca, qarray)
         cn = mat_d @ mat_d2
         assert_allclose(ca, cn)
 
     def test_dot_ket(self, mat_d, ket_d):
         ca = dot(mat_d, ket_d)
-        assert isinstance(ca, np.matrix)
+        assert isinstance(ca, qarray)
         cn = mat_d @ ket_d
         assert_allclose(ca, cn)
 
@@ -261,10 +262,13 @@ class TestDot:
 
     def test_dot_sparse_dense(self, mat_s, ket_d):
         cq = dot(mat_s, ket_d)
-        cn = mat_s @ ket_d
+        assert isinstance(cq, qarray)
+        cq = mat_s @ ket_d
+        assert isinstance(cq, qarray)
+        cn = mat_s._mul_vector(ket_d)
         assert not issparse(cq)
         assert isdense(cq)
-        assert_allclose(cq.A, cn)
+        assert_allclose(cq.A.ravel(), cn)
 
     def test_dot_sparse_dense_ket(self, mat_s, ket_d):
         cq = dot(mat_s, ket_d)
@@ -275,20 +279,19 @@ class TestDot:
         assert_allclose(cq.A, cn)
 
     def test_par_dot_csr_matvec(self, mat_s, ket_d):
-        x = par_dot_csr_matvec(mat_s, ket_d, 2)
+        x = par_dot_csr_matvec(mat_s, ket_d)
         y = dot_sparse(mat_s, ket_d)
         assert x.dtype == complex
         assert x.shape == (_TEST_SZ, 1)
-        assert isinstance(x, np.matrix)
+        assert isinstance(x, qarray)
         assert_allclose(x, y)
 
     def test_par_dot_csr_matvec_Array(self, mat_s, ket_d):
-        x = par_dot_csr_matvec(mat_s, np.asarray(ket_d).reshape(-1), 2)
+        x = par_dot_csr_matvec(mat_s, np.asarray(ket_d).reshape(-1))
         y = dot_sparse(mat_s, ket_d)
         assert x.dtype == complex
         assert x.shape == (_TEST_SZ,)
-        assert not isinstance(x, np.matrix)
-        assert_allclose(y, np.asmatrix(x.reshape(-1, 1)))
+        assert_allclose(y, x.reshape(-1, 1))
 
 
 class TestAccelVdot:
@@ -309,7 +312,7 @@ class TestFastDiagMul:
     def test_ldmul_small(self, mat_d, l1d):
         a = ldmul(l1d, mat_d)
         b = np.diag(l1d) @ mat_d
-        assert isinstance(a, np.matrix)
+        assert isinstance(a, qarray)
         assert_allclose(a, b)
 
     def test_ldmul_large(self):
@@ -317,7 +320,7 @@ class TestFastDiagMul:
         mat = rand_matrix(501)
         a = ldmul(vec, mat)
         b = np.diag(vec) @ mat
-        assert isinstance(a, np.matrix)
+        assert isinstance(a, qarray)
         assert_allclose(a, b)
 
     def test_ldmul_sparse(self, mat_s, l1d):
@@ -330,7 +333,7 @@ class TestFastDiagMul:
     def test_rdmul_small(self, mat_d, l1d):
         a = rdmul(mat_d, l1d)
         b = mat_d @ np.diag(l1d)
-        assert isinstance(a, np.matrix)
+        assert isinstance(a, qarray)
         assert_allclose(a, b)
 
     def test_rdmul_large(self):
@@ -338,7 +341,7 @@ class TestFastDiagMul:
         mat = rand_matrix(501)
         a = rdmul(mat, vec)
         b = mat @ np.diag(vec)
-        assert isinstance(a, np.matrix)
+        assert isinstance(a, qarray)
         assert_allclose(a, b)
 
     def test_rdmul_sparse(self, mat_s, l1d):
@@ -351,25 +354,25 @@ class TestFastDiagMul:
 class TestOuter:
     def test_outer_ket_ket(self, ket_d, ket_d2):
         c = outer(ket_d, ket_d2)
-        assert isinstance(c, np.matrix)
+        assert isinstance(c, qarray)
         d = np.multiply(ket_d, ket_d2.T)
         assert_allclose(c, d)
 
     def test_outer_ket_bra(self, ket_d, ket_d2):
         c = outer(ket_d, ket_d2.H)
-        assert isinstance(c, np.matrix)
+        assert isinstance(c, qarray)
         d = np.multiply(ket_d, ket_d2.H)
         assert_allclose(c, d)
 
     def test_outer_bra_ket(self, ket_d, ket_d2):
         c = outer(ket_d.H, ket_d2)
-        assert isinstance(c, np.matrix)
+        assert isinstance(c, qarray)
         d = np.multiply(ket_d.H.T, ket_d2.T)
         assert_allclose(c, d)
 
     def test_outer_bra_bra(self, ket_d, ket_d2):
         c = outer(ket_d.H, ket_d2.H)
-        assert isinstance(c, np.matrix)
+        assert isinstance(c, qarray)
         d = np.multiply(ket_d.H.T, ket_d2.H)
         assert_allclose(c, d)
 
@@ -394,7 +397,7 @@ class TestKron:
         assert mat_d2.shape == (_TEST_SZ, _TEST_SZ)
         xn = np.kron(mat_d, mat_d2)
         assert_allclose(x, xn)
-        assert isinstance(x, np.matrix)
+        assert isinstance(x, qarray)
 
     def test_kron_multi_args(self, mat_d, mat_d2, mat_d3):
         assert_allclose(kron(mat_d), mat_d)

@@ -11,15 +11,8 @@ import numpy as np
 import numexpr as ne
 import scipy.sparse as sp
 
-from ..core import qu, ptr, kron, nmlz, prod
-from ..accel import (
-    dot,
-    rdmul,
-    matrixify,
-    complex_array,
-    get_thread_pool,
-    _NUM_THREAD_WORKERS,
-)
+from ..core import (qarray, dag, dot, rdmul, complex_array, get_thread_pool,
+                    _NUM_THREAD_WORKERS, qu, ptr, kron, nmlz, prod)
 
 # -------------------------------- RANDOMGEN -------------------------------- #
 if (
@@ -291,7 +284,7 @@ def rand_phase(shape, scale=1, dtype=complex):
 
 def rand_matrix(d, scaled=True, sparse=False, stype='csr',
                 density=None, dtype=complex, seed=None):
-    """Generate a random complex matrix of order `d` with normally distributed
+    """Generate a random matrix of order `d` with normally distributed
     entries. If `scaled` is `True`, then in the limit of large `d` the
     eigenvalues will be distributed on the unit complex disk.
 
@@ -314,7 +307,8 @@ def rand_matrix(d, scaled=True, sparse=False, stype='csr',
 
     Returns
     -------
-        mat: random matrix
+    mat : qarray or sparse matrix
+        Random matrix.
     """
     if np.issubdtype(dtype, np.floating):
         iscomplex = False
@@ -349,7 +343,7 @@ def rand_matrix(d, scaled=True, sparse=False, stype='csr',
         mat = sp.coo_matrix((data, (i, j)), shape=(d, d)).asformat(stype)
     else:
         density = 1.0
-        mat = np.asmatrix(randn((d, d), dtype=dtype))
+        mat = qarray(randn((d, d), dtype=dtype))
 
     if scaled:
         mat /= ((2 if iscomplex else 1) * d * density)**0.5
@@ -359,7 +353,7 @@ def rand_matrix(d, scaled=True, sparse=False, stype='csr',
 
 @random_seed_fn
 def rand_herm(d, sparse=False, density=None, dtype=complex):
-    """Generate a random hermitian matrix of order `d` with normally
+    """Generate a random hermitian operator of order `d` with normally
     distributed entries. In the limit of large `d` the spectrum will be a
     semi-circular distribution between [-1, 1].
 
@@ -380,14 +374,14 @@ def rand_herm(d, sparse=False, density=None, dtype=complex):
     else:
         herm /= (2**1.5)
 
-    herm += herm.H
+    herm += dag(herm)
 
     return herm
 
 
 @random_seed_fn
 def rand_pos(d, sparse=False, density=None, dtype=complex):
-    """Generate a random positive matrix of order `d`, with normally
+    """Generate a random positive operator of size `d`, with normally
     distributed entries. In the limit of large `d` the spectrum will lie
     between [0, 1].
 
@@ -403,12 +397,12 @@ def rand_pos(d, sparse=False, density=None, dtype=complex):
     pos = rand_matrix(d, scaled=True, sparse=sparse,
                       density=density, dtype=dtype)
 
-    return dot(pos, pos.H)
+    return dot(pos, dag(pos))
 
 
 @random_seed_fn
 def rand_rho(d, sparse=False, density=None, dtype=complex):
-    """Generate a random positive matrix of order `d` with normally
+    """Generate a random positive operator of size `d` with normally
     distributed entries and unit trace.
 
     See Also
@@ -420,7 +414,7 @@ def rand_rho(d, sparse=False, density=None, dtype=complex):
 
 @random_seed_fn
 def rand_uni(d, dtype=complex):
-    """Generate a random unitary matrix of order `d`, distributed according to
+    """Generate a random unitary operator of size `d`, distributed according to
     the Haar measure.
 
     See Also
@@ -441,7 +435,7 @@ def rand_ket(d, sparse=False, stype='csr', density=0.01, dtype=complex):
         ket = sp.random(d, 1, format=stype, density=density)
         ket.data = randn((ket.nnz,), dtype=dtype)
     else:
-        ket = np.asmatrix(randn((d, 1), dtype=dtype))
+        ket = qarray(randn((d, 1), dtype=dtype))
     return nmlz(ket)
 
 
@@ -451,19 +445,19 @@ def rand_haar_state(d):
     distribution.
     """
     u = rand_uni(d)
-    return u[:, 0]
+    return u[:, [0]]
 
 
 @random_seed_fn
 def gen_rand_haar_states(d, reps):
-    """Generate many random Haar states, recycling a random unitary matrix
+    """Generate many random Haar states, recycling a random unitary operator
     by using all of its columns (not a good idea?).
     """
     for rep in range(reps):
         cyc = rep % d
         if cyc == 0:
             u = rand_uni(d)
-        yield u[:, cyc]
+        yield u[:, [cyc]]
 
 
 @random_seed_fn
@@ -502,7 +496,6 @@ def rand_product_state(n, qtype=None):
     return kron(*gen_rand_pure_qubits(n))
 
 
-@matrixify
 @random_seed_fn
 def rand_matrix_product_state(n, bond_dim, phys_dim=2, dtype=complex,
                               cyclic=False, trans_invar=False):
@@ -526,7 +519,7 @@ def rand_matrix_product_state(n, bond_dim, phys_dim=2, dtype=complex,
 
     Returns
     -------
-    ket : matrix-like
+    ket : qarray
         The random state, with shape (phys_dim**n, 1)
 
     """
@@ -555,7 +548,7 @@ def rand_seperable(dims, num_mix=10):
 
     Returns
     -------
-        np.matrix
+        qarray
             Mixed seperable state.
     """
 

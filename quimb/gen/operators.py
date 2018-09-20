@@ -6,14 +6,13 @@ import functools
 import itertools
 import operator
 
-
 from cytoolz import isiterable, concat, unique
 import numpy as np
 import scipy.sparse as sp
 from scipy.special import comb
 
-from ..accel import make_immutable, get_thread_pool, par_reduce, isreal
-from ..core import qu, eye, kron, ikron
+from ..core import (qarray, make_immutable, get_thread_pool,
+                    par_reduce, isreal, qu, eye, kron, ikron)
 
 
 # --------------------------------------------------------------------------- #
@@ -41,7 +40,7 @@ def spin_operator(label, S=1 / 2, **kwargs):
 
     Returns
     -------
-    S : immutable matrix
+    S : immutable operator
         The spin operator.
 
     See Also
@@ -51,11 +50,11 @@ def spin_operator(label, S=1 / 2, **kwargs):
     Examples
     --------
     >>> spin_operator('x')
-    matrix([[0. +0.j, 0.5+0.j],
+    qarray([[0. +0.j, 0.5+0.j],
             [0.5+0.j, 0. +0.j]])
 
     >>> qu.spin_operator('+', S=1)
-    matrix([[0.        +0.j, 1.41421356+0.j, 0.        +0.j],
+    qarray([[0.        +0.j, 1.41421356+0.j, 0.        +0.j],
             [0.        +0.j, 0.        +0.j, 1.41421356+0.j],
             [0.        +0.j, 0.        +0.j, 0.        +0.j]])
 
@@ -120,7 +119,7 @@ def pauli(xyz, dim=2, **kwargs):
 
     Returns
     -------
-    P : immutable matrix
+    P : immutable operator
         The pauli operator.
 
     See Also
@@ -232,7 +231,7 @@ def controlled(s, dtype=complex, sparse=False):
 
     Returns
     -------
-    C : immutable matrix
+    C : immutable operator
         The controlled two-qubit gate operator.
     """
     # alias not and NOT to x
@@ -295,7 +294,7 @@ def hamiltonian_builder(fn):
             H = H.real
 
         if not sparse:
-            H = np.asmatrix(H.todense())
+            H = qarray(H.A)
         elif H.format != stype:
             H = H.asformat(stype)
 
@@ -327,12 +326,12 @@ def ham_heis(n, j=1.0, b=0.0, cyclic=True,
     sparse : bool, optional
         Whether to return the hamiltonian in sparse form.
     stype : str, optional
-        What format of sparse matrix to return if ``sparse``.
+        What format of sparse operator to return if ``sparse``.
     parallel : bool, optional
-        Whether to build the matrix in parallel. By default will do this
+        Whether to build the operator in parallel. By default will do this
         for n > 16.
     nthreads : int optional
-        How mny threads to use in parallel to build the matrix.
+        How mny threads to use in parallel to build the operator.
     ownership : (int, int), optional
         If given, which range of rows to generate.
     kwargs
@@ -340,7 +339,7 @@ def ham_heis(n, j=1.0, b=0.0, cyclic=True,
 
     Returns
     -------
-    H : immutable matrix
+    H : immutable operator
         The Hamiltonian.
     """
     dims = (2,) * n
@@ -443,7 +442,7 @@ def ham_j1j2(n, j1=1.0, j2=0.5, bz=0.0, cyclic=True, ownership=None):
     cyclic : bool, optional
         Cyclic boundary conditions.
     sparse : bool, optional
-        Return hamtiltonian as sparse-csr matrix.
+        Return hamiltonian as sparse-csr operator.
     ownership : (int, int), optional
         If given, which range of rows to generate.
     kwargs
@@ -451,7 +450,7 @@ def ham_j1j2(n, j1=1.0, j2=0.5, bz=0.0, cyclic=True, ownership=None):
 
     Returns
     -------
-    H : immutable matrix
+    H : immutable operator
         The Hamiltonian.
     """
     dims = (2,) * n
@@ -580,7 +579,7 @@ def ham_mbl(n, dh, j=1.0, bz=0.0, cyclic=True,
 
     Returns
     -------
-    H : matrix_like
+    H : operator
         The MBL hamiltonian for spin-1/2.
 
     See Also
@@ -642,7 +641,7 @@ def ham_heis_2D(n, m, j=1.0, bz=0.0, cyclic=False,
 
     Returns
     -------
-    H : matrix
+    H : operator
         The hamiltonian.
     """
 
@@ -738,13 +737,13 @@ def zspin_projector(n, sz=0, stype="csr", dtype=float):
     sz : float or sequence of floats
         Spin-z value(s) subspace(s) to find projector for.
     stype : str
-        Sparse format of the output matrix.
+        Sparse format of the output operator.
     dtype : {float, complex}, optional
-        The data type of the matrix to generate.
+        The data type of the operator to generate.
 
     Returns
     -------
-    prj : immutable sparse matrix, shape (2**n, D)
+    prj : immutable sparse operator, shape (2**n, D)
         The (non-square) projector onto the specified subspace(s). The subspace
         size ``D`` is given by ``n choose (n / 2 + s)`` for each ``s``
         specified in ``sz``.
@@ -791,7 +790,7 @@ def zspin_projector(n, sz=0, stype="csr", dtype=float):
     cis = tuple(range(p))  # arbitrary basis
     cjs = tuple(int("".join(perm), 2) for perm in concat(all_perms))
 
-    # Construct matrix which prjects only on to these basis states
+    # Construct matrix which projects only on to these basis states
     prj = sp.coo_matrix((np.ones(p, dtype=dtype), (cjs, cis)),
                         shape=(2**n, p), dtype=dtype)
     prj = qu(prj, stype=stype, dtype=dtype)
@@ -860,7 +859,7 @@ def ham_hubbard_hardcore(n, t=0.5, V=1., mu=1., cyclic=True,
 
     Returns
     -------
-    H : matrix-like
+    H : operator
         The hamiltonian.
     """
 

@@ -7,14 +7,7 @@ import scipy.linalg as sla
 from cytoolz import identity
 
 from ..gen.rand import randn
-from ..accel import dot, njit
-
-
-def dag(X):
-    try:
-        return X.H
-    except AttributeError:
-        return X.conj().T
+from ..core import dag, dot, njit
 
 
 def lu_orthog(X):
@@ -364,7 +357,7 @@ def rsvd(A, eps_or_k, compute_uv=True, mode='adapt+block', use_qb=20,
 
     Parameters
     ----------
-    A : matrix_like, shape (m, n)
+    A : operator, shape (m, n)
         The operator to decompose.
     eps_or_k : float or int
         Either the relative precision or the number of singular values to

@@ -4,7 +4,7 @@ from numbers import Integral
 
 import numpy as np
 
-from ..accel import make_immutable
+from ..core import make_immutable
 from ..linalg.base_linalg import norm_fro_dense
 from ..gen.operators import spin_operator, eye, _gen_mbl_random_factors
 from ..gen.rand import randn, choice, random_seed_fn

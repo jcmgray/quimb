@@ -7,8 +7,8 @@ import functools
 import math
 import numpy as np
 
-from ..accel import ldmul, dot, make_immutable
-from ..core import qu, kron, eye, ikron, kronpow
+from ..core import (dag, ldmul, dot, make_immutable,
+                    qu, kron, eye, ikron, kronpow)
 from ..linalg.base_linalg import eigh
 from .operators import pauli, controlled
 
@@ -105,7 +105,7 @@ def yminus(**kwargs):
 
 
 def bloch_state(ax, ay, az, purified=False, **kwargs):
-    """Construct qubit density matrix from bloch vector.
+    """Construct qubit density operator from bloch vector.
 
     Parameters
     ----------
@@ -121,7 +121,7 @@ def bloch_state(ax, ay, az, purified=False, **kwargs):
     Returns
     -------
     Matrix
-        Density matrix of qubit 'pointing' in (ax, ay, az) direction.
+        Density operator of qubit 'pointing' in (ax, ay, az) direction.
     """
     n = (ax**2 + ay**2 + az**2)**.5
     if purified:
@@ -180,7 +180,7 @@ def thermal_state(ham, beta, precomp_func=False):
 
     Parameters
     ----------
-    ham : matrix or (1d-array, matrix)
+    ham : operator or (1d-array, 2d-array)
         Hamiltonian, either full or tuple of (evals, evecs).
     beta : float
         Inverse temperature of state.
@@ -190,8 +190,8 @@ def thermal_state(ham, beta, precomp_func=False):
 
     Returns
     -------
-    matrix or callable
-        Density matrix of thermal state, or function to generate such given
+    operator or callable
+        Density operator of thermal state, or function to generate such given
         a temperature.
     """
     if isinstance(ham, (list, tuple)):  # solved already
@@ -203,7 +203,7 @@ def thermal_state(ham, beta, precomp_func=False):
     def gen_state(b):
         el = np.exp(-b * evals)
         el /= np.sum(el)
-        return dot(evecs, ldmul(el, evecs.H))
+        return dot(evecs, ldmul(el, dag(evecs)))
 
     return gen_state if precomp_func else gen_state(beta)
 
@@ -219,7 +219,7 @@ def computational_state(binary, **kwargs):
     Examples
     --------
     >>> computational_state('101'):
-    matrix([[0.+0.j],
+    qarray([[0.+0.j],
             [0.+0.j],
             [0.+0.j],
             [0.+0.j],
@@ -229,7 +229,7 @@ def computational_state(binary, **kwargs):
             [0.+0.j]])
 
     >>> qu.computational_state([0, 1], qtype='dop')
-    matrix([[0.+0.j, 0.+0.j, 0.+0.j, 0.+0.j],
+    qarray([[0.+0.j, 0.+0.j, 0.+0.j, 0.+0.j],
             [0.+0.j, 1.+0.j, 0.+0.j, 0.+0.j],
             [0.+0.j, 0.+0.j, 0.+0.j, 0.+0.j],
             [0.+0.j, 0.+0.j, 0.+0.j, 0.+0.j]])
@@ -298,7 +298,7 @@ def werner_state(p, **kwargs):
 
     Returns
     -------
-    matrix
+    qarray
     """
     return (p * bell_state('psi-', qtype="dop", **kwargs) +
             (1 - p) * eye(4, **kwargs) / 4)
@@ -373,7 +373,7 @@ def perm_state(ps):
 
     Returns
     -------
-    vector or matrix
+    vector or operator
         The permutation state, dimension same as ``kron(*ps)``.
 
     Examples

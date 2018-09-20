@@ -3,6 +3,7 @@ import numpy as np
 from numpy.testing import assert_equal, assert_allclose
 
 from quimb import (
+    qarray,
     dot,
     ldmul,
     rand_uni,
@@ -58,5 +59,5 @@ class TestNumpyEigk:
     def test_evecs(self, ham1, which, k, sigma):
         lk, vk = eigs_numpy(ham1, k=k, which=which, return_vecs=True,
                             sigma=sigma, sort=False)
-        assert isinstance(vk, np.matrix)
+        assert isinstance(vk, qarray)
         assert_allclose(dot(vk, ldmul(lk, vk.H)), ham1)

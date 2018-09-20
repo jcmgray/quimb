@@ -8,7 +8,10 @@ from quimb.tensor import (
     MatrixProductState, MatrixProductOperator, align_TN_1D, MPS_rand_state,
     MPO_identity, MPO_identity_like, MPO_zeros, MPO_zeros_like, MPO_rand,
     MPO_rand_herm, MPO_ham_heis, MPS_neel_state, MPS_zero_state, bonds,
-    MPS_computational_state)
+    MPS_computational_state, Dense1D)
+
+
+dtypes = ['float32', 'float64', 'complex64', 'complex128']
 
 
 class TestMatrixProductState:
@@ -180,8 +183,9 @@ class TestMatrixProductState:
         assert_allclose(p_tn['foo5'].data, np.eye(10), atol=1e-13)
         assert_allclose(p_tn['foo7'].data, np.eye(8), atol=1e-13)
 
-    def test_canonize_and_calc_current_orthog_center(self):
-        p = MPS_rand_state(20, 3)
+    @pytest.mark.parametrize("dtype", dtypes)
+    def test_canonize_and_calc_current_orthog_center(self, dtype):
+        p = MPS_rand_state(20, 3, dtype=dtype)
         co = p.calc_current_orthog_center()
         assert co == (0, 19)
         p.canonize((5, 15), co)
@@ -190,6 +194,7 @@ class TestMatrixProductState:
         p.canonize((8, 11), co)
         co = p.calc_current_orthog_center()
         assert co == (8, 11)
+        assert p.dtype == dtype
 
     def test_can_change_data(self):
         p = MPS_rand_state(3, 10)
@@ -316,6 +321,12 @@ class TestMatrixProductState:
         ex_sgs = [qu.schmidt_gap(pd, [2] * n, range(i)) for i in range(1, n)]
         assert_allclose(ex_svns, svns)
         assert_allclose(ex_sgs, sgs)
+
+    def test_magnetization(self):
+        binary = [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1]
+        p = MPS_computational_state(binary)
+        mzs = [p.magnetization(i) for i in range(len(binary))]
+        assert_allclose(mzs, 0.5 - np.array(binary))
 
     @pytest.mark.parametrize("rescale", [False, True])
     @pytest.mark.parametrize(
@@ -461,6 +472,14 @@ class TestMatrixProductState:
         assert len(p.tensors) == 6 - int(contract) * bsz
         assert set(p.outer_inds()) == {'k{}'.format(i) for i in range(5)}
 
+    def test_gate_swap_and_split(self):
+        n = 10
+        p = MPS_computational_state('0' * n)
+        assert p.bond_sizes() == [1] * (n - 1)
+        G = qu.rand_uni(4)
+        p.gate_(G, (1, n - 2), contract='swap+split')
+        assert p.bond_sizes() == [1]  + [2] * (n - 3) + [1]
+
     def test_correlation(self):
         ghz = (MPS_computational_state('0000') +
                MPS_computational_state('1111')) / 2**0.5
@@ -504,10 +523,15 @@ class TestMatrixProductState:
 
 
 class TestMatrixProductOperator:
-    def test_matrix_product_operator(self):
-        tensors = ([np.random.rand(5, 2, 2)] +
+
+    @pytest.mark.parametrize("cyclic", [False, True])
+    def test_matrix_product_operator(self, cyclic):
+
+        end_shape = (5, 5, 2, 2) if cyclic else (5, 2, 2)
+
+        tensors = ([np.random.rand(*end_shape)] +
                    [np.random.rand(5, 5, 2, 2)
-                    for _ in range(3)] + [np.random.rand(5, 2, 2)])
+                    for _ in range(3)] + [np.random.rand(*end_shape)])
         mpo = MatrixProductOperator(tensors)
 
         mpo.show()
@@ -713,3 +737,27 @@ class TestSpecificStatesOperators:
         x1 = A.trace()
         x2 = (A + Z).trace()
         assert_allclose(x1, x2)
+
+
+class TestDense1D:
+
+    def test_simple(self):
+        n = 10
+        d_psi = qu.computational_state('0' * n)
+
+        t_psi = Dense1D(d_psi)
+        assert set(t_psi.outer_inds()) == {'k{}'.format(i) for i in range(n)}
+        assert set(t_psi.tags) == {'I{}'.format(i) for i in range(n)}
+
+        for i in range(n):
+            assert t_psi.H @ t_psi.gate(qu.pauli('Z'), i) == pytest.approx(1)
+
+        for i in range(n):
+            t_psi.gate_(qu.hadamard(), i)
+
+        assert len(t_psi.tensors) == n + 1
+
+        # should have '++++++++++'
+        assert t_psi.H @ t_psi == pytest.approx(1)
+        for i in range(n):
+            assert t_psi.H @ t_psi.gate(qu.pauli('X'), i) == pytest.approx(1)

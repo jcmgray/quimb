@@ -8,7 +8,7 @@ import scipy.linalg as sla
 import scipy.sparse.linalg as spla
 
 from ..utils import raise_cant_find_library_function
-from ..accel import issparse, isdense, vdot, ldmul
+from ..core import qarray, dag, issparse, isdense, vdot, ldmul
 from .numpy_linalg import (
     eig_numpy,
     eigs_numpy,
@@ -49,7 +49,7 @@ def choose_backend(A, k, int_eps=False, B=None):
     A_is_linop = isinstance(A, spla.LinearOperator)
     B_is_linop = isinstance(B, spla.LinearOperator)
 
-    # small matrix or large part of subspace requested
+    # small array or large part of subspace requested
     small_d_big_k = A.shape[0] ** 2 / k < (10000 if int_eps else 2000)
 
     if small_d_big_k and not (A_is_linop or B_is_linop):
@@ -83,19 +83,19 @@ def eigensystem_partial(A, k, isherm, *, B=None, which=None, return_vecs=True,
 
     Parameters
     ----------
-    A : sparse matrix-like, dense matrix-like, or LinearOperator
+    A : sparse, dense or linear operator
         The operator to solve for.
-    k : int, optional
-        Number of eigenpairs to return (default=6).
-    B : sparse matrix-like, dense matrix-like, or LinearOperator, optional
-        If given, the RHS matrix defining a generalized eigen problem.
+    k : int
+        Number of eigenpairs to return.
+    isherm : bool
+        Whether to use hermitian solve or not.
+    B : sparse, dense or linear operator, optional
+        If given, the RHS operator defining a generalized eigen problem.
     which : {'SA', 'LA', 'LM', 'SM', 'TR'}
         Where in spectrum to take eigenvalues from (see
         :func:``scipy.sparse.linalg.eigsh``)
     return_vecs : bool, optional
         Whether to return the eigenvectors.
-    isherm : bool, optional
-        Whether operator is known to be hermitian.
     sigma : float, optional
         Which part of spectrum to target, implies which='TR' if which is None.
     ncv : int, optional
@@ -116,10 +116,10 @@ def eigensystem_partial(A, k, isherm, *, B=None, which=None, return_vecs=True,
 
     Returns
     -------
-    elk : 1d-array
+    elk : (k,) array
         The ``k`` eigenvalues.
-    evk : 2d-matrix
-        matrix with ``k`` eigenvectors as columns if ``return_vecs``.
+    evk : (d, k) array
+        Array with ``k`` eigenvectors as columns if ``return_vecs``.
     """
     settings = {
         'k': k,
@@ -166,10 +166,10 @@ def eigensystem(A, isherm, *, k=-1, sort=True, return_vecs=True, **kwargs):
 
     Parameters
     ----------
-    A : matrix-like
-        The matrix to decompose.
-    isherm : bool, optional
-        Whether the matrix is assumed to be hermitian or not.
+    A : operator
+        The operator to decompose.
+    isherm : bool
+        Whether the operator is assumed to be hermitian or not.
     k : int, optional
         If negative, find all eigenpairs, else perform partial
         eigendecomposition and find ``k`` pairs. See
@@ -181,10 +181,10 @@ def eigensystem(A, isherm, *, k=-1, sort=True, return_vecs=True, **kwargs):
 
     Returns
     -------
-    el : 1d-array
+    el : (k,) array
         Eigenvalues.
-    ev : numpy.matrix
-        Corresponding eigenvectors as columns of matrix, such that
+    ev : (d, k) array
+        Corresponding eigenvectors as columns of array, such that
         ``ev @ diag(el) @ ev.H == A``.
     """
     if k < 0:
@@ -261,11 +261,11 @@ def _rel_window_to_abs_window(el_min, el_max, w_0, w_sz=None):
 
 def eigh_window(A, w_0, k, w_sz=None, backend='AUTO',
                 return_vecs=True, offset_const=1 / 104729, **kwargs):
-    """ Return eigenpairs internally from a hermitian matrix.
+    """ Return mid-spectrum eigenpairs from a hermitian operator.
 
     Parameters
     ----------
-    A : operator
+    A : (d, d) operator
         Operator to retrieve eigenpairs from.
     w_0 : float [0.0, 1.0]
         Relative window centre to retrieve eigenpairs from.
@@ -282,9 +282,9 @@ def eigh_window(A, w_0, k, w_sz=None, backend='AUTO',
 
     Returns
     -------
-    el : 1d-array
+    el : (k,) array
         Eigenvalues around w_0.
-    ev : 2d-matrix
+    ev : (d, k) array
         The eigenvectors, if ``return_vecs=True``.
     """
     w_sz = w_sz if w_sz is not None else 1.1
@@ -334,19 +334,23 @@ def eigvecsh_window(*args, **kwargs):
 # -------------------------------------------------------------------------- #
 
 def svd(A, return_vecs=True):
-    """Compute full singular value decomposition of matrix, using numpy.
+    """Compute full singular value decomposition of an operator, using numpy.
 
     Parameters
     ----------
-    A : dense matrix
+    A : (m, n) array
         The operator.
     return_vecs : bool, optional
         Whether to return the singular vectors.
 
     Returns
     -------
-    (U,) s (, VH) :
-        Singular value(s) (and vectors) such that ``U @ np.diag(s) @ VH = A``.
+    U : (m, k) array
+        Left singular vectors (if ``return_vecs=True``) as columns.
+    s : (k,) array
+        Singular values.
+    VH : (k, n) array
+        Right singular vectors (if ``return_vecs=True``) as rows.
     """
     try:
         return np.linalg.svd(A, full_matrices=False, compute_uv=return_vecs)
@@ -372,7 +376,7 @@ def svds(A, k, ncv=None, return_vecs=True, backend='AUTO', **kwargs):
 
     Parameters
     ----------
-    A : Matrix or LinearOperator
+    A : dense, sparse or linear operator
         The operator to decompose.
     k : int, optional
         number of singular value (triplets) to retrieve
@@ -406,7 +410,7 @@ def svds(A, k, ncv=None, return_vecs=True, backend='AUTO', **kwargs):
 # -------------------------------------------------------------------------- #
 
 def norm_2(A, **kwargs):
-    """Return the 2-norm of matrix, ``A``, i.e. the largest singular value.
+    """Return the 2-norm of operator, ``A``, i.e. the largest singular value.
     """
     return svds(A, k=1, return_vecs=False, **kwargs)[0]
 
@@ -433,7 +437,7 @@ def norm(A, ntype=2, **kwargs):
 
     Parameters
     ----------
-    A : matrix-like
+    A : operator
         The operator to find norm of.
     ntype : str
         Norm to calculate, if any of:
@@ -444,7 +448,8 @@ def norm(A, ntype=2, **kwargs):
 
     Returns
     -------
-        x: matrix norm
+    x : float
+        The operator norm.
     """
     types = {'2': '2', 2: '2', 'spectral': '2',
              'f': 'f', 'fro': 'f',
@@ -466,24 +471,20 @@ def expm(A, herm=False):
 
     Parameters
     ----------
-    A : dense or sparse matrix
-        Matrix to exponentiate.
+    A : dense or sparse operator
+        Operator to exponentiate.
     herm : bool, optional
         If True (not default), and ``A`` is dense, digonalize the matrix
         in order to perform the exponential.
-
-    Returns
-    -------
-    matrix
     """
     if issparse(A):
         # convert to and from csc to suppress scipy warning
         return spla.expm(A.tocsc()).tocsr()
     elif not herm:
-        return np.asmatrix(spla.expm(A))
+        return qarray(spla.expm(A))
     else:
         evals, evecs = eigh(A)
-        return evecs @ ldmul(np.exp(evals), evecs.H)
+        return evecs @ ldmul(np.exp(evals), dag(evecs))
 
 
 _EXPM_MULTIPLY_METHODS = {
@@ -502,10 +503,10 @@ def expm_multiply(mat, vec, backend="AUTO", **kwargs):
 
     Parameters
     ----------
-    mat : matrix-like
-        Matrix to exponentiate.
+    mat : operator
+        Operator with which to act with exponential on ``vec``.
     vec : vector-like
-        Vector to act with exponential of matrix on.
+        Vector to act with exponential of operator on.
     backend : {'AUTO', 'SCIPY', 'SLEPC', 'SLEPC-KRYLOV', 'SLEPC-EXPOKIT'}
         Which backend to use.
     kwargs
@@ -530,23 +531,23 @@ def sqrtm(A, herm=True):
 
     Parameters
     ----------
-    A : dense or sparse matrix
-        Matrix to take square root of.
+    A : dense array
+        Operator to take square root of.
     herm : bool, optional
         If True (the default), and ``A`` is dense, digonalize the matrix
         in order to take the square root.
 
     Returns
     -------
-    matrix
+    array
     """
     if issparse(A):
         raise NotImplementedError("No sparse sqrtm available.")
     elif not herm:
-        return np.asmatrix(sla.sqrtm(A))
+        return qarray(sla.sqrtm(A))
     else:
         evals, evecs = eigh(A)
-        return evecs @ ldmul(np.sqrt(evals.astype(complex)), evecs.H)
+        return evecs @ ldmul(np.sqrt(evals.astype(complex)), dag(evecs))
 
 
 class IdentityLinearOperator(spla.LinearOperator):
