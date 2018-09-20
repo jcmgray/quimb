@@ -190,7 +190,7 @@ class TestShellMatrix:
             'PCType': 'none',
         }
 
-        el, ev = eigs_slepc(alo, k=1, which='TR', sigma=0.0, tol=1e-9,
+        el, ev = eigs_slepc(alo, k=1, which='TR', sigma=0.0, tol=1e-6,
                             st_opts=st_opts, EPSType='krylovschur')
         el_s, ev_s = sp.linalg.eigsh(a.tocsc(), k=1, which='LM', sigma=0.0)
 

@@ -478,7 +478,7 @@ class TestMatrixProductState:
         assert p.bond_sizes() == [1] * (n - 1)
         G = qu.rand_uni(4)
         p.gate_(G, (1, n - 2), contract='swap+split')
-        assert p.bond_sizes() == [1]  + [2] * (n - 3) + [1]
+        assert p.bond_sizes() == [1] + [2] * (n - 3) + [1]
 
     def test_correlation(self):
         ghz = (MPS_computational_state('0000') +
