@@ -710,9 +710,9 @@ class DMRG:
             if Neff is None:
                 # just perform leading correction to norm from site_norm
                 site_norm = self._k[i:i + self.bsz].H @ self._k[i:i + self.bsz]
-                loc_gs = loc_gs * site_norm ** 0.5
+                loc_gs *= site_norm ** 0.5
                 loc_en *= site_norm
-                return
+                return loc_en, loc_gs
 
             loc_en -= self.opts['periodic_nullspace_fudge_factor']**0.5
 
@@ -721,6 +721,8 @@ class DMRG:
             if abs(Neffnorm - 1) > 10 * self.opts['local_eig_tol']:
                 raise DMRGError("Effective norm diverged to {}, check "
                                 "that Neff is positive?".format(Neffnorm))
+
+        return loc_en, loc_gs
 
     def _update_local_state_1site(self, i, direction, **compress_opts):
         r"""Find the single site effective tensor groundstate of::
@@ -747,7 +749,7 @@ class DMRG:
         loc_en, loc_gs = self._eigs(Heff, B=Neff, v0=loc_gs_old)
 
         # perform some minor checks and corrections
-        self.post_check(i, Neff, loc_gs, loc_en, loc_gs_old)
+        loc_en, loc_gs = self.post_check(i, Neff, loc_gs, loc_en, loc_gs_old)
 
         # insert back into state and all tensor networks viewing it
         loc_gs = loc_gs.A.reshape(dims)
@@ -792,7 +794,7 @@ class DMRG:
         loc_en, loc_gs = self._eigs(Heff, B=Neff, v0=loc_gs_old)
 
         # perform some minor checks and corrections
-        self.post_check(i, Neff, loc_gs, loc_en, loc_gs_old)
+        loc_en, loc_gs = self.post_check(i, Neff, loc_gs, loc_en, loc_gs_old)
 
         # split the two site local groundstate
         T_AB = Tensor(loc_gs.A.reshape(dims), uix)

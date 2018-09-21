@@ -748,7 +748,7 @@ def mfn_multiply_slepc(mat, vec,
 def lookup_ksp_error(i):
     """Look up PETSc error to print when raising after not converging.
     """
-    from petsc4py import PETSc
+    PETSc = get_petsc()
     _KSP_DIVERGED_REASONS = {i: error for error, i in
                              PETSc.KSP.ConvergedReason.__dict__.items()
                              if isinstance(i, int)}

@@ -1780,7 +1780,6 @@ class TensorNetwork(object):
                     raise ValueError("The total number of sites, ``nsites`` "
                                      "must be specified when a custom subset, "
                                      "i.e. ``sites``, is.")
-                self.sites = self.sites
 
             # set default blocksize
             if self.structure_bsz is None:
