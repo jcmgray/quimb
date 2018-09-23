@@ -2434,10 +2434,14 @@ class MatrixProductOperator(TensorNetwork1DFlat,
             raise TypeError("Can only Dot with a MatrixProductOperator or a "
                             "MatrixProductState, got {}".format(type(other)))
 
-    def trace(self):
-        traced = self.copy()
-        traced.upper_ind_id = traced.lower_ind_id
-        return traced ^ ...
+    def trace(self, left_inds=None, right_inds=None):
+        """Take the trace of this MPO.
+        """
+        if left_inds is None:
+            left_inds = map(self.upper_ind, range(self.nsites))
+        if right_inds is None:
+            right_inds = map(self.lower_ind, range(self.nsites))
+        return super().trace(left_inds, right_inds)
 
     def partial_transpose(self, sysa, inplace=False):
         """Perform the partial transpose on this MPO by swapping the bra and
