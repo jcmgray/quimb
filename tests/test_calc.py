@@ -301,7 +301,7 @@ class TestLogarithmicNegativity:
         # approx
         ln2 = qu.logneg_subsys(p, dims, sysa, sysb, approx_thresh=1, tol=0.005)
         assert ln1 != ln2
-        assert_allclose(ln1, ln2, rtol=1e-1)
+        assert_allclose(ln1, ln2, rtol=0.2)
 
 
 class TestConcurrence:
