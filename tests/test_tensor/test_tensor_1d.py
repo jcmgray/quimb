@@ -545,13 +545,11 @@ class TestMatrixProductOperator:
         }
 
     def test_add_mpo(self):
-        h = MPO_ham_heis(12)
+        h = MPO_rand_herm(12, 5)
         h2 = h + h
         assert max(h2[6].shape) == 10
-        h.lower_ind_id = h.upper_ind_id
-        t = h ^ ...
-        h2.upper_ind_id = h2.lower_ind_id
-        t2 = h2 ^ ...
+        t = h.trace()
+        t2 = h2.trace()
         assert_allclose(2 * t, t2)
 
     def test_adding_mpo(self):
@@ -584,10 +582,8 @@ class TestMatrixProductOperator:
         if cyclic:
             assert he.bond_size(0, -1) == 13
 
-        h.lower_ind_id = h.upper_ind_id
-        t = h ^ ...
-        he.upper_ind_id = he.lower_ind_id
-        te = he ^ ...
+        t = h.trace()
+        te = he.trace()
         assert_allclose(t, te)
 
     @pytest.mark.parametrize("cyclic", (False, True))
