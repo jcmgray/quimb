@@ -130,7 +130,7 @@ class TestEntropy:
         # approx
         e2 = qu.entropy_subsys(p, (2**5, 2**4), 0, approx_thresh=1)
         assert e1 != e2
-        assert_allclose(e1, e2, rtol=0.1)
+        assert_allclose(e1, e2, rtol=0.2)
 
         assert qu.entropy_subsys(p, (2**5, 2**4), [0, 1],
                                  approx_thresh=1) == 0.0
