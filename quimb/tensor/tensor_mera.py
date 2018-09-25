@@ -68,10 +68,10 @@ class MERA(TensorNetwork1DVector,
 
         nlayers = round(log2(n))
 
-        if isinstance(uni, np.ndarray):
+        if hasattr(uni, 'shape'):
             uni = (uni,)
 
-        if isinstance(iso, np.ndarray):
+        if hasattr(iso, 'shape'):
             iso = (iso,)
 
         unis = itertools.cycle(uni)

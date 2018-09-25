@@ -648,8 +648,15 @@ class TestMatrixProductOperator:
         assert qu.isherm(rptd)
         assert not qu.ispos(rptd)
 
+    def test_upper_lower_ind_id_guard(self):
+        A = MPO_rand(8, 5)
+        with pytest.raises(ValueError):
+            A.upper_ind_id = 'b{}'
+        with pytest.raises(ValueError):
+            A.lower_ind_id = 'k{}'
+
     @pytest.mark.parametrize("cyclic", (False, True))
-    def test_dot_mpo(self, cyclic):
+    def test_apply_mpo(self, cyclic):
         A = MPO_rand(8, 5, cyclic=cyclic)
         B = MPO_rand(
             8, 5, upper_ind_id='q{}', lower_ind_id='w{}', cyclic=cyclic)
@@ -659,6 +666,17 @@ class TestMatrixProductOperator:
         assert C.lower_ind_id == 'w{}'
         Ad, Bd, Cd = A.to_dense(), B.to_dense(), C.to_dense()
         assert_allclose(Ad @ Bd, Cd)
+
+    @pytest.mark.parametrize("cyclic", (False, True))
+    @pytest.mark.parametrize("site_ind_id", ('k{}', 'test{}'))
+    def test_apply_mps(self, cyclic, site_ind_id):
+        A = MPO_rand(8, 5, cyclic=cyclic)
+        x = MPS_rand_state(8, 4, site_ind_id=site_ind_id, cyclic=cyclic)
+        y = A.apply(x)
+        assert y.max_bond() == 20
+        assert isinstance(y, MatrixProductState)
+        assert len(y.tensors) == 8
+        assert y.site_ind_id == site_ind_id
 
     @pytest.mark.parametrize("cyclic", (False, True))
     def test_sites_mpo_mps_product(self, cyclic):

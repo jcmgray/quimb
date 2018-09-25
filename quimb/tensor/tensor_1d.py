@@ -19,6 +19,7 @@ from .tensor_core import (
     tags2set,
     get_tags,
     _asarray,
+    _ndim,
 )
 
 
@@ -189,7 +190,7 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
         where = (where,)
     ng = len(where)
 
-    shape_matches_2d = (G.ndim == 2) and (G.shape[1] == dp ** ng)
+    shape_matches_2d = (_ndim(G) == 2) and (G.shape[1] == dp ** ng)
     shape_maches_nd = all(d == dp for d in G.shape)
 
     if shape_matches_2d:
@@ -1069,7 +1070,7 @@ class MatrixProductState(TensorNetwork1DVector,
 
             site_tags = tuple({st} | tags for st in site_tags)
 
-        self.cyclic = (arrays[0].ndim == 3)
+        self.cyclic = (_ndim(arrays[0]) == 3)
 
         # transpose arrays to 'lrp' order.
         def gen_orders():
@@ -2200,7 +2201,7 @@ class MatrixProductOperator(TensorNetwork1DFlat,
 
             site_tags = tuple((st,) + tags for st in site_tags)
 
-        self.cyclic = (arrays[0].ndim == 4)
+        self.cyclic = (_ndim(arrays[0]) == 4)
 
         # transpose arrays to 'lrud' order.
         def gen_orders():
@@ -2321,6 +2322,10 @@ class MatrixProductOperator(TensorNetwork1DFlat,
         return self._lower_ind_id
 
     def _set_lower_ind_id(self, new_id):
+        if new_id == self._upper_ind_id:
+            raise ValueError("Setting the same upper and lower index ids will"
+                             " make the two ambiguous.")
+
         if self._lower_ind_id != new_id:
             self.reindex_lower_sites(new_id, inplace=True)
             self._lower_ind_id = new_id
@@ -2338,6 +2343,10 @@ class MatrixProductOperator(TensorNetwork1DFlat,
         return self._upper_ind_id
 
     def _set_upper_ind_id(self, new_id):
+        if new_id == self._lower_ind_id:
+            raise ValueError("Setting the same upper and lower index ids will"
+                             " make the two ambiguous.")
+
         if self._upper_ind_id != new_id:
             self.reindex_upper_sites(new_id, inplace=True)
             self._upper_ind_id = new_id
@@ -2387,9 +2396,29 @@ class MatrixProductOperator(TensorNetwork1DFlat,
 
         return summed
 
+    def _apply_mps(self, other, compress=True, **compress_opts):
+        # import pdb; pdb.set_trace()
+        A, x = self.copy(), other.copy()
+
+        # align the indices
+        A.upper_ind_id = "__tmp{}__"
+        A.lower_ind_id = x.site_ind_id
+        x.reindex_sites("__tmp{}__", inplace=True)
+
+        # form total network and contract each site
+        x |= A
+        for i in range(x.nsites):
+            x ^= x.site_tag(i)
+
+        x.fuse_multibonds(inplace=True)
+
+        # optionally compress
+        if compress:
+            x.compress(**compress_opts)
+
+        return x
+
     def _apply_mpo(self, other, compress=False, **compress_opts):
-        """This MPO acting on another MPO ladder style.
-        """
         A, B = self.copy(), other.copy()
 
         # align the indices and combine into a ladder
@@ -2416,8 +2445,38 @@ class MatrixProductOperator(TensorNetwork1DFlat,
         return out
 
     def apply(self, other, compress=False, **compress_opts):
-        """Act with this MPO on another MPO or MPS, such that the resulting
-        object has the same tensor network structure/indices as the input.
+        r"""Act with this MPO on another MPO or MPS, such that the resulting
+        object has the same tensor network structure/indices as ``other``.
+
+        For an MPS::
+
+            other: x-x-x-x-x-x-x-x-x-x-x-x-x-x-x-x-x-x
+                   | | | | | | | | | | | | | | | | | |
+             self: A-A-A-A-A-A-A-A-A-A-A-A-A-A-A-A-A-A
+                   | | | | | | | | | | | | | | | | | |
+
+                                   -->
+
+              out: y=y=y=y=y=y=y=y=y=y=y=y=y=y=y=y=y=y
+                   | | | | | | | | | | | | | | | | | |   <- other.site_ind_id
+
+        For an MPO::
+
+                   | | | | | | | | | | | | | | | | | |
+            other: B-B-B-B-B-B-B-B-B-B-B-B-B-B-B-B-B-B
+                   | | | | | | | | | | | | | | | | | |
+             self: A-A-A-A-A-A-A-A-A-A-A-A-A-A-A-A-A-A
+                   | | | | | | | | | | | | | | | | | |
+
+                                   -->
+
+                   | | | | | | | | | | | | | | | | | |   <- other.upper_ind_id
+              out: C=C=C=C=C=C=C=C=C=C=C=C=C=C=C=C=C=C
+                   | | | | | | | | | | | | | | | | | |   <- other.lower_ind_id
+
+        The resulting TN will have the same structure/indices as ``other``, but
+        probably with larger bonds (depending on compression).
+
 
         Parameters
         ----------
@@ -2427,8 +2486,14 @@ class MatrixProductOperator(TensorNetwork1DFlat,
             Whether to compress the resulting object.
         compress_opts
             Supplied to :meth:`TensorNetwork1DFlat.compress`.
+
+        Returns
+        -------
+        MatrixProductOperator or MatrixProductState
         """
-        if isinstance(other, MatrixProductOperator):
+        if isinstance(other, MatrixProductState):
+            return self._apply_mps(other, compress=compress, **compress_opts)
+        elif isinstance(other, MatrixProductOperator):
             return self._apply_mpo(other, compress=compress, **compress_opts)
         else:
             raise TypeError("Can only Dot with a MatrixProductOperator or a "

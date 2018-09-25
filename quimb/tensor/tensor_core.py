@@ -905,6 +905,13 @@ def _asarray(array):
     return array
 
 
+def _ndim(array):
+    try:
+        return array.ndim
+    except AttributeError:
+        return len(array.shape)
+
+
 class Tensor(object):
     """A labelled, tagged ndarray.
 
@@ -934,7 +941,7 @@ class Tensor(object):
         self._data = _asarray(data)
         self._inds = tuple(inds)
 
-        if self._data.ndim != len(self.inds):
+        if _ndim(self._data) != len(self.inds):
             raise ValueError(
                 "Wrong number of inds, {}, supplied for array"
                 " of shape {}.".format(self.inds, self._data.shape))
@@ -1019,7 +1026,7 @@ class Tensor(object):
 
             self._tags = tags2set(tags)
 
-        if len(self.inds) != self.data.ndim:
+        if len(self.inds) != _ndim(self.data):
             raise ValueError("Mismatch between number of data dimensions and "
                              "number of indices supplied.")
 
@@ -1052,7 +1059,7 @@ class Tensor(object):
 
     @property
     def ndim(self):
-        return self._data.ndim
+        return _ndim(self._data)
 
     @property
     def size(self):

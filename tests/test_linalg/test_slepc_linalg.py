@@ -90,7 +90,7 @@ class TestSlepceigs:
         assert h.dtype == vks.dtype
 
         assert_allclose(lks, lka)
-        assert_allclose(abs(vka.H @ vks), np.eye(5), atol=1e-9)
+        assert_allclose(abs(vka.H @ vks), np.eye(5), atol=1e-8)
 
 
 @slepc4py_test
@@ -181,7 +181,7 @@ class TestShellMatrix:
         assert_allclose(np.abs(ev_s.conj().T @ ev), 1.0)
 
     def test_internal_shift_invert_linear_solver(self):
-        a = rand_herm(100, sparse=True)
+        a = rand_herm(100, sparse=True, seed=42)
         alo = sp.linalg.aslinearoperator(a)
 
         st_opts = {
