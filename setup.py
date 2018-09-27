@@ -20,7 +20,7 @@ setup(
     cmdclass=versioneer.get_cmdclass(),
     author='Johnnie Gray',
     author_email="john.gray.14@ucl.ac.uk",
-    license='MIT',
+    license='Apache',
     packages=find_packages(exclude=['deps', 'tests*']),
     install_requires=[
         'numpy>=1.12',
@@ -61,7 +61,7 @@ setup(
     python_requires='>=3.5',
     classifiers=[
         'Development Status :: 3 - Alpha',
-        'License :: OSI Approved :: MIT License',
+        'License :: OSI Approved :: Apache Software License',
         'Programming Language :: Python :: 3',
         'Programming Language :: Python :: 3.5',
         'Programming Language :: Python :: 3.6',
