@@ -16,7 +16,7 @@ from quimb.tensor import (
     MPS_rand_state,
     TNLinearOperator1D,
 )
-from quimb.tensor.tensor_core import _trim_singular_vals
+from quimb.tensor.decomp import _trim_singular_vals
 
 
 def test__trim_singular_vals():
