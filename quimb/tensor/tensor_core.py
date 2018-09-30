@@ -189,7 +189,7 @@ def tensor_contract(*tensors, output_inds=None, get=None,
 
     if get == 'path':
         ops = (t.data for t in tensors)
-        return oe.contract_path(contract_str, *ops)[1]
+        return oe.contract_path(contract_str, *ops, **contract_opts)[1]
 
     if get == 'expression':
         # account for possible constant tensors
