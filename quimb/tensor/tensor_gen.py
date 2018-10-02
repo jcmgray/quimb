@@ -87,15 +87,17 @@ def MPS_rand_state(n, bond_dim, phys_dim=2, normalize=True, cyclic=False,
     return rmps
 
 
-def MPS_product_state(arrays, **mps_opts):
+def MPS_product_state(arrays, cyclic=False, **mps_opts):
     """Generate a product state in MatrixProductState form, i,e,
     with bond dimension 1, from single site vectors described by ``arrays``.
     """
+    cyc_dim = (1,) if cyclic else ()
+
     def gen_array_shapes():
-        yield (1, -1)
+        yield (*cyc_dim, 1, -1)
         for _ in range(len(arrays) - 2):
             yield (1, 1, -1)
-        yield (1, -1)
+        yield (*cyc_dim, 1, -1)
 
     mps_arrays = (_asarray(array).reshape(*shape)
                   for array, shape in zip(arrays, gen_array_shapes()))
