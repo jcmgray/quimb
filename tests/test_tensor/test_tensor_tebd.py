@@ -1,5 +1,6 @@
 import pytest
 from pytest import approx
+import numpy as np
 
 import quimb as qu
 import quimb.tensor as qtn
@@ -20,6 +21,7 @@ class TestTEBD:
         assert tebd.pt.bond_size(0, 1) > 1
         assert not tebd._queued_sweep
 
+    @pytest.mark.parametrize('cyclic', [False, True])
     @pytest.mark.parametrize('order', [2, 4])
     @pytest.mark.parametrize('dt,tol', [
         (0.0759283, None),
@@ -27,11 +29,11 @@ class TestTEBD:
         (0.0759283, 1e-4),
         (None, None),
     ])
-    def test_evolve_obc(self, order, dt, tol):
+    def test_evolve_obc_pbc(self, order, dt, tol, cyclic):
         n = 10
         tf = 2
-        psi0 = qtn.MPS_neel_state(n)
-        H_int = qu.ham_heis(2, cyclic=False)
+        psi0 = qtn.MPS_neel_state(n, cyclic=cyclic)
+        H_int = qu.ham_heis(2, cyclic=False)  # this is just the interaction
 
         if dt and tol:
             with pytest.raises(ValueError):
@@ -39,8 +41,8 @@ class TestTEBD:
             return
 
         tebd = qtn.TEBD(psi0, H_int, dt=dt, tol=tol)
-
-        tebd.split_opts['cutoff'] = 0.0
+        assert tebd.cyclic == cyclic
+        tebd.split_opts['cutoff'] = 1e-10
 
         if (dt is None and tol is None):
             with pytest.raises(ValueError):
@@ -52,19 +54,20 @@ class TestTEBD:
         assert not tebd._queued_sweep
 
         dpsi0 = psi0.to_dense()
-        dham = qu.ham_heis(n=n, sparse=True, cyclic=False)
+        dham = qu.ham_heis(n=n, sparse=True, cyclic=cyclic)
         evo = qu.Evolution(dpsi0, dham)
         evo.update_to(tf)
 
         assert qu.expec(evo.pt, tebd.pt.to_dense()) == approx(1, rel=1e-5)
 
+    @pytest.mark.parametrize('cyclic', [False, True])
     @pytest.mark.parametrize('dt,tol', [
         (0.0659283, None),
         (None, 1e-5),
     ])
-    def test_at_times(self, dt, tol):
+    def test_at_times(self, dt, tol, cyclic):
         n = 10
-        psi0 = qtn.MPS_neel_state(n)
+        psi0 = qtn.MPS_neel_state(n, cyclic=cyclic)
         H_int = qu.ham_heis(2, cyclic=False)
         tebd = qtn.TEBD(psi0, H_int, dt=dt, tol=tol)
         assert tebd.H.special_sites == set()
@@ -123,3 +126,37 @@ class TestTEBD:
         evo.update_to(tf)
 
         assert qu.expec(tebd.pt.to_dense(), evo.pt) == pytest.approx(1.0)
+
+    @pytest.mark.parametrize('cyclic', [False, True])
+    def test_ising_model_with_field(self, cyclic):
+
+        p = qtn.MPS_computational_state('0000100000', cyclic=cyclic)
+        pd = p.to_dense()
+
+        H_nni = qtn.NNI_ham_ising(10, j=4, bx=1, cyclic=cyclic)
+        H_mpo = qtn.MPO_ham_ising(10, j=4, bx=1, cyclic=cyclic)
+        H = qu.ham_ising(10, jz=4, bx=1, cyclic=cyclic)
+
+        tebd = qtn.TEBD(p, H_nni, tol=1e-6)
+        tebd.split_opts['cutoff'] = 1e-9
+        tebd.split_opts['cutoff_mode'] = 'rel'
+        evo = qu.Evolution(pd, H)
+
+        e0 = qu.expec(pd, H)
+        e0_mpo = qtn.expec_TN_1D(p.H, H_mpo, p)
+
+        assert e0_mpo == pytest.approx(e0)
+
+        tf = 2
+        ts = np.linspace(0, tf, 21)
+        evo.update_to(tf)
+
+        for pt in tebd.at_times(ts):
+            assert isinstance(pt, qtn.MatrixProductState)
+            assert (pt.H @ pt) == pytest.approx(1.0, rel=1e-5)
+
+        assert (qu.expec(tebd.pt.to_dense(), evo.pt) ==
+                pytest.approx(1.0, rel=1e-5))
+
+        ef_mpo = qtn.expec_TN_1D(tebd.pt.H, H_mpo, tebd.pt)
+        assert ef_mpo == pytest.approx(e0, 1e-5)
