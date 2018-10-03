@@ -21,7 +21,7 @@ from .tensor_core import (
     _asarray,
     _ndim,
 )
-
+from .tensor_tebd import TEBD
 
 def align_TN_1D(*tns, ind_ids=None, inplace=False):
     r"""Align an arbitrary number of 1D tensor networks in a stack-like
@@ -397,6 +397,53 @@ class TensorNetwork1DVector:
         cAB = self.expec(pAB, **expec_opts)
 
         return cAB - cA * cB
+
+
+def pauli_z_OTOC(L, i, t, psi0, H, H_back, dt=None, tol=None, order=4,
+                 split_opts=None):
+    """ The out-of-time-ordered correlator (OTOC) generating by a local pauli
+    'z' notation acting on site 'i' at time 't', it's a function of time.
+
+    Parameters
+    ----------
+    L : int
+        The length of chain.
+    i : int
+        The site where the local pauli 'z' notation acting on.
+    t : float
+        The time to evolve to.
+    psi0 : MatrixProductState
+        The initial state in MPS form.
+    H : NNI
+        The Hamiltonian for forward time-evolution.
+    H_back : NNI
+        The Hamiltonian for backward time-evolution, should have only sign
+        difference with 'H'.
+    dt : float, optional
+        Time step to use, cannot be set as well as tol.
+    tol : float, optional
+        Tolerance for whole evolution, cannot be set as well as dt.
+    order : int, optional
+        Trotter order to use, defaults to 4.
+    split_opts : dict, optional
+        Compression options applied for splitting after gate application, see
+        tensor_split().
+    """
+
+    # forward time evolution
+    tebd1 = TEBD(psi0, H, split_opts=split_opts)
+    tebd1.update_to(t, dt=dt, tol=tol, order=order)
+
+    # local pauli 'z' notation with a phase shift applys to tebd1.pt
+    i_sigma_z = MPO_local_pauli_z(L, i, phase=True)
+    psit_sigma = i_sigma_z.apply(tebd1.pt)
+
+    # backward time evolution
+    tebd2 = TEBD(psit_sigma, H_back, split_opts=split_opts)
+    tebd2.update_to(t, dt=dt, tol=tol, order=order)
+
+    # return the expective value of local pauli 'z'
+    return expec_TN_1D(tebd2.pt.H, MPO_local_pauli_z(L, i), tebd2.pt)
 
 
 class TensorNetwork1DFlat:
