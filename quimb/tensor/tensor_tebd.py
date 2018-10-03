@@ -211,11 +211,17 @@ class TEBD:
 
         # handle hamiltonian -> convert array to NNI
         if isinstance(H, np.ndarray):
-            H = NNI(H)
+            H = NNI(H, cyclic=p0.cyclic)
         if not isinstance(H, NNI):
             raise TypeError("``H`` should be a ``NNI`` or 2-site array, "
                             "not a TensorNetwork of any form.")
+
+        if p0.cyclic != H.cyclic:
+            raise ValueError("Both ``p0`` and ``H`` should have matching OBC "
+                             "or PBC.")
+
         self.H = H
+        self.cyclic = H.cyclic
         self._ham_norm = H.mean_norm()
         self._U_ints = {}
         self._err = 0.0
@@ -336,7 +342,7 @@ class TEBD:
             #     | | |     | | | | | | | | |
             #           <==  4   3   2   1
             #
-            for i in reversed(range(1, self.N - 1, 2)):
+            for i in reversed(range(1, self.N - (0 if self.cyclic else 1), 2)):
                 sites = (i, i + 1)
                 U = self.get_gate(dt_frac, sites)
                 self._pt.right_canonize(
