@@ -8,7 +8,7 @@ from quimb.tensor import (
     MatrixProductState, MatrixProductOperator, align_TN_1D, MPS_rand_state,
     MPO_identity, MPO_identity_like, MPO_zeros, MPO_zeros_like, MPO_rand,
     MPO_rand_herm, MPO_ham_heis, MPS_neel_state, MPS_zero_state, bonds,
-    MPS_computational_state, Dense1D)
+    MPS_computational_state, Dense1D, NNI_ham_ising, TEBD)
 
 
 dtypes = ['float32', 'float64', 'complex64', 'complex128']
@@ -491,7 +491,20 @@ class TestMatrixProductState:
             qu.pauli('Z'), 3, 1, B=qu.pauli('Y')) == pytest.approx(0.0)
 
         assert ghz.H @ ghz == pytest.approx(1.0)
-
+        
+    def test_pauli_z_OTOC(self):
+        L = 10
+        psi0 = MPS_computational_state('0'*L, cyclic=True)
+        H1 = NNI_ham_ising(L, j=4, bx=0, cyclic=True)
+        H_back1 = NNI_ham_ising(L, j=-4, bx=0, cyclic=True)
+        H2 = NNI_ham_ising(L, j=4, bx=3, cyclic=True)
+        H_back2 = NNI_ham_ising(L, j=-4, bx=3, cyclic=True)
+        
+        assert pauli_z_OTOC(L, 5, 0, psi0, H1, H_back1, dt=1e-2) == pytest.approx(1.0)
+        assert pauli_z_OTOC(L, 5, 1, psi0, H1, H_back1, dt=1e-2) == pytest.approx(1.0)
+        assert_approx_equal(pauli_z_OTOC(L, 5, 1, psi0, H1, H_back1, dt=1e-2), pauli_z_OTOC(L, 4, 1, psi0, H1, H_back1, dt=1e-2))
+        assert pauli_z_OTOC(L, 5, 2, psi0, H2, H_back2, dt=1e-2) == pytest.approx(0.1)
+        
     def test_gate_split(self):
         psi = MPS_rand_state(10, 3)
         psi2 = psi.copy()
