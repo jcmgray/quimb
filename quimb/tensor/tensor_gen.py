@@ -324,7 +324,7 @@ def MPO_local_pauli_z(L, i, phys_dim=2, cyclic=False, phase=False, **mpo_opts):
         else:
             yield II.reshape(1, *cyc_dim, phys_dim, phys_dim)
 
-    return qtn.MatrixProductOperator(gen_array(), **mpo_opts)
+    return MatrixProductOperator(gen_array(), **mpo_opts)
 
 
 @random_seed_fn
