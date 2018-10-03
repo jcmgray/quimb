@@ -105,16 +105,20 @@ def MPS_product_state(arrays, cyclic=False, **mps_opts):
     return MatrixProductState(mps_arrays, shape='lrp', **mps_opts)
 
 
-def MPS_computational_state(binary, dtype=float, **mps_opts):
+def MPS_computational_state(binary, dtype=float, cyclic=False, **mps_opts):
     """A computational basis state in Matrix Product State form.
 
     Parameters
     ----------
     binary : str or sequence of int
         String specifying the state, e.g. ``'00101010111'`` or ``[0, 0, 1]``.
+    cyclic : bool, optional
+        Generate a MPS with periodic boundary conditions or not, default open
+        boundary conditions.
     mps_opts
         Supplied to MatrixProductState constructor.
     """
+
     array_map = {
         '0': np.array([1., 0.], dtype=dtype),
         '1': np.array([0., 1.], dtype=dtype),
@@ -124,7 +128,7 @@ def MPS_computational_state(binary, dtype=float, **mps_opts):
         for s in binary:
             yield array_map[str(s)]
 
-    return MPS_product_state(tuple(gen_arrays()), **mps_opts)
+    return MPS_product_state(tuple(gen_arrays()), cyclic=cyclic, **mps_opts)
 
 
 def MPS_neel_state(n, down_first=False, dtype=float, **mps_opts):
@@ -274,6 +278,53 @@ def MPO_zeros_like(mpo, **mpo_opts):
                      dtype=mpo.dtype, site_tag_id=mpo.site_tag_id,
                      upper_ind_id=mpo.upper_ind_id, cyclic=mpo.cyclic,
                      lower_ind_id=mpo.lower_ind_id, **mpo_opts)
+
+
+def MPO_local_pauli_z(L, i, phys_dim=2, cyclic=False, phase=False, **mpo_opts):
+    """generate a MPO of the local pauli 'z' notation acting on site 'i'
+
+    Parameters
+    ----------
+    L : int
+        The length of chain.
+    i : int
+        The site where the local pauli 'z' notation acting on.
+    phys_dim : int, optional
+        The physical (site) dimensions, defaults to 2.
+    cyclic : bool, optional
+        Generate a MPO with periodic boundary conditions or not, default is
+        open boundary conditions.
+    phase : bool, optional
+        Add a phase shift e^{i\pi/2} or not, default is no phase shift.
+    mpo_opts
+        Supplied to :class: '~quimb.tensor.tensor_1d.MatrixProductOperator'.
+    """
+
+    II = np.identity(phys_dim, dtype=complex)
+
+    if phase is False:
+        z = np.array([[1., 0.], [0., -1.]], dtype=complex)
+    else:
+        z = np.array([[0.+1.j, 0.], [0., 0.-1.j]], dtype=complex)
+
+    cyc_dim = (1,) if cyclic else ()
+
+    def gen_array():
+        if i == 1:
+            yield z.reshape(*cyc_dim, 1, phys_dim, phys_dim)
+        else:
+            yield II.reshape(*cyc_dim, 1, phys_dim, phys_dim)
+        for n in range(L-2):
+            if i == n+2:
+                yield z.reshape(1, 1, phys_dim, phys_dim)
+            else:
+                yield II.reshape(1, 1, phys_dim, phys_dim)
+        if i == L:
+            yield z.reshape(1, *cyc_dim, phys_dim, phys_dim)
+        else:
+            yield II.reshape(1, *cyc_dim, phys_dim, phys_dim)
+
+    return qtn.MatrixProductOperator(gen_array(), **mpo_opts)
 
 
 @random_seed_fn
