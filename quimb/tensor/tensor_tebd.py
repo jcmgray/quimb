@@ -490,3 +490,50 @@ class TEBD:
                 self._set_progbar_desc(ts)
 
             yield self.pt
+
+
+def OTOC(psi0, H, H_back, t, i):
+    """ The out-of-time-ordered correlator (OTOC) generating by
+    a local pauli 'z' notation acting on site 'i' at time 't',
+    it's a function of time.
+    Parameters
+    ----------
+    psi0 : MatrixProductState
+        The initial state in MPS form.
+    H : NNI
+        The Hamiltonian for forward time-evolution.
+    H_back : NNI
+        The Hamiltonian for backward time-evolution, should have only
+        sign difference with 'H'.
+    t : float
+        The time to evolve to.
+    i : int
+        The site where the local pauli 'z' notation acting on.
+    """
+
+    # obviously play with these settings
+    tebd_opts = {
+        'tol': 1e-5,
+        'split_opts': {
+            'cutoff': 1e-5,
+            'cutoff_mode': 'rel',
+        },
+    }
+
+    Z = qu.pauli('Z')
+    phased_Z = 1j * Z
+
+    # evolve forward
+    tebd1 = TEBD(psi0, H, **tebd_opts)
+    tebd1.update_to(t)
+
+    # apply first phased Z-gate
+    psi_t_Z = tebd1.pt.gate(phased_Z, i, contract=True)
+
+    # evolve backwards
+    tebd2 = TEBD(psi_t_Z, H_back, **tebd_opts)
+    tebd2.update_to(t)
+
+    # compute expectation with second non-phased Z-gate
+    psi_f = tebd2.pt
+    return psi_f.H.expec(psi_f.gate(Z, i, contract=True))
