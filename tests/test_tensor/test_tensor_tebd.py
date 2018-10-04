@@ -4,7 +4,7 @@ import numpy as np
 
 import quimb as qu
 import quimb.tensor as qtn
-
+from quimb.tensor.tensor_tebd import OTOC
 
 class TestTEBD:
 
@@ -160,3 +160,19 @@ class TestTEBD:
 
         ef_mpo = qtn.expec_TN_1D(tebd.pt.H, H_mpo, tebd.pt)
         assert ef_mpo == pytest.approx(e0, 1e-5)
+
+
+def test_OTOC():
+    L = 10
+    psi0 = qtn.MPS_computational_state('0'*L, cyclic=True)
+    H1 = qtn.NNI_ham_ising(L, j=4, bx=0, cyclic=True)
+    H_back1 = qtn.NNI_ham_ising(L, j=-4, bx=0, cyclic=True)
+    H2 = qtn.NNI_ham_ising(L, j=4, bx=3, cyclic=True)
+    H_back2 = qtn.NNI_ham_ising(L, j=-4, bx=3, cyclic=True)
+
+    assert OTOC(psi0, H1, H_back1, 0, 5) == pytest.approx(1.0)
+    assert OTOC(psi0, H1, H_back1, 1, 5) == pytest.approx(1.0)
+    x = OTOC(psi0, H2, H_back2, 1, 5)
+    y = OTOC(psi0, H2, H_back2, 1, 4)
+    assert abs(x-y) < 1e-4
+    assert OTOC(psi0, H2, H_back2, 2, 5) == pytest.approx(0.1, 0.05)
