@@ -280,53 +280,6 @@ def MPO_zeros_like(mpo, **mpo_opts):
                      lower_ind_id=mpo.lower_ind_id, **mpo_opts)
 
 
-def MPO_local_pauli_z(L, i, phys_dim=2, cyclic=False, phase=False, **mpo_opts):
-    """generate a MPO of the local pauli 'z' notation acting on site 'i'
-
-    Parameters
-    ----------
-    L : int
-        The length of chain.
-    i : int
-        The site where the local pauli 'z' notation acting on.
-    phys_dim : int, optional
-        The physical (site) dimensions, defaults to 2.
-    cyclic : bool, optional
-        Generate a MPO with periodic boundary conditions or not, default is
-        open boundary conditions.
-    phase : bool, optional
-        Add a phase shift e^{i\pi/2} or not, default is no phase shift.
-    mpo_opts
-        Supplied to :class: '~quimb.tensor.tensor_1d.MatrixProductOperator'.
-    """
-
-    II = np.identity(phys_dim, dtype=complex)
-
-    if phase is False:
-        z = np.array([[1., 0.], [0., -1.]], dtype=complex)
-    else:
-        z = np.array([[0.+1.j, 0.], [0., 0.-1.j]], dtype=complex)
-
-    cyc_dim = (1,) if cyclic else ()
-
-    def gen_array():
-        if i == 1:
-            yield z.reshape(*cyc_dim, 1, phys_dim, phys_dim)
-        else:
-            yield II.reshape(*cyc_dim, 1, phys_dim, phys_dim)
-        for n in range(L-2):
-            if i == n+2:
-                yield z.reshape(1, 1, phys_dim, phys_dim)
-            else:
-                yield II.reshape(1, 1, phys_dim, phys_dim)
-        if i == L:
-            yield z.reshape(1, *cyc_dim, phys_dim, phys_dim)
-        else:
-            yield II.reshape(1, *cyc_dim, phys_dim, phys_dim)
-
-    return MatrixProductOperator(gen_array(), **mpo_opts)
-
-
 @random_seed_fn
 def MPO_rand(n, bond_dim, phys_dim=2, normalize=True, cyclic=False,
              herm=False, dtype=float, **mpo_opts):
