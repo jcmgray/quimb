@@ -522,7 +522,7 @@ def OTOC_local(psi0, H, H_back, ts, i):
 
     Z = qu.pauli('Z')
 
-    # apply the first Z-gate to right and set the initial TEBD
+    # set the initial TEBD and apply the first Z-gate to right
     psi0_L = psi0
     tebd1_L = TEBD(psi0_L, H, **tebd_opts)
 
@@ -550,3 +550,47 @@ def OTOC_local(psi0, H, H_back, ts, i):
         psi_f_L = tebd2_L.pt.gate(Z, i, contract=True)
         psi_f_R = tebd2_R.pt
         yield psi_f_L.H.expec(psi_f_R)
+
+
+def OTOC_local_fully_polarized(psi0, H, H_back, ts, i):
+    """ The out-of-time-ordered correlator (OTOC) generating by a local pauli
+    'z' notation acting on site 'i', and the psi0 is a fully polarized state.
+
+    Parameters
+    ----------
+    psi0 : MatrixProductState
+        The initial state in MPS form, and it's specifically set into
+        a fully polarized state.
+    H : NNI
+        The Hamiltonian for forward time-evolution.
+    H_back : NNI
+        The Hamiltonian for backward time-evolution, should have only
+        sign difference with 'H'.
+    ts : sequence of float
+        The time to evolve to.
+    i : int
+        The site where the local pauli 'z' notation acting on.
+    """
+
+    # obviously play with these settings
+    tebd_opts = {
+        'tol': 1e-5,
+        'split_opts': {
+            'cutoff': 1e-5,
+            'cutoff_mode': 'rel',
+        },
+    }
+
+    Z = qu.pauli('Z')
+    tebd1 = TEBD(psi0, H, **tebd_opts)
+    for t in ts:
+        # evolve forward
+        tebd1.update_to(t)
+        # apply first Z-gate
+        psi_t_Z = tebd1.pt.gate(Z, i, contract=True)
+        # evolve backwards
+        tebd2 = TEBD(psi_t_Z, H_back, **tebd_opts)
+        tebd2.update_to(t)
+        # compute expectation with second Z-gate
+        psi_f = tebd2.pt
+        yield psi_f.H.expec(psi_f.gate(Z, i, contract=True))
