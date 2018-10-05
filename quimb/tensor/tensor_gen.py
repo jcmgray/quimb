@@ -105,16 +105,20 @@ def MPS_product_state(arrays, cyclic=False, **mps_opts):
     return MatrixProductState(mps_arrays, shape='lrp', **mps_opts)
 
 
-def MPS_computational_state(binary, dtype=float, **mps_opts):
+def MPS_computational_state(binary, dtype=float, cyclic=False, **mps_opts):
     """A computational basis state in Matrix Product State form.
 
     Parameters
     ----------
     binary : str or sequence of int
         String specifying the state, e.g. ``'00101010111'`` or ``[0, 0, 1]``.
+    cyclic : bool, optional
+        Generate a MPS with periodic boundary conditions or not, default open
+        boundary conditions.
     mps_opts
         Supplied to MatrixProductState constructor.
     """
+
     array_map = {
         '0': np.array([1., 0.], dtype=dtype),
         '1': np.array([0., 1.], dtype=dtype),
@@ -124,7 +128,7 @@ def MPS_computational_state(binary, dtype=float, **mps_opts):
         for s in binary:
             yield array_map[str(s)]
 
-    return MPS_product_state(tuple(gen_arrays()), **mps_opts)
+    return MPS_product_state(tuple(gen_arrays()), cyclic=cyclic, **mps_opts)
 
 
 def MPS_neel_state(n, down_first=False, dtype=float, **mps_opts):
