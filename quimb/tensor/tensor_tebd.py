@@ -490,3 +490,67 @@ class TEBD:
                 self._set_progbar_desc(ts)
 
             yield self.pt
+
+
+def OTOC_local(psi0, H, H_back, ts, i):
+    """ The out-of-time-ordered correlator (OTOC) generating by a local
+    pauli 'z' notation acting on site 'i', note it's a function of time.
+
+    Parameters
+    ----------
+    psi0 : MatrixProductState
+        The initial state in MPS form.
+    H : NNI
+        The Hamiltonian for forward time-evolution.
+    H_back : NNI
+        The Hamiltonian for backward time-evolution, should have only
+        sign difference with 'H'.
+    ts : sequence of float
+        The time to evolve to.
+    i : int
+        The site where the local pauli 'z' notation acting on.
+    """
+
+    # obviously play with these settings
+    tebd_opts = {
+        'tol': 1e-5,
+        'split_opts': {
+            'cutoff': 1e-5,
+            'cutoff_mode': 'rel',
+        },
+    }
+
+    Z = qu.pauli('Z')
+
+    # apply the first Z-gate to right and set the initial TEBD
+    psi0_L = psi0
+    tebd1_L = TEBD(psi0_L, H, **tebd_opts)
+
+    psi0_R = psi0.gate(Z, i, contract=True)
+    tebd1_R = TEBD(psi0_R, H, **tebd_opts)
+
+    OTOC_local_t = []
+
+    for t in ts:
+        # evolve forward
+        tebd1_L.update_to(t)
+        tebd1_R.update_to(t)
+
+        # apply a Z-gate to both left and right states
+        psi_t_L_Z = tebd1_L.pt.gate(Z, i, contract=True)
+        psi_t_R_Z = tebd1_R.pt.gate(Z, i, contract=True)
+
+        # set the second left and right TEBD
+        tebd2_L = TEBD(psi_t_L_Z, H_back, **tebd_opts)
+        tebd2_R = TEBD(psi_t_R_Z, H_back, **tebd_opts)
+
+        # evolve backwards
+        tebd2_L.update_to(t)
+        tebd2_R.update_to(t)
+
+        # apply the laste Z-gate to left and compute overlap
+        psi_f_L = tebd2_L.pt.gate(Z, i, contract=True)
+        psi_f_R = tebd2_R.pt
+        OTOC_local_t += [psi_f_L.H.expec(psi_f_R)]
+
+    return OTOC_local_t
