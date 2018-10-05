@@ -529,8 +529,6 @@ def OTOC_local(psi0, H, H_back, ts, i):
     psi0_R = psi0.gate(Z, i, contract=True)
     tebd1_R = TEBD(psi0_R, H, **tebd_opts)
 
-    OTOC_local_t = []
-
     for t in ts:
         # evolve forward
         tebd1_L.update_to(t)
@@ -551,6 +549,4 @@ def OTOC_local(psi0, H, H_back, ts, i):
         # apply the laste Z-gate to left and compute overlap
         psi_f_L = tebd2_L.pt.gate(Z, i, contract=True)
         psi_f_R = tebd2_R.pt
-        OTOC_local_t += [psi_f_L.H.expec(psi_f_R)]
-
-    return OTOC_local_t
+        yield psi_f_L.H.expec(psi_f_R)
