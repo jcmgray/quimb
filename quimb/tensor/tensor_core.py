@@ -33,12 +33,12 @@ def _get_contract_expr(contract_str, *shapes, **kwargs):
 _get_contract_expr_cached = functools.lru_cache(4096)(_get_contract_expr)
 
 
-def get_contract_expr(contract_str, *shapes, **kwargs):
+def get_contract_expr(contract_str, *shapes, cache=True, **kwargs):
     """Get an callable expression that will evaluate ``contract_str`` based on
     ``shapes``. Cache the result if no constant tensors are involved.
     """
     # can only cache if the expression does not involve constant tensors
-    if kwargs.get('constants', None):
+    if kwargs.get('constants', None) or not cache:
         return _get_contract_expr(contract_str, *shapes, **kwargs)
 
     return _get_contract_expr_cached(contract_str, *shapes, **kwargs)
@@ -2674,12 +2674,12 @@ class TensorNetwork(object):
         # Else just contract those tensors specified by tags.
         return self.contract_tags(tags, inplace=inplace, **opts)
 
-    def contraction_complexity(self):
+    def contraction_complexity(self, **contract_opts):
         """Compute the 'contraction complexity' of this tensor network. This
         is simply defined as the maximum tensor rank produced during the
         'greedy' (so potentially only pseudo-optimal) contraction sequence.
         """
-        expr = self.contract(all, get='expression')
+        expr = self.contract(all, get='expression', **contract_opts)
         return max(len(c[2].split('->')[-1]) for c in expr.contraction_list)
 
     def __rshift__(self, tags_seq):
