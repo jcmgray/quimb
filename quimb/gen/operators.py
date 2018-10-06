@@ -308,7 +308,7 @@ def hamiltonian_builder(fn):
 @functools.lru_cache(maxsize=8)
 @hamiltonian_builder
 def ham_heis(n, j=1.0, b=0.0, cyclic=True,
-             parallel=None, nthreads=None, ownership=None):
+             parallel=False, nthreads=None, ownership=None):
     """Constructs the nearest neighbour 1d heisenberg spin-1/2 hamiltonian.
 
     Parameters
@@ -834,7 +834,7 @@ def num(n, **qu_opts):
 @functools.lru_cache(maxsize=8)
 @hamiltonian_builder
 def ham_hubbard_hardcore(n, t=0.5, V=1., mu=1., cyclic=True,
-                         parallel=None, ownership=None):
+                         parallel=False, ownership=None):
     """Generate the spinless fermion hopping hamiltonian.
 
     Parameters
