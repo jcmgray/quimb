@@ -82,14 +82,29 @@ class SyncroFuture:
         self.comm = comm
 
     def result(self):
-        iterate_over = (isinstance(self._result, tuple) and
-                        any(isinstance(x, np.ndarray) for x in self._result))
+        rank = self.comm.Get_rank()
+
+        if rank == self.result_rank:
+            should_it = (isinstance(self._result, tuple) and
+                         any(isinstance(x, np.ndarray) for x in self._result))
+            if should_it:
+                iterate_over = len(self._result)
+            else:
+                iterate_over = 0
+        else:
+            iterate_over = None
+        iterate_over = self.comm.bcast(iterate_over, root=self.result_rank)
 
         if iterate_over:
-            return tuple(bcast(x, self.comm, self.result_rank)
-                         for x in self._result)
+            if rank != self.result_rank:
+                self._result = (None,) * iterate_over
 
-        return bcast(self._result, self.comm, self.result_rank)
+            result = tuple(bcast(x, self.comm, self.result_rank)
+                           for x in self._result)
+        else:
+            result = bcast(self._result, self.comm, self.result_rank)
+
+        return result
 
     @staticmethod
     def cancel():
