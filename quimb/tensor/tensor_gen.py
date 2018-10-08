@@ -7,7 +7,7 @@ import numpy as np
 from ..core import make_immutable
 from ..linalg.base_linalg import norm_fro_dense
 from ..gen.operators import spin_operator, eye, _gen_mbl_random_factors
-from ..gen.rand import randn, choice, random_seed_fn
+from ..gen.rand import randn, choice, random_seed_fn, rand_phase
 from .tensor_core import Tensor, _asarray
 from .tensor_1d import MatrixProductState, MatrixProductOperator
 from .tensor_tebd import NNI
@@ -193,6 +193,18 @@ def MPS_zero_state(n, bond_dim=1, phys_dim=2, cyclic=False,
         yield np.zeros((bond_dim, *cyc_dim, phys_dim), dtype=dtype)
 
     return MatrixProductState(gen_arrays(), **mps_opts)
+
+
+def MPS_sampler(n, dtype=complex, squeeze=True, **mps_opts):
+    """A product state for sampling tensor network traces. Seen as a vector it
+    has the required property that ``psi.H @ psi == d`` always for hilbert
+    space size ``d``.
+    """
+    arrays = [rand_phase(2, dtype=dtype) for _ in range(n)]
+    psi = MPS_product_state(arrays, **mps_opts)
+    if squeeze:
+        psi.squeeze_()
+    return psi
 
 
 # --------------------------------------------------------------------------- #

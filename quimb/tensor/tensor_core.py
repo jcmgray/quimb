@@ -4,6 +4,7 @@ import os
 import re
 import copy
 import uuid
+import math
 import string
 import weakref
 import operator
@@ -2676,11 +2677,17 @@ class TensorNetwork(object):
 
     def contraction_complexity(self, **contract_opts):
         """Compute the 'contraction complexity' of this tensor network. This
-        is simply defined as the maximum tensor rank produced during the
-        'greedy' (so potentially only pseudo-optimal) contraction sequence.
+        is defined as log2 of the maximum tensor size produced during the
+        contraction sequence. If every index in the network has dimension 2
+        this corresponds to the maximum rank tensor produced.
         """
-        expr = self.contract(all, get='expression', **contract_opts)
-        return max(len(c[2].split('->')[-1]) for c in expr.contraction_list)
+        try:
+            path = self.contract(all, get='path', **contract_opts)
+            return math.log2(path.largest_intermediate)
+        except AttributeError:
+            expr = self.contract(all, get='expression', **contract_opts)
+            return max(len(c[2].split('->')[-1])
+                       for c in expr.contraction_list)
 
     def __rshift__(self, tags_seq):
         """Overload of '>>' for TensorNetwork.contract_cumulative.
