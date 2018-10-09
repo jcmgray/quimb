@@ -492,9 +492,10 @@ class TEBD:
             yield self.pt
 
 
-def OTOC_local(psi0, H, H_back, ts, i):
-    """ The out-of-time-ordered correlator (OTOC) generating by a local
-    pauli 'z' notation acting on site 'i', note it's a function of time.
+def OTOC_local(psi0, H, H_back, ts, i, A, B=None,
+               initial_eigenstate='check', **tebd_opts):
+    """ The out-of-time-ordered correlator (OTOC) generating by two local
+    operator A and B acting on site 'i', note it's a function of time.
 
     Parameters
     ----------
@@ -508,89 +509,70 @@ def OTOC_local(psi0, H, H_back, ts, i):
     ts : sequence of float
         The time to evolve to.
     i : int
-        The site where the local pauli 'z' notation acting on.
-    """
+        The site where the local operators acting on.
+    A : array
+        The operator to act with.
+    initial_eigenstate: {'check', Flase, True}
+        To check the psi0 is or not eigenstate of operator B. If psi0 is the
+        eigenstate of B, it will run a simpler version of OTOC calculation
+        automatically, 
 
-    # obviously play with these settings
-    tebd_opts = {
-        'tol': 1e-5,
-        'split_opts': {
-            'cutoff': 1e-5,
-            'cutoff_mode': 'rel',
-        },
-    }
-
-    Z = qu.pauli('Z')
-
-    # set the initial TEBD and apply the first Z-gate to right
-    psi0_L = psi0
-    tebd1_L = TEBD(psi0_L, H, **tebd_opts)
-
-    psi0_R = psi0.gate(Z, i, contract=True)
-    tebd1_R = TEBD(psi0_R, H, **tebd_opts)
-
-    for t in ts:
-        # evolve forward
-        tebd1_L.update_to(t)
-        tebd1_R.update_to(t)
-
-        # apply a Z-gate to both left and right states
-        psi_t_L_Z = tebd1_L.pt.gate(Z, i, contract=True)
-        psi_t_R_Z = tebd1_R.pt.gate(Z, i, contract=True)
-
-        # set the second left and right TEBD
-        tebd2_L = TEBD(psi_t_L_Z, H_back, **tebd_opts)
-        tebd2_R = TEBD(psi_t_R_Z, H_back, **tebd_opts)
-
-        # evolve backwards
-        tebd2_L.update_to(t)
-        tebd2_R.update_to(t)
-
-        # apply the laste Z-gate to left and compute overlap
-        psi_f_L = tebd2_L.pt.gate(Z, i, contract=True)
-        psi_f_R = tebd2_R.pt
-        yield psi_f_L.H.expec(psi_f_R)
-
-
-def OTOC_local_fully_polarized(psi0, H, H_back, ts, i):
-    """ The out-of-time-ordered correlator (OTOC) generating by a local pauli
-    'z' notation acting on site 'i', and the psi0 is a fully polarized state.
-
-    Parameters
+    Returns
     ----------
-    psi0 : MatrixProductState
-        The initial state in MPS form, and it's specifically set into
-        a fully polarized state.
-    H : NNI
-        The Hamiltonian for forward time-evolution.
-    H_back : NNI
-        The Hamiltonian for backward time-evolution, should have only
-        sign difference with 'H'.
-    ts : sequence of float
-        The time to evolve to.
-    i : int
-        The site where the local pauli 'z' notation acting on.
+    The OTOC <A(t)B(0)A(t)B(0)>
     """
 
-    # obviously play with these settings
-    tebd_opts = {
-        'tol': 1e-5,
-        'split_opts': {
-            'cutoff': 1e-5,
-            'cutoff_mode': 'rel',
-        },
-    }
+    if B is None:
+        B = A
 
-    Z = qu.pauli('Z')
-    tebd1 = TEBD(psi0, H, **tebd_opts)
-    for t in ts:
-        # evolve forward
-        tebd1.update_to(t)
-        # apply first Z-gate
-        psi_t_Z = tebd1.pt.gate(Z, i, contract=True)
-        # evolve backwards
-        tebd2 = TEBD(psi_t_Z, H_back, **tebd_opts)
-        tebd2.update_to(t)
-        # compute expectation with second Z-gate
-        psi_f = tebd2.pt
-        yield psi_f.H.expec(psi_f.gate(Z, i, contract=True))
+    if initial_eigenstate is 'check':
+        psi = psi0.gate(B, i, contract=True)
+        x = psi0.H.expec(psi)
+        y = psi.H.expec(psi)
+        if abs(x-y) < 1e-5:
+            initial_eigenstate = True
+        else:
+            initial_eigenstate = False
+
+    if initial_eigenstate is True:
+        tebd1 = TEBD(psi0, H, **tebd_opts)
+        for t in ts:
+            # evolve forward
+            tebd1.update_to(t)
+            # apply first A-gate
+            psi_t_A = tebd1.pt.gate(A, i, contract=True)
+            # evolve backwards
+            tebd2 = TEBD(psi_t_A, H_back, **tebd_opts)
+            tebd2.update_to(t)
+            # compute expectation with second B-gate
+            psi_f = tebd2.pt
+            yield psi_f.H.expec(psi_f.gate(B, i, contract=True))
+    else:
+        # set the initial TEBD and apply the first operator A to right
+        psi0_L = psi0
+        tebd1_L = TEBD(psi0_L, H, **tebd_opts)
+
+        psi0_R = psi0.gate(B, i, contract=True)
+        tebd1_R = TEBD(psi0_R, H, **tebd_opts)
+
+        for t in ts:
+            # evolve forward
+            tebd1_L.update_to(t)
+            tebd1_R.update_to(t)
+
+            # apply the opertor A to both left and right states
+            psi_t_L_A = tebd1_L.pt.gate(A, i, contract=True)
+            psi_t_R_A = tebd1_R.pt.gate(A.H, i, contract=True)
+
+            # set the second left and right TEBD
+            tebd2_L = TEBD(psi_t_L_A, H_back, **tebd_opts)
+            tebd2_R = TEBD(psi_t_R_A, H_back, **tebd_opts)
+
+            # evolve backwards
+            tebd2_L.update_to(t)
+            tebd2_R.update_to(t)
+
+            # apply the laste operator B to left and compute overlap
+            psi_f_L = tebd2_L.pt.gate(B.H, i, contract=True)
+            psi_f_R = tebd2_R.pt
+            yield psi_f_L.H.expec(psi_f_R)
