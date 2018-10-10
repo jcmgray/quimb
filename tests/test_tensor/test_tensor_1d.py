@@ -544,6 +544,15 @@ class TestMatrixProductOperator:
             'k0', 'b0', 'k1', 'b1', 'k2', 'b2', 'k3', 'b3', 'k4', 'b4'
         }
 
+    @pytest.mark.parametrize("cyclic", [False, True])
+    def test_compress_mpo(self, cyclic):
+        A = MPO_rand(12, 5, cyclic=cyclic)
+        assert all(b == 5 for b in A.bond_sizes())
+        A.expand_bond_dimension(10)
+        assert all(b == 10 for b in A.bond_sizes())
+        A.compress()
+        assert all(b in (4, 5) for b in A.bond_sizes())
+
     def test_add_mpo(self):
         h = MPO_rand_herm(12, 5)
         h2 = h + h
