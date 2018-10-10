@@ -493,7 +493,7 @@ class TensorNetwork1DFlat:
             to be the conjugate state.
         """
         if start is None:
-            start = 0
+            start = -1 if self.cyclic else 0
         if stop is None:
             stop = self.nsites - 1
 
@@ -529,7 +529,7 @@ class TensorNetwork1DFlat:
             it to be the conjugate state.
         """
         if start is None:
-            start = self.nsites - 1
+            start = self.nsites - (0 if self.cyclic else 1)
         if stop is None:
             stop = 0
 
@@ -728,7 +728,7 @@ class TensorNetwork1DFlat:
             Supplied to :meth:`Tensor.split`.
         """
         if start is None:
-            start = 0
+            start = -1 if self.cyclic else 0
         if stop is None:
             stop = self.nsites - 1
 
@@ -751,7 +751,7 @@ class TensorNetwork1DFlat:
             Supplied to :meth:`Tensor.split`.
         """
         if start is None:
-            start = self.nsites - 1
+            start = self.nsites - (0 if self.cyclic else 1)
         if stop is None:
             stop = 0
 
