@@ -838,6 +838,68 @@ def NNI_ham_XY(n=None, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **nni_opts):
     return H.build_nni(n=n, **nni_opts)
 
 
+def _ham_XXZ(D=0.0, *, S=1 / 2, cyclic=False):
+    H = SpinHam(S=S, cyclic=cyclic)
+
+    H += 1.0, 'X', 'X'
+    H += 1.0, 'Y', 'Y'
+
+    if D != 0.0:
+        H -= D, 'Z', 'Z'
+
+    return H
+
+
+def MPO_ham_XXZ(n=None, D=0.0, *, S=1 / 2, cyclic=False, **mpo_opts):
+    """XXZ-Hamiltonian in MPO form.
+
+    Parameters
+    ----------
+    n : int
+        The number of sites.
+    D : float, optional
+        The Z-interaction strength.
+    S : {1/2, 1, 3/2, ...}, optional
+        The underlying spin of the system, defaults to 1/2.
+    cyclic : bool, optional
+        Generate a MPO with periodic boundary conditions or not, default is
+        open boundary conditions.
+    mpo_opts
+        Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductOperator`.
+
+    Returns
+    -------
+    MatrixProductOperator
+    """
+    H = _ham_XXZ(D=D, S=S, cyclic=cyclic)
+    return H.build_mpo(n=n, **mpo_opts)
+
+
+def NNI_ham_XXZ(n=None, D=0.0, *, S=1 / 2, cyclic=False, **nni_opts):
+    """XXZ-Hamiltonian in MPO form.
+
+    Parameters
+    ----------
+    n : int
+        The number of sites.
+    D : float, optional
+        The Z-interaction strength.
+    S : {1/2, 1, 3/2, ...}, optional
+        The underlying spin of the system, defaults to 1/2.
+    cyclic : bool, optional
+        Generate a MPO with periodic boundary conditions or not, default is
+        open boundary conditions.
+    nni_opts
+        Supplied to :class:`~quimb.tensor.tensor_gen.NNI`.
+
+    Returns
+    -------
+    NNI
+    """
+    H = _ham_XXZ(D=D, S=S, cyclic=cyclic)
+    return H.build_nni(n=n, **nni_opts)
+
+
 def _ham_heis(j=1.0, bz=0.0, *, S=1 / 2, cyclic=False):
     H = SpinHam(S=S, cyclic=cyclic)
 
@@ -912,6 +974,86 @@ def NNI_ham_heis(n=None, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **nni_opts):
     NNI
     """
     H = _ham_heis(j=j, bz=bz, S=S, cyclic=cyclic)
+    return H.build_nni(n=n, **nni_opts)
+
+
+def _ham_bilinear_biquadratic(theta, *, S=1/2, cyclic=False):
+    H = SpinHam(S=S, cyclic=cyclic)
+
+    H += np.cos(theta), 'X', 'X'
+    H += np.cos(theta), 'Y', 'Y'
+    H += np.cos(theta), 'Z', 'Z'
+
+    XX = spin_operator('X', S=S) @ spin_operator('X', S=S)
+    YY = spin_operator('Y', S=S) @ spin_operator('Y', S=S)
+    ZZ = spin_operator('Z', S=S) @ spin_operator('Z', S=S)
+
+    H += np.sin(theta), XX, XX
+    H += np.sin(theta), XX, YY
+    H += np.sin(theta), XX, ZZ
+    H += np.sin(theta), YY, XX
+    H += np.sin(theta), YY, YY
+    H += np.sin(theta), YY, ZZ
+    H += np.sin(theta), ZZ, XX
+    H += np.sin(theta), ZZ, YY
+    H += np.sin(theta), ZZ, ZZ
+
+    return H
+
+
+def MPO_ham_bilinear_biquadratic(n=None, theta=0, *, S=1/2,
+                                 cyclic=False, **mpo_opts):
+    """ Hamiltonian of one-dimensional bilinear biquadratic chain in MPO form,
+    see PhysRevB.93.184428.
+
+    Parameters
+    ----------
+    n : int
+        The number of sites.
+    theta : float or (float, float), optional
+        The parameter for linear and non-linear term of interaction strength,
+        defaults to 0.
+    S : {1/2, 1, 3/2, ...}, optional
+        The underlying spin of the system, defaults to 1/2.
+    cyclic : bool, optional
+        Generate a NNI with periodic boundary conditions or not, default is
+        open boundary conditions.
+    mpo_opts
+        Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductOperator`.
+
+    Returns
+    -------
+    MatrixProductOperator
+    """
+    H = _ham_bilinear_biquadratic(theta, S=S, cyclic=cyclic)
+    return H.build_mpo(n, **mpo_opts)
+
+
+def NNI_ham_bilinear_biquadratic(n=None, theta=0, *, S=1/2,
+                                 cyclic=False, **nni_opts):
+    """ Hamiltonian of one-dimensional bilinear biquadratic chain in NNI form,
+    see PhysRevB.93.184428.
+
+    Parameters
+    ----------
+    n : int
+        The number of sites.
+    theta : float or (float, float), optional
+        The parameter for linear and non-linear term of interaction strength,
+        defaults to 0.
+    S : {1/2, 1, 3/2, ...}, optional
+        The underlying spin of the system, defaults to 1/2.
+    cyclic : bool, optional
+        Generate a NNI with periodic boundary conditions or not, default is
+        open boundary conditions.
+    nni_opts
+        Supplied to :class:`~quimb.tensor.tensor_1d.NNI`.
+
+    Returns
+    -------
+    NNI
+    """
+    H = _ham_bilinear_biquadratic(theta, S=S, cyclic=cyclic)
     return H.build_nni(n=n, **nni_opts)
 
 
