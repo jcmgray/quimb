@@ -20,6 +20,7 @@ from .tensor_gen import (
     MPS_rand_computational_state,
     MPS_neel_state,
     MPS_zero_state,
+    MPS_sampler,
     MPO_identity,
     MPO_identity_like,
     MPO_zeros,
@@ -57,6 +58,9 @@ from .tensor_mera import (
 from .tensor_tebd import (
     TEBD,
 )
+from .circuit import (
+    Circuit
+)
 
 __all__ = (
     "get_contract_backend",
@@ -78,6 +82,7 @@ __all__ = (
     "MPS_rand_computational_state",
     "MPS_neel_state",
     "MPS_zero_state",
+    "MPS_sampler",
     "MPO_identity",
     "MPO_identity_like",
     "MPO_zeros",
@@ -106,4 +111,5 @@ __all__ = (
     "DMRGX",
     "MERA",
     "TEBD",
+    "Circuit",
 )

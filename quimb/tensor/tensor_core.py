@@ -4,6 +4,7 @@ import os
 import re
 import copy
 import uuid
+import math
 import string
 import weakref
 import operator
@@ -33,12 +34,12 @@ def _get_contract_expr(contract_str, *shapes, **kwargs):
 _get_contract_expr_cached = functools.lru_cache(4096)(_get_contract_expr)
 
 
-def get_contract_expr(contract_str, *shapes, **kwargs):
+def get_contract_expr(contract_str, *shapes, cache=True, **kwargs):
     """Get an callable expression that will evaluate ``contract_str`` based on
     ``shapes``. Cache the result if no constant tensors are involved.
     """
     # can only cache if the expression does not involve constant tensors
-    if kwargs.get('constants', None):
+    if kwargs.get('constants', None) or not cache:
         return _get_contract_expr(contract_str, *shapes, **kwargs)
 
     return _get_contract_expr_cached(contract_str, *shapes, **kwargs)
@@ -2674,13 +2675,19 @@ class TensorNetwork(object):
         # Else just contract those tensors specified by tags.
         return self.contract_tags(tags, inplace=inplace, **opts)
 
-    def contraction_complexity(self):
+    def contraction_complexity(self, **contract_opts):
         """Compute the 'contraction complexity' of this tensor network. This
-        is simply defined as the maximum tensor rank produced during the
-        'greedy' (so potentially only pseudo-optimal) contraction sequence.
+        is defined as log2 of the maximum tensor size produced during the
+        contraction sequence. If every index in the network has dimension 2
+        this corresponds to the maximum rank tensor produced.
         """
-        expr = self.contract(all, get='expression')
-        return max(len(c[2].split('->')[-1]) for c in expr.contraction_list)
+        try:
+            path = self.contract(all, get='path', **contract_opts)
+            return math.log2(path.largest_intermediate)
+        except AttributeError:
+            expr = self.contract(all, get='expression', **contract_opts)
+            return max(len(c[2].split('->')[-1])
+                       for c in expr.contraction_list)
 
     def __rshift__(self, tags_seq):
         """Overload of '>>' for TensorNetwork.contract_cumulative.

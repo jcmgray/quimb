@@ -4,6 +4,8 @@
 import os
 import functools
 
+import numpy as np
+
 from .slepc_linalg import (
     eigs_slepc, svds_slepc, mfn_multiply_slepc, ssolve_slepc,
 )
@@ -36,6 +38,42 @@ else:
     NUM_MPI_WORKERS = psutil.cpu_count(logical=False)
 
 
+def bcast(result, comm, result_rank):
+    """Broadcast a result to all workers, dispatching to proper MPI (rather
+    than pickled) communication if the result is a numpy array.
+    """
+    rank = comm.Get_rank()
+
+    # make sure all workers know if result is an array or not
+    if rank == result_rank:
+        is_ndarray = isinstance(result, np.ndarray)
+    else:
+        is_ndarray = None
+    is_ndarray = comm.bcast(is_ndarray, root=result_rank)
+
+    # standard (pickle) bcast if not array
+    if not is_ndarray:
+        return comm.bcast(result, root=result_rank)
+
+    # make sure all workers have shape and dtype
+    if rank == result_rank:
+        shape_dtype = result.shape, str(result.dtype)
+    else:
+        shape_dtype = None
+
+    shape_dtype = comm.bcast(shape_dtype, root=result_rank)
+    shape, dtype = shape_dtype
+
+    # allocate data space
+    if rank != result_rank:
+        result = np.empty(shape, dtype=dtype)
+
+    # use fast communication for main array
+    comm.Bcast(result, root=result_rank)
+
+    return result
+
+
 class SyncroFuture:
 
     def __init__(self, result, result_rank, comm):
@@ -44,7 +82,29 @@ class SyncroFuture:
         self.comm = comm
 
     def result(self):
-        return self.comm.bcast(self._result, root=self.result_rank)
+        rank = self.comm.Get_rank()
+
+        if rank == self.result_rank:
+            should_it = (isinstance(self._result, tuple) and
+                         any(isinstance(x, np.ndarray) for x in self._result))
+            if should_it:
+                iterate_over = len(self._result)
+            else:
+                iterate_over = 0
+        else:
+            iterate_over = None
+        iterate_over = self.comm.bcast(iterate_over, root=self.result_rank)
+
+        if iterate_over:
+            if rank != self.result_rank:
+                self._result = (None,) * iterate_over
+
+            result = tuple(bcast(x, self.comm, self.result_rank)
+                           for x in self._result)
+        else:
+            result = bcast(self._result, self.comm, self.result_rank)
+
+        return result
 
     @staticmethod
     def cancel():
