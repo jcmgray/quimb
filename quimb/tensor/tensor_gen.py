@@ -1001,8 +1001,8 @@ def _ham_bilinear_biquadratic(theta, *, S=1/2, cyclic=False):
     return H
 
 
-def MPO_ham_bilinear_biquadratic(n=None, theta=0, *, S=1/2,
-                                 cyclic=False, **mpo_opts):
+def MPO_ham_bilinear_biquadratic(n=None, theta=0, *, S=1/2, cyclic=False,
+                                 compress=True, **mpo_opts):
     """ Hamiltonian of one-dimensional bilinear biquadratic chain in MPO form,
     see PhysRevB.93.184428.
 
@@ -1026,7 +1026,10 @@ def MPO_ham_bilinear_biquadratic(n=None, theta=0, *, S=1/2,
     MatrixProductOperator
     """
     H = _ham_bilinear_biquadratic(theta, S=S, cyclic=cyclic)
-    return H.build_mpo(n, **mpo_opts)
+    H_mpo = H.build_mpo(n, **mpo_opts)
+    if compress is True:
+        H_mpo.compress(cutoff=1e-12, cutoff_mode='rel')
+    return H_mpo
 
 
 def NNI_ham_bilinear_biquadratic(n=None, theta=0, *, S=1/2,
