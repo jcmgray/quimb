@@ -492,7 +492,7 @@ class TEBD:
             yield self.pt
 
 
-def OTOC_local(psi0, H, H_back, ts, i, A, B=None,
+def OTOC_local(psi0, H, H_back, ts, i, A, j=None, B=None,
                initial_eigenstate='check', **tebd_opts):
     """ The out-of-time-ordered correlator (OTOC) generating by two local
     operator A and B acting on site 'i', note it's a function of time.
@@ -524,12 +524,14 @@ def OTOC_local(psi0, H, H_back, ts, i, A, B=None,
 
     if B is None:
         B = A
+    if j is None:
+        j = i
 
     if initial_eigenstate is 'check':
-        psi = psi0.gate(B, i, contract=True)
+        psi = psi0.gate(B, j, contract=True)
         x = psi0.H.expec(psi)
         y = psi.H.expec(psi)
-        if abs(x-y) < 1e-5:
+        if abs(x**2-y) < 1e-10:
             initial_eigenstate = True
         else:
             initial_eigenstate = False
@@ -546,13 +548,14 @@ def OTOC_local(psi0, H, H_back, ts, i, A, B=None,
             tebd2.update_to(t)
             # compute expectation with second B-gate
             psi_f = tebd2.pt
-            yield psi_f.H.expec(psi_f.gate(B, i, contract=True))
+            x = psi0.H.expec(psi0.gate(B, j, contract=True))
+            yield x*psi_f.H.expec(psi_f.gate(B, j, contract=True))
     else:
         # set the initial TEBD and apply the first operator A to right
         psi0_L = psi0
         tebd1_L = TEBD(psi0_L, H, **tebd_opts)
 
-        psi0_R = psi0.gate(B, i, contract=True)
+        psi0_R = psi0.gate(B, j, contract=True)
         tebd1_R = TEBD(psi0_R, H, **tebd_opts)
 
         for t in ts:
@@ -573,6 +576,6 @@ def OTOC_local(psi0, H, H_back, ts, i, A, B=None,
             tebd2_R.update_to(t)
 
             # apply the laste operator B to left and compute overlap
-            psi_f_L = tebd2_L.pt.gate(B.H, i, contract=True)
+            psi_f_L = tebd2_L.pt.gate(B.H, j, contract=True)
             psi_f_R = tebd2_R.pt
             yield psi_f_L.H.expec(psi_f_R)
