@@ -538,6 +538,7 @@ def OTOC_local(psi0, H, H_back, ts, i, A, j=None, B=None,
 
     if initial_eigenstate is True:
         tebd1 = TEBD(psi0, H, **tebd_opts)
+        x = psi0.H.expec(psi0.gate(B, j, contract=True))
         for t in ts:
             # evolve forward
             tebd1.update_to(t)
@@ -548,7 +549,6 @@ def OTOC_local(psi0, H, H_back, ts, i, A, j=None, B=None,
             tebd2.update_to(t)
             # compute expectation with second B-gate
             psi_f = tebd2.pt
-            x = psi0.H.expec(psi0.gate(B, j, contract=True))
             yield x*psi_f.H.expec(psi_f.gate(B, j, contract=True))
     else:
         # set the initial TEBD and apply the first operator A to right
