@@ -576,13 +576,10 @@ def rdot(a, b):  # pragma: no cover
     return (a @ b)[0, 0]
 
 
-@njit
-def reshape_for_ldmul(vec):  # pragma: no cover
-    """Reshape a vector to be broadcast multiplied against a matrix in a way
-    that replicates left diagonal matrix multiplication.
-    """
-    d = vec.size
-    return d, vec.reshape(d, 1)
+@nb.njit(parallel=True)
+def _l_diag_dot_dense_par(l, A, out):  # pragma: no cover
+    for i in nb.prange(l.size):
+        out[i, :] = l[i] * A[i, :]
 
 
 @ensure_qarray
@@ -590,8 +587,14 @@ def l_diag_dot_dense(diag, mat):
     """Dot product of diagonal matrix (with only diagonal supplied) and dense
     matrix.
     """
-    d, diag = reshape_for_ldmul(diag)
-    return evaluate("diag * mat") if d > 500 else mul_dense(diag, mat)
+
+    if diag.size <= 128:
+        return mul_dense(diag.reshape(-1, 1), mat)
+    else:
+        out = np.empty_like(mat, dtype=np.common_type(diag, mat))
+        _l_diag_dot_dense_par(diag.ravel(), mat, out)
+
+    return out
 
 
 def l_diag_dot_sparse(diag, mat):
@@ -602,10 +605,8 @@ def l_diag_dot_sparse(diag, mat):
 
 
 def ldmul(diag, mat):
-    """Accelerated left diagonal multiplication using numexp.
-
-    Equivalent to ``numpy.diag(diag) @ mat``, but faster than numpy
-    for n > ~ 500.
+    """Accelerated left diagonal multiplication. Equivalent to
+    ``numpy.diag(diag) @ mat``, but faster than numpy.
 
     Parameters
     ----------
@@ -624,13 +625,10 @@ def ldmul(diag, mat):
     return l_diag_dot_dense(diag, mat)
 
 
-@njit
-def reshape_for_rdmul(vec):  # pragma: no cover
-    """Reshape a vector to be broadcast multiplied against a matrix in a way
-    that replicates right diagonal matrix multiplication.
-    """
-    d = vec.size
-    return d, vec.reshape(1, d)
+@nb.njit(parallel=True)
+def _r_diag_dot_dense_par(A, l, out):  # pragma: no cover
+    for i in nb.prange(l.size):
+        out[:, i] = A[:, i] * l[i]
 
 
 @ensure_qarray
@@ -638,8 +636,13 @@ def r_diag_dot_dense(mat, diag):
     """Dot product of dense matrix and digonal matrix (with only diagonal
     supplied).
     """
-    d, diag = reshape_for_rdmul(diag)
-    return evaluate("mat * diag") if d > 500 else mul_dense(mat, diag)
+    if diag.size <= 128:
+        return mul_dense(mat, diag.reshape(1, -1))
+    else:
+        out = np.empty_like(mat, dtype=np.common_type(diag, mat))
+        _r_diag_dot_dense_par(mat, diag.ravel(), out)
+
+    return out
 
 
 def r_diag_dot_sparse(mat, diag):
@@ -650,10 +653,9 @@ def r_diag_dot_sparse(mat, diag):
 
 
 def rdmul(mat, diag):
-    """Accelerated left diagonal multiplication using numexpr.
+    """Accelerated left diagonal multiplication.
 
-    Equivalent to ``mat @ numpy.diag(diag)``, but faster than numpy
-    for n > ~ 500.
+    Equivalent to ``mat @ numpy.diag(diag)``, but faster.
 
     Parameters
     ----------
@@ -698,36 +700,38 @@ def explt(l, t):  # pragma: no cover
 # Kronecker (tensor) product                                                  #
 # --------------------------------------------------------------------------- #
 
-@njit
-def reshape_for_kron(a, b):  # pragma: no cover
-    """Reshape two arrays for a 'broadcast' tensor (kronecker) product.
 
-    Returns the expected new dimensions as well.
-    """
+@njit
+def _nb_kron_exp_seq(a, b, out, m, n, p, q):
+    for i in range(m):
+        for j in range(n):
+            ii, fi = i * p, (i + 1) * p
+            ij, fj = j * q, (j + 1) * q
+            out[ii:fi, ij:fj] = a[i, j] * b
+
+
+@njit(parallel=True)
+def _nb_kron_exp_par(a, b, out, m, n, p, q):
+    for i in nb.prange(m):
+        for j in range(n):
+            ii, fi = i * p, (i + 1) * p
+            ij, fj = j * q, (j + 1) * q
+            out[ii:fi, ij:fj] = a[i, j] * b
+
+
+@ensure_qarray
+def kron_dense(a, b, par_thresh=4096):
     m, n = a.shape
     p, q = b.shape
-    a = a.reshape((m, 1, n, 1))
-    b = b.reshape((1, p, 1, q))
-    return a, b, m * p, n * q
 
+    out = np.empty((m * p, n * q), dtype=np.common_type(a, b))
 
-@ensure_qarray
-@upcast
-@njit
-def kron_dense(a, b):  # pragma: no cover
-    """Tensor (kronecker) product of two dense arrays.
-    """
-    a, b, mp, nq = reshape_for_kron(a, b)
-    return (a * b).reshape((mp, nq))
+    if out.size > 4096:
+        _nb_kron_exp_par(a, b, out, m, n, p, q)
+    else:
+        _nb_kron_exp_seq(a, b, out, m, n, p, q)
 
-
-@ensure_qarray
-def kron_dense_big(a, b):
-    """Parallelized (using numpexpr) tensor (kronecker) product for two
-    dense arrays.
-    """
-    a, b, mp, nq = reshape_for_kron(a, b)
-    return evaluate('a * b').reshape((mp, nq))
+    return out
 
 
 def kron_sparse(a, b, stype=None):
@@ -750,10 +754,8 @@ def kron_dispatch(a, b, stype=None):
     """
     if issparse(a) or issparse(b):
         return kron_sparse(a, b, stype=stype)
-    elif a.size * b.size > 23000:  # pragma: no cover
-        return kron_dense_big(a, b)
-    else:
-        return kron_dense(a, b)
+
+    return kron_dense(a, b)
 
 
 # --------------------------------------------------------------------------- #
