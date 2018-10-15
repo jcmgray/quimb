@@ -12,7 +12,6 @@ from numbers import Integral
 import numpy as np
 from numpy.matlib import zeros
 import scipy.sparse as sp
-from numexpr import evaluate
 from cytoolz import partition_all
 
 
@@ -674,19 +673,25 @@ def rdmul(mat, diag):
     return r_diag_dot_dense(mat, diag)
 
 
-@njit
-def reshape_for_outer(a, b):  # pragma: no cover
-    """Reshape two vectors for an outer product.
-    """
-    d = a.size
-    return d, a.reshape(d, 1), b.reshape(1, d)
+@nb.njit(parallel=True)
+def _outer_par(a, b, out, m, n):  # pragma: no cover
+    for i in nb.prange(m):
+        out[i, :] = a[i] * b[:]
 
 
+@ensure_qarray
 def outer(a, b):
     """Outer product between two vectors (no conjugation).
     """
-    d, a, b = reshape_for_outer(a, b)
-    return mul_dense(a, b) if d < 500 else qarray(evaluate('a * b'))
+    m, n = a.size, b.size
+
+    if m * n < 2**14:
+        return mul_dense(a.reshape(m, 1), b.reshape(1, n))
+
+    out = np.empty((m, n), dtype=np.common_type(a, b))
+    _outer_par(a.ravel(), b.ravel(), out, m, n)
+
+    return out
 
 
 @vectorize

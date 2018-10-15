@@ -7,7 +7,6 @@ dependencies:
   - numpy
   - scipy
   - numba
-  - numexpr
   - psutil
   - cytoolz
   - tqdm

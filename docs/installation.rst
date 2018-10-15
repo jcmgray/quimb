@@ -25,7 +25,6 @@ The core packages ``quimb`` requires are:
 * `numpy <http://www.numpy.org/>`_
 * `scipy <https://www.scipy.org/>`_
 * `numba <http://numba.pydata.org/>`_
-* `numexpr <https://github.com/pydata/numexpr>`_
 * `cytoolz <https://github.com/pytoolz/cytoolz>`_
 * `tqdm <https://github.com/tqdm/tqdm>`_
 

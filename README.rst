@@ -26,7 +26,7 @@
 The **core** ``quimb`` module:
 
 * Uses straight ``numpy`` and ``scipy.sparse`` matrices as quantum objects
-* Accelerates many operations using `numba <https://numba.pydata.org>`_ and `numexpr <https://github.com/pydata/numexpr>`_
+* Accelerates and parallelizes many operations using `numba <https://numba.pydata.org>`_.
 * Makes it easy to construct operators in large tensor spaces (e.g. 2D lattices)
 * Uses efficient methods to compute various quantities including entanglement measures
 * Has many built-in states and operators, including those based on fast, parallel random number generation
