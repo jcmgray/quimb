@@ -32,22 +32,22 @@ else:
 os.environ['NUMBA_NUM_THREADS'] = str(_NUM_THREAD_WORKERS)
 
 # need to set NUMBA_NUM_THREADS first
-import numba as nb  # noqa
+import numba  # noqa
 
 _NUMBA_CACHE = {
     'True': True, 'False': False,
 }[os.environ.get('QUIMB_NUMBA_CACHE', 'True')]
 
-njit = functools.partial(nb.njit, cache=_NUMBA_CACHE)
+njit = functools.partial(numba.njit, cache=_NUMBA_CACHE)
 """Numba no-python jit, but obeying cache setting."""
 
-njit_nocache = functools.partial(nb.njit, cache=False)
+njit_nocache = functools.partial(numba.njit, cache=False)
 """No cache alias of njit."""
 
-vectorize = functools.partial(nb.vectorize, cache=_NUMBA_CACHE)
+vectorize = functools.partial(numba.vectorize, cache=_NUMBA_CACHE)
 """Numba vectorize, but obeying cache setting."""
 
-vectorize_nocache = functools.partial(nb.vectorize, cache=False)
+pvectorize = functools.partial(numba.vectorize, cache=False, target='parallel')
 """No cache alias of vectorize."""
 
 
@@ -391,8 +391,7 @@ def _nb_complex_base(real, imag):
 
 _cmplx_sigs = ['complex64(float32, float32)', 'complex128(float64, float64)']
 _nb_complex_seq = vectorize(_cmplx_sigs)(_nb_complex_base)
-_nb_complex_par = vectorize_nocache(
-    _cmplx_sigs, target='parallel')(_nb_complex_base)
+_nb_complex_par = pvectorize(_cmplx_sigs)(_nb_complex_base)
 
 
 def complex_array(real, imag):
@@ -445,10 +444,8 @@ _sbtrct_sigs = ['float32(float32, float32, float32)',
                 'float64(float64, float64, float64)',
                 'complex64(complex64, float32, complex64)',
                 'complex128(complex128, float64, complex128)']
-_nb_subtract_update_seq = vectorize(
-    _sbtrct_sigs, target='cpu')(_nb_subtract_update_base)
-_nb_subtract_update_par = vectorize_nocache(
-    _sbtrct_sigs, target='parallel')(_nb_subtract_update_base)
+_nb_subtract_update_seq = vectorize(_sbtrct_sigs)(_nb_subtract_update_base)
+_nb_subtract_update_par = pvectorize(_sbtrct_sigs)(_nb_subtract_update_base)
 
 
 def subtract_update_(X, c, Y):
@@ -469,10 +466,8 @@ _divd_sigs = ['float32(float32, float32)',
               'float64(float64, float64)',
               'complex64(complex64, float32)',
               'complex128(complex128, float64)']
-_nb_divide_update_seq = vectorize(
-    _divd_sigs, target='cpu')(_nb_divide_update_base)
-_nb_divide_update_par = vectorize_nocache(
-    _divd_sigs, target='parallel')(_nb_divide_update_base)
+_nb_divide_update_seq = vectorize(_divd_sigs)(_nb_divide_update_base)
+_nb_divide_update_par = pvectorize(_divd_sigs)(_nb_divide_update_base)
 
 
 def divide_update_(X, c, out):
@@ -486,7 +481,7 @@ def divide_update_(X, c, out):
 
 @njit(parallel=True)  # pragma: no cover
 def _dot_csr_matvec_prange(data, indptr, indices, vec, out):
-    for i in nb.prange(vec.size):
+    for i in numba.prange(vec.size):
         isum = 0.0
         for j in range(indptr[i], indptr[i + 1]):
             isum += data[j] * vec[indices[j]]
@@ -575,9 +570,9 @@ def rdot(a, b):  # pragma: no cover
     return (a @ b)[0, 0]
 
 
-@nb.njit(parallel=True)
+@njit(parallel=True)
 def _l_diag_dot_dense_par(l, A, out):  # pragma: no cover
-    for i in nb.prange(l.size):
+    for i in numba.prange(l.size):
         out[i, :] = l[i] * A[i, :]
 
 
@@ -624,9 +619,9 @@ def ldmul(diag, mat):
     return l_diag_dot_dense(diag, mat)
 
 
-@nb.njit(parallel=True)
+@njit(parallel=True)
 def _r_diag_dot_dense_par(A, l, out):  # pragma: no cover
-    for i in nb.prange(l.size):
+    for i in numba.prange(l.size):
         out[:, i] = A[:, i] * l[i]
 
 
@@ -673,9 +668,9 @@ def rdmul(mat, diag):
     return r_diag_dot_dense(mat, diag)
 
 
-@nb.njit(parallel=True)
+@njit(parallel=True)
 def _outer_par(a, b, out, m, n):  # pragma: no cover
-    for i in nb.prange(m):
+    for i in numba.prange(m):
         out[i, :] = a[i] * b[:]
 
 
@@ -717,7 +712,7 @@ def _nb_kron_exp_seq(a, b, out, m, n, p, q):
 
 @njit(parallel=True)
 def _nb_kron_exp_par(a, b, out, m, n, p, q):
-    for i in nb.prange(m):
+    for i in numba.prange(m):
         for j in range(n):
             ii, fi = i * p, (i + 1) * p
             ij, fj = j * q, (j + 1) * q
