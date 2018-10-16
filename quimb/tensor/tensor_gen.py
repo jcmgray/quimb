@@ -537,6 +537,10 @@ class SpinHam:
             :func:`~quimb.spin_operator`, or actual arrays as long as they have
             the correct dimension.
         """
+        if factor == 0.0:
+            # no need to add zero terms
+            return
+
         if len(operators) == 1:
             self.one_site_terms.append((factor, *operators))
         elif len(operators) == 2:
@@ -570,7 +574,7 @@ class SpinHam:
 
         i, j = sorted(sites)
         if j - i != 1:
-            raise ValueError("Can only add nearest neighbour terms.")
+            raise NotImplementedError("Can only add nearest neighbour terms.")
 
         return _TermAdder(self.var_two_site_terms.get(sites, None), 2)
 
@@ -701,10 +705,7 @@ class SpinHam:
 def _ham_ising(j=1.0, bx=0.0, *, S=1 / 2, cyclic=False):
     H = SpinHam(S=1 / 2, cyclic=cyclic)
     H += j, 'Z', 'Z'
-
-    if bx != 0.0:
-        H -= bx, 'X'
-
+    H -= bx, 'X'
     return H
 
 
@@ -778,8 +779,7 @@ def _ham_XY(j=1.0, bz=0.0, *, S=1 / 2, cyclic=False):
         H += jx, 'X', 'X'
         H += jy, 'Y', 'Y'
 
-    if bz != 0.0:
-        H -= bz, 'Z'
+    H -= bz, 'Z'
 
     return H
 
@@ -838,68 +838,6 @@ def NNI_ham_XY(n=None, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **nni_opts):
     return H.build_nni(n=n, **nni_opts)
 
 
-def _ham_XXZ(D=0.0, *, S=1 / 2, cyclic=False):
-    H = SpinHam(S=S, cyclic=cyclic)
-
-    H += 1.0, 'X', 'X'
-    H += 1.0, 'Y', 'Y'
-
-    if D != 0.0:
-        H -= D, 'Z', 'Z'
-
-    return H
-
-
-def MPO_ham_XXZ(n=None, D=0.0, *, S=1 / 2, cyclic=False, **mpo_opts):
-    """XXZ-Hamiltonian in MPO form.
-
-    Parameters
-    ----------
-    n : int
-        The number of sites.
-    D : float, optional
-        The Z-interaction strength.
-    S : {1/2, 1, 3/2, ...}, optional
-        The underlying spin of the system, defaults to 1/2.
-    cyclic : bool, optional
-        Generate a MPO with periodic boundary conditions or not, default is
-        open boundary conditions.
-    mpo_opts
-        Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductOperator`.
-
-    Returns
-    -------
-    MatrixProductOperator
-    """
-    H = _ham_XXZ(D=D, S=S, cyclic=cyclic)
-    return H.build_mpo(n=n, **mpo_opts)
-
-
-def NNI_ham_XXZ(n=None, D=0.0, *, S=1 / 2, cyclic=False, **nni_opts):
-    """XXZ-Hamiltonian in MPO form.
-
-    Parameters
-    ----------
-    n : int
-        The number of sites.
-    D : float, optional
-        The Z-interaction strength.
-    S : {1/2, 1, 3/2, ...}, optional
-        The underlying spin of the system, defaults to 1/2.
-    cyclic : bool, optional
-        Generate a MPO with periodic boundary conditions or not, default is
-        open boundary conditions.
-    nni_opts
-        Supplied to :class:`~quimb.tensor.tensor_gen.NNI`.
-
-    Returns
-    -------
-    NNI
-    """
-    H = _ham_XXZ(D=D, S=S, cyclic=cyclic)
-    return H.build_nni(n=n, **nni_opts)
-
-
 def _ham_heis(j=1.0, bz=0.0, *, S=1 / 2, cyclic=False):
     H = SpinHam(S=S, cyclic=cyclic)
 
@@ -917,14 +855,13 @@ def _ham_heis(j=1.0, bz=0.0, *, S=1 / 2, cyclic=False):
         H += jy, 'Y', 'Y'
     H += jz, 'Z', 'Z'
 
-    if bz != 0.0:
-        H -= bz, 'Z'
+    H -= bz, 'Z'
 
     return H
 
 
 def MPO_ham_heis(n, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **mpo_opts):
-    """Heisenberg Hamiltonian in matrix product operator form.
+    """Heisenberg Hamiltonian in MPO form.
 
     Parameters
     ----------
@@ -951,7 +888,7 @@ def MPO_ham_heis(n, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **mpo_opts):
 
 
 def NNI_ham_heis(n=None, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **nni_opts):
-    """Heisenberg Hamiltonian in matrix product operator form.
+    """Heisenberg Hamiltonian in NNI form.
 
     Parameters
     ----------
@@ -966,7 +903,7 @@ def NNI_ham_heis(n=None, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **nni_opts):
     cyclic : bool, optional
         Generate a NNI with periodic boundary conditions or not, default is
         open boundary conditions.
-    mpo_opts or nni_opts
+    nni_opts
         Supplied to :class:`~quimb.tensor.tensor_gen.NNI`.
 
     Returns
@@ -977,7 +914,62 @@ def NNI_ham_heis(n=None, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **nni_opts):
     return H.build_nni(n=n, **nni_opts)
 
 
-def _ham_bilinear_biquadratic(theta, *, S=1/2, cyclic=False):
+def MPO_ham_XXZ(n, delta, jxy=1.0, *, S=1 / 2, cyclic=False, **mpo_opts):
+    """XXZ-Hamiltonian in MPO form.
+
+    Parameters
+    ----------
+    n : int
+        The number of sites.
+    delta : float
+        The Z-interaction strength.
+    jxy : float, optional
+        The X- and Y- interaction strength, defaults to 1.
+    S : {1/2, 1, 3/2, ...}, optional
+        The underlying spin of the system, defaults to 1/2.
+    cyclic : bool, optional
+        Generate a MPO with periodic boundary conditions or not, default is
+        open boundary conditions.
+    mpo_opts
+        Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductOperator`.
+
+    Returns
+    -------
+    MatrixProductOperator
+    """
+    return MPO_ham_heis(n, j=(jxy, jxy, delta), S=S, cyclic=cyclic, **mpo_opts)
+
+
+def NNI_ham_XXZ(n=None, delta=None, jxy=1.0, *,
+                S=1 / 2, cyclic=False, **nni_opts):
+    """XXZ-Hamiltonian in NNI form.
+
+    Parameters
+    ----------
+    n : int
+        The number of sites.
+    delta : float
+        The Z-interaction strength.
+    jxy : float, optional
+        The X- and Y- interaction strength, defaults to 1.
+    S : {1/2, 1, 3/2, ...}, optional
+        The underlying spin of the system, defaults to 1/2.
+    cyclic : bool, optional
+        Generate a NNI with periodic boundary conditions or not, default is
+        open boundary conditions.
+    nni_opts
+        Supplied to :class:`~quimb.tensor.tensor_gen.NNI`.
+
+    Returns
+    -------
+    NNI
+    """
+    if delta is None:
+        raise ValueError("You need to specify ``delta``.")
+    return NNI_ham_heis(n, j=(jxy, jxy, delta), S=S, cyclic=cyclic, **nni_opts)
+
+
+def _ham_bilinear_biquadratic(theta, *, S=1 / 2, cyclic=False):
     H = SpinHam(S=S, cyclic=cyclic)
 
     H += np.cos(theta), 'X', 'X'
@@ -1001,7 +993,7 @@ def _ham_bilinear_biquadratic(theta, *, S=1/2, cyclic=False):
     return H
 
 
-def MPO_ham_bilinear_biquadratic(n=None, theta=0, *, S=1/2, cyclic=False,
+def MPO_ham_bilinear_biquadratic(n=None, theta=0, *, S=1 / 2, cyclic=False,
                                  compress=True, **mpo_opts):
     """ Hamiltonian of one-dimensional bilinear biquadratic chain in MPO form,
     see PhysRevB.93.184428.
@@ -1028,11 +1020,11 @@ def MPO_ham_bilinear_biquadratic(n=None, theta=0, *, S=1/2, cyclic=False,
     H = _ham_bilinear_biquadratic(theta, S=S, cyclic=cyclic)
     H_mpo = H.build_mpo(n, **mpo_opts)
     if compress is True:
-        H_mpo.compress(cutoff=1e-12, cutoff_mode='rel')
+        H_mpo.compress(cutoff=1e-12, cutoff_mode='rel' if cyclic else 'sum2')
     return H_mpo
 
 
-def NNI_ham_bilinear_biquadratic(n=None, theta=0, *, S=1/2,
+def NNI_ham_bilinear_biquadratic(n=None, theta=0, *, S=1 / 2,
                                  cyclic=False, **nni_opts):
     """ Hamiltonian of one-dimensional bilinear biquadratic chain in NNI form,
     see PhysRevB.93.184428.
@@ -1050,7 +1042,7 @@ def NNI_ham_bilinear_biquadratic(n=None, theta=0, *, S=1/2,
         Generate a NNI with periodic boundary conditions or not, default is
         open boundary conditions.
     nni_opts
-        Supplied to :class:`~quimb.tensor.tensor_1d.NNI`.
+        Supplied to :class:`~quimb.tensor.tensor_gen.NNI`.
 
     Returns
     -------
@@ -1071,8 +1063,7 @@ def _ham_mbl(n, dh, j=1.0, seed=None, S=1 / 2, *, cyclic=False,
     for i in range(n):
         dh_r_xyzs = zip(dhds, rs[:, i], 'XYZ')
         for dh, r, xyz in dh_r_xyzs:
-            if dh != 0:
-                H[i] += dh * r, xyz
+            H[i] += dh * r, xyz
 
     return H
 
