@@ -819,7 +819,11 @@ class TensorNetwork1DFlat:
         """
         tn = self if inplace else self.copy()
 
-        for i, j in pairwise(tn.sites):
+        pairs = list(pairwise(tn.sites))
+        if self.cyclic:
+            pairs.append((-1, 0))
+
+        for i, j in pairs:
             T1, T2 = tn[i], tn[j]
             dbnds = tuple(T1.bonds(T2))
             T1.fuse_({dbnds[0]: dbnds})
