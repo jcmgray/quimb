@@ -2,12 +2,7 @@ from pytest import fixture, mark
 import numpy as np
 from numpy.testing import assert_equal, assert_allclose
 
-from quimb import (
-    qarray,
-    dot,
-    ldmul,
-    rand_uni,
-)
+import quimb as qu
 from quimb.linalg.numpy_linalg import (
     sort_inds,
     eigs_numpy,
@@ -21,9 +16,9 @@ def xs():
 
 @fixture
 def ham1():
-    evecs = rand_uni(5)
+    evecs = qu.rand_uni(5)
     evals = np.array([-5, -3, 0.1, 2, 4])
-    return dot(evecs, ldmul(evals, evecs.H))
+    return qu.dot(evecs, qu.ldmul(evals, evecs.H))
 
 
 class TestSortInds:
@@ -59,5 +54,23 @@ class TestNumpyEigk:
     def test_evecs(self, ham1, which, k, sigma):
         lk, vk = eigs_numpy(ham1, k=k, which=which, return_vecs=True,
                             sigma=sigma, sort=False)
-        assert isinstance(vk, qarray)
-        assert_allclose(dot(vk, ldmul(lk, vk.H)), ham1)
+        assert isinstance(vk, qu.qarray)
+        assert_allclose(qu.dot(vk, qu.ldmul(lk, vk.H)), ham1)
+
+
+class TestAutoBlock:
+
+    def test_eigh(self):
+        H = qu.ham_mbl(6, dh=2.5)
+        a_el, a_ev = qu.eigh(H, autoblock=False)
+        el, ev = qu.eigh(H, autoblock=True)
+
+        assert qu.norm(ev @ qu.ldmul(el, ev.H) - H, 'fro') < 1e-12
+        assert_allclose(a_el, el)
+        assert_allclose(ev.H @ ev, np.eye(H.shape[0]), atol=1e-12)
+
+    def test_eigvals(self):
+        H = qu.ham_hubbard_hardcore(4)
+        a_el = qu.eigvalsh(H, autoblock=False)
+        el = qu.eigvalsh(H, autoblock=True)
+        assert_allclose(a_el, el, atol=1e-12)

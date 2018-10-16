@@ -6,6 +6,7 @@ import numpy.linalg as nla
 import scipy.linalg as scla
 
 import quimb as qu
+from .autoblock import eigensystem_autoblocked
 
 
 _NUMPY_EIG_FUNCS = {
@@ -16,7 +17,7 @@ _NUMPY_EIG_FUNCS = {
 }
 
 
-def eig_numpy(A, sort=True, isherm=True, return_vecs=True):
+def eig_numpy(A, sort=True, isherm=True, return_vecs=True, autoblock=False):
     """Numpy based dense eigensolve.
 
     Parameters
@@ -29,6 +30,10 @@ def eig_numpy(A, sort=True, isherm=True, return_vecs=True):
         Whether ``A`` is hermitian.
     return_vecs : bool, optional
         Whether to return the eigenvectors.
+    autoblock : bool, optional
+        If true, automatically identify and exploit symmetries appearing in the
+        current basis as block diagonals formed via permutation of rows and
+        columns.
 
     Returns
     -------
@@ -37,6 +42,10 @@ def eig_numpy(A, sort=True, isherm=True, return_vecs=True):
     evecs : qarray
         If ``return_vecs=True``, the eigenvectors.
     """
+    if autoblock:
+        return eigensystem_autoblocked(A, sort=sort, isherm=isherm,
+                                       return_vecs=return_vecs)
+
     evals = _NUMPY_EIG_FUNCS[return_vecs, isherm](A)
 
     if return_vecs:
@@ -49,7 +58,7 @@ def eig_numpy(A, sort=True, isherm=True, return_vecs=True):
         return evals, qu.qarray(evecs)
 
     if sort:
-        return np.sort(evals)
+        evals.sort()
 
     return evals
 
