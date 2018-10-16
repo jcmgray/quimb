@@ -515,7 +515,7 @@ def OTOC_local(psi0, H, H_back, ts, i, A, j=None, B=None,
     initial_eigenstate: {'check', Flase, True}
         To check the psi0 is or not eigenstate of operator B. If psi0 is the
         eigenstate of B, it will run a simpler version of OTOC calculation
-        automatically, 
+        automatically.
 
     Returns
     ----------
