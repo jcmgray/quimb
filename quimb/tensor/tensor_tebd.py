@@ -490,3 +490,92 @@ class TEBD:
                 self._set_progbar_desc(ts)
 
             yield self.pt
+
+
+def OTOC_local(psi0, H, H_back, ts, i, A, j=None, B=None,
+               initial_eigenstate='check', **tebd_opts):
+    """ The out-of-time-ordered correlator (OTOC) generating by two local
+    operator A and B acting on site 'i', note it's a function of time.
+
+    Parameters
+    ----------
+    psi0 : MatrixProductState
+        The initial state in MPS form.
+    H : NNI
+        The Hamiltonian for forward time-evolution.
+    H_back : NNI
+        The Hamiltonian for backward time-evolution, should have only
+        sign difference with 'H'.
+    ts : sequence of float
+        The time to evolve to.
+    i : int
+        The site where the local operators acting on.
+    A : array
+        The operator to act with.
+    initial_eigenstate: {'check', Flase, True}
+        To check the psi0 is or not eigenstate of operator B. If psi0 is the
+        eigenstate of B, it will run a simpler version of OTOC calculation
+        automatically.
+
+    Returns
+    ----------
+    The OTOC <A(t)B(0)A(t)B(0)>
+    """
+
+    if B is None:
+        B = A
+    if j is None:
+        j = i
+
+    if initial_eigenstate is 'check':
+        psi = psi0.gate(B, j, contract=True)
+        x = psi0.H.expec(psi)
+        y = psi.H.expec(psi)
+        if abs(x**2-y) < 1e-10:
+            initial_eigenstate = True
+        else:
+            initial_eigenstate = False
+
+    if initial_eigenstate is True:
+        tebd1 = TEBD(psi0, H, **tebd_opts)
+        x = psi0.H.expec(psi0.gate(B, j, contract=True))
+        for t in ts:
+            # evolve forward
+            tebd1.update_to(t)
+            # apply first A-gate
+            psi_t_A = tebd1.pt.gate(A, i, contract=True)
+            # evolve backwards
+            tebd2 = TEBD(psi_t_A, H_back, **tebd_opts)
+            tebd2.update_to(t)
+            # compute expectation with second B-gate
+            psi_f = tebd2.pt
+            yield x*psi_f.H.expec(psi_f.gate(B, j, contract=True))
+    else:
+        # set the initial TEBD and apply the first operator A to right
+        psi0_L = psi0
+        tebd1_L = TEBD(psi0_L, H, **tebd_opts)
+
+        psi0_R = psi0.gate(B, j, contract=True)
+        tebd1_R = TEBD(psi0_R, H, **tebd_opts)
+
+        for t in ts:
+            # evolve forward
+            tebd1_L.update_to(t)
+            tebd1_R.update_to(t)
+
+            # apply the opertor A to both left and right states
+            psi_t_L_A = tebd1_L.pt.gate(A, i, contract=True)
+            psi_t_R_A = tebd1_R.pt.gate(A.H, i, contract=True)
+
+            # set the second left and right TEBD
+            tebd2_L = TEBD(psi_t_L_A, H_back, **tebd_opts)
+            tebd2_R = TEBD(psi_t_R_A, H_back, **tebd_opts)
+
+            # evolve backwards
+            tebd2_L.update_to(t)
+            tebd2_R.update_to(t)
+
+            # apply the laste operator B to left and compute overlap
+            psi_f_L = tebd2_L.pt.gate(B.H, j, contract=True)
+            psi_f_R = tebd2_R.pt
+            yield psi_f_L.H.expec(psi_f_R)

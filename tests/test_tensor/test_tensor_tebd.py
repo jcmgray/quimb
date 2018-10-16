@@ -4,6 +4,7 @@ import numpy as np
 
 import quimb as qu
 import quimb.tensor as qtn
+from quimb.tensor.tensor_tebd import OTOC_local
 
 
 class TestTEBD:
@@ -160,3 +161,28 @@ class TestTEBD:
 
         ef_mpo = qtn.expec_TN_1D(tebd.pt.H, H_mpo, tebd.pt)
         assert ef_mpo == pytest.approx(e0, 1e-5)
+
+
+def test_OTOC_local():
+    L = 10
+    psi0 = qtn.MPS_computational_state('0'*L, cyclic=True)
+    H1 = qtn.NNI_ham_ising(L, j=4, bx=0, cyclic=True)
+    H_back1 = qtn.NNI_ham_ising(L, j=-4, bx=0, cyclic=True)
+    H2 = qtn.NNI_ham_ising(L, j=4, bx=1, cyclic=True)
+    H_back2 = qtn.NNI_ham_ising(L, j=-4, bx=-1, cyclic=True)
+    A = qu.pauli('z')
+    ts = np.linspace(1, 2, 2)
+    OTOC_t = []
+    for OTOC in OTOC_local(psi0, H1, H_back1, ts, 5, A, tol=1e-5,
+                           split_opts={'cutoff': 1e-5, 'cutoff_mode': 'rel'},
+                           initial_eigenstate='check'):
+        OTOC_t += [OTOC]
+    assert OTOC_t[0] == pytest.approx(1.0)
+    assert OTOC_t[1] == pytest.approx(1.0)
+    x_t = []
+    for x in OTOC_local(psi0, H2, H_back2, ts, 5, A, tol=1e-5,
+                        split_opts={'cutoff': 1e-5, 'cutoff_mode': 'rel'},
+                        initial_eigenstate='check'):
+        x_t += [x]
+    assert x_t[0] == pytest.approx(0.52745, 1e-5)
+    assert x_t[1] == pytest.approx(0.70440, 1e-5)
