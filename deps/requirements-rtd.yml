@@ -6,8 +6,7 @@ dependencies:
   - python=3.6
   - numpy
   - scipy
-  - numba
-  - numexpr
+  - numba=0.39
   - psutil
   - cytoolz
   - tqdm

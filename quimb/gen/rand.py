@@ -8,11 +8,11 @@ from functools import wraps, lru_cache
 from numbers import Integral
 
 import numpy as np
-import numexpr as ne
 import scipy.sparse as sp
 
 from ..core import (qarray, dag, dot, rdmul, complex_array, get_thread_pool,
-                    _NUM_THREAD_WORKERS, qu, ptr, kron, nmlz, prod)
+                    _NUM_THREAD_WORKERS, qu, ptr, kron, nmlz, prod,
+                    vectorize, pvectorize)
 
 # -------------------------------- RANDOMGEN -------------------------------- #
 if (
@@ -253,6 +253,22 @@ def rand_rademacher(shape, scale=1, dtype=float):
     return x
 
 
+def _phase_to_complex_base(x):
+    return 1j * math.sin(x) + math.cos(x)
+
+
+_phase_sigs = ['complex64(float32)', 'complex128(float64)']
+_phase_to_complex_seq = vectorize(_phase_sigs)(_phase_to_complex_base)
+_phase_to_complex_par = pvectorize(_phase_sigs)(_phase_to_complex_base)
+
+
+def phase_to_complex(x):
+    if x.size >= 512:
+        return _phase_to_complex_par(x)
+    # XXX: this is not as fast as numexpr - investigate?
+    return _phase_to_complex_seq(x)
+
+
 @random_seed_fn
 def rand_phase(shape, scale=1, dtype=complex):
     """Generate random complex numbers distributed on the unit sphere.
@@ -265,17 +281,8 @@ def rand_phase(shape, scale=1, dtype=complex):
     else:
         sub_dtype = np.float64
 
-    x = randn(shape, dtype=sub_dtype, scale=2 * math.pi, dist='uniform')
-
-    # XXX: numexpr 2 doesn't support complex64
-    if (x.size > 4096) and (dtype == 'complex128'):
-        # accelerate with numexpr
-        if scale != 1:
-            return ne.evaluate("scale * (cos(x) + 1j * sin(x))")
-        return ne.evaluate("cos(x) + 1j * sin(x)")
-
-    z = 1j * np.sin(x)
-    z += np.cos(x)
+    phi = randn(shape, dtype=sub_dtype, scale=2 * math.pi, dist='uniform')
+    z = phase_to_complex(phi)
     if scale != 1:
         z *= scale
 

@@ -31,7 +31,6 @@ from quimb.core import (
     dot_sparse,
     par_dot_csr_matvec,
     kron_dense,
-    kron_dense_big,
     kron_sparse,
 )
 from quimb.core import kron, kronpow
@@ -390,9 +389,9 @@ class TestExplt:
 # --------------------------------------------------------------------------- #
 
 class TestKron:
-    @mark.parametrize("func", [kron_dense, kron_dense_big])
-    def test_kron_dense(self, mat_d, mat_d2, func):
-        x = func(mat_d, mat_d2)
+    @mark.parametrize("big", [False, True])
+    def test_kron_dense(self, mat_d, mat_d2, big):
+        x = kron_dense(mat_d, mat_d2, par_thresh=0 if big else 1e100)
         assert mat_d.shape == (_TEST_SZ, _TEST_SZ)
         assert mat_d2.shape == (_TEST_SZ, _TEST_SZ)
         xn = np.kron(mat_d, mat_d2)
