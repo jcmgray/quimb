@@ -79,6 +79,9 @@ def apply_Rz(psi, theta, i, **gate_opts):
 
 APPLY_GATES = {
     'H': build_gate_1(qu.hadamard(), tags='H'),
+    'X': build_gate_1(qu.pauli('X'), tags='X'),
+    'Y': build_gate_1(qu.pauli('Y'), tags='Y'),
+    'Z': build_gate_1(qu.pauli('Z'), tags='Z'),
     'CNOT': build_gate_2(qu.CNOT(), tags='CNOT'),
     'RZ': apply_Rx,
     'RY': apply_Ry,
@@ -115,6 +118,35 @@ class Circuit:
     ----------
     psi : TensorNetwork1DVector
         The current wavefunction.
+
+    Examples
+    --------
+
+    Create 3-qubit GHZ-state:
+
+        >>> qc = qtn.Circuit(3)
+        >>> gates = [
+                ('H', 0),
+                ('H', 1),
+                ('CNOT', 1, 2),
+                ('CNOT', 0, 2),
+                ('H', 0),
+                ('H', 1),
+                ('H', 2),
+            ]
+        >>> qc.apply_circuit(gates)
+        >>> qc.psi
+        <MatrixProductState(tensors=10, structure='I{}', nsites=3)>
+
+        >>> qc.psi.to_dense().round(4)
+        qarray([[ 0.7071+0.j],
+                [ 0.    +0.j],
+                [ 0.    +0.j],
+                [-0.    +0.j],
+                [-0.    +0.j],
+                [ 0.    +0.j],
+                [ 0.    +0.j],
+                [ 0.7071+0.j]])
     """
 
     def __init__(self, N=None, psi0=None, gate_opts=None, tags=None):
