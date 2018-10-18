@@ -157,17 +157,23 @@ def tensor_contract(*tensors, output_inds=None, get=None,
 
     Parameters
     ----------
-    *tensors : sequence of Tensor
+    tensors : sequence of Tensor
         The tensors to contract.
-    output_inds : sequence
+    output_inds : sequence of str
         If given, the desired order of output indices, else defaults to the
         order they occur in the input indices.
-    get : {None, 'expression'}, optional
-        If ``'expression'``, return the expression that performs the
-        contraction, for e.g. inspection of the order chosen.
+    get : {None, 'expression', 'path'}, optional
+        If None (the default), return the resulting scalar or Tensor. If
+        ``'expression'``, return the ``opt_einsum`` expression that performs
+        the contraction, for e.g. inspection of the order chosen. If
+        ``'path'``, return the ``opt_einsum`` path object with detailed
+        information such as flop cost.
     backend  {'numpy', 'cupy', 'tensorflow', 'theano', ...}, optional
         Which backend to use to perform the contraction. Must be a valid
         ``opt_einsum`` backend with the relevant library installed.
+    contract_opts
+        Passed to ``opt_einsum.contract_expression`` or
+        ``opt_einsum.contract_path``.
 
     Returns
     -------
@@ -256,6 +262,7 @@ def tensor_split(T, left_inds, method='svd', max_bond=None, absorb='both',
             - 'svds': iterative svd, allows truncation.
             - 'isvd': iterative svd using interpolative methods, allows
               truncation.
+            - 'rsvd' : randomized iterative svd with truncation.
             - 'qr': full QR decomposition.
             - 'lq': full LR decomposition.
             - 'eigh': full eigen-decomposition, tensor must he hermitian.
@@ -575,7 +582,8 @@ def _ndim(array):
 
 
 class Tensor(object):
-    """A labelled, tagged ndarray.
+    """A labelled, tagged ndarray. The index labels are used instead of
+    axis numbers to identify dimensions, and are preserved through operations.
 
     Parameters
     ----------
@@ -587,6 +595,22 @@ class Tensor(object):
     tags : sequence of str
         Tags with which to identify and group this tensor. These will
         be converted into a ``set``.
+
+    Examples
+    --------
+
+    Basic construction:
+
+        >>> from quimb import randn
+        >>> from quimb.tensor import Tensor
+        >>> X = Tensor(randn((2, 3, 4)), inds=['a', 'b', 'c'], tags={'X'})
+        >>> Y = Tensor(randn((3, 4, 5)), inds=['b', 'c', 'd'], tags={'Y'})
+
+    Indices are automatically aligned, and tags combined, when contracting:
+
+        >>> X @ Y
+        Tensor(shape=(2, 5), inds=('a', 'd'), tags={'Y', 'X'})
+
     """
 
     def __init__(self, data, inds, tags=None):
