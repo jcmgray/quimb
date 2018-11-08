@@ -54,7 +54,7 @@ FOUND_TQDM = find_library('tqdm')
 if FOUND_TQDM:
     from tqdm import tqdm
 
-    class _ctqdm(tqdm):
+    class continuous_progbar(tqdm):
         """A continuous version of tqdm, so that it can be updated with a float
         within some pre-given range, rather than a number of steps.
 
@@ -72,7 +72,9 @@ if FOUND_TQDM:
         def __init__(self, *args, total=100, **kwargs):
             """
             """
-            super(_ctqdm, self).__init__(total=total, unit="%", **kwargs)
+            kwargs.setdefault('ascii', True)
+            super(continuous_progbar, self).__init__(total=total,
+                                                     unit="%", **kwargs)
 
             if len(args) == 2:
                 self.start, self.stop = args
@@ -97,8 +99,10 @@ if FOUND_TQDM:
                 self.update(num_update)
                 self.step += num_update
 
-    progbar = tqdm
-    continuous_progbar = _ctqdm
+    def progbar(*args, **kwargs):
+        kwargs.setdefault('ascii', True)
+        return tqdm(*args, **kwargs)
+
 else:  # pragma: no cover
     extra_msg = "This is needed to show progress bars."
     progbar = raise_cant_find_library_function("tqdm", extra_msg)

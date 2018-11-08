@@ -144,8 +144,17 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
         correct ``site_ind_id``. Sites are read left to right from the shape.
     where : int or sequence of int
         Where the gate should act.
-    contract, {False, True, 'swap+split'}, optional
-        Contract the gate into the MPS, or leave it uncontracted.
+    contract : {False, True, 'swap+split'}, optional
+        Whether to contract the gate into the 1D tensor network. If,
+
+            - False: leave the gate uncontracted, the default
+            - True: contract the gate into the tensor network, if the gate acts
+              on more than one site, this will produce an ever larger tensor.
+            - 'swap+split': Swap sites until they are adjacent, then contract
+              the gate and split the resulting tensor, then swap the sites back
+              to their original position. In this way an MPS structure can be
+              explicitly maintained at the cost of rising bond-dimension.
+
     tags : str or sequence of str, optional
         Tag the new gate tensor with these tags.
     propagate_tags : {'sites', 'register', False, True}, optional
@@ -158,10 +167,14 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
               where this gate was actually applied. I.e. ignore the lightcone,
               just keep track of which 'registers' the gate was applied to.
             - If ``False``, propagate nothing.
-            - If ``True``, propagate all atags.
+            - If ``True``, propagate all tags.
 
     inplace, bool, optional
         Perform the gate in place.
+    compress_opts
+        Supplied to
+        `~quimb.tensor.tensor_1d.MatrixProductState.gate_with_auto_swap` only
+        if ``contract='swap+split'.
 
     Returns
     -------

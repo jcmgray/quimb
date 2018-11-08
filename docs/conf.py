@@ -150,8 +150,8 @@ html_theme_options = {
     ],
 }
 
-# paraiso-light, pastie, manni
-pygments_style = 'manni'
+# paraiso-light, pastie, manni, colorful
+pygments_style = 'pastie'
 
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the

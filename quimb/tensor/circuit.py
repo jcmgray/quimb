@@ -156,7 +156,7 @@ class Circuit:
 
         elif psi0 is None:
             self.N = N
-            self._psi = MPS_computational_state('0' * N).squeeze()
+            self._psi = MPS_computational_state('0' * N)
 
         elif N is None:
             self._psi = psi0.copy()
@@ -233,4 +233,4 @@ class Circuit:
 
     @property
     def psi(self):
-        return self._psi.copy()
+        return self._psi.squeeze()

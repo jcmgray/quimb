@@ -44,7 +44,14 @@ class TestCircuit:
         assert qu.expec(qc.psi.to_dense(), qu.ghz_state(3)) == pytest.approx(1)
 
     def test_rand_reg_qaoa(self):
-        G = rand_reg_graph(3, 18, seed=42)
+        G = rand_reg_graph(reg=3, n=18, seed=42)
         qasm = graph_to_circ(G)
         qc = qtn.Circuit.from_qasm(qasm)
+        assert (qc.psi.H & qc.psi) ^ all == pytest.approx(1.0)
+
+    def test_rand_reg_qaoa_mps_swapsplit(self):
+        G = rand_reg_graph(reg=3, n=18, seed=42)
+        qasm = graph_to_circ(G)
+        qc = qtn.Circuit.from_qasm(qasm, gate_opts={'contract': 'swap+split'})
+        assert len(qc.psi.tensors) == 18
         assert (qc.psi.H & qc.psi) ^ all == pytest.approx(1.0)
