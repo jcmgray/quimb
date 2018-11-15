@@ -251,6 +251,25 @@ def zeroify(fn, tol=1e-14):
     return zeroified_f
 
 
+_COMPLEX_DTYPES = {np.dtype('complex64'), np.dtype('complex128')}
+_DOUBLE_DTYPES = {np.dtype('float64'), np.dtype('complex128')}
+_DTYPE_MAP = {
+    (False, False): np.dtype('float32'),
+    (False, True): np.dtype('float64'),
+    (True, False): np.dtype('complex64'),
+    (True, True): np.dtype('complex128'),
+}
+
+
+def common_type(*arrays):
+    """Quick compute the minimal dtype sufficient for ``arrays``.
+    """
+    dtypes = {array.dtype for array in arrays}
+    has_complex = not _COMPLEX_DTYPES.isdisjoint(dtypes)
+    has_double = not _DOUBLE_DTYPES.isdisjoint(dtypes)
+    return _DTYPE_MAP[has_complex, has_double]
+
+
 def upcast(fn):
     """Decorator to make sure the types of two numpy arguments match.
     """
@@ -258,7 +277,7 @@ def upcast(fn):
         if a.dtype == b.dtype:
             return fn(a, b)
         else:
-            common = np.common_type(a, b)
+            common = common_type(a, b)
             return fn(a.astype(common), b.astype(common))
 
     return upcasted_fn
@@ -385,6 +404,7 @@ def ispos(qob, tol=1e-15):
 # Core accelerated numeric functions                                          #
 # --------------------------------------------------------------------------- #
 
+
 def _nb_complex_base(real, imag):
     return real + 1j * imag
 
@@ -508,7 +528,7 @@ def par_dot_csr_matvec(A, x):
     The main bottleneck for sparse matrix vector product is memory access,
     as such this function is only beneficial for pretty large matrices.
     """
-    y = np.empty(x.size, np.find_common_type([], [A.dtype, x.dtype]))
+    y = np.empty(x.size, common_type(A, x))
     _dot_csr_matvec_prange(A.data, A.indptr, A.indices, x.ravel(), y)
     y.shape = x.shape
     if isinstance(x, qarray):
@@ -585,7 +605,7 @@ def l_diag_dot_dense(diag, mat):
     if diag.size <= 128:
         return mul_dense(diag.reshape(-1, 1), mat)
     else:
-        out = np.empty_like(mat, dtype=np.common_type(diag, mat))
+        out = np.empty_like(mat, dtype=common_type(diag, mat))
         _l_diag_dot_dense_par(diag.ravel(), mat, out)
 
     return out
@@ -633,7 +653,7 @@ def r_diag_dot_dense(mat, diag):
     if diag.size <= 128:
         return mul_dense(mat, diag.reshape(1, -1))
     else:
-        out = np.empty_like(mat, dtype=np.common_type(diag, mat))
+        out = np.empty_like(mat, dtype=common_type(diag, mat))
         _r_diag_dot_dense_par(mat, diag.ravel(), out)
 
     return out
@@ -683,7 +703,7 @@ def outer(a, b):
     if m * n < 2**14:
         return mul_dense(a.reshape(m, 1), b.reshape(1, n))
 
-    out = np.empty((m, n), dtype=np.common_type(a, b))
+    out = np.empty((m, n), dtype=common_type(a, b))
     _outer_par(a.ravel(), b.ravel(), out, m, n)
 
     return out
@@ -724,7 +744,7 @@ def kron_dense(a, b, par_thresh=4096):
     m, n = a.shape
     p, q = b.shape
 
-    out = np.empty((m * p, n * q), dtype=np.common_type(a, b))
+    out = np.empty((m * p, n * q), dtype=common_type(a, b))
 
     if out.size > 4096:
         _nb_kron_exp_par(a, b, out, m, n, p, q)
@@ -1607,6 +1627,8 @@ def ikron(ops, dims, inds, sparse=None, stype=None,
     if isinstance(ops, (np.ndarray, sp.spmatrix)):
         ops = (ops,)
 
+    dtype = common_type(*ops)
+
     # Make sure dimensions and coordinates have been flattenened.
     if np.ndim(dims) > 1:
         dims, inds = dim_map(dims, inds)
@@ -1623,7 +1645,9 @@ def ikron(ops, dims, inds, sparse=None, stype=None,
     inds, ops = set(inds), iter(ops)
 
     # can't slice "coo" format so use "csr" if ownership specified
-    eye_kws = {'sparse': sparse, 'stype': "csr" if ownership else "coo"}
+    eye_kws = {'sparse': sparse,
+               'stype': "csr" if ownership else "coo",
+               'dtype': dtype}
 
     def gen_ops():
         cff_id = 1  # keeps track of compressing adjacent identities

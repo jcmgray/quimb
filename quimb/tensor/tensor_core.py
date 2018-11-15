@@ -19,7 +19,7 @@ import numpy as np
 import opt_einsum as oe
 import scipy.sparse.linalg as spla
 
-from ..core import qarray, prod, realify_scalar, vdot
+from ..core import qarray, prod, realify_scalar, vdot, common_type
 from ..linalg.base_linalg import norm_fro_dense
 from ..utils import functions_equal, has_cupy
 from . import decomp
@@ -459,7 +459,7 @@ def array_direct_product(X, Y, sum_axes=()):
             selectorX.append(slice(None))
             selectorY.append(slice(None))
 
-    new_type = np.find_common_type((X.dtype, Y.dtype), ())
+    new_type = common_type(X, Y)
     Z = np.zeros(final_shape, dtype=new_type)
 
     # Add tensors to the diagonals
