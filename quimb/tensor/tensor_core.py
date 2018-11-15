@@ -2846,10 +2846,10 @@ class TensorNetwork(object):
 
     @property
     def dtype(self):
-        """The dtype of this TensorNetwork, note this just randomly samples the
-        dtype of *one* tensor and thus assumes they all have the same dtype.
+        """The dtype of this TensorNetwork, this is the minimal common type
+        of all the tensors data.
         """
-        return next(iter(self)).dtype
+        return common_type(*self)
 
     def isreal(self):
         return np.issubdtype(self.dtype, np.floating)
