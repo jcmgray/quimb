@@ -2833,6 +2833,43 @@ class TensorNetwork(object):
 
         return tn
 
+    def rank_simplify(self, inplace=False):
+        """Simplify this tensor network by performing all contractions of
+        rank-1 and rank-2 tensors. These are guaranteed not to increase the
+        memory of the network and thus can be a useful pre-processing step
+        before performing a complex contraction.
+        """
+        tn = self if inplace else self.copy()
+        tids = set(tn.tensor_map)
+
+        while tids:
+            tid1 = tids.pop()
+            T1 = tn.tensor_map[tid1]
+
+            if T1.ndim > 2:
+                continue
+
+            if T1.ndim == 1:
+                ix, = T1.inds
+            elif T1.ndim == 2:
+                # always contract bigger index to decrease size
+                ix, ix_alt = T1.inds
+                if T1.ind_size(ix_alt) < T1.ind_size(ix):
+                    ix = ix_alt
+
+            tid2, = (i for i in tn.ind_map[ix] if i != tid1)
+
+            T3 = tn._pop_tensor(tid1) @ tn._pop_tensor(tid2)
+            tn.add_tensor(T3, tid=tid2, virtual=True)
+
+            # if result is low rank re-add to contract again
+            if T3.ndim in (1, 2):
+                tids.add(tid2)
+
+        return tn
+
+    rank_simplify_ = functools.partialmethod(rank_simplify, inplace=True)
+
     def max_bond(self):
         """Return the size of the largest bond in this network.
         """
