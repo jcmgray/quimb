@@ -218,6 +218,16 @@ def swap(dim=2, dtype=complex, **kwargs):
     return S
 
 
+@functools.lru_cache(maxsize=4)
+def iswap(dtype=complex, **kwargs):
+    iswap = qu([[1., 0., 0., 0.],
+                [0., 0., 1j, 0.],
+                [0., 1j, 0., 0.],
+                [0., 0., 0., 1.]], dtype=dtype, **kwargs)
+    make_immutable(iswap)
+    return iswap
+
+
 @functools.lru_cache(maxsize=16)
 def controlled(s, dtype=complex, sparse=False):
     """Construct a controlled pauli gate for two qubits.
