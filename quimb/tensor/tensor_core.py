@@ -21,7 +21,7 @@ import scipy.sparse.linalg as spla
 
 from ..core import qarray, prod, realify_scalar, vdot, common_type
 from ..linalg.base_linalg import norm_fro_dense
-from ..utils import functions_equal, has_cupy
+from ..utils import check_opt, functions_equal, has_cupy
 from . import decomp
 
 
@@ -151,6 +151,9 @@ def _maybe_map_indices_to_alphabet(a_ix, i_ix, o_ix):
     return ",".join(in_str) + "->" + out_str
 
 
+_VALID_CONTRACT_GET = {None, 'expression', 'path'}
+
+
 def tensor_contract(*tensors, output_inds=None, get=None,
                     backend=None, **contract_opts):
     """Efficiently contract multiple tensors, combining their tags.
@@ -179,6 +182,8 @@ def tensor_contract(*tensors, output_inds=None, get=None,
     -------
     scalar or Tensor
     """
+    check_opt('get', get, _VALID_CONTRACT_GET)
+
     if backend is None:
         backend = _CONTRACT_BACKEND
 
@@ -240,6 +245,9 @@ def rand_uuid(base=""):
     'virt-bond_bf342e68'
     """
     return base + "_" + r_bs_str + next(RAND_UUIDS)
+
+
+_VALID_SPLIT_GET = {None, 'arrays', 'tensors', 'values'}
 
 
 def tensor_split(T, left_inds, method='svd', max_bond=None, absorb='both',
@@ -305,6 +313,8 @@ def tensor_split(T, left_inds, method='svd', max_bond=None, absorb='both',
     TensorNetwork or (Tensor, Tensor) or (array, array) or 1D-array
         Respectively if get={None, 'tensors', 'arrays', 'values'}.
     """
+    check_opt('get', get, _VALID_SPLIT_GET)
+
     if isinstance(left_inds, str):
         left_inds = (left_inds,)
     else:
@@ -2292,10 +2302,10 @@ class TensorNetwork(object):
             The indices defining the right hand side of the SVD, these can be
             automatically worked out, but for hermitian decompositions the
             order is important and thus can be given here explicitly.
-        method : {'isvd', 'eig', 'eigh', 'svd', 'svds', 'eigsh', 'cholesky'}
+        method : str, optional
             How to perform the decomposition, if not an iterative method
-            ('isvd', 'svds', 'eigsh'), the subnetwork dense tensor will be
-            formed first.
+            the subnetwork dense tensor will be formed first, see
+            :func:`~quimb.tensor.tensor_core.tensor_split` for options.
         max_bond : int, optional
             The maximum bond to keep, defaults to no maximum (-1).
         ltags : sequence of str, optional

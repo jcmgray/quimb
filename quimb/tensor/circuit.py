@@ -50,6 +50,8 @@ def parse_qasm_url(url, **kwargs):
 # -------------------------- core gate functions ---------------------------- #
 
 def build_gate_1(gate, tags=None):
+    """Build a function that applies ``gate`` to a tensor network wavefunction.
+    """
 
     def apply_gate(psi, i, **gate_opts):
         psi.gate_(gate, int(i), tags=tags, **gate_opts)
@@ -58,6 +60,8 @@ def build_gate_1(gate, tags=None):
 
 
 def build_gate_2(gate, tags=None):
+    """Build a function that applies ``gate`` to a tensor network wavefunction.
+    """
 
     def apply_gate(psi, i, j, **gate_opts):
         psi.gate_(gate, (int(i), int(j)), tags=tags, **gate_opts)
@@ -65,33 +69,41 @@ def build_gate_2(gate, tags=None):
     return apply_gate
 
 
+# rotations take an angle and so don't fit into ``build_gate_1``
+
 def apply_Rx(psi, theta, i, **gate_opts):
+    """Apply an X-rotation of ``theta`` to tensor network wavefunction ``psi``.
+    """
     psi.gate_(qu.Rx(float(theta)), int(i), tags='RX', **gate_opts)
 
 
 def apply_Ry(psi, theta, i, **gate_opts):
+    """Apply a Y-rotation of ``theta`` to tensor network wavefunction ``psi``.
+    """
     psi.gate_(qu.Ry(float(theta)), int(i), tags='RY', **gate_opts)
 
 
 def apply_Rz(psi, theta, i, **gate_opts):
+    """Apply a Z-rotation of ``theta`` to tensor network wavefunction ``psi``.
+    """
     psi.gate_(qu.Rz(float(theta)), int(i), tags='RZ', **gate_opts)
 
 
 APPLY_GATES = {
+    'RZ': apply_Rx,
+    'RY': apply_Ry,
+    'RX': apply_Rz,
     'H': build_gate_1(qu.hadamard(), tags='H'),
     'X': build_gate_1(qu.pauli('X'), tags='X'),
     'Y': build_gate_1(qu.pauli('Y'), tags='Y'),
     'Z': build_gate_1(qu.pauli('Z'), tags='Z'),
-    'CNOT': build_gate_2(qu.CNOT(), tags='CNOT'),
-    'RZ': apply_Rx,
-    'RY': apply_Ry,
-    'RX': apply_Rz,
+    'T': build_gate_1(qu.T_gate(), tags='T'),
+    'X_1_2': build_gate_1(qu.Rx(math.pi / 2), tags='X_1/2'),
+    'Y_1_2': build_gate_1(qu.Ry(math.pi / 2), tags='Y_1/2'),
     'CX': build_gate_2(qu.cX(), tags='CX'),
     'CY': build_gate_2(qu.cY(), tags='CY'),
     'CZ': build_gate_2(qu.cZ(), tags='CZ'),
-    'T': build_gate_1(qu.T_gate(), tags='T'),
-    'X_1_2': build_gate_1(qu.Rx(math.pi / 2), tags='X_1/2'),
-    'Y_1_2': build_gate_1(qu.Ry(math.pi / 2), tags='Y_1/2')
+    'CNOT': build_gate_2(qu.CNOT(), tags='CNOT'),
 }
 
 
@@ -175,6 +187,7 @@ class Circuit:
                 self._psi.add_tag(tag)
 
         self.gate_opts = {} if gate_opts is None else dict(gate_opts)
+        self.gate_opts.setdefault('contract', 'split-gate')
         self.gates = []
 
     @classmethod

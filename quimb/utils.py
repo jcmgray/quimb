@@ -4,6 +4,14 @@ import importlib
 import itertools
 
 
+_CHECK_OPT_MSG = "Option `{}` should be one of {}, but got '{}'."
+
+
+def check_opt(name, value, valid):
+    if value not in valid:
+        raise ValueError(_CHECK_OPT_MSG.format(name, valid, value))
+
+
 def find_library(x):
     """Check if library is installed.
 

@@ -9,7 +9,7 @@ from numbers import Integral
 import numpy as np
 import opt_einsum as oe
 
-from ..utils import three_line_multi_print, pairwise
+from ..utils import check_opt, three_line_multi_print, pairwise
 import quimb as qu
 from .tensor_core import (
     Tensor,
@@ -119,18 +119,29 @@ def expec_TN_1D(*tns, compress=None, eps=1e-15):
     return expec_tn ^ ...
 
 
+_VALID_GATE_CONTRACT = {False, 'split-gate', True, 'swap+split'}
+_VALID_GATE_PROPAGATE = {'sites', 'register', False, True}
+
+
 def gate_TN_1D(tn, G, where, contract=False, tags=None,
                propagate_tags='sites', inplace=False,
                cur_orthog=None, **compress_opts):
     r"""Act with the gate ``g`` on sites ``where``, maintaining the outer
     indices of the 1D tensor netowork::
 
-        contract=False     contract=True
-            ...                  ...         <- where
-        0-0-0-0-0-0-0      0-0-0-GGG-0-0-0
-        | | | | | | |      | | | / \ | | |
-            GGG
-            | |
+        contract=False     contract='split-gate'
+            . .                  . .              <- where
+        0-0-0-0-0-0-0        0-0-0-0-0-0-0
+        | | | | | | |        | | | | | | |
+            GGG                  G~G
+            | |                  | |
+
+
+        contract=True      contract='swap+split'
+              . .                  . .            <- where
+        0-0-0-GGG-0-0-0      0-0-0-G=G-0-0-0
+        | | | / \ | | |      | | | | | | | |
+
 
     By default, site tags will be propagated to the gate tensors, identifying
     a 'light cone'.
@@ -142,12 +153,15 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
         number of dimensions as the number of sites. The second half of these
         will be contracted with the MPS, and the first half indexed with the
         correct ``site_ind_id``. Sites are read left to right from the shape.
+        A two-dimensional array is permissible if each dimension factorizes
+        correctly.
     where : int or sequence of int
         Where the gate should act.
-    contract : {False, True, 'swap+split'}, optional
+    contract : {False, 'split-gate', True, 'swap+split'}, optional
         Whether to contract the gate into the 1D tensor network. If,
 
             - False: leave the gate uncontracted, the default
+            - 'split-gate': like False, but split the gate if it is two-site.
             - True: contract the gate into the tensor network, if the gate acts
               on more than one site, this will produce an ever larger tensor.
             - 'swap+split': Swap sites until they are adjacent, then contract
@@ -172,9 +186,10 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
     inplace, bool, optional
         Perform the gate in place.
     compress_opts
-        Supplied to
-        `~quimb.tensor.tensor_1d.MatrixProductState.gate_with_auto_swap` only
-        if ``contract='swap+split'.
+        Supplied to :meth:`~quimb.tensor.tensor_core.Tensor.split`
+        if ``contract='swap+split'`` or
+        :meth:`~quimb.tensor.tensor_1d.MatrixProductState.gate_with_auto_swap`
+        if ``contract='swap+split'``.
 
     Returns
     -------
@@ -194,6 +209,9 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
     >>> p.outer_inds()
     ('k0', 'k1', 'k2')
     """
+    check_opt('contract', contract, _VALID_GATE_CONTRACT)
+    check_opt('propagate_tags', propagate_tags, _VALID_GATE_PROPAGATE)
+
     psi = tn if inplace else tn.copy()
 
     dp = psi.phys_dim()
@@ -203,6 +221,11 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
         where = (where,)
     ng = len(where)
 
+    if (ng > 2) and contract in ('swap+split', 'split-gate'):
+        err_msg = "Can't use `contract='{}'` for >2 sites.".format(contract)
+        raise ValueError(err_msg)
+
+    # allow gate to be a matrix as long as it factorizes into tensor
     shape_matches_2d = (_ndim(G) == 2) and (G.shape[1] == dp ** ng)
     shape_maches_nd = all(d == dp for d in G.shape)
 
@@ -213,8 +236,6 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
                          "".format(G.shape, where))
 
     if contract == 'swap+split' and ng > 1:
-        if ng > 2:
-            raise ValueError("Can't use auto-swap gate for more than 2 sites.")
         psi.gate_with_auto_swap(G, where, cur_orthog=cur_orthog,
                                 inplace=True, **compress_opts)
         return psi
@@ -228,27 +249,44 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
     # get the sites that used to have the physical indices
     site_tids = psi._get_tids_from_inds(bnds, which='any')
 
+    # convert the gate into a tensor
     TG = Tensor(G, gate_ix, tags=tags)
 
-    if contract:
+    if contract is True:
         # pop the sites, contract, then re-add
         pts = [psi._pop_tensor(tid) for tid in site_tids]
         psi |= TG.contract(*pts)
-    else:
-        psi |= TG
-        if propagate_tags:
-            if propagate_tags == 'register':
-                old_tags = {psi.site_tag(i) for i in where}
-            else:
-                old_tags = get_tags(psi.tensor_map[tid] for tid in site_tids)
+        return psi
 
-            if propagate_tags == 'sites':
-                # use regex to take tags only matching e.g. 'I0', 'I13'
-                rex = re.compile(psi.structure.format("\d+"))
-                old_tags = {t for t in old_tags if rex.match(t)}
+    # if not contracting the gate into the network, work out which tags to
+    # 'propagate' forward from the tensors being acted on to the gate tensors
+    if propagate_tags:
+        if propagate_tags == 'register':
+            old_tags = {psi.site_tag(i) for i in where}
+        else:
+            old_tags = get_tags(psi.tensor_map[tid] for tid in site_tids)
 
-            TG.modify(tags=TG.tags | old_tags)
+        if propagate_tags == 'sites':
+            # use regex to take tags only matching e.g. 'I0', 'I13'
+            rex = re.compile(psi.structure.format("\d+"))
+            old_tags = {t for t in old_tags if rex.match(t)}
 
+        TG.modify(tags=TG.tags | old_tags)
+
+    if contract == 'split-gate':
+        #  | |       | |
+        #  GGG  -->  G~G
+        #  | |       | |
+        TG = TG.split(TG.inds[::2], **compress_opts)
+
+        # if we are splitting the gate then only add site tags on the tensors
+        # directly 'above' the site
+        if (propagate_tags == 'register') and (ng == 2):
+            for (i, j) in (where, where[::-1]):
+                itid, = TG.ind_map[psi.site_ind(i)]
+                TG.tensor_map[itid].tags.discard(psi.site_tag(j))
+
+    psi |= TG
     return psi
 
 

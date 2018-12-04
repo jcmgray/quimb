@@ -456,20 +456,49 @@ class TestMatrixProductState:
     @pytest.mark.parametrize("propagate_tags", [False, True])
     @pytest.mark.parametrize("contract", [False, True])
     def test_gate_no_contract(self, bsz, propagate_tags, contract):
-        p = MPS_rand_state(5, 7)
+        p = MPS_rand_state(5, 7, tags={'PSI0'})
         q = p.copy()
         G = qu.rand_uni(2**bsz)
-        p = p.gate_(
-            G,
-            where=[i for i in range(2, 2 + bsz)],
-            tags='G',
-            contract=contract)
+        p = p.gate_(G, where=[i for i in range(2, 2 + bsz)], tags='G',
+                    contract=contract, propagate_tags=propagate_tags)
         TG = p['G']
         if propagate_tags or contract:
             assert p.site_tag(2) in TG.tags
-        assert p.H @ p == pytest.approx(1.0)
-        assert abs(q.H @ p) < 1.0
+        assert ('PSI0' in TG.tags) == (propagate_tags is True) or contract
+        assert (p.H & p) ^ all == pytest.approx(1.0)
+        assert abs((q.H & p) ^ all) < 1.0
         assert len(p.tensors) == 6 - int(contract) * bsz
+        assert set(p.outer_inds()) == {'k{}'.format(i) for i in range(5)}
+
+    @pytest.mark.parametrize("propagate_tags", [False, 'sites',
+                                                'register', True])
+    def test_gate_split_gate(self, propagate_tags):
+        p = MPS_rand_state(5, 7, tags={'PSI0'})
+        q = p.copy()
+        G = qu.CNOT()
+        p = p.gate_(G, where=[i for i in range(2, 4)], tags='G',
+                    contract='split-gate', propagate_tags=propagate_tags)
+        TG = p['G']
+
+        if propagate_tags is False:
+            assert TG[0].tags == {'G'}
+            assert TG[1].tags == {'G'}
+
+        elif propagate_tags == 'register':
+            assert TG[0].tags == {'G', 'I2'}
+            assert TG[1].tags == {'G', 'I3'}
+
+        elif propagate_tags == 'sites':
+            assert TG[0].tags == {'G', 'I2', 'I3'}
+            assert TG[1].tags == {'G', 'I2', 'I3'}
+
+        elif propagate_tags is True:
+            assert TG[0].tags == {'PSI0', 'G', 'I2', 'I3'}
+            assert TG[1].tags == {'PSI0', 'G', 'I2', 'I3'}
+
+        assert (p.H & p) ^ all == pytest.approx(1.0)
+        assert abs((q.H & p) ^ all) < 1.0
+        assert len(p.tensors) == 7
         assert set(p.outer_inds()) == {'k{}'.format(i) for i in range(5)}
 
     def test_gate_swap_and_split(self):
