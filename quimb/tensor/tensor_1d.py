@@ -253,7 +253,7 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
     # convert the gate into a tensor
     TG = Tensor(G, gate_ix, tags=tags)
 
-    if contract is True:
+    if contract in (True, 'swap+split'):
         # pop the sites, contract, then re-add
         pts = [psi._pop_tensor(tid) for tid in site_tids]
         psi |= TG.contract(*pts)
