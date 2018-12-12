@@ -240,6 +240,20 @@ class TestBasicTensorOperations:
         assert not a.check_owners()
         assert not b.check_owners()
 
+    def test_isel(self):
+        T = rand_tensor((2, 3, 4, 5, 6), inds=['a', 'b', 'c', 'd', 'e'])
+        Tis = T.isel({'d': 2, 'b': 0})
+        assert Tis.shape == (2, 4, 6)
+        assert Tis.inds == ('a', 'c', 'e')
+        assert_allclose(Tis.data, T.data[:, 0, :, 2, :])
+
+    def test_cut_iter(self):
+        psi = MPS_rand_state(10, 7, cyclic=True)
+        pp = psi.H & psi
+        bnds = bonds(pp[0], pp[-1])
+        assert sum(tn ^ all for tn in pp.cut_iter(*bnds)) == pytest.approx(1.0)
+        assert pp ^ all == pytest.approx(1.0)
+
 
 class TestTensorFunctions:
     @pytest.mark.parametrize('method', ['svd', 'eig', 'isvd', 'svds'])

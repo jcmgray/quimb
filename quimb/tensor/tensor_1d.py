@@ -131,7 +131,7 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
 
         contract=False     contract='split-gate'
             . .                  . .              <- where
-        0-0-0-0-0-0-0        0-0-0-0-0-0-0
+        o-o-o-o-o-o-o        o-o-o-o-o-o-o
         | | | | | | |        | | | | | | |
             GGG                  G~G
             | |                  | |
@@ -139,12 +139,13 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
 
         contract=True      contract='swap+split'
               . .                  . .            <- where
-        0-0-0-GGG-0-0-0      0-0-0-G=G-0-0-0
+        o-o-o-GGG-o-o-o      o-o-o-G=G-o-o-o
         | | | / \ | | |      | | | | | | | |
 
 
-    By default, site tags will be propagated to the gate tensors, identifying
-    a 'light cone'.
+    Note that the sites in ``where`` do not have to be contiguous. By default,
+    site tags will be propagated to the gate tensors, identifying a
+    'light cone'.
 
     Parameters
     ----------
@@ -273,7 +274,9 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
 
         TG.modify(tags=TG.tags | old_tags)
 
-    if contract == 'split-gate':
+    # check if we should split multi-site gates (which may result in an easier
+    # tensor network to contract if we use compression)
+    if (contract == 'split-gate') and (ng > 1):
         #  | |       | |
         #  GGG  -->  G~G
         #  | |       | |
@@ -1838,10 +1841,10 @@ class MatrixProductState(TensorNetwork1DVector,
                 max_bond=vmax_bond, **compress_opts)
 
             # cut joined bond by reindexing to upper- and lower- ind_id.
-            kb.cut_bond((mps.site_tag(section[0]), '_UP'),
-                        (mps.site_tag(section[0]), '_DOWN'),
-                        "_tmp_ind_u{}".format(label),
-                        "_tmp_ind_l{}".format(label))
+            kb.cut_between((mps.site_tag(section[0]), '_UP'),
+                           (mps.site_tag(section[0]), '_DOWN'),
+                           "_tmp_ind_u{}".format(label),
+                           "_tmp_ind_l{}".format(label))
 
         else:
             # just unfold and fuse physical indices:

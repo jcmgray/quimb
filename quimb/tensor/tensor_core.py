@@ -27,7 +27,7 @@ from . import decomp
 
 def _get_contract_expr(contract_str, *shapes, **kwargs):
     # choose how large intermediate arrays can be
-    kwargs.setdefault('memory_limit', -1)
+    kwargs.setdefault('optimize', 'greedy')
     return oe.contract_expression(contract_str, *shapes, **kwargs)
 
 
@@ -217,8 +217,8 @@ def tensor_contract(*tensors, output_inds=None, get=None,
 
     if not o_ix:
         if isinstance(o_array, np.ndarray):
-            o_array = np.asscalar(o_array)
-        return realify_scalar(o_array)
+            o_array = realify_scalar(o_array.item(0))
+        return o_array
 
     # unison of all tags
     o_tags = set_union(t.tags for t in tensors)
@@ -725,6 +725,43 @@ class Tensor(object):
         if len(self.inds) != _ndim(self.data):
             raise ValueError("Mismatch between number of data dimensions and "
                              "number of indices supplied.")
+
+    def isel(self, selectors, inplace=False):
+        """Select specific values for some dimensions/indices of this tensor,
+        thereby removing them. Analogous to ``X[:, :, 3, :, :]`` with arrays.
+
+        Parameters
+        ----------
+        selectors : dict[str, int]
+            Mapping of index(es) to which value to take.
+        inplace : bool, optional
+            Whether to select inplace or not.
+
+        Returns
+        -------
+        Tensor
+
+        Examples
+        --------
+        >>> T = rand_tensor((2, 3, 4), inds=('a', 'b', 'c'))
+        >>> T.isel({'b': -1})
+        Tensor(shape=(2, 4), inds=('a', 'c'), tags=set())
+
+        See Also
+        --------
+        TensorNetwork.isel
+        """
+        T = self if inplace else self.copy()
+
+        new_inds = tuple(ix for ix in self.inds if ix not in selectors)
+
+        data_loc = tuple(selectors.get(ix, slice(None)) for ix in self.inds)
+        new_data = self.data[data_loc]
+
+        T.modify(data=new_data, inds=new_inds)
+        return T
+
+    isel_ = functools.partialmethod(isel, inplace=True)
 
     def add_tag(self, tag):
         """Add a tag to this tensor. Unlike ``self.tags.add`` this also updates
@@ -1486,7 +1523,7 @@ class TensorNetwork(object):
 
             # set default blocksize
             if self.structure_bsz is None:
-                self.structure_bsz = 10
+                self.structure_bsz = 100
 
     def _combine_properties(self, other):
         props_equals = (('structure', lambda u, v: u == v),
@@ -2454,7 +2491,18 @@ class TensorNetwork(object):
         bnd, = bonds(T1, T2)
         self.ind_map[bnd] = {tid1, tid2}
 
-    def cut_bond(self, left_tags, right_tags, left_ind, right_ind):
+    def cut_bond(self, bnd, left_ind, right_ind):
+        """
+        """
+        tid_l, tid_r = self.ind_map[bnd]
+
+        TL, TR = self.tensor_map[tid_l], self.tensor_map[tid_r]
+        bnd, = bonds(TL, TR)
+
+        TL.reindex_({bnd: left_ind})
+        TR.reindex_({bnd: right_ind})
+
+    def cut_between(self, left_tags, right_tags, left_ind, right_ind):
         """Cut the bond between the tensors specified by ``left_tags`` and
         ``right_tags``, giving them the new inds ``left_ind`` and
         ``right_ind`` respectively.
@@ -2467,6 +2515,78 @@ class TensorNetwork(object):
 
         TL.reindex_({bnd: left_ind})
         TR.reindex_({bnd: right_ind})
+
+    def isel(self, selectors, inplace=False):
+        """Select specific values for some dimensions/indices of this tensor
+        network, thereby removing them.
+
+        Parameters
+        ----------
+        selectors : dict[str, int]
+            Mapping of index(es) to which value to take.
+        inplace : bool, optional
+            Whether to select inplace or not.
+
+        Returns
+        -------
+        TensorNetwork
+
+        See Also
+        --------
+        Tensor.isel
+        """
+        TN = self if inplace else self.copy()
+
+        tids = set.union(*map(self.ind_map.__getitem__, selectors))
+        for tid in tids:
+            # need to pop and add rather than acting inplace so we don't modify
+            # the tensor for other networks -> above copy not deep
+            TN.add_tensor(
+                TN._pop_tensor(tid).isel(selectors), virtual=True,
+            )
+
+        return TN
+
+    isel_ = functools.partialmethod(isel, inplace=True)
+
+    def cut_iter(self, *inds):
+        """Cut and iterate over one or more indices in this tensor network.
+        Each network yielded will have that index removed, and the sum of all
+        networks will equal the original network. This works by iterating over
+        the product of all combinations of each bond supplied to ``isel``.
+        As such, the number of networks produced is exponential in the number
+        of bonds cut.
+
+        Parameters
+        ----------
+        inds : sequence of str
+            The bonds to cut.
+
+        Yields
+        ------
+        TensorNetwork
+
+
+        Examples
+        --------
+
+        Here we'll cut the two extra bonds of a cyclic MPS and sum the
+        contraction of the resulting 49 OBC MPS norms:
+
+            >>> psi = MPS_rand_state(10, bond_dim=7, cyclic=True)
+            >>> norm = psi.H & psi
+            >>> bnds = bonds(norm[0], norm[-1])
+            >>> sum(tn ^ all for tn in norm.cut_iter(*bnds))
+            1.0
+
+        See Also
+        --------
+        TensorNetwork.isel, TensorNetwork.cut_between
+        """
+        ranges = [range(self.ind_size(ix)) for ix in inds]
+        for which in itertools.product(*ranges):
+            selector = dict(zip(inds, which))
+            yield self.isel(selector)
 
     def insert_operator(self, A, where1, where2, tags=None, inplace=False):
         r"""Insert an operator on the bond between the specified tensors,
@@ -2684,7 +2804,8 @@ class TensorNetwork(object):
             Any tensors with any of these tags with be contracted. Set to
             ``...`` (``Ellipsis``) to contract all tensors, the default.
         inplace : bool, optional
-            Whether to perform the contraction inplace.
+            Whether to perform the contraction inplace. This is only valid
+            if not all tensors are contracted (which doesn't produce a TN).
         opts
             Passed to ``tensor_contract``.
 
@@ -2698,6 +2819,8 @@ class TensorNetwork(object):
         --------
         contract_structured, contract_tags, contract_cumulative
         """
+        if tags is all:
+            return tensor_contract(*self, **opts)
 
         # Check for a structured strategy for performing contraction...
         if self.structure is not None:

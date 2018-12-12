@@ -94,8 +94,8 @@ class EEMPS(MatrixProductState):
         ai, af, bi, bf = rand_uuid(), rand_uuid(), rand_uuid(), rand_uuid()
 
         # cut bond between sysa start and sysb end, and sysa end and sysb start
-        self.cut_bond(self.sysa[0], self.sysb[-1], ai, bf)
-        self.cut_bond(self.sysa[-1], self.sysb[0], af, bi)
+        self.cut_between(self.sysa[0], self.sysb[-1], ai, bf)
+        self.cut_between(self.sysa[-1], self.sysb[0], af, bi)
 
         # add the env in that gap
         self |= Tensor(env, inds=(ai, af, bi, bf), tags={'_ENV'})

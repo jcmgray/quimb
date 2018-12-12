@@ -3,16 +3,16 @@ import quimb as qu
 from .tensor_gen import MPS_computational_state
 
 
-def parse_qasm(qasm, strip_round=False):
+def parse_qasm(qasm, strip_round='auto'):
     """Parse qasm from a string.
 
     Parameters
     ----------
     qasm : str
         The full string of the qasm file.
-    strip_round : bool, optional
-        If true, remove the first entry of each line,
-        assuming it to the the gate round.
+    strip_round : {'auto', False, True}, optional
+        Whether to strip the gate round (an integer beginning every gate line).
+        Defaults to auto-detecting but can also be forced.
 
     Returns
     -------
@@ -27,6 +27,9 @@ def parse_qasm(qasm, strip_round=False):
     lns = qasm.split('\n')
     n = int(lns[0])
     gates = [l.split(" ") for l in lns[1:] if l]
+
+    if strip_round == 'auto':
+        strip_round = gates[0][0].isdigit()
 
     if strip_round:
         gates = [g[1:] for g in gates]
@@ -188,10 +191,11 @@ class Circuit:
 
         self.gate_opts = {} if gate_opts is None else dict(gate_opts)
         self.gate_opts.setdefault('contract', 'split-gate')
+        self.gate_opts.setdefault('propagate_tags', 'register')
         self.gates = []
 
     @classmethod
-    def from_qasm(cls, qasm, strip_round=False, **quantum_circuit_opts):
+    def from_qasm(cls, qasm, strip_round='auto', **quantum_circuit_opts):
         """Generate a ``Circuit`` instance from a qasm string.
         """
         info = parse_qasm(qasm, strip_round=strip_round)
@@ -200,7 +204,7 @@ class Circuit:
         return qc
 
     @classmethod
-    def from_qasm_file(cls, fname, strip_round=False, **quantum_circuit_opts):
+    def from_qasm_file(cls, fname, strip_round='auto', **quantum_circuit_opts):
         """Generate a ``Circuit`` instance from a qasm file.
         """
         info = parse_qasm_file(fname, strip_round=strip_round)
@@ -209,7 +213,7 @@ class Circuit:
         return qc
 
     @classmethod
-    def from_qasm_url(cls, url, strip_round=False, **quantum_circuit_opts):
+    def from_qasm_url(cls, url, strip_round='auto', **quantum_circuit_opts):
         """Generate a ``Circuit`` instance from a qasm url.
         """
         info = parse_qasm_url(url, strip_round=strip_round)

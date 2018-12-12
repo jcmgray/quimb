@@ -15,9 +15,49 @@ from .tensor_tebd import NNI
 
 @random_seed_fn
 def rand_tensor(shape, inds, tags=None, dtype=float):
-    """Generate a random (complex) tensor with specified shape and inds.
+    """Generate a random tensor with specified shape and inds.
+
+    Parameters
+    ----------
+    shape : sequence of int
+        Size of each dimension.
+    inds : sequence of str
+        Names of each dimension.
+    tags : sequence of str
+        Labels to tag this tensor with.
+    dtype : {'float64', 'complex128', 'float32', 'complex64'}, optional
+        The underlying data type.
+
+    Returns
+    -------
+    Tensor
     """
     data = randn(shape, dtype=dtype)
+    return Tensor(data=data, inds=inds, tags=tags)
+
+
+@random_seed_fn
+def rand_phased(shape, inds, tags=None, dtype=complex):
+    """Generate a random tensor with specified shape and inds, and randomly
+    'phased' (distributed on the unit circle) data, such that
+    ``T.H @ T == T.norm()**2 == T.size``.
+
+    Parameters
+    ----------
+    shape : sequence of int
+        Size of each dimension.
+    inds : sequence of str
+        Names of each dimension.
+    tags : sequence of str
+        Labels to tag this tensor with.
+    dtype : {'complex128', 'complex64'}, optional
+        The underlying data type - can only be complex.
+
+    Returns
+    -------
+    Tensor
+    """
+    data = rand_phase(shape, dtype=dtype)
     return Tensor(data=data, inds=inds, tags=tags)
 
 

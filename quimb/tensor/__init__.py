@@ -14,6 +14,7 @@ from .tensor_core import (
 )
 from .tensor_gen import (
     rand_tensor,
+    rand_phased,
     MPS_rand_state,
     MPS_product_state,
     MPS_computational_state,
@@ -76,6 +77,7 @@ __all__ = (
     "TensorNetwork",
     "TNLinearOperator1D",
     "rand_tensor",
+    "rand_phased",
     "MPS_rand_state",
     "MPS_product_state",
     "MPS_computational_state",
