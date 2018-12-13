@@ -478,7 +478,8 @@ class TestMatrixProductState:
         G = qu.CNOT()
         p = p.gate_(G, where=[i for i in range(2, 4)], tags='G',
                     contract='split-gate', propagate_tags=propagate_tags)
-        TG = p['G']
+
+        TG = sorted(p['G'], key=lambda t: sorted(t.tags))
 
         if propagate_tags is False:
             assert TG[0].tags == {'G'}
