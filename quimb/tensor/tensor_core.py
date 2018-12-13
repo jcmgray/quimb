@@ -1523,7 +1523,7 @@ class TensorNetwork(object):
 
             # set default blocksize
             if self.structure_bsz is None:
-                self.structure_bsz = 100
+                self.structure_bsz = 10
 
     def _combine_properties(self, other):
         props_equals = (('structure', lambda u, v: u == v),

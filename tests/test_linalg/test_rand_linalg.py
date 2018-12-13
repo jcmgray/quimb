@@ -33,6 +33,9 @@ def rand_tn1d_sect(n, bd, dtype=complex):
 
     norm = qtn.TensorNetwork(qtn.align_TN_1D(mps.H, mpo, mps))
 
+    # greedy not good and contracting with large bsz
+    norm.structure_bsz = 2
+
     lix = qtn.bonds(norm[0], norm[1])
     rix = qtn.bonds(norm[n], norm[n + 1])
 
