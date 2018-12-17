@@ -25,24 +25,24 @@ from ..utils import check_opt, functions_equal, has_cupy
 from . import decomp
 
 
-def _get_contract_expr(contract_str, *shapes, **kwargs):
+def _get_contract_expr(eq, *shapes, **kwargs):
     # choose how large intermediate arrays can be
     kwargs.setdefault('optimize', 'greedy')
-    return oe.contract_expression(contract_str, *shapes, **kwargs)
+    return oe.contract_expression(eq, *shapes, **kwargs)
 
 
 _get_contract_expr_cached = functools.lru_cache(4096)(_get_contract_expr)
 
 
-def get_contract_expr(contract_str, *shapes, cache=True, **kwargs):
-    """Get an callable expression that will evaluate ``contract_str`` based on
+def get_contract_expr(eq, *shapes, cache=True, **kwargs):
+    """Get an callable expression that will evaluate ``eq`` based on
     ``shapes``. Cache the result if no constant tensors are involved.
     """
     # can only cache if the expression does not involve constant tensors
     if kwargs.get('constants', None) or not cache:
-        return _get_contract_expr(contract_str, *shapes, **kwargs)
+        return _get_contract_expr(eq, *shapes, **kwargs)
 
-    return _get_contract_expr_cached(contract_str, *shapes, **kwargs)
+    return _get_contract_expr_cached(eq, *shapes, **kwargs)
 
 
 _CONTRACT_BACKEND = 'numpy'
@@ -141,7 +141,7 @@ def _maybe_map_indices_to_alphabet(a_ix, i_ix, o_ix):
 
     Returns
     -------
-    contract_str : str
+    eq : str
         The string to feed to einsum/contract.
     """
     amap = {ix: oe.get_symbol(i) for i, ix in enumerate(a_ix)}
@@ -151,7 +151,7 @@ def _maybe_map_indices_to_alphabet(a_ix, i_ix, o_ix):
     return ",".join(in_str) + "->" + out_str
 
 
-_VALID_CONTRACT_GET = {None, 'expression', 'path'}
+_VALID_CONTRACT_GET = {None, 'expression', 'path-info', 'symbol-map'}
 
 
 def tensor_contract(*tensors, output_inds=None, get=None,
@@ -165,13 +165,19 @@ def tensor_contract(*tensors, output_inds=None, get=None,
     output_inds : sequence of str
         If given, the desired order of output indices, else defaults to the
         order they occur in the input indices.
-    get : {None, 'expression', 'path'}, optional
-        If None (the default), return the resulting scalar or Tensor. If
-        ``'expression'``, return the ``opt_einsum`` expression that performs
-        the contraction, for e.g. inspection of the order chosen. If
-        ``'path'``, return the ``opt_einsum`` path object with detailed
-        information such as flop cost.
-    backend  {'numpy', 'cupy', 'tensorflow', 'theano', ...}, optional
+    get : {None, 'expression', 'path-info', 'opt_einsum'}, optional
+        What to return. If:
+
+            * ``None`` (the default) - return the resulting scalar or Tensor.
+            * ``'expression'`` - return the ``opt_einsum`` expression that
+              performs the contraction and operates on the raw arrays.
+            * ``'symbol-map'`` - return the dict mapping ``opt_einsum`` symbols
+              to tensor indices.
+            * ``'path-info'`` - return the full ``opt_einsum`` path object with
+              detailed information such as flop cost. The symbol-map is also
+              added to the ``quimb_symbol_map`` attribute.
+
+    backend : {'numpy', 'cupy', 'tensorflow', 'theano', 'dask', ...}, optional
         Which backend to use to perform the contraction. Must be a valid
         ``opt_einsum`` backend with the relevant library installed.
     contract_opts
@@ -188,31 +194,38 @@ def tensor_contract(*tensors, output_inds=None, get=None,
         backend = _CONTRACT_BACKEND
 
     i_ix = tuple(t.inds for t in tensors)  # input indices per tensor
-    a_ix = tuple(concat(i_ix))  # list of all input indices
+    total_ix = tuple(concat(i_ix))  # list of all input indices
+    all_ix = tuple(unique(total_ix))
 
     if output_inds is None:
         # sort output indices  by input order for efficiency and consistency
-        o_ix = tuple(_gen_output_inds(a_ix))
+        o_ix = tuple(_gen_output_inds(total_ix))
     else:
         o_ix = output_inds
 
     # possibly map indices into the range needed by opt- einsum
-    contract_str = _maybe_map_indices_to_alphabet([*unique(a_ix)], i_ix, o_ix)
+    eq = _maybe_map_indices_to_alphabet(all_ix, i_ix, o_ix)
 
-    if get == 'path':
+    if get == 'symbol-map':
+        return {oe.get_symbol(i): ix for i, ix in enumerate(all_ix)}
+
+    if get == 'path-info':
         ops = (t.data for t in tensors)
-        return oe.contract_path(contract_str, *ops, **contract_opts)[1]
+        path_info = oe.contract_path(eq, *ops, **contract_opts)[1]
+        path_info.quimb_symbol_map = {oe.get_symbol(i): ix
+                                      for i, ix in enumerate(all_ix)}
+        return path_info
 
     if get == 'expression':
         # account for possible constant tensors
         cnst = contract_opts.get('constants', ())
         ops = (t.data if i in cnst else t.shape for i, t in enumerate(tensors))
-        expression = get_contract_expr(contract_str, *ops, **contract_opts)
+        expression = get_contract_expr(eq, *ops, **contract_opts)
         return expression
 
     # perform the contraction
     shapes = (t.shape for t in tensors)
-    expression = get_contract_expr(contract_str, *shapes, **contract_opts)
+    expression = get_contract_expr(eq, *shapes, **contract_opts)
     o_array = expression(*(t.data for t in tensors), backend=backend)
 
     if not o_ix:
@@ -2839,7 +2852,7 @@ class TensorNetwork(object):
         this corresponds to the maximum rank tensor produced.
         """
         try:
-            path = self.contract(all, get='path', **contract_opts)
+            path = self.contract(all, get='path-info', **contract_opts)
             return math.log2(path.largest_intermediate)
         except AttributeError:
             expr = self.contract(all, get='expression', **contract_opts)
