@@ -1387,7 +1387,7 @@ class TNLinearOperator(spla.LinearOperator):
             self._adjoint_linop = self.copy(conj=True, transpose=True)
         return self._adjoint_linop
 
-    def to_dense(self, *inds_seq):
+    def to_dense(self, *inds_seq, **contract_opts):
         """Convert this TNLinearOperator into a dense array, defaulting to
         grouping the left and right indices respectively.
         """
@@ -1399,7 +1399,7 @@ class TNLinearOperator(spla.LinearOperator):
         if not inds_seq:
             inds_seq = self.left_inds, self.right_inds
 
-        return tensor_contract(*ts).to_dense(*inds_seq)
+        return tensor_contract(*ts, **contract_opts).to_dense(*inds_seq)
 
     @property
     def A(self):
@@ -2896,12 +2896,12 @@ class TensorNetwork(object):
         tn = self.reindex({u: l for u, l in zip(left_inds, right_inds)})
         return tn.contract_tags(...)
 
-    def to_dense(self, *inds_seq):
+    def to_dense(self, *inds_seq, **contract_opts):
         """Convert this network into an dense array, with a single dimension
         for each of inds in ``inds_seqs``. E.g. to convert several sites
         into a density matrix: ``TN.to_dense(('k0', 'k1'), ('b0', 'b1'))``.
         """
-        return (self ^ ...).to_dense(*inds_seq)
+        return self.contract(..., **contract_opts).to_dense(*inds_seq)
 
     # --------------- information about indices and dimensions -------------- #
 
@@ -2987,6 +2987,7 @@ class TensorNetwork(object):
         """
         tn = self if inplace else self.copy()
         tids = set(tn.tensor_map)
+        outer_inds = set(tn.outer_inds())
 
         while tids:
             tid1 = tids.pop()
@@ -2995,11 +2996,14 @@ class TensorNetwork(object):
             if T1.ndim > 2:
                 continue
 
-            if T1.ndim == 1:
-                ix, = T1.inds
-            elif T1.ndim == 2:
+            # can only contract inner inds
+            inds = set(T1.inds) - outer_inds
+
+            if len(inds) == 1:
+                ix, = inds
+            elif len(inds) == 2:
                 # always contract bigger index to decrease size
-                ix, ix_alt = T1.inds
+                ix, ix_alt = inds
                 if T1.ind_size(ix_alt) < T1.ind_size(ix):
                     ix = ix_alt
 

@@ -379,15 +379,17 @@ class TensorNetwork1DVector:
         """
         return tuple(self.site_ind(i) for i in self.sites)
 
-    def to_dense(self, *inds_seq):
+    def to_dense(self, *inds_seq, **contract_opts):
         """Return the dense ket version of this 1D vector, i.e. a
         ``qarray`` with shape (-1, 1).
         """
         if not inds_seq:
             # just use list of site indices
-            return TensorNetwork.to_dense(self, self.site_inds).reshape(-1, 1)
+            return TensorNetwork.to_dense(
+                self, self.site_inds, **contract_opts
+            ).reshape(-1, 1)
 
-        return TensorNetwork.to_dense(self, self.site_inds)
+        return TensorNetwork.to_dense(self, self.site_inds, **contract_opts)
 
     def phys_dim(self, i=None):
         if i is None:
@@ -2625,15 +2627,16 @@ class MatrixProductOperator(TensorNetwork1DFlat,
         """
         return tuple(self.upper_ind(i) for i in self.sites)
 
-    def to_dense(self, *inds_seq):
+    def to_dense(self, *inds_seq, **contract_opts):
         if inds_seq:
             lix, rix = inds_seq
         else:
             lix, rix = self.lower_inds, self.upper_inds
 
-        data = self.contract(...).fuse((('lower', lix), ('upper', rix))).data
-        d = int(data.size**0.5)
-        return qu.qarray(data.reshape(d, d))
+        T = self.contract(..., **contract_opts)
+        T.fuse_((('lower', lix), ('upper', rix)))
+        d = int(T.size**0.5)
+        return qu.qarray(T.data.reshape(d, d))
 
     def phys_dim(self, i=None):
         if i is None:
