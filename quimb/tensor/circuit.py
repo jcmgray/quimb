@@ -1,23 +1,22 @@
 import math
+import numbers
+
 import quimb as qu
 from .tensor_gen import MPS_computational_state
 
 
-def parse_qasm(qasm, strip_round='auto'):
+def parse_qasm(qasm):
     """Parse qasm from a string.
 
     Parameters
     ----------
     qasm : str
         The full string of the qasm file.
-    strip_round : {'auto', False, True}, optional
-        Whether to strip the gate round (an integer beginning every gate line).
-        Defaults to auto-detecting but can also be forced.
 
     Returns
     -------
     circuit_info : dict
-        Information abou the circuit:
+        Information about the circuit:
 
         - circuit_info['n']: the number of qubits
         - circuit_info['n_gates']: the number of gates in total
@@ -27,13 +26,6 @@ def parse_qasm(qasm, strip_round='auto'):
     lns = qasm.split('\n')
     n = int(lns[0])
     gates = [l.split(" ") for l in lns[1:] if l]
-
-    if strip_round == 'auto':
-        strip_round = gates[0][0].isdigit()
-
-    if strip_round:
-        gates = [g[1:] for g in gates]
-
     return {'n': n, 'gates': gates, 'n_gates': len(gates)}
 
 
@@ -52,12 +44,21 @@ def parse_qasm_url(url, **kwargs):
 
 # -------------------------- core gate functions ---------------------------- #
 
+def _merge_tags(tags, gate_opts):
+    if isinstance(tags, str):
+        tags = {tags}
+    else:
+        tags = set(tags)
+    return tags | set(gate_opts.pop('tags', ()))
+
+
 def build_gate_1(gate, tags=None):
     """Build a function that applies ``gate`` to a tensor network wavefunction.
     """
 
     def apply_gate(psi, i, **gate_opts):
-        psi.gate_(gate, int(i), tags=tags, **gate_opts)
+        mtags = _merge_tags(tags, gate_opts)
+        psi.gate_(gate, int(i), tags=mtags, **gate_opts)
 
     return apply_gate
 
@@ -67,7 +68,8 @@ def build_gate_2(gate, tags=None):
     """
 
     def apply_gate(psi, i, j, **gate_opts):
-        psi.gate_(gate, (int(i), int(j)), tags=tags, **gate_opts)
+        mtags = _merge_tags(tags, gate_opts)
+        psi.gate_(gate, (int(i), int(j)), tags=mtags, **gate_opts)
 
     return apply_gate
 
@@ -77,19 +79,22 @@ def build_gate_2(gate, tags=None):
 def apply_Rx(psi, theta, i, **gate_opts):
     """Apply an X-rotation of ``theta`` to tensor network wavefunction ``psi``.
     """
-    psi.gate_(qu.Rx(float(theta)), int(i), tags='RX', **gate_opts)
+    mtags = _merge_tags({'RX'}, gate_opts)
+    psi.gate_(qu.Rx(float(theta)), int(i), tags=mtags, **gate_opts)
 
 
 def apply_Ry(psi, theta, i, **gate_opts):
     """Apply a Y-rotation of ``theta`` to tensor network wavefunction ``psi``.
     """
-    psi.gate_(qu.Ry(float(theta)), int(i), tags='RY', **gate_opts)
+    mtags = _merge_tags({'RY'}, gate_opts)
+    psi.gate_(qu.Ry(float(theta)), int(i), tags=mtags, **gate_opts)
 
 
 def apply_Rz(psi, theta, i, **gate_opts):
     """Apply a Z-rotation of ``theta`` to tensor network wavefunction ``psi``.
     """
-    psi.gate_(qu.Rz(float(theta)), int(i), tags='RZ', **gate_opts)
+    mtags = _merge_tags({'RZ'}, gate_opts)
+    psi.gate_(qu.Rz(float(theta)), int(i), tags=mtags, **gate_opts)
 
 
 APPLY_GATES = {
@@ -195,33 +200,33 @@ class Circuit:
         self.gates = []
 
     @classmethod
-    def from_qasm(cls, qasm, strip_round='auto', **quantum_circuit_opts):
+    def from_qasm(cls, qasm, **quantum_circuit_opts):
         """Generate a ``Circuit`` instance from a qasm string.
         """
-        info = parse_qasm(qasm, strip_round=strip_round)
+        info = parse_qasm(qasm)
         qc = Circuit(info['n'], **quantum_circuit_opts)
         qc.apply_circuit(info['gates'])
         return qc
 
     @classmethod
-    def from_qasm_file(cls, fname, strip_round='auto', **quantum_circuit_opts):
+    def from_qasm_file(cls, fname, **quantum_circuit_opts):
         """Generate a ``Circuit`` instance from a qasm file.
         """
-        info = parse_qasm_file(fname, strip_round=strip_round)
+        info = parse_qasm_file(fname)
         qc = Circuit(info['n'], **quantum_circuit_opts)
         qc.apply_circuit(info['gates'])
         return qc
 
     @classmethod
-    def from_qasm_url(cls, url, strip_round='auto', **quantum_circuit_opts):
+    def from_qasm_url(cls, url, **quantum_circuit_opts):
         """Generate a ``Circuit`` instance from a qasm url.
         """
-        info = parse_qasm_url(url, strip_round=strip_round)
+        info = parse_qasm_url(url)
         qc = Circuit(info['n'], **quantum_circuit_opts)
         qc.apply_circuit(info['gates'])
         return qc
 
-    def apply_gate(self, gate_id, *gate_args):
+    def apply_gate(self, gate_id, *gate_args, gate_round=None):
         """Apply a single gate to this tensor network quantum circuit.
 
         Parameters
@@ -230,9 +235,23 @@ class Circuit:
             Which type of gate to apply.
         gate_args : list[str]
             The argument to supply to it.
+        gate_round : int, optional
+            The gate round. If ``gate_id`` is integer-like, will also be taken
+            from here, with then ``gate_id, gate_args = gate_args[0],
+            gate_args[1:]``.
+
         """
+        if (gate_round is not None):
+            tags = {'ROUND_{}'.format(gate_round)}
+        elif isinstance(gate_id, numbers.Integral) or gate_id.isdigit():
+            # gate round given as first entry of qasm line
+            tags = {'ROUND_{}'.format(gate_id)}
+            gate_id, gate_args = gate_args[0], gate_args[1:]
+        else:
+            tags = set()
+
         apply_fn = APPLY_GATES[gate_id.upper()]
-        apply_fn(self._psi, *gate_args, **self.gate_opts)
+        apply_fn(self._psi, *gate_args, tags=tags, **self.gate_opts)
         self.gates.append((gate_id, *gate_args))
 
     def apply_circuit(self, gates):
@@ -251,3 +270,6 @@ class Circuit:
     @property
     def psi(self):
         return self._psi.squeeze()
+
+    def __repr__(self):
+        return "<Circuit(n={}, n_gates={})>".format(self.N, len(self.gates))
