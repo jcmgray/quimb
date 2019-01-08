@@ -198,12 +198,18 @@ class qarray(np.ndarray):
         return partial_trace(self, dims, keep)
 
     def __str__(self):
-        with np.printoptions(precision=6, linewidth=120):
-            return super().__str__()
+        current_printopts = np.get_printoptions()
+        np.set_printoptions(precision=6, linewidth=120)
+        s = super().__str__()
+        np.set_printoptions(**current_printopts)
+        return s
 
     def __repr__(self):
-        with np.printoptions(precision=6, linewidth=120):
-            return super().__repr__()
+        current_printopts = np.get_printoptions()
+        np.set_printoptions(precision=6, linewidth=120)
+        s = super().__str__()
+        np.set_printoptions(**current_printopts)
+        return s
 
 # --------------------------------------------------------------------------- #
 # Decorators for standardizing output                                         #
