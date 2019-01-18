@@ -2119,6 +2119,10 @@ class MatrixProductState(TensorNetwork1DVector,
 
             nt = len(ts)
 
+            if verbosity > 0:
+                msg = "Renormalizing for norm {} among {} tensors."
+                print(msg.format(norm, nt))
+
             # now spread the norm out among tensors
             for t in ts:
                 t.modify(data=t.data / norm**(1 / nt))

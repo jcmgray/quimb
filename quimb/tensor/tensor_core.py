@@ -1148,7 +1148,7 @@ class Tensor(object):
     def __matmul__(self, other):
         """Explicitly contract with another tensor.
         """
-        return tensor_contract(self, other)
+        return self.contract(other)
 
     def graph(self, *args, **kwargs):
         """Plot a graph of this tensor and its indices.

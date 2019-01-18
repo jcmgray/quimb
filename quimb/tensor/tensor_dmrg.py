@@ -935,13 +935,13 @@ class DMRG:
 
     # ----------------- overloadable 'plugin' style methods ----------------- #
 
-    @staticmethod
-    def _print_pre_sweep(i, LR, bd, ctf, verbosity=0):
+    def _print_pre_sweep(self, i, LR, bd, ctf, verbosity=0):
         """Print this before each sweep.
         """
         if verbosity > 0:
-            msg = "SWEEP-{}, direction={}, max_bond={}, cutoff:{}"
-            print(msg.format(i + 1, LR, bd, ctf), flush=True)
+            current_bd = self._k.max_bond()
+            msg = "SWEEP-{}, direction={}, max_bond=({}/{}), cutoff:{}"
+            print(msg.format(i + 1, LR, current_bd, bd, ctf), flush=True)
 
     def _compute_post_sweep(self):
         """Compute this after each sweep.
