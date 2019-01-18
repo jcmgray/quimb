@@ -1837,8 +1837,11 @@ def pkron(op, dims, inds, **ikron_opts):
     b = ikron(op, [sz_in, sz // sz_in], 0, **ikron_opts)
 
     # inverse of inds
-    inds_out, dims_out = zip(
-        *((i, x) for i, x in enumerate(dims) if i not in inds))
+    if len(dims) == len(inds):
+        inds_out, dims_out = (), ()
+    else:
+        inds_out, dims_out = zip(
+            *((i, x) for i, x in enumerate(dims) if i not in inds))
 
     # current order and dimensions of system
     p = [*inds, *inds_out]
