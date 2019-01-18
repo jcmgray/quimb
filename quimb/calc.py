@@ -10,6 +10,8 @@ from math import sin, cos, pi, log, log2, sqrt
 import numpy as np
 import numpy.linalg as nla
 from scipy.optimize import minimize
+import opt_einsum as oe
+
 
 from .core import (
     njit, issparse, isop, zeroify, realify, prod, isvec, dot, dag,
@@ -72,6 +74,93 @@ def purify(rho):
     for i, evals in enumerate(evals.flat):
         psi += evals * kron(vs[:, [i]], basis_vec(i, d))
     return qu(psi)
+
+
+@ensure_qarray
+def kraus_op(rho, Ek, dims=None, where=None, check=False):
+    r"""Operate on a mixed state with a set of kraus operators:
+
+    .. math::
+
+        \sigma = \sum_k E_k \rho E_k^{\dagger}
+
+    Parameters
+    ----------
+    rho : (d, d) density matrix
+        The density operator to perform operation on.
+    Ek : (K, d, d) array or sequence of K (d, d) arrays
+        The Kraus operator(s).
+    dims : sequence of int, optional
+        The subdimensions of ``rho``.
+    where : int, optional
+        Which of the subdimensions to apply the operation on.
+    check : bool, optional
+        Where to check ``sum_k(Ek.H @ Ek) == 1``.
+
+    Returns
+    -------
+    sigma : density matrix
+        The state after the kraus operation.
+
+    Examples
+    --------
+    The depolarising channel:
+
+        In [1]: import quimb as qu
+
+        In [2]: rho = qu.rand_rho(2)
+
+        In [3]: I, X, Y, Z = (qu.pauli(s) for s in 'IXYZ')
+
+        In [4]: [qu.expec(rho, A) for A in (X, Y, Z)]
+        Out[4]: [-0.652176185230622, -0.1301762132792484, 0.22362918368272583]
+
+        In [5]: p = 0.1
+
+        In [6]: Ek = [
+           ...:     (1 - p)**0.5 * I,
+           ...:     (p / 3)**0.5 * X,
+           ...:     (p / 3)**0.5 * Y,
+           ...:     (p / 3)**0.5 * Z
+           ...: ]
+
+        In [7]: sigma = qu.kraus_op(rho, Ek)
+
+        In [8]: [qu.expec(sigma, A) for A in (X, Y, Z)]
+        Out[8]: [-0.5652193605332058, -0.11281938484201527, 0.1938119591916957]
+    """
+    if not isinstance(Ek, np.ndarray):
+        Ek = np.stack(Ek, axis=0)
+
+    if check:
+        SEk = np.einsum('kij,kil', Ek, Ek.conj())
+        if norm(SEk - eye(Ek.shape[-1]), 'fro') > 1e-12:
+            raise ValueError("Did not find ``sum(E_k.H @ Ek) == 1``.")
+
+    if int(dims is None) + int(where is None) == 1:
+        raise ValueError("If `dims` is specified so should `where`.")
+
+    if dims:
+        dims = tuple(dims)
+        N = len(dims)
+        rho = rho.reshape(dims + dims)
+        i_inds = ["i{}".format(i) if i != where else "ik" for i in range(N)]
+        j_inds = ["j{}".format(i) if i != where else "jk" for i in range(N)]
+        rho_inds = i_inds + j_inds
+        out = [{'ik': 'ik_new', 'jk': 'jk_new'}.get(x, x) for x in rho_inds]
+    else:
+        rho_inds = ['ik', 'jk']
+        out = ['ik_new', 'jk_new']
+
+    Ei_inds = ['K', 'ik_new', 'ik']
+    Ej_inds = ['K', 'jk_new', 'jk']
+
+    sigma = oe.contract(Ek, Ei_inds, rho, rho_inds, Ek.conj(), Ej_inds, out)
+
+    if dims:
+        sigma = sigma.reshape(prod(dims), prod(dims))
+
+    return sigma
 
 
 def dephase(rho, p, rand_rank=None):

@@ -93,6 +93,51 @@ class TestDephase:
             assert rho_d.tr() == pytest.approx(1.0)
 
 
+class TestKrausOp:
+
+    @pytest.mark.parametrize("stack", [False, True])
+    def test_depolarize(self, stack):
+        rho = qu.rand_rho(2)
+        I, X, Y, Z = (qu.pauli(s) for s in 'IXYZ')
+        es = [qu.expec(rho, A) for A in (X, Y, Z)]
+        p = 0.1
+        Ek = [(1 - p)**0.5 * I,
+              (p / 3)**0.5 * X,
+              (p / 3)**0.5 * Y,
+              (p / 3)**0.5 * Z]
+        if stack:
+            Ek = np.stack(Ek, axis=0)
+        sigma = qu.kraus_op(rho, Ek, check=True)
+        es2 = [qu.expec(sigma, A) for A in (X, Y, Z)]
+        assert qu.tr(sigma) == pytest.approx(1.0)
+        assert all(abs(e2) < abs(e) for e, e2 in zip(es, es2))
+        sig_exp = sum(E @ rho @ qu.dag(E) for E in Ek)
+        assert_allclose(sig_exp, sigma)
+
+    def test_subsystem(self):
+        rho = qu.rand_rho(6)
+        dims = [3, 2]
+        I, X, Y, Z = (qu.pauli(s) for s in 'IXYZ')
+        mi_i = qu.mutual_information(rho, dims)
+        p = 0.1
+        Ek = [(1 - p)**0.5 * I,
+              (p / 3)**0.5 * X,
+              (p / 3)**0.5 * Y,
+              (p / 3)**0.5 * Z]
+
+        with pytest.raises(ValueError):
+            qu.kraus_op(rho, qu.randn((3, 2, 2)), check=True,
+                        dims=dims, where=1)
+
+        sigma = qu.kraus_op(rho, Ek, check=True, dims=dims, where=1)
+        mi_f = qu.mutual_information(sigma, dims)
+        assert mi_f < mi_i
+        assert qu.tr(sigma) == pytest.approx(1.0)
+        sig_exp = sum((qu.eye(3) & E) @ rho @ qu.dag(qu.eye(3) & E)
+                      for E in Ek)
+        assert_allclose(sig_exp, sigma)
+
+
 class TestEntropy:
     def test_entropy_pure(self):
         a = qu.bell_state(1, qtype='dop')

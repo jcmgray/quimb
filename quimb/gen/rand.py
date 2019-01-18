@@ -259,7 +259,11 @@ def _phase_to_complex_base(x):
 
 _phase_sigs = ['complex64(float32)', 'complex128(float64)']
 _phase_to_complex_seq = vectorize(_phase_sigs)(_phase_to_complex_base)
+"""Turn array of phases into unit circle complex numbers - sequential.
+"""
 _phase_to_complex_par = pvectorize(_phase_sigs)(_phase_to_complex_base)
+"""Turn array of phases into unit circle complex numbers - parallel.
+"""
 
 
 def phase_to_complex(x):

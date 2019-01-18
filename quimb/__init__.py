@@ -196,6 +196,7 @@ from .calc import (
     page_entropy,
     heisenberg_energy,
     dephase,
+    kraus_op,
 )
 
 # Evolution class and methods
