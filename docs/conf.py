@@ -14,8 +14,7 @@
 # serve to show the default.
 
 import sphinx_bootstrap_theme
-import quimb
-import quimb.tensor
+from quimb._version import get_versions
 
 # If extensions (or modules to document with autodoc) are in another directory,
 # add these directories to sys.path here. If the directory is relative to the
@@ -41,9 +40,13 @@ extensions = [
     'sphinx.ext.viewcode',
     'sphinx.ext.napoleon',
     'sphinx.ext.intersphinx',
+    'sphinx.ext.extlinks',
     'nbsphinx',
     'sphinx.ext.mathjax',
 ]
+
+extlinks = {'issue': ('https://github.com/jcmgray/quimb/issues/%s', 'GH'),
+            'pull': ('https://github.com/jcmgray/quimb/pull/%s', 'PR')}
 
 napoleon_google_docstring = False
 napoleon_numpy_docstring = True
@@ -79,7 +82,7 @@ author = 'Johnnie Gray'
 # built documents.
 #
 # The full version, including alpha/beta/rc tags.
-release = quimb._version.get_versions()['version']
+release = get_versions()['version']
 # The short X.Y version.
 version = '.'.join(release.split('.')[:2])
 

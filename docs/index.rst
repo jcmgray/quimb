@@ -104,6 +104,15 @@ Citing
     }
 
 
+Release Notes
+-------------
+
+.. toctree::
+  :maxdepth: 2
+
+  changelog
+
+
 Indices and tables
 ------------------
 
