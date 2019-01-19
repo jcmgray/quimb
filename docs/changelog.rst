@@ -17,6 +17,11 @@ v1.2.0 (unreleased)
 - TN: Add :meth:`quimb.tensor.tensor_core.TensorNetwork.isel`
 - TN: Add :meth:`quimb.tensor.tensor_core.TensorNetwork.cut_iter`
 - TN: Add ``'split-gate'`` gate mode
+- Many updates to tensor network quantum circuit simulation including:
+
+  * :class:`quimb.tensor.circuit.CircuitMPS`
+  * :class:`quimb.tensor.circuit.CircuitDense`
+  * 49-qubit depth 30 circuit simulation example
 
 
 **Bug fixes:**

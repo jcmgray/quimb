@@ -60,7 +60,9 @@ from .tensor_tebd import (
     TEBD,
 )
 from .circuit import (
-    Circuit
+    Circuit,
+    CircuitMPS,
+    CircuitDense,
 )
 
 __all__ = (
@@ -114,4 +116,6 @@ __all__ = (
     "MERA",
     "TEBD",
     "Circuit",
+    "CircuitMPS",
+    "CircuitDense",
 )

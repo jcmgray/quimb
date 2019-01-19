@@ -105,6 +105,7 @@ APPLY_GATES = {
     'X': build_gate_1(qu.pauli('X'), tags='X'),
     'Y': build_gate_1(qu.pauli('Y'), tags='Y'),
     'Z': build_gate_1(qu.pauli('Z'), tags='Z'),
+    'S': build_gate_1(qu.S_gate(), tags='S'),
     'T': build_gate_1(qu.T_gate(), tags='T'),
     'X_1_2': build_gate_1(qu.Rx(math.pi / 2), tags='X_1/2'),
     'Y_1_2': build_gate_1(qu.Ry(math.pi / 2), tags='Y_1/2'),
@@ -204,7 +205,7 @@ class Circuit:
         """Generate a ``Circuit`` instance from a qasm string.
         """
         info = parse_qasm(qasm)
-        qc = Circuit(info['n'], **quantum_circuit_opts)
+        qc = cls(info['n'], **quantum_circuit_opts)
         qc.apply_circuit(info['gates'])
         return qc
 
@@ -213,7 +214,7 @@ class Circuit:
         """Generate a ``Circuit`` instance from a qasm file.
         """
         info = parse_qasm_file(fname)
-        qc = Circuit(info['n'], **quantum_circuit_opts)
+        qc = cls(info['n'], **quantum_circuit_opts)
         qc.apply_circuit(info['gates'])
         return qc
 
@@ -222,12 +223,21 @@ class Circuit:
         """Generate a ``Circuit`` instance from a qasm url.
         """
         info = parse_qasm_url(url)
-        qc = Circuit(info['n'], **quantum_circuit_opts)
+        qc = cls(info['n'], **quantum_circuit_opts)
         qc.apply_circuit(info['gates'])
         return qc
 
     def apply_gate(self, gate_id, *gate_args, gate_round=None):
-        """Apply a single gate to this tensor network quantum circuit.
+        """Apply a single gate to this tensor network quantum circuit. If
+        ``gate_round`` is supplied the tensor(s) added will be tagged with
+        ``'ROUND_{gate_round}'``. Alternatively, putting an integer first like
+        so::
+
+            circuit.apply_gate(10, 'H', 7)
+
+        Is automatically translated to::
+
+            circuit.apply_gate('H', 7, gate_round=10)
 
         Parameters
         ----------
@@ -239,8 +249,8 @@ class Circuit:
             The gate round. If ``gate_id`` is integer-like, will also be taken
             from here, with then ``gate_id, gate_args = gate_args[0],
             gate_args[1:]``.
-
         """
+
         if (gate_round is not None):
             tags = {'ROUND_{}'.format(gate_round)}
         elif isinstance(gate_id, numbers.Integral) or gate_id.isdigit():
@@ -267,9 +277,83 @@ class Circuit:
 
         self._psi.squeeze_()
 
+    def x(self, i, gate_round=None):
+        self.apply_gate('X', i, gate_round=gate_round)
+
+    def y(self, i, gate_round=None):
+        self.apply_gate('Y', i, gate_round=gate_round)
+
+    def z(self, i, gate_round=None):
+        self.apply_gate('Z', i, gate_round=gate_round)
+
+    def h(self, i, gate_round=None):
+        self.apply_gate('H', i, gate_round=gate_round)
+
+    def s(self, i, gate_round=None):
+        self.apply_gate('S', i, gate_round=gate_round)
+
+    def t(self, i, gate_round=None):
+        self.apply_gate('T', i, gate_round=gate_round)
+
+    def rx(self, theta, i, gate_round=None):
+        self.apply_gate('RX', theta, i, gate_round=gate_round)
+
+    def ry(self, theta, i, gate_round=None):
+        self.apply_gate('RY', theta, i, gate_round=gate_round)
+
+    def rz(self, theta, i, gate_round=None):
+        self.apply_gate('RZ', theta, i, gate_round=gate_round)
+
+    def cx(self, i, j, gate_round=None):
+        self.apply_gate('CX', i, j, gate_round=gate_round)
+
+    def cy(self, i, j, gate_round=None):
+        self.apply_gate('CY', i, j, gate_round=gate_round)
+
+    def cz(self, i, j, gate_round=None):
+        self.apply_gate('CZ', i, j, gate_round=gate_round)
+
+    def cnot(self, i, j, gate_round=None):
+        self.apply_gate('CNOT', i, j, gate_round=gate_round)
+
     @property
     def psi(self):
+        """Tensor network representation of the wavefunction.
+        """
         return self._psi.squeeze()
 
     def __repr__(self):
-        return "<Circuit(n={}, n_gates={})>".format(self.N, len(self.gates))
+        r = "<Circuit(n={}, n_gates={}, gate_opts={})>"
+        return r.format(self.N, len(self.gates), self.gate_opts)
+
+
+class CircuitMPS(Circuit):
+    """Quantum circuit simulation keeping the state always in a MPS form. If
+    you think the circuit will not build up much entanglement, or you just want
+    to keep a rigorous handle on how much entanglement is present, this can
+    be useful.
+    """
+
+    def __init__(self, N=None, psi0=None, gate_opts=None, tags=None):
+        gate_opts = {} if gate_opts is None else dict(gate_opts)
+        gate_opts.setdefault('contract', 'swap+split')
+        super().__init__(N, psi0, gate_opts, tags)
+
+    @property
+    def psi(self):
+        # no squeeze so that bond dims of 1 preserved
+        return self._psi
+
+
+class CircuitDense(Circuit):
+    """Quantum circuit simulation keeping the state in full dense form.
+    """
+
+    def __init__(self, N=None, psi0=None, gate_opts=None, tags=None):
+        gate_opts = {} if gate_opts is None else dict(gate_opts)
+        gate_opts.setdefault('contract', True)
+        super().__init__(N, psi0, gate_opts, tags)
+
+    @property
+    def psi(self):
+        return self._psi ^ all

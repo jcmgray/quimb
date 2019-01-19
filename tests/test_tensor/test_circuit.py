@@ -1,4 +1,5 @@
 import pytest
+import numpy as np
 
 import quimb as qu
 import quimb.tensor as qtn
@@ -52,6 +53,35 @@ class TestCircuit:
     def test_rand_reg_qaoa_mps_swapsplit(self):
         G = rand_reg_graph(reg=3, n=18, seed=42)
         qasm = graph_to_circ(G)
-        qc = qtn.Circuit.from_qasm(qasm, gate_opts={'contract': 'swap+split'})
+        qc = qtn.CircuitMPS.from_qasm(qasm)
         assert len(qc.psi.tensors) == 18
         assert (qc.psi.H & qc.psi) ^ all == pytest.approx(1.0)
+
+    @pytest.mark.parametrize(
+        'Circ', [qtn.Circuit, qtn.CircuitMPS, qtn.CircuitDense]
+    )
+    def test_all_gate_methods(self, Circ):
+        rots = ['rx', 'ry', 'rz']
+        g1s = ['x', 'y', 'z', 's', 't', 'h']
+        g2s = ['cx', 'cy', 'cz', 'cnot']
+        g_rand = np.random.permutation(g1s + g2s)
+
+        psi0 = qtn.MPS_rand_state(2, 2)
+        circ = Circ(2, psi0)
+
+        for g in g_rand:
+            if g in rots:
+                theta = np.random.uniform(0, 2 * np.pi)
+                i = np.random.choice([0, 1])
+                args = (theta, i)
+            elif g in g1s:
+                i = np.random.choice([0, 1])
+                args = (i,)
+            elif g in g2s:
+                i, j = np.random.permutation([0, 1])
+                args = (i, j)
+
+            getattr(circ, g)(*args)
+
+        assert circ.psi.H @ circ.psi == pytest.approx(1.0)
+        assert abs((circ.psi.H & psi0) ^ all) < 0.99999999
