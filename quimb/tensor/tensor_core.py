@@ -42,6 +42,10 @@ def get_contract_expr(eq, *shapes, cache=True, **kwargs):
     if kwargs.get('constants', None) or not cache:
         return _get_contract_expr(eq, *shapes, **kwargs)
 
+    # make sure path given as list is hashable and thus cachable
+    if isinstance(kwargs.get('optimize', None), list):
+        kwargs['optimize'] = tuple(kwargs['optimize'])
+
     return _get_contract_expr_cached(eq, *shapes, **kwargs)
 
 
