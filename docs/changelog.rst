@@ -23,6 +23,7 @@ v1.2.0 (unreleased)
   * :class:`quimb.tensor.circuit.CircuitDense`
   * 49-qubit depth 30 circuit simulation example
 
+- Add ``from quimb.gates import *`` as shortcut to import ``X, Z, CNOT, ...``.
 
 **Bug fixes:**
 
