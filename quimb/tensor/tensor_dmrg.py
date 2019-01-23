@@ -630,7 +630,7 @@ class DMRG:
         if Heff is None:
             site_en = "N/A"
         else:
-            site_en = np.asscalar(loc_gs.H @ (Heff @ loc_gs))
+            site_en = (loc_gs.H @ (Heff @ loc_gs)).item()
 
         print("Sweep {} -- fullE={} effcE={} siteE={}"
               "".format(sweep_num, full_en, effv_en, site_en))
@@ -717,7 +717,7 @@ class DMRG:
             loc_en -= self.opts['periodic_nullspace_fudge_factor']**0.5
 
             # this is helpful for identifying badly behaved numerics
-            Neffnorm = np.asscalar(loc_gs.H @ (Neff @ loc_gs))
+            Neffnorm = (loc_gs.H @ (Neff @ loc_gs)).item()
             if abs(Neffnorm - 1) > 10 * self.opts['local_eig_tol']:
                 raise DMRGError("Effective norm diverged to {}, check "
                                 "that Neff is positive?".format(Neffnorm))
@@ -766,7 +766,7 @@ class DMRG:
 
         self._canonize_after_1site_update(direction, i)
 
-        return np.asscalar(loc_en), tot_en
+        return loc_en.item(), tot_en
 
     def _update_local_state_2site(self, i, direction, **compress_opts):
         r"""Find the 2-site effective tensor groundstate of::
@@ -821,7 +821,7 @@ class DMRG:
 
         tot_en = self._eff_ham ^ all
 
-        return np.asscalar(loc_en), tot_en
+        return loc_en.item(), tot_en
 
     def _update_local_state(self, i, **update_opts):
         """Move envs to site ``i`` and dispatch to the correct local updater.
