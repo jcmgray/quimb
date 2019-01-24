@@ -205,6 +205,42 @@ Ry = functools.partial(rotation, xyz='y')
 Rz = functools.partial(rotation, xyz='z')
 
 
+@functools.lru_cache(128)
+def U_gate(theta, phi, lamda, dtype=complex, sparse=False):
+    r"""Arbitrary unitary single qubit gate.
+
+    .. math::
+
+        U_3(\theta, \phi, \lambda) =
+        \begin{bmatrix}
+        \cos(\theta / 2) & - e^{i \lambda} \sin(\theta / 2) \\
+        e^{i \phi} \sin(\theta / 2) & e^{i(\lambda + \phi)}\cos(\theta / 2)
+        \end{bmatrix}
+
+    Parameters
+    ----------
+    theta : float
+        Angle between 0 and pi.
+    phi : float
+        Angle between 0 and 2 pi.
+    lamba : float
+        Angle between 0 and 2 pi.
+
+    Returns
+    -------
+    U : (2, 2) array
+        The unitary matrix, cached.
+    """
+    from cmath import cos, sin, exp
+
+    c2, s2 = cos(theta / 2), sin(theta / 2)
+    return qu(
+        [[c2, -exp(1j * lamda) * s2],
+         [exp(1j * phi) * s2, exp(1j * (lamda + phi)) * c2]],
+        dtype=dtype, sparse=sparse
+    )
+
+
 @functools.lru_cache(maxsize=8)
 def swap(dim=2, dtype=complex, **kwargs):
     """The SWAP operator acting on subsystems of dimension `dim`.

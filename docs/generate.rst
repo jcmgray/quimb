@@ -36,10 +36,12 @@ Operators
 - :func:`~quimb.gen.operators.phase_gate`
 - :func:`~quimb.gen.operators.T_gate`
 - :func:`~quimb.gen.operators.S_gate`
+- :func:`~quimb.gen.operators.U_gate`
 - :func:`~quimb.gen.operators.rotation`
 - :func:`~quimb.gen.operators.Rx`
 - :func:`~quimb.gen.operators.Ry`
 - :func:`~quimb.gen.operators.Rz`
+- :func:`~quimb.gen.operators.phase_gate`
 - :func:`~quimb.gen.operators.swap`
 - :func:`~quimb.gen.operators.iswap`
 - :func:`~quimb.gen.operators.controlled`

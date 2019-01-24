@@ -14,6 +14,7 @@ Things to check if new functionality added:
 4. If module, add to ``docs/api.rst`` for autosummarizing.
 5. Add to ``quimb/__init__.py`` and ``"__all__"`` if appropriate (or the
    tensor network equivalent ``quimb.tensor.__init__.py``).
+6. Add to changelog and elsewhere in docs.
 
 
 Running the Tests

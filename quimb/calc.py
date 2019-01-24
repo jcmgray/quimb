@@ -198,8 +198,30 @@ def projector(A, eigenvalue=1.0, tol=1e-12, autoblock=False):
 
 
 def measure(p, A, eigenvalue=None, tol=1e-12):
-    """Measure state ``p`` with observable ``A``, collapsing the state in the
+    r"""Measure state ``p`` with observable ``A``, collapsing the state in the
     process and returning the relevant eigenvalue.
+
+    .. math::
+
+        \left| \psi \right\rangle \rightarrow
+        \frac{
+            P_i \left| \psi \right\rangle
+        }{
+            \sqrt{\left\langle \psi \right| P_i \left| \psi \right\rangle}
+        }
+
+    and
+
+    .. math::
+
+        \rho \rightarrow
+        \frac{
+            P_i \rho P_i^{\dagger}
+        }{
+            \text{Tr} \left[ P_i \rho \right]
+        }
+
+    along with the corresponding eigenvalue :math:`\lambda_i`.
 
     Parameters
     ----------

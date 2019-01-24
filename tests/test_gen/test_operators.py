@@ -68,17 +68,22 @@ class TestControlledZ:
 class TestParametrizations:
     @pytest.mark.parametrize("gate", ['Rx', 'Ry', 'Rz', 'T_gate', 'S_gate',
                                       'CNOT', 'cX', 'cY', 'cZ', 'hadamard',
-                                      'swap'])
+                                      'phase_gate', 'iswap', 'swap', 'U_gate'])
     @pytest.mark.parametrize('dtype', [np.complex64, np.complex128])
     @pytest.mark.parametrize('sparse', [False, True])
     def test_construct(self, gate, dtype, sparse):
-        if gate in ['Rx', 'Ry', 'Rz']:
+        if gate in ('Rx', 'Ry', 'Rz', 'phase_gate'):
             args = (0.43827,)
+        elif gate in ('U_gate'):
+            args = (0.1, 0.2, 0.3)
         else:
             args = ()
         G = getattr(qu, gate)(*args, dtype=dtype, sparse=sparse)
         assert G.dtype == dtype
         assert qu.issparse(G) is sparse
+        psi = qu.rand_ket(G.shape[0])
+        Gpsi = G @ psi
+        assert qu.expec(Gpsi, Gpsi) == pytest.approx(1.0)
 
 
 class TestHamHeis:

@@ -27,6 +27,8 @@ v1.2.0 (unreleased)
   * 49-qubit depth 30 circuit simulation example
 
 - Add ``from quimb.gates import *`` as shortcut to import ``X, Z, CNOT, ...``.
+- Add :func:`~quimb.gen.operators.U_gate` for parametrized arbitrary single qubit unitary
+
 
 **Bug fixes:**
 
