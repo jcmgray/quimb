@@ -1467,8 +1467,6 @@ def dim_map(dims, coos, cyclic=False, trim=False):
     return tuple(dims), tuple(inds)
 
 
-# numba decorator can't cache generator
-@njit_nocache  # pragma: no cover
 def _dim_compressor(dims, inds):  # pragma: no cover
     """Helper function for ``dim_compress`` that does the heavy lifting.
 
