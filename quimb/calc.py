@@ -233,7 +233,7 @@ def measure(p, A, eigenvalue=None, tol=1e-12):
     if isvec(p):
         pj = (abs(ev.H @ p)**2).flatten()
     else:
-        pj = np.fromiter((expec(vj, p) for vj in ev.T), dtype=el.dtype)
+        pj = oe.contract("jk,kl,lj->j", ev.H, p, ev).real
 
     # then choose one
     if eigenvalue is None:
