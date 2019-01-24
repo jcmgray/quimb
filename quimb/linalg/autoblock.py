@@ -163,7 +163,7 @@ def _eigh_autoblocked(A, sort=True):  # pragma: no cover
 
         # check if trivial
         if ng == 1:
-            el[g[0]] = A[g[0], g[0]]
+            el[g[0]] = A[g[0], g[0]].real
             ev[g[0], g[0]] = 1.0
             continue
 

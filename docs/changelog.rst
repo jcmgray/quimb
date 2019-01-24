@@ -11,13 +11,16 @@ v1.2.0 (unreleased)
 
 **Enhancements**
 
-- Added ``kraus_op`` for general, noisy quantum operations
-- TN: Many tweaks to :class:`quimb.tensor.circuit.Circuit`
+- Added :func:`~quimb.calc.kraus_op` for general, noisy quantum operations
+- Added :func:`~quimb.calc.projector` for constructing projectors from observables
+- Added :func:`~quimb.calc.measure` for measuring and collapsing quantum states
+- Added :func:`~quimb.calc.cprint` pretty printing states in computational basis
 - TN: Add :meth:`quimb.tensor.tensor_core.TensorNetwork.rank_simplify`
 - TN: Add :meth:`quimb.tensor.tensor_core.TensorNetwork.isel`
 - TN: Add :meth:`quimb.tensor.tensor_core.TensorNetwork.cut_iter`
 - TN: Add ``'split-gate'`` gate mode
-- Many updates to tensor network quantum circuit simulation including:
+- Many updates to tensor network quantum circuit
+  (:class:`quimb.tensor.circuit.Circuit`) simulation including:
 
   * :class:`quimb.tensor.circuit.CircuitMPS`
   * :class:`quimb.tensor.circuit.CircuitDense`

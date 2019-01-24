@@ -26,7 +26,7 @@ from .linalg.approx_spectral import (
 )
 from .gen.operators import pauli
 from .gen.states import (
-    basis_vec, bell_state, bloch_state,
+    basis_vec, bell_state, bloch_state
 )
 from .utils import int2tup
 
@@ -161,6 +161,96 @@ def kraus_op(rho, Ek, dims=None, where=None, check=False):
         sigma = sigma.reshape(prod(dims), prod(dims))
 
     return sigma
+
+
+@ensure_qarray
+def projector(A, eigenvalue=1.0, tol=1e-12, autoblock=False):
+    """Compute the projector for the target ``eigenvalue`` of operator
+    ``A``.
+
+    Parameters
+    ----------
+    A : operator or tuple[array, operator].
+        The hermitian observable. If a tuple is supplied, assume this is the
+        eigendecomposition of the observable.
+    eigenvalue : float, optional
+        The target eigenvalue to construct the projector for, default: 1.
+    tol : float, optional
+        The tolerance with which to select all eigenvalues.
+    autoblock : bool, optional
+        Whether to use automatic symmetry exploitation.
+
+    Returns
+    -------
+    P : dense matrix
+        The projector onto the target eigenspace.
+    """
+    if isinstance(A, (tuple, list)):
+        el, ev = A
+    else:
+        el, ev = eigh(A, autoblock=autoblock)
+    which = np.argwhere(abs(el - eigenvalue) < tol)
+    P = np.zeros_like(ev)
+    for i in which:
+        vi = ev[:, i]
+        P += (vi @ vi.H)
+    return P
+
+
+def measure(p, A, eigenvalue=None, tol=1e-12):
+    """Measure state ``p`` with observable ``A``, collapsing the state in the
+    process and returning the relevant eigenvalue.
+
+    Parameters
+    ----------
+    p : vector or matrix
+        The quantum state to measure.
+    A : matrix or tuple[array, matrix]
+        The hermitian operator corresponding to an observable. You can supply
+        also a pre-diagonalized operator here as a tuple of eigenvalues and
+        eigenvectors.
+    tol : float, optional
+        The tolerance within which to group eigenspaces.
+    eigenvalue : float, optional
+        If specified, deterministically collapse to this result. Otherwise
+        randomly choose a result as in 'real-life'.
+
+    Returns
+    -------
+    result : float
+        The result of the measurement.
+    p_after : vector or matrix
+        The quantum state post measurement.
+    """
+    if isinstance(A, (tuple, list)):
+        el, ev = A
+    else:
+        el, ev = eigh(A)
+
+    js = np.arange(el.size)
+
+    # compute prob of each eigenvector
+    if isvec(p):
+        pj = (abs(ev.H @ p)**2).flatten()
+    else:
+        pj = np.fromiter((expec(vj, p) for vj in ev.T), dtype=el.dtype)
+
+    # then choose one
+    if eigenvalue is None:
+        j = np.random.choice(js, p=pj)
+        eigenvalue = el[j]
+
+    # now combine whole eigenspace
+    P = projector((el, ev), eigenvalue=eigenvalue, tol=tol)
+    total_prob = np.sum(pj[abs(el - eigenvalue) < tol])
+
+    # now collapse the state
+    if isvec(p):
+        p_after = P @ (p / total_prob**0.5)
+    else:
+        p_after = (P @ p @ P.H) / total_prob
+
+    return eigenvalue, p_after
 
 
 def dephase(rho, p, rand_rank=None):
@@ -787,6 +877,53 @@ def trace_distance(p1, p2):
     # Otherwise do full calculation
     return 0.5 * norm((p1 if p1_is_op else dop(p1)) -
                       (p2 if p2_is_op else dop(p2)), "tr")
+
+
+def cprint(psi, prec=6):
+    """Print a state in the computational basis.
+
+    Parameters
+    ----------
+    psi : vector
+        The pure state.
+    prec : int, optional
+        How many significant figures to print.
+
+    Examples
+    --------
+
+        >>> cprint(rand_ket(2**2))
+        (-0.0751069-0.192635j) |00>
+          (0.156837-0.562213j) |01>
+        (-0.307381+0.0291168j) |10>
+          (-0.14302+0.707661j) |11>
+
+        >>> cprint(w_state(4))
+        (0.5+0j) |0001>
+        (0.5+0j) |0010>
+        (0.5+0j) |0100>
+        (0.5+0j) |1000>
+    """
+    d = psi.shape[0]
+    n = int(log2(d))
+    if 2**n != d:
+        raise ValueError("State is not factorizable into computational basis.")
+
+    coeff_str = "{:." + str(prec) + "}"
+
+    coeffs, cs = [], []
+    for c in itertools.product('01', repeat=n):
+        c = "".join(c)
+        ix = int(c, 2)
+        coeff = psi.item(ix)
+        if coeff != 0.0:
+            cs.append(c)
+            coeffs.append(coeff_str.format(coeff))
+
+    max_str_len = max(map(len, coeffs))
+    full_str = "{:>" + str(max_str_len) + "} |{}>"
+    for coeff, c in zip(coeffs, cs):
+        print(full_str.format(coeff, c))
 
 
 def decomp(a, fn, fn_args, fn_d, nmlz_func, mode="p", tol=1e-3):

@@ -1,10 +1,10 @@
 """
 Quantum Information for Many-Body calculations.
 """
-
 import warnings
-warnings.filterwarnings('ignore', message='Caching is not available when ')
 
+# some useful math
+from math import pi, cos, sin, tan, exp, log, log2, sqrt
 
 # Core functions
 from .core import (
@@ -184,6 +184,7 @@ from .calc import (
     one_way_classical_information,
     quantum_discord,
     trace_distance,
+    cprint,
     decomp,
     pauli_decomp,
     bell_decomp,
@@ -197,6 +198,8 @@ from .calc import (
     heisenberg_energy,
     dephase,
     kraus_op,
+    projector,
+    measure,
 )
 
 # Evolution class and methods
@@ -218,13 +221,15 @@ from .utils import (
     load_from_disk,
 )
 
-# some useful math
-from math import pi, cos, sin, tan, exp, log, log2, sqrt
 
 # versioneer
 from ._version import get_versions
 __version__ = get_versions()['version']
 del get_versions
+
+
+warnings.filterwarnings('ignore', message='Caching is not available when ')
+
 
 __all__ = [
     # Accel ----------------------------------------------------------------- #
@@ -391,6 +396,7 @@ __all__ = [
     'one_way_classical_information',
     'quantum_discord',
     'trace_distance',
+    'cprint',
     'decomp',
     'pauli_decomp',
     'bell_decomp',
@@ -403,6 +409,9 @@ __all__ = [
     'page_entropy',
     'heisenberg_energy',
     'dephase',
+    'kraus_op',
+    'projector',
+    'measure',
     # Evo ------------------------------------------------------------------- #
     'Evolution',
     # Approx spectral ------------------------------------------------------- #

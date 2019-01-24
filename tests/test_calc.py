@@ -138,6 +138,61 @@ class TestKrausOp:
         assert_allclose(sig_exp, sigma)
 
 
+class TestProjector:
+
+    def test_simple(self):
+        Z = qu.pauli('Z')
+        P = qu.projector(Z & Z)
+        uu = qu.dop(qu.up()) & qu.dop(qu.up())
+        dd = qu.dop(qu.down()) & qu.dop(qu.down())
+        assert_allclose(P, uu + dd)
+        assert qu.expec(P, qu.bell_state('phi+')) == pytest.approx(1.0)
+        assert qu.expec(P, qu.bell_state('psi+')) == pytest.approx(0.0)
+
+
+class TestMeasure:
+
+    def test_pure(self):
+        psi = qu.bell_state('psi-')
+        IZ = qu.pauli('I') & qu.pauli('Z')
+        ZI = qu.pauli('Z') & qu.pauli('I')
+        res, psi_after = qu.measure(psi, IZ)
+        # normalized
+        assert qu.expectation(psi_after, psi_after) == pytest.approx(1.0)
+        # anticorrelated
+        assert qu.expectation(psi_after, IZ) == pytest.approx(res)
+        assert qu.expectation(psi_after, ZI) == pytest.approx(-res)
+        assert isinstance(psi_after, qu.qarray)
+
+    def test_bigger(self):
+        psi = qu.rand_ket(2**5)
+        assert np.sum(abs(psi) < 1e-12) == 0
+        A = qu.kronpow(qu.pauli('Z'), 5)
+        res, psi_after = qu.measure(psi, A, eigenvalue=-1.0)
+        # should have projected to half subspace
+        assert np.sum(abs(psi_after) < 1e-12) == 2**4
+        assert res == -1.0
+
+    def test_mixed(self):
+        rho = qu.dop(qu.bell_state('psi-'))
+        IZ = qu.pauli('I') & qu.pauli('Z')
+        ZI = qu.pauli('Z') & qu.pauli('I')
+        res, rho_after = qu.measure(rho, IZ)
+        # normalized
+        assert qu.tr(rho_after) == pytest.approx(1.0)
+        # anticorrelated
+        assert qu.expectation(rho_after, IZ) == pytest.approx(res)
+        assert qu.expectation(rho_after, ZI) == pytest.approx(-res)
+        assert isinstance(rho_after, qu.qarray)
+
+
+class TestCPrint:
+
+    def test_basic(self):
+        psi = qu.ghz_state(2)
+        qu.cprint(psi)
+
+
 class TestEntropy:
     def test_entropy_pure(self):
         a = qu.bell_state(1, qtype='dop')
