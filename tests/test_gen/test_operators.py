@@ -21,6 +21,9 @@ class TestSpinOperator:
         Sm = qu.spin_operator('-', 1 / 2)
         assert_allclose(Sm, [[0.0, 0.0], [1.0, 0.0]])
 
+        SI = qu.spin_operator('I', 1 / 2)
+        assert_allclose(SI, [[1.0, 0.0], [0.0, 1.0]])
+
     @pytest.mark.parametrize("label", ('x', 'y', 'z'))
     @pytest.mark.parametrize("S", [1, 3 / 2, 2, 5 / 2])
     def test_spin_high(self, label, S):
@@ -65,7 +68,8 @@ class TestControlledZ:
         assert_allclose(cz.A, np.diag([1, 1, 1, -1]))
 
 
-class TestParametrizations:
+class TestGates:
+
     @pytest.mark.parametrize("gate", ['Rx', 'Ry', 'Rz', 'T_gate', 'S_gate',
                                       'CNOT', 'cX', 'cY', 'cZ', 'hadamard',
                                       'phase_gate', 'iswap', 'swap', 'U_gate'])
@@ -84,6 +88,10 @@ class TestParametrizations:
         psi = qu.rand_ket(G.shape[0])
         Gpsi = G @ psi
         assert qu.expec(Gpsi, Gpsi) == pytest.approx(1.0)
+
+    def test_gates_import(self):
+        from quimb.gates import Z
+        assert_allclose(Z, [[1, 0], [0, -1]])
 
 
 class TestHamHeis:

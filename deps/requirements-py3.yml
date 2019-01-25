@@ -18,6 +18,7 @@ dependencies:
   - coveralls
   - codecov
   - opt_einsum
+  - joblib
   - pip:
     - randomgen
     - codeclimate-test-reporter

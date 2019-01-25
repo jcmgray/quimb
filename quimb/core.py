@@ -411,7 +411,7 @@ def ispos(qob, tol=1e-15):
 # --------------------------------------------------------------------------- #
 
 
-def _nb_complex_base(real, imag):
+def _nb_complex_base(real, imag):  # pragma: no cover
     return real + 1j * imag
 
 
@@ -462,7 +462,7 @@ def mul(x, y):
     return mul_dense(x, y)
 
 
-def _nb_subtract_update_base(X, c, Z):
+def _nb_subtract_update_base(X, c, Z):  # pragma: no cover
     return X - c * Z
 
 
@@ -484,7 +484,7 @@ def subtract_update_(X, c, Y):
         _nb_subtract_update_seq(X, c, Y, out=X)
 
 
-def _nb_divide_update_base(X, c):
+def _nb_divide_update_base(X, c):  # pragma: no cover
     return X / c
 
 
@@ -728,7 +728,7 @@ def explt(l, t):  # pragma: no cover
 
 
 @njit
-def _nb_kron_exp_seq(a, b, out, m, n, p, q):
+def _nb_kron_exp_seq(a, b, out, m, n, p, q):  # pragma: no cover
     for i in range(m):
         for j in range(n):
             ii, fi = i * p, (i + 1) * p
@@ -737,7 +737,7 @@ def _nb_kron_exp_seq(a, b, out, m, n, p, q):
 
 
 @njit(parallel=True)
-def _nb_kron_exp_par(a, b, out, m, n, p, q):
+def _nb_kron_exp_par(a, b, out, m, n, p, q):  # pragma: no cover
     for i in numba.prange(m):
         for j in range(n):
             ii, fi = i * p, (i + 1) * p
