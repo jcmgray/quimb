@@ -97,10 +97,16 @@ def apply_Rz(psi, theta, i, **gate_opts):
     psi.gate_(qu.Rz(float(theta)), int(i), tags=mtags, **gate_opts)
 
 
+def apply_U3(psi, theta, phi, lamda, i, **gate_opts):
+    mtags = _merge_tags({'U3'}, gate_opts)
+    psi.gate_(qu.U_gate(theta, phi, lamda), int(i), tags=mtags, **gate_opts)
+
+
 APPLY_GATES = {
     'RZ': apply_Rx,
     'RY': apply_Ry,
     'RX': apply_Rz,
+    'U3': apply_U3,
     'H': build_gate_1(qu.hadamard(), tags='H'),
     'X': build_gate_1(qu.pauli('X'), tags='X'),
     'Y': build_gate_1(qu.pauli('Y'), tags='Y'),
@@ -303,6 +309,9 @@ class Circuit:
 
     def rz(self, theta, i, gate_round=None):
         self.apply_gate('RZ', theta, i, gate_round=gate_round)
+
+    def u3(self, theta, phi, lamda, i, gate_round=None):
+        self.apply_gate('U3', theta, phi, lamda, i, gate_round=gate_round)
 
     def cx(self, i, j, gate_round=None):
         self.apply_gate('CX', i, j, gate_round=gate_round)

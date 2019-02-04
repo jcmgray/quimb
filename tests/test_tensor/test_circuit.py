@@ -64,13 +64,17 @@ class TestCircuit:
         rots = ['rx', 'ry', 'rz']
         g1s = ['x', 'y', 'z', 's', 't', 'h']
         g2s = ['cx', 'cy', 'cz', 'cnot']
-        g_rand = np.random.permutation(g1s + g2s)
+        g_rand = np.random.permutation(rots + g1s + g2s + ['u3'])
 
         psi0 = qtn.MPS_rand_state(2, 2)
         circ = Circ(2, psi0)
 
         for g in g_rand:
-            if g in rots:
+            if g == 'u3':
+                angles = np.random.uniform(0, 2 * np.pi, size=3)
+                i = np.random.choice([0, 1])
+                args = (*angles, i)
+            elif g in rots:
                 theta = np.random.uniform(0, 2 * np.pi)
                 i = np.random.choice([0, 1])
                 args = (theta, i)
