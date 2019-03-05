@@ -23,6 +23,7 @@ from ..core import qarray, prod, realify_scalar, vdot, common_type
 from ..linalg.base_linalg import norm_fro_dense
 from ..utils import check_opt, functions_equal, has_cupy
 from . import decomp
+from .array_ops import conj
 
 
 def _get_contract_expr(eq, *shapes, **kwargs):
@@ -46,11 +47,15 @@ def get_contract_expr(eq, *shapes, cache=True, **kwargs):
     if isinstance(kwargs.get('optimize', None), list):
         kwargs['optimize'] = tuple(kwargs['optimize'])
 
-    return _get_contract_expr_cached(eq, *shapes, **kwargs)
+    try:
+        return _get_contract_expr_cached(eq, *shapes, **kwargs)
+    except TypeError:
+        shapes = (tuple(map(int, s)) for s in shapes)
+        return _get_contract_expr_cached(eq, *shapes, **kwargs)
 
 
-_CONTRACT_BACKEND = 'numpy'
-_TENSOR_LINOP_BACKEND = 'cupy' if has_cupy() else 'numpy'
+_CONTRACT_BACKEND = 'auto'
+_TENSOR_LINOP_BACKEND = 'cupy' if has_cupy() else 'auto'
 
 
 def get_contract_backend():
@@ -789,11 +794,13 @@ class Tensor(object):
     def conj(self, inplace=False):
         """Conjugate this tensors data (does nothing to indices).
         """
+        conj_data = conj(self.data)
+
         if inplace:
-            self._data = self._data.conj()
+            self._data = conj_data
             return self
         else:
-            return Tensor(self._data.conj(), self.inds, self.tags)
+            return Tensor(conj_data, self.inds, self.tags)
 
     conj_ = functools.partialmethod(conj, inplace=True)
 
@@ -1314,7 +1321,7 @@ class TNLinearOperator(spla.LinearOperator):
         in_data = vec.reshape(*self.rdims)
 
         if self.is_conj:
-            in_data = in_data.conj()
+            in_data = conj(in_data)
 
         # cache the contractor
         if 'matvec' not in self._contractors:
@@ -1327,7 +1334,7 @@ class TNLinearOperator(spla.LinearOperator):
         out_data = fn(*self._ins, in_data, backend=self.backend)
 
         if self.is_conj:
-            out_data = out_data.conj()
+            out_data = conj(out_data)
 
         return out_data.ravel()
 
@@ -1336,7 +1343,7 @@ class TNLinearOperator(spla.LinearOperator):
         in_data = mat.reshape(*self.rdims, d)
 
         if self.is_conj:
-            in_data = in_data.conj()
+            in_data = conj(in_data)
 
         # for matmat need different contraction scheme for different d sizes
         key = "matmat_{}".format(d)
@@ -1353,7 +1360,7 @@ class TNLinearOperator(spla.LinearOperator):
         out_data = fn(*self._ins, in_data, backend=self.backend)
 
         if self.is_conj:
-            out_data = out_data.conj()
+            out_data = conj(out_data)
 
         return out_data.reshape(-1, d)
 
@@ -3358,7 +3365,7 @@ class TNLinearOperator1D(spla.LinearOperator):
         in_data = vec.reshape(*self.rdims)
 
         if self.is_conj:
-            in_data = in_data.conj()
+            in_data = conj(in_data)
 
         if self.is_trans:
             i, f, s = self.start, self.stop, 1
@@ -3376,7 +3383,7 @@ class TNLinearOperator1D(spla.LinearOperator):
 
         out_data = out_T.transpose_(*self.left_inds).data.ravel()
         if self.is_conj:
-            out_data = out_data.conj()
+            out_data = conj(out_data)
 
         return out_data
 
@@ -3385,7 +3392,7 @@ class TNLinearOperator1D(spla.LinearOperator):
         in_data = mat.reshape(*self.rdims, d)
 
         if self.is_conj:
-            in_data = in_data.conj()
+            in_data = conj(in_data)
 
         if self.is_trans:
             i, f, s = self.start, self.stop, 1
@@ -3405,7 +3412,7 @@ class TNLinearOperator1D(spla.LinearOperator):
         out_ix = (*self.left_inds, '_mat_ix')
         out_data = out_T.transpose_(*out_ix).data.reshape(-1, d)
         if self.is_conj:
-            out_data = out_data.conj()
+            out_data = conj(out_data)
 
         return out_data
 
