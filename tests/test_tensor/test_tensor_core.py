@@ -527,6 +527,15 @@ class TestTensorNetwork:
         x2 = (tn & tn.H) ^ ...
         assert_allclose(x1 / 4, x2)
 
+    def test_multiply_spread(self):
+        a = rand_tensor([2, 2], inds=['a', 'b'], tags='A')
+        b = Tensor(a.data, ['b', 'c'], tags='B')
+        c = Tensor(a.data, ['c', 'd'], tags='C')
+        tn = (a | b | c)
+        tn.multiply_(-8j + 1 / 3, spread_over=3)
+        assert_allclose(tn['A'].data, tn['B'].data)
+        assert_allclose(tn['B'].data, tn['C'].data)
+
     def test_contracting_tensors(self):
         a = rand_tensor((2, 3, 4), inds=[0, 1, 2], tags='red')
         b = rand_tensor((3, 4, 5), inds=[1, 2, 3], tags='blue')

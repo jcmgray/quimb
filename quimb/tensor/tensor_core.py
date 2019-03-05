@@ -1874,38 +1874,58 @@ class TensorNetwork(object):
         """
         return self.conj()
 
-    def multiply(self, x, inplace=False):
+    def multiply(self, x, inplace=False, spread_over=4):
         """Scalar multiplication of this tensor network with ``x``.
+
+        Parameters
+        ----------
+        x : scalar
+            The number to multiply this tensor network by.
+        inplace : bool, optional
+            Whether to perform the multiplication inplace.
+        spread_over : int, optional
+            How many tensors to try and spread the multiplication over, in
+            order that the effect of multiplying by a very large or small
+            scalar is not concentrated.
         """
         multiplied = self if inplace else self.copy()
-        tensor = next(iter(multiplied))
-        tensor.modify(data=tensor.data * x)
+        tensors = iter(multiplied)
+
+        spread_over = min(len(self.tensor_map), spread_over)
+        x_spread = x ** (1 / spread_over)
+
+        for _ in range(spread_over):
+            tensor = next(tensors)
+            tensor.modify(data=tensor.data * x_spread)
+
         return multiplied
+
+    multiply_ = functools.partialmethod(multiply, inplace=True)
 
     def __mul__(self, other):
         """Scalar multiplication.
         """
-        return self.multiply(other, inplace=False)
+        return self.multiply(other)
 
     def __rmul__(self, other):
         """Right side scalar multiplication.
         """
-        return self.multiply(other, inplace=False)
+        return self.multiply(other)
 
     def __imul__(self, other):
         """Inplace scalar multiplication.
         """
-        return self.multiply(other, inplace=True)
+        return self.multiply_(other)
 
     def __truediv__(self, other):
         """Scalar division.
         """
-        return self.multiply(1 / other, inplace=False)
+        return self.multiply(1 / other)
 
     def __itruediv__(self, other):
         """Inplace scalar division.
         """
-        return self.multiply(1 / other, inplace=True)
+        return self.multiply_(1 / other)
 
     @property
     def tensors(self):
