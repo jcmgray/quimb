@@ -536,6 +536,16 @@ class TestTensorNetwork:
         assert_allclose(tn['A'].data, tn['B'].data)
         assert_allclose(tn['B'].data, tn['C'].data)
 
+    def test_multiply_spread_neg_stays_real(self):
+        a = rand_tensor([2, 2], inds=['a', 'b'], tags='A', dtype='float32')
+        b = Tensor(a.data, ['b', 'c'], tags='B')
+        c = Tensor(a.data, ['c', 'd'], tags='C')
+        tn = (a | b | c)
+        tn.multiply_(-1000)
+        assert a.dtype == b.dtype == c.dtype == 'float32'
+        assert_allclose(abs(tn['A'].data), abs(tn['B'].data))
+        assert_allclose(abs(tn['B'].data), abs(tn['C'].data))
+
     def test_contracting_tensors(self):
         a = rand_tensor((2, 3, 4), inds=[0, 1, 2], tags='red')
         b = rand_tensor((3, 4, 5), inds=[1, 2, 3], tags='blue')

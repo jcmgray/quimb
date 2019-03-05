@@ -1874,7 +1874,7 @@ class TensorNetwork(object):
         """
         return self.conj()
 
-    def multiply(self, x, inplace=False, spread_over=4):
+    def multiply(self, x, inplace=False, spread_over=8):
         """Scalar multiplication of this tensor network with ``x``.
 
         Parameters
@@ -1892,11 +1892,27 @@ class TensorNetwork(object):
         tensors = iter(multiplied)
 
         spread_over = min(len(self.tensor_map), spread_over)
-        x_spread = x ** (1 / spread_over)
 
-        for _ in range(spread_over):
+        if spread_over == 1:
+            x_spread = x
+        else:
+            # check if number is negative -> don't want to introduce complex
+            if not isinstance(x, complex) and (x < 0.0):
+                neg = True
+                x = - x
+            else:
+                neg = False
+
+            x_spread = x ** (1 / spread_over)
+
+        for i in range(spread_over):
             tensor = next(tensors)
-            tensor.modify(data=tensor.data * x_spread)
+
+            # take into account a negative factor with single minus sign
+            if neg and (i == 0):
+                tensor.modify(data=tensor.data * (- x_spread))
+            else:
+                tensor.modify(data=tensor.data * x_spread)
 
         return multiplied
 
