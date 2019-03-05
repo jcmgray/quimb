@@ -102,6 +102,11 @@ def apply_U3(psi, theta, phi, lamda, i, **gate_opts):
     psi.gate_(qu.U_gate(theta, phi, lamda), int(i), tags=mtags, **gate_opts)
 
 
+def apply_swap(psi, i, j, **gate_opts):
+    itag, jtag = map(psi.site_tag, (i, j))
+    psi.reindex_({itag: jtag, jtag: itag})
+
+
 APPLY_GATES = {
     'RZ': apply_Rx,
     'RY': apply_Ry,
@@ -115,10 +120,12 @@ APPLY_GATES = {
     'T': build_gate_1(qu.T_gate(), tags='T'),
     'X_1_2': build_gate_1(qu.Rx(math.pi / 2), tags='X_1/2'),
     'Y_1_2': build_gate_1(qu.Ry(math.pi / 2), tags='Y_1/2'),
+    'IDEN': lambda *args, **kwargs: None,
     'CX': build_gate_2(qu.cX(), tags='CX'),
     'CY': build_gate_2(qu.cY(), tags='CY'),
     'CZ': build_gate_2(qu.cZ(), tags='CZ'),
     'CNOT': build_gate_2(qu.CNOT(), tags='CNOT'),
+    'SWAP': apply_swap,
 }
 
 
@@ -301,6 +308,9 @@ class Circuit:
     def t(self, i, gate_round=None):
         self.apply_gate('T', i, gate_round=gate_round)
 
+    def iden(self, i, gate_round=None):
+        pass
+
     def rx(self, theta, i, gate_round=None):
         self.apply_gate('RX', theta, i, gate_round=gate_round)
 
@@ -324,6 +334,9 @@ class Circuit:
 
     def cnot(self, i, j, gate_round=None):
         self.apply_gate('CNOT', i, j, gate_round=gate_round)
+
+    def swap(self, i, j, gate_round=None):
+        self.apply_gate('SWAP', i, j)
 
     @property
     def psi(self):

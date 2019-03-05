@@ -62,8 +62,8 @@ class TestCircuit:
     )
     def test_all_gate_methods(self, Circ):
         rots = ['rx', 'ry', 'rz']
-        g1s = ['x', 'y', 'z', 's', 't', 'h']
-        g2s = ['cx', 'cy', 'cz', 'cnot']
+        g1s = ['x', 'y', 'z', 's', 't', 'h', 'iden']
+        g2s = ['cx', 'cy', 'cz', 'cnot', 'swap']
         g_rand = np.random.permutation(rots + g1s + g2s + ['u3'])
 
         psi0 = qtn.MPS_rand_state(2, 2)
