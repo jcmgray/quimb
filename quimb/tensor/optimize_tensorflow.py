@@ -4,10 +4,15 @@ optimizations (complex contractions) the two modes offer similar performance,
 but for small to medium contractions graph mode is significantly faster.
 """
 
+import functools
 from collections import namedtuple
 
 import tqdm
 import numpy as np
+
+
+from .tensor_core import TensorNetwork
+from .array_ops import infer_backend
 
 
 LazyComplexTF = namedtuple('LazyComplexTF', ['shape', 'real', 'imag'])
@@ -140,7 +145,7 @@ def init_uninit_vars(sess):
     sess.run(tf.variables_initializer(var_list=uninit_vars_tf))
 
 
-class TNOpt:
+class TNOptimizer:
     """Optimize a tensor network's arrays using tensorflow.
 
     Parameters
@@ -155,6 +160,10 @@ class TNOpt:
         A function to normalize ``tn`` before being passed to ``loss_fn`` and
         also to call on the final, optimized tensor network. This can be used
         to enforce constraints such as normalization or unitarity.
+    loss_kwargs : dict_like, optional
+        Extra arguments to supply to ``loss_fn``. If any of these are tensor
+        networks, their backend arrays will be converted to constant tensorflow
+        tensors. Likewise for array-like arguments.
     optimizer : str, optional
         Which optimizer to use, default: ``'AdamOptimizer'``.
         This should be an optimizer that can be found in the
@@ -174,53 +183,84 @@ class TNOpt:
     Examples
     --------
 
-        import tensorflow as tf
-        import quimb.tensor as qtn
-        from quimb.tensor.optimize_tensorflow import *
+    .. code:: python3
 
-    Variational compression of cyclic MPS:
+        import quimb.tensor as qtn
+        from quimb.tensor.optimize_tensorflow import TNOptimizer
+
+        # can leave this out, and quimb will invoke tensorflow in
+        # eager mode, sacrificing some efficiency
+        import tensorflow as tf
+        sess = tf.InteractiveSession()
+
+    Variational compression of cyclic MPS, halving its bond dimension:
+
+    .. code:: python3
 
         # the target state we want to compress
-        targ = qtn.MPS_rand_state(10, bond_dim=6, cyclic=True, dtype='float32')
+        targ = qtn.MPS_rand_state(n=20, bond_dim=16,
+                                  cyclic=True, dtype='complex64')
 
-        # our intial guess for the compressed state
-        psi0 = qtn.MPS_rand_state(10, bond_dim=4, cyclic=True, dtype='float32')
+        # our initial guess for the compressed state
+        psi0 = qtn.MPS_rand_state(n=20, bond_dim=8,
+                                  cyclic=True, dtype='complex64')
 
-    Note since we are working with real MPS we don't need to worry about
-    conjugating etc.
+    .. code:: python3
 
-        # first convert our target to a tensorflow constant TN
-        tf_targ = constant_tn(targ)
-        contract_opts = {'cache': False, 'backend': 'tensorflow'}
+        >>> targ.show()
+         16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16
+        +--o--o--o--o--o--o--o--o--o--o--o--o--o--o--o--o--o--o--o--o--+
+           |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |
 
-        # then define the quantity we want to minimize (-ve. abs overlap)
-        def loss(psi):
-            overlap = (psi & tf_targ).contract(all, **contract_opts)
-            return -tf.abs(overlap)
+        >>> psi0.show()
+         8 8 8 8 8 8 8 8 8 8 8 8 8 8 8 8 8 8 8 8 8
+        +-o-o-o-o-o-o-o-o-o-o-o-o-o-o-o-o-o-o-o-o-+
+          | | | | | | | | | | | | | | | | | | | |
+
+        >>> abs(psi0.H @ targ)
+        0.0012382069
+
+    .. code:: python3
+
+        # the thing (scalar quantity) we want to *minimize*
+        def abs_overlap(psi, target):
+            overlap = (psi.H & target) ^ all
+            return -abs(overlap)
 
         # also need to define function that keeps us in the normalized manifold
-        def norm(psi):
-            nfactor = (psi & psi).contract(all, **contract_opts)
+        def psi_normalize(psi):
+            nfactor = (psi.H & psi) ^ all
             return psi / nfactor**0.5
 
-    Now we can run the optimizer:
+    Now we can set-up the optimizer and run it:
 
-        opt = tf_optimize(psi0, loss, norm, learning_rate=0.1, max_steps=100)
-        # -0.930211603: 100%|████████████████| 100/100 [00:14<00:00,  8.20it/s]
+    .. code:: python3
 
-    Note we don't expect this to reach 1.0 as for random MPS all the singular
-    values are likely significant and so compressing always involves some loss
-    of fidelity.
+        tnopt = TNOptimizer(
+            tn=psi0,
+            loss_fn=abs_overlap,
+            loss_kwargs={'target': targ},
+            norm_fn=psi_normalize,
+            optimizer='Adam',
+        )
 
-        >>> opt.H @ targ
-        0.9302115
+    .. code:: python3
+
+        >>> psif = tnopt.optimize(400)
+        -0.7474728226661682: 100%|███████████| 400/400 [00:07<00:00, 51.74it/s]
+
+        >>> abs(psif.H @ targ)
+        0.747473
+
+    You could alter the learning rate and keep running this if satisfactory
+    results are not achieved. Note we don't here expect this to reach 1.0 as
+    for random MPS all the singular values are likely significant and so
+    compressing always involves some loss of fidelity.
     """
 
-    def __init__(self, tn, loss_fn, norm_fn=None,
-                 optimizer='AdamOptimizer',
-                 learning_rate=0.01,
-                 loss_target=None,
-                 progbar=True):
+    def __init__(self, tn, loss_fn, norm_fn=None, loss_kwargs=None,
+                 optimizer='AdamOptimizer', learning_rate=0.01,
+                 loss_target=None, progbar=True):
         tf = get_tensorflow()
 
         # make tensorflow version of network and gather variables etc.
@@ -236,10 +276,25 @@ class TNOpt:
                 return x
 
         self.norm_fn = norm_fn
-        self.loss_fn = loss_fn
+        self.loss_kwargs = {}
+        if loss_kwargs is not None:
+            for k, v in loss_kwargs.items():
+                # check if tensor network supplied
+                if isinstance(v, TensorNetwork):
+                    # convert it to constant tensorflow TN
+                    self.loss_kwargs[k] = constant_tn(v)
+                elif hasattr(v, 'shape') and infer_backend(v) != 'tensorflow':
+                    self.loss_kwargs[k] = tf.convert_to_tensor(v)
+                else:
+                    self.loss_kwargs[k] = v
+        self.loss_fn = functools.partial(loss_fn, **self.loss_kwargs)
         self.loss = None
 
         if optimizer == 'scipy':
+            if executing_eagerly():
+                raise ValueError("The tensorflow ``'scipy'`` interface is not "
+                                 "available when executing eagerly.")
+
             self.optimizer = 'scipy'
             return
 

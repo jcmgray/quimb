@@ -23,7 +23,7 @@ from ..core import qarray, prod, realify_scalar, vdot, common_type
 from ..linalg.base_linalg import norm_fro_dense
 from ..utils import check_opt, functions_equal, has_cupy
 from . import decomp
-from .array_ops import conj
+from .array_ops import conj, reshape, iscomplex, sign
 
 
 def _get_contract_expr(eq, *shapes, **kwargs):
@@ -350,7 +350,7 @@ def tensor_split(T, left_inds, method='svd', max_bond=None, absorb='both',
     left_dims = TT.shape[:len(left_inds)]
     right_dims = TT.shape[len(left_inds):]
 
-    array = TT.data.reshape(prod(left_dims), prod(right_dims))
+    array = reshape(TT.data, (prod(left_dims), prod(right_dims)))
 
     if get == 'values':
         return {'svd': decomp._svdvals,
@@ -378,8 +378,8 @@ def tensor_split(T, left_inds, method='svd', max_bond=None, absorb='both',
         'eigsh': decomp._eigsh,
     }[method](array, **opts)
 
-    left = left.reshape(*left_dims, -1)
-    right = right.reshape(-1, *right_dims)
+    left = reshape(left, (*left_dims, -1))
+    right = reshape(right, (-1, *right_dims))
 
     if get == 'arrays':
         return left, right
@@ -830,7 +830,7 @@ class Tensor(object):
         return np.issubdtype(self.dtype, np.floating)
 
     def iscomplex(self):
-        return np.issubdtype(self.dtype, np.complexfloating)
+        return iscomplex(self.data)
 
     def astype(self, dtype, inplace=False):
         """Change the type of this tensor to ``dtype``.
@@ -1054,7 +1054,7 @@ class Tensor(object):
         dims = [prod(next(dims) for _ in fs) for fs in fused_inds] + list(dims)
 
         # create new tensor with new + remaining indices
-        tn.modify(data=tn.data.reshape(*dims),
+        tn.modify(data=reshape(tn.data, dims),
                   inds=(*new_fused_inds, *unfused_inds))
         return tn
 
@@ -1075,7 +1075,7 @@ class Tensor(object):
         new_shape, new_inds = zip(
             *((d, i) for d, i in zip(self.shape, self.inds) if d > 1))
         if len(t.inds) != len(new_inds):
-            t.modify(data=t.data.reshape(new_shape), inds=new_inds)
+            t.modify(data=reshape(t.data, new_shape), inds=new_inds)
         return t
 
     squeeze_ = functools.partialmethod(squeeze, inplace=True)
@@ -1083,7 +1083,7 @@ class Tensor(object):
     def norm(self):
         """Frobenius norm of this tensor.
         """
-        return norm_fro_dense(self.data.reshape(-1))
+        return norm_fro_dense(reshape(self.data, (-1,)))
 
     def symmetrize(self, ind1, ind2, inplace=False):
         """Hermitian symmetrize this tensor for indices ``ind1`` and ``ind2``.
@@ -1318,7 +1318,7 @@ class TNLinearOperator(spla.LinearOperator):
         super().__init__(dtype=self._tensors[0].dtype, shape=(ld, rd))
 
     def _matvec(self, vec):
-        in_data = vec.reshape(*self.rdims)
+        in_data = reshape(vec, self.rdims)
 
         if self.is_conj:
             in_data = conj(in_data)
@@ -1340,7 +1340,7 @@ class TNLinearOperator(spla.LinearOperator):
 
     def _matmat(self, mat):
         d = mat.shape[-1]
-        in_data = mat.reshape(*self.rdims, d)
+        in_data = reshape(mat, (*self.rdims, d))
 
         if self.is_conj:
             in_data = conj(in_data)
@@ -1362,7 +1362,7 @@ class TNLinearOperator(spla.LinearOperator):
         if self.is_conj:
             out_data = conj(out_data)
 
-        return out_data.reshape(-1, d)
+        return reshape(out_data, (-1, d))
 
     def copy(self, conj=False, transpose=False):
         if transpose:
@@ -1889,28 +1889,28 @@ class TensorNetwork(object):
             scalar is not concentrated.
         """
         multiplied = self if inplace else self.copy()
-        tensors = iter(multiplied)
-
         spread_over = min(len(self.tensor_map), spread_over)
 
         if spread_over == 1:
+            x_sign = 1.0
             x_spread = x
         else:
-            # check if number is negative -> don't want to introduce complex
-            if not isinstance(x, complex) and (x < 0.0):
-                neg = True
-                x = - x
+            # take care of sign of real scalars so as to keep real
+            if iscomplex(x):
+                x_sign = 1.0
             else:
-                neg = False
+                x_sign = sign(x)
+                x = abs(x)
 
             x_spread = x ** (1 / spread_over)
 
+        tensors = iter(multiplied)
         for i in range(spread_over):
             tensor = next(tensors)
 
             # take into account a negative factor with single minus sign
-            if neg and (i == 0):
-                tensor.modify(data=tensor.data * (- x_spread))
+            if i == 0:
+                tensor.modify(data=tensor.data * (x_sign * x_spread))
             else:
                 tensor.modify(data=tensor.data * x_spread)
 
@@ -2470,8 +2470,8 @@ class TensorNetwork(object):
             'eigsh': decomp._eigsh,
         }[method](A, cutoff=eps, **opts)
 
-        U = U.reshape(*left_shp, -1)
-        V = V.reshape(-1, *right_shp)
+        U = reshape(U, (*left_shp, -1))
+        V = reshape(V, (-1, *right_shp))
 
         new_bnd = rand_uuid()
 
@@ -2805,7 +2805,7 @@ class TensorNetwork(object):
             # peform the next contraction
             tn = tn.contract_tags(c_tags, inplace=True, which='any', **opts)
 
-            if isinstance(tn, Tensor) or np.isscalar(tn):
+            if not isinstance(tn, TensorNetwork):
                 # nothing more to contract
                 break
 
@@ -3398,7 +3398,7 @@ class TNLinearOperator1D(spla.LinearOperator):
         super().__init__(dtype=self.tn.dtype, shape=(ld, rd))
 
     def _matvec(self, vec):
-        in_data = vec.reshape(*self.rdims)
+        in_data = reshape(vec, self.rdims)
 
         if self.is_conj:
             in_data = conj(in_data)
@@ -3425,7 +3425,7 @@ class TNLinearOperator1D(spla.LinearOperator):
 
     def _matmat(self, mat):
         d = mat.shape[-1]
-        in_data = mat.reshape(*self.rdims, d)
+        in_data = reshape(mat, (*self.rdims, d))
 
         if self.is_conj:
             in_data = conj(in_data)
@@ -3446,7 +3446,7 @@ class TNLinearOperator1D(spla.LinearOperator):
         out_T = tnc ^ slice(i, f, s)
 
         out_ix = (*self.left_inds, '_mat_ix')
-        out_data = out_T.transpose_(*out_ix).data.reshape(-1, d)
+        out_data = reshape(out_T.transpose_(*out_ix).data, (-1, d))
         if self.is_conj:
             out_data = conj(out_data)
 
