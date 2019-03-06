@@ -814,3 +814,9 @@ class TestDense1D:
         assert t_psi.H @ t_psi == pytest.approx(1)
         for i in range(n):
             assert t_psi.H @ t_psi.gate(qu.pauli('X'), i) == pytest.approx(1)
+
+    def test_rand(self):
+        t_psi = Dense1D.rand(7, dtype='complex64')
+        assert t_psi.shape == (2,) * 7
+        assert t_psi.dtype == 'complex64'
+        assert (t_psi.H @ t_psi) == pytest.approx(1.0)

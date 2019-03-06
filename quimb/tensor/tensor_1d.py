@@ -2757,3 +2757,11 @@ class Dense1D(TensorNetwork1DVector,
 
         super().__init__([T], structure=site_tag_id, sites=sites,
                          nsites=nsites, check_collisions=False, **tn_opts)
+
+    @classmethod
+    def rand(cls, n, phys_dim=2, dtype=float, **dense1d_opts):
+        """Create a random dense vector 'tensor network'.
+        """
+        array = qu.randn(phys_dim ** n, dtype=dtype)
+        array /= qu.norm(array, 'fro')
+        return cls(array, nsites=n, **dense1d_opts)
