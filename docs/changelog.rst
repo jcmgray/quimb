@@ -15,20 +15,25 @@ v1.2.0 (unreleased)
 - Added :func:`~quimb.calc.projector` for constructing projectors from observables
 - Added :func:`~quimb.calc.measure` for measuring and collapsing quantum states
 - Added :func:`~quimb.calc.cprint` pretty printing states in computational basis
+- Added :func:`~quimb.calc.simulate_counts` for simulating computational basis counts
 - TN: Add :meth:`quimb.tensor.tensor_core.TensorNetwork.rank_simplify`
 - TN: Add :meth:`quimb.tensor.tensor_core.TensorNetwork.isel`
 - TN: Add :meth:`quimb.tensor.tensor_core.TensorNetwork.cut_iter`
 - TN: Add ``'split-gate'`` gate mode
+- TN: Add :class:`~quimb.tensor.optimize_tensorflow.TNOptimizer` for tensorflow based optimization
+  of arbitrary, contstrained tensor networks.
+- TN: Add :meth:`quimb.tensor.tensor_1d.Dense1D.rand`
+- TN: make many more tensor operations agnostic of the array backend (e.g. numpy, cupy,
+  tensorflow, ...)
 - Many updates to tensor network quantum circuit
   (:class:`quimb.tensor.circuit.Circuit`) simulation including:
 
   * :class:`quimb.tensor.circuit.CircuitMPS`
   * :class:`quimb.tensor.circuit.CircuitDense`
-  * 49-qubit depth 30 circuit simulation example
+  * 49-qubit depth 30 circuit simulation example :ref:`quantum-circuit-example`
 
 - Add ``from quimb.gates import *`` as shortcut to import ``X, Z, CNOT, ...``.
 - Add :func:`~quimb.gen.operators.U_gate` for parametrized arbitrary single qubit unitary
-
 
 **Bug fixes:**
 

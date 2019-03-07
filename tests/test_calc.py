@@ -186,6 +186,17 @@ class TestMeasure:
         assert isinstance(rho_after, qu.qarray)
 
 
+class TestSimulateCounts:
+
+    @pytest.mark.parametrize('qtype', ['ket', 'dop'])
+    def test_ghz(self, qtype):
+        psi = qu.ghz_state(3, qtype=qtype)
+        results = qu.simulate_counts(psi, 1024)
+        assert len(results) == 2
+        assert '000' in results
+        assert '111' in results
+
+
 class TestCPrint:
 
     def test_basic(self):

@@ -8,10 +8,10 @@ import collections
 from math import sin, cos, pi, log, log2, sqrt
 
 import numpy as np
+import opt_einsum as oe
 import numpy.linalg as nla
 from scipy.optimize import minimize
-import opt_einsum as oe
-
+from cytoolz import frequencies, keymap
 
 from .core import (
     njit, issparse, isop, zeroify, realify, prod, isvec, dot, dag,
@@ -273,6 +273,59 @@ def measure(p, A, eigenvalue=None, tol=1e-12):
         p_after = (P @ p @ P.H) / total_prob
 
     return eigenvalue, p_after
+
+
+def simulate_counts(p, C, phys_dim=2):
+    """Simulate measuring each qubit of ``p`` in the computational basis,
+    producing output like that of ``qiskit``.
+
+    Parameters
+    ----------
+    p : vector or operator
+        The quantum state, assumed to be normalized, as either a ket or density
+        operator.
+    C : int
+        The number of counts to perform.
+    phys_dim : int, optional
+        The assumed size of the subsystems of ``p``, defaults to 2 for qubits.
+
+    Returns
+    -------
+    results : dict[str, int]
+        The counts for each bit string measured.
+
+    Examples
+    --------
+
+    Simulate measuring the state of each qubit in a GHZ-state:
+
+    .. code:: python3
+
+        >>> import quimb as qu
+        >>> psi = qu.ghz_state(3)
+        >>> qu.simulate_counts(psi, 1024)
+        {'000': 514, '111': 510}
+
+    """
+    n = infer_size(p, phys_dim)
+    d = phys_dim**n
+
+    if isop(p):
+        pi = np.diag(p).real
+    else:
+        pi = np.multiply(np.conj(p), p).real
+
+    # probability of each basis state
+    pi = pi.reshape(-1)
+
+    # raw counts in terms of integers
+    raw_counts = np.random.choice(np.arange(d), size=C, p=pi)
+
+    # convert to frequencies of binary
+    bin_str = '{:0>' + str(n) + 'b}'
+    results = keymap(bin_str.format, frequencies(raw_counts))
+
+    return results
 
 
 def dephase(rho, p, rand_rank=None):

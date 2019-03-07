@@ -201,6 +201,7 @@ from .calc import (
     kraus_op,
     projector,
     measure,
+    simulate_counts,
 )
 
 # Evolution class and methods
@@ -414,6 +415,7 @@ __all__ = [
     'kraus_op',
     'projector',
     'measure',
+    'simulate_counts',
     # Evo ------------------------------------------------------------------- #
     'Evolution',
     # Approx spectral ------------------------------------------------------- #

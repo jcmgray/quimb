@@ -319,8 +319,9 @@ def ghz_state(n, **kwargs):
     -------
     vector
     """
-    return (basis_vec(0, 2**n, **kwargs) +
-            basis_vec(2**n - 1, 2**n, **kwargs)) / 2.**.5
+    psi = (basis_vec(0, 2**n) +
+            basis_vec(2**n - 1, 2**n)) / 2.**.5
+    return qu(psi, **kwargs)
 
 
 def w_state(n, **kwargs):
