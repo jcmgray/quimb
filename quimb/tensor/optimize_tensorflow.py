@@ -381,6 +381,7 @@ class TNOptimizer:
 
         def loss_callback(loss_val):
             self._n += 1
+            self.loss = loss_val
             pbar.set_description("{}".format(loss_val))
             pbar.update()
             return self._time_should_stop(max_time)
@@ -481,6 +482,7 @@ class TNOptimizer:
             The optimized tensor network (with arrays converted back to numpy).
         """
         if self.optimizer == 'scipy':
+            kwargs.setdefault('gtol', 1e-12)
             return self._optimize_scipy(max_steps, max_time=max_time, **kwargs)
         elif executing_eagerly():
             return self._optimize_eager(max_steps, max_time=max_time, **kwargs)
