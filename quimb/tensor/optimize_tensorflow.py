@@ -4,6 +4,7 @@ optimizations (complex contractions) the two modes offer similar performance,
 but for small to medium contractions graph mode is significantly faster.
 """
 
+import time
 import functools
 from collections import namedtuple
 
@@ -289,6 +290,7 @@ class TNOptimizer:
                     self.loss_kwargs[k] = v
         self.loss_fn = functools.partial(loss_fn, **self.loss_kwargs)
         self.loss = None
+        self._n = 0
 
         if optimizer == 'scipy':
             if executing_eagerly():
@@ -310,10 +312,28 @@ class TNOptimizer:
             self.loss_op = self.loss_fn(self.norm_fn(self.tn_opt))
             self.train_op = self.optimizer.minimize(self.loss_op)
 
+    @property
+    def nevals(self):
+        """The number of gradient evaluations.
+        """
+        return self._n
+
     def _get_lr(self):
         """Defining this callable allows dynamic learning rate for optimizer.
         """
         return self.learning_rate
+
+    def _maybe_start_timer(self, max_time):
+        if max_time is None:
+            return
+        else:
+            self._time_start = time.time()
+
+    def _time_should_stop(self, max_time):
+        if max_time is None:
+            return False
+        else:
+            return (time.time() - self._time_start) > max_time
 
     def _get_tn_opt_numpy_eager(self):
         """Get normalized, numpy version of optimized tensor network, in eager
@@ -341,35 +361,50 @@ class TNOptimizer:
         return tn_opt_numpy
 
     def _optimize_scipy(self, max_steps, method='L-BFGS-B',
-                        sess=None, **kwargs):
+                        sess=None, max_time=None, **kwargs):
         tf = get_tensorflow()
 
         loss_op = self.loss_fn(self.norm_fn(self.tn_opt))
 
-        kwargs['maxiter'] = max_steps
+        kwargs['maxfun'] = max_steps - 1
         if sess is None:
             sess = tf.get_default_session()
         init_uninit_vars(sess)
 
         pbar = tqdm.tqdm(total=max_steps, disable=not self.progbar)
+        self._maybe_start_timer(max_time)
+        timed_out = False
+
+        def step_callback(*_, **__):
+            if self._time_should_stop(max_time):
+                raise TimeoutError
 
         def loss_callback(loss_val):
+            self._n += 1
             pbar.set_description("{}".format(loss_val))
             pbar.update()
+            return self._time_should_stop(max_time)
 
         try:
             optimizer = tf.contrib.opt.ScipyOptimizerInterface(
                 loss_op, options=kwargs, method=method,
-
             )
             optimizer.minimize(sess, fetches=[loss_op],
-                               loss_callback=loss_callback)
+                               loss_callback=loss_callback,
+                               step_callback=step_callback)
+        except TimeoutError:
+            timed_out = True
         finally:
             pbar.close()
 
-        return self._get_tn_opt_numpy_graph(sess)
+            if timed_out:
+                raise TimeoutError("The scipy optimizer currently has no way "
+                                   "of extracting the current tensor values "
+                                   "mid execution.")
 
-    def grad(self):
+            return self._get_tn_opt_numpy_graph(sess)
+
+    def _grad(self):
         tf = get_tensorflow()
         # this is the function that computes the loss and tracks gradient
         with tf.GradientTape() as tape:
@@ -380,15 +415,16 @@ class TNOptimizer:
             self.loss = self.loss_fn(self.norm_fn(tn))
         return tape.gradient(self.loss, self.variables)
 
-    def _optimize_eager(self, max_steps):
+    def _optimize_eager(self, max_steps, max_time=None):
         tf = get_tensorflow()
 
         # perform the optimization with live progress
         pbar = tqdm.tqdm(total=max_steps, disable=not self.progbar)
+        self._maybe_start_timer(max_time)
         try:
             for _ in range(max_steps):
                 # compute gradient and display loss value
-                grads = self.grad()
+                grads = self._grad()
                 pbar.set_description("{}".format(self.loss))
 
                 # performing an optimization step
@@ -397,18 +433,20 @@ class TNOptimizer:
                     global_step=tf.train.get_or_create_global_step()
                 )
                 pbar.update()
+                self._n += 1
 
-                # check if there is a target loss we have reached
+                # check stopping criteria
                 if (self.loss_target is not None):
                     if self.loss < self.loss_target:
                         break
+                if self._time_should_stop(max_time):
+                    break
 
         finally:
             pbar.close()
+            return self._get_tn_opt_numpy_eager()
 
-        return self._get_tn_opt_numpy_eager()
-
-    def _optimize_graph(self, max_steps, sess=None):
+    def _optimize_graph(self, max_steps, max_time=None, sess=None, ):
         if sess is None:
             tf = get_tensorflow()
             sess = tf.get_default_session()
@@ -417,32 +455,34 @@ class TNOptimizer:
 
         # perform the optimization with live progress
         pbar = tqdm.tqdm(total=max_steps, disable=not self.progbar)
+        self._maybe_start_timer(max_time)
         try:
             for _ in range(max_steps):
                 _, self.loss = sess.run([self.train_op, self.loss_op])
                 pbar.set_description("{}".format(self.loss))
                 pbar.update()
+                self._n += 1
 
-                # check if there is a target loss we have reached
+                # check stopping criteria
                 if (self.loss_target is not None):
                     if self.loss < self.loss_target:
                         break
+                if self._time_should_stop(max_time):
+                    break
         finally:
             pbar.close()
+            return self._get_tn_opt_numpy_graph(sess)
 
-        return self._get_tn_opt_numpy_graph(sess)
-
-    def optimize(self, max_steps, **kwargs):
+    def optimize(self, max_steps, max_time=None, **kwargs):
         """
         Returns
         -------
         tn_opt : TensorNetwork
             The optimized tensor network (with arrays converted back to numpy).
         """
-
         if self.optimizer == 'scipy':
-            return self._optimize_scipy(max_steps, **kwargs)
+            return self._optimize_scipy(max_steps, max_time=max_time, **kwargs)
         elif executing_eagerly():
-            return self._optimize_eager(max_steps, **kwargs)
+            return self._optimize_eager(max_steps, max_time=max_time, **kwargs)
         else:
-            return self._optimize_graph(max_steps, **kwargs)
+            return self._optimize_graph(max_steps, max_time=max_time, **kwargs)
