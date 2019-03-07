@@ -13,7 +13,6 @@ import numpy as np
 
 
 from .tensor_core import TensorNetwork
-from .array_ops import infer_backend
 
 
 LazyComplexTF = namedtuple('LazyComplexTF', ['shape', 'real', 'imag'])
@@ -161,10 +160,13 @@ class TNOptimizer:
         A function to normalize ``tn`` before being passed to ``loss_fn`` and
         also to call on the final, optimized tensor network. This can be used
         to enforce constraints such as normalization or unitarity.
-    loss_kwargs : dict_like, optional
-        Extra arguments to supply to ``loss_fn``. If any of these are tensor
-        networks, their backend arrays will be converted to constant tensorflow
-        tensors. Likewise for array-like arguments.
+    loss_constants : dict_like, optional
+        Extra constant arguments to supply to ``loss_fn`` and be converted to
+        tensorflow constant tensors. Can be individual arrays or tensor
+        networks.
+    loss_kwargs :  dict_like, optional
+        Other kwargs to supply to ``loss_fn`` that are not arrays or tensor
+        networks.
     optimizer : str, optional
         Which optimizer to use, default: ``'AdamOptimizer'``.
         This should be an optimizer that can be found in the
@@ -240,7 +242,7 @@ class TNOptimizer:
         tnopt = TNOptimizer(
             tn=psi0,
             loss_fn=abs_overlap,
-            loss_kwargs={'target': targ},
+            loss_constants={'target': targ},
             norm_fn=psi_normalize,
             optimizer='Adam',
         )
@@ -259,9 +261,9 @@ class TNOptimizer:
     compressing always involves some loss of fidelity.
     """
 
-    def __init__(self, tn, loss_fn, norm_fn=None, loss_kwargs=None,
-                 optimizer='AdamOptimizer', learning_rate=0.01,
-                 loss_target=None, progbar=True):
+    def __init__(self, tn, loss_fn, norm_fn=None, loss_constants=None,
+                 loss_kwargs=None, optimizer='AdamOptimizer',
+                 learning_rate=0.001, loss_target=None, progbar=True):
         tf = get_tensorflow()
 
         # make tensorflow version of network and gather variables etc.
@@ -277,18 +279,18 @@ class TNOptimizer:
                 return x
 
         self.norm_fn = norm_fn
-        self.loss_kwargs = {}
-        if loss_kwargs is not None:
-            for k, v in loss_kwargs.items():
+        self.loss_constants = {}
+        if loss_constants is not None:
+            for k, v in loss_constants.items():
                 # check if tensor network supplied
                 if isinstance(v, TensorNetwork):
                     # convert it to constant tensorflow TN
-                    self.loss_kwargs[k] = constant_tn(v)
-                elif hasattr(v, 'shape') and infer_backend(v) != 'tensorflow':
-                    self.loss_kwargs[k] = tf.convert_to_tensor(v)
+                    self.loss_constants[k] = constant_tn(v)
                 else:
-                    self.loss_kwargs[k] = v
-        self.loss_fn = functools.partial(loss_fn, **self.loss_kwargs)
+                    self.loss_constants[k] = tf.convert_to_tensor(v)
+        self.loss_kwargs = {} if loss_kwargs is None else dict(loss_kwargs)
+        self.loss_fn = functools.partial(loss_fn, **self.loss_constants,
+                                         **self.loss_kwargs)
         self.loss = None
         self._n = 0
 
