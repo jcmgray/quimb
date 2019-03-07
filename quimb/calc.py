@@ -275,7 +275,7 @@ def measure(p, A, eigenvalue=None, tol=1e-12):
     return eigenvalue, p_after
 
 
-def simulate_counts(p, C, phys_dim=2):
+def simulate_counts(p, C, phys_dim=2, seed=None):
     """Simulate measuring each qubit of ``p`` in the computational basis,
     producing output like that of ``qiskit``.
 
@@ -307,6 +307,9 @@ def simulate_counts(p, C, phys_dim=2):
         {'000': 514, '111': 510}
 
     """
+    if seed is not None:
+        np.random.seed(seed)
+
     n = infer_size(p, phys_dim)
     d = phys_dim**n
 

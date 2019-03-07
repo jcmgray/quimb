@@ -344,6 +344,31 @@ class Circuit:
         """
         return self._psi.squeeze()
 
+    def simulate_counts(self, C, seed=None, **contract_opts):
+        """Simulate measuring each qubit in the computational basis. See
+        :func:`~quimb.calc.simulate_counts`.
+
+        .. warning::
+
+            This currently constructs the full wavefunction in order to sample
+            the probabilities accurately.
+
+        Parameters
+        ----------
+        C : int
+            The number of 'experimental runs', i.e. total counts.
+        contract_opts
+            Used to contract the tensor network representation.
+
+        Returns
+        -------
+        results : dict[str, int]
+            The number of recorded counts for each
+        """
+        inds = [self.psi.site_ind(i) for i in range(self.N)]
+        p_dense = self.psi.to_dense(inds, **contract_opts)
+        return qu.simulate_counts(p_dense, C=C, seed=seed)
+
     def __repr__(self):
         r = "<Circuit(n={}, n_gates={}, gate_opts={})>"
         return r.format(self.N, len(self.gates), self.gate_opts)

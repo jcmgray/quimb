@@ -43,6 +43,10 @@ class TestCircuit:
         ]
         qc.apply_circuit(gates)
         assert qu.expec(qc.psi.to_dense(), qu.ghz_state(3)) == pytest.approx(1)
+        counts = qc.simulate_counts(1024)
+        assert len(counts) == 2
+        assert '000' in counts
+        assert '111' in counts
 
     def test_rand_reg_qaoa(self):
         G = rand_reg_graph(reg=3, n=18, seed=42)
