@@ -23,7 +23,7 @@ from ..core import qarray, prod, realify_scalar, vdot, common_type
 from ..linalg.base_linalg import norm_fro_dense
 from ..utils import check_opt, functions_equal, has_cupy
 from . import decomp
-from .array_ops import conj, reshape, iscomplex, sign
+from .array_ops import do, conj, reshape, iscomplex
 
 
 def _get_contract_expr(eq, *shapes, **kwargs):
@@ -445,8 +445,8 @@ def tensor_add_bond(T1, T2):
     """Inplace addition of a dummy bond between ``T1`` and ``T2``.
     """
     bnd = rand_uuid()
-    T1.modify(data=T1.data[..., np.newaxis], inds=(*T1.inds, bnd))
-    T2.modify(data=T2.data[..., np.newaxis], inds=(*T2.inds, bnd))
+    T1.modify(data=do('expand_dims', T1.data, -1), inds=(*T1.inds, bnd))
+    T2.modify(data=do('expand_dims', T2.data, -1), inds=(*T2.inds, bnd))
 
 
 def array_direct_product(X, Y, sum_axes=()):
@@ -827,7 +827,7 @@ class Tensor(object):
         return self._data.dtype
 
     def isreal(self):
-        return np.issubdtype(self.dtype, np.floating)
+        return not iscomplex(self.data)
 
     def iscomplex(self):
         return iscomplex(self.data)
@@ -984,7 +984,7 @@ class Tensor(object):
         """
         el = self.singular_values(left_inds=left_inds, method=method)**2
         el = el[el > 0.0]
-        return np.sum(-el * np.log2(el))
+        return do('sum', -el * do('log2', el))
 
     def retag(self, retag_map, inplace=False):
         """Rename the tags of this tensor, optionally, in-place.
@@ -1899,7 +1899,7 @@ class TensorNetwork(object):
             if iscomplex(x):
                 x_sign = 1.0
             else:
-                x_sign = sign(x)
+                x_sign = do('sign', x)
                 x = abs(x)
 
             x_spread = x ** (1 / spread_over)
@@ -2697,13 +2697,13 @@ class TensorNetwork(object):
 
         Parameters
         ----------
-        U : np.ndarray
+        U : array
             The gauge to insert.
         where1 : str, sequence of str, or int
             Tags defining the location of the 'left' tensor.
         where2 : str, sequence of str, or int
             Tags defining the location of the 'right' tensor.
-        Uinv : np.ndarray
+        Uinv : array
             The inverse gauge, ``U @ Uinv == Uinv @ U == eye``, to insert.
             If not given will be calculated using :func:`numpy.linalg.inv`.
         """
@@ -2713,11 +2713,11 @@ class TensorNetwork(object):
         bnd, = T1.bonds(T2)
 
         if Uinv is None:
-            Uinv = np.linalg.inv(U)
+            Uinv = do('linalg.inv', U)
 
             # if we get wildly larger inverse due to singular U, try pseudo-inv
             if vdot(Uinv, Uinv) / vdot(U, U) > 1 / tol:
-                Uinv = np.linalg.pinv(U, rcond=tol**0.5)
+                Uinv = do('linalg.pinv', U, rcond=tol**0.5)
 
             # if still wildly larger inverse raise an error
             if vdot(Uinv, Uinv) / vdot(U, U) > 1 / tol:
