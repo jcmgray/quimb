@@ -3,6 +3,7 @@
 
 import importlib
 import numpy
+from ..linalg.base_linalg import norm_fro_dense
 
 
 def infer_backend(x):
@@ -136,9 +137,25 @@ def reshape(x, shape):
         return do('reshape', x, shape)
 
 
+def transpose(x, perm=None):
+    try:
+        return x.transpose(perm)
+    except AttributeError:
+        return do('transpose', x, perm)
+
+
 # ------------- miscelleneous other backend agnostic functions -------------- #
 
 def iscomplex(x):
     if not hasattr(x, 'dtype'):
         return isinstance(x, complex)
     return 'complex' == x.dtype.name[:7]
+
+
+def norm_fro(x):
+    if isinstance(x, numpy.ndarray):
+        return norm_fro_dense(x.reshape(-1))
+    try:
+        return do('linalg.norm', reshape(x, [-1]), 2)
+    except AttributeError:
+        return do('sum', do('multiply', do('conj', x), x)) ** 0.5

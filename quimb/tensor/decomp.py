@@ -3,6 +3,7 @@ import scipy.linalg as scla
 import scipy.sparse.linalg as spla
 import scipy.linalg.interpolative as sli
 
+from .array_ops import do
 from ..core import njit
 from ..linalg.rand_linalg import rsvd, estimate_rank
 
@@ -329,16 +330,29 @@ def _eigsh(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0):
 
 
 @njit  # pragma: no cover
-def _qr(x):
+def _qr_numba(x):
     """QR-decomposition.
     """
     Q, R = np.linalg.qr(x)
     return Q, R
 
 
+def _qr(x):
+    if isinstance(x, np.ndarray):
+        return _qr_numba(x)
+    return do('linalg.qr', x)
+
+
 @njit  # pragma: no cover
-def _lq(x):
+def _lq_numba(x):
     """LQ-decomposition.
     """
     Q, L = np.linalg.qr(x.T)
     return L.T, Q.T
+
+
+def _lq(x):
+    if isinstance(x, np.ndarray):
+        return _lq_numba(x)
+    Q, L = do('linalg.qr', do('transpose', x))
+    return do('transpose', L), do('transpose', Q)

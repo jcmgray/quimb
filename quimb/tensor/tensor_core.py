@@ -20,10 +20,9 @@ import opt_einsum as oe
 import scipy.sparse.linalg as spla
 
 from ..core import qarray, prod, realify_scalar, vdot, common_type
-from ..linalg.base_linalg import norm_fro_dense
 from ..utils import check_opt, functions_equal, has_cupy
 from . import decomp
-from .array_ops import do, conj, reshape, iscomplex
+from .array_ops import do, conj, reshape, transpose, iscomplex, norm_fro
 
 
 def _get_contract_expr(eq, *shapes, **kwargs):
@@ -886,7 +885,7 @@ class Tensor(object):
         current_ind_map = {ind: i for i, ind in enumerate(tn.inds)}
         out_shape = tuple(current_ind_map[i] for i in output_inds)
 
-        tn.modify(data=tn.data.transpose(*out_shape), inds=output_inds)
+        tn.modify(data=transpose(tn.data, out_shape), inds=output_inds)
         return tn
 
     transpose_ = functools.partialmethod(transpose, inplace=True)
@@ -1083,7 +1082,7 @@ class Tensor(object):
     def norm(self):
         """Frobenius norm of this tensor.
         """
-        return norm_fro_dense(reshape(self.data, (-1,)))
+        return norm_fro(self.data)
 
     def symmetrize(self, ind1, ind2, inplace=False):
         """Hermitian symmetrize this tensor for indices ``ind1`` and ``ind2``.
