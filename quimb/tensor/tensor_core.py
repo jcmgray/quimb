@@ -22,7 +22,8 @@ import scipy.sparse.linalg as spla
 from ..core import qarray, prod, realify_scalar, vdot, common_type
 from ..utils import check_opt, functions_equal, has_cupy
 from . import decomp
-from .array_ops import do, conj, reshape, transpose, iscomplex, norm_fro
+from .array_ops import (do, conj, reshape, transpose, iscomplex, norm_fro,
+                        isometrize)
 
 
 def _get_contract_expr(eq, *shapes, **kwargs):
@@ -1064,8 +1065,10 @@ class Tensor(object):
         for each of inds in ``inds_seqs``. E.g. to convert several sites
         into a density matrix: ``T.to_dense(('k0', 'k1'), ('b0', 'b1'))``.
         """
-        fused = self.fuse([(str(i), ix) for i, ix in enumerate(inds_seq)])
-        return qarray(fused.data)
+        x = self.fuse([(str(i), ix) for i, ix in enumerate(inds_seq)]).data
+        if isinstance(x, np.ndarray):
+            return qarray(x)
+        return x
 
     def squeeze(self, inplace=False):
         """Drop any singlet dimensions from this tensor.
@@ -1094,6 +1097,33 @@ class Tensor(object):
         TH = T.conj().transpose(*Hinds)
         T.modify(data=(T.data + TH.data) / 2)
         return T
+
+    def unitize(self, left_inds, inplace=False):
+        """Make this tensor unitary (or isometric) with respect to
+        ``left_inds``. The underlying method is to perform the matrix
+        exponential on the anti-hermitian part of this tensor's array, suitably
+        permuted and reshaped.
+
+        """
+        # partition indices into left and right
+        L_inds = list(left_inds)
+        R_inds = [ix for ix in self.inds if ix not in L_inds]
+        LR_inds = L_inds + R_inds
+
+        # fuse this tensor into a matrix and 'isometrize' it
+        x = self.to_dense(L_inds, R_inds)
+        x = isometrize(x)
+
+        # turn the array back into a tensor
+        x = reshape(x, [self.ind_size(ix) for ix in LR_inds])
+        Tu = Tensor(x, inds=LR_inds, tags=self.tags)
+
+        if inplace:
+            # XXX: do self.transpose_like_(Tu) or Tu.transpose_like_(self)?
+            self.modify(data=Tu.data, inds=Tu.inds)
+            Tu = self
+
+        return Tu
 
     def almost_equals(self, other, **kwargs):
         """Check if this tensor is almost the same as another.

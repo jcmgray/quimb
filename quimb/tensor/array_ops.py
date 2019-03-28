@@ -22,6 +22,7 @@ _module_aliases = {
 
 # lookup for when functions are elsewhere than the expected module
 _submodule_aliases = {
+    ('numpy', 'linalg.expm'): 'scipy',
     ('tensorflow', 'trace'): 'tensorflow.linalg',
 }
 
@@ -88,18 +89,22 @@ def do(fn, x, *args, **kwargs):
     try:
         lib_fn = _funcs[backend, fn]
     except KeyError:
-        # alias for global module
+        # alias for global module,
+        #     e.g. 'decimal' -> 'math'
         module = _module_aliases.get(backend, backend)
 
-        # module where function is found for backend
+        # module where function is found for backend,
+        #     e.g. ['tensorflow', trace'] -> 'tensorflow.linalg'
         submodule_name = _submodule_aliases.get((backend, fn), module)
 
-        # parse out extra submodules (e.g. for ``fn='linalg.eigh'``)
+        # parse out extra submodules
+        #     e.g. 'fn=linalg.eigh' -> ['linalg', 'eigh']
         split_fn = fn.split('.')
         submodule_name = '.'.join([submodule_name] + split_fn[:-1])
         only_fn = split_fn[-1]
 
         # cached lookup of custom name function might take
+        #     e.g. ['tensorflow', 'sum'] -> 'reduce_sum'
         fn_name = _func_aliases.get((backend, fn), only_fn)
 
         # import the function into the cache
@@ -168,3 +173,21 @@ def norm_fro(x):
         return do('linalg.norm', reshape(x, [-1]), 2)
     except AttributeError:
         return do('sum', do('multiply', do('conj', x), x)) ** 0.5
+
+
+def unitize(x):
+    """Generate a unitary matrix from square array ``x``.
+    """
+    return do('linalg.expm', x - dag(x))
+
+
+def isometrize(x):
+    """Generate a isometrix matrix from rectangular array ``x``.
+    """
+    m, n = x.shape
+    if m == n:
+        return unitize(x)
+    d = max(m, n)
+    x = do('pad', x, [[0, d - m], [0, d - n]], 'constant')
+    expx = do('linalg.expm', x - dag(x))
+    return expx[:m, :n]
