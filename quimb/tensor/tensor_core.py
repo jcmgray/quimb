@@ -3279,7 +3279,7 @@ class TensorNetwork(object):
         # Also set the colors of any tagged tensors.
         if node_size is None:
             node_size = 1000 / n**0.7
-        node_outline_size = node_size / 20
+        node_outline_size = min(3, node_size**0.5 / 10)
 
         szs = []
         node_colors = []
@@ -3303,7 +3303,7 @@ class TensorNetwork(object):
 
         edge_weights = [math.log2(d) for d in edge_weights]
 
-        fig, ax = plt.subplots(figsize=figsize)
+        fig, ax = plt.subplots(figsize=figsize, constrained_layout=True)
         ax.axis('off')
         ax.set_aspect('equal')
 
