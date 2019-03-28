@@ -81,7 +81,7 @@ def constant_tn(tn):
     return tf_tn
 
 
-def parse_network_to_tf(tn):
+def parse_network_to_tf(tn, constant_tags):
     tf = get_tensorflow()
     eager = executing_eagerly()
 
@@ -91,8 +91,12 @@ def parse_network_to_tf(tn):
 
     for t in tn_tf:
 
+        # check if tensor has any of the constant tags
+        if t.tags & constant_tags:
+            t.modify(data=tf.convert_to_tensor(t.data))
+
         # treat re and im parts as separate variables
-        if issubclass(t.dtype.type, np.complexfloating):
+        elif issubclass(t.dtype.type, np.complexfloating):
             tf_re, tf_im = tf.Variable(t.data.real), tf.Variable(t.data.imag)
             variables.extend((tf_re, tf_im))
 
@@ -261,17 +265,40 @@ class TNOptimizer:
     compressing always involves some loss of fidelity.
     """
 
-    def __init__(self, tn, loss_fn, norm_fn=None, loss_constants=None,
-                 loss_kwargs=None, optimizer='AdamOptimizer',
-                 learning_rate=0.001, loss_target=None, progbar=True):
+    def __init__(
+        self,
+        tn,
+        loss_fn,
+        norm_fn=None,
+        loss_constants=None,
+        loss_kwargs=None,
+        constant_tags=None,
+        optimizer='AdamOptimizer',
+        learning_rate=0.1,
+        learning_decay_steps=100,
+        learning_decay_rate=0.5,
+        loss_target=None,
+        progbar=True
+    ):
         tf = get_tensorflow()
 
+        self.constant_tags = (set() if constant_tags is None
+                              else set(constant_tags))
+
         # make tensorflow version of network and gather variables etc.
-        self.tn_opt, self.variables, self.iscomplex = parse_network_to_tf(tn)
+        self.tn_opt, self.variables, self.iscomplex = parse_network_to_tf(
+            tn, self.constant_tags
+        )
 
         self.progbar = progbar
         self.loss_target = loss_target
-        self.learning_rate = learning_rate
+
+        # set dynamic learning rate
+        self.global_step = tf.train.get_or_create_global_step()
+        self.learning_rate = tf.train.exponential_decay(
+            learning_rate=learning_rate, global_step=self.global_step,
+            decay_steps=learning_decay_steps, decay_rate=learning_decay_rate,
+        )
 
         # use identity if no nomalization required
         if norm_fn is None:
@@ -289,8 +316,9 @@ class TNOptimizer:
                 else:
                     self.loss_constants[k] = tf.convert_to_tensor(v)
         self.loss_kwargs = {} if loss_kwargs is None else dict(loss_kwargs)
-        self.loss_fn = functools.partial(loss_fn, **self.loss_constants,
-                                         **self.loss_kwargs)
+        self.loss_fn = functools.partial(
+            loss_fn, **self.loss_constants, **self.loss_kwargs
+        )
         self.loss = None
         self._n = 0
 
@@ -305,25 +333,21 @@ class TNOptimizer:
         elif isinstance(optimizer, str):
             if 'Optimizer' not in optimizer:
                 optimizer += 'Optimizer'
-            self.optimizer = getattr(tf.train, optimizer)(self._get_lr)
+            self.optimizer = getattr(tf.train, optimizer)(self.learning_rate)
         else:
             self.optimizer = optimizer
 
         if not executing_eagerly():
             # generate the loss and optimizer computational graphs
             self.loss_op = self.loss_fn(self.norm_fn(self.tn_opt))
-            self.train_op = self.optimizer.minimize(self.loss_op)
+            self.train_op = self.optimizer.minimize(
+                self.loss_op, global_step=self.global_step)
 
     @property
     def nevals(self):
         """The number of gradient evaluations.
         """
         return self._n
-
-    def _get_lr(self):
-        """Defining this callable allows dynamic learning rate for optimizer.
-        """
-        return self.learning_rate
 
     def _maybe_start_timer(self, max_time):
         if max_time is None:
@@ -419,8 +443,6 @@ class TNOptimizer:
         return tape.gradient(self.loss, self.variables)
 
     def _optimize_eager(self, max_steps, max_time=None):
-        tf = get_tensorflow()
-
         # perform the optimization with live progress
         pbar = tqdm.tqdm(total=max_steps, disable=not self.progbar)
         self._maybe_start_timer(max_time)
@@ -433,7 +455,7 @@ class TNOptimizer:
                 # performing an optimization step
                 self.optimizer.apply_gradients(
                     zip(grads, self.variables),
-                    global_step=tf.train.get_or_create_global_step()
+                    global_step=self.global_step,
                 )
                 pbar.update()
                 self._n += 1

@@ -21,7 +21,9 @@ _module_aliases = {
 
 
 # lookup for when functions are elsewhere than the expected module
-_submodule_aliases = {}
+_submodule_aliases = {
+    ('tensorflow', 'trace'): 'tensorflow.linalg',
+}
 
 
 # lookup for when functions don't have the same name
@@ -142,6 +144,13 @@ def transpose(x, perm=None):
         return x.transpose(perm)
     except AttributeError:
         return do('transpose', x, perm)
+
+
+def dag(x):
+    try:
+        return x.H
+    except AttributeError:
+        return do('conj', do('transpose', x))
 
 
 # ------------- miscelleneous other backend agnostic functions -------------- #

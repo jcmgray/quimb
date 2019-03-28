@@ -582,10 +582,10 @@ def rand_iso(n, m, dtype=complex):
     """
     data = randn((n, m), dtype=dtype)
 
-    q, _ = np.linalg.qr(data if n > m else data.T)
+    q, _ = np.linalg.qr(data if n >= m else data.T)
     q = q.astype(dtype)
 
-    return q if (n > m) else q.T
+    return q if (n >= m) else q.T
 
 
 @random_seed_fn

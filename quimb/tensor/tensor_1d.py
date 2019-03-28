@@ -21,6 +21,7 @@ from .tensor_core import (
     _asarray,
     _ndim,
 )
+from .array_ops import do, dag
 
 
 def align_TN_1D(*tns, ind_ids=None, inplace=False):
@@ -638,14 +639,14 @@ class TensorNetwork1DFlat:
 
         EL = kbc['_LEFT'].squeeze()
         # explicitly symmetrize to hermitian
-        EL.modify(data=(EL.data + EL.data.conj().T) / 2)
+        EL.modify(data=(EL.data + dag(EL.data)) / 2)
         # split into upper 'ket' part and lower 'bra' part, symmetric
         EL_lix, = EL.bonds(kbc[k.site_tag(start), '_BRA'])
         _, x = EL.split(EL_lix, method='eigh', cutoff=-1, get='arrays')
 
         ER = kbc['_RIGHT'].squeeze()
         # explicitly symmetrize to hermitian
-        ER.modify(data=(ER.data + ER.data.conj().T) / 2)
+        ER.modify(data=(ER.data + dag(ER.data)) / 2)
         # split into upper 'ket' part and lower 'bra' part, symmetric
         ER_lix, = ER.bonds(kbc[k.site_tag(stop - 1), '_BRA'])
         _, y = ER.split(ER_lix, method='eigh', cutoff=-1, get='arrays')
@@ -963,10 +964,10 @@ class TensorNetwork1DFlat:
                     for d, i in zip(tensor.shape, tensor.inds)]
 
             if rand_strength > 0:
-                edata = np.pad(tensor.data, pads, mode=rand_padder,
-                               rand_strength=rand_strength)
+                edata = do('pad', tensor.data, pads, mode=rand_padder,
+                           rand_strength=rand_strength)
             else:
-                edata = np.pad(tensor.data, pads, mode='constant')
+                edata = do('pad', tensor.data, pads, mode='constant')
 
             tensor.modify(data=edata)
 
@@ -1430,7 +1431,7 @@ class MatrixProductState(TensorNetwork1DVector,
         lix = [i for i in unshared if i != ix_i] + [ix_j]
         sTi, sTj = Tij.split(lix, get='tensors', **compress_opts)
 
-        # reindex and tranpose the tensors to directly update original tensors
+        # reindex and transpose the tensors to directly update original tensors
         sTi.reindex_({ix_j: ix_i})
         sTj.reindex_({ix_i: ix_j})
         sTi.transpose_like_(Ti)
