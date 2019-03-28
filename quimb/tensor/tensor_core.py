@@ -3102,7 +3102,7 @@ class TensorNetwork(object):
 
     def graph(self, color=None, show_inds=None, show_tags=None, node_size=None,
               iterations=200, k=None, fix=None, figsize=(6, 6), legend=True,
-              return_fig=False, **plot_opts):
+              return_fig=False, highlight_inds=(), **plot_opts):
         """Plot this tensor network as a networkx graph using matplotlib,
         with edge width corresponding to bond dimension.
 
@@ -3111,6 +3111,8 @@ class TensorNetwork(object):
         color : sequence of tags, optional
             If given, uniquely color any tensors which have each of the tags.
             If some tensors have more than of the tags, only one color will
+        highlight_inds : iterable:
+            Highlight these edges in red.
         show_inds : bool, optional
             Explicitly turn on labels for each tensors indices.
         show_tags : bool, optional
@@ -3184,6 +3186,8 @@ class TensorNetwork(object):
 
             for ix in t1.inds:
                 found_ind = False
+                edge_color = ((1.0, 0.2, 0.2) if ix in highlight_inds else
+                              (0.6, 0.6, 0.6))
 
                 # check to see if index is linked to another tensor
                 for j in range(0, n):
@@ -3193,12 +3197,14 @@ class TensorNetwork(object):
                     t2 = ts[j]
                     if ix in t2.inds:
                         found_ind = True
-                        G.add_edge(i, j, weight=t1.shared_bond_size(t2))
+                        G.add_edge(i, j, weight=t1.shared_bond_size(t2),
+                                   color=edge_color)
 
                 # else it must be an 'external' index
                 if not found_ind:
                     ext_lbl = "ext{}".format(ix)
-                    G.add_edge(i, ext_lbl, weight=t1.ind_size(ix))
+                    G.add_edge(i, ext_lbl, weight=t1.ind_size(ix),
+                               color=edge_color)
 
                     # optionally label the external index
                     if show_inds:
@@ -3208,6 +3214,7 @@ class TensorNetwork(object):
                         fixed_positions[ext_lbl] = fix_tids[ext_lbl]
 
         edge_weights = [x[2]['weight'] for x in G.edges(data=True)]
+        edge_colors = [x[2]['color'] for x in G.edges(data=True)]
 
         # color the nodes
         if color is None:
@@ -3242,23 +3249,33 @@ class TensorNetwork(object):
         # Also set the colors of any tagged tensors.
         if node_size is None:
             node_size = 1000 / n**0.7
+        node_outline_size = node_size / 20
 
         szs = []
-        crs = []
+        node_colors = []
+        node_outline_colors = []
         for nd in G.nodes():
+
+            # 'node' is actually a open index
             if isinstance(nd, str):
                 szs += [0]
-                crs += [(1.0, 1.0, 1.0)]
+                node_colors += [(1.0, 1.0, 1.0)]
             else:
                 szs += [node_size]
                 if G.node[nd]['color'] is not None:
-                    crs += [G.node[nd]['color']]
+                    node_colors += [G.node[nd]['color']]
                 else:
-                    crs += [(0.6, 0.6, 0.6)]
+                    node_colors += [(0.4, 0.4, 0.4)]
+
+            node_outline_colors.append(
+                tuple(0.8 * x for x in node_colors[-1])
+            )
 
         edge_weights = [math.log2(d) for d in edge_weights]
 
-        fig = plt.figure(figsize=figsize)
+        fig, ax = plt.subplots(figsize=figsize)
+        ax.axis('off')
+        ax.set_aspect('equal')
 
         # use spectral layout as starting point
         pos0 = nx.spectral_layout(G)
@@ -3276,9 +3293,12 @@ class TensorNetwork(object):
         pos = nx.spring_layout(G, pos=pos0, fixed=fixed,
                                k=k, iterations=iterations)
 
-        nx.draw(G, node_size=szs, node_color=crs, pos=pos, labels=labels,
-                with_labels=True, width=edge_weights, **plot_opts)
-        plt.gca().set_aspect('equal')
+        nx.draw_networkx_nodes(G, pos, node_color=node_colors, node_size=szs,
+                               ax=ax, linewidths=node_outline_size,
+                               edgecolors=node_outline_colors)
+        nx.draw_networkx_labels(G, pos, labels, font_size=10, ax=ax)
+        nx.draw_networkx_edges(G, pos, edge_color=edge_colors,
+                               width=edge_weights, ax=ax)
 
         # create legend
         if colors and legend:
