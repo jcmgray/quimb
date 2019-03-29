@@ -6,6 +6,7 @@ from numpy.testing import assert_allclose
 import scipy.sparse.linalg as spla
 
 import quimb as qu
+import quimb.tensor as qtn
 from quimb.tensor import (
     bonds,
     tensor_contract,
@@ -25,6 +26,27 @@ def test__trim_singular_vals():
     assert _trim_singular_vals(s, 0.5, 2) == 2
     assert _trim_singular_vals(s, 2, 3) == 2
     assert _trim_singular_vals(s, 5.02, 3) == 1
+
+
+class TestContractOpts:
+
+    def test_contract_strategy(self):
+        assert qtn.get_contract_strategy() == 'greedy'
+        with qtn.contract_strategy('auto'):
+            assert qtn.get_contract_strategy() == 'auto'
+        assert qtn.get_contract_strategy() == 'greedy'
+
+    def test_contract_backend(self):
+        assert qtn.get_contract_backend() == 'auto'
+        with qtn.contract_backend('cupy'):
+            assert qtn.get_contract_backend() == 'cupy'
+        assert qtn.get_contract_backend() == 'auto'
+
+    def test_tensor_linop_backend(self):
+        assert qtn.get_tensor_linop_backend() == 'auto'
+        with qtn.tensor_linop_backend('cupy'):
+            assert qtn.get_tensor_linop_backend() == 'cupy'
+        assert qtn.get_tensor_linop_backend() == 'auto'
 
 
 class TestBasicTensorOperations:

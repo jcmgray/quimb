@@ -10,6 +10,7 @@ import weakref
 import operator
 import functools
 import itertools
+import contextlib
 import collections
 from numbers import Integral
 
@@ -20,15 +21,45 @@ import opt_einsum as oe
 import scipy.sparse.linalg as spla
 
 from ..core import qarray, prod, realify_scalar, vdot, common_type
-from ..utils import check_opt, functions_equal, has_cupy
+from ..utils import check_opt, functions_equal
 from . import decomp
 from .array_ops import (do, conj, reshape, transpose, iscomplex, norm_fro,
                         isometrize)
 
 
+_DEFAULT_CONTRACTION_STRATEGY = 'greedy'
+
+
+def get_contract_strategy():
+    """Get the default contraction strategy - the option supplied as
+    ``optimize`` to ``opt_einsum``.
+    """
+    return _DEFAULT_CONTRACTION_STRATEGY
+
+
+def set_contract_strategy(strategy):
+    """Get the default contraction strategy - the option supplied as
+    ``optimize`` to ``opt_einsum``.
+    """
+    global _DEFAULT_CONTRACTION_STRATEGY
+    _DEFAULT_CONTRACTION_STRATEGY = strategy
+
+
+@contextlib.contextmanager
+def contract_strategy(strategy):
+    """A context manager to temporarily set the default contraction strategy
+    supplied as ``optimize`` to ``opt_einsum``.
+    """
+    orig_strategy = get_contract_strategy()
+    try:
+        yield set_contract_strategy(strategy)
+    finally:
+        set_contract_strategy(orig_strategy)
+
+
 def _get_contract_expr(eq, *shapes, **kwargs):
     # choose how large intermediate arrays can be
-    kwargs.setdefault('optimize', 'greedy')
+    kwargs.setdefault('optimize', _DEFAULT_CONTRACTION_STRATEGY)
     return oe.contract_expression(eq, *shapes, **kwargs)
 
 
@@ -55,7 +86,7 @@ def get_contract_expr(eq, *shapes, cache=True, **kwargs):
 
 
 _CONTRACT_BACKEND = 'auto'
-_TENSOR_LINOP_BACKEND = 'cupy' if has_cupy() else 'auto'
+_TENSOR_LINOP_BACKEND = 'auto'
 
 
 def get_contract_backend():
@@ -79,6 +110,18 @@ def set_contract_backend(backend):
     """
     global _CONTRACT_BACKEND
     _CONTRACT_BACKEND = backend
+
+
+@contextlib.contextmanager
+def contract_backend(backend):
+    """A context manager to temporarily set the default backend used for tensor
+    contractions, via 'opt_einsum'.
+    """
+    orig_backend = get_contract_backend()
+    try:
+        yield set_contract_backend(backend)
+    finally:
+        set_contract_backend(orig_backend)
 
 
 def get_tensor_linop_backend():
@@ -106,6 +149,18 @@ def set_tensor_linop_backend(backend):
     """
     global _TENSOR_LINOP_BACKEND
     _TENSOR_LINOP_BACKEND = backend
+
+
+@contextlib.contextmanager
+def tensor_linop_backend(backend):
+    """A context manager to temporarily set the default backend used for tensor
+    network linear operators, via 'opt_einsum'.
+    """
+    orig_backend = get_tensor_linop_backend()
+    try:
+        yield set_tensor_linop_backend(backend)
+    finally:
+        set_tensor_linop_backend(orig_backend)
 
 
 # --------------------------------------------------------------------------- #

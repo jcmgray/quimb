@@ -1,8 +1,13 @@
 from .tensor_core import (
+    get_contract_strategy,
+    set_contract_strategy,
+    contract_strategy,
     get_contract_backend,
     set_contract_backend,
+    contract_backend,
     get_tensor_linop_backend,
     set_tensor_linop_backend,
+    tensor_linop_backend,
     tensor_contract,
     tensor_split,
     tensor_direct_product,
@@ -66,8 +71,13 @@ from .circuit import (
 )
 
 __all__ = (
+    "contract_strategy",
+    "get_contract_strategy",
+    "set_contract_strategy",
+    "contract_backend",
     "get_contract_backend",
     "set_contract_backend",
+    "tensor_linop_backend",
     "get_tensor_linop_backend",
     "set_tensor_linop_backend",
     "tensor_contract",
