@@ -82,9 +82,9 @@ The following examples, generated from the notebooks in ``docs/examples``, demon
   ./examples/ex_tn_rand_uni_gate_graphs
   ./examples/ex_dmrg_periodic
   ./examples/ex_TEBD_evo
-  ./examples/ex_quantum_circuit
   ./examples/ex_MERA
-  ./examples/ex_torch_optimize_pbc_mps
+  ./examples/ex_tensorflow_optimize_pbc_mps
+  ./examples/ex_quantum_circuit
 
 
 Citing
