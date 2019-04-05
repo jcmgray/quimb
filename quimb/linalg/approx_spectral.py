@@ -409,7 +409,7 @@ def calc_est_window(estimates, mean_ests, conv_n):
     """
     m_est = min(max(conv_n, len(estimates) // 8), 12)
 
-    est = sum(estimates[-m_est:]) / m_est
+    est = sum(estimates[-m_est:]) / len(estimates[-m_est:])
     mean_ests.append(est)
 
     if len(estimates) > conv_n:
