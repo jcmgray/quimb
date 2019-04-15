@@ -17,6 +17,9 @@
 .. image:: http://joss.theoj.org/papers/10.21105/joss.00819/status.svg
   :target: https://doi.org/10.21105/joss.00819
   :alt: JOSS Paper
+.. image:: https://badges.gitter.im/quimb-chat/community.svg
+  :target: https://gitter.im/quimb-chat/community?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge
+  :alt: Gitter
 
 
 ----------------------------------------------------------------------------------
@@ -43,10 +46,11 @@ The **tensor network** submodule ``quimb.tensor``:
 * Can perform DMRG1, DMRG2 and DMRGX, in matrix product state language
 * Has tools to efficiently address periodic problems (transfer matrix compression and pseudo-orthogonalization)
 * Can perform MPS time evolutions with TEBD
+* Can optimize arbitrary tensor networks with ``tensorflow`` or ``pytorch``
 
 .. raw:: html
 
     <img src="https://github.com/jcmgray/quimb/blob/develop/docs/_static/montage.png" width="800px">
 
 The **full documentation** can be found at: `<http://quimb.readthedocs.io/en/latest/>`_.
-Contributions of any sort are very welcome - please see the `contributing guide <https://github.com/jcmgray/quimb/blob/develop/.github/CONTRIBUTING.md>`_.
+Contributions of any sort are very welcome - please see the `contributing guide <https://github.com/jcmgray/quimb/blob/develop/.github/CONTRIBUTING.md>`_. For 'non-github-issue' questions there is a `gitter chat <https://gitter.im/quimb-chat/>`_.
