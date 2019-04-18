@@ -187,10 +187,10 @@ class TestRandProductState:
     def test_rand_product_state(self):
         a = qu.rand_product_state(3)
         assert a.shape[0] == 2**3
-        assert_allclose((a.H @ a)[0, 0].real, 1.0)
-        assert_allclose(qu.mutinf(a, [2, 2, 2], 0, 1), 0.0)
-        assert_allclose(qu.mutinf(a, [2, 2, 2], 1, 2), 0.0)
-        assert_allclose(qu.mutinf(a, [2, 2, 2], 0, 2), 0.0)
+        assert (a.H @ a)[0, 0].real == pytest.approx(1.0)
+        assert qu.mutinf(a, [2, 2, 2], 0, 1) == pytest.approx(0.0)
+        assert qu.mutinf(a, [2, 2, 2], 1, 2) == pytest.approx(0.0)
+        assert qu.mutinf(a, [2, 2, 2], 0, 2) == pytest.approx(0.0)
 
 
 class TestRandMPS:
