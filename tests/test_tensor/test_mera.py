@@ -43,3 +43,13 @@ class TestMERA:
 
         # check only need 'lightcone' to compute local
         assert mera.select(7).H @ meraX.select(7) == pytest.approx(x2)
+
+    @pytest.mark.parametrize("method", ['qr', 'exp', 'mgs'])
+    def test_unitize(self, method):
+        mera = qt.MERA.rand(16, dangle=True)
+        assert mera.H @ mera == pytest.approx(2.0)
+        for t in mera:
+            t.modify(data=qu.randn(t.shape))
+        assert mera.H @ mera != pytest.approx(2.0)
+        mera.unitize_(method=method)
+        assert mera.H @ mera == pytest.approx(2.0)

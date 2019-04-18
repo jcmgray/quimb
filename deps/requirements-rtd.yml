@@ -16,3 +16,5 @@ dependencies:
   - nbsphinx
   - versioneer
   - opt_einsum
+  - pip:
+    - autoray

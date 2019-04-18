@@ -108,7 +108,8 @@ class MERA(TensorNetwork1DVector,
                         tags.add(site_tag_id.format(j))
                         tags.add(site_tag_id.format(j + 1))
 
-                    yield Tensor(next(unis), inds, tags=tags)
+                    yield Tensor(next(unis), inds=inds,
+                                 tags=tags, left_inds=(ll, lr))
 
                     # generate the isometry (offset by one effective site):
                     #      | ui
@@ -121,12 +122,13 @@ class MERA(TensorNetwork1DVector,
                     tags = {"_ISO", "_LAYER{}".format(i)}
 
                     if i < nlayers - 1 or dangle:
-                        yield Tensor(next(isos), inds, tags)
+                        yield Tensor(next(isos), inds=inds,
+                                     tags=tags, left_inds=(ll, lr))
                     else:
                         # don't leave dangling index at top
                         yield Tensor(
                             np.eye(phys_dim, dtype=next(isos).dtype) / 2**0.5,
-                            inds[:-1], tags
+                            inds=inds[:-1], tags=tags, left_inds=(ll, lr)
                         )
 
         super().__init__(gen_mera_tensors(), check_collisions=False,

@@ -276,10 +276,11 @@ class TestBasicTensorOperations:
         assert sum(tn ^ all for tn in pp.cut_iter(*bnds)) == pytest.approx(1.0)
         assert pp ^ all == pytest.approx(1.0)
 
-    def test_unitize(self):
+    @pytest.mark.parametrize("method", ['qr', 'exp', 'mgs'])
+    def test_unitize(self, method):
         t = rand_tensor((2, 3, 4), 'abc')
         assert t.H @ t != pytest.approx(3.0)
-        t.unitize('b', inplace=True)
+        t.unitize('b', inplace=True, method=method)
         assert t.H @ t == pytest.approx(3.0)
         assert t.inds == ('b', 'a', 'c')
 

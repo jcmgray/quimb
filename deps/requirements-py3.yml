@@ -20,6 +20,7 @@ dependencies:
   - opt_einsum
   - joblib
   - pip:
+    - autoray
     - randomgen
     - codeclimate-test-reporter
     - codacy-coverage

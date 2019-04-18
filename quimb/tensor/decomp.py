@@ -2,8 +2,8 @@ import numpy as np
 import scipy.linalg as scla
 import scipy.sparse.linalg as spla
 import scipy.linalg.interpolative as sli
+from autoray import do
 
-from .array_ops import do
 from ..core import njit
 from ..linalg.rand_linalg import rsvd, estimate_rank
 

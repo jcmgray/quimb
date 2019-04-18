@@ -19,12 +19,12 @@ from cytoolz import (unique, concat, frequencies,
 import numpy as np
 import opt_einsum as oe
 import scipy.sparse.linalg as spla
+from autoray import do, conj, reshape, transpose
 
 from ..core import qarray, prod, realify_scalar, vdot, common_type
 from ..utils import check_opt, functions_equal
 from . import decomp
-from .array_ops import (do, conj, reshape, transpose, iscomplex, norm_fro,
-                        isometrize)
+from .array_ops import iscomplex, norm_fro, unitize
 
 
 _DEFAULT_CONTRACTION_STRATEGY = 'greedy'
@@ -679,9 +679,14 @@ class Tensor(object):
     inds : sequence of str
         The index labels for each dimension. Must match the number of
         dimensions of ``data``.
-    tags : sequence of str
+    tags : sequence of str, optional
         Tags with which to identify and group this tensor. These will
         be converted into a ``set``.
+    left_inds : sequence of str, optional
+        Which, if any, indices to consider as 'left' indices.
+        This can be useful, for example, when automatically applying unitary
+        constraints to impose a certain flow on a tensor network but at the
+        atomistic (Tensor) level.
 
     Examples
     --------
@@ -700,7 +705,7 @@ class Tensor(object):
 
     """
 
-    def __init__(self, data, inds, tags=None):
+    def __init__(self, data, inds, tags=None, left_inds=None):
         # a new or copied Tensor always has no owners
         self.owners = {}
 
@@ -709,20 +714,28 @@ class Tensor(object):
             self._data = data.data
             self._inds = data.inds
             self._tags = data.tags.copy()
+            self._left_inds = data.left_inds
             return
 
         self._data = _asarray(data)
         self._inds = tuple(inds)
+        self._tags = tags2set(tags)
+        self._left_inds = tuple(left_inds) if left_inds is not None else None
 
-        if _ndim(self._data) != len(self.inds):
+        nd = _ndim(self._data)
+        if nd != len(self.inds):
             raise ValueError(
                 "Wrong number of inds, {}, supplied for array"
                 " of shape {}.".format(self.inds, self._data.shape))
 
-        self._tags = tags2set(tags)
+        if self.left_inds and any(i not in self.inds for i in self.left_inds):
+            raise ValueError(
+                "The 'left' indices {} are not found in {}."
+                "".format(self.left_inds, self.inds))
 
     def copy(self, deep=False):
-        """
+        """Copy this tensor. Note by default (``deep=False``), the underlying
+        array will *not* be copied.
         """
         if deep:
             return copy.deepcopy(self)
@@ -743,6 +756,14 @@ class Tensor(object):
     def tags(self):
         return self._tags
 
+    @property
+    def left_inds(self):
+        return self._left_inds
+
+    @left_inds.setter
+    def left_inds(self, left_inds):
+        self._left_inds = tuple(left_inds) if left_inds is not None else None
+
     def add_owner(self, tn, tid):
         """Add ``tn`` as owner of this Tensor - it's tag and ind maps will
         be updated whenever this tensor is retagged or reindexed.
@@ -750,7 +771,7 @@ class Tensor(object):
         self.owners[hash(tn)] = (weakref.ref(tn), tid)
 
     def remove_owner(self, tn):
-        """Remove ``tn`` as owner of this Tensor.
+        """Remove TensorNetwork ``tn`` as an owner of this Tensor.
         """
         try:
             del self.owners[hash(tn)]
@@ -759,7 +780,7 @@ class Tensor(object):
 
     def check_owners(self):
         """Check if this tensor is 'owned' by any alive TensorNetworks. Also
-        trim any weakrefs to dead TensorNetwork.
+        trim any weakrefs to dead TensorNetworks.
         """
         # first parse out dead owners
         for k in tuple(self.owners):
@@ -768,7 +789,7 @@ class Tensor(object):
 
         return len(self.owners) > 0
 
-    def modify(self, data=None, inds=None, tags=None):
+    def modify(self, **kwargs):
         """Overwrite the data of this tensor in place.
 
         Parameters
@@ -780,28 +801,43 @@ class Tensor(object):
         tags : sequence of str, optional
             New tags.
         """
-        if data is not None:
-            self._data = _asarray(data)
+        if 'data' in kwargs:
+            self._data = _asarray(kwargs.pop('data'))
 
-        if inds is not None:
+        if 'inds' in kwargs:
+            inds = tuple(kwargs.pop('inds'))
+
             # if this tensor has owners, update their ``ind_map``.
             if self.check_owners():
                 for ref, tid in self.owners.values():
                     ref()._modify_tensor_inds(self.inds, inds, tid)
 
-            self._inds = tuple(inds)
+            self._inds = inds
 
-        if tags is not None:
+        if 'tags' in kwargs:
+            tags = tags2set(kwargs.pop('tags'))
+
             # if this tensor has owners, update their ``tag_map``.
             if self.check_owners():
                 for ref, tid in self.owners.values():
                     ref()._modify_tensor_tags(self.tags, tags, tid)
 
-            self._tags = tags2set(tags)
+            self._tags = tags
+
+        if 'left_inds' in kwargs:
+            self.left_inds = kwargs.pop('left_inds')
+
+        if kwargs:
+            raise ValueError("Option(s) {} not valid.".format(kwargs))
 
         if len(self.inds) != _ndim(self.data):
             raise ValueError("Mismatch between number of data dimensions and "
                              "number of indices supplied.")
+
+        if self.left_inds and any(i not in self.inds for i in self.left_inds):
+            raise ValueError(
+                "The 'left' indices {} are not found in {}."
+                "".format(self.left_inds, self.inds))
 
     def isel(self, selectors, inplace=False):
         """Select specific values for some dimensions/indices of this tensor,
@@ -929,20 +965,20 @@ class Tensor(object):
         --------
         transpose_like
         """
-        tn = self if inplace else self.copy()
+        t = self if inplace else self.copy()
 
         output_inds = tuple(output_inds)  # need to re-use this.
 
-        if set(tn.inds) != set(output_inds):
+        if set(t.inds) != set(output_inds):
             raise ValueError("'output_inds' must be permutation of the "
                              "current tensor indices, but {} != {}"
-                             .format(set(tn.inds), set(output_inds)))
+                             .format(set(t.inds), set(output_inds)))
 
-        current_ind_map = {ind: i for i, ind in enumerate(tn.inds)}
+        current_ind_map = {ind: i for i, ind in enumerate(t.inds)}
         out_shape = tuple(current_ind_map[i] for i in output_inds)
 
-        tn.modify(data=transpose(tn.data, out_shape), inds=output_inds)
-        return tn
+        t.modify(data=transpose(t.data, out_shape), inds=output_inds)
+        return t
 
     transpose_ = functools.partialmethod(transpose, inplace=True)
 
@@ -969,8 +1005,8 @@ class Tensor(object):
         --------
         transpose
         """
-        tn = self if inplace else self.copy()
-        diff_ix = set(tn.inds) - set(other.inds)
+        t = self if inplace else self.copy()
+        diff_ix = set(t.inds) - set(other.inds)
 
         if len(diff_ix) > 1:
             raise ValueError("More than one index don't match, the transpose "
@@ -978,14 +1014,14 @@ class Tensor(object):
 
         # if their indices match, just plain transpose
         if not diff_ix:
-            tn.transpose_(*other.inds)
+            t.transpose_(*other.inds)
 
         else:
             di, = diff_ix
-            new_ix = (i if i in tn.inds else di for i in other.inds)
-            tn.transpose_(*new_ix)
+            new_ix = (i if i in t.inds else di for i in other.inds)
+            t.transpose_(*new_ix)
 
-        return tn
+        return t
 
     transpose_like_ = functools.partialmethod(transpose_like, inplace=True)
 
@@ -1070,7 +1106,16 @@ class Tensor(object):
             inds will be returned.
         """
         new = self if inplace else self.copy()
-        new.modify(inds=tuple(index_map.get(ind, ind) for ind in new.inds))
+
+        new_inds = tuple(index_map.get(ind, ind) for ind in new.inds)
+
+        if self.left_inds:
+            new_left_inds = (index_map.get(ind, ind) for ind in self.left_inds)
+        else:
+            new_left_inds = self.left_inds
+
+        new.modify(inds=new_inds, left_inds=new_left_inds)
+
         return new
 
     reindex_ = functools.partialmethod(reindex, inplace=True)
@@ -1091,27 +1136,29 @@ class Tensor(object):
         Tensor
             The transposed, reshaped and re-labeled tensor.
         """
-        tn = self if inplace else self.copy()
+        t = self if inplace else self.copy()
 
         if isinstance(fuse_map, dict):
             new_fused_inds, fused_inds = zip(*fuse_map.items())
         else:
             new_fused_inds, fused_inds = zip(*fuse_map)
 
-        unfused_inds = tuple(i for i in tn.inds if not
+        unfused_inds = tuple(i for i in t.inds if not
                              any(i in fs for fs in fused_inds))
 
         # transpose tensor to bring groups of fused inds to the beginning
-        tn.transpose_(*concat(fused_inds), *unfused_inds)
+        t.transpose_(*concat(fused_inds), *unfused_inds)
 
         # for each set of fused dims, group into product, then add remaining
-        dims = iter(tn.shape)
+        dims = iter(t.shape)
         dims = [prod(next(dims) for _ in fs) for fs in fused_inds] + list(dims)
 
         # create new tensor with new + remaining indices
-        tn.modify(data=reshape(tn.data, dims),
-                  inds=(*new_fused_inds, *unfused_inds))
-        return tn
+        #     + drop 'left' marked indices since they might be fused
+        t.modify(data=reshape(t.data, dims),
+                 inds=(*new_fused_inds, *unfused_inds), left_inds=None)
+
+        return t
 
     fuse_ = functools.partialmethod(fuse, inplace=True)
 
@@ -1131,8 +1178,19 @@ class Tensor(object):
         t = self if inplace else self.copy()
         new_shape, new_inds = zip(
             *((d, i) for d, i in zip(self.shape, self.inds) if d > 1))
+
+        new_left_inds = (
+            None if self.left_inds is None else
+            (i for i in self.left_inds if i in new_inds)
+        )
+
         if len(t.inds) != len(new_inds):
-            t.modify(data=reshape(t.data, new_shape), inds=new_inds)
+            t.modify(
+                data=reshape(t.data, new_shape),
+                inds=new_inds,
+                left_inds=new_left_inds,
+            )
+
         return t
 
     squeeze_ = functools.partialmethod(squeeze, inplace=True)
@@ -1141,6 +1199,13 @@ class Tensor(object):
         """Frobenius norm of this tensor.
         """
         return norm_fro(self.data)
+
+    def normalize(self, inplace=False):
+        T = self if inplace else self.copy()
+        T.modify(data=T.data / T.norm())
+        return T
+
+    normalize_ = functools.partialmethod(normalize, inplace=True)
 
     def symmetrize(self, ind1, ind2, inplace=False):
         """Hermitian symmetrize this tensor for indices ``ind1`` and ``ind2``.
@@ -1153,21 +1218,54 @@ class Tensor(object):
         T.modify(data=(T.data + TH.data) / 2)
         return T
 
-    def unitize(self, left_inds, inplace=False):
-        """Make this tensor unitary (or isometric) with respect to
+    def unitize(self, left_inds=None, inplace=False, method='qr'):
+        r"""Make this tensor unitary (or isometric) with respect to
         ``left_inds``. The underlying method is to perform the matrix
         exponential on the anti-hermitian part of this tensor's array, suitably
-        permuted and reshaped.
+        permuted and reshaped::
 
+        .. math::
+
+            U_A = \exp{A - A^\dagger}
+
+        If the tensor is not square, it will first be padded with zeros
+        and ``U_A`` will be appropriately sliced afterwards.
+
+
+        Parameters
+        ----------
+        left_inds : sequence of str
+            The indices to group together and treat as the left hand side of a
+            matrix.
+        inplace : bool, optional
+            Whether to perform the unitization inplace.
+
+        Returns
+        -------
+        Tensor
         """
+        if left_inds is None:
+            if self.left_inds is None:
+                raise ValueError(
+                    "You must specify `left_inds` since this tensor does not "
+                    "have any indices marked automatically as such in the "
+                    "attribute `left_inds`.")
+            else:
+                left_inds = self.left_inds
+
         # partition indices into left and right
         L_inds = list(left_inds)
         R_inds = [ix for ix in self.inds if ix not in L_inds]
+
+        # if the tensor is an effective vector, we can just normalize
+        if (len(L_inds) == 0) or (len(R_inds) == 0):
+            return self.normalize(inplace=inplace)
+
         LR_inds = L_inds + R_inds
 
         # fuse this tensor into a matrix and 'isometrize' it
         x = self.to_dense(L_inds, R_inds)
-        x = isometrize(x)
+        x = unitize(x, method=method)
 
         # turn the array back into a tensor
         x = reshape(x, [self.ind_size(ix) for ix in LR_inds])
@@ -1179,6 +1277,8 @@ class Tensor(object):
             Tu = self
 
         return Tu
+
+    unitize_ = functools.partialmethod(unitize, inplace=True)
 
     def almost_equals(self, other, **kwargs):
         """Check if this tensor is almost the same as another.
@@ -3095,6 +3195,19 @@ class TensorNetwork(object):
         return tn
 
     squeeze_ = functools.partialmethod(squeeze, inplace=True)
+
+    def unitize(self, mode='error', inplace=False, method='qr'):
+        """
+        """
+        tn = self if inplace else self.copy()
+        for t in tn:
+            if (t.left_inds is None) and (mode == 'error'):
+                raise ValueError("The tensor {} doesn't have left indices "
+                                 "marked using the `left_inds` attribute.")
+            t.unitize_(method=method)
+        return tn
+
+    unitize_ = functools.partialmethod(unitize, inplace=True)
 
     def fuse_multibonds(self, inplace=False):
         """Fuse any multi-bonds (more than one index shared by the same pair

@@ -8,6 +8,7 @@ from numbers import Integral
 
 import numpy as np
 import opt_einsum as oe
+from autoray import do, dag
 
 from ..utils import check_opt, three_line_multi_print, pairwise
 import quimb as qu
@@ -21,7 +22,6 @@ from .tensor_core import (
     _asarray,
     _ndim,
 )
-from .array_ops import do, dag
 
 
 def align_TN_1D(*tns, ind_ids=None, inplace=False):
