@@ -49,6 +49,7 @@ The **tensor network** submodule ``quimb.tensor``:
 .. image:: ./_static/montage.png
   :width: 800px
 
+
 Guides
 ------
 
@@ -67,7 +68,7 @@ The following guides give a basic introduction to the various parts:
   dynamics and evolution
   tensor-basics
   tensor-algorithms
-  develop
+
 
 .. _examples:
 
@@ -107,12 +108,16 @@ Citing
     }
 
 
-Release Notes
--------------
+
+Notes
+-----
+
+Notes on contributing to ``quimb`` and release details can be found below:
 
 .. toctree::
   :maxdepth: 2
 
+  develop
   changelog
 
 
