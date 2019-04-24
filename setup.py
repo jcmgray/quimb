@@ -30,6 +30,7 @@ setup(
         'cytoolz>=0.8.0',
         'tqdm>=4',
         'opt_einsum>=2',
+        'autoray>=0.1',
     ],
     extras_require={
         'tensor': [
