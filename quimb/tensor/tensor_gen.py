@@ -665,7 +665,8 @@ class SpinHam:
             for i in range(n):
                 which = {0: 'L', n - 1: 'R'}.get(i, None)
 
-                if which == 'R':
+                # at end in OBC need to inherit interactions from previous term
+                if (which == 'R') and not self.cyclic:
                     ij = (i - 1, i)
                 else:
                     ij = (i, i + 1)
