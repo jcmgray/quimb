@@ -47,6 +47,7 @@ class TestCircuit:
         assert len(counts) == 2
         assert '000' in counts
         assert '111' in counts
+        assert counts['000'] + counts['111'] == 1024
 
     def test_rand_reg_qaoa(self):
         G = rand_reg_graph(reg=3, n=18, seed=42)

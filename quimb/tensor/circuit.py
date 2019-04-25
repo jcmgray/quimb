@@ -344,6 +344,13 @@ class Circuit:
         """
         return self._psi.squeeze()
 
+    def to_dense(self, **contract_opts):
+        """Generate the dense representation of the final wavefunction.
+        """
+        inds = [self.psi.site_ind(i) for i in range(self.N)]
+        p_dense = self.psi.to_dense(inds, **contract_opts)
+        return p_dense
+
     def simulate_counts(self, C, seed=None, **contract_opts):
         """Simulate measuring each qubit in the computational basis. See
         :func:`~quimb.calc.simulate_counts`.
@@ -365,8 +372,7 @@ class Circuit:
         results : dict[str, int]
             The number of recorded counts for each
         """
-        inds = [self.psi.site_ind(i) for i in range(self.N)]
-        p_dense = self.psi.to_dense(inds, **contract_opts)
+        p_dense = self.to_dense(**contract_opts)
         return qu.simulate_counts(p_dense, C=C, seed=seed)
 
     def __repr__(self):
