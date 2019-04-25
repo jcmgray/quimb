@@ -390,7 +390,7 @@ class TensorNetwork1DVector:
                 self, self.site_inds, **contract_opts
             ).reshape(-1, 1)
 
-        return TensorNetwork.to_dense(self, self.site_inds, **contract_opts)
+        return TensorNetwork.to_dense(self, *inds_seq, **contract_opts)
 
     def phys_dim(self, i=None):
         if i is None:
