@@ -344,14 +344,30 @@ class Circuit:
         """
         return self._psi.squeeze()
 
-    def to_dense(self, **contract_opts):
+    def to_dense(self, reverse=False, **contract_opts):
         """Generate the dense representation of the final wavefunction.
+
+        Parameters
+        ----------
+        reverse : bool, optional
+            Whether to reverse the order of the subsystems, to match the
+            convention of qiskit for example.
+        contract_opts
+            Suppled to :func:`~quimb.tensor.tensor_core.tensor_contract`.
+
+        Returns
+        -------
+        qarray
         """
         inds = [self.psi.site_ind(i) for i in range(self.N)]
+
+        if reverse:
+            inds = inds[::-1]
+
         p_dense = self.psi.to_dense(inds, **contract_opts)
         return p_dense
 
-    def simulate_counts(self, C, seed=None, **contract_opts):
+    def simulate_counts(self, C, seed=None, reverse=False, **contract_opts):
         """Simulate measuring each qubit in the computational basis. See
         :func:`~quimb.calc.simulate_counts`.
 
@@ -364,15 +380,20 @@ class Circuit:
         ----------
         C : int
             The number of 'experimental runs', i.e. total counts.
+        seed : int, optional
+            A seed for reproducibility.
+        reverse : bool, optional
+            Whether to reverse the order of the subsystems, to match the
+            convention of qiskit for example.
         contract_opts
-            Used to contract the tensor network representation.
+            Suppled to :func:`~quimb.tensor.tensor_core.tensor_contract`.
 
         Returns
         -------
         results : dict[str, int]
             The number of recorded counts for each
         """
-        p_dense = self.to_dense(**contract_opts)
+        p_dense = self.to_dense(reverse=reverse, **contract_opts)
         return qu.simulate_counts(p_dense, C=C, seed=seed)
 
     def __repr__(self):
