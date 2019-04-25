@@ -47,3 +47,17 @@ class TestSpinHam:
 
         HB.build_mpo(n)
         HB.build_nni(n)
+
+    def test_no_default_term(self):
+        N = 10
+        builder = qtn.SpinHam(1 / 2)
+
+        for i in range(N - 1):
+            builder[i, i + 1] += 1.0, 'Z', 'Z'
+
+        H = builder.build_mpo(N)
+
+        dmrg = qtn.DMRG2(H)
+        dmrg.solve(verbosity=1)
+
+        assert dmrg.energy == pytest.approx(-2.25)

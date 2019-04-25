@@ -665,15 +665,19 @@ class SpinHam:
             for i in range(n):
                 which = {0: 'L', n - 1: 'R'}.get(i, None)
 
-                var_one = i in self.var_one_site_terms
-                var_two = (i, i + 1) in self.var_two_site_terms
+                if which == 'R':
+                    ij = (i - 1, i)
+                else:
+                    ij = (i, i + 1)
 
-                if not var_one or var_two:
+                var_one = i in self.var_one_site_terms
+                var_two = ij in self.var_two_site_terms
+
+                if not (var_one or var_two):
                     yield get_default_term(which)
                 else:
                     t1s = self.var_one_site_terms.get(i, self.one_site_terms)
-                    t2s = self.var_two_site_terms.get((i, i + 1),
-                                                      self.two_site_terms)
+                    t2s = self.var_two_site_terms.get(ij, self.two_site_terms)
 
                     yield spin_ham_mpo_tensor(t1s, t2s, S=self.S,
                                               which=which, cyclic=self.cyclic)
