@@ -527,8 +527,8 @@ def get_single_precision_dtype(dtype):
         raise ValueError("dtype {} not understood.".format(dtype))
 
 
-def approx_spectral_function(A, f, tol=0.01, *, bsz=1, R=1024, tol_scale=1,
-                             tau=None, k_min=10, k_max=512, beta_tol=1e-6,
+def approx_spectral_function(A, f, tol=1e-2, *, bsz=1, R=1024, tol_scale=1,
+                             tau=1e-5, k_min=10, k_max=512, beta_tol=1e-6,
                              mpi=False, mean_p=0.7, mean_s=1.0, pos=False,
                              v0=None, verbosity=0, single_precision='AUTO',
                              **lanczos_opts):
@@ -558,8 +558,7 @@ def approx_spectral_function(A, f, tol=0.01, *, bsz=1, R=1024, tol_scale=1,
     tau : float, optional
         The relative tolerance required for a single lanczos run to converge.
         This needs to be small enough that each estimate with a single random
-        vector produces an unbiased sample of the operators spectrum.
-        Defaults to ``tol / 3``.
+        vector produces an unbiased sample of the operators spectrum..
     k_min : int, optional
         The minimum size of the krylov subspace to form for each sample.
     k_max : int, optional
@@ -621,7 +620,7 @@ def approx_spectral_function(A, f, tol=0.01, *, bsz=1, R=1024, tol_scale=1,
 
     # require better precision for the lanczos procedure, otherwise biased
     if tau is None:
-        tau = tol / 4
+        tau = tol / 1000
 
     if verbosity:
         print("LANCZOS f(A) CALC: tol={}, tau={}, R={}, bsz={}"
