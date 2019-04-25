@@ -18,6 +18,7 @@ from quimb.tensor import (
     TNLinearOperator1D,
 )
 from quimb.tensor.decomp import _trim_singular_vals
+from quimb.tensor.tensor_core import _CONTRACT_BACKEND, _TENSOR_LINOP_BACKEND
 
 
 def test__trim_singular_vals():
@@ -37,16 +38,16 @@ class TestContractOpts:
         assert qtn.get_contract_strategy() == 'greedy'
 
     def test_contract_backend(self):
-        assert qtn.get_contract_backend() == 'auto'
+        assert qtn.get_contract_backend() == _CONTRACT_BACKEND
         with qtn.contract_backend('cupy'):
             assert qtn.get_contract_backend() == 'cupy'
-        assert qtn.get_contract_backend() == 'auto'
+        assert qtn.get_contract_backend() == _CONTRACT_BACKEND
 
     def test_tensor_linop_backend(self):
-        assert qtn.get_tensor_linop_backend() == 'auto'
+        assert qtn.get_tensor_linop_backend() == _TENSOR_LINOP_BACKEND
         with qtn.tensor_linop_backend('cupy'):
             assert qtn.get_tensor_linop_backend() == 'cupy'
-        assert qtn.get_tensor_linop_backend() == 'auto'
+        assert qtn.get_tensor_linop_backend() == _TENSOR_LINOP_BACKEND
 
 
 class TestBasicTensorOperations:

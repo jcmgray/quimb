@@ -85,8 +85,14 @@ def get_contract_expr(eq, *shapes, cache=True, **kwargs):
         return _get_contract_expr_cached(eq, *shapes, **kwargs)
 
 
-_CONTRACT_BACKEND = 'auto'
-_TENSOR_LINOP_BACKEND = 'auto'
+try:
+    from opt_einsum.contract import infer_backend
+    del infer_backend
+    _CONTRACT_BACKEND = 'auto'
+    _TENSOR_LINOP_BACKEND = 'auto'
+except ImportError:
+    _CONTRACT_BACKEND = 'numpy'
+    _TENSOR_LINOP_BACKEND = 'numpy'
 
 
 def get_contract_backend():
