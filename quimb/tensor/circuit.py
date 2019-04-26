@@ -359,12 +359,14 @@ class Circuit:
         -------
         qarray
         """
-        inds = [self.psi.site_ind(i) for i in range(self.N)]
+        psi = self.psi
+
+        inds = [psi.site_ind(i) for i in range(self.N)]
 
         if reverse:
             inds = inds[::-1]
 
-        p_dense = self.psi.to_dense(inds, **contract_opts)
+        p_dense = psi.to_dense(inds, **contract_opts)
         return p_dense
 
     def simulate_counts(self, C, seed=None, reverse=False, **contract_opts):
