@@ -151,7 +151,7 @@ class TestPTPTLazyMPSSpectralApprox:
 
         psi0 = dmrg.state.to_dense()
         lne = logneg_subsys(psi0, [2] * n, sysa=sysa, sysb=sysb)
-        lnx = log2(approx_spectral_function(rho_ab_pt, abs, tol=0.1,
+        lnx = log2(approx_spectral_function(rho_ab_pt, abs, tol=0.05, tau=1e-3,
                                             verbosity=2))
         assert_allclose(lne, lnx, rtol=0.5, atol=0.1)
 
