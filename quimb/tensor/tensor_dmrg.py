@@ -289,7 +289,7 @@ class MovingEnvironment:
                 self.envs[i] |= self.tnc.select(i)
                 self.envs[i] ^= ('_RIGHT', self.site_tag(i + self.bsz))
 
-            self.envs[i] |= self.tnc['_LEFT']
+            self.envs[start] |= self.tnc['_LEFT']
             self.pos = start
 
         elif begin == 'right':

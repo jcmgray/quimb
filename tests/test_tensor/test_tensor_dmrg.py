@@ -24,6 +24,7 @@ from quimb.tensor import (
     DMRG1,
     DMRG2,
     DMRGX,
+    SpinHam,
 )
 
 
@@ -297,6 +298,17 @@ class TestDMRG2:
         dmrg.solve(max_sweeps=3)
         res_dtype, = {t.dtype for t in dmrg.state}
         assert res_dtype == dtype
+
+    def test_total_size_2(self):
+        N = 2
+        builder = SpinHam(1 / 2)
+        for i in range(N - 1):
+            builder[i, i + 1] += 1.0, 'Z', 'Z'
+
+        H = builder.build_mpo(N)
+        dmrg = DMRG2(H)
+        dmrg.solve(verbosity=1)
+        assert dmrg.energy == pytest.approx(-1 / 4)
 
 
 class TestDMRGX:
