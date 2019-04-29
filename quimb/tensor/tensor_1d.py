@@ -2487,9 +2487,9 @@ class MatrixProductOperator(TensorNetwork1DFlat,
         A, B = self.copy(), other.copy()
 
         # align the indices and combine into a ladder
-        A.lower_ind_id = B.lower_ind_id
-        B.lower_ind_id = "__tmp{}__"
-        A.upper_ind_id = "__tmp{}__"
+        A.upper_ind_id = B.upper_ind_id
+        B.upper_ind_id = "__tmp{}__"
+        A.lower_ind_id = "__tmp{}__"
         both = A | B
 
         # contract each pair of tensors at each site
@@ -2498,7 +2498,7 @@ class MatrixProductOperator(TensorNetwork1DFlat,
 
         # convert back to MPO and fuse the double bonds
         out = MatrixProductOperator.from_TN(
-            both, upper_ind_id=B.upper_ind_id, lower_ind_id=A.lower_ind_id,
+            both, upper_ind_id=A.upper_ind_id, lower_ind_id=B.lower_ind_id,
             inplace=True, cyclic=self.cyclic, site_tag_id=A.site_tag_id)
 
         out.fuse_multibonds(inplace=True)
@@ -2639,7 +2639,7 @@ class MatrixProductOperator(TensorNetwork1DFlat,
             lix, rix = self.lower_inds, self.upper_inds
 
         T = self.contract(..., **contract_opts)
-        T.fuse_((('lower', lix), ('upper', rix)))
+        T.fuse_([('upper', rix), ('lower', lix)])
         d = int(T.size**0.5)
         return qu.qarray(T.data.reshape(d, d))
 

@@ -310,6 +310,31 @@ class TestDMRG2:
         dmrg.solve(verbosity=1)
         assert dmrg.energy == pytest.approx(-1 / 4)
 
+    def test_variable_bond_ham(self):
+        import quimb as qu
+
+        HB = SpinHam(1 / 2)
+        HB[0, 1] += 0.6, 'Z', 'Z'
+        HB[1, 2] += 0.7, 'Z', 'Z'
+        HB[1, 2] += 0.8, 'X', 'X'
+        HB[2, 3] += 0.9, 'Y', 'Y'
+
+        H_mpo = HB.build_mpo(4)
+        H_sps = HB.build_sparse(4)
+
+        assert H_mpo.bond_sizes() == [3, 4, 3]
+
+        Sx, Sy, Sz = map(qu.spin_operator, 'xyz')
+        H_explicit = (
+            qu.ikron(0.6 * Sz & Sz, [2, 2, 2, 2], [0, 1]) +
+            qu.ikron(0.7 * Sz & Sz, [2, 2, 2, 2], [1, 2]) +
+            qu.ikron(0.8 * Sx & Sx, [2, 2, 2, 2], [1, 2]) +
+            qu.ikron(0.9 * Sy & Sy, [2, 2, 2, 2], [2, 3])
+        )
+
+        assert_allclose(H_explicit, H_mpo.to_dense())
+        assert_allclose(H_explicit, H_sps.A)
+
 
 class TestDMRGX:
 

@@ -45,8 +45,11 @@ class TestSpinHam:
         elif var_one == 'def-only':
             HB += 1, K1
 
-        HB.build_mpo(n)
         HB.build_nni(n)
+        H_mpo = HB.build_mpo(n)
+        H_sps = HB.build_sparse(n)
+
+        assert_allclose(H_mpo.to_dense(), H_sps.A)
 
     def test_no_default_term(self):
         N = 10

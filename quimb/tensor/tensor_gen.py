@@ -4,7 +4,7 @@ from numbers import Integral
 
 import numpy as np
 
-from ..core import make_immutable
+from ..core import make_immutable, ikron
 from ..linalg.base_linalg import norm_fro_dense
 from ..gen.operators import spin_operator, eye, _gen_mbl_random_factors
 from ..gen.rand import randn, choice, random_seed_fn, rand_phase
@@ -403,7 +403,7 @@ def maybe_make_real(X):
 
 
 def spin_ham_mpo_tensor(one_site_terms, two_site_terms, S=1 / 2,
-                        which=None, cyclic=False):
+                        left_two_site_terms=None, which=None, cyclic=False):
     """Generate tensor(s) for a spin hamiltonian MPO.
 
     Parameters
@@ -417,6 +417,9 @@ def spin_ham_mpo_tensor(one_site_terms, two_site_terms, S=1 / 2,
         2d-array.
     S : fraction, optional
         What size spin to use, defaults to spin-1/2.
+    left_two_site_terms : sequence of (scalar, operator operator), optional
+        If the interaction to the left of this site has different spin terms
+        then the equivalent list of terms for that site.
     which : {None, 'L', 'R', 'A'}, optional
         If ``None``, generate the middle tensor, if 'L' a left-end tensor, if
         'R' a right-end tensor and if 'A' all three.
@@ -428,30 +431,38 @@ def spin_ham_mpo_tensor(one_site_terms, two_site_terms, S=1 / 2,
     numpy.ndarray[, numpy.ndarray, numpy.ndarray]
         The middle, left, right or all three MPO tensors.
     """
+    # assume same interaction type everywhere
+    if left_two_site_terms is None:
+        left_two_site_terms = two_site_terms
+
     # local dimension
     D = int(2 * S + 1)
-    # bond dimension
+    # bond dimension to right
     B = len(two_site_terms) + 2
+    # bond dimension to left
+    BL = len(left_two_site_terms) + 2
 
-    H = np.zeros((B, B, D, D), dtype=complex)
+    H = np.zeros((BL, B, D, D), dtype=complex)
 
     # add one-body terms
     for factor, s in one_site_terms:
         if isinstance(s, str):
             s = spin_operator(s, S=S)
-        H[B - 1, 0, :, :] += factor * s
+        H[-1, 0, :, :] += factor * s
 
     # add two-body terms
-    for i, (factor, s1, s2) in enumerate(two_site_terms):
+    for i, (factor, s1, _) in enumerate(two_site_terms):
         if isinstance(s1, str):
             s1 = spin_operator(s1, S=S)
+        H[-1, 1 + i, :, :] = factor * s1
+
+    for i, (_, _, s2) in enumerate(left_two_site_terms):
         if isinstance(s2, str):
             s2 = spin_operator(s2, S=S)
-        H[1 + i, 0, :, :] = factor * s1
-        H[-1, 1 + i, :, :] = s2
+        H[i + 1, 0, :, :] = s2
 
     H[0, 0, :, :] = eye(D)
-    H[B - 1, B - 1, :, :] = eye(D)
+    H[-1, -1, :, :] = eye(D)
 
     H = maybe_make_real(H)
     make_immutable(H)
@@ -505,6 +516,8 @@ class SpinHam:
     Currently limited to nearest neighbour interactions (and single site
     terms). It is possible to set 'default' translationally invariant terms,
     but also terms acting on specific sites only (which take precedence).
+    It is also possible to build a sparse matrix version of the hamiltonian
+    (obviously for small sizes only).
 
     Parameters
     ----------
@@ -665,28 +678,78 @@ class SpinHam:
             for i in range(n):
                 which = {0: 'L', n - 1: 'R'}.get(i, None)
 
-                # at end in OBC need to inherit interactions from previous term
-                if (which == 'R') and not self.cyclic:
-                    ij = (i - 1, i)
-                else:
-                    ij = (i, i + 1)
+                ij_L = (i - 1, i)
+                ij_R = (i, i + 1)
 
+                # check for site/bond specific terms
                 var_one = i in self.var_one_site_terms
-                var_two = ij in self.var_two_site_terms
+                var_two = (
+                    (ij_L in self.var_two_site_terms) or
+                    (ij_R in self.var_two_site_terms)
+                )
 
                 if not (var_one or var_two):
                     yield get_default_term(which)
                 else:
                     t1s = self.var_one_site_terms.get(i, self.one_site_terms)
-                    t2s = self.var_two_site_terms.get(ij, self.two_site_terms)
+                    t2s = self.var_two_site_terms.get(ij_R,
+                                                      self.two_site_terms)
+                    t2s_L = self.var_two_site_terms.get(ij_L,
+                                                        self.two_site_terms)
 
                     yield spin_ham_mpo_tensor(t1s, t2s, S=self.S,
+                                              left_two_site_terms=t2s_L,
                                               which=which, cyclic=self.cyclic)
 
         return MatrixProductOperator(arrays=gen_tensors(), bond_name=bond_name,
                                      upper_ind_id=upper_ind_id,
                                      lower_ind_id=lower_ind_id,
                                      site_tag_id=site_tag_id, tags=tags)
+
+    def build_sparse(self, n, **ikron_opts):
+        """Build a sparse matrix representation of this Hamiltonian.
+
+        Parameters
+        ----------
+        n : int, optional
+            The number of spins to build the matrix for.
+        ikron_opts
+            Supplied to :func:`~quimb.core.ikron`.
+
+        Returns
+        -------
+        H : matrix
+        """
+        ikron_opts.setdefault('sparse', True)
+
+        D = int(2 * self.S + 1)
+        dims = [D] * n
+
+        terms = []
+        for i in range(n):
+
+            t1s = self.var_one_site_terms.get(i, self.one_site_terms)
+            for factor, s in t1s:
+                if isinstance(s, str):
+                    s = spin_operator(s, S=self.S, sparse=True)
+                terms.append(
+                    ikron(factor * s, dims, i, **ikron_opts)
+                )
+
+            if (i + 1 == n) and (not self.cyclic):
+                break
+
+            t2s = self.var_two_site_terms.get((i, i + 1), self.two_site_terms)
+            for factor, s1, s2 in t2s:
+                if isinstance(s1, str):
+                    s1 = spin_operator(s1, S=self.S, sparse=True)
+                if isinstance(s2, str):
+                    s2 = spin_operator(s2, S=self.S, sparse=True)
+                terms.append(
+                    ikron([factor * s1, s2], dims, [i, i + 1], **ikron_opts)
+                )
+
+        return sum(terms)
 
     def _get_spin_op(self, factor, *ss):
         if len(ss) == 1:
