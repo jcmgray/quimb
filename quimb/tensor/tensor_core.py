@@ -936,6 +936,8 @@ class Tensor(object):
         T.modify(data=self.data.astype(dtype))
         return T
 
+    astype_ = functools.partialmethod(astype, inplace=True)
+
     def ind_size(self, ind):
         """Return the size of dimension corresponding to ``ind``.
         """
@@ -3138,7 +3140,7 @@ class TensorNetwork(object):
         for each of inds in ``inds_seqs``. E.g. to convert several sites
         into a density matrix: ``TN.to_dense(('k0', 'k1'), ('b0', 'b1'))``.
         """
-        return self.contract(..., **contract_opts).to_dense(*inds_seq)
+        return self.contract(**contract_opts).to_dense(*inds_seq)
 
     # --------------- information about indices and dimensions -------------- #
 
@@ -3301,6 +3303,8 @@ class TensorNetwork(object):
         for t in TN:
             t.astype(dtype, inplace=True)
         return TN
+
+    astype_ = functools.partialmethod(astype, inplace=True)
 
     # ------------------------------ printing ------------------------------- #
 

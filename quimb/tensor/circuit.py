@@ -342,9 +342,13 @@ class Circuit:
     def psi(self):
         """Tensor network representation of the wavefunction.
         """
-        return self._psi.squeeze()
+        # make sure all same dtype and drop singlet dimensions
+        psi = self._psi.squeeze()
+        psi.astype_(psi.dtype)
+        return psi
 
-    def to_dense(self, reverse=False, **contract_opts):
+    def to_dense(self, reverse=False, dtype=None,
+                 rank_simplify=False, **contract_opts):
         """Generate the dense representation of the final wavefunction.
 
         Parameters
@@ -354,19 +358,31 @@ class Circuit:
             convention of qiskit for example.
         contract_opts
             Suppled to :func:`~quimb.tensor.tensor_core.tensor_contract`.
+        dtype : dtype or str, optional
+            If given, convert the tensors to this dtype prior to contraction.
+        rank_simplify : bool, optional
+            If the network is complex, performing rank simplification first can
+            aid the contraction path finding.
 
         Returns
         -------
-        qarray
+        psi : qarray
+            The densely represented wavefunction with ``dtype`` data.
         """
         psi = self.psi
+
+        if dtype is not None:
+            psi.astype_(dtype)
+
+        if rank_simplify:
+            psi.rank_simplify_()
 
         inds = [psi.site_ind(i) for i in range(self.N)]
 
         if reverse:
             inds = inds[::-1]
 
-        p_dense = psi.to_dense(inds, **contract_opts)
+        p_dense = psi.to_dense(inds, tags=all, **contract_opts)
         return p_dense
 
     def simulate_counts(self, C, seed=None, reverse=False, **contract_opts):
