@@ -50,10 +50,11 @@ def align_TN_1D(*tns, ind_ids=None, inplace=False):
     if not inplace:
         tns = [tn.copy() for tn in tns]
 
+    n = len(tns)
+
     if ind_ids is None:
-        ind_ids = ([tns[0].site_ind_id] +
-                   ["__ind_{}".format(oe.get_symbol(i)) + "{}__"
-                    for i in range(len(tns) - 2)])
+        ind_ids = ["__ind_{}".format(oe.get_symbol(i)) + "{}__"
+                   for i in range(n - 1)]
     else:
         ind_ids = tuple(ind_ids)
 
@@ -61,15 +62,17 @@ def align_TN_1D(*tns, ind_ids=None, inplace=False):
         if isinstance(tn, TensorNetwork1DVector):
             if i == 0:
                 tn.site_ind_id = ind_ids[i]
-            elif i == len(tns) - 1:
+            elif i == n - 1:
                 tn.site_ind_id = ind_ids[i - 1]
             else:
                 raise ValueError("An 1D TN vector can only be aligned as the "
                                  "first or last TN in a sequence.")
 
         elif isinstance(tn, MatrixProductOperator):
-            tn.upper_ind_id = ind_ids[i - 1]
-            tn.lower_ind_id = ind_ids[i]
+            if i != 0:
+                tn.upper_ind_id = ind_ids[i - 1]
+            if i != n - 1:
+                tn.lower_ind_id = ind_ids[i]
 
         else:
             raise ValueError("Can only align MPS and MPOs currently.")
