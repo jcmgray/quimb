@@ -168,9 +168,11 @@ class TNOptimizer:
         Extra constant arguments to supply to ``loss_fn`` and be converted to
         tensorflow constant tensors. Can be individual arrays or tensor
         networks.
-    loss_kwargs :  dict_like, optional
+    loss_kwargs : dict_like, optional
         Other kwargs to supply to ``loss_fn`` that are not arrays or tensor
         networks.
+    constant_tags : sequence of str, optional
+        Treat any tensors *within* ``tn`` with these tags as constant.
     optimizer : str, optional
         Which optimizer to use, default: ``'AdamOptimizer'``.
         This should be an optimizer that can be found in the
@@ -181,6 +183,10 @@ class TNOptimizer:
     learning_rate : float, optional
         The learning rate to apply to use the optimizer with. You can
         dynamically change this between ``optimize`` calls.
+    learning_decay_steps : int, optional
+        How many steps to decay the learning rate over.
+    learning_decay_rate : float, optional
+        How much to decay the learning rate over ``learning_decay_steps``.
     loss_target : float, optional
         If supplied, stop optimizing once this loss is reached.
     progbar : bool, optional
