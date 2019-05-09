@@ -630,6 +630,30 @@ def bonds_size(t1, t2):
     return prod(t1.ind_size(ix) for ix in bonds(t1, t2))
 
 
+def connect(t1, t2, ax1, ax2):
+    """Connect two tensors by setting a shared index for the specified
+    dimensions. This is an inplace operation that will also affect any tensor
+    networks viewing these tensors.
+
+    Parameters
+    ----------
+    t1 : Tensor
+        The first tensor.
+    t2 :
+        The second tensor.
+    ax1 : int
+        The dimension (axis) to connect on the first tensor.
+    ax2 : int
+        The dimension (axis) to connect on the second tensor.
+    """
+    new_ind = rand_uuid()
+
+    ind1 = t1.inds[ax1]
+    ind2 = t2.inds[ax2]
+    t1.reindex_({ind1: new_ind})
+    t2.reindex_({ind2: new_ind})
+
+
 def get_tags(ts):
     """Return all the tags in found in ``ts``.
 

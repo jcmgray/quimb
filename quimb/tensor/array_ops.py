@@ -50,7 +50,7 @@ def _unitize_exp(x):
     """
     m, n = x.shape
     d = max(m, n)
-    x = do('pad', x, [[0, d - m], [0, d - n]], 'constant')
+    x = do('pad', x, [[0, d - m], [0, d - n]], 'constant', constant_values=0.0)
     expx = do('linalg.expm', x - dag(x))
     return expx[:m, :n]
 

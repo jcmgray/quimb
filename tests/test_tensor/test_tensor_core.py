@@ -285,6 +285,19 @@ class TestBasicTensorOperations:
         assert t.H @ t == pytest.approx(3.0)
         assert t.inds == ('b', 'a', 'c')
 
+    def test_connect(self):
+        x = rand_tensor((2, 3), 'ab')
+        y = rand_tensor((3, 2), 'cd')
+        tn = x | y
+        assert len(tn.outer_inds()) == 4
+        qtn.connect(x, y, 0, 1)
+        assert len(tn.outer_inds()) == 2
+        qtn.connect(x, y, 1, 0)
+        assert len(tn.outer_inds()) == 0
+        assert (tn ^ all).shape == ()
+        # make sure bond is newly labelled
+        assert set('abcd') & set(tn.all_inds()) == set()
+
 
 class TestTensorFunctions:
     @pytest.mark.parametrize('method', ['svd', 'eig', 'isvd', 'svds'])

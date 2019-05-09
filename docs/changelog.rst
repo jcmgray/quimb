@@ -23,6 +23,7 @@ v1.2.0 (unreleased)
 - TN: Add :class:`~quimb.tensor.optimize_tensorflow.TNOptimizer` for tensorflow based optimization
   of arbitrary, contstrained tensor networks.
 - TN: Add :meth:`quimb.tensor.tensor_1d.Dense1D.rand`
+- TN: Add :func:`~quimb.tensor.tensor_core.connect` to conveniently set a shared index for tensors
 - TN: make many more tensor operations agnostic of the array backend (e.g. numpy, cupy,
   tensorflow, ...)
 - Many updates to tensor network quantum circuit
