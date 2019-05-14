@@ -288,6 +288,10 @@ class TestBasicTensorOperations:
     def test_connect(self):
         x = rand_tensor((2, 3), 'ab')
         y = rand_tensor((3, 2), 'cd')
+
+        with pytest.raises(ValueError):
+            qtn.connect(x, y, 0, 0)
+
         tn = x | y
         assert len(tn.outer_inds()) == 4
         qtn.connect(x, y, 0, 1)

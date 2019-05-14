@@ -645,7 +645,35 @@ def connect(t1, t2, ax1, ax2):
         The dimension (axis) to connect on the first tensor.
     ax2 : int
         The dimension (axis) to connect on the second tensor.
+
+    Examples
+    --------
+
+        >>> X = rand_tensor([2, 3], inds=['a', 'b'])
+        >>> Y = rand_tensor([3, 4], inds=['c', 'd'])
+
+        >>> tn = (X | Y)  # is *view* of tensors (``&`` would copy them)
+        >>> print(tn)
+        TensorNetwork([
+            Tensor(shape=(2, 3), inds=('a', 'b'), tags=set()),
+            Tensor(shape=(3, 4), inds=('c', 'd'), tags=set()),
+        ])
+
+        >>> connect(X, Y, 1, 0)  # modifies tensors *and* viewing TN
+        >>> print(tn)
+        TensorNetwork([
+            Tensor(shape=(2, 3), inds=('a', '_e9021e0000002'), tags=set()),
+            Tensor(shape=(3, 4), inds=('_e9021e0000002', 'd'), tags=set()),
+        ])
+
+        >>>  tn ^ all
+        Tensor(shape=(2, 4), inds=('a', 'd'), tags=set())
+
     """
+    d1, d2 = t1.shape[ax1], t2.shape[ax2]
+    if d1 != d2:
+        raise ValueError("Index sizes don't match: {} != {}.".format(d1, d2))
+
     new_ind = rand_uuid()
 
     ind1 = t1.inds[ax1]
@@ -3334,7 +3362,8 @@ class TensorNetwork(object):
 
     def graph(self, color=None, show_inds=None, show_tags=None, node_size=None,
               iterations=200, k=None, fix=None, figsize=(6, 6), legend=True,
-              return_fig=False, highlight_inds=(), **plot_opts):
+              return_fig=False, highlight_inds=(), initial_layout='spectral',
+              edge_alpha=1 / 3, **plot_opts):
         """Plot this tensor network as a networkx graph using matplotlib,
         with edge width corresponding to bond dimension.
 
@@ -3364,6 +3393,13 @@ class TensorNetwork(object):
             Whether to draw a legend for the colored tags.
         node_size : None
             How big to draw the tensors.
+        initial_layout : {'spectral', 'kamada_kawai', 'circular', 'planar',
+                          'random', 'shell', 'bipartite', ...}, optional
+            The name of a networkx layout to use before iterating with the
+            spring layout. Set ``iterations=0`` if you just want to use this
+            layout only.
+        edge_alpha : float, optional
+            Set the alpha (opacity) of the drawn edges.
         plot_opts
             Supplied to ``networkx.draw``.
         """
@@ -3419,7 +3455,7 @@ class TensorNetwork(object):
             for ix in t1.inds:
                 found_ind = False
                 edge_color = ((1.0, 0.2, 0.2) if ix in highlight_inds else
-                              (0.6, 0.6, 0.6))
+                              (0.0, 0.0, 0.0))
 
                 # check to see if index is linked to another tensor
                 for j in range(0, n):
@@ -3455,7 +3491,10 @@ class TensorNetwork(object):
             colors = {color: plt.get_cmap('tab10').colors[0]}
         else:
             # choose longest nice seq of colors
-            if len(color) > 10:
+            if len(color) > 20:
+                rgbs = (plt.get_cmap('tab20c').colors +
+                        plt.get_cmap('tab20b').colors)
+            elif len(color) > 10:
                 rgbs = plt.get_cmap('tab20').colors
             else:
                 rgbs = plt.get_cmap('tab10').colors
@@ -3510,7 +3549,7 @@ class TensorNetwork(object):
         ax.set_aspect('equal')
 
         # use spectral layout as starting point
-        pos0 = nx.spectral_layout(G)
+        pos0 = getattr(nx, initial_layout + '_layout')(G)
         # scale points to fit with specified positions
         if fix:
             # but update with fixed positions
@@ -3530,7 +3569,7 @@ class TensorNetwork(object):
                                edgecolors=node_outline_colors)
         nx.draw_networkx_labels(G, pos, labels, font_size=10, ax=ax)
         nx.draw_networkx_edges(G, pos, edge_color=edge_colors,
-                               width=edge_weights, ax=ax)
+                               alpha=edge_alpha, width=edge_weights, ax=ax)
 
         # create legend
         if colors and legend:
