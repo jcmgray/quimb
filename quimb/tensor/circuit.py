@@ -108,9 +108,9 @@ def apply_swap(psi, i, j, **gate_opts):
 
 
 APPLY_GATES = {
-    'RZ': apply_Rx,
+    'RX': apply_Rx,
     'RY': apply_Ry,
-    'RX': apply_Rz,
+    'RZ': apply_Rz,
     'U3': apply_U3,
     'H': build_gate_1(qu.hadamard(), tags='H'),
     'X': build_gate_1(qu.pauli('X'), tags='X'),
@@ -120,6 +120,7 @@ APPLY_GATES = {
     'T': build_gate_1(qu.T_gate(), tags='T'),
     'X_1_2': build_gate_1(qu.Rx(math.pi / 2), tags='X_1/2'),
     'Y_1_2': build_gate_1(qu.Ry(math.pi / 2), tags='Y_1/2'),
+    'Z_1_2': build_gate_1(qu.Rz(math.pi / 2), tags='Z_1/2'),
     'IDEN': lambda *args, **kwargs: None,
     'CX': build_gate_2(qu.cX(), tags='CX'),
     'CY': build_gate_2(qu.cY(), tags='CY'),
