@@ -53,8 +53,14 @@ def align_TN_1D(*tns, ind_ids=None, inplace=False):
     n = len(tns)
 
     if ind_ids is None:
-        ind_ids = ["__ind_{}".format(oe.get_symbol(i)) + "{}__"
-                   for i in range(n - 1)]
+        if isinstance(tns[0], TensorNetwork1DVector):
+            ind_ids = [tns[0].site_ind_id]
+        else:
+            ind_ids = [tns[0].lower_ind_id]
+        ind_ids.extend(
+            "__ind_{}".format(oe.get_symbol(i)) + "{}__"
+            for i in range(n - 2)
+        )
     else:
         ind_ids = tuple(ind_ids)
 
