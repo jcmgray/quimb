@@ -741,10 +741,10 @@ class Tensor(object):
         Tags with which to identify and group this tensor. These will
         be converted into a ``set``.
     left_inds : sequence of str, optional
-        Which, if any, indices to consider as 'left' indices.
-        This can be useful, for example, when automatically applying unitary
-        constraints to impose a certain flow on a tensor network but at the
-        atomistic (Tensor) level.
+        Which, if any, indices to group as 'left' indices of an effective
+        matrix. This can be useful, for example, when automatically applying
+        unitary constraints to impose a certain flow on a tensor network but at
+        the atomistic (Tensor) level.
 
     Examples
     --------

@@ -14,7 +14,7 @@ from .tensor_tebd import NNI
 
 
 @random_seed_fn
-def rand_tensor(shape, inds, tags=None, dtype=float):
+def rand_tensor(shape, inds, tags=None, dtype=float, left_inds=None):
     """Generate a random tensor with specified shape and inds.
 
     Parameters
@@ -27,13 +27,18 @@ def rand_tensor(shape, inds, tags=None, dtype=float):
         Labels to tag this tensor with.
     dtype : {'float64', 'complex128', 'float32', 'complex64'}, optional
         The underlying data type.
+    left_inds : sequence of str, optional
+        Which, if any, indices to group as 'left' indices of an effective
+        matrix. This can be useful, for example, when automatically applying
+        unitary constraints to impose a certain flow on a tensor network but at
+        the atomistic (Tensor) level.
 
     Returns
     -------
     Tensor
     """
     data = randn(shape, dtype=dtype)
-    return Tensor(data=data, inds=inds, tags=tags)
+    return Tensor(data=data, inds=inds, tags=tags, left_inds=left_inds)
 
 
 @random_seed_fn
