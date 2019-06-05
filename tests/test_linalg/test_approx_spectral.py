@@ -257,9 +257,9 @@ class TestLanczosApprox:
 
     @pytest.mark.parametrize("bsz", [1, 2, 5])
     @pytest.mark.parametrize("fn_approx_rtol",
-                             [(np_sqrt, tr_sqrt_approx, 3e-1),
-                              (np.exp, tr_exp_approx, 3e-2),
-                              (np_xlogx, tr_xlogx_approx, 2e-1)])
+                             [(np_sqrt, tr_sqrt_approx, 0.3),
+                              (np.exp, tr_exp_approx, 0.03),
+                              (np_xlogx, tr_xlogx_approx, 0.3)])
     def test_approx_spectral_function_ptr_lin_op(self, fn_approx_rtol,
                                                  psi_abc, psi_ab, bsz):
         fn, approx, rtol = fn_approx_rtol
