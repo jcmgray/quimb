@@ -133,7 +133,7 @@ def kraus_op(rho, Ek, dims=None, where=None, check=False):
         Ek = np.stack(Ek, axis=0)
 
     if check:
-        SEk = np.einsum('kij,kil', Ek, Ek.conj())
+        SEk = np.einsum('kij,kil', Ek.conj(), Ek)
         if norm(SEk - eye(Ek.shape[-1]), 'fro') > 1e-12:
             raise ValueError("Did not find ``sum(E_k.H @ Ek) == 1``.")
 
