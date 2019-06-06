@@ -6,7 +6,7 @@ Release notes for ``quimb``.
 
 .. _whats-new.1.2.0:
 
-v1.2.0 (unreleased)
+v1.2.0 (6th June 2019)
 --------------------
 
 **Enhancements**

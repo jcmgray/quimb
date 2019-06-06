@@ -500,6 +500,8 @@ class TNOptimizer:
                         break
                 if self._time_should_stop(max_time):
                     break
+        except Exception as e:
+            print(e)
         finally:
             pbar.close()
             return self._get_tn_opt_numpy_graph(sess)

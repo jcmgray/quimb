@@ -106,6 +106,8 @@ def kraus_op(rho, Ek, dims=None, where=None, check=False):
     --------
     The depolarising channel:
 
+    .. code-block:: python3
+
         In [1]: import quimb as qu
 
         In [2]: rho = qu.rand_rho(2)

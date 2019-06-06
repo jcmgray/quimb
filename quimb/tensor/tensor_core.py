@@ -1280,17 +1280,7 @@ class Tensor(object):
 
     def unitize(self, left_inds=None, inplace=False, method='qr'):
         r"""Make this tensor unitary (or isometric) with respect to
-        ``left_inds``. The underlying method is to perform the matrix
-        exponential on the anti-hermitian part of this tensor's array, suitably
-        permuted and reshaped::
-
-        .. math::
-
-            U_A = \exp{A - A^\dagger}
-
-        If the tensor is not square, it will first be padded with zeros
-        and ``U_A`` will be appropriately sliced afterwards.
-
+        ``left_inds``. The underlying method is set by ``method``.
 
         Parameters
         ----------
@@ -1299,6 +1289,16 @@ class Tensor(object):
             matrix.
         inplace : bool, optional
             Whether to perform the unitization inplace.
+        method : {'qr', 'exp', 'mgs'}, optional
+            How to generate the unitary matrix. The options are:
+
+            - 'qr': use a QR decomposition directly.
+            - 'exp': exponential the padded, anti-hermitian part of the array
+            - 'mgs': use a explicit modified-gram-schmidt procedure
+
+            Generally, 'qr' is the fastest and best approach, however currently
+            ``tensorflow`` cannot back-propagate through for instance, making
+            the other two methods necessary.
 
         Returns
         -------
