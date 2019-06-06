@@ -338,6 +338,12 @@ class TensorNetwork1D:
         """
         return tuple(self.site_tag(i) for i in self.sites)
 
+    @functools.wraps(align_TN_1D)
+    def align(self, *args, inplace=False, **kwargs):
+        return align_TN_1D(self, *args, inplace=inplace, **kwargs)
+
+    align_ = functools.partialmethod(align, inplace=True)
+
 
 class TensorNetwork1DVector:
     """1D Tensor network which overall is like a vector with a single type of
@@ -412,12 +418,6 @@ class TensorNetwork1DVector:
         return gate_TN_1D(self, *args, inplace=inplace, **kwargs)
 
     gate_ = functools.partialmethod(gate, inplace=True)
-
-    @functools.wraps(align_TN_1D)
-    def align(self, *args, inplace=False, **kwargs):
-        return align_TN_1D(self, *args, inplace=inplace, **kwargs)
-
-    align_ = functools.partialmethod(align, inplace=True)
 
     @functools.wraps(expec_TN_1D)
     def expec(self, *args, **kwargs):

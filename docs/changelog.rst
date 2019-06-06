@@ -26,6 +26,9 @@ v1.2.0 (unreleased)
 - TN: Add :func:`~quimb.tensor.tensor_core.connect` to conveniently set a shared index for tensors
 - TN: make many more tensor operations agnostic of the array backend (e.g. numpy, cupy,
   tensorflow, ...)
+- TN: allow :func:`~quimb.tensor.tensor_1d.align_TN_1D` to take an MPO as the first argument
+- TN: add :meth:`~quimb.tensor.tensor_gen.SpinHam.build_sparse`
+- TN: add :meth:`quimb.tensor.tensor_core.Tensor.unitize` and :meth:`quimb.tensor.tensor_core.TensorNetwork.unitize` to impose unitary/isometric constraints on tensors specfied using the ``left_inds`` kwarg
 - Many updates to tensor network quantum circuit
   (:class:`quimb.tensor.circuit.Circuit`) simulation including:
 
@@ -41,5 +44,6 @@ v1.2.0 (unreleased)
 - Fix ``pkron`` for case ``len(dims) == len(inds)`` (:issue:`17`, :pull:`18`).
 - Fix ``qarray`` printing for older ``numpy`` versions
 - Fix TN quantum circuit bug where Z and X rotations were swapped
-- Fix variable bond MPO building (:issue:22) and L=2 DMRG
+- Fix variable bond MPO building (:issue:`22`) and L=2 DMRG
 - Fix ``norm(X, 'trace')`` for non-hermitian matrices
+- Add ``autoray`` as dependency (:issue:`21`)
