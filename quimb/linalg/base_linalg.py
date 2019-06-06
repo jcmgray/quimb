@@ -423,11 +423,14 @@ def norm_fro_sparse(A):
     return vdot(A.data, A.data).real**0.5
 
 
-def norm_trace_dense(A, isherm=True):
+def norm_trace_dense(A, isherm=False):
     """Returns the trace norm of operator ``A``, that is,
     the sum of the absolute eigenvalues.
     """
-    return abs(eigensystem(A, return_vecs=False, isherm=isherm)).sum()
+    if isherm:
+        return abs(eigvalsh(A)).sum()
+    else:
+        return svd(A, return_vecs=False).sum()
 
 
 def norm(A, ntype=2, **kwargs):

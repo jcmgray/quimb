@@ -18,7 +18,7 @@ from .core import (
     qu, kron, eye, ikron, tr, ptr, infer_size, expec, dop, ensure_qarray,
 )
 from .linalg.base_linalg import (
-    eigh, eigvalsh, norm, sqrtm,
+    eigh, eigvalsh, norm, sqrtm, norm_trace_dense
 )
 from .linalg.approx_spectral import (
     entropy_subsys_approx, tr_sqrt_subsys_approx,
@@ -691,7 +691,7 @@ def partial_transpose_norm(p, dims, sysa):
         rhoa = ptr(p, dims, sysa)
         return tr_sqrt(rhoa)**2
 
-    return norm(partial_transpose(p, dims, sysa), "tr")
+    return norm_trace_dense(partial_transpose(p, dims, sysa), isherm=True)
 
 
 @zeroify

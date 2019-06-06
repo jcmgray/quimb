@@ -40,3 +40,6 @@ v1.2.0 (unreleased)
 
 - Fix ``pkron`` for case ``len(dims) == len(inds)`` (:issue:`17`, :pull:`18`).
 - Fix ``qarray`` printing for older ``numpy`` versions
+- Fix TN quantum circuit bug where Z and X rotations were swapped
+- Fix variable bond MPO building (:issue:22) and L=2 DMRG
+- Fix ``norm(X, 'trace')`` for non-hermitian matrices

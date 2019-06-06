@@ -22,6 +22,7 @@ from .tensor_core import (
     _asarray,
     _ndim,
 )
+from ..linalg.base_linalg import norm_trace_dense
 
 
 def align_TN_1D(*tns, ind_ids=None, inplace=False):
@@ -2197,7 +2198,7 @@ class MatrixProductState(TensorNetwork1DVector,
         rho_ab_pt_lo = rho_ab.aslinearoperator(['kA', 'bB'], ['bA', 'kB'])
 
         if rho_ab_pt_lo.shape[0] <= approx_thresh:
-            tr_norm = qu.norm(rho_ab_pt_lo.to_dense(), 'tr')
+            tr_norm = norm_trace_dense(rho_ab_pt_lo.to_dense(), isherm=True)
         else:
             # estimate its spectrum and sum the abs(eigenvalues)
             tr_norm = qu.approx_spectral_function(
