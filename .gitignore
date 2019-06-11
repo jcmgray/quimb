@@ -117,3 +117,7 @@ docs/_autosummary/
 *.ipynb_checkpoints/
 
 \.vscode/
+
+# Default pycharm setup
+.idea
+venv
