@@ -998,16 +998,16 @@ class DMRG:
         tol : float, optional
             The absolute tolerance to converge energy to.
         bond_dims : int or sequence of int
-            Overide the initial/current bond_dim sequence.
+            Override the initial/current bond_dim sequence.
         cutoffs : float of sequence of float
-            Overide the initial/current cutoff sequence.
+            Override the initial/current cutoff sequence.
         sweep_sequence : str, optional
             String made of 'L' and 'R' defining the sweep sequence, e.g 'RRL'.
             The sequence will be repeated until ``max_sweeps`` is reached.
         max_sweeps : int, optional
             The maximum number of sweeps to perform.
         bounds : tuple, optional
-            A 2-tuple with cites (from and to, both included) to perform the sweep
+            A 2-tuple with sites (from and to, both included) to perform the sweep
             between.
         verbosity : {0, 1, 2}, optional
             How much information to print about progress.
@@ -1019,7 +1019,7 @@ class DMRG:
         """
         verbosity = int(verbosity)
 
-        # Possibly overide the default bond dimension, cutoff, LR sequences.
+        # Possibly override the default bond dimension, cutoff, LR sequences.
         if bond_dims is not None:
             self._set_bond_dim_seq(bond_dims)
         if cutoffs is not None:
