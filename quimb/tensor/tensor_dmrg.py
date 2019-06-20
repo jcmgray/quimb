@@ -889,10 +889,16 @@ class DMRG:
             bounds = bounds_ext
 
         if (direction == "right" and bounds[0] >= bounds[1]) or (direction == "left" and bounds[0] <= bounds[1]):
-            raise ValueError(f"Invalid bounds for direction={direction} (wrong order): {bounds}")
+            raise ValueError("Invalid bounds for direction={direction} (wrong order): {bounds}".format(
+                direction=direction,
+                bounds=bounds,
+            ))
 
         if any(map(lambda x: (x - bounds_ext[0]) * (x - bounds_ext[1]) > 0, bounds)):
-            raise ValueError(f"Bounds are out of range {bounds_ext}: {bounds}")
+            raise ValueError("Bounds are out of range {bounds_ext}: {bounds}".format(
+                bounds_ext=bounds_ext,
+                bounds=bounds,
+            ))
 
         if canonize:
             self._k.left_canonize(bra=self._b, stop=bounds[0] if self.cyclic else bounds[0] + bsz - 1)
