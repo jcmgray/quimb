@@ -431,6 +431,7 @@ def get_cyclic_canonizer(k, b, inv_tol=1e-10):
     """Get a function to use as a callback for ``MovingEnvironment`` that
     approximately orthogonalizes the segments of periodic MPS.
     """
+
     def cyclic_canonizer(start, stop, begin):
         k.canonize_cyclic(slice(start, stop), bra=b, inv_tol=inv_tol)
         if begin == 'left':
@@ -691,11 +692,11 @@ class DMRG:
             elif neff_dense:
                 Neff = (self._eff_norm ^ '_EYE')['_EYE'].to_dense(lix, uix)
                 np.fill_diagonal(Neff, Neff.diagonal() + fudge)
-                np.fill_diagonal(Heff, Heff.diagonal() + fudge**0.5)
+                np.fill_diagonal(Heff, Heff.diagonal() + fudge ** 0.5)
             else:
                 Neff = TNLinearOperator(self._eff_norm['_EYE'], **dims_inds)
                 Neff += IdentityLinearOperator(Neff.shape[0], fudge)
-                Heff += IdentityLinearOperator(Heff.shape[0], fudge**0.5)
+                Heff += IdentityLinearOperator(Heff.shape[0], fudge ** 0.5)
 
         else:
             Neff = None
@@ -714,7 +715,7 @@ class DMRG:
                 loc_en *= site_norm
                 return loc_en, loc_gs
 
-            loc_en -= self.opts['periodic_nullspace_fudge_factor']**0.5
+            loc_en -= self.opts['periodic_nullspace_fudge_factor'] ** 0.5
 
             # this is helpful for identifying badly behaved numerics
             Neffnorm = (loc_gs.H @ (Neff @ loc_gs)).item()
@@ -890,7 +891,7 @@ class DMRG:
         if (direction == "right" and bounds[0] >= bounds[1]) or (direction == "left" and bounds[0] <= bounds[1]):
             raise ValueError(f"Invalid bounds for direction={direction} (wrong order): {bounds}")
 
-        if any(map(lambda x: (x-bounds_ext[0]) * (x-bounds_ext[1]) > 0, bounds)):
+        if any(map(lambda x: (x - bounds_ext[0]) * (x - bounds_ext[1]) > 0, bounds)):
             raise ValueError(f"Bounds are out of range {bounds_ext}: {bounds}")
 
         if canonize:
@@ -970,7 +971,7 @@ class DMRG:
             self._k.show()
         if verbosity > 0:
             msg = "Energy: {} ... {}".format(self.energy, "converged!" if
-                                             converged else "not converged.")
+            converged else "not converged.")
             print(msg, flush=True)
 
     def _check_convergence(self, tol):
@@ -1082,7 +1083,6 @@ class DMRG1(DMRG):
     __doc__ += DMRG.__doc__
 
     def __init__(self, ham, which='SA', bond_dims=None, cutoffs=1e-8, p0=None):
-
         if bond_dims is None:
             bond_dims = range(10, 1001, 10)
 
@@ -1096,7 +1096,6 @@ class DMRG2(DMRG):
     __doc__ += DMRG.__doc__
 
     def __init__(self, ham, which='SA', bond_dims=None, cutoffs=1e-8, p0=None):
-
         if bond_dims is None:
             bond_dims = [8, 16, 32, 64, 128, 256, 512, 1024]
 
@@ -1149,11 +1148,11 @@ class DMRGX(DMRG):
         var_ham2.lower_ind_id = self._b.site_ind_id
         self.TN_energy2 = self._k | var_ham1 | var_ham2 | self._b
         self.energies.append(self.TN_energy ^ ...)
-        self.variances = [(self.TN_energy2 ^ ...) - self.energies[-1]**2]
+        self.variances = [(self.TN_energy2 ^ ...) - self.energies[-1] ** 2]
         self._target_energy = self.energies[-1]
 
         self.opts = {
-            'local_eig_partial_cutoff': 2**11,
+            'local_eig_partial_cutoff': 2 ** 11,
             'local_eig_partial_k': 0.02,
             'local_eig_tol': 1e-1,
             'overlap_thresh': 2 / 3,
@@ -1261,7 +1260,7 @@ class DMRGX(DMRG):
                                       output_inds=['__ev_ind__']).data
 
                 # then find minimum variance
-                best = np.argmin(en2 - evals**2)
+                best = np.argmin(en2 - evals ** 2)
 
         # update site i with the data and drop dummy index too
         ki.modify(data=evecs[..., best], inds=uix)
@@ -1362,7 +1361,7 @@ class DMRGX(DMRG):
         return tot_ens[-1]
 
     def _compute_post_sweep(self):
-        en_var = (self.TN_energy2 ^ ...) - self.energies[-1]**2
+        en_var = (self.TN_energy2 ^ ...) - self.energies[-1] ** 2
         self.variances.append(en_var)
 
     def _print_post_sweep(self, converged, verbosity=0):
@@ -1371,7 +1370,7 @@ class DMRGX(DMRG):
         if verbosity > 0:
             msg = "Energy={}, Variance={} ... {}"
             msg = msg.format(self.energy, self.variance, "converged!"
-                             if converged else "not converged.")
+            if converged else "not converged.")
             print(msg, flush=True)
 
     def _check_convergence(self, tol):
