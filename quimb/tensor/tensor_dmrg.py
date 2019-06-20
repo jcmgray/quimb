@@ -837,7 +837,7 @@ class DMRG:
             2: self._update_local_state_2site,
         }[self.bsz](i, **update_opts)
 
-    def sweep(self, direction, canonize=True, verbosity=0, **update_opts):
+    def sweep(self, direction, canonize=True, bounds=None, verbosity=0, **update_opts):
         r"""Perform a sweep of optimizations, either rightwards::
 
               optimize -->
@@ -866,23 +866,38 @@ class DMRG:
             Sweep from left to right (->) or right to left (<-) respectively.
         canonize : bool, optional
             Canonize the state first, not needed if doing alternate sweeps.
+        bounds : tuple, optional
+            A 2-tuple with cites (from and to, not included) to perform the sweep
+            between.
         verbosity : {0, 1, 2}, optional
             Show a progress bar for the sweep.
         update_opts :
             Supplied to ``self._update_local_state``.
         """
-        if canonize:
-            {'R': self._k.right_canonize,
-             'L': self._k.left_canonize}[direction](bra=self._b)
 
         n, bsz = self.n, self.bsz
 
-        direction, begin, sweep = {
-            ('R', False): ('right', 'left', range(0, n - bsz + 1)),
-            ('L', False): ('left', 'right', range(n - bsz, -1, -1)),
-            ('R', True): ('right', 'left', range(0, n)),
-            ('L', True): ('left', 'right', range(n - 1, -1, -1)),
+        direction, begin, bounds_ext = {
+            ('R', False): ('right', 'left', (0, n - bsz + 1)),
+            ('L', False): ('left', 'right', (n - bsz, -1)),
+            ('R', True): ('right', 'left', (0, n)),
+            ('L', True): ('left', 'right', (n - 1, -1)),
         }[direction, self.cyclic]
+
+        if bounds is None:
+            bounds = bounds_ext
+
+        if (direction == "right" and bounds[0] >= bounds[1]) or (direction == "left" and bounds[0] <= bounds[1]):
+            raise ValueError(f"Invalid bounds for direction={direction} (wrong order): {bounds}")
+
+        if any(map(lambda x: (x-bounds_ext[0]) * (x-bounds_ext[1]) > 0, bounds)):
+            raise ValueError(f"Bounds are out of range {bounds_ext}: {bounds}")
+
+        if canonize:
+            self._k.left_canonize(bra=self._b, stop=bounds[0] if self.cyclic else bounds[0] + bsz - 1)
+            self._k.right_canonize(bra=self._b, stop=bounds[0])
+
+        sweep = range(*bounds, 1 if direction == 'right' else -1)
 
         if verbosity:
             sweep = progbar(sweep, ncols=80, total=len(sweep))
@@ -925,12 +940,12 @@ class DMRG:
 
         return tot_ens[-1]
 
-    def sweep_right(self, canonize=True, verbosity=0, **update_opts):
-        return self.sweep(direction='R', canonize=canonize,
+    def sweep_right(self, canonize=True, bounds=None, verbosity=0, **update_opts):
+        return self.sweep(direction='R', canonize=canonize, bounds=bounds,
                           verbosity=verbosity, **update_opts)
 
-    def sweep_left(self, canonize=True, verbosity=0, **update_opts):
-        return self.sweep(direction='L', canonize=canonize,
+    def sweep_left(self, canonize=True, bounds=None, verbosity=0, **update_opts):
+        return self.sweep(direction='L', canonize=canonize, bounds=bounds,
                           verbosity=verbosity, **update_opts)
 
     # ----------------- overloadable 'plugin' style methods ----------------- #
@@ -973,6 +988,7 @@ class DMRG:
               cutoffs=None,
               sweep_sequence=None,
               max_sweeps=10,
+              bounds=None,
               verbosity=0):
         """Solve the system with a sequence of sweeps, up to a certain
         absolute tolerance in the energy or maximum number of sweeps.
@@ -990,6 +1006,9 @@ class DMRG:
             The sequence will be repeated until ``max_sweeps`` is reached.
         max_sweeps : int, optional
             The maximum number of sweeps to perform.
+        bounds : tuple, optional
+            A 2-tuple with cites (from and to, both included) to perform the sweep
+            between.
         verbosity : {0, 1, 2}, optional
             How much information to print about progress.
 
@@ -1010,6 +1029,12 @@ class DMRG:
 
         RLs = itertools.cycle(sweep_sequence)
         previous_LR = '0'
+
+        if bounds is None:
+            bounds = dict(R=None, L=None)
+        else:
+            s, e = sorted(bounds)
+            bounds = dict(R=(s, e + 1), L=(e, s - 1))
 
         for _ in range(max_sweeps):
             # Get the next direction, bond dimension and cutoff
@@ -1032,6 +1057,7 @@ class DMRG:
                 'cutoff': ctf,
                 'cutoff_mode': self.opts['bond_compress_cutoff_mode'],
                 'method': self.opts['bond_compress_method'],
+                'bounds': bounds[LR],
                 'verbosity': verbosity,
             }
 

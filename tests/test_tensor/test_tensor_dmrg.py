@@ -7,6 +7,7 @@ from quimb import (
     ham_heis,
     expec,
     plus,
+    down,
     is_eigenvector,
     eigh,
     heisenberg_energy,
@@ -334,6 +335,24 @@ class TestDMRG2:
 
         assert_allclose(H_explicit, H_mpo.to_dense())
         assert_allclose(H_explicit, H_sps.A)
+
+    def test_narrow_sweep(self):
+        N = 5
+        t = -1
+
+        H_mpo = MPO_ham_heis(N, t)
+        p0 = MPS_rand_state(5, 1)
+        p0[0].data[:] = down().T
+
+        dmrg = DMRG2(H_mpo, p0=p0)
+        # The spin direction is fixed to the left-most state during iterations
+        dmrg.solve(bounds=(1, N - 2))
+
+        bra = MPS_product_state([down()] * 5).H
+        ket = dmrg.state
+        bra.align_(ket)
+
+        assert_allclose(abs((bra & ket) ^ all), 1)
 
 
 class TestDMRGX:
