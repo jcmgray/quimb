@@ -934,7 +934,7 @@ class TensorNetwork1DFlat:
         return Tm1.singular_values(left_inds, method=method)
 
     def expand_bond_dimension(self, new_bond_dim, inplace=True, bra=None,
-                              rand_strength=0.0):
+                              rand_strength=0.0, sites=None):
         """Expand the bond dimensions of this 1D tensor network to at least
         ``new_bond_dim``.
 
@@ -950,6 +950,8 @@ class TensorNetwork1DFlat:
         rand_strength : float, optional
             If ``rand_strength > 0``, fill the new tensor entries with gaussian
             noise of strength ``rand_strength``.
+        sites : Iterable, optional
+            Sites to act on.
 
         Returns
         -------
@@ -960,7 +962,13 @@ class TensorNetwork1DFlat:
         else:
             expanded = self.copy()
 
-        for i in self.sites:
+        if sites is None:
+            sites = range(len(self.sites))
+        else:
+            sites = sorted(set(sites))
+
+        for _i in sites:
+            i = self.sites[_i]
             tensor = expanded[i]
             to_expand = []
 

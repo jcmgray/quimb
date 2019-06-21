@@ -336,17 +336,21 @@ class TestDMRG2:
         assert_allclose(H_explicit, H_mpo.to_dense())
         assert_allclose(H_explicit, H_sps.A)
 
-    def test_narrow_sweep(self):
+
+class TestDMRGCommon:
+
+    @pytest.mark.parametrize("kernel", (DMRG1, DMRG2))
+    def test_narrow_sweep(self, kernel):
         N = 5
         t = -1
 
         H_mpo = MPO_ham_heis(N, t)
-        p0 = MPS_rand_state(5, 1)
+        p0 = MPS_rand_state(N, 1)
         p0[0].data[:] = down().T
 
-        dmrg = DMRG2(H_mpo, p0=p0)
+        dmrg = kernel(H_mpo, p0=p0)
         # The spin direction is fixed to the left-most state during iterations
-        dmrg.solve(bounds=(1, N - 2))
+        dmrg.solve(bounds=(1, N))
 
         bra = MPS_product_state([down()] * 5).H
         ket = dmrg.state

@@ -868,7 +868,7 @@ class DMRG:
         canonize : bool, optional
             Canonize the state first, not needed if doing alternate sweeps.
         bounds : tuple, optional
-            A 2-tuple with cites (from and to, not included) to perform the sweep
+            A 2-tuple with sites (from and to, not included) to perform the sweep
             between.
         verbosity : {0, 1, 2}, optional
             Show a progress bar for the sweep.
@@ -1014,7 +1014,7 @@ class DMRG:
         max_sweeps : int, optional
             The maximum number of sweeps to perform.
         bounds : tuple, optional
-            A 2-tuple with sites (from and to, both included) to perform the sweep
+            A 2-tuple with sites (from and to, not included) to perform the sweep
             between.
         verbosity : {0, 1, 2}, optional
             How much information to print about progress.
@@ -1039,9 +1039,14 @@ class DMRG:
 
         if bounds is None:
             bounds = dict(R=None, L=None)
+            bounds_s = 0
+            bounds_e = self.n
         else:
-            s, e = sorted(bounds)
-            bounds = dict(R=(s, e + 1), L=(e, s - 1))
+            bounds_s, bounds_e = sorted(bounds)
+            bounds = dict(
+                R=(bounds_s, bounds_e + 1 - self.bsz),
+                L=(bounds_e - self.bsz, bounds_s-1)
+            )
 
         for _ in range(max_sweeps):
             # Get the next direction, bond dimension and cutoff
@@ -1054,7 +1059,7 @@ class DMRG:
             # need to manually expand bond dimension for DMRG1
             if self.bsz == 1:
                 self._k.expand_bond_dimension(
-                    bd, bra=self._b,
+                    bd, bra=self._b, sites=range(bounds_s, bounds_e),
                     rand_strength=self.opts['bond_expand_rand_strength'])
 
             # inject all options and defaults
