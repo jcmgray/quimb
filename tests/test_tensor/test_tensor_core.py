@@ -420,6 +420,21 @@ class TestTensorFunctions:
         assert 'hello' in b.tags
         assert a.shape == (1, 2, 3, 1, 4)
 
+    @pytest.mark.parametrize('dtype', [None, 'complex128', 'float32'])
+    def test_randomize(self, dtype):
+        a = rand_tensor((2, 3, 4), ['a', 'b', 'c'], dtype='float64')
+        if dtype is not None:
+            assert a.dtype != dtype
+        x1 = a.norm()
+        a.randomize_(dtype=dtype)
+        x2 = a.norm()
+        assert x1 != pytest.approx(x2)
+        assert a.shape == (2, 3, 4)
+        if dtype is not None:
+            assert a.dtype == dtype
+        else:
+            assert a.dtype == 'float64'
+
 
 class TestTensorNetwork:
     def test_combining_tensors(self):
@@ -914,6 +929,21 @@ class TestTensorNetwork:
 
         assert all(hash(tn) not in t.owners for t in tn2)
         assert all(hash(tn2) in t.owners for t in tn2)
+
+    @pytest.mark.parametrize('dtype', [None, 'float32', 'complex128'])
+    def test_randomize(self, dtype):
+        psi = MPS_rand_state(5, 3, dtype='float64')
+        x1 = psi.H @ psi
+        psi.randomize_(seed=42, dtype=dtype)
+        x2 = psi.H @ psi
+        assert x1 != pytest.approx(x2)
+        if dtype is None:
+            assert psi.dtype == 'float64'
+        else:
+            assert psi.dtype == dtype
+        psi.randomize_(seed=42, dtype=dtype)
+        x3 = psi.H @ psi
+        assert x2 == pytest.approx(x3)
 
 
 class TestTensorNetworkAsLinearOperator:

@@ -23,6 +23,7 @@ from autoray import do, conj, reshape, transpose
 
 from ..core import qarray, prod, realify_scalar, vdot, common_type
 from ..utils import check_opt, functions_equal
+from ..gen.rand import randn, seed_rand
 from . import decomp
 from .array_ops import iscomplex, norm_fro, unitize
 
@@ -1339,6 +1340,34 @@ class Tensor(object):
         return Tu
 
     unitize_ = functools.partialmethod(unitize, inplace=True)
+
+    def randomize(self, dtype=None, inplace=False, **randn_opts):
+        """Randomize the entries of this tensor.
+
+        Parameters
+        ----------
+        dtype : {None, 'complex128', 'float64',
+                 'complex64' 'float32'}, optional
+            The data type of the random entries. If left as the default
+            ``None``, then the data type of the current array will be used.
+        inplace : bool, optional
+            Whether to perform the randomization inplace, by default ``False``.
+        randn_opts
+            Supplied to :func:`~quimb.gen.rand.randn`.
+
+        Returns
+        -------
+        Tensor
+        """
+        t = self if inplace else self.copy()
+
+        if dtype is None:
+            dtype = t.dtype
+
+        t.modify(data=randn(t.shape, dtype=dtype, **randn_opts))
+        return t
+
+    randomize_ = functools.partialmethod(randomize, inplace=True)
 
     def almost_equals(self, other, **kwargs):
         """Check if this tensor is almost the same as another.
@@ -3268,6 +3297,39 @@ class TensorNetwork(object):
         return tn
 
     unitize_ = functools.partialmethod(unitize, inplace=True)
+
+    def randomize(self, dtype=None, seed=None, inplace=False, **randn_opts):
+        """Randomize every tensor in this TN - see
+        :meth:`quimb.tensor.tensor_core.Tensor.randomize`.
+
+        Parametrize
+        -----------
+        dtype : {None, 'complex128', 'float64',
+                 'complex64' 'float32'}, optional
+            The data type of the random entries. If left as the default
+            ``None``, then the data type of the current array will be used.
+        seed : None or int, optional
+            Seed for the random number generator.
+        inplace : bool, optional
+            Whether to perform the randomization inplace, by default ``False``.
+        randn_opts
+            Supplied to :func:`~quimb.gen.rand.randn`.
+
+        Returns
+        -------
+        TensorNetwork
+        """
+        tn = self if inplace else self.copy()
+
+        if seed is not None:
+            seed_rand(seed)
+
+        for t in tn:
+            t.randomize_(dtype=dtype, **randn_opts)
+
+        return tn
+
+    randomize_ = functools.partialmethod(randomize, inplace=True)
 
     def fuse_multibonds(self, inplace=False):
         """Fuse any multi-bonds (more than one index shared by the same pair

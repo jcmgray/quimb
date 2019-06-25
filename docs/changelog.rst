@@ -4,6 +4,16 @@ Changelog
 Release notes for ``quimb``.
 
 
+.. _whats-new.1.2.1:
+
+v1.2.1 (unreleased)
+--------------------
+
+**Enhancements**
+
+- Added :meth:`quimb.tensor.tensor_core.Tensor.randomize` and :meth:`quimb.tensor.tensor_core.TensorNetwork.randomize` to randomize tensor and tensor network entries.
+
+
 .. _whats-new.1.2.0:
 
 v1.2.0 (6th June 2019)
