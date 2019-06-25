@@ -12,6 +12,7 @@ v1.2.1 (unreleased)
 **Enhancements**
 
 - Added :meth:`quimb.tensor.tensor_core.Tensor.randomize` and :meth:`quimb.tensor.tensor_core.TensorNetwork.randomize` to randomize tensor and tensor network entries.
+- Automatically squeeze tensor networks when rank-simplifying
 
 
 .. _whats-new.1.2.0:

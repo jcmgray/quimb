@@ -3345,13 +3345,28 @@ class TensorNetwork(object):
 
         return tn
 
-    def rank_simplify(self, inplace=False):
+    def rank_simplify(self, squeeze=True, inplace=False):
         """Simplify this tensor network by performing all contractions of
         rank-1 and rank-2 tensors. These are guaranteed not to increase the
         memory of the network and thus can be a useful pre-processing step
         before performing a complex contraction.
+
+        Parameters
+        ----------
+        squeeze : bool, optional
+            Whether to first squeeze all size 1 bonds, by default True.
+        squeeze : bool, optional
+            Whether to perform rank simplification in-place.
+
+        Returns
+        -------
+        TensorNetwork
         """
         tn = self if inplace else self.copy()
+
+        if squeeze:
+            tn.squeeze_()
+
         tids = set(tn.tensor_map)
         outer_inds = set(tn.outer_inds())
 
