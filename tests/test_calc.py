@@ -137,6 +137,25 @@ class TestKrausOp:
                       for E in Ek)
         assert_allclose(sig_exp, sigma)
 
+    def test_multisubsystem(self):
+        qu.seed_rand(42)
+        dims = [2, 2, 2]
+        IIX = qu.ikron(qu.rand_herm(2), dims, 2)
+        dcmp = qu.pauli_decomp(IIX, mode='c')
+        for p, x in dcmp.items():
+            if x == 0j:
+                assert (p[0] != 'I') or (p[1] != 'I')
+            else:
+                assert p[0] == p[1] == 'I'
+        K = qu.rand_iso(3 * 4, 4).reshape(3, 4, 4)
+        KIIXK = qu.kraus_op(IIX, K, dims=dims, where=[0, 2])
+        dcmp = qu.pauli_decomp(KIIXK, mode='c')
+        for p, x in dcmp.items():
+            if x == 0j:
+                assert p[1] != 'I'
+            else:
+                assert p[1] == 'I'
+
 
 class TestProjector:
 

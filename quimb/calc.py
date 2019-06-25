@@ -92,8 +92,8 @@ def kraus_op(rho, Ek, dims=None, where=None, check=False):
         The Kraus operator(s).
     dims : sequence of int, optional
         The subdimensions of ``rho``.
-    where : int, optional
-        Which of the subdimensions to apply the operation on.
+    where : int or sequence of int, optional
+        Which of the subsystems to apply the operation on.
     check : bool, optional
         Where to check ``sum_k(Ek.H @ Ek) == 1``.
 
@@ -142,20 +142,44 @@ def kraus_op(rho, Ek, dims=None, where=None, check=False):
     if int(dims is None) + int(where is None) == 1:
         raise ValueError("If `dims` is specified so should `where`.")
 
+    if isinstance(where, numbers.Integral):
+        where = (where,)
+
     if dims:
+        # the full subdimensions of ``rho``
         dims = tuple(dims)
-        N = len(dims)
         rho = rho.reshape(dims + dims)
-        i_inds = ["i{}".format(i) if i != where else "ik" for i in range(N)]
-        j_inds = ["j{}".format(i) if i != where else "jk" for i in range(N)]
-        rho_inds = i_inds + j_inds
-        out = [{'ik': 'ik_new', 'jk': 'jk_new'}.get(x, x) for x in rho_inds]
+        N = len(dims)
+
+        # the subdimensions of where the kraus operator should act
+        kdims = tuple(dims[i] for i in where)
+        Ek = Ek.reshape((-1,) + kdims + kdims)
+
+        rho_inds, out, Ei_inds, Ej_inds = [], [], ['K'], ['K']
+        for i in range(N):
+            if i in where:
+                xi, xj = 'i{}k'.format(i), 'j{}k'.format(i)
+                for inds in (rho_inds, Ei_inds):
+                    inds.append(xi)
+                for inds in (rho_inds, Ej_inds):
+                    inds.append(xj)
+                xi, xj = 'i{}new'.format(i), 'j{}new'.format(i)
+                for inds in (out, Ei_inds):
+                    inds.append(xi)
+                for inds in (out, Ej_inds):
+                    inds.append(xj)
+            else:
+                xi, xj = 'i{}'.format(i), 'j{}'.format(i)
+                for inds in (rho_inds, out):
+                    inds.append(xi)
+                    inds.append(xj)
+        for inds in (rho_inds, out, Ei_inds, Ej_inds):
+            inds.sort()
     else:
         rho_inds = ['ik', 'jk']
-        out = ['ik_new', 'jk_new']
-
-    Ei_inds = ['K', 'ik_new', 'ik']
-    Ej_inds = ['K', 'jk_new', 'jk']
+        out = ['inew', 'jnew']
+        Ei_inds = ['K', 'inew', 'ik']
+        Ej_inds = ['K', 'jnew', 'jk']
 
     sigma = oe.contract(Ek, Ei_inds, rho, rho_inds, Ek.conj(), Ej_inds, out)
 
