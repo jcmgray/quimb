@@ -863,6 +863,38 @@ class TensorNetwork1DFlat:
                              "either 'left', 'right', 'flat' or an int "
                              "specifiying a new orthog center.".format(form))
 
+    def compress_site(self, i, canonize=True, cur_orthog='calc', bra=None,
+                      **compress_opts):
+        r"""Compress the bonds adjacent to site ``i``, by default first setting
+        the orthogonality center to that site.
+
+                 i                     i
+            -o-o-o-o-o-    -->    ->->~o~<-<-
+             | | | | |             | | | | |
+
+        Parameters
+        ----------
+        i : int
+            Which site to compress around
+        canonize : bool, optional
+            Whether to first set the orthogonality center to site ``i``.
+        cur_orthog : int, optional
+            If given, the known current orthogonality center, to speed up the
+            mixed canonization.
+        bra : MatrixProductState, optional
+            The conjugate state to also apply the compression to.
+        compress_opts
+            Supplied to :func:`~quimb.tensor.tensor_core.tensor_split`.
+        """
+        if canonize:
+            self.canonize(i, cur_orthog=cur_orthog, bra=bra)
+
+        if self.cyclic or i > 0:
+            self.left_compress_site(i - 1, bra=bra, **compress_opts)
+
+        if self.cyclic or i < self.nsites - 1:
+            self.right_compress_site(i + 1, bra=bra, **compress_opts)
+
     def bond(self, i, j):
         """Get the name of the index defining the bond between sites i and j.
         """

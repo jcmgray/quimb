@@ -273,6 +273,22 @@ class TestMatrixProductState:
         p.compress('flat', absorb='left')
         assert p.count_canonized() == (0, 0)
 
+    def test_compress_site(self):
+        psi = MPS_rand_state(10, 7)
+        psi.compress_site(3, max_bond=1)
+        assert psi.bond_sizes() == [2, 4, 1, 1, 7, 7, 7, 4, 2]
+        assert psi.calc_current_orthog_center() == (3, 3)
+
+        psi = MPS_rand_state(10, 7)
+        psi.compress_site(0, max_bond=1)
+        assert psi.bond_sizes() == [1, 7, 7, 7, 7, 7, 7, 4, 2]
+        assert psi.calc_current_orthog_center() == (0, 0)
+
+        psi = MPS_rand_state(10, 7)
+        psi.compress_site(9, max_bond=1)
+        assert psi.bond_sizes() == [2, 4, 7, 7, 7, 7, 7, 7, 1]
+        assert psi.calc_current_orthog_center() == (9, 9)
+
     @pytest.mark.parametrize("method", ['svd', 'eig'])
     @pytest.mark.parametrize("form", ['left', 'right', 'raise'])
     def test_add_and_compress_mps(self, method, form):
