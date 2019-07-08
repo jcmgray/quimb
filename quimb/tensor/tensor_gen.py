@@ -5,10 +5,10 @@ from numbers import Integral
 import numpy as np
 
 from ..core import make_immutable, ikron
-from ..linalg.base_linalg import norm_fro_dense
 from ..gen.operators import spin_operator, eye, _gen_mbl_random_factors
 from ..gen.rand import randn, choice, random_seed_fn, rand_phase
-from .tensor_core import Tensor, _asarray
+from .tensor_core import Tensor
+from .array_ops import asarray, sensibly_scale
 from .tensor_1d import MatrixProductState, MatrixProductOperator
 from .tensor_tebd import NNI
 
@@ -111,14 +111,11 @@ def MPS_rand_state(n, bond_dim, phys_dim=2, normalize=True, cyclic=False,
     def gen_data(shape):
         return randn(shape, dtype=dtype)
 
-    def scale(x):
-        return x / norm_fro_dense(x)**(1 / (x.ndim - 1))
-
     if trans_invar:
-        array = scale(gen_data(next(gen_shapes())))
+        array = sensibly_scale(gen_data(next(gen_shapes())))
         arrays = (array for _ in range(n))
     else:
-        arrays = map(scale, map(gen_data, gen_shapes()))
+        arrays = map(sensibly_scale, map(gen_data, gen_shapes()))
 
     rmps = MatrixProductState(arrays, **mps_opts)
 
@@ -144,7 +141,7 @@ def MPS_product_state(arrays, cyclic=False, **mps_opts):
             yield (1, 1, -1)
         yield (*cyc_dim, 1, -1)
 
-    mps_arrays = (_asarray(array).reshape(*shape)
+    mps_arrays = (asarray(array).reshape(*shape)
                   for array, shape in zip(arrays, gen_array_shapes()))
 
     return MatrixProductState(mps_arrays, shape='lrp', **mps_opts)
@@ -376,8 +373,7 @@ def MPO_rand(n, bond_dim, phys_dim=2, normalize=True, cyclic=False,
         trans = (0, 2, 1) if len(shape) == 3 else (0, 1, 3, 2)
         return data + data.transpose(*trans).conj()
 
-    arrays = map(lambda x: x / norm_fro_dense(x)**(1 / (x.ndim - 1)),
-                 map(gen_data, shapes))
+    arrays = map(sensibly_scale, map(gen_data, shapes))
 
     rmpo = MatrixProductOperator(arrays, **mpo_opts)
 

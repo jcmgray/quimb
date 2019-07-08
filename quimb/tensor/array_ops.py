@@ -7,6 +7,19 @@ from autoray import do, reshape, transpose, dag
 from ..linalg.base_linalg import norm_fro_dense
 
 
+def asarray(array):
+    if isinstance(array, numpy.matrix) or not hasattr(array, 'shape'):
+        return numpy.asarray(array)
+    return array
+
+
+def ndim(array):
+    try:
+        return array.ndim
+    except AttributeError:
+        return len(array.shape)
+
+
 # ------------- miscelleneous other backend agnostic functions -------------- #
 
 def iscomplex(x):
@@ -22,6 +35,13 @@ def norm_fro(x):
         return do('linalg.norm', reshape(x, [-1]), 2)
     except AttributeError:
         return do('sum', do('multiply', do('conj', x), x)) ** 0.5
+
+
+def sensibly_scale(x):
+    """Take an array and scale it *very* roughly such that random tensor
+    networks consisting of such arrays do not have gigantic norms.
+    """
+    return x / norm_fro(x)**(1.5 / ndim(x))
 
 
 def _unitize_qr(x):

@@ -12,7 +12,7 @@ from .tensor_core import (
     TensorNetwork,
     tensor_contract,
     TNLinearOperator,
-    _asarray,
+    asarray,
 )
 
 
@@ -1179,7 +1179,7 @@ class DMRGX(DMRG):
                 Heff, sigma=self._target_energy, v0=self._k[i].data,
                 k=k, tol=self.opts['local_eig_tol'], backend='scipy')
 
-        evecs = _asarray(evecs).reshape(*dims, -1)
+        evecs = asarray(evecs).reshape(*dims, -1)
         evecs_c = evecs.conj()
 
         # update tensor at site i with all evecs -> need dummy index

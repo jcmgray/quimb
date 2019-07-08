@@ -25,7 +25,7 @@ from ..core import qarray, prod, realify_scalar, vdot, common_type
 from ..utils import check_opt, functions_equal
 from ..gen.rand import randn, seed_rand
 from . import decomp
-from .array_ops import iscomplex, norm_fro, unitize
+from .array_ops import iscomplex, norm_fro, unitize, ndim, asarray
 
 
 _DEFAULT_CONTRACTION_STRATEGY = 'greedy'
@@ -714,19 +714,6 @@ def tags2set(tags):
 #                                Tensor Class                                 #
 # --------------------------------------------------------------------------- #
 
-def _asarray(array):
-    if isinstance(array, np.matrix) or not hasattr(array, 'shape'):
-        return np.asarray(array)
-    return array
-
-
-def _ndim(array):
-    try:
-        return array.ndim
-    except AttributeError:
-        return len(array.shape)
-
-
 class Tensor(object):
     """A labelled, tagged ndarray. The index labels are used instead of
     axis numbers to identify dimensions, and are preserved through operations.
@@ -776,12 +763,12 @@ class Tensor(object):
             self._left_inds = data.left_inds
             return
 
-        self._data = _asarray(data)
+        self._data = asarray(data)
         self._inds = tuple(inds)
         self._tags = tags2set(tags)
         self._left_inds = tuple(left_inds) if left_inds is not None else None
 
-        nd = _ndim(self._data)
+        nd = ndim(self._data)
         if nd != len(self.inds):
             raise ValueError(
                 "Wrong number of inds, {}, supplied for array"
@@ -861,7 +848,7 @@ class Tensor(object):
             New tags.
         """
         if 'data' in kwargs:
-            self._data = _asarray(kwargs.pop('data'))
+            self._data = asarray(kwargs.pop('data'))
 
         if 'inds' in kwargs:
             inds = tuple(kwargs.pop('inds'))
@@ -889,7 +876,7 @@ class Tensor(object):
         if kwargs:
             raise ValueError("Option(s) {} not valid.".format(kwargs))
 
-        if len(self.inds) != _ndim(self.data):
+        if len(self.inds) != ndim(self.data):
             raise ValueError("Mismatch between number of data dimensions and "
                              "number of indices supplied.")
 
@@ -966,7 +953,7 @@ class Tensor(object):
 
     @property
     def ndim(self):
-        return _ndim(self._data)
+        return ndim(self._data)
 
     @property
     def size(self):

@@ -19,9 +19,8 @@ from .tensor_core import (
     bonds,
     tags2set,
     get_tags,
-    _asarray,
-    _ndim,
 )
+from .array_ops import asarray, ndim, sensibly_scale
 from ..linalg.base_linalg import norm_trace_dense
 
 
@@ -238,11 +237,11 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
         raise ValueError(err_msg)
 
     # allow gate to be a matrix as long as it factorizes into tensor
-    shape_matches_2d = (_ndim(G) == 2) and (G.shape[1] == dp ** ng)
+    shape_matches_2d = (ndim(G) == 2) and (G.shape[1] == dp ** ng)
     shape_maches_nd = all(d == dp for d in G.shape)
 
     if shape_matches_2d:
-        G = _asarray(G).reshape([dp] * 2 * ng)
+        G = asarray(G).reshape([dp] * 2 * ng)
     elif not shape_maches_nd:
         raise ValueError("Gate with shape {} doesn't match sites {}"
                          "".format(G.shape, where))
@@ -1173,7 +1172,7 @@ class MatrixProductState(TensorNetwork1DVector,
 
             site_tags = tuple({st} | tags for st in site_tags)
 
-        self.cyclic = (_ndim(arrays[0]) == 3)
+        self.cyclic = (ndim(arrays[0]) == 3)
 
         # transpose arrays to 'lrp' order.
         def gen_orders():
@@ -1419,7 +1418,7 @@ class MatrixProductState(TensorNetwork1DVector,
 
         # Make Tensor of gate
         d = tn.phys_dim(i)
-        TG = Tensor(_asarray(G).reshape(d, d, d, d),
+        TG = Tensor(asarray(G).reshape(d, d, d, d),
                     inds=("_tmpi", "_tmpj", ix_i, ix_j))
 
         # Contract gate into the two sites
@@ -2308,7 +2307,7 @@ class MatrixProductOperator(TensorNetwork1DFlat,
 
             site_tags = tuple((st,) + tags for st in site_tags)
 
-        self.cyclic = (_ndim(arrays[0]) == 4)
+        self.cyclic = (ndim(arrays[0]) == 4)
 
         # transpose arrays to 'lrud' order.
         def gen_orders():
@@ -2797,7 +2796,7 @@ class Dense1D(TensorNetwork1DVector,
                 tags = set(tags)
             site_tags = site_tags | tags
 
-        T = Tensor(_asarray(array).reshape(*dims),
+        T = Tensor(asarray(array).reshape(*dims),
                    inds=site_inds, tags=site_tags)
 
         super().__init__([T], structure=site_tag_id, sites=sites,
