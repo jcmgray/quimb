@@ -728,6 +728,8 @@ class TestMatrixProductOperator:
         assert isinstance(y, MatrixProductState)
         assert len(y.tensors) == 8
         assert y.site_ind_id == site_ind_id
+        Ad, xd, yd = A.to_dense(), x.to_dense(), y.to_dense()
+        assert_allclose(Ad @ xd, yd)
 
     @pytest.mark.parametrize("cyclic", (False, True))
     def test_sites_mpo_mps_product(self, cyclic):

@@ -2508,8 +2508,8 @@ class MatrixProductOperator(TensorNetwork1DFlat,
         A, x = self.copy(), other.copy()
 
         # align the indices
-        A.upper_ind_id = "__tmp{}__"
-        A.lower_ind_id = x.site_ind_id
+        A.lower_ind_id = "__tmp{}__"
+        A.upper_ind_id = x.site_ind_id
         x.reindex_sites("__tmp{}__", inplace=True)
 
         # form total network and contract each site
@@ -2557,22 +2557,22 @@ class MatrixProductOperator(TensorNetwork1DFlat,
 
         For an MPS::
 
-            other: x-x-x-x-x-x-x-x-x-x-x-x-x-x-x-x-x-x
                    | | | | | | | | | | | | | | | | | |
              self: A-A-A-A-A-A-A-A-A-A-A-A-A-A-A-A-A-A
                    | | | | | | | | | | | | | | | | | |
+            other: x-x-x-x-x-x-x-x-x-x-x-x-x-x-x-x-x-x
 
                                    -->
 
-              out: y=y=y=y=y=y=y=y=y=y=y=y=y=y=y=y=y=y
                    | | | | | | | | | | | | | | | | | |   <- other.site_ind_id
+              out: y=y=y=y=y=y=y=y=y=y=y=y=y=y=y=y=y=y
 
         For an MPO::
 
                    | | | | | | | | | | | | | | | | | |
-            other: B-B-B-B-B-B-B-B-B-B-B-B-B-B-B-B-B-B
-                   | | | | | | | | | | | | | | | | | |
              self: A-A-A-A-A-A-A-A-A-A-A-A-A-A-A-A-A-A
+                   | | | | | | | | | | | | | | | | | |
+            other: B-B-B-B-B-B-B-B-B-B-B-B-B-B-B-B-B-B
                    | | | | | | | | | | | | | | | | | |
 
                                    -->
@@ -2605,6 +2605,8 @@ class MatrixProductOperator(TensorNetwork1DFlat,
         else:
             raise TypeError("Can only Dot with a MatrixProductOperator or a "
                             "MatrixProductState, got {}".format(type(other)))
+
+    dot = apply
 
     def trace(self, left_inds=None, right_inds=None):
         """Take the trace of this MPO.
