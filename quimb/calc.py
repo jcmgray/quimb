@@ -31,8 +31,9 @@ from .gen.states import (
 from .utils import int2tup
 
 
-def fidelity(p1, p2):
-    """Fidelity between two quantum states.
+def fidelity(p1, p2, squared=False):
+    """Fidelity between two quantum states. By default, the unsquared fidelity
+    is used, equivalent in the pure state case to ``|<psi|phi>|``.
 
     Parameters
     ----------
@@ -40,17 +41,26 @@ def fidelity(p1, p2):
         First state.
     p2 : vector or operator
         Second state.
+    squared : bool, optional
+        Whether to use the squared convention or not, by default False.
 
     Returns
     -------
     float
     """
     if isvec(p1) or isvec(p2):
-        return expec(p1, p2)
-    else:
-        sqrho = sqrtm(p1)
-        return tr(sqrtm(dot(sqrho, dot(p2, sqrho))))
-        # return norm(sqrtm(p1) @ sqrtm(p2), "tr")
+        F = expec(p1, p2)
+        if not squared:
+            F = F**0.5
+        return F
+
+    sqrho = sqrtm(p1)
+    F = tr(sqrtm(dot(sqrho, dot(p2, sqrho)))).real
+
+    if squared:
+        F = F**2
+
+    return F
 
 
 def purify(rho):

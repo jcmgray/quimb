@@ -15,6 +15,9 @@ v1.2.1 (unreleased)
 - Automatically squeeze tensor networks when rank-simplifying
 - Add :meth:`~quimb.tensor.tensor_1d.TensorNetwork1DFlat.compress_site` for compressing around single sites of MPS etc.
 
+**Bug fixes:**
+
+- Fix consistency of :func:`~quimb.calc.fidelity` by making the unsquared version the default for the case when either state is pure, and always return a real number.
 
 .. _whats-new.1.2.0:
 
