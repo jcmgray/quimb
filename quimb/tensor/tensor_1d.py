@@ -261,7 +261,7 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
     site_tids = psi._get_tids_from_inds(bnds, which='any')
 
     # convert the gate into a tensor
-    TG = Tensor(G, gate_ix, tags=tags)
+    TG = Tensor(G, gate_ix, tags=tags, left_inds=bnds)
 
     if contract in (True, 'swap+split'):
         # pop the sites, contract, then re-add
@@ -301,6 +301,88 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
 
     psi |= TG
     return psi
+
+
+def superop_TN_1D(tn_super, tn_op,
+                  upper_ind_id='k{}',
+                  lower_ind_id='b{}',
+                  so_outer_upper_ind_id=None,
+                  so_inner_upper_ind_id=None,
+                  so_inner_lower_ind_id=None,
+                  so_outer_lower_ind_id=None):
+    r"""Take a tensor network superoperator and act with it on a
+    tensor network operator, maintaining the original upper and lower
+    indices of the operator::
+
+
+         outer_upper_ind_id                           upper_ind_id
+            | | | ... |                               | | | ... |
+            +----------+                              +----------+
+            | tn_super +---+                          | tn_super +---+
+            +----------+   |     upper_ind_id         +----------+   |
+            | | | ... |    |      | | | ... |         | | | ... |    |
+         inner_upper_ind_id|     +-----------+       +-----------+   |
+                           |  +  |   tn_op   |   =   |   tn_op   |   |
+         inner_lower_ind_id|     +-----------+       +-----------+   |
+            | | | ... |    |      | | | ... |         | | | ... |    |
+            +----------+   |      lower_ind_id        +----------+   |
+            | tn_super +---+                          | tn_super +---+
+            +----------+                              +----------+
+            | | | ... | <--                           | | | ... |
+         outer_lower_ind_id                           lower_ind_id
+
+
+    Parameters
+    ----------
+    tn_super : TensorNetwork
+        The superoperator in the form of a 1D-like tensor network.
+    tn_op : TensorNetwork
+        The operator to be acted on in the form of a 1D-like tensor network.
+    upper_ind_id : str, optional
+        Current id of the upper operator indices, e.g. usually ``'k{}'``.
+    lower_ind_id : str, optional
+        Current id of the lower operator indices, e.g. usually ``'b{}'``.
+    so_outer_upper_ind_id : str, optional
+        Current id of the superoperator's upper outer indices, these will be
+        reindexed to form the new effective operators upper indices.
+    so_inner_upper_ind_id : str, optional
+        Current id of the superoperator's upper inner indices, these will be
+        joined with those described by ``upper_ind_id``.
+    so_inner_lower_ind_id : str, optional
+        Current id of the superoperator's lower inner indices, these will be
+        joined with those described by ``lower_ind_id``.
+    so_outer_lower_ind_id : str, optional
+        Current id of the superoperator's lower outer indices, these will be
+        reindexed to form the new effective operators lower indices.
+
+    Returns
+    -------
+    KAK : TensorNetwork
+        The tensornetwork of the superoperator acting on the operator.
+    """
+    n = tn_op.nsites
+
+    if so_outer_upper_ind_id is None:
+        so_outer_upper_ind_id = getattr(tn_super, 'outer_upper_ind_id', 'kn{}')
+    if so_inner_upper_ind_id is None:
+        so_inner_upper_ind_id = getattr(tn_super, 'inner_upper_ind_id', 'k{}')
+    if so_inner_lower_ind_id is None:
+        so_inner_lower_ind_id = getattr(tn_super, 'inner_lower_ind_id', 'b{}')
+    if so_outer_lower_ind_id is None:
+        so_outer_lower_ind_id = getattr(tn_super, 'outer_lower_ind_id', 'bn{}')
+
+    reindex_map = {}
+    for i in range(n):
+        upper_bnd = rand_uuid()
+        lower_bnd = rand_uuid()
+        reindex_map[upper_ind_id.format(i)] = upper_bnd
+        reindex_map[lower_ind_id.format(i)] = lower_bnd
+        reindex_map[so_inner_upper_ind_id.format(i)] = upper_bnd
+        reindex_map[so_inner_lower_ind_id.format(i)] = lower_bnd
+        reindex_map[so_outer_upper_ind_id.format(i)] = upper_ind_id.format(i)
+        reindex_map[so_outer_lower_ind_id.format(i)] = lower_ind_id.format(i)
+
+    return tn_super.reindex(reindex_map) & tn_op.reindex(reindex_map)
 
 
 def rand_padder(vector, pad_width, iaxis, kwargs):
@@ -2809,3 +2891,199 @@ class Dense1D(TensorNetwork1DVector,
         array = qu.randn(phys_dim ** n, dtype=dtype)
         array /= qu.norm(array, 'fro')
         return cls(array, nsites=n, **dense1d_opts)
+
+
+def tags2tuple(tags):
+    if tags is None:
+        return ()
+    elif isinstance(tags, str):
+        return (tags,)
+    else:
+        return tuple(tags)
+
+
+class SuperOperator1D(
+    TensorNetwork1D,
+    TensorNetwork,
+):
+    r"""
+
+        0   1   2       n-1
+        |   |   |        |     <-- outer_upper_ind_id
+        O===O===O==     =O
+        |\  |\  |\       |\     <-- inner_upper_ind_id
+          )   )   ) ...    )   <-- K (size of local Kraus sum)
+        |/  |/  |/       |/     <-- inner_lower_ind_id
+        O===O===O==     =O
+        |   | : |        |     <-- outer_lower_ind_id
+              :
+             chi (size of entangling bond dim)
+
+    Parameters
+    ----------
+    arrays : sequence of arrays
+        The data arrays defining the superoperator, this should be a sequence
+        of 2n arrays, such that the first two correspond to the upper and lower
+        operators acting on site 0 etc. The arrays should be 5 dimensional
+        unless OBC conditions are desired, in which case the first two and last
+        two should be 4-dimensional. The dimensions of array can be should
+        match the ``shape`` option.
+
+    """
+
+    _EXTRA_PROPS = (
+        '_site_tag_id',
+        '_outer_upper_ind_id',
+        '_inner_upper_ind_id',
+        '_inner_lower_ind_id',
+        '_outer_lower_ind_id',
+    )
+
+    def __init__(
+        self, arrays,
+        shape='lrkud',
+        site_tag_id='I{}',
+        outer_upper_ind_id='kn{}',
+        inner_upper_ind_id='k{}',
+        inner_lower_ind_id='b{}',
+        outer_lower_ind_id='bn{}',
+        tags=None,
+        tags_upper=None,
+        tags_lower=None,
+        sites=None,
+        nsites=None,
+        **tn_opts,
+    ):
+        # short-circuit for copying
+        if isinstance(arrays, SuperOperator1D):
+            super().__init__(arrays)
+            for ep in SuperOperator1D._EXTRA_PROPS:
+                setattr(self, ep, getattr(arrays, ep))
+            return
+
+        arrays = tuple(arrays)
+        if sites is None:
+            if nsites is None:
+                nsites = len(arrays) // 2
+            sites = range(nsites)
+
+        # process indices
+        self._outer_upper_ind_id = outer_upper_ind_id
+        self._inner_upper_ind_id = inner_upper_ind_id
+        self._inner_lower_ind_id = inner_lower_ind_id
+        self._outer_lower_ind_id = outer_lower_ind_id
+
+        outer_upper_inds = map(outer_upper_ind_id.format, sites)
+        inner_upper_inds = map(inner_upper_ind_id.format, sites)
+        inner_lower_inds = map(inner_lower_ind_id.format, sites)
+        outer_lower_inds = map(outer_lower_ind_id.format, sites)
+
+        # process tags
+        self._site_tag_id = site_tag_id
+        tags = tags2tuple(tags)
+        tags_upper = tags2tuple(tags_upper)
+        tags_lower = tags2tuple(tags_lower)
+
+        def gen_tags():
+            site_tags = map(site_tag_id.format, sites)
+            for site_tag in site_tags:
+                yield (site_tag,) + tags + tags_upper
+                yield (site_tag,) + tags + tags_lower
+
+        self.cyclic = (ndim(arrays[0]) == 5)
+
+        # transpose arrays to 'lrkud' order
+        #        u
+        #        |
+        #     l--O--r
+        #        |\
+        #        d k
+        def gen_orders():
+            lkud_ord = tuple(shape.replace('r', "").find(x) for x in 'lkud')
+            rkud_ord = tuple(shape.replace('l', "").find(x) for x in 'rkud')
+            lrkud_ord = tuple(map(shape.find, 'lrkud'))
+            yield rkud_ord if not self.cyclic else lrkud_ord
+            yield rkud_ord if not self.cyclic else lrkud_ord
+            for _ in range(len(sites) - 2):
+                yield lrkud_ord
+                yield lrkud_ord
+            yield lkud_ord if not self.cyclic else lrkud_ord
+            yield lkud_ord if not self.cyclic else lrkud_ord
+
+        def gen_inds():
+            #                    |<- outer_upper_ind
+            # cycU_ix or pU_ix --O-- nU_ix
+            #                   /|<- inner_upper_ind
+            #           k_ix ->(
+            #                   \|<- inner_lower_ind
+            # cycL_ix or pL_ix --O-- nL_ix
+            #                    |<- outer_lower_ind
+            if self.cyclic:
+                cycU_ix, cycL_ix = (rand_uuid(),), (rand_uuid(),)
+            else:
+                cycU_ix, cycL_ix = (), ()
+            nU_ix, nL_ix, k_ix = rand_uuid(), rand_uuid(), rand_uuid()
+            yield (*cycU_ix, nU_ix, k_ix,
+                   next(outer_upper_inds), next(inner_upper_inds))
+            yield (*cycL_ix, nL_ix, k_ix,
+                   next(outer_lower_inds), next(inner_lower_inds))
+            pU_ix, pL_ix = nU_ix, nL_ix
+            for _ in range(len(sites) - 2):
+                nU_ix, nL_ix, k_ix = rand_uuid(), rand_uuid(), rand_uuid()
+                yield (pU_ix, nU_ix, k_ix,
+                       next(outer_upper_inds), next(inner_upper_inds))
+                yield (pL_ix, nL_ix, k_ix,
+                       next(outer_lower_inds), next(inner_lower_inds))
+                pU_ix, pL_ix = nU_ix, nL_ix
+            k_ix = rand_uuid()
+            yield (pU_ix, *cycU_ix, k_ix,
+                   next(outer_upper_inds), next(inner_upper_inds))
+            yield (pL_ix, *cycL_ix, k_ix,
+                   next(outer_lower_inds), next(inner_lower_inds))
+
+        def gen_tensors():
+            for array, tags, inds, order in zip(arrays, gen_tags(),
+                                                gen_inds(), gen_orders()):
+                yield Tensor(array.transpose(*order), inds=inds, tags=tags)
+
+        super().__init__(gen_tensors(), structure=site_tag_id, sites=sites,
+                         nsites=nsites, check_collisions=False, **tn_opts)
+
+    @classmethod
+    def rand(cls, n, K, chi, phys_dim=2, herm=True,
+             cyclic=False, dtype=complex, **superop_opts):
+
+        def gen_arrays():
+            for i in range(n):
+                shape = []
+                if cyclic or (i != 0):
+                    shape += [chi]
+                if cyclic or (i != n - 1):
+                    shape += [chi]
+                shape += [K, phys_dim, phys_dim]
+                data = qu.randn(shape=shape, dtype=dtype)
+                yield data
+                if herm:
+                    yield data.conj()
+                else:
+                    yield qu.randn(shape=shape, dtype=dtype)
+
+        arrays = map(sensibly_scale, gen_arrays())
+
+        return cls(arrays, nsites=n, **superop_opts)
+
+    @property
+    def outer_upper_ind_id(self):
+        return self._outer_upper_ind_id
+
+    @property
+    def inner_upper_ind_id(self):
+        return self._inner_upper_ind_id
+
+    @property
+    def inner_lower_ind_id(self):
+        return self._inner_lower_ind_id
+
+    @property
+    def outer_lower_ind_id(self):
+        return self._outer_lower_ind_id

@@ -48,9 +48,11 @@ from .tensor_1d import (
     MatrixProductState,
     MatrixProductOperator,
     Dense1D,
+    SuperOperator1D,
     align_TN_1D,
     expec_TN_1D,
     gate_TN_1D,
+    superop_TN_1D,
 )
 from .tensor_dmrg import (
     MovingEnvironment,
@@ -117,9 +119,11 @@ __all__ = (
     "MatrixProductState",
     "MatrixProductOperator",
     "Dense1D",
+    "SuperOperator1D",
     "align_TN_1D",
     "expec_TN_1D",
     "gate_TN_1D",
+    "superop_TN_1D",
     "MovingEnvironment",
     "DMRG",
     "DMRG1",
