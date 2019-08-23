@@ -50,7 +50,7 @@ def get_tensorflow(eager=None):
                 eager = True
 
             if eager:
-                tf.enable_eager_execution()
+                tf.compat.v1.enable_eager_execution()
 
             _TENSORFLOW = tf
             _TENSORFLOW_EAGER = eager
@@ -93,7 +93,7 @@ def parse_network_to_tf(tn, constant_tags):
 
         # check if tensor has any of the constant tags
         if t.tags & constant_tags:
-            t.modify(data=tf.convert_to_tensor(t.data))
+            t.modify(data=tf.convert_to_tensor(value=t.data))
 
         # treat re and im parts as separate variables
         elif issubclass(t.dtype.type, np.complexfloating):
@@ -139,14 +139,14 @@ def init_uninit_vars(sess):
     tf = get_tensorflow()
 
     # names of variables
-    uninit_vars = sess.run(tf.report_uninitialized_variables())
+    uninit_vars = sess.run(tf.compat.v1.report_uninitialized_variables())
     vars_list = {v.decode('utf-8') for v in uninit_vars}
 
     # variables themselves
-    uninit_vars_tf = [v for v in tf.global_variables()
+    uninit_vars_tf = [v for v in tf.compat.v1.global_variables()
                       if v.name.split(':')[0] in vars_list]
 
-    sess.run(tf.variables_initializer(var_list=uninit_vars_tf))
+    sess.run(tf.compat.v1.variables_initializer(var_list=uninit_vars_tf))
 
 
 class TNOptimizer:
@@ -300,8 +300,8 @@ class TNOptimizer:
         self.loss_target = loss_target
 
         # set dynamic learning rate
-        self.global_step = tf.train.get_or_create_global_step()
-        self.learning_rate = tf.train.exponential_decay(
+        self.global_step = tf.compat.v1.train.get_or_create_global_step()
+        self.learning_rate = tf.compat.v1.train.exponential_decay(
             learning_rate=learning_rate, global_step=self.global_step,
             decay_steps=learning_decay_steps, decay_rate=learning_decay_rate,
         )
@@ -320,7 +320,7 @@ class TNOptimizer:
                     # convert it to constant tensorflow TN
                     self.loss_constants[k] = constant_tn(v)
                 else:
-                    self.loss_constants[k] = tf.convert_to_tensor(v)
+                    self.loss_constants[k] = tf.convert_to_tensor(value=v)
         self.loss_kwargs = {} if loss_kwargs is None else dict(loss_kwargs)
         self.loss_fn = functools.partial(
             loss_fn, **self.loss_constants, **self.loss_kwargs
@@ -339,7 +339,8 @@ class TNOptimizer:
         elif isinstance(optimizer, str):
             if 'Optimizer' not in optimizer:
                 optimizer += 'Optimizer'
-            self.optimizer = getattr(tf.train, optimizer)(self.learning_rate)
+            self.optimizer = getattr(
+                tf.compat.v1.train, optimizer)(self.learning_rate)
         else:
             self.optimizer = optimizer
 
@@ -400,7 +401,7 @@ class TNOptimizer:
 
         kwargs['maxfun'] = max_steps - 1
         if sess is None:
-            sess = tf.get_default_session()
+            sess = tf.compat.v1.get_default_session()
         init_uninit_vars(sess)
 
         pbar = tqdm.tqdm(total=max_steps, disable=not self.progbar)
@@ -480,7 +481,7 @@ class TNOptimizer:
     def _optimize_graph(self, max_steps, max_time=None, sess=None, ):
         if sess is None:
             tf = get_tensorflow()
-            sess = tf.get_default_session()
+            sess = tf.compat.v1.get_default_session()
 
         init_uninit_vars(sess)
 
