@@ -49,7 +49,7 @@ def fidelity(p1, p2, squared=False):
     float
     """
     if isvec(p1) or isvec(p2):
-        F = expec(p1, p2)
+        F = expec(p1, p2).real
         if not squared:
             F = F**0.5
         return F
