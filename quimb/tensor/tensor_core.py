@@ -2196,12 +2196,12 @@ class TensorNetwork(object):
     def __truediv__(self, other):
         """Scalar division.
         """
-        return self.multiply(1 / other)
+        return self.multiply(other**-1)
 
     def __itruediv__(self, other):
         """Inplace scalar division.
         """
-        return self.multiply_(1 / other)
+        return self.multiply_(other**-1)
 
     @property
     def tensors(self):
