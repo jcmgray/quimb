@@ -64,3 +64,24 @@ class TestSpinHam:
         dmrg.solve(verbosity=1)
 
         assert dmrg.energy == pytest.approx(-2.25)
+
+
+class TestMPSSpecificStates:
+
+    @pytest.mark.parametrize("dtype", [float, 'complex64'])
+    def test_ghz_state(self, dtype):
+        mps = qtn.MPS_ghz_state(5, dtype=dtype)
+        assert mps.dtype == dtype
+        psi = qu.ghz_state(5, dtype=dtype)
+        assert mps.H @ mps == pytest.approx(1.0)
+        assert mps.bond_sizes() == [2, 2, 2, 2]
+        assert qu.fidelity(psi, mps.to_dense()) == pytest.approx(1.0)
+
+    @pytest.mark.parametrize("dtype", [float, 'complex64'])
+    def test_w_state(self, dtype):
+        mps = qtn.MPS_w_state(5, dtype=dtype)
+        assert mps.dtype == dtype
+        psi = qu.w_state(5, dtype=dtype)
+        assert mps.H @ mps == pytest.approx(1.0)
+        assert mps.bond_sizes() == [2, 2, 2, 2]
+        assert qu.fidelity(psi, mps.to_dense()) == pytest.approx(1.0)
