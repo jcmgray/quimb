@@ -191,6 +191,64 @@ def MPS_neel_state(n, down_first=False, dtype=float, **mps_opts):
     return MPS_computational_state(binary_str, dtype=dtype, **mps_opts)
 
 
+def MPS_ghz_state(n, dtype=float, **mps_opts):
+    """Build the chi=2 OBC MPS representation of the GHZ state.
+
+    Parameters
+    ----------
+    n : int
+        Number of qubits.
+    dtype : {'float64', 'complex128', 'float32', 'complex64'}, optional
+        The underlying data type.
+    mps_opts
+        Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductState`.
+    """
+
+    def gen_arrays():
+        yield 2**-0.5 * np.array([[1., 0.],
+                                  [0., 1.]]).astype(dtype)
+
+        for i in range(1, n - 1):
+            yield np.array([[[1., 0.],
+                             [0., 0.]],
+                            [[0., 0.],
+                             [0., 1.]]]).astype(dtype)
+
+        yield np.array([[1., 0.],
+                        [0., 1.]]).astype(dtype)
+
+    return MatrixProductState(gen_arrays(), **mps_opts)
+
+
+def MPS_w_state(n, dtype=float, **mps_opts):
+    """Build the chi=2 OBC MPS representation of the W state.
+
+    Parameters
+    ----------
+    n : int
+        Number of qubits.
+    dtype : {'float64', 'complex128', 'float32', 'complex64'}, optional
+        The underlying data type.
+    mps_opts
+        Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductState`.
+    """
+
+    def gen_arrays():
+        yield (np.array([[1., 0.],
+                         [0., 1.]]) / n ** 0.5).astype(dtype)
+
+        for i in range(1, n - 1):
+            yield np.array([[[1., 0.],
+                             [0., 1.]],
+                            [[0., 0.],
+                             [1., 0.]]]).astype(dtype)
+
+        yield np.array([[0., 1.],
+                        [1., 0.]]).astype(dtype)
+
+    return MatrixProductState(gen_arrays(), **mps_opts)
+
+
 @random_seed_fn
 def MPS_rand_computational_state(n, dtype=float, **mps_opts):
     """Generate a random computation basis state, like '01101001010'.
