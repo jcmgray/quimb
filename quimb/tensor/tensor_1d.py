@@ -8,7 +8,7 @@ from numbers import Integral
 
 import numpy as np
 import opt_einsum as oe
-from autoray import do, dag
+from autoray import do, dag, reshape
 
 from ..utils import check_opt, three_line_multi_print, pairwise
 import quimb as qu
@@ -241,7 +241,7 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
     shape_maches_nd = all(d == dp for d in G.shape)
 
     if shape_matches_2d:
-        G = asarray(G).reshape([dp] * 2 * ng)
+        G = reshape(asarray(G), [dp] * 2 * ng)
     elif not shape_maches_nd:
         raise ValueError("Gate with shape {} doesn't match sites {}"
                          "".format(G.shape, where))
@@ -483,9 +483,9 @@ class TensorNetwork1DVector:
         """
         if not inds_seq:
             # just use list of site indices
-            return TensorNetwork.to_dense(
+            return do('reshape', TensorNetwork.to_dense(
                 self, self.site_inds, **contract_opts
-            ).reshape(-1, 1)
+            ), (-1, 1))
 
         return TensorNetwork.to_dense(self, *inds_seq, **contract_opts)
 
@@ -1352,7 +1352,7 @@ class MatrixProductState(TensorNetwork1DVector,
         n = len(dims)
         inds = [site_ind_id.format(i) for i in range(n)]
 
-        T = Tensor(psi.A.reshape(dims), inds=inds)
+        T = Tensor(reshape(psi.A, dims), inds=inds)
 
         def gen_tensors():
             #           split
@@ -1500,7 +1500,7 @@ class MatrixProductState(TensorNetwork1DVector,
 
         # Make Tensor of gate
         d = tn.phys_dim(i)
-        TG = Tensor(asarray(G).reshape(d, d, d, d),
+        TG = Tensor(reshape(asarray(G), (d, d, d, d)),
                     inds=("_tmpi", "_tmpj", ix_i, ix_j))
 
         # Contract gate into the two sites

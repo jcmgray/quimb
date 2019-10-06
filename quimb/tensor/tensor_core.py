@@ -512,7 +512,7 @@ def tensor_add_bond(T1, T2):
 
 
 def array_direct_product(X, Y, sum_axes=()):
-    """Direct product of two numpy.ndarrays.
+    """Direct product of two arrays.
 
     Parameters
     ----------
@@ -534,33 +534,23 @@ def array_direct_product(X, Y, sum_axes=()):
     if isinstance(sum_axes, Integral):
         sum_axes = (sum_axes,)
 
-    # parse the intermediate and final shape doubling the size of any axes that
-    #   is not to be summed, and preparing slices with which to add X, Y.
-    final_shape = []
-    selectorX = []
-    selectorY = []
-
+    padX = []
+    padY = []
     for i, (d1, d2) in enumerate(zip(X.shape, Y.shape)):
         if i not in sum_axes:
-            final_shape.append(d1 + d2)
-            selectorX.append(slice(0, d1))
-            selectorY.append(slice(d1, None))
+            padX.append((0, d2))
+            padY.append((d1, 0))
         else:
             if d1 != d2:
-                raise ValueError("Can only add sum tensor indices of the same "
-                                 "size.")
-            final_shape.append(d1)
-            selectorX.append(slice(None))
-            selectorY.append(slice(None))
+                raise ValueError("Can only add sum tensor "
+                                 "indices of the same size.")
+            padX.append((0, 0))
+            padY.append((0, 0))
 
-    new_type = common_type(X, Y)
-    Z = np.zeros(final_shape, dtype=new_type)
+    pX = do('pad', X, padX, mode='constant')
+    pY = do('pad', Y, padY, mode='constant')
 
-    # Add tensors to the diagonals
-    Z[tuple(selectorX)] += X
-    Z[tuple(selectorY)] += Y
-
-    return Z
+    return pX + pY
 
 
 def tensor_direct_product(T1, T2, sum_inds=(), inplace=False):
@@ -981,7 +971,7 @@ class Tensor(object):
     def ind_size(self, ind):
         """Return the size of dimension corresponding to ``ind``.
         """
-        return self.shape[self.inds.index(ind)]
+        return int(self.shape[self.inds.index(ind)])
 
     def shared_bond_size(self, other):
         """Get the total size of the shared index(es) with ``other``.

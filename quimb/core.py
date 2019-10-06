@@ -257,20 +257,20 @@ def zeroify(fn, tol=1e-14):
     return zeroified_f
 
 
-_COMPLEX_DTYPES = {np.dtype('complex64'), np.dtype('complex128')}
-_DOUBLE_DTYPES = {np.dtype('float64'), np.dtype('complex128')}
+_COMPLEX_DTYPES = {'complex64', 'complex128'}
+_DOUBLE_DTYPES = {'float64', 'complex128'}
 _DTYPE_MAP = {
-    (False, False): np.dtype('float32'),
-    (False, True): np.dtype('float64'),
-    (True, False): np.dtype('complex64'),
-    (True, True): np.dtype('complex128'),
+    (False, False): 'float32',
+    (False, True): 'float64',
+    (True, False): 'complex64',
+    (True, True): 'complex128',
 }
 
 
 def common_type(*arrays):
     """Quick compute the minimal dtype sufficient for ``arrays``.
     """
-    dtypes = {array.dtype for array in arrays}
+    dtypes = {array.dtype.name for array in arrays}
     has_complex = not _COMPLEX_DTYPES.isdisjoint(dtypes)
     has_double = not _DOUBLE_DTYPES.isdisjoint(dtypes)
     return _DTYPE_MAP[has_complex, has_double]

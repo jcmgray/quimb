@@ -2,7 +2,7 @@ import numpy as np
 import scipy.linalg as scla
 import scipy.sparse.linalg as spla
 import scipy.linalg.interpolative as sli
-from autoray import do
+from autoray import do, reshape
 
 from ..core import njit
 from ..linalg.rand_linalg import rsvd, estimate_rank
@@ -114,7 +114,7 @@ def _svd_alt(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0):
     return _trim_and_renorm_SVD(U, s, V, cutoff, cutoff_mode, max_bond, absorb)
 
 
-def _svd(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0):
+def _svd_numpy(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0):
     args = (x, cutoff, cutoff_mode, max_bond, absorb)
 
     try:
@@ -129,6 +129,54 @@ def _svd(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0):
             return _svd_alt(*args)
 
         raise e
+
+
+def _svd(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0):
+    if isinstance(x, np.ndarray):
+        return _svd_numpy(x, cutoff, cutoff_mode, max_bond, absorb)
+
+    U, s, VH = do('linalg.svd', x)
+
+    if cutoff > 0.0:
+        if cutoff_mode == 1:
+            n_chi = do('count_nonzero', s > cutoff)
+
+        elif cutoff_mode == 2:
+            n_chi = do('count_nonzero', s > cutoff * s[0])
+
+        elif cutoff_mode in (3, 4):
+            s2 = s * s
+            cs2 = do('cumsum', s2)
+            tot = cs2[-1]
+
+            if cutoff_mode == 3:
+                n_chi = do('count_nonzero', (tot - cs2) > cutoff) + 1
+            else:
+                n_chi = do('count_nonzero', cs2 < (1 - cutoff) * tot) + 1
+
+        n_chi = max(n_chi, 1)
+        if max_bond > 0:
+            n_chi = min(n_chi, max_bond)
+
+        if n_chi < s.shape[0]:
+            s = s[:n_chi]
+            U = U[..., :n_chi]
+            VH = VH[:n_chi, ...]
+
+        if cutoff_mode in (3, 4):
+            norm = (tot / cs2[n_chi - 1]) ** 0.5
+            s *= norm
+
+    if absorb == -1:
+        U *= reshape(s, (1, -1))
+    elif absorb == 1:
+        VH *= reshape(s, (-1, 1))
+    else:
+        s **= 0.5
+        U *= reshape(s, (1, -1))
+        VH *= reshape(s, (-1, 1))
+
+    return U, VH
 
 
 def _svdvals(x):
