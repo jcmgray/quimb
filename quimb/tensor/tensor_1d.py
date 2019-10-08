@@ -1157,7 +1157,7 @@ class TensorNetwork1DFlat:
         if tn.cyclic:
             return tn
 
-        tn.add_bond(0, -1)
+        tn.new_bond(0, -1)
         tn.cyclic = True
         return tn
 

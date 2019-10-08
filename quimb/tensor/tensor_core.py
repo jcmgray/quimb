@@ -503,12 +503,31 @@ def tensor_compress_bond(T1, T2, **compress_opts):
     T2.modify(data=T2C.data)
 
 
-def tensor_add_bond(T1, T2):
-    """Inplace addition of a dummy bond between ``T1`` and ``T2``.
+def new_bond(T1, T2, size=1, name=None, axis1=0, axis2=0):
+    """Inplace addition of a new bond between tensors ``T1`` and ``T2``. The
+    size of the new bond can be specified, in which case the new array parts
+    will be filled with zeros.
+
+    Parameters
+    ----------
+    T1 : Tensor
+        First tensor to modify.
+    T2 : Tensor
+        Second tensor to modify.
+    size : int, optional
+        Size of the new dimension.
+    name : str, optional
+        Name for the new index.
+    axis1 : int, optional
+        Position on the first tensor for the new dimension.
+    axis2 : int, optional
+        Position on the second tensor for the new dimension.
     """
-    bnd = rand_uuid()
-    T1.modify(data=do('expand_dims', T1.data, -1), inds=(*T1.inds, bnd))
-    T2.modify(data=do('expand_dims', T2.data, -1), inds=(*T2.inds, bnd))
+    if name is None:
+        name = rand_uuid()
+
+    T1.new_ind(name, size=size, axis=axis1)
+    T2.new_ind(name, size=size, axis=axis2)
 
 
 def array_direct_product(X, Y, sum_axes=()):
@@ -741,7 +760,7 @@ class Tensor(object):
 
     """
 
-    def __init__(self, data, inds, tags=None, left_inds=None):
+    def __init__(self, data=1.0, inds=(), tags=None, left_inds=None):
         # a new or copied Tensor always has no owners
         self.owners = {}
 
@@ -917,6 +936,52 @@ class Tensor(object):
         any TensorNetworks viewing this Tensor.
         """
         self.modify(tags=set.union(self.tags, {tag}))
+
+    def expand_ind(self, ind, size):
+        """Inplace increase the size of the dimension of ``ind``, the new array
+        entries will be filled with zeros.
+
+        Parameters
+        ----------
+        name : str
+            Name of the index to expand.
+        size : int, optional
+            Size of the expanded index.
+        """
+        if ind not in self.inds:
+            raise ValueError("Tensor has no index '{}'.".format(ind))
+
+        size_current = self.ind_size(ind)
+        pads = [
+            (0, size - size_current) if i == ind else (0, 0)
+            for i in self.inds
+        ]
+        self.modify(data=do('pad', self.data, pads, mode='constant'))
+
+    def new_ind(self, name, size=1, axis=0):
+        """Inplace add a new index - a named dimension. If ``size`` is
+        specified to be greater than one then the new array entries will be
+        filled with zeros.
+
+        Parameters
+        ----------
+        name : str
+            Name of the new index.
+        size : int, optional
+            Size of the new index.
+        axis : int, optional
+            Position of the new index.
+        """
+        new_inds = list(self.inds)
+        new_inds.insert(axis, name)
+
+        new_data = do('expand_dims', self.data, axis=axis)
+
+        self.modify(data=new_data, inds=new_inds)
+        if size > 1:
+            self.expand_ind(name, size)
+
+    new_bond = new_bond
 
     def conj(self, inplace=False):
         """Conjugate this tensors data (does nothing to indices).
@@ -2788,18 +2853,26 @@ class TensorNetwork(object):
                 self.convert_to_zero()
                 break
 
-    def add_bond(self, tags1, tags2):
+    def new_bond(self, tags1, tags2, **opts):
         """Inplace addition of a dummmy (size 1) bond between the single
         tensors specified by by ``tags1`` and ``tags2``.
+
+        Parameters
+        ----------
+        tags1 : sequence of str
+            Tags identifying the first tensor.
+        tags2 : sequence of str
+            Tags identifying the second tensor.
+        opts
+            Supplied to :func:`~quimb.tensor.tensor_core.new_bond`.
+
+        See Also
+        --------
+        new_bond
         """
         tid1, = self._get_tids_from_tags(tags1, which='all')
         tid2, = self._get_tids_from_tags(tags2, which='all')
-
-        T1, T2 = self.tensor_map[tid1], self.tensor_map[tid2]
-        tensor_add_bond(T1, T2)
-
-        bnd, = bonds(T1, T2)
-        self.ind_map[bnd] = {tid1, tid2}
+        new_bond(self.tensor_map[tid1], self.tensor_map[tid2], **opts)
 
     def cut_bond(self, bnd, left_ind, right_ind):
         """

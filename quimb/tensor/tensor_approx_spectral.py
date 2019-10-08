@@ -315,12 +315,12 @@ class PTPTLazyMPS:
         if le:
             self.TN.replace_with_identity(le, inplace=True)
         else:
-            self.TN.add_bond([ket.site_tag(0), '_KET'],
+            self.TN.new_bond([ket.site_tag(0), '_KET'],
                              [ket.site_tag(0), '_BRA'])
         if re:
             self.TN.replace_with_identity(re, inplace=True)
         else:
-            self.TN.add_bond([ket.site_tag(n - 1), '_KET'],
+            self.TN.new_bond([ket.site_tag(n - 1), '_KET'],
                              [ket.site_tag(n - 1), '_BRA'])
 
         # contract middle env if there is one
