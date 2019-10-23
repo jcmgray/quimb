@@ -254,6 +254,40 @@ def swap(dim=2, dtype=complex, **kwargs):
     return S
 
 
+@functools.lru_cache(maxsize=128)
+def fsim(theta, phi, dtype=complex, **kwargs):
+    r"""The 'fermionic simulation' gate:
+
+    .. math::
+
+        \mathrm{fsim}(\theta, \phi) =
+        \begin{bmatrix}
+        1 & 0 & 0 & 0\\
+        0 & \cos(\theta) & -i sin(\theta) & 0\\
+        0 & -i sin(\theta) & \cos(\theta) & 0\\
+        0 & 0 & 0 & \exp(-i \phi)
+        \end{bmatrix}
+
+    Note that ``theta`` and ``phi`` should be specified in radians and the sign
+    convention with this gate varies. Here for example,
+    ``fsim(- pi / 2, 0) == iswap()``.
+    """
+    from cmath import cos, sin, exp
+
+    a = cos(theta)
+    b = -1j * sin(theta)
+    c = exp(-1j * phi)
+
+    gate = [[1, 0, 0, 0],
+            [0, a, b, 0],
+            [0, b, a, 0],
+            [0, 0, 0, c]]
+
+    gate = qu(gate, dtype=dtype, **kwargs)
+    make_immutable(gate)
+    return gate
+
+
 @functools.lru_cache(maxsize=4)
 def iswap(dtype=complex, **kwargs):
     iswap = qu([[1., 0., 0., 0.],

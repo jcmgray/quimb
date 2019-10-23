@@ -72,14 +72,17 @@ class TestGates:
 
     @pytest.mark.parametrize("gate", ['Rx', 'Ry', 'Rz', 'T_gate', 'S_gate',
                                       'CNOT', 'cX', 'cY', 'cZ', 'hadamard',
-                                      'phase_gate', 'iswap', 'swap', 'U_gate'])
+                                      'phase_gate', 'iswap', 'swap', 'U_gate',
+                                      'fsim'])
     @pytest.mark.parametrize('dtype', [np.complex64, np.complex128])
     @pytest.mark.parametrize('sparse', [False, True])
     def test_construct(self, gate, dtype, sparse):
-        if gate in ('Rx', 'Ry', 'Rz', 'phase_gate'):
+        if gate in {'Rx', 'Ry', 'Rz', 'phase_gate'}:
             args = (0.43827,)
-        elif gate in ('U_gate'):
+        elif gate in {'U_gate'}:
             args = (0.1, 0.2, 0.3)
+        elif gate in {'fsim'}:
+            args = (-1.3, 5.4)
         else:
             args = ()
         G = getattr(qu, gate)(*args, dtype=dtype, sparse=sparse)
@@ -92,6 +95,9 @@ class TestGates:
     def test_gates_import(self):
         from quimb.gates import Z
         assert_allclose(Z, [[1, 0], [0, -1]])
+
+    def test_fsim(self):
+        assert_allclose(qu.fsim(- qu.pi / 2, 0.0), qu.iswap(), atol=1e-12)
 
 
 class TestHamHeis:

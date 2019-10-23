@@ -176,6 +176,9 @@ class qarray(np.ndarray):
     def A(self):
         return np.asarray(self)
 
+    def __array__(self):
+        return np.asarray(self)
+
     def __and__(self, other):
         return kron_dispatch(self, other)
 
