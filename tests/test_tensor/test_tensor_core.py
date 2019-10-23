@@ -407,10 +407,10 @@ class TestTensorFunctions:
                 rand_tensor((2, 3, 4), 'abc', dtype=dtype)
         else:
             t = rand_tensor((2, 3, 4), 'abc', dtype=dtype)
-            assert t.dtype == dtype
+            assert t.dtype == np.dtype(dtype)
 
             tn = t & t
-            assert tn.dtype == dtype
+            assert tn.dtype == np.dtype(dtype)
 
     def test_squeeze(self):
         a = rand_tensor((1, 2, 3, 1, 4), inds='abcde', tags=['hello'])

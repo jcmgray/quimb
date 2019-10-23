@@ -68,7 +68,7 @@ class TestSpinHam:
 
 class TestMPSSpecificStates:
 
-    @pytest.mark.parametrize("dtype", [float, 'complex64'])
+    @pytest.mark.parametrize("dtype", ['float32', 'complex64'])
     def test_ghz_state(self, dtype):
         mps = qtn.MPS_ghz_state(5, dtype=dtype)
         assert mps.dtype == dtype
@@ -77,7 +77,7 @@ class TestMPSSpecificStates:
         assert mps.bond_sizes() == [2, 2, 2, 2]
         assert qu.fidelity(psi, mps.to_dense()) == pytest.approx(1.0)
 
-    @pytest.mark.parametrize("dtype", [float, 'complex64'])
+    @pytest.mark.parametrize("dtype", ['float32', 'complex64'])
     def test_w_state(self, dtype):
         mps = qtn.MPS_w_state(5, dtype=dtype)
         assert mps.dtype == dtype
