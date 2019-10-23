@@ -204,7 +204,7 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
 
     Returns
     -------
-    MatrixProductState
+    TensorNetwork1DVector
 
     See Also
     --------
@@ -398,9 +398,14 @@ def rand_padder(vector, pad_width, iaxis, kwargs):
     return vector
 
 
-class TensorNetwork1D:
+class TensorNetwork1D(TensorNetwork):
     """Base class for tensor networks with a one-dimensional structure.
     """
+
+    _EXTRA_PROPS = ('_site_tag_id',)
+
+    def from_TN_setup(self):
+        self.structure = self.site_tag_id
 
     @property
     def site_tag_id(self):
@@ -426,10 +431,13 @@ class TensorNetwork1D:
     align_ = functools.partialmethod(align, inplace=True)
 
 
-class TensorNetwork1DVector:
+class TensorNetwork1DVector(TensorNetwork1D,
+                            TensorNetwork):
     """1D Tensor network which overall is like a vector with a single type of
     site ind.
     """
+
+    _EXTRA_PROPS = ('_site_tag_id', '_site_ind_id')
 
     def reindex_sites(self, new_id, where=None, inplace=False):
         """Update the physical site index labels to a new string specifier.
@@ -547,7 +555,8 @@ class TensorNetwork1DVector:
         return cAB - cA * cB
 
 
-class TensorNetwork1DFlat:
+class TensorNetwork1DFlat(TensorNetwork1D,
+                          TensorNetwork):
     """1D Tensor network which has a flat structure.
     """
 
@@ -1227,8 +1236,6 @@ class MatrixProductState(TensorNetwork1DVector,
         # short-circuit for copying MPSs
         if isinstance(arrays, MatrixProductState):
             super().__init__(arrays)
-            for ep in MatrixProductState._EXTRA_PROPS:
-                setattr(self, ep, getattr(arrays, ep))
             return
 
         arrays = tuple(arrays)
@@ -1285,33 +1292,6 @@ class MatrixProductState(TensorNetwork1DVector,
 
         super().__init__(gen_tensors(), structure=site_tag_id, sites=sites,
                          nsites=nsites, check_collisions=False, **tn_opts)
-
-    @classmethod
-    def from_TN(cls, tn, site_ind_id, site_tag_id,
-                cyclic=False, inplace=False):
-        """Convert a ``TensorNetwork`` into a ``MatrixProductState``, assuming
-        it has the appropirate underlying structure.
-
-        Parameters
-        ----------
-        tn : TensorNetwork
-            The tensor network to convert.
-        site_ind_id : str
-            The string formatter that specifies the site indices -- it should
-            match what the tensors of ``tn`` already have.
-        site_tag_id : str
-            The string formatter that specifies the site tags -- it should
-            match what the tensors of ``tn`` already have.
-        inplace : bool, optional
-            If True, perform the conversion in-place.
-        """
-        if not inplace:
-            tn = tn.copy()
-        tn.__class__ = cls
-        tn._site_ind_id = site_ind_id
-        tn._site_tag_id = site_tag_id
-        tn.cyclic = cyclic
-        return tn
 
     @classmethod
     def from_dense(cls, psi, dims, site_ind_id='k{}',
@@ -1371,14 +1351,9 @@ class MatrixProductState(TensorNetwork1DVector,
             yield TM
 
         tn = TensorNetwork(gen_tensors(), structure='I{}')
-        return cls.from_TN(tn, site_ind_id, site_tag_id)
-
-    def imprint(self, other):
-        """Cast ``other`` into a ``MatrixProductState`` like ``self``.
-        """
-        for p in MatrixProductState._EXTRA_PROPS:
-            setattr(other, p, getattr(self, p))
-        other.__class__ = MatrixProductState
+        return cls.from_TN(tn, cyclic=False,
+                           site_ind_id=site_ind_id,
+                           site_tag_id=site_tag_id)
 
     def add_MPS(self, other, inplace=False, compress=False, **compress_opts):
         """Add another MatrixProductState to this one.
@@ -2361,8 +2336,6 @@ class MatrixProductOperator(TensorNetwork1DFlat,
         # short-circuit for copying
         if isinstance(arrays, MatrixProductOperator):
             super().__init__(arrays)
-            for ep in MatrixProductOperator._EXTRA_PROPS:
-                setattr(self, ep, getattr(arrays, ep))
             return
 
         arrays = tuple(arrays)
@@ -2421,44 +2394,6 @@ class MatrixProductOperator(TensorNetwork1DFlat,
 
         super().__init__(gen_tensors(), structure=site_tag_id, sites=sites,
                          nsites=nsites, check_collisions=False, **tn_opts)
-
-    @classmethod
-    def from_TN(cls, tn, upper_ind_id, lower_ind_id, site_tag_id,
-                cyclic=False, inplace=False):
-        """Convert a TensorNetwork into a MatrixProductOperator, assuming it
-        has the appropirate underlying structure.
-
-        Parameters
-        ----------
-        tn : TensorNetwork
-            The tensor network to convert.
-        upper_ind_id : str
-            The string formatter that specifies the upper indices -- it should
-            match what the tensors of ``tn`` already have.
-        lower_ind_id : str
-            The string formatter that specifies the lower indices -- it should
-            match what the tensors of ``tn`` already have.
-        site_tag_id : str
-            The string formatter that specifies the site tags -- it should
-            match what the tensors of ``tn`` already have.
-        inplace : bool, optional
-            If True, perform the conversion in-place.
-        """
-        if not inplace:
-            tn = tn.copy()
-        tn.__class__ = cls
-        tn._upper_ind_id = upper_ind_id
-        tn._lower_ind_id = lower_ind_id
-        tn._site_tag_id = site_tag_id
-        tn.cyclic = cyclic
-        return tn
-
-    def imprint(self, other):
-        """Cast ``other`` into a ``MatrixProductOperator`` like ``self``.
-        """
-        for p in MatrixProductOperator._EXTRA_PROPS:
-            setattr(other, p, getattr(self, p))
-        other.__class__ = MatrixProductOperator
 
     def reindex_lower_sites(self, new_id, where=None, inplace=False):
         """Update the lower site index labels to a new string specifier.
@@ -2852,8 +2787,6 @@ class Dense1D(TensorNetwork1DVector,
         # copy short-circuit
         if isinstance(array, Dense1D):
             super().__init__(array)
-            for ep in Dense1D._EXTRA_PROPS:
-                setattr(self, ep, getattr(array, ep))
             return
 
         # work out number of sites and sub-dimensions etc.
@@ -2957,8 +2890,6 @@ class SuperOperator1D(
         # short-circuit for copying
         if isinstance(arrays, SuperOperator1D):
             super().__init__(arrays)
-            for ep in SuperOperator1D._EXTRA_PROPS:
-                setattr(self, ep, getattr(arrays, ep))
             return
 
         arrays = tuple(arrays)

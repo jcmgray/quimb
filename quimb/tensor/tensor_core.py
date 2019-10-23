@@ -1810,6 +1810,8 @@ class TensorNetwork(object):
         tensor ids of those tensors with ``ind``.
     """
 
+    _EXTRA_PROPS = ()
+
     def __init__(self, ts, *,
                  virtual=False,
                  structure=None,
@@ -1830,6 +1832,8 @@ class TensorNetwork(object):
             for tid, t in ts.tensor_map.items():
                 self.tensor_map[tid] = t if virtual else t.copy()
                 self.tensor_map[tid].add_owner(self, tid)
+            for ep in ts.__class__._EXTRA_PROPS:
+                setattr(self, ep, getattr(ts, ep))
             return
 
         # parameters
@@ -1898,6 +1902,61 @@ class TensorNetwork(object):
         Views the constituent tensors.
         """
         return TensorNetwork((self, other), virtual=True)
+
+    _EXTRA_PROPS = ()
+
+    @classmethod
+    def from_TN(cls, tn, inplace=False, **kwargs):
+        """Construct a specific tensor network subclass (i.e. one with some
+        promise about structure/geometry and tags/inds such as an MPS) from
+        a generic tensor network which should have that structure already.
+
+        Parameters
+        ----------
+        cls : class
+            The TensorNetwork subclass to convert ``tn`` to.
+        tn : TensorNetwork
+            The TensorNetwork to convert.
+        inplace : bool, optional
+            Whether to perform the conversion inplace or not.
+        kwargs
+            Extra properties of the TN subclass that should be specified.
+        """
+        new_tn = tn if inplace else tn.copy()
+
+        for prop in cls._EXTRA_PROPS:
+            # equate real and private property name
+            prop_name = prop.lstrip('_')
+
+            # get value from kwargs
+            if prop_name in kwargs:
+                setattr(new_tn, prop, kwargs.pop(prop_name))
+
+            # get value directly from TN
+            elif hasattr(tn, prop_name):
+                setattr(new_tn, prop, getattr(tn, prop_name))
+
+            else:
+                raise ValueError("You need to specify '{}' for the tensor "
+                                 "network class {}, and ensure that it "
+                                 "correctly corresponds to the structure of "
+                                 "the tensor network supplied, since it cannot"
+                                 " be found as an attribute on the TN: {}."
+                                 .format(prop_name, cls, tn))
+
+        if kwargs:
+            raise ValueError("Options {} are invalid for "
+                             "the class {}.".format(kwargs, cls))
+
+        new_tn.__class__ = cls
+        return new_tn
+
+    def view_as(self, cls, inplace=False, **kwargs):
+        """View this tensor network as subclass ``cls``.
+        """
+        return cls.from_TN(self, inplace=inplace, **kwargs)
+
+    view_as_ = functools.partialmethod(view_as, inplace=True)
 
     # ------------------------------- Methods ------------------------------- #
 
