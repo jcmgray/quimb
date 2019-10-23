@@ -17,6 +17,7 @@ v1.2.1 (unreleased)
 - Add :func:`~quimb.tensor.tensor_gen.MPS_ghz_state` and :func:`~quimb.tensor.tensor_gen.MPS_w_state` for building bond dimension 2 open boundary MPS reprentations of those states.
 - Various changes in conjunction with `autoray <https://github.com/jcmgray/autoray>`_ to improve the agnostic-ness of tensor network operations with respect to the backend array type
 - Add :func:`~quimb.tensor.tensor_core.new_bond` on top of :meth:`quimb.tensor.tensor_core.Tensor.new_ind` and :meth:`quimb.tensor.tensor_core.Tensor.expand_ind` for more graph orientated construction of tensor networks, see :ref:`tn-creation-graph-style`
+- Add the :func:`~quimb.gen.operators.fsim` gate.
 
 **Bug fixes:**
 
