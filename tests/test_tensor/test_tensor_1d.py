@@ -567,6 +567,25 @@ class TestMatrixProductState:
         psi0XX_s = psi0.gate_with_auto_swap(CNOT, (4, 13))
         assert psi0XX.H @ psi0XX_s == pytest.approx(1.0)
 
+    def test_auto_split_detection(self):
+        psi0 = MPS_computational_state('00')
+        CNOT = qu.controlled('not')
+        ISWAP = qu.iswap()
+        G = qu.rand_uni(4)
+
+        opts = {'contract': 'auto-split-gate', 'where': (0, 1)}
+
+        psi_cnot = psi0.gate(CNOT, **opts)
+        psi_iswap = psi0.gate(ISWAP, **opts)
+        psi_G = psi0.gate(G, **opts)
+
+        assert (psi_cnot.max_bond() ==
+                psi_iswap.max_bond() ==
+                psi_G.max_bond() == 2)
+
+        assert len(psi_cnot.tensors) == len(psi_iswap.tensors) == 4
+        assert len(psi_G.tensors) == 3
+
 
 class TestMatrixProductOperator:
 

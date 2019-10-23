@@ -17,6 +17,7 @@ from .tensor_core import (
     TensorNetwork,
     rand_uuid,
     bonds,
+    bonds_size,
     tags2set,
     get_tags,
 )
@@ -129,8 +130,10 @@ def expec_TN_1D(*tns, compress=None, eps=1e-15):
     return expec_tn ^ ...
 
 
-_VALID_GATE_CONTRACT = {False, 'split-gate', True, 'swap+split'}
+_VALID_GATE_CONTRACT = {False, True, 'swap+split',
+                        'split-gate', 'swap-split-gate', 'auto-split-gate'}
 _VALID_GATE_PROPAGATE = {'sites', 'register', False, True}
+_TWO_BODY_ONLY = _VALID_GATE_CONTRACT - {True, False}
 
 
 def gate_TN_1D(tn, G, where, contract=False, tags=None,
@@ -139,19 +142,28 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
     r"""Act with the gate ``g`` on sites ``where``, maintaining the outer
     indices of the 1D tensor netowork::
 
-        contract=False     contract='split-gate'
-            . .                  . .              <- where
-        o-o-o-o-o-o-o        o-o-o-o-o-o-o
-        | | | | | | |        | | | | | | |
-            GGG                  G~G
-            | |                  | |
+
+        contract=False       contract=True
+            . .                    . .             <- where
+        o-o-o-o-o-o-o        o-o-o-GGG-o-o-o
+        | | | | | | |        | | | / \ | | |
+            GGG
+            | |
 
 
-        contract=True      contract='swap+split'
-              . .                  . .            <- where
-        o-o-o-GGG-o-o-o      o-o-o-G=G-o-o-o
-        | | | / \ | | |      | | | | | | | |
+        contract='split-gate'        contract='swap-split-gate'
+              . .                          . .                      <- where
+          o-o-o-o-o-o-o                o-o-o-o-o-o-o
+          | | | | | | |                | | | | | | |
+              G~G                          G~G
+              | |                          \ /
+                                            X
+                                           / \
 
+        contract='swap+split'
+                . .            <- where
+          o-o-o-G=G-o-o-o
+          | | | | | | | |
 
     Note that the sites in ``where`` do not have to be contiguous. By default,
     site tags will be propagated to the gate tensors, identifying a
@@ -159,6 +171,8 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
 
     Parameters
     ----------
+    tn : TensorNetwork1DVector
+        The 1D vector-like tensor network, for example, and MPS.
     G : array
         A square array to act with on sites ``where``. It should have twice the
         number of dimensions as the number of sites. The second half of these
@@ -168,11 +182,16 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
         correctly.
     where : int or sequence of int
         Where the gate should act.
-    contract : {False, 'split-gate', True, 'swap+split'}, optional
+    contract : {False, 'split-gate', 'swap-split-gate',
+                'auto-split-gate', True, 'swap+split'}, optional
         Whether to contract the gate into the 1D tensor network. If,
 
             - False: leave the gate uncontracted, the default
             - 'split-gate': like False, but split the gate if it is two-site.
+            - 'swap-split-gate': like 'split-gate', but decompose the gate as
+              if a swap had first been applied
+            - 'auto-split-gate': automatically select between the above three
+              options, based on the rank of the gate.
             - True: contract the gate into the tensor network, if the gate acts
               on more than one site, this will produce an ever larger tensor.
             - 'swap+split': Swap sites until they are adjacent, then contract
@@ -230,9 +249,9 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
 
     if isinstance(where, Integral):
         where = (where,)
-    ng = len(where)
+    ng = len(where)  # number of sites the gate acts on
 
-    if (ng > 2) and contract in ('swap+split', 'split-gate'):
+    if (ng > 2) and contract in _TWO_BODY_ONLY:
         err_msg = "Can't use `contract='{}'` for >2 sites.".format(contract)
         raise ValueError(err_msg)
 
@@ -284,17 +303,56 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
 
         TG.modify(tags=TG.tags | old_tags)
 
+    if ng == 1:
+        psi |= TG
+        return psi
+
     # check if we should split multi-site gates (which may result in an easier
-    # tensor network to contract if we use compression)
-    if (contract == 'split-gate') and (ng > 1):
+    #     tensor network to contract if we use compression)
+    if contract in ('split-gate', 'auto-split-gate'):
         #  | |       | |
         #  GGG  -->  G~G
         #  | |       | |
-        TG = TG.split(TG.inds[::2], **compress_opts)
+        TGnorm = TG.split(TG.inds[::2], **compress_opts)
 
-        # if we are splitting the gate then only add site tags on the tensors
-        # directly 'above' the site
-        if (propagate_tags == 'register') and (ng == 2):
+    # sometimes it is worth performing the decomposition *across* the gate,
+    #     effectively introducing a SWAP
+    if contract in ('swap-split-gate', 'auto-split-gate'):
+        #            \ /
+        #  | |        X
+        #  GGG  -->  / \
+        #  | |       G~G
+        #            | |
+        TGswap = TG.split(TG.inds[::3], **compress_opts)
+
+    # like 'split-gate' but check the rank for swapped indices also, and if no
+    #     rank reduction, simply don't swap
+    if contract == 'auto-split-gate':
+        #            | |      \ /
+        #  | |       | |       X           | |
+        #  GGG  -->  G~G  or  / \   or ... GGG
+        #  | |       | |      G~G          | |
+        #            | |      | |
+        norm_rank = bonds_size(*TGnorm)
+        swap_rank = bonds_size(*TGswap)
+
+        if swap_rank < norm_rank:
+            contract = 'swap-split-gate'
+        elif norm_rank < dp**ng:
+            contract = 'split-gate'
+        else:
+            # else no rank reduction available - leave as ``contract=False``.
+            contract = False
+
+    if contract == 'swap-split-gate':
+        TG = TGswap
+    elif contract == 'split-gate':
+        TG = TGnorm
+
+    # if we are splitting the gate then only add site tags on the tensors
+    # directly 'above' the site
+    if contract in ('split-gate', 'swap-split-gate'):
+        if propagate_tags == 'register':
             for (i, j) in (where, where[::-1]):
                 itid, = TG.ind_map[psi.site_ind(i)]
                 TG.tensor_map[itid].tags.discard(psi.site_tag(j))

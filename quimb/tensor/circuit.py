@@ -3,6 +3,7 @@ import numbers
 
 import quimb as qu
 from .tensor_gen import MPS_computational_state
+from .tensor_1d import TensorNetwork1DVector
 
 
 def parse_qasm(qasm):
@@ -103,8 +104,8 @@ def apply_U3(psi, theta, phi, lamda, i, **gate_opts):
 
 
 def apply_swap(psi, i, j, **gate_opts):
-    itag, jtag = map(psi.site_tag, (i, j))
-    psi.reindex_({itag: jtag, jtag: itag})
+    iind, jind = map(psi.site_ind, (int(i), int(j)))
+    psi.reindex_({iind: jind, jind: iind})
 
 
 APPLY_GATES = {
@@ -127,6 +128,8 @@ APPLY_GATES = {
     'CZ': build_gate_2(qu.cZ(), tags='CZ'),
     'CNOT': build_gate_2(qu.CNOT(), tags='CNOT'),
     'SWAP': apply_swap,
+    'IS': build_gate_2(qu.iswap(), tags='ISWAP'),
+    'ISWAP': build_gate_2(qu.iswap(), tags='ISWAP'),
 }
 
 
@@ -169,7 +172,7 @@ class Circuit:
                 ('H', 1),
                 ('H', 2),
             ]
-        >>> qc.apply_circuit(gates)
+        >>> qc.apply_gates(gates)
         >>> qc.psi
         <MatrixProductState(tensors=10, structure='I{}', nsites=3)>
 
@@ -210,9 +213,14 @@ class Circuit:
                 self._psi.add_tag(tag)
 
         self.gate_opts = {} if gate_opts is None else dict(gate_opts)
-        self.gate_opts.setdefault('contract', 'split-gate')
+        self.gate_opts.setdefault('contract', 'auto-split-gate')
         self.gate_opts.setdefault('propagate_tags', 'register')
         self.gates = []
+
+        # when we add gates we will modify the TN structure, apart from in the
+        # 'swap+split' case, which explicitly maintains an MPS
+        if self.gate_opts['contract'] != 'swap+split':
+            self._psi.view_as_(TensorNetwork1DVector)
 
     @classmethod
     def from_qasm(cls, qasm, **quantum_circuit_opts):
@@ -220,7 +228,7 @@ class Circuit:
         """
         info = parse_qasm(qasm)
         qc = cls(info['n'], **quantum_circuit_opts)
-        qc.apply_circuit(info['gates'])
+        qc.apply_gates(info['gates'])
         return qc
 
     @classmethod
@@ -229,7 +237,7 @@ class Circuit:
         """
         info = parse_qasm_file(fname)
         qc = cls(info['n'], **quantum_circuit_opts)
-        qc.apply_circuit(info['gates'])
+        qc.apply_gates(info['gates'])
         return qc
 
     @classmethod
@@ -238,7 +246,7 @@ class Circuit:
         """
         info = parse_qasm_url(url)
         qc = cls(info['n'], **quantum_circuit_opts)
-        qc.apply_circuit(info['gates'])
+        qc.apply_gates(info['gates'])
         return qc
 
     def apply_gate(self, gate_id, *gate_args, gate_round=None):
@@ -276,9 +284,11 @@ class Circuit:
 
         apply_fn = APPLY_GATES[gate_id.upper()]
         apply_fn(self._psi, *gate_args, tags=tags, **self.gate_opts)
+
+        # keep track of the gates applied
         self.gates.append((gate_id, *gate_args))
 
-    def apply_circuit(self, gates):
+    def apply_gates(self, gates):
         """Apply a sequence of gates to this tensor network quantum circuit.
 
         Parameters
@@ -290,6 +300,12 @@ class Circuit:
             self.apply_gate(*gate)
 
         self._psi.squeeze_()
+
+    def apply_circuit(self, gates):
+        import warnings
+        msg = ("``apply_circuit`` is deprecated in favour of ``apply_gates``.")
+        warnings.warn(msg, DeprecationWarning)
+        self.apply_gates(gates)
 
     def x(self, i, gate_round=None):
         self.apply_gate('X', i, gate_round=gate_round)
@@ -338,6 +354,9 @@ class Circuit:
 
     def swap(self, i, j, gate_round=None):
         self.apply_gate('SWAP', i, j)
+
+    def iswap(self, i, j, gate_round=None):
+        self.apply_gate('ISWAP', i, j)
 
     @property
     def psi(self):

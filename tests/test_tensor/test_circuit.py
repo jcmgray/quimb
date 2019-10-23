@@ -41,7 +41,7 @@ class TestCircuit:
             ('H', 1),
             ('H', 2),
         ]
-        qc.apply_circuit(gates)
+        qc.apply_gates(gates)
         assert qu.expec(qc.psi.to_dense(), qu.ghz_state(3)) == pytest.approx(1)
         counts = qc.simulate_counts(1024)
         assert len(counts) == 2
@@ -94,3 +94,35 @@ class TestCircuit:
 
         assert circ.psi.H @ circ.psi == pytest.approx(1.0)
         assert abs((circ.psi.H & psi0) ^ all) < 0.99999999
+
+    def test_auto_split_gate(self):
+
+        n = 3
+        ops = [
+            ('u3', 1., 2., 3., 0),
+            ('u3', 2., 3., 1., 1),
+            ('u3', 3., 1., 2., 2),
+            ('cz', 0, 1),
+            ('iswap', 1, 2),
+            ('cx', 2, 0),
+            ('iswap', 2, 1),
+            ('h', 0),
+            ('h', 1),
+            ('h', 2),
+        ]
+        cnorm = qtn.Circuit(n, gate_opts=dict(contract='split-gate'))
+        cnorm.apply_gates(ops)
+        assert cnorm.psi.max_bond() == 4
+
+        cswap = qtn.Circuit(n, gate_opts=dict(contract='swap-split-gate'))
+        cswap.apply_gates(ops)
+        assert cswap.psi.max_bond() == 4
+
+        cauto = qtn.Circuit(n, gate_opts=dict(contract='auto-split-gate'))
+        cauto.apply_gates(ops)
+        assert cauto.psi.max_bond() == 2
+
+        assert qu.fidelity(cnorm.psi.to_dense(),
+                           cswap.psi.to_dense()) == pytest.approx(1.0)
+        assert qu.fidelity(cswap.psi.to_dense(),
+                           cauto.psi.to_dense()) == pytest.approx(1.0)
