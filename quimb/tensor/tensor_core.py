@@ -3635,10 +3635,10 @@ class TensorNetwork(object):
             colors = collections.OrderedDict(zip(color, rgbs))
 
         for i, t1 in enumerate(ts):
-            G.node[i]['color'] = None
+            G.nodes[i]['color'] = None
             for col_tag in colors:
                 if col_tag in t1.tags:
-                    G.node[i]['color'] = colors[col_tag]
+                    G.nodes[i]['color'] = colors[col_tag]
             # optionally label the tensor's tags
             if show_tags:
                 labels[i] = str(t1.tags)
@@ -3660,8 +3660,8 @@ class TensorNetwork(object):
                 node_colors += [(1.0, 1.0, 1.0)]
             else:
                 szs += [node_size]
-                if G.node[nd]['color'] is not None:
-                    node_colors += [G.node[nd]['color']]
+                if G.nodes[nd]['color'] is not None:
+                    node_colors += [G.nodes[nd]['color']]
                 else:
                     node_colors += [(0.4, 0.4, 0.4)]
 
