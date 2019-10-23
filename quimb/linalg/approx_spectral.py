@@ -16,11 +16,7 @@ from ..gen.rand import randn, rand_rademacher, rand_phase, seed_rand
 from ..linalg.mpi_launcher import get_mpi_pool
 from ..tensor.tensor_core import Tensor
 from ..tensor.tensor_1d import MatrixProductOperator
-from ..tensor.tensor_approx_spectral import (
-    construct_lanczos_tridiag_MPO,
-    PTPTLazyMPS,
-    construct_lanczos_tridiag_PTPTLazyMPS,
-)
+from ..tensor.tensor_approx_spectral import construct_lanczos_tridiag_MPO
 
 
 # --------------------------------------------------------------------------- #
@@ -432,8 +428,6 @@ def single_random_estimate(A, K, bsz, beta_tol, v0, f, pos, tau, tol_scale,
     # choose normal (any LinearOperator) or MPO lanczos tridiag construction
     if isinstance(A, MatrixProductOperator):
         lanc_fn = construct_lanczos_tridiag_MPO
-    elif isinstance(A, PTPTLazyMPS):
-        lanc_fn = construct_lanczos_tridiag_PTPTLazyMPS
     else:
         lanc_fn = construct_lanczos_tridiag
         lanczos_opts['bsz'] = bsz
