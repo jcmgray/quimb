@@ -1971,10 +1971,10 @@ class TensorNetwork(object):
                 g_ix = tn_iix - inner_inds
                 new_inds = {rand_uuid() for _ in range(len(b_ix))}
                 reind = dict(zip(b_ix, new_inds))
-                inner_inds |= new_inds
-                inner_inds |= g_ix
+                inner_inds.update(new_inds)
+                inner_inds.update(g_ix)
             else:
-                inner_inds |= tn_iix
+                inner_inds.update(tn_iix)
 
             # add tensors, reindexing if necessary
             for tid, tsr in tn.tensor_map.items():

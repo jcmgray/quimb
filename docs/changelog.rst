@@ -7,7 +7,7 @@ Release notes for ``quimb``.
 .. _whats-new.1.2.1:
 
 v1.2.1 (unreleased)
---------------------
+-------------------
 
 **Enhancements**
 
@@ -15,15 +15,18 @@ v1.2.1 (unreleased)
 - Automatically squeeze tensor networks when rank-simplifying
 - Add :meth:`~quimb.tensor.tensor_1d.TensorNetwork1DFlat.compress_site` for compressing around single sites of MPS etc.
 - Add :func:`~quimb.tensor.tensor_gen.MPS_ghz_state` and :func:`~quimb.tensor.tensor_gen.MPS_w_state` for building bond dimension 2 open boundary MPS reprentations of those states.
+- Various changes in conjunction with `autoray <https://github.com/jcmgray/autoray>`_ to improve the agnostic-ness of tensor network operations with respect to the backend array type
+- Add :func:`~quimb.tensor.tensor_core.new_bond` on top of :meth:`quimb.tensor.tensor_core.Tensor.new_ind` and :meth:`quimb.tensor.tensor_core.Tensor.expand_ind` for more graph orientated construction of tensor networks, see :ref:`tn-creation-graph-style`
 
 **Bug fixes:**
 
 - Fix consistency of :func:`~quimb.calc.fidelity` by making the unsquared version the default for the case when either state is pure, and always return a real number.
+- Fix a bug in the 2D system example for when ``j != 1.0``
 
 .. _whats-new.1.2.0:
 
 v1.2.0 (6th June 2019)
---------------------
+----------------------
 
 **Enhancements**
 

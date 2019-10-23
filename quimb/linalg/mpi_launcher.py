@@ -122,6 +122,7 @@ class SynchroMPIPool:
         self.size = self.comm.Get_size()
         self.rank = self.comm.Get_rank()
         self.counter = itertools.cycle(range(0, NUM_MPI_WORKERS))
+        self._max_workers = self.size
 
     def submit(self, fn, *args, **kwargs):
         # round robin iterate through ranks
