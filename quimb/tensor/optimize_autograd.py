@@ -3,6 +3,7 @@ automatically derive gradients for input to scipy.
 """
 import re
 import functools
+import importlib
 
 import tqdm
 import numpy as np
@@ -150,7 +151,7 @@ class TNOptimizer:
         loss_target=None,
         optimizer='L-BFGS-B',
         progbar=True,
-        autograd_backend='jax',
+        autograd_backend='AUTO',
         # the rest are ignored for compat
         learning_rate=None,
         learning_decay_steps=None,
@@ -158,9 +159,15 @@ class TNOptimizer:
     ):
         self.progbar = progbar
         self.optimizer = optimizer
-        self.autograd_backend = autograd_backend
         self.constant_tags = (set() if constant_tags is None
                               else set(constant_tags))
+        if autograd_backend.upper() == 'AUTO':
+            if importlib.util.find_spec("jax") is not None:
+                autograd_backend = 'jax'
+            else:
+                autograd_backend = 'autograd'
+
+        self.autograd_backend = autograd_backend
 
         # use identity if no nomalization required
         if norm_fn is None:
