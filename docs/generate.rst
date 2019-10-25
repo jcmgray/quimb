@@ -41,6 +41,10 @@ Operators
 - :func:`~quimb.gen.operators.Rx`
 - :func:`~quimb.gen.operators.Ry`
 - :func:`~quimb.gen.operators.Rz`
+- :func:`~quimb.gen.operators.Xsqrt`
+- :func:`~quimb.gen.operators.Ysqrt`
+- :func:`~quimb.gen.operators.Zsqrt`
+- :func:`~quimb.gen.operators.Wsqrt`
 - :func:`~quimb.gen.operators.phase_gate`
 - :func:`~quimb.gen.operators.swap`
 - :func:`~quimb.gen.operators.iswap`

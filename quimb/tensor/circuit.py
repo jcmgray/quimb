@@ -1,4 +1,3 @@
-import math
 import numbers
 
 import quimb as qu
@@ -103,6 +102,11 @@ def apply_U3(psi, theta, phi, lamda, i, **gate_opts):
     psi.gate_(qu.U_gate(theta, phi, lamda), int(i), tags=mtags, **gate_opts)
 
 
+def apply_fsim(psi, theta, phi, i, j, **gate_opts):
+    mtags = _merge_tags({'FSIM'}, gate_opts)
+    psi.gate_(qu.fsim(theta, phi), (int(i), int(j)), tags=mtags, **gate_opts)
+
+
 def apply_swap(psi, i, j, **gate_opts):
     iind, jind = map(psi.site_ind, (int(i), int(j)))
     psi.reindex_({iind: jind, jind: iind})
@@ -119,17 +123,19 @@ APPLY_GATES = {
     'Z': build_gate_1(qu.pauli('Z'), tags='Z'),
     'S': build_gate_1(qu.S_gate(), tags='S'),
     'T': build_gate_1(qu.T_gate(), tags='T'),
-    'X_1_2': build_gate_1(qu.Rx(math.pi / 2), tags='X_1/2'),
-    'Y_1_2': build_gate_1(qu.Ry(math.pi / 2), tags='Y_1/2'),
-    'Z_1_2': build_gate_1(qu.Rz(math.pi / 2), tags='Z_1/2'),
+    'X_1_2': build_gate_1(qu.Xsqrt(), tags='X_1/2'),
+    'Y_1_2': build_gate_1(qu.Ysqrt(), tags='Y_1/2'),
+    'Z_1_2': build_gate_1(qu.Zsqrt(), tags='Z_1/2'),
+    'W_1_2': build_gate_1(qu.Wsqrt(), tags='W_1/2'),
     'IDEN': lambda *args, **kwargs: None,
+    'CNOT': build_gate_2(qu.CNOT(), tags='CNOT'),
     'CX': build_gate_2(qu.cX(), tags='CX'),
     'CY': build_gate_2(qu.cY(), tags='CY'),
     'CZ': build_gate_2(qu.cZ(), tags='CZ'),
-    'CNOT': build_gate_2(qu.CNOT(), tags='CNOT'),
-    'SWAP': apply_swap,
     'IS': build_gate_2(qu.iswap(), tags='ISWAP'),
     'ISWAP': build_gate_2(qu.iswap(), tags='ISWAP'),
+    'FSIM': apply_fsim,
+    'SWAP': apply_swap,
 }
 
 
@@ -433,6 +439,11 @@ class Circuit:
         """
         p_dense = self.to_dense(reverse=reverse, **contract_opts)
         return qu.simulate_counts(p_dense, C=C, seed=seed)
+
+    def schrodinger_contract(self, *args, **contract_opts):
+        ntensor = len(self._psi.tensor_map)
+        path = [(0, 1)] + [(0, i) for i in reversed(range(1, ntensor - 1))]
+        return self.psi.contract(*args, optimize=path, **contract_opts)
 
     def __repr__(self):
         r = "<Circuit(n={}, n_gates={}, gate_opts={})>"

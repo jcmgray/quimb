@@ -234,11 +234,77 @@ def U_gate(theta, phi, lamda, dtype=complex, sparse=False):
     from cmath import cos, sin, exp
 
     c2, s2 = cos(theta / 2), sin(theta / 2)
-    return qu(
+    U = qu(
         [[c2, -exp(1j * lamda) * s2],
          [exp(1j * phi) * s2, exp(1j * (lamda + phi)) * c2]],
         dtype=dtype, sparse=sparse
     )
+    make_immutable(U)
+    return U
+
+
+@functools.lru_cache(4)
+def Xsqrt(**qu_opts):
+    r"""Rx(pi / 2).
+
+    .. math::
+
+        X^{\frac{1}{2}} =
+        \frac{1}{\sqrt{2}}
+        \begin{bmatrix}
+        1  & - i \\
+        - i & 1
+        \end{bmatrix}
+    """
+    return Rx(math.pi / 2, **qu_opts)
+
+
+@functools.lru_cache(4)
+def Ysqrt(**qu_opts):
+    r"""Ry(pi / 2).
+
+    .. math::
+
+        X^{\frac{1}{2}} =
+        \frac{1}{\sqrt{2}}
+        \begin{bmatrix}
+        1 & - 1 \\
+        1 & 1
+        \end{bmatrix}
+    """
+    return Ry(math.pi / 2, **qu_opts)
+
+
+@functools.lru_cache(4)
+def Zsqrt(**qu_opts):
+    r"""Rz(pi / 2).
+
+    .. math::
+
+        X^{\frac{1}{2}} =
+        \frac{1}{\sqrt{2}}
+        \begin{bmatrix}
+        1 - i & 0 \\
+        0 & 1 + i
+        \end{bmatrix}
+    """
+    return Ry(math.pi / 2, **qu_opts)
+
+
+@functools.lru_cache(4)
+def Wsqrt(**qu_opts):
+    r"""R[X + Y](pi / 2).
+
+    .. math::
+
+        X^{\frac{1}{2}} =
+        \frac{1}{\sqrt{2}}
+        \begin{bmatrix}
+        1 & -\sqrt{i} \\
+        \sqrt{-i} & 1
+        \end{bmatrix}
+    """
+    return U_gate(math.pi / 2, -math.pi / 4, math.pi / 4, **qu_opts)
 
 
 @functools.lru_cache(maxsize=8)
