@@ -51,7 +51,7 @@ def fidelity(p1, p2, squared=False):
     if isvec(p1) or isvec(p2):
         F = expec(p1, p2).real
         if not squared:
-            F = F**0.5
+            F = max(0.0, F)**0.5
         return F
 
     sqrho = sqrtm(p1)
