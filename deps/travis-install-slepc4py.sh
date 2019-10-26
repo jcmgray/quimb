@@ -53,7 +53,7 @@ python2 ./configure \
   --download-metis \
   --with-scalar-type=complex
 
-make -s all
+make all
 make test
 make streams NPMAX=2
 
@@ -62,7 +62,7 @@ export SLEPC_DIR=$INSTALL_DIR/slepc
 cd $SLEPC_DIR
 git pull
 python2 ./configure
-make -s
+make
 make test
 
 # ----------------------- #
