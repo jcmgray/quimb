@@ -19,7 +19,7 @@ cd $INSTALL_DIR
 # Download required repositories #
 # ------------------------------ #
 if [ ! -d "$INSTALL_DIR/petsc" ]; then
-  git clone --depth 5 https://bitbucket.org/petsc/petsc.git
+  git clone --depth 5 https://gitlab.com/petsc/petsc.git
 fi
 
 if [ ! -d "$INSTALL_DIR/slepc" ]; then
