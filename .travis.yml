@@ -24,9 +24,7 @@ addons:
       - m4
       - git
       - liblapack-dev
-      - liblapack3gf
       - libblas-dev
-      - libblas3gf
       - wget
 
 cache:
