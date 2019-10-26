@@ -2,6 +2,9 @@
 @import url('https://fonts.googleapis.com/css?family=Fira+Sans');
 @import url('https://fonts.googleapis.com/css?family=Fira+Mono');
 
+div.body {
+    max-width: 1200px;
+}
 
 code {
     font-family: 'Inconsolata', monospace;
@@ -33,7 +36,8 @@ h1 {
     font-family: 'Fira Mono', monospace;
     font-size: 45px;
     font-weight: bold;
-    line-height: 80px;
+    line-height: 50px;
+    margin-top: 40px;
     color: rgb(50, 75, 100);
 }
 
@@ -41,7 +45,8 @@ h2 {
     font-family: 'Fira Mono', monospace;
     font-size: 35px;
     font-weight: bold;
-    line-height: 60px;
+    line-height: 50px;
+    margin-top: 40px;
     color: rgb(50, 75, 100);
 }
 
@@ -50,6 +55,7 @@ h3 {
     font-size: 25px;
     font-weight: bold;
     line-height: 50px;
+    margin-top: 40px;
     color: rgb(50, 75, 100);
 }
 
