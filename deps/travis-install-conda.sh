@@ -2,6 +2,7 @@
 set -ex
 
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+ENV="test-environment-${TRAVIS_PYTHON_VERSION}"
 
 # ~~~ New install ~~~ #
 if [ ! -d "$HOME/conda/bin" ]; then
@@ -17,8 +18,11 @@ if [ ! -d "$HOME/conda/bin" ]; then
   conda install pyyaml
   conda update -q conda
   conda info -a
-  conda env create --file $DIR/requirements-py3.yml
-  source activate test-environment
+  conda env create \
+    --name $ENV \
+    python=$TRAVIS_PYTHON_VERSION \
+    --file $DIR/requirements-py3.yml
+  source activate $ENV
 # ~~~ cached install ~~~ #
 else
   echo "Using cached conda installation."
@@ -26,10 +30,13 @@ else
   hash -r
   conda config --set always_yes yes --set changeps1 no
   conda update -q conda
-  source activate test-environment
-  conda update -q --all
-  conda env update --file $DIR/requirements-py3.yml
+  source activate $ENV
+  conda update -q \
+    --all \
+    python=$TRAVIS_PYTHON_VERSION
+  conda env update \
+    --file $DIR/requirements-py3.yml \
+    python=$TRAVIS_PYTHON_VERSION
   pip install -U codeclimate-test-reporter codacy-coverage
-  pip install -U git+https://github.com/jcmgray/opt_einsum.git
   pip uninstall --yes quimb
 fi
