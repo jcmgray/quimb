@@ -470,8 +470,10 @@ def _nb_subtract_update_base(X, c, Z):  # pragma: no cover
 
 
 _sbtrct_sigs = ['float32(float32, float32, float32)',
+                'float32(float32, float64, float32)',
                 'float64(float64, float64, float64)',
                 'complex64(complex64, float32, complex64)',
+                'complex64(complex64, float64, complex64)',
                 'complex128(complex128, float64, complex128)']
 _nb_subtract_update_seq = vectorize(_sbtrct_sigs)(_nb_subtract_update_base)
 _nb_subtract_update_par = pvectorize(_sbtrct_sigs)(_nb_subtract_update_base)
