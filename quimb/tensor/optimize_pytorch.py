@@ -170,7 +170,7 @@ class TNOptimizer:
         try:
             for _ in range(max_steps):
                 self.optimizer.step(self.closure)
-                pbar.set_description("{}".format(self.loss))
+                pbar.set_description(f"{self.loss}")
                 pbar.update()
                 self._n += 1
 
@@ -181,7 +181,7 @@ class TNOptimizer:
                 if self._time_should_stop(max_time):
                     break
 
-                pbar.set_description("{}".format(self.loss))
+                pbar.set_description(f"{self.loss}")
 
         except Exception as excpt:
             if not isinstance(excpt, KeyboardInterrupt):

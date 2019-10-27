@@ -280,10 +280,10 @@ class Circuit:
         """
 
         if (gate_round is not None):
-            tags = {'ROUND_{}'.format(gate_round)}
+            tags = {f'ROUND_{gate_round}'}
         elif isinstance(gate_id, numbers.Integral) or gate_id.isdigit():
             # gate round given as first entry of qasm line
-            tags = {'ROUND_{}'.format(gate_id)}
+            tags = {f'ROUND_{gate_id}'}
             gate_id, gate_args = gate_args[0], gate_args[1:]
         else:
             tags = set()

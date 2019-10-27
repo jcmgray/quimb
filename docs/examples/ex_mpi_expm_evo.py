@@ -15,7 +15,7 @@ from mpi4py import MPI
 # Get some MPI information
 comm = MPI.COMM_WORLD
 rank, size = comm.Get_rank(), comm.Get_size()
-print("I am worker {} of total {} runnning main script...".format(rank, size))
+print(f"I am worker {rank} of total {size} runnning main script...")
 
 
 # setup a verbose version of the ham_heis constructor, and make it Lazy
@@ -40,7 +40,7 @@ evo = qu.Evolution(psi0, H, method='expm', expm_backend='slepc')
 evo.update_to(5)
 
 
-print("{}: I have final state norm {}".format(rank, qu.expec(evo.pt, evo.pt)))
+print(f"{rank}: I have final state norm {qu.expec(evo.pt, evo.pt)}")
 
 # Now lets demonstrate using the MPI pool construct
 pool = qu.get_mpi_pool()
@@ -59,4 +59,4 @@ fs = [pool.submit(logneg_subsys_verbose, evo.pt, dims=dims,
 # but then the results are comminucated to everyone
 rs = [f.result() for f in fs]
 
-print("{}: I have logneg results: {}".format(rank, rs))
+print(f"{rank}: I have logneg results: {rs}")

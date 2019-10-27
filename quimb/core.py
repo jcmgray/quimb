@@ -1072,8 +1072,8 @@ def infer_size(p, base=2):
     sz = math.log(max(p.shape), base)
 
     if sz % 1 > 1e-13:
-        raise ValueError("This state does not seem to be composed of sites"
-                         "of equal size {}.".format(base))
+        raise ValueError(f"This state does not seem to be composed of sites"
+                         "of equal size {base}.")
 
     return int(sz)
 
@@ -1280,8 +1280,7 @@ def kron(*ops, stype=None, coo_build=False, parallel=False, ownership=None):
 
         D = prod(dims)
         if not ((0 <= ri < D) and ((0 < rf <= D))):
-            raise ValueError(
-                "Ownership ({}, {}) not in range [0-{}].".format(ri, rf, D))
+            raise ValueError(f"Ownership ({ri}, {rf}) not in range [0-{D}].")
 
         matching_dyn = tuple(gen_matching_dynal(ri, rf - 1, dims))
         sliced_ops = list(gen_ops_maybe_sliced(ops, matching_dyn))

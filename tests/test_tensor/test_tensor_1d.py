@@ -59,8 +59,8 @@ class TestMatrixProductState:
     def test_from_dense(self):
         psi = qu.rand_ket(2**8)
         mps = MatrixProductState.from_dense(psi, dims=[2] * 8)
-        assert mps.tags == {'I{}'.format(i) for i in range(8)}
-        assert mps.site_inds == tuple('k{}'.format(i) for i in range(8))
+        assert mps.tags == {f'I{i}' for i in range(8)}
+        assert mps.site_inds == tuple(f'k{i}' for i in range(8))
         assert mps.nsites == 8
         mpod = mps.to_dense()
         assert qu.expec(mpod, psi) == pytest.approx(1)
@@ -372,7 +372,7 @@ class TestMatrixProductState:
     def test_specify_sites(self, cyclic):
         sites = [12, 13, 15, 16, 17]
         k = MPS_rand_state(5, 7, cyclic=cyclic, sites=sites, nsites=20)
-        assert set(k.tags) == {'I{}'.format(i) for i in sites}
+        assert set(k.tags) == {f'I{i}' for i in sites}
 
     def test_bipartite_schmidt_state(self):
         psi = MPS_rand_state(16, 5)
@@ -484,7 +484,7 @@ class TestMatrixProductState:
         assert (p.H & p) ^ all == pytest.approx(1.0)
         assert abs((q.H & p) ^ all) < 1.0
         assert len(p.tensors) == 6 - int(contract) * bsz
-        assert set(p.outer_inds()) == {'k{}'.format(i) for i in range(5)}
+        assert set(p.outer_inds()) == {f'k{i}' for i in range(5)}
 
     @pytest.mark.parametrize("propagate_tags", [False, 'sites',
                                                 'register', True])
@@ -516,7 +516,7 @@ class TestMatrixProductState:
         assert (p.H & p) ^ all == pytest.approx(1.0)
         assert abs((q.H & p) ^ all) < 1.0
         assert len(p.tensors) == 7
-        assert set(p.outer_inds()) == {'k{}'.format(i) for i in range(5)}
+        assert set(p.outer_inds()) == {f'k{i}' for i in range(5)}
 
     def test_gate_swap_and_split(self):
         n = 10
@@ -710,8 +710,8 @@ class TestMatrixProductOperator:
         rpt = r.partial_transpose([0, 1, 2])
         rptd = rpt.to_dense()
 
-        upper_inds = tuple('b{}'.format(i) for i in range(6))
-        lower_inds = tuple('k{}'.format(i) for i in range(6))
+        upper_inds = tuple(f'b{i}' for i in range(6))
+        lower_inds = tuple(f'k{i}' for i in range(6))
         outer_inds = rpt.outer_inds()
         assert all(i in outer_inds for i in upper_inds + lower_inds)
 
@@ -807,7 +807,7 @@ class TestSpecificStatesOperators:
         hh_mpo = MPO_ham_heis(n, tags=['foo'], cyclic=cyclic, j=j, bz=bz)
         assert hh_mpo[0].tags == {'I0', 'foo'}
         assert hh_mpo[1].tags == {'I1', 'foo'}
-        assert hh_mpo[-1].tags == {'I{}'.format(n - 1), 'foo'}
+        assert hh_mpo[-1].tags == {f'I{n - 1}', 'foo'}
         assert hh_mpo.shape == (2, ) * 2 * n
         hh_ex = qu.ham_heis(n, cyclic=cyclic, j=j, b=bz)
         assert_allclose(
@@ -836,8 +836,8 @@ class TestDense1D:
         d_psi = qu.computational_state('0' * n)
 
         t_psi = Dense1D(d_psi)
-        assert set(t_psi.outer_inds()) == {'k{}'.format(i) for i in range(n)}
-        assert set(t_psi.tags) == {'I{}'.format(i) for i in range(n)}
+        assert set(t_psi.outer_inds()) == {f'k{i}' for i in range(n)}
+        assert set(t_psi.tags) == {f'I{i}' for i in range(n)}
 
         for i in range(n):
             assert t_psi.H @ t_psi.gate(qu.pauli('Z'), i) == pytest.approx(1)

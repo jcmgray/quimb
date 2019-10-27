@@ -135,7 +135,7 @@ if (
             out = complex_array(create(d, sub_dtype), create(d, sub_dtype))
 
         else:
-            raise ValueError("dtype {} not understood.".format(dtype))
+            raise ValueError(f"dtype {dtype} not understood.")
 
         if out.dtype != dtype:
             out = out.astype(dtype)
@@ -195,7 +195,7 @@ else:  # pragma: no cover
             elif dist == 'uniform':
                 return np.random.uniform(low=loc, high=loc + scale, size=shape)
             else:
-                raise ValueError("Distribution '{}' not valid.".format(dist))
+                raise ValueError(f"Distribution '{dist}' not valid.")
 
         # real datatypes
         if np.issubdtype(dtype, np.floating):
@@ -204,8 +204,8 @@ else:  # pragma: no cover
         elif np.issubdtype(dtype, np.complexfloating):
             x = complex_array(create(), create())
         else:
-            raise TypeError("dtype {} not understood - should be float or "
-                            "complex.".format(dtype))
+            raise TypeError(f"dtype {dtype} not understood - should be float "
+                            "or complex.")
 
         if x.dtype != dtype:
             x = x.astype(dtype)
@@ -243,8 +243,8 @@ def rand_rademacher(shape, scale=1, dtype=float):
         need2convert = dtype not in (complex, np.complex_)
 
     else:
-        raise TypeError("dtype {} not understood - should be float or complex."
-                        "".format(dtype))
+        raise TypeError(f"dtype {dtype} not understood - should be float or "
+                        "complex.")
 
     x = choice(entries, shape)
     if need2convert:
@@ -278,7 +278,7 @@ def rand_phase(shape, scale=1, dtype=complex):
     """Generate random complex numbers distributed on the unit sphere.
     """
     if not np.issubdtype(dtype, np.complexfloating):
-        raise ValueError("dtype must be complex, got '{}'.".format(dtype))
+        raise ValueError(f"dtype must be complex, got '{dtype}'.")
 
     if np.issubdtype(dtype, np.complex64):
         sub_dtype = np.float32
@@ -326,8 +326,8 @@ def rand_matrix(d, scaled=True, sparse=False, stype='csr',
     elif np.issubdtype(dtype, np.complexfloating):
         iscomplex = True
     else:
-        raise TypeError("dtype {} not understood - should be "
-                        "float or complex.".format(dtype))
+        raise TypeError(f"dtype {dtype} not understood - should be "
+                        "float or complex.")
 
     # handle seed manually since standard python random.seed might be called
     if seed is not None:

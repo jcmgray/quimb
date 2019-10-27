@@ -21,7 +21,7 @@ Required Dependencies
 
 The core packages ``quimb`` requires are:
 
-* python 3.5+
+* python 3.6+
 * `numpy <http://www.numpy.org/>`_
 * `scipy <https://www.scipy.org/>`_
 * `numba <http://numba.pydata.org/>`_

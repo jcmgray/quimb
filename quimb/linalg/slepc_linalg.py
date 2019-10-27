@@ -542,7 +542,7 @@ def eigs_slepc(A, k, *, B=None, which=None, sigma=None, isherm=True, P=None,
     k = nconv if (return_all_conv or l_win is not None) else k
     if nconv < k:
         raise RuntimeError("SLEPC eigs did not find enough eigenpairs, "
-                           "wanted: {}, found: {}.".format(k, nconv))
+                           f"wanted: {k}, found: {nconv}.")
 
     # get eigenvalues
     rank = comm.Get_rank()
@@ -639,7 +639,7 @@ def svds_slepc(A, k=6, ncv=None, return_vecs=True, SVDType='cross',
     k = nconv if return_all_conv else k
     if nconv < k:
         raise RuntimeError("SLEPC svds did not find enough singular triplets, "
-                           "wanted: {}, found: {}.".format(k, nconv))
+                           f"wanted: {k}, found: {nconv}.")
 
     rank = comm.Get_rank()
 
@@ -778,8 +778,8 @@ def ssolve_slepc(A, y, isherm=True, comm=None, maxiter=None, tol=None,
 
     converged_reason = ksp.getConvergedReason()
     if converged_reason < 0:
-        raise RuntimeError("PETSc KSP solve did not converge, reason: {}"
-                           "".format(lookup_ksp_error(converged_reason)))
+        raise RuntimeError("PETSc KSP solve did not converge, reason: "
+                           f"{lookup_ksp_error(converged_reason)}")
 
     x = gather_petsc_array(x, comm=comm, out_shape=out_shape)
     comm.Barrier()

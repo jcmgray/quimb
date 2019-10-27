@@ -148,9 +148,9 @@ def eigensystem_partial(A, k, isherm, *, B=None, which=None, return_vecs=True,
     except Exception as e:  # pragma: no cover
         if fallback_to_scipy and (bkd != 'SCIPY'):
             warnings.warn(
-                "`eigensystem_partial` with backend '{}' failed, trying again "
-                "with scipy. Set ``fallback_to_scipy=False`` to avoid this and"
-                " see the full error. ".format(bkd))
+                f"`eigensystem_partial` with backend '{bkd}' failed, trying "
+                "again with scipy. Set ``fallback_to_scipy=False`` to avoid "
+                "this and see the full error.")
 
             return eigs_scipy(A, **settings, **backend_opts)
         else:
@@ -667,9 +667,8 @@ class Lazy:
     def __repr__(self):
         s = "<Lazy({}, shape={}{}{})>"
 
-        s_dtype = (', dtype={}'.format(self.dtype)
-                   if self.dtype is not None else '')
-        s_factor = (', factor={}'.format(self.factor)
-                    if self.factor is not None else '')
+        s_dtype = (f', dtype={self.dtype}' if self.dtype is not None else '')
+        s_factor = (
+            f', factor={self.factor}' if self.factor is not None else '')
 
         return s.format(self.fn.__name__, self.shape, s_dtype, s_factor)

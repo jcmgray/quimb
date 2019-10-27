@@ -191,8 +191,7 @@ def _gen_output_inds(all_inds):
     cnts = OrderedCounter(all_inds)
     for ind, freq in cnts.items():
         if freq > 2:
-            raise ValueError("The index {} appears more "
-                             "than twice!".format(ind))
+            raise ValueError(f"The index {ind} appears more than twice!")
         elif freq == 1:
             yield ind
 
@@ -682,7 +681,7 @@ def connect(t1, t2, ax1, ax2):
     """
     d1, d2 = t1.shape[ax1], t2.shape[ax2]
     if d1 != d2:
-        raise ValueError("Index sizes don't match: {} != {}.".format(d1, d2))
+        raise ValueError(f"Index sizes don't match: {d1} != {d2}.")
 
     new_ind = rand_uuid()
 
@@ -780,13 +779,12 @@ class Tensor(object):
         nd = ndim(self._data)
         if nd != len(self.inds):
             raise ValueError(
-                "Wrong number of inds, {}, supplied for array"
-                " of shape {}.".format(self.inds, self._data.shape))
+                f"Wrong number of inds, {self.inds}, supplied for array"
+                f" of shape {self._data.shape}.")
 
         if self.left_inds and any(i not in self.inds for i in self.left_inds):
-            raise ValueError(
-                "The 'left' indices {} are not found in {}."
-                "".format(self.left_inds, self.inds))
+            raise ValueError(f"The 'left' indices {self.left_inds} are not "
+                             f"found in {self.inds}.")
 
     def copy(self, deep=False):
         """Copy this tensor. Note by default (``deep=False``), the underlying
@@ -883,16 +881,15 @@ class Tensor(object):
             self.left_inds = kwargs.pop('left_inds')
 
         if kwargs:
-            raise ValueError("Option(s) {} not valid.".format(kwargs))
+            raise ValueError(f"Option(s) {kwargs} not valid.")
 
         if len(self.inds) != ndim(self.data):
             raise ValueError("Mismatch between number of data dimensions and "
                              "number of indices supplied.")
 
         if self.left_inds and any(i not in self.inds for i in self.left_inds):
-            raise ValueError(
-                "The 'left' indices {} are not found in {}."
-                "".format(self.left_inds, self.inds))
+            raise ValueError(f"The 'left' indices {self.left_inds} are "
+                             f"not found in {self.inds}.")
 
     def isel(self, selectors, inplace=False):
         """Select specific values for some dimensions/indices of this tensor,
@@ -949,7 +946,7 @@ class Tensor(object):
             Size of the expanded index.
         """
         if ind not in self.inds:
-            raise ValueError("Tensor has no index '{}'.".format(ind))
+            raise ValueError(f"Tensor has no index '{ind}'.")
 
         size_current = self.ind_size(ind)
         pads = [
@@ -1073,9 +1070,9 @@ class Tensor(object):
         output_inds = tuple(output_inds)  # need to re-use this.
 
         if set(t.inds) != set(output_inds):
-            raise ValueError("'output_inds' must be permutation of the "
-                             "current tensor indices, but {} != {}"
-                             .format(set(t.inds), set(output_inds)))
+            raise ValueError("'output_inds' must be permutation of the current"
+                             f" tensor indices, but {set(t.inds)} != "
+                             f"{set(output_inds)}")
 
         current_ind_map = {ind: i for i, ind in enumerate(t.inds)}
         out_shape = tuple(current_ind_map[i] for i in output_inds)
@@ -1489,10 +1486,8 @@ class Tensor(object):
         self.__dict__ = state.copy()
 
     def __repr__(self):
-        return "Tensor(shape={}, inds={}, tags={})".format(
-            self.data.shape,
-            self.inds,
-            self.tags)
+        return (f"Tensor(shape={self.data.shape}, "
+                f"inds={self.inds}, tags={self.tags})")
 
 
 # ------------------------- Add ufunc like methods -------------------------- #
@@ -1506,9 +1501,8 @@ def _make_promote_array_func(op, meth_name):
         if isinstance(other, Tensor):
 
             if set(self.inds) != set(other.inds):
-                raise ValueError(
-                    "The indicies of these two tensors do not "
-                    "match: {} != {}".format(self.inds, other.inds))
+                raise ValueError("The indicies of these two tensors do not "
+                                 f"match: {self.inds} != {other.inds}")
 
             otherT = other.transpose(*self.inds)
 
@@ -1661,7 +1655,7 @@ class TNLinearOperator(spla.LinearOperator):
             in_data = conj(in_data)
 
         # for matmat need different contraction scheme for different d sizes
-        key = "matmat_{}".format(d)
+        key = f"matmat_{d}"
 
         # cache the contractor
         if key not in self._contractors:
@@ -1886,10 +1880,9 @@ class TensorNetwork(object):
 
                 # both have prop, and don't match -> raise
                 elif not equal(u, v):
-                    raise ValueError(
-                        "Conflicting values found on tensor networks for "
-                        "property {}. First value: {}, second value: {}"
-                        .format(prop, u, v))
+                    raise ValueError("Conflicting values found on tensor "
+                                     f"networks for property {prop}. First "
+                                     f"value: {u}, second value: {v}")
 
     def __and__(self, other):
         """Combine this tensor network with more tensors, without contracting.
@@ -1937,16 +1930,15 @@ class TensorNetwork(object):
                 setattr(new_tn, prop, getattr(tn, prop_name))
 
             else:
-                raise ValueError("You need to specify '{}' for the tensor "
-                                 "network class {}, and ensure that it "
-                                 "correctly corresponds to the structure of "
-                                 "the tensor network supplied, since it cannot"
-                                 " be found as an attribute on the TN: {}."
-                                 .format(prop_name, cls, tn))
+                raise ValueError(
+                    f"You need to specify '{prop_name}' for the tensor network"
+                    f" class {cls}, and ensure that it correctly corresponds "
+                    f"to the structure of the tensor network supplied, since "
+                    f"it cannot be found as an attribute on the TN: {tn}.")
 
         if kwargs:
-            raise ValueError("Options {} are invalid for "
-                             "the class {}.".format(kwargs, cls))
+            raise ValueError(
+                f"Options {kwargs} are invalid for the class {cls}.")
 
         new_tn.__class__ = cls
         return new_tn
@@ -2416,7 +2408,7 @@ class TensorNetwork(object):
             return set(map(self.structure.format, self.slice2sites(sites)))
         else:
             raise TypeError("``sites2tags`` needs an integer or a slice"
-                            ", but got {}".format(sites))
+                            f", but got {sites}")
 
     def _get_tids_from(self, xmap, xs, which):
         inverse = which[0] == '!'
@@ -2576,8 +2568,7 @@ class TensorNetwork(object):
             tensors = self.select_tensors(tags, which='all')
 
         if len(tensors) == 0:
-            raise KeyError("Couldn't find any tensors "
-                           "matching {}.".format(tags))
+            raise KeyError(f"Couldn't find any tensors matching {tags}.")
 
         if len(tensors) == 1:
             return tensors[0]
@@ -2734,7 +2725,7 @@ class TensorNetwork(object):
         if dl != dr:
             raise ValueError(
                 "Can only replace_with_identity when the remaining indices "
-                "have matching dimensions, but {} != {}.".format(dl, dr))
+                f"have matching dimensions, but {dl} != {dr}.")
 
         tn.delete(where, which=which)
 
@@ -3060,8 +3051,8 @@ class TensorNetwork(object):
         db = T1.ind_size(bnd)
 
         if d != db:
-            raise ValueError("This operator has dimension {} but needs "
-                             "dimension {}.".format(d, db))
+            raise ValueError(f"This operator has dimension {d} but needs "
+                             f"dimension {db}.")
 
         # reindex one tensor, and add a new A tensor joining the bonds
         nbnd = rand_uuid()
@@ -3623,7 +3614,7 @@ class TensorNetwork(object):
                 fix_tids[tid] = pos
             except KeyError:
                 # assume index
-                fix_tids["ext{}".format(tags_or_ind)] = pos
+                fix_tids[f"ext{tags_or_ind}"] = pos
 
         labels = {}
         fixed_positions = {}
@@ -3656,7 +3647,7 @@ class TensorNetwork(object):
 
                 # else it must be an 'external' index
                 if not found_ind:
-                    ext_lbl = "ext{}".format(ix)
+                    ext_lbl = f"ext{ix}"
                     G.add_edge(i, ext_lbl, weight=t1.ind_size(ix),
                                color=edge_color)
 
@@ -3765,7 +3756,7 @@ class TensorNetwork(object):
                                        linestyle='', markersize=10)]
 
             # needed in case '_' is the first character
-            lbls = [" {}".format(l) for l in colors]
+            lbls = [f" {l}" for l in colors]
 
             plt.legend(handles, lbls, ncol=max(int(len(handles) / 20), 1),
                        loc='center left', bbox_to_anchor=(1, 0.5))
@@ -3802,11 +3793,9 @@ class TensorNetwork(object):
             self.nsites is not None else "")
 
     def __repr__(self):
-        rep = "<{}(tensors={}".format(self.__class__.__name__,
-                                      len(self.tensor_map))
+        rep = f"<{self.__class__.__name_}(tensors={len(self.tensor_map)}"
         if self.structure:
-            rep += ", structure='{}', nsites={}".format(self.structure,
-                                                        self.nsites)
+            rep += f", structure='{self.structure}', nsites={self.nsites}"
 
         return rep + ")>"
 

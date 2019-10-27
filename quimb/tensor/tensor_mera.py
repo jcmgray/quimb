@@ -103,7 +103,7 @@ class MERA(TensorNetwork1DVector,
                     ul, ur = map(m_ind_id.format, (j, (j + 1) % eff_n))
                     inds = (ll, lr, ul, ur)
 
-                    tags = {"_UNI", "_LAYER{}".format(i)}
+                    tags = {"_UNI", f"_LAYER{i}"}
                     if i == 0:
                         tags.add(site_tag_id.format(j))
                         tags.add(site_tag_id.format(j + 1))
@@ -119,7 +119,7 @@ class MERA(TensorNetwork1DVector,
                     ll, lr = map(m_ind_id.format, (j + 1, (j + 2) % eff_n))
                     ui = u_ind_id.format(j // 2)
                     inds = (ll, lr, ui)
-                    tags = {"_ISO", "_LAYER{}".format(i)}
+                    tags = {"_ISO", f"_LAYER{i}"}
 
                     if i < nlayers - 1 or dangle:
                         yield Tensor(next(isos), inds=inds,

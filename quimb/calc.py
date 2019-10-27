@@ -168,18 +168,18 @@ def kraus_op(rho, Ek, dims=None, where=None, check=False):
         rho_inds, out, Ei_inds, Ej_inds = [], [], ['K'], ['K']
         for i in range(N):
             if i in where:
-                xi, xj = 'i{}k'.format(i), 'j{}k'.format(i)
+                xi, xj = f'i{i}k', f'j{i}k'
                 for inds in (rho_inds, Ei_inds):
                     inds.append(xi)
                 for inds in (rho_inds, Ej_inds):
                     inds.append(xj)
-                xi, xj = 'i{}new'.format(i), 'j{}new'.format(i)
+                xi, xj = f'i{i}new', f'j{i}new'
                 for inds in (out, Ei_inds):
                     inds.append(xi)
                 for inds in (out, Ej_inds):
                     inds.append(xj)
             else:
-                xi, xj = 'i{}'.format(i), 'j{}'.format(i)
+                xi, xj = f'i{i}', f'j{i}'
                 for inds in (rho_inds, out):
                     inds.append(xi)
                     inds.append(xj)
@@ -534,8 +534,8 @@ def check_dims_and_indices(dims, *syss):
     all_sys = sum(syss, ())
 
     if not all(0 <= i < nsys for i in all_sys):
-        raise ValueError("Indices specified in `sysa` and `sysb` must be "
-                         "in range({}) for dims {}.".format(nsys, dims))
+        raise ValueError(f"Indices specified in `sysa` and `sysb` must be "
+                         "in range({nsys}) for dims {dims}.")
 
 
 def mutinf_subsys(psi_abc, dims, sysa, sysb, approx_thresh=2**13,

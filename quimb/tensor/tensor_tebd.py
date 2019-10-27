@@ -122,8 +122,8 @@ class NNI:
 
         term = self.H2s.get(sites, self.H2s[None])
         if term is None:
-            raise ValueError("No term has been set for sites {}, either specif"
-                             "ically or via a default term.".format(sites))
+            raise ValueError(f"No term has been set for sites {sites}, either "
+                             "specifically or via a default term.")
 
         # add single site term to left site if present
         H1 = self.H1s.get(i, self.H1s[None])
@@ -168,7 +168,7 @@ class NNI:
         ) / nterms
 
     def __repr__(self):
-        return "<NNI(n={}, cyclic={})>".format(self.n, self.cyclic)
+        return f"<NNI(n={self.n}, cyclic={self.cyclic})>"
 
 
 class TEBD:
@@ -446,7 +446,7 @@ class TEBD:
             progbar.close()
 
     def _set_progbar_desc(self, progbar):
-        msg = "t={:.4g}, max-bond={}".format(self.t, self._pt.max_bond())
+        msg = f"t={self.t:.4g}, max-bond={self._pt.max_bond()}"
         progbar.set_description(msg)
 
     def at_times(self, ts, dt=None, tol=None, order=4, progbar=None):

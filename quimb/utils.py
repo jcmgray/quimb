@@ -50,7 +50,7 @@ def raise_cant_find_library_function(x, extra_msg=None):
     """
 
     def function_that_will_raise(*_, **__):
-        error_msg = "The library {} is not installed. ".format(x)
+        error_msg = f"The library {x} is not installed. "
         if extra_msg is not None:
             error_msg += extra_msg
         raise ImportError(error_msg)
@@ -121,9 +121,8 @@ def deprecated(fn, old_name, new_name):
 
     def new_fn(*args, **kwargs):
         import warnings
-        warnings.warn("The {} function is deprecated in favor "
-                      "of {}".format(old_name, new_name),
-                      Warning)
+        warnings.warn(f"The {old_name} function is deprecated in favor "
+                      "of {new_name}", Warning)
         return fn(*args, **kwargs)
 
     return new_fn
@@ -216,13 +215,12 @@ class Verbosify:  # pragma: no cover
     def __call__(self, *args, **kwargs):
         if self.mpi:
             from mpi4py import MPI
-            pre_msg = "{}: ".format(MPI.COMM_WORLD.Get_rank())
+            pre_msg = f"{MPI.COMM_WORLD.Get_rank()}: "
         else:
             pre_msg = ""
 
         if self.highlight is None:
-            print("{}args {}, kwargs {}".format(pre_msg, args, kwargs))
+            print(f"{pre_msg} args {args}, kwargs {kwargs}")
         else:
-            print("{}{}={}".format(pre_msg, self.highlight,
-                                   kwargs[self.highlight]))
+            print("{pre_msg}{self.highlight}={kwargs[self.highlight]}")
         return self.fn(*args, **kwargs)

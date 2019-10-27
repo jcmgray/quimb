@@ -15,15 +15,15 @@ def graph_to_circ(G, gamma0=-0.743043, beta0=0.754082):
     n = G.number_of_nodes()
 
     # add all the gates
-    circ = "{}\n".format(n)
+    circ = f"{n}\n"
     for i in range(n):
-        circ += "H {}\n".format(i)
+        circ += f"H {i}\n"
     for i, j in G.edges:
-        circ += "CNOT {} {}\n".format(i, j)
-        circ += "Rz {} {}\n".format(gamma0, j)
-        circ += "CNOT {} {}\n".format(i, j)
+        circ += f"CNOT {i} {j}\n"
+        circ += f"Rz {gamma0} {j}\n"
+        circ += f"CNOT {i} {j}\n"
     for i in range(n):
-        circ += "Rx {} {}\n".format(beta0, i)
+        circ += f"Rx {beta0} {i}\n"
 
     return circ
 

@@ -11,8 +11,7 @@ class TestMERA:
         mera = qt.MERA.rand(16)
 
         # test outer inds
-        assert set(mera.outer_inds()) == {'k{}'.format(i)
-                                          for i in range(16)}
+        assert set(mera.outer_inds()) == {f'k{i}' for i in range(16)}
 
         # test normalized
         assert (mera.H & mera) ^ all == pytest.approx(1.0)

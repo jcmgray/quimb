@@ -273,8 +273,8 @@ class Evolution(object):
             self.expm_backend = expm_backend
             self.expm_opts = {} if expm_opts is None else dict(expm_opts)
         else:
-            raise ValueError("Did not understand evolution method: '{}'."
-                             .format(method))
+            raise ValueError(f"Did not understand evolution "
+                             "method: '{method}'.")
 
     def _setup_callback(self, fn):
         """Setup callbacks in the correct place to compute into _results

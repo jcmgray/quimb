@@ -64,8 +64,8 @@ def lazy_ptr_linop(psi_ab, dims, sysa, **linop_opts):
                        for i in range(len(dims))])
 
     return (Kab & Bab).aslinearoperator(
-        ['kA{}'.format(i) for i in sysa],
-        ['bA{}'.format(i) for i in sysa],
+        [f'kA{i}' for i in sysa],
+        [f'bA{i}' for i in sysa],
         **linop_opts
     )
 
@@ -173,7 +173,7 @@ def random_rect(shape, dist='rademacher', orthog=False, norm=True,
         # already normalized
 
     else:
-        raise ValueError("`dist={}` not understood.".format(dist))
+        raise ValueError(f"`dist={dist}` not understood.")
 
     if orthog and min(shape) > 1:
         V = scla.orth(V)
@@ -458,7 +458,7 @@ def single_random_estimate(A, K, bsz, beta_tol, v0, f, pos, tau, tol_scale,
         #     in which case latest estimate should be accurate
         if abs(beta[-1]) < beta_tol:
             if verbosity >= 2:
-                print("k={}: Beta breadown, returning {}.".format(k, Gf))
+                print(f"k={k}: Beta breadown, returning {Gf}.")
             return Gf
 
         # compute an estimate and error using a window of the last few results
@@ -476,18 +476,18 @@ def single_random_estimate(A, K, bsz, beta_tol, v0, f, pos, tau, tol_scale,
         if verbosity >= 2:
 
             if verbosity >= 3:
-                print("est_win={}, err_win={}".format(win_est, win_err))
-                print("est_fit={}, err_fit={}".format(fit_est, fit_err))
+                print(f"est_win={win_est}, err_win={win_err}")
+                print(f"est_fit={fit_est}, err_fit={fit_err}")
 
-            print("k={}: Gf={}, Est={}, Err={}".format(k, Gf, est, err))
+            print(f"k={k}: Gf={Gf}, Est={est}, Err={err}")
             if converged:
-                print("k={}: Converged to tau {}.".format(k, tau))
+                print(f"k={k}: Converged to tau {tau}.")
 
         if converged:
             break
 
     if verbosity >= 1:
-        print("k={}: Returning estimate {}.".format(k, est))
+        print(f"k={k}: Returning estimate {est}.")
 
     return est
 
@@ -518,7 +518,7 @@ def get_single_precision_dtype(dtype):
     elif np.issubdtype(dtype, np.floating):
         return np.float32
     else:
-        raise ValueError("dtype {} not understood.".format(dtype))
+        raise ValueError(f"dtype {dtype} not understood.")
 
 
 def approx_spectral_function(A, f, tol=1e-2, *, bsz=1, R=1024, tol_scale=1,
@@ -617,8 +617,7 @@ def approx_spectral_function(A, f, tol=1e-2, *, bsz=1, R=1024, tol_scale=1,
         tau = tol / 1000
 
     if verbosity:
-        print("LANCZOS f(A) CALC: tol={}, tau={}, R={}, bsz={}"
-              "".format(tol, tau, R, bsz))
+        print(f"LANCZOS f(A) CALC: tol={tol}, tau={tau}, R={R}, bsz={bsz}")
 
     # generate repeat estimates
     kwargs = {'A': A, 'K': k_max, 'bsz': bsz, 'beta_tol': beta_tol,
@@ -646,8 +645,7 @@ def approx_spectral_function(A, f, tol=1e-2, *, bsz=1, R=1024, tol_scale=1,
         samples.append(next(results))
 
         if verbosity >= 1:
-            print("Repeat {}: estimate is {}"
-                  "".format(len(samples), samples[-1]))
+            print(f"Repeat {len(samples)}: estimate is {samples[-1]}")
 
         # wait a few iterations before checking error on mean breakout
         if len(samples) >= 3:
@@ -655,12 +653,11 @@ def approx_spectral_function(A, f, tol=1e-2, *, bsz=1, R=1024, tol_scale=1,
                 samples, mean_p, mean_s, tol, tol_scale)
 
             if verbosity >= 1:
-                print("Total estimate = {} ± {}".format(estimate, err))
+                print(f"Total estimate = {estimate} ± {err}")
 
             if converged:
                 if verbosity >= 1:
-                    print("Repeat {}: converged to tol {}"
-                          "".format(len(samples), tol))
+                    print(f"Repeat {len(samples)}: converged to tol {tol}")
                 break
 
     if mpi:
@@ -682,7 +679,7 @@ def approx_spectral_function(A, f, tol=1e-2, *, bsz=1, R=1024, tol_scale=1,
             samples, mean_p, mean_s, tol, tol_scale)
 
     if verbosity >= 1:
-        print("ESTIMATE is {} ± {}".format(estimate, err))
+        print(f"ESTIMATE is {estimate} ± {err}")
 
     return estimate
 

@@ -229,8 +229,8 @@ class GetMPIBeforeCall(object):
             while comm.Get_size() != wait_for_workers:
                 if time() - t0 > 2:
                     raise RuntimeError(
-                        "Timeout while waiting for {} workers "
-                        "to join comm {}.".format(wait_for_workers, comm))
+                        f"Timeout while waiting for {wait_for_workers} "
+                        f"workers to join comm {comm}.")
 
         comm.Barrier()
         res = self.fn(*args, comm=comm, **kwargs)

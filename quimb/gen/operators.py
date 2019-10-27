@@ -93,8 +93,8 @@ def spin_operator(label, S=1 / 2, **kwargs):
         np.fill_diagonal(op, 1.0)
 
     else:
-        raise ValueError("Label '{}'' not understood, should be one of ``['X',"
-                         " 'Y', 'Z', '+', '-', 'I']``.".format(label))
+        raise ValueError(f"Label '{label}'' not understood, should be one of "
+                         "``['X', 'Y', 'Z', '+', '-', 'I']``.")
 
     op = qu(np.real_if_close(op), **kwargs)
 
@@ -923,8 +923,8 @@ def zspin_projector(n, sz=0, stype="csr", dtype=float):
         # Number of 'up' spins
         k = n / 2 + s
         if not k.is_integer():
-            raise ValueError("{} is not a valid spin half subspace for "
-                             "{} spins.".format(s, n))
+            raise ValueError(f"{s} is not a valid spin half subspace for {n} "
+                             "spins.")
         k = int(round(k))
         # Size of subspace
         p += comb(n, k, exact=True)

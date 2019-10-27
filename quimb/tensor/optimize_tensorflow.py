@@ -415,7 +415,7 @@ class TNOptimizer:
         def loss_callback(loss_val):
             self._n += 1
             self.loss = loss_val
-            pbar.set_description("{}".format(loss_val))
+            pbar.set_description(f"{loss_val}")
             pbar.update()
             return self._time_should_stop(max_time)
 
@@ -457,7 +457,7 @@ class TNOptimizer:
             for _ in range(max_steps):
                 # compute gradient and display loss value
                 grads = self._grad()
-                pbar.set_description("{}".format(self.loss))
+                pbar.set_description(f"{self.loss}")
 
                 # performing an optimization step
                 self.optimizer.apply_gradients(
@@ -491,7 +491,7 @@ class TNOptimizer:
         try:
             for _ in range(max_steps):
                 _, self.loss = sess.run([self.train_op, self.loss_op])
-                pbar.set_description("{}".format(self.loss))
+                pbar.set_description(f"{self.loss}")
                 pbar.update()
                 self._n += 1
 

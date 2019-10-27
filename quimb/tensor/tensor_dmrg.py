@@ -632,8 +632,8 @@ class DMRG:
         else:
             site_en = (loc_gs.H @ (Heff @ loc_gs)).item()
 
-        print("Sweep {} -- fullE={} effcE={} siteE={}"
-              "".format(sweep_num, full_en, effv_en, site_en))
+        print(f"Sweep {sweep_num} -- fullE={full_en} "
+              f"effcE={effv_en} siteE={site_en}")
 
     def print_norm_info(self, i=None):
         sweep_num = len(self.energies) + 1
@@ -649,8 +649,8 @@ class DMRG:
         else:
             site_norm = self._k[i].H @ self._k[i]
 
-        print("Sweep {} -- fullN={} effvN={} siteN={}"
-              "".format(sweep_num, full_n, effv_n, site_norm))
+        print(f"Sweep {sweep_num} -- fullN={full_n} "
+              f"effvN={effv_n} siteN={site_norm}")
 
     def form_local_ops(self, i, dims, lix, uix):
         """Construct the effective Hamiltonian, and if needed, norm.
@@ -719,8 +719,8 @@ class DMRG:
             # this is helpful for identifying badly behaved numerics
             Neffnorm = (loc_gs.H @ (Neff @ loc_gs)).item()
             if abs(Neffnorm - 1) > 10 * self.opts['local_eig_tol']:
-                raise DMRGError("Effective norm diverged to {}, check "
-                                "that Neff is positive?".format(Neffnorm))
+                raise DMRGError(f"Effective norm diverged to {Neffnorm}, "
+                                "check that Neff is positive?")
 
         return loc_en, loc_gs
 

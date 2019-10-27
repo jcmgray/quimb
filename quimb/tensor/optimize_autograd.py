@@ -244,7 +244,7 @@ class TNOptimizer:
 
             def callback(_):
                 pbar.update()
-                pbar.set_description("{}".format(self.loss))
+                pbar.set_description(f"{self.loss}")
 
             self.res = minimize(
                 fun=self.vectorized_func,
@@ -278,7 +278,7 @@ class TNOptimizer:
             def inner_callback(xk):
                 self.loss_best = min(self.loss_best, self.loss)
                 pbar.update()
-                msg = "{} [best: {}] ".format(self.loss, self.loss_best)
+                msg = f"{self.loss} [best: {self.loss_best}] "
                 pbar.set_description(msg)
 
             self.res = basinhopping(

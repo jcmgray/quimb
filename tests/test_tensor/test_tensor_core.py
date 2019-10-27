@@ -550,7 +550,7 @@ class TestTensorNetwork:
         tn.conj_()
 
         for i, arr in enumerate((a_data, b_data, c_data)):
-            assert_allclose(tn["I{}".format(i)].data, arr.conj())
+            assert_allclose(tn[f"I{i}"].data, arr.conj())
 
     def test_multiply(self):
         a = rand_tensor((2, 3, 4), inds=['0', '1', '2'], tags='red')
@@ -823,7 +823,7 @@ class TestTensorNetwork:
 
     def test_partition(self):
         k = MPS_rand_state(10, 7, site_tag_id='Q{}', structure_bsz=4)
-        where = ['Q{}'.format(i) for i in range(10) if i % 2 == 1]
+        where = [f'Q{i}' for i in range(10) if i % 2 == 1]
         k.add_tag('odd', where=where, which='any')
 
         tn_even, tn_odd = k.partition('odd')
@@ -908,8 +908,8 @@ class TestTensorNetwork:
         n = 7
         p = MPS_rand_state(n, 7, tags='KET')
         q = MPS_rand_state(n, 7, tags='BRA')
-        fix = {**{('KET', 'I{}'.format(i)): (i, 0) for i in range(n)},
-               **{('BRA', 'I{}'.format(i)): (i, 1) for i in range(n)}}
+        fix = {**{('KET', f'I{i}'): (i, 0) for i in range(n)},
+               **{('BRA', f'I{i}'): (i, 1) for i in range(n)}}
         (q | p).graph(colors=['KET', 'BRA'], fix=fix)
 
     def test_pickle(self):
@@ -984,7 +984,7 @@ class TestTensorNetworkAsLinearOperator:
         ul, = tn['_KET', 'I1'].bonds(tn['_KET', 'I2'])
         ll, = tn['_BRA', 'I1'].bonds(tn['_BRA', 'I2'])
 
-        where = ['I{}'.format(i) for i in range(2, 40)]
+        where = [f'I{i}' for i in range(2, 40)]
 
         tn.replace_with_svd(where, left_inds=(ul, ll), eps=1e-3, method=method,
                             inplace=True, ltags='_U', rtags='_V')

@@ -58,10 +58,7 @@ def align_TN_1D(*tns, ind_ids=None, inplace=False):
             ind_ids = [tns[0].site_ind_id]
         else:
             ind_ids = [tns[0].lower_ind_id]
-        ind_ids.extend(
-            "__ind_{}".format(oe.get_symbol(i)) + "{}__"
-            for i in range(n - 2)
-        )
+        ind_ids.extend(f"__ind_{oe.get_symbol(i)}{{}}__" for i in range(n - 2))
     else:
         ind_ids = tuple(ind_ids)
 
@@ -252,8 +249,7 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
     ng = len(where)  # number of sites the gate acts on
 
     if (ng > 2) and contract in _TWO_BODY_ONLY:
-        err_msg = "Can't use `contract='{}'` for >2 sites.".format(contract)
-        raise ValueError(err_msg)
+        raise ValueError(f"Can't use `contract='{contract}'` for >2 sites.")
 
     # allow gate to be a matrix as long as it factorizes into tensor
     shape_matches_2d = (ndim(G) == 2) and (G.shape[1] == dp ** ng)
@@ -262,8 +258,8 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
     if shape_matches_2d:
         G = reshape(asarray(G), [dp] * 2 * ng)
     elif not shape_maches_nd:
-        raise ValueError("Gate with shape {} doesn't match sites {}"
-                         "".format(G.shape, where))
+        raise ValueError(
+            f"Gate with shape {G.shape} doesn't match sites {where}")
 
     if contract == 'swap+split' and ng > 1:
         psi.gate_with_auto_swap(G, where, cur_orthog=cur_orthog,
@@ -781,8 +777,7 @@ class TensorNetwork1DFlat(TensorNetwork1D,
             start, stop = min(i), max(i) + 1
             if tuple(i) != tuple(range(start, stop)):
                 raise ValueError("Parameter ``i`` should be an integer or "
-                                 "contiguous block of integers, got {}."
-                                 "".format(i))
+                                 f"contiguous block of integers, got {i}.")
 
         k = self.copy()
         b = k.H
@@ -1007,9 +1002,9 @@ class TensorNetwork1DFlat(TensorNetwork1D,
             self.left_compress(stop=self.nsites // 2, **compress_opts)
 
         else:
-            raise ValueError("Form specifier {} not understood, should be "
-                             "either 'left', 'right', 'flat' or an int "
-                             "specifiying a new orthog center.".format(form))
+            raise ValueError(f"Form specifier {form} not understood, should be"
+                             " either 'left', 'right', 'flat' or an int "
+                             "specifiying a new orthog center.")
 
     def compress_site(self, i, canonize=True, cur_orthog='calc', bra=None,
                       **compress_opts):
@@ -1104,8 +1099,7 @@ class TensorNetwork1DFlat(TensorNetwork1D,
             The singular values.
         """
         if not (0 < i < self.nsites):
-            raise ValueError("Need 0 < i < {}, got i={}."
-                             .format(self.nsites, i))
+            raise ValueError(f"Need 0 < i < {self.nsites}, got i={i}.")
 
         self.canonize(i, cur_orthog)
 
@@ -1236,7 +1230,7 @@ class TensorNetwork1DFlat(TensorNetwork1D,
         for i in range(len(self.sites) - 1):
             bdim = self.bond_size(self.sites[i], self.sites[i + 1])
             strl = len(str(bdim))
-            l1 += " {}".format(bdim)
+            l1 += f" {bdim}"
             l2 += (">" if i < num_can_l else
                    "<" if i >= self.nsites - num_can_r else
                    "o") + ("-" if bdim < 100 else "=") * strl
@@ -1250,9 +1244,9 @@ class TensorNetwork1DFlat(TensorNetwork1D,
         if self.cyclic:
             bdim = self.bond_size(self.sites[0], self.sites[-1])
             bnd_str = ("-" if bdim < 100 else "=") * strl
-            l1 = " {}{}{} ".format(bdim, l1, bdim)
-            l2 = "+{}{}{}+".format(bnd_str, l2, bnd_str)
-            l3 = " {}{}{} ".format(" " * strl, l3, " " * strl)
+            l1 = f" {bdim}{l1}{bdim} "
+            l2 = f"+{bnd_str}{l2}{bnd_str}+"
+            l3 = f" {' ' * strl}{l3}{' ' * strl} "
 
         three_line_multi_print(l1, l2, l3, max_width=max_width)
 
@@ -1940,15 +1934,14 @@ class MatrixProductState(TensorNetwork1DVector,
 
             if mps.phys_dim() ** len(section) <= left_sz * right_sz:
                 if verbosity >= 1:
-                    print("Leaving lateral compress of section '{}' as it is "
-                          "too short: length={}, eff size={}."
-                          .format(section, len(section), left_sz * right_sz))
+                    print(f"Leaving lateral compress of section '{section}' as"
+                          f" it is too short: length={len(section)}, eff "
+                          f"size={left_sz * right_sz}.")
                 return
 
         if verbosity >= 1:
-            print("Laterally compressing section {}. Using options: "
-                  "eps={}, method={}, max_bond={}"
-                  .format(section, heps, hmethod, hmax_bond))
+            print(f"Laterally compressing section {section}. Using options: "
+                  f"eps={heps}, method={hmethod}, max_bond={hmax_bond}")
 
         section_tags = map(mps.site_tag, section)
         kb.replace_with_svd(section_tags, (ul, ll), heps, inplace=True,
@@ -1989,9 +1982,9 @@ class MatrixProductState(TensorNetwork1DVector,
                     vmethod = 'isvd'
 
             if verbosity >= 1:
-                print("Performing vertical decomposition of section {}, "
-                      "using options: eps={}, method={}, max_bond={}."
-                      .format(label, veps, vmethod, vmax_bond))
+                print(f"Performing vertical decomposition of section {label}, "
+                      f"using options: eps={veps}, method={vmethod}, "
+                      f"max_bond={vmax_bond}.")
 
             # do vertical SVD
             kb.replace_with_svd(
@@ -2002,8 +1995,8 @@ class MatrixProductState(TensorNetwork1DVector,
             # cut joined bond by reindexing to upper- and lower- ind_id.
             kb.cut_between((mps.site_tag(section[0]), '_UP'),
                            (mps.site_tag(section[0]), '_DOWN'),
-                           "_tmp_ind_u{}".format(label),
-                           "_tmp_ind_l{}".format(label))
+                           f"_tmp_ind_u{label}",
+                           f"_tmp_ind_l{label}")
 
         else:
             # just unfold and fuse physical indices:
@@ -2014,17 +2007,17 @@ class MatrixProductState(TensorNetwork1DVector,
             #                              |
 
             if verbosity >= 1:
-                print("Just vertical unfolding section {}.".format(label))
+                print(f"Just vertical unfolding section {label}.")
 
             kb, sec = kb.partition(section_tags, inplace=True)
             sec_l, sec_u = sec.partition('_KET', inplace=True)
             T_UP = (sec_u ^ all)
             T_UP.add_tag('_UP')
-            T_UP.fuse_({"_tmp_ind_u{}".format(label):
+            T_UP.fuse_({f"_tmp_ind_u{label}":
                         [mps.site_ind(i) for i in section]})
             T_DN = (sec_l ^ all)
             T_DN.add_tag('_DOWN')
-            T_DN.fuse_({"_tmp_ind_l{}".format(label):
+            T_DN.fuse_({f"_tmp_ind_l{label}":
                         [mps.site_ind(i) for i in section]})
             kb |= T_UP
             kb |= T_DN
@@ -2277,8 +2270,7 @@ class MatrixProductState(TensorNetwork1DVector,
             nt = len(ts)
 
             if verbosity > 0:
-                msg = "Renormalizing for norm {} among {} tensors."
-                print(msg.format(norm, nt))
+                print(f"Renormalizing for norm {norm} among {nt} tensors.")
 
             # now spread the norm out among tensors
             for t in ts:
@@ -2548,7 +2540,7 @@ class MatrixProductOperator(TensorNetwork1DFlat,
 
         if N != other.nsites:
             raise ValueError("Can't add MPO with another of different length."
-                             "Got lengths {} and {}".format(N, other.nsites))
+                             f"Got lengths {N} and {other.nsites}")
 
         summed = self if inplace else self.copy()
 
@@ -2678,7 +2670,7 @@ class MatrixProductOperator(TensorNetwork1DFlat,
             return self._apply_mpo(other, compress=compress, **compress_opts)
         else:
             raise TypeError("Can only Dot with a MatrixProductOperator or a "
-                            "MatrixProductState, got {}".format(type(other)))
+                            f"MatrixProductState, got {type(other)}")
 
     dot = apply
 
@@ -2786,7 +2778,7 @@ class MatrixProductOperator(TensorNetwork1DFlat,
         for i in range(len(self.sites) - 1):
             bdim = self.bond_size(self.sites[i], self.sites[i + 1])
             strl = len(str(bdim))
-            l1 += "|{}".format(bdim)
+            l1 += f"|{bdim}"
             l2 += (">" if i < num_can_l else
                    "<" if i >= self.nsites - num_can_r else
                    "O") + ("-" if bdim < 100 else "=") * strl
@@ -2799,9 +2791,9 @@ class MatrixProductOperator(TensorNetwork1DFlat,
         if self.cyclic:
             bdim = self.bond_size(self.sites[0], self.sites[-1])
             bnd_str = ("-" if bdim < 100 else "=") * strl
-            l1 = " {}{}{} ".format(bdim, l1, bdim)
-            l2 = "+{}{}{}+".format(bnd_str, l2, bnd_str)
-            l3 = " {}{}{} ".format(" " * strl, l3, " " * strl)
+            l1 = f" {bdim}{l1}{bdim} "
+            l2 = f"+{bnd_str}{l2}{bnd_str}+"
+            l3 = f" {' ' * strl}{l3}{' ' * strl} "
 
         three_line_multi_print(l1, l2, l3, max_width=max_width)
 
