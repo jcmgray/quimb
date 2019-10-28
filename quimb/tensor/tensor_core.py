@@ -3793,7 +3793,7 @@ class TensorNetwork(object):
             self.nsites is not None else "")
 
     def __repr__(self):
-        rep = f"<{self.__class__.__name_}(tensors={len(self.tensor_map)}"
+        rep = f"<{self.__class__.__name__}(tensors={len(self.tensor_map)}"
         if self.structure:
             rep += f", structure='{self.structure}', nsites={self.nsites}"
 
