@@ -1,8 +1,35 @@
 import numbers
 
+import cytoolz
+
 import quimb as qu
 from .tensor_gen import MPS_computational_state
 from .tensor_1d import TensorNetwork1DVector
+
+
+def _convert_ints_and_floats(x):
+    if isinstance(x, str):
+        try:
+            return int(x)
+        except ValueError:
+            pass
+
+        try:
+            return float(x)
+        except ValueError:
+            pass
+
+    return x
+
+
+def _put_registers_last(x):
+    # no need to do anything unless parameter (i.e. float) is found last
+    if not isinstance(x[-1], float):
+        return x
+
+    # swap this last group of floats with the penultimate group of integers
+    parts = tuple(cytoolz.partitionby(type, x))
+    return tuple(cytoolz.concatv(*parts[:-2], parts[-1], parts[-2]))
 
 
 def parse_qasm(qasm):
@@ -23,10 +50,26 @@ def parse_qasm(qasm):
         - circuit_info['gates']: list[list[str]], list of gates, each of which
           is a list of strings read from a line of the qasm file.
     """
-    lns = qasm.split('\n')
-    n = int(lns[0])
-    gates = [l.split(" ") for l in lns[1:] if l]
-    return {'n': n, 'gates': gates, 'n_gates': len(gates)}
+
+    lines = qasm.split('\n')
+    n = int(lines[0])
+
+    # turn into tuples of python types
+    gates = [
+        tuple(map(_convert_ints_and_floats, line.strip().split(" ")))
+        for line in lines[1:] if line
+    ]
+
+    # put registers/parameters in standard order and detect if gate round used
+    gates = tuple(map(_put_registers_last, gates))
+    round_specified = isinstance(gates[0][0], numbers.Integral)
+
+    return {
+        'n': n,
+        'gates': gates,
+        'n_gates': len(gates),
+        'round_specified': round_specified,
+    }
 
 
 def parse_qasm_file(fname, **kwargs):
@@ -127,6 +170,7 @@ APPLY_GATES = {
     'Y_1_2': build_gate_1(qu.Ysqrt(), tags='Y_1/2'),
     'Z_1_2': build_gate_1(qu.Zsqrt(), tags='Z_1/2'),
     'W_1_2': build_gate_1(qu.Wsqrt(), tags='W_1/2'),
+    'HZ_1_2': build_gate_1(qu.Wsqrt(), tags='W_1/2'),
     'IDEN': lambda *args, **kwargs: None,
     'CNOT': build_gate_2(qu.CNOT(), tags='CNOT'),
     'CX': build_gate_2(qu.cX(), tags='CX'),
@@ -134,6 +178,7 @@ APPLY_GATES = {
     'CZ': build_gate_2(qu.cZ(), tags='CZ'),
     'IS': build_gate_2(qu.iswap(), tags='ISWAP'),
     'ISWAP': build_gate_2(qu.iswap(), tags='ISWAP'),
+    'FS': apply_fsim,
     'FSIM': apply_fsim,
     'SWAP': apply_swap,
 }
