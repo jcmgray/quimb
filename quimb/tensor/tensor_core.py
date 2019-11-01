@@ -3445,6 +3445,8 @@ class TensorNetwork(object):
 
         return tn
 
+    fuse_multibonds_ = functools.partialmethod(fuse_multibonds, inplace=True)
+
     def rank_simplify(self, squeeze=True, inplace=False):
         """Simplify this tensor network by performing all contractions of
         rank-1 and rank-2 tensors. These are guaranteed not to increase the
