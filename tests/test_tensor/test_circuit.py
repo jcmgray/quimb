@@ -126,3 +126,68 @@ class TestCircuit:
                            cswap.psi.to_dense()) == pytest.approx(1.0)
         assert qu.fidelity(cswap.psi.to_dense(),
                            cauto.psi.to_dense()) == pytest.approx(1.0)
+
+    @pytest.mark.parametrize("gate2", ['cx', 'iswap'])
+    def test_circuit_simplify_tensor_network(self, gate2):
+        import random
+        import itertools
+
+        depth = n = 8
+
+        circ = qtn.Circuit(n)
+
+        def random_single_qubit_layer():
+            return [
+                (random.choice(['X_1_2', 'Y_1_2', 'W_1_2']), i)
+                for i in range(n)
+            ]
+
+        def even_two_qubit_layer():
+            return [
+                (gate2, i, i + 1)
+                for i in range(0, n, 2)
+            ]
+
+        def odd_two_qubit_layer():
+            return [
+                (gate2, i, i + 1)
+                for i in range(1, n - 1, 2)
+            ]
+
+        layering = itertools.cycle([
+            random_single_qubit_layer,
+            even_two_qubit_layer,
+            random_single_qubit_layer,
+            odd_two_qubit_layer,
+        ])
+
+        for i, layer_fn in zip(range(depth), layering):
+            for g in layer_fn():
+                circ.apply_gate(*g, gate_round=i)
+
+        psif = qtn.MPS_computational_state('0' * n).squeeze_()
+        tn = circ.psi & psif
+
+        c = tn.contract(all, optimize='greedy')
+        cw = tn.contraction_width(optimize='greedy')
+
+        # absorb all low-rank tensors into neighbours
+        tn_rs = tn.rank_simplify()
+
+        assert len(tn_rs.tensors) < len(tn.tensors)
+        assert all(t.ndim > 2 for t in tn_rs)
+
+        c_rs = tn_rs.contract(all, optimize='greedy')
+        assert c == pytest.approx(c_rs)
+        cw_rs = tn_rs.contraction_width(optimize='greedy')
+        assert cw_rs <= cw
+
+        tn_rs_dr = tn_rs.diagonal_reduce()
+        assert len(tn_rs_dr.ind_map) < len(tn_rs.ind_map)
+
+        # need to specify output inds since we now have hyper edges
+        c_rs_dr = tn_rs_dr.contract(all, optimize='greedy', output_inds=[])
+        assert c_rs_dr == pytest.approx(c)
+        cw_rs_dr = tn_rs_dr.contraction_width(optimize='greedy',
+                                              output_inds=[])
+        assert cw_rs_dr <= cw_rs

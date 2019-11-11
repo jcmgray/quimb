@@ -18,6 +18,8 @@ v1.2.1 (unreleased)
 - Various changes in conjunction with `autoray <https://github.com/jcmgray/autoray>`_ to improve the agnostic-ness of tensor network operations with respect to the backend array type
 - Add :func:`~quimb.tensor.tensor_core.new_bond` on top of :meth:`quimb.tensor.tensor_core.Tensor.new_ind` and :meth:`quimb.tensor.tensor_core.Tensor.expand_ind` for more graph orientated construction of tensor networks, see :ref:`tn-creation-graph-style`
 - Add the :func:`~quimb.gen.operators.fsim` gate.
+- TN: rename ``contraction_complexity`` to :meth:`~quimb.tensor.tensor_core.TensorNetwork.contraction_width`.
+- TN: add :meth:`quimb.tensor.tensor_core.TensorNetwork.diagonal_reduce`, to automatically collapse all diagonal tensor axes in a tensor network, introducing hyper edges.
 
 **Bug fixes:**
 

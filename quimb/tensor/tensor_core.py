@@ -25,7 +25,8 @@ from ..core import qarray, prod, realify_scalar, vdot, common_type
 from ..utils import check_opt, functions_equal
 from ..gen.rand import randn, seed_rand
 from . import decomp
-from .array_ops import iscomplex, norm_fro, unitize, ndim, asarray
+from .array_ops import (iscomplex, norm_fro, unitize,
+                        ndim, asarray, find_diag_axes)
 
 
 _DEFAULT_CONTRACTION_STRATEGY = 'greedy'
@@ -1542,197 +1543,6 @@ for meth_name, op in [('__radd__', operator.__add__),
                       ('__rpow__', operator.__pow__),
                       ('__rtruediv__', operator.__truediv__)]:
     setattr(Tensor, meth_name, _make_rhand_array_promote_func(op, meth_name))
-
-
-class TNLinearOperator(spla.LinearOperator):
-    r"""Get a linear operator - something that replicates the matrix-vector
-    operation - for an arbitrary uncontracted TensorNetwork, e.g::
-
-                 : --O--O--+ +-- :                 --+
-                 :   |     | |   :                   |
-                 : --O--O--O-O-- :    acting on    --V
-                 :   |     |     :                   |
-                 : --+     +---- :                 --+
-        left_inds^               ^right_inds
-
-    This can then be supplied to scipy's sparse linear algebra routines.
-    The ``left_inds`` / ``right_inds`` convention is that the linear operator
-    will have shape matching ``(*left_inds, *right_inds)``, so that the
-    ``right_inds`` are those that will be contracted in a normal
-    matvec / matmat operation::
-
-        _matvec =    --0--v    , _rmatvec =     v--0--
-
-    Parameters
-    ----------
-    tns : sequence of Tensors or TensorNetwork
-        A representation of the hamiltonian
-    left_inds : sequence of str
-        The 'left' inds of the effective hamiltonian network.
-    right_inds : sequence of str
-        The 'right' inds of the effective hamiltonian network. These should be
-        ordered the same way as ``left_inds``.
-    ldims : tuple of int, or None
-        The dimensions corresponding to left_inds. Will figure out if None.
-    rdims : tuple of int, or None
-        The dimensions corresponding to right_inds. Will figure out if None.
-    is_conj : bool, optional
-        Whether this object should represent the *adjoint* operator.
-
-    See Also
-    --------
-    TNLinearOperator1D
-    """
-
-    def __init__(self, tns, left_inds, right_inds, ldims=None, rdims=None,
-                 backend=None, is_conj=False):
-        self.backend = _TENSOR_LINOP_BACKEND if backend is None else backend
-
-        if isinstance(tns, TensorNetwork):
-            self._tensors = tns.tensors
-
-            if ldims is None or rdims is None:
-                ix_sz = tns.ind_sizes()
-                ldims = tuple(ix_sz[i] for i in left_inds)
-                rdims = tuple(ix_sz[i] for i in right_inds)
-
-        else:
-            self._tensors = tuple(tns)
-
-            if ldims is None or rdims is None:
-                ix_sz = dict(zip(concat((t.inds, t.shape) for t in tns)))
-                ldims = tuple(ix_sz[i] for i in left_inds)
-                rdims = tuple(ix_sz[i] for i in right_inds)
-
-        self.left_inds, self.right_inds = left_inds, right_inds
-        self.ldims, ld = ldims, prod(ldims)
-        self.rdims, rd = rdims, prod(rdims)
-
-        self._kws = {'get': 'expression'}
-
-        # if recent opt_einsum specify constant tensors
-        if hasattr(oe.backends, 'evaluate_constants'):
-            self._kws['constants'] = range(len(self._tensors))
-            self._ins = ()
-        else:
-            self._ins = tuple(t.data for t in self._tensors)
-
-        # conjugate inputs/ouputs rather all tensors if necessary
-        self.is_conj = is_conj
-        self._conj_linop = None
-        self._adjoint_linop = None
-        self._transpose_linop = None
-        self._contractors = {}
-
-        super().__init__(dtype=self._tensors[0].dtype, shape=(ld, rd))
-
-    def _matvec(self, vec):
-        in_data = reshape(vec, self.rdims)
-
-        if self.is_conj:
-            in_data = conj(in_data)
-
-        # cache the contractor
-        if 'matvec' not in self._contractors:
-            # generate a expression that acts directly on the data
-            iT = Tensor(in_data, inds=self.right_inds)
-            self._contractors['matvec'] = tensor_contract(
-                *self._tensors, iT, output_inds=self.left_inds, **self._kws)
-
-        fn = self._contractors['matvec']
-        out_data = fn(*self._ins, in_data, backend=self.backend)
-
-        if self.is_conj:
-            out_data = conj(out_data)
-
-        return out_data.ravel()
-
-    def _matmat(self, mat):
-        d = mat.shape[-1]
-        in_data = reshape(mat, (*self.rdims, d))
-
-        if self.is_conj:
-            in_data = conj(in_data)
-
-        # for matmat need different contraction scheme for different d sizes
-        key = f"matmat_{d}"
-
-        # cache the contractor
-        if key not in self._contractors:
-            # generate a expression that acts directly on the data
-            iT = Tensor(in_data, inds=(*self.right_inds, '_mat_ix'))
-            o_ix = (*self.left_inds, '_mat_ix')
-            self._contractors[key] = tensor_contract(
-                *self._tensors, iT, output_inds=o_ix, **self._kws)
-
-        fn = self._contractors[key]
-        out_data = fn(*self._ins, in_data, backend=self.backend)
-
-        if self.is_conj:
-            out_data = conj(out_data)
-
-        return reshape(out_data, (-1, d))
-
-    def copy(self, conj=False, transpose=False):
-        if transpose:
-            inds = self.right_inds, self.left_inds
-            dims = self.rdims, self.ldims
-        else:
-            inds = self.left_inds, self.right_inds
-            dims = self.ldims, self.rdims
-
-        if conj:
-            is_conj = not self.is_conj
-        else:
-            is_conj = self.is_conj
-
-        return TNLinearOperator(self._tensors, *inds, *dims,
-                                is_conj=is_conj, backend=self.backend)
-
-    def conj(self):
-        if self._conj_linop is None:
-            self._conj_linop = self.copy(conj=True)
-        return self._conj_linop
-
-    def _transpose(self):
-        if self._transpose_linop is None:
-            self._transpose_linop = self.copy(transpose=True)
-        return self._transpose_linop
-
-    def _adjoint(self):
-        """Hermitian conjugate of this TNLO.
-        """
-        # cache the adjoint
-        if self._adjoint_linop is None:
-            self._adjoint_linop = self.copy(conj=True, transpose=True)
-        return self._adjoint_linop
-
-    def to_dense(self, *inds_seq, **contract_opts):
-        """Convert this TNLinearOperator into a dense array, defaulting to
-        grouping the left and right indices respectively.
-        """
-        if self.is_conj:
-            ts = (t.conj() for t in self._tensors)
-        else:
-            ts = self._tensors
-
-        if not inds_seq:
-            inds_seq = self.left_inds, self.right_inds
-
-        return tensor_contract(*ts, **contract_opts).to_dense(*inds_seq)
-
-    @property
-    def A(self):
-        return self.to_dense()
-
-    def astype(self, dtype):
-        """Convert this ``TNLinearOperator`` to type ``dtype``.
-        """
-        return TNLinearOperator(
-            (t.astype(dtype) for t in self._tensors),
-            left_inds=self.left_inds, right_inds=self.right_inds,
-            ldims=self.ldims, rdims=self.rdims, backend=self.backend,
-        )
 
 
 # --------------------------------------------------------------------------- #
@@ -3265,19 +3075,14 @@ class TensorNetwork(object):
         # Else just contract those tensors specified by tags.
         return self.contract_tags(tags, inplace=inplace, **opts)
 
-    def contraction_complexity(self, **contract_opts):
-        """Compute the 'contraction complexity' of this tensor network. This
+    def contraction_width(self, **contract_opts):
+        """Compute the 'contraction width' of this tensor network. This
         is defined as log2 of the maximum tensor size produced during the
         contraction sequence. If every index in the network has dimension 2
         this corresponds to the maximum rank tensor produced.
         """
-        try:
-            path = self.contract(all, get='path-info', **contract_opts)
-            return math.log2(path.largest_intermediate)
-        except AttributeError:
-            expr = self.contract(all, get='expression', **contract_opts)
-            return max(len(c[2].split('->')[-1])
-                       for c in expr.contraction_list)
+        path_info = self.contract(all, get='path-info', **contract_opts)
+        return math.log2(path_info.largest_intermediate)
 
     def __rshift__(self, tags_seq):
         """Overload of '>>' for TensorNetwork.contract_cumulative.
@@ -3304,7 +3109,6 @@ class TensorNetwork(object):
         """
         return TensorNetwork((self, other)) ^ ...
 
-    @functools.wraps(TNLinearOperator)
     def aslinearoperator(self, left_inds, right_inds,
                          ldims=None, rdims=None, backend=None):
         return TNLinearOperator(self, left_inds, right_inds,
@@ -3324,15 +3128,6 @@ class TensorNetwork(object):
         return self.contract(**contract_opts).to_dense(*inds_seq)
 
     # --------------- information about indices and dimensions -------------- #
-
-    def _check_internal(self):
-        for tid, t in self.tensor_map.items():
-            for ix in t.inds:
-                if tid not in self.ind_map[ix]:
-                    raise ValueError("inds wrong")
-            for tg in t.tags:
-                if tid not in self.tag_map[tg]:
-                    raise ValueError("tags wrong")
 
     @property
     def tags(self):
@@ -3502,6 +3297,43 @@ class TensorNetwork(object):
         return tn
 
     rank_simplify_ = functools.partialmethod(rank_simplify, inplace=True)
+
+    def diagonal_reduce(self, inplace=False, **kwargs):
+        """Find tensors with diagonal structure and collapse those axes. This
+        will create a tensor 'hyper' network with indices repeated 2+ times, as
+        such, output indices should be explicitly supplied when contracting, as
+        they can no longer be automatically inferred. For example:
+
+            >>> tn_diag = tn.diagonal_reduce()
+            >>> tn_diag.contract(all, output_inds=[])
+
+        """
+        tn = self if inplace else self.copy()
+
+        indmap = {}
+        for t in tn:
+            ij = find_diag_axes(t.data, **kwargs)
+            if ij:
+                i, j = ij
+                ix_i, ix_j = t.inds[i], t.inds[j]
+                if ix_i in indmap:
+                    indmap[ix_j] = indmap[ix_i]
+                elif ix_j in indmap:
+                    indmap[ix_i] = indmap[ix_j]
+                else:
+                    indmap[ix_i] = ix_j
+
+        for t in tn:
+            if not any(ix in indmap for ix in t.inds):
+                continue
+            tmp_inds = [indmap.get(ix, ix) for ix in t.inds]
+            new_inds = list(unique(tmp_inds))
+            new_data = oe.contract(t.data, tmp_inds, new_inds)
+            t.modify(data=new_data, inds=new_inds)
+
+        return tn
+
+    diagonal_reduce_ = functools.partialmethod(diagonal_reduce, inplace=True)
 
     def max_bond(self):
         """Return the size of the largest bond in this network.
@@ -3800,6 +3632,197 @@ class TensorNetwork(object):
             rep += f", structure='{self.structure}', nsites={self.nsites}"
 
         return rep + ")>"
+
+
+class TNLinearOperator(spla.LinearOperator):
+    r"""Get a linear operator - something that replicates the matrix-vector
+    operation - for an arbitrary uncontracted TensorNetwork, e.g::
+
+                 : --O--O--+ +-- :                 --+
+                 :   |     | |   :                   |
+                 : --O--O--O-O-- :    acting on    --V
+                 :   |     |     :                   |
+                 : --+     +---- :                 --+
+        left_inds^               ^right_inds
+
+    This can then be supplied to scipy's sparse linear algebra routines.
+    The ``left_inds`` / ``right_inds`` convention is that the linear operator
+    will have shape matching ``(*left_inds, *right_inds)``, so that the
+    ``right_inds`` are those that will be contracted in a normal
+    matvec / matmat operation::
+
+        _matvec =    --0--v    , _rmatvec =     v--0--
+
+    Parameters
+    ----------
+    tns : sequence of Tensors or TensorNetwork
+        A representation of the hamiltonian
+    left_inds : sequence of str
+        The 'left' inds of the effective hamiltonian network.
+    right_inds : sequence of str
+        The 'right' inds of the effective hamiltonian network. These should be
+        ordered the same way as ``left_inds``.
+    ldims : tuple of int, or None
+        The dimensions corresponding to left_inds. Will figure out if None.
+    rdims : tuple of int, or None
+        The dimensions corresponding to right_inds. Will figure out if None.
+    is_conj : bool, optional
+        Whether this object should represent the *adjoint* operator.
+
+    See Also
+    --------
+    TNLinearOperator1D
+    """
+
+    def __init__(self, tns, left_inds, right_inds, ldims=None, rdims=None,
+                 backend=None, is_conj=False):
+        self.backend = _TENSOR_LINOP_BACKEND if backend is None else backend
+
+        if isinstance(tns, TensorNetwork):
+            self._tensors = tns.tensors
+
+            if ldims is None or rdims is None:
+                ix_sz = tns.ind_sizes()
+                ldims = tuple(ix_sz[i] for i in left_inds)
+                rdims = tuple(ix_sz[i] for i in right_inds)
+
+        else:
+            self._tensors = tuple(tns)
+
+            if ldims is None or rdims is None:
+                ix_sz = dict(zip(concat((t.inds, t.shape) for t in tns)))
+                ldims = tuple(ix_sz[i] for i in left_inds)
+                rdims = tuple(ix_sz[i] for i in right_inds)
+
+        self.left_inds, self.right_inds = left_inds, right_inds
+        self.ldims, ld = ldims, prod(ldims)
+        self.rdims, rd = rdims, prod(rdims)
+
+        self._kws = {'get': 'expression'}
+
+        # if recent opt_einsum specify constant tensors
+        if hasattr(oe.backends, 'evaluate_constants'):
+            self._kws['constants'] = range(len(self._tensors))
+            self._ins = ()
+        else:
+            self._ins = tuple(t.data for t in self._tensors)
+
+        # conjugate inputs/ouputs rather all tensors if necessary
+        self.is_conj = is_conj
+        self._conj_linop = None
+        self._adjoint_linop = None
+        self._transpose_linop = None
+        self._contractors = {}
+
+        super().__init__(dtype=self._tensors[0].dtype, shape=(ld, rd))
+
+    def _matvec(self, vec):
+        in_data = reshape(vec, self.rdims)
+
+        if self.is_conj:
+            in_data = conj(in_data)
+
+        # cache the contractor
+        if 'matvec' not in self._contractors:
+            # generate a expression that acts directly on the data
+            iT = Tensor(in_data, inds=self.right_inds)
+            self._contractors['matvec'] = tensor_contract(
+                *self._tensors, iT, output_inds=self.left_inds, **self._kws)
+
+        fn = self._contractors['matvec']
+        out_data = fn(*self._ins, in_data, backend=self.backend)
+
+        if self.is_conj:
+            out_data = conj(out_data)
+
+        return out_data.ravel()
+
+    def _matmat(self, mat):
+        d = mat.shape[-1]
+        in_data = reshape(mat, (*self.rdims, d))
+
+        if self.is_conj:
+            in_data = conj(in_data)
+
+        # for matmat need different contraction scheme for different d sizes
+        key = f"matmat_{d}"
+
+        # cache the contractor
+        if key not in self._contractors:
+            # generate a expression that acts directly on the data
+            iT = Tensor(in_data, inds=(*self.right_inds, '_mat_ix'))
+            o_ix = (*self.left_inds, '_mat_ix')
+            self._contractors[key] = tensor_contract(
+                *self._tensors, iT, output_inds=o_ix, **self._kws)
+
+        fn = self._contractors[key]
+        out_data = fn(*self._ins, in_data, backend=self.backend)
+
+        if self.is_conj:
+            out_data = conj(out_data)
+
+        return reshape(out_data, (-1, d))
+
+    def copy(self, conj=False, transpose=False):
+        if transpose:
+            inds = self.right_inds, self.left_inds
+            dims = self.rdims, self.ldims
+        else:
+            inds = self.left_inds, self.right_inds
+            dims = self.ldims, self.rdims
+
+        if conj:
+            is_conj = not self.is_conj
+        else:
+            is_conj = self.is_conj
+
+        return TNLinearOperator(self._tensors, *inds, *dims,
+                                is_conj=is_conj, backend=self.backend)
+
+    def conj(self):
+        if self._conj_linop is None:
+            self._conj_linop = self.copy(conj=True)
+        return self._conj_linop
+
+    def _transpose(self):
+        if self._transpose_linop is None:
+            self._transpose_linop = self.copy(transpose=True)
+        return self._transpose_linop
+
+    def _adjoint(self):
+        """Hermitian conjugate of this TNLO.
+        """
+        # cache the adjoint
+        if self._adjoint_linop is None:
+            self._adjoint_linop = self.copy(conj=True, transpose=True)
+        return self._adjoint_linop
+
+    def to_dense(self, *inds_seq, **contract_opts):
+        """Convert this TNLinearOperator into a dense array, defaulting to
+        grouping the left and right indices respectively.
+        """
+        if self.is_conj:
+            ts = (t.conj() for t in self._tensors)
+        else:
+            ts = self._tensors
+
+        if not inds_seq:
+            inds_seq = self.left_inds, self.right_inds
+
+        return tensor_contract(*ts, **contract_opts).to_dense(*inds_seq)
+
+    @property
+    def A(self):
+        return self.to_dense()
+
+    def astype(self, dtype):
+        """Convert this ``TNLinearOperator`` to type ``dtype``.
+        """
+        return TNLinearOperator(
+            (t.astype(dtype) for t in self._tensors),
+            left_inds=self.left_inds, right_inds=self.right_inds,
+            ldims=self.ldims, rdims=self.rdims, backend=self.backend,
+        )
 
 
 class TNLinearOperator1D(spla.LinearOperator):

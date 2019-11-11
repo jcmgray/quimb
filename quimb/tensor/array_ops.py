@@ -1,5 +1,6 @@
 """Backend agnostic array operations.
 """
+import itertools
 
 import numpy
 from autoray import do, reshape, transpose, dag
@@ -123,3 +124,17 @@ def unitize(x, method='qr'):
         through it.
     """
     return _UNITIZE_METHODS[method](x)
+
+
+def find_diag_axes(x, atol=1e-13):
+    """Try and find a pair of axes of ``x`` in which it is diagonal.
+    """
+    shape = x.shape
+    indexers = do('indices', shape, like=x)
+
+    for i, j in itertools.combinations(range(len(shape)), 2):
+        if shape[i] != shape[j]:
+            continue
+        if do('allclose', x[indexers[i] != indexers[j]], 0.0, atol=atol):
+            return (i, j)
+    return None
