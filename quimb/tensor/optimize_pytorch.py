@@ -10,10 +10,15 @@ from .tensor_core import TensorNetwork
 _TORCH_DEVICE = None
 
 
-def _get_torch_and_device():
+def _get_torch_and_device(dev=None):
     global _TORCH_DEVICE
 
-    if _TORCH_DEVICE is None:
+    if dev is not None:
+        assert dev in ['cpu', 'cuda']
+        import torch
+        _TORCH_DEVICE = torch, dev
+
+    elif _TORCH_DEVICE is None:
         import torch
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
         _TORCH_DEVICE = torch, device
@@ -81,9 +86,10 @@ class TNOptimizer:
         optimizer='Adam',
         learning_rate=0.01,
         loss_target=None,
+        device=None,
         progbar=True
     ):
-        torch, _ = _get_torch_and_device()
+        torch, _ = _get_torch_and_device(device)
 
         self.tn = tn
         self.optimizer = optimizer
