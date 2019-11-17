@@ -2050,7 +2050,7 @@ class TensorNetwork(object):
         """
         return self.conj()
 
-    def multiply(self, x, inplace=False, spread_over=8):
+    def multiply(self, x, inplace=False, spread_over=0):
         """Scalar multiplication of this tensor network with ``x``.
 
         Parameters
@@ -2065,7 +2065,11 @@ class TensorNetwork(object):
             scalar is not concentrated.
         """
         multiplied = self if inplace else self.copy()
-        spread_over = min(len(self.tensor_map), spread_over)
+        if spread_over == 0:
+            spread_over = len(self.tensor_map)
+        else:
+            assert spread_over > 0
+            spread_over = min(len(self.tensor_map), spread_over)
 
         if spread_over == 1:
             x_sign = 1.0
