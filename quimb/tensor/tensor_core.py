@@ -2118,6 +2118,8 @@ class TensorNetwork(object):
 
         return multiplied
 
+    multiply_each_ = functools.partialmethod(multiply_each, inplace=True)
+
     def __mul__(self, other):
         """Scalar multiplication.
         """
