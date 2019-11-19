@@ -101,8 +101,10 @@ class TNOptimizer:
         differentiable computation graph, while only the scalar multiplication
         of each tensor by ``x`` is included in the differentiable graph. This
         can lead to reductions in cpu time and memory usage when compared
-        to ``norm_fn``. Note that only one of ``norm_fn`` and ``norm_fn_scalar``
-        can be specified.
+        to ``norm_fn``. If desired, both ``norm_fn`` and ``norm_fn_scalar`` can 
+        be used at the same time to enforce general constraints on ``tn`` and 
+        then normalize it with scalar multiplication. In this case, note that 
+        ``norm_fn`` is applied first, and then ``norm_fn_scalar``.
     loss_constants : dict_like, optional
         Extra constant arguments to supply to ``loss_fn`` and be converted to
         tensorflow constant tensors. Can be individual arrays or tensor
@@ -158,14 +160,8 @@ class TNOptimizer:
         self.progbar = progbar
         self.constant_tags = (set() if constant_tags is None
                               else set(constant_tags))
-
-        # sort out the normalization between norm_fn or norm_fn_scalar
-        if norm_fn is not None and norm_fn_scalar is not None:
-            raise RuntimeError("""The norm_fn and norm_fn_scalar
-                               kwargs are both specified. Only
-                               one can be used at a time.""")
-        elif norm_fn is None and norm_fn_scalar is None:
-            # use identity if no normalization required
+        
+        if norm_fn is None:
             def norm_fn(x):
                 return x
 
@@ -198,13 +194,14 @@ class TNOptimizer:
 
     def closure(self):
         self.optimizer.zero_grad()
-        if self.norm_fn is not None:
-            self.loss = self.loss_fn(self.norm_fn(self.tn_opt))
-        else:
+        tn = self.norm_fn(self.tn_opt)
+        if self.norm_fn_scalar is not None:
             torch, _ = _TORCH_DEVICE
             with torch.no_grad():
-                fac = self.norm_fn_scalar(self.tn_opt)
-            self.loss = self.loss_fn(self.tn_opt.multiply_each(fac, inplace=False))
+                fac = self.norm_fn_scalar(tn)
+            self.loss = self.loss_fn(tn.multiply_each(fac, inplace=False))
+        else:
+            self.loss = self.loss_fn(tn)
         self.loss.backward()
         return self.loss
 
@@ -236,13 +233,12 @@ class TNOptimizer:
             return (time.time() - self._time_start) > max_time
 
     def _get_tn_opt_numpy(self):
-        if self.norm_fn is not None:
-            tn_opt_numpy = self.norm_fn(self.tn_opt)
-        else:
+        tn_opt_numpy = self.norm_fn(self.tn_opt)
+        if self.norm_fn_scalar is not None:
             torch, _ = _TORCH_DEVICE
             with torch.no_grad():
-                fac = self.norm_fn_scalar(self.tn_opt)
-            tn_opt_numpy = self.tn_opt.multiply_each(fac, inplace=False)
+                fac = self.norm_fn_scalar(tn_opt_numpy)
+            tn_opt_numpy.multiply_each_(fac)
         tn_opt_numpy.apply_to_arrays(lambda x: x.cpu().detach().numpy())
         return tn_opt_numpy
 
