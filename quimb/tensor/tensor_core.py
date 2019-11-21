@@ -3174,7 +3174,7 @@ class TensorNetwork(object):
             t.squeeze_()
 
         if fuse:
-            tn.fuse_multibonds(inplace=True)
+            tn.fuse_multibonds_()
 
         return tn
 
@@ -3264,7 +3264,7 @@ class TensorNetwork(object):
         if squeeze:
             tn.squeeze_()
 
-        tids = set(tn.tensor_map)
+        tids = list(tn.tensor_map)
         outer_inds = set(tn.outer_inds())
 
         while tids:
@@ -3281,18 +3281,18 @@ class TensorNetwork(object):
                 ix, = inds
             elif len(inds) == 2:
                 # always contract bigger index to decrease size
-                ix, ix_alt = inds
+                ix, ix_alt = sorted(inds)
                 if T1.ind_size(ix_alt) < T1.ind_size(ix):
                     ix = ix_alt
 
-            tid2, = (i for i in tn.ind_map[ix] if i != tid1)
+            tid2, = (i for i in sorted(tn.ind_map[ix]) if i != tid1)
 
             T3 = tn._pop_tensor(tid1) @ tn._pop_tensor(tid2)
             tn.add_tensor(T3, tid=tid2, virtual=True)
 
             # if result is low rank re-add to contract again
-            if T3.ndim in (1, 2):
-                tids.add(tid2)
+            if (T3.ndim in (1, 2)) and (tid2 not in tids):
+                tids.append(tid2)
 
         return tn
 
@@ -3310,6 +3310,7 @@ class TensorNetwork(object):
         """
         tn = self if inplace else self.copy()
 
+        # first find the indices that can be grouped together
         indmap = {}
         for t in tn:
             ij = find_diag_axes(t.data, **kwargs)
@@ -3323,6 +3324,7 @@ class TensorNetwork(object):
                 else:
                     indmap[ix_i] = ix_j
 
+        # then perform the actual diagonal collapse "ab->aa->a"
         for t in tn:
             if not any(ix in indmap for ix in t.inds):
                 continue
