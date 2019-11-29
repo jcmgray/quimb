@@ -265,7 +265,7 @@ def Ysqrt(**qu_opts):
 
     .. math::
 
-        X^{\frac{1}{2}} =
+        Y^{\frac{1}{2}} =
         \frac{1}{\sqrt{2}}
         \begin{bmatrix}
         1 & - 1 \\
@@ -281,7 +281,7 @@ def Zsqrt(**qu_opts):
 
     .. math::
 
-        X^{\frac{1}{2}} =
+        Z^{\frac{1}{2}} =
         \frac{1}{\sqrt{2}}
         \begin{bmatrix}
         1 - i & 0 \\
@@ -297,7 +297,7 @@ def Wsqrt(**qu_opts):
 
     .. math::
 
-        X^{\frac{1}{2}} =
+        W^{\frac{1}{2}} =
         \frac{1}{\sqrt{2}}
         \begin{bmatrix}
         1 & -\sqrt{i} \\
