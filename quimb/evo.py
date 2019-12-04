@@ -43,12 +43,13 @@ def schrodinger_eq_ket(ham):
 
 
 def schrodinger_eq_ket_timedep(ham):
-    """Wavefunction schrodinger equation.
+    """Wavefunction time dependent schrodinger equation.
 
     Parameters
     ----------
-    ham : operator
-        Time-independant Hamiltonian governing evolution.
+    ham : callable
+        Time-dependant Hamiltonian governing evolution, should take single
+        arguement ``t`` and return the Hamiltonian at that point.
 
     Returns
     -------
@@ -225,9 +226,11 @@ class Evolution(object):
     ----------
     p0 : quantum state
         Inital state, either vector or operator. If vector, converted to ket.
-    ham : operator, or tuple (1d array, operator).
+    ham : operator, tuple (1d array, operator), or callable
         Governing Hamiltonian, if tuple then assumed to contain
-        ``(eigvals, eigvecs)`` of presolved system.
+        ``(eigvals, eigvecs)`` of presolved system. If callable, assume a
+        time-dependent hamiltonian such that ``ham(t)`` is the Hamiltonian at
+        time ``t``.
     t0 : float, optional
         Initial time (i.e. time of state ``p0``), defaults to zero.
     compute : callable, or dict of callable, optional
@@ -285,10 +288,17 @@ class Evolution(object):
         self._method = method
 
         if method == 'solve' or isinstance(ham, (tuple, list)):
+            if callable(ham):
+                raise TypeError("You can't use the 'solve' method "
+                                "with a time-dependent Hamiltonian.")
             self._solve_ham(ham)
+
         elif method == 'integrate':
             self._start_integrator(ham, int_small_step)
         elif method == 'expm':
+            if callable(ham):
+                raise TypeError("You can't use the 'expm' method "
+                                "with a time-dependent Hamiltonian.")
             self._update_method = self._update_to_expm_ket
             self._pt = self._p0
             self.ham = ham
