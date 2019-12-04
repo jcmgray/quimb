@@ -42,6 +42,25 @@ def schrodinger_eq_ket(ham):
     return psi_dot
 
 
+def schrodinger_eq_ket_timedep(ham):
+    """Wavefunction schrodinger equation.
+
+    Parameters
+    ----------
+    ham : operator
+        Time-independant Hamiltonian governing evolution.
+
+    Returns
+    -------
+    psi_dot(t, y) : callable
+        Function to calculate psi_dot(t) at psi(t).
+    """
+    def psi_dot(t, y):
+        return -1.0j * dot(ham(t), y)
+
+    return psi_dot
+
+
 def schrodinger_eq_dop(ham):
     """Density operator schrodinger equation, but with flattened input/output.
 
@@ -170,18 +189,21 @@ def lindblad_eq_vectorized(ham, ls, gamma, sparse=False):
     return rho_dot
 
 
-def _calc_evo_eq(isdop, issparse, isopen=False):
+def _calc_evo_eq(isdop, issparse, isopen=False, timedep=False):
     """Choose an appropirate dynamical equation to evolve with.
     """
     eq_chooser = {
-        (0, 0, 0): schrodinger_eq_ket,
-        (0, 1, 0): schrodinger_eq_ket,
-        (1, 0, 0): schrodinger_eq_dop,
-        (1, 1, 0): schrodinger_eq_dop_vectorized,
-        (1, 0, 1): lindblad_eq,
-        (1, 1, 1): lindblad_eq_vectorized,
+        (0, 0, 0, 0): schrodinger_eq_ket,
+        (0, 1, 0, 0): schrodinger_eq_ket,
+        (1, 0, 0, 0): schrodinger_eq_dop,
+        (1, 1, 0, 0): schrodinger_eq_dop_vectorized,
+        (1, 0, 1, 0): lindblad_eq,
+        (1, 1, 1, 0): lindblad_eq_vectorized,
+        # time-dependent
+        (0, 0, 0, 1): schrodinger_eq_ket_timedep,
+        (0, 1, 0, 1): schrodinger_eq_ket_timedep,
     }
-    return eq_chooser[(isdop, issparse, isopen)]
+    return eq_chooser[(isdop, issparse, isopen, timedep)]
 
 
 # --------------------------------------------------------------------------- #
@@ -346,15 +368,21 @@ class Evolution(object):
     def _start_integrator(self, ham, small_step):
         """Initialize a stepping integrator.
         """
-        self._sparse_ham = issparse(ham)
+        timedep = callable(ham)
+        if timedep:
+            H0 = ham(0.0)
+        else:
+            H0 = ham
 
         # set complex ode with governing equation
-        evo_eq = _calc_evo_eq(self._isdop, self._sparse_ham)
+        self._sparse_ham = issparse(H0)
+        evo_eq = _calc_evo_eq(self._isdop, self._sparse_ham, False, timedep)
+
         self._stepper = complex_ode(evo_eq(ham))
 
         # 5th order stpper or 8th order stepper
         int_mthd, step_fct = ('dopri5', 150) if small_step else ('dop853', 50)
-        first_step = norm(ham, 'f') / step_fct
+        first_step = norm(H0, 'f') / step_fct
 
         self._stepper.set_integrator(int_mthd, nsteps=0, first_step=first_step)
 
