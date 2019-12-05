@@ -9,10 +9,12 @@ import functools
 
 import numpy as np
 from scipy.integrate import complex_ode
+from scipy.sparse.linalg import LinearOperator
 
 from .core import (qarray, isop, ldmul, rdmul, explt,
                    dot, issparse, qu, eye, dag)
 from .linalg.base_linalg import eigh, norm, expm_multiply
+from .linalg.approx_spectral import norm_fro_approx
 from .utils import continuous_progbar, progbar
 
 
@@ -392,7 +394,12 @@ class Evolution(object):
 
         # 5th order stpper or 8th order stepper
         int_mthd, step_fct = ('dopri5', 150) if small_step else ('dop853', 50)
-        first_step = norm(H0, 'f') / step_fct
+        if isinstance(H0, LinearOperator):
+            # approx norm doesn't need to be very accurate
+            nrm0 = norm_fro_approx(H0, tol=0.1)
+        else:
+            nrm0 = norm(H0, 'f')
+        first_step = nrm0 / step_fct
 
         self._stepper.set_integrator(int_mthd, nsteps=0, first_step=first_step)
 

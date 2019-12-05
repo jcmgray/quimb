@@ -139,6 +139,27 @@ def norm_fro(a):
     """
     return sqrt(inner(a, a))
 
+def norm_fro_approx(A, **kwargs):
+    r"""Calculate the approximate frobenius norm of any hermitian linear
+    operator:
+
+    .. math::
+
+        \mathrm{Tr} \left[ A^{\dagger} A \right]
+
+    Parameters
+    ----------
+    A : linear operator like
+        Operator with a dot method, assumed to be hermitian, to estimate the
+        frobenius norm of.
+    kwargs
+        Supplied to :func:`approx_spectral_function`.
+
+    Returns
+    -------
+    float
+    """
+    return approx_spectral_function(A, lambda x: x**2, **kwargs)**0.5
 
 def random_rect(shape, dist='rademacher', orthog=False, norm=True,
                 seed=False, dtype=complex):
