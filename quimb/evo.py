@@ -259,9 +259,6 @@ class Evolution(object):
     int_small_step : bool, optional
         If ``method='integrate'``, whether to use a low or high order
         integrator to give naturally small or large steps.
-    initial_norm : float, optional
-        An operator norm value (or estimate of) for ``ham`` (at t=t0 if time-dependent). 
-        If this is not supplied, an attempt to calculate will be made if needed.
     expm_backend : {'auto', 'scipy', 'slepc'}
         How to perform the expm_multiply function if ``method='expm'``. Can
         further specifiy ``'slepc-krylov'``, or ``'slepc-expokit'``.
@@ -277,7 +274,6 @@ class Evolution(object):
                  compute=None,
                  method='integrate',
                  int_small_step=False,
-                 initial_norm=None,
                  expm_backend='AUTO',
                  expm_opts=None,
                  progbar=False):
@@ -290,7 +286,6 @@ class Evolution(object):
 
         self._setup_callback(compute)
         self._method = method
-        self._initial_norm = initial_norm
 
         if method == 'solve' or isinstance(ham, (tuple, list)):
             if callable(ham):
@@ -397,10 +392,7 @@ class Evolution(object):
 
         # 5th order stpper or 8th order stepper
         int_mthd, step_fct = ('dopri5', 150) if small_step else ('dop853', 50)
-        if self._initial_norm is None:
-            first_step = norm(H0, 'f') / step_fct
-        else:
-            first_step = self._initial_norm / step_fct
+        first_step = norm(H0, 'f') / step_fct
 
         self._stepper.set_integrator(int_mthd, nsteps=0, first_step=first_step)
 
