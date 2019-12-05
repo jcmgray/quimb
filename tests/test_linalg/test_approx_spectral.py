@@ -30,6 +30,8 @@ from quimb.linalg.approx_spectral import (
     entropy_subsys_approx,
     logneg_subsys_approx,
     negativity_subsys_approx,
+    norm_fro,
+    norm_fro_approx,
 )
 from quimb.linalg import SLEPC4PY_FOUND
 
@@ -336,3 +338,11 @@ class TestSpecificApproxQuantities:
         actual_neg = negativity(rho_ab, DIMS[:-1], 0)
         approx_neg = negativity_subsys_approx(psi_abc, DIMS, 0, 1, bsz=bsz)
         assert_allclose(actual_neg, approx_neg, rtol=2e-1)
+
+    @pytest.mark.parametrize("bsz", [1, 2, 5])
+    def test_norm_fro_approx(self, bsz):
+        A = rand_herm(2**5)
+        actual_norm_fro = norm_fro(A)
+        approx_norm_fro = norm_fro_approx(A, tol=1e-2, bsz=bsz)
+        assert_allclose(actual_norm_fro, approx_norm_fro, rtol=1e-1)
+        
