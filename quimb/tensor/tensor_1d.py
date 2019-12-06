@@ -1009,7 +1009,7 @@ class TensorNetwork1DFlat(TensorNetwork1D,
     def compress_site(self, i, canonize=True, cur_orthog='calc', bra=None,
                       **compress_opts):
         r"""Compress the bonds adjacent to site ``i``, by default first setting
-        the orthogonality center to that site.
+        the orthogonality center to that site::
 
                  i                     i
             -o-o-o-o-o-    -->    ->->~o~<-<-
@@ -2889,7 +2889,7 @@ class SuperOperator1D(
     TensorNetwork1D,
     TensorNetwork,
 ):
-    r"""
+    r"""A 1D tensor network super-operator class::
 
         0   1   2       n-1
         |   |   |        |     <-- outer_upper_ind_id

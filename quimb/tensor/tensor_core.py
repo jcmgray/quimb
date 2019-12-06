@@ -3249,8 +3249,7 @@ class TensorNetwork(object):
 
         Parametrize
         -----------
-        dtype : {None, 'complex128', 'float64',
-                 'complex64' 'float32'}, optional
+        dtype : {None, str}, optional
             The data type of the random entries. If left as the default
             ``None``, then the data type of the current array will be used.
         seed : None or int, optional
