@@ -25,11 +25,22 @@ from ..core import qarray, prod, realify_scalar, vdot, common_type
 from ..utils import check_opt, functions_equal
 from ..gen.rand import randn, seed_rand
 from . import decomp
-from .array_ops import (iscomplex, norm_fro, unitize,
-                        ndim, asarray, find_diag_axes)
+from .array_ops import (iscomplex, norm_fro, unitize, ndim, asarray,
+                        find_diag_axes, find_antidiag_axes, find_columns)
 
 
 _DEFAULT_CONTRACTION_STRATEGY = 'greedy'
+
+
+def cost_rank(s12, s1, s2, k12, k1, k2):
+    rank_new = len(k12)
+    rank_old = max(len(k1), len(k2))
+    # second entry is to break ties
+    return rank_new - rank_old, rank_old
+
+
+greedy_rank = functools.partial(oe.paths.greedy, cost_fn=cost_rank)
+oe.paths.register_path_fn('greedy-rank', greedy_rank)
 
 
 def get_contract_strategy():
@@ -207,7 +218,11 @@ def _gen_output_inds(all_inds):
     cnts = OrderedCounter(all_inds)
     for ind, freq in cnts.items():
         if freq > 2:
-            raise ValueError(f"The index {ind} appears more than twice!")
+            raise ValueError(
+                f"The index {ind} appears more than twice! If this is "
+                "intentionally a 'hyper' tensor network you will need to "
+                "explicitly supply `output_inds` when contracting for example."
+            )
         elif freq == 1:
             yield ind
 
@@ -940,7 +955,7 @@ class Tensor(object):
         data_loc = tuple(selectors.get(ix, slice(None)) for ix in self.inds)
         new_data = self.data[data_loc]
 
-        T.modify(data=new_data, inds=new_inds)
+        T.modify(data=new_data, inds=new_inds, left_inds=None)
         return T
 
     isel_ = functools.partialmethod(isel, inplace=True)
@@ -1000,13 +1015,9 @@ class Tensor(object):
     def conj(self, inplace=False):
         """Conjugate this tensors data (does nothing to indices).
         """
-        conj_data = conj(self.data)
-
-        if inplace:
-            self._data = conj_data
-            return self
-        else:
-            return Tensor(conj_data, self.inds, self.tags)
+        t = self if inplace else self.copy()
+        t.modify(data=conj(self.data))
+        return t
 
     conj_ = functools.partialmethod(conj, inplace=True)
 
@@ -1425,6 +1436,22 @@ class Tensor(object):
 
     randomize_ = functools.partialmethod(randomize, inplace=True)
 
+    def flip(self, ind, inplace=False):
+        """Reverse the axis on this tensor corresponding to ``ind``. Like
+        performing e.g. ``X[:, :, ::-1, :]``.
+        """
+        if ind not in self.inds:
+            raise ValueError(f"Can't find index {ind} on this tensor.")
+
+        t = self if inplace else self.copy()
+        flipper = tuple(
+            slice(None, None, -1) if i == ind else slice(None) for i in t.inds
+        )
+        t.modify(data=self.data[flipper])
+        return t
+
+    flip_ = functools.partialmethod(flip, inplace=True)
+
     def almost_equals(self, other, **kwargs):
         """Check if this tensor is almost the same as another.
         """
@@ -1503,7 +1530,7 @@ class Tensor(object):
         self.__dict__ = state.copy()
 
     def __repr__(self):
-        return (f"Tensor(shape={self.data.shape}, "
+        return (f"{self.__class__.__name__}(shape={self.data.shape}, "
                 f"inds={self.inds}, tags={self.tags})")
 
 
@@ -1914,6 +1941,18 @@ class TensorNetwork(object):
         self._remove_tid((o for o in old if o not in new), self.ind_map, tid)
         self._add_tid((n for n in new if n not in old), self.ind_map, tid)
 
+    @property
+    def num_tensors(self):
+        """The total number of tensors in the tensor network.
+        """
+        return len(self.tensor_map)
+
+    @property
+    def num_indices(self):
+        """The total number of indices in the tensor network.
+        """
+        return len(self.ind_map)
+
     def calc_nsites(self):
         """Calculate how many tags there are which match ``structure``.
         """
@@ -2081,7 +2120,7 @@ class TensorNetwork(object):
             scalar is not concentrated.
         """
         multiplied = self if inplace else self.copy()
-        spread_over = min(len(self.tensor_map), spread_over)
+        spread_over = min(self.num_tensors, spread_over)
 
         if spread_over == 1:
             x_sign = 1.0
@@ -2456,7 +2495,7 @@ class TensorNetwork(object):
         tagged_tids = self._get_tids_from_tags(tags, which=which)
 
         # check if all tensors have been tagged
-        if len(tagged_tids) == len(self.tensor_map):
+        if len(tagged_tids) == self.num_tensors:
             return None, self.tensor_map.values()
 
         # Copy untagged to new network, and pop tagged tensors from this
@@ -2794,17 +2833,12 @@ class TensorNetwork(object):
         --------
         Tensor.isel
         """
-        TN = self if inplace else self.copy()
+        tn = self if inplace else self.copy()
 
-        tids = set.union(*map(self.ind_map.__getitem__, selectors))
-        for tid in tids:
-            # need to pop and add rather than acting inplace so we don't modify
-            # the tensor for other networks -> above copy not deep
-            TN.add_tensor(
-                TN._pop_tensor(tid).isel(selectors), virtual=True,
-            )
+        for tid in set_union(map(self.ind_map.__getitem__, selectors)):
+            tn.tensor_map[tid].isel_(selectors)
 
-        return TN
+        return tn
 
     isel_ = functools.partialmethod(isel, inplace=True)
 
@@ -3258,63 +3292,85 @@ class TensorNetwork(object):
 
     fuse_multibonds_ = functools.partialmethod(fuse_multibonds, inplace=True)
 
-    def rank_simplify(self, squeeze=True, inplace=False):
-        """Simplify this tensor network by performing all contractions of
-        rank-1 and rank-2 tensors. These are guaranteed not to increase the
-        memory of the network and thus can be a useful pre-processing step
-        before performing a complex contraction.
+    def flip(self, inds, inplace=False):
+        """Flip the dimension corresponding to indices ``inds`` on all tensors
+        that share it.
+        """
+        tn = self if inplace else self.copy()
+
+        if isinstance(inds, str):
+            inds = (inds,)
+
+        for ind in inds:
+            tids = tn.ind_map[ind]
+            for tid in tids:
+                tn.tensor_map[tid].flip_(ind)
+
+        return tn
+
+    flip_ = functools.partialmethod(flip, inplace=True)
+
+    def rank_simplify(self, inplace=False, optimize='greedy-rank',
+                      **contract_opts):
+        """Simplify this tensor network by performing contractions that don't
+        increase the rank of any tensors. This may need to be run several times
+        since the full contraction path generated is not necessarily greedily
+        ordered in terms of rank increases.
 
         Parameters
         ----------
-        squeeze : bool, optional
-            Whether to first squeeze all size 1 bonds, by default True.
-        squeeze : bool, optional
-            Whether to perform rank simplification in-place.
+        inplace : bool, optional
+            Whether to perform the rand reduction inplace.
+        optimize : str, opt_einsum.PathOptimizer
+            How to choose the the full contraction, which will be performed
+            up until the point that any tensor ranks start to increase.
+        contract_opts
+            Supplied to :func:`tensor_contract` to generate the full path, from
+            which initial rank reducing contraction steps will be taken.
 
         Returns
         -------
         TensorNetwork
+
+        See Also
+        --------
+        full_simplify, column_reduce, diagonal_reduce
         """
         tn = self if inplace else self.copy()
 
-        if squeeze:
-            tn.squeeze_()
+        info = tn.contract(all, get='path-info',
+                           optimize=optimize, **contract_opts)
+        contract_tids = list(tn.tensor_map)
 
-        tids = list(tn.tensor_map)
-        outer_inds = set(tn.outer_inds())
+        for c in info.contraction_list:
+            # whilst contractions don't increase rank perform them
+            lhs, output_i = c[2].split('->')
+            inputs_i = lhs.split(',')
+            if len(output_i) > max(map(len, inputs_i)):
+                break
 
-        while tids:
-            tid1 = tids.pop()
-            T1 = tn.tensor_map[tid1]
+            # get the tensors that the contraction corresponds to
+            tids = [contract_tids.pop(x) for x in sorted(c[0], reverse=True)]
+            Ts = [tn._pop_tensor(tid) for tid in tids]
 
-            if T1.ndim > 2:
-                continue
+            # find the correct output indices and perform the contraction
+            oix = [info.quimb_symbol_map[x] for x in output_i]
+            T = tensor_contract(*Ts, output_inds=oix)
 
-            # can only contract inner inds
-            inds = set(T1.inds) - outer_inds
+            # handle the case when a scalar is created
+            if not isinstance(T, Tensor):
+                T = Tensor(T)
 
-            if len(inds) == 1:
-                ix, = inds
-            elif len(inds) == 2:
-                # always contract bigger index to decrease size
-                ix, ix_alt = sorted(inds)
-                if T1.ind_size(ix_alt) < T1.ind_size(ix):
-                    ix = ix_alt
-
-            tid2, = (i for i in sorted(tn.ind_map[ix]) if i != tid1)
-
-            T3 = tn._pop_tensor(tid1) @ tn._pop_tensor(tid2)
-            tn.add_tensor(T3, tid=tid2, virtual=True)
-
-            # if result is low rank re-add to contract again
-            if (T3.ndim in (1, 2)) and (tid2 not in tids):
-                tids.append(tid2)
+            # add the new tensor back into the network
+            tid_ij = rand_uuid(base="_T")
+            tn.add_tensor(T, tid=tid_ij, virtual=True)
+            contract_tids.append(tid_ij)
 
         return tn
 
     rank_simplify_ = functools.partialmethod(rank_simplify, inplace=True)
 
-    def diagonal_reduce(self, inplace=False, **kwargs):
+    def diagonal_reduce(self, inplace=False, output_inds=None, atol=1e-12):
         """Find tensors with diagonal structure and collapse those axes. This
         will create a tensor 'hyper' network with indices repeated 2+ times, as
         such, output indices should be explicitly supplied when contracting, as
@@ -3323,35 +3379,253 @@ class TensorNetwork(object):
             >>> tn_diag = tn.diagonal_reduce()
             >>> tn_diag.contract(all, output_inds=[])
 
+        Parameters
+        ----------
+        inplace, bool, optional
+            Whether to perform the diagonal reduction inplace.
+        output_inds : sequence of str, optional
+            Which indices to explicitly consider as outer legs of the tensor
+            network and thus not replace. If not given, these will be taken as
+            all the indices that appear once.
+        atol : float, optional
+            When identifying diagonal tensors, the absolute tolerance with
+            which to compare to zero with.
+
+        Returns
+        -------
+        TensorNetwork
+
+        See Also
+        --------
+        full_simplify, rank_simplify, antidiag_gauge, column_reduce
         """
         tn = self if inplace else self.copy()
 
-        # first find the indices that can be grouped together
-        indmap = {}
-        for t in tn:
-            ij = find_diag_axes(t.data, **kwargs)
-            if ij:
-                i, j = ij
-                ix_i, ix_j = t.inds[i], t.inds[j]
-                if ix_i in indmap:
-                    indmap[ix_j] = indmap[ix_i]
-                elif ix_j in indmap:
-                    indmap[ix_i] = indmap[ix_j]
-                else:
-                    indmap[ix_i] = ix_j
+        if output_inds is None:
+            output_inds = set(self.outer_inds())
 
-        # then perform the actual diagonal collapse "ab->aa->a"
-        for t in tn:
-            if not any(ix in indmap for ix in t.inds):
+        queue = list(tn.tensors)
+        while queue:
+            t = queue.pop()
+            ij = find_diag_axes(t.data, atol=atol)
+
+            # no diagonals
+            if ij is None:
                 continue
-            tmp_inds = [indmap.get(ix, ix) for ix in t.inds]
+
+            i, j = ij
+            ix_i, ix_j = t.inds[i], t.inds[j]
+            if ix_j in output_inds:
+                if ix_i in output_inds:
+                    # both indices are outer indices - leave them
+                    continue
+                # just j is, make sure j -> i
+                ixmap = {ix_i: ix_j}
+            else:
+                ixmap = {ix_j: ix_i}
+
+            # e.g. if `ij == (0, 2)` then here we want 'abcd -> abad -> abd'
+            tmp_inds = [ixmap.get(ix, ix) for ix in t.inds]
             new_inds = list(unique(tmp_inds))
             new_data = oe.contract(t.data, tmp_inds, new_inds)
-            t.modify(data=new_data, inds=new_inds)
+            t.modify(data=new_data, inds=new_inds, left_inds=None)
+
+            # update wherever else the changed index appears (e.g. 'c' above)
+            tn.reindex_(ixmap)
+
+            # tensor might still have diagonal indices
+            queue.append(t)
 
         return tn
 
     diagonal_reduce_ = functools.partialmethod(diagonal_reduce, inplace=True)
+
+    def antidiag_gauge(self, inplace=False, output_inds=None, atol=1e-12):
+        """Flip the order of any bonds connected to antidiagonal tensors.
+        Whilst this is just a gauge fixing (with the gauge being the flipped
+        identity) it then allows ``diagonal_reduce`` to then simplify those
+        indices.
+
+        Parameters
+        ----------
+        inplace, bool, optional
+            Whether to perform the antidiagonal gauging inplace.
+        output_inds : sequence of str, optional
+            Which indices to explicitly consider as outer legs of the tensor
+            network and thus not flip. If not given, these will be taken as
+            all the indices that appear once.
+        atol : float, optional
+            When identifying antidiagonal tensors, the absolute tolerance with
+            which to compare to zero with.
+
+        Returns
+        -------
+        TensorNetwork
+
+        See Also
+        --------
+        full_simplify, rank_simplify, diagonal_reduce, column_reduce
+        """
+        tn = self if inplace else self.copy()
+
+        if output_inds is None:
+            output_inds = set(self.outer_inds())
+
+        queue = list(tn.tensor_map)
+        while queue:
+            tid = queue.pop()
+            t = tn.tensor_map[tid]
+            ij = find_antidiag_axes(t.data, atol=atol)
+
+            # tensor not anti-diagonal
+            if ij is None:
+                continue
+
+            # work out which, if any, index to flip
+            i, j = ij
+            ix_i, ix_j = t.inds[i], t.inds[j]
+            if ix_i in output_inds:
+                if ix_j in output_inds:
+                    # both are output indices, don't flip
+                    continue
+                # don't flip i as it is an output index
+                ix_flip = ix_j
+            else:
+                ix_flip = ix_i
+
+            # only flip one index
+            tn.flip_([ix_flip])
+            queue.append(tid)
+
+        return tn
+
+    antidiag_gauge_ = functools.partialmethod(antidiag_gauge, inplace=True)
+
+    def column_reduce(self, inplace=False, output_inds=None, atol=1e-12):
+        """Find bonds on this tensor network which have tensors where all but
+        one column (of the respective index) is non-zero, allowing the
+        'cutting' of that bond.
+
+        Parameters
+        ----------
+        inplace, bool, optional
+            Whether to perform the column reductions inplace.
+        output_inds : sequence of str, optional
+            Which indices to explicitly consider as outer legs of the tensor
+            network and thus not slice. If not given, these will be taken as
+            all the indices that appear once.
+        atol : float, optional
+            When identifying singlet column tensors, the absolute tolerance
+            with which to compare to zero with.
+
+        Returns
+        -------
+        TensorNetwork
+
+        See Also
+        --------
+        full_simplify, rank_simplify, diagonal_reduce, antidiag_gauge
+        """
+        tn = self if inplace else self.copy()
+
+        if output_inds is None:
+            output_inds = set(self.outer_inds())
+
+        queue = list(tn.tensor_map)
+        while queue:
+            tid = queue.pop()
+            t = tn.tensor_map[tid]
+            ax_i = find_columns(t.data, atol=atol)
+
+            # not singlet columns
+            if ax_i is None:
+                continue
+
+            ax, i = ax_i
+            ind = t.inds[ax]
+
+            # don't want to modify 'outer' shape of TN
+            if ind in output_inds:
+                continue
+
+            tn.isel_({ind: i})
+            queue.append(tid)
+
+        return tn
+
+    column_reduce_ = functools.partialmethod(column_reduce, inplace=True)
+
+    def full_simplify(self, seq='DRAC', inplace=False, output_inds=None,
+                      atol=1e-12, **rank_simplify_opts):
+        """Perform a series of tensor network 'simplifications' in a loop until
+        there is no more reduction in the number of tensors or indices. Note
+        that apart from rank-reduction, the simplification methods make use of
+        the non-zero structure of the tensors, and thus changes to this will
+        potentially produce different simplifications.
+
+        Parameters
+        ----------
+        seq : str, optional
+            Which simplifications and which order to perform them in.
+
+                * ``'D'`` : stands for ``diagonal_reduce``
+                * ``'R'`` : stands for ``rank_simplify``
+                * ``'A'`` : stands for ``antidiag_gauge``
+                * ``'C'`` : stands for ``column_reduce``
+
+            If you want to keep the tensor network 'simple', i.e. with no
+            hyperedges, then don't use ``'D'`` (moreover ``'A'`` is redundant).
+        inplace : bool, optional
+            Whether to perform the simplification inplace.
+        output_inds : sequence of str, optional
+            Explicitly set which indices of the tensor network are output
+            indices and thus should not be modified.
+        atol : float, optional
+            The absolute tolerance when indentifying zero entries of tensors.
+        rank_simplify_opts
+            Supplied to ``rank_simplify``.
+
+        Returns
+        -------
+        TensorNetwork
+
+        See Also
+        --------
+        diagonal_reduce, rank_simplify, antidiag_gauge, column_reduce
+        """
+        tn = self if inplace else self.copy()
+        tn.squeeze_()
+
+        # all the methods
+        if output_inds is None:
+            output_inds = self.outer_inds()
+
+        # for the index trick reductions, faster to supply set
+        ix_o = set(output_inds)
+
+        # keep simplifying until the number of tensors and indices equalizes
+        old_nt, old_ni = -1, -1
+        nt, ni = tn.num_tensors, tn.num_indices
+        while (nt, ni) != (old_nt, old_ni):
+            for meth in seq:
+                if meth == 'D':
+                    tn.diagonal_reduce_(output_inds=ix_o, atol=atol)
+                elif meth == 'R':
+                    tn.rank_simplify_(output_inds=output_inds,
+                                      **rank_simplify_opts)
+                elif meth == 'A':
+                    tn.antidiag_gauge_(output_inds=ix_o, atol=atol)
+                elif meth == 'C':
+                    tn.column_reduce_(output_inds=ix_o, atol=atol)
+                else:
+                    raise ValueError(f"'{meth}' is not a valid simplify type.")
+
+            old_nt, old_ni = nt, ni
+            nt, ni = tn.num_tensors, tn.num_indices
+
+        return tn
+
+    full_simplify_ = functools.partialmethod(full_simplify, inplace=True)
 
     def max_bond(self):
         """Return the size of the largest bond in this network.
@@ -3645,7 +3919,9 @@ class TensorNetwork(object):
             self.nsites is not None else "")
 
     def __repr__(self):
-        rep = f"<{self.__class__.__name__}(tensors={len(self.tensor_map)}"
+        rep = f"<{self.__class__.__name__}("
+        rep += f"tensors={self.num_tensors}"
+        rep += f", indices={self.num_indices}"
         if self.structure:
             rep += f", structure='{self.structure}', nsites={self.nsites}"
 

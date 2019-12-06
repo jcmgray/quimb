@@ -13,14 +13,19 @@ v1.2.1 (unreleased)
 
 - Added time dependent evolutions to :class:`~quimb.evo.Evolution` when integrating a pure state - see :ref:`time-dependent-evolution` - as well as supporting ``LinearOperator`` defined hamiltonians (:pull:`40`).
 - Added :meth:`quimb.tensor.tensor_core.Tensor.randomize` and :meth:`quimb.tensor.tensor_core.TensorNetwork.randomize` to randomize tensor and tensor network entries.
-- Automatically squeeze tensor networks when rank-simplifying
+- Automatically squeeze tensor networks when rank-simplifying.
 - Add :meth:`~quimb.tensor.tensor_1d.TensorNetwork1DFlat.compress_site` for compressing around single sites of MPS etc.
 - Add :func:`~quimb.tensor.tensor_gen.MPS_ghz_state` and :func:`~quimb.tensor.tensor_gen.MPS_w_state` for building bond dimension 2 open boundary MPS reprentations of those states.
-- Various changes in conjunction with `autoray <https://github.com/jcmgray/autoray>`_ to improve the agnostic-ness of tensor network operations with respect to the backend array type
-- Add :func:`~quimb.tensor.tensor_core.new_bond` on top of :meth:`quimb.tensor.tensor_core.Tensor.new_ind` and :meth:`quimb.tensor.tensor_core.Tensor.expand_ind` for more graph orientated construction of tensor networks, see :ref:`tn-creation-graph-style`
+- Various changes in conjunction with `autoray <https://github.com/jcmgray/autoray>`_ to improve the agnostic-ness of tensor network operations with respect to the backend array type.
+- Add :func:`~quimb.tensor.tensor_core.new_bond` on top of :meth:`quimb.tensor.tensor_core.Tensor.new_ind` and :meth:`quimb.tensor.tensor_core.Tensor.expand_ind` for more graph orientated construction of tensor networks, see :ref:`tn-creation-graph-style`.
 - Add the :func:`~quimb.gen.operators.fsim` gate.
 - TN: rename ``contraction_complexity`` to :meth:`~quimb.tensor.tensor_core.TensorNetwork.contraction_width`.
+- TN: update :meth:`quimb.tensor.tensor_core.TensorNetwork.rank_simplify`, to handle hyper-edges.
 - TN: add :meth:`quimb.tensor.tensor_core.TensorNetwork.diagonal_reduce`, to automatically collapse all diagonal tensor axes in a tensor network, introducing hyper edges.
+- TN: add :meth:`quimb.tensor.tensor_core.TensorNetwork.antidiag_gauge`, to automatically flip all anti-diagonal tensor axes in a tensor network allowing subsequent diagonal reduction.
+- TN: add :meth:`quimb.tensor.tensor_core.TensorNetwork.column_reduce`, to automatically identify tensor axes with a single non-zero column, allowing the corresponding index to be cut.
+- TN: add :meth:`quimb.tensor.tensor_core.TensorNetwork.full_simplify`, to iteratively perform all the above simplifications in a specfied order until nothing is left to be done.
+- TN: add ``num_tensors`` and ``num_indices`` attributes, show ``num_indices`` in ``__repr__``.
 
 **Bug fixes:**
 

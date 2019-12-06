@@ -139,15 +139,128 @@ def unitize(x, method='qr'):
     return _UNITIZE_METHODS[method](x)
 
 
-def find_diag_axes(x, atol=1e-13):
+def find_diag_axes(x, atol=1e-12):
     """Try and find a pair of axes of ``x`` in which it is diagonal.
+
+    Parameters
+    ----------
+    x : array-like
+        The array to search.
+    atol : float, optional
+        Tolerance with which to compare to zero.
+
+    Returns
+    -------
+    tuple[int] or None
+        The two axes if found else None.
+
+    Examples
+    --------
+
+        >>> x = np.array([[[1, 0], [0, 2]],
+        ...               [[3, 0], [0, 4]]])
+        >>> find_diag_axes(x)
+        (1, 2)
+
+    Which means we can reduce ``x`` without loss of information to:
+
+        >>> np.einsum('abb->ab', x)
+        array([[1, 2],
+               [3, 4]])
+
     """
     shape = x.shape
-    indexers = do('indices', shape, like=x)
+    indxrs = do('indices', shape, like=x)
 
     for i, j in itertools.combinations(range(len(shape)), 2):
         if shape[i] != shape[j]:
             continue
-        if do('allclose', x[indexers[i] != indexers[j]], 0.0, atol=atol):
+        if do('allclose', x[indxrs[i] != indxrs[j]], 0.0, atol=atol):
             return (i, j)
+    return None
+
+
+def find_antidiag_axes(x, atol=1e-12):
+    """Try and find a pair of axes of ``x`` in which it is anti-diagonal.
+
+    Parameters
+    ----------
+    x : array-like
+        The array to search.
+    atol : float, optional
+        Tolerance with which to compare to zero.
+
+    Returns
+    -------
+    tuple[int] or None
+        The two axes if found else None.
+
+    Examples
+    --------
+
+        >>> x = np.array([[[0, 1], [0, 2]],
+        ...               [[3, 0], [4, 0]]])
+        >>> find_antidiag_axes(x)
+        (0, 2)
+
+    Which means we can reduce ``x`` without loss of information to:
+
+        >>> np.einsum('aba->ab', x[::-1, :, :])
+        array([[3, 4],
+               [1, 2]])
+
+    as long as we flip the order of dimensions on other tensors corresponding
+    to the the same index.
+    """
+    shape = x.shape
+    indxrs = do('indices', shape, like=x)
+
+    for i, j in itertools.combinations(range(len(shape)), 2):
+        di, dj = shape[i], shape[j]
+        if di != dj:
+            continue
+        if do('allclose', x[indxrs[i] != dj - 1 - indxrs[j]], 0.0, atol=atol):
+            return (i, j)
+    return None
+
+
+def find_columns(x, atol=1e-12):
+    """Try and find columns of axes which are zero apart from a single index.
+
+    Parameters
+    ----------
+    x : array-like
+        The array to search.
+    atol : float, optional
+        Tolerance with which to compare to zero.
+
+    Returns
+    -------
+    tuple[int] or None
+        If found, the first integer is which axis, and the second is which
+        column of that axis, else None.
+
+    Examples
+    --------
+
+        >>> x = np.array([[[0, 1], [0, 2]],
+        ...               [[0, 3], [0, 4]]])
+        >>> find_columns(x)
+        (2, 1)
+
+    Which means we can happily slice ``x`` without loss of information to:
+
+        >>> x[:, :, 1]
+        array([[1, 2],
+               [3, 4]])
+
+    """
+    shape = x.shape
+    indxrs = do('indices', shape, like=x)
+
+    for i in range(len(shape)):
+        for j in range(shape[i]):
+            if do('allclose', x[indxrs[i] != j], 0.0, atol=atol):
+                return (i, j)
+
     return None

@@ -168,26 +168,14 @@ class TestCircuit:
         psif = qtn.MPS_computational_state('0' * n).squeeze_()
         tn = circ.psi & psif
 
-        c = tn.contract(all, optimize='greedy')
-        cw = tn.contraction_width(optimize='greedy')
+        c = tn.contract(all)
+        cw = tn.contraction_width()
 
-        # absorb all low-rank tensors into neighbours
-        tn_rs = tn.rank_simplify()
-
-        assert len(tn_rs.tensors) < len(tn.tensors)
-        assert all(t.ndim > 2 for t in tn_rs)
-
-        c_rs = tn_rs.contract(all, optimize='greedy')
-        assert c == pytest.approx(c_rs)
-        cw_rs = tn_rs.contraction_width(optimize='greedy')
-        assert cw_rs <= cw
-
-        tn_rs_dr = tn_rs.diagonal_reduce()
-        assert len(tn_rs_dr.ind_map) < len(tn_rs.ind_map)
-
+        tn_s = tn.full_simplify()
+        assert tn_s.num_tensors < tn.num_tensors
+        assert tn_s.num_indices < tn.num_indices
         # need to specify output inds since we now have hyper edges
-        c_rs_dr = tn_rs_dr.contract(all, optimize='greedy', output_inds=[])
-        assert c_rs_dr == pytest.approx(c)
-        cw_rs_dr = tn_rs_dr.contraction_width(optimize='greedy',
-                                              output_inds=[])
-        assert cw_rs_dr <= cw_rs
+        c_s = tn_s.contract(all, output_inds=[])
+        assert c_s == pytest.approx(c)
+        cw_s = tn_s.contraction_width(output_inds=[])
+        assert cw_s <= cw

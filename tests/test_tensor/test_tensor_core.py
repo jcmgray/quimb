@@ -946,6 +946,57 @@ class TestTensorNetwork:
         assert x2 == pytest.approx(x3)
 
 
+class TestTensorNetworkSimplifications:
+
+    def test_rank_simplify(self):
+        A = rand_tensor([2, 2, 3], 'abc', tags='A')
+        B = rand_tensor([3, 2], 'cd', tags='B')
+        C = rand_tensor([2, 2, 2], 'def', tags='C')
+        tn = A & B & C
+        tn_s = tn.rank_simplify()
+        assert tn.num_tensors == 3
+        assert tn_s.num_tensors == 2
+        assert (tn ^ all).almost_equals(tn_s ^ all)
+        # checl that 'B' was absorbed into 'A' not 'C'
+        assert tn_s['B'].tags == {'A', 'B'}
+
+    def test_diagonal_reduce(self):
+        A = rand_tensor([2, 2], 'ab', dtype=complex)
+        B = Tensor([[3j, 0.], [0., 4j]], 'bc')
+        C = rand_tensor([2, 2], 'ca', dtype=complex)
+        tn = A & B & C
+        tn_s = tn.diagonal_reduce()
+        assert tn.num_indices == 3
+        assert tn_s.num_indices == 2
+        assert tn ^ all == pytest.approx(tn_s.contract(all, output_inds=[]))
+
+    def test_antidiag_gauge(self):
+        A = rand_tensor([2, 2], 'ab', dtype=complex)
+        B = Tensor([[0., 3j], [4j, 0.]], 'bc')
+        C = rand_tensor([2, 2], 'ca', dtype=complex)
+        tn = A & B & C
+        assert tn.num_indices == 3
+        # can't use diagonal reduction yet
+        assert tn.diagonal_reduce().num_indices == 3
+        # initial gauge doesn't change indices
+        tn_a = tn.antidiag_gauge()
+        assert tn_a.num_indices == 3
+        # but allows the diagonal reduction
+        tn_ad = tn_a.diagonal_reduce()
+        assert tn_ad.num_indices == 2
+        assert tn ^ all == pytest.approx(tn_ad.contract(all, output_inds=[]))
+
+    def test_column_reduce(self):
+        A = rand_tensor([2, 3], 'ab')
+        A.new_ind('c', size=4)
+        B = rand_tensor([4, 5, 6], 'cde')
+        tn = A & B
+        assert tn.num_indices == 5
+        tn_s = tn.column_reduce()
+        assert tn_s.num_indices == 4
+        assert (tn ^ all).almost_equals(tn_s ^ all)
+
+
 class TestTensorNetworkAsLinearOperator:
 
     def test_against_dense(self):

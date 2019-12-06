@@ -486,7 +486,7 @@ class Circuit:
         return qu.simulate_counts(p_dense, C=C, seed=seed)
 
     def schrodinger_contract(self, *args, **contract_opts):
-        ntensor = len(self._psi.tensor_map)
+        ntensor = self._psi.num_tensors
         path = [(0, 1)] + [(0, i) for i in reversed(range(1, ntensor - 1))]
         return self.psi.contract(*args, optimize=path, **contract_opts)
 
