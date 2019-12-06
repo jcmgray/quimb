@@ -59,6 +59,18 @@ def _unitize_qr(x):
     return Q
 
 
+def _unitize_svd(x):
+    fat = x.shape[0] < x.shape[1]
+    if fat:
+        x = transpose(x)
+
+    Q = do('linalg.svd', x)[0]
+    if fat:
+        Q = transpose(Q)
+
+    return Q
+
+
 def _unitize_exp(x):
     r"""Perform isometrization using the using anti-symmetric matrix
     exponentiation.
@@ -106,6 +118,7 @@ def _unitize_modified_gram_schmidt(A):
 
 _UNITIZE_METHODS = {
     'qr': _unitize_qr,
+    'svd': _unitize_svd,
     'exp': _unitize_exp,
     'mgs': _unitize_modified_gram_schmidt,
 }

@@ -146,7 +146,7 @@ def _svd(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0):
 
         elif cutoff_mode in (3, 4):
             s2 = s * s
-            cs2 = do('cumsum', s2)
+            cs2 = do('cumsum', s2, 0)
             tot = cs2[-1]
 
             if cutoff_mode == 3:
@@ -167,14 +167,19 @@ def _svd(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0):
             norm = (tot / cs2[n_chi - 1]) ** 0.5
             s *= norm
 
+    elif max_bond > 0:
+        s = s[:max_bond]
+        U = U[..., :max_bond]
+        VH = VH[:max_bond, ...]
+
     if absorb == -1:
-        U *= reshape(s, (1, -1))
+        U = U * reshape(s, (1, -1))
     elif absorb == 1:
-        VH *= reshape(s, (-1, 1))
+        VH = VH * reshape(s, (-1, 1))
     else:
         s **= 0.5
-        U *= reshape(s, (1, -1))
-        VH *= reshape(s, (-1, 1))
+        U = U * reshape(s, (1, -1))
+        VH = VH * reshape(s, (-1, 1))
 
     return U, VH
 
