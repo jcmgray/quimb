@@ -11,12 +11,18 @@ import scipy.linalg as scla
 from scipy.ndimage.filters import uniform_filter1d
 
 from ..core import ptr, prod, vdot, njit, dot, subtract_update_, divide_update_
-from ..utils import int2tup
+from ..utils import int2tup, find_library, raise_cant_find_library_function
 from ..gen.rand import randn, rand_rademacher, rand_phase, seed_rand
 from ..linalg.mpi_launcher import get_mpi_pool
-from ..tensor.tensor_core import Tensor
-from ..tensor.tensor_1d import MatrixProductOperator
-from ..tensor.tensor_approx_spectral import construct_lanczos_tridiag_MPO
+
+if find_library('opt_einsum') and find_library('autoray'):
+    from ..tensor.tensor_core import Tensor
+    from ..tensor.tensor_1d import MatrixProductOperator
+    from ..tensor.tensor_approx_spectral import construct_lanczos_tridiag_MPO
+else:
+    reqs = '[opt_einsum,autoray]'
+    Tensor = raise_cant_find_library_function(reqs)
+    construct_lanczos_tridiag_MPO = raise_cant_find_library_function(reqs)
 
 
 # --------------------------------------------------------------------------- #
@@ -139,6 +145,7 @@ def norm_fro(a):
     """
     return sqrt(inner(a, a))
 
+
 def norm_fro_approx(A, **kwargs):
     r"""Calculate the approximate frobenius norm of any hermitian linear
     operator:
@@ -160,6 +167,7 @@ def norm_fro_approx(A, **kwargs):
     float
     """
     return approx_spectral_function(A, lambda x: x**2, **kwargs)**0.5
+
 
 def random_rect(shape, dist='rademacher', orthog=False, norm=True,
                 seed=False, dtype=complex):
