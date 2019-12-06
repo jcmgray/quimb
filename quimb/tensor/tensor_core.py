@@ -60,31 +60,46 @@ def contract_strategy(strategy):
 
 
 def _get_contract_expr(eq, *shapes, **kwargs):
-    # choose how large intermediate arrays can be
-    kwargs.setdefault('optimize', _DEFAULT_CONTRACTION_STRATEGY)
     return oe.contract_expression(eq, *shapes, **kwargs)
 
 
+def _get_contract_path(eq, *shapes, **kwargs):
+    return oe.contract_path(eq, *shapes, shapes=True, **kwargs)[1]
+
+
 _get_contract_expr_cached = functools.lru_cache(4096)(_get_contract_expr)
+_get_contract_path_cached = functools.lru_cache(1024)(_get_contract_path)
 
 
-def get_contract_expr(eq, *shapes, cache=True, **kwargs):
+_CONTRACT_FNS = {
+    (True, False): _get_contract_expr_cached,
+    (False, False): _get_contract_expr,
+    (True, True): _get_contract_path_cached,
+    (False, True): _get_contract_path,
+}
+
+
+def get_contraction(eq, *shapes, cache=True, path=False, **kwargs):
     """Get an callable expression that will evaluate ``eq`` based on
     ``shapes``. Cache the result if no constant tensors are involved.
     """
-    # can only cache if the expression does not involve constant tensors
-    if kwargs.get('constants', None) or not cache:
-        return _get_contract_expr(eq, *shapes, **kwargs)
+    kwargs.setdefault('optimize', _DEFAULT_CONTRACTION_STRATEGY)
+
+    # don't cache if using constants or a reusable path-optimizer
+    cache &= kwargs.get('constants', None) is None
+    cache &= not isinstance(kwargs['optimize'], oe.paths.PathOptimizer)
 
     # make sure path given as list is hashable and thus cachable
-    if isinstance(kwargs.get('optimize', None), list):
+    if cache and isinstance(kwargs.get('optimize', None), list):
         kwargs['optimize'] = tuple(kwargs['optimize'])
 
+    fn = _CONTRACT_FNS[cache, path]
+
     try:
-        return _get_contract_expr_cached(eq, *shapes, **kwargs)
+        return fn(eq, *shapes, **kwargs)
     except TypeError:
         shapes = (tuple(map(int, s)) for s in shapes)
-        return _get_contract_expr_cached(eq, *shapes, **kwargs)
+        return fn(eq, *shapes, **kwargs)
 
 
 try:
@@ -281,22 +296,23 @@ def tensor_contract(*tensors, output_inds=None, get=None,
         return {oe.get_symbol(i): ix for i, ix in enumerate(all_ix)}
 
     if get == 'path-info':
-        ops = (t.data for t in tensors)
-        path_info = oe.contract_path(eq, *ops, **contract_opts)[1]
-        path_info.quimb_symbol_map = {oe.get_symbol(i): ix
-                                      for i, ix in enumerate(all_ix)}
+        ops = (t.shape for t in tensors)
+        path_info = get_contraction(eq, *ops, path=True, **contract_opts)
+        path_info.quimb_symbol_map = {
+            oe.get_symbol(i): ix for i, ix in enumerate(all_ix)
+        }
         return path_info
 
     if get == 'expression':
         # account for possible constant tensors
         cnst = contract_opts.get('constants', ())
         ops = (t.data if i in cnst else t.shape for i, t in enumerate(tensors))
-        expression = get_contract_expr(eq, *ops, **contract_opts)
+        expression = get_contraction(eq, *ops, **contract_opts)
         return expression
 
     # perform the contraction
     shapes = (t.shape for t in tensors)
-    expression = get_contract_expr(eq, *shapes, **contract_opts)
+    expression = get_contraction(eq, *shapes, **contract_opts)
     o_array = expression(*(t.data for t in tensors), backend=backend)
 
     if not o_ix:
@@ -703,7 +719,7 @@ def get_tags(ts):
     if isinstance(ts, (TensorNetwork, Tensor)):
         ts = (ts,)
 
-    return set().union(*[t.tags for t in ts])
+    return set_union((t.tags for t in ts))
 
 
 def tags2set(tags):
