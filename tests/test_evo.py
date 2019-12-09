@@ -6,62 +6,45 @@ from functools import reduce
 import numpy as np
 from numpy.testing import assert_allclose
 
-from quimb import (
-    qu,
-    up,
-    eigh,
-    down,
-    ikron,
-    pauli,
-    expec,
-    qarray,
-    logneg,
-    rand_ket,
-    rand_rho,
-    rand_uni,
-    rand_herm,
-    ham_heis,
-    rand_matrix,
-)
+import quimb as qu
 from quimb.evo import (
     schrodinger_eq_ket,
     schrodinger_eq_dop,
     schrodinger_eq_dop_vectorized,
     lindblad_eq,
     lindblad_eq_vectorized,
-    Evolution,
 )
 from .test_linalg.test_slepc_linalg import slepc4py_test
 
 
 @fixture
 def psi_dot():
-    psi = rand_ket(3)
-    ham = 10 * rand_herm(3)
+    psi = qu.rand_ket(3)
+    ham = 10 * qu.rand_herm(3)
     psid = -1.0j * (ham @ psi)
     return psi, ham, psid
 
 
 @fixture
 def spsi_dot():
-    psi = rand_ket(3)
-    ham = rand_herm(3, sparse=True, density=0.5)
+    psi = qu.rand_ket(3)
+    ham = qu.rand_herm(3, sparse=True, density=0.5)
     psid = -1.0j * (ham @ psi)
     return psi, ham, psid
 
 
 @fixture
 def rho_dot():
-    rho = rand_rho(3)
-    ham = rand_herm(3)
+    rho = qu.rand_rho(3)
+    ham = qu.rand_herm(3)
     rhod = -1.0j * (ham @ rho - rho @ ham)
     return rho, ham, rhod
 
 
 @fixture
 def srho_dot():
-    rho = rand_rho(3)
-    ham = rand_herm(3, sparse=True, density=0.5)
+    rho = qu.rand_rho(3)
+    ham = qu.rand_herm(3, sparse=True, density=0.5)
     rhod = -1.0j * (ham @ rho - rho @ ham)
     return rho, ham, rhod
 
@@ -69,10 +52,10 @@ def srho_dot():
 @fixture
 def rho_dot_ls():
     np.random.seed(1)
-    rho = rand_rho(3)
-    ham = rand_herm(3)
+    rho = qu.rand_rho(3)
+    ham = qu.rand_herm(3)
     gamma = 0.7
-    ls = [rand_matrix(3) for _ in range(3)]
+    ls = [qu.rand_matrix(3) for _ in range(3)]
     rhodl = -1.0j * (ham @ rho - rho @ ham)
     for l in ls:
         rhodl += gamma * (l @ rho @ l.H)
@@ -83,10 +66,10 @@ def rho_dot_ls():
 
 @fixture
 def srho_dot_ls():
-    rho = rand_rho(3)
-    ham = rand_herm(3, sparse=True, density=0.5)
+    rho = qu.rand_rho(3)
+    ham = qu.rand_herm(3, sparse=True, density=0.5)
     gamma = 0.7
-    ls = [rand_matrix(3, sparse=True, density=0.5) for _ in range(3)]
+    ls = [qu.rand_matrix(3, sparse=True, density=0.5) for _ in range(3)]
     rhodl = -1.0j * (ham @ rho - rho @ ham)
     for l in ls:
         rhodl += gamma * (l @ rho @ l.H)
@@ -223,9 +206,9 @@ def ham_rcr_psi():
     LCM = reduce(lambda a, b: a * b // gcd(a, b), ens)
     trc = 2 * pi * LCM / LCD
     evals = np.array(ems) / np.array(ens)
-    v = rand_uni(d)
+    v = qu.rand_uni(d)
     ham = v @ np.diag(evals) @ v.H
-    p0 = rand_ket(d)
+    p0 = qu.rand_ket(d)
     tm = 0.573 * trc
     pm = v @ np.diag(np.exp(-1.0j * tm * evals)) @ v.H @ p0
     return ham, trc, p0, tm, pm
@@ -238,19 +221,19 @@ class TestEvolution:
                        (False, True)])
     def test_evo_ham_dense_ket_solve(self, ham_rcr_psi, sparse, presolve):
         ham, trc, p0, tm, pm = ham_rcr_psi
-        ham = qu(ham, sparse=sparse)
+        ham = qu.qu(ham, sparse=sparse)
         if presolve:
-            l, v = eigh(ham)
-            sim = Evolution(p0, (l, v))
+            l, v = qu.eigh(ham)
+            sim = qu.Evolution(p0, (l, v))
             assert sim._solved
         else:
-            sim = Evolution(p0, ham, method='solve')
+            sim = qu.Evolution(p0, ham, method='solve')
         sim.update_to(tm)
         assert_allclose(sim.pt, pm)
-        assert expec(sim.pt, p0) < 1.0
+        assert qu.expec(sim.pt, p0) < 1.0
         sim.update_to(trc)
         assert_allclose(sim.pt, p0)
-        assert isinstance(sim.pt, qarray)
+        assert isinstance(sim.pt, qu.qarray)
         assert sim.t == trc
 
     @mark.parametrize("dop", [False, True])
@@ -268,52 +251,81 @@ class TestEvolution:
 
         if method == 'bad':
             with raises(ValueError):
-                Evolution(p0, ham, method=method)
+                qu.Evolution(p0, ham, method=method)
             return
-        
-        ham = qu(ham, sparse=sparse)
+
+        ham = qu.qu(ham, sparse=sparse)
 
         if timedep:
             # fake a time dependent ham by making it callable
             ham_object, ham = ham, (lambda t: ham_object)
 
-        if timedep and (dop or (method in ('expm', 'solve'))):
+        if timedep and (method in ('expm', 'solve')):
             with raises(TypeError):
-                Evolution(p0, ham, method=method)
+                qu.Evolution(p0, ham, method=method)
             return
 
-        sim = Evolution(p0, ham, method=method)
+        sim = qu.Evolution(p0, ham, method=method)
         sim.update_to(tm)
         assert_allclose(sim.pt, pm, rtol=1e-4, atol=1e-6)
-        assert expec(sim.pt, p0) < 1.0
+        assert qu.expec(sim.pt, p0) < 1.0
         sim.update_to(trc)
         assert_allclose(sim.pt, p0, rtol=1e-4, atol=1e-6)
-        assert isinstance(sim.pt, qarray)
+        assert isinstance(sim.pt, qu.qarray)
         assert sim.t == trc
 
+    @mark.parametrize("dop", [False, True])
+    def test_evo_timedep_adiabatic(self, dop):
+        L = 6
+        T = 20
+
+        H1 = qu.ham_mbl(L, dh=1.0, seed=4, sparse=True)
+        gs1 = qu.groundstate(H1)
+        H2 = qu.ham_mbl(L, dh=1.0, seed=5, sparse=True)
+        gs2 = qu.groundstate(H2)
+
+        # make sure two ground states are different
+        assert qu.fidelity(gs1, gs2) < 0.5
+
+        # linearly interpolate form one ham to the other
+        def ham(t):
+            return (1 - t / T) * H1 + (t / T) * H2
+
+        if dop:
+            psi0 = qu.dop(gs1)
+        else:
+            psi0 = gs1
+
+        evo = qu.Evolution(psi0, ham, progbar=True)
+        evo.update_to(T)
+
+        # final state should no mostly overlap with second hamiltonian GS
+        assert qu.fidelity(evo.pt, gs1) < 0.5
+        assert qu.fidelity(evo.pt, gs2) > 0.99
+
     def test_evo_at_times(self):
-        ham = ham_heis(2, cyclic=False)
-        p0 = up() & down()
-        sim = Evolution(p0, ham, method='solve')
+        ham = qu.ham_heis(2, cyclic=False)
+        p0 = qu.up() & qu.down()
+        sim = qu.Evolution(p0, ham, method='solve')
         ts = np.linspace(0, 10)
         for t, pt in zip(ts, sim.at_times(ts)):
             x = cos(t)
-            y = expec(pt, ikron(pauli('z'), [2, 2], 0))
+            y = qu.expec(pt, qu.ikron(qu.pauli('z'), [2, 2], 0))
             assert_allclose(x, y, atol=1e-15)
 
     @mark.parametrize("qtype", ['ket', 'dop'])
     @mark.parametrize("method", ['solve', 'integrate', 'expm'])
     def test_evo_compute_callback(self, qtype, method):
-        ham = ham_heis(2, cyclic=False)
-        p0 = qu(up() & down(), qtype=qtype)
+        ham = qu.ham_heis(2, cyclic=False)
+        p0 = qu.qu(qu.up() & qu.down(), qtype=qtype)
 
         def some_quantity(t, pt):
-            return t, logneg(pt)
+            return t, qu.logneg(pt)
 
-        evo = Evolution(p0, ham, method=method, compute=some_quantity)
+        evo = qu.Evolution(p0, ham, method=method, compute=some_quantity)
         manual_lns = []
         for pt in evo.at_times(np.linspace(0, 1, 6)):
-            manual_lns.append(logneg(pt))
+            manual_lns.append(qu.logneg(pt))
         ts, lns = zip(*evo.results)
         assert len(lns) >= len(manual_lns)
         # check a specific value of logneg at t=0.8 was computed automatically
@@ -328,21 +340,21 @@ class TestEvolution:
     @mark.parametrize("method", ['solve', 'integrate', 'expm'])
     def test_evo_multi_compute(self, method, qtype):
 
-        ham = ham_heis(2, cyclic=False)
-        p0 = qu(up() & down(), qtype=qtype)
+        ham = qu.ham_heis(2, cyclic=False)
+        p0 = qu.qu(qu.up() & qu.down(), qtype=qtype)
 
         def some_quantity(t, _):
             return t
 
         def some_other_quantity(_, pt):
-            return logneg(pt)
+            return qu.logneg(pt)
 
-        evo = Evolution(p0, ham, method=method,
-                        compute={'t': some_quantity,
-                                 'logneg': some_other_quantity})
+        evo = qu.Evolution(p0, ham, method=method,
+                           compute={'t': some_quantity,
+                                    'logneg': some_other_quantity})
         manual_lns = []
         for pt in evo.at_times(np.linspace(0, 1, 6)):
-            manual_lns.append(logneg(pt))
+            manual_lns.append(qu.logneg(pt))
         ts = evo.results['t']
         lns = evo.results['logneg']
         assert len(lns) >= len(manual_lns)
@@ -356,33 +368,33 @@ class TestEvolution:
 
     @slepc4py_test
     def test_expm_krylov_expokit(self):
-        ham = rand_herm(100, sparse=True, density=0.8)
-        psi = rand_ket(100)
-        evo_exact = Evolution(psi, ham, method='solve')
-        evo_krylov = Evolution(psi, ham, method='expm',
-                               expm_backend='slepc-krylov')
-        evo_expokit = Evolution(psi, ham, method='expm',
-                                expm_backend='slepc-expokit')
+        ham = qu.rand_herm(100, sparse=True, density=0.8)
+        psi = qu.rand_ket(100)
+        evo_exact = qu.Evolution(psi, ham, method='solve')
+        evo_krylov = qu.Evolution(psi, ham, method='expm',
+                                  expm_backend='slepc-krylov')
+        evo_expokit = qu.Evolution(psi, ham, method='expm',
+                                   expm_backend='slepc-expokit')
         ts = np.linspace(0, 100, 21)
         for p1, p2, p3 in zip(evo_exact.at_times(ts),
                               evo_krylov.at_times(ts),
                               evo_expokit.at_times(ts)):
-            assert abs(expec(p1, p2) - 1) < 1e-9
-            assert abs(expec(p1, p3) - 1) < 1e-9
+            assert abs(qu.expec(p1, p2) - 1) < 1e-9
+            assert abs(qu.expec(p1, p3) - 1) < 1e-9
 
     def test_progbar_update_to_integrate(self, capsys):
-        ham = ham_heis(2, cyclic=False)
-        p0 = up() & down()
-        sim = Evolution(p0, ham, method='integrate', progbar=True)
+        ham = qu.ham_heis(2, cyclic=False)
+        p0 = qu.up() & qu.down()
+        sim = qu.Evolution(p0, ham, method='integrate', progbar=True)
         sim.update_to(100)
         # check something as been printed
         _, err = capsys.readouterr()
         assert err and "%" in err
 
     def test_progbar_at_times_solve(self, capsys):
-        ham = ham_heis(2, cyclic=False)
-        p0 = up() & down()
-        sim = Evolution(p0, ham, method='solve', progbar=True)
+        ham = qu.ham_heis(2, cyclic=False)
+        p0 = qu.up() & qu.down()
+        sim = qu.Evolution(p0, ham, method='solve', progbar=True)
         for _ in sim.at_times(np.linspace(0, 100, 11)):
             pass
         # check something as been printed
@@ -390,9 +402,9 @@ class TestEvolution:
         assert err and "%" in err
 
     def test_progbar_at_times_expm(self, capsys):
-        ham = ham_heis(2, cyclic=False)
-        p0 = up() & down()
-        sim = Evolution(p0, ham, method='expm', progbar=True)
+        ham = qu.ham_heis(2, cyclic=False)
+        p0 = qu.up() & qu.down()
+        sim = qu.Evolution(p0, ham, method='expm', progbar=True)
         for _ in sim.at_times(np.linspace(0, 100, 11)):
             pass
         # check something as been printed

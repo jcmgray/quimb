@@ -50,8 +50,8 @@ def schrodinger_eq_ket_timedep(ham):
     Parameters
     ----------
     ham : callable
-        Time-dependant Hamiltonian governing evolution, should take single
-        arguement ``t`` and return the Hamiltonian at that point.
+        Time-dependant Hamiltonian governing evolution, such that ``ham(t)``
+        returns an operator representation of the Hamiltonian at time ``t``.
 
     Returns
     -------
@@ -86,6 +86,35 @@ def schrodinger_eq_dop(ham):
 
     def rho_dot(_, y):
         hrho = dot(ham, y.reshape(d, d))
+        return -1.0j * (hrho - hrho.T.conj()).reshape(-1)
+
+    return rho_dot
+
+
+def schrodinger_eq_dop_timedep(ham):
+    """Time dependent density operator schrodinger equation, but with flattened
+    input/output.
+
+    Note that this assumes both `ham(t)` and `rho` are hermitian in order to
+    speed up the commutator, non-hermitian hamiltonians as used to model loss
+    should be treated explicilty or with `schrodinger_eq_dop_vectorized`.
+
+    Parameters
+    ----------
+    ham : callable
+        Time-dependant Hamiltonian governing evolution, such that ``ham(t)``
+        returns an operator representation of the Hamiltonian at time ``t``.
+
+    Returns
+    -------
+    rho_dot(t, y) : callable
+        Function to calculate rho_dot(t) at rho(t), input and
+        output both in ravelled (1D form).
+    """
+    d = ham(0).shape[0]
+
+    def rho_dot(t, y):
+        hrho = dot(ham(t), y.reshape(d, d))
         return -1.0j * (hrho - hrho.T.conj()).reshape(-1)
 
     return rho_dot
@@ -205,6 +234,8 @@ def _calc_evo_eq(isdop, issparse, isopen=False, timedep=False):
         # time-dependent
         (0, 0, 0, 1): schrodinger_eq_ket_timedep,
         (0, 1, 0, 1): schrodinger_eq_ket_timedep,
+        (1, 0, 0, 1): schrodinger_eq_dop_timedep,
+        (1, 1, 0, 1): schrodinger_eq_dop_timedep,
     }
     return eq_chooser[(isdop, issparse, isopen, timedep)]
 
@@ -289,10 +320,6 @@ class Evolution(object):
         self._setup_callback(compute)
         self._method = method
 
-        if self._isdop and callable(ham):
-                raise TypeError("You can't use a time-dependent Hamiltonian "
-                                "for density operator evolution.")
-            
         if method == 'solve' or isinstance(ham, (tuple, list)):
             if callable(ham):
                 raise TypeError("You can't use the 'solve' method "
