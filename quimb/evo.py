@@ -289,6 +289,10 @@ class Evolution(object):
         self._setup_callback(compute)
         self._method = method
 
+        if self._isdop and callable(ham):
+                raise TypeError("You can't use a time-dependent Hamiltonian "
+                                "for density operator evolution.")
+            
         if method == 'solve' or isinstance(ham, (tuple, list)):
             if callable(ham):
                 raise TypeError("You can't use the 'solve' method "

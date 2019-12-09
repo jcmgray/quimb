@@ -256,7 +256,8 @@ class TestEvolution:
     @mark.parametrize("dop", [False, True])
     @mark.parametrize("sparse", [False, True])
     @mark.parametrize("method", ["solve", "integrate", 'expm', 'bad'])
-    def test_evo_ham(self, ham_rcr_psi, sparse, dop, method):
+    @mark.parametrize("timedep", [False, True])
+    def test_evo_ham(self, ham_rcr_psi, sparse, dop, method, timedep):
         ham, trc, p0, tm, pm = ham_rcr_psi
         if dop:
             if method == 'expm':
@@ -269,8 +270,18 @@ class TestEvolution:
             with raises(ValueError):
                 Evolution(p0, ham, method=method)
             return
-
+        
         ham = qu(ham, sparse=sparse)
+
+        if timedep:
+            # fake a time dependent ham by making it callable
+            ham_object, ham = ham, (lambda t: ham_object)
+
+        if timedep and (dop or (method in ('expm', 'solve'))):
+            with raises(TypeError):
+                Evolution(p0, ham, method=method)
+            return
+
         sim = Evolution(p0, ham, method=method)
         sim.update_to(tm)
         assert_allclose(sim.pt, pm, rtol=1e-4, atol=1e-6)
