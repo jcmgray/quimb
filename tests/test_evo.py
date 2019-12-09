@@ -287,19 +287,19 @@ class TestEvolution:
         # make sure two ground states are different
         assert qu.fidelity(gs1, gs2) < 0.5
 
-        # linearly interpolate form one ham to the other
+        # linearly interpolate from one ham to the other
         def ham(t):
             return (1 - t / T) * H1 + (t / T) * H2
 
         if dop:
-            psi0 = qu.dop(gs1)
+            p0 = qu.dop(gs1)
         else:
-            psi0 = gs1
+            p0 = gs1
 
-        evo = qu.Evolution(psi0, ham, progbar=True)
+        evo = qu.Evolution(p0, ham, progbar=True)
         evo.update_to(T)
 
-        # final state should no mostly overlap with second hamiltonian GS
+        # final state should now overlap much more with second hamiltonian GS
         assert qu.fidelity(evo.pt, gs1) < 0.5
         assert qu.fidelity(evo.pt, gs2) > 0.99
 
