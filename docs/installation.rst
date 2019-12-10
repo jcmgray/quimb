@@ -27,6 +27,7 @@ The core packages ``quimb`` requires are:
 * `numba <http://numba.pydata.org/>`_
 * `cytoolz <https://github.com/pytoolz/cytoolz>`_
 * `tqdm <https://github.com/tqdm/tqdm>`_
+* `psutil <https://github.com/giampaolo/psutil>`_
 
 For ease and performance (i.e. mkl compiled libraries), `conda <https://conda.io/miniconda.html/>`_ is the recommended distribution with which to install these.
 
