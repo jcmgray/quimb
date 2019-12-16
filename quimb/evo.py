@@ -261,9 +261,9 @@ class Evolution(object):
         Inital state, either vector or operator. If vector, converted to ket.
     ham : operator, tuple (1d array, operator), or callable
         Governing Hamiltonian, if tuple then assumed to contain
-        ``(eigvals, eigvecs)`` of presolved system. If callable, assume a
-        time-dependent hamiltonian such that ``ham(t)`` is the Hamiltonian at
-        time ``t``.
+        ``(eigvals, eigvecs)`` of presolved system. If callable (but not a SciPy 
+        ``LinearOperator``), assume a time-dependent hamiltonian such that ``ham(t)`` 
+        is the Hamiltonian at time ``t``.
     t0 : float, optional
         Initial time (i.e. time of state ``p0``), defaults to zero.
     compute : callable, or dict of callable, optional
@@ -317,11 +317,16 @@ class Evolution(object):
         self._d = p0.shape[0]  # Hilbert space dimension
         self._progbar = progbar
 
+        self._timedep = callable(ham) and not isinstance(ham, LinearOperator)
+
         self._setup_callback(compute)
         self._method = method
 
         if method == 'solve' or isinstance(ham, (tuple, list)):
-            if callable(ham):
+            if isinstance(ham, LinearOperator):
+                raise TypeError("You can't use the 'solve' method "
+                                "with an abstract linear operator Hamiltonian.")
+            elif self._timedep:
                 raise TypeError("You can't use the 'solve' method "
                                 "with a time-dependent Hamiltonian.")
             self._solve_ham(ham)
@@ -329,7 +334,10 @@ class Evolution(object):
         elif method == 'integrate':
             self._start_integrator(ham, int_small_step)
         elif method == 'expm':
-            if callable(ham):
+            if isinstance(ham, LinearOperator):
+                raise TypeError("You can't use the 'expm' method "
+                                "with an abstract linear operator Hamiltonian.")
+            elif self._timedep:
                 raise TypeError("You can't use the 'expm' method "
                                 "with a time-dependent Hamiltonian.")
             self._update_method = self._update_to_expm_ket
@@ -411,15 +419,14 @@ class Evolution(object):
     def _start_integrator(self, ham, small_step):
         """Initialize a stepping integrator.
         """
-        timedep = callable(ham)
-        if timedep:
+        if self._timedep:
             H0 = ham(0.0)
         else:
             H0 = ham
 
         # set complex ode with governing equation
         self._sparse_ham = issparse(H0)
-        evo_eq = _calc_evo_eq(self._isdop, self._sparse_ham, False, timedep)
+        evo_eq = _calc_evo_eq(self._isdop, self._sparse_ham, False, self._timedep)
 
         self._stepper = complex_ode(evo_eq(ham))
 

@@ -240,7 +240,8 @@ class TestEvolution:
     @mark.parametrize("sparse", [False, True])
     @mark.parametrize("method", ["solve", "integrate", 'expm', 'bad'])
     @mark.parametrize("timedep", [False, True])
-    def test_evo_ham(self, ham_rcr_psi, sparse, dop, method, timedep):
+    @mark.parametrize("linop", [False, True])    
+    def test_evo_ham(self, ham_rcr_psi, sparse, dop, method, timedep, linop):
         ham, trc, p0, tm, pm = ham_rcr_psi
         if dop:
             if method == 'expm':
@@ -256,10 +257,20 @@ class TestEvolution:
 
         ham = qu.qu(ham, sparse=sparse)
 
+        if linop:
+            import scipy.sparse.linalg as spla
+
+            ham = spla.aslinearoperator(ham)
+
         if timedep:
             # fake a time dependent ham by making it callable
             ham_object, ham = ham, (lambda t: ham_object)
 
+        if linop and (method in ('expm', 'solve')):
+            with raises(TypeError):
+                qu.Evolution(p0, ham, method=method)
+            return
+            
         if timedep and (method in ('expm', 'solve')):
             with raises(TypeError):
                 qu.Evolution(p0, ham, method=method)
