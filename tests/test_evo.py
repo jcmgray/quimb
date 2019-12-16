@@ -275,7 +275,8 @@ class TestEvolution:
         assert sim.t == trc
 
     @mark.parametrize("dop", [False, True])
-    def test_evo_timedep_adiabatic(self, dop):
+    @mark.parametrize("linop", [False, True])
+    def test_evo_timedep_adiabatic(self, dop, linop):
         L = 6
         T = 20
 
@@ -284,12 +285,21 @@ class TestEvolution:
         H2 = qu.ham_mbl(L, dh=1.0, seed=5, sparse=True)
         gs2 = qu.groundstate(H2)
 
+        if linop:
+            import scipy.sparse.linalg as spla
+
+            H1 = spla.aslinearoperator(H1)
+            H2 = spla.aslinearoperator(H2)
+
         # make sure two ground states are different
         assert qu.fidelity(gs1, gs2) < 0.5
 
         # linearly interpolate from one ham to the other
         def ham(t):
             return (1 - t / T) * H1 + (t / T) * H2
+
+        if linop:
+            assert isinstance(ham(0.3), spla.LinearOperator)
 
         if dop:
             p0 = qu.dop(gs1)
