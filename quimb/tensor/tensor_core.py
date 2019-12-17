@@ -25,7 +25,7 @@ from ..core import qarray, prod, realify_scalar, vdot, common_type
 from ..utils import check_opt, functions_equal
 from ..gen.rand import randn, seed_rand
 from . import decomp
-from .array_ops import (iscomplex, norm_fro, unitize, ndim, asarray,
+from .array_ops import (iscomplex, norm_fro, unitize, ndim, asarray, PArray,
                         find_diag_axes, find_antidiag_axes, find_columns)
 
 
@@ -304,7 +304,7 @@ def tensor_contract(*tensors, output_inds=None, get=None,
     else:
         o_ix = output_inds
 
-    # possibly map indices into the range needed by opt- einsum
+    # possibly map indices into the range needed by opt-einsum
     eq = _maybe_map_indices_to_alphabet(all_ix, i_ix, o_ix)
 
     if get == 'symbol-map':
@@ -4283,3 +4283,95 @@ class TNLinearOperator1D(spla.LinearOperator):
     @property
     def A(self):
         return self.to_dense()
+
+
+class PTensor(Tensor):
+    """A tensor whose data array is lazily generate from a set of parameters
+    and a function.
+
+    Parameters
+    ----------
+    fn : callable
+        The function that generates the tensor data from ``params``.
+    params : sequence of numbers
+        The initial parameters supplied to the generating function like
+        ``fn(params)``.
+    inds : optional
+        Should match the shape of ``fn(params)``,
+        see :class:`~quimb.tensor.tensor_core.Tensor`.
+    tags : optional
+        See :class:`~quimb.tensor.tensor_core.Tensor`.
+    left_inds : optional
+        See :class:`~quimb.tensor.tensor_core.Tensor`.
+    conj : optional
+        Whether to treat this ``Tensor`` as lazily conjugated, such that when
+        the ``.data`` attribute is accessed it will be conjugated as well.
+
+    See Also
+    --------
+    PTensor
+    """
+
+    def __init__(self, fn, params, inds=(), tags=None,
+                 left_inds=None, conj=False):
+
+        self._parray = PArray(fn, params)
+        self.is_conj = conj
+        super().__init__(self.data, inds=inds, tags=tags, left_inds=left_inds)
+
+    @classmethod
+    def from_parray(cls, parray, *args, **kwargs):
+        return cls(parray.fn, parray.params, *args, **kwargs)
+
+    def copy(self):
+        """Copy this parametrized tensor.
+        """
+        return PTensor(
+            fn=self.fn,
+            params=self.params,
+            inds=self.inds,
+            tags=self.tags.copy(),
+            left_inds=self.left_inds,
+            conj=self.is_conj,
+        )
+
+    @property
+    def data(self):
+        self._data = self._parray.data
+
+        if self.is_conj:
+            return conj(self._data)
+
+        return self._data
+
+    @property
+    def fn(self):
+        return self._parray.fn
+
+    @property
+    def params(self):
+        return self._parray.params
+
+    @params.setter
+    def params(self, x):
+        self._parray.params = x
+
+    def conj(self, inplace=False):
+        """Conjugate this parametrized tensor - done lazily whenever the
+        ``.data`` attribute is accessed.
+        """
+        t = self if inplace else self.copy()
+        t.is_conj = not self.is_conj
+        return t
+
+    conj_ = functools.partialmethod(conj, inplace=True)
+
+    def unparametrize(self):
+        """Turn this PTensor into a normal Tensor.
+        """
+        return Tensor(
+            data=self.data,
+            inds=self.inds,
+            tags=self.tags.copy(),
+            left_inds=self.left_inds,
+        )

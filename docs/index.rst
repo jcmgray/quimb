@@ -89,6 +89,7 @@ The following examples, generated from the notebooks in ``docs/examples``, demon
   ./examples/ex_MERA
   ./examples/ex_tensorflow_optimize_pbc_mps
   ./examples/ex_quantum_circuit
+  ./examples/ex_tn_train_circuit
 
 
 Citing

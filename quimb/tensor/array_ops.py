@@ -264,3 +264,53 @@ def find_columns(x, atol=1e-12):
                 return (i, j)
 
     return None
+
+
+class PArray:
+    """Simple array-like object that lazily generates the actual array by
+    calling a function with a set of parameters.
+
+    Parameters
+    ----------
+    fn : callable
+        The function that generates the tensor data from ``params``.
+    params : sequence of numbers
+        The initial parameters supplied to the generating function like
+        ``fn(params)``.
+
+    See Also
+    --------
+    PTensor
+    """
+
+    def __init__(self, fn, params, shape=None):
+        self._fn = fn
+        self._params = asarray(params)
+        self._shape = shape
+
+    @property
+    def fn(self):
+        return self._fn
+
+    @property
+    def params(self):
+        return self._params
+
+    @params.setter
+    def params(self, x):
+        self._params = asarray(x)
+
+    @property
+    def data(self):
+        self._data = self._fn(self._params)
+        return self._data
+
+    @property
+    def shape(self):
+        if self._shape is None:
+            self._shape = self.data.shape
+        return self._shape
+
+    @property
+    def ndim(self):
+        return len(self.shape)

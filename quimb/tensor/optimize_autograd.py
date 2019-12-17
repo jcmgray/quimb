@@ -7,10 +7,16 @@ import importlib
 
 import tqdm
 import numpy as np
+from autoray import do
 
-from .tensor_core import contract_backend
+from .tensor_core import contract_backend, Tensor, TensorNetwork, PTensor
 from .array_ops import iscomplex
 from ..core import qarray
+
+if importlib.util.find_spec("jax") is not None:
+    _DEFAULT_BACKEND = 'jax'
+else:
+    _DEFAULT_BACKEND = 'autograd'
 
 
 _REAL_CONVERSION = {
@@ -102,26 +108,62 @@ class Vectorizer:
         return arrays
 
 
-def parse_network_to_jax(tn, constant_tags):
-    tn_jax = tn.copy()
+def parse_network_to_ag(tn, constant_tags, backend=_DEFAULT_BACKEND):
+    tn_ag = tn.copy()
     variables = []
 
     variable_tag = "__VARIABLE{}__"
 
-    for t in tn_jax:
-
-        if isinstance(t.data, qarray):
-            t.modify(data=np.asarray(t.data))
-
+    for t in tn_ag:
         # check if tensor has any of the constant tags
         if t.tags & constant_tags:
+            t.modify(data=constant(t.data, backend=backend))
             continue
 
+        if isinstance(t, PTensor):
+            data = t.params
+        else:
+            data = t.data
+
+        # jax doesn't like numpy.ndarray subclasses...
+        if isinstance(data, qarray):
+            data = data.A
+
         # append the raw data but mark the corresponding tensor for reinsertion
-        variables.append(t.data)
+        variables.append(data)
         t.add_tag(variable_tag.format(len(variables) - 1))
 
-    return tn_jax, variables
+    return tn_ag, variables
+
+
+def constant(x, backend=_DEFAULT_BACKEND):
+    if backend == 'jax' and isinstance(x, qarray):
+        x = x.A
+    return do('array', x, like=backend)
+
+
+def constant_t(t, backend=_DEFAULT_BACKEND):
+    ag_t = t.copy()
+    ag_t.modify(data=constant(ag_t.data, backend=backend))
+    return ag_t
+
+
+def constant_tn(tn, backend=_DEFAULT_BACKEND):
+    """Convert a tensor network's arrays to tensorflow constants.
+    """
+    ag_tn = tn.copy()
+    ag_tn.apply_to_arrays(functools.partial(constant, backend=backend))
+    return ag_tn
+
+
+def convert_args_to_jax(fn):
+
+    @functools.wraps(fn)
+    def jax_args_fn(arrays):
+        jarrays = [constant(array) for array in arrays]
+        return fn(jarrays)
+
+    return jax_args_fn
 
 
 variable_finder = re.compile('__VARIABLE(\d+)__')
@@ -133,9 +175,13 @@ def inject_(arrays, tn):
             match = variable_finder.match(tag)
             if match is not None:
                 i = int(match.groups(1)[0])
-                break
 
-        t.modify(data=arrays[i])
+                if isinstance(t, PTensor):
+                    t.params = arrays[i]
+                else:
+                    t.modify(data=arrays[i])
+
+                break
 
 
 class TNOptimizer:
@@ -159,13 +205,12 @@ class TNOptimizer:
     ):
         self.progbar = progbar
         self.optimizer = optimizer
-        self.constant_tags = (set() if constant_tags is None
-                              else set(constant_tags))
+        self.constant_tags = (
+            set() if constant_tags is None else set(constant_tags)
+        )
+
         if autograd_backend.upper() == 'AUTO':
-            if importlib.util.find_spec("jax") is not None:
-                autograd_backend = 'jax'
-            else:
-                autograd_backend = 'autograd'
+            autograd_backend = _DEFAULT_BACKEND
 
         self.autograd_backend = autograd_backend
 
@@ -177,22 +222,34 @@ class TNOptimizer:
         self.norm_fn = norm_fn
 
         self.loss_kwargs = {} if loss_kwargs is None else dict(loss_kwargs)
-        self.loss_target = loss_target
-        self.loss_constants = ({} if loss_constants is None else
-                               dict(loss_constants))
+
+        self.loss_constants = {}
+        if loss_constants is not None:
+            for k, v in loss_constants.items():
+                # check if tensor network supplied
+                if isinstance(v, TensorNetwork):
+                    # convert it to constant tensorflow TN
+                    self.loss_constants[k] = constant_tn(v, autograd_backend)
+                elif isinstance(v, Tensor):
+                    self.loss_constants[k] = constant_t(v, autograd_backend)
+                else:
+                    self.loss_constants[k] = constant(v, autograd_backend)
 
         self.loss_fn = functools.partial(
             loss_fn, **self.loss_constants, **self.loss_kwargs
         )
+
         self.loss = np.inf
         self.loss_best = np.inf
+        self.loss_target = loss_target
         self._n = 0
 
-        self.tn_opt, self.variables = parse_network_to_jax(
+        self.tn_opt, self.variables = parse_network_to_ag(
             tn, self.constant_tags
         )
 
-        self.v = Vectorizer(self.variables)
+        # this handles storing and packing /  unpacking many arrays as a vector
+        self.vctrzr = Vectorizer(self.variables)
 
         def func(arrays):
             # need to set backend explicitly as mixing with numpy arrays
@@ -203,23 +260,23 @@ class TNOptimizer:
         if self.autograd_backend == 'jax':
             import jax
             self.func_jit = jax.jit(func)
-            self.grad_jit = jax.jit(jax.grad(func))
+            self.grad_jit = jax.jit(jax.grad(self.func_jit))
         elif self.autograd_backend == 'autograd':
             import autograd
             self.func_jit = func
             self.grad_jit = autograd.grad(func)
 
         def vectorized_func(x):
-            arrays = self.v.unpack(x, conj=True)
-            jax_result = self.func_jit(arrays)
-            self.loss = np.asarray(jax_result)
+            arrays = self.vctrzr.unpack(x, conj=True)
+            ag_result = self.func_jit(arrays)
+            self.loss = np.asarray(ag_result)
             self._n += 1
             return self.loss
 
         def vectorized_grad(x):
-            arrays = self.v.unpack(x, conj=True)
-            jax_grads = self.grad_jit(arrays)
-            vec_grad = self.v.pack(jax_grads, 'grad')
+            arrays = self.vctrzr.unpack(x, conj=True)
+            ag_grads = self.grad_jit(arrays)
+            vec_grad = self.vctrzr.pack(ag_grads, 'grad')
             return vec_grad
 
         self.vectorized_func = vectorized_func
@@ -232,8 +289,8 @@ class TNOptimizer:
         return self._n
 
     def inject_res_vector_and_return_tn(self):
-        inject_(self.v.unpack(self.res.x, conj=True), self.tn_opt)
-        self.v.vector[:] = self.res.x
+        inject_(self.vctrzr.unpack(self.res.x, conj=True), self.tn_opt)
+        self.vctrzr.vector[:] = self.res.x
         return self.norm_fn(self.tn_opt)
 
     def optimize(self, n, tol=None, **options):
@@ -249,7 +306,7 @@ class TNOptimizer:
             self.res = minimize(
                 fun=self.vectorized_func,
                 jac=self.vectorized_grad,
-                x0=self.v.vector,
+                x0=self.vctrzr.vector,
                 callback=callback,
                 tol=tol,
                 method=self.optimizer,
@@ -283,7 +340,7 @@ class TNOptimizer:
 
             self.res = basinhopping(
                 func=self.vectorized_func,
-                x0=self.v.vector,
+                x0=self.vctrzr.vector,
                 niter=nhop,
                 minimizer_kwargs=dict(
                     jac=self.vectorized_grad,

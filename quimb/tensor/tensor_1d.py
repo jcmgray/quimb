@@ -20,9 +20,10 @@ from .tensor_core import (
     bonds_size,
     tags2set,
     get_tags,
+    PTensor,
 )
-from .array_ops import asarray, ndim, sensibly_scale
 from ..linalg.base_linalg import norm_trace_dense
+from . import array_ops as ops
 
 
 def align_TN_1D(*tns, ind_ids=None, inplace=False):
@@ -252,14 +253,17 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
         raise ValueError(f"Can't use `contract='{contract}'` for >2 sites.")
 
     # allow gate to be a matrix as long as it factorizes into tensor
-    shape_matches_2d = (ndim(G) == 2) and (G.shape[1] == dp ** ng)
-    shape_maches_nd = all(d == dp for d in G.shape)
+    shape_matches_2d = (ops.ndim(G) == 2) and (G.shape[1] == dp ** ng)
+    shape_matches_nd = all(d == dp for d in G.shape)
 
     if shape_matches_2d:
-        G = reshape(asarray(G), [dp] * 2 * ng)
-    elif not shape_maches_nd:
+        G = ops.asarray(G)
+        if ng >= 2:
+            G = reshape(G, [dp] * 2 * ng)
+
+    elif not shape_matches_nd:
         raise ValueError(
-            f"Gate with shape {G.shape} doesn't match sites {where}")
+            f"Gate with shape {G.shape} doesn't match sites {where}.")
 
     if contract == 'swap+split' and ng > 1:
         psi.gate_with_auto_swap(G, where, cur_orthog=cur_orthog,
@@ -275,8 +279,16 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
     # get the sites that used to have the physical indices
     site_tids = psi._get_tids_from_inds(bnds, which='any')
 
-    # convert the gate into a tensor
-    TG = Tensor(G, gate_ix, tags=tags, left_inds=bnds)
+    # convert the gate into a tensor - check if it is parametrized
+    if isinstance(G, ops.PArray):
+        if ng >= 2 and contract is not False:
+            raise ValueError(
+                "For a parametrized gate acting on more than one site "
+                "``contract`` must be false to preserve the array shape.")
+
+        TG = PTensor.from_parray(G, gate_ix, tags=tags, left_inds=bnds)
+    else:
+        TG = Tensor(G, gate_ix, tags=tags, left_inds=bnds)
 
     if contract in (True, 'swap+split'):
         # pop the sites, contract, then re-add
@@ -1313,7 +1325,7 @@ class MatrixProductState(TensorNetwork1DVector,
 
             site_tags = tuple({st} | tags for st in site_tags)
 
-        self.cyclic = (ndim(arrays[0]) == 3)
+        self.cyclic = (ops.ndim(arrays[0]) == 3)
 
         # transpose arrays to 'lrp' order.
         def gen_orders():
@@ -1527,7 +1539,7 @@ class MatrixProductState(TensorNetwork1DVector,
 
         # Make Tensor of gate
         d = tn.phys_dim(i)
-        TG = Tensor(reshape(asarray(G), (d, d, d, d)),
+        TG = Tensor(reshape(ops.asarray(G), (d, d, d, d)),
                     inds=("_tmpi", "_tmpj", ix_i, ix_j))
 
         # Contract gate into the two sites
@@ -2412,7 +2424,7 @@ class MatrixProductOperator(TensorNetwork1DFlat,
 
             site_tags = tuple((st,) + tags for st in site_tags)
 
-        self.cyclic = (ndim(arrays[0]) == 4)
+        self.cyclic = (ops.ndim(arrays[0]) == 4)
 
         # transpose arrays to 'lrud' order.
         def gen_orders():
@@ -2861,7 +2873,7 @@ class Dense1D(TensorNetwork1DVector,
                 tags = set(tags)
             site_tags = site_tags | tags
 
-        T = Tensor(asarray(array).reshape(*dims),
+        T = Tensor(ops.asarray(array).reshape(*dims),
                    inds=site_inds, tags=site_tags)
 
         super().__init__([T], structure=site_tag_id, sites=sites,
@@ -2971,7 +2983,7 @@ class SuperOperator1D(
                 yield (site_tag,) + tags + tags_upper
                 yield (site_tag,) + tags + tags_lower
 
-        self.cyclic = (ndim(arrays[0]) == 5)
+        self.cyclic = (ops.ndim(arrays[0]) == 5)
 
         # transpose arrays to 'lrkud' order
         #        u
@@ -3049,7 +3061,7 @@ class SuperOperator1D(
                 else:
                     yield qu.randn(shape=shape, dtype=dtype)
 
-        arrays = map(sensibly_scale, gen_arrays())
+        arrays = map(ops.sensibly_scale, gen_arrays())
 
         return cls(arrays, nsites=n, **superop_opts)
 
