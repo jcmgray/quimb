@@ -128,7 +128,7 @@ def apply_swap(psi, i, j, **gate_opts):
 
 # parametrizable gates
 
-def rx_gate_param(params):
+def rx_gate_param_gen(params):
     phi, = params
     c = do('cos', phi / 2)
     s = -1j * do('sin', phi / 2)
@@ -141,13 +141,13 @@ def apply_Rx(psi, theta, i, parametrize=False, **gate_opts):
     """
     mtags = _merge_tags({'RX'}, gate_opts)
     if parametrize:
-        G = ops.PArray(rx_gate_param, (float(theta),))
+        G = ops.PArray(rx_gate_param_gen, (float(theta),))
     else:
         G = qu.Rx(float(theta))
     psi.gate_(G, int(i), tags=mtags, **gate_opts)
 
 
-def ry_gate_param(params):
+def ry_gate_param_gen(params):
     phi, = params
     c = do('cos', phi / 2)
     s = do('sin', phi / 2)
@@ -160,13 +160,13 @@ def apply_Ry(psi, theta, i, parametrize=False, **gate_opts):
     """
     mtags = _merge_tags({'RY'}, gate_opts)
     if parametrize:
-        G = ops.PArray(ry_gate_param, (float(theta),))
+        G = ops.PArray(ry_gate_param_gen, (float(theta),))
     else:
         G = qu.Ry(float(theta))
     psi.gate_(G, int(i), tags=mtags, **gate_opts)
 
 
-def rz_gate_param(params):
+def rz_gate_param_gen(params):
     phi, = params
     c = do('cos', phi / 2)
     s = -1j * do('sin', phi / 2)
@@ -179,13 +179,13 @@ def apply_Rz(psi, theta, i, parametrize=False, **gate_opts):
     """
     mtags = _merge_tags({'RZ'}, gate_opts)
     if parametrize:
-        G = ops.PArray(rz_gate_param, (float(theta),))
+        G = ops.PArray(rz_gate_param_gen, (float(theta),))
     else:
         G = qu.Rz(float(theta))
     psi.gate_(G, int(i), tags=mtags, **gate_opts)
 
 
-def u3_gate(params):
+def u3_gate_param_gen(params):
     theta, phi, lamda = params
 
     c2 = do('cos', theta / 2)
@@ -203,17 +203,35 @@ def u3_gate(params):
 def apply_U3(psi, theta, phi, lamda, i, parametrize=False, **gate_opts):
     mtags = _merge_tags({'U3'}, gate_opts)
     if parametrize:
-        G = ops.PArray(u3_gate, (theta, phi, lamda))
+        G = ops.PArray(u3_gate_param_gen, (theta, phi, lamda))
     else:
         G = qu.U_gate(theta, phi, lamda)
     psi.gate_(G, int(i), tags=mtags, **gate_opts)
 
 
+def fsim_param_gen(params):
+    theta, phi = params
+
+    a = do('cos', theta)
+    b = -1j * do('sin', theta)
+    c = do('exp', -1j * phi)
+
+    data = [[[[1, 0],
+              [0, 0]],
+             [[0, a],
+              [b, 0]]],
+            [[[0, b],
+              [a, 0]],
+             [[0, 0],
+              [0, c]]]]
+
+    return do('array', data, like=params)
+
+
 def apply_fsim(psi, theta, phi, i, j, parametrize=False, **gate_opts):
     mtags = _merge_tags({'FSIM'}, gate_opts)
     if parametrize:
-        raise NotImplemented
-        G = ops.PArray(qu.fsim, (theta, phi))
+        G = ops.PArray(fsim_param_gen, (theta, phi))
     else:
         G = qu.fsim(theta, phi)
     psi.gate_(G, (int(i), int(j)), tags=mtags, **gate_opts)
