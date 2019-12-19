@@ -35,6 +35,9 @@ def test_hamiltonian_builder(sparse, stype, dtype):
     if sparse:
         assert H.format == stype
 
+    with pytest.raises(ValueError): # check immutability
+        H[0,0] = 100
+        
     if dtype == "don't pass":
         H = simple_ham_complex(sparse=sparse, stype=stype)
     elif dtype is np.float64:
@@ -52,6 +55,10 @@ def test_hamiltonian_builder(sparse, stype, dtype):
     assert qu.isdense(H) != sparse
     if sparse:
             assert H.format == stype
+
+    with pytest.raises(ValueError): # check immutability
+        H[0,0] = 100
+            
     return
                 
 class TestSpinOperator:
