@@ -427,7 +427,8 @@ def hamiltonian_builder(fn):
     kwargs ``stype`` and ``sparse``. This assumes the core function always
     builds the hamiltonian in sparse form. The wrapper then:
 
-    1. Checks if the operator is real
+    1. Checks if the operator is real and, if so, discards imaginary part if no
+       explicity `dtype` was given
     2. Converts the operator to dense or the correct sparse form
     3. Makes the operator immutable so it can be safely cached
     """
@@ -436,7 +437,7 @@ def hamiltonian_builder(fn):
     def ham_fn(*args, stype='csr', sparse=False, **kwargs):
         H = fn(*args, **kwargs)
 
-        if isreal(H):
+        if kwargs.get('dtype', None) is None and isreal(H):
             H = H.real
 
         if not sparse:
