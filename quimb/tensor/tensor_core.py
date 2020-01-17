@@ -2085,10 +2085,14 @@ class TensorNetwork(object):
             tensor = next(tensors)
 
             # take into account a negative factor with single minus sign
-            if i == 0:
+            if i == 0 and not inplace:
                 tensor.modify(data=tensor.data * (x_sign * x_spread))
-            else:
+            elif i == 0 and inplace:
+                tensor._data *= (x_sign * x_spread)
+            elif i > 0 and not inplace:
                 tensor.modify(data=tensor.data * x_spread)
+            else:
+                tensor._data *= x_spread
 
         return multiplied
 
@@ -2113,8 +2117,12 @@ class TensorNetwork(object):
         """
         multiplied = self if inplace else self.copy()
 
-        for t in multiplied.tensors:
-            t.modify(data=t.data * x)
+        if inplace:
+            for t in multiplied.tensors:
+                t._data *= x
+        else:
+            for t in multiplied.tensors:
+                t.modify(data=t.data * x)
 
         return multiplied
 
