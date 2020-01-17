@@ -288,7 +288,8 @@ class TNOptimizer:
                     torch, _ = _TORCH_DEVICE
                     with torch.no_grad():
                         fac = self.norm_fn_scalar(self.tn_opt)
-                        self.tn_opt.multiply_each(fac, inplace=True)
+                        for tensor in self.tn_opt:
+                            tensor._data *= fac
 
                 self.optimizer.step(self.closure)
                 pbar.set_description(f"{self.loss}")
