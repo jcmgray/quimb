@@ -73,6 +73,10 @@ def parse_network_to_torch(tn, constant_tags):
     return tn_torch, variables, iscomplex
 
 def abs_max_grad(tn):
+    """Inspect the gradient of every tensor element in the TensorNetwork
+    and return the gradient with the largest magnitude (useful for checking
+    convergence)."""
+
     torch, device = _get_torch_and_device()
     views = []
     for t in tn:
