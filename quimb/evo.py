@@ -329,10 +329,12 @@ class Evolution(object):
             elif self._timedep:
                 raise TypeError("You can't use the 'solve' method "
                                 "with a time-dependent Hamiltonian.")
-            self._solve_ham(ham)
+            self._ham = ham
+            self._setup_solved_ham()
 
         elif method == 'integrate':
             self._start_integrator(ham, int_small_step)
+            self._ham = ham
         elif method == 'expm':
             if isinstance(ham, LinearOperator):
                 raise TypeError("You can't use the 'expm' method "
@@ -342,9 +344,9 @@ class Evolution(object):
                                 "with a time-dependent Hamiltonian.")
             self._update_method = self._update_to_expm_ket
             self._pt = self._p0
-            self.ham = ham
             self.expm_backend = expm_backend
             self.expm_opts = {} if expm_opts is None else dict(expm_opts)
+            self._ham = ham
         else:
             raise ValueError(f"Did not understand evolution "
                              "method: '{method}'.")
@@ -393,28 +395,28 @@ class Evolution(object):
         self._step_callback = step_callback
         self._int_step_callback = int_step_callback
 
-    def _solve_ham(self, ham):
-        """Solve the supplied hamiltonian and find the initial state in the
-        energy eigenbasis for quick evolution later.
+    def _setup_solved_ham(self):
+        """Solve the hamiltonian if needed and find the initial state 
+        in the energy eigenbasis for quick evolution later.
         """
         # See if already solved from tuple
         try:
-            self._evals, self._evecs = ham
+            evals, evecs = self._ham
             self._method = 'solve'
         except ValueError:
-            self._evals, self._evecs = eigh(ham.A)
+            evals, evecs = eigh(self._ham.A)
+            self._ham = (evals, evecs)
 
         # Find initial state in energy eigenbasis at t0
         if self._isdop:
-            self.pe0 = dot(dag(self._evecs), dot(self._p0, self._evecs))
+            self.pe0 = dot(dag(evecs), dot(self._p0, evecs))
             self._update_method = self._update_to_solved_dop
         else:
-            self.pe0 = dot(dag(self._evecs), self._p0)
+            self.pe0 = dot(dag(evecs), self._p0)
             self._update_method = self._update_to_solved_ket
 
         # Current state (start with same as initial)
         self._pt = self._p0
-        self._solved = True
 
     def _start_integrator(self, ham, small_step):
         """Initialize a stepping integrator.
@@ -425,8 +427,7 @@ class Evolution(object):
             H0 = ham
 
         # set complex ode with governing equation
-        self._sparse_ham = issparse(H0)
-        evo_eq = _calc_evo_eq(self._isdop, self._sparse_ham, False, self._timedep)
+        evo_eq = _calc_evo_eq(self._isdop, issparse(H0), False, self._timedep)
 
         self._stepper = complex_ode(evo_eq(ham))
 
@@ -449,7 +450,6 @@ class Evolution(object):
 
         # assign the correct update_to method
         self._update_method = self._update_to_integrate
-        self._solved = False
 
     # Methods for updating the simulation ----------------------------------- #
 
@@ -458,7 +458,7 @@ class Evolution(object):
         the operator exponential itself.
         """
         factor = -1j * (t - self.t)
-        self._pt = expm_multiply(factor * self.ham, self._pt,
+        self._pt = expm_multiply(factor * self._ham, self._pt,
                                  backend=self.expm_backend, **self.expm_opts)
         self._t = t
 
@@ -471,8 +471,9 @@ class Evolution(object):
         wavefunction to time `t`.
         """
         self._t = t
-        lt = explt(self._evals, t - self.t0)
-        self._pt = self._evecs @ ldmul(lt, self.pe0)
+        evals, evecs = self._ham
+        lt = explt(evals, t - self.t0)
+        self._pt = evecs @ ldmul(lt, self.pe0)
 
         # compute any callbacks into -> self._results
         if self._step_callback is not None:
@@ -483,9 +484,10 @@ class Evolution(object):
         density operator to time `t`.
         """
         self._t = t
-        lt = explt(self._evals, t - self.t0)
+        evals, evecs = self._ham
+        lt = explt(evals, t - self.t0)
         lvpvl = rdmul(ldmul(lt, self.pe0), lt.conj())
-        self._pt = self._evecs @ (lvpvl @ dag(self._evecs))
+        self._pt = evecs @ (lvpvl @ dag(evecs))
 
         # compute any callbacks into -> self._results
         if self._step_callback is not None:
@@ -571,3 +573,4 @@ class Evolution(object):
         callback(s) for each time step.
         """
         return self._results
+
