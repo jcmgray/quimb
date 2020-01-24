@@ -4,6 +4,7 @@ import cytoolz
 from autoray import do
 
 import quimb as qu
+from .tensor_core import get_tags, PTensor
 from .tensor_gen import MPS_computational_state
 from .tensor_1d import TensorNetwork1DVector
 from . import array_ops as ops
@@ -269,6 +270,9 @@ APPLY_GATES = {
     'FSIM': apply_fsim,
 }
 
+ONE_QUBIT_PARAM_GATES = {'RX', 'RY', 'RZ', 'U3'}
+TWO_QUBIT_PARAM_GATES = {'FSIM'}
+
 
 # --------------------------- main circuit class ---------------------------- #
 
@@ -412,15 +416,14 @@ class Circuit:
             Supplied to the gate function, options here will override the
             default ``gate_opts``.
         """
+        tags = {f'GATE_{len(self.gates)}'}
 
         if (gate_round is not None):
-            tags = {f'ROUND_{gate_round}'}
+            tags.add(f'ROUND_{gate_round}')
         elif isinstance(gate_id, numbers.Integral) or gate_id.isdigit():
             # gate round given as first entry of qasm line
-            tags = {f'ROUND_{gate_id}'}
+            tags.add(f'ROUND_{gate_id}')
             gate_id, gate_args = gate_args[0], gate_args[1:]
-        else:
-            tags = set()
 
         opts = {**self.gate_opts, **gate_opts}
         apply_fn = APPLY_GATES[gate_id.upper()]
@@ -628,6 +631,46 @@ class Circuit:
         ntensor = self._psi.num_tensors
         path = [(0, 1)] + [(0, i) for i in reversed(range(1, ntensor - 1))]
         return self.psi.contract(*args, optimize=path, **contract_opts)
+
+    def update_params_from(self, tn):
+        """Assuming ``tn`` is a tensor network with tensors tagged ``GATE_{i}``
+        corresponding to this circuit (e.g. from ``circ.psi`` or ``circ.uni``)
+        but with updated parameters, update the current circuit parameters and
+        tensors with those values.
+
+        This is an inplace modification of the ``Circuit``.
+
+        Parameters
+        ----------
+        tn : TensorNetwork
+            The tensor network to find the updated parameters from.
+        """
+        for i, gate in enumerate(self.gates):
+            label = gate[0]
+            tag = f'GATE_{i}'
+            t = tn[tag]
+
+            # sanity check that tensor(s) `t` correspond to the correct gate
+            if label not in get_tags(t):
+                raise ValueError(f"The tensor(s) correponding to gate {i} "
+                                 f"should be tagged with '{label}', got {t}.")
+
+            # only update gates and tensors if they are parametrizable
+            if isinstance(t, PTensor):
+
+                # update the actual tensor
+                self._psi[tag].params = t.params
+
+                # update the gate entry
+                if label in ONE_QUBIT_PARAM_GATES:
+                    new_gate = (label, *t.params, gate[-1])
+                elif label in TWO_QUBIT_PARAM_GATES:
+                    new_gate = (label, *t.params, *gate[-2:])
+                else:
+                    raise ValueError(f"Didn't recognise '{label}' "
+                                     "gate as parametrizable.")
+
+                self.gates[i] = new_gate
 
     def __repr__(self):
         r = "<Circuit(n={}, n_gates={}, gate_opts={})>"

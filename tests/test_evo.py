@@ -240,7 +240,7 @@ class TestEvolution:
     @mark.parametrize("sparse", [False, True])
     @mark.parametrize("method", ["solve", "integrate", 'expm', 'bad'])
     @mark.parametrize("timedep", [False, True])
-    @mark.parametrize("linop", [False, True])    
+    @mark.parametrize("linop", [False, True])
     def test_evo_ham(self, ham_rcr_psi, sparse, dop, method, timedep, linop):
         ham, trc, p0, tm, pm = ham_rcr_psi
         if dop:
@@ -270,7 +270,7 @@ class TestEvolution:
             with raises(TypeError):
                 qu.Evolution(p0, ham, method=method)
             return
-            
+
         if timedep and (method in ('expm', 'solve')):
             with raises(TypeError):
                 qu.Evolution(p0, ham, method=method)

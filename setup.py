@@ -19,7 +19,7 @@ setup(
     version=versioneer.get_version(),
     cmdclass=versioneer.get_cmdclass(),
     author='Johnnie Gray',
-    author_email="john.gray.14@ucl.ac.uk",
+    author_email="johnniemcgray@gmail.com",
     license='Apache',
     packages=find_packages(exclude=['deps', 'tests*']),
     install_requires=[
