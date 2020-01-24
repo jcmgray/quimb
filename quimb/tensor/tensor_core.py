@@ -3426,7 +3426,10 @@ class TensorNetwork(object):
             # e.g. if `ij == (0, 2)` then here we want 'abcd -> abad -> abd'
             tmp_inds = [ixmap.get(ix, ix) for ix in t.inds]
             new_inds = list(unique(tmp_inds))
-            new_data = oe.contract(t.data, tmp_inds, new_inds)
+            eq = _maybe_map_indices_to_alphabet(new_inds, [tmp_inds], new_inds)
+
+            # extract the diagonal and update the tensor
+            new_data = do('einsum', eq, t.data, like=t.data)
             t.modify(data=new_data, inds=new_inds, left_inds=None)
 
             # update wherever else the changed index appears (e.g. 'c' above)
@@ -4286,7 +4289,7 @@ class TNLinearOperator1D(spla.LinearOperator):
 
 
 class PTensor(Tensor):
-    """A tensor whose data array is lazily generate from a set of parameters
+    """A tensor whose data array is lazily generated from a set of parameters
     and a function.
 
     Parameters

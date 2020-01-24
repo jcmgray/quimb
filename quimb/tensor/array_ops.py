@@ -3,8 +3,9 @@
 import itertools
 
 import numpy
-from autoray import do, reshape, transpose, dag
+from autoray import do, reshape, transpose, dag, infer_backend
 
+from ..core import njit
 from ..linalg.base_linalg import norm_fro_dense
 
 
@@ -139,6 +140,43 @@ def unitize(x, method='qr'):
     return _UNITIZE_METHODS[method](x)
 
 
+@njit
+def _numba_find_diag_axes(x, atol=1e-12):  # pragma: no cover
+    """Numba-compiled array diagonal axis finder.
+
+    Parameters
+    ----------
+    x : numpy.ndarray
+        The array to search for diagonal axes.
+    atol : float
+        The tolerance with which to compare to zero.
+
+    Returns
+    -------
+    diag_axes : set[tuple[int]]
+        The set of pairs of axes which are diagonal.
+    """
+
+    # create the set of pairs of matching size axes
+    diag_axes = set()
+    for d1 in range(x.ndim - 1):
+        for d2 in range(d1 + 1, x.ndim):
+            if x.shape[d1] == x.shape[d2]:
+                diag_axes.add((d1, d2))
+
+    # enumerate through every array entry, eagerly invalidating axis pairs
+    for index, val in numpy.ndenumerate(x):
+        for d1, d2 in diag_axes:
+            if (index[d1] != index[d2]) and (abs(val) > atol):
+                diag_axes.remove((d1, d2))
+
+        # all pairs invalid, nothing left to do
+        if len(diag_axes) == 0:
+            break
+
+    return diag_axes
+
+
 def find_diag_axes(x, atol=1e-12):
     """Try and find a pair of axes of ``x`` in which it is diagonal.
 
@@ -170,14 +208,65 @@ def find_diag_axes(x, atol=1e-12):
 
     """
     shape = x.shape
-    indxrs = do('indices', shape, like=x)
+    if len(shape) < 2:
+        return None
+
+    backend = infer_backend(x)
+
+    # use numba-accelerated version for numpy arrays
+    if backend == 'numpy':
+        diag_axes = _numba_find_diag_axes(x, atol=atol)
+        if diag_axes:
+            # make it determinstic
+            return min(diag_axes)
+        return None
+    indxrs = do('indices', shape, like=backend)
 
     for i, j in itertools.combinations(range(len(shape)), 2):
         if shape[i] != shape[j]:
             continue
-        if do('allclose', x[indxrs[i] != indxrs[j]], 0.0, atol=atol):
+        if do('allclose', x[indxrs[i] != indxrs[j]], 0.0,
+              atol=atol, like=backend):
             return (i, j)
     return None
+
+
+@njit
+def _numba_find_antidiag_axes(x, atol=1e-12):  # pragma: no cover
+    """Numba-compiled array antidiagonal axis finder.
+
+    Parameters
+    ----------
+    x : numpy.ndarray
+        The array to search for anti-diagonal axes.
+    atol : float
+        The tolerance with which to compare to zero.
+
+    Returns
+    -------
+    antidiag_axes : set[tuple[int]]
+        The set of pairs of axes which are anti-diagonal.
+    """
+
+    # create the set of pairs of matching size axes
+    antidiag_axes = set()
+    for i in range(x.ndim - 1):
+        for j in range(i + 1, x.ndim):
+            if x.shape[i] == x.shape[j]:
+                antidiag_axes.add((i, j))
+
+    # enumerate through every array entry, eagerly invalidating axis pairs
+    for index, val in numpy.ndenumerate(x):
+        for i, j in antidiag_axes:
+            d = x.shape[i]
+            if (index[i] != d - 1 - index[j]) and (abs(val) > atol):
+                antidiag_axes.remove((i, j))
+
+        # all pairs invalid, nothing left to do
+        if len(antidiag_axes) == 0:
+            break
+
+    return antidiag_axes
 
 
 def find_antidiag_axes(x, atol=1e-12):
@@ -213,15 +302,67 @@ def find_antidiag_axes(x, atol=1e-12):
     to the the same index.
     """
     shape = x.shape
-    indxrs = do('indices', shape, like=x)
+    if len(shape) < 2:
+        return None
+
+    backend = infer_backend(x)
+
+    # use numba-accelerated version for numpy arrays
+    if backend == 'numpy':
+        antidiag_axes = _numba_find_antidiag_axes(x, atol=atol)
+        if antidiag_axes:
+            # make it determinstic
+            return min(antidiag_axes)
+        return None
+
+    indxrs = do('indices', shape, like=backend)
 
     for i, j in itertools.combinations(range(len(shape)), 2):
         di, dj = shape[i], shape[j]
         if di != dj:
             continue
-        if do('allclose', x[indxrs[i] != dj - 1 - indxrs[j]], 0.0, atol=atol):
+        if do('allclose', x[indxrs[i] != dj - 1 - indxrs[j]], 0.0,
+              atol=atol, like=backend):
             return (i, j)
     return None
+
+
+@njit
+def _numba_find_columns(x, atol=1e-12):  # pragma: no cover
+    """Numba-compiled single non-zero column axis finder.
+
+    Parameters
+    ----------
+    x :  array
+        The array to search.
+    atol : float, optional
+        Absolute tolerance to compare to zero with.
+
+    Returns
+    -------
+    set[tuple[int]]
+        Set of pairs (axis, index) defining lone non-zero columns.
+    """
+
+    # possible pairings of axis + index
+    column_pairs = set()
+    for ax, d in enumerate(x.shape):
+        for i in range(d):
+            column_pairs.add((ax, i))
+
+    # enumerate over all array entries, invalidating potential column pairs
+    for index, val in numpy.ndenumerate(x):
+        if abs(val) > atol:
+            for ax, i in enumerate(index):
+                for pax, pi in column_pairs:
+                    if ax == pax and pi != i:
+                        column_pairs.remove((pax, pi))
+
+        # all potential pairs invalidated
+        if not len(column_pairs):
+            break
+
+    return column_pairs
 
 
 def find_columns(x, atol=1e-12):
@@ -256,11 +397,23 @@ def find_columns(x, atol=1e-12):
 
     """
     shape = x.shape
-    indxrs = do('indices', shape, like=x)
+    if len(shape) < 1:
+        return None
+
+    backend = infer_backend(x)
+
+    # use numba-accelerated version for numpy arrays
+    if backend == 'numpy':
+        columns_pairs = _numba_find_columns(x, atol)
+        if columns_pairs:
+            return min(columns_pairs)
+        return None
+
+    indxrs = do('indices', shape, like=backend)
 
     for i in range(len(shape)):
         for j in range(shape[i]):
-            if do('allclose', x[indxrs[i] != j], 0.0, atol=atol):
+            if do('allclose', x[indxrs[i] != j], 0.0, atol=atol, like=backend):
                 return (i, j)
 
     return None
