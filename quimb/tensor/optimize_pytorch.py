@@ -162,7 +162,9 @@ class TNOptimizer:
         If ``None``, then gpu (``'cuda'``) will be used if it can be
         detected, otherwise ``'cpu'`` will be used.
     progbar : bool, optional
-        Whether to show live progress of the optimization.
+        "True" show live progress of the optimization using a progress bar. 
+        "False" runs the optimization silently. For simple line-by-line
+        printing of the progress, you can set this option to the string "simple".
 
 
     General usage examples can be seen in the documentation
@@ -195,6 +197,7 @@ class TNOptimizer:
         self.loss_target = loss_target
         self.tol_change = tol_change
         self.tol_grad = tol_grad
+        assert progbar in [True, False, 'simple']
         self.progbar = progbar
         self.constant_tags = (set() if constant_tags is None
                               else set(constant_tags))
@@ -279,11 +282,15 @@ class TNOptimizer:
     def optimize(self, max_steps, max_time=None):
 
         # perform the optimization with live progress
-        pbar = tqdm.tqdm(total=max_steps, disable=not self.progbar)
+        if self.progbar is True:
+            pbar = tqdm.tqdm(total=max_steps)
+        else:
+            pbar = tqdm.tqdm(total=max_steps, disable=True)
         self._maybe_start_timer(max_time)
+
         try:
             for it in range(max_steps):
-                if self.progbar is False:
+                if self.progbar == 'simple':
                     t0 = time.time()
 
                 # keep the tn actually normalized during the optimization
@@ -300,7 +307,7 @@ class TNOptimizer:
                 pbar.update()
                 self._n += 1
 
-                if self.progbar is False:
+                if self.progbar == 'simple':
                     t1 = time.time()
                     print('loss = {}, iter time = {}'.format(self.loss, t1-t0))
 
