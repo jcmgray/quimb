@@ -32,7 +32,6 @@ def spsi_dot():
     psid = -1.0j * (ham @ psi)
     return psi, ham, psid
 
-
 @fixture
 def rho_dot():
     rho = qu.rand_rho(3)
@@ -225,7 +224,7 @@ class TestEvolution:
         if presolve:
             l, v = qu.eigh(ham)
             sim = qu.Evolution(p0, (l, v))
-            assert sim._solved
+            assert isinstance(sim._ham, tuple) and len(sim._ham) == 2 
         else:
             sim = qu.Evolution(p0, ham, method='solve')
         sim.update_to(tm)
