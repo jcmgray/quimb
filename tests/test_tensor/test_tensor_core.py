@@ -571,6 +571,15 @@ class TestTensorNetwork:
         x2 = (tn & tn.H) ^ ...
         assert_allclose(4 * x1, x2)
 
+    def test_multiply_each(self):
+        a = rand_tensor((2, 3, 4), inds=['0', '1', '2'], tags='red')
+        b = rand_tensor((3, 4, 5), inds=['1', '2', '3'], tags='blue')
+        c = rand_tensor((5, 2, 6), inds=['3', '0', '4'], tags='blue')
+        tn = a & b & c
+        x1 = (tn & tn.H) ^ ...
+        x2 = (tn.multiply_each(2) & tn.H) ^ ...
+        assert_allclose(2**3 * x1, x2)
+
     def test_divide(self):
         a = rand_tensor((2, 3, 4), inds=['0', '1', '2'], tags='red')
         b = rand_tensor((3, 4, 5), inds=['1', '2', '3'], tags='blue')
