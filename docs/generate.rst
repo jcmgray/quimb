@@ -116,8 +116,14 @@ All of these functions accept a ``seed`` argument for replicability:
             [-0.08442 -2.133635e-01j,  0.803236-2.691589e-18j]])
 
 
-For some applications, generating random numbers with ``numpy`` alone can be a bottleneck.
-``quimb`` will instead peform fast, multi-threaded random number generation with `randomgen <https://github.com/bashtage/randomgen>`_ if it is installed, which can potentially offer an order of magnitude better performance. While the random number sequences can be still replicated using the ``seed`` argument, they also depend (deterministically) on the number of threads used, so may vary across machines unless this is set (e.g. with ``'OMP_NUM_THREADS'``). Use of ``randomgen`` can be explicitly turned off with the environment variable ``QUIMB_USE_RANDOMGEN='false'``.
+For some applications, generating random numbers with a single thread can be a bottleneck, though
+since version 1.17 ``numpy`` itself enables parallel streams of random numbers to be generated.
+``quimb`` handles setting up the bit generators and multi-threading the creation of random arrays, with potentially large performance gains. While the random number sequences can be still replicated using the ``seed`` argument, they also depend (deterministically) on the number of threads used, so may vary across machines unless this is set (e.g. with ``'OMP_NUM_THREADS'``).
+
+.. note::
+    :class: quimbnote
+
+    Previously, `randomgen <https://github.com/bashtage/randomgen>`_ was needed for this functionality, and its `bit generators <https://bashtage.github.io/randomgen/bit_generators/index.html>`_ can still be specified to :func:`~quimb.gen.rand.set_rand_bitgen` if installed.
 
 The following gives a quick idea of the speed-ups possible. First random, complex, normally distributed array generation with a naive ``numpy`` method:
 
