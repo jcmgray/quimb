@@ -1,10 +1,10 @@
 import numpy as np
 import scipy.linalg as scla
-import scipy.sparse.linalg as spla
 import scipy.linalg.interpolative as sli
 from autoray import do, reshape
 
 from ..core import njit
+from ..linalg.base_linalg import svds, eigh
 from ..linalg.rand_linalg import rsvd, estimate_rank
 
 
@@ -330,7 +330,7 @@ def _svds(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0):
             x = x.to_dense()
         return _svd(x, cutoff, cutoff_mode, max_bond, absorb)
 
-    U, s, V = spla.svds(x, k=k)
+    U, s, V = svds(x, k=k)
     return _trim_and_renorm_SVD(U, s, V, cutoff, cutoff_mode, max_bond, absorb)
 
 
@@ -375,7 +375,7 @@ def _eigsh(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0):
             x = x.to_dense()
         return _eigh(x, cutoff, cutoff_mode, max_bond, absorb)
 
-    s, U = spla.eigsh(x, k=k)
+    s, U = eigh(x, k=k)
     s, U = s[::-1], U[:, ::-1]  # make sure largest singular value first
     V = np.sign(s).reshape(-1, 1) * dag(U)
     s = np.abs(s)

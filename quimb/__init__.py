@@ -167,6 +167,7 @@ from .gen.rand import (
     rand_iso,
     rand_mera,
     seed_rand,
+    set_rand_bitgen,
 )
 
 # Functions for calculating properties
@@ -385,6 +386,7 @@ __all__ = [
     'rand_iso',
     'rand_mera',
     'seed_rand',
+    'set_rand_bitgen',
     'computational_state',
     # Calc ------------------------------------------------------------------ #
     'expm',

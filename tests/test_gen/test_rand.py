@@ -1,8 +1,16 @@
+import importlib
+
 import pytest
 from numpy.testing import assert_allclose
 import numpy as np
 import scipy.sparse as sp
+
 import quimb as qu
+
+
+found_randomgen = bool(importlib.util.find_spec('randomgen'))
+reason = "randomgen not installed."
+randomgen_mark = pytest.mark.skipif(not found_randomgen, reason=reason)
 
 
 dtypes = [np.float32, np.float64, np.complex128, np.complex64]
@@ -17,6 +25,13 @@ class TestRandn:
         x = qu.randn((2, 3, 4), dtype=dtype)
         assert x.shape == (2, 3, 4)
         assert x.dtype == np.dtype(dtype)
+
+    @pytest.mark.parametrize("num_threads", [2, 3])
+    @pytest.mark.parametrize("dist", ['uniform', 'normal', 'exp'])
+    def test_multithreaded(self, num_threads, dist):
+        x = qu.randn((2, 3, 4), dist=dist, num_threads=num_threads, seed=42)
+        y = qu.randn((2, 3, 4), dist=dist, num_threads=num_threads, seed=42)
+        assert_allclose(x, y)
 
     def test_can_seed(self):
         assert_allclose(qu.randn(5, seed=42), qu.randn(5, seed=42))
@@ -38,6 +53,27 @@ class TestRandn:
         x = qu.gen.rand.rand_rademacher(10, dtype=dtype)
         assert x.dtype == dtype
         assert_allclose(np.abs(x), np.ones(10))
+
+    @pytest.mark.parametrize('bitgen', [
+        'MT19937',
+        'PCG64',
+        'Philox',
+        'SFC64',
+        pytest.param('JSF', marks=randomgen_mark),
+        pytest.param('SFMT', marks=randomgen_mark),
+        pytest.param('Xoshiro256', marks=randomgen_mark),
+        pytest.param('Xoshiro512', marks=randomgen_mark),
+    ])
+    def test_set_bitgen(self, bitgen):
+        x0 = qu.randn(3, seed=42)
+        qu.set_rand_bitgen(bitgen)
+        x1 = qu.randn(3, seed=42)
+        assert not np.allclose(x0, x1) or bitgen == 'PCG64'  # <- default
+        x2 = qu.randn(3, seed=42)
+        assert_allclose(x1, x2)
+        qu.set_rand_bitgen(None)
+        x3 = qu.randn(3, seed=42)
+        assert_allclose(x0, x3)
 
 
 @pytest.mark.parametrize('dtype', dtypes)

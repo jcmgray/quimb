@@ -48,9 +48,7 @@ Plotting tensor networks as colored graphs with weighted edges requires:
 * `matplotlib <https://matplotlib.org/>`_
 * `networkx <https://networkx.github.io/>`_
 
-Fast, multi-threaded random number generation requires:
-
-* `randomgen <https://github.com/bashtage/randomgen>`_
+Fast, multi-threaded random number generation no longer (with `numpy>1.17`) requires `randomgen <https://github.com/bashtage/randomgen>` though its bit generators can still be used._
 
 Finally, fast and optionally distributed partial eigen-solving, SVD, exponentiation etc. can be accelerated with ``slepc4py`` and its dependencies:
 
