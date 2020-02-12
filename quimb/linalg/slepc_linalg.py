@@ -19,50 +19,57 @@ def get_default_comm():
     return MPI.COMM_SELF
 
 
-class CacheOnComm(object):
-    """
+class _PetscSlepcHandler:
+    """Helper class for caching the PETSc and SLEPc imports and making sure
+    that the MPI comm they use is aligned.
     """
 
-    def __init__(self, comm_fn):
+    def __init__(self):
         self._comm = '__UNINITIALIZED__'
-        self._comm_fn = comm_fn
 
-    def __call__(self, comm=None):
-        # resolve default comm
+    def init_petsc_slepc(self, comm):
+        import os
+        petsc_arch = os.environ.get("PETSC_ARCH", None)
+
+        import petsc4py
+        petsc4py.init(args=['-no_signal_handler'], arch=petsc_arch, comm=comm)
+        import slepc4py
+        slepc4py.init(args=['-no_signal_handler'], arch=petsc_arch)
+
+        self._comm = comm
+        self._PETSc = petsc4py.PETSc
+        self._SLEPc = slepc4py.SLEPc
+
+    def get_petsc(self, comm=None):
         if comm is None:
             comm = get_default_comm()
-        # first call or called with different comm
-        if self._comm != comm:
-            self._result = self._comm_fn(comm=comm)
-            self._comm = comm
-        return self._result, comm
+
+        if comm != self._comm:
+            self.init_petsc_slepc(comm)
+
+        return self._PETSc, comm
+
+    def get_slepc(self, comm=None):
+        if comm is None:
+            comm = get_default_comm()
+
+        if comm != self._comm:
+            self.init_petsc_slepc(comm)
+
+        return self._SLEPc, comm
 
 
-def init_petsc_and_slepc(comm=None):
-    """Make sure petsc is initialized with comm before slepc.
-    """
-    import os
-    petsc_arch = os.environ.get("PETSC_ARCH", None)
-
-    import petsc4py
-    petsc4py.init(args=['-no_signal_handler'], arch=petsc_arch, comm=comm)
-    import slepc4py
-    slepc4py.init(args=['-no_signal_handler'], arch=petsc_arch)
-    return petsc4py.PETSc, slepc4py.SLEPc
+_petsc_slepc_handler = _PetscSlepcHandler()
 
 
-@CacheOnComm
 def get_petsc(comm=None):
-    """Cache petsc module import to allow lazy start.
-    """
-    return init_petsc_and_slepc(comm=comm)[0]
+    global _petsc_slepc_handler
+    return _petsc_slepc_handler.get_petsc()
 
 
-@CacheOnComm
 def get_slepc(comm=None):
-    """Cache slepc module import to allow lazy start.
-    """
-    return init_petsc_and_slepc(comm=comm)[1]
+    global _petsc_slepc_handler
+    return _petsc_slepc_handler.get_slepc()
 
 
 # --------------------------------------------------------------------------- #
