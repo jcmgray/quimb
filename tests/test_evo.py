@@ -389,7 +389,7 @@ class TestEvolution:
 
     @slepc4py_test
     @mark.parametrize('expm_backend', ['slepc-krylov', 'slepc-expokit'])
-    def test_expm_krylov_expokit(self, expm_backend):
+    def test_expm_slepc(self, expm_backend):
         ham = qu.ham_mbl(7, dh=0.5, sparse=True)
         psi = qu.rand_ket(2**7)
         evo_exact = qu.Evolution(psi, ham, method='solve')

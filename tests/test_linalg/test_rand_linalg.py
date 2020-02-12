@@ -84,7 +84,7 @@ class TestRSVD:
     @pytest.mark.parametrize('p', [0, 5])
     def test_rsvd_adaptive(self, dtype, shape, q, p):
         X = rand_rank(*shape, 10, dtype=dtype)
-        U, s, V = qu.rsvd(X, 1e-5, q=q, p=p, k_start=10)
+        U, s, V = qu.rsvd(X, 1e-6, q=q, p=p, k_start=10)
 
         k = s.size
         assert 10 <= k <= 20
