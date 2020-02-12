@@ -131,7 +131,7 @@ The following gives a quick idea of the speed-ups possible. First random, comple
 
     >>> import numpy as np
     >>> %timeit np.random.randn(2**22) + 1j * np.random.randn(2**22)
-    297 ms ± 2.09 ms per loop (mean ± std. dev. of 7 runs, 1 loop each)
+    394 ms ± 2.93 ms per loop (mean ± std. dev. of 7 runs, 1 loop each)
 
 
 And generation with ``quimb``:
@@ -140,4 +140,12 @@ And generation with ``quimb``:
 
     >>> import quimb as qu
     >>> %timeit qu.randn(2**22, dtype=complex)
-    32.1 ms ± 1.39 ms per loop (mean ± std. dev. of 7 runs, 10 loops each)
+    45.8 ms ± 2.08 ms per loop (mean ± std. dev. of 7 runs, 10 loops each)
+
+    >>> # try a randomgen bit generator
+    >>> qu.set_rand_bitgen('Xoshiro256')
+    >>> %timeit qu.randn(2**22, dtype=complex)
+    41.2 ms ± 2.02 ms per loop (mean ± std. dev. of 7 runs, 10 loops each)
+
+    >>> # use the default numpy bit generator
+    >>> qu.set_rand_bitgen(None)
