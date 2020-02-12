@@ -46,7 +46,7 @@ export PETSC_ARCH=arch-linux2-c-release
 cd $PETSC_DIR
 git pull
 
-python2 ./configure \
+python ./configure \
   --download-mumps \
   --download-scalapack \
   --download-parmetis \
@@ -61,7 +61,7 @@ make streams NPMAX=2
 export SLEPC_DIR=$INSTALL_DIR/slepc
 cd $SLEPC_DIR
 git pull
-python2 ./configure
+python ./configure
 make
 make test
 
