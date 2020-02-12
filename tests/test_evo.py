@@ -32,6 +32,7 @@ def spsi_dot():
     psid = -1.0j * (ham @ psi)
     return psi, ham, psid
 
+
 @fixture
 def rho_dot():
     rho = qu.rand_rho(3)
@@ -224,7 +225,7 @@ class TestEvolution:
         if presolve:
             l, v = qu.eigh(ham)
             sim = qu.Evolution(p0, (l, v))
-            assert isinstance(sim._ham, tuple) and len(sim._ham) == 2 
+            assert isinstance(sim._ham, tuple) and len(sim._ham) == 2
         else:
             sim = qu.Evolution(p0, ham, method='solve')
         sim.update_to(tm)
@@ -387,20 +388,16 @@ class TestEvolution:
         assert checked
 
     @slepc4py_test
-    def test_expm_krylov_expokit(self):
-        ham = qu.rand_herm(100, sparse=True, density=0.8)
-        psi = qu.rand_ket(100)
+    @mark.parametrize('expm_backend', ['slepc-krylov', 'slepc-expokit'])
+    def test_expm_krylov_expokit(self, expm_backend):
+        ham = qu.ham_mbl(7, dh=0.5, sparse=True)
+        psi = qu.rand_ket(2**7)
         evo_exact = qu.Evolution(psi, ham, method='solve')
-        evo_krylov = qu.Evolution(psi, ham, method='expm',
-                                  expm_backend='slepc-krylov')
-        evo_expokit = qu.Evolution(psi, ham, method='expm',
-                                   expm_backend='slepc-expokit')
-        ts = np.linspace(0, 100, 21)
-        for p1, p2, p3 in zip(evo_exact.at_times(ts),
-                              evo_krylov.at_times(ts),
-                              evo_expokit.at_times(ts)):
+        evo_slepc = qu.Evolution(psi, ham, method='expm',
+                                 expm_backend=expm_backend)
+        ts = np.linspace(0, 100, 6)
+        for p1, p2 in zip(evo_exact.at_times(ts), evo_slepc.at_times(ts)):
             assert abs(qu.expec(p1, p2) - 1) < 1e-9
-            assert abs(qu.expec(p1, p3) - 1) < 1e-9
 
     def test_progbar_update_to_integrate(self, capsys):
         ham = qu.ham_heis(2, cyclic=False)
