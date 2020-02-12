@@ -41,7 +41,7 @@ before_install:
   - "if [ ${BUILD_MPI:-ON} = ON ]; then chronic bash deps/travis-install-openmpi.sh; fi"
   - mpiexec --version
   - mpiexec -np 2 hostname
-  - "if [ ${BUILD_SLEPC:-ON} = ON ]; then chronic bash deps/travis-install-slepc4py.sh; fi"
+  - "if [ ${BUILD_SLEPC:-ON} = ON ]; then travis_wait 30 chronic bash deps/travis-install-slepc4py.sh; fi"
 
 install:
   - pip install -U --no-deps .
