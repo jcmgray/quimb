@@ -527,7 +527,7 @@ def OTOC_local(psi0, H, H_back, ts, i, A, j=None, B=None,
     if j is None:
         j = i
 
-    if initial_eigenstate is 'check':
+    if initial_eigenstate == 'check':
         psi = psi0.gate(B, j, contract=True)
         x = psi0.H.expec(psi)
         y = psi.H.expec(psi)

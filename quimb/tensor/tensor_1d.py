@@ -306,7 +306,7 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
 
         if propagate_tags == 'sites':
             # use regex to take tags only matching e.g. 'I0', 'I13'
-            rex = re.compile(psi.structure.format("\d+"))
+            rex = re.compile(psi.structure.format(r"\d+"))
             old_tags = {t for t in old_tags if rex.match(t)}
 
         TG.modify(tags=TG.tags | old_tags)

@@ -534,7 +534,7 @@ def ham_heis(n, j=1.0, b=0.0, cyclic=True,
         # General term, on-site b-field plus interaction with next site
         return ikron(two_site_term, dims, [i, i + 1], **ikron_kws)
 
-    terms_needed = range(0 if single_site_b is 0 else -1,
+    terms_needed = range(0 if single_site_b == 0 else -1,
                          n if cyclic else n - 1)
 
     if parallel:
@@ -660,7 +660,7 @@ def _gen_mbl_random_factors(n, dh, dh_dim, dh_dist, seed=None, beta=None):
         rs = 2.0 * np.random.rand(3, n) - 1.0
 
     elif dh_dist in {'qp', 'quasiperiodic', 'qr', 'quasirandom'}:
-        if dh_dim is not 'z':
+        if dh_dim != 'z':
             raise ValueError("dh_dim should be 1 or 'z' for dh_dist='qp'.")
 
         if beta is None:

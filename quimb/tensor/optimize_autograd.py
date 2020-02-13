@@ -166,7 +166,7 @@ def convert_args_to_jax(fn):
     return jax_args_fn
 
 
-variable_finder = re.compile('__VARIABLE(\d+)__')
+variable_finder = re.compile(r'__VARIABLE(\d+)__')
 
 
 def inject_(arrays, tn):

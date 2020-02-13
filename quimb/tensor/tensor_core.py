@@ -1956,12 +1956,12 @@ class TensorNetwork(object):
     def calc_nsites(self):
         """Calculate how many tags there are which match ``structure``.
         """
-        return len(re.findall(self.structure.format("(\d+)"), str(self.tags)))
+        return len(re.findall(self.structure.format(r"(\d+)"), str(self.tags)))
 
     @staticmethod
     @functools.lru_cache(8)
     def regex_for_calc_sites_cached(structure):
-        return re.compile(structure.format("(\d+)"))
+        return re.compile(structure.format(r"(\d+)"))
 
     def calc_sites(self):
         """Calculate with sites this TensorNetwork contain based on its
@@ -2150,8 +2150,8 @@ class TensorNetwork(object):
     multiply_ = functools.partialmethod(multiply, inplace=True)
 
     def multiply_each(self, x, inplace=False):
-        """Scalar multiplication of each tensor in this 
-        tensor network with ``x``. If trying to spread a 
+        """Scalar multiplication of each tensor in this
+        tensor network with ``x``. If trying to spread a
         multiplicative factor ``fac`` uniformly over all tensors in the
         network and the number of tensors is large, then calling
         ``multiply(fac)`` can be inaccurate due to precision loss.
