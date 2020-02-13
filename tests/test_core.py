@@ -781,3 +781,34 @@ class TestExpec:
         a = qu.singlet(qtype=qtype)
         b = qu.pauli(s, sparse=sparse) & qu.pauli(s, sparse=sparse)
         assert_allclose(qu.expec(a, b), -1)
+
+
+class TestNumbaFuncs:
+
+    @mark.parametrize("size", [300, 3000, (300, 5), (3000, 5)])
+    @mark.parametrize("X_dtype", ['float32', 'float64',
+                                  'complex64', 'complex128'])
+    @mark.parametrize("c_dtype", ['float32', 'float64'])
+    def test_subtract_update(
+        self, size, X_dtype, c_dtype,
+    ):
+        X = qu.randn(size, dtype=X_dtype)
+        Y = qu.randn(size, dtype=X_dtype)
+        c = qu.randn(1, dtype=c_dtype).item()
+        res = X - c * Y
+        qu.core.subtract_update_(X, c, Y)
+        assert_allclose(res, X)
+
+    @mark.parametrize("size", [300, 3000, (300, 5), (3000, 5)])
+    @mark.parametrize("X_dtype", ['float32', 'float64',
+                                  'complex64', 'complex128'])
+    @mark.parametrize("c_dtype", ['float32', 'float64'])
+    def test_divide_update(
+        self, size, X_dtype, c_dtype,
+    ):
+        X = qu.randn(size, dtype=X_dtype)
+        Y = np.empty_like(X)
+        c = qu.randn(1, dtype=c_dtype).item()
+        res = X / c
+        qu.core.divide_update_(X, c, Y)
+        assert_allclose(res, Y, rtol=1e-6)

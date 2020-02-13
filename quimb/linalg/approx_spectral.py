@@ -257,8 +257,8 @@ def construct_lanczos_tridiag(A, K, v0=None, bsz=1, k_min=10, orthog=False,
         orthog = False
         v_shp = (d, bsz)
 
-    alpha = np.zeros(K + 1)
-    beta = np.zeros(K + 2)
+    alpha = np.zeros(K + 1, dtype=get_equivalent_real_dtype(A.dtype))
+    beta = np.zeros(K + 2, dtype=get_equivalent_real_dtype(A.dtype))
     beta[1] = sqrt(prod(v_shp))  # by construction
 
     if v0 is None:
@@ -312,7 +312,7 @@ def lanczos_tridiag_eig(alpha, beta, check_finite=True):
     beta : array of float
         The k={-1, 1} off-diagonal. Only first ``len(alpha) - 1`` entries used.
     """
-    Tk_banded = np.empty((2, alpha.size))
+    Tk_banded = np.empty((2, alpha.size), dtype=alpha.dtype)
     Tk_banded[1, -1] = 0.0  # sometimes can get nan here? -> breaks eig_banded
     Tk_banded[0, :] = alpha
     Tk_banded[1, :beta.size] = beta
@@ -546,6 +546,15 @@ def get_single_precision_dtype(dtype):
         return np.complex64
     elif np.issubdtype(dtype, np.floating):
         return np.float32
+    else:
+        raise ValueError(f"dtype {dtype} not understood.")
+
+
+def get_equivalent_real_dtype(dtype):
+    if dtype in ('float64', 'complex128'):
+        return 'float64'
+    elif dtype in ('float32', 'complex64'):
+        return 'float32'
     else:
         raise ValueError(f"dtype {dtype} not understood.")
 

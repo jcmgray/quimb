@@ -41,13 +41,11 @@ _NUMBA_CACHE = {
 njit = functools.partial(numba.njit, cache=_NUMBA_CACHE)
 """Numba no-python jit, but obeying cache setting."""
 
-njit_nocache = functools.partial(numba.njit, cache=False)
-"""No cache alias of njit."""
-
 vectorize = functools.partial(numba.vectorize, cache=_NUMBA_CACHE)
 """Numba vectorize, but obeying cache setting."""
 
-pvectorize = functools.partial(numba.vectorize, cache=False, target='parallel')
+pvectorize = functools.partial(numba.vectorize, cache=_NUMBA_CACHE,
+                               target='parallel')
 """No cache alias of vectorize."""
 
 
@@ -483,10 +481,10 @@ def subtract_update_(X, c, Y):
     """Accelerated inplace computation of ``X -= c * Y``. This is mainly
     for Lanczos iteration.
     """
-    if X.size > 2048:
-        _nb_subtract_update_par(X, c, Y, out=X)
-    else:
-        _nb_subtract_update_seq(X, c, Y, out=X)
+    # if X.size > 2048:
+    #     _nb_subtract_update_par(X, c, Y, out=X)
+    # else:
+    _nb_subtract_update_seq(X, c, Y, out=X)
 
 
 def _nb_divide_update_base(X, c):  # pragma: no cover
@@ -504,10 +502,10 @@ _nb_divide_update_par = pvectorize(_divd_sigs)(_nb_divide_update_base)
 def divide_update_(X, c, out):
     """Accelerated computation of ``X / c`` into ``out``.
     """
-    if X.size > 2048:
-        _nb_divide_update_par(X, c, out=out)
-    else:
-        _nb_divide_update_seq(X, c, out=out)
+    # if X.size > 2048:
+    #     _nb_divide_update_par(X, c, out=out)
+    # else:
+    _nb_divide_update_seq(X, c, out=out)
 
 
 @njit(parallel=True)  # pragma: no cover

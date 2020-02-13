@@ -1,7 +1,7 @@
 import numpy as np
 import numba
 
-from ..core import njit, njit_nocache, qarray
+from ..core import njit, qarray
 
 
 @njit
@@ -69,7 +69,7 @@ def compute_blocks(ix, jx, d):  # pragma: no cover
     return sorted([sorted(g) for g in groups])
 
 
-@njit_nocache(parallel=True)
+@njit(parallel=True)
 def subselect(A, p):  # pragma: no cover
     """Select only the intersection of rows and columns of ``A`` matching the
     basis indices ``p``. Faster than double numpy slicing.
@@ -110,7 +110,7 @@ def subselect(A, p):  # pragma: no cover
     return out
 
 
-@njit_nocache(parallel=True)
+@njit(parallel=True)
 def subselect_set(A, B, p):  # pragma: no cover
     """Set only the intersection of rows and colums of ``A`` matching the
     basis indices ``p`` to ``B``.
@@ -144,7 +144,7 @@ def subselect_set(A, B, p):  # pragma: no cover
 
 
 # XXX: want to cache this eventaully -> need parallel+cache numba support?
-@njit_nocache
+@njit
 def _eigh_autoblocked(A, sort=True):  # pragma: no cover
     d = A.shape[0]
 
@@ -184,7 +184,7 @@ def _eigh_autoblocked(A, sort=True):  # pragma: no cover
 
 
 # XXX: want to cache this eventaully -> need parallel+cache numba support?
-@njit_nocache
+@njit
 def _eigvalsh_autoblocked(A, sort=True):  # pragma: no cover
     # as above but ignore eigenvector for extra speed
     d = A.shape[0]
