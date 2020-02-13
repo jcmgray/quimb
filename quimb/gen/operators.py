@@ -534,7 +534,7 @@ def ham_heis(n, j=1.0, b=0.0, cyclic=True,
         # General term, on-site b-field plus interaction with next site
         return ikron(two_site_term, dims, [i, i + 1], **ikron_kws)
 
-    terms_needed = range(0 if single_site_b == 0 else -1,
+    terms_needed = range(0 if not any((bx, by, bz)) else -1,
                          n if cyclic else n - 1)
 
     if parallel:
