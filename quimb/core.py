@@ -35,18 +35,30 @@ os.environ['NUMBA_NUM_THREADS'] = str(_NUM_THREAD_WORKERS)
 import numba  # noqa
 
 _NUMBA_CACHE = {
-    'True': True, 'False': False,
-}[os.environ.get('QUIMB_NUMBA_CACHE', 'True')]
+    'TRUE': True, 'ON': True, 'FALSE': False, 'OFF': False,
+}[os.environ.get('QUIMB_NUMBA_CACHE', 'True').upper()]
+_NUMBA_PAR = {
+    'TRUE': True, 'ON': True, 'FALSE': False, 'OFF': False,
+}[os.environ.get('QUIMB_NUMBA_PARALLEL', 'True').upper()]
 
 njit = functools.partial(numba.njit, cache=_NUMBA_CACHE)
-"""Numba no-python jit, but obeying cache setting."""
+"""Numba no-python jit, but obeying cache setting.
+"""
+
+pnjit = functools.partial(numba.njit, cache=_NUMBA_CACHE, parallel=_NUMBA_PAR)
+"""Numba no-python jit, but obeying cache setting, with optional parallel
+target, depending on environment variable 'QUIMB_NUMBA_PARALLEL'.
+"""
 
 vectorize = functools.partial(numba.vectorize, cache=_NUMBA_CACHE)
-"""Numba vectorize, but obeying cache setting."""
+"""Numba vectorize, but obeying cache setting.
+"""
 
 pvectorize = functools.partial(numba.vectorize, cache=_NUMBA_CACHE,
-                               target='parallel')
-"""No cache alias of vectorize."""
+                               target='parallel' if _NUMBA_PAR else 'cpu')
+"""Numba vectorize, but obeying cache setting, with optional parallel
+target, depending on environment variable 'QUIMB_NUMBA_PARALLEL'.
+"""
 
 
 class CacheThreadPool(object):
@@ -481,10 +493,10 @@ def subtract_update_(X, c, Y):
     """Accelerated inplace computation of ``X -= c * Y``. This is mainly
     for Lanczos iteration.
     """
-    # if X.size > 2048:
-    #     _nb_subtract_update_par(X, c, Y, out=X)
-    # else:
-    _nb_subtract_update_seq(X, c, Y, out=X)
+    if X.size > 2048:
+        _nb_subtract_update_par(X, c, Y, out=X)
+    else:
+        _nb_subtract_update_seq(X, c, Y, out=X)
 
 
 def _nb_divide_update_base(X, c):  # pragma: no cover
@@ -502,13 +514,13 @@ _nb_divide_update_par = pvectorize(_divd_sigs)(_nb_divide_update_base)
 def divide_update_(X, c, out):
     """Accelerated computation of ``X / c`` into ``out``.
     """
-    # if X.size > 2048:
-    #     _nb_divide_update_par(X, c, out=out)
-    # else:
-    _nb_divide_update_seq(X, c, out=out)
+    if X.size > 2048:
+        _nb_divide_update_par(X, c, out=out)
+    else:
+        _nb_divide_update_seq(X, c, out=out)
 
 
-@njit(parallel=True)  # pragma: no cover
+@pnjit  # pragma: no cover
 def _dot_csr_matvec_prange(data, indptr, indices, vec, out):
     for i in numba.prange(vec.size):
         isum = 0.0
@@ -599,7 +611,7 @@ def rdot(a, b):  # pragma: no cover
     return (a @ b)[0, 0]
 
 
-@njit(parallel=True)
+@pnjit
 def _l_diag_dot_dense_par(l, A, out):  # pragma: no cover
     for i in numba.prange(l.size):
         out[i, :] = l[i] * A[i, :]
@@ -648,7 +660,7 @@ def ldmul(diag, mat):
     return l_diag_dot_dense(diag, mat)
 
 
-@njit(parallel=True)
+@pnjit
 def _r_diag_dot_dense_par(A, l, out):  # pragma: no cover
     for i in numba.prange(l.size):
         out[:, i] = A[:, i] * l[i]
@@ -697,7 +709,7 @@ def rdmul(mat, diag):
     return r_diag_dot_dense(mat, diag)
 
 
-@njit(parallel=True)
+@pnjit
 def _outer_par(a, b, out, m, n):  # pragma: no cover
     for i in numba.prange(m):
         out[i, :] = a[i] * b[:]
@@ -739,7 +751,7 @@ def _nb_kron_exp_seq(a, b, out, m, n, p, q):  # pragma: no cover
             out[ii:fi, ij:fj] = a[i, j] * b
 
 
-@njit(parallel=True)
+@pnjit
 def _nb_kron_exp_par(a, b, out, m, n, p, q):  # pragma: no cover
     for i in numba.prange(m):
         for j in range(n):

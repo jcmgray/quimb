@@ -1,7 +1,7 @@
 import numpy as np
 import numba
 
-from ..core import njit, qarray
+from ..core import njit, pnjit, qarray
 
 
 @njit
@@ -69,7 +69,7 @@ def compute_blocks(ix, jx, d):  # pragma: no cover
     return sorted([sorted(g) for g in groups])
 
 
-@njit(parallel=True)
+@pnjit
 def subselect(A, p):  # pragma: no cover
     """Select only the intersection of rows and columns of ``A`` matching the
     basis indices ``p``. Faster than double numpy slicing.
@@ -110,7 +110,7 @@ def subselect(A, p):  # pragma: no cover
     return out
 
 
-@njit(parallel=True)
+@pnjit
 def subselect_set(A, B, p):  # pragma: no cover
     """Set only the intersection of rows and colums of ``A`` matching the
     basis indices ``p`` to ``B``.

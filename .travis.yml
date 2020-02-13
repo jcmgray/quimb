@@ -47,6 +47,8 @@ install:
   - pip install -U --no-deps .
 
 script:
+  - "if [ ${TEST_QUIMB:-ON} = ON ]; then export QUIMB_NUMBA_CACHE=off"
+  - "if [ ${TEST_QUIMB:-ON} = ON ]; then export QUIMB_NUMBA_PARALLEL=off"
   - "if [ ${TEST_QUIMB:-ON} = ON ]; then export OMP_NUM_THREADS=2; fi"
   - "if [ ${TEST_QUIMB:-ON} = ON ]; then env COVERAGE_FILE=.coverage.autompi pytest; fi"
   - "if [ ${TEST_QUIMB:-ON} = ON ]; then env COVERAGE_FILE=.coverage.manualmpi quimb-mpi-python --np 2 -m pytest; fi"
