@@ -66,30 +66,46 @@ class TestCircuit:
         'Circ', [qtn.Circuit, qtn.CircuitMPS, qtn.CircuitDense]
     )
     def test_all_gate_methods(self, Circ):
-        rots = ['rx', 'ry', 'rz']
-        g1s = ['x', 'y', 'z', 's', 't', 'h', 'iden']
-        g2s = ['cx', 'cy', 'cz', 'cnot', 'swap']
-        g_rand = np.random.permutation(rots + g1s + g2s + ['u3'])
+        import random
+
+        g_nq_np = [
+            # single qubit
+            ('x', 1, 0),
+            ('y', 1, 0),
+            ('z', 1, 0),
+            ('s', 1, 0),
+            ('t', 1, 0),
+            ('h', 1, 0),
+            ('iden', 1, 0),
+            ('x_1_2', 1, 0),
+            ('y_1_2', 1, 0),
+            ('z_1_2', 1, 0),
+            ('w_1_2', 1, 0),
+            ('hz_1_2', 1, 0),
+            # single qubit parametrizable
+            ('rx', 1, 1),
+            ('ry', 1, 1),
+            ('rz', 1, 1),
+            # two qubit
+            ('cx', 2, 0),
+            ('cy', 2, 0),
+            ('cz', 2, 0),
+            ('cnot', 2, 0),
+            ('swap', 2, 0),
+            ('iswap', 2, 0),
+            # two qubit parametrizable
+            ('fsim', 2, 2),
+        ]
+        random.shuffle(g_nq_np)
 
         psi0 = qtn.MPS_rand_state(2, 2)
-        circ = Circ(2, psi0)
+        circ = Circ(2, psi0, tags='PSI0')
 
-        for g in g_rand:
-            if g == 'u3':
-                angles = np.random.uniform(0, 2 * np.pi, size=3)
-                i = np.random.choice([0, 1])
-                args = (*angles, i)
-            elif g in rots:
-                theta = np.random.uniform(0, 2 * np.pi)
-                i = np.random.choice([0, 1])
-                args = (theta, i)
-            elif g in g1s:
-                i = np.random.choice([0, 1])
-                args = (i,)
-            elif g in g2s:
-                i, j = np.random.permutation([0, 1])
-                args = (i, j)
-
+        for g, n_q, n_p in g_nq_np:
+            args = [
+                *np.random.uniform(0, 2 * np.pi, size=n_p),
+                *np.random.choice([0, 1], replace=False, size=n_q)
+            ]
             getattr(circ, g)(*args)
 
         assert circ.psi.H @ circ.psi == pytest.approx(1.0)
