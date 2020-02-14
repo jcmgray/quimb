@@ -46,7 +46,7 @@ The **tensor network** submodule ``quimb.tensor``:
 * Can perform DMRG1, DMRG2 and DMRGX, in matrix product state language
 * Has tools to efficiently address periodic problems (transfer matrix compression and pseudo-orthogonalization)
 * Can perform MPS time evolutions with TEBD
-* Can optimize arbitrary tensor networks with ``tensorflow`` or ``pytorch``
+* Can optimize arbitrary tensor networks with ``tensorflow``, ``pytorch``, ``jax`` or ``autograd``
 
 .. raw:: html
 

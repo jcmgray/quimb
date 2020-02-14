@@ -1,6 +1,7 @@
 channels:
   - defaults
   - conda-forge
+  - pytorch
 dependencies:
   - numpy
   - scipy
@@ -17,6 +18,11 @@ dependencies:
   - codecov
   - opt_einsum
   - joblib
+  - jax
+  - pytorch
+  - cpuonly
+  - autograd
+  - tensorflow<2
   - pip:
     - autoray
     - randomgen

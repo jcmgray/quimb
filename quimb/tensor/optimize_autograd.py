@@ -149,7 +149,7 @@ def constant_t(t, backend=_DEFAULT_BACKEND):
 
 
 def constant_tn(tn, backend=_DEFAULT_BACKEND):
-    """Convert a tensor network's arrays to tensorflow constants.
+    """Convert a tensor network's arrays to constants.
     """
     ag_tn = tn.copy()
     ag_tn.apply_to_arrays(functools.partial(constant, backend=backend))
@@ -228,7 +228,7 @@ class TNOptimizer:
             for k, v in loss_constants.items():
                 # check if tensor network supplied
                 if isinstance(v, TensorNetwork):
-                    # convert it to constant tensorflow TN
+                    # convert it to constant TN
                     self.loss_constants[k] = constant_tn(v, autograd_backend)
                 elif isinstance(v, Tensor):
                     self.loss_constants[k] = constant_t(v, autograd_backend)
