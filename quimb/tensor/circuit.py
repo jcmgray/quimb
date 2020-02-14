@@ -238,7 +238,7 @@ def apply_fsim(psi, theta, phi, i, j, parametrize=False, **gate_opts):
     psi.gate_(G, (int(i), int(j)), tags=mtags, **gate_opts)
 
 
-APPLY_GATES = {
+GATE_FUNCTIONS = {
     # constant single qubit gates
     'H': build_gate_1(qu.hadamard(), tags='H'),
     'X': build_gate_1(qu.pauli('X'), tags='X'),
@@ -271,7 +271,8 @@ APPLY_GATES = {
 }
 
 ONE_QUBIT_PARAM_GATES = {'RX', 'RY', 'RZ', 'U3'}
-TWO_QUBIT_PARAM_GATES = {'FSIM'}
+TWO_QUBIT_PARAM_GATES = {'FS', 'FSIM'}
+ALL_PARAM_GATES = ONE_QUBIT_PARAM_GATES | TWO_QUBIT_PARAM_GATES
 
 
 # --------------------------- main circuit class ---------------------------- #
@@ -315,7 +316,7 @@ class Circuit:
             ]
         >>> qc.apply_gates(gates)
         >>> qc.psi
-        <MatrixProductState(tensors=10, structure='I{}', nsites=3)>
+        <TensorNetwork1DVector(tensors=12, indices=14, nsites=3)>
 
         >>> qc.psi.to_dense().round(4)
         qarray([[ 0.7071+0.j],
@@ -416,8 +417,11 @@ class Circuit:
             Supplied to the gate function, options here will override the
             default ``gate_opts``.
         """
+
+        # unique tag
         tags = {f'GATE_{len(self.gates)}'}
 
+        # parse which 'round' of gates
         if (gate_round is not None):
             tags.add(f'ROUND_{gate_round}')
         elif isinstance(gate_id, numbers.Integral) or gate_id.isdigit():
@@ -425,9 +429,22 @@ class Circuit:
             tags.add(f'ROUND_{gate_id}')
             gate_id, gate_args = gate_args[0], gate_args[1:]
 
+        gate_id = gate_id.upper()
+        gate_fn = GATE_FUNCTIONS[gate_id]
+
+        # overide any default gate opts
         opts = {**self.gate_opts, **gate_opts}
-        apply_fn = APPLY_GATES[gate_id.upper()]
-        apply_fn(self._psi, *gate_args, tags=tags, **opts)
+
+        # handle parametrize kwarg for non-parametrizable gates
+        if ('parametrize' in opts) and (gate_id not in ALL_PARAM_GATES):
+            parametrize = opts.pop('parametrize')
+            if parametrize:
+                msg = f"The gate '{gate_id}' cannot be parametrized."
+                raise ValueError(msg)
+            # can pop+ignore if False
+
+        # gate the TN!
+        gate_fn(self._psi, *gate_args, tags=tags, **opts)
 
         # keep track of the gates applied
         self.gates.append((gate_id, *gate_args))

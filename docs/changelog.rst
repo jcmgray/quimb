@@ -19,6 +19,7 @@ v1.2.1 (unreleased)
 - Various changes in conjunction with `autoray <https://github.com/jcmgray/autoray>`_ to improve the agnostic-ness of tensor network operations with respect to the backend array type.
 - Add :func:`~quimb.tensor.tensor_core.new_bond` on top of :meth:`quimb.tensor.tensor_core.Tensor.new_ind` and :meth:`quimb.tensor.tensor_core.Tensor.expand_ind` for more graph orientated construction of tensor networks, see :ref:`tn-creation-graph-style`.
 - Add the :func:`~quimb.gen.operators.fsim` gate.
+- Make the parallel number generation functions use new `numpy 1.17+` functionality rather than `randomgen` (which can still be used as the underlying bit generator) (:pull:`50`)
 - TN: rename ``contraction_complexity`` to :meth:`~quimb.tensor.tensor_core.TensorNetwork.contraction_width`.
 - TN: update :meth:`quimb.tensor.tensor_core.TensorNetwork.rank_simplify`, to handle hyper-edges.
 - TN: add :meth:`quimb.tensor.tensor_core.TensorNetwork.diagonal_reduce`, to automatically collapse all diagonal tensor axes in a tensor network, introducing hyper edges.
@@ -26,11 +27,19 @@ v1.2.1 (unreleased)
 - TN: add :meth:`quimb.tensor.tensor_core.TensorNetwork.column_reduce`, to automatically identify tensor axes with a single non-zero column, allowing the corresponding index to be cut.
 - TN: add :meth:`quimb.tensor.tensor_core.TensorNetwork.full_simplify`, to iteratively perform all the above simplifications in a specfied order until nothing is left to be done.
 - TN: add ``num_tensors`` and ``num_indices`` attributes, show ``num_indices`` in ``__repr__``.
+- TN: various improvements to the pytorch optimizer (:pull:`34`)
+- TN: add some built-in 1D quantum circuit ansatzes:
+  :func:`~quimb.tensor.circuit_gen.circ_ansatz_1D_zigzag`,
+  :func:`~quimb.tensor.circuit_gen.circ_ansatz_1D_brickwork`, and
+  :func:`~quimb.tensor.circuit_gen.circ_ansatz_1D_rand`.
+- **TN: add parametrized tensors** :class:`~quimb.tensor.tensor_core.PTensor` and so trainable, TN based quantum circuits -- see :ref:`example-tn-training-circuits`.
 
 **Bug fixes:**
 
 - Fix consistency of :func:`~quimb.calc.fidelity` by making the unsquared version the default for the case when either state is pure, and always return a real number.
 - Fix a bug in the 2D system example for when ``j != 1.0``
+- Add environment variable `QUIMB_NUMBA_PAR` to set whether numba should use automatic parallelization - mainly to fix travis segfaults.
+- Make cache import and initilization of `petsc4py` and `slepc4py` more robust.
 
 .. _whats-new.1.2.0:
 

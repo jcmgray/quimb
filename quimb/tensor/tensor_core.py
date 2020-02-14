@@ -1413,8 +1413,7 @@ class Tensor(object):
 
         Parameters
         ----------
-        dtype : {None, 'complex128', 'float64',
-                 'complex64' 'float32'}, optional
+        dtype : {None, str}, optional
             The data type of the random entries. If left as the default
             ``None``, then the data type of the current array will be used.
         inplace : bool, optional
@@ -3273,8 +3272,8 @@ class TensorNetwork(object):
         """Randomize every tensor in this TN - see
         :meth:`quimb.tensor.tensor_core.Tensor.randomize`.
 
-        Parametrize
-        -----------
+        Parameters
+        ----------
         dtype : {None, str}, optional
             The data type of the random entries. If left as the default
             ``None``, then the data type of the current array will be used.

@@ -195,3 +195,47 @@ class TestCircuit:
         assert c_s == pytest.approx(c)
         cw_s = tn_s.contraction_width(output_inds=[])
         assert cw_s <= cw
+
+
+class TestCircuitGen:
+
+    @pytest.mark.parametrize(
+        "ansatz,cyclic", [
+            ('zigzag', False),
+            ('brickwork', False),
+            ('brickwork', True),
+            ('rand', False),
+            ('rand', True),
+        ])
+    @pytest.mark.parametrize('n', [4, 5])
+    def test_1D_ansatzes(self, ansatz, cyclic, n):
+        depth = 3
+        num_pairs = n if cyclic else n - 1
+
+        fn = {
+            'zigzag': qtn.circ_ansatz_1D_zigzag,
+            'brickwork': qtn.circ_ansatz_1D_brickwork,
+            'rand': qtn.circ_ansatz_1D_rand,
+        }[ansatz]
+
+        opts = dict(
+            n=n,
+            depth=3,
+            gate_opts=dict(contract=False),
+        )
+        if cyclic:
+            opts['cyclic'] = True
+        if ansatz == 'rand':
+            opts['seed'] = 42
+
+        circ = fn(**opts)
+        tn = circ.uni
+
+        # total number of entangling gates
+        assert len(tn['CZ']) == num_pairs * depth
+
+        # number of entangling gates per pair
+        for i in range(num_pairs):
+            assert len(tn['CZ', f'I{i}', f'I{(i + 1) % n}']) == depth
+
+        assert all(isinstance(t, qtn.PTensor) for t in tn['U3'])

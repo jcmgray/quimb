@@ -77,6 +77,11 @@ from .circuit import (
     CircuitMPS,
     CircuitDense,
 )
+from .circuit_gen import (
+    circ_ansatz_1D_zigzag,
+    circ_ansatz_1D_brickwork,
+    circ_ansatz_1D_rand,
+)
 
 __all__ = (
     "contract_strategy",
@@ -144,4 +149,7 @@ __all__ = (
     "Circuit",
     "CircuitMPS",
     "CircuitDense",
+    "circ_ansatz_1D_zigzag",
+    "circ_ansatz_1D_brickwork",
+    "circ_ansatz_1D_rand",
 )

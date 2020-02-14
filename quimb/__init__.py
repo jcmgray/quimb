@@ -151,6 +151,7 @@ from .gen.states import (
 )
 from .gen.rand import (
     randn,
+    rand,
     rand_matrix,
     rand_herm,
     rand_pos,
@@ -380,6 +381,7 @@ __all__ = [
     'rand_mix',
     'rand_mps',
     'randn',
+    'rand',
     'rand_product_state',
     'rand_matrix_product_state',
     'rand_seperable',
