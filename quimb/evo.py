@@ -261,20 +261,20 @@ class Evolution(object):
         Inital state, either vector or operator. If vector, converted to ket.
     ham : operator, tuple (1d array, operator), or callable
         Governing Hamiltonian, if tuple then assumed to contain
-        ``(eigvals, eigvecs)`` of presolved system. If callable (but not a SciPy 
-        ``LinearOperator``), assume a time-dependent hamiltonian such that ``ham(t)`` 
-        is the Hamiltonian at time ``t``. In this case, the latest call to ``ham`` will
-        be cached (and made immutable) in case it is needed by callbacks passed to 
-        ``compute``.
+        ``(eigvals, eigvecs)`` of presolved system. If callable (but not a
+        SciPy ``LinearOperator``), assume a time-dependent hamiltonian such
+        that ``ham(t)`` is the Hamiltonian at time ``t``. In this case, the
+        latest call to ``ham`` will be cached (and made immutable) in case it
+        is needed by callbacks passed to ``compute``.
     t0 : float, optional
         Initial time (i.e. time of state ``p0``), defaults to zero.
     compute : callable, or dict of callable, optional
-        Function(s) to compute on the state at each time step. Function(s) should
-        take args (t, pt) or (t, pt, ham) if the Hamiltonian is required. If ham
-        is required, it will be passed in to the function exactly as given to
-        this ``Evolution`` instance, except if ``method`` is ``'solve'``, in which
-        case it will be passed in as the solved system ``(eigvals, eigvecs)``.
-        If supplied with:
+        Function(s) to compute on the state at each time step. Function(s)
+        should take args (t, pt) or (t, pt, ham) if the Hamiltonian is
+        required. If ham is required, it will be passed in to the function
+        exactly as given to this ``Evolution`` instance, except if ``method``
+        is ``'solve'``, in which case it will be passed in as the solved system
+        ``(eigvals, eigvecs)``. If supplied with:
 
             - single callable : ``Evolution.results`` will contain the results
               as a list,
@@ -326,22 +326,24 @@ class Evolution(object):
         self._timedep = callable(ham) and not isinstance(ham, LinearOperator)
 
         if self._timedep:
-            # make the time dependent hamiltonian be cached in case callbacks use it
+            # cache the time-dependent Hamiltonian in case callbacks use it
             noncacheing_ham = ham
+
             @functools.lru_cache(1)
-            def ham(t):                 
-                Ht = noncacheing_ham(t) 
+            def ham(t):
+                Ht = noncacheing_ham(t)
                 if not isinstance(Ht, LinearOperator):
                     make_immutable(Ht)
                 return Ht
-    
+
         self._setup_callback(compute)
         self._method = method
 
         if method == 'solve' or isinstance(ham, (tuple, list)):
             if isinstance(ham, LinearOperator):
                 raise TypeError("You can't use the 'solve' method "
-                                "with an abstract linear operator Hamiltonian.")
+                                "with an abstract linear operator "
+                                "Hamiltonian.")
             elif self._timedep:
                 raise TypeError("You can't use the 'solve' method "
                                 "with a time-dependent Hamiltonian.")
@@ -354,7 +356,8 @@ class Evolution(object):
         elif method == 'expm':
             if isinstance(ham, LinearOperator):
                 raise TypeError("You can't use the 'expm' method "
-                                "with an abstract linear operator Hamiltonian.")
+                                "with an abstract linear operator "
+                                "Hamiltonian.")
             elif self._timedep:
                 raise TypeError("You can't use the 'expm' method "
                                 "with a time-dependent Hamiltonian.")
@@ -379,8 +382,8 @@ class Evolution(object):
             else:
                 def int_step_callback(t, y, H):
                     pass
-                
-        # else fn is a dict of callbacks or a single callback        
+
+        # else fn is a dict of callbacks or a single callback
         else:
             # try just passing time and state to a single callback function
             # if it fails, pass time, state and hamiltonian
@@ -393,10 +396,11 @@ class Evolution(object):
                     else:
                         raise
                 return fn_result
-                
+
             # dict of funcs input -> dict of funcs output
             if isinstance(fn, dict):
                 self._results = {k: [] for k in fn}
+
                 def step_callback(t, pt, H):
                     for k, v in fn.items():
                         fn_result = single_callback(v, t, pt, H)
@@ -405,21 +409,23 @@ class Evolution(object):
             # else results -> single list of outputs of fn
             else:
                 self._results = []
+
                 def step_callback(t, pt, H):
                     fn_result = single_callback(fn, t, pt, H)
                     self._results.append(fn_result)
 
             # For the integration callback, additionally need to convert
             #   back to 'quantum' (column vector) form
+
             def int_step_callback(t, y, H):
                 pt = qarray(y.reshape(self._d, -1))
                 step_callback(t, pt, H)
-                
+
         self._step_callback = step_callback
         self._int_step_callback = int_step_callback
 
     def _setup_solved_ham(self):
-        """Solve the hamiltonian if needed and find the initial state 
+        """Solve the hamiltonian if needed and find the initial state
         in the energy eigenbasis for quick evolution later.
         """
         # See if already solved from tuple
@@ -598,4 +604,3 @@ class Evolution(object):
         callback(s) for each time step.
         """
         return self._results
-

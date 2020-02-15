@@ -290,7 +290,8 @@ class TestEvolution:
     @mark.parametrize("dop", [False, True])
     @mark.parametrize("linop", [False, True])
     @mark.parametrize("num_callbacks", [0, 1, 2])
-    def test_evo_timedep_adiabatic_with_callbacks(self, dop, linop, num_callbacks):
+    def test_evo_timedep_adiabatic_with_callbacks(self, dop, linop,
+                                                  num_callbacks):
         # tests time dependent Evolution via an adiabatic sweep with:
         #   a) no callbacks
         #   b) 1 callback that accesses the time-dependent Hamiltonian
@@ -298,7 +299,7 @@ class TestEvolution:
 
         if num_callbacks > 0 and (dop or linop):
             # should implement this at some point
-            return 
+            return
         L = 6
         T = 20
 
@@ -333,16 +334,15 @@ class TestEvolution:
         else:
             def gs_overlap(t, pt, H):
                 evals, evecs = eigs_scipy(H(t), k=1, which='SA')
-                return np.abs(qu.dot(pt.T, qu.qu(evecs[:,0])))**2
+                return np.abs(qu.dot(pt.T, qu.qu(evecs[:, 0])))**2
 
             if num_callbacks == 1:
                 compute = gs_overlap
             if num_callbacks == 2:
                 def norm(t, pt):
                     return qu.dot(pt.T, pt)
-                compute = {'norm' : norm, 'gs_overlap' : gs_overlap} 
+                compute = {'norm': norm, 'gs_overlap': gs_overlap}
             evo = qu.Evolution(p0, ham, compute=compute, progbar=True)
-            
         evo.update_to(T)
 
         # final state should now overlap much more with second hamiltonian GS
@@ -361,7 +361,7 @@ class TestEvolution:
             assert ((np.array(norm_results) - 1.0) < 1e-3).all()
             # check that we stayed in the ground state the whole time
             assert ((np.array(gs_overlap_results) - 1.0) < 1e-3).all()
-        
+
     def test_evo_at_times(self):
         ham = qu.ham_heis(2, cyclic=False)
         p0 = qu.up() & qu.down()
@@ -408,15 +408,14 @@ class TestEvolution:
         def some_other_quantity(_, pt):
             return qu.logneg(pt)
 
-        # check that hamiltonian gets accepted without error for all the methods
+        # check that hamiltonian gets accepted without error for all methods
         def some_other_quantity_accepting_ham(t, pt, H):
             return qu.logneg(pt)
-        
-        evo = qu.Evolution(p0, ham, method=method,
-                           compute={'t': some_quantity,
-                                    'logneg': some_other_quantity,
-                                    'logneg_ham': some_other_quantity_accepting_ham})
 
+        compute = {'t': some_quantity, 'logneg': some_other_quantity,
+                   'logneg_ham': some_other_quantity_accepting_ham}
+
+        evo = qu.Evolution(p0, ham, method=method, compute=compute)
         manual_lns = []
         for pt in evo.at_times(np.linspace(0, 1, 6)):
             manual_lns.append(qu.logneg(pt))
@@ -429,7 +428,8 @@ class TestEvolution:
         for t, ln, ln_ham in zip(ts, lns, lns_ham):
             if abs(t - 0.8) < 1e-12:
                 assert abs(ln - manual_lns[4]) < 1e-12
-                assert ln == ln_ham # check that accepting hamiltonian didn't mess it up
+                # check that accepting hamiltonian didn't mess it up
+                assert ln == ln_ham
                 checked = True
         assert checked
 
