@@ -12,7 +12,7 @@ from scipy.integrate import complex_ode
 from scipy.sparse.linalg import LinearOperator
 
 from .core import (qarray, isop, ldmul, rdmul, explt,
-                   dot, issparse, qu, eye, dag)
+                   dot, issparse, qu, eye, dag, make_immutable)
 from .linalg.base_linalg import eigh, norm, expm_multiply
 from .linalg.approx_spectral import norm_fro_approx
 from .utils import continuous_progbar, progbar
@@ -261,14 +261,20 @@ class Evolution(object):
         Inital state, either vector or operator. If vector, converted to ket.
     ham : operator, tuple (1d array, operator), or callable
         Governing Hamiltonian, if tuple then assumed to contain
-        ``(eigvals, eigvecs)`` of presolved system. If callable (but not a SciPy 
-        ``LinearOperator``), assume a time-dependent hamiltonian such that ``ham(t)`` 
-        is the Hamiltonian at time ``t``.
+        ``(eigvals, eigvecs)`` of presolved system. If callable (but not a
+        SciPy ``LinearOperator``), assume a time-dependent hamiltonian such
+        that ``ham(t)`` is the Hamiltonian at time ``t``. In this case, the
+        latest call to ``ham`` will be cached (and made immutable) in case it
+        is needed by callbacks passed to ``compute``.
     t0 : float, optional
         Initial time (i.e. time of state ``p0``), defaults to zero.
     compute : callable, or dict of callable, optional
-        Function(s) to compute on the state at each time step, called
-        with args (t, pt). If supplied with:
+        Function(s) to compute on the state at each time step. Function(s)
+        should take args (t, pt) or (t, pt, ham) if the Hamiltonian is
+        required. If ham is required, it will be passed in to the function
+        exactly as given to this ``Evolution`` instance, except if ``method``
+        is ``'solve'``, in which case it will be passed in as the solved system
+        ``(eigvals, eigvecs)``. If supplied with:
 
             - single callable : ``Evolution.results`` will contain the results
               as a list,
@@ -319,13 +325,25 @@ class Evolution(object):
 
         self._timedep = callable(ham) and not isinstance(ham, LinearOperator)
 
+        if self._timedep:
+            # cache the time-dependent Hamiltonian in case callbacks use it
+            noncacheing_ham = ham
+
+            @functools.lru_cache(1)
+            def ham(t):
+                Ht = noncacheing_ham(t)
+                if not isinstance(Ht, LinearOperator):
+                    make_immutable(Ht)
+                return Ht
+
         self._setup_callback(compute)
         self._method = method
 
         if method == 'solve' or isinstance(ham, (tuple, list)):
             if isinstance(ham, LinearOperator):
                 raise TypeError("You can't use the 'solve' method "
-                                "with an abstract linear operator Hamiltonian.")
+                                "with an abstract linear operator "
+                                "Hamiltonian.")
             elif self._timedep:
                 raise TypeError("You can't use the 'solve' method "
                                 "with a time-dependent Hamiltonian.")
@@ -338,7 +356,8 @@ class Evolution(object):
         elif method == 'expm':
             if isinstance(ham, LinearOperator):
                 raise TypeError("You can't use the 'expm' method "
-                                "with an abstract linear operator Hamiltonian.")
+                                "with an abstract linear operator "
+                                "Hamiltonian.")
             elif self._timedep:
                 raise TypeError("You can't use the 'expm' method "
                                 "with a time-dependent Hamiltonian.")
@@ -354,49 +373,59 @@ class Evolution(object):
     def _setup_callback(self, fn):
         """Setup callbacks in the correct place to compute into _results
         """
+        # if fn is None there is no callback, but possible make a dummy
+        #   one if progbar needs updating
         if fn is None:
             step_callback = None
             if not self._progbar:
                 int_step_callback = None
             else:
-                def int_step_callback(t, y):
+                def int_step_callback(t, y, H):
                     pass
 
-        # dict of funcs input -> dict of funcs output
-        elif isinstance(fn, dict):
-            self._results = {k: [] for k in fn}
+        # else fn is a dict of callbacks or a single callback
+        else:
+            # try just passing time and state to a single callback function
+            # if it fails, pass time, state and hamiltonian
+            def single_callback(fn, t, pt, H):
+                try:
+                    fn_result = fn(t, pt)
+                except TypeError as e:
+                    if 'positional' in e.args[0]:
+                        fn_result = fn(t, pt, H)
+                    else:
+                        raise
+                return fn_result
 
-            @functools.wraps(fn)
-            def step_callback(t, pt):
-                for k, v in fn.items():
-                    self._results[k].append(v(t, pt))
+            # dict of funcs input -> dict of funcs output
+            if isinstance(fn, dict):
+                self._results = {k: [] for k in fn}
+
+                def step_callback(t, pt, H):
+                    for k, v in fn.items():
+                        fn_result = single_callback(v, t, pt, H)
+                        self._results[k].append(fn_result)
+
+            # else results -> single list of outputs of fn
+            else:
+                self._results = []
+
+                def step_callback(t, pt, H):
+                    fn_result = single_callback(fn, t, pt, H)
+                    self._results.append(fn_result)
 
             # For the integration callback, additionally need to convert
             #   back to 'quantum' (column vector) form
-            @functools.wraps(fn)
-            def int_step_callback(t, y):
+
+            def int_step_callback(t, y, H):
                 pt = qarray(y.reshape(self._d, -1))
-                for k, v in fn.items():
-                    self._results[k].append(v(t, pt))
-
-        # else results -> single list of outputs of fn
-        else:
-            self._results = []
-
-            @functools.wraps(fn)
-            def step_callback(t, pt):
-                self._results.append(fn(t, pt))
-
-            @functools.wraps(fn)
-            def int_step_callback(t, y):
-                pt = qarray(y.reshape(self._d, -1))
-                self._results.append(fn(t, pt))
+                step_callback(t, pt, H)
 
         self._step_callback = step_callback
         self._int_step_callback = int_step_callback
 
     def _setup_solved_ham(self):
-        """Solve the hamiltonian if needed and find the initial state 
+        """Solve the hamiltonian if needed and find the initial state
         in the energy eigenbasis for quick evolution later.
         """
         # See if already solved from tuple
@@ -444,7 +473,9 @@ class Evolution(object):
 
         # Set step_callback to be evaluated with args (t, y) at each step
         if self._int_step_callback is not None:
-            self._stepper.set_solout(self._int_step_callback)
+            def solout(t, y):
+                self._int_step_callback(t, y, self._ham)
+            self._stepper.set_solout(solout)
 
         self._stepper.set_initial_value(self._p0.A.reshape(-1), self.t0)
 
@@ -464,7 +495,7 @@ class Evolution(object):
 
         # compute any callbacks into -> self._results
         if self._step_callback is not None:
-            self._step_callback(t, self._pt)
+            self._step_callback(t, self._pt, self._ham)
 
     def _update_to_solved_ket(self, t):
         """Update simulation consisting of a solved hamiltonian and a
@@ -477,7 +508,7 @@ class Evolution(object):
 
         # compute any callbacks into -> self._results
         if self._step_callback is not None:
-            self._step_callback(t, self._pt)
+            self._step_callback(t, self._pt, self._ham)
 
     def _update_to_solved_dop(self, t):
         """Update simulation consisting of a solved hamiltonian and a
@@ -491,7 +522,7 @@ class Evolution(object):
 
         # compute any callbacks into -> self._results
         if self._step_callback is not None:
-            self._step_callback(t, self._pt)
+            self._step_callback(t, self._pt, self._ham)
 
     def _update_to_integrate(self, t):
         """Update simulation consisting of unsolved hamiltonian.
@@ -511,7 +542,7 @@ class Evolution(object):
             with continuous_progbar(self.t, t) as pbar:
                 if self._int_step_callback is not None:
                     def solout(t, y):
-                        self._int_step_callback(t, y)
+                        self._int_step_callback(t, y, self._ham)
                         pbar.cupdate(t)
                 else:
                     def solout(t, _):
@@ -573,4 +604,3 @@ class Evolution(object):
         callback(s) for each time step.
         """
         return self._results
-
