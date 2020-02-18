@@ -4,7 +4,7 @@ Changelog
 Release notes for ``quimb``.
 
 
-.. _whats-new.1.2.1:
+.. _whats-new.1.3.0:
 
 v1.3.0 (18th Feb 2020)
 -------------------
