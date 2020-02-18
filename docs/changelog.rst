@@ -6,12 +6,13 @@ Release notes for ``quimb``.
 
 .. _whats-new.1.2.1:
 
-v1.2.1 (unreleased)
+v1.3.0 (18th Feb 2020)
 -------------------
 
 **Enhancements**
 
 - Added time dependent evolutions to :class:`~quimb.evo.Evolution` when integrating a pure state - see :ref:`time-dependent-evolution` - as well as supporting ``LinearOperator`` defined hamiltonians (:pull:`40`).
+- Allow the :class:`~quimb.evo.Evolution` callback ``compute=`` to optionally access the Hamiltonian (:pull:`49`).
 - Added :meth:`quimb.tensor.tensor_core.Tensor.randomize` and :meth:`quimb.tensor.tensor_core.TensorNetwork.randomize` to randomize tensor and tensor network entries.
 - Automatically squeeze tensor networks when rank-simplifying.
 - Add :meth:`~quimb.tensor.tensor_1d.TensorNetwork1DFlat.compress_site` for compressing around single sites of MPS etc.
