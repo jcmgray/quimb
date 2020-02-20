@@ -4,7 +4,7 @@ Quantum Information for Many-Body calculations.
 import warnings
 
 # some useful math
-from math import pi, cos, sin, tan, exp, log, log2, sqrt
+from math import pi, cos, sin, tan, exp, log, log2, log10, sqrt
 
 # Core functions
 from .core import (
@@ -449,6 +449,7 @@ __all__ = [
     'exp',
     'log',
     'log2',
+    'log10',
     'sqrt',
     'xlogx',
     # Utils ----------------------------------------------------------------- #
