@@ -3306,11 +3306,14 @@ class TensorNetwork(object):
         """
         tn = self if inplace else self.copy()
 
-        for T1, T2 in itertools.combinations(tn.tensors, 2):
-            dbnds = tuple(T1.bonds(T2))
-            if dbnds:
-                T1.fuse_({dbnds[0]: dbnds})
-                T2.fuse_({dbnds[0]: dbnds})
+        seen = collections.defaultdict(list)
+        for ix, tids in tn.ind_map.items():
+            seen[frozenset(tids)].append(ix)
+
+        for tidset, ixs in seen.items():
+            if len(ixs) > 1:
+                for tid in tidset:
+                    self.tensor_map[tid].fuse_({ixs[0]: ixs})
 
         return tn
 
