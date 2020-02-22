@@ -892,10 +892,12 @@ class Tensor(object):
         if 'inds' in kwargs:
             inds = tuple(kwargs.pop('inds'))
 
-            # if this tensor has owners, update their ``ind_map``.
-            if self.check_owners():
+            # if this tensor has owners, update their ``ind_map``, but only if
+            #     the indices are actually being changed not just permuted
+            set_old, set_new = set(self.inds), set(inds)
+            if (set_old != set_new) and self.check_owners():
                 for ref, tid in self.owners.values():
-                    ref()._modify_tensor_inds(self.inds, inds, tid)
+                    ref()._modify_tensor_inds(set_old, set_new, tid)
 
             self._inds = inds
 
@@ -1936,9 +1938,9 @@ class TensorNetwork(object):
         self._remove_tid((o for o in old if o not in new), self.tag_map, tid)
         self._add_tid((n for n in new if n not in old), self.tag_map, tid)
 
-    def _modify_tensor_inds(self, old, new, tid):
-        self._remove_tid((o for o in old if o not in new), self.ind_map, tid)
-        self._add_tid((n for n in new if n not in old), self.ind_map, tid)
+    def _modify_tensor_inds(self, set_old, set_new, tid):
+        self._remove_tid(set_old - set_new, self.ind_map, tid)
+        self._add_tid(set_new - set_old, self.ind_map, tid)
 
     @property
     def num_tensors(self):
