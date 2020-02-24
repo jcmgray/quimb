@@ -470,9 +470,6 @@ class TensorNetwork1D(TensorNetwork):
 
     _EXTRA_PROPS = ('_site_tag_id',)
 
-    def from_TN_setup(self):
-        self.structure = self.site_tag_id
-
     @property
     def site_tag_id(self):
         """The string specifier for tagging each site of this 1D TN.
@@ -1076,23 +1073,6 @@ class TensorNetwork1DFlat(TensorNetwork1D,
         if self.cyclic:
             bnd_szs.append(self.bond_size(-1, 0))
         return bnd_szs
-
-    def fuse_multibonds(self, inplace=False):
-        """Fuse any double/triple etc bonds between neighbours
-        """
-        tn = self if inplace else self.copy()
-
-        pairs = list(pairwise(tn.sites))
-        if self.cyclic:
-            pairs.append((-1, 0))
-
-        for i, j in pairs:
-            T1, T2 = tn[i], tn[j]
-            dbnds = tuple(T1.bonds(T2))
-            T1.fuse_({dbnds[0]: dbnds})
-            T2.fuse_({dbnds[0]: dbnds})
-
-        return tn
 
     def singular_values(self, i, cur_orthog=None, method='svd'):
         r"""Find the singular values associated with the ith bond::
