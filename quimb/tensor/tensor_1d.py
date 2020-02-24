@@ -621,6 +621,10 @@ class TensorNetwork1DVector(TensorNetwork1D,
         return cAB - cA * cB
 
 
+def set_default_compress_mode(opts, cyclic=False):
+    opts.setdefault('cutoff_mode', 'rel' if cyclic else 'rsum2')
+
+
 class TensorNetwork1DFlat(TensorNetwork1D,
                           TensorNetwork):
     """1D Tensor network which has a flat structure.
@@ -630,6 +634,7 @@ class TensorNetwork1DFlat(TensorNetwork1D,
         T1, T2 = self[i], self[i + 1]
         rix, lix = T1.filter_bonds(T2)
 
+        set_default_compress_mode(split_opts, self.cyclic)
         Q, R = T1.split(lix, get='tensors', right_inds=rix, **split_opts)
         R = R @ T2
 
@@ -647,6 +652,7 @@ class TensorNetwork1DFlat(TensorNetwork1D,
         T1, T2 = self[i], self[i - 1]
         lix, rix = T1.filter_bonds(T2)
 
+        set_default_compress_mode(split_opts, self.cyclic)
         L, Q = T1.split(lix, get='tensors', right_inds=rix, **split_opts)
         L = T2 @ L
 
@@ -915,7 +921,7 @@ class TensorNetwork1DFlat(TensorNetwork1D,
         compress_opts
             Supplied to :meth:`Tensor.split`.
         """
-        compress_opts['absorb'] = compress_opts.get('absorb', 'right')
+        compress_opts.setdefault('absorb', 'right')
         self._left_decomp_site(i, bra=bra, **compress_opts)
 
     def right_compress_site(self, i, bra=None, **compress_opts):
@@ -931,7 +937,7 @@ class TensorNetwork1DFlat(TensorNetwork1D,
         compress_opts
             Supplied to :meth:`Tensor.split`.
         """
-        compress_opts['absorb'] = compress_opts.get('absorb', 'left')
+        compress_opts.setdefault('absorb', 'left')
         self._right_decomp_site(i, bra=bra, **compress_opts)
 
     def left_compress(self, start=None, stop=None, bra=None, **compress_opts):
@@ -990,22 +996,25 @@ class TensorNetwork1DFlat(TensorNetwork1D,
             stability reasons, then right_compresses (default). ``'flat'``
             tries to distribute the singular values evenly -- state will not
             be canonical. ``'left'`` and ``'right'`` put the state into left
-            and right canonical form respectively without a prior sweep, or an
-            int will put the state into mixed canonical form at that site.
+            and right canonical form respectively with a prior opposite sweep,
+            or an int will put the state into mixed canonical form at that
+            site.
         compress_opts
             Supplied to :meth:`Tensor.split`.
         """
         if form is None:
-            self.left_canonize(bra=compress_opts.get('bra', None))
-            self.right_compress(**compress_opts)
+            form = 'right'
 
-        elif isinstance(form, Integral):
-            self.left_compress(stop=form, **compress_opts)
-            self.right_compress(stop=form, **compress_opts)
+        if isinstance(form, Integral):
+            self.right_canonize()
+            self.left_compress(**compress_opts)
+            self.right_canonize(stop=form)
 
         elif form == 'left':
+            self.right_canonize(bra=compress_opts.get('bra', None))
             self.left_compress(**compress_opts)
         elif form == 'right':
+            self.left_canonize(bra=compress_opts.get('bra', None))
             self.right_compress(**compress_opts)
 
         elif form == 'flat':
@@ -1393,6 +1402,8 @@ class MatrixProductState(TensorNetwork1DVector,
             o-o-o-o-o-o
             | | | | | |
         """
+        set_default_compress_mode(split_opts)
+
         n = len(dims)
         inds = [site_ind_id.format(i) for i in range(n)]
 
@@ -1548,6 +1559,7 @@ class MatrixProductState(TensorNetwork1DVector,
 
         # Split the tensor
         _, left_ix = Ti.filter_bonds(Tj)
+        set_default_compress_mode(compress_opts, self.cyclic)
         nTi, nTj = TG.split(left_inds=left_ix, get='tensors', **compress_opts)
 
         # make sure the new data shape matches and reinsert
@@ -1591,6 +1603,7 @@ class MatrixProductState(TensorNetwork1DVector,
         # split the contracted tensor, swapping the site indices
         Tij = Ti @ Tj
         lix = [i for i in unshared if i != ix_i] + [ix_j]
+        set_default_compress_mode(compress_opts, self.cyclic)
         sTi, sTj = Tij.split(lix, get='tensors', **compress_opts)
 
         # reindex and transpose the tensors to directly update original tensors

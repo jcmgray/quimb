@@ -165,7 +165,7 @@ class TestTEBD:
 
 def test_OTOC_local():
     L = 10
-    psi0 = qtn.MPS_computational_state('0'*L, cyclic=True)
+    psi0 = qtn.MPS_computational_state('0' * L, cyclic=True)
     H1 = qtn.NNI_ham_ising(L, j=4, bx=0, cyclic=True)
     H_back1 = qtn.NNI_ham_ising(L, j=-4, bx=0, cyclic=True)
     H2 = qtn.NNI_ham_ising(L, j=4, bx=1, cyclic=True)

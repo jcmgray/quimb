@@ -345,6 +345,39 @@ class TestTensorFunctions:
                         [0.5, 0.5])
 
     @pytest.mark.parametrize('method', ['svd', 'eig'])
+    def test_renorm(self, method):
+        U = qu.rand_uni(10)
+        s = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        x = np.einsum('ab,b,bc->ac', U, s, qu.dag(U))
+
+        t = qtn.Tensor(x, inds='ab')
+        fn2 = t.norm()**2
+        trc = np.einsum('aa', t.data).real
+
+        assert fn2 == pytest.approx(385.)
+        assert trc == pytest.approx(55.)
+
+        tn2 = t.split('a', method='svd', cutoff=0.1, cutoff_mode='rsum2')
+        a_fn2 = tn2.H @ tn2
+        assert qtn.bonds_size(*tn2) == 6
+        assert a_fn2 == pytest.approx(fn2)
+
+        tn2 = t.split('a', method='svd', cutoff=40, cutoff_mode='sum2')
+        a_fn2 = tn2.H @ tn2
+        assert qtn.bonds_size(*tn2) == 6
+        assert a_fn2 == pytest.approx(fn2)
+
+        tn1 = t.split('a', method='svd', cutoff=0.2, cutoff_mode='rsum1')
+        a_trc = tn1.trace('a', 'b').real
+        assert qtn.bonds_size(*tn1) == 6
+        assert a_trc == pytest.approx(trc)
+
+        tn1 = t.split('a', method='svd', cutoff=11, cutoff_mode='sum1')
+        a_trc = tn1.trace('a', 'b').real
+        assert qtn.bonds_size(*tn1) == 6
+        assert a_trc == pytest.approx(trc)
+
+    @pytest.mark.parametrize('method', ['svd', 'eig'])
     def test_entropy(self, method):
         psim = Tensor(np.eye(2) * 2**-0.5, inds='ab')
         assert_allclose(psim.H @ psim, 1.0)
@@ -846,8 +879,8 @@ class TestTensorNetwork:
 
         assert (tn_even & tn_odd).sites == range(10)
 
-    @pytest.mark.parametrize("backend", ['svd', 'eig', 'isvd', 'svds', 'rsvd'])
-    def test_compress_between(self, backend):
+    @pytest.mark.parametrize("method", ['svd', 'eig', 'isvd', 'svds', 'rsvd'])
+    def test_compress_between(self, method):
         A = rand_tensor((3, 4, 5), 'abd', tags={'T1'})
         tensor_direct_product(A, A, inplace=True)
         B = rand_tensor((5, 6), 'dc', tags={'T2'})
@@ -856,14 +889,14 @@ class TestTensorNetwork:
 
         assert A.shared_bond_size(B) == 10
 
-        tn.compress_between('T1', 'T2', backend=backend)
+        tn.compress_between('T1', 'T2', method=method)
 
-    @pytest.mark.parametrize("backend", ['svd', 'eig', 'isvd', 'svds', 'rsvd'])
-    def compress_all(self, backend):
+    @pytest.mark.parametrize("method", ['svd', 'eig', 'isvd', 'svds', 'rsvd'])
+    def compress_all(self, method):
         k = MPS_rand_state(10, 7)
         k += k
         k /= 2
-        k.compress_all(max_bond=5, backend=backend)
+        k.compress_all_(max_bond=5, method=method)
         assert k.max_bond() == 5
         assert_allclose(k.H @ k, 1.0)
 

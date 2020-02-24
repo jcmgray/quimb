@@ -363,11 +363,14 @@ def rand_uuid(base=""):
 
 
 _VALID_SPLIT_GET = {None, 'arrays', 'tensors', 'values'}
+_FULL_SPLIT_METHODS = {'svd', 'eig', 'eigh'}
+_CUTOFF_MODES = {'abs': 1, 'rel': 2, 'sum2': 3,
+                 'rsum2': 4, 'sum1': 5, 'rsum1': 6}
 
 
 def tensor_split(T, left_inds, method='svd', max_bond=None, absorb='both',
-                 cutoff=1e-10, cutoff_mode='sum2', get=None, bond_ind=None,
-                 ltags=None, rtags=None, right_inds=None):
+                 cutoff=1e-10, cutoff_mode='rel', renorm=None, get=None,
+                 bond_ind=None, ltags=None, rtags=None, right_inds=None):
     """Decompose this tensor into two tensors.
 
     Parameters
@@ -408,8 +411,17 @@ def tensor_split(T, left_inds, method='svd', max_bond=None, absorb='both',
             - 'abs': values less than ``cutoff`` discarded.
             - 'sum2': sum squared of values discarded must be ``< cutoff``.
             - 'rsum2': sum squared of values discarded must be less than
-              ``cutoff`` times the total sum squared values.
+              ``cutoff`` times the total sum of squared values.
+            - 'sum1': sum values discarded must be ``< cutoff``.
+            - 'rsum1': sum of values discarded must be less than
+              ``cutoff`` times the total sum of values.
 
+    renorm : {None, bool, or int}, optional
+        Whether to renormalize the kept singular values, assuming the bond has
+        a canonical environment, corresponding to maintaining the Frobenius
+        norm or trace. If ``None`` (the default) then this is automatically
+        turned on only for ``cutoff_method in {'sum2', 'rsum2', 'sum1',
+        'rsum1'}`` with ``method in {'svd', 'eig', 'eigh'}``.
     get : {None, 'arrays', 'tensors', 'values'}
         If given, what to return instead of a TN describing the split. The
         default, ``None``, returns a TensorNetwork of the two tensors.
@@ -451,12 +463,19 @@ def tensor_split(T, left_inds, method='svd', max_bond=None, absorb='both',
 
     opts = {}
     if method not in ('qr', 'lq'):
+
         # Convert defaults and settings to numeric type for numba funcs
         opts['cutoff'] = {None: -1.0}.get(cutoff, cutoff)
         opts['absorb'] = {'left': -1, 'both': 0, 'right': 1}[absorb]
         opts['max_bond'] = {None: -1}.get(max_bond, max_bond)
-        opts['cutoff_mode'] = {'abs': 1, 'rel': 2,
-                               'sum2': 3, 'rsum2': 4}[cutoff_mode]
+        opts['cutoff_mode'] = _CUTOFF_MODES[cutoff_mode]
+
+        # renorm doubles up as the power used to renormalize
+        if (method in _FULL_SPLIT_METHODS) and (renorm is None):
+            opts['renorm'] = {'sum2': 2, 'rsum2': 2,
+                              'sum1': 1, 'rsum1': 1}.get(cutoff_mode, 0)
+        else:
+            opts['renorm'] = 0 if renorm is None else int(renorm)
 
     left, right = {
         'svd': decomp._svd,
