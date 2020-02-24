@@ -533,13 +533,16 @@ def tensor_canonize_bond(T1, T2, **split_opts):
     split_opts.setdefault('method', 'qr')
     split_opts.setdefault('absorb', 'right')
 
-    s_ix, t1_ix = T1.filter_bonds(T2)
-    if len(s_ix) > 1:
-        T1.fuse_({s_ix[0]: s_ix})
-        T2.fuse_({s_ix[0]: s_ix})
-        s_ix = s_ix[0]
+    shared_ix, left_env_ix = T1.filter_bonds(T2)
+    if not shared_ix:
+        raise ValueError("The tensors specified don't share an bond.")
+    elif len(shared_ix) > 1:
+        # fuse multibonds
+        T1.fuse_({shared_ix[0]: shared_ix})
+        T2.fuse_({shared_ix[0]: shared_ix})
+        shared_ix = shared_ix[0]
 
-    new_T1, tRfact = T1.split(t1_ix, get='tensors', **split_opts)
+    new_T1, tRfact = T1.split(left_env_ix, get='tensors', **split_opts)
     new_T2 = T2.contract(tRfact)
 
     new_T1.transpose_like_(T1)
@@ -563,13 +566,18 @@ def tensor_compress_bond(T1, T2, absorb='both', **compress_opts):
                     |....    ....|          |     |
                      >  <    >  <              ^compressed bond
     """
-    s_ix, t1_ix = T1.filter_bonds(T2)
-
-    if not s_ix:
+    shared_ix, left_env_ix = T1.filter_bonds(T2)
+    if not shared_ix:
         raise ValueError("The tensors specified don't share an bond.")
+    elif len(shared_ix) > 1:
+        # fuse multibonds
+        T1.fuse_({shared_ix[0]: shared_ix})
+        T2.fuse_({shared_ix[0]: shared_ix})
+        shared_ix = shared_ix[0]
+
     # a) -> b)
-    T1_L, T1_R = T1.split(left_inds=t1_ix, get='tensors', method='qr')
-    T2_L, T2_R = T2.split(left_inds=s_ix, get='tensors', method='lq')
+    T1_L, T1_R = T1.split(left_inds=left_env_ix, get='tensors', method='qr')
+    T2_L, T2_R = T2.split(left_inds=shared_ix, get='tensors', method='lq')
     # b) -> c)
     M = (T1_R @ T2_L)
     M.drop_tags()
@@ -579,8 +587,8 @@ def tensor_compress_bond(T1, T2, absorb='both', **compress_opts):
 
     # make sure old bond being used
     ns_ix, = M_L.bonds(M_R)
-    M_L.reindex_({ns_ix: s_ix[0]})
-    M_R.reindex_({ns_ix: s_ix[0]})
+    M_L.reindex_({ns_ix: shared_ix[0]})
+    M_R.reindex_({ns_ix: shared_ix[0]})
 
     # d) -> e)
     T1C = T1_L.contract(M_L, output_inds=T1.inds)

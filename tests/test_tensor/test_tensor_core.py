@@ -879,19 +879,21 @@ class TestTensorNetwork:
 
         assert (tn_even & tn_odd).sites == range(10)
 
-    @pytest.mark.parametrize("method", ['svd', 'eig', 'isvd', 'svds', 'rsvd'])
-    def test_compress_between(self, method):
-        A = rand_tensor((3, 4, 5), 'abd', tags={'T1'})
-        tensor_direct_product(A, A, inplace=True)
-        B = rand_tensor((5, 6), 'dc', tags={'T2'})
-        tensor_direct_product(B, B, inplace=True)
-        tn = A & B
+    def test_compress_multibond(self):
+        A = rand_tensor((7, 2, 2), 'abc', tags='A')
+        A.expand_ind('c', 3)
+        B = rand_tensor((3, 2, 7), 'cbd', tags='B')
+        x0 = (A & B).trace('a', 'd')
+        qtn.tensor_compress_bond(A, B, absorb='left')
+        A.transpose_('a', 'b')
+        assert A.shape == (7, 4)
+        B.transpose_('b', 'd')
+        assert B.shape == (4, 7)
+        assert B.H @ B == pytest.approx(4)
+        x1 = (A & B).trace('a', 'd')
+        assert x1 == pytest.approx(x0)
 
-        assert A.shared_bond_size(B) == 10
-
-        tn.compress_between('T1', 'T2', method=method)
-
-    def test_canonize_bond(self):
+    def test_canonize_multibond(self):
         A = rand_tensor((3, 4, 5), 'abc', tags='A')
         assert A.H @ A != pytest.approx(3)
         B = rand_tensor((5, 4, 3), 'cbd', tags='B')
@@ -902,6 +904,17 @@ class TestTensorNetwork:
         assert A.H @ A == pytest.approx(3)
         x1 = (A & B).trace('a', 'd')
         assert x1 == pytest.approx(x0)
+
+    @pytest.mark.parametrize("method", ['svd', 'eig', 'isvd', 'svds', 'rsvd'])
+    def test_compress_between(self, method):
+        A = rand_tensor((3, 4, 5), 'abd', tags={'T1'})
+        A.expand_ind('d', 10)
+        B = rand_tensor((5, 6), 'dc', tags={'T2'})
+        B.expand_ind('d', 10)
+        tn = A | B
+        assert A.shared_bond_size(B) == 10
+        tn.compress_between('T1', 'T2', method=method)
+        assert A.shared_bond_size(B) == 5
 
     @pytest.mark.parametrize("method", ['svd', 'eig', 'isvd', 'svds', 'rsvd'])
     def compress_all(self, method):
