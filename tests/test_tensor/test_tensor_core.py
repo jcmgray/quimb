@@ -891,6 +891,18 @@ class TestTensorNetwork:
 
         tn.compress_between('T1', 'T2', method=method)
 
+    def test_canonize_bond(self):
+        A = rand_tensor((3, 4, 5), 'abc', tags='A')
+        assert A.H @ A != pytest.approx(3)
+        B = rand_tensor((5, 4, 3), 'cbd', tags='B')
+        x0 = (A & B).trace('a', 'd')
+        qtn.tensor_canonize_bond(A, B)
+        assert A.shape == (3, 3)
+        assert B.shape == (3, 3)
+        assert A.H @ A == pytest.approx(3)
+        x1 = (A & B).trace('a', 'd')
+        assert x1 == pytest.approx(x0)
+
     @pytest.mark.parametrize("method", ['svd', 'eig', 'isvd', 'svds', 'rsvd'])
     def compress_all(self, method):
         k = MPS_rand_state(10, 7)

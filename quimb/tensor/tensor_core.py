@@ -509,7 +509,47 @@ def tensor_split(T, left_inds, method='svd', max_bond=None, absorb='both',
     return TensorNetwork((Tl, Tr), check_collisions=False)
 
 
-def tensor_compress_bond(T1, T2, **compress_opts):
+def tensor_canonize_bond(T1, T2, **split_opts):
+    r"""Inplace 'canonization' of two tensors. This gauges the bond between
+    the two such that ``T1`` is isometric:
+
+
+          |   |          |   |          |   |
+        --1---2--  ->  -->~R-2--  ->  -->~~~O--
+          |   |          |   |          |   |
+          .                ...
+         <QR>              contract
+
+    Parameters
+    ----------
+    T1 : Tensor
+        The tensor to be isometrized.
+    T2 : Tensor
+        The tensor to absorb the R-factor into.
+    split_opts
+        Supplied to :func:`~quimb.tensor.tensor_core.tensor_split`, with
+        modified defaults of ``method=='qr'`` and ``absorb='right'``.
+    """
+    split_opts.setdefault('method', 'qr')
+    split_opts.setdefault('absorb', 'right')
+
+    s_ix, t1_ix = T1.filter_bonds(T2)
+    if len(s_ix) > 1:
+        T1.fuse_({s_ix[0]: s_ix})
+        T2.fuse_({s_ix[0]: s_ix})
+        s_ix = s_ix[0]
+
+    new_T1, tRfact = T1.split(t1_ix, get='tensors', **split_opts)
+    new_T2 = T2.contract(tRfact)
+
+    new_T1.transpose_like_(T1)
+    new_T2.transpose_like_(T2)
+
+    T1.modify(data=new_T1.data)
+    T2.modify(data=new_T2.data)
+
+
+def tensor_compress_bond(T1, T2, absorb='both', **compress_opts):
     r"""Inplace compress between the two single tensors. It follows the
     following steps to minimize the size of SVD performed::
 
@@ -528,16 +568,14 @@ def tensor_compress_bond(T1, T2, **compress_opts):
     if not s_ix:
         raise ValueError("The tensors specified don't share an bond.")
     # a) -> b)
-    T1_L, T1_R = T1.split(left_inds=t1_ix, get='tensors',
-                          absorb='right', **compress_opts)
-    T2_L, T2_R = T2.split(left_inds=s_ix, get='tensors',
-                          absorb='left', **compress_opts)
+    T1_L, T1_R = T1.split(left_inds=t1_ix, get='tensors', method='qr')
+    T2_L, T2_R = T2.split(left_inds=s_ix, get='tensors', method='lq')
     # b) -> c)
     M = (T1_R @ T2_L)
     M.drop_tags()
     # c) -> d)
     M_L, M_R = M.split(left_inds=T1_L.bonds(M), get='tensors',
-                       absorb='both', **compress_opts)
+                       absorb=absorb, **compress_opts)
 
     # make sure old bond being used
     ns_ix, = M_L.bonds(M_R)
@@ -2800,12 +2838,21 @@ class TensorNetwork(object):
         """
         n1, = self._get_tids_from_tags(tags1, which='all')
         n2, = self._get_tids_from_tags(tags2, which='all')
-        tensor_compress_bond(self.tensor_map[n1], self.tensor_map[n2])
+        tensor_compress_bond(
+            self.tensor_map[n1], self.tensor_map[n2], **compress_opts
+        )
 
-    def compress_all(self, **compress_opts):
+    def compress_all(self, inplace=False, **compress_opts):
         """Inplace compress all bonds in this network.
         """
-        for T1, T2 in itertools.combinations(self.tensors, 2):
+        tn = self if inplace else self.copy()
+        tn.fuse_multibonds_()
+
+        for ix, tids in tn.ind_map.items():
+            if len(tids) != 2:
+                continue
+
+            T1, T2 = (self.tensor_map[tid] for tid in tids)
             try:
                 tensor_compress_bond(T1, T2, **compress_opts)
             except ValueError:
@@ -2813,6 +2860,8 @@ class TensorNetwork(object):
             except ZeroDivisionError:
                 self.convert_to_zero()
                 break
+
+    compress_all_ = functools.partialmethod(compress_all, inplace=True)
 
     def new_bond(self, tags1, tags2, **opts):
         """Inplace addition of a dummmy (size 1) bond between the single
