@@ -511,11 +511,10 @@ def tensor_split(T, left_inds, method='svd', max_bond=None, absorb='both',
 
 def tensor_canonize_bond(T1, T2, **split_opts):
     r"""Inplace 'canonization' of two tensors. This gauges the bond between
-    the two such that ``T1`` is isometric:
-
+    the two such that ``T1`` is isometric::
 
           |   |          |   |          |   |
-        --1---2--  ->  -->~R-2--  ->  -->~~~O--
+        --1---2--  =>  -->~R-2--  =>  -->~~~O--
           |   |          |   |          |   |
           .                ...
          <QR>              contract

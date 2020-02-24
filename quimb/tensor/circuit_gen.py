@@ -15,7 +15,7 @@ def inject_u3s(
 
         ent_gates = [(0, 1), (2, 3), (1, 2)]
 
-    Would go get made into a circuit like:
+    Would go get made into a circuit like::
 
         |  |  |  |        |  |  |  |
         |  |  |  |        |  u  u  |
@@ -107,7 +107,7 @@ def gates_to_param_circuit(gates, n, parametrize='U3', **circuit_opts):
 
     Parameters
     ----------
-    gates : sequence[tuple[str, *float, *int]]
+    gates : sequence[tuple[str, float, int]]
         The gates describing the circuit.
     n : int
         The number of qubits to make the circuit act one.
