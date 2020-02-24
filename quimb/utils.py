@@ -142,32 +142,41 @@ def pairwise(iterable):
     return zip(a, b)
 
 
-def three_line_multi_print(l1, l2, l3, max_width=None):
+def print_multi_line(*lines, max_width=None):
     if max_width is None:
         import shutil
         max_width, _ = shutil.get_terminal_size()
 
-    if len(l2) <= max_width:
-        print(l1)
-        print(l2)
-        print(l3)
+    max_line_lenth = max(len(l) for l in lines)
+
+    if max_line_lenth <= max_width:
+        for l in lines:
+            print(l)
+
     else:  # pragma: no cover
         max_width -= 10  # for ellipses and pad
-        n_lines = (len(l2) - 1) // max_width + 1
-        for i in range(n_lines):
+        n_lines = len(lines)
+        n_blocks = (max_line_lenth - 1) // max_width + 1
+
+        for i in range(n_blocks):
             if i == 0:
-                print("   ", l1[i * max_width:(i + 1) * max_width], "   ")
-                print("   ", l2[i * max_width:(i + 1) * max_width], "...")
-                print("   ", l3[i * max_width:(i + 1) * max_width], "   ")
+                for j, l in enumerate(lines):
+                    print(
+                        "..." if j == n_lines // 2 else "   ",
+                        l[i * max_width:(i + 1) * max_width],
+                        "..." if j == n_lines // 2 else "   "
+                    )
                 print(("{:^" + str(max_width) + "}").format("..."))
-            elif i == n_lines - 1:
-                print("   ", l1[i * max_width:(i + 1) * max_width])
-                print("...", l2[i * max_width:(i + 1) * max_width])
-                print("   ", l3[i * max_width:(i + 1) * max_width])
+            elif i == n_blocks - 1:
+                for l in lines:
+                    print("   ", l[i * max_width:(i + 1) * max_width])
             else:
-                print("   ", l1[i * max_width:(i + 1) * max_width], "   ")
-                print("...", l2[i * max_width:(i + 1) * max_width], "...")
-                print("   ", l3[i * max_width:(i + 1) * max_width], "   ")
+                for j, l  in enumerate(lines):
+                    print(
+                        "..." if j == n_lines // 2 else "   ",
+                        l[i * max_width:(i + 1) * max_width],
+                        "..." if j == n_lines // 2 else "   ",
+                    )
                 print(("{:^" + str(max_width) + "}").format("..."))
 
 

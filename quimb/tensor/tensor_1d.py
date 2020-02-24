@@ -10,7 +10,7 @@ import numpy as np
 import opt_einsum as oe
 from autoray import do, dag, reshape
 
-from ..utils import check_opt, three_line_multi_print, pairwise
+from ..utils import check_opt, print_multi_line
 import quimb as qu
 from .tensor_core import (
     Tensor,
@@ -538,7 +538,7 @@ class TensorNetwork1DVector(TensorNetwork1D,
                            doc="The string specifier for the physical indices")
 
     def site_ind(self, i):
-        if isinstance(i, Integral):
+        if not isinstance(i, str):
             i = i % self.nsites
         return self.site_ind_id.format(i)
 
@@ -1234,22 +1234,22 @@ class TensorNetwork1DFlat(TensorNetwork1D,
             l1 += f" {bdim}"
             l2 += (">" if i < num_can_l else
                    "<" if i >= self.nsites - num_can_r else
-                   "o") + ("-" if bdim < 100 else "=") * strl
-            l3 += "|" + " " * strl
+                   "●") + ("─" if bdim < 100 else "━") * strl
+            l3 += "│" + " " * strl
             strl = len(str(bdim))
 
         l1 += " "
-        l2 += "<" if num_can_r > 0 else "o"
-        l3 += "|"
+        l2 += "<" if num_can_r > 0 else "●"
+        l3 += "│"
 
         if self.cyclic:
             bdim = self.bond_size(self.sites[0], self.sites[-1])
-            bnd_str = ("-" if bdim < 100 else "=") * strl
+            bnd_str = ("─" if bdim < 100 else "━") * strl
             l1 = f" {bdim}{l1}{bdim} "
             l2 = f"+{bnd_str}{l2}{bnd_str}+"
             l3 = f" {' ' * strl}{l3}{' ' * strl} "
 
-        three_line_multi_print(l1, l2, l3, max_width=max_width)
+        print_multi_line(l1, l2, l3, max_width=max_width)
 
 
 class MatrixProductState(TensorNetwork1DVector,
@@ -2783,24 +2783,24 @@ class MatrixProductOperator(TensorNetwork1DFlat,
         for i in range(len(self.sites) - 1):
             bdim = self.bond_size(self.sites[i], self.sites[i + 1])
             strl = len(str(bdim))
-            l1 += f"|{bdim}"
+            l1 += f"│{bdim}"
             l2 += (">" if i < num_can_l else
                    "<" if i >= self.nsites - num_can_r else
-                   "O") + ("-" if bdim < 100 else "=") * strl
-            l3 += "|" + " " * strl
+                   "●") + ("─" if bdim < 100 else "━") * strl
+            l3 += "│" + " " * strl
 
-        l1 += "|"
-        l2 += "<" if num_can_r > 0 else "O"
-        l3 += "|"
+        l1 += "│"
+        l2 += "<" if num_can_r > 0 else "●"
+        l3 += "│"
 
         if self.cyclic:
             bdim = self.bond_size(self.sites[0], self.sites[-1])
-            bnd_str = ("-" if bdim < 100 else "=") * strl
+            bnd_str = ("─" if bdim < 100 else "━") * strl
             l1 = f" {bdim}{l1}{bdim} "
             l2 = f"+{bnd_str}{l2}{bnd_str}+"
             l3 = f" {' ' * strl}{l3}{' ' * strl} "
 
-        three_line_multi_print(l1, l2, l3, max_width=max_width)
+        print_multi_line(l1, l2, l3, max_width=max_width)
 
 
 class Dense1D(TensorNetwork1DVector,
