@@ -572,7 +572,7 @@ def tensor_compress_bond(T1, T2, absorb='both', **compress_opts):
         # fuse multibonds
         T1.fuse_({shared_ix[0]: shared_ix})
         T2.fuse_({shared_ix[0]: shared_ix})
-        shared_ix = shared_ix[0]
+        shared_ix = (shared_ix[0],)
 
     # a) -> b)
     T1_L, T1_R = T1.split(left_inds=left_env_ix, get='tensors', method='qr')
