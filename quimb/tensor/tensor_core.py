@@ -3385,7 +3385,10 @@ class TensorNetwork(object):
 
         seen = collections.defaultdict(list)
         for ix, tids in tn.ind_map.items():
-            seen[frozenset(tids)].append(ix)
+
+            # only want to fuse inner bonds
+            if len(tids) > 1:
+                seen[frozenset(tids)].append(ix)
 
         for tidset, ixs in seen.items():
             if len(ixs) > 1:
