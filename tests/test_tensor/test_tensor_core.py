@@ -917,13 +917,87 @@ class TestTensorNetwork:
         assert A.shared_bond_size(B) == 5
 
     @pytest.mark.parametrize("method", ['svd', 'eig', 'isvd', 'svds', 'rsvd'])
-    def compress_all(self, method):
+    def test_compress_all(self, method):
         k = MPS_rand_state(10, 7)
         k += k
         k /= 2
-        k.compress_all_(max_bond=5, method=method)
-        assert k.max_bond() == 5
+        k.compress_all_(max_bond=7, method=method)
+        assert k.max_bond() == 7
         assert_allclose(k.H @ k, 1.0)
+
+    def test_canonize_between(self):
+        k = MPS_rand_state(4, 3)
+        k.canonize_between('I1', 'I2')
+        assert k.H @ k == pytest.approx(1)
+        t = k[1]
+        assert t.H @ t == pytest.approx(3)
+        t = k[2]
+        assert t.H @ t != pytest.approx(3)
+        k.canonize_between('I2', 'I1')
+        assert k.H @ k == pytest.approx(1)
+        t = k[1]
+        assert t.H @ t != pytest.approx(3)
+        t = k[2]
+        assert t.H @ t == pytest.approx(3)
+
+    def test_canonize_around(self):
+        # make a small tree tensor network
+        #
+        #             U2--                         v--
+        #             |                            |
+        #             U1--         ==>             v--        etc
+        #             |                            |
+        #   L2---L1---C---R1---R2        >---->---->----O---<
+        #  /     |    |    |    \       /     |    |    |    \
+        #
+        C = qtn.rand_tensor([2], inds=['kC'], tags='C', dtype=complex)
+
+        # left arm
+        L1 = qtn.rand_tensor([2], inds=['kL1'], tags='L1', dtype=complex)
+        qtn.new_bond(C, L1, size=7)
+        L2 = qtn.rand_tensor([2], inds=['kL2'], tags='L2', dtype=complex)
+        qtn.new_bond(L1, L2, size=7)
+
+        # right arm
+        R1 = qtn.rand_tensor([2], inds=['kR1'], tags='R1', dtype=complex)
+        qtn.new_bond(C, R1, size=7)
+        R2 = qtn.rand_tensor([2], inds=['kR2'], tags='R2', dtype=complex)
+        qtn.new_bond(R1, R2, size=7)
+
+        # upper arm
+        U1 = qtn.rand_tensor([2], inds=['kU1'], tags='U1', dtype=complex)
+        qtn.new_bond(C, U1, size=7)
+        U2 = qtn.rand_tensor([2], inds=['kU2'], tags='U2', dtype=complex)
+        qtn.new_bond(U1, U2, size=7)
+
+        # make the TN and randomize the data then normalize
+        ttn = qtn.TensorNetwork([C, L1, L2, R1, R2, U1, U2])
+        ttn.randomize_()
+        ttn /= (ttn.H @ ttn)**0.5
+        assert ttn.H @ ttn == pytest.approx(1.0)
+
+        # test max distance
+        ttn.canonize_around_('C', max_distance=1)
+        assert ttn.H @ ttn == pytest.approx(1.0)
+        assert ttn['C'].H @ ttn['C'] != pytest.approx(1.0)
+
+        # tensors one-away from center should be isometries
+        for tg in ['L1', 'R1', 'U1']:
+            assert ttn[tg].H @ ttn[tg] == pytest.approx(7)
+        # tensors two-away from center should be random
+        for tg in ['L2', 'R2', 'U2']:
+            assert ttn[tg].H @ ttn[tg] != pytest.approx(2)
+
+        # test can set the orthogonality center anywhere
+        for tg in ['C', 'L1', 'L2', 'R1', 'R2', 'U1', 'U2']:
+            ttn.canonize_around_(tg)
+            assert ttn.H @ ttn == pytest.approx(1.0)
+            assert ttn[tg].H @ ttn[tg] == pytest.approx(1.0)
+
+            # tensors two-away from center should now be isometries
+            for far_tg in ['L2', 'R2', 'U2']:
+                if far_tg != tg:
+                    ttn[far_tg].H @ ttn[far_tg] == pytest.approx(2)
 
     def test_insert_operator(self):
         p = MPS_rand_state(3, 7, tags='KET')

@@ -84,6 +84,12 @@ from .circuit_gen import (
     circ_ansatz_1D_brickwork,
     circ_ansatz_1D_rand,
 )
+from .tensor_2d import (
+    TensorNetwork2D,
+    PEPS,
+    contract_2d_one_layer_boundary,
+    contract_2d_two_layer_boundary,
+)
 
 __all__ = (
     "contract_strategy",
@@ -156,4 +162,8 @@ __all__ = (
     "circ_ansatz_1D_zigzag",
     "circ_ansatz_1D_brickwork",
     "circ_ansatz_1D_rand",
+    "TensorNetwork2D",
+    "PEPS",
+    "contract_2d_one_layer_boundary",
+    "contract_2d_two_layer_boundary",
 )

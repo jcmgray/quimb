@@ -500,7 +500,10 @@ class TensorNetwork1DVector(TensorNetwork1D,
     site ind.
     """
 
-    _EXTRA_PROPS = ('_site_tag_id', '_site_ind_id')
+    _EXTRA_PROPS = (
+        '_site_tag_id',
+        '_site_ind_id',
+    )
 
     def reindex_sites(self, new_id, where=None, inplace=False):
         """Update the physical site index labels to a new string specifier.
@@ -618,6 +621,131 @@ class TensorNetwork1DVector(TensorNetwork1D,
         return cAB - cA * cB
 
 
+class TensorNetwork1DOperator(TensorNetwork1D,
+                              TensorNetwork):
+
+    _EXTRA_PROPS = (
+        '_site_tag_id',
+        '_upper_ind_id',
+        '_lower_ind_id',
+    )
+
+    def reindex_lower_sites(self, new_id, where=None, inplace=False):
+        """Update the lower site index labels to a new string specifier.
+
+        Parameters
+        ----------
+        new_id : str
+            A string with a format placeholder to accept an int, e.g. "ket{}".
+        where : None or slice
+            Which sites to update the index labels on. If ``None`` (default)
+            all sites.
+        inplace : bool
+            Whether to reindex in place.
+        """
+        if where is None:
+            start = 0
+            stop = self.nsites
+        else:
+            start = 0 if where.start is None else where.start
+            stop = self.nsites if where.stop is ... else where.stop
+
+        return self.reindex({self.lower_ind(i): new_id.format(i)
+                             for i in range(start, stop)}, inplace=inplace)
+
+    def reindex_upper_sites(self, new_id, where=None, inplace=False):
+        """Update the upper site index labels to a new string specifier.
+
+        Parameters
+        ----------
+        new_id : str
+            A string with a format placeholder to accept an int, e.g. "ket{}".
+        where : None or slice
+            Which sites to update the index labels on. If ``None`` (default)
+            all sites.
+        inplace : bool
+            Whether to reindex in place.
+        """
+        if where is None:
+            start = 0
+            stop = self.nsites
+        else:
+            start = 0 if where.start is None else where.start
+            stop = self.nsites if where.stop is ... else where.stop
+
+        return self.reindex({self.upper_ind(i): new_id.format(i)
+                             for i in range(start, stop)}, inplace=inplace)
+
+    def _get_lower_ind_id(self):
+        return self._lower_ind_id
+
+    def _set_lower_ind_id(self, new_id):
+        if new_id == self._upper_ind_id:
+            raise ValueError("Setting the same upper and lower index ids will"
+                             " make the two ambiguous.")
+
+        if self._lower_ind_id != new_id:
+            self.reindex_lower_sites(new_id, inplace=True)
+            self._lower_ind_id = new_id
+
+    lower_ind_id = property(_get_lower_ind_id, _set_lower_ind_id,
+                            doc="The string specifier for the lower phyiscal "
+                            "indices")
+
+    def lower_ind(self, i):
+        """The name of the lower ('ket') index at site ``i``.
+        """
+        return self.lower_ind_id.format(i)
+
+    def _get_upper_ind_id(self):
+        return self._upper_ind_id
+
+    def _set_upper_ind_id(self, new_id):
+        if new_id == self._lower_ind_id:
+            raise ValueError("Setting the same upper and lower index ids will"
+                             " make the two ambiguous.")
+
+        if self._upper_ind_id != new_id:
+            self.reindex_upper_sites(new_id, inplace=True)
+            self._upper_ind_id = new_id
+
+    upper_ind_id = property(_get_upper_ind_id, _set_upper_ind_id,
+                            doc="The string specifier for the upper phyiscal "
+                            "indices")
+
+    def upper_ind(self, i):
+        """The name of the upper ('bra') index at site ``i``.
+        """
+        return self.upper_ind_id.format(i)
+
+    @property
+    def upper_inds(self):
+        """An ordered tuple of the actual upper physical indices.
+        """
+        return tuple(self.upper_ind(i) for i in self.sites)
+
+    def to_dense(self, *inds_seq, **contract_opts):
+        """Return the dense matrix version of this 1D operator, i.e. a
+        ``qarray`` with shape (d, d).
+        """
+        if not inds_seq:
+            inds_seq = (self.upper_inds, self.lower_inds)
+
+        return TensorNetwork.to_dense(self, *inds_seq, **contract_opts)
+
+    def phys_dim(self, i=None, which='upper'):
+        """Get a physical index size of this 1D operator.
+        """
+        if i is None:
+            i = self.sites[0]
+
+        if which == 'upper':
+            return self[i].ind_size(self.upper_ind(i))
+
+        if which == 'lower':
+            return self[i].ind_size(self.lower_ind(i))
+
+
 def set_default_compress_mode(opts, cyclic=False):
     opts.setdefault('cutoff_mode', 'rel' if cyclic else 'rsum2')
 
@@ -626,6 +754,8 @@ class TensorNetwork1DFlat(TensorNetwork1D,
                           TensorNetwork):
     """1D Tensor network which has a flat structure.
     """
+
+    _EXTRA_PROPS = ('_site_tag_id',)
 
     def _left_decomp_site(self, i, bra=None, **split_opts):
         T1, T2 = self[i], self[i + 1]
@@ -1280,7 +1410,11 @@ class MatrixProductState(TensorNetwork1DVector,
         The base name of the bond indices, onto which uuids will be added.
     """
 
-    _EXTRA_PROPS = ('_site_ind_id', '_site_tag_id', 'cyclic')
+    _EXTRA_PROPS = (
+        '_site_tag_id',
+        '_site_ind_id',
+        'cyclic',
+    )
 
     def __init__(self, arrays, *, shape='lrp', tags=None, bond_name="",
                  site_ind_id='k{}', site_tag_id='I{}', sites=None, nsites=None,
@@ -2351,7 +2485,8 @@ class MatrixProductState(TensorNetwork1DVector,
         return max(0, log2(tr_norm))
 
 
-class MatrixProductOperator(TensorNetwork1DFlat,
+class MatrixProductOperator(TensorNetwork1DOperator,
+                            TensorNetwork1DFlat,
                             TensorNetwork1D,
                             TensorNetwork):
     """Initialise a matrix product operator, with auto labelling and tagging.
@@ -2383,7 +2518,12 @@ class MatrixProductOperator(TensorNetwork1DFlat,
         The base name of the bond indices, onto which uuids will be added.
     """
 
-    _EXTRA_PROPS = ('_upper_ind_id', '_lower_ind_id', '_site_tag_id', 'cyclic')
+    _EXTRA_PROPS = (
+        '_site_tag_id',
+        '_upper_ind_id',
+        '_lower_ind_id',
+        'cyclic',
+    )
 
     def __init__(self, arrays, shape='lrud', site_tag_id='I{}', tags=None,
                  upper_ind_id='k{}', lower_ind_id='b{}', bond_name="",
@@ -2449,94 +2589,6 @@ class MatrixProductOperator(TensorNetwork1DFlat,
 
         super().__init__(gen_tensors(), structure=site_tag_id, sites=sites,
                          nsites=nsites, check_collisions=False, **tn_opts)
-
-    def reindex_lower_sites(self, new_id, where=None, inplace=False):
-        """Update the lower site index labels to a new string specifier.
-
-        Parameters
-        ----------
-        new_id : str
-            A string with a format placeholder to accept an int, e.g. "ket{}".
-        where : None or slice
-            Which sites to update the index labels on. If ``None`` (default)
-            all sites.
-        inplace : bool
-            Whether to reindex in place.
-        """
-        if where is None:
-            start = 0
-            stop = self.nsites
-        else:
-            start = 0 if where.start is None else where.start
-            stop = self.nsites if where.stop is ... else where.stop
-
-        return self.reindex({self.lower_ind(i): new_id.format(i)
-                             for i in range(start, stop)}, inplace=inplace)
-
-    def reindex_upper_sites(self, new_id, where=None, inplace=False):
-        """Update the upper site index labels to a new string specifier.
-
-        Parameters
-        ----------
-        new_id : str
-            A string with a format placeholder to accept an int, e.g. "ket{}".
-        where : None or slice
-            Which sites to update the index labels on. If ``None`` (default)
-            all sites.
-        inplace : bool
-            Whether to reindex in place.
-        """
-        if where is None:
-            start = 0
-            stop = self.nsites
-        else:
-            start = 0 if where.start is None else where.start
-            stop = self.nsites if where.stop is ... else where.stop
-
-        return self.reindex({self.upper_ind(i): new_id.format(i)
-                             for i in range(start, stop)}, inplace=inplace)
-
-    def _get_lower_ind_id(self):
-        return self._lower_ind_id
-
-    def _set_lower_ind_id(self, new_id):
-        if new_id == self._upper_ind_id:
-            raise ValueError("Setting the same upper and lower index ids will"
-                             " make the two ambiguous.")
-
-        if self._lower_ind_id != new_id:
-            self.reindex_lower_sites(new_id, inplace=True)
-            self._lower_ind_id = new_id
-
-    lower_ind_id = property(_get_lower_ind_id, _set_lower_ind_id,
-                            doc="The string specifier for the lower phyiscal "
-                            "indices")
-
-    def lower_ind(self, i):
-        """The name of the lower ('ket') index at site ``i``.
-        """
-        return self.lower_ind_id.format(i)
-
-    def _get_upper_ind_id(self):
-        return self._upper_ind_id
-
-    def _set_upper_ind_id(self, new_id):
-        if new_id == self._lower_ind_id:
-            raise ValueError("Setting the same upper and lower index ids will"
-                             " make the two ambiguous.")
-
-        if self._upper_ind_id != new_id:
-            self.reindex_upper_sites(new_id, inplace=True)
-            self._upper_ind_id = new_id
-
-    upper_ind_id = property(_get_upper_ind_id, _set_upper_ind_id,
-                            doc="The string specifier for the upper phyiscal "
-                            "indices")
-
-    def upper_ind(self, i):
-        """The name of the upper ('bra') index at site ``i``.
-        """
-        return self.upper_ind_id.format(i)
 
     def add_MPO(self, other, inplace=False, compress=False, **compress_opts):
         """Add another MatrixProductState to this one.
@@ -2741,28 +2793,6 @@ class MatrixProductOperator(TensorNetwork1DFlat,
         """
         return tuple(self.lower_ind(i) for i in self.sites)
 
-    @property
-    def upper_inds(self):
-        """An ordered tuple of the actual upper physical indices.
-        """
-        return tuple(self.upper_ind(i) for i in self.sites)
-
-    def to_dense(self, *inds_seq, **contract_opts):
-        if inds_seq:
-            lix, rix = inds_seq
-        else:
-            lix, rix = self.lower_inds, self.upper_inds
-
-        T = self.contract(..., **contract_opts)
-        T.fuse_([('upper', rix), ('lower', lix)])
-        d = int(T.size**0.5)
-        return qu.qarray(T.data.reshape(d, d))
-
-    def phys_dim(self, i=None):
-        if i is None:
-            i = self.sites[0]
-        return self[i].ind_size(self.upper_ind(i))
-
     def rand_state(self, bond_dim, **mps_opts):
         """Get a random vector matching this MPO.
         """
@@ -2832,7 +2862,10 @@ class Dense1D(TensorNetwork1DVector,
         Supplied to :class:`~quimb.tensor.tensor_core.TensorNetwork`.
     """
 
-    _EXTRA_PROPS = ('_site_ind_id', '_site_tag_id')
+    _EXTRA_PROPS = (
+        '_site_ind_id',
+        '_site_tag_id',
+    )
 
     def __init__(self, array, phys_dim=2, tags=None,
                  site_ind_id='k{}', site_tag_id='I{}',
@@ -2925,6 +2958,7 @@ class SuperOperator1D(
         '_inner_upper_ind_id',
         '_inner_lower_ind_id',
         '_outer_lower_ind_id',
+        'cyclic',
     )
 
     def __init__(

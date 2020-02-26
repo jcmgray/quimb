@@ -1817,7 +1817,7 @@ class TensorNetwork(object):
     _EXTRA_PROPS = ()
 
     @classmethod
-    def from_TN(cls, tn, inplace=False, **kwargs):
+    def from_TN(cls, tn, like=None, inplace=False, **kwargs):
         """Construct a specific tensor network subclass (i.e. one with some
         promise about structure/geometry and tags/inds such as an MPS) from
         a generic tensor network which should have that structure already.
@@ -1828,6 +1828,9 @@ class TensorNetwork(object):
             The TensorNetwork subclass to convert ``tn`` to.
         tn : TensorNetwork
             The TensorNetwork to convert.
+        like : TensorNetwork, optional
+            If specified, try and retrieve the neccesary attribute values from
+            this tensor network.
         inplace : bool, optional
             Whether to perform the conversion inplace or not.
         kwargs
@@ -1842,6 +1845,10 @@ class TensorNetwork(object):
             # get value from kwargs
             if prop_name in kwargs:
                 setattr(new_tn, prop, kwargs.pop(prop_name))
+
+            # get value from another manually specified TN
+            elif (like is not None) and hasattr(like, prop_name):
+                setattr(new_tn, prop, getattr(like, prop_name))
 
             # get value directly from TN
             elif hasattr(tn, prop_name):
@@ -2838,10 +2845,58 @@ class TensorNetwork(object):
                               for d, i in zip(T.shape, T.inds))
             T.modify(data=np.zeros(new_shape, dtype=T.dtype))
 
+    def contract_between(self, tags1, tags2, **contract_opts):
+        """Contract the two tensors specified by ``tags1`` and ``tags2``
+        respectively. This is an inplace operation.
+
+        Parameters
+        ----------
+        tags1 :
+            Tags uniquely identifying the first tensor.
+        tags2 : str or sequence of str
+            Tags uniquely identifying the second tensor.
+        contract_opts
+            Supplied to :func:`~quimb.tensor.tensor_core.tensor_contract`.
+        """
+        tid1, = self._get_tids_from_tags(tags1, which='all')
+        tid2, = self._get_tids_from_tags(tags2, which='all')
+        T1 = self._pop_tensor(tid1)
+        T2 = self._pop_tensor(tid2)
+        self |= tensor_contract(T1, T2, **contract_opts)
+
     def compress_between(self, tags1, tags2, **compress_opts):
-        """Compress the bond between the two single tensors in this network
-        specified by ``tags1`` and ``tags2`` using ``tensor_compress_bond``.
-        This is an inplace operation.
+        r"""Compress the bond between the two single tensors in this network
+        specified by ``tags1`` and ``tags2`` using
+        :func:`~quimb.tensor.tensor_core.tensor_compress_bond`::
+
+              |    |    |    |           |    |    |    |
+            ==●====●====●====●==       ==●====●====●====●==
+             /|   /|   /|   /|          /|   /|   /|   /|
+              |    |    |    |           |    |    |    |
+            ==●====1====2====●==  ==>  ==●====L----R====●==
+             /|   /|   /|   /|          /|   /|   /|   /|
+              |    |    |    |           |    |    |    |
+            ==●====●====●====●==       ==●====●====●====●==
+             /|   /|   /|   /|          /|   /|   /|   /|
+
+        This is an inplace operation. The compression is unlikely to be optimal
+        with respect to the frobenius norm, unless the TN is already
+        canonicalized at the two tensors. The ``absorb`` kwarg can be
+        specified to yield an isometry on either the left or right resulting
+        tensors.
+
+        Parameters
+        ----------
+        tags1 :
+            Tags uniquely identifying the first ('left') tensor.
+        tags2 : str or sequence of str
+            Tags uniquely identifying the second ('right') tensor.
+        compress_opts
+            Supplied to :func:`~quimb.tensor.tensor_core.tensor_compress_bond`.
+
+        See Also
+        --------
+        canonize_between
         """
         n1, = self._get_tids_from_tags(tags1, which='all')
         n2, = self._get_tids_from_tags(tags2, which='all')
@@ -2868,7 +2923,130 @@ class TensorNetwork(object):
                 self.convert_to_zero()
                 break
 
+        return tn
+
     compress_all_ = functools.partialmethod(compress_all, inplace=True)
+
+    def canonize_between(self, tags1, tags2, **canonize_opts):
+        r"""'Canonize' the bond between the two single tensors in this network
+        specified by ``tags1`` and ``tags2`` using ``tensor_canonize_bond``::
+
+              |    |    |    |           |    |    |    |
+            --●----●----●----●--       --●----●----●----●--
+             /|   /|   /|   /|          /|   /|   /|   /|
+              |    |    |    |           |    |    |    |
+            --●----1----2----●--  ==>  --●---->~~~~R----●--
+             /|   /|   /|   /|          /|   /|   /|   /|
+              |    |    |    |           |    |    |    |
+            --●----●----●----●--       --●----●----●----●--
+             /|   /|   /|   /|          /|   /|   /|   /|
+
+
+        This is an inplace operation. This can only be used to put a TN into
+        truly canonical form if the geometry is a tree, such as an MPS.
+
+        Parameters
+        ----------
+        tags1 :
+            Tags uniquely identifying the first ('left') tensor, which will
+            become an isometry.
+        tags2 : str or sequence of str
+            Tags uniquely identifying the second ('right') tensor.
+        canonize_opts
+            Supplied to :func:`~quimb.tensor.tensor_core.tensor_canonize_bond`.
+
+        See Also
+        --------
+        compress_between
+        """
+        n1, = self._get_tids_from_tags(tags1, which='all')
+        n2, = self._get_tids_from_tags(tags2, which='all')
+        tensor_canonize_bond(
+            self.tensor_map[n1], self.tensor_map[n2], **canonize_opts
+        )
+
+    def canonize_around(self, tags, which='all', max_distance=None,
+                        inplace=False, **canonize_opts):
+        r"""Expand a locally canonical region around ``tags``::
+
+                      --●---●--
+                    |   |   |   |
+                  --●---v---v---●--
+                |   |   |   |   |   |
+              --●--->---v---v---<---●--
+            |   |   |   |   |   |   |   |
+            ●--->--->---O---O---<---<---●
+            |   |   |   |   |   |   |   |
+              --●--->---^---^---^---●--
+                |   |   |   |   |   |
+                  --●---^---^---●--
+                    |   |   |   |
+                      --●---●--
+
+                             <=====>
+                             max_distance = 2 e.g.
+
+        Shown on a grid here but applicable to arbitrary geometry. This is a
+        way of gauging a tensor network that results in a canonical form if the
+        geometry is described by a tree (e.g. an MPS or TTN). The canonizations
+        proceed inwards via QR decompositions.
+
+        The sequence generated by round-robin expanding the boundary of the
+        originally specified tensors - it will only be unique for trees.
+
+        Parameters
+        ----------
+        tags : str, or sequence  or str
+            Tags defining which set of tensors to locally canonize around.
+        which : {'all', 'any', '!all', '!any'}, optional
+            How select the tensors based on tags.
+        max_distance : None or int, optional
+            How far, in terms of graph distance, to canonize tensors.
+        inplace : bool, optional
+            Whether to perform
+
+        """
+        tn = self if inplace else self.copy()
+
+        # all tensor tids in the network
+        all_tids = set(tn.tensor_map)
+
+        # the set of tensor tids that are in the 'bulk'
+        border = tn._get_tids_from_tags(tags, which=which)
+        remaining = all_tids - border
+        border = sorted((x, 0) for x in border)
+
+        # the sequence of tensors pairs to canonize
+        seq = []
+
+        while border:
+
+            tid, d = border.pop(0)
+            if (max_distance is not None) and d >= max_distance:
+                continue
+
+            ix = tn.tensor_map[tid].inds
+
+            # get un-canonized neighbors
+            neighbor_tids = set_union(tn.ind_map[i] for i in ix)
+            neighbor_tids &= remaining
+
+            for n_tid in neighbor_tids:
+                remaining.remove(n_tid)
+                border.append((n_tid, d + 1))
+                seq.append((n_tid, tid))
+
+        # want to start furthest away
+        seq.reverse()
+
+        for tid1, tid2 in seq:
+            T1 = tn.tensor_map[tid1]
+            T2 = tn.tensor_map[tid2]
+            tensor_canonize_bond(T1, T2, **canonize_opts)
+
+        return tn
+
+    canonize_around_ = functools.partialmethod(canonize_around, inplace=True)
 
     def new_bond(self, tags1, tags2, **opts):
         """Inplace addition of a dummmy (size 1) bond between the single
@@ -2890,17 +3068,6 @@ class TensorNetwork(object):
         tid1, = self._get_tids_from_tags(tags1, which='all')
         tid2, = self._get_tids_from_tags(tags2, which='all')
         new_bond(self.tensor_map[tid1], self.tensor_map[tid2], **opts)
-
-    def cut_bond(self, bnd, left_ind, right_ind):
-        """
-        """
-        tid_l, tid_r = self.ind_map[bnd]
-
-        TL, TR = self.tensor_map[tid_l], self.tensor_map[tid_r]
-        bnd, = bonds(TL, TR)
-
-        TL.reindex_({bnd: left_ind})
-        TR.reindex_({bnd: right_ind})
 
     def cut_between(self, left_tags, right_tags, left_ind, right_ind):
         """Cut the bond between the tensors specified by ``left_tags`` and
