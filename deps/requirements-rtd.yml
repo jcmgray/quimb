@@ -4,7 +4,7 @@ channels:
   - conda-forge
 dependencies:
   - python=3.6
-  - numpy=1.15
+  - numpy=1.17
   - scipy
   - numba
   - psutil

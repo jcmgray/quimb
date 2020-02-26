@@ -1,7 +1,9 @@
 python:
-    version: 3.6
+    version: 3.7
     pip_install: true
     extra_requirements:
           - docs
 build:
     image: latest
+conda:
+    environment: deps/requirements-rtd.yml
