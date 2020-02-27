@@ -4,17 +4,18 @@ channels:
   - conda-forge
 dependencies:
   - python=3.8
-  - numpy=1.17
-  - scipy
-  - numba
-  - psutil
-  - cytoolz
-  - tqdm
-  - ipython
-  - sphinx
-  - sphinx_bootstrap_theme
-  - nbsphinx
-  - versioneer
-  - opt_einsum
+  - pip
   - pip:
+    - numpy=1.17
+    - scipy
+    - numba
+    - psutil
+    - cytoolz
+    - tqdm
+    - ipython
+    - sphinx
+    - sphinx_bootstrap_theme
+    - nbsphinx
+    - versioneer
+    - opt_einsum
     - autoray
