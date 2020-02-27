@@ -5,8 +5,10 @@ build:
 
 python:
   version: 3.8
-  pip_install: true
-  extra_requirements:
-    - docs
+  install:
+    - method: pip
+      path: .
+      extra_requirements:
+        - docs
 
 formats: []
