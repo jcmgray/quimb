@@ -1,13 +1,12 @@
 version: 2
 
 build:
-    image: latest
-
-conda:
-    environment: deps/requirements-rtd.yml
+  image: latest
 
 python:
-    version: 3.8
-    install: []
+  version: 3.8
+  pip_install: true
+  extra_requirements:
+    - docs
 
 formats: []

@@ -55,6 +55,8 @@ setup(
             'sphinx_bootstrap_theme',
             'nbsphinx',
             'ipython',
+            'autoray',
+            'opt_einsum',
         ],
     },
     scripts=['bin/quimb-mpi-python'],
