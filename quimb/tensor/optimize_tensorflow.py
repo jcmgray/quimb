@@ -12,7 +12,7 @@ import tqdm
 import numpy as np
 
 
-from .tensor_core import TensorNetwork
+from .tensor_core import Tensor, TensorNetwork
 
 
 LazyComplexTF = namedtuple('LazyComplexTF', ['shape', 'real', 'imag'])
@@ -63,22 +63,28 @@ def executing_eagerly():
     return _TENSORFLOW_EAGER
 
 
-def variable_tn(tn):
-    """Convert a tensor network's arrays to tensorflow Variables.
-    """
+def variable(x):
     tf = get_tensorflow()
-    tf_tn = tn.copy()
-    tf_tn.apply_to_arrays(tf.Variable)
-    return tf_tn
+    return tf.Variable(x)
+
+
+def constant(x):
+    tf = get_tensorflow()
+    return tf.constant(x)
+
+
+def constant_t(t):
+    t_tf = t.copy()
+    t_tf.modify(data=constant(t_tf.data))
+    return t_tf
 
 
 def constant_tn(tn):
     """Convert a tensor network's arrays to tensorflow constants.
     """
-    tf = get_tensorflow()
-    tf_tn = tn.copy()
-    tf_tn.apply_to_arrays(tf.convert_to_tensor)
-    return tf_tn
+    tn_tf = tn.copy()
+    tn_tf.apply_to_arrays(constant)
+    return tn_tf
 
 
 def parse_network_to_tf(tn, constant_tags):
@@ -93,11 +99,11 @@ def parse_network_to_tf(tn, constant_tags):
 
         # check if tensor has any of the constant tags
         if t.tags & constant_tags:
-            t.modify(data=tf.convert_to_tensor(value=t.data))
+            t.modify(data=constant(value=t.data))
 
         # treat re and im parts as separate variables
         elif issubclass(t.dtype.type, np.complexfloating):
-            tf_re, tf_im = tf.Variable(t.data.real), tf.Variable(t.data.imag)
+            tf_re, tf_im = variable(t.data.real), variable(t.data.imag)
             variables.extend((tf_re, tf_im))
 
             # if eager need to delay complex combination until gradient tape
@@ -110,7 +116,7 @@ def parse_network_to_tf(tn, constant_tags):
             iscomplex = True
 
         else:
-            tf_data = tf.Variable(t.data)
+            tf_data = variable(t.data)
             variables.append(tf_data)
             t.modify(data=tf_data)
 
@@ -319,8 +325,10 @@ class TNOptimizer:
                 if isinstance(v, TensorNetwork):
                     # convert it to constant tensorflow TN
                     self.loss_constants[k] = constant_tn(v)
+                elif isinstance(v, Tensor):
+                    self.loss_constants[k] = constant_t(v)
                 else:
-                    self.loss_constants[k] = tf.convert_to_tensor(value=v)
+                    self.loss_constants[k] = constant(v)
         self.loss_kwargs = {} if loss_kwargs is None else dict(loss_kwargs)
         self.loss_fn = functools.partial(
             loss_fn, **self.loss_constants, **self.loss_kwargs
@@ -372,26 +380,29 @@ class TNOptimizer:
         """Get normalized, numpy version of optimized tensor network, in eager
         mode.
         """
-        if self.iscomplex:
-            tn = evaluate_lazy_complex(self.tn_opt)
-        else:
-            tn = self.tn_opt
+        tn = self.tn_opt.copy()
 
-        tn_opt_numpy = self.norm_fn(tn)
-        tn_opt_numpy.apply_to_arrays(lambda x: x.numpy())
-        return tn_opt_numpy
+        if self.iscomplex:
+            tn = evaluate_lazy_complex(tn)
+        tn = self.norm_fn(tn)
+
+        tn.drop_tags(t for t in tn.tags if '__VARIABLE' in t)
+        tn.apply_to_arrays(lambda x: x.numpy())
+
+        return tn
 
     def _get_tn_opt_numpy_graph(self, sess):
         """Get normalized, numpy version of optimized tensor network.
         """
-        tn_opt_numpy = self.norm_fn(self.tn_opt)
+        tn = self.norm_fn(self.tn_opt.copy())
+        tn.drop_tags(t for t in tn.tags if '__VARIABLE' in t)
 
         # evaluate all arrays as once for performance reasons
-        np_arrays = sess.run([t.data for t in tn_opt_numpy])
-        for t, data in zip(tn_opt_numpy, np_arrays):
+        np_arrays = sess.run([t.data for t in tn])
+        for t, data in zip(tn, np_arrays):
             t.modify(data=data)
 
-        return tn_opt_numpy
+        return tn
 
     def _optimize_scipy(self, max_steps, method='L-BFGS-B',
                         sess=None, max_time=None, **kwargs):

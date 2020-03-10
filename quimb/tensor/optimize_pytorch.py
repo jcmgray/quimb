@@ -4,7 +4,7 @@ import functools
 import tqdm
 import numpy as np
 
-from .tensor_core import TensorNetwork
+from .tensor_core import Tensor, TensorNetwork
 
 
 _TORCH_DEVICE = None
@@ -36,10 +36,10 @@ def constant(x):
     return torch.tensor(x, requires_grad=False, device=device)
 
 
-def variable_tn(tn):
-    var_tn = tn.copy()
-    var_tn.apply_to_arrays(variable)
-    return var_tn
+def constant_t(t):
+    t_torch = t.copy()
+    t_torch.modify(data=constant(t_torch.data))
+    return t_torch
 
 
 def constant_tn(tn):
@@ -71,6 +71,7 @@ def parse_network_to_torch(tn, constant_tags):
             t.modify(data=torch_data)
 
     return tn_torch, variables, iscomplex
+
 
 def abs_max_grad(tn):
     """Inspect the gradient of every tensor element in the TensorNetwork
@@ -104,7 +105,7 @@ class TNOptimizer:
         The target loss function to minimize. Should accept ``tn`` (backed by
         pytorch tensors) or the output of ``norm_fn``.
     norm_fn : callable, optional
-        A function to normalize ``tn`` before being passed to ``loss_fn``. 
+        A function to normalize ``tn`` before being passed to ``loss_fn``.
         This offers very
         general support, so it can be used
         to enforce any constraints such as normalization or unitarity. The
@@ -121,16 +122,17 @@ class TNOptimizer:
         to multiply each tensor in ``tn`` in order to normalize it. If ``tn``
         is normalized by simple scalar multiplication of the tensors, it is
         recommended to use this function instead of ``norm_fn``. In this case,
-        the computation of ``x`` and the rescaling of the tensor values can be 
+        the computation of ``x`` and the rescaling of the tensor values can be
         performed outside the scope of the
         differentiable computation graph. This has two important advantages:
         1) It can lead to reductions in cpu time and memory usage when compared
-        to ``norm_fn``. 2) It can actually modify the parameters under optimization
-        to keep them normalized throughout the procedure, increasing numerical
-        stability. If desired, both ``norm_fn`` and ``norm_fn_scalar`` can
-        be used at the same time to enforce general constraints on ``tn`` and
-        then normalize it with scalar multiplication. In this case, note that
-        ``norm_fn_scalar`` is applied first, and then ``norm_fn``.
+        to ``norm_fn``. 2) It can actually modify the parameters under
+        optimization to keep them normalized throughout the procedure,
+        increasing numerical stability. If desired, both ``norm_fn`` and
+        ``norm_fn_scalar`` can be used at the same time to enforce general
+        constraints on ``tn`` and then normalize it with scalar multiplication.
+        In this case, note that ``norm_fn_scalar`` is applied first, and then
+        ``norm_fn``.
     loss_constants : dict_like, optional
         Extra constant arguments to supply to ``loss_fn`` and be converted to
         tensorflow constant tensors. Can be individual arrays or tensor
@@ -150,11 +152,11 @@ class TNOptimizer:
     loss_target : float, optional
         If supplied, stop optimizing once this loss is reached.
     tol_change : float, optional
-        Convergence threshold on the function value. If the value of the loss 
-        function changes by less than ``tol_change`` between subsequent optimization 
-        steps, the optimization will terminate.
+        Convergence threshold on the function value. If the value of the loss
+        function changes by less than ``tol_change`` between subsequent
+        optimization steps, the optimization will terminate.
     tol_grad : float, optional
-        Convergence threshold on the gradients. If the absolute value of the 
+        Convergence threshold on the gradients. If the absolute value of the
         gradient with the largest magnitude is smaller than ``tol_grad``, the
         optimization will terminate.
     device : string, optional
@@ -162,15 +164,15 @@ class TNOptimizer:
         If ``None``, then gpu (``'cuda'``) will be used if it can be
         detected, otherwise ``'cpu'`` will be used.
     progbar : bool, optional
-        "True" show live progress of the optimization using a progress bar. 
+        "True" show live progress of the optimization using a progress bar.
         "False" runs the optimization silently. For simple line-by-line
-        printing of the progress, you can set this option to the string "simple".
+        printing of the progress, you can set this option to the string
+        "simple".
 
 
     General usage examples can be seen in the documentation
     for ``tensor.optimize_tensorflow.TNOptimizer``.
     """
-
 
     def __init__(
         self,
@@ -201,7 +203,7 @@ class TNOptimizer:
         self.progbar = progbar
         self.constant_tags = (set() if constant_tags is None
                               else set(constant_tags))
-        
+
         if norm_fn is None:
             def norm_fn(x):
                 return x
@@ -216,6 +218,8 @@ class TNOptimizer:
                 if isinstance(v, TensorNetwork):
                     # convert it to constant pytorch TN
                     self.loss_constants[k] = constant_tn(v)
+                elif isinstance(v, Tensor):
+                    self.loss_constants[k] = constant_t(v)
                 else:
                     self.loss_constants[k] = constant(v)
         self.loss_kwargs = {} if loss_kwargs is None else dict(loss_kwargs)
@@ -223,6 +227,7 @@ class TNOptimizer:
             loss_fn, **self.loss_constants, **self.loss_kwargs
         )
         self.loss = None
+        self.losses = []
         self._n = 0
 
         # make pytorch version of network and gather variables etc.
@@ -235,14 +240,12 @@ class TNOptimizer:
 
     def closure(self):
         self.optimizer.zero_grad()
-        tn = self.norm_fn(self.tn_opt) # MJO: can't move this out of closure
-                                       # and down into optimizer() along with 
-                                       # norm_fn_scalar because we need
-                                       # norm_fn() to be a STRICTLY in-place
-                                       # modification of tn_opt for that 
-                                       # to work. I'm not sure how we can
-                                       # guarantee that for a norm_fn()
-                                       # with completely general functionality
+        # MJO: can't move this out of closure and down into optimizer() along
+        # with norm_fn_scalar because we need norm_fn() to be a STRICTLY
+        # in-place modification of tn_opt for that to work. I'm not sure how we
+        # can guarantee that for a norm_fn() with completely general
+        # functionality
+        tn = self.norm_fn(self.tn_opt)
         self.loss = self.loss_fn(tn)
         self.loss.backward()
         return self.loss
@@ -275,9 +278,10 @@ class TNOptimizer:
             return (time.time() - self._time_start) > max_time
 
     def _get_tn_opt_numpy(self):
-        tn_opt_numpy = self.norm_fn(self.tn_opt)
-        tn_opt_numpy.apply_to_arrays(lambda x: x.cpu().detach().numpy())
-        return tn_opt_numpy
+        tn = self.norm_fn(self.tn_opt.copy())
+        tn.drop_tags(t for t in tn.tags if '__VARIABLE' in t)
+        tn.apply_to_arrays(lambda x: x.cpu().detach().numpy())
+        return tn
 
     def optimize(self, max_steps, max_time=None):
 
@@ -289,7 +293,7 @@ class TNOptimizer:
         self._maybe_start_timer(max_time)
 
         try:
-            for it in range(max_steps):
+            for _ in range(max_steps):
                 if self.progbar == 'simple':
                     t0 = time.time()
 
@@ -303,28 +307,32 @@ class TNOptimizer:
                             tensor._data *= fac
 
                 self.optimizer.step(self.closure)
+                self.losses.append(self.loss.item())
                 pbar.set_description(f"{self.loss}")
                 pbar.update()
                 self._n += 1
 
                 if self.progbar == 'simple':
                     t1 = time.time()
-                    print('loss = {}, iter time = {}'.format(self.loss, t1-t0))
+                    print(f'loss = {self.loss}, iter time = {t1 - t0}')
 
                 # stopping conditions
                 if (self.loss_target is not None):
                     if self.loss < self.loss_target:
                         break
+
                 if self._time_should_stop(max_time):
                     break
-                if it > 0:
-                    if abs(self.loss - prev_loss) <= self.tol_change:
+
+                if len(self.losses) > 2:
+                    loss_change = abs(self.losses[-1] - self.losses[-2])
+                    if loss_change <= self.tol_change:
                         break
+
                 if abs_max_grad(self.tn_opt) <= self.tol_grad:
                     break
 
                 pbar.set_description(f"{self.loss}")
-                prev_loss = self.loss
 
         except Exception as excpt:
             if not isinstance(excpt, KeyboardInterrupt):

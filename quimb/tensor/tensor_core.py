@@ -19,7 +19,7 @@ from cytoolz import (unique, concat, frequencies,
 import numpy as np
 import opt_einsum as oe
 import scipy.sparse.linalg as spla
-from autoray import do, conj, reshape, transpose
+from autoray import do, conj, reshape, transpose, astype
 
 from ..core import qarray, prod, realify_scalar, vdot, common_type
 from ..utils import check_opt, functions_equal
@@ -1119,7 +1119,7 @@ class Tensor(object):
         """Change the type of this tensor to ``dtype``.
         """
         T = self if inplace else self.copy()
-        T.modify(data=self.data.astype(dtype))
+        T.modify(data=astype(self.data, dtype))
         return T
 
     astype_ = functools.partialmethod(astype, inplace=True)

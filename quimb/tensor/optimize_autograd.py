@@ -242,10 +242,11 @@ class TNOptimizer:
         self.loss = np.inf
         self.loss_best = np.inf
         self.loss_target = loss_target
+        self.losses = []
         self._n = 0
 
         self.tn_opt, self.variables = parse_network_to_ag(
-            tn, self.constant_tags
+            tn, self.constant_tags, backend=self.autograd_backend,
         )
 
         # this handles storing and packing /  unpacking many arrays as a vector
@@ -269,7 +270,8 @@ class TNOptimizer:
         def vectorized_func(x):
             arrays = self.vctrzr.unpack(x, conj=True)
             ag_result = self.func_jit(arrays)
-            self.loss = np.asarray(ag_result)
+            self.loss = ag_result.item()
+            self.losses.append(self.loss)
             self._n += 1
             return self.loss
 
@@ -291,7 +293,9 @@ class TNOptimizer:
     def inject_res_vector_and_return_tn(self):
         inject_(self.vctrzr.unpack(self.res.x, conj=True), self.tn_opt)
         self.vctrzr.vector[:] = self.res.x
-        return self.norm_fn(self.tn_opt)
+        tn = self.norm_fn(self.tn_opt.copy())
+        tn.drop_tags(t for t in tn.tags if '__VARIABLE' in t)
+        return tn
 
     def optimize(self, n, tol=None, **options):
         from scipy.optimize import minimize
