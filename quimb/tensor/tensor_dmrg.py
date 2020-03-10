@@ -107,31 +107,31 @@ class MovingEnvironment:
     few sites in a 1D tensor network. E.g. for ``begin='left', bsz=2``, this
     initializes the right environments like so::
 
-        n - 1: o-o-o-     -o-o-o
-               | | |       | | |
-               H-H-H- ... -H-H-H
-               | | |       | | |
-               o-o-o-     -o-o-o
+        n - 1: ●─●─●─     ─●─●─●
+               │ │ │       │ │ │
+               H─H─H─ ... ─H─H─H
+               │ │ │       │ │ │
+               ●─●─●─     ─●─●─●
 
-        n - 2: o-o-o-     -o-o\
-               | | |       | | o
-               H-H-H- ... -H-H-H
-               | | |       | | o
-               o-o-o-     -o-o/
+        n - 2: ●─●─●─     ─●─●─╮
+               │ │ │       │ │ ●
+               H─H─H─ ... ─H─H─H
+               │ │ │       │ │ ●
+               ●─●─●─     ─●─●─╯
 
-        n - 3: o-o-o-     -o\
-               | | |       | oo
-               H-H-H- ... -H-HH
-               | | |       | oo
-               o-o-o-     -o/
+        n - 3: ●─●─●─     ─●─╮
+               │ │ │       │ ●●
+               H─H─H─ ... ─H─HH
+               │ │ │       │ ●●
+               ●─●─●─     ─●─╯
 
         ...
 
-        0    : o-o\
-               | | oo   ooo
-               H-H-HH...HHH
-               | | oo   ooo
-               o-o/
+        0    : ●─●─╮
+               │ │ ●●   ●●●
+               H─H─HH...HHH
+               │ │ ●●   ●●●
+               ●─●─╯
 
     which can then be used to efficiently generate the left environments as
     each site is updated. For example if ``bsz=2`` and the environements have
@@ -139,41 +139,41 @@ class MovingEnvironment:
     returns something like::
 
              <---> bsz sites
-             /o-o\
-        ooooo | | ooooooo
-        HHHHH-H-H-HHHHHHH
-        ooooo | | ooooooo
-             \o-o/
+            ╭─●─●─╮
+        ●●●●● │ │ ●●●●●●●
+        HHHHH─H─H─HHHHHHH
+        ●●●●● │ │ ●●●●●●●
+            ╰─●─●─╯
         0 ... i i+1 ... n-1
 
     For periodic systems ``MovingEnvironment`` approximates the 'long
     way round' transfer matrices. E.g consider replacing segment B
     (to arbitrary precision) with an SVD::
 
-        /-----------------------------------------------\
-        +-A-A-A-A-A-A-A-A-A-A-A-A-B-B-B-B-B-B-B-B-B-B-B-+
-          | | | | | | | | | | | | | | | | | | | | | | |           ==>
-        +-A-A-A-A-A-A-A-A-A-A-A-A-B-B-B-B-B-B-B-B-B-B-B-+
-        \-----------------------------------------------/
+        ╭───────────────────────────────────────────────╮
+        ╰─A─A─A─A─A─A─A─A─A─A─A─A─B─B─B─B─B─B─B─B─B─B─B─╯
+          │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │           ==>
+        ╭─A─A─A─A─A─A─A─A─A─A─A─A─B─B─B─B─B─B─B─B─B─B─B─╮
+        ╰───────────────────────────────────────────────╯
 
-        +~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~+
-        |   /-A-A-A-A-A-A-A-A-A-A-A-A-\   |                       ==>
-        +~<BL | | | | | | | | | | | | BR>~+
-            \-A-A-A-A-A-A-A-A-A-A-A-A-/
+        ╭┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄╮
+        ┊   ╭─A─A─A─A─A─A─A─A─A─A─A─A─╮   ┊                       ==>
+        ╰┄<BL │ │ │ │ │ │ │ │ │ │ │ │ BR>┄╯
+            ╰─A─A─A─A─A─A─A─A─A─A─A─A─╯
               ^                     ^
         segment_start          segment_stop - 1
 
-        +~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~+
-        |   /-A-A-\                        |                      ==>
-        +~<BL | |  AAAAAAAAAAAAAAAAAAAABR>~+
-            \-A-A-/
+        ╭┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄╮
+        ┊   ╭─A─A─╮                        ┊                      ==>
+        ╰┄<BL │ │ AAAAAAAAAAAAAAAAAAAAABR>┄╯
+            ╰─A─A─╯
               ...
             <-bsz->
 
-        +~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~+
-        |               /-A-A-\           |                       ==>
-        +~<BLAAAAAAAAAAA  | |  AAAAAAABR>~+
-                        \-A-A-/
+        ╭┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄╮
+        ┊               ╭─A─A─╮           ┊                       ==>
+        ╰~<BLAAAAAAAAAAA  │ │ AAAAAAAABR>~╯
+                        ╰─A─A─╯
                           i i+1
              -----sweep--------->
 

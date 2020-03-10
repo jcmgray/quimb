@@ -14,6 +14,7 @@ from .tensor_core import (
     rand_uuid,
     TensorNetwork,
 )
+from .array_ops import sensibly_scale
 
 
 class TensorNetwork2D(TensorNetwork):
@@ -507,7 +508,7 @@ class PEPS(TensorNetwork2DVector,
                 shape.append(bond_dim)
             shape.append(phys_dim)
 
-            arrays[i][j] = randn(shape, dtype=dtype)
+            arrays[i][j] = sensibly_scale(randn(shape, dtype=dtype))
 
         return cls(arrays, **peps_opts)
 
@@ -628,7 +629,7 @@ def contract_2d_one_layer_boundary(
         #     ●--●--●--●--●
         #
         for j in range(tn.Ly):
-            tn ^= [tn.site_tag(i, j), tn.site_tag(i + 1, j)]
+            tn.contract_between((i, j), (i + 1, j))
 
         if (not alternate) or (i % 2 == 0):
             if horizontal_canonize:

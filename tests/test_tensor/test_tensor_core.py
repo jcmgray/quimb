@@ -988,6 +988,10 @@ class TestTensorNetwork:
         for tg in ['L2', 'R2', 'U2']:
             assert ttn[tg].H @ ttn[tg] != pytest.approx(2)
 
+        ttn.canonize_around_('C', max_distance=2)
+        for tg in ['L2', 'R2', 'U2']:
+            assert ttn[tg].H @ ttn[tg] == pytest.approx(2)
+
         # test can set the orthogonality center anywhere
         for tg in ['C', 'L1', 'L2', 'R1', 'R2', 'U1', 'U2']:
             ttn.canonize_around_(tg)
@@ -1085,6 +1089,17 @@ class TestTensorNetwork:
         psi.randomize_(seed=42, dtype=dtype)
         x3 = psi.H @ psi
         assert x2 == pytest.approx(x3)
+
+    @pytest.mark.parametrize('dtype', ['float32', 'complex128'])
+    def test_equalize_norms(self, dtype):
+        psi = MPS_rand_state(5, 3, dtype=dtype)
+        psi.randomize_(seed=42)
+        x_exp = psi.H @ psi
+        norms = [t.norm() for t in psi]
+        psi.equalize_norms_()
+        enorms = [t.norm() for t in psi]
+        assert all(n1 != n2 for n1, n2 in zip(norms, enorms))
+        assert psi.H @ psi == pytest.approx(x_exp)
 
 
 class TestTensorNetworkSimplifications:

@@ -2847,7 +2847,8 @@ class TensorNetwork(object):
 
     def contract_between(self, tags1, tags2, **contract_opts):
         """Contract the two tensors specified by ``tags1`` and ``tags2``
-        respectively. This is an inplace operation.
+        respectively. This is an inplace operation. No-op if the tensor
+        specified by ``tags1`` and ``tags2`` is the same tensor.
 
         Parameters
         ----------
@@ -2860,11 +2861,29 @@ class TensorNetwork(object):
         """
         tid1, = self._get_tids_from_tags(tags1, which='all')
         tid2, = self._get_tids_from_tags(tags2, which='all')
+
+        # allow no-op for same tensor specified twice ('already contracted')
+        if tid1 == tid2:
+            return
+
         T1 = self._pop_tensor(tid1)
         T2 = self._pop_tensor(tid2)
+
         self |= tensor_contract(T1, T2, **contract_opts)
 
-    def compress_between(self, tags1, tags2, **compress_opts):
+    def _compress_between_tids(self, tid1, tid2, canonize_distance=None,
+                               **compress_opts):
+        Tl = self.tensor_map[tid1]
+        Tr = self.tensor_map[tid2]
+
+        if canonize_distance:
+            self._canonize_around_tids(
+                (tid1, tid2), max_distance=canonize_distance)
+
+        tensor_compress_bond(Tl, Tr, **compress_opts)
+
+    def compress_between(self, tags1, tags2, canonize_distance=None,
+                         **compress_opts):
         r"""Compress the bond between the two single tensors in this network
         specified by ``tags1`` and ``tags2`` using
         :func:`~quimb.tensor.tensor_core.tensor_compress_bond`::
@@ -2898,11 +2917,10 @@ class TensorNetwork(object):
         --------
         canonize_between
         """
-        n1, = self._get_tids_from_tags(tags1, which='all')
-        n2, = self._get_tids_from_tags(tags2, which='all')
-        tensor_compress_bond(
-            self.tensor_map[n1], self.tensor_map[n2], **compress_opts
-        )
+        tid1, = self._get_tids_from_tags(tags1, which='all')
+        tid2, = self._get_tids_from_tags(tags2, which='all')
+        self._compress_between_tids(
+            tid1, tid2, canonize_distance=canonize_distance, **compress_opts)
 
     def compress_all(self, inplace=False, **compress_opts):
         """Inplace compress all bonds in this network.
@@ -2926,6 +2944,11 @@ class TensorNetwork(object):
         return tn
 
     compress_all_ = functools.partialmethod(compress_all, inplace=True)
+
+    def _canonize_between_tids(self, tid1, tid2, **canonize_opts):
+        Tl = self.tensor_map[tid1]
+        Tr = self.tensor_map[tid2]
+        tensor_canonize_bond(Tl, Tr, **canonize_opts)
 
     def canonize_between(self, tags1, tags2, **canonize_opts):
         r"""'Canonize' the bond between the two single tensors in this network
@@ -2959,11 +2982,48 @@ class TensorNetwork(object):
         --------
         compress_between
         """
-        n1, = self._get_tids_from_tags(tags1, which='all')
-        n2, = self._get_tids_from_tags(tags2, which='all')
-        tensor_canonize_bond(
-            self.tensor_map[n1], self.tensor_map[n2], **canonize_opts
-        )
+        tid1, = self._get_tids_from_tags(tags1, which='all')
+        tid2, = self._get_tids_from_tags(tags2, which='all')
+        self._canonize_between_tids(tid1, tid2, **canonize_opts)
+
+    def _canonize_around_tids(self, tids, max_distance=None,
+                              inplace=True, **canonize_opts):
+        tn = self if inplace else self.copy()
+
+        border = set(tids)
+        all_tids = set(tn.tensor_map)
+        remaining = all_tids - border
+        border_d = sorted((x, 0) for x in border)
+
+        # the sequence of tensors pairs to canonize
+        seq = []
+
+        while border_d:
+
+            tid, d = border_d.pop(0)
+            if (max_distance is not None) and d >= max_distance:
+                continue
+
+            ix = tn.tensor_map[tid].inds
+
+            # get un-canonized neighbors
+            neighbor_tids = set_union(tn.ind_map[i] for i in ix)
+            neighbor_tids &= remaining
+
+            for n_tid in neighbor_tids:
+                remaining.remove(n_tid)
+                border_d.append((n_tid, d + 1))
+                seq.append((n_tid, tid))
+
+        # want to start furthest away
+        seq.reverse()
+
+        for tid1, tid2 in seq:
+            T1 = tn.tensor_map[tid1]
+            T2 = tn.tensor_map[tid2]
+            tensor_canonize_bond(T1, T2, **canonize_opts)
+
+        return tn
 
     def canonize_around(self, tags, which='all', max_distance=None,
                         inplace=False, **canonize_opts):
@@ -3006,45 +3066,10 @@ class TensorNetwork(object):
             Whether to perform
 
         """
-        tn = self if inplace else self.copy()
-
-        # all tensor tids in the network
-        all_tids = set(tn.tensor_map)
-
         # the set of tensor tids that are in the 'bulk'
-        border = tn._get_tids_from_tags(tags, which=which)
-        remaining = all_tids - border
-        border = sorted((x, 0) for x in border)
-
-        # the sequence of tensors pairs to canonize
-        seq = []
-
-        while border:
-
-            tid, d = border.pop(0)
-            if (max_distance is not None) and d >= max_distance:
-                continue
-
-            ix = tn.tensor_map[tid].inds
-
-            # get un-canonized neighbors
-            neighbor_tids = set_union(tn.ind_map[i] for i in ix)
-            neighbor_tids &= remaining
-
-            for n_tid in neighbor_tids:
-                remaining.remove(n_tid)
-                border.append((n_tid, d + 1))
-                seq.append((n_tid, tid))
-
-        # want to start furthest away
-        seq.reverse()
-
-        for tid1, tid2 in seq:
-            T1 = tn.tensor_map[tid1]
-            T2 = tn.tensor_map[tid2]
-            tensor_canonize_bond(T1, T2, **canonize_opts)
-
-        return tn
+        border = self._get_tids_from_tags(tags, which=which)
+        return self._canonize_around_tids(border, max_distance=max_distance,
+                                          inplace=inplace, **canonize_opts)
 
     canonize_around_ = functools.partialmethod(canonize_around, inplace=True)
 
@@ -3394,6 +3419,8 @@ class TensorNetwork(object):
         # Else just contract those tensors specified by tags.
         return self.contract_tags(tags, inplace=inplace, **opts)
 
+    contract_ = functools.partialmethod(contract, inplace=True)
+
     def contraction_width(self, **contract_opts):
         """Compute the 'contraction width' of this tensor network. This
         is defined as log2 of the maximum tensor size produced during the
@@ -3543,6 +3570,22 @@ class TensorNetwork(object):
         return tn
 
     randomize_ = functools.partialmethod(randomize, inplace=True)
+
+    def equalize_norms(self, inplace=False):
+        """Make the Frobenius norm of every tensor in this TN equal without
+        changing the overall value.
+        """
+        tn = self if inplace else self.copy()
+
+        norms = [t.norm() for t in tn]
+        X = math.e ** (do('sum', do('log', norms, like=norms[0])) / len(norms))
+
+        for t, xi in zip(tn, norms):
+            t.modify(data=(X / xi) * t.data)
+
+        return tn
+
+    equalize_norms_ = functools.partialmethod(equalize_norms, inplace=True)
 
     def fuse_multibonds(self, inplace=False):
         """Fuse any multi-bonds (more than one index shared by the same pair
@@ -4129,7 +4172,7 @@ class TensorNetwork(object):
         ax.set_aspect('equal')
 
         # use spectral layout as starting point
-        pos0 = getattr(nx, initial_layout + '_layout')(G)
+        pos0 = getattr(nx, initial_layout + '_layout')(G, weight=None)
         # scale points to fit with specified positions
         if fix:
             # but update with fixed positions
@@ -4142,7 +4185,7 @@ class TensorNetwork(object):
 
         # and then relax remaining using spring layout
         pos = nx.spring_layout(G, pos=pos0, fixed=fixed,
-                               k=k, iterations=iterations)
+                               k=k, iterations=iterations, weight=None)
 
         nx.draw_networkx_nodes(G, pos, node_color=node_colors, node_size=szs,
                                ax=ax, linewidths=node_outline_size,
