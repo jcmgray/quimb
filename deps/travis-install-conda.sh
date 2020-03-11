@@ -37,6 +37,6 @@ else
   conda env update \
     --file $DIR/requirements-py3.yml \
     python=$TRAVIS_PYTHON_VERSION
-  pip install -U codeclimate-test-reporter codacy-coverage
+  pip install -U randomgen
   pip uninstall --yes quimb
 fi

@@ -57,5 +57,3 @@ script:
 after_success:
   - "if [ ${TEST_QUIMB:-ON} = ON ]; then coveralls; fi"
   - "if [ ${TEST_QUIMB:-ON} = ON ]; then codecov; fi"
-  - "if [ ${TEST_QUIMB:-ON} = ON ]; then codeclimate-test-reporter; fi"
-  - "if [ ${TEST_QUIMB:-ON} = ON ]; then python-codacy-coverage -r coverage.xml; fi"
