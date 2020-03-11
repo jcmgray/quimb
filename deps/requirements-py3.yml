@@ -23,8 +23,6 @@ dependencies:
   - cpuonly
   - autograd
   - tensorflow<2
+  - autoray
   - pip:
-    - autoray
     - randomgen
-    - codeclimate-test-reporter
-    - codacy-coverage
