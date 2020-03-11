@@ -50,12 +50,8 @@ class Test2DContract:
         # hopefully uneccesary at some point
         norm.view_as_(qtn.TensorNetwork2D, like=psi)
 
-        # flatten
-        for i, j in norm.gen_site_coos():
-            norm ^= (i, j)
-
         xe = norm.contract(all, optimize='auto-hq')
-        xt = qtn.contract_2d_one_layer_boundary(norm, max_bond=9)
+        xt = norm.contract_boundary(max_bond=9)
         assert xt == pytest.approx(xe, rel=1e-2)
 
     def test_contract_2d_two_layer_boundary(self):
@@ -66,5 +62,5 @@ class Test2DContract:
         norm.view_as_(qtn.TensorNetwork2D, like=psi)
 
         xe = norm.contract(all, optimize='auto-hq')
-        xt = qtn.contract_2d_two_layer_boundary(norm, max_bond=18)
+        xt = norm.contract_boundary(max_bond=27, layer_tags=['KET', 'BRA'])
         assert xt == pytest.approx(xe, rel=1e-2)
