@@ -99,7 +99,7 @@ def parse_network_to_tf(tn, constant_tags):
 
         # check if tensor has any of the constant tags
         if t.tags & constant_tags:
-            t.modify(data=constant(value=t.data))
+            t.modify(data=constant(t.data))
 
         # treat re and im parts as separate variables
         elif issubclass(t.dtype.type, np.complexfloating):
