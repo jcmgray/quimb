@@ -290,8 +290,9 @@ class TestEvolution:
     @mark.parametrize("dop", [False, True])
     @mark.parametrize("linop", [False, True])
     @mark.parametrize("num_callbacks", [0, 1, 2])
+    @mark.parametrize("use_int_stop", [False, True])
     def test_evo_timedep_adiabatic_with_callbacks(self, dop, linop,
-                                                  num_callbacks):
+                                                  num_callbacks, use_int_stop):
         # tests time dependent Evolution via an adiabatic sweep with:
         #   a) no callbacks
         #   b) 1 callback that accesses the time-dependent Hamiltonian
@@ -300,6 +301,11 @@ class TestEvolution:
         if num_callbacks > 0 and (dop or linop):
             # should implement this at some point
             return
+
+        if use_int_stop and dop:
+            # should implement this at some point
+            return
+
         L = 6
         T = 20
 
@@ -329,8 +335,17 @@ class TestEvolution:
         else:
             p0 = gs1
 
+        if use_int_stop:
+            def check_init_gs_overlap(t, pt):
+                val = qu.fidelity(pt, gs1)
+                return (-1 if val <= 0.75 else 0)
+            int_stop = check_init_gs_overlap
+        else:
+            int_stop = None
+
         if num_callbacks == 0:
-            evo = qu.Evolution(p0, ham, progbar=True)
+            evo = qu.Evolution(p0, ham, method='integrate', int_stop=int_stop,
+                               progbar=True)
         else:
             def gs_overlap(t, pt, H):
                 evals, evecs = eigs_scipy(H(t), k=1, which='SA')
@@ -342,12 +357,19 @@ class TestEvolution:
                 def norm(t, pt):
                     return qu.dot(pt.T, pt)
                 compute = {'norm': norm, 'gs_overlap': gs_overlap}
-            evo = qu.Evolution(p0, ham, compute=compute, progbar=True)
+            evo = qu.Evolution(p0, ham, compute=compute, int_stop=int_stop,
+                               method='integrate', progbar=True)
         evo.update_to(T)
 
         # final state should now overlap much more with second hamiltonian GS
-        assert qu.fidelity(evo.pt, gs1) < 0.5
-        assert qu.fidelity(evo.pt, gs2) > 0.99
+        if use_int_stop:
+            assert qu.fidelity(evo.pt, gs1) < 0.9
+            assert qu.fidelity(evo.pt, gs2) > 0.1
+            assert evo.t < 15
+        else:
+            assert qu.fidelity(evo.pt, gs1) < 0.5
+            assert qu.fidelity(evo.pt, gs2) > 0.99
+            assert evo.t == 20
 
         if num_callbacks == 1:
             gs_overlap_results = evo.results

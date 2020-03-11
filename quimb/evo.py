@@ -282,6 +282,14 @@ class Evolution(object):
               results as a dict of lists with corresponding keys to those
               given in ``compute``.
 
+    int_stop : callable, optional
+        A condition to terminate the integration early if ``method`` is
+        ``'integrate'``. This callable is called at every successful
+        integration step and should take args (t, pt) or (t, pt, ham) similar
+        to the function(s) in the ``compute`` argument.  It should return
+        ``-1`` to stop the integration, otherwise it should return ``None``
+        or ``0``.
+
     method : {'integrate', 'solve', 'expm'}
         How to evolve the system:
 
@@ -311,6 +319,7 @@ class Evolution(object):
 
     def __init__(self, p0, ham, t0=0,
                  compute=None,
+                 int_stop=None,
                  method='integrate',
                  int_small_step=False,
                  expm_backend='AUTO',
@@ -336,7 +345,12 @@ class Evolution(object):
                     make_immutable(Ht)
                 return Ht
 
-        self._setup_callback(compute)
+        if (int_stop is not None) and (not method == 'integrate'):
+            raise ValueError("You can't provide an integration stopping "
+                             "condition (int_stop) if the method is not "
+                             "'integrate'")
+
+        self._setup_callback(compute, int_stop)
         self._method = method
 
         if method == 'solve' or isinstance(ham, (tuple, list)):
@@ -370,7 +384,7 @@ class Evolution(object):
             raise ValueError(f"Did not understand evolution "
                              "method: '{method}'.")
 
-    def _setup_callback(self, fn):
+    def _setup_callback(self, fn, int_stop):
         """Setup callbacks in the correct place to compute into _results
         """
         # if fn is None there is no callback, but possible make a dummy
@@ -422,6 +436,35 @@ class Evolution(object):
                 step_callback(t, pt, H)
 
         self._step_callback = step_callback
+
+        # if there is an integration stopping condition, set up the function
+        #   to use this
+
+        if int_stop is not None:
+            int_stop_no_tryexcept = int_stop
+
+            # try just passing time and state to a single callback function
+            # if it fails, pass time, state and hamiltonian
+            def int_stop(t, y, H):
+                try:
+                    int_stop_output = int_stop_no_tryexcept(t, y)
+                except TypeError as e:
+                    if 'positional' in e.args[0]:
+                        int_stop_output = int_stop_no_tryexcept(t, y, H)
+                    else:
+                        raise
+                return int_stop_output
+
+            if int_step_callback is not None:
+                int_step_callback_bare = int_step_callback
+
+                def int_step_callback(t, y, H):
+                    int_step_callback_bare(t, y, H)
+                    return int_stop(t, y, H)
+            else:
+                def int_step_callback(t, y, H):
+                    return int_stop(t, y, H)
+
         self._int_step_callback = int_step_callback
 
     def _setup_solved_ham(self):
@@ -474,7 +517,8 @@ class Evolution(object):
         # Set step_callback to be evaluated with args (t, y) at each step
         if self._int_step_callback is not None:
             def solout(t, y):
-                self._int_step_callback(t, y, self._ham)
+                res = self._int_step_callback(t, y, self._ham)
+                return res
             self._stepper.set_solout(solout)
 
         self._stepper.set_initial_value(self._p0.A.reshape(-1), self.t0)
@@ -542,8 +586,9 @@ class Evolution(object):
             with continuous_progbar(self.t, t) as pbar:
                 if self._int_step_callback is not None:
                     def solout(t, y):
-                        self._int_step_callback(t, y, self._ham)
+                        int_stop = self._int_step_callback(t, y, self._ham)
                         pbar.cupdate(t)
+                        return int_stop
                 else:
                     def solout(t, _):
                         pbar.cupdate(t)
