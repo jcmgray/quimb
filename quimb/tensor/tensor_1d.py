@@ -481,6 +481,22 @@ class TensorNetwork1D(TensorNetwork):
         """
         return self.site_tag_id.format(i % self.nsites)
 
+    def retag_sites(self, new_id, where=None, inplace=False):
+        """Modify the site tags for all or some tensors in this 1D TN
+        (without changing the ``site_tag_id``).
+        """
+        if where is None:
+            where = self.sites
+
+        return self.retag({self.site_tag(i): new_id.format(i) for i in where},
+                          inplace=inplace)
+
+    @site_tag_id.setter
+    def site_tag_id(self, new_id):
+        if self._site_tag_id != new_id:
+            self.retag_sites(new_id, inplace=True)
+            self._site_tag_id = new_id
+
     @property
     def site_tags(self):
         """An ordered tuple of the actual site tags.

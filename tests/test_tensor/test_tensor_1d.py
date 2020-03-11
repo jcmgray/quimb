@@ -609,6 +609,13 @@ class TestMatrixProductOperator:
             'k0', 'b0', 'k1', 'b1', 'k2', 'b2', 'k3', 'b3', 'k4', 'b4'
         }
 
+        assert set(mpo.site_tags) == {f'I{i}' for i in range(5)}
+        assert all(f'I{i}' in mpo.tags for i in range(5))
+        mpo.site_tag_id = 'TEST1,{}'
+        assert set(mpo.site_tags) == {f'TEST1,{i}' for i in range(5)}
+        assert not any(f'I{i}' in mpo.tags for i in range(5))
+        assert all(f'TEST1,{i}' in mpo.tags for i in range(5))
+
     @pytest.mark.parametrize("cyclic", [False, True])
     def test_compress_mpo(self, cyclic):
         A = MPO_rand(12, 5, cyclic=cyclic)

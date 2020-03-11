@@ -87,8 +87,6 @@ from .circuit_gen import (
 from .tensor_2d import (
     TensorNetwork2D,
     PEPS,
-    contract_2d_one_layer_boundary,
-    contract_2d_two_layer_boundary,
 )
 
 __all__ = (
@@ -164,6 +162,4 @@ __all__ = (
     "circ_ansatz_1D_rand",
     "TensorNetwork2D",
     "PEPS",
-    "contract_2d_one_layer_boundary",
-    "contract_2d_two_layer_boundary",
 )
