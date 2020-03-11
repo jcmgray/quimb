@@ -7,7 +7,7 @@ import importlib
 
 import tqdm
 import numpy as np
-from autoray import do
+from autoray import do, to_numpy
 
 from .tensor_core import contract_backend, Tensor, TensorNetwork, PTensor
 from .array_ops import iscomplex
@@ -15,6 +15,8 @@ from ..core import qarray
 
 if importlib.util.find_spec("jax") is not None:
     _DEFAULT_BACKEND = 'jax'
+elif importlib.util.find_spec("tensorflow") is not None:
+    _DEFAULT_BACKEND = 'tensorflow'
 else:
     _DEFAULT_BACKEND = 'autograd'
 
@@ -156,14 +158,24 @@ def constant_tn(tn, backend=_DEFAULT_BACKEND):
     return ag_tn
 
 
-def convert_args_to_jax(fn):
+def tensorflow_value_and_grad(fn):
+    """TensorFlow 2 version of ``value_and_grad``.
+    """
+    import tensorflow as tf
 
-    @functools.wraps(fn)
-    def jax_args_fn(arrays):
-        jarrays = [constant(array) for array in arrays]
-        return fn(jarrays)
+    jit_fn = tf.function(fn, autograph=False)
 
-    return jax_args_fn
+    def fn_value_and_grad(arrays):
+        arrays = [tf.constant(x) for x in arrays]
+
+        # explicitly only watch supplied arrays
+        with tf.GradientTape(watch_accessed_variables=False) as t:
+            t.watch(arrays)
+            result = jit_fn(arrays)
+
+        return result, t.gradient(result, arrays)
+
+    return fn_value_and_grad
 
 
 variable_finder = re.compile(r'__VARIABLE(\d+)__')
@@ -197,6 +209,7 @@ class TNOptimizer:
         loss_target=None,
         optimizer='L-BFGS-B',
         progbar=True,
+        bounds=None,
         autograd_backend='AUTO',
         # the rest are ignored for compat
         learning_rate=None,
@@ -205,13 +218,13 @@ class TNOptimizer:
     ):
         self.progbar = progbar
         self.optimizer = optimizer
+        self.bounds = bounds
         self.constant_tags = (
             set() if constant_tags is None else set(constant_tags)
         )
 
         if autograd_backend.upper() == 'AUTO':
             autograd_backend = _DEFAULT_BACKEND
-
         self.autograd_backend = autograd_backend
 
         # use identity if no nomalization required
@@ -252,6 +265,10 @@ class TNOptimizer:
         # this handles storing and packing /  unpacking many arrays as a vector
         self.vctrzr = Vectorizer(self.variables)
 
+        if bounds is not None:
+            bounds = (bounds,) * self.vctrzr.d
+        self.bounds = bounds
+
         def func(arrays):
             # need to set backend explicitly as mixing with numpy arrays
             with contract_backend(self.autograd_backend):
@@ -260,29 +277,26 @@ class TNOptimizer:
 
         if self.autograd_backend == 'jax':
             import jax
-            self.func_jit = jax.jit(func)
-            self.grad_jit = jax.jit(jax.grad(self.func_jit))
+            self.func_val_and_grad = jax.value_and_grad(jax.jit(func))
         elif self.autograd_backend == 'autograd':
             import autograd
-            self.func_jit = func
-            self.grad_jit = autograd.grad(func)
+            self.func_val_and_grad = autograd.value_and_grad(func)
+        elif self.autograd_backend == 'tensorflow':
+            self.func_val_and_grad = tensorflow_value_and_grad(func)
 
-        def vectorized_func(x):
+        def vectorized_value_and_grad(x):
             arrays = self.vctrzr.unpack(x, conj=True)
-            ag_result = self.func_jit(arrays)
-            self.loss = ag_result.item()
-            self.losses.append(self.loss)
+            ag_result, ag_grads = self.func_val_and_grad(arrays)
             self._n += 1
-            return self.loss
 
-        def vectorized_grad(x):
-            arrays = self.vctrzr.unpack(x, conj=True)
-            ag_grads = self.grad_jit(arrays)
+            self.loss = to_numpy(ag_result)
+            self.losses.append(self.loss)
+
             vec_grad = self.vctrzr.pack(ag_grads, 'grad')
-            return vec_grad
 
-        self.vectorized_func = vectorized_func
-        self.vectorized_grad = vectorized_grad
+            return self.loss, vec_grad
+
+        self.vectorized_value_and_grad = vectorized_value_and_grad
 
     @property
     def nevals(self):
@@ -308,11 +322,12 @@ class TNOptimizer:
                 pbar.set_description(f"{self.loss}")
 
             self.res = minimize(
-                fun=self.vectorized_func,
-                jac=self.vectorized_grad,
+                fun=self.vectorized_value_and_grad,
+                jac=True,
                 x0=self.vctrzr.vector,
                 callback=callback,
                 tol=tol,
+                bounds=self.bounds,
                 method=self.optimizer,
                 options=dict(
                     maxiter=n,
@@ -343,12 +358,13 @@ class TNOptimizer:
                 pbar.set_description(msg)
 
             self.res = basinhopping(
-                func=self.vectorized_func,
+                func=self.vectorized_value_and_grad,
                 x0=self.vctrzr.vector,
                 niter=nhop,
                 minimizer_kwargs=dict(
-                    jac=self.vectorized_grad,
+                    jac=True,
                     method=self.optimizer,
+                    bounds=self.bounds,
                     callback=inner_callback,
                     options=dict(
                         maxiter=n,
