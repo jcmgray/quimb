@@ -351,7 +351,15 @@ def _rsvd(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0, renorm=0):
     from the get-go, and is thus more efficient. Can also supply
     ``scipy.sparse.linalg.LinearOperator``.
     """
-    U, s, V = rsvd(x, cutoff)
+    if max_bond > 0:
+        if cutoff > 0.0:
+            # adapt and block
+            U, s, V = rsvd(x, cutoff, k_max=max_bond)
+        else:
+            U, s, V = rsvd(x, max_bond)
+    else:
+        U, s, V = rsvd(x, cutoff)
+
     return _trim_and_renorm_SVD(U, s, V, cutoff, cutoff_mode,
                                 max_bond, absorb, renorm)
 

@@ -364,8 +364,34 @@ def rand_uuid(base=""):
 
 _VALID_SPLIT_GET = {None, 'arrays', 'tensors', 'values'}
 _FULL_SPLIT_METHODS = {'svd', 'eig', 'eigh'}
+_RANK_HIDDEN_METHODS = {'qr', 'lq', 'cholesky'}
+_CUTOFF_LOOKUP = {None: -1.0}
+_ABSORB_LOOKUP = {'left': -1, 'both': 0, 'right': 1}
+_MAX_BOND_LOOKUP = {None: -1}
 _CUTOFF_MODES = {'abs': 1, 'rel': 2, 'sum2': 3,
                  'rsum2': 4, 'sum1': 5, 'rsum1': 6}
+_RENORM_LOOKUP = {'sum2': 2, 'rsum2': 2, 'sum1': 1, 'rsum1': 1}
+
+
+def _parse_split_opts(method, cutoff, absorb, max_bond, cutoff_mode, renorm):
+    opts = {}
+
+    if method in _RANK_HIDDEN_METHODS:
+        return opts
+
+    # Convert defaults and settings to numeric type for numba funcs
+    opts['cutoff'] = _CUTOFF_LOOKUP.get(cutoff, cutoff)
+    opts['absorb'] = _ABSORB_LOOKUP[absorb]
+    opts['max_bond'] = _MAX_BOND_LOOKUP.get(max_bond, max_bond)
+    opts['cutoff_mode'] = _CUTOFF_MODES[cutoff_mode]
+
+    # renorm doubles up as the power used to renormalize
+    if (method in _FULL_SPLIT_METHODS) and (renorm is None):
+        opts['renorm'] = _RENORM_LOOKUP.get(cutoff_mode, 0)
+    else:
+        opts['renorm'] = 0 if renorm is None else int(renorm)
+
+    return opts
 
 
 def tensor_split(T, left_inds, method='svd', max_bond=None, absorb='both',
@@ -461,21 +487,8 @@ def tensor_split(T, left_inds, method='svd', max_bond=None, absorb='both',
         return {'svd': decomp._svdvals,
                 'eig': decomp._svdvals_eig}[method](array)
 
-    opts = {}
-    if method not in ('qr', 'lq'):
-
-        # Convert defaults and settings to numeric type for numba funcs
-        opts['cutoff'] = {None: -1.0}.get(cutoff, cutoff)
-        opts['absorb'] = {'left': -1, 'both': 0, 'right': 1}[absorb]
-        opts['max_bond'] = {None: -1}.get(max_bond, max_bond)
-        opts['cutoff_mode'] = _CUTOFF_MODES[cutoff_mode]
-
-        # renorm doubles up as the power used to renormalize
-        if (method in _FULL_SPLIT_METHODS) and (renorm is None):
-            opts['renorm'] = {'sum2': 2, 'rsum2': 2,
-                              'sum1': 1, 'rsum1': 1}.get(cutoff_mode, 0)
-        else:
-            opts['renorm'] = 0 if renorm is None else int(renorm)
+    opts = _parse_split_opts(
+        method, cutoff, absorb, max_bond, cutoff_mode, renorm)
 
     left, right = {
         'svd': decomp._svd,
@@ -539,7 +552,6 @@ def tensor_canonize_bond(T1, T2, **split_opts):
         # fuse multibonds
         T1.fuse_({shared_ix[0]: shared_ix})
         T2.fuse_({shared_ix[0]: shared_ix})
-        shared_ix = shared_ix[0]
 
     new_T1, tRfact = T1.split(left_env_ix, get='tensors', **split_opts)
     new_T2 = T2.contract(tRfact)
@@ -559,6 +571,7 @@ def tensor_compress_bond(T1, T2, absorb='both', **compress_opts):
         --1---2--  ->  --1L~~1R--2L~~2R--  ->  --1L~~M~~2R--
           |   |          |   ......   |          |       |
          <*> <*>              >  <                  <*>
+         QR   LQ                                    SVD
 
                   d)|            |        e)|     |
               ->  --1L~~ML~~MR~~2R--  ->  --1C~~~2C--
@@ -575,7 +588,8 @@ def tensor_compress_bond(T1, T2, absorb='both', **compress_opts):
         shared_ix = (shared_ix[0],)
 
     # a) -> b)
-    T1_L, T1_R = T1.split(left_inds=left_env_ix, get='tensors', method='qr')
+    T1_L, T1_R = T1.split(left_inds=left_env_ix, right_inds=shared_ix,
+                          get='tensors', method='qr')
     T2_L, T2_R = T2.split(left_inds=shared_ix, get='tensors', method='lq')
     # b) -> c)
     M = (T1_R @ T2_L)
@@ -2697,6 +2711,7 @@ class TensorNetwork(object):
 
     def replace_with_svd(self, where, left_inds, eps, *, which='any',
                          right_inds=None, method='isvd', max_bond=None,
+                         absorb='both', cutoff_mode='rel', renorm=None,
                          ltags=None, rtags=None, keep_tags=True,
                          start=None, stop=None, inplace=False):
         r"""Replace all tensors marked by ``where`` with an iteratively
@@ -2781,7 +2796,8 @@ class TensorNetwork(object):
 
         left_shp, right_shp = A.ldims, A.rdims
 
-        opts = {'max_bond': -1 if max_bond is None else max_bond}
+        opts = _parse_split_opts(
+            method, eps, absorb, max_bond, cutoff_mode, renorm)
 
         if method in ('svd', 'eig', 'eigh', 'cholesky'):
             if not isinstance(A, np.ndarray):
@@ -2796,7 +2812,7 @@ class TensorNetwork(object):
             'svds': decomp._svds,
             'rsvd': decomp._rsvd,
             'eigsh': decomp._eigsh,
-        }[method](A, cutoff=eps, **opts)
+        }[method](A, **opts)
 
         U = reshape(U, (*left_shp, -1))
         V = reshape(V, (-1, *right_shp))
@@ -2808,6 +2824,8 @@ class TensorNetwork(object):
         leave |= Tensor(V, inds=(new_bnd, *right_inds), tags=tags | rtags)
 
         return leave
+
+    replace_with_svd_ = functools.partialmethod(replace_with_svd, inplace=True)
 
     def replace_section_with_svd(self, start, stop, eps,
                                  **replace_with_svd_opts):
