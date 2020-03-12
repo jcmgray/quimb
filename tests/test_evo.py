@@ -384,6 +384,42 @@ class TestEvolution:
             # check that we stayed in the ground state the whole time
             assert ((np.array(gs_overlap_results) - 1.0) < 1e-3).all()
 
+    def test_int_stop_calling_details(self, ham_rcr_psi):
+        # test some details about the way Evolution is called with int_stop:
+        # - Giving int_stop without any compute
+        # - Giving int_stop with (t, p) and with (t, p, H) call signatures
+        ham, trc, p0, tm, pm = ham_rcr_psi
+
+        # check that the int_stop argument doesn't get accepted in either form
+        with raises(ValueError):
+            qu.Evolution(p0, ham, method='solve', int_stop=(lambda t, p: -1))
+        with raises(ValueError):
+            qu.Evolution(p0, ham, method='solve',
+                         int_stop=(lambda t, p, H: -1))
+
+        # check expected behaviour in case where int_stop takes t, p
+        sim = qu.Evolution(p0, ham, method='integrate',
+                           int_stop=(lambda t, p: -1))
+        sim.update_to(trc)
+        assert sim.t < trc/2  # make sure it stopped early
+
+        sim = qu.Evolution(p0, ham, method='integrate',
+                           int_stop=(lambda t, p: 0))
+        sim.update_to(trc)
+        assert sim.t == trc  # make sure it didn't stop early
+
+        sim = qu.Evolution(p0, ham, method='integrate',
+                           int_stop=(lambda t, p, H: -1))
+
+        # check expected behaviour in case where int_stop takes t, p, H
+        sim.update_to(trc)
+        assert sim.t < trc/2  # make sure it stopped early
+
+        sim = qu.Evolution(p0, ham, method='integrate',
+                           int_stop=(lambda t, p, H: 0))
+        sim.update_to(trc)
+        assert sim.t == trc  # make sure it didn't stop early
+
     def test_evo_at_times(self):
         ham = qu.ham_heis(2, cyclic=False)
         p0 = qu.up() & qu.down()
