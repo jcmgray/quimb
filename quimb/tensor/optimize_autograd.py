@@ -9,7 +9,14 @@ import tqdm
 import numpy as np
 from autoray import do, to_numpy
 
-from .tensor_core import contract_backend, Tensor, TensorNetwork, PTensor
+from .tensor_core import (
+    contract_backend,
+    Tensor,
+    TensorNetwork,
+    PTensor,
+    utup_intersection,
+    tags_to_utup,
+)
 from .array_ops import iscomplex
 from ..core import qarray
 
@@ -118,7 +125,7 @@ def parse_network_to_ag(tn, constant_tags, backend=_DEFAULT_BACKEND):
 
     for t in tn_ag:
         # check if tensor has any of the constant tags
-        if t.tags & constant_tags:
+        if utup_intersection((t.tags, constant_tags)):
             t.modify(data=constant(t.data, backend=backend))
             continue
 
@@ -219,9 +226,7 @@ class TNOptimizer:
         self.progbar = progbar
         self.optimizer = optimizer
         self.bounds = bounds
-        self.constant_tags = (
-            set() if constant_tags is None else set(constant_tags)
-        )
+        self.constant_tags = tags_to_utup(constant_tags)
 
         if autograd_backend.upper() == 'AUTO':
             autograd_backend = _DEFAULT_BACKEND

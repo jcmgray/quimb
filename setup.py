@@ -35,7 +35,7 @@ setup(
             'matplotlib',
             'networkx',
             'opt_einsum>=2',
-            'autoray>=0.1',
+            'autoray>=0.2.0',
         ],
         'advanced_solvers': [
             'mpi4py',

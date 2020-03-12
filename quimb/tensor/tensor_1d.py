@@ -18,7 +18,9 @@ from .tensor_core import (
     rand_uuid,
     bonds,
     bonds_size,
-    tags2set,
+    tags_to_utup,
+    utup_union,
+    utup_add,
     get_tags,
     PTensor,
 )
@@ -243,7 +245,7 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
     psi = tn if inplace else tn.copy()
 
     dp = psi.phys_dim()
-    tags = tags2set(tags)
+    tags = tags_to_utup(tags)
 
     if isinstance(where, Integral):
         where = (where,)
@@ -300,16 +302,16 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
     # 'propagate' forward from the tensors being acted on to the gate tensors
     if propagate_tags:
         if propagate_tags == 'register':
-            old_tags = {psi.site_tag(i) for i in where}
+            old_tags = tuple(map(psi.site_tag, where))
         else:
             old_tags = get_tags(psi.tensor_map[tid] for tid in site_tids)
 
         if propagate_tags == 'sites':
             # use regex to take tags only matching e.g. 'I0', 'I13'
             rex = re.compile(psi.structure.format(r"\d+"))
-            old_tags = {t for t in old_tags if rex.match(t)}
+            old_tags = tuple(filter(rex.match, old_tags))
 
-        TG.modify(tags=TG.tags | old_tags)
+        TG.modify(tags=utup_union((TG.tags, old_tags)))
 
     if ng == 1:
         psi |= TG
@@ -363,7 +365,7 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
         if propagate_tags == 'register':
             for (i, j) in (where, where[::-1]):
                 itid, = TG.ind_map[psi.site_ind(i)]
-                TG.tensor_map[itid].tags.discard(psi.site_tag(j))
+                TG.tensor_map[itid].drop_tags(psi.site_tag(j))
 
     psi |= TG
     return psi
@@ -1455,14 +1457,9 @@ class MatrixProductState(TensorNetwork1DVector,
         # process site tags
         self._site_tag_id = site_tag_id
         site_tags = map(site_tag_id.format, sites)
-
         if tags is not None:
-            if isinstance(tags, str):
-                tags = {tags}
-            else:
-                tags = set(tags)
-
-            site_tags = tuple({st} | tags for st in site_tags)
+            # mix in global tags
+            site_tags = (utup_add(tags, st) for st in site_tags)
 
         self.cyclic = (ops.ndim(arrays[0]) == 3)
 
@@ -1552,7 +1549,7 @@ class MatrixProductState(TensorNetwork1DVector,
                 TM, TR = TM.split(left_inds=inds[:i], get='tensors',
                                   rtags={site_tag_id.format(i)}, **split_opts)
                 yield TR
-            TM.tags.add(site_tag_id.format(0))
+            TM.add_tag(site_tag_id.format(0))
             yield TM
 
         tn = TensorNetwork(gen_tensors(), structure='I{}')
@@ -2906,14 +2903,10 @@ class Dense1D(TensorNetwork1DVector,
 
         # process site tags
         self._site_tag_id = site_tag_id
-        site_tags = set(map(site_tag_id.format, sites))
-
+        site_tags = tuple(map(site_tag_id.format, sites))
         if tags is not None:
-            if isinstance(tags, str):
-                tags = {tags}
-            else:
-                tags = set(tags)
-            site_tags = site_tags | tags
+            # mix in global tags
+            site_tags = utup_union((tags_to_utup(tags), site_tags))
 
         T = Tensor(ops.asarray(array).reshape(*dims),
                    inds=site_inds, tags=site_tags)
@@ -2928,15 +2921,6 @@ class Dense1D(TensorNetwork1DVector,
         array = qu.randn(phys_dim ** n, dtype=dtype)
         array /= qu.norm(array, 'fro')
         return cls(array, nsites=n, **dense1d_opts)
-
-
-def tags2tuple(tags):
-    if tags is None:
-        return ()
-    elif isinstance(tags, str):
-        return (tags,)
-    else:
-        return tuple(tags)
 
 
 class SuperOperator1D(
@@ -3016,9 +3000,9 @@ class SuperOperator1D(
 
         # process tags
         self._site_tag_id = site_tag_id
-        tags = tags2tuple(tags)
-        tags_upper = tags2tuple(tags_upper)
-        tags_lower = tags2tuple(tags_lower)
+        tags = tags_to_utup(tags)
+        tags_upper = tags_to_utup(tags_upper)
+        tags_lower = tags_to_utup(tags_lower)
 
         def gen_tags():
             site_tags = map(site_tag_id.format, sites)

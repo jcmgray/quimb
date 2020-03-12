@@ -4,7 +4,7 @@ import cytoolz
 from autoray import do
 
 import quimb as qu
-from .tensor_core import get_tags, PTensor
+from .tensor_core import get_tags, PTensor, utup_union, tags_to_utup
 from .tensor_gen import MPS_computational_state
 from .tensor_1d import TensorNetwork1DVector
 from . import array_ops as ops
@@ -91,11 +91,7 @@ def parse_qasm_url(url, **kwargs):
 # -------------------------- core gate functions ---------------------------- #
 
 def _merge_tags(tags, gate_opts):
-    if isinstance(tags, str):
-        tags = {tags}
-    else:
-        tags = set(tags)
-    return tags | set(gate_opts.pop('tags', ()))
+    return utup_union(map(tags_to_utup, (tags, gate_opts.pop('tags', None))))
 
 
 def build_gate_1(gate, tags=None):

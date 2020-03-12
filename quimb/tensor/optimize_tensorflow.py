@@ -12,7 +12,7 @@ import tqdm
 import numpy as np
 
 
-from .tensor_core import Tensor, TensorNetwork
+from .tensor_core import Tensor, TensorNetwork, utup_intersection
 
 
 LazyComplexTF = namedtuple('LazyComplexTF', ['shape', 'real', 'imag'])
@@ -98,7 +98,7 @@ def parse_network_to_tf(tn, constant_tags):
     for t in tn_tf:
 
         # check if tensor has any of the constant tags
-        if t.tags & constant_tags:
+        if utup_intersection((t.tags, constant_tags)):
             t.modify(data=constant(t.data))
 
         # treat re and im parts as separate variables

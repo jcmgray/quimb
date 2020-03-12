@@ -84,7 +84,7 @@ class NNI:
         if H1 is not None:
             self.H1s = dict(H1)
         else:
-            self.H1s = {}
+            self.H1s = dict()
         self.H1s.setdefault(None, None)
 
         # sites where the term might be different

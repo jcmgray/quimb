@@ -10,7 +10,8 @@ from ..gen.rand import randn, seed_rand
 from ..utils import print_multi_line, check_opt
 from .tensor_core import (
     Tensor,
-    tags2set,
+    utup_union,
+    tags_to_utup,
     rand_uuid,
     TensorNetwork,
 )
@@ -1386,7 +1387,7 @@ class PEPS(TensorNetwork2DVector,
             super().__init__(arrays)
             return
 
-        tags = tags2set(tags)
+        tags = tags_to_utup(tags)
         self._site_ind_id = site_ind_id
         self._site_tag_id = site_tag_id
         self._row_tag_id = row_tag_id
@@ -1438,9 +1439,9 @@ class PEPS(TensorNetwork2DVector,
             inds.append(self.site_ind(i, j))
 
             # mix site, row, column and global tags
-            ij_tags = tags.union({self.site_tag(i, j),
-                                  self.row_tag(i),
-                                  self.col_tag(j)})
+            ij_tags = utup_union((tags, (self.site_tag(i, j),
+                                         self.row_tag(i),
+                                         self.col_tag(j))))
 
             # create the site tensor!
             tensors.append(Tensor(data=array, inds=inds, tags=ij_tags))

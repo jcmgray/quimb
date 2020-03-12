@@ -201,21 +201,78 @@ def tensor_linop_backend(backend):
 #                                Tensor Funcs                                 #
 # --------------------------------------------------------------------------- #
 
-def set_union(sets):
-    """Non variadic version of set.union.
+
+def utup(x):
+    """Construct a tuple of the unique elements of ``x``.
     """
-    return set.union(*sets)
+    return tuple(unique(x))
 
 
-class OrderedCounter(collections.Counter, collections.OrderedDict):
-    pass
+def empty_utup():
+    """The empty 'unique tuple'.
+    """
+    return tuple()
+
+
+def utup_add(xs, y):
+    """Add element ``y`` to tuple ``xs`` if it doesn't already contain it,
+    returning a new tuple.
+    """
+    if y in xs:
+        return xs
+    return xs + (y,)
+
+
+def utup_discard(xs, y):
+    """If element ``y`` is found in ``xs``remove it, returning a new tuple.
+    """
+    try:
+        i = xs.index(y)
+        return xs[:i] + xs[i + 1:]
+    except ValueError:
+        return xs
+
+
+def utup_union(xs):
+    """Unique tuple, non variadic version of set.union.
+    """
+    return tuple(unique(concat(xs)))
+
+
+def utup_intersection(xs):
+    """Unique tuple, non variadic version of set.intersection.
+    """
+    try:
+        x0 = xs[0]
+    except TypeError:
+        xs = tuple(xs)
+        x0 = xs[0]
+
+    return tuple(el for el in x0 if all(el in x for x in xs[1:]))
+
+
+def utup_difference(x, y):
+    """Return a tuple with any elements in ``y`` removed from ``x``.
+    """
+    return tuple(el for el in x if el not in y)
+
+
+def tags_to_utup(tags):
+    """Parse a ``tags`` argument into a unique tuple.
+    """
+    if tags is None:
+        return ()
+    elif isinstance(tags, str):
+        return (tags,)
+    else:
+        return utup(tags)
 
 
 def _gen_output_inds(all_inds):
     """Generate the output, i.e. unique, indices from the set ``inds``. Raise
     if any index found more than twice.
     """
-    cnts = OrderedCounter(all_inds)
+    cnts = collections.Counter(all_inds)
     for ind, freq in cnts.items():
         if freq > 2:
             raise ValueError(
@@ -335,8 +392,8 @@ def tensor_contract(*tensors, output_inds=None, get=None,
             o_array = realify_scalar(o_array.item(0))
         return o_array
 
-    # unison of all tags
-    o_tags = set_union(t.tags for t in tensors)
+    # union of all tags
+    o_tags = utup_union(t.tags for t in tensors)
 
     return Tensor(data=o_array, inds=o_ix, tags=o_tags)
 
@@ -374,7 +431,7 @@ _RENORM_LOOKUP = {'sum2': 2, 'rsum2': 2, 'sum1': 1, 'rsum1': 1}
 
 
 def _parse_split_opts(method, cutoff, absorb, max_bond, cutoff_mode, renorm):
-    opts = {}
+    opts = dict()
 
     if method in _RANK_HIDDEN_METHODS:
         return opts
@@ -511,7 +568,8 @@ def tensor_split(T, left_inds, method='svd', max_bond=None, absorb='both',
 
     bond_ind = rand_uuid() if bond_ind is None else bond_ind
 
-    ltags, rtags = tags2set(ltags) | T.tags, tags2set(rtags) | T.tags
+    ltags = utup_union((tags_to_utup(ltags), T.tags))
+    rtags = utup_union((tags_to_utup(rtags), T.tags))
 
     Tl = Tensor(data=left, inds=(*left_inds, bond_ind), tags=ltags)
     Tr = Tensor(data=right, inds=(bond_ind, *right_inds), tags=rtags)
@@ -730,16 +788,16 @@ def bonds(t1, t2):
     and ``t2``.
     """
     if isinstance(t1, Tensor):
-        ix1 = set(t1.inds)
+        ix1 = t1.inds
     else:
-        ix1 = set(concat(t.inds for t in t1))
+        ix1 = utup_union(t.inds for t in t1)
 
     if isinstance(t2, Tensor):
-        ix2 = set(t2.inds)
+        ix2 = t2.inds
     else:
-        ix2 = set(concat(t.inds for t in t2))
+        ix2 = utup_union(t.inds for t in t2)
 
-    return ix1 & ix2
+    return utup_intersection((ix1, ix2))
 
 
 def bonds_size(t1, t2):
@@ -812,20 +870,7 @@ def get_tags(ts):
     if isinstance(ts, (TensorNetwork, Tensor)):
         ts = (ts,)
 
-    return set_union((t.tags for t in ts))
-
-
-def tags2set(tags):
-    """Parse a ``tags`` argument into a set - leave if already one.
-    """
-    if isinstance(tags, set):
-        return tags
-    elif tags is None:
-        return set()
-    elif isinstance(tags, str):
-        return {tags}
-    else:
-        return set(tags)
+    return utup_union((t.tags for t in ts))
 
 
 # --------------------------------------------------------------------------- #
@@ -871,19 +916,19 @@ class Tensor(object):
 
     def __init__(self, data=1.0, inds=(), tags=None, left_inds=None):
         # a new or copied Tensor always has no owners
-        self.owners = {}
+        self.owners = dict()
 
         # Short circuit for copying Tensors
         if isinstance(data, Tensor):
             self._data = data.data
             self._inds = data.inds
-            self._tags = data.tags.copy()
+            self._tags = data.tags
             self._left_inds = data.left_inds
             return
 
         self._data = asarray(data)
         self._inds = tuple(inds)
-        self._tags = tags2set(tags)
+        self._tags = tags_to_utup(tags)
         self._left_inds = tuple(left_inds) if left_inds is not None else None
 
         nd = ndim(self._data)
@@ -972,15 +1017,14 @@ class Tensor(object):
 
             # if this tensor has owners, update their ``ind_map``, but only if
             #     the indices are actually being changed not just permuted
-            set_old, set_new = set(self.inds), set(inds)
-            if (set_old != set_new) and self.check_owners():
+            if (set(self.inds) != set(inds)) and self.check_owners():
                 for ref, tid in self.owners.values():
-                    ref()._modify_tensor_inds(set_old, set_new, tid)
+                    ref()._modify_tensor_inds(self.inds, inds, tid)
 
             self._inds = inds
 
         if 'tags' in kwargs:
-            tags = tags2set(kwargs.pop('tags'))
+            tags = tags_to_utup(kwargs.pop('tags'))
 
             # if this tensor has owners, update their ``tag_map``.
             if self.check_owners():
@@ -1044,7 +1088,7 @@ class Tensor(object):
         """Add a tag to this tensor. Unlike ``self.tags.add`` this also updates
         any TensorNetworks viewing this Tensor.
         """
-        self.modify(tags=set.union(self.tags, {tag}))
+        self.modify(tags=utup_add(self.tags, tag))
 
     def expand_ind(self, ind, size):
         """Inplace increase the size of the dimension of ``ind``, the new array
@@ -1297,7 +1341,7 @@ class Tensor(object):
             tags will be returned.
         """
         new = self if inplace else self.copy()
-        new.modify(tags={retag_map.get(tag, tag) for tag in new.tags})
+        new.modify(tags=(retag_map.get(tag, tag) for tag in new.tags))
         return new
 
     retag_ = functools.partialmethod(retag, inplace=True)
@@ -1544,11 +1588,9 @@ class Tensor(object):
         """Drop certain tags, defaulting to all, from this tensor.
         """
         if tags is None:
-            tags = self.tags
+            self.modify(tags=empty_utup())
         else:
-            tags = tags2set(tags)
-
-        self.modify(tags=self.tags - tags)
+            self.modify(tags=utup_difference(self.tags, tags_to_utup(tags)))
 
     def bonds(self, other):
         """Return a tuple of the shared indices between this tensor
@@ -1605,12 +1647,16 @@ class Tensor(object):
         # This allows pickling, since the copy has no weakrefs.
         return self.copy().__dict__
 
-    def __setstate(self, state):
+    def __setstate__(self, state):
         self.__dict__ = state.copy()
 
     def __repr__(self):
-        return (f"{self.__class__.__name__}(shape={self.data.shape}, "
-                f"inds={self.inds}, tags={self.tags})")
+        return (
+            f"{self.__class__.__name__}("
+            f"shape={self.data.shape}, "
+            f"inds={self.inds}, "
+            f"tags={tuple(self.tags)})"
+        )
 
 
 # ------------------------- Add ufunc like methods -------------------------- #
@@ -1631,7 +1677,7 @@ def _make_promote_array_func(op, meth_name):
 
             return Tensor(
                 data=op(self.data, otherT.data), inds=self.inds,
-                tags=self.tags | other.tags)
+                tags=utup_union((self.tags, other.tags)))
         else:
             return Tensor(data=op(self.data, other),
                           inds=self.inds, tags=self.tags)
@@ -1752,9 +1798,9 @@ class TensorNetwork(object):
             self.nsites = ts.nsites
             self.sites = ts.sites
             self.structure_bsz = ts.structure_bsz
-            self.tag_map = valmap(lambda tid: tid.copy(), ts.tag_map)
-            self.ind_map = valmap(lambda tid: tid.copy(), ts.ind_map)
-            self.tensor_map = {}
+            self.tag_map = ts.tag_map.copy()
+            self.ind_map = ts.ind_map.copy()
+            self.tensor_map = dict()
             for tid, t in ts.tensor_map.items():
                 self.tensor_map[tid] = t if virtual else t.copy()
                 self.tensor_map[tid].add_owner(self, tid)
@@ -1769,14 +1815,14 @@ class TensorNetwork(object):
         self.sites = sites
 
         # internal structure
-        self.tensor_map = {}
-        self.tag_map = {}
-        self.ind_map = {}
+        self.tensor_map = dict()
+        self.tag_map = dict()
+        self.ind_map = dict()
 
-        inner_inds = set()
+        self._inner_inds = empty_utup()
         for t in ts:
-            self.add(t, virtual=virtual, inner_inds=inner_inds,
-                     check_collisions=check_collisions)
+            self.add(t, virtual=virtual, check_collisions=check_collisions)
+        self._inner_inds = None
 
         if self.structure:
             # set the list of indices of sites which are present
@@ -1907,9 +1953,9 @@ class TensorNetwork(object):
         """
         for x in xs:
             if x in x_map:
-                x_map[x].add(tid)
+                x_map[x] = utup_add(x_map[x], tid)
             else:
-                x_map[x] = {tid}
+                x_map[x] = (tid,)
 
     @staticmethod
     def _remove_tid(xs, x_map, tid):
@@ -1917,11 +1963,12 @@ class TensorNetwork(object):
         """
         for x in xs:
             try:
-                tids = x_map[x]
-                tids.discard(tid)
+                tids = utup_discard(x_map[x], tid)
                 if not tids:
                     # tid was last tensor -> delete entry
                     del x_map[x]
+                else:
+                    x_map[x] = tids
             except KeyError:
                 # tid already removed from x entry - e.g. repeated index
                 pass
@@ -1942,29 +1989,27 @@ class TensorNetwork(object):
         self._add_tid(T.tags, self.tag_map, tid)
         self._add_tid(T.inds, self.ind_map, tid)
 
-    def add_tensor_network(self, tn, virtual=False, check_collisions=True,
-                           inner_inds=None):
+    def add_tensor_network(self, tn, virtual=False, check_collisions=True):
         """
         """
         self._combine_sites(tn)
         self._combine_properties(tn)
 
         if check_collisions:  # add tensors individually
-            if inner_inds is None:
-                inner_inds = set(self.inner_inds())
+            if getattr(self, '_inner_inds', None) is None:
+                self._inner_inds = self.inner_inds()
 
             # check for matching inner_indices -> need to re-index
-            tn_iix = set(tn.inner_inds())
-            b_ix = inner_inds & tn_iix
+            tn_iix = tn.inner_inds()
+            b_ix = utup_intersection((self._inner_inds, tn_iix))
 
             if b_ix:
-                g_ix = tn_iix - inner_inds
-                new_inds = {rand_uuid() for _ in range(len(b_ix))}
+                g_ix = utup_difference(tn_iix, self._inner_inds)
+                new_inds = tuple(rand_uuid() for _ in range(len(b_ix)))
                 reind = dict(zip(b_ix, new_inds))
-                inner_inds.update(new_inds)
-                inner_inds.update(g_ix)
+                self._inner_inds += new_inds + g_ix
             else:
-                inner_inds.update(tn_iix)
+                self._inner_inds += tn_iix
 
             # add tensors, reindexing if necessary
             for tid, tsr in tn.tensor_map.items():
@@ -1978,15 +2023,15 @@ class TensorNetwork(object):
                 self.tensor_map[tid] = T
                 T.add_owner(self, tid)
 
-            self.tag_map = merge_with(set_union, self.tag_map, tn.tag_map)
-            self.ind_map = merge_with(set_union, self.ind_map, tn.ind_map)
+            self.tag_map = merge_with(utup_union, self.tag_map, tn.tag_map)
+            self.ind_map = merge_with(utup_union, self.ind_map, tn.ind_map)
 
-    def add(self, t, virtual=False, check_collisions=True, inner_inds=None):
+    def add(self, t, virtual=False, check_collisions=True):
         """Add Tensor, TensorNetwork or sequence thereof to self.
         """
         if isinstance(t, (tuple, list)):
             for each_t in t:
-                self.add(each_t, inner_inds=inner_inds, virtual=virtual,
+                self.add(each_t, virtual=virtual,
                          check_collisions=check_collisions)
             return
 
@@ -2002,7 +2047,7 @@ class TensorNetwork(object):
         if istensor:
             self.add_tensor(t, virtual=virtual)
         else:
-            self.add_tensor_network(t, virtual=virtual, inner_inds=inner_inds,
+            self.add_tensor_network(t, virtual=virtual,
                                     check_collisions=check_collisions)
 
     def __iand__(self, tensor):
@@ -2023,9 +2068,9 @@ class TensorNetwork(object):
         self._remove_tid((o for o in old if o not in new), self.tag_map, tid)
         self._add_tid((n for n in new if n not in old), self.tag_map, tid)
 
-    def _modify_tensor_inds(self, set_old, set_new, tid):
-        self._remove_tid(set_old - set_new, self.ind_map, tid)
-        self._add_tid(set_new - set_old, self.ind_map, tid)
+    def _modify_tensor_inds(self, old, new, tid):
+        self._remove_tid(utup_difference(old, new), self.ind_map, tid)
+        self._add_tid(utup_difference(new, old), self.ind_map, tid)
 
     @property
     def num_tensors(self):
@@ -2042,7 +2087,9 @@ class TensorNetwork(object):
     def calc_nsites(self):
         """Calculate how many tags there are which match ``structure``.
         """
-        return len(re.findall(self.structure.format(r"(\d+)"), str(self.tags)))
+        return len(
+            re.findall(self.structure.format(r"(\d+)"), ",".join(self.tags))
+        )
 
     @staticmethod
     @functools.lru_cache(8)
@@ -2054,7 +2101,7 @@ class TensorNetwork(object):
         ``structure``.
         """
         rgx = self.regex_for_calc_sites_cached(self.structure)
-        matches = rgx.findall(str(self.tags))
+        matches = rgx.findall(",".join(self.tags))
         sites = sorted(map(int, matches))
 
         # check if can convert to contiguous range
@@ -2125,7 +2172,7 @@ class TensorNetwork(object):
         tags : str or sequence of str
             The tag or tags to drop.
         """
-        tags = tags2set(tags)
+        tags = tags_to_utup(tags)
 
         for t in self:
             t.drop_tags(tags)
@@ -2163,7 +2210,7 @@ class TensorNetwork(object):
         """
         tn = self if inplace else self.copy()
 
-        tids = set_union(tn.ind_map.get(ix, set()) for ix in index_map)
+        tids = utup_union(tn.ind_map.get(ix, ()) for ix in index_map)
 
         for tid in tids:
             T = tn.tensor_map[tid]
@@ -2380,9 +2427,10 @@ class TensorNetwork(object):
             The correct tags describing those sites.
         """
         if isinstance(sites, Integral):
-            return {self.site_tag(sites)}
+            return (self.site_tag(sites),)
+
         elif isinstance(sites, slice):
-            return set(map(self.structure.format, self.slice2sites(sites)))
+            return tuple(map(self.structure.format, self.slice2sites(sites)))
         else:
             raise TypeError("``sites2tags`` needs an integer or a slice"
                             f", but got {sites}")
@@ -2392,12 +2440,12 @@ class TensorNetwork(object):
         if inverse:
             which = which[1:]
 
-        combine = {'all': set.intersection, 'any': set.union}[which]
+        combine = {'all': utup_intersection, 'any': utup_union}[which]
         tid_sets = (xmap[x] for x in xs)
-        tids = combine(*tid_sets)
+        tids = combine(tid_sets)
 
         if inverse:
-            return set(self.tensor_map) - tids
+            return utup_difference(self.tensor_map, tids)
 
         return tids
 
@@ -2421,18 +2469,18 @@ class TensorNetwork(object):
         set[str]
         """
         if tags in (None, ..., all):
-            return set(self.tensor_map)
+            return tuple(self.tensor_map)
         elif isinstance(tags, (Integral, slice)):
             tags = self.sites2tags(tags)
         else:
-            tags = tags2set(tags)
+            tags = tags_to_utup(tags)
 
         return self._get_tids_from(self.tag_map, tags, which)
 
     def _get_tids_from_inds(self, inds, which='all'):
         """Like ``_get_tids_from_tags`` but specify inds instead.
         """
-        inds = tags2set(inds)
+        inds = tags_to_utup(inds)
         return self._get_tids_from(self.ind_map, inds, which)
 
     def select_tensors(self, tags, which='all'):
@@ -2515,11 +2563,11 @@ class TensorNetwork(object):
         # find all the inds in the tagged portion
         tagged_tids = self._get_tids_from_tags(tags, which)
         tagged_ts = (self.tensor_map[tid] for tid in tagged_tids)
-        inds = set(concat(t.inds for t in tagged_ts))
+        inds = utup_union(t.inds for t in tagged_ts)
 
         # find all tensors with those inds, and remove the initial tensors
-        inds_tids = set_union(self.ind_map[i] for i in inds)
-        neighbour_tids = inds_tids - tagged_tids
+        inds_tids = utup_union(self.ind_map[i] for i in inds)
+        neighbour_tids = utup_difference(inds_tids, tagged_tids)
 
         return tuple(self.tensor_map[tid] for tid in neighbour_tids)
 
@@ -2772,9 +2820,9 @@ class TensorNetwork(object):
         leave, svd_section = self.partition(where, which=which,
                                             inplace=inplace, calc_sites=False)
 
-        tags = svd_section.tags if keep_tags else set()
-        ltags = tags2set(ltags)
-        rtags = tags2set(rtags)
+        tags = svd_section.tags if keep_tags else empty_utup()
+        ltags = tags_to_utup(ltags)
+        rtags = tags_to_utup(rtags)
 
         if right_inds is None:
             # compute
@@ -2820,8 +2868,10 @@ class TensorNetwork(object):
         new_bnd = rand_uuid()
 
         # Add the new, compressed tensors back in
-        leave |= Tensor(U, inds=(*left_inds, new_bnd), tags=tags | ltags)
-        leave |= Tensor(V, inds=(new_bnd, *right_inds), tags=tags | rtags)
+        leave |= Tensor(U, inds=(*left_inds, new_bnd),
+                        tags=utup_union((tags, ltags)))
+        leave |= Tensor(V, inds=(new_bnd, *right_inds),
+                        tags=utup_union((tags, rtags)))
 
         return leave
 
@@ -3008,10 +3058,10 @@ class TensorNetwork(object):
                               inplace=True, **canonize_opts):
         tn = self if inplace else self.copy()
 
-        border = set(tids)
-        all_tids = set(tn.tensor_map)
-        remaining = all_tids - border
-        border_d = sorted((x, 0) for x in border)
+        border = tids
+        all_tids = tuple(tn.tensor_map)
+        remaining = utup_difference(all_tids, border)
+        border_d = [(x, 0) for x in border]
 
         # the sequence of tensors pairs to canonize
         seq = []
@@ -3025,11 +3075,11 @@ class TensorNetwork(object):
             ix = tn.tensor_map[tid].inds
 
             # get un-canonized neighbors
-            neighbor_tids = set_union(tn.ind_map[i] for i in ix)
-            neighbor_tids &= remaining
+            neighbor_tids = utup_union(tn.ind_map[i] for i in ix)
+            neighbor_tids = utup_intersection((neighbor_tids, remaining))
 
             for n_tid in neighbor_tids:
-                remaining.remove(n_tid)
+                remaining = utup_discard(remaining, n_tid)
                 border_d.append((n_tid, d + 1))
                 seq.append((n_tid, tid))
 
@@ -3147,7 +3197,7 @@ class TensorNetwork(object):
         """
         tn = self if inplace else self.copy()
 
-        for tid in set_union(map(self.ind_map.__getitem__, selectors)):
+        for tid in utup_union(map(self.ind_map.__getitem__, selectors)):
             tn.tensor_map[tid].isel_(selectors)
 
         return tn
@@ -3341,11 +3391,11 @@ class TensorNetwork(object):
         contract, contract_tags, contract_structured
         """
         tn = self if inplace else self.copy()
-        c_tags = set()
+        c_tags = empty_utup()
 
         for tags in tags_seq:
             # accumulate tags from each contractions
-            c_tags |= tags2set(tags)
+            c_tags = utup_union((c_tags, tags_to_utup(tags)))
 
             # peform the next contraction
             tn = tn.contract_tags(c_tags, inplace=True, which='any', **opts)
@@ -3495,7 +3545,7 @@ class TensorNetwork(object):
 
     @property
     def tags(self):
-        return set(self.tag_map.keys())
+        return tuple(self.tag_map.keys())
 
     def all_inds(self):
         """Return a tuple of all indices (with repetition) in this network.
@@ -3616,7 +3666,7 @@ class TensorNetwork(object):
 
             # only want to fuse inner bonds
             if len(tids) > 1:
-                seen[frozenset(tids)].append(ix)
+                seen[utup(tids)].append(ix)
 
         for tidset, ixs in seen.items():
             if len(ixs) > 1:
@@ -4058,7 +4108,7 @@ class TensorNetwork(object):
             show_tags = (n <= 20)
 
         if fix is None:
-            fix = {}
+            fix = dict()
         else:
             # find range with which to scale spectral points with
             xmin, xmax, ymin, ymax = (
@@ -4071,7 +4121,7 @@ class TensorNetwork(object):
             xymin, xymax = min(xmin, ymin), max(xmax, ymax)
 
         # identify tensors by tid
-        fix_tids = {}
+        fix_tids = dict()
         for tags_or_ind, pos in tuple(fix.items()):
             try:
                 tid, = self._get_tids_from_tags(tags_or_ind)
@@ -4080,8 +4130,8 @@ class TensorNetwork(object):
                 # assume index
                 fix_tids[f"ext{tags_or_ind}"] = pos
 
-        labels = {}
-        fixed_positions = {}
+        labels = dict()
+        fixed_positions = dict()
 
         for i, (tid, t1) in enumerate(self.tensor_map.items()):
 
@@ -4127,7 +4177,7 @@ class TensorNetwork(object):
 
         # color the nodes
         if color is None:
-            colors = {}
+            colors = dict()
         elif isinstance(color, str):
             colors = {color: plt.get_cmap('tab10').colors[0]}
         else:
@@ -4146,7 +4196,7 @@ class TensorNetwork(object):
             rand_colors = (tuple(np.random.rand(3)) for _ in range(9999999999))
             rgbs = concat((rgbs, *extras, rand_colors))
             # ordered to reliably overcolor tags
-            colors = collections.OrderedDict(zip(color, rgbs))
+            colors = dict(zip(color, rgbs))
 
         for i, t1 in enumerate(ts):
             G.nodes[i]['color'] = None
@@ -4344,7 +4394,7 @@ class TNLinearOperator(spla.LinearOperator):
         self._conj_linop = None
         self._adjoint_linop = None
         self._transpose_linop = None
-        self._contractors = {}
+        self._contractors = dict()
 
         super().__init__(dtype=self._tensors[0].dtype, shape=(ld, rd))
 
@@ -4669,7 +4719,7 @@ class PTensor(Tensor):
             fn=self.fn,
             params=self.params,
             inds=self.inds,
-            tags=self.tags.copy(),
+            tags=self.tags,
             left_inds=self.left_inds,
             conj=self.is_conj,
         )
@@ -4711,6 +4761,6 @@ class PTensor(Tensor):
         return Tensor(
             data=self.data,
             inds=self.inds,
-            tags=self.tags.copy(),
+            tags=self.tags,
             left_inds=self.left_inds,
         )

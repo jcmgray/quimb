@@ -183,7 +183,7 @@ class TestBasicTensorOperations:
         assert isinstance(d, Tensor)
         assert d.shape == (6,)
         assert d.inds == (4,)
-        assert d.tags == {'red', 'blue'}
+        assert d.tags == ('red', 'blue')
 
     def test_contract_with_legal_characters(self):
         a = Tensor(np.random.randn(2, 3, 4), inds='abc',
@@ -217,19 +217,19 @@ class TestBasicTensorOperations:
         b = a.fuse({'bra': ['a', 'c'], 'ket': 'bd'})
         assert set(b.shape) == {8, 15}
         assert set(b.inds) == {'bra', 'ket'}
-        assert b.tags == {'blue'}
+        assert b.tags == ('blue',)
 
         b = a.fuse({'ket': 'bd', 'bra': 'ac'})
         assert set(b.shape) == {15, 8}
         assert set(b.inds) == {'ket', 'bra'}
-        assert b.tags == {'blue'}
+        assert b.tags == ('blue',)
 
     def test_fuse_leftover(self):
         a = Tensor(np.random.rand(2, 3, 4, 5, 2, 2), 'abcdef', tags={'blue'})
         b = a.fuse({'bra': 'ac', 'ket': 'bd'})
         assert b.shape == (8, 15, 2, 2)
         assert b.inds == ('bra', 'ket', 'e', 'f')
-        assert b.tags == {'blue'}
+        assert b.tags == ('blue',)
 
     def test_tensor_transpose(self):
         a = Tensor(np.random.rand(2, 3, 4, 5, 2, 2), 'abcdef', tags={'blue'})
@@ -1114,7 +1114,7 @@ class TestTensorNetworkSimplifications:
         assert tn_s.num_tensors == 2
         assert (tn ^ all).almost_equals(tn_s ^ all)
         # checl that 'B' was absorbed into 'A' not 'C'
-        assert tn_s['B'].tags == {'A', 'B'}
+        assert set(tn_s['B'].tags) == {'A', 'B'}
 
     def test_diagonal_reduce(self):
         A = rand_tensor([2, 2], 'ab', dtype=complex)

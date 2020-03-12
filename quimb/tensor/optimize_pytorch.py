@@ -4,7 +4,7 @@ import functools
 import tqdm
 import numpy as np
 
-from .tensor_core import Tensor, TensorNetwork
+from .tensor_core import Tensor, TensorNetwork, utup_intersection
 
 
 _TORCH_DEVICE = None
@@ -57,7 +57,7 @@ def parse_network_to_torch(tn, constant_tags):
     for t in tn_torch:
 
         # check if tensor has any of the constant tags
-        if t.tags & constant_tags:
+        if utup_intersection((t.tags, constant_tags)):
             t.modify(data=constant(t.data))
 
         # treat re and im parts as separate variables

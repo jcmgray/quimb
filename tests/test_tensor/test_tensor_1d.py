@@ -59,7 +59,7 @@ class TestMatrixProductState:
     def test_from_dense(self):
         psi = qu.rand_ket(2**8)
         mps = MatrixProductState.from_dense(psi, dims=[2] * 8)
-        assert mps.tags == {f'I{i}' for i in range(8)}
+        assert set(mps.tags) == {f'I{i}' for i in range(8)}
         assert mps.site_inds == tuple(f'k{i}' for i in range(8))
         assert mps.nsites == 8
         mpod = mps.to_dense()
@@ -73,8 +73,8 @@ class TestMatrixProductState:
 
         mps.left_canonize_site(0)
         assert mps['I0'].shape == (2, 2)
-        assert mps['I0'].tags == {'I0'}
-        assert mps['I1'].tags == {'I1'}
+        assert mps['I0'].tags == ('I0',)
+        assert mps['I1'].tags == ('I1',)
 
         U = (mps['I0'].data)
         assert_allclose(U.conj().T @ U, np.eye(2), atol=1e-13)
@@ -98,8 +98,8 @@ class TestMatrixProductState:
 
         mps.right_canonize_site(2)
         assert mps['I2'].shape == (2, 2)
-        assert mps['I2'].tags == {'I2'}
-        assert mps['I1'].tags == {'I1'}
+        assert mps['I2'].tags == ('I2',)
+        assert mps['I1'].tags == ('I1',)
 
         U = (mps['I2'].data)
         assert_allclose(U.conj().T @ U, np.eye(2), atol=1e-13)
@@ -498,20 +498,20 @@ class TestMatrixProductState:
         TG = sorted(p['G'], key=lambda t: sorted(t.tags))
 
         if propagate_tags is False:
-            assert TG[0].tags == {'G'}
-            assert TG[1].tags == {'G'}
+            assert TG[0].tags == ('G',)
+            assert TG[1].tags == ('G',)
 
         elif propagate_tags == 'register':
-            assert TG[0].tags == {'G', 'I2'}
-            assert TG[1].tags == {'G', 'I3'}
+            assert set(TG[0].tags) == {'G', 'I2'}
+            assert set(TG[1].tags) == {'G', 'I3'}
 
         elif propagate_tags == 'sites':
-            assert TG[0].tags == {'G', 'I2', 'I3'}
-            assert TG[1].tags == {'G', 'I2', 'I3'}
+            assert set(TG[0].tags) == {'G', 'I2', 'I3'}
+            assert set(TG[1].tags) == {'G', 'I2', 'I3'}
 
         elif propagate_tags is True:
-            assert TG[0].tags == {'PSI0', 'G', 'I2', 'I3'}
-            assert TG[1].tags == {'PSI0', 'G', 'I2', 'I3'}
+            assert set(TG[0].tags) == {'PSI0', 'G', 'I2', 'I3'}
+            assert set(TG[1].tags) == {'PSI0', 'G', 'I2', 'I3'}
 
         assert (p.H & p) ^ all == pytest.approx(1.0)
         assert abs((q.H & p) ^ all) < 1.0
@@ -777,9 +777,9 @@ class TestSpecificStatesOperators:
         n = 10
         rmps = MPS_rand_state(
             n, 10, site_tag_id="foo{}", tags='bar', cyclic=cyclic)
-        assert rmps[0].tags == {'foo0', 'bar'}
-        assert rmps[3].tags == {'foo3', 'bar'}
-        assert rmps[-1].tags == {'foo9', 'bar'}
+        assert set(rmps[0].tags) == {'foo0', 'bar'}
+        assert set(rmps[3].tags) == {'foo3', 'bar'}
+        assert set(rmps[-1].tags) == {'foo9', 'bar'}
 
         rmpsH_rmps = rmps.H & rmps
         assert len(rmpsH_rmps.tag_map['foo0']) == 2
@@ -812,9 +812,9 @@ class TestSpecificStatesOperators:
     @pytest.mark.parametrize("n", [2, 3, 4])
     def test_mpo_site_ham_heis(self, cyclic, j, bz, n):
         hh_mpo = MPO_ham_heis(n, tags=['foo'], cyclic=cyclic, j=j, bz=bz)
-        assert hh_mpo[0].tags == {'I0', 'foo'}
-        assert hh_mpo[1].tags == {'I1', 'foo'}
-        assert hh_mpo[-1].tags == {f'I{n - 1}', 'foo'}
+        assert set(hh_mpo[0].tags) == {'I0', 'foo'}
+        assert set(hh_mpo[1].tags) == {'I1', 'foo'}
+        assert set(hh_mpo[-1].tags) == {f'I{n - 1}', 'foo'}
         assert hh_mpo.shape == (2, ) * 2 * n
         hh_ex = qu.ham_heis(n, cyclic=cyclic, j=j, b=bz)
         assert_allclose(
