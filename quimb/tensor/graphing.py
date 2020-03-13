@@ -221,7 +221,7 @@ def graph(
         # needed in case '_' is the first character
         lbls = [f" {l}" for l in colors]
 
-        plt.legend(handles, lbls, ncol=max(int(len(handles) / 20), 1),
+        plt.legend(handles, lbls, ncol=max(round(len(handles) / 20), 1),
                    loc='center left', bbox_to_anchor=(1, 0.5))
 
     if return_fig:
@@ -273,7 +273,7 @@ def auto_colors(nc):
     # modulate color saturation with sine to generate local distinguishability
     # ... but only turn on gradually for increasing number of nodes
     sat_mod_period = min(4, nc / 7)
-    sat_mod_factor = max(0.0, 2 / 3 * math.tanh((nc - 7) / 7))
+    sat_mod_factor = max(0.0, 2 / 3 * math.tanh((nc - 7) / 4))
 
     return [
         mod_sat(
