@@ -13,6 +13,8 @@ from .tensor_core import (
     tensor_contract,
     TNLinearOperator,
     asarray,
+    utup_add,
+    utup_discard,
 )
 
 
@@ -319,21 +321,21 @@ class MovingEnvironment:
         if not self.segmented:
             if not self.cyclic:
                 # generate dummy left and right envs
-                self.tnc |= Tensor(1.0, (), {'_LEFT'}).astype(self.tn.dtype)
-                self.tnc |= Tensor(1.0, (), {'_RIGHT'}).astype(self.tn.dtype)
+                self.tnc |= Tensor(tags='_LEFT').astype(self.tn.dtype)
+                self.tnc |= Tensor(tags='_RIGHT').astype(self.tn.dtype)
                 return
 
             # if cyclic just contract other section and tag
-            self.tnc |= Tensor(1.0, (), {'_LEFT'}).astype(self.tn.dtype)
+            self.tnc |= Tensor(tags='_LEFT').astype(self.tn.dtype)
             self.tnc.contract(slice(stop, start + self.n), inplace=True)
             self.tnc.add_tag('_RIGHT', where=stop + 1)
             return
 
         # replicate all tags on end pieces apart from site number
-        ltags = {'_LEFT', *self.tnc.select(start - 1).tags}
-        ltags.remove(self.site_tag(start - 1))
-        rtags = {'_RIGHT', *self.tnc.select(stop).tags}
-        rtags.remove(self.site_tag(stop))
+        ltags = utup_add(self.tnc.select(start - 1).tags, '_LEFT')
+        ltags = utup_discard(ltags, self.site_tag(start - 1))
+        rtags = utup_add(self.tnc.select(stop).tags, '_RIGHT')
+        rtags = utup_discard(rtags, self.site_tag(stop))
 
         # for example, pseudo orthogonalization if cyclic
         if self.segment_callbacks is not None:

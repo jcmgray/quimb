@@ -4,7 +4,7 @@ import cytoolz
 from autoray import do
 
 import quimb as qu
-from .tensor_core import get_tags, PTensor, utup_union, tags_to_utup
+from .tensor_core import get_tags, PTensor, utup_union, tags_to_utup, utup_add
 from .tensor_gen import MPS_computational_state
 from .tensor_1d import TensorNetwork1DVector
 from . import array_ops as ops
@@ -136,7 +136,7 @@ def rx_gate_param_gen(params):
 def apply_Rx(psi, theta, i, parametrize=False, **gate_opts):
     """Apply an X-rotation of ``theta`` to tensor network wavefunction ``psi``.
     """
-    mtags = _merge_tags({'RX'}, gate_opts)
+    mtags = _merge_tags('RX', gate_opts)
     if parametrize:
         G = ops.PArray(rx_gate_param_gen, (float(theta),))
     else:
@@ -155,7 +155,7 @@ def ry_gate_param_gen(params):
 def apply_Ry(psi, theta, i, parametrize=False, **gate_opts):
     """Apply a Y-rotation of ``theta`` to tensor network wavefunction ``psi``.
     """
-    mtags = _merge_tags({'RY'}, gate_opts)
+    mtags = _merge_tags('RY', gate_opts)
     if parametrize:
         G = ops.PArray(ry_gate_param_gen, (float(theta),))
     else:
@@ -174,7 +174,7 @@ def rz_gate_param_gen(params):
 def apply_Rz(psi, theta, i, parametrize=False, **gate_opts):
     """Apply a Z-rotation of ``theta`` to tensor network wavefunction ``psi``.
     """
-    mtags = _merge_tags({'RZ'}, gate_opts)
+    mtags = _merge_tags('RZ', gate_opts)
     if parametrize:
         G = ops.PArray(rz_gate_param_gen, (float(theta),))
     else:
@@ -198,7 +198,7 @@ def u3_gate_param_gen(params):
 
 
 def apply_U3(psi, theta, phi, lamda, i, parametrize=False, **gate_opts):
-    mtags = _merge_tags({'U3'}, gate_opts)
+    mtags = _merge_tags('U3', gate_opts)
     if parametrize:
         G = ops.PArray(u3_gate_param_gen, (theta, phi, lamda))
     else:
@@ -226,7 +226,7 @@ def fsim_param_gen(params):
 
 
 def apply_fsim(psi, theta, phi, i, j, parametrize=False, **gate_opts):
-    mtags = _merge_tags({'FSIM'}, gate_opts)
+    mtags = _merge_tags('FSIM', gate_opts)
     if parametrize:
         G = ops.PArray(fsim_param_gen, (theta, phi))
     else:
@@ -415,14 +415,14 @@ class Circuit:
         """
 
         # unique tag
-        tags = {f'GATE_{len(self.gates)}'}
+        tags = tags_to_utup(f'GATE_{len(self.gates)}')
 
         # parse which 'round' of gates
         if (gate_round is not None):
-            tags.add(f'ROUND_{gate_round}')
+            tags = utup_add(tags, f'ROUND_{gate_round}')
         elif isinstance(gate_id, numbers.Integral) or gate_id.isdigit():
             # gate round given as first entry of qasm line
-            tags.add(f'ROUND_{gate_id}')
+            tags = utup_add(tags, f'ROUND_{gate_id}')
             gate_id, gate_args = gate_args[0], gate_args[1:]
 
         gate_id = gate_id.upper()

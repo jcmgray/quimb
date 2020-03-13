@@ -3553,12 +3553,15 @@ class TensorNetwork(object):
         return tuple(self.ind_map)
 
     def inner_inds(self):
-        """Tuple of all inner indices, i.e. those that appear twice.
+        """Tuple of interior indices, assumed to be any indices that appear
+        twice or more (this only holds generally for non-hyper tensor
+        networks).
         """
         return tuple(i for i, tids in self.ind_map.items() if len(tids) == 2)
 
     def outer_inds(self):
-        """Tuple of exterior indices, i.e. those that appear once.
+        """Tuple of exterior indices, assumed to be any lone indices (this only
+        holds generally for non-hyper tensor networks).
         """
         return tuple(i for i, tids in self.ind_map.items() if len(tids) == 1)
 

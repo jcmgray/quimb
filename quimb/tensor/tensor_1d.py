@@ -283,7 +283,7 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
 
     # convert the gate into a tensor - check if it is parametrized
     if isinstance(G, ops.PArray):
-        if ng >= 2 and contract is not False:
+        if (ng >= 2) and (contract is not False):
             raise ValueError(
                 "For a parametrized gate acting on more than one site "
                 "``contract`` must be false to preserve the array shape.")
@@ -292,6 +292,7 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
     else:
         TG = Tensor(G, gate_ix, tags=tags, left_inds=bnds)
 
+    # handle 'swap+split' only for ``ng == 1``
     if contract in (True, 'swap+split'):
         # pop the sites, contract, then re-add
         pts = [psi._pop_tensor(tid) for tid in site_tids]
@@ -1548,7 +1549,7 @@ class MatrixProductState(TensorNetwork1DVector,
             TM = T
             for i in range(n - 1, 0, -1):
                 TM, TR = TM.split(left_inds=inds[:i], get='tensors',
-                                  rtags={site_tag_id.format(i)}, **split_opts)
+                                  rtags=site_tag_id.format(i), **split_opts)
                 yield TR
             TM.add_tag(site_tag_id.format(0))
             yield TM
