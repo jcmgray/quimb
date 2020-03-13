@@ -1459,6 +1459,7 @@ class MatrixProductState(TensorNetwork1DVector,
         site_tags = map(site_tag_id.format, sites)
         if tags is not None:
             # mix in global tags
+            tags = tags_to_utup(tags)
             site_tags = (utup_add(tags, st) for st in site_tags)
 
         self.cyclic = (ops.ndim(arrays[0]) == 3)

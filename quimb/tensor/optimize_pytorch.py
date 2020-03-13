@@ -4,7 +4,7 @@ import functools
 import tqdm
 import numpy as np
 
-from .tensor_core import Tensor, TensorNetwork, utup_intersection
+from .tensor_core import Tensor, TensorNetwork, utup_intersection, tags_to_utup
 
 
 _TORCH_DEVICE = None
@@ -201,8 +201,7 @@ class TNOptimizer:
         self.tol_grad = tol_grad
         assert progbar in [True, False, 'simple']
         self.progbar = progbar
-        self.constant_tags = (set() if constant_tags is None
-                              else set(constant_tags))
+        self.constant_tags = tags_to_utup(constant_tags)
 
         if norm_fn is None:
             def norm_fn(x):

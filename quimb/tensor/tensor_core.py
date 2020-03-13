@@ -832,19 +832,19 @@ def connect(t1, t2, ax1, ax2):
         >>> tn = (X | Y)  # is *view* of tensors (``&`` would copy them)
         >>> print(tn)
         TensorNetwork([
-            Tensor(shape=(2, 3), inds=('a', 'b'), tags=set()),
-            Tensor(shape=(3, 4), inds=('c', 'd'), tags=set()),
+            Tensor(shape=(2, 3), inds=('a', 'b'), tags=()),
+            Tensor(shape=(3, 4), inds=('c', 'd'), tags=()),
         ])
 
         >>> connect(X, Y, 1, 0)  # modifies tensors *and* viewing TN
         >>> print(tn)
         TensorNetwork([
-            Tensor(shape=(2, 3), inds=('a', '_e9021e0000002'), tags=set()),
-            Tensor(shape=(3, 4), inds=('_e9021e0000002', 'd'), tags=set()),
+            Tensor(shape=(2, 3), inds=('a', '_e9021e0000002'), tags=()),
+            Tensor(shape=(3, 4), inds=('_e9021e0000002', 'd'), tags=()),
         ])
 
         >>>  tn ^ all
-        Tensor(shape=(2, 4), inds=('a', 'd'), tags=set())
+        Tensor(shape=(2, 4), inds=('a', 'd'), tags=())
 
     """
     d1, d2 = t1.shape[ax1], t2.shape[ax2]
@@ -1066,7 +1066,7 @@ class Tensor(object):
         --------
         >>> T = rand_tensor((2, 3, 4), inds=('a', 'b', 'c'))
         >>> T.isel({'b': -1})
-        Tensor(shape=(2, 4), inds=('a', 'c'), tags=set())
+        Tensor(shape=(2, 4), inds=('a', 'c'), tags=())
 
         See Also
         --------
