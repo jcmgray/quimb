@@ -174,6 +174,37 @@ class TensorNetwork2D(TensorNetwork):
         """
         return gen_2d_bond_pairs(self.Lx, self.Ly)
 
+    def __repr__(self):
+        """Insert number of rows and columns into standard print.
+        """
+        s = super().__repr__()
+        extra = f', Lx={self.Lx}, Ly={self.Ly}, max_bond={self.max_bond()}'
+        s = f'{s[:-2]}{extra}{s[-2:]}'
+        return s
+
+    def __str__(self):
+        """Insert number of rows and columns into standard print.
+        """
+        s = super().__str__()
+        extra = f', Lx={self.Lx}, Ly={self.Ly}, max_bond={self.max_bond()}'
+        s = f'{s[:-1]}{extra}{s[-1:]}'
+        return s
+
+    def flatten(self, fuse_multibonds=True, inplace=False):
+        """Contract all tensors corresponding to each site into one.
+        """
+        tn = self if inplace else self.copy()
+
+        for i, j in self.gen_site_coos():
+            tn ^= (i, j)
+
+        if fuse_multibonds:
+            tn.fuse_multibonds_()
+
+        return tn.view_as_(TensorNetwork2DFlat, like=self)
+
+    flatten_ = functools.partialmethod(flatten, inplace=True)
+
     def canonize_row(self, i, sweep, yrange=None, **canonize_opts):
         r"""Canonize all or part of a row.
 

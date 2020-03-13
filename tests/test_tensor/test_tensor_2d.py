@@ -39,6 +39,16 @@ class TestPEPSConstruct:
             assert psi_dense.shape == (512, 1)
 
         psi.show()
+        assert f'Lx={Lx}' in psi.__str__()
+        assert f'Lx={Lx}' in psi.__repr__()
+
+    def test_flatten(self):
+        psi = qtn.PEPS.rand(3, 5, 3, seed=42)
+        norm = psi.H & psi
+        assert len(norm.tensors) == 30
+        norm.flatten_()
+        assert len(norm.tensors) == 15
+        assert norm.max_bond() == 9
 
 
 class Test2DContract:
