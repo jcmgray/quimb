@@ -56,6 +56,25 @@ class TensorNetwork2D(TensorNetwork):
         '_Ly',
     )
 
+    def _compatible_2d(self, other):
+        return (
+            isinstance(other, TensorNetwork2D) and
+            all(getattr(self, e) == getattr(other, e)
+                for e in TensorNetwork2D._EXTRA_PROPS)
+        )
+
+    def __and__(self, other):
+        new = super().__and__(other)
+        if self._compatible_2d(other):
+            new.view_as_(TensorNetwork2D, like=self)
+        return new
+
+    def __or__(self, other):
+        new = super().__or__(other)
+        if self._compatible_2d(other):
+            new.view_as_(TensorNetwork2D, like=self)
+        return new
+
     @property
     def Lx(self):
         """The number of rows.
@@ -1162,6 +1181,94 @@ class TensorNetwork2D(TensorNetwork):
 
     contract_boundary_ = functools.partialmethod(
         contract_boundary, inplace=True)
+
+    def compute_row_environments(self, **compress_opts):
+        """Compute the ``2 * self.Lx`` 1D boundary tensor networks describing
+        the lower and upper environments of each row in this 2D tensor network,
+        assumed to represent the norm.
+
+        Parameters
+        ----------
+        compress_opts
+            Supplied to
+            :meth:`~quimb.tensor.tensor_2d.TensorNetwork2D.contract_boundary_from_bottom`
+            and
+            :meth:`~quimb.tensor.tensor_2d.TensorNetwork2D.contract_boundary_from_top`
+            .
+
+        Returns
+        -------
+        row_envs : dict[(str, int), TensorNetwork]
+            The two environment tensor networks of row ``i`` will be stored in
+            ``row_envs['below', i]`` and ``row_envs['above', i]``.
+        """
+        row_envs = dict()
+
+        # upwards pass
+        first_row = self.row_tag(0)
+        env_bottom = self.copy()
+        row_envs['below', 0] = TensorNetwork([])
+        row_envs['below', 1] = env_bottom.select(first_row)
+        for i in range(2, env_bottom.Lx):
+            env_bottom.contract_boundary_from_bottom_(
+                (i - 2, i - 1), **compress_opts)
+            row_envs['below', i] = env_bottom.select(first_row)
+
+        # downwards pass
+        last_row = self.row_tag(self.Lx - 1)
+        env_top = self.copy()
+        row_envs['above', self.Lx - 1] = TensorNetwork([])
+        row_envs['above', self.Lx - 2] = env_top.select(last_row)
+        for i in range(env_top.Lx - 3, -1, -1):
+            env_top.contract_boundary_from_top_(
+                (i + 1, i + 2), **compress_opts)
+            row_envs['above', i] = env_top.select(last_row)
+
+        return row_envs
+
+    def compute_col_environments(self, **compress_opts):
+        """Compute the ``2 * self.Ly`` 1D boundary tensor networks describing
+        the left and right environments of each column in this 2D tensor
+        network, assumed to represent the norm.
+
+        Parameters
+        ----------
+        compress_opts
+            Supplied to
+            :meth:`~quimb.tensor.tensor_2d.TensorNetwork2D.contract_boundary_from_left`
+            and
+            :meth:`~quimb.tensor.tensor_2d.TensorNetwork2D.contract_boundary_from_right`
+            .
+
+        Returns
+        -------
+        col_envs : dict[(str, int), TensorNetwork]
+            The two environment tensor networks of column ``j`` will be stored
+            in ``row_envs['left', j]`` and ``row_envs['right', j]``.
+        """
+        col_envs = dict()
+
+        # rightwards pass
+        first_column = self.col_tag(0)
+        env_right = self.copy()
+        col_envs['left', 0] = TensorNetwork([])
+        col_envs['left', 1] = env_right.select(first_column)
+        for j in range(2, env_right.Ly):
+            env_right.contract_boundary_from_left_(
+                (j - 2, j - 1), **compress_opts)
+            col_envs['left', j] = env_right.select(first_column)
+
+        # leftwards pass
+        last_column = self.col_tag(self.Ly - 1)
+        env_left = self.copy()
+        col_envs['right', self.Ly - 1] = TensorNetwork([])
+        col_envs['right', self.Ly - 2] = env_left.select(last_column)
+        for j in range(self.Ly - 3, -1, -1):
+            env_left.contract_boundary_from_right_(
+                (j + 1, j + 2), **compress_opts)
+            col_envs['right', j] = env_left.select(last_column)
+
+        return col_envs
 
 
 class TensorNetwork2DVector(TensorNetwork2D,

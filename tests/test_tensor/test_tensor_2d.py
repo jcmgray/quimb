@@ -46,21 +46,57 @@ class Test2DContract:
     def test_contract_2d_one_layer_boundary(self):
         psi = qtn.PEPS.rand(4, 4, 3, seed=42)
         norm = psi.H & psi
-
-        # hopefully uneccesary at some point
-        norm.view_as_(qtn.TensorNetwork2D, like=psi)
-
         xe = norm.contract(all, optimize='auto-hq')
         xt = norm.contract_boundary(max_bond=9)
         assert xt == pytest.approx(xe, rel=1e-2)
 
     def test_contract_2d_two_layer_boundary(self):
         psi = qtn.PEPS.rand(4, 4, 3, seed=42, tags='KET')
-        norm = psi.retag({'KET': 'BRA'}).H & psi
-
-        # hopefully uneccesary at some point
-        norm.view_as_(qtn.TensorNetwork2D, like=psi)
-
+        norm = psi.retag({'KET': 'BRA'}).H | psi
         xe = norm.contract(all, optimize='auto-hq')
         xt = norm.contract_boundary(max_bond=27, layer_tags=['KET', 'BRA'])
         assert xt == pytest.approx(xe, rel=1e-2)
+
+    @pytest.mark.parametrize("two_layer", [False, True])
+    def test_compute_row_envs(self, two_layer):
+        psi = qtn.PEPS.rand(5, 4, 2, seed=42, tags='KET')
+        norm = psi.retag({'KET': 'BRA'}).H | psi
+        ex = norm.contract(all)
+
+        if two_layer:
+            compress_opts = {'cutoff': 1e-6, 'max_bond': 12,
+                             'layer_tags': ['KET', 'BRA']}
+        else:
+            compress_opts = {'cutoff': 1e-6, 'max_bond': 8}
+        row_envs = norm.compute_row_environments(**compress_opts)
+
+        for i in range(norm.Lx):
+            norm_i = (
+                row_envs['below', i] &
+                norm.select(norm.row_tag(i)) &
+                row_envs['above', i]
+            )
+            x = norm_i.contract(all)
+            assert x == pytest.approx(ex, rel=1e-2)
+
+    @pytest.mark.parametrize("two_layer", [False, True])
+    def test_compute_col_envs(self, two_layer):
+        psi = qtn.PEPS.rand(4, 5, 2, seed=42, tags='KET')
+        norm = psi.retag({'KET': 'BRA'}).H | psi
+        ex = norm.contract(all)
+
+        if two_layer:
+            compress_opts = {'cutoff': 1e-6, 'max_bond': 12,
+                             'layer_tags': ['KET', 'BRA']}
+        else:
+            compress_opts = {'cutoff': 1e-6, 'max_bond': 8}
+        col_envs = norm.compute_col_environments(**compress_opts)
+
+        for j in range(norm.Lx):
+            norm_j = (
+                col_envs['left', j] &
+                norm.select(norm.col_tag(j)) &
+                col_envs['right', j]
+            )
+            x = norm_j.contract(all)
+            assert x == pytest.approx(ex, rel=1e-2)
