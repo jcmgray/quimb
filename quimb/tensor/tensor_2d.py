@@ -1565,6 +1565,8 @@ class TensorNetwork2DVector(TensorNetwork2D,
 
         if is_lone_coo(where):
             where = (where,)
+        else:
+            where = tuple(where)
         ng = len(where)
 
         # allow a matrix to be reshaped into a tensor if it factorizes
@@ -1742,10 +1744,10 @@ class TensorNetwork2DOperator(TensorNetwork2D,
         """Get a physical index size of this 2D operator.
         """
         if which == 'upper':
-            return self[i, j].ind_size(self.upper_ind(i))
+            return self[i, j].ind_size(self.upper_ind(i, j))
 
         if which == 'lower':
-            return self[i, j].ind_size(self.lower_ind(i))
+            return self[i, j].ind_size(self.lower_ind(i, j))
 
 
 class TensorNetwork2DFlat(TensorNetwork2D,
