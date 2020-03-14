@@ -1,5 +1,6 @@
 import pytest
 
+import quimb as qu
 import quimb.tensor as qtn
 
 
@@ -49,6 +50,62 @@ class TestPEPSConstruct:
         norm.flatten_()
         assert len(norm.tensors) == 15
         assert norm.max_bond() == 9
+
+    @pytest.mark.parametrize('where', [
+        [(0, 0)], [(0, 1)], [(0, 2)], [(2, 2)],
+        [(3, 2)], [(3, 1)], [(3, 0)], [(2, 0)], [(1, 1)],
+    ])
+    @pytest.mark.parametrize('contract', [False, True])
+    def test_gate_2d_single_site(self, where, contract):
+        Lx = 4
+        Ly = 3
+        D = 2
+
+        psi = qtn.PEPS.rand(Lx, Ly, bond_dim=D, seed=42, dtype=complex)
+        psi_d = psi.to_dense()
+        G = qu.rand_matrix(2)
+
+        # compute the exact dense reference
+        dims = [[2] * Ly] * Lx
+        IGI = qu.ikron(G, dims, where, sparse=True)
+        xe = (psi_d.H @ IGI @ psi_d).item()
+
+        tn = psi.H & psi.gate(G, where, contract=contract)
+        assert len(tn.tensors) == 2 * Lx * Ly + int(not contract)
+
+        assert tn ^ all == pytest.approx(xe)
+
+    @pytest.mark.parametrize(
+        'contract', [False, True, 'split', 'lazy-split', 'reduce-split'])
+    @pytest.mark.parametrize('where', [
+        [(1, 1), (2, 1)], [(3, 2), (2, 2)],
+    ])
+    def test_gate_2d_two_site(self, where, contract):
+        Lx = 4
+        Ly = 3
+        D = 2
+
+        psi = qtn.PEPS.rand(Lx, Ly, bond_dim=D, seed=42, dtype=complex)
+        psi_d = psi.to_dense()
+
+        # ikron can't tensor operators across non-adjacent subsytems
+        # so we explicitly construct the gate as a sum of tensor components
+        G_comps = [(qu.rand_matrix(2), qu.rand_matrix(2)) for _ in range(4)]
+        G = sum(A & B for A, B in G_comps)
+
+        # compute the exact dense reference
+        dims = [[2] * Ly] * Lx
+        IGI = sum(qu.ikron([A, B], dims, where, sparse=True)
+                  for A, B in G_comps)
+
+        xe = (psi_d.H @ IGI @ psi_d).item()
+
+        tn = psi.H & psi.gate(G, where, contract=contract)
+        change = {False: 1, True: -1, 'split': 0, 'lazy-split': 0,
+                  'reduce-split': 0}[contract]
+        assert len(tn.tensors) == 2 * Lx * Ly + change
+
+        assert tn ^ all == pytest.approx(xe)
 
 
 class Test2DContract:

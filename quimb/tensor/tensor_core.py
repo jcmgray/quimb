@@ -421,6 +421,7 @@ def rand_uuid(base=""):
 _VALID_SPLIT_GET = {None, 'arrays', 'tensors', 'values'}
 _FULL_SPLIT_METHODS = {'svd', 'eig', 'eigh'}
 _RANK_HIDDEN_METHODS = {'qr', 'lq', 'cholesky'}
+_DENSE_ONLY_METHODS = {'svd', 'eig', 'eigh', 'cholesky', 'qr', 'lq'}
 _CUTOFF_LOOKUP = {None: -1.0}
 _ABSORB_LOOKUP = {'left': -1, 'both': 0, 'right': 1}
 _MAX_BOND_LOOKUP = {None: -1}
@@ -532,12 +533,21 @@ def tensor_split(T, left_inds, method='svd', max_bond=None, absorb='both',
     if right_inds is None:
         right_inds = tuple(x for x in T.inds if x not in left_inds)
 
-    TT = T.transpose(*left_inds, *right_inds)
+    if isinstance(T, TNLinearOperator):
+        left_dims = T.ldims
+        right_dims = T.rdims
 
-    left_dims = TT.shape[:len(left_inds)]
-    right_dims = TT.shape[len(left_inds):]
+        if method in _DENSE_ONLY_METHODS:
+            array = T.to_dense()
+        else:
+            array = T
+    else:
+        TT = T.transpose(*left_inds, *right_inds)
 
-    array = reshape(TT.data, (prod(left_dims), prod(right_dims)))
+        left_dims = TT.shape[:len(left_inds)]
+        right_dims = TT.shape[len(left_inds):]
+
+        array = reshape(TT.data, (prod(left_dims), prod(right_dims)))
 
     if get == 'values':
         return {'svd': decomp._svdvals,
@@ -2841,36 +2851,16 @@ class TensorNetwork(object):
             A = TNLinearOperator1D(svd_section, start=start, stop=stop,
                                    left_inds=left_inds, right_inds=right_inds)
 
-        left_shp, right_shp = A.ldims, A.rdims
+        ltags = utup_union((tags, ltags))
+        rtags = utup_union((tags, rtags))
 
-        opts = _parse_split_opts(
-            method, eps, absorb, max_bond, cutoff_mode, renorm)
+        TL, TR = tensor_split(A, left_inds=left_inds, right_inds=right_inds,
+                              method=method, cutoff=eps, absorb=absorb,
+                              max_bond=max_bond, cutoff_mode=cutoff_mode,
+                              renorm=renorm, ltags=ltags, rtags=rtags)
 
-        if method in ('svd', 'eig', 'eigh', 'cholesky'):
-            if not isinstance(A, np.ndarray):
-                A = A.to_dense()
-
-        U, V = {
-            'svd': decomp._svd,
-            'eig': decomp._eig,
-            'eigh': decomp._eigh,
-            'cholesky': decomp._cholesky,
-            'isvd': decomp._isvd,
-            'svds': decomp._svds,
-            'rsvd': decomp._rsvd,
-            'eigsh': decomp._eigsh,
-        }[method](A, **opts)
-
-        U = reshape(U, (*left_shp, -1))
-        V = reshape(V, (-1, *right_shp))
-
-        new_bnd = rand_uuid()
-
-        # Add the new, compressed tensors back in
-        leave |= Tensor(U, inds=(*left_inds, new_bnd),
-                        tags=utup_union((tags, ltags)))
-        leave |= Tensor(V, inds=(new_bnd, *right_inds),
-                        tags=utup_union((tags, rtags)))
+        leave |= TL
+        leave |= TR
 
         return leave
 
@@ -4145,13 +4135,14 @@ class TNLinearOperator(spla.LinearOperator):
             self._tensors = tuple(tns)
 
             if ldims is None or rdims is None:
-                ix_sz = dict(zip(concat((t.inds, t.shape) for t in tns)))
+                ix_sz = dict(concat((zip(t.inds, t.shape) for t in tns)))
                 ldims = tuple(ix_sz[i] for i in left_inds)
                 rdims = tuple(ix_sz[i] for i in right_inds)
 
         self.left_inds, self.right_inds = left_inds, right_inds
         self.ldims, ld = ldims, prod(ldims)
         self.rdims, rd = rdims, prod(rdims)
+        self.tags = utup_union((t.inds for t in self._tensors))
 
         self._kws = {'get': 'expression'}
 
@@ -4265,6 +4256,11 @@ class TNLinearOperator(spla.LinearOperator):
             inds_seq = self.left_inds, self.right_inds
 
         return tensor_contract(*ts, **contract_opts).to_dense(*inds_seq)
+
+    @functools.wraps(tensor_split)
+    def split(self, **kwargs):
+        return tensor_split(self, left_inds=self.left_inds,
+                            right_inds=self.right_inds, **kwargs)
 
     @property
     def A(self):

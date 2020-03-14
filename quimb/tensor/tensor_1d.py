@@ -136,6 +136,23 @@ _VALID_GATE_PROPAGATE = {'sites', 'register', False, True}
 _TWO_BODY_ONLY = _VALID_GATE_CONTRACT - {True, False}
 
 
+def maybe_factor_gate_into_tensor(G, dp, ng, where):
+    # allow gate to be a matrix as long as it factorizes into tensor
+    shape_matches_2d = (ops.ndim(G) == 2) and (G.shape[1] == dp ** ng)
+    shape_matches_nd = all(d == dp for d in G.shape)
+
+    if shape_matches_2d:
+        G = ops.asarray(G)
+        if ng >= 2:
+            G = reshape(G, [dp] * 2 * ng)
+
+    elif not shape_matches_nd:
+        raise ValueError(
+            f"Gate with shape {G.shape} doesn't match sites {where}.")
+
+    return G
+
+
 def gate_TN_1D(tn, G, where, contract=False, tags=None,
                propagate_tags='sites', inplace=False,
                cur_orthog=None, **compress_opts):
@@ -254,18 +271,7 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
     if (ng > 2) and contract in _TWO_BODY_ONLY:
         raise ValueError(f"Can't use `contract='{contract}'` for >2 sites.")
 
-    # allow gate to be a matrix as long as it factorizes into tensor
-    shape_matches_2d = (ops.ndim(G) == 2) and (G.shape[1] == dp ** ng)
-    shape_matches_nd = all(d == dp for d in G.shape)
-
-    if shape_matches_2d:
-        G = ops.asarray(G)
-        if ng >= 2:
-            G = reshape(G, [dp] * 2 * ng)
-
-    elif not shape_matches_nd:
-        raise ValueError(
-            f"Gate with shape {G.shape} doesn't match sites {where}.")
+    G = maybe_factor_gate_into_tensor(G, dp, ng, where)
 
     if contract == 'swap+split' and ng > 1:
         psi.gate_with_auto_swap(G, where, cur_orthog=cur_orthog,

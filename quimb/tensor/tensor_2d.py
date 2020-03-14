@@ -1,6 +1,7 @@
 """Classes and algorithms related to 2D tensor networks.
 """
 import functools
+from numbers import Integral
 from itertools import product, cycle
 from collections import defaultdict
 
@@ -8,14 +9,18 @@ from autoray import do
 
 from ..gen.rand import randn, seed_rand
 from ..utils import print_multi_line, check_opt
+from . import array_ops as ops
 from .tensor_core import (
     Tensor,
-    utup_union,
-    tags_to_utup,
     rand_uuid,
+    utup_union,
+    utup_discard,
+    tags_to_utup,
     TensorNetwork,
+    tensor_contract,
+    TNLinearOperator,
 )
-from .array_ops import sensibly_scale
+from .tensor_1d import maybe_factor_gate_into_tensor
 
 
 class TensorNetwork2D(TensorNetwork):
@@ -1214,9 +1219,33 @@ class TensorNetwork2D(TensorNetwork):
         contract_boundary, inplace=True)
 
     def compute_row_environments(self, **compress_opts):
-        """Compute the ``2 * self.Lx`` 1D boundary tensor networks describing
+        r"""Compute the ``2 * self.Lx`` 1D boundary tensor networks describing
         the lower and upper environments of each row in this 2D tensor network,
         assumed to represent the norm.
+
+        The 'above' environment for row ``i`` will be a contraction of all
+        rows ``i + 1, i + 2, ...`` etc::
+
+             ●━━━●━━━●━━━●━━━●━━━●━━━●━━━●━━━●━━━●
+            ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲
+
+        The 'below' environment for row ``i`` will be a contraction of all
+        rows ``i - 1, i - 2, ...`` etc::
+
+            ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱
+             ●━━━●━━━●━━━●━━━●━━━●━━━●━━━●━━━●━━━●
+
+        Such that
+        ``envs['above', i] & self.select(self.row_tag(i)) & envs['below', i]``
+        would look like::
+
+             ●━━━●━━━●━━━●━━━●━━━●━━━●━━━●━━━●━━━●
+            ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲
+            o─o─o─o─o─o─o─o─o─o─o─o─o─o─o─o─o─o─o─o
+            ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱
+             ●━━━●━━━●━━━●━━━●━━━●━━━●━━━●━━━●━━━●
+
+        And be (an approximation of) the norm centered around row ``i``
 
         Parameters
         ----------
@@ -1258,9 +1287,47 @@ class TensorNetwork2D(TensorNetwork):
         return row_envs
 
     def compute_col_environments(self, **compress_opts):
-        """Compute the ``2 * self.Ly`` 1D boundary tensor networks describing
+        r"""Compute the ``2 * self.Ly`` 1D boundary tensor networks describing
         the left and right environments of each column in this 2D tensor
         network, assumed to represent the norm.
+
+        The 'left' environment for column ``j`` will be a contraction of all
+        columns ``j - 1, j - 2, ...`` etc::
+
+            ●<
+            ┃
+            ●<
+            ┃
+            ●<
+            ┃
+            ●<
+
+
+        The 'right' environment for row ``j`` will be a contraction of all
+        rows ``j + 1, j + 2, ...`` etc::
+
+            >●
+             ┃
+            >●
+             ┃
+            >●
+             ┃
+            >●
+
+        Such that
+        ``envs['left', j] & self.select(self.col_tag(j)) & envs['right', j]``
+        would look like::
+
+               ╱o
+            ●< o| >●
+            ┃  |o  ┃
+            ●< o| >●
+            ┃  |o  ┃
+            ●< o| >●
+            ┃  |o  ┃
+            ●< o╱ >●
+
+        And be (an approximation of) the norm centered around column ``j``
 
         Parameters
         ----------
@@ -1300,6 +1367,27 @@ class TensorNetwork2D(TensorNetwork):
             col_envs['right', j] = env_left.select(last_column)
 
         return col_envs
+
+
+def is_lone_coo(where):
+    """Check if ``where`` has been specified as a single coordinate pair.
+    """
+    return (len(where) == 2) and (isinstance(where[0], Integral))
+
+
+def group_inds(t1, t2):
+    """Group bonds into left only, shared, and right only.
+    """
+    lix, six, rix = [], [], []
+    for ix in utup_union((t1, t2)):
+        if ix in t1:
+            if ix not in t2:
+                lix.append(ix)
+            else:
+                six.append(ix)
+        else:
+            rix.append(ix)
+    return lix, six, rix
 
 
 class TensorNetwork2DVector(TensorNetwork2D,
@@ -1367,6 +1455,228 @@ class TensorNetwork2DVector(TensorNetwork2D,
         """Get the size of the physical indices / a specific physical index.
         """
         return self.ind_size(self.site_ind(i, j))
+
+    def gate(
+        self,
+        G,
+        where,
+        contract=False,
+        tags=None,
+        inplace=False,
+        **compress_opts
+    ):
+        """Apply the dense gate ``G``, maintaining the physical indices of this
+        2D vector tensor network.
+
+        Parameters
+        ----------
+        G : array_like
+            The gate array to apply, should match or be factorable into the
+            shape ``(phys_dim,) * (2 * len(where))``.
+        where : sequence of tuple[int, int] or tuple[int, int]
+            Which site coordinates to apply the gate to.
+        contract : {'reduce-split', 'lazy-split', 'split',
+                    False, True}, optional
+            How to contract the gate into the 2D tensor network:
+
+                - False: gate is added to network and nothing is contracted,
+                  tensor network structure is thus not maintained.
+                - True: gate is contracted with all tensors involved, tensor
+                  network structure is thus only maintained if gate acts on a
+                  single site only.
+                - 'split': contract all involved tensors then split the result
+                  back into two.
+                - 'reduce-split': factor the two physical indices into
+                  'R-factors' using QR decompositions on the original site
+                  tensors, then contract the gate, split it and reabsorb each
+                  side. Much cheaper than ``'split'``.
+                - 'lazy-split': form the three tensor 'linear operator' of the
+                  two original site tensors and gate lazily, then directly
+                  decompose it probably using an iterative method.
+
+            The final three methods are relevant for two site gates only, for
+            single site gates they use the ``contract=True`` option which also
+            maintains the structure of the TN. See below for a pictorial
+            description of each method.
+        tags : str or sequence of str, optional
+            Tags to add to the new gate tensor.
+        inplace : bool, optional
+            Whether to perform the gate operation inplace on the tensor
+            network or not.
+        compress_opts
+            Supplied to :func:`~quimb.tensor.tensor_core.tensor_split` for any
+            ``contract`` methods that involve splitting. Ignored otherwise.
+
+        Returns
+        -------
+        G_psi : TensorNetwork2DVector
+            The new 2D vector TN like ``IIIGII @ psi`` etc.
+
+        Notes
+        -----
+
+        The ``contract`` options look like the following (for two site gates).
+
+        ``contract=False``::
+
+              │   │
+              GGGGG
+              │╱  │╱
+            ──●───●──
+             ╱   ╱
+
+        ``contract=True``::
+
+              │╱  │╱
+            ──GGGGG──
+             ╱   ╱
+
+        ``contract='split'``::
+
+              │╱  │╱          │╱  │╱
+            ──GGGGG──  ==>  ──G┄┄┄G──
+             ╱   ╱           ╱   ╱
+             <SVD>
+
+        ``contract='lazy-split'``::
+
+              │   │    (via 'vector' products with left / right indices only)
+              GGGGG
+              │╱  │╱          │╱  │╱
+            ──●───●──  ==>  ──G┄┄┄G──
+             ╱   ╱           ╱   ╱
+
+        ``contract='reduce-split'``::
+
+               │   │             │ │
+               GGGGG             GGG               │ │
+               │╱  │╱   ==>     ╱│ │  ╱   ==>     ╱│ │  ╱          │╱  │╱
+             ──●───●──       ──>─●─●─<──       ──>─GGG─<──  ==>  ──G┄┄┄G──
+              ╱   ╱           ╱     ╱           ╱     ╱           ╱   ╱
+            <QR> <LQ>                            <SVD>
+
+        For one site gates when one of the 'split' methods is supplied
+        ``contract=True`` is assumed.
+        """
+        psi = self if inplace else self.copy()
+
+        dp = psi.phys_dim()
+        tags = tags_to_utup(tags)
+
+        if is_lone_coo(where):
+            where = (where,)
+        ng = len(where)
+
+        # allow a matrix to be reshaped into a tensor if it factorizes
+        G = maybe_factor_gate_into_tensor(G, dp, ng, where)
+
+        bnds = [rand_uuid() for _ in range(ng)]
+        site_ix = [psi.site_ind(i, j) for i, j in where]
+
+        TG = Tensor(G, inds=site_ix + bnds, tags=tags, left_inds=bnds)
+
+        if contract is False:
+            #
+            #       │   │
+            #       GGGGG
+            #       │╱  │╱
+            #     ──●───●──
+            #      ╱   ╱
+            #
+            psi.reindex_(dict(zip(site_ix, bnds)))
+            psi |= TG
+            return psi
+
+        elif (contract is True) or (ng == 1):
+            #
+            #       │╱  │╱
+            #     ──GGGGG──
+            #      ╱   ╱
+            #
+            psi.reindex_(dict(zip(site_ix, bnds)))
+
+            # get the sites that used to have the physical indices
+            site_tids = psi._get_tids_from_inds(bnds, which='any')
+
+            # pop the sites, contract, then re-add
+            pts = [psi._pop_tensor(tid) for tid in site_tids]
+            psi |= tensor_contract(*pts, TG)
+
+            return psi
+
+        ij1, ij2 = where
+        TL, TR = psi[ij1], psi[ij2]
+        lix, _, rix = group_inds(TL.inds, TR.inds)
+
+        if contract == 'split':
+            #
+            #       │╱  │╱          │╱  │╱
+            #     ──GGGGG──  ==>  ──G┄┄┄G──
+            #      ╱   ╱           ╱   ╱
+            #
+            # form dense tensor, moving physical indices onto gate
+            TLRG = tensor_contract(
+                TL.reindex({site_ix[0]: bnds[0]}),
+                TR.reindex({site_ix[1]: bnds[1]}),
+                TG)
+            TL_new, TR_new = TLRG.split(
+                left_inds=lix, right_inds=rix, get='tensors', **compress_opts)
+
+        elif contract == 'lazy-split':
+            #
+            #       │   │     (via iterative decomposition - don't form dense)
+            #       GGGGG
+            #       │╱  │╱          │╱  │╱
+            #     ──●───●──  ==>  ──G┄┄┄G──
+            #      ╱   ╱           ╱   ╱
+            #
+            # form effective linop, moving physical indices onto gate
+            TLRG = TNLinearOperator(
+                (TL.reindex({site_ix[0]: bnds[0]}),
+                 TR.reindex({site_ix[1]: bnds[1]}),
+                 TG),
+                left_inds=lix, right_inds=rix
+            )
+            TL_new, TR_new = TLRG.split(get='tensors', **compress_opts)
+
+        elif contract == 'reduce-split':
+            #
+            #       │   │             │ │
+            #       GGGGG             GGG               │ │
+            #       │╱  │╱   ==>     ╱│ │  ╱   ==>     ╱│ │  ╱          │╱  │╱
+            #     ──●───●──       ──>─●─●─<──       ──>─GGG─<──  ==>  ──G┄┄┄G──
+            #      ╱   ╱           ╱     ╱           ╱     ╱           ╱   ╱
+            #    <QR> <LQ>                            <SVD>
+            #
+            # reduce the site tensors
+            TL_Q, TL_R = TL.split(
+                left_inds=utup_discard(lix, site_ix[0]), method='qr')
+            TR_Q, TR_L = TR.split(
+                left_inds=utup_discard(rix, site_ix[1]), method='qr')
+
+            # contract in the gate tensor (moving physical indices onto gate)
+            TLRG = tensor_contract(
+                TL_R.reindex({site_ix[0]: bnds[0]}),
+                TR_L.reindex({site_ix[1]: bnds[1]}),
+                TG)
+
+            # split the new tensor living on the bond
+            left_bnd, = TL_Q.bonds(TLRG)
+            TLRG_L, TLRG_R = TLRG.split(
+                left_inds=(left_bnd, site_ix[0]), **compress_opts)
+
+            # absorb the factors back into site tensors
+            TL_new = TL_Q @ TLRG_L
+            TR_new = TR_Q @ TLRG_R
+
+        TL_new.transpose_like_(TL)
+        TR_new.transpose_like_(TR)
+        TL.modify(data=TL_new.data)
+        TR.modify(data=TR_new.data)
+
+        return psi
+
+    gate_ = functools.partialmethod(gate, inplace=True)
 
 
 class TensorNetwork2DOperator(TensorNetwork2D,
@@ -1630,7 +1940,7 @@ class PEPS(TensorNetwork2DVector,
                 shape.append(bond_dim)
             shape.append(phys_dim)
 
-            arrays[i][j] = sensibly_scale(sensibly_scale(
+            arrays[i][j] = ops.sensibly_scale(ops.sensibly_scale(
                 randn(shape, dtype=dtype)))
 
         return cls(arrays, **peps_opts)
