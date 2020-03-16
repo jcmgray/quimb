@@ -302,10 +302,6 @@ class TestEvolution:
             # should implement this at some point
             return
 
-        if use_int_stop and dop:
-            # should implement this at some point
-            return
-
         L = 6
         T = 20
 
