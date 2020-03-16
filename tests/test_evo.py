@@ -420,6 +420,13 @@ class TestEvolution:
         sim.update_to(trc)
         assert sim.t == trc  # make sure it didn't stop early
 
+        # check that TypeError not related to argument count gets properly
+        #   raised
+        with raises(TypeError):
+            sim = qu.Evolution(p0, ham, method='integrate',
+                               int_stop=7)
+            sim.update_to(trc)
+
     def test_evo_at_times(self):
         ham = qu.ham_heis(2, cyclic=False)
         p0 = qu.up() & qu.down()
