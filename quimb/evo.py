@@ -240,9 +240,36 @@ def _calc_evo_eq(isdop, issparse, isopen=False, timedep=False):
     return eq_chooser[(isdop, issparse, isopen, timedep)]
 
 
+class Try2Then3Args:
+
+    def __init__(self, fn):
+        self.fn = fn
+        self.num_args = None
+
+    def first_call(self, t, p, H):
+        try:
+            res = self.fn(t, p)
+            self.num_args = 2
+        except TypeError as e:
+            if 'positional' in e.args[0]:
+                res = self.fn(t, p, H)
+                self.num_args = 3
+            else:
+                raise
+        return res
+
+    def __call__(self, t, p, H):
+        if self.num_args is None:
+            return self.first_call(t, p, H)
+        elif self.num_args == 2:
+            return self.fn(t, p)
+        elif self.num_args == 3:
+            return self.fn(t, p, H)
+
 # --------------------------------------------------------------------------- #
 # Quantum Evolution Class                                                     #
 # --------------------------------------------------------------------------- #
+
 
 class Evolution(object):
     """A class for evolving quantum systems according to Schrodinger equation.
@@ -282,6 +309,14 @@ class Evolution(object):
               results as a dict of lists with corresponding keys to those
               given in ``compute``.
 
+    int_stop : callable, optional
+        A condition to terminate the integration early if ``method`` is
+        ``'integrate'``. This callable is called at every successful
+        integration step and should take args (t, pt) or (t, pt, ham) similar
+        to the function(s) in the ``compute`` argument.  It should return
+        ``-1`` to stop the integration, otherwise it should return ``None``
+        or ``0``.
+
     method : {'integrate', 'solve', 'expm'}
         How to evolve the system:
 
@@ -311,6 +346,7 @@ class Evolution(object):
 
     def __init__(self, p0, ham, t0=0,
                  compute=None,
+                 int_stop=None,
                  method='integrate',
                  int_small_step=False,
                  expm_backend='AUTO',
@@ -336,7 +372,12 @@ class Evolution(object):
                     make_immutable(Ht)
                 return Ht
 
-        self._setup_callback(compute)
+        if (int_stop is not None) and (method != 'integrate'):
+            raise ValueError("You can't provide an integration stopping "
+                             "condition (int_stop) if the method is not "
+                             "'integrate'")
+
+        self._setup_callback(compute, int_stop)
         self._method = method
 
         if method == 'solve' or isinstance(ham, (tuple, list)):
@@ -370,56 +411,77 @@ class Evolution(object):
             raise ValueError(f"Did not understand evolution "
                              "method: '{method}'.")
 
-    def _setup_callback(self, fn):
+    def _setup_callback(self, fn, int_stop):
         """Setup callbacks in the correct place to compute into _results
         """
-        # if fn is None there is no callback, but possible make a dummy
-        #   one if progbar needs updating
+        # if fn is None there is no callback
         if fn is None:
             step_callback = None
-            if not self._progbar:
-                int_step_callback = None
-            else:
-                def int_step_callback(t, y, H):
-                    pass
-
         # else fn is a dict of callbacks or a single callback
         else:
-            # try just passing time and state to a single callback function
-            # if it fails, pass time, state and hamiltonian
-            def single_callback(fn, t, pt, H):
-                try:
-                    fn_result = fn(t, pt)
-                except TypeError as e:
-                    if 'positional' in e.args[0]:
-                        fn_result = fn(t, pt, H)
-                    else:
-                        raise
-                return fn_result
-
             # dict of funcs input -> dict of funcs output
             if isinstance(fn, dict):
+                fn_try2then3args = {k: Try2Then3Args(v) for k, v in fn.items()}
                 self._results = {k: [] for k in fn}
 
                 def step_callback(t, pt, H):
-                    for k, v in fn.items():
-                        fn_result = single_callback(v, t, pt, H)
+                    for k, v in fn_try2then3args.items():
+                        fn_result = v(t, pt, H)
                         self._results[k].append(fn_result)
 
             # else results -> single list of outputs of fn
             else:
+                fn_try2then3args = Try2Then3Args(fn)
                 self._results = []
 
                 def step_callback(t, pt, H):
-                    fn_result = single_callback(fn, t, pt, H)
+                    fn_result = fn_try2then3args(t, pt, H)
                     self._results.append(fn_result)
 
             # For the integration callback, additionally need to convert
             #   back to 'quantum' (column vector) form
 
-            def int_step_callback(t, y, H):
-                pt = qarray(y.reshape(self._d, -1))
-                step_callback(t, pt, H)
+        # if no compute callback, check if there is an int_stop callback
+        if step_callback is None:
+            # if there is only an int_stop callback, set this up
+            if int_stop is not None:
+                int_stop_try2then3args = Try2Then3Args(int_stop)
+
+                def int_step_callback(t, y, H):
+                    pt = qarray(y.reshape(self._d, -1))
+                    return int_stop_try2then3args(t, pt, H)
+
+            # else if there is neither kind of callback but a progbar is
+            #   needed, set up a dummy callback so it gets updated
+            elif self._progbar:
+                def int_step_callback(t, y, H):
+                    pass
+
+            # else there are no callbacks and no progbar
+            else:
+                int_step_callback = None
+
+        # else there is compute callback, but may need to add int_stop callback
+        else:
+            # if both kinds of callback, combine them
+            if int_stop is not None:
+                int_stop_try2then3args = Try2Then3Args(int_stop)
+
+                def int_step_callback(t, y, H):
+                    # For the integration callback, additionally need to
+                    #   convert back to 'quantum' (column vector) form
+                    pt = qarray(y.reshape(self._d, -1))
+                    step_callback(t, pt, H)
+                    return int_stop_try2then3args(t, pt, H)
+
+            # else no int_stop callback, so just set up compute callback
+            else:
+
+                def int_step_callback(t, y, H):
+                    # For the integration callback, additionally need to
+                    #   convert back to 'quantum' (column vector) form
+                    pt = qarray(y.reshape(self._d, -1))
+                    step_callback(t, pt, H)
 
         self._step_callback = step_callback
         self._int_step_callback = int_step_callback
@@ -474,7 +536,8 @@ class Evolution(object):
         # Set step_callback to be evaluated with args (t, y) at each step
         if self._int_step_callback is not None:
             def solout(t, y):
-                self._int_step_callback(t, y, self._ham)
+                res = self._int_step_callback(t, y, self._ham)
+                return res
             self._stepper.set_solout(solout)
 
         self._stepper.set_initial_value(self._p0.A.reshape(-1), self.t0)
@@ -542,8 +605,9 @@ class Evolution(object):
             with continuous_progbar(self.t, t) as pbar:
                 if self._int_step_callback is not None:
                     def solout(t, y):
-                        self._int_step_callback(t, y, self._ham)
+                        int_stop_res = self._int_step_callback(t, y, self._ham)
                         pbar.cupdate(t)
+                        return int_stop_res
                 else:
                     def solout(t, _):
                         pbar.cupdate(t)

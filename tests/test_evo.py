@@ -290,8 +290,9 @@ class TestEvolution:
     @mark.parametrize("dop", [False, True])
     @mark.parametrize("linop", [False, True])
     @mark.parametrize("num_callbacks", [0, 1, 2])
+    @mark.parametrize("use_int_stop", [False, True])
     def test_evo_timedep_adiabatic_with_callbacks(self, dop, linop,
-                                                  num_callbacks):
+                                                  num_callbacks, use_int_stop):
         # tests time dependent Evolution via an adiabatic sweep with:
         #   a) no callbacks
         #   b) 1 callback that accesses the time-dependent Hamiltonian
@@ -300,6 +301,7 @@ class TestEvolution:
         if num_callbacks > 0 and (dop or linop):
             # should implement this at some point
             return
+
         L = 6
         T = 20
 
@@ -329,8 +331,17 @@ class TestEvolution:
         else:
             p0 = gs1
 
+        if use_int_stop:
+            def check_init_gs_overlap(t, pt):
+                val = qu.fidelity(pt, gs1)
+                return (-1 if val <= 0.75 else 0)
+            int_stop = check_init_gs_overlap
+        else:
+            int_stop = None
+
         if num_callbacks == 0:
-            evo = qu.Evolution(p0, ham, progbar=True)
+            evo = qu.Evolution(p0, ham, method='integrate', int_stop=int_stop,
+                               progbar=True)
         else:
             def gs_overlap(t, pt, H):
                 evals, evecs = eigs_scipy(H(t), k=1, which='SA')
@@ -342,12 +353,19 @@ class TestEvolution:
                 def norm(t, pt):
                     return qu.dot(pt.T, pt)
                 compute = {'norm': norm, 'gs_overlap': gs_overlap}
-            evo = qu.Evolution(p0, ham, compute=compute, progbar=True)
+            evo = qu.Evolution(p0, ham, compute=compute, int_stop=int_stop,
+                               method='integrate', progbar=True)
         evo.update_to(T)
 
         # final state should now overlap much more with second hamiltonian GS
-        assert qu.fidelity(evo.pt, gs1) < 0.5
-        assert qu.fidelity(evo.pt, gs2) > 0.99
+        if use_int_stop:
+            assert qu.fidelity(evo.pt, gs1) < 0.9
+            assert qu.fidelity(evo.pt, gs2) > 0.1
+            assert evo.t < 15
+        else:
+            assert qu.fidelity(evo.pt, gs1) < 0.5
+            assert qu.fidelity(evo.pt, gs2) > 0.99
+            assert evo.t == 20
 
         if num_callbacks == 1:
             gs_overlap_results = evo.results
@@ -361,6 +379,49 @@ class TestEvolution:
             assert ((np.array(norm_results) - 1.0) < 1e-3).all()
             # check that we stayed in the ground state the whole time
             assert ((np.array(gs_overlap_results) - 1.0) < 1e-3).all()
+
+    def test_int_stop_calling_details(self, ham_rcr_psi):
+        # test some details about the way Evolution is called with int_stop:
+        # - Giving int_stop without any compute
+        # - Giving int_stop with (t, p) and with (t, p, H) call signatures
+        ham, trc, p0, tm, pm = ham_rcr_psi
+
+        # check that the int_stop argument doesn't get accepted in either form
+        with raises(ValueError):
+            qu.Evolution(p0, ham, method='solve', int_stop=(lambda t, p: -1))
+        with raises(ValueError):
+            qu.Evolution(p0, ham, method='solve',
+                         int_stop=(lambda t, p, H: -1))
+
+        # check expected behaviour in case where int_stop takes t, p
+        sim = qu.Evolution(p0, ham, method='integrate',
+                           int_stop=(lambda t, p: -1))
+        sim.update_to(trc)
+        assert sim.t < trc/2  # make sure it stopped early
+
+        sim = qu.Evolution(p0, ham, method='integrate',
+                           int_stop=(lambda t, p: 0))
+        sim.update_to(trc)
+        assert sim.t == trc  # make sure it didn't stop early
+
+        sim = qu.Evolution(p0, ham, method='integrate',
+                           int_stop=(lambda t, p, H: -1))
+
+        # check expected behaviour in case where int_stop takes t, p, H
+        sim.update_to(trc)
+        assert sim.t < trc/2  # make sure it stopped early
+
+        sim = qu.Evolution(p0, ham, method='integrate',
+                           int_stop=(lambda t, p, H: 0))
+        sim.update_to(trc)
+        assert sim.t == trc  # make sure it didn't stop early
+
+        # check that TypeError not related to argument count gets properly
+        #   raised
+        with raises(TypeError):
+            sim = qu.Evolution(p0, ham, method='integrate',
+                               int_stop=7)
+            sim.update_to(trc)
 
     def test_evo_at_times(self):
         ham = qu.ham_heis(2, cyclic=False)
