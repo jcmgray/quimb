@@ -2033,20 +2033,20 @@ class TensorNetwork(object):
                 self._inner_inds = self.inner_inds()
 
             # check for matching inner_indices -> need to re-index
-            tn_iix = tn.inner_inds()
-            b_ix = utup_intersection((self._inner_inds, tn_iix))
+            other_inner_ix = tn.inner_inds()
+            clash_ix = utup_intersection((self._inner_inds, other_inner_ix))
 
-            if b_ix:
-                g_ix = utup_difference(tn_iix, self._inner_inds)
-                new_inds = tuple(rand_uuid() for _ in range(len(b_ix)))
-                reind = dict(zip(b_ix, new_inds))
-                self._inner_inds += new_inds + g_ix
+            if clash_ix:
+                can_keep_ix = utup_difference(other_inner_ix, self._inner_inds)
+                new_inds = tuple(rand_uuid() for _ in range(len(clash_ix)))
+                reind = dict(zip(clash_ix, new_inds))
+                self._inner_inds += new_inds + can_keep_ix
             else:
-                self._inner_inds += tn_iix
+                self._inner_inds += other_inner_ix
 
             # add tensors, reindexing if necessary
             for tid, tsr in tn.tensor_map.items():
-                if b_ix and any(i in reind for i in tsr.inds):
+                if clash_ix and any(i in reind for i in tsr.inds):
                     tsr = tsr.reindex(reind, inplace=virtual)
                 self.add_tensor(tsr, virtual=virtual, tid=tid)
 
@@ -2252,6 +2252,15 @@ class TensorNetwork(object):
         return tn
 
     reindex_ = functools.partialmethod(reindex, inplace=True)
+
+    def mangle_inner_(self, which=None):
+        """Generate new index names for internal bonds, meaning that when this
+        tensor network is combined with another, there should be no collisions.
+        """
+        if which is None:
+            which = self.inner_inds()
+        reindex_map = {ix: rand_uuid() for ix in which}
+        self.reindex_(reindex_map)
 
     def conj(self, inplace=False):
         """Conjugate all the tensors in this network (leaves all indices).

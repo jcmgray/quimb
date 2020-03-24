@@ -1113,6 +1113,16 @@ class TestTensorNetwork:
         assert all(n1 != n2 for n1, n2 in zip(norms, enorms))
         assert psi.H @ psi == pytest.approx(x_exp)
 
+    def test_mangle_inner(self):
+        a = MPS_rand_state(6, 3)
+        b = a.copy()
+        assert tuple(a.ind_map) == tuple(b.ind_map)
+        b.mangle_inner_()
+        assert tuple(a.ind_map) != tuple(b.ind_map)
+        ab = a & b
+        assert all(ix in ab.ind_map for ix in a.ind_map)
+        assert all(ix in ab.ind_map for ix in b.ind_map)
+
 
 class TestTensorNetworkSimplifications:
 
