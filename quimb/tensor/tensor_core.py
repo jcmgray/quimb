@@ -2573,6 +2573,9 @@ class TensorNetwork(object):
 
         return tn
 
+    select_any = functools.partialmethod(select, which='any')
+    select_all = functools.partialmethod(select, which='all')
+
     def select_neighbors(self, tags, which='any'):
         """Select any neighbouring tensors to those specified by ``tags``.self
 
@@ -2617,7 +2620,7 @@ class TensorNetwork(object):
         Tensor or sequence of Tensors
         """
         if isinstance(tags, slice):
-            return self.select(self.sites2tags(tags), which='any')
+            return self.select_any(self.sites2tags(tags))
 
         elif isinstance(tags, Integral):
             tensors = self.select_tensors(self.sites2tags(tags), which='any')

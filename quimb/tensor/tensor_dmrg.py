@@ -283,7 +283,7 @@ class MovingEnvironment:
 
             tags_initital = ['_RIGHT'] + [self.site_tag(stop - 1 + b)
                                           for b in range(self.bsz)]
-            self.envs = {stop - 1: self.tnc.select(tags_initital, which='any')}
+            self.envs = {stop - 1: self.tnc.select_any(tags_initital)}
 
             for i in reversed(range(start, stop - 1)):
                 # add a new site to previous env, and contract one site
@@ -298,7 +298,7 @@ class MovingEnvironment:
 
             tags_initital = ['_LEFT'] + [self.site_tag(start + b)
                                          for b in range(self.bsz)]
-            self.envs = {start: self.tnc.select(tags_initital, which='any')}
+            self.envs = {start: self.tnc.select_any(tags_initital)}
 
             for i in range(start + 1, stop):
                 # add a new site to previous env, and contract one site
