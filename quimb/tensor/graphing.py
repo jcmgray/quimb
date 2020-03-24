@@ -8,19 +8,20 @@ from cytoolz import valmap
 def graph(
     tn,
     color=None,
+    highlight_inds=(),
     show_inds=None,
     show_tags=None,
-    node_size=None,
-    iterations=200,
-    k=None,
-    fix=None,
-    figsize=(6, 6),
-    legend=True,
-    return_fig=False,
-    highlight_inds=(),
-    initial_layout='spectral',
-    edge_alpha=1 / 3,
     custom_colors=None,
+    legend=True,
+    fix=None,
+    k=None,
+    iterations=200,
+    initial_layout='spectral',
+    node_size=None,
+    edge_alpha=1 / 3,
+    figsize=(6, 6),
+    return_fig=False,
+    ax=None,
     **plot_opts
 ):
     """Plot this tensor network as a networkx graph using matplotlib,
@@ -37,28 +38,36 @@ def graph(
         Explicitly turn on labels for each tensors indices.
     show_tags : bool, optional
         Explicitly turn on labels for each tensors tags.
-    iterations : int, optional
-        How many iterations to perform when when finding the best layout
-        using node repulsion. Ramp this up if the graph is drawing messily.
-    k : float, optional
-        The optimal distance between nodes.
+    custom_colors : sequence of colors, optional
+        Supply a custom sequence of colors to match the tags given
+        in ``color``.
+    legend : bool, optional
+        Whether to draw a legend for the colored tags.
     fix : dict[tags, (float, float)], optional
         Used to specify actual relative positions for each tensor node.
         Each key should be a sequence of tags that uniquely identifies a
         tensor, and each value should be a x, y coordinate tuple.
-    figsize : tuple of int
-        The size of the drawing.
-    legend : bool, optional
-        Whether to draw a legend for the colored tags.
-    node_size : None
-        How big to draw the tensors.
+    k : float, optional
+        The optimal distance between nodes.
+    iterations : int, optional
+        How many iterations to perform when when finding the best layout
+        using node repulsion. Ramp this up if the graph is drawing messily.
     initial_layout : {'spectral', 'kamada_kawai', 'circular', 'planar',
                       'random', 'shell', 'bipartite', ...}, optional
         The name of a networkx layout to use before iterating with the
         spring layout. Set ``iterations=0`` if you just want to use this
         layout only.
+    node_size : None
+        How big to draw the tensors.
     edge_alpha : float, optional
         Set the alpha (opacity) of the drawn edges.
+    figsize : tuple of int
+        The size of the drawing.
+    return_fig : bool, optional
+        If True and ``ax is None`` then return the figure created rather than
+        executing ``pyplot.show()``.
+    ax : matplotlib.Axis, optional
+        Draw the graph on this axis rather than creating a new figure.
     plot_opts
         Supplied to ``networkx.draw``.
     """
@@ -184,9 +193,10 @@ def graph(
 
     edge_weights = [math.log2(d) for d in edge_weights]
 
-    fig, ax = plt.subplots(figsize=figsize, constrained_layout=True)
-    ax.axis('off')
-    ax.set_aspect('equal')
+    if ax is None:
+        fig, ax = plt.subplots(figsize=figsize, constrained_layout=True)
+        ax.axis('off')
+        ax.set_aspect('equal')
 
     # use spectral layout as starting point
     pos0 = getattr(nx, initial_layout + '_layout')(G, weight=None)
@@ -224,7 +234,9 @@ def graph(
         plt.legend(handles, lbls, ncol=max(round(len(handles) / 20), 1),
                    loc='center left', bbox_to_anchor=(1, 0.5))
 
-    if return_fig:
+    if ax is not None:
+        return
+    elif return_fig:
         return fig
     else:
         plt.show()
