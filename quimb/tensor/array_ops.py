@@ -3,7 +3,7 @@
 import itertools
 
 import numpy
-from autoray import do, reshape, transpose, dag, infer_backend
+from autoray import do, reshape, transpose, dag, infer_backend, get_dtype_name
 
 from ..core import njit
 from ..linalg.base_linalg import norm_fro_dense
@@ -25,9 +25,7 @@ def ndim(array):
 # ------------- miscelleneous other backend agnostic functions -------------- #
 
 def iscomplex(x):
-    if not hasattr(x, 'dtype'):
-        return isinstance(x, complex)
-    return 'complex' in str(x.dtype)
+    return 'complex' in get_dtype_name(x)
 
 
 def norm_fro(x):

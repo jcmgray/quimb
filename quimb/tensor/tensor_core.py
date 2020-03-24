@@ -17,8 +17,8 @@ from numbers import Integral
 import numpy as np
 import opt_einsum as oe
 import scipy.sparse.linalg as spla
-from autoray import do, conj, reshape, transpose, astype
 from cytoolz import unique, concat, frequencies, partition_all, merge_with
+from autoray import do, conj, reshape, transpose, astype, infer_backend
 
 from ..core import qarray, prod, realify_scalar, vdot, common_type
 from ..utils import check_opt, functions_equal
@@ -113,8 +113,8 @@ def get_contraction(eq, *shapes, cache=True, path=False, **kwargs):
 
 
 try:
-    from opt_einsum.contract import infer_backend
-    del infer_backend
+    from opt_einsum.contract import infer_backend as _oe_infer_backend
+    del _oe_infer_backend
     _CONTRACT_BACKEND = 'auto'
     _TENSOR_LINOP_BACKEND = 'auto'
 except ImportError:
@@ -1149,7 +1149,9 @@ class Tensor(object):
         """Conjugate this tensors data (does nothing to indices).
         """
         t = self if inplace else self.copy()
-        t.modify(data=conj(self.data))
+        data = t.data
+        if iscomplex(data):
+            t.modify(data=conj(data))
         return t
 
     conj_ = functools.partialmethod(conj, inplace=True)
@@ -4025,11 +4027,8 @@ class TensorNetwork(object):
         """
         return common_type(*self)
 
-    def isreal(self):
-        return np.issubdtype(self.dtype, np.floating)
-
     def iscomplex(self):
-        return np.issubdtype(self.dtype, np.complexfloating)
+        return iscomplex(self)
 
     def astype(self, dtype, inplace=False):
         """Convert the type of all tensors in this network to ``dtype``.

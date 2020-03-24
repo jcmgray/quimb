@@ -2,8 +2,8 @@ import time
 import functools
 
 import tqdm
-import numpy as np
 
+from . import array_ops
 from .tensor_core import Tensor, TensorNetwork, utup_intersection, tags_to_utup
 
 
@@ -61,7 +61,7 @@ def parse_network_to_torch(tn, constant_tags):
             t.modify(data=constant(t.data))
 
         # treat re and im parts as separate variables
-        elif issubclass(t.dtype.type, np.complexfloating):
+        elif array_ops.iscomplex(t.data):
             iscomplex = True
             raise TypeError("Torch does not yet support complex data types.")
 
