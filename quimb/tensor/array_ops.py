@@ -25,6 +25,8 @@ def ndim(array):
 # ------------- miscelleneous other backend agnostic functions -------------- #
 
 def iscomplex(x):
+    if infer_backend(x) == 'builtins':
+        return isinstance(x, complex)
     return 'complex' in get_dtype_name(x)
 
 
