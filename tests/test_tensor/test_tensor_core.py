@@ -468,6 +468,18 @@ class TestTensorFunctions:
         else:
             assert a.dtype == 'float64'
 
+    def test_multiply_index_diagonal(self):
+        x = rand_tensor((3, 4), 'ab')
+        y = rand_tensor((4, 5), 'bc')
+        z1 = x @ y
+        # insert a diagonal gauge
+        s = qu.randn(4)
+        z2 = (
+            x.multiply_index_diagonal('b', s) @
+            y.multiply_index_diagonal('b', 1 / s)
+        )
+        assert z1.almost_equals(z2)
+
 
 class TestTensorNetwork:
     def test_combining_tensors(self):

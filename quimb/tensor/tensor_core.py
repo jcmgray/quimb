@@ -680,6 +680,18 @@ def tensor_compress_bond(T1, T2, absorb='both', **compress_opts):
     T2.modify(data=T2C.data)
 
 
+def tensor_balance_bond(t1, t2):
+    """Gauge the bond between two tensors such that the norm of the 'columns'
+    of the tensors on each side is the same for each index of the bond.
+    """
+    ix, = bonds(t1, t2)
+    x = tensor_contract(t1.H, t1, output_inds=[ix]).data
+    y = tensor_contract(t2.H, t2, output_inds=[ix]).data
+    s = (x / y)
+    t1.multiply_index_diagonal_(ix, s**-0.25)
+    t2.multiply_index_diagonal_(ix, s**+0.25)
+
+
 def new_bond(T1, T2, size=1, name=None, axis1=0, axis2=0):
     """Inplace addition of a new bond between tensors ``T1`` and ``T2``. The
     size of the new bond can be specified, in which case the new array parts
@@ -1179,9 +1191,6 @@ class Tensor(object):
     def dtype(self):
         return self._data.dtype
 
-    def isreal(self):
-        return not iscomplex(self.data)
-
     def iscomplex(self):
         return iscomplex(self.data)
 
@@ -1587,6 +1596,18 @@ class Tensor(object):
 
     flip_ = functools.partialmethod(flip, inplace=True)
 
+    def multiply_index_diagonal(self, ind, x, inplace=False):
+        """Multiply this tensor by 1D array ``x`` as if it were a diagonal
+        tensor being contracted into index ``ind``.
+        """
+        t = self if inplace else self.copy()
+        x_broadcast = reshape(x, [(-1 if i == ind else 1) for i in t.inds])
+        t.modify(data=t.data * x_broadcast)
+        return t
+
+    multiply_index_diagonal_ = functools.partialmethod(
+        multiply_index_diagonal, inplace=True)
+
     def almost_equals(self, other, **kwargs):
         """Check if this tensor is almost the same as another.
         """
@@ -1594,7 +1615,7 @@ class Tensor(object):
         if not same_inds:
             return False
         otherT = other.transpose(*self.inds)
-        return np.allclose(self.data, otherT.data, **kwargs)
+        return do('allclose', self.data, otherT.data, **kwargs)
 
     def drop_tags(self, tags=None):
         """Drop certain tags, defaulting to all, from this tensor.
@@ -2903,7 +2924,7 @@ class TensorNetwork(object):
         for T in self:
             new_shape = tuple(d if i in outer_inds else 1
                               for d, i in zip(T.shape, T.inds))
-            T.modify(data=np.zeros(new_shape, dtype=T.dtype))
+            T.modify(data=do('zeros', new_shape, dtype=T.dtype, like=T.data))
 
     def contract_between(self, tags1, tags2, **contract_opts):
         """Contract the two tensors specified by ``tags1`` and ``tags2``
@@ -3641,7 +3662,12 @@ class TensorNetwork(object):
         tn = self if inplace else self.copy()
 
         norms = [t.norm() for t in tn]
-        X = math.e ** (do('sum', do('log', norms, like=norms[0])) / len(norms))
+        backend = infer_backend(norms[0])
+        X = do('power',
+               math.e,
+               do('mean',
+                  do('log',
+                     do('array', norms, like=backend))), like=backend)
 
         for t, xi in zip(tn, norms):
             t.modify(data=(X / xi) * t.data)
@@ -3649,6 +3675,22 @@ class TensorNetwork(object):
         return tn
 
     equalize_norms_ = functools.partialmethod(equalize_norms, inplace=True)
+
+    def balance_bonds(self, inplace=False):
+        """
+        """
+        tn = self if inplace else self.copy()
+
+        for ix, tids in tn.ind_map.items():
+            if len(tids) != 2:
+                continue
+            tid1, tid2 = tids
+            t1, t2 = [tn.tensor_map[x] for x in (tid1, tid2)]
+            tensor_balance_bond(t1, t2)
+
+        return tn
+
+    balance_bonds_ = functools.partialmethod(balance_bonds, inplace=True)
 
     def fuse_multibonds(self, inplace=False):
         """Fuse any multi-bonds (more than one index shared by the same pair
