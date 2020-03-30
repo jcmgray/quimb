@@ -534,7 +534,7 @@ def tensor_split(T, left_inds, method='svd', max_bond=None, absorb='both',
     if right_inds is None:
         right_inds = tuple(x for x in T.inds if x not in left_inds)
 
-    if isinstance(T, TNLinearOperator):
+    if isinstance(T, spla.LinearOperator):
         left_dims = T.ldims
         right_dims = T.rdims
 
@@ -4382,6 +4382,7 @@ class TNLinearOperator1D(spla.LinearOperator):
         self.left_inds, self.right_inds = left_inds, right_inds
         self.ldims, ld = ldims, prod(ldims)
         self.rdims, rd = rdims, prod(rdims)
+        self.tags = self.tn.tags
 
         # conjugate inputs/ouputs rather all tensors if necessary
         self.is_conj = is_conj
