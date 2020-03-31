@@ -3,6 +3,7 @@ import importlib
 import pytest
 from numpy.testing import assert_allclose
 from autoray import real
+import opt_einsum as oe
 
 import quimb as qu
 import quimb.tensor as qtn
@@ -11,15 +12,25 @@ import quimb.tensor as qtn
 found_torch = importlib.util.find_spec('torch') is not None
 found_autograd = importlib.util.find_spec('autograd') is not None
 found_jax = importlib.util.find_spec('jax') is not None
+found_tensorflow = importlib.util.find_spec('tensorflow') is not None
 
-try:
-    import tensorflow as tf
-    # needed so tensorflow doesn't allocate all gpu mem
-    _TF_CONFIG = tf.ConfigProto()
-    _TF_CONFIG.gpu_options.allow_growth = True
-    found_tensorflow = True
-except ImportError:
-    found_tensorflow = False
+if found_tensorflow:
+    # XXX: tensorflow einsum gradient wrong for complex backends
+    #      https://github.com/tensorflow/tensorflow/issues/37307
+    oe.backends.dispatch._has_einsum['tensorflow'] = False
+
+jax_case = pytest.param(
+    'jax', marks=pytest.mark.skipif(
+        not found_jax, reason='jax not installed'))
+autograd_case = pytest.param(
+    'autograd', marks=pytest.mark.skipif(
+        not found_autograd, reason='autograd not installed'))
+tensorflow_case = pytest.param(
+    'tensorflow', marks=pytest.mark.skipif(
+        not found_tensorflow, reason='tensorflow not installed'))
+pytorch_case = pytest.param(
+    'torch', marks=pytest.mark.skipif(
+        not found_torch, reason='pytorch not installed'))
 
 
 @pytest.fixture
@@ -82,41 +93,6 @@ def test_optimize_pbc_heis_torch(heis_pbc):
     assert loss_fn(psi_opt, H) == pytest.approx(en_ex, rel=1e-2)
 
 
-@pytest.mark.skipif(not found_tensorflow, reason="Tensorflow not installed.")
-@pytest.mark.parametrize('optimizer', ['Adam', 'scipy'])
-def test_optimize_pbc_heis_tensorflow(heis_pbc, optimizer):
-    from quimb.tensor.optimize_tensorflow import TNOptimizer
-    psi0, H, norm_fn, loss_fn, en_ex = heis_pbc
-
-    with tf.Session(config=_TF_CONFIG).as_default():
-        tnopt = TNOptimizer(
-            psi0,
-            loss_fn,
-            norm_fn,
-            loss_constants={'H': H},
-            optimizer=optimizer,
-        )
-        psi_opt = tnopt.optimize(100)
-    assert loss_fn(psi_opt, H) == pytest.approx(en_ex, rel=1e-2)
-
-
-@pytest.mark.skipif(not found_tensorflow, reason="Tensorflow not installed.")
-@pytest.mark.parametrize('optimizer', ['Adam', 'scipy'])
-def test_optimize_ham_mbl_complex_tensorflow(ham_mbl_pbc_complex, optimizer):
-    from quimb.tensor.optimize_tensorflow import TNOptimizer
-    psi0, H, norm_fn, loss_fn, en_ex = ham_mbl_pbc_complex
-    with tf.Session(config=_TF_CONFIG).as_default():
-        tnopt = TNOptimizer(
-            psi0,
-            loss_fn,
-            norm_fn,
-            loss_constants={'H': H},
-            optimizer=optimizer,
-        )
-        psi_opt = tnopt.optimize(100)
-    assert loss_fn(psi_opt, H) == pytest.approx(en_ex, rel=1e-2)
-
-
 def test_vectorizer():
     from quimb.tensor.optimize_autograd import Vectorizer
 
@@ -138,16 +114,10 @@ def test_vectorizer():
         assert_allclose(x, y)
 
 
-jax_case = pytest.param(
-    'jax', marks=pytest.mark.skipif(not found_jax, reason='jax not installed'))
-autograd_case = pytest.param(
-    'autograd', marks=pytest.mark.skipif(not found_autograd,
-                                         reason='autograd not installed'))
-
-
-@pytest.mark.parametrize('backend', [jax_case, autograd_case])
+@pytest.mark.parametrize('backend', [jax_case, autograd_case,
+                                     tensorflow_case, pytorch_case])
 @pytest.mark.parametrize('method', ['simple', 'basin'])
-def test_optimize_pbc_heis_jax(heis_pbc, backend, method):
+def test_optimize_pbc_heis(heis_pbc, backend, method):
     from quimb.tensor.optimize_autograd import TNOptimizer
     psi0, H, norm_fn, loss_fn, en_ex = heis_pbc
     tnopt = TNOptimizer(
@@ -164,9 +134,10 @@ def test_optimize_pbc_heis_jax(heis_pbc, backend, method):
     assert loss_fn(psi_opt, H) == pytest.approx(en_ex, rel=1e-2)
 
 
-@pytest.mark.parametrize('backend', [jax_case, autograd_case])
+@pytest.mark.parametrize('backend', [jax_case, autograd_case,
+                                     tensorflow_case])
 @pytest.mark.parametrize('method', ['simple', 'basin'])
-def test_optimize_ham_mbl_complex_jax(ham_mbl_pbc_complex, backend, method):
+def test_optimize_ham_mbl_complex(ham_mbl_pbc_complex, backend, method):
     from quimb.tensor.optimize_autograd import TNOptimizer
     psi0, H, norm_fn, loss_fn, en_ex = ham_mbl_pbc_complex
     tnopt = TNOptimizer(

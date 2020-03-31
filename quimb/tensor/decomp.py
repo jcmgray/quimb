@@ -101,13 +101,13 @@ def _trim_and_renorm_SVD(U, s, V, cutoff, cutoff_mode,
     s = np.ascontiguousarray(s)
 
     if absorb == -1:
-        U *= s.reshape((1, -1))
+        U = U * s.reshape((1, -1))
     elif absorb == 1:
-        V *= s.reshape((-1, 1))
+        V = V * s.reshape((-1, 1))
     else:
         s **= 0.5
-        U *= s.reshape((1, -1))
-        V *= s.reshape((-1, 1))
+        U = U * s.reshape((1, -1))
+        V = V * s.reshape((-1, 1))
 
     return U, V
 
@@ -217,7 +217,7 @@ def _svdvals(x):
 def dag(x):
     """Hermitian conjugate.
     """
-    return np.conjugate(x).T
+    return np.conjugate(x.T)
 
 
 @njit  # pragma: no cover

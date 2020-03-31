@@ -22,7 +22,7 @@ dependencies:
   - pytorch
   - cpuonly
   - autograd
-  - tensorflow<2
+  - tensorflow>=2
   - autoray
   - pip:
     - randomgen

@@ -7,7 +7,7 @@ import importlib
 
 import tqdm
 import numpy as np
-from autoray import do, to_numpy
+from cytoolz import valmap
 
 from .tensor_core import (
     contract_backend,
@@ -87,7 +87,7 @@ class Vectorizer:
 
         return x
 
-    def unpack(self, vector=None, conj=False):
+    def unpack(self, vector=None):
         """Turn the single, flat ``vector`` into a sequence of arrays.
         """
         if vector is None:
@@ -104,9 +104,6 @@ class Vectorizer:
             else:
                 array = vector[i:i + 2 * size]
                 array = array.view(equivalent_complex_type(array))
-                # XXX: need to conjugate for autograd/jax, convention??
-                if conj:
-                    array = np.conj(array)
                 array.shape = shape
                 i += 2 * size
 
@@ -117,7 +114,7 @@ class Vectorizer:
         return arrays
 
 
-def parse_network_to_ag(tn, constant_tags, backend=_DEFAULT_BACKEND):
+def parse_network_to_backend(tn, constant_tags, to_constant):
     tn_ag = tn.copy()
     variables = []
 
@@ -126,7 +123,7 @@ def parse_network_to_ag(tn, constant_tags, backend=_DEFAULT_BACKEND):
     for t in tn_ag:
         # check if tensor has any of the constant tags
         if utup_intersection((t.tags, constant_tags)):
-            t.modify(data=constant(t.data, backend=backend))
+            t.modify(data=to_constant(t.data))
             continue
 
         if isinstance(t, PTensor):
@@ -145,44 +142,146 @@ def parse_network_to_ag(tn, constant_tags, backend=_DEFAULT_BACKEND):
     return tn_ag, variables
 
 
-def constant(x, backend=_DEFAULT_BACKEND):
-    if backend == 'jax' and isinstance(x, qarray):
-        x = x.A
-    return do('array', x, like=backend)
-
-
-def constant_t(t, backend=_DEFAULT_BACKEND):
+def constant_t(t, to_constant):
     ag_t = t.copy()
-    ag_t.modify(data=constant(ag_t.data, backend=backend))
+    ag_t.modify(data=to_constant(ag_t.data))
     return ag_t
 
 
-def constant_tn(tn, backend=_DEFAULT_BACKEND):
+def constant_tn(tn, to_constant):
     """Convert a tensor network's arrays to constants.
     """
     ag_tn = tn.copy()
-    ag_tn.apply_to_arrays(functools.partial(constant, backend=backend))
+    ag_tn.apply_to_arrays(to_constant)
     return ag_tn
 
 
-def tensorflow_value_and_grad(fn):
-    """TensorFlow 2 version of ``value_and_grad``.
-    """
-    import tensorflow as tf
+class AutoGradHandler:
 
-    jit_fn = tf.function(fn, autograph=False)
+    def __init__(self):
+        import autograd
+        self.autograd = autograd
 
-    def fn_value_and_grad(arrays):
-        arrays = [tf.constant(x) for x in arrays]
+    def to_variable(self, x):
+        return np.array(x)
 
-        # explicitly only watch supplied arrays
-        with tf.GradientTape(watch_accessed_variables=False) as t:
-            t.watch(arrays)
-            result = jit_fn(arrays)
+    def to_constant(self, x):
+        return np.array(x)
 
-        return result, t.gradient(result, arrays)
+    def setup_fn(self, fn):
+        self._value_and_grad = self.autograd.value_and_grad(fn)
 
-    return fn_value_and_grad
+    def value_and_grad(self, arrays):
+        loss, grads = self._value_and_grad(arrays)
+        return loss, [x.conj() for x in grads]
+
+
+class JaxHandler:
+
+    def __init__(self, jit_fn=True):
+        import jax
+        self.jit_fn = jit_fn
+        self.jax = jax
+
+    def to_variable(self, x):
+        return self.jax.numpy.array(x)
+
+    def to_constant(self, x):
+        return self.jax.numpy.array(x)
+
+    def setup_fn(self, fn):
+        if self.jit_fn:
+            jfn = self.jax.jit(fn)
+        else:
+            jfn = fn
+
+        self._value_and_grad = self.jax.value_and_grad(jfn)
+
+    def value_and_grad(self, arrays):
+        loss, grads = self._value_and_grad(arrays)
+        return loss, [x.conj() for x in grads]
+
+
+class TensorFlowHandler:
+
+    def __init__(self, jit_fn=False, autograph=False):
+        import tensorflow
+        self.tensorflow = tensorflow
+        self.jit_fn = jit_fn
+        self.autograph = autograph
+
+    def to_variable(self, x):
+        return self.tensorflow.Variable(x)
+
+    def to_constant(self, x):
+        return self.tensorflow.constant(x)
+
+    def setup_fn(self, fn):
+        if self.jit_fn:
+            self._backend_fn = self.tensorflow.function(
+                fn, autograph=self.autograph)
+        else:
+            self._backend_fn = fn
+
+    def value_and_grad(self, arrays):
+        variables = [self.to_variable(x) for x in arrays]
+
+        with self.tensorflow.GradientTape() as t:
+            result = self._backend_fn(variables)
+
+        grads = [x.numpy() for x in t.gradient(result, variables)]
+        loss = result.numpy()
+
+        return loss, grads
+
+
+class TorchHandler:
+
+    def __init__(self, jit_fn=False, device=None):
+        import torch
+        self.torch = torch
+        self.jit_fn = jit_fn
+        if device is None:
+            device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        self.device = device
+
+    def to_variable(self, x):
+        return self.torch.tensor(x, requires_grad=True, device=self.device)
+
+    def to_constant(self, x):
+        return self.torch.tensor(x, device=self.device)
+
+    def setup_fn(self, fn):
+        self._fn = fn
+        self._backend_fn = None
+
+    def _setup_backend_fn(self, arrays):
+        if self.jit_fn:
+            self._backend_fn = self.torch.jit.trace(
+                self._fn, example_inputs=[list(map(self.to_constant, arrays))])
+        else:
+            self._backend_fn = self._fn
+
+    def value_and_grad(self, arrays):
+        if self._backend_fn is None:
+            self._setup_backend_fn(arrays)
+
+        arrays = [self.to_variable(x) for x in arrays]
+        result = self._backend_fn(arrays)
+        result.backward()
+
+        loss = result.detach().cpu().numpy()
+        grads = [x.grad.cpu().numpy() for x in arrays]
+
+        return loss, grads
+
+
+_BACKEND_HANDLERS = {
+    'autograd': AutoGradHandler,
+    'jax': JaxHandler,
+    'tensorflow': TensorFlowHandler,
+    'torch': TorchHandler,
+}
 
 
 variable_finder = re.compile(r'__VARIABLE(\d+)__')
@@ -222,15 +321,18 @@ class TNOptimizer:
         learning_rate=None,
         learning_decay_steps=None,
         learning_decay_rate=None,
+        **backend_opts
     ):
         self.progbar = progbar
         self.optimizer = optimizer
         self.bounds = bounds
         self.constant_tags = tags_to_utup(constant_tags)
 
+        # the object that handles converting to backend + computing gradient
         if autograd_backend.upper() == 'AUTO':
             autograd_backend = _DEFAULT_BACKEND
-        self.autograd_backend = autograd_backend
+        self.handler = _BACKEND_HANDLERS[autograd_backend](**backend_opts)
+        to_constant = self.handler.to_constant
 
         # use identity if no nomalization required
         if norm_fn is None:
@@ -239,32 +341,34 @@ class TNOptimizer:
 
         self.norm_fn = norm_fn
 
-        self.loss_kwargs = {} if loss_kwargs is None else dict(loss_kwargs)
-
+        # convert constant arrays ahead of time to correct backend
         self.loss_constants = {}
         if loss_constants is not None:
             for k, v in loss_constants.items():
                 # check if tensor network supplied
                 if isinstance(v, TensorNetwork):
                     # convert it to constant TN
-                    self.loss_constants[k] = constant_tn(v, autograd_backend)
+                    self.loss_constants[k] = constant_tn(v, to_constant)
                 elif isinstance(v, Tensor):
-                    self.loss_constants[k] = constant_t(v, autograd_backend)
+                    self.loss_constants[k] = constant_t(v, to_constant)
+                elif isinstance(v, dict):
+                    self.loss_constants[k] = valmap(to_constant, v)
                 else:
-                    self.loss_constants[k] = constant(v, autograd_backend)
+                    self.loss_constants[k] = to_constant(v)
 
+        self.loss_kwargs = {} if loss_kwargs is None else dict(loss_kwargs)
         self.loss_fn = functools.partial(
             loss_fn, **self.loss_constants, **self.loss_kwargs
         )
 
-        self.loss = np.inf
-        self.loss_best = np.inf
+        self.loss = float('inf')
+        self.loss_best = float('inf')
         self.loss_target = loss_target
         self.losses = []
         self._n = 0
 
-        self.tn_opt, self.variables = parse_network_to_ag(
-            tn, self.constant_tags, backend=self.autograd_backend,
+        self.tn_opt, self.variables = parse_network_to_backend(
+            tn, self.constant_tags, to_constant
         )
 
         # this handles storing and packing /  unpacking many arrays as a vector
@@ -275,26 +379,19 @@ class TNOptimizer:
         self.bounds = bounds
 
         def func(arrays):
-            # need to set backend explicitly as mixing with numpy arrays
-            with contract_backend(self.autograd_backend):
+            # set backend explicitly as maybe mixing with numpy arrays
+            with contract_backend(autograd_backend):
                 inject_(arrays, self.tn_opt)
                 return self.loss_fn(self.norm_fn(self.tn_opt))
 
-        if self.autograd_backend == 'jax':
-            import jax
-            self.func_val_and_grad = jax.value_and_grad(jax.jit(func))
-        elif self.autograd_backend == 'autograd':
-            import autograd
-            self.func_val_and_grad = autograd.value_and_grad(func)
-        elif self.autograd_backend == 'tensorflow':
-            self.func_val_and_grad = tensorflow_value_and_grad(func)
+        self.handler.setup_fn(func)
 
         def vectorized_value_and_grad(x):
-            arrays = self.vctrzr.unpack(x, conj=True)
-            ag_result, ag_grads = self.func_val_and_grad(arrays)
-            self._n += 1
+            arrays = self.vctrzr.unpack(x)
+            ag_result, ag_grads = self.handler.value_and_grad(arrays)
 
-            self.loss = to_numpy(ag_result)
+            self._n += 1
+            self.loss = ag_result.item()
             self.losses.append(self.loss)
 
             vec_grad = self.vctrzr.pack(ag_grads, 'grad')
@@ -310,10 +407,11 @@ class TNOptimizer:
         return self._n
 
     def inject_res_vector_and_return_tn(self):
-        inject_(self.vctrzr.unpack(self.res.x, conj=True), self.tn_opt)
+        arrays = self.vctrzr.unpack(self.res.x)
+        inject_(arrays, self.tn_opt)
         self.vctrzr.vector[:] = self.res.x
         tn = self.norm_fn(self.tn_opt.copy())
-        tn.drop_tags(t for t in tn.tags if '__VARIABLE' in t)
+        tn.drop_tags(t for t in tn.tags if variable_finder.match(t))
         return tn
 
     def optimize(self, n, tol=None, **options):
