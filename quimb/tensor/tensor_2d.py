@@ -1,11 +1,13 @@
 """Classes and algorithms related to 2D tensor networks.
 """
 import functools
+from operator import add
 from numbers import Integral
-from itertools import product, cycle
+from itertools import product, cycle, starmap
 from collections import defaultdict
 
 from autoray import do
+import opt_einsum as oe
 
 from ..gen.rand import randn, seed_rand
 from ..utils import print_multi_line, check_opt
@@ -145,8 +147,7 @@ class TensorNetwork2D(TensorNetwork):
     def site_tags(self):
         """All of the ``Lx * Ly`` site tags.
         """
-        return tuple(self.site_tag(i, j)
-                     for i in range(self.Lx) for j in range(self.Ly))
+        return tuple(starmap(self.site_tag, self.gen_site_coos()))
 
     def maybe_convert_coo(self, x):
         """Check if ``x`` is a tuple of two ints and convert to the
@@ -170,14 +171,70 @@ class TensorNetwork2D(TensorNetwork):
     def gen_site_coos(self):
         """Generate coordinates for all the sites in this 2D TN.
         """
-        for i in range(self.Lx):
-            for j in range(self.Ly):
-                yield (i, j)
+        return product(range(self.Lx), range(self.Ly))
 
     def gen_bond_coos(self):
         """Generate pairs of coordinates for all the bonds in this 2D TN.
         """
-        return gen_2d_bond_pairs(self.Lx, self.Ly)
+        for i, j in self.gen_site_coos():
+            coo_right = (i, j + 1)
+            if self.valid_coo(coo_right):
+                yield (i, j), coo_right
+            coo_above = (i + 1, j)
+            if self.valid_coo(coo_above):
+                yield (i, j), coo_above
+
+    def gen_horizontal_bond_coos(self):
+        """Generate all coordinate pairs like ``(i, j), (i, j + 1)``.
+        """
+        for i in range(self.Lx):
+            for j in range(self.Ly - 1):
+                yield (i, j), (i, j + 1)
+
+    def gen_horizontal_even_bond_coos(self):
+        """Generate all coordinate pairs like ``(i, j), (i, j + 1)`` where
+        ``j`` is even, which thus don't overlap at all.
+        """
+        for i in range(self.Lx):
+            for j in range(0, self.Ly - 1, 2):
+                yield (i, j), (i, j + 1)
+
+    def gen_horizontal_odd_bond_coos(self):
+        """Generate all coordinate pairs like ``(i, j), (i, j + 1)`` where
+        ``j`` is odd, which thus don't overlap at all.
+        """
+        for i in range(self.Lx):
+            for j in range(1, self.Ly - 1, 2):
+                yield (i, j), (i, j + 1)
+
+    def gen_vertical_bond_coos(self):
+        """Generate all coordinate pairs like ``(i, j), (i + 1, j)``.
+        """
+        for j in range(self.Ly):
+            for i in range(self.Lx - 1):
+                yield (i, j), (i + 1, j)
+
+    def gen_vertical_even_bond_coos(self):
+        """Generate all coordinate pairs like ``(i, j), (i + 1, j)`` where
+        ``i`` is even, which thus don't overlap at all.
+        """
+        for j in range(self.Ly):
+            for i in range(0, self.Lx - 1, 2):
+                yield (i, j), (i + 1, j)
+
+    def gen_vertical_odd_bond_coos(self):
+        """Generate all coordinate pairs like ``(i, j), (i + 1, j)`` where
+        ``i`` is odd, which thus don't overlap at all.
+        """
+        for j in range(self.Ly):
+            for i in range(1, self.Lx - 1, 2):
+                yield (i, j), (i + 1, j)
+
+    def valid_coo(self, ij):
+        """Test whether ``ij`` is in grid for this 2D TN.
+        """
+        i, j = ij
+        return (0 <= i < self.Lx) and (0 <= j < self.Ly)
 
     def __repr__(self):
         """Insert number of rows and columns into standard print.
@@ -1066,7 +1123,7 @@ class TensorNetwork2D(TensorNetwork):
         around=None,
         layer_tags=None,
         max_separation=1,
-        sequence='bltr',
+        sequence=None,
         bottom=None,
         top=None,
         left=None,
@@ -1137,10 +1194,18 @@ class TensorNetwork2D(TensorNetwork):
             right = tn.Ly - 1
 
         if around is not None:
+            if sequence is None:
+                sequence = 'bltr'
             stop_i_min = min(x[0] for x in around)
             stop_i_max = max(x[0] for x in around)
             stop_j_min = min(x[1] for x in around)
             stop_j_max = max(x[1] for x in around)
+        elif sequence is None:
+            # contract in along short dimension
+            if self.Lx >= self.Ly:
+                sequence = 'b'
+            else:
+                sequence = 'l'
 
         # keep track of whether we have hit the ``around`` region.
         reached_stop = {direction: False for direction in sequence}
@@ -1218,7 +1283,7 @@ class TensorNetwork2D(TensorNetwork):
     contract_boundary_ = functools.partialmethod(
         contract_boundary, inplace=True)
 
-    def compute_row_environments(self, **compress_opts):
+    def compute_row_environments(self, dense=False, **compress_opts):
         r"""Compute the ``2 * self.Lx`` 1D boundary tensor networks describing
         the lower and upper environments of each row in this 2D tensor network,
         assumed to represent the norm.
@@ -1249,6 +1314,8 @@ class TensorNetwork2D(TensorNetwork):
 
         Parameters
         ----------
+        dense : bool, optional
+            If true, contract the boundary in as a single dense tensor.
         compress_opts
             Supplied to
             :meth:`~quimb.tensor.tensor_2d.TensorNetwork2D.contract_boundary_from_bottom`
@@ -1265,28 +1332,38 @@ class TensorNetwork2D(TensorNetwork):
         row_envs = dict()
 
         # upwards pass
+        row_envs['below', 0] = TensorNetwork([])
         first_row = self.row_tag(0)
         env_bottom = self.copy()
-        row_envs['below', 0] = TensorNetwork([])
+        if dense:
+            env_bottom ^= first_row
         row_envs['below', 1] = env_bottom.select(first_row)
         for i in range(2, env_bottom.Lx):
-            env_bottom.contract_boundary_from_bottom_(
-                (i - 2, i - 1), **compress_opts)
+            if dense:
+                env_bottom ^= (self.row_tag(i - 2), self.row_tag(i - 1))
+            else:
+                env_bottom.contract_boundary_from_bottom_(
+                    (i - 2, i - 1), **compress_opts)
             row_envs['below', i] = env_bottom.select(first_row)
 
         # downwards pass
+        row_envs['above', self.Lx - 1] = TensorNetwork([])
         last_row = self.row_tag(self.Lx - 1)
         env_top = self.copy()
-        row_envs['above', self.Lx - 1] = TensorNetwork([])
+        if dense:
+            env_top ^= last_row
         row_envs['above', self.Lx - 2] = env_top.select(last_row)
         for i in range(env_top.Lx - 3, -1, -1):
-            env_top.contract_boundary_from_top_(
-                (i + 1, i + 2), **compress_opts)
+            if dense:
+                env_top ^= (self.row_tag(i + 1), self.row_tag(i + 2))
+            else:
+                env_top.contract_boundary_from_top_(
+                    (i + 1, i + 2), **compress_opts)
             row_envs['above', i] = env_top.select(last_row)
 
         return row_envs
 
-    def compute_col_environments(self, **compress_opts):
+    def compute_col_environments(self, dense=False, **compress_opts):
         r"""Compute the ``2 * self.Ly`` 1D boundary tensor networks describing
         the left and right environments of each column in this 2D tensor
         network, assumed to represent the norm.
@@ -1331,6 +1408,8 @@ class TensorNetwork2D(TensorNetwork):
 
         Parameters
         ----------
+        dense : bool, optional
+            If true, contract the boundary in as a single dense tensor.
         compress_opts
             Supplied to
             :meth:`~quimb.tensor.tensor_2d.TensorNetwork2D.contract_boundary_from_left`
@@ -1347,13 +1426,18 @@ class TensorNetwork2D(TensorNetwork):
         col_envs = dict()
 
         # rightwards pass
+        col_envs['left', 0] = TensorNetwork([])
         first_column = self.col_tag(0)
         env_right = self.copy()
-        col_envs['left', 0] = TensorNetwork([])
+        if dense:
+            env_right ^= first_column
         col_envs['left', 1] = env_right.select(first_column)
         for j in range(2, env_right.Ly):
-            env_right.contract_boundary_from_left_(
-                (j - 2, j - 1), **compress_opts)
+            if dense:
+                env_right ^= (self.col_tag(j - 2), self.col_tag(j - 1))
+            else:
+                env_right.contract_boundary_from_left_(
+                    (j - 2, j - 1), **compress_opts)
             col_envs['left', j] = env_right.select(first_column)
 
         # leftwards pass
@@ -1367,6 +1451,272 @@ class TensorNetwork2D(TensorNetwork):
             col_envs['right', j] = env_left.select(last_column)
 
         return col_envs
+
+    def _compute_plaquette_environments_row_first(
+        self,
+        x_bsz,
+        y_bsz,
+        second_dense=None,
+        row_envs=None,
+        **compute_environment_opts
+    ):
+        if second_dense is None:
+            second_dense = x_bsz < 2
+
+        # first we contract from either side to produce column environments
+        if row_envs is None:
+            row_envs = self.compute_row_environments(
+                **compute_environment_opts)
+
+        # next we form vertical strips and contract from both top and bottom
+        #     for each column
+        col_envs = dict()
+        for i in range(self.Lx - x_bsz + 1):
+            #
+            #      ●━━━●━━━●━━━●━━━●━━━●━━━●━━━●━━━●━━━●
+            #     ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲
+            #     o─o─o─o─o─o─o─o─o─o─o─o─o─o─o─o─o─o─o─o     ┬
+            #     | | | | | | | | | | | | | | | | | | | |     ┊ x_bsz
+            #     o─o─o─o─o─o─o─o─o─o─o─o─o─o─o─o─o─o─o─o     ┴
+            #     ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱
+            #      ●━━━●━━━●━━━●━━━●━━━●━━━●━━━●━━━●━━━●
+            #
+            row_i = TensorNetwork((
+                row_envs['below', i],
+                self.select_any([self.row_tag(i + x) for x in range(x_bsz)]),
+                row_envs['above', i + x_bsz - 1],
+            ), check_collisions=False).view_as_(TensorNetwork2D, like=self)
+            #
+            #           y_bsz
+            #           <-->               second_dense=True
+            #       ●──      ──●
+            #       │          │            ╭──     ──╮
+            #       ●── .  . ──●            │╭─ . . ─╮│     ┬
+            #       │          │     or     ●         ●     ┊ x_bsz
+            #       ●── .  . ──●            │╰─ . . ─╯│     ┴
+            #       │          │            ╰──     ──╯
+            #       ●──      ──●
+            #     'left'    'right'       'left'    'right'
+            #
+            col_envs[i] = row_i.compute_col_environments(
+                xrange=(max(i - 1, 0), min(i + x_bsz, self.Lx - 1)),
+                dense=second_dense, **compute_environment_opts)
+
+        # then range through all the possible plaquettes, selecting the correct
+        # boundary tensors from either the column or row environments
+        plaquette_envs = dict()
+        for i0, j0 in product(range(self.Lx - x_bsz + 1),
+                              range(self.Ly - y_bsz + 1)):
+
+            # we want to select bordering tensors from:
+            #
+            #       L──A──A──R    <- A from the row environments
+            #       │  │  │  │
+            #  i0+1 L──●──●──R
+            #       │  │  │  │    <- L, R from the column environments
+            #  i0   L──●──●──R
+            #       │  │  │  │
+            #       L──B──B──R    <- B from the row environments
+            #
+            #         j0  j0+1
+            #
+            left_coos = ((i0 + x, j0 - 1) for x in range(-1, x_bsz + 1))
+            left_tags = tuple(
+                starmap(self.site_tag, filter(self.valid_coo, left_coos)))
+
+            right_coos = ((i0 + x, j0 + y_bsz) for x in range(-1, x_bsz + 1))
+            right_tags = tuple(
+                starmap(self.site_tag, filter(self.valid_coo, right_coos)))
+
+            below_coos = ((i0 - 1, j0 + x) for x in range(y_bsz))
+            below_tags = tuple(
+                starmap(self.site_tag, filter(self.valid_coo, below_coos)))
+
+            above_coos = ((i0 + x_bsz, j0 + x) for x in range(y_bsz))
+            above_tags = tuple(
+                starmap(self.site_tag, filter(self.valid_coo, above_coos)))
+
+            env_ij = TensorNetwork((
+                col_envs[i0]['left', j0].select_any(left_tags),
+                col_envs[i0]['right', j0 + y_bsz - 1].select_any(right_tags),
+                row_envs['below', i0].select_any(below_tags),
+                row_envs['above', i0 + x_bsz - 1].select_any(above_tags),
+            ), check_collisions=False)
+
+            # finally, absorb any rank-2 corner tensors
+            env_ij.rank_simplify_()
+
+            plaquette_envs[i0, j0] = env_ij
+
+        return plaquette_envs
+
+    def _compute_plaquette_environments_col_first(
+        self,
+        x_bsz,
+        y_bsz,
+        second_dense=None,
+        col_envs=None,
+        **compute_environment_opts
+    ):
+        if second_dense is None:
+            second_dense = y_bsz < 2
+
+        # first we contract from either side to produce column environments
+        if col_envs is None:
+            col_envs = self.compute_col_environments(
+                **compute_environment_opts)
+
+        # next we form vertical strips and contract from both top and bottom
+        #     for each column
+        row_envs = dict()
+        for j in range(self.Ly - y_bsz + 1):
+            #
+            #        y_bsz
+            #        <-->
+            #
+            #      ╭─╱o─╱o─╮
+            #     ●──o|─o|──●
+            #     ┃╭─|o─|o─╮┃
+            #     ●──o|─o|──●
+            #     ┃╭─|o─|o─╮┃
+            #     ●──o|─o|──●
+            #     ┃╭─|o─|o─╮┃
+            #     ●──o╱─o╱──●
+            #     ┃╭─|o─|o─╮┃
+            #     ●──o╱─o╱──●
+            #
+            col_j = TensorNetwork((
+                col_envs['left', j],
+                self.select_any([self.col_tag(j + jn) for jn in range(y_bsz)]),
+                col_envs['right', j + y_bsz - 1],
+            ), check_collisions=False).view_as_(TensorNetwork2D, like=self)
+            #
+            #        y_bsz
+            #        <-->        second_dense=True
+            #     ●──●──●──●      ╭──●──╮
+            #     │  │  │  │  or  │ ╱ ╲ │    'above'
+            #        .  .           . .                  ┬
+            #                                            ┊ x_bsz
+            #        .  .           . .                  ┴
+            #     │  │  │  │  or  │ ╲ ╱ │    'below'
+            #     ●──●──●──●      ╰──●──╯
+            #
+            row_envs[j] = col_j.compute_row_environments(
+                yrange=(max(j - 1, 0), min(j + y_bsz, self.Ly - 1)),
+                dense=second_dense, **compute_environment_opts)
+
+        # then range through all the possible plaquettes, selecting the correct
+        # boundary tensors from either the column or row environments
+        plaquette_envs = dict()
+        for i0, j0 in product(range(self.Lx - x_bsz + 1),
+                              range(self.Ly - y_bsz + 1)):
+
+            # we want to select bordering tensors from:
+            #
+            #          A──A──A──A    <- A from the row environments
+            #          │  │  │  │
+            #     i0+1 L──●──●──R
+            #          │  │  │  │    <- L, R from the column environments
+            #     i0   L──●──●──R
+            #          │  │  │  │
+            #          B──B──B──B    <- B from the row environments
+            #
+            #            j0  j0+1
+            #
+            left_coos = ((i0 + x, j0 - 1) for x in range(x_bsz))
+            left_tags = tuple(
+                starmap(self.site_tag, filter(self.valid_coo, left_coos)))
+
+            right_coos = ((i0 + x, j0 + y_bsz) for x in range(x_bsz))
+            right_tags = tuple(
+                starmap(self.site_tag, filter(self.valid_coo, right_coos)))
+
+            below_coos = ((i0 - 1, j0 + x) for x in range(- 1, y_bsz + 1))
+            below_tags = tuple(
+                starmap(self.site_tag, filter(self.valid_coo, below_coos)))
+
+            above_coos = ((i0 + x_bsz, j0 + x) for x in range(- 1, y_bsz + 1))
+            above_tags = tuple(
+                starmap(self.site_tag, filter(self.valid_coo, above_coos)))
+
+            env_ij = TensorNetwork((
+                col_envs['left', j0].select_any(left_tags),
+                col_envs['right', j0 + y_bsz - 1].select_any(right_tags),
+                row_envs[j0]['below', i0].select_any(below_tags),
+                row_envs[j0]['above', i0 + x_bsz - 1].select_any(above_tags),
+            ), check_collisions=False)
+
+            # finally, absorb any rank-2 corner tensors
+            env_ij.rank_simplify_()
+
+            plaquette_envs[i0, j0] = env_ij
+
+        return plaquette_envs
+
+    def compute_plaquette_environments(
+        self,
+        x_bsz=2,
+        y_bsz=2,
+        first_contract=None,
+        second_dense=None,
+        **compute_environment_opts,
+    ):
+        r"""Compute all environments like::
+
+            second_dense=False   second_dense=True (& first_contract='columns')
+
+              ●──●                  ╭───●───╮
+             ╱│  │╲                 │  ╱ ╲  │
+            ●─.  .─●    ┬           ●─ . . ─●    ┬
+            │      │    ┊ x_bsz     │       │    ┊ x_bsz
+            ●─.  .─●    ┴           ●─ . . ─●    ┴
+             ╲│  │╱                 │  ╲ ╱  │
+              ●──●                  ╰───●───╯
+
+              <-->                    <->
+             y_bsz                   y_bsz
+
+        Use two boundary contractions sweeps.
+
+        Parameters
+        ----------
+        x_bsz : int, optional
+            The size of the plaquettes in the x-direction (number of rows).
+        y_bsz : int, optional
+            The size of the plaquettes in the y-direction (number of columns).
+        first_contract : {None, 'rows', 'columns'}, optional
+            The environments can either be generated with initial sweeps in
+            the row or column direction. Generally it makes sense to perform
+            this approximate step in whichever is smaller (the default).
+        second_dense : None or bool, optional
+            Whether to perform the second set of contraction sweeps (in the
+            rotated direction from whichever ``first_contract`` is) using
+            a dense tensor or boundary method.
+        compute_environment_opts
+            Supplied to
+            :meth:`~quimb.tensor.tensor_2d.TensorNetwork2D.compute_col_environments`
+            or
+            :meth:`~quimb.tensor.tensor_2d.TensorNetwork2D.compute_row_environments`
+            .
+        """
+        if first_contract is None:
+            if x_bsz > y_bsz:
+                first_contract = 'columns'
+            elif y_bsz > x_bsz:
+                first_contract = 'rows'
+            elif self.Lx >= self.Ly:
+                first_contract = 'rows'
+            else:
+                first_contract = 'columns'
+
+        compute_env_fn = {
+            'rows': self._compute_plaquette_environments_row_first,
+            'columns': self._compute_plaquette_environments_col_first,
+        }[first_contract]
+
+        return compute_env_fn(
+            x_bsz=x_bsz, y_bsz=y_bsz, second_dense=second_dense,
+            **compute_environment_opts)
 
 
 def is_lone_coo(where):
@@ -1437,7 +1787,7 @@ class TensorNetwork2DVector(TensorNetwork2D,
     def site_inds(self):
         """All of the site inds.
         """
-        return tuple(self.site_ind(i, j) for i, j in self.gen_site_coos())
+        return tuple(starmap(self.site_ind, self.gen_site_coos()))
 
     def to_dense(self, *inds_seq, **contract_opts):
         """Return the dense ket version of this 2D vector, i.e. a ``qarray``
@@ -1451,10 +1801,17 @@ class TensorNetwork2DVector(TensorNetwork2D,
 
         return TensorNetwork.to_dense(self, *inds_seq, **contract_opts)
 
-    def phys_dim(self, i=0, j=0):
+    def phys_dim(self, i=None, j=None):
         """Get the size of the physical indices / a specific physical index.
         """
-        return self.ind_size(self.site_ind(i, j))
+        if (i is not None) and (j is not None):
+            pix = self.site_ind(i, j)
+        else:
+            # allow for when some physical indices might have been contracted
+            pix = next(iter(
+                ix for ix in self.site_inds if ix in self.ind_map
+            ))
+        return self.ind_size(pix)
 
     def gate(
         self,
@@ -1560,28 +1917,30 @@ class TensorNetwork2DVector(TensorNetwork2D,
         """
         psi = self if inplace else self.copy()
 
-        dp = psi.phys_dim()
-        tags = tags_to_utup(tags)
-
         if is_lone_coo(where):
             where = (where,)
         else:
             where = tuple(where)
         ng = len(where)
 
+        dp = psi.phys_dim(*where[0])
+        tags = tags_to_utup(tags)
+
         # allow a matrix to be reshaped into a tensor if it factorizes
+        #     i.e. (4, 4) assumed to be two qubit gate -> (2, 2, 2, 2)
         G = maybe_factor_gate_into_tensor(G, dp, ng, where)
 
-        bnds = [rand_uuid() for _ in range(ng)]
         site_ix = [psi.site_ind(i, j) for i, j in where]
+        # new indices to join old physical sites to new gate
+        bnds = [rand_uuid() for _ in range(ng)]
 
         TG = Tensor(G, inds=site_ix + bnds, tags=tags, left_inds=bnds)
 
         if contract is False:
             #
-            #       │   │
+            #       │   │      <- site_ix
             #       GGGGG
-            #       │╱  │╱
+            #       │╱  │╱     <- bnds
             #     ──●───●──
             #      ╱   ╱
             #
@@ -1680,6 +2039,161 @@ class TensorNetwork2DVector(TensorNetwork2D,
 
     gate_ = functools.partialmethod(gate, inplace=True)
 
+    def compute_local_expectation(
+        self,
+        terms,
+        normalized=False,
+        contract_optimize='auto-hq',
+        return_all=False,
+        **plaquette_env_options,
+    ):
+        r"""Compute the sum of many local expecations by essentially forming
+        the reduced density matrix of all required plaquettes.
+
+        Parameters
+        ----------
+        terms : dict[tuple[tuple[int], array]
+            A dictionary mapping site coordinates to raw operators, which will
+            be supplied to
+            :meth:`~quimb.tensor.tensor_2d.TensorNetwork2DVector.gate`.
+        normalized : bool, optional
+            If True, normalize the value of each local expectation by the local
+            norm: $\langle O_i \rangle = Tr[\rho_p O_i] / Tr[\rho_p]$.
+        contract_optimize : str, optional
+            Contraction path finder to use for contracting the local plaquette
+            expectation (and optionally normalization).
+        return_all : bool, optional
+            Whether to the return all the values individually as a dictionary
+            of coordinates to tuple[local_expectation, local_norm].
+        plaquette_env_options
+            Supplied to
+            :meth:`~quimb.tensor.tensor_2d.TensorNetwork2D.compute_plaquette_environments`
+            to generate the plaquette environments, equivalent to approximately
+            performing the partial trace.
+
+        Returns
+        -------
+        scalar or dict
+        """
+        ket = self.copy()
+
+        ket.add_tag('KET')
+        bra = ket.retag({'KET': 'BRA'})
+        bra.conj_()
+        # manually mangle so norm has no new indices
+        bra.mangle_inner_()
+        norm = bra & ket
+
+        # work out from the term coordinates what size plaquettes we need
+        x_bsz = max(abs(coo1[0] - coo2[0]) for coo1, coo2 in terms) + 1
+        y_bsz = max(abs(coo1[1] - coo2[1]) for coo1, coo2 in terms) + 1
+
+        # set some sensible defaults
+        plaquette_env_options.setdefault('layer_tags', ('KET', 'BRA'))
+
+        plaquette_envs = norm.compute_plaquette_environments(
+            x_bsz=x_bsz, y_bsz=y_bsz, **plaquette_env_options)
+
+        # work out which plaquettes to use for which terms
+        plaq2coo = defaultdict(list)
+        for where, G in terms.items():
+            xmin = min(coo[0] for coo in where)
+            ymin = min(coo[1] for coo in where)
+
+            i0 = xmin - max(0, xmin - self.Lx + x_bsz)
+            j0 = ymin - max(0, ymin - self.Ly + y_bsz)
+
+            plaq2coo[i0, j0].append((where, G))
+
+        expecs = dict()
+
+        for i0, j0 in plaq2coo:
+            # site tags for the plaquette
+            sites = [
+                ket.site_tag(i, j)
+                for i in range(i0, i0 + x_bsz)
+                for j in range(j0, j0 + y_bsz)
+            ]
+
+            # view the ket portion as 2d vector so we can gate it
+            ket_local = ket.select_any(sites)
+            ket_local.view_as_(TensorNetwork2DVector, like=self)
+            bra_and_env = bra.select_any(sites) | plaquette_envs[i0, j0]
+
+            with oe.shared_intermediates():
+                # compute local estimation of norm for this plaquette
+                if normalized:
+                    norm_i0j0 = (
+                        ket_local | bra_and_env
+                    ).contract(all, optimize=contract_optimize)
+                else:
+                    norm_i0j0 = None
+
+                # for each local term on plaquette compute expectation
+                for where, G in plaq2coo[i0, j0]:
+                    expec_ij = (
+                        ket_local.gate(G, where, contract=False) | bra_and_env
+                    ).contract(all, optimize=contract_optimize)
+
+                    expecs[where] = expec_ij, norm_i0j0
+
+        if return_all:
+            return expecs
+
+        if normalized:
+            return functools.reduce(add, (e / n for e, n in expecs.values()))
+
+        return functools.reduce(add, (e for e, _ in expecs.values()))
+
+    def normalize(
+        self,
+        balance_bonds=False,
+        equalize_norms=False,
+        inplace=False,
+        **boundary_contract_opts,
+    ):
+        """Normalize this PEPS.
+
+        Parameters
+        ----------
+        inplace : bool, optional
+            Whether to perform the normalization inplace or not.
+        balance_bonds : bool, optional
+            Whether to balance the bonds after normalization, a form of
+            conditioning.
+        equalize_norms : bool, optional
+            Whether to set all the tensor norms to the same value after
+            normalization, another form of conditioning.
+        boundary_contract_opts
+            Supplied to
+            :meth:`~quimb.tensor.tensor_2d.TensorNetwork2D.contract_boundary`,
+            by default, two layer contraction will be used.
+        """
+        ket = self.copy()
+        ket.add_tag('KET')
+        bra = ket.retag({'KET': 'BRA'})
+        bra.conj_()
+
+        norm = ket | bra
+
+        # default to two layer contraction
+        boundary_contract_opts.setdefault('layer_tags', ('KET', 'BRA'))
+
+        nfact = norm.contract_boundary(**boundary_contract_opts)
+
+        n_ket = self.multiply_each(
+            nfact**(-1 / (2 * self.num_tensors)), inplace=inplace)
+
+        if balance_bonds:
+            n_ket.balance_bonds_()
+
+        if equalize_norms:
+            n_ket.equalize_norms_()
+
+        return n_ket
+
+    normalize_ = functools.partialmethod(normalize, inplace=True)
+
 
 class TensorNetwork2DOperator(TensorNetwork2D,
                               TensorNetwork):
@@ -1712,7 +2226,7 @@ class TensorNetwork2DOperator(TensorNetwork2D,
     def lower_inds(self):
         """All of the lower inds.
         """
-        return tuple(self.lower_ind(i, j) for i, j in self.gen_site_coos())
+        return tuple(starmap(self.lower_ind, self.gen_site_coos()))
 
     @property
     def upper_ind_id(self):
@@ -1729,7 +2243,7 @@ class TensorNetwork2DOperator(TensorNetwork2D,
     def upper_inds(self):
         """All of the upper inds.
         """
-        return tuple(self.upper_ind(i, j) for i, j in self.gen_site_coos())
+        return tuple(starmap(self.upper_ind, self.gen_site_coos()))
 
     def to_dense(self, *inds_seq, **contract_opts):
         """Return the dense matrix version of this 2D operator, i.e. a
@@ -1951,37 +2465,6 @@ class PEPS(TensorNetwork2DVector,
         """Print a unicode schematic of this PEPS and its bond dimensions.
         """
         show_2d(self, show_lower=True)
-
-
-def gen_2d_bond_pairs(Lx, Ly, cyclic=(False, False)):
-    r"""Utility for generating all the bond coordinates for a grid::
-
-                 ...
-
-          │       │       │       │
-          │       │       │       │
-        (1,0)───(1,1)───(1,2)───(1,3)───
-          │       │       │       │
-          │       │       │       │
-        (1,0)───(1,1)───(1,2)───(1,3)───  ...
-          │       │       │       │
-          │       │       │       │
-        (0,0)───(0,1)───(0,2)───(0,3)───
-
-    Including with cyclic boundary conditions in either or both directions.
-    """
-    for i in range(Lx):
-        for j in range(Ly):
-            if i + 1 < Lx:
-                yield (i, j), (i + 1, j)
-            if j + 1 < Ly:
-                yield (i, j), (i, j + 1)
-
-            if cyclic[0] and i == Lx - 1:
-                yield (0, j), (i, j)
-
-            if cyclic[1] and j == Ly - 1:
-                yield (i, 0), (i, j)
 
 
 def show_2d(tn_2d, show_lower=False, show_upper=False):

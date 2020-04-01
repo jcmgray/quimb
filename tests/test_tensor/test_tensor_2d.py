@@ -1,4 +1,5 @@
 import pytest
+import itertools
 
 import quimb as qu
 import quimb.tensor as qtn
@@ -50,6 +51,24 @@ class TestPEPSConstruct:
         norm.flatten_()
         assert len(norm.tensors) == 15
         assert norm.max_bond() == 9
+
+    @pytest.mark.parametrize('Lx', [3, 4, 5])
+    @pytest.mark.parametrize('Ly', [3, 4, 5])
+    def test_bond_coordinates(self, Lx, Ly):
+        psi = qtn.PEPS.rand(Lx, Ly, bond_dim=1)
+        all_bonds = tuple(psi.gen_bond_coos())
+        assert len(all_bonds) == 2 * Lx * Ly - Lx - Ly
+        he = tuple(psi.gen_horizontal_even_bond_coos())
+        ho = tuple(psi.gen_horizontal_odd_bond_coos())
+        ve = tuple(psi.gen_vertical_even_bond_coos())
+        vo = tuple(psi.gen_vertical_odd_bond_coos())
+        for p in (he, ho, ve, vo):
+            assert len(set(p)) == len(p)
+            # check there is no overlap at all
+            sites = tuple(itertools.chain.from_iterable(he))
+            assert len(set(sites)) == len(sites)
+        # check all coordinates are generated
+        assert set(itertools.chain(he, ho, ve, vo)) == set(all_bonds)
 
     @pytest.mark.parametrize('where', [
         [(0, 0)], [(0, 1)], [(0, 2)], [(2, 2)],
@@ -167,3 +186,43 @@ class Test2DContract:
             )
             x = norm_j.contract(all)
             assert x == pytest.approx(ex, rel=1e-2)
+
+    def test_normalize(self):
+        psi = qtn.PEPS.rand(4, 5, 2, seed=42)
+        norm = (psi.H | psi).contract(all)
+        assert norm != pytest.approx(1.0)
+        psi.normalize_(balance_bonds=True, equalize_norms=True, cutoff=2e-3)
+        norm = (psi.H | psi).contract(all)
+        assert norm == pytest.approx(1.0, rel=0.01)
+
+    @pytest.mark.parametrize('normalized', [False, True])
+    def test_compute_local_expectation(self, normalized):
+        H = qu.ham_heis_2D(4, 3, sparse=True)
+        Hij = qu.ham_heis(2, cyclic=False)
+
+        peps = qtn.PEPS.rand(4, 3, 2, seed=42)
+        k = peps.to_dense()
+
+        if normalized:
+            qu.normalize(k)
+        ex = qu.expec(H, k)
+
+        opts = dict(cutoff=2e-3, max_bond=9, contract_optimize='random-greedy')
+
+        # compute 2x1 and 1x2 plaquettes separately
+        hterms = {coos: Hij for coos in peps.gen_horizontal_bond_coos()}
+        vterms = {coos: Hij for coos in peps.gen_vertical_bond_coos()}
+
+        he = peps.compute_local_expectation(
+            hterms, normalized=normalized, **opts)
+        ve = peps.compute_local_expectation(
+            vterms, normalized=normalized, **opts)
+
+        assert he + ve == pytest.approx(ex, rel=1e-2)
+
+        # compute all terms in 2x2 plaquettes
+        terms_all = {**hterms, **vterms}
+        e = peps.compute_local_expectation(
+            terms_all, normalized=normalized, **opts)
+
+        assert e == pytest.approx(ex, rel=1e-2)
