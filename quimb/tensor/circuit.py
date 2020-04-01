@@ -126,9 +126,16 @@ def apply_swap(psi, i, j, **gate_opts):
 # parametrizable gates
 
 def rx_gate_param_gen(params):
-    phi, = params
-    c = do('cos', phi / 2)
-    s = -1j * do('sin', phi / 2)
+    phi = params[0]
+
+    c_re = do('cos', phi / 2)
+    c_im = do('imag', c_re)
+    c = do('complex', c_re, c_im)
+
+    s_im = -do('sin', phi / 2)
+    s_re = do('imag', s_im)
+    s = do('complex', s_re, s_im)
+
     data = [[c, s], [s, c]]
     return do('array', data, like=params)
 
@@ -145,9 +152,16 @@ def apply_Rx(psi, theta, i, parametrize=False, **gate_opts):
 
 
 def ry_gate_param_gen(params):
-    phi, = params
-    c = do('cos', phi / 2)
-    s = do('sin', phi / 2)
+    phi = params[0]
+
+    c_re = do('cos', phi / 2)
+    c_im = do('imag', c_re)
+    c = do('complex', c_re, c_im)
+
+    s_re = do('sin', phi / 2)
+    s_im = do('imag', s_re)
+    s = do('complex', s_re, s_im)
+
     data = [[c, -s], [s, c]]
     return do('array', data, like=params)
 
@@ -164,9 +178,16 @@ def apply_Ry(psi, theta, i, parametrize=False, **gate_opts):
 
 
 def rz_gate_param_gen(params):
-    phi, = params
-    c = do('cos', phi / 2)
-    s = -1j * do('sin', phi / 2)
+    phi = params[0]
+
+    c_re = do('cos', phi / 2)
+    c_im = do('imag', c_re)
+    c = do('complex', c_re, c_im)
+
+    s_im = -do('sin', phi / 2)
+    s_re = do('imag', s_im)
+    s = do('complex', s_re, s_im)
+
     data = [[c + s, 0], [0, c - s]]
     return do('array', data, like=params)
 
@@ -183,17 +204,30 @@ def apply_Rz(psi, theta, i, parametrize=False, **gate_opts):
 
 
 def u3_gate_param_gen(params):
-    theta, phi, lamda = params
+    theta, phi, lamda = params[0], params[1], params[2]
 
-    c2 = do('cos', theta / 2)
-    s2 = do('sin', theta / 2)
-    el = do('exp', 1.j * lamda)
-    ep = do('exp', 1.j * phi)
-    elp = do('exp', 1.j * (lamda + phi))
+    c2_re = do('cos', theta / 2)
+    c2_im = do('imag', c2_re)
+    c2 = do('complex', c2_re, c2_im)
+
+    s2_re = do('sin', theta / 2)
+    s2_im = do('imag', s2_re)
+    s2 = do('complex', s2_re, s2_im)
+
+    el_im = lamda
+    el_re = do('imag', el_im)
+    el = do('exp', do('complex', el_re, el_im))
+
+    ep_im = phi
+    ep_re = do('imag', ep_im)
+    ep = do('exp', do('complex', ep_re, ep_im))
+
+    elp_im = lamda + phi
+    elp_re = do('imag', elp_im)
+    elp = do('exp', do('complex', elp_re, elp_im))
 
     data = [[c2, -el * s2],
             [ep * s2, elp * c2]]
-
     return do('array', data, like=params)
 
 
@@ -207,11 +241,19 @@ def apply_U3(psi, theta, phi, lamda, i, parametrize=False, **gate_opts):
 
 
 def fsim_param_gen(params):
-    theta, phi = params
+    theta, phi = params[0], params[1]
 
-    a = do('cos', theta)
-    b = -1j * do('sin', theta)
-    c = do('exp', -1j * phi)
+    a_re = do('cos', theta)
+    a_im = do('imag', a_re)
+    a = do('complex', a_re, a_im)
+
+    b_im = -do('sin', theta)
+    b_re = do('imag', b_im)
+    b = do('complex', b_re, b_im)
+
+    c_im = -phi
+    c_re = do('imag', c_im)
+    c = do('exp', do('complex', c_re, c_im))
 
     data = [[[[1, 0],
               [0, 0]],
