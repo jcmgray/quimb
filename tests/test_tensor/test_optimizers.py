@@ -118,9 +118,8 @@ def test_vectorizer():
                                      tensorflow_case, pytorch_case])
 @pytest.mark.parametrize('method', ['simple', 'basin'])
 def test_optimize_pbc_heis(heis_pbc, backend, method):
-    from quimb.tensor.optimize_autograd import TNOptimizer
     psi0, H, norm_fn, loss_fn, en_ex = heis_pbc
-    tnopt = TNOptimizer(
+    tnopt = qtn.TNOptimizer(
         psi0,
         loss_fn,
         norm_fn,
@@ -138,9 +137,8 @@ def test_optimize_pbc_heis(heis_pbc, backend, method):
                                      tensorflow_case])
 @pytest.mark.parametrize('method', ['simple', 'basin'])
 def test_optimize_ham_mbl_complex(ham_mbl_pbc_complex, backend, method):
-    from quimb.tensor.optimize_autograd import TNOptimizer
     psi0, H, norm_fn, loss_fn, en_ex = ham_mbl_pbc_complex
-    tnopt = TNOptimizer(
+    tnopt = qtn.TNOptimizer(
         psi0,
         loss_fn,
         norm_fn,
@@ -152,3 +150,29 @@ def test_optimize_ham_mbl_complex(ham_mbl_pbc_complex, backend, method):
     elif method == 'basin':
         psi_opt = tnopt.optimize_basinhopping(25, 4)
     assert loss_fn(psi_opt, H) == pytest.approx(en_ex, rel=1e-2)
+
+
+@pytest.mark.parametrize('backend', [jax_case, autograd_case,
+                                     tensorflow_case])
+def test_parametrized_circuit(backend):
+    H = qu.ham_mbl(4, dh=3.0, dh_dim=3)
+    gs = qu.groundstate(H)
+    T_gs = qtn.Dense1D(gs)
+
+    def loss(psi, target):
+        f = psi.H & target
+        f.rank_simplify_()
+        return -abs(f ^ all)
+
+    circ = qtn.circ_ansatz_1D_brickwork(4, depth=4)
+    psi0 = circ.psi
+    tnopt = qtn.TNOptimizer(
+        psi0,
+        loss,
+        tags='U3',
+        loss_constants=dict(target=T_gs),
+        autograd_backend=backend,
+        loss_target=-0.99,
+    )
+    psi_opt = tnopt.optimize(20)
+    assert qu.fidelity(psi_opt.to_dense(), gs) > 0.99

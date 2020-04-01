@@ -8,6 +8,7 @@ import importlib
 import tqdm
 import numpy as np
 from cytoolz import valmap
+from autoray import to_numpy
 
 from .tensor_core import (
     contract_backend,
@@ -114,7 +115,7 @@ class Vectorizer:
         return arrays
 
 
-def parse_network_to_backend(tn, constant_tags, to_constant):
+def parse_network_to_backend(tn, tags, constant_tags, to_constant):
     tn_ag = tn.copy()
     variables = []
 
@@ -123,6 +124,11 @@ def parse_network_to_backend(tn, constant_tags, to_constant):
     for t in tn_ag:
         # check if tensor has any of the constant tags
         if utup_intersection((t.tags, constant_tags)):
+            t.modify(data=to_constant(t.data))
+            continue
+
+        # if tags are specified only optimize those tagged
+        if tags and not utup_intersection((t.tags, tags)):
             t.modify(data=to_constant(t.data))
             continue
 
@@ -229,8 +235,8 @@ class TensorFlowHandler:
         with self.tensorflow.GradientTape() as t:
             result = self._backend_fn(variables)
 
-        grads = [x.numpy() for x in t.gradient(result, variables)]
-        loss = result.numpy()
+        grads = tuple(map(to_numpy, t.gradient(result, variables)))
+        loss = to_numpy(result)
 
         return loss, grads
 
@@ -270,8 +276,8 @@ class TorchHandler:
         result = self._backend_fn(arrays)
         result.backward()
 
-        loss = result.detach().cpu().numpy()
-        grads = [x.grad.cpu().numpy() for x in arrays]
+        loss = to_numpy(result)
+        grads = [to_numpy(x.grad) for x in arrays]
 
         return loss, grads
 
@@ -303,6 +309,48 @@ def inject_(arrays, tn):
 
 
 class TNOptimizer:
+    """Globally optimize tensors within a tensor network with respect to any
+    loss function via automatic differentiation. If parametrized tensors are
+    used, optimize the parameters rather than the raw arrays.
+
+    Parameters
+    ----------
+    tn : TensorNetwork
+        The core tensor network structure within which to optimize tensors.
+    loss_fn : callable
+        The function that takes ``tn`` (as well as ``loss_constants`` and
+        ``loss_kwargs``) and returns a single real 'loss' to be minimized.
+    norm_fn : callable, optional
+        A function to call before ``loss_fn`` that prepares or 'normalizes' the
+        raw tensor network in some way.
+    loss_constants : dict, optional
+        Extra tensor networks, tensors, dicts of arrays, or arrays which will
+        be supplied to ``loss_fn`` but also converted to the correct backend
+        array type.
+    loss_kwargs : dict, optional
+        Extra options to supply to ``loss_fn`` (unlike ``loss_constants`` these
+        are assumed to be simple options that don't need conversion).
+    tags : str, or sequence of str, optional
+        If supplied, only optimize tensors with any of these tags.
+    constant_tags : str, or sequence of str, optional
+        If supplied, skip optimizing tensors with any of these tags.
+    loss_target : float, optional
+        Stop optimizing once this loss value is reached.
+    optimizer : str, optional
+        Which ``scipy.optimize.minimize`` optimizer to use (the ``'method'``
+        kwarg of that function).
+    progbar : bool, optional
+        Whether to show live progress.
+    bounds : None or (float, float), optional
+        Constrain the optimized tensor entries within this range (if the scipy
+        optimizer supports it).
+    autograd_backend : {'jax', 'autograd', 'tensorflow', 'torch'}, optional
+        Which backend library to use to perform the automatic differentation
+        (and computation).
+    backend_opts
+        Supplied to the backend function compiler and array handler. For
+        example ``jit_fn=True`` or ``device='cpu'`` .
+    """
 
     def __init__(
         self,
@@ -311,21 +359,19 @@ class TNOptimizer:
         norm_fn=None,
         loss_constants=None,
         loss_kwargs=None,
+        tags=None,
         constant_tags=None,
         loss_target=None,
         optimizer='L-BFGS-B',
         progbar=True,
         bounds=None,
         autograd_backend='AUTO',
-        # the rest are ignored for compat
-        learning_rate=None,
-        learning_decay_steps=None,
-        learning_decay_rate=None,
         **backend_opts
     ):
         self.progbar = progbar
         self.optimizer = optimizer
         self.bounds = bounds
+        self.tags = tags_to_utup(tags)
         self.constant_tags = tags_to_utup(constant_tags)
 
         # the object that handles converting to backend + computing gradient
@@ -368,7 +414,7 @@ class TNOptimizer:
         self._n = 0
 
         self.tn_opt, self.variables = parse_network_to_backend(
-            tn, self.constant_tags, to_constant
+            tn, self.tags, self.constant_tags, to_constant
         )
 
         # this handles storing and packing /  unpacking many arrays as a vector
@@ -412,6 +458,7 @@ class TNOptimizer:
         self.vctrzr.vector[:] = self.res.x
         tn = self.norm_fn(self.tn_opt.copy())
         tn.drop_tags(t for t in tn.tags if variable_finder.match(t))
+        tn.apply_to_arrays(to_numpy)
         return tn
 
     def optimize(self, n, tol=None, **options):

@@ -84,6 +84,9 @@ from .circuit_gen import (
     circ_ansatz_1D_brickwork,
     circ_ansatz_1D_rand,
 )
+from .optimize_autograd import (
+    TNOptimizer,
+)
 from .tensor_2d import (
     TensorNetwork2D,
     PEPS,
@@ -160,6 +163,7 @@ __all__ = (
     "circ_ansatz_1D_zigzag",
     "circ_ansatz_1D_brickwork",
     "circ_ansatz_1D_rand",
+    "TNOptimizer",
     "TensorNetwork2D",
     "PEPS",
 )
