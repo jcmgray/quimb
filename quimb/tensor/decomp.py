@@ -76,7 +76,7 @@ def _renorm_singular_vals(s, n_chi, renorm_power):
 
 
 @njit  # pragma: no cover
-def _trim_and_renorm_SVD(U, s, V, cutoff, cutoff_mode,
+def _trim_and_renorm_SVD(U, s, VH, cutoff, cutoff_mode,
                          max_bond, absorb, renorm_power):
     if cutoff > 0.0:
         n_chi = _trim_singular_vals(s, cutoff, cutoff_mode)
@@ -91,25 +91,27 @@ def _trim_and_renorm_SVD(U, s, V, cutoff, cutoff_mode,
                 s = s[:n_chi]
 
             U = U[..., :n_chi]
-            V = V[:n_chi, ...]
+            VH = VH[:n_chi, ...]
 
     elif max_bond != -1:
         U = U[..., :max_bond]
         s = s[:max_bond]
-        V = V[:max_bond, ...]
+        VH = VH[:max_bond, ...]
 
     s = np.ascontiguousarray(s)
 
-    if absorb == -1:
+    if absorb is None:
+        return U, s, VH
+    elif absorb == -1:
         U = U * s.reshape((1, -1))
     elif absorb == 1:
-        V = V * s.reshape((-1, 1))
+        VH = VH * s.reshape((-1, 1))
     else:
         s **= 0.5
         U = U * s.reshape((1, -1))
-        V = V * s.reshape((-1, 1))
+        VH = VH * s.reshape((-1, 1))
 
-    return U, V
+    return U, None, VH
 
 
 @njit  # pragma: no cover
@@ -117,17 +119,17 @@ def _svd_nb(x, cutoff=-1.0, cutoff_mode=3,
             max_bond=-1, absorb=0, renorm_power=0):
     """SVD-decomposition.
     """
-    U, s, V = np.linalg.svd(x, full_matrices=False)
-    return _trim_and_renorm_SVD(U, s, V, cutoff, cutoff_mode,
+    U, s, VH = np.linalg.svd(x, full_matrices=False)
+    return _trim_and_renorm_SVD(U, s, VH, cutoff, cutoff_mode,
                                 max_bond, absorb, renorm_power)
 
 
 def _svd_alt(x, cutoff=-1.0, cutoff_mode=3,
              max_bond=-1, absorb=0, renorm_power=0):
-    """SVD-decompt using alternate scipy driver.
+    """SVD-decomp using alternate scipy driver.
     """
-    U, s, V = scla.svd(x, full_matrices=False, lapack_driver='gesvd')
-    return _trim_and_renorm_SVD(U, s, V, cutoff, cutoff_mode,
+    U, s, VH = scla.svd(x, full_matrices=False, lapack_driver='gesvd')
+    return _trim_and_renorm_SVD(U, s, VH, cutoff, cutoff_mode,
                                 max_bond, absorb, renorm_power)
 
 
@@ -195,6 +197,8 @@ def _svd(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0, renorm=0):
         U = U[..., :max_bond]
         VH = VH[:max_bond, ...]
 
+    if absorb is None:
+        return U, s, VH
     if absorb == -1:
         U = U * reshape(s, (1, -1))
     elif absorb == 1:
@@ -204,7 +208,7 @@ def _svd(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0, renorm=0):
         U = U * reshape(s, (1, -1))
         VH = VH * reshape(s, (-1, 1))
 
-    return U, VH
+    return U, None, VH
 
 
 def _svdvals(x):
@@ -228,7 +232,7 @@ def _eig(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0, renorm=0):
         # Get sU, V
         s2, V = np.linalg.eigh(dag(x) @ x)
         U = x @ V
-        V = dag(V)
+        VH = dag(V)
         # small negative eigenvalues turn into nan when sqrtd
         s2[s2 < 0.0] = 0.0
         s = s2**0.5
@@ -236,14 +240,14 @@ def _eig(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0, renorm=0):
     else:
         # Get U, sV
         s2, U = np.linalg.eigh(x @ dag(x))
-        V = dag(U) @ x
+        VH = dag(U) @ x
         s2[s2 < 0.0] = 0.0
         s = s2**0.5
-        V /= s.reshape((-1, 1))
+        VH /= s.reshape((-1, 1))
 
-    U, s, V = U[:, ::-1], s[::-1], V[::-1, :]
+    U, s, VH = U[:, ::-1], s[::-1], VH[::-1, :]
 
-    return _trim_and_renorm_SVD(U, s, V, cutoff, cutoff_mode,
+    return _trim_and_renorm_SVD(U, s, VH, cutoff, cutoff_mode,
                                 max_bond, absorb, renorm)
 
 
@@ -274,26 +278,6 @@ def _eigh(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0, renorm=0):
                                 max_bond, absorb, renorm)
 
 
-@njit  # pragma: no cover
-def _numba_cholesky(x, cutoff=-1, cutoff_mode=3, max_bond=-1, absorb=0):
-    """SVD-decomposition, using cholesky decomposition, only works if
-    ``x`` is positive definite.
-    """
-    L = np.linalg.cholesky(x)
-    return L, dag(L)
-
-
-def _cholesky(x, cutoff=-1, cutoff_mode=3, max_bond=-1, absorb=0):
-    try:
-        return _numba_cholesky(x, cutoff, cutoff_mode, max_bond, absorb)
-    except np.linalg.LinAlgError as e:
-        if cutoff < 0:
-            raise e
-        # try adding cutoff identity - assuming it is approx allowable error
-        xi = x + 2 * cutoff * np.eye(x.shape[0])
-        return _numba_cholesky(xi, cutoff, cutoff_mode, max_bond, absorb)
-
-
 def _choose_k(x, cutoff, max_bond):
     """Choose the number of singular values to target.
     """
@@ -321,8 +305,8 @@ def _svds(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0, renorm=0):
             x = x.to_dense()
         return _svd(x, cutoff, cutoff_mode, max_bond, absorb)
 
-    U, s, V = svds(x, k=k)
-    return _trim_and_renorm_SVD(U, s, V, cutoff, cutoff_mode,
+    U, s, VH = svds(x, k=k)
+    return _trim_and_renorm_SVD(U, s, VH, cutoff, cutoff_mode,
                                 max_bond, absorb, renorm)
 
 
@@ -340,8 +324,8 @@ def _isvd(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0, renorm=0):
         return _svd(x, cutoff, cutoff_mode, max_bond, absorb)
 
     U, s, V = sli.svd(x, k)
-    V = dag(V)
-    return _trim_and_renorm_SVD(U, s, V, cutoff, cutoff_mode,
+    VH = dag(V)
+    return _trim_and_renorm_SVD(U, s, VH, cutoff, cutoff_mode,
                                 max_bond, absorb, renorm)
 
 
@@ -354,13 +338,13 @@ def _rsvd(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0, renorm=0):
     if max_bond > 0:
         if cutoff > 0.0:
             # adapt and block
-            U, s, V = rsvd(x, cutoff, k_max=max_bond)
+            U, s, VH = rsvd(x, cutoff, k_max=max_bond)
         else:
-            U, s, V = rsvd(x, max_bond)
+            U, s, VH = rsvd(x, max_bond)
     else:
-        U, s, V = rsvd(x, cutoff)
+        U, s, VH = rsvd(x, cutoff)
 
-    return _trim_and_renorm_SVD(U, s, V, cutoff, cutoff_mode,
+    return _trim_and_renorm_SVD(U, s, VH, cutoff, cutoff_mode,
                                 max_bond, absorb, renorm)
 
 
@@ -390,13 +374,14 @@ def _qr_numba(x):
     """QR-decomposition.
     """
     Q, R = np.linalg.qr(x)
-    return Q, R
+    return Q, None, R
 
 
 def _qr(x):
     if isinstance(x, np.ndarray):
         return _qr_numba(x)
-    return do('linalg.qr', x)
+    Q, R = do('linalg.qr', x)
+    return Q, None, R
 
 
 @njit  # pragma: no cover
@@ -404,11 +389,31 @@ def _lq_numba(x):
     """LQ-decomposition.
     """
     Q, L = np.linalg.qr(x.T)
-    return L.T, Q.T
+    return L.T, None, Q.T
 
 
 def _lq(x):
     if isinstance(x, np.ndarray):
         return _lq_numba(x)
     Q, L = do('linalg.qr', do('transpose', x))
-    return do('transpose', L), do('transpose', Q)
+    return do('transpose', L), None, do('transpose', Q)
+
+
+@njit  # pragma: no cover
+def _numba_cholesky(x, cutoff=-1, cutoff_mode=3, max_bond=-1, absorb=0):
+    """SVD-decomposition, using cholesky decomposition, only works if
+    ``x`` is positive definite.
+    """
+    L = np.linalg.cholesky(x)
+    return L, None, dag(L)
+
+
+def _cholesky(x, cutoff=-1, cutoff_mode=3, max_bond=-1, absorb=0):
+    try:
+        return _numba_cholesky(x, cutoff, cutoff_mode, max_bond, absorb)
+    except np.linalg.LinAlgError as e:
+        if cutoff < 0:
+            raise e
+        # try adding cutoff identity - assuming it is approx allowable error
+        xi = x + 2 * cutoff * np.eye(x.shape[0])
+        return _numba_cholesky(xi, cutoff, cutoff_mode, max_bond, absorb)

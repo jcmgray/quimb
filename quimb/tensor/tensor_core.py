@@ -43,7 +43,7 @@ oe.paths.register_path_fn('greedy-rank', greedy_rank)
 
 
 def get_contract_strategy():
-    """Get the default contraction strategy - the option supplied as
+    r"""Get the default contraction strategy - the option supplied as
     ``optimize`` to ``opt_einsum``.
     """
     return _DEFAULT_CONTRACTION_STRATEGY
@@ -223,7 +223,7 @@ def utup_add(xs, y):
 
 
 def utup_discard(xs, y):
-    """If element ``y`` is found in ``xs``remove it, returning a new tuple.
+    """If element ``y`` is found in ``xs`` remove it, returning a new tuple.
     """
     try:
         i = xs.index(y)
@@ -424,7 +424,7 @@ _FULL_SPLIT_METHODS = {'svd', 'eig', 'eigh'}
 _RANK_HIDDEN_METHODS = {'qr', 'lq', 'cholesky'}
 _DENSE_ONLY_METHODS = {'svd', 'eig', 'eigh', 'cholesky', 'qr', 'lq'}
 _CUTOFF_LOOKUP = {None: -1.0}
-_ABSORB_LOOKUP = {'left': -1, 'both': 0, 'right': 1}
+_ABSORB_LOOKUP = {'left': -1, 'both': 0, 'right': 1, None: None}
 _MAX_BOND_LOOKUP = {None: -1}
 _CUTOFF_MODES = {'abs': 1, 'rel': 2, 'sum2': 3,
                  'rsum2': 4, 'sum1': 5, 'rsum1': 6}
@@ -435,9 +435,15 @@ def _parse_split_opts(method, cutoff, absorb, max_bond, cutoff_mode, renorm):
     opts = dict()
 
     if method in _RANK_HIDDEN_METHODS:
+        if absorb is None:
+            raise ValueError(
+                "You can't return the singular values separately when "
+                "`method='{}'`.".format(method))
+
+        # options are only relevant for handling singular values
         return opts
 
-    # Convert defaults and settings to numeric type for numba funcs
+    # convert defaults and settings to numeric type for numba funcs
     opts['cutoff'] = _CUTOFF_LOOKUP.get(cutoff, cutoff)
     opts['absorb'] = _ABSORB_LOOKUP[absorb]
     opts['max_bond'] = _MAX_BOND_LOOKUP.get(max_bond, max_bond)
@@ -452,52 +458,82 @@ def _parse_split_opts(method, cutoff, absorb, max_bond, cutoff_mode, renorm):
     return opts
 
 
-def tensor_split(T, left_inds, method='svd', max_bond=None, absorb='both',
-                 cutoff=1e-10, cutoff_mode='rel', renorm=None, get=None,
-                 bond_ind=None, ltags=None, rtags=None, right_inds=None):
+def tensor_split(
+    T,
+    left_inds,
+    method='svd',
+    get=None,
+    absorb='both',
+    max_bond=None,
+    cutoff=1e-10,
+    cutoff_mode='rel',
+    renorm=None,
+    ltags=None,
+    rtags=None,
+    stags=None,
+    bond_ind=None,
+    right_inds=None,
+):
     """Decompose this tensor into two tensors.
 
     Parameters
     ----------
-    T : Tensor
-        The tensor to split.
+    T : Tensor or TNLinearOperator
+        The tensor (network) to split.
     left_inds : str or sequence of str
-        The index or sequence of inds, which ``tensor`` should already have, to
+        The index or sequence of inds, which ``T`` should already have, to
         split to the 'left'.
     method : str, optional
         How to split the tensor, only some methods allow bond truncation:
 
-            - 'svd': full SVD, allows truncation.
-            - 'eig': full SVD via eigendecomp, allows truncation.
-            - 'svds': iterative svd, allows truncation.
-            - 'isvd': iterative svd using interpolative methods, allows
+            - ``'svd'``: full SVD, allows truncation.
+            - ``'eig'``: full SVD via eigendecomp, allows truncation.
+            - ``'svds'``: iterative svd, allows truncation.
+            - ``'isvd'``: iterative svd using interpolative methods, allows
               truncation.
-            - 'rsvd' : randomized iterative svd with truncation.
-            - 'qr': full QR decomposition.
-            - 'lq': full LR decomposition.
-            - 'eigh': full eigen-decomposition, tensor must he hermitian.
-            - 'eigsh': iterative eigen-decomposition, tensor must he hermitian.
-            - 'cholesky': full cholesky decomposition, tensor must be positive.
+            - ``'rsvd'`` : randomized iterative svd with truncation.
+            - ``'eigh'``: full eigen-decomposition, tensor must he hermitian.
+            - ``'eigsh'``: iterative eigen-decomposition, tensor must be
+              hermitian.
+            - ``'qr'``: full QR decomposition.
+            - ``'lq'``: full LR decomposition.
+            - ``'cholesky'``: full cholesky decomposition, tensor must be
+              positive.
 
-    max_bond: None or int
+    get : {None, 'arrays', 'tensors', 'values'}
+        If given, what to return instead of a TN describing the split:
+
+            - ``None``: a tensor network of the two (or three) tensors.
+            - ``'arrays'``: the raw data arrays as a tuple ``(l, r)`` or
+              ``(l, s, r)`` depending on ``absorb``.
+            - ``'tensors '``: the new tensors as a tuple ``(Tl, Tr)`` or
+              ``(Tl, Ts, Tr)`` depending on ``absorb``.
+            - ``'values'``: only compute and return the singular values ``s``.
+
+    absorb : {'both', 'left', 'right', None}, optional
+        Whether to absorb the singular values into both, the left, or the right
+        unitary matrix respectively, or neither. If neither (``absorb=None``)
+        then the singular values will be returned separately in their own
+        1D tensor or array. In that case if ``get=None`` the tensor network
+        returned will have a hyperedge corresponding to the new bond index
+        connecting three tensors. If ``get='tensors'`` or ``get='arrays'`` then
+        a tuple like ``(left, s, right)`` is returned.
+    max_bond : None or int
         If integer, the maxmimum number of singular values to keep, regardless
         of ``cutoff``.
-    absorb = {'both', 'left', 'right'}
-        Whether to absorb the singular values into both, the left or right
-        unitary matrix respectively.
     cutoff : float, optional
         The threshold below which to discard singular values, only applies to
-        SVD and eigendecomposition based methods (not QR, LQ, or cholesky).
+        rank revealing methods (not QR, LQ, or cholesky).
     cutoff_mode : {'sum2', 'rel', 'abs', 'rsum2'}
         Method with which to apply the cutoff threshold:
 
-            - 'rel': values less than ``cutoff * s[0]`` discarded.
-            - 'abs': values less than ``cutoff`` discarded.
-            - 'sum2': sum squared of values discarded must be ``< cutoff``.
-            - 'rsum2': sum squared of values discarded must be less than
+            - ``'rel'``: values less than ``cutoff * s[0]`` discarded.
+            - ``'abs'``: values less than ``cutoff`` discarded.
+            - ``'sum2'``: sum squared of values discarded must be ``< cutoff``.
+            - ``'rsum2'``: sum squared of values discarded must be less than
               ``cutoff`` times the total sum of squared values.
-            - 'sum1': sum values discarded must be ``< cutoff``.
-            - 'rsum1': sum of values discarded must be less than
+            - ``'sum1'``: sum values discarded must be ``< cutoff``.
+            - ``'rsum1'``: sum of values discarded must be less than
               ``cutoff`` times the total sum of values.
 
     renorm : {None, bool, or int}, optional
@@ -506,31 +542,30 @@ def tensor_split(T, left_inds, method='svd', max_bond=None, absorb='both',
         norm or trace. If ``None`` (the default) then this is automatically
         turned on only for ``cutoff_method in {'sum2', 'rsum2', 'sum1',
         'rsum1'}`` with ``method in {'svd', 'eig', 'eigh'}``.
-    get : {None, 'arrays', 'tensors', 'values'}
-        If given, what to return instead of a TN describing the split. The
-        default, ``None``, returns a TensorNetwork of the two tensors.
-    bond_ind : str, optional
-        Explicitly name the new bond, else a random one will be generated.
     ltags : sequence of str, optional
         Add these new tags to the left tensor.
     rtags : sequence of str, optional
         Add these new tags to the right tensor.
+    stags : sequence of str, optional
+        Add these new tags to the singular value tensor.
+    bond_ind : str, optional
+        Explicitly name the new bond, else a random one will be generated.
     right_inds : sequence of str, optional
         Explicitly give the right indices, otherwise they will be worked out.
         This is a minor performance feature.
 
     Returns
     -------
-    TensorNetwork or (Tensor, Tensor) or (array, array) or 1D-array
-        Respectively if get={None, 'tensors', 'arrays', 'values'}.
+    TensorNetwork or tuple[Tensor] or tuple[array] or 1D-array
+        Depending on if ``get`` is ``None``, ``'tensors'``, ``'arrays'``, or
+        ``'values'``. In the first three cases, if ``absorb`` is set, then the
+        returned objects correspond to ``(left, right)`` whereas if
+        ``absorb=None`` the returned objects correspond to
+        ``(left, singular_values, right)``.
     """
     check_opt('get', get, _VALID_SPLIT_GET)
 
-    if isinstance(left_inds, str):
-        left_inds = (left_inds,)
-    else:
-        left_inds = tuple(left_inds)
-
+    left_inds = tags_to_utup(left_inds)
     if right_inds is None:
         right_inds = tuple(x for x in T.inds if x not in left_inds)
 
@@ -557,7 +592,7 @@ def tensor_split(T, left_inds, method='svd', max_bond=None, absorb='both',
     opts = _parse_split_opts(
         method, cutoff, absorb, max_bond, cutoff_mode, renorm)
 
-    left, right = {
+    split_fn = {
         'svd': decomp._svd,
         'eig': decomp._eig,
         'qr': decomp._qr,
@@ -568,26 +603,36 @@ def tensor_split(T, left_inds, method='svd', max_bond=None, absorb='both',
         'svds': decomp._svds,
         'rsvd': decomp._rsvd,
         'eigsh': decomp._eigsh,
-    }[method](array, **opts)
+    }[method]
 
+    # ``s`` itself will be None unless ``absorb=None`` is specified
+    left, s, right = split_fn(array, **opts)
     left = reshape(left, (*left_dims, -1))
     right = reshape(right, (-1, *right_dims))
 
     if get == 'arrays':
+        if absorb is None:
+            return left, s, right
         return left, right
 
     bond_ind = rand_uuid() if bond_ind is None else bond_ind
-
     ltags = utup_union((tags_to_utup(ltags), T.tags))
     rtags = utup_union((tags_to_utup(rtags), T.tags))
 
     Tl = Tensor(data=left, inds=(*left_inds, bond_ind), tags=ltags)
     Tr = Tensor(data=right, inds=(bond_ind, *right_inds), tags=rtags)
 
-    if get == 'tensors':
-        return Tl, Tr
+    if absorb is None:
+        stags = utup_union((tags_to_utup(stags), T.tags))
+        Ts = Tensor(data=s, inds=(bond_ind,), tags=stags)
+        tensors = (Tl, Ts, Tr)
+    else:
+        tensors = (Tl, Tr)
 
-    return TensorNetwork((Tl, Tr), check_collisions=False)
+    if get == 'tensors':
+        return tensors
+
+    return TensorNetwork(tensors, check_collisions=False)
 
 
 def tensor_canonize_bond(T1, T2, **split_opts):

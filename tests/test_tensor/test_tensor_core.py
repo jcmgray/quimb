@@ -309,8 +309,8 @@ class TestTensorFunctions:
     @pytest.mark.parametrize('cutoff', [-1.0, 1e-13, 1e-10])
     @pytest.mark.parametrize('cutoff_mode', ['abs', 'rel', 'sum2'])
     @pytest.mark.parametrize('absorb', ['left', 'both', 'right'])
-    def test_split_tensor_with_vals(self, method, linds, cutoff,
-                                    cutoff_mode, absorb):
+    def test_split_tensor_rank_revealing(self, method, linds, cutoff,
+                                         cutoff_mode, absorb):
         a = rand_tensor((2, 3, 4, 5, 6), inds='abcde', tags='red')
         a_split = a.split(linds, method=method, cutoff=cutoff,
                           cutoff_mode=cutoff_mode, absorb=absorb)
@@ -325,7 +325,7 @@ class TestTensorFunctions:
 
     @pytest.mark.parametrize('method', ['qr', 'lq'])
     @pytest.mark.parametrize('linds', [('a', 'b', 'd'), ('c', 'e')])
-    def test_split_tensor_no_vals(self, method, linds):
+    def test_split_tensor_rank_hidden(self, method, linds):
         a = rand_tensor((2, 3, 4, 5, 6), inds='abcde', tags='red')
         a_split = a.split(linds, method=method)
         assert len(a_split.tensors) == 2
@@ -343,6 +343,42 @@ class TestTensorFunctions:
         assert_allclose(psim.H @ psim, 1.0)
         assert_allclose(psim.singular_values('a', method=method)**2,
                         [0.5, 0.5])
+
+    def test_absorb_none(self):
+        x = qtn.rand_tensor((4, 5, 6, 7), inds='abcd', tags='X', seed=42)
+        e = x.H @ x
+
+        with pytest.raises(ValueError):
+            x.split(['a', 'c'], absorb=None, method='qr')
+
+        xs_tn = x.split(['a', 'c'], absorb=None, stags='S')
+        assert isinstance(xs_tn, TensorNetwork)
+        assert xs_tn.num_tensors == 3
+        e1 = (xs_tn.H & xs_tn).contract(all, output_inds=())
+        assert e1 == pytest.approx(e)
+        assert 'S' in xs_tn.tags
+
+        Tl, Ts, Tr = x.split(['a', 'c'], absorb=None, get='tensors')
+        assert isinstance(Ts, Tensor)
+        assert len(Ts.inds) == 1
+        assert 'X' in Ts.tags
+        Tl.multiply_index_diagonal_(Ts.inds[0], Ts.data)
+        xs_tn = Tl & Tr
+        e2 = (xs_tn.H & xs_tn).contract(all)
+        assert e2 == pytest.approx(e)
+
+        l, s, r = x.split(['a', 'c'], absorb=None, get='arrays')
+        assert s.size == 24
+        y_data = np.einsum('acx,x,xbd->abcd', l, s, r)
+        assert_allclose(y_data, x.data)
+
+        l, s, r = x.split(['a', 'c'], absorb=None, get='arrays', max_bond=20)
+        assert s.size == 20
+        y_data = np.einsum('acx,x,xbd->abcd', l, s, r)
+        assert (
+            qu.norm(y_data, 'fro') ==
+            pytest.approx(qu.norm(x.data, 'fro'), rel=0.1)
+        )
 
     @pytest.mark.parametrize('method', ['svd', 'eig'])
     def test_renorm(self, method):
