@@ -18,7 +18,8 @@ import numpy as np
 import opt_einsum as oe
 import scipy.sparse.linalg as spla
 from cytoolz import unique, concat, frequencies, partition_all, merge_with
-from autoray import do, conj, reshape, transpose, astype, infer_backend
+from autoray import (do, conj, reshape, transpose, astype,
+                     infer_backend, get_dtype_name)
 
 from ..core import qarray, prod, realify_scalar, vdot, common_type
 from ..utils import check_opt, functions_equal
@@ -1729,12 +1730,16 @@ class Tensor(object):
         self.__dict__ = state.copy()
 
     def __repr__(self):
-        return (
-            f"{self.__class__.__name__}("
-            f"shape={self.data.shape}, "
-            f"inds={self.inds}, "
-            f"tags={tuple(self.tags)})"
-        )
+        return (f"{self.__class__.__name__}("
+                f"shape={tuple(map(int, self.data.shape))}, "
+                f"inds={self.inds}, "
+                f"tags={tuple(self.tags)})")
+
+    def __str__(self):
+        s = self.__repr__()[:-1]
+        s += (f", backend='{infer_backend(self.data)}'"
+              f", dtype='{get_dtype_name(self.data)}')")
+        return s
 
 
 # ------------------------- Add ufunc like methods -------------------------- #

@@ -61,6 +61,11 @@ class TestBasicTensorOperations:
         with pytest.raises(ValueError):
             Tensor(x, inds=[0, 2], tags='blue')
 
+        assert repr(a) == ("Tensor(shape=(2, 3, 4), "
+                           "inds=(0, 1, 2), tags=('blue',))")
+        assert str(a) == ("Tensor(shape=(2, 3, 4), inds=(0, 1, 2), "
+                          "tags=('blue',), backend='numpy', dtype='float64')")
+
     def test_tensor_copy(self):
         a = Tensor(np.random.randn(2, 3, 4), inds=[0, 1, 2], tags='blue')
         b = a.copy()
