@@ -34,9 +34,9 @@ def graph(
         If some tensors have more than of the tags, only one color will
     highlight_inds : iterable:
         Highlight these edges in red.
-    show_inds : bool, optional
+    show_inds : {None, False, True, 'all'}, optional
         Explicitly turn on labels for each tensors indices.
-    show_tags : bool, optional
+    show_tags : {None, False, True}, optional
         Explicitly turn on labels for each tensors tags.
     custom_colors : sequence of colors, optional
         Supply a custom sequence of colors to match the tags given
@@ -75,11 +75,19 @@ def graph(
     import matplotlib.pyplot as plt
     import math
 
-    # build the graph
-    G = nx.Graph()
-    n = tn.num_tensors
+    # automatically decide whether to show tags and inds
+    if show_inds is None:
+        show_inds = (tn.num_tensors <= 20)
+    if show_tags is None:
+        show_tags = (tn.num_tensors <= 20)
 
     hyperedges = []
+    node_labels = dict()
+    edge_labels = dict()
+
+    # build the graph
+    G = nx.Graph()
+
     for ix, tids in tn.ind_map.items():
         edge_attrs = {
             'color': ((1.0, 0.2, 0.2) if ix in highlight_inds else
@@ -90,25 +98,20 @@ def graph(
         if len(tids) == 2:
             # standard edge
             G.add_edge(*tids, **edge_attrs)
+            if show_inds == 'all':
+                edge_labels[tids] = ix
         else:
             # hyper or outer edge - needs dummy 'node' shown with zero size
             hyperedges.append(ix)
             for tid in tids:
                 G.add_edge(tid, ix, **edge_attrs)
 
-    # automatically decide whether to show tags and inds
-    if show_inds is None:
-        show_inds = (n <= 20)
-    if show_tags is None:
-        show_tags = (n <= 20)
-    labels = dict()
-
     # color the nodes
     colors = _get_colors(color, custom_colors)
 
     # set the size of the nodes
     if node_size is None:
-        node_size = 1000 / n**0.7
+        node_size = 1000 / tn.num_tensors**0.7
     node_outline_size = min(3, node_size**0.5 / 5)
 
     # set parameters for all the nodes
@@ -122,20 +125,20 @@ def graph(
         G.nodes[tid]['color'] = color
         G.nodes[tid]['outline_color'] = tuple(0.8 * c for c in color)
         if show_tags:
-            labels[tid] = str(t.tags)
+            node_labels[tid] = str(t.tags)
 
     for hix in hyperedges:
         G.nodes[hix]['ind'] = hix
         G.nodes[hix]['color'] = (1.0, 1.0, 1.0)
-        G.nodes[hix]['size'] = 1
-        G.nodes[hix]['outline_size'] = 0
+        G.nodes[hix]['size'] = 0.0
+        G.nodes[hix]['outline_size'] = 0.0
         G.nodes[hix]['outline_color'] = (1.0, 1.0, 1.0)
         if show_inds is 'all':
-            labels[hix] = hix
+            node_labels[hix] = hix
 
     if show_inds:
         for oix in tn.outer_inds():
-            labels[oix] = oix
+            node_labels[oix] = oix
 
     pos = _get_positions(tn, G, fix, initial_layout, k, iterations)
 
@@ -144,6 +147,13 @@ def graph(
         ax.axis('off')
         ax.set_aspect('equal')
 
+    nx.draw_networkx_edges(
+        G, pos,
+        width=[x[2]['weight'] for x in G.edges(data=True)],
+        edge_color=[x[2]['color'] for x in G.edges(data=True)],
+        alpha=edge_alpha,
+        ax=ax,
+    )
     nx.draw_networkx_nodes(
         G, pos,
         node_color=[x[1]['color'] for x in G.nodes(data=True)],
@@ -152,19 +162,20 @@ def graph(
         linewidths=[x[1]['outline_size'] for x in G.nodes(data=True)],
         ax=ax,
     )
-    nx.draw_networkx_labels(
-        G, pos,
-        labels=labels,
-        font_size=10,
-        ax=ax,
-    )
-    nx.draw_networkx_edges(
-        G, pos,
-        width=[x[2]['weight'] for x in G.edges(data=True)],
-        edge_color=[x[2]['color'] for x in G.edges(data=True)],
-        alpha=edge_alpha,
-        ax=ax,
-    )
+    if show_inds == 'all':
+        nx.draw_networkx_edge_labels(
+            G, pos,
+            edge_labels=edge_labels,
+            font_size=10,
+            ax=ax,
+        )
+    if show_tags or show_inds:
+        nx.draw_networkx_labels(
+            G, pos,
+            labels=node_labels,
+            font_size=10,
+            ax=ax,
+        )
 
     # create legend
     if colors and legend:
