@@ -175,4 +175,5 @@ def test_parametrized_circuit(backend):
         loss_target=-0.99,
     )
     psi_opt = tnopt.optimize(20)
+    assert sum(l < -0.99 for l in tnopt.losses) == 1
     assert qu.fidelity(psi_opt.to_dense(), gs) > 0.99

@@ -133,7 +133,7 @@ def graph(
         G.nodes[hix]['size'] = 0.0
         G.nodes[hix]['outline_size'] = 0.0
         G.nodes[hix]['outline_color'] = (1.0, 1.0, 1.0)
-        if show_inds is 'all':
+        if show_inds == 'all':
             node_labels[hix] = hix
 
     if show_inds:

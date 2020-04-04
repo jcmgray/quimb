@@ -263,8 +263,9 @@ class TorchHandler:
 
     def _setup_backend_fn(self, arrays):
         if self.jit_fn:
+            example_inputs = (tuple(map(self.to_constant, arrays)),)
             self._backend_fn = self.torch.jit.trace(
-                self._fn, example_inputs=[list(map(self.to_constant, arrays))])
+                self._fn, example_inputs=example_inputs)
         else:
             self._backend_fn = self._fn
 
@@ -274,10 +275,8 @@ class TorchHandler:
 
         arrays = [self.to_variable(x) for x in arrays]
         result = self._backend_fn(arrays)
-        result.backward()
-
+        grads = tuple(map(to_numpy, self.torch.autograd.grad(result, arrays)))
         loss = to_numpy(result)
-        grads = [to_numpy(x.grad) for x in arrays]
 
         return loss, grads
 
@@ -418,10 +417,10 @@ class TNOptimizer:
         )
 
         # this handles storing and packing /  unpacking many arrays as a vector
-        self.vctrzr = Vectorizer(self.variables)
+        self.vectorizer = Vectorizer(self.variables)
 
         if bounds is not None:
-            bounds = (bounds,) * self.vctrzr.d
+            bounds = (bounds,) * self.vectorizer.d
         self.bounds = bounds
 
         def func(arrays):
@@ -433,14 +432,16 @@ class TNOptimizer:
         self.handler.setup_fn(func)
 
         def vectorized_value_and_grad(x):
-            arrays = self.vctrzr.unpack(x)
+            self.vectorizer.vector[:] = x
+            arrays = self.vectorizer.unpack()
+
             ag_result, ag_grads = self.handler.value_and_grad(arrays)
 
             self._n += 1
             self.loss = ag_result.item()
             self.losses.append(self.loss)
 
-            vec_grad = self.vctrzr.pack(ag_grads, 'grad')
+            vec_grad = self.vectorizer.pack(ag_grads, 'grad')
 
             return self.loss, vec_grad
 
@@ -453,9 +454,8 @@ class TNOptimizer:
         return self._n
 
     def inject_res_vector_and_return_tn(self):
-        arrays = self.vctrzr.unpack(self.res.x)
+        arrays = self.vectorizer.unpack()
         inject_(arrays, self.tn_opt)
-        self.vctrzr.vector[:] = self.res.x
         tn = self.norm_fn(self.tn_opt.copy())
         tn.drop_tags(t for t in tn.tags if variable_finder.match(t))
         tn.apply_to_arrays(to_numpy)
@@ -471,10 +471,15 @@ class TNOptimizer:
                 pbar.update()
                 pbar.set_description(f"{self.loss}")
 
+                if self.loss_target is not None:
+                    if self.loss < self.loss_target:
+                        # returning True doesn't terminate optimization
+                        raise KeyboardInterrupt
+
             self.res = minimize(
                 fun=self.vectorized_value_and_grad,
                 jac=True,
-                x0=self.vctrzr.vector,
+                x0=self.vectorizer.vector,
                 callback=callback,
                 tol=tol,
                 bounds=self.bounds,
@@ -484,7 +489,10 @@ class TNOptimizer:
                     **options,
                 )
             )
+            self.vectorizer.vector[:] = self.res.x
 
+        except KeyboardInterrupt:
+            pass
         finally:
             pbar.close()
 
@@ -496,10 +504,8 @@ class TNOptimizer:
         try:
             pbar = tqdm.tqdm(total=n * nhop, disable=not self.progbar)
 
-            def callback(x, f, accept):
-                if self.loss_target is not None:
-                    if self.loss_best < self.loss_target:
-                        return True
+            def hop_callback(x, f, accept):
+                pass
 
             def inner_callback(xk):
                 self.loss_best = min(self.loss_best, self.loss)
@@ -507,9 +513,14 @@ class TNOptimizer:
                 msg = f"{self.loss} [best: {self.loss_best}] "
                 pbar.set_description(msg)
 
+                if self.loss_target is not None:
+                    if self.loss_best < self.loss_target:
+                        # returning True doesn't terminate optimization
+                        raise KeyboardInterrupt
+
             self.res = basinhopping(
                 func=self.vectorized_value_and_grad,
-                x0=self.vctrzr.vector,
+                x0=self.vectorizer.vector,
                 niter=nhop,
                 minimizer_kwargs=dict(
                     jac=True,
@@ -520,10 +531,13 @@ class TNOptimizer:
                         maxiter=n,
                     )
                 ),
-                callback=callback,
+                callback=hop_callback,
                 T=temperature,
             )
+            self.vectorizer.vector[:] = self.res.x
 
+        except KeyboardInterrupt:
+            pass
         finally:
             pbar.close()
 
