@@ -1,4 +1,5 @@
 from .tensor_core import (
+    set_contract_path_cache,
     get_contract_strategy,
     set_contract_strategy,
     contract_strategy,
@@ -93,6 +94,7 @@ from .tensor_2d import (
 )
 
 __all__ = (
+    "set_contract_path_cache",
     "contract_strategy",
     "get_contract_strategy",
     "set_contract_strategy",

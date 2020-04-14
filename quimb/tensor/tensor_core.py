@@ -78,16 +78,55 @@ def _get_contract_path(eq, *shapes, **kwargs):
     return oe.contract_path(eq, *shapes, shapes=True, **kwargs)[1]
 
 
-_get_contract_expr_cached = functools.lru_cache(4096)(_get_contract_expr)
-_get_contract_path_cached = functools.lru_cache(1024)(_get_contract_path)
-
-
 _CONTRACT_FNS = {
-    (True, False): _get_contract_expr_cached,
+    (True, False): functools.lru_cache(4096)(_get_contract_expr),
     (False, False): _get_contract_expr,
-    (True, True): _get_contract_path_cached,
+    (True, True): functools.lru_cache(1024)(_get_contract_path),
     (False, True): _get_contract_path,
 }
+
+
+_CONTRACT_PATH_CACHE = None
+
+
+def set_contract_path_cache(
+    directory=None,
+    in_mem_cache_size_expr=2**12,
+    in_mem_cache_size_path=2**10,
+):
+    """Specify an directory to cache all contraction paths to, if a directory
+    is specified ``diskcache`` (https://pypi.org/project/diskcache/) will be
+    used to write all contraction expressions / paths to.
+
+    Parameters
+    ----------
+    directory : None or path, optimize
+        If None (the default), don't use any disk caching. If a path, supply it
+        to ``diskcache.Cache`` to use as the persistent store.
+    in_mem_cache_size_expr : int, optional
+        The size of the in memory cache to use for contraction expressions.
+    in_mem_cache_size_path : int, optional
+        The size of the in memory cache to use for contraction paths.
+    """
+    global _CONTRACT_PATH_CACHE
+
+    if _CONTRACT_PATH_CACHE is not None:
+        _CONTRACT_PATH_CACHE.close()
+
+    if directory is None:
+        _CONTRACT_PATH_CACHE = None
+        expr_fn = _get_contract_expr
+        path_fn = _get_contract_path
+    else:
+        import diskcache
+        _CONTRACT_PATH_CACHE = diskcache.Cache(directory)
+        expr_fn = _CONTRACT_PATH_CACHE.memoize()(_get_contract_expr)
+        path_fn = _CONTRACT_PATH_CACHE.memoize()(_get_contract_path)
+
+    _CONTRACT_FNS[True, False] = (
+        functools.lru_cache(in_mem_cache_size_expr)(expr_fn))
+    _CONTRACT_FNS[True, True] = (
+        functools.lru_cache(in_mem_cache_size_path)(path_fn))
 
 
 def get_contraction(eq, *shapes, cache=True, path=False, **kwargs):
