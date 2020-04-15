@@ -1,3 +1,7 @@
+variables:
+  install_slepc4py: false
+
+
 jobs:
 
 - job: Linux
@@ -9,7 +13,32 @@ jobs:
         conda_env: py37
       py38:
         conda_env: py38
+      py38-slepc4py:
+        conda_env: py38
+        install_slepc4py: true
   pool:
     vmImage: 'ubuntu-latest'
+  steps:
+  - template: ci/azure/unit-tests.yml
+
+
+- job: Windows
+  strategy:
+    matrix:
+      py37:
+        conda_env: py37
+  pool:
+    vmImage: 'windows-latest'
+  steps:
+  - template: ci/azure/unit-tests.yml
+
+
+- job: MaxOSX
+  strategy:
+    matrix:
+      py37:
+        conda_env: py37
+  pool:
+    vmImage: 'macOS-latest'
   steps:
   - template: ci/azure/unit-tests.yml
