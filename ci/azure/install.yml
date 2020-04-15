@@ -10,8 +10,7 @@ steps:
     conda env create -n quimb-tests --file ${{ parameters.env_file }}
   displayName: Install conda dependencies
 
-- ${{ if eq(variables['install_slepc4py'], 'true') }}:
-  - template: install-slepc4py.yml
+- template: install-slepc4py.yml
 
 - bash: |
     source activate quimb-tests

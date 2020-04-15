@@ -8,4 +8,5 @@ steps:
     pip install Cython
     pip install petsc petsc4py --no-binary :all:
     pip install slepc slepc4py --no-binary :all:
-  condition: eq(variables['Agent.OS'], 'Linux')
+  condition: and(eq(variables['install_slepc4py'], 'true'), eq(variables['Agent.OS'], 'Linux'))
+  displayName: Install slepc4py linux
