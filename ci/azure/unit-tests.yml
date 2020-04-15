@@ -4,7 +4,7 @@ steps:
 
 - bash: |
     source activate quimb-tests
-    python -OO -c "import quimb"
+    python -c "import quimb"
   displayName: Import quimb
 
 - bash: |
