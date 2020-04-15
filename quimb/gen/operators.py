@@ -454,7 +454,7 @@ def hamiltonian_builder(fn):
 
 @functools.lru_cache(maxsize=8)
 @hamiltonian_builder
-def ham_heis(n, j=1.0, b=0.0, cyclic=True,
+def ham_heis(n, j=1.0, b=0.0, cyclic=False,
              parallel=False, nthreads=None, ownership=None):
     """Constructs the nearest neighbour 1d heisenberg spin-1/2 hamiltonian.
 
@@ -572,7 +572,7 @@ def ham_XXZ(n, delta, jxy=1.0, **ham_opts):
 
 @functools.lru_cache(maxsize=8)
 @hamiltonian_builder
-def ham_j1j2(n, j1=1.0, j2=0.5, bz=0.0, cyclic=True, ownership=None):
+def ham_j1j2(n, j1=1.0, j2=0.5, bz=0.0, cyclic=False, ownership=None):
     """Generate the j1-j2 hamiltonian, i.e. next nearest neighbour
     interactions.
 
@@ -678,7 +678,7 @@ def _gen_mbl_random_factors(n, dh, dh_dim, dh_dist, seed=None, beta=None):
 
 
 @hamiltonian_builder
-def ham_mbl(n, dh, j=1.0, bz=0.0, cyclic=True,
+def ham_mbl(n, dh, j=1.0, bz=0.0, cyclic=False,
             seed=None, dh_dist="s", dh_dim=1, beta=None, ownership=None):
     """ Constructs a heisenberg hamiltonian with isotropic coupling and
     random fields acting on each spin - the many-body localized (MBL)
@@ -980,7 +980,7 @@ def num(n, **qu_opts):
 
 @functools.lru_cache(maxsize=8)
 @hamiltonian_builder
-def ham_hubbard_hardcore(n, t=0.5, V=1., mu=1., cyclic=True,
+def ham_hubbard_hardcore(n, t=0.5, V=1., mu=1., cyclic=False,
                          parallel=False, ownership=None):
     """Generate the spinless fermion hopping hamiltonian.
 
