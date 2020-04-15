@@ -90,6 +90,7 @@ class TestContractOpts:
                 is
                 tn.contract(all, optimize='quimb_test_opt', get='path-info'))
             assert info['num_calls'] == 4
+            assert len(os.listdir(tdir)) != 0
 
             # need to release close the cache so the directory can be deleted
             qtn.set_contract_path_cache(None)
