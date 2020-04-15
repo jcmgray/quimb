@@ -3,6 +3,7 @@ channels:
   - conda-forge
   - pytorch
 dependencies:
+  - python=3.8
   - numpy
   - scipy
   - numba
@@ -24,5 +25,7 @@ dependencies:
   - autograd
   - tensorflow<2
   - autoray
+  - diskcache
+  - pip
   - pip:
     - randomgen

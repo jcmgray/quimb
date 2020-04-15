@@ -1,0 +1,20 @@
+steps:
+
+- template: install.yml
+
+- bash: |
+    source activate quimb-tests
+    python -OO -c "import quimb"
+  displayName: Import quimb
+
+- bash: |
+    source activate quimb-tests
+    pytest \
+    --cov=quimb tests/ \
+    --cov-report=xml
+  displayName: Run tests
+
+- bash: |
+    curl https://codecov.io/bash > codecov.sh
+    bash codecov.sh -t 29682b41-75ee-4a13-aad6-9d1c712061af
+  displayName: Upload coverage to codecov.io

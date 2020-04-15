@@ -36,6 +36,7 @@ setup(
             'networkx',
             'opt_einsum>=2',
             'autoray>=0.1',
+            'diskcache',
         ],
         'advanced_solvers': [
             'mpi4py',

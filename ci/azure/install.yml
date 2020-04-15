@@ -1,0 +1,22 @@
+parameters:
+  env_file: ci/requirements/$CONDA_ENV.yml
+
+steps:
+
+- template: add-conda-to-path.yml
+
+- bash: |
+    conda update -y conda
+    conda env create -n quimb-tests --file ${{ parameters.env_file }}
+  displayName: Install conda dependencies
+
+- bash: |
+    source activate quimb-tests
+    python -m pip install --no-deps -e .
+  displayName: Install quimb
+
+- bash: |
+    source activate quimb-tests
+    conda info -a
+    conda list
+  displayName: Version info

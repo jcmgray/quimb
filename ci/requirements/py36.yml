@@ -1,0 +1,31 @@
+channels:
+  - defaults
+  - conda-forge
+  - pytorch
+dependencies:
+  - python=3.6
+  - numpy
+  - scipy
+  - numba
+  - psutil
+  - cytoolz
+  - tqdm
+  - networkx
+  - matplotlib
+  - coverage
+  - pytest
+  - pytest-cov
+  - coveralls
+  - codecov
+  - opt_einsum
+  - joblib
+  - jax
+  - pytorch
+  - cpuonly
+  - autograd
+  - tensorflow<2
+  - autoray
+  - diskcache
+  - pip
+  - pip:
+    - randomgen
