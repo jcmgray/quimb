@@ -20,7 +20,7 @@ dependencies:
   - joblib
   - autoray
   - diskcache
-  - tensorflow-mkl
   - pip
   - pip:
     - randomgen
+    - tensorflow
