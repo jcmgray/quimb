@@ -1,36 +1,54 @@
-# Python package
-# Create and test a Python package on multiple Python versions.
-# Add steps that analyze code, save the dist with the build record, publish to a PyPI-compatible index, and more:
-# https://docs.microsoft.com/azure/devops/pipelines/languages/python
+variables:
+  which_tests: 'all'
+  install_slepc4py: false
 
-trigger:
-- master
+jobs:
 
-pool:
-  vmImage: 'ubuntu-latest'
-strategy:
-  matrix:
-    Python35:
-      python.version: '3.5'
-    Python36:
-      python.version: '3.6'
-    Python37:
-      python.version: '3.7'
-    Python38:
-      python.version: '3.8'
+- job: Linux
+  strategy:
+    matrix:
+      py36:
+        conda_env: py36
+      py37:
+        conda_env: py37
+      py38:
+        conda_env: py38
+      py38-slepc4py:
+        conda_env: py38
+        install_slepc4py: true
+        which_tests: 'core'
+      py38-jax:
+        conda_env: py38-jax
+        which_tests: 'tensor'
+      py38-pytorch:
+        conda_env: py38-pytorch
+        which_tests: 'tensor'
+      py38-tensorflow:
+        conda_env: py38-tensorflow
+        which_tests: 'tensor'
+  pool:
+    vmImage: 'ubuntu-latest'
+  steps:
+  - template: ci/azure/unit-tests.yml
 
-steps:
-- task: UsePythonVersion@0
-  inputs:
-    versionSpec: '$(python.version)'
-  displayName: 'Use Python $(python.version)'
 
-- script: |
-    python -m pip install --upgrade pip
-    pip install -r requirements.txt
-  displayName: 'Install dependencies'
+- job: Windows
+  strategy:
+    matrix:
+      py38:
+        conda_env: py38
+  pool:
+    vmImage: 'windows-latest'
+  steps:
+  - template: ci/azure/unit-tests.yml
 
-- script: |
-    pip install pytest pytest-azurepipelines
-    pytest
-  displayName: 'pytest'
+
+- job: MaxOSX
+  strategy:
+    matrix:
+      py38:
+        conda_env: py38
+  pool:
+    vmImage: 'macOS-latest'
+  steps:
+  - template: ci/azure/unit-tests.yml

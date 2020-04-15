@@ -1,0 +1,13 @@
+steps:
+
+- bash: |
+    source activate quimb-tests
+    sudo apt install -y openmpi-bin libopenmpi-dev gfortran bison flex cmake valgrind curl autoconf libopenblas-base libopenblas-dev
+    pip install mpi4py
+    export PETSC_CONFIGURE_OPTIONS='--download-mumps --download-scalapack --download-parmetis --download-metis --with-scalar-type=complex'
+    echo $PETSC_CONFIGURE_OPTIONS
+    pip install Cython
+    pip install petsc petsc4py --no-binary :all:
+    pip install slepc slepc4py --no-binary :all:
+  condition: and(eq(variables['install_slepc4py'], 'true'), eq(variables['Agent.OS'], 'Linux'))
+  displayName: Install slepc4py linux
