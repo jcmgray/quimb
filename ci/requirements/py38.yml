@@ -1,20 +1,25 @@
-name: docs
 channels:
   - defaults
   - conda-forge
 dependencies:
   - python=3.8
-  - pip
   - numpy
   - scipy
   - numba
   - psutil
   - cytoolz
   - tqdm
-  - ipython
-  - sphinx
-  - sphinx_bootstrap_theme
-  - nbsphinx
-  - versioneer
+  - networkx
+  - matplotlib
+  - coverage
+  - pytest
+  - pytest-cov
+  - coveralls
+  - codecov
   - opt_einsum
+  - joblib
   - autoray
+  - diskcache
+  - pip
+  - pip:
+    - randomgen

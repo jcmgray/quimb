@@ -1,8 +1,8 @@
 channels:
   - defaults
   - conda-forge
-  - pytorch
 dependencies:
+  - python=3.8
   - numpy
   - scipy
   - numba
@@ -18,11 +18,11 @@ dependencies:
   - codecov
   - opt_einsum
   - joblib
-  - jax
-  - pytorch
-  - cpuonly
-  - autograd
-  - tensorflow>=2
   - autoray
+  - diskcache
+  - jax
+  - jaxlib
+  - autograd
+  - pip
   - pip:
     - randomgen

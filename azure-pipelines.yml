@@ -1,0 +1,54 @@
+variables:
+  which_tests: 'all'
+  install_slepc4py: false
+
+jobs:
+
+- job: Linux
+  strategy:
+    matrix:
+      py36:
+        conda_env: py36
+      py37:
+        conda_env: py37
+      py38:
+        conda_env: py38
+      py38-slepc4py:
+        conda_env: py38
+        install_slepc4py: true
+        which_tests: 'core'
+      py38-jax:
+        conda_env: py38-jax
+        which_tests: 'tensor'
+      py38-pytorch:
+        conda_env: py38-pytorch
+        which_tests: 'tensor'
+      py38-tensorflow:
+        conda_env: py38-tensorflow
+        which_tests: 'tensor'
+  pool:
+    vmImage: 'ubuntu-latest'
+  steps:
+  - template: ci/azure/unit-tests.yml
+
+
+- job: Windows
+  strategy:
+    matrix:
+      py38:
+        conda_env: py38
+  pool:
+    vmImage: 'windows-latest'
+  steps:
+  - template: ci/azure/unit-tests.yml
+
+
+- job: MaxOSX
+  strategy:
+    matrix:
+      py38:
+        conda_env: py38
+  pool:
+    vmImage: 'macOS-latest'
+  steps:
+  - template: ci/azure/unit-tests.yml
