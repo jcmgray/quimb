@@ -3114,13 +3114,13 @@ class TensorNetwork(object):
             if len(tids) != 2:
                 continue
 
-            T1, T2 = (self.tensor_map[tid] for tid in tids)
+            T1, T2 = (tn.tensor_map[tid] for tid in tids)
             try:
                 tensor_compress_bond(T1, T2, **compress_opts)
             except ValueError:
                 continue
             except ZeroDivisionError:
-                self.convert_to_zero()
+                tn.convert_to_zero()
                 break
 
         return tn
