@@ -3756,22 +3756,25 @@ class TensorNetwork(object):
 
     randomize_ = functools.partialmethod(randomize, inplace=True)
 
-    def equalize_norms(self, inplace=False):
+    def equalize_norms(self, value=None, inplace=False):
         """Make the Frobenius norm of every tensor in this TN equal without
-        changing the overall value.
+        changing the overall value if ``value=None``, or set the norm of every
+        tensor to ``value`` by scalar multiplication only.
         """
         tn = self if inplace else self.copy()
 
         norms = [t.norm() for t in tn]
-        backend = infer_backend(norms[0])
-        X = do('power',
-               math.e,
-               do('mean',
-                  do('log',
-                     do('array', norms, like=backend))), like=backend)
+
+        if value is None:
+            backend = infer_backend(norms[0])
+            value = do('power',
+                       math.e,
+                       do('mean',
+                          do('log',
+                             do('array', norms, like=backend))), like=backend)
 
         for t, xi in zip(tn, norms):
-            t.modify(data=(X / xi) * t.data)
+            t.modify(data=(value / xi) * t.data)
 
         return tn
 
