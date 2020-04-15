@@ -1190,15 +1190,19 @@ class TestTensorNetwork:
         assert x2 == pytest.approx(x3)
 
     @pytest.mark.parametrize('dtype', ['float32', 'complex128'])
-    def test_equalize_norms(self, dtype):
+    @pytest.mark.parametrize('value', [None, 42])
+    def test_equalize_norms(self, dtype, value):
         psi = MPS_rand_state(5, 3, dtype=dtype)
         psi.randomize_(seed=42)
         x_exp = psi.H @ psi
         norms = [t.norm() for t in psi]
-        psi.equalize_norms_()
+        psi.equalize_norms_(value)
         enorms = [t.norm() for t in psi]
-        assert all(n1 != n2 for n1, n2 in zip(norms, enorms))
-        assert psi.H @ psi == pytest.approx(x_exp)
+        if value is None:
+            assert all(n1 != n2 for n1, n2 in zip(norms, enorms))
+            assert psi.H @ psi == pytest.approx(x_exp)
+        else:
+            assert all(n1 == pytest.approx(value) for n1 in enorms)
 
     def test_mangle_inner(self):
         a = MPS_rand_state(6, 3)
