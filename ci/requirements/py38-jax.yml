@@ -1,0 +1,28 @@
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - python=3.8
+  - numpy
+  - scipy
+  - numba
+  - psutil
+  - cytoolz
+  - tqdm
+  - networkx
+  - matplotlib
+  - coverage
+  - pytest
+  - pytest-cov
+  - coveralls
+  - codecov
+  - opt_einsum
+  - joblib
+  - autoray
+  - diskcache
+  - jax
+  - jaxlib
+  - autograd
+  - pip
+  - pip:
+    - randomgen

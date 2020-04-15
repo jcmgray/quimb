@@ -11,7 +11,18 @@ steps:
     source activate quimb-tests
     pytest \
     --cov=quimb tests/ \
-    --cov-report=xml
+    --cov-report=xml \
+    tests
+  condition: eq(variables['which_tests'], 'all')
+  displayName: Run tests
+
+- bash: |
+    source activate quimb-tests
+    pytest \
+    --cov=quimb tests/ \
+    --cov-report=xml \
+    tests/test_tensor
+  condition: eq(variables['which_tests'], 'tensor')
   displayName: Run tests
 
 - bash: |
