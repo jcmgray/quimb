@@ -16,6 +16,7 @@ jobs:
       py38-slepc4py:
         conda_env: py38
         install_slepc4py: true
+        which_tests: 'core'
       py38-jax:
         conda_env: py38-jax
         which_tests: 'tensor'
