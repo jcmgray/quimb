@@ -1,6 +1,6 @@
 jobs:
 
--job: Linux
+- job: Linux
   strategy:
     matrix:
       py36:
