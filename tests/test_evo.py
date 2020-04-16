@@ -305,9 +305,9 @@ class TestEvolution:
         L = 6
         T = 20
 
-        H1 = qu.ham_mbl(L, dh=1.0, seed=4, sparse=True)
+        H1 = qu.ham_mbl(L, dh=1.0, seed=4, sparse=True, cyclic=True)
         gs1 = qu.groundstate(H1)
-        H2 = qu.ham_mbl(L, dh=1.0, seed=5, sparse=True)
+        H2 = qu.ham_mbl(L, dh=1.0, seed=5, sparse=True, cyclic=True)
         gs2 = qu.groundstate(H2)
 
         if linop:
@@ -397,7 +397,7 @@ class TestEvolution:
         sim = qu.Evolution(p0, ham, method='integrate',
                            int_stop=(lambda t, p: -1))
         sim.update_to(trc)
-        assert sim.t < trc/2  # make sure it stopped early
+        assert sim.t < trc / 2  # make sure it stopped early
 
         sim = qu.Evolution(p0, ham, method='integrate',
                            int_stop=(lambda t, p: 0))
@@ -409,7 +409,7 @@ class TestEvolution:
 
         # check expected behaviour in case where int_stop takes t, p, H
         sim.update_to(trc)
-        assert sim.t < trc/2  # make sure it stopped early
+        assert sim.t < trc / 2  # make sure it stopped early
 
         sim = qu.Evolution(p0, ham, method='integrate',
                            int_stop=(lambda t, p, H: 0))
