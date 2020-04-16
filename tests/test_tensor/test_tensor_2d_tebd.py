@@ -16,6 +16,9 @@ class TestLocalHam2DConstruct:
     @pytest.mark.parametrize('Lx', [3, 4])
     @pytest.mark.parametrize('Ly', [3, 4])
     def test_construct(self, Lx, Ly, H2_type, H1_type):
+        import matplotlib
+        from matplotlib import pyplot as plt
+        matplotlib.use('Template')
 
         if H2_type == 'default':
             H2 = qu.rand_herm(4)
@@ -44,7 +47,8 @@ class TestLocalHam2DConstruct:
             assert len({id(x) for x in ham.terms.values()}) == 1
 
         print(ham)
-        ham.graph()
+        fig = ham.graph(return_fig=True)
+        plt.close(fig)
 
     @pytest.mark.parametrize('Lx', [4, 5])
     @pytest.mark.parametrize('Ly', [4, 5])

@@ -231,7 +231,7 @@ def _eig(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0, renorm=0):
     if x.shape[0] > x.shape[1]:
         # Get sU, V
         s2, V = np.linalg.eigh(dag(x) @ x)
-        U = x @ V
+        U = x @ np.ascontiguousarray(V)
         VH = dag(V)
         # small negative eigenvalues turn into nan when sqrtd
         s2[s2 < 0.0] = 0.0
