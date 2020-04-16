@@ -440,10 +440,10 @@ def calc_est_window(estimates, mean_ests, conv_n):
     if len(estimates) > conv_n:
         # check for convergence using variance of paired last m estimates
         #   -> paired because estimates alternate between upper and lower bound
-        paired_ests = [
+        paired_ests = tuple(
             (a + b) / 2 for a, b in
             zip(estimates[-m_est::2], estimates[-m_est + 1::2])
-        ]
+        )
         err = std(paired_ests) / (m_est / 2) ** 0.5
     else:
         err = inf
