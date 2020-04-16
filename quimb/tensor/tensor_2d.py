@@ -2518,6 +2518,200 @@ class PEPS(TensorNetwork2DVector,
         show_2d(self, show_lower=True)
 
 
+class PEPO(TensorNetwork2DOperator,
+           TensorNetwork2DFlat,
+           TensorNetwork2D,
+           TensorNetwork):
+    r"""Projected Entangled Pair Operator object::
+
+
+                         ...
+             │╱   │╱   │╱   │╱   │╱   │╱
+             ●────●────●────●────●────●──
+            ╱│   ╱│   ╱│   ╱│   ╱│   ╱│
+             │╱   │╱   │╱   │╱   │╱   │╱
+             ●────●────●────●────●────●──
+            ╱│   ╱│   ╱│   ╱│   ╱│   ╱│
+             │╱   │╱   │╱   │╱   │╱   │╱   ...
+             ●────●────●────●────●────●──
+            ╱│   ╱│   ╱│   ╱│   ╱│   ╱│
+             │╱   │╱   │╱   │╱   │╱   │╱
+             ●────●────●────●────●────●──
+            ╱    ╱    ╱    ╱    ╱    ╱
+
+    Parameters
+    ----------
+    arrays : sequence of sequence of array
+        The core tensor data arrays.
+    shape : str, optional
+        Which order the dimensions of the arrays are stored in, the default
+        ``'urdlbk'`` stands for ('up', 'right', 'down', 'left', 'bra', 'ket').
+        Arrays on the edge of lattice are assumed to be missing the
+        corresponding dimension.
+    tags : set[str], optional
+        Extra global tags to add to the tensor network.
+    upper_ind_id : str, optional
+        String specifier for naming convention of upper site indices.
+    lower_ind_id : str, optional
+        String specifier for naming convention of lower site indices.
+    site_tag_id : str, optional
+        String specifier for naming convention of site tags.
+    row_tag_id : str, optional
+        String specifier for naming convention of row tags.
+    col_tag_id : str, optional
+        String specifier for naming convention of column tags.
+    """
+
+    _EXTRA_PROPS = (
+        '_site_tag_id',
+        '_row_tag_id',
+        '_col_tag_id',
+        '_Lx',
+        '_Ly',
+        '_upper_ind_id',
+        '_lower_ind_id',
+    )
+
+    def __init__(self, arrays, *, shape='urdlbk', tags=None,
+                 upper_ind_id='k{},{}', lower_ind_id='b{},{}',
+                 site_tag_id='I{},{}', row_tag_id='ROW{}', col_tag_id='COL{}',
+                 **tn_opts):
+
+        if isinstance(arrays, PEPO):
+            super().__init__(arrays)
+            return
+
+        tags = tags_to_utup(tags)
+        self._upper_ind_id = upper_ind_id
+        self._lower_ind_id = lower_ind_id
+        self._site_tag_id = site_tag_id
+        self._row_tag_id = row_tag_id
+        self._col_tag_id = col_tag_id
+
+        arrays = tuple(tuple(x for x in xs) for xs in arrays)
+        self._Lx = len(arrays)
+        self._Ly = len(arrays[0])
+        tensors = []
+
+        # cache for both creating and retrieving indices
+        ix = defaultdict(rand_uuid)
+
+        for i, j in product(range(self.Lx), range(self.Ly)):
+            array = arrays[i][j]
+
+            # figure out if we need to transpose the arrays from some order
+            #     other than up right down left physical
+            array_order = shape
+            if i == self.Lx - 1:
+                array_order = array_order.replace('u', '')
+            if j == self.Ly - 1:
+                array_order = array_order.replace('r', '')
+            if i == 0:
+                array_order = array_order.replace('d', '')
+            if j == 0:
+                array_order = array_order.replace('l', '')
+
+            # allow convention of missing bonds to be singlet dimensions
+            if len(array.shape) != len(array_order):
+                array = do('squeeze', array)
+
+            transpose_order = tuple(
+                array_order.find(x) for x in 'urdlbk' if x in array_order
+            )
+            if transpose_order != tuple(range(len(array_order))):
+                array = do('transpose', array, transpose_order)
+
+            # get the relevant indices corresponding to neighbours
+            inds = []
+            if 'u' in array_order:
+                inds.append(ix[(i + 1, j), (i, j)])
+            if 'r' in array_order:
+                inds.append(ix[(i, j), (i, j + 1)])
+            if 'd' in array_order:
+                inds.append(ix[(i, j), (i - 1, j)])
+            if 'l' in array_order:
+                inds.append(ix[(i, j - 1), (i, j)])
+            inds.append(self.lower_ind(i, j))
+            inds.append(self.upper_ind(i, j))
+
+            # mix site, row, column and global tags
+            ij_tags = utup_union((tags, (self.site_tag(i, j),
+                                         self.row_tag(i),
+                                         self.col_tag(j))))
+
+            # create the site tensor!
+            tensors.append(Tensor(data=array, inds=inds, tags=ij_tags))
+
+        super().__init__(tensors, check_collisions=False, **tn_opts)
+
+    @classmethod
+    def rand(cls, Lx, Ly, bond_dim, phys_dim=2, herm=False,
+             dtype=float, seed=None, **pepo_opts):
+        """Create a random PEPO.
+
+        Parameters
+        ----------
+        Lx : int
+            The number of rows.
+        Ly : int
+            The number of columns.
+        bond_dim : int
+            The bond dimension.
+        physical : int, optional
+            The physical index dimension.
+        herm : bool, optional
+            Whether to symmetrize the tensors across the physical bonds to make
+            the overall operator hermitian.
+        dtype : dtype, optional
+            The dtype to create the arrays with, default is real double.
+        seed : int, optional
+            A random seed.
+        pepo_opts
+            Supplied to :class:`~quimb.tensor.tensor_2d.PEPO`.
+
+        Returns
+        -------
+        X : PEPO
+        """
+        if seed is not None:
+            seed_rand(seed)
+
+        arrays = [[None for _ in range(Ly)] for _ in range(Lx)]
+
+        for i, j in product(range(Lx), range(Ly)):
+
+            shape = []
+            if i != Lx - 1:  # bond up
+                shape.append(bond_dim)
+            if j != Ly - 1:  # bond right
+                shape.append(bond_dim)
+            if i != 0:  # bond down
+                shape.append(bond_dim)
+            if j != 0:  # bond left
+                shape.append(bond_dim)
+            shape.append(phys_dim)
+            shape.append(phys_dim)
+
+            X = ops.sensibly_scale(ops.sensibly_scale(
+                randn(shape, dtype=dtype)))
+
+            if herm:
+                new_order = list(range(len(shape)))
+                new_order[-2], new_order[-1] = new_order[-1], new_order[-2]
+                X = (do('conj', X) + do('transpose', X, new_order)) / 2
+
+            arrays[i][j] = X
+
+        return cls(arrays, **pepo_opts)
+
+    rand_herm = functools.partialmethod(rand, herm=True)
+
+    def show(self):
+        """Print a unicode schematic of this PEPO and its bond dimensions.
+        """
+        show_2d(self, show_lower=True, show_upper=True)
+
+
 def show_2d(tn_2d, show_lower=False, show_upper=False):
     """Base function for printing a unicode schematic of flat 2D TNs.
     """

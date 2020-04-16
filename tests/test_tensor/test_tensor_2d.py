@@ -226,3 +226,47 @@ class Test2DContract:
             terms_all, normalized=normalized, autogroup=False, **opts)
 
         assert e == pytest.approx(ex, rel=1e-2)
+
+
+class TestPEPOConstruct:
+
+    @pytest.mark.parametrize('Lx', [3, 4, 5])
+    @pytest.mark.parametrize('Ly', [3, 4, 5])
+    def test_basic_rand(self, Lx, Ly):
+        X = qtn.PEPO.rand_herm(Lx, Ly, bond_dim=4)
+
+        assert X.max_bond() == 4
+        assert X.Lx == Lx
+        assert X.Ly == Ly
+        assert len(X.tensor_map) == Lx * Ly
+        assert X.upper_inds == tuple(
+            f'k{i},{j}' for i in range(Lx) for j in range(Ly)
+        )
+        assert X.lower_inds == tuple(
+            f'b{i},{j}' for i in range(Lx) for j in range(Ly)
+        )
+        assert X.site_tags == tuple(
+            f'I{i},{j}' for i in range(Lx) for j in range(Ly)
+        )
+
+        assert X.bond_size((1, 1), (1, 2)) == (4)
+
+        for i in range(Lx):
+            assert len(X.select(f'ROW{i}').tensor_map) == Ly
+        for j in range(Ly):
+            assert len(X.select(f'COL{j}').tensor_map) == Lx
+
+        for i in range(Lx):
+            for j in range(Ly):
+                assert X.phys_dim(i, j) == 2
+                assert isinstance(X[i, j], qtn.Tensor)
+                assert isinstance(X[f'I{i},{j}'], qtn.Tensor)
+
+        if Lx == Ly == 3:
+            X_dense = X.to_dense(optimize='random-greedy')
+            assert X_dense.shape == (512, 512)
+            assert qu.isherm(X_dense)
+
+        X.show()
+        assert f'Lx={Lx}' in X.__str__()
+        assert f'Lx={Lx}' in X.__repr__()

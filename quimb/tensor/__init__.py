@@ -91,6 +91,7 @@ from .optimize_autograd import (
 from .tensor_2d import (
     TensorNetwork2D,
     PEPS,
+    PEPO,
 )
 from .tensor_2d_tebd import (
     LocalHam2D,
@@ -173,6 +174,7 @@ __all__ = (
     "TNOptimizer",
     "TensorNetwork2D",
     "PEPS",
+    "PEPO",
     "LocalHam2D",
     "TEBD2D",
     "SimpleUpdate",
