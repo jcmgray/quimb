@@ -2110,7 +2110,8 @@ class TensorNetwork2DVector(TensorNetwork2D,
                     autogroup_success = False
                     break
 
-            if autogroup_success:
+            # only need to split computation if both h and v terms exist
+            if autogroup_success and hterms and vterms:
                 he = self.compute_local_expectation(
                     hterms, normalized=normalized, autogroup=False,
                     contract_optimize=contract_optimize, return_all=return_all,

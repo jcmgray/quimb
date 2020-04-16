@@ -223,6 +223,6 @@ class Test2DContract:
         # compute all terms in 2x2 plaquettes
         terms_all = {**hterms, **vterms}
         e = peps.compute_local_expectation(
-            terms_all, normalized=normalized, **opts)
+            terms_all, normalized=normalized, autogroup=False, **opts)
 
         assert e == pytest.approx(ex, rel=1e-2)
