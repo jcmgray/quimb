@@ -3,27 +3,31 @@ import numpy as np
 from numpy.testing import assert_allclose
 import quimb as qu
 
+
 @pytest.mark.parametrize("sparse", [False, True])
 @pytest.mark.parametrize("stype", ['csr', 'csc'])
-@pytest.mark.parametrize("dtype", ["don't pass", None, np.float64, np.complex128])
+@pytest.mark.parametrize("dtype", [
+    "don't pass", None, np.float64, np.complex128])
 def test_hamiltonian_builder(sparse, stype, dtype):
     from quimb.gen.operators import hamiltonian_builder
 
     @hamiltonian_builder
     def simple_ham(sparse=None, stype=None, dtype=None):
-        H = qu.qu([[0.0, 1.0], [1.0, 0.0]], sparse=True, stype='csr', dtype=dtype)
+        H = qu.qu([[0.0, 1.0],
+                   [1.0, 0.0]], sparse=True, stype='csr', dtype=dtype)
         return H
 
     @hamiltonian_builder
     def simple_ham_complex(sparse=None, stype=None, dtype=None):
-        H = qu.qu([[0.0, 1.0j], [-1.0j, 0.0]], sparse=True, stype='csr', dtype=dtype)
+        H = qu.qu([[0.0, 1.0j],
+                   [-1.0j, 0.0]], sparse=True, stype='csr', dtype=dtype)
         return H
-    
+
     if dtype == "don't pass":
         H = simple_ham(sparse=sparse, stype=stype)
     else:
         H = simple_ham(sparse=sparse, stype=stype, dtype=dtype)
-     
+
     if dtype == "don't pass" or dtype is None:
         # check that passng no actual dtype keeps it as float
         assert H.dtype == np.float64
@@ -35,14 +39,14 @@ def test_hamiltonian_builder(sparse, stype, dtype):
     if sparse:
         assert H.format == stype
 
-    with pytest.raises(ValueError): # check immutability
-        H[0,0] = 100
-        
+    with pytest.raises(ValueError):  # check immutability
+        H[0, 0] = 100
+
     if dtype == "don't pass":
         H = simple_ham_complex(sparse=sparse, stype=stype)
     elif dtype is np.float64:
         with pytest.warns(np.ComplexWarning):
-            H = simple_ham_complex(sparse=sparse, stype=stype, dtype=dtype)    
+            H = simple_ham_complex(sparse=sparse, stype=stype, dtype=dtype)
     else:
         H = simple_ham_complex(sparse=sparse, stype=stype, dtype=dtype)
     if dtype == "don't pass" or dtype is None:
@@ -56,11 +60,12 @@ def test_hamiltonian_builder(sparse, stype, dtype):
     if sparse:
             assert H.format == stype
 
-    with pytest.raises(ValueError): # check immutability
-        H[0,0] = 100
-            
+    with pytest.raises(ValueError):  # check immutability
+        H[0, 0] = 100
+
     return
-                
+
+
 class TestSpinOperator:
     def test_spin_half(self):
         Sx = qu.spin_operator('x', 1 / 2)
@@ -292,7 +297,7 @@ class TestSwap:
 class TestHubbardSpinless:
 
     def test_half_filling_groundstate(self):
-        H = qu.ham_hubbard_hardcore(8, t=0.5, V=1.0, mu=1.0)
+        H = qu.ham_hubbard_hardcore(8, t=0.5, V=1.0, mu=1.0, cyclic=True)
         gs = qu.groundstate(H)
         dims = [2] * 8
         cn = qu.num(2)
