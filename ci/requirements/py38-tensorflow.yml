@@ -16,7 +16,7 @@ dependencies:
   - pytest-cov
   - coveralls
   - codecov
-  - opt_einsum
+  - opt_einsum>=3.2
   - joblib
   - autoray
   - diskcache
