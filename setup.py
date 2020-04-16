@@ -34,7 +34,7 @@ setup(
         'tensor': [
             'matplotlib',
             'networkx',
-            'opt_einsum>=2',
+            'opt_einsum>=3.2',
             'autoray>=0.2.0',
             'diskcache',
         ],
