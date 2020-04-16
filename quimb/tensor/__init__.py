@@ -92,6 +92,11 @@ from .tensor_2d import (
     TensorNetwork2D,
     PEPS,
 )
+from .tensor_2d_tebd import (
+    LocalHam2D,
+    TEBD2D,
+    SimpleUpdate,
+)
 
 __all__ = (
     "set_contract_path_cache",
@@ -168,4 +173,7 @@ __all__ = (
     "TNOptimizer",
     "TensorNetwork2D",
     "PEPS",
+    "LocalHam2D",
+    "TEBD2D",
+    "SimpleUpdate",
 )

@@ -1286,7 +1286,7 @@ class TensorNetwork2D(TensorNetwork):
     def compute_row_environments(self, dense=False, **compress_opts):
         r"""Compute the ``2 * self.Lx`` 1D boundary tensor networks describing
         the lower and upper environments of each row in this 2D tensor network,
-        assumed to represent the norm.
+        *assumed to represent the norm*.
 
         The 'above' environment for row ``i`` will be a contraction of all
         rows ``i + 1, i + 2, ...`` etc::
@@ -1820,6 +1820,7 @@ class TensorNetwork2DVector(TensorNetwork2D,
         contract=False,
         tags=None,
         inplace=False,
+        info=None,
         **compress_opts
     ):
         """Apply the dense gate ``G``, maintaining the physical indices of this
@@ -1860,6 +1861,9 @@ class TensorNetwork2DVector(TensorNetwork2D,
         inplace : bool, optional
             Whether to perform the gate operation inplace on the tensor
             network or not.
+        info : None or dict, optional
+            Used to store extra optional information such as the sinuglar
+            values if not absorbed.
         compress_opts
             Supplied to :func:`~quimb.tensor.tensor_core.tensor_split` for any
             ``contract`` methods that involve splitting. Ignored otherwise.
@@ -1980,8 +1984,9 @@ class TensorNetwork2DVector(TensorNetwork2D,
                 TL.reindex({site_ix[0]: bnds[0]}),
                 TR.reindex({site_ix[1]: bnds[1]}),
                 TG)
-            TL_new, TR_new = TLRG.split(
+            split_res = TLRG.split(
                 left_inds=lix, right_inds=rix, get='tensors', **compress_opts)
+            TL_new, TR_new = split_res[0], split_res[-1]
 
         elif contract == 'lazy-split':
             #
@@ -1998,7 +2003,8 @@ class TensorNetwork2DVector(TensorNetwork2D,
                  TG),
                 left_inds=lix, right_inds=rix
             )
-            TL_new, TR_new = TLRG.split(get='tensors', **compress_opts)
+            split_res = TLRG.split(get='tensors', **compress_opts)
+            TL_new, TR_new = split_res[0], split_res[-1]
 
         elif contract == 'reduce-split':
             #
@@ -2022,9 +2028,10 @@ class TensorNetwork2DVector(TensorNetwork2D,
                 TG)
 
             # split the new tensor living on the bond
-            left_bnd, = TL_Q.bonds(TLRG)
-            TLRG_L, TLRG_R = TLRG.split(
-                left_inds=(left_bnd, site_ix[0]), **compress_opts)
+            lbnd, = TL_Q.bonds(TLRG)
+            split_res = TLRG.split(
+                left_inds=(lbnd, site_ix[0]), get='tensors', **compress_opts)
+            TLRG_L, TLRG_R = split_res[0], split_res[-1]
 
             # absorb the factors back into site tensors
             TL_new = TL_Q @ TLRG_L
@@ -2035,6 +2042,11 @@ class TensorNetwork2DVector(TensorNetwork2D,
         TL.modify(data=TL_new.data)
         TR.modify(data=TR_new.data)
 
+        # optionally
+        if compress_opts.get('absorb', 'both') is None and (info is not None):
+            assert len(split_res) == 3
+            info['singular_values'] = split_res[1].data
+
         return psi
 
     gate_ = functools.partialmethod(gate, inplace=True)
@@ -2043,6 +2055,7 @@ class TensorNetwork2DVector(TensorNetwork2D,
         self,
         terms,
         normalized=False,
+        autogroup=True,
         contract_optimize='auto-hq',
         return_all=False,
         **plaquette_env_options,
@@ -2059,6 +2072,10 @@ class TensorNetwork2DVector(TensorNetwork2D,
         normalized : bool, optional
             If True, normalize the value of each local expectation by the local
             norm: $\langle O_i \rangle = Tr[\rho_p O_i] / Tr[\rho_p]$.
+        autogroup : bool, optional
+            If ``True`` (the default), group terms into horizontal and vertical
+            sets to be computed separately (usually more efficient) if
+            possible.
         contract_optimize : str, optional
             Contraction path finder to use for contracting the local plaquette
             expectation (and optionally normalization).
@@ -2075,6 +2092,39 @@ class TensorNetwork2DVector(TensorNetwork2D,
         -------
         scalar or dict
         """
+
+        # maybe group the terms into horizontal and vertical for efficiency
+        if autogroup:
+            hterms, vterms = {}, {}
+
+            autogroup_success = True
+            for (ija, ijb), G in terms.items():
+                if ija[0] == ijb[0]:
+                    # same row
+                    hterms[ija, ijb] = G
+                elif ija[1] == ijb[1]:
+                    # same column
+                    vterms[ija, ijb] = G
+                else:
+                    # found a term which is neither vertical nor horizontal
+                    autogroup_success = False
+                    break
+
+            if autogroup_success:
+                he = self.compute_local_expectation(
+                    hterms, normalized=normalized, autogroup=False,
+                    contract_optimize=contract_optimize, return_all=return_all,
+                    **plaquette_env_options)
+                ve = self.compute_local_expectation(
+                    vterms, normalized=normalized, autogroup=False,
+                    contract_optimize=contract_optimize, return_all=return_all,
+                    **plaquette_env_options)
+
+                if return_all:
+                    return {**he, **ve}
+                else:
+                    return he + ve
+
         ket = self.copy()
 
         ket.add_tag('KET')

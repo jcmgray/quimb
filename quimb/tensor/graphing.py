@@ -107,7 +107,7 @@ def graph(
                 G.add_edge(tid, ix, **edge_attrs)
 
     # color the nodes
-    colors = _get_colors(color, custom_colors)
+    colors = get_colors(color, custom_colors)
 
     # set the size of the nodes
     if node_size is None:
@@ -251,7 +251,7 @@ def auto_colors(nc):
     ]
 
 
-def _get_colors(color, custom_colors=None):
+def get_colors(color, custom_colors=None):
     """Generate a sequence of rgbs for tag(s) ``color``.
     """
     from matplotlib.colors import to_rgba
