@@ -392,10 +392,10 @@ def tensor_contract(*tensors, output_inds=None, get=None,
 
     i_ix = tuple(t.inds for t in tensors)  # input indices per tensor
     total_ix = tuple(concat(i_ix))  # list of all input indices
-    all_ix = tuple(unique(total_ix))
+    all_ix = utup(total_ix)
 
     if output_inds is None:
-        # sort output indices  by input order for efficiency and consistency
+        # sort output indices by input order for efficiency and consistency
         o_ix = tuple(_gen_output_inds(total_ix))
     else:
         o_ix = output_inds
@@ -2342,24 +2342,43 @@ class TensorNetwork(object):
 
     reindex_ = functools.partialmethod(reindex, inplace=True)
 
-    def mangle_inner_(self, which=None):
+    def mangle_inner_(self, append=None, which=None):
         """Generate new index names for internal bonds, meaning that when this
         tensor network is combined with another, there should be no collisions.
+
+        Parameters
+        ----------
+        append : None or str, optional
+            Whether and what to append to the indices to perform the mangling.
+            If ``None`` a whole new random UUID will be generated.
+        which : sequence of str, optional
+            Which indices to rename, if ``None`` (the default), all inner
+            indices.
         """
         if which is None:
             which = self.inner_inds()
-        reindex_map = {ix: rand_uuid() for ix in which}
-        self.reindex_(reindex_map)
 
-    def conj(self, inplace=False):
+        if append is None:
+            reindex_map = {ix: rand_uuid() for ix in which}
+        else:
+            reindex_map = {ix: ix + append for ix in which}
+
+        self.reindex_(reindex_map)
+        return self
+
+    def conj(self, mangle_inner=False, inplace=False):
         """Conjugate all the tensors in this network (leaves all indices).
         """
-        new_tn = self if inplace else self.copy()
+        tn = self if inplace else self.copy()
 
-        for t in new_tn:
+        for t in tn:
             t.conj_()
 
-        return new_tn
+        if mangle_inner:
+            append = None if mangle_inner is True else str(mangle_inner)
+            tn.mangle_inner_(append)
+
+        return tn
 
     conj_ = functools.partialmethod(conj, inplace=True)
 

@@ -2130,9 +2130,7 @@ class TensorNetwork2DVector(TensorNetwork2D,
 
         ket.add_tag('KET')
         bra = ket.retag({'KET': 'BRA'})
-        bra.conj_()
-        # manually mangle so norm has no new indices
-        bra.mangle_inner_()
+        bra.conj_('*')  # manually mangle inner so norm has no new indices
         norm = bra & ket
 
         # work out from the term coordinates what size plaquettes we need

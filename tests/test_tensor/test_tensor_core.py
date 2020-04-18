@@ -1210,11 +1210,12 @@ class TestTensorNetwork:
         else:
             assert all(n1 == pytest.approx(value) for n1 in enorms)
 
-    def test_mangle_inner(self):
+    @pytest.mark.parametrize("append", [None, '*'])
+    def test_mangle_inner(self, append):
         a = MPS_rand_state(6, 3)
         b = a.copy()
         assert tuple(a.ind_map) == tuple(b.ind_map)
-        b.mangle_inner_()
+        b.mangle_inner_(append)
         assert tuple(a.ind_map) != tuple(b.ind_map)
         ab = a & b
         assert all(ix in ab.ind_map for ix in a.ind_map)
