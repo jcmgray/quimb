@@ -85,7 +85,7 @@ from .circuit_gen import (
     circ_ansatz_1D_brickwork,
     circ_ansatz_1D_rand,
 )
-from .optimize_autograd import (
+from .optimize import (
     TNOptimizer,
 )
 from .tensor_2d import (

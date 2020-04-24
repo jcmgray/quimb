@@ -1,5 +1,5 @@
-"""Support for optimizing tensor networks using ``autograd`` or ``jax`` to
-automatically derive gradients for input to scipy.
+"""Support for optimizing tensor networks using automatic differentiation to
+automatically derive gradients for input to scipy optimizers.
 """
 import re
 import functools
@@ -25,6 +25,8 @@ if importlib.util.find_spec("jax") is not None:
     _DEFAULT_BACKEND = 'jax'
 elif importlib.util.find_spec("tensorflow") is not None:
     _DEFAULT_BACKEND = 'tensorflow'
+elif importlib.util.find_spec("torch") is not None:
+    _DEFAULT_BACKEND = 'torch'
 else:
     _DEFAULT_BACKEND = 'autograd'
 
@@ -210,11 +212,17 @@ class JaxHandler:
 
 class TensorFlowHandler:
 
-    def __init__(self, jit_fn=False, autograph=False):
+    def __init__(
+        self,
+        jit_fn=False,
+        autograph=False,
+        experimental_compile=False,
+    ):
         import tensorflow
         self.tensorflow = tensorflow
         self.jit_fn = jit_fn
         self.autograph = autograph
+        self.experimental_compile = experimental_compile
 
     def to_variable(self, x):
         return self.tensorflow.Variable(x)
@@ -225,7 +233,9 @@ class TensorFlowHandler:
     def setup_fn(self, fn):
         if self.jit_fn:
             self._backend_fn = self.tensorflow.function(
-                fn, autograph=self.autograph)
+                fn,
+                autograph=self.autograph,
+                experimental_compile=self.experimental_compile)
         else:
             self._backend_fn = fn
 
@@ -343,7 +353,7 @@ class TNOptimizer:
     bounds : None or (float, float), optional
         Constrain the optimized tensor entries within this range (if the scipy
         optimizer supports it).
-    autograd_backend : {'jax', 'autograd', 'tensorflow', 'torch'}, optional
+    autodiff_backend : {'jax', 'autograd', 'tensorflow', 'torch'}, optional
         Which backend library to use to perform the automatic differentation
         (and computation).
     backend_opts
@@ -364,7 +374,7 @@ class TNOptimizer:
         optimizer='L-BFGS-B',
         progbar=True,
         bounds=None,
-        autograd_backend='AUTO',
+        autodiff_backend='AUTO',
         **backend_opts
     ):
         self.progbar = progbar
@@ -374,9 +384,9 @@ class TNOptimizer:
         self.constant_tags = tags_to_utup(constant_tags)
 
         # the object that handles converting to backend + computing gradient
-        if autograd_backend.upper() == 'AUTO':
-            autograd_backend = _DEFAULT_BACKEND
-        self.handler = _BACKEND_HANDLERS[autograd_backend](**backend_opts)
+        if autodiff_backend.upper() == 'AUTO':
+            autodiff_backend = _DEFAULT_BACKEND
+        self.handler = _BACKEND_HANDLERS[autodiff_backend](**backend_opts)
         to_constant = self.handler.to_constant
 
         # use identity if no nomalization required
@@ -425,7 +435,7 @@ class TNOptimizer:
 
         def func(arrays):
             # set backend explicitly as maybe mixing with numpy arrays
-            with contract_backend(autograd_backend):
+            with contract_backend(autodiff_backend):
                 inject_(arrays, self.tn_opt)
                 return self.loss_fn(self.norm_fn(self.tn_opt))
 
