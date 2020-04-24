@@ -204,7 +204,7 @@ def _svd(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0, renorm=0):
     elif absorb == 1:
         VH = VH * reshape(s, (-1, 1))
     else:
-        s **= 0.5
+        s = s ** 0.5
         U = U * reshape(s, (1, -1))
         VH = VH * reshape(s, (-1, 1))
 

@@ -270,3 +270,46 @@ class TestPEPOConstruct:
         X.show()
         assert f'Lx={Lx}' in X.__str__()
         assert f'Lx={Lx}' in X.__repr__()
+
+
+class TestMisc:
+
+    def test_calc_plaquette_sizes(self):
+        from quimb.tensor.tensor_2d import calc_plaquette_sizes
+        H2 = {None: qu.ham_heis(2)}
+        ham = qtn.LocalHam2D(10, 10, H2)
+        assert calc_plaquette_sizes(ham.terms.keys()) == ((1, 2), (2, 1))
+        assert (calc_plaquette_sizes(ham.terms.keys(), autogroup=False) ==
+                ((2, 2),))
+        H2[(1, 1), (2, 2)] = 0.5 * qu.ham_heis(2)
+        ham = qtn.LocalHam2D(10, 10, H2)
+        assert calc_plaquette_sizes(ham.terms.keys()) == ((2, 2),)
+        H2[(2, 2), (2, 4)] = 0.25 * qu.ham_heis(2)
+        H2[(2, 4), (4, 4)] = 0.25 * qu.ham_heis(2)
+        ham = qtn.LocalHam2D(10, 10, H2)
+        assert (calc_plaquette_sizes(ham.terms.keys()) ==
+                ((1, 3), (2, 2), (3, 1)))
+        assert (calc_plaquette_sizes(ham.terms.keys(), autogroup=False) ==
+                ((3, 3),))
+
+    def test_calc_plaquette_map(self):
+        from quimb.tensor.tensor_2d import calc_plaquette_map
+        plaquettes = [
+            # 2x2 plaquette covering all sites
+            ((0, 0), (2, 2)),
+            # horizontal plaquettes
+            ((0, 0), (1, 2)),
+            ((1, 0), (1, 2)),
+            # vertical plaquettes
+            ((0, 0), (2, 1)),
+            ((0, 1), (2, 1)),
+        ]
+        assert (
+            calc_plaquette_map(plaquettes) ==
+            {((0, 0), (0, 1)): ((0, 0), (1, 2)),
+             ((0, 0), (1, 0)): ((0, 0), (2, 1)),
+             ((0, 0), (1, 1)): ((0, 0), (2, 2)),
+             ((0, 1), (1, 0)): ((0, 0), (2, 2)),
+             ((0, 1), (1, 1)): ((0, 1), (2, 1)),
+             ((1, 0), (1, 1)): ((1, 0), (1, 2))}
+        )

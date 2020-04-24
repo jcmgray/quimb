@@ -97,6 +97,7 @@ from .tensor_2d_tebd import (
     LocalHam2D,
     TEBD2D,
     SimpleUpdate,
+    FullUpdate,
 )
 
 __all__ = (
@@ -178,4 +179,5 @@ __all__ = (
     "LocalHam2D",
     "TEBD2D",
     "SimpleUpdate",
+    "FullUpdate",
 )

@@ -3,7 +3,7 @@
 import functools
 from operator import add
 from numbers import Integral
-from itertools import product, cycle, starmap
+from itertools import product, cycle, starmap, combinations
 from collections import defaultdict
 
 from autoray import do
@@ -1546,7 +1546,7 @@ class TensorNetwork2D(TensorNetwork):
             # finally, absorb any rank-2 corner tensors
             env_ij.rank_simplify_()
 
-            plaquette_envs[i0, j0] = env_ij
+            plaquette_envs[(i0, j0), (x_bsz, y_bsz)] = env_ij
 
         return plaquette_envs
 
@@ -1649,7 +1649,7 @@ class TensorNetwork2D(TensorNetwork):
             # finally, absorb any rank-2 corner tensors
             env_ij.rank_simplify_()
 
-            plaquette_envs[i0, j0] = env_ij
+            plaquette_envs[(i0, j0), (x_bsz, y_bsz)] = env_ij
 
         return plaquette_envs
 
@@ -1812,6 +1812,35 @@ class TensorNetwork2DVector(TensorNetwork2D,
                 ix for ix in self.site_inds if ix in self.ind_map
             ))
         return self.ind_size(pix)
+
+    def make_norm(
+        self,
+        mangle_append='*',
+        layer_tags=('KET', 'BRA'),
+        return_all=False,
+    ):
+        """Make the norm tensor network of this 2D vector.
+
+        Parameters
+        ----------
+        mangle_append : {str, False or None}, optional
+            How to mangle the inner indices of the bra.
+        layer_tags : (str, str), optional
+            The tags to identify the top and bottom.
+        return_all : bool, optional
+            Return the norm, the ket and the bra.
+        """
+        ket = self.copy()
+        ket.add_tag(layer_tags[0])
+
+        bra = ket.retag({layer_tags[0]: layer_tags[1]})
+        bra.conj_(mangle_append)
+
+        norm = ket | bra
+
+        if return_all:
+            return norm, ket, bra
+        return norm
 
     def gate(
         self,
@@ -2051,6 +2080,16 @@ class TensorNetwork2DVector(TensorNetwork2D,
 
     gate_ = functools.partialmethod(gate, inplace=True)
 
+    def compute_norm(
+        self,
+        layer_tags=('KET', 'BRA'),
+        **contract_opts,
+    ):
+        """Compute the norm of this vector via boundary contraction.
+        """
+        norm = self.make_norm(layer_tags=layer_tags)
+        return norm.contract_boundary(layer_tags=layer_tags, **contract_opts)
+
     def compute_local_expectation(
         self,
         terms,
@@ -2058,6 +2097,8 @@ class TensorNetwork2DVector(TensorNetwork2D,
         autogroup=True,
         contract_optimize='auto-hq',
         return_all=False,
+        plaquette_envs=None,
+        plaquette_map=None,
         **plaquette_env_options,
     ):
         r"""Compute the sum of many local expecations by essentially forming
@@ -2082,6 +2123,12 @@ class TensorNetwork2DVector(TensorNetwork2D,
         return_all : bool, optional
             Whether to the return all the values individually as a dictionary
             of coordinates to tuple[local_expectation, local_norm].
+        plaquette_envs : None or dict, optional
+            Supply precomputed plaquette environments.
+        plaquette_map : None, dict, optional
+            Supply the mapping of which plaquettes (denoted by
+            ``((x0, y0), (dx, dy))``) to use for which coordinates, it will be
+            calculated automatically otherwise.
         plaquette_env_options
             Supplied to
             :meth:`~quimb.tensor.tensor_2d.TensorNetwork2D.compute_plaquette_environments`
@@ -2092,82 +2139,36 @@ class TensorNetwork2DVector(TensorNetwork2D,
         -------
         scalar or dict
         """
+        norm, ket, bra = self.make_norm(return_all=True)
 
-        # maybe group the terms into horizontal and vertical for efficiency
-        if autogroup:
-            hterms, vterms = {}, {}
+        if plaquette_envs is None:
+            # set some sensible defaults
+            plaquette_env_options.setdefault('layer_tags', ('KET', 'BRA'))
 
-            autogroup_success = True
-            for (ija, ijb), G in terms.items():
-                if ija[0] == ijb[0]:
-                    # same row
-                    hterms[ija, ijb] = G
-                elif ija[1] == ijb[1]:
-                    # same column
-                    vterms[ija, ijb] = G
-                else:
-                    # found a term which is neither vertical nor horizontal
-                    autogroup_success = False
-                    break
+            plaquette_envs = dict()
+            for x_bsz, y_bsz in calc_plaquette_sizes(terms, autogroup):
+                plaquette_envs.update(norm.compute_plaquette_environments(
+                    x_bsz=x_bsz, y_bsz=y_bsz, **plaquette_env_options))
 
-            # only need to split computation if both h and v terms exist
-            if autogroup_success and hterms and vterms:
-                he = self.compute_local_expectation(
-                    hterms, normalized=normalized, autogroup=False,
-                    contract_optimize=contract_optimize, return_all=return_all,
-                    **plaquette_env_options)
-                ve = self.compute_local_expectation(
-                    vterms, normalized=normalized, autogroup=False,
-                    contract_optimize=contract_optimize, return_all=return_all,
-                    **plaquette_env_options)
+        if plaquette_map is None:
+            # work out which plaquettes to use for which terms
+            plaquette_map = calc_plaquette_map(plaquette_envs)
 
-                if return_all:
-                    return {**he, **ve}
-                else:
-                    return he + ve
-
-        ket = self.copy()
-
-        ket.add_tag('KET')
-        bra = ket.retag({'KET': 'BRA'})
-        bra.conj_('*')  # manually mangle inner so norm has no new indices
-        norm = bra & ket
-
-        # work out from the term coordinates what size plaquettes we need
-        x_bsz = max(abs(coo1[0] - coo2[0]) for coo1, coo2 in terms) + 1
-        y_bsz = max(abs(coo1[1] - coo2[1]) for coo1, coo2 in terms) + 1
-
-        # set some sensible defaults
-        plaquette_env_options.setdefault('layer_tags', ('KET', 'BRA'))
-
-        plaquette_envs = norm.compute_plaquette_environments(
-            x_bsz=x_bsz, y_bsz=y_bsz, **plaquette_env_options)
-
-        # work out which plaquettes to use for which terms
+        # now group the terms into just the plaquettes we need
         plaq2coo = defaultdict(list)
         for where, G in terms.items():
-            xmin = min(coo[0] for coo in where)
-            ymin = min(coo[1] for coo in where)
-
-            i0 = xmin - max(0, xmin - self.Lx + x_bsz)
-            j0 = ymin - max(0, ymin - self.Ly + y_bsz)
-
-            plaq2coo[i0, j0].append((where, G))
+            p = plaquette_map[where]
+            plaq2coo[p].append((where, G))
 
         expecs = dict()
-
-        for i0, j0 in plaq2coo:
+        for p in plaq2coo:
             # site tags for the plaquette
-            sites = [
-                ket.site_tag(i, j)
-                for i in range(i0, i0 + x_bsz)
-                for j in range(j0, j0 + y_bsz)
-            ]
+            sites = tuple(starmap(ket.site_tag, plaquette_to_sites(p)))
 
             # view the ket portion as 2d vector so we can gate it
             ket_local = ket.select_any(sites)
             ket_local.view_as_(TensorNetwork2DVector, like=self)
-            bra_and_env = bra.select_any(sites) | plaquette_envs[i0, j0]
+            bra_and_env = bra.select_any(sites) | plaquette_envs[p]
 
             with oe.shared_intermediates():
                 # compute local estimation of norm for this plaquette
@@ -2179,7 +2180,7 @@ class TensorNetwork2DVector(TensorNetwork2D,
                     norm_i0j0 = None
 
                 # for each local term on plaquette compute expectation
-                for where, G in plaq2coo[i0, j0]:
+                for where, G in plaq2coo[p]:
                     expec_ij = (
                         ket_local.gate(G, where, contract=False) | bra_and_env
                     ).contract(all, optimize=contract_optimize)
@@ -2218,12 +2219,7 @@ class TensorNetwork2DVector(TensorNetwork2D,
             :meth:`~quimb.tensor.tensor_2d.TensorNetwork2D.contract_boundary`,
             by default, two layer contraction will be used.
         """
-        ket = self.copy()
-        ket.add_tag('KET')
-        bra = ket.retag({'KET': 'BRA'})
-        bra.conj_()
-
-        norm = ket | bra
+        norm = self.make_norm()
 
         # default to two layer contraction
         boundary_contract_opts.setdefault('layer_tags', ('KET', 'BRA'))
@@ -2740,3 +2736,142 @@ def show_2d(tn_2d, show_lower=False, show_upper=False):
     lines.append(f'{lb}    ' * tn_2d.Ly)
 
     print_multi_line(*lines)
+
+
+def calc_plaquette_sizes(pairs, autogroup=True):
+    """Find a sequence of plaquette blocksizes that will cover all the terms
+    (coordinate pairs) in ``pairs``.
+
+    Parameters
+    ----------
+    pairs : sequence of tuple[tuple[int]]
+        The sequence of 2D coordinates pairs describing terms.
+    autogroup : bool, optional
+        Whether to return the minimal sequence of blocksizes that will cover
+        all terms or merge them into a single ``((x_bsz, y_bsz),)``.
+
+    Return
+    ------
+    bszs : tuple[tuple[int]]
+        Pairs of blocksizes.
+
+    Examples
+    --------
+
+    Some nearest neighbour interactions:
+
+        >>> H2 = {None: qu.ham_heis(2)}
+        >>> ham = qtn.LocalHam2D(10, 10, H2)
+        >>> calc_plaquette_sizes(ham.terms.keys())
+        ((1, 2), (2, 1))
+
+        >>> calc_plaquette_sizes(ham.terms.keys(), autogroup=False)
+        ((2, 2),)
+
+    If we add any next nearest neighbour interaction then we are going to
+    need the (2, 2) blocksize in any case:
+
+        >>> H2[(1, 1), (2, 2)] = 0.5 * qu.ham_heis(2)
+        >>> ham = qtn.LocalHam2D(10, 10, H2)
+        >>> calc_plaquette_sizes(ham.terms.keys())
+        ((2, 2),)
+
+    If we add longer range interactions (non-diagonal next nearest) we again
+    can benefit from multiple plaquette blocksizes:
+
+        >>> H2[(1, 1), (1, 3)] = 0.25 * qu.ham_heis(2)
+        >>> H2[(1, 1), (3, 1)] = 0.25 * qu.ham_heis(2)
+        >>> ham = qtn.LocalHam2D(10, 10, H2)
+        >>> calc_plaquette_sizes(ham.terms.keys())
+        ((1, 3), (2, 2), (3, 1))
+
+    Or choose the plaquette blocksize that covers all terms:
+
+        >>> calc_plaquette_sizes(ham.terms.keys(), autogroup=False)
+        ((3, 3),)
+
+    """
+    # get the rectangular size of each coordinate pair
+    #     e.g. ((1, 1), (2, 1)) -> (2, 1)
+    #          ((4, 5), (6, 7)) -> (3, 3) etc.
+    bszs = {tuple(abs(a - b) + 1 for a, b in zip(*pair)) for pair in pairs}
+
+    # remove block size pairs that can be contained in another block pair size
+    #     e.g. {(1, 2), (2, 1), (2, 2)} -> ((2, 2),)
+    bszs = tuple(sorted(
+        b for b in bszs
+        if not any(
+            (b[0] <= b2[0]) and (b[1] <= b2[1])
+            for b2 in bszs - {b}
+        )
+    ))
+
+    # return each plaquette size separately
+    if autogroup:
+        return bszs
+
+    # else choose a single blocksize that will cover all terms
+    #     e.g. ((1, 2), (3, 2)) -> ((3, 2),)
+    #          ((1, 2), (2, 1)) -> ((2, 2),)
+    return (tuple(map(max, zip(*bszs))),)
+
+
+def plaquette_to_sites(p):
+    """Turn a plaquette ``((i0, j0), (di, dj))`` into the sites it contains.
+
+    Examples
+    --------
+
+        >>> plaquette_to_sites([(3, 4), (2, 2)])
+        ((3, 4), (3, 5), (4, 4), (4, 5))
+    """
+    (i0, j0), (di, dj) = p
+    return tuple((i, j)
+                 for i in range(i0, i0 + di)
+                 for j in range(j0, j0 + dj))
+
+
+def calc_plaquette_map(plaquettes):
+    """Generate a dictionary of all the coordinate pairs in ``plaquettes``
+    mapped to the 'best' (smallest) rectangular plaquette that contains them.
+
+    Examples
+    --------
+
+    Consider 4 sites, with one 2x2 plaquette and two vertical (2x1)
+    and horizontal (1x2) plaquettes each:
+
+        >>> plaquettes = [
+        ...     # 2x2 plaquette covering all sites
+        ...     ((0, 0), (2, 2)),
+        ...     # horizontal plaquettes
+        ...     ((0, 0), (1, 2)),
+        ...     ((1, 0), (1, 2)),
+        ...     # vertical plaquettes
+        ...     ((0, 0), (2, 1)),
+        ...     ((0, 1), (2, 1)),
+        ... ]
+
+        >>> calc_plaquette_map(plaquettes)
+        {((0, 0), (0, 1)): ((0, 0), (1, 2)),
+         ((0, 0), (1, 0)): ((0, 0), (2, 1)),
+         ((0, 0), (1, 1)): ((0, 0), (2, 2)),
+         ((0, 1), (1, 0)): ((0, 0), (2, 2)),
+         ((0, 1), (1, 1)): ((0, 1), (2, 1)),
+         ((1, 0), (1, 1)): ((1, 0), (1, 2))}
+
+    Now every of the size coordinate pairs is mapped to one of the plaquettes,
+    but to the smallest one that contains it. So the 2x2 plaquette (specified
+    by ``((0, 0), (2, 2))``) would only used for diagonal terms here.
+    """
+    # sort in descending total plaquette size
+    plqs = sorted(plaquettes, key=lambda p: (-p[1][0] * p[1][1], p))
+
+    mapping = dict()
+    for p in plqs:
+        sites = plaquette_to_sites(p)
+        # this will generate all coordinate pairs with ij_a < ij_b
+        for ij_a, ij_b in combinations(sites, 2):
+            mapping[ij_a, ij_b] = p
+
+    return mapping

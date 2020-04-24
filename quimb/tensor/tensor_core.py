@@ -2057,6 +2057,15 @@ class TensorNetwork(object):
 
     view_as_ = functools.partialmethod(view_as, inplace=True)
 
+    def view_like(self, like, inplace=False, **kwargs):
+        """View this tensor network as the same subclass ``cls`` as ``like``
+        inheriting its extra properties as well.
+        """
+        return self.view_as(like.__class__, like=like,
+                            inplace=inplace, **kwargs)
+
+    view_like_ = functools.partialmethod(view_like, inplace=True)
+
     # ------------------------------- Methods ------------------------------- #
 
     def copy(self, virtual=False, deep=False):
@@ -2403,7 +2412,11 @@ class TensorNetwork(object):
             scalar is not concentrated.
         """
         multiplied = self if inplace else self.copy()
-        spread_over = min(self.num_tensors, spread_over)
+
+        if spread_over == 'all':
+            spread_over = self.num_tensors
+        else:
+            spread_over = min(self.num_tensors, spread_over)
 
         if spread_over == 1:
             x_sign = 1.0

@@ -1,15 +1,22 @@
 import random
-import itertools
 import collections
+from itertools import product, starmap
 
-from autoray import do, to_numpy, infer_backend, get_dtype_name
 import tqdm
 import numpy as np
+import scipy.sparse.linalg as spla
+from opt_einsum import shared_intermediates
+from autoray import do, dag, conj, reshape, to_numpy
 
-from ..core import eye, kron, qarray
-from ..linalg.base_linalg import expm
 from .graphing import get_colors
-from .tensor_core import Tensor
+from ..core import eye, kron, qarray
+from .tensor_core import Tensor, contract_strategy
+from .optimize import TNOptimizer
+from .tensor_2d import (
+    calc_plaquette_sizes,
+    calc_plaquette_map,
+    plaquette_to_sites,
+)
 
 
 class LocalHam2D:
@@ -86,7 +93,7 @@ class LocalHam2D:
         # possibly fill in default gates
         default_H2 = self.terms.pop(None, None)
         if default_H2 is not None:
-            for i, j in itertools.product(range(self.Lx), range(self.Ly)):
+            for i, j in product(range(self.Lx), range(self.Ly)):
                 if i + 1 < self.Lx:
                     where = ((i, j), (i + 1, j))
                     self.terms.setdefault(where, default_H2)
@@ -119,7 +126,7 @@ class LocalHam2D:
         # possibly set the default single site term
         default_H1 = H1s.pop(None, None)
         if default_H1 is not None:
-            for i, j in itertools.product(range(self.Lx), range(self.Ly)):
+            for i, j in product(range(self.Lx), range(self.Ly)):
                 H1s.setdefault((i, j), default_H1)
 
         # now absorb the single site terms evenly into the two site terms
@@ -195,8 +202,8 @@ class LocalHam2D:
         cache = self._op_cache['expm']
         key = (id(x), y)
         if key not in cache:
-            xn = to_numpy(x)
-            cache[key] = do('array', expm(xn * y), like=x)
+            el, ev = do('linalg.eigh', x)
+            cache[key] = ev @ do('diag', do('exp', el * y)) @ dag(ev)
         return cache[key]
 
     def get_gate(self, where):
@@ -386,7 +393,7 @@ class LocalHam2D:
             plt.show()
 
 
-class TEBD2D:
+class TEBD2DImag:
     """Generic class for performing two dimensional time evolving block
     decimation, i.e. applying the exponential of a Hamiltonian using
     a product formula that involves applying local exponentiated gates only.
@@ -406,13 +413,14 @@ class TEBD2D:
         Supplied to :meth:`quimb.tensor.tensor_2d.TensorNetwork2DVector.gate`,
         in addition to ``max_bond``. By default ``contract`` is set to
         'reduce-split' and ``cutoff`` is set to ``0.0``.
-    ordering : str or tuple[tuple[int]], optional
+    ordering : str, tuple[tuple[int]], callable, optional
         How to order the terms, if a string is given then use this as the
         strategy given to
         :meth:`~quimb.tensor.tensor_2d_tebd.LocalHam2D.get_auto_ordering`. An
         explicit list of coordinate pairs can also be given. The default is to
         greedily form an 'edge coloring' based on the sorted list of
-        Hamiltonian pair coordinates.
+        Hamiltonian pair coordinates. If a callable is supplied it will be used
+        to generate the ordering before each sweep.
     compute_energy_every : None or int, optional
         How often to compute and record the energy. If a positive integer 'n',
         the energy is computed *before* every nth sweep (i.e. including before
@@ -430,11 +438,11 @@ class TEBD2D:
         and ``normalized`` is set to ``True``.
     compute_energy_fn : callable, optional
         Supply your own function to compute the energy, it should take the
-        ``TEBD2D`` object as its only argument.
+        ``TEBD2DImag`` object as its only argument.
     callback : callable, optional
         A custom callback to run after every sweep, it should take the
-        ``TEBD2D`` object as its only argument. If it returns any value that
-        boolean evaluates to ``True`` then terminal the evolution.
+        ``TEBD2DImag`` object as its only argument. If it returns any value
+        that boolean evaluates to ``True`` then terminal the evolution.
     progbar : boolean, optional
         Whether to show a live progress bar during the evolution.
 
@@ -455,6 +463,10 @@ class TEBD2D:
     taus : list[float]
         The corresponding sequence of time steps that energies have been
         computed at.
+    best : dict
+        If ``keep_best`` was set then the best recorded energy and the
+        corresponding state that was computed - keys ``'energy'`` and
+        ``'state'`` respectively.
     """
 
     def __init__(
@@ -462,7 +474,8 @@ class TEBD2D:
         psi0,
         ham,
         tau=0.01,
-        max_bond='psi0',
+        D=None,
+        chi=None,
         gate_opts=None,
         ordering='sort',
         compute_energy_every=None,
@@ -470,7 +483,9 @@ class TEBD2D:
         compute_energy_opts=None,
         compute_energy_fn=None,
         callback=None,
+        keep_best=False,
         progbar=True,
+        **kwargs,
     ):
 
         self._psi = psi0.copy()
@@ -482,28 +497,33 @@ class TEBD2D:
         self.tau = tau
 
         # parse gate application options
-        if max_bond == 'psi0':
-            max_bond = self._psi.max_bond()
+        if D is None:
+            D = self._psi.max_bond()
         self.gate_opts = (
             dict() if gate_opts is None else
             dict(gate_opts))
-        self.gate_opts.setdefault('contract', 'reduce-split')
-        self.gate_opts.setdefault('max_bond', max_bond)
+        self.gate_opts['max_bond'] = D
         self.gate_opts.setdefault('cutoff', 0.0)
+        self.gate_opts.setdefault('contract', 'reduce-split')
 
         # parse energy computation options
-        self.compute_energy_every = compute_energy_every
-        self.compute_energy_final = compute_energy_final
-        self.compute_energy_fn = compute_energy_fn
+        if chi is None:
+            chi = max(8, D**2)
         self.compute_energy_opts = (
             dict() if compute_energy_opts is None else
             dict(compute_energy_opts))
-        self.compute_energy_opts.setdefault('max_bond', max(8, max_bond**2))
+        self.compute_energy_opts['max_bond'] = chi
         self.compute_energy_opts.setdefault('cutoff', 0.0)
         self.compute_energy_opts.setdefault('normalized', True)
 
+        self.compute_energy_every = compute_energy_every
+        self.compute_energy_final = compute_energy_final
+        self.compute_energy_fn = compute_energy_fn
+
         if ordering is None or isinstance(ordering, str):
             self.ordering = self.ham.get_auto_ordering(ordering)
+        elif callable(ordering):
+            self.ordering = ordering
         else:
             self.ordering = tuple(ordering)
 
@@ -513,25 +533,49 @@ class TEBD2D:
         self.taus = []
         self.energies = []
 
-    @property
-    def n(self):
-        """The number of sweeps performed.
+        self.keep_best = bool(keep_best)
+        self.best = dict(energy=float('inf'), state=None)
+
+        # process the remaining kwargs (e.g. simple or full update specific)
+        self.setup(**kwargs)
+
+    def setup(self):
+        """Initilization functionality.
         """
-        return self._n
+        pass
+
+    def presweep(self, i):
+        """Perform any computations required before the sweep (and energy
+        computation). For the basic TEBD this is nothing.
+        """
+        pass
+
+    def compute_energy(self):
+        """Compute and return the energy of the current state.
+        """
+        return self.state.compute_local_expectation(
+            self.ham.terms,
+            **self.compute_energy_opts
+        )
+
+    def sweep(self):
+        """Perform a full sweep of gates at every pair.
+        """
+        if callable(self.ordering):
+            ordering = self.ordering()
+        else:
+            ordering = self.ordering
+
+        for where in ordering:
+            U = self.ham.get_gate_expm(where, -self.tau)
+            self.gate(U, where)
 
     def gate(self, U, where):
         """Perform single gate ``U`` at coordinate pair ``where``.
         """
         self._psi.gate_(U, where, **self.gate_opts)
 
-    def sweep(self):
-        """Perform a full sweep of gates at every pair.
-        """
-        for where in self.ordering:
-            U = self.ham.get_gate_expm(where, -self.tau)
-            self.gate(U, where)
-
-    def _compute_energy(self):
+    def _check_energy(self):
         """
         """
         if self.its and (self._n == self.its[-1]):
@@ -541,17 +585,20 @@ class TEBD2D:
         if self.compute_energy_fn is not None:
             en = self.compute_energy_fn(self)
         else:
-            en = self.state.compute_local_expectation(
-                self.ham.terms, **self.compute_energy_opts)
+            en = self.compute_energy()
 
-        self.energies.append(en)
-        self.taus.append(self.tau)
+        self.energies.append(float(en))
+        self.taus.append(float(self.tau))
         self.its.append(self._n)
+
+        if self.keep_best and en < self.best['energy']:
+            self.best['energy'] = en
+            self.best['state'] = self.state
 
         return self.energies[-1]
 
     def _update_progbar(self, pbar):
-        desc = f"n={self._n}, tau={self.tau}, energy={float(self.energy):.6f}"
+        desc = f"n={self._n}, tau={self.tau}, energy~{float(self.energy):.6f}"
         pbar.set_description(desc)
 
     def evolve(self, steps, tau=None):
@@ -560,16 +607,19 @@ class TEBD2D:
         if tau is not None:
             self.tau = tau
 
-        pbar = tqdm.tqdm(total=steps, disable=not self.progbar)
+        pbar = tqdm.tqdm(total=steps, disable=self.progbar is not True)
 
         try:
             for i in range(steps):
+                # anything required by both energy and sweep
+                self.presweep(i)
+
                 # possibly compute the energy
                 should_compute_energy = (
                     bool(self.compute_energy_every) and
                     (i % self.compute_energy_every == 0))
                 if should_compute_energy:
-                    self._compute_energy()
+                    self._check_energy()
                     self._update_progbar(pbar)
 
                 # actually perform the gates
@@ -583,7 +633,7 @@ class TEBD2D:
 
             # possibly compute the energy
             if self.compute_energy_final:
-                self._compute_energy()
+                self._check_energy()
                 self._update_progbar(pbar)
 
         except KeyboardInterrupt:
@@ -596,6 +646,28 @@ class TEBD2D:
         return self._psi.copy()
 
     @property
+    def n(self):
+        """The number of sweeps performed.
+        """
+        return self._n
+
+    @property
+    def D(self):
+        return self.gate_opts['max_bond']
+
+    @D.setter
+    def D(self, value):
+        self.gate_opts['max_bond'] = round(value)
+
+    @property
+    def chi(self):
+        return self.compute_energy_opts['max_bond']
+
+    @chi.setter
+    def chi(self, value):
+        self.compute_energy_opts['max_bond'] = round(value)
+
+    @property
     def state(self):
         """Return a copy of the current state.
         """
@@ -605,11 +677,16 @@ class TEBD2D:
     def energy(self):
         """Return the energy of current state, computing it only if necessary.
         """
-        return self._compute_energy()
+        return self._check_energy()
+
+    def __repr__(self):
+        s = "<{}(n={}, tau={}, D={}, chi={})>"
+        return s.format(
+            self.__class__.__name__, self.n, self.tau, self.D, self.chi)
 
 
-class SimpleUpdate(TEBD2D):
-    """A simple subclass of ``TEBD2D`` that overrides two key methods in order
+class SimpleUpdate(TEBD2DImag):
+    """A simple subclass of ``TEBD2DImag`` that overrides two key methods in order
     to keep 'diagonal gauges' living on the bonds of a PEPS. The gauges are
     stored separately from the main PEPS in the ``gauges`` attribute. Before
     and after a gate is applied they are absorbed and then extracted. When
@@ -617,23 +694,29 @@ class SimpleUpdate(TEBD2D):
     can call ``get_state(absorb_gauges=False)`` to lazily add them as hyperedge
     weights only. Reference: https://arxiv.org/abs/0806.3719.
 
-    """ + TEBD2D.__doc__
+    """ + TEBD2DImag.__doc__
+
+    def setup(
+        self,
+        gauge_renorm=True,
+        gauge_smudge=1e-6,
+    ):
+        self.gauge_renorm = gauge_renorm
+        self.gauge_smudge = gauge_smudge
+        self._initialize_gauges()
 
     def _initialize_gauges(self):
         """Create unit singular values, stored as tensors.
         """
-        data00 = self._psi[0, 0].data
-
         # create the gauges like whatever data array is in the first site.
-        backend = infer_backend(data00)
-        dtype = get_dtype_name(data00)
+        data00 = self._psi[0, 0].data
 
         self._gauges = dict()
         for ija, ijb in self._psi.gen_bond_coos():
             bnd = self._psi.bond(ija, ijb)
             d = self._psi.ind_size(bnd)
             Tsval = Tensor(
-                do('array', np.ones((d,), dtype=dtype), like=backend),
+                do('ones', (d,), dtype=data00.dtype, like=data00),
                 inds=[bnd],
                 tags=[self._psi.site_tag(*ija), self._psi.site_tag(*ijb)]
             )
@@ -645,14 +728,10 @@ class SimpleUpdate(TEBD2D):
         weights (``t = gauges[pair]; t.data``) and index
         (``t = gauges[pair]; t.inds[0]``) of all the gauges.
         """
-        try:
-            return self._gauges
-        except AttributeError:
-            self._initialize_gauges()
-            return self._gauges
+        return self._gauges
 
     def gate(self, U, where):
-        """Like ``TEBD2D.gate`` but absorb and extract the relevant gauges
+        """Like ``TEBD2DImag.gate`` but absorb and extract the relevant gauges
         before and after each gate application.
         """
         ija, ijb = where
@@ -662,45 +741,51 @@ class SimpleUpdate(TEBD2D):
         Ta = self._psi[ija]
         Tb = self._psi[ijb]
 
-        # absorb the 'outer' gauges of each site
+        # get the relevant neighbours for both sites
         coo_a_neighbours = tuple(filter(
             lambda coo: self._psi.valid_coo(coo) and coo != ijb,
             [(ia + 1, ja), (ia - 1, ja), (ia, ja + 1), (ia, ja - 1)]
         ))
-        for coo in coo_a_neighbours:
-            Tsval = self.gauges[tuple(sorted((ija, coo)))]
-            Ta.multiply_index_diagonal_(Tsval.inds[0], Tsval.data)
-
         coo_b_neighbours = tuple(filter(
             lambda coo: self._psi.valid_coo(coo) and coo != ija,
             [(ib + 1, jb), (ib - 1, jb), (ib, jb + 1), (ib, jb - 1)]
         ))
+
+        # absorb the 'outer' gauges from these neighbours
+        for coo in coo_a_neighbours:
+            Tsval = self.gauges[tuple(sorted((ija, coo)))]
+            Ta.multiply_index_diagonal_(
+                ind=Tsval.inds[0], x=(Tsval.data + self.gauge_smudge))
         for coo in coo_b_neighbours:
             Tsval = self.gauges[tuple(sorted((ijb, coo)))]
-            Tb.multiply_index_diagonal_(Tsval.inds[0], Tsval.data)
+            Tb.multiply_index_diagonal_(
+                ind=Tsval.inds[0], x=(Tsval.data + self.gauge_smudge))
 
-        # absorb the bond gauge equally into both sites
+        # absorb the inner bond gauge equally into both sites
         Tsval = self.gauges[ija, ijb]
         bnd, = Tsval.inds
-        Ta.multiply_index_diagonal_(bnd, Tsval.data**0.5)
-        Tb.multiply_index_diagonal_(bnd, Tsval.data**0.5)
+        Ta.multiply_index_diagonal_(ind=bnd, x=Tsval.data**0.5)
+        Tb.multiply_index_diagonal_(ind=bnd, x=Tsval.data**0.5)
 
         # perform the gate, retrieving new bond singular values
         info = dict()
         self._psi.gate_(U, where, absorb=None, info=info, **self.gate_opts)
 
         s = info['singular_values']
-        # keep the singular values from blowing up
-        s = s / do('sum', s)
+        if self.gauge_renorm:
+            # keep the singular values from blowing up
+            s = s / do('sum', s)
         Tsval.modify(data=s)
 
         # 'extract' the outer gauges again
         for coo in coo_a_neighbours:
             Tsval = self.gauges[tuple(sorted((ija, coo)))]
-            Ta.multiply_index_diagonal_(Tsval.inds[0], Tsval.data**-1)
+            Ta.multiply_index_diagonal_(
+                ind=Tsval.inds[0], x=(Tsval.data + self.gauge_smudge)**-1)
         for coo in coo_b_neighbours:
             Tsval = self.gauges[tuple(sorted((ijb, coo)))]
-            Tb.multiply_index_diagonal_(Tsval.inds[0], Tsval.data**-1)
+            Tb.multiply_index_diagonal_(
+                ind=Tsval.inds[0], x=(Tsval.data + self.gauge_smudge)**-1)
 
     def get_state(self, absorb_gauges=True):
         """Return the state, with the diagonal bond gauges either absorbed
@@ -722,3 +807,372 @@ class SimpleUpdate(TEBD2D):
                 Tb.multiply_index_diagonal_(bnd, Tsval.data**0.5)
 
         return psi
+
+
+def gate_full_update_als(
+    ket,
+    env,
+    bra,
+    G,
+    where,
+    tags_plq,
+    steps,
+    tol,
+    max_bond,
+    optimize='auto-hq',
+    solver='solve',
+    dense=True,
+    enforce_pos=True,
+):
+    ket_plq = ket.select_any(tags_plq).view_like_(ket)
+    bra_plq = bra.select_any(tags_plq).view_like_(bra)
+
+    # this is the target, create it before we initialize guess
+    G_ket_plq = ket_plq.gate(G, where, contract=False)
+
+    ket_plq.gate_(G, where, contract='reduce-split', max_bond=max_bond)
+    bra_plq.gate_(conj(G), where, contract='reduce-split', max_bond=max_bond)
+
+    norm_plq = bra_plq | env | ket_plq
+    overlap = bra_plq | env | G_ket_plq
+
+    xs = dict()
+    x_previous = dict()
+    previous_overlap = None
+
+    with contract_strategy(optimize), shared_intermediates():
+        for i in range(steps):
+
+            for site in tags_plq:
+                lix = norm_plq[site, 'BRA'].inds[:-1]
+                rix = norm_plq[site, 'KET'].inds[:-1]
+                # remove site tensors and group their indices
+                if dense:
+                    N = (norm_plq.select(site, which='!any')
+                         .to_dense(lix, rix))
+
+                    if enforce_pos:
+                        el, ev = do('linalg.eigh', (N + dag(N)) / 2)
+                        el = do('clip', el, 0.0, None)
+                        N = ev @ do('diag', el) @ dag(ev)
+
+                else:
+                    N = (norm_plq.select(site, which='!any')
+                         .aslinearoperator(lix, rix))
+
+                # target vector (remove lower site tensor and contract to vec)
+                b = (overlap
+                     .select((site, 'BRA'), which='!all')
+                     .to_dense(overlap[site, 'BRA'].inds[:-1],
+                               overlap[site, 'BRA'].inds[-1:]))
+
+                if solver == 'solve':
+                    x = do('linalg.solve', N, b)
+                elif solver == 'lstsq':
+                    x = do('linalg.lstsq', N, b, rcond=tol * 1e-3)[0]
+                else:
+                    # use scipy sparse linalg solvers
+                    if solver in ('lsqr', 'lsmr'):
+                        solver_opts = dict(atol=tol, btol=tol)
+                    else:
+                        solver_opts = dict(tol=tol)
+
+                    # use current site as initial guess (iterate over site ind)
+                    x0 = x_previous.get(site, b)
+                    x = np.stack([
+                        getattr(spla, solver)
+                        (N, b[..., k], x0=x0[..., k], **solver_opts)[0]
+                        for k in range(x0.shape[-1])
+                    ], axis=-1)
+
+                # update the tensors (all 'virtual' TNs above also updated)
+                Tk, Tb = ket[site], bra[site]
+                Tk.modify(data=reshape(x, Tk.shape))
+                Tb.modify(data=reshape(conj(x), Tb.shape))
+
+                # store solution to check convergence
+                xs[site] = x
+
+            # after updating both sites check for convergence of tensor entries
+            ov = overlap.contract(all, optimize=optimize)
+            converged = (
+                (previous_overlap is not None) and
+                (abs(ov - previous_overlap) < tol)
+            )
+            if converged:
+                break
+
+            previous_overlap = ov
+            for site in tags_plq:
+                x_previous[site] = xs[site]
+
+
+def gate_full_update_autodiff_mse(
+    ket,
+    env,
+    bra,
+    G,
+    where,
+    tags_plq,
+    steps,
+    tol,
+    max_bond,
+    optimize='auto-hq',
+    optimizer='L-BFGS-B',
+    autodiff_backend='autograd',
+    **kwargs,
+):
+    ket_plq = ket.select_any(tags_plq).view_like_(ket)
+
+    # the target tensor data
+    G_ket_plq = ket_plq.gate(G, where, contract=False)
+    G_ket_plq_env = G_ket_plq | env
+    y = G_ket_plq_env.contract(all, optimize=optimize).data
+
+    # what we are going to optimize, start with simple gate tensors
+    ket_plq_env = ket_plq.gate(
+        G, where, contract='reduce-split', max_bond=max_bond
+    ) | env
+
+    def mse(ket_plq_env):
+        x = ket_plq_env.contract(all, optimize=optimize).data
+        return do('sum', ((x - y)**2))
+
+    tnopt = TNOptimizer(
+        ket_plq_env,
+        loss_fn=mse,
+        tags=tags_plq,
+        progbar=False,
+        optimizer=optimizer,
+        autodiff_backend=autodiff_backend,
+        **kwargs,
+    )
+    ket_plq_env_opt = tnopt.optimize(steps, tol=tol)
+
+    for site in tags_plq:
+        ket[site].modify(data=ket_plq_env_opt[site].data)
+        bra[site].modify(data=conj(ket_plq_env_opt[site].data))
+
+
+def gate_full_update_autodiff_fidelity(
+    ket,
+    env,
+    bra,
+    G,
+    where,
+    tags_plq,
+    steps,
+    tol,
+    max_bond,
+    optimize='auto-hq',
+    autodiff_backend='autograd',
+    autograd_optimizer='L-BFGS-B',
+    **kwargs,
+):
+    ket_plq = ket.select_any(tags_plq).view_like_(ket)
+    bra_plq = bra.select_any(tags_plq).view_like_(bra)
+
+    # make initial guess the simple gate tensors
+    bra_plq.gate_(
+        conj(G), where, contract='reduce-split', max_bond=max_bond)
+
+    # the target
+    G_ket_plq_env = ket_plq.gate(G, where, contract=False) | env
+
+    # the target norm
+    bra_GG_ket = bra_plq.gate(conj(G), where, contract=False) | G_ket_plq_env
+    target_norm = bra_GG_ket.contract(all, optimize=optimize)
+
+    def normalize(bra_plq):
+        for site in tags_plq:
+            ket_plq[site].modify(data=conj(bra_plq[site].data))
+        nrm_f = (bra_plq | env | ket_plq).contract(all, optimize=optimize)
+        return bra_plq * (target_norm / nrm_f)**0.5
+
+    def fidelity(bra_plq):
+        f = (bra_plq | G_ket_plq_env).contract(all, optimize=optimize)
+        return -abs(f)**2
+
+    tnopt = TNOptimizer(
+        bra_plq,
+        loss_fn=fidelity,
+        norm_fn=normalize,
+        tags=tags_plq,
+        progbar=False,
+        optimizer=autograd_optimizer,
+        autodiff_backend=autodiff_backend,
+        **kwargs,
+    )
+    bra_plq_opt = tnopt.optimize(steps, tol=tol)
+
+    for site in tags_plq:
+        ket[site].modify(data=conj(bra_plq_opt[site].data))
+        bra[site].modify(data=bra_plq_opt[site].data)
+
+
+def get_default_full_update_fit_opts():
+    """The default options for the full update gate fitting procedure.
+    """
+    return {
+        # general
+        'tol': 1e-9,
+        'steps': 100,
+        # alternative least squares
+        'als_dense': True,
+        'als_solver': 'solve',
+        'als_enforce_pos': False,
+        # automatic differentation optimizing
+        'autodiff_backend': 'autograd',
+        'autodiff_optimizer': 'L-BFGS-B',
+    }
+
+
+def parse_specific_gate_opts(strategy, fit_opts):
+    """Parse the options from ``fit_opts`` which are relevant for ``strategy``.
+    """
+    gate_opts = {
+        'tol': fit_opts['tol'],
+        'steps': fit_opts['steps'],
+    }
+
+    if 'als' in strategy:
+        gate_opts['solver'] = fit_opts['als_solver']
+        gate_opts['dense'] = fit_opts['als_dense']
+        gate_opts['enforce_pos'] = fit_opts['als_enforce_pos']
+    elif 'autodiff' in strategy:
+        gate_opts['optimizer'] = fit_opts['autodiff_optimizer']
+        gate_opts['autodiff_backend'] = fit_opts['autodiff_backend']
+
+    return gate_opts
+
+
+class FullUpdate(TEBD2DImag):
+
+    def setup(
+        self,
+        compute_envs_every=1,
+        pre_normalize=True,
+        condition_tensors=True,
+        contract_optimize='auto-hq',
+        fit_strategy='als',
+        fit_opts=None,
+    ):
+        self.fit_opts = get_default_full_update_fit_opts()
+        if fit_opts is not None:
+            self.fit_opts.update(fit_opts)
+        self.fit_strategy = str(fit_strategy)
+
+        self.pre_normalize = bool(pre_normalize)
+        self.contract_optimize = str(contract_optimize)
+        self.condition_tensors = bool(condition_tensors)
+        self.compute_envs_every = int(compute_envs_every)
+
+        self._env_n = -1
+        self._psi.add_tag('KET')
+
+    @property
+    def fit_strategy(self):
+        return self._fit_strategy
+
+    @fit_strategy.setter
+    def fit_strategy(self, fit_strategy):
+        self._gate_fit_fn = {
+            'als': gate_full_update_als,
+            'autodiff-mse': gate_full_update_autodiff_mse,
+            'autodiff-fidelity': gate_full_update_autodiff_fidelity,
+        }[fit_strategy]
+        self._fit_strategy = fit_strategy
+
+    def _compute_plaquette_envs(self):
+        """Compute and store the plaquette environments for all local terms.
+        """
+        if self._n == self._env_n:
+            # have already computed environments at this step
+            return
+
+        if self.condition_tensors:
+            self._psi.equalize_norms_()
+            self._psi.balance_bonds_()
+
+        # useful to store the bra that went into making the norm
+        norm, _, self._bra = self._psi.make_norm(return_all=True)
+
+        envs = dict()
+        for x_bsz, y_bsz in calc_plaquette_sizes(self.ham.terms):
+            envs.update(norm.compute_plaquette_environments(
+                x_bsz=x_bsz, y_bsz=y_bsz, max_bond=self.chi, cutoff=0.0))
+
+        if self.pre_normalize:
+            # get the first plaquette env and use it to compute current norm
+            p0, env0 = next(iter(envs.items()))
+            sites = plaquette_to_sites(p0)
+            tags_plq = tuple(starmap(norm.site_tag, sites))
+            norm_plq = norm.select_any(tags_plq) | env0
+
+            # contract the local plaquette norm
+            nfactor = do(
+                'abs', norm_plq.contract(all, optimize=self.contract_optimize))
+
+            # scale the bra and ket and each of the plaquette environments
+            self._psi.multiply_(nfactor**(-1 / 2), spread_over='all')
+            self._bra.multiply_(nfactor**(-1 / 2), spread_over='all')
+
+            # scale the envs, taking into account the number of sites missing
+            n = self._psi.num_tensors
+            for ((_, _), (di, dj)), env in envs.items():
+                n_missing = di * dj
+                env.multiply_(nfactor ** (n_missing / n - 1),
+                              spread_over='all')
+
+        self.plaquette_envs = envs
+        self.plaquette_mapping = calc_plaquette_map(envs)
+
+        self._env_n = self._n
+
+    def presweep(self, i):
+        """Full update presweep - compute envs and inject gate options.
+        """
+        # inject the specific gate options required (do
+        # here so user can change options between sweeps)
+        self._gate_opts = parse_specific_gate_opts(
+            self.fit_strategy, self.fit_opts)
+
+        # compute the plaquette environments to be used for gating and energy
+        if i % self.compute_envs_every == 0:
+            self._compute_plaquette_envs()
+
+    def compute_energy(self):
+        """Full update compute energy - use the (likely) already calculated
+        plaquette environments.
+        """
+        self._compute_plaquette_envs()
+
+        return self.state.compute_local_expectation(
+            self.ham.terms,
+            plaquette_envs=self.plaquette_envs,
+            plaquette_mapping=self.plaquette_mapping,
+            **self.compute_energy_opts
+        )
+
+    def gate(self, G, where):
+        """Apply the gate ``G`` at sites where, using a fitting method that
+        takes into account the current environment.
+        """
+        # get the plaquette containing ``where`` and the sites it contains -
+        # these will all be fitted
+        plq = self.plaquette_mapping[tuple(sorted(where))]
+        env = self.plaquette_envs[plq]
+        tags_plq = tuple(starmap(self._psi.site_tag, plaquette_to_sites(plq)))
+
+        # perform the gate, inplace
+        self._gate_fit_fn(
+            ket=self._psi,
+            env=env,
+            bra=self._bra,
+            G=G,
+            where=where,
+            tags_plq=tags_plq,
+            max_bond=self.D,
+            optimize=self.contract_optimize,
+            **self._gate_opts
+        )
