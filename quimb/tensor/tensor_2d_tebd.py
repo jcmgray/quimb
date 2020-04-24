@@ -686,13 +686,13 @@ class TEBD2DImag:
 
 
 class SimpleUpdate(TEBD2DImag):
-    """A simple subclass of ``TEBD2DImag`` that overrides two key methods in order
-    to keep 'diagonal gauges' living on the bonds of a PEPS. The gauges are
-    stored separately from the main PEPS in the ``gauges`` attribute. Before
-    and after a gate is applied they are absorbed and then extracted. When
-    accessing the ``state`` attribute they are automatically inserted or you
-    can call ``get_state(absorb_gauges=False)`` to lazily add them as hyperedge
-    weights only. Reference: https://arxiv.org/abs/0806.3719.
+    """A simple subclass of ``TEBD2DImag`` that overrides two key methods in
+    order to keep 'diagonal gauges' living on the bonds of a PEPS. The gauges
+    are stored separately from the main PEPS in the ``gauges`` attribute.
+    Before and after a gate is applied they are absorbed and then extracted.
+    When accessing the ``state`` attribute they are automatically inserted or
+    you can call ``get_state(absorb_gauges=False)`` to lazily add them as
+    hyperedge weights only. Reference: https://arxiv.org/abs/0806.3719.
 
     """ + TEBD2DImag.__doc__
 
@@ -774,7 +774,7 @@ class SimpleUpdate(TEBD2DImag):
         s = info['singular_values']
         if self.gauge_renorm:
             # keep the singular values from blowing up
-            s = s / do('sum', s)
+            s = s / do('sum', s**2)**0.5
         Tsval.modify(data=s)
 
         # 'extract' the outer gauges again
