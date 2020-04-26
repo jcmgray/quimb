@@ -22,7 +22,7 @@ from .tensor_2d import (
 class LocalHam2D:
     """A 2D Hamiltonian represented as local terms. This combines all two site
     and one site terms into a single interaction per lattice pair, and caches
-    operations on the terms such as getting their exponentiatial.
+    operations on the terms such as getting their exponential.
 
     Parameters
     ----------
@@ -51,6 +51,7 @@ class LocalHam2D:
         The total effective local term for each interaction (with single site
         terms appropriately absorbed). Each key is a pair of coordinates
         ``ija, ijb`` with ``ija < ijb``.
+
     """
 
     def __init__(self, Lx, Ly, H2, H1=None):
@@ -445,6 +446,8 @@ class TEBD2DImag:
         that boolean evaluates to ``True`` then terminal the evolution.
     progbar : boolean, optional
         Whether to show a live progress bar during the evolution.
+    kwargs
+        Extra options for the specific ``TEBD2DImag`` subclass.
 
     Attributes
     ----------
@@ -700,9 +703,11 @@ class SimpleUpdate(TEBD2DImag):
         self,
         gauge_renorm=True,
         gauge_smudge=1e-6,
+        condition_tensors=True,
     ):
         self.gauge_renorm = gauge_renorm
         self.gauge_smudge = gauge_smudge
+        self.condition_tensors = condition_tensors
         self._initialize_gauges()
 
     def _initialize_gauges(self):
@@ -806,6 +811,10 @@ class SimpleUpdate(TEBD2DImag):
                 Ta.multiply_index_diagonal_(bnd, Tsval.data**0.5)
                 Tb.multiply_index_diagonal_(bnd, Tsval.data**0.5)
 
+        if self.condition_tensors:
+            psi.balance_bonds_()
+            psi.equalize_norms_()
+
         return psi
 
 
@@ -822,7 +831,8 @@ def gate_full_update_als(
     optimize='auto-hq',
     solver='solve',
     dense=True,
-    enforce_pos=True,
+    enforce_pos=False,
+    pos_smudge=1e-6,
 ):
     ket_plq = ket.select_any(tags_plq).view_like_(ket)
     bra_plq = bra.select_any(tags_plq).view_like_(bra)
@@ -853,7 +863,7 @@ def gate_full_update_als(
 
                     if enforce_pos:
                         el, ev = do('linalg.eigh', (N + dag(N)) / 2)
-                        el = do('clip', el, 0.0, None)
+                        el = do('clip', el, pos_smudge, None)
                         N = ev @ do('diag', el) @ dag(ev)
 
                 else:
@@ -918,8 +928,8 @@ def gate_full_update_autodiff_mse(
     tol,
     max_bond,
     optimize='auto-hq',
-    optimizer='L-BFGS-B',
     autodiff_backend='autograd',
+    autodiff_optimizer='L-BFGS-B',
     **kwargs,
 ):
     ket_plq = ket.select_any(tags_plq).view_like_(ket)
@@ -927,7 +937,8 @@ def gate_full_update_autodiff_mse(
     # the target tensor data
     G_ket_plq = ket_plq.gate(G, where, contract=False)
     G_ket_plq_env = G_ket_plq | env
-    y = G_ket_plq_env.contract(all, optimize=optimize).data
+    Ty = G_ket_plq_env.contract(all, optimize=optimize)
+    y = Ty.data
 
     # what we are going to optimize, start with simple gate tensors
     ket_plq_env = ket_plq.gate(
@@ -935,7 +946,9 @@ def gate_full_update_autodiff_mse(
     ) | env
 
     def mse(ket_plq_env):
-        x = ket_plq_env.contract(all, optimize=optimize).data
+        x = ket_plq_env.contract(
+            all, optimize=optimize, output_inds=Ty.inds
+        ).data
         return do('sum', ((x - y)**2))
 
     tnopt = TNOptimizer(
@@ -943,7 +956,7 @@ def gate_full_update_autodiff_mse(
         loss_fn=mse,
         tags=tags_plq,
         progbar=False,
-        optimizer=optimizer,
+        optimizer=autodiff_optimizer,
         autodiff_backend=autodiff_backend,
         **kwargs,
     )
@@ -966,22 +979,20 @@ def gate_full_update_autodiff_fidelity(
     max_bond,
     optimize='auto-hq',
     autodiff_backend='autograd',
-    autograd_optimizer='L-BFGS-B',
+    autodiff_optimizer='L-BFGS-B',
     **kwargs,
 ):
     ket_plq = ket.select_any(tags_plq).view_like_(ket)
     bra_plq = bra.select_any(tags_plq).view_like_(bra)
 
+    # the target sites + gate and also norm
+    G_ket_plq_env = ket_plq.gate(G, where, contract=False) | env
+    bra_GG_ket = bra_plq.gate(conj(G), where, contract=False) | G_ket_plq_env
+    target_norm = bra_GG_ket.contract(all, optimize=optimize)
+
     # make initial guess the simple gate tensors
     bra_plq.gate_(
         conj(G), where, contract='reduce-split', max_bond=max_bond)
-
-    # the target
-    G_ket_plq_env = ket_plq.gate(G, where, contract=False) | env
-
-    # the target norm
-    bra_GG_ket = bra_plq.gate(conj(G), where, contract=False) | G_ket_plq_env
-    target_norm = bra_GG_ket.contract(all, optimize=optimize)
 
     def normalize(bra_plq):
         for site in tags_plq:
@@ -999,7 +1010,7 @@ def gate_full_update_autodiff_fidelity(
         norm_fn=normalize,
         tags=tags_plq,
         progbar=False,
-        optimizer=autograd_optimizer,
+        optimizer=autodiff_optimizer,
         autodiff_backend=autodiff_backend,
         **kwargs,
     )
@@ -1015,12 +1026,13 @@ def get_default_full_update_fit_opts():
     """
     return {
         # general
-        'tol': 1e-9,
-        'steps': 100,
+        'tol': 1e-10,
+        'steps': 20,
         # alternative least squares
         'als_dense': True,
         'als_solver': 'solve',
         'als_enforce_pos': False,
+        'als_enforce_pos_smudge': 1e-9,
         # automatic differentation optimizing
         'autodiff_backend': 'autograd',
         'autodiff_optimizer': 'L-BFGS-B',
@@ -1039,9 +1051,11 @@ def parse_specific_gate_opts(strategy, fit_opts):
         gate_opts['solver'] = fit_opts['als_solver']
         gate_opts['dense'] = fit_opts['als_dense']
         gate_opts['enforce_pos'] = fit_opts['als_enforce_pos']
+        gate_opts['pos_smudge'] = fit_opts['als_enforce_pos_smudge']
+
     elif 'autodiff' in strategy:
-        gate_opts['optimizer'] = fit_opts['autodiff_optimizer']
         gate_opts['autodiff_backend'] = fit_opts['autodiff_backend']
+        gate_opts['autodiff_optimizer'] = fit_opts['autodiff_optimizer']
 
     return gate_opts
 

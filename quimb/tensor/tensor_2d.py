@@ -6,9 +6,10 @@ from numbers import Integral
 from itertools import product, cycle, starmap, combinations
 from collections import defaultdict
 
-from autoray import do
+from autoray import do, infer_backend
 import opt_einsum as oe
 
+from ..gen.operators import swap
 from ..gen.rand import randn, seed_rand
 from ..utils import print_multi_line, check_opt
 from . import array_ops as ops
@@ -1998,8 +1999,37 @@ class TensorNetwork2DVector(TensorNetwork2D,
 
             return psi
 
-        ij1, ij2 = where
-        TL, TR = psi[ij1], psi[ij2]
+        # following are all based on splitting tensors to maintain structure
+        ij_a, ij_b = where
+
+        retrieve_svals = (
+            compress_opts.get('absorb', 'both') is None and
+            (info is not None)
+        )
+
+        # check if we are not nearest neighbour and need to swap first
+        if abs(ij_b[0] - ij_a[0]) + abs(ij_b[1] - ij_a[1]) > 1:
+
+            if retrieve_svals:
+                raise NotImplementedError
+
+            # find a swap path
+            *swaps, final = gen_swap_path(ij_a, ij_b, move='ab')
+
+            # move the sites together
+            SWAP = get_swap(dp, dtype=G.dtype, backend=infer_backend(G))
+            for pair in swaps:
+                psi.gate_(SWAP, pair, contract=contract)
+
+            # perform actual gate also compressing etc on 'way back'
+            psi.gate_(G, final, contract=contract, **compress_opts)
+
+            for pair in reversed(swaps):
+                psi.gate_(SWAP, pair, contract=contract, **compress_opts)
+
+            return psi
+
+        TL, TR = psi[ij_a], psi[ij_b]
         lix, _, rix = group_inds(TL.inds, TR.inds)
 
         if contract == 'split':
@@ -2072,8 +2102,7 @@ class TensorNetwork2DVector(TensorNetwork2D,
         TR.modify(data=TR_new.data)
 
         # optionally
-        if compress_opts.get('absorb', 'both') is None and (info is not None):
-            assert len(split_res) == 3
+        if retrieve_svals:
             info['singular_values'] = split_res[1].data
 
         return psi
@@ -2875,3 +2904,78 @@ def calc_plaquette_map(plaquettes):
             mapping[ij_a, ij_b] = p
 
     return mapping
+
+
+def gen_swap_path(ij_a, ij_b, move='ab'):
+    """Generate the coordinates or a series of swaps that would bring ``ij_a``
+    and ``ij_b`` together.
+
+    Parameters
+    ----------
+    ij_a : (int, int)
+        Coordinate of site 'a'.
+    ij_b : (int, int)
+        Coordinate of site 'b'.
+    move : {'a', 'b', or 'ab'}, optional
+        Whether to move 'a', 'b' or both, to reach each other.
+
+    Returns
+    -------
+    generator[tuple[tuple[int]]]
+        The path.
+    """
+    ia, ja = ij_a
+    ib, jb = ij_b
+    di = ib - ia
+    dj = jb - ja
+
+    while di or dj:
+        if di != 0 and 'a' in move:
+            # move a vertically
+            istep = min(max(di, -1), +1)
+            new_ij_a = (ia + istep, ja)
+            yield (ij_a, new_ij_a)
+            ij_a = new_ij_a
+            ia += istep
+            di -= istep
+
+        if di != 0 and 'b' in move:
+            # move b vertically
+            istep = min(max(di, -1), +1)
+            new_ij_b = (ib - istep, jb)
+            # need to make sure final gate is applied correct way
+            if new_ij_b == ij_a:
+                yield (ij_a, ij_b)
+            else:
+                yield (ij_b, new_ij_b)
+            ij_b = new_ij_b
+            ib -= istep
+            di -= istep
+
+        if dj != 0 and 'a' in move:
+            # move a horizontally
+            jstep = min(max(dj, -1), +1)
+            new_ij_a = (ia, ja + jstep)
+            yield (ij_a, new_ij_a)
+            ij_a = new_ij_a
+            ja += jstep
+            dj -= jstep
+
+        if dj != 0 and 'b' in move:
+            # move b horizontally
+            jstep = min(max(dj, -1), +1)
+            new_ij_b = (ib, jb - jstep)
+            # need to make sure final gate is applied correct way
+            if new_ij_b == ij_a:
+                yield (ij_a, ij_b)
+            else:
+                yield (ij_b, new_ij_b)
+            ij_b = new_ij_b
+            jb -= jstep
+            dj -= jstep
+
+
+@functools.lru_cache(8)
+def get_swap(dp, dtype, backend):
+    SWAP = swap(dp, dtype=dtype)
+    return do('array', SWAP, like=backend)
