@@ -352,27 +352,33 @@ class LocalHam2D:
                 seen.add(ij2)
 
             ys, xs = zip(ij1, ij2)
-            nrm = do('linalg.norm', self.terms[ij1, ij2])
+
+            # offset by the length of bond to distinguish NNN etc.
+            d = ((xs[1] - xs[0])**2 + (ys[1] - ys[0])**2)**0.5
+            xs = [xi + 0.03 * d for xi in xs]
+            ys = [yi + 0.03 * d for yi in ys]
 
             # set coordinates for label with some offset towards left
             if ij1[1] < ij2[1]:
-                x0 = (3 * xs[0] + 2 * xs[1]) / 5
-                y0 = (3 * ys[0] + 2 * ys[1]) / 5
+                lbl_x0 = (3 * xs[0] + 2 * xs[1]) / 5
+                lbl_y0 = (3 * ys[0] + 2 * ys[1]) / 5
             else:
-                x0 = (2 * xs[0] + 3 * xs[1]) / 5
-                y0 = (2 * ys[0] + 3 * ys[1]) / 5
+                lbl_x0 = (2 * xs[0] + 3 * xs[1]) / 5
+                lbl_y0 = (2 * ys[0] + 3 * ys[1]) / 5
 
-            data.append((xs, ys, n, x0, y0, nrm))
+            nrm = do('linalg.norm', self.terms[ij1, ij2])
+
+            data.append((xs, ys, n, lbl_x0, lbl_y0, nrm))
 
         num_groups = n + 1
         colors = get_colors(range(num_groups))
 
         # do the plotting
-        for xs, ys, n, x0, y0, nrm in data:
+        for xs, ys, n, lbl_x0, lbl_y0, nrm in data:
             ax.plot(xs, ys, c=colors[n], linewidth=2 * nrm**0.5)
             if show_norm:
                 label = "{:.3f}".format(nrm)
-                ax.text(x0, y0, label, c=colors[n], fontsize=fontsize)
+                ax.text(lbl_x0, lbl_y0, label, c=colors[n], fontsize=fontsize)
 
         # create legend
         if legend:
