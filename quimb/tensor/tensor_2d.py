@@ -2010,22 +2010,29 @@ class TensorNetwork2DVector(TensorNetwork2D,
         # check if we are not nearest neighbour and need to swap first
         if abs(ij_b[0] - ij_a[0]) + abs(ij_b[1] - ij_a[1]) > 1:
 
-            if retrieve_svals:
-                raise NotImplementedError
-
             # find a swap path
             *swaps, final = gen_swap_path(ij_a, ij_b, move='ab')
 
             # move the sites together
             SWAP = get_swap(dp, dtype=G.dtype, backend=infer_backend(G))
             for pair in swaps:
-                psi.gate_(SWAP, pair, contract=contract)
+                psi.gate_(SWAP, pair, contract=contract, absorb='right')
+
+            compress_opts['info'] = info
+            compress_opts['contract'] = contract
 
             # perform actual gate also compressing etc on 'way back'
-            psi.gate_(G, final, contract=contract, **compress_opts)
+            psi.gate_(G, final, **compress_opts)
 
+            if retrieve_svals:
+                info['singular_values', final] = info.pop('singular_values')
+
+            compress_opts.setdefault('absorb', 'left')
             for pair in reversed(swaps):
-                psi.gate_(SWAP, pair, contract=contract, **compress_opts)
+                psi.gate_(SWAP, pair, **compress_opts)
+
+                if retrieve_svals:
+                    info['singular_values', pair] = info.pop('singular_values')
 
             return psi
 

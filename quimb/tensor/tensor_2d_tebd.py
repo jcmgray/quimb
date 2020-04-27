@@ -833,22 +833,25 @@ def gate_full_update_als(
     dense=True,
     enforce_pos=False,
     pos_smudge=1e-6,
+    init_simple_guess=False,
 ):
     ket_plq = ket.select_any(tags_plq).view_like_(ket)
     bra_plq = bra.select_any(tags_plq).view_like_(bra)
 
-    # this is the target, create it before we initialize guess
-    G_ket_plq = ket_plq.gate(G, where, contract=False)
+    # this is the full target (copy - not virtual)
+    target = ket_plq.gate(G, where, contract=False) | env
 
-    ket_plq.gate_(G, where, contract='reduce-split', max_bond=max_bond)
-    bra_plq.gate_(conj(G), where, contract='reduce-split', max_bond=max_bond)
+    if init_simple_guess:
+        ket_plq.gate_(G, where, contract='reduce-split', max_bond=max_bond)
+        for site in tags_plq:
+            bra_plq[site].modify(data=conj(ket_plq[site].data))
 
+    overlap = bra_plq | target
     norm_plq = bra_plq | env | ket_plq
-    overlap = bra_plq | env | G_ket_plq
 
     xs = dict()
     x_previous = dict()
-    previous_overlap = None
+    previous_cost = None
 
     with contract_strategy(optimize), shared_intermediates():
         for i in range(steps):
@@ -904,67 +907,20 @@ def gate_full_update_als(
                 xs[site] = x
 
             # after updating both sites check for convergence of tensor entries
-            ov = overlap.contract(all, optimize=optimize)
+            cost_fid = do('abs', do('trace', x.H @ b))
+            cost_norm = do('abs', do('trace', x.H @ (N @ x)))
+            cost = - 2 * cost_fid + cost_norm
+
             converged = (
-                (previous_overlap is not None) and
-                (abs(ov - previous_overlap) < tol)
+                (previous_cost is not None) and
+                (abs(cost - previous_cost) < tol)
             )
             if converged:
                 break
 
-            previous_overlap = ov
+            previous_cost = cost
             for site in tags_plq:
                 x_previous[site] = xs[site]
-
-
-def gate_full_update_autodiff_mse(
-    ket,
-    env,
-    bra,
-    G,
-    where,
-    tags_plq,
-    steps,
-    tol,
-    max_bond,
-    optimize='auto-hq',
-    autodiff_backend='autograd',
-    autodiff_optimizer='L-BFGS-B',
-    **kwargs,
-):
-    ket_plq = ket.select_any(tags_plq).view_like_(ket)
-
-    # the target tensor data
-    G_ket_plq = ket_plq.gate(G, where, contract=False)
-    G_ket_plq_env = G_ket_plq | env
-    Ty = G_ket_plq_env.contract(all, optimize=optimize)
-    y = Ty.data
-
-    # what we are going to optimize, start with simple gate tensors
-    ket_plq_env = ket_plq.gate(
-        G, where, contract='reduce-split', max_bond=max_bond
-    ) | env
-
-    def mse(ket_plq_env):
-        x = ket_plq_env.contract(
-            all, optimize=optimize, output_inds=Ty.inds
-        ).data
-        return do('sum', ((x - y)**2))
-
-    tnopt = TNOptimizer(
-        ket_plq_env,
-        loss_fn=mse,
-        tags=tags_plq,
-        progbar=False,
-        optimizer=autodiff_optimizer,
-        autodiff_backend=autodiff_backend,
-        **kwargs,
-    )
-    ket_plq_env_opt = tnopt.optimize(steps, tol=tol)
-
-    for site in tags_plq:
-        ket[site].modify(data=ket_plq_env_opt[site].data)
-        bra[site].modify(data=conj(ket_plq_env_opt[site].data))
 
 
 def gate_full_update_autodiff_fidelity(
@@ -980,34 +936,33 @@ def gate_full_update_autodiff_fidelity(
     optimize='auto-hq',
     autodiff_backend='autograd',
     autodiff_optimizer='L-BFGS-B',
+    init_simple_guess=False,
     **kwargs,
 ):
     ket_plq = ket.select_any(tags_plq).view_like_(ket)
     bra_plq = bra.select_any(tags_plq).view_like_(bra)
 
-    # the target sites + gate and also norm
-    G_ket_plq_env = ket_plq.gate(G, where, contract=False) | env
-    bra_GG_ket = bra_plq.gate(conj(G), where, contract=False) | G_ket_plq_env
-    target_norm = bra_GG_ket.contract(all, optimize=optimize)
+    # the target sites + gate and also norm (copy - not virtual)
+    target = ket_plq.gate(G, where, contract=False) | env
 
     # make initial guess the simple gate tensors
-    bra_plq.gate_(
-        conj(G), where, contract='reduce-split', max_bond=max_bond)
-
-    def normalize(bra_plq):
+    if init_simple_guess:
+        ket_plq.gate_(G, where, contract='reduce-split', max_bond=max_bond)
         for site in tags_plq:
-            ket_plq[site].modify(data=conj(bra_plq[site].data))
-        nrm_f = (bra_plq | env | ket_plq).contract(all, optimize=optimize)
-        return bra_plq * (target_norm / nrm_f)**0.5
+            bra_plq[site].modify(data=conj(ket_plq[site].data))
 
     def fidelity(bra_plq):
-        f = (bra_plq | G_ket_plq_env).contract(all, optimize=optimize)
-        return -abs(f)**2
+        for site in tags_plq:
+            ket_plq[site].modify(data=conj(bra_plq[site].data))
+
+        fid = (bra_plq | target).contract(all, optimize=optimize)
+        norm = (bra_plq | env | ket_plq).contract(all, optimize=optimize)
+
+        return - 2 * do('abs', fid) + do('abs', norm)
 
     tnopt = TNOptimizer(
         bra_plq,
         loss_fn=fidelity,
-        norm_fn=normalize,
         tags=tags_plq,
         progbar=False,
         optimizer=autodiff_optimizer,
@@ -1017,8 +972,9 @@ def gate_full_update_autodiff_fidelity(
     bra_plq_opt = tnopt.optimize(steps, tol=tol)
 
     for site in tags_plq:
-        ket[site].modify(data=conj(bra_plq_opt[site].data))
-        bra[site].modify(data=bra_plq_opt[site].data)
+        new_data = bra_plq_opt[site].data
+        ket[site].modify(data=conj(new_data))
+        bra[site].modify(data=new_data)
 
 
 def get_default_full_update_fit_opts():
@@ -1028,6 +984,7 @@ def get_default_full_update_fit_opts():
         # general
         'tol': 1e-10,
         'steps': 20,
+        'init_simple_guess': False,
         # alternative least squares
         'als_dense': True,
         'als_solver': 'solve',
@@ -1045,6 +1002,7 @@ def parse_specific_gate_opts(strategy, fit_opts):
     gate_opts = {
         'tol': fit_opts['tol'],
         'steps': fit_opts['steps'],
+        'init_simple_guess': fit_opts['init_simple_guess'],
     }
 
     if 'als' in strategy:
@@ -1071,10 +1029,13 @@ class FullUpdate(TEBD2DImag):
         fit_strategy='als',
         fit_opts=None,
     ):
+        self.fit_strategy = str(fit_strategy)
         self.fit_opts = get_default_full_update_fit_opts()
         if fit_opts is not None:
+            bad_opts = set(fit_opts) - set(self.fit_opts)
+            if bad_opts:
+                raise ValueError("Invalid fit option(s): {}".format(bad_opts))
             self.fit_opts.update(fit_opts)
-        self.fit_strategy = str(fit_strategy)
 
         self.pre_normalize = bool(pre_normalize)
         self.contract_optimize = str(contract_optimize)
@@ -1092,7 +1053,6 @@ class FullUpdate(TEBD2DImag):
     def fit_strategy(self, fit_strategy):
         self._gate_fit_fn = {
             'als': gate_full_update_als,
-            'autodiff-mse': gate_full_update_autodiff_mse,
             'autodiff-fidelity': gate_full_update_autodiff_fidelity,
         }[fit_strategy]
         self._fit_strategy = fit_strategy
