@@ -62,6 +62,49 @@ class TestTEBD:
         assert qu.expec(evo.pt, tebd.pt.to_dense()) == approx(1, rel=1e-5)
 
     @pytest.mark.parametrize('cyclic', [False, True])
+    @pytest.mark.parametrize('order', [2, 4])
+    @pytest.mark.parametrize('dt,tol', [
+        (0.0759283, None),
+        (None, 1e-4),
+        (0.0759283, 1e-4),
+        (None, None),
+    ])
+    @pytest.mark.parametrize('n', [5, 6])
+    def test_imag_evolve_obc_pbc(self, n, order, dt, tol, cyclic):
+        tf = 2
+        ground = qtn.MPS_computational_state('0' * n, cyclic=cyclic)
+        excited = qtn.MPS_computational_state(('01' * n)[:n], cyclic=cyclic)
+        psi0 = (ground + excited) / 2**0.5
+        H = qtn.NNI_ham_ising(n, j=-1, cyclic=cyclic)
+
+        if dt and tol:
+            with pytest.raises(ValueError):
+                qtn.TEBD(psi0, H, dt=dt, tol=tol, imag=True)
+            return
+
+        tebd = qtn.TEBD(psi0, H, dt=dt, tol=tol, imag=True)
+        assert tebd.cyclic == cyclic
+        tebd.split_opts['cutoff'] = 1e-10
+
+        if (dt is None and tol is None):
+            with pytest.raises(ValueError):
+                tebd.update_to(tf, order=order)
+            return
+
+        tebd.update_to(tf, order=order)
+        assert tebd.t == approx(tf)
+        assert not tebd._queued_sweep
+
+        H_mpo = qtn.MPO_ham_ising(n, j=-1, cyclic=cyclic)
+        E_ground = qu.expec(H_mpo.to_dense(), ground.to_dense())
+        E_excited = qu.expec(H_mpo.to_dense(), excited.to_dense())
+
+        psi1 = (np.exp(-tf * E_ground) * ground + np.exp(-tf * E_excited) * excited)
+        psi1 /= np.sqrt(np.exp(-2 * tf * E_ground) + np.exp(-2 * tf * E_excited))
+
+        assert qu.expec(psi1.to_dense(), tebd.pt.to_dense()) == approx(1, rel=1e-5)
+
+    @pytest.mark.parametrize('cyclic', [False, True])
     @pytest.mark.parametrize('dt,tol', [
         (0.0659283, None),
         (None, 1e-5),
