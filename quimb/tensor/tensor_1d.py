@@ -1845,10 +1845,15 @@ class MatrixProductState(TensorNetwork1DVector,
 
                 rho.drop_tags(self.site_tag(i))
 
+        # if single site a single tensor is produced
+        if isinstance(rho, Tensor):
+            rho = TensorNetwork([rho], nsites=self.nsites)
+
         # transpose upper and lower tags to match other MPOs
-        rho = MatrixProductOperator.from_TN(
-            rho, lower_ind_id=upper_ind_id, upper_ind_id=self.site_ind_id,
-            cyclic=self.cyclic, site_tag_id=self.site_tag_id, inplace=True)
+        rho.view_as_(
+            MatrixProductOperator,
+            cyclic=self.cyclic, site_tag_id=self.site_tag_id,
+            lower_ind_id=upper_ind_id, upper_ind_id=self.site_ind_id, )
 
         if rescale_sites:
             # e.g. [3, 4, 5, 7, 9] -> [0, 1, 2, 3, 4]
