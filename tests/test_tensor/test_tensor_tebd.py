@@ -96,13 +96,13 @@ class TestTEBD:
         assert not tebd._queued_sweep
 
         H_mpo = qtn.MPO_ham_ising(n, j=-1, cyclic=cyclic)
-        E_ground = qu.expec(H_mpo.to_dense(), ground.to_dense())
-        E_excited = qu.expec(H_mpo.to_dense(), excited.to_dense())
+        E_ground = qtn.expec_TN_1D(ground.H, H_mpo, ground)
+        E_excited = qtn.expec_TN_1D(excited.H, H_mpo, excited)
 
         psi1 = (np.exp(-tf * E_ground) * ground + np.exp(-tf * E_excited) * excited)
         psi1 /= np.sqrt(np.exp(-2 * tf * E_ground) + np.exp(-2 * tf * E_excited))
 
-        assert qu.expec(psi1.to_dense(), tebd.pt.to_dense()) == approx(1, rel=1e-5)
+        assert qtn.expec_TN_1D(psi1.H, tebd.pt) == approx(1, rel=1e-5)
 
     @pytest.mark.parametrize('cyclic', [False, True])
     @pytest.mark.parametrize('dt,tol', [
