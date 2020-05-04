@@ -8,7 +8,7 @@ import importlib
 import tqdm
 import numpy as np
 from cytoolz import valmap
-from autoray import to_numpy
+from autoray import to_numpy, astype
 
 from .tensor_core import (
     contract_backend,
@@ -79,7 +79,10 @@ class Vectorizer:
 
         i = 0
         for array, size, cmplx in zip(arrays, self.sizes, self.iscomplexes):
-            array = np.asarray(array)
+
+            if not isinstance(array, np.ndarray):
+                array = to_numpy(array)
+
             if not cmplx:
                 x[i:i + size] = array.reshape(-1)
                 i += size
@@ -111,7 +114,8 @@ class Vectorizer:
                 i += 2 * size
 
             if array.dtype != dtype:
-                array = array.astype(dtype)
+                array = astype(array, dtype)
+
             arrays.append(array)
 
         return arrays
