@@ -1,6 +1,6 @@
 import random
 import collections
-from itertools import product, starmap
+from itertools import product, starmap, chain
 
 import tqdm
 import numpy as np
@@ -10,12 +10,13 @@ from autoray import do, dag, conj, reshape, to_numpy
 
 from .graphing import get_colors
 from ..core import eye, kron, qarray
-from .tensor_core import Tensor, contract_strategy
+from .tensor_core import Tensor, contract_strategy, utup
 from .optimize import TNOptimizer
 from .tensor_2d import (
     calc_plaquette_sizes,
     calc_plaquette_map,
     plaquette_to_sites,
+    gen_swap_path,
 )
 
 
@@ -122,7 +123,7 @@ class LocalHam2D:
         # convert qarrays (mostly useful for working with jax)
         for key, X in H1s.items():
             if isinstance(X, qarray):
-                H1[key] = X.A
+                H1s[key] = X.A
 
         # possibly set the default single site term
         default_H1 = H1s.pop(None, None)
@@ -271,6 +272,10 @@ class LocalHam2D:
         elif order == 'random':
             pairs = list(self.terms)
             random.shuffle(pairs)
+        elif order == 'random-ungrouped':
+            pairs = list(self.terms)
+            random.shuffle(pairs)
+            return pairs
         else:
             return self._nx_color_ordering(order, **kwargs)
 
@@ -331,7 +336,8 @@ class LocalHam2D:
         if figsize is None:
             figsize = (self.Ly, self.Lx)
 
-        if ax is None:
+        ax_supplied = (ax is not None)
+        if not ax_supplied:
             fig, ax = plt.subplots(figsize=figsize, constrained_layout=True)
             ax.axis('off')
             ax.set_aspect('equal')
@@ -353,10 +359,13 @@ class LocalHam2D:
 
             ys, xs = zip(ij1, ij2)
 
-            # offset by the length of bond to distinguish NNN etc.
             d = ((xs[1] - xs[0])**2 + (ys[1] - ys[0])**2)**0.5
-            xs = [xi + 0.03 * d for xi in xs]
-            ys = [yi + 0.03 * d for yi in ys]
+            # offset by the length of bond to distinguish NNN etc.
+            #     choose offset direction by parity of first site
+
+            if d > 2**0.5:
+                xs = [xi + (-1)**int(ys[0]) * 0.02 * d for xi in xs]
+                ys = [yi + (-1)**int(xs[0]) * 0.02 * d for yi in ys]
 
             # set coordinates for label with some offset towards left
             if ij1[1] < ij2[1]:
@@ -392,12 +401,13 @@ class LocalHam2D:
             ax.legend(handles, lbls, ncol=max(round(len(handles) / 20), 1),
                       loc='center left', bbox_to_anchor=(1, 0.5))
 
-        if ax is not None:
+        if ax_supplied:
             return
-        elif return_fig:
+
+        if return_fig:
             return fig
-        else:
-            plt.show()
+
+        plt.show()
 
 
 class TEBD2DImag:
@@ -543,7 +553,7 @@ class TEBD2DImag:
         self.energies = []
 
         self.keep_best = bool(keep_best)
-        self.best = dict(energy=float('inf'), state=None)
+        self.best = dict(energy=float('inf'), state=None, it=None)
 
         # process the remaining kwargs (e.g. simple or full update specific)
         self.setup(**kwargs)
@@ -603,6 +613,7 @@ class TEBD2DImag:
         if self.keep_best and en < self.best['energy']:
             self.best['energy'] = en
             self.best['state'] = self.state
+            self.best['it'] = self._n
 
         return self.energies[-1]
 
@@ -694,6 +705,17 @@ class TEBD2DImag:
             self.__class__.__name__, self.n, self.tau, self.D, self.chi)
 
 
+def conditioner(tn, value=None, sweeps=2, balance_bonds=True):
+    """
+    """
+    if balance_bonds:
+        for _ in range(sweeps - 1):
+            tn.balance_bonds_()
+            tn.equalize_norms_()
+        tn.balance_bonds_()
+    tn.equalize_norms_(value=value)
+
+
 class SimpleUpdate(TEBD2DImag):
     """A simple subclass of ``TEBD2DImag`` that overrides two key methods in
     order to keep 'diagonal gauges' living on the bonds of a PEPS. The gauges
@@ -710,10 +732,14 @@ class SimpleUpdate(TEBD2DImag):
         gauge_renorm=True,
         gauge_smudge=1e-6,
         condition_tensors=True,
+        condition_balance_bonds=True,
+        swap_sequence=('av', 'bv', 'ah', 'bh'),
     ):
         self.gauge_renorm = gauge_renorm
         self.gauge_smudge = gauge_smudge
         self.condition_tensors = condition_tensors
+        self.condition_balance_bonds = condition_balance_bonds
+        self.swap_sequence = swap_sequence
         self._initialize_gauges()
 
     def _initialize_gauges(self):
@@ -729,7 +755,11 @@ class SimpleUpdate(TEBD2DImag):
             Tsval = Tensor(
                 do('ones', (d,), dtype=data00.dtype, like=data00),
                 inds=[bnd],
-                tags=[self._psi.site_tag(*ija), self._psi.site_tag(*ijb)]
+                tags=[
+                    self._psi.site_tag(*ija),
+                    self._psi.site_tag(*ijb),
+                    'SU_gauge',
+                ]
             )
             self._gauges[tuple(sorted((ija, ijb)))] = Tsval
 
@@ -748,55 +778,72 @@ class SimpleUpdate(TEBD2DImag):
         ija, ijb = where
         ia, ja = ija
         ib, jb = ijb
+        is_nearest_neighbour = (abs(ib - ia) + abs(jb - ja) == 1)
 
-        Ta = self._psi[ija]
-        Tb = self._psi[ijb]
+        # get the string linking the two sites
+        if is_nearest_neighbour:
+            swap_path = None
+            string = (ija, ijb)
+        else:
+            swap_path = tuple(
+                gen_swap_path(*where, sequence=self.swap_sequence))
+            string = utup(chain.from_iterable(swap_path))
 
-        # get the relevant neighbours for both sites
-        coo_a_neighbours = tuple(filter(
-            lambda coo: self._psi.valid_coo(coo) and coo != ijb,
-            [(ia + 1, ja), (ia - 1, ja), (ia, ja + 1), (ia, ja - 1)]
-        ))
-        coo_b_neighbours = tuple(filter(
-            lambda coo: self._psi.valid_coo(coo) and coo != ija,
-            [(ib + 1, jb), (ib - 1, jb), (ib, jb + 1), (ib, jb - 1)]
-        ))
+        def env_neighbours(i, j):
+            return tuple(filter(
+                lambda coo: self._psi.valid_coo((coo)) and coo not in string,
+                [(i + 1, j), (i - 1, j), (i, j + 1), (i, j - 1)]
+            ))
+
+        # get the relevant neighbours for string of sites
+        neighbours = {site: env_neighbours(*site) for site in string}
 
         # absorb the 'outer' gauges from these neighbours
-        for coo in coo_a_neighbours:
-            Tsval = self.gauges[tuple(sorted((ija, coo)))]
-            Ta.multiply_index_diagonal_(
-                ind=Tsval.inds[0], x=(Tsval.data + self.gauge_smudge))
-        for coo in coo_b_neighbours:
-            Tsval = self.gauges[tuple(sorted((ijb, coo)))]
-            Tb.multiply_index_diagonal_(
-                ind=Tsval.inds[0], x=(Tsval.data + self.gauge_smudge))
+        for site in string:
+            Tij = self._psi[site]
+            for neighbour in neighbours[site]:
+                Tsval = self.gauges[tuple(sorted((site, neighbour)))]
+                Tij.multiply_index_diagonal_(
+                    ind=Tsval.inds[0], x=(Tsval.data + self.gauge_smudge))
 
-        # absorb the inner bond gauge equally into both sites
-        Tsval = self.gauges[ija, ijb]
-        bnd, = Tsval.inds
-        Ta.multiply_index_diagonal_(ind=bnd, x=Tsval.data**0.5)
-        Tb.multiply_index_diagonal_(ind=bnd, x=Tsval.data**0.5)
+        # absorb the inner bond gauges equally into both sites along string
+        for site_a, site_b in zip(string[:-1], string[1:]):
+            Ta, Tb = self._psi[site_a], self._psi[site_b]
+            Tsval = self.gauges[tuple(sorted((site_a, site_b)))]
+            bnd, = Tsval.inds
+            Ta.multiply_index_diagonal_(ind=bnd, x=Tsval.data**0.5)
+            Tb.multiply_index_diagonal_(ind=bnd, x=Tsval.data**0.5)
 
         # perform the gate, retrieving new bond singular values
         info = dict()
-        self._psi.gate_(U, where, absorb=None, info=info, **self.gate_opts)
+        self._psi.gate_(U, where, absorb=None, info=info,
+                        swap_path=swap_path, **self.gate_opts)
 
-        s = info['singular_values']
-        if self.gauge_renorm:
-            # keep the singular values from blowing up
-            s = s / do('sum', s**2)**0.5
-        Tsval.modify(data=s)
+        if is_nearest_neighbour:
+            s = info['singular_values']
+            if self.gauge_renorm:
+                # keep the singular values from blowing up
+                s = s / do('sum', s**2)**0.5
+            Tsval.modify(data=s)
 
-        # 'extract' the outer gauges again
-        for coo in coo_a_neighbours:
-            Tsval = self.gauges[tuple(sorted((ija, coo)))]
-            Ta.multiply_index_diagonal_(
-                ind=Tsval.inds[0], x=(Tsval.data + self.gauge_smudge)**-1)
-        for coo in coo_b_neighbours:
-            Tsval = self.gauges[tuple(sorted((ijb, coo)))]
-            Tb.multiply_index_diagonal_(
-                ind=Tsval.inds[0], x=(Tsval.data + self.gauge_smudge)**-1)
+        else:
+            # set the new singualar values all along the chain
+            for site_a, site_b in zip(string[:-1], string[1:]):
+                bond_pair = tuple(sorted((site_a, site_b)))
+                s = info['singular_values', bond_pair]
+                if self.gauge_renorm:
+                    # keep the singular values from blowing up
+                    s = s / do('sum', s**2)**0.5
+                Tsval = self.gauges[bond_pair]
+                Tsval.modify(data=s)
+
+        # absorb the 'outer' gauges from these neighbours
+        for site in string:
+            Tij = self._psi[site]
+            for neighbour in neighbours[site]:
+                Tsval = self.gauges[tuple(sorted((site, neighbour)))]
+                Tij.multiply_index_diagonal_(
+                    ind=Tsval.inds[0], x=(Tsval.data + self.gauge_smudge)**-1)
 
     def get_state(self, absorb_gauges=True):
         """Return the state, with the diagonal bond gauges either absorbed
@@ -818,8 +865,7 @@ class SimpleUpdate(TEBD2DImag):
                 Tb.multiply_index_diagonal_(bnd, Tsval.data**0.5)
 
         if self.condition_tensors:
-            psi.balance_bonds_()
-            psi.equalize_norms_()
+            conditioner(psi, balance_bonds=self.condition_balance_bonds)
 
         return psi
 
@@ -839,7 +885,10 @@ def gate_full_update_als(
     dense=True,
     enforce_pos=False,
     pos_smudge=1e-6,
-    init_simple_guess=False,
+    init_simple_guess=True,
+    condition_tensors=True,
+    condition_maintain_norms=True,
+    condition_balance_bonds=True,
 ):
     ket_plq = ket.select_any(tags_plq).view_like_(ket)
     bra_plq = bra.select_any(tags_plq).view_like_(bra)
@@ -851,6 +900,13 @@ def gate_full_update_als(
         ket_plq.gate_(G, where, contract='reduce-split', max_bond=max_bond)
         for site in tags_plq:
             bra_plq[site].modify(data=conj(ket_plq[site].data))
+
+    if condition_tensors:
+        conditioner(ket_plq, balance_bonds=condition_balance_bonds)
+        for site in tags_plq:
+            bra_plq[site].modify(data=conj(ket_plq[site].data))
+        if condition_maintain_norms:
+            pre_norm = ket_plq[site].norm()
 
     overlap = bra_plq | target
     norm_plq = bra_plq | env | ket_plq
@@ -913,8 +969,8 @@ def gate_full_update_als(
                 xs[site] = x
 
             # after updating both sites check for convergence of tensor entries
-            cost_fid = do('abs', do('trace', x.H @ b))
-            cost_norm = do('abs', do('trace', x.H @ (N @ x)))
+            cost_fid = do('abs', do('trace', dag(x) @ b))
+            cost_norm = do('abs', do('trace', dag(x) @ (N @ x)))
             cost = - 2 * cost_fid + cost_norm
 
             converged = (
@@ -927,6 +983,16 @@ def gate_full_update_als(
             previous_cost = cost
             for site in tags_plq:
                 x_previous[site] = xs[site]
+
+    if condition_tensors:
+        if condition_maintain_norms:
+            conditioner(
+                ket_plq, value=pre_norm, balance_bonds=condition_balance_bonds)
+        else:
+            conditioner(
+                ket_plq, balance_bonds=condition_balance_bonds)
+        for site in tags_plq:
+            bra_plq[site].modify(data=conj(ket_plq[site].data))
 
 
 def gate_full_update_autodiff_fidelity(
@@ -942,7 +1008,10 @@ def gate_full_update_autodiff_fidelity(
     optimize='auto-hq',
     autodiff_backend='autograd',
     autodiff_optimizer='L-BFGS-B',
-    init_simple_guess=False,
+    init_simple_guess=True,
+    condition_tensors=True,
+    condition_maintain_norms=True,
+    condition_balance_bonds=True,
     **kwargs,
 ):
     ket_plq = ket.select_any(tags_plq).view_like_(ket)
@@ -956,6 +1025,13 @@ def gate_full_update_autodiff_fidelity(
         ket_plq.gate_(G, where, contract='reduce-split', max_bond=max_bond)
         for site in tags_plq:
             bra_plq[site].modify(data=conj(ket_plq[site].data))
+
+    if condition_tensors:
+        conditioner(ket_plq, balance_bonds=condition_balance_bonds)
+        for site in tags_plq:
+            bra_plq[site].modify(data=conj(ket_plq[site].data))
+        if condition_maintain_norms:
+            pre_norm = ket_plq[site].norm()
 
     def fidelity(bra_plq):
         for site in tags_plq:
@@ -982,6 +1058,16 @@ def gate_full_update_autodiff_fidelity(
         ket[site].modify(data=conj(new_data))
         bra[site].modify(data=new_data)
 
+    if condition_tensors:
+        if condition_maintain_norms:
+            conditioner(
+                ket_plq, value=pre_norm, balance_bonds=condition_balance_bonds)
+        else:
+            conditioner(
+                ket_plq, balance_bonds=condition_balance_bonds)
+        for site in tags_plq:
+            bra_plq[site].modify(data=conj(ket_plq[site].data))
+
 
 def get_default_full_update_fit_opts():
     """The default options for the full update gate fitting procedure.
@@ -990,12 +1076,14 @@ def get_default_full_update_fit_opts():
         # general
         'tol': 1e-10,
         'steps': 20,
-        'init_simple_guess': False,
+        'init_simple_guess': True,
+        'condition_tensors': True,
+        'condition_maintain_norms': True,
         # alternative least squares
         'als_dense': True,
         'als_solver': 'solve',
         'als_enforce_pos': False,
-        'als_enforce_pos_smudge': 1e-9,
+        'als_enforce_pos_smudge': 1e-6,
         # automatic differentation optimizing
         'autodiff_backend': 'autograd',
         'autodiff_optimizer': 'L-BFGS-B',
@@ -1009,6 +1097,8 @@ def parse_specific_gate_opts(strategy, fit_opts):
         'tol': fit_opts['tol'],
         'steps': fit_opts['steps'],
         'init_simple_guess': fit_opts['init_simple_guess'],
+        'condition_tensors': fit_opts['condition_tensors'],
+        'condition_maintain_norms': fit_opts['condition_maintain_norms'],
     }
 
     if 'als' in strategy:
@@ -1031,6 +1121,7 @@ class FullUpdate(TEBD2DImag):
         compute_envs_every=1,
         pre_normalize=True,
         condition_tensors=True,
+        condition_balance_bonds=True,
         contract_optimize='auto-hq',
         fit_strategy='als',
         fit_opts=None,
@@ -1046,6 +1137,7 @@ class FullUpdate(TEBD2DImag):
         self.pre_normalize = bool(pre_normalize)
         self.contract_optimize = str(contract_optimize)
         self.condition_tensors = bool(condition_tensors)
+        self.condition_balance_bonds = bool(condition_balance_bonds)
         self.compute_envs_every = int(compute_envs_every)
 
         self._env_n = -1
@@ -1071,8 +1163,7 @@ class FullUpdate(TEBD2DImag):
             return
 
         if self.condition_tensors:
-            self._psi.equalize_norms_()
-            self._psi.balance_bonds_()
+            conditioner(self._psi, balance_bonds=self.condition_balance_bonds)
 
         # useful to store the bra that went into making the norm
         norm, _, self._bra = self._psi.make_norm(return_all=True)
@@ -1154,5 +1245,6 @@ class FullUpdate(TEBD2DImag):
             tags_plq=tags_plq,
             max_bond=self.D,
             optimize=self.contract_optimize,
+            condition_balance_bonds=self.condition_balance_bonds,
             **self._gate_opts
         )

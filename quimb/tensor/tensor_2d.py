@@ -1,12 +1,13 @@
 """Classes and algorithms related to 2D tensor networks.
 """
+import random
 import functools
 from operator import add
 from numbers import Integral
-from itertools import product, cycle, starmap, combinations
+from itertools import product, cycle, starmap, combinations, count
 from collections import defaultdict
 
-from autoray import do, infer_backend
+from autoray import do, infer_backend, get_dtype_name
 import opt_einsum as oe
 
 from ..gen.operators import swap
@@ -1851,6 +1852,7 @@ class TensorNetwork2DVector(TensorNetwork2D,
         tags=None,
         inplace=False,
         info=None,
+        swap_path=None,
         **compress_opts
     ):
         """Apply the dense gate ``G``, maintaining the physical indices of this
@@ -2010,11 +2012,15 @@ class TensorNetwork2DVector(TensorNetwork2D,
         # check if we are not nearest neighbour and need to swap first
         if abs(ij_b[0] - ij_a[0]) + abs(ij_b[1] - ij_a[1]) > 1:
 
-            # find a swap path
-            *swaps, final = gen_swap_path(ij_a, ij_b, move='ab')
+            if swap_path is None:
+                # find a swap path
+                *swaps, final = gen_swap_path(ij_a, ij_b)
+            else:
+                *swaps, final = swap_path
 
             # move the sites together
-            SWAP = get_swap(dp, dtype=G.dtype, backend=infer_backend(G))
+            SWAP = get_swap(dp, dtype=get_dtype_name(G),
+                            backend=infer_backend(G))
             for pair in swaps:
                 psi.gate_(SWAP, pair, contract=contract, absorb='right')
 
@@ -2025,14 +2031,16 @@ class TensorNetwork2DVector(TensorNetwork2D,
             psi.gate_(G, final, **compress_opts)
 
             if retrieve_svals:
-                info['singular_values', final] = info.pop('singular_values')
+                info['singular_values', tuple(sorted(final))] = \
+                    info.pop('singular_values')
 
-            compress_opts.setdefault('absorb', 'left')
+            compress_opts.setdefault('absorb', 'both')
             for pair in reversed(swaps):
                 psi.gate_(SWAP, pair, **compress_opts)
 
                 if retrieve_svals:
-                    info['singular_values', pair] = info.pop('singular_values')
+                    info['singular_values', tuple(sorted(pair))] = \
+                        info.pop('singular_values')
 
             return psi
 
@@ -2913,7 +2921,7 @@ def calc_plaquette_map(plaquettes):
     return mapping
 
 
-def gen_swap_path(ij_a, ij_b, move='ab'):
+def gen_swap_path(ij_a, ij_b, sequence=('av', 'bv', 'ah', 'bh')):
     """Generate the coordinates or a series of swaps that would bring ``ij_a``
     and ``ij_b`` together.
 
@@ -2936,8 +2944,13 @@ def gen_swap_path(ij_a, ij_b, move='ab'):
     di = ib - ia
     dj = jb - ja
 
-    while di or dj:
-        if di != 0 and 'a' in move:
+    if sequence == 'random':
+        poss_moves = (random.choice(('av', 'bv', 'ah', 'bh')) for _ in count())
+    else:
+        poss_moves = cycle(sequence)
+
+    for move in poss_moves:
+        if (move == 'av') and (di != 0):
             # move a vertically
             istep = min(max(di, -1), +1)
             new_ij_a = (ia + istep, ja)
@@ -2946,7 +2959,7 @@ def gen_swap_path(ij_a, ij_b, move='ab'):
             ia += istep
             di -= istep
 
-        if di != 0 and 'b' in move:
+        elif (move == 'bv') and (di != 0):
             # move b vertically
             istep = min(max(di, -1), +1)
             new_ij_b = (ib - istep, jb)
@@ -2959,7 +2972,7 @@ def gen_swap_path(ij_a, ij_b, move='ab'):
             ib -= istep
             di -= istep
 
-        if dj != 0 and 'a' in move:
+        elif (move == 'ah') and (dj != 0):
             # move a horizontally
             jstep = min(max(dj, -1), +1)
             new_ij_a = (ia, ja + jstep)
@@ -2968,7 +2981,7 @@ def gen_swap_path(ij_a, ij_b, move='ab'):
             ja += jstep
             dj -= jstep
 
-        if dj != 0 and 'b' in move:
+        elif (move == 'bh') and (dj != 0):
             # move b horizontally
             jstep = min(max(dj, -1), +1)
             new_ij_b = (ib, jb - jstep)
@@ -2980,6 +2993,9 @@ def gen_swap_path(ij_a, ij_b, move='ab'):
             ij_b = new_ij_b
             jb -= jstep
             dj -= jstep
+
+        if di == dj == 0:
+            return
 
 
 @functools.lru_cache(8)
