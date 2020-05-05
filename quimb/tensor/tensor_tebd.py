@@ -196,6 +196,8 @@ class TEBD:
     split_opts : dict, optional
         Compression options applied for splitting after gate application, see
         :func:`~quimb.tensor.tensor_core.tensor_split`.
+    imag : bool, optional
+        Enable imaginary time evolution. Defaults to false.
 
     See Also
     --------
@@ -203,7 +205,7 @@ class TEBD:
     """
 
     def __init__(self, p0, H, dt=None, tol=None, t0=0.0,
-                 split_opts=None, progbar=True):
+                 split_opts=None, progbar=True, imag=False):
         # prepare initial state
         self._pt = p0.copy()
         self._pt.canonize(0)
@@ -232,6 +234,7 @@ class TEBD:
             raise ValueError("Can't set default for both ``dt`` and ``tol``.")
         self.dt = self._dt = dt
         self.tol = tol
+        self.imag = imag
 
         # misc other options
         self.progbar = progbar
@@ -263,7 +266,8 @@ class TEBD:
         try:
             return self._U_ints[dt_frac, sites]
         except KeyError:
-            U = qu.expm(-1.0j * self._dt * dt_frac * self.H(sites))
+            imag_factor = 1.0 if self.imag else 1.0j
+            U = qu.expm(-imag_factor * self._dt * dt_frac * self.H(sites))
             self._U_ints[dt_frac, sites] = U
             return U
 
@@ -318,6 +322,7 @@ class TEBD:
         # ------------------------------------------------------------------- #
 
         if direction == 'right':
+            final_site_ind = -1
             # Apply even gates:
             #
             #     o-<-<-<-<-<-<-<-<-<-   -<-<
@@ -332,8 +337,10 @@ class TEBD:
                 self._pt.left_canonize(start=max(0, i - 1), stop=i)
                 self._pt.gate_split_(
                     U, where=sites, absorb='right', **self.split_opts)
+            self._pt.left_canonize_site(self.N - 2)
 
         elif direction == 'left':
+            final_site_ind = 0
             # Apply odd gates:
             #
             #     >->->-   ->->->->->->->->-o
@@ -352,6 +359,11 @@ class TEBD:
 
             # one extra canonicalization not included in last split
             self._pt.right_canonize_site(1)
+
+        # Renormalise after imaginary time evolution
+        if self.imag:
+            factor = self._pt[final_site_ind].norm()
+            self._pt[final_site_ind] /= factor
 
     def _step_order2(self, tau=1, **sweep_opts):
         """Perform a single, second order step.
