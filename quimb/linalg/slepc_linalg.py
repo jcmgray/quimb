@@ -64,12 +64,12 @@ _petsc_slepc_handler = _PetscSlepcHandler()
 
 def get_petsc(comm=None):
     global _petsc_slepc_handler
-    return _petsc_slepc_handler.get_petsc()
+    return _petsc_slepc_handler.get_petsc(comm=comm)
 
 
 def get_slepc(comm=None):
     global _petsc_slepc_handler
-    return _petsc_slepc_handler.get_slepc()
+    return _petsc_slepc_handler.get_slepc(comm=comm)
 
 
 # --------------------------------------------------------------------------- #
