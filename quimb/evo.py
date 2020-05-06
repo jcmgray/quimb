@@ -13,9 +13,12 @@ from scipy.sparse.linalg import LinearOperator
 
 from .core import (qarray, isop, ldmul, rdmul, explt,
                    dot, issparse, qu, eye, dag, make_immutable)
-from .linalg.base_linalg import eigh, norm, expm_multiply
+from .linalg.base_linalg import eigh, norm, expm_multiply, Lazy
 from .linalg.approx_spectral import norm_fro_approx
 from .utils import continuous_progbar, progbar
+
+
+CALLABLE_TIME_INDEP_CLASSES = (LinearOperator, Lazy)
 
 
 # --------------------------------------------------------------------------- #
@@ -359,7 +362,10 @@ class Evolution(object):
         self._d = p0.shape[0]  # Hilbert space dimension
         self._progbar = progbar
 
-        self._timedep = callable(ham) and not isinstance(ham, LinearOperator)
+        self._timedep = (
+            callable(ham) and
+            not isinstance(ham, CALLABLE_TIME_INDEP_CLASSES)
+        )
 
         if self._timedep:
             # cache the time-dependent Hamiltonian in case callbacks use it

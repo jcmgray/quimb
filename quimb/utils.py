@@ -231,5 +231,5 @@ class Verbosify:  # pragma: no cover
         if self.highlight is None:
             print(f"{pre_msg} args {args}, kwargs {kwargs}")
         else:
-            print("{pre_msg}{self.highlight}={kwargs[self.highlight]}")
+            print(f"{pre_msg}{self.highlight}={kwargs[self.highlight]}")
         return self.fn(*args, **kwargs)
