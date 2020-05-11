@@ -12,17 +12,17 @@ import opt_einsum as oe
 
 from ..gen.operators import swap
 from ..gen.rand import randn, seed_rand
-from ..utils import print_multi_line, check_opt
+from ..utils import print_multi_line, check_opt, pairwise
 from . import array_ops as ops
 from .tensor_core import (
     Tensor,
+    bonds,
     rand_uuid,
     utup_union,
-    utup_discard,
+    utup_difference,
     tags_to_utup,
     TensorNetwork,
     tensor_contract,
-    TNLinearOperator,
 )
 from .tensor_1d import maybe_factor_gate_into_tensor
 
@@ -1742,6 +1742,154 @@ def group_inds(t1, t2):
     return lix, six, rix
 
 
+def gate_string_split_(TG, where, string, original_ts, bonds_along,
+                       reindex_map, site_ix, info, **compress_opts):
+
+    # the outer, neighboring indices of each tensor in the string
+    neighb_inds = []
+
+    # tensors we are going to contract in the blob, reindex some to attach gate
+    contract_ts = []
+
+    for t, coo in zip(original_ts, string):
+        neighb_inds.append(utup_difference(t.inds, bonds_along))
+        contract_ts.append(t.reindex(reindex_map) if coo in where else t)
+
+    # form the central blob of all sites and gate contracted
+    blob = tensor_contract(*contract_ts, TG)
+
+    # one by one extract the site tensors again
+    new_ts = [None] * len(string)
+
+    for i in range(len(string) - 1):
+        lix = neighb_inds[i]
+        if i > 0:
+            lix += (bonds_along[i - 1],)
+        bix = bonds_along[i]
+
+        new_ts[i], *maybe_svals, blob = blob.split(
+            left_inds=lix, bond_ind=bix, get='tensors', **compress_opts)
+
+        # if singular values are returned (``absorb=None``) check if we should
+        #     return them via ``info``, e.g. for ``SimpleUpdate``
+        if maybe_svals and info is not None:
+            coo_pair = tuple(sorted((string[i], string[i + 1])))
+            info['singular_values', coo_pair] = maybe_svals[0].data
+
+    # remaining blob is the final tensor
+    new_ts[-1] = blob
+
+    # transpose to match original tensors and update original data
+    for to, tn in zip(original_ts, new_ts):
+        tn.transpose_like_(to)
+        to.modify(data=tn.data)
+
+
+def gate_string_reduce_split_(TG, where, string, original_ts, bonds_along,
+                              reindex_map, site_ix, info, **compress_opts):
+
+    # indices to reduce, first and final include physical indices for gate
+    inds_to_reduce = [(bonds_along[0], site_ix[0])]
+    for b1, b2 in pairwise(bonds_along):
+        inds_to_reduce.append((b1, b2))
+    inds_to_reduce.append((bonds_along[-1], site_ix[-1]))
+
+    # tensors that remain on the string sites and those pulled into string
+    outer_ts, inner_ts = [], []
+    for coo, rix, t in zip(string, inds_to_reduce, original_ts):
+        tq, tr = t.split(left_inds=None, right_inds=rix,
+                         method='qr', get='tensors')
+        outer_ts.append(tq)
+        inner_ts.append(tr.reindex_(reindex_map) if coo in where else tr)
+
+    # contract the blob of gate with reduced tensors only
+    blob = tensor_contract(*inner_ts, TG)
+
+    regauge = []
+
+    # extract the new reduced tensors sequentially from each end
+    i = 0
+    j = len(string) - 1
+
+    while True:
+
+        # extract at beginning of string
+        lix = bonds(blob, outer_ts[i])
+        if i == 0:
+            lix += (site_ix[0],)
+        else:
+            lix += (bonds_along[i - 1],)
+
+        # the original bond we are restoring
+        bix = bonds_along[i]
+
+        inner_ts[i], *maybe_svals, blob = blob.split(
+            left_inds=lix, get='tensors',
+            bond_ind=bix, **compress_opts)
+
+        # if singular values are returned (``absorb=None``) check if we should
+        #     return them via ``info``, e.g. for ``SimpleUpdate`
+        if maybe_svals and info is not None:
+            s = next(iter(maybe_svals)).data
+            coo_pair = tuple(sorted((string[i], string[i + 1])))
+            info['singular_values', coo_pair] = s
+
+            if i != j - 1:
+                # gauge the blob but record to reguage bond at end
+                blob.multiply_index_diagonal_(bix, s)
+                regauge.append((i + 1, bix, s))
+
+        i += 1
+        if i == j:
+            inner_ts[i] = blob
+            break
+
+        # extract at end of string
+        lix = bonds(blob, outer_ts[j])
+        if j == len(string) - 1:
+            lix += (site_ix[-1],)
+        else:
+            lix += (bonds_along[j],)
+
+        # the original bond we are restoring
+        bix = bonds_along[j - 1]
+
+        inner_ts[j], *maybe_svals, blob = blob.split(
+            left_inds=lix, get='tensors', bond_ind=bix, **compress_opts)
+
+        # if singular values are returned (``absorb=None``) check if we should
+        #     return them via ``info``, e.g. for ``SimpleUpdate`
+        if maybe_svals and info is not None:
+            s = next(iter(maybe_svals)).data
+            coo_pair = tuple(sorted((string[j - 1], string[j])))
+            info['singular_values', coo_pair] = s
+
+            if j != i + 1:
+                # gauge the blob but record to reguage bond at end
+                blob.multiply_index_diagonal_(bix, s)
+                regauge.append((j - 1, bix, s))
+
+        j -= 1
+        if j == i:
+            inner_ts[j] = blob
+            break
+
+    # reabsorb the inner reduced tensors into the sites
+    new_ts = [
+        tensor_contract(ts, tr, output_inds=to.inds)
+        for to, ts, tr in zip(original_ts, outer_ts, inner_ts)
+    ]
+
+    # ungauge the site tensors along bond if necessary
+    for i, bix, s in regauge:
+        t = new_ts[i]
+        t.multiply_index_diagonal_(bix, s**-1)
+
+    # update originals
+    for to, t in zip(original_ts, new_ts):
+        to.modify(data=t.data)
+
+
 class TensorNetwork2DVector(TensorNetwork2D,
                             TensorNetwork):
     """Mixin class  for a 2D square lattice vector TN, i.e. one with a single
@@ -1852,6 +2000,7 @@ class TensorNetwork2DVector(TensorNetwork2D,
         tags=None,
         inplace=False,
         info=None,
+        use_swaps=False,
         swap_path=None,
         **compress_opts
     ):
@@ -1865,8 +2014,7 @@ class TensorNetwork2DVector(TensorNetwork2D,
             shape ``(phys_dim,) * (2 * len(where))``.
         where : sequence of tuple[int, int] or tuple[int, int]
             Which site coordinates to apply the gate to.
-        contract : {'reduce-split', 'lazy-split', 'split',
-                    False, True}, optional
+        contract : {'reduce-split', 'split', False, True}, optional
             How to contract the gate into the 2D tensor network:
 
                 - False: gate is added to network and nothing is contracted,
@@ -1880,9 +2028,6 @@ class TensorNetwork2DVector(TensorNetwork2D,
                   'R-factors' using QR decompositions on the original site
                   tensors, then contract the gate, split it and reabsorb each
                   side. Much cheaper than ``'split'``.
-                - 'lazy-split': form the three tensor 'linear operator' of the
-                  two original site tensors and gate lazily, then directly
-                  decompose it probably using an iterative method.
 
             The final three methods are relevant for two site gates only, for
             single site gates they use the ``contract=True`` option which also
@@ -1931,14 +2076,6 @@ class TensorNetwork2DVector(TensorNetwork2D,
              ╱   ╱           ╱   ╱
              <SVD>
 
-        ``contract='lazy-split'``::
-
-              │   │    (via 'vector' products with left / right indices only)
-              GGGGG
-              │╱  │╱          │╱  │╱
-            ──●───●──  ==>  ──G┄┄┄G──
-             ╱   ╱           ╱   ╱
-
         ``contract='reduce-split'``::
 
                │   │             │ │
@@ -1951,6 +2088,8 @@ class TensorNetwork2DVector(TensorNetwork2D,
         For one site gates when one of the 'split' methods is supplied
         ``contract=True`` is assumed.
         """
+        check_opt("contract", contract, (False, True, 'split', 'reduce-split'))
+
         psi = self if inplace else self.copy()
 
         if is_lone_coo(where):
@@ -1969,6 +2108,7 @@ class TensorNetwork2DVector(TensorNetwork2D,
         site_ix = [psi.site_ind(i, j) for i, j in where]
         # new indices to join old physical sites to new gate
         bnds = [rand_uuid() for _ in range(ng)]
+        reindex_map = dict(zip(site_ix, bnds))
 
         TG = Tensor(G, inds=site_ix + bnds, tags=tags, left_inds=bnds)
 
@@ -1980,7 +2120,7 @@ class TensorNetwork2DVector(TensorNetwork2D,
             #     ──●───●──
             #      ╱   ╱
             #
-            psi.reindex_(dict(zip(site_ix, bnds)))
+            psi.reindex_(reindex_map)
             psi |= TG
             return psi
 
@@ -1990,7 +2130,7 @@ class TensorNetwork2DVector(TensorNetwork2D,
             #     ──GGGGG──
             #      ╱   ╱
             #
-            psi.reindex_(dict(zip(site_ix, bnds)))
+            psi.reindex_(reindex_map)
 
             # get the sites that used to have the physical indices
             site_tids = psi._get_tids_from_inds(bnds, which='any')
@@ -2004,13 +2144,8 @@ class TensorNetwork2DVector(TensorNetwork2D,
         # following are all based on splitting tensors to maintain structure
         ij_a, ij_b = where
 
-        retrieve_svals = (
-            compress_opts.get('absorb', 'both') is None and
-            (info is not None)
-        )
-
         # check if we are not nearest neighbour and need to swap first
-        if abs(ij_b[0] - ij_a[0]) + abs(ij_b[1] - ij_a[1]) > 1:
+        if use_swaps and (abs(ij_b[0] - ij_a[0]) + abs(ij_b[1] - ij_a[1])) > 1:
 
             if swap_path is None:
                 # find a swap path
@@ -2030,22 +2165,20 @@ class TensorNetwork2DVector(TensorNetwork2D,
             # perform actual gate also compressing etc on 'way back'
             psi.gate_(G, final, **compress_opts)
 
-            if retrieve_svals:
-                info['singular_values', tuple(sorted(final))] = \
-                    info.pop('singular_values')
-
             compress_opts.setdefault('absorb', 'both')
             for pair in reversed(swaps):
                 psi.gate_(SWAP, pair, **compress_opts)
 
-                if retrieve_svals:
-                    info['singular_values', tuple(sorted(pair))] = \
-                        info.pop('singular_values')
-
             return psi
 
-        TL, TR = psi[ij_a], psi[ij_b]
-        lix, _, rix = group_inds(TL.inds, TR.inds)
+        # generate a string connecting the sites
+        string = tuple(gen_string(*where))
+
+        # the tensors along this string, which will be updated
+        original_ts = [psi[coo] for coo in string]
+
+        # the len(string) - 1 indices connecting the string
+        bonds_along = [bonds(t1, t2)[0] for t1, t2 in pairwise(original_ts)]
 
         if contract == 'split':
             #
@@ -2053,32 +2186,9 @@ class TensorNetwork2DVector(TensorNetwork2D,
             #     ──GGGGG──  ==>  ──G┄┄┄G──
             #      ╱   ╱           ╱   ╱
             #
-            # form dense tensor, moving physical indices onto gate
-            TLRG = tensor_contract(
-                TL.reindex({site_ix[0]: bnds[0]}),
-                TR.reindex({site_ix[1]: bnds[1]}),
-                TG)
-            split_res = TLRG.split(
-                left_inds=lix, right_inds=rix, get='tensors', **compress_opts)
-            TL_new, TR_new = split_res[0], split_res[-1]
-
-        elif contract == 'lazy-split':
-            #
-            #       │   │     (via iterative decomposition - don't form dense)
-            #       GGGGG
-            #       │╱  │╱          │╱  │╱
-            #     ──●───●──  ==>  ──G┄┄┄G──
-            #      ╱   ╱           ╱   ╱
-            #
-            # form effective linop, moving physical indices onto gate
-            TLRG = TNLinearOperator(
-                (TL.reindex({site_ix[0]: bnds[0]}),
-                 TR.reindex({site_ix[1]: bnds[1]}),
-                 TG),
-                left_inds=lix, right_inds=rix
-            )
-            split_res = TLRG.split(get='tensors', **compress_opts)
-            TL_new, TR_new = split_res[0], split_res[-1]
+            gate_string_split_(
+                TG, where, string, original_ts, bonds_along,
+                reindex_map, site_ix, info, **compress_opts)
 
         elif contract == 'reduce-split':
             #
@@ -2089,36 +2199,9 @@ class TensorNetwork2DVector(TensorNetwork2D,
             #      ╱   ╱           ╱     ╱           ╱     ╱           ╱   ╱
             #    <QR> <LQ>                            <SVD>
             #
-            # reduce the site tensors
-            TL_Q, TL_R = TL.split(
-                left_inds=utup_discard(lix, site_ix[0]), method='qr')
-            TR_Q, TR_L = TR.split(
-                left_inds=utup_discard(rix, site_ix[1]), method='qr')
-
-            # contract in the gate tensor (moving physical indices onto gate)
-            TLRG = tensor_contract(
-                TL_R.reindex({site_ix[0]: bnds[0]}),
-                TR_L.reindex({site_ix[1]: bnds[1]}),
-                TG)
-
-            # split the new tensor living on the bond
-            lbnd, = TL_Q.bonds(TLRG)
-            split_res = TLRG.split(
-                left_inds=(lbnd, site_ix[0]), get='tensors', **compress_opts)
-            TLRG_L, TLRG_R = split_res[0], split_res[-1]
-
-            # absorb the factors back into site tensors
-            TL_new = TL_Q @ TLRG_L
-            TR_new = TR_Q @ TLRG_R
-
-        TL_new.transpose_like_(TL)
-        TR_new.transpose_like_(TR)
-        TL.modify(data=TL_new.data)
-        TR.modify(data=TR_new.data)
-
-        # optionally
-        if retrieve_svals:
-            info['singular_values'] = split_res[1].data
+            gate_string_reduce_split_(
+                TG, where, string, original_ts, bonds_along,
+                reindex_map, site_ix, info, **compress_opts)
 
         return psi
 
@@ -2919,6 +3002,44 @@ def calc_plaquette_map(plaquettes):
             mapping[ij_a, ij_b] = p
 
     return mapping
+
+
+def gen_string(ij_a, ij_b, sequence=('v', 'h')):
+    """Generate a string of coordinates, in order, from ``ij_a`` to ``ij_b``.
+    """
+    ia, ja = ij_a
+    ib, jb = ij_b
+    di = ib - ia
+    dj = jb - ja
+
+    if sequence == 'random':
+        poss_moves = (random.choice(('v', 'h')) for _ in count())
+    else:
+        poss_moves = cycle(sequence)
+
+    yield ij_a
+
+    for move in poss_moves:
+        if abs(di) + abs(dj) == 1:
+            yield ij_b
+            return
+
+        if (move == 'v') and (di != 0):
+            # move a vertically
+            istep = min(max(di, -1), +1)
+            new_ij_a = (ia + istep, ja)
+            yield new_ij_a
+            ij_a = new_ij_a
+            ia += istep
+            di -= istep
+        elif (move == 'h') and (dj != 0):
+            # move a horizontally
+            jstep = min(max(dj, -1), +1)
+            new_ij_a = (ia, ja + jstep)
+            yield new_ij_a
+            ij_a = new_ij_a
+            ja += jstep
+            dj -= jstep
 
 
 def gen_swap_path(ij_a, ij_b, sequence=('av', 'bv', 'ah', 'bh')):

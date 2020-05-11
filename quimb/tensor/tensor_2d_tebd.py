@@ -1,6 +1,6 @@
 import random
 import collections
-from itertools import product, starmap, chain
+from itertools import product, starmap
 
 import tqdm
 import numpy as np
@@ -8,15 +8,16 @@ import scipy.sparse.linalg as spla
 from opt_einsum import shared_intermediates
 from autoray import do, dag, conj, reshape, to_numpy
 
-from .graphing import get_colors
 from ..core import eye, kron, qarray
-from .tensor_core import Tensor, contract_strategy, utup
+from ..utils import pairwise
+from .graphing import get_colors
+from .tensor_core import Tensor, contract_strategy
 from .optimize import TNOptimizer
 from .tensor_2d import (
     calc_plaquette_sizes,
     calc_plaquette_map,
     plaquette_to_sites,
-    gen_swap_path,
+    gen_string,
 )
 
 
@@ -501,6 +502,7 @@ class TEBD2DImag:
         compute_energy_final=True,
         compute_energy_opts=None,
         compute_energy_fn=None,
+        compute_energy_per_site=False,
         callback=None,
         keep_best=False,
         progbar=True,
@@ -538,6 +540,7 @@ class TEBD2DImag:
         self.compute_energy_every = compute_energy_every
         self.compute_energy_final = compute_energy_final
         self.compute_energy_fn = compute_energy_fn
+        self.compute_energy_per_site = bool(compute_energy_per_site)
 
         if ordering is None or isinstance(ordering, str):
             self.ordering = self.ham.get_auto_ordering(ordering)
@@ -605,6 +608,9 @@ class TEBD2DImag:
             en = self.compute_energy_fn(self)
         else:
             en = self.compute_energy()
+
+        if self.compute_energy_per_site:
+            en = en / (self.ham.Lx * self.ham.Ly)
 
         self.energies.append(float(en))
         self.taus.append(float(self.tau))
@@ -778,16 +784,9 @@ class SimpleUpdate(TEBD2DImag):
         ija, ijb = where
         ia, ja = ija
         ib, jb = ijb
-        is_nearest_neighbour = (abs(ib - ia) + abs(jb - ja) == 1)
 
         # get the string linking the two sites
-        if is_nearest_neighbour:
-            swap_path = None
-            string = (ija, ijb)
-        else:
-            swap_path = tuple(
-                gen_swap_path(*where, sequence=self.swap_sequence))
-            string = utup(chain.from_iterable(swap_path))
+        string = tuple(gen_string(ija, ijb))
 
         def env_neighbours(i, j):
             return tuple(filter(
@@ -807,7 +806,7 @@ class SimpleUpdate(TEBD2DImag):
                     ind=Tsval.inds[0], x=(Tsval.data + self.gauge_smudge))
 
         # absorb the inner bond gauges equally into both sites along string
-        for site_a, site_b in zip(string[:-1], string[1:]):
+        for site_a, site_b in pairwise(string):
             Ta, Tb = self._psi[site_a], self._psi[site_b]
             Tsval = self.gauges[tuple(sorted((site_a, site_b)))]
             bnd, = Tsval.inds
@@ -816,26 +815,17 @@ class SimpleUpdate(TEBD2DImag):
 
         # perform the gate, retrieving new bond singular values
         info = dict()
-        self._psi.gate_(U, where, absorb=None, info=info,
-                        swap_path=swap_path, **self.gate_opts)
+        self._psi.gate_(U, where, absorb=None, info=info, **self.gate_opts)
 
-        if is_nearest_neighbour:
-            s = info['singular_values']
+        # set the new singualar values all along the chain
+        for site_a, site_b in pairwise(string):
+            bond_pair = tuple(sorted((site_a, site_b)))
+            s = info['singular_values', bond_pair]
             if self.gauge_renorm:
                 # keep the singular values from blowing up
                 s = s / do('sum', s**2)**0.5
+            Tsval = self.gauges[bond_pair]
             Tsval.modify(data=s)
-
-        else:
-            # set the new singualar values all along the chain
-            for site_a, site_b in zip(string[:-1], string[1:]):
-                bond_pair = tuple(sorted((site_a, site_b)))
-                s = info['singular_values', bond_pair]
-                if self.gauge_renorm:
-                    # keep the singular values from blowing up
-                    s = s / do('sum', s**2)**0.5
-                Tsval = self.gauges[bond_pair]
-                Tsval.modify(data=s)
 
         # absorb the 'outer' gauges from these neighbours
         for site in string:

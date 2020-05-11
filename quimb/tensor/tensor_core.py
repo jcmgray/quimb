@@ -522,7 +522,8 @@ def tensor_split(
         The tensor (network) to split.
     left_inds : str or sequence of str
         The index or sequence of inds, which ``T`` should already have, to
-        split to the 'left'.
+        split to the 'left'. You can supply ``None`` here if you supply
+        ``right_inds`` instead.
     method : str, optional
         How to split the tensor, only some methods allow bond truncation:
 
@@ -605,9 +606,13 @@ def tensor_split(
     """
     check_opt('get', get, _VALID_SPLIT_GET)
 
-    left_inds = tags_to_utup(left_inds)
+    if left_inds is None:
+        left_inds = utup_difference(T.inds, right_inds)
+    else:
+        left_inds = tags_to_utup(left_inds)
+
     if right_inds is None:
-        right_inds = tuple(x for x in T.inds if x not in left_inds)
+        right_inds = utup_difference(T.inds, left_inds)
 
     if isinstance(T, spla.LinearOperator):
         left_dims = T.ldims
@@ -3695,7 +3700,9 @@ class TensorNetwork(object):
         for each of inds in ``inds_seqs``. E.g. to convert several sites
         into a density matrix: ``TN.to_dense(('k0', 'k1'), ('b0', 'b1'))``.
         """
-        return self.contract(**contract_opts).to_dense(*inds_seq)
+        T = self.contract(
+            all, output_inds=tuple(concat(inds_seq)), **contract_opts)
+        return T.to_dense(*inds_seq)
 
     # --------------- information about indices and dimensions -------------- #
 
