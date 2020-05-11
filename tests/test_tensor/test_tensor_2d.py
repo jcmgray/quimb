@@ -95,7 +95,7 @@ class TestPEPSConstruct:
         assert tn ^ all == pytest.approx(xe)
 
     @pytest.mark.parametrize(
-        'contract', [False, True, 'split', 'lazy-split', 'reduce-split'])
+        'contract', [False, True, 'split', 'reduce-split'])
     @pytest.mark.parametrize('where', [
         [(1, 1), (2, 1)], [(3, 2), (2, 2)],
     ])
@@ -120,7 +120,7 @@ class TestPEPSConstruct:
         xe = (psi_d.H @ IGI @ psi_d).item()
 
         tn = psi.H & psi.gate(G, where, contract=contract)
-        change = {False: 1, True: -1, 'split': 0, 'lazy-split': 0,
+        change = {False: 1, True: -1, 'split': 0,
                   'reduce-split': 0}[contract]
         assert len(tn.tensors) == 2 * Lx * Ly + change
 
