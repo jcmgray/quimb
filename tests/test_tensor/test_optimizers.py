@@ -94,7 +94,7 @@ def test_optimize_pbc_heis_torch(heis_pbc):
 
 
 def test_vectorizer():
-    from quimb.tensor.optimize_autograd import Vectorizer
+    from quimb.tensor.optimize import Vectorizer
 
     shapes = [(2, 3), (4, 5), (6, 7, 8)]
     dtypes = ['complex64', 'float32', 'complex64']
@@ -175,5 +175,5 @@ def test_parametrized_circuit(backend):
         loss_target=-0.99,
     )
     psi_opt = tnopt.optimize(20)
-    assert sum(l < -0.99 for l in tnopt.losses) == 1
+    assert sum(loss < -0.99 for loss in tnopt.losses) == 1
     assert qu.fidelity(psi_opt.to_dense(), gs) > 0.99
