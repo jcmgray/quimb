@@ -567,6 +567,21 @@ class TestTensorFunctions:
         )
         assert z1.almost_equals(z2)
 
+    @pytest.mark.parametrize("smudge", [1e-6, 1e-12])
+    def test_balance_bonds(self, smudge):
+        t1 = rand_tensor((3, 4), 'ab')
+        t2 = rand_tensor((4, 5), 'bc')
+        col_nrm_x1 = tensor_contract(t1.H, t1, output_inds='b').data
+        col_nrm_y1 = tensor_contract(t2.H, t2, output_inds='b').data
+        assert not np.allclose(col_nrm_x1, col_nrm_y1, rtol=1e-6)
+        z1 = (t1 @ t2).data
+        qtn.tensor_balance_bond(t1, t2, smudge=smudge)
+        col_nrm_x2 = tensor_contract(t1.H, t1, output_inds='b').data
+        col_nrm_y2 = tensor_contract(t2.H, t2, output_inds='b').data
+        assert_allclose(col_nrm_x2, col_nrm_y2, rtol=10 * smudge)
+        z2 = (t1 @ t2).data
+        assert_allclose(z1, z2)
+
 
 class TestTensorNetwork:
     def test_combining_tensors(self):

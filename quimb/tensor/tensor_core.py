@@ -765,14 +765,24 @@ def tensor_compress_bond(T1, T2, absorb='both', **compress_opts):
     T2.modify(data=T2C.data)
 
 
-def tensor_balance_bond(t1, t2):
+def tensor_balance_bond(t1, t2, smudge=1e-6):
     """Gauge the bond between two tensors such that the norm of the 'columns'
     of the tensors on each side is the same for each index of the bond.
+
+    Parameters
+    ----------
+    t1 : Tensor
+        The first tensor, should share a single index with ``t2``.
+    t2 : Tensor
+        The second tensor, should share a single index with ``t1``.
+    smudge : float, optional
+        Avoid numerical issues by 'smudging' the correctional factor by this
+        much - the gauging introduced is still exact.
     """
     ix, = bonds(t1, t2)
     x = tensor_contract(t1.H, t1, output_inds=[ix]).data
     y = tensor_contract(t2.H, t2, output_inds=[ix]).data
-    s = (x / y)
+    s = (x + smudge) / (y + smudge)
     t1.multiply_index_diagonal_(ix, s**-0.25)
     t2.multiply_index_diagonal_(ix, s**+0.25)
 
