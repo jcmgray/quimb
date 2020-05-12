@@ -3700,8 +3700,9 @@ class TensorNetwork(object):
         for each of inds in ``inds_seqs``. E.g. to convert several sites
         into a density matrix: ``TN.to_dense(('k0', 'k1'), ('b0', 'b1'))``.
         """
+        tags = contract_opts.pop('tags', all)
         T = self.contract(
-            all, output_inds=tuple(concat(inds_seq)), **contract_opts)
+            tags, output_inds=tuple(concat(inds_seq)), **contract_opts)
         return T.to_dense(*inds_seq)
 
     # --------------- information about indices and dimensions -------------- #

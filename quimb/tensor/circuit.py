@@ -650,7 +650,7 @@ class Circuit:
         if reverse:
             inds = inds[::-1]
 
-        p_dense = psi.to_dense(inds, tags=all, **contract_opts)
+        p_dense = psi.to_dense(inds, **contract_opts)
         return p_dense
 
     def simulate_counts(self, C, seed=None, reverse=False, **contract_opts):

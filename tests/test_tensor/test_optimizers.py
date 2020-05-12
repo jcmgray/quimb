@@ -124,7 +124,7 @@ def test_optimize_pbc_heis(heis_pbc, backend, method):
         loss_fn,
         norm_fn,
         loss_constants={'H': H},
-        autograd_backend=backend,
+        autodiff_backend=backend,
     )
     if method == 'simple':
         psi_opt = tnopt.optimize(100)
@@ -143,7 +143,7 @@ def test_optimize_ham_mbl_complex(ham_mbl_pbc_complex, backend, method):
         loss_fn,
         norm_fn,
         loss_constants={'H': H},
-        autograd_backend=backend,
+        autodiff_backend=backend,
     )
     if method == 'simple':
         psi_opt = tnopt.optimize(100)
@@ -171,7 +171,7 @@ def test_parametrized_circuit(backend):
         loss,
         tags='U3',
         loss_constants=dict(target=T_gs),
-        autograd_backend=backend,
+        autodiff_backend=backend,
         loss_target=-0.99,
     )
     psi_opt = tnopt.optimize(20)
