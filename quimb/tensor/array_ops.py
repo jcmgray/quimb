@@ -5,13 +5,20 @@ import itertools
 import numpy
 from autoray import do, reshape, transpose, dag, infer_backend, get_dtype_name
 
-from ..core import njit
+from ..core import njit, qarray
 from ..linalg.base_linalg import norm_fro_dense
 
 
 def asarray(array):
-    if isinstance(array, numpy.matrix) or not hasattr(array, 'shape'):
+    """Maybe convert data for a tensor to use.
+    """
+    should_convert_to_numpy = (
+        isinstance(array, (numpy.matrix, qarray)) or
+        not hasattr(array, 'shape'))
+
+    if should_convert_to_numpy:
         return numpy.asarray(array)
+
     return array
 
 
