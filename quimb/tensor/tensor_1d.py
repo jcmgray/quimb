@@ -80,7 +80,7 @@ def align_TN_1D(*tns, ind_ids=None, inplace=False):
                 tn.lower_ind_id = ind_ids[i]
 
         else:
-            raise ValueError("Can only align MPS and MPOs currently.")
+            raise ValueError("Can only align MPSs, LPSs and MPOs currently.")
 
     return tns
 
@@ -2349,6 +2349,636 @@ class MatrixProductState(TensorNetwork1DVector,
 
         # clip below 0
         return max(0, log2(tr_norm))
+
+
+class LocallyPurifiedState(TensorNetwork1DVector,
+                           TensorNetwork1DFlat,
+                           TensorNetwork1D,
+                           TensorNetwork):
+    """Initialise a locally purified state, with auto labelling and tagging.
+
+    Parameters
+    ----------
+    arrays : sequence of arrays
+        The tensor arrays to form into an LPS.
+    shape : str, optional
+        String specifying layout of the tensors. E.g. 'lrpk' (the default)
+        indicates the shape corresponds left-bond, right-bond, physical index and
+        Kraus index. End tensors have either 'l' or 'r' dropped from the string.
+    site_ind_id : str
+        A string specifiying how to label the physical site indices. Should
+        contain a ``'{}'`` placeholder. It is used to generate the actual
+        indices like: ``map(site_ind_id.format, range(len(arrays)))``.
+    kraus_ind_id : str
+        A string specifiying how to label the Kraus site indices. Should
+        contain a ``'{}'`` placeholder. It is used to generate the actual
+        indices like: ``map(kraus_ind_id.format, range(len(arrays)))``.
+    site_tag_id : str
+        A string specifiying how to tag the tensors at each site. Should
+        contain a ``'{}'`` placeholder. It is used to generate the actual tags
+        like: ``map(site_tag_id.format, range(len(arrays)))``.
+    tags : str or sequence of str, optional
+        Global tags to attach to all tensors.
+    bond_name : str, optional
+        The base name of the bond indices, onto which uuids will be added.
+    """
+
+
+    _EXTRA_PROPS = ('_site_ind_id', '_kraus_ind_id', '_site_tag_id', 'cyclic')
+
+    def __init__(self, arrays, *, shape='lrpk', tags=None, bond_name="",
+                 site_ind_id='k{}', kraus_ind_id='kr{}', site_tag_id='I{}', sites=None,
+                 nsites=None, **tn_opts):
+
+        # short-circuit for copying LPSs
+        if isinstance(arrays, LocallyPurifiedState):
+            super().__init__(arrays)
+            return
+
+        arrays = tuple(arrays)
+
+        if sites is None:
+            if nsites is None:
+                nsites = len(arrays)
+            sites = range(nsites)
+
+        # process site indices
+        self._site_ind_id = site_ind_id
+        self._kraus_ind_id = kraus_ind_id
+        site_inds = map(site_ind_id.format, sites)
+        kraus_inds = map(kraus_ind_id.format, sites)
+
+        # process site tags
+        self._site_tag_id = site_tag_id
+        site_tags = map(site_tag_id.format, sites)
+        if tags is not None:
+            if isinstance(tags, str):
+                tags = (tags,)
+            else:
+                tags = tuple(tags)
+
+            site_tags = tuple((st,) + tags for st in site_tags)
+
+        self.cyclic = (ops.ndim(arrays[0]) == 4)
+
+        # transpose arrays to 'lrpk' order.
+        def gen_orders():
+            lpk_ord = tuple(shape.replace('r', "").find(x) for x in 'lpk')
+            rpk_ord = tuple(shape.replace('l', "").find(x) for x in 'rpk')
+            lrpk_ord = tuple(shape.find(x) for x in 'lrpk')
+            yield lpk_ord if not self.cyclic else lrpk_ord
+            for _ in range(len(sites) - 2):
+                yield lrpk_ord
+            yield rpk_ord if not self.cyclic else lrpk_ord
+
+        def gen_inds():
+            cyc_bond = (rand_uuid(base=bond_name),) if self.cyclic else ()
+
+            nbond = rand_uuid(base=bond_name)
+            yield (*cyc_bond, nbond, next(site_inds), next(kraus_inds))
+            pbond = nbond
+            for _ in range(len(sites) - 2):
+                nbond = rand_uuid(base=bond_name)
+                yield (pbond, nbond, next(site_inds), next(kraus_inds))
+                pbond = nbond
+            yield (pbond, *cyc_bond, next(site_inds), next(kraus_inds))
+
+        def gen_tensors():
+            for array, site_tag, inds, order in zip(arrays, site_tags,
+                                                    gen_inds(), gen_orders()):
+                yield Tensor(array.transpose(*order), inds=inds, tags=site_tag)
+
+        super().__init__(gen_tensors(), structure=site_tag_id, sites=sites,
+                         nsites=nsites, check_collisions=False, **tn_opts)
+
+    @classmethod
+    def from_dense(cls, rho, dims, site_ind_id='k{}', kraus_ind_id='kr{}',
+                   site_tag_id='I{}', **split_opts):
+        """Create a ``LocallyPurifiedState`` directly from a dense matrix
+
+        Parameters
+        ----------
+        rho : array_like
+            The dense mixed state to convert to LPS form.
+        dims : sequence of int
+            Physical subsystem dimensions of each site.
+        site_ind_id : str, optional
+            How to index the physical sites, see
+            :class:`~quimb.tensor.tensor_1d.LocallyPurifiedState`.
+        kraus_ind_id : str, optional
+            How to index the Kraus sites, see
+            :class:`~quimb.tensor.tensor_1d.LocallyPurifiedState`.
+        site_tag_id : str, optional
+            How to tag the physical sites, see
+            :class:`~quimb.tensor.tensor_1d.LocallyPurifiedState`.
+        split_opts
+            Supplied to :func:`~quimb.tensor.tensor_core.tensor_split` to
+            in order to partition the dense matrix into tensors.
+
+        Returns
+        -------
+        LocallyPurifiedState
+
+        Examples
+        --------
+
+            >>> dims = [2, 2, 2, 2, 2, 2]
+            >>> rho = rand_mix(prod(dims))
+            >>> lps = LocallyPurifiedState.from_dense(rho, dims)
+            >>> lps.show()
+        """
+        raise NotImplementedError
+
+    @classmethod
+    def from_mps(cls, mps, kraus_ind_id='kr{}'):
+        """Create a ``LocallyPurifiedState`` directly from a ``MatrixProductState``
+
+        Parameters
+        ----------
+        mps : MatrixProductState
+            The MPS to convert to LPS form.
+        kraus_ind_id : str, optional
+            How to index the Kraus sites, see
+            :class:`~quimb.tensor.tensor_1d.LocallyPurifiedState`.
+
+        Returns
+        -------
+        LocallyPurifiedState
+
+        Examples
+        --------
+
+            >>> mps = rand_matrix_product_state(6, 8)
+            >>> lps = LocallyPurifiedState.from_mps(mps)
+            >>> lps.show()
+        """
+        raise NotImplementedError
+
+    def to_mpo(self, upper_ind_id='k{}', lower_ind_id='b{}'):
+        raise NotImplementedError
+
+    def to_dense(self):
+        raise NotImplementedError
+
+    def compress_kraus_site(self, i, **compress_opts):
+        # A simple SVD that splits off the Kraus index from the others and absorbs the
+        # singular values into the tensor. Can discard V due to unitarity.
+        raise NotImplementedError
+
+    def compress_kraus(self, **compress_opts):
+        raise NotImplementedError
+
+    def add_LPS(self, other, inplace=False, compress=False, **compress_opts):
+        """Add another LocallyPurifiedState to this one.
+        """
+        N = self.nsites
+
+        if N != other.nsites:
+            raise ValueError("Can't add LPS with another of different length.")
+
+        new_lps = self if inplace else self.copy()
+
+        for i in new_lps.sites:
+            t1, t2 = new_lps[i], other[i]
+
+            if set(t1.inds) != set(t2.inds):
+                # Need to use bonds to match indices
+                reindex_map = {}
+
+                if i > 0 or self.cyclic:
+                    pair = ((i - 1) % N, i)
+                    reindex_map[other.bond(*pair)] = new_lps.bond(*pair)
+
+                if i < new_lps.nsites - 1 or self.cyclic:
+                    pair = (i, (i + 1) % N)
+                    reindex_map[other.bond(*pair)] = new_lps.bond(*pair)
+
+                t2 = t2.reindex(reindex_map)
+
+            t1.direct_product(t2, inplace=True, sum_inds=new_lps.site_ind(i))
+
+        if compress:
+            new_lps.compress(**compress_opts)
+
+        return new_lps
+
+    def __add__(self, other):
+        """LPS addition.
+        """
+        return self.add_LPS(other, inplace=False)
+
+    def __iadd__(self, other):
+        """In-place LPS addition.
+        """
+        return self.add_LPS(other, inplace=True)
+
+    def __sub__(self, other):
+        """LPS subtraction.
+        """
+        return self.add_LPS(other * -1, inplace=False)
+
+    def __isub__(self, other):
+        """In-place LPS subtraction.
+        """
+        return self.add_LPS(other * -1, inplace=True)
+
+    def normalize(self, bra=None, eps=1e-15, insert=None):
+        """Normalize this LPS. For periodic LPSs this uses transfer matrix SVD
+        approximation with precision ``eps`` in order to be efficient. Inplace.
+
+        Parameters
+        ----------
+        bra : MatrixProductState, optional
+            If given, normalize this MPS with the same factor.
+        eps : float, optional
+            If cyclic, precision to approximation transfer matrix with.
+            Default: 1e-14.
+        insert : int, optional
+            Insert the corrective normalization on this site, random if
+            not given.
+
+        Returns
+        -------
+        old_norm : float
+            The old norm ``self.H @ self``.
+        """
+        norm = expec_TN_1D(self.H, self, eps=eps)
+
+        if insert is None:
+            insert = -1
+
+        self[insert].modify(data=self[insert].data / norm ** 0.5)
+        if bra is not None:
+            bra[insert].modify(data=bra[insert].data / norm ** 0.5)
+
+        return norm
+
+    def gate_split(self, G, where, inplace=False, **compress_opts):
+        r"""Apply a two-site gate and then split resulting tensor to retrieve an
+        LPS form::
+
+             | | | | | |
+            -o-o-A-B-o-o-            | | | | | |             | | | | | |
+             | | | | | |            -o-o-GGG-o-o-           -o-o-X~Y-o-o-
+             | | GGG | |     ==>     | | | | | |     ==>     | | | | | |
+             | | | | | |                 i j                     i j
+                 i j
+
+        As might be found in TEBD.
+
+        Parameters
+        ----------
+        G : array
+            The gate, with shape ``(d**2, d**2)`` for physical dimension ``d``.
+        where : (int, int)
+            Indices of the sites to apply the gate to.
+        compress_opts
+            Supplied to :func:`~quimb.tensor.tensor_split`.
+
+        See Also
+        --------
+        gate, gate_with_auto_swap
+        """
+        tn = self if inplace else self.copy()
+
+        i, j = where
+
+        Ti, Tj = tn[i], tn[j]
+        ix_i, ix_j = tn.site_ind(i), tn.site_ind(j)
+
+        # Make Tensor of gate
+        d = tn.phys_dim(i)
+        TG = Tensor(reshape(ops.asarray(G), (d, d, d, d)),
+                    inds=("_tmpi", "_tmpj", ix_i, ix_j))
+
+        # Contract gate into the two sites
+        TG = TG.contract(Ti, Tj)
+        TG.reindex_({"_tmpi": ix_i, "_tmpj": ix_j})
+
+        # Split the tensor
+        _, left_ix = Ti.filter_bonds(Tj)
+        set_default_compress_mode(compress_opts, self.cyclic)
+        nTi, nTj = TG.split(left_inds=left_ix, get='tensors', **compress_opts)
+
+        # make sure the new data shape matches and reinsert
+        Ti.modify(data=nTi.transpose_like_(Ti).data)
+        Tj.modify(data=nTj.transpose_like_(Tj).data)
+
+        return tn
+
+    gate_split_ = functools.partialmethod(gate_split, inplace=True)
+
+    def swap_sites_with_compress(self, i, j, cur_orthog=None,
+                                 inplace=False, **compress_opts):
+        """Swap sites ``i`` and ``j`` by contracting, then splitting with the
+        physical indices swapped.
+
+        Parameters
+        ----------
+        i : int
+            The first site to swap.
+        j : int
+            The second site to swap.
+        cur_orthog : int, sequence of int, or 'calc'
+            If known, the current orthogonality center.
+        inplace : bond, optional
+            Perform the swaps inplace.
+        compress_opts
+            Supplied to :func:`~quimb.tensor.tensor_core.tensor_split`.
+        """
+        i, j = sorted((i, j))
+        if i + 1 != j:
+            raise ValueError("Sites aren't adjacent.")
+
+        lps = self if inplace else self.copy()
+        lps.canonize((i, j), cur_orthog)
+
+        # get site tensors and indices
+        ix_i, ix_j = map(lps.site_ind, (i, j))
+        Ti, Tj = lps[i], lps[j]
+        _, unshared = Ti.filter_bonds(Tj)
+
+        # split the contracted tensor, swapping the site indices
+        Tij = Ti @ Tj
+        lix = [i for i in unshared if i != ix_i] + [ix_j]
+        set_default_compress_mode(compress_opts, self.cyclic)
+        sTi, sTj = Tij.split(lix, get='tensors', **compress_opts)
+
+        # reindex and transpose the tensors to directly update original tensors
+        sTi.reindex_({ix_j: ix_i})
+        sTj.reindex_({ix_i: ix_j})
+        sTi.transpose_like_(Ti)
+        sTj.transpose_like_(Tj)
+
+        Ti.modify(data=sTi.data)
+        Tj.modify(data=sTj.data)
+
+        return lps
+
+    def swap_site_to(self, i, f, cur_orthog=None,
+                     inplace=False, **compress_opts):
+        r"""Swap site ``i`` to site ``f``, compressing the bond after each
+        swap::
+
+                  i       f
+            0 1 2 3 4 5 6 7 8 9      0 1 2 4 5 6 7 3 8 9
+
+            | | | | | | | | | |      | | | | | | | | | |
+            o-o-o-x-o-o-o-o-o-o      o-o-o-o-o-o-o-x-o-o
+            | | | | | | | | | |  ->  | | | | | | | | | |
+
+
+        Parameters
+        ----------
+        i : int
+            The site to move.
+        f : int
+            The new location for site ``i``.
+        cur_orthog : int, sequence of int, or 'calc'
+            If known, the current orthogonality center.
+        inplace : bond, optional
+            Perform the swaps inplace.
+        compress_opts
+            Supplied to :func:`~quimb.tensor.tensor_core.tensor_split`.
+        """
+        lps = self if inplace else self.copy()
+
+        if i == f:
+            return lps
+        if i < f:
+            js = range(i, f)
+        if f < i:
+            js = range(i - 1, f - 1, -1)
+
+        for j in js:
+            lps.swap_sites_with_compress(
+                j, j + 1, inplace=True, cur_orthog=cur_orthog, **compress_opts)
+            cur_orthog = (j, j + 1)
+
+        return lps
+
+    def gate_with_auto_swap(self, G, where, inplace=False,
+                            cur_orthog=None, **compress_opts):
+        """Perform a two site gate on this LPS by, if necessary, swapping and
+        compressing the sites until they are adjacent, using ``gate_split``,
+        then unswapping the sites back to their original position.
+
+        Parameters
+        ----------
+        G : array
+            The gate, with shape ``(d**2, d**2)`` for physical dimension ``d``.
+        where : (int, int)
+            Indices of the sites to apply the gate to.
+        cur_orthog : int, sequence of int, or 'calc'
+            If known, the current orthogonality center.
+        inplace : bond, optional
+            Perform the swaps inplace.
+        compress_opts
+            Supplied to :func:`~quimb.tensor.tensor_core.tensor_split`.
+
+        See Also
+        --------
+        gate, gate_split
+        """
+        lps = self if inplace else self.copy()
+
+        i, j = sorted(where)
+        need2swap = i + 1 != j
+
+        # move j site adjacent to i site
+        if need2swap:
+            lps.swap_site_to(j, i + 1, cur_orthog=cur_orthog,
+                             inplace=True, **compress_opts)
+            cur_orthog = (i + 1, i + 2)
+
+        # make sure sites are orthog center, then apply and split
+        lps.canonize((i, i + 1), cur_orthog)
+        lps.gate_split_(G, (i, i + 1), **compress_opts)
+
+        # move j site back to original position
+        if need2swap:
+            lps.swap_site_to(i + 1, j, cur_orthog=(i, i + 1),
+                             inplace=True, **compress_opts, )
+
+        return lps
+
+    def magnetization(self, i, direction='Z', cur_orthog=None):
+        """Compute the magnetization at site ``i``.
+        """
+        if self.cyclic:
+            msg = ("``magnetization`` currently makes use of orthogonality for"
+                   " efficiencies sake, for cyclic systems is it still "
+                   "possible to compute as a normal expectation.")
+            raise NotImplementedError(msg)
+
+        self.canonize(i, cur_orthog)
+
+        #  /--\
+        # / +-k-+
+        # O | | |
+        # \ +-b-+
+        #  \--/
+
+        Tk = self[i]
+        ind1, ind2 = self.site_ind(i), '__tmp__'
+        Tb = Tk.H.reindex({ind1: ind2})
+
+        O_data = qu.spin_operator(direction, S=(self.phys_dim(i) - 1) / 2)
+        TO = Tensor(O_data, inds=(ind1, ind2))
+
+        return Tk.contract(TO, Tb)
+
+    def schmidt_values(self, i, cur_orthog=None, method='svd'):
+        r"""Find the Schmidt values associated with the bipartition of this
+        LPS between sites on either site of ``i``. In other words, ``i`` is the
+        number of sites in the left hand partition::
+
+            ....L....   i
+            | | | | |   | | | | | | | | | | |
+            o-o-o-o-o-S-o-o-o-o-o-o-o-o-o-o-o
+            | | | | |   | | | | | | | | | | |
+                   i-1  ..........R..........
+
+        The Schmidt values, ``S``, are the singular values associated with the
+        ``(i - 1, i)`` bond, squared, provided the LPS is mixed canonized at
+        one of those sites.
+
+        Parameters
+        ----------
+        i : int
+            The number of sites in the left partition.
+        cur_orthog : int
+            If given, the known current orthogonality center, to speed up the
+            mixed canonization.
+
+        Returns
+        -------
+        S : 1d-array
+            The Schmidt values.
+        """
+        if self.cyclic:
+            raise NotImplementedError
+
+        return self.singular_values(i, cur_orthog, method=method)**2
+
+    def entropy(self, i, cur_orthog=None, method='svd'):
+        """The entropy of bipartition between the left block of ``i`` sites and
+        the rest.
+
+        Parameters
+        ----------
+        i : int
+            The number of sites in the left partition.
+        cur_orthog : int
+            If given, the known current orthogonality center, to speed up the
+            mixed canonization.
+
+        Returns
+        -------
+        float
+        """
+        if self.cyclic:
+            msg = ("For cyclic systems, try explicitly computing the entropy "
+                   "of the (compressed) reduced density matrix.")
+            raise NotImplementedError(msg)
+
+        S = self.schmidt_values(i, cur_orthog=cur_orthog, method=method)
+        S = S[S > 0.0]
+        return np.sum(-S * np.log2(S))
+
+    def schmidt_gap(self, i, cur_orthog=None, method='svd'):
+        """The Schmidt gap of bipartition between the left block of ``i`` sites
+        and the rest.
+
+        Parameters
+        ----------
+        i : int
+            The number of sites in the left partition.
+        cur_orthog : int
+            If given, the known current orthogonality center, to speed up the
+            mixed canonization.
+
+        Returns
+        -------
+        float
+        """
+        if self.cyclic:
+            raise NotImplementedError
+
+        S = self.schmidt_values(i, cur_orthog=cur_orthog, method=method)
+
+        if len(S) == 1:
+            return S[0]
+
+        return S[0] - S[1]
+
+    def partial_trace(self, keep, rescale_sites=True):
+        r"""Partially trace this locally purified state, producing another locally
+        purified state.
+
+        Parameters
+        ----------
+        keep : sequence of int or slice
+            Indicies of the sites to keep.
+        rescale_sites : bool, optional
+            If ``True`` (the default), then the kept sites will be rescaled to
+            ``(0, 1, 2, ...)`` etc. rather than keeping their original site
+            numbers.
+
+        Returns
+        -------
+        lps : LocallyPurifiedState
+            The state in LPS form.
+        """
+        # Use the trace over the upper and lower LPS tensors to increase the Kraus rank
+        # of adjacent tensors
+        raise NotImplementedError
+
+    def ptr(self, keep, rescale_sites=True):
+        """Alias of :meth:`~quimb.tensor.MatrixProductState.partial_trace`.
+        """
+        return self.partial_trace(keep, rescale_sites=rescale_sites)
+
+    def bipartite_schmidt_state(self, sz_a, get='rho', cur_orthog=None):
+        r"""Compute the reduced state for a bipartition of an OBC LPS, in terms
+        of the minimal left/right Schmidt basis::
+
+                A            B
+            .........     ...........
+            | | | | |     | | | | | |        bA    bB
+            >->->->->--s--<-<-<-<-<-<         |     |
+            | | | | |     | | | | | |    ->   +-s^2-+
+            >->->->->--s--<-<-<-<-<-<         |     |
+            | | | | |     | | | | | |        kA    kB
+           k0 k1...
+
+        Parameters
+        ----------
+        sz_a : int
+            The number of sites in subsystem A, must be ``0 < sz_a < N``.
+        get : {'rho', 'rho-dense'}, optional
+            Get the:
+
+            - 'rho': density operator form, i.e. vector outer product
+            - 'rho-dense': like 'rho' but return ``numpy.matrix``.
+
+        cur_orthog : int, optional
+            If given, take as the current orthogonality center so as to
+            efficienctly move it a minimal distance.
+        """
+        if self.cyclic:
+            raise NotImplementedError("LPS must have OBC.")
+
+        s = np.diag(self.singular_values(sz_a, cur_orthog=cur_orthog))
+
+        if 'dense' in get:
+            kd = qu.qarray(s.reshape(-1, 1))
+            return kd @ kd.H
+        else:
+            k = Tensor(s, (self.site_ind('A'), self.site_ind('B')))
+            return k & k.reindex({'kA': 'bA', 'kB': 'bB'})
+
+    # TODO: partial_trace_compress and logneg_subsys
 
 
 class MatrixProductOperator(TensorNetwork1DFlat,
