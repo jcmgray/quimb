@@ -3914,6 +3914,16 @@ class TensorNetwork(object):
         """
         tn = self if inplace else self.copy()
 
+        # first remove floating scalar tensors
+        scalars = []
+        for tid, t in tuple(tn.tensor_map.items()):
+            if len(t.inds) == 0:
+                tn._pop_tensor(tid)
+                scalars.append(t.data)
+        if scalars:
+            tn.multiply_(prod(scalars))
+
+        # then contract rank reducing tensors
         info = tn.contract(all, get='path-info',
                            optimize=optimize, **contract_opts)
         contract_tids = list(tn.tensor_map)
@@ -4050,6 +4060,8 @@ class TensorNetwork(object):
         if output_inds is None:
             output_inds = set(self.outer_inds())
 
+        done = set()
+
         queue = list(tn.tensor_map)
         while queue:
             tid = queue.pop()
@@ -4072,8 +4084,13 @@ class TensorNetwork(object):
             else:
                 ix_flip = ix_i
 
+            # can get caught in loop unless we only flip once
+            if ix_flip in done:
+                continue
+
             # only flip one index
             tn.flip_([ix_flip])
+            done.add(ix_flip)
             queue.append(tid)
 
         return tn
