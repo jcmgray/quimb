@@ -70,13 +70,13 @@ Build PETSC
 .. code-block:: bash
 
     cd $SRC_DIR
-    git clone https://bitbucket.org/petsc/petsc.git
+    git clone https://gitlab.com/petsc/petsc.git
 
     export PETSC_DIR=$SRC_DIR/petsc
     export PETSC_ARCH=arch-auto-complex
 
     cd petsc
-    python2 ./configure \
+    python ./configure \
       --download-mumps \
       --download-scalapack \
       --download-parmetis \
@@ -99,10 +99,10 @@ Build SLEPC
 .. code-block:: bash
 
     cd $SRC_DIR
-    git clone https://bitbucket.org/slepc/slepc.git
+    git clone https://gitlab.com/slepc/slepc.git
     export SLEPC_DIR=$SRC_DIR/slepc
     cd slepc
-    python2 ./configure
+    python ./configure
     make
     make test
 
@@ -114,7 +114,7 @@ Build the python interfaces
 
     cd $SRC_DIR
     git clone https://bitbucket.org/petsc/petsc4py.git
-    git clone https://bitbucket.org/slepc/slepc4py.git
+    git clone https://gitlab.com/slepc/slepc4py.git
 
     cd $SRC_DIR/petsc4py
     python setup.py build
