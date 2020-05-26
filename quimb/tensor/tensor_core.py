@@ -70,29 +70,41 @@ def contract_strategy(strategy):
         set_contract_strategy(orig_strategy)
 
 
+def _get_contract_path(eq, *shapes, **kwargs):
+    """Get the contraction path - sequence of integer pairs.
+    """
+    return tuple(oe.contract_path(eq, *shapes, shapes=True, **kwargs)[0])
+
+
 def _get_contract_expr(eq, *shapes, **kwargs):
+    """Get the contraction expression - callable taking raw arrays.
+    """
     return oe.contract_expression(eq, *shapes, **kwargs)
 
 
-def _get_contract_path(eq, *shapes, **kwargs):
+def _get_contract_info(eq, *shapes, **kwargs):
+    """Get the contraction ipath info - object containing various information.
+    """
     return oe.contract_path(eq, *shapes, shapes=True, **kwargs)[1]
-
-
-_CONTRACT_FNS = {
-    (True, False): functools.lru_cache(4096)(_get_contract_expr),
-    (False, False): _get_contract_expr,
-    (True, True): functools.lru_cache(1024)(_get_contract_path),
-    (False, True): _get_contract_path,
-}
 
 
 _CONTRACT_PATH_CACHE = None
 
 
+_CONTRACT_FNS = {
+    # key: (get, cache)
+    ('path', False): _get_contract_path,
+    ('path', True): functools.lru_cache(2**12)(_get_contract_path),
+    ('expr', False): _get_contract_expr,
+    ('expr', True): functools.lru_cache(2**12)(_get_contract_expr),
+    ('info', False): _get_contract_info,
+    ('info', True): functools.lru_cache(2**12)(_get_contract_info),
+}
+
+
 def set_contract_path_cache(
     directory=None,
-    in_mem_cache_size_expr=2**12,
-    in_mem_cache_size_path=2**10,
+    in_mem_cache_size=2**12,
 ):
     """Specify an directory to cache all contraction paths to, if a directory
     is specified ``diskcache`` (https://pypi.org/project/diskcache/) will be
@@ -115,41 +127,67 @@ def set_contract_path_cache(
 
     if directory is None:
         _CONTRACT_PATH_CACHE = None
-        expr_fn = _get_contract_expr
         path_fn = _get_contract_path
     else:
+        # for size reasons we only cache actual path to disk
         import diskcache
         _CONTRACT_PATH_CACHE = diskcache.Cache(directory)
-        expr_fn = _CONTRACT_PATH_CACHE.memoize()(_get_contract_expr)
         path_fn = _CONTRACT_PATH_CACHE.memoize()(_get_contract_path)
 
-    _CONTRACT_FNS[True, False] = (
-        functools.lru_cache(in_mem_cache_size_expr)(expr_fn))
-    _CONTRACT_FNS[True, True] = (
-        functools.lru_cache(in_mem_cache_size_path)(path_fn))
+    # second layer of in memory caching applies to all functions
+    _CONTRACT_FNS['path', True] = (
+        functools.lru_cache(in_mem_cache_size)(path_fn))
+    _CONTRACT_FNS['expr', True] = (
+        functools.lru_cache(in_mem_cache_size)(_get_contract_expr))
+    _CONTRACT_FNS['info', True] = (
+        functools.lru_cache(in_mem_cache_size)(_get_contract_info))
 
 
-def get_contraction(eq, *shapes, cache=True, path=False, **kwargs):
+def get_contraction(eq, *shapes, cache=True, get='expr', **kwargs):
     """Get an callable expression that will evaluate ``eq`` based on
     ``shapes``. Cache the result if no constant tensors are involved.
     """
-    kwargs.setdefault('optimize', _DEFAULT_CONTRACTION_STRATEGY)
+    optimize = kwargs.pop('optimize', _DEFAULT_CONTRACTION_STRATEGY)
 
-    # don't cache if using constants or a reusable path-optimizer
-    cache &= kwargs.get('constants', None) is None
-    cache &= not isinstance(kwargs['optimize'], oe.paths.PathOptimizer)
+    # can't cache if using constants
+    if 'constants' in kwargs:
+        expr_fn = _CONTRACT_FNS['expr', False]
+        expr = expr_fn(eq, *shapes, optimize=optimize, **kwargs)
+        return expr
 
-    # make sure path given as list is hashable and thus cachable
-    if cache and isinstance(kwargs.get('optimize', None), list):
-        kwargs['optimize'] = tuple(kwargs['optimize'])
+    # make sure explicit paths are hashable
+    if isinstance(optimize, list):
+        optimize = tuple(optimize)
 
-    fn = _CONTRACT_FNS[cache, path]
+    # can't cache if using a reusable path-optimizer
+    cache &= not isinstance(optimize, oe.paths.PathOptimizer)
 
-    try:
-        return fn(eq, *shapes, **kwargs)
-    except TypeError:
-        shapes = (tuple(map(int, s)) for s in shapes)
-        return fn(eq, *shapes, **kwargs)
+    # make sure shapes are hashable (e.g. for tensorflow arrays)
+    if cache:
+        try:
+            hash(shapes[0])
+        except TypeError:
+            shapes = tuple(tuple(map(int, s)) for s in shapes)
+
+    # get the path, unless explicitly given already
+    if not isinstance(optimize, tuple):
+        path_fn = _CONTRACT_FNS['path', cache]
+        path = path_fn(eq, *shapes, optimize=optimize, **kwargs)
+    else:
+        path = optimize
+
+    if get == 'expr':
+        expr_fn = _CONTRACT_FNS['expr', cache]
+        expr = expr_fn(eq, *shapes, optimize=path, **kwargs)
+        return expr
+
+    if get == 'info':
+        info_fn = _CONTRACT_FNS['info', cache]
+        info = info_fn(eq, *shapes, optimize=path, **kwargs)
+        return info
+
+    if get == 'path':
+        return path
 
 
 try:
@@ -281,13 +319,8 @@ def utup_union(xs):
 def utup_intersection(xs):
     """Unique tuple, non variadic version of set.intersection.
     """
-    try:
-        x0 = xs[0]
-    except TypeError:
-        xs = tuple(xs)
-        x0 = xs[0]
-
-    return tuple(el for el in x0 if all(el in x for x in xs[1:]))
+    x0, *x1s = xs
+    return tuple(el for el in x0 if all(el in x for x in x1s))
 
 
 def utup_difference(x, y):
@@ -398,7 +431,7 @@ def tensor_contract(*tensors, output_inds=None, get=None,
         # sort output indices by input order for efficiency and consistency
         o_ix = tuple(_gen_output_inds(total_ix))
     else:
-        o_ix = output_inds
+        o_ix = tuple(output_inds)
 
     # possibly map indices into the range needed by opt-einsum
     eq = _maybe_map_indices_to_alphabet(all_ix, i_ix, o_ix)
@@ -408,7 +441,7 @@ def tensor_contract(*tensors, output_inds=None, get=None,
 
     if get == 'path-info':
         ops = (t.shape for t in tensors)
-        path_info = get_contraction(eq, *ops, path=True, **contract_opts)
+        path_info = get_contraction(eq, *ops, get='info', **contract_opts)
         path_info.quimb_symbol_map = {
             oe.get_symbol(i): ix for i, ix in enumerate(all_ix)
         }

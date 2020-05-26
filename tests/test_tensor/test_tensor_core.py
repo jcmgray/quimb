@@ -69,12 +69,12 @@ class TestContractOpts:
             tn.contract(all, optimize='quimb_test_opt', get='expression'))
         assert info['num_calls'] == 1
 
-        # contraction pathinfo objects are cached separately
+        # contraction pathinfo objects are now cached together
         assert (
             tn.contract(all, optimize='quimb_test_opt', get='path-info')
             is
             tn.contract(all, optimize='quimb_test_opt', get='path-info'))
-        assert info['num_calls'] == 2
+        assert info['num_calls'] == 1
 
         # set a directory cache - functions will be run fresh again
         with tempfile.TemporaryDirectory() as tdir:
@@ -84,12 +84,12 @@ class TestContractOpts:
                 tn.contract(all, optimize='quimb_test_opt', get='expression')
                 is
                 tn.contract(all, optimize='quimb_test_opt', get='expression'))
-            assert info['num_calls'] == 3
+            assert info['num_calls'] == 2
             assert (
                 tn.contract(all, optimize='quimb_test_opt', get='path-info')
                 is
                 tn.contract(all, optimize='quimb_test_opt', get='path-info'))
-            assert info['num_calls'] == 4
+            assert info['num_calls'] == 2
             assert len(os.listdir(tdir)) != 0
 
             # need to release close the cache so the directory can be deleted
