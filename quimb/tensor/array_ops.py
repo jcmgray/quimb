@@ -462,8 +462,7 @@ class PArray:
 
     @property
     def data(self):
-        self._data = self._fn(self._params)
-        return self._data
+        return self._fn(self._params)
 
     @property
     def shape(self):

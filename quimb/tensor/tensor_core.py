@@ -4686,10 +4686,9 @@ class PTensor(Tensor):
 
     def __init__(self, fn, params, inds=(), tags=None,
                  left_inds=None, conj=False):
-
-        self._parray = PArray(fn, params)
+        super().__init__(
+            PArray(fn, params), inds=inds, tags=tags, left_inds=left_inds)
         self.is_conj = conj
-        super().__init__(self.data, inds=inds, tags=tags, left_inds=left_inds)
 
     @classmethod
     def from_parray(cls, parray, *args, **kwargs):
@@ -4708,12 +4707,26 @@ class PTensor(Tensor):
         )
 
     @property
-    def data(self):
-        self._data = self._parray.data
-
+    def _data(self):
+        """Make ``_data`` read-only and handle conjugation lazily.
+        """
+        data_fn_params = self._parray.data
         if self.is_conj:
-            return conj(self._data)
+            return conj(data_fn_params)
+        return data_fn_params
 
+    @_data.setter
+    def _data(self, x):
+        if not isinstance(x, PArray):
+            raise ValueError(
+                "You can only update the data of a ``PTensor`` with an "
+                "``PArray``. Alternatively you can convert this ``PTensor to "
+                "a normal ``Tensor`` with ``t.unparametrize()``")
+        self.is_conj = False
+        self._parray = x
+
+    @property
+    def data(self):
         return self._data
 
     @property
@@ -4741,9 +4754,4 @@ class PTensor(Tensor):
     def unparametrize(self):
         """Turn this PTensor into a normal Tensor.
         """
-        return Tensor(
-            data=self.data,
-            inds=self.inds,
-            tags=self.tags,
-            left_inds=self.left_inds,
-        )
+        return Tensor(self)
