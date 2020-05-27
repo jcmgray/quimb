@@ -356,6 +356,7 @@ def _gen_output_inds(all_inds):
             yield ind
 
 
+@functools.lru_cache(2**12)
 def _maybe_map_indices_to_alphabet(a_ix, i_ix, o_ix):
     """``einsum`` need characters a-z,A-Z or equivalent numbers.
     Do this early, and allow *any* index labels.
