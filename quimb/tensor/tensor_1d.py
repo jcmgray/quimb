@@ -261,12 +261,12 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
 
     psi = tn if inplace else tn.copy()
 
-    dp = psi.phys_dim()
-    tags = tags_to_utup(tags)
-
     if isinstance(where, Integral):
         where = (where,)
     ng = len(where)  # number of sites the gate acts on
+
+    dp = psi.phys_dim(where[0])
+    tags = tags_to_utup(tags)
 
     if (ng > 2) and contract in _TWO_BODY_ONLY:
         raise ValueError(f"Can't use `contract='{contract}'` for >2 sites.")
