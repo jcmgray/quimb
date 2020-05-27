@@ -1152,6 +1152,9 @@ class Tensor(object):
 
         return len(self.owners) > 0
 
+    def _apply_function(self, fn):
+        self._data = fn(self.data)
+
     def modify(self, **kwargs):
         """Overwrite the data of this tensor in place.
 
@@ -1159,6 +1162,9 @@ class Tensor(object):
         ----------
         data : array, optional
             New data.
+        apply : callable, optional
+            A function to apply to the current data. If `data` is also given
+            this is applied subsequently.
         inds : sequence of str, optional
             New tuple of indices.
         tags : sequence of str, optional
@@ -1166,6 +1172,9 @@ class Tensor(object):
         """
         if 'data' in kwargs:
             self._data = asarray(kwargs.pop('data'))
+
+        if 'apply' in kwargs:
+            self._apply_function(kwargs.pop('apply'))
 
         if 'inds' in kwargs:
             inds = tuple(kwargs.pop('inds'))
@@ -1232,9 +1241,7 @@ class Tensor(object):
         new_inds = tuple(ix for ix in self.inds if ix not in selectors)
 
         data_loc = tuple(selectors.get(ix, slice(None)) for ix in self.inds)
-        new_data = self.data[data_loc]
-
-        T.modify(data=new_data, inds=new_inds, left_inds=None)
+        T.modify(apply=lambda x: x[data_loc], inds=new_inds, left_inds=None)
         return T
 
     isel_ = functools.partialmethod(isel, inplace=True)
@@ -1331,7 +1338,8 @@ class Tensor(object):
         """Change the type of this tensor to ``dtype``.
         """
         T = self if inplace else self.copy()
-        T.modify(data=astype(self.data, dtype))
+        if T.dtype != dtype:
+            T.modify(apply=lambda data: astype(data, dtype))
         return T
 
     astype_ = functools.partialmethod(astype, inplace=True)
@@ -1582,6 +1590,11 @@ class Tensor(object):
         """Drop any singlet dimensions from this tensor.
         """
         t = self if inplace else self.copy()
+
+        # can't squeeze if tensor is scalar
+        if t.ndim == 0:
+            return t
+
         new_shape, new_inds = zip(
             *((d, i) for d, i in zip(self.shape, self.inds) if d > 1))
 
@@ -2485,9 +2498,9 @@ class TensorNetwork(object):
 
             # take into account a negative factor with single minus sign
             if i == 0:
-                tensor.modify(data=tensor.data * (x_sign * x_spread))
+                tensor.modify(apply=lambda data: data * (x_sign * x_spread))
             else:
-                tensor.modify(data=tensor.data * x_spread)
+                tensor.modify(apply=lambda data: data * x_spread)
 
         return multiplied
 
@@ -2513,7 +2526,7 @@ class TensorNetwork(object):
         multiplied = self if inplace else self.copy()
 
         for t in multiplied.tensors:
-            t.modify(data=t.data * x)
+            t.modify(apply=lambda data: data * x)
 
         return multiplied
 
@@ -2564,7 +2577,7 @@ class TensorNetwork(object):
         """Modify every tensor's array inplace by applying ``fn`` to it.
         """
         for t in self:
-            t.modify(data=fn(t.data))
+            t.modify(apply=fn)
 
     # ----------------- selecting and splitting the network ----------------- #
 
@@ -3954,7 +3967,12 @@ class TensorNetwork(object):
                 tn._pop_tensor(tid)
                 scalars.append(t.data)
         if scalars:
-            tn.multiply_(prod(scalars))
+            scalar_mult = prod(scalars)
+            if not tn.num_tensors:
+                # check if all tensors were scalars - nothing left to multiply
+                tn.add_tensor(Tensor(scalar_mult))
+            else:
+                tn.multiply_(scalar_mult)
 
         # then contract rank reducing tensors
         info = tn.contract(all, get='path-info',
@@ -4044,13 +4062,19 @@ class TensorNetwork(object):
                 ixmap = {ix_j: ix_i}
 
             # e.g. if `ij == (0, 2)` then here we want 'abcd -> abad -> abd'
-            tmp_inds = [ixmap.get(ix, ix) for ix in t.inds]
-            new_inds = list(unique(tmp_inds))
-            eq = _maybe_map_indices_to_alphabet(new_inds, [tmp_inds], new_inds)
+            tmp_inds = tuple(ixmap.get(ix, ix) for ix in t.inds)
+            new_inds = utup(tmp_inds)
+            eq = _maybe_map_indices_to_alphabet(
+                new_inds, (tmp_inds,), new_inds)
+
+            # do this wrapping trick so that eq doesn't change due to closure
+            def get_reducer(x_eq):
+                def reducer(x):
+                    return do('einsum', x_eq, x, like=x)
+                return reducer
 
             # extract the diagonal and update the tensor
-            new_data = do('einsum', eq, t.data, like=t.data)
-            t.modify(data=new_data, inds=new_inds, left_inds=None)
+            t.modify(apply=get_reducer(eq), inds=new_inds, left_inds=None)
 
             # update wherever else the changed index appears (e.g. 'c' above)
             tn.reindex_(ixmap)
@@ -4184,7 +4208,7 @@ class TensorNetwork(object):
 
     column_reduce_ = functools.partialmethod(column_reduce, inplace=True)
 
-    def full_simplify(self, seq='DRAC', inplace=False, output_inds=None,
+    def full_simplify(self, seq='ADCR', inplace=False, output_inds=None,
                       atol=1e-12, **rank_simplify_opts):
         """Perform a series of tensor network 'simplifications' in a loop until
         there is no more reduction in the number of tensors or indices. Note
@@ -4223,7 +4247,7 @@ class TensorNetwork(object):
         diagonal_reduce, rank_simplify, antidiag_gauge, column_reduce
         """
         tn = self if inplace else self.copy()
-        tn.squeeze_()
+        tn.squeeze_(fuse=True)
 
         # all the methods
         if output_inds is None:
@@ -4717,11 +4741,9 @@ class PTensor(Tensor):
     PTensor
     """
 
-    def __init__(self, fn, params, inds=(), tags=None,
-                 left_inds=None, conj=False):
+    def __init__(self, fn, params, inds=(), tags=None, left_inds=None):
         super().__init__(
             PArray(fn, params), inds=inds, tags=tags, left_inds=left_inds)
-        self.is_conj = conj
 
     @classmethod
     def from_parray(cls, parray, *args, **kwargs):
@@ -4736,26 +4758,23 @@ class PTensor(Tensor):
             inds=self.inds,
             tags=self.tags,
             left_inds=self.left_inds,
-            conj=self.is_conj,
         )
 
     @property
     def _data(self):
         """Make ``_data`` read-only and handle conjugation lazily.
         """
-        data_fn_params = self._parray.data
-        if self.is_conj:
-            return conj(data_fn_params)
-        return data_fn_params
+        return self._parray.data
 
     @_data.setter
     def _data(self, x):
         if not isinstance(x, PArray):
-            raise ValueError(
-                "You can only update the data of a ``PTensor`` with an "
-                "``PArray``. Alternatively you can convert this ``PTensor to "
-                "a normal ``Tensor`` with ``t.unparametrize()``")
-        self.is_conj = False
+            raise TypeError(
+                "You can only directly update the data of a ``PTensor`` with "
+                "another ``PArray``. You can chain another function with the "
+                "``.modify(apply=fn)`` method. Alternatively you can convert "
+                "this ``PTensor to a normal ``Tensor`` with "
+                "``t.unparametrize()``")
         self._parray = x
 
     @property
@@ -4766,6 +4785,10 @@ class PTensor(Tensor):
     def fn(self):
         return self._parray.fn
 
+    @fn.setter
+    def fn(self, x):
+        self._parray.fn = x
+
     @property
     def params(self):
         return self._parray.params
@@ -4774,12 +4797,22 @@ class PTensor(Tensor):
     def params(self, x):
         self._parray.params = x
 
+    @property
+    def shape(self):
+        return self._parray.shape
+
+    def _apply_function(self, fn):
+        """Apply ``fn`` to the data array of this ``PTensor`` (lazily), by
+        composing it with the current parametrized array function.
+        """
+        self._parray.add_function(fn)
+
     def conj(self, inplace=False):
         """Conjugate this parametrized tensor - done lazily whenever the
         ``.data`` attribute is accessed.
         """
         t = self if inplace else self.copy()
-        t.is_conj = not self.is_conj
+        t._apply_function(conj)
         return t
 
     conj_ = functools.partialmethod(conj, inplace=True)

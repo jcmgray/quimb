@@ -3,6 +3,7 @@
 import itertools
 
 import numpy
+from cytoolz import compose
 from autoray import do, reshape, transpose, dag, infer_backend, get_dtype_name
 
 from ..core import njit, qarray
@@ -447,10 +448,15 @@ class PArray:
         self._fn = fn
         self._params = asarray(params)
         self._shape = shape
+        self._shape_fn_id = id(fn)
 
     @property
     def fn(self):
         return self._fn
+
+    @fn.setter
+    def fn(self, x):
+        self._fn = x
 
     @property
     def params(self):
@@ -466,10 +472,23 @@ class PArray:
 
     @property
     def shape(self):
-        if self._shape is None:
+        # if we haven't calculated shape or have updated function, get shape
+        _shape_fn_id = id(self.fn)
+        if (self._shape is None) or (self._shape_fn_id != _shape_fn_id):
             self._shape = self.data.shape
+            self._shape_fn_id = _shape_fn_id
         return self._shape
 
     @property
     def ndim(self):
         return len(self.shape)
+
+    def copy(self):
+        return PArray(self.fn, self.params, self.shape)
+
+    def add_function(self, g):
+        """Chain the new function ``g`` on top of current function ``f`` like
+        ``g(f(params))``.
+        """
+        f = self.fn
+        self.fn = compose(g, f)
