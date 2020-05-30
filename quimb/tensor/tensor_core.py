@@ -143,6 +143,25 @@ def set_contract_path_cache(
         functools.lru_cache(in_mem_cache_size)(_get_contract_info))
 
 
+def _get_contraction(eq, shapes, optimize, cache, get, **kwargs):
+    # get the path, unless explicitly given already
+    if not isinstance(optimize, tuple):
+        path_fn = _CONTRACT_FNS['path', cache]
+        path = path_fn(eq, *shapes, optimize=optimize, **kwargs)
+    else:
+        path = optimize
+
+    if get == 'expr':
+        expr_fn = _CONTRACT_FNS['expr', cache]
+        expr = expr_fn(eq, *shapes, optimize=path, **kwargs)
+        return expr
+
+    if get == 'info':
+        info_fn = _CONTRACT_FNS['info', cache]
+        info = info_fn(eq, *shapes, optimize=path, **kwargs)
+        return info
+
+
 def get_contraction(eq, *shapes, cache=True, get='expr', **kwargs):
     """Get an callable expression that will evaluate ``eq`` based on
     ``shapes``. Cache the result if no constant tensors are involved.
@@ -162,32 +181,15 @@ def get_contraction(eq, *shapes, cache=True, get='expr', **kwargs):
     # can't cache if using a reusable path-optimizer
     cache &= not isinstance(optimize, oe.paths.PathOptimizer)
 
-    # make sure shapes are hashable (e.g. for tensorflow arrays)
-    if cache:
-        try:
-            hash(shapes[0])
-        except TypeError:
+    try:
+        return _get_contraction(eq, shapes, optimize, cache, get, **kwargs)
+    except TypeError as e:
+        # some shapes (e.g. tensorflow) are not hashable
+        if 'unhashable' in str(e):
             shapes = tuple(tuple(map(int, s)) for s in shapes)
-
-    # get the path, unless explicitly given already
-    if not isinstance(optimize, tuple):
-        path_fn = _CONTRACT_FNS['path', cache]
-        path = path_fn(eq, *shapes, optimize=optimize, **kwargs)
-    else:
-        path = optimize
-
-    if get == 'expr':
-        expr_fn = _CONTRACT_FNS['expr', cache]
-        expr = expr_fn(eq, *shapes, optimize=path, **kwargs)
-        return expr
-
-    if get == 'info':
-        info_fn = _CONTRACT_FNS['info', cache]
-        info = info_fn(eq, *shapes, optimize=path, **kwargs)
-        return info
-
-    if get == 'path':
-        return path
+            return _get_contraction(eq, shapes, optimize, cache, get, **kwargs)
+        else:
+            raise e
 
 
 try:
