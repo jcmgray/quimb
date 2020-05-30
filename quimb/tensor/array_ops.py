@@ -445,10 +445,15 @@ class PArray:
     """
 
     def __init__(self, fn, params, shape=None):
-        self._fn = fn
-        self._params = asarray(params)
+        self.fn = fn
+        self.params = params
         self._shape = shape
         self._shape_fn_id = id(fn)
+
+    def copy(self):
+        new = PArray(self.fn, self.params, self.shape)
+        new._data = self._data  # for efficiency
+        return new
 
     @property
     def fn(self):
@@ -457,6 +462,7 @@ class PArray:
     @fn.setter
     def fn(self, x):
         self._fn = x
+        self._data = None
 
     @property
     def params(self):
@@ -465,10 +471,13 @@ class PArray:
     @params.setter
     def params(self, x):
         self._params = asarray(x)
+        self._data = None
 
     @property
     def data(self):
-        return self._fn(self._params)
+        if self._data is None:
+            self._data = self._fn(self._params)
+        return self._data
 
     @property
     def shape(self):
@@ -482,9 +491,6 @@ class PArray:
     @property
     def ndim(self):
         return len(self.shape)
-
-    def copy(self):
-        return PArray(self.fn, self.params, self.shape)
 
     def add_function(self, g):
         """Chain the new function ``g`` on top of current function ``f`` like

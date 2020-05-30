@@ -1392,7 +1392,7 @@ class Tensor(object):
         current_ind_map = {ind: i for i, ind in enumerate(t.inds)}
         out_shape = tuple(current_ind_map[i] for i in output_inds)
 
-        t.modify(data=transpose(t.data, out_shape), inds=output_inds)
+        t.modify(apply=lambda x: transpose(x, out_shape), inds=output_inds)
         return t
 
     transpose_ = functools.partialmethod(transpose, inplace=True)
@@ -1738,7 +1738,7 @@ class Tensor(object):
         flipper = tuple(
             slice(None, None, -1) if i == ind else slice(None) for i in t.inds
         )
-        t.modify(data=self.data[flipper])
+        t.modify(apply=lambda x: x[flipper])
         return t
 
     flip_ = functools.partialmethod(flip, inplace=True)
@@ -4747,19 +4747,17 @@ class PTensor(Tensor):
             PArray(fn, params), inds=inds, tags=tags, left_inds=left_inds)
 
     @classmethod
-    def from_parray(cls, parray, *args, **kwargs):
-        return cls(parray.fn, parray.params, *args, **kwargs)
+    def from_parray(cls, parray, inds=(), tags=None, left_inds=None):
+        obj = cls.__new__(cls)
+        super(PTensor, obj).__init__(
+            parray, inds=inds, tags=tags, left_inds=left_inds)
+        return obj
 
     def copy(self):
         """Copy this parametrized tensor.
         """
-        return PTensor(
-            fn=self.fn,
-            params=self.params,
-            inds=self.inds,
-            tags=self.tags,
-            left_inds=self.left_inds,
-        )
+        return PTensor.from_parray(self._parray.copy(), inds=self.inds,
+                                   tags=self.tags, left_inds=self.left_inds)
 
     @property
     def _data(self):
