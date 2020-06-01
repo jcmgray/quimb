@@ -18,9 +18,8 @@ from .tensor_core import (
     rand_uuid,
     bonds,
     bonds_size,
-    tags_to_utup,
-    utup_union,
-    utup_add,
+    oset,
+    tags_to_oset,
     get_tags,
     PTensor,
 )
@@ -266,7 +265,7 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
     ng = len(where)  # number of sites the gate acts on
 
     dp = psi.phys_dim(where[0])
-    tags = tags_to_utup(tags)
+    tags = tags_to_oset(tags)
 
     if (ng > 2) and contract in _TWO_BODY_ONLY:
         raise ValueError(f"Can't use `contract='{contract}'` for >2 sites.")
@@ -309,16 +308,16 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
     # 'propagate' forward from the tensors being acted on to the gate tensors
     if propagate_tags:
         if propagate_tags == 'register':
-            old_tags = tuple(map(psi.site_tag, where))
+            old_tags = oset(map(psi.site_tag, where))
         else:
             old_tags = get_tags(psi.tensor_map[tid] for tid in site_tids)
 
         if propagate_tags == 'sites':
             # use regex to take tags only matching e.g. 'I0', 'I13'
             rex = re.compile(psi.structure.format(r"\d+"))
-            old_tags = tuple(filter(rex.match, old_tags))
+            old_tags = oset(filter(rex.match, old_tags))
 
-        TG.modify(tags=utup_union((TG.tags, old_tags)))
+        TG.modify(tags=TG.tags | old_tags)
 
     if ng == 1:
         psi |= TG
@@ -330,7 +329,7 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
         #  | |       | |
         #  GGG  -->  G~G
         #  | |       | |
-        TGnorm = TG.split(TG.inds[::2], **compress_opts)
+        ts_gate_norm = TG.split(TG.inds[::2], get='tensors', **compress_opts)
 
     # sometimes it is worth performing the decomposition *across* the gate,
     #     effectively introducing a SWAP
@@ -340,7 +339,7 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
         #  GGG  -->  / \
         #  | |       G~G
         #            | |
-        TGswap = TG.split(TG.inds[::3], **compress_opts)
+        ts_gate_swap = TG.split(TG.inds[::3], get='tensors', **compress_opts)
 
     # like 'split-gate' but check the rank for swapped indices also, and if no
     #     rank reduction, simply don't swap
@@ -350,8 +349,8 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
         #  GGG  -->  G~G  or  / \   or ... GGG
         #  | |       | |      G~G          | |
         #            | |      | |
-        norm_rank = bonds_size(*TGnorm)
-        swap_rank = bonds_size(*TGswap)
+        norm_rank = bonds_size(*ts_gate_norm)
+        swap_rank = bonds_size(*ts_gate_swap)
 
         if swap_rank < norm_rank:
             contract = 'swap-split-gate'
@@ -362,19 +361,21 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
             contract = False
 
     if contract == 'swap-split-gate':
-        TG = TGswap
+        ts_gate = ts_gate_swap
     elif contract == 'split-gate':
-        TG = TGnorm
+        ts_gate = ts_gate_norm
+    else:
+        ts_gate = (TG,)
 
     # if we are splitting the gate then only add site tags on the tensors
     # directly 'above' the site
     if contract in ('split-gate', 'swap-split-gate'):
         if propagate_tags == 'register':
-            for (i, j) in (where, where[::-1]):
-                itid, = TG.ind_map[psi.site_ind(i)]
-                TG.tensor_map[itid].drop_tags(psi.site_tag(j))
+            ts_gate[0].drop_tags(psi.site_tag(where[1]))
+            ts_gate[1].drop_tags(psi.site_tag(where[0]))
 
-    psi |= TG
+    for t in ts_gate:
+        psi |= t
     return psi
 
 
@@ -1466,8 +1467,8 @@ class MatrixProductState(TensorNetwork1DVector,
         site_tags = map(site_tag_id.format, sites)
         if tags is not None:
             # mix in global tags
-            tags = tags_to_utup(tags)
-            site_tags = (utup_add(tags, st) for st in site_tags)
+            tags = tags_to_oset(tags)
+            site_tags = (tags | oset((st,)) for st in site_tags)
 
         self.cyclic = (ops.ndim(arrays[0]) == 3)
 
@@ -2919,7 +2920,7 @@ class Dense1D(TensorNetwork1DVector,
         site_tags = tuple(map(site_tag_id.format, sites))
         if tags is not None:
             # mix in global tags
-            site_tags = utup_union((tags_to_utup(tags), site_tags))
+            site_tags = tags_to_oset(tags) | site_tags
 
         T = Tensor(ops.asarray(array).reshape(*dims),
                    inds=site_inds, tags=site_tags)
@@ -3013,9 +3014,9 @@ class SuperOperator1D(
 
         # process tags
         self._site_tag_id = site_tag_id
-        tags = tags_to_utup(tags)
-        tags_upper = tags_to_utup(tags_upper)
-        tags_lower = tags_to_utup(tags_lower)
+        tags = tags_to_oset(tags)
+        tags_upper = tags_to_oset(tags_upper)
+        tags_lower = tags_to_oset(tags_lower)
 
         def gen_tags():
             site_tags = map(site_tag_id.format, sites)

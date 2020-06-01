@@ -4,7 +4,7 @@ import random
 import functools
 from operator import add
 from numbers import Integral
-from itertools import product, cycle, starmap, combinations, count
+from itertools import product, cycle, starmap, combinations, count, chain
 from collections import defaultdict
 
 from autoray import do, infer_backend, get_dtype_name
@@ -18,9 +18,8 @@ from .tensor_core import (
     Tensor,
     bonds,
     rand_uuid,
-    utup_union,
-    utup_difference,
-    tags_to_utup,
+    oset,
+    tags_to_oset,
     TensorNetwork,
     tensor_contract,
 )
@@ -1731,7 +1730,7 @@ def group_inds(t1, t2):
     """Group bonds into left only, shared, and right only.
     """
     lix, six, rix = [], [], []
-    for ix in utup_union((t1, t2)):
+    for ix in oset(chain(t1, t2)):
         if ix in t1:
             if ix not in t2:
                 lix.append(ix)
@@ -1752,7 +1751,7 @@ def gate_string_split_(TG, where, string, original_ts, bonds_along,
     contract_ts = []
 
     for t, coo in zip(original_ts, string):
-        neighb_inds.append(utup_difference(t.inds, bonds_along))
+        neighb_inds.append(tuple(ix for ix in t.inds if ix not in bonds_along))
         contract_ts.append(t.reindex(reindex_map) if coo in where else t)
 
     # form the central blob of all sites and gate contracted
@@ -1816,9 +1815,9 @@ def gate_string_reduce_split_(TG, where, string, original_ts, bonds_along,
         # extract at beginning of string
         lix = bonds(blob, outer_ts[i])
         if i == 0:
-            lix += (site_ix[0],)
+            lix.add(site_ix[0])
         else:
-            lix += (bonds_along[i - 1],)
+            lix.add(bonds_along[i - 1])
 
         # the original bond we are restoring
         bix = bonds_along[i]
@@ -1847,13 +1846,14 @@ def gate_string_reduce_split_(TG, where, string, original_ts, bonds_along,
         # extract at end of string
         lix = bonds(blob, outer_ts[j])
         if j == len(string) - 1:
-            lix += (site_ix[-1],)
+            lix.add(site_ix[-1])
         else:
-            lix += (bonds_along[j],)
+            lix.add(bonds_along[j])
 
         # the original bond we are restoring
         bix = bonds_along[j - 1]
 
+        # split the blob!
         inner_ts[j], *maybe_svals, blob = blob.split(
             left_inds=lix, get='tensors', bond_ind=bix, **compress_opts)
 
@@ -2099,7 +2099,7 @@ class TensorNetwork2DVector(TensorNetwork2D,
         ng = len(where)
 
         dp = psi.phys_dim(*where[0])
-        tags = tags_to_utup(tags)
+        tags = tags_to_oset(tags)
 
         # allow a matrix to be reshaped into a tensor if it factorizes
         #     i.e. (4, 4) assumed to be two qubit gate -> (2, 2, 2, 2)
@@ -2178,7 +2178,8 @@ class TensorNetwork2DVector(TensorNetwork2D,
         original_ts = [psi[coo] for coo in string]
 
         # the len(string) - 1 indices connecting the string
-        bonds_along = [bonds(t1, t2)[0] for t1, t2 in pairwise(original_ts)]
+        bonds_along = [next(iter(bonds(t1, t2)))
+                       for t1, t2 in pairwise(original_ts)]
 
         if contract == 'split':
             #
@@ -2523,7 +2524,7 @@ class PEPS(TensorNetwork2DVector,
             super().__init__(arrays)
             return
 
-        tags = tags_to_utup(tags)
+        tags = tags_to_oset(tags)
         self._site_ind_id = site_ind_id
         self._site_tag_id = site_tag_id
         self._row_tag_id = row_tag_id
@@ -2575,9 +2576,10 @@ class PEPS(TensorNetwork2DVector,
             inds.append(self.site_ind(i, j))
 
             # mix site, row, column and global tags
-            ij_tags = utup_union((tags, (self.site_tag(i, j),
-                                         self.row_tag(i),
-                                         self.col_tag(j))))
+
+            ij_tags = tags | oset((self.site_tag(i, j),
+                                   self.row_tag(i),
+                                   self.col_tag(j)))
 
             # create the site tensor!
             tensors.append(Tensor(data=array, inds=inds, tags=ij_tags))
@@ -2702,7 +2704,7 @@ class PEPO(TensorNetwork2DOperator,
             super().__init__(arrays)
             return
 
-        tags = tags_to_utup(tags)
+        tags = tags_to_oset(tags)
         self._upper_ind_id = upper_ind_id
         self._lower_ind_id = lower_ind_id
         self._site_tag_id = site_tag_id
@@ -2756,9 +2758,9 @@ class PEPO(TensorNetwork2DOperator,
             inds.append(self.upper_ind(i, j))
 
             # mix site, row, column and global tags
-            ij_tags = utup_union((tags, (self.site_tag(i, j),
-                                         self.row_tag(i),
-                                         self.col_tag(j))))
+            ij_tags = tags | oset((self.site_tag(i, j),
+                                   self.row_tag(i),
+                                   self.col_tag(j)))
 
             # create the site tensor!
             tensors.append(Tensor(data=array, inds=inds, tags=ij_tags))

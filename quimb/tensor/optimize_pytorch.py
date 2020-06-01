@@ -4,7 +4,7 @@ import functools
 import tqdm
 
 from . import array_ops
-from .tensor_core import Tensor, TensorNetwork, utup_intersection, tags_to_utup
+from .tensor_core import Tensor, TensorNetwork, tags_to_oset
 
 
 _TORCH_DEVICE = None
@@ -57,7 +57,7 @@ def parse_network_to_torch(tn, constant_tags):
     for t in tn_torch:
 
         # check if tensor has any of the constant tags
-        if utup_intersection((t.tags, constant_tags)):
+        if t.tags & constant_tags:
             t.modify(data=constant(t.data))
 
         # treat re and im parts as separate variables
@@ -201,7 +201,7 @@ class TNOptimizer:
         self.tol_grad = tol_grad
         assert progbar in [True, False, 'simple']
         self.progbar = progbar
-        self.constant_tags = tags_to_utup(constant_tags)
+        self.constant_tags = tags_to_oset(constant_tags)
 
         if norm_fn is None:
             def norm_fn(x):

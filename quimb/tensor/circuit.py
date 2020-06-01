@@ -4,7 +4,7 @@ import cytoolz
 from autoray import do
 
 import quimb as qu
-from .tensor_core import get_tags, PTensor, utup_union, tags_to_utup, utup_add
+from .tensor_core import get_tags, PTensor, oset, tags_to_oset
 from .tensor_gen import MPS_computational_state
 from .tensor_1d import TensorNetwork1DVector
 from . import array_ops as ops
@@ -91,7 +91,7 @@ def parse_qasm_url(url, **kwargs):
 # -------------------------- core gate functions ---------------------------- #
 
 def _merge_tags(tags, gate_opts):
-    return utup_union(map(tags_to_utup, (tags, gate_opts.pop('tags', None))))
+    return oset.union(*map(tags_to_oset, (tags, gate_opts.pop('tags', None))))
 
 
 def build_gate_1(gate, tags=None):
@@ -457,14 +457,14 @@ class Circuit:
         """
 
         # unique tag
-        tags = tags_to_utup(f'GATE_{len(self.gates)}')
+        tags = tags_to_oset(f'GATE_{len(self.gates)}')
 
         # parse which 'round' of gates
         if (gate_round is not None):
-            tags = utup_add(tags, f'ROUND_{gate_round}')
+            tags.add(f'ROUND_{gate_round}')
         elif isinstance(gate_id, numbers.Integral) or gate_id.isdigit():
             # gate round given as first entry of qasm line
-            tags = utup_add(tags, f'ROUND_{gate_id}')
+            tags.add(f'ROUND_{gate_id}')
             gate_id, gate_args = gate_args[0], gate_args[1:]
 
         gate_id = gate_id.upper()

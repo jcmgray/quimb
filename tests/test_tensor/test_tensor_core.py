@@ -8,6 +8,7 @@ import scipy.sparse.linalg as spla
 import quimb as qu
 import quimb.tensor as qtn
 from quimb.tensor import (
+    oset,
     bonds,
     tensor_contract,
     tensor_direct_product,
@@ -108,9 +109,10 @@ class TestBasicTensorOperations:
             Tensor(x, inds=[0, 2], tags='blue')
 
         assert repr(a) == ("Tensor(shape=(2, 3, 4), "
-                           "inds=(0, 1, 2), tags=('blue',))")
+                           "inds=(0, 1, 2), tags=oset(['blue']))")
         assert str(a) == ("Tensor(shape=(2, 3, 4), inds=(0, 1, 2), "
-                          "tags=('blue',), backend='numpy', dtype='float64')")
+                          "tags=oset(['blue']), backend='numpy', "
+                          "dtype='float64')")
 
     def test_tensor_copy(self):
         a = Tensor(np.random.randn(2, 3, 4), inds=[0, 1, 2], tags='blue')
@@ -234,7 +236,7 @@ class TestBasicTensorOperations:
         assert isinstance(d, Tensor)
         assert d.shape == (6,)
         assert d.inds == (4,)
-        assert d.tags == ('red', 'blue')
+        assert d.tags == oset(('red', 'blue'))
 
     def test_contract_with_legal_characters(self):
         a = Tensor(np.random.randn(2, 3, 4), inds='abc',
@@ -268,19 +270,19 @@ class TestBasicTensorOperations:
         b = a.fuse({'bra': ['a', 'c'], 'ket': 'bd'})
         assert set(b.shape) == {8, 15}
         assert set(b.inds) == {'bra', 'ket'}
-        assert b.tags == ('blue',)
+        assert b.tags == oset(('blue',))
 
         b = a.fuse({'ket': 'bd', 'bra': 'ac'})
         assert set(b.shape) == {15, 8}
         assert set(b.inds) == {'ket', 'bra'}
-        assert b.tags == ('blue',)
+        assert b.tags == oset(('blue',))
 
     def test_fuse_leftover(self):
         a = Tensor(np.random.rand(2, 3, 4, 5, 2, 2), 'abcdef', tags={'blue'})
         b = a.fuse({'bra': 'ac', 'ket': 'bd'})
         assert b.shape == (8, 15, 2, 2)
         assert b.inds == ('bra', 'ket', 'e', 'f')
-        assert b.tags == ('blue',)
+        assert b.tags == oset(('blue',))
 
     def test_tensor_transpose(self):
         a = Tensor(np.random.rand(2, 3, 4, 5, 2, 2), 'abcdef', tags={'blue'})

@@ -15,8 +15,7 @@ from .tensor_core import (
     Tensor,
     TensorNetwork,
     PTensor,
-    utup_intersection,
-    tags_to_utup,
+    tags_to_oset,
 )
 from .array_ops import iscomplex
 from ..core import qarray
@@ -129,12 +128,12 @@ def parse_network_to_backend(tn, tags, constant_tags, to_constant):
 
     for t in tn_ag:
         # check if tensor has any of the constant tags
-        if utup_intersection((t.tags, constant_tags)):
+        if t.tags & constant_tags:
             t.modify(data=to_constant(t.data))
             continue
 
         # if tags are specified only optimize those tagged
-        if tags and not utup_intersection((t.tags, tags)):
+        if tags and not (t.tags & tags):
             t.modify(data=to_constant(t.data))
             continue
 
@@ -384,8 +383,8 @@ class TNOptimizer:
         self.progbar = progbar
         self.optimizer = optimizer
         self.bounds = bounds
-        self.tags = tags_to_utup(tags)
-        self.constant_tags = tags_to_utup(constant_tags)
+        self.tags = tags_to_oset(tags)
+        self.constant_tags = tags_to_oset(constant_tags)
 
         # the object that handles converting to backend + computing gradient
         if autodiff_backend.upper() == 'AUTO':

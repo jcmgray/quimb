@@ -24,6 +24,7 @@ from .tensor_core import (
     TensorNetwork,
     TNLinearOperator1D,
     PTensor,
+    oset,
 )
 from .tensor_gen import (
     rand_tensor,
@@ -127,6 +128,7 @@ __all__ = (
     "TensorNetwork",
     "TNLinearOperator1D",
     "PTensor",
+    "oset",
     "rand_tensor",
     "rand_phased",
     "MPS_rand_state",

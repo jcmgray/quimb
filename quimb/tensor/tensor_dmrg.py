@@ -13,8 +13,6 @@ from .tensor_core import (
     tensor_contract,
     TNLinearOperator,
     asarray,
-    utup_add,
-    utup_discard,
 )
 
 
@@ -332,10 +330,12 @@ class MovingEnvironment:
             return
 
         # replicate all tags on end pieces apart from site number
-        ltags = utup_add(self.tnc.select(start - 1).tags, '_LEFT')
-        ltags = utup_discard(ltags, self.site_tag(start - 1))
-        rtags = utup_add(self.tnc.select(stop).tags, '_RIGHT')
-        rtags = utup_discard(rtags, self.site_tag(stop))
+        ltags = self.tnc.select(start - 1).tags
+        ltags.add('_LEFT')
+        ltags.discard(self.site_tag(start - 1))
+        rtags = self.tnc.select(stop).tags
+        rtags.add('_RIGHT')
+        rtags.discard(self.site_tag(stop))
 
         # for example, pseudo orthogonalization if cyclic
         if self.segment_callbacks is not None:
