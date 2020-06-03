@@ -606,14 +606,16 @@ class TensorNetwork1DVector(TensorNetwork1D,
         if B is None:
             B = A
 
+        bra = self.H
+
         pA = self.gate(A, i, contract=True)
-        cA = self.expec(pA, **expec_opts)
+        cA = expec_TN_1D(bra, pA, **expec_opts)
 
         pB = self.gate(B, j, contract=True)
-        cB = self.expec(pB, **expec_opts)
+        cB = expec_TN_1D(bra, pB, **expec_opts)
 
         pAB = pA.gate_(B, j, contract=True)
-        cAB = self.expec(pAB, **expec_opts)
+        cAB = expec_TN_1D(bra, pAB, **expec_opts)
 
         return cAB - cA * cB
 
