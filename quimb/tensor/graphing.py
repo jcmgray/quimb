@@ -18,6 +18,7 @@ def graph(
     iterations=200,
     initial_layout='spectral',
     node_size=None,
+    edge_scale=1.0,
     edge_alpha=1 / 3,
     figsize=(6, 6),
     return_fig=False,
@@ -59,6 +60,8 @@ def graph(
         layout only.
     node_size : None
         How big to draw the tensors.
+    edge_scale : float, optional
+        How much to scale the width of the edges.
     edge_alpha : float, optional
         Set the alpha (opacity) of the drawn edges.
     figsize : tuple of int
@@ -93,7 +96,7 @@ def graph(
             'color': ((1.0, 0.2, 0.2) if ix in highlight_inds else
                       (0.0, 0.0, 0.0)),
             'ind': ix,
-            'weight': math.log2(tn.ind_size(ix))
+            'weight': edge_scale * math.log2(tn.ind_size(ix))
         }
         if len(tids) == 2:
             # standard edge
@@ -125,7 +128,7 @@ def graph(
         G.nodes[tid]['color'] = color
         G.nodes[tid]['outline_color'] = tuple(0.8 * c for c in color)
         if show_tags:
-            node_labels[tid] = str(t.tags)
+            node_labels[tid] = '{' + str(list(t.tags))[1:-1] + '}'
 
     for hix in hyperedges:
         G.nodes[hix]['ind'] = hix
@@ -185,7 +188,7 @@ def graph(
                                    linestyle='', markersize=10)]
 
         # needed in case '_' is the first character
-        lbls = [f" {l}" for l in colors]
+        lbls = [f" {lbl}" for lbl in colors]
 
         plt.legend(handles, lbls, ncol=max(round(len(handles) / 20), 1),
                    loc='center left', bbox_to_anchor=(1, 0.5))
