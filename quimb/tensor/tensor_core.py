@@ -3232,12 +3232,13 @@ class TensorNetwork(object):
         tid2, = self._get_tids_from_tags(tags2, which='all')
         self._canonize_between_tids(tid1, tid2, **canonize_opts)
 
-    def _canonize_around_tids(self, tids, max_distance=None,
-                              inplace=True, **canonize_opts):
-        tn = self if inplace else self.copy()
-
-        border = tids
-        all_tids = oset(tn.tensor_map)
+    def _greedy_tree_span(self, tids, max_distance=None):
+        """Generate a tree on the tensor network graph, fanning out from the
+        tensors identified by ``tids``, up to a maximum of ``max_distance``
+        away.
+        """
+        border = oset(tids)
+        all_tids = oset(self.tensor_map)
         remaining = all_tids - border
         border_d = [(x, 0) for x in border]
 
@@ -3250,21 +3251,30 @@ class TensorNetwork(object):
             if (max_distance is not None) and d >= max_distance:
                 continue
 
-            ix = tn.tensor_map[tid].inds
+            ix = self.tensor_map[tid].inds
 
             # get un-canonized neighbors
-            neighbor_tids = oset.union(*(tn.ind_map[i] for i in ix))
+            neighbor_tids = oset_union(self.ind_map[i] for i in ix)
             neighbor_tids &= remaining
 
             for n_tid in neighbor_tids:
                 remaining.discard(n_tid)
                 border_d.append((n_tid, d + 1))
-                seq.append((n_tid, tid))
+                seq.append((n_tid, tid, d))
 
         # want to start furthest away
         seq.reverse()
 
-        for tid1, tid2 in seq:
+        return seq
+
+
+    def _canonize_around_tids(self, tids, max_distance=None,
+                              inplace=True, **canonize_opts):
+        tn = self if inplace else self.copy()
+
+        seq = self._greedy_tree_span(tids, max_distance=max_distance)
+
+        for tid1, tid2, _ in seq:
             T1 = tn.tensor_map[tid1]
             T2 = tn.tensor_map[tid2]
             tensor_canonize_bond(T1, T2, **canonize_opts)
