@@ -3267,7 +3267,6 @@ class TensorNetwork(object):
 
         return seq
 
-
     def _canonize_around_tids(self, tids, max_distance=None,
                               inplace=True, **canonize_opts):
         tn = self if inplace else self.copy()

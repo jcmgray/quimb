@@ -129,12 +129,12 @@ def parse_network_to_backend(tn, tags, constant_tags, to_constant):
     for t in tn_ag:
         # check if tensor has any of the constant tags
         if t.tags & constant_tags:
-            t.modify(data=to_constant(t.data))
+            t.modify(apply=to_constant)
             continue
 
         # if tags are specified only optimize those tagged
         if tags and not (t.tags & tags):
-            t.modify(data=to_constant(t.data))
+            t.modify(apply=to_constant)
             continue
 
         if isinstance(t, PTensor):
@@ -155,7 +155,7 @@ def parse_network_to_backend(tn, tags, constant_tags, to_constant):
 
 def constant_t(t, to_constant):
     ag_t = t.copy()
-    ag_t.modify(data=to_constant(ag_t.data))
+    ag_t.modify(apply=to_constant)
     return ag_t
 
 
