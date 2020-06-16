@@ -1251,6 +1251,11 @@ class Tensor(object):
             Position of the new index.
         """
         new_inds = list(self.inds)
+
+        # list.insert has different behavior to expand_dims for -ve. axis
+        if axis < 0:
+            axis = len(new_inds) + axis + 1
+
         new_inds.insert(axis, name)
 
         new_data = do('expand_dims', self.data, axis=axis)

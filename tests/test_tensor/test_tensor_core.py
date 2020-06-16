@@ -1281,7 +1281,7 @@ class TestTensorNetworkSimplifications:
 
     def test_column_reduce(self):
         A = rand_tensor([2, 3], 'ab')
-        A.new_ind('c', size=4)
+        A.new_ind('c', size=4, axis=-2)
         B = rand_tensor([4, 5, 6], 'cde')
         tn = A & B
         assert tn.num_indices == 5
