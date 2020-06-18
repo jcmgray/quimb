@@ -202,11 +202,9 @@ class JaxHandler:
 
     def setup_fn(self, fn):
         if self.jit_fn:
-            jfn = self.jax.jit(fn)
+            self._value_and_grad = self.jax.jit(self.jax.value_and_grad(fn))
         else:
-            jfn = fn
-
-        self._value_and_grad = self.jax.value_and_grad(jfn)
+            self._value_and_grad = self.jax.value_and_grad(fn)
 
     def value_and_grad(self, arrays):
         loss, grads = self._value_and_grad(arrays)
