@@ -318,6 +318,158 @@ def inject_(arrays, tn):
                 break
 
 
+class SGD:
+    """Stateful ``scipy.optimize.minimize`` compatible implementation of
+    stochastic gradient descent with momentum.
+
+    Adapted from ``autograd/misc/optimizers.py``.
+    """
+
+    def __init__(self):
+        from scipy.optimize import OptimizeResult
+        self.OptimizeResult = OptimizeResult
+        self._i = 0
+        self._velocity = None
+
+    def get_velocity(self, x):
+        if self._velocity is None:
+            self._velocity = np.zeros_like(x)
+        return self._velocity
+
+    def __call__(self, fun, x0, jac, args=(), learning_rate=0.1, mass=0.9,
+                 maxiter=1000, callback=None, bounds=None, **kwargs):
+
+        x = x0
+        velocity = self.get_velocity(x)
+
+        for _ in range(maxiter):
+            g = jac(x)
+
+            if callback and callback(x):
+                break
+
+            velocity = mass * velocity - (1.0 - mass) * g
+            x = x + learning_rate * velocity
+
+            if bounds is not None:
+                x = np.clip(x, bounds[:, 0], bounds[:, 1])
+
+            self._i += 1
+
+        # save for restart
+        self._velocity = velocity
+
+        return self.OptimizeResult(
+            x=x, fun=fun(x), jac=g, nit=self._i, nfev=self._i, success=True)
+
+
+class RMSPROP:
+    """Stateful ``scipy.optimize.minimize`` compatible implementation of
+    root mean squared prop: See Adagrad paper for details.
+
+    Adapted from ``autograd/misc/optimizers.py``.
+    """
+
+    def __init__(self):
+        from scipy.optimize import OptimizeResult
+        self.OptimizeResult = OptimizeResult
+        self._i = 0
+        self._avg_sq_grad = None
+
+    def get_avg_sq_grad(self, x):
+        if self._avg_sq_grad is None:
+            self._avg_sq_grad = np.ones_like(x)
+        return self._avg_sq_grad
+
+    def __call__(self, fun, x0, jac, args=(), learning_rate=0.1, gamma=0.9,
+                 eps=1e-8, maxiter=1000, callback=None, bounds=None, **kwargs):
+        x = x0
+        avg_sq_grad = self.get_avg_sq_grad(x)
+
+        for _ in range(maxiter):
+            g = jac(x)
+
+            if callback and callback(x):
+                break
+
+            avg_sq_grad = avg_sq_grad * gamma + g**2 * (1 - gamma)
+            x = x - learning_rate * g / (np.sqrt(avg_sq_grad) + eps)
+
+            if bounds is not None:
+                x = np.clip(x, bounds[:, 0], bounds[:, 1])
+
+            self._i += 1
+
+        # save for restart
+        self._avg_sq_grad = avg_sq_grad
+
+        return self.OptimizeResult(
+            x=x, fun=fun(x), jac=g, nit=self._i, nfev=self._i, success=True)
+
+
+class ADAM:
+    """Stateful ``scipy.optimize.minimize`` compatible implementation of
+    ADAM - http://arxiv.org/pdf/1412.6980.pdf.
+
+    Adapted from ``autograd/misc/optimizers.py``.
+    """
+
+    def __init__(self):
+        from scipy.optimize import OptimizeResult
+        self.OptimizeResult = OptimizeResult
+        self._i = 0
+        self._m = None
+        self._v = None
+
+    def get_m(self, x):
+        if self._m is None:
+            self._m = np.zeros_like(x)
+        return self._m
+
+    def get_v(self, x):
+        if self._v is None:
+            self._v = np.zeros_like(x)
+        return self._v
+
+    def __call__(self, fun, x0, jac, args=(), learning_rate=0.001, beta1=0.9,
+                 beta2=0.999, eps=1e-8, maxiter=1000, callback=None,
+                 bounds=None, **kwargs):
+        x = x0
+        m = self.get_m(x)
+        v = self.get_v(x)
+
+        for _ in range(maxiter):
+            g = jac(x)
+
+            if callback and callback(x):
+                break
+
+            m = (1 - beta1) * g + beta1 * m  # first  moment estimate.
+            v = (1 - beta2) * (g**2) + beta2 * v  # second moment estimate.
+            mhat = m / (1 - beta1**(self._i + 1))  # bias correction.
+            vhat = v / (1 - beta2**(self._i + 1))
+            x = x - learning_rate * mhat / (np.sqrt(vhat) + eps)
+
+            if bounds is not None:
+                x = np.clip(x, bounds[:, 0], bounds[:, 1])
+
+            self._i += 1
+
+        # save for restart
+        self._m = m
+        self._v = v
+
+        return self.OptimizeResult(
+            x=x, fun=fun(x), jac=g, nit=self._i, nfev=self._i, success=True)
+
+
+_STOC_GRAD_METHODS = {
+    'sgd': SGD,
+    'rmsprop': RMSPROP,
+    'adam': ADAM,
+}
+
+
 class TNOptimizer:
     """Globally optimize tensors within a tensor network with respect to any
     loss function via automatic differentiation. If parametrized tensors are
@@ -379,8 +531,6 @@ class TNOptimizer:
         **backend_opts
     ):
         self.progbar = progbar
-        self.optimizer = optimizer
-        self.bounds = bounds
         self.tags = tags_to_oset(tags)
         self.constant_tags = tags_to_oset(constant_tags)
 
@@ -430,10 +580,6 @@ class TNOptimizer:
         # this handles storing and packing /  unpacking many arrays as a vector
         self.vectorizer = Vectorizer(self.variables)
 
-        if bounds is not None:
-            bounds = (bounds,) * self.vectorizer.d
-        self.bounds = bounds
-
         def func(arrays):
             # set backend explicitly as maybe mixing with numpy arrays
             with contract_backend(autodiff_backend):
@@ -458,11 +604,30 @@ class TNOptimizer:
 
         self.vectorized_value_and_grad = vectorized_value_and_grad
 
+        if bounds is not None:
+            bounds = np.array((bounds,) * self.vectorizer.d)
+        self.bounds = bounds
+
+        # options to do with the scipy minimizer
+        self.optimizer = optimizer
+
     @property
     def nevals(self):
         """The number of gradient evaluations.
         """
         return self._n
+
+    @property
+    def optimizer(self):
+        return self._optimizer
+
+    @optimizer.setter
+    def optimizer(self, x):
+        self._optimizer = x
+        if self.optimizer in _STOC_GRAD_METHODS:
+            self._method = _STOC_GRAD_METHODS[self.optimizer]()
+        else:
+            self._method = self.optimizer
 
     def inject_res_vector_and_return_tn(self):
         arrays = self.vectorizer.unpack()
@@ -494,11 +659,8 @@ class TNOptimizer:
                 callback=callback,
                 tol=tol,
                 bounds=self.bounds,
-                method=self.optimizer,
-                options=dict(
-                    maxiter=n,
-                    **options,
-                )
+                method=self._method,
+                options=dict(maxiter=n, **options),
             )
             self.vectorizer.vector[:] = self.res.x
 
@@ -509,7 +671,7 @@ class TNOptimizer:
 
         return self.inject_res_vector_and_return_tn()
 
-    def optimize_basinhopping(self, n, nhop, temperature=1.0):
+    def optimize_basinhopping(self, n, nhop, temperature=1.0, **options):
         from scipy.optimize import basinhopping
 
         try:
@@ -538,9 +700,7 @@ class TNOptimizer:
                     method=self.optimizer,
                     bounds=self.bounds,
                     callback=inner_callback,
-                    options=dict(
-                        maxiter=n,
-                    )
+                    options=dict(maxiter=n, **options)
                 ),
                 callback=hop_callback,
                 T=temperature,
