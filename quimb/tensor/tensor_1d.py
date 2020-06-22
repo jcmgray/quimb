@@ -1288,21 +1288,18 @@ class TensorNetwork1DFlat(TensorNetwork1D,
         -------
         MatrixProductState
         """
-        if inplace:
-            expanded = self
-        else:
-            expanded = self.copy()
+        expanded = self if inplace else self.copy()
 
         for i in self.sites:
             tensor = expanded[i]
-            to_expand = []
+            inds_to_expand = []
 
             if i > 0 or self.cyclic:
-                to_expand.append(self.bond(i - 1, i))
+                inds_to_expand.append(self.bond(i - 1, i))
             if i < self.nsites - 1 or self.cyclic:
-                to_expand.append(self.bond(i, i + 1))
+                inds_to_expand.append(self.bond(i, i + 1))
 
-            pads = [(0, 0) if i not in to_expand else
+            pads = [(0, 0) if i not in inds_to_expand else
                     (0, max(new_bond_dim - d, 0))
                     for d, i in zip(tensor.shape, tensor.inds)]
 

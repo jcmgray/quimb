@@ -23,7 +23,16 @@ from .tensor_core import (
     TensorNetwork,
     tensor_contract,
 )
-from .tensor_1d import maybe_factor_gate_into_tensor
+from .tensor_1d import maybe_factor_gate_into_tensor, rand_padder
+
+
+def manhattan_distance(coo_a, coo_b):
+    return sum(abs(coo_a[i] - coo_b[i]) for i in range(2))
+
+
+def nearest_neighbors(coo):
+    i, j = coo
+    return ((i - 1, j), (i, j - 1), (i, j + 1), (i + 1, j))
 
 
 class TensorNetwork2D(TensorNetwork):
@@ -65,6 +74,9 @@ class TensorNetwork2D(TensorNetwork):
     )
 
     def _compatible_2d(self, other):
+        """Check whether ``self`` and ``other`` are compatible 2D tensor
+        networks such that they can remain a 2D tensor network when combined.
+        """
         return (
             isinstance(other, TensorNetwork2D) and
             all(getattr(self, e) == getattr(other, e)
@@ -1744,6 +1756,9 @@ def group_inds(t1, t2):
 def gate_string_split_(TG, where, string, original_ts, bonds_along,
                        reindex_map, site_ix, info, **compress_opts):
 
+    # by default this means singuvalues are kept in the string 'blob' tensor
+    compress_opts.setdefault('absorb', 'right')
+
     # the outer, neighboring indices of each tensor in the string
     neighb_inds = []
 
@@ -1757,35 +1772,89 @@ def gate_string_split_(TG, where, string, original_ts, bonds_along,
     # form the central blob of all sites and gate contracted
     blob = tensor_contract(*contract_ts, TG)
 
-    # one by one extract the site tensors again
-    new_ts = [None] * len(string)
+    regauged = []
 
-    for i in range(len(string) - 1):
+    # one by one extract the site tensors again from each end
+    inner_ts = [None] * len(string)
+    i = 0
+    j = len(string) - 1
+
+    while True:
         lix = neighb_inds[i]
         if i > 0:
             lix += (bonds_along[i - 1],)
+
+        # the original bond we are restoring
         bix = bonds_along[i]
 
-        new_ts[i], *maybe_svals, blob = blob.split(
-            left_inds=lix, bond_ind=bix, get='tensors', **compress_opts)
+        # split the blob!
+        inner_ts[i], *maybe_svals, blob = blob.split(
+            left_inds=lix, get='tensors', bond_ind=bix, **compress_opts)
 
         # if singular values are returned (``absorb=None``) check if we should
-        #     return them via ``info``, e.g. for ``SimpleUpdate``
+        #     return them via ``info``, e.g. for ``SimpleUpdate`
         if maybe_svals and info is not None:
+            s = next(iter(maybe_svals)).data
             coo_pair = tuple(sorted((string[i], string[i + 1])))
-            info['singular_values', coo_pair] = maybe_svals[0].data
+            info['singular_values', coo_pair] = s
 
-    # remaining blob is the final tensor
-    new_ts[-1] = blob
+            # regauge the blob but record so as to unguage later
+            if i != j - 1:
+                blob.multiply_index_diagonal_(bix, s)
+                regauged.append((i + 1, bix, s))
+
+        # move inwards along string, terminate if two ends meet
+        i += 1
+        if i == j:
+            inner_ts[i] = blob
+            break
+
+        # extract at end of string
+        lix = neighb_inds[j]
+        if j < len(string) - 1:
+            lix += (bonds_along[j],)
+
+        # the original bond we are restoring
+        bix = bonds_along[j - 1]
+
+        # split the blob!
+        inner_ts[j], *maybe_svals, blob = blob.split(
+            left_inds=lix, get='tensors', bond_ind=bix, **compress_opts)
+
+        # if singular values are returned (``absorb=None``) check if we should
+        #     return them via ``info``, e.g. for ``SimpleUpdate`
+        if maybe_svals and info is not None:
+            s = next(iter(maybe_svals)).data
+            coo_pair = tuple(sorted((string[j - 1], string[j])))
+            info['singular_values', coo_pair] = s
+
+            # regauge the blob but record so as to unguage later
+            if j != i + 1:
+                blob.multiply_index_diagonal_(bix, s)
+                regauged.append((j - 1, bix, s))
+
+        # move inwards along string, terminate if two ends meet
+        j -= 1
+        if j == i:
+            inner_ts[j] = blob
+            break
+
+    # ungauge the site tensors along bond if necessary
+    for i, bix, s in regauged:
+        t = inner_ts[i]
+        t.multiply_index_diagonal_(bix, s**-1)
 
     # transpose to match original tensors and update original data
-    for to, tn in zip(original_ts, new_ts):
+    for to, tn in zip(original_ts, inner_ts):
         tn.transpose_like_(to)
         to.modify(data=tn.data)
 
 
 def gate_string_reduce_split_(TG, where, string, original_ts, bonds_along,
                               reindex_map, site_ix, info, **compress_opts):
+
+    # by default this means singuvalues are kept in the string 'blob' tensor
+    compress_opts.setdefault('absorb', 'right')
 
     # indices to reduce, first and final include physical indices for gate
     inds_to_reduce = [(bonds_along[0], site_ix[0])]
@@ -1804,7 +1873,7 @@ def gate_string_reduce_split_(TG, where, string, original_ts, bonds_along,
     # contract the blob of gate with reduced tensors only
     blob = tensor_contract(*inner_ts, TG)
 
-    regauge = []
+    regauged = []
 
     # extract the new reduced tensors sequentially from each end
     i = 0
@@ -1822,9 +1891,9 @@ def gate_string_reduce_split_(TG, where, string, original_ts, bonds_along,
         # the original bond we are restoring
         bix = bonds_along[i]
 
+        # split the blob!
         inner_ts[i], *maybe_svals, blob = blob.split(
-            left_inds=lix, get='tensors',
-            bond_ind=bix, **compress_opts)
+            left_inds=lix, get='tensors', bond_ind=bix, **compress_opts)
 
         # if singular values are returned (``absorb=None``) check if we should
         #     return them via ``info``, e.g. for ``SimpleUpdate`
@@ -1833,11 +1902,12 @@ def gate_string_reduce_split_(TG, where, string, original_ts, bonds_along,
             coo_pair = tuple(sorted((string[i], string[i + 1])))
             info['singular_values', coo_pair] = s
 
+            # regauge the blob but record so as to unguage later
             if i != j - 1:
-                # gauge the blob but record to reguage bond at end
                 blob.multiply_index_diagonal_(bix, s)
-                regauge.append((i + 1, bix, s))
+                regauged.append((i + 1, bix, s))
 
+        # move inwards along string, terminate if two ends meet
         i += 1
         if i == j:
             inner_ts[i] = blob
@@ -1864,11 +1934,12 @@ def gate_string_reduce_split_(TG, where, string, original_ts, bonds_along,
             coo_pair = tuple(sorted((string[j - 1], string[j])))
             info['singular_values', coo_pair] = s
 
+            # regauge the blob but record so as to unguage later
             if j != i + 1:
-                # gauge the blob but record to reguage bond at end
                 blob.multiply_index_diagonal_(bix, s)
-                regauge.append((j - 1, bix, s))
+                regauged.append((j - 1, bix, s))
 
+        # move inwards along string, terminate if two ends meet
         j -= 1
         if j == i:
             inner_ts[j] = blob
@@ -1881,7 +1952,7 @@ def gate_string_reduce_split_(TG, where, string, original_ts, bonds_along,
     ]
 
     # ungauge the site tensors along bond if necessary
-    for i, bix, s in regauge:
+    for i, bix, s in regauged:
         t = new_ts[i]
         t.multiply_index_diagonal_(bix, s**-1)
 
@@ -2000,8 +2071,8 @@ class TensorNetwork2DVector(TensorNetwork2D,
         tags=None,
         inplace=False,
         info=None,
-        use_swaps=False,
-        swap_path=None,
+        long_range_use_swaps=False,
+        long_range_path_sequence=None,
         **compress_opts
     ):
         """Apply the dense gate ``G``, maintaining the physical indices of this
@@ -2144,14 +2215,30 @@ class TensorNetwork2DVector(TensorNetwork2D,
         # following are all based on splitting tensors to maintain structure
         ij_a, ij_b = where
 
-        # check if we are not nearest neighbour and need to swap first
-        if use_swaps and (abs(ij_b[0] - ij_a[0]) + abs(ij_b[1] - ij_a[1])) > 1:
+        # parse the argument specifying how to find the path between
+        # non-nearest neighbours
+        if long_range_path_sequence is not None:
+            # make sure we can index
+            long_range_path_sequence = tuple(long_range_path_sequence)
+            # if the first element is a str specifying move sequence, e.g.
+            #     ('v', 'h')
+            #     ('av', 'bv', 'ah', 'bh')  # using swaps
+            manual_lr_path = not isinstance(long_range_path_sequence[0], str)
+            # otherwise assume a path has been manually specified, e.g.
+            #     ((1, 2), (2, 2), (2, 3), ... )
+            #     (((1, 1), (1, 2)), ((4, 3), (3, 3)), ...)  # using swaps
+        else:
+            manual_lr_path = False
 
-            if swap_path is None:
-                # find a swap path
-                *swaps, final = gen_swap_path(ij_a, ij_b)
+        # check if we are not nearest neighbour and need to swap first
+        if long_range_use_swaps:
+
+            if manual_lr_path:
+                *swaps, final = long_range_path_sequence
             else:
-                *swaps, final = swap_path
+                # find a swap path
+                *swaps, final = gen_long_range_swap_path(
+                    ij_a, ij_b, sequence=long_range_path_sequence)
 
             # move the sites together
             SWAP = get_swap(dp, dtype=get_dtype_name(G),
@@ -2171,8 +2258,11 @@ class TensorNetwork2DVector(TensorNetwork2D,
 
             return psi
 
-        # generate a string connecting the sites
-        string = tuple(gen_string(*where))
+        if manual_lr_path:
+            string = long_range_path_sequence
+        else:
+            string = tuple(gen_long_range_path(
+                *where, sequence=long_range_path_sequence))
 
         # the tensors along this string, which will be updated
         original_ts = [psi[coo] for coo in string]
@@ -2463,6 +2553,57 @@ class TensorNetwork2DFlat(TensorNetwork2D,
         """
         b_ix = self.bond(coo1, coo2)
         return self[coo1].ind_size(b_ix)
+
+    def expand_bond_dimension(self, new_bond_dim, inplace=True, bra=None,
+                              rand_strength=0.0):
+        """Increase the bond dimension of this flat, 2D, tensor network,
+        padding the tensor data with either zeros or random entries.
+
+        Parameters
+        ----------
+        new_bond_dim : int
+            The new dimension. If smaller or equal to the current bond
+            dimension nothing will happend.
+        inplace : bool, optional
+            Whether to expand in place (the default), or return a new TN.
+        bra : TensorNetwork2DFlat, optional
+            Expand this TN with the same data also, assuming it to be the
+            conjugate, bra, TN.
+        rand_strength : float, optional
+            If greater than zero, pad the data arrays with gaussian noise of
+            this strength.
+
+        Returns
+        -------
+        expanded : TensorNetwork2DFlat
+        """
+
+        expanded = self if inplace else self.copy()
+
+        for coo_a in self.gen_site_coos():
+            tensor = expanded[coo_a]
+            inds_to_expand = [
+                self.bond(coo_a, coo_b)
+                for coo_b in nearest_neighbors(coo_a)
+                if self.valid_coo(coo_b)
+            ]
+
+            pads = [(0, 0) if i not in inds_to_expand else
+                    (0, max(new_bond_dim - d, 0))
+                    for d, i in zip(tensor.shape, tensor.inds)]
+
+            if rand_strength > 0:
+                edata = do('pad', tensor.data, pads, mode=rand_padder,
+                           rand_strength=rand_strength)
+            else:
+                edata = do('pad', tensor.data, pads, mode='constant')
+
+            tensor.modify(data=edata)
+
+            if bra is not None:
+                bra[coo_a].modify(data=tensor.data.conj())
+
+        return expanded
 
 
 class PEPS(TensorNetwork2DVector,
@@ -3006,16 +3147,40 @@ def calc_plaquette_map(plaquettes):
     return mapping
 
 
-def gen_string(ij_a, ij_b, sequence=('v', 'h')):
+def gen_long_range_path(ij_a, ij_b, sequence=None):
     """Generate a string of coordinates, in order, from ``ij_a`` to ``ij_b``.
+
+    Parameters
+    ----------
+    ij_a : (int, int)
+        Coordinate of site 'a'.
+    ij_b : (int, int)
+        Coordinate of site 'b'.
+    sequence : None, iterable of {'v', 'h'}, or 'random', optional
+        What order to cycle through and try and perform moves in, 'v', 'h'
+        standing for move vertically and horizontally respectively. The default
+        is ``('v', 'h')``.
+
+    Returns
+    -------
+    generator[tuple[int]]
+        The path, each element is a single coordinate.
     """
     ia, ja = ij_a
     ib, jb = ij_b
     di = ib - ia
     dj = jb - ja
 
-    if sequence == 'random':
-        poss_moves = (random.choice(('v', 'h')) for _ in count())
+    # nearest neighbour
+    if abs(di) + abs(dj) == 1:
+        yield ij_a
+        yield ij_b
+        return
+
+    if sequence is None:
+        poss_moves = cycle(('v', 'h'))
+    elif sequence == 'random':
+        poss_moves = (random.choice('vh') for _ in count())
     else:
         poss_moves = cycle(sequence)
 
@@ -3044,7 +3209,7 @@ def gen_string(ij_a, ij_b, sequence=('v', 'h')):
             dj -= jstep
 
 
-def gen_swap_path(ij_a, ij_b, sequence=('av', 'bv', 'ah', 'bh')):
+def gen_long_range_swap_path(ij_a, ij_b, sequence=None):
     """Generate the coordinates or a series of swaps that would bring ``ij_a``
     and ``ij_b`` together.
 
@@ -3054,20 +3219,30 @@ def gen_swap_path(ij_a, ij_b, sequence=('av', 'bv', 'ah', 'bh')):
         Coordinate of site 'a'.
     ij_b : (int, int)
         Coordinate of site 'b'.
-    move : {'a', 'b', or 'ab'}, optional
-        Whether to move 'a', 'b' or both, to reach each other.
+    sequence : None, it of {'av', 'bv', 'ah', 'bh'}, or 'random', optional
+        What order to cycle through and try and perform moves in, 'av', 'bv',
+        'ah', 'bh' standing for move 'a' vertically, 'b' vertically, 'a'
+        horizontally', and 'b' horizontally respectively. The default is
+        ``('av', 'bv', 'ah', 'bh')``.
 
     Returns
     -------
     generator[tuple[tuple[int]]]
-        The path.
+        The path, each element is two coordinates to swap.
     """
     ia, ja = ij_a
     ib, jb = ij_b
     di = ib - ia
     dj = jb - ja
 
-    if sequence == 'random':
+    # nearest neighbour
+    if abs(di) + abs(dj) == 1:
+        yield (ij_a, ij_b)
+        return
+
+    if sequence is None:
+        poss_moves = cycle(('av', 'bv', 'ah', 'bh'))
+    elif sequence == 'random':
         poss_moves = (random.choice(('av', 'bv', 'ah', 'bh')) for _ in count())
     else:
         poss_moves = cycle(sequence)
@@ -3119,6 +3294,14 @@ def gen_swap_path(ij_a, ij_b, sequence=('av', 'bv', 'ah', 'bh')):
 
         if di == dj == 0:
             return
+
+
+def swap_path_to_long_range_path(swap_path, ij_a):
+    """Generates the ordered long-range path - a sequence of coordinates - from
+    a (long-range) swap path - a sequence of coordinate pairs.
+    """
+    sites = set(chain(*swap_path))
+    return sorted(sites, key=lambda ij_b: manhattan_distance(ij_a, ij_b))
 
 
 @functools.lru_cache(8)

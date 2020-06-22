@@ -17,7 +17,10 @@ from .tensor_2d import (
     calc_plaquette_sizes,
     calc_plaquette_map,
     plaquette_to_sites,
-    gen_string,
+    gen_long_range_path,
+    gen_long_range_swap_path,
+    swap_path_to_long_range_path,
+    nearest_neighbors,
 )
 
 
@@ -411,7 +414,7 @@ class LocalHam2D:
         plt.show()
 
 
-class TEBD2DImag:
+class TEBD2D:
     """Generic class for performing two dimensional time evolving block
     decimation, i.e. applying the exponential of a Hamiltonian using
     a product formula that involves applying local exponentiated gates only.
@@ -456,15 +459,15 @@ class TEBD2DImag:
         and ``normalized`` is set to ``True``.
     compute_energy_fn : callable, optional
         Supply your own function to compute the energy, it should take the
-        ``TEBD2DImag`` object as its only argument.
+        ``TEBD2D`` object as its only argument.
     callback : callable, optional
         A custom callback to run after every sweep, it should take the
-        ``TEBD2DImag`` object as its only argument. If it returns any value
+        ``TEBD2D`` object as its only argument. If it returns any value
         that boolean evaluates to ``True`` then terminal the evolution.
     progbar : boolean, optional
         Whether to show a live progress bar during the evolution.
     kwargs
-        Extra options for the specific ``TEBD2DImag`` subclass.
+        Extra options for the specific ``TEBD2D`` subclass.
 
     Attributes
     ----------
@@ -496,8 +499,9 @@ class TEBD2DImag:
         tau=0.01,
         D=None,
         chi=None,
+        imag=True,
         gate_opts=None,
-        ordering='sort',
+        ordering=None,
         compute_energy_every=None,
         compute_energy_final=True,
         compute_energy_opts=None,
@@ -508,6 +512,9 @@ class TEBD2DImag:
         progbar=True,
         **kwargs,
     ):
+        self.imag = imag
+        if not imag:
+            raise NotImplementedError("Real time evolution not tested yet.")
 
         self._psi = psi0.copy()
         self.ham = ham
@@ -542,7 +549,13 @@ class TEBD2DImag:
         self.compute_energy_fn = compute_energy_fn
         self.compute_energy_per_site = bool(compute_energy_per_site)
 
-        if ordering is None or isinstance(ordering, str):
+        if ordering is None:
+
+            def dynamic_random():
+                return self.ham.get_auto_ordering('random_sequential')
+
+            self.ordering = dynamic_random
+        elif isinstance(ordering, str):
             self.ordering = self.ham.get_auto_ordering(ordering)
         elif callable(ordering):
             self.ordering = ordering
@@ -722,8 +735,8 @@ def conditioner(tn, value=None, sweeps=2, balance_bonds=True):
     tn.equalize_norms_(value=value)
 
 
-class SimpleUpdate(TEBD2DImag):
-    """A simple subclass of ``TEBD2DImag`` that overrides two key methods in
+class SimpleUpdate(TEBD2D):
+    """A simple subclass of ``TEBD2D`` that overrides two key methods in
     order to keep 'diagonal gauges' living on the bonds of a PEPS. The gauges
     are stored separately from the main PEPS in the ``gauges`` attribute.
     Before and after a gate is applied they are absorbed and then extracted.
@@ -731,7 +744,7 @@ class SimpleUpdate(TEBD2DImag):
     you can call ``get_state(absorb_gauges=False)`` to lazily add them as
     hyperedge weights only. Reference: https://arxiv.org/abs/0806.3719.
 
-    """ + TEBD2DImag.__doc__
+    """ + TEBD2D.__doc__
 
     def setup(
         self,
@@ -739,13 +752,15 @@ class SimpleUpdate(TEBD2DImag):
         gauge_smudge=1e-6,
         condition_tensors=True,
         condition_balance_bonds=True,
-        swap_sequence=('av', 'bv', 'ah', 'bh'),
+        long_range_use_swaps=False,
+        long_range_path_sequence='random',
     ):
         self.gauge_renorm = gauge_renorm
         self.gauge_smudge = gauge_smudge
         self.condition_tensors = condition_tensors
         self.condition_balance_bonds = condition_balance_bonds
-        self.swap_sequence = swap_sequence
+        self.gate_opts['long_range_use_swaps'] = long_range_use_swaps
+        self.long_range_path_sequence = long_range_path_sequence
         self._initialize_gauges()
 
     def _initialize_gauges(self):
@@ -777,21 +792,40 @@ class SimpleUpdate(TEBD2DImag):
         """
         return self._gauges
 
+    @property
+    def long_range_use_swaps(self):
+        return self.gate_opts['long_range_use_swaps']
+
+    @long_range_use_swaps.setter
+    def long_range_use_swaps(self, b):
+        self.gate_opts['long_range_use_swaps'] = bool(b)
+
     def gate(self, U, where):
-        """Like ``TEBD2DImag.gate`` but absorb and extract the relevant gauges
+        """Like ``TEBD2D.gate`` but absorb and extract the relevant gauges
         before and after each gate application.
         """
         ija, ijb = where
         ia, ja = ija
         ib, jb = ijb
 
-        # get the string linking the two sites
-        string = tuple(gen_string(ija, ijb))
+        if callable(self.long_range_path_sequence):
+            long_range_path_sequence = self.long_range_path_sequence(ija, ijb)
+        else:
+            long_range_path_sequence = self.long_range_path_sequence
+
+        if self.long_range_use_swaps:
+            path = tuple(gen_long_range_swap_path(
+                ija, ijb, sequence=long_range_path_sequence))
+            string = swap_path_to_long_range_path(path, ija)
+        else:
+            # get the string linking the two sites
+            string = path = tuple(gen_long_range_path(
+                ija, ijb, sequence=long_range_path_sequence))
 
         def env_neighbours(i, j):
             return tuple(filter(
                 lambda coo: self._psi.valid_coo((coo)) and coo not in string,
-                [(i + 1, j), (i - 1, j), (i, j + 1), (i, j - 1)]
+                nearest_neighbors((i, j))
             ))
 
         # get the relevant neighbours for string of sites
@@ -815,7 +849,8 @@ class SimpleUpdate(TEBD2DImag):
 
         # perform the gate, retrieving new bond singular values
         info = dict()
-        self._psi.gate_(U, where, absorb=None, info=info, **self.gate_opts)
+        self._psi.gate_(U, where, absorb=None, info=info,
+                        long_range_path_sequence=path, **self.gate_opts)
 
         # set the new singualar values all along the chain
         for site_a, site_b in pairwise(string):
@@ -879,6 +914,8 @@ def gate_full_update_als(
     condition_tensors=True,
     condition_maintain_norms=True,
     condition_balance_bonds=True,
+    long_range_use_swaps=False,
+    long_range_path_sequence='random',
 ):
     ket_plq = ket.select_any(tags_plq).view_like_(ket)
     bra_plq = bra.select_any(tags_plq).view_like_(bra)
@@ -1104,17 +1141,19 @@ def parse_specific_gate_opts(strategy, fit_opts):
     return gate_opts
 
 
-class FullUpdate(TEBD2DImag):
+class FullUpdate(TEBD2D):
 
     def setup(
         self,
+        fit_strategy='als',
+        fit_opts=None,
         compute_envs_every=1,
         pre_normalize=True,
         condition_tensors=True,
         condition_balance_bonds=True,
         contract_optimize='auto-hq',
-        fit_strategy='als',
-        fit_opts=None,
+        long_range_use_swaps=False,
+        long_range_path_sequence='random',
     ):
         self.fit_strategy = str(fit_strategy)
         self.fit_opts = get_default_full_update_fit_opts()
@@ -1129,6 +1168,9 @@ class FullUpdate(TEBD2DImag):
         self.condition_tensors = bool(condition_tensors)
         self.condition_balance_bonds = bool(condition_balance_bonds)
         self.compute_envs_every = int(compute_envs_every)
+
+        self.long_range_use_swaps = long_range_use_swaps
+        self.long_range_path_sequence = long_range_path_sequence
 
         self._env_n = -1
         self._psi.add_tag('KET')
@@ -1236,5 +1278,7 @@ class FullUpdate(TEBD2DImag):
             max_bond=self.D,
             optimize=self.contract_optimize,
             condition_balance_bonds=self.condition_balance_bonds,
+            long_range_use_swaps=self.long_range_use_swaps,
+            long_range_path_sequence=self.long_range_path_sequence,
             **self._gate_opts
         )
