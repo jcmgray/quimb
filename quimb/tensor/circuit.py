@@ -1,10 +1,12 @@
 import numbers
 
 import cytoolz
+import numpy as np
 from autoray import do
 
 import quimb as qu
-from .tensor_core import get_tags, PTensor, oset, tags_to_oset
+from ..utils import progbar as _progbar
+from .tensor_core import get_tags, PTensor, oset, tags_to_oset, oset_union
 from .tensor_gen import MPS_computational_state
 from .tensor_1d import TensorNetwork1DVector
 from . import array_ops as ops
@@ -323,7 +325,8 @@ class Circuit:
     N : int, optional
         The number of qubits.
     psi0 : TensorNetwork1DVector, optional
-        The initial state, assumed to be ``|00000....0>`` if not given.
+        The initial state, assumed to be ``|00000....0>`` if not given. The
+        state is always copied and the tag ``PSI0`` added.
     gate_opts : dict_like, optional
         Default keyword arguments to supply to each
         :func:`~quimb.tensor.tensor_1d.gate_TN_1D` call during the circuit.
@@ -367,14 +370,22 @@ class Circuit:
                 [ 0.7071+0.j]])
     """
 
-    def __init__(self, N=None, psi0=None, gate_opts=None, tags=None):
+    def __init__(
+        self,
+        N=None,
+        psi0=None,
+        gate_opts=None,
+        tags=None,
+        psi0_dtype='complex128',
+        psi0_tag='PSI0',
+    ):
 
         if N is None and psi0 is None:
             raise ValueError("You must supply one of `N` or `psi0`.")
 
         elif psi0 is None:
             self.N = N
-            self._psi = MPS_computational_state('0' * N)
+            self._psi = MPS_computational_state('0' * N, dtype=psi0_dtype)
 
         elif N is None:
             self._psi = psi0.copy()
@@ -385,6 +396,8 @@ class Circuit:
                 raise ValueError("`N` doesn't match `psi0`.")
             self.N = N
             self._psi = psi0.copy()
+
+        self._psi.add_tag(psi0_tag)
 
         if tags is not None:
             if isinstance(tags, str):
@@ -401,6 +414,10 @@ class Circuit:
         # 'swap+split' case, which explicitly maintains an MPS
         if self.gate_opts['contract'] != 'swap+split':
             self._psi.view_as_(TensorNetwork1DVector)
+
+        self._sample_n_gates = -1
+        self._sample_norm_cache = None
+        self._sample_norm_path_cache = None
 
     @classmethod
     def from_qasm(cls, qasm, **quantum_circuit_opts):
@@ -591,7 +608,8 @@ class Circuit:
         """Tensor network representation of the wavefunction.
         """
         # make sure all same dtype and drop singlet dimensions
-        psi = self._psi.squeeze()
+        psi = self._psi.copy()
+        psi.squeeze_()
         psi.astype_(psi.dtype)
         return psi
 
@@ -615,8 +633,385 @@ class Circuit:
 
         return U.reindex_(ixmap)
 
+    def get_reverse_lightcone_tags(self, where):
+        """Get the tags of gates in this circuit corresponding to the 'reverse'
+        lightcone propagating backwards from registers in ``where``.
+
+        Parameters
+        ----------
+        where : int or sequence of int
+            The register or register to get the reverse lightcone of.
+
+        Returns
+        -------
+        tuple[str]
+            The sequence of gate tags (``GATE_{i}``, ...) corresponding to the
+            lightcone.
+        """
+        if isinstance(where, numbers.Integral):
+            cone = {where}
+        else:
+            cone = set(where)
+
+        lightcone_tags = []
+
+        for i, gate in reversed(tuple(enumerate(self.gates))):
+            if isinstance(gate[-2], numbers.Integral):
+                regs = set(gate[-2:])
+            else:
+                regs = set(gate[-1:])
+
+            if regs & cone:
+                lightcone_tags.append(f"GATE_{i}")
+                cone |= regs
+
+        # initial state is always part of the lightcone
+        lightcone_tags.append('PSI0')
+        lightcone_tags.reverse()
+
+        return tuple(lightcone_tags)
+
+    def get_psi_reverse_lightcone(self, where, keep_psi0=False):
+        """Get just the bit of the wavefunction in the reverse lightcone of
+        sites in ``where`` - i.e. causally linked.
+
+        Parameters
+        ----------
+        where : int, or sequence of int
+            The sites to propagate the the lightcone back from, supplied to
+            :meth:`~quimb.tensor.circuit.Circuit.get_reverse_lightcone_tags`.
+        keep_psi0 : bool, optional
+            Keep the tensors corresponding to the initial wavefunction
+            regardless of whether they are outside of the lightcone.
+
+        Returns
+        -------
+        psi_lc : TensorNetwork1DVector
+        """
+        if isinstance(where, numbers.Integral):
+            where = (where,)
+
+        psi = self.psi
+        lightcone_tags = self.get_reverse_lightcone_tags(where)
+        psi_lc = psi.select_any(lightcone_tags).view_like_(psi)
+
+        if not keep_psi0:
+            # these sites are in the lightcone regardless of gates above them
+            site_tags = oset(psi.site_tag(i) for i in where)
+
+            for tid, t in tuple(psi_lc.tensor_map.items()):
+                # get all tensors connected to this tensor (incld itself)
+                neighbors = oset_union(psi_lc.ind_map[ix] for ix in t.inds)
+
+                # lone tensor not attached to anything - drop it
+                # but only if it isn't directly in the ``where`` region
+                if (len(neighbors) == 1) and not (t.tags & site_tags):
+                    psi_lc._pop_tensor(tid)
+
+        return psi_lc
+
+    def get_norm_lightcone_simplified(
+        self, where, simplify_sequence='ADCRS', **full_simplify_opts
+    ):
+        """Get a simplified TN of the norm of the wavefunction, with
+        gates outside reverse lightcone of ``where`` cancelled, and physical
+        indices within ``where`` preserved so that they can be fixed (sliced)
+        or used as output indices.
+
+        Parameters
+        ----------
+        where : int or sequence of int
+            The region assumed to be the target density matrix essentially.
+            Supplied to
+            :meth:`~quimb.tensor.circuit.Circuit.get_reverse_lightcone_tags`.
+        simplify_sequence : str, optional
+            Which local tensor network simplifications to perform and in which
+            order.
+        full_simplify_opts
+            Other options supplied to
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.full_simplify`.
+
+        Returns
+        -------
+        norm_lc : TensorNetwork
+        """
+        psi_lc = self.get_psi_reverse_lightcone(where)
+        norm_lc = psi_lc.H & psi_lc
+
+        # don't want to simplify site indices in region away
+        output_inds = [psi_lc.site_ind(i) for i in where]
+
+        # perform the local simplifications
+        norm_lc.full_simplify_(output_inds=output_inds, seq=simplify_sequence,
+                               **full_simplify_opts)
+
+        return norm_lc
+
+    def _maybe_init_sampling_caches(self):
+        # clear/create the cache if circuit has changed
+        if self._sample_n_gates != len(self.gates):
+            self._sample_norm_cache = dict()
+            self._sample_norm_path_cache = dict()
+            self._sampling_conditionals = dict()
+            self._sample_n_gates = len(self.gates)
+
+    def _get_sampling_norm_cache(self):
+        self._maybe_init_sampling_caches()
+        return self._sample_norm_cache
+
+    def _get_sampling_norm_path_cache(self):
+        self._maybe_init_sampling_caches()
+        return self._sample_norm_path_cache
+
+    def compute_marginal(
+        self,
+        where,
+        fix=None,
+        optimize='auto-hq',
+        backend='auto',
+        dtype='complex64',
+        get=None,
+        simplify_sequence='ADCRS',
+        **full_simplify_opts,
+    ):
+        """Compute the probability tensor of qubits in ``where``, given
+        possibly fixed qubits in ``fix`` and tracing everything else having
+        removed redundant unitary gates.
+
+        Parameters
+        ----------
+        where : sequence of int
+            The qubits to compute the marginal probability distribution of.
+        fix : None or dict[int, str], optional
+            Measurement results on other qubits to fix.
+        optimize : str, optional
+            Contraction path optimizer to use for the marginals, shouldn't be
+            a reusable path optimizer as called on many different TNs. Passed
+            to :func:`opt_einsum.contract_path`.
+        backend : str, optional
+            Backend to perform the marginal contraction with, e.g. ``'jax'``.
+            Passed to ``opt_einsum``.
+        dtype : str, optional
+            Data type to cast the TN to before contraction.
+        simplify_sequence : str, optional
+            Which local tensor network simplifications to perform and in which
+            order, see
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.full_simplify`.
+        full_simplify_opts
+            Other options supplied to
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.full_simplify`.
+        """
+        site_ind = self._psi.site_ind
+
+        # index trick to contract straight to reduced density matrix diagonal
+        # rho_ii -> p_i (i.e. insert a COPY tensor into the norm)
+        output_inds = [site_ind(i) for i in where]
+
+        # lightcone region is target qubit plus fixed qubits
+        region = set(where)
+        if fix is not None:
+            region |= set(fix)
+        region = tuple(sorted(region))
+
+        # cache the fully simplified version of this
+        norm_cache = self._get_sampling_norm_cache()
+        if region not in norm_cache:
+            norm_cache[region] = self.get_norm_lightcone_simplified(
+                region, **full_simplify_opts)
+        nm_lc = norm_cache[region].copy()
+
+        if fix:
+            # project (slice) fixed tensors with bitstring
+            # this severs the indices connecting norm on fixed sites
+            nm_lc.isel_({site_ind(i): int(b) for i, b in fix.items()})
+
+        # having sliced we can do a final simplify
+        nm_lc.full_simplify_(simplify_sequence, output_inds=output_inds,
+                             **full_simplify_opts)
+
+        # cast to desired data type
+        nm_lc.astype_(dtype)
+
+        # NB. the path isn't neccesarily the same each time due to the post
+        #     slicing full simplify, however there is also the lower level
+        #     contraction path cache if the structure generated *is* the same
+        path_cache = self._get_sampling_norm_path_cache()
+        info = path_cache[region] = nm_lc.contract(
+            all, output_inds=output_inds,
+            optimize=optimize, get='path-info'
+        )
+
+        if get == 'path-info':
+            return info
+
+        # perform the contraction with the path found
+        return abs(nm_lc.contract(
+            all, output_inds=output_inds,
+            optimize=info.path, backend=backend
+        ).data)
+
+    def get_greedy_lightcone_ordering(self, qubits=None):
+        """Get a order to measure ``qubits`` in, by greedily choosing whichever
+        has the smallest reverse lightcone followed by whichever expands this
+        lightcone *least*.
+
+        Parameters
+        ----------
+        qubits : None or sequence of int
+            The qubits to generate a lightcone ordering for, if ``None``,
+            assume all qubits.
+
+        Returns
+        -------
+        tuple[int]
+            The order to 'measure' qubits in.
+        """
+        if qubits is None:
+            qubits = range(self.N)
+
+        cone = set()
+        lctgs = {i: set(self.get_reverse_lightcone_tags(i)) for i in qubits}
+
+        order = []
+        while lctgs:
+            # get the next qubit which adds least num gates to lightcone
+            next_qubit = min(lctgs, key=lambda i: len(lctgs[i] - cone))
+            cone |= lctgs.pop(next_qubit)
+            order.append(next_qubit)
+
+        return tuple(order)
+
+    def sample_dry_run(
+        self,
+        qubits=None,
+        order=None,
+        result=None,
+        optimize='auto-hq',
+        progbar=True,
+        simplify_sequence='ADCRS',
+        **full_simplify_opts,
+    ):
+        """
+        """
+        if qubits is None:
+            qubits = range(self.N)
+        if order is None:
+            order = self.get_greedy_lightcone_ordering(qubits)
+        elif set(qubits) != set(order):
+            raise ValueError("``order`` must be a permutation of ``qubits``.")
+
+        if result is None:
+            result = {i: '0' for i in qubits}
+
+        # init TN norms, contraction paths, and marginals
+        self._maybe_init_sampling_caches()
+
+        infos = []
+        fix = {}
+
+        for i in _progbar(order, disable=not progbar):
+            infos.append(self.compute_marginal(
+                where=[i],
+                fix=fix,
+                optimize=optimize,
+                simplify_sequence=simplify_sequence,
+                get='path-info',
+                **full_simplify_opts,
+            ))
+
+            # set the result of qubit ``i`` arbitrarily
+            fix[i] = result[i]
+
+        return infos
+
+    def sample(
+        self,
+        C,
+        qubits=None,
+        order=None,
+        seed=None,
+        optimize='auto-hq',
+        backend='auto',
+        dtype='complex64',
+        simplify_sequence='ADCRS',
+        **full_simplify_opts,
+    ):
+        """Sample the circuit given by ``gates``, ``C`` times, using lightcone
+        cancelling and caching marginal distribution results.
+
+        Parameters
+        ----------
+        C : int
+            The number of times to sample.
+        qubits : None or sequence of int, optional
+            Which qubits to measure, defaults (``None``) to all qubits.
+        order : None or sequence of int, optional
+            Which order to measure the qubits in, defaults (``None``) to an
+            order based on greedily expanding the smallest reverse lightcone.
+        seed : None or int, optional
+            A random seed, passed to ``numpy.random.seed`` if given.
+        optimize : str, optional
+            Contraction path optimizer to use for the marginals, shouldn't be
+            a reusable path optimizer as called on many different TNs. Passed
+            to :func:`opt_einsum.contract_path`.
+        backend : str, optional
+            Backend to perform the marginal contraction with, e.g. ``'jax'``.
+            Passed to ``opt_einsum``.
+        dtype : str, optional
+            Data type to cast the TN to before contraction.
+        simplify_sequence : str, optional
+            Which local tensor network simplifications to perform and in which
+            order, see
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.full_simplify`.
+        full_simplify_opts
+            Other options supplied to
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.full_simplify`.
+        """
+        if seed is not None:
+            np.random.seed(seed)
+
+        if qubits is None:
+            qubits = range(self.N)
+        if order is None:
+            order = self.get_greedy_lightcone_ordering(qubits)
+        elif set(qubits) != set(order):
+            raise ValueError("``order`` must be a permutation of ``qubits``.")
+
+        # init TN norms, contraction paths, and marginals
+        self._maybe_init_sampling_caches()
+
+        for _ in range(C):
+            result = {}
+            for i in order:
+
+                # key - (qubit i, tuple[int qubit, str result])
+                # value - probability of qubit i being 0/1 given prior result
+                # e.g. (3, ((0, 0), (1, 0), (2, 1), (4, 0), ...)
+                #     = prob(qubit3=0/1 given 'measurements' |
+                #            (qubit0=0, qubit1=0, qubit2=1, qubit4=0, ...))
+                key = (i, tuple(sorted(result.items())))
+
+                if key not in self._sampling_conditionals:
+                    # compute p(i=0/1 | current bitstring)
+                    p = self.compute_marginal(
+                        where=[i],
+                        fix=result,
+                        optimize=optimize,
+                        backend=backend,
+                        dtype=dtype,
+                        simplify_sequence=simplify_sequence,
+                        **full_simplify_opts,
+                    )
+                    p = do('to_numpy', p).astype('float64')
+                    self._sampling_conditionals[key] = p / sum(p)
+
+                p = self._sampling_conditionals[key]
+                result[i] = np.random.choice(['0', '1'], p=p)
+
+            yield "".join(result[i] for i in qubits)
+
     def to_dense(self, reverse=False, dtype=None,
-                 rank_simplify=False, **contract_opts):
+                 simplify_sequence='R', **contract_opts):
         """Generate the dense representation of the final wavefunction.
 
         Parameters
@@ -628,9 +1023,13 @@ class Circuit:
             Suppled to :func:`~quimb.tensor.tensor_core.tensor_contract`.
         dtype : dtype or str, optional
             If given, convert the tensors to this dtype prior to contraction.
-        rank_simplify : bool, optional
-            If the network is complex, performing rank simplification first can
-            aid the contraction path finding.
+        simplify_sequence : str, optional
+            Which local tensor network simplifications to perform and in which
+            order, see
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.full_simplify`.
+        contract_opts
+            Supplied to
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.to_dense`.
 
         Returns
         -------
@@ -642,10 +1041,10 @@ class Circuit:
         if dtype is not None:
             psi.astype_(dtype)
 
-        if rank_simplify:
-            psi.rank_simplify_()
-
         inds = [psi.site_ind(i) for i in range(self.N)]
+
+        if simplify_sequence:
+            psi.full_simplify_(simplify_sequence, output_inds=inds)
 
         if reverse:
             inds = inds[::-1]

@@ -4196,6 +4196,34 @@ class TensorNetwork(object):
 
     column_reduce_ = functools.partialmethod(column_reduce, inplace=True)
 
+    def split_simplify(self, inplace=False, atol=1e-12):
+        """Find tensors which have low rank SVD decompositions across any
+        combination of bonds and perform them.
+        """
+        tn = self if inplace else self.copy()
+
+        for tid, t in tuple(tn.tensor_map.items()):
+
+            found = False
+            for r in range(1, t.ndim):
+                for lix in itertools.combinations(t.inds, r):
+                    tl, tr = t.split(lix, get='tensors', cutoff=atol)
+                    new_size = max(tl.size, tr.size)
+                    if new_size < t.size:
+                        found = True
+                        break
+                if found:
+                    break
+
+            if found:
+                tn._pop_tensor(tid)
+                tn.add_tensor(tl, virtual=True)
+                tn.add_tensor(tr, virtual=True)
+
+        return tn
+
+    split_simplify_ = functools.partialmethod(split_simplify, inplace=True)
+
     def full_simplify(self, seq='ADCR', inplace=False, output_inds=None,
                       atol=1e-12, **rank_simplify_opts):
         """Perform a series of tensor network 'simplifications' in a loop until
@@ -4258,6 +4286,8 @@ class TensorNetwork(object):
                     tn.antidiag_gauge_(output_inds=ix_o, atol=atol)
                 elif meth == 'C':
                     tn.column_reduce_(output_inds=ix_o, atol=atol)
+                elif meth == 'S':
+                    tn.split_simplify_(atol=atol)
                 else:
                     raise ValueError(f"'{meth}' is not a valid simplify type.")
 
