@@ -315,6 +315,22 @@ TWO_QUBIT_PARAM_GATES = {'FS', 'FSIM'}
 ALL_PARAM_GATES = ONE_QUBIT_PARAM_GATES | TWO_QUBIT_PARAM_GATES
 
 
+def sample_bitstring_from_prob_ndarray(p):
+    """Sample a bitstring from n-dimensional tensor ``p`` of probabilities.
+
+    Examples
+    --------
+
+        >>> import numpy as np
+        >>> p = np.zeros(shape=(2, 2, 2, 2, 2))
+        >>> p[0, 1, 0, 1, 1] = 1.0
+        >>> sample_bitstring_from_prob_ndarray(p)
+        '01011'
+    """
+    b = np.random.choice(np.arange(p.size), p=p.flat)
+    return f"{b:0>{p.ndim}b}"
+
+
 # --------------------------- main circuit class ---------------------------- #
 
 class Circuit:
@@ -368,6 +384,19 @@ class Circuit:
                 [ 0.    +0.j],
                 [ 0.    +0.j],
                 [ 0.7071+0.j]])
+
+        >>> for b in qc.sample(10):
+        ...     print(b)
+        000
+        000
+        111
+        000
+        111
+        111
+        000
+        111
+        000
+        000
     """
 
     def __init__(
@@ -710,9 +739,7 @@ class Circuit:
 
         return psi_lc
 
-    def get_norm_lightcone_simplified(
-        self, where, simplify_sequence='ADCRS', **full_simplify_opts
-    ):
+    def get_norm_lightcone_simplified(self, where, seq='ADCRS', atol=1e-6):
         """Get a simplified TN of the norm of the wavefunction, with
         gates outside reverse lightcone of ``where`` cancelled, and physical
         indices within ``where`` preserved so that they can be fixed (sliced)
@@ -724,44 +751,78 @@ class Circuit:
             The region assumed to be the target density matrix essentially.
             Supplied to
             :meth:`~quimb.tensor.circuit.Circuit.get_reverse_lightcone_tags`.
-        simplify_sequence : str, optional
+        seq : str, optional
             Which local tensor network simplifications to perform and in which
-            order.
-        full_simplify_opts
-            Other options supplied to
+            order, see
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.full_simplify`.
+        atol : float, optional
+            The tolerance with which to compare to zero when applying
             :meth:`~quimb.tensor.tensor_core.TensorNetwork.full_simplify`.
 
         Returns
         -------
-        norm_lc : TensorNetwork
+        TensorNetwork
         """
+        key = (where, seq, atol)
+        if key in self._sample_norm_cache:
+            return self._sample_norm_cache[key].copy()
+
         psi_lc = self.get_psi_reverse_lightcone(where)
         norm_lc = psi_lc.H & psi_lc
 
         # don't want to simplify site indices in region away
-        output_inds = [psi_lc.site_ind(i) for i in where]
+        output_inds = tuple(map(psi_lc.site_ind, where))
 
-        # perform the local simplifications
-        norm_lc.full_simplify_(output_inds=output_inds, seq=simplify_sequence,
-                               **full_simplify_opts)
+        # # simplify the norm and cache it
+        norm_lc.full_simplify_(seq=seq, atol=atol, output_inds=output_inds)
+        self._sample_norm_cache[key] = norm_lc
 
-        return norm_lc
+        # return a copy so we can modify it inplace
+        return norm_lc.copy()
+
+    def get_psi_simplified(self, seq='ADCRS', atol=1e-6):
+        """Get the full wavefunction post local tensor newtork simplification.
+
+        Parameters
+        ----------
+        seq : str, optional
+            Which local tensor network simplifications to perform and in which
+            order, see
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.full_simplify`.
+        atol : float, optional
+            The tolerance with which to compare to zero when applying
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.full_simplify`.
+
+        Returns
+        -------
+        TensorNetwork1DVector
+        """
+        key = (tuple(range(self.N)), seq, atol)
+        if key in self._sample_norm_cache:
+            return self._sample_norm_cache[key].copy()
+
+        psi = self.psi
+        # make sure to keep all outer indices
+        output_inds = tuple(map(psi.site_ind, range(self.N)))
+
+        # simplify the state and cache it
+        psi.full_simplify_(seq=seq, atol=atol, output_inds=output_inds)
+        self._sample_norm_cache[key] = psi
+
+        # return a copy so we can modify it inplace
+        return psi.copy()
 
     def _maybe_init_sampling_caches(self):
         # clear/create the cache if circuit has changed
         if self._sample_n_gates != len(self.gates):
+            self._sample_n_gates = len(self.gates)
+
+            # storage
+            self._lightcone_orderings = dict()
             self._sample_norm_cache = dict()
             self._sample_norm_path_cache = dict()
             self._sampling_conditionals = dict()
-            self._sample_n_gates = len(self.gates)
-
-    def _get_sampling_norm_cache(self):
-        self._maybe_init_sampling_caches()
-        return self._sample_norm_cache
-
-    def _get_sampling_norm_path_cache(self):
-        self._maybe_init_sampling_caches()
-        return self._sample_norm_path_cache
+            self._marginal_storage_size = 0
 
     def compute_marginal(
         self,
@@ -770,9 +831,9 @@ class Circuit:
         optimize='auto-hq',
         backend='auto',
         dtype='complex64',
-        get=None,
         simplify_sequence='ADCRS',
-        **full_simplify_opts,
+        simplify_atol=1e-6,
+        get=None,
     ):
         """Compute the probability tensor of qubits in ``where``, given
         possibly fixed qubits in ``fix`` and tracing everything else having
@@ -785,27 +846,34 @@ class Circuit:
         fix : None or dict[int, str], optional
             Measurement results on other qubits to fix.
         optimize : str, optional
-            Contraction path optimizer to use for the marginals, shouldn't be
-            a reusable path optimizer as called on many different TNs. Passed
-            to :func:`opt_einsum.contract_path`.
+            Contraction path optimizer to use for the marginal, can be
+            a reusable path optimizer as only called once (though path won't be
+            cached for later use in that case).
         backend : str, optional
-            Backend to perform the marginal contraction with, e.g. ``'jax'``.
-            Passed to ``opt_einsum``.
+            Backend to perform the marginal contraction with, e.g. ``'numpy'``,
+            ``'cupy'`` or ``'jax'``. Passed to ``opt_einsum``.
         dtype : str, optional
             Data type to cast the TN to before contraction.
         simplify_sequence : str, optional
             Which local tensor network simplifications to perform and in which
             order, see
             :meth:`~quimb.tensor.tensor_core.TensorNetwork.full_simplify`.
-        full_simplify_opts
-            Other options supplied to
+        simplify_atol : float, optional
+            The tolerance with which to compare to zero when applying
             :meth:`~quimb.tensor.tensor_core.TensorNetwork.full_simplify`.
+        get : None or 'path-info', optional
+            Whether to perform the marginal contraction or just return the
+            associated contraction path information.
         """
+        self._maybe_init_sampling_caches()
+
         site_ind = self._psi.site_ind
 
         # index trick to contract straight to reduced density matrix diagonal
         # rho_ii -> p_i (i.e. insert a COPY tensor into the norm)
         output_inds = [site_ind(i) for i in where]
+
+        fs_opts = dict(seq=simplify_sequence, atol=simplify_atol)
 
         # lightcone region is target qubit plus fixed qubits
         region = set(where)
@@ -813,30 +881,33 @@ class Circuit:
             region |= set(fix)
         region = tuple(sorted(region))
 
-        # cache the fully simplified version of this
-        norm_cache = self._get_sampling_norm_cache()
-        if region not in norm_cache:
-            norm_cache[region] = self.get_norm_lightcone_simplified(
-                region, **full_simplify_opts)
-        nm_lc = norm_cache[region].copy()
+        # have we fixed or are measuring all qubits?
+        final_marginal = (len(region) == self.N)
+
+        # these both are cached and produce TN copies
+        if final_marginal:
+            # won't need to partially trace anything -> just need ket
+            nm_lc = self.get_psi_simplified(**fs_opts)
+        else:
+            # can use lightcone cancellation on partially traced qubits
+            nm_lc = self.get_norm_lightcone_simplified(region, **fs_opts)
 
         if fix:
             # project (slice) fixed tensors with bitstring
-            # this severs the indices connecting norm on fixed sites
+            # this severs the indices connecting bra and ket on fixed sites
             nm_lc.isel_({site_ind(i): int(b) for i, b in fix.items()})
 
         # having sliced we can do a final simplify
-        nm_lc.full_simplify_(simplify_sequence, output_inds=output_inds,
-                             **full_simplify_opts)
+        nm_lc.full_simplify_(output_inds=output_inds, **fs_opts)
 
         # cast to desired data type
         nm_lc.astype_(dtype)
 
-        # NB. the path isn't neccesarily the same each time due to the post
+        # NB. the path isn't *neccesarily* the same each time due to the post
         #     slicing full simplify, however there is also the lower level
         #     contraction path cache if the structure generated *is* the same
-        path_cache = self._get_sampling_norm_path_cache()
-        info = path_cache[region] = nm_lc.contract(
+        #     so still pretty efficient to just overwrite
+        info = self._sample_norm_path_cache[region] = nm_lc.contract(
             all, output_inds=output_inds,
             optimize=optimize, get='path-info'
         )
@@ -845,12 +916,18 @@ class Circuit:
             return info
 
         # perform the contraction with the path found
-        return abs(nm_lc.contract(
+        p_marginal = abs(nm_lc.contract(
             all, output_inds=output_inds,
             optimize=info.path, backend=backend
         ).data)
 
-    def get_greedy_lightcone_ordering(self, qubits=None):
+        if final_marginal:
+            # we only did half the ket contraction so need to square
+            p_marginal = p_marginal**2
+
+        return p_marginal
+
+    def calc_qubit_ordering(self, qubits=None):
         """Get a order to measure ``qubits`` in, by greedily choosing whichever
         has the smallest reverse lightcone followed by whichever expands this
         lightcone *least*.
@@ -866,8 +943,16 @@ class Circuit:
         tuple[int]
             The order to 'measure' qubits in.
         """
+        self._maybe_init_sampling_caches()
+
         if qubits is None:
-            qubits = range(self.N)
+            qubits = tuple(range(self.N))
+        else:
+            qubits = tuple(sorted(qubits))
+
+        # check the cache first
+        if qubits in self._lightcone_orderings:
+            return self._lightcone_orderings[qubits]
 
         cone = set()
         lctgs = {i: set(self.get_reverse_lightcone_tags(i)) for i in qubits}
@@ -879,65 +964,50 @@ class Circuit:
             cone |= lctgs.pop(next_qubit)
             order.append(next_qubit)
 
-        return tuple(order)
+        order = self._lightcone_orderings[qubits] = tuple(order)
 
-    def sample_dry_run(
-        self,
-        qubits=None,
-        order=None,
-        result=None,
-        optimize='auto-hq',
-        progbar=True,
-        simplify_sequence='ADCRS',
-        **full_simplify_opts,
-    ):
-        """
+        return order
+
+    def _parse_qubits_order(self, qubits=None, order=None):
+        """Simply initializes the default of measuring all qubits, and the
+        default order, or checks that ``order`` is a permutation of ``qubits``.
         """
         if qubits is None:
             qubits = range(self.N)
         if order is None:
-            order = self.get_greedy_lightcone_ordering(qubits)
+            order = self.calc_qubit_ordering(qubits)
         elif set(qubits) != set(order):
             raise ValueError("``order`` must be a permutation of ``qubits``.")
 
-        if result is None:
-            result = {i: '0' for i in qubits}
+        return qubits, order
 
-        # init TN norms, contraction paths, and marginals
-        self._maybe_init_sampling_caches()
-
-        infos = []
-        fix = {}
-
-        for i in _progbar(order, disable=not progbar):
-            infos.append(self.compute_marginal(
-                where=[i],
-                fix=fix,
-                optimize=optimize,
-                simplify_sequence=simplify_sequence,
-                get='path-info',
-                **full_simplify_opts,
-            ))
-
-            # set the result of qubit ``i`` arbitrarily
-            fix[i] = result[i]
-
-        return infos
+    def _group_order(self, order, group_size=1):
+        """Take the qubit ordering ``order`` and batch it in groups of size
+        ``group_size``, sorting the qubits (for caching reasons) within each
+        group.
+        """
+        return tuple(
+            tuple(sorted(g))
+            for g in cytoolz.partition_all(group_size, order)
+        )
 
     def sample(
         self,
         C,
         qubits=None,
         order=None,
+        group_size=1,
+        max_marginal_storage=2**20,
         seed=None,
         optimize='auto-hq',
         backend='auto',
         dtype='complex64',
         simplify_sequence='ADCRS',
-        **full_simplify_opts,
+        simplify_atol=1e-6,
     ):
         """Sample the circuit given by ``gates``, ``C`` times, using lightcone
-        cancelling and caching marginal distribution results.
+        cancelling and caching marginal distribution results. This is a
+        generator.
 
         Parameters
         ----------
@@ -948,67 +1018,314 @@ class Circuit:
         order : None or sequence of int, optional
             Which order to measure the qubits in, defaults (``None``) to an
             order based on greedily expanding the smallest reverse lightcone.
+            If specified it should be a permutation of ``qubits``.
+        group_size : int, optional
+            How many qubits to group together into marginals, the larger this
+            is the fewer marginals need to be computed, which can be faster at
+            the cost of higher memory. The marginal themselves will each be
+            of size ``2**group_size``.
+        max_marginal_storage : int, optional
+            The total cumulative number of marginal probabilites to cache, once
+            this is exceeded caching will be turned off.
         seed : None or int, optional
             A random seed, passed to ``numpy.random.seed`` if given.
         optimize : str, optional
             Contraction path optimizer to use for the marginals, shouldn't be
             a reusable path optimizer as called on many different TNs. Passed
-            to :func:`opt_einsum.contract_path`.
+            to :func:`opt_einsum.contract_path`. If you want to use a custom
+            path optimizer register it with a name using
+            ``opt_einsum.paths.register_path_fn`` after which the paths will be
+            cached on name.
         backend : str, optional
-            Backend to perform the marginal contraction with, e.g. ``'jax'``.
-            Passed to ``opt_einsum``.
+            Backend to perform the marginal contraction with, e.g. ``'numpy'``,
+            ``'cupy'`` or ``'jax'``. Passed to ``opt_einsum``.
         dtype : str, optional
             Data type to cast the TN to before contraction.
         simplify_sequence : str, optional
             Which local tensor network simplifications to perform and in which
             order, see
             :meth:`~quimb.tensor.tensor_core.TensorNetwork.full_simplify`.
-        full_simplify_opts
-            Other options supplied to
+        simplify_atol : float, optional
+            The tolerance with which to compare to zero when applying
             :meth:`~quimb.tensor.tensor_core.TensorNetwork.full_simplify`.
+
+        Yields
+        ------
+        bitstrings : sequence of str
         """
+        # init TN norms, contraction paths, and marginals
+        self._maybe_init_sampling_caches()
+        qubits, order = self._parse_qubits_order(qubits, order)
+        groups = self._group_order(order, group_size)
+
         if seed is not None:
             np.random.seed(seed)
 
-        if qubits is None:
-            qubits = range(self.N)
-        if order is None:
-            order = self.get_greedy_lightcone_ordering(qubits)
-        elif set(qubits) != set(order):
-            raise ValueError("``order`` must be a permutation of ``qubits``.")
-
-        # init TN norms, contraction paths, and marginals
-        self._maybe_init_sampling_caches()
-
+        result = dict()
         for _ in range(C):
-            result = {}
-            for i in order:
+            for where in groups:
 
-                # key - (qubit i, tuple[int qubit, str result])
-                # value - probability of qubit i being 0/1 given prior result
-                # e.g. (3, ((0, 0), (1, 0), (2, 1), (4, 0), ...)
-                #     = prob(qubit3=0/1 given 'measurements' |
-                #            (qubit0=0, qubit1=0, qubit2=1, qubit4=0, ...))
-                key = (i, tuple(sorted(result.items())))
-
+                # key - (tuple[int] qubits, tuple[int qubit, str result])
+                # value marginal probability distribution of qubits given prior
+                # result, as an ndarray
+                key = (where, tuple(sorted(result.items())))
                 if key not in self._sampling_conditionals:
-                    # compute p(i=0/1 | current bitstring)
+                    # compute p(qs=x | current bitstring)
                     p = self.compute_marginal(
-                        where=[i],
+                        where=where,
                         fix=result,
                         optimize=optimize,
                         backend=backend,
                         dtype=dtype,
                         simplify_sequence=simplify_sequence,
-                        **full_simplify_opts,
+                        simplify_atol=simplify_atol,
                     )
                     p = do('to_numpy', p).astype('float64')
-                    self._sampling_conditionals[key] = p / sum(p)
+                    p /= p.sum()
 
-                p = self._sampling_conditionals[key]
-                result[i] = np.random.choice(['0', '1'], p=p)
+                    if self._marginal_storage_size <= max_marginal_storage:
+                        self._sampling_conditionals[key] = p
+                        self._marginal_storage_size += p.size
+                else:
+                    p = self._sampling_conditionals[key]
+
+                # the sampled bitstring e.g. '1' or '001010101'
+                b_where = sample_bitstring_from_prob_ndarray(p)
+
+                # split back into individual qubit results
+                for q, b in zip(where, b_where):
+                    result[q] = b
 
             yield "".join(result[i] for i in qubits)
+            result.clear()
+
+    def sample_rehearse(
+        self,
+        qubits=None,
+        order=None,
+        group_size=1,
+        result=None,
+        optimize='auto-hq',
+        simplify_sequence='ADCRS',
+        simplify_atol=1e-6,
+        progbar=False,
+    ):
+        """
+        Parameters
+        ----------
+        qubits : None or sequence of int, optional
+            Which qubits to measure, defaults (``None``) to all qubits.
+        order : None or sequence of int, optional
+            Which order to measure the qubits in, defaults (``None``) to an
+            order based on greedily expanding the smallest reverse lightcone.
+        group_size : int, optional
+            How many qubits to group together into marginals, the larger this
+            is the fewer marginals need to be computed, which can be faster at
+            the cost of higher memory. The marginal's size itself is
+            exponential in ``group_size``.
+        result : None or dict[int, str], optional
+            Explicitly check the computational cost of this result, assumed to
+            be all zeros if not given.
+        optimize : str, optional
+            Contraction path optimizer to use for the marginals, shouldn't be
+            a reusable path optimizer as called on many different TNs. Passed
+            to :func:`opt_einsum.contract_path`. If you want to use a custom
+            path optimizer register it with a name using
+            ``opt_einsum.paths.register_path_fn`` after which the paths will be
+            cached on name.
+        simplify_sequence : str, optional
+            Which local tensor network simplifications to perform and in which
+            order, see
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.full_simplify`.
+        simplify_atol : float, optional
+            The tolerance with which to compare to zero when applying
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.full_simplify`.
+        progbar : bool, optional
+            Whether to show the progress of finding each contraction path.
+
+        Returns
+        -------
+        infos : tuple[opt_einsum.PathInfo]
+            One contraction path info object per grouped marginal computation.
+        """
+        # init TN norms, contraction paths, and marginals
+        self._maybe_init_sampling_caches()
+        qubits, order = self._parse_qubits_order(qubits, order)
+        groups = self._group_order(order, group_size)
+
+        if result is None:
+            result = {q: '0' for q in qubits}
+
+        infos = []
+        fix = {}
+        for where in _progbar(groups, disable=not progbar):
+            infos.append(self.compute_marginal(
+                where=where,
+                fix=fix,
+                optimize=optimize,
+                simplify_sequence=simplify_sequence,
+                get='path-info',
+            ))
+
+            # set the result of qubit ``q`` arbitrarily
+            for q in where:
+                fix[q] = result[q]
+
+        return tuple(infos)
+
+    def sample_chaotic(
+        self,
+        C,
+        marginal_qubits,
+        max_marginal_storage=2**20,
+        seed=None,
+        optimize='auto-hq',
+        backend='auto',
+        dtype='complex64',
+        simplify_sequence='ADCRS',
+        simplify_atol=1e-6,
+    ):
+        """Sample from this circuit, *assuming* it to be chaotic. Which is to
+        say, only compute and sample correctly from the final marginal,
+        assuming that the distribution on the other qubits is uniform.
+
+        Parameters
+        ----------
+        C : int
+            The number of times to sample.
+        marginal_qubits : int or sequence of int
+            The number of qubits to treat as marginal, or the actual qubits. If
+            an int is given then the qubits treated as marginal will be
+            ``circuit.calc_qubit_ordering()[:marginal_qubits]``.
+        seed : None or int, optional
+            A random seed, passed to ``numpy.random.seed`` if given.
+        optimize : str, optional
+            Contraction path optimizer to use for the marginals, shouldn't be
+            a reusable path optimizer as called on many different TNs. Passed
+            to :func:`opt_einsum.contract_path`. If you want to use a custom
+            path optimizer register it with a name using
+            ``opt_einsum.paths.register_path_fn`` after which the paths will be
+            cached on name.
+        backend : str, optional
+            Backend to perform the marginal contraction with, e.g. ``'numpy'``,
+            ``'cupy'`` or ``'jax'``. Passed to ``opt_einsum``.
+        dtype : str, optional
+            Data type to cast the TN to before contraction.
+        simplify_sequence : str, optional
+            Which local tensor network simplifications to perform and in which
+            order, see
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.full_simplify`.
+        simplify_atol : float, optional
+            The tolerance with which to compare to zero when applying
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.full_simplify`.
+        """
+        # init TN norms, contraction paths, and marginals
+        self._maybe_init_sampling_caches()
+        qubits = tuple(range(self.N))
+
+        if seed is not None:
+            np.random.seed(seed)
+
+        if isinstance(marginal_qubits, numbers.Integral):
+            marginal_qubits = self.calc_qubit_ordering()[:marginal_qubits]
+        where = tuple(sorted(marginal_qubits))
+
+        fix_qubits = tuple(q for q in qubits if q not in where)
+
+        result = dict()
+        for _ in range(C):
+            for q in fix_qubits:
+                result[q] = np.random.choice(('0', '1'))
+
+            key = (where, tuple(sorted(result.items())))
+            if key not in self._sampling_conditionals:
+                p = self.compute_marginal(
+                    where=where,
+                    fix=result,
+                    optimize=optimize,
+                    backend=backend,
+                    dtype=dtype,
+                    simplify_sequence=simplify_sequence,
+                    simplify_atol=simplify_atol,
+                )
+                p = do('to_numpy', p).astype('float64')
+                p /= p.sum()
+
+                if self._marginal_storage_size <= max_marginal_storage:
+                    self._sampling_conditionals[key] = p
+                    self._marginal_storage_size += p.size
+            else:
+                p = self._sampling_conditionals[key]
+
+            b_where = sample_bitstring_from_prob_ndarray(p)
+            # split back into individual qubit results
+            for q, b in zip(where, b_where):
+                result[q] = b
+
+            yield "".join(result[i] for i in qubits)
+            result.clear()
+
+    def sample_chaotic_rehearse(
+        self,
+        marginal_qubits,
+        result=None,
+        optimize='auto-hq',
+        simplify_sequence='ADCRS',
+        simplify_atol=1e-6,
+    ):
+        """Rehearse chaotic sampling (perform just the TN simplifications and
+        contraction path finding).
+
+        Parameters
+        ----------
+        marginal_qubits : int or sequence of int
+            The number of qubits to treat as marginal, or the actual qubits. If
+            an int is given then the qubits treated as marginal will be
+            ``circuit.calc_qubit_ordering()[:marginal_qubits]``.
+        result : None or dict[int, str], optional
+            Explicitly check the computational cost of this result, assumed to
+            be all zeros if not given.
+        optimize : str, optional
+            Contraction path optimizer to use for the marginal, can be
+            a reusable path optimizer as only called once (though path won't be
+            cached for later use in that case).
+        simplify_sequence : str, optional
+            Which local tensor network simplifications to perform and in which
+            order, see
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.full_simplify`.
+        simplify_atol : float, optional
+            The tolerance with which to compare to zero when applying
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.full_simplify`.
+
+        Returns
+        -------
+        info : opt_einsum.PathInfo
+            The contraction path information for the main computation.
+        """
+
+        # init TN norms, contraction paths, and marginals
+        self._maybe_init_sampling_caches()
+        qubits = tuple(range(self.N))
+
+        if isinstance(marginal_qubits, numbers.Integral):
+            marginal_qubits = self.calc_qubit_ordering()[:marginal_qubits]
+        where = tuple(sorted(marginal_qubits))
+
+        fix_qubits = tuple(q for q in qubits if q not in where)
+
+        if result is None:
+            fix = {q: '0' for q in fix_qubits}
+        else:
+            fix = {q: result[q] for q in fix_qubits}
+
+        return self.compute_marginal(
+            where=where,
+            fix=fix,
+            optimize=optimize,
+            simplify_sequence=simplify_sequence,
+            simplify_atol=simplify_atol,
+            get='path-info',
+        )
 
     def to_dense(self, reverse=False, dtype=None,
                  simplify_sequence='R', **contract_opts):
