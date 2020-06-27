@@ -140,8 +140,8 @@ class LocalHam2D:
 
             # get interacting terms which cover the site
             pairs = self._sites_to_covering_terms[i, j]
-            np = len(pairs)
-            if np == 0:
+            num_pairs = len(pairs)
+            if num_pairs == 0:
                 raise ValueError(
                     f"There are no two site terms to add this single site "
                     f"term to - site {(i, j)} is not coupled to anything.")
@@ -153,7 +153,7 @@ class LocalHam2D:
                 self.terms[pair] = (
                     self._add_cached(
                         self.terms[pair],
-                        self._div_cached(H_tensored, np)
+                        self._div_cached(H_tensored, num_pairs)
                     )
                 )
 

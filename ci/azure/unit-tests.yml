@@ -2,6 +2,10 @@ steps:
 
 - template: install.yml
 
+variables:
+  QUIMB_NUMBA_CACHE: 'false'
+  QUIMB_NUMBA_PARALLEL: 'false'
+
 - bash: |
     source activate quimb-tests
     python -c "import quimb"
@@ -14,7 +18,7 @@ steps:
     --cov-report=xml \
     tests
   condition: eq(variables['which_tests'], 'all')
-  displayName: Run tests
+  displayName: Run all tests
 
 - bash: |
     source activate quimb-tests
@@ -24,7 +28,7 @@ steps:
     --ignore=tests/test_tensor \
     tests
   condition: eq(variables['which_tests'], 'core')
-  displayName: Run tests
+  displayName: Run core tests
 
 - bash: |
     source activate quimb-tests
@@ -33,7 +37,7 @@ steps:
     --cov-report=xml \
     tests/test_tensor
   condition: eq(variables['which_tests'], 'tensor')
-  displayName: Run tests
+  displayName: Run tensor tests
 
 - bash: |
     curl https://codecov.io/bash > codecov.sh
