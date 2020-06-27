@@ -5,10 +5,11 @@ import numpy as np
 from autoray import do
 
 import quimb as qu
-from ..utils import progbar as _progbar
-from .tensor_core import get_tags, PTensor, oset, tags_to_oset, oset_union
+from ..utils import progbar as _progbar, oset
+from .tensor_core import (get_tags, tags_to_oset, oset_union,
+                          PTensor, TensorNetwork)
 from .tensor_gen import MPS_computational_state
-from .tensor_1d import TensorNetwork1DVector
+from .tensor_1d import TensorNetwork1DVector, Dense1D
 from . import array_ops as ops
 
 
@@ -822,7 +823,36 @@ class Circuit:
             self._sample_norm_cache = dict()
             self._sample_norm_path_cache = dict()
             self._sampling_conditionals = dict()
+            self._sampling_sliced_contractions = dict()
             self._marginal_storage_size = 0
+
+    def _get_sliced_contractor(
+        self,
+        info,
+        target_size,
+        arrays,
+        overhead_warn=2.0,
+    ):
+        key = (info.eq, target_size)
+        if key in self._sampling_sliced_contractions:
+            sc = self._sampling_sliced_contractions[key]
+            sc.arrays = arrays
+            return sc
+
+        from cotengra import SliceFinder
+
+        sf = SliceFinder(info, target_size=target_size)
+        ix_sl, cost_sl = sf.search()
+
+        if cost_sl.overhead > overhead_warn:
+            import warnings
+            warnings.warn(
+                f"Slicing contraction to size {target_size} has introduced"
+                f" an FLOPs overhead of {cost_sl.overhead:.2f}x.")
+
+        sc = sf.SlicedContractor(arrays)
+        self._sampling_sliced_contractions[key] = sc
+        return sc
 
     def compute_marginal(
         self,
@@ -833,6 +863,7 @@ class Circuit:
         dtype='complex64',
         simplify_sequence='ADCRS',
         simplify_atol=1e-6,
+        target_size=None,
         get=None,
     ):
         """Compute the probability tensor of qubits in ``where``, given
@@ -864,6 +895,11 @@ class Circuit:
         get : None or 'path-info', optional
             Whether to perform the marginal contraction or just return the
             associated contraction path information.
+        target_size : None or int, optional
+            The largest size of tensor to allow. If specified and any
+            contraction involves tensors bigger than this, 'slice' the
+            contraction into independent parts and sum them individually.
+            Requires ``cotengra`` currently.
         """
         self._maybe_init_sampling_caches()
 
@@ -915,11 +951,17 @@ class Circuit:
         if get == 'path-info':
             return info
 
-        # perform the contraction with the path found
-        p_marginal = abs(nm_lc.contract(
-            all, output_inds=output_inds,
-            optimize=info.path, backend=backend
-        ).data)
+        if target_size is not None:
+            # perform the 'sliced' contraction restricted to ``target_size``
+            arrays = tuple(t.data for t in nm_lc)
+            sc = self._get_sliced_contractor(info, target_size, arrays)
+            p_marginal = abs(sc.contract_all(backend=backend))
+        else:
+            # perform the full contraction with the path found
+            p_marginal = abs(nm_lc.contract(
+                all, output_inds=output_inds,
+                optimize=info.path, backend=backend
+            ).data)
 
         if final_marginal:
             # we only did half the ket contraction so need to square
@@ -1004,6 +1046,7 @@ class Circuit:
         dtype='complex64',
         simplify_sequence='ADCRS',
         simplify_atol=1e-6,
+        target_size=None,
     ):
         """Sample the circuit given by ``gates``, ``C`` times, using lightcone
         cancelling and caching marginal distribution results. This is a
@@ -1048,6 +1091,11 @@ class Circuit:
         simplify_atol : float, optional
             The tolerance with which to compare to zero when applying
             :meth:`~quimb.tensor.tensor_core.TensorNetwork.full_simplify`.
+        target_size : None or int, optional
+            The largest size of tensor to allow. If specified and any
+            contraction involves tensors bigger than this, 'slice' the
+            contraction into independent parts and sum them individually.
+            Requires ``cotengra`` currently.
 
         Yields
         ------
@@ -1055,7 +1103,11 @@ class Circuit:
         """
         # init TN norms, contraction paths, and marginals
         self._maybe_init_sampling_caches()
+
+        # which qubits and an ordering e.g. (2, 3, 4, 5), (5, 3, 4, 2)
         qubits, order = self._parse_qubits_order(qubits, order)
+
+        # group the ordering e.g. ((5, 3), (4, 2))
         groups = self._group_order(order, group_size)
 
         if seed is not None:
@@ -1065,9 +1117,12 @@ class Circuit:
         for _ in range(C):
             for where in groups:
 
-                # key - (tuple[int] qubits, tuple[int qubit, str result])
-                # value marginal probability distribution of qubits given prior
-                # result, as an ndarray
+                # key - (tuple[int] where, tuple[tuple[int q, str b])
+                # value  - marginal probability distribution of `where` given
+                #     prior results, as an ndarray
+                # e.g. ((2,), ((0, '0'), (1, '0'))): array([1., 0.]), means
+                #     prob(qubit2='0')=1 given qubit0='0' and qubit1='0'
+                #     prob(qubit2='1')=0 given qubit0='0' and qubit1='0'
                 key = (where, tuple(sorted(result.items())))
                 if key not in self._sampling_conditionals:
                     # compute p(qs=x | current bitstring)
@@ -1079,6 +1134,7 @@ class Circuit:
                         dtype=dtype,
                         simplify_sequence=simplify_sequence,
                         simplify_atol=simplify_atol,
+                        target_size=target_size,
                     )
                     p = do('to_numpy', p).astype('float64')
                     p /= p.sum()
@@ -1184,6 +1240,7 @@ class Circuit:
         dtype='complex64',
         simplify_sequence='ADCRS',
         simplify_atol=1e-6,
+        target_size=None,
     ):
         """Sample from this circuit, *assuming* it to be chaotic. Which is to
         say, only compute and sample correctly from the final marginal,
@@ -1218,6 +1275,11 @@ class Circuit:
         simplify_atol : float, optional
             The tolerance with which to compare to zero when applying
             :meth:`~quimb.tensor.tensor_core.TensorNetwork.full_simplify`.
+        target_size : None or int, optional
+            The largest size of tensor to allow. If specified and any
+            contraction involves tensors bigger than this, 'slice' the
+            contraction into independent parts and sum them individually.
+            Requires ``cotengra`` currently.
         """
         # init TN norms, contraction paths, and marginals
         self._maybe_init_sampling_caches()
@@ -1226,17 +1288,23 @@ class Circuit:
         if seed is not None:
             np.random.seed(seed)
 
+        # choose which qubits to treat as marginal - ideally 'towards one side'
+        #     to increase contraction efficiency
         if isinstance(marginal_qubits, numbers.Integral):
             marginal_qubits = self.calc_qubit_ordering()[:marginal_qubits]
         where = tuple(sorted(marginal_qubits))
 
+        # we will uniformly sample, and post-select on, the remaining qubits
         fix_qubits = tuple(q for q in qubits if q not in where)
 
         result = dict()
         for _ in range(C):
+
+            # generate a random bit-string for the fixed qubits
             for q in fix_qubits:
                 result[q] = np.random.choice(('0', '1'))
 
+            # compute the remaining marginal
             key = (where, tuple(sorted(result.items())))
             if key not in self._sampling_conditionals:
                 p = self.compute_marginal(
@@ -1247,6 +1315,7 @@ class Circuit:
                     dtype=dtype,
                     simplify_sequence=simplify_sequence,
                     simplify_atol=simplify_atol,
+                    target_size=target_size,
                 )
                 p = do('to_numpy', p).astype('float64')
                 p /= p.sum()
@@ -1257,7 +1326,9 @@ class Circuit:
             else:
                 p = self._sampling_conditionals[key]
 
+            # sample a bit-string for the marginal qubits
             b_where = sample_bitstring_from_prob_ndarray(p)
+
             # split back into individual qubit results
             for q, b in zip(where, b_where):
                 result[q] = b
@@ -1465,6 +1536,25 @@ class CircuitMPS(Circuit):
         # no squeeze so that bond dims of 1 preserved
         return self._psi
 
+    @property
+    def uni(self):
+        raise ValueError("You can't extract the circuit unitary "
+                         "TN from a ``CircuitMPS``.")
+
+    def calc_qubit_ordering(self, qubits=None):
+        """MPS already has a natural ordering.
+        """
+        if qubits is None:
+            return tuple(range(self.N))
+        else:
+            return tuple(sorted(qubits))
+
+    def get_psi_reverse_lightcone(self, where, keep_psi0=False):
+        """Override ``get_psi_reverse_lightcone`` as for an MPS the lightcone
+        is not meaningful.
+        """
+        return self.psi
+
 
 class CircuitDense(Circuit):
     """Quantum circuit simulation keeping the state in full dense form.
@@ -1477,4 +1567,26 @@ class CircuitDense(Circuit):
 
     @property
     def psi(self):
-        return self._psi ^ all
+        t = self._psi ^ all
+        psi = TensorNetwork([t])
+        psi.view_as_(Dense1D, like=self._psi)
+        return psi
+
+    @property
+    def uni(self):
+        raise ValueError("You can't extract the circuit unitary "
+                         "TN from a ``CircuitDense``.")
+
+    def calc_qubit_ordering(self, qubits=None):
+        """Qubit ordering doesn't matter for a dense wavefunction.
+        """
+        if qubits is None:
+            return tuple(range(self.N))
+        else:
+            return tuple(sorted(qubits))
+
+    def get_psi_reverse_lightcone(self, where, keep_psi0=False):
+        """Override ``get_psi_reverse_lightcone`` as for a dense wavefunction
+        the lightcone is not meaningful.
+        """
+        return self.psi
