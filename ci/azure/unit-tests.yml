@@ -2,10 +2,6 @@ steps:
 
 - template: install.yml
 
-variables:
-  QUIMB_NUMBA_CACHE: 'false'
-  QUIMB_NUMBA_PARALLEL: 'false'
-
 - bash: |
     source activate quimb-tests
     python -c "import quimb"

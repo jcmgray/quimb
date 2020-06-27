@@ -1,6 +1,8 @@
 variables:
   which_tests: 'all'
   install_slepc4py: false
+  quimb_numba_cache: false
+  quimb_numba_parallel: false
 
 jobs:
 
