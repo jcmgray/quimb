@@ -1,11 +1,11 @@
 import numbers
 
-import cytoolz
 import numpy as np
 from autoray import do
 
 import quimb as qu
-from ..utils import progbar as _progbar, oset
+from ..utils import progbar as _progbar
+from ..utils import oset, partitionby, concatv, partition_all
 from .tensor_core import (get_tags, tags_to_oset, oset_union,
                           PTensor, TensorNetwork)
 from .tensor_gen import MPS_computational_state
@@ -34,8 +34,8 @@ def _put_registers_last(x):
         return x
 
     # swap this last group of floats with the penultimate group of integers
-    parts = tuple(cytoolz.partitionby(type, x))
-    return tuple(cytoolz.concatv(*parts[:-2], parts[-1], parts[-2]))
+    parts = tuple(partitionby(type, x))
+    return tuple(concatv(*parts[:-2], parts[-1], parts[-2]))
 
 
 def parse_qasm(qasm):
@@ -1030,7 +1030,7 @@ class Circuit:
         """
         return tuple(
             tuple(sorted(g))
-            for g in cytoolz.partition_all(group_size, order)
+            for g in partition_all(group_size, order)
         )
 
     def sample(

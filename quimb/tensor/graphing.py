@@ -1,8 +1,9 @@
 """Functionailty for drawing tensor networks.
 """
 
+from ..utils import valmap
+
 import numpy as np
-from cytoolz import valmap
 
 
 def graph(

@@ -12,7 +12,7 @@ from numbers import Integral
 import numpy as np
 from numpy.matlib import zeros
 import scipy.sparse as sp
-from cytoolz import partition_all
+from .utils import partition_all
 
 
 # --------------------------------------------------------------------------- #

@@ -10,7 +10,6 @@ from math import sin, cos, pi, log, log2, sqrt
 import numpy as np
 import numpy.linalg as nla
 from scipy.optimize import minimize
-from cytoolz import frequencies, keymap
 
 from .core import (
     njit, issparse, isop, zeroify, realify, prod, isvec, dot, dag,
@@ -27,7 +26,8 @@ from .gen.operators import pauli
 from .gen.states import (
     basis_vec, bell_state, bloch_state
 )
-from .utils import int2tup, raise_cant_find_library_function
+from .utils import (int2tup, raise_cant_find_library_function, frequencies,
+                    keymap)
 
 try:
     from opt_einsum import contract

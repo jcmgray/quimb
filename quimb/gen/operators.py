@@ -6,11 +6,11 @@ import functools
 import itertools
 import operator
 
-from cytoolz import isiterable, concat, unique
 import numpy as np
 import scipy.sparse as sp
 from scipy.special import comb
 
+from ..utils import isiterable, concat, unique
 from ..core import (qarray, make_immutable, get_thread_pool,
                     par_reduce, isreal, qu, eye, kron, ikron)
 

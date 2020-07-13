@@ -3,10 +3,10 @@
 import itertools
 
 import numpy
-from cytoolz import compose
 from autoray import do, reshape, transpose, dag, infer_backend, get_dtype_name
 
 from ..core import njit, qarray
+from ..utils import compose
 from ..linalg.base_linalg import norm_fro_dense
 
 

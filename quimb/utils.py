@@ -4,6 +4,40 @@ import importlib
 import itertools
 
 
+try:
+    import cytoolz
+    last = cytoolz.last
+    concat = cytoolz.concat
+    frequencies = cytoolz.frequencies
+    partition_all = cytoolz.partition_all
+    merge_with = cytoolz.merge_with
+    valmap = cytoolz.valmap
+    partitionby = cytoolz.partitionby
+    concatv = cytoolz.concatv
+    partition_all = cytoolz.partition_all
+    compose = cytoolz.compose
+    identity = cytoolz.identity
+    isiterable = cytoolz.isiterable
+    unique = cytoolz.unique
+    keymap = cytoolz.keymap
+except ImportError:
+    import toolz
+    last = toolz.last
+    concat = toolz.concat
+    frequencies = toolz.frequencies
+    partition_all = toolz.partition_all
+    merge_with = toolz.merge_with
+    valmap = toolz.valmap
+    partitionby = toolz.partitionby
+    concatv = toolz.concatv
+    partition_all = toolz.partition_all
+    compose = toolz.compose
+    identity = toolz.identity
+    isiterable = toolz.isiterable
+    unique = toolz.unique
+    keymap = toolz.keymap
+
+
 _CHECK_OPT_MSG = "Option `{}` should be one of {}, but got '{}'."
 
 

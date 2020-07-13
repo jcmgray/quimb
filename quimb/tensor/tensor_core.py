@@ -17,12 +17,12 @@ from numbers import Integral
 import numpy as np
 import opt_einsum as oe
 import scipy.sparse.linalg as spla
-from cytoolz import concat, frequencies, partition_all, merge_with, valmap
 from autoray import (do, conj, reshape, transpose, astype,
                      infer_backend, get_dtype_name)
 
 from ..core import qarray, prod, realify_scalar, vdot, common_type
-from ..utils import check_opt, functions_equal, oset
+from ..utils import (check_opt, functions_equal, oset, concat, frequencies,
+                     partition_all, merge_with, valmap)
 from ..gen.rand import randn, seed_rand
 from . import decomp
 from .array_ops import (iscomplex, norm_fro, unitize, ndim, asarray, PArray,

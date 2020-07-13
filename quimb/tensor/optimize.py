@@ -7,7 +7,6 @@ import importlib
 
 import tqdm
 import numpy as np
-from cytoolz import valmap
 from autoray import to_numpy, astype
 
 from .tensor_core import (
@@ -19,6 +18,7 @@ from .tensor_core import (
 )
 from .array_ops import iscomplex
 from ..core import qarray
+from ..utils import valmap
 
 if importlib.util.find_spec("jax") is not None:
     _DEFAULT_BACKEND = 'jax'
