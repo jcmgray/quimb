@@ -343,6 +343,8 @@ class SGD:
         velocity = self.get_velocity(x)
 
         for _ in range(maxiter):
+            self._i += 1
+
             g = jac(x)
 
             if callback and callback(x):
@@ -353,8 +355,6 @@ class SGD:
 
             if bounds is not None:
                 x = np.clip(x, bounds[:, 0], bounds[:, 1])
-
-            self._i += 1
 
         # save for restart
         self._velocity = velocity
@@ -387,6 +387,8 @@ class RMSPROP:
         avg_sq_grad = self.get_avg_sq_grad(x)
 
         for _ in range(maxiter):
+            self._i += 1
+
             g = jac(x)
 
             if callback and callback(x):
@@ -397,8 +399,6 @@ class RMSPROP:
 
             if bounds is not None:
                 x = np.clip(x, bounds[:, 0], bounds[:, 1])
-
-            self._i += 1
 
         # save for restart
         self._avg_sq_grad = avg_sq_grad
@@ -439,6 +439,8 @@ class ADAM:
         v = self.get_v(x)
 
         for _ in range(maxiter):
+            self._i += 1
+
             g = jac(x)
 
             if callback and callback(x):
@@ -446,14 +448,12 @@ class ADAM:
 
             m = (1 - beta1) * g + beta1 * m  # first  moment estimate.
             v = (1 - beta2) * (g**2) + beta2 * v  # second moment estimate.
-            mhat = m / (1 - beta1**(self._i + 1))  # bias correction.
-            vhat = v / (1 - beta2**(self._i + 1))
+            mhat = m / (1 - beta1**(self._i))  # bias correction.
+            vhat = v / (1 - beta2**(self._i))
             x = x - learning_rate * mhat / (np.sqrt(vhat) + eps)
 
             if bounds is not None:
                 x = np.clip(x, bounds[:, 0], bounds[:, 1])
-
-            self._i += 1
 
         # save for restart
         self._m = m
@@ -463,10 +463,81 @@ class ADAM:
             x=x, fun=fun(x), jac=g, nit=self._i, nfev=self._i, success=True)
 
 
+class NADAM:
+    """Stateful ``scipy.optimize.minimize`` compatible implementation of
+    NADAM - [Dozat - http://cs229.stanford.edu/proj2015/054_report.pdf].
+
+    Adapted from ``autograd/misc/optimizers.py``.
+    """
+
+    def __init__(self):
+        from scipy.optimize import OptimizeResult
+        self.OptimizeResult = OptimizeResult
+        self._i = 0
+        self._m = None
+        self._v = None
+        self._mus = None
+
+    def get_m(self, x):
+        if self._m is None:
+            self._m = np.zeros_like(x)
+        return self._m
+
+    def get_v(self, x):
+        if self._v is None:
+            self._v = np.zeros_like(x)
+        return self._v
+
+    def get_mus(self, beta1):
+        if self._mus is None:
+            self._mus = [1, beta1 * (1 - 0.5 * 0.96**0.004)]
+        return self._mus
+
+    def __call__(self, fun, x0, jac, args=(), learning_rate=0.001, beta1=0.9,
+                 beta2=0.999, eps=1e-8, maxiter=1000, callback=None,
+                 bounds=None, **kwargs):
+        x = x0
+        m = self.get_m(x)
+        v = self.get_v(x)
+        mus = self.get_mus(beta1)
+
+        for _ in range(maxiter):
+            self._i += 1
+
+            # this is ``mu[t + 1]`` -> already computed ``mu[t]``
+            self._mus.append(beta1 * (1 - 0.5 * 0.96**(0.004 * (self._i + 1))))
+
+            g = jac(x)
+
+            if callback and callback(x):
+                break
+
+            gd = g / (1 - np.prod(self._mus[:-1]))
+            m = beta1 * m + (1 - beta1) * g
+            md = m / (1 - np.prod(self._mus))
+            v = beta2 * v + (1 - beta2) * g**2
+            vd = v / (1 - beta2**self._i)
+            mhat = (1 - self._mus[self._i]) * gd + self._mus[self._i + 1] * md
+
+            x = x - learning_rate * mhat / (np.sqrt(vd) + eps)
+
+            if bounds is not None:
+                x = np.clip(x, bounds[:, 0], bounds[:, 1])
+
+        # save for restart
+        self._m = m
+        self._v = v
+        self._mus = mus
+
+        return self.OptimizeResult(
+            x=x, fun=fun(x), jac=g, nit=self._i, nfev=self._i, success=True)
+
+
 _STOC_GRAD_METHODS = {
     'sgd': SGD,
     'rmsprop': RMSPROP,
     'adam': ADAM,
+    'nadam': NADAM,
 }
 
 
