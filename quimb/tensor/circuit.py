@@ -1514,9 +1514,13 @@ class Circuit:
 
                 self.gates[i] = new_gate
 
+    @property
+    def num_gates(self):
+        return len(self.gates)
+
     def __repr__(self):
-        r = "<Circuit(n={}, n_gates={}, gate_opts={})>"
-        return r.format(self.N, len(self.gates), self.gate_opts)
+        r = "<Circuit(n={}, num_gates={}, gate_opts={})>"
+        return r.format(self.N, self.num_gates, self.gate_opts)
 
 
 class CircuitMPS(Circuit):

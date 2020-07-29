@@ -973,7 +973,22 @@ def quantum_discord(p, dims=(2, 2), sysa=0, sysb=1):
 
 @zeroify
 def trace_distance(p1, p2):
-    """Trace distance between two states.
+    r"""Trace distance between two states:
+
+    .. math::
+
+        \delta(\rho, \sigma)
+        =
+        \frac{1}{2} \left| \rho - \sigma \right|_\mathrm{tr}
+
+    If two wavefunctions are supplied the trace distance will be computed via
+    the more efficient expression:
+
+    .. math::
+
+        \delta(|\psi\rangle\langle\psi|, |\phi\rangle\langle\phi|)
+        =
+        \sqrt{1 - \langle \psi | \phi \rangle^2}
 
     Parameters
     ----------

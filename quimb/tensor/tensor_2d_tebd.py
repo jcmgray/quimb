@@ -805,8 +805,6 @@ class SimpleUpdate(TEBD2D):
         before and after each gate application.
         """
         ija, ijb = where
-        ia, ja = ija
-        ib, jb = ijb
 
         if callable(self.long_range_path_sequence):
             long_range_path_sequence = self.long_range_path_sequence(ija, ijb)

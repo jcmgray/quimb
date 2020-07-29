@@ -4750,9 +4750,6 @@ class PTensor(Tensor):
         See :class:`~quimb.tensor.tensor_core.Tensor`.
     left_inds : optional
         See :class:`~quimb.tensor.tensor_core.Tensor`.
-    conj : optional
-        Whether to treat this ``Tensor`` as lazily conjugated, such that when
-        the ``.data`` attribute is accessed it will be conjugated as well.
 
     See Also
     --------

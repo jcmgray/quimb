@@ -1,68 +1,33 @@
-@import url('https://fonts.googleapis.com/css?family=Inconsolata');
-@import url('https://fonts.googleapis.com/css?family=Fira+Sans');
-@import url('https://fonts.googleapis.com/css?family=Fira+Mono');
-
-div.body {
-    max-width: 1200px;
-}
-
 code {
-    font-family: 'Inconsolata', monospace;
-    font-size: 15px;
-    line-height: 25px;
     color: #ed7a00;
     background-color: #fff9e2;
 }
 
-code, kbd, pre, samp {
-    font-family: 'Inconsolata', monospace;
-    font-size: 17px;
-    line-height: 25px;
-}
-
-blockquote {
-    font-family: 'Fira Sans', sans-serif;
-    font-size: 17px;
-    line-height: 31px;
-}
-
-body {
-    font-family: 'Fira Sans', sans-serif;
-    font-size: 17px;
-    line-height: 31px;
+:root{
+    --headercolor: rgb(50, 75, 100);
+    --highlightcolor: rgb(50, 75, 100);
 }
 
 h1 {
-    font-family: 'Fira Mono', monospace;
-    font-size: 45px;
-    font-weight: bold;
-    line-height: 50px;
-    margin-top: 40px;
-    color: rgb(50, 75, 100);
+    color: var(--headercolor);
 }
 
 h2 {
-    font-family: 'Fira Mono', monospace;
-    font-size: 35px;
-    font-weight: bold;
-    line-height: 50px;
-    margin-top: 40px;
-    color: rgb(50, 75, 100);
+    color: var(--headercolor);
 }
 
 h3 {
-    font-family: 'Fira Mono', monospace;
-    font-size: 25px;
-    font-weight: bold;
-    line-height: 50px;
-    margin-top: 40px;
-    color: rgb(50, 75, 100);
+    color: var(--headercolor);
 }
 
-.quimbnote {
-    background-color: rgb(84, 179, 68);
+.navbar-nav > .active > .nav-link {
+    color: var(--highlightcolor) !important;
 }
 
-.quimbwarning {
-    background-color: #FE5A3C;
+.toc-entry > .nav-link.active {
+    color: var(--highlightcolor) !important;
+}
+
+.bd-sidebar .nav > .active:hover > a, .bd-sidebar .nav > .active > a {
+    color: var(--highlightcolor) !important;
 }
