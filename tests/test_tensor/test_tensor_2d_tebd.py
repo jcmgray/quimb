@@ -1,9 +1,16 @@
-import pytest
 import itertools
+import importlib
+
+import pytest
 
 import quimb as qu
 import quimb.tensor as qtn
 
+found_torch = importlib.util.find_spec('torch') is not None
+
+pytorch_case = pytest.param(
+    'torch', marks=pytest.mark.skipif(
+        not found_torch, reason='pytorch not installed'))
 
 class TestLocalHam2DConstruct:
 
@@ -77,3 +84,66 @@ class TestLocalHam2DConstruct:
         # make sure first four pairs are in same commuting group at least
         first_four_pairs = tuple(itertools.chain(*ordering[:4]))
         assert len(first_four_pairs) == len(set(first_four_pairs))
+
+
+class TestSimpleUpdate:
+
+    @pytest.mark.parametrize('backend', ['numpy', pytorch_case])
+    def test_heis_small(self, backend):
+        Lx = 3
+        Ly = 4
+        D = 2
+
+        H2 = qu.ham_heis(2)
+        ham = qtn.LocalHam2D(Lx, Ly, H2)
+        psi0 = qtn.PEPS.rand(Lx, Ly, D)
+
+        def to_backend(x):
+            import autoray
+            return autoray.do('array', x, like=backend)
+
+        psi0.apply_to_arrays(to_backend)
+        ham.apply_to_arrays(to_backend)
+
+        su = qtn.SimpleUpdate(
+            psi0, ham, progbar=True, keep_best=True, compute_energy_every=10)
+
+        su.evolve(33, tau=0.3)
+        su.state = su.best['state']
+        su.evolve(33, tau=0.1)
+        su.state = su.best['state']
+        su.evolve(33, tau=0.03)
+        su.state = su.best['state']
+
+        assert su.best['energy'] < -6.25
+
+class TestFullUpdate:
+
+    @pytest.mark.parametrize('backend', ['numpy', pytorch_case])
+    def test_heis_small(self, backend):
+        Lx = 3
+        Ly = 4
+        D = 2
+
+        H2 = qu.ham_heis(2)
+        ham = qtn.LocalHam2D(Lx, Ly, H2)
+        psi0 = qtn.PEPS.rand(Lx, Ly, D)
+
+        def to_backend(x):
+            import autoray
+            return autoray.do('array', x, like=backend)
+
+        psi0.apply_to_arrays(to_backend)
+        ham.apply_to_arrays(to_backend)
+
+        su = qtn.FullUpdate(
+            psi0, ham, progbar=True, keep_best=True, compute_energy_every=1)
+
+        su.evolve(33, tau=0.3)
+        su.state = su.best['state']
+        su.evolve(33, tau=0.1)
+        su.state = su.best['state']
+        su.evolve(33, tau=0.03)
+        su.state = su.best['state']
+
+        assert su.best['energy'] < -6.30

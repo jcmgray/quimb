@@ -516,7 +516,7 @@ class TEBD2D:
         if not imag:
             raise NotImplementedError("Real time evolution not tested yet.")
 
-        self._psi = psi0.copy()
+        self.state = psi0
         self.ham = ham
         self.progbar = progbar
         self.callback = callback
@@ -684,6 +684,9 @@ class TEBD2D:
     def get_state(self):
         return self._psi.copy()
 
+    def set_state(self, psi):
+        self._psi = psi.copy()
+
     @property
     def n(self):
         """The number of sweeps performed.
@@ -711,6 +714,10 @@ class TEBD2D:
         """Return a copy of the current state.
         """
         return self.get_state()
+
+    @state.setter
+    def state(self, psi):
+        self.set_state(psi)
 
     @property
     def energy(self):
@@ -761,7 +768,6 @@ class SimpleUpdate(TEBD2D):
         self.condition_balance_bonds = condition_balance_bonds
         self.gate_opts['long_range_use_swaps'] = long_range_use_swaps
         self.long_range_path_sequence = long_range_path_sequence
-        self._initialize_gauges()
 
     def _initialize_gauges(self):
         """Create unit singular values, stored as tensors.
@@ -891,6 +897,13 @@ class SimpleUpdate(TEBD2D):
             conditioner(psi, balance_bonds=self.condition_balance_bonds)
 
         return psi
+
+    def set_state(self, psi):
+        """Set the wavefunction state, this resets the environment gauges to
+        unity.
+        """
+        self._psi = psi.copy()
+        self._initialize_gauges()
 
 
 def gate_full_update_als(
@@ -1184,6 +1197,16 @@ class FullUpdate(TEBD2D):
             'autodiff-fidelity': gate_full_update_autodiff_fidelity,
         }[fit_strategy]
         self._fit_strategy = fit_strategy
+
+    def set_state(self, psi):
+        self._psi = psi.copy()
+
+        # ensure the final dimension of each tensor is the physical dim
+        for tag, ind in zip(self._psi.site_tags, self._psi.site_inds):
+            t = self._psi[tag]
+            if t.inds[-1] != ind:
+                new_inds = [i for i in t.inds if i != ind] + [ind]
+                t.transpose_(*new_inds)
 
     def _compute_plaquette_envs(self):
         """Compute and store the plaquette environments for all local terms.
