@@ -1,6 +1,6 @@
-=========================
-Tensor Network User Guide
-=========================
+====================
+Tensor Network Guide
+====================
 
 .. toctree::
   :numbered:

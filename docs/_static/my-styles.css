@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css?family=Fira+Mono');
+
 code {
     color: #ed7a00;
     background-color: #fff9e2;
@@ -9,14 +11,20 @@ code {
 }
 
 h1 {
+    font-family: 'Fira Mono', monospace;
+    font-weight: bold;
     color: var(--headercolor);
 }
 
 h2 {
+    font-family: 'Fira Mono', monospace;
+    font-weight: bold;
     color: var(--headercolor);
 }
 
 h3 {
+    font-family: 'Fira Mono', monospace;
+    font-weight: bold;
     color: var(--headercolor);
 }
 

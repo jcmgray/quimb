@@ -1,8 +1,6 @@
 variables:
   which_tests: 'all'
   install_slepc4py: false
-  quimb_numba_cache: false
-  quimb_numba_parallel: false
 
 jobs:
 
@@ -28,6 +26,8 @@ jobs:
       py38-tensorflow:
         conda_env: py38-tensorflow
         which_tests: 'tensor'
+        quimb_numba_cache: false
+        quimb_numba_parallel: false
   pool:
     vmImage: 'ubuntu-latest'
   steps:
