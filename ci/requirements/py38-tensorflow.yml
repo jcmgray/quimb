@@ -5,7 +5,7 @@ dependencies:
   - python=3.8
   - numpy
   - scipy
-  - llvmlite
+  - numba
   - psutil
   - cytoolz
   - tqdm
@@ -20,8 +20,7 @@ dependencies:
   - joblib
   - autoray
   - diskcache
+  - tensorflow
   - pip
   - pip:
-    - numba
     - randomgen
-    - tensorflow
