@@ -94,8 +94,8 @@ def graph(
 
     for ix, tids in tn.ind_map.items():
         edge_attrs = {
-            'color': ((1.0, 0.2, 0.2) if ix in highlight_inds else
-                      (0.0, 0.0, 0.0)),
+            'color': ((1.0, 0.2, 0.2, 1.0) if ix in highlight_inds else
+                      (0.0, 0.0, 0.0, 1.0)),
             'ind': ix,
             'weight': edge_scale * math.log2(tn.ind_size(ix))
         }
@@ -133,10 +133,10 @@ def graph(
 
     for hix in hyperedges:
         G.nodes[hix]['ind'] = hix
-        G.nodes[hix]['color'] = (1.0, 1.0, 1.0)
+        G.nodes[hix]['color'] = (1.0, 1.0, 1.0, 1.0)
         G.nodes[hix]['size'] = 0.0
         G.nodes[hix]['outline_size'] = 0.0
-        G.nodes[hix]['outline_color'] = (1.0, 1.0, 1.0)
+        G.nodes[hix]['outline_color'] = (1.0, 1.0, 1.0, 1.0)
         if show_inds == 'all':
             node_labels[hix] = hix
 
@@ -153,17 +153,17 @@ def graph(
 
     nx.draw_networkx_edges(
         G, pos,
-        width=[x[2]['weight'] for x in G.edges(data=True)],
-        edge_color=[x[2]['color'] for x in G.edges(data=True)],
+        width=tuple(x[2]['weight'] for x in G.edges(data=True)),
+        edge_color=tuple(x[2]['color'] for x in G.edges(data=True)),
         alpha=edge_alpha,
         ax=ax,
     )
     nx.draw_networkx_nodes(
         G, pos,
-        node_color=[x[1]['color'] for x in G.nodes(data=True)],
-        edgecolors=[x[1]['outline_color'] for x in G.nodes(data=True)],
-        node_size=[x[1]['size'] for x in G.nodes(data=True)],
-        linewidths=[x[1]['outline_size'] for x in G.nodes(data=True)],
+        node_color=tuple(x[1]['color'] for x in G.nodes(data=True)),
+        edgecolors=tuple(x[1]['outline_color'] for x in G.nodes(data=True)),
+        node_size=tuple(x[1]['size'] for x in G.nodes(data=True)),
+        linewidths=tuple(x[1]['outline_size'] for x in G.nodes(data=True)),
         ax=ax,
     )
     if show_inds == 'all':
