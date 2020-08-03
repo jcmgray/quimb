@@ -122,7 +122,7 @@ def graph(
     for tid, t in tn.tensor_map.items():
         G.nodes[tid]['size'] = node_size
         G.nodes[tid]['outline_size'] = node_outline_size
-        color = (0.4, 0.4, 0.4)
+        color = (0.4, 0.4, 0.4, 1.0)
         for tag in colors:
             if tag in t.tags:
                 color = colors[tag]
@@ -231,7 +231,7 @@ def mod_sat(c, mod):
     from matplotlib.colors import hsv_to_rgb, rgb_to_hsv
 
     h, s, v = rgb_to_hsv(c[:3])
-    return tuple(hsv_to_rgb((h, mod * s, v)))
+    return (*hsv_to_rgb((h, mod * s, v)), 1.0)
 
 
 def auto_colors(nc):
