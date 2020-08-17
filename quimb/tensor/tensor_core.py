@@ -1408,7 +1408,7 @@ class Tensor(object):
 
         # create new tensor with new + remaining indices
         #     + updated 'left' marked indices assuming all unfused left inds
-        #       remain left marked
+        #       remain 'left' marked
         t.modify(data=reshape(t.data, new_dims),
                  inds=new_inds, left_inds=new_left_inds)
 
