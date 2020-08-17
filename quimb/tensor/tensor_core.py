@@ -21,10 +21,10 @@ import opt_einsum as oe
 import scipy.sparse.linalg as spla
 from autoray import do, conj, reshape, transpose
 
-# from ..core import qarray, prod, realify_scalar, vdot, common_type
-# from ..utils import check_opt, functions_equal
-# from ..gen.rand import randn, seed_rand
-# from . import decomp
+from ..core import qarray, prod, realify_scalar, vdot, common_type
+from ..utils import check_opt, functions_equal
+from ..gen.rand import randn, seed_rand
+from . import decomp
 from .array_ops import (iscomplex, norm_fro, unitize, ndim, asarray, PArray,
                         find_diag_axes, find_antidiag_axes, find_columns)
 
