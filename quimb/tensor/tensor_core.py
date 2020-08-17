@@ -1356,7 +1356,7 @@ class Tensor(object):
 
     fuse_ = functools.partialmethod(fuse, inplace=True)
 
-    def unfuse(self, fuse_map, shape_map, inplace=False):
+    def unfuse(self, unfuse_map, shape_map, inplace=False):
         """Reshape single indices into groups of multiple.
 
         Parameters
@@ -1379,10 +1379,10 @@ class Tensor(object):
         """
         t = self if inplace else self.copy()
 
-        if isinstance(fuse_map, dict):
-            old_inds, new_unfused_inds = zip(*fuse_map.items())
+        if isinstance(unfuse_map, dict):
+            old_inds, new_unfused_inds = zip(*unfuse_map.items())
         else:
-            old_inds, new_unfused_inds = zip(*fuse_map)
+            old_inds, new_unfused_inds = zip(*unfuse_map)
 
         # for each set of fused dims, group into product, then add remaining
         new_inds = [[i] for i in t.inds]
