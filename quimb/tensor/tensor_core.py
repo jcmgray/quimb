@@ -1544,6 +1544,66 @@ class Tensor(object):
 
     fuse_ = functools.partialmethod(fuse, inplace=True)
 
+    def unfuse(self, unfuse_map, shape_map, inplace=False):
+        """Reshape single indices into groups of multiple indices
+
+        Parameters
+        ----------
+        unfuse_map : dict_like or sequence of tuples.
+            Mapping like: ``{existing_ind: sequence of new inds, ...}`` or an
+            ordered mapping like ``[(old_ind_1, new_inds_1), ...]`` in which
+            case the output tensor's new inds will be ordered. In both cases
+            the new indices are created at the old index's position of the
+            tensor's shape
+
+        shape_map : dict_like or sequence of tuples
+            Mapping like: ``{old_ind: new_ind_sizes, ...}`` or an
+            ordered mapping like ``[(old_ind_1, new_ind_sizes_1), ...]``.
+
+        Returns
+        -------
+        Tensor
+            The transposed, reshaped and re-labeled tensor
+        """
+        t = self if inplace else self.copy()
+
+        if isinstance(unfuse_map, dict):
+            old_inds, new_unfused_inds = zip(*unfuse_map.items())
+        else:
+            old_inds, new_unfused_inds = zip(*unfuse_map)
+
+        # for each set of fused dims, group into product, then add remaining
+        new_inds = [[i] for i in t.inds]
+        new_dims = [[i] for i in t.shape]
+        for ix in range(len(old_inds)):
+            ind_pos = t.inds.index(old_inds[ix])
+            new_inds[ind_pos] = new_unfused_inds[ix]
+            new_dims[ind_pos] = shape_map[old_inds[ix]]
+
+        # flatten new_inds, new_dims
+        new_inds = tuple(itertools.chain(*new_inds))
+        new_dims = tuple(itertools.chain(*new_dims))
+
+        try:
+            new_left_inds = []
+            for ix in t.left_inds:
+                try:
+                    new_left_inds.extend(unfuse_map[ix])
+                except KeyError:
+                    new_left_inds.append(ix)
+        except TypeError:
+            new_left_inds = None
+
+        # create new tensor with new + remaining indices
+        #     + updated 'left' marked indices assuming all unfused left inds
+        #       remain 'left' marked
+        t.modify(data=reshape(t.data, new_dims),
+                 inds=new_inds, left_inds=new_left_inds)
+
+        return t
+
+    unfuse_ = functools.partialmethod(unfuse, inplace=True)
+
     def to_dense(self, *inds_seq):
         """Convert this Tensor into an dense array, with a single dimension
         for each of inds in ``inds_seqs``. E.g. to convert several sites

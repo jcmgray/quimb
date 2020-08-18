@@ -277,6 +277,27 @@ class TestBasicTensorOperations:
         assert set(b.inds) == {'ket', 'bra'}
         assert b.tags == oset(('blue',))
 
+    def test_unfuse(self):
+        a = Tensor(np.random.rand(2, 3, 4, 5), 'abcd', tags={'blue'})
+        b = a.fuse({'bra': ['a', 'c'], 'ket': 'bd'})
+
+        c = b.unfuse({'bra': ['a','c'], 'ket': 'bd'}, {'bra':[2,4], 'ket':[3,5]})
+        assert set(c.shape) == {2,3,4,5}
+        assert set(c.inds) == {'a','b','c','d'}
+        assert c.left_inds == b.left_inds
+        assert np.allclose( c.data.reshape(8,15) , b.data )
+
+        b.modify(left_inds=['ket'])
+        c = b.unfuse({'ket': 'bd'}, {'ket':[5,3]})
+        assert set(c.shape) == {3, 5, 8}
+        assert set(c.inds) == {'b','d','bra'}
+        assert c.tags == {'blue'}
+        assert set(c.left_inds) == {'b','d'}
+
+        b.modify(left_inds=['bra'])
+        c = b.unfuse({'ket': 'bd'}, {'ket':[5,3]})
+        assert set(c.left_inds) == {'bra'}
+
     def test_fuse_leftover(self):
         a = Tensor(np.random.rand(2, 3, 4, 5, 2, 2), 'abcdef', tags={'blue'})
         b = a.fuse({'bra': 'ac', 'ket': 'bd'})
