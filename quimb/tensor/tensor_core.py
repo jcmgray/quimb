@@ -1420,6 +1420,27 @@ class Tensor(object):
     def split(self, *args, **kwargs):
         return tensor_split(self, *args, **kwargs)
 
+    def gate(self, G, ind, inplace=False, **contract_opts):
+        """Gate this tensor - contract a matrix into one of its indices without
+        changing its indices. Unlike ``contract``, ``G`` is a raw array and the
+        tensor remains looking exactly the same.
+
+        Parameters
+        ----------
+        G : 2D array_like
+            The matrix to gate the tensor index with.
+        ind : str
+            Which index to apply the gate to.
+        """
+        t = self if inplace else self.copy()
+        G_inds = ['__tmp__', ind]
+        out = ['__tmp__' if ix == ind else ix for ix in t.inds]
+        new_data = oe.contract(G, G_inds, t.data, t.inds, out, **contract_opts)
+        t.modify(data=new_data)
+        return t
+
+    gate_ = functools.partialmethod(gate, inplace=True)
+
     def singular_values(self, left_inds, method='svd'):
         """Return the singular values associated with splitting this tensor
         according to ``left_inds``.
@@ -3542,7 +3563,7 @@ class TensorNetwork(object):
         """Insert the gauge transformation ``U @ U^-1`` into the bond between
         the tensors, ``T1`` and ``T2``, defined by ``where1`` and ``where2``.
         The resulting tensors at those locations will be ``T1 @ U^-1`` and
-        ``T2 @ U``.
+        ``U @ T2``.
 
         Parameters
         ----------
@@ -3572,14 +3593,8 @@ class TensorNetwork(object):
             if vdot(Uinv, Uinv) / vdot(U, U) > 1 / tol:
                 raise np.linalg.LinAlgError("Ill conditioned inverse.")
 
-        T1Ui = Tensor(Uinv, inds=('__dummy__', bnd)) @ T1
-        T2U = Tensor(U, inds=(bnd, '__dummy__')) @ T2
-
-        T1Ui.transpose_like_(T1)
-        T2U.transpose_like_(T2)
-
-        T1.modify(data=T1Ui.data)
-        T2.modify(data=T2U.data)
+        T1.gate_(Uinv.T, bnd)
+        T2.gate_(U, bnd)
 
     # ----------------------- contracting the network ----------------------- #
 

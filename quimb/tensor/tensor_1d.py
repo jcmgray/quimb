@@ -977,8 +977,8 @@ class TensorNetwork1DFlat(TensorNetwork1D,
         ER_lix, = ER.bonds(kbc[k.site_tag(stop - 1), '_BRA'])
         _, y = ER.split(ER_lix, method='eigh', cutoff=-1, get='arrays')
 
-        self.insert_gauge(x.T, start - 1, start, tol=inv_tol)
-        self.insert_gauge(y.T, stop, stop - 1, tol=inv_tol)
+        self.insert_gauge(x, start - 1, start, tol=inv_tol)
+        self.insert_gauge(y, stop, stop - 1, tol=inv_tol)
 
         if bra is not None:
             for i in (start - 1, start, stop, stop - 1):
