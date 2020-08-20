@@ -126,8 +126,9 @@ class MERA(TensorNetwork1DVector,
                                      tags=tags, left_inds=(ll, lr))
                     else:
                         # don't leave dangling index at top
+                        iso_f = next(isos)
                         yield Tensor(
-                            np.eye(phys_dim, dtype=next(isos).dtype) / 2**0.5,
+                            np.eye(iso_f.shape[0], dtype=iso_f.dtype) / 2**0.5,
                             inds=inds[:-1], tags=tags, left_inds=(ll, lr)
                         )
 
@@ -148,20 +149,39 @@ class MERA(TensorNetwork1DVector,
                         t.add_tag(f'I{j}')
 
     @classmethod
-    def rand(cls, n, phys_dim=2, dtype=float, **mera_opts):
+    def rand(cls, n, max_bond=None, phys_dim=2, dtype=float, **mera_opts):
+
         d = phys_dim
+        if max_bond is None:
+            max_bond = d
 
         def gen_unis():
+            D = d
+            m = n // 2
+
             while True:
-                uni = qu.rand_iso(d**2, d**2, dtype=dtype)
-                uni.shape = (d, d, d, d)
-                yield uni
+                for _ in range(m):
+                    uni = qu.rand_iso(D**2, D**2, dtype=dtype)
+                    uni.shape = (D, D, D, D)
+                    yield uni
+
+                D = min(D**2, max_bond)
+                m //= 2
 
         def gen_isos():
+            Dl = d
+            Du = min(Dl**2, max_bond)
+            m = n // 2
+
             while True:
-                iso = qu.rand_iso(d**2, d, dtype=dtype)
-                iso.shape = (d, d, d)
-                yield iso
+                for _ in range(m):
+                    iso = qu.rand_iso(Dl**2, Du, dtype=dtype)
+                    iso.shape = (Dl, Dl, Du)
+                    yield iso
+
+                Dl = Du
+                Du = min(Dl**2, max_bond)
+                m //= 2
 
         return cls(n, gen_unis(), gen_isos(), phys_dim=d, **mera_opts)
 
