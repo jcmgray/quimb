@@ -1,5 +1,6 @@
 import numpy as np
 import scipy.linalg as scla
+import scipy.sparse.linalg as spla
 import scipy.linalg.interpolative as sli
 from autoray import do, reshape
 
@@ -76,8 +77,8 @@ def _renorm_singular_vals(s, n_chi, renorm_power):
 
 
 @njit  # pragma: no cover
-def _trim_and_renorm_SVD(U, s, VH, cutoff, cutoff_mode,
-                         max_bond, absorb, renorm_power):
+def _trim_and_renorm_SVD_numba(U, s, VH, cutoff, cutoff_mode,
+                               max_bond, absorb, renorm_power):
     if cutoff > 0.0:
         n_chi = _trim_singular_vals(s, cutoff, cutoff_mode)
 
@@ -114,49 +115,8 @@ def _trim_and_renorm_SVD(U, s, VH, cutoff, cutoff_mode,
     return U, None, VH
 
 
-@njit  # pragma: no cover
-def _svd_nb(x, cutoff=-1.0, cutoff_mode=3,
-            max_bond=-1, absorb=0, renorm_power=0):
-    """SVD-decomposition.
-    """
-    U, s, VH = np.linalg.svd(x, full_matrices=False)
-    return _trim_and_renorm_SVD(U, s, VH, cutoff, cutoff_mode,
-                                max_bond, absorb, renorm_power)
-
-
-def _svd_alt(x, cutoff=-1.0, cutoff_mode=3,
-             max_bond=-1, absorb=0, renorm_power=0):
-    """SVD-decomp using alternate scipy driver.
-    """
-    U, s, VH = scla.svd(x, full_matrices=False, lapack_driver='gesvd')
-    return _trim_and_renorm_SVD(U, s, VH, cutoff, cutoff_mode,
-                                max_bond, absorb, renorm_power)
-
-
-def _svd_numpy(x, cutoff=-1.0, cutoff_mode=3,
-               max_bond=-1, absorb=0, renorm_power=0):
-    args = (x, cutoff, cutoff_mode, max_bond, absorb, renorm_power)
-
-    try:
-        return _svd_nb(*args)
-
-    except (scla.LinAlgError, ValueError) as e:  # pragma: no cover
-
-        if isinstance(e, scla.LinAlgError) or 'converge' in str(e):
-            import warnings
-            warnings.warn("TN SVD failed, trying again with alternate driver.")
-
-            return _svd_alt(*args)
-
-        raise e
-
-
-def _svd(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0, renorm=0):
-    if isinstance(x, np.ndarray):
-        return _svd_numpy(x, cutoff, cutoff_mode, max_bond, absorb, renorm)
-
-    U, s, VH = do('linalg.svd', x)
-
+def _trim_and_renorm_SVD(U, s, VH, cutoff, cutoff_mode,
+                         max_bond, absorb, renorm_power):
     if cutoff > 0.0:
         if cutoff_mode == 1:
             n_chi = do('count_nonzero', s > cutoff)
@@ -188,7 +148,7 @@ def _svd(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0, renorm=0):
             U = U[..., :n_chi]
             VH = VH[:n_chi, ...]
 
-        if renorm > 0:
+        if renorm_power > 0:
             norm = (tot / csp[n_chi - 1]) ** (1 / p)
             s *= norm
 
@@ -209,6 +169,52 @@ def _svd(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0, renorm=0):
         VH = VH * reshape(s, (-1, 1))
 
     return U, None, VH
+
+
+@njit  # pragma: no cover
+def _svd_numba(x, cutoff=-1.0, cutoff_mode=3,
+               max_bond=-1, absorb=0, renorm_power=0):
+    """SVD-decomposition.
+    """
+    U, s, VH = np.linalg.svd(x, full_matrices=False)
+    return _trim_and_renorm_SVD_numba(U, s, VH, cutoff, cutoff_mode,
+                                      max_bond, absorb, renorm_power)
+
+
+def _svd_scipy_alt(x, cutoff=-1.0, cutoff_mode=3,
+                   max_bond=-1, absorb=0, renorm_power=0):
+    """SVD-decomp using alternate scipy driver.
+    """
+    U, s, VH = scla.svd(x, full_matrices=False, lapack_driver='gesvd')
+    return _trim_and_renorm_SVD_numba(U, s, VH, cutoff, cutoff_mode,
+                                      max_bond, absorb, renorm_power)
+
+
+def _svd_numpy(x, cutoff=-1.0, cutoff_mode=3,
+               max_bond=-1, absorb=0, renorm_power=0):
+    args = (x, cutoff, cutoff_mode, max_bond, absorb, renorm_power)
+
+    try:
+        return _svd_numba(*args)
+
+    except (scla.LinAlgError, ValueError) as e:  # pragma: no cover
+
+        if isinstance(e, scla.LinAlgError) or 'converge' in str(e):
+            import warnings
+            warnings.warn("TN SVD failed, trying again with alternate driver.")
+
+            return _svd_scipy_alt(*args)
+
+        raise e
+
+
+def _svd(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0, renorm=0):
+    if isinstance(x, np.ndarray):
+        return _svd_numpy(x, cutoff, cutoff_mode, max_bond, absorb, renorm)
+
+    U, s, VH = do('linalg.svd', x)
+    return _trim_and_renorm_SVD(U, s, VH, cutoff, cutoff_mode,
+                                max_bond, absorb, renorm)
 
 
 def _svdvals(x):
@@ -247,8 +253,8 @@ def _eig(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0, renorm=0):
 
     U, s, VH = U[:, ::-1], s[::-1], VH[::-1, :]
 
-    return _trim_and_renorm_SVD(U, s, VH, cutoff, cutoff_mode,
-                                max_bond, absorb, renorm)
+    return _trim_and_renorm_SVD_numba(U, s, VH, cutoff, cutoff_mode,
+                                      max_bond, absorb, renorm)
 
 
 @njit
@@ -274,8 +280,8 @@ def _eigh(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0, renorm=0):
 
     V = np.sign(s).reshape(-1, 1) * dag(U)
     s = np.abs(s)
-    return _trim_and_renorm_SVD(U, s, V, cutoff, cutoff_mode,
-                                max_bond, absorb, renorm)
+    return _trim_and_renorm_SVD_numba(U, s, V, cutoff, cutoff_mode,
+                                      max_bond, absorb, renorm)
 
 
 def _choose_k(x, cutoff, max_bond):
@@ -306,8 +312,8 @@ def _svds(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0, renorm=0):
         return _svd(x, cutoff, cutoff_mode, max_bond, absorb)
 
     U, s, VH = svds(x, k=k)
-    return _trim_and_renorm_SVD(U, s, VH, cutoff, cutoff_mode,
-                                max_bond, absorb, renorm)
+    return _trim_and_renorm_SVD_numba(U, s, VH, cutoff, cutoff_mode,
+                                      max_bond, absorb, renorm)
 
 
 def _isvd(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0, renorm=0):
@@ -325,16 +331,11 @@ def _isvd(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0, renorm=0):
 
     U, s, V = sli.svd(x, k)
     VH = dag(V)
-    return _trim_and_renorm_SVD(U, s, VH, cutoff, cutoff_mode,
-                                max_bond, absorb, renorm)
+    return _trim_and_renorm_SVD_numba(U, s, VH, cutoff, cutoff_mode,
+                                      max_bond, absorb, renorm)
 
 
-def _rsvd(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0, renorm=0):
-    """SVD-decomposition using randomized methods (due to Halko). Allows the
-    computation of only a certain number of singular values, e.g. max_bond,
-    from the get-go, and is thus more efficient. Can also supply
-    ``scipy.sparse.linalg.LinearOperator``.
-    """
+def _rsvd_numpy(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0, renorm=0):
     if max_bond > 0:
         if cutoff > 0.0:
             # adapt and block
@@ -344,6 +345,20 @@ def _rsvd(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0, renorm=0):
     else:
         U, s, VH = rsvd(x, cutoff)
 
+    return _trim_and_renorm_SVD_numba(U, s, VH, cutoff, cutoff_mode,
+                                      max_bond, absorb, renorm)
+
+
+def _rsvd(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0, renorm=0):
+    """SVD-decomposition using randomized methods (due to Halko). Allows the
+    computation of only a certain number of singular values, e.g. max_bond,
+    from the get-go, and is thus more efficient. Can also supply
+    ``scipy.sparse.linalg.LinearOperator``.
+    """
+    if isinstance(x, (np.ndarray, spla.LinearOperator)):
+        return _rsvd_numpy(x, cutoff, cutoff_mode, max_bond, absorb, renorm)
+
+    U, s, VH = do('linalg.rsvd', x, max_bond)
     return _trim_and_renorm_SVD(U, s, VH, cutoff, cutoff_mode,
                                 max_bond, absorb, renorm)
 
@@ -365,8 +380,8 @@ def _eigsh(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0, renorm=0):
     s, U = s[::-1], U[:, ::-1]  # make sure largest singular value first
     V = np.sign(s).reshape(-1, 1) * dag(U)
     s = np.abs(s)
-    return _trim_and_renorm_SVD(U, s, V, cutoff, cutoff_mode,
-                                max_bond, absorb, renorm)
+    return _trim_and_renorm_SVD_numba(U, s, V, cutoff, cutoff_mode,
+                                      max_bond, absorb, renorm)
 
 
 @njit  # pragma: no cover
