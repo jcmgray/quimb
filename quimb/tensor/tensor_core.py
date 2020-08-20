@@ -673,7 +673,7 @@ def tensor_split(
     return TensorNetwork(tensors, check_collisions=False)
 
 
-def tensor_canonize_bond(T1, T2, **split_opts):
+def tensor_canonize_bond(T1, T2, absorb='right', **split_opts):
     r"""Inplace 'canonization' of two tensors. This gauges the bond between
     the two such that ``T1`` is isometric::
 
@@ -693,8 +693,15 @@ def tensor_canonize_bond(T1, T2, **split_opts):
         Supplied to :func:`~quimb.tensor.tensor_core.tensor_split`, with
         modified defaults of ``method=='qr'`` and ``absorb='right'``.
     """
+    check_opt('absorb', absorb, ('left', 'both', 'right'))
+
+    if absorb == 'both':
+        split_opts.setdefault('cutoff', 0.0)
+        return tensor_compress_bond(T1, T2, **split_opts)
+
     split_opts.setdefault('method', 'qr')
-    split_opts.setdefault('absorb', 'right')
+    if absorb == 'left':
+        T1, T2 = T2, T1
 
     shared_ix, left_env_ix = T1.filter_bonds(T2)
     if not shared_ix:
@@ -714,7 +721,7 @@ def tensor_canonize_bond(T1, T2, **split_opts):
     T2.modify(data=new_T2.data)
 
 
-def tensor_compress_bond(T1, T2, absorb='both', **compress_opts):
+def tensor_compress_bond(T1, T2, absorb='both', info=None, **compress_opts):
     r"""Inplace compress between the two single tensors. It follows the
     following steps to minimize the size of SVD performed::
 
@@ -746,8 +753,8 @@ def tensor_compress_bond(T1, T2, absorb='both', **compress_opts):
     M = (T1_R @ T2_L)
     M.drop_tags()
     # c) -> d)
-    M_L, M_R = M.split(left_inds=T1_L.bonds(M), get='tensors',
-                       absorb=absorb, **compress_opts)
+    M_L, *s, M_R = M.split(left_inds=T1_L.bonds(M), get='tensors',
+                           absorb=absorb, **compress_opts)
 
     # make sure old bond being used
     ns_ix, = M_L.bonds(M_R)
@@ -761,6 +768,9 @@ def tensor_compress_bond(T1, T2, absorb='both', **compress_opts):
     # update with the new compressed data
     T1.modify(data=T1C.data)
     T2.modify(data=T2C.data)
+
+    if s and info is not None:
+        info['singular_values'], = s
 
 
 def tensor_balance_bond(t1, t2, smudge=1e-6):
@@ -783,6 +793,27 @@ def tensor_balance_bond(t1, t2, smudge=1e-6):
     s = (x + smudge) / (y + smudge)
     t1.multiply_index_diagonal_(ix, s**-0.25)
     t2.multiply_index_diagonal_(ix, s**+0.25)
+
+
+def tensor_fuse_squeeze(t1, t2):
+    """If ``t1`` and ``t2`` share more than one bond fuse it, and if the size
+    of the shared dimenion(s) is 1, squeeze it. Inplace operation.
+    """
+    shared = bonds(t1, t2)
+    nshared = len(shared)
+
+    if nshared == 0:
+        return
+
+    ind0 = next(iter(shared))
+
+    if nshared > 1:
+        t1.fuse_({ind0: shared})
+        t2.fuse_({ind0: shared})
+
+    if t1.ind_size(ind0) == 1:
+        t1.squeeze_(include=(ind0,))
+        t2.squeeze_(include=(ind0,))
 
 
 def new_bond(T1, T2, size=1, name=None, axis1=0, axis2=0):
@@ -1312,6 +1343,13 @@ class Tensor(object):
 
     astype_ = functools.partialmethod(astype, inplace=True)
 
+    def max_dim(self):
+        """Return the maximum size of any dimension, or 1 if scalar.
+        """
+        if self.ndim == 0:
+            return 1
+        return max(self.shape)
+
     def ind_size(self, ind):
         """Return the size of dimension corresponding to ``ind``.
         """
@@ -1635,8 +1673,19 @@ class Tensor(object):
             return qarray(x)
         return x
 
-    def squeeze(self, inplace=False):
+    def squeeze(self, include=None, inplace=False):
         """Drop any singlet dimensions from this tensor.
+
+        Parameters
+        ----------
+        inplace : bool, optional
+            Whether modify the original or return a new tensor.
+        include : sequence of str, optional
+            Only squeeze dimensions with indices in this list.
+
+        Returns
+        -------
+        Tensor
         """
         t = self if inplace else self.copy()
 
@@ -1644,8 +1693,18 @@ class Tensor(object):
         if 1 not in t.shape:
             return t
 
-        new_shape, new_inds = zip(
-            *((d, i) for d, i in zip(self.shape, self.inds) if d > 1))
+        new_shape_new_inds = [
+            (d, i) for d, i in zip(self.shape, self.inds)
+            if (d > 1) or (include is not None and i not in include)
+        ]
+
+        if not new_shape_new_inds:
+            # squeezing everything -> can't unzip `new_shape_new_inds`
+            new_inds = ()
+            new_data = reshape(t.data, ())
+        else:
+            new_shape, new_inds = zip(*new_shape_new_inds)
+            new_data = reshape(t.data, new_shape)
 
         new_left_inds = (
             None if self.left_inds is None else
@@ -1653,11 +1712,7 @@ class Tensor(object):
         )
 
         if len(t.inds) != len(new_inds):
-            t.modify(
-                data=reshape(t.data, new_shape),
-                inds=new_inds,
-                left_inds=new_left_inds,
-            )
+            t.modify(data=new_data, inds=new_inds, left_inds=new_left_inds)
 
         return t
 
@@ -2897,13 +2952,8 @@ class TensorNetwork(object):
             raise TypeError("Can only set value with a new 'Tensor'.")
 
         tid, = tids
-
-        # check if tags match, else need to modify TN structure
-        if self.tensor_map[tid].tags != tensor.tags:
-            self._pop_tensor(tid)
-            self.add_tensor(tensor, tid, virtual=True)
-        else:
-            self.tensor_map[tid] = tensor
+        self._pop_tensor(tid)
+        self.add_tensor(tensor, tid=tid, virtual=True)
 
     def __delitem__(self, tags):
         """Delete any tensors which have all of ``tags``.
@@ -4376,7 +4426,7 @@ class TensorNetwork(object):
     def max_bond(self):
         """Return the size of the largest bond in this network.
         """
-        return max(max(t.shape) for t in self)
+        return max(t.max_dim() for t in self)
 
     @property
     def shape(self):

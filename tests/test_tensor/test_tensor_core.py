@@ -563,6 +563,26 @@ class TestTensorFunctions:
         assert b.inds == ('b', 'c', 'e')
         assert 'hello' in b.tags
         assert a.shape == (1, 2, 3, 1, 4)
+        c = a.squeeze(include=['d'])
+        assert c.shape == (1, 2, 3, 4)
+        assert c.inds == ('a', 'b', 'c', 'e')
+
+    def test_tensor_fuse_squeeze(self):
+        a = rand_tensor((1, 2, 3), inds='abc')
+        b = rand_tensor((2, 3, 4), inds='bcd')
+        qtn.tensor_fuse_squeeze(a, b)
+        assert a.inds == ('b', 'a')
+        assert a.shape == (6, 1)
+        assert b.inds == ('b', 'd')
+        assert b.shape == (6, 4)
+
+        a = rand_tensor((1, 1, 1), inds='abc')
+        b = rand_tensor((1, 1, 1), inds='bcd')
+        qtn.tensor_fuse_squeeze(a, b)
+        assert a.inds == ('a',)
+        assert a.shape == (1,)
+        assert b.inds == ('d',)
+        assert b.shape == (1,)
 
     @pytest.mark.parametrize('dtype', [None, 'complex128', 'float32'])
     def test_randomize(self, dtype):
