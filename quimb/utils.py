@@ -307,6 +307,18 @@ class oset:
         u.update(*others)
         return u
 
+    def pop(self):
+        return self.pop_first
+
+    def pop_first(self):
+        el = next(self.__iter__())
+        self.remove(el)
+        return el
+
+    def first(self):
+        el = next(self.__iter__())
+        return el
+
     def intersection_update(self, *others):
         if len(others) > 1:
             si = set.intersection(*(set(o._d) for o in others))
