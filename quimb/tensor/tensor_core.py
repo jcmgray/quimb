@@ -1445,6 +1445,29 @@ class Tensor(object):
 
     transpose_like_ = functools.partialmethod(transpose_like, inplace=True)
 
+    def sum_reduce(self, ind, inplace=False):
+        """Sum over index ``ind``, removing it from this tensor.
+
+        Parameters
+        ----------
+        ind : str
+            The index to sum over.
+        inplace : bool, optional
+            Whether to perform the reduction inplace.
+
+        Returns
+        -------
+        Tensor
+        """
+        t = self if inplace else self.copy()
+        axis = t.inds.index(ind)
+        new_data = do('sum', t.data, axis=axis)
+        new_inds = t.inds[:axis] + t.inds[axis + 1:]
+        t.modify(data=new_data, inds=new_inds)
+        return t
+
+    sum_reduce_ = functools.partialmethod(sum_reduce, inplace=True)
+
     @functools.wraps(tensor_contract)
     def contract(self, *others, output_inds=None, **opts):
         return tensor_contract(self, *others, output_inds=output_inds, **opts)

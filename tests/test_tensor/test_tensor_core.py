@@ -315,6 +315,20 @@ class TestBasicTensorOperations:
         with pytest.raises(ValueError):
             a.transpose(*'cdfebz')
 
+    def test_sum_reduce(self):
+        t = rand_tensor((2, 3, 4), 'abc')
+        ta = t.sum_reduce('a')
+        assert ta.ndim == 2
+        assert_allclose(ta.data, t.data.sum(axis=0))
+        tb = t.sum_reduce('b')
+        assert tb.ndim == 2
+        assert_allclose(tb.data, t.data.sum(axis=1))
+        tc = t.sum_reduce('c')
+        assert tc.ndim == 2
+        assert_allclose(tc.data, t.data.sum(axis=2))
+        with pytest.raises(ValueError):
+            t.sum_reduce_('d')
+
     def test_ownership(self):
         a = rand_tensor((2, 2), ('a', 'b'), tags={'X', 'Y'})
         b = rand_tensor((2, 2), ('b', 'c'), tags={'X', 'Z'})
