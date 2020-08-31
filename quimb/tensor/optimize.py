@@ -20,6 +20,11 @@ from .array_ops import iscomplex
 from ..core import qarray
 from ..utils import valmap
 
+from collections.abc import Iterable
+import copy
+import time
+from dask.distributed import as_completed
+
 if importlib.util.find_spec("jax") is not None:
     _DEFAULT_BACKEND = 'jax'
 elif importlib.util.find_spec("tensorflow") is not None:
@@ -550,9 +555,14 @@ class TNOptimizer:
     ----------
     tn : TensorNetwork
         The core tensor network structure within which to optimize tensors.
-    loss_fn : callable
+    loss_fn : callable [or Iterable{callable}]
         The function that takes ``tn`` (as well as ``loss_constants`` and
         ``loss_kwargs``) and returns a single real 'loss' to be minimized.
+        For Hamiltonians which can be represented as a sum over terms, an
+        iterable collection of terms (e.g. list) can be given instead. In that
+        case each term is evaluated independently and the sum taken as loss_fn.
+        This can reduce the total memory requirements or allow for parallelization
+        (see ->daskclient)
     norm_fn : callable, optional
         A function to call before ``loss_fn`` that prepares or 'normalizes' the
         raw tensor network in some way.
@@ -583,6 +593,9 @@ class TNOptimizer:
     backend_opts
         Supplied to the backend function compiler and array handler. For
         example ``jit_fn=True`` or ``device='cpu'`` .
+    daskclient: dask.Client, optional
+        To be used with term-by-term Hamiltonians. If supplied, this client is used 
+        to parallelize the evaluation. Otherwise each term is evaluated in sequence.
     """
 
     def __init__(
@@ -599,11 +612,13 @@ class TNOptimizer:
         progbar=True,
         bounds=None,
         autodiff_backend='AUTO',
+        daskclient=None,
         **backend_opts
     ):
         self.progbar = progbar
         self.tags = tags_to_oset(tags)
         self.constant_tags = tags_to_oset(constant_tags)
+        self.daskclient = daskclient
 
         # the object that handles converting to backend + computing gradient
         if autodiff_backend.upper() == 'AUTO':
@@ -634,9 +649,14 @@ class TNOptimizer:
                     self.loss_constants[k] = to_constant(v)
 
         self.loss_kwargs = {} if loss_kwargs is None else dict(loss_kwargs)
-        self.loss_fn = functools.partial(
-            loss_fn, **self.loss_constants, **self.loss_kwargs
-        )
+        if not isinstance(loss_fn,Iterable):
+            self.loss_fn = functools.partial(
+                loss_fn, **self.loss_constants, **self.loss_kwargs
+            ) 
+        else:
+            self.loss_fn = [functools.partial(
+                fn, **self.loss_constants, **self.loss_kwargs
+            ) for fn in loss_fn]
 
         self.loss = float('inf')
         self.loss_best = float('inf')
@@ -651,26 +671,65 @@ class TNOptimizer:
         # this handles storing and packing /  unpacking many arrays as a vector
         self.vectorizer = Vectorizer(self.variables)
 
-        def func(arrays):
-            # set backend explicitly as maybe mixing with numpy arrays
-            with contract_backend(autodiff_backend):
-                inject_(arrays, self.tn_opt)
-                return self.loss_fn(self.norm_fn(self.tn_opt))
+        if not isinstance(self.loss_fn,Iterable):
+            def func(arrays):
+                # set backend explicitly as maybe mixing with numpy arrays
+                with contract_backend(autodiff_backend):
+                    inject_(arrays, self.tn_opt)
+                    return self.loss_fn(self.norm_fn(self.tn_opt))
 
-        self.handler.setup_fn(func)
+            self.handler.setup_fn(func)
+        else:
+            self.handler = [copy.copy(self.handler) for _ in range(len(self.loss_fn))]
+            for i in range(len(self.loss_fn)):
+                def ffunc(arrays,loss_fn,norm_fn,tn_opt):
+                    # set backend explicitly as maybe mixing with numpy arrays
+                    with contract_backend(autodiff_backend):
+                        inject_(arrays, tn_opt)
+                        return loss_fn(norm_fn(tn_opt))
+                # defining func as partial over tn_opt and norm_fn is necessary because the function is not cloudpickle-able otherwise
+                # which is a requirement for dask serialization of the function (for distribution in the compute graph)
+                func = functools.partial(ffunc,loss_fn=self.loss_fn[i],norm_fn=self.norm_fn,tn_opt=self.tn_opt)
+
+                self.handler[i].setup_fn(func)
 
         def vectorized_value_and_grad(x):
             self.vectorizer.vector[:] = x
             arrays = self.vectorizer.unpack()
 
-            ag_result, ag_grads = self.handler.value_and_grad(arrays)
+            if not isinstance(self.handler,Iterable):
+                ag_result, ag_grads = self.handler.value_and_grad(arrays)
+                self.loss = ag_result.item()
+                vec_grad = self.vectorizer.pack(ag_grads, 'grad')
+            else: # TODO parallelize
+                self.loss = 0
+                ag_grad = None
+                if not self.daskclient:
+                    for handler in self.handler: # not combined with dask version below, because in this case 
+                                                 # each term is allowed to go out-of-scope before the next one starts
+                        ag_result, ag_grads = handler.value_and_grad(arrays)
+                        self.loss += ag_result.item()
 
-            self._n += 1
-            self.loss = ag_result.item()
+                        if ag_grad is None:
+                            ag_grad  = list(ag_grads)
+                        else:
+                            for i in range(len(ag_grad)):
+                                ag_grad[i] += ag_grads[i]
+                else:
+                    futures = [self.daskclient.submit(handler.value_and_grad,arrays) for handler in self.handler]
+                    for future in as_completed(futures):
+                        ag_result, ag_grads = future.result()
+                        self.loss += ag_result.item()
+
+                        if ag_grad is None:
+                            ag_grad  = list(ag_grads)
+                        else:
+                            for i in range(len(ag_grad)):
+                                ag_grad[i] += ag_grads[i]
+                vec_grad = self.vectorizer.pack(ag_grad, 'grad')
+
             self.losses.append(self.loss)
-
-            vec_grad = self.vectorizer.pack(ag_grads, 'grad')
-
+            self._n += 1
             return self.loss, vec_grad
 
         self.vectorized_value_and_grad = vectorized_value_and_grad
@@ -720,6 +779,7 @@ class TNOptimizer:
 
                 if self.loss_target is not None:
                     if self.loss < self.loss_target:
+                        print(f"loss: {self.loss}        < {self.loss_target} => terminating")
                         # returning True doesn't terminate optimization
                         raise KeyboardInterrupt
 
@@ -736,6 +796,7 @@ class TNOptimizer:
             self.vectorizer.vector[:] = self.res.x
 
         except KeyboardInterrupt:
+            print("Received KeyboardInterrupt")
             pass
         finally:
             pbar.close()
