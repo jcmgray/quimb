@@ -120,6 +120,9 @@ def graph(
 
     # set parameters for all the nodes
     for tid, t in tn.tensor_map.items():
+        if t.ndim == 0:
+            continue
+
         G.nodes[tid]['size'] = node_size
         G.nodes[tid]['outline_size'] = node_outline_size
         color = (0.4, 0.4, 0.4, 1.0)

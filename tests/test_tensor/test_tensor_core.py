@@ -22,7 +22,7 @@ from quimb.tensor.decomp import _trim_singular_vals
 from quimb.tensor.tensor_core import _CONTRACT_BACKEND, _TENSOR_LINOP_BACKEND
 
 
-def test__trim_singular_vals():
+def test_trim_singular_vals():
     s = np.array([3., 2., 1., 0.1])
     assert _trim_singular_vals(s, 0.5, 1) == 3
     assert _trim_singular_vals(s, 0.5, 2) == 2

@@ -5,7 +5,7 @@ from autoray import do
 
 import quimb as qu
 from ..utils import progbar as _progbar
-from ..utils import oset, partitionby, concatv, partition_all
+from ..utils import oset, partitionby, concatv, partition_all, ensure_dict
 from .tensor_core import (get_tags, tags_to_oset, oset_union,
                           PTensor, TensorNetwork)
 from .tensor_gen import MPS_computational_state
@@ -435,7 +435,7 @@ class Circuit:
             for tag in tags:
                 self._psi.add_tag(tag)
 
-        self.gate_opts = {} if gate_opts is None else dict(gate_opts)
+        self.gate_opts = ensure_dict(gate_opts)
         self.gate_opts.setdefault('contract', 'auto-split-gate')
         self.gate_opts.setdefault('propagate_tags', 'register')
         self.gates = []
@@ -1531,7 +1531,7 @@ class CircuitMPS(Circuit):
     """
 
     def __init__(self, N=None, psi0=None, gate_opts=None, tags=None):
-        gate_opts = {} if gate_opts is None else dict(gate_opts)
+        gate_opts = ensure_dict(gate_opts)
         gate_opts.setdefault('contract', 'swap+split')
         super().__init__(N, psi0, gate_opts, tags)
 
@@ -1565,7 +1565,7 @@ class CircuitDense(Circuit):
     """
 
     def __init__(self, N=None, psi0=None, gate_opts=None, tags=None):
-        gate_opts = {} if gate_opts is None else dict(gate_opts)
+        gate_opts = ensure_dict(gate_opts)
         gate_opts.setdefault('contract', True)
         super().__init__(N, psi0, gate_opts, tags)
 

@@ -238,7 +238,7 @@ class TEBD:
 
         # misc other options
         self.progbar = progbar
-        self.split_opts = {} if split_opts is None else dict(split_opts)
+        self.split_opts = qu.utils.ensure_dict(split_opts)
 
     @property
     def pt(self):

@@ -168,6 +168,14 @@ def int2tup(x):
             tuple(x))
 
 
+def ensure_dict(x):
+    """Make sure ``x`` is a ``dict``, creating an empty one if ``x is None``.
+    """
+    if x is None:
+        return {}
+    return dict(x)
+
+
 def pairwise(iterable):
     """Iterate over each pair of neighbours in ``iterable``.
     """

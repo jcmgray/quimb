@@ -10,7 +10,7 @@ import numpy as np
 import opt_einsum as oe
 from autoray import do, dag, reshape
 
-from ..utils import check_opt, print_multi_line
+from ..utils import check_opt, print_multi_line, ensure_dict
 import quimb as qu
 from .tensor_core import (
     Tensor,
@@ -2485,10 +2485,8 @@ class MatrixProductState(TensorNetwork1DVector,
             d = round(psi.shape[0]**0.5)
             return qu.logneg(psi, [d, d])
 
-        if compress_opts is None:
-            compress_opts = {}
-        if approx_spectral_opts is None:
-            approx_spectral_opts = {}
+        compress_opts = ensure_dict(compress_opts)
+        approx_spectral_opts = ensure_dict(approx_spectral_opts)
 
         # set the default verbosity for each method
         compress_opts.setdefault('verbosity', verbosity)
