@@ -1,15 +1,21 @@
 """Generate specific tensor network states and operators.
 """
+import math
+import functools
+import itertools
+import collections
 from numbers import Integral
 
 import numpy as np
+import opt_einsum as oe
 
 from ..core import make_immutable, ikron
 from ..gen.operators import spin_operator, eye, _gen_mbl_random_factors
 from ..gen.rand import randn, choice, random_seed_fn, rand_phase
-from .tensor_core import Tensor
+from .tensor_core import Tensor, new_bond, TensorNetwork, rand_uuid
 from .array_ops import asarray, sensibly_scale
 from .tensor_1d import MatrixProductState, MatrixProductOperator
+from .tensor_2d import TensorNetwork2D
 from .tensor_tebd import NNI
 
 
@@ -64,6 +70,427 @@ def rand_phased(shape, inds, tags=None, dtype=complex):
     """
     data = rand_phase(shape, dtype=dtype)
     return Tensor(data=data, inds=inds, tags=tags)
+
+
+def TN_rand_reg(
+    n,
+    reg,
+    D,
+    phys_dim=None,
+    seed=None,
+    site_tag_id='I{}',
+    site_ind_id='k{}',
+):
+    """Create a random regular tensor network.
+
+    Parameters
+    ----------
+    n : int
+        The number of tensors.
+    reg : int
+        The degree of the tensor network (how many tensors each tensor
+        connects to).
+    D : int
+        The bond dimension connecting tensors.
+    phys_dim : int, optional
+        If not ``None``, give each tensor a 'physical', free index of this size
+        to mimic a wavefunction of ``n`` sites.
+    seed : int, optional
+        A random seed.
+    site_tag_id : str, optional
+        String with formatter to tag sites.
+    site_ind_id : str, optional
+        String with formatter to tag indices (if ``phys_dim`` specified).
+
+    Returns
+    -------
+    TensorNetwork
+    """
+    import networkx as nx
+    G = nx.random_degree_sequence_graph([reg] * n, seed=None)
+
+    ts = []
+    for i in range(n):
+        t = Tensor(tags=site_tag_id.format(i))
+        if phys_dim is not None:
+            t.new_ind(site_ind_id.format(i), size=phys_dim)
+        ts.append(t)
+
+    for i, j in G.edges:
+        new_bond(ts[i], ts[j], size=D)
+
+    tn = TensorNetwork(ts)
+    tn.randomize_(seed=seed)
+
+    return tn
+
+
+@functools.lru_cache(128)
+def classical_ising_S_matrix(beta, j=1.0):
+    """The interaction term for the classical ising model.
+    """
+    S = np.array(
+        [[math.exp(j * beta), math.exp(-j * beta)],
+         [math.exp(-j * beta), math.exp(j * beta)]])
+    make_immutable(S)
+    return S
+
+
+@functools.lru_cache(128)
+def classical_ising_H_matrix(beta, h=0.0):
+    """The magnetic field term for the classical ising model.
+    """
+    H = np.array([math.exp(-beta * h), math.exp(beta * h)])
+    make_immutable(H)
+    return H
+
+
+@functools.lru_cache(128)
+def classical_ising_sqrtS_matrix(beta):
+    """The sqrt factorized interaction term for the classical ising model.
+    """
+    S_1_2 = np.array(
+        [[math.cosh(beta)**0.5 + math.sinh(beta)**0.5,
+          math.cosh(beta)**0.5 - math.sinh(beta)**0.5],
+         [math.cosh(beta)**0.5 - math.sinh(beta)**0.5,
+          math.cosh(beta)**0.5 + math.sinh(beta)**0.5]]
+    ) / 2**0.5
+    make_immutable(S_1_2)
+    return S_1_2
+
+
+@functools.lru_cache(128)
+def classical_ising_T_matrix(beta, h=0.0, directions='lrud'):
+    """The single effective TN site for the classical ising model.
+    """
+    arrays = (
+        [classical_ising_sqrtS_matrix(beta)] * len(directions) +
+        [classical_ising_H_matrix(beta, h)]
+    )
+    lhs = ",".join(f'i{x}' for x in directions)
+    eq = lhs + ",i->" + directions
+    return oe.contract(eq, *arrays)
+
+
+@functools.lru_cache(128)
+def classical_ising_T2d_matrix(beta, directions='lrud', h=0.0):
+    """The single effective TN site for the 2D classical ising model.
+    """
+    return classical_ising_T_matrix(beta, h, directions)
+
+
+@functools.lru_cache(128)
+def classical_ising_T3d_matrix(beta, directions='lrudab', h=0.0):
+    """The single effective TN site for the 3D classical ising model.
+    """
+    return classical_ising_T_matrix(beta, h, directions)
+
+
+def HTN2D_classical_ising_partition_function(
+    Lx,
+    Ly,
+    beta,
+    h=0.0,
+    j=1.0,
+    ind_id='s{},{}',
+    cyclic=False,
+):
+    """Hyper tensor network representation of the 2D classical ising model
+    partition function. The indices will be shared by 4 or 5 tensors depending
+    on whether ``h`` is non-zero. As opposed to the 'normal' tensor network,
+    here each classical spin is still a single index, which is easier to
+    contract exactly.
+
+    Parameters
+    ----------
+    Lx : int
+        Length of side x.
+    Ly : int
+        Length of side y.
+    beta : float
+        The inverse temperature.
+    h : float, optional
+        The magnetic field strength.
+    j : float, optional
+        The interaction strength.
+    cyclic : bool or (bool, bool), optional
+        Whether to use periodic boundary conditions. X and Y can be specified
+        separately using a tuple.
+    ind_id : str, optional
+        How to label the indices i.e. ``ind_id.format(i, j)``, each of which
+        corresponds to a single classical spin.
+
+    Returns
+    -------
+    TensorNetwork
+
+    See Also
+    --------
+    TN2D_classical_ising_partition_function
+    """
+
+    ts = []
+
+    S = classical_ising_S_matrix(beta=beta, j=j)
+    H = classical_ising_H_matrix(beta=beta, h=h)
+
+    try:
+        cyclic_x, cyclic_y = cyclic
+    except TypeError:
+        cyclic_x = cyclic_y = cyclic
+
+    for i, j in itertools.product(range(Lx), range(Ly)):
+
+        if i < Lx - 1 or cyclic_x:
+            inds = ind_id.format(i, j), ind_id.format((i + 1) % Lx, j)
+            ts.append(Tensor(S, inds=inds))
+
+        if j < Ly - 1 or cyclic_y:
+            inds = ind_id.format(i, j), ind_id.format(i, (j + 1) % Ly)
+            ts.append(Tensor(S, inds=inds))
+
+        if h != 0.0:
+            ts.append(Tensor(H, inds=(ind_id.format(i, j),)))
+
+    return TensorNetwork(ts)
+
+
+def HTN3D_classical_ising_partition_function(
+    Lx,
+    Ly,
+    Lz,
+    beta,
+    h=0.0,
+    j=1.0,
+    cyclic=False,
+    ind_id='s{},{},{}',
+):
+    """Hyper tensor network representation of the 3D classical ising model
+    partition function. The indices will be shared by 6 or 7 tensors depending
+    on whether ``h`` is non-zero. As opposed to the 'normal' tensor network,
+    here each classical spin is still a single index, which is easier to
+    contract exactly.
+
+    Parameters
+    ----------
+    Lx : int
+        Length of side x.
+    Ly : int
+        Length of side y.
+    Lz : int
+        Length of side z.
+    beta : float
+        The inverse temperature.
+    h : float, optional
+        The magnetic field strength.
+    j : float, optional
+        The interaction strength.
+    cyclic : bool or (bool, bool, bool), optional
+        Whether to use periodic boundary conditions. X, Y and Z can be
+        specified separately using a tuple.
+    ind_id : str, optional
+        How to label the indices i.e. ``ind_id.format(i, j, k)``, each of which
+        corresponds to a single classical spin.
+
+    Returns
+    -------
+    TensorNetwork
+
+    See Also
+    --------
+    TN3D_classical_ising_partition_function
+    """
+
+    ts = []
+
+    S = classical_ising_S_matrix(beta=beta, j=j)
+    H = classical_ising_H_matrix(beta=beta, h=h)
+
+    try:
+        cyclic_x, cyclic_y, cyclic_z = cyclic
+    except TypeError:
+        cyclic_x = cyclic_y = cyclic_z = cyclic
+
+    for i, j, k in itertools.product(range(Lx), range(Ly), range(Lz)):
+
+        if i < Lx - 1 or cyclic_x:
+            inds = ind_id.format(i, j, k), ind_id.format((i + 1) % Lx, j, k)
+            ts.append(Tensor(S, inds=inds))
+
+        if j < Ly - 1 or cyclic_y:
+            inds = ind_id.format(i, j, k), ind_id.format(i, (j + 1) % Ly, k)
+            ts.append(Tensor(S, inds=inds))
+
+        if k < Lz - 1 or cyclic_z:
+            inds = ind_id.format(i, j, k), ind_id.format(i, j, (k + 1) % Lz)
+            ts.append(Tensor(S, inds=inds))
+
+        if h != 0.0:
+            ts.append(Tensor(H, inds=(ind_id.format(i, j, k),)))
+
+    return TensorNetwork(ts)
+
+
+def TN2D_classical_ising_partition_function(
+    Lx,
+    Ly,
+    beta,
+    h=0.0,
+    cyclic=False,
+    site_tag_id='I{},{}',
+    row_tag_id='ROW{}',
+    col_tag_id='COL{}',
+):
+    """The tensor network representation of the 2D classical ising model
+    partition function.
+
+    Parameters
+    ----------
+    Lx : int
+        Length of side x.
+    Ly : int
+        Length of side y.
+    beta : float
+        The inverse temperature.
+    h : float, optional
+        The magnetic field strength.
+    cyclic : bool or (bool, bool), optional
+        Whether to use periodic boundary conditions. X and Y can be specified
+        separately using a tuple.
+    site_tag_id : str, optional
+        String specifier for naming convention of site tags.
+    row_tag_id : str, optional
+        String specifier for naming convention of row tags.
+    col_tag_id : str, optional
+        String specifier for naming convention of column tags.
+
+    Returns
+    -------
+    TensorNetwork2D
+
+    See Also
+    --------
+    HTN2D_classical_ising_partition_function
+    """
+    try:
+        cyclic_x, cyclic_y = cyclic
+    except TypeError:
+        cyclic_x = cyclic_y = cyclic
+
+    ts = []
+    bonds = collections.defaultdict(rand_uuid)
+
+    for i, j in itertools.product(range(Lx), range(Ly)):
+        directions = ""
+        inds = []
+
+        if j > 0 or cyclic_y:
+            directions += 'l'
+            inds.append(bonds[(i, (j - 1) % Ly), (i, j)])
+        if j < Ly - 1 or cyclic_y:
+            directions += 'r'
+            inds.append(bonds[(i, j), (i, (j + 1) % Ly)])
+        if i < Lx - 1 or cyclic_x:
+            directions += 'u'
+            inds.append(bonds[(i, j), ((i + 1) % Lx, j)])
+        if i > 0 or cyclic_x:
+            directions += 'd'
+            inds.append(bonds[((i - 1) % Lx, j), (i, j)])
+
+        ts.append(Tensor(
+            data=classical_ising_T2d_matrix(beta, directions, h=h),
+            inds=inds,
+            tags=[site_tag_id.format(i, j),
+                  row_tag_id.format(i),
+                  col_tag_id.format(j)]))
+
+    tn = TensorNetwork(ts)
+
+    return tn.view_as_(
+        TensorNetwork2D,
+        Lx=Lx, Ly=Ly,
+        site_tag_id=site_tag_id,
+        row_tag_id=row_tag_id,
+        col_tag_id=col_tag_id,
+    )
+
+
+def TN3D_classical_ising_partition_function(
+    Lx,
+    Ly,
+    Lz,
+    beta,
+    h=0.0,
+    cyclic=False,
+    site_tag_id='I{},{},{}',
+):
+    """Tensor network representation of the 3D classical ising model
+    partition function.
+
+    Parameters
+    ----------
+    Lx : int
+        Length of side x.
+    Ly : int
+        Length of side y.
+    Lz : int
+        Length of side z.
+    beta : float
+        The inverse temperature.
+    h : float, optional
+        The magnetic field strength.
+    cyclic : bool or (bool, bool, bool), optional
+        Whether to use periodic boundary conditions. X, Y and Z can be
+        specified separately using a tuple.
+    site_tag_id : str, optional
+        String formatter specifying how to label each site.
+
+    Returns
+    -------
+    TensorNetwork
+
+    See Also
+    --------
+    HTN3D_classical_ising_partition_function
+    """
+    try:
+        cyclic_x, cyclic_y, cyclic_z = cyclic
+    except TypeError:
+        cyclic_x = cyclic_y = cyclic_z = cyclic
+
+    ts = []
+    bonds = collections.defaultdict(rand_uuid)
+
+    for i, j, k in itertools.product(range(Lx), range(Ly), range(Lz)):
+        directions = ""
+        inds = []
+
+        if k > 0 or cyclic_z:
+            directions += 'b'
+            inds.append(bonds[(i, j, (k - 1) % Lz), (i, j, k)])
+        if k < Lz - 1 or cyclic_z:
+            directions += 'a'
+            inds.append(bonds[(i, j, k), (i, j, (k + 1) % Lz)])
+        if j > 0 or cyclic_y:
+            directions += 'l'
+            inds.append(bonds[(i, (j - 1) % Ly, k), (i, j, k)])
+        if j < Ly - 1 or cyclic_y:
+            directions += 'r'
+            inds.append(bonds[(i, j, k), (i, (j + 1) % Ly, k)])
+        if i < Lx - 1 or cyclic_x:
+            directions += 'u'
+            inds.append(bonds[(i, j, k), ((i + 1) % Lx, j, k)])
+        if i > 0 or cyclic_x:
+            directions += 'd'
+            inds.append(bonds[((i - 1) % Lx, j, k), (i, j, k)])
+
+        ts.append(Tensor(
+            data=classical_ising_T3d_matrix(beta, directions, h=h),
+            inds=inds,
+            tags=[site_tag_id.format(i, j, k)]))
+
+    tn = TensorNetwork(ts)
+    return tn
 
 
 # --------------------------------------------------------------------------- #
