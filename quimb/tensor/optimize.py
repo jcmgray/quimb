@@ -289,7 +289,7 @@ class TorchHandler:
         grads = tuple(map(to_numpy, self.torch.autograd.grad(result, arrays)))
         loss = to_numpy(result)
 
-        return loss, grads
+        return loss, [g.conj() for g in grads]
 
 
 _BACKEND_HANDLERS = {
