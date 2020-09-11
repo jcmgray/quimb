@@ -2,7 +2,7 @@ import numpy as np
 import scipy.linalg as scla
 import scipy.sparse.linalg as spla
 import scipy.linalg.interpolative as sli
-from autoray import do, reshape
+from autoray import do, reshape, dag, infer_backend, astype, get_dtype_name
 
 from ..core import njit
 from ..linalg.base_linalg import svds, eigh
@@ -157,6 +157,12 @@ def _trim_and_renorm_SVD(U, s, VH, cutoff, cutoff_mode,
         U = U[..., :max_bond]
         VH = VH[:max_bond, ...]
 
+    # XXX: tensorflow can't multiply mixed dtypes
+    if infer_backend(s) == 'tensorflow':
+        dtype = get_dtype_name(U)
+        if 'complex' in dtype:
+            s = astype(s, dtype)
+
     if absorb is None:
         return U, s, VH
     if absorb == -1:
@@ -224,37 +230,66 @@ def _svdvals(x):
 
 
 @njit  # pragma: no cover
-def dag(x):
+def dag_numba(x):
     """Hermitian conjugate.
     """
     return np.conjugate(x.T)
 
 
 @njit  # pragma: no cover
-def _eig(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0, renorm=0):
+def _eig_numba(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0, renorm=0):
     """SVD-split via eigen-decomposition.
     """
     if x.shape[0] > x.shape[1]:
         # Get sU, V
-        s2, V = np.linalg.eigh(dag(x) @ x)
+        s2, V = np.linalg.eigh(dag_numba(x) @ x)
         U = x @ np.ascontiguousarray(V)
-        VH = dag(V)
+        VH = dag_numba(V)
         # small negative eigenvalues turn into nan when sqrtd
         s2[s2 < 0.0] = 0.0
         s = s2**0.5
         U /= s.reshape((1, -1))
     else:
         # Get U, sV
-        s2, U = np.linalg.eigh(x @ dag(x))
-        VH = dag(U) @ x
+        s2, U = np.linalg.eigh(x @ dag_numba(x))
+        VH = dag_numba(U) @ x
         s2[s2 < 0.0] = 0.0
         s = s2**0.5
         VH /= s.reshape((-1, 1))
 
+    # we need singular values and vectors in descending order
     U, s, VH = U[:, ::-1], s[::-1], VH[::-1, :]
 
     return _trim_and_renorm_SVD_numba(U, s, VH, cutoff, cutoff_mode,
                                       max_bond, absorb, renorm)
+
+
+def _eig(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0, renorm=0):
+    if isinstance(x, np.ndarray):
+        return _eig_numba(x, cutoff, cutoff_mode, max_bond, absorb, renorm)
+
+    if x.shape[0] > x.shape[1]:
+        # Get sU, V
+        s2, V = do('linalg.eigh', dag(x) @ x)
+        U = x @ V
+        VH = dag(V)
+        # small negative eigenvalues turn into nan when sqrtd
+        s2 = do('clip', s2, 0.0, None)
+        s = s2**0.5
+        U = U / reshape(s, (1, -1))
+    else:
+        # Get U, sV
+        s2, U = do('linalg.eigh', x @ dag(x))
+        VH = dag(U) @ x
+        s2 = do('clip', s2, 0.0, None)
+        s = s2**0.5
+        VH = VH / reshape(s, (-1, 1))
+
+    # we need singular values and vectors in descending order
+    U, s, VH = do('flip', U, (1,)), do('flip', s, (0,)), do('flip', VH, (0,))
+
+    return _trim_and_renorm_SVD(U, s, VH, cutoff, cutoff_mode,
+                                max_bond, absorb, renorm)
 
 
 @njit
@@ -262,9 +297,9 @@ def _svdvals_eig(x):  # pragma: no cover
     """SVD-decomposition via eigen, but return singular values only.
     """
     if x.shape[0] > x.shape[1]:
-        s2 = np.linalg.eigvalsh(dag(x) @ x)
+        s2 = np.linalg.eigvalsh(dag_numba(x) @ x)
     else:
-        s2 = np.linalg.eigvalsh(x @ dag(x))
+        s2 = np.linalg.eigvalsh(x @ dag_numba(x))
 
     s2[s2 < 0.0] = 0.0
     return s2[::-1]**0.5
@@ -278,7 +313,7 @@ def _eigh(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0, renorm=0):
     s, U = np.linalg.eigh(x)
     s, U = s[::-1], U[:, ::-1]  # make sure largest singular value first
 
-    V = np.sign(s).reshape(-1, 1) * dag(U)
+    V = np.sign(s).reshape(-1, 1) * dag_numba(U)
     s = np.abs(s)
     return _trim_and_renorm_SVD_numba(U, s, V, cutoff, cutoff_mode,
                                       max_bond, absorb, renorm)
@@ -330,7 +365,7 @@ def _isvd(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0, renorm=0):
         return _svd(x, cutoff, cutoff_mode, max_bond, absorb)
 
     U, s, V = sli.svd(x, k)
-    VH = dag(V)
+    VH = dag_numba(V)
     return _trim_and_renorm_SVD_numba(U, s, VH, cutoff, cutoff_mode,
                                       max_bond, absorb, renorm)
 
@@ -378,7 +413,7 @@ def _eigsh(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0, renorm=0):
 
     s, U = eigh(x, k=k)
     s, U = s[::-1], U[:, ::-1]  # make sure largest singular value first
-    V = np.sign(s).reshape(-1, 1) * dag(U)
+    V = np.sign(s).reshape(-1, 1) * dag_numba(U)
     s = np.abs(s)
     return _trim_and_renorm_SVD_numba(U, s, V, cutoff, cutoff_mode,
                                       max_bond, absorb, renorm)
@@ -420,7 +455,7 @@ def _numba_cholesky(x, cutoff=-1, cutoff_mode=3, max_bond=-1, absorb=0):
     ``x`` is positive definite.
     """
     L = np.linalg.cholesky(x)
-    return L, None, dag(L)
+    return L, None, dag_numba(L)
 
 
 def _cholesky(x, cutoff=-1, cutoff_mode=3, max_bond=-1, absorb=0):
