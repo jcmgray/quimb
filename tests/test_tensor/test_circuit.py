@@ -19,9 +19,7 @@ def graph_to_circ(G, gamma0=-0.743043, beta0=0.754082):
     for i in range(n):
         circ += f"H {i}\n"
     for i, j in G.edges:
-        circ += f"CNOT {i} {j}\n"
-        circ += f"Rz {gamma0} {j}\n"
-        circ += f"CNOT {i} {j}\n"
+        circ += f"Rzz {gamma0} {i} {j}\n"
     for i in range(n):
         circ += f"Rx {beta0} {i}\n"
 
@@ -49,13 +47,13 @@ class TestCircuit:
         assert '111' in counts
         assert counts['000'] + counts['111'] == 1024
 
-    def test_rand_reg_qaoa(self):
+    def test_from_qasm(self):
         G = rand_reg_graph(reg=3, n=18, seed=42)
         qasm = graph_to_circ(G)
         qc = qtn.Circuit.from_qasm(qasm)
         assert (qc.psi.H & qc.psi) ^ all == pytest.approx(1.0)
 
-    def test_rand_reg_qaoa_mps_swapsplit(self):
+    def test_from_qasm_mps_swapsplit(self):
         G = rand_reg_graph(reg=3, n=18, seed=42)
         qasm = graph_to_circ(G)
         qc = qtn.CircuitMPS.from_qasm(qasm)
@@ -95,6 +93,7 @@ class TestCircuit:
             ('iswap', 2, 0),
             # two qubit parametrizable
             ('fsim', 2, 2),
+            ('rzz', 2, 1),
         ]
         random.shuffle(g_nq_np)
 
@@ -196,6 +195,16 @@ class TestCircuit:
         cw_s = tn_s.contraction_width(output_inds=[])
         assert cw_s <= cw
 
+    def test_local_expectation_multigate(self):
+        circ = qtn.Circuit(2)
+        circ.h(0)
+        circ.cnot(0, 1)
+        circ.y(1)
+        Gs = [qu.kronpow(qu.pauli(s), 2) for s in 'xyz']
+        exps = circ.local_expectation(Gs, [0, 1])
+        assert exps[0] == pytest.approx(-1)
+        assert exps[1] == pytest.approx(-1)
+        assert exps[2] == pytest.approx(-1)
 
 class TestCircuitGen:
 
@@ -239,3 +248,30 @@ class TestCircuitGen:
             assert len(tn['CZ', f'I{i}', f'I{(i + 1) % n}']) == depth
 
         assert all(isinstance(t, qtn.PTensor) for t in tn['U3'])
+
+    def test_qaoa(self):
+        G = rand_reg_graph(3, 10, seed=666)
+        terms = {(i, j): 1. for i, j in G.edges}
+        ZZ = qu.pauli('Z') & qu.pauli('Z')
+
+        gammas = [1.2]
+        betas = [-0.4]
+
+        circ1 = qtn.circ_qaoa(terms, 1, gammas, betas)
+
+        energy1 = sum(
+            circ1.local_expectation(ZZ, edge)
+            for edge in terms
+        )
+        assert energy1 < -4
+
+        gammas = [0.4]
+        betas = [0.3]
+
+        circ2 = qtn.circ_qaoa(terms, 1, gammas, betas)
+
+        energy2 = sum(
+            circ2.local_expectation(ZZ, edge)
+            for edge in terms
+        )
+        assert energy2 > 4

@@ -2,13 +2,13 @@ import numbers
 import functools
 
 import numpy as np
-from autoray import do
+from autoray import do, reshape
 
 import quimb as qu
 from ..utils import progbar as _progbar
 from ..utils import oset, partitionby, concatv, partition_all, ensure_dict
 from .tensor_core import (get_tags, tags_to_oset, oset_union,
-                          PTensor, TensorNetwork)
+                          PTensor, Tensor, TensorNetwork, rand_uuid)
 from .tensor_gen import MPS_computational_state
 from .tensor_1d import TensorNetwork1DVector, Dense1D
 from . import array_ops as ops
@@ -1155,7 +1155,6 @@ class Circuit:
         backend='auto',
         dtype='complex128',
         target_size=None,
-        gate_opts=None,
         rehearse=False,
     ):
         r"""Compute the a single expectation value of operator ``G``, acting on
@@ -1167,12 +1166,13 @@ class Circuit:
 
         where :math:`\bar{q}` is the set of qubits :math:`G` acts one and
         :math:`\psi_{\bar{q}}` is the circuit wavefunction only with gates in
-        the causal cone of this set.
+        the causal cone of this set. If you supply a tuple or list of gates
+        then the expectations will be computed simulteneously.
 
         Parameters
         ----------
-        G : array
-            The raw operator to find the expectation of.
+        G : array or tuple[array] or list[array]
+            The raw operator(s) to find the expectation of.
         where : int or sequence of int
             Which qubits the operator acts on.
         optimize : str, optional
@@ -1207,27 +1207,43 @@ class Circuit:
 
         Returns
         -------
-        float or dict
+        float, array or dict
         """
-        gate_opts = ensure_dict(gate_opts)
-
         if isinstance(where, numbers.Integral):
             where = (where,)
 
         ket = self.get_psi_reverse_lightcone(where)
-        bra = ket.H
-        bGk = (bra | ket.gate_(G, where, **gate_opts))
+        k_inds = tuple(ket.site_ind(i) for i in where)
+
+        b_inds = tuple(rand_uuid() for i in where)
+        bra = ket.conj().reindex_(dict(zip(k_inds, b_inds)))
+
+        d = ket.ind_size(k_inds[0])
+
+        if isinstance(G, (list, tuple)):
+            # if we have multiple expectations create an extra indexed stack
+            nG = len(G)
+            G_data = do('stack', G, like=G[0])
+            G_data = reshape(G_data, (nG,) + (d,) * 2 * len(where))
+            output_inds = (rand_uuid(),)
+        else:
+            G_data = reshape(G, (d,) * 2 * len(where))
+            output_inds = ()
+
+        TG = Tensor(data=G_data, inds=output_inds + k_inds + b_inds)
+
+        bGk = (bra | TG | ket)
 
         bGk.full_simplify_(
             seq=simplify_sequence,
             atol=simplify_atol,
-            output_inds=(),
+            output_inds=output_inds,
         )
         bGk.astype_(dtype)
 
         info = bGk.contract(
             all,
-            output_inds=(),
+            output_inds=output_inds,
             optimize=optimize,
             get='path-info'
         )
@@ -1241,8 +1257,11 @@ class Circuit:
             sc = self._get_sliced_contractor(info, target_size, arrays)
             g_ex = sc.contract_all(backend=backend)
         else:
-            g_ex = bGk.contract(all, output_inds=(),
+            g_ex = bGk.contract(all, output_inds=output_inds,
                                 optimize=info.path, backend=backend)
+
+        if isinstance(g_ex, Tensor):
+            g_ex = g_ex.data
 
         return g_ex
 
