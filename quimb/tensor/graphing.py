@@ -97,7 +97,7 @@ def graph(
             'color': ((1.0, 0.2, 0.2, 1.0) if ix in highlight_inds else
                       (0.0, 0.0, 0.0, 1.0)),
             'ind': ix,
-            'weight': edge_scale * math.log2(tn.ind_size(ix))
+            'edge_size': edge_scale * math.log2(tn.ind_size(ix))
         }
         if len(tids) == 2:
             # standard edge
@@ -156,7 +156,7 @@ def graph(
 
     nx.draw_networkx_edges(
         G, pos,
-        width=tuple(x[2]['weight'] for x in G.edges(data=True)),
+        width=tuple(x[2]['edge_size'] for x in G.edges(data=True)),
         edge_color=tuple(x[2]['color'] for x in G.edges(data=True)),
         alpha=edge_alpha,
         ax=ax,
@@ -308,7 +308,7 @@ def _get_positions(tn, G, fix, initial_layout, k, iterations):
             fixed_positions[tags_or_ind] = pos
 
     # use spectral layout as starting point
-    pos0 = getattr(nx, initial_layout + '_layout')(G, weight=None)
+    pos0 = getattr(nx, initial_layout + '_layout')(G)
 
     # scale points to fit with specified positions
     if fix:
@@ -322,6 +322,6 @@ def _get_positions(tn, G, fix, initial_layout, k, iterations):
 
     # and then relax remaining using spring layout
     pos = nx.spring_layout(
-        G, pos=pos0, fixed=fixed, k=k, iterations=iterations, weight=None)
+        G, pos=pos0, fixed=fixed, k=k, iterations=iterations)
 
     return pos
