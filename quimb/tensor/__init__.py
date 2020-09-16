@@ -92,6 +92,7 @@ from .circuit_gen import (
     circ_ansatz_1D_zigzag,
     circ_ansatz_1D_brickwork,
     circ_ansatz_1D_rand,
+    circ_qaoa,
 )
 from .optimize import (
     TNOptimizer,
@@ -188,6 +189,7 @@ __all__ = (
     "circ_ansatz_1D_zigzag",
     "circ_ansatz_1D_brickwork",
     "circ_ansatz_1D_rand",
+    "circ_qaoa",
     "TNOptimizer",
     "TensorNetwork2D",
     "PEPS",

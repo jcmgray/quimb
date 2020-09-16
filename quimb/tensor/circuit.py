@@ -1,4 +1,5 @@
 import numbers
+import functools
 
 import numpy as np
 from autoray import do
@@ -279,6 +280,46 @@ def apply_fsim(psi, theta, phi, i, j, parametrize=False, **gate_opts):
     psi.gate_(G, (int(i), int(j)), tags=mtags, **gate_opts)
 
 
+def rzz_param_gen(params):
+    gamma = params[0]
+
+    c00 = c11 = do('complex', do('cos', gamma), do('sin', gamma))
+    c01 = c10 = do('complex', do('cos', gamma), -do('sin', gamma))
+
+    data = [[[[c00, 0],
+              [0, 0]],
+             [[0, c01],
+              [0, 0]]],
+            [[[0, 0],
+              [c10, 0]],
+             [[0, 0],
+              [0, c11]]]]
+
+    return do('array', data, like=params)
+
+
+@functools.lru_cache(maxsize=128)
+def rzz(gamma):
+    r"""
+    The gate describing an Ising interaction evolution, or 'ZZ'-rotation.
+
+    .. math::
+
+        \mathrm{RZZ}(\gamma) = \exp(-i \gamma Z_i Z_j)
+
+    """
+    return rzz_param_gen(np.array([gamma]))
+
+
+def apply_rzz(psi, gamma, i, j, parametrize=False, **gate_opts):
+    mtags = _merge_tags('RZZ', gate_opts)
+    if parametrize:
+        G = ops.PArray(rzz_param_gen, (float(gamma),))
+    else:
+        G = rzz(float(gamma))
+    psi.gate_(G, (int(i), int(j)), tags=mtags, **gate_opts)
+
+
 GATE_FUNCTIONS = {
     # constant single qubit gates
     'H': build_gate_1(qu.hadamard(), tags='H'),
@@ -309,10 +350,11 @@ GATE_FUNCTIONS = {
     'U3': apply_U3,
     'FS': apply_fsim,
     'FSIM': apply_fsim,
+    'RZZ': apply_rzz,
 }
 
 ONE_QUBIT_PARAM_GATES = {'RX', 'RY', 'RZ', 'U3'}
-TWO_QUBIT_PARAM_GATES = {'FS', 'FSIM'}
+TWO_QUBIT_PARAM_GATES = {'FS', 'FSIM', 'RZZ'}
 ALL_PARAM_GATES = ONE_QUBIT_PARAM_GATES | TWO_QUBIT_PARAM_GATES
 
 
@@ -633,6 +675,10 @@ class Circuit:
         self.apply_gate('FSIM', theta, phi, i, j,
                         gate_round=gate_round, parametrize=parametrize)
 
+    def rzz(self, theta, i, j, gate_round=None, parametrize=False):
+        self.apply_gate('RZZ', theta, i, j,
+                        gate_round=gate_round, parametrize=parametrize)
+
     @property
     def psi(self):
         """Tensor network representation of the wavefunction.
@@ -740,79 +786,6 @@ class Circuit:
 
         return psi_lc
 
-    def get_norm_lightcone_simplified(self, where, seq='ADCRS', atol=1e-6):
-        """Get a simplified TN of the norm of the wavefunction, with
-        gates outside reverse lightcone of ``where`` cancelled, and physical
-        indices within ``where`` preserved so that they can be fixed (sliced)
-        or used as output indices.
-
-        Parameters
-        ----------
-        where : int or sequence of int
-            The region assumed to be the target density matrix essentially.
-            Supplied to
-            :meth:`~quimb.tensor.circuit.Circuit.get_reverse_lightcone_tags`.
-        seq : str, optional
-            Which local tensor network simplifications to perform and in which
-            order, see
-            :meth:`~quimb.tensor.tensor_core.TensorNetwork.full_simplify`.
-        atol : float, optional
-            The tolerance with which to compare to zero when applying
-            :meth:`~quimb.tensor.tensor_core.TensorNetwork.full_simplify`.
-
-        Returns
-        -------
-        TensorNetwork
-        """
-        key = (where, seq, atol)
-        if key in self._sample_norm_cache:
-            return self._sample_norm_cache[key].copy()
-
-        psi_lc = self.get_psi_reverse_lightcone(where)
-        norm_lc = psi_lc.H & psi_lc
-
-        # don't want to simplify site indices in region away
-        output_inds = tuple(map(psi_lc.site_ind, where))
-
-        # # simplify the norm and cache it
-        norm_lc.full_simplify_(seq=seq, atol=atol, output_inds=output_inds)
-        self._sample_norm_cache[key] = norm_lc
-
-        # return a copy so we can modify it inplace
-        return norm_lc.copy()
-
-    def get_psi_simplified(self, seq='ADCRS', atol=1e-6):
-        """Get the full wavefunction post local tensor newtork simplification.
-
-        Parameters
-        ----------
-        seq : str, optional
-            Which local tensor network simplifications to perform and in which
-            order, see
-            :meth:`~quimb.tensor.tensor_core.TensorNetwork.full_simplify`.
-        atol : float, optional
-            The tolerance with which to compare to zero when applying
-            :meth:`~quimb.tensor.tensor_core.TensorNetwork.full_simplify`.
-
-        Returns
-        -------
-        TensorNetwork1DVector
-        """
-        key = (tuple(range(self.N)), seq, atol)
-        if key in self._sample_norm_cache:
-            return self._sample_norm_cache[key].copy()
-
-        psi = self.psi
-        # make sure to keep all outer indices
-        output_inds = tuple(map(psi.site_ind, range(self.N)))
-
-        # simplify the state and cache it
-        psi.full_simplify_(seq=seq, atol=atol, output_inds=output_inds)
-        self._sample_norm_cache[key] = psi
-
-        # return a copy so we can modify it inplace
-        return psi.copy()
-
     def _maybe_init_sampling_caches(self):
         # clear/create the cache if circuit has changed
         if self._sample_n_gates != len(self.gates):
@@ -854,6 +827,428 @@ class Circuit:
         self._sampling_sliced_contractions[key] = sc
         return sc
 
+    def get_psi_simplified(self, seq='ADCRS', atol=1e-12):
+        """Get the full wavefunction post local tensor network simplification.
+
+        Parameters
+        ----------
+        seq : str, optional
+            Which local tensor network simplifications to perform and in which
+            order, see
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.full_simplify`.
+        atol : float, optional
+            The tolerance with which to compare to zero when applying
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.full_simplify`.
+
+        Returns
+        -------
+        psi : TensorNetwork1DVector
+        """
+        self._maybe_init_sampling_caches()
+
+        key = (tuple(range(self.N)), seq, atol)
+        if key in self._sample_norm_cache:
+            return self._sample_norm_cache[key].copy()
+
+        psi = self.psi
+        # make sure to keep all outer indices
+        output_inds = tuple(map(psi.site_ind, range(self.N)))
+
+        # simplify the state and cache it
+        psi.full_simplify_(seq=seq, atol=atol, output_inds=output_inds)
+        self._sample_norm_cache[key] = psi
+
+        # return a copy so we can modify it inplace
+        return psi.copy()
+
+    def get_norm_lightcone_simplified(self, where, seq='ADCRS', atol=1e-12):
+        """Get a simplified TN of the norm of the wavefunction, with
+        gates outside reverse lightcone of ``where`` cancelled, and physical
+        indices within ``where`` preserved so that they can be fixed (sliced)
+        or used as output indices.
+
+        Parameters
+        ----------
+        where : int or sequence of int
+            The region assumed to be the target density matrix essentially.
+            Supplied to
+            :meth:`~quimb.tensor.circuit.Circuit.get_reverse_lightcone_tags`.
+        seq : str, optional
+            Which local tensor network simplifications to perform and in which
+            order, see
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.full_simplify`.
+        atol : float, optional
+            The tolerance with which to compare to zero when applying
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.full_simplify`.
+
+        Returns
+        -------
+        TensorNetwork
+        """
+        key = (where, seq, atol)
+        if key in self._sample_norm_cache:
+            return self._sample_norm_cache[key].copy()
+
+        psi_lc = self.get_psi_reverse_lightcone(where)
+        norm_lc = psi_lc.H & psi_lc
+
+        # don't want to simplify site indices in region away
+        output_inds = tuple(map(psi_lc.site_ind, where))
+
+        # # simplify the norm and cache it
+        norm_lc.full_simplify_(seq=seq, atol=atol, output_inds=output_inds)
+        self._sample_norm_cache[key] = norm_lc
+
+        # return a copy so we can modify it inplace
+        return norm_lc.copy()
+
+    def amplitude(
+        self,
+        b,
+        optimize='auto-hq',
+        simplify_sequence='ADCRS',
+        simplify_atol=1e-12,
+        backend='auto',
+        dtype='complex128',
+        target_size=None,
+        rehearse=False,
+    ):
+        r"""Get the amplitude coefficient of bitstring ``b``.
+
+        .. math::
+
+            c_b = \langle b | \psi \rangle
+
+        Parameters
+        ----------
+        b : str or sequence of int
+            The bitstring to compute the transition amplitude for.
+        optimize : str, optional
+            Contraction path optimizer to use for the amplitude, can be
+            a reusable path optimizer as only called once (though path won't be
+            cached for later use in that case).
+        simplify_sequence : str, optional
+            Which local tensor network simplifications to perform and in which
+            order, see
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.full_simplify`.
+        simplify_atol : float, optional
+            The tolerance with which to compare to zero when applying
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.full_simplify`.
+        backend : str, optional
+            Backend to perform the contraction with, e.g. ``'numpy'``,
+            ``'cupy'`` or ``'jax'``. Passed to ``opt_einsum``.
+        dtype : str, optional
+            Data type to cast the TN to before contraction.
+        target_size : None or int, optional
+            The largest size of tensor to allow. If specified and any
+            contraction involves tensors bigger than this, 'slice' the
+            contraction into independent parts and sum them individually.
+            Requires ``cotengra`` currently.
+        rehearse : bool, optional
+            If ``True``, generate and cache the simplified tensor network and
+            contraction path but don't actually perform the contraction.
+            Returns a dict with keys ``'tn'`` and ``'info'`` with the tensor
+            network that will be contracted and the corresponding contraction
+            path if so.
+        """
+        self._maybe_init_sampling_caches()
+
+        if len(b) != self.N:
+            raise ValueError(f"Bit-string {b} length does not "
+                             f"match number of qubits {self.N}.")
+
+        # get the full wavefunction simplified
+        psi_b = self.get_psi_simplified(
+            seq=simplify_sequence, atol=simplify_atol)
+
+        # fix the output indices to the correct bitstring
+        for i, x in zip(range(self.N), b):
+            psi_b.isel_({psi_b.site_ind(i): int(x)})
+
+        # perform a final simplification and cast
+        psi_b.full_simplify_(seq=simplify_sequence, atol=simplify_atol)
+        psi_b.astype_(dtype)
+
+        # get the contraction path info
+        info = self._sample_norm_path_cache['amplitude'] = psi_b.contract(
+            all, output_inds=(), optimize=optimize, get='path-info'
+        )
+
+        if rehearse:
+            return {'tn': psi_b, 'info': info}
+
+        if target_size is not None:
+            # perform the 'sliced' contraction restricted to ``target_size``
+            arrays = tuple(t.data for t in psi_b)
+            sc = self._get_sliced_contractor(info, target_size, arrays)
+            c_b = sc.contract_all(backend=backend)
+        else:
+            # perform the full contraction with the path found
+            c_b = psi_b.contract(
+                all, output_inds=(), optimize=info.path, backend=backend
+            )
+
+        return c_b
+
+    def amplitude_rehearse(
+        self,
+        b='random',
+        simplify_sequence='ADCRS',
+        simplify_atol=1e-12,
+        optimize='auto-hq',
+        dtype='complex128',
+    ):
+        """Perform just the tensor network simplifications and contraction path
+        finding associated with computing a single amplitude (caching the
+        results) but don't perform the actual contraction.
+
+        Parameters
+        ----------
+        b : 'random', str or sequence of int
+            The bitstring to rehearse computing the transition amplitude for,
+            if ``'random'`` (the default) a random bitstring will be used.
+        optimize : str, optional
+            Contraction path optimizer to use for the marginal, can be
+            a reusable path optimizer as only called once (though path won't be
+            cached for later use in that case).
+        simplify_sequence : str, optional
+            Which local tensor network simplifications to perform and in which
+            order, see
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.full_simplify`.
+        simplify_atol : float, optional
+            The tolerance with which to compare to zero when applying
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.full_simplify`.
+        backend : str, optional
+            Backend to perform the marginal contraction with, e.g. ``'numpy'``,
+            ``'cupy'`` or ``'jax'``. Passed to ``opt_einsum``.
+        dtype : str, optional
+            Data type to cast the TN to before contraction.
+
+        Returns
+        -------
+        dict
+
+        """
+        if b == 'random':
+            import random
+            b = [random.choice('01') for _ in range(self.N)]
+
+        return self.amplitude(
+            b=b, optimize=optimize, dtype=dtype, rehearse=True,
+            simplify_sequence=simplify_sequence, simplify_atol=simplify_atol)
+
+    def partial_trace(
+        self,
+        keep,
+        optimize='auto-hq',
+        simplify_sequence='ADCRS',
+        simplify_atol=1e-12,
+        backend='auto',
+        dtype='complex128',
+        target_size=None,
+        rehearse=False,
+    ):
+        r"""Perform the partial trace on the circuit wavefunction, retaining
+        only qubits in ``keep``, and making use of reverse lightcone
+        cancellation:
+
+        .. math::
+
+            \rho_{\bar{q}} = Tr_{\bar{p}}
+            |\psi_{\bar{q}} \rangle \langle \psi_{\bar{q}}|
+
+        Where :math:`\bar{q}` is the set of qubits to keep,
+        :math:`\psi_{\bar{q}}` is the circuit wavefunction only with gates in
+        the causal cone of this set, and :math:`\bar{p}` is the remaining
+        qubits.
+
+        Parameters
+        ----------
+        keep : int or sequence of int
+            The qubit(s) to keep as we trace out the rest.
+        optimize : str, optional
+            Contraction path optimizer to use for the reduced density matrix,
+            can be a custom path optimizer as only called once (though path
+            won't be cached for later use in that case).
+        simplify_sequence : str, optional
+            Which local tensor network simplifications to perform and in which
+            order, see
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.full_simplify`.
+        simplify_atol : float, optional
+            The tolerance with which to compare to zero when applying
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.full_simplify`.
+        backend : str, optional
+            Backend to perform the marginal contraction with, e.g. ``'numpy'``,
+            ``'cupy'`` or ``'jax'``. Passed to ``opt_einsum``.
+        dtype : str, optional
+            Data type to cast the TN to before contraction.
+        target_size : None or int, optional
+            The largest size of tensor to allow. If specified and any
+            contraction involves tensors bigger than this, 'slice' the
+            contraction into independent parts and sum them individually.
+            Requires ``cotengra`` currently.
+        rehearse : bool, optional
+            If ``True``, generate and cache the simplified tensor network and
+            contraction path but don't actually perform the contraction.
+            Returns a dict with keys ``'tn'`` and ``'info'`` with the tensor
+            network that will be contracted and the corresponding contraction
+            path if so.
+
+        Returns
+        -------
+        array or dict
+        """
+
+        if isinstance(keep, numbers.Integral):
+            keep = (keep,)
+
+        ket = self.get_psi_reverse_lightcone(keep)
+
+        ket_inds = [ket.site_ind(i) for i in keep]
+        bra_inds = [f"_b{i}" for i in keep]
+        output_inds = ket_inds + bra_inds
+
+        bra = ket.reindex(dict(zip(ket_inds, bra_inds)))
+        rho = ket & bra.conj_()
+
+        rho.full_simplify_(
+            seq=simplify_sequence,
+            atol=simplify_atol,
+            output_inds=output_inds,
+        )
+        rho.astype_(dtype)
+
+        info = rho.contract(
+            all,
+            output_inds=output_inds,
+            optimize=optimize,
+            get='path-info'
+        )
+
+        if rehearse:
+            return {'tn': rho, 'info': info}
+
+        if target_size is not None:
+            # perform the 'sliced' contraction restricted to ``target_size``
+            arrays = tuple(t.data for t in rho)
+            sc = self._get_sliced_contractor(info, target_size, arrays)
+            rho_dense = sc.contract_all(backend=backend)
+        else:
+            # perform the full contraction with the path found
+            rho_dense = rho.contract(
+                all, output_inds=output_inds,
+                optimize=info.path, backend=backend
+            ).data
+
+        return ops.reshape(rho_dense, [2**len(keep), 2**len(keep)])
+
+    partial_trace_rehearse = functools.partialmethod(
+        partial_trace, rehearse=True)
+
+    def local_expectation(
+        self,
+        G,
+        where,
+        optimize='auto-hq',
+        simplify_sequence='ADCRS',
+        simplify_atol=1e-12,
+        backend='auto',
+        dtype='complex128',
+        target_size=None,
+        gate_opts=None,
+        rehearse=False,
+    ):
+        r"""Compute the a single expectation value of operator ``G``, acting on
+        sites ``where``, making use of reverse lightcone cancellation.
+
+        .. math::
+
+            \langle \psi_{\bar{q}} | G_{\bar{q}} | \psi_{\bar{q}} \rangle
+
+        where :math:`\bar{q}` is the set of qubits :math:`G` acts one and
+        :math:`\psi_{\bar{q}}` is the circuit wavefunction only with gates in
+        the causal cone of this set.
+
+        Parameters
+        ----------
+        G : array
+            The raw operator to find the expectation of.
+        where : int or sequence of int
+            Which qubits the operator acts on.
+        optimize : str, optional
+            Contraction path optimizer to use for the local expectation,
+            can be a custom path optimizer as only called once (though path
+            won't be cached for later use in that case).
+        simplify_sequence : str, optional
+            Which local tensor network simplifications to perform and in which
+            order, see
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.full_simplify`.
+        simplify_atol : float, optional
+            The tolerance with which to compare to zero when applying
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.full_simplify`.
+        backend : str, optional
+            Backend to perform the marginal contraction with, e.g. ``'numpy'``,
+            ``'cupy'`` or ``'jax'``. Passed to ``opt_einsum``.
+        dtype : str, optional
+            Data type to cast the TN to before contraction.
+        target_size : None or int, optional
+            The largest size of tensor to allow. If specified and any
+            contraction involves tensors bigger than this, 'slice' the
+            contraction into independent parts and sum them individually.
+            Requires ``cotengra`` currently.
+        gate_opts : None or dict_like
+            Options to use when applying ``G`` to the wavefunction.
+        rehearse : bool, optional
+            If ``True``, generate and cache the simplified tensor network and
+            contraction path but don't actually perform the contraction.
+            Returns a dict with keys ``'tn'`` and ``'info'`` with the tensor
+            network that will be contracted and the corresponding contraction
+            path if so.
+
+        Returns
+        -------
+        float or dict
+        """
+        gate_opts = ensure_dict(gate_opts)
+
+        if isinstance(where, numbers.Integral):
+            where = (where,)
+
+        ket = self.get_psi_reverse_lightcone(where)
+        bra = ket.H
+        bGk = (bra | ket.gate_(G, where, **gate_opts))
+
+        bGk.full_simplify_(
+            seq=simplify_sequence,
+            atol=simplify_atol,
+            output_inds=(),
+        )
+        bGk.astype_(dtype)
+
+        info = bGk.contract(
+            all,
+            output_inds=(),
+            optimize=optimize,
+            get='path-info'
+        )
+
+        if rehearse:
+            return {'tn': bGk, 'info': info}
+
+        if target_size is not None:
+            # perform the 'sliced' contraction restricted to ``target_size``
+            arrays = tuple(t.data for t in bGk)
+            sc = self._get_sliced_contractor(info, target_size, arrays)
+            g_ex = sc.contract_all(backend=backend)
+        else:
+            g_ex = bGk.contract(all, output_inds=(),
+                                optimize=info.path, backend=backend)
+
+        return g_ex
+
+    local_expectation_rehearse = functools.partialmethod(
+        local_expectation, rehearse=True)
+
     def compute_marginal(
         self,
         where,
@@ -864,7 +1259,7 @@ class Circuit:
         simplify_sequence='ADCRS',
         simplify_atol=1e-6,
         target_size=None,
-        get=None,
+        rehearse=False,
     ):
         """Compute the probability tensor of qubits in ``where``, given
         possibly fixed qubits in ``fix`` and tracing everything else having
@@ -892,9 +1287,9 @@ class Circuit:
         simplify_atol : float, optional
             The tolerance with which to compare to zero when applying
             :meth:`~quimb.tensor.tensor_core.TensorNetwork.full_simplify`.
-        get : None or 'path-info', optional
+        rehearse : bool, optional
             Whether to perform the marginal contraction or just return the
-            associated contraction path information.
+            associated TN and contraction path information.
         target_size : None or int, optional
             The largest size of tensor to allow. If specified and any
             contraction involves tensors bigger than this, 'slice' the
@@ -948,8 +1343,8 @@ class Circuit:
             optimize=optimize, get='path-info'
         )
 
-        if get == 'path-info':
-            return info
+        if rehearse:
+            return nm_lc, info
 
         if target_size is not None:
             # perform the 'sliced' contraction restricted to ``target_size``
@@ -1048,9 +1443,48 @@ class Circuit:
         simplify_atol=1e-6,
         target_size=None,
     ):
-        """Sample the circuit given by ``gates``, ``C`` times, using lightcone
+        r"""Sample the circuit given by ``gates``, ``C`` times, using lightcone
         cancelling and caching marginal distribution results. This is a
-        generator.
+        generator. This proceeds as a chain of marginal computations.
+
+        Assuming we have ``group_size=1``, and some ordering of the qubits,
+        :math:`\{q_0, q_1, q_2, q_3, \ldots\}` we first compute:
+
+        .. math::
+
+            p(q_0) = \mathrm{diag} \mathrm{Tr}_{1, 2, 3,\ldots}
+            | \psi_{0} \rangle \langle \psi_{0} |
+
+        I.e. simply the probability distribution on a single qubit, conditioned
+        on nothing. The subscript on :math:`\psi` refers to the fact that we
+        only need gates from the causal cone of qubit 0.
+        From this we can sample an outcome, either 0 or 1, if we
+        call this :math:`r_0` we can then move on to the next marginal:
+
+        .. math::
+
+            p(q_1 | r_0) = \mathrm{diag} \mathrm{Tr}_{2, 3,\ldots}
+            \langle r_0
+            | \psi_{0, 1} \rangle \langle \psi_{0, 1} |
+            r_0 \rangle
+
+        I.e. the probability distribution of the next qubit, given our prior
+        result. We can sample from this to get :math:`r_1`. Then we compute:
+
+        .. math::
+
+            p(q_2 | r_0 r_1) = \mathrm{diag} \mathrm{Tr}_{3,\ldots}
+            \langle r_0 r_1
+            | \psi_{0, 1, 2} \rangle \langle \psi_{0, 1, 2} |
+            r_0 r_1 \rangle
+
+        Eventually we will reach the 'final marginal', which we can compute as
+
+        .. math::
+
+            |\langle r_0 r_1 r_2 r_3 \ldots | \psi \rangle|^2
+
+        since there is nothing left to trace out.
 
         Parameters
         ----------
@@ -1166,7 +1600,10 @@ class Circuit:
         simplify_atol=1e-6,
         progbar=False,
     ):
-        """
+        """Perform the preparations and contraction path findings for
+        :meth:`~quimb.tensor.circuit.Circuit.sample`, caching various
+        intermedidate objects, but don't perform the main contractions.
+
         Parameters
         ----------
         qubits : None or sequence of int, optional
@@ -1201,8 +1638,12 @@ class Circuit:
 
         Returns
         -------
-        infos : tuple[opt_einsum.PathInfo]
+        dict[tuple[int], dict]
             One contraction path info object per grouped marginal computation.
+            The keys of the dict are the qubits the marginal is computed for,
+            the values are a dict containing a representative simplified tensor
+            network (key: 'tn') and the main contraction path info
+            (key: 'info').
         """
         # init TN norms, contraction paths, and marginals
         self._maybe_init_sampling_caches()
@@ -1212,22 +1653,25 @@ class Circuit:
         if result is None:
             result = {q: '0' for q in qubits}
 
-        infos = []
         fix = {}
+        tns_and_infos = {}
+
         for where in _progbar(groups, disable=not progbar):
-            infos.append(self.compute_marginal(
+            tn, info = self.compute_marginal(
                 where=where,
                 fix=fix,
                 optimize=optimize,
                 simplify_sequence=simplify_sequence,
-                get='path-info',
-            ))
+                rehearse=True,
+            )
+
+            tns_and_infos[where] = {'tn': tn, 'info': info}
 
             # set the result of qubit ``q`` arbitrarily
             for q in where:
                 fix[q] = result[q]
 
-        return tuple(infos)
+        return tns_and_infos
 
     def sample_chaotic(
         self,
@@ -1242,9 +1686,31 @@ class Circuit:
         simplify_atol=1e-6,
         target_size=None,
     ):
-        """Sample from this circuit, *assuming* it to be chaotic. Which is to
+        r"""Sample from this circuit, *assuming* it to be chaotic. Which is to
         say, only compute and sample correctly from the final marginal,
         assuming that the distribution on the other qubits is uniform.
+        Given ``marginal_qubits=5`` for instance, for each sample a random
+        bit-string :math:`r_0 r_1 r_2 \ldots r_{N - 6}` for the remaining
+        :math:`N - 5` qubits will be chosen, then the final marginal will be
+        computed as
+
+        .. math::
+
+            p(q_{N-5}q_{N-4}q_{N-3}q_{N-2}q_{N-1}
+            | r_0 r_1 r_2 \ldots r_{N-6})
+            =
+            |\langle r_0 r_1 r_2 \ldots r_{N - 6} | \psi \rangle|^2
+
+        and then sampled from. Note the expression on the right hand side has
+        5 open indices here and so is a tensor, however if ``marginal_qubits``
+        is not too big then the cost of contracting this is very similar to
+        a single amplitude.
+
+        .. note::
+
+            This method *assumes* the circuit is chaotic, if its not, then the
+            samples produced will not be an accurate representation of the
+            probability distribution.
 
         Parameters
         ----------
@@ -1257,12 +1723,9 @@ class Circuit:
         seed : None or int, optional
             A random seed, passed to ``numpy.random.seed`` if given.
         optimize : str, optional
-            Contraction path optimizer to use for the marginals, shouldn't be
-            a reusable path optimizer as called on many different TNs. Passed
-            to :func:`opt_einsum.contract_path`. If you want to use a custom
-            path optimizer register it with a name using
-            ``opt_einsum.paths.register_path_fn`` after which the paths will be
-            cached on name.
+            Contraction path optimizer to use for the marginal, can be
+            a reusable path optimizer as only called once (though path won't be
+            cached for later use in that case).
         backend : str, optional
             Backend to perform the marginal contraction with, e.g. ``'numpy'``,
             ``'cupy'`` or ``'jax'``. Passed to ``opt_einsum``.
@@ -1280,6 +1743,10 @@ class Circuit:
             contraction involves tensors bigger than this, 'slice' the
             contraction into independent parts and sum them individually.
             Requires ``cotengra`` currently.
+
+        Yields
+        ------
+        str
         """
         # init TN norms, contraction paths, and marginals
         self._maybe_init_sampling_caches()
@@ -1343,6 +1810,7 @@ class Circuit:
         optimize='auto-hq',
         simplify_sequence='ADCRS',
         simplify_atol=1e-6,
+        dtype='complex64',
     ):
         """Rehearse chaotic sampling (perform just the TN simplifications and
         contraction path finding).
@@ -1367,11 +1835,16 @@ class Circuit:
         simplify_atol : float, optional
             The tolerance with which to compare to zero when applying
             :meth:`~quimb.tensor.tensor_core.TensorNetwork.full_simplify`.
+        dtype : str, optional
+            Data type to cast the TN to before contraction.
 
         Returns
         -------
-        info : opt_einsum.PathInfo
-            The contraction path information for the main computation.
+        dict[tuple[int], dict]
+            The contraction path information for the main computation, the key
+            is the qubits that formed the final marginal. The value is itself a
+            dict with keys ``'tn'`` - a representative tensor network - and
+            ``'info'`` - the contraction path information.
         """
 
         # init TN norms, contraction paths, and marginals
@@ -1389,17 +1862,29 @@ class Circuit:
         else:
             fix = {q: result[q] for q in fix_qubits}
 
-        return self.compute_marginal(
+        tn, info = self.compute_marginal(
             where=where,
             fix=fix,
             optimize=optimize,
             simplify_sequence=simplify_sequence,
             simplify_atol=simplify_atol,
-            get='path-info',
+            dtype=dtype,
+            rehearse=True,
         )
 
-    def to_dense(self, reverse=False, dtype=None,
-                 simplify_sequence='R', **contract_opts):
+        return {where: {'tn': tn, 'info': info}}
+
+    def to_dense(
+        self,
+        reverse=False,
+        optimize='auto-hq',
+        simplify_sequence='R',
+        simplify_atol=1e-12,
+        backend='auto',
+        dtype=None,
+        target_size=None,
+        rehearse=False,
+    ):
         """Generate the dense representation of the final wavefunction.
 
         Parameters
@@ -1407,47 +1892,91 @@ class Circuit:
         reverse : bool, optional
             Whether to reverse the order of the subsystems, to match the
             convention of qiskit for example.
-        contract_opts
-            Suppled to :func:`~quimb.tensor.tensor_core.tensor_contract`.
+        optimize : str, optional
+            Contraction path optimizer to use for the contraction, can be
+            a single path optimizer as only called once (though path won't be
+            cached for later use in that case).
         dtype : dtype or str, optional
             If given, convert the tensors to this dtype prior to contraction.
         simplify_sequence : str, optional
             Which local tensor network simplifications to perform and in which
             order, see
             :meth:`~quimb.tensor.tensor_core.TensorNetwork.full_simplify`.
-        contract_opts
-            Supplied to
-            :meth:`~quimb.tensor.tensor_core.TensorNetwork.to_dense`.
+        simplify_atol : float, optional
+            The tolerance with which to compare to zero when applying
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.full_simplify`.
+        backend : str, optional
+            Backend to perform the contraction with, e.g. ``'numpy'``,
+            ``'cupy'`` or ``'jax'``. Passed to ``opt_einsum``.
+        dtype : str, optional
+            Data type to cast the TN to before contraction.
+        target_size : None or int, optional
+            The largest size of tensor to allow. If specified and any
+            contraction involves tensors bigger than this, 'slice' the
+            contraction into independent parts and sum them individually.
+            Requires ``cotengra`` currently.
+        rehearse : bool, optional
+            If ``True``, generate and cache the simplified tensor network and
+            contraction path but don't actually perform the contraction.
+            Returns a dict with keys ``'tn'`` and ``'info'`` with the tensor
+            network that will be contracted and the corresponding contraction
+            path if so.
 
         Returns
         -------
         psi : qarray
             The densely represented wavefunction with ``dtype`` data.
         """
-        psi = self.psi
+        psi = self.get_psi_simplified(simplify_sequence, simplify_atol)
 
         if dtype is not None:
             psi.astype_(dtype)
 
-        inds = [psi.site_ind(i) for i in range(self.N)]
-
-        if simplify_sequence:
-            psi.full_simplify_(simplify_sequence, output_inds=inds)
-
+        output_inds = tuple(map(psi.site_ind, range(self.N)))
         if reverse:
-            inds = inds[::-1]
+            output_inds = output_inds[::-1]
 
-        p_dense = psi.to_dense(inds, **contract_opts)
-        return p_dense
+        # get the contraction path info
+        info = self._sample_norm_path_cache['dense'] = psi.contract(
+            all, output_inds=output_inds, optimize=optimize, get='path-info'
+        )
 
-    def simulate_counts(self, C, seed=None, reverse=False, **contract_opts):
-        """Simulate measuring each qubit in the computational basis. See
+        if rehearse:
+            return {'tn': psi, 'info': info}
+
+        if target_size is not None:
+            # perform the 'sliced' contraction restricted to ``target_size``
+            arrays = tuple(t.data for t in psi)
+            sc = self._get_sliced_contractor(info, target_size, arrays)
+            psi_tensor = sc.contract_all(backend=backend)
+        else:
+            # perform the full contraction with the path found
+            psi_tensor = psi.contract(
+                all, output_inds=output_inds,
+                optimize=info.path, backend=backend
+            ).data
+
+        k = ops.reshape(psi_tensor, (-1, 1))
+
+        if isinstance(k, np.ndarray):
+            k = qu.qarray(k)
+
+        return k
+
+    to_dense_rehearse = functools.partialmethod(to_dense, rehearse=True)
+
+    def simulate_counts(self, C, seed=None, reverse=False, **to_dense_opts):
+        """Simulate measuring all qubits in the computational basis many times.
+        Unlike :meth:`~quimb.tensor.circuit.Circuit.sample`, this generates all
+        the samples simulteneously using the full wavefunction constructed from
+        :meth:`~quimb.tensor.circuit.Circuit.to_dense`, then calling
         :func:`~quimb.calc.simulate_counts`.
 
         .. warning::
 
-            This currently constructs the full wavefunction in order to sample
-            the probabilities accurately.
+            Because this constructs the full wavefunction it always requires
+            exponential memory in the number of qubits, regardless of circuit
+            depth and structure.
 
         Parameters
         ----------
@@ -1458,15 +1987,15 @@ class Circuit:
         reverse : bool, optional
             Whether to reverse the order of the subsystems, to match the
             convention of qiskit for example.
-        contract_opts
-            Suppled to :func:`~quimb.tensor.tensor_core.tensor_contract`.
+        to_dense_opts
+            Suppled to :meth:`~quimb.tensor.circuit.Circuit.to_dense`.
 
         Returns
         -------
         results : dict[str, int]
             The number of recorded counts for each
         """
-        p_dense = self.to_dense(reverse=reverse, **contract_opts)
+        p_dense = self.to_dense(reverse=reverse, **to_dense_opts)
         return qu.simulate_counts(p_dense, C=C, seed=seed)
 
     def schrodinger_contract(self, *args, **contract_opts):

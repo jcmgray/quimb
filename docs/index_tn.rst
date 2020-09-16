@@ -7,4 +7,5 @@ Tensor Network Guide
   :maxdepth: 2
 
   tensor-basics
-  tensor-algorithms
+  tensor-1d
+  tensor-circuit

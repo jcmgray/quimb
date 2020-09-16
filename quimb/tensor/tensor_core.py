@@ -4350,7 +4350,17 @@ class TensorNetwork(object):
         """
         tn = self if inplace else self.copy()
 
+        # we don't want to repeatedly check the split decompositions of the
+        #     same tensor as we cycle through simplification methods
+        if not hasattr(tn, '_split_simplify_cache'):
+            tn._split_simplify_cache = set()
+
         for tid, t in tuple(tn.tensor_map.items()):
+
+            # id's are reused when objects go out of scope -> use tid as well
+            cache_key = (tid, id(t.data))
+            if cache_key in self._split_simplify_cache:
+                continue
 
             found = False
             for r in range(1, t.ndim):
@@ -4367,6 +4377,8 @@ class TensorNetwork(object):
                 tn._pop_tensor(tid)
                 tn.add_tensor(tl, virtual=True)
                 tn.add_tensor(tr, virtual=True)
+            else:
+                tn._split_simplify_cache.add(cache_key)
 
         return tn
 
@@ -4385,10 +4397,11 @@ class TensorNetwork(object):
         seq : str, optional
             Which simplifications and which order to perform them in.
 
-                * ``'D'`` : stands for ``diagonal_reduce``
-                * ``'R'`` : stands for ``rank_simplify``
                 * ``'A'`` : stands for ``antidiag_gauge``
+                * ``'D'`` : stands for ``diagonal_reduce``
                 * ``'C'`` : stands for ``column_reduce``
+                * ``'R'`` : stands for ``rank_simplify``
+                * ``'S'`` : stands for ``split_simplify``
 
             If you want to keep the tensor network 'simple', i.e. with no
             hyperedges, then don't use ``'D'`` (moreover ``'A'`` is redundant).
@@ -4408,7 +4421,8 @@ class TensorNetwork(object):
 
         See Also
         --------
-        diagonal_reduce, rank_simplify, antidiag_gauge, column_reduce
+        diagonal_reduce, rank_simplify, antidiag_gauge, column_reduce,
+        split_simplify
         """
         tn = self if inplace else self.copy()
         tn.squeeze_()

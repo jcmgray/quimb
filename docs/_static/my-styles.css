@@ -39,3 +39,8 @@ h3 {
 .bd-sidebar .nav > .active:hover > a, .bd-sidebar .nav > .active > a {
     color: var(--highlightcolor) !important;
 }
+
+
+.toc-entry a {
+    padding: 0.4rem 1.0rem;
+}

@@ -314,3 +314,73 @@ def circ_ansatz_1D_rand(
     circ = gates_to_param_circuit(gates, n, **circuit_opts)
 
     return circ
+
+
+def circ_qaoa(
+    terms,
+    depth,
+    gammas,
+    betas,
+    **circuit_opts,
+):
+    r"""Generate the QAOA circuit for weighted graph described by ``terms``.
+
+    .. math::
+
+        |{\bar{\gamma}, \bar{\beta}}\rangle = U_B (\beta _p)
+        U_C (\gamma _p) \cdots U_B (\beta _1) U_C (\gamma _1) |{+}\rangle
+
+    with
+
+    .. math::
+
+        U_C (\gamma) = e^{-i \gamma \mathcal{C}} = \prod \limits_{i, j
+        \in E(G)} e^{-i \gamma w_{i j} Z_i Z_j}
+
+    and
+
+    .. math::
+
+        U_B (\beta) = \prod \limits_{i \in G} e^{-i \beta X_i}
+
+
+    Parameters
+    ----------
+    terms : dict[tuple[int], float]
+        The mapping of integer pair keys ``(i, j)`` to the edge weight values,
+        ``wij``. The integers should be a contiguous range enumerated from
+        zero, with the total number of qubits being inferred from this.
+    depth : int
+        The number of layers of gates to apply, ``p`` above.
+    gammas : iterable of float
+        The interaction angles for each layer.
+    betas : iterable of float
+        The rotation angles for each layer.
+    circuit_opts
+        Supplied to :class:`~quimb.tensor.circuit.Circuit`. Note
+        ``gate_opts={'contract': False}`` is set by default (it can be
+        overridden) since the RZZ gate, even though it has a rank-2
+        decomposition, is also diagonal.
+    """
+    circuit_opts.setdefault('gate_opts', {})
+    circuit_opts['gate_opts'].setdefault('contract', False)
+
+    n = max(itertools.chain.from_iterable(terms)) + 1
+
+    gates = []
+
+    # layer of hadamards to get into plus state
+    for i in range(n):
+        gates.append((0, 'h', i))
+
+    for d in range(depth):
+        for (i, j), wij in terms.items():
+            gates.append((d, 'rzz', wij * gammas[d], i, j))
+
+        for i in range(n):
+            gates.append((d, 'rx', -betas[d] * 2, i))
+
+    circ = Circuit(n, **circuit_opts)
+    circ.apply_gates(gates)
+
+    return circ
