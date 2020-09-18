@@ -1,6 +1,8 @@
 import pytest
 import numpy as np
 
+from numpy.testing import assert_allclose
+
 import quimb as qu
 import quimb.tensor as qtn
 
@@ -11,7 +13,7 @@ def rand_reg_graph(reg, n, seed=None):
     return G
 
 
-def graph_to_circ(G, gamma0=-0.743043, beta0=0.754082):
+def graph_to_qasm(G, gamma0=-0.743043, beta0=0.754082):
     n = G.number_of_nodes()
 
     # add all the gates
@@ -25,6 +27,31 @@ def graph_to_circ(G, gamma0=-0.743043, beta0=0.754082):
 
     return circ
 
+
+def random_a2a_circ(L, depth):
+    import random
+
+    qubits = list(range(L))
+    gates = []
+
+    for i in range(L):
+        gates.append((0, 'h', i))
+
+    for d in range(depth):
+        random.shuffle(qubits)
+
+        for i in range(0, L - 1, 2):
+            g = random.choice(['cx', 'cy', 'cz', 'iswap'])
+            gates.append((d, g, qubits[i], qubits[i + 1]))
+
+        for q in qubits:
+            g = random.choice(['rx', 'ry', 'rz'])
+            gates.append((d, g, random.gauss(1.0, 0.5), q))
+
+    circ = qtn.Circuit(L)
+    circ.apply_gates(gates)
+
+    return circ
 
 class TestCircuit:
 
@@ -49,13 +76,13 @@ class TestCircuit:
 
     def test_from_qasm(self):
         G = rand_reg_graph(reg=3, n=18, seed=42)
-        qasm = graph_to_circ(G)
+        qasm = graph_to_qasm(G)
         qc = qtn.Circuit.from_qasm(qasm)
         assert (qc.psi.H & qc.psi) ^ all == pytest.approx(1.0)
 
     def test_from_qasm_mps_swapsplit(self):
         G = rand_reg_graph(reg=3, n=18, seed=42)
-        qasm = graph_to_circ(G)
+        qasm = graph_to_qasm(G)
         qc = qtn.CircuitMPS.from_qasm(qasm)
         assert len(qc.psi.tensors) == 18
         assert (qc.psi.H & qc.psi) ^ all == pytest.approx(1.0)
@@ -84,6 +111,7 @@ class TestCircuit:
             ('rx', 1, 1),
             ('ry', 1, 1),
             ('rz', 1, 1),
+            ('u3', 1, 3),
             # two qubit
             ('cx', 2, 0),
             ('cy', 2, 0),
@@ -194,6 +222,87 @@ class TestCircuit:
         assert c_s == pytest.approx(c)
         cw_s = tn_s.contraction_width(output_inds=[])
         assert cw_s <= cw
+
+    def test_amplitude(self):
+        L = 5
+        circ = random_a2a_circ(L, 3)
+        psi = circ.to_dense()
+
+        for i in range(2**L):
+            b = f"{i:0>{L}b}"
+            c = circ.amplitude(b)
+            assert c == pytest.approx(psi[i, 0])
+
+    def test_partial_trace(self):
+        L = 5
+        circ = random_a2a_circ(L, 3)
+        psi = circ.to_dense()
+        for i in range(L - 1):
+            keep = (i, i + 1)
+            assert_allclose(qu.partial_trace(psi, [2] * 5, keep=keep),
+                            circ.partial_trace(keep),
+                            atol=1e-12)
+
+    @pytest.mark.parametrize("group_size", (1, 2, 6))
+    def test_sample(self, group_size):
+        import collections
+        from scipy.stats import power_divergence
+
+        C = 2**10
+        L = 5
+        circ = random_a2a_circ(L, 3)
+
+        psi = circ.to_dense()
+        p_exp = abs(psi.reshape(-1))**2
+        f_exp = p_exp * C
+
+        counts = collections.Counter(circ.sample(C, group_size=group_size))
+        f_obs = np.zeros(2**L)
+        for b, c in counts.items():
+            f_obs[int(b, 2)] = c
+
+        assert power_divergence(f_obs, f_exp)[0] < 100
+
+    def test_sample_chaotic(self):
+        import collections
+        from scipy.stats import power_divergence
+
+        C = 2**10
+        L = 5
+        circ = random_a2a_circ(L, 3)
+
+        psi = circ.to_dense()
+        p_exp = abs(psi.reshape(-1))**2
+        f_exp = p_exp * C
+
+        goodnesses = [0] * 5
+
+        for num_marginal in [1, 2, 3, 4, 5]:
+            counts = collections.Counter(
+                circ.sample_chaotic(C, num_marginal)
+            )
+            f_obs = np.zeros(2**L)
+            for b, c in counts.items():
+                f_obs[int(b, 2)] = c
+
+            goodnesses[num_marginal - 1] += power_divergence(f_obs, f_exp)[0]
+
+        # assert general sampling goodness gets better with larger marginal
+        assert sum(goodnesses[i] < goodnesses[i - 1] for i in range(1, L)) >= 3
+
+    def test_local_expectation(self):
+        import random
+        L = 5
+        depth = 3
+        circ = random_a2a_circ(L, depth)
+        psi = circ.to_dense()
+        for _ in range(10):
+            G = qu.rand_matrix(4)
+            i = random.randint(0, L - 2)
+            where = (i, i + 1)
+            x1 = qu.expec(qu.ikron(G, [2] * L, where), psi)
+            x2 = circ.local_expectation(G, where)
+            assert x1 == pytest.approx(x2)
 
     def test_local_expectation_multigate(self):
         circ = qtn.Circuit(2)

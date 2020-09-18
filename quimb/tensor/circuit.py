@@ -393,6 +393,13 @@ class Circuit:
         Tag(s) to add to the initial wavefunction tensors (whether these are
         propagated to the rest of the circuit's tensors depends on
         ``gate_opts``).
+    psi0_dtype : str, optional
+        Ensure the initial state has this dtype.
+    psi0_tag : str, optional
+        Ensure the initial state has this tag.
+    bra_site_ind_id : str, optional
+        Use this to label 'bra' site indices when creating certain (mostly
+        internal) intermediate tensor networks.
 
     Attributes
     ----------
@@ -450,6 +457,7 @@ class Circuit:
         tags=None,
         psi0_dtype='complex128',
         psi0_tag='PSI0',
+        bra_site_ind_id='b{}',
     ):
 
         if N is None and psi0 is None:
@@ -487,9 +495,17 @@ class Circuit:
         if self.gate_opts['contract'] != 'swap+split':
             self._psi.view_as_(TensorNetwork1DVector)
 
+        ket_site_ind_id = self._psi.site_ind_id
+        if ket_site_ind_id == bra_site_ind_id:
+            raise ValueError(
+                "The 'ket' and 'bra' site ind ids clash : "
+                "'{}' and '{}".format(self._psi.site_ind_id, bra_site_ind_id))
+        self.ket_site_ind = ket_site_ind_id.format
+        self.bra_site_ind = bra_site_ind_id.format
+
         self._sample_n_gates = -1
-        self._sample_norm_cache = None
-        self._sample_norm_path_cache = None
+        self._storage = dict()
+        self._sampled_conditionals = dict()
 
     @classmethod
     def from_qasm(cls, qasm, **quantum_circuit_opts):
@@ -589,7 +605,7 @@ class Circuit:
 
         self._psi.squeeze_()
 
-    def apply_circuit(self, gates):
+    def apply_circuit(self, gates):  # pragma: no cover
         import warnings
         msg = ("``apply_circuit`` is deprecated in favour of ``apply_gates``.")
         warnings.warn(msg, DeprecationWarning)
@@ -786,17 +802,14 @@ class Circuit:
 
         return psi_lc
 
-    def _maybe_init_sampling_caches(self):
+    def _maybe_init_storage(self):
         # clear/create the cache if circuit has changed
         if self._sample_n_gates != len(self.gates):
             self._sample_n_gates = len(self.gates)
 
             # storage
-            self._lightcone_orderings = dict()
-            self._sample_norm_cache = dict()
-            self._sample_norm_path_cache = dict()
-            self._sampling_conditionals = dict()
-            self._sampling_sliced_contractions = dict()
+            self._storage.clear()
+            self._sampled_conditionals.clear()
             self._marginal_storage_size = 0
 
     def _get_sliced_contractor(
@@ -806,9 +819,9 @@ class Circuit:
         arrays,
         overhead_warn=2.0,
     ):
-        key = (info.eq, target_size)
-        if key in self._sampling_sliced_contractions:
-            sc = self._sampling_sliced_contractions[key]
+        key = ('sliced_contractor', info.eq, target_size)
+        if key in self._storage:
+            sc = self._storage[key]
             sc.arrays = arrays
             return sc
 
@@ -824,7 +837,7 @@ class Circuit:
                 f" an FLOPs overhead of {cost_sl.overhead:.2f}x.")
 
         sc = sf.SlicedContractor(arrays)
-        self._sampling_sliced_contractions[key] = sc
+        self._storage[key] = sc
         return sc
 
     def get_psi_simplified(self, seq='ADCRS', atol=1e-12):
@@ -844,11 +857,11 @@ class Circuit:
         -------
         psi : TensorNetwork1DVector
         """
-        self._maybe_init_sampling_caches()
+        self._maybe_init_storage()
 
-        key = (tuple(range(self.N)), seq, atol)
-        if key in self._sample_norm_cache:
-            return self._sample_norm_cache[key].copy()
+        key = ('psi_simplified', seq, atol)
+        if key in self._storage:
+            return self._storage[key].copy()
 
         psi = self.psi
         # make sure to keep all outer indices
@@ -856,12 +869,12 @@ class Circuit:
 
         # simplify the state and cache it
         psi.full_simplify_(seq=seq, atol=atol, output_inds=output_inds)
-        self._sample_norm_cache[key] = psi
+        self._storage[key] = psi
 
         # return a copy so we can modify it inplace
         return psi.copy()
 
-    def get_norm_lightcone_simplified(self, where, seq='ADCRS', atol=1e-12):
+    def get_rdm_lightcone_simplified(self, where, seq='ADCRS', atol=1e-12):
         """Get a simplified TN of the norm of the wavefunction, with
         gates outside reverse lightcone of ``where`` cancelled, and physical
         indices within ``where`` preserved so that they can be fixed (sliced)
@@ -885,22 +898,27 @@ class Circuit:
         -------
         TensorNetwork
         """
-        key = (where, seq, atol)
-        if key in self._sample_norm_cache:
-            return self._sample_norm_cache[key].copy()
+        key = ('rdm_lightcone_simplified', tuple(sorted(where)), seq, atol)
+        if key in self._storage:
+            return self._storage[key].copy()
 
-        psi_lc = self.get_psi_reverse_lightcone(where)
-        norm_lc = psi_lc.H & psi_lc
+        ket_lc = self.get_psi_reverse_lightcone(where)
+
+        k_inds = tuple(map(self.ket_site_ind, where))
+        b_inds = tuple(map(self.bra_site_ind, where))
+
+        bra_lc = ket_lc.conj().reindex(dict(zip(k_inds, b_inds)))
+        rho_lc = bra_lc | ket_lc
 
         # don't want to simplify site indices in region away
-        output_inds = tuple(map(psi_lc.site_ind, where))
+        output_inds = b_inds + k_inds
 
         # # simplify the norm and cache it
-        norm_lc.full_simplify_(seq=seq, atol=atol, output_inds=output_inds)
-        self._sample_norm_cache[key] = norm_lc
+        rho_lc.full_simplify_(seq=seq, atol=atol, output_inds=output_inds)
+        self._storage[key] = rho_lc
 
         # return a copy so we can modify it inplace
-        return norm_lc.copy()
+        return rho_lc.copy()
 
     def amplitude(
         self,
@@ -951,7 +969,7 @@ class Circuit:
             network that will be contracted and the corresponding contraction
             path if so.
         """
-        self._maybe_init_sampling_caches()
+        self._maybe_init_storage()
 
         if len(b) != self.N:
             raise ValueError(f"Bit-string {b} length does not "
@@ -970,7 +988,7 @@ class Circuit:
         psi_b.astype_(dtype)
 
         # get the contraction path info
-        info = self._sample_norm_path_cache['amplitude'] = psi_b.contract(
+        info = psi_b.contract(
             all, output_inds=(), optimize=optimize, get='path-info'
         )
 
@@ -1102,21 +1120,12 @@ class Circuit:
         if isinstance(keep, numbers.Integral):
             keep = (keep,)
 
-        ket = self.get_psi_reverse_lightcone(keep)
+        output_inds = (tuple(map(self.ket_site_ind, keep)) +
+                       tuple(map(self.bra_site_ind, keep)))
 
-        ket_inds = [ket.site_ind(i) for i in keep]
-        bra_inds = [f"_b{i}" for i in keep]
-        output_inds = ket_inds + bra_inds
-
-        bra = ket.reindex(dict(zip(ket_inds, bra_inds)))
-        rho = ket & bra.conj_()
-
-        rho.full_simplify_(
-            seq=simplify_sequence,
-            atol=simplify_atol,
-            output_inds=output_inds,
-        )
-        rho.astype_(dtype)
+        rho = self.get_rdm_lightcone_simplified(
+            keep, simplify_sequence, simplify_atol
+        ).astype_(dtype)
 
         info = rho.contract(
             all,
@@ -1207,41 +1216,39 @@ class Circuit:
 
         Returns
         -------
-        float, array or dict
+        scalar, tuple[scalar] or dict
         """
         if isinstance(where, numbers.Integral):
             where = (where,)
 
-        ket = self.get_psi_reverse_lightcone(where)
-        k_inds = tuple(ket.site_ind(i) for i in where)
-
-        b_inds = tuple(rand_uuid() for i in where)
-        bra = ket.conj().reindex_(dict(zip(k_inds, b_inds)))
-
-        d = ket.ind_size(k_inds[0])
+        rho = self.get_rdm_lightcone_simplified(
+            where, simplify_sequence, simplify_atol
+        )
+        k_inds = tuple(self.ket_site_ind(i) for i in where)
+        b_inds = tuple(self.bra_site_ind(i) for i in where)
 
         if isinstance(G, (list, tuple)):
             # if we have multiple expectations create an extra indexed stack
             nG = len(G)
             G_data = do('stack', G, like=G[0])
-            G_data = reshape(G_data, (nG,) + (d,) * 2 * len(where))
+            G_data = reshape(G_data, (nG,) + (2,) * 2 * len(where))
             output_inds = (rand_uuid(),)
         else:
-            G_data = reshape(G, (d,) * 2 * len(where))
+            G_data = reshape(G, (2,) * 2 * len(where))
             output_inds = ()
 
-        TG = Tensor(data=G_data, inds=output_inds + k_inds + b_inds)
+        TG = Tensor(data=G_data, inds=output_inds + b_inds + k_inds)
 
-        bGk = (bra | TG | ket)
+        rhoG = rho | TG
 
-        bGk.full_simplify_(
+        rhoG.full_simplify_(
             seq=simplify_sequence,
             atol=simplify_atol,
             output_inds=output_inds,
         )
-        bGk.astype_(dtype)
+        rhoG.astype_(dtype)
 
-        info = bGk.contract(
+        info = rhoG.contract(
             all,
             output_inds=output_inds,
             optimize=optimize,
@@ -1249,19 +1256,19 @@ class Circuit:
         )
 
         if rehearse:
-            return {'tn': bGk, 'info': info}
+            return {'tn': rhoG, 'info': info}
 
         if target_size is not None:
             # perform the 'sliced' contraction restricted to ``target_size``
-            arrays = tuple(t.data for t in bGk)
+            arrays = tuple(t.data for t in rhoG)
             sc = self._get_sliced_contractor(info, target_size, arrays)
             g_ex = sc.contract_all(backend=backend)
         else:
-            g_ex = bGk.contract(all, output_inds=output_inds,
-                                optimize=info.path, backend=backend)
+            g_ex = rhoG.contract(all, output_inds=output_inds,
+                                 optimize=info.path, backend=backend)
 
         if isinstance(g_ex, Tensor):
-            g_ex = g_ex.data
+            g_ex = tuple(g_ex.data)
 
         return g_ex
 
@@ -1315,13 +1322,11 @@ class Circuit:
             contraction into independent parts and sum them individually.
             Requires ``cotengra`` currently.
         """
-        self._maybe_init_sampling_caches()
-
-        site_ind = self._psi.site_ind
+        self._maybe_init_storage()
 
         # index trick to contract straight to reduced density matrix diagonal
         # rho_ii -> p_i (i.e. insert a COPY tensor into the norm)
-        output_inds = [site_ind(i) for i in where]
+        output_inds = [self.ket_site_ind(i) for i in where]
 
         fs_opts = dict(seq=simplify_sequence, atol=simplify_atol)
 
@@ -1340,12 +1345,16 @@ class Circuit:
             nm_lc = self.get_psi_simplified(**fs_opts)
         else:
             # can use lightcone cancellation on partially traced qubits
-            nm_lc = self.get_norm_lightcone_simplified(region, **fs_opts)
+            nm_lc = self.get_rdm_lightcone_simplified(region, **fs_opts)
+            # re-connect the ket and bra indices as taking diagonal
+            nm_lc.reindex_({
+                self.bra_site_ind(i): self.ket_site_ind(i) for i in region
+            })
 
         if fix:
             # project (slice) fixed tensors with bitstring
             # this severs the indices connecting bra and ket on fixed sites
-            nm_lc.isel_({site_ind(i): int(b) for i, b in fix.items()})
+            nm_lc.isel_({self.ket_site_ind(i): int(b) for i, b in fix.items()})
 
         # having sliced we can do a final simplify
         nm_lc.full_simplify_(output_inds=output_inds, **fs_opts)
@@ -1357,7 +1366,7 @@ class Circuit:
         #     slicing full simplify, however there is also the lower level
         #     contraction path cache if the structure generated *is* the same
         #     so still pretty efficient to just overwrite
-        info = self._sample_norm_path_cache[region] = nm_lc.contract(
+        info = nm_lc.contract(
             all, output_inds=output_inds,
             optimize=optimize, get='path-info'
         )
@@ -1399,16 +1408,18 @@ class Circuit:
         tuple[int]
             The order to 'measure' qubits in.
         """
-        self._maybe_init_sampling_caches()
+        self._maybe_init_storage()
 
         if qubits is None:
             qubits = tuple(range(self.N))
         else:
             qubits = tuple(sorted(qubits))
 
+        key = ('lightcone_ordering', qubits)
+
         # check the cache first
-        if qubits in self._lightcone_orderings:
-            return self._lightcone_orderings[qubits]
+        if key in self._storage:
+            return self._storage[key]
 
         cone = set()
         lctgs = {i: set(self.get_reverse_lightcone_tags(i)) for i in qubits}
@@ -1420,7 +1431,7 @@ class Circuit:
             cone |= lctgs.pop(next_qubit)
             order.append(next_qubit)
 
-        order = self._lightcone_orderings[qubits] = tuple(order)
+        order = self._storage[key] = tuple(order)
 
         return order
 
@@ -1555,7 +1566,7 @@ class Circuit:
         bitstrings : sequence of str
         """
         # init TN norms, contraction paths, and marginals
-        self._maybe_init_sampling_caches()
+        self._maybe_init_storage()
 
         # which qubits and an ordering e.g. (2, 3, 4, 5), (5, 3, 4, 2)
         qubits, order = self._parse_qubits_order(qubits, order)
@@ -1577,7 +1588,7 @@ class Circuit:
                 #     prob(qubit2='0')=1 given qubit0='0' and qubit1='0'
                 #     prob(qubit2='1')=0 given qubit0='0' and qubit1='0'
                 key = (where, tuple(sorted(result.items())))
-                if key not in self._sampling_conditionals:
+                if key not in self._sampled_conditionals:
                     # compute p(qs=x | current bitstring)
                     p = self.compute_marginal(
                         where=where,
@@ -1593,10 +1604,10 @@ class Circuit:
                     p /= p.sum()
 
                     if self._marginal_storage_size <= max_marginal_storage:
-                        self._sampling_conditionals[key] = p
+                        self._sampled_conditionals[key] = p
                         self._marginal_storage_size += p.size
                 else:
-                    p = self._sampling_conditionals[key]
+                    p = self._sampled_conditionals[key]
 
                 # the sampled bitstring e.g. '1' or '001010101'
                 b_where = sample_bitstring_from_prob_ndarray(p)
@@ -1665,7 +1676,7 @@ class Circuit:
             (key: 'info').
         """
         # init TN norms, contraction paths, and marginals
-        self._maybe_init_sampling_caches()
+        self._maybe_init_storage()
         qubits, order = self._parse_qubits_order(qubits, order)
         groups = self._group_order(order, group_size)
 
@@ -1768,7 +1779,7 @@ class Circuit:
         str
         """
         # init TN norms, contraction paths, and marginals
-        self._maybe_init_sampling_caches()
+        self._maybe_init_storage()
         qubits = tuple(range(self.N))
 
         if seed is not None:
@@ -1792,7 +1803,7 @@ class Circuit:
 
             # compute the remaining marginal
             key = (where, tuple(sorted(result.items())))
-            if key not in self._sampling_conditionals:
+            if key not in self._sampled_conditionals:
                 p = self.compute_marginal(
                     where=where,
                     fix=result,
@@ -1807,10 +1818,10 @@ class Circuit:
                 p /= p.sum()
 
                 if self._marginal_storage_size <= max_marginal_storage:
-                    self._sampling_conditionals[key] = p
+                    self._sampled_conditionals[key] = p
                     self._marginal_storage_size += p.size
             else:
-                p = self._sampling_conditionals[key]
+                p = self._sampled_conditionals[key]
 
             # sample a bit-string for the marginal qubits
             b_where = sample_bitstring_from_prob_ndarray(p)
@@ -1867,7 +1878,7 @@ class Circuit:
         """
 
         # init TN norms, contraction paths, and marginals
-        self._maybe_init_sampling_caches()
+        self._maybe_init_storage()
         qubits = tuple(range(self.N))
 
         if isinstance(marginal_qubits, numbers.Integral):
@@ -1956,7 +1967,7 @@ class Circuit:
             output_inds = output_inds[::-1]
 
         # get the contraction path info
-        info = self._sample_norm_path_cache['dense'] = psi.contract(
+        info = psi.contract(
             all, output_inds=output_inds, optimize=optimize, get='path-info'
         )
 
