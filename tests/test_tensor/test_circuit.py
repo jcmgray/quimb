@@ -269,25 +269,29 @@ class TestCircuit:
 
         C = 2**10
         L = 5
-        circ = random_a2a_circ(L, 3)
-
-        psi = circ.to_dense()
-        p_exp = abs(psi.reshape(-1))**2
-        f_exp = p_exp * C
-
+        reps = 3
+        depth = 2
         goodnesses = [0] * 5
 
-        for num_marginal in [1, 2, 3, 4, 5]:
-            counts = collections.Counter(
-                circ.sample_chaotic(C, num_marginal)
-            )
-            f_obs = np.zeros(2**L)
-            for b, c in counts.items():
-                f_obs[int(b, 2)] = c
+        for _ in range(reps):
+            circ = random_a2a_circ(L, depth)
 
-            goodnesses[num_marginal - 1] += power_divergence(f_obs, f_exp)[0]
+            psi = circ.to_dense()
+            p_exp = abs(psi.reshape(-1))**2
+            f_exp = p_exp * C
 
-        # assert general sampling goodness gets better with larger marginal
+            for num_marginal in [1, 2, 3, 4, 5]:
+                counts = collections.Counter(
+                    circ.sample_chaotic(C, num_marginal)
+                )
+                f_obs = np.zeros(2**L)
+                for b, c in counts.items():
+                    f_obs[int(b, 2)] = c
+
+                goodness = power_divergence(f_obs, f_exp)[0]
+                goodnesses[num_marginal - 1] += goodness
+
+        # assert average sampling goodness gets better with larger marginal
         assert sum(goodnesses[i] < goodnesses[i - 1] for i in range(1, L)) >= 3
 
     def test_local_expectation(self):
