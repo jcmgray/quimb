@@ -3865,10 +3865,13 @@ class TensorNetwork(object):
         """
         return TensorNetwork((self, other)) ^ ...
 
-    def aslinearoperator(self, left_inds, right_inds,
-                         ldims=None, rdims=None, backend=None):
-        return TNLinearOperator(self, left_inds, right_inds,
-                                ldims, rdims, backend=backend)
+    def aslinearoperator(self, left_inds, right_inds, ldims=None, rdims=None,
+                         backend=None, optimize='auto'):
+        """View this ``TensorNetwork`` as a
+        :class:`~quimb.tensor.tensor_contract.TNLinearOperator`.
+        """
+        return TNLinearOperator(self, left_inds, right_inds, ldims, rdims,
+                                optimize=optimize, backend=backend)
 
     def trace(self, left_inds, right_inds):
         """Trace over ``left_inds`` joined with ``right_inds``
@@ -4561,6 +4564,10 @@ class TNLinearOperator(spla.LinearOperator):
         The dimensions corresponding to left_inds. Will figure out if None.
     rdims : tuple of int, or None
         The dimensions corresponding to right_inds. Will figure out if None.
+    optimize : str, optional
+        The path optimizer to use for the 'matrix-vector' contraction.
+    backend : str, optional
+        The array backend to use for the 'matrix-vector' contraction.
     is_conj : bool, optional
         Whether this object should represent the *adjoint* operator.
 
@@ -4570,8 +4577,9 @@ class TNLinearOperator(spla.LinearOperator):
     """
 
     def __init__(self, tns, left_inds, right_inds, ldims=None, rdims=None,
-                 backend=None, is_conj=False):
+                 optimize='auto', backend=None, is_conj=False):
         self.backend = _TENSOR_LINOP_BACKEND if backend is None else backend
+        self.optimize = optimize
 
         if isinstance(tns, TensorNetwork):
             self._tensors = tns.tensors
@@ -4623,7 +4631,8 @@ class TNLinearOperator(spla.LinearOperator):
             # generate a expression that acts directly on the data
             iT = Tensor(in_data, inds=self.right_inds)
             self._contractors['matvec'] = tensor_contract(
-                *self._tensors, iT, output_inds=self.left_inds, **self._kws)
+                *self._tensors, iT, output_inds=self.left_inds,
+                optimize=self.optimize, **self._kws)
 
         fn = self._contractors['matvec']
         out_data = fn(*self._ins, in_data, backend=self.backend)
@@ -4649,7 +4658,8 @@ class TNLinearOperator(spla.LinearOperator):
             iT = Tensor(in_data, inds=(*self.right_inds, '_mat_ix'))
             o_ix = (*self.left_inds, '_mat_ix')
             self._contractors[key] = tensor_contract(
-                *self._tensors, iT, output_inds=o_ix, **self._kws)
+                *self._tensors, iT, output_inds=o_ix,
+                optimize=self.optimize, **self._kws)
 
         fn = self._contractors[key]
         out_data = fn(*self._ins, in_data, backend=self.backend)
@@ -4672,8 +4682,8 @@ class TNLinearOperator(spla.LinearOperator):
         else:
             is_conj = self.is_conj
 
-        return TNLinearOperator(self._tensors, *inds, *dims,
-                                is_conj=is_conj, backend=self.backend)
+        return TNLinearOperator(self._tensors, *inds, *dims, is_conj=is_conj,
+                                optimize=self.optimize, backend=self.backend)
 
     def conj(self):
         if self._conj_linop is None:
@@ -4697,6 +4707,8 @@ class TNLinearOperator(spla.LinearOperator):
         """Convert this TNLinearOperator into a dense array, defaulting to
         grouping the left and right indices respectively.
         """
+        contract_opts.setdefault('optimize', self.optimize)
+
         if self.is_conj:
             ts = (t.conj() for t in self._tensors)
         else:
@@ -4722,7 +4734,8 @@ class TNLinearOperator(spla.LinearOperator):
         return TNLinearOperator(
             (t.astype(dtype) for t in self._tensors),
             left_inds=self.left_inds, right_inds=self.right_inds,
-            ldims=self.ldims, rdims=self.rdims, backend=self.backend,
+            ldims=self.ldims, rdims=self.rdims,
+            optimize=self.optimize, backend=self.backend,
         )
 
 

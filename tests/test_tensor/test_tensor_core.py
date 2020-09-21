@@ -1348,7 +1348,8 @@ class TestTensorNetworkSimplifications:
 
 class TestTensorNetworkAsLinearOperator:
 
-    def test_against_dense(self):
+    @pytest.mark.parametrize('optimize', ['auto', 'auto-hq'])
+    def test_against_dense(self, optimize):
         A, B, C, D = (
             rand_tensor([3, 5, 5], 'aef'),
             rand_tensor([3, 5, 5], 'beg'),
@@ -1357,7 +1358,7 @@ class TestTensorNetworkAsLinearOperator:
         )
 
         tn = A & B & C & D
-        tn_lo = tn.aslinearoperator(('a', 'b'), ('c', 'd'))
+        tn_lo = tn.aslinearoperator(('a', 'b'), ('c', 'd'), optimize=optimize)
         tn_d = tn.to_dense(['a', 'b'], ['c', 'd'])
 
         u, s, v = qu.svds(tn_lo, k=5, backend='scipy')
