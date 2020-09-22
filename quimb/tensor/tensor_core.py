@@ -22,7 +22,7 @@ from autoray import (do, conj, reshape, transpose, astype,
 
 from ..core import qarray, prod, realify_scalar, vdot, common_type
 from ..utils import (check_opt, functions_equal, oset, concat, frequencies,
-                     partition_all, merge_with, valmap)
+                     partition_all, merge_with, valmap, ensure_dict)
 from ..gen.rand import randn, seed_rand
 from . import decomp
 from .array_ops import (iscomplex, norm_fro, unitize, ndim, asarray, PArray,
@@ -3273,22 +3273,50 @@ class TensorNetwork(object):
 
         T1 = self._pop_tensor(tid1)
         T2 = self._pop_tensor(tid2)
+        T12 = tensor_contract(T1, T2, **contract_opts)
+        self.add_tensor(T12, tid=tid2, virtual=True)
 
-        self |= tensor_contract(T1, T2, **contract_opts)
+    def contract_ind(self, ind, **contract_opts):
+        """Contract tensors connected by ``ind``.
+        """
+        tids = self._get_tids_from_inds(ind)
+        ts = [self._pop_tensor(tid) for tid in tids]
+        self |= tensor_contract(*ts, **contract_opts)
 
-    def _compress_between_tids(self, tid1, tid2, canonize_distance=None,
-                               **compress_opts):
+    def _compress_between_tids(
+        self,
+        tid1,
+        tid2,
+        canonize_distance=None,
+        canonize_opts=None,
+        equalize_norms=False,
+        **compress_opts
+    ):
         Tl = self.tensor_map[tid1]
         Tr = self.tensor_map[tid2]
 
         if canonize_distance:
+            canonize_opts = ensure_dict(canonize_opts)
+            canonize_opts.setdefault('equalize_norms', equalize_norms)
+
             self._canonize_around_tids(
-                (tid1, tid2), max_distance=canonize_distance)
+                (tid1, tid2), max_distance=canonize_distance, **canonize_opts)
 
         tensor_compress_bond(Tl, Tr, **compress_opts)
 
-    def compress_between(self, tags1, tags2, canonize_distance=None,
-                         **compress_opts):
+        if equalize_norms:
+            self.strip_exponent(tid1, equalize_norms)
+            self.strip_exponent(tid2, equalize_norms)
+
+    def compress_between(
+        self,
+        tags1,
+        tags2,
+        canonize_distance=0,
+        canonize_opts=None,
+        equalize_norms=False,
+        **compress_opts,
+    ):
         r"""Compress the bond between the two single tensors in this network
         specified by ``tags1`` and ``tags2`` using
         :func:`~quimb.tensor.tensor_core.tensor_compress_bond`::
@@ -3315,6 +3343,13 @@ class TensorNetwork(object):
             Tags uniquely identifying the first ('left') tensor.
         tags2 : str or sequence of str
             Tags uniquely identifying the second ('right') tensor.
+        canonize_distance : int, optional
+            How far to locally canonize around the target tensors first.
+        canonize_opts : None or dict, optional
+            Other options for the local canonization.
+        equalize_norms : bool or float, optional
+            If set, rescale the norms of all tensors modified to this value,
+            stripping the rescaling factor into the ``exponent`` attribute.
         compress_opts
             Supplied to :func:`~quimb.tensor.tensor_core.tensor_compress_bond`.
 
@@ -3324,8 +3359,13 @@ class TensorNetwork(object):
         """
         tid1, = self._get_tids_from_tags(tags1, which='all')
         tid2, = self._get_tids_from_tags(tags2, which='all')
+
         self._compress_between_tids(
-            tid1, tid2, canonize_distance=canonize_distance, **compress_opts)
+            tid1, tid2,
+            canonize_distance=canonize_distance,
+            canonize_opts=canonize_opts,
+            equalize_norms=equalize_norms,
+            **compress_opts)
 
     def compress_all(self, inplace=False, **compress_opts):
         """Inplace compress all bonds in this network.
@@ -3337,11 +3377,8 @@ class TensorNetwork(object):
             if len(tids) != 2:
                 continue
 
-            T1, T2 = (tn.tensor_map[tid] for tid in tids)
             try:
-                tensor_compress_bond(T1, T2, **compress_opts)
-            except ValueError:
-                continue
+                tn._compress_between_tids(*tids, **compress_opts)
             except ZeroDivisionError:
                 tn.convert_to_zero()
                 break
@@ -3350,10 +3387,20 @@ class TensorNetwork(object):
 
     compress_all_ = functools.partialmethod(compress_all, inplace=True)
 
-    def _canonize_between_tids(self, tid1, tid2, **canonize_opts):
+    def _canonize_between_tids(
+        self,
+        tid1,
+        tid2,
+        equalize_norms=False,
+        **canonize_opts,
+    ):
         Tl = self.tensor_map[tid1]
         Tr = self.tensor_map[tid2]
         tensor_canonize_bond(Tl, Tr, **canonize_opts)
+
+        if equalize_norms:
+            self.strip_exponent(tid1, equalize_norms)
+            self.strip_exponent(tid2, equalize_norms)
 
     def canonize_between(self, tags1, tags2, **canonize_opts):
         r"""'Canonize' the bond between the two single tensors in this network
@@ -3391,56 +3438,326 @@ class TensorNetwork(object):
         tid2, = self._get_tids_from_tags(tags2, which='all')
         self._canonize_between_tids(tid1, tid2, **canonize_opts)
 
-    def _greedy_tree_span(self, tids, max_distance=None):
+    def _get_neighbor_tids(self, tids):
+        """Get the tids of tensors connected to the tensor at ``tid``.
+        """
+        tids = tags_to_oset(tids)
+
+        neighbors = oset_union(
+            self.ind_map[ind]
+            for tid in tids
+            for ind in self.tensor_map[tid].inds
+        )
+
+        # discard rather than remove to account for scalar ``tid`` tensor
+        neighbors -= tids
+
+        return neighbors
+
+    def get_tree_span(
+        self,
+        tids,
+        min_distance=0,
+        max_distance=None,
+        include=None,
+        exclude=None,
+        distance_sort='min',
+    ):
         """Generate a tree on the tensor network graph, fanning out from the
         tensors identified by ``tids``, up to a maximum of ``max_distance``
-        away.
+        away. The tree can be visualized with
+        :meth:`~quimb.tensor.tensor_core.TensorNetwork.graph_tree_span`.
+
+        Parameters
+        ----------
+        tids : sequence of str
+            The nodes that define the region to span out of.
+        min_distance : int, optional
+            Don't add edges to the tree until this far from the region. For
+            example, ``1`` will not include the last merges from neighboring
+            tensors in the region defined by ``tids``.
+        max_distance : None or int, optional
+            Terminate branches once they reach this far away. If ``None`` there
+            is no limit,
+        include : sequence of str, optional
+            If specified, only ``tids`` specified here can be part of the tree.
+        exclude : sequence of str, optional
+            If specified, ``tids`` specified here cannot be part of the tree.
+        distance_sort : {'min', 'max'}, optional
+            When expanding the tree, how to choose what nodes to expand to
+            next, once connectivity to the current surface has been taken into
+            account.
+
+        Returns
+        -------
+        list[(str, str, int)]
+            The ordered list of merges, each given as tuple ``(tid1, tid2, d)``
+            indicating merge ``tid1 -> tid2`` at distance ``d``.
+
+        See Also
+        --------
+        graph_tree_span
         """
-        border = oset(tids)
-        all_tids = oset(self.tensor_map)
-        remaining = all_tids - border
-        border_d = [(x, 0) for x in border]
+        region = oset(tids)
 
-        # the sequence of tensors pairs to canonize
+        # check if we should only allow a certain set of nodes
+        if include is None:
+            include = oset(self.tensor_map)
+        elif not isinstance(include, oset):
+            include = oset(include)
+
+        allowed = include - region
+
+        # check if we should explicitly ignore some nodes
+        if exclude is not None:
+            if not isinstance(exclude, oset):
+                exclude = oset(exclude)
+            allowed -= exclude
+
+        candidates = []
+        merges = {}
+        distances = {tid: 0 for tid in region}
+        connectivity = collections.Counter()
+
+        distance_coeff = {'min': -1, 'max': 1}[distance_sort]
+
+        def _sorter(t):
+            # how to pick which tensor to absorb into the expanding surface
+            # here, choose the candidate that is most connected to current
+            # surface, breaking ties with how close it is to the region
+            return connectivity[t], distance_coeff * distances[t]
+
+        def _check_candidate(tid_surface, tid_neighb):
+            """Check the expansion of ``tid_surface`` to ``tid_neighb``.
+            """
+            if (tid_neighb in region) or (tid_neighb not in allowed):
+                # we've already absorbed it, or we're not allowed to
+                return
+
+            new_d = distances[tid_surface] + 1
+            if tid_neighb in distances:
+                # we've already assessed it, check for shorter path
+                if new_d < distances[tid_neighb]:
+                    merges[tid_neighb] = tid_surface
+                    distances[tid_neighb] = new_d
+            else:
+                # defines a new spanning tree edge
+                merges[tid_neighb] = tid_surface
+                distances[tid_neighb] = new_d
+                if (max_distance is None) or (new_d <= max_distance):
+                    candidates.append(tid_neighb)
+
+            # keep track of how connected to the current surface potential new
+            # nodes are
+            connectivity[tid_neighb] += 1
+
+        # setup the initial region and candidate nodes to expand to
+        for tid_surface in region:
+            for tid_next in self._get_neighbor_tids(tid_surface):
+                _check_candidate(tid_surface, tid_next)
+
+        # the sequence of tensors merges to canonize
         seq = []
+        while candidates:
+            candidates.sort(key=_sorter)
+            tid_surface = candidates.pop()
+            region.add(tid_surface)
 
-        while border_d:
+            if distances[tid_surface] > min_distance:
+                # checking distance allows the innermost merges to be ignored,
+                # for example, to contract an environment around a region
+                seq.append((tid_surface, merges[tid_surface],
+                            distances[tid_surface]))
 
-            tid, d = border_d.pop(0)
-            if (max_distance is not None) and d >= max_distance:
-                continue
+            # check all the neighbors of the tensor we've just expanded to
+            for tid_next in self._get_neighbor_tids(tid_surface):
+                _check_candidate(tid_surface, tid_next)
 
-            ix = self.tensor_map[tid].inds
-
-            # get un-canonized neighbors
-            neighbor_tids = oset_union(self.ind_map[i] for i in ix)
-            neighbor_tids &= remaining
-
-            for n_tid in neighbor_tids:
-                remaining.discard(n_tid)
-                border_d.append((n_tid, d + 1))
-                seq.append((n_tid, tid, d))
-
-        # want to start furthest away
+        # make the sequence of merges flow inwards
         seq.reverse()
-
         return seq
 
-    def _canonize_around_tids(self, tids, max_distance=None,
-                              inplace=True, **canonize_opts):
-        tn = self if inplace else self.copy()
+    def _graph_tree_span_tids(
+        self,
+        tids,
+        span=None,
+        min_distance=0,
+        max_distance=None,
+        include=None,
+        exclude=None,
+        distance_sort='min',
+        color='order',
+        colormap='Spectral',
+        **graph_opts,
+    ):
+        tn = self.copy()
 
-        seq = self._greedy_tree_span(tids, max_distance=max_distance)
+        tix = oset()
+        ds = oset()
 
+        if span is None:
+            span = tn.get_tree_span(
+                tids,
+                min_distance=min_distance,
+                max_distance=max_distance,
+                include=include,
+                exclude=exclude,
+                distance_sort=distance_sort)
+
+        for i, (tid1, tid2, d) in enumerate(span):
+            # get the tensors on either side of this tree edge
+            t1, t2 = tn.tensor_map[tid1], tn.tensor_map[tid2]
+
+            # get the ind(s) connecting them
+            tix |= oset(bonds(t1, t2))
+
+            if color == 'distance':
+                # tag the outer tensor with distance ``d``
+                t1.add_tag(f'D{d}')
+                ds.add(d)
+            elif color == 'order':
+                d = len(span) - i
+                t1.add_tag(f'D{d}')
+                ds.add(d)
+
+        if colormap is not None:
+            import matplotlib.cm as cm
+            cmap = getattr(cm, colormap)
+            custom_colors = cmap(np.linspace(0, 1, len(ds)))
+        else:
+            custom_colors = None
+
+        graph_opts.setdefault('legend', False)
+        graph_opts.setdefault('custom_colors', custom_colors)
+        graph_opts.setdefault('highlight_inds', tix)
+
+        return tn.graph(color=[f'D{d}' for d in sorted(ds)], **graph_opts)
+
+    def graph_tree_span(
+        self,
+        tags,
+        which='all',
+        min_distance=0,
+        max_distance=None,
+        include=None,
+        exclude=None,
+        distance_sort='min',
+        color='order',
+        colormap='Spectral',
+        **graph_opts,
+    ):
+        """Visualize a generated tree span out of the tensors tagged by
+        ``tags``.
+
+        Parameters
+        ----------
+        tags : str or sequence of str
+            Tags specifiying a region of tensors to span out of.
+        which : {'all', 'any': '!all', '!any'}, optional
+            How to select tensors based on the tags.
+        min_distance : int, optional
+            See :meth:`~quimb.tensor.tensor_core.TensorNetwork.get_tree_span`.
+        max_distance : None or int, optional
+            See :meth:`~quimb.tensor.tensor_core.TensorNetwork.get_tree_span`.
+        include : sequence of str, optional
+            See :meth:`~quimb.tensor.tensor_core.TensorNetwork.get_tree_span`.
+        exclude : sequence of str, optional
+            See :meth:`~quimb.tensor.tensor_core.TensorNetwork.get_tree_span`.
+        distance_sort : {'min', 'max'}, optional
+            See :meth:`~quimb.tensor.tensor_core.TensorNetwork.get_tree_span`.
+        color : {'order', 'distance'}, optional
+            Whether to color nodes based on the order of the contraction or the
+            graph distance from the specified region.
+        colormap : str
+            The name of a ``matplotlib`` colormap to use.
+
+        See Also
+        --------
+        get_tree_span
+        """
+        return self._graph_tree_span_tids(
+            self._get_tids_from_tags(tags, which=which),
+            min_distance=min_distance,
+            max_distance=max_distance,
+            include=include,
+            exclude=exclude,
+            distance_sort=distance_sort,
+            color=color,
+            colormap=colormap,
+            **graph_opts)
+
+    def _canonize_around_tids(
+        self,
+        tids,
+        min_distance=0,
+        max_distance=None,
+        include=None,
+        exclude=None,
+        distance_sort='min',
+        absorb='right',
+        gauge_links=False,
+        link_absorb='both',
+        **canonize_opts
+    ):
+        seq = self.get_tree_span(
+            tids,
+            min_distance=min_distance,
+            max_distance=max_distance,
+            include=include,
+            exclude=exclude,
+            distance_sort=distance_sort)
+
+        if gauge_links:
+            # if specified we first gauge *between* the branches
+            branches = oset()
+            merges = oset()
+            links = oset()
+
+            # work out which bonds are branch-to-branch
+            for tid1, tid2, d in seq:
+                branches.add(tid1)
+                merges.add(frozenset((tid1, tid2)))
+
+            for tid1 in branches:
+                for tid1_neighb in self._get_neighbor_tids(tid1):
+                    if tid1_neighb not in branches:
+                        # connects to out of tree -> ignore
+                        continue
+                    link = frozenset((tid1, tid1_neighb))
+                    if link in merges:
+                        # connects along tree not between branches -> ignore
+                        continue
+                    links.add(link)
+
+            # do a simple update style gauging of each link
+            for _ in range(int(gauge_links)):
+                for tid1, tid2 in links:
+                    self._canonize_between_tids(
+                        tid1, tid2, absorb=link_absorb, **canonize_opts)
+
+        # gauge inwards *along* the branches
         for tid1, tid2, _ in seq:
-            T1 = tn.tensor_map[tid1]
-            T2 = tn.tensor_map[tid2]
-            tensor_canonize_bond(T1, T2, **canonize_opts)
+            self._canonize_between_tids(
+                tid1, tid2, absorb=absorb, **canonize_opts)
 
-        return tn
+        return self
 
-    def canonize_around(self, tags, which='all', max_distance=None,
-                        inplace=False, **canonize_opts):
+    def canonize_around(
+        self,
+        tags,
+        which='all',
+        min_distance=0,
+        max_distance=None,
+        include=None,
+        exclude=None,
+        distance_sort='min',
+        absorb='right',
+        gauge_links=False,
+        link_absorb='both',
+        equalize_norms=False,
+        inplace=False,
+        **canonize_opts
+    ):
         r"""Expand a locally canonical region around ``tags``::
 
                       --●---●--
@@ -3474,18 +3791,287 @@ class TensorNetwork(object):
             Tags defining which set of tensors to locally canonize around.
         which : {'all', 'any', '!all', '!any'}, optional
             How select the tensors based on tags.
+        min_distance : int, optional
+            How close, in terms of graph distance, to canonize tensors away.
+            See :meth:`~quimb.tensor.tensor_core.TensorNetwork.get_tree_span`.
         max_distance : None or int, optional
-            How far, in terms of graph distance, to canonize tensors.
+            How far, in terms of graph distance, to canonize tensors away.
+            See :meth:`~quimb.tensor.tensor_core.TensorNetwork.get_tree_span`.
+        include : sequence of str, optional
+            How to build the spanning tree to canonize along.
+            See :meth:`~quimb.tensor.tensor_core.TensorNetwork.get_tree_span`.
+        exclude : sequence of str, optional
+            How to build the spanning tree to canonize along.
+            See :meth:`~quimb.tensor.tensor_core.TensorNetwork.get_tree_span`.
+        distance_sort  {'min', 'max'}, optional
+            How to build the spanning tree to canonize along.
+            See :meth:`~quimb.tensor.tensor_core.TensorNetwork.get_tree_span`.
+        absorb : {'right', 'left', 'both'}, optional
+            As we canonize inwards from tensor A to tensor B which to absorb
+            the singular values into.
+        gauge_links : bool, optional
+            Whether to gauge the links *between* branches of the spanning tree
+            generated (in a Simple Update like fashion).
+        link_absorb : {'both', 'right', 'left'}, optional
+            If performing the link gauging, how to absorb the singular values.
+        equalize_norms : bool or float, optional
+            Scale the norms of tensors acted on to this value, accumulating the
+            log10 scaled factors in ``self.exponent``.
         inplace : bool, optional
-            Whether to perform
+            Whether to perform the canonization inplace.
 
+        Returns
+        -------
+        TensorNetwork
+
+        See Also
+        --------
+        get_tree_span
         """
+        tn = self if inplace else self.copy()
+
         # the set of tensor tids that are in the 'bulk'
-        border = self._get_tids_from_tags(tags, which=which)
-        return self._canonize_around_tids(border, max_distance=max_distance,
-                                          inplace=inplace, **canonize_opts)
+        border = tn._get_tids_from_tags(tags, which=which)
+
+        return tn._canonize_around_tids(
+            border,
+            min_distance=min_distance,
+            max_distance=max_distance,
+            include=include,
+            exclude=exclude,
+            distance_sort=distance_sort,
+            absorb=absorb,
+            gauge_links=gauge_links,
+            link_absorb=link_absorb,
+            equalize_norms=equalize_norms,
+            **canonize_opts)
 
     canonize_around_ = functools.partialmethod(canonize_around, inplace=True)
+
+    def _contract_compressed_tid_sequence(
+        self,
+        seq,
+        max_bond=None,
+        canonize_distance=0,
+        canonize_opts=None,
+        canonize_boundary_only=False,
+        compress_opts=None,
+        compress_exclude=None,
+        equalize_norms=False,
+        info=None,
+    ):
+
+        # keep track of pairs along the tree - no point compressing these
+        dont_compress_pairs = {frozenset(s[:2]) for s in seq}
+
+        # keep track of the largest tensor encountered
+        largest_intermediate = 0
+
+        # the boundary - the set of intermediate tensors
+        boundary = oset()
+
+        # options relating to locally canonizing around each compression
+        if canonize_distance:
+            canonize_opts = ensure_dict(canonize_opts)
+            canonize_opts.setdefault('equalize_norms', equalize_norms)
+            if canonize_boundary_only:
+                canonize_opts['include'] = boundary
+            else:
+                canonize_opts['include'] = None
+        # options relating to the compression itself
+        compress_opts = ensure_dict(compress_opts)
+        compress_opts.setdefault('absorb', 'right')
+        compress_opts.setdefault('equalize_norms', equalize_norms)
+
+        for tid1, tid2, d in seq:
+            # tid1 -> tid2 is inwards on the contraction tree, ``d`` is the
+            # graph distance from the original region
+
+            # pop out the pair of tensors
+            t1, t2 = self._pop_tensor(tid1), self._pop_tensor(tid2)
+
+            # contract them
+            t_new = t1 @ t2
+
+            if not isinstance(t_new, Tensor):
+                t_new = Tensor(t_new, tags=t1.tags | t2.tags)
+
+            if info is not None:
+                largest_intermediate = max(largest_intermediate, t_new.size)
+
+            # re-add the product, using the same identifier as the (inner) t2
+            tid_new = tid2
+            self.add_tensor(t_new, tid=tid_new, virtual=True)
+
+            # maybe control norm blow-up by stripping the new tensor exponent
+            if equalize_norms:
+                self.strip_exponent(tid_new, equalize_norms)
+
+            # update the boundary
+            boundary.add(tid_new)
+
+            if callable(max_bond):
+                # allow a dynamic bond dimension based on distance to region
+                chi = max_bond(d)
+            else:
+                chi = max_bond
+
+            neighbors = self._get_neighbor_tids(tid_new)
+
+            for tid_neighb in neighbors:
+                if (
+                    # not allowed to compress
+                    ((compress_exclude is not None) and
+                     (tid_neighb in compress_exclude)) or
+                    # pointless as bond will be contracted anyway
+                    frozenset((tid_neighb, tid_new)) in dont_compress_pairs
+                ):
+                    continue
+
+                t_neighb = self.tensor_map[tid_neighb]
+
+                # check for compressing large shared (multi) bonds
+                if chi is None or bonds_size(t_new, t_neighb) > chi:
+
+                    # possibly gauge around the tensors before we compress
+                    if canonize_distance:
+                        self._canonize_around_tids(
+                            (tid_neighb, tid_new),
+                            max_distance=canonize_distance, **canonize_opts)
+
+                    # actually compress
+                    self._compress_between_tids(
+                        tid_neighb, tid_new, max_bond=chi, **compress_opts)
+
+                else:
+                    # also just check for accumulation of small multi-bonds
+                    tensor_fuse_squeeze(t_new, t_neighb)
+
+        if info is not None:
+            info['largest_intermediate'] = largest_intermediate
+
+        return self
+
+    def _contract_around_tids(
+        self,
+        tids,
+        seq=None,
+        min_distance=0,
+        max_distance=None,
+        span_opts=None,
+        max_bond=None,
+        canonize_distance=0,
+        canonize_opts=None,
+        canonize_boundary_only=False,
+        compress_opts=None,
+        equalize_norms=False,
+        info=None,
+        inplace=True,
+    ):
+        """Contract around ``tids``, by following a greedily generated
+        spanning tree, and compressing whenever two tensors in the outer
+        'boundary' share more than one index.
+        """
+        tn = self if inplace else self.copy()
+
+        if seq is None:
+            span_opts = ensure_dict(span_opts)
+            seq = tn.get_tree_span(
+                tids,
+                min_distance=min_distance,
+                max_distance=max_distance,
+                **span_opts)
+
+        canonize_opts = ensure_dict(canonize_opts)
+        canonize_opts['exclude'] = oset(itertools.chain(
+            canonize_opts.get('exclude', ()), tids
+        ))
+
+        return tn._contract_compressed_tid_sequence(
+            seq,
+            max_bond=max_bond,
+            canonize_distance=canonize_distance,
+            canonize_opts=canonize_opts,
+            canonize_boundary_only=canonize_boundary_only,
+            compress_opts=compress_opts,
+            compress_exclude=tids,
+            equalize_norms=equalize_norms,
+            info=info)
+
+    def contract_around(
+        self,
+        tags,
+        which='all',
+        min_distance=0,
+        max_distance=None,
+        span_opts=None,
+        max_bond=None,
+        canonize_distance=0,
+        canonize_opts=None,
+        canonize_boundary_only=False,
+        compress_opts=None,
+        equalize_norms=False,
+        info=None,
+        inplace=False,
+    ):
+        """Perform a compressed contraction inwards towards the tensors
+        identified by ``tags``.
+        """
+        tids = self._get_tids_from_tags(tags, which=which)
+
+        return self._contract_around_tids(
+            tids,
+            min_distance=min_distance,
+            max_distance=max_distance,
+            span_opts=span_opts,
+            max_bond=max_bond,
+            canonize_distance=canonize_distance,
+            canonize_opts=canonize_opts,
+            canonize_boundary_only=canonize_boundary_only,
+            compress_opts=compress_opts,
+            inplace=inplace,
+            info=info)
+
+    contract_around_ = functools.partialmethod(contract_around, inplace=True)
+
+    def contract_compressed(
+        self,
+        optimize,
+        max_bond=None,
+        canonize_distance=0,
+        canonize_opts=None,
+        canonize_boundary_only=False,
+        compress_opts=None,
+        equalize_norms=False,
+        info=None,
+        inplace=False,
+    ):
+        tn = self if inplace else self.copy()
+
+        pinfo = tn.contract(all, optimize=optimize, get='path-info')
+
+        # generate the list of merges (tid1 -> tid2)
+        tids = list(tn.tensor_map)
+        seq = []
+        for i, j in pinfo.path:
+            if i > j:
+                i, j = j, i
+
+            tid2 = tids.pop(j)
+            tid1 = tids.pop(i)
+            tids.append(tid2)
+
+            seq.append((tid1, tid2, float('inf')))
+
+        return tn._contract_compressed_tid_sequence(
+            seq=seq,
+            max_bond=max_bond,
+            canonize_distance=canonize_distance,
+            canonize_opts=canonize_opts,
+            canonize_boundary_only=canonize_boundary_only,
+            compress_opts=compress_opts,
+            equalize_norms=equalize_norms,
+            info=info)
 
     def new_bond(self, tags1, tags2, **opts):
         """Inplace addition of a dummmy (size 1) bond between the single
@@ -3990,32 +4576,86 @@ class TensorNetwork(object):
 
     randomize_ = functools.partialmethod(randomize, inplace=True)
 
+    def strip_exponent(self, tid, value=None):
+        """Scale the elements of tensor corresponding to ``tid`` so that the
+        norm of the array is some value, which defaults to ``1``. The log of
+        the scaling factor, base 10, is then accumulated in the ``exponent``
+        attribute.
+
+        Parameters
+        ----------
+        tid : str
+            The tensor identifier.
+        value : None or float, optional
+            The value to scale the norm of the tensor to.
+        """
+        if (value is None) or (value is True):
+            value = 1.0
+
+        t = self.tensor_map[tid]
+        stripped_factor = t.norm() / value
+        t.modify(apply=lambda data: data / stripped_factor)
+        try:
+            self.exponent = self.exponent + do('log10', stripped_factor)
+        except AttributeError:
+            self.exponent = do('log10', stripped_factor)
+
+    def distribute_exponent(self):
+        """Distribute the exponent ``p`` of this tensor network (i.e.
+        corresponding to ``tn * 10**p``) equally among all tensors.
+        """
+        if not hasattr(self, 'exponent'):
+            return
+
+        # multiply each tensor by the nth root of 10**exponent
+        x = 10**(self.exponent / self.num_tensors)
+        self.multiply_each_(x)
+
+        # reset the exponent to zero
+        self.exponent = 0.0
+
     def equalize_norms(self, value=None, inplace=False):
         """Make the Frobenius norm of every tensor in this TN equal without
         changing the overall value if ``value=None``, or set the norm of every
         tensor to ``value`` by scalar multiplication only.
+
+        Parameters
+        ----------
+        value : None or float, optional
+            Set the norm of each tensor to this value specifically. If supplied
+            the change in overall scaling will be accumulated in
+            ``tn.exponent`` in the form of a base 10 power.
+        inplace : bool, optional
+            Whether to perform the norm equalization inplace or not.
+
+        Returns
+        -------
+        TensorNetwork
         """
         tn = self if inplace else self.copy()
 
-        norms = [t.norm() for t in tn]
+        for tid in tn.tensor_map:
+            tn.strip_exponent(tid, value=value)
 
         if value is None:
-            backend = infer_backend(norms[0])
-            value = do('power',
-                       math.e,
-                       do('mean',
-                          do('log',
-                             do('array', norms, like=backend))), like=backend)
-
-        for t, xi in zip(tn, norms):
-            t.modify(data=(value / xi) * t.data)
+            tn.distribute_exponent()
 
         return tn
 
     equalize_norms_ = functools.partialmethod(equalize_norms, inplace=True)
 
     def balance_bonds(self, inplace=False):
-        """
+        """Apply :func:`~quimb.tensor.tensor_contract.tensor_balance_bond` to
+        all bonds in this tensor network.
+
+        Parameters
+        ----------
+        inplace : bool, optional
+            Whether to perform the bond balancing inplace or not.
+
+        Returns
+        -------
+        TensorNetwork
         """
         tn = self if inplace else self.copy()
 
