@@ -4029,6 +4029,7 @@ class TensorNetwork(object):
             canonize_opts=canonize_opts,
             canonize_boundary_only=canonize_boundary_only,
             compress_opts=compress_opts,
+            equalize_norms=equalize_norms,
             inplace=inplace,
             info=info)
 
