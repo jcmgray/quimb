@@ -244,6 +244,137 @@ def apply_U3(psi, theta, phi, lamda, i, parametrize=False, **gate_opts):
     psi.gate_(G, int(i), tags=mtags, **gate_opts)
 
 
+def u2_gate_param_gen(params):
+    phi, lamda = params[0], params[1]
+
+    c00 = 1
+
+    c01_im = lamda
+    c01_re = do('imag', c01_im)
+    c01 = - do('exp', do('complex', c01_re, c01_im))
+
+    c10_im = phi
+    c10_re = do('imag', c10_im)
+    c10 = do('exp', do('complex', c10_re, c10_im))
+
+    c11_im = phi + lamda
+    c11_re = do('imag', c11_im)
+    c11 = do('exp', do('complex', c11_re, c11_im))
+
+    data = [[c00, c01],
+            [c10, c11]]
+    return do('array', data, like=params) / 2**0.5
+
+
+def apply_U2(psi, phi, lamda, i, parametrize=False, **gate_opts):
+    mtags = _merge_tags('U2', gate_opts)
+    if parametrize:
+        G = ops.PArray(u2_gate_param_gen, (phi, lamda))
+    else:
+        G = qu.U_gate(np.pi / 2, phi, lamda)
+    psi.gate_(G, int(i), tags=mtags, **gate_opts)
+
+
+def u1_gate_param_gen(params):
+    lamda = params[0]
+
+    c11_im = lamda
+    c11_re = do('imag', c11_im)
+    c11 = do('exp', do('complex', c11_re, c11_im))
+
+    data = [[1, 0],
+            [0, c11]]
+    return do('array', data, like=params)
+
+
+def apply_U1(psi, lamda, i, parametrize=False, **gate_opts):
+    mtags = _merge_tags('U1', gate_opts)
+    if parametrize:
+        G = ops.PArray(u1_gate_param_gen, (lamda,))
+    else:
+        G = qu.U_gate(0.0, 0.0, lamda)
+    psi.gate_(G, int(i), tags=mtags, **gate_opts)
+
+
+def cu3_param_gen(params):
+    U3 = u3_gate_param_gen(params)
+
+    data = [[[[1, 0], [0, 0]],
+             [[0, 1], [0, 0]]],
+            [[[0, 0], [U3[0, 0], U3[0, 1]]],
+             [[0, 0], [U3[1, 0], U3[1, 1]]]]]
+
+    return do('array', data, like=params)
+
+
+@functools.lru_cache(maxsize=128)
+def cu3(theta, phi, lamda):
+    return cu3_param_gen(np.array([theta, phi, lamda]))
+
+
+def apply_cu3(psi, theta, phi, lamda, i, j, parametrize=False, **gate_opts):
+    mtags = _merge_tags('CU3', gate_opts)
+    if parametrize:
+        G = ops.PArray(cu3_param_gen, (theta, phi, lamda))
+    else:
+        G = cu3(theta, phi, lamda)
+    psi.gate_(G, (int(i), int(j)), tags=mtags, **gate_opts)
+
+
+def cu2_param_gen(params):
+    U2 = u2_gate_param_gen(params)
+
+    data = [[[[1, 0], [0, 0]],
+             [[0, 1], [0, 0]]],
+            [[[0, 0], [U2[0, 0], U2[0, 1]]],
+             [[0, 0], [U2[1, 0], U2[1, 1]]]]]
+
+    return do('array', data, like=params)
+
+
+@functools.lru_cache(maxsize=128)
+def cu2(phi, lamda):
+    return cu2_param_gen(np.array([phi, lamda]))
+
+
+def apply_cu2(psi, phi, lamda, i, j, parametrize=False, **gate_opts):
+    mtags = _merge_tags('CU2', gate_opts)
+    if parametrize:
+        G = ops.PArray(cu2_param_gen, (phi, lamda))
+    else:
+        G = cu2(phi, lamda)
+    psi.gate_(G, (int(i), int(j)), tags=mtags, **gate_opts)
+
+
+def cu1_param_gen(params):
+    lamda = params[0]
+
+    c11_im = lamda
+    c11_re = do('imag', c11_im)
+    c11 = do('exp', do('complex', c11_re, c11_im))
+
+    data = [[[[1, 0], [0, 0]],
+             [[0, 1], [0, 0]]],
+            [[[0, 0], [1, 0]],
+             [[0, 0], [0, c11]]]]
+
+    return do('array', data, like=params)
+
+
+@functools.lru_cache(maxsize=128)
+def cu1(lamda):
+    return cu1_param_gen(np.array([lamda]))
+
+
+def apply_cu1(psi, lamda, i, j, parametrize=False, **gate_opts):
+    mtags = _merge_tags('CU1', gate_opts)
+    if parametrize:
+        G = ops.PArray(cu1_param_gen, (lamda,))
+    else:
+        G = cu1(lamda)
+    psi.gate_(G, (int(i), int(j)), tags=mtags, **gate_opts)
+
+
 def fsim_param_gen(params):
     theta, phi = params[0], params[1]
 
@@ -259,14 +390,10 @@ def fsim_param_gen(params):
     c_re = do('imag', c_im)
     c = do('exp', do('complex', c_re, c_im))
 
-    data = [[[[1, 0],
-              [0, 0]],
-             [[0, a],
-              [b, 0]]],
-            [[[0, b],
-              [a, 0]],
-             [[0, 0],
-              [0, c]]]]
+    data = [[[[1, 0], [0, 0]],
+             [[0, a], [b, 0]]],
+            [[[0, b], [a, 0]],
+             [[0, 0], [0, c]]]]
 
     return do('array', data, like=params)
 
@@ -286,14 +413,10 @@ def rzz_param_gen(params):
     c00 = c11 = do('complex', do('cos', gamma), do('sin', gamma))
     c01 = c10 = do('complex', do('cos', gamma), -do('sin', gamma))
 
-    data = [[[[c00, 0],
-              [0, 0]],
-             [[0, c01],
-              [0, 0]]],
-            [[[0, 0],
-              [c10, 0]],
-             [[0, 0],
-              [0, c11]]]]
+    data = [[[[c00, 0], [0, 0]],
+             [[0, c01], [0, 0]]],
+            [[[0, 0], [c10, 0]],
+             [[0, 0], [0, c11]]]]
 
     return do('array', data, like=params)
 
@@ -343,18 +466,24 @@ GATE_FUNCTIONS = {
     # special non-tensor gates
     'IDEN': lambda *args, **kwargs: None,
     'SWAP': apply_swap,
-    # parametrizable gates
+    # single parametrizable gates
     'RX': apply_Rx,
     'RY': apply_Ry,
     'RZ': apply_Rz,
     'U3': apply_U3,
+    'U2': apply_U2,
+    'U1': apply_U1,
+    # two qubit parametrizable gates
+    'CU3': apply_cu3,
+    'CU2': apply_cu2,
+    'CU1': apply_cu1,
     'FS': apply_fsim,
     'FSIM': apply_fsim,
     'RZZ': apply_rzz,
 }
 
-ONE_QUBIT_PARAM_GATES = {'RX', 'RY', 'RZ', 'U3'}
-TWO_QUBIT_PARAM_GATES = {'FS', 'FSIM', 'RZZ'}
+ONE_QUBIT_PARAM_GATES = {'RX', 'RY', 'RZ', 'U3', 'U2', 'U1'}
+TWO_QUBIT_PARAM_GATES = {'CU3', 'CU2', 'CU1', 'FS', 'FSIM', 'RZZ'}
 ALL_PARAM_GATES = ONE_QUBIT_PARAM_GATES | TWO_QUBIT_PARAM_GATES
 
 
@@ -685,6 +814,26 @@ class Circuit:
 
     def u3(self, theta, phi, lamda, i, gate_round=None, parametrize=False):
         self.apply_gate('U3', theta, phi, lamda, i,
+                        gate_round=gate_round, parametrize=parametrize)
+
+    def u2(self, phi, lamda, i, gate_round=None, parametrize=False):
+        self.apply_gate('U2', phi, lamda, i,
+                        gate_round=gate_round, parametrize=parametrize)
+
+    def u1(self, lamda, i, gate_round=None, parametrize=False):
+        self.apply_gate('U1', lamda, i,
+                        gate_round=gate_round, parametrize=parametrize)
+
+    def cu3(self, theta, phi, lamda, i, j, gate_round=None, parametrize=False):
+        self.apply_gate('CU3', theta, phi, lamda, i, j,
+                        gate_round=gate_round, parametrize=parametrize)
+
+    def cu2(self, phi, lamda, i, j, gate_round=None, parametrize=False):
+        self.apply_gate('CU2', phi, lamda, i, j,
+                        gate_round=gate_round, parametrize=parametrize)
+
+    def cu1(self, lamda, i, j, gate_round=None, parametrize=False):
+        self.apply_gate('CU1', lamda, i, j,
                         gate_round=gate_round, parametrize=parametrize)
 
     def fsim(self, theta, phi, i, j, gate_round=None, parametrize=False):

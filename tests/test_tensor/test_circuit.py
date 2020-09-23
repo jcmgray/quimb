@@ -112,6 +112,8 @@ class TestCircuit:
             ('ry', 1, 1),
             ('rz', 1, 1),
             ('u3', 1, 3),
+            ('u2', 1, 2),
+            ('u1', 1, 1),
             # two qubit
             ('cx', 2, 0),
             ('cy', 2, 0),
@@ -120,6 +122,9 @@ class TestCircuit:
             ('swap', 2, 0),
             ('iswap', 2, 0),
             # two qubit parametrizable
+            ('cu3', 2, 3),
+            ('cu2', 2, 2),
+            ('cu1', 2, 1),
             ('fsim', 2, 2),
             ('rzz', 2, 1),
         ]
