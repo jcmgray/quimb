@@ -725,6 +725,12 @@ class TensorNetwork1DOperator(TensorNetwork1D,
         """
         return self.lower_ind_id.format(i)
 
+    @property
+    def lower_inds(self):
+        """An ordered tuple of the actual lower physical indices.
+        """
+        return tuple(self.lower_ind(i) for i in self.sites)
+
     def _get_upper_ind_id(self):
         return self._upper_ind_id
 
@@ -2651,7 +2657,6 @@ class MatrixProductOperator(TensorNetwork1DOperator,
         return summed
 
     def _apply_mps(self, other, compress=True, **compress_opts):
-        # import pdb; pdb.set_trace()
         A, x = self.copy(), other.copy()
 
         # align the indices

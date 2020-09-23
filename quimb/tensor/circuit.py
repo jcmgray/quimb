@@ -10,7 +10,7 @@ from ..utils import oset, partitionby, concatv, partition_all, ensure_dict
 from .tensor_core import (get_tags, tags_to_oset, oset_union,
                           PTensor, Tensor, TensorNetwork, rand_uuid)
 from .tensor_gen import MPS_computational_state
-from .tensor_1d import TensorNetwork1DVector, Dense1D
+from .tensor_1d import TensorNetwork1DVector, Dense1D, TensorNetwork1DOperator
 from . import array_ops as ops
 
 
@@ -624,13 +624,17 @@ class Circuit:
         if self.gate_opts['contract'] != 'swap+split':
             self._psi.view_as_(TensorNetwork1DVector)
 
-        ket_site_ind_id = self._psi.site_ind_id
-        if ket_site_ind_id == bra_site_ind_id:
+        self._ket_site_ind_id = self._psi.site_ind_id
+        self._bra_site_ind_id = bra_site_ind_id
+
+        if self._ket_site_ind_id == self._bra_site_ind_id:
             raise ValueError(
                 "The 'ket' and 'bra' site ind ids clash : "
-                "'{}' and '{}".format(self._psi.site_ind_id, bra_site_ind_id))
-        self.ket_site_ind = ket_site_ind_id.format
-        self.bra_site_ind = bra_site_ind_id.format
+                "'{}' and '{}".format(self._ket_site_ind_id,
+                                      self._bra_site_ind_id))
+
+        self.ket_site_ind = self._ket_site_ind_id.format
+        self.bra_site_ind = self._bra_site_ind_id.format
 
         self._sample_n_gates = -1
         self._storage = dict()
@@ -862,7 +866,8 @@ class Circuit:
         U = self.psi
 
         # rename the initial state rand_uuid bonds to 1D site inds
-        ixmap = {f'k{i}': f'b{i}' for i in range(self.N)}
+        ixmap = {self.ket_site_ind(i): self.bra_site_ind(i)
+                 for i in range(self.N)}
 
         # the first `N` tensors should be the tensors of input state
         tids = tuple(U.tensor_map)[:self.N]
@@ -872,7 +877,14 @@ class Circuit:
             old_ix, = t.inds
             ixmap[old_ix] = f'k{i}'
 
-        return U.reindex_(ixmap)
+        U.reindex_(ixmap)
+        U.view_as_(
+            TensorNetwork1DOperator,
+            upper_ind_id=self._ket_site_ind_id,
+            lower_ind_id=self._bra_site_ind_id,
+        )
+
+        return U
 
     def get_reverse_lightcone_tags(self, where):
         """Get the tags of gates in this circuit corresponding to the 'reverse'
