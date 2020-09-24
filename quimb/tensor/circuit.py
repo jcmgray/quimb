@@ -909,6 +909,23 @@ class Circuit:
         lightcone_tags = []
 
         for i, gate in reversed(tuple(enumerate(self.gates))):
+            if gate[0] == 'IDEN':
+                continue
+
+            if gate[0] == 'SWAP':
+                i, j = gate[1:]
+                i_in_cone = i in cone
+                j_in_cone = j in cone
+                if i_in_cone:
+                    cone.add(j)
+                else:
+                    cone.discard(j)
+                if j_in_cone:
+                    cone.add(i)
+                else:
+                    cone.discard(i)
+                continue
+
             if isinstance(gate[-2], numbers.Integral):
                 regs = set(gate[-2:])
             else:

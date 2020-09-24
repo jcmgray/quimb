@@ -72,6 +72,27 @@ def qft_circ(n, swaps=True, **circuit_opts):
     return circ
 
 
+def swappy_circ(n, depth):
+    circ = qtn.Circuit(n)
+
+    for d in range(depth):
+        pairs = np.random.permutation(np.arange(n))
+
+        for i in range(n // 2):
+            qi = pairs[2 * i]
+            qj = pairs[2 * i + 1]
+
+            gate = np.random.choice(['FSIM', 'SWAP'])
+            if gate == 'FSIM':
+                params = np.random.randn(2)
+            else:
+                params = ()
+
+            circ.apply_gate(gate, *params, qi, qj)
+
+    return circ
+
+
 class TestCircuit:
 
     def test_prepare_GHZ(self):
@@ -358,6 +379,32 @@ class TestCircuit:
              [w**0, w**6, w**4, w**2, w**0, w**6, w**4, w**2],
              [w**0, w**7, w**6, w**5, w**4, w**3, w**2, w**1]])
         assert_allclose(U, ex)
+
+    def test_swap_lighcones(self):
+        circ = qtn.Circuit(3)
+        circ.x(0)  # 0
+        circ.x(1)  # 1
+        circ.x(2)  # 2
+        circ.swap(0, 1)  # 3
+        circ.cx(1, 2)  # 4
+        circ.cx(0, 1)  # 5
+        assert circ.get_reverse_lightcone_tags((2,)) == (
+            'PSI0', 'GATE_0', 'GATE_2', 'GATE_4'
+        )
+
+    def test_swappy_local_expecs(self):
+        circ = swappy_circ(4, 4)
+        Gs = [qu.rand_matrix(4) for _ in range(3)]
+        pairs = [(0, 1), (1, 2), (2, 3)]
+
+        psi = circ.to_dense()
+        dims = [2] * 4
+
+        exs = [qu.expec(qu.ikron(G, dims, pair), psi)
+               for G, pair in zip(Gs, pairs)]
+        aps = [circ.local_expectation(G, pair) for G, pair in zip(Gs, pairs)]
+
+        assert_allclose(exs, aps)
 
 class TestCircuitGen:
 
