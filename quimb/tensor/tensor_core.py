@@ -73,7 +73,31 @@ def contract_strategy(strategy):
 def _get_contract_path(eq, *shapes, **kwargs):
     """Get the contraction path - sequence of integer pairs.
     """
-    return tuple(oe.contract_path(eq, *shapes, shapes=True, **kwargs)[0])
+
+    # construct the internal opt_einsum data
+    lhs, rhs = eq.split('->')
+    terms = lhs.split(',')
+
+    # nothing to optimize in this case
+    nterms = len(terms)
+    if nterms <= 2:
+        return (tuple(range(nterms)),)
+
+    inputs = list(map(set, terms))
+    output = set(rhs)
+
+    size_dict = {}
+    for ix, d in zip(concat(terms), concat(shapes)):
+        size_dict[ix] = d
+
+    # get the actual path generating function
+    optimize = kwargs.pop('optimize', get_contract_strategy())
+    if isinstance(optimize, str):
+        optimize = oe.paths.get_path_fn(optimize)
+
+    # this way we get to avoid constructing the full PathInfo object
+    path = optimize(inputs, output, size_dict, **kwargs)
+    return tuple(path)
 
 
 def _get_contract_expr(eq, *shapes, **kwargs):
@@ -144,9 +168,13 @@ def set_contract_path_cache(
 
 
 def _get_contraction(eq, shapes, optimize, cache, get, **kwargs):
+    # don't cache path if using a 'single-shot' path-optimizer
+    #     (you may want to run these several times, each time improving path)
+    cache_path = cache and not isinstance(optimize, oe.paths.PathOptimizer)
+
     # get the path, unless explicitly given already
     if not isinstance(optimize, tuple):
-        path_fn = _CONTRACT_FNS['path', cache]
+        path_fn = _CONTRACT_FNS['path', cache_path]
         path = path_fn(eq, *shapes, optimize=optimize, **kwargs)
     else:
         path = optimize
@@ -177,9 +205,6 @@ def get_contraction(eq, *shapes, cache=True, get='expr', **kwargs):
     # make sure explicit paths are hashable
     if isinstance(optimize, list):
         optimize = tuple(optimize)
-
-    # can't cache if using a reusable path-optimizer
-    cache &= not isinstance(optimize, oe.paths.PathOptimizer)
 
     try:
         return _get_contraction(eq, shapes, optimize, cache, get, **kwargs)
@@ -303,7 +328,7 @@ def _gen_output_inds(all_inds):
     """Generate the output, i.e. unique, indices from the set ``inds``. Raise
     if any index found more than twice.
     """
-    cnts = collections.Counter(all_inds)
+    cnts = frequencies(all_inds)
     for ind, freq in cnts.items():
         if freq > 2:
             raise ValueError(
@@ -4818,16 +4843,26 @@ class TensorNetwork(object):
         """
         tn = self if inplace else self.copy()
 
+        if not hasattr(tn, '_simplify_cache'):
+            tn._simplify_cache = set()
+
         if output_inds is None:
             output_inds = set(self.outer_inds())
 
-        queue = list(tn.tensors)
+        queue = list(tn.tensor_map)
         while queue:
-            t = queue.pop()
+            tid = queue.pop()
+            t = tn.tensor_map[tid]
+
+            cache_key = ('diag_reduce', tid, id(t.data))
+            if cache_key in tn._simplify_cache:
+                continue
+
             ij = find_diag_axes(t.data, atol=atol)
 
             # no diagonals
             if ij is None:
+                tn._simplify_cache.add(cache_key)
                 continue
 
             i, j = ij
@@ -4860,7 +4895,7 @@ class TensorNetwork(object):
             tn.reindex_(ixmap)
 
             # tensor might still have diagonal indices
-            queue.append(t)
+            queue.append(tid)
 
         return tn
 
@@ -4964,14 +4999,23 @@ class TensorNetwork(object):
         if output_inds is None:
             output_inds = set(self.outer_inds())
 
+        if not hasattr(tn, '_simplify_cache'):
+            tn._simplify_cache = set()
+
         queue = list(tn.tensor_map)
         while queue:
             tid = queue.pop()
             t = tn.tensor_map[tid]
+
+            cache_key = ('column_reduce', tid, id(t.data))
+            if cache_key in tn._simplify_cache:
+                continue
+
             ax_i = find_columns(t.data, atol=atol)
 
             # not singlet columns
             if ax_i is None:
+                tn._simplify_cache.add(cache_key)
                 continue
 
             ax, i = ax_i
@@ -4996,14 +5040,14 @@ class TensorNetwork(object):
 
         # we don't want to repeatedly check the split decompositions of the
         #     same tensor as we cycle through simplification methods
-        if not hasattr(tn, '_split_simplify_cache'):
-            tn._split_simplify_cache = set()
+        if not hasattr(tn, '_simplify_cache'):
+            tn._simplify_cache = set()
 
         for tid, t in tuple(tn.tensor_map.items()):
 
             # id's are reused when objects go out of scope -> use tid as well
-            cache_key = (tid, id(t.data))
-            if cache_key in self._split_simplify_cache:
+            cache_key = ('split', tid, id(t.data))
+            if cache_key in tn._simplify_cache:
                 continue
 
             found = False
@@ -5022,7 +5066,7 @@ class TensorNetwork(object):
                 tn.add_tensor(tl, virtual=True)
                 tn.add_tensor(tr, virtual=True)
             else:
-                tn._split_simplify_cache.add(cache_key)
+                tn._simplify_cache.add(cache_key)
 
         return tn
 
