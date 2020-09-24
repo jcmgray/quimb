@@ -391,6 +391,14 @@ class TestBasicTensorOperations:
         # make sure bond is newly labelled
         assert set('abcd') & set(tn.all_inds()) == set()
 
+    def test_group_inds(self):
+        x = rand_tensor((2, 2, 2, 2), 'abcd')
+        y = rand_tensor((2, 2, 2), 'bdf')
+        lix, six, rix = qtn.group_inds(x, y)
+        assert lix == ['a', 'c']
+        assert six == ['b', 'd']
+        assert rix == ['f']
+
 
 class TestTensorFunctions:
     @pytest.mark.parametrize('method', ['svd', 'eig', 'isvd', 'svds'])

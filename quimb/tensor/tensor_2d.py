@@ -1738,21 +1738,6 @@ def is_lone_coo(where):
     return (len(where) == 2) and (isinstance(where[0], Integral))
 
 
-def group_inds(t1, t2):
-    """Group bonds into left only, shared, and right only.
-    """
-    lix, six, rix = [], [], []
-    for ix in oset(chain(t1, t2)):
-        if ix in t1:
-            if ix not in t2:
-                lix.append(ix)
-            else:
-                six.append(ix)
-        else:
-            rix.append(ix)
-    return lix, six, rix
-
-
 def gate_string_split_(TG, where, string, original_ts, bonds_along,
                        reindex_map, site_ix, info, **compress_opts):
 

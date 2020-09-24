@@ -978,6 +978,23 @@ def bonds_size(t1, t2):
     return prod(t1.ind_size(ix) for ix in bonds(t1, t2))
 
 
+def group_inds(t1, t2):
+    """Group bonds into left only, shared, and right only.
+    """
+    left_inds, shared_inds, right_inds = [], [], []
+
+    for ix in t1.inds:
+        if ix in t2.inds:
+            shared_inds.append(ix)
+        else:
+            left_inds.append(ix)
+    for ix in t2.inds:
+        if ix not in shared_inds:
+            right_inds.append(ix)
+
+    return left_inds, shared_inds, right_inds
+
+
 def connect(t1, t2, ax1, ax2):
     """Connect two tensors by setting a shared index for the specified
     dimensions. This is an inplace operation that will also affect any tensor
@@ -2953,7 +2970,7 @@ class TensorNetwork(object):
         inds = oset_union(t.inds for t in tagged_ts)
 
         # find all tensors with those inds, and remove the initial tensors
-        inds_tids = oset.union(*(self.ind_map[i] for i in inds))
+        inds_tids = oset_union(self.ind_map[i] for i in inds)
         neighbour_tids = inds_tids - tagged_tids
 
         return tuple(self.tensor_map[tid] for tid in neighbour_tids)
@@ -5013,7 +5030,7 @@ class TensorNetwork(object):
 
             ax_i = find_columns(t.data, atol=atol)
 
-            # not singlet columns
+            # no singlet columns
             if ax_i is None:
                 tn._simplify_cache.add(cache_key)
                 continue
