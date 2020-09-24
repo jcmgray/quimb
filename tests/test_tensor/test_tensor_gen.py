@@ -86,6 +86,11 @@ class TestMPSSpecificStates:
         assert mps.bond_sizes() == [2, 2, 2, 2]
         assert qu.fidelity(psi, mps.to_dense()) == pytest.approx(1.0)
 
+    def test_computational_state(self):
+        mps = qtn.MPS_computational_state('01+-')
+        assert_allclose(mps.to_dense(),
+                        qu.up() & qu.down() & qu.plus() & qu.minus())
+
 
 class TestGenericTN:
 

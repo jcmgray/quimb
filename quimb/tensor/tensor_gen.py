@@ -591,6 +591,8 @@ def MPS_computational_state(binary, dtype=float, cyclic=False, **mps_opts):
     array_map = {
         '0': np.array([1., 0.], dtype=dtype),
         '1': np.array([0., 1.], dtype=dtype),
+        '+': np.array([2**-0.5, 2**-0.5], dtype=dtype),
+        '-': np.array([2**-0.5, -2**-0.5], dtype=dtype),
     }
 
     def gen_arrays():
@@ -1304,14 +1306,23 @@ def _ham_ising(j=1.0, bx=0.0, *, S=1 / 2, cyclic=False):
 
 
 def MPO_ham_ising(n, j=1.0, bx=0.0, *, S=1 / 2, cyclic=False, **mpo_opts):
-    """Ising Hamiltonian in MPO form.
+    r"""Ising Hamiltonian in MPO form.
+
+    .. math::
+
+        H_\mathrm{Ising} =
+        J \sum_{i} \sigma^Z_i \sigma^Z_{i + 1} -
+        B_x \sum_{i} \sigma^X_i
+
+    Note the default convention of antiferromagnetic interactions and spin
+    operators not Pauli matrices.
 
     Parameters
     ----------
     n : int
         The number of sites.
     j : float, optional
-        The ZZ interaction strength.
+        The ZZ interaction strength. Positive is antiferromagnetic.
     bx : float, optional
         The X-magnetic field strength.
     S : {1/2, 1, 3/2, ...}, optional
@@ -1331,14 +1342,23 @@ def MPO_ham_ising(n, j=1.0, bx=0.0, *, S=1 / 2, cyclic=False, **mpo_opts):
 
 
 def NNI_ham_ising(n=None, j=1.0, bx=0.0, *, S=1 / 2, cyclic=False, **nni_opts):
-    """Ising Hamiltonian in NNI form.
+    r"""Ising Hamiltonian in NNI form.
+
+    .. math::
+
+        H_\mathrm{Ising} =
+        J \sum_{i} \sigma^Z_i \sigma^Z_{i + 1} -
+        B_x \sum_{i} \sigma^X_i
+
+    Note the default convention of antiferromagnetic interactions and spin
+    operators not Pauli matrices.
 
     Parameters
     ----------
     n : int
         The number of sites.
     j : float, optional
-        The ZZ interaction strength.
+        The ZZ interaction strength. Positive is antiferromagnetic.
     bx : float, optional
         The X-magnetic field strength.
     S : {1/2, 1, 3/2, ...}, optional
@@ -1379,14 +1399,26 @@ def _ham_XY(j=1.0, bz=0.0, *, S=1 / 2, cyclic=False):
 
 
 def MPO_ham_XY(n, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **mpo_opts):
-    """XY-Hamiltonian in MPO form.
+    r"""XY-Hamiltonian in MPO form.
+
+    .. math::
+
+        H_\mathrm{XY} =
+        \sum_{i} (
+            J_X \sigma^X_i \sigma^X_{i + 1} +
+            J_Y \sigma^Y_i \sigma^Y_{i + 1}
+            )
+        - B_x \sum_{i} \sigma^Z_i
+
+    Note the default convention of antiferromagnetic interactions and spin
+    operators not Pauli matrices.
 
     Parameters
     ----------
     n : int
         The number of sites.
     j : float or (float, float), optional
-        The XX and YY interaction strength.
+        The XX and YY interaction strength. Positive is antiferromagnetic.
     bz : float, optional
         The Z-magnetic field strength.
     S : {1/2, 1, 3/2, ...}, optional
@@ -1406,14 +1438,26 @@ def MPO_ham_XY(n, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **mpo_opts):
 
 
 def NNI_ham_XY(n=None, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **nni_opts):
-    """XY-Hamiltonian in NNI form.
+    r"""XY-Hamiltonian in NNI form.
+
+    .. math::
+
+        H_\mathrm{XY} =
+        \sum_{i} (
+            J_X \sigma^X_i \sigma^X_{i + 1} +
+            J_Y \sigma^Y_i \sigma^Y_{i + 1}
+            )
+        - B_Z \sum_{i} \sigma^Z_i
+
+    Note the default convention of antiferromagnetic interactions and spin
+    operators not Pauli matrices.
 
     Parameters
     ----------
     n : int
         The number of sites.
     j : float or (float, float), optional
-        The XX and YY interaction strength.
+        The XX and YY interaction strength. Positive is antiferromagnetic.
     bz : float, optional
         The Z-magnetic field strength.
     S : {1/2, 1, 3/2, ...}, optional
@@ -1455,14 +1499,27 @@ def _ham_heis(j=1.0, bz=0.0, *, S=1 / 2, cyclic=False):
 
 
 def MPO_ham_heis(n, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **mpo_opts):
-    """Heisenberg Hamiltonian in MPO form.
+    r"""Heisenberg Hamiltonian in MPO form.
+
+    .. math::
+
+        H_\mathrm{Heis} =
+        \sum_{i} (
+            J_X \sigma^X_i \sigma^X_{i + 1} +
+            J_Y \sigma^Y_i \sigma^Y_{i + 1} +
+            J_Z \sigma^Z_i \sigma^Z_{i + 1}
+            )
+        - B_Z \sum_{i} \sigma^Z_i
+
+    Note the default convention of antiferromagnetic interactions and spin
+    operators not Pauli matrices.
 
     Parameters
     ----------
     n : int
         The number of sites.
     j : float or (float, float, float), optional
-        The XX, YY and ZZ interaction strength.
+        The XX, YY and ZZ interaction strength. Positive is antiferromagnetic.
     bz : float, optional
         The Z-magnetic field strength.
     S : {1/2, 1, 3/2, ...}, optional
@@ -1482,14 +1539,27 @@ def MPO_ham_heis(n, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **mpo_opts):
 
 
 def NNI_ham_heis(n=None, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **nni_opts):
-    """Heisenberg Hamiltonian in NNI form.
+    r"""Heisenberg Hamiltonian in NNI form.
+
+    .. math::
+
+        H_\mathrm{Heis} =
+        \sum_{i} (
+            J_X \sigma^X_i \sigma^X_{i + 1} +
+            J_Y \sigma^Y_i \sigma^Y_{i + 1} +
+            J_Z \sigma^Z_i \sigma^Z_{i + 1}
+            )
+        - B_Z \sum_{i} \sigma^Z_i
+
+    Note the default convention of antiferromagnetic interactions and spin
+    operators not Pauli matrices.
 
     Parameters
     ----------
     n : int
         The number of sites.
     j : float or (float, float, float), optional
-        The XX, YY and ZZ interaction strength.
+        The XX, YY and ZZ interaction strength. Positive is antiferromagnetic.
     bz : float, optional
         The Z-magnetic field strength.
     S : {1/2, 1, 3/2, ...}, optional
@@ -1509,16 +1579,30 @@ def NNI_ham_heis(n=None, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **nni_opts):
 
 
 def MPO_ham_XXZ(n, delta, jxy=1.0, *, S=1 / 2, cyclic=False, **mpo_opts):
-    """XXZ-Hamiltonian in MPO form.
+    r"""XXZ-Hamiltonian in MPO form.
+
+    .. math::
+
+        H_\mathrm{XXZ} =
+        \sum_{i} (
+            J_X \sigma^X_i \sigma^X_{i + 1} +
+            J_Y \sigma^Y_i \sigma^Y_{i + 1} +
+            \Delta \sigma^Z_i \sigma^Z_{i + 1}
+            )
+        - B_Z \sum_{i} \sigma^Z_i
+
+    Note the default convention of antiferromagnetic interactions and spin
+    operators not Pauli matrices.
 
     Parameters
     ----------
     n : int
         The number of sites.
     delta : float
-        The Z-interaction strength.
+        The ZZ-interaction strength. Positive is antiferromagnetic.
     jxy : float, optional
-        The X- and Y- interaction strength, defaults to 1.
+        The X- and Y- interaction strength, defaults to 1. Positive is
+        antiferromagnetic.
     S : {1/2, 1, 3/2, ...}, optional
         The underlying spin of the system, defaults to 1/2.
     cyclic : bool, optional
@@ -1536,16 +1620,30 @@ def MPO_ham_XXZ(n, delta, jxy=1.0, *, S=1 / 2, cyclic=False, **mpo_opts):
 
 def NNI_ham_XXZ(n=None, delta=None, jxy=1.0, *,
                 S=1 / 2, cyclic=False, **nni_opts):
-    """XXZ-Hamiltonian in NNI form.
+    r"""XXZ-Hamiltonian in NNI form.
+
+    .. math::
+
+        H_\mathrm{XXZ} =
+        \sum_{i} (
+            J_X \sigma^X_i \sigma^X_{i + 1} +
+            J_Y \sigma^Y_i \sigma^Y_{i + 1} +
+            \Delta \sigma^Z_i \sigma^Z_{i + 1}
+            )
+        - B_Z \sum_{i} \sigma^Z_i
+
+    Note the default convention of antiferromagnetic interactions and spin
+    operators not Pauli matrices.
 
     Parameters
     ----------
     n : int
         The number of sites.
     delta : float
-        The Z-interaction strength.
+        The ZZ-interaction strength. Positive is antiferromagnetic.
     jxy : float, optional
-        The X- and Y- interaction strength, defaults to 1.
+        The X- and Y- interaction strength, defaults to 1.  Positive is
+        antiferromagnetic.
     S : {1/2, 1, 3/2, ...}, optional
         The underlying spin of the system, defaults to 1/2.
     cyclic : bool, optional
@@ -1664,7 +1762,20 @@ def _ham_mbl(n, dh, j=1.0, seed=None, S=1 / 2, *, cyclic=False,
 
 def MPO_ham_mbl(n, dh, j=1.0, seed=None, S=1 / 2, *, cyclic=False,
                 dh_dist='s', dh_dim=1, beta=None, **mpo_opts):
-    """The many-body-localized spin hamiltonian in MPO form.
+    r"""The many-body-localized spin hamiltonian in MPO form.
+
+    .. math::
+
+        H_\mathrm{MBL} =
+        \sum_{i} (
+            J_X \sigma^X_i \sigma^X_{i + 1} +
+            J_Y \sigma^Y_i \sigma^Y_{i + 1} +
+            J_Z \sigma^Z_i \sigma^Z_{i + 1}
+            )
+        - \sum_{i} h_i \sigma^Z_i
+
+    Note the default convention of antiferromagnetic interactions and spin
+    operators not Pauli matrices.
 
     Parameters
     ----------
@@ -1673,7 +1784,8 @@ def MPO_ham_mbl(n, dh, j=1.0, seed=None, S=1 / 2, *, cyclic=False,
     dh : float
         Random noise strength.
     j : float, or (float, float, float), optional
-        Interaction strength(s) e.g. 1 or (1., 1., 0.5).
+        Interaction strength(s) e.g. 1 or (1., 1., 0.5).  Positive is
+        antiferromagnetic.
     seed : int, optional
         Random number to seed the noise with.
     S : {1/2, 1, 3/2, ...}, optional
@@ -1698,7 +1810,20 @@ def MPO_ham_mbl(n, dh, j=1.0, seed=None, S=1 / 2, *, cyclic=False,
 
 def NNI_ham_mbl(n, dh, j=1.0, seed=None, S=1 / 2, *, cyclic=False,
                 dh_dist='s', dh_dim=1, beta=None, **nni_opts):
-    """The many-body-localized spin hamiltonian in NNI form.
+    r"""The many-body-localized spin hamiltonian in NNI form.
+
+    .. math::
+
+        H_\mathrm{MBL} =
+        \sum_{i} (
+            J_X \sigma^X_i \sigma^X_{i + 1} +
+            J_Y \sigma^Y_i \sigma^Y_{i + 1} +
+            J_Z \sigma^Z_i \sigma^Z_{i + 1}
+            )
+        - \sum_{i} h_i \sigma^Z_i
+
+    Note the default convention of antiferromagnetic interactions and spin
+    operators not Pauli matrices.
 
     Parameters
     ----------
@@ -1707,7 +1832,8 @@ def NNI_ham_mbl(n, dh, j=1.0, seed=None, S=1 / 2, *, cyclic=False,
     dh : float
         Random noise strength.
     j : float, or (float, float, float), optional
-        Interaction strength(s) e.g. 1 or (1., 1., 0.5).
+        Interaction strength(s) e.g. 1 or (1., 1., 0.5).  Positive is
+        antiferromagnetic.
     seed : int, optional
         Random number to seed the noise with.
     S : {1/2, 1, 3/2, ...}, optional
