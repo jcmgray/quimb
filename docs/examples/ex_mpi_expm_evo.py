@@ -15,7 +15,7 @@ from mpi4py import MPI
 # Get some MPI information
 comm = MPI.COMM_WORLD
 rank, size = comm.Get_rank(), comm.Get_size()
-print(f"I am worker {rank} of total {size} runnning main script...")
+print(f"I am worker {rank} of total {size} running main script...")
 
 
 # setup a verbose version of the ham_heis constructor, and make it Lazy
