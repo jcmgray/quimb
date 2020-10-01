@@ -10,13 +10,14 @@ import numpy as np
 import opt_einsum as oe
 
 from ..core import make_immutable, ikron
+from ..utils import deprecated
 from ..gen.operators import spin_operator, eye, _gen_mbl_random_factors
 from ..gen.rand import randn, choice, random_seed_fn, rand_phase
 from .tensor_core import Tensor, new_bond, TensorNetwork, rand_uuid
 from .array_ops import asarray, sensibly_scale
 from .tensor_1d import MatrixProductState, MatrixProductOperator
 from .tensor_2d import TensorNetwork2D
-from .tensor_tebd import NNI
+from .tensor_1d_tebd import LocalHam1D
 
 
 @random_seed_fn
@@ -498,13 +499,13 @@ def TN3D_classical_ising_partition_function(
 # --------------------------------------------------------------------------- #
 
 @random_seed_fn
-def MPS_rand_state(n, bond_dim, phys_dim=2, normalize=True, cyclic=False,
+def MPS_rand_state(L, bond_dim, phys_dim=2, normalize=True, cyclic=False,
                    dtype=float, trans_invar=False, **mps_opts):
     """Generate a random matrix product state.
 
     Parameters
     ----------
-    n : int
+    L : int
         The number of sites.
     bond_dim : int
         The bond dimension.
@@ -531,7 +532,7 @@ def MPS_rand_state(n, bond_dim, phys_dim=2, normalize=True, cyclic=False,
 
     def gen_shapes():
         yield (*cyc_dim, bond_dim, phys_dim)
-        for _ in range(n - 2):
+        for _ in range(L - 2):
             yield (bond_dim, bond_dim, phys_dim)
         yield (bond_dim, *cyc_dim, phys_dim)
 
@@ -540,7 +541,7 @@ def MPS_rand_state(n, bond_dim, phys_dim=2, normalize=True, cyclic=False,
 
     if trans_invar:
         array = sensibly_scale(gen_data(next(gen_shapes())))
-        arrays = (array for _ in range(n))
+        arrays = (array for _ in range(L))
     else:
         arrays = map(sensibly_scale, map(gen_data, gen_shapes()))
 
@@ -602,30 +603,30 @@ def MPS_computational_state(binary, dtype=float, cyclic=False, **mps_opts):
     return MPS_product_state(tuple(gen_arrays()), cyclic=cyclic, **mps_opts)
 
 
-def MPS_neel_state(n, down_first=False, dtype=float, **mps_opts):
+def MPS_neel_state(L, down_first=False, dtype=float, **mps_opts):
     """Generate the neel state in Matrix Product State form.
 
     Parameters
     ----------
-    n : int
+    L : int
         The number of spins.
     down_first : bool, optional
         Whether to start with '1' (down) or '0' (up) first.
     mps_opts
         Supplied to MatrixProductState constructor.
     """
-    binary_str = "01" * (n // 2) + (n % 2 == 1) * "0"
+    binary_str = "01" * (L // 2) + (L % 2 == 1) * "0"
     if down_first:
         binary_str = "1" + binary_str[:-1]
     return MPS_computational_state(binary_str, dtype=dtype, **mps_opts)
 
 
-def MPS_ghz_state(n, dtype=float, **mps_opts):
+def MPS_ghz_state(L, dtype=float, **mps_opts):
     """Build the chi=2 OBC MPS representation of the GHZ state.
 
     Parameters
     ----------
-    n : int
+    L : int
         Number of qubits.
     dtype : {'float64', 'complex128', 'float32', 'complex64'}, optional
         The underlying data type.
@@ -637,7 +638,7 @@ def MPS_ghz_state(n, dtype=float, **mps_opts):
         yield 2**-0.5 * np.array([[1., 0.],
                                   [0., 1.]]).astype(dtype)
 
-        for i in range(1, n - 1):
+        for i in range(1, L - 1):
             yield np.array([[[1., 0.],
                              [0., 0.]],
                             [[0., 0.],
@@ -649,12 +650,12 @@ def MPS_ghz_state(n, dtype=float, **mps_opts):
     return MatrixProductState(gen_arrays(), **mps_opts)
 
 
-def MPS_w_state(n, dtype=float, **mps_opts):
+def MPS_w_state(L, dtype=float, **mps_opts):
     """Build the chi=2 OBC MPS representation of the W state.
 
     Parameters
     ----------
-    n : int
+    L : int
         Number of qubits.
     dtype : {'float64', 'complex128', 'float32', 'complex64'}, optional
         The underlying data type.
@@ -664,9 +665,9 @@ def MPS_w_state(n, dtype=float, **mps_opts):
 
     def gen_arrays():
         yield (np.array([[1., 0.],
-                         [0., 1.]]) / n ** 0.5).astype(dtype)
+                         [0., 1.]]) / L ** 0.5).astype(dtype)
 
-        for i in range(1, n - 1):
+        for i in range(1, L - 1):
             yield np.array([[[1., 0.],
                              [0., 1.]],
                             [[0., 0.],
@@ -679,12 +680,12 @@ def MPS_w_state(n, dtype=float, **mps_opts):
 
 
 @random_seed_fn
-def MPS_rand_computational_state(n, dtype=float, **mps_opts):
+def MPS_rand_computational_state(L, dtype=float, **mps_opts):
     """Generate a random computation basis state, like '01101001010'.
 
     Parameters
     ----------
-    n : int
+    L : int
         The number of qubits.
     seed : int, optional
         The seed to use.
@@ -693,17 +694,17 @@ def MPS_rand_computational_state(n, dtype=float, **mps_opts):
     mps_opts
         Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductState`.
     """
-    cstr = (choice(('0', '1')) for _ in range(n))
+    cstr = (choice(('0', '1')) for _ in range(L))
     return MPS_computational_state(cstr, dtype=dtype, **mps_opts)
 
 
-def MPS_zero_state(n, bond_dim=1, phys_dim=2, cyclic=False,
+def MPS_zero_state(L, bond_dim=1, phys_dim=2, cyclic=False,
                    dtype=float, **mps_opts):
     """The all-zeros MPS state, of given bond-dimension.
 
     Parameters
     ----------
-    n : int
+    L : int
         The number of sites.
     bond_dim : int, optional
         The bond dimension, defaults to 1.
@@ -721,19 +722,19 @@ def MPS_zero_state(n, bond_dim=1, phys_dim=2, cyclic=False,
 
     def gen_arrays():
         yield np.zeros((*cyc_dim, bond_dim, phys_dim), dtype=dtype)
-        for _ in range(n - 2):
+        for _ in range(L - 2):
             yield np.zeros((bond_dim, bond_dim, phys_dim), dtype=dtype)
         yield np.zeros((bond_dim, *cyc_dim, phys_dim), dtype=dtype)
 
     return MatrixProductState(gen_arrays(), **mps_opts)
 
 
-def MPS_sampler(n, dtype=complex, squeeze=True, **mps_opts):
+def MPS_sampler(L, dtype=complex, squeeze=True, **mps_opts):
     """A product state for sampling tensor network traces. Seen as a vector it
     has the required property that ``psi.H @ psi == d`` always for hilbert
     space size ``d``.
     """
-    arrays = [rand_phase(2, dtype=dtype) for _ in range(n)]
+    arrays = [rand_phase(2, dtype=dtype) for _ in range(L)]
     psi = MPS_product_state(arrays, **mps_opts)
     if squeeze:
         psi.squeeze_()
@@ -744,12 +745,12 @@ def MPS_sampler(n, dtype=complex, squeeze=True, **mps_opts):
 #                                    MPOs                                     #
 # --------------------------------------------------------------------------- #
 
-def MPO_identity(n, phys_dim=2, dtype=float, cyclic=False, **mpo_opts):
-    """Generate an identity MPO of size ``n``.
+def MPO_identity(L, phys_dim=2, dtype=float, cyclic=False, **mpo_opts):
+    """Generate an identity MPO of size ``L``.
 
     Parameters
     ----------
-    n : int
+    L : int
         The number of sites.
     phys_dim : int, optional
         The physical (site) dimensions, defaults to 2.
@@ -766,7 +767,7 @@ def MPO_identity(n, phys_dim=2, dtype=float, cyclic=False, **mpo_opts):
 
     def gen_arrays():
         yield II.reshape(*cyc_dim, 1, phys_dim, phys_dim)
-        for _ in range(n - 2):
+        for _ in range(L - 2):
             yield II.reshape(1, 1, phys_dim, phys_dim)
         yield II.reshape(1, *cyc_dim, phys_dim, phys_dim)
 
@@ -777,18 +778,18 @@ def MPO_identity_like(mpo, **mpo_opts):
     """Return an identity matrix operator with the same physical index and
     inds/tags as ``mpo``.
     """
-    return MPO_identity(n=mpo.nsites, phys_dim=mpo.phys_dim(), dtype=mpo.dtype,
+    return MPO_identity(L=mpo.L, phys_dim=mpo.phys_dim(), dtype=mpo.dtype,
                         site_tag_id=mpo.site_tag_id, cyclic=mpo.cyclic,
                         upper_ind_id=mpo.upper_ind_id,
                         lower_ind_id=mpo.lower_ind_id, **mpo_opts)
 
 
-def MPO_zeros(n, phys_dim=2, dtype=float, cyclic=False, **mpo_opts):
-    """Generate a zeros MPO of size ``n``.
+def MPO_zeros(L, phys_dim=2, dtype=float, cyclic=False, **mpo_opts):
+    """Generate a zeros MPO of size ``L``.
 
     Parameters
     ----------
-    n : int
+    L : int
         The number of sites.
     phys_dim : int, optional
         The physical (site) dimensions, defaults to 2.
@@ -804,7 +805,7 @@ def MPO_zeros(n, phys_dim=2, dtype=float, cyclic=False, **mpo_opts):
 
     def gen_arrays():
         yield np.zeros((*cyc_dim, 1, phys_dim, phys_dim), dtype=dtype)
-        for _ in range(n - 2):
+        for _ in range(L - 2):
             yield np.zeros((1, 1, phys_dim, phys_dim), dtype=dtype)
         yield np.zeros((1, *cyc_dim, phys_dim, phys_dim), dtype=dtype)
 
@@ -815,20 +816,20 @@ def MPO_zeros_like(mpo, **mpo_opts):
     """Return a zeros matrix operator with the same physical index and
     inds/tags as ``mpo``.
     """
-    return MPO_zeros(n=mpo.nsites, phys_dim=mpo.phys_dim(),
+    return MPO_zeros(L=mpo.L, phys_dim=mpo.phys_dim(),
                      dtype=mpo.dtype, site_tag_id=mpo.site_tag_id,
                      upper_ind_id=mpo.upper_ind_id, cyclic=mpo.cyclic,
                      lower_ind_id=mpo.lower_ind_id, **mpo_opts)
 
 
 @random_seed_fn
-def MPO_rand(n, bond_dim, phys_dim=2, normalize=True, cyclic=False,
+def MPO_rand(L, bond_dim, phys_dim=2, normalize=True, cyclic=False,
              herm=False, dtype=float, **mpo_opts):
     """Generate a random matrix product state.
 
     Parameters
     ----------
-    n : int
+    L : int
         The number of sites.
     bond_dim : int
         The bond dimension.
@@ -849,7 +850,7 @@ def MPO_rand(n, bond_dim, phys_dim=2, normalize=True, cyclic=False,
     cyc_shp = (bond_dim,) if cyclic else ()
 
     shapes = [(*cyc_shp, bond_dim, phys_dim, phys_dim),
-              *((bond_dim, bond_dim, phys_dim, phys_dim),) * (n - 2),
+              *((bond_dim, bond_dim, phys_dim, phys_dim),) * (L - 2),
               (bond_dim, *cyc_shp, phys_dim, phys_dim)]
 
     def gen_data(shape):
@@ -871,12 +872,12 @@ def MPO_rand(n, bond_dim, phys_dim=2, normalize=True, cyclic=False,
 
 
 @random_seed_fn
-def MPO_rand_herm(n, bond_dim, phys_dim=2, normalize=True,
+def MPO_rand_herm(L, bond_dim, phys_dim=2, normalize=True,
                   dtype=float, **mpo_opts):
     """Generate a random hermitian matrix product operator.
     See :class:`~quimb.tensor.tensor_gen.MPO_rand`.
     """
-    return MPO_rand(n, bond_dim, phys_dim=phys_dim, normalize=normalize,
+    return MPO_rand(L, bond_dim, phys_dim=phys_dim, normalize=normalize,
                     dtype=dtype, herm=True, **mpo_opts)
 
 
@@ -977,7 +978,7 @@ def spin_ham_mpo_tensor(one_site_terms, two_site_terms, S=1 / 2,
 
 
 class _TermAdder:
-    """Simple class to allow ``SpinHam`` syntax like
+    """Simple class to allow ``SpinHam1D`` syntax like
     ``builder[i, j] += (1/2, 'Z', 'X')``. This object is temporarily created
     by the getitem call, accumulates the new term, then has its the new
     combined list of terms extracted in the setitem call.
@@ -999,9 +1000,9 @@ class _TermAdder:
         return self
 
 
-class SpinHam:
-    """Class for easily building custom spin hamiltonians in MPO or NNI form.
-    Currently limited to nearest neighbour interactions (and single site
+class SpinHam1D:
+    """Class for easily building custom spin hamiltonians in MPO or LocalHam1D
+    form. Currently limited to nearest neighbour interactions (and single site
     terms). It is possible to set 'default' translationally invariant terms,
     but also terms acting on specific sites only (which take precedence).
     It is also possible to build a sparse matrix version of the hamiltonian
@@ -1018,7 +1019,7 @@ class SpinHam:
     --------
     Initialize the spin hamiltonian builder:
 
-        >>> builder = SpinHam(S=3 / 2)
+        >>> builder = SpinHam1D(S=3 / 2)
 
     Add some two-site terms:
 
@@ -1034,12 +1035,12 @@ class SpinHam:
 
         >>> mpo_ham = builder.build_mpo(100)
         >>> mpo_ham
-        <MatrixProductOperator(tensors=100, structure='I{}', nsites=100)>
+        <MatrixProductOperator(tensors=100, L=100, max_bond=5)>
 
-    Build a NNI version of the hamiltonian for use with TEBD:
+    Build a LocalHam1D version of the hamiltonian for use with TEBD:
 
-        >>> builder.build_nni(100)
-        <NNI(n=100, cyclic=False)>
+        >>> builder.build_local_ham(100)
+        <LocalHam1D(L=100, cyclic=False)>
 
     You can also set terms for specific sites (this overides any of the
     'default', translationally invariant terms set as above):
@@ -1145,9 +1146,9 @@ class SpinHam:
                 raise ValueError("Can only add nearest neighbour terms.")
             self.var_two_site_terms[sites] = terms
 
-    def build_mpo(self, n, upper_ind_id='k{}', lower_ind_id='b{}',
+    def build_mpo(self, L, upper_ind_id='k{}', lower_ind_id='b{}',
                   site_tag_id='I{}', tags=None, bond_name=""):
-        """Build an MPO instance of this spin hamiltonian of size ``n``. See
+        """Build an MPO instance of this spin hamiltonian of size ``L``. See
         also ``MatrixProductOperator``.
         """
         # cache the default term
@@ -1163,8 +1164,8 @@ class SpinHam:
                 return t_defs[which]
 
         def gen_tensors():
-            for i in range(n):
-                which = {0: 'L', n - 1: 'R'}.get(i, None)
+            for i in range(L):
+                which = {0: 'L', L - 1: 'R'}.get(i, None)
 
                 ij_L = (i - 1, i)
                 ij_R = (i, i + 1)
@@ -1194,12 +1195,12 @@ class SpinHam:
                                      lower_ind_id=lower_ind_id,
                                      site_tag_id=site_tag_id, tags=tags)
 
-    def build_sparse(self, n, **ikron_opts):
+    def build_sparse(self, L, **ikron_opts):
         """Build a sparse matrix representation of this Hamiltonian.
 
         Parameters
         ----------
-        n : int, optional
+        L : int, optional
             The number of spins to build the matrix for.
         ikron_opts
             Supplied to :func:`~quimb.core.ikron`.
@@ -1211,10 +1212,10 @@ class SpinHam:
         ikron_opts.setdefault('sparse', True)
 
         D = int(2 * self.S + 1)
-        dims = [D] * n
+        dims = [D] * L
 
         terms = []
-        for i in range(n):
+        for i in range(L):
 
             t1s = self.var_one_site_terms.get(i, self.one_site_terms)
             for factor, s in t1s:
@@ -1224,7 +1225,7 @@ class SpinHam:
                     ikron(factor * s, dims, i, **ikron_opts)
                 )
 
-            if (i + 1 == n) and (not self.cyclic):
+            if (i + 1 == L) and (not self.cyclic):
                 break
 
             t2s = self.var_two_site_terms.get((i, i + 1), self.two_site_terms)
@@ -1260,20 +1261,20 @@ class SpinHam:
         make_immutable(H)
         return H
 
-    def build_nni(self, n=None, **nni_opts):
+    def build_local_ham(self, L=None, **local_ham_1d_opts):
         """Build a nearest neighbour interactor instance of this spin
-        hamiltonian of size ``n``. See also
-        :class:`~quimb.tensor.tensor_tebd.NNI`.
+        hamiltonian of size ``L``. See also
+        :class:`~quimb.tensor.tensor_1d_tebd.LocalHam1D`.
 
         Parameters
         ----------
-        n : int, optional
+        L : int, optional
             The number of spins, if the hamiltonian only has two-site terms
             this is optional.
 
         Returns
         -------
-        NNI
+        LocalHam1D
         """
         H1s, H2s = {}, {}
 
@@ -1295,17 +1296,21 @@ class SpinHam:
             for site, terms in self.var_one_site_terms.items():
                 H1s[site] = self._sum_spin_ops(terms)
 
-        return NNI(H2=H2s, H1=H1s, n=n, cyclic=self.cyclic, **nni_opts)
+        return LocalHam1D(H2=H2s, H1=H1s, L=L,
+                          cyclic=self.cyclic, **local_ham_1d_opts)
+
+
+SpinHam = deprecated(SpinHam1D, 'SpinHam', 'SpinHam1D')
 
 
 def _ham_ising(j=1.0, bx=0.0, *, S=1 / 2, cyclic=False):
-    H = SpinHam(S=1 / 2, cyclic=cyclic)
+    H = SpinHam1D(S=1 / 2, cyclic=cyclic)
     H += j, 'Z', 'Z'
     H -= bx, 'X'
     return H
 
 
-def MPO_ham_ising(n, j=1.0, bx=0.0, *, S=1 / 2, cyclic=False, **mpo_opts):
+def MPO_ham_ising(L, j=1.0, bx=0.0, *, S=1 / 2, cyclic=False, **mpo_opts):
     r"""Ising Hamiltonian in MPO form.
 
     .. math::
@@ -1319,7 +1324,7 @@ def MPO_ham_ising(n, j=1.0, bx=0.0, *, S=1 / 2, cyclic=False, **mpo_opts):
 
     Parameters
     ----------
-    n : int
+    L : int
         The number of sites.
     j : float, optional
         The ZZ interaction strength. Positive is antiferromagnetic.
@@ -1330,7 +1335,7 @@ def MPO_ham_ising(n, j=1.0, bx=0.0, *, S=1 / 2, cyclic=False, **mpo_opts):
     cyclic : bool, optional
         Generate a MPO with periodic boundary conditions or not, default is
         open boundary conditions.
-    mpo_opts or nni_opts
+    mpo_opts or local_ham_1d_opts
         Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductOperator`.
 
     Returns
@@ -1338,11 +1343,12 @@ def MPO_ham_ising(n, j=1.0, bx=0.0, *, S=1 / 2, cyclic=False, **mpo_opts):
     MatrixProductOperator
     """
     H = _ham_ising(j=j, bx=bx, S=S, cyclic=cyclic)
-    return H.build_mpo(n, **mpo_opts)
+    return H.build_mpo(L, **mpo_opts)
 
 
-def NNI_ham_ising(n=None, j=1.0, bx=0.0, *, S=1 / 2, cyclic=False, **nni_opts):
-    r"""Ising Hamiltonian in NNI form.
+def ham_1d_ising(L=None, j=1.0, bx=0.0, *, S=1 / 2,
+                 cyclic=False, **local_ham_1d_opts):
+    r"""Ising Hamiltonian in LocalHam1D form.
 
     .. math::
 
@@ -1355,7 +1361,7 @@ def NNI_ham_ising(n=None, j=1.0, bx=0.0, *, S=1 / 2, cyclic=False, **nni_opts):
 
     Parameters
     ----------
-    n : int
+    L : int
         The number of sites.
     j : float, optional
         The ZZ interaction strength. Positive is antiferromagnetic.
@@ -1364,21 +1370,24 @@ def NNI_ham_ising(n=None, j=1.0, bx=0.0, *, S=1 / 2, cyclic=False, **nni_opts):
     S : {1/2, 1, 3/2, ...}, optional
         The underlying spin of the system, defaults to 1/2.
     cyclic : bool, optional
-        Generate a NNI with periodic boundary conditions or not, default is
-        open boundary conditions.
-    mpo_opts or nni_opts
-        Supplied to :class:`~quimb.tensor.tensor_1d.NNI`.
+        Generate a hamiltonian with periodic boundary conditions or not,
+        default is open boundary conditions.
+    mpo_opts or local_ham_1d_opts
+        Supplied to :class:`~quimb.tensor.tensor_1d.LocalHam1D`.
 
     Returns
     -------
-    NNI
+    LocalHam1D
     """
     H = _ham_ising(j=j, bx=bx, S=S, cyclic=cyclic)
-    return H.build_nni(n=n, **nni_opts)
+    return H.build_local_ham(L=L, **local_ham_1d_opts)
+
+
+NNI_ham_ising = deprecated(ham_1d_ising, 'NNI_ham_ising', 'ham_1d_ising')
 
 
 def _ham_XY(j=1.0, bz=0.0, *, S=1 / 2, cyclic=False):
-    H = SpinHam(S=S, cyclic=cyclic)
+    H = SpinHam1D(S=S, cyclic=cyclic)
 
     try:
         jx, jy = j
@@ -1398,7 +1407,7 @@ def _ham_XY(j=1.0, bz=0.0, *, S=1 / 2, cyclic=False):
     return H
 
 
-def MPO_ham_XY(n, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **mpo_opts):
+def MPO_ham_XY(L, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **mpo_opts):
     r"""XY-Hamiltonian in MPO form.
 
     .. math::
@@ -1415,7 +1424,7 @@ def MPO_ham_XY(n, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **mpo_opts):
 
     Parameters
     ----------
-    n : int
+    L : int
         The number of sites.
     j : float or (float, float), optional
         The XX and YY interaction strength. Positive is antiferromagnetic.
@@ -1426,7 +1435,7 @@ def MPO_ham_XY(n, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **mpo_opts):
     cyclic : bool, optional
         Generate a MPO with periodic boundary conditions or not, default is
         open boundary conditions.
-    mpo_opts or nni_opts
+    mpo_opts or local_ham_1d_opts
         Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductOperator`.
 
     Returns
@@ -1434,11 +1443,12 @@ def MPO_ham_XY(n, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **mpo_opts):
     MatrixProductOperator
     """
     H = _ham_XY(j=j, bz=bz, S=S, cyclic=cyclic)
-    return H.build_mpo(n, **mpo_opts)
+    return H.build_mpo(L, **mpo_opts)
 
 
-def NNI_ham_XY(n=None, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **nni_opts):
-    r"""XY-Hamiltonian in NNI form.
+def ham_1d_XY(L=None, j=1.0, bz=0.0, *, S=1 / 2,
+              cyclic=False, **local_ham_1d_opts):
+    r"""XY-Hamiltonian in LocalHam1D form.
 
     .. math::
 
@@ -1454,7 +1464,7 @@ def NNI_ham_XY(n=None, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **nni_opts):
 
     Parameters
     ----------
-    n : int
+    L : int
         The number of sites.
     j : float or (float, float), optional
         The XX and YY interaction strength. Positive is antiferromagnetic.
@@ -1463,21 +1473,24 @@ def NNI_ham_XY(n=None, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **nni_opts):
     S : {1/2, 1, 3/2, ...}, optional
         The underlying spin of the system, defaults to 1/2.
     cyclic : bool, optional
-        Generate a NNI with periodic boundary conditions or not, default is
-        open boundary conditions.
-    nni_opts
-        Supplied to :class:`~quimb.tensor.tensor_1d.NNI`.
+        Generate a hamiltonian with periodic boundary conditions or not,
+        default is open boundary conditions.
+    local_ham_1d_opts
+        Supplied to :class:`~quimb.tensor.tensor_1d.LocalHam1D`.
 
     Returns
     -------
-    NNI
+    LocalHam1D
     """
     H = _ham_XY(j=j, bz=bz, S=S, cyclic=cyclic)
-    return H.build_nni(n=n, **nni_opts)
+    return H.build_local_ham(L=L, **local_ham_1d_opts)
+
+
+NNI_ham_XY = deprecated(ham_1d_XY, 'NNI_ham_XY', 'ham_1d_XY')
 
 
 def _ham_heis(j=1.0, bz=0.0, *, S=1 / 2, cyclic=False):
-    H = SpinHam(S=S, cyclic=cyclic)
+    H = SpinHam1D(S=S, cyclic=cyclic)
 
     try:
         jx, jy, jz = j
@@ -1498,7 +1511,7 @@ def _ham_heis(j=1.0, bz=0.0, *, S=1 / 2, cyclic=False):
     return H
 
 
-def MPO_ham_heis(n, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **mpo_opts):
+def MPO_ham_heis(L, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **mpo_opts):
     r"""Heisenberg Hamiltonian in MPO form.
 
     .. math::
@@ -1516,7 +1529,7 @@ def MPO_ham_heis(n, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **mpo_opts):
 
     Parameters
     ----------
-    n : int
+    L : int
         The number of sites.
     j : float or (float, float, float), optional
         The XX, YY and ZZ interaction strength. Positive is antiferromagnetic.
@@ -1535,11 +1548,12 @@ def MPO_ham_heis(n, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **mpo_opts):
     MatrixProductOperator
     """
     H = _ham_heis(j=j, bz=bz, S=S, cyclic=cyclic)
-    return H.build_mpo(n, **mpo_opts)
+    return H.build_mpo(L, **mpo_opts)
 
 
-def NNI_ham_heis(n=None, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **nni_opts):
-    r"""Heisenberg Hamiltonian in NNI form.
+def ham_1d_heis(L=None, j=1.0, bz=0.0, *, S=1 / 2,
+                cyclic=False, **local_ham_1d_opts):
+    r"""Heisenberg Hamiltonian in LocalHam1D form.
 
     .. math::
 
@@ -1556,7 +1570,7 @@ def NNI_ham_heis(n=None, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **nni_opts):
 
     Parameters
     ----------
-    n : int
+    L : int
         The number of sites.
     j : float or (float, float, float), optional
         The XX, YY and ZZ interaction strength. Positive is antiferromagnetic.
@@ -1565,20 +1579,23 @@ def NNI_ham_heis(n=None, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **nni_opts):
     S : {1/2, 1, 3/2, ...}, optional
         The underlying spin of the system, defaults to 1/2.
     cyclic : bool, optional
-        Generate a NNI with periodic boundary conditions or not, default is
-        open boundary conditions.
-    nni_opts
-        Supplied to :class:`~quimb.tensor.tensor_gen.NNI`.
+        Generate a hamiltonian with periodic boundary conditions or not,
+        default is open boundary conditions.
+    local_ham_1d_opts
+        Supplied to :class:`~quimb.tensor.tensor_gen.LocalHam1D`.
 
     Returns
     -------
-    NNI
+    LocalHam1D
     """
     H = _ham_heis(j=j, bz=bz, S=S, cyclic=cyclic)
-    return H.build_nni(n=n, **nni_opts)
+    return H.build_local_ham(L=L, **local_ham_1d_opts)
 
 
-def MPO_ham_XXZ(n, delta, jxy=1.0, *, S=1 / 2, cyclic=False, **mpo_opts):
+NNI_ham_heis = deprecated(ham_1d_heis, 'NNI_ham_heis', 'ham_1d_heis')
+
+
+def MPO_ham_XXZ(L, delta, jxy=1.0, *, S=1 / 2, cyclic=False, **mpo_opts):
     r"""XXZ-Hamiltonian in MPO form.
 
     .. math::
@@ -1596,7 +1613,7 @@ def MPO_ham_XXZ(n, delta, jxy=1.0, *, S=1 / 2, cyclic=False, **mpo_opts):
 
     Parameters
     ----------
-    n : int
+    L : int
         The number of sites.
     delta : float
         The ZZ-interaction strength. Positive is antiferromagnetic.
@@ -1615,12 +1632,12 @@ def MPO_ham_XXZ(n, delta, jxy=1.0, *, S=1 / 2, cyclic=False, **mpo_opts):
     -------
     MatrixProductOperator
     """
-    return MPO_ham_heis(n, j=(jxy, jxy, delta), S=S, cyclic=cyclic, **mpo_opts)
+    return MPO_ham_heis(L, j=(jxy, jxy, delta), S=S, cyclic=cyclic, **mpo_opts)
 
 
-def NNI_ham_XXZ(n=None, delta=None, jxy=1.0, *,
-                S=1 / 2, cyclic=False, **nni_opts):
-    r"""XXZ-Hamiltonian in NNI form.
+def ham_1d_XXZ(L=None, delta=None, jxy=1.0, *,
+               S=1 / 2, cyclic=False, **local_ham_1d_opts):
+    r"""XXZ-Hamiltonian in LocalHam1D form.
 
     .. math::
 
@@ -1637,7 +1654,7 @@ def NNI_ham_XXZ(n=None, delta=None, jxy=1.0, *,
 
     Parameters
     ----------
-    n : int
+    L : int
         The number of sites.
     delta : float
         The ZZ-interaction strength. Positive is antiferromagnetic.
@@ -1647,22 +1664,26 @@ def NNI_ham_XXZ(n=None, delta=None, jxy=1.0, *,
     S : {1/2, 1, 3/2, ...}, optional
         The underlying spin of the system, defaults to 1/2.
     cyclic : bool, optional
-        Generate a NNI with periodic boundary conditions or not, default is
-        open boundary conditions.
-    nni_opts
-        Supplied to :class:`~quimb.tensor.tensor_gen.NNI`.
+        Generate a hamiltonian with periodic boundary conditions or not,
+        default is open boundary conditions.
+    local_ham_1d_opts
+        Supplied to :class:`~quimb.tensor.tensor_gen.LocalHam1D`.
 
     Returns
     -------
-    NNI
+    LocalHam1D
     """
     if delta is None:
         raise ValueError("You need to specify ``delta``.")
-    return NNI_ham_heis(n, j=(jxy, jxy, delta), S=S, cyclic=cyclic, **nni_opts)
+    return ham_1d_heis(L, j=(jxy, jxy, delta), S=S,
+                       cyclic=cyclic, **local_ham_1d_opts)
+
+
+NNI_ham_XXZ = deprecated(ham_1d_XXZ, 'NNI_ham_XXZ', 'ham_1d_XXZ')
 
 
 def _ham_bilinear_biquadratic(theta, *, S=1 / 2, cyclic=False):
-    H = SpinHam(S=S, cyclic=cyclic)
+    H = SpinHam1D(S=S, cyclic=cyclic)
 
     H += np.cos(theta), 'X', 'X'
     H += np.cos(theta), 'Y', 'Y'
@@ -1685,14 +1706,14 @@ def _ham_bilinear_biquadratic(theta, *, S=1 / 2, cyclic=False):
     return H
 
 
-def MPO_ham_bilinear_biquadratic(n=None, theta=0, *, S=1 / 2, cyclic=False,
+def MPO_ham_bilinear_biquadratic(L=None, theta=0, *, S=1 / 2, cyclic=False,
                                  compress=True, **mpo_opts):
     """ Hamiltonian of one-dimensional bilinear biquadratic chain in MPO form,
     see PhysRevB.93.184428.
 
     Parameters
     ----------
-    n : int
+    L : int
         The number of sites.
     theta : float or (float, float), optional
         The parameter for linear and non-linear term of interaction strength,
@@ -1700,8 +1721,8 @@ def MPO_ham_bilinear_biquadratic(n=None, theta=0, *, S=1 / 2, cyclic=False,
     S : {1/2, 1, 3/2, ...}, optional
         The underlying spin of the system, defaults to 1/2.
     cyclic : bool, optional
-        Generate a NNI with periodic boundary conditions or not, default is
-        open boundary conditions.
+        Generate a hamiltonian with periodic boundary conditions or not,
+        default is open boundary conditions.
     mpo_opts
         Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductOperator`.
 
@@ -1710,20 +1731,20 @@ def MPO_ham_bilinear_biquadratic(n=None, theta=0, *, S=1 / 2, cyclic=False,
     MatrixProductOperator
     """
     H = _ham_bilinear_biquadratic(theta, S=S, cyclic=cyclic)
-    H_mpo = H.build_mpo(n, **mpo_opts)
+    H_mpo = H.build_mpo(L, **mpo_opts)
     if compress is True:
         H_mpo.compress(cutoff=1e-12, cutoff_mode='rel' if cyclic else 'sum2')
     return H_mpo
 
 
-def NNI_ham_bilinear_biquadratic(n=None, theta=0, *, S=1 / 2,
-                                 cyclic=False, **nni_opts):
-    """ Hamiltonian of one-dimensional bilinear biquadratic chain in NNI form,
-    see PhysRevB.93.184428.
+def ham_1d_bilinear_biquadratic(L=None, theta=0, *, S=1 / 2,
+                                cyclic=False, **local_ham_1d_opts):
+    """ Hamiltonian of one-dimensional bilinear biquadratic chain in LocalHam1D
+    form, see PhysRevB.93.184428.
 
     Parameters
     ----------
-    n : int
+    L : int
         The number of sites.
     theta : float or (float, float), optional
         The parameter for linear and non-linear term of interaction strength,
@@ -1731,28 +1752,33 @@ def NNI_ham_bilinear_biquadratic(n=None, theta=0, *, S=1 / 2,
     S : {1/2, 1, 3/2, ...}, optional
         The underlying spin of the system, defaults to 1/2.
     cyclic : bool, optional
-        Generate a NNI with periodic boundary conditions or not, default is
-        open boundary conditions.
-    nni_opts
-        Supplied to :class:`~quimb.tensor.tensor_gen.NNI`.
+        Generate a hamiltonian with periodic boundary conditions or not,
+        default is open boundary conditions.
+    local_ham_1d_opts
+        Supplied to :class:`~quimb.tensor.tensor_gen.LocalHam1D`.
 
     Returns
     -------
-    NNI
+    LocalHam1D
     """
     H = _ham_bilinear_biquadratic(theta, S=S, cyclic=cyclic)
-    return H.build_nni(n=n, **nni_opts)
+    return H.build_local_ham(L=L, **local_ham_1d_opts)
 
 
-def _ham_mbl(n, dh, j=1.0, seed=None, S=1 / 2, *, cyclic=False,
+NNI_ham_bilinear_biquadratic = deprecated(ham_1d_bilinear_biquadratic,
+                                          'NNI_ham_bilinear_biquadratic',
+                                          'ham_1d_bilinear_biquadratic')
+
+
+def _ham_mbl(L, dh, j=1.0, seed=None, S=1 / 2, *, cyclic=False,
              dh_dist='s', dh_dim=1, beta=None):
     # start with the heisenberg builder
     H = _ham_heis(j, S=S, cyclic=cyclic)
 
-    dhds, rs = _gen_mbl_random_factors(n, dh, dh_dim, dh_dist, seed, beta)
+    dhds, rs = _gen_mbl_random_factors(L, dh, dh_dim, dh_dist, seed, beta)
 
     # generate noise, potentially in all directions, each with own strength
-    for i in range(n):
+    for i in range(L):
         dh_r_xyzs = zip(dhds, rs[:, i], 'XYZ')
         for dh, r, xyz in dh_r_xyzs:
             H[i] += dh * r, xyz
@@ -1760,7 +1786,7 @@ def _ham_mbl(n, dh, j=1.0, seed=None, S=1 / 2, *, cyclic=False,
     return H
 
 
-def MPO_ham_mbl(n, dh, j=1.0, seed=None, S=1 / 2, *, cyclic=False,
+def MPO_ham_mbl(L, dh, j=1.0, seed=None, S=1 / 2, *, cyclic=False,
                 dh_dist='s', dh_dim=1, beta=None, **mpo_opts):
     r"""The many-body-localized spin hamiltonian in MPO form.
 
@@ -1779,7 +1805,7 @@ def MPO_ham_mbl(n, dh, j=1.0, seed=None, S=1 / 2, *, cyclic=False,
 
     Parameters
     ----------
-    n : int
+    L : int
         Number of spins.
     dh : float
         Random noise strength.
@@ -1803,14 +1829,14 @@ def MPO_ham_mbl(n, dh, j=1.0, seed=None, S=1 / 2, *, cyclic=False,
     -------
     MatrixProductOperator
     """
-    H = _ham_mbl(n, dh=dh, j=j, seed=seed, S=S, cyclic=cyclic,
+    H = _ham_mbl(L, dh=dh, j=j, seed=seed, S=S, cyclic=cyclic,
                  dh_dist=dh_dist, dh_dim=dh_dim, beta=beta)
-    return H.build_mpo(n, **mpo_opts)
+    return H.build_mpo(L, **mpo_opts)
 
 
-def NNI_ham_mbl(n, dh, j=1.0, seed=None, S=1 / 2, *, cyclic=False,
-                dh_dist='s', dh_dim=1, beta=None, **nni_opts):
-    r"""The many-body-localized spin hamiltonian in NNI form.
+def ham_1d_mbl(L, dh, j=1.0, seed=None, S=1 / 2, *, cyclic=False,
+               dh_dist='s', dh_dim=1, beta=None, **local_ham_1d_opts):
+    r"""The many-body-localized spin hamiltonian in LocalHam1D form.
 
     .. math::
 
@@ -1827,7 +1853,7 @@ def NNI_ham_mbl(n, dh, j=1.0, seed=None, S=1 / 2, *, cyclic=False,
 
     Parameters
     ----------
-    n : int
+    L : int
         Number of spins.
     dh : float
         Random noise strength.
@@ -1844,13 +1870,16 @@ def NNI_ham_mbl(n, dh, j=1.0, seed=None, S=1 / 2, *, cyclic=False,
         Whether to use sqaure, guassian or quasiperiodic noise.
     beta : float, optional
         Frequency of the quasirandom noise, only if ``dh_dist='qr'``.
-    nni_opts
-        Supplied to :class:`NNI`.
+    local_ham_1d_opts
+        Supplied to :class:`LocalHam1D`.
 
     Returns
     -------
-    NNI
+    LocalHam1D
     """
-    H = _ham_mbl(n, dh=dh, j=j, seed=seed, S=S, cyclic=cyclic,
+    H = _ham_mbl(L, dh=dh, j=j, seed=seed, S=S, cyclic=cyclic,
                  dh_dist=dh_dist, dh_dim=dh_dim, beta=beta)
-    return H.build_nni(n, **nni_opts)
+    return H.build_local_ham(L, **local_ham_1d_opts)
+
+
+NNI_ham_mbl = deprecated(ham_1d_mbl, 'NNI_ham_mbl', 'ham_1d_mbl')

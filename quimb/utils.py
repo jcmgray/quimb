@@ -156,7 +156,7 @@ def deprecated(fn, old_name, new_name):
     def new_fn(*args, **kwargs):
         import warnings
         warnings.warn(f"The {old_name} function is deprecated in favor "
-                      "of {new_name}", Warning)
+                      f"of {new_name}", Warning)
         return fn(*args, **kwargs)
 
     return new_fn
@@ -220,23 +220,6 @@ def print_multi_line(*lines, max_width=None):
                         "..." if j == n_lines // 2 else "   ",
                     )
                 print(("{:^" + str(max_width) + "}").format("..."))
-
-
-def functions_equal(fn1, fn2):
-    """Check equality of the code in ``fn1`` and ``fn2``.
-    """
-
-    try:
-        code1 = fn1.__code__.co_code
-    except AttributeError:
-        code1 = fn1.__func__.__code__.co_code
-
-    try:
-        code2 = fn2.__code__.co_code
-    except AttributeError:
-        code2 = fn2.__func__.__code__.co_code
-
-    return code1 == code2
 
 
 def save_to_disk(obj, fname, **dump_opts):

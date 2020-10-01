@@ -231,8 +231,8 @@ class MovingEnvironment:
         else:
             self.segment_callbacks = segment_callbacks
 
-        self.n = tn.nsites
-        self.structure = tn.structure
+        self.L = tn.L
+        self._site_tag_id = tn.site_tag_id
 
         if self.cyclic:
             self.eps = eps
@@ -245,34 +245,34 @@ class MovingEnvironment:
                 # this logic essentially makes sure that segments prefer
                 #     overshooting e.g ssz=1/3 with n=100 produces segments of
                 #     length 34, to avoid a final segement of length 1.
-                self._ssz = int(self.n * ssz + self.n % int(1 / ssz))
+                self._ssz = int(self.L * ssz + self.L % int(1 / ssz))
             else:
                 self._ssz = ssz
 
-            self.segmented = self._ssz < self.n
+            self.segmented = self._ssz < self.L
             # will still split system in half but no compression or callbacks
             if not self.segmented:
-                self._ssz = int(self.n / 2 + self.n % 2)
+                self._ssz = int(self.L / 2 + self.L % 2)
 
             start, stop = {
                 'left': (0, self._ssz),
-                'right': (self.n - self._ssz, self.n)
+                'right': (self.L - self._ssz, self.L)
             }[begin]
         else:
             self.segmented = False
-            start, stop = (0, self.n - self.bsz + 1)
+            start, stop = (0, self.L - self.bsz + 1)
 
         self.init_segment(begin, start, stop)
 
     def site_tag(self, i):
-        return self.structure.format(i % self.n)
+        return self._site_tag_id.format(i % self.L)
 
     def init_segment(self, begin, start, stop):
         """Initialize the environments in ``range(start, stop)`` so that one
         can start sweeping from the side defined by ``begin``.
         """
-        if (start >= self.n) or (stop < 0):
-            start, stop = start % self.n, stop % self.n
+        if (start >= self.L) or (stop < 0):
+            start, stop = start % self.L, stop % self.L
 
         self.segment = range(start, stop)
         self.init_non_segment(start, stop + self.bsz // 2)
@@ -325,7 +325,7 @@ class MovingEnvironment:
 
             # if cyclic just contract other section and tag
             self.tnc |= Tensor(tags='_LEFT').astype(self.tn.dtype)
-            self.tnc.contract(slice(stop, start + self.n), inplace=True)
+            self.tnc.contract(slice(stop, start + self.L), inplace=True)
             self.tnc.add_tag('_RIGHT', where=stop + 1)
             return
 
@@ -369,7 +369,7 @@ class MovingEnvironment:
             self.tnc['_RIGHT'] /= norm
 
     def move_right(self):
-        i = (self.pos + 1) % self.n
+        i = (self.pos + 1) % self.L
 
         # generate a new segment if we go over the border
         if i not in self.segment:
@@ -377,7 +377,7 @@ class MovingEnvironment:
                 raise ValueError("For OBC, ``0 <= position <= n - bsz``.")
             self.init_segment('left', i, i + self._ssz)
         else:
-            self.pos = i % self.n
+            self.pos = i % self.L
 
         i0 = self.segment.start
 
@@ -389,7 +389,7 @@ class MovingEnvironment:
             self.envs[i] |= new_left ^ all
 
     def move_left(self):
-        i = (self.pos - 1) % self.n
+        i = (self.pos - 1) % self.L
 
         # generate a new segment if we go over the border
         if i not in self.segment:
@@ -397,7 +397,7 @@ class MovingEnvironment:
                 raise ValueError("For OBC, ``0 <= position <= n - bsz``.")
             self.init_segment('right', i - self._ssz + 1, i + 1)
         else:
-            self.pos = i % self.n
+            self.pos = i % self.L
 
         iN = self.segment.stop
 
@@ -415,12 +415,12 @@ class MovingEnvironment:
         if self.cyclic:
             # to take account of PBC, rescale so that current pos == n // 2,
             #     then work out if desired i is lower or higher
-            ri = (i + (self.n // 2 - self.pos)) % self.n
-            direction = 'left' if ri <= self.n // 2 else 'right'
+            ri = (i + (self.L // 2 - self.pos)) % self.L
+            direction = 'left' if ri <= self.L // 2 else 'right'
         else:
             direction = 'left' if i < self.pos else 'right'
 
-        while self.pos != i % self.n:
+        while self.pos != i % self.L:
             {'left': self.move_left, 'right': self.move_right}[direction]()
 
     def __call__(self):
@@ -537,7 +537,7 @@ class DMRG:
 
     def __init__(self, ham, bond_dims, cutoffs=1e-9,
                  bsz=2, which='SA', p0=None):
-        self.n = ham.nsites
+        self.L = ham.L
         self.phys_dim = ham.phys_dim()
         self.bsz = bsz
         self.which = which
@@ -602,7 +602,7 @@ class DMRG:
         """Compress a site having updated it. Also serves to move the
         orthogonality center along.
         """
-        if (direction == 'right') and ((i < self.n - 1) or self.cyclic):
+        if (direction == 'right') and ((i < self.L - 1) or self.cyclic):
             self._k.left_canonize_site(i, bra=self._b)
         elif (direction == 'left') and ((i > 0) or self.cyclic):
             self._k.right_canonize_site(i, bra=self._b)
@@ -647,7 +647,7 @@ class DMRG:
             effv_n = 'OBC'
 
         if i is None:
-            site_norm = [self._k[i].H @ self._k[i] for i in range(self.n)]
+            site_norm = [self._k[i].H @ self._k[i] for i in range(self.L)]
         else:
             site_norm = self._k[i].H @ self._k[i]
 
@@ -877,7 +877,7 @@ class DMRG:
             {'R': self._k.right_canonize,
              'L': self._k.left_canonize}[direction](bra=self._b)
 
-        n, bsz = self.n, self.bsz
+        n, bsz = self.L, self.bsz
 
         direction, begin, sweep = {
             ('R', False): ('right', 'left', range(0, n - bsz + 1)),
@@ -1308,15 +1308,15 @@ class DMRGX(DMRG):
             Supplied to ``self._update_local_state``.
         """
         old_k = self._k.copy().H
-        TN_overlap = TensorNetwork([self._k, old_k], virtual=True)
+        TN_overlap = self._k | old_k
 
         if canonize:
             {'R': self._k.right_canonize,
              'L': self._k.left_canonize}[direction](bra=self._b)
 
         direction, begin, sweep = {
-            'R': ('right', 'left', range(0, self.n - self.bsz + 1)),
-            'L': ('left', 'right', reversed(range(0, self.n - self.bsz + 1))),
+            'R': ('right', 'left', range(0, self.L - self.bsz + 1)),
+            'L': ('left', 'right', reversed(range(0, self.L - self.bsz + 1))),
         }[direction]
 
         eff_opts = {'begin': begin, 'bsz': self.bsz, 'cyclic': self.cyclic}
@@ -1325,7 +1325,7 @@ class DMRGX(DMRG):
         self.ME_eff_ovlp = MovingEnvironment(TN_overlap, **eff_opts)
 
         if verbosity:
-            sweep = progbar(sweep, ncols=80, total=self.n - self.bsz + 1)
+            sweep = progbar(sweep, ncols=80, total=self.L - self.bsz + 1)
 
         local_ens, tot_ens = zip(*[
             self._update_local_state(i, direction=direction, **update_opts)

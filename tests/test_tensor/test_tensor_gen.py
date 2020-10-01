@@ -5,7 +5,7 @@ import quimb as qu
 import quimb.tensor as qtn
 
 
-class TestSpinHam:
+class TestSpinHam1D:
 
     @pytest.mark.parametrize("cyclic", [False, True])
     def test_var_terms(self, cyclic):
@@ -21,7 +21,7 @@ class TestSpinHam:
         K1 = qu.rand_herm(2**1)
 
         n = 10
-        HB = qtn.SpinHam(S=1 / 2)
+        HB = qtn.SpinHam1D(S=1 / 2)
 
         if var_two == 'some':
             HB += 1, K1, K1
@@ -45,7 +45,7 @@ class TestSpinHam:
         elif var_one == 'def-only':
             HB += 1, K1
 
-        HB.build_nni(n)
+        HB.build_local_ham(n)
         H_mpo = HB.build_mpo(n)
         H_sps = HB.build_sparse(n)
 
@@ -53,7 +53,7 @@ class TestSpinHam:
 
     def test_no_default_term(self):
         N = 10
-        builder = qtn.SpinHam(1 / 2)
+        builder = qtn.SpinHam1D(1 / 2)
 
         for i in range(N - 1):
             builder[i, i + 1] += 1.0, 'Z', 'Z'

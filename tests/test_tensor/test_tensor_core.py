@@ -14,6 +14,7 @@ from quimb.tensor import (
     tensor_direct_product,
     Tensor,
     TensorNetwork,
+    TensorNetwork1D,
     rand_tensor,
     MPS_rand_state,
     TNLinearOperator1D,
@@ -877,7 +878,8 @@ class TestTensorNetwork:
         b = rand_tensor((3, 4, 5), inds=[1, 2, 3], tags='I1')
         c = rand_tensor((5, 2, 6), inds=[3, 0, 4], tags='I2')
         d = rand_tensor((5, 2, 6), inds=[5, 6, 4], tags='I3')
-        tn = TensorNetwork((a, b, c, d), structure="I{}")
+        tn = TensorNetwork((a, b, c, d))
+        tn.view_as_(TensorNetwork1D, L=4, site_tag_id='I{}')
 
         assert len((tn ^ slice(2)).tensors) == 3
         assert len((tn ^ slice(..., 1, -1)).tensors) == 3
@@ -923,7 +925,8 @@ class TestTensorNetwork:
         b_data = np.random.randn(2, 3, 4)
         a = Tensor(a_data, inds='abc', tags={'I0'})
         b = Tensor(b_data, inds='abc', tags={'I1'})
-        tn = TensorNetwork((a, b), structure="I{}")
+        tn = TensorNetwork((a, b))
+        tn.view_as_(TensorNetwork1D, L=2, site_tag_id='I{}')
         assert_allclose(tn[0].data, a_data)
         new_data = np.random.randn(2, 3, 4)
         tn[1] = Tensor(new_data, inds='abc', tags={'I1', 'red'})
@@ -935,7 +938,8 @@ class TestTensorNetwork:
         b_data = np.random.randn(2, 3, 4)
         a = Tensor(a_data, inds='abc', tags={'I0'})
         b = Tensor(b_data, inds='abc', tags={'I1'})
-        tn = TensorNetwork((a, b), structure="I{}")
+        tn = TensorNetwork((a, b))
+        tn.view_as_(TensorNetwork1D, L=2, site_tag_id='I{}')
         assert_allclose(tn[0].data, a_data)
         new_data = np.random.randn(2, 3, 4)
         tn[1].modify(data=new_data)
@@ -1044,7 +1048,7 @@ class TestTensorNetwork:
         assert set(x.inds) == {'a', 'd'}
 
     def test_partition(self):
-        k = MPS_rand_state(10, 7, site_tag_id='Q{}', structure_bsz=4)
+        k = MPS_rand_state(10, 7, site_tag_id='Q{}')
         where = [f'Q{i}' for i in range(10) if i % 2 == 1]
         k.add_tag('odd', where=where, which='any')
 
@@ -1052,12 +1056,10 @@ class TestTensorNetwork:
 
         assert len(tn_even.tensors) == len(tn_odd.tensors) == 5
 
-        assert tn_even.structure == 'Q{}'
-        assert tn_even.structure_bsz == 4
-        assert tn_odd.structure == 'Q{}'
-        assert tn_odd.structure_bsz == 4
+        assert tn_even.site_tag_id == 'Q{}'
+        assert tn_odd.site_tag_id == 'Q{}'
 
-        assert (tn_even & tn_odd).sites == range(10)
+        assert (tn_even & tn_odd).sites == tuple(range(10))
 
     def test_compress_multibond(self):
         A = rand_tensor((7, 2, 2), 'abc', tags='A')
@@ -1400,7 +1402,7 @@ class TestTensorNetworkAsLinearOperator:
 
         tn.replace_with_svd(where, left_inds=(ul, ll), eps=1e-3, method=method,
                             inplace=True, ltags='_U', rtags='_V')
-        tn.structure = None
+
         x2 = tn ^ ...
 
         # check ltags and rtags have gone in

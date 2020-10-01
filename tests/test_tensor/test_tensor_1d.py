@@ -62,7 +62,7 @@ class TestMatrixProductState:
         mps = MatrixProductState.from_dense(psi, dims=[2] * 8)
         assert mps.tags == oset(f'I{i}' for i in range(8))
         assert mps.site_inds == tuple(f'k{i}' for i in range(8))
-        assert mps.nsites == 8
+        assert mps.L == 8
         mpod = mps.to_dense()
         assert qu.expec(mpod, psi) == pytest.approx(1)
 
@@ -375,12 +375,6 @@ class TestMatrixProductState:
         pd = p.to_dense()
         rdd = pd.ptr([2] * n, keep=keep)
         assert_allclose(rd, rdd)
-
-    @pytest.mark.parametrize("cyclic", [False, True])
-    def test_specify_sites(self, cyclic):
-        sites = [12, 13, 15, 16, 17]
-        k = MPS_rand_state(5, 7, cyclic=cyclic, sites=sites, nsites=20)
-        assert k.tags == oset([f'I{i}' for i in sites])
 
     def test_bipartite_schmidt_state(self):
         psi = MPS_rand_state(16, 5)
@@ -764,14 +758,6 @@ class TestMatrixProductOperator:
         assert y.site_ind_id == site_ind_id
         Ad, xd, yd = A.to_dense(), x.to_dense(), y.to_dense()
         assert_allclose(Ad @ xd, yd)
-
-    @pytest.mark.parametrize("cyclic", (False, True))
-    def test_sites_mpo_mps_product(self, cyclic):
-        k = MPS_rand_state(13, 7, cyclic=cyclic)
-        X = MPO_rand_herm(3, 5, sites=[3, 6, 7], nsites=13, cyclic=cyclic)
-        b = k.H
-        k.align_(X, b)
-        assert (k & X & b) ^ ...
 
 
 # --------------------------------------------------------------------------- #

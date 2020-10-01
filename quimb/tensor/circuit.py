@@ -552,7 +552,7 @@ class Circuit:
             ]
         >>> qc.apply_gates(gates)
         >>> qc.psi
-        <TensorNetwork1DVector(tensors=12, indices=14, nsites=3)>
+        <TensorNetwork1DVector(tensors=12, indices=14, L=3, max_bond=2)>
 
         >>> qc.psi.to_dense().round(4)
         qarray([[ 0.7071+0.j],
@@ -598,10 +598,10 @@ class Circuit:
 
         elif N is None:
             self._psi = psi0.copy()
-            self.N = psi0.nsites
+            self.N = psi0.L
 
         else:
-            if N != psi0.nsites:
+            if N != psi0.L:
                 raise ValueError("`N` doesn't match `psi0`.")
             self.N = N
             self._psi = psi0.copy()

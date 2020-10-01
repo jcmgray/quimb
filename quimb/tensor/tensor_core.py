@@ -1,7 +1,6 @@
 """Core tensor network tools.
 """
 import os
-import re
 import copy
 import uuid
 import math
@@ -18,11 +17,11 @@ import numpy as np
 import opt_einsum as oe
 import scipy.sparse.linalg as spla
 from autoray import (do, conj, reshape, transpose, astype,
-                     infer_backend, get_dtype_name)
+                     infer_backend, get_dtype_name, dag)
 
 from ..core import qarray, prod, realify_scalar, vdot, common_type
-from ..utils import (check_opt, functions_equal, oset, concat, frequencies,
-                     partition_all, merge_with, valmap, ensure_dict)
+from ..utils import (check_opt, oset, concat, frequencies,
+                     merge_with, valmap, ensure_dict)
 from ..gen.rand import randn, seed_rand
 from . import decomp
 from .array_ops import (iscomplex, norm_fro, unitize, ndim, asarray, PArray,
@@ -94,6 +93,8 @@ def _get_contract_path(eq, *shapes, **kwargs):
     optimize = kwargs.pop('optimize', get_contract_strategy())
     if isinstance(optimize, str):
         optimize = oe.paths.get_path_fn(optimize)
+
+    kwargs.setdefault('memory_limit', None)
 
     # this way we get to avoid constructing the full PathInfo object
     path = optimize(inputs, output, size_dict, **kwargs)
@@ -2077,37 +2078,6 @@ class TensorNetwork(object):
     ts : sequence of Tensor or TensorNetwork
         The objects to combine. The new network will copy these (but not the
         underlying data) by default. For a *view* set ``virtual=True``.
-    structure : str, optional
-        A string, with integer format specifier, that describes how to range
-        over the network's tags in order to contract it. Also allows integer
-        indexing rather than having to explcitly use tags.
-    structure_bsz : int, optional
-        How many sites to group together when auto contracting. Eg for 3 (with
-        the dotted lines denoting vertical strips of tensors to be
-        contracted)::
-
-            .....       i        ........ i        ...i.
-            O-O-O-O-O-O-O-        /-O-O-O-O-        /-O-
-            | | | | | | |   ->   1  | | | |   ->   2  |   ->  etc.
-            O-O-O-O-O-O-O-        \-O-O-O-O-        \-O-
-
-        Should not require tensor contractions with more than 52 unique
-        indices.
-    nsites : int, optional
-        The total number of sites, if explicitly known. This will be calculated
-        using `structure` if needed but not specified. When the network is not
-        dense in sites, i.e. ``sites != range(nsites)``, this should be the
-        total number of sites the network is embedded in::
-
-            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10  :-> nsites=10
-            .  .  .  .  .  .  .  .  .  .  .
-                  0--0--0--------0--0         :-> sites=(2, 3, 4, 7, 8)
-                  |  |  |        |  |
-
-    sites : sequence of int, optional
-        The indices of the sites present in this network, defaults to
-        ``range(nsites)``. But could be e.g. ``[0, 1, 4, 5, 7]`` if some sites
-        have been removed.
     check_collisions : bool, optional
         If True, the default, then Tensors and TensorNetworks with double
         indices which match another Tensor or TensorNetworks double indices
@@ -2135,21 +2105,12 @@ class TensorNetwork(object):
     """
 
     _EXTRA_PROPS = ()
+    _CONTRACT_STRUCTURED = False
 
-    def __init__(self, ts, *,
-                 virtual=False,
-                 structure=None,
-                 structure_bsz=None,
-                 nsites=None,
-                 sites=None,
-                 check_collisions=True):
+    def __init__(self, ts, *, virtual=False, check_collisions=True):
 
         # short-circuit for copying TensorNetworks
         if isinstance(ts, TensorNetwork):
-            self.structure = ts.structure
-            self.nsites = ts.nsites
-            self.sites = ts.sites
-            self.structure_bsz = ts.structure_bsz
             self.tag_map = valmap(lambda tids: tids.copy(), ts.tag_map)
             self.ind_map = valmap(lambda tids: tids.copy(), ts.ind_map)
             self.tensor_map = dict()
@@ -2160,12 +2121,6 @@ class TensorNetwork(object):
                 setattr(self, ep, getattr(ts, ep))
             return
 
-        # parameters
-        self.structure = structure
-        self.structure_bsz = structure_bsz
-        self.nsites = nsites
-        self.sites = sites
-
         # internal structure
         self.tensor_map = dict()
         self.tag_map = dict()
@@ -2175,44 +2130,6 @@ class TensorNetwork(object):
         for t in ts:
             self.add(t, virtual=virtual, check_collisions=check_collisions)
         self._inner_inds = None
-
-        if self.structure:
-            # set the list of indices of sites which are present
-            if self.sites is None:
-                if self.nsites is None:
-                    self.nsites = self.calc_nsites()
-                self.sites = range(self.nsites)
-            else:
-                if self.nsites is None:
-                    raise ValueError("The total number of sites, ``nsites`` "
-                                     "must be specified when a custom subset, "
-                                     "i.e. ``sites``, is.")
-
-            # set default blocksize
-            if self.structure_bsz is None:
-                self.structure_bsz = 10
-
-    def _combine_properties(self, other):
-        props_equals = (('structure', lambda u, v: u == v),
-                        ('nsites', lambda u, v: u == v),
-                        ('structure_bsz', lambda u, v: u == v),
-                        ('contract_structured_all', functions_equal))
-
-        for prop, equal in props_equals:
-
-            # check whether to inherit ... or compare properties
-            u, v = getattr(self, prop, None), getattr(other, prop, None)
-
-            if v is not None:
-                # don't have prop yet -> inherit
-                if u is None:
-                    setattr(self, prop, v)
-
-                # both have prop, and don't match -> raise
-                elif not equal(u, v):
-                    raise ValueError("Conflicting values found on tensor "
-                                     f"networks for property {prop}. First "
-                                     f"value: {u}, second value: {v}")
 
     def __and__(self, other):
         """Combine this tensor network with more tensors, without contracting.
@@ -2352,9 +2269,6 @@ class TensorNetwork(object):
     def add_tensor_network(self, tn, virtual=False, check_collisions=True):
         """
         """
-        self._combine_sites(tn)
-        self._combine_properties(tn)
-
         if check_collisions:  # add tensors individually
             if getattr(self, '_inner_inds', None) is None:
                 self._inner_inds = oset(self.inner_inds())
@@ -2445,46 +2359,6 @@ class TensorNetwork(object):
         """The total number of indices in the tensor network.
         """
         return len(self.ind_map)
-
-    def calc_nsites(self):
-        """Calculate how many tags there are which match ``structure``.
-        """
-        return len(
-            re.findall(self.structure.format(r"(\d+)"), ",".join(self.tags))
-        )
-
-    @staticmethod
-    @functools.lru_cache(8)
-    def regex_for_calc_sites_cached(structure):
-        return re.compile(structure.format(r"(\d+)"))
-
-    def calc_sites(self):
-        """Calculate with sites this TensorNetwork contain based on its
-        ``structure``.
-        """
-        rgx = self.regex_for_calc_sites_cached(self.structure)
-        matches = rgx.findall(",".join(self.tags))
-        sites = sorted(map(int, matches))
-
-        # check if can convert to contiguous range
-        mn, mx = min(sites), max(sites) + 1
-        if len(sites) == mx - mn:
-            sites = range(mn, mx)
-
-        return sites
-
-    def _combine_sites(self, other):
-        """Correctly combine the sites list of two TNs.
-        """
-        if (self.sites != other.sites) and (other.sites is not None):
-            if self.sites is None:
-                self.sites = other.sites
-            else:
-                self.sites = tuple(sorted(set(self.sites) | set(other.sites)))
-
-                mn, mx = min(self.sites), max(self.sites) + 1
-                if len(self.sites) == mx - mn:
-                    self.sites = range(mn, mx)
 
     def _pop_tensor(self, tid):
         """Remove a tensor from this network, returning said tensor.
@@ -2751,84 +2625,6 @@ class TensorNetwork(object):
 
     # ----------------- selecting and splitting the network ----------------- #
 
-    def slice2sites(self, tag_slice):
-        """Take a slice object, and work out its implied start, stop and step,
-        taking into account cyclic boundary conditions.
-
-        Examples
-        --------
-        Normal slicing:
-
-            >>> p = MPS_rand_state(10, bond_dim=7)
-            >>> p.slice2sites(slice(5))
-            (0, 1, 2, 3, 4)
-
-            >>> p.slice2sites(slice(4, 8))
-            (4, 5, 6, 7)
-
-        Slicing from end backwards:
-
-            >>> p.slice2sites(slice(..., -3, -1))
-            (9, 8)
-
-        Slicing round the end:
-
-            >>> p.slice2sites(slice(7, 12))
-            (7, 8, 9, 0, 1)
-
-            >>> p.slice2sites(slice(-3, 2))
-            (7, 8, 9, 0, 1)
-
-        If the start point is > end point (*before* modulo n), then step needs
-        to be negative to return anything.
-        """
-        if tag_slice.start is None:
-            start = 0
-        elif tag_slice.start is ...:
-            if tag_slice.step == -1:
-                start = self.nsites - 1
-            else:
-                start = -1
-        else:
-            start = tag_slice.start
-
-        if tag_slice.stop in (..., None):
-            stop = self.nsites
-        else:
-            stop = tag_slice.stop
-
-        step = 1 if tag_slice.step is None else tag_slice.step
-
-        return tuple(s % self.nsites for s in range(start, stop, step))
-
-    def site_tag(self, i):
-        """Get the tag corresponding to site ``i``, taking into account
-        periodic boundary conditions.
-        """
-        return self.structure.format(i % self.nsites)
-
-    def sites2tags(self, sites):
-        """Take a integer or slice and produce the correct set of tags.
-
-        Parameters
-        ----------
-        sites : int or slice
-            The site(s). If ``slice``, non inclusive of end.
-
-        Returns
-        -------
-        tags : set
-            The correct tags describing those sites.
-        """
-        if isinstance(sites, Integral):
-            return (self.site_tag(sites),)
-
-        elif isinstance(sites, slice):
-            return tuple(map(self.structure.format, self.slice2sites(sites)))
-        else:
-            raise TypeError("``sites2tags`` needs an integer or a slice"
-                            f", but got {sites}")
-
     def _get_tids_from(self, xmap, xs, which):
         inverse = which[0] == '!'
         if inverse:
@@ -2932,12 +2728,8 @@ class TensorNetwork(object):
         tagged_tids = self._get_tids_from_tags(tags, which=which)
         ts = (self.tensor_map[n] for n in tagged_tids)
 
-        tn = TensorNetwork(ts, check_collisions=False, virtual=True,
-                           structure=self.structure, nsites=self.nsites,
-                           structure_bsz=self.structure_bsz)
-
-        if self.structure is not None:
-            tn.sites = tn.calc_sites()
+        tn = TensorNetwork(ts, check_collisions=False, virtual=True)
+        tn.view_like_(self)
 
         return tn
 
@@ -2988,13 +2780,9 @@ class TensorNetwork(object):
         Tensor or sequence of Tensors
         """
         if isinstance(tags, slice):
-            return self.select_any(self.sites2tags(tags))
+            return self.select_any(self.maybe_convert_coo(tags))
 
-        elif isinstance(tags, Integral):
-            tensors = self.select_tensors(self.sites2tags(tags), which='any')
-
-        else:
-            tensors = self.select_tensors(tags, which='all')
+        tensors = self.select_tensors(tags, which='all')
 
         if len(tensors) == 0:
             raise KeyError(f"Couldn't find any tensors matching {tags}.")
@@ -3063,7 +2851,7 @@ class TensorNetwork(object):
 
         return untagged_tn, tagged_ts
 
-    def partition(self, tags, which='any', inplace=False, calc_sites=True):
+    def partition(self, tags, which='any', inplace=False):
         """Split this TN into two, based on which tensors have any or all of
         ``tags``. Unlike ``partition_tensors``, both results are TNs which
         inherit the structure of the initial TN.
@@ -3076,8 +2864,6 @@ class TensorNetwork(object):
             Whether to split based on matching any or all of the tags.
         inplace : bool
             If True, actually remove the tagged tensors from self.
-        calc_sites : bool
-            If True, calculate which sites belong to which network.
 
         Returns
         -------
@@ -3090,13 +2876,13 @@ class TensorNetwork(object):
         """
         tagged_tids = self._get_tids_from_tags(tags, which=which)
 
-        kws = {'check_collisions': False, 'structure': self.structure,
-               'structure_bsz': self.structure_bsz, 'nsites': self.nsites}
+        kws = {'check_collisions': False}
 
         if inplace:
             t1 = self
             t2s = [t1._pop_tensor(tid) for tid in tagged_tids]
             t2 = TensorNetwork(t2s, **kws)
+            t2.view_like_(self)
 
         else:  # rebuild both -> quicker
             t1s, t2s = [], []
@@ -3104,10 +2890,8 @@ class TensorNetwork(object):
                 (t2s if tid in tagged_tids else t1s).append(tensor)
 
             t1, t2 = TensorNetwork(t1s, **kws), TensorNetwork(t2s, **kws)
-
-        if calc_sites and self.structure is not None:
-            t1.sites = t1.calc_sites()
-            t2.sites = t2.calc_sites()
+            t1.view_like_(self)
+            t2.view_like_(self)
 
         return t1, t2
 
@@ -3217,7 +3001,7 @@ class TensorNetwork(object):
         replace_with_identity
         """
         leave, svd_section = self.partition(where, which=which,
-                                            inplace=inplace, calc_sites=False)
+                                            inplace=inplace)
 
         tags = svd_section.tags if keep_tags else oset()
         ltags = tags_to_oset(ltags)
@@ -3232,9 +3016,11 @@ class TensorNetwork(object):
             A = svd_section.aslinearoperator(left_inds=left_inds,
                                              right_inds=right_inds)
         else:
+            from .tensor_1d import TNLinearOperator1D
+
             # check if need to invert start stop as well
             if '!' in which:
-                start, stop = stop, start + self.nsites
+                start, stop = stop, start + self.L
                 left_inds, right_inds = right_inds, left_inds
                 ltags, rtags = rtags, ltags
 
@@ -4377,49 +4163,6 @@ class TensorNetwork(object):
 
         return tn
 
-    def contract_structured(self, tag_slice, inplace=False, **opts):
-        """Perform a structured contraction, translating ``tag_slice`` from a
-        ``slice`` or `...` to a cumulative sequence of tags.
-
-        Parameters
-        ----------
-        tag_slice : slice or ...
-            The range of sites, or `...` for all.
-        inplace : bool, optional
-            Whether to perform the contraction inplace.
-
-        Returns
-        -------
-        TensorNetwork, Tensor or scalar
-            The result of the contraction, still a ``TensorNetwork`` if the
-            contraction was only partial.
-
-        See Also
-        --------
-        contract, contract_tags, contract_cumulative
-        """
-        # check for all sites
-        if tag_slice is ...:
-
-            # check for a custom structured full contract sequence
-            if hasattr(self, "contract_structured_all"):
-                return self.contract_structured_all(
-                    self, inplace=inplace, **opts)
-
-            # else slice over all sites
-            tag_slice = slice(0, self.nsites)
-
-        # filter sites by the slice, but also which sites are present at all
-        sites = self.slice2sites(tag_slice)
-        tags_seq = (self.structure.format(s) for s in sites if s in self.sites)
-
-        # partition sites into `structure_bsz` groups
-        if self.structure_bsz > 1:
-            tags_seq = partition_all(self.structure_bsz, tags_seq)
-
-        # contract each block of sites cumulatively
-        return self.contract_cumulative(tags_seq, inplace=inplace, **opts)
-
     def contract(self, tags=..., inplace=False, **opts):
         """Contract some, or all, of the tensors in this network. This method
         dispatches to ``contract_structured`` or ``contract_tags``.
@@ -4448,14 +4191,13 @@ class TensorNetwork(object):
         if tags is all:
             return tensor_contract(*self, **opts)
 
-        # Check for a structured strategy for performing contraction...
-        if self.structure is not None:
-
-            # but only use for total or slice tags
+        # this checks whether certain TN classes have a manually specified
+        #     contraction pattern (e.g. 1D along the line)
+        if self._CONTRACT_STRUCTURED:
             if (tags is ...) or isinstance(tags, slice):
                 return self.contract_structured(tags, inplace=inplace, **opts)
 
-        # Else just contract those tensors specified by tags.
+        # else just contract those tensors specified by tags.
         return self.contract_tags(tags, inplace=inplace, **opts)
 
     contract_ = functools.partialmethod(contract, inplace=True)
@@ -5211,23 +4953,17 @@ class TensorNetwork(object):
             t.add_owner(self, tid=rand_uuid(base="_T"))
 
     def __str__(self):
-        return "{}([{}{}{}]{}{})".format(
+        return "{}([{}{}{}])".format(
             self.__class__.__name__,
             os.linesep,
             "".join(["    " + repr(t) + "," + os.linesep
                      for t in self.tensors[:-1]]),
-            "    " + repr(self.tensors[-1]) + "," + os.linesep,
-            ", structure='{}'".format(self.structure) if
-            self.structure is not None else "",
-            ", nsites={}".format(self.nsites) if
-            self.nsites is not None else "")
+            "    " + repr(self.tensors[-1]) + "," + os.linesep)
 
     def __repr__(self):
         rep = f"<{self.__class__.__name__}("
         rep += f"tensors={self.num_tensors}"
         rep += f", indices={self.num_indices}"
-        if self.structure:
-            rep += f", structure='{self.structure}', nsites={self.nsites}"
 
         return rep + ")>"
 
@@ -5439,174 +5175,6 @@ class TNLinearOperator(spla.LinearOperator):
             ldims=self.ldims, rdims=self.rdims,
             optimize=self.optimize, backend=self.backend,
         )
-
-
-class TNLinearOperator1D(spla.LinearOperator):
-    r"""A 1D tensor network linear operator like::
-
-                 start                 stop - 1
-                   .                     .
-                 :-O-O-O-O-O-O-O-O-O-O-O-O-:                 --+
-                 : | | | | | | | | | | | | :                   |
-                 :-H-H-H-H-H-H-H-H-H-H-H-H-:    acting on    --V
-                 : | | | | | | | | | | | | :                   |
-                 :-O-O-O-O-O-O-O-O-O-O-O-O-:                 --+
-        left_inds^                         ^right_inds
-
-    Like :class:`~quimb.tensor.tensor_core.TNLinearOperator`, but performs a
-    structured contract from one end to the other than can handle very long
-    chains possibly more efficiently by contracting in blocks from one end.
-
-
-    Parameters
-    ----------
-    tn : TensorNetwork
-        The tensor network to turn into a ``LinearOperator``.
-    left_inds : sequence of str
-        The left indicies.
-    right_inds : sequence of str
-        The right indicies.
-    start : int
-        Index of starting site.
-    stop : int
-        Index of stopping site (does not include this site).
-    ldims : tuple of int, optional
-        If known, the dimensions corresponding to ``left_inds``.
-    rdims : tuple of int, optional
-        If known, the dimensions corresponding to ``right_inds``.
-
-    See Also
-    --------
-    TNLinearOperator
-    """
-
-    def __init__(self, tn, left_inds, right_inds, start, stop,
-                 ldims=None, rdims=None, is_conj=False, is_trans=False):
-        self.tn = tn
-        self.start, self.stop = start, stop
-
-        if ldims is None or rdims is None:
-            ind_sizes = tn.ind_sizes()
-            ldims = tuple(ind_sizes[i] for i in left_inds)
-            rdims = tuple(ind_sizes[i] for i in right_inds)
-
-        self.left_inds, self.right_inds = left_inds, right_inds
-        self.ldims, ld = ldims, prod(ldims)
-        self.rdims, rd = rdims, prod(rdims)
-        self.tags = self.tn.tags
-
-        # conjugate inputs/ouputs rather all tensors if necessary
-        self.is_conj = is_conj
-        self.is_trans = is_trans
-        self._conj_linop = None
-        self._adjoint_linop = None
-        self._transpose_linop = None
-
-        super().__init__(dtype=self.tn.dtype, shape=(ld, rd))
-
-    def _matvec(self, vec):
-        in_data = reshape(vec, self.rdims)
-
-        if self.is_conj:
-            in_data = conj(in_data)
-
-        if self.is_trans:
-            i, f, s = self.start, self.stop, 1
-        else:
-            i, f, s = self.stop - 1, self.start - 1, -1
-
-        # add the vector to the right of the chain
-        tnc = self.tn | Tensor(in_data, self.right_inds, tags=['_VEC'])
-
-        # absorb it into the rightmost site
-        tnc ^= ['_VEC', self.tn.site_tag(i)]
-
-        # then do a structured contract along the whole chain
-        out_T = tnc ^ slice(i, f, s)
-
-        out_data = out_T.transpose_(*self.left_inds).data.ravel()
-        if self.is_conj:
-            out_data = conj(out_data)
-
-        return out_data
-
-    def _matmat(self, mat):
-        d = mat.shape[-1]
-        in_data = reshape(mat, (*self.rdims, d))
-
-        if self.is_conj:
-            in_data = conj(in_data)
-
-        if self.is_trans:
-            i, f, s = self.start, self.stop, 1
-        else:
-            i, f, s = self.stop - 1, self.start - 1, -1
-
-        # add the vector to the right of the chain
-        in_ix = (*self.right_inds, '_mat_ix')
-        tnc = self.tn | Tensor(in_data, inds=in_ix, tags=['_VEC'])
-
-        # absorb it into the rightmost site
-        tnc ^= ['_VEC', self.tn.site_tag(i)]
-
-        # then do a structured contract along the whole chain
-        out_T = tnc ^ slice(i, f, s)
-
-        out_ix = (*self.left_inds, '_mat_ix')
-        out_data = reshape(out_T.transpose_(*out_ix).data, (-1, d))
-        if self.is_conj:
-            out_data = conj(out_data)
-
-        return out_data
-
-    def copy(self, conj=False, transpose=False):
-
-        if transpose:
-            inds = (self.right_inds, self.left_inds)
-            dims = (self.rdims, self.ldims)
-            is_trans = not self.is_trans
-        else:
-            inds = (self.left_inds, self.right_inds)
-            dims = (self.ldims, self.rdims)
-            is_trans = self.is_trans
-
-        if conj:
-            is_conj = not self.is_conj
-        else:
-            is_conj = self.is_conj
-
-        return TNLinearOperator1D(self.tn, *inds, self.start, self.stop, *dims,
-                                  is_conj=is_conj, is_trans=is_trans)
-
-    def conj(self):
-        if self._conj_linop is None:
-            self._conj_linop = self.copy(conj=True)
-        return self._conj_linop
-
-    def _transpose(self):
-        if self._transpose_linop is None:
-            self._transpose_linop = self.copy(transpose=True)
-        return self._transpose_linop
-
-    def _adjoint(self):
-        """Hermitian conjugate of this TNLO.
-        """
-        # cache the adjoint
-        if self._adjoint_linop is None:
-            self._adjoint_linop = self.copy(conj=True, transpose=True)
-        return self._adjoint_linop
-
-    def to_dense(self):
-        T = self.tn ^ slice(self.start, self.stop)
-
-        if self.is_conj:
-            T = T.conj()
-
-        return T.to_dense(self.left_inds, self.right_inds)
-
-    @property
-    def A(self):
-        return self.to_dense()
 
 
 class PTensor(Tensor):

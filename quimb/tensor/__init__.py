@@ -24,7 +24,6 @@ from .tensor_core import (
     new_bond,
     Tensor,
     TensorNetwork,
-    TNLinearOperator1D,
     PTensor,
     oset,
 )
@@ -52,16 +51,22 @@ from .tensor_gen import (
     MPO_rand,
     MPO_rand_herm,
     SpinHam,
+    SpinHam1D,
     MPO_ham_ising,
     MPO_ham_XY,
     MPO_ham_heis,
     MPO_ham_mbl,
+    ham_1d_ising,
     NNI_ham_ising,
+    ham_1d_XY,
     NNI_ham_XY,
+    ham_1d_heis,
     NNI_ham_heis,
+    ham_1d_mbl,
     NNI_ham_mbl,
 )
 from .tensor_1d import (
+    TensorNetwork1D,
     MatrixProductState,
     MatrixProductOperator,
     Dense1D,
@@ -70,6 +75,7 @@ from .tensor_1d import (
     expec_TN_1D,
     gate_TN_1D,
     superop_TN_1D,
+    TNLinearOperator1D,
 )
 from .tensor_dmrg import (
     MovingEnvironment,
@@ -81,7 +87,9 @@ from .tensor_dmrg import (
 from .tensor_mera import (
     MERA,
 )
-from .tensor_tebd import (
+from .tensor_1d_tebd import (
+    LocalHam1D,
+    NNI,
     TEBD,
 )
 from .circuit import (
@@ -162,14 +170,20 @@ __all__ = (
     "MPO_rand",
     "MPO_rand_herm",
     "SpinHam",
+    "SpinHam1D",
     "MPO_ham_ising",
     "MPO_ham_XY",
     "MPO_ham_heis",
     "MPO_ham_mbl",
+    "ham_1d_ising",
     "NNI_ham_ising",
+    "ham_1d_XY",
     "NNI_ham_XY",
+    "ham_1d_heis",
     "NNI_ham_heis",
+    "ham_1d_mbl",
     "NNI_ham_mbl",
+    "TensorNetwork1D",
     "MatrixProductState",
     "MatrixProductOperator",
     "Dense1D",
@@ -185,6 +199,8 @@ __all__ = (
     "DMRGX",
     "MERA",
     "TEBD",
+    "LocalHam1D",
+    "NNI",
     "Circuit",
     "CircuitMPS",
     "CircuitDense",
