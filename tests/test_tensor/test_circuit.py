@@ -327,7 +327,7 @@ class TestCircuit:
 
             for num_marginal in [1, 2, 3, 4, 5]:
                 counts = collections.Counter(
-                    circ.sample_chaotic(C, num_marginal)
+                    circ.sample_chaotic(C, num_marginal, seed=666)
                 )
                 f_obs = np.zeros(2**L)
                 for b, c in counts.items():
