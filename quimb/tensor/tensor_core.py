@@ -2667,8 +2667,6 @@ class TensorNetwork(object):
         """
         if tags in (None, ..., all):
             return tuple(self.tensor_map)
-        elif isinstance(tags, (Integral, slice)):
-            tags = self.sites2tags(tags)
         else:
             tags = tags_to_oset(tags)
 
