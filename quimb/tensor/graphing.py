@@ -281,6 +281,43 @@ def get_colors(color, custom_colors=None):
     return dict(zip(color, rgbs))
 
 
+def _rotate(xy, theta):
+    """Return a rotated set of points.
+    """
+    s = np.sin(theta)
+    c = np.cos(theta)
+
+    xyr = np.empty_like(xy)
+    xyr[:, 0] = c * xy[:, 0] - s *  xy[:, 1]
+    xyr[:, 1] = s * xy[:, 0] + c *  xy[:, 1]
+
+    return xyr
+
+
+def _span(xy):
+    """Return the vertical span of the points.
+    """
+    return xy[:, 1].max() - xy[:, 1].min()
+
+
+def _massage_pos(pos, nangles=24, flatten=False):
+    """Rotate a position dict's points to cover a small vertical span
+    """
+    xy = np.empty((len(pos), 2))
+    for i, (x, y) in enumerate(pos.values()):
+        xy[i, 0] = x
+        xy[i, 1] = y
+
+    thetas = np.linspace(0, 2 * np.pi, nangles, endpoint=False)
+    rxys = (_rotate(xy, theta) for theta in thetas)
+    rxy0 = min(rxys, key=lambda rxy: _span(rxy))
+
+    if flatten:
+        rxy0[:, 1] /=2
+
+    return dict(zip(pos, rxy0))
+
+
 def _get_positions(tn, G, fix, initial_layout, k, iterations):
     import networkx as nx
 
@@ -307,7 +344,7 @@ def _get_positions(tn, G, fix, initial_layout, k, iterations):
             # assume index
             fixed_positions[tags_or_ind] = pos
 
-    # use spectral layout as starting point
+    # use spectral or other layout as starting point
     pos0 = getattr(nx, initial_layout + '_layout')(G)
 
     # scale points to fit with specified positions
@@ -323,5 +360,9 @@ def _get_positions(tn, G, fix, initial_layout, k, iterations):
     # and then relax remaining using spring layout
     pos = nx.spring_layout(
         G, pos=pos0, fixed=fixed, k=k, iterations=iterations)
+
+    if not fix:
+        # finally rotate them to cover a small vertical span
+        pos = _massage_pos(pos)
 
     return pos

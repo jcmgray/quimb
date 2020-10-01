@@ -76,7 +76,7 @@ class TestTEBD:
         ground = qtn.MPS_computational_state('0' * n, cyclic=cyclic)
         excited = qtn.MPS_computational_state(('01' * n)[:n], cyclic=cyclic)
         psi0 = (ground + excited) / 2**0.5
-        H = qtn.ham1d_ising(n, j=-1, cyclic=cyclic)
+        H = qtn.ham_1d_ising(n, j=-1, cyclic=cyclic)
 
         if dt and tol:
             with pytest.raises(ValueError):
@@ -126,8 +126,8 @@ class TestTEBD:
     def test_local_ham_1d_and_single_site_terms(self):
         n = 10
         psi0 = qtn.MPS_neel_state(n)
-        lham1d = qtn.ham1d_XY(n, bz=0.9)
-        tebd = qtn.TEBD(psi0, lham1d)
+        lham_1d = qtn.ham_1d_XY(n, bz=0.9)
+        tebd = qtn.TEBD(psi0, lham_1d)
         tebd.update_to(1.0, tol=1e-5)
         assert abs(psi0.H @ tebd.pt) < 1.0
         assert tebd.pt.entropy(5) > 0.0
@@ -142,8 +142,8 @@ class TestTEBD:
     def test_local_ham_1d_and_single_site_terms_heis(self):
         n = 10
         psi0 = qtn.MPS_neel_state(n)
-        lham1d = qtn.ham1d_heis(n, j=(0.7, 0.8, 0.9), bz=0.337)
-        tebd = qtn.TEBD(psi0, lham1d)
+        lham_1d = qtn.ham_1d_heis(n, j=(0.7, 0.8, 0.9), bz=0.337)
+        tebd = qtn.TEBD(psi0, lham_1d)
         tebd.update_to(1.0, tol=1e-5)
         assert abs(psi0.H @ tebd.pt) < 1.0
         assert tebd.pt.entropy(5) > 0.0
@@ -159,7 +159,7 @@ class TestTEBD:
         n = 10
         tf = 1.0
         p0 = qtn.MPS_rand_state(n, bond_dim=1)
-        H = qtn.ham1d_mbl(n, dh=1.7, cyclic=False, seed=42)
+        H = qtn.ham_1d_mbl(n, dh=1.7, cyclic=False, seed=42)
         print(H)
         tebd = qtn.TEBD(p0, H)
         tebd.update_to(tf, tol=1e-3)
@@ -177,11 +177,11 @@ class TestTEBD:
         p = qtn.MPS_computational_state('0000100000', cyclic=cyclic)
         pd = p.to_dense()
 
-        lham1d = qtn.ham1d_ising(10, j=4, bx=1, cyclic=cyclic)
+        lham_1d = qtn.ham_1d_ising(10, j=4, bx=1, cyclic=cyclic)
         H_mpo = qtn.MPO_ham_ising(10, j=4, bx=1, cyclic=cyclic)
         H = qu.ham_ising(10, jz=4, bx=1, cyclic=cyclic)
 
-        tebd = qtn.TEBD(p, lham1d, tol=1e-6)
+        tebd = qtn.TEBD(p, lham_1d, tol=1e-6)
         tebd.split_opts['cutoff'] = 1e-9
         tebd.split_opts['cutoff_mode'] = 'rel'
         evo = qu.Evolution(pd, H)
@@ -209,10 +209,10 @@ class TestTEBD:
 def test_OTOC_local():
     L = 10
     psi0 = qtn.MPS_computational_state('0' * L, cyclic=True)
-    H1 = qtn.ham1d_ising(L, j=4, bx=0, cyclic=True)
-    H_back1 = qtn.ham1d_ising(L, j=-4, bx=0, cyclic=True)
-    H2 = qtn.ham1d_ising(L, j=4, bx=1, cyclic=True)
-    H_back2 = qtn.ham1d_ising(L, j=-4, bx=-1, cyclic=True)
+    H1 = qtn.ham_1d_ising(L, j=4, bx=0, cyclic=True)
+    H_back1 = qtn.ham_1d_ising(L, j=-4, bx=0, cyclic=True)
+    H2 = qtn.ham_1d_ising(L, j=4, bx=1, cyclic=True)
+    H_back2 = qtn.ham_1d_ising(L, j=-4, bx=-1, cyclic=True)
     A = qu.pauli('z')
     ts = np.linspace(1, 2, 2)
     OTOC_t = []
