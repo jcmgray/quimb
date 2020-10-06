@@ -293,7 +293,7 @@ class oset:
         self._d.pop(k, None)
 
     def remove(self, k):
-        self._d.pop(k)
+        del self._d[k]
 
     def clear(self):
         self._d.clear()
@@ -337,6 +337,14 @@ class oset:
         else:
             su = others[0]._d
         return oset._from_dict({k: None for k in self._d if k not in su})
+
+    def popleft(self):
+        k = next(iter(self._d))
+        del self._d[k]
+        return k
+
+    def popright(self):
+        return self._d.popitem()[0]
 
     def __eq__(self, other):
         if isinstance(other, oset):

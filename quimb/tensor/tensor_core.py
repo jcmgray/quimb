@@ -31,17 +31,6 @@ from .graphing import graph
 _DEFAULT_CONTRACTION_STRATEGY = 'greedy'
 
 
-def cost_rank(s12, s1, s2, k12, k1, k2):
-    rank_new = len(k12)
-    rank_old = max(len(k1), len(k2))
-    # second entry is to break ties
-    return rank_new - rank_old, rank_old
-
-
-greedy_rank = functools.partial(oe.paths.greedy, cost_fn=cost_rank)
-oe.paths.register_path_fn('greedy-rank', greedy_rank)
-
-
 def get_contract_strategy():
     r"""Get the default contraction strategy - the option supplied as
     ``optimize`` to ``opt_einsum``.
@@ -342,17 +331,17 @@ def _gen_output_inds(all_inds):
 
 
 @functools.lru_cache(2**12)
-def _maybe_map_indices_to_alphabet(a_ix, i_ix, o_ix):
+def _inds_to_eq(all_inds, inputs, output):
     """``einsum`` need characters a-z,A-Z or equivalent numbers.
     Do this early, and allow *any* index labels.
 
     Parameters
     ----------
-    a_ix : set
+    all_inds : iterable
         All of the input indices.
-    i_ix : sequence of sequence
+    inputs : sequence of sequence
         The input indices per tensor.
-    o_ix : list of int
+    output : list of int
         The output indices.
 
     Returns
@@ -360,9 +349,9 @@ def _maybe_map_indices_to_alphabet(a_ix, i_ix, o_ix):
     eq : str
         The string to feed to einsum/contract.
     """
-    amap = {ix: oe.get_symbol(i) for i, ix in enumerate(a_ix)}
-    in_str = ("".join(amap[i] for i in ix) for ix in i_ix)
-    out_str = "".join(amap[o] for o in o_ix)
+    amap = {ix: oe.get_symbol(i) for i, ix in enumerate(all_inds)}
+    in_str = ("".join(amap[i] for i in ix) for ix in inputs)
+    out_str = "".join(amap[o] for o in output)
 
     return ",".join(in_str) + "->" + out_str
 
@@ -420,7 +409,7 @@ def tensor_contract(*tensors, output_inds=None, get=None,
         o_ix = tuple(output_inds)
 
     # possibly map indices into the range needed by opt-einsum
-    eq = _maybe_map_indices_to_alphabet(all_ix, i_ix, o_ix)
+    eq = _inds_to_eq(all_ix, i_ix, o_ix)
 
     if get == 'symbol-map':
         return {oe.get_symbol(i): ix for i, ix in enumerate(all_ix)}
@@ -1504,12 +1493,30 @@ class Tensor(object):
         """
         t = self if inplace else self.copy()
         axis = t.inds.index(ind)
-        new_data = do('sum', t.data, axis=axis)
         new_inds = t.inds[:axis] + t.inds[axis + 1:]
-        t.modify(data=new_data, inds=new_inds)
+        t.modify(apply=lambda x: do('sum', x, axis=axis), inds=new_inds)
         return t
 
     sum_reduce_ = functools.partialmethod(sum_reduce, inplace=True)
+
+    def collapse_repeated(self, inplace=False):
+        """Take the diagonals of any repeated indices, such that each index
+        only appears once.
+        """
+        t = self if inplace else self.copy()
+
+        new_inds = tuple(oset(t.inds))
+        if len(t.inds) == len(new_inds):
+            return t
+
+        eq = _inds_to_eq(new_inds, (t.inds,), new_inds)
+        t.modify(apply=lambda x: do('einsum', eq, x, like=x),
+                 inds=new_inds, left_inds=None)
+
+        return t
+
+    collapse_repeated_ = functools.partialmethod(
+        collapse_repeated, inplace=True)
 
     @functools.wraps(tensor_contract)
     def contract(self, *others, output_inds=None, **opts):
@@ -4493,23 +4500,29 @@ class TensorNetwork(object):
 
     flip_ = functools.partialmethod(flip, inplace=True)
 
-    def rank_simplify(self, inplace=False, optimize='greedy-rank',
-                      **contract_opts):
+    def rank_simplify(
+        self,
+        output_inds=None,
+        equalize_norms=False,
+        cache=None,
+        inplace=False,
+    ):
         """Simplify this tensor network by performing contractions that don't
-        increase the rank of any tensors. This may need to be run several times
-        since the full contraction path generated is not necessarily greedily
-        ordered in terms of rank increases.
+        increase the rank of any tensors.
 
         Parameters
         ----------
+        output_inds : sequence of str, optional
+            Explicitly set which indices of the tensor network are output
+            indices and thus should not be modified.
+        equalize_norms : bool or float
+            Actively renormalize the tensors during the simplification process.
+            Useful for very large TNs. The scaling factor will be stored as an
+            exponent in ``tn.exponent``.
+        cache : None or set
+            Persistent cache used to mark already checked tensors.
         inplace : bool, optional
             Whether to perform the rand reduction inplace.
-        optimize : str, opt_einsum.PathOptimizer
-            How to choose the the full contraction, which will be performed
-            up until the point that any tensor ranks start to increase.
-        contract_opts
-            Supplied to :func:`tensor_contract` to generate the full path, from
-            which initial rank reducing contraction steps will be taken.
 
         Returns
         -------
@@ -4521,55 +4534,148 @@ class TensorNetwork(object):
         """
         tn = self if inplace else self.copy()
 
-        # first remove floating scalar tensors
+        if output_inds is None:
+            output_inds = set(tn.outer_inds())
+
+        # pairs of tensors we have already checked
+        if cache is None:
+            cache = set()
+
+        # first parse all tensors
         scalars = []
+        count = collections.Counter()
         for tid, t in tuple(tn.tensor_map.items()):
-            if len(t.inds) == 0:
+
+            # remove floating scalar tensors -->
+            #     these have no indices so won't be caught otherwise
+            if t.ndim == 0:
                 tn._pop_tensor(tid)
                 scalars.append(t.data)
+                continue
+
+            # ... and remove any redundant repeated indices on the same tensor
+            t.collapse_repeated_()
+
+            # ... also build the index counter at the same time
+            count.update(t.inds)
+
+        # this ensures the output indices are not removed (+1 each)
+        count.update(output_inds)
+
+        # sorted list of unique indices to check -> start with lowly connected
+        def rank_weight(ind):
+            return -sum(tn.tensor_map[tid].ndim for tid in tn.ind_map[ind])
+
+        queue = oset(sorted(count, key=rank_weight))
+
+        while queue:
+            # get next index
+            ind = queue.popright()
+
+            # the tensors it connects
+            try:
+                tids = tn.ind_map[ind]
+            except KeyError:
+                # index already contracted alongside another
+                continue
+
+            # index only appears on one tensor and not in output -> can sum
+            if count[ind] == 1:
+                tid, = tids
+                t = tn.tensor_map[tid]
+                t.sum_reduce_(ind)
+
+                # check if we have created a scalar
+                if t.ndim == 0:
+                    tn._pop_tensor(tid)
+                    scalars.append(t.data)
+
+                continue
+
+            # otherwise check pairwise contractions
+            cands = []
+            for tid_a, tid_b in itertools.combinations(tids, 2):
+
+                ta = tn.tensor_map[tid_a]
+                tb = tn.tensor_map[tid_b]
+
+                cache_key = ('rs', tid_a, tid_b, id(ta.data), id(tb.data))
+                if cache_key in cache:
+                    continue
+
+                # work out the output indices of candidate contraction
+                involved = frequencies(itertools.chain(ta.inds, tb.inds))
+                out_ab = []
+                deincr = []
+                for oix, c in involved.items():
+                    if c != count[oix]:
+                        out_ab.append(oix)
+                        if c == 2:
+                            deincr.append(oix)
+                    # else this the last occurence of index oix -> remove it
+
+                # check if candidate contraction will reduce rank
+                new_ndim = len(out_ab)
+                old_ndim = max(ta.ndim, tb.ndim)
+
+                if new_ndim <= old_ndim:
+                    res = (new_ndim - old_ndim, tid_a, tid_b, out_ab, deincr)
+                    cands.append(res)
+                else:
+                    cache.add(cache_key)
+
+            if not cands:
+                # none of the parwise contractions reduce rank
+                continue
+
+            score, tid_a, tid_b, out_ab, deincr = min(cands)
+            ta = tn._pop_tensor(tid_a)
+            tb = tn._pop_tensor(tid_b)
+            tab = ta.contract(tb, output_inds=out_ab)
+
+            for ix in deincr:
+                count[ix] -= 1
+
+            if not out_ab:
+                # handle scalars produced at the end
+                scalars.append(tab)
+                continue
+
+            tid = rand_uuid('_T')
+            tn.add_tensor(tab, tid=tid, virtual=True)
+
+            if equalize_norms:
+                tn.strip_exponent(tid, equalize_norms)
+
+            for ix in out_ab:
+                # now we need to check outputs indices again
+                queue.add(ix)
+
         if scalars:
-            scalar_mult = prod(scalars)
-            if not tn.num_tensors:
-                # check if all tensors were scalars - nothing left to multiply
-                tn.add_tensor(Tensor(scalar_mult))
-                return tn
+            if equalize_norms:
+                signs = []
+                for s in scalars:
+                    signs.append(do("sign", s))
+                    tn.exponent += do("log10", do('abs', s))
+                scalars = signs
+
+            if tn.num_tensors:
+                tn *= prod(scalars)
             else:
-                tn.multiply_(scalar_mult)
-
-        # then contract rank reducing tensors
-        info = tn.contract(all, get='path-info',
-                           optimize=optimize, **contract_opts)
-        contract_tids = list(tn.tensor_map)
-
-        for c in info.contraction_list:
-            # whilst contractions don't increase rank perform them
-            lhs, output_i = c[2].split('->')
-            inputs_i = lhs.split(',')
-            if len(output_i) > max(map(len, inputs_i)):
-                break
-
-            # get the tensors that the contraction corresponds to
-            tids = [contract_tids.pop(x) for x in sorted(c[0], reverse=True)]
-            Ts = [tn._pop_tensor(tid) for tid in tids]
-
-            # find the correct output indices and perform the contraction
-            oix = [info.quimb_symbol_map[x] for x in output_i]
-            T = tensor_contract(*Ts, output_inds=oix)
-
-            # handle the case when a scalar is created
-            if not isinstance(T, Tensor):
-                T = Tensor(T)
-
-            # add the new tensor back into the network
-            tid_ij = rand_uuid(base="_T")
-            tn.add_tensor(T, tid=tid_ij, virtual=True)
-            contract_tids.append(tid_ij)
+                # no tensors left! re-add one with all the scalars
+                tn |= Tensor(prod(scalars))
 
         return tn
 
     rank_simplify_ = functools.partialmethod(rank_simplify, inplace=True)
 
-    def diagonal_reduce(self, inplace=False, output_inds=None, atol=1e-12):
+    def diagonal_reduce(
+        self,
+        output_inds=None,
+        atol=1e-12,
+        cache=None,
+        inplace=False,
+    ):
         """Find tensors with diagonal structure and collapse those axes. This
         will create a tensor 'hyper' network with indices repeated 2+ times, as
         such, output indices should be explicitly supplied when contracting, as
@@ -4580,8 +4686,6 @@ class TensorNetwork(object):
 
         Parameters
         ----------
-        inplace, bool, optional
-            Whether to perform the diagonal reduction inplace.
         output_inds : sequence of str, optional
             Which indices to explicitly consider as outer legs of the tensor
             network and thus not replace. If not given, these will be taken as
@@ -4589,6 +4693,10 @@ class TensorNetwork(object):
         atol : float, optional
             When identifying diagonal tensors, the absolute tolerance with
             which to compare to zero with.
+        cache : None or set
+            Persistent cache used to mark already checked tensors.
+        inplace, bool, optional
+            Whether to perform the diagonal reduction inplace.
 
         Returns
         -------
@@ -4600,8 +4708,8 @@ class TensorNetwork(object):
         """
         tn = self if inplace else self.copy()
 
-        if not hasattr(tn, '_simplify_cache'):
-            tn._simplify_cache = set()
+        if cache is None:
+            cache = set()
 
         if output_inds is None:
             output_inds = set(self.outer_inds())
@@ -4611,15 +4719,15 @@ class TensorNetwork(object):
             tid = queue.pop()
             t = tn.tensor_map[tid]
 
-            cache_key = ('diag_reduce', tid, id(t.data))
-            if cache_key in tn._simplify_cache:
+            cache_key = ('dr', tid, id(t.data))
+            if cache_key in cache:
                 continue
 
             ij = find_diag_axes(t.data, atol=atol)
 
             # no diagonals
             if ij is None:
-                tn._simplify_cache.add(cache_key)
+                cache.add(cache_key)
                 continue
 
             i, j = ij
@@ -4633,32 +4741,27 @@ class TensorNetwork(object):
             else:
                 ixmap = {ix_j: ix_i}
 
-            # e.g. if `ij == (0, 2)` then here we want 'abcd -> abad -> abd'
-            tmp_inds = tuple(ixmap.get(ix, ix) for ix in t.inds)
-            new_inds = tuple(oset(tmp_inds))
-            eq = _maybe_map_indices_to_alphabet(
-                new_inds, (tmp_inds,), new_inds)
-
-            # do this wrapping trick so that eq doesn't change due to closure
-            def get_reducer(x_eq):
-                def reducer(x):
-                    return do('einsum', x_eq, x, like=x)
-                return reducer
-
-            # extract the diagonal and update the tensor
-            t.modify(apply=get_reducer(eq), inds=new_inds, left_inds=None)
-
             # update wherever else the changed index appears (e.g. 'c' above)
             tn.reindex_(ixmap)
 
-            # tensor might still have diagonal indices
+            # take the multidimensional diagonal of the tensor
+            #     (which now has a repeated index)
+            t.collapse_repeated_()
+
+            # tensor might still have other diagonal indices
             queue.append(tid)
 
         return tn
 
     diagonal_reduce_ = functools.partialmethod(diagonal_reduce, inplace=True)
 
-    def antidiag_gauge(self, inplace=False, output_inds=None, atol=1e-12):
+    def antidiag_gauge(
+        self,
+        output_inds=None,
+        atol=1e-12,
+        cache=None,
+        inplace=False,
+    ):
         """Flip the order of any bonds connected to antidiagonal tensors.
         Whilst this is just a gauge fixing (with the gauge being the flipped
         identity) it then allows ``diagonal_reduce`` to then simplify those
@@ -4666,8 +4769,6 @@ class TensorNetwork(object):
 
         Parameters
         ----------
-        inplace, bool, optional
-            Whether to perform the antidiagonal gauging inplace.
         output_inds : sequence of str, optional
             Which indices to explicitly consider as outer legs of the tensor
             network and thus not flip. If not given, these will be taken as
@@ -4675,6 +4776,10 @@ class TensorNetwork(object):
         atol : float, optional
             When identifying antidiagonal tensors, the absolute tolerance with
             which to compare to zero with.
+        cache : None or set
+            Persistent cache used to mark already checked tensors.
+        inplace, bool, optional
+            Whether to perform the antidiagonal gauging inplace.
 
         Returns
         -------
@@ -4689,16 +4794,25 @@ class TensorNetwork(object):
         if output_inds is None:
             output_inds = set(self.outer_inds())
 
+        if cache is None:
+            cache = set()
+
         done = set()
 
         queue = list(tn.tensor_map)
         while queue:
             tid = queue.pop()
             t = tn.tensor_map[tid]
+
+            cache_key = ('ag', tid, id(t.data))
+            if cache_key in cache:
+                continue
+
             ij = find_antidiag_axes(t.data, atol=atol)
 
             # tensor not anti-diagonal
             if ij is None:
+                cache.add(cache_key)
                 continue
 
             # work out which, if any, index to flip
@@ -4726,15 +4840,19 @@ class TensorNetwork(object):
 
     antidiag_gauge_ = functools.partialmethod(antidiag_gauge, inplace=True)
 
-    def column_reduce(self, inplace=False, output_inds=None, atol=1e-12):
+    def column_reduce(
+        self,
+        output_inds=None,
+        atol=1e-12,
+        cache=None,
+        inplace=False,
+    ):
         """Find bonds on this tensor network which have tensors where all but
         one column (of the respective index) is non-zero, allowing the
         'cutting' of that bond.
 
         Parameters
         ----------
-        inplace, bool, optional
-            Whether to perform the column reductions inplace.
         output_inds : sequence of str, optional
             Which indices to explicitly consider as outer legs of the tensor
             network and thus not slice. If not given, these will be taken as
@@ -4742,6 +4860,10 @@ class TensorNetwork(object):
         atol : float, optional
             When identifying singlet column tensors, the absolute tolerance
             with which to compare to zero with.
+        cache : None or set
+            Persistent cache used to mark already checked tensors.
+        inplace, bool, optional
+            Whether to perform the column reductions inplace.
 
         Returns
         -------
@@ -4756,23 +4878,23 @@ class TensorNetwork(object):
         if output_inds is None:
             output_inds = set(self.outer_inds())
 
-        if not hasattr(tn, '_simplify_cache'):
-            tn._simplify_cache = set()
+        if cache is None:
+            cache = set()
 
         queue = list(tn.tensor_map)
         while queue:
             tid = queue.pop()
             t = tn.tensor_map[tid]
 
-            cache_key = ('column_reduce', tid, id(t.data))
-            if cache_key in tn._simplify_cache:
+            cache_key = ('cr', tid, id(t.data))
+            if cache_key in cache:
                 continue
 
             ax_i = find_columns(t.data, atol=atol)
 
             # no singlet columns
             if ax_i is None:
-                tn._simplify_cache.add(cache_key)
+                cache.add(cache_key)
                 continue
 
             ax, i = ax_i
@@ -4789,22 +4911,41 @@ class TensorNetwork(object):
 
     column_reduce_ = functools.partialmethod(column_reduce, inplace=True)
 
-    def split_simplify(self, inplace=False, atol=1e-12):
+    def split_simplify(
+        self,
+        atol=1e-12,
+        equalize_norms=False,
+        cache=None,
+        inplace=False,
+    ):
         """Find tensors which have low rank SVD decompositions across any
         combination of bonds and perform them.
+
+        Parameters
+        ----------
+        atol : float, optional
+            Cutoff used when attempting low rank decompositions.
+        equalize_norms : bool or float
+            Actively renormalize the tensors during the simplification process.
+            Useful for very large TNs. The scaling factor will be stored as an
+            exponent in ``tn.exponent``.
+        cache : None or set
+            Persistent cache used to mark already checked tensors.
+        inplace, bool, optional
+            Whether to perform the split simplification inplace.
         """
         tn = self if inplace else self.copy()
 
         # we don't want to repeatedly check the split decompositions of the
         #     same tensor as we cycle through simplification methods
-        if not hasattr(tn, '_simplify_cache'):
-            tn._simplify_cache = set()
+        if cache is None:
+            cache = set()
 
         for tid, t in tuple(tn.tensor_map.items()):
 
             # id's are reused when objects go out of scope -> use tid as well
-            cache_key = ('split', tid, id(t.data))
-            if cache_key in tn._simplify_cache:
+            cache_key = ('sp', tid, id(t.data))
+            if cache_key in cache:
                 continue
 
             found = False
@@ -4820,17 +4961,33 @@ class TensorNetwork(object):
 
             if found:
                 tn._pop_tensor(tid)
-                tn.add_tensor(tl, virtual=True)
-                tn.add_tensor(tr, virtual=True)
+                tidl = rand_uuid('_T')
+                tn.add_tensor(tl, tid=tidl, virtual=True)
+                tidr = rand_uuid('_T')
+                tn.add_tensor(tr, tid=tidr, virtual=True)
+
+                if equalize_norms:
+                    tn.strip_exponent(tidl, equalize_norms)
+                    tn.strip_exponent(tidr, equalize_norms)
+
             else:
-                tn._simplify_cache.add(cache_key)
+                cache.add(cache_key)
 
         return tn
 
     split_simplify_ = functools.partialmethod(split_simplify, inplace=True)
 
-    def full_simplify(self, seq='ADCR', inplace=False, output_inds=None,
-                      atol=1e-12, **rank_simplify_opts):
+    def full_simplify(
+        self,
+        seq='ADCR',
+        output_inds=None,
+        atol=1e-12,
+        equalize_norms=False,
+        cache=None,
+        inplace=False,
+        progbar=False,
+        **rank_simplify_opts
+    ):
         """Perform a series of tensor network 'simplifications' in a loop until
         there is no more reduction in the number of tensors or indices. Note
         that apart from rank-reduction, the simplification methods make use of
@@ -4850,15 +5007,27 @@ class TensorNetwork(object):
 
             If you want to keep the tensor network 'simple', i.e. with no
             hyperedges, then don't use ``'D'`` (moreover ``'A'`` is redundant).
-        inplace : bool, optional
-            Whether to perform the simplification inplace.
         output_inds : sequence of str, optional
             Explicitly set which indices of the tensor network are output
-            indices and thus should not be modified.
+            indices and thus should not be modified. If not specified the
+            tensor network is assumed to be a 'standard' one where indices that
+            only appear once are the output indices.
         atol : float, optional
-            The absolute tolerance when indentifying zero entries of tensors.
-        rank_simplify_opts
-            Supplied to ``rank_simplify``.
+            The absolute tolerance when indentifying zero entries of tensors
+            and performing low-rank decompositions.
+        equalize_norms : bool or float
+            Actively renormalize the tensors during the simplification process.
+            Useful for very large TNs. If `True`, the norms, in the formed of
+            stripped exponents, will be redistributed at the end. If an actual
+            number, the final tensors will all have this norm, and the scaling
+            factor will be stored as a base-10 exponent in ``tn.exponent``.
+        cache : None or set
+            A persistent cache for each simplification process to mark
+            already processed tensors.
+        progbar : bool, optional
+            Show a live progress bar of the simplification process.
+        inplace : bool, optional
+            Whether to perform the simplification inplace.
 
         Returns
         -------
@@ -4876,30 +5045,59 @@ class TensorNetwork(object):
         if output_inds is None:
             output_inds = self.outer_inds()
 
+        if cache is None:
+            cache = set()
+
         # for the index trick reductions, faster to supply set
         ix_o = set(output_inds)
 
         # keep simplifying until the number of tensors and indices equalizes
         old_nt, old_ni = -1, -1
         nt, ni = tn.num_tensors, tn.num_indices
+
+        if progbar:
+            import tqdm
+            pbar = tqdm.tqdm()
+            pbar.set_description(f'{nt}, {ni}')
+
         while (nt, ni) != (old_nt, old_ni):
             for meth in seq:
+
+                if progbar:
+                    pbar.update()
+                    pbar.set_description(
+                        f'{meth} {tn.num_tensors}, {tn.num_indices}')
+
                 if meth == 'D':
-                    tn.diagonal_reduce_(output_inds=ix_o, atol=atol)
+                    tn.diagonal_reduce_(output_inds=ix_o, atol=atol,
+                                        cache=cache)
                 elif meth == 'R':
-                    tn.rank_simplify_(output_inds=output_inds,
+                    tn.rank_simplify_(output_inds=ix_o, cache=cache,
+                                      equalize_norms=equalize_norms,
                                       **rank_simplify_opts)
                 elif meth == 'A':
-                    tn.antidiag_gauge_(output_inds=ix_o, atol=atol)
+                    tn.antidiag_gauge_(output_inds=ix_o, atol=atol,
+                                       cache=cache)
                 elif meth == 'C':
-                    tn.column_reduce_(output_inds=ix_o, atol=atol)
+                    tn.column_reduce_(output_inds=ix_o, atol=atol, cache=cache)
                 elif meth == 'S':
-                    tn.split_simplify_(atol=atol)
+                    tn.split_simplify_(atol=atol, cache=cache,
+                                       equalize_norms=equalize_norms)
                 else:
                     raise ValueError(f"'{meth}' is not a valid simplify type.")
 
             old_nt, old_ni = nt, ni
             nt, ni = tn.num_tensors, tn.num_indices
+
+        if equalize_norms:
+            if equalize_norms is True:
+                # this also redistributes the collected exponents
+                tn.equalize_norms_()
+            else:
+                tn.equalize_norms_(value=equalize_norms)
+
+        if progbar:
+            pbar.close()
 
         return tn
 
