@@ -10,6 +10,7 @@ def graph(
     tn,
     color=None,
     highlight_inds=(),
+    highlight_tids=(),
     show_inds=None,
     show_tags=None,
     custom_colors=None,
@@ -129,6 +130,8 @@ def graph(
         for tag in colors:
             if tag in t.tags:
                 color = colors[tag]
+        if tid in highlight_tids:
+            color = (1.0, 0.2, 0.2, 1.0)
         G.nodes[tid]['color'] = color
         G.nodes[tid]['outline_color'] = tuple(0.8 * c for c in color)
         if show_tags:
@@ -288,8 +291,8 @@ def _rotate(xy, theta):
     c = np.cos(theta)
 
     xyr = np.empty_like(xy)
-    xyr[:, 0] = c * xy[:, 0] - s *  xy[:, 1]
-    xyr[:, 1] = s * xy[:, 0] + c *  xy[:, 1]
+    xyr[:, 0] = c * xy[:, 0] - s * xy[:, 1]
+    xyr[:, 1] = s * xy[:, 0] + c * xy[:, 1]
 
     return xyr
 
@@ -313,7 +316,7 @@ def _massage_pos(pos, nangles=24, flatten=False):
     rxy0 = min(rxys, key=lambda rxy: _span(rxy))
 
     if flatten:
-        rxy0[:, 1] /=2
+        rxy0[:, 1] /= 2
 
     return dict(zip(pos, rxy0))
 
