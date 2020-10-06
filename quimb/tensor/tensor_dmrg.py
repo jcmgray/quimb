@@ -431,6 +431,7 @@ def get_cyclic_canonizer(k, b, inv_tol=1e-10):
     """Get a function to use as a callback for ``MovingEnvironment`` that
     approximately orthogonalizes the segments of periodic MPS.
     """
+
     def cyclic_canonizer(start, stop, begin):
         k.canonize_cyclic(slice(start, stop), bra=b, inv_tol=inv_tol)
         if begin == 'left':
@@ -691,11 +692,11 @@ class DMRG:
             elif neff_dense:
                 Neff = (self._eff_norm ^ '_EYE')['_EYE'].to_dense(lix, uix)
                 np.fill_diagonal(Neff, Neff.diagonal() + fudge)
-                np.fill_diagonal(Heff, Heff.diagonal() + fudge**0.5)
+                np.fill_diagonal(Heff, Heff.diagonal() + fudge ** 0.5)
             else:
                 Neff = TNLinearOperator(self._eff_norm['_EYE'], **dims_inds)
                 Neff += IdentityLinearOperator(Neff.shape[0], fudge)
-                Heff += IdentityLinearOperator(Heff.shape[0], fudge**0.5)
+                Heff += IdentityLinearOperator(Heff.shape[0], fudge ** 0.5)
 
         else:
             Neff = None
@@ -714,7 +715,7 @@ class DMRG:
                 loc_en *= site_norm
                 return loc_en, loc_gs
 
-            loc_en -= self.opts['periodic_nullspace_fudge_factor']**0.5
+            loc_en -= self.opts['periodic_nullspace_fudge_factor'] ** 0.5
 
             # this is helpful for identifying badly behaved numerics
             Neffnorm = (loc_gs.H @ (Neff @ loc_gs)).item()
@@ -837,7 +838,7 @@ class DMRG:
             2: self._update_local_state_2site,
         }[self.bsz](i, **update_opts)
 
-    def sweep(self, direction, canonize=True, verbosity=0, **update_opts):
+    def sweep(self, direction, canonize=True, bounds=None, verbosity=0, **update_opts):
         r"""Perform a sweep of optimizations, either rightwards::
 
               optimize -->
@@ -866,23 +867,44 @@ class DMRG:
             Sweep from left to right (->) or right to left (<-) respectively.
         canonize : bool, optional
             Canonize the state first, not needed if doing alternate sweeps.
+        bounds : tuple, optional
+            A 2-tuple with sites (from and to, not included) to perform the sweep
+            between.
         verbosity : {0, 1, 2}, optional
             Show a progress bar for the sweep.
         update_opts :
             Supplied to ``self._update_local_state``.
         """
-        if canonize:
-            {'R': self._k.right_canonize,
-             'L': self._k.left_canonize}[direction](bra=self._b)
 
         n, bsz = self.n, self.bsz
 
-        direction, begin, sweep = {
-            ('R', False): ('right', 'left', range(0, n - bsz + 1)),
-            ('L', False): ('left', 'right', range(n - bsz, -1, -1)),
-            ('R', True): ('right', 'left', range(0, n)),
-            ('L', True): ('left', 'right', range(n - 1, -1, -1)),
+        direction, begin, bounds_ext = {
+            ('R', False): ('right', 'left', (0, n - bsz + 1)),
+            ('L', False): ('left', 'right', (n - bsz, -1)),
+            ('R', True): ('right', 'left', (0, n)),
+            ('L', True): ('left', 'right', (n - 1, -1)),
         }[direction, self.cyclic]
+
+        if bounds is None:
+            bounds = bounds_ext
+
+        if (direction == "right" and bounds[0] >= bounds[1]) or (direction == "left" and bounds[0] <= bounds[1]):
+            raise ValueError("Invalid bounds for direction={direction} (wrong order): {bounds}".format(
+                direction=direction,
+                bounds=bounds,
+            ))
+
+        if any(map(lambda x: (x - bounds_ext[0]) * (x - bounds_ext[1]) > 0, bounds)):
+            raise ValueError("Bounds are out of range {bounds_ext}: {bounds}".format(
+                bounds_ext=bounds_ext,
+                bounds=bounds,
+            ))
+
+        if canonize:
+            self._k.left_canonize(bra=self._b, stop=bounds[0] if self.cyclic else bounds[0] + bsz - 1)
+            self._k.right_canonize(bra=self._b, stop=bounds[0])
+
+        sweep = range(*bounds, 1 if direction == 'right' else -1)
 
         if verbosity:
             sweep = progbar(sweep, ncols=80, total=len(sweep))
@@ -925,12 +947,12 @@ class DMRG:
 
         return tot_ens[-1]
 
-    def sweep_right(self, canonize=True, verbosity=0, **update_opts):
-        return self.sweep(direction='R', canonize=canonize,
+    def sweep_right(self, canonize=True, bounds=None, verbosity=0, **update_opts):
+        return self.sweep(direction='R', canonize=canonize, bounds=bounds,
                           verbosity=verbosity, **update_opts)
 
-    def sweep_left(self, canonize=True, verbosity=0, **update_opts):
-        return self.sweep(direction='L', canonize=canonize,
+    def sweep_left(self, canonize=True, bounds=None, verbosity=0, **update_opts):
+        return self.sweep(direction='L', canonize=canonize, bounds=bounds,
                           verbosity=verbosity, **update_opts)
 
     # ----------------- overloadable 'plugin' style methods ----------------- #
@@ -955,7 +977,7 @@ class DMRG:
             self._k.show()
         if verbosity > 0:
             msg = "Energy: {} ... {}".format(self.energy, "converged!" if
-                                             converged else "not converged.")
+            converged else "not converged.")
             print(msg, flush=True)
 
     def _check_convergence(self, tol):
@@ -973,6 +995,7 @@ class DMRG:
               cutoffs=None,
               sweep_sequence=None,
               max_sweeps=10,
+              bounds=None,
               verbosity=0):
         """Solve the system with a sequence of sweeps, up to a certain
         absolute tolerance in the energy or maximum number of sweeps.
@@ -982,14 +1005,17 @@ class DMRG:
         tol : float, optional
             The absolute tolerance to converge energy to.
         bond_dims : int or sequence of int
-            Overide the initial/current bond_dim sequence.
+            Override the initial/current bond_dim sequence.
         cutoffs : float of sequence of float
-            Overide the initial/current cutoff sequence.
+            Override the initial/current cutoff sequence.
         sweep_sequence : str, optional
             String made of 'L' and 'R' defining the sweep sequence, e.g 'RRL'.
             The sequence will be repeated until ``max_sweeps`` is reached.
         max_sweeps : int, optional
             The maximum number of sweeps to perform.
+        bounds : tuple, optional
+            A 2-tuple with sites (from and to, not included) to perform the sweep
+            between.
         verbosity : {0, 1, 2}, optional
             How much information to print about progress.
 
@@ -1000,7 +1026,7 @@ class DMRG:
         """
         verbosity = int(verbosity)
 
-        # Possibly overide the default bond dimension, cutoff, LR sequences.
+        # Possibly override the default bond dimension, cutoff, LR sequences.
         if bond_dims is not None:
             self._set_bond_dim_seq(bond_dims)
         if cutoffs is not None:
@@ -1010,6 +1036,17 @@ class DMRG:
 
         RLs = itertools.cycle(sweep_sequence)
         previous_LR = '0'
+
+        if bounds is None:
+            bounds = dict(R=None, L=None)
+            bounds_s = 0
+            bounds_e = self.n
+        else:
+            bounds_s, bounds_e = sorted(bounds)
+            bounds = dict(
+                R=(bounds_s, bounds_e + 1 - self.bsz),
+                L=(bounds_e - self.bsz, bounds_s-1)
+            )
 
         for _ in range(max_sweeps):
             # Get the next direction, bond dimension and cutoff
@@ -1022,7 +1059,7 @@ class DMRG:
             # need to manually expand bond dimension for DMRG1
             if self.bsz == 1:
                 self._k.expand_bond_dimension(
-                    bd, bra=self._b,
+                    bd, bra=self._b, sites=range(bounds_s, bounds_e),
                     rand_strength=self.opts['bond_expand_rand_strength'])
 
             # inject all options and defaults
@@ -1032,6 +1069,7 @@ class DMRG:
                 'cutoff': ctf,
                 'cutoff_mode': self.opts['bond_compress_cutoff_mode'],
                 'method': self.opts['bond_compress_method'],
+                'bounds': bounds[LR],
                 'verbosity': verbosity,
             }
 
@@ -1056,7 +1094,6 @@ class DMRG1(DMRG):
     __doc__ += DMRG.__doc__
 
     def __init__(self, ham, which='SA', bond_dims=None, cutoffs=1e-8, p0=None):
-
         if bond_dims is None:
             bond_dims = range(10, 1001, 10)
 
@@ -1070,7 +1107,6 @@ class DMRG2(DMRG):
     __doc__ += DMRG.__doc__
 
     def __init__(self, ham, which='SA', bond_dims=None, cutoffs=1e-8, p0=None):
-
         if bond_dims is None:
             bond_dims = [8, 16, 32, 64, 128, 256, 512, 1024]
 
@@ -1123,11 +1159,11 @@ class DMRGX(DMRG):
         var_ham2.lower_ind_id = self._b.site_ind_id
         self.TN_energy2 = self._k | var_ham1 | var_ham2 | self._b
         self.energies.append(self.TN_energy ^ ...)
-        self.variances = [(self.TN_energy2 ^ ...) - self.energies[-1]**2]
+        self.variances = [(self.TN_energy2 ^ ...) - self.energies[-1] ** 2]
         self._target_energy = self.energies[-1]
 
         self.opts = {
-            'local_eig_partial_cutoff': 2**11,
+            'local_eig_partial_cutoff': 2 ** 11,
             'local_eig_partial_k': 0.02,
             'local_eig_tol': 1e-1,
             'overlap_thresh': 2 / 3,
@@ -1235,7 +1271,7 @@ class DMRGX(DMRG):
                                       output_inds=['__ev_ind__']).data
 
                 # then find minimum variance
-                best = np.argmin(en2 - evals**2)
+                best = np.argmin(en2 - evals ** 2)
 
         # update site i with the data and drop dummy index too
         ki.modify(data=evecs[..., best], inds=uix)
@@ -1336,7 +1372,7 @@ class DMRGX(DMRG):
         return tot_ens[-1]
 
     def _compute_post_sweep(self):
-        en_var = (self.TN_energy2 ^ ...) - self.energies[-1]**2
+        en_var = (self.TN_energy2 ^ ...) - self.energies[-1] ** 2
         self.variances.append(en_var)
 
     def _print_post_sweep(self, converged, verbosity=0):
@@ -1345,7 +1381,7 @@ class DMRGX(DMRG):
         if verbosity > 0:
             msg = "Energy={}, Variance={} ... {}"
             msg = msg.format(self.energy, self.variance, "converged!"
-                             if converged else "not converged.")
+            if converged else "not converged.")
             print(msg, flush=True)
 
     def _check_convergence(self, tol):
