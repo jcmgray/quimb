@@ -21,7 +21,7 @@ from .tensor_1d_tebd import LocalHam1D
 
 
 @random_seed_fn
-def rand_tensor(shape, inds, tags=None, dtype=float, left_inds=None):
+def rand_tensor(shape, inds, tags=None, dtype='float64', left_inds=None):
     """Generate a random tensor with specified shape and inds.
 
     Parameters
@@ -123,6 +123,160 @@ def TN_rand_reg(
     tn = TensorNetwork(ts)
     tn.randomize_(seed=seed)
 
+    return tn
+
+
+@random_seed_fn
+def TN2D_rand(
+    Lx,
+    Ly,
+    D,
+    cyclic=False,
+    site_tag_id='I{},{}',
+    row_tag_id='ROW{}',
+    col_tag_id='COL{}',
+    dtype='float64',
+):
+    """A random scalar 2D lattice tensor network.
+
+    Parameters
+    ----------
+    Lx : int
+        Length of side x.
+    Ly : int
+        Length of side y.
+    D : int
+        The bond dimension connecting sites.
+    cyclic : bool or (bool, bool), optional
+        Whether to use periodic boundary conditions. X and Y can be specified
+        separately using a tuple.
+    site_tag_id : str, optional
+        String specifier for naming convention of site tags.
+    row_tag_id : str, optional
+        String specifier for naming convention of row tags.
+    col_tag_id : str, optional
+        String specifier for naming convention of column tags.
+    dtype : dtype, optional
+        Data type of the random arrays.
+
+    Returns
+    -------
+    TensorNetwork2D
+    """
+    try:
+        cyclic_x, cyclic_y = cyclic
+    except TypeError:
+        cyclic_x = cyclic_y = cyclic
+
+    ts = []
+    bonds = collections.defaultdict(rand_uuid)
+
+    for i, j in itertools.product(range(Lx), range(Ly)):
+        directions = ""
+        inds = []
+
+        if j > 0 or cyclic_y:
+            directions += 'l'
+            inds.append(bonds[(i, (j - 1) % Ly), (i, j)])
+        if j < Ly - 1 or cyclic_y:
+            directions += 'r'
+            inds.append(bonds[(i, j), (i, (j + 1) % Ly)])
+        if i < Lx - 1 or cyclic_x:
+            directions += 'u'
+            inds.append(bonds[(i, j), ((i + 1) % Lx, j)])
+        if i > 0 or cyclic_x:
+            directions += 'd'
+            inds.append(bonds[((i - 1) % Lx, j), (i, j)])
+
+        ts.append(Tensor(
+            data=randn([D] * len(inds), dtype=dtype),
+            inds=inds,
+            tags=[site_tag_id.format(i, j),
+                  row_tag_id.format(i),
+                  col_tag_id.format(j)]))
+
+    tn = TensorNetwork(ts)
+
+    return tn.view_as_(
+        TensorNetwork2D,
+        Lx=Lx, Ly=Ly,
+        site_tag_id=site_tag_id,
+        row_tag_id=row_tag_id,
+        col_tag_id=col_tag_id,
+    )
+
+
+@random_seed_fn
+def TN3D_rand(
+    Lx,
+    Ly,
+    Lz,
+    D,
+    cyclic=False,
+    site_tag_id='I{},{},{}',
+    dtype='float64',
+):
+    """A random scalar 3D lattice tensor network.
+
+    Parameters
+    ----------
+    Lx : int
+        Length of side x.
+    Ly : int
+        Length of side y.
+    Lz : int
+        Length of side z.
+    D : int
+        The bond dimension connecting sites.
+    cyclic : bool or (bool, bool, bool), optional
+        Whether to use periodic boundary conditions. X, Y and Z can be
+        specified separately using a tuple.
+    site_tag_id : str, optional
+        String formatter specifying how to label each site.
+    dtype : dtype, optional
+        Data type of the random arrays.
+
+    Returns
+    -------
+    TensorNetwork
+    """
+    try:
+        cyclic_x, cyclic_y, cyclic_z = cyclic
+    except TypeError:
+        cyclic_x = cyclic_y = cyclic_z = cyclic
+
+    ts = []
+    bonds = collections.defaultdict(rand_uuid)
+
+    for i, j, k in itertools.product(range(Lx), range(Ly), range(Lz)):
+        directions = ""
+        inds = []
+
+        if k > 0 or cyclic_z:
+            directions += 'b'
+            inds.append(bonds[(i, j, (k - 1) % Lz), (i, j, k)])
+        if k < Lz - 1 or cyclic_z:
+            directions += 'a'
+            inds.append(bonds[(i, j, k), (i, j, (k + 1) % Lz)])
+        if j > 0 or cyclic_y:
+            directions += 'l'
+            inds.append(bonds[(i, (j - 1) % Ly, k), (i, j, k)])
+        if j < Ly - 1 or cyclic_y:
+            directions += 'r'
+            inds.append(bonds[(i, j, k), (i, (j + 1) % Ly, k)])
+        if i < Lx - 1 or cyclic_x:
+            directions += 'u'
+            inds.append(bonds[(i, j, k), ((i + 1) % Lx, j, k)])
+        if i > 0 or cyclic_x:
+            directions += 'd'
+            inds.append(bonds[((i - 1) % Lx, j, k), (i, j, k)])
+
+        ts.append(Tensor(
+            data=randn([D] * len(inds), dtype=dtype),
+            inds=inds,
+            tags=[site_tag_id.format(i, j, k)]))
+
+    tn = TensorNetwork(ts)
     return tn
 
 
@@ -500,7 +654,7 @@ def TN3D_classical_ising_partition_function(
 
 @random_seed_fn
 def MPS_rand_state(L, bond_dim, phys_dim=2, normalize=True, cyclic=False,
-                   dtype=float, trans_invar=False, **mps_opts):
+                   dtype='float64', trans_invar=False, **mps_opts):
     """Generate a random matrix product state.
 
     Parameters
@@ -575,7 +729,7 @@ def MPS_product_state(arrays, cyclic=False, **mps_opts):
     return MatrixProductState(mps_arrays, shape='lrp', **mps_opts)
 
 
-def MPS_computational_state(binary, dtype=float, cyclic=False, **mps_opts):
+def MPS_computational_state(binary, dtype='float64', cyclic=False, **mps_opts):
     """A computational basis state in Matrix Product State form.
 
     Parameters
@@ -603,7 +757,7 @@ def MPS_computational_state(binary, dtype=float, cyclic=False, **mps_opts):
     return MPS_product_state(tuple(gen_arrays()), cyclic=cyclic, **mps_opts)
 
 
-def MPS_neel_state(L, down_first=False, dtype=float, **mps_opts):
+def MPS_neel_state(L, down_first=False, dtype='float64', **mps_opts):
     """Generate the neel state in Matrix Product State form.
 
     Parameters
@@ -621,7 +775,7 @@ def MPS_neel_state(L, down_first=False, dtype=float, **mps_opts):
     return MPS_computational_state(binary_str, dtype=dtype, **mps_opts)
 
 
-def MPS_ghz_state(L, dtype=float, **mps_opts):
+def MPS_ghz_state(L, dtype='float64', **mps_opts):
     """Build the chi=2 OBC MPS representation of the GHZ state.
 
     Parameters
@@ -650,7 +804,7 @@ def MPS_ghz_state(L, dtype=float, **mps_opts):
     return MatrixProductState(gen_arrays(), **mps_opts)
 
 
-def MPS_w_state(L, dtype=float, **mps_opts):
+def MPS_w_state(L, dtype='float64', **mps_opts):
     """Build the chi=2 OBC MPS representation of the W state.
 
     Parameters
@@ -680,7 +834,7 @@ def MPS_w_state(L, dtype=float, **mps_opts):
 
 
 @random_seed_fn
-def MPS_rand_computational_state(L, dtype=float, **mps_opts):
+def MPS_rand_computational_state(L, dtype='float64', **mps_opts):
     """Generate a random computation basis state, like '01101001010'.
 
     Parameters
@@ -699,7 +853,7 @@ def MPS_rand_computational_state(L, dtype=float, **mps_opts):
 
 
 def MPS_zero_state(L, bond_dim=1, phys_dim=2, cyclic=False,
-                   dtype=float, **mps_opts):
+                   dtype='float64', **mps_opts):
     """The all-zeros MPS state, of given bond-dimension.
 
     Parameters
@@ -745,7 +899,7 @@ def MPS_sampler(L, dtype=complex, squeeze=True, **mps_opts):
 #                                    MPOs                                     #
 # --------------------------------------------------------------------------- #
 
-def MPO_identity(L, phys_dim=2, dtype=float, cyclic=False, **mpo_opts):
+def MPO_identity(L, phys_dim=2, dtype='float64', cyclic=False, **mpo_opts):
     """Generate an identity MPO of size ``L``.
 
     Parameters
@@ -784,7 +938,7 @@ def MPO_identity_like(mpo, **mpo_opts):
                         lower_ind_id=mpo.lower_ind_id, **mpo_opts)
 
 
-def MPO_zeros(L, phys_dim=2, dtype=float, cyclic=False, **mpo_opts):
+def MPO_zeros(L, phys_dim=2, dtype='float64', cyclic=False, **mpo_opts):
     """Generate a zeros MPO of size ``L``.
 
     Parameters
@@ -824,7 +978,7 @@ def MPO_zeros_like(mpo, **mpo_opts):
 
 @random_seed_fn
 def MPO_rand(L, bond_dim, phys_dim=2, normalize=True, cyclic=False,
-             herm=False, dtype=float, **mpo_opts):
+             herm=False, dtype='float64', **mpo_opts):
     """Generate a random matrix product state.
 
     Parameters
@@ -873,7 +1027,7 @@ def MPO_rand(L, bond_dim, phys_dim=2, normalize=True, cyclic=False,
 
 @random_seed_fn
 def MPO_rand_herm(L, bond_dim, phys_dim=2, normalize=True,
-                  dtype=float, **mpo_opts):
+                  dtype='float64', **mpo_opts):
     """Generate a random hermitian matrix product operator.
     See :class:`~quimb.tensor.tensor_gen.MPO_rand`.
     """
