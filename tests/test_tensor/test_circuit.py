@@ -1,5 +1,9 @@
+import math
+import itertools
+
 import pytest
 import numpy as np
+from numpy.testing import assert_allclose
 
 import quimb as qu
 import quimb.tensor as qtn
@@ -11,7 +15,7 @@ def rand_reg_graph(reg, n, seed=None):
     return G
 
 
-def graph_to_circ(G, gamma0=-0.743043, beta0=0.754082):
+def graph_to_qasm(G, gamma0=-0.743043, beta0=0.754082):
     n = G.number_of_nodes()
 
     # add all the gates
@@ -19,11 +23,72 @@ def graph_to_circ(G, gamma0=-0.743043, beta0=0.754082):
     for i in range(n):
         circ += f"H {i}\n"
     for i, j in G.edges:
-        circ += f"CNOT {i} {j}\n"
-        circ += f"Rz {gamma0} {j}\n"
-        circ += f"CNOT {i} {j}\n"
+        circ += f"Rzz {gamma0} {i} {j}\n"
     for i in range(n):
         circ += f"Rx {beta0} {i}\n"
+
+    return circ
+
+
+def random_a2a_circ(L, depth):
+    import random
+
+    qubits = list(range(L))
+    gates = []
+
+    for i in range(L):
+        gates.append((0, 'h', i))
+
+    for d in range(depth):
+        random.shuffle(qubits)
+
+        for i in range(0, L - 1, 2):
+            g = random.choice(['cx', 'cy', 'cz', 'iswap'])
+            gates.append((d, g, qubits[i], qubits[i + 1]))
+
+        for q in qubits:
+            g = random.choice(['rx', 'ry', 'rz'])
+            gates.append((d, g, random.gauss(1.0, 0.5), q))
+
+    circ = qtn.Circuit(L)
+    circ.apply_gates(gates)
+
+    return circ
+
+
+def qft_circ(n, swaps=True, **circuit_opts):
+
+    circ = qtn.Circuit(n, **circuit_opts)
+
+    for i in range(n):
+        circ.h(i)
+        for j, m in zip(range(i + 1, n), itertools.count(2)):
+            circ.cu1(2 * math.pi / 2**m, j, i)
+
+    if swaps:
+        for i in range(n // 2):
+            circ.swap(i, n - i - 1)
+
+    return circ
+
+
+def swappy_circ(n, depth):
+    circ = qtn.Circuit(n)
+
+    for d in range(depth):
+        pairs = np.random.permutation(np.arange(n))
+
+        for i in range(n // 2):
+            qi = pairs[2 * i]
+            qj = pairs[2 * i + 1]
+
+            gate = np.random.choice(['FSIM', 'SWAP'])
+            if gate == 'FSIM':
+                params = np.random.randn(2)
+            else:
+                params = ()
+
+            circ.apply_gate(gate, *params, qi, qj)
 
     return circ
 
@@ -49,15 +114,15 @@ class TestCircuit:
         assert '111' in counts
         assert counts['000'] + counts['111'] == 1024
 
-    def test_rand_reg_qaoa(self):
+    def test_from_qasm(self):
         G = rand_reg_graph(reg=3, n=18, seed=42)
-        qasm = graph_to_circ(G)
+        qasm = graph_to_qasm(G)
         qc = qtn.Circuit.from_qasm(qasm)
         assert (qc.psi.H & qc.psi) ^ all == pytest.approx(1.0)
 
-    def test_rand_reg_qaoa_mps_swapsplit(self):
+    def test_from_qasm_mps_swapsplit(self):
         G = rand_reg_graph(reg=3, n=18, seed=42)
-        qasm = graph_to_circ(G)
+        qasm = graph_to_qasm(G)
         qc = qtn.CircuitMPS.from_qasm(qasm)
         assert len(qc.psi.tensors) == 18
         assert (qc.psi.H & qc.psi) ^ all == pytest.approx(1.0)
@@ -86,6 +151,9 @@ class TestCircuit:
             ('rx', 1, 1),
             ('ry', 1, 1),
             ('rz', 1, 1),
+            ('u3', 1, 3),
+            ('u2', 1, 2),
+            ('u1', 1, 1),
             # two qubit
             ('cx', 2, 0),
             ('cy', 2, 0),
@@ -94,7 +162,11 @@ class TestCircuit:
             ('swap', 2, 0),
             ('iswap', 2, 0),
             # two qubit parametrizable
+            ('cu3', 2, 3),
+            ('cu2', 2, 2),
+            ('cu1', 2, 1),
             ('fsim', 2, 2),
+            ('rzz', 2, 1),
         ]
         random.shuffle(g_nq_np)
 
@@ -196,6 +268,143 @@ class TestCircuit:
         cw_s = tn_s.contraction_width(output_inds=[])
         assert cw_s <= cw
 
+    def test_amplitude(self):
+        L = 5
+        circ = random_a2a_circ(L, 3)
+        psi = circ.to_dense()
+
+        for i in range(2**L):
+            b = f"{i:0>{L}b}"
+            c = circ.amplitude(b)
+            assert c == pytest.approx(psi[i, 0])
+
+    def test_partial_trace(self):
+        L = 5
+        circ = random_a2a_circ(L, 3)
+        psi = circ.to_dense()
+        for i in range(L - 1):
+            keep = (i, i + 1)
+            assert_allclose(qu.partial_trace(psi, [2] * 5, keep=keep),
+                            circ.partial_trace(keep),
+                            atol=1e-12)
+
+    @pytest.mark.parametrize("group_size", (1, 2, 6))
+    def test_sample(self, group_size):
+        import collections
+        from scipy.stats import power_divergence
+
+        C = 2**10
+        L = 5
+        circ = random_a2a_circ(L, 3)
+
+        psi = circ.to_dense()
+        p_exp = abs(psi.reshape(-1))**2
+        f_exp = p_exp * C
+
+        counts = collections.Counter(circ.sample(C, group_size=group_size))
+        f_obs = np.zeros(2**L)
+        for b, c in counts.items():
+            f_obs[int(b, 2)] = c
+
+        assert power_divergence(f_obs, f_exp)[0] < 100
+
+    def test_sample_chaotic(self):
+        import collections
+        from scipy.stats import power_divergence
+
+        C = 2**10
+        L = 5
+        reps = 3
+        depth = 2
+        goodnesses = [0] * 5
+
+        for _ in range(reps):
+            circ = random_a2a_circ(L, depth)
+
+            psi = circ.to_dense()
+            p_exp = abs(psi.reshape(-1))**2
+            f_exp = p_exp * C
+
+            for num_marginal in [1, 2, 3, 4, 5]:
+                counts = collections.Counter(
+                    circ.sample_chaotic(C, num_marginal, seed=666)
+                )
+                f_obs = np.zeros(2**L)
+                for b, c in counts.items():
+                    f_obs[int(b, 2)] = c
+
+                goodness = power_divergence(f_obs, f_exp)[0]
+                goodnesses[num_marginal - 1] += goodness
+
+        # assert average sampling goodness gets better with larger marginal
+        assert sum(goodnesses[i] < goodnesses[i - 1] for i in range(1, L)) >= 3
+
+    def test_local_expectation(self):
+        import random
+        L = 5
+        depth = 3
+        circ = random_a2a_circ(L, depth)
+        psi = circ.to_dense()
+        for _ in range(10):
+            G = qu.rand_matrix(4)
+            i = random.randint(0, L - 2)
+            where = (i, i + 1)
+            x1 = qu.expec(qu.ikron(G, [2] * L, where), psi)
+            x2 = circ.local_expectation(G, where)
+            assert x1 == pytest.approx(x2)
+
+    def test_local_expectation_multigate(self):
+        circ = qtn.Circuit(2)
+        circ.h(0)
+        circ.cnot(0, 1)
+        circ.y(1)
+        Gs = [qu.kronpow(qu.pauli(s), 2) for s in 'xyz']
+        exps = circ.local_expectation(Gs, [0, 1])
+        assert exps[0] == pytest.approx(-1)
+        assert exps[1] == pytest.approx(-1)
+        assert exps[2] == pytest.approx(-1)
+
+    def test_uni_to_dense(self):
+        import cmath
+        circ = qft_circ(3)
+        U = circ.uni.to_dense()
+        w = cmath.exp(2j * math.pi / 2**3)
+        ex = 2**(-3 / 2) * np.array(
+            [[w**0, w**0, w**0, w**0, w**0, w**0, w**0, w**0],
+             [w**0, w**1, w**2, w**3, w**4, w**5, w**6, w**7],
+             [w**0, w**2, w**4, w**6, w**0, w**2, w**4, w**6],
+             [w**0, w**3, w**6, w**1, w**4, w**7, w**2, w**5],
+             [w**0, w**4, w**0, w**4, w**0, w**4, w**0, w**4],
+             [w**0, w**5, w**2, w**7, w**4, w**1, w**6, w**3],
+             [w**0, w**6, w**4, w**2, w**0, w**6, w**4, w**2],
+             [w**0, w**7, w**6, w**5, w**4, w**3, w**2, w**1]])
+        assert_allclose(U, ex)
+
+    def test_swap_lighcones(self):
+        circ = qtn.Circuit(3)
+        circ.x(0)  # 0
+        circ.x(1)  # 1
+        circ.x(2)  # 2
+        circ.swap(0, 1)  # 3
+        circ.cx(1, 2)  # 4
+        circ.cx(0, 1)  # 5
+        assert circ.get_reverse_lightcone_tags((2,)) == (
+            'PSI0', 'GATE_0', 'GATE_2', 'GATE_4'
+        )
+
+    def test_swappy_local_expecs(self):
+        circ = swappy_circ(4, 4)
+        Gs = [qu.rand_matrix(4) for _ in range(3)]
+        pairs = [(0, 1), (1, 2), (2, 3)]
+
+        psi = circ.to_dense()
+        dims = [2] * 4
+
+        exs = [qu.expec(qu.ikron(G, dims, pair), psi)
+               for G, pair in zip(Gs, pairs)]
+        aps = [circ.local_expectation(G, pair) for G, pair in zip(Gs, pairs)]
+
+        assert_allclose(exs, aps)
 
 class TestCircuitGen:
 
@@ -239,3 +448,30 @@ class TestCircuitGen:
             assert len(tn['CZ', f'I{i}', f'I{(i + 1) % n}']) == depth
 
         assert all(isinstance(t, qtn.PTensor) for t in tn['U3'])
+
+    def test_qaoa(self):
+        G = rand_reg_graph(3, 10, seed=666)
+        terms = {(i, j): 1. for i, j in G.edges}
+        ZZ = qu.pauli('Z') & qu.pauli('Z')
+
+        gammas = [1.2]
+        betas = [-0.4]
+
+        circ1 = qtn.circ_qaoa(terms, 1, gammas, betas)
+
+        energy1 = sum(
+            circ1.local_expectation(ZZ, edge)
+            for edge in terms
+        )
+        assert energy1 < -4
+
+        gammas = [0.4]
+        betas = [0.3]
+
+        circ2 = qtn.circ_qaoa(terms, 1, gammas, betas)
+
+        energy2 = sum(
+            circ2.local_expectation(ZZ, edge)
+            for edge in terms
+        )
+        assert energy2 > 4

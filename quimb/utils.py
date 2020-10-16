@@ -4,6 +4,40 @@ import importlib
 import itertools
 
 
+try:
+    import cytoolz
+    last = cytoolz.last
+    concat = cytoolz.concat
+    frequencies = cytoolz.frequencies
+    partition_all = cytoolz.partition_all
+    merge_with = cytoolz.merge_with
+    valmap = cytoolz.valmap
+    partitionby = cytoolz.partitionby
+    concatv = cytoolz.concatv
+    partition_all = cytoolz.partition_all
+    compose = cytoolz.compose
+    identity = cytoolz.identity
+    isiterable = cytoolz.isiterable
+    unique = cytoolz.unique
+    keymap = cytoolz.keymap
+except ImportError:
+    import toolz
+    last = toolz.last
+    concat = toolz.concat
+    frequencies = toolz.frequencies
+    partition_all = toolz.partition_all
+    merge_with = toolz.merge_with
+    valmap = toolz.valmap
+    partitionby = toolz.partitionby
+    concatv = toolz.concatv
+    partition_all = toolz.partition_all
+    compose = toolz.compose
+    identity = toolz.identity
+    isiterable = toolz.isiterable
+    unique = toolz.unique
+    keymap = toolz.keymap
+
+
 _CHECK_OPT_MSG = "Option `{}` should be one of {}, but got '{}'."
 
 
@@ -122,7 +156,7 @@ def deprecated(fn, old_name, new_name):
     def new_fn(*args, **kwargs):
         import warnings
         warnings.warn(f"The {old_name} function is deprecated in favor "
-                      "of {new_name}", Warning)
+                      f"of {new_name}", Warning)
         return fn(*args, **kwargs)
 
     return new_fn
@@ -132,6 +166,14 @@ def int2tup(x):
     return (x if isinstance(x, tuple) else
             (x,) if isinstance(x, int) else
             tuple(x))
+
+
+def ensure_dict(x):
+    """Make sure ``x`` is a ``dict``, creating an empty one if ``x is None``.
+    """
+    if x is None:
+        return {}
+    return dict(x)
 
 
 def pairwise(iterable):
@@ -147,11 +189,11 @@ def print_multi_line(*lines, max_width=None):
         import shutil
         max_width, _ = shutil.get_terminal_size()
 
-    max_line_lenth = max(len(l) for l in lines)
+    max_line_lenth = max(len(ln) for ln in lines)
 
     if max_line_lenth <= max_width:
-        for l in lines:
-            print(l)
+        for ln in lines:
+            print(ln)
 
     else:  # pragma: no cover
         max_width -= 10  # for ellipses and pad
@@ -168,33 +210,16 @@ def print_multi_line(*lines, max_width=None):
                     )
                 print(("{:^" + str(max_width) + "}").format("..."))
             elif i == n_blocks - 1:
-                for l in lines:
-                    print("   ", l[i * max_width:(i + 1) * max_width])
+                for ln in lines:
+                    print("   ", ln[i * max_width:(i + 1) * max_width])
             else:
-                for j, l  in enumerate(lines):
+                for j, ln in enumerate(lines):
                     print(
                         "..." if j == n_lines // 2 else "   ",
-                        l[i * max_width:(i + 1) * max_width],
+                        ln[i * max_width:(i + 1) * max_width],
                         "..." if j == n_lines // 2 else "   ",
                     )
                 print(("{:^" + str(max_width) + "}").format("..."))
-
-
-def functions_equal(fn1, fn2):
-    """Check equality of the code in ``fn1`` and ``fn2``.
-    """
-
-    try:
-        code1 = fn1.__code__.co_code
-    except AttributeError:
-        code1 = fn1.__func__.__code__.co_code
-
-    try:
-        code2 = fn2.__code__.co_code
-    except AttributeError:
-        code2 = fn2.__func__.__code__.co_code
-
-    return code1 == code2
 
 
 def save_to_disk(obj, fname, **dump_opts):
@@ -233,3 +258,128 @@ class Verbosify:  # pragma: no cover
         else:
             print(f"{pre_msg}{self.highlight}={kwargs[self.highlight]}")
         return self.fn(*args, **kwargs)
+
+
+class oset:
+    """An ordered set which stores elements as the keys of dict (ordered as of
+    python 3.6). 'A few times' slower than using a set directly for small
+    sizes, but makes everything deterministic.
+    """
+
+    __slots__ = ('_d',)
+
+    def __init__(self, it=()):
+        self._d = dict.fromkeys(it)
+
+    @classmethod
+    def _from_dict(cls, d):
+        obj = object.__new__(oset)
+        obj._d = d
+        return obj
+
+    @classmethod
+    def from_dict(cls, d):
+        """Public method makes sure to copy incoming dictionary.
+        """
+        return oset._from_dict(d.copy())
+
+    def copy(self):
+        return oset.from_dict(self._d)
+
+    def add(self, k):
+        self._d[k] = None
+
+    def discard(self, k):
+        self._d.pop(k, None)
+
+    def remove(self, k):
+        del self._d[k]
+
+    def clear(self):
+        self._d.clear()
+
+    def update(self, *others):
+        for o in others:
+            self._d.update(o._d)
+
+    def union(self, *others):
+        u = self.copy()
+        u.update(*others)
+        return u
+
+    def intersection_update(self, *others):
+        if len(others) > 1:
+            si = set.intersection(*(set(o._d) for o in others))
+        else:
+            si = others[0]._d
+        self._d = {k: None for k in self._d if k in si}
+
+    def intersection(self, *others):
+        n_others = len(others)
+        if n_others == 0:
+            return self.copy()
+        elif n_others == 1:
+            si = others[0]._d
+        else:
+            si = set.intersection(*(set(o._d) for o in others))
+        return oset._from_dict({k: None for k in self._d if k in si})
+
+    def difference_update(self, *others):
+        if len(others) > 1:
+            su = set.union(*(set(o._d) for o in others))
+        else:
+            su = others[0]._d
+        self._d = {k: None for k in self._d if k not in su}
+
+    def difference(self, *others):
+        if len(others) > 1:
+            su = set.union(*(set(o._d) for o in others))
+        else:
+            su = others[0]._d
+        return oset._from_dict({k: None for k in self._d if k not in su})
+
+    def popleft(self):
+        k = next(iter(self._d))
+        del self._d[k]
+        return k
+
+    def popright(self):
+        return self._d.popitem()[0]
+
+    def __eq__(self, other):
+        if isinstance(other, oset):
+            return self._d == other._d
+        return False
+
+    def __or__(self, other):
+        return self.union(other)
+
+    def __ior__(self, other):
+        self.update(other)
+        return self
+
+    def __and__(self, other):
+        return self.intersection(other)
+
+    def __iand__(self, other):
+        self.intersection_update(other)
+        return self
+
+    def __sub__(self, other):
+        return self.difference(other)
+
+    def __isub__(self, other):
+        self.difference_update(other)
+        return self
+
+    def __len__(self):
+        return self._d.__len__()
+
+    def __iter__(self):
+        return self._d.__iter__()
+
+    def __contains__(self, x):
+        return self._d.__contains__(x)
+
+    def __repr__(self):
+        return f"oset({list(self._d)})"

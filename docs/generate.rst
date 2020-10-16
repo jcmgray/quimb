@@ -121,7 +121,6 @@ since version 1.17 ``numpy`` itself enables parallel streams of random numbers t
 ``quimb`` handles setting up the bit generators and multi-threading the creation of random arrays, with potentially large performance gains. While the random number sequences can be still replicated using the ``seed`` argument, they also depend (deterministically) on the number of threads used, so may vary across machines unless this is set (e.g. with ``'OMP_NUM_THREADS'``).
 
 .. note::
-    :class: quimbnote
 
     Previously, `randomgen <https://github.com/bashtage/randomgen>`_ was needed for this functionality, and its `bit generators <https://bashtage.github.io/randomgen/bit_generators/index.html>`_ can still be specified to :func:`~quimb.gen.rand.set_rand_bitgen` if installed.
 

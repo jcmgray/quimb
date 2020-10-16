@@ -4,7 +4,7 @@ import numpy as np
 
 import quimb as qu
 import quimb.tensor as qtn
-from quimb.tensor.tensor_tebd import OTOC_local
+from quimb.tensor.tensor_1d_tebd import OTOC_local
 
 
 class TestTEBD:
@@ -30,9 +30,9 @@ class TestTEBD:
         (0.0759283, 1e-4),
         (None, None),
     ])
-    def test_evolve_obc_pbc(self, order, dt, tol, cyclic):
-        n = 10
-        tf = 2
+    @pytest.mark.parametrize('n', [5, 6])
+    def test_evolve_obc_pbc(self, n, order, dt, tol, cyclic):
+        tf = 1.0 if cyclic else 2
         psi0 = qtn.MPS_neel_state(n, cyclic=cyclic)
         H_int = qu.ham_heis(2, cyclic=False)  # this is just the interaction
 
@@ -59,7 +59,8 @@ class TestTEBD:
         evo = qu.Evolution(dpsi0, dham)
         evo.update_to(tf)
 
-        assert qu.expec(evo.pt, tebd.pt.to_dense()) == approx(1, rel=1e-5)
+        assert qu.expec(evo.pt, tebd.pt.to_dense()) == approx(1, rel=1e-3 if
+                                                              cyclic else 1e-5)
 
     @pytest.mark.parametrize('cyclic', [False, True])
     @pytest.mark.parametrize('order', [2, 4])
@@ -75,7 +76,7 @@ class TestTEBD:
         ground = qtn.MPS_computational_state('0' * n, cyclic=cyclic)
         excited = qtn.MPS_computational_state(('01' * n)[:n], cyclic=cyclic)
         psi0 = (ground + excited) / 2**0.5
-        H = qtn.NNI_ham_ising(n, j=-1, cyclic=cyclic)
+        H = qtn.ham_1d_ising(n, j=-1, cyclic=cyclic)
 
         if dt and tol:
             with pytest.raises(ValueError):
@@ -99,8 +100,10 @@ class TestTEBD:
         E_ground = qtn.expec_TN_1D(ground.H, H_mpo, ground)
         E_excited = qtn.expec_TN_1D(excited.H, H_mpo, excited)
 
-        psi1 = (np.exp(-tf * E_ground) * ground + np.exp(-tf * E_excited) * excited)
-        psi1 /= np.sqrt(np.exp(-2 * tf * E_ground) + np.exp(-2 * tf * E_excited))
+        psi1 = (np.exp(-tf * E_ground) * ground +
+                np.exp(-tf * E_excited) * excited)
+        psi1 /= np.sqrt(np.exp(-2 * tf * E_ground) +
+                        np.exp(-2 * tf * E_excited))
 
         assert qtn.expec_TN_1D(psi1.H, tebd.pt) == approx(1, rel=1e-5)
 
@@ -114,19 +117,17 @@ class TestTEBD:
         psi0 = qtn.MPS_neel_state(n, cyclic=cyclic)
         H_int = qu.ham_heis(2, cyclic=False)
         tebd = qtn.TEBD(psi0, H_int, dt=dt, tol=tol)
-        assert tebd.H.special_sites == set()
 
         for pt in tebd.at_times([0.1, 0.2, 0.3, 0.4, 0.5]):
             assert pt.H @ pt == approx(1, rel=1e-5)
 
         assert tebd.err <= 1e-5
 
-    def test_NNI_and_single_site_terms(self):
+    def test_local_ham_1d_and_single_site_terms(self):
         n = 10
         psi0 = qtn.MPS_neel_state(n)
-        H_nni = qtn.NNI_ham_XY(n, bz=0.9)
-        assert H_nni.special_sites == {(8, 9)}
-        tebd = qtn.TEBD(psi0, H_nni)
+        lham_1d = qtn.ham_1d_XY(n, bz=0.9)
+        tebd = qtn.TEBD(psi0, lham_1d)
         tebd.update_to(1.0, tol=1e-5)
         assert abs(psi0.H @ tebd.pt) < 1.0
         assert tebd.pt.entropy(5) > 0.0
@@ -138,11 +139,11 @@ class TestTEBD:
 
         assert qu.expec(tebd.pt.to_dense(), evo.pt) == pytest.approx(1.0)
 
-    def test_NNI_and_single_site_terms_heis(self):
+    def test_local_ham_1d_and_single_site_terms_heis(self):
         n = 10
         psi0 = qtn.MPS_neel_state(n)
-        H_nni = qtn.NNI_ham_heis(n, j=(0.7, 0.8, 0.9), bz=0.337)
-        tebd = qtn.TEBD(psi0, H_nni)
+        lham_1d = qtn.ham_1d_heis(n, j=(0.7, 0.8, 0.9), bz=0.337)
+        tebd = qtn.TEBD(psi0, lham_1d)
         tebd.update_to(1.0, tol=1e-5)
         assert abs(psi0.H @ tebd.pt) < 1.0
         assert tebd.pt.entropy(5) > 0.0
@@ -158,9 +159,8 @@ class TestTEBD:
         n = 10
         tf = 1.0
         p0 = qtn.MPS_rand_state(n, bond_dim=1)
-        H = qtn.NNI_ham_mbl(n, dh=1.7, cyclic=False, seed=42)
+        H = qtn.ham_1d_mbl(n, dh=1.7, cyclic=False, seed=42)
         print(H)
-        assert H.special_sites == {(i, i + 1) for i in range(n)}
         tebd = qtn.TEBD(p0, H)
         tebd.update_to(tf, tol=1e-3)
 
@@ -177,11 +177,11 @@ class TestTEBD:
         p = qtn.MPS_computational_state('0000100000', cyclic=cyclic)
         pd = p.to_dense()
 
-        H_nni = qtn.NNI_ham_ising(10, j=4, bx=1, cyclic=cyclic)
+        lham_1d = qtn.ham_1d_ising(10, j=4, bx=1, cyclic=cyclic)
         H_mpo = qtn.MPO_ham_ising(10, j=4, bx=1, cyclic=cyclic)
         H = qu.ham_ising(10, jz=4, bx=1, cyclic=cyclic)
 
-        tebd = qtn.TEBD(p, H_nni, tol=1e-6)
+        tebd = qtn.TEBD(p, lham_1d, tol=1e-6)
         tebd.split_opts['cutoff'] = 1e-9
         tebd.split_opts['cutoff_mode'] = 'rel'
         evo = qu.Evolution(pd, H)
@@ -209,10 +209,10 @@ class TestTEBD:
 def test_OTOC_local():
     L = 10
     psi0 = qtn.MPS_computational_state('0' * L, cyclic=True)
-    H1 = qtn.NNI_ham_ising(L, j=4, bx=0, cyclic=True)
-    H_back1 = qtn.NNI_ham_ising(L, j=-4, bx=0, cyclic=True)
-    H2 = qtn.NNI_ham_ising(L, j=4, bx=1, cyclic=True)
-    H_back2 = qtn.NNI_ham_ising(L, j=-4, bx=-1, cyclic=True)
+    H1 = qtn.ham_1d_ising(L, j=4, bx=0, cyclic=True)
+    H_back1 = qtn.ham_1d_ising(L, j=-4, bx=0, cyclic=True)
+    H2 = qtn.ham_1d_ising(L, j=4, bx=1, cyclic=True)
+    H_back2 = qtn.ham_1d_ising(L, j=-4, bx=-1, cyclic=True)
     A = qu.pauli('z')
     ts = np.linspace(1, 2, 2)
     OTOC_t = []
@@ -227,5 +227,5 @@ def test_OTOC_local():
                         split_opts={'cutoff': 1e-5, 'cutoff_mode': 'rel'},
                         initial_eigenstate='check'):
         x_t += [x]
-    assert x_t[0] == pytest.approx(0.52745, 1e-5)
-    assert x_t[1] == pytest.approx(0.70440, 1e-5)
+    assert x_t[0] == pytest.approx(0.52745, rel=1e-4, abs=1e-9)
+    assert x_t[1] == pytest.approx(0.70440, rel=1e-4, abs=1e-9)

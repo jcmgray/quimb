@@ -37,7 +37,7 @@ In addition, the tensor network library, :mod:`quimb.tensor`, requires:
 * `autoray <https://github.com/jcmgray/autoray>`_
 
 ``opt_einsum`` efficiently optimizes tensor contraction expressions. It can be installed with ``pip`` or from `conda-forge <https://conda-forge.org>`_ and is a required dependency since various bits of the core ``quimb`` module now make use tensor-network functionality behind the scenes.
-``autoray`` allows backend agnostic numeric code for various tensor network operations so that many libraries other than ``numpy`` can be used. It is currently only installable via ``pip`` from `pypi <https://pypi.org/project/autoray/>`_.
+``autoray`` allows backend agnostic numeric code for various tensor network operations so that many libraries other than ``numpy`` can be used. It can be installed via ``pip`` from `pypi <https://pypi.org/project/autoray/>`_ or via ``conda`` from `conda-forge <https://anaconda.org/conda-forge/autoray>`_.
 
 
 Optional Dependencies
@@ -48,7 +48,7 @@ Plotting tensor networks as colored graphs with weighted edges requires:
 * `matplotlib <https://matplotlib.org/>`_
 * `networkx <https://networkx.github.io/>`_
 
-Fast, multi-threaded random number generation no longer (with `numpy>1.17`) requires `randomgen <https://github.com/bashtage/randomgen>` though its bit generators can still be used._
+Fast, multi-threaded random number generation no longer (with `numpy>1.17`) requires `randomgen <https://github.com/bashtage/randomgen>`_ though its bit generators can still be used.
 
 Finally, fast and optionally distributed partial eigen-solving, SVD, exponentiation etc. can be accelerated with ``slepc4py`` and its dependencies:
 
@@ -126,6 +126,5 @@ Build the python interfaces
 
 
 .. note::
-    :class: quimbnote
 
     It is possible to compile several versions of PETSc/SLEPc side by side, for example a ``--with-scalar-type=real`` version, naming them with different values of ``PETSC_ARCH``. When loading PETSc/SLEPc, ``quimb`` respects ``PETSC_ARCH`` if it is set, but it cannot dynamically switch bewteen them.

@@ -107,31 +107,31 @@ class MovingEnvironment:
     few sites in a 1D tensor network. E.g. for ``begin='left', bsz=2``, this
     initializes the right environments like so::
 
-        n - 1: o-o-o-     -o-o-o
-               | | |       | | |
-               H-H-H- ... -H-H-H
-               | | |       | | |
-               o-o-o-     -o-o-o
+        n - 1: ●─●─●─     ─●─●─●
+               │ │ │       │ │ │
+               H─H─H─ ... ─H─H─H
+               │ │ │       │ │ │
+               ●─●─●─     ─●─●─●
 
-        n - 2: o-o-o-     -o-o\
-               | | |       | | o
-               H-H-H- ... -H-H-H
-               | | |       | | o
-               o-o-o-     -o-o/
+        n - 2: ●─●─●─     ─●─●─╮
+               │ │ │       │ │ ●
+               H─H─H─ ... ─H─H─H
+               │ │ │       │ │ ●
+               ●─●─●─     ─●─●─╯
 
-        n - 3: o-o-o-     -o\
-               | | |       | oo
-               H-H-H- ... -H-HH
-               | | |       | oo
-               o-o-o-     -o/
+        n - 3: ●─●─●─     ─●─╮
+               │ │ │       │ ●●
+               H─H─H─ ... ─H─HH
+               │ │ │       │ ●●
+               ●─●─●─     ─●─╯
 
         ...
 
-        0    : o-o\
-               | | oo   ooo
-               H-H-HH...HHH
-               | | oo   ooo
-               o-o/
+        0    : ●─●─╮
+               │ │ ●●   ●●●
+               H─H─HH...HHH
+               │ │ ●●   ●●●
+               ●─●─╯
 
     which can then be used to efficiently generate the left environments as
     each site is updated. For example if ``bsz=2`` and the environements have
@@ -139,41 +139,41 @@ class MovingEnvironment:
     returns something like::
 
              <---> bsz sites
-             /o-o\
-        ooooo | | ooooooo
-        HHHHH-H-H-HHHHHHH
-        ooooo | | ooooooo
-             \o-o/
+            ╭─●─●─╮
+        ●●●●● │ │ ●●●●●●●
+        HHHHH─H─H─HHHHHHH
+        ●●●●● │ │ ●●●●●●●
+            ╰─●─●─╯
         0 ... i i+1 ... n-1
 
     For periodic systems ``MovingEnvironment`` approximates the 'long
     way round' transfer matrices. E.g consider replacing segment B
     (to arbitrary precision) with an SVD::
 
-        /-----------------------------------------------\
-        +-A-A-A-A-A-A-A-A-A-A-A-A-B-B-B-B-B-B-B-B-B-B-B-+
-          | | | | | | | | | | | | | | | | | | | | | | |           ==>
-        +-A-A-A-A-A-A-A-A-A-A-A-A-B-B-B-B-B-B-B-B-B-B-B-+
-        \-----------------------------------------------/
+        ╭───────────────────────────────────────────────╮
+        ╰─A─A─A─A─A─A─A─A─A─A─A─A─B─B─B─B─B─B─B─B─B─B─B─╯
+          │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │           ==>
+        ╭─A─A─A─A─A─A─A─A─A─A─A─A─B─B─B─B─B─B─B─B─B─B─B─╮
+        ╰───────────────────────────────────────────────╯
 
-        +~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~+
-        |   /-A-A-A-A-A-A-A-A-A-A-A-A-\   |                       ==>
-        +~<BL | | | | | | | | | | | | BR>~+
-            \-A-A-A-A-A-A-A-A-A-A-A-A-/
+        ╭┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄╮
+        ┊   ╭─A─A─A─A─A─A─A─A─A─A─A─A─╮   ┊                       ==>
+        ╰┄<BL │ │ │ │ │ │ │ │ │ │ │ │ BR>┄╯
+            ╰─A─A─A─A─A─A─A─A─A─A─A─A─╯
               ^                     ^
         segment_start          segment_stop - 1
 
-        +~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~+
-        |   /-A-A-\                        |                      ==>
-        +~<BL | |  AAAAAAAAAAAAAAAAAAAABR>~+
-            \-A-A-/
+        ╭┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄╮
+        ┊   ╭─A─A─╮                        ┊                      ==>
+        ╰┄<BL │ │ AAAAAAAAAAAAAAAAAAAAABR>┄╯
+            ╰─A─A─╯
               ...
             <-bsz->
 
-        +~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~+
-        |               /-A-A-\           |                       ==>
-        +~<BLAAAAAAAAAAA  | |  AAAAAAABR>~+
-                        \-A-A-/
+        ╭┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄╮
+        ┊               ╭─A─A─╮           ┊                       ==>
+        ╰~<BLAAAAAAAAAAA  │ │ AAAAAAAABR>~╯
+                        ╰─A─A─╯
                           i i+1
              -----sweep--------->
 
@@ -231,8 +231,8 @@ class MovingEnvironment:
         else:
             self.segment_callbacks = segment_callbacks
 
-        self.n = tn.nsites
-        self.structure = tn.structure
+        self.L = tn.L
+        self._site_tag_id = tn.site_tag_id
 
         if self.cyclic:
             self.eps = eps
@@ -245,34 +245,34 @@ class MovingEnvironment:
                 # this logic essentially makes sure that segments prefer
                 #     overshooting e.g ssz=1/3 with n=100 produces segments of
                 #     length 34, to avoid a final segement of length 1.
-                self._ssz = int(self.n * ssz + self.n % int(1 / ssz))
+                self._ssz = int(self.L * ssz + self.L % int(1 / ssz))
             else:
                 self._ssz = ssz
 
-            self.segmented = self._ssz < self.n
+            self.segmented = self._ssz < self.L
             # will still split system in half but no compression or callbacks
             if not self.segmented:
-                self._ssz = int(self.n / 2 + self.n % 2)
+                self._ssz = int(self.L / 2 + self.L % 2)
 
             start, stop = {
                 'left': (0, self._ssz),
-                'right': (self.n - self._ssz, self.n)
+                'right': (self.L - self._ssz, self.L)
             }[begin]
         else:
             self.segmented = False
-            start, stop = (0, self.n - self.bsz + 1)
+            start, stop = (0, self.L - self.bsz + 1)
 
         self.init_segment(begin, start, stop)
 
     def site_tag(self, i):
-        return self.structure.format(i % self.n)
+        return self._site_tag_id.format(i % self.L)
 
     def init_segment(self, begin, start, stop):
         """Initialize the environments in ``range(start, stop)`` so that one
         can start sweeping from the side defined by ``begin``.
         """
-        if (start >= self.n) or (stop < 0):
-            start, stop = start % self.n, stop % self.n
+        if (start >= self.L) or (stop < 0):
+            start, stop = start % self.L, stop % self.L
 
         self.segment = range(start, stop)
         self.init_non_segment(start, stop + self.bsz // 2)
@@ -281,7 +281,7 @@ class MovingEnvironment:
 
             tags_initital = ['_RIGHT'] + [self.site_tag(stop - 1 + b)
                                           for b in range(self.bsz)]
-            self.envs = {stop - 1: self.tnc.select(tags_initital, which='any')}
+            self.envs = {stop - 1: self.tnc.select_any(tags_initital)}
 
             for i in reversed(range(start, stop - 1)):
                 # add a new site to previous env, and contract one site
@@ -296,7 +296,7 @@ class MovingEnvironment:
 
             tags_initital = ['_LEFT'] + [self.site_tag(start + b)
                                          for b in range(self.bsz)]
-            self.envs = {start: self.tnc.select(tags_initital, which='any')}
+            self.envs = {start: self.tnc.select_any(tags_initital)}
 
             for i in range(start + 1, stop):
                 # add a new site to previous env, and contract one site
@@ -319,21 +319,23 @@ class MovingEnvironment:
         if not self.segmented:
             if not self.cyclic:
                 # generate dummy left and right envs
-                self.tnc |= Tensor(1.0, (), {'_LEFT'}).astype(self.tn.dtype)
-                self.tnc |= Tensor(1.0, (), {'_RIGHT'}).astype(self.tn.dtype)
+                self.tnc |= Tensor(tags='_LEFT').astype(self.tn.dtype)
+                self.tnc |= Tensor(tags='_RIGHT').astype(self.tn.dtype)
                 return
 
             # if cyclic just contract other section and tag
-            self.tnc |= Tensor(1.0, (), {'_LEFT'}).astype(self.tn.dtype)
-            self.tnc.contract(slice(stop, start + self.n), inplace=True)
+            self.tnc |= Tensor(tags='_LEFT').astype(self.tn.dtype)
+            self.tnc.contract(slice(stop, start + self.L), inplace=True)
             self.tnc.add_tag('_RIGHT', where=stop + 1)
             return
 
         # replicate all tags on end pieces apart from site number
-        ltags = {'_LEFT', *self.tnc.select(start - 1).tags}
-        ltags.remove(self.site_tag(start - 1))
-        rtags = {'_RIGHT', *self.tnc.select(stop).tags}
-        rtags.remove(self.site_tag(stop))
+        ltags = self.tnc.select(start - 1).tags
+        ltags.add('_LEFT')
+        ltags.discard(self.site_tag(start - 1))
+        rtags = self.tnc.select(stop).tags
+        rtags.add('_RIGHT')
+        rtags.discard(self.site_tag(stop))
 
         # for example, pseudo orthogonalization if cyclic
         if self.segment_callbacks is not None:
@@ -367,7 +369,7 @@ class MovingEnvironment:
             self.tnc['_RIGHT'] /= norm
 
     def move_right(self):
-        i = (self.pos + 1) % self.n
+        i = (self.pos + 1) % self.L
 
         # generate a new segment if we go over the border
         if i not in self.segment:
@@ -375,7 +377,7 @@ class MovingEnvironment:
                 raise ValueError("For OBC, ``0 <= position <= n - bsz``.")
             self.init_segment('left', i, i + self._ssz)
         else:
-            self.pos = i % self.n
+            self.pos = i % self.L
 
         i0 = self.segment.start
 
@@ -387,7 +389,7 @@ class MovingEnvironment:
             self.envs[i] |= new_left ^ all
 
     def move_left(self):
-        i = (self.pos - 1) % self.n
+        i = (self.pos - 1) % self.L
 
         # generate a new segment if we go over the border
         if i not in self.segment:
@@ -395,7 +397,7 @@ class MovingEnvironment:
                 raise ValueError("For OBC, ``0 <= position <= n - bsz``.")
             self.init_segment('right', i - self._ssz + 1, i + 1)
         else:
-            self.pos = i % self.n
+            self.pos = i % self.L
 
         iN = self.segment.stop
 
@@ -413,12 +415,12 @@ class MovingEnvironment:
         if self.cyclic:
             # to take account of PBC, rescale so that current pos == n // 2,
             #     then work out if desired i is lower or higher
-            ri = (i + (self.n // 2 - self.pos)) % self.n
-            direction = 'left' if ri <= self.n // 2 else 'right'
+            ri = (i + (self.L // 2 - self.pos)) % self.L
+            direction = 'left' if ri <= self.L // 2 else 'right'
         else:
             direction = 'left' if i < self.pos else 'right'
 
-        while self.pos != i % self.n:
+        while self.pos != i % self.L:
             {'left': self.move_left, 'right': self.move_right}[direction]()
 
     def __call__(self):
@@ -535,7 +537,7 @@ class DMRG:
 
     def __init__(self, ham, bond_dims, cutoffs=1e-9,
                  bsz=2, which='SA', p0=None):
-        self.n = ham.nsites
+        self.L = ham.L
         self.phys_dim = ham.phys_dim()
         self.bsz = bsz
         self.which = which
@@ -600,7 +602,7 @@ class DMRG:
         """Compress a site having updated it. Also serves to move the
         orthogonality center along.
         """
-        if (direction == 'right') and ((i < self.n - 1) or self.cyclic):
+        if (direction == 'right') and ((i < self.L - 1) or self.cyclic):
             self._k.left_canonize_site(i, bra=self._b)
         elif (direction == 'left') and ((i > 0) or self.cyclic):
             self._k.right_canonize_site(i, bra=self._b)
@@ -645,7 +647,7 @@ class DMRG:
             effv_n = 'OBC'
 
         if i is None:
-            site_norm = [self._k[i].H @ self._k[i] for i in range(self.n)]
+            site_norm = [self._k[i].H @ self._k[i] for i in range(self.L)]
         else:
             site_norm = self._k[i].H @ self._k[i]
 
@@ -875,7 +877,7 @@ class DMRG:
             {'R': self._k.right_canonize,
              'L': self._k.left_canonize}[direction](bra=self._b)
 
-        n, bsz = self.n, self.bsz
+        n, bsz = self.L, self.bsz
 
         direction, begin, sweep = {
             ('R', False): ('right', 'left', range(0, n - bsz + 1)),
@@ -1306,15 +1308,15 @@ class DMRGX(DMRG):
             Supplied to ``self._update_local_state``.
         """
         old_k = self._k.copy().H
-        TN_overlap = TensorNetwork([self._k, old_k], virtual=True)
+        TN_overlap = self._k | old_k
 
         if canonize:
             {'R': self._k.right_canonize,
              'L': self._k.left_canonize}[direction](bra=self._b)
 
         direction, begin, sweep = {
-            'R': ('right', 'left', range(0, self.n - self.bsz + 1)),
-            'L': ('left', 'right', reversed(range(0, self.n - self.bsz + 1))),
+            'R': ('right', 'left', range(0, self.L - self.bsz + 1)),
+            'L': ('left', 'right', reversed(range(0, self.L - self.bsz + 1))),
         }[direction]
 
         eff_opts = {'begin': begin, 'bsz': self.bsz, 'cyclic': self.cyclic}
@@ -1323,7 +1325,7 @@ class DMRGX(DMRG):
         self.ME_eff_ovlp = MovingEnvironment(TN_overlap, **eff_opts)
 
         if verbosity:
-            sweep = progbar(sweep, ncols=80, total=self.n - self.bsz + 1)
+            sweep = progbar(sweep, ncols=80, total=self.L - self.bsz + 1)
 
         local_ens, tot_ens = zip(*[
             self._update_local_state(i, direction=direction, **update_opts)

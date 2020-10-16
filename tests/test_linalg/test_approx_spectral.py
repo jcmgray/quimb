@@ -1,7 +1,6 @@
 import pytest
 import numpy as np
 from numpy.testing import assert_allclose
-from cytoolz import last
 
 from quimb import (
     prod,
@@ -16,6 +15,7 @@ from quimb import (
     negativity,
     entropy,
 )
+from quimb.utils import last
 
 from quimb.linalg.approx_spectral import (
     lazy_ptr_ppt_linop,

@@ -10,7 +10,6 @@ from math import sin, cos, pi, log, log2, sqrt
 import numpy as np
 import numpy.linalg as nla
 from scipy.optimize import minimize
-from cytoolz import frequencies, keymap
 
 from .core import (
     njit, issparse, isop, zeroify, realify, prod, isvec, dot, dag,
@@ -27,7 +26,8 @@ from .gen.operators import pauli
 from .gen.states import (
     basis_vec, bell_state, bloch_state
 )
-from .utils import int2tup, raise_cant_find_library_function
+from .utils import (int2tup, raise_cant_find_library_function, frequencies,
+                    keymap)
 
 try:
     from opt_einsum import contract
@@ -973,7 +973,22 @@ def quantum_discord(p, dims=(2, 2), sysa=0, sysb=1):
 
 @zeroify
 def trace_distance(p1, p2):
-    """Trace distance between two states.
+    r"""Trace distance between two states:
+
+    .. math::
+
+        \delta(\rho, \sigma)
+        =
+        \frac{1}{2} \left| \rho - \sigma \right|_\mathrm{tr}
+
+    If two wavefunctions are supplied the trace distance will be computed via
+    the more efficient expression:
+
+    .. math::
+
+        \delta(|\psi\rangle\langle\psi|, |\phi\rangle\langle\phi|)
+        =
+        \sqrt{1 - \langle \psi | \phi \rangle^2}
 
     Parameters
     ----------

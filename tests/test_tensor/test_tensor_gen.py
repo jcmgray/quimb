@@ -5,7 +5,7 @@ import quimb as qu
 import quimb.tensor as qtn
 
 
-class TestSpinHam:
+class TestSpinHam1D:
 
     @pytest.mark.parametrize("cyclic", [False, True])
     def test_var_terms(self, cyclic):
@@ -21,7 +21,7 @@ class TestSpinHam:
         K1 = qu.rand_herm(2**1)
 
         n = 10
-        HB = qtn.SpinHam(S=1 / 2)
+        HB = qtn.SpinHam1D(S=1 / 2)
 
         if var_two == 'some':
             HB += 1, K1, K1
@@ -45,7 +45,7 @@ class TestSpinHam:
         elif var_one == 'def-only':
             HB += 1, K1
 
-        HB.build_nni(n)
+        HB.build_local_ham(n)
         H_mpo = HB.build_mpo(n)
         H_sps = HB.build_sparse(n)
 
@@ -53,7 +53,7 @@ class TestSpinHam:
 
     def test_no_default_term(self):
         N = 10
-        builder = qtn.SpinHam(1 / 2)
+        builder = qtn.SpinHam1D(1 / 2)
 
         for i in range(N - 1):
             builder[i, i + 1] += 1.0, 'Z', 'Z'
@@ -85,3 +85,55 @@ class TestMPSSpecificStates:
         assert mps.H @ mps == pytest.approx(1.0)
         assert mps.bond_sizes() == [2, 2, 2, 2]
         assert qu.fidelity(psi, mps.to_dense()) == pytest.approx(1.0)
+
+    def test_computational_state(self):
+        mps = qtn.MPS_computational_state('01+-')
+        assert_allclose(mps.to_dense(),
+                        qu.up() & qu.down() & qu.plus() & qu.minus())
+
+
+class TestGenericTN:
+
+    def test_TN_rand_reg(self):
+        n = 6
+        reg = 3
+        D = 2
+        tn = qtn.TN_rand_reg(n, reg, D=D)
+        assert tn.outer_inds() == ()
+        assert tn.max_bond() == D
+        assert {t.ndim for t in tn} == {reg}
+        ket = qtn.TN_rand_reg(n, reg, D=2, phys_dim=2)
+        assert set(ket.outer_inds()) == {f'k{i}' for i in range(n)}
+        assert ket.max_bond() == D
+
+    @pytest.mark.parametrize('Lx', [3])
+    @pytest.mark.parametrize('Ly', [2, 4])
+    @pytest.mark.parametrize('beta', [0.13, 0.44])
+    @pytest.mark.parametrize('h', [0.0, 0.1])
+    @pytest.mark.parametrize('cyclic',
+                             [False, True, (False, True), (True, False)])
+    def test_2D_classical_ising_model(self, Lx, Ly, beta, h, cyclic):
+        tn = qtn.TN2D_classical_ising_partition_function(
+            Lx, Ly, beta=beta, h=h, cyclic=cyclic)
+        htn = qtn.HTN2D_classical_ising_partition_function(
+            Lx, Ly, beta=beta, h=h, cyclic=cyclic)
+        Z1 = tn.contract(all, output_inds=())
+        Z2 = htn.contract(all, output_inds=())
+        assert Z1 == pytest.approx(Z2)
+
+    @pytest.mark.parametrize('Lx', [2])
+    @pytest.mark.parametrize('Ly', [3])
+    @pytest.mark.parametrize('Lz', [4])
+    @pytest.mark.parametrize('beta', [0.13, 1 / 4.5])
+    @pytest.mark.parametrize('h', [0.0, 0.1])
+    @pytest.mark.parametrize('cyclic',
+                             [False, True,
+                              (False, True, False), (True, False, True)])
+    def test_3D_classical_ising_model(self, Lx, Ly, Lz, beta, h, cyclic):
+        tn = qtn.TN3D_classical_ising_partition_function(
+            Lx, Ly, Lz, beta=beta, h=h, cyclic=cyclic)
+        htn = qtn.HTN3D_classical_ising_partition_function(
+            Lx, Ly, Lz, beta=beta, h=h, cyclic=cyclic)
+        Z1 = tn.contract(all, output_inds=())
+        Z2 = htn.contract(all, output_inds=())
+        assert Z1 == pytest.approx(Z2)

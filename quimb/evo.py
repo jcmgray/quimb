@@ -15,7 +15,7 @@ from .core import (qarray, isop, ldmul, rdmul, explt,
                    dot, issparse, qu, eye, dag, make_immutable)
 from .linalg.base_linalg import eigh, norm, expm_multiply, Lazy
 from .linalg.approx_spectral import norm_fro_approx
-from .utils import continuous_progbar, progbar
+from .utils import continuous_progbar, progbar, ensure_dict
 
 
 CALLABLE_TIME_INDEP_CLASSES = (LinearOperator, Lazy)
@@ -411,7 +411,7 @@ class Evolution(object):
             self._update_method = self._update_to_expm_ket
             self._pt = self._p0
             self.expm_backend = expm_backend
-            self.expm_opts = {} if expm_opts is None else dict(expm_opts)
+            self.expm_opts = ensure_dict(expm_opts)
             self._ham = ham
         else:
             raise ValueError(f"Did not understand evolution "

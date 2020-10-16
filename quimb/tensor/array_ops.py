@@ -3,15 +3,23 @@
 import itertools
 
 import numpy
-from autoray import do, reshape, transpose, dag, infer_backend
+from autoray import do, reshape, transpose, dag, infer_backend, get_dtype_name
 
-from ..core import njit
+from ..core import njit, qarray
+from ..utils import compose
 from ..linalg.base_linalg import norm_fro_dense
 
 
 def asarray(array):
-    if isinstance(array, numpy.matrix) or not hasattr(array, 'shape'):
+    """Maybe convert data for a tensor to use.
+    """
+    should_convert_to_numpy = (
+        isinstance(array, (numpy.matrix, qarray)) or
+        not hasattr(array, 'shape'))
+
+    if should_convert_to_numpy:
         return numpy.asarray(array)
+
     return array
 
 
@@ -25,9 +33,9 @@ def ndim(array):
 # ------------- miscelleneous other backend agnostic functions -------------- #
 
 def iscomplex(x):
-    if not hasattr(x, 'dtype'):
+    if infer_backend(x) == 'builtins':
         return isinstance(x, complex)
-    return 'complex' in str(x.dtype)
+    return 'complex' in get_dtype_name(x)
 
 
 def norm_fro(x):
@@ -437,13 +445,24 @@ class PArray:
     """
 
     def __init__(self, fn, params, shape=None):
-        self._fn = fn
-        self._params = asarray(params)
+        self.fn = fn
+        self.params = params
         self._shape = shape
+        self._shape_fn_id = id(fn)
+
+    def copy(self):
+        new = PArray(self.fn, self.params, self.shape)
+        new._data = self._data  # for efficiency
+        return new
 
     @property
     def fn(self):
         return self._fn
+
+    @fn.setter
+    def fn(self, x):
+        self._fn = x
+        self._data = None
 
     @property
     def params(self):
@@ -452,18 +471,30 @@ class PArray:
     @params.setter
     def params(self, x):
         self._params = asarray(x)
+        self._data = None
 
     @property
     def data(self):
-        self._data = self._fn(self._params)
+        if self._data is None:
+            self._data = self._fn(self._params)
         return self._data
 
     @property
     def shape(self):
-        if self._shape is None:
+        # if we haven't calculated shape or have updated function, get shape
+        _shape_fn_id = id(self.fn)
+        if (self._shape is None) or (self._shape_fn_id != _shape_fn_id):
             self._shape = self.data.shape
+            self._shape_fn_id = _shape_fn_id
         return self._shape
 
     @property
     def ndim(self):
         return len(self.shape)
+
+    def add_function(self, g):
+        """Chain the new function ``g`` on top of current function ``f`` like
+        ``g(f(params))``.
+        """
+        f = self.fn
+        self.fn = compose(g, f)

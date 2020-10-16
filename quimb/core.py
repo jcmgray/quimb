@@ -12,7 +12,7 @@ from numbers import Integral
 import numpy as np
 from numpy.matlib import zeros
 import scipy.sparse as sp
-from cytoolz import partition_all
+from .utils import partition_all
 
 
 # --------------------------------------------------------------------------- #
@@ -608,7 +608,7 @@ def rdot(a, b):  # pragma: no cover
     Here, ``b`` will *not* be conjugated before the inner product.
     """
     a, b = a.reshape((1, -1)), b.reshape((-1, 1))
-    return (a @ b)[0, 0]
+    return (a @ b).item()
 
 
 @pnjit

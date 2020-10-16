@@ -7,7 +7,7 @@ def readme():
         import re
         long_desc = f.read()
         # strip out the raw html images
-        long_desc = re.sub('\.\. raw::[\S\s]*?>\n\n', "", long_desc)
+        long_desc = re.sub(r'\.\. raw::[\S\s]*?>\n\n', "", long_desc)
         return long_desc
 
 
@@ -53,7 +53,7 @@ setup(
         ],
         'docs': [
             'sphinx',
-            'sphinx_bootstrap_theme',
+            'pydata-sphinx-theme',
             'nbsphinx',
             'ipython',
             'autoray',
