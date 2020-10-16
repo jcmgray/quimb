@@ -4564,7 +4564,8 @@ class TensorNetwork(object):
 
         # sorted list of unique indices to check -> start with lowly connected
         def rank_weight(ind):
-            return -sum(tn.tensor_map[tid].ndim for tid in tn.ind_map[ind])
+            return (tn.ind_size(ind),
+                    -sum(tn.tensor_map[tid].ndim for tid in tn.ind_map[ind]))
 
         queue = oset(sorted(count, key=rank_weight))
 
