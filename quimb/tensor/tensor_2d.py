@@ -440,8 +440,9 @@ class TensorNetwork2D(TensorNetwork):
             Starting column, defaults to whole row.
         jstop : int or None
             Stopping column, defaults to whole row.
-        canonize_opts
-            Supplied to ``compress_between``.
+        compress_opts
+            Supplied to
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.compress_between`.
         """
         check_opt('sweep', sweep, ('right', 'left'))
         compress_opts.setdefault('absorb', 'right')
@@ -501,8 +502,9 @@ class TensorNetwork2D(TensorNetwork):
             Which direction to sweep in.
         xrange : None or (int, int), optional
             The range of rows to compress.
-        canonize_opts
-            Supplied to ``compress_between``.
+        compress_opts
+            Supplied to
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.compress_between`.
         """
         check_opt('sweep', sweep, ('up', 'down'))
 

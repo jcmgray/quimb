@@ -736,20 +736,47 @@ def tensor_canonize_bond(T1, T2, absorb='right', **split_opts):
     T2.modify(data=new_T2.data)
 
 
-def tensor_compress_bond(T1, T2, absorb='both', info=None, **compress_opts):
+def tensor_compress_bond(
+    T1,
+    T2,
+    reduced=True,
+    absorb='both',
+    info=None,
+    **compress_opts
+):
     r"""Inplace compress between the two single tensors. It follows the
     following steps to minimize the size of SVD performed::
 
-        a)|   |        b)|            |        c)|       |
-        --1---2--  ->  --1L~~1R--2L~~2R--  ->  --1L~~M~~2R--
-          |   |          |   ......   |          |       |
-         <*> <*>              >  <                  <*>
-         QR   LQ                                    SVD
+        a)│   │        b)│        │        c)│       │
+        ━━●━━━●━━  ->  ━━>━━○━━○━━<━━  ->  ━━>━━━M━━━<━━
+          │   │          │  ....  │          │       │
+         <*> <*>          contract              <*>
+         QR   LQ            -><-                SVD
 
-                  d)|            |        e)|     |
-              ->  --1L~~ML~~MR~~2R--  ->  --1C~~~2C--
-                    |....    ....|          |     |
-                     >  <    >  <              ^compressed bond
+                  d)│            │        e)│   │
+              ->  ━━>━━━ML──MR━━━<━━  ->  ━━●───●━━
+                    │....    ....│          │   │
+                  contract  contract          ^compressed bond
+                    -><-      -><-
+
+    Parameters
+    ----------
+    T1 : Tensor
+        The left tensor.
+    T2 : Tensor
+        The right tensor.
+    max_bond : int or None, optional
+        The maxmimum bond dimension.
+    cutoff : float, optional
+        The singular value cutoff to use.
+    reduced : bool, optional
+        Whether to perform the QR reduction as above or not.
+    absorb : {'both', 'left', 'right', None}, optional
+        Where to absorb the singular values after decomposition.
+    info : None or dict, optional
+        A dict for returning extra information such as the singular values.
+    compress_opts :
+        Supplied to :func:`~quimb.tensor.tensor_core.tensor_split`.
     """
     shared_ix, left_env_ix = T1.filter_bonds(T2)
     if not shared_ix:
@@ -760,25 +787,32 @@ def tensor_compress_bond(T1, T2, absorb='both', info=None, **compress_opts):
         T2.fuse_({shared_ix[0]: shared_ix})
         shared_ix = (shared_ix[0],)
 
-    # a) -> b)
-    T1_L, T1_R = T1.split(left_inds=left_env_ix, right_inds=shared_ix,
-                          get='tensors', method='qr')
-    T2_L, T2_R = T2.split(left_inds=shared_ix, get='tensors', method='lq')
-    # b) -> c)
-    M = (T1_R @ T2_L)
-    M.drop_tags()
-    # c) -> d)
-    M_L, *s, M_R = M.split(left_inds=T1_L.bonds(M), get='tensors',
-                           absorb=absorb, **compress_opts)
+    if reduced:
+        # a) -> b)
+        T1_L, T1_R = T1.split(left_inds=left_env_ix, right_inds=shared_ix,
+                              get='tensors', method='qr')
+        T2_L, T2_R = T2.split(left_inds=shared_ix, get='tensors', method='lq')
+        # b) -> c)
+        M = (T1_R @ T2_L)
+        M.drop_tags()
+        # c) -> d)
+        M_L, *s, M_R = M.split(left_inds=T1_L.bonds(M), get='tensors',
+                               absorb=absorb, **compress_opts)
 
-    # make sure old bond being used
-    ns_ix, = M_L.bonds(M_R)
-    M_L.reindex_({ns_ix: shared_ix[0]})
-    M_R.reindex_({ns_ix: shared_ix[0]})
+        # make sure old bond being used
+        ns_ix, = M_L.bonds(M_R)
+        M_L.reindex_({ns_ix: shared_ix[0]})
+        M_R.reindex_({ns_ix: shared_ix[0]})
 
-    # d) -> e)
-    T1C = T1_L.contract(M_L, output_inds=T1.inds)
-    T2C = M_R.contract(T2_R, output_inds=T2.inds)
+        # d) -> e)
+        T1C = T1_L.contract(M_L, output_inds=T1.inds)
+        T2C = M_R.contract(T2_R, output_inds=T2.inds)
+    else:
+        T12 = T1 @ T2
+        T1C, *s, T2C = T12.split(left_inds=left_env_ix, get='tensors',
+                                 absorb=absorb, **compress_opts)
+        T1C.transpose_like_(T1)
+        T2C.transpose_like_(T2)
 
     # update with the new compressed data
     T1.modify(data=T1C.data)

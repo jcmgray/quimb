@@ -751,7 +751,7 @@ class SimpleUpdate(TEBD2D):
     you can call ``get_state(absorb_gauges=False)`` to lazily add them as
     hyperedge weights only. Reference: https://arxiv.org/abs/0806.3719.
 
-        Parameters
+    Parameters
     ----------
     psi0 : TensorNetwork2DVector
         The initial state.
@@ -839,7 +839,7 @@ class SimpleUpdate(TEBD2D):
         If ``keep_best`` was set then the best recorded energy and the
         corresponding state that was computed - keys ``'energy'`` and
         ``'state'`` respectively.
-    """ + TEBD2D.__doc__
+    """
 
     def setup(
         self,
