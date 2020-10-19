@@ -751,6 +751,94 @@ class SimpleUpdate(TEBD2D):
     you can call ``get_state(absorb_gauges=False)`` to lazily add them as
     hyperedge weights only. Reference: https://arxiv.org/abs/0806.3719.
 
+        Parameters
+    ----------
+    psi0 : TensorNetwork2DVector
+        The initial state.
+    ham : LocalHam2D
+        The Hamtiltonian consisting of local terms.
+    tau : float, optional
+        The default local exponent, if considered as time real values here
+        imply imaginary time.
+    max_bond : {'psi0', int, None}, optional
+        The maximum bond dimension to keep when applying each gate.
+    gate_opts : dict, optional
+        Supplied to :meth:`quimb.tensor.tensor_2d.TensorNetwork2DVector.gate`,
+        in addition to ``max_bond``. By default ``contract`` is set to
+        'reduce-split' and ``cutoff`` is set to ``0.0``.
+    ordering : str, tuple[tuple[int]], callable, optional
+        How to order the terms, if a string is given then use this as the
+        strategy given to
+        :meth:`~quimb.tensor.tensor_2d_tebd.LocalHam2D.get_auto_ordering`. An
+        explicit list of coordinate pairs can also be given. The default is to
+        greedily form an 'edge coloring' based on the sorted list of
+        Hamiltonian pair coordinates. If a callable is supplied it will be used
+        to generate the ordering before each sweep.
+    compute_energy_every : None or int, optional
+        How often to compute and record the energy. If a positive integer 'n',
+        the energy is computed *before* every nth sweep (i.e. including before
+        the zeroth).
+    compute_energy_final : bool, optional
+        Whether to compute and record the energy at the end of the sweeps
+        regardless of the value of ``compute_energy_every``. If you start
+        sweeping again then this final energy is the same as the zeroth of the
+        next set of sweeps and won't be recomputed.
+    compute_energy_opts : dict, optional
+        Supplied to
+        :meth:`~quimb.tensor.tensor_2d.PEPS.compute_local_expectation`. By
+        default ``max_bond`` is set to ``max(8, D**2)`` where ``D`` is the
+        maximum bond to use for applying the gate, ``cutoff`` is set to ``0.0``
+        and ``normalized`` is set to ``True``.
+    compute_energy_fn : callable, optional
+        Supply your own function to compute the energy, it should take the
+        ``TEBD2D`` object as its only argument.
+    callback : callable, optional
+        A custom callback to run after every sweep, it should take the
+        ``TEBD2D`` object as its only argument. If it returns any value
+        that boolean evaluates to ``True`` then terminal the evolution.
+    progbar : boolean, optional
+        Whether to show a live progress bar during the evolution.
+    gauge_renorm : bool, optional
+        Whether to actively renormalize the singular value gauges.
+    gauge_smudge : float, optional
+        A small offset to use when applying the guage and its inverse to avoid
+        numerical problems.
+    condition_tensors : bool, optional
+        Whether to actively equalize tensor norms for numerical stability.
+    condition_balance_bonds : bool, optional
+        If and when equalizing tensor norms, whether to also balance bonds as
+        an additional conditioning.
+    long_range_use_swaps : bool, optional
+        If there are long range terms, whether to use swap gates to apply the
+        terms. If ``False``, a long range blob tensor (which won't scale well
+        for long distances) is formed instead.
+    long_range_path_sequence : str or callable, optional
+        If there are long range terms how to generate the path between the two
+        coordinates. If callable, should take the two coordinates and return a
+        sequence of  coordinates that links them, else passed to
+        ``gen_long_range_swap_path``.
+
+    Attributes
+    ----------
+    state : TensorNetwork2DVector
+        The current state.
+    ham : LocalHam2D
+        The Hamiltonian being used to evolve.
+    energy : float
+        The current of the current state, this will trigger a computation if
+        the energy at this iteration hasn't been computed yet.
+    energies : list[float]
+        The energies that have been computed, if any.
+    its : list[int]
+        The corresponding sequence of iteration numbers that energies have been
+        computed at.
+    taus : list[float]
+        The corresponding sequence of time steps that energies have been
+        computed at.
+    best : dict
+        If ``keep_best`` was set then the best recorded energy and the
+        corresponding state that was computed - keys ``'energy'`` and
+        ``'state'`` respectively.
     """ + TEBD2D.__doc__
 
     def setup(
@@ -925,8 +1013,6 @@ def gate_full_update_als(
     condition_tensors=True,
     condition_maintain_norms=True,
     condition_balance_bonds=True,
-    long_range_use_swaps=False,
-    long_range_path_sequence='random',
 ):
     ket_plq = ket.select_any(tags_plq).view_like_(ket)
     bra_plq = bra.select_any(tags_plq).view_like_(bra)
@@ -1153,6 +1239,109 @@ def parse_specific_gate_opts(strategy, fit_opts):
 
 
 class FullUpdate(TEBD2D):
+    """Implements the 'Full Update' version of 2D imaginary time evolution,
+    where each application of a gate is fitted to the current tensors using a
+    boundary contracted environment.
+
+    Parameters
+    ----------
+    psi0 : TensorNetwork2DVector
+        The initial state.
+    ham : LocalHam2D
+        The Hamtiltonian consisting of local terms.
+    tau : float, optional
+        The default local exponent, if considered as time real values here
+        imply imaginary time.
+    max_bond : {'psi0', int, None}, optional
+        The maximum bond dimension to keep when applying each gate.
+    gate_opts : dict, optional
+        Supplied to :meth:`quimb.tensor.tensor_2d.TensorNetwork2DVector.gate`,
+        in addition to ``max_bond``. By default ``contract`` is set to
+        'reduce-split' and ``cutoff`` is set to ``0.0``.
+    ordering : str, tuple[tuple[int]], callable, optional
+        How to order the terms, if a string is given then use this as the
+        strategy given to
+        :meth:`~quimb.tensor.tensor_2d_tebd.LocalHam2D.get_auto_ordering`. An
+        explicit list of coordinate pairs can also be given. The default is to
+        greedily form an 'edge coloring' based on the sorted list of
+        Hamiltonian pair coordinates. If a callable is supplied it will be used
+        to generate the ordering before each sweep.
+    compute_energy_every : None or int, optional
+        How often to compute and record the energy. If a positive integer 'n',
+        the energy is computed *before* every nth sweep (i.e. including before
+        the zeroth).
+    compute_energy_final : bool, optional
+        Whether to compute and record the energy at the end of the sweeps
+        regardless of the value of ``compute_energy_every``. If you start
+        sweeping again then this final energy is the same as the zeroth of the
+        next set of sweeps and won't be recomputed.
+    compute_energy_opts : dict, optional
+        Supplied to
+        :meth:`~quimb.tensor.tensor_2d.PEPS.compute_local_expectation`. By
+        default ``max_bond`` is set to ``max(8, D**2)`` where ``D`` is the
+        maximum bond to use for applying the gate, ``cutoff`` is set to ``0.0``
+        and ``normalized`` is set to ``True``.
+    compute_energy_fn : callable, optional
+        Supply your own function to compute the energy, it should take the
+        ``TEBD2D`` object as its only argument.
+    callback : callable, optional
+        A custom callback to run after every sweep, it should take the
+        ``TEBD2D`` object as its only argument. If it returns any value
+        that boolean evaluates to ``True`` then terminal the evolution.
+    progbar : boolean, optional
+        Whether to show a live progress bar during the evolution.
+    fit_strategy : {'als', 'autodiff'}, optional
+        Core method used to fit the gate application.
+
+            * ``'als'``: alternating least squares
+            * ``'autodiff'``: local fidelity using autodiff
+
+    fit_opts : dict, optional
+        Advanced options for the gate application fitting functions. Defaults
+        are inserted and can be accessed via the ``.fit_opts`` attribute.
+    compute_envs_every : {'term', 'group', 'sweep', int}, optional
+        How often to recompute the environments used to the fit the gate
+        application:
+
+            * ``'term'``: every gate
+            * ``'group'``: every set of commuting gates (the default)
+            * ``'sweep'``: every total sweep
+            * int: every ``x`` number of total sweeps
+
+    pre_normalize : bool, optional
+        Actively renormalize the state using the computed environments.
+    condition_tensors : bool, optional
+        Whether to actively equalize tensor norms for numerical stability.
+    condition_balance_bonds : bool, optional
+        If and when equalizing tensor norms, whether to also balance bonds as
+        an additional conditioning.
+    contract_optimize : str, optional
+        Contraction path optimizer to use for gate + env + sites contractions.
+
+    Attributes
+    ----------
+    state : TensorNetwork2DVector
+        The current state.
+    ham : LocalHam2D
+        The Hamiltonian being used to evolve.
+    energy : float
+        The current of the current state, this will trigger a computation if
+        the energy at this iteration hasn't been computed yet.
+    energies : list[float]
+        The energies that have been computed, if any.
+    its : list[int]
+        The corresponding sequence of iteration numbers that energies have been
+        computed at.
+    taus : list[float]
+        The corresponding sequence of time steps that energies have been
+        computed at.
+    best : dict
+        If ``keep_best`` was set then the best recorded energy and the
+        corresponding state that was computed - keys ``'energy'`` and
+        ``'state'`` respectively.
+    fit_opts : dict
+        Detailed options for fitting the applied gate.
+    """
 
     def setup(
         self,
@@ -1163,8 +1352,6 @@ class FullUpdate(TEBD2D):
         condition_tensors=True,
         condition_balance_bonds=True,
         contract_optimize='auto-hq',
-        long_range_use_swaps=False,
-        long_range_path_sequence='random',
     ):
         self.fit_strategy = str(fit_strategy)
         self.fit_opts = get_default_full_update_fit_opts()
@@ -1178,12 +1365,10 @@ class FullUpdate(TEBD2D):
         self.contract_optimize = str(contract_optimize)
         self.condition_tensors = bool(condition_tensors)
         self.condition_balance_bonds = bool(condition_balance_bonds)
-        self.compute_envs_every = int(compute_envs_every)
 
-        self.long_range_use_swaps = long_range_use_swaps
-        self.long_range_path_sequence = long_range_path_sequence
+        self.compute_envs_every = compute_envs_every
+        self._env_n = self._env_term_count = self._env_group_count = -1
 
-        self._env_n = -1
         self._psi.add_tag('KET')
 
     @property
@@ -1208,11 +1393,38 @@ class FullUpdate(TEBD2D):
                 new_inds = [i for i in t.inds if i != ind] + [ind]
                 t.transpose_(*new_inds)
 
-    def _compute_plaquette_envs(self):
+    @property
+    def compute_envs_every(self):
+        return self._compute_envs_every
+
+    @compute_envs_every.setter
+    def compute_envs_every(self, x):
+        if x == 'sweep':
+            self._need_to_recompute_envs = lambda: (
+                (self._n != self._env_n)
+            )
+        elif x == 'group':
+            self._need_to_recompute_envs = lambda: (
+                (self._n != self._env_n) or
+                (self._group_count != self._env_group_count)
+            )
+        elif x == 'term':
+            self._need_to_recompute_envs = lambda: (
+                (self._n != self._env_n) or
+                (self._group_count != self._env_group_count) or
+                (self._term_count != self._env_term_count)
+            )
+        else:
+            x = max(1, int(x))
+            self._need_to_recompute_envs = lambda: (self._n >= self._env_n + x)
+
+        self._compute_envs_every = x
+
+    def _maybe_compute_plaquette_envs(self, force=False):
         """Compute and store the plaquette environments for all local terms.
         """
-        if self._n == self._env_n:
-            # have already computed environments at this step
+        # first check if we need to compute the envs
+        if not self._need_to_recompute_envs() and not force:
             return
 
         if self.condition_tensors:
@@ -1252,6 +1464,8 @@ class FullUpdate(TEBD2D):
         self.plaquette_mapping = calc_plaquette_map(envs)
 
         self._env_n = self._n
+        self._env_group_count = self._group_count
+        self._env_term_count = self._term_count
 
     def presweep(self, i):
         """Full update presweep - compute envs and inject gate options.
@@ -1261,15 +1475,16 @@ class FullUpdate(TEBD2D):
         self._gate_opts = parse_specific_gate_opts(
             self.fit_strategy, self.fit_opts)
 
-        # compute the plaquette environments to be used for gating and energy
-        if i % self.compute_envs_every == 0:
-            self._compute_plaquette_envs()
+        # keep track of number of gates applied, and commutative groups
+        self._term_count = 0
+        self._group_count = 0
+        self._current_group = set()
 
     def compute_energy(self):
         """Full update compute energy - use the (likely) already calculated
         plaquette environments.
         """
-        self._compute_plaquette_envs()
+        self._maybe_compute_plaquette_envs(force=self._n != self._env_n)
 
         return self.state.compute_local_expectation(
             self.ham.terms,
@@ -1282,8 +1497,20 @@ class FullUpdate(TEBD2D):
         """Apply the gate ``G`` at sites where, using a fitting method that
         takes into account the current environment.
         """
+        # check if the new term commutes with those applied so far, this is to
+        #     decide if we need to recompute the environments
+        swhere = set(where)
+        if self._current_group.isdisjoint(swhere):
+            # if so add it to the grouping
+            self._current_group |= swhere
+        else:
+            # else increment and reset the grouping
+            self._current_group = swhere
+            self._group_count += 1
+
         # get the plaquette containing ``where`` and the sites it contains -
         # these will all be fitted
+        self._maybe_compute_plaquette_envs()
         plq = self.plaquette_mapping[tuple(sorted(where))]
         env = self.plaquette_envs[plq]
         tags_plq = tuple(starmap(self._psi.site_tag, plaquette_to_sites(plq)))
@@ -1299,7 +1526,8 @@ class FullUpdate(TEBD2D):
             max_bond=self.D,
             optimize=self.contract_optimize,
             condition_balance_bonds=self.condition_balance_bonds,
-            long_range_use_swaps=self.long_range_use_swaps,
-            long_range_path_sequence=self.long_range_path_sequence,
             **self._gate_opts
         )
+
+        # increments every gate call regardless
+        self._term_count += 1
