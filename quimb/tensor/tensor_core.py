@@ -3244,11 +3244,7 @@ class TensorNetwork(object):
             if len(tids) != 2:
                 continue
 
-            try:
-                tn._compress_between_tids(*tids, **compress_opts)
-            except ZeroDivisionError:
-                tn.convert_to_zero()
-                break
+            tn._compress_between_tids(*tids, **compress_opts)
 
         return tn
 

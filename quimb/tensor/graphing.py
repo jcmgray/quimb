@@ -133,7 +133,9 @@ def graph(
         if tid in highlight_tids:
             color = (1.0, 0.2, 0.2, 1.0)
         G.nodes[tid]['color'] = color
-        G.nodes[tid]['outline_color'] = tuple(0.8 * c for c in color)
+        G.nodes[tid]['outline_color'] = tuple(
+            (1.0 if i == 3 else 0.8) * c for i, c in enumerate(color)
+        )
         if show_tags:
             node_labels[tid] = '{' + str(list(t.tags))[1:-1] + '}'
 

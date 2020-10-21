@@ -1713,6 +1713,13 @@ class TensorNetwork2D(TensorNetwork):
             or
             :meth:`~quimb.tensor.tensor_2d.TensorNetwork2D.compute_row_environments`
             .
+
+        Returns
+        -------
+        dict[((int, int), (int, int)), TensorNetwork]
+            The plaquette environments. The key is two tuples of ints, the
+            startings coordinate of the plaquette being the first and the size
+            of the plaquette being the second pair.
         """
         if first_contract is None:
             if x_bsz > y_bsz:
@@ -2097,7 +2104,7 @@ class TensorNetwork2DVector(TensorNetwork2D,
             Whether to perform the gate operation inplace on the tensor
             network or not.
         info : None or dict, optional
-            Used to store extra optional information such as the sinuglar
+            Used to store extra optional information such as the singular
             values if not absorbed.
         compress_opts
             Supplied to :func:`~quimb.tensor.tensor_core.tensor_split` for any

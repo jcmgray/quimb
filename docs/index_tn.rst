@@ -8,4 +8,5 @@ Tensor Network Guide
 
   tensor-basics
   tensor-1d
+  tensor-2d
   tensor-circuit
