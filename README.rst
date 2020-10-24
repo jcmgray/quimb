@@ -2,9 +2,9 @@
 
     <img src="https://github.com/jcmgray/quimb/blob/develop/docs/_static/quimb_logo_title.png" width="450px">
 
-.. image:: https://travis-ci.org/jcmgray/quimb.svg?branch=master
-  :target: https://travis-ci.org/jcmgray/quimb
-  :alt: Travis-CI
+.. image:: https://dev.azure.com/quimb-org/quimb/_apis/build/status/jcmgray.quimb?branchName=develop
+  :target: https://dev.azure.com/quimb-org/quimb/
+  :alt: Azure
 .. image:: https://codecov.io/gh/jcmgray/quimb/branch/master/graph/badge.svg
   :target: https://codecov.io/gh/jcmgray/quimb
   :alt: Code Coverage
