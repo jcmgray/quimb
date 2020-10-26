@@ -15,7 +15,7 @@ class TestSpinHam1D:
         assert_allclose(Hd, Ht)
 
     @pytest.mark.parametrize("var_two", ['none', 'some', 'only'])
-    @pytest.mark.parametrize("var_one", ['some', 'only', 'onnly-some',
+    @pytest.mark.parametrize("var_one", ['some', 'only', 'only-some',
                                          'def-only', 'none'])
     def test_specials(self, var_one, var_two):
         K1 = qu.rand_herm(2**1)
