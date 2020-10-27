@@ -10,3 +10,4 @@ Tensor Network Guide
   tensor-1d
   tensor-2d
   tensor-circuit
+  tensor-design

@@ -46,3 +46,7 @@ code, kbd, pre, samp {
 .container, .container-lg, .container-md, .container-sm, .container-xl {
     max-width: 1600px;
 }
+
+.col-md-3 {
+    max-width: 20%;
+}
