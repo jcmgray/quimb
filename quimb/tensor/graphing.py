@@ -23,6 +23,7 @@ def graph(
     edge_scale=1.0,
     edge_alpha=1 / 3,
     figsize=(6, 6),
+    margin=None,
     return_fig=False,
     ax=None,
     **plot_opts
@@ -68,6 +69,9 @@ def graph(
         Set the alpha (opacity) of the drawn edges.
     figsize : tuple of int
         The size of the drawing.
+    margin : None or float, optional
+        Specify an argument for ``ax.margin``, else the plot limits will try
+        and be computed based on the node positions and node sizes.
     return_fig : bool, optional
         If True and ``ax is None`` then return the figure created rather than
         executing ``pyplot.show()``.
@@ -158,6 +162,29 @@ def graph(
         fig, ax = plt.subplots(figsize=figsize, constrained_layout=True)
         ax.axis('off')
         ax.set_aspect('equal')
+
+        xmin = ymin = +float('inf')
+        xmax = ymax = -float('inf')
+        for xy in pos.values():
+            # print(xy)
+            xmin = min(xmin, xy[0])
+            xmax = max(xmax, xy[0])
+            ymin = min(ymin, xy[1])
+            ymax = max(ymax, xy[1])
+
+        if margin is None:
+            # XXX: pad the plot range so that node circles are not clipped,
+            #     using the networkx node_size parameter, *which is in absolute
+            #     units* and so must be inverse transformed using matplotlib!
+            inv = ax.transData.inverted()
+            real_node_size = (abs(
+                inv.transform((0, node_size))[1] -
+                inv.transform((0, 0))[1]
+            ) ** 0.5) / 4
+            ax.set_xlim(xmin - real_node_size, xmax + real_node_size)
+            ax.set_ylim(ymin - real_node_size, ymax + real_node_size)
+        else:
+            ax.margins(margin)
 
     nx.draw_networkx_edges(
         G, pos,
