@@ -1511,6 +1511,26 @@ class Tensor(object):
 
     transpose_like_ = functools.partialmethod(transpose_like, inplace=True)
 
+    def trace(self, ind1, ind2, inplace=False):
+        """Trace index ``ind1`` with ``ind2``, removing both.
+        """
+        t = self if inplace else self.copy()
+
+        old_inds, new_inds = [], []
+        for ix in t.inds:
+            if ix in (ind1, ind2):
+                old_inds.append(ind1)
+            else:
+                old_inds.append(ix)
+                new_inds.append(ix)
+        old_inds, new_inds = tuple(old_inds), tuple(new_inds)
+
+        eq = _inds_to_eq(t.inds, (old_inds,), new_inds)
+        t.modify(apply=lambda x: do('einsum', eq, x, like=x),
+                 inds=new_inds, left_inds=None)
+
+        return t
+
     def sum_reduce(self, ind, inplace=False):
         """Sum over index ``ind``, removing it from this tensor.
 

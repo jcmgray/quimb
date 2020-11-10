@@ -316,6 +316,15 @@ class TestBasicTensorOperations:
         with pytest.raises(ValueError):
             a.transpose(*'cdfebz')
 
+    def test_tensor_trace(self):
+        t = qtn.rand_tensor((3, 3, 3), 'abc', dtype='complex128')
+        tb = t.trace('a', 'c')
+        assert tb.inds == ('b',)
+        assert_allclose(tb.data, np.trace(t.data, axis1=0, axis2=2))
+        tc = t.trace('a', 'b')
+        assert tc.inds == ('c',)
+        assert_allclose(tc.data, np.trace(t.data, axis1=0, axis2=1))
+
     def test_sum_reduce(self):
         t = rand_tensor((2, 3, 4), 'abc')
         ta = t.sum_reduce('a')
