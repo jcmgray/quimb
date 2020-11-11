@@ -7,10 +7,9 @@ import functools
 from math import log2
 from numbers import Integral
 
-import numpy as np
 import opt_einsum as oe
 import scipy.sparse.linalg as spla
-from autoray import do, dag, reshape, conj
+from autoray import do, dag, reshape, conj, get_dtype_name, transpose
 
 from ..utils import check_opt, print_multi_line, ensure_dict, partition_all
 import quimb as qu
@@ -745,6 +744,8 @@ class TensorNetwork1DVector(TensorNetwork1D,
                            doc="The string specifier for the physical indices")
 
     def site_ind(self, i):
+        """Get the physical index name of site ``i``.
+        """
         if not isinstance(i, str):
             i = i % self.L
         return self.site_ind_id.format(i)
@@ -1511,13 +1512,12 @@ class TensorNetwork1DFlat(TensorNetwork1D,
 
         def isidentity(x):
             d = x.shape[0]
-            if x.dtype in ('float32', 'complex64'):
+            if get_dtype_name(x) in ('float32', 'complex64'):
                 rtol, atol = 1e-5, 1e-6
-                idtty = np.eye(d, dtype='float32')
             else:
                 rtol, atol = 1e-9, 1e-11
-                idtty = np.eye(d, dtype='float64')
-            return np.allclose(x, idtty, rtol=rtol, atol=atol)
+            idtty = do('eye', d, dtype=x.dtype, like=x)
+            return do('allclose', x, idtty, rtol=rtol, atol=atol)
 
         for i in range(self.L - 1):
             ov ^= slice(max(0, i - 1), i + 1)
@@ -1678,7 +1678,7 @@ class MatrixProductState(TensorNetwork1DVector,
         def gen_tensors():
             for array, site_tag, inds, order in zip(arrays, site_tags,
                                                     gen_inds(), gen_orders()):
-                yield Tensor(array.transpose(*order), inds=inds, tags=site_tag)
+                yield Tensor(transpose(array, order), inds=inds, tags=site_tag)
 
         super().__init__(gen_tensors(), check_collisions=False, **tn_opts)
 
@@ -2097,7 +2097,7 @@ class MatrixProductState(TensorNetwork1DVector,
 
         S = self.schmidt_values(i, cur_orthog=cur_orthog, method=method)
         S = S[S > 0.0]
-        return np.sum(-S * np.log2(S))
+        return do('sum', -S * do('log2', S))
 
     def schmidt_gap(self, i, cur_orthog=None, method='svd'):
         """The schmidt gap of bipartition between the left block of ``i`` sites
@@ -2242,7 +2242,7 @@ class MatrixProductState(TensorNetwork1DVector,
         if self.cyclic:
             raise NotImplementedError("MPS must have OBC.")
 
-        s = np.diag(self.singular_values(sz_a, cur_orthog=cur_orthog))
+        s = do('diag', self.singular_values(sz_a, cur_orthog=cur_orthog))
 
         if 'dense' in get:
             kd = qu.qarray(s.reshape(-1, 1))
@@ -2785,7 +2785,7 @@ class MatrixProductOperator(TensorNetwork1DOperator,
             for array, site_tag, inds, order in zip(arrays, site_tags,
                                                     gen_inds(), gen_orders()):
 
-                yield Tensor(array.transpose(*order), inds=inds, tags=site_tag)
+                yield Tensor(transpose(array, order), inds=inds, tags=site_tag)
 
         super().__init__(gen_tensors(), check_collisions=False, **tn_opts)
 
@@ -3239,7 +3239,7 @@ class SuperOperator1D(
         def gen_tensors():
             for array, tags, inds, order in zip(arrays, gen_tags(),
                                                 gen_inds(), gen_orders()):
-                yield Tensor(array.transpose(*order), inds=inds, tags=tags)
+                yield Tensor(transpose(array, order), inds=inds, tags=tags)
 
         super().__init__(gen_tensors(), check_collisions=False, **tn_opts)
 
