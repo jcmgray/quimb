@@ -1581,6 +1581,8 @@ class Tensor(object):
         return tensor_direct_product(
             self, other, sum_inds=sum_inds, inplace=inplace)
 
+    direct_product_ = functools.partialmethod(direct_product, inplace=True)
+
     @functools.wraps(tensor_split)
     def split(self, *args, **kwargs):
         return tensor_split(self, *args, **kwargs)

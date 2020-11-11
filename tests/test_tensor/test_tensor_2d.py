@@ -52,6 +52,14 @@ class TestPEPSConstruct:
         assert len(norm.tensors) == 15
         assert norm.max_bond() == 9
 
+    def test_add_peps(self):
+        pa = qtn.PEPS.rand(3, 4, 2)
+        pb = qtn.PEPS.rand(3, 4, 3)
+        pc = qtn.PEPS.rand(3, 4, 4)
+        pab = pa + pb
+        assert pab.max_bond() == 5
+        assert pab @ pc == pytest.approx(pa @ pc + pb @ pc)
+
     @pytest.mark.parametrize('Lx', [3, 4, 5])
     @pytest.mark.parametrize('Ly', [3, 4, 5])
     def test_bond_coordinates(self, Lx, Ly):
@@ -270,6 +278,14 @@ class TestPEPOConstruct:
         X.show()
         assert f'Lx={Lx}' in X.__str__()
         assert f'Lx={Lx}' in X.__repr__()
+
+    def test_add_pepo(self):
+        pa = qtn.PEPO.rand(3, 4, 2)
+        pb = qtn.PEPO.rand(3, 4, 3)
+        pc = qtn.PEPO.rand(3, 4, 4)
+        pab = pa + pb
+        assert pab.max_bond() == 5
+        assert pab @ pc == pytest.approx(pa @ pc + pb @ pc)
 
 
 class TestMisc:

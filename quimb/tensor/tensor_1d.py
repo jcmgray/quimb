@@ -1749,9 +1749,7 @@ class MatrixProductState(TensorNetwork1DVector,
     def add_MPS(self, other, inplace=False, compress=False, **compress_opts):
         """Add another MatrixProductState to this one.
         """
-        L = self.L
-
-        if L != other.L:
+        if self.L != other.L:
             raise ValueError("Can't add MPS with another of different length.")
 
         new_mps = self if inplace else self.copy()
@@ -1764,21 +1762,23 @@ class MatrixProductState(TensorNetwork1DVector,
                 reindex_map = {}
 
                 if i > 0 or self.cyclic:
-                    pair = ((i - 1) % L, i)
+                    pair = ((i - 1) % self.L, i)
                     reindex_map[other.bond(*pair)] = new_mps.bond(*pair)
 
                 if i < new_mps.L - 1 or self.cyclic:
-                    pair = (i, (i + 1) % L)
+                    pair = (i, (i + 1) % self.L)
                     reindex_map[other.bond(*pair)] = new_mps.bond(*pair)
 
                 t2 = t2.reindex(reindex_map)
 
-            t1.direct_product(t2, inplace=True, sum_inds=new_mps.site_ind(i))
+            t1.direct_product_(t2, sum_inds=new_mps.site_ind(i))
 
         if compress:
             new_mps.compress(**compress_opts)
 
         return new_mps
+
+    add_MPS_ = functools.partialmethod(add_MPS, inplace=True)
 
     def __add__(self, other):
         """MPS addition.
@@ -2792,11 +2792,9 @@ class MatrixProductOperator(TensorNetwork1DOperator,
     def add_MPO(self, other, inplace=False, compress=False, **compress_opts):
         """Add another MatrixProductState to this one.
         """
-        N = self.L
-
-        if N != other.L:
+        if self.L != other.L:
             raise ValueError("Can't add MPO with another of different length."
-                             f"Got lengths {N} and {other.L}")
+                             f"Got lengths {self.L} and {other.L}")
 
         summed = self if inplace else self.copy()
 
@@ -2808,22 +2806,24 @@ class MatrixProductOperator(TensorNetwork1DOperator,
                 reindex_map = {}
 
                 if i > 0 or self.cyclic:
-                    pair = ((i - 1) % N, i)
+                    pair = ((i - 1) % self.L, i)
                     reindex_map[other.bond(*pair)] = summed.bond(*pair)
 
                 if i < summed.L - 1 or self.cyclic:
-                    pair = (i, (i + 1) % N)
+                    pair = (i, (i + 1) % self.L)
                     reindex_map[other.bond(*pair)] = summed.bond(*pair)
 
                 t2 = t2.reindex(reindex_map)
 
             sum_inds = (summed.upper_ind(i), summed.lower_ind(i))
-            t1.direct_product(t2, inplace=True, sum_inds=sum_inds)
+            t1.direct_product_(t2, sum_inds=sum_inds)
 
         if compress:
             summed.compress(**compress_opts)
 
         return summed
+
+    add_MPO_ = functools.partialmethod(add_MPO, inplace=True)
 
     def _apply_mps(self, other, compress=True, **compress_opts):
         A, x = self.copy(), other.copy()

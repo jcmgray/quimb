@@ -2770,6 +2770,51 @@ class PEPS(TensorNetwork2DVector,
 
         return cls(arrays, **peps_opts)
 
+    def add_PEPS(self, other, inplace=False):
+        """Add this PEPS with another.
+        """
+        if (self.Lx, self.Ly) != (other.Lx, other.Ly):
+            raise ValueError("PEPS must be the same size.")
+
+        peps = self if inplace else self.copy()
+        for coo in peps.gen_site_coos():
+            t1, t2 = peps[coo], other[coo]
+
+            if set(t1.inds) != set(t2.inds):
+                # Need to use bonds to match indices
+                reindex_map = {}
+                i, j = coo
+                if i > 0:
+                    pair = ((i - 1, j), (i, j))
+                    reindex_map[other.bond(*pair)] = peps.bond(*pair)
+                if i < self.Lx - 1:
+                    pair = ((i, j), (i + 1, j))
+                    reindex_map[other.bond(*pair)] = peps.bond(*pair)
+                if j > 0:
+                    pair = ((i, j - 1), (i, j))
+                    reindex_map[other.bond(*pair)] = peps.bond(*pair)
+                if j < self.Ly - 1:
+                    pair = ((i, j), (i, j + 1))
+                    reindex_map[other.bond(*pair)] = peps.bond(*pair)
+
+                t2 = t2.reindex(reindex_map)
+
+            t1.direct_product_(t2, sum_inds=peps.site_ind(*coo))
+
+        return peps
+
+    add_PEPS_ = functools.partialmethod(add_PEPS, inplace=True)
+
+    def __add__(self, other):
+        """PEPS addition.
+        """
+        return self.add_PEPS(other, inplace=False)
+
+    def __iadd__(self, other):
+        """In-place PEPS addition.
+        """
+        return self.add_PEPS(other, inplace=True)
+
     def show(self):
         """Print a unicode schematic of this PEPS and its bond dimensions.
         """
@@ -2963,6 +3008,52 @@ class PEPO(TensorNetwork2DOperator,
         return cls(arrays, **pepo_opts)
 
     rand_herm = functools.partialmethod(rand, herm=True)
+
+    def add_PEPO(self, other, inplace=False):
+        """Add this PEPO with another.
+        """
+        if (self.Lx, self.Ly) != (other.Lx, other.Ly):
+            raise ValueError("PEPOs must be the same size.")
+
+        pepo = self if inplace else self.copy()
+        for coo in pepo.gen_site_coos():
+            t1, t2 = pepo[coo], other[coo]
+
+            if set(t1.inds) != set(t2.inds):
+                # Need to use bonds to match indices
+                reindex_map = {}
+                i, j = coo
+                if i > 0:
+                    pair = ((i - 1, j), (i, j))
+                    reindex_map[other.bond(*pair)] = pepo.bond(*pair)
+                if i < self.Lx - 1:
+                    pair = ((i, j), (i + 1, j))
+                    reindex_map[other.bond(*pair)] = pepo.bond(*pair)
+                if j > 0:
+                    pair = ((i, j - 1), (i, j))
+                    reindex_map[other.bond(*pair)] = pepo.bond(*pair)
+                if j < self.Ly - 1:
+                    pair = ((i, j), (i, j + 1))
+                    reindex_map[other.bond(*pair)] = pepo.bond(*pair)
+
+                t2 = t2.reindex(reindex_map)
+
+            sum_inds = (pepo.upper_ind(*coo), pepo.lower_ind(*coo))
+            t1.direct_product_(t2, sum_inds=sum_inds)
+
+        return pepo
+
+    add_PEPO_ = functools.partialmethod(add_PEPO, inplace=True)
+
+    def __add__(self, other):
+        """PEPO addition.
+        """
+        return self.add_PEPO(other, inplace=False)
+
+    def __iadd__(self, other):
+        """In-place PEPO addition.
+        """
+        return self.add_PEPO(other, inplace=True)
 
     def show(self):
         """Print a unicode schematic of this PEPO and its bond dimensions.
