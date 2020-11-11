@@ -29,7 +29,15 @@ else:
     import psutil
     _NUM_THREAD_WORKERS = psutil.cpu_count(logical=False)
 
-os.environ['NUMBA_NUM_THREADS'] = str(_NUM_THREAD_WORKERS)
+if ('NUMBA_NUM_THREADS' in os.environ):
+    if int(os.environ['NUMBA_NUM_THREADS']) != _NUM_THREAD_WORKERS:
+        import warnings
+        warnings.warn(
+            "'NUMBA_NUM_THREADS' has been set elsewhere and doesn't match the "
+            "value 'quimb' has tried to set - "
+            f"{os.environ['NUMBA_NUM_THREADS']} vs {_NUM_THREAD_WORKERS}.")
+else:
+    os.environ['NUMBA_NUM_THREADS'] = str(_NUM_THREAD_WORKERS)
 
 # need to set NUMBA_NUM_THREADS first
 import numba  # noqa
