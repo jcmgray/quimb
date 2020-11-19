@@ -1,3 +1,4 @@
+import math
 import numbers
 import functools
 
@@ -1537,6 +1538,13 @@ class Circuit:
         # having sliced we can do a final simplify
         nm_lc.full_simplify_(output_inds=output_inds, **fs_opts)
 
+        # for stability with very small probabilities, scale by average prob
+        nfact = 2**len(fix)
+        if final_marginal:
+            nm_lc.multiply_(nfact**0.5, spread_over='all')
+        else:
+            nm_lc.multiply_(nfact, spread_over='all')
+
         # cast to desired data type
         nm_lc.astype_(dtype)
 
@@ -1568,7 +1576,7 @@ class Circuit:
             # we only did half the ket contraction so need to square
             p_marginal = p_marginal**2
 
-        return p_marginal
+        return p_marginal / nfact
 
     def calc_qubit_ordering(self, qubits=None):
         """Get a order to measure ``qubits`` in, by greedily choosing whichever
