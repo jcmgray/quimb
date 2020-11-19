@@ -26,7 +26,7 @@ from ..gen.rand import randn, seed_rand
 from . import decomp
 from .array_ops import (iscomplex, norm_fro, unitize, ndim, asarray, PArray,
                         find_diag_axes, find_antidiag_axes, find_columns)
-from .graphing import graph
+from .drawing import draw_tn
 
 _DEFAULT_CONTRACTION_STRATEGY = 'greedy'
 
@@ -2050,10 +2050,12 @@ class Tensor(object):
         """
         return self.contract(other)
 
-    def graph(self, *args, **kwargs):
+    def draw(self, *args, **kwargs):
         """Plot a graph of this tensor and its indices.
         """
-        graph(TensorNetwork((self,)), *args, **kwargs)
+        draw_tn(TensorNetwork((self,)), *args, **kwargs)
+
+    graph = draw
 
     def __getstate__(self):
         # This allows pickling, since the copy has no weakrefs.
@@ -5216,7 +5218,8 @@ class TensorNetwork(object):
 
         return rep + ")>"
 
-    graph = graph
+    draw = draw_tn
+    graph = draw_tn
 
 
 class TNLinearOperator(spla.LinearOperator):

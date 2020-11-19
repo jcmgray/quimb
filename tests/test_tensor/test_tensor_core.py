@@ -1239,7 +1239,7 @@ class TestTensorNetwork:
         from matplotlib import pyplot as plt
         matplotlib.use('Template')
         k = MPS_rand_state(10, 7, normalize=False)
-        fig = k.graph(color=['I0', 'I2'], return_fig=True)
+        fig = k.draw(color=['I0', 'I2'], return_fig=True)
         plt.close(fig)
 
     def test_graph_with_fixed_pos(self):
@@ -1251,7 +1251,7 @@ class TestTensorNetwork:
         q = MPS_rand_state(n, 7, tags='BRA')
         fix = {**{('KET', f'I{i}'): (i, 0) for i in range(n)},
                **{('BRA', f'I{i}'): (i, 1) for i in range(n)}}
-        fig = (q | p).graph(colors=['KET', 'BRA'], fix=fix, return_fig=True)
+        fig = (q | p).draw(colors=['KET', 'BRA'], fix=fix, return_fig=True)
         plt.close(fig)
 
     def test_pickle(self):

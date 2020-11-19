@@ -10,7 +10,7 @@ from autoray import do, dag, conj, reshape, to_numpy
 
 from ..core import eye, kron, qarray
 from ..utils import pairwise
-from .graphing import get_colors
+from .drawing import get_colors
 from .tensor_core import Tensor, contract_strategy
 from .optimize import TNOptimizer
 from .tensor_2d import (
@@ -303,7 +303,7 @@ class LocalHam2D:
         s = "<LocalHam2D(Lx={}, Ly={}, num_terms={})>"
         return s.format(self.Lx, self.Ly, len(self.terms))
 
-    def graph(
+    def draw(
         self,
         ordering='sort',
         show_norm=True,
@@ -412,6 +412,8 @@ class LocalHam2D:
             return fig
 
         plt.show()
+
+    graph = draw
 
 
 class TEBD2D:

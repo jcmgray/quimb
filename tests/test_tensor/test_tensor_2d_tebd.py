@@ -54,7 +54,7 @@ class TestLocalHam2DConstruct:
             assert len({id(x) for x in ham.terms.values()}) == 1
 
         print(ham)
-        fig = ham.graph(return_fig=True)
+        fig = ham.draw(return_fig=True)
         plt.close(fig)
 
     @pytest.mark.parametrize('Lx', [4, 5])

@@ -6,22 +6,30 @@ from ..utils import valmap
 import numpy as np
 
 
-def graph(
+def draw_tn(
     tn,
     color=None,
+    *,
     highlight_inds=(),
+    highlight_color_node=(1.0, 0.2, 0.2, 1.0),
     highlight_tids=(),
+    highlight_color_edge=(1.0, 0.2, 0.2, 1.0),
     show_inds=None,
     show_tags=None,
     custom_colors=None,
+    title=None,
     legend=True,
     fix=None,
     k=None,
     iterations=200,
     initial_layout='spectral',
+    node_color=None,
+    outline_darkness=0.8,
     node_size=None,
+    edge_color=None,
     edge_scale=1.0,
-    edge_alpha=1 / 3,
+    edge_alpha=1 / 2,
+    label_color=None,
     figsize=(6, 6),
     margin=None,
     return_fig=False,
@@ -81,7 +89,9 @@ def graph(
         Supplied to ``networkx.draw``.
     """
     import networkx as nx
+    import matplotlib as mpl
     import matplotlib.pyplot as plt
+    from matplotlib.colors import to_rgb
     import math
 
     # automatically decide whether to show tags and inds
@@ -90,17 +100,37 @@ def graph(
     if show_tags is None:
         show_tags = (tn.num_tensors <= 20)
 
-    hyperedges = []
-    node_labels = dict()
-    edge_labels = dict()
+    isdark = sum(to_rgb(mpl.rcParams['figure.facecolor'])) / 3 < 0.5
+    if isdark:
+        draw_color = (0.75, 0.77, 0.80, 1.0)
+    else:
+        draw_color = (0.45, 0.47, 0.50, 1.0)
+
+    if edge_color is None:
+        edge_color = draw_color
+
+    if node_color is None:
+        node_color = draw_color
+
+    # set the size of the nodes
+    if node_size is None:
+        node_size = 1000 / tn.num_tensors**0.7
+    node_outline_size = min(3, node_size**0.5 / 5)
+
+    if label_color is None:
+        label_color = mpl.rcParams['axes.labelcolor']
 
     # build the graph
     G = nx.Graph()
 
+    hyperedges = []
+    node_labels = dict()
+    edge_labels = dict()
+
     for ix, tids in tn.ind_map.items():
         edge_attrs = {
-            'color': ((1.0, 0.2, 0.2, 1.0) if ix in highlight_inds else
-                      (0.0, 0.0, 0.0, 1.0)),
+            'color': (highlight_color_edge if ix in highlight_inds else
+                      edge_color),
             'ind': ix,
             'edge_size': edge_scale * math.log2(tn.ind_size(ix))
         }
@@ -118,11 +148,6 @@ def graph(
     # color the nodes
     colors = get_colors(color, custom_colors)
 
-    # set the size of the nodes
-    if node_size is None:
-        node_size = 1000 / tn.num_tensors**0.7
-    node_outline_size = min(3, node_size**0.5 / 5)
-
     # set parameters for all the nodes
     for tid, t in tn.tensor_map.items():
         if t.ndim == 0:
@@ -130,15 +155,16 @@ def graph(
 
         G.nodes[tid]['size'] = node_size
         G.nodes[tid]['outline_size'] = node_outline_size
-        color = (0.4, 0.4, 0.4, 1.0)
+        color = node_color
         for tag in colors:
             if tag in t.tags:
                 color = colors[tag]
         if tid in highlight_tids:
-            color = (1.0, 0.2, 0.2, 1.0)
+            color = highlight_color_node
         G.nodes[tid]['color'] = color
         G.nodes[tid]['outline_color'] = tuple(
-            (1.0 if i == 3 else 0.8) * c for i, c in enumerate(color)
+            (1.0 if i == 3 else outline_darkness) * c
+            for i, c in enumerate(color)
         )
         if show_tags:
             node_labels[tid] = '{' + str(list(t.tags))[1:-1] + '}'
@@ -206,6 +232,7 @@ def graph(
             G, pos,
             edge_labels=edge_labels,
             font_size=10,
+            font_color=label_color,
             ax=ax,
         )
     if show_tags or show_inds:
@@ -213,6 +240,7 @@ def graph(
             G, pos,
             labels=node_labels,
             font_size=10,
+            font_color=label_color,
             ax=ax,
         )
 
