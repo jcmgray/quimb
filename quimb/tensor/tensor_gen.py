@@ -79,6 +79,7 @@ def TN_rand_reg(
     D,
     phys_dim=None,
     seed=None,
+    dtype='float64',
     site_tag_id='I{}',
     site_ind_id='k{}',
 ):
@@ -121,7 +122,7 @@ def TN_rand_reg(
         new_bond(ts[i], ts[j], size=D)
 
     tn = TensorNetwork(ts)
-    tn.randomize_(seed=seed)
+    tn.randomize_(seed=seed, dtype=dtype)
 
     return tn
 

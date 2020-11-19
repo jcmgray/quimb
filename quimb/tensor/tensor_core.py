@@ -972,10 +972,40 @@ def tensor_direct_product(T1, T2, sum_inds=(), inplace=False):
     else:
         new_T = T1.copy()
 
-    # XXX: add T2s tags?
-    new_T.modify(data=array_direct_product(T1.data, T2.data,
-                                           sum_axes=sum_axes))
+    new_data = array_direct_product(T1.data, T2.data, sum_axes=sum_axes)
+    new_T.modify(data=new_data)
+
     return new_T
+
+
+def tensor_network_sum(tnA, tnB):
+    """Sum of two tensor networks, whose indices should match exactly, using
+    direct products.
+
+    Parameters
+    ----------
+    tnA : TensorNetwork
+        The first tensor network.
+    tnB : TensorNetwork
+        The second tensor network.
+
+    Returns
+    -------
+    TensorNetwork
+        The sum of ``tnA`` and ``tnB``, with increased bond dimensions.
+    """
+    oix = tnA.outer_inds()
+
+    ts = []
+    for t1, t2 in zip(tnA, tnB):
+
+        if set(t1.inds) != set(t2.inds):
+            raise ValueError("Can only sum TNs with exactly matching indices.")
+
+        sum_inds = [ix for ix in t1.inds if ix in oix]
+        ts.append(tensor_direct_product(t1, t2, sum_inds))
+
+    return TensorNetwork(ts).view_like_(tnA)
 
 
 def bonds(t1, t2):
@@ -1083,6 +1113,84 @@ def get_tags(ts):
         ts = (ts,)
 
     return oset.union(*(t.tags for t in ts))
+
+
+def tensor_network_distance(
+    tnA,
+    tnB,
+    xAA=None,
+    xAB=None,
+    xBB=None,
+    method='auto',
+    **contract_opts,
+):
+    r"""Compute the Frobenius norm distance between two tensor networks:
+
+    .. math::
+
+            D(A, B)
+            = | A - B |_{\mathrm{fro}}
+            = \mathrm{Tr} [(A - B)^{\dagger}(A - B)]^{1/2}
+            = ( \langle A | A \rangle - 2 \mathrm{Re} \langle A | B \rangle|
+            + \langle B | B \rangle ) ^{1/2}
+
+    which should have a matching external indices.
+
+    Parameters
+    ----------
+    tnA : TensorNetwork or Tensor
+        The first tensor network operator.
+    tnB : TensorNetwork or Tensor
+        The second tensor network operator.
+    xAA : None or scalar
+        The value of ``A.H @ A`` if you already know it (or it doesn't matter).
+    xAB : None or scalar
+        The value of ``A.H @ B`` if you already know it (or it doesn't matter).
+    xBB : None or scalar
+        The value of ``B.H @ B`` if you already know it (or it doesn't matter).
+    method : {'auto', 'overlap', 'dense'}, optional
+        How to compute the distance. If ``'overlap'``, the default, the
+        distance will be computed as the sum of overlaps, without explicitly
+        forming the dense operators. If ``'dense'``, the operators will be
+        directly formed and the norm computed, which can be quicker when the
+        exterior dimensions are small. If ``'auto'``, the dense method will
+        be used if the total operator (outer) size is ``<= 2**16``.
+    contract_opts
+        Supplied to :meth:`~quimb.tensor.tensor_core.TensorNetwork.contract`.
+
+    Returns
+    -------
+    D : float
+    """
+    check_opt('method', method, ('auto', 'dense', 'overlap'))
+
+    oix = tnA.outer_inds()
+    if set(oix) != set(tnB.outer_inds()):
+        raise ValueError(
+            "Can only fit tensor networks with matching outer indices.")
+
+    if method == 'auto':
+        d = prod(map(tnA.ind_size, oix))
+        if d <= 1 << 16:
+            method = 'dense'
+        else:
+            method = 'overlap'
+
+    # directly form vectorizations of both
+    if method == 'dense':
+        A = tnA.to_dense(oix)
+        B = tnB.to_dense(oix)
+        return do('linalg.norm', A - B)
+
+    # overlap method
+    if xAA is None:
+        xAA = (tnA | tnA.H).contract(all, **contract_opts)
+    if xAB is None:
+        xAB = (tnA | tnB.H).contract(all, **contract_opts)
+    if xBB is None:
+        xBB = (tnB | tnB.H).contract(all, **contract_opts)
+
+    return do('real', xAA - 2 * xAB + xBB)**0.5
 
 
 # --------------------------------------------------------------------------- #
@@ -1586,6 +1694,10 @@ class Tensor(object):
     @functools.wraps(tensor_split)
     def split(self, *args, **kwargs):
         return tensor_split(self, *args, **kwargs)
+
+    @functools.wraps(tensor_network_distance)
+    def distance(self, other, **contract_opts):
+        return tensor_network_distance(self, other, **contract_opts)
 
     def gate(self, G, ind, inplace=False, **contract_opts):
         """Gate this tensor - contract a matrix into one of its indices without
@@ -4318,6 +4430,10 @@ class TensorNetwork(object):
         T = self.contract(
             tags, output_inds=tuple(concat(inds_seq)), **contract_opts)
         return T.to_dense(*inds_seq)
+
+    @functools.wraps(tensor_network_distance)
+    def distance(self, *args, **kwargs):
+        return tensor_network_distance(self, *args, **kwargs)
 
     # --------------- information about indices and dimensions -------------- #
 

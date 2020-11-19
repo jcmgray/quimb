@@ -841,6 +841,15 @@ class TestTensorNetwork:
         assert_allclose(abs(tn['A'].data), abs(tn['B'].data))
         assert_allclose(abs(tn['B'].data), abs(tn['C'].data))
 
+    def test_tensor_network_sum(self):
+        A = qtn.TN_rand_reg(n=6, reg=3, D=2, phys_dim=2, dtype='complex')
+        B = A.copy()
+        B.randomize_()
+        d1 = A.distance(B)
+        AmB = qtn.tensor_network_sum(A, -1 * B)
+        d2 = (AmB | AmB.H).contract(all)**0.5
+        assert d1 == pytest.approx(d2)
+
     def test_contracting_tensors(self):
         a = rand_tensor((2, 3, 4), inds=[0, 1, 2], tags='red')
         b = rand_tensor((3, 4, 5), inds=[1, 2, 3], tags='blue')
@@ -895,6 +904,17 @@ class TestTensorNetwork:
         assert len((tn ^ slice(-1, 1)).tensors) == 3
         assert len((tn ^ slice(None, -2, -1)).tensors) == 3
         assert len((tn ^ slice(-2, 0)).tensors) == 3
+
+    @pytest.mark.parametrize('method', ('auto', 'dense', 'overlap'))
+    def test_tensor_network_distance(self, method):
+        n = 6
+        A = qtn.TN_rand_reg(n=n, reg=3, D=2, phys_dim=2, dtype=complex)
+        Ad = A.to_dense([f'k{i}' for i in range(n)])
+        B = qtn.TN_rand_reg(n=6, reg=3, D=2, phys_dim=2, dtype=complex)
+        Bd = B.to_dense([f'k{i}' for i in range(n)])
+        d1 = np.linalg.norm(Ad - Bd)
+        d2 = A.distance(B, method=method)
+        assert d1 == pytest.approx(d2)
 
     def test_reindex(self):
         a = Tensor(np.random.randn(2, 3, 4), inds=[0, 1, 2], tags='red')
