@@ -411,8 +411,8 @@ class TestMatrixProductState:
                  range(50, 60),
                  range(30, 60)])
     def test_partial_trace_compress(self, method, cyclic, sysa, sysb):
-        k = MPS_rand_state(60, 8, cyclic=cyclic)
-        kws = dict(sysa=sysa, sysb=sysb, eps=1e-4, method=method)
+        k = MPS_rand_state(60, 5, cyclic=cyclic)
+        kws = dict(sysa=sysa, sysb=sysb, eps=1e-6, method=method, verbosity=2)
         rhoc_ab = k.partial_trace_compress(**kws)
         assert set(rhoc_ab.outer_inds()) == {'kA', 'kB', 'bA', 'bB'}
         inds = ['kA', 'kB'], ['bA', 'bB']
