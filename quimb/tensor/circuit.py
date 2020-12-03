@@ -504,6 +504,15 @@ def sample_bitstring_from_prob_ndarray(p):
     return f"{b:0>{p.ndim}b}"
 
 
+def rehearsal_dict(tn, info):
+    return {
+        'tn': tn,
+        'info': info,
+        'W': math.log2(info.largest_intermediate),
+        'C': math.log10(info.opt_cost / 2),
+    }
+
+
 # --------------------------- main circuit class ---------------------------- #
 
 class Circuit:
@@ -1172,7 +1181,7 @@ class Circuit:
         )
 
         if rehearse:
-            return {'tn': psi_b, 'info': info}
+            return rehearsal_dict(psi_b, info)
 
         if target_size is not None:
             # perform the 'sliced' contraction restricted to ``target_size``
@@ -1314,7 +1323,7 @@ class Circuit:
         )
 
         if rehearse:
-            return {'tn': rho, 'info': info}
+            return rehearsal_dict(rho, info)
 
         if target_size is not None:
             # perform the 'sliced' contraction restricted to ``target_size``
@@ -1435,7 +1444,7 @@ class Circuit:
         )
 
         if rehearse:
-            return {'tn': rhoG, 'info': info}
+            return rehearsal_dict(rhoG, info)
 
         if target_size is not None:
             # perform the 'sliced' contraction restricted to ``target_size``
@@ -1881,7 +1890,7 @@ class Circuit:
                 rehearse=True,
             )
 
-            tns_and_infos[where] = {'tn': tn, 'info': info}
+            tns_and_infos[where] = rehearsal_dict(tn, info)
 
             # set the result of qubit ``q`` arbitrarily
             for q in where:
@@ -2088,7 +2097,7 @@ class Circuit:
             rehearse=True,
         )
 
-        return {where: {'tn': tn, 'info': info}}
+        return {where: rehearsal_dict(tn, info)}
 
     def to_dense(
         self,
@@ -2158,7 +2167,7 @@ class Circuit:
         )
 
         if rehearse:
-            return {'tn': psi, 'info': info}
+            return rehearsal_dict(psi, info)
 
         if target_size is not None:
             # perform the 'sliced' contraction restricted to ``target_size``
