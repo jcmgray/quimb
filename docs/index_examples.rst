@@ -14,5 +14,5 @@ Examples
   ./examples/ex_TEBD_evo
   ./examples/ex_MERA
   ./examples/ex_tensorflow_optimize_pbc_mps
-  ./examples/ex_quantum_circuit
   ./examples/ex_tn_train_circuit
+  ./examples/ex_tn_qaoa_energy_bayesopt
