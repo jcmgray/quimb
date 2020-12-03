@@ -2692,7 +2692,7 @@ class MatrixProductState(TensorNetwork1DVector,
         remove=False,
         outcome=None,
         renorm=True,
-        current_orthog=None,
+        cur_orthog=None,
         get=None,
         inplace=False,
     ):
@@ -2722,7 +2722,7 @@ class MatrixProductState(TensorNetwork1DVector,
             will be randomly sampled according to the local density matrix.
         renorm : bool, optional
             Whether to renormalize the state post measurement.
-        current_orthog : None or int, optional
+        cur_orthog : None or int, optional
             If you already know the orthogonality center, you can supply it
             here for efficiencies sake.
         get : {None, 'outcome'}, optional
@@ -2734,7 +2734,7 @@ class MatrixProductState(TensorNetwork1DVector,
         Returns
         -------
         outcome : int
-            The measurement outcome, draw from ``range(phys_dim)``.
+            The measurement outcome, drawn from ``range(phys_dim)``.
         psi : MatrixProductState
             The measured state, if ``get != 'outcome'``.
         """
@@ -2746,8 +2746,8 @@ class MatrixProductState(TensorNetwork1DVector,
         d = self.phys_dim(site)
 
         # make sure MPS is canonicalized
-        if current_orthog is not None:
-            tn.shift_orthogonality_center(current_orthog, site)
+        if cur_orthog is not None:
+            tn.shift_orthogonality_center(cur_orthog, site)
         else:
             tn.canonize(site)
 

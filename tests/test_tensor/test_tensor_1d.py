@@ -588,17 +588,17 @@ class TestMatrixProductState:
         assert len(psi_cnot.tensors) == len(psi_iswap.tensors) == 4
         assert len(psi_G.tensors) == 3
 
-    @pytest.mark.parametrize('current_orthog', (None, 3))
+    @pytest.mark.parametrize('cur_orthog', (None, 3))
     @pytest.mark.parametrize('site', (0, 5, 9))
     @pytest.mark.parametrize('outcome', (None, 2))
     @pytest.mark.parametrize('renorm', (True, False))
     @pytest.mark.parametrize('remove', (True, False))
-    def test_mps_measure(self, current_orthog, site, outcome, renorm, remove):
+    def test_mps_measure(self, cur_orthog, site, outcome, renorm, remove):
         psi = MPS_rand_state(10, 7, phys_dim=3, dtype=complex)
-        if current_orthog:
-            psi.canonize(current_orthog)
+        if cur_orthog:
+            psi.canonize(cur_orthog)
         outcome, psim = psi.measure(
-            site, outcome=outcome, current_orthog=current_orthog,
+            site, outcome=outcome, cur_orthog=cur_orthog,
             renorm=renorm, remove=remove)
         newL = 10 - int(remove)
         assert psim.L == newL
