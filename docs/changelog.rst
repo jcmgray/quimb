@@ -3,6 +3,15 @@ Changelog
 
 Release notes for ``quimb``.
 
+.. _whats-new.2.0.0:
+
+v2.0.0 (unreleased)
+----------------------
+
+**Enhancements**
+
+**Bug fixes:**
+
 
 .. _whats-new.1.3.0:
 

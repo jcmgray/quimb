@@ -19,16 +19,16 @@ from quimb.tensor import (
     MPS_rand_state,
     TNLinearOperator1D,
 )
-from quimb.tensor.decomp import _trim_singular_vals
+from quimb.tensor.decomp import _trim_singular_vals_numba
 from quimb.tensor.tensor_core import _CONTRACT_BACKEND, _TENSOR_LINOP_BACKEND
 
 
 def test_trim_singular_vals():
     s = np.array([3., 2., 1., 0.1])
-    assert _trim_singular_vals(s, 0.5, 1) == 3
-    assert _trim_singular_vals(s, 0.5, 2) == 2
-    assert _trim_singular_vals(s, 2, 3) == 2
-    assert _trim_singular_vals(s, 5.02, 3) == 1
+    assert _trim_singular_vals_numba(s, 0.5, 1) == 3
+    assert _trim_singular_vals_numba(s, 0.5, 2) == 2
+    assert _trim_singular_vals_numba(s, 2, 3) == 2
+    assert _trim_singular_vals_numba(s, 5.02, 3) == 1
 
 
 class TestContractOpts:
@@ -1254,7 +1254,7 @@ class TestTensorNetwork:
         tn.fuse_multibonds(inplace=True)
         assert len(tn.inner_inds()) == 3
 
-    def test_graph(self):
+    def test_draw(self):
         import matplotlib
         from matplotlib import pyplot as plt
         matplotlib.use('Template')
@@ -1262,7 +1262,7 @@ class TestTensorNetwork:
         fig = k.draw(color=['I0', 'I2'], return_fig=True)
         plt.close(fig)
 
-    def test_graph_with_fixed_pos(self):
+    def test_draw_with_fixed_pos(self):
         import matplotlib
         from matplotlib import pyplot as plt
         matplotlib.use('Template')
@@ -1271,7 +1271,7 @@ class TestTensorNetwork:
         q = MPS_rand_state(n, 7, tags='BRA')
         fix = {**{('KET', f'I{i}'): (i, 0) for i in range(n)},
                **{('BRA', f'I{i}'): (i, 1) for i in range(n)}}
-        fig = (q | p).draw(colors=['KET', 'BRA'], fix=fix, return_fig=True)
+        fig = (q | p).draw(color=['KET', 'BRA'], fix=fix, return_fig=True)
         plt.close(fig)
 
     def test_pickle(self):

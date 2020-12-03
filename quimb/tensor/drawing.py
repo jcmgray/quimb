@@ -11,9 +11,9 @@ def draw_tn(
     color=None,
     *,
     highlight_inds=(),
-    highlight_color_node=(1.0, 0.2, 0.2, 1.0),
     highlight_tids=(),
     highlight_color_edge=(1.0, 0.2, 0.2, 1.0),
+    highlight_color_node=(1.0, 0.2, 0.2, 1.0),
     show_inds=None,
     show_tags=None,
     custom_colors=None,
@@ -34,7 +34,6 @@ def draw_tn(
     margin=None,
     return_fig=False,
     ax=None,
-    **plot_opts
 ):
     """Plot this tensor network as a networkx graph using matplotlib,
     with edge width corresponding to bond dimension.
@@ -43,9 +42,15 @@ def draw_tn(
     ----------
     color : sequence of tags, optional
         If given, uniquely color any tensors which have each of the tags.
-        If some tensors have more than of the tags, only one color will
-    highlight_inds : iterable:
-        Highlight these edges in red.
+        If some tensors have more than of the tags, only one color will show.
+    highlight_inds : iterable, optional
+        Highlight these edges.
+    highlight_tids : iterable, optional
+        Highlight these nodes.
+    highlight_color_edge
+        What color to use for ``highlight_inds`` nodes.
+    highlight_color_node : tuple[float], optional
+        What color to use for ``highlight_tids`` nodes.
     show_inds : {None, False, True, 'all'}, optional
         Explicitly turn on labels for each tensors indices.
     show_tags : {None, False, True}, optional
@@ -53,12 +58,15 @@ def draw_tn(
     custom_colors : sequence of colors, optional
         Supply a custom sequence of colors to match the tags given
         in ``color``.
+    title : str, optional
+        Set a title for the axis.
     legend : bool, optional
         Whether to draw a legend for the colored tags.
     fix : dict[tags, (float, float)], optional
         Used to specify actual relative positions for each tensor node.
         Each key should be a sequence of tags that uniquely identifies a
-        tensor, and each value should be a x, y coordinate tuple.
+        tensor, a ``tid``, or a ``ind``, and each value should be a ``(x, y)``
+        coordinate tuple.
     k : float, optional
         The optimal distance between nodes.
     iterations : int, optional
@@ -69,12 +77,20 @@ def draw_tn(
         The name of a networkx layout to use before iterating with the
         spring layout. Set ``iterations=0`` if you just want to use this
         layout only.
+    node_color : tuple[float], optional
+        Default color of nodes.
+    outline_darkness : float, optional
+        Darkening of nodes outlines.
     node_size : None
         How big to draw the tensors.
+    edge_color : tuple[float], optional
+        Default color of edges.
     edge_scale : float, optional
         How much to scale the width of the edges.
     edge_alpha : float, optional
         Set the alpha (opacity) of the drawn edges.
+    label_color : tuple[float], optional
+        Color to draw labels with.
     figsize : tuple of int
         The size of the drawing.
     margin : None or float, optional
@@ -85,8 +101,6 @@ def draw_tn(
         executing ``pyplot.show()``.
     ax : matplotlib.Axis, optional
         Draw the graph on this axis rather than creating a new figure.
-    plot_opts
-        Supplied to ``networkx.draw``.
     """
     import networkx as nx
     import matplotlib as mpl
@@ -188,11 +202,12 @@ def draw_tn(
         fig, ax = plt.subplots(figsize=figsize, constrained_layout=True)
         ax.axis('off')
         ax.set_aspect('equal')
+        if title is not None:
+            ax.set_title(str(title))
 
         xmin = ymin = +float('inf')
         xmax = ymax = -float('inf')
         for xy in pos.values():
-            # print(xy)
             xmin = min(xmin, xy[0])
             xmax = max(xmax, xy[0])
             ymin = min(ymin, xy[1])
@@ -211,6 +226,10 @@ def draw_tn(
             ax.set_ylim(ymin - real_node_size, ymax + real_node_size)
         else:
             ax.margins(margin)
+
+        created_fig = True
+    else:
+        created_fig = False
 
     nx.draw_networkx_edges(
         G, pos,
@@ -257,12 +276,15 @@ def draw_tn(
         plt.legend(handles, lbls, ncol=max(round(len(handles) / 20), 1),
                    loc='center left', bbox_to_anchor=(1, 0.5))
 
-    if ax is not None:
+    if not created_fig:
+        # we added to axisting axes
         return
-    elif return_fig:
+
+    if return_fig:
         return fig
     else:
         plt.show()
+        plt.close(fig)
 
 
 # colorblind palettes by Bang Wong (https://www.nature.com/articles/nmeth.1618)
@@ -402,7 +424,8 @@ def _get_positions(tn, G, fix, initial_layout, k, iterations):
             fixed_positions[tid] = pos
         except KeyError:
             # assume index
-            fixed_positions[tags_or_ind] = pos
+            if (tags_or_ind in tn.tensor_map) or (tags_or_ind in tn.ind_map):
+                fixed_positions[tags_or_ind] = pos
 
     # use spectral or other layout as starting point
     pos0 = getattr(nx, initial_layout + '_layout')(G)
