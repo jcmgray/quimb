@@ -2686,6 +2686,102 @@ class MatrixProductState(TensorNetwork1DVector,
         # clip below 0
         return max(0, log2(tr_norm))
 
+    def measure(
+        self,
+        site,
+        remove=False,
+        outcome=None,
+        renorm=True,
+        current_orthog=None,
+        get=None,
+        inplace=False,
+    ):
+        """Measure this MPS at ``site``, including projecting the state.
+        Optionally remove the site afterwards, yielding an MPS with one less
+        site. In either case the orthogonality center of the returned MPS is
+        ``min(site, new_L - 1)``.
+
+        Parameters
+        ----------
+        site : int
+            The site to measure.
+        remove : bool, optional
+            Whether to project and remove the site after measurement.
+        outcome : None or int, optional
+            Specify the desired outcome of the measurement. If ``None``, it
+            will randomly sampled according to the reduced state.
+        renorm : bool, optional
+            Whether to renormalize the state post measurement.
+        current_orthog : None or int, optional
+            If you already know the orthogonality center, you can supply it
+            here for efficiencies sake.
+        get : {None, 'outcome'}, optional
+            If ``'outcome'``, simply return the outcome, and don't perform any
+            projection.
+        inplace : bool, optional
+            Whether to perform the measurement in place or not.
+
+        Returns
+        -------
+        outcome : int
+            The measurement outcome, draw from ``range(phys_dim)``.
+        psi : MatrixProductState
+            The measured state, if ``get != 'outcome'``.
+        """
+        if self.cyclic:
+            raise ValueError('Not supported on cyclic MPS yet.')
+
+        tn = self if inplace else self.copy()
+        L = tn.L
+        d = self.phys_dim(site)
+
+        # make sure MPS is canonicalized
+        if current_orthog is not None:
+            tn.shift_orthogonality_center(current_orthog, site)
+        else:
+            tn.canonize(site)
+
+        # local tensor and physical dim
+        t = tn[site]
+        ind = tn.site_ind(site)
+
+        # diagonal of reduced density matrix = probs
+        tii = t.contract(t.H, output_inds=(ind,))
+        p = do('real', tii.data)
+
+        if outcome is None:
+            # sample an outcome
+            outcome = do('random.choice', do('arange', d, like=p), p=p)
+
+        if get == 'outcome':
+            return outcome
+
+        # project the outcome and renormalize
+        t.isel_({ind: outcome})
+
+        if renorm:
+            t.modify(data=t.data / p[outcome]**0.5)
+
+        if remove:
+            # contract the projected tensor into neighbor
+            if site == L - 1:
+                tn ^= slice(site - 1, site + 1)
+            else:
+                tn ^= slice(site, site + 2)
+
+            # adjust structure for one less spin
+            for i in range(site + 1, L):
+                tn[i].reindex_({tn.site_ind(i): tn.site_ind(i - 1)})
+                tn[i].retag_({tn.site_tag(i): tn.site_tag(i - 1)})
+            tn._L = L - 1
+        else:
+            # simply re-expand tensor dimensions (with zeros)
+            t.new_ind(ind, size=d, axis=-1)
+
+        return outcome, tn
+
+    measure_ = functools.partialmethod(measure, inplace=True)
+
 
 class MatrixProductOperator(TensorNetwork1DOperator,
                             TensorNetwork1DFlat,

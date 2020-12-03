@@ -588,6 +588,38 @@ class TestMatrixProductState:
         assert len(psi_cnot.tensors) == len(psi_iswap.tensors) == 4
         assert len(psi_G.tensors) == 3
 
+    @pytest.mark.parametrize('current_orthog', (None, 3))
+    @pytest.mark.parametrize('site', (0, 5, 9))
+    @pytest.mark.parametrize('outcome', (None, 2))
+    @pytest.mark.parametrize('renorm', (True, False))
+    @pytest.mark.parametrize('remove', (True, False))
+    def test_mps_measure(self, current_orthog, site, outcome, renorm, remove):
+        psi = MPS_rand_state(10, 7, phys_dim=3, dtype=complex)
+        if current_orthog:
+            psi.canonize(current_orthog)
+        outcome, psim = psi.measure(
+            site, outcome=outcome, current_orthog=current_orthog,
+            renorm=renorm, remove=remove)
+        newL = 10 - int(remove)
+        assert psim.L == newL
+        assert psim.num_tensors == newL
+        assert set(psim.site_tags) == {f'I{i}' for i in range(newL)}
+        assert set(psim.site_inds) == {f'k{i}' for i in range(newL)}
+        if renorm:
+            assert psim.H @ psim == pytest.approx(1.0)
+        else:
+            assert 0.0 < psim.H @ psim < 1.0
+        new_can_cen = min(site, newL - 1)
+        t = psim[new_can_cen]
+        if renorm:
+            assert t.H @ t == pytest.approx(1.0)
+        else:
+            0.0 < t.H @ t < 1.0
+
+    def test_measure_known_outcome(self):
+        mps = MPS_computational_state('010101')
+        assert mps.measure_(3, get='outcome') == 1
+
 
 class TestMatrixProductOperator:
 
