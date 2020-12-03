@@ -2696,7 +2696,7 @@ class MatrixProductState(TensorNetwork1DVector,
         get=None,
         inplace=False,
     ):
-        """Measure this MPS at ``site``, including projecting the state.
+        r"""Measure this MPS at ``site``, including projecting the state.
         Optionally remove the site afterwards, yielding an MPS with one less
         site. In either case the orthogonality center of the returned MPS is
         ``min(site, new_L - 1)``.
@@ -2706,10 +2706,20 @@ class MatrixProductState(TensorNetwork1DVector,
         site : int
             The site to measure.
         remove : bool, optional
-            Whether to project and remove the site after measurement.
+            Whether to remove the site completely after projecting the
+            measurement. If ``True``, sites greater than ``site`` will be
+            retagged and reindex one down, and the MPS will have one less site.
+            E.g::
+
+                0-1-2-3-4-5-6
+                       / / /  - measure and remove site 3
+                0-1-2-4-5-6
+                              - reindex sites (4, 5, 6) to (3, 4, 5)
+                0-1-2-3-4-5
+
         outcome : None or int, optional
             Specify the desired outcome of the measurement. If ``None``, it
-            will randomly sampled according to the reduced state.
+            will be randomly sampled according to the local density matrix.
         renorm : bool, optional
             Whether to renormalize the state post measurement.
         current_orthog : None or int, optional
