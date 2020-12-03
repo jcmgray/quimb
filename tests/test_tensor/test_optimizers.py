@@ -79,20 +79,6 @@ def ham_mbl_pbc_complex():
     return psi0, H, norm_fn, loss_fn, en_ex
 
 
-@pytest.mark.skipif(not found_torch, reason="Torch not installed.")
-def test_optimize_pbc_heis_torch(heis_pbc):
-    from quimb.tensor.optimize_pytorch import TNOptimizer
-    psi0, H, norm_fn, loss_fn, en_ex = heis_pbc
-    tnopt = TNOptimizer(
-        psi0,
-        loss_fn,
-        norm_fn,
-        loss_constants={'H': H},
-    )
-    psi_opt = tnopt.optimize(100)
-    assert loss_fn(psi_opt, H) == pytest.approx(en_ex, rel=1e-2)
-
-
 def test_vectorizer():
     from quimb.tensor.optimize import Vectorizer
 
