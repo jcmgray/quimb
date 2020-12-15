@@ -4543,7 +4543,7 @@ class TensorNetwork(object):
 
     randomize_ = functools.partialmethod(randomize, inplace=True)
 
-    def strip_exponent(self, tid, value=None):
+    def strip_exponent(self, tid_or_tensor, value=None):
         """Scale the elements of tensor corresponding to ``tid`` so that the
         norm of the array is some value, which defaults to ``1``. The log of
         the scaling factor, base 10, is then accumulated in the ``exponent``
@@ -4551,15 +4551,19 @@ class TensorNetwork(object):
 
         Parameters
         ----------
-        tid : str
-            The tensor identifier.
+        tid : str or Tensor
+            The tensor identifier or actual tensor.
         value : None or float, optional
             The value to scale the norm of the tensor to.
         """
         if (value is None) or (value is True):
             value = 1.0
 
-        t = self.tensor_map[tid]
+        if isinstance(tid_or_tensor, Tensor):
+            t = tid_or_tensor
+        else:
+            t = self.tensor_map[tid_or_tensor]
+
         stripped_factor = t.norm() / value
         t.modify(apply=lambda data: data / stripped_factor)
         try:
@@ -4819,11 +4823,10 @@ class TensorNetwork(object):
                 scalars.append(tab)
                 continue
 
-            tid = rand_uuid('_T')
-            tn.add_tensor(tab, tid=tid, virtual=True)
+            tn |= tab
 
             if equalize_norms:
-                tn.strip_exponent(tid, equalize_norms)
+                tn.strip_exponent(tab, equalize_norms)
 
             for ix in out_ab:
                 # now we need to check outputs indices again
@@ -5139,14 +5142,12 @@ class TensorNetwork(object):
 
             if found:
                 tn._pop_tensor(tid)
-                tidl = rand_uuid('_T')
-                tn.add_tensor(tl, tid=tidl, virtual=True)
-                tidr = rand_uuid('_T')
-                tn.add_tensor(tr, tid=tidr, virtual=True)
+                tn |= tl
+                tn |= tr
 
                 if equalize_norms:
-                    tn.strip_exponent(tidl, equalize_norms)
-                    tn.strip_exponent(tidr, equalize_norms)
+                    tn.strip_exponent(tl, equalize_norms)
+                    tn.strip_exponent(tr, equalize_norms)
 
             else:
                 cache.add(cache_key)
