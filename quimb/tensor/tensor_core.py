@@ -192,19 +192,18 @@ def get_contraction(eq, *shapes, cache=True, get='expr', **kwargs):
         expr = expr_fn(eq, *shapes, optimize=optimize, **kwargs)
         return expr
 
+    # make sure shapes are hashable + concrete python ints
+    if not (
+        isinstance(shapes[0], tuple) and
+        isinstance(next(concat(shapes), 1), int)
+    ):
+        shapes = tuple(tuple(map(int, s)) for s in shapes)
+
     # make sure explicit paths are hashable
     if isinstance(optimize, list):
         optimize = tuple(optimize)
 
-    try:
-        return _get_contraction(eq, shapes, optimize, cache, get, **kwargs)
-    except TypeError as e:
-        # some shapes (e.g. tensorflow) are not hashable
-        if 'unhashable' in str(e):
-            shapes = tuple(tuple(map(int, s)) for s in shapes)
-            return _get_contraction(eq, shapes, optimize, cache, get, **kwargs)
-        else:
-            raise e
+    return _get_contraction(eq, shapes, optimize, cache, get, **kwargs)
 
 
 try:
