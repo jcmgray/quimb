@@ -6,14 +6,28 @@ from ..utils import valmap
 import numpy as np
 
 
+def _add_or_merge_edge(G, u, v, attrs):
+    if not G.has_edge(u, v):
+        G.add_edge(u, v, **attrs)
+    else:
+        # multibond - update attrs
+        attrs0 = G.edges[u, v]
+        # average colors
+        attrs0['color'] = tuple(
+            (x + y) / 2 for x, y in zip(attrs0['color'], attrs['color']))
+        attrs0['ind'] += ' ' + attrs['ind']
+        # adding log size == multiplying bond dim
+        attrs0['edge_size'] += attrs['edge_size']
+
+
 def draw_tn(
     tn,
     color=None,
     *,
     highlight_inds=(),
     highlight_tids=(),
-    highlight_color_edge=(1.0, 0.2, 0.2, 1.0),
-    highlight_color_node=(1.0, 0.2, 0.2, 1.0),
+    highlight_inds_color=(1.0, 0.2, 0.2, 1.0),
+    highlight_tids_color=(1.0, 0.2, 0.2, 1.0),
     show_inds=None,
     show_tags=None,
     custom_colors=None,
@@ -32,6 +46,9 @@ def draw_tn(
     label_color=None,
     figsize=(6, 6),
     margin=None,
+    xlims=None,
+    ylims=None,
+    get=None,
     return_fig=False,
     ax=None,
 ):
@@ -47,9 +64,9 @@ def draw_tn(
         Highlight these edges.
     highlight_tids : iterable, optional
         Highlight these nodes.
-    highlight_color_edge
+    highlight_inds_color
         What color to use for ``highlight_inds`` nodes.
-    highlight_color_node : tuple[float], optional
+    highlight_tids_color : tuple[float], optional
         What color to use for ``highlight_tids`` nodes.
     show_inds : {None, False, True, 'all'}, optional
         Explicitly turn on labels for each tensors indices.
@@ -96,6 +113,14 @@ def draw_tn(
     margin : None or float, optional
         Specify an argument for ``ax.margin``, else the plot limits will try
         and be computed based on the node positions and node sizes.
+    xlims : None or tuple, optional
+        Explicitly set the x plot range.
+    xlims : None or tuple, optional
+        Explicitly set the y plot range.
+    get : {Nonr, 'pos'}, optional
+        If ``'pos'``, return the plotting positions of each ``tid`` and ``ind``
+        drawn as a node, this can supplied to subsequent calls as ``fix=pos``
+        to maintain positions, even as the graph structure changes.
     return_fig : bool, optional
         If True and ``ax is None`` then return the figure created rather than
         executing ``pyplot.show()``.
@@ -143,29 +168,32 @@ def draw_tn(
 
     for ix, tids in tn.ind_map.items():
         edge_attrs = {
-            'color': (highlight_color_edge if ix in highlight_inds else
+            'color': (highlight_inds_color if ix in highlight_inds else
                       edge_color),
             'ind': ix,
             'edge_size': edge_scale * math.log2(tn.ind_size(ix))
         }
         if len(tids) == 2:
             # standard edge
-            G.add_edge(*tids, **edge_attrs)
+            _add_or_merge_edge(G, *tids, edge_attrs)
             if show_inds == 'all':
-                edge_labels[tids] = ix
+                edge_labels[tuple(tids)] = ix
         else:
             # hyper or outer edge - needs dummy 'node' shown with zero size
             hyperedges.append(ix)
             for tid in tids:
-                G.add_edge(tid, ix, **edge_attrs)
+                _add_or_merge_edge(G, tid, ix, edge_attrs)
+
+    if len(G) == 0:
+        # tensor network is only scalars, no inds
+        for tid in tn.tensor_map:
+            G.add_node(tid)
 
     # color the nodes
     colors = get_colors(color, custom_colors)
 
     # set parameters for all the nodes
     for tid, t in tn.tensor_map.items():
-        if t.ndim == 0:
-            continue
 
         G.nodes[tid]['size'] = node_size
         G.nodes[tid]['outline_size'] = node_outline_size
@@ -174,7 +202,7 @@ def draw_tn(
             if tag in t.tags:
                 color = colors[tag]
         if tid in highlight_tids:
-            color = highlight_color_node
+            color = highlight_tids_color
         G.nodes[tid]['color'] = color
         G.nodes[tid]['outline_color'] = tuple(
             (1.0 if i == 3 else outline_darkness) * c
@@ -197,6 +225,9 @@ def draw_tn(
             node_labels[oix] = oix
 
     pos = _get_positions(tn, G, fix, initial_layout, k, iterations)
+
+    if get == 'pos':
+        return pos
 
     if ax is None:
         fig, ax = plt.subplots(figsize=figsize, constrained_layout=True)
@@ -279,6 +310,11 @@ def draw_tn(
     if not created_fig:
         # we added to axisting axes
         return
+
+    if xlims is not None:
+        ax.set_xlim(xlims)
+    if ylims is not None:
+        ax.set_ylim(ylims)
 
     if return_fig:
         return fig
@@ -426,6 +462,10 @@ def _get_positions(tn, G, fix, initial_layout, k, iterations):
             # assume index
             if (tags_or_ind in tn.tensor_map) or (tags_or_ind in tn.ind_map):
                 fixed_positions[tags_or_ind] = pos
+
+    if all(node in fix for node in G.nodes):
+        # everything is already fixed
+        return fix
 
     # use spectral or other layout as starting point
     pos0 = getattr(nx, initial_layout + '_layout')(G)
