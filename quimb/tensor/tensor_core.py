@@ -1233,9 +1233,11 @@ class Tensor(object):
 
     """
 
+    __slots__ = ('_data', '_inds', '_tags', '_left_inds', '_owners')
+
     def __init__(self, data=1.0, inds=(), tags=None, left_inds=None):
         # a new or copied Tensor always has no owners
-        self.owners = dict()
+        self._owners = dict()
 
         # Short circuit for copying Tensors
         if isinstance(data, Tensor):
@@ -1291,17 +1293,21 @@ class Tensor(object):
     def left_inds(self, left_inds):
         self._left_inds = tuple(left_inds) if left_inds is not None else None
 
+    @property
+    def owners(self):
+        return self._owners
+
     def add_owner(self, tn, tid):
         """Add ``tn`` as owner of this Tensor - it's tag and ind maps will
         be updated whenever this tensor is retagged or reindexed.
         """
-        self.owners[hash(tn)] = (weakref.ref(tn), tid)
+        self._owners[hash(tn)] = (weakref.ref(tn), tid)
 
     def remove_owner(self, tn):
         """Remove TensorNetwork ``tn`` as an owner of this Tensor.
         """
         try:
-            del self.owners[hash(tn)]
+            del self._owners[hash(tn)]
         except KeyError:
             pass
 
@@ -1310,11 +1316,11 @@ class Tensor(object):
         trim any weakrefs to dead TensorNetworks.
         """
         # first parse out dead owners
-        for k in tuple(self.owners):
-            if not self.owners[k][0]():
-                del self.owners[k]
+        for k in tuple(self._owners):
+            if not self._owners[k][0]():
+                del self._owners[k]
 
-        return len(self.owners) > 0
+        return len(self._owners) > 0
 
     def _apply_function(self, fn):
         self._data = fn(self.data)
@@ -1348,7 +1354,7 @@ class Tensor(object):
             old_inds = oset(self.inds)
             new_inds = oset(inds)
             if (old_inds != new_inds) and self.check_owners():
-                for ref, tid in self.owners.values():
+                for ref, tid in self._owners.values():
                     ref()._modify_tensor_inds(old_inds, new_inds, tid)
 
             self._inds = inds
@@ -1358,7 +1364,7 @@ class Tensor(object):
 
             # if this tensor has owners, update their ``tag_map``.
             if self.check_owners():
-                for ref, tid in self.owners.values():
+                for ref, tid in self._owners.values():
                     ref()._modify_tensor_tags(self.tags, tags, tid)
 
             self._tags = tags
@@ -2170,10 +2176,12 @@ class Tensor(object):
 
     def __getstate__(self):
         # This allows pickling, since the copy has no weakrefs.
-        return self.copy().__dict__
+        return (self._data, self._inds, self._tags, self._left_inds)
 
     def __setstate__(self, state):
-        self.__dict__ = state.copy()
+        self._data, self._inds, tags, self._left_inds = state
+        self._tags = tags.copy()
+        self._owners = {}
 
     def __repr__(self):
         return (f"{self.__class__.__name__}("
