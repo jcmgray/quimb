@@ -8,7 +8,7 @@ from autoray import do, reshape
 import quimb as qu
 from ..utils import progbar as _progbar
 from ..utils import oset, partitionby, concatv, partition_all, ensure_dict
-from .tensor_core import (get_tags, tags_to_oset, oset_union,
+from .tensor_core import (get_tags, tags_to_oset, oset_union, tensor_contract,
                           PTensor, Tensor, TensorNetwork, rand_uuid)
 from .tensor_gen import MPS_computational_state
 from .tensor_1d import TensorNetwork1DVector, Dense1D, TensorNetwork1DOperator
@@ -444,6 +444,62 @@ def apply_rzz(psi, gamma, i, j, parametrize=False, **gate_opts):
     psi.gate_(G, (int(i), int(j)), tags=mtags, **gate_opts)
 
 
+def su4_gate_param_gen(params):
+    """See https://arxiv.org/abs/quant-ph/0308006 - Fig. 7.
+    """
+
+    TA1 = Tensor(u3_gate_param_gen(params[0:3]), ['a1', 'a0'])
+    TA2 = Tensor(u3_gate_param_gen(params[3:6]), ['b1', 'b0'])
+
+    cnot = do('array', qu.CNOT().reshape(2, 2, 2, 2),
+              like=params, dtype=TA1.data.dtype)
+
+    TNOTC1 = Tensor(cnot, ['b2', 'a2', 'b1', 'a1'])
+    TRz1 = Tensor(rz_gate_param_gen(params[12:13]), inds=['a3', 'a2'])
+    TRy2 = Tensor(ry_gate_param_gen(params[13:14]), inds=['b3', 'b2'])
+    TCNOT2 = Tensor(cnot, ['a5', 'b4', 'a3', 'b3'])
+    TRy3 = Tensor(ry_gate_param_gen(params[14:15]), inds=['b5', 'b4'])
+    TNOTC3 = Tensor(cnot, ['b6', 'a6', 'b5', 'a5'])
+    TA3 = Tensor(u3_gate_param_gen(params[6:9]), ['a7', 'a6'])
+    TA4 = Tensor(u3_gate_param_gen(params[9:12]), ['b7', 'b6'])
+
+    return tensor_contract(
+        TA1, TA2, TNOTC1,
+        TRz1, TRy2, TCNOT2, TRy3,
+        TNOTC3, TA3, TA4,
+        output_inds=['a7', 'b7'] + ['a0', 'b0'],
+        optimize='auto-hq',
+    ).data
+
+
+def apply_su4(
+    psi,
+    theta1, phi1, lamda1,
+    theta2, phi2, lamda2,
+    theta3, phi3, lamda3,
+    theta4, phi4, lamda4,
+    t1, t2, t3,
+    i, j,
+    parametrize=False,
+    **gate_opts
+):
+    """See https://arxiv.org/abs/quant-ph/0308006 - Fig. 7.
+    """
+    params = (theta1, phi1, lamda1,
+              theta2, phi2, lamda2,
+              theta3, phi3, lamda3,
+              theta4, phi4, lamda4,
+              t1, t2, t3,)
+
+    mtags = _merge_tags('SU4', gate_opts)
+    if parametrize:
+        G = ops.PArray(su4_gate_param_gen, params)
+    else:
+        G = su4_gate_param_gen(params)
+
+    psi.gate_(G, (int(i), int(j)), tags=mtags, **gate_opts)
+
+
 GATE_FUNCTIONS = {
     # constant single qubit gates
     'H': build_gate_1(qu.hadamard(), tags='H'),
@@ -481,10 +537,11 @@ GATE_FUNCTIONS = {
     'FS': apply_fsim,
     'FSIM': apply_fsim,
     'RZZ': apply_rzz,
+    'SU4': apply_su4,
 }
 
 ONE_QUBIT_PARAM_GATES = {'RX', 'RY', 'RZ', 'U3', 'U2', 'U1'}
-TWO_QUBIT_PARAM_GATES = {'CU3', 'CU2', 'CU1', 'FS', 'FSIM', 'RZZ'}
+TWO_QUBIT_PARAM_GATES = {'CU3', 'CU2', 'CU1', 'FS', 'FSIM', 'RZZ', 'SU4'}
 ALL_PARAM_GATES = ONE_QUBIT_PARAM_GATES | TWO_QUBIT_PARAM_GATES
 
 
@@ -857,6 +914,27 @@ class Circuit:
     def rzz(self, theta, i, j, gate_round=None, parametrize=False):
         self.apply_gate('RZZ', theta, i, j,
                         gate_round=gate_round, parametrize=parametrize)
+
+    def su4(
+        self,
+        theta1, phi1, lamda1,
+        theta2, phi2, lamda2,
+        theta3, phi3, lamda3,
+        theta4, phi4, lamda4,
+        t1, t2, t3,
+        i, j,
+        gate_round=None, parametrize=False
+    ):
+        self.apply_gate(
+            'SU4',
+            theta1, phi1, lamda1,
+            theta2, phi2, lamda2,
+            theta3, phi3, lamda3,
+            theta4, phi4, lamda4,
+            t1, t2, t3,
+            i, j,
+            gate_round=gate_round, parametrize=parametrize
+        )
 
     @property
     def psi(self):
