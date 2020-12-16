@@ -1054,8 +1054,8 @@ class Circuit:
         psi_lc = psi.select_any(lightcone_tags).view_like_(psi)
 
         if not keep_psi0:
-            # these sites are in the lightcone regardless of gates above them
-            site_tags = oset(psi.site_tag(i) for i in where)
+            # these sites are in the lightcone regardless of being alone
+            site_inds = set(map(psi.site_ind, where))
 
             for tid, t in tuple(psi_lc.tensor_map.items()):
                 # get all tensors connected to this tensor (incld itself)
@@ -1063,7 +1063,7 @@ class Circuit:
 
                 # lone tensor not attached to anything - drop it
                 # but only if it isn't directly in the ``where`` region
-                if (len(neighbors) == 1) and not (t.tags & site_tags):
+                if (len(neighbors) == 1) and set(t.inds).isdisjoint(site_inds):
                     psi_lc._pop_tensor(tid)
 
         return psi_lc
