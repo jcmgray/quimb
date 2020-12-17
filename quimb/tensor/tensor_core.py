@@ -9,6 +9,7 @@ import weakref
 import operator
 import functools
 import itertools
+import threading
 import contextlib
 import collections
 from numbers import Integral
@@ -28,34 +29,70 @@ from .array_ops import (iscomplex, norm_fro, unitize, ndim, asarray, PArray,
                         find_diag_axes, find_antidiag_axes, find_columns)
 from .drawing import draw_tn
 
-_DEFAULT_CONTRACTION_STRATEGY = 'greedy'
+
+_CONTRACT_STRATEGY = 'greedy'
+_TEMP_CONTRACT_STRATEGIES = collections.defaultdict(list)
 
 
 def get_contract_strategy():
     r"""Get the default contraction strategy - the option supplied as
     ``optimize`` to ``opt_einsum``.
     """
-    return _DEFAULT_CONTRACTION_STRATEGY
+    if not _TEMP_CONTRACT_STRATEGIES:
+        # shortcut for when no temp strategies are in use
+        return _CONTRACT_STRATEGY
+
+    thread_id = threading.get_ident()
+    if thread_id not in _TEMP_CONTRACT_STRATEGIES:
+        return _CONTRACT_STRATEGY
+
+    temp_strategies = _TEMP_CONTRACT_STRATEGIES[thread_id]
+    # empty list -> not in context manager -> use default strategy
+    if not temp_strategies:
+        # clean up to allow above shortcuts
+        del _TEMP_CONTRACT_STRATEGIES[thread_id]
+        return _CONTRACT_STRATEGY
+
+    # use most recently set strategy for this threy
+    return temp_strategies[-1]
 
 
 def set_contract_strategy(strategy):
     """Get the default contraction strategy - the option supplied as
     ``optimize`` to ``opt_einsum``.
     """
-    global _DEFAULT_CONTRACTION_STRATEGY
-    _DEFAULT_CONTRACTION_STRATEGY = strategy
+    global _CONTRACT_STRATEGY
+    _CONTRACT_STRATEGY = strategy
 
 
 @contextlib.contextmanager
-def contract_strategy(strategy):
+def contract_strategy(strategy, set_globally=False):
     """A context manager to temporarily set the default contraction strategy
-    supplied as ``optimize`` to ``opt_einsum``.
+    supplied as ``optimize`` to ``opt_einsum``. By default, this only sets the
+    contract strategy for the current thread.
+
+    Parameters
+    ----------
+    set_globally : bool, optimize
+        Whether to set the strategy just for this thread, or for all threads.
+        If you are entering the context, *then* using multithreading, you might
+        want ``True``.
     """
-    orig_strategy = get_contract_strategy()
-    try:
-        yield set_contract_strategy(strategy)
-    finally:
-        set_contract_strategy(orig_strategy)
+    if set_globally:
+        orig_strategy = get_contract_strategy()
+        set_contract_strategy(strategy)
+        try:
+            yield
+        finally:
+            set_contract_strategy(orig_strategy)
+    else:
+        thread_id = threading.get_ident()
+        temp_strategies = _TEMP_CONTRACT_STRATEGIES[thread_id]
+        temp_strategies.append(strategy)
+        try:
+            yield
+        finally:
+            temp_strategies.pop()
 
 
 def _get_contract_path(eq, *shapes, **kwargs):
@@ -180,11 +217,13 @@ def _get_contraction(eq, shapes, optimize, cache, get, **kwargs):
         return info
 
 
-def get_contraction(eq, *shapes, cache=True, get='expr', **kwargs):
+def get_contraction(eq, *shapes, cache=True, get='expr',
+                    optimize=None, **kwargs):
     """Get an callable expression that will evaluate ``eq`` based on
     ``shapes``. Cache the result if no constant tensors are involved.
     """
-    optimize = kwargs.pop('optimize', _DEFAULT_CONTRACTION_STRATEGY)
+    if optimize is None:
+        optimize = get_contract_strategy()
 
     # can't cache if using constants
     if 'constants' in kwargs:
@@ -216,6 +255,10 @@ except ImportError:
     _TENSOR_LINOP_BACKEND = 'numpy'
 
 
+_TEMP_CONTRACT_BACKENDS = collections.defaultdict(list)
+_TEMP_TENSOR_LINOP_BACKENDS = collections.defaultdict(list)
+
+
 def get_contract_backend():
     """Get the default backend used for tensor contractions, via 'opt_einsum'.
 
@@ -224,7 +267,19 @@ def get_contract_backend():
     set_contract_backend, get_tensor_linop_backend, set_tensor_linop_backend,
     tensor_contract
     """
-    return _CONTRACT_BACKEND
+    if not _TEMP_CONTRACT_BACKENDS:
+        return _CONTRACT_BACKEND
+
+    thread_id = threading.get_ident()
+    if thread_id not in _TEMP_CONTRACT_BACKENDS:
+        return _CONTRACT_BACKEND
+
+    temp_backends = _TEMP_CONTRACT_BACKENDS[thread_id]
+    if not temp_backends:
+        del _TEMP_CONTRACT_BACKENDS[thread_id]
+        return _CONTRACT_BACKEND
+
+    return temp_backends[-1]
 
 
 def set_contract_backend(backend):
@@ -240,15 +295,33 @@ def set_contract_backend(backend):
 
 
 @contextlib.contextmanager
-def contract_backend(backend):
+def contract_backend(backend, set_globally=False):
     """A context manager to temporarily set the default backend used for tensor
-    contractions, via 'opt_einsum'.
+    contractions, via 'opt_einsum'. By default, this only sets the contract
+    backend for the current thread.
+
+    Parameters
+    ----------
+    set_globally : bool, optimize
+        Whether to set the backend just for this thread, or for all threads. If
+        you are entering the context, *then* using multithreading, you might
+        want ``True``.
     """
-    orig_backend = get_contract_backend()
-    try:
-        yield set_contract_backend(backend)
-    finally:
-        set_contract_backend(orig_backend)
+    if set_globally:
+        orig_backend = get_contract_backend()
+        set_contract_backend(backend)
+        try:
+            yield
+        finally:
+            set_contract_backend(orig_backend)
+    else:
+        thread_id = threading.get_ident()
+        temp_backends = _TEMP_CONTRACT_BACKENDS[thread_id]
+        temp_backends.append(backend)
+        try:
+            yield
+        finally:
+            temp_backends.pop()
 
 
 def get_tensor_linop_backend():
@@ -261,7 +334,19 @@ def get_tensor_linop_backend():
     set_tensor_linop_backend, set_contract_backend, get_contract_backend,
     TNLinearOperator
     """
-    return _TENSOR_LINOP_BACKEND
+    if not _TEMP_TENSOR_LINOP_BACKENDS:
+        return _TENSOR_LINOP_BACKEND
+
+    thread_id = threading.get_ident()
+    if thread_id not in _TEMP_TENSOR_LINOP_BACKENDS:
+        return _TENSOR_LINOP_BACKEND
+
+    temp_backends = _TEMP_TENSOR_LINOP_BACKENDS[thread_id]
+    if not temp_backends:
+        del _TEMP_TENSOR_LINOP_BACKENDS[thread_id]
+        return _TENSOR_LINOP_BACKEND
+
+    return temp_backends[-1]
 
 
 def set_tensor_linop_backend(backend):
@@ -279,15 +364,33 @@ def set_tensor_linop_backend(backend):
 
 
 @contextlib.contextmanager
-def tensor_linop_backend(backend):
+def tensor_linop_backend(backend, set_globally=False):
     """A context manager to temporarily set the default backend used for tensor
-    network linear operators, via 'opt_einsum'.
+    network linear operators, via 'opt_einsum'. By default, this
+    only sets the contract backend for the current thread.
+
+    Parameters
+    ----------
+    set_globally : bool, optimize
+        Whether to set the backend just for this thread, or for all threads. If
+        you are entering the context, *then* using multithreading, you might
+        want ``True``.
     """
-    orig_backend = get_tensor_linop_backend()
-    try:
-        yield set_tensor_linop_backend(backend)
-    finally:
-        set_tensor_linop_backend(orig_backend)
+    if set_globally:
+        orig_backend = get_tensor_linop_backend()
+        set_tensor_linop_backend(backend)
+        try:
+            yield
+        finally:
+            set_tensor_linop_backend(orig_backend)
+    else:
+        thread_id = threading.get_ident()
+        temp_backends = _TEMP_TENSOR_LINOP_BACKENDS[thread_id]
+        temp_backends.append(backend)
+        try:
+            yield
+        finally:
+            temp_backends.pop()
 
 
 # --------------------------------------------------------------------------- #
@@ -395,7 +498,7 @@ def tensor_contract(*tensors, output_inds=None, get=None,
     check_opt('get', get, _VALID_CONTRACT_GET)
 
     if backend is None:
-        backend = _CONTRACT_BACKEND
+        backend = get_contract_backend()
 
     i_ix = tuple(t.inds for t in tensors)  # input indices per tensor
     total_ix = tuple(concat(i_ix))  # list of all input indices
@@ -5392,7 +5495,10 @@ class TNLinearOperator(spla.LinearOperator):
 
     def __init__(self, tns, left_inds, right_inds, ldims=None, rdims=None,
                  optimize='auto', backend=None, is_conj=False):
-        self.backend = _TENSOR_LINOP_BACKEND if backend is None else backend
+        if backend is None:
+            self.backend = get_tensor_linop_backend()
+        else:
+            self.backend = backend
         self.optimize = optimize
 
         if isinstance(tns, TensorNetwork):
