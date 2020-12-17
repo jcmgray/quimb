@@ -149,13 +149,17 @@ def tensor_contract(*tensors, output_inds=None, direction="left", inplace=False)
 
     if not isinstance(out, (float, complex)):
         _output_inds = out.inds
-        if output_inds is None: output_inds = _output_inds
+        if output_inds is None:
+            output_inds = _output_inds
+        else:
+            output_inds = tuple(output_inds)
         if set(_output_inds) != set(output_inds):
             raise TypeError("specified out_inds not allow in tensordot, \
                          make sure not summation/Hadamard product appears")
         if output_inds!=_output_inds:
-            transpose_order = tuple([_output_inds.index(ia) for ia in output_inds])
-            out = out.transpose(transpose_order, inplace=True)
+            #transpose_order = tuple([_output_inds.index(ia) for ia in output_inds])
+            #out = out.transpose(transpose_order, inplace=True)
+            out = out.transpose(output_inds, inplace=True)
     return out
 
 def tensor_split(T, left_inds, method='svd', get=None, absorb='both', max_bond=None, cutoff=1e-10,
@@ -207,6 +211,41 @@ def tensor_split(T, left_inds, method='svd', get=None, absorb='both', max_bond=N
         return tensors
 
     return FermionTensorNetwork(tensors, check_collisions=False, virtual=True)
+
+def tensor_compress_bond(
+    T1,
+    T2,
+    absorb='both',
+    inplace=True,
+    info=None,
+    **compress_opts
+):
+    fs, (tid1, tid2) = _fetch_fermion_space(T1, T2, inplace=inplace)
+
+    site1, site2 = fs[tid1][1], fs[tid2][1]
+
+    if site1 < site2:
+        Tl, Tr = T1, T2
+        tidl, tidr = tid1, tid2
+    else:
+        Tl, Tr = T2, T1
+        tidl, tidr = tid2, tid1
+
+    tmp = fs.copy()
+
+    left_inds = [ind for ind in Tl.inds if ind not in Tr.inds]
+    right_inds = [ind for ind in Tr.inds if ind not in Tl.inds]
+
+    out = fs._contract_pairs(tidl, tidr, direction="left")
+    out_tid = out.fermion_owner[2]
+    out_site = fs[out_tid][1]
+
+    l, r = out.split(left_inds=left_inds, right_inds=right_inds, absorb=absorb, get="tensors", **compress_opts)
+    fs.replace_tensor(out_site, l, tid=tidl, virtual=True)
+    fs.insert_tensor(out_site+1, r, tid=tidr, virtual=True)
+    fs.move(tidl, min(site1, site2))
+    fs.move(tidr, max(site2, site1))
+    return l, r
 
 class FermionSpace:
     """A labelled, ordered dictionary. The tensor labels point to the tensor
@@ -315,14 +354,16 @@ class FermionSpace:
         """
         if (tid is None) or (tid in self.tensor_order.keys()):
             tid = rand_uuid(base="_T")
-        if site not in sites:
+        if site not in self.sites:
             self.add_tensor(tsr, tid, site=site, virtual=virtual)
         else:
             T = tsr if virtual else tsr.copy()
             T.set_fermion_owner(self, tid)
-            new_tensor_order = {tid: (T, site)}
             for atid, (atsr, asite) in self.tensor_order.items():
-                new_tensor_order[atid] = (atsr, asite+(asite>=site))
+                if asite >= site:
+                    self.tensor_order.update({atid: (atsr, asite+1)})
+            self.tensor_order.update({tid: (T, site)})
+
 
     def insert(self, site, *tsr, virtual=False):
         for T in tsr:
@@ -366,48 +407,6 @@ class FermionSpace:
         else:
             self.add_tensor(site, tsr)
 
-    def _move_left(self, tid_or_site):
-        """ Switch position for the specified tensor with the tensor to its left
-            A_{n-1} A_n = \tilda{A}_{n} \tilda{A}_{n-1}
-            global phase factorized to \tilda{A}_{n-1},
-            local phase factorized to \tilda{A}_n
-        """
-        tid, site, tsr = self[tid_or_site]
-        if site != min(self.sites):
-            if site-1 not in self.sites:
-                raise ValueError("left of site %s not occupied"%site)
-            tid_l, site_l, tsr_l = self[site-1]
-            if tsr.parity * tsr_l.parity:
-                tsr_l.data._global_flip()
-            axes = []
-            for ax, s in enumerate(tsr.inds):
-                if s in tsr_l.inds:
-                    axes.append(ax)
-            tsr.data._local_flip(axes)
-            self.tensor_order[tid] = (tsr, site-1)
-            self.tensor_order[tid_l] = (tsr_l, site)
-
-    def _move_right(self, tid_or_site):
-        """ Switch position for the specified tensor with the tensor to its left
-            A_n A_{n+1} = \tilda{A}_{n+1} \tilda{A}_n
-            global phase factorized to \tilda{A}_n,
-            local phase factorized to \tilda{A}_{n+1}
-        """
-        tid, site, tsr = self[tid_or_site]
-        if site != max(self.sites):
-            if site+1 not in self.sites:
-                raise ValueError("right of site %s not occupied"%site)
-            tid_r, site_r, tsr_r = self[site+1]
-            if tsr.parity * tsr_r.parity:
-                tsr.data._global_flip()
-            axes = []
-            for ax, s in enumerate(tsr_r.inds):
-                if s in tsr.inds:
-                    axes.append(ax)
-            tsr_r.data._local_flip(axes)
-            self.tensor_order[tid] = (tsr, site+1)
-            self.tensor_order[tid_r] = (tsr_r, site)
-
     def move(self, tid_or_site, des_site):
         '''Both local and global phase factorized to the tensor that's being operated on
         '''
@@ -441,11 +440,9 @@ class FermionSpace:
             if site1 == site2: return
             sitemin, sitemax = min(site1, site2), max(site1, site2)
             if direction == 'left':
-                for isite in range(sitemax, sitemin+1, -1):
-                    self._move_left(isite)
+                self.move(sitemax, sitemin+1)
             elif direction == 'right':
-                for isite in range(sitemin, sitemax-1):
-                    self._move_right(isite)
+                self.move(sitemin, sitemax-1)
             else:
                 raise ValueError("direction %s not recognized"%direction)
 
