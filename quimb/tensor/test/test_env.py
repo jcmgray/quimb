@@ -111,6 +111,8 @@ norm_rd = norm.reorder_right_row(direction="down",layer_tags=layer_tags)
 norm_lu = norm.reorder_left_row(direction="up",layer_tags=layer_tags)
 
 
+
+
 row_envs = norm.compute_row_environments(layer_tags=layer_tags)
 print("TESTING ROW ENVIRONMENTS")
 for ix in range(Lx):
@@ -122,7 +124,16 @@ for ix in range(Lx):
         out = fs._contract_pairs(0,1)
     print("ROW%i env + mid: %.6f"%(ix, out))
 
-
+col_envs = norm.compute_col_environments(layer_tags=layer_tags)
+print("TESTING COL ENVIRONMENTS")
+for ix in range(Ly):
+    tmp = col_envs["left", ix].copy()
+    tmp.add_tensor_network(col_envs["mid", ix])
+    tmp.add_tensor_network(col_envs["right", ix])
+    fs = tmp.fermion_space
+    for i in range(len(fs.tensor_order.keys())-1):
+        out = fs._contract_pairs(0,1)
+    print("COL%i env + mid: %.6f"%(ix, out))
 
 out = contract_all(norm)
 print(out)

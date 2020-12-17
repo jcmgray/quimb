@@ -37,18 +37,6 @@ class FermionTensorNetwork2D(FermionTensorNetwork,TensorNetwork2D):
     def flatten(self, fuse_multibonds=True, inplace=False):
         raise NotImplementedError
 
-
-    def _contract_boundary_from_bottom_multi(
-        self,
-        xrange,
-        yrange,
-        layer_tags,
-        canonize=True,
-        compress_sweep='left',
-        **compress_opts
-    ):
-        raise NotImplementedError
-
     def contract_boundary_from_bottom(
         self,
         xrange,
@@ -105,10 +93,41 @@ class FermionTensorNetwork2D(FermionTensorNetwork,TensorNetwork2D):
         inplace=False,
         **compress_opts
     ):
-        raise NotImplementedError
+        tn = self if inplace else self.copy()
+        Lx, Ly = self._Lx, self._Ly
+        if xrange is None: xrange = (0, Lx-1)
+        for j in range(max(yrange), min(yrange), -1):
+            for i in range(min(xrange), max(xrange) + 1):
+                tag1, tag2 = tn.site_tag(i, j), tn.site_tag(i, j-1)
+                if layer_tags is not None:
+                    for p in range(len(layer_tags)-1):
+                        tn.contract_between((tag1, layer_tags[p]), (tag1, layer_tags[p+1]))
+                        tn.contract_between((tag2, layer_tags[p]), (tag2, layer_tags[p+1]))
+                tn.contract_between(tag1, tag2)
+        return tn
 
-    def compute_row_environments(self, **compress_opts):
-        raise NotImplementedError
+    def contract_boundary_from_left(
+        self,
+        yrange,
+        xrange=None,
+        canonize=True,
+        compress_sweep='down',
+        layer_tags=None,
+        inplace=False,
+        **compress_opts
+    ):
+        tn = self if inplace else self.copy()
+        Lx, Ly = self._Lx, self._Ly
+        if xrange is None: xrange = (0, Lx-1)
+        for j in range(min(yrange), max(yrange)):
+            for i in range(min(xrange), max(xrange) + 1):
+                tag1, tag2 = tn.site_tag(i, j), tn.site_tag(i, j+1)
+                if layer_tags is not None:
+                    for p in range(len(layer_tags)-1):
+                        tn.contract_between((tag1, layer_tags[p]), (tag1, layer_tags[p+1]))
+                        tn.contract_between((tag2, layer_tags[p]), (tag2, layer_tags[p+1]))
+                tn.contract_between(tag1, tag2)
+        return tn
 
     def compute_row_environments(self, layer_tags=None, **compress_opts):
         Lx = self._Lx
@@ -137,8 +156,36 @@ class FermionTensorNetwork2D(FermionTensorNetwork,TensorNetwork2D):
             env_top.contract_boundary_from_top((i+1, i+2), layer_tags=layer_tags, inplace=True)
             row_envs['above', i] = env_top.select(last_row).simple_copy()
 
-
         return row_envs
+
+    def compute_col_environments(self, layer_tags=None, **compress_opts):
+        Ly = self._Ly
+        env_left = self.reorder_upward_column(layer_tags=layer_tags)
+        env_right = env_left.copy()
+        col_envs = dict()
+
+        first_col = env_left.col_tag(0)
+        col_envs["left", 0] = FermionTensorNetwork([])
+        col_envs['left', 1] = env_left.select(first_col).simple_copy()
+        col_envs['mid', 0] = env_left.select(first_col).simple_copy()
+
+        for i in range(2, Ly):
+            left_row = env_left.col_tag(i-1)
+            col_envs["mid", i-1] = env_left.select(left_row).simple_copy()
+            env_left.contract_boundary_from_left((i-2, i-1), layer_tags=layer_tags, inplace=True)
+            col_envs['left', i] = env_left.select(left_row).simple_copy()
+
+        last_col = env_left.col_tag(Ly-1)
+        col_envs['mid', Ly-1] = env_left.select(last_col).simple_copy()
+
+        col_envs['right', Ly-1] = FermionTensorNetwork([])
+        col_envs['right', Ly-2] = env_right.select(last_col).simple_copy()
+
+        for i in range(Ly-3, -1, -1):
+            env_right.contract_boundary_from_right((i+1, i+2), layer_tags=layer_tags, inplace=True)
+            col_envs['right', i] = env_right.select(last_col).simple_copy()
+
+        return col_envs
 
     def _reorder_from_tid(self, tid_map, inplace=False):
         tn = self if inplace else self.copy()
