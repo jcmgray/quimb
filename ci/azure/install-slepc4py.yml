@@ -7,7 +7,7 @@ steps:
     export PETSC_CONFIGURE_OPTIONS='--download-mumps --download-scalapack --download-parmetis --download-metis --with-scalar-type=complex'
     echo $PETSC_CONFIGURE_OPTIONS
     pip install Cython
-    pip install petsc petsc4py --no-binary :all:
-    pip install slepc slepc4py --no-binary :all:
+    pip install petsc==3.14.0 petsc4py==3.14.0 --no-binary :all:
+    pip install slepc==3.14.0 slepc4py==3.14.0 --no-binary :all:
   condition: and(eq(variables['install_slepc4py'], 'true'), eq(variables['Agent.OS'], 'Linux'))
   displayName: Install slepc4py linux
