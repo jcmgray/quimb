@@ -10,7 +10,6 @@ import functools
 from numbers import Integral
 
 import numpy as np
-from numpy.matlib import zeros
 import scipy.sparse as sp
 from .utils import partition_all
 
@@ -1962,7 +1961,7 @@ def _trace_lose(p, dims, lose):
     e = dims[lose]
     a = prod(dims[:lose])
     b = prod(dims[lose + 1:])
-    rhos = zeros(shape=(a * b, a * b), dtype=np.complex128)
+    rhos = np.zeros(shape=(a * b, a * b), dtype=np.complex128)
     for i in range(a * b):
         for j in range(i, a * b):
             i_i = e * b * (i // b) + (i % b)
@@ -1984,7 +1983,7 @@ def _trace_keep(p, dims, keep):
     s = dims[keep]
     a = prod(dims[:keep])
     b = prod(dims[keep + 1:])
-    rhos = zeros(shape=(s, s), dtype=np.complex128)
+    rhos = np.zeros(shape=(s, s), dtype=np.complex128)
     for i in range(s):
         for j in range(i, s):
             for k in range(a):

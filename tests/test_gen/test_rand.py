@@ -41,11 +41,14 @@ class TestRandn:
         assert_allclose(np.mean(x), 50, rtol=1e-1)
         assert_allclose(np.std(x), 100, rtol=1e-1)
 
-    @pytest.mark.parametrize("dtype", ['complex64', 'complex128'])
-    def test_rand_phase(self, dtype):
+    @pytest.mark.parametrize("dtype,tol", [
+        ('complex64', 1e-5),
+        ('complex128', 1e-11),
+    ])
+    def test_rand_phase(self, dtype, tol):
         x = qu.gen.rand.rand_phase(10, dtype=dtype)
         assert x.dtype == dtype
-        assert_allclose(np.abs(x), np.ones(10))
+        assert_allclose(np.abs(x), np.ones(10), rtol=tol)
 
     @pytest.mark.parametrize("dtype", ['float32', 'float64',
                                        'complex64', 'complex128'])
