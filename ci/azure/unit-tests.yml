@@ -3,12 +3,12 @@ steps:
 - template: install.yml
 
 - bash: |
-    conda activate quimb-tests
+    source activate quimb-tests
     python -c "import quimb"
   displayName: Import quimb
 
 - bash: |
-    conda activate quimb-tests
+    source activate quimb-tests
     pytest \
     --cov=quimb tests/ \
     --cov-report=xml \
@@ -17,7 +17,7 @@ steps:
   displayName: Run all tests
 
 - bash: |
-    conda activate quimb-tests
+    source activate quimb-tests
     pytest \
     --cov=quimb tests/ \
     --cov-report=xml \
@@ -27,7 +27,7 @@ steps:
   displayName: Run core tests
 
 - bash: |
-    conda activate quimb-tests
+    source activate quimb-tests
     pytest \
     --cov=quimb tests/ \
     --cov-report=xml \

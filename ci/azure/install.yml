@@ -13,12 +13,12 @@ steps:
 - template: install-slepc4py.yml
 
 - bash: |
-    conda activate quimb-tests
+    source activate quimb-tests
     python -m pip install --no-deps -e .
   displayName: Install quimb
 
 - bash: |
-    conda activate quimb-tests
+    source activate quimb-tests
     conda info -a
     conda list
   displayName: Version info

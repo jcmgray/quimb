@@ -1,7 +1,6 @@
 steps:
-
 - bash: |
-    conda activate quimb-tests
+    source activate quimb-tests
     sudo apt install -y openmpi-bin libopenmpi-dev gfortran bison flex cmake valgrind curl autoconf libopenblas-base libopenblas-dev
     pip install mpi4py
     export PETSC_CONFIGURE_OPTIONS='--download-mumps --download-scalapack --download-parmetis --download-metis --with-scalar-type=complex'
