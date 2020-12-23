@@ -58,6 +58,8 @@ class FermionTensorNetwork2D(FermionTensorNetwork,TensorNetwork2D):
                         tn.contract_between((tag1, layer_tags[p]), (tag1, layer_tags[p+1]))
                         tn.contract_between((tag2, layer_tags[p]), (tag2, layer_tags[p+1]))
                 tn.contract_between(tag1, tag2)
+            self.compress_row(i, sweep=compress_sweep,
+                              yrange=yrange, **compress_opts)
         return tn
 
     def contract_boundary_from_top(
@@ -81,6 +83,9 @@ class FermionTensorNetwork2D(FermionTensorNetwork,TensorNetwork2D):
                         tn.contract_between((tag1, layer_tags[p]), (tag1, layer_tags[p+1]))
                         tn.contract_between((tag2, layer_tags[p]), (tag2, layer_tags[p+1]))
                 tn.contract_between(tag1, tag2)
+
+            self.compress_row(i, sweep=compress_sweep,
+                              yrange=yrange, **compress_opts)
         return tn
 
     def contract_boundary_from_right(
@@ -104,6 +109,9 @@ class FermionTensorNetwork2D(FermionTensorNetwork,TensorNetwork2D):
                         tn.contract_between((tag1, layer_tags[p]), (tag1, layer_tags[p+1]))
                         tn.contract_between((tag2, layer_tags[p]), (tag2, layer_tags[p+1]))
                 tn.contract_between(tag1, tag2)
+
+            self.compress_column(j, sweep=compress_sweep,
+                                 xrange=xrange, **compress_opts)
         return tn
 
     def contract_boundary_from_left(
@@ -127,6 +135,9 @@ class FermionTensorNetwork2D(FermionTensorNetwork,TensorNetwork2D):
                         tn.contract_between((tag1, layer_tags[p]), (tag1, layer_tags[p+1]))
                         tn.contract_between((tag2, layer_tags[p]), (tag2, layer_tags[p+1]))
                 tn.contract_between(tag1, tag2)
+
+            self.compress_column(j, sweep=compress_sweep,
+                                 xrange=xrange, **compress_opts)
         return tn
 
     def compute_row_environments(self, layer_tags=None, **compress_opts):
@@ -143,7 +154,7 @@ class FermionTensorNetwork2D(FermionTensorNetwork,TensorNetwork2D):
         for i in range(2, Lx):
             below_row = env_bottom.row_tag(i-1)
             row_envs["mid", i-1] = env_bottom.select(below_row).simple_copy()
-            env_bottom.contract_boundary_from_bottom((i-2, i-1), layer_tags=layer_tags, inplace=True)
+            env_bottom.contract_boundary_from_bottom((i-2, i-1), layer_tags=layer_tags, inplace=True, **compress_opts)
             row_envs['below', i] = env_bottom.select(below_row).simple_copy()
 
         last_row = env_bottom.row_tag(Lx-1)
@@ -153,7 +164,7 @@ class FermionTensorNetwork2D(FermionTensorNetwork,TensorNetwork2D):
         row_envs['above', Lx-2] = env_top.select(last_row).simple_copy()
 
         for i in range(Lx-3, -1, -1):
-            env_top.contract_boundary_from_top((i+1, i+2), layer_tags=layer_tags, inplace=True)
+            env_top.contract_boundary_from_top((i+1, i+2), layer_tags=layer_tags, inplace=True, **compress_opts)
             row_envs['above', i] = env_top.select(last_row).simple_copy()
 
         return row_envs
@@ -172,7 +183,7 @@ class FermionTensorNetwork2D(FermionTensorNetwork,TensorNetwork2D):
         for i in range(2, Ly):
             left_row = env_left.col_tag(i-1)
             col_envs["mid", i-1] = env_left.select(left_row).simple_copy()
-            env_left.contract_boundary_from_left((i-2, i-1), layer_tags=layer_tags, inplace=True)
+            env_left.contract_boundary_from_left((i-2, i-1), layer_tags=layer_tags, inplace=True, **compress_opts)
             col_envs['left', i] = env_left.select(left_row).simple_copy()
 
         last_col = env_left.col_tag(Ly-1)
@@ -182,7 +193,7 @@ class FermionTensorNetwork2D(FermionTensorNetwork,TensorNetwork2D):
         col_envs['right', Ly-2] = env_right.select(last_col).simple_copy()
 
         for i in range(Ly-3, -1, -1):
-            env_right.contract_boundary_from_right((i+1, i+2), layer_tags=layer_tags, inplace=True)
+            env_right.contract_boundary_from_right((i+1, i+2), layer_tags=layer_tags, inplace=True, **compress_opts)
             col_envs['right', i] = env_right.select(last_col).simple_copy()
 
         return col_envs

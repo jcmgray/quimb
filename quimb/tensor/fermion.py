@@ -157,8 +157,6 @@ def tensor_contract(*tensors, output_inds=None, direction="left", inplace=False)
             raise TypeError("specified out_inds not allow in tensordot, \
                          make sure not summation/Hadamard product appears")
         if output_inds!=_output_inds:
-            #transpose_order = tuple([_output_inds.index(ia) for ia in output_inds])
-            #out = out.transpose(transpose_order, inplace=True)
             out = out.transpose(output_inds, inplace=True)
     return out
 
@@ -230,8 +228,6 @@ def tensor_compress_bond(
     else:
         Tl, Tr = T2, T1
         tidl, tidr = tid2, tid1
-
-    tmp = fs.copy()
 
     left_inds = [ind for ind in Tl.inds if ind not in Tr.inds]
     right_inds = [ind for ind in Tr.inds if ind not in Tl.inds]
@@ -984,7 +980,6 @@ class FermionTensorNetwork(TensorNetwork):
         ts = [self.tensor_map[n] for n in tagged_tids]
         tn = FermionTensorNetwork(ts, check_collisions=False, virtual=True)
         tn.view_like_(self)
-
         return tn
 
     def __iand__(self, tensor):
@@ -1336,22 +1331,36 @@ class FermionTensorNetwork(TensorNetwork):
         else:
             self |= out
 
-    def replace_tensor(self, tid_or_site, tsr_or_tn, virtual=False):
-        tid, site, tsr = self.fermion_space[tid_or_site]
-        istensor = isinstance(tsr_or_tn, FermionTensor)
-        istensornetwork = isinstance(tsr_or_tn, FermionTensorNetwork)
+    def _compress_between_tids(
+        self,
+        tid1,
+        tid2,
+        canonize_distance=None,
+        canonize_opts=None,
+        equalize_norms=False,
+        **compress_opts
+    ):
+        Tl = self.tensor_map[tid1]
+        Tr = self.tensor_map[tid2]
 
-        pass
+        if canonize_distance:
+            raise NotImplementedError
 
+        l, r = tensor_compress_bond(Tl, Tr, inplace=True, **compress_opts)
+
+        new_tid1 = l.fermion_owner[2]
+        new_tid2 = r.fermion_owner[2]
+        self.tensor_map[new_tid1] = l
+        self.tensor_map[new_tid2] = r
+
+        if equalize_norms:
+            raise NotImplementedError
 
     def replace_section_with_svd(self, start, stop, eps,
                                  **replace_with_svd_opts):
         raise NotImplementedError
 
     def convert_to_zero(self):
-        raise NotImplementedError
-
-    def compress_between(self, tags1, tags2, **compress_opts):
         raise NotImplementedError
 
     def compress_all(self, inplace=False, **compress_opts):
