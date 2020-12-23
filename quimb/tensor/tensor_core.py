@@ -2389,6 +2389,11 @@ class TensorNetwork(object):
     ind_map : dict
         Like ``tag_map`` but for indices. So ``ind_map[ind]]`` returns the
         tensor ids of those tensors with ``ind``.
+    exponent : float
+        A scalar prefactor for the tensor network, stored in base 10 like
+        ``10**exponent``. This is mostly for conditioning purposes and will be
+        ``0.0`` unless you use use ``equalize_norms(value)`` or
+        ``tn.strip_exponent(tid_or_tensor)``.
     """
 
     _EXTRA_PROPS = ()
@@ -2406,6 +2411,7 @@ class TensorNetwork(object):
                 self.tensor_map[tid].add_owner(self, tid)
             for ep in ts.__class__._EXTRA_PROPS:
                 setattr(self, ep, getattr(ts, ep))
+            self.exponent = ts.exponent
             return
 
         # internal structure
@@ -2417,6 +2423,8 @@ class TensorNetwork(object):
         for t in ts:
             self.add(t, virtual=virtual, check_collisions=check_collisions)
         self._inner_inds = None
+
+        self.exponent = 0.0
 
     def __and__(self, other):
         """Combine this tensor network with more tensors, without contracting.
@@ -4669,18 +4677,12 @@ class TensorNetwork(object):
 
         stripped_factor = t.norm() / value
         t.modify(apply=lambda data: data / stripped_factor)
-        try:
-            self.exponent = self.exponent + do('log10', stripped_factor)
-        except AttributeError:
-            self.exponent = do('log10', stripped_factor)
+        self.exponent = self.exponent + do('log10', stripped_factor)
 
     def distribute_exponent(self):
         """Distribute the exponent ``p`` of this tensor network (i.e.
         corresponding to ``tn * 10**p``) equally among all tensors.
         """
-        if not hasattr(self, 'exponent'):
-            return
-
         # multiply each tensor by the nth root of 10**exponent
         x = 10**(self.exponent / self.num_tensors)
         self.multiply_each_(x)
