@@ -4494,14 +4494,33 @@ class TensorNetwork(object):
 
     contract_ = functools.partialmethod(contract, inplace=True)
 
-    def contraction_width(self, **contract_opts):
+    def contraction_info(self, optimize=None, **contract_opts):
+        """Compute the ``opt_einsum.PathInfo`` object decsribing the
+        contraction of this entire tensor network using path optimizer
+        ``optimize``.
+        """
+        if optimize is None:
+            optimize = get_contract_strategy()
+        return self.contract(
+            all, optimize=optimize, get='path-info', **contract_opts)
+
+    def contraction_width(self, optimize=None, **contract_opts):
         """Compute the 'contraction width' of this tensor network. This
         is defined as log2 of the maximum tensor size produced during the
         contraction sequence. If every index in the network has dimension 2
         this corresponds to the maximum rank tensor produced.
         """
-        path_info = self.contract(all, get='path-info', **contract_opts)
+        path_info = self.contraction_info(optimize, **contract_opts)
         return math.log2(path_info.largest_intermediate)
+
+    def contraction_cost(self, optimize=None, **contract_opts):
+        """Compute the 'contraction cost' of this tensor network. This
+        is defined as log10 of the total number of scalar operations during the
+        contraction sequence. Multiply by 2 to estimate FLOPS for real dtype,
+        and by 8 to estimate FLOPS for complex dtype.
+        """
+        path_info = self.contraction_info(optimize, **contract_opts)
+        return path_info.opt_cost / 2
 
     def __rshift__(self, tags_seq):
         """Overload of '>>' for TensorNetwork.contract_cumulative.

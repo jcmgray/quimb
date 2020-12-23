@@ -905,6 +905,14 @@ class TestTensorNetwork:
         assert len((tn ^ slice(None, -2, -1)).tensors) == 3
         assert len((tn ^ slice(-2, 0)).tensors) == 3
 
+    def test_contraction_info(self):
+        a = qtn.rand_tensor((8, 8), ('a', 'b'))
+        b = qtn.rand_tensor((8, 8), ('b', 'c'))
+        c = qtn.rand_tensor((8, 8), ('c', 'd'))
+        tn = a | b | c
+        assert tn.contraction_width() == 6
+        assert tn.contraction_cost() == 2 * 8**3
+
     @pytest.mark.parametrize('method', ('auto', 'dense', 'overlap'))
     def test_tensor_network_distance(self, method):
         n = 6
