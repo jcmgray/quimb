@@ -1280,8 +1280,8 @@ def tensor_network_distance(
 
     # directly form vectorizations of both
     if method == 'dense':
-        A = tnA.to_dense(oix)
-        B = tnB.to_dense(oix)
+        A = tnA.to_dense(oix, to_qarray=False)
+        B = tnB.to_dense(oix, to_qarray=False)
         return do('linalg.norm', A - B)
 
     # overlap method
@@ -2012,13 +2012,13 @@ class Tensor(object):
 
     unfuse_ = functools.partialmethod(unfuse, inplace=True)
 
-    def to_dense(self, *inds_seq):
+    def to_dense(self, *inds_seq, to_qarray=True):
         """Convert this Tensor into an dense array, with a single dimension
         for each of inds in ``inds_seqs``. E.g. to convert several sites
         into a density matrix: ``T.to_dense(('k0', 'k1'), ('b0', 'b1'))``.
         """
         x = self.fuse([(str(i), ix) for i, ix in enumerate(inds_seq)]).data
-        if isinstance(x, np.ndarray):
+        if (infer_backend(x) == 'numpy') and to_qarray:
             return qarray(x)
         return x
 
@@ -3613,7 +3613,7 @@ class TensorNetwork(object):
 
         See Also
         --------
-        graph_tree_span
+        draw_tree_span
         """
         region = oset(tids)
 
@@ -3694,7 +3694,7 @@ class TensorNetwork(object):
         seq.reverse()
         return seq
 
-    def _graph_tree_span_tids(
+    def _draw_tree_span_tids(
         self,
         tids,
         span=None,
@@ -3705,7 +3705,7 @@ class TensorNetwork(object):
         distance_sort='min',
         color='order',
         colormap='Spectral',
-        **graph_opts,
+        **draw_opts,
     ):
         tn = self.copy()
 
@@ -3744,13 +3744,13 @@ class TensorNetwork(object):
         else:
             custom_colors = None
 
-        graph_opts.setdefault('legend', False)
-        graph_opts.setdefault('custom_colors', custom_colors)
-        graph_opts.setdefault('highlight_inds', tix)
+        draw_opts.setdefault('legend', False)
+        draw_opts.setdefault('custom_colors', custom_colors)
+        draw_opts.setdefault('highlight_inds', tix)
 
-        return tn.graph(color=[f'D{d}' for d in sorted(ds)], **graph_opts)
+        return tn.draw(color=[f'D{d}' for d in sorted(ds)], **draw_opts)
 
-    def graph_tree_span(
+    def draw_tree_span(
         self,
         tags,
         which='all',
@@ -3761,7 +3761,7 @@ class TensorNetwork(object):
         distance_sort='min',
         color='order',
         colormap='Spectral',
-        **graph_opts,
+        **draw_opts,
     ):
         """Visualize a generated tree span out of the tensors tagged by
         ``tags``.
@@ -3792,7 +3792,7 @@ class TensorNetwork(object):
         --------
         get_tree_span
         """
-        return self._graph_tree_span_tids(
+        return self._draw_tree_span_tids(
             self._get_tids_from_tags(tags, which=which),
             min_distance=min_distance,
             max_distance=max_distance,
@@ -3801,7 +3801,9 @@ class TensorNetwork(object):
             distance_sort=distance_sort,
             color=color,
             colormap=colormap,
-            **graph_opts)
+            **draw_opts)
+
+    graph_tree_span = draw_tree_span
 
     def _canonize_around_tids(
         self,
@@ -4212,19 +4214,20 @@ class TensorNetwork(object):
         tid2, = self._get_tids_from_tags(tags2, which='all')
         new_bond(self.tensor_map[tid1], self.tensor_map[tid2], **opts)
 
+    def _cut_between_tids(self, tid1, tid2, left_ind, right_ind):
+        TL, TR = self.tensor_map[tid1], self.tensor_map[tid2]
+        bnd, = bonds(TL, TR)
+        TL.reindex_({bnd: left_ind})
+        TR.reindex_({bnd: right_ind})
+
     def cut_between(self, left_tags, right_tags, left_ind, right_ind):
         """Cut the bond between the tensors specified by ``left_tags`` and
         ``right_tags``, giving them the new inds ``left_ind`` and
         ``right_ind`` respectively.
         """
-        tid_l, = self._get_tids_from_tags(left_tags)
-        tid_r, = self._get_tids_from_tags(right_tags)
-
-        TL, TR = self.tensor_map[tid_l], self.tensor_map[tid_r]
-        bnd, = bonds(TL, TR)
-
-        TL.reindex_({bnd: left_ind})
-        TR.reindex_({bnd: right_ind})
+        tid1, = self._get_tids_from_tags(left_tags)
+        tid2, = self._get_tids_from_tags(right_tags)
+        self._cut_between_tids(tid1, tid2, left_ind, right_ind)
 
     def isel(self, selectors, inplace=False):
         """Select specific values for some dimensions/indices of this tensor
@@ -4539,7 +4542,7 @@ class TensorNetwork(object):
         tn = self.reindex({u: l for u, l in zip(left_inds, right_inds)})
         return tn.contract_tags(...)
 
-    def to_dense(self, *inds_seq, **contract_opts):
+    def to_dense(self, *inds_seq, to_qarray=True, **contract_opts):
         """Convert this network into an dense array, with a single dimension
         for each of inds in ``inds_seqs``. E.g. to convert several sites
         into a density matrix: ``TN.to_dense(('k0', 'k1'), ('b0', 'b1'))``.
@@ -4547,7 +4550,7 @@ class TensorNetwork(object):
         tags = contract_opts.pop('tags', all)
         T = self.contract(
             tags, output_inds=tuple(concat(inds_seq)), **contract_opts)
-        return T.to_dense(*inds_seq)
+        return T.to_dense(*inds_seq, to_qarray=to_qarray)
 
     @functools.wraps(tensor_network_distance)
     def distance(self, *args, **kwargs):
