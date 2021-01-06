@@ -143,23 +143,26 @@ class FermionTensorNetwork2D(FermionTensorNetwork,TensorNetwork2D):
                     "r": range(Ly),
                     "l": range(Ly)[::-1]}
         if row_wise:
-            iterator = product(iter_dic[direction[1]], iter_dic[direction[0]])
-        else:
             iterator = product(iter_dic[direction[0]], iter_dic[direction[1]])
+        else:
+            iterator = product(iter_dic[direction[1]], iter_dic[direction[0]])
         position = 0
         tid_map = dict()
         for i, j in iterator:
             x, y = (i, j) if row_wise else (j, i)
             site_tag = self.site_tag(x, y)
-            if layer_tags is None:
-                tid,  = self._get_tids_from_tags(site_tag)
-                tid_map[tid] = position
-                position += 1
+            tid = self._get_tids_from_tags(site_tag)
+            if layer_tags is None or len(tid)==1:
+                tid,  = tid
+                if tid not in tid_map:
+                    tid_map[tid] = position
+                    position += 1
             else:
                 for tag in layer_tags:
                     tid, = self._get_tids_from_tags((site_tag, tag))
-                    tid_map[tid] = position
-                    position += 1
+                    if tid not in tid_map:
+                        tid_map[tid] = position
+                        position += 1
 
         return self._reorder_from_tid(tid_map, inplace)
 
