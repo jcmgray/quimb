@@ -237,6 +237,8 @@ def tensor_compress_bond(
     out_site = fs[out_tid][1]
 
     l, r = out.split(left_inds=left_inds, right_inds=right_inds, absorb=absorb, get="tensors", **compress_opts)
+    l.modify(tags=Tl.tags)
+    r.modify(tags=Tr.tags)
     fs.replace_tensor(out_site, l, tid=tidl, virtual=True)
     fs.insert_tensor(out_site+1, r, tid=tidr, virtual=True)
     fs.move(tidl, min(site1, site2))
@@ -682,7 +684,7 @@ class FermionTensor(Tensor):
         """Return the "inflated" shape composed of maximal size for each leg
         """
         shapes = self.shapes
-        return np.amax(shapes, axis=0)
+        return tuple(np.amax(shapes, axis=0))
 
     @functools.wraps(tensor_split)
     def split(self, *args, **kwargs):
@@ -1331,6 +1333,27 @@ class FermionTensorNetwork(TensorNetwork):
         else:
             self |= out
 
+    def contract_tags(self, tags, inplace=False, which='any', **opts):
+
+        tids = self._get_tids_from_tags(tags, which='any')
+        if len(tids)  == 0:
+            raise ValueError("No tags were found - nothing to contract. "
+                             "(Change this to a no-op maybe?)")
+        elif len(tids) == 1:
+            return self
+
+        untagged_tn, tagged_ts = self.partition_tensors(
+            tags, inplace=inplace, which=which)
+
+
+        contracted = tensor_contract(*tagged_ts, inplace=True, **opts)
+
+        if untagged_tn is None:
+            return contracted
+
+        untagged_tn.add_tensor(contracted, virtual=True)
+        return untagged_tn
+
     def _compress_between_tids(
         self,
         tid1,
@@ -1340,18 +1363,12 @@ class FermionTensorNetwork(TensorNetwork):
         equalize_norms=False,
         **compress_opts
     ):
-        Tl = self.tensor_map[tid1]
-        Tr = self.tensor_map[tid2]
 
-        if canonize_distance:
-            raise NotImplementedError
+        Tl = self._pop_tensor_(tid1)
+        Tr = self._pop_tensor_(tid2)
 
         l, r = tensor_compress_bond(Tl, Tr, inplace=True, **compress_opts)
-
-        new_tid1 = l.fermion_owner[2]
-        new_tid2 = r.fermion_owner[2]
-        self.tensor_map[new_tid1] = l
-        self.tensor_map[new_tid2] = r
+        self |= (l, r)
 
         if equalize_norms:
             raise NotImplementedError

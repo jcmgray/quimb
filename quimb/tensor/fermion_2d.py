@@ -37,163 +37,94 @@ class FermionTensorNetwork2D(FermionTensorNetwork,TensorNetwork2D):
     def flatten(self, fuse_multibonds=True, inplace=False):
         raise NotImplementedError
 
-    def contract_boundary_from_bottom(
-        self,
-        xrange,
-        yrange=None,
-        canonize=True,
-        compress_sweep='left',
-        layer_tags=None,
-        inplace=False,
-        **compress_opts
-    ):
-        tn = self if inplace else self.copy()
-        Lx, Ly = self._Lx, self._Ly
-        if yrange is None: yrange = (0, Ly-1)
-        for i in range(min(xrange), max(xrange)):
-            for j in range(min(yrange), max(yrange) + 1):
-                tag1, tag2 = tn.site_tag(i, j), tn.site_tag(i + 1, j)
-                if layer_tags is not None:
-                    for p in range(len(layer_tags)-1):
-                        tn.contract_between((tag1, layer_tags[p]), (tag1, layer_tags[p+1]))
-                        tn.contract_between((tag2, layer_tags[p]), (tag2, layer_tags[p+1]))
-                tn.contract_between(tag1, tag2)
-            self.compress_row(i, sweep=compress_sweep,
-                              yrange=yrange, **compress_opts)
-        return tn
+    def canonize_row(self, i, sweep, yrange=None, **canonize_opts):
+        pass
 
-    def contract_boundary_from_top(
-        self,
-        xrange,
-        yrange=None,
-        canonize=True,
-        compress_sweep='left',
-        layer_tags=None,
-        inplace=False,
-        **compress_opts
-    ):
-        tn = self if inplace else self.copy()
-        Lx, Ly = self._Lx, self._Ly
-        if yrange is None: yrange = (0, Ly-1)
-        for i in range(max(xrange), min(xrange), -1):
-            for j in range(min(yrange), max(yrange) + 1):
-                tag1, tag2 = tn.site_tag(i, j), tn.site_tag(i - 1, j)
-                if layer_tags is not None:
-                    for p in range(len(layer_tags)-1):
-                        tn.contract_between((tag1, layer_tags[p]), (tag1, layer_tags[p+1]))
-                        tn.contract_between((tag2, layer_tags[p]), (tag2, layer_tags[p+1]))
-                tn.contract_between(tag1, tag2)
+    def canonize_column(self, j, sweep, xrange=None, **canonize_opts):
+        pass
 
-            self.compress_row(i, sweep=compress_sweep,
-                              yrange=yrange, **compress_opts)
-        return tn
-
-    def contract_boundary_from_right(
-        self,
-        yrange,
-        xrange=None,
-        canonize=True,
-        compress_sweep='down',
-        layer_tags=None,
-        inplace=False,
-        **compress_opts
-    ):
-        tn = self if inplace else self.copy()
-        Lx, Ly = self._Lx, self._Ly
-        if xrange is None: xrange = (0, Lx-1)
-        for j in range(max(yrange), min(yrange), -1):
-            for i in range(min(xrange), max(xrange) + 1):
-                tag1, tag2 = tn.site_tag(i, j), tn.site_tag(i, j-1)
-                if layer_tags is not None:
-                    for p in range(len(layer_tags)-1):
-                        tn.contract_between((tag1, layer_tags[p]), (tag1, layer_tags[p+1]))
-                        tn.contract_between((tag2, layer_tags[p]), (tag2, layer_tags[p+1]))
-                tn.contract_between(tag1, tag2)
-
-            self.compress_column(j, sweep=compress_sweep,
-                                 xrange=xrange, **compress_opts)
-        return tn
-
-    def contract_boundary_from_left(
-        self,
-        yrange,
-        xrange=None,
-        canonize=True,
-        compress_sweep='down',
-        layer_tags=None,
-        inplace=False,
-        **compress_opts
-    ):
-        tn = self if inplace else self.copy()
-        Lx, Ly = self._Lx, self._Ly
-        if xrange is None: xrange = (0, Lx-1)
-        for j in range(min(yrange), max(yrange)):
-            for i in range(min(xrange), max(xrange) + 1):
-                tag1, tag2 = tn.site_tag(i, j), tn.site_tag(i, j+1)
-                if layer_tags is not None:
-                    for p in range(len(layer_tags)-1):
-                        tn.contract_between((tag1, layer_tags[p]), (tag1, layer_tags[p+1]))
-                        tn.contract_between((tag2, layer_tags[p]), (tag2, layer_tags[p+1]))
-                tn.contract_between(tag1, tag2)
-
-            self.compress_column(j, sweep=compress_sweep,
-                                 xrange=xrange, **compress_opts)
-        return tn
-
-    def compute_row_environments(self, layer_tags=None, **compress_opts):
-        Lx = self._Lx
-        env_bottom = self.reorder_right_row(layer_tags=layer_tags)
+    def compute_row_environments(self, dense=False, **compress_opts):
+        layer_tags = compress_opts.get("layer_tags", None)
+        reorder_tags = compress_opts.pop("reorder_tags", layer_tags)
+        env_bottom = self.reorder_right_row(layer_tags=reorder_tags)
         env_top = env_bottom.copy()
+
         row_envs = dict()
 
-        first_row = env_bottom.row_tag(0)
-        row_envs["below", 0] = FermionTensorNetwork([])
-        row_envs['below', 1] = env_bottom.select(first_row).simple_copy()
+        # upwards pass
+        row_envs['below', 0] = FermionTensorNetwork([])
+        first_row = self.row_tag(0)
+        if dense:
+            env_bottom ^= first_row
         row_envs['mid', 0] = env_bottom.select(first_row).simple_copy()
-
-        for i in range(2, Lx):
+        row_envs['below', 1] = env_bottom.select(first_row).simple_copy()
+        for i in range(2, env_bottom.Lx):
             below_row = env_bottom.row_tag(i-1)
             row_envs["mid", i-1] = env_bottom.select(below_row).simple_copy()
-            env_bottom.contract_boundary_from_bottom((i-2, i-1), layer_tags=layer_tags, inplace=True, **compress_opts)
-            row_envs['below', i] = env_bottom.select(below_row).simple_copy()
+            if dense:
+                env_bottom ^= (self.row_tag(i - 2), self.row_tag(i - 1))
+            else:
+                env_bottom.contract_boundary_from_bottom_(
+                    (i - 2, i - 1), **compress_opts)
+            row_envs['below', i] = env_bottom.select(first_row).simple_copy()
 
-        last_row = env_bottom.row_tag(Lx-1)
-        row_envs['mid', Lx-1] = env_bottom.select(last_row).simple_copy()
-
-        row_envs['above', Lx-1] = FermionTensorNetwork([])
-        row_envs['above', Lx-2] = env_top.select(last_row).simple_copy()
-
-        for i in range(Lx-3, -1, -1):
-            env_top.contract_boundary_from_top((i+1, i+2), layer_tags=layer_tags, inplace=True, **compress_opts)
+        last_row = env_bottom.row_tag(self.Lx-1)
+        row_envs['mid', self.Lx-1] = env_bottom.select(last_row).simple_copy()
+        # downwards pass
+        row_envs['above', self.Lx - 1] = FermionTensorNetwork([])
+        last_row = self.row_tag(self.Lx - 1)
+        if dense:
+            env_top ^= last_row
+        row_envs['above', self.Lx - 2] = env_top.select(last_row).simple_copy()
+        for i in range(env_top.Lx - 3, -1, -1):
+            if dense:
+                env_top ^= (self.row_tag(i + 1), self.row_tag(i + 2))
+            else:
+                env_top.contract_boundary_from_top_(
+                    (i + 1, i + 2), **compress_opts)
             row_envs['above', i] = env_top.select(last_row).simple_copy()
 
         return row_envs
 
-    def compute_col_environments(self, layer_tags=None, **compress_opts):
-        Ly = self._Ly
-        env_left = self.reorder_upward_column(layer_tags=layer_tags)
+    def compute_col_environments(self, dense=False, **compress_opts):
+        layer_tags = compress_opts.get("layer_tags", None)
+        reorder_tags = compress_opts.pop("reorder_tags", layer_tags)
+        env_left = self.reorder_upward_column(layer_tags=reorder_tags)
         env_right = env_left.copy()
         col_envs = dict()
 
-        first_col = env_left.col_tag(0)
-        col_envs["left", 0] = FermionTensorNetwork([])
-        col_envs['left', 1] = env_left.select(first_col).simple_copy()
+        # upwards pass
+        col_envs['left', 0] = FermionTensorNetwork([])
+        first_col = self.col_tag(0)
+        if dense:
+            env_left ^= first_col
         col_envs['mid', 0] = env_left.select(first_col).simple_copy()
+        col_envs['left', 1] = env_left.select(first_col).simple_copy()
 
-        for i in range(2, Ly):
-            left_row = env_left.col_tag(i-1)
-            col_envs["mid", i-1] = env_left.select(left_row).simple_copy()
-            env_left.contract_boundary_from_left((i-2, i-1), layer_tags=layer_tags, inplace=True, **compress_opts)
-            col_envs['left', i] = env_left.select(left_row).simple_copy()
+        for i in range(2, env_left.Ly):
+            left_col = env_left.col_tag(i-1)
+            col_envs["mid", i-1] = env_left.select(left_col).simple_copy()
+            if dense:
+                env_left ^= (self.col_tag(i - 2), self.col_tag(i - 1))
+            else:
+                env_left.contract_boundary_from_left_(
+                    (i - 2, i - 1), **compress_opts)
+            col_envs['left', i] = env_left.select(first_col).simple_copy()
 
-        last_col = env_left.col_tag(Ly-1)
-        col_envs['mid', Ly-1] = env_left.select(last_col).simple_copy()
-
-        col_envs['right', Ly-1] = FermionTensorNetwork([])
-        col_envs['right', Ly-2] = env_right.select(last_col).simple_copy()
-
-        for i in range(Ly-3, -1, -1):
-            env_right.contract_boundary_from_right((i+1, i+2), layer_tags=layer_tags, inplace=True, **compress_opts)
+        last_col = env_left.col_tag(self.Ly-1)
+        col_envs['mid', self.Ly-1] = env_left.select(last_col).simple_copy()
+        # downwards pass
+        col_envs['right', self.Ly - 1] = FermionTensorNetwork([])
+        last_col = self.col_tag(self.Ly - 1)
+        if dense:
+            env_right ^= last_col
+        col_envs['right', self.Ly - 2] = env_right.select(last_col).simple_copy()
+        for i in range(env_right.Ly - 3, -1, -1):
+            if dense:
+                env_right ^= (self.col_tag(i + 1), self.col_tag(i + 2))
+            else:
+                env_right.contract_boundary_from_right_(
+                    (i + 1, i + 2), **compress_opts)
             col_envs['right', i] = env_right.select(last_col).simple_copy()
 
         return col_envs
@@ -400,6 +331,7 @@ class FPEPS(FermionTensorNetwork2D,
             dq = SZ(parity[i][j])
 
             arrays[i][j] = SparseFermionTensor.random(shape, dq=dq, dtype=dtype).to_flat()
+
 
         return cls(arrays, **peps_opts)
 
