@@ -11,6 +11,36 @@ from .tensor_core import tensor_contract as _tensor_contract
 from ..utils import oset, valmap
 from .array_ops import asarray, ndim, transpose
 
+
+def _contract_connected(tsr1, tsr2, out_inds=None):
+    ainds, binds = tsr1.inds, tsr2.inds
+    _output_inds = []
+    ax_a, ax_b = [], []
+    for kia, ia in enumerate(ainds):
+        if ia not in binds:
+            _output_inds.append(ia)
+        else:
+            ax_a.append(kia)
+            ax_b.append(binds.index(ia))
+    for kib, ib in enumerate(binds):
+        if ib not in ainds:
+            _output_inds.append(ib)
+    if out_inds is None: out_inds=_output_inds
+    if set(_output_inds) != set(out_inds):
+        raise TypeError("specified out_inds not allowed in tensordot, \
+                         make sure no summation/Hadamard product appears")
+
+    out = np.tensordot(tsr1.data, tsr2.data, axes=[ax_a, ax_b])
+    if len(out_inds)==0:
+        return out.data[0]
+
+    if out_inds!=_output_inds:
+        transpose_order = tuple([_output_inds.index(ia) for ia in out_inds])
+        out = out.transpose(transpose_order)
+    o_tags = oset.union(*(tsr1.tags, tsr2.tags))
+    out = FermionTensor(out, inds=out_inds, tags=o_tags)
+    return out
+
 def _contract_pairs(fs, tid_or_site1, tid_or_site2, out_inds=None, direction='left'):
     """ Perform pairwise contraction for two tensors in a specified fermion space.
         If the two tensors are not adjacent, move one of the tensors in the given direction.
@@ -47,33 +77,7 @@ def _contract_pairs(fs, tid_or_site1, tid_or_site2, out_inds=None, direction='le
     site2 = site1 + 1
     tsr1 = fs[site1][2]
     tsr2 = fs[site2][2]
-    ainds, binds = tsr1.inds, tsr2.inds
-    _output_inds = []
-    ax_a, ax_b = [], []
-    for kia, ia in enumerate(ainds):
-        if ia not in binds:
-            _output_inds.append(ia)
-        else:
-            ax_a.append(kia)
-            ax_b.append(binds.index(ia))
-    for kib, ib in enumerate(binds):
-        if ib not in ainds:
-            _output_inds.append(ib)
-    if out_inds is None: out_inds=_output_inds
-    if set(_output_inds) != set(out_inds):
-        raise TypeError("specified out_inds not allowed in tensordot, \
-                         make sure no summation/Hadamard product appears")
-
-    out = np.tensordot(tsr1.data, tsr2.data, axes=[ax_a, ax_b])
-    if len(out_inds)==0:
-        return out.data[0]
-
-    if out_inds!=_output_inds:
-        transpose_order = tuple([_output_inds.index(ia) for ia in out_inds])
-        out = out.transpose(transpose_order)
-    o_tags = oset.union(*(tsr1.tags, tsr2.tags))
-    out = FermionTensor(out, inds=out_inds, tags=o_tags)
-    return out
+    return _contract_connected(tsr1, tsr2, out_inds)
 
 def _fetch_fermion_space(*tensors, inplace=True):
     """ Retrieve the FermionSpace and the associated tensor_ids for the tensors.
@@ -210,6 +214,13 @@ def tensor_split(T, left_inds, method='svd', get=None, absorb='both', max_bond=N
 
     return FermionTensorNetwork(tensors, check_collisions=False, virtual=True)
 
+def _compress_connected(Tl, Tr, absorb='both', **compress_opts):
+    left_inds = [ind for ind in Tl.inds if ind not in Tr.inds]
+    right_inds = [ind for ind in Tr.inds if ind not in Tl.inds]
+    out = _contract_connected(Tl, Tr)
+    l, r = out.split(left_inds=left_inds, right_inds=right_inds, absorb=absorb, get="tensors", **compress_opts)
+    return l, r
+
 def tensor_compress_bond(
     T1,
     T2,
@@ -219,31 +230,49 @@ def tensor_compress_bond(
     **compress_opts
 ):
     fs, (tid1, tid2) = _fetch_fermion_space(T1, T2, inplace=inplace)
+    site1, site2 = fs[tid1][1], fs[tid2][1]
+    fs.make_adjacent(tid1, tid2)
+    l, r = _compress_connected(T1, T2, absorb, **compress_opts)
+    T1.modify(data=l.data, inds=l.inds)
+    T2.modify(data=r.data, inds=r.inds)
+    fs.move(tid1, site1)
+    fs.move(tid2, site2)
+    return T1, T2
 
+def _canonize_connected(T1, T2, absorb='right', **split_opts):
+    if absorb == 'both':
+        return _compress_connected(T1, T2, absorb=absorb, **split_opts)
+    if absorb == "left":
+        T1, T2 = T2, T1
+
+    shared_ix, left_env_ix = T1.filter_bonds(T2)
+    if not shared_ix:
+        raise ValueError("The tensors specified don't share an bond.")
+
+    new_T1, tRfact = T1.split(left_env_ix, get='tensors', **split_opts)
+    new_T2 = _contract_connected(tRfact, T2)
+    if absorb == "left":
+        return new_T2, new_T1
+    else:
+        return new_T1, new_T2
+
+def tensor_canonize_bond(T1, T2, absorb='right', **split_opts):
+
+    check_opt('absorb', absorb, ('left', 'both', 'right'))
+
+    if absorb == 'both':
+        return tensor_compress_bond(T1, T2, absorb=absorb, **split_opts)
+
+    fs, (tid1, tid2) = _fetch_fermion_space(T1, T2, inplace=True)
     site1, site2 = fs[tid1][1], fs[tid2][1]
 
-    if site1 < site2:
-        Tl, Tr = T1, T2
-        tidl, tidr = tid1, tid2
-    else:
-        Tl, Tr = T2, T1
-        tidl, tidr = tid2, tid1
-
-    left_inds = [ind for ind in Tl.inds if ind not in Tr.inds]
-    right_inds = [ind for ind in Tr.inds if ind not in Tl.inds]
-
-    out = fs._contract_pairs(tidl, tidr, direction="left")
-    out_tid = out.fermion_owner[2]
-    out_site = fs[out_tid][1]
-
-    l, r = out.split(left_inds=left_inds, right_inds=right_inds, absorb=absorb, get="tensors", **compress_opts)
-    l.modify(tags=Tl.tags)
-    r.modify(tags=Tr.tags)
-    fs.replace_tensor(out_site, l, tid=tidl, virtual=True)
-    fs.insert_tensor(out_site+1, r, tid=tidr, virtual=True)
-    fs.move(tidl, min(site1, site2))
-    fs.move(tidr, max(site2, site1))
-    return l, r
+    fs.make_adjacent(tid1, tid2)
+    l, r = _canonize_connected(T1, T2, absorb, **split_opts)
+    T1.modify(data=l.data, inds=l.inds)
+    T2.modify(data=r.data, inds=r.inds)
+    fs.move(tid1, site1)
+    fs.move(tid2, site2)
+    return T1, T2
 
 class FermionSpace:
     """A labelled, ordered dictionary. The tensor labels point to the tensor
@@ -428,6 +457,22 @@ class FermionSpace:
         axes = [tsr.inds.index(i) for i in shared_inds]
         if len(axes)>0: tsr.data._local_flip(axes)
         self.tensor_order[tid] = (tsr, des_site)
+
+    def move_past(self, tsr, site_range):
+        start, end = site_range
+        iterator = range(start, end)
+        shared_inds = []
+        tid_lst = [self[isite][0] for isite in iterator]
+        parity = 0
+        for itid in tid_lst:
+            itsr, isite = self.tensor_order[itid]
+            parity += itsr.parity
+            shared_inds += list(oset(itsr.inds) & oset(tsr.inds))
+        global_parity = (parity % 2) * tsr.data.parity
+        if global_parity != 0: tsr.data._global_flip()
+        axes = [tsr.inds.index(i) for i in shared_inds]
+        if len(axes)>0: tsr.data._local_flip(axes)
+        return tsr
 
     def make_adjacent(self, tid_or_site1, tid_or_site2, direction='left'):
         """ Move one tensor in the specified direction to make the two adjacent
@@ -855,6 +900,12 @@ class FermionTensorNetwork(TensorNetwork):
         Views the constituent tensors.
         """
         return FermionTensorNetwork((self, other), virtual=True)
+
+    def _reorder_from_tid(self, tid_map, inplace=False):
+        tn = self if inplace else self.copy()
+        for tid, site in tid_map.items():
+            tn.fermion_space.move(tid, site)
+        return tn
 
     def assemble_with_tensor(self, tsr):
         if not is_mergeable(self, tsr):
@@ -1364,11 +1415,23 @@ class FermionTensorNetwork(TensorNetwork):
         **compress_opts
     ):
 
-        Tl = self._pop_tensor_(tid1)
-        Tr = self._pop_tensor_(tid2)
+        Tl = self.tensor_map[tid1]
+        Tr = self.tensor_map[tid2]
+        tensor_compress_bond(Tl, Tr, inplace=True, **compress_opts)
 
-        l, r = tensor_compress_bond(Tl, Tr, inplace=True, **compress_opts)
-        self |= (l, r)
+        if equalize_norms:
+            raise NotImplementedError
+
+    def _canonize_between_tids(
+        self,
+        tid1,
+        tid2,
+        equalize_norms=False,
+        **canonize_opts,
+    ):
+        Tl = self.tensor_map[tid1]
+        Tr = self.tensor_map[tid2]
+        tensor_canonize_bond(Tl, Tr, **canonize_opts)
 
         if equalize_norms:
             raise NotImplementedError

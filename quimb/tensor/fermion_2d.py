@@ -37,12 +37,6 @@ class FermionTensorNetwork2D(FermionTensorNetwork,TensorNetwork2D):
     def flatten(self, fuse_multibonds=True, inplace=False):
         raise NotImplementedError
 
-    def canonize_row(self, i, sweep, yrange=None, **canonize_opts):
-        pass
-
-    def canonize_column(self, j, sweep, xrange=None, **canonize_opts):
-        pass
-
     def compute_row_environments(self, dense=False, **compress_opts):
         layer_tags = compress_opts.get("layer_tags", None)
         reorder_tags = compress_opts.pop("reorder_tags", layer_tags)
@@ -129,11 +123,169 @@ class FermionTensorNetwork2D(FermionTensorNetwork,TensorNetwork2D):
 
         return col_envs
 
-    def _reorder_from_tid(self, tid_map, inplace=False):
-        tn = self if inplace else self.copy()
-        for tid, site in tid_map.items():
-            tn.fermion_space.move(tid, site)
-        return tn
+    def _compute_plaquette_environments_row_first(
+        self,
+        x_bsz,
+        y_bsz,
+        second_dense=None,
+        row_envs=None,
+        **compute_environment_opts
+    ):
+        if second_dense is None:
+            second_dense = x_bsz < 2
+
+        # first we contract from either side to produce column environments
+        if row_envs is None:
+            row_envs = self.compute_row_environments(
+                **compute_environment_opts)
+
+        # next we form vertical strips and contract from both top and bottom
+        #     for each column
+        col_envs = dict()
+        for i in range(self.Lx - x_bsz + 1):
+            #
+            #      ●━━━●━━━●━━━●━━━●━━━●━━━●━━━●━━━●━━━●
+            #     ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲
+            #     o─o─o─o─o─o─o─o─o─o─o─o─o─o─o─o─o─o─o─o     ┬
+            #     | | | | | | | | | | | | | | | | | | | |     ┊ x_bsz
+            #     o─o─o─o─o─o─o─o─o─o─o─o─o─o─o─o─o─o─o─o     ┴
+            #     ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱
+            #      ●━━━●━━━●━━━●━━━●━━━●━━━●━━━●━━━●━━━●
+            #
+            row_i = FermionTensorNetwork((
+                row_envs['below', i],
+                *[row_envs['mid', i+x] for x in range(x_bsz)],
+                row_envs['above', i + x_bsz - 1],
+            ), check_collisions=False).view_as_(FermionTensorNetwork2D, like=self)
+            #
+            #           y_bsz
+            #           <-->               second_dense=True
+            #       ●──      ──●
+            #       │          │            ╭──     ──╮
+            #       ●── .  . ──●            │╭─ . . ─╮│     ┬
+            #       │          │     or     ●         ●     ┊ x_bsz
+            #       ●── .  . ──●            │╰─ . . ─╯│     ┴
+            #       │          │            ╰──     ──╯
+            #       ●──      ──●
+            #     'left'    'right'       'left'    'right'
+            #
+            col_envs[i] = row_i.compute_col_environments(
+                xrange=(max(i - 1, 0), min(i + x_bsz, self.Lx - 1)),
+                dense=second_dense, **compute_environment_opts)
+
+        plaquette_envs = dict()
+        for i0, j0 in product(range(self.Lx - x_bsz + 1),
+                              range(self.Ly - y_bsz + 1)):
+
+            # we want to select bordering tensors from:
+            #
+            #       L──A──A──R    <- A from the row environments
+            #       │  │  │  │
+            #  i0+1 L──●──●──R
+            #       │  │  │  │    <- L, R from the column environments
+            #  i0   L──●──●──R
+            #       │  │  │  │
+            #       L──B──B──R    <- B from the row environments
+            #
+            #         j0  j0+1
+            #
+            env_ij = FermionTensorNetwork((
+                col_envs[i0]['left', j0],
+                *[col_envs[i0]['mid', ix] for ix in range(j0, j0+y_bsz)],
+                col_envs[i0]['right', j0 + y_bsz - 1]
+            ), check_collisions=False)
+
+            ij_tags = (self.site_tag(i0 +ix, j0 + iy) for ix in range(x_bsz) for iy in range(y_bsz))
+            tid_lst = []
+            for ij in ij_tags:
+                tid_lst += list(env_ij._get_tids_from_tags(ij))
+            position = range(len(env_ij.tensor_map)-len(tid_lst), len(env_ij.tensor_map))
+            reorder_map = {i:j for i, j in zip(tid_lst, position)}
+            env_ij._reorder_from_tid(reorder_map, inplace=True)
+            plaquette_envs[(i0, j0), (x_bsz, y_bsz)] = env_ij
+
+        return plaquette_envs
+
+    def _compute_plaquette_environments_col_first(
+        self,
+        x_bsz,
+        y_bsz,
+        second_dense=None,
+        col_envs=None,
+        **compute_environment_opts
+    ):
+        if second_dense is None:
+            second_dense = y_bsz < 2
+
+        # first we contract from either side to produce column environments
+        if col_envs is None:
+            col_envs = self.compute_col_environments(
+                **compute_environment_opts)
+
+        # next we form vertical strips and contract from both top and bottom
+        #     for each column
+        row_envs = dict()
+        for j in range(self.Ly - y_bsz + 1):
+            #
+            #        y_bsz
+            #        <-->
+            #
+            #      ╭─╱o─╱o─╮
+            #     ●──o|─o|──●
+            #     ┃╭─|o─|o─╮┃
+            #     ●──o|─o|──●
+            #     ┃╭─|o─|o─╮┃
+            #     ●──o|─o|──●
+            #     ┃╭─|o─|o─╮┃
+            #     ●──o╱─o╱──●
+            #     ┃╭─|o─|o─╮┃
+            #     ●──o╱─o╱──●
+            #
+            col_j = FermionTensorNetwork((
+                col_envs['left', j],
+                *[col_envs['mid', j+y] for y in range(y_bsz)],
+                col_envs['right', j + y_bsz - 1],
+            ), check_collisions=False).view_as_(FermionTensorNetwork2D, like=self)
+            #
+            #        y_bsz
+            #        <-->        second_dense=True
+            #     ●──●──●──●      ╭──●──╮
+            #     │  │  │  │  or  │ ╱ ╲ │    'above'
+            #        .  .           . .                  ┬
+            #                                            ┊ x_bsz
+            #        .  .           . .                  ┴
+            #     │  │  │  │  or  │ ╲ ╱ │    'below'
+            #     ●──●──●──●      ╰──●──╯
+            #
+            row_envs[j] = col_j.compute_row_environments(
+                yrange=(max(j - 1, 0), min(j + y_bsz, self.Ly - 1)),
+                dense=second_dense, **compute_environment_opts)
+
+        # then range through all the possible plaquettes, selecting the correct
+        # boundary tensors from either the column or row environments
+        plaquette_envs = dict()
+        for i0, j0 in product(range(self.Lx - x_bsz + 1),
+                              range(self.Ly - y_bsz + 1)):
+
+
+            env_ij = FermionTensorNetwork((
+                row_envs[j0]['below', i0],
+                *[row_envs[j0]['mid', ix] for ix in range(i0, i0+x_bsz)],
+                row_envs[j0]['above', i0 + x_bsz - 1]
+            ), check_collisions=False)
+
+            ij_tags = (self.site_tag(i0 +ix, j0 + iy) for ix in range(x_bsz) for iy in range(y_bsz))
+            tid_lst = []
+            for ij in ij_tags:
+                tid_lst += list(env_ij._get_tids_from_tags(ij))
+            position = range(len(env_ij.tensor_map)-len(tid_lst), len(env_ij.tensor_map))
+            reorder_map = {i:j for i, j in zip(tid_lst, position)}
+            env_ij._reorder_from_tid(reorder_map, inplace=True)
+
+            plaquette_envs[(i0, j0), (x_bsz, y_bsz)] = env_ij
+
+        return plaquette_envs
+
 
     def reorder(self, direction="ru", layer_tags=None, inplace=False):
         Lx, Ly = self._Lx, self._Ly
@@ -142,23 +294,28 @@ class FermionTensorNetwork2D(FermionTensorNetwork,TensorNetwork2D):
                     "d": range(Lx)[::-1],
                     "r": range(Ly),
                     "l": range(Ly)[::-1]}
-        if row_wise:
-            iterator = product(iter_dic[direction[0]], iter_dic[direction[1]])
-        else:
-            iterator = product(iter_dic[direction[1]], iter_dic[direction[0]])
+        iterator = product(iter_dic[direction[1]], iter_dic[direction[0]])
         position = 0
         tid_map = dict()
         for i, j in iterator:
             x, y = (i, j) if row_wise else (j, i)
             site_tag = self.site_tag(x, y)
             tid = self._get_tids_from_tags(site_tag)
-            if layer_tags is None or len(tid)==1:
+            if len(tid)==1:
                 tid,  = tid
                 if tid not in tid_map:
                     tid_map[tid] = position
                     position += 1
             else:
-                for tag in layer_tags:
+                if layer_tags is None:
+                    _tags = [self.tensor_map[ix].tags for ix in tid]
+                    _tmp_tags = _tags[0].copy()
+                    for itag in _tags[1:]:
+                        _tmp_tags &= itag
+                    _layer_tags = sorted([list(i-_tmp_tags)[0] for i in _tags])
+                else:
+                    _layer_tags = layer_tags
+                for tag in _layer_tags:
                     tid, = self._get_tids_from_tags((site_tag, tag))
                     if tid not in tid_map:
                         tid_map[tid] = position
