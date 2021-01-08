@@ -68,6 +68,9 @@ from .tensor_gen import (
     NNI_ham_heis,
     ham_1d_mbl,
     NNI_ham_mbl,
+    ham_2d_ising,
+    ham_2d_heis,
+    ham_2d_j1j2,
 )
 from .tensor_1d import (
     TensorNetwork1D,
@@ -111,6 +114,7 @@ from .optimize import (
     TNOptimizer,
 )
 from .tensor_2d import (
+    gen_2d_bonds,
     TensorNetwork2D,
     PEPS,
     PEPO,
@@ -191,6 +195,9 @@ __all__ = (
     "NNI_ham_heis",
     "ham_1d_mbl",
     "NNI_ham_mbl",
+    "ham_2d_ising",
+    "ham_2d_heis",
+    "ham_2d_j1j2",
     "TensorNetwork1D",
     "MatrixProductState",
     "MatrixProductOperator",
@@ -217,6 +224,7 @@ __all__ = (
     "circ_ansatz_1D_rand",
     "circ_qaoa",
     "TNOptimizer",
+    "gen_2d_bonds",
     "TensorNetwork2D",
     "PEPS",
     "PEPO",

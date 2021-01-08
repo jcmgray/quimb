@@ -35,6 +35,62 @@ def nearest_neighbors(coo):
     return ((i - 1, j), (i, j - 1), (i, j + 1), (i + 1, j))
 
 
+def gen_2d_bonds(Lx, Ly, steppers, coo_filter=None):
+    """Convenience function for tiling pairs of bond coordinates on a 2D
+    lattice given a function like ``lambda i, j: (i + 1, j + 1)``.
+
+    Parameters
+    ----------
+    Lx : int
+        The number of rows.
+    Ly : int
+        The number of columns.
+    steppers : callable or sequence of callable
+        Function(s) that take args ``(i, j)`` and generate another coordinate,
+        thus defining a bond.
+    coo_filter : callable
+        Function that takes args ``(i, j)`` and only returns ``True`` if this
+        is to be a valid starting coordinate.
+
+    Yields
+    ------
+    bond : tuple[tuple[int, int], tuple[int, int]]
+        A pair of coordinates.
+
+    Examples
+    --------
+
+    Generate nearest neighbor bonds:
+
+        >>> for bond in gen_2d_bonds(2, 2, [lambda i, j: (i, j + 1),
+        >>>                                 lambda i, j: (i + 1, j)]):
+        >>>     print(bond)
+        ((0, 0), (0, 1))
+        ((0, 0), (1, 0))
+        ((0, 1), (1, 1))
+        ((1, 0), (1, 1))
+
+    Generate next nearest neighbor digonal bonds:
+
+        >>> for bond in gen_2d_bonds(2, 2, [lambda i, j: (i + 1, j + 1),
+        >>>                                 lambda i, j: (i + 1, j - 1)]):
+        >>>     print(bond)
+        ((0, 0), (1, 1))
+        ((0, 1), (1, 0))
+
+    """
+
+    if callable(steppers):
+        steppers = (steppers,)
+
+    for i, j in product(range(Lx), range(Ly)):
+        if (coo_filter is None) or coo_filter(i, j):
+            for stepper in steppers:
+                i2, j2 = stepper(i, j)
+                if (0 <= i2 < Lx) and (0 <= j2 < Ly):
+                    yield (i, j), (i2, j2)
+
+
 class TensorNetwork2D(TensorNetwork):
     r"""Mixin class for tensor networks with a square lattice two-dimensional
     structure, indexed by ``[{row},{column}]`` so that::
@@ -189,59 +245,110 @@ class TensorNetwork2D(TensorNetwork):
     def gen_bond_coos(self):
         """Generate pairs of coordinates for all the bonds in this 2D TN.
         """
-        for i, j in self.gen_site_coos():
-            coo_right = (i, j + 1)
-            if self.valid_coo(coo_right):
-                yield (i, j), coo_right
-            coo_above = (i + 1, j)
-            if self.valid_coo(coo_above):
-                yield (i, j), coo_above
+        return gen_2d_bonds(self.Lx, self.Ly, steppers=[
+            lambda i, j: (i, j + 1),
+            lambda i, j: (i + 1, j)
+        ])
 
     def gen_horizontal_bond_coos(self):
         """Generate all coordinate pairs like ``(i, j), (i, j + 1)``.
         """
-        for i in range(self.Lx):
-            for j in range(self.Ly - 1):
-                yield (i, j), (i, j + 1)
+        return gen_2d_bonds(self.Lx, self.Ly, steppers=[
+            lambda i, j: (i, j + 1),
+        ])
 
     def gen_horizontal_even_bond_coos(self):
         """Generate all coordinate pairs like ``(i, j), (i, j + 1)`` where
         ``j`` is even, which thus don't overlap at all.
         """
-        for i in range(self.Lx):
-            for j in range(0, self.Ly - 1, 2):
-                yield (i, j), (i, j + 1)
+        return gen_2d_bonds(self.Lx, self.Ly, steppers=[
+            lambda i, j: (i, j + 1),
+        ], coo_filter=lambda i, j: j % 2 == 0)
 
     def gen_horizontal_odd_bond_coos(self):
         """Generate all coordinate pairs like ``(i, j), (i, j + 1)`` where
         ``j`` is odd, which thus don't overlap at all.
         """
-        for i in range(self.Lx):
-            for j in range(1, self.Ly - 1, 2):
-                yield (i, j), (i, j + 1)
+        return gen_2d_bonds(self.Lx, self.Ly, steppers=[
+            lambda i, j: (i, j + 1),
+        ], coo_filter=lambda i, j: j % 2 == 1)
 
     def gen_vertical_bond_coos(self):
         """Generate all coordinate pairs like ``(i, j), (i + 1, j)``.
         """
-        for j in range(self.Ly):
-            for i in range(self.Lx - 1):
-                yield (i, j), (i + 1, j)
+        return gen_2d_bonds(self.Lx, self.Ly, steppers=[
+            lambda i, j: (i + 1, j),
+        ])
 
     def gen_vertical_even_bond_coos(self):
         """Generate all coordinate pairs like ``(i, j), (i + 1, j)`` where
         ``i`` is even, which thus don't overlap at all.
         """
-        for j in range(self.Ly):
-            for i in range(0, self.Lx - 1, 2):
-                yield (i, j), (i + 1, j)
+        return gen_2d_bonds(self.Lx, self.Ly, steppers=[
+            lambda i, j: (i + 1, j),
+        ], coo_filter=lambda i, j: i % 2 == 0)
 
     def gen_vertical_odd_bond_coos(self):
         """Generate all coordinate pairs like ``(i, j), (i + 1, j)`` where
         ``i`` is odd, which thus don't overlap at all.
         """
-        for j in range(self.Ly):
-            for i in range(1, self.Lx - 1, 2):
-                yield (i, j), (i + 1, j)
+        return gen_2d_bonds(self.Lx, self.Ly, steppers=[
+            lambda i, j: (i + 1, j),
+        ], coo_filter=lambda i, j: i % 2 == 1)
+
+    def gen_diagonal_left_bond_coos(self):
+        """Generate all coordinate pairs like ``(i, j), (i + 1, j - 1)``.
+        """
+        return gen_2d_bonds(self.Lx, self.Ly, steppers=[
+            lambda i, j: (i + 1, j - 1),
+        ])
+
+    def gen_diagonal_left_even_bond_coos(self):
+        """Generate all coordinate pairs like ``(i, j), (i + 1, j - 1)`` where
+        ``j`` is even, which thus don't overlap at all.
+        """
+        return gen_2d_bonds(self.Lx, self.Ly, steppers=[
+            lambda i, j: (i + 1, j - 1),
+        ], coo_filter=lambda i, j: j % 2 == 0)
+
+    def gen_diagonal_left_odd_bond_coos(self):
+        """Generate all coordinate pairs like ``(i, j), (i + 1, j - 1)`` where
+        ``j`` is odd, which thus don't overlap at all.
+        """
+        return gen_2d_bonds(self.Lx, self.Ly, steppers=[
+            lambda i, j: (i + 1, j - 1),
+        ], coo_filter=lambda i, j: j % 2 == 1)
+
+    def gen_diagonal_right_bond_coos(self):
+        """Generate all coordinate pairs like ``(i, j), (i + 1, j + 1)``.
+        """
+        return gen_2d_bonds(self.Lx, self.Ly, steppers=[
+            lambda i, j: (i + 1, j + 1),
+        ])
+
+    def gen_diagonal_right_even_bond_coos(self):
+        """Generate all coordinate pairs like ``(i, j), (i + 1, j + 1)`` where
+        ``i`` is even, which thus don't overlap at all.
+        """
+        return gen_2d_bonds(self.Lx, self.Ly, steppers=[
+            lambda i, j: (i + 1, j + 1),
+        ], coo_filter=lambda i, j: i % 2 == 0)
+
+    def gen_diagonal_right_odd_bond_coos(self):
+        """Generate all coordinate pairs like ``(i, j), (i + 1, j + 1)`` where
+        ``i`` is odd, which thus don't overlap at all.
+        """
+        return gen_2d_bonds(self.Lx, self.Ly, steppers=[
+            lambda i, j: (i + 1, j + 1),
+        ], coo_filter=lambda i, j: i % 2 == 1)
+
+    def gen_diagonal_bond_coos(self):
+        """Generate all next nearest neighbor diagonal coordinate pairs.
+        """
+        return gen_2d_bonds(self.Lx, self.Ly, steppers=[
+            lambda i, j: (i + 1, j - 1),
+            lambda i, j: (i + 1, j + 1),
+        ])
 
     def valid_coo(self, ij):
         """Test whether ``ij`` is in grid for this 2D TN.
@@ -1706,7 +1813,8 @@ class TensorNetwork2D(TensorNetwork):
         second_dense : None or bool, optional
             Whether to perform the second set of contraction sweeps (in the
             rotated direction from whichever ``first_contract`` is) using
-            a dense tensor or boundary method.
+            a dense tensor or boundary method. By default this is only turned
+            on if the ``bsz`` in the corresponding direction is 1.
         compute_environment_opts
             Supplied to
             :meth:`~quimb.tensor.tensor_2d.TensorNetwork2D.compute_col_environments`

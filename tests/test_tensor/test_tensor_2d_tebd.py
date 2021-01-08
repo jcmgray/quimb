@@ -62,16 +62,7 @@ class TestLocalHam2DConstruct:
     @pytest.mark.parametrize(
         'order', [None, 'sort', 'random', 'smallest_last'])
     def test_ordering(self, Lx, Ly, order):
-        H2 = {None: qu.ham_heis(2)}
-        for i in range(Lx - 1):
-            for j in range(Ly):
-                if j + 1 < Ly:
-                    H2[(i, j), (i + 1, j + 1)] = qu.ham_heis(2, j=0.5)
-                if j - 1 >= 0:
-                    H2[(i, j), (i + 1, j - 1)] = qu.ham_heis(2, j=0.5)
-
-        ham = qtn.LocalHam2D(Lx, Ly, H2=H2)
-
+        ham = qtn.ham_2d_j1j2(Lx, Ly)
         assert (
             len(ham.terms) ==
             2 * Lx * Ly - Lx - Ly + 2 * (Lx - 1) * (Ly - 1)
@@ -94,8 +85,7 @@ class TestSimpleUpdate:
         Ly = 4
         D = 2
 
-        H2 = qu.ham_heis(2)
-        ham = qtn.LocalHam2D(Lx, Ly, H2)
+        ham = qtn.ham_2d_heis(Lx, Ly)
         psi0 = qtn.PEPS.rand(Lx, Ly, D)
 
         def to_backend(x):
@@ -125,9 +115,8 @@ class TestFullUpdate:
         Ly = 4
         D = 2
 
-        H2 = qu.ham_heis(2)
-        ham = qtn.LocalHam2D(Lx, Ly, H2)
         psi0 = qtn.PEPS.rand(Lx, Ly, D)
+        ham = qtn.ham_2d_heis(Lx, Ly)
 
         def to_backend(x):
             import autoray

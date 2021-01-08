@@ -14,6 +14,7 @@ from .drawing import get_colors
 from .tensor_core import Tensor, contract_strategy
 from .optimize import TNOptimizer
 from .tensor_2d import (
+    gen_2d_bonds,
     calc_plaquette_sizes,
     calc_plaquette_map,
     plaquette_to_sites,
@@ -99,13 +100,11 @@ class LocalHam2D:
         # possibly fill in default gates
         default_H2 = self.terms.pop(None, None)
         if default_H2 is not None:
-            for i, j in product(range(self.Lx), range(self.Ly)):
-                if i + 1 < self.Lx:
-                    where = ((i, j), (i + 1, j))
-                    self.terms.setdefault(where, default_H2)
-                if j + 1 < self.Ly:
-                    where = ((i, j), (i, j + 1))
-                    self.terms.setdefault(where, default_H2)
+            for where in gen_2d_bonds(Lx, Ly, steppers=[
+                lambda i, j: (i, j + 1),
+                lambda i, j: (i + 1, j),
+            ]):
+                self.terms.setdefault(where, default_H2)
 
         # make a directory of which single sites are covered by which terms
         #     - to merge them into later
