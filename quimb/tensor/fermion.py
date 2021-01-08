@@ -687,6 +687,18 @@ class FermionTensor(Tensor):
     def parity(self):
         return self.data.parity
 
+    def ind_size(self, dim_or_ind):
+        if isinstance(dim_or_ind, str):
+            if dim_or_ind not in self.inds:
+                raise ValueError("%s indice not found in the tensor"%dim_or_ind)
+            dim_or_ind = self.inds.index(dim_or_ind)
+
+        from pyblock3.algebra.symmetry import SZ, BondInfo
+        sz = [SZ.from_flat(ix) for ix in self.data.q_labels[:,dim_or_ind]]
+        sp = self.data.shapes[:,dim_or_ind]
+        bond_dict = dict(zip(sz, sp))
+        return BondInfo(bond_dict)
+
     def copy(self, deep=False):
         """Copy this tensor. Note by default (``deep=False``), the underlying
         array will *not* be copied. The fermion owner will to reset to None
@@ -780,12 +792,6 @@ class FermionTensor(Tensor):
         tsr.modify(data=data, inds=inds)
 
         return tsr
-
-    def ind_size(self, ind):
-        size = 0
-        for blkshape in self.shapes:
-            size += blkshape[self.inds.index(ind)]
-        return size
 
     def fuse(self, fuse_map, inplace=False):
         raise NotImplementedError
