@@ -218,8 +218,16 @@ def tensor_split(T, left_inds, method='svd', get=None, absorb='both', max_bond=N
 def _compress_connected(Tl, Tr, absorb='both', **compress_opts):
     left_inds = [ind for ind in Tl.inds if ind not in Tr.inds]
     right_inds = [ind for ind in Tr.inds if ind not in Tl.inds]
-    out = _contract_connected(Tl, Tr)
-    l, r = out.split(left_inds=left_inds, right_inds=right_inds, absorb=absorb, get="tensors", **compress_opts)
+    if Tl.get_fermion_info()[1] < Tr.get_fermion_info()[1]:
+        out = _contract_connected(Tl, Tr)
+        l, r = out.split(left_inds=left_inds, right_inds=right_inds, absorb=absorb, get="tensors", **compress_opts)
+    else:
+        out = _contract_connected(Tr, Tl)
+        if absorb == "left":
+            absorb = "right"
+        elif absorb == "right":
+            absorb = "left"
+        r, l = out.split(left_inds=right_inds, right_inds=left_inds, absorb=absorb, get="tensors", **compress_opts)
     return l, r
 
 def tensor_compress_bond(
@@ -250,15 +258,19 @@ def _canonize_connected(T1, T2, absorb='right', **split_opts):
     if not shared_ix:
         raise ValueError("The tensors specified don't share an bond.")
 
-    new_T1, tRfact = T1.split(left_env_ix, get='tensors', **split_opts)
-    new_T2 = _contract_connected(tRfact, T2)
+    if T1.get_fermion_info()[1] < T2.get_fermion_info()[1]:
+        new_T1, tRfact = T1.split(left_env_ix, get='tensors', **split_opts)
+        new_T2 = _contract_connected(tRfact, T2)
+    else:
+        tRfact, new_T1 = T1.split(shared_ix, get='tensors', **split_opts)
+        new_T2 = _contract_connected(T2, tRfact)
+
     if absorb == "left":
         return new_T2, new_T1
     else:
         return new_T1, new_T2
 
 def tensor_canonize_bond(T1, T2, absorb='right', **split_opts):
-
     check_opt('absorb', absorb, ('left', 'both', 'right'))
 
     if absorb == 'both':
