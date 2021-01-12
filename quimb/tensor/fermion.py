@@ -3,7 +3,6 @@ import weakref
 import functools
 from .tensor_core import (Tensor, TensorNetwork,
                           rand_uuid, tags_to_oset,
-                          tensor_split,
                           _parse_split_opts,
                           check_opt,
                           _VALID_SPLIT_GET)
@@ -195,9 +194,11 @@ def tensor_split(T, left_inds, method='svd', get=None, absorb='both', max_bond=N
     rtags = T.tags | tags_to_oset(rtags)
     if bond_ind is None:
         if absorb is None:
-            bond_ind = (rand_uuid(), rand_uuid())
+            bond_ind = (rand_uuid(),) * 2
         else:
             bond_ind = (rand_uuid(),)
+    elif isinstance(bond_ind, str):
+        bond_ind = (bond_ind,) * 2
 
     Tl = FermionTensor(data=left, inds=(*left_inds, bond_ind[0]), tags=ltags)
     Tr = FermionTensor(data=right, inds=(bond_ind[-1], *right_inds), tags=rtags)
@@ -538,6 +539,7 @@ class FermionSpace:
             ABCDEF, (3, False) -> ABC-EF
         """
         tid, site, tsr = self[tid_or_site]
+        tsr.remove_fermion_owner()
         del self.tensor_order[tid]
         if inplace:
             indent_sites = []
@@ -709,6 +711,35 @@ class FermionTensor(Tensor):
         else:
             t = self.__class__(self, None)
         return t
+
+    def multiply_index_diagonal(self, ind, x, inplace=False, location="front"):
+        """Multiply this tensor by 1D array ``x`` as if it were a diagonal
+        tensor being contracted into index ``ind``.
+        """
+        if location not in ["front", "back"]:
+            raise ValueError("invalid for the location of the diagonal")
+        t = self if inplace else self.copy()
+        ax = t.inds.index(ind)
+        if isinstance(x, FermionTensor):
+            x = x.data
+        if location=="front":
+            out = np.tensordot(x, t.data, axes=((1,), (ax,)))
+            transpose_order = list(range(1, ax+1)) + [0] + list(range(ax+1, t.ndim))
+        else:
+            out = np.tensordot(t.data, x, axes=((ax,),(0,)))
+            transpose_order = list(range(ax)) + [t.ndim-1] + list(range(ax, t.ndim-1))
+        data = np.transpose(out, transpose_order)
+        t.modify(data=data)
+        return t
+
+    multiply_index_diagonal_ = functools.partialmethod(
+        multiply_index_diagonal, inplace=True)
+
+    def get_fermion_info(self):
+        if self.fermion_owner is None:
+            return None
+        fs, tid = self.fermion_owner[1:]
+        return (tid, fs().tensor_order[tid][1])
 
     def contract(self, *others, output_inds=None, **opts):
         return tensor_contract(self, *others, output_inds=output_inds, **opts)
