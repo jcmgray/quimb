@@ -169,7 +169,7 @@ def tensor_contract(*tensors, output_inds=None, direction="left", inplace=False)
             raise TypeError("specified out_inds not allow in tensordot, \
                          make sure not summation/Hadamard product appears")
         if output_inds!=_output_inds:
-            out = out.transpose(output_inds, inplace=True)
+            out = out.transpose(*output_inds, inplace=True)
     return out
 
 def tensor_split(T, left_inds, method='svd', get=None, absorb='both', max_bond=None, cutoff=1e-10,
