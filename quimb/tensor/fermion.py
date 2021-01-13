@@ -28,8 +28,17 @@ def _contract_connected(tsr1, tsr2, out_inds=None):
     if set(_output_inds) != set(out_inds):
         raise TypeError("specified out_inds not allowed in tensordot, \
                          make sure no summation/Hadamard product appears")
+    info1 = tsr1.get_fermion_info()
+    info2 = tsr2.get_fermion_info()
+    reverse_contract = False
 
-    out = np.tensordot(tsr1.data, tsr2.data, axes=[ax_a, ax_b])
+    if info1 is not None and info2 is not None:
+        if info1[1] > info2[1]:
+            reverse_contract=True
+    if reverse_contract:
+        out = np.tensordot(tsr2.data, tsr1.data, axes=[ax_b, ax_a])
+    else:
+        out = np.tensordot(tsr1.data, tsr2.data, axes=[ax_a, ax_b])
     if len(out_inds)==0:
         return out.data[0]
 
@@ -417,6 +426,14 @@ class FermionSpace:
             raise KeyError("site:%s not occupied"%site)
         idx = self.sites.index(site)
         return list(self.tensor_order.keys())[idx]
+
+    def _reorder_from_dict(self, tid_map):
+        tid_lst = list(tid_map.keys())
+        des_sites = list(tid_map.values())
+        work_des_sites = sorted(des_sites)[::-1]
+        for isite in work_des_sites:
+            ind = des_sites.index(isite)
+            self.move(tid_lst[ind], isite)
 
     def is_adjacent(self, tid_or_site1, tid_or_site2):
         """ Check whether two tensors are adjacently placed in the space
@@ -823,6 +840,8 @@ class FermionTensor(Tensor):
         t.modify(apply=lambda x: np.transpose(x, out_shape), inds=output_inds)
         return t
 
+    transpose_ = functools.partialmethod(transpose, inplace=True)
+
     @property
     def H(self):
         """Return the ket of this tensor, this is different from Fermionic transposition
@@ -952,8 +971,7 @@ class FermionTensorNetwork(TensorNetwork):
 
     def _reorder_from_tid(self, tid_map, inplace=False):
         tn = self if inplace else self.copy()
-        for tid, site in tid_map.items():
-            tn.fermion_space.move(tid, site)
+        tn.fermion_space._reorder_from_dict(tid_map)
         return tn
 
     def assemble_with_tensor(self, tsr):
