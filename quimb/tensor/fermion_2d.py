@@ -1,14 +1,267 @@
-from .fermion import FermionTensorNetwork, FermionTensor
-from .tensor_2d import TensorNetwork2D, TensorNetwork2DVector, PEPS
+from .fermion import (
+    FermionTensorNetwork,
+    FermionTensor,
+    tensor_contract
+)
+from .tensor_2d import (
+    TensorNetwork2D,
+    TensorNetwork2DVector,
+    PEPS,
+    is_lone_coo,
+    gen_long_range_path)
 from .tensor_core import (
     rand_uuid,
     oset,
-    tags_to_oset
+    tags_to_oset,
+    bonds
 )
+from ..utils import check_opt, pairwise
 from collections import defaultdict
 from itertools import product
 import numpy as np
+import functools
+from pyblock3.algebra.fermion import FlatFermionTensor
 
+INVERSE_CUTOFF = 1e-10
+
+def gate_string_split_(TG, where, string, original_ts, bonds_along,
+                       reindex_map, site_ix, info, **compress_opts):
+    # by default this means singuvalues are kept in the string 'blob' tensor
+    compress_opts.setdefault('absorb', 'right')
+    loc_info = dict([t.get_fermion_info() for t in original_ts])
+    # the outer, neighboring indices of each tensor in the string
+    neighb_inds = []
+
+    # tensors we are going to contract in the blob, reindex some to attach gate
+    contract_ts = []
+    fermion_info = []
+
+    for t, coo in zip(original_ts, string):
+        neighb_inds.append(tuple(ix for ix in t.inds if ix not in bonds_along))
+        contract_ts.append(t.reindex_(reindex_map) if coo in where else t)
+        fermion_info.append(t.get_fermion_info())
+
+    blob = tensor_contract(*contract_ts, TG, inplace=True)
+    regauged = []
+    work_site = blob.get_fermion_info()[1]
+    fs = blob.fermion_owner[1]()
+
+    # one by one extract the site tensors again from each end
+    inner_ts = [None] * len(string)
+    i = 0
+    j = len(string) - 1
+
+    while True:
+        lix = neighb_inds[i]
+        if i > 0:
+            lix += (bonds_along[i - 1],)
+
+        # the original bond we are restoring
+        bix = bonds_along[i]
+
+        # split the blob!
+        inner_ts[i], *maybe_svals, blob = blob.split(
+            left_inds=lix, get='tensors', bond_ind=bix, **compress_opts)
+
+        # if singular values are returned (``absorb=None``) check if we should
+        #     return them via ``info``, e.g. for ``SimpleUpdate`
+
+        if maybe_svals and info is not None:
+            s = next(iter(maybe_svals)).data
+            #coo_pair = tuple(sorted((string[i], string[i + 1])))
+            coo_pair = (string[i], string[i+1])
+            info['singular_values', coo_pair] = s
+
+            # regauge the blob but record so as to unguage later
+            if i != j - 1:
+                blob.multiply_index_diagonal_(bix, s, location="front")
+                regauged.append((i + 1, bix, "front", s))
+
+        # move inwards along string, terminate if two ends meet
+        i += 1
+        if i == j:
+            inner_ts[i] = blob
+            break
+
+        # extract at end of string
+        lix = neighb_inds[j]
+        if j < len(string) - 1:
+            lix += (bonds_along[j],)
+
+        # the original bond we are restoring
+        bix = bonds_along[j - 1]
+
+        # split the blob!
+        lix = tuple(oset(blob.inds)-oset(lix))
+        blob, *maybe_svals, inner_ts[j] = blob.split(
+            left_inds=lix, get='tensors', bond_ind=bix, **compress_opts)
+
+        # if singular values are returned (``absorb=None``) check if we should
+        #     return them via ``info``, e.g. for ``SimpleUpdate`
+        if maybe_svals and info is not None:
+            s = next(iter(maybe_svals)).data
+            coo_pair = (string[j-1], string[j])
+            info['singular_values', coo_pair] = s
+
+            # regauge the blob but record so as to ungauge later
+            if j != i + 1:
+                blob.multiply_index_diagonal_(bix, s, location="back")
+                regauged.append((j - 1, bix, "back", s))
+
+        # move inwards along string, terminate if two ends meet
+        j -= 1
+        if j == i:
+            inner_ts[j] = blob
+            break
+    # SVD funcs needs to be modify and make sure S has even parity
+    for i, bix, location, s in regauged:
+        idx = np.where(abs(s.data)>INVERSE_CUTOFF)[0]
+        snew = np.zeros_like(s.data)
+        snew[idx] = 1/s.data[idx]
+        snew = FlatFermionTensor(s.q_labels, s.shapes, snew, idxs=s.idxs)
+        t = inner_ts[i]
+        t.multiply_index_diagonal_(bix, snew, location=location)
+
+    for to, tn in zip(original_ts, inner_ts):
+        x1 = tn.inds
+        tn.transpose_like_(to)
+        to.modify(data=tn.data)
+
+    for i, (tid, _) in enumerate(fermion_info):
+        if i==0:
+            fs.replace_tensor(work_site, original_ts[i], tid=tid, virtual=True)
+        else:
+            fs.insert_tensor(work_site+i, original_ts[i], tid=tid, virtual=True)
+
+    fs._reorder_from_dict(dict(fermion_info))
+
+def gate_string_reduce_split_(TG, where, string, original_ts, bonds_along,
+                       reindex_map, site_ix, info, **compress_opts):
+    compress_opts.setdefault('absorb', 'right')
+
+    # indices to reduce, first and final include physical indices for gate
+    inds_to_reduce = [(bonds_along[0], site_ix[0])]
+    for b1, b2 in pairwise(bonds_along):
+        inds_to_reduce.append((b1, b2))
+    inds_to_reduce.append((bonds_along[-1], site_ix[-1]))
+
+    # tensors that remain on the string sites and those pulled into string
+    outer_ts, inner_ts = [], []
+    fermion_info = []
+    fs = TG.fermion_owner[1]()
+    tid_lst = []
+    for coo, rix, t in zip(string, inds_to_reduce, original_ts):
+        tq, tr = t.split(left_inds=None, right_inds=rix,
+                         method='svd', get='tensors', absorb="right")
+        fermion_info.append(t.get_fermion_info())
+        outer_ts.append(tq)
+        inner_ts.append(tr.reindex_(reindex_map) if coo in where else tr)
+
+    for tq, tr, t in zip(outer_ts, inner_ts, original_ts):
+        isite = t.get_fermion_info()[1]
+        fs.replace_tensor(isite, tq, virtual=True)
+        fs.insert_tensor(isite+1, tr, virtual=True)
+
+    blob = tensor_contract(*inner_ts, TG, inplace=True)
+    work_site = blob.get_fermion_info()[1]
+    regauged = []
+
+    # extract the new reduced tensors sequentially from each end
+    i = 0
+    j = len(string) - 1
+
+    while True:
+
+        # extract at beginning of string
+        lix = bonds(blob, outer_ts[i])
+        if i == 0:
+            lix.add(site_ix[0])
+        else:
+            lix.add(bonds_along[i - 1])
+
+        # the original bond we are restoring
+        bix = bonds_along[i]
+
+        # split the blob!
+        inner_ts[i], *maybe_svals, blob = blob.split(
+            left_inds=lix, get='tensors', bond_ind=bix, **compress_opts)
+
+        # if singular values are returned (``absorb=None``) check if we should
+        #     return them via ``info``, e.g. for ``SimpleUpdate`
+        if maybe_svals and info is not None:
+            s = next(iter(maybe_svals)).data
+            coo_pair = (string[i], string[i + 1])
+            info['singular_values', coo_pair] = s
+
+            # regauge the blob but record so as to unguage later
+            if i != j - 1:
+                blob.multiply_index_diagonal_(bix, s, location="front")
+                regauged.append((i + 1, bix, "front", s))
+
+        # move inwards along string, terminate if two ends meet
+        i += 1
+        if i == j:
+            inner_ts[i] = blob
+            break
+
+        # extract at end of string
+        lix = bonds(blob, outer_ts[j])
+        if j == len(string) - 1:
+            lix.add(site_ix[-1])
+        else:
+            lix.add(bonds_along[j])
+
+        # the original bond we are restoring
+        bix = bonds_along[j - 1]
+
+        # split the blob!
+        lix = tuple(oset(blob.inds)-oset(lix))
+        blob, *maybe_svals, inner_ts[j] = blob.split(
+            left_inds=lix, get='tensors', bond_ind=bix, **compress_opts)
+
+        # if singular values are returned (``absorb=None``) check if we should
+        #     return them via ``info``, e.g. for ``SimpleUpdate`
+        if maybe_svals and info is not None:
+            s = next(iter(maybe_svals)).data
+            coo_pair = (string[j - 1], string[j])
+            info['singular_values', coo_pair] = s
+
+            # regauge the blob but record so as to unguage later
+            if j != i + 1:
+                blob.multiply_index_diagonal_(bix, s, location="back")
+                regauged.append((j - 1, bix, "back", s))
+
+        # move inwards along string, terminate if two ends meet
+        j -= 1
+        if j == i:
+            inner_ts[j] = blob
+            break
+
+    for i, (tid, _) in enumerate(fermion_info):
+        if i==0:
+            fs.replace_tensor(work_site, inner_ts[i], tid=tid, virtual=True)
+        else:
+            fs.insert_tensor(work_site+i, inner_ts[i], tid=tid, virtual=True)
+
+    new_ts = [
+        tensor_contract(ts, tr, output_inds=to.inds, inplace=True)
+        for to, ts, tr in zip(original_ts, outer_ts, inner_ts)
+    ]
+
+    for i, bix, location, s in regauged:
+        idx = np.where(abs(s.data)>INVERSE_CUTOFF)[0]
+        snew = np.zeros_like(s.data)
+        snew[idx] = 1/s.data[idx]
+        snew = FlatFermionTensor(s.q_labels, s.shapes, snew, idxs=s.idxs)
+        t = new_ts[i]
+        t.multiply_index_diagonal_(bix, snew, location=location)
+
+    for (tid, _), to, t in zip(fermion_info, original_ts, new_ts):
+        site = t.get_fermion_info()[1]
+        to.modify(data=t.data)
+        fs.replace_tensor(site, to, tid=tid, virtual=True)
+
+    fs._reorder_from_dict(dict(fermion_info))
 
 class FermionTensorNetwork2D(FermionTensorNetwork,TensorNetwork2D):
 
@@ -496,10 +749,18 @@ class FPEPS(FermionTensorNetwork2D,
         return cls(arrays, **peps_opts)
 
 
-class FermionTensorNetwork2DVector(TensorNetwork2DVector,
-                                   FermionTensorNetwork2D,
-                                   FermionTensorNetwork):
+class FermionTensorNetwork2DVector(FermionTensorNetwork2D,
+                                   FermionTensorNetwork,
+                                   TensorNetwork2DVector):
 
+    _EXTRA_PROPS = (
+        '_site_tag_id',
+        '_row_tag_id',
+        '_col_tag_id',
+        '_Lx',
+        '_Ly',
+        '_site_ind_id',
+    )
 
     def to_dense(self, *inds_seq, **contract_opts):
         raise NotImplementedError
@@ -543,6 +804,8 @@ class FermionTensorNetwork2DVector(TensorNetwork2DVector,
         tags=None,
         inplace=False,
         info=None,
+        long_range_use_swaps=False,
+        long_range_path_sequence=None,
         **compress_opts
     ):
         check_opt("contract", contract, (False, True, 'split', 'reduce-split'))
@@ -555,7 +818,6 @@ class FermionTensorNetwork2DVector(TensorNetwork2DVector,
             where = tuple(where)
         ng = len(where)
 
-        dp = psi.phys_dim(*where[0])
         tags = tags_to_oset(tags)
 
         # allow a matrix to be reshaped into a tensor if it factorizes
@@ -566,7 +828,7 @@ class FermionTensorNetwork2DVector(TensorNetwork2DVector,
         bnds = [rand_uuid() for _ in range(ng)]
         reindex_map = dict(zip(site_ix, bnds))
 
-        TG = Tensor(G, inds=site_ix + bnds, tags=tags, left_inds=bnds)
+        TG = FermionTensor(G, inds=bnds + site_ix, tags=tags, left_inds=bnds) # [bnds first, then site_ix]
 
         if contract is False:
             #
@@ -587,23 +849,47 @@ class FermionTensorNetwork2DVector(TensorNetwork2DVector,
             #      ╱   ╱
             #
             psi.reindex_(reindex_map)
+            input_tid, = psi._get_tids_from_inds(bnds, which='any')
+            isite = psi.tensor_map[input_tid].get_fermion_info()[1]
+
+            #psi |= TG
+            psi.fermion_space.add_tensor(TG, virtual=True)
 
             # get the sites that used to have the physical indices
             site_tids = psi._get_tids_from_inds(bnds, which='any')
 
             # pop the sites, contract, then re-add
-            pts = [psi._pop_tensor(tid) for tid in site_tids]
-            psi |= tensor_contract(*pts, TG)
-
+            pts = [psi._pop_tensor_(tid) for tid in site_tids]
+            out = tensor_contract(*pts, TG, inplace=True)
+            psi.fermion_space.move(out.get_fermion_info()[0], isite)
+            psi |= out
             return psi
 
         # following are all based on splitting tensors to maintain structure
         ij_a, ij_b = where
 
-        long_range_path_sequence = None
-        manual_lr_path = False
+        # parse the argument specifying how to find the path between
+        # non-nearest neighbours
+        if long_range_path_sequence is not None:
+            # make sure we can index
+            long_range_path_sequence = tuple(long_range_path_sequence)
+            # if the first element is a str specifying move sequence, e.g.
+            #     ('v', 'h')
+            #     ('av', 'bv', 'ah', 'bh')  # using swaps
+            manual_lr_path = not isinstance(long_range_path_sequence[0], str)
+            # otherwise assume a path has been manually specified, e.g.
+            #     ((1, 2), (2, 2), (2, 3), ... )
+            #     (((1, 1), (1, 2)), ((4, 3), (3, 3)), ...)  # using swaps
+        else:
+            manual_lr_path = False
+
+        psi.fermion_space.add_tensor(TG, virtual=True)
+        # check if we are not nearest neighbour and need to swap first
+        if long_range_use_swaps:
+            raise NotImplementedError
+
         string = tuple(gen_long_range_path(
-            *where, sequence=long_range_path_sequence))
+                 *where, sequence=long_range_path_sequence))
 
         # the tensors along this string, which will be updated
         original_ts = [psi[coo] for coo in string]
@@ -634,9 +920,9 @@ class FermionTensorNetwork2DVector(TensorNetwork2DVector,
             gate_string_reduce_split_(
                 TG, where, string, original_ts, bonds_along,
                 reindex_map, site_ix, info, **compress_opts)
-
         return psi
 
+    gate_ = functools.partialmethod(gate, inplace=True)
 
     def compute_norm(
         self,
