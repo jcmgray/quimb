@@ -392,7 +392,7 @@ class FermionSpace:
 
         T.set_fermion_owner(self, tid)
         atsr.remove_fermion_owner()
-        del atsr
+        del self.tensor_order[atid]
         self.tensor_order[tid] = (T, site)
 
     def insert_tensor(self, site, tsr, tid=None, virtual=False):
