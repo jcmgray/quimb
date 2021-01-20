@@ -60,7 +60,9 @@ def gate_string_split_(TG, where, string, original_ts, bonds_along,
         bix = bonds_along[i]
 
         # split the blob!
-        inner_ts[i], *maybe_svals, blob = blob.split(
+
+        lix = tuple(oset(blob.inds)-oset(lix))
+        blob, *maybe_svals, inner_ts[i] = blob.split(
             left_inds=lix, get='tensors', bond_ind=bix, **compress_opts)
 
         # if singular values are returned (``absorb=None``) check if we should
@@ -74,8 +76,8 @@ def gate_string_split_(TG, where, string, original_ts, bonds_along,
 
             # regauge the blob but record so as to unguage later
             if i != j - 1:
-                blob.multiply_index_diagonal_(bix, s, location="front")
-                regauged.append((i + 1, bix, "front", s))
+                blob.multiply_index_diagonal_(bix, s, location="back")
+                regauged.append((i + 1, bix, "back", s))
 
         # move inwards along string, terminate if two ends meet
         i += 1
@@ -92,8 +94,7 @@ def gate_string_split_(TG, where, string, original_ts, bonds_along,
         bix = bonds_along[j - 1]
 
         # split the blob!
-        lix = tuple(oset(blob.inds)-oset(lix))
-        blob, *maybe_svals, inner_ts[j] = blob.split(
+        inner_ts[j], *maybe_svals, blob= blob.split(
             left_inds=lix, get='tensors', bond_ind=bix, **compress_opts)
 
         # if singular values are returned (``absorb=None``) check if we should
@@ -105,8 +106,8 @@ def gate_string_split_(TG, where, string, original_ts, bonds_along,
 
             # regauge the blob but record so as to ungauge later
             if j != i + 1:
-                blob.multiply_index_diagonal_(bix, s, location="back")
-                regauged.append((j - 1, bix, "back", s))
+                blob.multiply_index_diagonal_(bix, s, location="front")
+                regauged.append((j - 1, bix, "front", s))
 
         # move inwards along string, terminate if two ends meet
         j -= 1
@@ -123,9 +124,8 @@ def gate_string_split_(TG, where, string, original_ts, bonds_along,
         t.multiply_index_diagonal_(bix, snew, location=location)
 
     for to, tn in zip(original_ts, inner_ts):
-        x1 = tn.inds
         tn.transpose_like_(to)
-        to.modify(data=tn.data)
+        to.modify(data=tn.data, inds=tn.inds)
 
     for i, (tid, _) in enumerate(fermion_info):
         if i==0:
@@ -159,8 +159,8 @@ def gate_string_reduce_split_(TG, where, string, original_ts, bonds_along,
 
     for tq, tr, t in zip(outer_ts, inner_ts, original_ts):
         isite = t.get_fermion_info()[1]
-        fs.replace_tensor(isite, tq, virtual=True)
-        fs.insert_tensor(isite+1, tr, virtual=True)
+        fs.replace_tensor(isite, tr, virtual=True)
+        fs.insert_tensor(isite+1, tq, virtual=True)
 
     blob = tensor_contract(*inner_ts, TG, inplace=True)
     work_site = blob.get_fermion_info()[1]
@@ -183,7 +183,8 @@ def gate_string_reduce_split_(TG, where, string, original_ts, bonds_along,
         bix = bonds_along[i]
 
         # split the blob!
-        inner_ts[i], *maybe_svals, blob = blob.split(
+        lix = tuple(oset(blob.inds)-oset(lix))
+        blob, *maybe_svals, inner_ts[i] = blob.split(
             left_inds=lix, get='tensors', bond_ind=bix, **compress_opts)
 
         # if singular values are returned (``absorb=None``) check if we should
@@ -195,8 +196,8 @@ def gate_string_reduce_split_(TG, where, string, original_ts, bonds_along,
 
             # regauge the blob but record so as to unguage later
             if i != j - 1:
-                blob.multiply_index_diagonal_(bix, s, location="front")
-                regauged.append((i + 1, bix, "front", s))
+                blob.multiply_index_diagonal_(bix, s, location="back")
+                regauged.append((i + 1, bix, "back", s))
 
         # move inwards along string, terminate if two ends meet
         i += 1
@@ -215,10 +216,8 @@ def gate_string_reduce_split_(TG, where, string, original_ts, bonds_along,
         bix = bonds_along[j - 1]
 
         # split the blob!
-        lix = tuple(oset(blob.inds)-oset(lix))
-        blob, *maybe_svals, inner_ts[j] = blob.split(
+        inner_ts[j], *maybe_svals, blob = blob.split(
             left_inds=lix, get='tensors', bond_ind=bix, **compress_opts)
-
         # if singular values are returned (``absorb=None``) check if we should
         #     return them via ``info``, e.g. for ``SimpleUpdate`
         if maybe_svals and info is not None:
@@ -228,8 +227,8 @@ def gate_string_reduce_split_(TG, where, string, original_ts, bonds_along,
 
             # regauge the blob but record so as to unguage later
             if j != i + 1:
-                blob.multiply_index_diagonal_(bix, s, location="back")
-                regauged.append((j - 1, bix, "back", s))
+                blob.multiply_index_diagonal_(bix, s, location="front")
+                regauged.append((j - 1, bix, "front", s))
 
         # move inwards along string, terminate if two ends meet
         j -= 1
@@ -828,7 +827,7 @@ class FermionTensorNetwork2DVector(FermionTensorNetwork2D,
         bnds = [rand_uuid() for _ in range(ng)]
         reindex_map = dict(zip(site_ix, bnds))
 
-        TG = FermionTensor(G, inds=bnds + site_ix, tags=tags, left_inds=bnds) # [bnds first, then site_ix]
+        TG = FermionTensor(G.copy(), inds=site_ix+bnds, tags=tags, left_inds=site_ix) # [bnds first, then site_ix]
 
         if contract is False:
             #
@@ -957,3 +956,47 @@ class FermionTensorNetwork2DVector(FermionTensorNetwork2D,
         **boundary_contract_opts,
     ):
         raise NotImplementedError
+
+def _gen_site_wfn_tsr(state, ndim=2, ax=0):
+    from pyblock3.algebra.core import SubTensor
+    from pyblock3.algebra.fermion import SparseFermionTensor
+    from pyblock3.algebra.symmetry import SZ
+    state_map = {0:(0,0), 1:(1,0), 2:(1,1), 3:(0,1)}
+    if state not in state_map:
+        raise KeyError("requested state not recoginized")
+    q_lab, ind = state_map[state]
+    q_label = [SZ(0),] * ax + [SZ(q_lab),] + [SZ(0),] *(ndim-ax-1)
+    shape = [1,] * ax + [2,] + [1,] *(ndim-ax-1)
+    dat = np.zeros([2])
+    dat.put(ind, 1)
+    dat = dat.reshape(shape)
+    blocks = [SubTensor(reduced=dat, q_labels=q_label)]
+    smat = SparseFermionTensor(blocks=blocks).to_flat()
+    return smat
+
+def gen_mf_peps(state_array, shape='urdlp', **kwargs):
+    Lx, Ly = state_array.shape
+    arr = state_array.astype("int")
+    cache = dict()
+    def _gen_ij(i, j):
+        state = arr[i, j]
+        array_order = shape
+        if i == Lx - 1:
+            array_order = array_order.replace('u', '')
+        if j == Ly - 1:
+            array_order = array_order.replace('r', '')
+        if i == 0:
+            array_order = array_order.replace('d', '')
+        if j == 0:
+            array_order = array_order.replace('l', '')
+
+        ndim = len(array_order)
+        ax = array_order.index('p')
+        key = (state, ndim, ax)
+        if key not in cache:
+            cache[key] = _gen_site_wfn_tsr(state, ndim, ax).copy()
+        return cache[key]
+
+    tsr_array = [[_gen_ij(i,j) for j in range(Ly)] for i in range(Lx)]
+
+    return FPEPS(tsr_array, shape=shape, **kwargs)

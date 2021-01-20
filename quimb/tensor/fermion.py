@@ -12,7 +12,13 @@ from .array_ops import asarray, ndim, transpose
 
 
 def _contract_connected(tsr1, tsr2, out_inds=None):
-    ainds, binds = tsr1.inds, tsr2.inds
+    info1 = tsr1.get_fermion_info()
+    info2 = tsr2.get_fermion_info()
+    t1, t2 = tsr1, tsr2
+    if info1 is not None and info2 is not None:
+        if info1[1] < info2[1]:
+            t1, t2 = tsr2, tsr1
+    ainds, binds = t1.inds, t2.inds
     _output_inds = []
     ax_a, ax_b = [], []
     for kia, ia in enumerate(ainds):
@@ -28,17 +34,9 @@ def _contract_connected(tsr1, tsr2, out_inds=None):
     if set(_output_inds) != set(out_inds):
         raise TypeError("specified out_inds not allowed in tensordot, \
                          make sure no summation/Hadamard product appears")
-    info1 = tsr1.get_fermion_info()
-    info2 = tsr2.get_fermion_info()
-    reverse_contract = False
 
-    if info1 is not None and info2 is not None:
-        if info1[1] > info2[1]:
-            reverse_contract=True
-    if reverse_contract:
-        out = np.tensordot(tsr2.data, tsr1.data, axes=[ax_b, ax_a])
-    else:
-        out = np.tensordot(tsr1.data, tsr2.data, axes=[ax_a, ax_b])
+    out = np.tensordot(t1.data, t2.data, axes=[ax_a, ax_b])
+
     if len(out_inds)==0:
         return out.data[0]
 
@@ -227,16 +225,15 @@ def tensor_split(T, left_inds, method='svd', get=None, absorb='both', max_bond=N
 def _compress_connected(Tl, Tr, absorb='both', **compress_opts):
     left_inds = [ind for ind in Tl.inds if ind not in Tr.inds]
     right_inds = [ind for ind in Tr.inds if ind not in Tl.inds]
+    out = _contract_connected(Tl, Tr)
     if Tl.get_fermion_info()[1] < Tr.get_fermion_info()[1]:
-        out = _contract_connected(Tl, Tr)
-        l, r = out.split(left_inds=left_inds, right_inds=right_inds, absorb=absorb, get="tensors", **compress_opts)
-    else:
-        out = _contract_connected(Tr, Tl)
         if absorb == "left":
             absorb = "right"
         elif absorb == "right":
             absorb = "left"
         r, l = out.split(left_inds=right_inds, right_inds=left_inds, absorb=absorb, get="tensors", **compress_opts)
+    else:
+        l, r = out.split(left_inds=left_inds, right_inds=right_inds, absorb=absorb, get="tensors", **compress_opts)
     return l, r
 
 def tensor_compress_bond(
@@ -268,11 +265,11 @@ def _canonize_connected(T1, T2, absorb='right', **split_opts):
         raise ValueError("The tensors specified don't share an bond.")
 
     if T1.get_fermion_info()[1] < T2.get_fermion_info()[1]:
+        tRfact, new_T1 = T1.split(shared_ix, get="tensors", **split_opts)
+        new_T2 = _contract_connected(T2, tRfact)
+    else:
         new_T1, tRfact = T1.split(left_env_ix, get='tensors', **split_opts)
         new_T2 = _contract_connected(tRfact, T2)
-    else:
-        tRfact, new_T1 = T1.split(shared_ix, get='tensors', **split_opts)
-        new_T2 = _contract_connected(T2, tRfact)
 
     if absorb == "left":
         return new_T2, new_T1
