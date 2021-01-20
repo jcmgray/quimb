@@ -300,9 +300,9 @@ class FermionTensorNetwork2D(FermionTensorNetwork,TensorNetwork2D):
         # upwards pass
         row_envs['below', 0] = FermionTensorNetwork([])
         first_row = self.row_tag(0)
+        row_envs['mid', 0] = env_bottom.select(first_row).simple_copy()
         if dense:
             env_bottom ^= first_row
-        row_envs['mid', 0] = env_bottom.select(first_row).simple_copy()
         row_envs['below', 1] = env_bottom.select(first_row).simple_copy()
         for i in range(2, env_bottom.Lx):
             below_row = env_bottom.row_tag(i-1)
@@ -342,9 +342,9 @@ class FermionTensorNetwork2D(FermionTensorNetwork,TensorNetwork2D):
         # upwards pass
         col_envs['left', 0] = FermionTensorNetwork([])
         first_col = self.col_tag(0)
+        col_envs['mid', 0] = env_left.select(first_col).simple_copy()
         if dense:
             env_left ^= first_col
-        col_envs['mid', 0] = env_left.select(first_col).simple_copy()
         col_envs['left', 1] = env_left.select(first_col).simple_copy()
 
         for i in range(2, env_left.Ly):
