@@ -125,7 +125,7 @@ def _fetch_fermion_space(*tensors, inplace=True):
         tid_lst = list(fs.tensor_order.keys())
     return fs, tid_lst
 
-def tensor_contract(*tensors, output_inds=None, direction="left", inplace=False):
+def tensor_contract(*tensors, output_inds=None, direction="left", inplace=False, **contract_opts):
     """ Perform tensor contractions for all the given tensors.
         If input tensors do not belong to the same underlying fsobj,
         the position of each tensor will be the same as its order in the input tensor tuple/list.
@@ -145,7 +145,7 @@ def tensor_contract(*tensors, output_inds=None, direction="left", inplace=False)
     -------
     out : a FermionTensor object or a number
     """
-    path_info = _tensor_contract(*tensors, get='path-info')
+    path_info = _tensor_contract(*tensors, get='path-info', **contract_opts)
     fs, tid_lst = _fetch_fermion_space(*tensors, inplace=inplace)
     for conc in path_info.contraction_list:
         pos1, pos2 = conc[0]
@@ -223,6 +223,8 @@ def tensor_split(T, left_inds, method='svd', get=None, absorb='both', max_bond=N
     return FermionTensorNetwork(tensors, check_collisions=False, virtual=True)
 
 def _compress_connected(Tl, Tr, absorb='both', **compress_opts):
+    if Tl.inds == Tr.inds:
+        return Tl, Tr
     left_inds = [ind for ind in Tl.inds if ind not in Tr.inds]
     right_inds = [ind for ind in Tr.inds if ind not in Tl.inds]
     out = _contract_connected(Tl, Tr)
@@ -1468,6 +1470,19 @@ class FermionTensorNetwork(TensorNetwork):
 
         untagged_tn.add_tensor(contracted, virtual=True)
         return untagged_tn
+
+    def contract(self, tags=..., inplace=False, **opts):
+
+        if tags is all:
+            return tensor_contract(*self, **opts)
+
+        # this checks whether certain TN classes have a manually specified
+        #     contraction pattern (e.g. 1D along the line)
+        if self._CONTRACT_STRUCTURED:
+            raise NotImplementedError("structured contraction not implemented")
+
+        # else just contract those tensors specified by tags.
+        return self.contract_tags(tags, inplace=inplace, **opts)
 
     def _compress_between_tids(
         self,

@@ -923,17 +923,6 @@ class FermionTensorNetwork2DVector(FermionTensorNetwork2D,
 
     gate_ = functools.partialmethod(gate, inplace=True)
 
-    def compute_norm(
-        self,
-        layer_tags=('KET', 'BRA'),
-        **contract_opts,
-    ):
-        """Compute the norm of this vector via boundary contraction.
-        """
-        raise NotImplementedError
-        norm = self.make_norm(layer_tags=layer_tags)
-        return norm.contract_boundary(layer_tags=layer_tags, **contract_opts)
-
     def compute_local_expectation(
         self,
         terms,
