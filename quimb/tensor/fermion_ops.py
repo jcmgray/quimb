@@ -51,11 +51,8 @@ def to_exp(tsr, x):
     out = np.tensordot(out, v, axes=((-1,),(0,)))
     return out
 
-def ham_eye(const=1.):
-    seven = SZ(0)
-    sodd = SZ(1)
-    info = BondInfo({seven:2, sodd:2})
-    return FlatFermionTensor.eye(info)
+def ham_eye(bond_info):
+    return FlatFermionTensor.eye(bond_info)
 
 def gen_h1(h=1.):
     blocks= []

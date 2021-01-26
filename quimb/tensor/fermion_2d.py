@@ -6,6 +6,7 @@ from .fermion import (
 from .tensor_2d import (
     TensorNetwork2D,
     TensorNetwork2DVector,
+    TensorNetwork2DFlat,
     PEPS,
     is_lone_coo,
     gen_long_range_path,
@@ -621,163 +622,6 @@ class FermionTensorNetwork2D(FermionTensorNetwork,TensorNetwork2D):
         direction = "l" + direction[0]
         return self.reorder(direction=direction, layer_tags=layer_tags, inplace=inplace)
 
-
-class FPEPS(FermionTensorNetwork2D,
-            PEPS):
-
-
-    _EXTRA_PROPS = (
-        '_site_tag_id',
-        '_row_tag_id',
-        '_col_tag_id',
-        '_Lx',
-        '_Ly',
-        '_site_ind_id',
-    )
-
-    def __init__(self, arrays, *, shape='urdlp', tags=None,
-                 site_ind_id='k{},{}', site_tag_id='I{},{}',
-                 row_tag_id='ROW{}', col_tag_id='COL{}',
-                 order_iterator=None, **tn_opts):
-
-        if isinstance(arrays, FPEPS):
-            super().__init__(arrays)
-            return
-
-        tags = tags_to_oset(tags)
-        self._site_ind_id = site_ind_id
-        self._site_tag_id = site_tag_id
-        self._row_tag_id = row_tag_id
-        self._col_tag_id = col_tag_id
-
-        arrays = tuple(tuple(x for x in xs) for xs in arrays)
-        self._Lx = len(arrays)
-        self._Ly = len(arrays[0])
-        tensors = []
-
-        # cache for both creating and retrieving indices
-        ix = defaultdict(rand_uuid)
-
-        if order_iterator is None:
-            order_iterator = product(range(self.Lx), range(self.Ly))
-        for i, j in order_iterator:
-            array = arrays[i][j]
-
-            # figure out if we need to transpose the arrays from some order
-            #     other than up right down left physical
-            array_order = shape
-            if i == self.Lx - 1:
-                array_order = array_order.replace('u', '')
-            if j == self.Ly - 1:
-                array_order = array_order.replace('r', '')
-            if i == 0:
-                array_order = array_order.replace('d', '')
-            if j == 0:
-                array_order = array_order.replace('l', '')
-
-            # allow convention of missing bonds to be singlet dimensions
-            if array.ndim != len(array_order):
-                raise ValueError("array shape not matching array order")
-
-            transpose_order = tuple(
-                array_order.find(x) for x in 'urdlp' if x in array_order
-            )
-
-            if transpose_order != tuple(range(len(array_order))):
-                array = array.transpose(transpose_order)
-
-            # get the relevant indices corresponding to neighbours
-            inds = []
-            if 'u' in array_order:
-                inds.append(ix[(i + 1, j), (i, j)])
-            if 'r' in array_order:
-                inds.append(ix[(i, j), (i, j + 1)])
-            if 'd' in array_order:
-                inds.append(ix[(i, j), (i - 1, j)])
-            if 'l' in array_order:
-                inds.append(ix[(i, j - 1), (i, j)])
-            inds.append(self.site_ind(i, j))
-
-            # mix site, row, column and global tags
-
-            ij_tags = tags | oset((self.site_tag(i, j),
-                                   self.row_tag(i),
-                                   self.col_tag(j)))
-            # create the site tensor!
-            tensors.append(FermionTensor(data=array, inds=inds, tags=ij_tags))
-        super().__init__(tensors, check_collisions=False, **tn_opts)
-
-    @classmethod
-    def rand(cls, Lx, Ly, bond_dim, phys_dim=2,
-             dtype=float, seed=None, parity=None,
-             **peps_opts):
-        """Create a random (un-normalized) PEPS.
-
-        Parameters
-        ----------
-        Lx : int
-            The number of rows.
-        Ly : int
-            The number of columns.
-        bond_dim : int
-            The bond dimension.
-        physical : int, optional
-            The physical index dimension.
-        dtype : dtype, optional
-            The dtype to create the arrays with, default is real double.
-        seed : int, optional
-            A random seed.
-        parity: int or int array of (0,1), optional
-            parity for each site, default is random parity for all sites
-        peps_opts
-            Supplied to :class:`~quimb.tensor.tensor_2d.PEPS`.
-
-        Returns
-        -------
-        psi : PEPS
-        """
-        if seed is not None:
-            np.random.seed(seed)
-
-        arrays = [[None for _ in range(Ly)] for _ in range(Lx)]
-
-        from pyblock3.algebra.fermion import SparseFermionTensor
-        from pyblock3.algebra.symmetry import SZ, BondInfo
-
-        if isinstance(parity, np.ndarray):
-            if not parity.shape != (Lx, Ly):
-                raise ValueError("parity array shape not matching (Lx, Ly)")
-        elif isinstance(parity, int):
-            parity = np.ones((Lx, Ly), dtype=int) * (parity % 2)
-        elif parity is None:
-            parity = np.random.randint(0,2,Lx*Ly).reshape(Lx, Ly)
-        else:
-            raise TypeError("parity type not recoginized")
-
-        vir_info = BondInfo({SZ(0): bond_dim, SZ(1): bond_dim})
-        phy_info = BondInfo({SZ(0): phys_dim, SZ(1): phys_dim})
-
-        for i, j in product(range(Lx), range(Ly)):
-
-            shape = []
-            if i != Lx - 1:  # bond up
-                shape.append(vir_info)
-            if j != Ly - 1:  # bond right
-                shape.append(vir_info)
-            if i != 0:  # bond down
-                shape.append(vir_info)
-            if j != 0:  # bond left
-                shape.append(vir_info)
-
-            shape.append(phy_info)
-            dq = SZ(parity[i][j])
-
-            arrays[i][j] = SparseFermionTensor.random(shape, dq=dq, dtype=dtype).to_flat()
-
-
-        return cls(arrays, **peps_opts)
-
-
 class FermionTensorNetwork2DVector(FermionTensorNetwork2D,
                                    FermionTensorNetwork,
                                    TensorNetwork2DVector):
@@ -1045,6 +889,162 @@ class FermionTensorNetwork2DVector(FermionTensorNetwork2D,
         **boundary_contract_opts,
     ):
         raise NotImplementedError
+
+class FPEPS(FermionTensorNetwork2DVector,
+            FermionTensorNetwork2D,
+            PEPS,
+            TensorNetwork2DFlat):
+
+
+    _EXTRA_PROPS = (
+        '_site_tag_id',
+        '_row_tag_id',
+        '_col_tag_id',
+        '_Lx',
+        '_Ly',
+        '_site_ind_id',
+    )
+
+    def __init__(self, arrays, *, shape='urdlp', tags=None,
+                 site_ind_id='k{},{}', site_tag_id='I{},{}',
+                 row_tag_id='ROW{}', col_tag_id='COL{}',
+                 order_iterator=None, **tn_opts):
+
+        if isinstance(arrays, FPEPS):
+            super().__init__(arrays)
+            return
+
+        tags = tags_to_oset(tags)
+        self._site_ind_id = site_ind_id
+        self._site_tag_id = site_tag_id
+        self._row_tag_id = row_tag_id
+        self._col_tag_id = col_tag_id
+
+        arrays = tuple(tuple(x for x in xs) for xs in arrays)
+        self._Lx = len(arrays)
+        self._Ly = len(arrays[0])
+        tensors = []
+
+        # cache for both creating and retrieving indices
+        ix = defaultdict(rand_uuid)
+
+        if order_iterator is None:
+            order_iterator = product(range(self.Lx), range(self.Ly))
+        for i, j in order_iterator:
+            array = arrays[i][j]
+
+            # figure out if we need to transpose the arrays from some order
+            #     other than up right down left physical
+            array_order = shape
+            if i == self.Lx - 1:
+                array_order = array_order.replace('u', '')
+            if j == self.Ly - 1:
+                array_order = array_order.replace('r', '')
+            if i == 0:
+                array_order = array_order.replace('d', '')
+            if j == 0:
+                array_order = array_order.replace('l', '')
+
+            # allow convention of missing bonds to be singlet dimensions
+            if array.ndim != len(array_order):
+                raise ValueError("array shape not matching array order")
+
+            transpose_order = tuple(
+                array_order.find(x) for x in 'urdlp' if x in array_order
+            )
+
+            if transpose_order != tuple(range(len(array_order))):
+                array = array.transpose(transpose_order)
+
+            # get the relevant indices corresponding to neighbours
+            inds = []
+            if 'u' in array_order:
+                inds.append(ix[(i + 1, j), (i, j)])
+            if 'r' in array_order:
+                inds.append(ix[(i, j), (i, j + 1)])
+            if 'd' in array_order:
+                inds.append(ix[(i, j), (i - 1, j)])
+            if 'l' in array_order:
+                inds.append(ix[(i, j - 1), (i, j)])
+            inds.append(self.site_ind(i, j))
+
+            # mix site, row, column and global tags
+
+            ij_tags = tags | oset((self.site_tag(i, j),
+                                   self.row_tag(i),
+                                   self.col_tag(j)))
+            # create the site tensor!
+            tensors.append(FermionTensor(data=array, inds=inds, tags=ij_tags))
+        super().__init__(tensors, check_collisions=False, **tn_opts)
+
+    @classmethod
+    def rand(cls, Lx, Ly, bond_dim, phys_dim=2,
+             dtype=float, seed=None, parity=None,
+             **peps_opts):
+        """Create a random (un-normalized) PEPS.
+
+        Parameters
+        ----------
+        Lx : int
+            The number of rows.
+        Ly : int
+            The number of columns.
+        bond_dim : int
+            The bond dimension.
+        physical : int, optional
+            The physical index dimension.
+        dtype : dtype, optional
+            The dtype to create the arrays with, default is real double.
+        seed : int, optional
+            A random seed.
+        parity: int or int array of (0,1), optional
+            parity for each site, default is random parity for all sites
+        peps_opts
+            Supplied to :class:`~quimb.tensor.tensor_2d.PEPS`.
+
+        Returns
+        -------
+        psi : PEPS
+        """
+        if seed is not None:
+            np.random.seed(seed)
+
+        arrays = [[None for _ in range(Ly)] for _ in range(Lx)]
+
+        from pyblock3.algebra.fermion import SparseFermionTensor
+        from pyblock3.algebra.symmetry import SZ, BondInfo
+
+        if isinstance(parity, np.ndarray):
+            if not parity.shape != (Lx, Ly):
+                raise ValueError("parity array shape not matching (Lx, Ly)")
+        elif isinstance(parity, int):
+            parity = np.ones((Lx, Ly), dtype=int) * (parity % 2)
+        elif parity is None:
+            parity = np.random.randint(0,2,Lx*Ly).reshape(Lx, Ly)
+        else:
+            raise TypeError("parity type not recoginized")
+
+        vir_info = BondInfo({SZ(0): bond_dim, SZ(1): bond_dim})
+        phy_info = BondInfo({SZ(0): phys_dim, SZ(1): phys_dim})
+
+        for i, j in product(range(Lx), range(Ly)):
+
+            shape = []
+            if i != Lx - 1:  # bond up
+                shape.append(vir_info)
+            if j != Ly - 1:  # bond right
+                shape.append(vir_info)
+            if i != 0:  # bond down
+                shape.append(vir_info)
+            if j != 0:  # bond left
+                shape.append(vir_info)
+
+            shape.append(phy_info)
+            dq = SZ(parity[i][j])
+
+            arrays[i][j] = SparseFermionTensor.random(shape, dq=dq, dtype=dtype).to_flat()
+
+        return cls(arrays, **peps_opts)
 
 def _gen_site_wfn_tsr(state, ndim=2, ax=0):
     from pyblock3.algebra.core import SubTensor
