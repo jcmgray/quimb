@@ -1480,7 +1480,7 @@ class TensorNetwork2D(TensorNetwork):
                 if (around is None) or (top - 1 > stop_i_max):
                     tn.contract_boundary_from_top_(
                         xrange=(top, top - 1), compress_sweep='right',
-                        yrange=(left, right),  **contract_boundary_opts)
+                        yrange=(left, right), **contract_boundary_opts)
                     top -= 1
                 else:
                     reached_stop[direction] = True

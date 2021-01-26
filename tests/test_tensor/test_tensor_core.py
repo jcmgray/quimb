@@ -924,6 +924,32 @@ class TestTensorNetwork:
         d2 = A.distance(B, method=method)
         assert d1 == pytest.approx(d2)
 
+    @pytest.mark.parametrize('method,opts', (
+        ('als', (('enforce_pos', False),)),
+        ('als', (('enforce_pos', True),)),
+        ('autodiff', (('distance_method', 'dense'),)),
+        ('autodiff', (('distance_method', 'overlap'),)),
+    ))
+    def test_fit_mps(self, method, opts):
+        k1 = qtn.MPS_rand_state(5, 3, seed=666)
+        k2 = qtn.MPS_rand_state(5, 3, seed=667)
+        assert k1.distance(k2) > 1e-3
+        k1.fit_(k2, method=method, progbar=True, **dict(opts))
+        assert k1.distance(k2) < 1e-3
+
+    @pytest.mark.parametrize('method,opts', (
+        ('als', (('enforce_pos', False),)),
+        ('als', (('enforce_pos', True),)),
+        ('autodiff', (('distance_method', 'dense'),)),
+        ('autodiff', (('distance_method', 'overlap'),)),
+    ))
+    def test_fit_rand_reg(self, method, opts):
+        r1 = qtn.TN_rand_reg(5, 4, D=2, seed=666, phys_dim=2)
+        k2 = qtn.MPS_rand_state(5, 3, seed=667)
+        assert r1.distance(k2) > 1e-3
+        r1.fit_(k2, method=method, progbar=True, **dict(opts))
+        assert r1.distance(k2) < 1e-3
+
     def test_reindex(self):
         a = Tensor(np.random.randn(2, 3, 4), inds=[0, 1, 2], tags='red')
         b = Tensor(np.random.randn(3, 4, 5), inds=[1, 2, 3], tags='blue')
