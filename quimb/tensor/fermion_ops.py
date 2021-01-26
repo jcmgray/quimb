@@ -1,10 +1,55 @@
 import numpy as np
 from itertools import product
 from pyblock3.algebra.core import SubTensor
-from pyblock3.algebra.fermion import SparseFermionTensor, FlatFermionTensor
+from pyblock3.algebra.fermion import SparseFermionTensor, FlatFermionTensor, _pack_flat_tensor, _unpack_flat_tensor
 from pyblock3.algebra.symmetry import SZ, BondInfo
 from .fermion_2d import FPEPS,FermionTensorNetwork2DVector
 
+def to_exp(tsr, x):
+    ndim = tsr.ndim
+    if tsr.parity == 1:
+        raise ValueError("expontial of odd parity tensor not defined")
+    if np.mod(ndim, 2) !=0:
+        raise ValueError("dimension of the tensor must be even (%i)"%ndim)
+    ax = ndim //2
+    data = []
+    udata, sdata, vdata = [],[],[]
+    uq,sq,vq= [],[],[]
+    ushapes, vshapes, sshapes = [],[],[]
+    sz_labels = ((SZ(0),SZ(0)), (SZ(1), SZ(1)))
+    if ndim == 2:
+        parity_axes = None
+    else:
+        parity_axes = list(range(ax))
+
+    for szlab in sz_labels:
+        data, row_map, col_map = _pack_flat_tensor(tsr, szlab, ax, parity_axes)
+        el, ev = np.linalg.eig(data)
+        s = np.diag(np.exp(-el*x))
+        _unpack_flat_tensor(ev, row_map, 0, udata, uq, ushapes, parity_axes)
+        _unpack_flat_tensor(ev.conj().T, col_map, 1, vdata, vq, vshapes)
+        sq.append([SZ.to_flat(iq) for iq in szlab])
+        sshapes.append(s.shape)
+        sdata.append(s.ravel())
+
+    sq = np.asarray(sq, dtype=np.uint32)
+    sshapes = np.asarray(sshapes, dtype=np.uint32)
+    sdata = np.concatenate(sdata)
+    s = FlatFermionTensor(sq, sshapes, sdata)
+
+    uq = np.asarray(uq, dtype=np.uint32)
+    ushapes = np.asarray(ushapes, dtype=np.uint32)
+    udata = np.concatenate(udata)
+
+    vq = np.asarray(vq, dtype=np.uint32)
+    vshapes = np.asarray(vshapes, dtype=np.uint32)
+    vdata = np.concatenate(vdata)
+    u = FlatFermionTensor(uq, ushapes, udata)
+    v = FlatFermionTensor(vq, vshapes, vdata)
+
+    out = np.tensordot(u, s, axes=((-1,),(0,)))
+    out = np.tensordot(out, v, axes=((-1,),(0,)))
+    return out
 
 def ham_eye(const=1.):
     seven = SZ(0)
