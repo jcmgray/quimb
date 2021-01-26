@@ -108,23 +108,33 @@ nop = ops.count_n()
 sz = ops.measure_sz()
 hop = ops.hopping(t)
 
-env = compute_env(psi, max_bond)
-
 print("testing U")
+terms = dict()
+for i in range(Lx):
+    for j in range(Ly):
+        terms[(i,j)] = uop
+exps = psi.compute_local_expectation(terms, return_all=True)
+
 for ix in range(Lx):
     for iy in range(Ly):
         where = (ix, iy)
-        out = compute_expectation(env, psi, uop, where, max_bond)
+        out = exps[where][0]
         if state_array[ix,iy]==3:
             print(U==out)
         else:
             print(0.==out)
 
 print("testing N")
+terms = dict()
+for i in range(Lx):
+    for j in range(Ly):
+        terms[(i,j)] = nop
+exps = psi.compute_local_expectation(terms, return_all=True)
+
 for ix in range(Lx):
     for iy in range(Ly):
         where = (ix, iy)
-        out = compute_expectation(env, psi, nop, where, max_bond)
+        out = exps[where][0]
         if state_array[ix,iy] ==0:
             print(0.==out)
         elif state_array[ix, iy] in [1, 2]:
@@ -132,11 +142,17 @@ for ix in range(Lx):
         else:
             print(2.==out)
 
-print("testing sz")
+print("testing Sz")
+terms = dict()
+for i in range(Lx):
+    for j in range(Ly):
+        terms[(i,j)] = sz
+exps = psi.compute_local_expectation(terms, return_all=True)
+
 for ix in range(Lx):
     for iy in range(Ly):
         where = (ix, iy)
-        out = compute_expectation(env, psi, sz, where, max_bond)
+        out = exps[where][0]
         if state_array[ix,iy] in [0,3]:
             print(0.==out)
         elif state_array[ix, iy] ==1:

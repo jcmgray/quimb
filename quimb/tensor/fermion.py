@@ -487,7 +487,9 @@ class FermionSpace:
         if len(axes)>0: tsr.data._local_flip(axes)
         self.tensor_order[tid] = (tsr, des_site)
 
-    def move_past(self, tsr, site_range):
+    def move_past(self, tsr, site_range=None):
+        if site_range is None:
+            site_range = (0, len(self.tensor_order))
         start, end = site_range
         iterator = range(start, end)
         shared_inds = []
@@ -1474,7 +1476,7 @@ class FermionTensorNetwork(TensorNetwork):
     def contract(self, tags=..., inplace=False, **opts):
 
         if tags is all:
-            return tensor_contract(*self, **opts)
+            return tensor_contract(*self, inplace=inplace, **opts)
 
         # this checks whether certain TN classes have a manually specified
         #     contraction pattern (e.g. 1D along the line)

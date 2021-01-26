@@ -8,21 +8,51 @@ from .tensor_2d import (
     TensorNetwork2DVector,
     PEPS,
     is_lone_coo,
-    gen_long_range_path)
+    gen_long_range_path,
+    plaquette_to_sites)
 from .tensor_core import (
     rand_uuid,
     oset,
     tags_to_oset,
     bonds
 )
+from .tensor_2d import calc_plaquette_sizes as _calc_plaquette_sizes
+from .tensor_2d import calc_plaquette_map as _calc_plaquette_map
 from ..utils import check_opt, pairwise
 from collections import defaultdict
 from itertools import product
 import numpy as np
 import functools
+from operator import add
 from pyblock3.algebra.fermion import FlatFermionTensor
 
 INVERSE_CUTOFF = 1e-10
+
+def calc_plaquette_sizes(pairs, autogroup=False):
+    if autogroup:
+        raise NotImplementedError
+    singles = []
+    remainders = []
+    for pair in pairs:
+        singles.append(is_lone_coo(pair))
+        if not is_lone_coo(pair):
+            remainders.append(pair)
+    singles = (sum(singles) != 0)
+    if singles:
+        sizes = ((1,1),)
+    else:
+        sizes = ()
+    if len(remainders) >0:
+        sizes += _calc_plaquette_sizes(remainders, autogroup)
+    return sizes
+
+def calc_plaquette_map(plaquettes):
+    plaqs = [p for p in plaquettes if p[1][0] * p[1][1]>1]
+    map = _calc_plaquette_map(plaqs)
+    for p in plaquettes:
+        if p[1][0] * p[1][1]==1:
+            map[p[0]] = p
+    return map
 
 def gate_string_split_(TG, where, string, original_ts, bonds_along,
                        reindex_map, site_ix, info, **compress_opts):
@@ -927,15 +957,85 @@ class FermionTensorNetwork2DVector(FermionTensorNetwork2D,
         self,
         terms,
         normalized=False,
-        autogroup=True,
+        autogroup=False,
         contract_optimize='auto-hq',
         return_all=False,
+        layer_tags=('KET', 'BRA'),
         plaquette_envs=None,
         plaquette_map=None,
         **plaquette_env_options,
     ):
+        norm, ket, bra = self.make_norm(return_all=True, layer_tags=layer_tags)
+        new_terms = dict()
+        for where, op in terms.items():
+            if is_lone_coo(where):
+                _where = (where,)
+            else:
+                _where = tuple(where)
+            ng = len(_where)
+            site_ix = [bra.site_ind(i, j) for i, j in _where]
+            bnds = [rand_uuid() for _ in range(ng)]
+            TG = FermionTensor(op.copy(), inds=site_ix+bnds, left_inds=site_ix)
+            new_terms[where] = bra.fermion_space.move_past(TG).data
 
-        raise NotImplementedError
+        if plaquette_envs is None:
+            # set some sensible defaults
+            plaquette_env_options.setdefault('layer_tags', ('KET', 'BRA'))
+
+            plaquette_envs = dict()
+            for x_bsz, y_bsz in calc_plaquette_sizes(terms, autogroup):
+                plaquette_envs.update(norm.compute_plaquette_environments(
+                    x_bsz=x_bsz, y_bsz=y_bsz, **plaquette_env_options))
+
+        if plaquette_map is None:
+            # work out which plaquettes to use for which terms
+            plaquette_map = calc_plaquette_map(plaquette_envs)
+
+        # now group the terms into just the plaquettes we need
+        plaq2coo = defaultdict(list)
+        for where, G in new_terms.items():
+            p = plaquette_map[where]
+            plaq2coo[p].append((where, G))
+
+        expecs = dict()
+        for p in plaq2coo:
+            # site tags for the plaquette
+            # view the ket portion as 2d vector so we can gate it
+            tn = plaquette_envs[p]
+            if normalized:
+                norm_i0j0 = tn.contract(all, optimize=contract_optimize)
+            else:
+                norm_i0j0 = None
+
+            for where, G in plaq2coo[p]:
+                newtn = tn.copy()
+                if is_lone_coo(where):
+                    _where = (where,)
+                else:
+                    _where = tuple(where)
+                ng = len(_where)
+                site_ix = [bra.site_ind(i, j) for i, j in _where]
+                bnds = [rand_uuid() for _ in range(ng)]
+                reindex_map = dict(zip(site_ix, bnds))
+                TG = FermionTensor(G.copy(), inds=site_ix+bnds, left_inds=site_ix)
+                ntsr = len(newtn.tensor_map)
+                fs = newtn.fermion_space
+                ng = len(where)
+                for i in range(ntsr-2*ng, ntsr):
+                    tsr = fs[i][2]
+                    if layer_tags[0] in tsr.tags:
+                        tsr.reindex_(reindex_map)
+                newtn.add_tensor(TG, virtual=True)
+                expec_ij = newtn.contract(all, optimize=contract_optimize)
+                expecs[where] = expec_ij, norm_i0j0
+
+        if return_all:
+            return expecs
+
+        if normalized:
+            return functools.reduce(add, (e / n for e, n in expecs.values()))
+
+        return functools.reduce(add, (e for e, _ in expecs.values()))
 
     def normalize(
         self,
