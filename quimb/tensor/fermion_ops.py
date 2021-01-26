@@ -25,7 +25,7 @@ def to_exp(tsr, x):
     for szlab in sz_labels:
         data, row_map, col_map = _pack_flat_tensor(tsr, szlab, ax, parity_axes)
         el, ev = np.linalg.eig(data)
-        s = np.diag(np.exp(-el*x))
+        s = np.diag(np.exp(el*x))
         _unpack_flat_tensor(ev, row_map, 0, udata, uq, ushapes, parity_axes)
         _unpack_flat_tensor(ev.conj().T, col_map, 1, vdata, vq, vshapes)
         sq.append([SZ.to_flat(iq) for iq in szlab])

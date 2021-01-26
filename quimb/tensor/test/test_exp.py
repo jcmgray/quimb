@@ -42,7 +42,7 @@ def get_err(out, out1):
     return max(err)
 
 tau = 0.1
-tsr = ops.to_exp(hop, tau)
+tsr = ops.to_exp(hop, -tau)
 
 sx = SZ(0)
 sy = SZ(1)
