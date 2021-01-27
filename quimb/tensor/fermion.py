@@ -295,6 +295,31 @@ def tensor_canonize_bond(T1, T2, absorb='right', **split_opts):
     fs.move(tid2, site2)
     return T1, T2
 
+def tensor_balance_bond(t1, t2, smudge=1e-6):
+    from pyblock3.algebra.core import SubTensor
+    from pyblock3.algebra.fermion import SparseFermionTensor
+    ix, = t1.bonds(t2)
+    t1H = t1.H.reindex_({ix: ix+'*'})
+    t2H = t2.H.reindex_({ix: ix+'*'})
+    out = tensor_contract(t1H, t1)
+    out1 = tensor_contract(t2H, t2)
+    sblk1 = []
+    sblk2 = []
+    for iblk1 in out.data.to_sparse():
+        for iblk2 in out1.data.to_sparse():
+            if iblk1.q_labels != iblk2.q_labels:
+                continue
+            x = np.diag(np.asarray(iblk1))
+            y = np.diag(np.asarray(iblk2))
+            s = (x + smudge) / (y + smudge)
+            sblk1.append(SubTensor(reduced=np.diag(s**-0.25), q_labels=iblk1.q_labels))
+            sblk2.append(SubTensor(reduced=np.diag(s**0.25), q_labels=iblk2.q_labels))
+
+    s1 = SparseFermionTensor(blocks=sblk1).to_flat()
+    s2 = SparseFermionTensor(blocks=sblk2).to_flat()
+    t1.multiply_index_diagonal_(ix, s1, location="back")
+    t2.multiply_index_diagonal_(ix, s2, location="front")
+
 class FermionSpace:
     """A labelled, ordered dictionary. The tensor labels point to the tensor
        and its position inside the fermion space.
@@ -979,6 +1004,32 @@ class FermionTensorNetwork(TensorNetwork):
         tn = self if inplace else self.copy()
         tn.fermion_space._reorder_from_dict(tid_map)
         return tn
+
+    def balance_bonds(self, inplace=False):
+        """Apply :func:`~quimb.tensor.fermion.tensor_balance_bond` to
+        all bonds in this tensor network.
+
+        Parameters
+        ----------
+        inplace : bool, optional
+            Whether to perform the bond balancing inplace or not.
+
+        Returns
+        -------
+        TensorNetwork
+        """
+        tn = self if inplace else self.copy()
+
+        for ix, tids in tn.ind_map.items():
+            if len(tids) != 2:
+                continue
+            tid1, tid2 = tids
+            t1, t2 = [tn.tensor_map[x] for x in (tid1, tid2)]
+            tensor_balance_bond(t1, t2)
+
+        return tn
+
+    balance_bonds_ = functools.partialmethod(balance_bonds, inplace=True)
 
     def assemble_with_tensor(self, tsr):
         if not is_mergeable(self, tsr):
