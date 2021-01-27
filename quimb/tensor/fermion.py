@@ -719,6 +719,11 @@ class FermionTensor(Tensor):
     def parity(self):
         return self.data.parity
 
+    def norm(self):
+        """Frobenius norm of this tensor.
+        """
+        return np.linalg.norm(self.data.data, 2)
+
     def ind_size(self, dim_or_ind):
         if isinstance(dim_or_ind, str):
             if dim_or_ind not in self.inds:
