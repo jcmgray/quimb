@@ -1,5 +1,6 @@
 import pytest
 import operator
+import importlib
 
 import numpy as np
 from numpy.testing import assert_allclose
@@ -21,6 +22,10 @@ from quimb.tensor import (
 )
 from quimb.tensor.decomp import _trim_singular_vals_numba
 from quimb.tensor.tensor_core import _CONTRACT_BACKEND, _TENSOR_LINOP_BACKEND
+
+autograd_mark = pytest.mark.skipif(
+    importlib.util.find_spec('autograd') is None,
+    reason='autograd not installed')
 
 
 def test_trim_singular_vals():
@@ -927,8 +932,10 @@ class TestTensorNetwork:
     @pytest.mark.parametrize('method,opts', (
         ('als', (('enforce_pos', False),)),
         ('als', (('enforce_pos', True),)),
-        ('autodiff', (('distance_method', 'dense'),)),
-        ('autodiff', (('distance_method', 'overlap'),)),
+        pytest.param('autodiff', (('distance_method', 'dense'),),
+                     marks=autograd_mark),
+        pytest.param('autodiff', (('distance_method', 'overlap'),),
+                     marks=autograd_mark),
     ))
     def test_fit_mps(self, method, opts):
         k1 = qtn.MPS_rand_state(5, 3, seed=666)
@@ -940,8 +947,10 @@ class TestTensorNetwork:
     @pytest.mark.parametrize('method,opts', (
         ('als', (('enforce_pos', False),)),
         ('als', (('enforce_pos', True),)),
-        ('autodiff', (('distance_method', 'dense'),)),
-        ('autodiff', (('distance_method', 'overlap'),)),
+        pytest.param('autodiff', (('distance_method', 'dense'),),
+                     marks=autograd_mark),
+        pytest.param('autodiff', (('distance_method', 'overlap'),),
+                     marks=autograd_mark),
     ))
     def test_fit_rand_reg(self, method, opts):
         r1 = qtn.TN_rand_reg(5, 4, D=2, seed=666, phys_dim=2)
