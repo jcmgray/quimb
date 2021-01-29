@@ -29,9 +29,7 @@ from pyblock3.algebra.fermion import FlatFermionTensor
 
 INVERSE_CUTOFF = 1e-10
 
-def calc_plaquette_sizes(pairs, autogroup=False):
-    if autogroup:
-        raise NotImplementedError
+def calc_plaquette_sizes(pairs, autogroup=True):
     singles = []
     remainders = []
     for pair in pairs:
@@ -801,7 +799,7 @@ class FermionTensorNetwork2DVector(FermionTensorNetwork2D,
         self,
         terms,
         normalized=False,
-        autogroup=False,
+        autogroup=True,
         contract_optimize='auto-hq',
         return_all=False,
         layer_tags=('KET', 'BRA'),
@@ -864,9 +862,9 @@ class FermionTensorNetwork2DVector(FermionTensorNetwork2D,
                 TG = FermionTensor(G.copy(), inds=site_ix+bnds, left_inds=site_ix)
                 ntsr = len(newtn.tensor_map)
                 fs = newtn.fermion_space
-                ng = len(where)
-                for i in range(ntsr-2*ng, ntsr):
-                    tsr = fs[i][2]
+                tids = newtn._get_tids_from_inds(site_ix, which='any')
+                for tid_ in tids:
+                    tsr = newtn.tensor_map[tid_]
                     if layer_tags[0] in tsr.tags:
                         tsr.reindex_(reindex_map)
                 newtn.add_tensor(TG, virtual=True)

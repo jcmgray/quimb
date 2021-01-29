@@ -85,6 +85,25 @@ def onsite_u(u=1):
     umat = SparseFermionTensor(blocks=blocks).to_flat()
     return umat
 
+def hubbard(t, u, fac=None):
+    if fac is None:
+        fac = (1, 1)
+    faca, facb = fac
+    ham = hopping(t).to_sparse()
+    for iblk in ham:
+        qin, qout = iblk.q_labels[:2], iblk.q_labels[2:]
+        if qin != qout: continue
+        in_pair = [iq.n for iq in qin]
+        if in_pair == [0,0]:
+            iblk[1,0,1,0] += faca * u
+            iblk[0,1,0,1] += facb * u
+            iblk[1,1,1,1] += (faca + facb) * u
+        elif in_pair == [0,1]:
+            iblk[1,:,1,:] += faca * u * np.eye(2)
+        elif in_pair == [1,0]:
+            iblk[:,1,:,1] += facb * u * np.eye(2)
+    return ham.to_flat()
+
 def count_n():
     nmat0 = np.zeros([2,2])
     nmat0[1,1] = 2
