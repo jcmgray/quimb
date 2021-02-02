@@ -707,7 +707,7 @@ class FermionTensor(Tensor):
     def __init__(self, data=1.0, inds=(), tags=None, left_inds=None, fermion_owner=None):
 
         # a new or copied Tensor always has no owners
-        self.owners = dict()
+        self._owners = dict()
 
         # Short circuit for copying Tensors
         if isinstance(data, self.__class__):
@@ -975,6 +975,7 @@ class FermionTensorNetwork(TensorNetwork):
                     self.tensor_map[tid].add_owner(self, tid)
                 for ep in ts.__class__._EXTRA_PROPS:
                     setattr(self, ep, getattr(ts, ep))
+                self.exponent = ts.exponent
                 return
 
             # internal structure
@@ -986,6 +987,7 @@ class FermionTensorNetwork(TensorNetwork):
             for t in ts:
                 self.add(t, virtual=virtual, check_collisions=check_collisions)
             self._inner_inds = None
+            self.exponent = 0.0
 
     def __and__(self, other):
         """Combine this tensor network with more tensors, without contracting.
