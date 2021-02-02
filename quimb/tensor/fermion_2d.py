@@ -1040,7 +1040,9 @@ class FPEPS(FermionTensorNetwork2DVector,
             shape.append(phy_info)
             dq = SZ(parity[i][j])
 
-            arrays[i][j] = SparseFermionTensor.random(shape, dq=dq, dtype=dtype).to_flat()
+            tsr = SparseFermionTensor.random(shape, dq=dq, dtype=dtype).to_flat()
+            tsr.data /= np.linalg.norm(tsr.data, 2) **(1.5 / tsr.ndim)
+            arrays[i][j] = tsr
 
         return cls(arrays, **peps_opts)
 
