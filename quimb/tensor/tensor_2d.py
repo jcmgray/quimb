@@ -2645,7 +2645,10 @@ class TensorNetwork2DVector(TensorNetwork2D,
         terms : dict[tuple[tuple[int], array]
             A dictionary mapping site coordinates to raw operators, which will
             be supplied to
-            :meth:`~quimb.tensor.tensor_2d.TensorNetwork2DVector.gate`.
+            :meth:`~quimb.tensor.tensor_2d.TensorNetwork2DVector.gate`. The
+            keys should either be a single coordinate - ``(i, j)`` - describing
+            a single site operator, or a pair of coordinates -
+            ``((i_a, j_a), (i_b, j_b))`` describing a two site operator.
         normalized : bool, optional
             If True, normalize the value of each local expectation by the local
             norm: $\langle O_i \rangle = Tr[\rho_p O_i] / Tr[\rho_p]$.
@@ -2682,7 +2685,7 @@ class TensorNetwork2DVector(TensorNetwork2D,
             plaquette_env_options.setdefault('layer_tags', ('KET', 'BRA'))
 
             plaquette_envs = dict()
-            for x_bsz, y_bsz in calc_plaquette_sizes(terms, autogroup):
+            for x_bsz, y_bsz in calc_plaquette_sizes(terms.keys(), autogroup):
                 plaquette_envs.update(norm.compute_plaquette_environments(
                     x_bsz=x_bsz, y_bsz=y_bsz, **plaquette_env_options))
 
@@ -3417,14 +3420,15 @@ def show_2d(tn_2d, show_lower=False, show_upper=False):
     print_multi_line(*lines)
 
 
-def calc_plaquette_sizes(pairs, autogroup=True):
+def calc_plaquette_sizes(coo_groups, autogroup=True):
     """Find a sequence of plaquette blocksizes that will cover all the terms
     (coordinate pairs) in ``pairs``.
 
     Parameters
     ----------
-    pairs : sequence of tuple[tuple[int]]
-        The sequence of 2D coordinates pairs describing terms.
+    coo_groups : sequence of tuple[tuple[int]] or tuple[int]
+        The sequence of 2D coordinates pairs describing terms. Each should
+        either be a single 2D coordinate or a sequence of 2D coordinates.
     autogroup : bool, optional
         Whether to return the minimal sequence of blocksizes that will cover
         all terms or merge them into a single ``((x_bsz, y_bsz),)``.
@@ -3473,7 +3477,15 @@ def calc_plaquette_sizes(pairs, autogroup=True):
     # get the rectangular size of each coordinate pair
     #     e.g. ((1, 1), (2, 1)) -> (2, 1)
     #          ((4, 5), (6, 7)) -> (3, 3) etc.
-    bszs = {tuple(abs(a - b) + 1 for a, b in zip(*pair)) for pair in pairs}
+    bszs = set()
+    for coos in coo_groups:
+        if is_lone_coo(coos):
+            bszs.add((1, 1))
+            continue
+        xs, ys = zip(*coos)
+        xsz = max(xs) - min(xs) + 1
+        ysz = max(ys) - min(ys) + 1
+        bszs.add((xsz, ysz))
 
     # remove block size pairs that can be contained in another block pair size
     #     e.g. {(1, 2), (2, 1), (2, 2)} -> ((2, 2),)
@@ -3549,6 +3561,8 @@ def calc_plaquette_map(plaquettes):
     mapping = dict()
     for p in plqs:
         sites = plaquette_to_sites(p)
+        for site in sites:
+            mapping[site] = p
         # this will generate all coordinate pairs with ij_a < ij_b
         for ij_a, ij_b in combinations(sites, 2):
             mapping[ij_a, ij_b] = p
