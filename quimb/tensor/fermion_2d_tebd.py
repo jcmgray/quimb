@@ -5,7 +5,7 @@ from itertools import product
 from pyblock3.algebra.core import SubTensor
 from pyblock3.algebra.fermion import SparseFermionTensor, FlatFermionTensor
 from quimb.tensor.fermion_2d import FPEPS,FermionTensorNetwork2DVector
-from quimb.tensor.fermion_ops import to_exp, eye, hubbard
+from quimb.tensor.fermion_ops import to_exponential, eye, hubbard
 from pyblock3.algebra.symmetry import SZ, BondInfo
 from quimb.tensor.tensor_2d_tebd import SimpleUpdate as _SimpleUpdate
 from quimb.tensor.tensor_2d_tebd import conditioner
@@ -134,7 +134,7 @@ class LocalHam2D:
         cache = self._op_cache['expm']
         key = (id(x), y)
         if key not in cache:
-            out = to_exp(x, y)
+            out = to_exponential(x, y)
             cache[key] = out
         return cache[key]
 

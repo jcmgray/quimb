@@ -10,15 +10,15 @@ from .tensor_2d import (
     PEPS,
     is_lone_coo,
     gen_long_range_path,
-    plaquette_to_sites)
+    plaquette_to_sites,
+    calc_plaquette_sizes,
+    calc_plaquette_map)
 from .tensor_core import (
     rand_uuid,
     oset,
     tags_to_oset,
     bonds
 )
-from .tensor_2d import calc_plaquette_sizes as _calc_plaquette_sizes
-from .tensor_2d import calc_plaquette_map as _calc_plaquette_map
 from ..utils import check_opt, pairwise
 from collections import defaultdict
 from itertools import product
@@ -28,30 +28,6 @@ from operator import add
 from pyblock3.algebra.fermion import FlatFermionTensor
 
 INVERSE_CUTOFF = 1e-10
-
-def calc_plaquette_sizes(pairs, autogroup=True):
-    singles = []
-    remainders = []
-    for pair in pairs:
-        singles.append(is_lone_coo(pair))
-        if not is_lone_coo(pair):
-            remainders.append(pair)
-    singles = (sum(singles) != 0)
-    if singles:
-        sizes = ((1,1),)
-    else:
-        sizes = ()
-    if len(remainders) >0:
-        sizes += _calc_plaquette_sizes(remainders, autogroup)
-    return sizes
-
-def calc_plaquette_map(plaquettes):
-    plaqs = [p for p in plaquettes if p[1][0] * p[1][1]>1]
-    map = _calc_plaquette_map(plaqs)
-    for p in plaquettes:
-        if p[1][0] * p[1][1]==1:
-            map[p[0]] = p
-    return map
 
 def gate_string_split_(TG, where, string, original_ts, bonds_along,
                        reindex_map, site_ix, info, **compress_opts):
@@ -720,8 +696,8 @@ class FermionTensorNetwork2DVector(FermionTensorNetwork2D,
             #      ╱   ╱
             #
             psi.reindex_(reindex_map)
-            input_tid, = psi._get_tids_from_inds(bnds, which='any')
-            isite = psi.tensor_map[input_tid].get_fermion_info()[1]
+            input_tids = psi._get_tids_from_inds(bnds, which='any')
+            isite = [psi.tensor_map[itid].get_fermion_info()[1] for itid in input_tids]
 
             #psi |= TG
             psi.fermion_space.add_tensor(TG, virtual=True)
@@ -732,7 +708,7 @@ class FermionTensorNetwork2DVector(FermionTensorNetwork2D,
             # pop the sites, contract, then re-add
             pts = [psi._pop_tensor_(tid) for tid in site_tids]
             out = tensor_contract(*pts, TG, inplace=True)
-            psi.fermion_space.move(out.get_fermion_info()[0], isite)
+            psi.fermion_space.move(out.get_fermion_info()[0], min(isite))
             psi |= out
             return psi
 
@@ -825,7 +801,7 @@ class FermionTensorNetwork2DVector(FermionTensorNetwork2D,
             plaquette_env_options.setdefault('layer_tags', ('KET', 'BRA'))
 
             plaquette_envs = dict()
-            for x_bsz, y_bsz in calc_plaquette_sizes(terms, autogroup):
+            for x_bsz, y_bsz in calc_plaquette_sizes(terms.keys(), autogroup):
                 plaquette_envs.update(norm.compute_plaquette_environments(
                     x_bsz=x_bsz, y_bsz=y_bsz, **plaquette_env_options))
 
