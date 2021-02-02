@@ -7,10 +7,9 @@ import functools
 from math import log2
 from numbers import Integral
 
-import numpy as np
 import opt_einsum as oe
 import scipy.sparse.linalg as spla
-from autoray import do, dag, reshape, conj
+from autoray import do, dag, reshape, conj, get_dtype_name, transpose
 
 from ..utils import check_opt, print_multi_line, ensure_dict, partition_all
 import quimb as qu
@@ -745,6 +744,8 @@ class TensorNetwork1DVector(TensorNetwork1D,
                            doc="The string specifier for the physical indices")
 
     def site_ind(self, i):
+        """Get the physical index name of site ``i``.
+        """
         if not isinstance(i, str):
             i = i % self.L
         return self.site_ind_id.format(i)
@@ -1511,13 +1512,12 @@ class TensorNetwork1DFlat(TensorNetwork1D,
 
         def isidentity(x):
             d = x.shape[0]
-            if x.dtype in ('float32', 'complex64'):
+            if get_dtype_name(x) in ('float32', 'complex64'):
                 rtol, atol = 1e-5, 1e-6
-                idtty = np.eye(d, dtype='float32')
             else:
                 rtol, atol = 1e-9, 1e-11
-                idtty = np.eye(d, dtype='float64')
-            return np.allclose(x, idtty, rtol=rtol, atol=atol)
+            idtty = do('eye', d, dtype=x.dtype, like=x)
+            return do('allclose', x, idtty, rtol=rtol, atol=atol)
 
         for i in range(self.L - 1):
             ov ^= slice(max(0, i - 1), i + 1)
@@ -1678,7 +1678,7 @@ class MatrixProductState(TensorNetwork1DVector,
         def gen_tensors():
             for array, site_tag, inds, order in zip(arrays, site_tags,
                                                     gen_inds(), gen_orders()):
-                yield Tensor(array.transpose(*order), inds=inds, tags=site_tag)
+                yield Tensor(transpose(array, order), inds=inds, tags=site_tag)
 
         super().__init__(gen_tensors(), check_collisions=False, **tn_opts)
 
@@ -1749,9 +1749,7 @@ class MatrixProductState(TensorNetwork1DVector,
     def add_MPS(self, other, inplace=False, compress=False, **compress_opts):
         """Add another MatrixProductState to this one.
         """
-        L = self.L
-
-        if L != other.L:
+        if self.L != other.L:
             raise ValueError("Can't add MPS with another of different length.")
 
         new_mps = self if inplace else self.copy()
@@ -1764,21 +1762,23 @@ class MatrixProductState(TensorNetwork1DVector,
                 reindex_map = {}
 
                 if i > 0 or self.cyclic:
-                    pair = ((i - 1) % L, i)
+                    pair = ((i - 1) % self.L, i)
                     reindex_map[other.bond(*pair)] = new_mps.bond(*pair)
 
                 if i < new_mps.L - 1 or self.cyclic:
-                    pair = (i, (i + 1) % L)
+                    pair = (i, (i + 1) % self.L)
                     reindex_map[other.bond(*pair)] = new_mps.bond(*pair)
 
                 t2 = t2.reindex(reindex_map)
 
-            t1.direct_product(t2, inplace=True, sum_inds=new_mps.site_ind(i))
+            t1.direct_product_(t2, sum_inds=new_mps.site_ind(i))
 
         if compress:
             new_mps.compress(**compress_opts)
 
         return new_mps
+
+    add_MPS_ = functools.partialmethod(add_MPS, inplace=True)
 
     def __add__(self, other):
         """MPS addition.
@@ -2097,7 +2097,7 @@ class MatrixProductState(TensorNetwork1DVector,
 
         S = self.schmidt_values(i, cur_orthog=cur_orthog, method=method)
         S = S[S > 0.0]
-        return np.sum(-S * np.log2(S))
+        return do('sum', -S * do('log2', S))
 
     def schmidt_gap(self, i, cur_orthog=None, method='svd'):
         """The schmidt gap of bipartition between the left block of ``i`` sites
@@ -2242,7 +2242,7 @@ class MatrixProductState(TensorNetwork1DVector,
         if self.cyclic:
             raise NotImplementedError("MPS must have OBC.")
 
-        s = np.diag(self.singular_values(sz_a, cur_orthog=cur_orthog))
+        s = do('diag', self.singular_values(sz_a, cur_orthog=cur_orthog))
 
         if 'dense' in get:
             kd = qu.qarray(s.reshape(-1, 1))
@@ -2686,6 +2686,112 @@ class MatrixProductState(TensorNetwork1DVector,
         # clip below 0
         return max(0, log2(tr_norm))
 
+    def measure(
+        self,
+        site,
+        remove=False,
+        outcome=None,
+        renorm=True,
+        cur_orthog=None,
+        get=None,
+        inplace=False,
+    ):
+        r"""Measure this MPS at ``site``, including projecting the state.
+        Optionally remove the site afterwards, yielding an MPS with one less
+        site. In either case the orthogonality center of the returned MPS is
+        ``min(site, new_L - 1)``.
+
+        Parameters
+        ----------
+        site : int
+            The site to measure.
+        remove : bool, optional
+            Whether to remove the site completely after projecting the
+            measurement. If ``True``, sites greater than ``site`` will be
+            retagged and reindex one down, and the MPS will have one less site.
+            E.g::
+
+                0-1-2-3-4-5-6
+                       / / /  - measure and remove site 3
+                0-1-2-4-5-6
+                              - reindex sites (4, 5, 6) to (3, 4, 5)
+                0-1-2-3-4-5
+
+        outcome : None or int, optional
+            Specify the desired outcome of the measurement. If ``None``, it
+            will be randomly sampled according to the local density matrix.
+        renorm : bool, optional
+            Whether to renormalize the state post measurement.
+        cur_orthog : None or int, optional
+            If you already know the orthogonality center, you can supply it
+            here for efficiencies sake.
+        get : {None, 'outcome'}, optional
+            If ``'outcome'``, simply return the outcome, and don't perform any
+            projection.
+        inplace : bool, optional
+            Whether to perform the measurement in place or not.
+
+        Returns
+        -------
+        outcome : int
+            The measurement outcome, drawn from ``range(phys_dim)``.
+        psi : MatrixProductState
+            The measured state, if ``get != 'outcome'``.
+        """
+        if self.cyclic:
+            raise ValueError('Not supported on cyclic MPS yet.')
+
+        tn = self if inplace else self.copy()
+        L = tn.L
+        d = self.phys_dim(site)
+
+        # make sure MPS is canonicalized
+        if cur_orthog is not None:
+            tn.shift_orthogonality_center(cur_orthog, site)
+        else:
+            tn.canonize(site)
+
+        # local tensor and physical dim
+        t = tn[site]
+        ind = tn.site_ind(site)
+
+        # diagonal of reduced density matrix = probs
+        tii = t.contract(t.H, output_inds=(ind,))
+        p = do('real', tii.data)
+
+        if outcome is None:
+            # sample an outcome
+            outcome = do('random.choice', do('arange', d, like=p), p=p)
+
+        if get == 'outcome':
+            return outcome
+
+        # project the outcome and renormalize
+        t.isel_({ind: outcome})
+
+        if renorm:
+            t.modify(data=t.data / p[outcome]**0.5)
+
+        if remove:
+            # contract the projected tensor into neighbor
+            if site == L - 1:
+                tn ^= slice(site - 1, site + 1)
+            else:
+                tn ^= slice(site, site + 2)
+
+            # adjust structure for one less spin
+            for i in range(site + 1, L):
+                tn[i].reindex_({tn.site_ind(i): tn.site_ind(i - 1)})
+                tn[i].retag_({tn.site_tag(i): tn.site_tag(i - 1)})
+            tn._L = L - 1
+        else:
+            # simply re-expand tensor dimensions (with zeros)
+            t.new_ind(ind, size=d, axis=-1)
+
+        return outcome, tn
+
+    measure_ = functools.partialmethod(measure, inplace=True)
+
 
 class MatrixProductOperator(TensorNetwork1DOperator,
                             TensorNetwork1DFlat,
@@ -2785,18 +2891,16 @@ class MatrixProductOperator(TensorNetwork1DOperator,
             for array, site_tag, inds, order in zip(arrays, site_tags,
                                                     gen_inds(), gen_orders()):
 
-                yield Tensor(array.transpose(*order), inds=inds, tags=site_tag)
+                yield Tensor(transpose(array, order), inds=inds, tags=site_tag)
 
         super().__init__(gen_tensors(), check_collisions=False, **tn_opts)
 
     def add_MPO(self, other, inplace=False, compress=False, **compress_opts):
         """Add another MatrixProductState to this one.
         """
-        N = self.L
-
-        if N != other.L:
+        if self.L != other.L:
             raise ValueError("Can't add MPO with another of different length."
-                             f"Got lengths {N} and {other.L}")
+                             f"Got lengths {self.L} and {other.L}")
 
         summed = self if inplace else self.copy()
 
@@ -2808,22 +2912,24 @@ class MatrixProductOperator(TensorNetwork1DOperator,
                 reindex_map = {}
 
                 if i > 0 or self.cyclic:
-                    pair = ((i - 1) % N, i)
+                    pair = ((i - 1) % self.L, i)
                     reindex_map[other.bond(*pair)] = summed.bond(*pair)
 
                 if i < summed.L - 1 or self.cyclic:
-                    pair = (i, (i + 1) % N)
+                    pair = (i, (i + 1) % self.L)
                     reindex_map[other.bond(*pair)] = summed.bond(*pair)
 
                 t2 = t2.reindex(reindex_map)
 
             sum_inds = (summed.upper_ind(i), summed.lower_ind(i))
-            t1.direct_product(t2, inplace=True, sum_inds=sum_inds)
+            t1.direct_product_(t2, sum_inds=sum_inds)
 
         if compress:
             summed.compress(**compress_opts)
 
         return summed
+
+    add_MPO_ = functools.partialmethod(add_MPO, inplace=True)
 
     def _apply_mps(self, other, compress=True, **compress_opts):
         A, x = self.copy(), other.copy()
@@ -3239,7 +3345,7 @@ class SuperOperator1D(
         def gen_tensors():
             for array, tags, inds, order in zip(arrays, gen_tags(),
                                                 gen_inds(), gen_orders()):
-                yield Tensor(array.transpose(*order), inds=inds, tags=tags)
+                yield Tensor(transpose(array, order), inds=inds, tags=tags)
 
         super().__init__(gen_tensors(), check_collisions=False, **tn_opts)
 

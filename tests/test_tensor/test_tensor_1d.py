@@ -411,8 +411,8 @@ class TestMatrixProductState:
                  range(50, 60),
                  range(30, 60)])
     def test_partial_trace_compress(self, method, cyclic, sysa, sysb):
-        k = MPS_rand_state(60, 8, cyclic=cyclic)
-        kws = dict(sysa=sysa, sysb=sysb, eps=1e-4, method=method)
+        k = MPS_rand_state(60, 5, cyclic=cyclic)
+        kws = dict(sysa=sysa, sysb=sysb, eps=1e-6, method=method, verbosity=2)
         rhoc_ab = k.partial_trace_compress(**kws)
         assert set(rhoc_ab.outer_inds()) == {'kA', 'kB', 'bA', 'bB'}
         inds = ['kA', 'kB'], ['bA', 'bB']
@@ -587,6 +587,38 @@ class TestMatrixProductState:
 
         assert len(psi_cnot.tensors) == len(psi_iswap.tensors) == 4
         assert len(psi_G.tensors) == 3
+
+    @pytest.mark.parametrize('cur_orthog', (None, 3))
+    @pytest.mark.parametrize('site', (0, 5, 9))
+    @pytest.mark.parametrize('outcome', (None, 2))
+    @pytest.mark.parametrize('renorm', (True, False))
+    @pytest.mark.parametrize('remove', (True, False))
+    def test_mps_measure(self, cur_orthog, site, outcome, renorm, remove):
+        psi = MPS_rand_state(10, 7, phys_dim=3, dtype=complex)
+        if cur_orthog:
+            psi.canonize(cur_orthog)
+        outcome, psim = psi.measure(
+            site, outcome=outcome, cur_orthog=cur_orthog,
+            renorm=renorm, remove=remove)
+        newL = 10 - int(remove)
+        assert psim.L == newL
+        assert psim.num_tensors == newL
+        assert set(psim.site_tags) == {f'I{i}' for i in range(newL)}
+        assert set(psim.site_inds) == {f'k{i}' for i in range(newL)}
+        if renorm:
+            assert psim.H @ psim == pytest.approx(1.0)
+        else:
+            assert 0.0 < psim.H @ psim < 1.0
+        new_can_cen = min(site, newL - 1)
+        t = psim[new_can_cen]
+        if renorm:
+            assert t.H @ t == pytest.approx(1.0)
+        else:
+            0.0 < t.H @ t < 1.0
+
+    def test_measure_known_outcome(self):
+        mps = MPS_computational_state('010101')
+        assert mps.measure_(3, get='outcome') == 1
 
 
 class TestMatrixProductOperator:

@@ -11,13 +11,16 @@ import opt_einsum as oe
 
 from ..core import make_immutable, ikron
 from ..utils import deprecated
-from ..gen.operators import spin_operator, eye, _gen_mbl_random_factors
+from ..gen.operators import (
+    spin_operator, eye, _gen_mbl_random_factors, ham_heis
+)
 from ..gen.rand import randn, choice, random_seed_fn, rand_phase
 from .tensor_core import Tensor, new_bond, TensorNetwork, rand_uuid
 from .array_ops import asarray, sensibly_scale
 from .tensor_1d import MatrixProductState, MatrixProductOperator
-from .tensor_2d import TensorNetwork2D
+from .tensor_2d import gen_2d_bonds, TensorNetwork2D
 from .tensor_1d_tebd import LocalHam1D
+from .tensor_2d_tebd import LocalHam2D
 
 
 @random_seed_fn
@@ -79,6 +82,7 @@ def TN_rand_reg(
     D,
     phys_dim=None,
     seed=None,
+    dtype='float64',
     site_tag_id='I{}',
     site_ind_id='k{}',
 ):
@@ -121,7 +125,7 @@ def TN_rand_reg(
         new_bond(ts[i], ts[j], size=D)
 
     tn = TensorNetwork(ts)
-    tn.randomize_(seed=seed)
+    tn.randomize_(seed=seed, dtype=dtype)
 
     return tn
 
@@ -1502,7 +1506,8 @@ def MPO_ham_ising(L, j=1.0, bx=0.0, *, S=1 / 2, cyclic=False, **mpo_opts):
 
 def ham_1d_ising(L=None, j=1.0, bx=0.0, *, S=1 / 2,
                  cyclic=False, **local_ham_1d_opts):
-    r"""Ising Hamiltonian in LocalHam1D form.
+    r"""Ising Hamiltonian in
+    :class:`~quimb.tensor.tensor_1d_tebd.LocalHam1D` form.
 
     .. math::
 
@@ -1602,7 +1607,8 @@ def MPO_ham_XY(L, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **mpo_opts):
 
 def ham_1d_XY(L=None, j=1.0, bz=0.0, *, S=1 / 2,
               cyclic=False, **local_ham_1d_opts):
-    r"""XY-Hamiltonian in LocalHam1D form.
+    r"""XY-Hamiltonian in
+    :class:`~quimb.tensor.tensor_1d_tebd.LocalHam1D` form.
 
     .. math::
 
@@ -1707,7 +1713,8 @@ def MPO_ham_heis(L, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **mpo_opts):
 
 def ham_1d_heis(L=None, j=1.0, bz=0.0, *, S=1 / 2,
                 cyclic=False, **local_ham_1d_opts):
-    r"""Heisenberg Hamiltonian in LocalHam1D form.
+    r"""Heisenberg Hamiltonian in
+    :class:`~quimb.tensor.tensor_1d_tebd.LocalHam1D` form.
 
     .. math::
 
@@ -1736,7 +1743,7 @@ def ham_1d_heis(L=None, j=1.0, bz=0.0, *, S=1 / 2,
         Generate a hamiltonian with periodic boundary conditions or not,
         default is open boundary conditions.
     local_ham_1d_opts
-        Supplied to :class:`~quimb.tensor.tensor_gen.LocalHam1D`.
+        Supplied to :class:`~quimb.tensor.tensor_1d_tebd.LocalHam1D`.
 
     Returns
     -------
@@ -1791,7 +1798,8 @@ def MPO_ham_XXZ(L, delta, jxy=1.0, *, S=1 / 2, cyclic=False, **mpo_opts):
 
 def ham_1d_XXZ(L=None, delta=None, jxy=1.0, *,
                S=1 / 2, cyclic=False, **local_ham_1d_opts):
-    r"""XXZ-Hamiltonian in LocalHam1D form.
+    r"""XXZ-Hamiltonian in
+    :class:`~quimb.tensor.tensor_1d_tebd.LocalHam1D` form.
 
     .. math::
 
@@ -1821,7 +1829,7 @@ def ham_1d_XXZ(L=None, delta=None, jxy=1.0, *,
         Generate a hamiltonian with periodic boundary conditions or not,
         default is open boundary conditions.
     local_ham_1d_opts
-        Supplied to :class:`~quimb.tensor.tensor_gen.LocalHam1D`.
+        Supplied to :class:`~quimb.tensor.tensor_1d_tebd.LocalHam1D`.
 
     Returns
     -------
@@ -1909,7 +1917,7 @@ def ham_1d_bilinear_biquadratic(L=None, theta=0, *, S=1 / 2,
         Generate a hamiltonian with periodic boundary conditions or not,
         default is open boundary conditions.
     local_ham_1d_opts
-        Supplied to :class:`~quimb.tensor.tensor_gen.LocalHam1D`.
+        Supplied to :class:`~quimb.tensor.tensor_1d_tebd.LocalHam1D`.
 
     Returns
     -------
@@ -1990,7 +1998,8 @@ def MPO_ham_mbl(L, dh, j=1.0, seed=None, S=1 / 2, *, cyclic=False,
 
 def ham_1d_mbl(L, dh, j=1.0, seed=None, S=1 / 2, *, cyclic=False,
                dh_dist='s', dh_dim=1, beta=None, **local_ham_1d_opts):
-    r"""The many-body-localized spin hamiltonian in LocalHam1D form.
+    r"""The many-body-localized spin hamiltonian in
+    :class:`~quimb.tensor.tensor_1d_tebd.LocalHam1D` form.
 
     .. math::
 
@@ -2037,3 +2046,148 @@ def ham_1d_mbl(L, dh, j=1.0, seed=None, S=1 / 2, *, cyclic=False,
 
 
 NNI_ham_mbl = deprecated(ham_1d_mbl, 'NNI_ham_mbl', 'ham_1d_mbl')
+
+
+def ham_2d_ising(Lx, Ly, j=1.0, bx=0.0, **local_ham_2d_opts):
+    r"""Ising Hamiltonian in
+    :class:`~quimb.tensor.tensor_2d_tebd.LocalHam2D` form.
+
+    .. math::
+
+        H_\mathrm{Ising} =
+        J \sum_{<ij>} \sigma^Z_i \sigma^Z_{j} -
+        B_x \sum_{i} \sigma^X_i
+
+    for nearest neighbors :math:`<ij>`. Note the default convention of
+    antiferromagnetic interactions and spin operators not Pauli matrices.
+
+    Parameters
+    ----------
+    Lx : int
+        The number of rows.
+    Ly : int
+        The number of columns.
+    j : float, optional
+        The ZZ interaction strength. Positive is antiferromagnetic.
+    bx : float, optional
+        The X-magnetic field strength.
+    local_ham_2d_opts
+        Supplied to :class:`~quimb.tensor.tensor_2d.LocalHam2D`.
+
+    Returns
+    -------
+    LocalHam2D
+    """
+    H2 = ham_heis(2, j=(0, 0, j), cyclic=False)
+    if bx == 0.0:
+        H1 = None
+    else:
+        H1 = -bx * spin_operator('X').real
+    return LocalHam2D(Lx, Ly, H2=H2, H1=H1, **local_ham_2d_opts)
+
+
+def ham_2d_heis(Lx, Ly, j=1.0, bz=0.0, **local_ham_2d_opts):
+    r"""Heisenberg Hamiltonian in
+    :class:`~quimb.tensor.tensor_2d_tebd.LocalHam2D`. form.
+
+    .. math::
+
+        H_\mathrm{Heis} =
+        \sum_{<ij>} (
+            J_X \sigma^X_i \sigma^X_{j} +
+            J_Y \sigma^Y_i \sigma^Y_{j} +
+            J_Z \sigma^Z_i \sigma^Z_{j}
+            )
+        - B_Z \sum_{i} \sigma^Z_{i}
+
+    for nearest neighbors :math:`<ij>`. Note the default convention of
+    antiferromagnetic interactions and spin operators not Pauli matrices.
+
+    Parameters
+    ----------
+    Lx : int
+        The number of rows.
+    Ly : int
+        The number of columns.
+    j : float or (float, float, float), optional
+        The XX, YY and ZZ interaction strength. Positive is antiferromagnetic.
+    bz : float, optional
+        The Z-magnetic field strength.
+    local_ham_2d_opts
+        Supplied to :class:`~quimb.tensor.tensor_2d_tebd.LocalHam2D`.
+
+    Returns
+    -------
+    LocalHam2D
+    """
+    H2 = ham_heis(2, j=j, cyclic=False)
+    if bz == 0.0:
+        H1 = None
+    else:
+        H1 = -bz * spin_operator('Z').real
+    return LocalHam2D(Lx, Ly, H2=H2, H1=H1, **local_ham_2d_opts)
+
+
+def ham_2d_j1j2(Lx, Ly, j1=1.0, j2=0.5, bz=0.0, **local_ham_2d_opts):
+    r"""Heisenberg Hamiltonian in
+    :class:`~quimb.tensor.tensor_2d_tebd.LocalHam2D`. form.
+
+    .. math::
+
+        H_\mathrm{Heis} =
+        \sum_{<ij>} (
+            J_{1,X} \sigma^X_i \sigma^X_{j} +
+            J_{1,Y} \sigma^Y_i \sigma^Y_{j} +
+            J_{1,Z} \sigma^Z_i \sigma^Z_{j}
+            )
+        +
+        \sum_{<<ij>>} (
+            J_{2,X} \sigma^X_i \sigma^X_{j} +
+            J_{2,Y} \sigma^Y_i \sigma^Y_{j} +
+            J_{2,Z} \sigma^Z_i \sigma^Z_{j}
+            )
+        - B_Z \sum_{i} \sigma^Z_{i}
+
+    for nearest neighbors :math:`<ij>` and diagonal next nearest neighbors
+    :math:`<<ij>>`. Note the default convention of antiferromagnetic
+    interactions and spin operators not Pauli matrices.
+
+    Parameters
+    ----------
+    Lx : int
+        The number of rows.
+    Ly : int
+        The number of columns.
+    j2 : float or (float, float, float), optional
+        The nearest neighbor  XX, YY and ZZ interaction strength. Positive is
+        antiferromagnetic.
+    j2 : float or (float, float, float), optional
+        The diagonal next nearest nearest XX, YY and ZZ interaction strength.
+        Positive is antiferromagnetic.
+    bz : float, optional
+        The Z-magnetic field strength.
+    local_ham_2d_opts
+        Supplied to :class:`~quimb.tensor.tensor_2d_tebd.LocalHam2D`.
+
+    Returns
+    -------
+    LocalHam2D
+    """
+
+    # default nearest neighbor interaction
+    H2 = {None: ham_heis(2, j=j1, cyclic=False)}
+
+    # diagonal next nearest neighbor interactions
+    for bond in gen_2d_bonds(Lx, Ly, steppers=[
+        lambda i, j: (i + 1, j - 1),
+        lambda i, j: (i + 1, j + 1),
+    ]):
+        H2[bond] = ham_heis(2, j=j2, cyclic=False)
+
+    # magnetic field
+    if bz == 0.0:
+        H1 = None
+    else:
+        H1 = -bz * spin_operator('Z').real
+
+    return LocalHam2D(Lx, Ly, H2=H2, H1=H1, **local_ham_2d_opts)

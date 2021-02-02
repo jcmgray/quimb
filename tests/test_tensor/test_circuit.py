@@ -167,6 +167,7 @@ class TestCircuit:
             ('cu1', 2, 1),
             ('fsim', 2, 2),
             ('rzz', 2, 1),
+            ('su4', 2, 15),
         ]
         random.shuffle(g_nq_np)
 
@@ -182,6 +183,34 @@ class TestCircuit:
 
         assert circ.psi.H @ circ.psi == pytest.approx(1.0)
         assert abs((circ.psi.H & psi0) ^ all) < 0.99999999
+
+    def test_su4(self):
+        psi0 = qtn.MPS_rand_state(2, 2)
+        circ_a = qtn.Circuit(psi0=psi0)
+        params = qu.randn(15)
+
+        circ_a.su4(*params, 0, 1)
+        psi_a = circ_a.to_dense()
+
+        circ_b = qtn.Circuit(psi0=psi0)
+        (theta1, phi1, lamda1,
+         theta2, phi2, lamda2,
+         theta3, phi3, lamda3,
+         theta4, phi4, lamda4,
+         t1, t2, t3,) = params
+        circ_b.u3(theta1, phi1, lamda1, 0)
+        circ_b.u3(theta2, phi2, lamda2, 1)
+        circ_b.cnot(1, 0)
+        circ_b.rz(t1, 0)
+        circ_b.ry(t2, 1)
+        circ_b.cnot(0, 1)
+        circ_b.ry(t3, 1)
+        circ_b.cnot(1, 0)
+        circ_b.u3(theta3, phi3, lamda3, 0)
+        circ_b.u3(theta4, phi4, lamda4, 1)
+        psi_b = circ_b.to_dense()
+
+        assert qu.fidelity(psi_a, psi_b) == pytest.approx(1.0)
 
     def test_auto_split_gate(self):
 
@@ -312,7 +341,7 @@ class TestCircuit:
         import collections
         from scipy.stats import power_divergence
 
-        C = 2**10
+        C = 2**12
         L = 5
         reps = 3
         depth = 2

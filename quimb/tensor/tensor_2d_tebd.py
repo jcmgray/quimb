@@ -10,10 +10,11 @@ from autoray import do, dag, conj, reshape, to_numpy
 
 from ..core import eye, kron, qarray
 from ..utils import pairwise
-from .graphing import get_colors
+from .drawing import get_colors
 from .tensor_core import Tensor, contract_strategy
 from .optimize import TNOptimizer
 from .tensor_2d import (
+    gen_2d_bonds,
     calc_plaquette_sizes,
     calc_plaquette_map,
     plaquette_to_sites,
@@ -99,13 +100,11 @@ class LocalHam2D:
         # possibly fill in default gates
         default_H2 = self.terms.pop(None, None)
         if default_H2 is not None:
-            for i, j in product(range(self.Lx), range(self.Ly)):
-                if i + 1 < self.Lx:
-                    where = ((i, j), (i + 1, j))
-                    self.terms.setdefault(where, default_H2)
-                if j + 1 < self.Ly:
-                    where = ((i, j), (i, j + 1))
-                    self.terms.setdefault(where, default_H2)
+            for where in gen_2d_bonds(Lx, Ly, steppers=[
+                lambda i, j: (i, j + 1),
+                lambda i, j: (i + 1, j),
+            ]):
+                self.terms.setdefault(where, default_H2)
 
         # make a directory of which single sites are covered by which terms
         #     - to merge them into later
@@ -303,7 +302,7 @@ class LocalHam2D:
         s = "<LocalHam2D(Lx={}, Ly={}, num_terms={})>"
         return s.format(self.Lx, self.Ly, len(self.terms))
 
-    def graph(
+    def draw(
         self,
         ordering='sort',
         show_norm=True,
@@ -412,6 +411,8 @@ class LocalHam2D:
             return fig
 
         plt.show()
+
+    graph = draw
 
 
 class TEBD2D:
@@ -593,7 +594,7 @@ class TEBD2D:
             **self.compute_energy_opts
         )
 
-    def sweep(self):
+    def sweep(self, tau):
         """Perform a full sweep of gates at every pair.
         """
         if callable(self.ordering):
@@ -602,7 +603,12 @@ class TEBD2D:
             ordering = self.ordering
 
         for where in ordering:
-            U = self.ham.get_gate_expm(where, -self.tau)
+
+            if callable(tau):
+                U = self.ham.get_gate_expm(where, -tau(where))
+            else:
+                U = self.ham.get_gate_expm(where, -tau)
+
             self.gate(U, where)
 
     def gate(self, U, where):
@@ -662,7 +668,7 @@ class TEBD2D:
                     self._update_progbar(pbar)
 
                 # actually perform the gates
-                self.sweep()
+                self.sweep(self.tau)
                 self._n += 1
                 pbar.update()
 
@@ -1093,7 +1099,7 @@ def gate_full_update_als(
                 xs[site] = x
 
             # after updating both sites check for convergence of tensor entries
-            cost_fid = do('abs', do('trace', dag(x) @ b))
+            cost_fid = do('trace', do('real', dag(x) @ b))
             cost_norm = do('abs', do('trace', dag(x) @ (N @ x)))
             cost = - 2 * cost_fid + cost_norm
 

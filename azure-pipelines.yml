@@ -29,7 +29,7 @@ jobs:
         quimb_numba_cache: false
         quimb_numba_parallel: false
   pool:
-    vmImage: 'ubuntu-latest'
+    vmImage: 'ubuntu-20.04'
   steps:
   - template: ci/azure/unit-tests.yml
 

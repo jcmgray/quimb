@@ -9,7 +9,6 @@ from ..core import prod
 from ..linalg.base_linalg import eigh, IdentityLinearOperator
 from .tensor_core import (
     Tensor,
-    TensorNetwork,
     tensor_contract,
     TNLinearOperator,
     asarray,

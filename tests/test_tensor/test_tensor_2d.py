@@ -52,6 +52,14 @@ class TestPEPSConstruct:
         assert len(norm.tensors) == 15
         assert norm.max_bond() == 9
 
+    def test_add_peps(self):
+        pa = qtn.PEPS.rand(3, 4, 2)
+        pb = qtn.PEPS.rand(3, 4, 3)
+        pc = qtn.PEPS.rand(3, 4, 4)
+        pab = pa + pb
+        assert pab.max_bond() == 5
+        assert pab @ pc == pytest.approx(pa @ pc + pb @ pc)
+
     @pytest.mark.parametrize('Lx', [3, 4, 5])
     @pytest.mark.parametrize('Ly', [3, 4, 5])
     def test_bond_coordinates(self, Lx, Ly):
@@ -196,7 +204,28 @@ class Test2DContract:
         assert norm == pytest.approx(1.0, rel=0.01)
 
     @pytest.mark.parametrize('normalized', [False, True])
-    def test_compute_local_expectation(self, normalized):
+    def test_compute_local_expectation_one_sites(self, normalized):
+        peps = qtn.PEPS.rand(4, 3, 2, seed=42, dtype='complex')
+
+        # reference
+        k = peps.to_dense()
+        if normalized:
+            qu.normalize(k)
+        coos = list(itertools.product([0, 2, 3], [0, 1, 2]))
+        terms = {coo: qu.rand_matrix(2) for coo in coos}
+        dims = [[2] * 3] * 4
+        A = sum(qu.ikron(A, dims, [coo], sparse=True)
+                for coo, A in terms.items())
+        ex = qu.expec(A, k)
+
+        opts = dict(cutoff=2e-3, max_bond=9, contract_optimize='random-greedy')
+        e = peps.compute_local_expectation(
+            terms, normalized=normalized, **opts)
+
+        assert e == pytest.approx(ex, rel=1e-2)
+
+    @pytest.mark.parametrize('normalized', [False, True])
+    def test_compute_local_expectation_two_sites(self, normalized):
         H = qu.ham_heis_2D(4, 3, sparse=True)
         Hij = qu.ham_heis(2, cyclic=False)
 
@@ -271,6 +300,14 @@ class TestPEPOConstruct:
         assert f'Lx={Lx}' in X.__str__()
         assert f'Lx={Lx}' in X.__repr__()
 
+    def test_add_pepo(self):
+        pa = qtn.PEPO.rand(3, 4, 2)
+        pb = qtn.PEPO.rand(3, 4, 3)
+        pc = qtn.PEPO.rand(3, 4, 4)
+        pab = pa + pb
+        assert pab.max_bond() == 5
+        assert pab @ pc == pytest.approx(pa @ pc + pb @ pc)
+
 
 class TestMisc:
 
@@ -306,7 +343,11 @@ class TestMisc:
         ]
         assert (
             calc_plaquette_map(plaquettes) ==
-            {((0, 0), (0, 1)): ((0, 0), (1, 2)),
+            {(0, 0): ((0, 0), (2, 1)),
+             (0, 1): ((0, 1), (2, 1)),
+             (1, 0): ((1, 0), (1, 2)),
+             (1, 1): ((1, 0), (1, 2)),
+             ((0, 0), (0, 1)): ((0, 0), (1, 2)),
              ((0, 0), (1, 0)): ((0, 0), (2, 1)),
              ((0, 0), (1, 1)): ((0, 0), (2, 2)),
              ((0, 1), (1, 0)): ((0, 0), (2, 2)),

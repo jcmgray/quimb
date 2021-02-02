@@ -4,6 +4,7 @@ automatically derive gradients for input to scipy optimizers.
 import re
 import functools
 import importlib
+from collections.abc import Iterable
 
 import tqdm
 import numpy as np
@@ -18,7 +19,7 @@ from .tensor_core import (
 )
 from .array_ops import iscomplex
 from ..core import qarray
-from ..utils import valmap
+from ..utils import valmap, ensure_dict
 
 if importlib.util.find_spec("jax") is not None:
     _DEFAULT_BACKEND = 'jax'
@@ -167,48 +168,71 @@ def constant_tn(tn, to_constant):
     return ag_tn
 
 
+@functools.lru_cache(1)
+def get_autograd():
+    import autograd
+    return autograd
+
+
 class AutoGradHandler:
 
-    def __init__(self):
-        import autograd
-        self.autograd = autograd
+    def __init__(self, device='cpu'):
+        if device != 'cpu':
+            raise ValueError("`autograd` currently is only "
+                             "backed by cpu, numpy arrays.")
 
     def to_variable(self, x):
-        return np.array(x)
+        return np.asarray(x)
 
     def to_constant(self, x):
-        return np.array(x)
+        return np.asarray(x)
 
     def setup_fn(self, fn):
-        self._value_and_grad = self.autograd.value_and_grad(fn)
+        autograd = get_autograd()
+        self._value_and_grad = autograd.value_and_grad(fn)
 
     def value_and_grad(self, arrays):
         loss, grads = self._value_and_grad(arrays)
         return loss, [x.conj() for x in grads]
+
+
+@functools.lru_cache(1)
+def get_jax():
+    import jax
+    return jax
 
 
 class JaxHandler:
 
-    def __init__(self, jit_fn=True):
-        import jax
+    def __init__(self, jit_fn=True, device=None):
         self.jit_fn = jit_fn
-        self.jax = jax
+        self.device = device
 
     def to_variable(self, x):
-        return self.jax.numpy.array(x)
+        jax = get_jax()
+        return jax.numpy.asarray(x)
 
     def to_constant(self, x):
-        return self.jax.numpy.array(x)
+        jax = get_jax()
+        return jax.numpy.asarray(x)
 
     def setup_fn(self, fn):
+        jax = get_jax()
         if self.jit_fn:
-            self._value_and_grad = self.jax.jit(self.jax.value_and_grad(fn))
+            self._value_and_grad = jax.jit(
+                jax.value_and_grad(fn), backend=self.device)
         else:
-            self._value_and_grad = self.jax.value_and_grad(fn)
+            self._value_and_grad = jax.value_and_grad(fn)
 
     def value_and_grad(self, arrays):
         loss, grads = self._value_and_grad(arrays)
-        return loss, [x.conj() for x in grads]
+        return loss, [to_numpy(x.conj()) for x in grads]
+
+
+@functools.lru_cache(1)
+def get_tensorflow():
+    import tensorflow
+    return tensorflow
 
 
 class TensorFlowHandler:
@@ -218,22 +242,31 @@ class TensorFlowHandler:
         jit_fn=False,
         autograph=False,
         experimental_compile=False,
+        device=None,
     ):
-        import tensorflow
-        self.tensorflow = tensorflow
         self.jit_fn = jit_fn
         self.autograph = autograph
         self.experimental_compile = experimental_compile
+        self.device = device
 
     def to_variable(self, x):
-        return self.tensorflow.Variable(x)
+        tf = get_tensorflow()
+        if self.device is None:
+            return tf.Variable(x)
+        with tf.device(self.device):
+            return tf.Variable(x)
 
     def to_constant(self, x):
-        return self.tensorflow.constant(x)
+        tf = get_tensorflow()
+        if self.device is None:
+            return tf.constant(x)
+        with tf.device(self.device):
+            return tf.constant(x)
 
     def setup_fn(self, fn):
+        tf = get_tensorflow()
         if self.jit_fn:
-            self._backend_fn = self.tensorflow.function(
+            self._backend_fn = tf.function(
                 fn,
                 autograph=self.autograph,
                 experimental_compile=self.experimental_compile)
@@ -241,55 +274,75 @@ class TensorFlowHandler:
             self._backend_fn = fn
 
     def value_and_grad(self, arrays):
+        tf = get_tensorflow()
         variables = [self.to_variable(x) for x in arrays]
 
-        with self.tensorflow.GradientTape() as t:
+        with tf.GradientTape() as t:
             result = self._backend_fn(variables)
+        tf_grads = t.gradient(result, variables)
 
-        grads = tuple(map(to_numpy, t.gradient(result, variables)))
+        grads = [
+            # unused variables return as None
+            # NB note different convention for conjugation (i.e. none)
+            np.zeros_like(arrays[i]) if g is None else to_numpy(g)
+            for i, g in enumerate(tf_grads)
+        ]
         loss = to_numpy(result)
-
         return loss, grads
+
+
+@functools.lru_cache(1)
+def get_torch():
+    import torch
+    return torch
 
 
 class TorchHandler:
 
     def __init__(self, jit_fn=False, device=None):
-        import torch
-        self.torch = torch
+        torch = get_torch()
         self.jit_fn = jit_fn
         if device is None:
             device = 'cuda' if torch.cuda.is_available() else 'cpu'
         self.device = device
 
     def to_variable(self, x):
-        return self.torch.tensor(x, requires_grad=True, device=self.device)
+        torch = get_torch()
+        return torch.tensor(x).to(self.device).requires_grad_()
 
     def to_constant(self, x):
-        return self.torch.tensor(x, device=self.device)
+        torch = get_torch()
+        return torch.tensor(x).to(self.device)
 
     def setup_fn(self, fn):
         self._fn = fn
         self._backend_fn = None
 
     def _setup_backend_fn(self, arrays):
+        torch = get_torch()
         if self.jit_fn:
             example_inputs = (tuple(map(self.to_constant, arrays)),)
-            self._backend_fn = self.torch.jit.trace(
+            self._backend_fn = torch.jit.trace(
                 self._fn, example_inputs=example_inputs)
         else:
             self._backend_fn = self._fn
 
     def value_and_grad(self, arrays):
+        torch = get_torch()
+
         if self._backend_fn is None:
             self._setup_backend_fn(arrays)
 
-        arrays = [self.to_variable(x) for x in arrays]
-        result = self._backend_fn(arrays)
-        grads = tuple(map(to_numpy, self.torch.autograd.grad(result, arrays)))
+        variables = [self.to_variable(x) for x in arrays]
+        result = self._backend_fn(variables)
+        torch_grads = torch.autograd.grad(result, variables, allow_unused=True)
+        grads = [
+            # unused variables return as None
+            np.zeros_like(arrays[i]) if g is None else to_numpy(g).conj()
+            for i, g in enumerate(torch_grads)
+        ]
         loss = to_numpy(result)
-
-        return loss, [g.conj() for g in grads]
+        return loss, grads
 
 
 _BACKEND_HANDLERS = {
@@ -298,6 +351,62 @@ _BACKEND_HANDLERS = {
     'tensorflow': TensorFlowHandler,
     'torch': TorchHandler,
 }
+
+
+class MultiLossHandler:
+
+    def __init__(self, autodiff_backend, executor=None, **backend_opts):
+        self.autodiff_backend = autodiff_backend
+        self.backend_opts = backend_opts
+        self.executor = executor
+
+        # start just with one, as we don't don't know how many functions yet
+        h0 = _BACKEND_HANDLERS[autodiff_backend](**backend_opts)
+        self.handlers = [h0]
+        # ... but we do need access to `to_constant`
+        self.to_constant = h0.to_constant
+
+    def setup_fn(self, funcs):
+        fn0, *fns = funcs
+        self.handlers[0].setup_fn(fn0)
+        for fn in fns:
+            h = _BACKEND_HANDLERS[self.autodiff_backend](**self.backend_opts)
+            h.setup_fn(fn)
+            self.handlers.append(h)
+
+    def _value_and_grad_seq(self, arrays):
+        h0, *hs = self.handlers
+        loss, grads = h0.value_and_grad(arrays)
+        # need to make arrays writeable for efficient inplace sum
+        grads = list(map(np.array, grads))
+        for h in hs:
+            loss_i, grads_i = h.value_and_grad(arrays)
+            loss += loss_i
+            for i, g_i in enumerate(grads_i):
+                grads[i] += g_i
+        return loss, grads
+
+    def _value_and_grad_par(self, arrays):
+        futures = [self.executor.submit(h.value_and_grad, arrays)
+                   for h in self.handlers]
+        results = (f.result() for f in futures)
+
+        # get first result
+        loss, grads = next(results)
+        grads = list(map(np.array, grads))
+
+        # process remaining results
+        for loss_i, grads_i in results:
+            loss += loss_i
+            for i, g_i in enumerate(grads_i):
+                grads[i] += g_i
+
+        return loss, grads
+
+    def value_and_grad(self, arrays):
+        if self.executor is not None:
+            return self._value_and_grad_par(arrays)
+        return self._value_and_grad_seq(arrays)
 
 
 variable_finder = re.compile(r'__VARIABLE(\d+)__')
@@ -541,6 +650,55 @@ _STOC_GRAD_METHODS = {
 }
 
 
+def parse_constant_arg(arg, to_constant):
+    # check if tensor network supplied
+    if isinstance(arg, TensorNetwork):
+        # convert it to constant TN
+        return constant_tn(arg, to_constant)
+
+    if isinstance(arg, Tensor):
+        return constant_t(arg, to_constant)
+
+    if isinstance(arg, dict):
+        return valmap(to_constant, arg)
+
+    if isinstance(arg, list):
+        return list(map(to_constant, arg))
+
+    if isinstance(arg, tuple):
+        return tuple(map(to_constant, arg))
+
+    # assume ``arg`` is a raw array
+    return to_constant(arg)
+
+
+class _MakeArrayFn:
+    """Class wrapper so picklable.
+    """
+
+    __slots__ = ('tn_opt', 'loss_fn', 'norm_fn', 'autodiff_backend')
+
+    def __init__(self, tn_opt, loss_fn, norm_fn, autodiff_backend):
+        self.tn_opt = tn_opt
+        self.loss_fn = loss_fn
+        self.norm_fn = norm_fn
+        self.autodiff_backend = autodiff_backend
+
+    def __call__(self, arrays):
+        # copy the TN so norm and loss functions can modify in place
+        # XXX: make optional for efficiency?
+        tn_compute = self.tn_opt.copy()
+        inject_(arrays, tn_compute)
+
+        # set backend explicitly as maybe mixing with numpy arrays
+        with contract_backend(self.autodiff_backend):
+            return self.loss_fn(self.norm_fn(tn_compute))
+
+
+def identity_fn(x):
+    return x
+
+
 class TNOptimizer:
     """Globally optimize tensors within a tensor network with respect to any
     loss function via automatic differentiation. If parametrized tensors are
@@ -550,16 +708,21 @@ class TNOptimizer:
     ----------
     tn : TensorNetwork
         The core tensor network structure within which to optimize tensors.
-    loss_fn : callable
+    loss_fn : callable or sequence of callable
         The function that takes ``tn`` (as well as ``loss_constants`` and
         ``loss_kwargs``) and returns a single real 'loss' to be minimized.
+        For Hamiltonians which can be represented as a sum over terms, an
+        iterable collection of terms (e.g. list) can be given instead. In that
+        case each term is evaluated independently and the sum taken as loss_fn.
+        This can reduce the total memory requirements or allow for
+        parallelization (see ``executor``).
     norm_fn : callable, optional
         A function to call before ``loss_fn`` that prepares or 'normalizes' the
         raw tensor network in some way.
     loss_constants : dict, optional
-        Extra tensor networks, tensors, dicts of arrays, or arrays which will
-        be supplied to ``loss_fn`` but also converted to the correct backend
-        array type.
+        Extra tensor networks, tensors, dicts/list/tuples of arrays, or arrays
+        which will be supplied to ``loss_fn`` but also converted to the correct
+        backend array type.
     loss_kwargs : dict, optional
         Extra options to supply to ``loss_fn`` (unlike ``loss_constants`` these
         are assumed to be simple options that don't need conversion).
@@ -571,7 +734,14 @@ class TNOptimizer:
         Stop optimizing once this loss value is reached.
     optimizer : str, optional
         Which ``scipy.optimize.minimize`` optimizer to use (the ``'method'``
-        kwarg of that function).
+        kwarg of that function). In addition, ``quimb`` implements a few custom
+        optimizers compatible with this interface that you can reference by
+        name - ``{'adam', 'nadam', 'rmsprop', 'sgd'}``.
+    executor : None or Executor, optional
+        To be used with term-by-term Hamiltonians. If supplied, this executor
+        is used  to parallelize the evaluation. Otherwise each term is
+        evaluated in sequence. It should implement the basic
+        concurrent.futures (PEP 3148) interface.
     progbar : bool, optional
         Whether to show live progress.
     bounds : None or (float, float), optional
@@ -599,78 +769,85 @@ class TNOptimizer:
         progbar=True,
         bounds=None,
         autodiff_backend='AUTO',
+        executor=None,
         **backend_opts
     ):
         self.progbar = progbar
         self.tags = tags_to_oset(tags)
         self.constant_tags = tags_to_oset(constant_tags)
 
-        # the object that handles converting to backend + computing gradient
         if autodiff_backend.upper() == 'AUTO':
             autodiff_backend = _DEFAULT_BACKEND
-        self.handler = _BACKEND_HANDLERS[autodiff_backend](**backend_opts)
-        to_constant = self.handler.to_constant
+        self._autodiff_backend = autodiff_backend
+        self._multiloss = isinstance(loss_fn, Iterable)
+
+        # the object that handles converting to backend + computing gradient
+        if self._multiloss:
+            # special meta-handler if loss function is sequence to sum
+            backend_opts['executor'] = executor
+            self.handler = MultiLossHandler(autodiff_backend, **backend_opts)
+        else:
+            self.handler = _BACKEND_HANDLERS[autodiff_backend](**backend_opts)
 
         # use identity if no nomalization required
         if norm_fn is None:
-            def norm_fn(x):
-                return x
-
+            norm_fn = identity_fn
         self.norm_fn = norm_fn
 
         # convert constant arrays ahead of time to correct backend
-        self.loss_constants = {}
-        if loss_constants is not None:
-            for k, v in loss_constants.items():
-                # check if tensor network supplied
-                if isinstance(v, TensorNetwork):
-                    # convert it to constant TN
-                    self.loss_constants[k] = constant_tn(v, to_constant)
-                elif isinstance(v, Tensor):
-                    self.loss_constants[k] = constant_t(v, to_constant)
-                elif isinstance(v, dict):
-                    self.loss_constants[k] = valmap(to_constant, v)
-                else:
-                    self.loss_constants[k] = to_constant(v)
+        self.loss_constants = {
+            k: parse_constant_arg(v, self.handler.to_constant)
+            for k, v in ensure_dict(loss_constants).items()
+        }
+        self.loss_kwargs = ensure_dict(loss_kwargs)
+        kws = {**self.loss_constants, **self.loss_kwargs}
 
-        self.loss_kwargs = {} if loss_kwargs is None else dict(loss_kwargs)
-        self.loss_fn = functools.partial(
-            loss_fn, **self.loss_constants, **self.loss_kwargs
-        )
+        # inject these constant options to the loss function(s)
+        if self._multiloss:
+            # loss is a sum of independent terms
+            self.loss_fn = [functools.partial(fn, **kws) for fn in loss_fn]
+        else:
+            # loss is all in one
+            self.loss_fn = functools.partial(loss_fn, **kws)
 
+        # work out which tensors to optimize and get the underlying data
+        self.tn_opt, self.variables = parse_network_to_backend(
+            tn, self.tags, self.constant_tags, self.handler.to_constant)
+
+        # first we wrap the function to convert from array args to TN arg
+        #     (i.e. to autodiff library compatible form)
+        if self._multiloss:
+            array_fn = [_MakeArrayFn(self.tn_opt, fn, self.norm_fn,
+                                     autodiff_backend) for fn in self.loss_fn]
+        else:
+            array_fn = _MakeArrayFn(
+                self.tn_opt, self.loss_fn, self.norm_fn, autodiff_backend)
+
+        # then we pass it to the handler which generates a function that
+        # computes both the value and gradients (still in array form)
+        self.handler.setup_fn(array_fn)
+
+        # finally we wrap the function to convert to and from a single vector
+        # from and to array form i.e. scipy optimizer compatible form
+
+        # handles storing and packing / unpacking many arrays as a vector
+        self.vectorizer = Vectorizer(self.variables)
+
+        # tracking info
         self.loss = float('inf')
         self.loss_best = float('inf')
         self.loss_target = loss_target
         self.losses = []
         self._n = 0
 
-        self.tn_opt, self.variables = parse_network_to_backend(
-            tn, self.tags, self.constant_tags, to_constant
-        )
-
-        # this handles storing and packing /  unpacking many arrays as a vector
-        self.vectorizer = Vectorizer(self.variables)
-
-        def func(arrays):
-            # set backend explicitly as maybe mixing with numpy arrays
-            with contract_backend(autodiff_backend):
-                inject_(arrays, self.tn_opt)
-                return self.loss_fn(self.norm_fn(self.tn_opt))
-
-        self.handler.setup_fn(func)
-
         def vectorized_value_and_grad(x):
             self.vectorizer.vector[:] = x
             arrays = self.vectorizer.unpack()
-
             ag_result, ag_grads = self.handler.value_and_grad(arrays)
-
             self._n += 1
             self.loss = ag_result.item()
             self.losses.append(self.loss)
-
             vec_grad = self.vectorizer.pack(ag_grads, 'grad')
-
             return self.loss, vec_grad
 
         self.vectorized_value_and_grad = vectorized_value_and_grad
@@ -681,6 +858,10 @@ class TNOptimizer:
 
         # options to do with the scipy minimizer
         self.optimizer = optimizer
+
+    def __repr__(self):
+        return (f"<TNOptimizer(d={self.vectorizer.d}, "
+                f"backend={self._autodiff_backend})>")
 
     @property
     def nevals(self):

@@ -228,6 +228,8 @@ from .linalg.approx_spectral import (
 from .utils import (
     save_to_disk,
     load_from_disk,
+    oset,
+    LRU,
 )
 
 
@@ -457,4 +459,6 @@ __all__ = [
     'load_from_disk',
     'get_thread_pool',
     'get_mpi_pool',
+    'oset',
+    'LRU',
 ]

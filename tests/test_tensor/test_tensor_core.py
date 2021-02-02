@@ -1,5 +1,6 @@
 import pytest
 import operator
+import importlib
 
 import numpy as np
 from numpy.testing import assert_allclose
@@ -19,16 +20,20 @@ from quimb.tensor import (
     MPS_rand_state,
     TNLinearOperator1D,
 )
-from quimb.tensor.decomp import _trim_singular_vals
+from quimb.tensor.decomp import _trim_singular_vals_numba
 from quimb.tensor.tensor_core import _CONTRACT_BACKEND, _TENSOR_LINOP_BACKEND
+
+autograd_mark = pytest.mark.skipif(
+    importlib.util.find_spec('autograd') is None,
+    reason='autograd not installed')
 
 
 def test_trim_singular_vals():
     s = np.array([3., 2., 1., 0.1])
-    assert _trim_singular_vals(s, 0.5, 1) == 3
-    assert _trim_singular_vals(s, 0.5, 2) == 2
-    assert _trim_singular_vals(s, 2, 3) == 2
-    assert _trim_singular_vals(s, 5.02, 3) == 1
+    assert _trim_singular_vals_numba(s, 0.5, 1) == 3
+    assert _trim_singular_vals_numba(s, 0.5, 2) == 2
+    assert _trim_singular_vals_numba(s, 2, 3) == 2
+    assert _trim_singular_vals_numba(s, 5.02, 3) == 1
 
 
 class TestContractOpts:
@@ -315,6 +320,15 @@ class TestBasicTensorOperations:
 
         with pytest.raises(ValueError):
             a.transpose(*'cdfebz')
+
+    def test_tensor_trace(self):
+        t = qtn.rand_tensor((3, 3, 3), 'abc', dtype='complex128')
+        tb = t.trace('a', 'c')
+        assert tb.inds == ('b',)
+        assert_allclose(tb.data, np.trace(t.data, axis1=0, axis2=2))
+        tc = t.trace('a', 'b')
+        assert tc.inds == ('c',)
+        assert_allclose(tc.data, np.trace(t.data, axis1=0, axis2=1))
 
     def test_sum_reduce(self):
         t = rand_tensor((2, 3, 4), 'abc')
@@ -832,6 +846,15 @@ class TestTensorNetwork:
         assert_allclose(abs(tn['A'].data), abs(tn['B'].data))
         assert_allclose(abs(tn['B'].data), abs(tn['C'].data))
 
+    def test_tensor_network_sum(self):
+        A = qtn.TN_rand_reg(n=6, reg=3, D=2, phys_dim=2, dtype='complex')
+        B = A.copy()
+        B.randomize_()
+        d1 = A.distance(B)
+        AmB = qtn.tensor_network_sum(A, -1 * B)
+        d2 = (AmB | AmB.H).contract(all)**0.5
+        assert d1 == pytest.approx(d2)
+
     def test_contracting_tensors(self):
         a = rand_tensor((2, 3, 4), inds=[0, 1, 2], tags='red')
         b = rand_tensor((3, 4, 5), inds=[1, 2, 3], tags='blue')
@@ -886,6 +909,55 @@ class TestTensorNetwork:
         assert len((tn ^ slice(-1, 1)).tensors) == 3
         assert len((tn ^ slice(None, -2, -1)).tensors) == 3
         assert len((tn ^ slice(-2, 0)).tensors) == 3
+
+    def test_contraction_info(self):
+        a = qtn.rand_tensor((8, 8), ('a', 'b'))
+        b = qtn.rand_tensor((8, 8), ('b', 'c'))
+        c = qtn.rand_tensor((8, 8), ('c', 'd'))
+        tn = a | b | c
+        assert tn.contraction_width() == 6
+        assert tn.contraction_cost() == 2 * 8**3
+
+    @pytest.mark.parametrize('method', ('auto', 'dense', 'overlap'))
+    def test_tensor_network_distance(self, method):
+        n = 6
+        A = qtn.TN_rand_reg(n=n, reg=3, D=2, phys_dim=2, dtype=complex)
+        Ad = A.to_dense([f'k{i}' for i in range(n)])
+        B = qtn.TN_rand_reg(n=6, reg=3, D=2, phys_dim=2, dtype=complex)
+        Bd = B.to_dense([f'k{i}' for i in range(n)])
+        d1 = np.linalg.norm(Ad - Bd)
+        d2 = A.distance(B, method=method)
+        assert d1 == pytest.approx(d2)
+
+    @pytest.mark.parametrize('method,opts', (
+        ('als', (('enforce_pos', False),)),
+        ('als', (('enforce_pos', True),)),
+        pytest.param('autodiff', (('distance_method', 'dense'),),
+                     marks=autograd_mark),
+        pytest.param('autodiff', (('distance_method', 'overlap'),),
+                     marks=autograd_mark),
+    ))
+    def test_fit_mps(self, method, opts):
+        k1 = qtn.MPS_rand_state(5, 3, seed=666)
+        k2 = qtn.MPS_rand_state(5, 3, seed=667)
+        assert k1.distance(k2) > 1e-3
+        k1.fit_(k2, method=method, progbar=True, **dict(opts))
+        assert k1.distance(k2) < 1e-3
+
+    @pytest.mark.parametrize('method,opts', (
+        ('als', (('enforce_pos', False),)),
+        ('als', (('enforce_pos', True),)),
+        pytest.param('autodiff', (('distance_method', 'dense'),),
+                     marks=autograd_mark),
+        pytest.param('autodiff', (('distance_method', 'overlap'),),
+                     marks=autograd_mark),
+    ))
+    def test_fit_rand_reg(self, method, opts):
+        r1 = qtn.TN_rand_reg(5, 4, D=2, seed=666, phys_dim=2)
+        k2 = qtn.MPS_rand_state(5, 3, seed=667)
+        assert r1.distance(k2) > 1e-3
+        r1.fit_(k2, method=method, progbar=True, **dict(opts))
+        assert r1.distance(k2) < 1e-3
 
     def test_reindex(self):
         a = Tensor(np.random.randn(2, 3, 4), inds=[0, 1, 2], tags='red')
@@ -1225,15 +1297,15 @@ class TestTensorNetwork:
         tn.fuse_multibonds(inplace=True)
         assert len(tn.inner_inds()) == 3
 
-    def test_graph(self):
+    def test_draw(self):
         import matplotlib
         from matplotlib import pyplot as plt
         matplotlib.use('Template')
         k = MPS_rand_state(10, 7, normalize=False)
-        fig = k.graph(color=['I0', 'I2'], return_fig=True)
+        fig = k.draw(color=['I0', 'I2'], return_fig=True)
         plt.close(fig)
 
-    def test_graph_with_fixed_pos(self):
+    def test_draw_with_fixed_pos(self):
         import matplotlib
         from matplotlib import pyplot as plt
         matplotlib.use('Template')
@@ -1242,7 +1314,7 @@ class TestTensorNetwork:
         q = MPS_rand_state(n, 7, tags='BRA')
         fix = {**{('KET', f'I{i}'): (i, 0) for i in range(n)},
                **{('BRA', f'I{i}'): (i, 1) for i in range(n)}}
-        fig = (q | p).graph(colors=['KET', 'BRA'], fix=fix, return_fig=True)
+        fig = (q | p).draw(color=['KET', 'BRA'], fix=fix, return_fig=True)
         plt.close(fig)
 
     def test_pickle(self):

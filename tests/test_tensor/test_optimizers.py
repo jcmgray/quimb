@@ -1,3 +1,4 @@
+import functools
 import importlib
 
 import pytest
@@ -77,20 +78,6 @@ def ham_mbl_pbc_complex():
     en_ex = qu.groundenergy(qu.ham_mbl(L, sparse=True, **ham_opts))
 
     return psi0, H, norm_fn, loss_fn, en_ex
-
-
-@pytest.mark.skipif(not found_torch, reason="Torch not installed.")
-def test_optimize_pbc_heis_torch(heis_pbc):
-    from quimb.tensor.optimize_pytorch import TNOptimizer
-    psi0, H, norm_fn, loss_fn, en_ex = heis_pbc
-    tnopt = TNOptimizer(
-        psi0,
-        loss_fn,
-        norm_fn,
-        loss_constants={'H': H},
-    )
-    psi_opt = tnopt.optimize(100)
-    assert loss_fn(psi_opt, H) == pytest.approx(en_ex, rel=1e-2)
 
 
 def test_vectorizer():
@@ -177,3 +164,53 @@ def test_parametrized_circuit(backend):
     psi_opt = tnopt.optimize(20)
     assert sum(loss < -0.99 for loss in tnopt.losses) == 1
     assert qu.fidelity(psi_opt.to_dense(), gs) > 0.99
+
+
+def mera_norm_fn(mera):
+    return mera.unitize(method='mgs')
+
+
+def mera_local_expectation(mera, terms, where):
+    tags = [mera.site_tag(coo) for coo in where]
+    mera_ij = mera.select(tags, 'any')
+    mera_ij_G = mera_ij.gate(terms[where], where)
+    mera_ij_ex = (mera_ij_G & mera_ij.H)
+    return mera_ij_ex.contract(all, optimize='auto-hq')
+
+
+@pytest.mark.parametrize('backend', [autograd_case, jax_case,
+                                     tensorflow_case, pytorch_case])
+@pytest.mark.parametrize('executor', [None, 'threads'])
+def test_multiloss(backend, executor):
+    if executor == 'threads':
+        from concurrent.futures import ThreadPoolExecutor
+        executor = ThreadPoolExecutor(2)
+
+    L = 8
+    D = 3
+    dtype = 'float32'
+
+    mera = qtn.MERA.rand(L, max_bond=D, dtype=dtype)
+
+    H2 = qu.ham_heis(2).real.astype(dtype)
+    terms = {(i, (i + 1) % L): H2 for i in range(L)}
+
+    loss_fns = [functools.partial(mera_local_expectation, where=where)
+                for where in terms]
+
+    tnopt = qtn.TNOptimizer(
+        mera,
+        loss_fn=loss_fns,
+        norm_fn=mera_norm_fn,
+        loss_constants={'terms': terms},
+        autodiff_backend=backend,
+        executor=executor,
+        device='cpu',
+    )
+
+    tnopt.optimize(10)
+    # ex = -3.6510934089371734
+    assert tnopt.loss < -2.5
+
+    if executor is not None:
+        executor.shutdown()

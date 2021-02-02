@@ -1,3 +1,4 @@
+import math
 import numbers
 import functools
 
@@ -7,7 +8,7 @@ from autoray import do, reshape
 import quimb as qu
 from ..utils import progbar as _progbar
 from ..utils import oset, partitionby, concatv, partition_all, ensure_dict
-from .tensor_core import (get_tags, tags_to_oset, oset_union,
+from .tensor_core import (get_tags, tags_to_oset, oset_union, tensor_contract,
                           PTensor, Tensor, TensorNetwork, rand_uuid)
 from .tensor_gen import MPS_computational_state
 from .tensor_1d import TensorNetwork1DVector, Dense1D, TensorNetwork1DOperator
@@ -443,6 +444,62 @@ def apply_rzz(psi, gamma, i, j, parametrize=False, **gate_opts):
     psi.gate_(G, (int(i), int(j)), tags=mtags, **gate_opts)
 
 
+def su4_gate_param_gen(params):
+    """See https://arxiv.org/abs/quant-ph/0308006 - Fig. 7.
+    """
+
+    TA1 = Tensor(u3_gate_param_gen(params[0:3]), ['a1', 'a0'])
+    TA2 = Tensor(u3_gate_param_gen(params[3:6]), ['b1', 'b0'])
+
+    cnot = do('array', qu.CNOT().reshape(2, 2, 2, 2),
+              like=params, dtype=TA1.data.dtype)
+
+    TNOTC1 = Tensor(cnot, ['b2', 'a2', 'b1', 'a1'])
+    TRz1 = Tensor(rz_gate_param_gen(params[12:13]), inds=['a3', 'a2'])
+    TRy2 = Tensor(ry_gate_param_gen(params[13:14]), inds=['b3', 'b2'])
+    TCNOT2 = Tensor(cnot, ['a5', 'b4', 'a3', 'b3'])
+    TRy3 = Tensor(ry_gate_param_gen(params[14:15]), inds=['b5', 'b4'])
+    TNOTC3 = Tensor(cnot, ['b6', 'a6', 'b5', 'a5'])
+    TA3 = Tensor(u3_gate_param_gen(params[6:9]), ['a7', 'a6'])
+    TA4 = Tensor(u3_gate_param_gen(params[9:12]), ['b7', 'b6'])
+
+    return tensor_contract(
+        TA1, TA2, TNOTC1,
+        TRz1, TRy2, TCNOT2, TRy3,
+        TNOTC3, TA3, TA4,
+        output_inds=['a7', 'b7'] + ['a0', 'b0'],
+        optimize='auto-hq',
+    ).data
+
+
+def apply_su4(
+    psi,
+    theta1, phi1, lamda1,
+    theta2, phi2, lamda2,
+    theta3, phi3, lamda3,
+    theta4, phi4, lamda4,
+    t1, t2, t3,
+    i, j,
+    parametrize=False,
+    **gate_opts
+):
+    """See https://arxiv.org/abs/quant-ph/0308006 - Fig. 7.
+    """
+    params = (theta1, phi1, lamda1,
+              theta2, phi2, lamda2,
+              theta3, phi3, lamda3,
+              theta4, phi4, lamda4,
+              t1, t2, t3,)
+
+    mtags = _merge_tags('SU4', gate_opts)
+    if parametrize:
+        G = ops.PArray(su4_gate_param_gen, params)
+    else:
+        G = su4_gate_param_gen(params)
+
+    psi.gate_(G, (int(i), int(j)), tags=mtags, **gate_opts)
+
+
 GATE_FUNCTIONS = {
     # constant single qubit gates
     'H': build_gate_1(qu.hadamard(), tags='H'),
@@ -480,10 +537,11 @@ GATE_FUNCTIONS = {
     'FS': apply_fsim,
     'FSIM': apply_fsim,
     'RZZ': apply_rzz,
+    'SU4': apply_su4,
 }
 
 ONE_QUBIT_PARAM_GATES = {'RX', 'RY', 'RZ', 'U3', 'U2', 'U1'}
-TWO_QUBIT_PARAM_GATES = {'CU3', 'CU2', 'CU1', 'FS', 'FSIM', 'RZZ'}
+TWO_QUBIT_PARAM_GATES = {'CU3', 'CU2', 'CU1', 'FS', 'FSIM', 'RZZ', 'SU4'}
 ALL_PARAM_GATES = ONE_QUBIT_PARAM_GATES | TWO_QUBIT_PARAM_GATES
 
 
@@ -501,6 +559,15 @@ def sample_bitstring_from_prob_ndarray(p):
     """
     b = np.random.choice(np.arange(p.size), p=p.flat)
     return f"{b:0>{p.ndim}b}"
+
+
+def rehearsal_dict(tn, info):
+    return {
+        'tn': tn,
+        'info': info,
+        'W': math.log2(info.largest_intermediate),
+        'C': math.log10(info.opt_cost / 2),
+    }
 
 
 # --------------------------- main circuit class ---------------------------- #
@@ -848,6 +915,27 @@ class Circuit:
         self.apply_gate('RZZ', theta, i, j,
                         gate_round=gate_round, parametrize=parametrize)
 
+    def su4(
+        self,
+        theta1, phi1, lamda1,
+        theta2, phi2, lamda2,
+        theta3, phi3, lamda3,
+        theta4, phi4, lamda4,
+        t1, t2, t3,
+        i, j,
+        gate_round=None, parametrize=False
+    ):
+        self.apply_gate(
+            'SU4',
+            theta1, phi1, lamda1,
+            theta2, phi2, lamda2,
+            theta3, phi3, lamda3,
+            theta4, phi4, lamda4,
+            t1, t2, t3,
+            i, j,
+            gate_round=gate_round, parametrize=parametrize
+        )
+
     @property
     def psi(self):
         """Tensor network representation of the wavefunction.
@@ -966,8 +1054,8 @@ class Circuit:
         psi_lc = psi.select_any(lightcone_tags).view_like_(psi)
 
         if not keep_psi0:
-            # these sites are in the lightcone regardless of gates above them
-            site_tags = oset(psi.site_tag(i) for i in where)
+            # these sites are in the lightcone regardless of being alone
+            site_inds = set(map(psi.site_ind, where))
 
             for tid, t in tuple(psi_lc.tensor_map.items()):
                 # get all tensors connected to this tensor (incld itself)
@@ -975,7 +1063,7 @@ class Circuit:
 
                 # lone tensor not attached to anything - drop it
                 # but only if it isn't directly in the ``where`` region
-                if (len(neighbors) == 1) and not (t.tags & site_tags):
+                if (len(neighbors) == 1) and set(t.inds).isdisjoint(site_inds):
                     psi_lc._pop_tensor(tid)
 
         return psi_lc
@@ -1171,7 +1259,7 @@ class Circuit:
         )
 
         if rehearse:
-            return {'tn': psi_b, 'info': info}
+            return rehearsal_dict(psi_b, info)
 
         if target_size is not None:
             # perform the 'sliced' contraction restricted to ``target_size``
@@ -1313,7 +1401,7 @@ class Circuit:
         )
 
         if rehearse:
-            return {'tn': rho, 'info': info}
+            return rehearsal_dict(rho, info)
 
         if target_size is not None:
             # perform the 'sliced' contraction restricted to ``target_size``
@@ -1434,7 +1522,7 @@ class Circuit:
         )
 
         if rehearse:
-            return {'tn': rhoG, 'info': info}
+            return rehearsal_dict(rhoG, info)
 
         if target_size is not None:
             # perform the 'sliced' contraction restricted to ``target_size``
@@ -1537,6 +1625,13 @@ class Circuit:
         # having sliced we can do a final simplify
         nm_lc.full_simplify_(output_inds=output_inds, **fs_opts)
 
+        # for stability with very small probabilities, scale by average prob
+        nfact = 2**len(fix)
+        if final_marginal:
+            nm_lc.multiply_(nfact**0.5, spread_over='all')
+        else:
+            nm_lc.multiply_(nfact, spread_over='all')
+
         # cast to desired data type
         nm_lc.astype_(dtype)
 
@@ -1568,7 +1663,7 @@ class Circuit:
             # we only did half the ket contraction so need to square
             p_marginal = p_marginal**2
 
-        return p_marginal
+        return p_marginal / nfact
 
     def calc_qubit_ordering(self, qubits=None):
         """Get a order to measure ``qubits`` in, by greedily choosing whichever
@@ -1873,7 +1968,7 @@ class Circuit:
                 rehearse=True,
             )
 
-            tns_and_infos[where] = {'tn': tn, 'info': info}
+            tns_and_infos[where] = rehearsal_dict(tn, info)
 
             # set the result of qubit ``q`` arbitrarily
             for q in where:
@@ -2080,7 +2175,7 @@ class Circuit:
             rehearse=True,
         )
 
-        return {where: {'tn': tn, 'info': info}}
+        return {where: rehearsal_dict(tn, info)}
 
     def to_dense(
         self,
@@ -2150,7 +2245,7 @@ class Circuit:
         )
 
         if rehearse:
-            return {'tn': psi, 'info': info}
+            return rehearsal_dict(psi, info)
 
         if target_size is not None:
             # perform the 'sliced' contraction restricted to ``target_size``

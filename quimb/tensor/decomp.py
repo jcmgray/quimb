@@ -10,7 +10,7 @@ from ..linalg.rand_linalg import rsvd, estimate_rank
 
 
 @njit(['i4(f4[:], f4, i4)', 'i4(f8[:], f8, i4)'])  # pragma: no cover
-def _trim_singular_vals(s, cutoff, cutoff_mode):
+def _trim_singular_vals_numba(s, cutoff, cutoff_mode):
     """Find the number of singular values to keep of ``s`` given ``cutoff`` and
     ``cutoff_mode``.
 
@@ -80,7 +80,7 @@ def _renorm_singular_vals(s, n_chi, renorm_power):
 def _trim_and_renorm_SVD_numba(U, s, VH, cutoff, cutoff_mode,
                                max_bond, absorb, renorm_power):
     if cutoff > 0.0:
-        n_chi = _trim_singular_vals(s, cutoff, cutoff_mode)
+        n_chi = _trim_singular_vals_numba(s, cutoff, cutoff_mode)
 
         if max_bond > 0:
             n_chi = min(n_chi, max_bond)
@@ -450,7 +450,7 @@ def _lq(x):
 
 
 @njit  # pragma: no cover
-def _numba_cholesky(x, cutoff=-1, cutoff_mode=3, max_bond=-1, absorb=0):
+def _cholesky_numba(x, cutoff=-1, cutoff_mode=3, max_bond=-1, absorb=0):
     """SVD-decomposition, using cholesky decomposition, only works if
     ``x`` is positive definite.
     """
@@ -460,10 +460,10 @@ def _numba_cholesky(x, cutoff=-1, cutoff_mode=3, max_bond=-1, absorb=0):
 
 def _cholesky(x, cutoff=-1, cutoff_mode=3, max_bond=-1, absorb=0):
     try:
-        return _numba_cholesky(x, cutoff, cutoff_mode, max_bond, absorb)
+        return _cholesky_numba(x, cutoff, cutoff_mode, max_bond, absorb)
     except np.linalg.LinAlgError as e:
         if cutoff < 0:
             raise e
         # try adding cutoff identity - assuming it is approx allowable error
         xi = x + 2 * cutoff * np.eye(x.shape[0])
-        return _numba_cholesky(xi, cutoff, cutoff_mode, max_bond, absorb)
+        return _cholesky_numba(xi, cutoff, cutoff_mode, max_bond, absorb)

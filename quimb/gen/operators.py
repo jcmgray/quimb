@@ -288,7 +288,7 @@ def Zsqrt(**qu_opts):
         0 & 1 + i
         \end{bmatrix}
     """
-    return Ry(math.pi / 2, **qu_opts)
+    return Rz(math.pi / 2, **qu_opts)
 
 
 @functools.lru_cache(4)

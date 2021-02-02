@@ -1,6 +1,4 @@
-@import url('https://fontlibrary.org/face/aardvark-sans');
-@import url('https://fonts.googleapis.com/css2?family=Commissioner&display=swap');
-@import url('https://fontlibrary.org/face/code-new-roman');
+@import url('https://fonts.googleapis.com/css2?family=Commissioner&family=Roboto+Mono:wght@400;600&display=swap');
 
 code {
     color: #ed7a00;
@@ -13,7 +11,7 @@ code {
 }
 
 h1, h2, h3 {
-    font-family: 'AardvarkFixedRegular', monospace;
+    font-family: 'Roboto Mono', monospace;
     font-weight: bold;
     color: var(--headercolor) !important;
 }
@@ -23,7 +21,7 @@ body {
 }
 
 code, kbd, pre, samp {
-    font-family: 'CodeNewRomanRegular', monospace;
+    font-family: 'Roboto Mono', monospace;
 }
 
 .navbar-nav > .active > .nav-link {

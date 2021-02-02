@@ -32,11 +32,11 @@ setup(
     ],
     extras_require={
         'tensor': [
-            'matplotlib',
-            'networkx',
+            'matplotlib>=2.0',
+            'networkx>=2.3',
             'opt_einsum>=3.2',
             'autoray>=0.2.0',
-            'diskcache',
+            'diskcache>=3.0',
         ],
         'advanced_solvers': [
             'mpi4py',
@@ -52,12 +52,12 @@ setup(
             'pytest-cov',
         ],
         'docs': [
-            'sphinx',
-            'pydata-sphinx-theme',
-            'nbsphinx',
-            'ipython',
-            'autoray',
-            'opt_einsum',
+            'sphinx>=2.0',
+            'pydata-sphinx-theme>=0.4',
+            'nbsphinx>=0.4',
+            'ipython>=7.0',
+            'autoray>=0.2.0',
+            'opt_einsum>=3.2',
         ],
     },
     scripts=['bin/quimb-mpi-python'],
