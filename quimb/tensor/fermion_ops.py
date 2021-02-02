@@ -5,7 +5,7 @@ from pyblock3.algebra.fermion import SparseFermionTensor, FlatFermionTensor, _pa
 from pyblock3.algebra.symmetry import SZ, BondInfo
 from .fermion_2d import FPEPS,FermionTensorNetwork2DVector
 
-def to_exp(tsr, x):
+def to_exponential(tsr, x):
     ndim = tsr.ndim
     if tsr.parity == 1:
         raise ValueError("expontial of odd parity tensor not defined")
