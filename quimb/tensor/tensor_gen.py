@@ -10,7 +10,7 @@ import numpy as np
 import opt_einsum as oe
 
 from ..core import make_immutable, ikron
-from ..utils import deprecated
+from ..utils import deprecated, unique, concat
 from ..gen.operators import (
     spin_operator, eye, _gen_mbl_random_factors, ham_heis
 )
@@ -76,6 +76,66 @@ def rand_phased(shape, inds, tags=None, dtype=complex):
     return Tensor(data=data, inds=inds, tags=tags)
 
 
+def gen_unique_edges(edges):
+    seen = set()
+    for node_a, node_b in edges:
+        if node_b < node_a:
+            node_a, node_b = node_b, node_a
+        key = (node_a, node_b)
+        if key in seen:
+            continue
+        yield (node_a, node_b)
+        seen.add(key)
+
+
+def TN_rand_from_edges(
+    edges,
+    D,
+    phys_dim=None,
+    seed=None,
+    dtype='float64',
+    site_tag_id='I{}',
+    site_ind_id='k{}',
+):
+    """Create a random tensor network with geometry defined from a
+    :class:`networkx.Graph`.
+
+    Parameters
+    ----------
+    G : networkx.Graph
+        The graph defining the geometry.
+    D : int
+        The bond dimension connecting tensors.
+    phys_dim : int, optional
+        If not ``None``, give each tensor a 'physical', free index of this size
+        to mimic a wavefunction of ``len(G)`` sites.
+    seed : int, optional
+        A random seed.
+    site_tag_id : str, optional
+        String with formatter to tag sites.
+    site_ind_id : str, optional
+        String with formatter to tag indices (if ``phys_dim`` specified).
+
+    Returns
+    -------
+    TensorNetwork
+    """
+    ts = {}
+    for node in unique(concat(edges)):
+        t = Tensor(tags=site_tag_id.format(node))
+        if phys_dim is not None:
+            t.new_ind(site_ind_id.format(node), size=phys_dim)
+        ts[node] = t
+
+    for node_a, node_b in gen_unique_edges(edges):
+        new_bond(ts[node_a], ts[node_b], size=D)
+
+    tn = TensorNetwork(ts.values())
+    tn.randomize_(seed=seed, dtype=dtype)
+
+    return tn
+
+
 def TN_rand_reg(
     n,
     reg,
@@ -112,22 +172,10 @@ def TN_rand_reg(
     TensorNetwork
     """
     import networkx as nx
-    G = nx.random_degree_sequence_graph([reg] * n, seed=None)
-
-    ts = []
-    for i in range(n):
-        t = Tensor(tags=site_tag_id.format(i))
-        if phys_dim is not None:
-            t.new_ind(site_ind_id.format(i), size=phys_dim)
-        ts.append(t)
-
-    for i, j in G.edges:
-        new_bond(ts[i], ts[j], size=D)
-
-    tn = TensorNetwork(ts)
-    tn.randomize_(seed=seed, dtype=dtype)
-
-    return tn
+    G = nx.random_degree_sequence_graph([reg] * n, seed=seed)
+    return TN_rand_from_edges(
+        G.edges, D=D, phys_dim=phys_dim, seed=seed, dtype=dtype,
+        site_tag_id=site_tag_id, site_ind_id=site_ind_id)
 
 
 @random_seed_fn
@@ -284,13 +332,15 @@ def TN3D_rand(
     return tn
 
 
+# ---------------------------- classical models ----------------------------- #
+
 @functools.lru_cache(128)
 def classical_ising_S_matrix(beta, j=1.0):
     """The interaction term for the classical ising model.
     """
     S = np.array(
-        [[math.exp(j * beta), math.exp(-j * beta)],
-         [math.exp(-j * beta), math.exp(j * beta)]])
+        [[math.exp(+j * beta), math.exp(-j * beta)],
+         [math.exp(-j * beta), math.exp(+j * beta)]])
     make_immutable(S)
     return S
 
@@ -305,25 +355,25 @@ def classical_ising_H_matrix(beta, h=0.0):
 
 
 @functools.lru_cache(128)
-def classical_ising_sqrtS_matrix(beta):
+def classical_ising_sqrtS_matrix(beta, j=1.0):
     """The sqrt factorized interaction term for the classical ising model.
     """
     S_1_2 = np.array(
-        [[math.cosh(beta)**0.5 + math.sinh(beta)**0.5,
-          math.cosh(beta)**0.5 - math.sinh(beta)**0.5],
-         [math.cosh(beta)**0.5 - math.sinh(beta)**0.5,
-          math.cosh(beta)**0.5 + math.sinh(beta)**0.5]]
+        [[math.cosh(j * beta)**0.5 + math.sinh(j * beta)**0.5,
+          math.cosh(j * beta)**0.5 - math.sinh(j * beta)**0.5],
+         [math.cosh(j * beta)**0.5 - math.sinh(j * beta)**0.5,
+          math.cosh(j * beta)**0.5 + math.sinh(j * beta)**0.5]]
     ) / 2**0.5
     make_immutable(S_1_2)
     return S_1_2
 
 
 @functools.lru_cache(128)
-def classical_ising_T_matrix(beta, h=0.0, directions='lrud'):
+def classical_ising_T_matrix(beta, j=1.0, h=0.0, directions='lrud'):
     """The single effective TN site for the classical ising model.
     """
     arrays = (
-        [classical_ising_sqrtS_matrix(beta)] * len(directions) +
+        [classical_ising_sqrtS_matrix(beta, j=j)] * len(directions) +
         [classical_ising_H_matrix(beta, h)]
     )
     lhs = ",".join(f'i{x}' for x in directions)
@@ -332,17 +382,17 @@ def classical_ising_T_matrix(beta, h=0.0, directions='lrud'):
 
 
 @functools.lru_cache(128)
-def classical_ising_T2d_matrix(beta, directions='lrud', h=0.0):
+def classical_ising_T2d_matrix(beta, directions='lrud', j=1.0, h=0.0):
     """The single effective TN site for the 2D classical ising model.
     """
-    return classical_ising_T_matrix(beta, h, directions)
+    return classical_ising_T_matrix(beta, j, h, directions)
 
 
 @functools.lru_cache(128)
-def classical_ising_T3d_matrix(beta, directions='lrudab', h=0.0):
+def classical_ising_T3d_matrix(beta, directions='lrudab', j=1.0, h=0.0):
     """The single effective TN site for the 3D classical ising model.
     """
-    return classical_ising_T_matrix(beta, h, directions)
+    return classical_ising_T_matrix(beta, j, h, directions)
 
 
 def HTN2D_classical_ising_partition_function(
@@ -371,7 +421,7 @@ def HTN2D_classical_ising_partition_function(
     h : float, optional
         The magnetic field strength.
     j : float, optional
-        The interaction strength.
+        The interaction strength, positive being *ferromagnetic*.
     cyclic : bool or (bool, bool), optional
         Whether to use periodic boundary conditions. X and Y can be specified
         separately using a tuple.
@@ -398,18 +448,18 @@ def HTN2D_classical_ising_partition_function(
     except TypeError:
         cyclic_x = cyclic_y = cyclic
 
-    for i, j in itertools.product(range(Lx), range(Ly)):
+    for ni, nj in itertools.product(range(Lx), range(Ly)):
 
-        if i < Lx - 1 or cyclic_x:
-            inds = ind_id.format(i, j), ind_id.format((i + 1) % Lx, j)
+        if ni < Lx - 1 or cyclic_x:
+            inds = ind_id.format(ni, nj), ind_id.format((ni + 1) % Lx, nj)
             ts.append(Tensor(S, inds=inds))
 
-        if j < Ly - 1 or cyclic_y:
-            inds = ind_id.format(i, j), ind_id.format(i, (j + 1) % Ly)
+        if nj < Ly - 1 or cyclic_y:
+            inds = ind_id.format(ni, nj), ind_id.format(ni, (nj + 1) % Ly)
             ts.append(Tensor(S, inds=inds))
 
         if h != 0.0:
-            ts.append(Tensor(H, inds=(ind_id.format(i, j),)))
+            ts.append(Tensor(H, inds=(ind_id.format(ni, nj),)))
 
     return TensorNetwork(ts)
 
@@ -419,8 +469,8 @@ def HTN3D_classical_ising_partition_function(
     Ly,
     Lz,
     beta,
-    h=0.0,
     j=1.0,
+    h=0.0,
     cyclic=False,
     ind_id='s{},{},{}',
 ):
@@ -440,10 +490,10 @@ def HTN3D_classical_ising_partition_function(
         Length of side z.
     beta : float
         The inverse temperature.
+    j : float, optional
+        The interaction strength, positive being *ferromagnetic*.
     h : float, optional
         The magnetic field strength.
-    j : float, optional
-        The interaction strength.
     cyclic : bool or (bool, bool, bool), optional
         Whether to use periodic boundary conditions. X, Y and Z can be
         specified separately using a tuple.
@@ -470,22 +520,25 @@ def HTN3D_classical_ising_partition_function(
     except TypeError:
         cyclic_x = cyclic_y = cyclic_z = cyclic
 
-    for i, j, k in itertools.product(range(Lx), range(Ly), range(Lz)):
+    for ni, nj, nk in itertools.product(range(Lx), range(Ly), range(Lz)):
 
-        if i < Lx - 1 or cyclic_x:
-            inds = ind_id.format(i, j, k), ind_id.format((i + 1) % Lx, j, k)
+        if ni < Lx - 1 or cyclic_x:
+            inds = (ind_id.format(ni, nj, nk),
+                    ind_id.format((ni + 1) % Lx, nj, nk))
             ts.append(Tensor(S, inds=inds))
 
-        if j < Ly - 1 or cyclic_y:
-            inds = ind_id.format(i, j, k), ind_id.format(i, (j + 1) % Ly, k)
+        if nj < Ly - 1 or cyclic_y:
+            inds = (ind_id.format(ni, nj, nk),
+                    ind_id.format(ni, (nj + 1) % Ly, nk))
             ts.append(Tensor(S, inds=inds))
 
-        if k < Lz - 1 or cyclic_z:
-            inds = ind_id.format(i, j, k), ind_id.format(i, j, (k + 1) % Lz)
+        if nk < Lz - 1 or cyclic_z:
+            inds = (ind_id.format(ni, nj, nk),
+                    ind_id.format(ni, nj, (nk + 1) % Lz))
             ts.append(Tensor(S, inds=inds))
 
         if h != 0.0:
-            ts.append(Tensor(H, inds=(ind_id.format(i, j, k),)))
+            ts.append(Tensor(H, inds=(ind_id.format(ni, nj, nk),)))
 
     return TensorNetwork(ts)
 
@@ -494,6 +547,7 @@ def TN2D_classical_ising_partition_function(
     Lx,
     Ly,
     beta,
+    j=1.0,
     h=0.0,
     cyclic=False,
     site_tag_id='I{},{}',
@@ -511,6 +565,8 @@ def TN2D_classical_ising_partition_function(
         Length of side y.
     beta : float
         The inverse temperature.
+    j : float, optional
+        The interaction strength, positive being *ferromagnetic*.
     h : float, optional
         The magnetic field strength.
     cyclic : bool or (bool, bool), optional
@@ -539,29 +595,29 @@ def TN2D_classical_ising_partition_function(
     ts = []
     bonds = collections.defaultdict(rand_uuid)
 
-    for i, j in itertools.product(range(Lx), range(Ly)):
+    for ni, nj in itertools.product(range(Lx), range(Ly)):
         directions = ""
         inds = []
 
-        if j > 0 or cyclic_y:
+        if nj > 0 or cyclic_y:
             directions += 'l'
-            inds.append(bonds[(i, (j - 1) % Ly), (i, j)])
-        if j < Ly - 1 or cyclic_y:
+            inds.append(bonds[(ni, (nj - 1) % Ly), (ni, nj)])
+        if nj < Ly - 1 or cyclic_y:
             directions += 'r'
-            inds.append(bonds[(i, j), (i, (j + 1) % Ly)])
-        if i < Lx - 1 or cyclic_x:
+            inds.append(bonds[(ni, nj), (ni, (nj + 1) % Ly)])
+        if ni < Lx - 1 or cyclic_x:
             directions += 'u'
-            inds.append(bonds[(i, j), ((i + 1) % Lx, j)])
-        if i > 0 or cyclic_x:
+            inds.append(bonds[(ni, nj), ((ni + 1) % Lx, nj)])
+        if ni > 0 or cyclic_x:
             directions += 'd'
-            inds.append(bonds[((i - 1) % Lx, j), (i, j)])
+            inds.append(bonds[((ni - 1) % Lx, nj), (ni, nj)])
 
         ts.append(Tensor(
-            data=classical_ising_T2d_matrix(beta, directions, h=h),
+            data=classical_ising_T2d_matrix(beta, directions, j=j, h=h),
             inds=inds,
-            tags=[site_tag_id.format(i, j),
-                  row_tag_id.format(i),
-                  col_tag_id.format(j)]))
+            tags=[site_tag_id.format(ni, nj),
+                  row_tag_id.format(ni),
+                  col_tag_id.format(nj)]))
 
     tn = TensorNetwork(ts)
 
@@ -579,6 +635,7 @@ def TN3D_classical_ising_partition_function(
     Ly,
     Lz,
     beta,
+    j=1.0,
     h=0.0,
     cyclic=False,
     site_tag_id='I{},{},{}',
@@ -596,6 +653,8 @@ def TN3D_classical_ising_partition_function(
         Length of side z.
     beta : float
         The inverse temperature.
+    j : float, optional
+        The interaction strength, positive being *ferromagnetic*.
     h : float, optional
         The magnetic field strength.
     cyclic : bool or (bool, bool, bool), optional
@@ -620,35 +679,197 @@ def TN3D_classical_ising_partition_function(
     ts = []
     bonds = collections.defaultdict(rand_uuid)
 
-    for i, j, k in itertools.product(range(Lx), range(Ly), range(Lz)):
+    for ni, nj, nk in itertools.product(range(Lx), range(Ly), range(Lz)):
         directions = ""
         inds = []
 
-        if k > 0 or cyclic_z:
+        if nk > 0 or cyclic_z:
             directions += 'b'
-            inds.append(bonds[(i, j, (k - 1) % Lz), (i, j, k)])
-        if k < Lz - 1 or cyclic_z:
+            inds.append(bonds[(ni, nj, (nk - 1) % Lz), (ni, nj, nk)])
+        if nk < Lz - 1 or cyclic_z:
             directions += 'a'
-            inds.append(bonds[(i, j, k), (i, j, (k + 1) % Lz)])
-        if j > 0 or cyclic_y:
+            inds.append(bonds[(ni, nj, nk), (ni, nj, (nk + 1) % Lz)])
+        if nj > 0 or cyclic_y:
             directions += 'l'
-            inds.append(bonds[(i, (j - 1) % Ly, k), (i, j, k)])
-        if j < Ly - 1 or cyclic_y:
+            inds.append(bonds[(ni, (nj - 1) % Ly, nk), (ni, nj, nk)])
+        if nj < Ly - 1 or cyclic_y:
             directions += 'r'
-            inds.append(bonds[(i, j, k), (i, (j + 1) % Ly, k)])
-        if i < Lx - 1 or cyclic_x:
+            inds.append(bonds[(ni, nj, nk), (ni, (nj + 1) % Ly, nk)])
+        if ni < Lx - 1 or cyclic_x:
             directions += 'u'
-            inds.append(bonds[(i, j, k), ((i + 1) % Lx, j, k)])
-        if i > 0 or cyclic_x:
+            inds.append(bonds[(ni, nj, nk), ((ni + 1) % Lx, nj, nk)])
+        if ni > 0 or cyclic_x:
             directions += 'd'
-            inds.append(bonds[((i - 1) % Lx, j, k), (i, j, k)])
+            inds.append(bonds[((ni - 1) % Lx, nj, nk), (ni, nj, nk)])
 
         ts.append(Tensor(
-            data=classical_ising_T3d_matrix(beta, directions, h=h),
+            data=classical_ising_T3d_matrix(beta, directions, j=j, h=h),
             inds=inds,
-            tags=[site_tag_id.format(i, j, k)]))
+            tags=[site_tag_id.format(ni, nj, nk)]))
 
     tn = TensorNetwork(ts)
+    return tn
+
+
+def HTN_classical_partition_function_from_edges(
+    edges,
+    beta,
+    j=1.0,
+    h=0.0,
+    site_ind_id="s{}",
+    site_tag_id="I{}",
+    bond_tag_id="B{},{}",
+):
+    """Build a hyper tensor network representation of a classical ising model
+    partition function by specifying graph edges. There will be a single
+    tensor *per interaction* rather than per site, as well as a single tensor
+    for each site, if ``h != 0.0``.
+
+    Parameters
+    ----------
+    edges : sequence of tuple[hashable, hashable]
+        The graph edges, as a sequence of pairs of hashable objects, for
+        example integers, representing the nodes. You can redundantly specify
+        ``(u, v)`` and ``(v, u)`` and only one edge will be added.
+    beta : float, optional
+        The inverse temperature.
+    j : float, or callable, optional
+        The interaction strength, positive being *ferromagnetic*. If a
+        callable should have the signature ``j(node_a, node_b)`` and return
+        a float.
+    h : float, or callable, optional
+        The magnetic field strength. If a callable should have the
+        signature ``h(node)`` and return a float.
+    site_ind_id : str, optional
+        A string formatter for naming tensor indices like
+        ``site_ind_id.format(node)``.
+    site_tag_id : str, optional
+        A string formatter for naming tensor tags like
+        ``site_tag_id.format(node)``.
+    bond_tag_id : str, optional
+        A string formatter for naming tensor tags like
+        ``bond_tag_id.format(node_a, node_b)``.
+
+    Returns
+    -------
+    TensorNetwork
+    """
+    if callable(j):
+        j_factory = j
+    else:
+        def j_factory(node_a, node_b):
+            return j
+
+    ts = []
+    for node_a, node_b in gen_unique_edges(edges):
+        data = classical_ising_S_matrix(beta=beta, j=j_factory(node_a, node_b))
+        inds = [site_ind_id.format(node_a),
+                site_ind_id.format(node_b)]
+        tags = [bond_tag_id.format(node_a, node_b),
+                site_tag_id.format(node_a),
+                site_tag_id.format(node_b)]
+        ts.append(Tensor(data=data, inds=inds, tags=tags))
+
+    if h != 0.0:
+        if callable(h):
+            h_factory = h
+        else:
+            def h_factory(node):
+                return h
+
+        for node in unique(concat(edges)):
+            data = classical_ising_H_matrix(beta, h=h_factory(node))
+            inds = [site_ind_id.format(node)]
+            tags = [site_tag_id.format(node)]
+            ts.append(Tensor(data=data, inds=inds, tags=tags))
+
+    return TensorNetwork(ts)
+
+
+def TN_classical_partition_function_from_edges(
+    edges,
+    beta,
+    j=1.0,
+    h=0.0,
+    site_tag_id="I{}",
+    bond_ind_id="b{},{}",
+):
+    """Build a regular tensor network representation of a classical ising model
+    partition function by specifying graph edges. There will be a single
+    tensor per site.
+
+    Parameters
+    ----------
+    edges : sequence of tuple[hashable, hashable]
+        The graph edges, as a sequence of pairs of hashable objects, for
+        example integers, representing the nodes. You can redundantly specify
+        ``(u, v)`` and ``(v, u)`` and only one edge will be added.
+    beta : float, optional
+        The inverse temperature.
+    j : float, or callable, optional
+        The interaction strength, positive being *ferromagnetic*. If a
+        callable should have the signature ``j(node_a, node_b)`` and return
+        a float.
+    h : float, or callable, optional
+        The magnetic field strength. If a callable should have the
+        signature ``h(node)`` and return a float.
+    site_tag_id : str, optional
+        A string formatter for naming tensor tags like
+        ``site_ind_id.format(node)``.
+    bond_ind_id : str, optional
+        A string formatter for naming the indices bewteen tensors like
+        ``bond_ind_id.format(node_a, node_b)``.
+
+    Returns
+    -------
+    TensorNetwork
+    """
+    if callable(j):
+        j_factory = j
+    else:
+        def j_factory(node_a, node_b):
+            return j
+
+    to_contract = collections.defaultdict(list)
+    ts = []
+    for node_a, node_b in gen_unique_edges(edges):
+        j_ab = j_factory(node_a, node_b)
+        bond_ab = bond_ind_id.format(node_a, node_b)
+
+        # left tensor factor
+        data = classical_ising_sqrtS_matrix(beta=beta, j=j_ab)
+        inds = [f's{node_a}', bond_ab]
+        tags = [site_tag_id.format(node_a)]
+        ts.append(Tensor(data=data, inds=inds, tags=tags))
+
+        # right tensor factor
+        data = classical_ising_sqrtS_matrix(beta=beta, j=j_ab)
+        inds = [bond_ab, f's{node_b}']
+        tags = [site_tag_id.format(node_b)]
+        ts.append(Tensor(data=data, inds=inds, tags=tags))
+
+        to_contract[f's{node_a}'].append(bond_ab)
+        to_contract[f's{node_b}'].append(bond_ab)
+
+    if h != 0.0:
+        if callable(h):
+            h_factory = h
+        else:
+            def h_factory(node):
+                return h
+
+        for node in unique(concat(edges)):
+            data = classical_ising_H_matrix(beta, h=h_factory(node))
+            inds = [f's{node}']
+            tags = [site_tag_id.format(node)]
+            ts.append(Tensor(data=data, inds=inds, tags=tags))
+            to_contract[f's{node}'].extend(())
+
+    tn = TensorNetwork(ts)
+
+    for ind, output_inds in to_contract.items():
+        tn.contract_ind(ind, output_inds=output_inds)
+
     return tn
 
 
