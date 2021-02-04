@@ -1789,7 +1789,7 @@ class TensorNetwork2D(TensorNetwork):
                 row_envs['below', i],
                 self.select_any([self.row_tag(i + x) for x in range(x_bsz)]),
                 row_envs['above', i + x_bsz - 1],
-            ), check_collisions=False).view_as_(TensorNetwork2D, like=self)
+            )).view_as_(TensorNetwork2D, like=self)
             #
             #           y_bsz
             #           <-->               second_dense=True
@@ -1847,7 +1847,7 @@ class TensorNetwork2D(TensorNetwork):
                 col_envs[i0]['right', j0 + y_bsz - 1].select_any(right_tags),
                 row_envs['below', i0].select_any(below_tags),
                 row_envs['above', i0 + x_bsz - 1].select_any(above_tags),
-            ), check_collisions=False)
+            ))
 
             # finally, absorb any rank-2 corner tensors
             env_ij.rank_simplify_()
@@ -1900,7 +1900,7 @@ class TensorNetwork2D(TensorNetwork):
                 col_envs['left', j],
                 self.select_any([self.col_tag(j + jn) for jn in range(y_bsz)]),
                 col_envs['right', j + y_bsz - 1],
-            ), check_collisions=False).view_as_(TensorNetwork2D, like=self)
+            )).view_as_(TensorNetwork2D, like=self)
             #
             #        y_bsz
             #        <-->        second_dense=True
@@ -1957,7 +1957,7 @@ class TensorNetwork2D(TensorNetwork):
                 col_envs['right', j0 + y_bsz - 1].select_any(right_tags),
                 row_envs[j0]['below', i0].select_any(below_tags),
                 row_envs[j0]['above', i0 + x_bsz - 1].select_any(above_tags),
-            ), check_collisions=False)
+            ))
 
             # finally, absorb any rank-2 corner tensors
             env_ij.rank_simplify_()
@@ -3046,7 +3046,7 @@ class PEPS(TensorNetwork2DVector,
             # create the site tensor!
             tensors.append(Tensor(data=array, inds=inds, tags=ij_tags))
 
-        super().__init__(tensors, check_collisions=False, **tn_opts)
+        super().__init__(tensors, virtual=True, **tn_opts)
 
     @classmethod
     def rand(cls, Lx, Ly, bond_dim, phys_dim=2,
@@ -3272,7 +3272,7 @@ class PEPO(TensorNetwork2DOperator,
             # create the site tensor!
             tensors.append(Tensor(data=array, inds=inds, tags=ij_tags))
 
-        super().__init__(tensors, check_collisions=False, **tn_opts)
+        super().__init__(tensors, virtual=True, **tn_opts)
 
     @classmethod
     def rand(cls, Lx, Ly, bond_dim, phys_dim=2, herm=False,

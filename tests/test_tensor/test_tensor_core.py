@@ -1017,9 +1017,10 @@ class TestTensorNetwork:
         tn[1].modify(data=new_data)
         assert_allclose(tn['I1'].data, new_data)
 
-    def test_combining_with_no_check_collisions(self):
+    def test_make_tids_consecutive_combining_with_no_check_collisions(self):
         p1 = MPS_rand_state(5, 3, phys_dim=3)
         p2 = MPS_rand_state(5, 3, phys_dim=3)
+        p2.make_tids_consecutive(tid0=5)
         # shouldn't need to check any collisions
         tn = TensorNetwork((p1, p2), check_collisions=False)
         # test can contract

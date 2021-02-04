@@ -408,7 +408,7 @@ def tags_to_oset(tags):
     """
     if tags is None:
         return oset()
-    elif isinstance(tags, str):
+    elif isinstance(tags, (str, int)):
         return oset((tags,))
     elif isinstance(tags, oset):
         return tags.copy()
@@ -787,7 +787,7 @@ def tensor_split(
     if get == 'tensors':
         return tensors
 
-    return TensorNetwork(tensors, check_collisions=False)
+    return TensorNetwork(tensors, virtual=True)
 
 
 def tensor_canonize_bond(T1, T2, absorb='right', **split_opts):
@@ -2602,17 +2602,17 @@ class TensorNetwork(object):
     ts : sequence of Tensor or TensorNetwork
         The objects to combine. The new network will copy these (but not the
         underlying data) by default. For a *view* set ``virtual=True``.
-    check_collisions : bool, optional
-        If True, the default, then Tensors and TensorNetworks with double
-        indices which match another Tensor or TensorNetworks double indices
-        will have those indices' names mangled. Can be explicitly turned off
-        when it is known that no collisions will take place -- i.e. when not
-        adding any new tensors.
     virtual : bool, optional
         Whether the TensorNetwork should be a *view* onto the tensors it is
         given, or a copy of them. E.g. if a virtual TN is constructed, any
         changes to a Tensor's indices or tags will propagate to all TNs viewing
         that Tensor.
+    check_collisions : bool, optional
+        If True, the default, then ``TensorNetwork`` instances with double
+        indices which match another ``TensorNetwork`` instances double indices
+        will have those indices' names mangled. Can be explicitly turned off
+        when it is known that no collisions will take place -- i.e. when not
+        adding any new tensors.
 
     Attributes
     ----------
@@ -2646,22 +2646,24 @@ class TensorNetwork(object):
             for tid, t in ts.tensor_map.items():
                 self.tensor_map[tid] = t if virtual else t.copy()
                 self.tensor_map[tid].add_owner(self, tid)
+            self._inner_inds = ts._inner_inds.copy()
+            self._outer_inds = ts._outer_inds.copy()
+            self._tid_counter = ts._tid_counter
+            self.exponent = ts.exponent
             for ep in ts.__class__._EXTRA_PROPS:
                 setattr(self, ep, getattr(ts, ep))
-            self.exponent = ts.exponent
             return
 
         # internal structure
+        self._tid_counter = 0
         self.tensor_map = dict()
         self.tag_map = dict()
         self.ind_map = dict()
-
         self._inner_inds = oset()
+        self._outer_inds = oset()
+        self.exponent = 0.0
         for t in ts:
             self.add(t, virtual=virtual, check_collisions=check_collisions)
-        self._inner_inds = None
-
-        self.exponent = 0.0
 
     def __and__(self, other):
         """Combine this tensor network with more tensors, without contracting.
@@ -2757,37 +2759,82 @@ class TensorNetwork(object):
 
     __copy__ = copy
 
-    @staticmethod
-    def _add_tid(xs, x_map, tid):
-        """Add tid to the relevant map.
+    def _add_tags(self, tags, tid):
+        """Link ``tid`` to each of ``tags``.
         """
-        for x in xs:
-            if x in x_map:
-                x_map[x].add(tid)
+        for tag in tags:
+            if tag in self.tag_map:
+                self.tag_map[tag].add(tid)
             else:
-                x_map[x] = oset((tid,))
+                self.tag_map[tag] = oset((tid,))
 
-    @staticmethod
-    def _remove_tid(xs, x_map, tid):
-        """Remove tid from the relevant map.
+    def _remove_tags(self, tags, tid):
+        """"Unlink ``tid`` from each of ``tags``.
         """
-        for x in xs:
+        for tag in tags:
             try:
-                tids = x_map[x]
+                tids = self.tag_map[tag]
                 tids.discard(tid)
                 if not tids:
                     # tid was last tensor -> delete entry
-                    del x_map[x]
+                    del self.tag_map[tag]
             except KeyError:
                 # tid already removed from x entry - e.g. repeated index
                 pass
+
+    def _add_inds(self, inds, tid):
+        """Link ``tid`` to each of ``inds``.
+        """
+        for ind in inds:
+            if ind in self.ind_map:
+                self.ind_map[ind].add(tid)
+                self._outer_inds.discard(ind)
+                self._inner_inds.add(ind)
+            else:
+                self.ind_map[ind] = oset((tid,))
+                self._outer_inds.add(ind)
+
+    def _remove_inds(self, inds, tid):
+        """"Unlink ``tid`` from each of ``inds``.
+        """
+        for ind in inds:
+            try:
+                tids = self.ind_map[ind]
+                tids.discard(tid)
+                occurences = len(tids)
+                if occurences == 0:
+                    # tid was last tensor -> delete entry
+                    del self.ind_map[ind]
+                    self._outer_inds.discard(ind)
+                elif occurences == 1:
+                    self._inner_inds.discard(ind)
+                    self._outer_inds.add(ind)
+            except KeyError:
+                # tid already removed from x entry - e.g. repeated index
+                pass
+
+    def _reset_inner_outer(self, inds):
+        for ind in inds:
+            occurences = len(self.ind_map[ind])
+            if occurences == 1:
+                self._inner_inds.discard(ind)
+                self._outer_inds.add(ind)
+            else:
+                self._inner_inds.add(ind)
+                self._outer_inds.discard(ind)
+
+    def _next_tid(self):
+        # N.B. safer? previous behavior -> return rand_uuid('_T')
+        while self._tid_counter in self.tensor_map:
+            self._tid_counter = self._tid_counter + 1
+        return self._tid_counter
 
     def add_tensor(self, tensor, tid=None, virtual=False):
         """Add a single tensor to this network - mangle its tid if neccessary.
         """
         # check for tid conflict
         if (tid is None) or (tid in self.tensor_map):
-            tid = rand_uuid(base="_T")
+            tid = self._next_tid()
 
         # add tensor to the main index
         T = tensor if virtual else tensor.copy()
@@ -2795,44 +2842,27 @@ class TensorNetwork(object):
         T.add_owner(self, tid)
 
         # add its tid to the relevant tags and inds, or create new entries
-        self._add_tid(T.tags, self.tag_map, tid)
-        self._add_tid(T.inds, self.ind_map, tid)
+        self._add_tags(T.tags, tid)
+        self._add_inds(T.inds, tid)
 
     def add_tensor_network(self, tn, virtual=False, check_collisions=True):
         """
         """
         if check_collisions:  # add tensors individually
-            if getattr(self, '_inner_inds', None) is None:
-                self._inner_inds = oset(self.inner_inds())
-
             # check for matching inner_indices -> need to re-index
-            other_inner_ix = oset(tn.inner_inds())
-            clash_ix = self._inner_inds & other_inner_ix
+            clash_ix = self._inner_inds & tn._inner_inds
+            reind = {ix: rand_uuid() for ix in clash_ix}
+        else:
+            clash_ix = False
+            reind = None
 
-            if clash_ix:
-                can_keep_ix = other_inner_ix - self._inner_inds
-                new_inds = oset(rand_uuid() for _ in range(len(clash_ix)))
-                reind = dict(zip(clash_ix, new_inds))
-                self._inner_inds.update(new_inds, can_keep_ix)
-            else:
-                self._inner_inds.update(other_inner_ix)
+        # add tensors, reindexing if necessary
+        for tid, tsr in tn.tensor_map.items():
+            if clash_ix and any(i in reind for i in tsr.inds):
+                tsr = tsr.reindex(reind, inplace=virtual)
+            self.add_tensor(tsr, virtual=virtual, tid=tid)
 
-            # add tensors, reindexing if necessary
-            for tid, tsr in tn.tensor_map.items():
-                if clash_ix and any(i in reind for i in tsr.inds):
-                    tsr = tsr.reindex(reind, inplace=virtual)
-                self.add_tensor(tsr, virtual=virtual, tid=tid)
-
-        else:  # directly add tensor/tag indexes
-            for tid, tsr in tn.tensor_map.items():
-                T = tsr if virtual else tsr.copy()
-                self.tensor_map[tid] = T
-                T.add_owner(self, tid)
-
-            self.tag_map = merge_with(lambda it: oset.union(*it),
-                                      self.tag_map, tn.tag_map)
-            self.ind_map = merge_with(lambda it: oset.union(*it),
-                                      self.ind_map, tn.ind_map)
+        self.exponent = self.exponent + tn.exponent
 
     def add(self, t, virtual=False, check_collisions=True):
         """Add Tensor, TensorNetwork or sequence thereof to self.
@@ -2858,6 +2888,14 @@ class TensorNetwork(object):
             self.add_tensor_network(t, virtual=virtual,
                                     check_collisions=check_collisions)
 
+    def make_tids_consecutive(self, tid0=0):
+        """Reset the `tids` - node identifies - to be consecutive integers.
+        """
+        tids = tuple(self.tensor_map.keys())
+        ts = tuple(map(self._pop_tensor, tids))
+        self._tid_counter = tid0
+        self.add(ts, virtual=True)
+
     def __iand__(self, tensor):
         """Inplace, but non-virtual, addition of a Tensor or TensorNetwork to
         this network. It should not have any conflicting indices.
@@ -2873,12 +2911,12 @@ class TensorNetwork(object):
         return self
 
     def _modify_tensor_tags(self, old, new, tid):
-        self._remove_tid(old - new, self.tag_map, tid)
-        self._add_tid(new - old, self.tag_map, tid)
+        self._remove_tags(old - new, tid)
+        self._add_tags(new - old, tid)
 
     def _modify_tensor_inds(self, old, new, tid):
-        self._remove_tid(old - new, self.ind_map, tid)
-        self._add_tid(new - old, self.ind_map, tid)
+        self._remove_inds(old - new, tid)
+        self._add_inds(new - old, tid)
 
     @property
     def num_tensors(self):
@@ -2899,8 +2937,8 @@ class TensorNetwork(object):
         t = self.tensor_map.pop(tid)
 
         # remove the tid from the tag and ind maps
-        self._remove_tid(t.tags, self.tag_map, tid)
-        self._remove_tid(t.inds, self.ind_map, tid)
+        self._remove_tags(t.tags, tid)
+        self._remove_inds(t.inds, tid)
 
         # remove this tensornetwork as an owner
         t.remove_owner(self)
@@ -4911,6 +4949,19 @@ class TensorNetwork(object):
         """
         return {i: self.ind_size(i) for i in self.ind_map}
 
+    def inner_inds(self):
+        """Tuple of interior indices, assumed to be any indices that appear
+        twice or more (this only holds generally for non-hyper tensor
+        networks).
+        """
+        return tuple(self._inner_inds)
+
+    def outer_inds(self):
+        """Tuple of exterior indices, assumed to be any lone indices (this only
+        holds generally for non-hyper tensor networks).
+        """
+        return tuple(self._outer_inds)
+
     def outer_dims_inds(self):
         """Get the 'outer' pairs of dimension and indices, i.e. as if this
         tensor network was fully contracted.
@@ -5144,7 +5195,7 @@ class TensorNetwork(object):
         tn = self if inplace else self.copy()
 
         if output_inds is None:
-            output_inds = set(tn.outer_inds())
+            output_inds = tn._outer_inds
 
         # pairs of tensors we have already checked
         if cache is None:
@@ -5752,8 +5803,8 @@ class TensorNetwork(object):
     def __setstate__(self, state):
         # This allows picklings, by restoring the returned TN as owner
         self.__dict__ = state.copy()
-        for t in self.__dict__['tensor_map'].values():
-            t.add_owner(self, tid=rand_uuid(base="_T"))
+        for tid, t in self.__dict__['tensor_map'].items():
+            t.add_owner(self, tid=tid)
 
     def __str__(self):
         return "{}([{}{}{}])".format(

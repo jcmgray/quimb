@@ -708,6 +708,15 @@ class TensorNetwork1DVector(TensorNetwork1D,
         '_L',
     )
 
+    def reindex_all(self, new_id, inplace=False):
+        """Reindex all physical sites and change the ``site_ind_id``.
+        """
+        tn = self if inplace else self.copy()
+        tn.site_ind_id = new_id
+        return tn
+
+    reindex_all_ = functools.partialmethod(reindex_all, inplace=True)
+
     def reindex_sites(self, new_id, where=None, inplace=False):
         """Update the physical site index labels to a new string specifier.
         Note that this doesn't change the stored id string with the TN.
@@ -732,12 +741,14 @@ class TensorNetwork1DVector(TensorNetwork1D,
         return self.reindex({self.site_ind(i): new_id.format(i)
                              for i in indices}, inplace=inplace)
 
+    reindex_sites_ = functools.partialmethod(reindex_sites, inplace=True)
+
     def _get_site_ind_id(self):
         return self._site_ind_id
 
     def _set_site_ind_id(self, new_id):
         if self._site_ind_id != new_id:
-            self.reindex_sites(new_id, inplace=True)
+            self.reindex_sites_(new_id)
             self._site_ind_id = new_id
 
     site_ind_id = property(_get_site_ind_id, _set_site_ind_id,
@@ -1680,7 +1691,7 @@ class MatrixProductState(TensorNetwork1DVector,
                                                     gen_inds(), gen_orders()):
                 yield Tensor(transpose(array, order), inds=inds, tags=site_tag)
 
-        super().__init__(gen_tensors(), check_collisions=False, **tn_opts)
+        super().__init__(gen_tensors(), virtual=True, **tn_opts)
 
     @classmethod
     def from_dense(cls, psi, dims, site_ind_id='k{}',
@@ -2146,7 +2157,7 @@ class MatrixProductState(TensorNetwork1DVector,
             The density operator in MPO form.
         """
         p_bra = self.copy()
-        p_bra.reindex_sites(upper_ind_id, where=keep, inplace=True)
+        p_bra.reindex_sites_(upper_ind_id, where=keep)
         rho = self.H & p_bra
         # now have e.g:
         #     | |     |   |
@@ -2893,7 +2904,7 @@ class MatrixProductOperator(TensorNetwork1DOperator,
 
                 yield Tensor(transpose(array, order), inds=inds, tags=site_tag)
 
-        super().__init__(gen_tensors(), check_collisions=False, **tn_opts)
+        super().__init__(gen_tensors(), virtual=True, **tn_opts)
 
     def add_MPO(self, other, inplace=False, compress=False, **compress_opts):
         """Add another MatrixProductState to this one.
@@ -2937,7 +2948,7 @@ class MatrixProductOperator(TensorNetwork1DOperator,
         # align the indices
         A.lower_ind_id = "__tmp{}__"
         A.upper_ind_id = x.site_ind_id
-        x.reindex_sites("__tmp{}__", inplace=True)
+        x.reindex_sites_("__tmp{}__")
 
         # form total network and contract each site
         x |= A
@@ -3198,7 +3209,7 @@ class Dense1D(TensorNetwork1DVector,
 
         T = Tensor(data=data, inds=site_inds, tags=site_tags)
 
-        super().__init__([T], check_collisions=False, **tn_opts)
+        super().__init__([T], virtual=True, **tn_opts)
 
     @classmethod
     def rand(cls, n, phys_dim=2, dtype=float, **dense1d_opts):
@@ -3347,7 +3358,7 @@ class SuperOperator1D(
                                                 gen_inds(), gen_orders()):
                 yield Tensor(transpose(array, order), inds=inds, tags=tags)
 
-        super().__init__(gen_tensors(), check_collisions=False, **tn_opts)
+        super().__init__(gen_tensors(), virtual=True, **tn_opts)
 
     @classmethod
     def rand(cls, n, K, chi, phys_dim=2, herm=True,
