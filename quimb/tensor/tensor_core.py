@@ -2759,7 +2759,7 @@ class TensorNetwork(object):
 
     __copy__ = copy
 
-    def _add_tags(self, tags, tid):
+    def _link_tags(self, tags, tid):
         """Link ``tid`` to each of ``tags``.
         """
         for tag in tags:
@@ -2768,7 +2768,7 @@ class TensorNetwork(object):
             else:
                 self.tag_map[tag] = oset((tid,))
 
-    def _remove_tags(self, tags, tid):
+    def _unlink_tags(self, tags, tid):
         """"Unlink ``tid`` from each of ``tags``.
         """
         for tag in tags:
@@ -2782,7 +2782,7 @@ class TensorNetwork(object):
                 # tid already removed from x entry - e.g. repeated index
                 pass
 
-    def _add_inds(self, inds, tid):
+    def _link_inds(self, inds, tid):
         """Link ``tid`` to each of ``inds``.
         """
         for ind in inds:
@@ -2794,7 +2794,7 @@ class TensorNetwork(object):
                 self.ind_map[ind] = oset((tid,))
                 self._outer_inds.add(ind)
 
-    def _remove_inds(self, inds, tid):
+    def _unlink_inds(self, inds, tid):
         """"Unlink ``tid`` from each of ``inds``.
         """
         for ind in inds:
@@ -2841,9 +2841,9 @@ class TensorNetwork(object):
         self.tensor_map[tid] = T
         T.add_owner(self, tid)
 
-        # add its tid to the relevant tags and inds, or create new entries
-        self._add_tags(T.tags, tid)
-        self._add_inds(T.inds, tid)
+        # add its tid to the relevant tag and inds maps, or create new entries
+        self._link_tags(T.tags, tid)
+        self._link_inds(T.inds, tid)
 
     def add_tensor_network(self, tn, virtual=False, check_collisions=True):
         """
@@ -2911,12 +2911,12 @@ class TensorNetwork(object):
         return self
 
     def _modify_tensor_tags(self, old, new, tid):
-        self._remove_tags(old - new, tid)
-        self._add_tags(new - old, tid)
+        self._unlink_tags(old - new, tid)
+        self._link_tags(new - old, tid)
 
     def _modify_tensor_inds(self, old, new, tid):
-        self._remove_inds(old - new, tid)
-        self._add_inds(new - old, tid)
+        self._unlink_inds(old - new, tid)
+        self._link_inds(new - old, tid)
 
     @property
     def num_tensors(self):
@@ -2937,8 +2937,8 @@ class TensorNetwork(object):
         t = self.tensor_map.pop(tid)
 
         # remove the tid from the tag and ind maps
-        self._remove_tags(t.tags, tid)
-        self._remove_inds(t.inds, tid)
+        self._unlink_tags(t.tags, tid)
+        self._unlink_inds(t.inds, tid)
 
         # remove this tensornetwork as an owner
         t.remove_owner(self)
@@ -4925,19 +4925,6 @@ class TensorNetwork(object):
         """
         return tuple(self.ind_map)
 
-    def inner_inds(self):
-        """Tuple of interior indices, assumed to be any indices that appear
-        twice or more (this only holds generally for non-hyper tensor
-        networks).
-        """
-        return tuple(i for i, tids in self.ind_map.items() if len(tids) == 2)
-
-    def outer_inds(self):
-        """Tuple of exterior indices, assumed to be any lone indices (this only
-        holds generally for non-hyper tensor networks).
-        """
-        return tuple(i for i, tids in self.ind_map.items() if len(tids) == 1)
-
     def ind_size(self, ind):
         """Find the size of ``ind``.
         """
@@ -5222,6 +5209,9 @@ class TensorNetwork(object):
         # this ensures the output indices are not removed (+1 each)
         count.update(output_inds)
 
+        # special case, everything connected by one index
+        trivial = len(count) == 1
+
         # sorted list of unique indices to check -> start with lowly connected
         def rank_weight(ind):
             return (tn.ind_size(ind),
@@ -5284,6 +5274,10 @@ class TensorNetwork(object):
                     cands.append(res)
                 else:
                     cache.add(cache_key)
+
+                if cands and trivial:
+                    # can do contractions in any order
+                    break
 
             if not cands:
                 # none of the parwise contractions reduce rank

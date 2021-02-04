@@ -1395,6 +1395,14 @@ class TestTensorNetworkSimplifications:
         # checl that 'B' was absorbed into 'A' not 'C'
         assert set(tn_s['B'].tags) == {'A', 'B'}
 
+    def test_rank_simplify_single_ind(self):
+        ts = [rand_tensor([2], 'a') for _ in range(100)]
+        tn = TensorNetwork(ts)
+        assert len(tn.ind_map) == 1
+        assert len(tn.tensor_map) == 100
+        tn.rank_simplify_()
+        assert len(tn.tensor_map) == 1
+
     def test_diagonal_reduce(self):
         A = rand_tensor([2, 2], 'ab', dtype=complex)
         B = Tensor([[3j, 0.], [0., 4j]], 'bc')
