@@ -305,35 +305,35 @@ class FermionTensorNetwork2D(FermionTensorNetwork,TensorNetwork2D):
         # upwards pass
         row_envs['below', 0] = FermionTensorNetwork([])
         first_row = self.row_tag(0)
-        row_envs['mid', 0] = env_bottom.select(first_row).simple_copy()
+        row_envs['mid', 0] = env_bottom.select(first_row).copy()
         if dense:
             env_bottom ^= first_row
-        row_envs['below', 1] = env_bottom.select(first_row).simple_copy()
+        row_envs['below', 1] = env_bottom.select(first_row).copy()
         for i in range(2, env_bottom.Lx):
             below_row = env_bottom.row_tag(i-1)
-            row_envs["mid", i-1] = env_bottom.select(below_row).simple_copy()
+            row_envs["mid", i-1] = env_bottom.select(below_row).copy()
             if dense:
                 env_bottom ^= (self.row_tag(i - 2), self.row_tag(i - 1))
             else:
                 env_bottom.contract_boundary_from_bottom_(
                     (i - 2, i - 1), **compress_opts)
-            row_envs['below', i] = env_bottom.select(first_row).simple_copy()
+            row_envs['below', i] = env_bottom.select(first_row).copy()
 
         last_row = env_bottom.row_tag(self.Lx-1)
-        row_envs['mid', self.Lx-1] = env_bottom.select(last_row).simple_copy()
+        row_envs['mid', self.Lx-1] = env_bottom.select(last_row).copy()
         # downwards pass
         row_envs['above', self.Lx - 1] = FermionTensorNetwork([])
         last_row = self.row_tag(self.Lx - 1)
         if dense:
             env_top ^= last_row
-        row_envs['above', self.Lx - 2] = env_top.select(last_row).simple_copy()
+        row_envs['above', self.Lx - 2] = env_top.select(last_row).copy()
         for i in range(env_top.Lx - 3, -1, -1):
             if dense:
                 env_top ^= (self.row_tag(i + 1), self.row_tag(i + 2))
             else:
                 env_top.contract_boundary_from_top_(
                     (i + 1, i + 2), **compress_opts)
-            row_envs['above', i] = env_top.select(last_row).simple_copy()
+            row_envs['above', i] = env_top.select(last_row).copy()
 
         return row_envs
 
@@ -347,36 +347,36 @@ class FermionTensorNetwork2D(FermionTensorNetwork,TensorNetwork2D):
         # upwards pass
         col_envs['left', 0] = FermionTensorNetwork([])
         first_col = self.col_tag(0)
-        col_envs['mid', 0] = env_left.select(first_col).simple_copy()
+        col_envs['mid', 0] = env_left.select(first_col).copy()
         if dense:
             env_left ^= first_col
-        col_envs['left', 1] = env_left.select(first_col).simple_copy()
+        col_envs['left', 1] = env_left.select(first_col).copy()
 
         for i in range(2, env_left.Ly):
             left_col = env_left.col_tag(i-1)
-            col_envs["mid", i-1] = env_left.select(left_col).simple_copy()
+            col_envs["mid", i-1] = env_left.select(left_col).copy()
             if dense:
                 env_left ^= (self.col_tag(i - 2), self.col_tag(i - 1))
             else:
                 env_left.contract_boundary_from_left_(
                     (i - 2, i - 1), **compress_opts)
-            col_envs['left', i] = env_left.select(first_col).simple_copy()
+            col_envs['left', i] = env_left.select(first_col).copy()
 
         last_col = env_left.col_tag(self.Ly-1)
-        col_envs['mid', self.Ly-1] = env_left.select(last_col).simple_copy()
+        col_envs['mid', self.Ly-1] = env_left.select(last_col).copy()
         # downwards pass
         col_envs['right', self.Ly - 1] = FermionTensorNetwork([])
         last_col = self.col_tag(self.Ly - 1)
         if dense:
             env_right ^= last_col
-        col_envs['right', self.Ly - 2] = env_right.select(last_col).simple_copy()
+        col_envs['right', self.Ly - 2] = env_right.select(last_col).copy()
         for i in range(env_right.Ly - 3, -1, -1):
             if dense:
                 env_right ^= (self.col_tag(i + 1), self.col_tag(i + 2))
             else:
                 env_right.contract_boundary_from_right_(
                     (i + 1, i + 2), **compress_opts)
-            col_envs['right', i] = env_right.select(last_col).simple_copy()
+            col_envs['right', i] = env_right.select(last_col).copy()
 
         return col_envs
 
@@ -699,7 +699,6 @@ class FermionTensorNetwork2DVector(FermionTensorNetwork2D,
             input_tids = psi._get_tids_from_inds(bnds, which='any')
             isite = [psi.tensor_map[itid].get_fermion_info()[1] for itid in input_tids]
 
-            #psi |= TG
             psi.fermion_space.add_tensor(TG, virtual=True)
 
             # get the sites that used to have the physical indices

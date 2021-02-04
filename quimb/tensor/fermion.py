@@ -129,18 +129,32 @@ def _fetch_fermion_space(*tensors, inplace=True):
     fs : a FermionSpace object
     tid_lst: a list of strings for the tensor_ids
     """
-    if isinstance(tensors, FermionTensor):
+    if isinstance(tensors, (FermionTensor, FermionTensorNetwork)):
         tensors = (tensors, )
 
     if is_mergeable(*tensors):
-        fs = tensors[0].fermion_owner[1]()
+        if isinstance(tensors[0], FermionTensor):
+            fs = tensors[0].fermion_owner[1]()
+        else:
+            fs = tensors[0].fermion_space
         if not inplace:
             fs = fs.copy()
-        tid_lst = [tsr.get_fermion_info()[0] for tsr in tensors]
+        tid_lst = []
+        for tsr_or_tn in tensors:
+            if isinstance(tsr_or_tn, FermionTensor):
+                tid_lst.append(tsr_or_tn.get_fermion_info()[0])
+            else:
+                tid_lst.append(tsr_or_tn.tensor_map.keys())
     else:
         fs = FermionSpace()
-        for tsr in tensors:
-            fs.add_tensor(tsr, virtual=inplace)
+        for tsr_or_tn in tensors:
+            if isinstance(tsr_or_tn, FermionTensor):
+                fs.add_tensor(tsr_or_tn, virtual=inplace)
+            elif isinstance(tsr_or_tn, FermionTensorNetwork):
+                if not tsr_or_tn.is_continuous():
+                    raise ValueError("Input Network not continous, merge not allowed")
+                for itsr in tsr_or_tn:
+                    fs.add_tensor(itsr, virtual=inplace)
         tid_lst = list(fs.tensor_order.keys())
     return fs, tid_lst
 
@@ -966,7 +980,7 @@ class FermionTensor(Tensor):
         """
         if location not in ["front", "back"]:
             raise ValueError("invalid for the location of the diagonal")
-        t = self if inplace else self.copy()
+        t = self if inplace else self.copy(full=True)
         ax = t.inds.index(ind)
         if isinstance(x, FermionTensor):
             x = x.data
@@ -1027,7 +1041,9 @@ class FermionTensor(Tensor):
         return tensor_split(self, *args, **kwargs)
 
     def transpose(self, *output_inds, inplace=False):
-        """Transpose this tensor.
+        """Transpose this tensor. This does not change the physical meaning of
+        the operator represented, eg:
+        T_{abc}a^{\dagger}b^{\dagger}c^{\dagger} = \tilda{T}_{cab}c^{\dagger}a^{\dagger}b^{\dagger}
 
         Parameters
         ----------
@@ -1063,8 +1079,9 @@ class FermionTensor(Tensor):
 
     @property
     def H(self):
-        """Return the ket of this tensor, this is different from Fermionic transposition
-            U_{abc} a^{\dagger}b^{\dagger}c^{\dagger} -> U^{cba\star}cba
+        """Return the ket of this tensor, eg:
+        U_{abc} a^{\dagger}b^{\dagger}c^{\dagger} -> U^{cba\star}cba
+        Note this is different from Fermionic transposition
         """
         axes = list(range(self.ndim))[::-1]
         data = self.data.permute(axes).conj()
@@ -1190,8 +1207,13 @@ class FermionTensorNetwork(TensorNetwork):
         """
         return FermionTensorNetwork((self, other), virtual=True)
 
+    def __iter__(self):
+        sorted_sites = sorted(self.filled_sites)
+        for isite in sorted_sites:
+            yield self.fermion_space[isite][2]
+
     def _reorder_from_tid(self, tid_map, inplace=False):
-        tn = self if inplace else self.copy()
+        tn = self if inplace else self.copy(full=True)
         tn.fermion_space._reorder_from_dict(tid_map)
         return tn
 
@@ -1208,7 +1230,7 @@ class FermionTensorNetwork(TensorNetwork):
         -------
         TensorNetwork
         """
-        tn = self if inplace else self.copy()
+        tn = self if inplace else self.copy(full=True)
 
         for ix, tids in tn.ind_map.items():
             if len(tids) != 2:
@@ -1286,8 +1308,14 @@ class FermionTensorNetwork(TensorNetwork):
         if not tn.is_continuous():
             raise ValueError("input tensor network is not contiguously ordered")
 
-        filled_sites = tn.filled_sites
-        sorted_sites = sorted(filled_sites)
+        sorted_tensors = []
+        for tsr in tn:
+            tid = tsr.get_fermion_info()[0]
+            sorted_tensors.append([tid, tsr])
+        # if inplace, fermion_owners need to be removed first to avoid conflicts
+        if virtual:
+            for tid, tsr in sorted_tensors:
+                tsr.remove_fermion_owner()
 
         if check_collisions:  # add tensors individually
             if getattr(self, '_inner_inds', None) is None:
@@ -1306,15 +1334,13 @@ class FermionTensorNetwork(TensorNetwork):
                 self._inner_inds.update(other_inner_ix)
 
             # add tensors, reindexing if necessary
-            for site in sorted_sites:
-                tid, _, tsr = tn.fermion_space[site]
+            for tid, tsr in sorted_tensors:
                 if clash_ix and any(i in reind for i in tsr.inds):
                     tsr = tsr.reindex(reind, inplace=virtual)
                 self.add_tensor(tsr, tid=tid, virtual=virtual)
 
         else:  # directly add tensor/tag indexes
-            for site in sorted_sites:
-                tid, _, tsr = tn.fermion_space[site]
+            for tid, tsr in sorted_tensors:
                 self.add_tensor(tsr, tid=tid, virtual=virtual)
 
     def add(self, t, virtual=False, check_collisions=True):
@@ -1363,7 +1389,10 @@ class FermionTensorNetwork(TensorNetwork):
         """Inplace, virtual, addition of a Tensor or TensorNetwork to this
         network. It should not have any conflicting indices.
         """
-        self.add(tensor, virtual=True)
+        if is_mergeable(self, tensor):
+            self.assemble(tensor)
+        else:
+            self.add(tensor, virtual=True)
         return self
 
     # ------------------------------- Methods ------------------------------- #
@@ -1388,17 +1417,22 @@ class FermionTensorNetwork(TensorNetwork):
         if len(filled_sites) ==0 : return True
         return (max(filled_sites) - min(filled_sites) + 1) == len(filled_sites)
 
-    def copy(self):
-        """ Tensors and underlying FermionSpace(all tensors in it) will
-            be copied
+    def copy(self, full=False):
+        """ For full copy, the tensors and underlying FermionSpace(all tensors in it) will
+        be copied. For partial copy, the tensors in this network must be continuously
+        placed and a new FermionSpace will be created to hold this continous sector.
         """
-        return self.__class__(self, virtual=False)
+        if full:
+            return self.__class__(self, virtual=False)
+        else:
+            if not self.is_continuous():
+                raise TypeError("Tensors not continuously placed in the network, \
+                                partial copy not allowed")
+            newtn = FermionTensorNetwork([])
+            newtn.add_tensor_network(self)
+            newtn.view_like_(self)
+            return newtn
 
-    def simple_copy(self):
-        newtn = FermionTensorNetwork([])
-        newtn.add_tensor_network(self)
-        newtn.view_like_(self)
-        return newtn
 
     def _pop_tensor(self, tid, remove_from_fs=True):
         """Remove a tensor from this network, returning said tensor.
@@ -1423,7 +1457,7 @@ class FermionTensorNetwork(TensorNetwork):
 
     @property
     def H(self):
-        tn = self.copy()
+        tn = self.copy(full=True)
         fs = tn.fermion_space
         max_site = max(fs.sites)
 
@@ -1452,7 +1486,6 @@ class FermionTensorNetwork(TensorNetwork):
 
     # ----------------- selecting and splitting the network ----------------- #
 
-
     def __setitem__(self, tags, tensor):
         #TODO: FIXME
         """Set the single tensor uniquely associated with ``tags``.
@@ -1463,8 +1496,8 @@ class FermionTensorNetwork(TensorNetwork):
                            "existing tensor only - found {} with tag(s) '{}'."
                            .format(len(tids), tags))
 
-        if not isinstance(tensor, Tensor):
-            raise TypeError("Can only set value with a new 'Tensor'.")
+        if not isinstance(tensor, FermionTensor):
+            raise TypeError("Can only set value with a new 'FermionTensor'.")
 
         tid, = tids
         site = self.fermion_space.tensor_order[tid][1]
@@ -1474,7 +1507,8 @@ class FermionTensorNetwork(TensorNetwork):
 
     def partition_tensors(self, tags, inplace=False, which='any'):
         """Split this TN into a list of tensors containing any or all of
-        ``tags`` and a ``TensorNetwork`` of the the rest.
+        ``tags`` and a ``FermionTensorNetwork`` of the the rest.
+        The tensors and FermionTensorNetwork remain in the same FermionSpace
 
         Parameters
         ----------
@@ -1489,8 +1523,8 @@ class FermionTensorNetwork(TensorNetwork):
 
         Returns
         -------
-        (u_tn, t_ts) : (TensorNetwork, tuple of Tensors)
-            The untagged tensor network, and the sequence of tagged Tensors.
+        (u_tn, t_ts) : (FermionTensorNetwork, tuple of FermionTensors)
+            The untagged fermion tensor network, and the sequence of tagged Tensors.
 
         See Also
         --------
@@ -1503,7 +1537,7 @@ class FermionTensorNetwork(TensorNetwork):
             return None, self.tensor_map.values()
 
         # Copy untagged to new network, and pop tagged tensors from this
-        untagged_tn = self if inplace else self.copy()
+        untagged_tn = self if inplace else self.copy(full=True)
         tagged_ts = tuple(map(untagged_tn._pop_tensor_, sorted(tagged_tids)))
 
         return untagged_tn, tagged_ts
@@ -1524,7 +1558,7 @@ class FermionTensorNetwork(TensorNetwork):
 
         Returns
         -------
-        untagged_tn, tagged_tn : (TensorNetwork, TensorNetwork)
+        untagged_tn, tagged_tn : (FermionTensorNetwork, FermionTensorNetwork)
             The untagged and tagged tensor networs.
 
         See Also
@@ -1534,9 +1568,9 @@ class FermionTensorNetwork(TensorNetwork):
         tagged_tids = self._get_tids_from_tags(tags, which=which)
 
         kws = {'check_collisions': False}
-        t1 = self if inplace else self.copy()
+        t1 = self if inplace else self.copy(full=True)
         t2s = [t1._pop_tensor_(tid) for tid in tagged_tids]
-        t2 = FermionTensorNetwork(t2s, **kws)
+        t2 = FermionTensorNetwork(t2s, virtual=True, **kws)
         t2.view_like_(self)
         return t1, t2
 
@@ -1559,7 +1593,7 @@ class FermionTensorNetwork(TensorNetwork):
         tags2 : str or sequence of str
             Tags uniquely identifying the second tensor.
         contract_opts
-            Supplied to :func:`~quimb.tensor.tensor_core.tensor_contract`.
+            Supplied to :func:`~quimb.tensor.fermion.tensor_contract`.
         """
         tid1, = self._get_tids_from_tags(tags1, which='all')
         tid2, = self._get_tids_from_tags(tags2, which='all')
@@ -1620,7 +1654,7 @@ class FermionTensorNetwork(TensorNetwork):
         # this checks whether certain TN classes have a manually specified
         #     contraction pattern (e.g. 1D along the line)
         if self._CONTRACT_STRUCTURED:
-            raise NotImplementedError("structured contraction not implemented")
+            raise NotImplementedError()
 
         # else just contract those tensors specified by tags.
         return self.contract_tags(tags, inplace=inplace, **opts)
@@ -1639,8 +1673,12 @@ class FermionTensorNetwork(TensorNetwork):
         Tr = self.tensor_map[tid2]
         tensor_compress_bond(Tl, Tr, inplace=True, **compress_opts)
 
-        if equalize_norms:
+        if canonize_distance:
             raise NotImplementedError
+
+        if equalize_norms:
+            self.strip_exponent(tid1, equalize_norms)
+            self.strip_exponent(tid2, equalize_norms)
 
     def _canonize_between_tids(
         self,
@@ -1654,7 +1692,8 @@ class FermionTensorNetwork(TensorNetwork):
         tensor_canonize_bond(Tl, Tr, **canonize_opts)
 
         if equalize_norms:
-            raise NotImplementedError
+            self.strip_exponent(tid1, equalize_norms)
+            self.strip_exponent(tid2, equalize_norms)
 
     def replace_section_with_svd(self, start, stop, eps,
                                  **replace_with_svd_opts):
@@ -1674,7 +1713,6 @@ class FermionTensorNetwork(TensorNetwork):
 
     def cut_between(self, left_tags, right_tags, left_ind, right_ind):
         raise NotImplementedError
-
 
     def cut_iter(self, *inds):
         raise NotImplementedError
