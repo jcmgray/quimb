@@ -2,20 +2,34 @@ import numpy as np
 import random
 import collections
 from itertools import product
-from pyblock3.algebra.core import SubTensor
-from pyblock3.algebra.fermion import SparseFermionTensor, FlatFermionTensor
-from quimb.tensor.fermion_2d import FPEPS,FermionTensorNetwork2DVector
-from quimb.tensor.fermion_ops import to_exponential, eye, hubbard
-from pyblock3.algebra.symmetry import SZ, BondInfo
-from quimb.tensor.tensor_2d_tebd import SimpleUpdate as _SimpleUpdate
-from quimb.tensor.tensor_2d_tebd import conditioner
-from quimb.utils import pairwise
-from quimb.tensor.tensor_2d import (gen_long_range_path,
-                                    nearest_neighbors)
+from ..utils import pairwise
+#from .fermion_ops import eye, hubbard
+from .tensor_2d_tebd import SimpleUpdate as _SimpleUpdate
+from .tensor_2d_tebd import conditioner
+from .tensor_2d import (gen_long_range_path,
+                        nearest_neighbors)
+from pyblock3.algebra.fermion_operators import eye, hubbard
 
-SMALL_VAL = 1e-10
+INVERSE_CUTOFF = 1e-10
 
 def Hubbard2D(t, u, Lx, Ly):
+    """Create a LocalHam2D object for 2D Hubbard Model
+
+    Parameters
+    ----------
+    t : int or float
+        The hopping parameter
+    u : int or float
+        Onsite columb repulsion
+    Lx: int
+        Size in x direction
+    Ly: int
+        Size in y direction
+
+    Returns
+    -------
+    a LocalHam2D object
+    """
     ham = dict()
     count_neighbour = lambda i,j: (i>0) + (i<Lx-1) + (j>0) + (j<Ly-1)
     for i, j in product(range(Lx), range(Ly)):
@@ -33,9 +47,9 @@ def Hubbard2D(t, u, Lx, Ly):
     return LocalHam2D(Lx, Ly, ham)
 
 class LocalHam2D:
-    """A 2D Hamiltonian represented as local terms. This combines all two site
-    and one site terms into a single interaction per lattice pair, and caches
-    operations on the terms such as getting their exponential.
+    """A 2D Fermion Hamiltonian represented as local terms. Different from
+    class:`~quimb.tensor.tensor_2d_tebd.LocalHam2D`, this does not combine
+    two sites and one site term into a single interaction per lattice pair.
 
     Parameters
     ----------
@@ -134,7 +148,7 @@ class LocalHam2D:
         cache = self._op_cache['expm']
         key = (id(x), y)
         if key not in cache:
-            out = to_exponential(x, y)
+            out = x.to_exponential(y)
             cache[key] = out
         return cache[key]
 
@@ -268,7 +282,7 @@ class SimpleUpdate(_SimpleUpdate):
                     raise KeyError("gauge not found")
                 bond_ind = self._psi.bond(site, neighbour)
                 mult_val = Tsval.copy()
-                mult_val.data[abs(mult_val.data)>SMALL_VAL] += self.gauge_smudge
+                mult_val.data[abs(mult_val.data)>INVERSE_CUTOFF] += self.gauge_smudge
                 Tij.multiply_index_diagonal_(
                     ind=bond_ind, x=mult_val, location=location)
 
@@ -325,7 +339,7 @@ class SimpleUpdate(_SimpleUpdate):
                     raise KeyError("gauge not found")
                 bnd = self._psi.bond(site, neighbour)
                 mult_val = Tsval.copy()
-                non_zero_ind = abs(mult_val.data)>SMALL_VAL
+                non_zero_ind = abs(mult_val.data)>INVERSE_CUTOFF
                 mult_val.data[non_zero_ind] = (mult_val.data[non_zero_ind] + self.gauge_smudge) ** -1
                 Tij.multiply_index_diagonal_(
                     ind=bnd, x=mult_val, location=location)
@@ -333,8 +347,8 @@ class SimpleUpdate(_SimpleUpdate):
     def get_state(self, absorb_gauges=True):
         """Return the state, with the diagonal bond gauges either absorbed
         equally into the tensors on either side of them
-        (``absorb_gauges=True``, the default), or left lazily represented in
-        the tensor network with hyperedges (``absorb_gauges=False``).
+        (``absorb_gauges=True``, the default), lazy representation with
+        hyperedges not implemented
         """
         psi = self._psi.copy()
 

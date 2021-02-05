@@ -4,8 +4,7 @@ import itertools
 from quimb.tensor.fermion import (
     FermionTensor, FermionTensorNetwork, tensor_contract)
 
-from quimb.tensor.fermion_2d import (
-    FPEPS, )
+from quimb.tensor.fermion_2d import FPEPS
 
 from pyblock3.algebra.symmetry import (SZ, BondInfo)
 from pyblock3.algebra.fermion import SparseFermionTensor

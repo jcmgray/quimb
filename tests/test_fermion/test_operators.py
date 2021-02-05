@@ -2,7 +2,8 @@ import pytest
 import numpy as np
 import itertools
 from quimb.tensor.fermion_2d import gen_mf_peps, FPEPS
-from quimb.tensor import fermion_ops as ops
+#from quimb.tensor import fermion_ops as ops
+from pyblock3.algebra import fermion_operators as ops
 from pyblock3.algebra.symmetry import SZ
 from pyblock3.algebra.core import SubTensor
 from pyblock3.algebra.fermion import SparseFermionTensor
@@ -94,7 +95,7 @@ class TestOperators:
         U = 4.
         tau = 0.02
         uop = ops.onsite_u(U)
-        uop_exp = ops.to_exponential(uop, -tau)
+        uop_exp = uop.to_exponential(-tau)
         terms = {coo: uop_exp for coo in itertools.product(range(Lx), range(Ly))}
         result = psi.compute_local_expectation(terms, normalized=False, return_all=True)
         for ix, iy in itertools.product(range(Lx), range(Ly)):
@@ -105,7 +106,7 @@ class TestOperators:
         t = 3
         tau = 0.1
         hop = ops.hopping(t)
-        hop_exp = ops.to_exponential(hop, -tau)
+        hop_exp = hop.to_exponential(-tau)
         blocks=[]
         states = np.zeros([2,2])
         states[1,0] = states[0,1] = .5
