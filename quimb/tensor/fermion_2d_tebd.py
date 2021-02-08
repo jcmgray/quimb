@@ -3,28 +3,28 @@ import random
 import collections
 from itertools import product
 from ..utils import pairwise
-#from .fermion_ops import eye, hubbard
 from .tensor_2d_tebd import SimpleUpdate as _SimpleUpdate
 from .tensor_2d_tebd import conditioner
-from .tensor_2d import (gen_long_range_path,
-                        nearest_neighbors)
+from .tensor_2d import gen_long_range_path, nearest_neighbors
 from pyblock3.algebra.fermion_operators import eye, hubbard
 
 INVERSE_CUTOFF = 1e-10
 
-def Hubbard2D(t, u, Lx, Ly):
+def Hubbard2D(t, u, Lx, Ly, mu=0.):
     """Create a LocalHam2D object for 2D Hubbard Model
 
     Parameters
     ----------
-    t : int or float
+    t : scalar
         The hopping parameter
-    u : int or float
+    u : scalar
         Onsite columb repulsion
     Lx: int
         Size in x direction
     Ly: int
         Size in y direction
+    mu: scalar, optional
+        Chemical potential
 
     Returns
     -------
@@ -37,12 +37,12 @@ def Hubbard2D(t, u, Lx, Ly):
         if i+1 != Lx:
             where = ((i,j), (i+1,j))
             count_b = count_neighbour(i+1,j)
-            uop = hubbard(t,u, (1./count_ij, 1./count_b))
+            uop = hubbard(t,u, mu, (1./count_ij, 1./count_b))
             ham[where] = uop
         if j+1 != Ly:
             where = ((i,j), (i,j+1))
             count_b = count_neighbour(i,j+1)
-            uop = hubbard(t,u, (1./count_ij, 1./count_b))
+            uop = hubbard(t,u, mu, (1./count_ij, 1./count_b))
             ham[where] = uop
     return LocalHam2D(Lx, Ly, ham)
 

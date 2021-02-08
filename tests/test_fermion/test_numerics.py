@@ -9,17 +9,6 @@ from quimb.tensor.fermion_2d import FPEPS
 from pyblock3.algebra.symmetry import (SZ, BondInfo)
 from pyblock3.algebra.fermion import SparseFermionTensor
 
-def get_err(A, B):
-    err = []
-    nblk = A.shapes.shape[0]
-    for i in range(nblk):
-        dlt = np.sum(abs(A.q_labels[i] - B.q_labels), axis=1)
-        j = np.where(dlt==0)[0][0]
-        ist, ied = A.idxs[i], A.idxs[i+1]
-        jst, jed = B.idxs[j], B.idxs[j+1]
-        err.append(max(abs(A.data[ist:ied]-B.data[jst:jed])))
-    return max(err)
-
 np.random.seed(3)
 bond_1 = BondInfo({SZ(0):3, SZ(1): 2})
 bond_2 = BondInfo({SZ(0):5, SZ(1): 5})
@@ -51,7 +40,7 @@ class TestContract:
         tsr_egbc = tensor_contract(tsr_abc, tsr_ega, output_inds=("e","g","b", "c"))
 
         egbc = np.tensordot(ega, abc, axes=[(2,),(0,)])
-        err = get_err(tsr_egbc.data, egbc)
+        err = (egbc - tsr_egbc.data).norm()
         assert err < 1e-10
 
     def test_contract_between(self):
@@ -60,7 +49,7 @@ class TestContract:
         tsr_egbc = tn1["abc"].transpose("e","g","b","c")
 
         egbc = np.tensordot(ega, abc, axes=[(2,),(0,)])
-        err = get_err(tsr_egbc.data, egbc)
+        err = (egbc - tsr_egbc.data).norm()
         assert err < 1e-10
 
     def test_contract_all(self):
@@ -79,19 +68,8 @@ class TestContract:
         out = tn1["deg"].transpose("e","g","b","c")
 
         egbc = np.tensordot(deg, bcd, axes=[(0,),(2)])
-        err = get_err(out.data, egbc)
+        err = (egbc - out.data).norm()
         assert err < 1e-10
-
-class TestCompress:
-    def test_backend(self):
-        pass
-
-    def test_compress_between(self):
-        pass
-
-class TestCanonize:
-    def test_backend(self):
-        pass
 
 class TestBalance:
     def test_balance_bonds(self):

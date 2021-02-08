@@ -2,7 +2,6 @@ import pytest
 import numpy as np
 import itertools
 from quimb.tensor.fermion_2d import gen_mf_peps, FPEPS
-#from quimb.tensor import fermion_ops as ops
 from pyblock3.algebra import fermion_operators as ops
 from pyblock3.algebra.symmetry import SZ
 from pyblock3.algebra.core import SubTensor
@@ -65,13 +64,16 @@ class TestOperators:
         psi = FPEPS.rand(Lx, Ly, 2)
         t = 2.
         U = 6.
+        mu = 0.2
         hop = ops.hopping(t)
         uop = ops.onsite_u(U)
-        full_terms = {(ix, iy): uop for ix, iy in itertools.product(range(Lx), range(Ly))}
+        nop = ops.count_n()
+        full_terms = {(ix, iy): uop + mu*nop for ix, iy in itertools.product(range(Lx), range(Ly))}
         hterms = {coos: hop for coos in psi.gen_horizontal_bond_coos()}
         vterms = {coos: hop for coos in psi.gen_vertical_bond_coos()}
         full_terms.update(hterms)
         full_terms.update(vterms)
+        mu_terms = {(ix, iy): nop for ix, iy in itertools.product(range(Lx), range(Ly))}
         ene = psi.compute_local_expectation(full_terms, max_bond=12)
 
         ham = dict()
@@ -81,12 +83,12 @@ class TestOperators:
             if i+1 != Lx:
                 where = ((i,j), (i+1,j))
                 count_b = count_neighbour(i+1,j)
-                uop = ops.hubbard(t,U, (1./count_ij, 1./count_b))
+                uop = ops.hubbard(t,U, mu, (1./count_ij, 1./count_b))
                 ham[where] = uop
             if j+1 != Ly:
                 where = ((i,j), (i,j+1))
                 count_b = count_neighbour(i,j+1)
-                uop = ops.hubbard(t,U, (1./count_ij, 1./count_b))
+                uop = ops.hubbard(t,U, mu, (1./count_ij, 1./count_b))
                 ham[where] = uop
         ene1 = psi.compute_local_expectation(ham, max_bond=12)
         assert ene == pytest.approx(ene1, rel=1e-2)

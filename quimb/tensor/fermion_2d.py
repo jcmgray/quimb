@@ -25,7 +25,6 @@ from itertools import product
 import numpy as np
 import functools
 from operator import add
-from pyblock3.algebra.fermion import FlatFermionTensor
 
 INVERSE_CUTOFF = 1e-10
 
@@ -124,7 +123,7 @@ def gate_string_split_(TG, where, string, original_ts, bonds_along,
         idx = np.where(abs(s.data)>INVERSE_CUTOFF)[0]
         snew = np.zeros_like(s.data)
         snew[idx] = 1/s.data[idx]
-        snew = FlatFermionTensor(s.q_labels, s.shapes, snew, idxs=s.idxs)
+        snew = s.__class__(s.q_labels, s.shapes, snew, idxs=s.idxs)
         t = inner_ts[i]
         t.multiply_index_diagonal_(bix, snew, location=location)
 
@@ -256,7 +255,7 @@ def gate_string_reduce_split_(TG, where, string, original_ts, bonds_along,
         idx = np.where(abs(s.data)>INVERSE_CUTOFF)[0]
         snew = np.zeros_like(s.data)
         snew[idx] = 1/s.data[idx]
-        snew = FlatFermionTensor(s.q_labels, s.shapes, snew, idxs=s.idxs)
+        snew = s.__class__(s.q_labels, s.shapes, snew, idxs=s.idxs)
         t = new_ts[i]
         t.multiply_index_diagonal_(bix, snew, location=location)
 
