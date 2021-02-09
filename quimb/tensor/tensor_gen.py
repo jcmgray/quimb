@@ -873,6 +873,60 @@ def TN_classical_partition_function_from_edges(
     return tn
 
 
+@functools.lru_cache(128)
+def dimer_data(d, cover_count=1, dtype=float):
+    shape = [2] * d
+    x = np.zeros(shape, dtype=dtype)
+    index_sum = np.indices(shape).sum(axis=0)
+    x[index_sum == cover_count] = 1
+    make_immutable(x)
+    return x
+
+
+def TN_dimer_covering_from_edges(
+    edges,
+    cover_count=1,
+    site_tag_id="I{}",
+    bond_ind_id="b{},{}",
+    dtype=float,
+):
+    """Make a tensor network from sequence of graph edges that counts the
+    number of ways to cover the graph exactly with dimers.
+
+    Parameters
+    ----------
+    edges : sequence of tuple
+        The edges, each item should be a pair of hashable objects describing
+        nodes linked.
+    cover_count : int, optional
+        The exact number of times each node must be 'covered'. For example
+        1 for a standard dimer covering or 2 for 'ice rules'.
+    site_tag_id : str, optional
+        A string formatter for naming tensor tags like
+        ``site_ind_id.format(node)``.
+    bond_ind_id : str, optional
+        A string formatter for naming the indices bewteen tensors like
+        ``bond_ind_id.format(node_a, node_b)``.
+
+    Returns
+    -------
+    TensorNetwork
+    """
+    nodes2inds = collections.defaultdict(list)
+    for ni, nj in edges:
+        bond = bond_ind_id.format(ni, nj)
+        nodes2inds[ni].append(bond)
+        nodes2inds[nj].append(bond)
+
+    ts = []
+    for node, inds in nodes2inds.items():
+        data = dimer_data(len(inds), cover_count=cover_count, dtype=dtype)
+        tag = site_tag_id.format(node)
+        ts.append(Tensor(data, inds=inds, tags=tag))
+
+    return TensorNetwork(ts)
+
+
 # --------------------------------------------------------------------------- #
 #                                    MPSs                                     #
 # --------------------------------------------------------------------------- #

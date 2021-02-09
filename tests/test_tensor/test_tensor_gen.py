@@ -165,3 +165,13 @@ class TestGenericTN:
                 G.edges, beta=beta, j=j, h=h
             ).contract(all, output_inds=())
             assert Z3 == pytest.approx(Z4)
+
+    def test_tn_dimer_covering(self):
+        edges = [(0, 1), (1, 2), (2, 3), (3, 0)]
+        tn = qtn.TN_dimer_covering_from_edges(edges, cover_count=1)
+        assert tn ^ all == pytest.approx(2.0)
+        tn = qtn.TN_dimer_covering_from_edges(edges, cover_count=2)
+        assert tn ^ all == pytest.approx(1.0)
+        edges = [(0, 1), (1, 2), (2, 0)]
+        tn = qtn.TN_dimer_covering_from_edges(edges, cover_count=1)
+        assert tn ^ all == pytest.approx(0.0)
