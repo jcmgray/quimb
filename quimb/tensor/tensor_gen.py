@@ -97,13 +97,14 @@ def TN_rand_from_edges(
     site_tag_id='I{}',
     site_ind_id='k{}',
 ):
-    """Create a random tensor network with geometry defined from a
-    :class:`networkx.Graph`.
+    """Create a random tensor network with geometry defined from a sequence
+    of edges defining a graph.
 
     Parameters
     ----------
-    G : networkx.Graph
-        The graph defining the geometry.
+    G : sequence of tuple[node, node]
+        The edges defining a graph, each element should be a pair of nodes
+        described by hashable objects.
     D : int
         The bond dimension connecting tensors.
     phys_dim : int, optional
@@ -891,7 +892,8 @@ def TN_dimer_covering_from_edges(
     dtype=float,
 ):
     """Make a tensor network from sequence of graph edges that counts the
-    number of ways to cover the graph exactly with dimers.
+    number of ways to cover the graph exactly with dimers. See
+    https://arxiv.org/abs/1805.10598 for the construction.
 
     Parameters
     ----------
