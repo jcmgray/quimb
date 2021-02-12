@@ -134,6 +134,31 @@ class TestPEPSConstruct:
 
         assert tn ^ all == pytest.approx(xe)
 
+    @pytest.mark.parametrize('propagate_tags',
+                             [False, True, 'sites', 'register'])
+    def test_gate_propagate_tags(self, propagate_tags):
+        Lx = 4
+        Ly = 3
+        D = 1
+        psi = qtn.PEPS.rand(Lx, Ly, D, tags='PSI0')
+        psi.gate_(qu.rand_uni(4), [(1, 1), (1, 2)], tags='G1',
+                  propagate_tags=propagate_tags)
+        psi.gate_(qu.rand_uni(4), [(1, 2), (3, 2)], tags='G2',
+                  propagate_tags=propagate_tags)
+        if propagate_tags is False:
+            assert set(psi['G1'].tags) == {'G1'}
+            assert set(psi['G2'].tags) == {'G2'}
+        if propagate_tags is True:
+            tgs1 = {'I1,1', 'I1,2', 'G1', 'PSI0', 'COL1', 'COL2', 'ROW1'}
+            assert set(psi['G1'][0].tags) == tgs1
+            assert set(psi['G2'].tags) == tgs1 | {'G2', 'I3,2', 'ROW3', 'COL2'}
+        if propagate_tags == 'sites':
+            assert set(psi['G1'].tags) == {'G1', 'I1,1', 'I1,2'}
+            assert set(psi['G2'].tags) == {'G2', 'I1,1', 'I1,2', 'I3,2'}
+        if propagate_tags == 'register':
+            assert set(psi['G1'].tags) == {'G1', 'I1,1', 'I1,2'}
+            assert set(psi['G2'].tags) == {'G2', 'I1,2', 'I3,2'}
+
 
 class Test2DContract:
 

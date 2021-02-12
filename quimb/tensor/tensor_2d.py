@@ -1,5 +1,6 @@
 """Classes and algorithms related to 2D tensor networks.
 """
+import re
 import random
 import functools
 from operator import add
@@ -22,6 +23,7 @@ from .tensor_core import (
     tags_to_oset,
     TensorNetwork,
     tensor_contract,
+    oset_union,
 )
 from .tensor_1d import maybe_factor_gate_into_tensor, rand_padder
 
@@ -2387,6 +2389,7 @@ class TensorNetwork2DVector(TensorNetwork2D,
         where,
         contract=False,
         tags=None,
+        propagate_tags='sites',
         inplace=False,
         info=None,
         long_range_use_swaps=False,
@@ -2424,6 +2427,20 @@ class TensorNetwork2DVector(TensorNetwork2D,
             description of each method.
         tags : str or sequence of str, optional
             Tags to add to the new gate tensor.
+        propagate_tags : {'sites', 'register', True, False}, optional
+            If ``contract==False``, which tags to propagate to the new gate
+            tensor from the tensors it was applied to:
+
+                - If ``'sites'``, then only propagate tags matching e.g.
+                  'I{},{}' and ignore all others. I.e. assuming unitary gates
+                  just propagate the causal lightcone.
+                - If ``'register'``, then only propagate tags matching the
+                  sites of where this gate was actually applied. I.e. ignore
+                  the lightcone, just keep track of which 'registers' the gate
+                  was applied to.
+                - If ``False``, propagate nothing.
+                - If ``True``, propagate all tags.
+
         inplace : bool, optional
             Whether to perform the gate operation inplace on the tensor
             network or not.
@@ -2509,6 +2526,21 @@ class TensorNetwork2DVector(TensorNetwork2D,
             #     ──●───●──
             #      ╱   ╱
             #
+            if propagate_tags:
+                if propagate_tags == 'register':
+                    old_tags = oset(starmap(psi.site_tag, where))
+                else:
+                    old_tags = oset_union(psi.tensor_map[tid].tags
+                                          for ind in site_ix
+                                          for tid in psi.ind_map[ind])
+
+                if propagate_tags == 'sites':
+                    # use regex to take tags only matching e.g. 'I4,3'
+                    rex = re.compile(psi.site_tag_id.format(r"\d+", r"\d+"))
+                    old_tags = oset(filter(rex.match, old_tags))
+
+                TG.modify(tags=TG.tags | old_tags)
+
             psi.reindex_(reindex_map)
             psi |= TG
             return psi
