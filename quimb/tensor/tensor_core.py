@@ -206,6 +206,9 @@ def _get_contraction(eq, shapes, optimize, cache, get, **kwargs):
     else:
         path = optimize
 
+    if get == 'path':
+        return path
+
     if get == 'expr':
         expr_fn = _CONTRACT_FNS['expr', cache]
         expr = expr_fn(eq, *shapes, optimize=path, **kwargs)
@@ -458,7 +461,7 @@ def _inds_to_eq(all_inds, inputs, output):
     return ",".join(in_str) + "->" + out_str
 
 
-_VALID_CONTRACT_GET = {None, 'expression', 'path-info', 'symbol-map'}
+_VALID_CONTRACT_GET = {None, 'expression', 'path', 'path-info', 'symbol-map'}
 
 
 def tensor_contract(*tensors, output_inds=None, get=None,
@@ -515,6 +518,10 @@ def tensor_contract(*tensors, output_inds=None, get=None,
 
     if get == 'symbol-map':
         return {oe.get_symbol(i): ix for i, ix in enumerate(all_ix)}
+
+    if get == 'path':
+        ops = (t.shape for t in tensors)
+        return get_contraction(eq, *ops, get='path', **contract_opts)
 
     if get == 'path-info':
         ops = (t.shape for t in tensors)
@@ -4443,12 +4450,12 @@ class TensorNetwork(object):
     ):
         tn = self if inplace else self.copy()
 
-        pinfo = tn.contract(all, optimize=optimize, get='path-info')
+        path = tn.contraction_path(optimize, output_inds=output_inds)
 
         # generate the list of merges (tid1 -> tid2)
         tids = list(tn.tensor_map)
         seq = []
-        for i, j in pinfo.path:
+        for i, j in path:
             if i > j:
                 i, j = j, i
 
@@ -4769,6 +4776,16 @@ class TensorNetwork(object):
 
     contract_ = functools.partialmethod(contract, inplace=True)
 
+    def contraction_path(self, optimize=None, **contract_opts):
+        """Compute the contraction path, a sequence of tuple[int, int], for
+        the contraction of this entire tensor network using path optimizer
+        ``optimize``.
+        """
+        if optimize is None:
+            optimize = get_contract_strategy()
+        return self.contract(
+            all, optimize=optimize, get='path', **contract_opts)
+
     def contraction_info(self, optimize=None, **contract_opts):
         """Compute the ``opt_einsum.PathInfo`` object decsribing the
         contraction of this entire tensor network using path optimizer
@@ -4778,6 +4795,19 @@ class TensorNetwork(object):
             optimize = get_contract_strategy()
         return self.contract(
             all, optimize=optimize, get='path-info', **contract_opts)
+
+    def contraction_tree(self, optimize=None, **contract_opts):
+        """Return the :class:`cotengra.ContractionTree` corresponding to
+        contracting this entire tensor network with path finder ``optimize``.
+        """
+        path = self.contraction_path(optimize, **contract_opts)
+        try:
+            tree = optimize.best['tree']
+        except (AttributeError, KeyError):
+            import cotengra as ctg
+            path_info = self.contraction_info(path, **contract_opts)
+            tree = ctg.ContractionTree.from_info(path_info)
+        return tree
 
     def contraction_width(self, optimize=None, **contract_opts):
         """Compute the 'contraction width' of this tensor network. This
