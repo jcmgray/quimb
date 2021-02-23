@@ -1374,6 +1374,7 @@ def tensor_network_fit_autodiff(
 def tensor_network_fit_als(
     tn,
     tn_target,
+    tags=None,
     steps=100,
     tol=1e-9,
     solver='solve',
@@ -1397,6 +1398,8 @@ def tensor_network_fit_als(
         The tensor network to fit.
     tn_target : TensorNetwork
         The target tensor network to fit ``tn`` to.
+    tags : sequence of str, optional
+        If supplied, only optimize tensors matching any of given tags.
     steps : int, optional
         The maximum number of ALS steps.
     tol : float, optional
@@ -1441,8 +1444,14 @@ def tensor_network_fit_als(
     # mark the tensors we are going to optimize
     tna = tn.copy()
     tna.add_tag('__KET__')
+
+    if tags is None:
+        to_tag = tna
+    else:
+        to_tag = tna.select_tensors(tags, 'any')
+
     tagged = []
-    for i, t in enumerate(tna):
+    for i, t in enumerate(to_tag):
         var_tag = f'__VAR{i}__'
         t.add_tag(var_tag)
         tagged.append(var_tag)

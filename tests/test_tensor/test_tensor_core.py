@@ -959,6 +959,28 @@ class TestTensorNetwork:
         r1.fit_(k2, method=method, progbar=True, **dict(opts))
         assert r1.distance(k2) < 1e-3
 
+    @pytest.mark.parametrize('method,opts', (
+        ('als', (('enforce_pos', False),)),
+        ('als', (('enforce_pos', True),)),
+        pytest.param('autodiff', (('distance_method', 'dense'),),
+                     marks=autograd_mark),
+        pytest.param('autodiff', (('distance_method', 'overlap'),),
+                     marks=autograd_mark),
+    ))
+    def test_fit_partial_tags(self, method, opts):
+        k1 = qtn.MPS_rand_state(5, 3, seed=666)
+        k2 = qtn.MPS_rand_state(5, 3, seed=667)
+        d0 = k1.distance(k2)
+        tags = ["I0", "I2", "I4"]
+        k1f = k1.fit(k2, tol=1e-3, tags=tags,
+                     method=method, progbar=True, **dict(opts))
+        assert k1f.distance(k2) < d0
+        assert (k1f[0] - k1[0]).norm() > 1e-12
+        assert (k1f[1] - k1[1]).norm() < 1e-12
+        assert (k1f[2] - k1[2]).norm() > 1e-12
+        assert (k1f[3] - k1[3]).norm() < 1e-12
+        assert (k1f[4] - k1[4]).norm() > 1e-12
+
     def test_reindex(self):
         a = Tensor(np.random.randn(2, 3, 4), inds=[0, 1, 2], tags='red')
         b = Tensor(np.random.randn(3, 4, 5), inds=[1, 2, 3], tags='blue')
