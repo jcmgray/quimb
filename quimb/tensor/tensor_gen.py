@@ -10,12 +10,13 @@ import numpy as np
 import opt_einsum as oe
 
 from ..core import make_immutable, ikron
-from ..utils import deprecated, unique, concat
+from ..utils import check_opt, deprecated, unique, concat
 from ..gen.operators import (
     spin_operator, eye, _gen_mbl_random_factors, ham_heis
 )
 from ..gen.rand import randn, choice, random_seed_fn, rand_phase
-from .tensor_core import Tensor, new_bond, TensorNetwork, rand_uuid
+from .tensor_core import (Tensor, new_bond, TensorNetwork, rand_uuid,
+                          tensor_direct_product)
 from .array_ops import asarray, sensibly_scale
 from .tensor_1d import MatrixProductState, MatrixProductOperator
 from .tensor_2d import gen_2d_bonds, TensorNetwork2D
@@ -927,6 +928,173 @@ def TN_dimer_covering_from_edges(
         ts.append(Tensor(data, inds=inds, tags=tag))
 
     return TensorNetwork(ts)
+
+
+# --------------------------------------------------------------------------- #
+#                           Weighted Model Counting                           #
+# --------------------------------------------------------------------------- #
+
+
+def clause_negmask(clause):
+    return int("".join('0' if x > 0 else '1' for x in clause), 2)
+
+
+@functools.lru_cache(128)
+def clause_data(ndim, m=0, dtype=float, q=2):
+    """Get the array representing satisfiability of ``ndim`` clauses with
+    unsatisfied condition encoded in ``m``.
+    """
+    shape = [q] * ndim
+    t = np.ones(shape, dtype=dtype)
+    t[np.unravel_index(m, shape)] = 0
+    return t
+
+
+def clause_tensor(ndim, m, inds, tags=None):
+    """Get the tensor representing satisfiability of ``ndim`` clauses with
+    unsatisfied condition encoded in ``m`` labelled by ``inds`` and ``tags``.
+    """
+    data = clause_data(ndim, m=m)
+    return Tensor(data=data, inds=inds, tags=tags)
+
+
+def clause_mps_tensors(ndim, m, inds, tags=None):
+    """Get the set of MPS tensors representing satisfiability of ``ndim``
+    clauses with unsatisfied condition encoded in ``m`` labelled by ``inds``
+    and ``tags``.
+    """
+    mps = (
+        MPS_computational_state('+' * ndim, tags=tags) * (2**(ndim / 2)) -
+        MPS_computational_state(f'{m:0>{ndim}b}', tags=tags)
+    )
+    mps.reindex_({
+        mps.site_ind(i): ind
+        for i, ind in enumerate(inds)
+    })
+    return mps.tensors
+
+
+@functools.lru_cache(2**10)
+def clause_parafac_data(ndim, m):
+    """Get the set of PARAFAC arrays representing satisfiability of ``ndim``
+    clauses with unsatisfied condition encoded in ``m``.
+    """
+    inds = [f'k{i}' for i in range(ndim)]
+    bond = 'b'
+
+    pfc_ones = np.ones((2, 1))
+    pfc_up = np.array([[1.], [0.]])
+    pfc_dn = np.array([[0.], [1.]])
+
+    ts_ones = [Tensor(data=pfc_ones, inds=[ix, bond]) for ix in inds]
+
+    bmask = f'{m:0>{ndim}b}'
+    ts_mask = [Tensor(data=(pfc_dn if b == '1' else pfc_up), inds=[ix, bond])
+               for ix, b in zip(inds, bmask)]
+
+    # just need to multiply a single mask tensor by -1
+    ts_mask[0] *= -1
+    ts = [tensor_direct_product(t1, t2, sum_inds=(ix,))
+          for ix, t1, t2 in zip(inds, ts_ones, ts_mask)]
+
+    return tuple(t.data for t in ts)
+
+
+def clause_parafac_tensors(ndim, m, inds, tags=None):
+    """Get the set of PARAFAC tensors representing satisfiability of ``ndim``
+    clauses with unsatisfied condition encoded in ``m`` labelled by ``inds``
+    and ``tags``.
+    """
+    bond = rand_uuid()
+    return [Tensor(x, inds=[ix, bond], tags=tags)
+            for x, ix in zip(clause_parafac_data(ndim, m), inds)]
+
+
+def HTN_from_cnf(fname, mode='parafac'):
+    """Create a hyper tensor network from a '.cnf' or '.wcnf' file - i.e. a
+    model counting or weighted model counting instance specification.
+
+    Parameters
+    ----------
+    fname : str
+        Path to a '.cnf' or '.wcnf' file.
+    mode : {'parafac', 'mps', 'dense', int}, optional
+        How to represent the clauses:
+
+            * 'parafac' - `N` rank-2 tensors connected by a single hyper index.
+              You could further call :meth:`hyperinds_resolve` for more options
+              to convert the hyper index into a (decomposed) COPY-tensor.
+            * 'mps' - `N` rank-3 tensors connected along a 1D line.
+            * 'dense' - contract the hyper index.
+            * int - use the 'parafac' mode, but only if the length of a clause
+              is larger than this threshold.
+
+    Returns
+    -------
+    htn : TensorNetwork
+    """
+
+    ts = []
+    weights = {}
+    clause_counter = 1
+
+    with open(fname, 'r') as f:
+        for line in f:
+            args = line.split()
+
+            # get global info
+            if args[0] == 'p':
+                num_vars = int(args[2])
+                # num_clauses = int(args[3])
+                continue
+
+            # ignore empty lines, comments and info line
+            if (not args) or (args == ['0']) or (args[0] in 'c%'):
+                continue
+
+            # variable weight
+            if args[0] == 'w':
+                sgn_var, w = args[1:]
+                sgn_var = int(sgn_var)
+                sgn = '-' if sgn_var < 0 else '+'
+                var = str(abs(sgn_var))
+                w = float(w)
+                weights[var, sgn] = w
+                continue
+
+            # clause tensor
+            clause = tuple(map(int, filter(None, args[:-1])))
+
+            # encode the OR statement with possible negations as int
+            m = clause_negmask(clause)
+            inds = [str(abs(var)) for var in clause]
+            tag = f'CLAUSE{clause_counter}'
+
+            if (
+                # parafac mode
+                (mode == 'parafac' and len(inds) > 2) or
+                # parafac above cutoff size mode
+                (isinstance(mode, int) and len(inds) > mode)
+            ):
+                ts.extend(clause_parafac_tensors(len(inds), m, inds, tag))
+
+            elif mode == 'mps' and len(inds) > 2:
+                ts.extend(clause_mps_tensors(len(inds), m, inds, tag))
+
+            else:
+                # dense
+                ts.append(clause_tensor(len(inds), m, inds, tag))
+
+            clause_counter += 1
+
+    for i in range(1, num_vars + 1):
+        var = str(i)
+        wp = weights.get((var, '+'), 1.0)
+        wm = weights.get((var, '-'), 1.0)
+
+        ts.append(Tensor([wm, wp], inds=[var], tags=[f'VAR{i}']))
+
+    return TensorNetwork(ts, virtual=True)
 
 
 # --------------------------------------------------------------------------- #
