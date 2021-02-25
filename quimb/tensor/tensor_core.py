@@ -749,23 +749,23 @@ def tensor_split(
         array = reshape(TT.data, (prod(left_dims), prod(right_dims)))
 
     if get == 'values':
-        return {'svd': decomp._svdvals,
-                'eig': decomp._svdvals_eig}[method](array)
+        return {'svd': decomp.svdvals,
+                'eig': decomp.svdvals_eig}[method](array)
 
     opts = _parse_split_opts(
         method, cutoff, absorb, max_bond, cutoff_mode, renorm)
 
     split_fn = {
-        'svd': decomp._svd,
-        'eig': decomp._eig,
-        'qr': decomp._qr,
-        'lq': decomp._lq,
-        'eigh': decomp._eigh,
-        'cholesky': decomp._cholesky,
-        'isvd': decomp._isvd,
-        'svds': decomp._svds,
-        'rsvd': decomp._rsvd,
-        'eigsh': decomp._eigsh,
+        'svd': decomp.svd,
+        'eig': decomp.eig,
+        'qr': decomp.qr,
+        'lq': decomp.lq,
+        'eigh': decomp.eigh,
+        'cholesky': decomp.cholesky,
+        'isvd': decomp.isvd,
+        'svds': decomp.svds,
+        'rsvd': decomp.rsvd,
+        'eigsh': decomp.eigsh,
     }[method]
 
     # ``s`` itself will be None unless ``absorb=None`` is specified
@@ -3433,7 +3433,26 @@ class TensorNetwork(object):
         tids = self._get_tids_from_tags(tags, which=which)
         return tuple(self.tensor_map[n] for n in tids)
 
-    def select(self, tags, which='all'):
+    def _select_tids(self, tids, virtual=True):
+        """Get a copy or a virtual copy (doesn't copy the tensors) of this
+        ``TensorNetwork``, only with the tensors corresponding to ``tids``.
+        """
+        tn = TensorNetwork(())
+        for tid in tids:
+            tn.add_tensor(self.tensor_map[tid], tid=tid, virtual=virtual)
+        tn.view_like_(self)
+        return tn
+
+    def _select_without_tids(self, tids, virtual=True):
+        """Get a copy or a virtual copy (doesn't copy the tensors) of this
+        ``TensorNetwork``, without the tensors corresponding to ``tids``.
+        """
+        tn = self.copy(virtual=virtual)
+        for tid in tids:
+            tn._pop_tensor(tid)
+        return tn
+
+    def select(self, tags, which='all', virtual=True):
         """Get a TensorNetwork comprising tensors that match all or any of
         ``tags``, inherit the network properties/structure from ``self``.
         This returns a view of the tensors not a copy.
@@ -3444,23 +3463,21 @@ class TensorNetwork(object):
             The tag or tag sequence.
         which : {'all', 'any'}
             Whether to require matching all or any of the tags.
+        virtual : bool, optional
+            Whether the returned tensor network views the same tensors (the
+            default) or takes copies (``virtual=False``) from ``self``.
 
         Returns
         -------
-        tagged_tensors : tuple of Tensor
-            The tagged tensors.
+        tagged_tn : TensorNetwork
+            A tensor network containing the tagged tensors.
 
         See Also
         --------
         select_tensors, select_neighbors, partition, partition_tensors
         """
         tagged_tids = self._get_tids_from_tags(tags, which=which)
-        ts = (self.tensor_map[n] for n in tagged_tids)
-
-        tn = TensorNetwork(ts, check_collisions=False, virtual=True)
-        tn.view_like_(self)
-
-        return tn
+        return self._select_tids(tagged_tids, virtual=virtual)
 
     select_any = functools.partialmethod(select, which='any')
     select_all = functools.partialmethod(select, which='all')
@@ -3495,6 +3512,88 @@ class TensorNetwork(object):
         neighbour_tids = inds_tids - tagged_tids
 
         return tuple(self.tensor_map[tid] for tid in neighbour_tids)
+
+    def _select_local_tids(
+        self,
+        tids,
+        max_distance=1,
+        reduce_outer=None,
+        inwards=False,
+        virtual=True,
+        include=None,
+        exclude=None,
+    ):
+        span = self.get_tree_span(
+            tids, max_distance=max_distance,
+            include=include, exclude=exclude, inwards=inwards,
+        )
+        local_tids = oset(tids)
+        for s in span:
+            local_tids.add(s[0])
+            local_tids.add(s[1])
+
+        tn_sl = self._select_tids(local_tids, virtual=virtual)
+
+        # optionally remove/reduce outer indices that appear outside `tag`
+        if reduce_outer == 'sum':
+            for ix in tn_sl.outer_inds():
+                tid_edge, = tn_sl.ind_map[ix]
+                if tid_edge in tids:
+                    continue
+                tn_sl.tensor_map[tid_edge].sum_reduce_(ix)
+
+        elif reduce_outer == 'svd':
+            for ix in tn_sl.outer_inds():
+                # get the tids that stretch across the border
+                tid_out, tid_in = sorted(
+                    self.ind_map[ix], key=tn_sl.tensor_map.__contains__)
+
+                # rank-1 decompose the outer tensor
+                l, r = self.tensor_map[tid_out].split(
+                    left_inds=None, right_inds=[ix],
+                    max_bond=1, get='arrays', absorb='left')
+
+                # absorb the factor into the inner tensor to remove that ind
+                tn_sl.tensor_map[tid_in].gate_(r, ix).squeeze_(include=[ix])
+
+        elif reduce_outer == 'svd-sum':
+            for ix in tn_sl.outer_inds():
+                # get the tids that stretch across the border
+                tid_out, tid_in = sorted(
+                    self.ind_map[ix], key=tn_sl.tensor_map.__contains__)
+
+                # full-rank decompose the outer tensor
+                l, r = self.tensor_map[tid_out].split(
+                    left_inds=None, right_inds=[ix],
+                    max_bond=None, get='arrays', absorb='left')
+
+                # absorb the factor into the inner tensor then sum over it
+                tn_sl.tensor_map[tid_in].gate_(r, ix).sum_reduce_(ix)
+
+        return tn_sl
+
+    def select_local(
+        self,
+        tags,
+        which='all',
+        max_distance=1,
+        reduce_outer=None,
+        inwards=False,
+        virtual=True,
+        include=None,
+        exclude=None,
+    ):
+        check_opt('reduce_outer', reduce_outer,
+                  (None, 'sum', 'svd', 'svd-sum'))
+
+        return self._select_local_tids(
+            tids=self._get_tids_from_tags(tags, which),
+            max_distance=max_distance,
+            reduce_outer=reduce_outer,
+            inwards=inwards,
+            virtual=virtual,
+            include=include,
+            exclude=exclude)
 
     def __getitem__(self, tags):
         """Get the tensor(s) associated with ``tags``.
@@ -3840,35 +3939,250 @@ class TensorNetwork(object):
         ts = [self._pop_tensor(tid) for tid in tids]
         self |= tensor_contract(*ts, **contract_opts)
 
+    def _compute_bond_env(
+        self, tid1, tid2,
+        select_local_distance=None,
+        select_local_opts=None,
+        max_bond=None,
+        cutoff=None,
+        method='contract_around',
+        contract_around_opts=None,
+        contract_compressed_opts=None,
+        optimize='auto-hq',
+        include=None,
+        exclude=None,
+    ):
+        """Compute the local tensor environment of the bond(s), if cut,
+        between two tensors.
+        """
+        # the TN we will start with
+        if select_local_distance is include is exclude is None:
+            # ... either the full TN
+            tn_env = self.copy()
+        else:
+            # ... or just a local patch of the TN (with dangling bonds removed)
+            select_local_opts = ensure_dict(select_local_opts)
+            select_local_opts.setdefault('reduce_outer', 'svd')
+
+            tn_env = self._select_local_tids(
+                (tid1, tid2), max_distance=select_local_distance,
+                virtual=False, include=include, exclude=exclude,
+                **select_local_opts)
+
+            # not propagated by _select_local_tids
+            tn_env.exponent = self.exponent
+
+        # cut the bond between the two target tensors in the local TN
+        t1 = tn_env.tensor_map[tid1]
+        t2 = tn_env.tensor_map[tid2]
+        bond, = t1.bonds(t2)
+        lcut = rand_uuid()
+        rcut = rand_uuid()
+        t1.reindex_({bond: lcut})
+        t2.reindex_({bond: rcut})
+
+        if max_bond is not None:
+            if method == 'contract_around':
+                tn_env._contract_around_tids(
+                    (tid1, tid2), max_bond=max_bond, cutoff=cutoff,
+                    **ensure_dict(contract_around_opts))
+
+            if method == 'contract_compressed':
+                tn_env.contract_compressed_(
+                    max_bond=max_bond, cutoff=cutoff,
+                    **ensure_dict(contract_compressed_opts))
+
+        return tn_env.to_dense([lcut], [rcut], optimize=optimize)
+
+    def _compress_between_full_bond_tids(
+        self,
+        tid1,
+        tid2,
+        max_bond,
+        cutoff=0.0,
+        absorb='both',
+        renorm=True,
+        method='eig',
+        select_local_distance=None,
+        select_local_opts=None,
+        env_max_bond='max_bond',
+        env_cutoff='cutoff',
+        env_method='contract_around',
+        contract_around_opts=None,
+        contract_compressed_opts=None,
+        env_optimize='auto-hq',
+        include=None,
+        exclude=None,
+    ):
+        if env_max_bond == 'max_bond':
+            env_max_bond = max_bond
+        if env_cutoff == 'cutoff':
+            env_cutoff = cutoff
+
+        ta = self.tensor_map[tid1]
+        tb = self.tensor_map[tid2]
+
+        # handle multibonds and no shared bonds
+        tensor_fuse_squeeze(ta, tb)
+        bix = ta.bonds(tb)
+        if not bix:
+            return
+
+        E = self._compute_bond_env(
+            tid1, tid2,
+            select_local_distance=select_local_distance,
+            select_local_opts=select_local_opts,
+            max_bond=env_max_bond,
+            cutoff=env_cutoff,
+            method=env_method,
+            contract_around_opts=contract_around_opts,
+            contract_compressed_opts=contract_compressed_opts,
+            optimize=env_optimize,
+            include=include,
+            exclude=exclude,
+        )
+
+        Cl, Cr = decomp.similarity_compress(
+            E, max_bond, method=method, renorm=renorm)
+
+        # absorb them into the tensors to compress this bond
+        bond, = bix
+        ta.gate_(Cr, bond)
+        tb.gate_(Cl.T, bond)
+
+        if absorb != 'both':
+            tensor_canonize_bond(ta, tb, absorb=absorb)
+
+    def _compress_between_local_fit(
+        self,
+        tid1,
+        tid2,
+        max_bond,
+        cutoff=0.0,
+        absorb='both',
+        method='als',
+        select_local_distance=1,
+        select_local_opts=None,
+        include=None,
+        exclude=None,
+        **fit_opts
+    ):
+        if cutoff != 0.0:
+            import warnings
+            warnings.warn("Non-zero cutoff ignored by local fit compress.")
+
+        select_local_opts = ensure_dict(select_local_opts)
+        tn_loc_target = self._select_local_tids(
+            (tid1, tid2),
+            max_distance=select_local_distance,
+            include=include, exclude=exclude, virtual=False)
+
+        tn_loc_compress = tn_loc_target.copy()
+        ta = tn_loc_compress.tensor_map[tid1]
+        tb = tn_loc_compress.tensor_map[tid2]
+        tensor_compress_bond(ta, tb, max_bond=max_bond, cutoff=0.0)
+
+        tn_loc_opt = tn_loc_compress.fit_(
+            tn_loc_target, method=method, **fit_opts)
+
+        for tid, t in tn_loc_opt.tensor_map.items():
+            self.tensor_map[tid].modify(data=t.data)
+
+        if absorb != 'both':
+            self._canonize_between_tids(tid1, tid2, absorb=absorb)
+
     def _compress_between_tids(
         self,
         tid1,
         tid2,
+        max_bond=None,
+        cutoff=1e-10,
+        absorb='both',
         canonize_distance=None,
         canonize_opts=None,
+        canonize_after_distance=None,
+        canonize_after_opts=None,
+        mode='basic',
         equalize_norms=False,
+        callback=None,
         **compress_opts
     ):
-        Tl = self.tensor_map[tid1]
-        Tr = self.tensor_map[tid2]
+        ta = self.tensor_map[tid1]
+        tb = self.tensor_map[tid2]
+
+        tensor_fuse_squeeze(ta, tb)
+        lix, bix, rix = group_inds(ta, tb)
+        if len(bix) == 0:
+            return
+
+        if (max_bond is not None) and (cutoff == 0.0):
+            lsize = prod(map(self.ind_size, lix))
+            rsize = prod(map(self.ind_size, rix))
+            if (lsize <= max_bond) or (rsize <= max_bond):
+                # special case - fixing any orthonormal basis for the left or
+                # right tensor (whichever has smallest outer dimensions) will
+                # produce the required compression without any SVD
+                compress_absorb = 'right' if lsize <= rsize else 'left'
+                tensor_canonize_bond(ta, tb, absorb=compress_absorb)
+
+                if absorb != compress_absorb:
+                    tensor_canonize_bond(ta, tb, absorb=absorb)
+
+                if equalize_norms:
+                    self.strip_exponent(tid1, equalize_norms)
+                    self.strip_exponent(tid2, equalize_norms)
+
+                return
 
         if canonize_distance:
+            # gauge around pair by absorbing QR factors along bonds
             canonize_opts = ensure_dict(canonize_opts)
             canonize_opts.setdefault('equalize_norms', equalize_norms)
-
             self._canonize_around_tids(
-                (tid1, tid2), max_distance=canonize_distance, **canonize_opts)
+                (tid1, tid2),
+                max_distance=canonize_distance, **canonize_opts)
 
-        tensor_compress_bond(Tl, Tr, **compress_opts)
+        compress_opts['max_bond'] = max_bond
+        compress_opts['cutoff'] = cutoff
+        compress_opts['absorb'] = absorb
+
+        if mode == 'basic':
+            tensor_compress_bond(ta, tb, **compress_opts)
+
+        elif mode == 'full-bond':
+            self._compress_between_full_bond_tids(tid1, tid2, **compress_opts)
+
+
+        elif mode == 'local-fit':
+            self._compress_between_local_fit(tid1, tid2, **compress_opts)
+
+        else:
+            # assume callable
+            mode(self, tid1, tid2, **compress_opts)
 
         if equalize_norms:
             self.strip_exponent(tid1, equalize_norms)
             self.strip_exponent(tid2, equalize_norms)
 
+        if canonize_after_distance:
+            # 'undo' the inwards canonization
+            canonize_after_opts = ensure_dict(canonize_after_opts)
+            self._gauge_local_tids(
+                tids=(tid1, tid2),
+                max_distance=canonize_after_distance,
+                **canonize_after_opts
+            )
+
+        if callback is not None:
+            callback(self, (tid1, tid2))
+
     def compress_between(
         self,
         tags1,
         tags2,
+        max_bond=None,
+        cutoff=1e-10,
+        absorb='both',
         canonize_distance=0,
         canonize_opts=None,
         equalize_norms=False,
@@ -3900,6 +4214,10 @@ class TensorNetwork(object):
             Tags uniquely identifying the first ('left') tensor.
         tags2 : str or sequence of str
             Tags uniquely identifying the second ('right') tensor.
+        max_bond : int or None, optional
+            The maxmimum bond dimension.
+        cutoff : float, optional
+            The singular value cutoff to use.
         canonize_distance : int, optional
             How far to locally canonize around the target tensors first.
         canonize_opts : None or dict, optional
@@ -3919,6 +4237,9 @@ class TensorNetwork(object):
 
         self._compress_between_tids(
             tid1, tid2,
+            max_bond=max_bond,
+            cutoff=cutoff,
+            absorb=absorb,
             canonize_distance=canonize_distance,
             canonize_opts=canonize_opts,
             equalize_norms=equalize_norms,
@@ -3930,11 +4251,13 @@ class TensorNetwork(object):
         tn = self if inplace else self.copy()
         tn.fuse_multibonds_()
 
-        for ix, tids in tn.ind_map.items():
-            if len(tids) != 2:
+        for ix in tuple(tn.ind_map):
+            try:
+                tid1, tid2 = tn.ind_map[ix]
+            except (ValueError, KeyError):
+                # not a bond, or index already compressed away
                 continue
-
-            tn._compress_between_tids(*tids, **compress_opts)
+            tn._compress_between_tids(tid1, tid2, **compress_opts)
 
         return tn
 
@@ -4014,12 +4337,16 @@ class TensorNetwork(object):
         max_distance=None,
         include=None,
         exclude=None,
+        ndim_sort='max',
         distance_sort='min',
+        sorter=None,
+        connectivity_weight_bonds=False,
+        inwards=True,
     ):
         """Generate a tree on the tensor network graph, fanning out from the
         tensors identified by ``tids``, up to a maximum of ``max_distance``
         away. The tree can be visualized with
-        :meth:`~quimb.tensor.tensor_core.TensorNetwork.graph_tree_span`.
+        :meth:`~quimb.tensor.tensor_core.TensorNetwork.draw_tree_span`.
 
         Parameters
         ----------
@@ -4036,10 +4363,17 @@ class TensorNetwork(object):
             If specified, only ``tids`` specified here can be part of the tree.
         exclude : sequence of str, optional
             If specified, ``tids`` specified here cannot be part of the tree.
-        distance_sort : {'min', 'max'}, optional
+        ndim_sort : {'min', 'max', 'none'}, optional
             When expanding the tree, how to choose what nodes to expand to
             next, once connectivity to the current surface has been taken into
             account.
+        distance_sort : {'min', 'max', 'none'}, optional
+            When expanding the tree, how to choose what nodes to expand to
+            next, once connectivity to the current surface has been taken into
+            account.
+        connectivity_weight_bonds : bool, optional
+            Whether to weight the 'connection' of a candidate tensor to expand
+            out to using bond size as well as number of bonds.
 
         Returns
         -------
@@ -4070,15 +4404,10 @@ class TensorNetwork(object):
         candidates = []
         merges = {}
         distances = {tid: 0 for tid in region}
-        connectivity = collections.Counter()
+        connectivity = collections.defaultdict(lambda: 0)
 
-        distance_coeff = {'min': -1, 'max': 1}[distance_sort]
-
-        def _sorter(t):
-            # how to pick which tensor to absorb into the expanding surface
-            # here, choose the candidate that is most connected to current
-            # surface, breaking ties with how close it is to the region
-            return connectivity[t], distance_coeff * distances[t]
+        distance_coeff = {'min': -1, 'max': 1, 'none': 0}[distance_sort]
+        ndim_coeff = {'min': -1, 'max': 1, 'none': 0}[ndim_sort]
 
         def _check_candidate(tid_surface, tid_neighb):
             """Check the expansion of ``tid_surface`` to ``tid_neighb``.
@@ -4087,14 +4416,9 @@ class TensorNetwork(object):
                 # we've already absorbed it, or we're not allowed to
                 return
 
-            new_d = distances[tid_surface] + 1
-            if tid_neighb in distances:
-                # we've already assessed it, check for shorter path
-                if new_d < distances[tid_neighb]:
-                    merges[tid_neighb] = tid_surface
-                    distances[tid_neighb] = new_d
-            else:
+            if tid_neighb not in distances:
                 # defines a new spanning tree edge
+                new_d = distances[tid_surface] + 1
                 merges[tid_neighb] = tid_surface
                 distances[tid_neighb] = new_d
                 if (max_distance is None) or (new_d <= max_distance):
@@ -4102,7 +4426,26 @@ class TensorNetwork(object):
 
             # keep track of how connected to the current surface potential new
             # nodes are
-            connectivity[tid_neighb] += 1
+            if connectivity_weight_bonds:
+                connectivity[tid_neighb] += math.log2(bonds_size(
+                    self.tensor_map[tid_surface], self.tensor_map[tid_neighb]))
+            else:
+                connectivity[tid_neighb] += 1
+
+        if sorter is None:
+            def _sorter(t):
+                # how to pick which tensor to absorb into the expanding surface
+                # here, choose the candidate that is most connected to current
+                # surface, breaking ties with how close it is to the region
+                return (
+                    connectivity[t],
+                    ndim_coeff * self.tensor_map[t].ndim,
+                    distance_coeff * distances[t],
+                )
+        else:
+            _sorter = functools.partial(
+                sorter, tn=self, distances=distances,
+                connectivity=connectivity)
 
         # setup the initial region and candidate nodes to expand to
         for tid_surface in region:
@@ -4126,8 +4469,10 @@ class TensorNetwork(object):
             for tid_next in self._get_neighbor_tids(tid_surface):
                 _check_candidate(tid_surface, tid_next)
 
-        # make the sequence of merges flow inwards
-        seq.reverse()
+        if inwards:
+            # make the sequence of merges flow inwards
+            seq.reverse()
+
         return seq
 
     def _draw_tree_span_tids(
@@ -4138,7 +4483,10 @@ class TensorNetwork(object):
         max_distance=None,
         include=None,
         exclude=None,
+        ndim_sort='max',
         distance_sort='min',
+        sorter=None,
+        connectivity_weight_bonds=False,
         color='order',
         colormap='Spectral',
         **draw_opts,
@@ -4155,7 +4503,10 @@ class TensorNetwork(object):
                 max_distance=max_distance,
                 include=include,
                 exclude=exclude,
-                distance_sort=distance_sort)
+                ndim_sort=ndim_sort,
+                distance_sort=distance_sort,
+                sorter=sorter,
+                connectivity_weight_bonds=connectivity_weight_bonds)
 
         for i, (tid1, tid2, d) in enumerate(span):
             # get the tensors on either side of this tree edge
@@ -4174,8 +4525,11 @@ class TensorNetwork(object):
                 ds.add(d)
 
         if colormap is not None:
-            import matplotlib.cm as cm
-            cmap = getattr(cm, colormap)
+            if isinstance(colormap, str):
+                import matplotlib.cm
+                cmap = getattr(matplotlib.cm, colormap)
+            else:
+                cmap = colormap
             custom_colors = cmap(np.linspace(0, 1, len(ds)))
         else:
             custom_colors = None
@@ -4194,7 +4548,9 @@ class TensorNetwork(object):
         max_distance=None,
         include=None,
         exclude=None,
+        ndim_sort='max',
         distance_sort='min',
+        connectivity_weight_bonds=False,
         color='order',
         colormap='Spectral',
         **draw_opts,
@@ -4234,7 +4590,9 @@ class TensorNetwork(object):
             max_distance=max_distance,
             include=include,
             exclude=exclude,
+            ndim_sort=ndim_sort,
             distance_sort=distance_sort,
+            connectivity_weight_bonds=connectivity_weight_bonds,
             color=color,
             colormap=colormap,
             **draw_opts)
@@ -4248,19 +4606,22 @@ class TensorNetwork(object):
         max_distance=None,
         include=None,
         exclude=None,
-        distance_sort='min',
+        span_opts=None,
         absorb='right',
         gauge_links=False,
         link_absorb='both',
+        inwards=True,
         **canonize_opts
     ):
+        span_opts = ensure_dict(span_opts)
         seq = self.get_tree_span(
             tids,
             min_distance=min_distance,
             max_distance=max_distance,
             include=include,
             exclude=exclude,
-            distance_sort=distance_sort)
+            inwards=inwards,
+            **span_opts)
 
         if gauge_links:
             # if specified we first gauge *between* the branches
@@ -4305,7 +4666,7 @@ class TensorNetwork(object):
         max_distance=None,
         include=None,
         exclude=None,
-        distance_sort='min',
+        span_opts=None,
         absorb='right',
         gauge_links=False,
         link_absorb='both',
@@ -4394,7 +4755,7 @@ class TensorNetwork(object):
             max_distance=max_distance,
             include=include,
             exclude=exclude,
-            distance_sort=distance_sort,
+            span_opts=span_opts,
             absorb=absorb,
             gauge_links=gauge_links,
             link_absorb=link_absorb,
@@ -4403,25 +4764,253 @@ class TensorNetwork(object):
 
     canonize_around_ = functools.partialmethod(canonize_around, inplace=True)
 
+    def gauge_all_canonize(
+        self,
+        max_iterations=5,
+        absorb='both',
+        inplace=False,
+    ):
+        """Iterative gauge all the bonds in this tensor network with a basic
+        'canonization' strategy.
+        """
+        tn = self if inplace else self.copy()
+
+        for _ in range(max_iterations):
+            for ind in tuple(tn.ind_map.keys()):
+                try:
+                    tid1, tid2 = tn.ind_map[ind]
+                except (KeyError, ValueError):
+                    # fused multibond (removed) or not a bond (len(tids != 2))
+                    continue
+                tn._canonize_between_tids(tid1, tid2, absorb=absorb)
+
+        return tn
+
+    gauge_all_canonize_ = functools.partialmethod(
+        gauge_all_canonize, inplace=True)
+
+    def gauge_all_simple(
+        self,
+        max_iterations=5,
+        tol=0.0,
+        smudge=1e-12,
+        power=1.0,
+        gauges=None,
+        inplace=False,
+    ):
+        """Iterative gauge all the bonds in this tensor network with a 'simple
+        update' like strategy.
+        """
+        tn = self if inplace else self.copy()
+
+        # every index in the TN
+        inds = list(tn.ind_map)
+
+        # the vector 'gauges' that will live on the bonds
+        gauges_supplied = gauges is not None
+        if not gauges_supplied:
+            gauges = {}
+
+        # for retrieving singular values
+        info = {}
+
+        # accrue scaling to avoid numerical blow-ups
+        nfact = 0.0
+
+        it = 0
+        not_converged = True
+        while not_converged and it < max_iterations:
+
+            # can only converge if tol > 0.0
+            all_converged = tol > 0.0
+
+            for ind in inds:
+                try:
+                    tid1, tid2 = tn.ind_map[ind]
+                except (KeyError, ValueError):
+                    # fused multibond (removed) or not a bond (len(tids != 2))
+                    pass
+
+                t1 = tn.tensor_map[tid1]
+                t2 = tn.tensor_map[tid2]
+                lix, bix, rix = group_inds(t1, t2)
+
+                bond = bix[0]
+                if len(bix) > 1:
+                    # first absorb separate gauges
+                    for ind in bix:
+                        s = gauges.pop(ind, None)
+                        if s is not None:
+                            t1.multiply_index_diagonal_(ind, s**0.5)
+                            t2.multiply_index_diagonal_(ind, s**0.5)
+                    # multibond - fuse it
+                    t1.fuse_({bond: bix})
+                    t2.fuse_({bond: bix})
+
+                # absorb 'outer' gauges into tensors
+                inv_gauges = []
+                for t, ixs in ((t1, lix), (t2, rix)):
+                    for ix in ixs:
+                        try:
+                            s = (gauges[ix] + smudge)**power
+                        except KeyError:
+                            continue
+                        t.multiply_index_diagonal_(ix, s)
+                        # keep track of how to invert gauge
+                        inv_gauges.append((t, ix, 1 / s))
+
+                # absorb the inner gauge, if it exists
+                if bond in gauges:
+                    t1.multiply_index_diagonal_(bond, gauges[bond])
+
+                # perform SVD to get new bond gauge
+                tensor_compress_bond(
+                    t1, t2, absorb=None, info=info, cutoff=0.0)
+
+                s = info['singular_values'].data
+                smax = do('max', s)
+                new_gauge = s / smax
+                nfact = do('log10', smax) + nfact
+
+                if tol > 0.0:
+                    # check convergence
+                    old_gauge = gauges.get(bond, 1.0)
+                    sdiff = do('linalg.norm', old_gauge - new_gauge)
+                    all_converged &= sdiff < tol
+
+                # update inner gauge and undo outer gauges
+                gauges[bond] = new_gauge
+                for t, ix, inv_s in inv_gauges:
+                    t.multiply_index_diagonal_(ix, inv_s)
+
+            not_converged = not all_converged
+            it += 1
+
+        # redistribute the accrued scaling
+        tn.multiply_each_(10**(nfact / tn.num_tensors))
+
+        if not gauges_supplied:
+            # absorb all bond gauges
+            for ix, s in gauges.items():
+                t1, t2 = map(tn.tensor_map.__getitem__, tn.ind_map[ix])
+                s_1_2 = s**0.5
+                t1.multiply_index_diagonal_(ix, s_1_2)
+                t2.multiply_index_diagonal_(ix, s_1_2)
+
+        return tn
+
+    gauge_all_simple_ = functools.partialmethod(gauge_all_simple, inplace=True)
+
+    def gauge_all_random(self, iterations=1, unitary=True, inplace=False):
+        """Gauge all the bonds in this network randomly. This is largely for
+        testing purposes.
+        """
+        tn = self if inplace else self.copy()
+
+        for _ in range(iterations):
+            for ix, tids in tn.ind_map.items():
+                try:
+                    tid1, tid2 = tids
+                except (KeyError, ValueError):
+                    continue
+
+                t1 = tn.tensor_map[tid1]
+                t2 = tn.tensor_map[tid2]
+
+                d = t1.ind_size(ix)
+
+                if unitary:
+                    G = rand_uni(d, dtype=get_dtype_name(t1.data))
+                    G = do('array', G, like=t1.data)
+                    Ginv = dag(G)
+                else:
+                    G = rand_matrix(d, dtype=get_dtype_name(t1.data))
+                    G = do('array', G, like=t1.data)
+                    Ginv = do("linalg.inv", G)
+
+                t1.gate_(G, ix)
+                t2.gate_(Ginv.T, ix)
+
+        return tn
+
+    gauge_all_random_ = functools.partialmethod(gauge_all_random, inplace=True)
+
+    def _gauge_local_tids(
+        self,
+        tids,
+        max_distance=1,
+        max_iterations='max_distance',
+        method='canonize',
+        inwards=False,
+        include=None,
+        exclude=None,
+        **gauge_local_opts
+    ):
+        """Iteratively gauge all bonds in the local tensor network defined by
+        ``tids`` according to one of several strategies.
+        """
+        if max_iterations == 'max_distance':
+            max_iterations = max_distance
+
+        tn_loc = self._select_local_tids(
+            tids, max_distance=max_distance, inwards=inwards,
+            virtual=True, include=include, exclude=exclude
+        )
+
+        if method == "canonize":
+            tn_loc.gauge_all_canonize_(
+                max_iterations=max_iterations, **gauge_local_opts)
+        elif method == "simple":
+            tn_loc.gauge_all_simple_(
+                max_iterations=max_iterations, **gauge_local_opts)
+        elif method == "random":
+            tn_loc.gauge_all_random_(**gauge_local_opts)
+
+        return tn_loc
+
+    def gauge_local(
+        self,
+        tags,
+        which='all',
+        max_distance=1,
+        max_iterations='max_distance',
+        method='canonize',
+        inplace=False,
+        **gauge_local_opts
+    ):
+        """Iteratively gauge all bonds in the tagged sub tensor network
+        according to one of several strategies.
+        """
+        tn = self if inplace else self.copy()
+        tids = self._get_tids_from_tags(tags, which)
+        tn._gauge_local_tids(
+            tids, max_distance=max_distance, max_iterations=max_iterations,
+            method=method, **gauge_local_opts)
+        return tn
+
+    gauge_local_ = functools.partialmethod(gauge_local, inplace=True)
+
     def _contract_compressed_tid_sequence(
         self,
         seq,
         max_bond=None,
+        cutoff=1e-10,
         canonize_distance=0,
         canonize_opts=None,
-        canonize_boundary_only=False,
+        canonize_after_distance=0,
+        canonize_after_opts=None,
+        gauge_boundary_only=False,
         compress_opts=None,
+        compress_span=False,
         compress_exclude=None,
         equalize_norms=False,
-        info=None,
+        callback_pre_contract=None,
+        callback_post_contract=None,
+        callback_pre_compress=None,
+        callback_post_compress=None,
+        callback=None,
+        progbar=False,
     ):
-
-        # keep track of pairs along the tree - no point compressing these
-        dont_compress_pairs = {frozenset(s[:2]) for s in seq}
-
-        # keep track of the largest tensor encountered
-        largest_intermediate = 0
-
         # the boundary - the set of intermediate tensors
         boundary = oset()
 
@@ -4429,18 +5018,55 @@ class TensorNetwork(object):
         if canonize_distance:
             canonize_opts = ensure_dict(canonize_opts)
             canonize_opts.setdefault('equalize_norms', equalize_norms)
-            if canonize_boundary_only:
+            if gauge_boundary_only:
                 canonize_opts['include'] = boundary
             else:
                 canonize_opts['include'] = None
+
         # options relating to the compression itself
         compress_opts = ensure_dict(compress_opts)
-        compress_opts.setdefault('absorb', 'right')
-        compress_opts.setdefault('equalize_norms', equalize_norms)
+        compress_opts.setdefault('absorb', 'left')
 
-        for tid1, tid2, d in seq:
+        # options relating to canonizing around tensors *after* compression
+        if canonize_after_distance:
+            canonize_after_opts = ensure_dict(canonize_after_opts)
+            if gauge_boundary_only:
+                canonize_after_opts['include'] = boundary
+            else:
+                canonize_after_opts['include'] = None
+
+        # allow dynamic compresson options based on distance
+        if callable(max_bond):
+            chi_fn = max_bond
+        else:
+            def chi_fn(d):
+                return max_bond
+
+        if callable(cutoff):
+            eps_fn = cutoff
+        else:
+            def eps_fn(d):
+                return cutoff
+
+        C = len(seq)
+
+        # keep track of pairs along the tree - often no point compressing these
+        #     (potentially, on some complex graphs, one needs to compress)
+        dont_compress_pairs = {frozenset((s[0], s[1])) for s in seq}
+
+        if progbar:
+            import tqdm
+            pbar = tqdm.tqdm(total=C)
+        else:
+            pbar = None
+
+        for i in range(C):
             # tid1 -> tid2 is inwards on the contraction tree, ``d`` is the
             # graph distance from the original region
+            tid1, tid2, d = seq[i]
+
+            if callback_pre_contract is not None:
+                callback_pre_contract(self, (tid1, tid2))
 
             # pop out the pair of tensors
             t1, t2 = self._pop_tensor(tid1), self._pop_tensor(tid2)
@@ -4451,8 +5077,10 @@ class TensorNetwork(object):
             if not isinstance(t_new, Tensor):
                 t_new = Tensor(t_new, tags=t1.tags | t2.tags)
 
-            if info is not None:
-                largest_intermediate = max(largest_intermediate, t_new.size)
+            if progbar:
+                pbar.set_description(
+                    f"log2[SIZE]: {math.log2(t_new.size):.2f}")
+                pbar.update()
 
             # re-add the product, using the same identifier as the (inner) t2
             tid_new = tid2
@@ -4465,45 +5093,62 @@ class TensorNetwork(object):
             # update the boundary
             boundary.add(tid_new)
 
-            if callable(max_bond):
-                # allow a dynamic bond dimension based on distance to region
-                chi = max_bond(d)
-            else:
-                chi = max_bond
+            if callback_post_contract is not None:
+                callback_post_contract(self, tid_new)
 
-            neighbors = self._get_neighbor_tids(tid_new)
+            # allow dynamically adjusting truncation settings based on distance
+            chi = chi_fn(d)
+            eps = eps_fn(d)
 
-            for tid_neighb in neighbors:
+            for tid_neighb in self._get_neighbor_tids(tid_new):
+
+                # first just check for accumulation of small multi-bonds
+                t_neighb = self.tensor_map[tid_neighb]
+                tensor_fuse_squeeze(t_new, t_neighb)
+
+                pair_key = frozenset((tid_new, tid_neighb))
                 if (
                     # not allowed to compress
                     ((compress_exclude is not None) and
                      (tid_neighb in compress_exclude)) or
-                    # pointless as bond will be contracted anyway
-                    frozenset((tid_neighb, tid_new)) in dont_compress_pairs
+                    # compressing along span often pointless
+                    ((not compress_span) and
+                     (pair_key in dont_compress_pairs)) or
+                    # always pointless if next contraction
+                    (pair_key in {frozenset(s[:2]) for s in seq[i + 1:i + 2]})
                 ):
                     continue
 
-                t_neighb = self.tensor_map[tid_neighb]
-
                 # check for compressing large shared (multi) bonds
-                if chi is None or bonds_size(t_new, t_neighb) > chi:
+                if (
+                    (chi is None and eps != 0.0) or
+                    (bonds_size(t_new, t_neighb) > chi)
+                ):
+                    if callback_pre_compress is not None:
+                        callback_pre_compress(self, (tid_new, tid_neighb))
 
-                    # possibly gauge around the tensors before we compress
-                    if canonize_distance:
-                        self._canonize_around_tids(
-                            (tid_neighb, tid_new),
-                            max_distance=canonize_distance, **canonize_opts)
-
-                    # actually compress
                     self._compress_between_tids(
-                        tid_neighb, tid_new, max_bond=chi, **compress_opts)
+                        tid_new,
+                        tid_neighb,
+                        max_bond=chi,
+                        cutoff=eps,
+                        canonize_distance=canonize_distance,
+                        canonize_opts=canonize_opts,
+                        canonize_after_distance=canonize_after_distance,
+                        canonize_after_opts=canonize_after_opts,
+                        equalize_norms=equalize_norms,
+                        **compress_opts
+                    )
 
-                else:
-                    # also just check for accumulation of small multi-bonds
-                    tensor_fuse_squeeze(t_new, t_neighb)
+                    if callback_post_compress is not None:
+                        callback_post_compress(self, (tid_new, tid_neighb))
 
-        if info is not None:
-            info['largest_intermediate'] = largest_intermediate
+            if callback is not None:
+                callback(self, tid_new)
+
+        if equalize_norms is True:
+            # this also redistibutes the collected exponent
+            self.equalize_norms_()
 
         return self
 
@@ -4515,13 +5160,14 @@ class TensorNetwork(object):
         max_distance=None,
         span_opts=None,
         max_bond=None,
+        cutoff=1e-10,
         canonize_distance=0,
         canonize_opts=None,
-        canonize_boundary_only=False,
+        gauge_boundary_only=False,
         compress_opts=None,
         equalize_norms=False,
-        info=None,
         inplace=True,
+        **kwargs,
     ):
         """Contract around ``tids``, by following a greedily generated
         spanning tree, and compressing whenever two tensors in the outer
@@ -4545,13 +5191,14 @@ class TensorNetwork(object):
         return tn._contract_compressed_tid_sequence(
             seq,
             max_bond=max_bond,
+            cutoff=cutoff,
             canonize_distance=canonize_distance,
             canonize_opts=canonize_opts,
-            canonize_boundary_only=canonize_boundary_only,
+            gauge_boundary_only=gauge_boundary_only,
             compress_opts=compress_opts,
             compress_exclude=tids,
             equalize_norms=equalize_norms,
-            info=info)
+            **kwargs)
 
     def contract_around(
         self,
@@ -4561,13 +5208,14 @@ class TensorNetwork(object):
         max_distance=None,
         span_opts=None,
         max_bond=None,
+        cutoff=1e-10,
         canonize_distance=0,
         canonize_opts=None,
-        canonize_boundary_only=False,
+        gauge_boundary_only=False,
         compress_opts=None,
         equalize_norms=False,
-        info=None,
         inplace=False,
+        **kwargs
     ):
         """Perform a compressed contraction inwards towards the tensors
         identified by ``tags``.
@@ -4580,27 +5228,38 @@ class TensorNetwork(object):
             max_distance=max_distance,
             span_opts=span_opts,
             max_bond=max_bond,
+            cutoff=cutoff,
             canonize_distance=canonize_distance,
             canonize_opts=canonize_opts,
-            canonize_boundary_only=canonize_boundary_only,
+            gauge_boundary_only=gauge_boundary_only,
             compress_opts=compress_opts,
             equalize_norms=equalize_norms,
             inplace=inplace,
-            info=info)
+            **kwargs)
 
     contract_around_ = functools.partialmethod(contract_around, inplace=True)
 
     def contract_compressed(
         self,
         optimize,
+        output_inds=None,
         max_bond=None,
+        cutoff=1e-10,
         canonize_distance=0,
         canonize_opts=None,
-        canonize_boundary_only=False,
+        gauge_boundary_only=False,
         compress_opts=None,
+        compress_span=True,
+        compress_exclude=None,
         equalize_norms=False,
-        info=None,
+        callback_pre_contract=None,
+        callback_post_contract=None,
+        callback_pre_compress=None,
+        callback_post_compress=None,
+        callback=None,
+        progbar=False,
         inplace=False,
+        **kwargs
     ):
         tn = self if inplace else self.copy()
 
@@ -4622,12 +5281,24 @@ class TensorNetwork(object):
         return tn._contract_compressed_tid_sequence(
             seq=seq,
             max_bond=max_bond,
+            cutoff=cutoff,
             canonize_distance=canonize_distance,
             canonize_opts=canonize_opts,
-            canonize_boundary_only=canonize_boundary_only,
+            gauge_boundary_only=gauge_boundary_only,
             compress_opts=compress_opts,
+            compress_span=compress_span,
+            compress_exclude=compress_exclude,
             equalize_norms=equalize_norms,
-            info=info)
+            callback_pre_contract=callback_pre_contract,
+            callback_post_contract=callback_post_contract,
+            callback_pre_compress=callback_pre_compress,
+            callback_post_compress=callback_post_compress,
+            callback=callback,
+            progbar=progbar,
+            **kwargs)
+
+    contract_compressed_ = functools.partialmethod(
+        contract_compressed, inplace=True)
 
     def new_bond(self, tags1, tags2, **opts):
         """Inplace addition of a dummmy (size 1) bond between the single
@@ -5137,7 +5808,7 @@ class TensorNetwork(object):
         """Get the 'outer' pairs of dimension and indices, i.e. as if this
         tensor network was fully contracted.
         """
-        return tuple((self.ind_size(i), i) for i in self.outer_inds())
+        return tuple((self.ind_size(i), i) for i in self._outer_inds)
 
     def squeeze(self, fuse=False, inplace=False):
         """Drop singlet bonds and dimensions from this tensor network. If

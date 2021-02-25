@@ -418,7 +418,7 @@ def _span(xy):
     return xy[:, 1].max() - xy[:, 1].min()
 
 
-def _massage_pos(pos, nangles=24, flatten=False):
+def _massage_pos(pos, nangles=360, flatten=False):
     """Rotate a position dict's points to cover a small vertical span
     """
     xy = np.empty((len(pos), 2))

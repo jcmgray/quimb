@@ -1,3 +1,5 @@
+import functools
+
 import numpy as np
 import scipy.linalg as scla
 import scipy.sparse.linalg as spla
@@ -5,8 +7,8 @@ import scipy.linalg.interpolative as sli
 from autoray import do, reshape, dag, infer_backend, astype, get_dtype_name
 
 from ..core import njit
-from ..linalg.base_linalg import svds, eigh
-from ..linalg.rand_linalg import rsvd, estimate_rank
+from ..linalg import base_linalg
+from ..linalg import rand_linalg
 
 
 @njit(['i4(f4[:], f4, i4)', 'i4(f8[:], f8, i4)'])  # pragma: no cover
@@ -214,7 +216,7 @@ def _svd_numpy(x, cutoff=-1.0, cutoff_mode=3,
         raise e
 
 
-def _svd(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0, renorm=0):
+def svd(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0, renorm=0):
     if isinstance(x, np.ndarray):
         return _svd_numpy(x, cutoff, cutoff_mode, max_bond, absorb, renorm)
 
@@ -223,7 +225,7 @@ def _svd(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0, renorm=0):
                                 max_bond, absorb, renorm)
 
 
-def _svdvals(x):
+def svdvals(x):
     """SVD-decomposition, but return singular values only.
     """
     return np.linalg.svd(x, full_matrices=False, compute_uv=False)
@@ -264,7 +266,7 @@ def _eig_numba(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0, renorm=0):
                                       max_bond, absorb, renorm)
 
 
-def _eig(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0, renorm=0):
+def eig(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0, renorm=0):
     if isinstance(x, np.ndarray):
         return _eig_numba(x, cutoff, cutoff_mode, max_bond, absorb, renorm)
 
@@ -293,7 +295,7 @@ def _eig(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0, renorm=0):
 
 
 @njit
-def _svdvals_eig(x):  # pragma: no cover
+def svdvals_eig(x):  # pragma: no cover
     """SVD-decomposition via eigen, but return singular values only.
     """
     if x.shape[0] > x.shape[1]:
@@ -306,7 +308,7 @@ def _svdvals_eig(x):  # pragma: no cover
 
 
 @njit  # pragma: no cover
-def _eigh(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0, renorm=0):
+def eigh(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0, renorm=0):
     """SVD-decomposition, using hermitian eigen-decomposition, only works if
     ``x`` is hermitian.
     """
@@ -325,7 +327,8 @@ def _choose_k(x, cutoff, max_bond):
     d = min(x.shape)
 
     if cutoff != 0.0:
-        k = estimate_rank(x, cutoff, k_max=None if max_bond < 0 else max_bond)
+        k = rand_linalg.estimate_rank(
+            x, cutoff, k_max=None if max_bond < 0 else max_bond)
     else:
         k = min(d, max_bond)
 
@@ -333,7 +336,7 @@ def _choose_k(x, cutoff, max_bond):
     return 'full' if k > d // 2 else k
 
 
-def _svds(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0, renorm=0):
+def svds(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0, renorm=0):
     """SVD-decomposition using iterative methods. Allows the
     computation of only a certain number of singular values, e.g. max_bond,
     from the get-go, and is thus more efficient. Can also supply
@@ -344,14 +347,14 @@ def _svds(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0, renorm=0):
     if k == 'full':
         if not isinstance(x, np.ndarray):
             x = x.to_dense()
-        return _svd(x, cutoff, cutoff_mode, max_bond, absorb)
+        return svd(x, cutoff, cutoff_mode, max_bond, absorb)
 
-    U, s, VH = svds(x, k=k)
+    U, s, VH = base_linalg.svds(x, k=k)
     return _trim_and_renorm_SVD_numba(U, s, VH, cutoff, cutoff_mode,
                                       max_bond, absorb, renorm)
 
 
-def _isvd(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0, renorm=0):
+def isvd(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0, renorm=0):
     """SVD-decomposition using interpolative matrix random methods. Allows the
     computation of only a certain number of singular values, e.g. max_bond,
     from the get-go, and is thus more efficient. Can also supply
@@ -362,7 +365,7 @@ def _isvd(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0, renorm=0):
     if k == 'full':
         if not isinstance(x, np.ndarray):
             x = x.to_dense()
-        return _svd(x, cutoff, cutoff_mode, max_bond, absorb)
+        return svd(x, cutoff, cutoff_mode, max_bond, absorb)
 
     U, s, V = sli.svd(x, k)
     VH = dag_numba(V)
@@ -374,17 +377,17 @@ def _rsvd_numpy(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0, renorm=0):
     if max_bond > 0:
         if cutoff > 0.0:
             # adapt and block
-            U, s, VH = rsvd(x, cutoff, k_max=max_bond)
+            U, s, VH = rand_linalg.rsvd(x, cutoff, k_max=max_bond)
         else:
-            U, s, VH = rsvd(x, max_bond)
+            U, s, VH = rand_linalg.rsvd(x, max_bond)
     else:
-        U, s, VH = rsvd(x, cutoff)
+        U, s, VH = rand_linalg.rsvd(x, cutoff)
 
     return _trim_and_renorm_SVD_numba(U, s, VH, cutoff, cutoff_mode,
                                       max_bond, absorb, renorm)
 
 
-def _rsvd(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0, renorm=0):
+def rsvd(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0, renorm=0):
     """SVD-decomposition using randomized methods (due to Halko). Allows the
     computation of only a certain number of singular values, e.g. max_bond,
     from the get-go, and is thus more efficient. Can also supply
@@ -398,7 +401,7 @@ def _rsvd(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0, renorm=0):
                                 max_bond, absorb, renorm)
 
 
-def _eigsh(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0, renorm=0):
+def eigsh(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0, renorm=0):
     """SVD-decomposition using iterative hermitian eigen decomp, thus assuming
     that ``x`` is hermitian. Allows the computation of only a certain number of
     singular values, e.g. max_bond, from the get-go, and is thus more
@@ -409,9 +412,9 @@ def _eigsh(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0, renorm=0):
     if k == 'full':
         if not isinstance(x, np.ndarray):
             x = x.to_dense()
-        return _eigh(x, cutoff, cutoff_mode, max_bond, absorb)
+        return eigh(x, cutoff, cutoff_mode, max_bond, absorb)
 
-    s, U = eigh(x, k=k)
+    s, U = base_linalg.eigh(x, k=k)
     s, U = s[::-1], U[:, ::-1]  # make sure largest singular value first
     V = np.sign(s).reshape(-1, 1) * dag_numba(U)
     s = np.abs(s)
@@ -427,7 +430,7 @@ def _qr_numba(x):
     return Q, None, R
 
 
-def _qr(x):
+def qr(x):
     if isinstance(x, np.ndarray):
         return _qr_numba(x)
     Q, R = do('linalg.qr', x)
@@ -442,7 +445,7 @@ def _lq_numba(x):
     return L.T, None, Q.T
 
 
-def _lq(x):
+def lq(x):
     if isinstance(x, np.ndarray):
         return _lq_numba(x)
     Q, L = do('linalg.qr', do('transpose', x))
@@ -458,7 +461,7 @@ def _cholesky_numba(x, cutoff=-1, cutoff_mode=3, max_bond=-1, absorb=0):
     return L, None, dag_numba(L)
 
 
-def _cholesky(x, cutoff=-1, cutoff_mode=3, max_bond=-1, absorb=0):
+def cholesky(x, cutoff=-1, cutoff_mode=3, max_bond=-1, absorb=0):
     try:
         return _cholesky_numba(x, cutoff, cutoff_mode, max_bond, absorb)
     except np.linalg.LinAlgError as e:
@@ -467,3 +470,139 @@ def _cholesky(x, cutoff=-1, cutoff_mode=3, max_bond=-1, absorb=0):
         # try adding cutoff identity - assuming it is approx allowable error
         xi = x + 2 * cutoff * np.eye(x.shape[0])
         return _cholesky_numba(xi, cutoff, cutoff_mode, max_bond, absorb)
+
+
+# ------ similarity transforms for compressing effective environments ------- #
+
+def _similarity_compress_eig(X, max_bond, renorm):
+    # eigen decompose X -> V w V^-1
+    el, ev = do('linalg.eig', X)
+    evi = do('linalg.inv', ev)
+
+    # choose largest abs value eigenpairs
+    sel = do('argsort', do('abs', el))[-max_bond:]
+    Cl = ev[:, sel]
+    Cr = evi[sel, :]
+
+    if renorm:
+        trace_old = do('sum', el)
+        trace_new = do('sum', el[sel])
+        Cl = Cl * trace_old / trace_new
+
+    return Cl, Cr
+
+
+@njit([
+    '(c8[:,:], i4, i4)',
+    '(c16[:,:], i4, i4)',
+])  # pragma: no cover
+def _similarity_compress_eig_numba(X, max_bond, renorm):
+    el, ev = np.linalg.eig(X)
+    evi = np.linalg.inv(ev)
+    sel = np.argsort(np.abs(el))[-max_bond:]
+    Cl = ev[:, sel]
+    Cr = evi[sel, :]
+    if renorm:
+        trace_old = np.sum(el)
+        trace_new = np.sum(el[sel])
+        Cl = Cl * trace_old / trace_new
+    return Cl, Cr
+
+
+def _similarity_compress_svd(X, max_bond, renorm, asymm):
+    U, _, VH = do('linalg.svd', X)
+    U = U[:, :max_bond]
+
+    Cl = U
+    if asymm:
+        VH = VH[:max_bond, :]
+        Cr = dag(U)
+        Cl = dag(VH)
+    else:
+        Cr = dag(U)
+
+    if renorm:
+        # explicitly maintain trace value
+        trace_old = do('trace', X)
+        trace_new = do('trace', Cr @ (X @ Cl))
+        Cl = Cl * (trace_old / trace_new)
+
+    return Cl, Cr
+
+
+@njit  # pragma: no cover
+def _similarity_compress_svd_numba(X, max_bond, renorm, asymm):
+    U, _, VH = np.linalg.svd(X)
+    U = U[:, :max_bond]
+    Cl = U
+
+    if asymm:
+        VH = VH[:max_bond, :]
+        Cr = dag_numba(U)
+        Cl = dag_numba(VH)
+    else:
+        Cr = dag_numba(U)
+
+    if renorm:
+        trace_old = np.trace(X)
+        trace_new = np.trace(Cr @ (X @ Cl))
+        Cl = Cl * trace_old / trace_new
+    return Cl, Cr
+
+
+def _similarity_compress_eigh2(X, max_bond, renorm):
+    EE = X @ dag(X)
+    _, ev = do('linalg.eigh', EE + dag(EE))
+    Cl = ev[:, -max_bond:]
+    Cr = dag(Cl)
+
+    if renorm:
+        trace_old = do('trace', X)
+        trace_new = do('trace', Cr @ (X @ Cl))
+        Cl = Cl * (trace_old / trace_new)
+
+    return Cl, Cr
+
+
+@njit  # pragma: no cover
+def _similarity_compress_eigh2_numba(X, max_bond, renorm):
+    EE = X @ dag_numba(X)
+    _, ev = np.linalg.eigh(EE + dag_numba(EE))
+    Cl = ev[:, -max_bond:]
+    Cr = dag_numba(Cl)
+    if renorm:
+        trace_old = np.trace(X)
+        trace_new = np.trace(Cr @ (X @ Cl))
+        Cl = Cl * (trace_old / trace_new)
+    return Cl, Cr
+
+
+_similarity_compress_fns = {
+    ('eig', False): _similarity_compress_eig,
+    ('eig', True): _similarity_compress_eig_numba,
+    ('svd', False): functools.partial(
+        _similarity_compress_svd, asymm=0),
+    ('svd', True): functools.partial(
+        _similarity_compress_svd_numba, asymm=0),
+    ('svd-asymm', False): functools.partial(
+        _similarity_compress_svd, asymm=1),
+    ('svd-asymm', True): functools.partial(
+        _similarity_compress_svd_numba, asymm=1),
+    ('eigh2', False): _similarity_compress_eigh2,
+    ('eigh2', True): _similarity_compress_eigh2_numba,
+}
+
+
+def similarity_compress(X, max_bond, renorm=True, method='eigh2'):
+    if method == 'eig':
+        if get_dtype_name(X) == 'float64':
+            X = astype(X, 'complex128')
+        elif get_dtype_name(X) == 'float32':
+            X = astype(X, 'complex64')
+
+    isnumpy = isinstance(X, np.ndarray)
+    if isnumpy:
+        X = np.ascontiguousarray(X)
+
+    fn = _similarity_compress_fns[method, isnumpy]
+    return fn(X, max_bond, int(renorm))
