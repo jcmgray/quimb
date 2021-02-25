@@ -3372,6 +3372,43 @@ class TensorNetwork(object):
         inds = tags_to_oset(inds)
         return self._get_tids_from(self.ind_map, inds, which)
 
+    def _tids_get(self, *tids):
+        """Convenience function that generates unique tensors from tids.
+        """
+        seen = set()
+        sadd = seen.add
+        tmap = self.tensor_map
+        for tid in tids:
+            if tid not in seen:
+                yield tmap[tid]
+                sadd(tid)
+
+    def _inds_get(self, *inds):
+        """Convenience function that generates unique tensors from inds.
+        """
+        seen = set()
+        sadd = seen.add
+        tmap = self.tensor_map
+        imap = self.ind_map
+        for ind in inds:
+            for tid in imap.get(ind, ()):
+                if tid not in seen:
+                    yield tmap[tid]
+                    sadd(tid)
+
+    def _tags_get(self, *tags):
+        """Convenience function that generates unique tensors from tags.
+        """
+        seen = set()
+        sadd = seen.add
+        tmap = self.tensor_map
+        gmap = self.tag_map
+        for tag in tags:
+            for tid in gmap.get(tag, ()):
+                if tid not in seen:
+                    yield tmap[tid]
+                    sadd(tid)
+
     def select_tensors(self, tags, which='all'):
         """Return the sequence of tensors that match ``tags``. If
         ``which='all'``, each tensor must contain every tag. If
@@ -5776,6 +5813,188 @@ class TensorNetwork(object):
 
     split_simplify_ = functools.partialmethod(split_simplify, inplace=True)
 
+    def gen_loops(self, max_loop_length=None):
+        """Generate sequences of tids that represent loops in the TN.
+
+        Parameters
+        ----------
+        max_loop_length : None or int
+            Set the maximum number of tensors that can appear in a loop. If
+            ``None``, wait until any loop is found and set that as the
+            maximum length.
+
+        Yields
+        ------
+        tuple[int]
+        """
+        # start paths beginning at every node
+        queue = [(tid,) for tid in self.tensor_map]
+        seen = set()
+        while queue:
+            path = queue.pop(0)
+            # consider all the ways to extend each path
+            for tid_next in self._get_neighbor_tids(path[-1]):
+                tid0 = path[0]
+                # check for valid loop ...
+                if (
+                    # is not trivial
+                    (len(path) > 2) and
+                    # begins where is starts
+                    (tid_next == tid0) and
+                    # and is not just a cyclic permutation of existing loop
+                    (frozenset(path) not in seen)
+                ):
+                    yield tuple(sorted(path))
+                    seen.add(frozenset(path))
+                    if max_loop_length is None:
+                        # automatically set the max loop length
+                        max_loop_length = len(path) + 1
+
+                # path hits itself too early
+                elif tid_next in path:
+                    continue
+
+                # keep extending path, but only if
+                elif (
+                    # we haven't found any loops yet
+                    (max_loop_length is None) or
+                    # or this loops is short
+                    (len(path) < max_loop_length)
+                ):
+                    queue.append(path + (tid_next,))
+
+    def tids_are_connected(self, tids):
+        """Check whether nodes ``tids`` are connected.
+
+        Parameters
+        ----------
+        tids : sequence of int
+            Nodes to check.
+
+        Returns
+        -------
+        bool
+        """
+        enum = range(len(tids))
+        groups = dict(zip(enum, enum))
+        regions = [
+            (oset([tid]), self._get_neighbor_tids(tid))
+            for tid in tids
+        ]
+        for i, j in itertools.combinations(enum, 2):
+            mi = groups.get(i, i)
+            mj = groups.get(j, j)
+
+            if regions[mi][0] & regions[mj][1]:
+                groups[mj] = mi
+                regions[mi][0].update(regions[mj][0])
+                regions[mi][1].update(regions[mj][1])
+
+        return len(set(groups.values())) == 1
+
+    def loop_simplify(
+        self,
+        max_loop_length=None,
+        cutoff=1e-12,
+        loops=None,
+        cache=None,
+        inplace=False,
+        **split_opts
+    ):
+        """Try and simplify this tensor network by identifying loops and
+        checking for low-rank decompositions across groupings of the loops
+        outer indices.
+
+        Parameters
+        ----------
+        max_loop_length : None or int, optional
+            Largest length of loop to search for, if not set, the size will be
+            set to the length of the first (and shortest) loop found.
+        cutoff : float, optional
+            Cutoff to use for the operator decomposition.
+        loops : None, sequence or callable
+            Loops to check, or a function that generates them.
+        cache : set, optional
+            For performance reasons can supply a cache for already checked
+            loops.
+        inplace : bool, optional
+            Whether to replace the loops inplace.
+        split_opts
+            Supplied to :func:`~quimb.tensor.tensor_core.tensor_split`.
+
+        Returns
+        -------
+        TensorNetwork
+        """
+        tn = self if inplace else self.copy()
+
+        if loops is None:
+            loops = tuple(tn.gen_loops(max_loop_length))
+        elif callable(loops):
+            loops = loops(tn, max_loop_length)
+
+        for loop in loops:
+            if any(tid not in tn.tensor_map for tid in loop):
+                # some tensors have been compressed away already
+                continue
+
+            if cache is not None:
+                key = ('lp', frozenset((tid, id(tn.tensor_map[tid].data))
+                                       for tid in loop))
+                if key in cache:
+                    continue
+
+            tn_loop = tn._select_tids(loop)
+            oix = oset(tn_loop.outer_inds())
+            current_size = sum(tn_loop.tensor_map[tid].size for tid in loop)
+            cands = []
+
+            for tid_lefts, tid_rights in gen_bipartitions(loop):
+                if not (
+                    tn.tids_are_connected(tid_lefts) and
+                    tn.tids_are_connected(tid_rights)
+                ):
+                    # only group indices if they are contiguous in the graph
+                    continue
+
+                left_inds = oset(
+                    concat(t.inds for t in tn._tids_get(*tid_lefts))
+                ) & oix
+                right_inds = oset(
+                    concat(t.inds for t in tn._tids_get(*tid_rights))
+                ) & oix
+
+                if (not left_inds) or (not right_inds):
+                    continue
+
+                # cast the loop as an operator and split it
+                tnlo = tn_loop.aslinearoperator(left_inds, right_inds)
+                tl, tr = tensor_split(
+                    tnlo, left_inds, right_inds=right_inds, get='tensors',
+                    cutoff=cutoff, **split_opts
+                )
+
+                new_size = (tl.size + tr.size)
+                if new_size < current_size:
+                    cands.append((new_size / current_size, loop, tl, tr))
+
+            if not cands:
+                # no decompositions decrease the size
+                if cache is not None:
+                    cache.add(key)
+                continue
+
+            # perform the decomposition that minimizes the new size
+            _, loop, tl, tr = min(cands, key=lambda x: x[0])
+            for tid in loop:
+                tn._pop_tensor(tid)
+            tn |= tl
+            tn |= tr
+
+        return tn
+
+    loop_simplify_ = functools.partialmethod(loop_simplify, inplace=True)
+
     def full_simplify(
         self,
         seq='ADCR',
@@ -5785,7 +6004,8 @@ class TensorNetwork(object):
         cache=None,
         inplace=False,
         progbar=False,
-        **rank_simplify_opts
+        rank_simplify_opts=None,
+        loop_simplify_opts=None,
     ):
         """Perform a series of tensor network 'simplifications' in a loop until
         there is no more reduction in the number of tensors or indices. Note
@@ -5803,6 +6023,7 @@ class TensorNetwork(object):
                 * ``'C'`` : stands for ``column_reduce``
                 * ``'R'`` : stands for ``rank_simplify``
                 * ``'S'`` : stands for ``split_simplify``
+                * ``'L'`` : stands for ``loop_simplify``
 
             If you want to keep the tensor network 'simple', i.e. with no
             hyperedges, then don't use ``'D'`` (moreover ``'A'`` is redundant).
@@ -5835,10 +6056,13 @@ class TensorNetwork(object):
         See Also
         --------
         diagonal_reduce, rank_simplify, antidiag_gauge, column_reduce,
-        split_simplify
+        split_simplify, loop_simplify
         """
         tn = self if inplace else self.copy()
         tn.squeeze_()
+
+        rank_simplify_opts = ensure_dict(rank_simplify_opts)
+        loop_simplify_opts = ensure_dict(loop_simplify_opts)
 
         # all the methods
         if output_inds is None:
@@ -5882,6 +6106,9 @@ class TensorNetwork(object):
                 elif meth == 'S':
                     tn.split_simplify_(atol=atol, cache=cache,
                                        equalize_norms=equalize_norms)
+                elif meth == 'L':
+                    tn.loop_simplify_(cutoff=atol, cache=cache,
+                                      **loop_simplify_opts)
                 else:
                     raise ValueError(f"'{meth}' is not a valid simplify type.")
 
