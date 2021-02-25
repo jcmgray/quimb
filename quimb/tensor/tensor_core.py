@@ -5150,6 +5150,9 @@ class TensorNetwork(object):
             # this also redistibutes the collected exponent
             self.equalize_norms_()
 
+        if progbar:
+            pbar.close()
+
         return self
 
     def _contract_around_tids(
