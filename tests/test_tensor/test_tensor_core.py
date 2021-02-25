@@ -1402,6 +1402,31 @@ class TestTensorNetwork:
         assert all(ix in ab.ind_map for ix in a.ind_map)
         assert all(ix in ab.ind_map for ix in b.ind_map)
 
+    @pytest.mark.parametrize("mode", ["manual", "dense", "mps", "tree"])
+    def test_hyperind_resolve(self, mode):
+        import networkx as nx
+        import random
+        import collections
+
+        # create a random interaction ising model
+        G = nx.watts_strogatz_graph(10, 4, 0.5, seed=666)
+        edges = tuple(G.edges)
+        js = collections.defaultdict(random.random)
+        htn = qtn.HTN_classical_partition_function_from_edges(
+            edges, j=lambda i, j: js[frozenset((i, j))], beta=0.22, h=0.04)
+        Zh = htn.contract(all, output_inds=())
+
+        if mode == "manual":
+            # resolve manually
+            tn = qtn.TN_classical_partition_function_from_edges(
+                edges, j=lambda i, j: js[frozenset((i, j))], beta=0.22, h=0.04)
+        else:
+            tn = htn.hyperinds_resolve(mode)
+
+        Z = tn.contract(all, output_inds=())
+        assert Z == pytest.approx(Zh)
+        assert max(map(len, tn.ind_map.values())) == 2
+
 
 class TestTensorNetworkSimplifications:
 
