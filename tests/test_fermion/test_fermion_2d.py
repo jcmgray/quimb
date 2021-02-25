@@ -3,11 +3,7 @@ import numpy as np
 import itertools
 from quimb.tensor.fermion_2d import FPEPS
 from pyblock3.algebra.fermion import SparseFermionTensor
-from pyblock3.algebra.symmetry import SZ, BondInfo
-from pyblock3.algebra import fermion_operators as ops
-
-
-
+from pyblock3.algebra.symmetry import QPN, BondInfo
 
 class TestPEPSConstruct:
     @pytest.mark.parametrize('where', [
@@ -16,8 +12,8 @@ class TestPEPSConstruct:
     ])
     @pytest.mark.parametrize('contract', [False, True])
     def test_gate_2d_single_site(self, where, contract):
-        bond = BondInfo({SZ(0):2, SZ(1): 2})
-        G = SparseFermionTensor.random((bond, bond)).to_flat()
+        bond = BondInfo({QPN(0):1, QPN(2): 1, QPN(1,-1):1, QPN(1,1):1})
+        G = SparseFermionTensor.random((bond, bond), pattern="+-").to_flat()
         Lx = 3
         Ly = 3
         psi = FPEPS.rand(Lx, Ly, 2, seed=42, tags='KET')
@@ -32,8 +28,8 @@ class TestPEPSConstruct:
         [(1, 1), (2, 1)], [(2, 1), (2, 2)]
     ])
     def test_gate_2d_two_site(self, where, contract):
-        bond = BondInfo({SZ(0):2, SZ(1): 2})
-        G = SparseFermionTensor.random((bond, bond,bond,bond)).to_flat()
+        bond = BondInfo({QPN(0):1, QPN(2): 1, QPN(1,-1):1, QPN(1,1):1})
+        G = SparseFermionTensor.random((bond, bond,bond,bond), pattern="++--").to_flat()
         Lx = 3
         Ly = 3
         psi = FPEPS.rand(Lx, Ly, 2, seed=42, tags='KET')
@@ -44,18 +40,19 @@ class TestPEPSConstruct:
         assert tn ^ all == pytest.approx(xe)
 
 class Test2DContract:
+
     def test_contract_2d_one_layer_boundary(self):
         psi = FPEPS.rand(4, 4, 2, seed=42, tags='KET')
         norm = psi.make_norm()
         xe = norm.contract(all, optimize='auto-hq')
-        xt = norm.contract_boundary(max_bond=9)
+        xt = norm.contract_boundary(max_bond=6)
         assert xt == pytest.approx(xe, rel=1e-2)
 
     def test_contract_2d_two_layer_boundary(self):
         psi = FPEPS.rand(4, 4, 2, seed=42, tags='KET')
         norm = psi.make_norm()
         xe = norm.contract(all, optimize='auto-hq')
-        xt = norm.contract_boundary(max_bond=9, layer_tags=['KET', 'BRA'])
+        xt = norm.contract_boundary(max_bond=6, layer_tags=['KET', 'BRA'])
         assert xt == pytest.approx(xe, rel=1e-2)
 
     @pytest.mark.parametrize("two_layer", [False, True])
@@ -79,6 +76,7 @@ class Test2DContract:
             x = norm_i.contract(all)
             assert x == pytest.approx(ex, rel=1e-2)
 
+
     @pytest.mark.parametrize("two_layer", [False, True])
     def test_compute_col_envs(self, two_layer):
         psi = FPEPS.rand(2, 4, 2, seed=42, tags='KET')
@@ -100,6 +98,7 @@ class Test2DContract:
             x = norm_i.contract(all)
             assert x == pytest.approx(ex, rel=1e-2)
 
+
     def test_normalize(self):
         psi = FPEPS.rand(3, 3, 2, seed=42)
         norm = psi.make_norm().contract(all)
@@ -108,10 +107,12 @@ class Test2DContract:
         norm = psi.make_norm().contract(all)
         assert norm == pytest.approx(1.0, rel=1e-2)
 
+
+
     def test_compute_local_expectation_one_sites(self):
         peps = FPEPS.rand(4, 3, 2, seed=42)
         coos = list(itertools.product([0, 2, 3], [0, 1, 2]))
-        bond = BondInfo({SZ(0):2, SZ(1): 2})
+        bond = BondInfo({QPN(0):1, QPN(2): 1, QPN(1,-1):1, QPN(1,1):1})
         terms = {coo: SparseFermionTensor.random((bond, bond)).to_flat() for coo in coos}
 
         expecs = peps.compute_local_expectation(
@@ -135,8 +136,8 @@ class Test2DContract:
     def test_compute_local_expectation_two_sites(self):
         normalized=True
         peps = FPEPS.rand(4, 3, 2, seed=42)
-        bond = BondInfo({SZ(0):2, SZ(1): 2})
-        Hij = SparseFermionTensor.random((bond, bond, bond, bond)).to_flat()
+        bond = BondInfo({QPN(0):1, QPN(2): 1, QPN(1,-1):1, QPN(1,1):1})
+        Hij = SparseFermionTensor.random((bond, bond, bond, bond), pattern="++--").to_flat()
         hterms = {coos: Hij for coos in peps.gen_horizontal_bond_coos()}
         vterms = {coos: Hij for coos in peps.gen_vertical_bond_coos()}
 

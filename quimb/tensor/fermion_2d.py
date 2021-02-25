@@ -39,11 +39,13 @@ def gate_string_split_(TG, where, string, original_ts, bonds_along,
     # tensors we are going to contract in the blob, reindex some to attach gate
     contract_ts = []
     fermion_info = []
+    qpn_infos = []
 
     for t, coo in zip(original_ts, string):
         neighb_inds.append(tuple(ix for ix in t.inds if ix not in bonds_along))
         contract_ts.append(t.reindex_(reindex_map) if coo in where else t)
         fermion_info.append(t.get_fermion_info())
+        qpn_infos.append(t.data.dq)
 
     blob = tensor_contract(*contract_ts, TG, inplace=True)
     regauged = []
@@ -64,10 +66,10 @@ def gate_string_split_(TG, where, string, original_ts, bonds_along,
         bix = bonds_along[i]
 
         # split the blob!
-
+        qpn_info = [blob.data.dq - qpn_infos[i], qpn_infos[i]]
         lix = tuple(oset(blob.inds)-oset(lix))
         blob, *maybe_svals, inner_ts[i] = blob.split(
-            left_inds=lix, get='tensors', bond_ind=bix, **compress_opts)
+            left_inds=lix, get='tensors', bond_ind=bix, qpn_info=qpn_info, **compress_opts)
 
         # if singular values are returned (``absorb=None``) check if we should
         #     return them via ``info``, e.g. for ``SimpleUpdate`
@@ -98,8 +100,9 @@ def gate_string_split_(TG, where, string, original_ts, bonds_along,
         bix = bonds_along[j - 1]
 
         # split the blob!
+        qpn_info = [qpn_infos[j], blob.data.dq - qpn_infos[j]]
         inner_ts[j], *maybe_svals, blob= blob.split(
-            left_inds=lix, get='tensors', bond_ind=bix, **compress_opts)
+            left_inds=lix, get='tensors', bond_ind=bix, qpn_info=qpn_info, **compress_opts)
 
         # if singular values are returned (``absorb=None``) check if we should
         #     return them via ``info``, e.g. for ``SimpleUpdate`
@@ -123,7 +126,7 @@ def gate_string_split_(TG, where, string, original_ts, bonds_along,
         idx = np.where(abs(s.data)>INVERSE_CUTOFF)[0]
         snew = np.zeros_like(s.data)
         snew[idx] = 1/s.data[idx]
-        snew = s.__class__(s.q_labels, s.shapes, snew, idxs=s.idxs)
+        snew = s.__class__(s.q_labels, s.shapes, snew, pattern="+-", idxs=s.idxs)
         t = inner_ts[i]
         t.multiply_index_diagonal_(bix, snew, location=location)
 
@@ -155,8 +158,9 @@ def gate_string_reduce_split_(TG, where, string, original_ts, bonds_along,
     fs = TG.fermion_owner[1]()
     tid_lst = []
     for coo, rix, t in zip(string, inds_to_reduce, original_ts):
+        qpn_info = (t.data.dq, t.data.dq.__class__(0))
         tq, tr = t.split(left_inds=None, right_inds=rix,
-                         method='svd', get='tensors', absorb="right")
+                         method='svd', get='tensors', absorb="right", qpn_info=qpn_info)
         fermion_info.append(t.get_fermion_info())
         outer_ts.append(tq)
         inner_ts.append(tr.reindex_(reindex_map) if coo in where else tr)
@@ -255,7 +259,7 @@ def gate_string_reduce_split_(TG, where, string, original_ts, bonds_along,
         idx = np.where(abs(s.data)>INVERSE_CUTOFF)[0]
         snew = np.zeros_like(s.data)
         snew[idx] = 1/s.data[idx]
-        snew = s.__class__(s.q_labels, s.shapes, snew, idxs=s.idxs)
+        snew = s.__class__(s.q_labels, s.shapes, snew, pattern="+-", idxs=s.idxs)
         t = new_ts[i]
         t.multiply_index_diagonal_(bix, snew, location=location)
 
@@ -950,8 +954,8 @@ class FPEPS(FermionTensorNetwork2DVector,
         super().__init__(tensors, check_collisions=False, **tn_opts)
 
     @classmethod
-    def rand(cls, Lx, Ly, bond_dim, phys_dim=2,
-             dtype=float, seed=None, parity=None,
+    def rand(cls, Lx, Ly, bond_dim, qpn=None, phys_dim=1,
+             dtype=float, seed=None, shape="urdlp", qpn_map=None,
              **peps_opts):
         """Create a random (un-normalized) PEPS.
 
@@ -980,64 +984,36 @@ class FPEPS(FermionTensorNetwork2DVector,
         """
         if seed is not None:
             np.random.seed(seed)
+        if qpn is None: qpn = (Lx*Ly, Lx*Ly%2)
+        from pyblock3.algebra import fermion_gen
+        if qpn_map is None:
+            distribution = peps_opts.pop("distribution", "even")
+            qpn_map = fermion_gen._gen_2d_qpn_map(Lx, Ly, qpn, distribution)
 
-        arrays = [[None for _ in range(Ly)] for _ in range(Lx)]
-
-        from pyblock3.algebra.fermion import SparseFermionTensor
-        from pyblock3.algebra.symmetry import SZ, BondInfo
-
-        if isinstance(parity, np.ndarray):
-            if not parity.shape != (Lx, Ly):
-                raise ValueError("parity array shape not matching (Lx, Ly)")
-        elif isinstance(parity, int):
-            parity = np.ones((Lx, Ly), dtype=int) * (parity % 2)
-        elif parity is None:
-            parity = np.random.randint(0,2,Lx*Ly).reshape(Lx, Ly)
+        if Lx >= Ly:
+            arrays = fermion_gen._qpn_map_to_col_skeleton(qpn_map, phys_dim, bond_dim, shape)
         else:
-            raise TypeError("parity type not recoginized")
-
-        vir_info = BondInfo({SZ(0): bond_dim, SZ(1): bond_dim})
-        phy_info = BondInfo({SZ(0): phys_dim, SZ(1): phys_dim})
-
-        for i, j in product(range(Lx), range(Ly)):
-
-            shape = []
-            if i != Lx - 1:  # bond up
-                shape.append(vir_info)
-            if j != Ly - 1:  # bond right
-                shape.append(vir_info)
-            if i != 0:  # bond down
-                shape.append(vir_info)
-            if j != 0:  # bond left
-                shape.append(vir_info)
-
-            shape.append(phy_info)
-            dq = SZ(parity[i][j])
-
-            tsr = SparseFermionTensor.random(shape, dq=dq, dtype=dtype).to_flat()
-            tsr.data /= np.linalg.norm(tsr.data, 2) **(1.5 / tsr.ndim)
-            arrays[i][j] = tsr
+            arrays = fermion_gen._qpn_map_to_row_skeleton(qpn_map, phys_dim, bond_dim, shape)
 
         return cls(arrays, **peps_opts)
 
-def _gen_site_wfn_tsr(state, ndim=2, ax=0):
+def _gen_site_wfn_tsr(state, pattern=None, ndim=2, ax=0):
     from pyblock3.algebra.core import SubTensor
     from pyblock3.algebra.fermion import SparseFermionTensor
-    from pyblock3.algebra.symmetry import SZ
-    state_map = {0:(0,0), 1:(1,0), 2:(1,1), 3:(0,1)}
+    from pyblock3.algebra.symmetry import QPN
+    state_map = {0:QPN(0,0), 1:QPN(1,1), 2:QPN(1,-1), 3:QPN(2,0)}
     if state not in state_map:
         raise KeyError("requested state not recoginized")
-    q_lab, ind = state_map[state]
-    q_label = [SZ(0),] * ax + [SZ(q_lab),] + [SZ(0),] *(ndim-ax-1)
-    shape = [1,] * ax + [2,] + [1,] *(ndim-ax-1)
-    dat = np.zeros([2])
-    dat.put(ind, 1)
-    dat = dat.reshape(shape)
+    q_label = [QPN(0),] * ax + [state_map[state]] + [QPN(0),] *(ndim-ax-1)
+    shape = [1,] * ndim
+    dat = np.ones(shape)
     blocks = [SubTensor(reduced=dat, q_labels=q_label)]
-    smat = SparseFermionTensor(blocks=blocks).to_flat()
+    smat = SparseFermionTensor(blocks=blocks, pattern=pattern).to_flat()
     return smat
 
 def gen_mf_peps(state_array, shape='urdlp', **kwargs):
+    pattern_map = {"d": "+", "l":"+", "p":"+",
+                   "u": "-", "r":"-"}
     Lx, Ly = state_array.shape
     arr = state_array.astype("int")
     cache = dict()
@@ -1052,12 +1028,12 @@ def gen_mf_peps(state_array, shape='urdlp', **kwargs):
             array_order = array_order.replace('d', '')
         if j == 0:
             array_order = array_order.replace('l', '')
-
+        pattern = "".join([pattern_map[i] for i in array_order])
         ndim = len(array_order)
         ax = array_order.index('p')
-        key = (state, ndim, ax)
+        key = (state, ndim, ax, pattern)
         if key not in cache:
-            cache[key] = _gen_site_wfn_tsr(state, ndim, ax).copy()
+            cache[key] = _gen_site_wfn_tsr(state, pattern, ndim, ax).copy()
         return cache[key]
 
     tsr_array = [[_gen_ij(i,j) for j in range(Ly)] for i in range(Lx)]

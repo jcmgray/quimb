@@ -3,7 +3,7 @@ import numpy as np
 import itertools
 from quimb.tensor.fermion_2d import gen_mf_peps, FPEPS
 from pyblock3.algebra import fermion_operators as ops
-from pyblock3.algebra.symmetry import SZ
+from pyblock3.algebra.symmetry import QPN
 from pyblock3.algebra.core import SubTensor
 from pyblock3.algebra.fermion import SparseFermionTensor
 
@@ -12,23 +12,42 @@ np.random.seed(3)
 state_array = np.random.randint(0, 4, Lx*Ly).reshape(Lx, Ly)
 psi = gen_mf_peps(state_array)
 
-
-
 class TestOperators:
     def test_hopping(self):
         t = 2
         hop = ops.hopping(t)
         blocks=[]
-        states = np.zeros([2,2])
-        states[0] = .5
-        blocks.append(SubTensor(reduced=states, q_labels=(SZ(0), SZ(1)))) #0+, 0-
-        blocks.append(SubTensor(reduced=-states.T, q_labels=(SZ(1), SZ(0)))) #+0, -0, eigenstate of hopping
-        # psi = |0+> + |0-> - |+0> - |-0>, eigenstate of hopping(eigval = t)
-        ket = SparseFermionTensor(blocks=blocks).to_flat()
+        states = np.ones([1,1]) * .5 ** .5
+        blocks.append(SubTensor(reduced=states, q_labels=(QPN(0),QPN(1,1)))) #0+
+        blocks.append(SubTensor(reduced=states, q_labels=(QPN(1,1),QPN(0)))) #+0, eigenstate of hopping
+        # psi = |0+> + |+0> - |-0>, eigenstate of hopping(eigval = -t)
+        ket = SparseFermionTensor(blocks=blocks, pattern="++").to_flat()
         ket1 = np.tensordot(hop, ket, axes=((2,3),(0,1)))
-        bra = ket.permute([1,0]).conj()
+        bra = ket.dagger
         expec = np.tensordot(bra, ket1, axes=((1,0),(0,1))).data[0]
-        assert expec == pytest.approx(t, rel=1e-2)
+        assert expec == pytest.approx(-t, rel=1e-2)
+
+    def test_exponential_hop(self):
+        t = 3
+        tau = 0.1
+        hop = ops.hopping(t)
+        hop_exp = hop.to_exponential(-tau)
+        blocks=[]
+        states = np.ones([1,1]) * .5
+        blocks.append(SubTensor(reduced=states, q_labels=(QPN(2), QPN(0))))
+        blocks.append(SubTensor(reduced=states, q_labels=(QPN(0), QPN(2))))
+        blocks.append(SubTensor(reduced=-states, q_labels=(QPN(1,1), QPN(1,-1))))
+        blocks.append(SubTensor(reduced=states, q_labels=(QPN(1,-1), QPN(1,1))))
+
+        ket = SparseFermionTensor(blocks=blocks, pattern="++").to_flat()
+        ket1 = np.tensordot(hop, ket, axes=((2,3),(0,1)))
+        bra = ket.dagger
+        expec = np.tensordot(bra, ket1, axes=((1,0),(0,1))).data[0]
+        assert expec == pytest.approx(2*t, rel=1e-2)
+
+        ket1 = np.tensordot(hop_exp, ket, axes=((2,3),(0,1)))
+        expec = np.tensordot(bra, ket1, axes=((1,0),(0,1))).data[0]
+        assert expec == pytest.approx(np.e**(-2*t*tau), rel=1e-2)
 
     def test_onsite_u(self):
         U = 4.
@@ -103,26 +122,3 @@ class TestOperators:
         for ix, iy in itertools.product(range(Lx), range(Ly)):
             ref = np.e**(-tau*U) if state_array[ix,iy]==3 else 1.
             assert ref == pytest.approx(result[(ix,iy)][0], rel=1e-2)
-
-    def test_exponential_hop(self):
-        t = 3
-        tau = 0.1
-        hop = ops.hopping(t)
-        hop_exp = hop.to_exponential(-tau)
-        blocks=[]
-        states = np.zeros([2,2])
-        states[1,0] = states[0,1] = .5
-        blocks.append(SubTensor(reduced=states, q_labels=(SZ(0), SZ(0))))
-        states = np.zeros([2,2])
-        states[1,0] =-.5
-        states[0,1] =.5
-        blocks.append(SubTensor(reduced=states, q_labels=(SZ(1), SZ(1))))
-        ket = SparseFermionTensor(blocks=blocks).to_flat()
-        ket1 = np.tensordot(hop, ket, axes=((2,3),(0,1)))
-        bra = ket.permute([1,0]).conj()
-        expec = np.tensordot(bra, ket1, axes=((1,0),(0,1))).data[0]
-        assert expec == pytest.approx(2*t, rel=1e-2)
-
-        ket1 = np.tensordot(hop_exp, ket, axes=((2,3),(0,1)))
-        expec = np.tensordot(bra, ket1, axes=((1,0),(0,1))).data[0]
-        assert expec == pytest.approx(np.e**(-2*t*tau), rel=1e-2)

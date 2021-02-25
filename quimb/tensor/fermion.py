@@ -13,6 +13,7 @@ from .tensor_core import (Tensor, TensorNetwork, rand_uuid, tags_to_oset,
 from .tensor_core import tensor_contract as _tensor_contract
 from ..utils import oset, valmap
 from .array_ops import asarray, ndim
+from pyblock3.algebra.symmetry import QPN
 
 def _contract_connected(T1, T2, output_inds=None):
     """Fermionic contraction of two tensors that are adjacent to each other.
@@ -218,7 +219,8 @@ def tensor_split(
     rtags=None,
     stags=None,
     bond_ind=None,
-    right_inds=None
+    right_inds=None,
+    qpn_info=None
 ):
     """Decompose this Fermionic tensor into two fermionic tensors.
 
@@ -312,7 +314,7 @@ def tensor_split(
     _right_inds =[T.inds.index(i) for i in right_inds]
 
     if method == "svd":
-        left, s, right = T.data.tensor_svd(_left_inds, right_idx=_right_inds, **opts)
+        left, s, right = T.data.tensor_svd(_left_inds, right_idx=_right_inds, qpn_info=qpn_info, **opts)
     else:
         raise NotImplementedError
 
@@ -370,16 +372,17 @@ def _compress_connected(Tl, Tr, absorb='both', **compress_opts):
     left_inds = [ind for ind in Tl.inds if ind not in Tr.inds]
     right_inds = [ind for ind in Tr.inds if ind not in Tl.inds]
     out = _contract_connected(Tl, Tr)
+    qpn_info = (Tl.data.dq, Tr.data.dq)
     if Tl.get_fermion_info()[1] < Tr.get_fermion_info()[1]:
         if absorb == "left":
             absorb = "right"
         elif absorb == "right":
             absorb = "left"
         r, l = out.split(left_inds=right_inds, right_inds=left_inds,
-                         absorb=absorb, get="tensors", **compress_opts)
+                         absorb=absorb, get="tensors", qpn_info=qpn_info, **compress_opts)
     else:
         l, r = out.split(left_inds=left_inds, right_inds=right_inds,
-                         absorb=absorb, get="tensors", **compress_opts)
+                         absorb=absorb, get="tensors", qpn_info=qpn_info, **compress_opts)
     return l, r
 
 def tensor_compress_bond(
@@ -443,10 +446,12 @@ def _canonize_connected(T1, T2, absorb='right', **split_opts):
         raise ValueError("The tensors specified don't share an bond.")
 
     if T1.get_fermion_info()[1] < T2.get_fermion_info()[1]:
-        tRfact, new_T1 = T1.split(shared_ix, get="tensors", **split_opts)
+        qpn_info = (T1.data.dq.__class__(0), T1.data.dq)
+        tRfact, new_T1 = T1.split(shared_ix, get="tensors", qpn_info=qpn_info, **split_opts)
         new_T2 = _contract_connected(T2, tRfact)
     else:
-        new_T1, tRfact = T1.split(left_env_ix, get='tensors', **split_opts)
+        qpn_info = (T1.data.dq, T1.data.dq.__class__(0))
+        new_T1, tRfact = T1.split(left_env_ix, get='tensors', qpn_info=qpn_info, **split_opts)
         new_T2 = _contract_connected(tRfact, T2)
 
     if absorb == "left":
@@ -516,8 +521,8 @@ def tensor_balance_bond(t1, t2, smudge=1e-6):
             sblk1.append(SubTensor(reduced=np.diag(s**-0.25), q_labels=iblk1.q_labels))
             sblk2.append(SubTensor(reduced=np.diag(s**0.25), q_labels=iblk2.q_labels))
 
-    s1 = SparseFermionTensor(blocks=sblk1).to_flat()
-    s2 = SparseFermionTensor(blocks=sblk2).to_flat()
+    s1 = SparseFermionTensor(blocks=sblk1, pattern="+-").to_flat()
+    s2 = SparseFermionTensor(blocks=sblk2, pattern="+-").to_flat()
     t1.multiply_index_diagonal_(ix, s1, location="back")
     t2.multiply_index_diagonal_(ix, s2, location="front")
 
@@ -881,12 +886,10 @@ class FermionSpace:
         new_fs = FermionSpace()
         for tid, (tsr, site) in self.tensor_order.items():
             T = tsr.copy()
-            reverse_order = list(range(tsr.ndim))[::-1]
-            new_data = T.data.permute(reverse_order).conj()
+            new_data = T.data.dagger
             new_inds = T.inds[::-1]
             T.modify(data=new_data, inds=new_inds)
             new_fs.add_tensor(T, tid, max_site-site, virtual=True)
-
         return new_fs
 
 
@@ -957,8 +960,8 @@ class FermionTensor(Tensor):
                 raise ValueError("%s indice not found in the tensor"%dim_or_ind)
             dim_or_ind = self.inds.index(dim_or_ind)
 
-        from pyblock3.algebra.symmetry import SZ, BondInfo
-        sz = [SZ.from_flat(ix) for ix in self.data.q_labels[:,dim_or_ind]]
+        from pyblock3.algebra.symmetry import QPN, BondInfo
+        sz = [QPN.from_flat(ix) for ix in self.data.q_labels[:,dim_or_ind]]
         sp = self.data.shapes[:,dim_or_ind]
         bond_dict = dict(zip(sz, sp))
         return BondInfo(bond_dict)
@@ -1083,8 +1086,7 @@ class FermionTensor(Tensor):
         U_{abc} a^{\dagger}b^{\dagger}c^{\dagger} -> U^{cba\star}cba
         Note this is different from Fermionic transposition
         """
-        axes = list(range(self.ndim))[::-1]
-        data = self.data.permute(axes).conj()
+        data = self.data.dagger
         inds = self.inds[::-1]
         tsr = self.copy()
         tsr.modify(data=data, inds=inds)
@@ -1463,7 +1465,7 @@ class FermionTensorNetwork(TensorNetwork):
 
         for tid, (tsr, site) in fs.tensor_order.items():
              reverse_order = list(range(tsr.ndim))[::-1]
-             new_data = tsr.data.permute(reverse_order).conj()
+             new_data = tsr.data.dagger
              new_inds = tsr.inds[::-1]
              tsr.modify(data=new_data, inds=new_inds)
              fs.tensor_order.update({tid: (tsr, max_site-site)})
