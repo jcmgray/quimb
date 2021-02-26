@@ -1156,6 +1156,13 @@ class TestTensorNetwork:
 
         assert (tn_even & tn_odd).sites == tuple(range(10))
 
+    def test_subgraphs(_):
+        k1 = MPS_rand_state(6, 7, site_ind_id='a{}')
+        k2 = MPS_rand_state(8, 7, site_ind_id='b{}')
+        tn = k1 | k2
+        s1, s2 = tn.subgraphs()
+        assert {s1.num_tensors, s2.num_tensors} == {6, 8}
+
     def test_compress_multibond(self):
         A = rand_tensor((7, 2, 2), 'abc', tags='A')
         A.expand_ind('c', 3)

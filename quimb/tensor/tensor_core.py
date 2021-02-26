@@ -4330,6 +4330,46 @@ class TensorNetwork(object):
 
         return neighbors
 
+    def subgraphs(self, virtual=False):
+        """Split this tensor network into disconneceted subgraphs.
+
+        Parameters
+        ----------
+        virtual : bool, optional
+            Whether the tensor networks should view the original tensors or
+            not - by default take copies.
+
+        Returns
+        -------
+        list[TensorNetwork]
+        """
+        groups = []
+        tids = oset(self.tensor_map)
+
+        # check all nodes
+        while tids:
+
+            # get a remaining node
+            tid0 = tids.popright()
+            queue = [tid0]
+            group = oset(queue)
+
+            while queue:
+                # expand it until no neighbors
+                tid = queue.pop()
+                for tid_n in self._get_neighbor_tids(tid):
+                    if tid_n in group:
+                        continue
+                    else:
+                        group.add(tid_n)
+                        queue.append(tid_n)
+
+            # remove current subgraph and continue
+            tids -= group
+            groups.append(group)
+
+        return [self._select_tids(group, virtual=virtual) for group in groups]
+
     def get_tree_span(
         self,
         tids,
