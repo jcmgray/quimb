@@ -1036,6 +1036,7 @@ def HTN_from_cnf(fname, mode='parafac'):
 
     ts = []
     weights = {}
+    weighted = set()
     clause_counter = 1
 
     with open(fname, 'r') as f:
@@ -1060,6 +1061,7 @@ def HTN_from_cnf(fname, mode='parafac'):
                 var = str(abs(sgn_var))
                 w = float(w)
                 weights[var, sgn] = w
+                weighted.add(var)
                 continue
 
             # clause tensor
@@ -1087,12 +1089,20 @@ def HTN_from_cnf(fname, mode='parafac'):
 
             clause_counter += 1
 
-    for i in range(1, num_vars + 1):
-        var = str(i)
-        wp = weights.get((var, '+'), 1.0)
-        wm = weights.get((var, '-'), 1.0)
+    for var in sorted(weighted):
+        wp_specified = (var, '+') in weights
+        wm_specified = (var, '-') in weights
 
-        ts.append(Tensor([wm, wp], inds=[var], tags=[f'VAR{i}']))
+        if wp_specified and wm_specified:
+            wp, wm = weights[var, '+'], weights[var, '-']
+        elif wp_specified:
+            wp = weights[var, '+']
+            wm = 1 - wp
+        elif wm_specified:
+            wm = weights[var, '-']
+            wp = 1 - wm
+
+        ts.append(Tensor([wm, wp], inds=[var], tags=[f'VAR{var}']))
 
     return TensorNetwork(ts, virtual=True)
 
