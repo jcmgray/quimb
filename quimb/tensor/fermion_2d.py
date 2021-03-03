@@ -249,9 +249,8 @@ def gate_string_reduce_split_(TG, where, string, original_ts, bonds_along,
             fs.replace_tensor(work_site, inner_ts[i], tid=tid, virtual=True)
         else:
             fs.insert_tensor(work_site+i, inner_ts[i], tid=tid, virtual=True)
-
     new_ts = [
-        tensor_contract(ts, tr, output_inds=to.inds, inplace=True)
+        tensor_contract(ts, tr, inplace=True).transpose_like_(to)
         for to, ts, tr in zip(original_ts, outer_ts, inner_ts)
     ]
 
@@ -778,7 +777,7 @@ class FermionTensorNetwork2DVector(FermionTensorNetwork2D,
         terms,
         normalized=False,
         autogroup=True,
-        contract_optimize='auto-hq',
+        contract_optimize='greedy',
         return_all=False,
         layer_tags=('KET', 'BRA'),
         plaquette_envs=None,
