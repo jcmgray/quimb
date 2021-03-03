@@ -6612,6 +6612,7 @@ class TensorNetwork(object):
         cutoff=1e-12,
         loops=None,
         cache=None,
+        equalize_norms=False,
         inplace=False,
         **split_opts
     ):
@@ -6704,6 +6705,10 @@ class TensorNetwork(object):
                 tn._pop_tensor(tid)
             tn |= tl
             tn |= tr
+
+            if equalize_norms:
+                tn.strip_exponent(tl, equalize_norms)
+                tn.strip_exponent(tr, equalize_norms)
 
         return tn
 
@@ -6822,6 +6827,7 @@ class TensorNetwork(object):
                                        equalize_norms=equalize_norms)
                 elif meth == 'L':
                     tn.loop_simplify_(cutoff=atol, cache=cache,
+                                      equalize_norms=equalize_norms,
                                       **loop_simplify_opts)
                 else:
                     raise ValueError(f"'{meth}' is not a valid simplify type.")
