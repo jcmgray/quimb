@@ -5096,9 +5096,10 @@ class TensorNetwork(object):
 
         if progbar:
             import tqdm
+            max_size = 0.0
             pbar = tqdm.tqdm(total=C)
         else:
-            pbar = None
+            max_size = pbar = None
 
         for i in range(C):
             # tid1 -> tid2 is inwards on the contraction tree, ``d`` is the
@@ -5118,8 +5119,10 @@ class TensorNetwork(object):
                 t_new = Tensor(t_new, tags=t1.tags | t2.tags)
 
             if progbar:
+                new_size = math.log2(t_new.size)
+                max_size = max(max_size, new_size)
                 pbar.set_description(
-                    f"log2[SIZE]: {math.log2(t_new.size):.2f}")
+                    f"log2[SIZE]: {new_size:.2f}/{max_size:.2f}")
                 pbar.update()
 
             # re-add the product, using the same identifier as the (inner) t2
