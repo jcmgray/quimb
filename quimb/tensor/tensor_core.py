@@ -1619,14 +1619,33 @@ class Tensor(object):
             raise ValueError(f"The 'left' indices {self.left_inds} are not "
                              f"found in {self.inds}.")
 
-    def copy(self, deep=False):
-        """Copy this tensor. Note by default (``deep=False``), the underlying
-        array will *not* be copied.
+    def copy(self, deep=False, virtual=False):
+        """Copy this tensor.
+
+        .. note::
+
+            By default (``deep=False``), the underlying array will *not* be
+            copied.
+
+        Parameters
+        ----------
+        deep : bool, optional
+            Whether to copy the underlying data as well.
+        virtual : bool, optional
+            To conveniently mimic the behaviour of taking a virtual copy of
+            tensor network, this simply returns ``self``.
         """
+        if not (deep or virtual):
+            return Tensor(self, None)
+
+        if deep and virtual:
+            raise ValueError("Copy can't be both deep and virtual.")
+
+        if virtual:
+            return self
+
         if deep:
             return copy.deepcopy(self)
-        else:
-            return Tensor(self, None)
 
     __copy__ = copy
 

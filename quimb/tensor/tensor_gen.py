@@ -940,7 +940,7 @@ def clause_negmask(clause):
 
 
 @functools.lru_cache(128)
-def clause_data(ndim, m=0, dtype=float, q=2):
+def or_clause_data(ndim, m=0, dtype=float, q=2):
     """Get the array representing satisfiability of ``ndim`` clauses with
     unsatisfied condition encoded in ``m``.
     """
@@ -950,15 +950,15 @@ def clause_data(ndim, m=0, dtype=float, q=2):
     return t
 
 
-def clause_tensor(ndim, m, inds, tags=None):
+def or_clause_tensor(ndim, m, inds, tags=None):
     """Get the tensor representing satisfiability of ``ndim`` clauses with
     unsatisfied condition encoded in ``m`` labelled by ``inds`` and ``tags``.
     """
-    data = clause_data(ndim, m=m)
+    data = or_clause_data(ndim, m=m)
     return Tensor(data=data, inds=inds, tags=tags)
 
 
-def clause_mps_tensors(ndim, m, inds, tags=None):
+def or_clause_mps_tensors(ndim, m, inds, tags=None):
     """Get the set of MPS tensors representing satisfiability of ``ndim``
     clauses with unsatisfied condition encoded in ``m`` labelled by ``inds``
     and ``tags``.
@@ -975,7 +975,7 @@ def clause_mps_tensors(ndim, m, inds, tags=None):
 
 
 @functools.lru_cache(2**10)
-def clause_parafac_data(ndim, m):
+def or_clause_parafac_data(ndim, m):
     """Get the set of PARAFAC arrays representing satisfiability of ``ndim``
     clauses with unsatisfied condition encoded in ``m``.
     """
@@ -1007,7 +1007,7 @@ def clause_parafac_tensors(ndim, m, inds, tags=None):
     """
     bond = rand_uuid()
     return [Tensor(x, inds=[ix, bond], tags=tags)
-            for x, ix in zip(clause_parafac_data(ndim, m), inds)]
+            for x, ix in zip(or_clause_parafac_data(ndim, m), inds)]
 
 
 def HTN_from_cnf(fname, mode='parafac'):
@@ -1081,11 +1081,11 @@ def HTN_from_cnf(fname, mode='parafac'):
                 ts.extend(clause_parafac_tensors(len(inds), m, inds, tag))
 
             elif mode == 'mps' and len(inds) > 2:
-                ts.extend(clause_mps_tensors(len(inds), m, inds, tag))
+                ts.extend(or_clause_mps_tensors(len(inds), m, inds, tag))
 
             else:
                 # dense
-                ts.append(clause_tensor(len(inds), m, inds, tag))
+                ts.append(or_clause_tensor(len(inds), m, inds, tag))
 
             clause_counter += 1
 
@@ -1141,13 +1141,19 @@ def MPS_rand_state(L, bond_dim, phys_dim=2, normalize=True, cyclic=False,
         raise ValueError("State cannot be translationally invariant with open "
                          "boundary conditions.")
 
+    # check for site varying physical dimensions
+    if isinstance(phys_dim, Integral):
+        phys_dims = itertools.repeat(phys_dim)
+    else:
+        phys_dims = itertools.cycle(phys_dim)
+
     cyc_dim = (bond_dim,) if cyclic else ()
 
     def gen_shapes():
-        yield (*cyc_dim, bond_dim, phys_dim)
+        yield (*cyc_dim, bond_dim, next(phys_dims))
         for _ in range(L - 2):
-            yield (bond_dim, bond_dim, phys_dim)
-        yield (bond_dim, *cyc_dim, phys_dim)
+            yield (bond_dim, bond_dim, next(phys_dims))
+        yield (bond_dim, *cyc_dim, next(phys_dims))
 
     def gen_data(shape):
         return randn(shape, dtype=dtype)

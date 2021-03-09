@@ -3115,9 +3115,11 @@ class MatrixProductOperator(TensorNetwork1DOperator,
     def rand_state(self, bond_dim, **mps_opts):
         """Get a random vector matching this MPO.
         """
-        return qu.tensor.MPS_rand_state(self.L, bond_dim, self.phys_dim(),
-                                        dtype=self.dtype, cyclic=self.cyclic,
-                                        **mps_opts)
+        return qu.tensor.MPS_rand_state(
+            self.L, bond_dim=bond_dim,
+            phys_dim=[self.phys_dim(i) for i in self.sites],
+            dtype=self.dtype, cyclic=self.cyclic, **mps_opts
+        )
 
     def identity(self, **mpo_opts):
         """Get a identity matching this MPO.

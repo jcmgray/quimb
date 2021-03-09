@@ -30,6 +30,7 @@ def draw_tn(
     highlight_tids_color=(1.0, 0.2, 0.2, 1.0),
     show_inds=None,
     show_tags=None,
+    show_scalars=True,
     custom_colors=None,
     title=None,
     legend=True,
@@ -192,7 +193,10 @@ def draw_tn(
 
         if tid not in G.nodes:
             # e.g. tensor is a scalar
-            G.add_node(tid)
+            if show_scalars:
+                G.add_node(tid)
+            else:
+                continue
 
         G.nodes[tid]['size'] = node_size
         G.nodes[tid]['outline_size'] = node_outline_size
