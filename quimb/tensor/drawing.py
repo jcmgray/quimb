@@ -184,16 +184,15 @@ def draw_tn(
             for tid in tids:
                 _add_or_merge_edge(G, tid, ix, edge_attrs)
 
-    if len(G) == 0:
-        # tensor network is only scalars, no inds
-        for tid in tn.tensor_map:
-            G.add_node(tid)
-
     # color the nodes
     colors = get_colors(color, custom_colors)
 
     # set parameters for all the nodes
     for tid, t in tn.tensor_map.items():
+
+        if tid not in G.nodes:
+            # e.g. tensor is a scalar
+            G.add_node(tid)
 
         G.nodes[tid]['size'] = node_size
         G.nodes[tid]['outline_size'] = node_outline_size
