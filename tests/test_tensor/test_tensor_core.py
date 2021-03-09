@@ -1518,6 +1518,17 @@ class TestTensorNetworkAsLinearOperator:
         X = np.random.randn(9, 8) + 1.0j * np.random.randn(9, 8)
         assert_allclose(tn_lo.dot(X), tn_d.dot(X))
 
+    def test_trace_array_function_interface(self):
+        tn = qtn.TensorNetwork((
+            rand_tensor([3, 5, 5], 'aef'),
+            rand_tensor([3, 5, 5], 'beg'),
+            rand_tensor([3, 5, 5], 'cfh'),
+            rand_tensor([3, 5, 5], 'dhg'),
+        ))
+        tn_lo = tn.aslinearoperator(('a', 'b'), ('c', 'd'))
+        tn_d = tn.to_dense(['a', 'b'], ['c', 'd'])
+        assert np.trace(tn_lo) == pytest.approx(np.trace(tn_d))
+
     @pytest.mark.parametrize("dtype", (float, complex))
     @pytest.mark.parametrize("method", ('isvd', 'rsvd'))
     def test_replace_with_svd_using_linear_operator(self, dtype, method):

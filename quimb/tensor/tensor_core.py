@@ -6992,6 +6992,9 @@ class TensorNetwork(object):
     graph = draw_tn
 
 
+TNLO_HANDLED_FUNCTIONS = {}
+
+
 class TNLinearOperator(spla.LinearOperator):
     r"""Get a linear operator - something that replicates the matrix-vector
     operation - for an arbitrary uncontracted TensorNetwork, e.g::
@@ -7132,6 +7135,13 @@ class TNLinearOperator(spla.LinearOperator):
 
         return reshape(out_data, (-1, d))
 
+    def trace(self):
+        if 'trace' not in self._contractors:
+            tn = TensorNetwork(self._tensors)
+            self._contractors['trace'] = tn.trace(
+                self.left_inds, self.right_inds, optimize=self.optimize)
+        return self._contractors['trace']
+
     def copy(self, conj=False, transpose=False):
         if transpose:
             inds = self.right_inds, self.left_inds
@@ -7200,6 +7210,30 @@ class TNLinearOperator(spla.LinearOperator):
             ldims=self.ldims, rdims=self.rdims,
             optimize=self.optimize, backend=self.backend,
         )
+
+    def __array_function__(self, func, types, args, kwargs):
+        if (
+            (func not in TNLO_HANDLED_FUNCTIONS) or
+            (not all(issubclass(t, self.__class__) for t in types))
+        ):
+            return NotImplemented
+        return TNLO_HANDLED_FUNCTIONS[func](*args, **kwargs)
+
+
+def tnlo_implements(np_function):
+    """Register an __array_function__ implementation for TNLinearOperator
+    objects.
+    """
+    def decorator(func):
+        TNLO_HANDLED_FUNCTIONS[np_function] = func
+        return func
+
+    return decorator
+
+
+@tnlo_implements(np.trace)
+def _tnlo_trace(x):
+    return x.trace()
 
 
 class PTensor(Tensor):

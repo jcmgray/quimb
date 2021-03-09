@@ -68,6 +68,13 @@ class TestSpinHam1D:
 
 class TestMPSSpecificStates:
 
+    def test_site_varying_phys_dim(self):
+        k = qtn.MPS_rand_state(5, 4, phys_dim=[2, 3, 3, 2, 5])
+        assert k.H @ k == pytest.approx(1.0)
+        assert k.outer_dims_inds() == (
+            (2, 'k0'), (3, 'k1'), (3, 'k2'), (2, 'k3'), (5, 'k4'),
+        )
+
     @pytest.mark.parametrize("dtype", ['float32', 'complex64'])
     def test_ghz_state(self, dtype):
         mps = qtn.MPS_ghz_state(5, dtype=dtype)
