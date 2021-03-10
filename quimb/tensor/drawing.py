@@ -1,9 +1,10 @@
 """Functionailty for drawing tensor networks.
 """
-
-from ..utils import valmap
+import textwrap
 
 import numpy as np
+
+from ..utils import valmap
 
 
 def _add_or_merge_edge(G, u, v, attrs):
@@ -212,7 +213,11 @@ def draw_tn(
             for i, c in enumerate(color)
         )
         if show_tags:
-            node_labels[tid] = '{' + str(list(t.tags))[1:-1] + '}'
+            # make the tags appear with auto vertical extend
+            node_label = '{' + str(list(t.tags))[1:-1] + '}'
+            node_labels[tid] = "\n".join(textwrap.wrap(
+                node_label, max(2 * len(node_label) ** 0.5, 16)
+            ))
 
     for hix in hyperedges:
         G.nodes[hix]['ind'] = hix

@@ -929,10 +929,10 @@ class TNOptimizer:
         try:
             pbar = tqdm.tqdm(total=n * nhop, disable=not self.progbar)
 
-            def hop_callback(x, f, accept):
+            def hop_callback(_, f, accept):
                 pass
 
-            def inner_callback(xk):
+            def inner_callback(_):
                 self.loss_best = min(self.loss_best, self.loss)
                 pbar.update()
                 msg = f"{self.loss} [best: {self.loss_best}] "
