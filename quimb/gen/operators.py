@@ -343,15 +343,61 @@ def fsim(theta, phi, dtype=complex, **kwargs):
     a = cos(theta)
     b = -1j * sin(theta)
     c = exp(-1j * phi)
-
     gate = [[1, 0, 0, 0],
             [0, a, b, 0],
             [0, b, a, 0],
             [0, 0, 0, c]]
 
+
+
     gate = qu(gate, dtype=dtype, **kwargs)
     make_immutable(gate)
     return gate
+
+
+#https://arxiv.org/pdf/2010.07965.pdf, Eq. 18
+def fsimg( theta, Zeta, chi, gamma, phi, dtype=complex, **kwargs):
+    r"""The 'fermionic simulation' gate:
+      \theta is the iSWAP angle
+      \phi is the controlled-phase angle
+      \Zeta, \chi, \gamma  are single-qubit phase angles 
+
+    .. math::
+
+        \mathrm{fsimg}(\theta, \Zeta, \chi, \gamma, \phi) =
+        \begin{bmatrix}
+        1 & 0 & 0 & 0\\
+        0 & \exp(-i(\gamma +\zeta )) \cos(\theta) & -i \exp(-i(\gamma - \chi )) sin(\theta) & 0\\
+        0 & -i \exp(-i(\gamma + \chi )) sin(\theta) & \exp(-i(\gamma - \zeta )) \cos(\theta) & 0\\
+        0 & 0 & 0 & \exp(-i (\phi +2 \gamma))
+        \end{bmatrix}
+
+    Note that ``theta`` ,``phi``, ``Zeta``, ``chi``, ``gamma`` should be specified in radians and the sign
+    convention with this gate varies. Here for example,
+    ``fsimg(- pi / 2, 0, 0, 0,0) == iswap()``.
+    """
+    from cmath import cos, sin, exp
+
+    print ("Holooo")
+
+    a1 =    exp(-1j * (gamma + Zeta )) * cos(theta)
+    a2 =    exp(-1j * (gamma - Zeta )) * cos(theta)
+
+    b1 = -1j * exp(-1j * (gamma - chi )) * sin(theta)
+    b2 = -1j * exp(-1j * (gamma + chi )) * sin(theta)
+
+    c = exp(-1j * (phi + 2*gamma ))
+
+    gate = [[1, 0, 0, 0],
+            [0, a1, b1, 0],
+            [0, b2, a2, 0],
+            [0, 0, 0, c]]
+
+
+    gate = qu(gate, dtype=dtype, **kwargs)
+    make_immutable(gate)
+    return gate
+
 
 
 @functools.lru_cache(maxsize=4)
