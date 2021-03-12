@@ -164,7 +164,10 @@ class TestGates:
         assert_allclose(qu.fsim(- qu.pi / 2, 0.0), qu.iswap(), atol=1e-12)
 
     def test_fsimg(self):
-        assert_allclose(qu.fsimg(- qu.pi / 2, 0.0, 0.0, 0.0, 0.0), qu.iswap(), atol=1e-12)
+        assert_allclose(
+                        qu.fsimg(- qu.pi / 2, 0.0, 0.0, 0.0, 0.0),
+                        qu.iswap(), atol=1e-12
+                       )
 
 class TestHamHeis:
     def test_ham_heis_2(self):
