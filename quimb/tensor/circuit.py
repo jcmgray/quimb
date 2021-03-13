@@ -409,8 +409,12 @@ def apply_fsim(psi, theta, phi, i, j, parametrize=False, **gate_opts):
 
 
 def fsimg_param_gen(params):
-    theta, Zeta, chi, gamma, phi = params[0], params[1],
-    params[2], params[3], params[4]
+    theta, Zeta, chi, gamma, phi = (
+                                  params[0],
+                                  params[1],
+                                  params[2],
+                                  params[3],
+                                  params[4])
 
     a11_re = do('cos', theta)
     a11_im = do('imag', a11_re)
