@@ -1,3 +1,4 @@
+import re
 import functools
 import importlib
 
@@ -32,6 +33,55 @@ tensorflow_case = pytest.param(
 pytorch_case = pytest.param(
     'torch', marks=pytest.mark.skipif(
         not found_torch, reason='pytorch not installed'))
+
+
+@pytest.fixture
+def tagged_qaoa_tn():
+    """
+    make qaoa tensor network, with RZZ and RX tagged on a per-round basis 
+    so that these tags can be used as shared_tags to TNOptimizer
+    """
+
+    n = 8
+    depth = 4
+    terms = [ (i,(i+1)%n) for i in range(n) ]
+    gammas = qu.randn(depth)
+    betas = qu.randn(depth)
+
+    # make circuit
+    circuit_opts = {'gate_opts':{'contract':False}}
+    circ = qtn.Circuit(n, **circuit_opts)
+
+    # layer of hadamards to get into plus state
+    for i in range(n):
+        circ.apply_gate('H', i, gate_round=0)
+
+    for d in range(depth):
+        for (i, j) in terms:
+            circ.apply_gate('RZZ', -gammas[d], i, j, gate_round=d, parametrize=True)
+
+        for i in range(n):
+            circ.apply_gate('RX', betas[d] * 2, i, gate_round=d, parametrize=True)
+
+    # tag circuit for shared_tags
+    tn_tagged = circ.psi.copy()
+    variable_finder = re.compile(r'ROUND_(\d+)')
+
+    for t in tn_tagged:
+        if ('RZZ' in t.tags):
+            for tag in t.tags:
+                match = variable_finder.match(tag)
+                if match is not None:
+                    i = int(match.groups(1)[0])
+                    t.add_tag('p'+f'{2*i}')
+        elif ('RX' in t.tags):
+            for tag in t.tags:
+                match = variable_finder.match(tag)
+                if match is not None:
+                    i = int(match.groups(1)[0])
+                    t.add_tag('p'+f'{2*i+1}')
+
+    return n,depth,tn_tagged
 
 
 @pytest.fixture
@@ -214,3 +264,33 @@ def test_multiloss(backend, executor):
 
     if executor is not None:
         executor.shutdown()
+
+
+@pytest.mark.parametrize('backend', [jax_case, autograd_case,
+                                     tensorflow_case])
+def test_shared_tags(tagged_qaoa_tn,backend):
+    n,depth,psi0 = tagged_qaoa_tn
+
+    H = qu.ham_heis(n,j=(0.,0.,-1.),b=(1.,0.,0.),cyclic=True,)
+    gs = qu.groundstate(H)
+    T_gs = qtn.Dense1D(gs)
+
+    def loss(psi, target):
+        f = psi.H & target
+        f.rank_simplify_()
+        return -abs(f ^ all)
+
+    tnopt = qtn.TNOptimizer(
+        psi0,
+        loss_fn=loss,
+        shared_tags=[ 'p'+f'{i}' for i in range(2*depth) ],
+        loss_constants={'target': T_gs},
+        autodiff_backend=backend,
+        loss_target=-0.99,
+    )
+    # correct number of opt params identified
+    assert len(tnopt.variables) == 2*depth 
+
+    psi_opt = tnopt.optimize_basinhopping(n=10, nhop=5)
+    assert sum(loss < -0.99 for loss in tnopt.losses) == 1
+    assert qu.fidelity(psi_opt.to_dense(), gs) > 0.99
