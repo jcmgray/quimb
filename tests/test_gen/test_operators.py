@@ -135,7 +135,7 @@ class TestGates:
     @pytest.mark.parametrize("gate", ['Rx', 'Ry', 'Rz', 'T_gate', 'S_gate',
                                       'CNOT', 'cX', 'cY', 'cZ', 'hadamard',
                                       'phase_gate', 'iswap', 'swap', 'U_gate',
-                                      'fsim'])
+                                      'fsim', 'fsimg'])
     @pytest.mark.parametrize('dtype', [np.complex64, np.complex128])
     @pytest.mark.parametrize('sparse', [False, True])
     def test_construct(self, gate, dtype, sparse):
@@ -145,6 +145,8 @@ class TestGates:
             args = (0.1, 0.2, 0.3)
         elif gate in {'fsim'}:
             args = (-1.3, 5.4)
+        elif gate in {'fsimg'}:
+            args = (-1.3, 5.4, 2., 3., 4.)
         else:
             args = ()
         G = getattr(qu, gate)(*args, dtype=dtype, sparse=sparse)
@@ -161,6 +163,11 @@ class TestGates:
     def test_fsim(self):
         assert_allclose(qu.fsim(- qu.pi / 2, 0.0), qu.iswap(), atol=1e-12)
 
+    def test_fsimg(self):
+        assert_allclose(
+                        qu.fsimg(- qu.pi / 2, 0.0, 0.0, 0.0, 0.0),
+                        qu.iswap(), atol=1e-12
+                       )
 
 class TestHamHeis:
     def test_ham_heis_2(self):
