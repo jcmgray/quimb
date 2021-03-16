@@ -65,21 +65,9 @@ def tagged_qaoa_tn():
 
     # tag circuit for shared_tags
     tn_tagged = circ.psi.copy()
-    variable_finder = re.compile(r'ROUND_(\d+)')
-
-    for t in tn_tagged:
-        if ('RZZ' in t.tags):
-            for tag in t.tags:
-                match = variable_finder.match(tag)
-                if match is not None:
-                    i = int(match.groups(1)[0])
-                    t.add_tag('p'+f'{2*i}')
-        elif ('RX' in t.tags):
-            for tag in t.tags:
-                match = variable_finder.match(tag)
-                if match is not None:
-                    i = int(match.groups(1)[0])
-                    t.add_tag('p'+f'{2*i+1}')
+    for i in range(depth):
+        tn_tagged.select(['RZZ', f'ROUND_{i}']).add_tag(f'p{2 * i}')
+        tn_tagged.select(['RX', f'ROUND_{i}']).add_tag(f'p{2 * i + 1}')
 
     return n,depth,tn_tagged
 

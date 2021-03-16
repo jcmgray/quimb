@@ -2,7 +2,7 @@
 automatically derive gradients for input to scipy optimizers.
 """
 import re
-import sys
+import warnings
 import functools
 import importlib
 from collections.abc import Iterable
@@ -125,27 +125,24 @@ class Vectorizer:
 variable_finder = re.compile(r'__VARIABLE(\d+)__')
 
 
-def parse_network_to_backend(tn, tags, shared_tags, constant_tags, to_constant):
+def parse_network_to_backend(
+    tn,
+    tags,
+    shared_tags,
+    constant_tags,
+    to_constant,
+):
+
     tn_ag = tn.copy()
     variables = []
 
     variable_tag = "__VARIABLE{}__"
 
-    # used to identify variables associated with shared tags
-    shared_variables = {}
     # tags to optimise over
     opt_tags = tags | shared_tags
 
-    for t in tn_ag:
-        # check if tensor has any of the constant tags
-        if t.tags & constant_tags:
-            t.modify(apply=to_constant)
-            continue
-
-        # if tags or shared_tags are specified only optimize those tagged
-        if opt_tags and not (t.tags & opt_tags):
-            t.modify(apply=to_constant)
-            continue
+    def get_tensor_data(t):
+        """ simple function to extract tensor data """
 
         if isinstance(t, PTensor):
             data = t.params
@@ -156,31 +153,69 @@ def parse_network_to_backend(tn, tags, shared_tags, constant_tags, to_constant):
         if isinstance(data, qarray):
             data = data.A
 
-        # if shared_tags are specified and this tensor contains one of them
-        if shared_tags and (t.tags & shared_tags):
-            if len(t.tags & shared_tags)>1:
-                print('TNOptimizer warning, tensor tagged with multiple `shared_tags`,'
-                    +' sharing behaviour may be unpredictable.',file=sys.stderr)
+        return data
 
-            tag = (t.tags & shared_tags).popright()
-            if tag in shared_variables:
-                # we have already created variable
-                var = shared_variables[tag]
-                assert variables[int(variable_finder.match(var).groups(1)[0])].shape == data.shape,('TNOptimizer error,'
-                    +' a shared_tags tag covers tensors with different numbers of params.')
-                t.add_tag(var)
-                continue
-            else:
-                # store variable we are about to create in shared_variables
-                shared_variables[tag] = variable_tag.format(len(variables))
+    # handle simple case of every tensor being a variable
+    if not opt_tags:
+        for t in tn_ag:
+            # append the raw data but mark the corresponding tensor
+            # for reinsertion
+            data = get_tensor_data(t)
+            variables.append(data)
+            t.add_tag(variable_tag.format(len(variables) - 1))
+        return tn_ag, variables
 
-        # create new variable when -- no tags have been passed, this is a 
-        # non-shared optimisation tag, or it is a shared tag that we are seeing 
-        # for the first time
-
-        # append the raw data but mark the corresponding tensor for reinsertion
+    # handle normally tagged tensors
+    for t in tn_ag.select(tags, 'any'):
+        # append the raw data but mark the corresponding tensor
+        # for reinsertion
+        data = get_tensor_data(t)
         variables.append(data)
         t.add_tag(variable_tag.format(len(variables) - 1))
+
+    # handle shared tags
+    for tag in shared_tags:
+
+        var_name = variable_tag.format(len(variables))
+        test_data = None
+
+        for t in tn_ag.select(tag):
+            data = get_tensor_data(t)
+
+            # detect that this tensor is already variable tagged and skip
+            # if it is
+            if any([variable_finder.match(tag) for tag in t.tags]):
+                warnings.warn('TNOptimizer warning, tensor tagged with'
+                              + ' multiple `tags` or `shared_tags`.')
+                continue
+
+            if test_data is None:
+                # create variable and store data
+                variables.append(data)
+                test_data = data
+            else:
+                # check that the shape of the variable's data matches the
+                # data of this new tensor
+                if not test_data.shape == data.shape:
+                    raise ValueError('TNOptimizer error, a `shared_tags`'
+                                     + ' tag covers tensors with different'
+                                     + ' numbers of params.')
+
+            # mark the corresponding tensor for reinsertion
+            t.add_tag(var_name)
+
+    # find constant tensors and set them constant
+    for t in tn_ag:
+
+        # check if tensor has any of the constant tags
+        if t.tags & constant_tags:
+            t.modify(apply=to_constant)
+            continue
+
+        # if tags or shared_tags are specified only optimize those tagged
+        if opt_tags and not (t.tags & opt_tags):
+            t.modify(apply=to_constant)
+            continue
 
     return tn_ag, variables
 
@@ -438,7 +473,6 @@ class MultiLossHandler:
         if self.executor is not None:
             return self._value_and_grad_par(arrays)
         return self._value_and_grad_seq(arrays)
-
 
 
 def inject_(arrays, tn):
@@ -758,7 +792,8 @@ class TNOptimizer:
     tags : str, or sequence of str, optional
         If supplied, only optimize tensors with any of these tags.
     shared_tags : str, or sequence of str, optional
-        If supplied, optimize all tensors with these tags together
+        If supplied, each tag in ``shared_tags`` corresponds to a group of
+        tensors to be optimized together
     constant_tags : str, or sequence of str, optional
         If supplied, skip optimizing tensors with any of these tags.
     loss_target : float, optional
@@ -845,7 +880,8 @@ class TNOptimizer:
 
         # work out which tensors to optimize and get the underlying data
         self.tn_opt, self.variables = parse_network_to_backend(
-            tn, self.tags, self.shared_tags, self.constant_tags, self.handler.to_constant)
+            tn, self.tags, self.shared_tags, self.constant_tags,
+            self.handler.to_constant)
 
         # first we wrap the function to convert from array args to TN arg
         #     (i.e. to autodiff library compatible form)
