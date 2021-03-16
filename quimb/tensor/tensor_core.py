@@ -5750,11 +5750,11 @@ class TensorNetwork(object):
         return TNLinearOperator(self, left_inds, right_inds, ldims, rdims,
                                 optimize=optimize, backend=backend)
 
-    def trace(self, left_inds, right_inds):
+    def trace(self, left_inds, right_inds, **contract_opts):
         """Trace over ``left_inds`` joined with ``right_inds``
         """
         tn = self.reindex({u: l for u, l in zip(left_inds, right_inds)})
-        return tn.contract_tags(...)
+        return tn.contract_tags(..., **contract_opts)
 
     def to_dense(self, *inds_seq, to_qarray=True, **contract_opts):
         """Convert this network into an dense array, with a single dimension

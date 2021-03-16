@@ -82,7 +82,7 @@ def swappy_circ(n, depth):
             qi = pairs[2 * i]
             qj = pairs[2 * i + 1]
 
-            gate = np.random.choice(['FSIM', 'SWAP', 'FSIMG'])
+            gate = np.random.choice(['FSIM', 'SWAP'])
             if gate == 'FSIM':
                 params = np.random.randn(2)
             elif gate == 'FSIMG':
