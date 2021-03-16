@@ -430,10 +430,10 @@ def apply_fsim(psi, theta, phi, i, j, parametrize=False, **gate_opts):
     psi.gate_(G, (int(i), int(j)), tags=mtags, **gate_opts)
 
 
-def apply_fsimt(psi, theta, i, j, parametrize=False, **gate_opts):
+def apply_fsimt(psi,theta, i, j, parametrize=False, **gate_opts):
     mtags = _merge_tags('FSIMT', gate_opts)
     if parametrize:
-        G = ops.PArray(fsimt_param_gen, (theta))
+        G = ops.PArray(fsimt_param_gen, (theta,))
     else:
         G = qu.fsimt(theta)
     psi.gate_(G, (int(i), int(j)), tags=mtags, **gate_opts)
@@ -648,7 +648,7 @@ GATE_FUNCTIONS = {
 
 ONE_QUBIT_PARAM_GATES = {'RX', 'RY', 'RZ', 'U3', 'U2', 'U1'}
 TWO_QUBIT_PARAM_GATES = {
-   'CU3', 'CU2', 'CU1', 'FS', 'FSIM', 'FSIMG','FSIMT'
+   'CU3', 'CU2', 'CU1', 'FS', 'FSIM', 'FSIMG','FSIMT',
    'RZZ', 'SU4'}
 ALL_PARAM_GATES = ONE_QUBIT_PARAM_GATES | TWO_QUBIT_PARAM_GATES
 
