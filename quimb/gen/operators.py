@@ -415,11 +415,11 @@ def fsimg(theta, zeta, chi, gamma, phi, dtype=complex, **kwargs):
 
     a00 = exp(1j * (gamma + phi)) 
 
-    a1 = -1 * exp(1j * (-gamma + phi + zeta)) * sin(theta)
-    a2 = exp(1j * -(gamma + phi + zeta)) * sin(theta)
+    a1 =  exp(1j * (-gamma + phi + zeta)) * sin(theta)
+    a2 = -1 * exp(1j * -(gamma + phi + zeta)) * sin(theta)
 
-    b1 =  exp(1j * (-gamma + phi + chi)) * cos(theta)
-    b2 =  exp(1j * -(gamma + phi + chi)) * cos(theta)
+    b1 =  exp(1j * -(gamma + phi + chi)) * cos(theta)
+    b2 =  exp(1j * (-gamma + phi + chi)) * cos(theta)
 
     c = exp(1j * (gamma - phi))
 

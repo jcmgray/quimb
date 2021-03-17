@@ -458,7 +458,7 @@ def fsimg_param_gen(params):
     c_re = do('imag', c_im)
     c = do('exp', do('complex', c_re, c_im))
 
-    a11_re = -do('sin', theta)
+    a11_re = do('sin', theta)
     a11_im = do('imag', a11_re)
     a11 = do('complex', a11_re, a11_im)
 
@@ -467,7 +467,7 @@ def fsimg_param_gen(params):
     e11 = do('exp', do('complex', e11_re, e11_im))
 
 
-    a22_re = do('sin', theta)
+    a22_re = -do('sin', theta)
     a22_im = do('imag', a22_re)
     a22 = do('complex', a22_re, a22_im)
 
@@ -481,7 +481,7 @@ def fsimg_param_gen(params):
     a21_im = do('imag', a21_re)
     a21 = do('complex', a21_re, a21_im)
 
-    e21_im = (-gamma + phi + chi)
+    e21_im = -(gamma + phi + chi)
     e21_re = do('imag', e21_im)
     e21 = do('exp', do('complex', e21_re, e21_im))
 
@@ -489,7 +489,7 @@ def fsimg_param_gen(params):
     a12_im = do('imag', a12_re)
     a12 = do('complex', a12_re, a12_im)
 
-    e12_im = -(gamma + phi + chi)
+    e12_im = (-gamma + phi + chi)
     e12_re = do('imag', e12_im)
     e12 = do('exp', do('complex', e12_re, e12_im))
 
