@@ -390,7 +390,7 @@ def fsimt(theta, dtype=complex, **kwargs):
 
 
 
-def fsimg(theta, Zeta, chi, gamma, phi, dtype=complex, **kwargs):
+def fsimg(theta, zeta, chi, gamma, phi, dtype=complex, **kwargs):
     r"""The 'fermionic simulation' gate:
       \theta is the iSWAP angle
       \phi is the controlled-phase angle
@@ -413,15 +413,17 @@ def fsimg(theta, Zeta, chi, gamma, phi, dtype=complex, **kwargs):
     """
     from cmath import cos, sin, exp
 
-    a1 = exp(-1j * (gamma + Zeta)) * cos(theta)
-    a2 = exp(-1j * (gamma - Zeta)) * cos(theta)
+    a00 = exp(1j * (gamma + phi)) 
 
-    b1 = -1j * exp(-1j * (gamma - chi)) * sin(theta)
-    b2 = -1j * exp(-1j * (gamma + chi)) * sin(theta)
+    a1 = -1 * exp(1j * (-gamma + phi + zeta)) * sin(theta)
+    a2 = exp(1j * -(gamma + phi + zeta)) * sin(theta)
 
-    c = exp(-1j * (phi + 2*gamma))
+    b1 =  exp(1j * (-gamma + phi + chi)) * cos(theta)
+    b2 =  exp(1j * -(gamma + phi + chi)) * cos(theta)
 
-    gate = [[1, 0, 0, 0],
+    c = exp(1j * (gamma - phi))
+
+    gate = [[a00, 0, 0, 0],
             [0, a1, b1, 0],
             [0, b2, a2, 0],
             [0, 0, 0, c]]
