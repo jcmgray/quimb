@@ -174,7 +174,7 @@ def _numba_find_diag_axes(x, atol=1e-12):  # pragma: no cover
 
     # enumerate through every array entry, eagerly invalidating axis pairs
     for index, val in numpy.ndenumerate(x):
-        for d1, d2 in diag_axes:
+        for d1, d2 in list(diag_axes):
             if (index[d1] != index[d2]) and (abs(val) > atol):
                 diag_axes.remove((d1, d2))
 
