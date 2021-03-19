@@ -409,7 +409,7 @@ def apply_fsim(psi, theta, phi, i, j, parametrize=False, **gate_opts):
 
 
 def fsimg_param_gen(params):
-    theta, Zeta, chi, gamma, phi = (
+    theta, zeta, chi, gamma, phi = (
         params[0], params[1], params[2], params[3], params[4]
     )
 
@@ -417,7 +417,7 @@ def fsimg_param_gen(params):
     a11_im = do('imag', a11_re)
     a11 = do('complex', a11_re, a11_im)
 
-    e11_im = -(gamma + Zeta)
+    e11_im = -(gamma + zeta)
     e11_re = do('imag', e11_im)
     e11 = do('exp', do('complex', e11_re, e11_im))
 
@@ -425,7 +425,7 @@ def fsimg_param_gen(params):
     a22_im = do('imag', a22_re)
     a22 = do('complex', a22_re, a22_im)
 
-    e22_im = -(gamma - Zeta)
+    e22_im = -(gamma - zeta)
     e22_re = do('imag', e22_im)
     e22 = do('exp', do('complex', e22_re, e22_im))
 
@@ -463,15 +463,15 @@ def fsimg_param_gen(params):
 
 def apply_fsimg(
     psi,
-    theta, Zeta, chi, gamma, phi,
+    theta, zeta, chi, gamma, phi,
     i, j, parametrize=False, **gate_opts
 ):
 
     mtags = _merge_tags('FSIMG', gate_opts)
     if parametrize:
-        G = ops.PArray(fsimg_param_gen, (theta, Zeta, chi, gamma, phi))
+        G = ops.PArray(fsimg_param_gen, (theta, zeta, chi, gamma, phi))
     else:
-        G = qu.fsimg(theta, Zeta, chi, gamma, phi)
+        G = qu.fsimg(theta, zeta, chi, gamma, phi)
     psi.gate_(G, (int(i), int(j)), tags=mtags, **gate_opts)
 
 
@@ -981,9 +981,9 @@ class Circuit:
         self.apply_gate('FSIM', theta, phi, i, j,
                         gate_round=gate_round, parametrize=parametrize)
 
-    def fsimg(self, theta, Zeta, chi, gamma, phi, i, j,
+    def fsimg(self, theta, zeta, chi, gamma, phi, i, j,
               gate_round=None, parametrize=False):
-        self.apply_gate('FSIMG', theta, Zeta, chi, gamma, phi, i, j,
+        self.apply_gate('FSIMG', theta, zeta, chi, gamma, phi, i, j,
                         gate_round=gate_round, parametrize=parametrize)
 
     def rzz(self, theta, i, j, gate_round=None, parametrize=False):
