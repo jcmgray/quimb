@@ -189,7 +189,7 @@ def _parse_opt_in(tn, tags, shared_tags, to_constant,):
             t.add_tag(var_name)
 
     # iterate over tensors which *don't* have any of the given tags
-    for t in tn.select_tensors(tags, which='!any'):
+    for t in tn_ag.select_tensors(tags, which='!any'):
         t.modify(apply=to_constant)
 
     return tn_ag, variables
