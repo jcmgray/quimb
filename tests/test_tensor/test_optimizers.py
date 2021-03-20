@@ -1,14 +1,15 @@
-import re
 import functools
 import importlib
 
 import pytest
+import numpy as np
 from numpy.testing import assert_allclose
 from autoray import real
 import opt_einsum as oe
 
 import quimb as qu
 import quimb.tensor as qtn
+from quimb.tensor.optimize import parse_network_to_backend, _get_tensor_data
 
 
 found_torch = importlib.util.find_spec('torch') is not None
@@ -38,18 +39,18 @@ pytorch_case = pytest.param(
 @pytest.fixture
 def tagged_qaoa_tn():
     """
-    make qaoa tensor network, with RZZ and RX tagged on a per-round basis 
+    make qaoa tensor network, with RZZ and RX tagged on a per-round basis
     so that these tags can be used as shared_tags to TNOptimizer
     """
 
     n = 8
     depth = 4
-    terms = [ (i,(i+1)%n) for i in range(n) ]
+    terms = [(i, (i+1) % n) for i in range(n)]
     gammas = qu.randn(depth)
     betas = qu.randn(depth)
 
     # make circuit
-    circuit_opts = {'gate_opts':{'contract':False}}
+    circuit_opts = {'gate_opts': {'contract': False}}
     circ = qtn.Circuit(n, **circuit_opts)
 
     # layer of hadamards to get into plus state
@@ -58,10 +59,12 @@ def tagged_qaoa_tn():
 
     for d in range(depth):
         for (i, j) in terms:
-            circ.apply_gate('RZZ', -gammas[d], i, j, gate_round=d, parametrize=True)
+            circ.apply_gate('RZZ', -gammas[d], i, j, gate_round=d,
+                            parametrize=True)
 
         for i in range(n):
-            circ.apply_gate('RX', betas[d] * 2, i, gate_round=d, parametrize=True)
+            circ.apply_gate('RX', betas[d] * 2, i, gate_round=d,
+                            parametrize=True)
 
     # tag circuit for shared_tags
     tn_tagged = circ.psi.copy()
@@ -69,7 +72,7 @@ def tagged_qaoa_tn():
         tn_tagged.select(['RZZ', f'ROUND_{i}']).add_tag(f'p{2 * i}')
         tn_tagged.select(['RX', f'ROUND_{i}']).add_tag(f'p{2 * i + 1}')
 
-    return n,depth,tn_tagged
+    return n, depth, tn_tagged
 
 
 @pytest.fixture
@@ -254,12 +257,75 @@ def test_multiloss(backend, executor):
         executor.shutdown()
 
 
-@pytest.mark.parametrize('backend', [jax_case, autograd_case,
-                                     tensorflow_case])
-def test_shared_tags(tagged_qaoa_tn,backend):
-    n,depth,psi0 = tagged_qaoa_tn
+@pytest.mark.new
+def test_parse_network_to_backend_shared_tags(tagged_qaoa_tn):
+    n, depth, psi0 = tagged_qaoa_tn
 
-    H = qu.ham_heis(n,j=(0.,0.,-1.),b=(1.,0.,0.),cyclic=True,)
+    def to_constant(x):
+        return np.asarray(x)
+
+    tags = ['p'+f'{i}' for i in range(2*depth)]
+    tn_tagged, variabes = parse_network_to_backend(psi0,
+                                                   tags=tags,
+                                                   shared_tags=tags,
+                                                   to_constant=to_constant,
+                                                   )
+    # test number of variables identified
+    assert len(variabes) == 2*depth
+    # each variable tag should be in n tensors
+    for i in range(len(tags)):
+        var_tag = "__VARIABLE"+f'{i}'+"__"
+        assert len(tn_tagged.select(var_tag).tensors) == n
+
+
+@pytest.mark.new
+def test_parse_network_to_backend_individual_tags(tagged_qaoa_tn):
+    n, depth, psi0 = tagged_qaoa_tn
+
+    def to_constant(x):
+        return np.asarray(x)
+
+    tags = ['p'+f'{i}' for i in range(2*depth)]
+    tn_tagged, variabes = parse_network_to_backend(psi0,
+                                                   tags=tags,
+                                                   to_constant=to_constant,
+                                                   )
+    # test number of variables identified
+    assert len(variabes) == 2*depth*n
+    # each variable tag should only be in 1 tensors
+    for i in range(len(tags)):
+        var_tag = "__VARIABLE"+f'{i}'+"__"
+        assert len(tn_tagged.select(var_tag).tensors) == 1
+
+
+@pytest.mark.new
+def test_parse_network_to_backend_constant_tags(tagged_qaoa_tn):
+    n, depth, psi0 = tagged_qaoa_tn
+
+    def to_constant(x):
+        return np.asarray(x)
+
+    # constant tags, include shared variable tags for first QAOA layer
+    constant_tags = ['PSI0', 'H', 'p0', 'p1']
+    tn_tagged, variabes = parse_network_to_backend(psi0,
+                                                   constant_tags=constant_tags,
+                                                   to_constant=to_constant,
+                                                   )
+    # test number of variables identified
+    assert len(variabes) == 2*(depth-1)*n
+    # each variable tag should only be in 1 tensors
+    for i in range(len(variabes)):
+        var_tag = "__VARIABLE"+f'{i}'+"__"
+        assert len(tn_tagged.select(var_tag).tensors) == 1
+
+
+@pytest.mark.new
+@pytest.mark.parametrize('backend', [jax_case, autograd_case,
+                                     tensorflow_case, pytorch_case])
+def test_shared_tags(tagged_qaoa_tn, backend):
+    n, depth, psi0 = tagged_qaoa_tn
+
+    H = qu.ham_heis(n, j=(0., 0., -1.), b=(1., 0., 0.), cyclic=True,)
     gs = qu.groundstate(H)
     T_gs = qtn.Dense1D(gs)
 
@@ -268,17 +334,30 @@ def test_shared_tags(tagged_qaoa_tn,backend):
         f.rank_simplify_()
         return -abs(f ^ all)
 
+    tags = ['p'+f'{i}' for i in range(2*depth)]
     tnopt = qtn.TNOptimizer(
         psi0,
         loss_fn=loss,
-        shared_tags=[ 'p'+f'{i}' for i in range(2*depth) ],
+        tags=tags,
+        shared_tags=tags,
         loss_constants={'target': T_gs},
         autodiff_backend=backend,
-        loss_target=-0.99,
+        # loss_target=-0.99,
     )
-    # correct number of opt params identified
-    assert len(tnopt.variables) == 2*depth 
 
+    # run optimisation and test output
     psi_opt = tnopt.optimize_basinhopping(n=10, nhop=5)
-    assert sum(loss < -0.99 for loss in tnopt.losses) == 1
+    # assert sum(loss < -0.99 for loss in tnopt.losses) == 1
     assert qu.fidelity(psi_opt.to_dense(), gs) > 0.99
+
+    # test dimension of optimisation space
+    assert tnopt.res.x.size == 2*depth
+
+    # examine tensors inside optimised TN and check sharing was done
+    for tag in tags:
+        test_data = None
+        for t in psi_opt.select(tag):
+            if test_data is None:
+                test_data = _get_tensor_data(t)
+            else:
+                assert_allclose(test_data, _get_tensor_data(t))
