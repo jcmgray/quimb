@@ -882,7 +882,7 @@ class TNOptimizer:
             self._method = self.optimizer
 
     def inject_res_vector_and_return_tn(self):
-        arrays = self.vectorizer.unpack()
+        arrays = tuple(map(self.handler.to_constant, self.vectorizer.unpack()))
         inject_(arrays, self.tn_opt)
         tn = self.norm_fn(self.tn_opt.copy())
         tn.drop_tags(t for t in tn.tags if variable_finder.match(t))
