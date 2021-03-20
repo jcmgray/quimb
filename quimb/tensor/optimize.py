@@ -2,6 +2,7 @@
 automatically derive gradients for input to scipy optimizers.
 """
 import re
+import warnings
 import functools
 import importlib
 from collections.abc import Iterable
@@ -121,37 +122,159 @@ class Vectorizer:
         return arrays
 
 
-def parse_network_to_backend(tn, tags, constant_tags, to_constant):
+_VARIABLE_TAG = "__VARIABLE{}__"
+variable_finder = re.compile(r'__VARIABLE(\d+)__')
+
+
+def _get_tensor_data(t):
+    """ simple function to extract tensor data """
+
+    if isinstance(t, PTensor):
+        data = t.params
+    else:
+        data = t.data
+
+    # jax doesn't like numpy.ndarray subclasses...
+    if isinstance(data, qarray):
+        data = data.A
+
+    return data
+
+
+def _parse_opt_in(tn, tags, shared_tags, to_constant,):
+    """ """
     tn_ag = tn.copy()
     variables = []
 
-    variable_tag = "__VARIABLE{}__"
+    # tags where each individual tensor should get a separate variable
+    individual_tags = tags - shared_tags
+
+    # handle tagged tensors that are not shared
+    for t in tn_ag.select(individual_tags, 'any'):
+        # append the raw data but mark the corresponding tensor
+        # for reinsertion
+        data = _get_tensor_data(t)
+        variables.append(data)
+        t.add_tag(_VARIABLE_TAG.format(len(variables) - 1))
+
+    # handle shared tags
+    for tag in shared_tags:
+
+        var_name = _VARIABLE_TAG.format(len(variables))
+        test_data = None
+
+        for t in tn_ag.select(tag):
+            data = _get_tensor_data(t)
+
+            # detect that this tensor is already variable tagged and skip
+            # if it is
+            if any(variable_finder.match(tag) for tag in t.tags):
+                warnings.warn('TNOptimizer warning, tensor tagged with'
+                              + ' multiple `tags` or `shared_tags`.')
+                continue
+
+            if test_data is None:
+                # create variable and store data
+                variables.append(data)
+                test_data = data
+            else:
+                # check that the shape of the variable's data matches the
+                # data of this new tensor
+                if not test_data.shape == data.shape:
+                    raise ValueError('TNOptimizer error, a `shared_tags`'
+                                     + ' tag covers tensors with different'
+                                     + ' numbers of params.')
+
+            # mark the corresponding tensor for reinsertion
+            t.add_tag(var_name)
+
+    # iterate over tensors which *don't* have any of the given tags
+    for t in tn_ag.select_tensors(tags, which='!any'):
+        t.modify(apply=to_constant)
+
+    return tn_ag, variables
+
+
+def _parse_opt_out(tn, constant_tags, to_constant,):
+    """ """
+    tn_ag = tn.copy()
+    variables = []
 
     for t in tn_ag:
-        # check if tensor has any of the constant tags
+
         if t.tags & constant_tags:
             t.modify(apply=to_constant)
             continue
 
-        # if tags are specified only optimize those tagged
-        if tags and not (t.tags & tags):
-            t.modify(apply=to_constant)
-            continue
-
-        if isinstance(t, PTensor):
-            data = t.params
-        else:
-            data = t.data
-
-        # jax doesn't like numpy.ndarray subclasses...
-        if isinstance(data, qarray):
-            data = data.A
-
-        # append the raw data but mark the corresponding tensor for reinsertion
+        # append the raw data but mark the corresponding tensor
+        # for reinsertion
+        data = _get_tensor_data(t)
         variables.append(data)
-        t.add_tag(variable_tag.format(len(variables) - 1))
+        t.add_tag(_VARIABLE_TAG.format(len(variables) - 1))
 
     return tn_ag, variables
+
+
+def parse_network_to_backend(
+    tn,
+    to_constant,
+    tags=None,
+    shared_tags=None,
+    constant_tags=None,
+):
+    """
+    Parse tensor network to:
+    - identify the dimension of the optimisation space and the initial point of
+      the optimisation from the current values in the tensor network
+    - add variable tags to individual tensors so that optimisation vector
+      values can be efficiently reinserted into the tensor network
+
+    There are two different modes:
+    - opt_in : `tags` (and optionally `shared_tags`) are specified and only
+               these tensor tags will be optimised over. In this case
+               `constant_tags` is ignored if it is passed
+    - opt_out : 'tags' is not specified. In this case all tensors will be
+                optimised over, unless they have one of `constant_tags` tags
+
+    Parameters
+    ----------
+    tn : TensorNetwork
+        The initial tensor network to parse
+    to_constant : Callable
+        Function that fixes a tensor as constant
+    tags : str, or sequence of str, optional
+        Set of opt-in tags to optimise
+    shared_tags : str, or sequence of str, optional
+        Subset of opt-in tags to joint optimise i.e. all tensors with tag s in
+        shared_tags will correspond to the same optimisation variables
+    constant_tags : str, or sequence of str, optional
+        Set of opt-out tags if `tags` not passed
+
+    Returns
+    -------
+    tn_ag : TensorNetwork
+        Tensor network tagged for reinsertion of optimisation variable values
+    variables : list
+        List of variables extracted from tn
+    """
+    tags = tags_to_oset(tags)
+    shared_tags = tags_to_oset(shared_tags)
+    constant_tags = tags_to_oset(constant_tags)
+
+    if tags | shared_tags:
+        # opt_in
+        if not (tags & shared_tags) == shared_tags:
+            tags = tags | shared_tags
+            warnings.warn('TNOptimizer warning, some `shared_tags` are missing'
+                          + ' from `tags`. Automatically adding these missing'
+                          + ' `shared_tags` to `tags`.')
+        if constant_tags:
+            warnings.warn('TNOptimizer warning, if `tags` or `shared_tags` are'
+                          + ' specified then `constant_tags` is ignored.')
+        return _parse_opt_in(tn, tags, shared_tags, to_constant, )
+
+    # opt-out
+    return _parse_opt_out(tn, constant_tags, to_constant, )
 
 
 def constant_t(t, to_constant):
@@ -407,9 +530,6 @@ class MultiLossHandler:
         if self.executor is not None:
             return self._value_and_grad_par(arrays)
         return self._value_and_grad_seq(arrays)
-
-
-variable_finder = re.compile(r'__VARIABLE(\d+)__')
 
 
 def inject_(arrays, tn):
@@ -728,6 +848,9 @@ class TNOptimizer:
         are assumed to be simple options that don't need conversion).
     tags : str, or sequence of str, optional
         If supplied, only optimize tensors with any of these tags.
+    shared_tags : str, or sequence of str, optional
+        If supplied, each tag in ``shared_tags`` corresponds to a group of
+        tensors to be optimized together
     constant_tags : str, or sequence of str, optional
         If supplied, skip optimizing tensors with any of these tags.
     loss_target : float, optional
@@ -763,6 +886,7 @@ class TNOptimizer:
         loss_constants=None,
         loss_kwargs=None,
         tags=None,
+        shared_tags=None,
         constant_tags=None,
         loss_target=None,
         optimizer='L-BFGS-B',
@@ -773,8 +897,9 @@ class TNOptimizer:
         **backend_opts
     ):
         self.progbar = progbar
-        self.tags = tags_to_oset(tags)
-        self.constant_tags = tags_to_oset(constant_tags)
+        self.tags = tags
+        self.shared_tags = shared_tags
+        self.constant_tags = constant_tags
 
         if autodiff_backend.upper() == 'AUTO':
             autodiff_backend = _DEFAULT_BACKEND
@@ -812,7 +937,12 @@ class TNOptimizer:
 
         # work out which tensors to optimize and get the underlying data
         self.tn_opt, self.variables = parse_network_to_backend(
-            tn, self.tags, self.constant_tags, self.handler.to_constant)
+            tn,
+            tags=self.tags,
+            shared_tags=self.shared_tags,
+            constant_tags=self.constant_tags,
+            to_constant=self.handler.to_constant
+        )
 
         # first we wrap the function to convert from array args to TN arg
         #     (i.e. to autodiff library compatible form)
