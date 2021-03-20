@@ -278,7 +278,6 @@ def test_parse_network_to_backend_shared_tags(tagged_qaoa_tn):
         assert len(tn_tagged.select(var_tag).tensors) == n
 
 
-@pytest.mark.new
 def test_parse_network_to_backend_individual_tags(tagged_qaoa_tn):
     n, depth, psi0 = tagged_qaoa_tn
 
@@ -298,7 +297,6 @@ def test_parse_network_to_backend_individual_tags(tagged_qaoa_tn):
         assert len(tn_tagged.select(var_tag).tensors) == 1
 
 
-@pytest.mark.new
 def test_parse_network_to_backend_constant_tags(tagged_qaoa_tn):
     n, depth, psi0 = tagged_qaoa_tn
 
@@ -319,9 +317,8 @@ def test_parse_network_to_backend_constant_tags(tagged_qaoa_tn):
         assert len(tn_tagged.select(var_tag).tensors) == 1
 
 
-@pytest.mark.new
 @pytest.mark.parametrize('backend', [jax_case, autograd_case,
-                                     tensorflow_case, pytorch_case])
+                                     tensorflow_case])
 def test_shared_tags(tagged_qaoa_tn, backend):
     n, depth, psi0 = tagged_qaoa_tn
 
