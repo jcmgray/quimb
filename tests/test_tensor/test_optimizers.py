@@ -264,17 +264,17 @@ def test_parse_network_to_backend_shared_tags(tagged_qaoa_tn):
     def to_constant(x):
         return np.asarray(x)
 
-    tags = ['p'+f'{i}' for i in range(2*depth)]
+    tags = [f'p{i}' for i in range(2 * depth)]
     tn_tagged, variabes = parse_network_to_backend(psi0,
                                                    tags=tags,
                                                    shared_tags=tags,
                                                    to_constant=to_constant,
                                                    )
     # test number of variables identified
-    assert len(variabes) == 2*depth
+    assert len(variabes) == 2 * depth
     # each variable tag should be in n tensors
     for i in range(len(tags)):
-        var_tag = "__VARIABLE"+f'{i}'+"__"
+        var_tag = f"__VARIABLE{i}__"
         assert len(tn_tagged.select(var_tag).tensors) == n
 
 
@@ -284,17 +284,15 @@ def test_parse_network_to_backend_individual_tags(tagged_qaoa_tn):
     def to_constant(x):
         return np.asarray(x)
 
-    tags = ['p'+f'{i}' for i in range(2*depth)]
-    tn_tagged, variabes = parse_network_to_backend(psi0,
-                                                   tags=tags,
-                                                   to_constant=to_constant,
-                                                   )
+    tags = [f'p{i}' for i in range(2*depth)]
+    tn_tagged, variabes = parse_network_to_backend(
+        psi0, tags=tags, to_constant=to_constant)
     # test number of variables identified
-    assert len(variabes) == 2*depth*n
+    assert len(variabes) == 2 * depth * n
     # each variable tag should only be in 1 tensors
     for i in range(len(tags)):
-        var_tag = "__VARIABLE"+f'{i}'+"__"
-        assert len(tn_tagged.select(var_tag).tensors) == 1
+        var_tag = f"__VARIABLE{i}__"
+        assert len(tn_tagged.select_tensors(var_tag)) == 1
 
 
 def test_parse_network_to_backend_constant_tags(tagged_qaoa_tn):
@@ -305,15 +303,14 @@ def test_parse_network_to_backend_constant_tags(tagged_qaoa_tn):
 
     # constant tags, include shared variable tags for first QAOA layer
     constant_tags = ['PSI0', 'H', 'p0', 'p1']
-    tn_tagged, variabes = parse_network_to_backend(psi0,
-                                                   constant_tags=constant_tags,
-                                                   to_constant=to_constant,
-                                                   )
+    tn_tagged, variabes = parse_network_to_backend(
+        psi0, constant_tags=constant_tags, to_constant=to_constant)
+
     # test number of variables identified
-    assert len(variabes) == 2*(depth-1)*n
+    assert len(variabes) == 2 * (depth - 1) * n
     # each variable tag should only be in 1 tensors
     for i in range(len(variabes)):
-        var_tag = "__VARIABLE"+f'{i}'+"__"
+        var_tag = f"__VARIABLE{i}__"
         assert len(tn_tagged.select(var_tag).tensors) == 1
 
 
@@ -331,7 +328,7 @@ def test_shared_tags(tagged_qaoa_tn, backend):
         f.rank_simplify_()
         return -abs(f ^ all)
 
-    tags = ['p'+f'{i}' for i in range(2*depth)]
+    tags = [f'p{i}' for i in range(2 * depth)]
     tnopt = qtn.TNOptimizer(
         psi0,
         loss_fn=loss,
@@ -353,7 +350,7 @@ def test_shared_tags(tagged_qaoa_tn, backend):
     # examine tensors inside optimised TN and check sharing was done
     for tag in tags:
         test_data = None
-        for t in psi_opt.select(tag):
+        for t in psi_opt.select_tensors(tag):
             if test_data is None:
                 test_data = _get_tensor_data(t)
             else:
