@@ -801,7 +801,16 @@ def ham_mbl(n, dh, j=1.0, bz=0.0, cyclic=False,
 @hamiltonian_builder
 def ham_heis_2D(n, m, j=1.0, bz=0.0, cyclic=False,
                 parallel=False, ownership=None):
-    """Construct the 2D spin-1/2 heisenberg model hamiltonian.
+    r"""Construct the 2D spin-1/2 heisenberg model hamiltonian:
+
+    .. math::
+
+        \hat{H} = \sum_{<i, j>}
+        J_X \sigma^X_i \sigma^X_j +
+        J_Y \sigma^Y_i \sigma^Y_j +
+        J_Z \sigma^Z_i \sigma^Z_j
+
+    where the sum runs over pairs :math:`<i,j>` on a 2D square lattice.
 
     Parameters
     ----------
@@ -840,6 +849,8 @@ def ham_heis_2D(n, m, j=1.0, bz=0.0, cyclic=False,
     except (TypeError, ValueError):
         jx = jy = jz = j
 
+    js = {s: js for s, js in zip("xyz", [jx, jy, jz]) if js != 0.0}
+
     dims = [[2] * m] * n  # shape (n, m)
 
     sites = tuple(itertools.product(range(n), range(m)))
@@ -854,21 +865,20 @@ def ham_heis_2D(n, m, j=1.0, bz=0.0, cyclic=False,
             if cyclic or right != 0:
                 yield ((i, j), (i, right))
 
+    # generate all pairs of coordinates and directions
+    pairs_ss = tuple(itertools.product(gen_pairs(), js))
+
     # build the hamiltonian in sparse 'coo' format always for efficiency
     op_kws = {'sparse': True, 'stype': 'coo'}
     ikron_kws = {'sparse': True, 'stype': 'coo',
                  'coo_build': True, 'ownership': ownership}
-
-    # generate all pairs of coordinates and directions
-    pairs_ss = tuple(itertools.product(gen_pairs(), 'xyz'))
 
     # generate XX, YY and ZZ interaction from
     #     e.g. arg ([(3, 4), (3, 5)], 'z')
     def interactions(pair_s):
         pair, s = pair_s
         Sxyz = spin_operator(s, **op_kws)
-        J = {'x': jx, 'y': jy, 'z': jz}[s]
-        return ikron(J * Sxyz, dims, inds=pair, **ikron_kws)
+        return ikron([js[s] * Sxyz, Sxyz], dims, inds=pair, **ikron_kws)
 
     # generate Z field
     def fields(site):
