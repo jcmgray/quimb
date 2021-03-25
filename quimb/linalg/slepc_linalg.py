@@ -678,7 +678,6 @@ def svds_slepc(A, k=6, ncv=None, return_vecs=True, SVDType='cross',
     else:
         res = np.asarray([svd_solver.getValue(i) for i in range(k)])
 
-    comm.Barrier()
     svd_solver.destroy()
     return res if rank == 0 else None
 
@@ -745,7 +744,6 @@ def mfn_multiply_slepc(mat, vec,
     # --> gather the (distributed) petsc vector to a numpy matrix on master
     all_out = gather_petsc_array(out, comm=comm, out_shape=(-1, 1))
 
-    comm.Barrier()
     mfn.destroy()
     return all_out
 
@@ -789,6 +787,5 @@ def ssolve_slepc(A, y, isherm=True, comm=None, maxiter=None, tol=None,
                            f"{lookup_ksp_error(converged_reason)}")
 
     x = gather_petsc_array(x, comm=comm, out_shape=out_shape)
-    comm.Barrier()
     ksp.destroy()
     return x
