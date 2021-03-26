@@ -1643,6 +1643,15 @@ def ikron(ops, dims, inds, sparse=None, stype=None,
     >>> A = rand_herm(5)
     >>> ikron(A, [2, -1, 2, -1, 2, -1], [1, 3, 5]).shape
     (1000, 1000)
+
+    Create a two site interaction (note the coefficient `jx` we only need to
+    multiply into a single input operator):
+
+    >>> Sx = spin_operator('X')
+    >>> jx = 0.123
+    >>> jSxSx = ikron([jx * Sx, Sx], [2, 2, 2, 2], [0, 3])
+    >>> np.allclose(jSxSx, jx * (Sx & eye(2) & eye(2) & Sx))
+    True
     """
     # TODO: test 2d+ dims and coos
     # TODO: simplify  with compress coords?

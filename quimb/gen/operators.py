@@ -806,9 +806,9 @@ def ham_heis_2D(n, m, j=1.0, bz=0.0, cyclic=False,
     .. math::
 
         \hat{H} = \sum_{<i, j>}
-        J_X \sigma^X_i \sigma^X_j +
-        J_Y \sigma^Y_i \sigma^Y_j +
-        J_Z \sigma^Z_i \sigma^Z_j
+        J_X S^X_i S^X_j +
+        J_Y S^Y_i S^Y_j +
+        J_Z S^Z_i S^Z_j
 
     where the sum runs over pairs :math:`<i,j>` on a 2D square lattice.
 
