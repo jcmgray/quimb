@@ -6,6 +6,7 @@ from quimb import (
     rand_herm,
     rand_ket,
     eigh,
+    can_use_mpi_pool,
 )
 
 from quimb.linalg import SLEPC4PY_FOUND
@@ -16,7 +17,6 @@ if SLEPC4PY_FOUND:
         eigs_slepc_spawn,
         svds_slepc_spawn,
         mfn_multiply_slepc_spawn,
-        can_use_mpi_pool,
         ALREADY_RUNNING_AS_MPI,
         NUM_MPI_WORKERS,
     )
