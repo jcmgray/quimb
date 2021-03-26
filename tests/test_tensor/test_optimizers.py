@@ -321,7 +321,7 @@ def test_shared_tags(tagged_qaoa_tn, backend):
 
     H = qu.ham_heis(n, j=(0., 0., -1.), b=(1., 0., 0.), cyclic=True,)
     gs = qu.groundstate(H)
-    T_gs = qtn.Dense1D(gs)
+    T_gs = qtn.Dense1D(gs).astype(complex)  # tensorflow needs all same dtype
 
     def loss(psi, target):
         f = psi.H & target
