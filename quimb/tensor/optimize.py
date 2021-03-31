@@ -1047,7 +1047,13 @@ class TNOptimizer:
         inject_(arrays, self.tn_opt)
         tn = self.norm_fn(self.tn_opt.copy())
         tn.drop_tags(t for t in tn.tags if variable_finder.match(t))
-        tn.apply_to_arrays(to_numpy)
+
+        for t in tn:
+            if isinstance(t, PTensor):
+                t.params = to_numpy(t.params)
+            else:
+                t.modify(data=to_numpy(t.data))
+
         return tn
 
     def optimize(self, n, tol=None, **options):
