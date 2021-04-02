@@ -296,9 +296,26 @@ class FermionTensorNetwork2D(FermionTensorNetwork,TensorNetwork2D):
     def flatten(self, fuse_multibonds=True, inplace=False):
         raise NotImplementedError
 
-    def compute_row_environments(self, dense=False, **compress_opts):
-        layer_tags = compress_opts.get("layer_tags", None)
-        reorder_tags = compress_opts.pop("reorder_tags", layer_tags)
+    def compute_row_environments(
+        self,
+        max_bond=None,
+        cutoff=1e-10,
+        canonize=True,
+        layer_tags=None,
+        dense=False,
+        compress_opts=None,
+        **contract_boundary_opts
+    ):
+        contract_boundary_opts['max_bond'] = max_bond
+        contract_boundary_opts['cutoff'] = cutoff
+        contract_boundary_opts['canonize'] = canonize
+        contract_boundary_opts['layer_tags'] = layer_tags
+        contract_boundary_opts['compress_opts'] = compress_opts
+
+        if compress_opts is not None:
+            reorder_tags = compress_opts.pop("reorder_tags", layer_tags)
+        else:
+            reorder_tags = layer_tags
         env_bottom = self.reorder_right_row(layer_tags=reorder_tags)
         env_top = env_bottom.copy()
 
@@ -308,8 +325,16 @@ class FermionTensorNetwork2D(FermionTensorNetwork,TensorNetwork2D):
         row_envs['below', 0] = FermionTensorNetwork([])
         first_row = self.row_tag(0)
         row_envs['mid', 0] = env_bottom.select(first_row).copy()
+        row_envs['above', self.Lx - 1] = FermionTensorNetwork([])
+        if self.Lx == 1:
+            return row_envs
         if dense:
             env_bottom ^= first_row
+        else:
+            for j in range(self.Ly):
+                env_bottom ^= self.site_tag(0, j)
+            env_bottom.compress_row(0, sweep="right", max_bond=max_bond, cutoff=cutoff, compress_opts=compress_opts)
+
         row_envs['below', 1] = env_bottom.select(first_row).copy()
         for i in range(2, env_bottom.Lx):
             below_row = env_bottom.row_tag(i-1)
@@ -318,30 +343,51 @@ class FermionTensorNetwork2D(FermionTensorNetwork,TensorNetwork2D):
                 env_bottom ^= (self.row_tag(i - 2), self.row_tag(i - 1))
             else:
                 env_bottom.contract_boundary_from_bottom_(
-                    (i - 2, i - 1), **compress_opts)
+                    (i - 2, i - 1), **contract_boundary_opts)
             row_envs['below', i] = env_bottom.select(first_row).copy()
 
         last_row = env_bottom.row_tag(self.Lx-1)
         row_envs['mid', self.Lx-1] = env_bottom.select(last_row).copy()
         # downwards pass
-        row_envs['above', self.Lx - 1] = FermionTensorNetwork([])
         last_row = self.row_tag(self.Lx - 1)
         if dense:
             env_top ^= last_row
+        else:
+            for j in range(self.Ly):
+                env_top ^= self.site_tag(self.Lx-1, j)
+            env_top.compress_row(self.Lx-1, sweep="right", max_bond=max_bond, cutoff=cutoff, compress_opts=compress_opts)
+
         row_envs['above', self.Lx - 2] = env_top.select(last_row).copy()
         for i in range(env_top.Lx - 3, -1, -1):
             if dense:
                 env_top ^= (self.row_tag(i + 1), self.row_tag(i + 2))
             else:
                 env_top.contract_boundary_from_top_(
-                    (i + 1, i + 2), **compress_opts)
+                    (i + 1, i + 2), **contract_boundary_opts)
             row_envs['above', i] = env_top.select(last_row).copy()
 
         return row_envs
 
-    def compute_col_environments(self, dense=False, **compress_opts):
-        layer_tags = compress_opts.get("layer_tags", None)
-        reorder_tags = compress_opts.pop("reorder_tags", layer_tags)
+    def compute_col_environments(
+        self,
+        max_bond=None,
+        cutoff=1e-10,
+        canonize=True,
+        layer_tags=None,
+        dense=False,
+        compress_opts=None,
+        **contract_boundary_opts
+    ):
+        contract_boundary_opts['max_bond'] = max_bond
+        contract_boundary_opts['cutoff'] = cutoff
+        contract_boundary_opts['canonize'] = canonize
+        contract_boundary_opts['layer_tags'] = layer_tags
+        contract_boundary_opts['compress_opts'] = compress_opts
+
+        if compress_opts is not None:
+            reorder_tags = compress_opts.pop("reorder_tags", layer_tags)
+        else:
+            reorder_tags = layer_tags
         env_left = self.reorder_upward_column(layer_tags=reorder_tags)
         env_right = env_left.copy()
         col_envs = dict()
@@ -350,8 +396,16 @@ class FermionTensorNetwork2D(FermionTensorNetwork,TensorNetwork2D):
         col_envs['left', 0] = FermionTensorNetwork([])
         first_col = self.col_tag(0)
         col_envs['mid', 0] = env_left.select(first_col).copy()
+        col_envs['right', self.Ly - 1] = FermionTensorNetwork([])
+        if self.Ly == 1:
+            return col_envs
+
         if dense:
             env_left ^= first_col
+        else:
+            for i in range(self.Lx):
+                env_left ^= self.site_tag(i, 0)
+            env_left.compress_column(0, sweep="up", max_bond=max_bond, cutoff=cutoff, compress_opts=compress_opts)
         col_envs['left', 1] = env_left.select(first_col).copy()
 
         for i in range(2, env_left.Ly):
@@ -361,23 +415,26 @@ class FermionTensorNetwork2D(FermionTensorNetwork,TensorNetwork2D):
                 env_left ^= (self.col_tag(i - 2), self.col_tag(i - 1))
             else:
                 env_left.contract_boundary_from_left_(
-                    (i - 2, i - 1), **compress_opts)
+                    (i - 2, i - 1), **contract_boundary_opts)
             col_envs['left', i] = env_left.select(first_col).copy()
 
         last_col = env_left.col_tag(self.Ly-1)
         col_envs['mid', self.Ly-1] = env_left.select(last_col).copy()
         # downwards pass
-        col_envs['right', self.Ly - 1] = FermionTensorNetwork([])
         last_col = self.col_tag(self.Ly - 1)
         if dense:
             env_right ^= last_col
+        else:
+            for i in range(self.Lx):
+                env_right ^= self.site_tag(i, self.Ly-1)
+            env_right.compress_column(self.Ly-1, sweep="up", max_bond=max_bond, cutoff=cutoff, compress_opts=compress_opts)
         col_envs['right', self.Ly - 2] = env_right.select(last_col).copy()
         for i in range(env_right.Ly - 3, -1, -1):
             if dense:
                 env_right ^= (self.col_tag(i + 1), self.col_tag(i + 2))
             else:
                 env_right.contract_boundary_from_right_(
-                    (i + 1, i + 2), **compress_opts)
+                    (i + 1, i + 2), **contract_boundary_opts)
             col_envs['right', i] = env_right.select(last_col).copy()
 
         return col_envs
@@ -386,6 +443,10 @@ class FermionTensorNetwork2D(FermionTensorNetwork,TensorNetwork2D):
         self,
         x_bsz,
         y_bsz,
+        max_bond=None,
+        cutoff=1e-10,
+        canonize=True,
+        layer_tags=None,
         second_dense=None,
         row_envs=None,
         **compute_environment_opts
@@ -396,7 +457,8 @@ class FermionTensorNetwork2D(FermionTensorNetwork,TensorNetwork2D):
         # first we contract from either side to produce column environments
         if row_envs is None:
             row_envs = self.compute_row_environments(
-                **compute_environment_opts)
+                max_bond=max_bond, cutoff=cutoff, canonize=canonize,
+                layer_tags=layer_tags, **compute_environment_opts)
 
         # next we form vertical strips and contract from both top and bottom
         #     for each column
@@ -430,7 +492,8 @@ class FermionTensorNetwork2D(FermionTensorNetwork,TensorNetwork2D):
             #
             col_envs[i] = row_i.compute_col_environments(
                 xrange=(max(i - 1, 0), min(i + x_bsz, self.Lx - 1)),
-                dense=second_dense, **compute_environment_opts)
+                dense=second_dense, max_bond=max_bond, cutoff=cutoff, canonize=canonize,
+                layer_tags=layer_tags, **compute_environment_opts)
 
         plaquette_envs = dict()
         for i0, j0 in product(range(self.Lx - x_bsz + 1),
@@ -469,6 +532,10 @@ class FermionTensorNetwork2D(FermionTensorNetwork,TensorNetwork2D):
         self,
         x_bsz,
         y_bsz,
+        max_bond=None,
+        cutoff=1e-10,
+        canonize=True,
+        layer_tags=None,
         second_dense=None,
         col_envs=None,
         **compute_environment_opts
@@ -479,7 +546,8 @@ class FermionTensorNetwork2D(FermionTensorNetwork,TensorNetwork2D):
         # first we contract from either side to produce column environments
         if col_envs is None:
             col_envs = self.compute_col_environments(
-                **compute_environment_opts)
+                max_bond=max_bond, cutoff=cutoff, canonize=canonize,
+                layer_tags=layer_tags, **compute_environment_opts)
 
         # next we form vertical strips and contract from both top and bottom
         #     for each column
@@ -518,7 +586,8 @@ class FermionTensorNetwork2D(FermionTensorNetwork,TensorNetwork2D):
             #
             row_envs[j] = col_j.compute_row_environments(
                 yrange=(max(j - 1, 0), min(j + y_bsz, self.Ly - 1)),
-                dense=second_dense, **compute_environment_opts)
+                dense=second_dense, max_bond=max_bond, cutoff=cutoff, canonize=canonize,
+                layer_tags=layer_tags, **compute_environment_opts)
 
         # then range through all the possible plaquettes, selecting the correct
         # boundary tensors from either the column or row environments
@@ -981,6 +1050,7 @@ class FPEPS(FermionTensorNetwork2DVector,
         -------
         psi : PEPS
         """
+        raise NotImplementedError
         if seed is not None:
             np.random.seed(seed)
         if qpn is None: qpn = (Lx*Ly, Lx*Ly%2)
@@ -995,46 +1065,3 @@ class FPEPS(FermionTensorNetwork2DVector,
             arrays = fermion_gen._qpn_map_to_row_skeleton(qpn_map, phys_dim, bond_dim, shape)
 
         return cls(arrays, **peps_opts)
-
-def _gen_site_wfn_tsr(state, pattern=None, ndim=2, ax=0):
-    from pyblock3.algebra.core import SubTensor
-    from pyblock3.algebra.fermion import SparseFermionTensor
-    from pyblock3.algebra.symmetry import QPN
-    state_map = {0:QPN(0,0), 1:QPN(1,1), 2:QPN(1,-1), 3:QPN(2,0)}
-    if state not in state_map:
-        raise KeyError("requested state not recoginized")
-    q_label = [QPN(0),] * ax + [state_map[state]] + [QPN(0),] *(ndim-ax-1)
-    shape = [1,] * ndim
-    dat = np.ones(shape)
-    blocks = [SubTensor(reduced=dat, q_labels=q_label)]
-    smat = SparseFermionTensor(blocks=blocks, pattern=pattern).to_flat()
-    return smat
-
-def gen_mf_peps(state_array, shape='urdlp', **kwargs):
-    pattern_map = {"d": "+", "l":"+", "p":"+",
-                   "u": "-", "r":"-"}
-    Lx, Ly = state_array.shape
-    arr = state_array.astype("int")
-    cache = dict()
-    def _gen_ij(i, j):
-        state = arr[i, j]
-        array_order = shape
-        if i == Lx - 1:
-            array_order = array_order.replace('u', '')
-        if j == Ly - 1:
-            array_order = array_order.replace('r', '')
-        if i == 0:
-            array_order = array_order.replace('d', '')
-        if j == 0:
-            array_order = array_order.replace('l', '')
-        pattern = "".join([pattern_map[i] for i in array_order])
-        ndim = len(array_order)
-        ax = array_order.index('p')
-        key = (state, ndim, ax, pattern)
-        if key not in cache:
-            cache[key] = _gen_site_wfn_tsr(state, pattern, ndim, ax).copy()
-        return cache[key]
-
-    tsr_array = [[_gen_ij(i,j) for j in range(Ly)] for i in range(Lx)]
-
-    return FPEPS(tsr_array, shape=shape, **kwargs)

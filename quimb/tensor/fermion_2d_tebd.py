@@ -6,11 +6,11 @@ from ..utils import pairwise
 from .tensor_2d_tebd import SimpleUpdate as _SimpleUpdate
 from .tensor_2d_tebd import conditioner
 from .tensor_2d import gen_long_range_path, nearest_neighbors
-from pyblock3.algebra.fermion_operators import eye, hubbard
+from .fermion_interface import DEFAULT_SYMMETRY, eye, to_exponential
 
 INVERSE_CUTOFF = 1e-10
 
-def Hubbard2D(t, u, Lx, Ly, mu=0.):
+def Hubbard2D(t, u, Lx, Ly, mu=0., symmetry=DEFAULT_SYMMETRY):
     """Create a LocalHam2D object for 2D Hubbard Model
 
     Parameters
@@ -30,6 +30,7 @@ def Hubbard2D(t, u, Lx, Ly, mu=0.):
     -------
     a LocalHam2D object
     """
+    from quimb.tensor.fermion_interface import Hubbard
     ham = dict()
     count_neighbour = lambda i,j: (i>0) + (i<Lx-1) + (j>0) + (j<Ly-1)
     for i, j in product(range(Lx), range(Ly)):
@@ -37,12 +38,12 @@ def Hubbard2D(t, u, Lx, Ly, mu=0.):
         if i+1 != Lx:
             where = ((i,j), (i+1,j))
             count_b = count_neighbour(i+1,j)
-            uop = hubbard(t,u, mu, (1./count_ij, 1./count_b))
+            uop = Hubbard(t,u, mu, (1./count_ij, 1./count_b), symmetry=symmetry)
             ham[where] = uop
         if j+1 != Ly:
             where = ((i,j), (i,j+1))
             count_b = count_neighbour(i,j+1)
-            uop = hubbard(t,u, mu, (1./count_ij, 1./count_b))
+            uop = Hubbard(t,u, mu, (1./count_ij, 1./count_b), symmetry=symmetry)
             ham[where] = uop
     return LocalHam2D(Lx, Ly, ham)
 
@@ -148,7 +149,7 @@ class LocalHam2D:
         cache = self._op_cache['expm']
         key = (id(x), y)
         if key not in cache:
-            out = x.to_exponential(y)
+            out = to_exponential(x, y)
             cache[key] = out
         return cache[key]
 

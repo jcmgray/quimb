@@ -13,7 +13,10 @@ from .tensor_core import (Tensor, TensorNetwork, rand_uuid, tags_to_oset,
 from .tensor_core import tensor_contract as _tensor_contract
 from ..utils import oset, valmap
 from .array_ops import asarray, ndim
-from pyblock3.algebra.symmetry import QPN
+from . import fermion_interface
+
+DEFAULT_SYMMETRY = fermion_interface.DEFAULT_SYMMETRY
+BondInfo = fermion_interface.BondInfo
 
 def _contract_connected(T1, T2, output_inds=None):
     """Fermionic contraction of two tensors that are adjacent to each other.
@@ -942,6 +945,10 @@ class FermionTensor(Tensor):
                              f"found in {self.inds}.")
 
     @property
+    def symmetry(self):
+        return self.data.symmetry
+
+    @property
     def fermion_owner(self):
         return self._fermion_owner
 
@@ -960,8 +967,7 @@ class FermionTensor(Tensor):
                 raise ValueError("%s indice not found in the tensor"%dim_or_ind)
             dim_or_ind = self.inds.index(dim_or_ind)
 
-        from pyblock3.algebra.symmetry import QPN, BondInfo
-        sz = [QPN.from_flat(ix) for ix in self.data.q_labels[:,dim_or_ind]]
+        sz = [self.symmetry.from_flat(ix) for ix in self.data.q_labels[:,dim_or_ind]]
         sp = self.data.shapes[:,dim_or_ind]
         bond_dict = dict(zip(sz, sp))
         return BondInfo(bond_dict)
@@ -1150,6 +1156,8 @@ def is_mergeable(*ts_or_tsn):
             if obj.fermion_owner is None:
                 return False
             hashval, fsobj, tid = obj.fermion_owner
+            if fsobj() is None:
+                return False
             fs_lst.append(hashval)
             site_lst.append(fsobj()[tid][1])
         elif isinstance(obj, FermionTensorNetwork):
@@ -1464,11 +1472,10 @@ class FermionTensorNetwork(TensorNetwork):
         max_site = max(fs.sites)
 
         for tid, (tsr, site) in fs.tensor_order.items():
-             reverse_order = list(range(tsr.ndim))[::-1]
-             new_data = tsr.data.dagger
-             new_inds = tsr.inds[::-1]
-             tsr.modify(data=new_data, inds=new_inds)
-             fs.tensor_order.update({tid: (tsr, max_site-site)})
+            new_data = tsr.data.dagger
+            new_inds = tsr.inds[::-1]
+            tsr.modify(data=new_data, inds=new_inds)
+            fs.tensor_order.update({tid: (tsr, max_site-site)})
         return tn
 
     def __mul__(self, other):
