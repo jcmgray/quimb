@@ -58,6 +58,11 @@ def equivalent_complex_type(x):
 class Vectorizer:
     """Object for mapping a sequence of mixed real/complex n-dimensional arrays
     to a single numpy vector and back and forth.
+
+    Parameters
+    ----------
+    array : sequence of array
+        The set of arrays to map into a single real vector.
     """
 
     def __init__(self, arrays):
@@ -72,6 +77,9 @@ class Vectorizer:
         self.pack(arrays)
 
     def pack(self, arrays, name='vector'):
+        """Take ``arrays`` and pack their values into attribute `.{name}`, by
+        default `.vector`.
+        """
 
         # scipy's optimization routines require real, double data
         if not hasattr(self, name):
@@ -127,8 +135,8 @@ variable_finder = re.compile(r'__VARIABLE(\d+)__')
 
 
 def _get_tensor_data(t):
-    """ simple function to extract tensor data """
-
+    """Simple function to extract tensor data.
+    """
     if isinstance(t, PTensor):
         data = t.params
     else:
@@ -141,8 +149,10 @@ def _get_tensor_data(t):
     return data
 
 
-def _parse_opt_in(tn, tags, shared_tags, to_constant,):
-    """ """
+def _parse_opt_in(tn, tags, shared_tags, to_constant):
+    """Parse a tensor network where tensors are assumed to be constant unless
+    tagged.
+    """
     tn_ag = tn.copy()
     variables = []
 
@@ -150,7 +160,7 @@ def _parse_opt_in(tn, tags, shared_tags, to_constant,):
     individual_tags = tags - shared_tags
 
     # handle tagged tensors that are not shared
-    for t in tn_ag.select(individual_tags, 'any'):
+    for t in tn_ag.select_tensors(individual_tags, 'any'):
         # append the raw data but mark the corresponding tensor
         # for reinsertion
         data = _get_tensor_data(t)
@@ -163,14 +173,14 @@ def _parse_opt_in(tn, tags, shared_tags, to_constant,):
         var_name = _VARIABLE_TAG.format(len(variables))
         test_data = None
 
-        for t in tn_ag.select(tag):
+        for t in tn_ag.select_tensors(tag):
             data = _get_tensor_data(t)
 
             # detect that this tensor is already variable tagged and skip
             # if it is
             if any(variable_finder.match(tag) for tag in t.tags):
                 warnings.warn('TNOptimizer warning, tensor tagged with'
-                              + ' multiple `tags` or `shared_tags`.')
+                              ' multiple `tags` or `shared_tags`.')
                 continue
 
             if test_data is None:
@@ -180,10 +190,10 @@ def _parse_opt_in(tn, tags, shared_tags, to_constant,):
             else:
                 # check that the shape of the variable's data matches the
                 # data of this new tensor
-                if not test_data.shape == data.shape:
-                    raise ValueError('TNOptimizer error, a `shared_tags`'
-                                     + ' tag covers tensors with different'
-                                     + ' numbers of params.')
+                if test_data.shape != data.shape:
+                    raise ValueError('TNOptimizer error, a `shared_tags` tag '
+                                     'covers tensors with different numbers of'
+                                     ' params.')
 
             # mark the corresponding tensor for reinsertion
             t.add_tag(var_name)
@@ -196,7 +206,9 @@ def _parse_opt_in(tn, tags, shared_tags, to_constant,):
 
 
 def _parse_opt_out(tn, constant_tags, to_constant,):
-    """ """
+    """Parse a tensor network where tensors are assumed to be variables unless
+    tagged.
+    """
     tn_ag = tn.copy()
     variables = []
 
@@ -224,38 +236,41 @@ def parse_network_to_backend(
 ):
     """
     Parse tensor network to:
-    - identify the dimension of the optimisation space and the initial point of
-      the optimisation from the current values in the tensor network
-    - add variable tags to individual tensors so that optimisation vector
-      values can be efficiently reinserted into the tensor network
+
+        - identify the dimension of the optimisation space and the initial
+          point of the optimisation from the current values in the tensor
+          network,
+        - add variable tags to individual tensors so that optimisation vector
+          values can be efficiently reinserted into the tensor network.
 
     There are two different modes:
-    - opt_in : `tags` (and optionally `shared_tags`) are specified and only
-               these tensor tags will be optimised over. In this case
-               `constant_tags` is ignored if it is passed
-    - opt_out : 'tags' is not specified. In this case all tensors will be
-                optimised over, unless they have one of `constant_tags` tags
+
+        - 'opt in' : `tags` (and optionally `shared_tags`) are specified and
+          only these tensor tags will be optimised over. In this case
+          `constant_tags` is ignored if it is passed,
+        - 'opt out' : `tags` is not specified. In this case all tensors will be
+          optimised over, unless they have one of `constant_tags` tags.
 
     Parameters
     ----------
     tn : TensorNetwork
-        The initial tensor network to parse
+        The initial tensor network to parse.
     to_constant : Callable
-        Function that fixes a tensor as constant
+        Function that fixes a tensor as constant.
     tags : str, or sequence of str, optional
-        Set of opt-in tags to optimise
+        Set of opt-in tags to optimise.
     shared_tags : str, or sequence of str, optional
         Subset of opt-in tags to joint optimise i.e. all tensors with tag s in
-        shared_tags will correspond to the same optimisation variables
+        shared_tags will correspond to the same optimisation variables.
     constant_tags : str, or sequence of str, optional
-        Set of opt-out tags if `tags` not passed
+        Set of opt-out tags if `tags` not passed.
 
     Returns
     -------
     tn_ag : TensorNetwork
-        Tensor network tagged for reinsertion of optimisation variable values
+        Tensor network tagged for reinsertion of optimisation variable values.
     variables : list
-        List of variables extracted from tn
+        List of variables extracted from ``tn``.
     """
     tags = tags_to_oset(tags)
     shared_tags = tags_to_oset(shared_tags)
@@ -266,11 +281,12 @@ def parse_network_to_backend(
         if not (tags & shared_tags) == shared_tags:
             tags = tags | shared_tags
             warnings.warn('TNOptimizer warning, some `shared_tags` are missing'
-                          + ' from `tags`. Automatically adding these missing'
-                          + ' `shared_tags` to `tags`.')
+                          ' from `tags`. Automatically adding these missing'
+                          ' `shared_tags` to `tags`.')
         if constant_tags:
             warnings.warn('TNOptimizer warning, if `tags` or `shared_tags` are'
-                          + ' specified then `constant_tags` is ignored.')
+                          ' specified then `constant_tags` is ignored - '
+                          'consider instead untagging those tensors.')
         return _parse_opt_in(tn, tags, shared_tags, to_constant, )
 
     # opt-out
@@ -850,7 +866,7 @@ class TNOptimizer:
         If supplied, only optimize tensors with any of these tags.
     shared_tags : str, or sequence of str, optional
         If supplied, each tag in ``shared_tags`` corresponds to a group of
-        tensors to be optimized together
+        tensors to be optimized together.
     constant_tags : str, or sequence of str, optional
         If supplied, skip optimizing tensors with any of these tags.
     loss_target : float, optional
@@ -1001,30 +1017,67 @@ class TNOptimizer:
 
     @property
     def optimizer(self):
+        """The underlying optimizer that works with the vectorized functions.
+        """
         return self._optimizer
 
     @optimizer.setter
     def optimizer(self, x):
+        if isinstance(x, str):
+            x = x.lower()
         self._optimizer = x
         if self.optimizer in _STOC_GRAD_METHODS:
             self._method = _STOC_GRAD_METHODS[self.optimizer]()
         else:
             self._method = self.optimizer
 
-    def inject_res_vector_and_return_tn(self):
-        arrays = self.vectorizer.unpack()
+    def get_tn_opt(self):
+        """Extract the optimized tensor network, this is a three part process:
+
+            1. inject the current optimized vector into the target tensor
+               network,
+            2. run it through ``norm_fn``,
+            3. drop any tags used to identify variables.
+
+        Returns
+        -------
+        tn_opt : TensorNetwork
+        """
+        arrays = tuple(map(self.handler.to_constant, self.vectorizer.unpack()))
         inject_(arrays, self.tn_opt)
         tn = self.norm_fn(self.tn_opt.copy())
         tn.drop_tags(t for t in tn.tags if variable_finder.match(t))
-#        tn.apply_to_arrays(to_numpy)
+
         for t in tn:
-             if isinstance(t, PTensor):
-                 t.params = to_numpy(t.params)
-             else:
-                 t.modify(data=to_numpy(t.data))
+            if isinstance(t, PTensor):
+                t.params = to_numpy(t.params)
+            else:
+                t.modify(data=to_numpy(t.data))
+
         return tn
 
     def optimize(self, n, tol=None, **options):
+        """Run the optimizer for ``n`` function evaluations, using
+        :func:`scipy.optimize.minimize` as the driver for the vectorized
+        computation.
+
+        Parameters
+        ----------
+        n : int
+            Notionally the maximum number of iterations for the optimizer, note
+            that depending on the optimizer being used, this may correspond to
+            number of function evaluations rather than just iterations.
+        tol : None or float, optional
+            Tolerance for convergence, note that various more specific
+            tolerances can usually be supplied to ``options``, depending on
+            the optimizer being used.
+        options
+            Supplied to :func:`scipy.optimize.minimize`.
+
+        Returns
+        -------
+        tn_opt : TensorNetwork
+        """
         from scipy.optimize import minimize
 
         try:
@@ -1056,9 +1109,28 @@ class TNOptimizer:
         finally:
             pbar.close()
 
-        return self.inject_res_vector_and_return_tn()
+        return self.get_tn_opt()
 
     def optimize_basinhopping(self, n, nhop, temperature=1.0, **options):
+        """Run the optimizer for using :func:`scipy.optimize.basinhopping`
+        as the driver for the vectorized computation. This performs ``nhop``
+        local optimization each with ``n`` iterations.
+
+        Parameters
+        ----------
+        n : int
+            Number of iterations per local optimization.
+        nhop : int
+            Number of local optimizations to hop between.
+        temperature : float, optional
+            H
+        options
+            Supplied to the inner :func:`scipy.optimize.minimize` call.
+
+        Returns
+        -------
+        tn_opt : TensorNetwork
+        """
         from scipy.optimize import basinhopping
 
         try:
@@ -1084,7 +1156,7 @@ class TNOptimizer:
                 niter=nhop,
                 minimizer_kwargs=dict(
                     jac=True,
-                    method=self.optimizer,
+                    method=self._method,
                     bounds=self.bounds,
                     callback=inner_callback,
                     options=dict(maxiter=n, **options)
@@ -1099,4 +1171,4 @@ class TNOptimizer:
         finally:
             pbar.close()
 
-        return self.inject_res_vector_and_return_tn()
+        return self.get_tn_opt()
