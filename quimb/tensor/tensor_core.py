@@ -5068,6 +5068,7 @@ class TensorNetwork(object):
         canonize_after_distance=0,
         canonize_after_opts=None,
         gauge_boundary_only=False,
+        compress_late=False,
         compress_opts=None,
         compress_span=False,
         compress_exclude=None,
@@ -5081,6 +5082,56 @@ class TensorNetwork(object):
     ):
         # the boundary - the set of intermediate tensors
         boundary = oset()
+
+        def _do_contraction(tid1, tid2):
+            """The inner closure that contracts the two tensors identified by
+            ``tid1`` and ``tid``.
+            """
+            if callback_pre_contract is not None:
+                callback_pre_contract(self, (tid1, tid2))
+
+            # pop out the pair of tensors
+            t1, t2 = self._pop_tensor(tid1), self._pop_tensor(tid2)
+
+            # contract them
+            t_new = tensor_contract(t1, t2, preserve_tensor=True)
+
+            # re-add the product, using the same identifier as the (inner) t2
+            tid_new = tid2
+            self.add_tensor(t_new, tid=tid_new, virtual=True)
+
+            # maybe control norm blow-up by stripping the new tensor exponent
+            if equalize_norms:
+                self.strip_exponent(t_new, equalize_norms)
+
+            # update the boundary
+            boundary.add(tid_new)
+
+            if callback_post_contract is not None:
+                callback_post_contract(self, tid_new)
+
+            return tid_new, t_new
+
+        # keep track of pairs along the tree - often no point compressing these
+        #     (potentially, on some complex graphs, one needs to compress)
+        if not compress_span:
+            dont_compress_pairs = {frozenset((s[0], s[1])) for s in seq}
+        else:
+            # else just exclude the next few upcoming contractions, starting
+            # with the first
+            dont_compress_pairs = {frozenset((seq[0][0], seq[0][1]))}
+
+        def _should_skip_compression(i, tid1, tid2):
+            """The inner closure deciding whether we should compress between
+            ``tid1`` and tid2``.
+            """
+            pair_key = frozenset((tid1, tid2))
+            return (
+                # explicitly excluded from compression
+                ((compress_exclude is not None) and (tid2 in compress_exclude))
+                # or compressing pair that will be eventually contracted
+                or pair_key in dont_compress_pairs
+            )
 
         # options relating to locally canonizing around each compression
         if canonize_distance:
@@ -5116,90 +5167,33 @@ class TensorNetwork(object):
             def eps_fn(d):
                 return cutoff
 
-        C = len(seq)
-
-        # keep track of pairs along the tree - often no point compressing these
-        #     (potentially, on some complex graphs, one needs to compress)
-        dont_compress_pairs = {frozenset((s[0], s[1])) for s in seq}
-
-        if progbar:
-            import tqdm
-            max_size = 0.0
-            pbar = tqdm.tqdm(total=C)
-        else:
-            max_size = pbar = None
-
-        for i in range(C):
-            # tid1 -> tid2 is inwards on the contraction tree, ``d`` is the
-            # graph distance from the original region
-            tid1, tid2, d = seq[i]
-
-            if callback_pre_contract is not None:
-                callback_pre_contract(self, (tid1, tid2))
-
-            # pop out the pair of tensors
-            t1, t2 = self._pop_tensor(tid1), self._pop_tensor(tid2)
-
-            # contract them
-            t_new = t1 @ t2
-
-            if not isinstance(t_new, Tensor):
-                t_new = Tensor(t_new, tags=t1.tags | t2.tags)
-
-            if progbar:
-                new_size = math.log2(t_new.size)
-                max_size = max(max_size, new_size)
-                pbar.set_description(
-                    f"log2[SIZE]: {new_size:.2f}/{max_size:.2f}")
-                pbar.update()
-
-            # re-add the product, using the same identifier as the (inner) t2
-            tid_new = tid2
-            self.add_tensor(t_new, tid=tid_new, virtual=True)
-
-            # maybe control norm blow-up by stripping the new tensor exponent
-            if equalize_norms:
-                self.strip_exponent(tid_new, equalize_norms)
-
-            # update the boundary
-            boundary.add(tid_new)
-
-            if callback_post_contract is not None:
-                callback_post_contract(self, tid_new)
-
-            # allow dynamically adjusting truncation settings based on distance
+        def _compress_neighbors(tid, t, d):
+            """Inner closure that compresses tensor ``t`` with identifier
+            ``tid`` at distance ``d``, with its neighbors.
+            """
             chi = chi_fn(d)
             eps = eps_fn(d)
 
-            for tid_neighb in self._get_neighbor_tids(tid_new):
+            if max_bond is None and eps == 0.0:
+                # skip compression
+                return
+
+            for tid_neighb in self._get_neighbor_tids(tid):
 
                 # first just check for accumulation of small multi-bonds
                 t_neighb = self.tensor_map[tid_neighb]
-                tensor_fuse_squeeze(t_new, t_neighb)
+                tensor_fuse_squeeze(t, t_neighb)
 
-                pair_key = frozenset((tid_new, tid_neighb))
-                if (
-                    # not allowed to compress
-                    ((compress_exclude is not None) and
-                     (tid_neighb in compress_exclude)) or
-                    # compressing along span often pointless
-                    ((not compress_span) and
-                     (pair_key in dont_compress_pairs)) or
-                    # always pointless if next contraction
-                    (pair_key in {frozenset(s[:2]) for s in seq[i + 1:i + 2]})
-                ):
+                if _should_skip_compression(i, tid, tid_neighb):
                     continue
 
                 # check for compressing large shared (multi) bonds
-                if (
-                    (chi is None and eps != 0.0) or
-                    (bonds_size(t_new, t_neighb) > chi)
-                ):
+                if bonds_size(t, t_neighb) > chi:
                     if callback_pre_compress is not None:
-                        callback_pre_compress(self, (tid_new, tid_neighb))
+                        callback_pre_compress(self, (tid, tid_neighb))
 
                     self._compress_between_tids(
-                        tid_new,
+                        tid,
                         tid_neighb,
                         max_bond=chi,
                         cutoff=eps,
@@ -5212,7 +5206,45 @@ class TensorNetwork(object):
                     )
 
                     if callback_post_compress is not None:
-                        callback_post_compress(self, (tid_new, tid_neighb))
+                        callback_post_compress(self, (tid, tid_neighb))
+
+        num_contractions = len(seq)
+
+        if progbar:
+            import tqdm
+            max_size = 0.0
+            pbar = tqdm.tqdm(total=num_contractions)
+        else:
+            max_size = pbar = None
+
+        for i in range(num_contractions):
+            # tid1 -> tid2 is inwards on the contraction tree, ``d`` is the
+            # graph distance from the original region
+            tid1, tid2, d = seq[i]
+
+            if compress_span:
+                # only keep track of the next few contractions to ignore
+                for s in seq[i + 1:i + 2]:
+                    dont_compress_pairs.add(frozenset((s[0], s[1])))
+
+            if compress_late:
+                # we compress just before we have to contract involved tensors
+                t1, t2 = self._tids_get(tid1, tid2)
+                _compress_neighbors(tid1, t1, d)
+                _compress_neighbors(tid2, t2, d)
+
+            tid_new, t_new = _do_contraction(tid1, tid2)
+
+            if progbar:
+                new_size = math.log2(t_new.size)
+                max_size = max(max_size, new_size)
+                pbar.set_description(
+                    f"log2[SIZE]: {new_size:.2f}/{max_size:.2f}")
+                pbar.update()
+
+            if not compress_late:
+                # we compress as soon as we produce a new tensor
+                _compress_neighbors(tid_new, t_new, d)
 
             if callback is not None:
                 callback(self, tid_new)

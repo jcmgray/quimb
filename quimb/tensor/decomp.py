@@ -509,6 +509,33 @@ def _similarity_compress_eig_numba(X, max_bond, renorm):
     return Cl, Cr
 
 
+def _similarity_compress_eigh(X, max_bond, renorm):
+    XX = (X + dag(X)) / 2
+    el, ev = do('linalg.eigh', XX)
+    sel = do('argsort', do('abs', el))[-max_bond:]
+    Cl = ev[:, sel]
+    Cr = dag(Cl)
+    if renorm:
+        trace_old = np.trace(X)
+        trace_new = np.trace(Cr @ (X @ Cl))
+        Cl = Cl * trace_old / trace_new
+    return Cl, Cr
+
+
+@njit
+def _similarity_compress_eigh_numba(X, max_bond, renorm):
+    XX = (X + dag_numba(X)) / 2
+    el, ev = np.linalg.eigh(XX)
+    sel = np.argsort(-np.abs(el))[:max_bond]
+    Cl = ev[:, sel]
+    Cr = dag_numba(Cl)
+    if renorm:
+        trace_old = np.trace(X)
+        trace_new = np.trace(Cr @ (X @ Cl))
+        Cl = Cl * trace_old / trace_new
+    return Cl, Cr
+
+
 def _similarity_compress_svd(X, max_bond, renorm, asymm):
     U, _, VH = do('linalg.svd', X)
     U = U[:, :max_bond]
@@ -550,50 +577,32 @@ def _similarity_compress_svd_numba(X, max_bond, renorm, asymm):
     return Cl, Cr
 
 
-def _similarity_compress_eigh2(X, max_bond, renorm):
-    EE = X @ dag(X)
-    _, ev = do('linalg.eigh', EE + dag(EE))
-    Cl = ev[:, -max_bond:]
-    Cr = dag(Cl)
-
-    if renorm:
-        trace_old = do('trace', X)
-        trace_new = do('trace', Cr @ (X @ Cl))
-        Cl = Cl * (trace_old / trace_new)
-
-    return Cl, Cr
-
-
-@njit  # pragma: no cover
-def _similarity_compress_eigh2_numba(X, max_bond, renorm):
-    EE = X @ dag_numba(X)
-    _, ev = np.linalg.eigh(EE + dag_numba(EE))
-    Cl = ev[:, -max_bond:]
+def _similarity_compress_schur_numpy(X, max_bond, renorm):
+    L, Z = scla.schur(X, check_finite=False)
+    sel = np.argsort(-np.abs(np.diag(L)))[:max_bond]
+    Cl = Z[:, sel]
     Cr = dag_numba(Cl)
     if renorm:
         trace_old = np.trace(X)
         trace_new = np.trace(Cr @ (X @ Cl))
-        Cl = Cl * (trace_old / trace_new)
+        Cl = Cl * trace_old / trace_new
     return Cl, Cr
 
 
 _similarity_compress_fns = {
     ('eig', False): _similarity_compress_eig,
     ('eig', True): _similarity_compress_eig_numba,
+    ('eigh', False): _similarity_compress_eigh,
+    ('eigh', True): _similarity_compress_eigh_numba,
     ('svd', False): functools.partial(
         _similarity_compress_svd, asymm=0),
     ('svd', True): functools.partial(
         _similarity_compress_svd_numba, asymm=0),
-    ('svd-asymm', False): functools.partial(
-        _similarity_compress_svd, asymm=1),
-    ('svd-asymm', True): functools.partial(
-        _similarity_compress_svd_numba, asymm=1),
-    ('eigh2', False): _similarity_compress_eigh2,
-    ('eigh2', True): _similarity_compress_eigh2_numba,
+    ('schur', True): _similarity_compress_schur_numpy,
 }
 
 
-def similarity_compress(X, max_bond, renorm=True, method='eigh2'):
+def similarity_compress(X, max_bond, renorm=True, method='eig'):
     if method == 'eig':
         if get_dtype_name(X) == 'float64':
             X = astype(X, 'complex128')
