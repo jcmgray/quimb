@@ -101,19 +101,16 @@ def _get_contract_path(eq, *shapes, **kwargs):
     """
 
     # construct the internal opt_einsum data
-    lhs, rhs = eq.split('->')
-    terms = lhs.split(',')
+    lhs, output = eq.split('->')
+    inputs = lhs.split(',')
 
     # nothing to optimize in this case
-    nterms = len(terms)
+    nterms = len(inputs)
     if nterms <= 2:
         return (tuple(range(nterms)),)
 
-    inputs = list(map(set, terms))
-    output = set(rhs)
-
     size_dict = {}
-    for ix, d in zip(concat(terms), concat(shapes)):
+    for ix, d in zip(concat(inputs), concat(shapes)):
         size_dict[ix] = d
 
     # get the actual path generating function
@@ -465,8 +462,14 @@ def _inds_to_eq(all_inds, inputs, output):
 _VALID_CONTRACT_GET = {None, 'expression', 'path', 'path-info', 'symbol-map'}
 
 
-def tensor_contract(*tensors, output_inds=None, get=None,
-                    backend=None, **contract_opts):
+def tensor_contract(
+    *tensors,
+    output_inds=None,
+    get=None,
+    backend=None,
+    preserve_tensor=False,
+    **contract_opts
+):
     """Efficiently contract multiple tensors, combining their tags.
 
     Parameters
@@ -491,6 +494,9 @@ def tensor_contract(*tensors, output_inds=None, get=None,
     backend : {'numpy', 'cupy', 'tensorflow', 'theano', 'dask', ...}, optional
         Which backend to use to perform the contraction. Must be a valid
         ``opt_einsum`` backend with the relevant library installed.
+    preserve_tensor : bool, optional
+        Whether to return a tensor regardless of whether the output object
+        is a scalar (has no indices) or not.
     contract_opts
         Passed to ``opt_einsum.contract_expression`` or
         ``opt_einsum.contract_path``.
@@ -499,8 +505,6 @@ def tensor_contract(*tensors, output_inds=None, get=None,
     -------
     scalar or Tensor
     """
-    check_opt('get', get, _VALID_CONTRACT_GET)
-
     if backend is None:
         backend = get_contract_backend()
 
@@ -517,34 +521,38 @@ def tensor_contract(*tensors, output_inds=None, get=None,
     # possibly map indices into the range needed by opt-einsum
     eq = _inds_to_eq(all_ix, i_ix, o_ix)
 
-    if get == 'symbol-map':
-        return {oe.get_symbol(i): ix for i, ix in enumerate(all_ix)}
+    if get is not None:
+        check_opt('get', get, _VALID_CONTRACT_GET)
 
-    if get == 'path':
-        ops = (t.shape for t in tensors)
-        return get_contraction(eq, *ops, get='path', **contract_opts)
+        if get == 'symbol-map':
+            return {oe.get_symbol(i): ix for i, ix in enumerate(all_ix)}
 
-    if get == 'path-info':
-        ops = (t.shape for t in tensors)
-        path_info = get_contraction(eq, *ops, get='info', **contract_opts)
-        path_info.quimb_symbol_map = {
-            oe.get_symbol(i): ix for i, ix in enumerate(all_ix)
-        }
-        return path_info
+        if get == 'path':
+            ops = (t.shape for t in tensors)
+            return get_contraction(eq, *ops, get='path', **contract_opts)
 
-    if get == 'expression':
-        # account for possible constant tensors
-        cnst = contract_opts.get('constants', ())
-        ops = (t.data if i in cnst else t.shape for i, t in enumerate(tensors))
-        expression = get_contraction(eq, *ops, **contract_opts)
-        return expression
+        if get == 'path-info':
+            ops = (t.shape for t in tensors)
+            path_info = get_contraction(eq, *ops, get='info', **contract_opts)
+            path_info.quimb_symbol_map = {
+                oe.get_symbol(i): ix for i, ix in enumerate(all_ix)
+            }
+            return path_info
+
+        if get == 'expression':
+            # account for possible constant tensors
+            cnst = contract_opts.get('constants', ())
+            ops = (t.data if i in cnst else t.shape
+                   for i, t in enumerate(tensors))
+            expression = get_contraction(eq, *ops, **contract_opts)
+            return expression
 
     # perform the contraction
     shapes = (t.shape for t in tensors)
     expression = get_contraction(eq, *shapes, **contract_opts)
     o_array = expression(*(t.data for t in tensors), backend=backend)
 
-    if not o_ix:
+    if not o_ix and not preserve_tensor:
         if isinstance(o_array, np.ndarray):
             o_array = realify_scalar(o_array.item(0))
         return o_array
@@ -2048,11 +2056,12 @@ class Tensor(object):
         """
         t = self if inplace else self.copy()
 
-        new_inds = tuple(oset(t.inds))
-        if len(t.inds) == len(new_inds):
+        old_inds = t.inds
+        new_inds = tuple(unique(old_inds))
+        if len(old_inds) == len(new_inds):
             return t
 
-        eq = _inds_to_eq(new_inds, (t.inds,), new_inds)
+        eq = _inds_to_eq(new_inds, (old_inds,), new_inds)
         t.modify(apply=lambda x: do('einsum', eq, x, like=x),
                  inds=new_inds, left_inds=None)
 
@@ -3948,7 +3957,7 @@ class TensorNetwork(object):
 
         T1 = self._pop_tensor(tid1)
         T2 = self._pop_tensor(tid2)
-        T12 = tensor_contract(T1, T2, **contract_opts)
+        T12 = tensor_contract(T1, T2, preserve_tensor=True, **contract_opts)
         self.add_tensor(T12, tid=tid2, virtual=True)
 
     def contract_ind(self, ind, **contract_opts):
@@ -3956,7 +3965,7 @@ class TensorNetwork(object):
         """
         tids = self._get_tids_from_inds(ind)
         ts = [self._pop_tensor(tid) for tid in tids]
-        self |= tensor_contract(*ts, **contract_opts)
+        self |= tensor_contract(*ts, preserve_tensor=True, **contract_opts)
 
     def _compute_bond_env(
         self, tid1, tid2,
@@ -4888,7 +4897,7 @@ class TensorNetwork(object):
                     tid1, tid2 = tn.ind_map[ind]
                 except (KeyError, ValueError):
                     # fused multibond (removed) or not a bond (len(tids != 2))
-                    pass
+                    continue
 
                 t1 = tn.tensor_map[tid1]
                 t2 = tn.tensor_map[tid2]
@@ -5511,6 +5520,34 @@ class TensorNetwork(object):
 
     insert_operator_ = functools.partialmethod(insert_operator, inplace=True)
 
+    def _insert_gauge_tids(
+        self,
+        U,
+        tid1,
+        tid2,
+        Uinv=None,
+        tol=1e-10,
+        bond=None,
+    ):
+        t1, t2 = self._tids_get(tid1, tid2)
+
+        if bond is None:
+            bond, = t1.bonds(t2)
+
+        if Uinv is None:
+            Uinv = do('linalg.inv', U)
+
+            # if we get wildly larger inverse due to singular U, try pseudo-inv
+            if vdot(Uinv, Uinv) / vdot(U, U) > 1 / tol:
+                Uinv = do('linalg.pinv', U, rcond=tol**0.5)
+
+            # if still wildly larger inverse raise an error
+            if vdot(Uinv, Uinv) / vdot(U, U) > 1 / tol:
+                raise np.linalg.LinAlgError("Ill conditioned inverse.")
+
+        t1.gate_(Uinv.T, bond)
+        t2.gate_(U, bond)
+
     def insert_gauge(self, U, where1, where2, Uinv=None, tol=1e-10):
         """Insert the gauge transformation ``U @ U^-1`` into the bond between
         the tensors, ``T1`` and ``T2``, defined by ``where1`` and ``where2``.
@@ -5529,24 +5566,9 @@ class TensorNetwork(object):
             The inverse gauge, ``U @ Uinv == Uinv @ U == eye``, to insert.
             If not given will be calculated using :func:`numpy.linalg.inv`.
         """
-        n1, = self._get_tids_from_tags(where1, which='all')
-        n2, = self._get_tids_from_tags(where2, which='all')
-        T1, T2 = self.tensor_map[n1], self.tensor_map[n2]
-        bnd, = T1.bonds(T2)
-
-        if Uinv is None:
-            Uinv = do('linalg.inv', U)
-
-            # if we get wildly larger inverse due to singular U, try pseudo-inv
-            if vdot(Uinv, Uinv) / vdot(U, U) > 1 / tol:
-                Uinv = do('linalg.pinv', U, rcond=tol**0.5)
-
-            # if still wildly larger inverse raise an error
-            if vdot(Uinv, Uinv) / vdot(U, U) > 1 / tol:
-                raise np.linalg.LinAlgError("Ill conditioned inverse.")
-
-        T1.gate_(Uinv.T, bnd)
-        T2.gate_(U, bnd)
+        tid1, = self._get_tids_from_tags(where1, which='all')
+        tid2, = self._get_tids_from_tags(where2, which='all')
+        self._insert_gauge_tids(U, tid1, tid2, Uinv=Uinv, tol=tol)
 
     # ----------------------- contracting the network ----------------------- #
 
@@ -5576,13 +5598,16 @@ class TensorNetwork(object):
         untagged_tn, tagged_ts = self.partition_tensors(
             tags, inplace=inplace, which=which)
 
+        contracting_all = untagged_tn is None
         if not tagged_ts:
             raise ValueError("No tags were found - nothing to contract. "
                              "(Change this to a no-op maybe?)")
 
-        contracted = tensor_contract(*tagged_ts, **opts)
+        contracted = tensor_contract(
+            *tagged_ts, preserve_tensor=not contracting_all, **opts
+        )
 
-        if untagged_tn is None:
+        if contracting_all:
             return contracted
 
         untagged_tn.add_tensor(contracted, virtual=True)
