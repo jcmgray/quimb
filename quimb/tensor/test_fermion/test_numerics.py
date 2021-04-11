@@ -12,9 +12,10 @@ def u11setup(request):
     bond1 = BondInfo({U11(0):3, U11(1,1): 3, U11(1,-1):3, U11(2):3})
     bond2 = BondInfo({U11(0):5, U11(1,1): 5, U11(1,-1):5, U11(2):5})
     request.cls.abc = abc = rand((bond2, bond1, bond1), dq=U11(1,1), pattern="+--").to_flat()
-    request.cls.bcd = bcd = rand((bond1, bond1, bond1), dq=U11(1,-1), pattern="++-").to_flat()
-    request.cls.ega = ega = rand((bond1, bond1, bond2), dq=U11(1,1), pattern="-++").to_flat()
-    request.cls.deg = deg = rand((bond1, bond1, bond1), dq=U11(1,-1), pattern="-+-").to_flat()
+    request.cls.bcd = bcd = rand((bond1, bond1, bond1), dq=U11(-1,-1), pattern="++-").to_flat()
+
+    request.cls.ega = ega = rand((bond1, bond1, bond2), dq=U11(1,-1), pattern="+--").to_flat()
+    request.cls.deg = deg = rand((bond1, bond1, bond1), dq=U11(-1,1), pattern="+-+").to_flat()
     request.cls.Tabc = Tabc = FermionTensor(abc, inds=['a','b','c'], tags=["abc"])
     request.cls.Tega = Tega = FermionTensor(ega, inds=['e','g','a'], tags=["ega"])
     request.cls.Tbcd = Tbcd = FermionTensor(bcd, inds=['b','c','d'], tags=["bcd"])
@@ -25,8 +26,8 @@ def u11setup(request):
     bc = rand((bond1, bond1), dq=U11(1,-1), pattern="++").to_flat()
     Tab = FermionTensor(ab, inds=['a','b'], tags=["ab"])
     Tbc = FermionTensor(bc, inds=['b','c'], tags=["bc"])
-    Tab1 = FermionTensor(ab, inds=['a','b1'], tags=["ab1"])
-    Tbc1 = FermionTensor(bc, inds=['b1','c'], tags=["bc1"])
+    Tab1 = FermionTensor(ab.dagger, inds=['b1','a'], tags=["ab1"])
+    Tbc1 = FermionTensor(bc.dagger, inds=['c','b1'], tags=["bc1"])
     request.cls.norm = FermionTensorNetwork((Tab, Tbc, Tbc1, Tab1))
     yield
 
@@ -34,10 +35,12 @@ def u11setup(request):
 def u1setup(request):
     bond1 = BondInfo({U1(0):3, U1(1): 3, U1(3):3, U1(2):3})
     bond2 = BondInfo({U1(0):5, U1(1): 5, U1(3):5, U1(2):5})
-    request.cls.abc = abc = rand((bond2, bond1, bond1), dq=U1(-1), pattern="+--").to_flat()
-    request.cls.bcd = bcd = rand((bond1, bond1, bond1), dq=U1(3), pattern="++-").to_flat()
-    request.cls.ega = ega = rand((bond1, bond1, bond2), dq=U1(-1), pattern="-++").to_flat()
-    request.cls.deg = deg = rand((bond1, bond1, bond1), dq=U1(3), pattern="-+-").to_flat()
+
+    request.cls.abc = abc = rand((bond2, bond1, bond1), dq=U1(1), pattern="+--").to_flat()
+    request.cls.bcd = bcd = rand((bond1, bond1, bond1), dq=U1(2), pattern="++-").to_flat()
+    request.cls.ega = ega = rand((bond1, bond1, bond2), dq=U1(-1), pattern="+--").to_flat()
+    request.cls.deg = deg = rand((bond1, bond1, bond1), dq=U1(-2), pattern="+-+").to_flat()
+
     request.cls.Tabc = Tabc = FermionTensor(abc, inds=['a','b','c'], tags=["abc"])
     request.cls.Tega = Tega = FermionTensor(ega, inds=['e','g','a'], tags=["ega"])
     request.cls.Tbcd = Tbcd = FermionTensor(bcd, inds=['b','c','d'], tags=["bcd"])
@@ -48,8 +51,8 @@ def u1setup(request):
     bc = rand((bond1, bond1), dq=U1(1), pattern="++").to_flat()
     Tab = FermionTensor(ab, inds=['a','b'], tags=["ab"])
     Tbc = FermionTensor(bc, inds=['b','c'], tags=["bc"])
-    Tab1 = FermionTensor(ab, inds=['a','b1'], tags=["ab1"])
-    Tbc1 = FermionTensor(bc, inds=['b1','c'], tags=["bc1"])
+    Tab1 = FermionTensor(ab.dagger, inds=['b1','a'], tags=["ab1"])
+    Tbc1 = FermionTensor(bc.dagger, inds=['c','b1'], tags=["bc1"])
     request.cls.norm = FermionTensorNetwork((Tab, Tbc, Tbc1, Tab1))
     yield
 
@@ -57,10 +60,11 @@ def u1setup(request):
 def z4setup(request):
     bond1 = BondInfo({Z4(0):3, Z4(1): 3, Z4(3):3, Z4(2):3})
     bond2 = BondInfo({Z4(0):5, Z4(1): 5, Z4(3):5, Z4(2):5})
+
     request.cls.abc = abc = rand((bond2, bond1, bond1), dq=Z4(1), pattern="+--").to_flat()
-    request.cls.bcd = bcd = rand((bond1, bond1, bond1), dq=Z4(3), pattern="++-").to_flat()
-    request.cls.ega = ega = rand((bond1, bond1, bond2), dq=Z4(1), pattern="-++").to_flat()
-    request.cls.deg = deg = rand((bond1, bond1, bond1), dq=Z4(3), pattern="-+-").to_flat()
+    request.cls.bcd = bcd = rand((bond1, bond1, bond1), dq=Z4(2), pattern="++-").to_flat()
+    request.cls.ega = ega = rand((bond1, bond1, bond2), dq=Z4(0), pattern="+--").to_flat()
+    request.cls.deg = deg = rand((bond1, bond1, bond1), dq=Z4(1), pattern="+-+").to_flat()
     request.cls.Tabc = Tabc = FermionTensor(abc, inds=['a','b','c'], tags=["abc"])
     request.cls.Tega = Tega = FermionTensor(ega, inds=['e','g','a'], tags=["ega"])
     request.cls.Tbcd = Tbcd = FermionTensor(bcd, inds=['b','c','d'], tags=["bcd"])
@@ -71,8 +75,8 @@ def z4setup(request):
     bc = rand((bond1, bond1), dq=Z4(1), pattern="++").to_flat()
     Tab = FermionTensor(ab, inds=['a','b'], tags=["ab"])
     Tbc = FermionTensor(bc, inds=['b','c'], tags=["bc"])
-    Tab1 = FermionTensor(ab, inds=['a','b1'], tags=["ab1"])
-    Tbc1 = FermionTensor(bc, inds=['b1','c'], tags=["bc1"])
+    Tab1 = FermionTensor(ab.dagger, inds=['b1','a'], tags=["ab1"])
+    Tbc1 = FermionTensor(bc.dagger, inds=['c','b1'], tags=["bc1"])
     request.cls.norm = FermionTensorNetwork((Tab, Tbc, Tbc1, Tab1))
     yield
 
@@ -80,10 +84,10 @@ def z4setup(request):
 def z2setup(request):
     bond1 = BondInfo({Z2(0):3, Z2(1): 3})
     bond2 = BondInfo({Z2(0):5, Z2(1): 5})
-    request.cls.abc = abc = rand((bond2, bond1, bond1), dq=Z2(1), pattern="+--").to_flat()
+    request.cls.abc = abc = rand((bond2, bond1, bond1), dq=Z2(0), pattern="+--").to_flat()
     request.cls.bcd = bcd = rand((bond1, bond1, bond1), dq=Z2(1), pattern="++-").to_flat()
-    request.cls.ega = ega = rand((bond1, bond1, bond2), dq=Z2(1), pattern="-++").to_flat()
-    request.cls.deg = deg = rand((bond1, bond1, bond1), dq=Z2(1), pattern="-+-").to_flat()
+    request.cls.ega = ega = rand((bond1, bond1, bond2), dq=Z2(1), pattern="+--").to_flat()
+    request.cls.deg = deg = rand((bond1, bond1, bond1), dq=Z2(0), pattern="+-+").to_flat()
     request.cls.Tabc = Tabc = FermionTensor(abc, inds=['a','b','c'], tags=["abc"])
     request.cls.Tega = Tega = FermionTensor(ega, inds=['e','g','a'], tags=["ega"])
     request.cls.Tbcd = Tbcd = FermionTensor(bcd, inds=['b','c','d'], tags=["bcd"])
@@ -94,12 +98,12 @@ def z2setup(request):
     bc = rand((bond1, bond1), dq=Z2(1), pattern="++").to_flat()
     Tab = FermionTensor(ab, inds=['a','b'], tags=["ab"])
     Tbc = FermionTensor(bc, inds=['b','c'], tags=["bc"])
-    Tab1 = FermionTensor(ab*1.3, inds=['a','b1'], tags=["ab1"])
-    Tbc1 = FermionTensor(bc*1.5, inds=['b1','c'], tags=["bc1"])
+    Tab1 = FermionTensor(ab.dagger, inds=['b1','a'], tags=["ab1"])
+    Tbc1 = FermionTensor(bc.dagger, inds=['c','b1'], tags=["bc1"])
     request.cls.norm = FermionTensorNetwork((Tab, Tbc, Tbc1, Tab1))
     yield
 
-@pytest.mark.usefixtures('u1setup')
+@pytest.mark.usefixtures('u11setup')
 class TestU11:
     def test_backend(self):
         Tegbc = tensor_contract(self.Tabc, self.Tega, output_inds=("e","g","b", "c"))
