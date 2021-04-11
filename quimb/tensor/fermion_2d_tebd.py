@@ -227,6 +227,12 @@ class LocalHam2D:
         s = "<LocalHam2D(Lx={}, Ly={}, num_terms={})>"
         return s.format(self.Lx, self.Ly, len(self.terms))
 
+def _get_location(Ti, Tj):
+    if Ti.get_fermion_info()[1]<Tj.get_fermion_info()[1]:
+        return "front", "back"
+    else:
+        return "back", "front"
+
 class SimpleUpdate(_SimpleUpdate):
 
     def _initialize_gauges(self):
@@ -236,10 +242,15 @@ class SimpleUpdate(_SimpleUpdate):
         data00 = self._psi[0, 0].data
 
         self._gauges = dict()
+        inv_dict = {"+":"-", "-":"+"}
         for ija, ijb in self._psi.gen_bond_coos():
+            Tija = self._psi[ija]
+            Tijb = self._psi[ijb]
             bnd = self._psi.bond(ija, ijb)
-            bond_dimension = self._psi.ind_size(bnd)
+            sign_ija = Tija.data.pattern[Tija.inds.index(bnd)]
+            bond_dimension = Tija.ind_size(bnd)
             Tsval = eye(bond_dimension)
+            Tsval.pattern = sign_ija + inv_dict[sign_ija]
             self._gauges[tuple(sorted((ija, ijb)))] = Tsval
 
     def gate(self, U, where):
@@ -275,12 +286,12 @@ class SimpleUpdate(_SimpleUpdate):
             for neighbour in neighbours[site]:
                 if (site, neighbour) in self.gauges:
                     Tsval = self.gauges[(site, neighbour)]
-                    location = "back"
                 elif (neighbour, site) in self.gauges:
                     Tsval = self.gauges[(neighbour, site)]
-                    location = "front"
                 else:
                     raise KeyError("gauge not found")
+                T2 = self._psi[neighbour]
+                location = _get_location(Tij, T2)[0]
                 bond_ind = self._psi.bond(site, neighbour)
                 mult_val = Tsval.copy()
                 mult_val.data[abs(mult_val.data)>INVERSE_CUTOFF] += self.gauge_smudge
@@ -292,13 +303,11 @@ class SimpleUpdate(_SimpleUpdate):
             Ta, Tb = self._psi[site_a], self._psi[site_b]
             if (site_a, site_b) in self.gauges:
                 Tsval = self.gauges[(site_a, site_b)]
-                loca, locb = ("back", "front")
             elif (site_b, site_a) in self.gauges:
                 Tsval = self.gauges[(site_b, site_a)]
-                loca, locb = ("front", "back")
             else:
                 raise KeyError("gauge not found")
-
+            loca, locb = _get_location(Ta, Tb)
             mult_val = Tsval.copy()
             mult_val.data = Tsval.data ** .5
             bnd = self._psi.bond(site_a, site_b)
@@ -332,16 +341,15 @@ class SimpleUpdate(_SimpleUpdate):
             for neighbour in neighbours[site]:
                 if (site, neighbour) in self.gauges:
                     Tsval = self.gauges[(site, neighbour)]
-                    location = "back"
                 elif (neighbour, site) in self.gauges:
                     Tsval = self.gauges[(neighbour, site)]
-                    location = "front"
                 else:
                     raise KeyError("gauge not found")
                 bnd = self._psi.bond(site, neighbour)
                 mult_val = Tsval.copy()
                 non_zero_ind = abs(mult_val.data)>INVERSE_CUTOFF
                 mult_val.data[non_zero_ind] = (mult_val.data[non_zero_ind] + self.gauge_smudge) ** -1
+                location = _get_location(Tij, self._psi[neighbour])[0]
                 Tij.multiply_index_diagonal_(
                     ind=bnd, x=mult_val, location=location)
 
@@ -360,10 +368,11 @@ class SimpleUpdate(_SimpleUpdate):
                 bnd = psi.bond(ija, ijb)
                 Ta = psi[ija]
                 Tb = psi[ijb]
+                loca, locb = _get_location(Ta, Tb)
                 mult_val = Tsval.copy()
                 mult_val.data = Tsval.data ** .5
-                Ta.multiply_index_diagonal_(bnd, mult_val, location='back')
-                Tb.multiply_index_diagonal_(bnd, mult_val, location='front')
+                Ta.multiply_index_diagonal_(bnd, mult_val, location=loca)
+                Tb.multiply_index_diagonal_(bnd, mult_val, location=locb)
 
         if self.condition_tensors:
             conditioner(psi, balance_bonds=self.condition_balance_bonds)

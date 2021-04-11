@@ -349,7 +349,7 @@ def tensor_split(
     if get == 'tensors':
         return tensors
 
-    return FermionTensorNetwork(tensors, check_collisions=False, virtual=True)
+    return FermionTensorNetwork(tensors[::-1], check_collisions=False, virtual=True)
 
 def _compress_connected(Tl, Tr, absorb='both', **compress_opts):
     """Compression of two Fermionic tensors that are adjacent to each other.
@@ -524,8 +524,12 @@ def tensor_balance_bond(t1, t2, smudge=1e-6):
             sblk1.append(SubTensor(reduced=np.diag(s**-0.25), q_labels=iblk1.q_labels))
             sblk2.append(SubTensor(reduced=np.diag(s**0.25), q_labels=iblk2.q_labels))
 
-    s1 = SparseFermionTensor(blocks=sblk1, pattern="+-").to_flat()
-    s2 = SparseFermionTensor(blocks=sblk2, pattern="+-").to_flat()
+    sign1 = t1.data.pattern[t1.inds.index(ix)]
+    sign2 = t2.data.pattern[t2.inds.index(ix)]
+    s1_pattern = {"+":"-+", "-":"+-"}[sign1]
+    s2_pattern = {"-":"-+", "+":"+-"}[sign2]
+    s1 = SparseFermionTensor(blocks=sblk1, pattern=s1_pattern).to_flat()
+    s2 = SparseFermionTensor(blocks=sblk2, pattern=s2_pattern).to_flat()
     t1.multiply_index_diagonal_(ix, s1, location="back")
     t2.multiply_index_diagonal_(ix, s2, location="front")
 
@@ -966,8 +970,11 @@ class FermionTensor(Tensor):
             if dim_or_ind not in self.inds:
                 raise ValueError("%s indice not found in the tensor"%dim_or_ind)
             dim_or_ind = self.inds.index(dim_or_ind)
-
-        sz = [self.symmetry.from_flat(ix) for ix in self.data.q_labels[:,dim_or_ind]]
+        ipattern = self.data.pattern[dim_or_ind]
+        if ipattern=="+":
+            sz = [self.symmetry.from_flat(ix) for ix in self.data.q_labels[:,dim_or_ind]]
+        else:
+            sz = [-self.symmetry.from_flat(ix) for ix in self.data.q_labels[:,dim_or_ind]]
         sp = self.data.shapes[:,dim_or_ind]
         bond_dict = dict(zip(sz, sp))
         return BondInfo(bond_dict)

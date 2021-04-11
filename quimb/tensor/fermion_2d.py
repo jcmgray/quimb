@@ -126,7 +126,7 @@ def gate_string_split_(TG, where, string, original_ts, bonds_along,
         idx = np.where(abs(s.data)>INVERSE_CUTOFF)[0]
         snew = np.zeros_like(s.data)
         snew[idx] = 1/s.data[idx]
-        snew = s.__class__(s.q_labels, s.shapes, snew, pattern="+-", idxs=s.idxs)
+        snew = s.__class__(s.q_labels, s.shapes, snew, pattern=s.pattern, idxs=s.idxs)
         t = inner_ts[i]
         t.multiply_index_diagonal_(bix, snew, location=location)
 
@@ -258,7 +258,7 @@ def gate_string_reduce_split_(TG, where, string, original_ts, bonds_along,
         idx = np.where(abs(s.data)>INVERSE_CUTOFF)[0]
         snew = np.zeros_like(s.data)
         snew[idx] = 1/s.data[idx]
-        snew = s.__class__(s.q_labels, s.shapes, snew, pattern="+-", idxs=s.idxs)
+        snew = s.__class__(s.q_labels, s.shapes, snew, pattern=s.pattern, idxs=s.idxs)
         t = new_ts[i]
         t.multiply_index_diagonal_(bix, snew, location=location)
 
