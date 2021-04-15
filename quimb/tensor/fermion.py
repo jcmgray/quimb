@@ -13,10 +13,9 @@ from .tensor_core import (Tensor, TensorNetwork, rand_uuid, tags_to_oset,
 from .tensor_core import tensor_contract as _tensor_contract
 from ..utils import oset, valmap
 from .array_ops import asarray, ndim
-from . import fermion_interface
+from . import block_interface
 
-DEFAULT_SYMMETRY = fermion_interface.DEFAULT_SYMMETRY
-BondInfo = fermion_interface.BondInfo
+BondInfo = block_interface.BondInfo
 
 def _contract_connected(T1, T2, output_inds=None):
     """Fermionic contraction of two tensors that are adjacent to each other.

@@ -1,7 +1,7 @@
 import pytest
 import numpy as np
 import itertools
-from quimb.tensor.fermion_interface import BondInfo, SparseFermionTensor, U11, U1, Z4, Z2
+from quimb.tensor.block_interface import BondInfo, SparseFermionTensor, U11, U1, Z4, Z2
 from quimb.tensor.fermion_gen import gen_mf_peps
 
 @pytest.fixture(scope='class')

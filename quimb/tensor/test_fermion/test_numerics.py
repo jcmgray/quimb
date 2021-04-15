@@ -2,7 +2,7 @@ import pytest
 import numpy as np
 from quimb.tensor.fermion import (
     FermionTensor, FermionTensorNetwork, tensor_contract)
-from quimb.tensor.fermion_interface import BondInfo, U11, U1, Z2, Z4
+from quimb.tensor.block_interface import BondInfo, U11, U1, Z2, Z4
 from pyblock3.algebra.fermion import SparseFermionTensor
 
 rand = SparseFermionTensor.random

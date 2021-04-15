@@ -19,6 +19,7 @@ from .tensor_core import (
     tags_to_oset,
     bonds
 )
+from .block_tools import inv_with_smudge
 from ..utils import check_opt, pairwise
 from collections import defaultdict
 from itertools import product
@@ -123,10 +124,7 @@ def gate_string_split_(TG, where, string, original_ts, bonds_along,
             break
     # SVD funcs needs to be modify and make sure S has even parity
     for i, bix, location, s in regauged:
-        idx = np.where(abs(s.data)>INVERSE_CUTOFF)[0]
-        snew = np.zeros_like(s.data)
-        snew[idx] = 1/s.data[idx]
-        snew = s.__class__(s.q_labels, s.shapes, snew, pattern=s.pattern, idxs=s.idxs)
+        snew = inv_with_smudge(s, INVERSE_CUTOFF, gauge_smudge=0)
         t = inner_ts[i]
         t.multiply_index_diagonal_(bix, snew, location=location)
 
@@ -255,10 +253,7 @@ def gate_string_reduce_split_(TG, where, string, original_ts, bonds_along,
     ]
 
     for i, bix, location, s in regauged:
-        idx = np.where(abs(s.data)>INVERSE_CUTOFF)[0]
-        snew = np.zeros_like(s.data)
-        snew[idx] = 1/s.data[idx]
-        snew = s.__class__(s.q_labels, s.shapes, snew, pattern=s.pattern, idxs=s.idxs)
+        snew = inv_with_smudge(s, INVERSE_CUTOFF, gauge_smudge=0)
         t = new_ts[i]
         t.multiply_index_diagonal_(bix, snew, location=location)
 

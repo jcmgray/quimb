@@ -6,11 +6,12 @@ from ..utils import pairwise
 from .tensor_2d_tebd import SimpleUpdate as _SimpleUpdate
 from .tensor_2d_tebd import conditioner
 from .tensor_2d import gen_long_range_path, nearest_neighbors
-from .fermion_interface import DEFAULT_SYMMETRY, eye, to_exponential
+from .block_interface import eye, to_exponential, Hubbard
+from . import block_tools
 
 INVERSE_CUTOFF = 1e-10
 
-def Hubbard2D(t, u, Lx, Ly, mu=0., symmetry=DEFAULT_SYMMETRY):
+def Hubbard2D(t, u, Lx, Ly, mu=0., symmetry=None):
     """Create a LocalHam2D object for 2D Hubbard Model
 
     Parameters
@@ -30,7 +31,6 @@ def Hubbard2D(t, u, Lx, Ly, mu=0., symmetry=DEFAULT_SYMMETRY):
     -------
     a LocalHam2D object
     """
-    from quimb.tensor.fermion_interface import Hubbard
     ham = dict()
     count_neighbour = lambda i,j: (i>0) + (i<Lx-1) + (j>0) + (j<Ly-1)
     for i, j in product(range(Lx), range(Ly)):
@@ -293,8 +293,7 @@ class SimpleUpdate(_SimpleUpdate):
                 T2 = self._psi[neighbour]
                 location = _get_location(Tij, T2)[0]
                 bond_ind = self._psi.bond(site, neighbour)
-                mult_val = Tsval.copy()
-                mult_val.data[abs(mult_val.data)>INVERSE_CUTOFF] += self.gauge_smudge
+                mult_val = block_tools.add_with_smudge(Tsval, INVERSE_CUTOFF, self.gauge_smudge)
                 Tij.multiply_index_diagonal_(
                     ind=bond_ind, x=mult_val, location=location)
 
@@ -308,8 +307,7 @@ class SimpleUpdate(_SimpleUpdate):
             else:
                 raise KeyError("gauge not found")
             loca, locb = _get_location(Ta, Tb)
-            mult_val = Tsval.copy()
-            mult_val.data = Tsval.data ** .5
+            mult_val = block_tools.sqrt(Tsval)
             bnd = self._psi.bond(site_a, site_b)
             Ta.multiply_index_diagonal_(ind=bnd, x=mult_val, location=loca)
             Tb.multiply_index_diagonal_(ind=bnd, x=mult_val, location=locb)
@@ -327,8 +325,7 @@ class SimpleUpdate(_SimpleUpdate):
                 bond_pair = (site_b, site_a)
             s = info['singular_values', bond_pair]
             if self.gauge_renorm:
-                # keep the singular values from blowing up
-                s = s / np.sum(s.data**2) ** 0.5
+                s = s / s.norm()
 
             if bond_pair not in self.gauges:
                 del self.gauges[(bond_pair[1], bond_pair[0])]
@@ -346,9 +343,7 @@ class SimpleUpdate(_SimpleUpdate):
                 else:
                     raise KeyError("gauge not found")
                 bnd = self._psi.bond(site, neighbour)
-                mult_val = Tsval.copy()
-                non_zero_ind = abs(mult_val.data)>INVERSE_CUTOFF
-                mult_val.data[non_zero_ind] = (mult_val.data[non_zero_ind] + self.gauge_smudge) ** -1
+                mult_val = block_tools.inv_with_smudge(Tsval, INVERSE_CUTOFF, self.gauge_smudge)
                 location = _get_location(Tij, self._psi[neighbour])[0]
                 Tij.multiply_index_diagonal_(
                     ind=bnd, x=mult_val, location=location)
@@ -369,8 +364,7 @@ class SimpleUpdate(_SimpleUpdate):
                 Ta = psi[ija]
                 Tb = psi[ijb]
                 loca, locb = _get_location(Ta, Tb)
-                mult_val = Tsval.copy()
-                mult_val.data = Tsval.data ** .5
+                mult_val = block_tools.sqrt(Tsval)
                 Ta.multiply_index_diagonal_(bnd, mult_val, location=loca)
                 Tb.multiply_index_diagonal_(bnd, mult_val, location=locb)
 

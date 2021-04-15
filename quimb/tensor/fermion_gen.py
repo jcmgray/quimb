@@ -1,15 +1,15 @@
+import numpy as np
 from pyblock3.algebra.core import SubTensor
 from pyblock3.algebra.fermion import SparseFermionTensor
 from pyblock3.algebra import fermion_encoding
-from quimb.tensor.fermion_interface import DEFAULT_SYMMETRY
+import quimb.tensor.block_interface as bitf
 from quimb.tensor.fermion_2d import FPEPS
-import numpy as np
-from itertools import product
 
 pattern_map = {"d": "+", "l":"+", "p":"+",
                "u": "-", "r":"-"}
 
-def _gen_site_tsr(state, pattern=None, ndim=2, ax=0, symmetry=DEFAULT_SYMMETRY):
+def _gen_site_tsr(state, pattern=None, ndim=2, ax=0, symmetry=None):
+    if symmetry is None: symmetry = bitf.DEFAULT_SYMMETRY
     state_map = fermion_encoding.get_state_map(symmetry)
     if state not in state_map:
         raise KeyError("requested state not recoginized")
@@ -21,11 +21,13 @@ def _gen_site_tsr(state, pattern=None, ndim=2, ax=0, symmetry=DEFAULT_SYMMETRY):
     ind = (0,)* ax + (ind,) + (0,) * (ndim-ax-1)
     dat[ind] = 1
     blocks = [SubTensor(reduced=dat, q_labels=q_label)]
-    T = SparseFermionTensor(blocks=blocks, pattern=pattern).to_flat()
+    T = SparseFermionTensor(blocks=blocks, pattern=pattern)
+    if bitf.USE_CPP:
+        T =  T.to_flat()
     return T
 
-def gen_mf_peps(state_array, shape='urdlp', symmetry=DEFAULT_SYMMETRY, **kwargs):
-
+def gen_mf_peps(state_array, shape='urdlp', symmetry=None, **kwargs):
+    if symmetry is None: symmetry = bitf.DEFAULT_SYMMETRY
     Lx, Ly = state_array.shape
     arr = state_array.astype("int")
     cache = dict()
