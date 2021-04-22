@@ -4603,8 +4603,9 @@ class TensorNetwork(object):
             custom_colors = None
 
         draw_opts.setdefault('legend', False)
-        draw_opts.setdefault('custom_colors', custom_colors)
+        draw_opts.setdefault('edge_color', (0.85, 0.85, 0.85))
         draw_opts.setdefault('highlight_inds', tix)
+        draw_opts.setdefault('custom_colors', custom_colors)
 
         return tn.draw(color=[f'D{d}' for d in sorted(ds)], **draw_opts)
 

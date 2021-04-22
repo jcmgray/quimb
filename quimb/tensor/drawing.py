@@ -46,6 +46,8 @@ def draw_tn(
     edge_scale=1.0,
     edge_alpha=1 / 2,
     label_color=None,
+    font_size=10,
+    font_size_inner=7,
     figsize=(6, 6),
     margin=None,
     xlims=None,
@@ -74,6 +76,8 @@ def draw_tn(
         Explicitly turn on labels for each tensors indices.
     show_tags : {None, False, True}, optional
         Explicitly turn on labels for each tensors tags.
+    show_scalars : bool, optional
+        Whether to show scalar tensors (floating nodes with no edges).
     custom_colors : sequence of colors, optional
         Supply a custom sequence of colors to match the tags given
         in ``color``.
@@ -91,7 +95,7 @@ def draw_tn(
     iterations : int, optional
         How many iterations to perform when when finding the best layout
         using node repulsion. Ramp this up if the graph is drawing messily.
-    initial_layout : {'spectral', 'kamada_kawai', 'circular', 'planar',
+    initial_layout : {'spectral', 'kamada_kawai', 'circular', 'planar', \\
                       'random', 'shell', 'bipartite', ...}, optional
         The name of a networkx layout to use before iterating with the
         spring layout. Set ``iterations=0`` if you just want to use this
@@ -110,6 +114,10 @@ def draw_tn(
         Set the alpha (opacity) of the drawn edges.
     label_color : tuple[float], optional
         Color to draw labels with.
+    font_size : int, optional
+        Font size for drawing tags and outer indices.
+    font_size_inner : int, optional
+        Font size for drawing inner indices.
     figsize : tuple of int
         The size of the drawing.
     margin : None or float, optional
@@ -289,7 +297,7 @@ def draw_tn(
         nx.draw_networkx_edge_labels(
             G, pos,
             edge_labels=edge_labels,
-            font_size=10,
+            font_size=font_size_inner,
             font_color=label_color,
             ax=ax,
         )
@@ -297,7 +305,7 @@ def draw_tn(
         nx.draw_networkx_labels(
             G, pos,
             labels=node_labels,
-            font_size=10,
+            font_size=font_size,
             font_color=label_color,
             ax=ax,
         )
