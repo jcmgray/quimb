@@ -82,10 +82,10 @@ class PetscLinearOperatorContext:
         self.real = lo.dtype in (float, np.float_)
 
     def mult(self, _, x, y):
-        y[:] = self.lo.matvec(x[:])
+        y[:] = self.lo.matvec(x)
 
     def multHermitian(self, _, x, y):
-        y[:] = self.lo.rmatvec(x[:])
+        y[:] = self.lo.rmatvec(x)
 
 
 def linear_operator_2_petsc_shell(lo, comm=None):

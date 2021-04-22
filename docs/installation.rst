@@ -59,72 +59,30 @@ Finally, fast and optionally distributed partial eigen-solving, SVD, exponentiat
 * `mpi4py <http://mpi4py.readthedocs.io/en/latest/>`_ (v2.1.0+)
 * An MPI implementation (`OpenMPI <https://www.open-mpi.org/>`_ recommended, the 1.10.x series seems most robust for spawning processes)
 
-It is recommended to compile and install these (apart from MPI if you are e.g. on a cluster) yourself (see below).
-
-For best performance of some routines, (e.g. shift invert eigen-solving), petsc must be configured with certain options. Here is a rough overview of the steps to installing the above in a directory ``$SRC_DIR``, with MPI and ``mpi4py`` already installed. ``$PATH_TO_YOUR_BLAS_LAPACK_LIB`` should point to e.g. `OpenBLAS <https://github.com/xianyi/OpenBLAS>`_ (``libopenblas.so``) or the MKL library (``libmkl_rt.so``). ``$COMPILE_FLAGS`` should be optimizations chosen for your compiler, e.g. for ``gcc`` ``"-O3 -march=native -s -DNDEBUG"``, or for ``icc`` ``"-O3 -xHost"`` etc.
-
-
-Build PETSC
-~~~~~~~~~~~
+For best performance of some routines, (e.g. shift invert eigen-solving), petsc must be configured with certain options.
+Pip can handle this compilation and installation, for example the following script installs everything necessary on Ubuntu:
 
 .. code-block:: bash
 
-    cd $SRC_DIR
-    git clone https://gitlab.com/petsc/petsc.git
+  #!/bin/bash
 
-    export PETSC_DIR=$SRC_DIR/petsc
-    export PETSC_ARCH=arch-auto-complex
+  # install build tools, OpenMPI, and OpenBLAS
+  sudo apt install -y openmpi-bin libopenmpi-dev gfortran bison flex cmake valgrind curl autoconf libopenblas-base libopenblas-dev
 
-    cd petsc
-    python ./configure \
-      --download-mumps \
-      --download-scalapack \
-      --download-parmetis \
-      --download-metis \
-      --download-ptscotch \
-      --with-debugging=0 \
-      --with-blas-lapack-lib=$PATH_TO_YOUR_BLAS_LAPACK_LIB \
-      COPTFLAGS="$COMPILE_FLAGS" \
-      CXXOPTFLAGS="$COMPILE_FLAGS" \
-      FOPTFLAGS="$COMPILE_FLAGS" \
-      --with-scalar-type=complex
-    make all
-    make test
-    make streams NPMAX=4
+  # optimization flags, e.g. for intel you might want "-O3 -xHost"
+  export OPTFLAGS="-O3 -march=native -s -DNDEBUG"
 
+  # petsc options, here configured for real
+  export PETSC_CONFIGURE_OPTIONS="--with-scalar-type=real --download-mumps --download-scalapack --download-parmetis --download-metis --COPTFLAGS='$OPTFLAGS' --CXXOPTFLAGS='$OPTFLAGS' --FOPTFLAGS='$OPTFLAGS'"
 
-Build SLEPC
-~~~~~~~~~~~
-
-.. code-block:: bash
-
-    cd $SRC_DIR
-    git clone https://gitlab.com/slepc/slepc.git
-    export SLEPC_DIR=$SRC_DIR/slepc
-    cd slepc
-    python ./configure
-    make
-    make test
-
-
-Build the python interfaces
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. code-block:: bash
-
-    cd $SRC_DIR
-    git clone https://bitbucket.org/petsc/petsc4py.git
-    git clone https://gitlab.com/slepc/slepc4py.git
-
-    cd $SRC_DIR/petsc4py
-    python setup.py build
-    python setup.py install
-
-    cd $SRC_DIR/slepc4py
-    python setup.py build
-    python setup.py install
-
+  # make sure using all the same version
+  export PETSC_VERSION=3.14.0
+  pip install petsc==$PETSC_VERSION --no-binary :all:
+  pip install petsc4py==$PETSC_VERSION --no-binary :all:
+  pip install slepc==$PETSC_VERSION --no-binary :all:
+  pip install slepc4py==$PETSC_VERSION --no-binary :all:
 
 .. note::
 
-    It is possible to compile several versions of PETSc/SLEPc side by side, for example a ``--with-scalar-type=real`` version, naming them with different values of ``PETSC_ARCH``. When loading PETSc/SLEPc, ``quimb`` respects ``PETSC_ARCH`` if it is set, but it cannot dynamically switch bewteen them.
+    For the most control and best performance it is recommended to compile and install these (apart from MPI if you are e.g. on a cluster) manually - see the `PETSc instructions <https://www.mcs.anl.gov/petsc/documentation/installation.html>`_.
+    It is possible to compile several versions of PETSc/SLEPc side by side, for example a ``--with-scalar-type=complex`` and/or a ``--with-precision=single`` version, naming them with different values of ``PETSC_ARCH``. When loading PETSc/SLEPc, ``quimb`` respects ``PETSC_ARCH`` if it is set, but it cannot dynamically switch between them.

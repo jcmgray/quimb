@@ -16,15 +16,15 @@ if (
     ('OMPI_COMM_WORLD_SIZE' in os.environ) or  # OpenMPI
     ('PMI_SIZE' in os.environ)  # MPICH
 ):
-    if '_QUIMB_MPI_LAUNCHED' not in os.environ:
-        raise RuntimeError("For the moment, quimb programs launched explicitly"
-                           " using MPI need to use `quimb-mpi-python`.")
+    QUIMB_MPI_LAUNCHED = '_QUIMB_MPI_LAUNCHED' in os.environ
     ALREADY_RUNNING_AS_MPI = True
     USE_SYNCRO = "QUIMB_SYNCRO_MPI" in os.environ
 else:
+    QUIMB_MPI_LAUNCHED = False
     ALREADY_RUNNING_AS_MPI = False
     USE_SYNCRO = False
 
+# default to not allowing mpi spawning capabilities
 ALLOW_SPAWN = {
     'TRUE': True, 'ON': True, 'FALSE': False, 'OFF': False,
 }[os.environ.get('QUIMB_MPI_SPAWN', 'False').upper()]
@@ -139,7 +139,7 @@ class SynchroMPIPool:
         self.comm = MPI.COMM_WORLD
         self.size = self.comm.Get_size()
         self.rank = self.comm.Get_rank()
-        self.counter = itertools.cycle(range(0, NUM_MPI_WORKERS))
+        self.counter = itertools.cycle(range(0, self.size))
         self._max_workers = self.size
 
     def submit(self, fn, *args, **kwargs):
@@ -196,6 +196,11 @@ def get_mpi_pool(num_workers=None, num_threads=1):
     if (num_workers == 1) and (num_threads == _NUM_THREAD_WORKERS):
         from concurrent.futures import ProcessPoolExecutor
         return ProcessPoolExecutor(1)
+
+    if not QUIMB_MPI_LAUNCHED:
+        raise RuntimeError(
+            "For the moment, quimb programs using `get_mpi_pool` need to be "
+            "explicitly launched using `quimb-mpi-python`.")
 
     if USE_SYNCRO:
         return SynchroMPIPool()

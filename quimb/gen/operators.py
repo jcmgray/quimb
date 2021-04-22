@@ -1,6 +1,5 @@
 """Functions for generating quantum operators.
 """
-from operator import add
 import math
 import functools
 import itertools
@@ -581,7 +580,7 @@ def ham_heis(n, j=1.0, b=0.0, cyclic=False,
 
     if parallel:
         pool = get_thread_pool(nthreads)
-        ham = par_reduce(add, pool.map(gen_term, terms_needed))
+        ham = par_reduce(operator.add, pool.map(gen_term, terms_needed))
     else:
         ham = sum(map(gen_term, terms_needed))
 
@@ -890,13 +889,13 @@ def ham_heis_2D(n, m, j=1.0, bz=0.0, cyclic=False,
         all_terms = itertools.chain(
             map(interactions, pairs_ss),
             map(fields, sites) if bz != 0.0 else ())
-        H = sum(all_terms)
+        H = functools.reduce(operator.add, all_terms)
     else:
         pool = get_thread_pool()
         all_terms = itertools.chain(
             pool.map(interactions, pairs_ss),
             pool.map(fields, sites) if bz != 0.0 else ())
-        H = par_reduce(add, all_terms)
+        H = par_reduce(operator.add, all_terms)
 
     return H
 
