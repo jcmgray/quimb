@@ -1876,7 +1876,7 @@ def pkron(op, dims, inds, **ikron_opts):
     dims_cur = (*dims_in, *dims_out)
 
     # find inverse permutation
-    ip = np.empty(n, dtype=np.int)
+    ip = np.empty(n, dtype=np.int32)
     ip[p] = np.arange(n)
 
     return permute(b, dims_cur, ip)
