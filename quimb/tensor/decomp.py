@@ -516,8 +516,8 @@ def _similarity_compress_eigh(X, max_bond, renorm):
     Cl = ev[:, sel]
     Cr = dag(Cl)
     if renorm:
-        trace_old = np.trace(X)
-        trace_new = np.trace(Cr @ (X @ Cl))
+        trace_old = do('trace', X)
+        trace_new = do('trace', Cr @ (X @ Cl))
         Cl = Cl * trace_old / trace_new
     return Cl, Cr
 
@@ -589,6 +589,57 @@ def _similarity_compress_schur_numpy(X, max_bond, renorm):
     return Cl, Cr
 
 
+@njit  # pragma: no cover
+def _similarity_compress_biorthog_numpy(X, max_bond, renorm):
+    U, s, VH = np.linalg.svd(X)
+
+    B = U[:, :max_bond]
+    AH = VH[:max_bond, :]
+
+    Uab, sab, VHab = np.linalg.svd(AH @ B)
+
+    # smudge factor
+    sab += 1e-12 * np.max(sab)
+    sab **= -0.5
+
+    sab_inv = sab.reshape((1, -1))
+    P = Uab * sab_inv
+    Q = dag_numba(VHab) * sab_inv
+
+    Cl = B @ Q
+    Cr = dag_numba(P) @ AH
+
+    if renorm:
+        trace_old = np.trace(X)
+        trace_new = np.trace(Cr @ (X @ Cl))
+        Cl = Cl * trace_old / trace_new
+
+    return Cl, Cr
+
+
+def _similarity_compress_biorthog(X, max_bond, renorm):
+    U, s, VH = do('linalg.svd', X)
+
+    B = U[:, :max_bond]
+    AH = VH[:max_bond, :]
+
+    Uab, sab, VHab = do('linalg.svd', AH @ B)
+    sab = (sab + 1e-12 * do('max', sab)) ** -0.5
+    sab_inv = do('reshape', sab, (1, -1))
+    P = Uab * sab_inv
+    Q = dag(VHab) * sab_inv
+
+    Cl = B @ Q
+    Cr = dag(P) @ AH
+
+    if renorm:
+        trace_old = do('trace', X)
+        trace_new = do('trace', Cr @ (X @ Cl))
+        Cl = Cl * trace_old / trace_new
+
+    return Cl, Cr
+
+
 _similarity_compress_fns = {
     ('eig', False): _similarity_compress_eig,
     ('eig', True): _similarity_compress_eig_numba,
@@ -599,10 +650,12 @@ _similarity_compress_fns = {
     ('svd', True): functools.partial(
         _similarity_compress_svd_numba, asymm=0),
     ('schur', True): _similarity_compress_schur_numpy,
+    ('biorthog', True): _similarity_compress_biorthog_numpy,
+    ('biorthog', False): _similarity_compress_biorthog,
 }
 
 
-def similarity_compress(X, max_bond, renorm=True, method='eig'):
+def similarity_compress(X, max_bond, renorm=True, method='eigh'):
     if method == 'eig':
         if get_dtype_name(X) == 'float64':
             X = astype(X, 'complex128')
