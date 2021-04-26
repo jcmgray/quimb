@@ -85,6 +85,8 @@ def swappy_circ(n, depth):
             gate = np.random.choice(['FSIM', 'SWAP'])
             if gate == 'FSIM':
                 params = np.random.randn(2)
+            elif gate == 'FSIMG':
+                params = np.random.randn(5)
             else:
                 params = ()
 
@@ -166,6 +168,7 @@ class TestCircuit:
             ('cu2', 2, 2),
             ('cu1', 2, 1),
             ('fsim', 2, 2),
+            ('fsimg', 2, 5),
             ('rzz', 2, 1),
             ('su4', 2, 15),
         ]
@@ -434,6 +437,29 @@ class TestCircuit:
         aps = [circ.local_expectation(G, pair) for G, pair in zip(Gs, pairs)]
 
         assert_allclose(exs, aps)
+
+    @pytest.mark.parametrize(
+        "name, densefn, nparam, nqubit",
+        [
+            ('rx', qu.Rx, 1, 1),
+            ('ry', qu.Ry, 1, 1),
+            ('rz', qu.Rz, 1, 1),
+            ('u3', qu.U_gate, 3, 1),
+            ('fsim', qu.fsim, 2, 2),
+            ('fsimg', qu.fsimg, 5, 2),
+        ]
+    )
+    def test_parametrized_gates_rx(self, name, densefn, nparam, nqubit):
+        k0 = qu.rand_ket(2**nqubit)
+        params = qu.randn(nparam)
+        kf = densefn(*params) @ k0
+        k0mps = qtn.MatrixProductState.from_dense(k0, [2] * nqubit)
+        circ = qtn.Circuit(psi0=k0mps, gate_opts={'contract': False})
+        getattr(circ, name)(*params, *range(nqubit), parametrize=True)
+        tn = circ.psi
+        assert isinstance(tn['GATE_0'], qtn.PTensor)
+        assert_allclose(circ.to_dense(), kf)
+
 
 class TestCircuitGen:
 

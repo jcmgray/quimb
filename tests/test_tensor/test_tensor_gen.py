@@ -68,6 +68,13 @@ class TestSpinHam1D:
 
 class TestMPSSpecificStates:
 
+    def test_site_varying_phys_dim(self):
+        k = qtn.MPS_rand_state(5, 4, phys_dim=[2, 3, 3, 2, 5])
+        assert k.H @ k == pytest.approx(1.0)
+        assert k.outer_dims_inds() == (
+            (2, 'k0'), (3, 'k1'), (3, 'k2'), (2, 'k3'), (5, 'k4'),
+        )
+
     @pytest.mark.parametrize("dtype", ['float32', 'complex64'])
     def test_ghz_state(self, dtype):
         mps = qtn.MPS_ghz_state(5, dtype=dtype)
@@ -109,31 +116,69 @@ class TestGenericTN:
     @pytest.mark.parametrize('Lx', [3])
     @pytest.mark.parametrize('Ly', [2, 4])
     @pytest.mark.parametrize('beta', [0.13, 0.44])
+    @pytest.mark.parametrize('j', [-1.0, +1.0])
     @pytest.mark.parametrize('h', [0.0, 0.1])
     @pytest.mark.parametrize('cyclic',
                              [False, True, (False, True), (True, False)])
-    def test_2D_classical_ising_model(self, Lx, Ly, beta, h, cyclic):
+    def test_2D_classical_ising_model(self, Lx, Ly, beta, j, h, cyclic):
         tn = qtn.TN2D_classical_ising_partition_function(
-            Lx, Ly, beta=beta, h=h, cyclic=cyclic)
+            Lx, Ly, beta=beta, j=j, h=h, cyclic=cyclic)
         htn = qtn.HTN2D_classical_ising_partition_function(
-            Lx, Ly, beta=beta, h=h, cyclic=cyclic)
+            Lx, Ly, beta=beta, j=j, h=h, cyclic=cyclic)
         Z1 = tn.contract(all, output_inds=())
         Z2 = htn.contract(all, output_inds=())
         assert Z1 == pytest.approx(Z2)
+
+        if not cyclic:
+            # skip cyclic as nx has no multibonds for L=2
+            import networkx as nx
+            G = nx.lattice.grid_graph((Lx, Ly))
+            Z3 = qtn.TN_classical_partition_function_from_edges(
+                G.edges, beta=beta, j=j, h=h
+            ).contract(all, output_inds=())
+            assert Z2 == pytest.approx(Z3)
+            Z4 = qtn.HTN_classical_partition_function_from_edges(
+                G.edges, beta=beta, j=j, h=h
+            ).contract(all, output_inds=())
+            assert Z3 == pytest.approx(Z4)
 
     @pytest.mark.parametrize('Lx', [2])
     @pytest.mark.parametrize('Ly', [3])
     @pytest.mark.parametrize('Lz', [4])
     @pytest.mark.parametrize('beta', [0.13, 1 / 4.5])
+    @pytest.mark.parametrize('j', [-1.0, +1.0])
     @pytest.mark.parametrize('h', [0.0, 0.1])
     @pytest.mark.parametrize('cyclic',
                              [False, True,
                               (False, True, False), (True, False, True)])
-    def test_3D_classical_ising_model(self, Lx, Ly, Lz, beta, h, cyclic):
+    def test_3D_classical_ising_model(self, Lx, Ly, Lz, beta, j, h, cyclic):
         tn = qtn.TN3D_classical_ising_partition_function(
-            Lx, Ly, Lz, beta=beta, h=h, cyclic=cyclic)
+            Lx, Ly, Lz, beta=beta, j=j, h=h, cyclic=cyclic)
         htn = qtn.HTN3D_classical_ising_partition_function(
-            Lx, Ly, Lz, beta=beta, h=h, cyclic=cyclic)
+            Lx, Ly, Lz, beta=beta, j=j, h=h, cyclic=cyclic)
         Z1 = tn.contract(all, output_inds=())
         Z2 = htn.contract(all, output_inds=())
         assert Z1 == pytest.approx(Z2)
+
+        if not cyclic:
+            # skip cyclic as nx has no multibonds for L=2
+            import networkx as nx
+            G = nx.lattice.grid_graph((Lx, Ly, Lz))
+            Z3 = qtn.TN_classical_partition_function_from_edges(
+                G.edges, beta=beta, j=j, h=h
+            ).contract(all, output_inds=())
+            assert Z2 == pytest.approx(Z3)
+            Z4 = qtn.HTN_classical_partition_function_from_edges(
+                G.edges, beta=beta, j=j, h=h
+            ).contract(all, output_inds=())
+            assert Z3 == pytest.approx(Z4)
+
+    def test_tn_dimer_covering(self):
+        edges = [(0, 1), (1, 2), (2, 3), (3, 0)]
+        tn = qtn.TN_dimer_covering_from_edges(edges, cover_count=1)
+        assert tn ^ all == pytest.approx(2.0)
+        tn = qtn.TN_dimer_covering_from_edges(edges, cover_count=2)
+        assert tn ^ all == pytest.approx(1.0)
+        edges = [(0, 1), (1, 2), (2, 0)]
+        tn = qtn.TN_dimer_covering_from_edges(edges, cover_count=1)
+        assert tn ^ all == pytest.approx(0.0)

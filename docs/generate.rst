@@ -49,11 +49,20 @@ Operators
 - :func:`~quimb.gen.operators.swap`
 - :func:`~quimb.gen.operators.iswap`
 - :func:`~quimb.gen.operators.fsim`
+- :func:`~quimb.gen.operators.fsimg`
 - :func:`~quimb.gen.operators.controlled`
 - :func:`~quimb.gen.operators.CNOT`
 - :func:`~quimb.gen.operators.cX`
 - :func:`~quimb.gen.operators.cY`
 - :func:`~quimb.gen.operators.cZ`
+
+Most of these are cached (and immutable), so can be called repeatedly without creating any new objects:
+
+.. code-block:: py3
+
+    >>> pauli('Z') is pauli('Z')
+    True
+
 
 **Hamiltonians and related operators**:
 
@@ -71,12 +80,25 @@ Operators
 - :func:`~quimb.gen.operators.num`
 - :func:`~quimb.gen.operators.ham_hubbard_hardcore`
 
-Most of these are cached (and immutable), so can be called repeatedly without creating any new objects:
+.. note::
 
-.. code-block:: py3
+    The Hamiltonians are generally defined using spin operators rather than
+    Pauli matrices. Thus for example, the following spin-1/2 Hamiltonians would
+    be equivalent
 
-    >>> pauli('Z') is pauli('Z')
-    True
+    - in spin-operators:
+
+    .. math::
+
+        \hat{H} = \sum J S^X_i S^X_{i + 1} + B S^Z_i
+
+    - and in Pauli operators (with :math:`S^X=\dfrac{\sigma^X}{2}` etc.):
+
+    .. math::
+
+        \hat{H} = \sum \dfrac{J}{4} \sigma^X_i \sigma^X_{i + 1} + \dfrac{B}{2} \sigma^Z_{i}
+
+    note that interaction terms are scaled different than the single site terms.
 
 
 Random States & Operators

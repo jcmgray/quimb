@@ -134,56 +134,96 @@ class TestPEPSConstruct:
 
         assert tn ^ all == pytest.approx(xe)
 
+    @pytest.mark.parametrize('propagate_tags',
+                             [False, True, 'sites', 'register'])
+    def test_gate_propagate_tags(self, propagate_tags):
+        Lx = 4
+        Ly = 3
+        D = 1
+        psi = qtn.PEPS.rand(Lx, Ly, D, tags='PSI0')
+        psi.gate_(qu.rand_uni(4), [(1, 1), (1, 2)], tags='G1',
+                  propagate_tags=propagate_tags)
+        psi.gate_(qu.rand_uni(4), [(1, 2), (3, 2)], tags='G2',
+                  propagate_tags=propagate_tags)
+        if propagate_tags is False:
+            assert set(psi['G1'].tags) == {'G1'}
+            assert set(psi['G2'].tags) == {'G2'}
+        if propagate_tags is True:
+            tgs1 = {'I1,1', 'I1,2', 'G1', 'PSI0', 'COL1', 'COL2', 'ROW1'}
+            assert set(psi['G1'][0].tags) == tgs1
+            assert set(psi['G2'].tags) == tgs1 | {'G2', 'I3,2', 'ROW3', 'COL2'}
+        if propagate_tags == 'sites':
+            assert set(psi['G1'].tags) == {'G1', 'I1,1', 'I1,2'}
+            assert set(psi['G2'].tags) == {'G2', 'I1,1', 'I1,2', 'I3,2'}
+        if propagate_tags == 'register':
+            assert set(psi['G1'].tags) == {'G1', 'I1,1', 'I1,2'}
+            assert set(psi['G2'].tags) == {'G2', 'I1,2', 'I3,2'}
+
 
 class Test2DContract:
 
     def test_contract_2d_one_layer_boundary(self):
         psi = qtn.PEPS.rand(4, 4, 3, seed=42)
-        norm = psi.H & psi
+        norm = psi.make_norm()
         xe = norm.contract(all, optimize='auto-hq')
         xt = norm.contract_boundary(max_bond=9)
         assert xt == pytest.approx(xe, rel=1e-2)
 
     def test_contract_2d_two_layer_boundary(self):
         psi = qtn.PEPS.rand(4, 4, 3, seed=42, tags='KET')
-        norm = psi.retag({'KET': 'BRA'}).H | psi
+        norm = psi.make_norm()
         xe = norm.contract(all, optimize='auto-hq')
         xt = norm.contract_boundary(max_bond=27, layer_tags=['KET', 'BRA'])
         assert xt == pytest.approx(xe, rel=1e-2)
 
-    @pytest.mark.parametrize("two_layer", [False, True])
-    def test_compute_row_envs(self, two_layer):
+    def test_contract_2d_full_bond(self):
+        psi = qtn.PEPS.rand(4, 4, 3, seed=42, tags='KET')
+        norm = psi.make_norm()
+        xe = norm.contract(all, optimize='auto-hq')
+        xt = norm.contract_boundary(max_bond=27, mode='full-bond')
+        assert xt == pytest.approx(xe, rel=1e-2)
+
+    @pytest.mark.parametrize("mode,two_layer", [
+        ('mps', False),
+        ('mps', True),
+        ('full-bond', False),
+    ])
+    def test_compute_row_envs(self, mode, two_layer):
         psi = qtn.PEPS.rand(5, 4, 2, seed=42, tags='KET')
-        norm = psi.retag({'KET': 'BRA'}).H | psi
+        norm = psi.make_norm()
         ex = norm.contract(all)
 
         if two_layer:
-            compress_opts = {'cutoff': 1e-6, 'max_bond': 12,
+            compress_opts = {'cutoff': 1e-6, 'max_bond': 12, 'mode': mode,
                              'layer_tags': ['KET', 'BRA']}
         else:
-            compress_opts = {'cutoff': 1e-6, 'max_bond': 8}
+            compress_opts = {'cutoff': 1e-6, 'max_bond': 8, 'mode': mode}
         row_envs = norm.compute_row_environments(**compress_opts)
 
         for i in range(norm.Lx):
             norm_i = (
-                row_envs['below', i] &
+                row_envs['bottom', i] &
                 norm.select(norm.row_tag(i)) &
-                row_envs['above', i]
+                row_envs['top', i]
             )
             x = norm_i.contract(all)
             assert x == pytest.approx(ex, rel=1e-2)
 
-    @pytest.mark.parametrize("two_layer", [False, True])
-    def test_compute_col_envs(self, two_layer):
+    @pytest.mark.parametrize("mode,two_layer", [
+        ('mps', False),
+        ('mps', True),
+        ('full-bond', False),
+    ])
+    def test_compute_col_envs(self, mode, two_layer):
         psi = qtn.PEPS.rand(4, 5, 2, seed=42, tags='KET')
         norm = psi.retag({'KET': 'BRA'}).H | psi
         ex = norm.contract(all)
 
         if two_layer:
-            compress_opts = {'cutoff': 1e-6, 'max_bond': 12,
+            compress_opts = {'cutoff': 1e-6, 'max_bond': 12, 'mode': mode,
                              'layer_tags': ['KET', 'BRA']}
         else:
-            compress_opts = {'cutoff': 1e-6, 'max_bond': 8}
+            compress_opts = {'cutoff': 1e-6, 'max_bond': 8, 'mode': mode}
         col_envs = norm.compute_col_environments(**compress_opts)
 
         for j in range(norm.Lx):
@@ -204,7 +244,8 @@ class Test2DContract:
         assert norm == pytest.approx(1.0, rel=0.01)
 
     @pytest.mark.parametrize('normalized', [False, True])
-    def test_compute_local_expectation_one_sites(self, normalized):
+    @pytest.mark.parametrize('mode', ['mps', 'full-bond'])
+    def test_compute_local_expectation_one_sites(self, mode, normalized):
         peps = qtn.PEPS.rand(4, 3, 2, seed=42, dtype='complex')
 
         # reference
@@ -220,12 +261,13 @@ class Test2DContract:
 
         opts = dict(cutoff=2e-3, max_bond=9, contract_optimize='random-greedy')
         e = peps.compute_local_expectation(
-            terms, normalized=normalized, **opts)
+            terms, mode=mode, normalized=normalized, **opts)
 
         assert e == pytest.approx(ex, rel=1e-2)
 
     @pytest.mark.parametrize('normalized', [False, True])
-    def test_compute_local_expectation_two_sites(self, normalized):
+    @pytest.mark.parametrize('mode', ['mps', 'full-bond'])
+    def test_compute_local_expectation_two_sites(self, mode, normalized):
         H = qu.ham_heis_2D(4, 3, sparse=True)
         Hij = qu.ham_heis(2, cyclic=False)
 
@@ -236,23 +278,26 @@ class Test2DContract:
             qu.normalize(k)
         ex = qu.expec(H, k)
 
-        opts = dict(cutoff=2e-3, max_bond=9, contract_optimize='random-greedy')
+        opts = dict(
+            mode=mode,
+            normalized=normalized,
+            cutoff=2e-3,
+            max_bond=9,
+            contract_optimize='random-greedy'
+        )
 
         # compute 2x1 and 1x2 plaquettes separately
         hterms = {coos: Hij for coos in peps.gen_horizontal_bond_coos()}
         vterms = {coos: Hij for coos in peps.gen_vertical_bond_coos()}
 
-        he = peps.compute_local_expectation(
-            hterms, normalized=normalized, **opts)
-        ve = peps.compute_local_expectation(
-            vterms, normalized=normalized, **opts)
+        he = peps.compute_local_expectation(hterms, **opts)
+        ve = peps.compute_local_expectation(vterms, **opts)
 
         assert he + ve == pytest.approx(ex, rel=1e-2)
 
         # compute all terms in 2x2 plaquettes
         terms_all = {**hterms, **vterms}
-        e = peps.compute_local_expectation(
-            terms_all, normalized=normalized, autogroup=False, **opts)
+        e = peps.compute_local_expectation(terms_all, autogroup=False, **opts)
 
         assert e == pytest.approx(ex, rel=1e-2)
 

@@ -368,15 +368,16 @@ class MovingEnvironment:
             self.tnc['_RIGHT'] /= norm
 
     def move_right(self):
+        if (not self.cyclic) and (self.pos + 1 not in self.segment):
+            raise ValueError("For OBC, ``0 <= position <= n - bsz``.")
+
         i = (self.pos + 1) % self.L
 
         # generate a new segment if we go over the border
         if i not in self.segment:
-            if not self.cyclic:
-                raise ValueError("For OBC, ``0 <= position <= n - bsz``.")
             self.init_segment('left', i, i + self._ssz)
         else:
-            self.pos = i % self.L
+            self.pos = i
 
         i0 = self.segment.start
 
@@ -388,15 +389,16 @@ class MovingEnvironment:
             self.envs[i] |= new_left ^ all
 
     def move_left(self):
+        if (not self.cyclic) and (self.pos - 1 not in self.segment):
+            raise ValueError("For OBC, ``0 <= position <= n - bsz``.")
+
         i = (self.pos - 1) % self.L
 
         # generate a new segment if we go over the border
         if i not in self.segment:
-            if not self.cyclic:
-                raise ValueError("For OBC, ``0 <= position <= n - bsz``.")
             self.init_segment('right', i - self._ssz + 1, i + 1)
         else:
-            self.pos = i % self.L
+            self.pos = i
 
         iN = self.segment.stop
 

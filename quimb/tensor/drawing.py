@@ -1,9 +1,10 @@
 """Functionailty for drawing tensor networks.
 """
-
-from ..utils import valmap
+import textwrap
 
 import numpy as np
+
+from ..utils import valmap
 
 
 def _add_or_merge_edge(G, u, v, attrs):
@@ -30,6 +31,7 @@ def draw_tn(
     highlight_tids_color=(1.0, 0.2, 0.2, 1.0),
     show_inds=None,
     show_tags=None,
+    show_scalars=True,
     custom_colors=None,
     title=None,
     legend=True,
@@ -44,6 +46,8 @@ def draw_tn(
     edge_scale=1.0,
     edge_alpha=1 / 2,
     label_color=None,
+    font_size=10,
+    font_size_inner=7,
     figsize=(6, 6),
     margin=None,
     xlims=None,
@@ -72,6 +76,8 @@ def draw_tn(
         Explicitly turn on labels for each tensors indices.
     show_tags : {None, False, True}, optional
         Explicitly turn on labels for each tensors tags.
+    show_scalars : bool, optional
+        Whether to show scalar tensors (floating nodes with no edges).
     custom_colors : sequence of colors, optional
         Supply a custom sequence of colors to match the tags given
         in ``color``.
@@ -89,7 +95,7 @@ def draw_tn(
     iterations : int, optional
         How many iterations to perform when when finding the best layout
         using node repulsion. Ramp this up if the graph is drawing messily.
-    initial_layout : {'spectral', 'kamada_kawai', 'circular', 'planar',
+    initial_layout : {'spectral', 'kamada_kawai', 'circular', 'planar', \\
                       'random', 'shell', 'bipartite', ...}, optional
         The name of a networkx layout to use before iterating with the
         spring layout. Set ``iterations=0`` if you just want to use this
@@ -108,6 +114,10 @@ def draw_tn(
         Set the alpha (opacity) of the drawn edges.
     label_color : tuple[float], optional
         Color to draw labels with.
+    font_size : int, optional
+        Font size for drawing tags and outer indices.
+    font_size_inner : int, optional
+        Font size for drawing inner indices.
     figsize : tuple of int
         The size of the drawing.
     margin : None or float, optional
@@ -184,16 +194,18 @@ def draw_tn(
             for tid in tids:
                 _add_or_merge_edge(G, tid, ix, edge_attrs)
 
-    if len(G) == 0:
-        # tensor network is only scalars, no inds
-        for tid in tn.tensor_map:
-            G.add_node(tid)
-
     # color the nodes
     colors = get_colors(color, custom_colors)
 
     # set parameters for all the nodes
     for tid, t in tn.tensor_map.items():
+
+        if tid not in G.nodes:
+            # e.g. tensor is a scalar
+            if show_scalars:
+                G.add_node(tid)
+            else:
+                continue
 
         G.nodes[tid]['size'] = node_size
         G.nodes[tid]['outline_size'] = node_outline_size
@@ -209,7 +221,11 @@ def draw_tn(
             for i, c in enumerate(color)
         )
         if show_tags:
-            node_labels[tid] = '{' + str(list(t.tags))[1:-1] + '}'
+            # make the tags appear with auto vertical extend
+            node_label = '{' + str(list(t.tags))[1:-1] + '}'
+            node_labels[tid] = "\n".join(textwrap.wrap(
+                node_label, max(2 * len(node_label) ** 0.5, 16)
+            ))
 
     for hix in hyperedges:
         G.nodes[hix]['ind'] = hix
@@ -281,7 +297,7 @@ def draw_tn(
         nx.draw_networkx_edge_labels(
             G, pos,
             edge_labels=edge_labels,
-            font_size=10,
+            font_size=font_size_inner,
             font_color=label_color,
             ax=ax,
         )
@@ -289,7 +305,7 @@ def draw_tn(
         nx.draw_networkx_labels(
             G, pos,
             labels=node_labels,
-            font_size=10,
+            font_size=font_size,
             font_color=label_color,
             ax=ax,
         )
@@ -418,7 +434,7 @@ def _span(xy):
     return xy[:, 1].max() - xy[:, 1].min()
 
 
-def _massage_pos(pos, nangles=24, flatten=False):
+def _massage_pos(pos, nangles=360, flatten=False):
     """Rotate a position dict's points to cover a small vertical span
     """
     xy = np.empty((len(pos), 2))

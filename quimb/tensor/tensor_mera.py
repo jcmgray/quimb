@@ -134,7 +134,7 @@ class MERA(TensorNetwork1DVector,
                             inds=inds[:-1], tags=tags, left_inds=(ll, lr)
                         )
 
-        super().__init__(gen_mera_tensors(), check_collisions=False)
+        super().__init__(gen_mera_tensors(), virtual=True)
 
         # tag the MERA with the 'causal-cone' of each site
         for i in range(nlayers):

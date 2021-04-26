@@ -408,6 +408,73 @@ def apply_fsim(psi, theta, phi, i, j, parametrize=False, **gate_opts):
     psi.gate_(G, (int(i), int(j)), tags=mtags, **gate_opts)
 
 
+def fsimg_param_gen(params):
+    theta, zeta, chi, gamma, phi = (
+        params[0], params[1], params[2], params[3], params[4]
+    )
+
+    a11_re = do('cos', theta)
+    a11_im = do('imag', a11_re)
+    a11 = do('complex', a11_re, a11_im)
+
+    e11_im = -(gamma + zeta)
+    e11_re = do('imag', e11_im)
+    e11 = do('exp', do('complex', e11_re, e11_im))
+
+    a22_re = do('cos', theta)
+    a22_im = do('imag', a22_re)
+    a22 = do('complex', a22_re, a22_im)
+
+    e22_im = -(gamma - zeta)
+    e22_re = do('imag', e22_im)
+    e22 = do('exp', do('complex', e22_re, e22_im))
+
+    a21_re = do('sin', theta)
+    a21_im = do('imag', a21_re)
+    a21 = do('complex', a21_re, a21_im)
+
+    e21_im = -(gamma - chi)
+    e21_re = do('imag', e21_im)
+    e21 = do('exp', do('complex', e21_re, e21_im))
+
+    a12_re = do('sin', theta)
+    a12_im = do('imag', a12_re)
+    a12 = do('complex', a12_re, a12_im)
+
+    e12_im = -(gamma + chi)
+    e12_re = do('imag', e12_im)
+    e12 = do('exp', do('complex', e12_re, e12_im))
+
+    img_re = do('real', -1.j)
+    img_im = do('imag', -1.j)
+    img = do('complex', img_re, img_im)
+
+    c_im = -(2 * gamma + phi)
+    c_re = do('imag', c_im)
+    c = do('exp', do('complex', c_re, c_im))
+
+    data = [[[[1, 0], [0, 0]],
+             [[0, a11 * e11], [a21 * e21 * img, 0]]],
+            [[[0, a12 * e12 * img], [a22 * e22, 0]],
+             [[0, 0], [0, c]]]]
+
+    return do('array', data, like=params)
+
+
+def apply_fsimg(
+    psi,
+    theta, zeta, chi, gamma, phi,
+    i, j, parametrize=False, **gate_opts
+):
+
+    mtags = _merge_tags('FSIMG', gate_opts)
+    if parametrize:
+        G = ops.PArray(fsimg_param_gen, (theta, zeta, chi, gamma, phi))
+    else:
+        G = qu.fsimg(theta, zeta, chi, gamma, phi)
+    psi.gate_(G, (int(i), int(j)), tags=mtags, **gate_opts)
+
+
 def rzz_param_gen(params):
     gamma = params[0]
 
@@ -536,12 +603,15 @@ GATE_FUNCTIONS = {
     'CU1': apply_cu1,
     'FS': apply_fsim,
     'FSIM': apply_fsim,
+    'FSIMG': apply_fsimg,
     'RZZ': apply_rzz,
     'SU4': apply_su4,
 }
 
 ONE_QUBIT_PARAM_GATES = {'RX', 'RY', 'RZ', 'U3', 'U2', 'U1'}
-TWO_QUBIT_PARAM_GATES = {'CU3', 'CU2', 'CU1', 'FS', 'FSIM', 'RZZ', 'SU4'}
+TWO_QUBIT_PARAM_GATES = {
+    'CU3', 'CU2', 'CU1', 'FS', 'FSIM', 'FSIMG', 'RZZ', 'SU4'
+}
 ALL_PARAM_GATES = ONE_QUBIT_PARAM_GATES | TWO_QUBIT_PARAM_GATES
 
 
@@ -909,6 +979,11 @@ class Circuit:
 
     def fsim(self, theta, phi, i, j, gate_round=None, parametrize=False):
         self.apply_gate('FSIM', theta, phi, i, j,
+                        gate_round=gate_round, parametrize=parametrize)
+
+    def fsimg(self, theta, zeta, chi, gamma, phi, i, j,
+              gate_round=None, parametrize=False):
+        self.apply_gate('FSIMG', theta, zeta, chi, gamma, phi, i, j,
                         gate_round=gate_round, parametrize=parametrize)
 
     def rzz(self, theta, i, j, gate_round=None, parametrize=False):
