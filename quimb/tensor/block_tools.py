@@ -31,34 +31,33 @@ def add_with_smudge(T, cutoff=1e-10, gauge_smudge=1e-6):
         return arr
     return apply(T, _add_with_smudge)
 
-'''
-bitf.set(symmetry="z22", use_cpp=True, fermion=True)
-H = bitf.Hubbard(1,4,0.1)
-H.data = abs(H.data)
-H.data[H.data==0] = 2.0
-Hsqrt = sqrt(H)
-print("sqrt")
-print((Hsqrt.data**2-H.data).sum())
+def get_smudge_balance(T1, T2, ix, smudge):
+    flat = bitf.dispatch_settings("use_cpp")
+    if flat:
+        t1, t2 = T1.data.to_sparse(), T2.data.to_sparse()
+    else:
+        t1, t2 = T1.data, T2.data
+    sign1 = t1.pattern[T1.inds.index(ix)]
+    sign2 = t2.pattern[T2.inds.index(ix)]
+    s1_pattern = {"+":"-+", "-":"+-"}[sign1]
+    s2_pattern = {"-":"-+", "+":"+-"}[sign2]
 
-Hi = inv_with_smudge(H)
-print("inv")
-print(Hi.data*H.data)
-Ha = add_with_smudge(H)
-print("add")
-print(Ha.data-H.data)
+    inv = (sign1 == sign2)
+    block_cls = t1.blocks[0].__class__
+    block_dict = {}
+    for iblk1 in t1:
+        q0 = iblk1.q_labels[0]
+        block_dict[q0] = np.diag(np.asarray(iblk1)) + smudge
+    for iblk2 in t2:
+        q0 = -iblk2.q_labels[0] if inv else iblk2.q_labels[0]
+        if q0 not in block_dict: continue
+        block_dict[q0] = block_dict[q0] / (np.diag(np.asarray(iblk2)) + smudge)
 
-bitf.set(symmetry="z2", use_cpp=False, fermion=True)
-H = bitf.Hubbard(1,4,0.1).to_flat()
-H.data = abs(H.data)
-H.data[H.data==0] = 2.0
-H = H.to_sparse()
-Hsqrt = sqrt(H).to_flat()
-print("sqrt")
-print((Hsqrt.data**2-H.to_flat().data).sum())
-Hi = inv_with_smudge(H).to_flat()
-print("inv")
-print(Hi.data*H.to_flat().data)
-Ha = add_with_smudge(H).to_flat()
-print("add")
-print(Ha.data-H.to_flat().data)
-'''
+    s1 = [block_cls(reduced=np.diag(s**-0.25), q_labels=(qlab,)*2) for qlab, s in block_dict.items()]
+    s2 = [block_cls(reduced=np.diag(s** 0.25), q_labels=(qlab,)*2) for qlab, s in block_dict.items()]
+    s1 = t1.__class__(blocks=s1, pattern=s1_pattern)
+    s2 = t2.__class__(blocks=s2, pattern=s2_pattern)
+    if flat:
+        s1 = s1.to_flat()
+        s2 = s2.to_flat()
+    return s1, s2

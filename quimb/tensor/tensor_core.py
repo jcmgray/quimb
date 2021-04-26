@@ -1580,7 +1580,7 @@ class Tensor(object):
         self._owners = dict()
 
         # Short circuit for copying Tensors
-        if isinstance(data, Tensor):
+        if isinstance(data, self.__class__):
             self._data = data.data
             self._inds = data.inds
             self._tags = data.tags.copy()
@@ -1609,7 +1609,7 @@ class Tensor(object):
         if deep:
             return copy.deepcopy(self)
         else:
-            return Tensor(self, None)
+            return self.__class__(self, None)
 
     __copy__ = copy
 
@@ -2639,7 +2639,7 @@ class TensorNetwork(object):
     def __init__(self, ts, *, virtual=False, check_collisions=True):
 
         # short-circuit for copying TensorNetworks
-        if isinstance(ts, TensorNetwork):
+        if isinstance(ts, self.__class__):
             self.tag_map = valmap(lambda tids: tids.copy(), ts.tag_map)
             self.ind_map = valmap(lambda tids: tids.copy(), ts.ind_map)
             self.tensor_map = dict()
@@ -2667,15 +2667,13 @@ class TensorNetwork(object):
         """Combine this tensor network with more tensors, without contracting.
         Copies the tensors.
         """
-        return TensorNetwork((self, other))
+        return self.__class__((self, other))
 
     def __or__(self, other):
         """Combine this tensor network with more tensors, without contracting.
         Views the constituent tensors.
         """
-        return TensorNetwork((self, other), virtual=True)
-
-    _EXTRA_PROPS = ()
+        return self.__class__((self, other), virtual=True)
 
     @classmethod
     def from_TN(cls, tn, like=None, inplace=False, **kwargs):
@@ -4249,8 +4247,8 @@ class TensorNetwork(object):
             # contract them
             t_new = t1 @ t2
 
-            if not isinstance(t_new, Tensor):
-                t_new = Tensor(t_new, tags=t1.tags | t2.tags)
+            if not isinstance(t_new, t1.__class__):
+                t_new = t1.__class__(t_new, tags=t1.tags | t2.tags)
 
             if info is not None:
                 largest_intermediate = max(largest_intermediate, t_new.size)
@@ -4569,7 +4567,7 @@ class TensorNetwork(object):
         # reindex one tensor, and add a new A tensor joining the bonds
         nbnd = rand_uuid()
         T2.reindex_({bnd: nbnd})
-        TA = Tensor(A, inds=(bnd, nbnd), tags=tags)
+        TA = A.__class__(A, inds=(bnd, nbnd), tags=tags)
         tn |= TA
 
         return tn

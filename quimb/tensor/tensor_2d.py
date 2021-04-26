@@ -708,7 +708,7 @@ class TensorNetwork2D(TensorNetwork):
                 #     │  │  │  │  │
                 #     ●══●══<══<══<
                 #
-                self.canonize_row(i, sweep=canonize_sweep, yrange=yrange, max_bond=max_bond, cutoff=cutoff)
+                self.canonize_row(i, sweep=canonize_sweep, yrange=yrange)
 
             #
             #     │  │  │  │  │  -->  │  │  │  │  │  -->  │  │  │  │  │
@@ -870,7 +870,7 @@ class TensorNetwork2D(TensorNetwork):
                 #     ●══●══<══<══<
                 #     |  |  |  |  |
                 #
-                self.canonize_row(i, sweep=canonize_sweep, yrange=yrange, max_bond=max_bond, cutoff=cutoff)
+                self.canonize_row(i, sweep=canonize_sweep, yrange=yrange)
             #
             #     >──●══●══●══●  -->  >──>──●══●══●  -->  >──>──>──●══●
             #     |  |  |  |  |  -->  |  |  |  |  |  -->  |  |  |  |  |
@@ -1035,7 +1035,7 @@ class TensorNetwork2D(TensorNetwork):
                 #     ║         ║
                 #     ●──       ●──
                 #
-                self.canonize_column(j, sweep=canonize_sweep, xrange=xrange, max_bond=max_bond, cutoff=cutoff)
+                self.canonize_column(j, sweep=canonize_sweep, xrange=xrange)
             #
             #     v──       ●──
             #     ║         │
@@ -1208,7 +1208,7 @@ class TensorNetwork2D(TensorNetwork):
                 #     ║         ║
                 #   ──●       ──●
                 #
-                self.canonize_column(j, sweep=canonize_sweep, xrange=xrange, max_bond=max_bond, cutoff=cutoff)
+                self.canonize_column(j, sweep=canonize_sweep, xrange=xrange)
             #
             #   ──v       ──●
             #     ║         │
@@ -1607,10 +1607,6 @@ class TensorNetwork2D(TensorNetwork):
         env_bottom = self.copy()
         if dense:
             env_bottom ^= first_row
-        else:
-            for j in range(self.Ly):
-                env_bottom ^= self.site_tag(0, j)
-            env_bottom.compress_row(0, sweep="right", compress_opts=compress_opts)
 
         row_envs['below', 1] = env_bottom.select(first_row)
         for i in range(2, env_bottom.Lx):
@@ -1626,10 +1622,6 @@ class TensorNetwork2D(TensorNetwork):
         env_top = self.copy()
         if dense:
             env_top ^= last_row
-        else:
-            for j in range(self.Ly):
-                env_top ^= self.site_tag(self.Lx-1, j)
-            env_top.compress_row(self.Lx-1, sweep="right", compress_opts=compress_opts)
 
         row_envs['above', self.Lx - 2] = env_top.select(last_row)
         for i in range(env_top.Lx - 3, -1, -1):
@@ -1746,10 +1738,6 @@ class TensorNetwork2D(TensorNetwork):
         env_right = self.copy()
         if dense:
             env_right ^= first_column
-        else:
-            for i in range(self.Lx):
-                env_right ^= self.site_tag(i, 0)
-            env_right.compress_column(0, sweep="up", compress_opts=compress_opts)
 
         col_envs['left', 1] = env_right.select(first_column)
         for j in range(2, env_right.Ly):
@@ -1765,10 +1753,6 @@ class TensorNetwork2D(TensorNetwork):
         env_left = self.copy()
         if dense:
             env_left ^= last_column
-        else:
-            for i in range(self.Lx):
-                env_left ^= self.site_tag(i, self.Ly-1)
-            env_left.compress_column(self.Ly-1, sweep="up", compress_opts=compress_opts)
 
         col_envs['right', self.Ly - 2] = env_left.select(last_column)
         for j in range(self.Ly - 3, -1, -1):
