@@ -1644,7 +1644,7 @@ class Tensor(object):
             tensor network, this simply returns ``self``.
         """
         if not (deep or virtual):
-            return Tensor(self, None)
+            return self.__class__(self, None)
 
         if deep and virtual:
             raise ValueError("Copy can't be both deep and virtual.")
@@ -5093,17 +5093,7 @@ class TensorNetwork(object):
             t1, t2 = self._pop_tensor(tid1), self._pop_tensor(tid2)
 
             # contract them
-<<<<<<< HEAD
-            t_new = t1 @ t2
-
-            if not isinstance(t_new, t1.__class__):
-                t_new = t1.__class__(t_new, tags=t1.tags | t2.tags)
-
-            if info is not None:
-                largest_intermediate = max(largest_intermediate, t_new.size)
-=======
             t_new = tensor_contract(t1, t2, preserve_tensor=True)
->>>>>>> upstream/develop
 
             # re-add the product, using the same identifier as the (inner) t2
             tid_new = tid2
