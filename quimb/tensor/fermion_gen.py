@@ -8,8 +8,11 @@ from quimb.tensor.fermion_2d import FPEPS
 pattern_map = {"d": "+", "l":"+", "p":"+",
                "u": "-", "r":"-"}
 
-def _gen_site_tsr(state, pattern=None, ndim=2, ax=0, symmetry=None):
-    if symmetry is None: symmetry = bitf.DEFAULT_SYMMETRY
+def _gen_site_tsr(state, pattern=None, ndim=2, ax=0, symmetry=None, use_cpp=None):
+    if symmetry is None:
+        symmetry = bitf.dispatch_settings("symmetry")
+    if use_cpp is None:
+        use_cpp = bitf.dispatch_settings("use_cpp")
     state_map = fermion_encoding.get_state_map(symmetry)
     if state not in state_map:
         raise KeyError("requested state not recoginized")
@@ -22,12 +25,13 @@ def _gen_site_tsr(state, pattern=None, ndim=2, ax=0, symmetry=None):
     dat[ind] = 1
     blocks = [SubTensor(reduced=dat, q_labels=q_label)]
     T = SparseFermionTensor(blocks=blocks, pattern=pattern)
-    if bitf.USE_CPP:
+    if use_cpp:
         T =  T.to_flat()
     return T
 
-def gen_mf_peps(state_array, shape='urdlp', symmetry=None, **kwargs):
-    if symmetry is None: symmetry = bitf.DEFAULT_SYMMETRY
+def gen_mf_peps(state_array, shape='urdlp', symmetry=None, use_cpp=None, **kwargs):
+    if symmetry is None:
+        symmetry = bitf.dispatch_settings("symmetry")
     Lx, Ly = state_array.shape
     arr = state_array.astype("int")
     cache = dict()
@@ -47,7 +51,7 @@ def gen_mf_peps(state_array, shape='urdlp', symmetry=None, **kwargs):
         ax = array_order.index('p')
         key = (state, ndim, ax, pattern)
         if key not in cache:
-            cache[key] = _gen_site_tsr(state, pattern, ndim, ax, symmetry).copy()
+            cache[key] = _gen_site_tsr(state, pattern, ndim, ax, symmetry, use_cpp).copy()
         return cache[key]
 
     tsr_array = [[_gen_ij(i,j) for j in range(Ly)] for i in range(Lx)]
