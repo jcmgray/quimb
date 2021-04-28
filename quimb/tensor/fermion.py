@@ -353,6 +353,11 @@ class FermionSpace:
 # --------------------------------------------------------------------------- #
 
 def tensor_contract(*tensors, output_inds=None, inplace=False, **contract_opts):
+    if len(tensors) == 1:
+        if inplace:
+            return tensors[0]
+        else:
+            return tensors[0].copy()
     path_info = _tensor_contract(*tensors, get='path-info', **contract_opts)
     fs, tid_lst = _fetch_fermion_space(*tensors, inplace=inplace)
     if inplace:

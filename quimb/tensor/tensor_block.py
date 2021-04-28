@@ -31,6 +31,8 @@ def _core_contract(T1, T2):
         return T1.__class__(data=o_array, inds=o_ix, tags=o_tags)
 
 def tensor_contract(*tensors, output_inds=None, **contract_opts):
+    if len(tensors) == 1:
+        return tensors[0]
     path_info = _tensor_contract(*tensors, get='path-info', **contract_opts)
     tensors = list(tensors)
     for conc in path_info.contraction_list:
