@@ -155,6 +155,8 @@ class FermionTensorNetwork2D(FermionTensorNetwork, TensorNetwork2D):
         envs[from_which, sweep[0]] = FermionTensorNetwork([])
         first_row = row_tag(sweep[0])
         envs['mid', sweep[0]] = tn.select(first_row).copy()
+        if len(sweep)==1:
+            return envs
         if dense:
             tn ^= first_row
         envs[from_which, sweep[1]] = tn.select(first_row).copy()
@@ -719,8 +721,8 @@ class FermionTensorNetwork2DVector(FermionTensorNetwork2D,
             # pop the sites, contract, then re-add
             pts = [psi._pop_tensor(tid) for tid in site_tids]
             out = tensor_contract(*pts, TG, inplace=True)
-            psi.fermion_space.move(out.get_fermion_info()[0], min(isite))
             psi |= out
+            psi.fermion_space.move(out.get_fermion_info()[0], min(isite))
             return psi
 
         # following are all based on splitting tensors to maintain structure

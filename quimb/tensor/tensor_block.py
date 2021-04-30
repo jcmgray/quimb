@@ -148,7 +148,7 @@ def tensor_canonize_bond(T1, T2, absorb='right', **split_opts):
 
     if absorb == "right":
         new_T1, tRfact = T1.split(left_env_ix, get='tensors', absorb=absorb, **split_opts)
-        new_T2 = T2.contract(tRfact)
+        new_T2 = tRfact.contract(T2)
     else:
         tLfact, new_T2 = T2.split(shared_ix, get="tensors", absorb=absorb, **split_opts)
         new_T1 = T1.contract(tLfact)
@@ -241,7 +241,7 @@ class BlockTensor(Tensor):
 
     def ind_size(self, ind):
         ax = self.inds.index(ind)
-        return self.get_bond_info(ax)
+        return self.data.get_bond_info(ax)
 
     def conj(self, inplace=False):
         """Conjugate this tensors data (does nothing to indices).
