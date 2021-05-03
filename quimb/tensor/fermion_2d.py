@@ -483,9 +483,11 @@ def gate_string_split_(TG, where, string, original_ts, bonds_along,
         t = inner_ts[i]
         t.multiply_index_diagonal_(bix, snew, location=location)
 
+    revert_index_map = {v: k for k, v in reindex_map.items()}
     for to, tn in zip(original_ts, inner_ts):
+        to.reindex_(revert_index_map)
         tn.transpose_like_(to)
-        to.modify(data=tn.data, inds=tn.inds)
+        to.modify(data=tn.data)
 
     for i, (tid, _) in enumerate(fermion_info):
         if i==0:
