@@ -18,7 +18,7 @@ def sqrt(T):
 
 def inv_with_smudge(T, cutoff=1e-10, gauge_smudge=1e-6):
     def _inv_with_smudge(arr):
-        new_arr = np.zeros_like(arr)
+        new_arr = np.zeros(arr.shape, dtype=arr.dtype)
         ind = abs(arr) > cutoff
         new_arr[ind] = (arr[ind] + gauge_smudge) ** -1
         return new_arr
