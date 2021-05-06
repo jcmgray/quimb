@@ -1,20 +1,17 @@
-"""Classes and algorithms related to 2D tensor networks.
+"""Classes and algorithms related to Fermionic 2D tensor networks.
 """
 import re
 import functools
 from operator import add
-from itertools import product, cycle, starmap
+from itertools import product
 from collections import defaultdict
-
-import opt_einsum as oe
 
 from ..utils import check_opt, pairwise
 from .tensor_core import (
     bonds,
     rand_uuid,
     oset,
-    tags_to_oset,
-    oset_union,
+    tags_to_oset
 )
 from .tensor_2d import (
     Rotator2D,
@@ -27,13 +24,23 @@ from .tensor_2d import (
     is_lone_coo,
     gen_long_range_path,
     calc_plaquette_sizes,
-    calc_plaquette_map)
-from .tensor_block import BlockTensorNetwork
-from .fermion import FermionTensor, FermionTensorNetwork, tensor_contract
+    calc_plaquette_map
+)
+from .fermion import (
+    FermionTensor,
+    FermionTensorNetwork,
+    tensor_contract
+)
 
 INVERSE_CUTOFF = 1e-10
 
 class FermionTensorNetwork2D(FermionTensorNetwork, TensorNetwork2D):
+    """A subclass of ``quimb.tensor.tensor_2d.TensorNetwork2D`` that overrides methods
+    that depend on ordering of the tensors. Reorder method is added to aid row/column-wise
+    operations. Environments are now computed as an entire FermionTensorNetwork so that the
+    plaquettes are placed correctly
+
+    """
     _EXTRA_PROPS = (
         '_site_tag_id',
         '_row_tag_id',
@@ -68,6 +75,37 @@ class FermionTensorNetwork2D(FermionTensorNetwork, TensorNetwork2D):
         raise NotImplementedError
 
     def reorder(self, direction, layer_tags=None, inplace=False):
+        r"""Reorder all tensors either row/column-wise
+
+        If ``direction == 'row'`` then::
+
+                     |  |  |  |  |  |  |
+        Row 0:      ─●─>●─>●─>●─>●─>●─>●─    then Row 1
+                     |  |  |  |  |  |  |
+        Row 1:      ─●─>●─>●─>●─>●─>●─>●─    then Row 2
+                     |  |  |  |  |  |  |
+        Row 2:      ─●─>●─>●─>●─>●─>●─>●─
+                     |  |  |  |  |  |  |
+
+        If ``direction == 'col'`` then::
+
+                     v  v  v  v  v  v  v
+                    ─●──●──●──●──●──●──●─
+                     v  v  v  v  v  v  v
+                    ─●──●──●──●──●──●──●─
+                     v  v  v  v  v  v  v
+                    ─●──●──●──●──●──●──●─
+                     v  v  v  v  v  v  v
+
+        Parameters
+        ----------
+        direction : {"row", "column"}
+            The direction to reorder the entire network
+        layer_tags : optional
+            The relative order within a single coordinate
+        inplace : bool, optional
+            Whether to perform the operation inplace
+        """
         Lx, Ly = self._Lx, self._Ly
         tid_map = dict()
         current_position = 0
@@ -135,6 +173,10 @@ class FermionTensorNetwork2D(FermionTensorNetwork, TensorNetwork2D):
         envs=None,
         **contract_boundary_opts
     ):
+        """Compute the ``self.Lx`` 1D boundary tensor networks describing
+        the environments of rows and columns. The returned tensor network
+        also contains the original plaquettes
+        """
         direction = {"left": "col",
                      "right": "col",
                      "top": "row",

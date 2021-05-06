@@ -26,6 +26,8 @@ def Hubbard2D(t, u, Lx, Ly, mu=0., symmetry=None):
         Size in y direction
     mu: scalar, optional
         Chemical potential
+    symmetry: {"z2",'u1', 'z22', 'u11'}, optional
+        Symmetry in the backend
 
     Returns
     -------
@@ -58,7 +60,7 @@ class LocalHam2D:
         The number of rows.
     Ly : int
         The number of columns.
-    H2 : array_like or dict[tuple[tuple[int]], array_like]
+    H2 : pyblock3 tensors or dict[tuple[tuple[int]], pyblock3 tensors]
         The two site term(s). If a single array is given, assume to be the
         default interaction for all nearest neighbours. If a dict is supplied,
         the keys should represent specific pairs of coordinates like
@@ -75,7 +77,7 @@ class LocalHam2D:
 
     Attributes
     ----------
-    terms : dict[tuple[tuple[int]], array_like]
+    terms : dict[tuple[tuple[int]], pyblock3 tensors]
         The total effective local term for each interaction (with single site
         terms appropriately absorbed). Each key is a pair of coordinates
         ``ija, ijb`` with ``ija < ijb``.
@@ -217,16 +219,6 @@ class LocalHam2D:
 
         return ordering
 
-    def apply_to_arrays(self, fn):
-        """Apply the function ``fn`` to all the arrays representing terms.
-        """
-        for k, x in self.terms.items():
-            self.terms[k] = fn(x)
-
-    def __repr__(self):
-        s = "<LocalHam2D(Lx={}, Ly={}, num_terms={})>"
-        return s.format(self.Lx, self.Ly, len(self.terms))
-
 def _get_location(Ti, Tj):
     if Ti.get_fermion_info()[1]<Tj.get_fermion_info()[1]:
         return "front", "back"
@@ -234,6 +226,97 @@ def _get_location(Ti, Tj):
         return "back", "front"
 
 class SimpleUpdate(_SimpleUpdate):
+    """A subclass of ``quimb.tensor.tensor_2d_tebd.SimpleUpdate`` that overrides one key method in
+    order to ensure the gauge is placed in the right order within the PEPS. The gauges
+    are stored separately from the main PEPS in the ``gauges`` attribute.
+    Before and after a gate is applied they are absorbed and then extracted.
+    When absorbing the gauge back to the PEPS, one needs to retrive the right order
+    based on the relative ordering of the two gauged tensors.
+
+    Parameters
+    ----------
+    psi0 : FermionTensorNetwork2DVector
+        The initial state.
+    ham : LocalHam2D
+        The Hamtiltonian consisting of local terms.
+    tau : float, optional
+        The default local exponent, if considered as time real values here
+        imply imaginary time.
+    max_bond : {'psi0', int, None}, optional
+        The maximum bond dimension to keep when applying each gate.
+    gate_opts : dict, optional
+        Supplied to :meth:`quimb.tensor.fermion_2d.FermionTensorNetwork2DVector.gate`,
+        in addition to ``max_bond``. By default ``contract`` is set to
+        'reduce-split' and ``cutoff`` is set to ``0.0``.
+    ordering : str, tuple[tuple[int]], callable, optional
+        How to order the terms, if a string is given then use this as the
+        strategy given to
+        :meth:`~quimb.tensor.fermion_2d_tebd.LocalHam2D.get_auto_ordering`. An
+        explicit list of coordinate pairs can also be given. The default is to
+        greedily form an 'edge coloring' based on the sorted list of
+        Hamiltonian pair coordinates. If a callable is supplied it will be used
+        to generate the ordering before each sweep.
+    compute_energy_every : None or int, optional
+        How often to compute and record the energy. If a positive integer 'n',
+        the energy is computed *before* every nth sweep (i.e. including before
+        the zeroth).
+    compute_energy_final : bool, optional
+        Whether to compute and record the energy at the end of the sweeps
+        regardless of the value of ``compute_energy_every``. If you start
+        sweeping again then this final energy is the same as the zeroth of the
+        next set of sweeps and won't be recomputed.
+    compute_energy_opts : dict, optional
+        Supplied to
+        :meth:`~quimb.tensor.tensor_2d.PEPS.compute_local_expectation`. By
+        default ``max_bond`` is set to ``max(8, D**2)`` where ``D`` is the
+        maximum bond to use for applying the gate, ``cutoff`` is set to ``0.0``
+        and ``normalized`` is set to ``True``.
+    compute_energy_fn : callable, optional
+        Supply your own function to compute the energy, it should take the
+        ``TEBD2D`` object as its only argument.
+    callback : callable, optional
+        A custom callback to run after every sweep, it should take the
+        ``TEBD2D`` object as its only argument. If it returns any value
+        that boolean evaluates to ``True`` then terminal the evolution.
+    progbar : boolean, optional
+        Whether to show a live progress bar during the evolution.
+    gauge_renorm : bool, optional
+        Whether to actively renormalize the singular value gauges.
+    gauge_smudge : float, optional
+        A small offset to use when applying the guage and its inverse to avoid
+        numerical problems.
+    condition_tensors : bool, optional
+        Whether to actively equalize tensor norms for numerical stability.
+    condition_balance_bonds : bool, optional
+        If and when equalizing tensor norms, whether to also balance bonds as
+        an additional conditioning.
+    long_range_use_swaps : bool, optional
+        disenabled option
+    long_range_path_sequence : str or callable, optional
+        disenabled option
+
+    Attributes
+    ----------
+    state : FermionTensorNetwork2DVector
+        The current state.
+    ham : LocalHam2D
+        The Hamiltonian being used to evolve.
+    energy : float
+        The current of the current state, this will trigger a computation if
+        the energy at this iteration hasn't been computed yet.
+    energies : list[float]
+        The energies that have been computed, if any.
+    its : list[int]
+        The corresponding sequence of iteration numbers that energies have been
+        computed at.
+    taus : list[float]
+        The corresponding sequence of time steps that energies have been
+        computed at.
+    best : dict
+        If ``keep_best`` was set then the best recorded energy and the
+        corresponding state that was computed - keys ``'energy'`` and
+        ``'state'`` respectively.
+    """
 
     def _initialize_gauges(self):
         """Create unit singular values, stored as tensors.
@@ -350,9 +433,8 @@ class SimpleUpdate(_SimpleUpdate):
 
     def get_state(self, absorb_gauges=True):
         """Return the state, with the diagonal bond gauges either absorbed
-        equally into the tensors on either side of them
-        (``absorb_gauges=True``, the default), lazy representation with
-        hyperedges not implemented
+        equally into the tensors (``absorb_gauges=True``, the default),
+        lazy representation with hyperedges disenabled
         """
         psi = self._psi.copy()
 
