@@ -1878,7 +1878,7 @@ class Tensor(object):
         t = self if inplace else self.copy()
         data = t.data
         if iscomplex(data):
-            t.modify(data=conj(data))
+            t.modify(apply=conj)
         return t
 
     conj_ = functools.partialmethod(conj, inplace=True)
@@ -1970,9 +1970,9 @@ class Tensor(object):
                              f"{set(output_inds)}")
 
         current_ind_map = {ind: i for i, ind in enumerate(t.inds)}
-        out_shape = tuple(current_ind_map[i] for i in output_inds)
+        perm = tuple(current_ind_map[i] for i in output_inds)
 
-        t.modify(apply=lambda x: transpose(x, out_shape), inds=output_inds)
+        t.modify(apply=lambda x: transpose(x, perm), inds=output_inds)
         return t
 
     transpose_ = functools.partialmethod(transpose, inplace=True)
@@ -5630,8 +5630,9 @@ class TensorNetwork(object):
         Parameters
         ----------
         tags : sequence of str
-            The list of tags to filter the tensors by. Use ``...``
-            (``Ellipsis``) to contract all.
+            The list of tags to filter the tensors by. Use ``all`` or ``...``
+            (``Ellipsis``) to contract all tensors. ``...`` will try and use a
+            'structured' contract method if possible.
         inplace : bool, optional
             Whether to perform the contraction inplace.
         which : {'all', 'any'}
@@ -5822,7 +5823,7 @@ class TensorNetwork(object):
     def aslinearoperator(self, left_inds, right_inds, ldims=None, rdims=None,
                          backend=None, optimize='auto'):
         """View this ``TensorNetwork`` as a
-        :class:`~quimb.tensor.tensor_contract.TNLinearOperator`.
+        :class:`~quimb.tensor.tensor_core.TNLinearOperator`.
         """
         return TNLinearOperator(self, left_inds, right_inds, ldims, rdims,
                                 optimize=optimize, backend=backend)
@@ -6169,6 +6170,7 @@ class TensorNetwork(object):
         output_inds=None,
         equalize_norms=False,
         cache=None,
+        max_combinations=500,
         inplace=False,
     ):
         """Simplify this tensor network by performing contractions that don't
@@ -6231,10 +6233,14 @@ class TensorNetwork(object):
 
         # sorted list of unique indices to check -> start with lowly connected
         def rank_weight(ind):
-            return (tn.ind_size(ind),
-                    -sum(tn.tensor_map[tid].ndim for tid in tn.ind_map[ind]))
+            return (tn.ind_size(ind), -sum(tn.tensor_map[tid].ndim
+                                           for tid in tn.ind_map[ind]))
 
         queue = oset(sorted(count, key=rank_weight))
+
+        # number of tensors for which there will be more pairwise combinations
+        # than max_combinations
+        combi_cutoff = int(0.5 * ((8 * max_combinations + 1)**0.5 + 1))
 
         while queue:
             # get next index
@@ -6262,6 +6268,13 @@ class TensorNetwork(object):
 
             # otherwise check pairwise contractions
             cands = []
+            combos_checked = 0
+
+            if len(tids) > combi_cutoff:
+                # sort size of the tensors so that when we are limited by
+                #     max_combinations we check likely ones first
+                tids = sorted(tids, key=lambda tid: tn.tensor_map[tid].ndim)
+
             for tid_a, tid_b in itertools.combinations(tids, 2):
 
                 ta = tn.tensor_map[tid_a]
@@ -6270,6 +6283,8 @@ class TensorNetwork(object):
                 cache_key = ('rs', tid_a, tid_b, id(ta.data), id(tb.data))
                 if cache_key in cache:
                     continue
+
+                combos_checked += 1
 
                 # work out the output indices of candidate contraction
                 involved = frequencies(itertools.chain(ta.inds, tb.inds))
@@ -6292,15 +6307,16 @@ class TensorNetwork(object):
                 else:
                     cache.add(cache_key)
 
-                if cands and trivial:
+                if cands and (trivial or combos_checked > max_combinations):
                     # can do contractions in any order
+                    # ... or hyperindex is very large, stop checking
                     break
 
             if not cands:
                 # none of the parwise contractions reduce rank
                 continue
 
-            score, tid_a, tid_b, out_ab, deincr = min(cands)
+            _, tid_a, tid_b, out_ab, deincr = min(cands)
             ta = tn._pop_tensor(tid_a)
             tb = tn._pop_tensor(tid_b)
             tab = ta.contract(tb, output_inds=out_ab)
@@ -6383,7 +6399,7 @@ class TensorNetwork(object):
             cache = set()
 
         if output_inds is None:
-            output_inds = set(self.outer_inds())
+            output_inds = set(tn._outer_inds)
 
         queue = list(tn.tensor_map)
         while queue:
@@ -6620,14 +6636,12 @@ class TensorNetwork(object):
                 continue
 
             found = False
-            for r in range(1, t.ndim):
-                for lix in itertools.combinations(t.inds, r):
-                    tl, tr = t.split(lix, get='tensors', cutoff=atol)
-                    new_size = max(tl.size, tr.size)
-                    if new_size < t.size:
-                        found = True
-                        break
-                if found:
+            for lix, rix in gen_bipartitions(t.inds):
+                tl, tr = t.split(lix, right_inds=rix,
+                                 get='tensors', cutoff=atol)
+                new_size = max(tl.size, tr.size)
+                if new_size < t.size:
+                    found = True
                     break
 
             if found:
@@ -6660,41 +6674,10 @@ class TensorNetwork(object):
         ------
         tuple[int]
         """
-        # start paths beginning at every node
-        queue = [(tid,) for tid in self.tensor_map]
-        seen = set()
-        while queue:
-            path = queue.pop(0)
-            # consider all the ways to extend each path
-            for tid_next in self._get_neighbor_tids(path[-1]):
-                tid0 = path[0]
-                # check for valid loop ...
-                if (
-                    # is not trivial
-                    (len(path) > 2) and
-                    # begins where is starts
-                    (tid_next == tid0) and
-                    # and is not just a cyclic permutation of existing loop
-                    (frozenset(path) not in seen)
-                ):
-                    yield tuple(sorted(path))
-                    seen.add(frozenset(path))
-                    if max_loop_length is None:
-                        # automatically set the max loop length
-                        max_loop_length = len(path) + 1
-
-                # path hits itself too early
-                elif tid_next in path:
-                    continue
-
-                # keep extending path, but only if
-                elif (
-                    # we haven't found any loops yet
-                    (max_loop_length is None) or
-                    # or this loops is short
-                    (len(path) < max_loop_length)
-                ):
-                    queue.append(path + (tid_next,))
+        from cotengra.core import get_hypergraph
+        inputs = {tid: t.inds for tid, t in self.tensor_map.items()}
+        hg = get_hypergraph(inputs, accel='auto')
+        return hg.compute_loops(max_loop_length)
 
     def tids_are_connected(self, tids):
         """Check whether nodes ``tids`` are connected.
@@ -6725,9 +6708,106 @@ class TensorNetwork(object):
 
         return len(set(groups.values())) == 1
 
+    def pair_simplify(
+        self,
+        cutoff=1e-12,
+        output_inds=None,
+        max_inds=10,
+        cache=None,
+        equalize_norms=False,
+        max_combinations=500,
+        inplace=False,
+        **split_opts,
+    ):
+        tn = self if inplace else self.copy()
+
+        if output_inds is None:
+            output_inds = tn._outer_inds
+
+        queue = list(tn.ind_map)
+
+        def gen_pairs():
+            # number of tensors for which there will be more pairwise
+            # combinations than max_combinations
+            combi_cutoff = int(0.5 * ((8 * max_combinations + 1)**0.5 + 1))
+
+            while queue:
+                ind = queue.pop()
+                try:
+                    tids = tn.ind_map[ind]
+                except KeyError:
+                    continue
+
+                if len(tids) > combi_cutoff:
+                    # sort size of the tensors so that when we are limited by
+                    #     max_combinations we check likely ones first
+                    tids = sorted(
+                        tids, key=lambda tid: tn.tensor_map[tid].ndim)
+
+                for _, (tid1, tid2) in zip(
+                    range(max_combinations),
+                    itertools.combinations(tids, 2),
+                ):
+                    if (tid1 in tn.tensor_map) and (tid2 in tn.tensor_map):
+                        yield tid1, tid2
+
+        for pair in gen_pairs():
+
+            if cache is not None:
+                key = ('pc', frozenset((tid, id(tn.tensor_map[tid].data))
+                                       for tid in pair))
+                if key in cache:
+                    continue
+
+            t1, t2 = tn._tids_get(*pair)
+            inds = self.compute_contracted_inds(*pair, output_inds=output_inds)
+
+            if len(inds) > max_inds:
+                # don't check exponentially many bipartitions
+                continue
+
+            t12 = tensor_contract(t1, t2, output_inds=inds,
+                                  preserve_tensor=True)
+            current_size = t1.size + t2.size
+
+            cands = []
+            for lix, rix in gen_bipartitions(inds):
+                tl, tr = t12.split(left_inds=lix, right_inds=rix,
+                                   get='tensors', cutoff=cutoff, **split_opts)
+                new_size = (tl.size + tr.size)
+                if new_size < current_size:
+                    cands.append((new_size / current_size, pair, tl, tr))
+
+            if not cands:
+                # no decompositions decrease the size
+                if cache is not None:
+                    cache.add(key)
+                continue
+
+            # perform the decomposition that minimizes the new size
+            _, pair, tl, tr = min(cands, key=lambda x: x[0])
+            for tid in tuple(pair):
+                tn._pop_tensor(tid)
+            tn |= tl
+            tn |= tr
+
+            tensor_fuse_squeeze(tl, tr)
+            if equalize_norms:
+                tn.strip_exponent(tl, equalize_norms)
+                tn.strip_exponent(tr, equalize_norms)
+
+            queue.extend(tl.inds)
+            queue.extend(tr.inds)
+
+        return tn
+
+    pair_simplify_ = functools.partialmethod(pair_simplify, inplace=True)
+
     def loop_simplify(
         self,
+        output_inds=None,
         max_loop_length=None,
+        max_inds=10,
         cutoff=1e-12,
         loops=None,
         cache=None,
@@ -6762,6 +6842,9 @@ class TensorNetwork(object):
         """
         tn = self if inplace else self.copy()
 
+        if output_inds is None:
+            output_inds = tn._outer_inds
+
         if loops is None:
             loops = tuple(tn.gen_loops(max_loop_length))
         elif callable(loops):
@@ -6778,34 +6861,27 @@ class TensorNetwork(object):
                 if key in cache:
                     continue
 
-            tn_loop = tn._select_tids(loop)
-            oix = oset(tn_loop.outer_inds())
-            current_size = sum(tn_loop.tensor_map[tid].size for tid in loop)
+            oix = tn.compute_contracted_inds(*loop, output_inds=output_inds)
+            if len(oix) > max_inds:
+                continue
+            oix = oset(oix)
+
+            ts = tuple(tn._tids_get(*loop))
+            current_size = sum(t.size for t in ts)
+            tloop = tensor_contract(*ts, output_inds=oix)
+
             cands = []
-
-            for tid_lefts, tid_rights in gen_bipartitions(loop):
+            for left_inds, right_inds in gen_bipartitions(oix):
                 if not (
-                    tn.tids_are_connected(tid_lefts) and
-                    tn.tids_are_connected(tid_rights)
+                    tn.tids_are_connected(self._get_tids_from_inds(left_inds))
+                    and
+                    tn.tids_are_connected(self._get_tids_from_inds(right_inds))
                 ):
-                    # only group indices if they are contiguous in the graph
                     continue
 
-                left_inds = oset(
-                    concat(t.inds for t in tn._tids_get(*tid_lefts))
-                ) & oix
-                right_inds = oset(
-                    concat(t.inds for t in tn._tids_get(*tid_rights))
-                ) & oix
-
-                if (not left_inds) or (not right_inds):
-                    continue
-
-                # cast the loop as an operator and split it
-                tnlo = tn_loop.aslinearoperator(left_inds, right_inds)
                 tl, tr = tensor_split(
-                    tnlo, left_inds, right_inds=right_inds, get='tensors',
-                    cutoff=cutoff, **split_opts
+                    tloop, left_inds=left_inds, right_inds=right_inds,
+                    get='tensors', cutoff=cutoff, **split_opts
                 )
 
                 new_size = (tl.size + tr.size)
@@ -6825,6 +6901,7 @@ class TensorNetwork(object):
             tn |= tl
             tn |= tr
 
+            tensor_fuse_squeeze(tl, tr)
             if equalize_norms:
                 tn.strip_exponent(tl, equalize_norms)
                 tn.strip_exponent(tr, equalize_norms)
@@ -6945,7 +7022,13 @@ class TensorNetwork(object):
                     tn.split_simplify_(atol=atol, cache=cache,
                                        equalize_norms=equalize_norms)
                 elif meth == 'L':
-                    tn.loop_simplify_(cutoff=atol, cache=cache,
+                    tn.loop_simplify_(output_inds=ix_o, cutoff=atol,
+                                      cache=cache,
+                                      equalize_norms=equalize_norms,
+                                      **loop_simplify_opts)
+                elif meth == 'P':
+                    tn.pair_simplify_(output_inds=ix_o, cutoff=atol,
+                                      cache=cache,
                                       equalize_norms=equalize_norms,
                                       **loop_simplify_opts)
                 else:
