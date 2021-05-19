@@ -5966,11 +5966,11 @@ class TensorNetwork(object):
         ))
 
         return tuple(
-            ix for ix, c in freqs.items()
+            ix for ix, c in freqs.items() if
             # ind also appears elsewhere -> keep
-            if c != len(self.ind_map[ix]) or
+            (c != len(self.ind_map[ix])) or
             # explicitly in output -> keep
-            c in output_inds
+            (ix in output_inds)
         )
 
     def squeeze(self, fuse=False, inplace=False):
