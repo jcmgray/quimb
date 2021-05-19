@@ -906,7 +906,7 @@ class TensorNetwork2D(TensorNetwork):
         max_bond,
         cutoff=0.0,
         method='eigh',
-        renorm=True,
+        renorm=False,
         optimize='auto-hq',
         opposite_envs=None,
         contract_boundary_opts=None,
