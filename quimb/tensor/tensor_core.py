@@ -421,8 +421,7 @@ def _gen_output_inds(all_inds):
     """Generate the output, i.e. unique, indices from the set ``inds``. Raise
     if any index found more than twice.
     """
-    cnts = frequencies(all_inds)
-    for ind, freq in cnts.items():
+    for ind, freq in frequencies(all_inds).items():
         if freq > 2:
             raise ValueError(
                 f"The index {ind} appears more than twice! If this is "
@@ -434,17 +433,29 @@ def _gen_output_inds(all_inds):
 
 
 @functools.lru_cache(2**12)
-def _inds_to_eq(all_inds, inputs, output):
-    """``einsum`` need characters a-z,A-Z or equivalent numbers.
-    Do this early, and allow *any* index labels.
+def get_symbol(i):
+    """Get the 'ith' symbol.
+    """
+    return oe.get_symbol(i)
+
+
+def empty_symbol_map():
+    """Get a default dictionary that will populate with symbol entries as they
+    are accessed.
+    """
+    return collections.defaultdict(map(get_symbol, itertools.count()).__next__)
+
+
+@functools.lru_cache(2**12)
+def _inds_to_eq(inputs, output):
+    """Turn input and output indices of any sort into a single 'equation'
+    string where each index is a single 'symbol' (unicode character).
 
     Parameters
     ----------
-    all_inds : iterable
-        All of the input indices.
-    inputs : sequence of sequence
+    inputs : sequence of sequence of str
         The input indices per tensor.
-    output : list of int
+    output : sequence of str
         The output indices.
 
     Returns
@@ -452,11 +463,10 @@ def _inds_to_eq(all_inds, inputs, output):
     eq : str
         The string to feed to einsum/contract.
     """
-    amap = {ix: oe.get_symbol(i) for i, ix in enumerate(all_inds)}
-    in_str = ("".join(amap[i] for i in ix) for ix in inputs)
-    out_str = "".join(amap[o] for o in output)
-
-    return ",".join(in_str) + "->" + out_str
+    symbol_get = empty_symbol_map().__getitem__
+    in_str = ("".join(map(symbol_get, inds)) for inds in inputs)
+    out_str = "".join(map(symbol_get, output))
+    return ",".join(in_str) + f"->{out_str}"
 
 
 _VALID_CONTRACT_GET = {None, 'expression', 'path', 'path-info', 'symbol-map'}
@@ -491,7 +501,7 @@ def tensor_contract(
               detailed information such as flop cost. The symbol-map is also
               added to the ``quimb_symbol_map`` attribute.
 
-    backend : {'numpy', 'cupy', 'tensorflow', 'theano', 'dask', ...}, optional
+    backend : {'auto', 'numpy', 'jax', 'cupy', 'tensorflow', ...}, optional
         Which backend to use to perform the contraction. Must be a valid
         ``opt_einsum`` backend with the relevant library installed.
     preserve_tensor : bool, optional
@@ -508,24 +518,25 @@ def tensor_contract(
     if backend is None:
         backend = get_contract_backend()
 
-    i_ix = tuple(t.inds for t in tensors)  # input indices per tensor
-    total_ix = tuple(concat(i_ix))  # list of all input indices
-    all_ix = tuple(unique(total_ix))
+    inds_i = tuple(t.inds for t in tensors)  # input indices per tensor
 
     if output_inds is None:
         # sort output indices by input order for efficiency and consistency
-        o_ix = tuple(_gen_output_inds(total_ix))
+        inds_out = tuple(_gen_output_inds(concat(inds_i)))
     else:
-        o_ix = tuple(output_inds)
+        inds_out = tuple(output_inds)
 
     # possibly map indices into the range needed by opt-einsum
-    eq = _inds_to_eq(all_ix, i_ix, o_ix)
+    eq = _inds_to_eq(inds_i, inds_out)
 
     if get is not None:
         check_opt('get', get, _VALID_CONTRACT_GET)
 
         if get == 'symbol-map':
-            return {oe.get_symbol(i): ix for i, ix in enumerate(all_ix)}
+            return {
+                get_symbol(i): ix
+                for i, ix in enumerate(unique(concat(inds_i)))
+            }
 
         if get == 'path':
             ops = (t.shape for t in tensors)
@@ -535,7 +546,8 @@ def tensor_contract(
             ops = (t.shape for t in tensors)
             path_info = get_contraction(eq, *ops, get='info', **contract_opts)
             path_info.quimb_symbol_map = {
-                oe.get_symbol(i): ix for i, ix in enumerate(all_ix)
+                get_symbol(i): ix
+                for i, ix in enumerate(unique(concat(inds_i)))
             }
             return path_info
 
@@ -552,7 +564,7 @@ def tensor_contract(
     expression = get_contraction(eq, *shapes, **contract_opts)
     o_array = expression(*(t.data for t in tensors), backend=backend)
 
-    if not o_ix and not preserve_tensor:
+    if not inds_out and not preserve_tensor:
         if isinstance(o_array, np.ndarray):
             o_array = realify_scalar(o_array.item(0))
         return o_array
@@ -560,7 +572,7 @@ def tensor_contract(
     # union of all tags
     o_tags = oset.union(*(t.tags for t in tensors))
 
-    return Tensor(data=o_array, inds=o_ix, tags=o_tags)
+    return Tensor(data=o_array, inds=inds_out, tags=o_tags)
 
 
 # generate a random base to avoid collisions on difference processes ...
@@ -2022,7 +2034,7 @@ class Tensor(object):
                 new_inds.append(ix)
         old_inds, new_inds = tuple(old_inds), tuple(new_inds)
 
-        eq = _inds_to_eq(t.inds, (old_inds,), new_inds)
+        eq = _inds_to_eq((old_inds,), new_inds)
         t.modify(apply=lambda x: do('einsum', eq, x, like=x),
                  inds=new_inds, left_inds=None)
 
@@ -2061,7 +2073,7 @@ class Tensor(object):
         if len(old_inds) == len(new_inds):
             return t
 
-        eq = _inds_to_eq(new_inds, (old_inds,), new_inds)
+        eq = _inds_to_eq((old_inds,), new_inds)
         t.modify(apply=lambda x: do('einsum', eq, x, like=x),
                  inds=new_inds, left_inds=None)
 
@@ -2245,7 +2257,6 @@ class Tensor(object):
             case the output tensor's new inds will be ordered. In both cases
             the new indices are created at the old index's position of the
             tensor's shape
-
         shape_map : dict_like or sequence of tuples
             Mapping like: ``{old_ind: new_ind_sizes, ...}`` or an
             ordered mapping like ``[(old_ind_1, new_ind_sizes_1), ...]``.
@@ -3955,17 +3966,25 @@ class TensorNetwork(object):
         if tid1 == tid2:
             return
 
-        T1 = self._pop_tensor(tid1)
-        T2 = self._pop_tensor(tid2)
-        T12 = tensor_contract(T1, T2, preserve_tensor=True, **contract_opts)
-        self.add_tensor(T12, tid=tid2, virtual=True)
+        output_inds = self.compute_contracted_inds(tid1, tid2)
+        t1 = self._pop_tensor(tid1)
+        t2 = self._pop_tensor(tid2)
+        t12 = tensor_contract(t1, t2, output_inds=output_inds,
+                              preserve_tensor=True, **contract_opts)
+        self.add_tensor(t12, tid=tid2, virtual=True)
 
-    def contract_ind(self, ind, **contract_opts):
+    def contract_ind(self, ind, output_inds=None, **contract_opts):
         """Contract tensors connected by ``ind``.
         """
-        tids = self._get_tids_from_inds(ind)
-        ts = [self._pop_tensor(tid) for tid in tids]
-        self |= tensor_contract(*ts, preserve_tensor=True, **contract_opts)
+        tids = tuple(self._get_tids_from_inds(ind))
+        output_inds = self.compute_contracted_inds(
+            *tids, output_inds=output_inds)
+        tnew = tensor_contract(
+            *map(self._pop_tensor, tids), output_inds=output_inds,
+            preserve_tensor=True, **contract_opts
+        )
+        self.add_tensor(tnew, tid=tids[0], virtual=True)
+
 
     def _compute_bond_env(
         self, tid1, tid2,
@@ -5932,6 +5951,26 @@ class TensorNetwork(object):
         tensor network was fully contracted.
         """
         return tuple((self.ind_size(i), i) for i in self._outer_inds)
+
+    def compute_contracted_inds(self, *tids, output_inds=None):
+        """Get the indices describing the tensor contraction of tensors
+        corresponding to ``tids``.
+        """
+        if output_inds is None:
+            output_inds = self._outer_inds
+
+        # number of times each index appears on tensors
+        freqs = frequencies(concat(
+            self.tensor_map[tid].inds for tid in tids
+        ))
+
+        return tuple(
+            ix for ix, c in freqs.items()
+            # ind also appears elsewhere -> keep
+            if c != len(self.ind_map[ix]) or
+            # explicitly in output -> keep
+            c in output_inds
+        )
 
     def squeeze(self, fuse=False, inplace=False):
         """Drop singlet bonds and dimensions from this tensor network. If
