@@ -1,10 +1,14 @@
 """Functionailty for drawing tensor networks.
 """
 import textwrap
+import importlib
 
 import numpy as np
 
 from ..utils import valmap
+
+
+HAS_FA2 = importlib.util.find_spec('fa2') is not None
 
 
 def _add_or_merge_edge(G, u, v, attrs):
@@ -39,6 +43,7 @@ def draw_tn(
     k=None,
     iterations=200,
     initial_layout='spectral',
+    use_forceatlas2=1000,
     node_color=None,
     outline_darkness=0.8,
     node_size=None,
@@ -72,7 +77,7 @@ def draw_tn(
         What color to use for ``highlight_inds`` nodes.
     highlight_tids_color : tuple[float], optional
         What color to use for ``highlight_tids`` nodes.
-    show_inds : {None, False, True, 'all'}, optional
+    show_inds : {None, False, True, 'all', 'bond-size'}, optional
         Explicitly turn on labels for each tensors indices.
     show_tags : {None, False, True}, optional
         Explicitly turn on labels for each tensors tags.
@@ -100,6 +105,10 @@ def draw_tn(
         The name of a networkx layout to use before iterating with the
         spring layout. Set ``iterations=0`` if you just want to use this
         layout only.
+    use_forceatlas2 : bool or int, optional
+        Whether to try and use ``forceatlas2`` (``fa2``) for the spring layout
+        relaxation instead of ``networkx``. If an integer, only try and use
+        beyond that many nodes (it can give messier results on smaller graphs).
     node_color : tuple[float], optional
         Default color of nodes.
     outline_darkness : float, optional
@@ -188,6 +197,8 @@ def draw_tn(
             _add_or_merge_edge(G, *tids, edge_attrs)
             if show_inds == 'all':
                 edge_labels[tuple(tids)] = ix
+            elif show_inds == 'bond-size':
+                edge_labels[tuple(tids)] = tn.ind_size(ix)
         else:
             # hyper or outer edge - needs dummy 'node' shown with zero size
             hyperedges.append(ix)
@@ -235,12 +246,19 @@ def draw_tn(
         G.nodes[hix]['outline_color'] = (1.0, 1.0, 1.0, 1.0)
         if show_inds == 'all':
             node_labels[hix] = hix
+        elif show_inds == 'bond-size':
+            node_labels[hix] = tn.ind_size(hix)
 
-    if show_inds:
+    if show_inds == 'bond-size':
+        font_size = font_size_inner
+        for oix in tn.outer_inds():
+            node_labels[oix] = tn.ind_size(oix)
+    elif show_inds:
         for oix in tn.outer_inds():
             node_labels[oix] = oix
 
-    pos = _get_positions(tn, G, fix, initial_layout, k, iterations)
+    pos = _get_positions(tn, G, fix, initial_layout,
+                         k, iterations, use_forceatlas2)
 
     if get == 'pos':
         return pos
@@ -293,7 +311,7 @@ def draw_tn(
         linewidths=tuple(x[1]['outline_size'] for x in G.nodes(data=True)),
         ax=ax,
     )
-    if show_inds == 'all':
+    if show_inds in {'all', 'bond-size'}:
         nx.draw_networkx_edge_labels(
             G, pos,
             edge_labels=edge_labels,
@@ -452,7 +470,8 @@ def _massage_pos(pos, nangles=360, flatten=False):
     return dict(zip(pos, rxy0))
 
 
-def _get_positions(tn, G, fix, initial_layout, k, iterations):
+def _get_positions(tn, G, fix, initial_layout,
+                   k, iterations, use_forceatlas2):
     import networkx as nx
 
     if fix is None:
@@ -497,8 +516,26 @@ def _get_positions(tn, G, fix, initial_layout, k, iterations):
         fixed = None
 
     # and then relax remaining using spring layout
-    pos = nx.spring_layout(
-        G, pos=pos0, fixed=fixed, k=k, iterations=iterations)
+    if iterations:
+
+        if use_forceatlas2 is True:
+            use_forceatlas2 = 1
+        elif use_forceatlas2 in (0, False):
+            use_forceatlas2 = float('inf')
+
+        should_use_fa2 = (
+            (fixed is None) and HAS_FA2 and (len(G) > use_forceatlas2)
+        )
+
+        if should_use_fa2:
+            from fa2 import ForceAtlas2
+            pos = ForceAtlas2(verbose=False).forceatlas2_networkx_layout(
+                G, pos=pos0, iterations=iterations)
+        else:
+            pos = nx.spring_layout(
+                G, pos=pos0, fixed=fixed, k=k, iterations=iterations)
+    else:
+        pos = pos0
 
     if not fix:
         # finally rotate them to cover a small vertical span
