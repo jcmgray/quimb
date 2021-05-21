@@ -5,12 +5,12 @@ import copy
 import functools
 
 import numpy as np
+import opt_einsum as oe
 
 from ..utils import (check_opt, oset)
 from .drawing import draw_tn
 
-from .tensor_core import Tensor, TensorNetwork, _parse_split_opts, oset_union, tags_to_oset, rand_uuid, _parse_split_opts
-from .tensor_core import tensor_contract as _tensor_contract
+from .tensor_core import Tensor, TensorNetwork, _parse_split_opts, oset_union, tags_to_oset, rand_uuid, _parse_split_opts, concat, unique, _gen_output_inds, _inds_to_eq, get_contraction
 from .block_tools import apply, get_smudge_balance
 from .block_interface import dispatch_settings
 
@@ -30,10 +30,40 @@ def _core_contract(T1, T2):
     else:
         return T1.__class__(data=o_array, inds=o_ix, tags=o_tags)
 
+def get_block_contraction_path_info(*tensors, **contract_opts):
+    i_ix = tuple(t.inds for t in tensors)  # input indices per tensor
+    total_ix = tuple(concat(i_ix))  # list of all input indices
+    all_ix = tuple(unique(total_ix))
+
+    o_ix = tuple(_gen_output_inds(total_ix))
+
+    # possibly map indices into the range needed by opt-einsum
+    eq = _inds_to_eq(all_ix, i_ix, o_ix)
+
+    size_dict = dict()
+    for T in tensors:
+        i_shape = T.shape
+        for ax, ix in enumerate(T.inds):
+            if ix not in size_dict:
+                size_dict[ix] = i_shape[ax]
+            else:
+                size_dict[ix] = max(i_shape[ax], size_dict[ix])
+
+    ops = []
+    for T in tensors:
+        i_shape = [size_dict[ix] for ix in T.inds]
+        ops.append(tuple(i_shape))
+
+    path_info = get_contraction(eq, *ops, get='info', **contract_opts)
+    path_info.quimb_symbol_map = {
+        oe.get_symbol(i): ix for i, ix in enumerate(all_ix)
+    }
+    return path_info
+
 def tensor_contract(*tensors, output_inds=None, **contract_opts):
     if len(tensors) == 1:
         return tensors[0]
-    path_info = _tensor_contract(*tensors, get='path-info', **contract_opts)
+    path_info = get_block_contraction_path_info(*tensors, **contract_opts)
     tensors = list(tensors)
     for conc in path_info.contraction_list:
         pos1, pos2 = sorted(conc[0])
