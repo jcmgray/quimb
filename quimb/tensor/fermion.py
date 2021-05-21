@@ -10,9 +10,8 @@ from ..utils import (check_opt, oset, valmap)
 from .drawing import draw_tn
 
 from .tensor_core import Tensor, TensorNetwork, _parse_split_opts, oset_union, tags_to_oset, rand_uuid, _parse_split_opts
-from .tensor_core import tensor_contract as _tensor_contract
 from .tensor_block import tensor_split as _tensor_split
-from .tensor_block import _core_contract, tensor_canonize_bond, tensor_compress_bond, BlockTensor, BlockTensorNetwork
+from .tensor_block import _core_contract, tensor_canonize_bond, tensor_compress_bond, BlockTensor, BlockTensorNetwork, get_block_contraction_path_info
 from .block_tools import apply, get_smudge_balance
 from .block_interface import dispatch_settings
 from functools import wraps
@@ -358,7 +357,7 @@ def tensor_contract(*tensors, output_inds=None, inplace=False, **contract_opts):
             return tensors[0]
         else:
             return tensors[0].copy()
-    path_info = _tensor_contract(*tensors, get='path-info', **contract_opts)
+    path_info = get_block_contraction_path_info(*tensors, **contract_opts)
     fs, tid_lst = _fetch_fermion_space(*tensors, inplace=inplace)
     if inplace:
         tensors = list(tensors)
