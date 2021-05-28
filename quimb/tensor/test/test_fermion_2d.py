@@ -1,76 +1,98 @@
 import pytest
 import numpy as np
-import itertools
-from quimb.tensor.block_interface import BondInfo, SparseFermionTensor, U11, U1, Z4, Z2, Z22
-from quimb.tensor.fermion_gen import gen_mf_peps
+from itertools import product
+from quimb.tensor.block_interface import set_options
+from quimb.tensor.fermion_2d import FPEPS
+from quimb.tensor.block_gen import rand_all_blocks as rand
 
+set_options(fermion=True)
 @pytest.fixture(scope='class')
 def u11setup(request):
-    bond = BondInfo({U11(0):1, U11(2): 1, U11(1,-1):1, U11(1,1):1})
-    G = SparseFermionTensor.random((bond, bond), pattern="+-").to_flat()
-    Hij = SparseFermionTensor.random((bond,)*4, pattern="++--").to_flat()
+    bond = ((0,0),(1,1),(1,-1),(2,0))
+    set_options(symmetry="u11")
+    G = rand((1,1), [bond]*2, pattern="+-")
+    Hij = rand((1,1,1,1), [bond]*4, pattern="++--")
     request.cls.G = G
     request.cls.Hij = Hij
     request.cls.Lx = Lx = 3
     request.cls.Ly = Ly = 3
-    request.cls.state_array = state_array = np.random.randint(0, 4, Lx*Ly).reshape(Lx, Ly)
-    request.cls.peps = gen_mf_peps(state_array, symmetry="U11")
+    state_map = {0:(0,0), 1:(1,1), 2:(1,-1), 3:(2,0)}
+    phys_infos = dict()
+    for ix, iy in product(range(Lx), range(Ly)):
+        phys_infos[ix,iy] = state_map[np.random.randint(0,4)]
+    request.cls.peps = FPEPS.gen_site_prod_state(Lx, Ly, phys_infos, phys_dim=1)
     for itsr in request.cls.peps.tensor_map.values():
         itsr.data.data *= np.random.random(itsr.data.data.size) * 5
 
 @pytest.fixture(scope='class')
 def z22setup(request):
-    bond = BondInfo({Z22(0):1, Z22(0,1): 1, Z22(1,0):1, Z22(1,1):1})
-    G = SparseFermionTensor.random((bond, bond), pattern="+-").to_flat()
-    Hij = SparseFermionTensor.random((bond,)*4, pattern="++--").to_flat()
+    bond = ((0,0),(0,1),(1,0),(1,1))
+    set_options(symmetry="z22")
+    G = rand((1,1), [bond]*2, pattern="+-")
+    Hij = rand((1,1,1,1), [bond]*4, pattern="++--")
     request.cls.G = G
     request.cls.Hij = Hij
     request.cls.Lx = Lx = 3
     request.cls.Ly = Ly = 3
-    request.cls.state_array = state_array = np.random.randint(0, 4, Lx*Ly).reshape(Lx, Ly)
-    request.cls.peps = gen_mf_peps(state_array, symmetry="Z22")
+    state_map = {0:(0,0), 1:(0,1), 2:(1,1), 3:(2,0)}
+    phys_infos = dict()
+    for ix, iy in product(range(Lx), range(Ly)):
+        phys_infos[ix,iy] = state_map[np.random.randint(0,4)]
+    request.cls.peps = FPEPS.gen_site_prod_state(Lx, Ly, phys_infos, phys_dim=1)
     for itsr in request.cls.peps.tensor_map.values():
         itsr.data.data *= np.random.random(itsr.data.data.size) * 5
 
 @pytest.fixture(scope='class')
 def u1setup(request):
-    bond = BondInfo({U1(0):1, U1(1): 2, U1(2):1})
-    G = SparseFermionTensor.random((bond, bond), pattern="+-").to_flat()
-    Hij = SparseFermionTensor.random((bond,)*4, pattern="++--").to_flat()
+    bond = (0,1,2)
+    set_options(symmetry="u1")
+    G = rand((1,1), [bond]*2, pattern="+-")
+    Hij = rand((1,1,1,1), [bond]*4, pattern="++--")
+
     request.cls.G = G
     request.cls.Hij = Hij
     request.cls.Lx = Lx = 3
     request.cls.Ly = Ly = 3
-    request.cls.state_array = state_array = np.random.randint(0, 4, Lx*Ly).reshape(Lx, Ly)
-    request.cls.peps = gen_mf_peps(state_array, symmetry="U1")
+    phys_infos = dict()
+    for ix, iy in product(range(Lx), range(Ly)):
+        phys_infos[ix,iy] = np.random.randint(0,3)
+    request.cls.peps = FPEPS.gen_site_prod_state(Lx, Ly, phys_infos, phys_dim=1)
     for itsr in request.cls.peps.tensor_map.values():
         itsr.data.data *= np.random.random(itsr.data.data.size) * 5
 
 @pytest.fixture(scope='class')
 def z4setup(request):
-    bond = BondInfo({Z4(0):2, Z4(1): 2})
-    G = SparseFermionTensor.random((bond, bond), pattern="+-").to_flat()
-    Hij = SparseFermionTensor.random((bond,)*4, pattern="++--").to_flat()
+    bond = (0,1,2,3)
+    set_options(symmetry="z4")
+    G = rand((1,1), [bond]*2, pattern="+-")
+    Hij = rand((1,1,1,1), [bond]*4, pattern="++--")
+
     request.cls.G = G
     request.cls.Hij = Hij
     request.cls.Lx = Lx = 3
     request.cls.Ly = Ly = 3
-    request.cls.state_array = state_array = np.random.randint(0, 4, Lx*Ly).reshape(Lx, Ly)
-    request.cls.peps = gen_mf_peps(state_array, symmetry="z4")
+    phys_infos = dict()
+    for ix, iy in product(range(Lx), range(Ly)):
+        phys_infos[ix,iy] = np.random.randint(0,4)
+    request.cls.peps = FPEPS.gen_site_prod_state(Lx, Ly, phys_infos, phys_dim=1)
     for itsr in request.cls.peps.tensor_map.values():
         itsr.data.data *= np.random.random(itsr.data.data.size) * 5
 
 @pytest.fixture(scope='class')
 def z2setup(request):
-    bond = BondInfo({Z2(0):2, Z2(1): 2})
-    G = SparseFermionTensor.random((bond, bond), pattern="+-").to_flat()
-    Hij = SparseFermionTensor.random((bond,)*4, pattern="++--").to_flat()
+    bond = (0,1)
+    set_options(symmetry="z2")
+    G = rand((1,1), [bond]*2, pattern="+-")
+    Hij = rand((1,1,1,1), [bond]*4, pattern="++--")
+
     request.cls.G = G
     request.cls.Hij = Hij
     request.cls.Lx = Lx = 3
     request.cls.Ly = Ly = 3
-    request.cls.state_array = state_array = np.random.randint(0, 4, Lx*Ly).reshape(Lx, Ly)
-    request.cls.peps = gen_mf_peps(state_array, symmetry="z2")
+    phys_infos = dict()
+    for ix, iy in product(range(Lx), range(Ly)):
+        phys_infos[ix,iy] = np.random.randint(0,2)
+    request.cls.peps = FPEPS.gen_site_prod_state(Lx, Ly, phys_infos, phys_dim=1)
     for itsr in request.cls.peps.tensor_map.values():
         itsr.data.data *= np.random.random(itsr.data.data.size) * 5
 
@@ -171,7 +193,7 @@ class TestPEPS_U11:
 
     def test_compute_local_expectation_one_sites(self):
         peps = self.peps
-        coos = list(itertools.product(range(self.Lx), range(self.Ly)))
+        coos = list(product(range(self.Lx), range(self.Ly)))
         terms = {coo: self.G for coo in coos}
 
         expecs = peps.compute_local_expectation(

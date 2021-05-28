@@ -2,29 +2,26 @@ import pytest
 import numpy as np
 from quimb.tensor.tensor_block import (
     BlockTensor, BlockTensorNetwork, tensor_contract)
-from quimb.tensor.block_interface import BondInfo, U11, U1, Z2, Z4, Z22, set
-from pyblock3.algebra.fermion import SparseFermionTensor
-
-set(fermion=False)
-rand = SparseFermionTensor.random
+from quimb.tensor.block_gen import rand_all_blocks as rand
+from quimb.tensor.block_interface import set_options
 
 @pytest.fixture(scope='class')
 def u11setup(request):
-    bond1 = BondInfo({U11(0):3, U11(1,1): 3, U11(1,-1):3, U11(2):3})
-    bond2 = BondInfo({U11(0):5, U11(1,1): 5, U11(1,-1):5, U11(2):5})
-    request.cls.abc = abc = rand((bond2, bond1, bond1), dq=U11(1,1), pattern="+--").to_flat()
-    request.cls.bcd = bcd = rand((bond1, bond1, bond1), dq=U11(-1,-1), pattern="++-").to_flat()
+    bond = [(0,0), (1,1), (1,-1), (2,0)]
+    set_options(symmetry="u11", fermion=False)
+    request.cls.abc = abc = rand((4,2,3), [bond]*3, pattern="+--", dq=(1,1))
+    request.cls.bcd = bcd = rand((2,3,5), [bond]*3, pattern="++-", dq=(-1,-1))
+    request.cls.ega = ega = rand((3,6,4), [bond]*3, pattern="+--", dq=(1,-1))
+    request.cls.deg = deg = rand((5,3,6), [bond]*3, pattern="+-+", dq=(-1,1))
 
-    request.cls.ega = ega = rand((bond1, bond1, bond2), dq=U11(1,-1), pattern="+--").to_flat()
-    request.cls.deg = deg = rand((bond1, bond1, bond1), dq=U11(-1,1), pattern="+-+").to_flat()
     request.cls.Tabc = Tabc = BlockTensor(abc, inds=['a','b','c'], tags=["abc"])
     request.cls.Tega = Tega = BlockTensor(ega, inds=['e','g','a'], tags=["ega"])
     request.cls.Tbcd = Tbcd = BlockTensor(bcd, inds=['b','c','d'], tags=["bcd"])
     request.cls.Tdeg = Tdeg = BlockTensor(deg, inds=['d','e','g'], tags=["deg"])
     request.cls.tn = BlockTensorNetwork((Tabc, Tega, Tbcd, Tdeg))
 
-    ab = rand((bond1, bond1), dq=U11(0), pattern="+-").to_flat()
-    bc = rand((bond1, bond1), dq=U11(1,-1), pattern="++").to_flat()
+    ab = rand((2,5), [bond]*2, pattern="+-", dq=(0,0))
+    bc = rand((5,4), [bond]*2, pattern="++", dq=(1,-1))
     Tab = BlockTensor(ab, inds=['a','b'], tags=["ab"])
     Tbc = BlockTensor(bc, inds=['b','c'], tags=["bc"])
     Tab1 = BlockTensor(ab.dagger, inds=['b1','a'], tags=["ab1"])
@@ -34,21 +31,22 @@ def u11setup(request):
 
 @pytest.fixture(scope='class')
 def z22setup(request):
-    bond1 = BondInfo({Z22(0):3, Z22(0,1): 3, Z22(1,0):3, Z22(1,1):3})
-    bond2 = BondInfo({Z22(0):5, Z22(0,1): 5, Z22(1,0):5, Z22(1,1):5})
-    request.cls.abc = abc = rand((bond2, bond1, bond1), dq=Z22(0,1), pattern="+--").to_flat()
-    request.cls.bcd = bcd = rand((bond1, bond1, bond1), dq=Z22(1,0), pattern="++-").to_flat()
+    bond = [(0,0), (0,1), (1,0), (1,1)]
+    set_options(symmetry="z22", fermion=False)
+    request.cls.abc = abc = rand((4,2,3), [bond]*3, pattern="+--", dq=(0,1))
+    request.cls.bcd = bcd = rand((2,3,5), [bond]*3, pattern="++-", dq=(1,0))
+    request.cls.ega = ega = rand((3,6,4), [bond]*3, pattern="+--", dq=(1,0))
+    request.cls.deg = deg = rand((5,3,6), [bond]*3, pattern="+-+", dq=(0,1))
 
-    request.cls.ega = ega = rand((bond1, bond1, bond2), dq=Z22(1,0), pattern="+--").to_flat()
-    request.cls.deg = deg = rand((bond1, bond1, bond1), dq=Z22(0,1), pattern="+-+").to_flat()
     request.cls.Tabc = Tabc = BlockTensor(abc, inds=['a','b','c'], tags=["abc"])
     request.cls.Tega = Tega = BlockTensor(ega, inds=['e','g','a'], tags=["ega"])
     request.cls.Tbcd = Tbcd = BlockTensor(bcd, inds=['b','c','d'], tags=["bcd"])
     request.cls.Tdeg = Tdeg = BlockTensor(deg, inds=['d','e','g'], tags=["deg"])
     request.cls.tn = BlockTensorNetwork((Tabc, Tega, Tbcd, Tdeg))
 
-    ab = rand((bond1, bond1), dq=Z22(0), pattern="+-").to_flat()
-    bc = rand((bond1, bond1), dq=Z22(1,0), pattern="++").to_flat()
+    ab = rand((2,5), [bond]*2, pattern="+-", dq=(0,0))
+    bc = rand((5,4), [bond]*2, pattern="++", dq=(1,0))
+
     Tab = BlockTensor(ab, inds=['a','b'], tags=["ab"])
     Tbc = BlockTensor(bc, inds=['b','c'], tags=["bc"])
     Tab1 = BlockTensor(ab.dagger, inds=['b1','a'], tags=["ab1"])
@@ -58,13 +56,13 @@ def z22setup(request):
 
 @pytest.fixture(scope='class')
 def u1setup(request):
-    bond1 = BondInfo({U1(0):3, U1(1): 3, U1(3):3, U1(2):3})
-    bond2 = BondInfo({U1(0):5, U1(1): 5, U1(3):5, U1(2):5})
+    bond = (0,1,2,3)
+    set_options(symmetry="u1", fermion=False)
 
-    request.cls.abc = abc = rand((bond2, bond1, bond1), dq=U1(1), pattern="+--").to_flat()
-    request.cls.bcd = bcd = rand((bond1, bond1, bond1), dq=U1(2), pattern="++-").to_flat()
-    request.cls.ega = ega = rand((bond1, bond1, bond2), dq=U1(-1), pattern="+--").to_flat()
-    request.cls.deg = deg = rand((bond1, bond1, bond1), dq=U1(-2), pattern="+-+").to_flat()
+    request.cls.abc = abc = rand((4,2,3), [bond]*3, pattern="+--", dq=1)
+    request.cls.bcd = bcd = rand((2,3,5), [bond]*3, pattern="++-", dq=2)
+    request.cls.ega = ega = rand((3,6,4), [bond]*3, pattern="+--", dq=-1)
+    request.cls.deg = deg = rand((5,3,6), [bond]*3, pattern="+-+", dq=-2)
 
     request.cls.Tabc = Tabc = BlockTensor(abc, inds=['a','b','c'], tags=["abc"])
     request.cls.Tega = Tega = BlockTensor(ega, inds=['e','g','a'], tags=["ega"])
@@ -72,8 +70,9 @@ def u1setup(request):
     request.cls.Tdeg = Tdeg = BlockTensor(deg, inds=['d','e','g'], tags=["deg"])
     request.cls.tn = BlockTensorNetwork((Tabc, Tega, Tbcd, Tdeg))
 
-    ab = rand((bond1, bond1), dq=U1(0), pattern="+-").to_flat()
-    bc = rand((bond1, bond1), dq=U1(1), pattern="++").to_flat()
+    ab = rand((2,5), [bond]*2, pattern="+-", dq=0)
+    bc = rand((5,4), [bond]*2, pattern="++", dq=1)
+
     Tab = BlockTensor(ab, inds=['a','b'], tags=["ab"])
     Tbc = BlockTensor(bc, inds=['b','c'], tags=["bc"])
     Tab1 = BlockTensor(ab.dagger, inds=['b1','a'], tags=["ab1"])
@@ -83,21 +82,22 @@ def u1setup(request):
 
 @pytest.fixture(scope='class')
 def z4setup(request):
-    bond1 = BondInfo({Z4(0):3, Z4(1): 3, Z4(3):3, Z4(2):3})
-    bond2 = BondInfo({Z4(0):5, Z4(1): 5, Z4(3):5, Z4(2):5})
+    bond = (0,1,2,3)
+    set_options(symmetry="z4", fermion=False)
+    request.cls.abc = abc = rand((4,2,3), [bond]*3, pattern="+--", dq=1)
+    request.cls.bcd = bcd = rand((2,3,5), [bond]*3, pattern="++-", dq=2)
+    request.cls.ega = ega = rand((3,6,4), [bond]*3, pattern="+--", dq=0)
+    request.cls.deg = deg = rand((5,3,6), [bond]*3, pattern="+-+", dq=1)
 
-    request.cls.abc = abc = rand((bond2, bond1, bond1), dq=Z4(1), pattern="+--").to_flat()
-    request.cls.bcd = bcd = rand((bond1, bond1, bond1), dq=Z4(2), pattern="++-").to_flat()
-    request.cls.ega = ega = rand((bond1, bond1, bond2), dq=Z4(0), pattern="+--").to_flat()
-    request.cls.deg = deg = rand((bond1, bond1, bond1), dq=Z4(1), pattern="+-+").to_flat()
     request.cls.Tabc = Tabc = BlockTensor(abc, inds=['a','b','c'], tags=["abc"])
     request.cls.Tega = Tega = BlockTensor(ega, inds=['e','g','a'], tags=["ega"])
     request.cls.Tbcd = Tbcd = BlockTensor(bcd, inds=['b','c','d'], tags=["bcd"])
     request.cls.Tdeg = Tdeg = BlockTensor(deg, inds=['d','e','g'], tags=["deg"])
     request.cls.tn = BlockTensorNetwork((Tabc, Tega, Tbcd, Tdeg))
 
-    ab = rand((bond1, bond1), dq=Z4(0), pattern="+-").to_flat()
-    bc = rand((bond1, bond1), dq=Z4(1), pattern="++").to_flat()
+    ab = rand((2,5), [bond]*2, pattern="+-", dq=0)
+    bc = rand((5,4), [bond]*2, pattern="++", dq=1)
+
     Tab = BlockTensor(ab, inds=['a','b'], tags=["ab"])
     Tbc = BlockTensor(bc, inds=['b','c'], tags=["bc"])
     Tab1 = BlockTensor(ab.dagger, inds=['b1','a'], tags=["ab1"])
@@ -107,20 +107,22 @@ def z4setup(request):
 
 @pytest.fixture(scope='class')
 def z2setup(request):
-    bond1 = BondInfo({Z2(0):3, Z2(1): 3})
-    bond2 = BondInfo({Z2(0):5, Z2(1): 5})
-    request.cls.abc = abc = rand((bond2, bond1, bond1), dq=Z2(0), pattern="+--").to_flat()
-    request.cls.bcd = bcd = rand((bond1, bond1, bond1), dq=Z2(1), pattern="++-").to_flat()
-    request.cls.ega = ega = rand((bond1, bond1, bond2), dq=Z2(1), pattern="+--").to_flat()
-    request.cls.deg = deg = rand((bond1, bond1, bond1), dq=Z2(0), pattern="+-+").to_flat()
+    bond = (0,1)
+    set_options(symmetry="z2", fermion=False)
+    request.cls.abc = abc = rand((4,2,3), [bond]*3, pattern="+--", dq=0)
+    request.cls.bcd = bcd = rand((2,3,5), [bond]*3, pattern="++-", dq=1)
+    request.cls.ega = ega = rand((3,6,4), [bond]*3, pattern="+--", dq=1)
+    request.cls.deg = deg = rand((5,3,6), [bond]*3, pattern="+-+", dq=0)
+
     request.cls.Tabc = Tabc = BlockTensor(abc, inds=['a','b','c'], tags=["abc"])
     request.cls.Tega = Tega = BlockTensor(ega, inds=['e','g','a'], tags=["ega"])
     request.cls.Tbcd = Tbcd = BlockTensor(bcd, inds=['b','c','d'], tags=["bcd"])
     request.cls.Tdeg = Tdeg = BlockTensor(deg, inds=['d','e','g'], tags=["deg"])
     request.cls.tn = BlockTensorNetwork((Tabc, Tega, Tbcd, Tdeg))
 
-    ab = rand((bond1, bond1), dq=Z2(0), pattern="+-").to_flat()
-    bc = rand((bond1, bond1), dq=Z2(1), pattern="++").to_flat()
+    ab = rand((2,5), [bond]*2, pattern="+-", dq=0)
+    bc = rand((5,4), [bond]*2, pattern="++", dq=1)
+
     Tab = BlockTensor(ab, inds=['a','b'], tags=["ab"])
     Tbc = BlockTensor(bc, inds=['b','c'], tags=["bc"])
     Tab1 = BlockTensor(ab.dagger, inds=['b1','a'], tags=["ab1"])

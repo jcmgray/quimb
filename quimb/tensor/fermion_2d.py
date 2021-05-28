@@ -31,6 +31,7 @@ from .fermion import (
     FermionTensorNetwork,
     tensor_contract
 )
+from .block_gen import rand_all_blocks, ones_single_block
 
 INVERSE_CUTOFF = 1e-10
 
@@ -1044,9 +1045,109 @@ class FPEPS(FermionTensorNetwork2DVector,
         super().__init__(tensors, virtual=True, **tn_opts)
 
     @classmethod
-    def rand(cls, Lx, Ly, bond_dim, phys_dim=2,
-             dtype=float, seed=None, **peps_opts):
-        raise NotImplementedError
+    def rand(cls, Lx, Ly, bond_dim, symmetry_infos, dq_infos,
+             phys_dim=2, seed=None, dtype=float, **peps_opts):
+        r'''Construct a random 2d FPEPS with given quantum particle number distribution
+
+        Parameters
+        ----------
+        Lx : int
+            The number of rows.
+        Ly : int
+            The number of columns.
+        bond_dim: int
+            Virtual bond dimension for each virtual block
+        symmetry_infos : dict[tuple[int], list/tuple]
+            A dictionary mapping the site coordinates to the allowed quantum particle
+            numbers in each dimension ordered by up, right, down, left and physical,
+            which will be supplied to ``rand_all_blocks``
+        dq_infos: dict[tuple[ix], int or tuple/list of integers]
+            A dictionary mapping the site coordinates to the net quantum particle numbers
+            on that site, which will be supplied to ``rand_all_blocks``
+        phys_dim: int
+            Physical bond dimension for each physical block
+        seed : int, optional
+            A random seed.
+        dtype : {'float64', 'complex128', 'float32', 'complex64'}, optional
+            The underlying data type.
+        pepes_opts
+            Supplied to :class:`~quimb.tensor.fermion_2d.FPEPS`.
+
+        Returns
+        -------
+        FPEPS
+        '''
+        if seed is not None:
+            np.random.seed(seed)
+        pattern_map = {"d": "+", "l":"+", "p":"+",
+                           "u": "-", "r":"-"}
+
+        arrays = [[None for _ in range(Ly)] for _ in range(Lx)]
+        for i, j in product(range(Lx), range(Ly)):
+            shape = []
+            pattern = ""
+            if i != Lx - 1:  # bond up
+                shape.append(bond_dim)
+                pattern += pattern_map['u']
+            if j != Ly - 1:  # bond right
+                shape.append(bond_dim)
+                pattern += pattern_map['r']
+            if i != 0:  # bond down
+                shape.append(bond_dim)
+                pattern += pattern_map['d']
+            if j != 0:  # bond left
+                shape.append(bond_dim)
+                pattern += pattern_map['l']
+            shape.append(phys_dim)
+            pattern += pattern_map['p']
+            symmetry_info = symmetry_infos[i, j]
+            arrays[i][j] = rand_all_blocks(shape, symmetry_info, dtype=dtype, pattern=pattern, dq=dq_infos[i, j])
+        return FPEPS(arrays, **peps_opts)
+
+    @classmethod
+    def gen_site_prod_state(cls, Lx, Ly, phys_infos, phys_dim=1, **peps_opts):
+        r'''Construct a 2d FPEPS as site product state
+
+        Parameters
+        ----------
+        Lx : int
+            The number of rows.
+        Ly : int
+            The number of columns.
+        phys_infos: dict[tuple[int], int or tuple/list]
+            A dictionary mapping the site coordinates to the specified single quantum
+            particle state
+        phys_dim: int
+            Physical bond dimension for the physical block
+        pepes_opts
+            Supplied to :class:`~quimb.tensor.fermion_2d.FPEPS`.
+
+        Returns
+        -------
+        FPEPS
+        '''
+        pattern_map = {"d": "+", "l":"+", "p":"+",
+                           "u": "-", "r":"-"}
+        arrays = [[None for _ in range(Ly)] for _ in range(Lx)]
+        for i, j in product(range(Lx), range(Ly)):
+            shape = []
+            pattern = ""
+            if i != Lx - 1:  # bond up
+                shape.append(1)
+                pattern += pattern_map['u']
+            if j != Ly - 1:  # bond right
+                shape.append(1)
+                pattern += pattern_map['r']
+            if i != 0:  # bond down
+                shape.append(1)
+                pattern += pattern_map['d']
+            if j != 0:  # bond left
+                shape.append(1)
+                pattern += pattern_map['l']
+            shape.append(phys_dim)
+            pattern += pattern_map['p']
+            arrays[i][j] = ones_single_block(shape, pattern, phys_infos[i, j], ind=len(shape)-1)
+        return FPEPS(arrays, **peps_opts)
 
     def add_PEPS(self, other, inplace=False):
         raise NotImplementedError

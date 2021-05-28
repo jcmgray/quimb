@@ -26,7 +26,7 @@ def set_fermion(use_fermion):
     this.USE_FERMION = use_fermion
     setting.set_fermion(use_fermion)
 
-def set(**kwargs):
+def set_options(**kwargs):
     symmetry = kwargs.pop("symmetry", this.DEFAULT_SYMMETRY)
     use_fermion = kwargs.pop("fermion", this.USE_FERMION)
     use_cpp = kwargs.pop("use_cpp", this.USE_CPP)
@@ -46,6 +46,9 @@ def dispatch_settings(*keys):
     if len(_settings) == 1:
         _settings = _settings[0]
     return _settings
+
+def get_symmetry():
+    return setting.symmetry_map[this.DEFAULT_SYMMETRY]
 
 to_exponential = fermion_ops.get_exponential
 H1 = fermion_ops.H1
