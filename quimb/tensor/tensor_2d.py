@@ -906,7 +906,7 @@ class TensorNetwork2D(TensorNetwork):
         max_bond,
         cutoff=0.0,
         method='eigh',
-        renorm=True,
+        renorm=False,
         optimize='auto-hq',
         opposite_envs=None,
         contract_boundary_opts=None,
@@ -930,7 +930,7 @@ class TensorNetwork2D(TensorNetwork):
             Cut-off value to used to truncate singular values in the boundary
             contraction - only for the opposite direction environment
             contraction.
-        method : {'eigh', 'eig', 'svd', 'biorthog', 'schur'}, optional
+        method : {'eigh', 'eig', 'svd', 'biorthog'}, optional
             Which similarity decomposition method to use to compress the full
             bond environment.
         renorm : bool, optional
@@ -1078,6 +1078,8 @@ class TensorNetwork2D(TensorNetwork):
         """Unified entrypoint for contracting any rectangular patch of tensors
         from any direction, with any boundary method.
         """
+        check_opt('mode', mode, {'mps', 'full-bond'})
+
         tn = self if inplace else self.copy()
 
         # universal options

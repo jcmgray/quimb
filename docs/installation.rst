@@ -73,7 +73,7 @@ Pip can handle this compilation and installation, for example the following scri
   export OPTFLAGS="-O3 -march=native -s -DNDEBUG"
 
   # petsc options, here configured for real
-  export PETSC_CONFIGURE_OPTIONS="--with-scalar-type=real --download-mumps --download-scalapack --download-parmetis --download-metis --COPTFLAGS='$OPTFLAGS' --CXXOPTFLAGS='$OPTFLAGS' --FOPTFLAGS='$OPTFLAGS'"
+  export PETSC_CONFIGURE_OPTIONS="--with-scalar-type=complex --download-mumps --download-scalapack --download-parmetis --download-metis --COPTFLAGS='$OPTFLAGS' --CXXOPTFLAGS='$OPTFLAGS' --FOPTFLAGS='$OPTFLAGS'"
 
   # make sure using all the same version
   export PETSC_VERSION=3.14.0

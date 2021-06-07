@@ -294,7 +294,7 @@ def eig(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0, renorm=0):
                                 max_bond, absorb, renorm)
 
 
-@njit
+@njit  # pragma: no cover
 def svdvals_eig(x):  # pragma: no cover
     """SVD-decomposition via eigen, but return singular values only.
     """
@@ -522,7 +522,7 @@ def _similarity_compress_eigh(X, max_bond, renorm):
     return Cl, Cr
 
 
-@njit
+@njit  # pragma: no cover
 def _similarity_compress_eigh_numba(X, max_bond, renorm):
     XX = (X + dag_numba(X)) / 2
     el, ev = np.linalg.eigh(XX)
@@ -577,20 +577,31 @@ def _similarity_compress_svd_numba(X, max_bond, renorm, asymm):
     return Cl, Cr
 
 
-def _similarity_compress_schur_numpy(X, max_bond, renorm):
-    L, Z = scla.schur(X, check_finite=False)
-    sel = np.argsort(-np.abs(np.diag(L)))[:max_bond]
-    Cl = Z[:, sel]
-    Cr = dag_numba(Cl)
+def _similarity_compress_biorthog(X, max_bond, renorm):
+    U, s, VH = do('linalg.svd', X)
+
+    B = U[:, :max_bond]
+    AH = VH[:max_bond, :]
+
+    Uab, sab, VHab = do('linalg.svd', AH @ B)
+    sab = (sab + 1e-12 * do('max', sab)) ** -0.5
+    sab_inv = do('reshape', sab, (1, -1))
+    P = Uab * sab_inv
+    Q = dag(VHab) * sab_inv
+
+    Cl = B @ Q
+    Cr = dag(P) @ AH
+
     if renorm:
-        trace_old = np.trace(X)
-        trace_new = np.trace(Cr @ (X @ Cl))
+        trace_old = do('trace', X)
+        trace_new = do('trace', Cr @ (X @ Cl))
         Cl = Cl * trace_old / trace_new
+
     return Cl, Cr
 
 
 @njit  # pragma: no cover
-def _similarity_compress_biorthog_numpy(X, max_bond, renorm):
+def _similarity_compress_biorthog_numba(X, max_bond, renorm):
     U, s, VH = np.linalg.svd(X)
 
     B = U[:, :max_bond]
@@ -617,29 +628,6 @@ def _similarity_compress_biorthog_numpy(X, max_bond, renorm):
     return Cl, Cr
 
 
-def _similarity_compress_biorthog(X, max_bond, renorm):
-    U, s, VH = do('linalg.svd', X)
-
-    B = U[:, :max_bond]
-    AH = VH[:max_bond, :]
-
-    Uab, sab, VHab = do('linalg.svd', AH @ B)
-    sab = (sab + 1e-12 * do('max', sab)) ** -0.5
-    sab_inv = do('reshape', sab, (1, -1))
-    P = Uab * sab_inv
-    Q = dag(VHab) * sab_inv
-
-    Cl = B @ Q
-    Cr = dag(P) @ AH
-
-    if renorm:
-        trace_old = do('trace', X)
-        trace_new = do('trace', Cr @ (X @ Cl))
-        Cl = Cl * trace_old / trace_new
-
-    return Cl, Cr
-
-
 _similarity_compress_fns = {
     ('eig', False): _similarity_compress_eig,
     ('eig', True): _similarity_compress_eig_numba,
@@ -649,9 +637,8 @@ _similarity_compress_fns = {
         _similarity_compress_svd, asymm=0),
     ('svd', True): functools.partial(
         _similarity_compress_svd_numba, asymm=0),
-    ('schur', True): _similarity_compress_schur_numpy,
-    ('biorthog', True): _similarity_compress_biorthog_numpy,
     ('biorthog', False): _similarity_compress_biorthog,
+    ('biorthog', True): _similarity_compress_biorthog_numba,
 }
 
 

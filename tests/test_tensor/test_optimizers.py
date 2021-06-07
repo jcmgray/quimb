@@ -257,7 +257,6 @@ def test_multiloss(backend, executor):
         executor.shutdown()
 
 
-@pytest.mark.new
 def test_parse_network_to_backend_shared_tags(tagged_qaoa_tn):
     n, depth, psi0 = tagged_qaoa_tn
 
