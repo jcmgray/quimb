@@ -38,7 +38,7 @@ def get_block_contraction_path_info(*tensors, **contract_opts):
     o_ix = tuple(_gen_output_inds(total_ix))
 
     # possibly map indices into the range needed by opt-einsum
-    eq = _inds_to_eq(all_ix, i_ix, o_ix)
+    eq = _inds_to_eq(i_ix, o_ix)
 
     size_dict = dict()
     for T in tensors:
