@@ -1617,7 +1617,7 @@ class Tensor(object):
         self._owners = dict()
 
         # Short circuit for copying Tensors
-        if isinstance(data, self.__class__):
+        if isinstance(data, Tensor):
             self._data = data.data
             self._inds = data.inds
             self._tags = data.tags.copy()
@@ -2802,7 +2802,7 @@ class TensorNetwork(object):
     def __init__(self, ts, *, virtual=False, check_collisions=True):
 
         # short-circuit for copying TensorNetworks
-        if isinstance(ts, self.__class__):
+        if isinstance(ts, TensorNetwork):
             self.tag_map = valmap(lambda tids: tids.copy(), ts.tag_map)
             self.ind_map = valmap(lambda tids: tids.copy(), ts.ind_map)
             self.tensor_map = dict()
@@ -2832,13 +2832,13 @@ class TensorNetwork(object):
         """Combine this tensor network with more tensors, without contracting.
         Copies the tensors.
         """
-        return self.__class__((self, other))
+        return TensorNetwork((self, other))
 
     def __or__(self, other):
         """Combine this tensor network with more tensors, without contracting.
         Views the constituent tensors.
         """
-        return self.__class__((self, other), virtual=True)
+        return TensorNetwork((self, other), virtual=True)
 
     @classmethod
     def from_TN(cls, tn, like=None, inplace=False, **kwargs):

@@ -394,7 +394,8 @@ class BlockTensor(Tensor):
         """
         return BlockTensorNetwork((self, other), virtual=True)
 
-
+    _EXTRA_PROPS = ()
+    
     def draw(self, *args, **kwargs):
         """Plot a graph of this tensor and its indices.
         """
