@@ -196,7 +196,7 @@ def gen_2d_bonds_z2(pnarray, physical_infos):
     for ix, iy in product(range(Lx), range(Ly)):
         nvir = (ix != Lx - 1) + (ix != 0) +\
                (iy != Ly - 1) + (iy != 0)
-        symmetry_infos[ix,iy] = [(0,1)] * nvir + [tuple(physical_infos[ix][iy])]
+        symmetry_infos[ix,iy] = [(0,1)] * nvir + [tuple(physical_infos[ix,iy])]
         dq_infos[ix,iy]= pnarray[ix,iy]
     return symmetry_infos, dq_infos
 
@@ -228,7 +228,7 @@ def gen_2d_bonds_z22(n1array, n2array, physical_infos):
     for ix, iy in product(range(Lx), range(Ly)):
         nvir = (ix != Lx - 1) + (ix != 0) +\
                (iy != Ly - 1) + (iy != 0)
-        symmetry_infos[ix,iy] = [((0,0),(0,1),(1,0),(1,1))] * nvir + [tuple(physical_infos[ix][iy])]
+        symmetry_infos[ix,iy] = [((0,0),(0,1),(1,0),(1,1))] * nvir + [tuple(physical_infos[ix,iy])]
         dq_infos[ix,iy]= (n1array[ix,iy], n2array[ix,iy])
     return symmetry_infos, dq_infos
 
