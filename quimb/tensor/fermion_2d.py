@@ -100,7 +100,7 @@ class FermionTensorNetwork2D(FermionTensorNetwork, TensorNetwork2D):
 
         Parameters
         ----------
-        direction : {"row", "column"}
+        direction : {"row", "col"}
             The direction to reorder the entire network
         layer_tags : optional
             The relative order within a single coordinate
