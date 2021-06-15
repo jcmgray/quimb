@@ -22,8 +22,10 @@ def _add_or_merge_edge(G, u, v, attrs):
             (x + y) / 2 for x, y in zip(attrs0['color'], attrs['color']))
         attrs0['ind'] += ' ' + attrs['ind']
         # hide original edge and instead track multiple bond sizes
-        attrs0['edge_size'] = 0
+        attrs0['multiedge_inds'].append(attrs['ind'])
         attrs0['multiedge_sizes'].append(attrs['edge_size'])
+        attrs0['spring_weight'] /= (attrs['edge_size'] + 1)
+        attrs0['edge_size'] = 0
 
 
 def draw_tn(
@@ -212,7 +214,9 @@ def draw_tn(
             'ind': ix,
             'edge_size': edge_scale * math.log2(tn.ind_size(ix)),
         }
+        edge_attrs['multiedge_inds'] = [edge_attrs['ind']]
         edge_attrs['multiedge_sizes'] = [edge_attrs['edge_size']]
+        edge_attrs['spring_weight'] = 1 / sum(t.ndim for t in tn._inds_get(ix))
 
         if len(tids) == 2:
             # standard edge
@@ -327,6 +331,7 @@ def draw_tn(
     )
 
     # draw multiedges
+    multiedge_centers = {}
     for i, j, attrs in G.edges(data=True):
         sizes = attrs['multiedge_sizes']
         multiplicity = len(sizes)
@@ -336,9 +341,22 @@ def draw_tn(
                 multiplicity * +multiedge_spread,
                 multiplicity
             )
-            for sz, rad in zip(sizes, rads):
+
+            xa, ya = pos[i]
+            xb, yb = pos[j]
+            xab, yab = (xa + xb) / 2., (ya + yb) / 2.
+            dx, dy = xb - xa, yb - ya
+
+            inds = attrs['multiedge_inds']
+            for sz, rad, ix in zip(sizes, rads, inds):
+
+                # store the central point of the arc in case its needed by
+                # the arrow drawing functionality
+                cx, cy = xab + rad * dy * 0.5, yab - rad * dx * 0.5
+                multiedge_centers[ix] = (cx, cy)
+
                 ax.add_patch(patches.FancyArrowPatch(
-                    pos[i], pos[j],
+                    (xa, ya), (xb, yb),
                     connectionstyle=patches.ConnectionStyle.Arc3(rad=rad),
                     alpha=edge_alpha,
                     linewidth=sz,
@@ -368,8 +386,11 @@ def draw_tn(
                     (xa, ya), (xb, yb) = pos[tida], pos[tidb]
 
                     # arrow start and change
-                    x = (xa + arrow_closeness * xb) / (1 + arrow_closeness)
-                    y = (ya + arrow_closeness * yb) / (1 + arrow_closeness)
+                    if ind in multiedge_centers:
+                        x, y = multiedge_centers[ind]
+                    else:
+                        x = (xa + arrow_closeness * xb) / (1 + arrow_closeness)
+                        y = (ya + arrow_closeness * yb) / (1 + arrow_closeness)
                     dx = (xb - xa) * arrow_length
                     dy = (yb - ya) * arrow_length
 
