@@ -23,7 +23,6 @@ def _add_or_merge_edge(G, u, v, attrs):
         attrs0['ind'] += ' ' + attrs['ind']
         # hide original edge and instead track multiple bond sizes
         attrs0['edge_size'] = 0
-        attrs0['multiedge_sizes'].setdefault([])
         attrs0['multiedge_sizes'].append(attrs['edge_size'])
 
 
@@ -55,6 +54,9 @@ def draw_tn(
     edge_scale=1.0,
     edge_alpha=1 / 2,
     multiedge_spread=0.1,
+    show_left_inds=True,
+    arrow_closeness=1.1,
+    arrow_length=0.1,
     label_color=None,
     font_size=10,
     font_size_inner=7,
@@ -130,6 +132,12 @@ def draw_tn(
         Set the alpha (opacity) of the drawn edges.
     multiedge_spread : float, optional
         How much to spread the lines of multi-edges.
+    show_left_inds : bool, optional
+        Whether to show ``tensor.left_inds`` as incoming arrows.
+    arrow_closeness : float, optional
+        How close to draw the arrow to its target.
+    arrow_length : float, optional
+        The size of the arrow with respect to the edge.
     label_color : tuple[float], optional
         Color to draw labels with.
     font_size : int, optional
@@ -346,6 +354,36 @@ def draw_tn(
         node_shape=node_shape,
         ax=ax,
     )
+
+    # draw incomcing arrows for tensor left_inds
+    if show_left_inds:
+        for tid, t in tn.tensor_map.items():
+            if t.left_inds is not None:
+                for ind in t.left_inds:
+                    if ind in hyperedges:
+                        tida = ind
+                    else:
+                        tida, = (x for x in tn.ind_map[ind] if x != tid)
+                    tidb = tid
+                    (xa, ya), (xb, yb) = pos[tida], pos[tidb]
+
+                    # arrow start and change
+                    x = (xa + arrow_closeness * xb) / (1 + arrow_closeness)
+                    y = (ya + arrow_closeness * yb) / (1 + arrow_closeness)
+                    dx = (xb - xa) * arrow_length
+                    dy = (yb - ya) * arrow_length
+
+                    ax.add_patch(patches.FancyArrow(
+                        x, y, dx, dy,
+                        width=0,  # don't draw tail
+                        length_includes_head=True,
+                        head_width=(dx**2 + dy**2)**0.5,
+                        head_length=(dx**2 + dy**2)**0.5,
+                        color=edge_color,
+                        alpha=edge_alpha,
+                        fill=True,
+                    ))
+
     if show_inds in {'all', 'bond-size'}:
         nx.draw_networkx_edge_labels(
             G, pos,
