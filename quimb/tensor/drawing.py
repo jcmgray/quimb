@@ -45,8 +45,10 @@ def draw_tn(
     initial_layout='spectral',
     use_forceatlas2=1000,
     node_color=None,
-    outline_darkness=0.8,
     node_size=None,
+    node_shape='o',
+    node_outline_size=None,
+    node_outline_darkness=0.8,
     edge_color=None,
     edge_scale=1.0,
     edge_alpha=1 / 2,
@@ -111,10 +113,12 @@ def draw_tn(
         beyond that many nodes (it can give messier results on smaller graphs).
     node_color : tuple[float], optional
         Default color of nodes.
-    outline_darkness : float, optional
-        Darkening of nodes outlines.
-    node_size : None
+    node_size : None or float, optional
         How big to draw the tensors.
+    node_outline_size : None or float, optional
+        The width of the border of each node.
+    node_outline_darkness : float, optional
+        Darkening of nodes outlines.
     edge_color : tuple[float], optional
         Default color of edges.
     edge_scale : float, optional
@@ -173,7 +177,8 @@ def draw_tn(
     # set the size of the nodes
     if node_size is None:
         node_size = 1000 / tn.num_tensors**0.7
-    node_outline_size = min(3, node_size**0.5 / 5)
+    if node_outline_size is None:
+        node_outline_size = min(3, node_size**0.5 / 5)
 
     if label_color is None:
         label_color = mpl.rcParams['axes.labelcolor']
@@ -228,7 +233,7 @@ def draw_tn(
             color = highlight_tids_color
         G.nodes[tid]['color'] = color
         G.nodes[tid]['outline_color'] = tuple(
-            (1.0 if i == 3 else outline_darkness) * c
+            (1.0 if i == 3 else node_outline_darkness) * c
             for i, c in enumerate(color)
         )
         if show_tags:
@@ -309,6 +314,7 @@ def draw_tn(
         edgecolors=tuple(x[1]['outline_color'] for x in G.nodes(data=True)),
         node_size=tuple(x[1]['size'] for x in G.nodes(data=True)),
         linewidths=tuple(x[1]['outline_size'] for x in G.nodes(data=True)),
+        node_shape=node_shape,
         ax=ax,
     )
     if show_inds in {'all', 'bond-size'}:
