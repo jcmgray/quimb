@@ -140,7 +140,6 @@ class FermionTensorNetwork2D(FermionTensorNetwork, TensorNetwork2D):
                     if tid not in tid_map:
                         tid_map[tid] = current_position
                         current_position += 1
-
         return self._reorder_from_tid(tid_map, inplace)
 
     def _contract_boundary_full_bond(
@@ -319,13 +318,6 @@ class FermionTensorNetwork2D(FermionTensorNetwork, TensorNetwork2D):
                 col_envs[i0]['right', j0 + y_bsz - 1]
             ), check_collisions=False)
 
-            ij_tags = (self.site_tag(i0 +ix, j0 + iy) for ix in range(x_bsz) for iy in range(y_bsz))
-            tid_lst = []
-            for ij in ij_tags:
-                tid_lst += list(env_ij._get_tids_from_tags(ij))
-            position = range(len(env_ij.tensor_map)-len(tid_lst), len(env_ij.tensor_map))
-            reorder_map = {i:j for i, j in zip(tid_lst, position)}
-            env_ij._reorder_from_tid(reorder_map, inplace=True)
             plaquette_envs[(i0, j0), (x_bsz, y_bsz)] = env_ij
 
         return plaquette_envs
@@ -416,13 +408,6 @@ class FermionTensorNetwork2D(FermionTensorNetwork, TensorNetwork2D):
                 row_envs[j0]['top', i0 + x_bsz - 1]
             ), check_collisions=False)
 
-            ij_tags = (self.site_tag(i0 +ix, j0 + iy) for ix in range(x_bsz) for iy in range(y_bsz))
-            tid_lst = []
-            for ij in ij_tags:
-                tid_lst += list(env_ij._get_tids_from_tags(ij))
-            position = range(len(env_ij.tensor_map)-len(tid_lst), len(env_ij.tensor_map))
-            reorder_map = {i:j for i, j in zip(tid_lst, position)}
-            env_ij._reorder_from_tid(reorder_map, inplace=True)
             plaquette_envs[(i0, j0), (x_bsz, y_bsz)] = env_ij
 
         return plaquette_envs
