@@ -21,8 +21,10 @@ def _add_or_merge_edge(G, u, v, attrs):
         attrs0['color'] = tuple(
             (x + y) / 2 for x, y in zip(attrs0['color'], attrs['color']))
         attrs0['ind'] += ' ' + attrs['ind']
-        # adding log size == multiplying bond dim
-        attrs0['edge_size'] += attrs['edge_size']
+        # hide original edge and instead track multiple bond sizes
+        attrs0['edge_size'] = 0
+        attrs0['multiedge_sizes'].setdefault([])
+        attrs0['multiedge_sizes'].append(attrs['edge_size'])
 
 
 def draw_tn(
@@ -52,6 +54,7 @@ def draw_tn(
     edge_color=None,
     edge_scale=1.0,
     edge_alpha=1 / 2,
+    multiedge_spread=0.1,
     label_color=None,
     font_size=10,
     font_size_inner=7,
@@ -125,6 +128,8 @@ def draw_tn(
         How much to scale the width of the edges.
     edge_alpha : float, optional
         Set the alpha (opacity) of the drawn edges.
+    multiedge_spread : float, optional
+        How much to spread the lines of multi-edges.
     label_color : tuple[float], optional
         Color to draw labels with.
     font_size : int, optional
@@ -153,6 +158,7 @@ def draw_tn(
     import networkx as nx
     import matplotlib as mpl
     import matplotlib.pyplot as plt
+    import matplotlib.patches as patches
     from matplotlib.colors import to_rgb
     import math
 
@@ -191,12 +197,15 @@ def draw_tn(
     edge_labels = dict()
 
     for ix, tids in tn.ind_map.items():
+        # general information for this index
         edge_attrs = {
             'color': (highlight_inds_color if ix in highlight_inds else
                       edge_color),
             'ind': ix,
-            'edge_size': edge_scale * math.log2(tn.ind_size(ix))
+            'edge_size': edge_scale * math.log2(tn.ind_size(ix)),
         }
+        edge_attrs['multiedge_sizes'] = [edge_attrs['edge_size']]
+
         if len(tids) == 2:
             # standard edge
             _add_or_merge_edge(G, *tids, edge_attrs)
@@ -308,6 +317,26 @@ def draw_tn(
         alpha=edge_alpha,
         ax=ax,
     )
+
+    # draw multiedges
+    for i, j, attrs in G.edges(data=True):
+        sizes = attrs['multiedge_sizes']
+        multiplicity = len(sizes)
+        if multiplicity > 1:
+            rads = np.linspace(
+                multiplicity * -multiedge_spread,
+                multiplicity * +multiedge_spread,
+                multiplicity
+            )
+            for sz, rad in zip(sizes, rads):
+                ax.add_patch(patches.FancyArrowPatch(
+                    pos[i], pos[j],
+                    connectionstyle=patches.ConnectionStyle.Arc3(rad=rad),
+                    alpha=edge_alpha,
+                    linewidth=sz,
+                    color=attrs['color'],
+                ))
+
     nx.draw_networkx_nodes(
         G, pos,
         node_color=tuple(x[1]['color'] for x in G.nodes(data=True)),
