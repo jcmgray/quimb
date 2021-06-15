@@ -201,8 +201,18 @@ class FermionSpace:
         T, site = self.tensor_order[tid_or_site]
         return T, tid, site
 
+    def get_ind_map(self):
+        ind_map = dict()
+        for tid, (T, _) in self.tensor_order.items():
+            for ind in T.inds:
+                if ind not in ind_map:
+                    ind_map[ind] = oset([tid])
+                else:
+                    ind_map[ind] = ind_map[ind].union(oset([tid]))
+        return ind_map
+
     def _reorder_from_dict(self, tid_map):
-        """ Reorder tensors from a tensor_id/position mapping.
+        """ inplace reordering of tensors from a tensor_id/position mapping.
         Pizorn algorithm will be applied during moving
 
         Parameters
@@ -210,14 +220,102 @@ class FermionSpace:
         tid_map: dictionary
             Mapping of tensor id to the desired location
         """
+        if len(tid_map) == len(self.tensor_order):
+            self.reorder_all_(tid_map)
+        else:
+            tid_lst = list(tid_map.keys())
+            des_sites = list(tid_map.values())
+            # sort the destination sites to avoid cross-overs during moving
+            work_des_sites = sorted(des_sites)[::-1]
+            for isite in work_des_sites:
+                ind = des_sites.index(isite)
+                self.move(tid_lst[ind], isite)
+
+    def reorder_all(self, tid_map, ind_map=None, inplace=False):
+        """ reordering of tensors from a tensor_id/position mapping. The tid_map
+        must contains the mapping for all tensors in this FermionSpace.
+        Pizorn algorithm will be applied during moving.
+
+        Parameters
+        ----------
+        tid_map: dictionary
+            Mapping of tensor id to the desired location
+        ind_map: dictinary, optional
+            Mapping of tensor index to the tensor id
+        inplace: bool, optional
+            Whether the orordering operation is inplace or not
+        """
+        fs = self if inplace else self.copy()
+        # Compute Global Phase
+        if len(tid_map) != len(fs.tensor_order):
+            raise ValueError("tid_map must be of equal size as the FermionSpace")
+        nsites = len(fs.tensor_order)
+        parity_tab = []
+        input_tab = []
+        free_tids = []
+        for isite in range(nsites):
+            tid = fs.get_tid_from_site(isite)
+            T = fs.tensor_order[tid][0]
+            if not T.avoid_phase:
+                free_tids.append(tid)
+            parity_tab.append(T.parity)
+            input_tab.append(tid)
 
         tid_lst = list(tid_map.keys())
         des_sites = list(tid_map.values())
-        # sort the destination sites to avoid cross-overs during moving
-        work_des_sites = sorted(des_sites)[::-1]
-        for isite in work_des_sites:
-            ind = des_sites.index(isite)
-            self.move(tid_lst[ind], isite)
+        global_parity = 0
+        for fsite in range(nsites-1, -1, -1):
+            idx = des_sites.index(fsite)
+            tid = tid_lst[idx]
+            isite = input_tab.index(tid)
+            if isite == fsite: continue
+            global_parity += np.sum(parity_tab[isite+1:fsite+1]) * parity_tab[isite]
+            parity_tab[isite:fsite+1] = parity_tab[isite+1:fsite+1]+[parity_tab[isite]]
+            input_tab[isite:fsite+1] = input_tab[isite+1:fsite+1]+[input_tab[isite]]
+
+        _global_flip = (int(global_parity) % 2 == 1)
+        if _global_flip:
+            if len(free_tids) ==0:
+                raise ValueError("Global flip required on one tensor but all tensors are marked to avoid phase")
+            T = fs.tensor_order[free_tids[0]][0]
+            T.flip_(global_flip=_global_flip)
+
+        # Compute Local Phase
+        if ind_map is None:
+            ind_map = fs.get_ind_map()
+        else:
+            ind_map = ind_map.copy()
+
+        local_flip_info = dict()
+        for tid1, fsite1 in tid_map.items():
+            T1, isite1 = fs.tensor_order[tid1]
+            for ind in T1.inds:
+                tids = ind_map.pop(ind, [])
+                if len(tids) <2:
+                    continue
+                tid2, = tids - oset([tid1])
+                T2, isite2 = fs.tensor_order[tid2]
+                fsite2 = tid_map[tid2]
+                if (isite1-isite2) * (fsite1-fsite2) < 0:
+                    if T1.avoid_phase and T2.avoid_phase:
+                        raise ValueError("relative order for %s and %s changed, local phase can not be avoided"%(tid1, tid2))
+                    else:
+                        marked_tid = tid2 if T1.avoid_phase else tid1
+                    if marked_tid not in local_flip_info:
+                        local_flip_info[marked_tid] = [ind]
+                    else:
+                        local_flip_info[marked_tid].append(ind)
+
+        for tid, inds in local_flip_info.items():
+            T = fs.tensor_order[tid][0]
+            T.flip_(local_inds=inds)
+
+        for tid, fsite in tid_map.items():
+            T = fs.tensor_order[tid][0]
+            fs.tensor_order.update({tid: (T, fsite)})
+        return fs
+
+    reorder_all_ = functools.partialmethod(reorder_all, inplace=True)
 
     def __setitem__(self, site, tsr):
         if site in self.sites:
@@ -238,6 +336,7 @@ class FermionSpace:
         """
 
         tsr, tid, site = self.get_full_info(tid_or_site)
+        avoid_phase = tsr.avoid_phase
         if site == des_site: return
         move_left = (des_site < site)
         iterator = range(des_site, site) if move_left else range(site+1, des_site+1)
@@ -246,23 +345,27 @@ class FermionSpace:
         parity = 0
         for itid in tid_lst:
             itsr, isite = self.tensor_order[itid]
-            parity += itsr.parity
-            shared_inds += list(oset(itsr.inds) & oset(tsr.inds))
+            i_shared_inds = list(oset(itsr.inds) & oset(tsr.inds))
+            if avoid_phase:
+                global_flip = (tsr.parity * itsr.parity == 1)
+                if len(i_shared_inds)>0 or global_flip:
+                    if itsr.avoid_phase:
+                        raise ValueError("Two tensors marked to avoid phase")
+                    itsr.flip_(global_flip=global_flip, local_inds=i_shared_inds)
+            else:
+                shared_inds += i_shared_inds
+                parity += itsr.parity
+
             if move_left:
                 self.tensor_order[itid] = (itsr, isite+1)
             else:
                 self.tensor_order[itid] = (itsr, isite-1)
-        global_parity = (parity % 2) * tsr.data.parity
-        axes = [tsr.inds.index(i) for i in shared_inds]
-        if global_parity == 0 and len(axes) ==0:
-            new_data = tsr.data
-        else:
-            new_data = tsr.data.copy()
-        if global_parity !=0:
-            new_data._global_flip()
-        if len(axes)>0:
-            new_data._local_flip(axes)
-        tsr.modify(data=new_data)
+
+        if not avoid_phase:
+            global_parity = (parity % 2) * tsr.data.parity
+            global_flip = (global_parity == 1)
+            tsr.flip_(global_flip=global_flip, local_inds=shared_inds)
+
         self.tensor_order[tid] = (tsr, des_site)
 
     def move_past(self, tsr, site_range=None):
@@ -483,17 +586,60 @@ def _fetch_fermion_space(*tensors, inplace=True):
 
 class FermionTensor(BlockTensor):
 
-    __slots__ = ('_data', '_inds', '_tags', '_left_inds', '_owners', '_fermion_owner')
+    __slots__ = ('_data', '_inds', '_tags', '_left_inds',
+                '_owners', '_fermion_owner', '_avoid_phase',
+                '_fermion_path')
 
     def __init__(self, data=1.0, inds=(), tags=None, left_inds=None):
 
         # a new or copied Tensor always has no owners
         self._fermion_owner = None
         BlockTensor.__init__(self, data=data, inds=inds, tags=tags, left_inds=left_inds)
+        if isinstance(data, FermionTensor):
+            self._data = data.data.copy()
+            self._avoid_phase = data._avoid_phase
+            self._fermion_path = data._fermion_path.copy()
+        else:
+            self._avoid_phase = False
+            self._fermion_path = dict()
 
     @property
     def symmetry(self):
         return self.data.dq.__name__
+
+    @property
+    def net_symmetry(self):
+        return self.data.dq
+
+    @property
+    def avoid_phase(self):
+        return self._avoid_phase
+
+    @property
+    def fermion_path(self):
+        return self._fermion_path
+
+    @avoid_phase.setter
+    def avoid_phase(self, avoid_phase):
+        self._avoid_phase = avoid_phase
+
+    @fermion_path.setter
+    def fermion_path(self, fermion_path):
+        self._fermion_path = fermion_path
+
+    def set_fermion_path(self, global_flip=False, local_inds=None):
+        if local_inds is None:
+            local_inds = []
+        _global_flip = self.fermion_path.pop("global_flip", False)
+        _local_inds = self.fermion_path.pop("local_inds", [])
+        self._fermion_path["global_flip"] = _global_flip ^ global_flip
+        all_inds = tuple(local_inds) + tuple(_local_inds)
+        updated_local_inds = []
+        for ind in all_inds:
+            count = all_inds.count(ind)
+            if count %2 ==1:
+                updated_local_inds.append(ind)
+        self._fermion_path["local_inds"] = updated_local_inds
 
     @property
     def fermion_owner(self):
@@ -503,12 +649,39 @@ class FermionTensor(BlockTensor):
     def parity(self):
         return self.data.parity
 
+    def modify(self, **kwargs):
+        if "inds" in kwargs and "data" not in kwargs:
+            inds = kwargs.get("inds")
+            local_inds = self.fermion_path.pop("local_inds", [])
+            new_local_inds = []
+            for ind in local_inds:
+                if ind in self.inds:
+                    new_ind = inds[self.inds.index(ind)]
+                    new_local_inds.append(new_ind)
+            self._fermion_path["local_inds"] = new_local_inds
+
+        super().modify(**kwargs)
+
+    def flip(self, global_flip=False, local_inds=None, inplace=False):
+        T = self if inplace else self.copy()
+        T.set_fermion_path(global_flip=global_flip, local_inds=local_inds)
+        if global_flip:
+            T.data._global_flip()
+        if local_inds is not None and len(local_inds)>0:
+            axes = [T.inds.index(ind) for ind in local_inds]
+            T.data._local_flip(axes)
+        return T
+
+    flip_ = functools.partialmethod(flip, inplace=True)
+
     def copy(self, deep=False):
         """Copy this tensor. Note by default (``deep=False``), the underlying
         array will *not* be copied. The fermion owner will to reset to None
         """
         if deep:
             t = copy.deepcopy(self)
+            t.avoid_phase = self.avoid_phase
+            t.fermion_path = self.fermion_path.copy()
             t.remove_fermion_owner()
         else:
             t = self.__class__(self, None)
