@@ -53,7 +53,7 @@ setup(
         ],
         'docs': [
             'sphinx>=2.0',
-            'pydata-sphinx-theme>=0.4',
+            'sphinx-book-theme>=0.4',
             'nbsphinx>=0.4',
             'ipython>=7.0',
             'autoray>=0.2.0',
