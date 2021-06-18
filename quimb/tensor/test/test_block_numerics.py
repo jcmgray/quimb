@@ -1,7 +1,8 @@
 import pytest
 import numpy as np
 from quimb.tensor.tensor_block import (
-    BlockTensor, BlockTensorNetwork, tensor_contract)
+    BlockTensor, BlockTensorNetwork)
+from quimb.tensor.tensor_core import tensor_contract
 from quimb.tensor.block_gen import rand_all_blocks as rand
 from quimb.tensor.block_interface import set_options
 

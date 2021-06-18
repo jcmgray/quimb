@@ -6,13 +6,12 @@ import functools
 
 import numpy as np
 
-from ..utils import (check_opt, oset, valmap)
+from ..utils import (oset, valmap)
 from .drawing import draw_tn
 
-from .tensor_core import Tensor, TensorNetwork, _parse_split_opts, oset_union, tags_to_oset, rand_uuid, _parse_split_opts
+from .tensor_core import TensorNetwork, rand_uuid
 from .tensor_block import tensor_split as _tensor_split
-from .tensor_block import _core_contract, tensor_canonize_bond, tensor_compress_bond, BlockTensor, BlockTensorNetwork, get_block_contraction_path_info
-from .block_tools import apply, get_smudge_balance
+from .tensor_block import _core_contract, tensor_canonize_bond, tensor_compress_bond, BlockTensor, BlockTensorNetwork, get_block_contraction_path_info, tensor_balance_bond
 from .block_interface import dispatch_settings
 from functools import wraps
 
@@ -454,7 +453,7 @@ class FermionSpace:
 #                                Tensor Funcs                                 #
 # --------------------------------------------------------------------------- #
 
-def tensor_contract(*tensors, output_inds=None, inplace=False, **contract_opts):
+def tensor_contract(*tensors, output_inds=None, preserve_tensor=False, inplace=False, **contract_opts):
     if len(tensors) == 1:
         if inplace:
             return tensors[0]
@@ -471,7 +470,7 @@ def tensor_contract(*tensors, output_inds=None, inplace=False, **contract_opts):
         pos1, pos2 = sorted(conc[0])
         T2 = tensors.pop(pos2)
         T1 = tensors.pop(pos1)
-        out = _core_contract(T1, T2)
+        out = _core_contract(T1, T2, preserve_tensor)
         tensors.append(out)
 
     if not isinstance(out, (float, complex)):
@@ -580,6 +579,12 @@ def _fetch_fermion_space(*tensors, inplace=True):
         tid_lst = list(fs.tensor_order.keys())
     return fs, tid_lst
 
+FERMION_FUNCS = {"tensor_contract": tensor_contract,
+                 "tensor_split": tensor_split,
+                 "tensor_compress_bond": tensor_compress_bond,
+                 "tensor_canonize_bond": tensor_canonize_bond,
+                 "tensor_balance_bond": tensor_balance_bond}
+
 # --------------------------------------------------------------------------- #
 #                                Tensor Class                                 #
 # --------------------------------------------------------------------------- #
@@ -596,7 +601,8 @@ class FermionTensor(BlockTensor):
         self._fermion_owner = None
         BlockTensor.__init__(self, data=data, inds=inds, tags=tags, left_inds=left_inds)
         if isinstance(data, FermionTensor):
-            self._data = data.data.copy()
+            if len(data.inds)!=0:
+                self._data = data.data.copy()
             self._avoid_phase = data._avoid_phase
             self._fermion_path = data._fermion_path.copy()
         else:
@@ -604,12 +610,8 @@ class FermionTensor(BlockTensor):
             self._fermion_path = dict()
 
     @property
-    def symmetry(self):
-        return self.data.dq.__name__
-
-    @property
-    def net_symmetry(self):
-        return self.data.dq
+    def custom_funcs(self):
+        return FERMION_FUNCS
 
     @property
     def avoid_phase(self):
@@ -694,9 +696,6 @@ class FermionTensor(BlockTensor):
         site = fs.tensor_order[tid][1]
         return (tid, site)
 
-    def contract(self, *others, output_inds=None, **opts):
-        return tensor_contract(self, *others, output_inds=output_inds, **opts)
-
     @fermion_owner.setter
     def fermion_owner(self, fowner):
         self._fermion_owner = fowner
@@ -706,9 +705,6 @@ class FermionTensor(BlockTensor):
 
     def remove_fermion_owner(self):
         self.fermion_owner = None
-
-    def split(self, *args, **kwargs):
-        return tensor_split(self, *args, **kwargs)
 
     def __and__(self, other):
         """Combine with another ``Tensor`` or ``TensorNetwork`` into a new
@@ -939,14 +935,8 @@ class FermionTensorNetwork(BlockTensorNetwork):
         """Remove a tensor from this network, returning said tensor.
         """
         # pop the tensor itself
-        t = self.tensor_map.pop(tid)
 
-        # remove the tid from the tag and ind maps
-        self._unlink_tags(t.tags, tid)
-        self._unlink_inds(t.inds, tid)
-
-        # remove this tensornetwork as an owner
-        t.remove_owner(self)
+        t = super()._pop_tensor(tid)
         if remove_from_fs:
             self.fermion_space.remove_tensor(tid)
             t.remove_fermion_owner()
@@ -1000,66 +990,14 @@ class FermionTensorNetwork(BlockTensorNetwork):
         return t1, t2
 
     def contract_between(self, tags1, tags2, **contract_opts):
-        tid1, = self._get_tids_from_tags(tags1, which='all')
-        tid2, = self._get_tids_from_tags(tags2, which='all')
-
-        # allow no-op for same tensor specified twice ('already contracted')
-        if tid1 == tid2:
-            return
-        T1 = self._pop_tensor(tid1)
-        T2 = self._pop_tensor(tid2)
-        T12 = tensor_contract(T1, T2, inplace=True, **contract_opts)
-        if isinstance(T12, (float, complex)):
-            return T12
-        else:
-            self |= T12
+        contract_opts["inplace"] = True
+        super().contract_between(tags1, tags2, **contract_opts)
 
     def contract_ind(self, ind, **contract_opts):
         """Contract tensors connected by ``ind``.
         """
-        tids = self._get_tids_from_inds(ind)
-        ts = [self._pop_tensor(tid) for tid in tids]
-        out = tensor_contract(*ts, inplace=True, **contract_opts)
-        if isinstance(out, (float, complex)):
-            return out
-        else:
-            self |= out
-
-    def _compress_between_tids(
-        self,
-        tid1,
-        tid2,
-        canonize_distance=None,
-        canonize_opts=None,
-        equalize_norms=False,
-        **compress_opts
-    ):
-        Tl = self.tensor_map[tid1]
-        Tr = self.tensor_map[tid2]
-
-        if canonize_distance:
-            raise NotImplementedError
-
-        tensor_compress_bond(Tl, Tr, **compress_opts)
-
-        if equalize_norms:
-            self.strip_exponent(tid1, equalize_norms)
-            self.strip_exponent(tid2, equalize_norms)
-
-    def _canonize_between_tids(
-        self,
-        tid1,
-        tid2,
-        equalize_norms=False,
-        **canonize_opts,
-    ):
-        Tl = self.tensor_map[tid1]
-        Tr = self.tensor_map[tid2]
-        tensor_canonize_bond(Tl, Tr, **canonize_opts)
-
-        if equalize_norms:
-            self.strip_exponent(tid1, equalize_norms)
-            self.strip_exponent(tid2, equalize_norms)
+        contract_opts["inplace"] = True
+        super().contract_ind(ind, **contract_opts)
 
     # ----------------------- contracting the network ----------------------- #
     def contract_tags(self, tags, inplace=False, which='any', **opts):
@@ -1077,21 +1015,6 @@ class FermionTensorNetwork(BlockTensorNetwork):
 
         untagged_tn.add_tensor(contracted, virtual=True)
         return untagged_tn
-
-    def contract(self, tags=..., inplace=False, **opts):
-        if tags is all:
-            return tensor_contract(*self, inplace=inplace, **opts)
-
-        # this checks whether certain TN classes have a manually specified
-        #     contraction pattern (e.g. 1D along the line)
-        if self._CONTRACT_STRUCTURED:
-            if (tags is ...) or isinstance(tags, slice):
-                return self.contract_structured(tags, inplace=inplace, **opts)
-
-        # else just contract those tensors specified by tags.
-        return self.contract_tags(tags, inplace=inplace, **opts)
-
-    contract_ = functools.partialmethod(contract, inplace=True)
 
     def __matmul__(self, other):
         """Overload "@" to mean full contraction with another network.

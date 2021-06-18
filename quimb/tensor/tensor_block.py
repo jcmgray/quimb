@@ -10,22 +10,24 @@ import opt_einsum as oe
 from ..utils import (check_opt, oset)
 from .drawing import draw_tn
 
-from .tensor_core import Tensor, TensorNetwork, _parse_split_opts, oset_union, tags_to_oset, rand_uuid, _parse_split_opts, concat, unique, _gen_output_inds, _inds_to_eq, get_contraction
-from .block_tools import apply, get_smudge_balance
+from .tensor_core import (Tensor, TensorNetwork, tags_to_oset, rand_uuid,
+                          _parse_split_opts, concat, unique, _inds_to_eq,
+                          _gen_output_inds, get_contraction)
+from .block_tools import get_smudge_balance
 from .block_interface import dispatch_settings
 
 # --------------------------------------------------------------------------- #
 #                                Tensor Funcs                                 #
 # --------------------------------------------------------------------------- #
 
-def _core_contract(T1, T2):
+def _core_contract(T1, T2, preserve_tensor=False):
     conc = [ind for ind in T1.inds if ind in T2.inds]
     ax1 = [T1.inds.index(ind) for ind in conc]
     ax2 = [T2.inds.index(ind) for ind in conc]
     o_array = np.tensordot(T1.data, T2.data, (ax1, ax2))
     o_ix = tuple([ind for ind in T1.inds+T2.inds if ind not in conc])
     o_tags = oset.union(T1.tags, T2.tags)
-    if len(o_ix) == 0:
+    if len(o_ix) == 0 and not preserve_tensor:
         return o_array
     else:
         return T1.__class__(data=o_array, inds=o_ix, tags=o_tags)
@@ -60,7 +62,7 @@ def get_block_contraction_path_info(*tensors, **contract_opts):
     }
     return path_info
 
-def tensor_contract(*tensors, output_inds=None, **contract_opts):
+def tensor_contract(*tensors, output_inds=None, preserve_tensor=False, **contract_opts):
     if len(tensors) == 1:
         return tensors[0]
     path_info = get_block_contraction_path_info(*tensors, **contract_opts)
@@ -69,7 +71,7 @@ def tensor_contract(*tensors, output_inds=None, **contract_opts):
         pos1, pos2 = sorted(conc[0])
         T2 = tensors.pop(pos2)
         T1 = tensors.pop(pos1)
-        out = _core_contract(T1, T2)
+        out = _core_contract(T1, T2, preserve_tensor)
         tensors.append(out)
 
     if not isinstance(out, (float, complex)):
@@ -243,6 +245,12 @@ def tensor_balance_bond(t1, t2, smudge=1e-6):
     t1.multiply_index_diagonal_(ix, s1, location="back")
     t2.multiply_index_diagonal_(ix, s2, location="front")
 
+BLOCK_FUNCS = {"tensor_contract": tensor_contract,
+                "tensor_split": tensor_split,
+                "tensor_compress_bond": tensor_compress_bond,
+                "tensor_canonize_bond": tensor_canonize_bond,
+                "tensor_balance_bond": tensor_balance_bond}
+
 # --------------------------------------------------------------------------- #
 #                                Tensor Class                                 #
 # --------------------------------------------------------------------------- #
@@ -251,14 +259,23 @@ class BlockTensor(Tensor):
 
     __slots__ = ('_data', '_inds', '_tags', '_left_inds', '_owners')
 
-    def _apply_function(self, fn):
-        self._data = apply(self.data, fn)
-
     def expand_ind(self, ind, size):
         raise NotImplementedError
 
     def new_ind(self, name, size=1, axis=0):
         raise NotImplementedError
+
+    @property
+    def custom_funcs(self):
+        return BLOCK_FUNCS
+
+    @property
+    def symmetry(self):
+        return self.data.dq.__name__
+
+    @property
+    def net_symmetry(self):
+        return self.data.dq
 
     @property
     def shape(self):
@@ -273,38 +290,11 @@ class BlockTensor(Tensor):
         ax = self.inds.index(ind)
         return self.data.get_bond_info(ax)
 
-    def conj(self, inplace=False):
-        """Conjugate this tensors data (does nothing to indices).
-        """
-        t = self if inplace else self.copy()
-        t.modify(data=t.data.conj())
-        return t
-
-    conj_ = functools.partialmethod(conj, inplace=True)
-
     @property
     def H(self):
         t = self.copy()
         t.modify(data=t.data.dagger, inds=t.inds[::-1])
         return t
-
-    def transpose(self, *output_inds, inplace=False):
-        t = self if inplace else self.copy()
-
-        output_inds = tuple(output_inds)  # need to re-use this.
-
-        if set(t.inds) != set(output_inds):
-            raise ValueError("'output_inds' must be permutation of the current"
-                             f" tensor indices, but {set(t.inds)} != "
-                             f"{set(output_inds)}")
-
-        current_ind_map = {ind: i for i, ind in enumerate(t.inds)}
-        out_shape = tuple(current_ind_map[i] for i in output_inds)
-
-        t.modify(data=np.transpose(t.data, out_shape), inds=output_inds)
-        return t
-
-    transpose_ = functools.partialmethod(transpose, inplace=True)
 
     def trace(self, ind1, ind2, inplace=False):
         raise NotImplementedError
@@ -315,14 +305,8 @@ class BlockTensor(Tensor):
     def collapse_repeated(self, inplace=False):
         raise NotImplementedError
 
-    def contract(self, *others, output_inds=None, **opts):
-        return tensor_contract(self, *others, output_inds=output_inds, **opts)
-
     def direct_product(self, other, sum_inds=(), inplace=False):
         raise NotImplementedError
-
-    def split(self, *args, **kwargs):
-        return tensor_split(self, *args, **kwargs)
 
     def distance(self, other, **contract_opts):
         raise NotImplementedError
@@ -395,7 +379,7 @@ class BlockTensor(Tensor):
         return BlockTensorNetwork((self, other), virtual=True)
 
     _EXTRA_PROPS = ()
-    
+
     def draw(self, *args, **kwargs):
         """Plot a graph of this tensor and its indices.
         """
@@ -429,62 +413,6 @@ class BlockTensorNetwork(TensorNetwork):
 
     def convert_to_zero(self):
         raise NotImplementedError
-
-    def contract_between(self, tags1, tags2, **contract_opts):
-        tid1, = self._get_tids_from_tags(tags1, which='all')
-        tid2, = self._get_tids_from_tags(tags2, which='all')
-
-        # allow no-op for same tensor specified twice ('already contracted')
-        if tid1 == tid2:
-            return
-
-        T1 = self._pop_tensor(tid1)
-        T2 = self._pop_tensor(tid2)
-        T12 = tensor_contract(T1, T2, **contract_opts)
-        self.add_tensor(T12, tid=tid2, virtual=True)
-
-    def contract_ind(self, ind, **contract_opts):
-        """Contract tensors connected by ``ind``.
-        """
-        tids = self._get_tids_from_inds(ind)
-        ts = [self._pop_tensor(tid) for tid in tids]
-        self |= tensor_contract(*ts, **contract_opts)
-
-    def _compress_between_tids(
-        self,
-        tid1,
-        tid2,
-        canonize_distance=None,
-        canonize_opts=None,
-        equalize_norms=False,
-        **compress_opts
-    ):
-        Tl = self.tensor_map[tid1]
-        Tr = self.tensor_map[tid2]
-
-        if canonize_distance:
-            raise NotImplementedError
-
-        tensor_compress_bond(Tl, Tr, **compress_opts)
-
-        if equalize_norms:
-            self.strip_exponent(tid1, equalize_norms)
-            self.strip_exponent(tid2, equalize_norms)
-
-    def _canonize_between_tids(
-        self,
-        tid1,
-        tid2,
-        equalize_norms=False,
-        **canonize_opts,
-    ):
-        Tl = self.tensor_map[tid1]
-        Tr = self.tensor_map[tid2]
-        tensor_canonize_bond(Tl, Tr, **canonize_opts)
-
-        if equalize_norms:
-            self.strip_exponent(tid1, equalize_norms)
-            self.strip_exponent(tid2, equalize_norms)
 
     def new_bond(self, tags1, tags2, **opts):
         raise NotImplementedError
@@ -531,21 +459,6 @@ class BlockTensorNetwork(TensorNetwork):
         untagged_tn.add_tensor(contracted, virtual=True)
         return untagged_tn
 
-    def contract(self, tags=..., inplace=False, **opts):
-        if tags is all:
-            return tensor_contract(*self, **opts)
-
-        # this checks whether certain TN classes have a manually specified
-        #     contraction pattern (e.g. 1D along the line)
-        if self._CONTRACT_STRUCTURED:
-            if (tags is ...) or isinstance(tags, slice):
-                return self.contract_structured(tags, inplace=inplace, **opts)
-
-        # else just contract those tensors specified by tags.
-        return self.contract_tags(tags, inplace=inplace, **opts)
-
-    contract_ = functools.partialmethod(contract, inplace=True)
-
     def __matmul__(self, other):
         """Overload "@" to mean full contraction with another network.
         """
@@ -579,20 +492,6 @@ class BlockTensorNetwork(TensorNetwork):
 
     def unitize(self, mode='error', inplace=False, method='qr'):
         raise NotImplementedError
-
-    def balance_bonds(self, inplace=False):
-        tn = self if inplace else self.copy()
-
-        for ix, tids in tn.ind_map.items():
-            if len(tids) != 2:
-                continue
-            tid1, tid2 = tids
-            t1, t2 = [tn.tensor_map[x] for x in (tid1, tid2)]
-            tensor_balance_bond(t1, t2)
-
-        return tn
-
-    balance_bonds_ = functools.partialmethod(balance_bonds, inplace=True)
 
     def fuse_multibonds(self, inplace=False):
         raise NotImplementedError

@@ -515,6 +515,11 @@ def tensor_contract(
     -------
     scalar or Tensor
     """
+    if hasattr(tensors[0], "custom_funcs") and get is None:
+        func = tensors[0].custom_funcs["tensor_contract"]
+        return func(*tensors, output_inds=output_inds,
+            preserve_tensor=preserve_tensor, **contract_opts)
+
     if backend is None:
         backend = get_contract_backend()
 
@@ -651,6 +656,7 @@ def tensor_split(
     stags=None,
     bond_ind=None,
     right_inds=None,
+    **kwargs
 ):
     """Decompose this tensor into two tensors.
 
@@ -742,6 +748,15 @@ def tensor_split(
         ``absorb=None`` the returned objects correspond to
         ``(left, singular_values, right)``.
     """
+    if hasattr(T, "custom_funcs"):
+        func = T.custom_funcs["tensor_split"]
+        return func(T, left_inds, method=method,
+                get=get, absorb=absorb, max_bond=max_bond,
+                cutoff=cutoff, cutoff_mode=cutoff_mode,
+                renorm=renorm, ltags=ltags, rtags=rtags,
+                stags=stags, bond_ind=bond_ind,
+                right_inds=right_inds, **kwargs)
+
     check_opt('get', get, _VALID_SPLIT_GET)
 
     if left_inds is None:
@@ -838,6 +853,10 @@ def tensor_canonize_bond(T1, T2, absorb='right', **split_opts):
         Supplied to :func:`~quimb.tensor.tensor_core.tensor_split`, with
         modified defaults of ``method=='qr'`` and ``absorb='right'``.
     """
+    if hasattr(T1, "custom_funcs"):
+        func = T1.custom_funcs["tensor_canonize_bond"]
+        return func(T1, T2, absorb=absorb, **split_opts)
+
     check_opt('absorb', absorb, ('left', 'both', 'right'))
 
     if absorb == 'both':
@@ -908,6 +927,11 @@ def tensor_compress_bond(
     compress_opts :
         Supplied to :func:`~quimb.tensor.tensor_core.tensor_split`.
     """
+    if hasattr(T1, "custom_funcs"):
+        func = T1.custom_funcs["tensor_compress_bond"]
+        return func(T1, T2, reduced=reduced, absorb=absorb,
+                    info=info, **compress_opts)
+
     shared_ix, left_env_ix = T1.filter_bonds(T2)
     if not shared_ix:
         raise ValueError("The tensors specified don't share an bond.")
@@ -966,6 +990,10 @@ def tensor_balance_bond(t1, t2, smudge=1e-6):
         Avoid numerical issues by 'smudging' the correctional factor by this
         much - the gauging introduced is still exact.
     """
+    if hasattr(t1, "custom_funcs"):
+        func = t1.custom_funcs["tensor_balance_bond"]
+        return func(t1, t2, smudge=smudge)
+
     ix, = bonds(t1, t2)
     x = tensor_contract(t1.H, t1, output_inds=[ix]).data
     y = tensor_contract(t2.H, t2, output_inds=[ix]).data
@@ -978,6 +1006,12 @@ def tensor_fuse_squeeze(t1, t2):
     """If ``t1`` and ``t2`` share more than one bond fuse it, and if the size
     of the shared dimenion(s) is 1, squeeze it. Inplace operation.
     """
+    if hasattr(t1, "custom_funcs"):
+        func = t1.custom_funcs.get("tensor_fuse_squeeze", None)
+        if func is not None:
+            return func(t1, t2)
+        else:
+            return
     shared = bonds(t1, t2)
     nshared = len(shared)
 
