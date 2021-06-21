@@ -396,23 +396,6 @@ class FermionSpace:
         if len(axes)>0: tsr.data._local_flip(axes)
         return tsr
 
-    def make_adjacent(self, tid1, tid2, direction='left'):
-        """ Move one tensor in the specified direction to make the two adjacent
-        """
-        site1 = self.tensor_order[tid1][1]
-        site2 = self.tensor_order[tid2][1]
-        if abs(site1-site2)!=1:
-            site1 = self.tensor_order[tid1][1]
-            site2 = self.tensor_order[tid2][1]
-            if site1 == site2: return
-            sitemin, sitemax = min(site1, site2), max(site1, site2)
-            if direction == 'left':
-                self.move(sitemax, sitemin+1)
-            elif direction == 'right':
-                self.move(sitemin, sitemax-1)
-            else:
-                raise ValueError("direction %s not recognized"%direction)
-
     def remove_tensor(self, site):
         """ remove a specified tensor at a given site, eg
         012345               01234
@@ -441,14 +424,6 @@ class FermionSpace:
             new_fs.add_tensor(T, tid, max_site-site, virtual=True)
         return new_fs
 
-    def _contract_pairs(self, tid1, tid2, output_inds=None):
-        self.make_adjacent(tid1, tid2)
-        T1, site1 = self.tensor_order[tid1]
-        T2, site2 = self.tensor_order[tid2]
-        out = _contract_connected(T1, T2, output_inds)
-        self.replace_tensor(min(site1, site2), out, virtual=True)
-        self.remove_tensor(max(site1, site2))
-
 # --------------------------------------------------------------------------- #
 #                                Tensor Funcs                                 #
 # --------------------------------------------------------------------------- #
@@ -460,7 +435,7 @@ def tensor_contract(*tensors, output_inds=None, preserve_tensor=False, inplace=F
         else:
             return tensors[0].copy()
     path_info = get_block_contraction_path_info(*tensors, **contract_opts)
-    fs, tid_lst = _fetch_fermion_space(*tensors, inplace=inplace)
+    fs, tid_lst = _dispatch_fermion_space(*tensors, inplace=inplace)
     if inplace:
         tensors = list(tensors)
     else:
@@ -533,7 +508,7 @@ def is_mergeable(*ts_or_tsn):
 
     return all([fs==fs_lst[0] for fs in fs_lst]) and len(set(site_lst)) == len(site_lst)
 
-def _fetch_fermion_space(*tensors, inplace=True):
+def _dispatch_fermion_space(*tensors, inplace=True):
     """ Retrieve the FermionSpace and the associated tensor_ids for the tensors.
     If the given tensors all belong to the same FermionSpace object (fsobj),
     the underlying fsobj will be returned. Otherwise, a new FermionSpace will be created,
@@ -639,7 +614,7 @@ class FermionTensor(BlockTensor):
         updated_local_inds = []
         for ind in all_inds:
             count = all_inds.count(ind)
-            if count %2 ==1:
+            if count % 2 ==1:
                 updated_local_inds.append(ind)
         self._fermion_path["local_inds"] = updated_local_inds
 
@@ -731,7 +706,6 @@ class FermionTensor(BlockTensor):
 
 class FermionTensorNetwork(BlockTensorNetwork):
 
-    __slots__ = ('_inner_inds', '_outer_inds', '_tid_counter')
     _EXTRA_PROPS = ()
     _CONTRACT_STRUCTURED = False
 
@@ -843,8 +817,8 @@ class FermionTensorNetwork(BlockTensorNetwork):
 
         tid, = tids
         site = self.fermion_space.tensor_order[tid][1]
-        TensorNetwork._pop_tensor(self, tid)
-        TensorNetwork.add_tensor(self, tensor, tid=tid, virtual=True)
+        super()._pop_tensor(tid)
+        super().add_tensor(tensor, tid=tid, virtual=True)
         self.fermion_space.replace_tensor(site, tensor, tid=tid, virtual=True)
 
     def _reorder_from_tid(self, tid_map, inplace=False):
@@ -852,38 +826,33 @@ class FermionTensorNetwork(BlockTensorNetwork):
         tn.fermion_space._reorder_from_dict(tid_map)
         return tn
 
-    def add_tensor(self, tsr, tid=None, virtual=False, site=None):
-        if tid is None or tid in self.fermion_space.tensor_order.keys():
-            tid = rand_uuid(base="_T")
-
+    def add_tensor(self, tsr, tid=None, virtual=False):
+        T = tsr if virtual else tsr.copy()
         if virtual:
-            fs = tsr.fermion_owner
-            if fs is not None:
+            fs = T.fermion_owner
+            if fs is None:
+                self.fermion_space.add_tensor(T, tid, virtual=True)
+            else:
                 if hash(fs[0]) != hash(self.fermion_space) and len(self.tensor_map)!=0:
                     raise ValueError("the tensor is already in a different FermionSpace, inplace addition not allowed")
-                else:
-                    tid, isite = tsr.get_fermion_info()
-                    if site is not None and site != isite:
-                        raise ValueError("the specified site not consistent with the original location of this tensor in the FermionSpace")
-                    TensorNetwork.add_tensor(self, tsr, tid, virtual=True)
-            else:
-                self.fermion_space.add_tensor(tsr, tid, site, virtual=True)
-                TensorNetwork.add_tensor(self, tsr, tid, virtual=True)
         else:
-            T = tsr.copy()
-            self.fermion_space.add_tensor(T, tid, site, virtual=True)
-            TensorNetwork.add_tensor(self, T, tid, virtual=True)
+            self.fermion_space.add_tensor(T, tid, virtual=True)
+        tid = T.get_fermion_info()[0]
+        super().add_tensor(T, tid, virtual=True)
+
 
     def add_tensor_network(self, tn, virtual=False, check_collisions=True):
         if virtual:
             if min(len(self.tensor_map), len(tn.tensor_map)) == 0:
-                TensorNetwork.add_tensor_network(self, tn, virtual=virtual, check_collisions=check_collisions)
+                super().add_tensor_network(tn,
+                        virtual=virtual, check_collisions=check_collisions)
                 return
             elif hash(tn.fermion_space) == hash(self.fermion_space):
                 if is_mergeable(self, tn):
-                    TensorNetwork.add_tensor_network(self, tn, virtual=virtual, check_collisions=check_collisions)
+                    super().add_tensor_network(tn,
+                            virtual=True, check_collisions=check_collisions)
                 else:
-                    raise ValueError("the two tensornetworks co-share same sites, inplace addition not allow")
+                    raise ValueError("the two tensornetworks co-share same sites, inplace addition not allowed")
                 return
 
         if not tn.is_continuous():
@@ -893,101 +862,30 @@ class FermionTensorNetwork(BlockTensorNetwork):
         for tsr in tn:
             tid = tsr.get_fermion_info()[0]
             sorted_tensors.append([tid, tsr])
-        # if inplace, fermion_owners need to be removed first to avoid conflicts
-        if virtual:
-            for tid, tsr in sorted_tensors:
+            # if inplace, fermion_owners need to be
+            # removed first to avoid conflicts
+            if virtual:
                 tsr.remove_fermion_owner()
 
         if check_collisions:  # add tensors individually
-            if getattr(self, '_inner_inds', None) is None:
-                self._inner_inds = oset(self.inner_inds())
-
             # check for matching inner_indices -> need to re-index
-            other_inner_ix = oset(tn.inner_inds())
-            clash_ix = self._inner_inds & other_inner_ix
+            clash_ix = self._inner_inds & tn._inner_inds
+            reind = {ix: rand_uuid() for ix in clash_ix}
+        else:
+            clash_ix = False
+            reind = None
 
-            if clash_ix:
-                can_keep_ix = other_inner_ix - self._inner_inds
-                new_inds = oset(rand_uuid() for _ in range(len(clash_ix)))
-                reind = dict(zip(clash_ix, new_inds))
-                self._inner_inds.update(new_inds, can_keep_ix)
-            else:
-                self._inner_inds.update(other_inner_ix)
+        # add tensors, reindexing if necessary
+        for tid, tsr in sorted_tensors:
+            if clash_ix and any(i in reind for i in tsr.inds):
+                tsr = tsr.reindex(reind, inplace=virtual)
+            self.add_tensor(tsr, virtual=virtual, tid=tid)
 
-            # add tensors, reindexing if necessary
-            for tid, tsr in sorted_tensors:
-                if clash_ix and any(i in reind for i in tsr.inds):
-                    tsr = tsr.reindex(reind, inplace=virtual)
-                self.add_tensor(tsr, tid=tid, virtual=virtual)
-
-        else:  # directly add tensor/tag indexes
-            for tid, tsr in sorted_tensors:
-                self.add_tensor(tsr, tid=tid, virtual=virtual)
-
-    def select(self, tags, which='all'):
-        tagged_tids = self._get_tids_from_tags(tags, which=which)
-        ts = [self.tensor_map[n] for n in tagged_tids]
-        tn = FermionTensorNetwork(ts, check_collisions=False, virtual=True)
-        tn.view_like_(self)
-        return tn
-
-    def _pop_tensor(self, tid, remove_from_fs=False):
-        """Remove a tensor from this network, returning said tensor.
-        """
-        # pop the tensor itself
-
-        t = super()._pop_tensor(tid)
-        if remove_from_fs:
-            self.fermion_space.remove_tensor(tid)
-            t.remove_fermion_owner()
-
-        return t
-
-    _pop_tensor_ = functools.partialmethod(_pop_tensor, remove_from_fs=True)
-
-    def partition_tensors(self, tags, inplace=False, which='any'):
-        tagged_tids = self._get_tids_from_tags(tags, which=which)
-
-        # check if all tensors have been tagged
-        if len(tagged_tids) == self.num_tensors:
-            return None, self.tensor_map.values()
-
-        # Copy untagged to new network, and pop tagged tensors from this
-        untagged_tn = self if inplace else self.copy(full=True)
-        tagged_ts = tuple(map(untagged_tn._pop_tensor, sorted(tagged_tids)))
-
-        return untagged_tn, tagged_ts
+        self.exponent = self.exponent + tn.exponent
 
     def partition(self, tags, which='any', inplace=False):
-        """Split this TN into two, based on which tensors have any or all of
-        ``tags``. Unlike ``partition_tensors``, both results are TNs which
-        inherit the structure of the initial TN.
-
-        Parameters
-        ----------
-        tags : sequence of str
-            The tags to split the network with.
-        which : {'any', 'all'}
-            Whether to split based on matching any or all of the tags.
-        inplace : bool
-            If True, actually remove the tagged tensors from self.
-
-        Returns
-        -------
-        untagged_tn, tagged_tn : (TensorNetwork, TensorNetwork)
-            The untagged and tagged tensor networs.
-
-        See Also
-        --------
-        partition_tensors, select, select_tensors
-        """
-        tagged_tids = self._get_tids_from_tags(tags, which=which)
-        kws = {'check_collisions': False}
-        t1 = self if inplace else self.copy(full=True)
-        t2s = [t1._pop_tensor(tid) for tid in tagged_tids]
-        t2 = FermionTensorNetwork(t2s, virtual=True, **kws)
-        t2.view_like_(self)
-        return t1, t2
+        tn = self if inplace else self.copy(full=True)
+        return TensorNetwork.partition(tn, tags, which=which, inplace=True)
 
     def contract_between(self, tags1, tags2, **contract_opts):
         contract_opts["inplace"] = True
@@ -1004,13 +902,16 @@ class FermionTensorNetwork(BlockTensorNetwork):
         untagged_tn, tagged_ts = self.partition_tensors(
             tags, inplace=inplace, which=which)
 
+        contracting_all = untagged_tn is None
         if not tagged_ts:
             raise ValueError("No tags were found - nothing to contract. "
                              "(Change this to a no-op maybe?)")
+        opts["inplace"] = True
+        contracted = tensor_contract(
+            *tagged_ts, preserve_tensor=not contracting_all, **opts
+        )
 
-        contracted = tensor_contract(*tagged_ts, inplace=True, **opts)
-
-        if untagged_tn is None:
+        if contracting_all:
             return contracted
 
         untagged_tn.add_tensor(contracted, virtual=True)

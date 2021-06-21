@@ -393,7 +393,6 @@ class BlockTensor(Tensor):
 
 class BlockTensorNetwork(TensorNetwork):
 
-    __slots__ = ('_inner_inds', '_outer_inds', '_tid_counter')
     _EXTRA_PROPS = ()
     _CONTRACT_STRUCTURED = False
 
@@ -419,45 +418,6 @@ class BlockTensorNetwork(TensorNetwork):
 
     def insert_gauge(self, U, where1, where2, Uinv=None, tol=1e-10):
         raise NotImplementedError
-
-    # ----------------------- contracting the network ----------------------- #
-    def contract_tags(self, tags, inplace=False, which='any', **opts):
-        """Contract the tensors that match any or all of ``tags``.
-
-        Parameters
-        ----------
-        tags : sequence of str
-            The list of tags to filter the tensors by. Use ``...``
-            (``Ellipsis``) to contract all.
-        inplace : bool, optional
-            Whether to perform the contraction inplace.
-        which : {'all', 'any'}
-            Whether to require matching all or any of the tags.
-
-        Returns
-        -------
-        TensorNetwork, Tensor or scalar
-            The result of the contraction, still a ``TensorNetwork`` if the
-            contraction was only partial.
-
-        See Also
-        --------
-        contract, contract_cumulative, contract_structured
-        """
-        untagged_tn, tagged_ts = self.partition_tensors(
-            tags, inplace=inplace, which=which)
-
-        if not tagged_ts:
-            raise ValueError("No tags were found - nothing to contract. "
-                             "(Change this to a no-op maybe?)")
-
-        contracted = tensor_contract(*tagged_ts, **opts)
-
-        if untagged_tn is None:
-            return contracted
-
-        untagged_tn.add_tensor(contracted, virtual=True)
-        return untagged_tn
 
     def __matmul__(self, other):
         """Overload "@" to mean full contraction with another network.
