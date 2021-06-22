@@ -331,8 +331,8 @@ class SimpleUpdate(_SimpleUpdate):
             Tijb = self._psi[ijb]
             bnd = self._psi.bond(ija, ijb)
             sign_ija = Tija.data.pattern[Tija.inds.index(bnd)]
-            bond_dimension = Tija.ind_size(bnd)
-            Tsval = eye(bond_dimension)
+            bond_info = Tija.bond_info(bnd)
+            Tsval = eye(bond_info)
             Tsval.pattern = sign_ija + inv_dict[sign_ija]
             self._gauges[tuple(sorted((ija, ijb)))] = Tsval
 

@@ -286,7 +286,7 @@ class BlockTensor(Tensor):
     def astype(self, dtype, inplace=False):
         raise NotImplementedError
 
-    def ind_size(self, ind):
+    def bond_info(self, ind):
         ax = self.inds.index(ind)
         return self.data.get_bond_info(ax)
 
