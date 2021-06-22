@@ -407,3 +407,17 @@ class LRU(collections.OrderedDict):
         if len(self) > self.maxsize:
             oldest = next(iter(self))
             del self[oldest]
+
+
+def gen_bipartitions(it):
+    """Generate all unique bipartitions of ``it``. Unique meaning
+    ``(1, 2), (3, 4)`` is considered the same as ``(3, 4), (1, 2)``.
+    """
+    n = len(it)
+    if n:
+        for i in range(1, 2**(n - 1)):
+            bitstring_repr = f'{i:0>{n}b}'
+            l, r = [], []
+            for b, x in zip(bitstring_repr, it):
+                (l if b == '0' else r).append(x)
+            yield l, r

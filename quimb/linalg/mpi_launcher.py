@@ -12,23 +12,31 @@ from .slepc_linalg import (
 from ..core import _NUM_THREAD_WORKERS
 
 # Work out if already running as mpi
-if ('OMPI_COMM_WORLD_SIZE' in os.environ) or ('PMI_SIZE' in os.environ):
+if (
+    ('OMPI_COMM_WORLD_SIZE' in os.environ) or  # OpenMPI
+    ('PMI_SIZE' in os.environ)  # MPICH
+):
+    QUIMB_MPI_LAUNCHED = '_QUIMB_MPI_LAUNCHED' in os.environ
     ALREADY_RUNNING_AS_MPI = True
-    if '_QUIMB_MPI_LAUNCHED' not in os.environ:
-        raise RuntimeError(
-            "For the moment, quimb programs launched explicitly"
-            " using MPI need to use `quimb-mpi-python`.")
     USE_SYNCRO = "QUIMB_SYNCRO_MPI" in os.environ
 else:
+    QUIMB_MPI_LAUNCHED = False
     ALREADY_RUNNING_AS_MPI = False
     USE_SYNCRO = False
 
+# default to not allowing mpi spawning capabilities
+ALLOW_SPAWN = {
+    'TRUE': True, 'ON': True, 'FALSE': False, 'OFF': False,
+}[os.environ.get('QUIMB_MPI_SPAWN', 'False').upper()]
+
 # Work out the desired total number of workers
-for _NUM_MPI_WORKERS_VAR in ['QUIMB_NUM_MPI_WORKERS',
-                             'QUIMB_NUM_PROCS',
-                             'OMPI_COMM_WORLD_SIZE',
-                             'PMI_SIZE',
-                             'OMP_NUM_THREADS']:
+for _NUM_MPI_WORKERS_VAR in (
+    'QUIMB_NUM_MPI_WORKERS',
+    'QUIMB_NUM_PROCS',
+    'OMPI_COMM_WORLD_SIZE',
+    'PMI_SIZE',
+    'OMP_NUM_THREADS'
+):
     if _NUM_MPI_WORKERS_VAR in os.environ:
         NUM_MPI_WORKERS = int(os.environ[_NUM_MPI_WORKERS_VAR])
         break
@@ -36,6 +44,12 @@ else:
     import psutil
     _NUM_MPI_WORKERS_VAR = 'psutil'
     NUM_MPI_WORKERS = psutil.cpu_count(logical=False)
+
+
+def can_use_mpi_pool():
+    """Function to determine whether we are allowed to call `get_mpi_pool`.
+    """
+    return ALLOW_SPAWN or ALREADY_RUNNING_AS_MPI
 
 
 def bcast(result, comm, result_rank):
@@ -114,6 +128,10 @@ class SyncroFuture:
 
 
 class SynchroMPIPool:
+    """An object that looks like a ``concurrent.futures`` executor but actually
+    distributes tasks in a round-robin fashion based to MPI workers, before
+    broadcasting the results to each other.
+    """
 
     def __init__(self):
         import itertools
@@ -121,7 +139,7 @@ class SynchroMPIPool:
         self.comm = MPI.COMM_WORLD
         self.size = self.comm.Get_size()
         self.rank = self.comm.Get_rank()
-        self.counter = itertools.cycle(range(0, NUM_MPI_WORKERS))
+        self.counter = itertools.cycle(range(0, self.size))
         self._max_workers = self.size
 
     def submit(self, fn, *args, **kwargs):
@@ -179,8 +197,19 @@ def get_mpi_pool(num_workers=None, num_threads=1):
         from concurrent.futures import ProcessPoolExecutor
         return ProcessPoolExecutor(1)
 
+    if not QUIMB_MPI_LAUNCHED:
+        raise RuntimeError(
+            "For the moment, quimb programs using `get_mpi_pool` need to be "
+            "explicitly launched using `quimb-mpi-python`.")
+
     if USE_SYNCRO:
         return SynchroMPIPool()
+
+    if not can_use_mpi_pool():
+        raise RuntimeError(
+            "`get_mpi_pool()` cannot be explicitly called unless already "
+            "running under MPI, or you set the environment variable "
+            "`QUIMB_MPI_SPAWN=True`.")
 
     from mpi4py.futures import MPIPoolExecutor
     return MPIPoolExecutor(num_workers, main=False,
@@ -199,21 +228,24 @@ class GetMPIBeforeCall(object):
     def __init__(self, fn):
         self.fn = fn
 
-    def __call__(self, *args,
-                 comm_self=False,
-                 wait_for_workers=None,
-                 **kwargs):
+    def __call__(
+        self,
+        *args,
+        comm_self=False,
+        wait_for_workers=None,
+        **kwargs
+    ):
         """
         Parameters
         ----------
-        *args :
+        args
             Supplied to self.fn
         comm_self : bool, optional
             Whether to force use of MPI.COMM_SELF
         wait_for_workers : int, optional
             If set, wait for the communicator to have this many workers, this
             can help to catch some errors regarding expected worker numbers.
-        **kwargs :
+        kwargs
             Supplied to self.fn
         """
         from mpi4py import MPI
@@ -232,9 +264,7 @@ class GetMPIBeforeCall(object):
                         f"Timeout while waiting for {wait_for_workers} "
                         f"workers to join comm {comm}.")
 
-        comm.Barrier()
         res = self.fn(*args, comm=comm, **kwargs)
-        comm.Barrier()
         return res
 
 
@@ -250,37 +280,45 @@ class SpawnMPIProcessesFunc(object):
     def __init__(self, fn):
         self.fn = fn
 
-    def __call__(self, *args,
-                 num_workers=None,
-                 num_threads=1,
-                 mpi_pool=None,
-                 spawn_all=USE_SYNCRO or (not ALREADY_RUNNING_AS_MPI),
-                 **kwargs):
+    def __call__(
+        self,
+        *args,
+        num_workers=None,
+        num_threads=1,
+        mpi_pool=None,
+        spawn_all=USE_SYNCRO or (not ALREADY_RUNNING_AS_MPI),
+        **kwargs
+    ):
         """
         Parameters
         ----------
-            *args
-                Supplied to `self.fn`.
-            num_workers : int, optional
-                How many total process should run function in parallel.
-            num_threads : int, optional
-                How many (OMP) threads each process should use
-            mpi_pool : pool-like, optional
-                If not None (default), submit function to this pool.
-            spawn_all : bool, optional
-                Whether all the parallel processes should be spawned (True), or
-                num_workers - 1, so that the current process can also do work.
-            **kwargs
-                Supplied to `self.fn`.
+        args
+            Supplied to `self.fn`.
+        num_workers : int, optional
+            How many total process should run function in parallel.
+        num_threads : int, optional
+            How many (OMP) threads each process should use
+        mpi_pool : pool-like, optional
+            If not None (default), submit function to this pool.
+        spawn_all : bool, optional
+            Whether all the parallel processes should be spawned (True), or
+            num_workers - 1, so that the current process can also do work.
+        kwargs
+            Supplied to `self.fn`.
 
         Returns
         -------
-            `fn` output from the master process.
+        `fn` output from the master process.
         """
         if num_workers is None:
             num_workers = NUM_MPI_WORKERS
 
-        if num_workers == 1:  # no pool or communicator required
+        if (
+            # use must explicitly run program as
+            (not can_use_mpi_pool()) or
+            # no pool or communicator needed
+            (num_workers == 1)
+        ):
             return self.fn(*args, comm_self=True, **kwargs)
 
         kwargs['wait_for_workers'] = num_workers

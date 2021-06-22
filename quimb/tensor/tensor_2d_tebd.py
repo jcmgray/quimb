@@ -243,7 +243,7 @@ class LocalHam2D:
         # sort into color groups
         coloring.sort(key=lambda coo_color: coo_color[1])
 
-        return [coo for coo, color in coloring]
+        return [coo for coo, _ in coloring]
 
     def get_auto_ordering(self, order='sort', **kwargs):
         """Get an ordering of the terms to use with TEBD, for example. The

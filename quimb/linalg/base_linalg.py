@@ -18,7 +18,9 @@ from .numpy_linalg import (
 from .scipy_linalg import (
     eigs_scipy,
     eigs_lobpcg,
+    eigs_primme,
     svds_scipy,
+    svds_primme,
 )
 from . import SLEPC4PY_FOUND
 
@@ -70,6 +72,7 @@ def choose_backend(A, k, int_eps=False, B=None):
 _EIGS_METHODS = {
     'NUMPY': eigs_numpy,
     'SCIPY': eigs_scipy,
+    'PRIMME': eigs_primme,
     'LOBPCG': eigs_lobpcg,
     'SLEPC': eigs_slepc_spawn,
     'SLEPC-NOMPI': eigs_slepc,
@@ -366,6 +369,7 @@ _SVDS_METHODS = {
     'SLEPC-NOMPI': svds_slepc,
     'NUMPY': svds_numpy,
     'SCIPY': svds_scipy,
+    'PRIMME': svds_primme,
 }
 
 

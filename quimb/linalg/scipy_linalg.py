@@ -1,5 +1,6 @@
 """Scipy based linear algebra.
 """
+import functools
 
 import numpy as np
 import scipy.sparse.linalg as spla
@@ -20,7 +21,8 @@ def maybe_sort_and_project(lk, vk, P, sort=True):
 
 
 def eigs_scipy(A, k, *, B=None, which=None, return_vecs=True, sigma=None,
-               isherm=True, sort=True, P=None, tol=None, **eigs_opts):
+               isherm=True, sort=True, P=None, tol=None, backend=None,
+               **eigs_opts):
     """Returns a few eigenpairs from a possibly sparse hermitian operator
 
     Parameters
@@ -45,6 +47,8 @@ def eigs_scipy(A, k, *, B=None, which=None, return_vecs=True, sigma=None,
         Perform the eigensolve in the subspace defined by this projector.
     sort : bool, optional
         Whether to ensure the eigenvalues are sorted in ascending value.
+    backend : None or 'primme', optional
+        Which backend to use.
     eigs_opts
         Supplied to :func:`scipy.sparse.linalg.eigsh` or
         :func:`scipy.sparse.linalg.eigs`.
@@ -88,14 +92,26 @@ def eigs_scipy(A, k, *, B=None, which=None, return_vecs=True, sigma=None,
         'tol': 0 if tol is None else tol
     }
 
-    eig_fn = spla.eigsh if isherm else spla.eigs
+    if backend is None:
+        eigs = spla.eigsh if isherm else spla.eigs
+    elif backend == 'primme':
+        import primme
+        if isherm:
+            eigs = primme.eigsh
+        else:
+            raise ValueError("Primme only for hermitian problems.")
+
+        # primme requires a N * k initial space even if k == 1
+        v0 = eigs_opts.get('v0', None)
+        if (v0 is not None) and (v0.ndim == 1):
+            eigs_opts['v0'] = v0.reshape(-1, 1)
 
     if return_vecs:
-        lk, vk = eig_fn(A, **settings, **eigs_opts)
+        lk, vk = eigs(A, **settings, **eigs_opts)
         vk = qu.qarray(vk)
         return maybe_sort_and_project(lk, vk, P, sort)
     else:
-        lk = eig_fn(A, **settings, **eigs_opts)
+        lk = eigs(A, **settings, **eigs_opts)
         return np.sort(lk) if sort else lk
 
 
@@ -200,7 +216,7 @@ def eigs_lobpcg(A, k, *, B=None, v0=None, which=None, return_vecs=True,
         return np.sort(lk) if sort else lk
 
 
-def svds_scipy(A, k=6, *, return_vecs=True, **svds_opts):
+def svds_scipy(A, k=6, *, return_vecs=True, backend=None, **svds_opts):
     """Compute a number of singular value pairs
 
     Parameters
@@ -227,10 +243,20 @@ def svds_scipy(A, k=6, *, return_vecs=True, **svds_opts):
     if isinstance(A, qu.qarray):
         A = A.A
 
+    if backend is None:
+        svds = spla.svds
+    elif backend == 'primme':
+        import primme
+        svds = primme.svds
+
     if return_vecs:
-        uk, sk, vtk = spla.svds(A, **settings)
+        uk, sk, vtk = svds(A, **settings)
         so = np.argsort(-sk)
         return qu.qarray(uk[:, so]), sk[so], qu.qarray(vtk[so, :])
     else:
-        sk = spla.svds(A, **settings)
+        sk = svds(A, **settings)
         return sk[np.argsort(-sk)]
+
+
+eigs_primme = functools.partial(eigs_scipy, backend='primme')
+svds_primme = functools.partial(svds_scipy, backend='primme')

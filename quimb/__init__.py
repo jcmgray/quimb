@@ -83,7 +83,7 @@ from .linalg.base_linalg import (
     Lazy,
 )
 from .linalg.rand_linalg import rsvd, estimate_rank
-from .linalg.mpi_launcher import get_mpi_pool
+from .linalg.mpi_launcher import get_mpi_pool, can_use_mpi_pool
 
 # Generating objects
 from .gen.operators import (
@@ -105,6 +105,7 @@ from .gen.operators import (
     swap,
     iswap,
     fsim,
+    fsimg,
     controlled,
     CNOT,
     cX,
@@ -332,6 +333,7 @@ __all__ = [
     'swap',
     'iswap',
     'fsim',
+    'fsimg',
     'controlled',
     'CNOT',
     'cX',
@@ -459,6 +461,7 @@ __all__ = [
     'load_from_disk',
     'get_thread_pool',
     'get_mpi_pool',
+    'can_use_mpi_pool',
     'oset',
     'LRU',
 ]

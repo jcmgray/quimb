@@ -1,9 +1,14 @@
 """Functionailty for drawing tensor networks.
 """
+import textwrap
+import importlib
+
+import numpy as np
 
 from ..utils import valmap
 
-import numpy as np
+
+HAS_FA2 = importlib.util.find_spec('fa2') is not None
 
 
 def _add_or_merge_edge(G, u, v, attrs):
@@ -30,6 +35,7 @@ def draw_tn(
     highlight_tids_color=(1.0, 0.2, 0.2, 1.0),
     show_inds=None,
     show_tags=None,
+    show_scalars=True,
     custom_colors=None,
     title=None,
     legend=True,
@@ -37,6 +43,7 @@ def draw_tn(
     k=None,
     iterations=200,
     initial_layout='spectral',
+    use_forceatlas2=1000,
     node_color=None,
     outline_darkness=0.8,
     node_size=None,
@@ -44,6 +51,8 @@ def draw_tn(
     edge_scale=1.0,
     edge_alpha=1 / 2,
     label_color=None,
+    font_size=10,
+    font_size_inner=7,
     figsize=(6, 6),
     margin=None,
     xlims=None,
@@ -68,10 +77,12 @@ def draw_tn(
         What color to use for ``highlight_inds`` nodes.
     highlight_tids_color : tuple[float], optional
         What color to use for ``highlight_tids`` nodes.
-    show_inds : {None, False, True, 'all'}, optional
+    show_inds : {None, False, True, 'all', 'bond-size'}, optional
         Explicitly turn on labels for each tensors indices.
     show_tags : {None, False, True}, optional
         Explicitly turn on labels for each tensors tags.
+    show_scalars : bool, optional
+        Whether to show scalar tensors (floating nodes with no edges).
     custom_colors : sequence of colors, optional
         Supply a custom sequence of colors to match the tags given
         in ``color``.
@@ -89,11 +100,15 @@ def draw_tn(
     iterations : int, optional
         How many iterations to perform when when finding the best layout
         using node repulsion. Ramp this up if the graph is drawing messily.
-    initial_layout : {'spectral', 'kamada_kawai', 'circular', 'planar',
+    initial_layout : {'spectral', 'kamada_kawai', 'circular', 'planar', \\
                       'random', 'shell', 'bipartite', ...}, optional
         The name of a networkx layout to use before iterating with the
         spring layout. Set ``iterations=0`` if you just want to use this
         layout only.
+    use_forceatlas2 : bool or int, optional
+        Whether to try and use ``forceatlas2`` (``fa2``) for the spring layout
+        relaxation instead of ``networkx``. If an integer, only try and use
+        beyond that many nodes (it can give messier results on smaller graphs).
     node_color : tuple[float], optional
         Default color of nodes.
     outline_darkness : float, optional
@@ -108,6 +123,10 @@ def draw_tn(
         Set the alpha (opacity) of the drawn edges.
     label_color : tuple[float], optional
         Color to draw labels with.
+    font_size : int, optional
+        Font size for drawing tags and outer indices.
+    font_size_inner : int, optional
+        Font size for drawing inner indices.
     figsize : tuple of int
         The size of the drawing.
     margin : None or float, optional
@@ -178,22 +197,26 @@ def draw_tn(
             _add_or_merge_edge(G, *tids, edge_attrs)
             if show_inds == 'all':
                 edge_labels[tuple(tids)] = ix
+            elif show_inds == 'bond-size':
+                edge_labels[tuple(tids)] = tn.ind_size(ix)
         else:
             # hyper or outer edge - needs dummy 'node' shown with zero size
             hyperedges.append(ix)
             for tid in tids:
                 _add_or_merge_edge(G, tid, ix, edge_attrs)
 
-    if len(G) == 0:
-        # tensor network is only scalars, no inds
-        for tid in tn.tensor_map:
-            G.add_node(tid)
-
     # color the nodes
     colors = get_colors(color, custom_colors)
 
     # set parameters for all the nodes
     for tid, t in tn.tensor_map.items():
+
+        if tid not in G.nodes:
+            # e.g. tensor is a scalar
+            if show_scalars:
+                G.add_node(tid)
+            else:
+                continue
 
         G.nodes[tid]['size'] = node_size
         G.nodes[tid]['outline_size'] = node_outline_size
@@ -209,7 +232,11 @@ def draw_tn(
             for i, c in enumerate(color)
         )
         if show_tags:
-            node_labels[tid] = '{' + str(list(t.tags))[1:-1] + '}'
+            # make the tags appear with auto vertical extend
+            node_label = '{' + str(list(t.tags))[1:-1] + '}'
+            node_labels[tid] = "\n".join(textwrap.wrap(
+                node_label, max(2 * len(node_label) ** 0.5, 16)
+            ))
 
     for hix in hyperedges:
         G.nodes[hix]['ind'] = hix
@@ -219,12 +246,19 @@ def draw_tn(
         G.nodes[hix]['outline_color'] = (1.0, 1.0, 1.0, 1.0)
         if show_inds == 'all':
             node_labels[hix] = hix
+        elif show_inds == 'bond-size':
+            node_labels[hix] = tn.ind_size(hix)
 
-    if show_inds:
+    if show_inds == 'bond-size':
+        font_size = font_size_inner
+        for oix in tn.outer_inds():
+            node_labels[oix] = tn.ind_size(oix)
+    elif show_inds:
         for oix in tn.outer_inds():
             node_labels[oix] = oix
 
-    pos = _get_positions(tn, G, fix, initial_layout, k, iterations)
+    pos = _get_positions(tn, G, fix, initial_layout,
+                         k, iterations, use_forceatlas2)
 
     if get == 'pos':
         return pos
@@ -277,11 +311,11 @@ def draw_tn(
         linewidths=tuple(x[1]['outline_size'] for x in G.nodes(data=True)),
         ax=ax,
     )
-    if show_inds == 'all':
+    if show_inds in {'all', 'bond-size'}:
         nx.draw_networkx_edge_labels(
             G, pos,
             edge_labels=edge_labels,
-            font_size=10,
+            font_size=font_size_inner,
             font_color=label_color,
             ax=ax,
         )
@@ -289,7 +323,7 @@ def draw_tn(
         nx.draw_networkx_labels(
             G, pos,
             labels=node_labels,
-            font_size=10,
+            font_size=font_size,
             font_color=label_color,
             ax=ax,
         )
@@ -418,7 +452,7 @@ def _span(xy):
     return xy[:, 1].max() - xy[:, 1].min()
 
 
-def _massage_pos(pos, nangles=24, flatten=False):
+def _massage_pos(pos, nangles=360, flatten=False):
     """Rotate a position dict's points to cover a small vertical span
     """
     xy = np.empty((len(pos), 2))
@@ -436,7 +470,8 @@ def _massage_pos(pos, nangles=24, flatten=False):
     return dict(zip(pos, rxy0))
 
 
-def _get_positions(tn, G, fix, initial_layout, k, iterations):
+def _get_positions(tn, G, fix, initial_layout,
+                   k, iterations, use_forceatlas2):
     import networkx as nx
 
     if fix is None:
@@ -481,8 +516,26 @@ def _get_positions(tn, G, fix, initial_layout, k, iterations):
         fixed = None
 
     # and then relax remaining using spring layout
-    pos = nx.spring_layout(
-        G, pos=pos0, fixed=fixed, k=k, iterations=iterations)
+    if iterations:
+
+        if use_forceatlas2 is True:
+            use_forceatlas2 = 1
+        elif use_forceatlas2 in (0, False):
+            use_forceatlas2 = float('inf')
+
+        should_use_fa2 = (
+            (fixed is None) and HAS_FA2 and (len(G) > use_forceatlas2)
+        )
+
+        if should_use_fa2:
+            from fa2 import ForceAtlas2
+            pos = ForceAtlas2(verbose=False).forceatlas2_networkx_layout(
+                G, pos=pos0, iterations=iterations)
+        else:
+            pos = nx.spring_layout(
+                G, pos=pos0, fixed=fixed, k=k, iterations=iterations)
+    else:
+        pos = pos0
 
     if not fix:
         # finally rotate them to cover a small vertical span
