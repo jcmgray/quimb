@@ -282,7 +282,7 @@ class Test2DContract:
             mode=mode,
             normalized=normalized,
             cutoff=2e-3,
-            max_bond=9,
+            max_bond=16,
             contract_optimize='random-greedy'
         )
 

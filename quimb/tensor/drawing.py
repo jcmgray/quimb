@@ -21,8 +21,11 @@ def _add_or_merge_edge(G, u, v, attrs):
         attrs0['color'] = tuple(
             (x + y) / 2 for x, y in zip(attrs0['color'], attrs['color']))
         attrs0['ind'] += ' ' + attrs['ind']
-        # adding log size == multiplying bond dim
-        attrs0['edge_size'] += attrs['edge_size']
+        # hide original edge and instead track multiple bond sizes
+        attrs0['multiedge_inds'].append(attrs['ind'])
+        attrs0['multiedge_sizes'].append(attrs['edge_size'])
+        attrs0['spring_weight'] /= (attrs['edge_size'] + 1)
+        attrs0['edge_size'] = 0
 
 
 def draw_tn(
@@ -45,11 +48,17 @@ def draw_tn(
     initial_layout='spectral',
     use_forceatlas2=1000,
     node_color=None,
-    outline_darkness=0.8,
     node_size=None,
+    node_shape='o',
+    node_outline_size=None,
+    node_outline_darkness=0.8,
     edge_color=None,
     edge_scale=1.0,
     edge_alpha=1 / 2,
+    multiedge_spread=0.1,
+    show_left_inds=True,
+    arrow_closeness=1.1,
+    arrow_length=0.1,
     label_color=None,
     font_size=10,
     font_size_inner=7,
@@ -111,16 +120,26 @@ def draw_tn(
         beyond that many nodes (it can give messier results on smaller graphs).
     node_color : tuple[float], optional
         Default color of nodes.
-    outline_darkness : float, optional
-        Darkening of nodes outlines.
-    node_size : None
+    node_size : None or float, optional
         How big to draw the tensors.
+    node_outline_size : None or float, optional
+        The width of the border of each node.
+    node_outline_darkness : float, optional
+        Darkening of nodes outlines.
     edge_color : tuple[float], optional
         Default color of edges.
     edge_scale : float, optional
         How much to scale the width of the edges.
     edge_alpha : float, optional
         Set the alpha (opacity) of the drawn edges.
+    multiedge_spread : float, optional
+        How much to spread the lines of multi-edges.
+    show_left_inds : bool, optional
+        Whether to show ``tensor.left_inds`` as incoming arrows.
+    arrow_closeness : float, optional
+        How close to draw the arrow to its target.
+    arrow_length : float, optional
+        The size of the arrow with respect to the edge.
     label_color : tuple[float], optional
         Color to draw labels with.
     font_size : int, optional
@@ -149,6 +168,7 @@ def draw_tn(
     import networkx as nx
     import matplotlib as mpl
     import matplotlib.pyplot as plt
+    import matplotlib.patches as patches
     from matplotlib.colors import to_rgb
     import math
 
@@ -173,7 +193,8 @@ def draw_tn(
     # set the size of the nodes
     if node_size is None:
         node_size = 1000 / tn.num_tensors**0.7
-    node_outline_size = min(3, node_size**0.5 / 5)
+    if node_outline_size is None:
+        node_outline_size = min(3, node_size**0.5 / 5)
 
     if label_color is None:
         label_color = mpl.rcParams['axes.labelcolor']
@@ -186,12 +207,17 @@ def draw_tn(
     edge_labels = dict()
 
     for ix, tids in tn.ind_map.items():
+        # general information for this index
         edge_attrs = {
             'color': (highlight_inds_color if ix in highlight_inds else
                       edge_color),
             'ind': ix,
-            'edge_size': edge_scale * math.log2(tn.ind_size(ix))
+            'edge_size': edge_scale * math.log2(tn.ind_size(ix)),
         }
+        edge_attrs['multiedge_inds'] = [edge_attrs['ind']]
+        edge_attrs['multiedge_sizes'] = [edge_attrs['edge_size']]
+        edge_attrs['spring_weight'] = 1 / sum(t.ndim for t in tn._inds_get(ix))
+
         if len(tids) == 2:
             # standard edge
             _add_or_merge_edge(G, *tids, edge_attrs)
@@ -228,7 +254,7 @@ def draw_tn(
             color = highlight_tids_color
         G.nodes[tid]['color'] = color
         G.nodes[tid]['outline_color'] = tuple(
-            (1.0 if i == 3 else outline_darkness) * c
+            (1.0 if i == 3 else node_outline_darkness) * c
             for i, c in enumerate(color)
         )
         if show_tags:
@@ -303,14 +329,82 @@ def draw_tn(
         alpha=edge_alpha,
         ax=ax,
     )
+
+    # draw multiedges
+    multiedge_centers = {}
+    for i, j, attrs in G.edges(data=True):
+        sizes = attrs['multiedge_sizes']
+        multiplicity = len(sizes)
+        if multiplicity > 1:
+            rads = np.linspace(
+                multiplicity * -multiedge_spread,
+                multiplicity * +multiedge_spread,
+                multiplicity
+            )
+
+            xa, ya = pos[i]
+            xb, yb = pos[j]
+            xab, yab = (xa + xb) / 2., (ya + yb) / 2.
+            dx, dy = xb - xa, yb - ya
+
+            inds = attrs['multiedge_inds']
+            for sz, rad, ix in zip(sizes, rads, inds):
+
+                # store the central point of the arc in case its needed by
+                # the arrow drawing functionality
+                cx, cy = xab + rad * dy * 0.5, yab - rad * dx * 0.5
+                multiedge_centers[ix] = (cx, cy)
+
+                ax.add_patch(patches.FancyArrowPatch(
+                    (xa, ya), (xb, yb),
+                    connectionstyle=patches.ConnectionStyle.Arc3(rad=rad),
+                    alpha=edge_alpha,
+                    linewidth=sz,
+                    color=attrs['color'],
+                ))
+
     nx.draw_networkx_nodes(
         G, pos,
         node_color=tuple(x[1]['color'] for x in G.nodes(data=True)),
         edgecolors=tuple(x[1]['outline_color'] for x in G.nodes(data=True)),
         node_size=tuple(x[1]['size'] for x in G.nodes(data=True)),
         linewidths=tuple(x[1]['outline_size'] for x in G.nodes(data=True)),
+        node_shape=node_shape,
         ax=ax,
     )
+
+    # draw incomcing arrows for tensor left_inds
+    if show_left_inds:
+        for tid, t in tn.tensor_map.items():
+            if t.left_inds is not None:
+                for ind in t.left_inds:
+                    if ind in hyperedges:
+                        tida = ind
+                    else:
+                        tida, = (x for x in tn.ind_map[ind] if x != tid)
+                    tidb = tid
+                    (xa, ya), (xb, yb) = pos[tida], pos[tidb]
+
+                    # arrow start and change
+                    if ind in multiedge_centers:
+                        x, y = multiedge_centers[ind]
+                    else:
+                        x = (xa + arrow_closeness * xb) / (1 + arrow_closeness)
+                        y = (ya + arrow_closeness * yb) / (1 + arrow_closeness)
+                    dx = (xb - xa) * arrow_length
+                    dy = (yb - ya) * arrow_length
+
+                    ax.add_patch(patches.FancyArrow(
+                        x, y, dx, dy,
+                        width=0,  # don't draw tail
+                        length_includes_head=True,
+                        head_width=(dx**2 + dy**2)**0.5,
+                        head_length=(dx**2 + dy**2)**0.5,
+                        color=edge_color,
+                        alpha=edge_alpha,
+                        fill=True,
+                    ))
+
     if show_inds in {'all', 'bond-size'}:
         nx.draw_networkx_edge_labels(
             G, pos,
