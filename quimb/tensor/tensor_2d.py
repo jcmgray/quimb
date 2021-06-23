@@ -2758,7 +2758,7 @@ class TensorNetwork2DVector(TensorNetwork2D,
                   tensors, then contract the gate, split it and reabsorb each
                   side. Much cheaper than ``'split'``.
 
-            The final three methods are relevant for two site gates only, for
+            The final two methods are relevant for two site gates only, for
             single site gates they use the ``contract=True`` option which also
             maintains the structure of the TN. See below for a pictorial
             description of each method.
@@ -2882,7 +2882,7 @@ class TensorNetwork2DVector(TensorNetwork2D,
             psi |= TG
             return psi
 
-        elif (contract is True) or (ng == 1):
+        if (contract is True) or (ng == 1):
             #
             #       │╱  │╱
             #     ──GGGGG──

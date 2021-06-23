@@ -1608,8 +1608,10 @@ def tensor_network_fit_als(
 # --------------------------------------------------------------------------- #
 
 class Tensor(object):
-    """A labelled, tagged ndarray. The index labels are used instead of
-    axis numbers to identify dimensions, and are preserved through operations.
+    """A labelled, tagged n-dimensional array. The index labels are used
+    instead of axis numbers to identify dimensions, and are preserved through
+    operations. The tags are used to identify the tensor within networks, and
+    are combined when tensors are contracted together.
 
     Parameters
     ----------
@@ -4017,6 +4019,234 @@ class TensorNetwork(object):
         )
         self.add_tensor(tnew, tid=tids[0], virtual=True)
 
+    def gate_inds(
+        self,
+        G,
+        inds,
+        contract=False,
+        tags=None,
+        info=None,
+        inplace=False,
+        **compress_opts,
+    ):
+        """Apply the 'gate' ``G`` to indices ``inds``, propagating them to the
+        outside, as if applying ``G @ x``.
+
+        Parameters
+        ----------
+        G : array_ike
+            The gate array to apply, should match or be factorable into the
+            shape ``(*phys_dims, *phys_dims)``.
+        inds : str or sequence or str,
+            The index or indices to apply the gate to.
+        contract : {False, True, 'split', 'reduce-split'}, optional
+            How to apply the gate:
+
+                - False: gate is added to network and nothing is contracted,
+                  tensor network structure is thus not maintained.
+                - True: gate is contracted with all tensors involved, tensor
+                  network structure is thus only maintained if gate acts on a
+                  single site only.
+                - 'split': contract all involved tensors then split the result
+                  back into two.
+                - 'reduce-split': factor the two physical indices into
+                  'R-factors' using QR decompositions on the original site
+                  tensors, then contract the gate, split it and reabsorb each
+                  side. Much cheaper than ``'split'``.
+
+            The final two methods are relevant for two site gates only, for
+            single site gates they use the ``contract=True`` option which also
+            maintains the structure of the TN. See below for a pictorial
+            description of each method.
+        tags : str or sequence of str, optional
+            Tags to add to the new gate tensor.
+        info : None or dict, optional
+            Used to store extra optional information such as the singular
+            values if not absorbed.
+        inplace : bool, optional
+            Whether to perform the gate operation inplace on the tensor
+            network or not.
+        compress_opts
+            Supplied to :func:`~quimb.tensor.tensor_core.tensor_split` for any
+            ``contract`` methods that involve splitting. Ignored otherwise.
+
+        Returns
+        -------
+        G_tn : TensorNetwork
+
+        Notes
+        -----
+
+        The ``contract`` options look like the following (for two site gates).
+
+        ``contract=False``::
+
+              .   .  <- inds
+              │   │
+              GGGGG
+              │╱  │╱
+            ──●───●──
+             ╱   ╱
+
+        ``contract=True``::
+
+              │╱  │╱
+            ──GGGGG──
+             ╱   ╱
+
+        ``contract='split'``::
+
+              │╱  │╱          │╱  │╱
+            ──GGGGG──  ==>  ──G┄┄┄G──
+             ╱   ╱           ╱   ╱
+             <SVD>
+
+        ``contract='reduce-split'``::
+
+               │   │             │ │
+               GGGGG             GGG               │ │
+               │╱  │╱   ==>     ╱│ │  ╱   ==>     ╱│ │  ╱          │╱  │╱
+             ──●───●──       ──>─●─●─<──       ──>─GGG─<──  ==>  ──G┄┄┄G──
+              ╱   ╱           ╱     ╱           ╱     ╱           ╱   ╱
+            <QR> <LQ>                            <SVD>
+
+        For one site gates when one of the 'split' methods is supplied
+        ``contract=True`` is assumed.
+        """
+        check_opt("contract", contract, (False, True, 'split', 'reduce-split'))
+
+        tn = self if inplace else self.copy()
+
+        if isinstance(inds, str):
+            inds = (inds,)
+        ng = len(inds)
+
+        # new indices to join old physical sites to new gate
+        bnds = [rand_uuid() for _ in range(ng)]
+        reindex_map = dict(zip(inds, bnds))
+
+        # tensor representing the gate
+        tags = tags_to_oset(tags)
+        tG = Tensor(G, inds=inds + bnds, tags=tags, left_inds=bnds)
+
+        if contract is False:
+            #
+            #       │   │      <- site_ix
+            #       GGGGG
+            #       │╱  │╱     <- bnds
+            #     ──●───●──
+            #      ╱   ╱
+            #
+            tn.reindex_(reindex_map)
+            tn |= tG
+            return tn
+
+        tids = self._get_tids_from_inds(inds, 'any')
+
+        if (contract is True) or (len(tids) == 1):
+            #
+            #       │╱  │╱
+            #     ──GGGGG──
+            #      ╱   ╱
+            #
+            tn.reindex_(reindex_map)
+
+            # get the sites that used to have the physical indices
+            site_tids = tn._get_tids_from_inds(bnds, which='any')
+
+            # pop the sites, contract, then re-add
+            pts = [tn._pop_tensor(tid) for tid in site_tids]
+            tn |= tensor_contract(*pts, tG)
+
+            return tn
+
+        # get the two tensors and their current shared indices etc.
+        ixl, ixr = inds
+        tl, tr = tn._inds_get(ixl, ixr)
+        bnds_l, (bix,), bnds_r = group_inds(tl, tr)
+
+        if contract == 'split':
+            #
+            #       │╱  │╱         │╱  │╱
+            #     ──GGGGG──  ->  ──G~~~G──
+            #      ╱   ╱          ╱   ╱
+            #
+
+            # contract with new gate tensor
+            tlGr = tensor_contract(
+                tl.reindex(reindex_map),
+                tr.reindex(reindex_map),
+                tG)
+
+            # decompose back into two tensors
+            tln, *maybe_svals, trn = tlGr.split(
+                left_inds=bnds_l, right_inds=bnds_r,
+                bond_ind=bix, get='tensors', **compress_opts)
+
+        if contract == 'reduce-split':
+            # move physical inds on reduced tensors
+            #
+            #       │   │             │ │
+            #       GGGGG             GGG
+            #       │╱  │╱   ->     ╱ │ │   ╱
+            #     ──●───●──      ──>──●─●──<──
+            #      ╱   ╱          ╱       ╱
+            #
+            tmp_bix_l = rand_uuid()
+            tl_Q, tl_R = tl.split(left_inds=None, right_inds=[bix, ixl],
+                                  method='qr', bond_ind=tmp_bix_l)
+            tmp_bix_r = rand_uuid()
+            tr_L, tr_Q = tr.split(left_inds=[bix, ixr], right_inds=None,
+                                  method='lq', bond_ind=tmp_bix_r)
+
+            # contract reduced tensors with gate tensor
+            #
+            #          │ │
+            #          GGG                │ │
+            #        ╱ │ │   ╱    ->    ╱ │ │   ╱
+            #     ──>──●─●──<──      ──>──LGR──<──
+            #      ╱       ╱          ╱       ╱
+            #
+            tlGr = tensor_contract(
+                tl_R.reindex(reindex_map),
+                tr_L.reindex(reindex_map),
+                tG)
+
+            # split to find new reduced factors
+            #
+            #          │ │                │ │
+            #        ╱ │ │   ╱    ->    ╱ │ │   ╱
+            #     ──>──LGR──<──      ──>──L=R──<──
+            #      ╱       ╱          ╱       ╱
+            #
+            tl_R, *maybe_svals, tr_L = tlGr.split(
+                left_inds=[tmp_bix_l, ixl], right_inds=[tmp_bix_r, ixr],
+                bond_ind=bix, get='tensors', **compress_opts)
+
+            # absorb reduced factors back into site tensors
+            #
+            #          │ │             │   │
+            #        ╱ │ │   ╱         │╱  │╱
+            #     ──>──L=R──<──  ->  ──●───●──
+            #      ╱       ╱          ╱   ╱
+            #
+            tln = tl_Q @ tl_R
+            trn = tr_L @ tr_Q
+
+        # if singular values are returned (``absorb=None``) check if we should
+        #     return them via ``info``, e.g. for ``SimpleUpdate`
+        if maybe_svals and info is not None:
+            s = next(iter(maybe_svals)).data
+            info['singular_values', tuple(sorted(inds))] = s
+
+        # update original tensors
+        tl.modify(data=tln.transpose_like_(tl).data)
+        tr.modify(data=trn.transpose_like_(tr).data)
+
+        return tn
+
+    gate_inds_ = functools.partialmethod(gate_inds, inplace=True)
+
 
     def _compute_bond_env(
         self, tid1, tid2,
@@ -4459,7 +4689,7 @@ class TensorNetwork(object):
         ndim_sort='max',
         distance_sort='min',
         sorter=None,
-        connectivity_weight_bonds=False,
+        connectivity_weight_bonds=True,
         inwards=True,
     ):
         """Generate a tree on the tensor network graph, fanning out from the
@@ -4605,7 +4835,7 @@ class TensorNetwork(object):
         ndim_sort='max',
         distance_sort='min',
         sorter=None,
-        connectivity_weight_bonds=False,
+        connectivity_weight_bonds=True,
         color='order',
         colormap='Spectral',
         **draw_opts,
@@ -4670,7 +4900,7 @@ class TensorNetwork(object):
         exclude=None,
         ndim_sort='max',
         distance_sort='min',
-        connectivity_weight_bonds=False,
+        connectivity_weight_bonds=True,
         color='order',
         colormap='Spectral',
         **draw_opts,
@@ -5364,6 +5594,36 @@ class TensorNetwork(object):
             compress_exclude=tids,
             equalize_norms=equalize_norms,
             **kwargs)
+
+    def most_central_tid(self):
+        import cotengra as ctg
+        hg = ctg.get_hypergraph(
+            {tid: t.inds for tid, t in self.tensor_map.items()}
+        )
+        cents = hg.simple_centrality()
+        return max((score, tid) for tid, score in cents.items())[1]
+
+    def least_central_tid(self):
+        import cotengra as ctg
+        hg = ctg.get_hypergraph(
+            {tid: t.inds for tid, t in self.tensor_map.items()}
+        )
+        cents = hg.simple_centrality()
+        return min((score, tid) for tid, score in cents.items())[1]
+
+    def contract_around_center(self, **opts):
+        tid_center = self.most_central_tid()
+        opts.setdefault("span_opts", {})
+        opts["span_opts"].setdefault("distance_sort", "min")
+        opts["span_opts"].setdefault("ndim_sort", "max")
+        return self.copy()._contract_around_tids([tid_center], **opts)
+
+    def contract_around_corner(self, **opts):
+        tid_corner = self.least_central_tid()
+        opts.setdefault("span_opts", {})
+        opts["span_opts"].setdefault("distance_sort", "max")
+        opts["span_opts"].setdefault("ndim_sort", "min")
+        return self.copy()._contract_around_tids([tid_corner], **opts)
 
     def contract_around(
         self,
