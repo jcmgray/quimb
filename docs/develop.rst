@@ -28,7 +28,7 @@ The tests can also be run with pre-spawned mpi workers using the command ``quimb
 Building the docs locally
 =========================
 
-Building the docs requires `sphinx <http://www.sphinx-doc.org/en/stable/>`_, `pydata-sphinx-theme <https://github.com/pandas-dev/pydata-sphinx-theme>`_, and `nbsphinx <https://nbsphinx.readthedocs.io>`_.
+Building the docs requires `sphinx <http://www.sphinx-doc.org/en/stable/>`_, `sphinx-book-theme <https://github.com/executablebooks/sphinx-book-theme>`_, and `nbsphinx <https://nbsphinx.readthedocs.io>`_.
 
 1. To start from scratch, remove ``quimb/docs/_autosummary`` and ``quimb/docs/_build``.
 2. Run ``make html`` (``make.bat html`` on windows) in the ``quimb/docs`` folder.
