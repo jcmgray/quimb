@@ -6,14 +6,14 @@ from operator import add
 from itertools import product
 from collections import defaultdict
 
-from ..utils import check_opt, pairwise
-from .tensor_core import (
+from ...utils import check_opt, pairwise
+from ..tensor_core import (
     bonds,
     rand_uuid,
     oset,
     tags_to_oset
 )
-from .tensor_2d import (
+from ..tensor_2d import (
     Rotator2D,
     TensorNetwork2D,
     TensorNetwork2DVector,
@@ -26,7 +26,7 @@ from .tensor_2d import (
     calc_plaquette_sizes,
     calc_plaquette_map
 )
-from .fermion import (
+from .fermion_core import (
     FermionTensor,
     FermionTensorNetwork,
     tensor_contract

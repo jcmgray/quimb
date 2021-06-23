@@ -6,10 +6,10 @@ import functools
 
 import numpy as np
 
-from ..utils import (oset, valmap)
-from .drawing import draw_tn
+from ...utils import (oset, valmap)
+from ..drawing import draw_tn
 
-from .tensor_core import TensorNetwork, rand_uuid
+from ..tensor_core import TensorNetwork, rand_uuid
 from .tensor_block import tensor_split as _tensor_split
 from .tensor_block import _core_contract, tensor_canonize_bond, tensor_compress_bond, BlockTensor, BlockTensorNetwork, get_block_contraction_path_info, tensor_balance_bond
 from .block_interface import dispatch_settings

@@ -1,8 +1,8 @@
-from quimb.tensor import block_interface as bitf
+from .block_interface import dispatch_settings
 import numpy as np
 
 def apply(T, func):
-    use_cpp = bitf.dispatch_settings("use_cpp")
+    use_cpp = dispatch_settings("use_cpp")
     if use_cpp:
         new_T = T.copy()
         new_T.data = func(new_T.data)
@@ -32,7 +32,7 @@ def add_with_smudge(T, cutoff=1e-10, gauge_smudge=1e-6):
     return apply(T, _add_with_smudge)
 
 def get_smudge_balance(T1, T2, ix, smudge):
-    flat = bitf.dispatch_settings("use_cpp")
+    flat = dispatch_settings("use_cpp")
     if flat:
         t1, t2 = T1.data.to_sparse(), T2.data.to_sparse()
     else:

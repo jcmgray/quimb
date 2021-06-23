@@ -1,140 +1,143 @@
 import pytest
 import numpy as np
-from quimb.tensor.tensor_block import (
-    BlockTensor, BlockTensorNetwork)
+from quimb.tensor.fermion.fermion_core import (
+    FermionTensor, FermionTensorNetwork)
 from quimb.tensor.tensor_core import tensor_contract
-from quimb.tensor.block_gen import rand_all_blocks as rand
-from quimb.tensor.block_interface import set_options
+from quimb.tensor.fermion.block_gen import rand_all_blocks as rand
+from quimb.tensor.fermion.block_interface import set_options
+
+set_options(fermion=True)
 
 @pytest.fixture(scope='class')
 def u11setup(request):
     bond = [(0,0), (1,1), (1,-1), (2,0)]
-    set_options(symmetry="u11", fermion=False)
+    set_options(symmetry="u11")
     request.cls.abc = abc = rand((4,2,3), [bond]*3, pattern="+--", dq=(1,1))
     request.cls.bcd = bcd = rand((2,3,5), [bond]*3, pattern="++-", dq=(-1,-1))
     request.cls.ega = ega = rand((3,6,4), [bond]*3, pattern="+--", dq=(1,-1))
     request.cls.deg = deg = rand((5,3,6), [bond]*3, pattern="+-+", dq=(-1,1))
 
-    request.cls.Tabc = Tabc = BlockTensor(abc, inds=['a','b','c'], tags=["abc"])
-    request.cls.Tega = Tega = BlockTensor(ega, inds=['e','g','a'], tags=["ega"])
-    request.cls.Tbcd = Tbcd = BlockTensor(bcd, inds=['b','c','d'], tags=["bcd"])
-    request.cls.Tdeg = Tdeg = BlockTensor(deg, inds=['d','e','g'], tags=["deg"])
-    request.cls.tn = BlockTensorNetwork((Tabc, Tega, Tbcd, Tdeg))
+    request.cls.Tabc = Tabc = FermionTensor(abc, inds=['a','b','c'], tags=["abc"])
+    request.cls.Tega = Tega = FermionTensor(ega, inds=['e','g','a'], tags=["ega"])
+    request.cls.Tbcd = Tbcd = FermionTensor(bcd, inds=['b','c','d'], tags=["bcd"])
+    request.cls.Tdeg = Tdeg = FermionTensor(deg, inds=['d','e','g'], tags=["deg"])
+    request.cls.tn = FermionTensorNetwork((Tabc, Tega, Tbcd, Tdeg))
 
     ab = rand((2,5), [bond]*2, pattern="+-", dq=(0,0))
     bc = rand((5,4), [bond]*2, pattern="++", dq=(1,-1))
-    Tab = BlockTensor(ab, inds=['a','b'], tags=["ab"])
-    Tbc = BlockTensor(bc, inds=['b','c'], tags=["bc"])
-    Tab1 = BlockTensor(ab.dagger, inds=['b1','a'], tags=["ab1"])
-    Tbc1 = BlockTensor(bc.dagger, inds=['c','b1'], tags=["bc1"])
-    request.cls.norm = BlockTensorNetwork((Tab, Tbc, Tbc1, Tab1))
+    Tab = FermionTensor(ab, inds=['a','b'], tags=["ab"])
+    Tbc = FermionTensor(bc, inds=['b','c'], tags=["bc"])
+    Tab1 = FermionTensor(ab.dagger, inds=['b1','a'], tags=["ab1"])
+    Tbc1 = FermionTensor(bc.dagger, inds=['c','b1'], tags=["bc1"])
+    request.cls.norm = FermionTensorNetwork((Tab, Tbc, Tbc1, Tab1))
     yield
 
 @pytest.fixture(scope='class')
 def z22setup(request):
     bond = [(0,0), (0,1), (1,0), (1,1)]
-    set_options(symmetry="z22", fermion=False)
+    set_options(symmetry="z22")
     request.cls.abc = abc = rand((4,2,3), [bond]*3, pattern="+--", dq=(0,1))
     request.cls.bcd = bcd = rand((2,3,5), [bond]*3, pattern="++-", dq=(1,0))
     request.cls.ega = ega = rand((3,6,4), [bond]*3, pattern="+--", dq=(1,0))
     request.cls.deg = deg = rand((5,3,6), [bond]*3, pattern="+-+", dq=(0,1))
 
-    request.cls.Tabc = Tabc = BlockTensor(abc, inds=['a','b','c'], tags=["abc"])
-    request.cls.Tega = Tega = BlockTensor(ega, inds=['e','g','a'], tags=["ega"])
-    request.cls.Tbcd = Tbcd = BlockTensor(bcd, inds=['b','c','d'], tags=["bcd"])
-    request.cls.Tdeg = Tdeg = BlockTensor(deg, inds=['d','e','g'], tags=["deg"])
-    request.cls.tn = BlockTensorNetwork((Tabc, Tega, Tbcd, Tdeg))
+    request.cls.Tabc = Tabc = FermionTensor(abc, inds=['a','b','c'], tags=["abc"])
+    request.cls.Tega = Tega = FermionTensor(ega, inds=['e','g','a'], tags=["ega"])
+    request.cls.Tbcd = Tbcd = FermionTensor(bcd, inds=['b','c','d'], tags=["bcd"])
+    request.cls.Tdeg = Tdeg = FermionTensor(deg, inds=['d','e','g'], tags=["deg"])
+    request.cls.tn = FermionTensorNetwork((Tabc, Tega, Tbcd, Tdeg))
 
     ab = rand((2,5), [bond]*2, pattern="+-", dq=(0,0))
     bc = rand((5,4), [bond]*2, pattern="++", dq=(1,0))
 
-    Tab = BlockTensor(ab, inds=['a','b'], tags=["ab"])
-    Tbc = BlockTensor(bc, inds=['b','c'], tags=["bc"])
-    Tab1 = BlockTensor(ab.dagger, inds=['b1','a'], tags=["ab1"])
-    Tbc1 = BlockTensor(bc.dagger, inds=['c','b1'], tags=["bc1"])
-    request.cls.norm = BlockTensorNetwork((Tab, Tbc, Tbc1, Tab1))
+    Tab = FermionTensor(ab, inds=['a','b'], tags=["ab"])
+    Tbc = FermionTensor(bc, inds=['b','c'], tags=["bc"])
+    Tab1 = FermionTensor(ab.dagger, inds=['b1','a'], tags=["ab1"])
+    Tbc1 = FermionTensor(bc.dagger, inds=['c','b1'], tags=["bc1"])
+    request.cls.norm = FermionTensorNetwork((Tab, Tbc, Tbc1, Tab1))
     yield
 
 @pytest.fixture(scope='class')
 def u1setup(request):
     bond = (0,1,2,3)
-    set_options(symmetry="u1", fermion=False)
+    set_options(symmetry="u1")
 
     request.cls.abc = abc = rand((4,2,3), [bond]*3, pattern="+--", dq=1)
     request.cls.bcd = bcd = rand((2,3,5), [bond]*3, pattern="++-", dq=2)
     request.cls.ega = ega = rand((3,6,4), [bond]*3, pattern="+--", dq=-1)
     request.cls.deg = deg = rand((5,3,6), [bond]*3, pattern="+-+", dq=-2)
 
-    request.cls.Tabc = Tabc = BlockTensor(abc, inds=['a','b','c'], tags=["abc"])
-    request.cls.Tega = Tega = BlockTensor(ega, inds=['e','g','a'], tags=["ega"])
-    request.cls.Tbcd = Tbcd = BlockTensor(bcd, inds=['b','c','d'], tags=["bcd"])
-    request.cls.Tdeg = Tdeg = BlockTensor(deg, inds=['d','e','g'], tags=["deg"])
-    request.cls.tn = BlockTensorNetwork((Tabc, Tega, Tbcd, Tdeg))
+    request.cls.Tabc = Tabc = FermionTensor(abc, inds=['a','b','c'], tags=["abc"])
+    request.cls.Tega = Tega = FermionTensor(ega, inds=['e','g','a'], tags=["ega"])
+    request.cls.Tbcd = Tbcd = FermionTensor(bcd, inds=['b','c','d'], tags=["bcd"])
+    request.cls.Tdeg = Tdeg = FermionTensor(deg, inds=['d','e','g'], tags=["deg"])
+    request.cls.tn = FermionTensorNetwork((Tabc, Tega, Tbcd, Tdeg))
 
     ab = rand((2,5), [bond]*2, pattern="+-", dq=0)
     bc = rand((5,4), [bond]*2, pattern="++", dq=1)
 
-    Tab = BlockTensor(ab, inds=['a','b'], tags=["ab"])
-    Tbc = BlockTensor(bc, inds=['b','c'], tags=["bc"])
-    Tab1 = BlockTensor(ab.dagger, inds=['b1','a'], tags=["ab1"])
-    Tbc1 = BlockTensor(bc.dagger, inds=['c','b1'], tags=["bc1"])
-    request.cls.norm = BlockTensorNetwork((Tab, Tbc, Tbc1, Tab1))
+    Tab = FermionTensor(ab, inds=['a','b'], tags=["ab"])
+    Tbc = FermionTensor(bc, inds=['b','c'], tags=["bc"])
+    Tab1 = FermionTensor(ab.dagger, inds=['b1','a'], tags=["ab1"])
+    Tbc1 = FermionTensor(bc.dagger, inds=['c','b1'], tags=["bc1"])
+    request.cls.norm = FermionTensorNetwork((Tab, Tbc, Tbc1, Tab1))
     yield
 
 @pytest.fixture(scope='class')
 def z4setup(request):
     bond = (0,1,2,3)
-    set_options(symmetry="z4", fermion=False)
+    set_options(symmetry="z4")
     request.cls.abc = abc = rand((4,2,3), [bond]*3, pattern="+--", dq=1)
     request.cls.bcd = bcd = rand((2,3,5), [bond]*3, pattern="++-", dq=2)
     request.cls.ega = ega = rand((3,6,4), [bond]*3, pattern="+--", dq=0)
     request.cls.deg = deg = rand((5,3,6), [bond]*3, pattern="+-+", dq=1)
 
-    request.cls.Tabc = Tabc = BlockTensor(abc, inds=['a','b','c'], tags=["abc"])
-    request.cls.Tega = Tega = BlockTensor(ega, inds=['e','g','a'], tags=["ega"])
-    request.cls.Tbcd = Tbcd = BlockTensor(bcd, inds=['b','c','d'], tags=["bcd"])
-    request.cls.Tdeg = Tdeg = BlockTensor(deg, inds=['d','e','g'], tags=["deg"])
-    request.cls.tn = BlockTensorNetwork((Tabc, Tega, Tbcd, Tdeg))
+    request.cls.Tabc = Tabc = FermionTensor(abc, inds=['a','b','c'], tags=["abc"])
+    request.cls.Tega = Tega = FermionTensor(ega, inds=['e','g','a'], tags=["ega"])
+    request.cls.Tbcd = Tbcd = FermionTensor(bcd, inds=['b','c','d'], tags=["bcd"])
+    request.cls.Tdeg = Tdeg = FermionTensor(deg, inds=['d','e','g'], tags=["deg"])
+    request.cls.tn = FermionTensorNetwork((Tabc, Tega, Tbcd, Tdeg))
 
     ab = rand((2,5), [bond]*2, pattern="+-", dq=0)
     bc = rand((5,4), [bond]*2, pattern="++", dq=1)
 
-    Tab = BlockTensor(ab, inds=['a','b'], tags=["ab"])
-    Tbc = BlockTensor(bc, inds=['b','c'], tags=["bc"])
-    Tab1 = BlockTensor(ab.dagger, inds=['b1','a'], tags=["ab1"])
-    Tbc1 = BlockTensor(bc.dagger, inds=['c','b1'], tags=["bc1"])
-    request.cls.norm = BlockTensorNetwork((Tab, Tbc, Tbc1, Tab1))
+    Tab = FermionTensor(ab, inds=['a','b'], tags=["ab"])
+    Tbc = FermionTensor(bc, inds=['b','c'], tags=["bc"])
+    Tab1 = FermionTensor(ab.dagger, inds=['b1','a'], tags=["ab1"])
+    Tbc1 = FermionTensor(bc.dagger, inds=['c','b1'], tags=["bc1"])
+    request.cls.norm = FermionTensorNetwork((Tab, Tbc, Tbc1, Tab1))
     yield
 
 @pytest.fixture(scope='class')
 def z2setup(request):
     bond = (0,1)
-    set_options(symmetry="z2", fermion=False)
+    set_options(symmetry="z2")
     request.cls.abc = abc = rand((4,2,3), [bond]*3, pattern="+--", dq=0)
     request.cls.bcd = bcd = rand((2,3,5), [bond]*3, pattern="++-", dq=1)
     request.cls.ega = ega = rand((3,6,4), [bond]*3, pattern="+--", dq=1)
     request.cls.deg = deg = rand((5,3,6), [bond]*3, pattern="+-+", dq=0)
 
-    request.cls.Tabc = Tabc = BlockTensor(abc, inds=['a','b','c'], tags=["abc"])
-    request.cls.Tega = Tega = BlockTensor(ega, inds=['e','g','a'], tags=["ega"])
-    request.cls.Tbcd = Tbcd = BlockTensor(bcd, inds=['b','c','d'], tags=["bcd"])
-    request.cls.Tdeg = Tdeg = BlockTensor(deg, inds=['d','e','g'], tags=["deg"])
-    request.cls.tn = BlockTensorNetwork((Tabc, Tega, Tbcd, Tdeg))
+    request.cls.Tabc = Tabc = FermionTensor(abc, inds=['a','b','c'], tags=["abc"])
+    request.cls.Tega = Tega = FermionTensor(ega, inds=['e','g','a'], tags=["ega"])
+    request.cls.Tbcd = Tbcd = FermionTensor(bcd, inds=['b','c','d'], tags=["bcd"])
+    request.cls.Tdeg = Tdeg = FermionTensor(deg, inds=['d','e','g'], tags=["deg"])
+    request.cls.tn = FermionTensorNetwork((Tabc, Tega, Tbcd, Tdeg))
 
     ab = rand((2,5), [bond]*2, pattern="+-", dq=0)
     bc = rand((5,4), [bond]*2, pattern="++", dq=1)
 
-    Tab = BlockTensor(ab, inds=['a','b'], tags=["ab"])
-    Tbc = BlockTensor(bc, inds=['b','c'], tags=["bc"])
-    Tab1 = BlockTensor(ab.dagger, inds=['b1','a'], tags=["ab1"])
-    Tbc1 = BlockTensor(bc.dagger, inds=['c','b1'], tags=["bc1"])
-    request.cls.norm = BlockTensorNetwork((Tab, Tbc, Tbc1, Tab1))
+    Tab = FermionTensor(ab, inds=['a','b'], tags=["ab"])
+    Tbc = FermionTensor(bc, inds=['b','c'], tags=["bc"])
+    Tab1 = FermionTensor(ab.dagger, inds=['b1','a'], tags=["ab1"])
+    Tbc1 = FermionTensor(bc.dagger, inds=['c','b1'], tags=["bc1"])
+    request.cls.norm = FermionTensorNetwork((Tab, Tbc, Tbc1, Tab1))
     yield
+
 
 @pytest.mark.usefixtures('u11setup')
 class TestU11:
     def test_backend(self):
-        Tegbc = tensor_contract(self.Tabc, self.Tega, output_inds=("e","g","b", "c"))
+        Tegbc = tensor_contract(self.Tega, self.Tabc, output_inds=("e","g","b", "c"))
         egbc = np.tensordot(self.ega, self.abc, axes=[(2,),(0,)])
         err = (egbc - Tegbc.data).norm()
         assert err < 1e-10
@@ -186,13 +189,13 @@ class TestU11:
 
     def test_split(self):
         Tegbc = tensor_contract(self.Tabc, self.Tega, output_inds=("e","g","b", "c"))
-        u, s, v = Tegbc.split(("e","b"), method="svd", absorb=None)
+        u, s, v = Tegbc.split(("e","b"), method="svd", absorb=None, get="tensors")
         out = tensor_contract(u,s,v, output_inds=Tegbc.inds)
         assert((out.data-Tegbc.data).norm()<1e-10)
 
         for absorb in ["left", "right"]:
             for method in ["qr", "svd"]:
-                l, r = Tegbc.split(("g","c"), method=method, absorb=absorb)
+                l, r = Tegbc.split(("g","c"), method=method, absorb=absorb, get="tensors")
                 out = tensor_contract(l, r, output_inds=Tegbc.inds)
                 assert((out.data-Tegbc.data).norm()<1e-10)
 

@@ -1,9 +1,9 @@
 import pytest
 import numpy as np
 from itertools import product
-from quimb.tensor.block_interface import set_options
-from quimb.tensor.fermion_2d import FPEPS
-from quimb.tensor.block_gen import rand_all_blocks as rand
+from quimb.tensor.fermion.block_interface import set_options
+from quimb.tensor.fermion.fermion_2d import FPEPS
+from quimb.tensor.fermion.block_gen import rand_all_blocks as rand
 
 set_options(fermion=True)
 @pytest.fixture(scope='class')
