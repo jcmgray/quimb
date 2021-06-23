@@ -5134,6 +5134,10 @@ class TensorNetwork(object):
     ):
         # the boundary - the set of intermediate tensors
         boundary = oset()
+        contract_opts = {"preserve_tensor": True}
+        is_fermion = hasattr(self, "fermion_space")
+        if is_fermion:
+            contract_opts["inplace"] = True
 
         def _do_contraction(tid1, tid2):
             """The inner closure that contracts the two tensors identified by
@@ -5146,10 +5150,13 @@ class TensorNetwork(object):
             t1, t2 = self._pop_tensor(tid1), self._pop_tensor(tid2)
 
             # contract them
-            t_new = tensor_contract(t1, t2, preserve_tensor=True)
+            t_new = tensor_contract(t1, t2, **contract_opts)
 
             # re-add the product, using the same identifier as the (inner) t2
+            if is_fermion:
+                t_new.modify_tid(tid2)
             tid_new = tid2
+
             self.add_tensor(t_new, tid=tid_new, virtual=True)
 
             # maybe control norm blow-up by stripping the new tensor exponent
@@ -5240,7 +5247,7 @@ class TensorNetwork(object):
                     continue
 
                 # check for compressing large shared (multi) bonds
-                if bonds_size(t, t_neighb) > chi:
+                if chi is not None and bonds_size(t, t_neighb) > chi:
                     if callback_pre_compress is not None:
                         callback_pre_compress(self, (tid, tid_neighb))
 

@@ -626,6 +626,21 @@ class FermionTensor(BlockTensor):
     def parity(self):
         return self.data.parity
 
+    def modify_tid(self, tid):
+        if self.fermion_owner is None:
+            return
+        fs, old_tid = self.fermion_owner
+        if old_tid == tid:
+            return
+        _, site = fs.tensor_order[old_tid]
+        del fs.tensor_order[old_tid]
+        fs.tensor_order[tid] = (self, site)
+        self.set_fermion_owner(fs, tid)
+        if self.owners:
+            tn = list(self.owners.values())[0][0]()
+            del tn.tensor_map[old_tid]
+            tn.tensor_map[tid] = self
+
     def modify(self, **kwargs):
         if "inds" in kwargs and "data" not in kwargs:
             inds = kwargs.get("inds")
