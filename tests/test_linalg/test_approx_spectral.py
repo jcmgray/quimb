@@ -14,6 +14,7 @@ from quimb import (
     logneg,
     negativity,
     entropy,
+    can_use_mpi_pool,
 )
 from quimb.utils import last
 
@@ -33,10 +34,10 @@ from quimb.linalg.approx_spectral import (
     norm_fro,
     norm_fro_approx,
 )
-from quimb.linalg import SLEPC4PY_FOUND
 
-
-MPI_PARALLEL = [False] + ([True] if SLEPC4PY_FOUND else [])
+MPI_PARALLEL = [False]
+if can_use_mpi_pool():
+    MPI_PARALLEL.append(True)
 
 
 np.random.seed(42)

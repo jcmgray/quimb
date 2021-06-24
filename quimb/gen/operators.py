@@ -1,6 +1,5 @@
 """Functions for generating quantum operators.
 """
-from operator import add
 import math
 import functools
 import itertools
@@ -353,13 +352,16 @@ def fsim(theta, phi, dtype=complex, **kwargs):
     return gate
 
 
-def fsimg(theta, Zeta, chi, gamma, phi, dtype=complex, **kwargs):
-    r"""The 'fermionic simulation' gate:
-      \theta is the iSWAP angle
-      \phi is the controlled-phase angle
-      \Zeta, \chi, \gamma  are single-qubit phase angles
+@functools.lru_cache(maxsize=256)
+def fsimg(theta, zeta, chi, gamma, phi, dtype=complex, **kwargs):
+    r"""The 'fermionic simulation' gate, with:
+
+        * :math:`\theta` is the iSWAP angle
+        * :math:`\phi` is the controlled-phase angle
+        * :math:`\zeta, \chi, \gamma`  are single-qubit phase angles.
+
     .. math::
-        \mathrm{fsimg}(\theta, \Zeta, \chi, \gamma, \phi) =
+        \mathrm{fsimg}(\theta, \zeta, \chi, \gamma, \phi) =
         \begin{bmatrix}
         1 & 0 & 0 & 0\\
         0 & \exp(-i(\gamma +\zeta )) \cos(\theta) &
@@ -369,20 +371,20 @@ def fsimg(theta, Zeta, chi, gamma, phi, dtype=complex, **kwargs):
         0 & 0 & 0 & \exp(-i (\phi +2 \gamma))
         \end{bmatrix}
 
-    Note that ``theta`` ,``phi``, ``Zeta``, ``chi``, ``gamma``
-    should be specified in radians and the sign
-    convention with this gate varies. Here for example,
+    See Equation 18 of https://arxiv.org/abs/2010.07965. Note that ``theta``,
+    ``phi``, ``zeta``, ``chi``, ``gamma`` should be specified in radians and
+    the sign convention with this gate varies. Here for example,
     ``fsimg(- pi / 2, 0, 0, 0,0) == iswap()``.
     """
     from cmath import cos, sin, exp
 
-    a1 = exp(-1j * (gamma + Zeta)) * cos(theta)
-    a2 = exp(-1j * (gamma - Zeta)) * cos(theta)
+    a1 = exp(-1j * (gamma + zeta)) * cos(theta)
+    a2 = exp(-1j * (gamma - zeta)) * cos(theta)
 
     b1 = -1j * exp(-1j * (gamma - chi)) * sin(theta)
     b2 = -1j * exp(-1j * (gamma + chi)) * sin(theta)
 
-    c = exp(-1j * (phi + 2*gamma))
+    c = exp(-1j * (phi + 2 * gamma))
 
     gate = [[1, 0, 0, 0],
             [0, a1, b1, 0],
@@ -578,7 +580,7 @@ def ham_heis(n, j=1.0, b=0.0, cyclic=False,
 
     if parallel:
         pool = get_thread_pool(nthreads)
-        ham = par_reduce(add, pool.map(gen_term, terms_needed))
+        ham = par_reduce(operator.add, pool.map(gen_term, terms_needed))
     else:
         ham = sum(map(gen_term, terms_needed))
 
@@ -798,7 +800,16 @@ def ham_mbl(n, dh, j=1.0, bz=0.0, cyclic=False,
 @hamiltonian_builder
 def ham_heis_2D(n, m, j=1.0, bz=0.0, cyclic=False,
                 parallel=False, ownership=None):
-    """Construct the 2D spin-1/2 heisenberg model hamiltonian.
+    r"""Construct the 2D spin-1/2 heisenberg model hamiltonian:
+
+    .. math::
+
+        \hat{H} = \sum_{<i, j>}
+        J_X S^X_i S^X_j +
+        J_Y S^Y_i S^Y_j +
+        J_Z S^Z_i S^Z_j
+
+    where the sum runs over pairs :math:`<i,j>` on a 2D square lattice.
 
     Parameters
     ----------
@@ -837,6 +848,8 @@ def ham_heis_2D(n, m, j=1.0, bz=0.0, cyclic=False,
     except (TypeError, ValueError):
         jx = jy = jz = j
 
+    js = {s: js for s, js in zip("xyz", [jx, jy, jz]) if js != 0.0}
+
     dims = [[2] * m] * n  # shape (n, m)
 
     sites = tuple(itertools.product(range(n), range(m)))
@@ -851,21 +864,20 @@ def ham_heis_2D(n, m, j=1.0, bz=0.0, cyclic=False,
             if cyclic or right != 0:
                 yield ((i, j), (i, right))
 
+    # generate all pairs of coordinates and directions
+    pairs_ss = tuple(itertools.product(gen_pairs(), js))
+
     # build the hamiltonian in sparse 'coo' format always for efficiency
     op_kws = {'sparse': True, 'stype': 'coo'}
     ikron_kws = {'sparse': True, 'stype': 'coo',
                  'coo_build': True, 'ownership': ownership}
-
-    # generate all pairs of coordinates and directions
-    pairs_ss = tuple(itertools.product(gen_pairs(), 'xyz'))
 
     # generate XX, YY and ZZ interaction from
     #     e.g. arg ([(3, 4), (3, 5)], 'z')
     def interactions(pair_s):
         pair, s = pair_s
         Sxyz = spin_operator(s, **op_kws)
-        J = {'x': jx, 'y': jy, 'z': jz}[s]
-        return ikron(J * Sxyz, dims, inds=pair, **ikron_kws)
+        return ikron([js[s] * Sxyz, Sxyz], dims, inds=pair, **ikron_kws)
 
     # generate Z field
     def fields(site):
@@ -877,13 +889,13 @@ def ham_heis_2D(n, m, j=1.0, bz=0.0, cyclic=False,
         all_terms = itertools.chain(
             map(interactions, pairs_ss),
             map(fields, sites) if bz != 0.0 else ())
-        H = sum(all_terms)
+        H = functools.reduce(operator.add, all_terms)
     else:
         pool = get_thread_pool()
         all_terms = itertools.chain(
             pool.map(interactions, pairs_ss),
             pool.map(fields, sites) if bz != 0.0 else ())
-        H = par_reduce(add, all_terms)
+        H = par_reduce(operator.add, all_terms)
 
     return H
 

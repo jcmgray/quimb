@@ -24,27 +24,17 @@ code, kbd, pre, samp {
     font-family: 'Roboto Mono', monospace;
 }
 
-.navbar-nav > .active > .nav-link {
-    color: var(--highlightcolor) !important;
+.content {
+    width: 60em;
 }
 
-.toc-entry > .nav-link.active {
-    color: var(--highlightcolor) !important;
+.bd-sidebar {
+    padding-top: 0em;
+    padding-right: 2em;
+    padding-left: 2em;
 }
 
-.bd-sidebar .nav > .active:hover > a, .bd-sidebar .nav > .active > a {
-    color: var(--highlightcolor) !important;
-}
-
-
-.toc-entry a {
-    padding: 0.4rem 1.0rem;
-}
-
-.container, .container-lg, .container-md, .container-sm, .container-xl {
-    max-width: 1600px;
-}
-
-.col-md-3 {
-    max-width: 20%;
+.bd-sidebar
+div.navbar_extra_footer {
+    font-size: .6em;
 }

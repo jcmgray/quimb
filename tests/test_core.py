@@ -33,7 +33,7 @@ class TestQuimbify:
         x = [1, 2, 3j]
         p = qu.qu(x, qtype='ket')
         assert(type(p) == qu.qarray)
-        assert(p.dtype == np.complex)
+        assert(p.dtype == complex)
         assert(p.shape == (3, 1))
         p = qu.qu(x, qtype='bra')
         assert(p.shape == (1, 3))
@@ -43,7 +43,7 @@ class TestQuimbify:
         x = np.random.randn(3, 3)
         p = qu.qu(x, qtype='dop')
         assert(type(p) == qu.qarray)
-        assert(p.dtype == np.complex)
+        assert(p.dtype == complex)
         assert(p.shape == (3, 3))
 
     def test_convert_vector_to_dop(self):
@@ -75,7 +75,7 @@ class TestQuimbify:
         assert(type(p) == qu.qarray)
         p = qu.qu(x, 'dop', sparse=True)
         assert(type(p) == sp.csr_matrix)
-        assert(p.dtype == np.complex)
+        assert(p.dtype == complex)
         assert(p.nnz == 2)
 
     def test_sparse_convert_to_dop(self):

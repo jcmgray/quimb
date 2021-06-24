@@ -10,7 +10,7 @@ import numpy as np
 import opt_einsum as oe
 
 from ..core import make_immutable, ikron
-from ..utils import check_opt, deprecated, unique, concat
+from ..utils import deprecated, unique, concat
 from ..gen.operators import (
     spin_operator, eye, _gen_mbl_random_factors, ham_heis
 )
@@ -1043,16 +1043,15 @@ def HTN_from_cnf(fname, mode='parafac'):
         for line in f:
             args = line.split()
 
-            # get global info
+            # global info, don't need
             if args[0] == 'p':
-                num_vars = int(args[2])
+                # num_vars = int(args[2])
                 # num_clauses = int(args[3])
                 continue
 
-            # ignore empty lines, comments and info line
-            if (not args) or (args == ['0']) or (args[0] in 'c%'):
-                continue
-
+            # translate mc2021 style weight to normal
+            if args[:3] == ['c', 'p', 'weight']:
+                args = ('w', *args[3:5])
             # variable weight
             if args[0] == 'w':
                 sgn_var, w = args[1:]
@@ -1062,6 +1061,10 @@ def HTN_from_cnf(fname, mode='parafac'):
                 w = float(w)
                 weights[var, sgn] = w
                 weighted.add(var)
+                continue
+
+            # ignore empty lines, other comments and info line
+            if (not args) or (args == ['0']) or (args[0][0] in 'c%'):
                 continue
 
             # clause tensor

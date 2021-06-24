@@ -174,7 +174,7 @@ def _numba_find_diag_axes(x, atol=1e-12):  # pragma: no cover
 
     # enumerate through every array entry, eagerly invalidating axis pairs
     for index, val in numpy.ndenumerate(x):
-        for d1, d2 in diag_axes:
+        for d1, d2 in list(diag_axes):
             if (index[d1] != index[d2]) and (abs(val) > atol):
                 diag_axes.remove((d1, d2))
 
@@ -265,7 +265,7 @@ def _numba_find_antidiag_axes(x, atol=1e-12):  # pragma: no cover
 
     # enumerate through every array entry, eagerly invalidating axis pairs
     for index, val in numpy.ndenumerate(x):
-        for i, j in antidiag_axes:
+        for i, j in list(antidiag_axes):
             d = x.shape[i]
             if (index[i] != d - 1 - index[j]) and (abs(val) > atol):
                 antidiag_axes.remove((i, j))
@@ -362,7 +362,7 @@ def _numba_find_columns(x, atol=1e-12):  # pragma: no cover
     for index, val in numpy.ndenumerate(x):
         if abs(val) > atol:
             for ax, i in enumerate(index):
-                for pax, pi in column_pairs:
+                for pax, pi in list(column_pairs):
                     if ax == pax and pi != i:
                         column_pairs.remove((pax, pi))
 
