@@ -34,7 +34,6 @@ code, kbd, pre, samp {
     padding-left: 2em;
 }
 
-.bd-sidebar
-div.navbar_extra_footer {
+#site-navigation div.navbar_extra_footer {
     font-size: .6em;
 }
