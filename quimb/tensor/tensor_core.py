@@ -851,6 +851,8 @@ def tensor_canonize_bond(T1, T2, absorb='right', **split_opts):
     shared_ix, left_env_ix = T1.filter_bonds(T2)
     if not shared_ix:
         raise ValueError("The tensors specified don't share an bond.")
+    elif (T1.left_inds is not None) and set(T1.left_inds) == set(left_env_ix):
+        return
     elif len(shared_ix) > 1:
         # fuse multibonds
         T1.fuse_({shared_ix[0]: shared_ix})
@@ -862,7 +864,7 @@ def tensor_canonize_bond(T1, T2, absorb='right', **split_opts):
     new_T1.transpose_like_(T1)
     new_T2.transpose_like_(T2)
 
-    T1.modify(data=new_T1.data)
+    T1.modify(data=new_T1.data, left_inds=left_env_ix)
     T2.modify(data=new_T2.data)
 
 
@@ -947,6 +949,11 @@ def tensor_compress_bond(
     # update with the new compressed data
     T1.modify(data=T1C.data)
     T2.modify(data=T2C.data)
+
+    if absorb == 'right':
+        T1.modify(left_inds=left_env_ix)
+    elif absorb == 'left':
+        T2.modify(left_inds=right_env_ix)
 
     if s and info is not None:
         info['singular_values'], = s
@@ -1737,16 +1744,19 @@ class Tensor(object):
             New tuple of indices.
         tags : sequence of str, optional
             New tags.
+        left_inds : sequence of str, optional
+            New grouping of indices to be 'on the left'.
         """
         if 'data' in kwargs:
             self._data = asarray(kwargs.pop('data'))
+            self._left_inds = None
 
         if 'apply' in kwargs:
             self._apply_function(kwargs.pop('apply'))
+            self._left_inds = None
 
         if 'inds' in kwargs:
             inds = tuple(kwargs.pop('inds'))
-
             # if this tensor has owners, update their ``ind_map``, but only if
             #     the indices are actually being changed not just permuted
             old_inds = oset(self.inds)
@@ -1756,10 +1766,10 @@ class Tensor(object):
                     ref()._modify_tensor_inds(old_inds, new_inds, tid)
 
             self._inds = inds
+            self._left_inds = None
 
         if 'tags' in kwargs:
             tags = tags_to_oset(kwargs.pop('tags'))
-
             # if this tensor has owners, update their ``tag_map``.
             if self.check_owners():
                 for ref, tid in self._owners.values():
@@ -1878,9 +1888,7 @@ class Tensor(object):
         """Conjugate this tensors data (does nothing to indices).
         """
         t = self if inplace else self.copy()
-        data = t.data
-        if iscomplex(data):
-            t.modify(apply=conj)
+        t.modify(apply=conj)
         return t
 
     conj_ = functools.partialmethod(conj, inplace=True)
@@ -2242,7 +2250,7 @@ class Tensor(object):
         # create new tensor with new + remaining indices
         #     + drop 'left' marked indices since they might be fused
         t.modify(data=reshape(t.data, dims),
-                 inds=(*new_fused_inds, *unfused_inds), left_inds=None)
+                 inds=(*new_fused_inds, *unfused_inds))
 
         return t
 
@@ -2369,7 +2377,7 @@ class Tensor(object):
 
     def normalize(self, inplace=False):
         T = self if inplace else self.copy()
-        T.modify(data=T.data / T.norm())
+        T.modify(data=T.data / T.norm(), left_inds=T.left_inds)
         return T
 
     normalize_ = functools.partialmethod(normalize, inplace=True)
@@ -2436,11 +2444,11 @@ class Tensor(object):
 
         # turn the array back into a tensor
         x = reshape(x, [self.ind_size(ix) for ix in LR_inds])
-        Tu = Tensor(x, inds=LR_inds, tags=self.tags)
+        Tu = Tensor(x, inds=LR_inds, tags=self.tags, left_inds=left_inds)
 
         if inplace:
             # XXX: do self.transpose_like_(Tu) or Tu.transpose_like_(self)?
-            self.modify(data=Tu.data, inds=Tu.inds)
+            self.modify(data=Tu.data, inds=Tu.inds, left_inds=Tu.left_inds)
             Tu = self
 
         return Tu
@@ -6248,12 +6256,14 @@ class TensorNetwork(object):
 
     squeeze_ = functools.partialmethod(squeeze, inplace=True)
 
-    def unitize(self, mode='error', inplace=False, method='qr'):
+    def unitize(self, method='qr', allow_no_left_inds=False, inplace=False):
         """
         """
         tn = self if inplace else self.copy()
         for t in tn:
-            if (t.left_inds is None) and (mode == 'error'):
+            if t.left_inds is None:
+                if allow_no_left_inds:
+                    continue
                 raise ValueError("The tensor {} doesn't have left indices "
                                  "marked using the `left_inds` attribute.")
             t.unitize_(method=method)
@@ -7124,7 +7134,6 @@ class TensorNetwork(object):
             oix = tn.compute_contracted_inds(*loop, output_inds=output_inds)
             if len(oix) > max_inds:
                 continue
-            oix = oset(oix)
 
             ts = tuple(tn._tids_get(*loop))
             current_size = sum(t.size for t in ts)
