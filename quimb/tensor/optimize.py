@@ -597,7 +597,7 @@ def inject_(arrays, tn):
                 if isinstance(t, PTensor):
                     t.params = arrays[i]
                 else:
-                    t.modify(data=arrays[i])
+                    t.modify(data=arrays[i], left_inds=t.left_inds)
 
                 break
 
