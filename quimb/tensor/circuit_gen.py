@@ -1,7 +1,8 @@
 import math
+import random
 import itertools
 
-from .. import rand
+from .. import rand, seed_rand
 from . import Circuit
 
 
@@ -9,6 +10,7 @@ def inject_u3s(
     ent_gates,
     gate2='cz',
     avoid_doubling=False,
+    seed=None,
 ):
     r"""Take a sequence of pairs denoting qubits to entangle and interleave one
     single qubit gate inbetween every leg. For example:
@@ -47,6 +49,8 @@ def inject_u3s(
     -------
     Circuit
     """
+    if seed is not None:
+        seed_rand(seed)
 
     # keep track of where not to apply another entangling gate
     just_entangled = set()
@@ -134,6 +138,7 @@ def circ_ansatz_1D_zigzag(
     n,
     depth,
     gate2='cz',
+    seed=None,
     **circuit_opts
 ):
     r"""A 1D circuit ansatz with forward and backward layers of entangling
@@ -163,6 +168,8 @@ def circ_ansatz_1D_zigzag(
         The number of entangling gates per pair.
     gate2 : {'cx', 'cy', 'cz', 'iswap', ..., str}, optional
         The gate to use for the entanling pairs.
+    seed : int, optional
+        Random seed for parameters.
     opts
         Supplied to :func:`~quimb.tensor.circuit_gen.gates_to_param_circuit`.
 
@@ -185,7 +192,7 @@ def circ_ansatz_1D_zigzag(
             ent_gates.extend(backward_layer)
 
     # inject U3 gates!
-    gates = inject_u3s(ent_gates, gate2=gate2)
+    gates = inject_u3s(ent_gates, gate2=gate2, seed=seed)
     circ = gates_to_param_circuit(gates, n, **circuit_opts)
 
     return circ
@@ -195,6 +202,7 @@ def circ_ansatz_1D_brickwork(
     n, depth,
     cyclic=False,
     gate2='cz',
+    seed=None,
     **circuit_opts
 ):
     r"""A 1D circuit ansatz with odd and even layers of entangling
@@ -226,6 +234,8 @@ def circ_ansatz_1D_brickwork(
         Whether to add entangling gates between qubits 0 and n - 1.
     gate2 : {'cx', 'cy', 'cz', 'iswap', ..., str}, optional
         The gate to use for the entanling pairs.
+    seed : int, optional
+        Random seed for parameters.
     opts
         Supplied to :func:`~quimb.tensor.circuit_gen.gates_to_param_circuit`.
 
@@ -252,7 +262,7 @@ def circ_ansatz_1D_brickwork(
             ent_gates.append((n - 1, 0))
 
     # inject U3 gates!
-    gates = inject_u3s(ent_gates, gate2=gate2)
+    gates = inject_u3s(ent_gates, gate2=gate2, seed=seed)
     circ = gates_to_param_circuit(gates, n, **circuit_opts)
 
     return circ
@@ -296,8 +306,6 @@ def circ_ansatz_1D_rand(
     --------
     circ_ansatz_1D_zigzag, circ_ansatz_1D_brickwork
     """
-    import random
-
     if seed is not None:
         random.seed(seed)
 
@@ -310,7 +318,8 @@ def circ_ansatz_1D_rand(
     random.shuffle(ent_gates)
 
     # inject U3 gates!
-    gates = inject_u3s(ent_gates, avoid_doubling=avoid_doubling, gate2=gate2)
+    gates = inject_u3s(ent_gates, avoid_doubling=avoid_doubling,
+                       gate2=gate2, seed=seed)
     circ = gates_to_param_circuit(gates, n, **circuit_opts)
 
     return circ

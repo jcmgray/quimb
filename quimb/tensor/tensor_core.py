@@ -3349,7 +3349,89 @@ class TensorNetwork(object):
 
     @property
     def tensors(self):
-        return tuple(self)
+        """Get the tuple of tensors in this tensor network.
+        """
+        return tuple(self.tensor_map.values())
+
+    @property
+    def arrays(self):
+        """Get the tuple of raw arrays containing all the tensor network data.
+        """
+        return tuple(t.data for t in self)
+
+    def get_symbol_map(self):
+        """Get the mapping of the current indices to ``einsum`` style single
+        unicode characters. The symbols are generated in the order they appear
+        on the tensors.
+
+        See Also
+        --------
+        get_equation, get_inputs_output_size_dict
+        """
+        symbol_map = empty_symbol_map()
+        for t in self:
+            for ix in t.inds:
+                symbol_map[ix]
+        return symbol_map
+
+    def get_equation(self, output_inds=None):
+        """Get the 'equation' describing this tensor network, in ``einsum``
+        style with a single unicode letter per index. The symbols are generated
+        in the order they appear on the tensors.
+
+        Parameters
+        ----------
+        output_inds : None or sequence of str, optional
+            Manually specify which are the output indices.
+
+        Returns
+        -------
+        eq : str
+
+        Examples
+        --------
+
+            >>> tn = qtn.TN_rand_reg(10, 3, 2)
+            >>> tn.get_equation()
+            'abc,dec,fgb,hia,jke,lfk,mnj,ing,omd,ohl->'
+
+        See Also
+        --------
+        get_symbol_map, get_inputs_output_size_dict
+        """
+        if output_inds is None:
+            output_inds = self.outer_inds()
+        inputs_inds = tuple(t.inds for t in self)
+        return _inds_to_eq(inputs_inds, output_inds)
+
+    def get_inputs_output_size_dict(self, output_inds=None):
+        """Get a tuple of ``inputs``, ``output`` and ``size_dict`` suitable for
+        e.g. passing to path optimizers. The symbols are generated in the order
+        they appear on the tensors.
+
+        Parameters
+        ----------
+        output_inds : None or sequence of str, optional
+            Manually specify which are the output indices.
+
+        Returns
+        -------
+        inputs : tuple[str]
+        output : str
+        size_dict : dict[str, ix]
+
+        See Also
+        --------
+        get_symbol_map, get_equation
+        """
+        eq = self.get_equation()
+        lhs, output = eq.split('->')
+        inputs = lhs.split(',')
+        size_dict = {}
+        for term, t in zip(inputs, self):
+            for k, d in zip(term, t.shape):
+                size_dict[k] = d
+        return inputs, output, size_dict
 
     def tensors_sorted(self):
         """Return a tuple of tensors sorted by their respective tags, such that
@@ -6032,17 +6114,32 @@ class TensorNetwork(object):
         return self.contract(
             all, optimize=optimize, get='path-info', **contract_opts)
 
-    def contraction_tree(self, optimize=None, **contract_opts):
+    def contraction_tree(
+        self,
+        optimize=None,
+        output_inds=None,
+        **contract_opts
+    ):
         """Return the :class:`cotengra.ContractionTree` corresponding to
         contracting this entire tensor network with path finder ``optimize``.
         """
-        path = self.contraction_path(optimize, **contract_opts)
+        inputs, output, size_dict = self.get_inputs_output_size_dict(
+            output_inds=output_inds)
+
+        if optimize is None:
+            optimize = get_contract_strategy()
+        if isinstance(optimize, str):
+            optimize = oe.paths.get_path_fn(optimize)
+
         try:
-            tree = optimize.best['tree']
-        except (AttributeError, KeyError):
+            tree = optimize.search(inputs, output, size_dict)
+        except AttributeError:
             import cotengra as ctg
-            path_info = self.contraction_info(path, **contract_opts)
-            tree = ctg.ContractionTree.from_info(path_info)
+            path = optimize(inputs, output, size_dict)
+            tree = ctg.ContractionTree.from_path(
+                inputs, output, size_dict, path=path
+            )
+
         return tree
 
     def contraction_width(self, optimize=None, **contract_opts):
