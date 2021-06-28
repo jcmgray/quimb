@@ -653,6 +653,7 @@ class TensorNetwork2D(TensorNetwork):
         yrange=None,
         max_bond=None,
         cutoff=1e-10,
+        equalize_norms=False,
         compress_opts=None,
     ):
         r"""Compress all or part of a row.
@@ -705,6 +706,7 @@ class TensorNetwork2D(TensorNetwork):
         check_opt('sweep', sweep, ('right', 'left'))
         compress_opts = ensure_dict(compress_opts)
         compress_opts.setdefault('absorb', 'right')
+        compress_opts.setdefault('equalize_norms', equalize_norms)
 
         if yrange is None:
             yrange = (0, self.Ly - 1)
@@ -725,6 +727,7 @@ class TensorNetwork2D(TensorNetwork):
         xrange=None,
         max_bond=None,
         cutoff=1e-10,
+        equalize_norms=False,
         compress_opts=None,
     ):
         r"""Compress all or part of a column.
@@ -785,6 +788,7 @@ class TensorNetwork2D(TensorNetwork):
         check_opt('sweep', sweep, ('up', 'down'))
         compress_opts = ensure_dict(compress_opts)
         compress_opts.setdefault('absorb', 'right')
+        compress_opts.setdefault('equalize_norms', equalize_norms)
 
         if xrange is None:
             xrange = (0, self.Lx - 1)
@@ -808,6 +812,7 @@ class TensorNetwork2D(TensorNetwork):
         canonize=True,
         compress_sweep=None,
         layer_tag=None,
+        equalize_norms=False,
         compress_opts=None,
     ):
         # rotate coordinates and sweeps rather than actual TN
@@ -838,7 +843,7 @@ class TensorNetwork2D(TensorNetwork):
                 #     │  │  │  │  │
                 #     ●══●══<══<══<
                 #
-                canonize_fn(i)
+                canonize_fn(i, equalize_norms=equalize_norms)
 
             #
             #     │  │  │  │  │  -->  │  │  │  │  │  -->  │  │  │  │  │
@@ -846,6 +851,7 @@ class TensorNetwork2D(TensorNetwork):
             #     .  .           -->     .  .        -->        .  .
             #
             compress_fn(i, max_bond=max_bond, cutoff=cutoff,
+                        equalize_norms=equalize_norms,
                         compress_opts=compress_opts)
 
     def _contract_boundary_multi(
@@ -858,6 +864,7 @@ class TensorNetwork2D(TensorNetwork):
         cutoff=1e-10,
         canonize=True,
         compress_sweep=None,
+        equalize_norms=False,
         compress_opts=None,
     ):
         # rotate coordinates and sweeps rather than actual TN
@@ -889,7 +896,7 @@ class TensorNetwork2D(TensorNetwork):
                     i, i + istep, layer_tag=tag,
                     max_bond=max_bond, cutoff=cutoff,
                     canonize=canonize, compress_sweep=compress_sweep,
-                    compress_opts=compress_opts)
+                    equalize_norms=equalize_norms, compress_opts=compress_opts)
 
                 # so we can still uniqely identify 'inner' tensors, drop inner
                 #     site tag merged into outer tensor for all but last tensor
