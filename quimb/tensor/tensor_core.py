@@ -910,7 +910,8 @@ def tensor_compress_bond(
     compress_opts :
         Supplied to :func:`~quimb.tensor.tensor_core.tensor_split`.
     """
-    shared_ix, left_env_ix = T1.filter_bonds(T2)
+    left_env_ix, shared_ix, right_env_ix = group_inds(T1, T2)
+
     if not shared_ix:
         raise ValueError("The tensors specified don't share an bond.")
     elif len(shared_ix) > 1:
@@ -919,14 +920,14 @@ def tensor_compress_bond(
         T2.fuse_({shared_ix[0]: shared_ix})
         shared_ix = (shared_ix[0],)
 
-    if reduced:
+    if reduced is True:
         # a) -> b)
         T1_L, T1_R = T1.split(left_inds=left_env_ix, right_inds=shared_ix,
                               get='tensors', method='qr')
-        T2_L, T2_R = T2.split(left_inds=shared_ix, get='tensors', method='lq')
+        T2_L, T2_R = T2.split(left_inds=shared_ix, right_inds=right_env_ix,
+                              get='tensors', method='lq')
         # b) -> c)
-        M = (T1_R @ T2_L)
-        M.drop_tags()
+        M = T1_R @ T2_L
         # c) -> d)
         M_L, *s, M_R = M.split(left_inds=T1_L.bonds(M), get='tensors',
                                absorb=absorb, **compress_opts)
@@ -939,6 +940,14 @@ def tensor_compress_bond(
         # d) -> e)
         T1C = T1_L.contract(M_L, output_inds=T1.inds)
         T2C = M_R.contract(T2_R, output_inds=T2.inds)
+
+    elif reduced == 'lazy':
+        compress_opts.setdefault('method', 'isvd')
+        T12 = TNLinearOperator((T1, T2), left_env_ix, right_env_ix)
+        T1C, *s, T2C = T12.split(get='tensors', absorb=absorb, **compress_opts)
+        T1C.transpose_like_(T1)
+        T2C.transpose_like_(T2)
+
     else:
         T12 = T1 @ T2
         T1C, *s, T2C = T12.split(left_inds=left_env_ix, get='tensors',
@@ -981,7 +990,7 @@ def tensor_balance_bond(t1, t2, smudge=1e-6):
     t2.multiply_index_diagonal_(ix, s**+0.25)
 
 
-def tensor_fuse_squeeze(t1, t2):
+def tensor_fuse_squeeze(t1, t2, squeeze=True):
     """If ``t1`` and ``t2`` share more than one bond fuse it, and if the size
     of the shared dimenion(s) is 1, squeeze it. Inplace operation.
     """
@@ -997,7 +1006,7 @@ def tensor_fuse_squeeze(t1, t2):
         t1.fuse_({ind0: shared})
         t2.fuse_({ind0: shared})
 
-    if t1.ind_size(ind0) == 1:
+    if squeeze and t1.ind_size(ind0) == 1:
         t1.squeeze_(include=(ind0,))
         t2.squeeze_(include=(ind0,))
 
@@ -4369,7 +4378,7 @@ class TensorNetwork(object):
         cutoff=0.0,
         absorb='both',
         renorm=True,
-        method='eig',
+        method='eigh',
         select_local_distance=None,
         select_local_opts=None,
         env_max_bond='max_bond',
@@ -4471,13 +4480,14 @@ class TensorNetwork(object):
         canonize_after_opts=None,
         mode='basic',
         equalize_norms=False,
+        squeeze=True,
         callback=None,
         **compress_opts
     ):
         ta = self.tensor_map[tid1]
         tb = self.tensor_map[tid2]
 
-        tensor_fuse_squeeze(ta, tb)
+        tensor_fuse_squeeze(ta, tb, squeeze=squeeze)
         lix, bix, rix = group_inds(ta, tb)
         if len(bix) == 0:
             return
@@ -5408,7 +5418,7 @@ class TensorNetwork(object):
         canonize_after_distance=0,
         canonize_after_opts=None,
         gauge_boundary_only=False,
-        compress_late=False,
+        compress_late=True,
         compress_opts=None,
         compress_span=False,
         compress_exclude=None,
