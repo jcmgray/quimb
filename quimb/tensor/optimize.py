@@ -847,9 +847,11 @@ def parse_constant_arg(arg, to_constant):
     return to_constant(arg)
 
 
-class _MakeArrayFn:
+class MakeArrayFn:
     """Class wrapper so picklable.
     """
+
+    __name__ = 'MakeArrayFn'
 
     def __init__(self, tn_opt, loss_fn, norm_fn, autodiff_backend):
         self.tn_opt = tn_opt
@@ -993,10 +995,10 @@ class TNOptimizer:
         # first we wrap the function to convert from array args to TN arg
         #     (i.e. to autodiff library compatible form)
         if self._multiloss:
-            array_fn = [_MakeArrayFn(self._tn_opt, fn, self.norm_fn,
-                                     autodiff_backend) for fn in self.loss_fn]
+            array_fn = [MakeArrayFn(self._tn_opt, fn, self.norm_fn,
+                                    autodiff_backend) for fn in self.loss_fn]
         else:
-            array_fn = _MakeArrayFn(
+            array_fn = MakeArrayFn(
                 self._tn_opt, self.loss_fn, self.norm_fn, autodiff_backend)
 
 
@@ -1157,7 +1159,7 @@ class TNOptimizer:
             if isinstance(t, PTensor):
                 t.params = to_numpy(t.params)
             else:
-                t.modify(data=to_numpy(t.data))
+                t.modify(data=to_numpy(t.data), left_inds=t.left_inds)
 
         return tn
 
