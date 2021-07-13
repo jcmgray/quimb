@@ -6,10 +6,10 @@ import functools
 
 import numpy as np
 
-from ...utils import (oset, valmap)
+from ...utils import (oset, valmap, check_opt)
 from ..drawing import draw_tn
 
-from ..tensor_core import TensorNetwork, rand_uuid
+from ..tensor_core import TensorNetwork, rand_uuid, tags_to_oset, group_inds
 from .tensor_block import tensor_split as _tensor_split
 from .tensor_block import _core_contract, tensor_canonize_bond, tensor_compress_bond, BlockTensor, BlockTensorNetwork, get_block_contraction_path_info, tensor_balance_bond
 from .block_interface import dispatch_settings
@@ -560,6 +560,20 @@ FERMION_FUNCS = {"tensor_contract": tensor_contract,
                  "tensor_canonize_bond": tensor_canonize_bond,
                  "tensor_balance_bond": tensor_balance_bond}
 
+def _split_and_replace_in_fs(T, insert_gauge=False, **compress_opts):
+    compress_opts["get"] = "tensors"
+    tensors = T.split(**compress_opts)
+    isite = T.get_fermion_info()[1]
+    fs = T.fermion_owner[0]
+    fs.replace_tensor(isite, tensors[-1], tid=rand_uuid(base="_T"), virtual=True)
+    if insert_gauge and len(tensors)==3:
+        fs.insert_tensor(isite+1, tensors[1], tid=rand_uuid(base="_T"), virtual=True)
+        offset = 1
+    else:
+        offset = 0
+    fs.insert_tensor(isite+1+offset, tensors[0], tid=rand_uuid(base="_T"), virtual=True)
+    return tensors
+
 # --------------------------------------------------------------------------- #
 #                                Tensor Class                                 #
 # --------------------------------------------------------------------------- #
@@ -933,6 +947,179 @@ class FermionTensorNetwork(BlockTensorNetwork):
 
         untagged_tn.add_tensor(contracted, virtual=True)
         return untagged_tn
+
+    def gate_inds(
+        self,
+        G,
+        inds,
+        contract=False,
+        tags=None,
+        info=None,
+        inplace=False,
+        **compress_opts,
+    ):
+        check_opt("contract", contract, (False, True, 'split', 'reduce-split'))
+
+        tn = self if inplace else self.copy()
+
+        if isinstance(inds, str):
+            inds = (inds,)
+        ng = len(inds)
+
+        # new indices to join old physical sites to new gate
+        bnds = tuple([rand_uuid() for _ in range(ng)])
+        reindex_map = dict(zip(inds, bnds))
+
+        # tensor representing the gate
+        tags = tags_to_oset(tags)
+        tG = FermionTensor(G.copy(), inds=inds + bnds, tags=tags, left_inds=bnds)
+        fs = tn.fermion_space
+
+        if contract is False:
+            #
+            #       │   │      <- site_ix
+            #       GGGGG
+            #       │╱  │╱     <- bnds
+            #     ──●───●──
+            #      ╱   ╱
+            #
+            tn.reindex_(reindex_map)
+            tn |= tG
+            return tn
+
+        tids = self._get_tids_from_inds(inds, 'any')
+
+        fs.add_tensor(tG, virtual=True)
+
+        if (contract is True) or (len(tids) == 1):
+            #
+            #       │╱  │╱
+            #     ──GGGGG──
+            #      ╱   ╱
+            #
+            tn.reindex_(reindex_map)
+
+            # get the sites that used to have the physical indices
+            site_tids = tn._get_tids_from_inds(bnds, which='any')
+
+            # pop the sites, contract, then re-add
+            pts = [tn._pop_tensor(tid) for tid in site_tids]
+            tn |= tensor_contract(*pts, tG, inplace=True)
+            return tn
+
+        # get the two tensors and their current shared indices etc.
+        ixl, ixr = inds
+        tl, tr = tn._inds_get(ixl, ixr)
+        if tl.get_fermion_info()[1] > tr.get_fermion_info()[1]:
+            ixl, ixr = ixr, ixl
+            tl, tr = tr, tl
+
+        bnds_l, (bix,), bnds_r = group_inds(tl, tr)
+
+        tidl, sitel = tl.get_fermion_info()
+        tidr, siter = tr.get_fermion_info()
+        fermion_info = {tidl: sitel,
+                        tidr: siter}
+
+        if contract == 'split':
+            #
+            #       │╱  │╱         │╱  │╱
+            #     ──GGGGG──  ->  ──G~~~G──
+            #      ╱   ╱          ╱   ╱
+            #
+
+            # contract with new gate tensor
+            tlGr = tensor_contract(
+                tl.reindex_(reindex_map),
+                tr.reindex_(reindex_map),
+                tG, inplace=True)
+
+            tlGr.modify_tid(tidl)
+            isite = tlGr.get_fermion_info()[1]
+            # decompose back into two tensors
+            qpn_info = (tr.net_symmetry, tl.net_symmetry)
+            trn, *maybe_svals, tln = tlGr.split(
+                left_inds=bnds_r, right_inds=bnds_l,
+                bond_ind=bix, get='tensors', qpn_info=qpn_info, **compress_opts)
+
+            fs.replace_tensor(isite, tl, virtual=True)
+            fs.insert_tensor(isite+1, tr, tid=tidr, virtual=True)
+            revert_index_map = dict(zip(bnds, inds))
+            tl.reindex_(revert_index_map)
+            tr.reindex_(revert_index_map)
+
+        if contract == 'reduce-split':
+            # move physical inds on reduced tensors
+            #
+            #       │   │             │ │
+            #       GGGGG             GGG
+            #       │╱  │╱   ->     ╱ │ │   ╱
+            #     ──●───●──      ──>──●─●──<──
+            #      ╱   ╱          ╱       ╱
+            #
+
+            tmp_bix_l = rand_uuid()
+            tl_Q, tl_R = _split_and_replace_in_fs(tl,
+                        left_inds=None, right_inds=[bix, ixl],
+                        method='qr', bond_ind=tmp_bix_l, absorb="right")
+
+            tmp_bix_r = rand_uuid()
+            tr_L, tr_Q = _split_and_replace_in_fs(tr,
+                        left_inds=[bix, ixr], right_inds=None,
+                        method='qr', bond_ind=tmp_bix_r, absorb="left")
+
+            # contract reduced tensors with gate tensor
+            #
+            #          │ │
+            #          GGG                │ │
+            #        ╱ │ │   ╱    ->    ╱ │ │   ╱
+            #     ──>──●─●──<──      ──>──LGR──<──
+            #      ╱       ╱          ╱       ╱
+            #
+
+            tlGr = tensor_contract(
+                tl_R.reindex_(reindex_map),
+                tr_L.reindex_(reindex_map),
+                tG, inplace=True)
+
+            # split to find new reduced factors
+            #
+            #          │ │                │ │
+            #        ╱ │ │   ╱    ->    ╱ │ │   ╱
+            #     ──>──LGR──<──      ──>──L=R──<──
+            #      ╱       ╱          ╱       ╱
+            #
+            tr_L, *maybe_svals, tl_R = _split_and_replace_in_fs(tlGr,
+                            left_inds=[tmp_bix_r, ixr], right_inds=[tmp_bix_l, ixl],
+                            bond_ind=bix, get='tensors', **compress_opts)
+
+            # absorb reduced factors back into site tensors
+            #
+            #          │ │             │   │
+            #        ╱ │ │   ╱         │╱  │╱
+            #     ──>──L=R──<──  ->  ──●───●──
+            #      ╱       ╱          ╱   ╱
+            tln = tensor_contract(tl_Q, tl_R, inplace=True)
+            trn = tensor_contract(tr_L, tr_Q, inplace=True)
+            lsite = tln.get_fermion_info()[1]
+            rsite = trn.get_fermion_info()[1]
+            fs.replace_tensor(lsite, tl, tid=tidl, virtual=True)
+            fs.replace_tensor(rsite, tr, tid=tidr, virtual=True)
+
+        # if singular values are returned (``absorb=None``) check if we should
+        #     return them via ``info``, e.g. for ``SimpleUpdate`
+        if maybe_svals and info is not None:
+            s = next(iter(maybe_svals)).data
+            info['singular_values', (ixl, ixr)] = s
+
+        # update original tensors
+        tl.modify(data=tln.transpose_like_(tl).data)
+        tr.modify(data=trn.transpose_like_(tr).data)
+        # move the tensors to the original locations
+        fs._reorder_from_dict(fermion_info)
+        return tn
+
+    gate_inds_ = functools.partialmethod(gate_inds, inplace=True)
 
     def __matmul__(self, other):
         """Overload "@" to mean full contraction with another network.
