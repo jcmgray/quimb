@@ -4122,7 +4122,7 @@ class TensorNetwork(object):
         ng = len(inds)
 
         # new indices to join old physical sites to new gate
-        bnds = [rand_uuid() for _ in range(ng)]
+        bnds = tuple([rand_uuid() for _ in range(ng)])
         reindex_map = dict(zip(inds, bnds))
 
         # tensor representing the gate
