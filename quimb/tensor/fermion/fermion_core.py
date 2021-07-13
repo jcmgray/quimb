@@ -632,6 +632,8 @@ class FermionTensor(BlockTensor):
         fs, old_tid = self.fermion_owner
         if old_tid == tid:
             return
+        if tid in fs.tensor_order:
+            raise ValueError("tid:%s is already used for another tensor"%tid)
         _, site = fs.tensor_order[old_tid]
         del fs.tensor_order[old_tid]
         fs.tensor_order[tid] = (self, site)
