@@ -598,9 +598,23 @@ def rand_uuid(base=""):
 
 
 _VALID_SPLIT_GET = {None, 'arrays', 'tensors', 'values'}
+_SPLIT_FNS = {
+    'svd': decomp.svd,
+    'eig': decomp.eig,
+    'qr': decomp.qr,
+    'lq': decomp.lq,
+    'eigh': decomp.eigh,
+    'cholesky': decomp.cholesky,
+    'isvd': decomp.isvd,
+    'svds': decomp.svds,
+    'rsvd': decomp.rsvd,
+    'eigsh': decomp.eigsh,
+}
+_SPLIT_VALUES_FNS = {'svd': decomp.svdvals, 'eig': decomp.svdvals_eig}
 _FULL_SPLIT_METHODS = {'svd', 'eig', 'eigh'}
 _RANK_HIDDEN_METHODS = {'qr', 'lq', 'cholesky'}
 _DENSE_ONLY_METHODS = {'svd', 'eig', 'eigh', 'cholesky', 'qr', 'lq'}
+_ISOM_METHODS = {'svd', 'eig', 'eigh', 'isvd', 'svds', 'rsvd', 'eigsh'}
 _CUTOFF_LOOKUP = {None: -1.0}
 _ABSORB_LOOKUP = {'left': -1, 'both': 0, 'right': 1, None: None}
 _MAX_BOND_LOOKUP = {None: -1}
@@ -755,41 +769,24 @@ def tensor_split(
     if isinstance(T, spla.LinearOperator):
         left_dims = T.ldims
         right_dims = T.rdims
-
         if method in _DENSE_ONLY_METHODS:
             array = T.to_dense()
         else:
             array = T
     else:
         TT = T.transpose(*left_inds, *right_inds)
-
         left_dims = TT.shape[:len(left_inds)]
         right_dims = TT.shape[len(left_inds):]
-
         array = reshape(TT.data, (prod(left_dims), prod(right_dims)))
 
     if get == 'values':
-        return {'svd': decomp.svdvals,
-                'eig': decomp.svdvals_eig}[method](array)
+        return _SPLIT_VALUES_FNS[method](array)
 
     opts = _parse_split_opts(
         method, cutoff, absorb, max_bond, cutoff_mode, renorm)
 
-    split_fn = {
-        'svd': decomp.svd,
-        'eig': decomp.eig,
-        'qr': decomp.qr,
-        'lq': decomp.lq,
-        'eigh': decomp.eigh,
-        'cholesky': decomp.cholesky,
-        'isvd': decomp.isvd,
-        'svds': decomp.svds,
-        'rsvd': decomp.rsvd,
-        'eigsh': decomp.eigsh,
-    }[method]
-
     # ``s`` itself will be None unless ``absorb=None`` is specified
-    left, s, right = split_fn(array, **opts)
+    left, s, right = _SPLIT_FNS[method](array, **opts)
     left = reshape(left, (*left_dims, -1))
     right = reshape(right, (-1, *right_dims))
 
@@ -811,6 +808,16 @@ def tensor_split(
         tensors = (Tl, Ts, Tr)
     else:
         tensors = (Tl, Tr)
+
+    # work out if we have created left and/or right isometric tensors
+    left_isom = ((method == 'qr') or (method in _ISOM_METHODS and
+                                      absorb in (None, 'right')))
+    right_isom = ((method == 'lq') or (method in _ISOM_METHODS and
+                                       absorb in (None, 'left')))
+    if left_isom:
+        Tl.modify(left_inds=left_inds)
+    if right_isom:
+        Tr.modify(left_inds=right_inds)
 
     if get == 'tensors':
         return tensors
@@ -3862,6 +3869,23 @@ class TensorNetwork(object):
             t2.view_like_(self)
 
         return t1, t2
+
+    def split_tensor(
+        self,
+        tags,
+        left_inds,
+        **split_opts,
+    ):
+        """Split the single tensor uniquely identified by ``tags``, adding the
+        resulting tensors from the decomposition back into the network. Inplace
+        operation.
+        """
+        tid, = self._get_tids_from_tags(tags, which='all')
+        t = self._pop_tensor(tid)
+        tl, tr = t.split(left_inds=left_inds, get='tensors', **split_opts)
+        self.add_tensor(tl)
+        self.add_tensor(tr)
+        return self
 
     def replace_with_identity(self, where, which='any', inplace=False):
         r"""Replace all tensors marked by ``where`` with an
