@@ -3,7 +3,7 @@
 import os
 import copy
 import functools
-
+import math
 import numpy as np
 
 from ...utils import (oset, valmap, check_opt)
@@ -1120,6 +1120,103 @@ class FermionTensorNetwork(BlockTensorNetwork):
         return tn
 
     gate_inds_ = functools.partialmethod(gate_inds, inplace=True)
+
+    def make_norm(
+        self,
+        mangle_append='*',
+        layer_tags=('KET', 'BRA'),
+        return_all=False,
+    ):
+        ket = self.copy()
+        if len(ket.outer_inds())==0:
+            return ket
+        ket.add_tag(layer_tags[0])
+
+        bra = ket.retag({layer_tags[0]: layer_tags[1]})
+        bra = bra.H
+        if mangle_append:
+            bra.mangle_inner_(mangle_append)
+        norm = ket & bra
+
+        if return_all:
+            return norm, ket, bra
+        return norm
+
+    def compute_inds_environment(self, inds, **inds_env_options):
+        env = self.copy()
+        if isinstance(inds, str):
+            inds = (inds, )
+        else:
+            inds = tuple(inds)
+        tids = oset()
+        for ix in inds:
+            tids |= env.ind_map[ix]
+        env._contract_around_tids(tids, **inds_env_options)
+        return env
+
+    def compute_inds_expectation(
+        self,
+        terms,
+        max_bond=None,
+        *,
+        gen_seq = None,
+        cutoff=1e-10,
+        layer_tags=('KET', 'BRA'),
+        normalized=False,
+        min_distance = 1,
+        max_distance = None,
+        contract_optimize='auto-hq',
+        return_all=False,
+        **inds_env_options,
+    ):
+        norm, ket, bra = self.make_norm(return_all=True, layer_tags=layer_tags)
+
+        inds_env_options["max_bond"] = max_bond
+        inds_env_options["cutoff"] = cutoff
+        inds_env_options["min_distance"] = min_distance
+        inds_env_options["max_distance"] = max_distance
+
+        expecs = dict()
+
+        for inds, G in terms.items():
+            if isinstance(inds, str):
+                _inds = (inds, )
+            else:
+                _inds = tuple(inds)
+            new_inds = tuple([rand_uuid() for _ix in range(len(_inds))])
+            reindex_map = dict(zip(_inds, new_inds))
+            TG = FermionTensor(G.copy(), inds= _inds+new_inds)
+            bra.fermion_space.move_past(TG)
+
+            if callable(gen_seq):
+                inds_env_options["seq"] = gen_seq(inds)
+
+            env = norm.compute_inds_environment(
+                            inds, **inds_env_options)
+
+            if normalized:
+                norm_i0j0 = env.contract(all,
+                            optimize=contract_optimize)
+            else:
+                norm_i0j0 = None
+
+            for ix in _inds:
+                tensors = list(env._inds_get(ix))
+                for T in tensors:
+                    if layer_tags[0] in T.tags:
+                        T.reindex_(reindex_map)
+
+            env.add_tensor(TG, virtual=True)
+            expec_ij = env.contract(all, optimize=contract_optimize)
+            expecs[inds] = expec_ij, norm_i0j0
+
+        if return_all:
+            return expecs
+
+        if normalized:
+            return functools.reduce(add, (e / n for e, n in expecs.values()))
+
+        return functools.reduce(add, (e for e, _ in expecs.values()))
 
     def __matmul__(self, other):
         """Overload "@" to mean full contraction with another network.

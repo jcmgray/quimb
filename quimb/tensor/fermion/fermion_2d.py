@@ -668,25 +668,6 @@ class FermionTensorNetwork2DVector(FermionTensorNetwork2D,
     def to_dense(self, *inds_seq, **contract_opts):
         raise NotImplementedError
 
-    def make_norm(
-        self,
-        mangle_append='*',
-        layer_tags=('KET', 'BRA'),
-        return_all=False,
-    ):
-        ket = self.copy()
-        ket.add_tag(layer_tags[0])
-
-        bra = ket.retag({layer_tags[0]: layer_tags[1]})
-        bra = bra.H
-        if mangle_append:
-            bra.mangle_inner_(mangle_append)
-        norm = ket & bra
-
-        if return_all:
-            return norm, ket, bra
-        return norm
-
     def gate(
         self,
         G,
