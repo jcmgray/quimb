@@ -974,7 +974,7 @@ class TNOptimizer:
             norm_fn = identity_fn
         self.norm_fn = norm_fn
 
-        self.reset(tn)
+        self.reset(tn, loss_target=loss_target)
 
         # convert constant arrays ahead of time to correct backend
         self.loss_constants = {
@@ -1031,7 +1031,7 @@ class TNOptimizer:
         self._n = 0
         self._pbar = None
 
-    def reset(self, tn=None, clear_info=True):
+    def reset(self, tn=None, clear_info=True, loss_target=None):
         """Reset this optimizer without losing the compiled loss and gradient
         functions.
 
@@ -1046,7 +1046,7 @@ class TNOptimizer:
         if tn is not None:
             self._set_tn(tn)
         if clear_info:
-            self._reset_tracking_info()
+            self._reset_tracking_info(loss_target=loss_target)
 
     def _maybe_init_pbar(self, n):
         if self.progbar:
@@ -1064,6 +1064,11 @@ class TNOptimizer:
             self._pbar.close()
             self._pbar = None
 
+    def _check_loss_target(self):
+        if (self.loss_target is not None) and (self.loss <= self.loss_target):
+            # for scipy terminating optimizer with callback doesn't work
+            raise KeyboardInterrupt
+
     def vectorized_value(self, x):
         """The value of the loss function at vector ``x``.
         """
@@ -1073,6 +1078,7 @@ class TNOptimizer:
         self.losses.append(self.loss)
         self._n += 1
         self._maybe_update_pbar()
+        self._check_loss_target()
         return self.loss
 
     def vectorized_value_and_grad(self, x):
@@ -1086,6 +1092,7 @@ class TNOptimizer:
         self.losses.append(self.loss)
         vec_grad = self.vectorizer.pack(grads, 'grad')
         self._maybe_update_pbar()
+        self._check_loss_target()
         return self.loss, vec_grad
 
     def vectorized_hessp(self, x, p):
