@@ -806,6 +806,21 @@ class Circuit:
         qc.apply_gates(info['gates'])
         return qc
 
+    def apply_gate_raw(self, U, where, tags=None,
+                       gate_round=None, **gate_opts):
+        """Apply the raw array ``U`` as a gate on qubits in ``where``. It will
+        be assumed to be unitary for the sake of computing reverse lightcones.
+        """
+        tags = (
+            tags_to_oset(tags) |
+            tags_to_oset(f'GATE_{len(self.gates)}')
+        )
+        if (gate_round is not None):
+            tags.add(f'ROUND_{gate_round}')
+        opts = {**self.gate_opts, **gate_opts}
+        self._psi.gate_(U, where, tags=tags, **opts)
+        self.gates.append((id(U), *where))
+
     def apply_gate(self, gate_id, *gate_args, gate_round=None, **gate_opts):
         """Apply a single gate to this tensor network quantum circuit. If
         ``gate_round`` is supplied the tensor(s) added will be tagged with
@@ -2362,7 +2377,7 @@ class Circuit:
         )
 
         if rehearse == "tn":
-            return next(iter(rehs.values()))
+            return rehs
 
         return {where: rehs}
 
@@ -2622,7 +2637,7 @@ class Circuit:
             **contract_opts
         )
         if progbar:
-            chunks = _progbar(chunks, total=tree.nslices)
+            chunks = _progbar(chunks, total=tree.nchunks)
 
         def f(chunk):
             return do('sum', do('abs', chunk)**4)
