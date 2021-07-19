@@ -3,7 +3,7 @@
 import os
 import copy
 import functools
-import math
+from operator import add
 import numpy as np
 
 from ...utils import (oset, valmap, check_opt)

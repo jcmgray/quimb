@@ -74,13 +74,17 @@ class SimpleUpdate(_SimpleUpdate):
         gauge_renorm=True,
         gauge_smudge=1e-6,
         condition_tensors=True,
-        condition_balance_bonds=True
+        condition_balance_bonds=True,
+        min_distance = 1,
+        max_distance = None
     ):
         self.gauge_renorm = gauge_renorm
         self.gauge_smudge = gauge_smudge
         self.condition_tensors = condition_tensors
         self.condition_balance_bonds = condition_balance_bonds
         self.neighbor_pairs = dict()
+        self.compute_energy_opts['min_distance'] = min_distance
+        self.compute_energy_opts['max_distance'] = max_distance
         for (_, ix), (_, iy) in gen_neighbor_pairs(self._psi):
             if ix not in self.neighbor_pairs:
                 self.neighbor_pairs[ix] = [iy]
@@ -118,19 +122,10 @@ class SimpleUpdate(_SimpleUpdate):
         return Ta, Tb, Tsval, location
 
     def compute_energy(self):
-        ket = self.state
-        ket.add_tag("KET")
-        bra = ket.retag({"KET": "BRA"})
-        bra = bra.H
-        bra.mangle_inner_("*")
-        norm = ket & bra
-        phased_ham = dict()
-        for where, U in self.ham.terms.items():
-            inds = (rand_uuid(), rand_uuid()) + where
-            TU = FermionTensor(U.copy(), inds=inds)
-            new_U = ket.fermion_space.move_past(TU).data
-            phased_ham[where] = new_U
-        return phased_ham
+        return self.state.compute_inds_expectation(
+            self.ham.terms,
+            **self.compute_energy_opts
+        )
 
     def gate(self, U, where):
         """Like ``TEBD2D.gate`` but absorb and extract the relevant gauges
