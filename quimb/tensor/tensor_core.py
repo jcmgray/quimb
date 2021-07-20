@@ -3261,6 +3261,35 @@ class TensorNetwork(object):
         """
         return self.conj()
 
+    def make_norm(
+        self,
+        mangle_append='*',
+        layer_tags=('KET', 'BRA'),
+        return_all=False,
+    ):
+        """Make the norm tensor network of this tensor network ``tn.H & tn``.
+
+        Parameters
+        ----------
+        mangle_append : {str, False or None}, optional
+            How to mangle the inner indices of the bra.
+        layer_tags : (str, str), optional
+            The tags to identify the top and bottom.
+        return_all : bool, optional
+            Return the norm, the ket and the bra.
+        """
+        ket = self.copy()
+        ket.add_tag(layer_tags[0])
+
+        bra = ket.retag({layer_tags[0]: layer_tags[1]})
+        bra.conj_(mangle_append)
+
+        norm = ket | bra
+
+        if return_all:
+            return norm, ket, bra
+        return norm
+
     def multiply(self, x, inplace=False, spread_over=8):
         """Scalar multiplication of this tensor network with ``x``.
 
@@ -4210,7 +4239,21 @@ class TensorNetwork(object):
 
         if isinstance(inds, str):
             inds = (inds,)
+
         ng = len(inds)
+        ndimG = ndim(G)
+        ds = [tn.ind_size(ix) for ix in inds]
+
+        if ndimG != 2 * ng:
+            # gate supplied as matrix, factorize it
+            G = reshape(G, ds * 2)
+
+        for i, d in enumerate(G.shape):
+            if d != ds[i % ng]:
+                raise ValueError(
+                    f"Gate with shape {G.shape} doesn't match indices {inds} "
+                    f"with dimensions {ds}. "
+                )
 
         # new indices to join old physical sites to new gate
         bnds = [rand_uuid() for _ in range(ng)]
@@ -4218,7 +4261,7 @@ class TensorNetwork(object):
 
         # tensor representing the gate
         tags = tags_to_oset(tags)
-        tG = Tensor(G, inds=inds + bnds, tags=tags, left_inds=bnds)
+        tG = Tensor(G, inds=(*inds, *bnds), tags=tags, left_inds=bnds)
 
         if contract is False:
             #
@@ -4328,7 +4371,7 @@ class TensorNetwork(object):
         #     return them via ``info``, e.g. for ``SimpleUpdate`
         if maybe_svals and info is not None:
             s = next(iter(maybe_svals)).data
-            info['singular_values', tuple(sorted(inds))] = s
+            info['singular_values', bix] = s
 
         # update original tensors
         tl.modify(data=tln.transpose_like_(tl).data)
@@ -5432,6 +5475,118 @@ class TensorNetwork(object):
 
     gauge_local_ = functools.partialmethod(gauge_local, inplace=True)
 
+    def gauge_simple_insert(self, gauges):
+        """Insert the simple update style bond gauges found in ``gauges`` if
+        they are present in this tensor network. The gauges inserted are also
+        returned so that they can be removed later.
+
+        Parameters
+        ----------
+        gauges : dict[str, array_like]
+            The store of bond gauges, the keys being indices and the values
+            being the vectors. Only bonds present in this dictionary will be
+            gauged.
+
+        Returns
+        -------
+        outer : list[(Tensor, str, array_like)]
+            The sequence of gauges applied to outer indices, each a tuple of
+            the tensor, the index and the gauge vector.
+        inner : list[((Tensor, Tensor), str, array_like)]
+            The sequence of gauges applied to inner indices, each a tuple of
+            the two inner tensors, the inner bond and the gauge vector applied.
+        """
+        # absorb outer gauges fully into single tensor
+        outer = []
+        for ix in self.outer_inds():
+            g = gauges.get(ix, None)
+            if g is None:
+                continue
+            t, = self._inds_get(ix)
+            t.multiply_index_diagonal_(ix, g)
+            outer.append((t, ix, g))
+
+        # absorb inner gauges half and half into both tensors
+        inner = []
+        for ix in self.inner_inds():
+            g = gauges.get(ix, None)
+            if g is None:
+                continue
+            g = g ** 0.5
+            tl, tr = self._inds_get(ix)
+            tl.multiply_index_diagonal_(ix, g)
+            tr.multiply_index_diagonal_(ix, g)
+            inner.append(((tl, tr), ix, g))
+
+        return outer, inner
+
+    @contextlib.contextmanager
+    def gauge_simple_temp(
+        self,
+        gauges,
+        ungauge_outer=True,
+        ungauge_inner=True,
+    ):
+        """Context manager that temporarily inserts simple update style bond
+        gauges into this tensor network, before optionally ungauging them.
+
+        Parameters
+        ----------
+        self : TensorNetwork
+            The TensorNetwork to be gauge-bonded.
+        gauges : dict[str, array_like]
+            The store of gauge bonds, the keys being indices and the values
+            being the vectors. Only bonds present in this dictionary will be
+            gauged.
+        ungauge_outer : bool, optional
+            Whether to ungauge the outer bonds.
+        ungauge_inner : bool, optional
+            Whether to ungauge the inner bonds.
+
+        Yields
+        ------
+        outer : list[(Tensor, int, array_like)]
+            The tensors, indices and gauges that were performed on outer
+            indices.
+        inner : list[((Tensor, Tensor), int, array_like)]
+            The tensors, indices and gauges that were performed on inner bonds.
+
+        Examples
+        --------
+
+            >>> tn = TN_rand_reg(10, 4, 3)
+            >>> tn ^ all
+            -51371.66630218866
+
+            >>> gauges = {}
+            >>> tn.gauge_all_simple_(gauges=gauges)
+            >>> len(gauges)
+            20
+
+            >>> tn ^ all
+            28702551.673767876
+
+            >>> with gauged_bonds(tn, gauges):
+            ...     # temporarily insert gauges
+            ...     print(tn ^ all)
+            -51371.66630218887
+
+            >>> tn ^ all
+            28702551.67376789
+
+        """
+        outer, inner = self.gauge_simple_insert(gauges)
+        try:
+            yield outer, inner
+        finally:
+            while ungauge_outer and outer:
+                t, ix, g = outer.pop()
+                t.multiply_index_diagonal_(ix, g**-1)
+            while ungauge_inner and inner:
+                (tl, tr), ix, g = inner.pop()
+                ginv = g**-1
+                tl.multiply_index_diagonal_(ix, ginv)
+                tr.multiply_index_diagonal_(ix, ginv)
     def _contract_compressed_tid_sequence(
         self,
         seq,

@@ -1,15 +1,12 @@
-import collections
-
 import numpy as np
-from autoray import do, to_numpy, dag
 
-from ..core import qarray, eye, kron
 from ..utils import ensure_dict, continuous_progbar, deprecated
-from ..utils import progbar as qu_progbar
+from ..utils import progbar as Progbar
 from .array_ops import norm_fro
+from .tensor_arbgeom_tebd import LocalHamGen
 
 
-class LocalHam1D:
+class LocalHam1D(LocalHamGen):
     """An simple interacting hamiltonian object used, for instance, in TEBD.
     Once instantiated, the ``LocalHam1D`` hamiltonian stores a single term
     per pair of sites, cached versions of which can be retrieved like
@@ -74,168 +71,22 @@ class LocalHam1D:
         self.L = int(L)
         self.cyclic = cyclic
 
-        # caches for not repeating operations / duplicating tensors
-        self._op_cache = collections.defaultdict(dict)
-
         # parse two site terms
         if hasattr(H2, 'shape'):
             # use as default nearest neighbour term
-            self.terms = {None: H2}
+            H2 = {None: H2}
         else:
-            self.terms = dict(H2)
+            H2 = dict(H2)
 
-        # convert qarrays (mostly useful for working with jax)
-        for key, X in self.terms.items():
-            if isinstance(X, qarray):
-                self.terms[key] = X.A
-
-        # first combine terms to ensure i < j
-        for where in tuple(filter(bool, self.terms)):
-            i, j = where
-            if i < j:
-                continue
-
-            # pop and flip the term
-            X12 = self._flip_cached(self.terms.pop(where))
-
-            # add to, or create, term with flipped coos
-            new_where = j, i
-            if new_where in self.terms:
-                self.terms[new_where] = (
-                    self._add_cached(self.terms[new_where], X12)
-                )
-            else:
-                self.terms[new_where] = X12
-
-        # possibly fill in default gates
-        default_H2 = self.terms.pop(None, None)
+        default_H2 = H2.pop(None, None)
         if default_H2 is not None:
-            for i in range(self.L):
-                if (i + 1 < self.L) or self.cyclic:
-                    where = (i, (i + 1) % self.L)
-                    self.terms.setdefault(where, default_H2)
+            for i in range(self.L + int(self.cyclic) - 1):
+                coo_a = i
+                coo_b = (i + 1) % self.L
+                if (coo_a, coo_b) not in H2 and (coo_b, coo_a) not in H2:
+                    H2[coo_a, coo_b] = default_H2
 
-        # make a directory of which single sites are covered by which terms
-        #     - to merge them into later
-        self._sites_to_covering_terms = collections.defaultdict(list)
-        for where in self.terms:
-            i, j = where
-            self._sites_to_covering_terms[i].append(where)
-            self._sites_to_covering_terms[j].append(where)
-
-        # parse one site terms
-        if H1 is None:
-            H1s = dict()
-        elif hasattr(H1, 'shape'):
-            # set a default site term
-            H1s = {None: H1}
-        else:
-            H1s = dict(H1)
-
-        # convert qarrays (mostly useful for working with jax)
-        for key, X in H1s.items():
-            if isinstance(X, qarray):
-                H1s[key] = X.A
-
-        # possibly set the default single site term
-        default_H1 = H1s.pop(None, None)
-        if default_H1 is not None:
-            for i in range(self.L):
-                H1s.setdefault(i, default_H1)
-
-        # now absorb the single site terms evenly into the two site terms
-        for i, H in H1s.items():
-
-            # get interacting terms which cover the site
-            pairs = self._sites_to_covering_terms[i]
-            num_pairs = len(pairs)
-            if num_pairs == 0:
-                raise ValueError(
-                    f"There are no two site terms to add this single site "
-                    f"term to - site {i} is not coupled to anything.")
-
-            # merge the single site term in equal parts into all covering pairs
-            H_tensoreds = (self._op_id_cached(H), self._id_op_cached(H))
-            for pair in pairs:
-                H_tensored = H_tensoreds[pair.index(i)]
-                self.terms[pair] = (
-                    self._add_cached(
-                        self.terms[pair],
-                        self._div_cached(H_tensored, num_pairs)
-                    )
-                )
-
-    def _flip_cached(self, x):
-        cache = self._op_cache['flip']
-        key = id(x)
-        if key not in cache:
-            d = int(x.size**(1 / 4))
-            xf = do('reshape', x, (d, d, d, d))
-            xf = do('transpose', xf, (1, 0, 3, 2))
-            xf = do('reshape', xf, (d * d, d * d))
-            cache[key] = xf
-        return cache[key]
-
-    def _add_cached(self, x, y):
-        cache = self._op_cache['add']
-        key = (id(x), id(y))
-        if key not in cache:
-            cache[key] = x + y
-        return cache[key]
-
-    def _div_cached(self, x, y):
-        cache = self._op_cache['div']
-        key = (id(x), y)
-        if key not in cache:
-            cache[key] = x / y
-        return cache[key]
-
-    def _op_id_cached(self, x):
-        cache = self._op_cache['op_id']
-        key = id(x)
-        if key not in cache:
-            xn = to_numpy(x)
-            d = int(xn.size**0.5)
-            Id = eye(d, dtype=xn.dtype)
-            XI = do('array', kron(xn, Id), like=x)
-            cache[key] = XI
-        return cache[key]
-
-    def _id_op_cached(self, x):
-        cache = self._op_cache['id_op']
-        key = id(x)
-        if key not in cache:
-            xn = to_numpy(x)
-            d = int(xn.size**0.5)
-            Id = eye(d, dtype=xn.dtype)
-            IX = do('array', kron(Id, xn), like=x)
-            cache[key] = IX
-        return cache[key]
-
-    def _expm_cached(self, x, y):
-        cache = self._op_cache['expm']
-        key = (id(x), y)
-        if key not in cache:
-            el, ev = do('linalg.eigh', x)
-            cache[key] = ev @ do('diag', do('exp', el * y)) @ dag(ev)
-        return cache[key]
-
-    def get_gate(self, where):
-        """Get the local term for pair ``where``, cached.
-        """
-        return self.terms[tuple(where)]
-
-    def get_gate_expm(self, where, x):
-        """Get the local term for pair ``where``, matrix exponentiated by
-        ``x``, and cached.
-        """
-        return self._expm_cached(self.get_gate(where), x)
-
-    def apply_to_arrays(self, fn):
-        """Apply the function ``fn`` to all the arrays representing terms.
-        """
-        for k, x in self.terms.items():
-            self.terms[k] = fn(x)
+        super().__init__(H2=H2, H1=H1)
 
     def mean_norm(self):
         """Computes the average frobenius norm of local terms.
@@ -583,7 +434,7 @@ class TEBD:
         # set up progress bar
         progbar = self.progbar if (progbar is None) else progbar
         if progbar:
-            ts = qu_progbar(ts)
+            ts = Progbar(ts)
 
         for t in ts:
             self.update_to(t, dt=dt, tol=False, order=order, progbar=False)
