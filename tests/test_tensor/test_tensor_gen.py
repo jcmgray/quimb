@@ -5,6 +5,27 @@ import quimb as qu
 import quimb.tensor as qtn
 
 
+class TestGeometries:
+
+    @pytest.mark.parametrize('cyclic', [False, True])
+    @pytest.mark.parametrize("edge_fn,shape,percell,coordination", [
+        (qtn.edges_2d_square, (3, 3), 1, 4),
+        (qtn.edges_2d_hexagonal, (3, 3), 2, 3),
+        (qtn.edges_2d_kagome, (3, 3), 3, 4),
+        (qtn.edges_2d_triangular, (3, 3), 1, 6),
+        (qtn.edges_2d_triangular_rectangular, (3, 3), 2, 6),
+        (qtn.edges_3d_cubic, (3, 3, 3), 1, 6),
+        (qtn.edges_3d_pyrochlore, (3, 3, 3), 4, 6),
+        (qtn.edges_3d_diamond, (3, 3, 3), 2, 4),
+        (qtn.edges_3d_diamond_cubic, (2, 2, 2), 8, 4),
+    ])
+    def test_basic(self, cyclic, edge_fn, shape, percell, coordination):
+        edges = edge_fn(*shape, cyclic=cyclic)
+        tn = qtn.TN_rand_from_edges(edges, D=2)
+        assert tn.num_tensors == qu.prod(shape) * percell
+        assert max(t.ndim for t in tn) == coordination
+
+
 class TestSpinHam1D:
 
     @pytest.mark.parametrize("cyclic", [False, True])
