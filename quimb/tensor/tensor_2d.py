@@ -653,6 +653,7 @@ class TensorNetwork2D(TensorNetwork):
         yrange=None,
         max_bond=None,
         cutoff=1e-10,
+        equalize_norms=False,
         compress_opts=None,
     ):
         r"""Compress all or part of a row.
@@ -705,6 +706,7 @@ class TensorNetwork2D(TensorNetwork):
         check_opt('sweep', sweep, ('right', 'left'))
         compress_opts = ensure_dict(compress_opts)
         compress_opts.setdefault('absorb', 'right')
+        compress_opts.setdefault('equalize_norms', equalize_norms)
 
         if yrange is None:
             yrange = (0, self.Ly - 1)
@@ -725,6 +727,7 @@ class TensorNetwork2D(TensorNetwork):
         xrange=None,
         max_bond=None,
         cutoff=1e-10,
+        equalize_norms=False,
         compress_opts=None,
     ):
         r"""Compress all or part of a column.
@@ -785,6 +788,7 @@ class TensorNetwork2D(TensorNetwork):
         check_opt('sweep', sweep, ('up', 'down'))
         compress_opts = ensure_dict(compress_opts)
         compress_opts.setdefault('absorb', 'right')
+        compress_opts.setdefault('equalize_norms', equalize_norms)
 
         if xrange is None:
             xrange = (0, self.Lx - 1)
@@ -808,6 +812,7 @@ class TensorNetwork2D(TensorNetwork):
         canonize=True,
         compress_sweep=None,
         layer_tag=None,
+        equalize_norms=False,
         compress_opts=None,
     ):
         # rotate coordinates and sweeps rather than actual TN
@@ -838,7 +843,7 @@ class TensorNetwork2D(TensorNetwork):
                 #     │  │  │  │  │
                 #     ●══●══<══<══<
                 #
-                canonize_fn(i)
+                canonize_fn(i, equalize_norms=equalize_norms)
 
             #
             #     │  │  │  │  │  -->  │  │  │  │  │  -->  │  │  │  │  │
@@ -846,6 +851,7 @@ class TensorNetwork2D(TensorNetwork):
             #     .  .           -->     .  .        -->        .  .
             #
             compress_fn(i, max_bond=max_bond, cutoff=cutoff,
+                        equalize_norms=equalize_norms,
                         compress_opts=compress_opts)
 
     def _contract_boundary_multi(
@@ -858,6 +864,7 @@ class TensorNetwork2D(TensorNetwork):
         cutoff=1e-10,
         canonize=True,
         compress_sweep=None,
+        equalize_norms=False,
         compress_opts=None,
     ):
         # rotate coordinates and sweeps rather than actual TN
@@ -889,7 +896,7 @@ class TensorNetwork2D(TensorNetwork):
                     i, i + istep, layer_tag=tag,
                     max_bond=max_bond, cutoff=cutoff,
                     canonize=canonize, compress_sweep=compress_sweep,
-                    compress_opts=compress_opts)
+                    equalize_norms=equalize_norms, compress_opts=compress_opts)
 
                 # so we can still uniqely identify 'inner' tensors, drop inner
                 #     site tag merged into outer tensor for all but last tensor
@@ -1126,7 +1133,7 @@ class TensorNetwork2D(TensorNetwork):
     ):
         r"""Contract a 2D tensor network inwards from the bottom, canonizing
         and compressing (left to right) along the way. If
-        ``layer_tags is None`` this looks like:
+        ``layer_tags is None`` this looks like::
 
             a) contract
 
@@ -1148,7 +1155,7 @@ class TensorNetwork2D(TensorNetwork):
 
         If ``layer_tags`` is specified, each then each layer is contracted in
         and compressed separately, resulting generally in a lower memory
-        scaling. For two layer tags this looks like:
+        scaling. For two layer tags this looks like::
 
             a) first flatten the outer boundary only
 
@@ -1242,7 +1249,7 @@ class TensorNetwork2D(TensorNetwork):
     ):
         r"""Contract a 2D tensor network inwards from the top, canonizing and
         compressing (right to left) along the way. If
-        ``layer_tags is None`` this looks like:
+        ``layer_tags is None`` this looks like::
 
             a) contract
 
@@ -1264,7 +1271,7 @@ class TensorNetwork2D(TensorNetwork):
 
         If ``layer_tags`` is specified, each then each layer is contracted in
         and compressed separately, resulting generally in a lower memory
-        scaling. For two layer tags this looks like:
+        scaling. For two layer tags this looks like::
 
             a) first flatten the outer boundary only
 
@@ -1358,7 +1365,7 @@ class TensorNetwork2D(TensorNetwork):
     ):
         r"""Contract a 2D tensor network inwards from the left, canonizing and
         compressing (bottom to top) along the way. If
-        ``layer_tags is None`` this looks like:
+        ``layer_tags is None`` this looks like::
 
             a) contract
 
@@ -1386,7 +1393,7 @@ class TensorNetwork2D(TensorNetwork):
 
         If ``layer_tags`` is specified, each then each layer is contracted in
         and compressed separately, resulting generally in a lower memory
-        scaling. For two layer tags this looks like:
+        scaling. For two layer tags this looks like::
 
             a) first flatten the outer boundary only
 
@@ -1491,7 +1498,7 @@ class TensorNetwork2D(TensorNetwork):
     ):
         r"""Contract a 2D tensor network inwards from the left, canonizing and
         compressing (top to bottom) along the way. If
-        ``layer_tags is None`` this looks like:
+        ``layer_tags is None`` this looks like::
 
             a) contract
 
@@ -1519,7 +1526,7 @@ class TensorNetwork2D(TensorNetwork):
 
         If ``layer_tags`` is specified, each then each layer is contracted in
         and compressed separately, resulting generally in a lower memory
-        scaling. For two layer tags this looks like:
+        scaling. For two layer tags this looks like::
 
             a) first flatten the outer boundary only
 
@@ -2691,35 +2698,6 @@ class TensorNetwork2DVector(TensorNetwork2D,
             ))
         return self.ind_size(pix)
 
-    def make_norm(
-        self,
-        mangle_append='*',
-        layer_tags=('KET', 'BRA'),
-        return_all=False,
-    ):
-        """Make the norm tensor network of this 2D vector.
-
-        Parameters
-        ----------
-        mangle_append : {str, False or None}, optional
-            How to mangle the inner indices of the bra.
-        layer_tags : (str, str), optional
-            The tags to identify the top and bottom.
-        return_all : bool, optional
-            Return the norm, the ket and the bra.
-        """
-        ket = self.copy()
-        ket.add_tag(layer_tags[0])
-
-        bra = ket.retag({layer_tags[0]: layer_tags[1]})
-        bra.conj_(mangle_append)
-
-        norm = ket | bra
-
-        if return_all:
-            return norm, ket, bra
-        return norm
-
     def gate(
         self,
         G,
@@ -3348,7 +3326,7 @@ class PEPS(TensorNetwork2DVector,
            TensorNetwork2DFlat,
            TensorNetwork2D,
            TensorNetwork):
-    r"""Projected Entangled Pair States object::
+    r"""Projected Entangled Pair States object (2D)::
 
 
                          ...
@@ -3417,7 +3395,7 @@ class PEPS(TensorNetwork2DVector,
         # cache for both creating and retrieving indices
         ix = defaultdict(rand_uuid)
 
-        for i, j in product(range(self.Lx), range(self.Ly)):
+        for i, j in self.gen_site_coos():
             array = arrays[i][j]
 
             # figure out if we need to transpose the arrays from some order
@@ -3445,11 +3423,11 @@ class PEPS(TensorNetwork2DVector,
             # get the relevant indices corresponding to neighbours
             inds = []
             if 'u' in array_order:
-                inds.append(ix[(i + 1, j), (i, j)])
+                inds.append(ix[(i, j), (i + 1, j)])
             if 'r' in array_order:
                 inds.append(ix[(i, j), (i, j + 1)])
             if 'd' in array_order:
-                inds.append(ix[(i, j), (i - 1, j)])
+                inds.append(ix[(i - 1, j), (i, j)])
             if 'l' in array_order:
                 inds.append(ix[(i, j - 1), (i, j)])
             inds.append(self.site_ind(i, j))
@@ -3464,6 +3442,109 @@ class PEPS(TensorNetwork2DVector,
             tensors.append(Tensor(data=array, inds=inds, tags=ij_tags))
 
         super().__init__(tensors, virtual=True, **tn_opts)
+
+    @classmethod
+    def from_fill_fn(
+        cls, fill_fn, Lx, Ly, bond_dim, phys_dim=2, **peps_opts
+    ):
+        """Create a 2D PEPS from a filling function with signature
+        ``fill_fn(shape)``.
+
+        Parameters
+        ----------
+        Lx : int
+            The number of rows.
+        Ly : int
+            The number of columns.
+        bond_dim : int
+            The bond dimension.
+        physical : int, optional
+            The physical index dimension.
+        peps_opts
+            Supplied to :class:`~quimb.tensor.tensor_2d.PEPS`.
+
+        Returns
+        -------
+        psi : PEPS
+        """
+        arrays = [[None for _ in range(Ly)] for _ in range(Lx)]
+
+        for i, j in product(range(Lx), range(Ly)):
+
+            shape = []
+            if i != Lx - 1:  # bond up
+                shape.append(bond_dim)
+            if j != Ly - 1:  # bond right
+                shape.append(bond_dim)
+            if i != 0:  # bond down
+                shape.append(bond_dim)
+            if j != 0:  # bond left
+                shape.append(bond_dim)
+            shape.append(phys_dim)
+
+            arrays[i][j] = fill_fn(shape)
+
+        return cls(arrays, **peps_opts)
+
+    @classmethod
+    def empty(cls, Lx, Ly, bond_dim, phys_dim=2, like='numpy', **peps_opts):
+        """Create an empty 2D PEPS.
+
+        Parameters
+        ----------
+        Lx : int
+            The number of rows.
+        Ly : int
+            The number of columns.
+        bond_dim : int
+            The bond dimension.
+        physical : int, optional
+            The physical index dimension.
+        peps_opts
+            Supplied to :class:`~quimb.tensor.tensor_2d.PEPS`.
+
+        Returns
+        -------
+        psi : PEPS
+
+        See Also
+        --------
+        PEPS.from_fill_fn
+        """
+        return cls.from_fill_fn(
+            lambda shape: do("zeros", shape, like=like),
+            Lx, Ly, bond_dim, phys_dim, **peps_opts
+        )
+
+    @classmethod
+    def ones(cls, Lx, Ly, bond_dim, phys_dim=2, like='numpy', **peps_opts):
+        """Create a 2D PEPS whose tensors are filled with ones.
+
+        Parameters
+        ----------
+        Lx : int
+            The number of rows.
+        Ly : int
+            The number of columns.
+        bond_dim : int
+            The bond dimension.
+        physical : int, optional
+            The physical index dimension.
+        peps_opts
+            Supplied to :class:`~quimb.tensor.tensor_2d.PEPS`.
+
+        Returns
+        -------
+        psi : PEPS
+
+        See Also
+        --------
+        PEPS.from_fill_fn
+        """
+        return cls.from_fill_fn(
+            lambda shape: do("ones", shape, like=like),
+            Lx, Ly, bond_dim, phys_dim, **peps_opts
+        )
 
     @classmethod
     def rand(cls, Lx, Ly, bond_dim, phys_dim=2,
@@ -3490,29 +3571,21 @@ class PEPS(TensorNetwork2DVector,
         Returns
         -------
         psi : PEPS
+
+        See Also
+        --------
+        PEPS.from_fill_fn
         """
         if seed is not None:
             seed_rand(seed)
 
-        arrays = [[None for _ in range(Ly)] for _ in range(Lx)]
-
-        for i, j in product(range(Lx), range(Ly)):
-
-            shape = []
-            if i != Lx - 1:  # bond up
-                shape.append(bond_dim)
-            if j != Ly - 1:  # bond right
-                shape.append(bond_dim)
-            if i != 0:  # bond down
-                shape.append(bond_dim)
-            if j != 0:  # bond left
-                shape.append(bond_dim)
-            shape.append(phys_dim)
-
-            arrays[i][j] = ops.sensibly_scale(ops.sensibly_scale(
+        def fill_fn(shape):
+            return ops.sensibly_scale(ops.sensibly_scale(
                 randn(shape, dtype=dtype)))
 
-        return cls(arrays, **peps_opts)
+        return cls.from_fill_fn(
+            fill_fn, Lx, Ly, bond_dim, phys_dim, **peps_opts
+        )
 
     def add_PEPS(self, other, inplace=False):
         """Add this PEPS with another.

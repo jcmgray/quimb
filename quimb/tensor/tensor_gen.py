@@ -18,8 +18,10 @@ from ..gen.rand import randn, choice, random_seed_fn, rand_phase
 from .tensor_core import (Tensor, new_bond, TensorNetwork, rand_uuid,
                           tensor_direct_product)
 from .array_ops import asarray, sensibly_scale
+from .tensor_arbgeom import TensorNetworkGen, TensorNetworkGenVector
 from .tensor_1d import MatrixProductState, MatrixProductOperator
 from .tensor_2d import gen_2d_bonds, TensorNetwork2D
+from .tensor_3d import TensorNetwork3D
 from .tensor_1d_tebd import LocalHam1D
 from .tensor_2d_tebd import LocalHam2D
 
@@ -123,7 +125,10 @@ def TN_rand_from_edges(
     TensorNetwork
     """
     ts = {}
-    for node in unique(concat(edges)):
+
+    sites = tuple(sorted(set(concat(edges))))
+
+    for node in sites:
         t = Tensor(tags=site_tag_id.format(node))
         if phys_dim is not None:
             t.new_ind(site_ind_id.format(node), size=phys_dim)
@@ -134,6 +139,17 @@ def TN_rand_from_edges(
 
     tn = TensorNetwork(ts.values())
     tn.randomize_(seed=seed, dtype=dtype)
+
+    if phys_dim is not None:
+        tn.view_as_(
+            TensorNetworkGenVector, sites=sites,
+            site_tag_id=site_tag_id, site_ind_id=site_ind_id
+        )
+    else:
+        tn.view_as_(
+            TensorNetworkGen, sites=sites,
+            site_tag_id=site_tag_id
+        )
 
     return tn
 
@@ -268,6 +284,9 @@ def TN3D_rand(
     D,
     cyclic=False,
     site_tag_id='I{},{},{}',
+    x_tag_id='X{}',
+    y_tag_id='Y{}',
+    z_tag_id='Z{}',
     dtype='float64',
 ):
     """A random scalar 3D lattice tensor network.
@@ -328,10 +347,24 @@ def TN3D_rand(
         ts.append(Tensor(
             data=randn([D] * len(inds), dtype=dtype),
             inds=inds,
-            tags=[site_tag_id.format(i, j, k)]))
+            tags=[
+                site_tag_id.format(i, j, k),
+                x_tag_id.format(i),
+                y_tag_id.format(j),
+                z_tag_id.format(k),
+            ],
+        ))
 
     tn = TensorNetwork(ts)
-    return tn
+
+    return tn.view_as_(
+        TensorNetwork3D,
+        Lx=Lx, Ly=Ly, Lz=Lz,
+        site_tag_id=site_tag_id,
+        x_tag_id=x_tag_id,
+        y_tag_id=y_tag_id,
+        z_tag_id=z_tag_id,
+    )
 
 
 # ---------------------------- classical models ----------------------------- #
@@ -641,6 +674,9 @@ def TN3D_classical_ising_partition_function(
     h=0.0,
     cyclic=False,
     site_tag_id='I{},{},{}',
+    x_tag_id='X{}',
+    y_tag_id='Y{}',
+    z_tag_id='Z{}',
 ):
     """Tensor network representation of the 3D classical ising model
     partition function.
@@ -707,10 +743,24 @@ def TN3D_classical_ising_partition_function(
         ts.append(Tensor(
             data=classical_ising_T3d_matrix(beta, directions, j=j, h=h),
             inds=inds,
-            tags=[site_tag_id.format(ni, nj, nk)]))
+            tags=[
+                site_tag_id.format(ni, nj, nk),
+                x_tag_id.format(ni),
+                y_tag_id.format(nj),
+                z_tag_id.format(nk),
+            ],
+        ))
 
     tn = TensorNetwork(ts)
-    return tn
+
+    return tn.view_as_(
+        TensorNetwork3D,
+        Lx=Lx, Ly=Ly, Lz=Lz,
+        site_tag_id=site_tag_id,
+        x_tag_id=x_tag_id,
+        y_tag_id=y_tag_id,
+        z_tag_id=z_tag_id,
+    )
 
 
 def HTN_classical_partition_function_from_edges(
@@ -853,6 +903,8 @@ def TN_classical_partition_function_from_edges(
         to_contract[f's{node_a}'].append(bond_ab)
         to_contract[f's{node_b}'].append(bond_ab)
 
+    sites = tuple(sorted(set(concat(edges))))
+
     if h != 0.0:
         if callable(h):
             h_factory = h
@@ -860,7 +912,7 @@ def TN_classical_partition_function_from_edges(
             def h_factory(node):
                 return h
 
-        for node in unique(concat(edges)):
+        for node in sites:
             data = classical_ising_H_matrix(beta, h=h_factory(node))
             inds = [f's{node}']
             tags = [site_tag_id.format(node)]
@@ -872,6 +924,7 @@ def TN_classical_partition_function_from_edges(
     for ind, output_inds in to_contract.items():
         tn.contract_ind(ind, output_inds=output_inds)
 
+    tn.view_as_(TensorNetworkGen, sites=sites, site_tag_id=site_tag_id)
     return tn
 
 
@@ -927,7 +980,10 @@ def TN_dimer_covering_from_edges(
         tag = site_tag_id.format(node)
         ts.append(Tensor(data, inds=inds, tags=tag))
 
-    return TensorNetwork(ts)
+    tn = TensorNetwork(ts)
+    sites = tuple(sorted(nodes2inds))
+    tn.view_as_(TensorNetworkGen, sites=sites, site_tag_id=site_tag_id)
+    return tn
 
 
 # --------------------------------------------------------------------------- #

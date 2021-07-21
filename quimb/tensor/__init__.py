@@ -132,6 +132,11 @@ from .tensor_2d_tebd import (
     SimpleUpdate,
     FullUpdate,
 )
+from .tensor_3d import (
+    gen_3d_bonds,
+    TensorNetwork3D,
+    PEPS3D,
+)
 
 __all__ = (
     "set_contract_path_cache",
@@ -246,4 +251,7 @@ __all__ = (
     "TEBD2D",
     "SimpleUpdate",
     "FullUpdate",
+    "gen_3d_bonds",
+    "TensorNetwork3D",
+    "PEPS3D",
 )

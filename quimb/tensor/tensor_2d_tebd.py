@@ -1,14 +1,10 @@
-import random
-import collections
-from itertools import product, starmap
+from itertools import starmap
 
-import tqdm
 import numpy as np
 import scipy.sparse.linalg as spla
 from opt_einsum import shared_intermediates
-from autoray import do, dag, conj, reshape, to_numpy
+from autoray import do, dag, conj, reshape
 
-from ..core import eye, kron, qarray
 from ..utils import pairwise
 from .drawing import get_colors
 from .tensor_core import Tensor, contract_strategy
@@ -23,9 +19,10 @@ from .tensor_2d import (
     swap_path_to_long_range_path,
     nearest_neighbors,
 )
+from .tensor_arbgeom_tebd import LocalHamGen, TEBDGen
 
 
-class LocalHam2D:
+class LocalHam2D(LocalHamGen):
     """A 2D Hamiltonian represented as local terms. This combines all two site
     and one site terms into a single interaction per lattice pair, and caches
     operations on the terms such as getting their exponential.
@@ -64,239 +61,30 @@ class LocalHam2D:
         self.Lx = int(Lx)
         self.Ly = int(Ly)
 
-        # caches for not repeating operations / duplicating tensors
-        self._op_cache = collections.defaultdict(dict)
-
         # parse two site terms
         if hasattr(H2, 'shape'):
             # use as default nearest neighbour term
-            self.terms = {None: H2}
+            H2 = {None: H2}
         else:
-            self.terms = dict(H2)
-
-        # convert qarrays (mostly useful for working with jax)
-        for key, X in self.terms.items():
-            if isinstance(X, qarray):
-                self.terms[key] = X.A
-
-        # first combine terms to ensure coo1 < coo2
-        for where in tuple(filter(bool, self.terms)):
-            coo1, coo2 = where
-            if coo1 < coo2:
-                continue
-
-            # pop and flip the term
-            X12 = self._flip_cached(self.terms.pop(where))
-
-            # add to, or create, term with flipped coos
-            new_where = coo2, coo1
-            if new_where in self.terms:
-                self.terms[new_where] = (
-                    self._add_cached(self.terms[new_where], X12)
-                )
-            else:
-                self.terms[new_where] = X12
+            H2 = dict(H2)
 
         # possibly fill in default gates
-        default_H2 = self.terms.pop(None, None)
+        default_H2 = H2.pop(None, None)
         if default_H2 is not None:
-            for where in gen_2d_bonds(Lx, Ly, steppers=[
+            for coo_a, coo_b in gen_2d_bonds(Lx, Ly, steppers=[
                 lambda i, j: (i, j + 1),
                 lambda i, j: (i + 1, j),
             ]):
-                self.terms.setdefault(where, default_H2)
+                if (coo_a, coo_b) not in H2 and (coo_b, coo_a) not in H2:
+                    H2[coo_a, coo_b] = default_H2
 
-        # make a directory of which single sites are covered by which terms
-        #     - to merge them into later
-        self._sites_to_covering_terms = collections.defaultdict(list)
-        for where in self.terms:
-            ij1, ij2 = where
-            self._sites_to_covering_terms[ij1].append(where)
-            self._sites_to_covering_terms[ij2].append(where)
+        super().__init__(H2=H2, H1=H1)
 
-        # parse one site terms
-        if H1 is None:
-            H1s = dict()
-        elif hasattr(H1, 'shape'):
-            # set a default site term
-            H1s = {None: H1}
-        else:
-            H1s = dict(H1)
-
-        # convert qarrays (mostly useful for working with jax)
-        for key, X in H1s.items():
-            if isinstance(X, qarray):
-                H1s[key] = X.A
-
-        # possibly set the default single site term
-        default_H1 = H1s.pop(None, None)
-        if default_H1 is not None:
-            for i, j in product(range(self.Lx), range(self.Ly)):
-                H1s.setdefault((i, j), default_H1)
-
-        # now absorb the single site terms evenly into the two site terms
-        for (i, j), H in H1s.items():
-
-            # get interacting terms which cover the site
-            pairs = self._sites_to_covering_terms[i, j]
-            num_pairs = len(pairs)
-            if num_pairs == 0:
-                raise ValueError(
-                    f"There are no two site terms to add this single site "
-                    f"term to - site {(i, j)} is not coupled to anything.")
-
-            # merge the single site term in equal parts into all covering pairs
-            H_tensoreds = (self._op_id_cached(H), self._id_op_cached(H))
-            for pair in pairs:
-                H_tensored = H_tensoreds[pair.index((i, j))]
-                self.terms[pair] = (
-                    self._add_cached(
-                        self.terms[pair],
-                        self._div_cached(H_tensored, num_pairs)
-                    )
-                )
-
-    def _flip_cached(self, x):
-        cache = self._op_cache['flip']
-        key = id(x)
-        if key not in cache:
-            d = int(x.size**(1 / 4))
-            xf = do('reshape', x, (d, d, d, d))
-            xf = do('transpose', xf, (1, 0, 3, 2))
-            xf = do('reshape', xf, (d * d, d * d))
-            cache[key] = xf
-        return cache[key]
-
-    def _add_cached(self, x, y):
-        cache = self._op_cache['add']
-        key = (id(x), id(y))
-        if key not in cache:
-            cache[key] = x + y
-        return cache[key]
-
-    def _div_cached(self, x, y):
-        cache = self._op_cache['div']
-        key = (id(x), y)
-        if key not in cache:
-            cache[key] = x / y
-        return cache[key]
-
-    def _op_id_cached(self, x):
-        cache = self._op_cache['op_id']
-        key = id(x)
-        if key not in cache:
-            xn = to_numpy(x)
-            d = int(xn.size**0.5)
-            Id = eye(d, dtype=xn.dtype)
-            XI = do('array', kron(xn, Id), like=x)
-            cache[key] = XI
-        return cache[key]
-
-    def _id_op_cached(self, x):
-        cache = self._op_cache['id_op']
-        key = id(x)
-        if key not in cache:
-            xn = to_numpy(x)
-            d = int(xn.size**0.5)
-            Id = eye(d, dtype=xn.dtype)
-            IX = do('array', kron(Id, xn), like=x)
-            cache[key] = IX
-        return cache[key]
-
-    def _expm_cached(self, x, y):
-        cache = self._op_cache['expm']
-        key = (id(x), y)
-        if key not in cache:
-            el, ev = do('linalg.eigh', x)
-            cache[key] = ev @ do('diag', do('exp', el * y)) @ dag(ev)
-        return cache[key]
-
-    def get_gate(self, where):
-        """Get the local term for pair ``where``, cached.
+    @property
+    def nsites(self):
+        """The number of sites in the system.
         """
-        return self.terms[tuple(where)]
-
-    def get_gate_expm(self, where, x):
-        """Get the local term for pair ``where``, matrix exponentiated by
-        ``x``, and cached.
-        """
-        return self._expm_cached(self.get_gate(where), x)
-
-    def apply_to_arrays(self, fn):
-        """Apply the function ``fn`` to all the arrays representing terms.
-        """
-        for k, x in self.terms.items():
-            self.terms[k] = fn(x)
-
-    def _nx_color_ordering(self, strategy='smallest_first', interchange=True):
-        """Generate a term ordering based on a coloring on the line graph.
-        """
-        import networkx as nx
-
-        G = nx.Graph()
-        for ija, ijb in self.terms:
-            G.add_edge(ija, ijb)
-
-        coloring = list(nx.coloring.greedy_color(
-            nx.line_graph(G), strategy, interchange=interchange).items())
-
-        # sort into color groups
-        coloring.sort(key=lambda coo_color: coo_color[1])
-
-        return [coo for coo, _ in coloring]
-
-    def get_auto_ordering(self, order='sort', **kwargs):
-        """Get an ordering of the terms to use with TEBD, for example. The
-        default is to sort the coordinates then greedily group them into
-        commuting sets.
-
-        Parameters
-        ----------
-        order : {'sort', None, 'random', str}
-            How to order the terms *before* greedily grouping them into
-            commuting (non-coordinate overlapping) sets. ``'sort'`` will sort
-            the coordinate pairs first. ``None`` will use the current order of
-            terms which should match the order they were supplied to this
-            ``LocalHam2D`` instance.  ``'random'`` will randomly shuffle the
-            coordinate pairs before grouping them - *not* the same as returning
-            a completely random order. Any other option will be passed as a
-            strategy to ``networkx.coloring.greedy_color`` to generate the
-            ordering.
-
-        Returns
-        -------
-        list[tuple[tuple[int]]]
-            Sequence of coordinate pairs.
-        """
-        if order is None:
-            pairs = self.terms
-        elif order == 'sort':
-            pairs = sorted(self.terms)
-        elif order == 'random':
-            pairs = list(self.terms)
-            random.shuffle(pairs)
-        elif order == 'random-ungrouped':
-            pairs = list(self.terms)
-            random.shuffle(pairs)
-            return pairs
-        else:
-            return self._nx_color_ordering(order, **kwargs)
-
-        pairs = {x: None for x in pairs}
-
-        cover = set()
-        ordering = list()
-        while pairs:
-            for pair in tuple(pairs):
-                ij1, ij2 = pair
-                if (ij1 not in cover) and (ij2 not in cover):
-                    ordering.append(pair)
-                    pairs.pop(pair)
-                    cover.add(ij1)
-                    cover.add(ij2)
-            cover.clear()
-
-        return ordering
+        return self.Lx * self.Ly
 
     def __repr__(self):
         s = "<LocalHam2D(Lx={}, Ly={}, num_terms={})>"
@@ -415,7 +203,7 @@ class LocalHam2D:
     graph = draw
 
 
-class TEBD2D:
+class TEBD2D(TEBDGen):
     """Generic class for performing two dimensional time evolving block
     decimation, i.e. applying the exponential of a Hamiltonian using
     a product formula that involves applying local exponentiated gates only.
@@ -511,80 +299,31 @@ class TEBD2D:
         callback=None,
         keep_best=False,
         progbar=True,
-        **kwargs,
     ):
-        self.imag = imag
-        if not imag:
-            raise NotImplementedError("Real time evolution not tested yet.")
-
-        self.state = psi0
-        self.ham = ham
-        self.progbar = progbar
-        self.callback = callback
-
-        # default time step to use
-        self.tau = tau
-
-        # parse gate application options
-        if D is None:
-            D = self._psi.max_bond()
-        self.gate_opts = (
-            dict() if gate_opts is None else
-            dict(gate_opts))
-        self.gate_opts['max_bond'] = D
-        self.gate_opts.setdefault('cutoff', 0.0)
-        self.gate_opts.setdefault('contract', 'reduce-split')
+        super().__init__(
+            psi0=psi0,
+            ham=ham,
+            tau=tau,
+            D=D,
+            imag=imag,
+            gate_opts=gate_opts,
+            ordering=ordering,
+            compute_energy_every=compute_energy_every,
+            compute_energy_final=compute_energy_final,
+            compute_energy_opts=compute_energy_opts,
+            compute_energy_fn=compute_energy_fn,
+            compute_energy_per_site=compute_energy_per_site,
+            callback=callback,
+            keep_best=keep_best,
+            progbar=progbar,
+        )
 
         # parse energy computation options
         if chi is None:
-            chi = max(8, D**2)
-        self.compute_energy_opts = (
-            dict() if compute_energy_opts is None else
-            dict(compute_energy_opts))
+            chi = max(8, self.D**2)
         self.compute_energy_opts['max_bond'] = chi
         self.compute_energy_opts.setdefault('cutoff', 0.0)
         self.compute_energy_opts.setdefault('normalized', True)
-
-        self.compute_energy_every = compute_energy_every
-        self.compute_energy_final = compute_energy_final
-        self.compute_energy_fn = compute_energy_fn
-        self.compute_energy_per_site = bool(compute_energy_per_site)
-
-        if ordering is None:
-
-            def dynamic_random():
-                return self.ham.get_auto_ordering('random_sequential')
-
-            self.ordering = dynamic_random
-        elif isinstance(ordering, str):
-            self.ordering = self.ham.get_auto_ordering(ordering)
-        elif callable(ordering):
-            self.ordering = ordering
-        else:
-            self.ordering = tuple(ordering)
-
-        # storage
-        self._n = 0
-        self.its = []
-        self.taus = []
-        self.energies = []
-
-        self.keep_best = bool(keep_best)
-        self.best = dict(energy=float('inf'), state=None, it=None)
-
-        # process the remaining kwargs (e.g. simple or full update specific)
-        self.setup(**kwargs)
-
-    def setup(self):
-        """Initilization functionality.
-        """
-        pass
-
-    def presweep(self, i):
-        """Perform any computations required before the sweep (and energy
-        computation). For the basic TEBD this is nothing.
-        """
-        pass
 
     def compute_energy(self):
         """Compute and return the energy of the current state.
@@ -594,119 +333,6 @@ class TEBD2D:
             **self.compute_energy_opts
         )
 
-    def sweep(self, tau):
-        """Perform a full sweep of gates at every pair.
-        """
-        if callable(self.ordering):
-            ordering = self.ordering()
-        else:
-            ordering = self.ordering
-
-        for where in ordering:
-
-            if callable(tau):
-                U = self.ham.get_gate_expm(where, -tau(where))
-            else:
-                U = self.ham.get_gate_expm(where, -tau)
-
-            self.gate(U, where)
-
-    def gate(self, U, where):
-        """Perform single gate ``U`` at coordinate pair ``where``.
-        """
-        self._psi.gate_(U, where, **self.gate_opts)
-
-    def _check_energy(self):
-        """
-        """
-        if self.its and (self._n == self.its[-1]):
-            # only compute if haven't already
-            return self.energies[-1]
-
-        if self.compute_energy_fn is not None:
-            en = self.compute_energy_fn(self)
-        else:
-            en = self.compute_energy()
-
-        if self.compute_energy_per_site:
-            en = en / (self.ham.Lx * self.ham.Ly)
-
-        self.energies.append(float(en))
-        self.taus.append(float(self.tau))
-        self.its.append(self._n)
-
-        if self.keep_best and en < self.best['energy']:
-            self.best['energy'] = en
-            self.best['state'] = self.state
-            self.best['it'] = self._n
-
-        return self.energies[-1]
-
-    def _update_progbar(self, pbar):
-        desc = f"n={self._n}, tau={self.tau}, energy~{float(self.energy):.6f}"
-        pbar.set_description(desc)
-
-    def evolve(self, steps, tau=None):
-        """
-        """
-        if tau is not None:
-            self.tau = tau
-
-        pbar = tqdm.tqdm(total=steps, disable=self.progbar is not True)
-
-        try:
-            for i in range(steps):
-                # anything required by both energy and sweep
-                self.presweep(i)
-
-                # possibly compute the energy
-                should_compute_energy = (
-                    bool(self.compute_energy_every) and
-                    (i % self.compute_energy_every == 0))
-                if should_compute_energy:
-                    self._check_energy()
-                    self._update_progbar(pbar)
-
-                # actually perform the gates
-                self.sweep(self.tau)
-                self._n += 1
-                pbar.update()
-
-                if self.callback is not None:
-                    if self.callback(self):
-                        break
-
-            # possibly compute the energy
-            if self.compute_energy_final:
-                self._check_energy()
-                self._update_progbar(pbar)
-
-        except KeyboardInterrupt:
-            # allow the user to interupt early
-            pass
-        finally:
-            pbar.close()
-
-    def get_state(self):
-        return self._psi.copy()
-
-    def set_state(self, psi):
-        self._psi = psi.copy()
-
-    @property
-    def n(self):
-        """The number of sweeps performed.
-        """
-        return self._n
-
-    @property
-    def D(self):
-        return self.gate_opts['max_bond']
-
-    @D.setter
-    def D(self, value):
-        self.gate_opts['max_bond'] = round(value)
-
     @property
     def chi(self):
         return self.compute_energy_opts['max_bond']
@@ -714,22 +340,6 @@ class TEBD2D:
     @chi.setter
     def chi(self, value):
         self.compute_energy_opts['max_bond'] = round(value)
-
-    @property
-    def state(self):
-        """Return a copy of the current state.
-        """
-        return self.get_state()
-
-    @state.setter
-    def state(self, psi):
-        self.set_state(psi)
-
-    @property
-    def energy(self):
-        """Return the energy of current state, computing it only if necessary.
-        """
-        return self._check_energy()
 
     def __repr__(self):
         s = "<{}(n={}, tau={}, D={}, chi={})>"
@@ -847,15 +457,49 @@ class SimpleUpdate(TEBD2D):
         ``'state'`` respectively.
     """
 
-    def setup(
+    def __init__(
         self,
+        psi0,
+        ham,
+        tau=0.01,
+        D=None,
+        chi=None,
         gauge_renorm=True,
         gauge_smudge=1e-6,
         condition_tensors=True,
         condition_balance_bonds=True,
         long_range_use_swaps=False,
         long_range_path_sequence='random',
+        imag=True,
+        gate_opts=None,
+        ordering=None,
+        compute_energy_every=None,
+        compute_energy_final=True,
+        compute_energy_opts=None,
+        compute_energy_fn=None,
+        compute_energy_per_site=False,
+        callback=None,
+        keep_best=False,
+        progbar=True,
     ):
+        super().__init__(
+            psi0=psi0,
+            ham=ham,
+            tau=tau,
+            D=D,
+            chi=chi,
+            imag=imag,
+            gate_opts=gate_opts,
+            ordering=ordering,
+            compute_energy_every=compute_energy_every,
+            compute_energy_final=compute_energy_final,
+            compute_energy_opts=compute_energy_opts,
+            compute_energy_fn=compute_energy_fn,
+            compute_energy_per_site=compute_energy_per_site,
+            callback=callback,
+            keep_best=keep_best,
+            progbar=progbar,
+        )
         self.gauge_renorm = gauge_renorm
         self.gauge_smudge = gauge_smudge
         self.condition_tensors = condition_tensors
@@ -867,7 +511,7 @@ class SimpleUpdate(TEBD2D):
         """Create unit singular values, stored as tensors.
         """
         # create the gauges like whatever data array is in the first site.
-        data00 = self._psi[0, 0].data
+        data00 = next(iter(self._psi.tensor_map.values())).data
 
         self._gauges = dict()
         for ija, ijb in self._psi.gen_bond_coos():
@@ -956,7 +600,7 @@ class SimpleUpdate(TEBD2D):
             s = info['singular_values', bond_pair]
             if self.gauge_renorm:
                 # keep the singular values from blowing up
-                s = s / do('sum', s**2)**0.5
+                s = s / s[0]
             Tsval = self.gauges[bond_pair]
             Tsval.modify(data=s)
 
@@ -1349,8 +993,13 @@ class FullUpdate(TEBD2D):
         Detailed options for fitting the applied gate.
     """
 
-    def setup(
+    def __init__(
         self,
+        psi0,
+        ham,
+        tau=0.01,
+        D=None,
+        chi=None,
         fit_strategy='als',
         fit_opts=None,
         compute_envs_every=1,
@@ -1358,7 +1007,37 @@ class FullUpdate(TEBD2D):
         condition_tensors=True,
         condition_balance_bonds=True,
         contract_optimize='auto-hq',
+        imag=True,
+        gate_opts=None,
+        ordering=None,
+        compute_energy_every=None,
+        compute_energy_final=True,
+        compute_energy_opts=None,
+        compute_energy_fn=None,
+        compute_energy_per_site=False,
+        callback=None,
+        keep_best=False,
+        progbar=True,
     ):
+        super().__init__(
+            psi0=psi0,
+            ham=ham,
+            tau=tau,
+            D=D,
+            chi=chi,
+            imag=imag,
+            gate_opts=gate_opts,
+            ordering=ordering,
+            compute_energy_every=compute_energy_every,
+            compute_energy_final=compute_energy_final,
+            compute_energy_opts=compute_energy_opts,
+            compute_energy_fn=compute_energy_fn,
+            compute_energy_per_site=compute_energy_per_site,
+            callback=callback,
+            keep_best=keep_best,
+            progbar=progbar,
+        )
+
         self.fit_strategy = str(fit_strategy)
         self.fit_opts = get_default_full_update_fit_opts()
         if fit_opts is not None:

@@ -460,6 +460,16 @@ class TestCircuit:
         assert isinstance(tn['GATE_0'], qtn.PTensor)
         assert_allclose(circ.to_dense(), kf)
 
+    def test_apply_raw_gate(self):
+        k0 = qu.rand_ket(4)
+        psi0 = qtn.MatrixProductState.from_dense(k0, [2] * 2)
+        circ = qtn.Circuit(psi0=psi0)
+        U = qu.rand_uni(4)
+        circ.apply_gate_raw(U, [0, 1], tags='UCUSTOM')
+        assert len(circ.gates) == 1
+        assert 'UCUSTOM' in circ.psi.tags
+        assert qu.fidelity(circ.to_dense(), U @ k0) == pytest.approx(1)
+
 
 class TestCircuitGen:
 

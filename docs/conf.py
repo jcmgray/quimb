@@ -71,7 +71,7 @@ master_doc = 'index'
 
 # General information about the project.
 project = 'quimb'
-copyright = '2020, Johnnie Gray'
+copyright = '2015-2021, Johnnie Gray'
 author = 'Johnnie Gray'
 
 # The version info for the project you're documenting, acts as replacement for
@@ -116,7 +116,7 @@ exclude_patterns = ['_build', '**.ipynb_checkpoints']
 # show_authors = False
 
 # The name of the Pygments (syntax highlighting) style to use.
-pygments_style = 'pastie'
+pygments_style = 'default'
 
 # A list of ignored prefixes for module index sorting.
 # modindex_common_prefix = []
