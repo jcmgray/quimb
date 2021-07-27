@@ -582,7 +582,7 @@ class FermionTensor(BlockTensor):
 
     __slots__ = ('_data', '_inds', '_tags', '_left_inds',
                 '_owners', '_fermion_owner', '_avoid_phase',
-                '_fermion_path')
+                '_phase')
 
     def __init__(self, data=1.0, inds=(), tags=None, left_inds=None):
 
@@ -593,10 +593,10 @@ class FermionTensor(BlockTensor):
             if len(data.inds)!=0:
                 self._data = data.data.copy()
             self._avoid_phase = data._avoid_phase
-            self._fermion_path = data._fermion_path.copy()
+            self._phase = data._phase.copy()
         else:
             self._avoid_phase = False
-            self._fermion_path = dict()
+            self._phase = dict()
 
     @property
     def custom_funcs(self):
@@ -607,30 +607,30 @@ class FermionTensor(BlockTensor):
         return self._avoid_phase
 
     @property
-    def fermion_path(self):
-        return self._fermion_path
+    def phase(self):
+        return self._phase
 
     @avoid_phase.setter
     def avoid_phase(self, avoid_phase):
         self._avoid_phase = avoid_phase
 
-    @fermion_path.setter
-    def fermion_path(self, fermion_path):
-        self._fermion_path = fermion_path
+    @phase.setter
+    def phase(self, phase):
+        self._phase = phase
 
-    def set_fermion_path(self, global_flip=False, local_inds=None):
+    def set_phase(self, global_flip=False, local_inds=None):
         if local_inds is None:
             local_inds = []
-        _global_flip = self.fermion_path.pop("global_flip", False)
-        _local_inds = self.fermion_path.pop("local_inds", [])
-        self._fermion_path["global_flip"] = _global_flip ^ global_flip
+        _global_flip = self.phase.pop("global_flip", False)
+        _local_inds = self.phase.pop("local_inds", [])
+        self._phase["global_flip"] = _global_flip ^ global_flip
         all_inds = tuple(local_inds) + tuple(_local_inds)
         updated_local_inds = []
         for ind in all_inds:
             count = all_inds.count(ind)
             if count % 2 ==1:
                 updated_local_inds.append(ind)
-        self._fermion_path["local_inds"] = updated_local_inds
+        self._phase["local_inds"] = updated_local_inds
 
     @property
     def fermion_owner(self):
@@ -660,19 +660,19 @@ class FermionTensor(BlockTensor):
     def modify(self, **kwargs):
         if "inds" in kwargs and "data" not in kwargs:
             inds = kwargs.get("inds")
-            local_inds = self.fermion_path.pop("local_inds", [])
+            local_inds = self.phase.pop("local_inds", [])
             new_local_inds = []
             for ind in local_inds:
                 if ind in self.inds:
                     new_ind = inds[self.inds.index(ind)]
                     new_local_inds.append(new_ind)
-            self._fermion_path["local_inds"] = new_local_inds
+            self._phase["local_inds"] = new_local_inds
 
         super().modify(**kwargs)
 
     def flip(self, global_flip=False, local_inds=None, inplace=False):
         T = self if inplace else self.copy()
-        T.set_fermion_path(global_flip=global_flip, local_inds=local_inds)
+        T.set_phase(global_flip=global_flip, local_inds=local_inds)
         if global_flip:
             T.data._global_flip()
         if local_inds is not None and len(local_inds)>0:
@@ -689,7 +689,7 @@ class FermionTensor(BlockTensor):
         if deep:
             t = copy.deepcopy(self)
             t.avoid_phase = self.avoid_phase
-            t.fermion_path = self.fermion_path.copy()
+            t.phase = self.phase.copy()
             t.remove_fermion_owner()
         else:
             t = self.__class__(self, None)

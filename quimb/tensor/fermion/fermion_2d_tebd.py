@@ -139,6 +139,10 @@ class LocalHam2D:
                 where = (i, j)
                 self.terms.setdefault(where, default_H1)
 
+    @property
+    def nsites(self):
+        return self.Lx * self.Ly
+
     def _flip_cached(self, x):
         cache = self._op_cache['flip']
         key = id(x)
