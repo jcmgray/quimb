@@ -1,10 +1,10 @@
 """Classes and algorithms related to Fermionic 2D tensor networks.
 """
-import re
 import functools
 from operator import add
 from itertools import product
 from collections import defaultdict
+import numpy as np
 
 from ...utils import check_opt, pairwise
 from ..tensor_core import (
@@ -32,6 +32,7 @@ from .fermion_core import (
     tensor_contract
 )
 from .block_gen import rand_all_blocks, ones_single_block
+from .block_tools import inv_with_smudge
 
 INVERSE_CUTOFF = 1e-10
 

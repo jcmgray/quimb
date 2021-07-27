@@ -795,6 +795,62 @@ class FermionTensorNetwork(BlockTensorNetwork):
         filled_sites = self.filled_sites
         if len(filled_sites) ==0 : return True
         return (max(filled_sites) - min(filled_sites) + 1) == len(filled_sites)
+    
+    def _remove_phase_from_tids(self, tids):
+        """
+        remove phase information on specified tensors
+        """
+        tids = tags_to_oset(tids)
+        for tid in tids:
+            self.tensor_map[tid].phase = dict()
+    
+    def _remove_phase_from_tags(self, tags, which='all'):
+        tagged_tids = self._get_tids_from_tags(tags, which=which)
+        return self._remove_phase_from_tids(tagged_tids)
+    
+    def _reorder_tids_like(self, tids, like):
+        ntensors = len(self.fermion_space.tensor_order)
+        ref_order = dict()
+        for tid in tids:
+            ref_order[tid] = like.tensor_map[tid].get_fermion_info()[1]
+        sort_order = sorted(ref_order, 
+                    key=lambda k: ref_order[k])
+        order_map = dict(zip(sort_order, range(ntensors-len(tids), ntensors)))
+        self._reorder_from_tid(order_map, inplace=True)
+    
+    def _refactor_phase_from_tids(self, tids):
+        tids = tags_to_oset(tids)
+        local_inds = []
+        global_flip = 0
+        for tid in tids:
+            local_inds.extend(self.tensor_map[tid].phase.get("local_inds", []))
+            global_flip += self.tensor_map[tid].phase.get("global_flip", False)
+        global_flip = (global_flip % 2) == 1
+        linked_inds_map = dict()
+        for ind in local_inds:
+            linked_tids = self.ind_map[ind] - tids
+            if linked_tids:
+                output_tid, = linked_tids
+                linked_inds_map[ind] = output_tid
+            else:
+                raise ValueError(''' can't refactor the local phase on bond %s, either due to:
+                        1. The bond has an open indices
+                        2. The order of the two tensors sharing
+                            this bond needs to be reorderred'''%ind)
+                return
+            
+        for ind, otid in linked_inds_map.items():
+            To = self.tensor_map[otid]
+            To.flip_(local_inds=(ind,), global_flip=global_flip)
+            global_flip = False
+        
+        for itid in tids:
+            Ti = self.tensor_map[itid]
+            Ti.flip_(**Ti.phase)
+        if global_flip:
+            other_tids = tags_to_oset(self.tensor_map.keys()) - tids
+            gtid = list(other_tids)[0]
+            self.tensor_map[gtid].flip_(global_flip=True)
 
     def copy(self, full=False):
         """ For full copy, the tensors and underlying FermionSpace(all tensors in it) will
