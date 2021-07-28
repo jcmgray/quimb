@@ -12,7 +12,6 @@ from ..drawing import draw_tn
 from ..tensor_core import TensorNetwork, rand_uuid, tags_to_oset, group_inds
 from .tensor_block import tensor_split as _tensor_split
 from .tensor_block import _core_contract, tensor_canonize_bond, tensor_compress_bond, BlockTensor, BlockTensorNetwork, get_block_contraction_path_info, tensor_balance_bond
-from .block_interface import dispatch_settings
 from functools import wraps
 
 def contract_decorator(fn):
@@ -38,16 +37,17 @@ _core_contract = contract_decorator(_core_contract)
 def compress_decorator(fn):
     @wraps(fn)
     def wrapper(T1, T2, *args, **kwargs):
-        tid1, site1 = T1.get_fermion_info()
-        tid2, site2 = T2.get_fermion_info()
-        fs = T1.fermion_owner[0]
-        loc_dict = {tid1: site1, tid2: site2}
-        if site1 > site2:
-            fs.move(tid1, site2+1)
+        site1 = T1.get_fermion_info()[1]
+        site2 = T2.get_fermion_info()[1]
+        if site1<site2:
+            fn(T1, T2, *args, **kwargs)
         else:
-            fs.move(tid1, site2)
-        fn(T1, T2, *args, **kwargs)
-        fs._reorder_from_dict(loc_dict)
+            absorb = kwargs.pop("absorb")
+            kwargs["absorb"] = {"left":"right",
+                                "right":"left",
+                                "both":"both",
+                                None: None}[absorb]
+            fn(T2, T1, *args, **kwargs)
         return T1, T2
     return wrapper
 
@@ -795,7 +795,7 @@ class FermionTensorNetwork(BlockTensorNetwork):
         filled_sites = self.filled_sites
         if len(filled_sites) ==0 : return True
         return (max(filled_sites) - min(filled_sites) + 1) == len(filled_sites)
-    
+
     def _remove_phase_from_tids(self, tids):
         """
         remove phase information on specified tensors
@@ -803,21 +803,21 @@ class FermionTensorNetwork(BlockTensorNetwork):
         tids = tags_to_oset(tids)
         for tid in tids:
             self.tensor_map[tid].phase = dict()
-    
+
     def _remove_phase_from_tags(self, tags, which='all'):
         tagged_tids = self._get_tids_from_tags(tags, which=which)
         return self._remove_phase_from_tids(tagged_tids)
-    
+
     def _reorder_tids_like(self, tids, like):
         ntensors = len(self.fermion_space.tensor_order)
         ref_order = dict()
         for tid in tids:
             ref_order[tid] = like.tensor_map[tid].get_fermion_info()[1]
-        sort_order = sorted(ref_order, 
+        sort_order = sorted(ref_order,
                     key=lambda k: ref_order[k])
         order_map = dict(zip(sort_order, range(ntensors-len(tids), ntensors)))
         self._reorder_from_tid(order_map, inplace=True)
-    
+
     def _refactor_phase_from_tids(self, tids):
         tids = tags_to_oset(tids)
         local_inds = []
@@ -838,12 +838,12 @@ class FermionTensorNetwork(BlockTensorNetwork):
                         2. The order of the two tensors sharing
                             this bond needs to be reorderred'''%ind)
                 return
-            
+
         for ind, otid in linked_inds_map.items():
             To = self.tensor_map[otid]
             To.flip_(local_inds=(ind,), global_flip=global_flip)
             global_flip = False
-        
+
         for itid in tids:
             Ti = self.tensor_map[itid]
             Ti.flip_(**Ti.phase)
@@ -912,7 +912,7 @@ class FermionTensorNetwork(BlockTensorNetwork):
         tn = self if inplace else self.copy(full=True)
         tn.fermion_space._reorder_from_dict(tid_map)
         return tn
-    
+
     def _select_tids(self, tids, virtual=True):
         """Get a copy or a virtual copy (doesn't copy the tensors) of this
         ``FermionTensorNetwork``, only with the tensors corresponding to ``tids``.
@@ -925,18 +925,15 @@ class FermionTensorNetwork(BlockTensorNetwork):
 
     def add_tensor(self, tsr, tid=None, virtual=False):
         T = tsr if virtual else tsr.copy()
-        if virtual:
-            fs = T.fermion_owner
-            if fs is None:
-                self.fermion_space.add_tensor(T, tid, virtual=True)
-            else:
-                if hash(fs[0]) != hash(self.fermion_space) and len(self.tensor_map)!=0:
-                    raise ValueError("the tensor is already in a different FermionSpace, inplace addition not allowed")
-        else:
+        fs = T.fermion_owner
+        if fs is None:
             self.fermion_space.add_tensor(T, tid, virtual=True)
+        else:
+            if hash(fs[0])!= hash(self.fermion_space) and \
+                len(self.tensor_map) >0:
+                raise ValueError("The tensor is not compatible with the current network")
         tid = T.get_fermion_info()[0]
         super().add_tensor(T, tid, virtual=True)
-
 
     def add_tensor_network(self, tn, virtual=False, check_collisions=True):
         if virtual:
@@ -955,14 +952,11 @@ class FermionTensorNetwork(BlockTensorNetwork):
         if not tn.is_continuous():
             raise ValueError("input tensor network is not contiguously ordered")
 
+        tn = tn if virtual else tn.copy()
         sorted_tensors = []
         for tsr in tn:
             tid = tsr.get_fermion_info()[0]
             sorted_tensors.append([tid, tsr])
-            # if inplace, fermion_owners need to be
-            # removed first to avoid conflicts
-            if virtual:
-                tsr.remove_fermion_owner()
 
         if check_collisions:  # add tensors individually
             # check for matching inner_indices -> need to re-index
@@ -974,9 +968,10 @@ class FermionTensorNetwork(BlockTensorNetwork):
 
         # add tensors, reindexing if necessary
         for tid, tsr in sorted_tensors:
+            tsr.remove_fermion_owner()
             if clash_ix and any(i in reind for i in tsr.inds):
-                tsr = tsr.reindex(reind, inplace=virtual)
-            self.add_tensor(tsr, virtual=virtual, tid=tid)
+                tsr.reindex_(reind)
+            self.add_tensor(tsr, virtual=True, tid=tid)
 
         self.exponent = self.exponent + tn.exponent
 
@@ -1235,7 +1230,7 @@ class FermionTensorNetwork(BlockTensorNetwork):
         return_all=False,
         **inds_env_options,
     ):
-        norm, ket, bra = self.make_norm(return_all=True, layer_tags=layer_tags)
+        norm, _, bra = self.make_norm(return_all=True, layer_tags=layer_tags)
 
         inds_env_options["max_bond"] = max_bond
         inds_env_options["cutoff"] = cutoff

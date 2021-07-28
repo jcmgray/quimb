@@ -1,7 +1,5 @@
 """Core tensor network tools.
 """
-import os
-import copy
 import functools
 
 import numpy as np
@@ -14,7 +12,6 @@ from ..tensor_core import (Tensor, TensorNetwork, tags_to_oset, rand_uuid,
                           _parse_split_opts, concat, unique, _inds_to_eq,
                           _gen_output_inds, get_contraction)
 from .block_tools import get_smudge_balance
-from .block_interface import dispatch_settings
 
 # --------------------------------------------------------------------------- #
 #                                Tensor Funcs                                 #

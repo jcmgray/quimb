@@ -1,7 +1,7 @@
 import numpy as np
 from itertools import product
 
-from ...gen.rand import randn, seed_rand
+from ...gen.rand import randn
 from .block_interface import dispatch_settings, get_symmetry
 
 from pyblock3.algebra.core import SubTensor
