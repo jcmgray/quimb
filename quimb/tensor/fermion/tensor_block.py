@@ -297,7 +297,24 @@ class BlockTensor(Tensor):
         return t
 
     def trace(self, ind1, ind2, inplace=False):
-        raise NotImplementedError
+        """Trace index ``ind1`` with ``ind2``, removing both.
+        """
+        t = self if inplace else self.copy()
+
+        old_inds, new_inds = [], []
+        for ix in t.inds:
+            if ix in (ind1, ind2):
+                old_inds.append(ind1)
+            else:
+                old_inds.append(ix)
+                new_inds.append(ix)
+        old_inds, new_inds = tuple(old_inds), tuple(new_inds)
+        ax1 = self.inds.index(ind1)
+        ax2 = self.inds.index(ind2)
+        new_data = t.data.trace(ax1, ax2)
+        t.modify(data=new_data,
+                 inds=new_inds, left_inds=None)
+        return t
 
     def sum_reduce(self, ind, inplace=False):
         raise NotImplementedError
@@ -395,6 +412,30 @@ class BlockTensorNetwork(TensorNetwork):
 
     _EXTRA_PROPS = ()
     _CONTRACT_STRUCTURED = False
+
+    def trace(self, left_inds, right_inds, **contract_opts):
+        """Trace over ``left_inds`` joined with ``right_inds``
+        """
+        tn = self.copy()
+        _left_inds = []
+        _right_inds = []
+        out = None
+        for u, l in zip(left_inds, right_inds):
+            T1, = tn._inds_get(u)
+            T2, = tn._inds_get(l)
+            if T1 is T2:
+                out = T1.trace(u, l, inplace=True)
+            else:
+                _left_inds.append(u)
+                _right_inds.append(l)
+        if _left_inds:
+            tn.reindex_({u: l for u, l in zip(_left_inds, _right_inds)})
+            return tn.contract_tags(..., inplace=True, **contract_opts)
+        else:
+            if tn.outer_inds():
+                return tn
+            else:
+                return out.data
 
     def replace_with_identity(self, where, which='any', inplace=False):
         raise NotImplementedError

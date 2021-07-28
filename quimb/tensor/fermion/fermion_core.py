@@ -912,6 +912,16 @@ class FermionTensorNetwork(BlockTensorNetwork):
         tn = self if inplace else self.copy(full=True)
         tn.fermion_space._reorder_from_dict(tid_map)
         return tn
+    
+    def _select_tids(self, tids, virtual=True):
+        """Get a copy or a virtual copy (doesn't copy the tensors) of this
+        ``FermionTensorNetwork``, only with the tensors corresponding to ``tids``.
+        """
+        tn = FermionTensorNetwork(())
+        for tid in tids:
+            tn.add_tensor(self.tensor_map[tid], tid=tid, virtual=virtual)
+        tn.view_like_(self)
+        return tn
 
     def add_tensor(self, tsr, tid=None, virtual=False):
         T = tsr if virtual else tsr.copy()
