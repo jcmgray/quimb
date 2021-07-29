@@ -1,13 +1,14 @@
 """Core tensor network tools.
 """
-import os
 import copy
 import functools
 from operator import add
+import contextlib
 import numpy as np
 
 from ...utils import (oset, valmap, check_opt)
 from ..drawing import draw_tn
+from .block_tools import sqrt, inv_with_smudge
 
 from ..tensor_core import TensorNetwork, rand_uuid, tags_to_oset, group_inds
 from .tensor_block import tensor_split as _tensor_split
@@ -574,6 +575,12 @@ def _split_and_replace_in_fs(T, insert_gauge=False, **compress_opts):
     fs.insert_tensor(isite+1+offset, tensors[0], tid=rand_uuid(base="_T"), virtual=True)
     return tensors
 
+def _get_gauge_location(Ti, Tj):
+    if Ti.get_fermion_info()[1]<Tj.get_fermion_info()[1]:
+        return "front", "back"
+    else:
+        return "back", "front"
+
 # --------------------------------------------------------------------------- #
 #                                Tensor Class                                 #
 # --------------------------------------------------------------------------- #
@@ -852,7 +859,7 @@ class FermionTensorNetwork(BlockTensorNetwork):
             gtid = list(other_tids)[0]
             self.tensor_map[gtid].flip_(global_flip=True)
 
-    def copy(self, full=False):
+    def copy(self, full=False, force=False):
         """ For full copy, the tensors and underlying FermionSpace(all tensors in it) will
         be copied. For partial copy, the tensors in this network must be continuously
         placed and a new FermionSpace will be created to hold this continous sector.
@@ -863,10 +870,11 @@ class FermionTensorNetwork(BlockTensorNetwork):
             tsr = [fs.tensor_order[tid][0] for tid in tids]
             newtn = FermionTensorNetwork(tsr, virtual=True)
         else:
-            if not self.is_continuous():
+            if not self.is_continuous() and not force:
                 raise TypeError("Tensors not continuously placed in the network, \
                                 partial copy not allowed")
-            newtn = FermionTensorNetwork(self)
+            else:                
+                newtn = FermionTensorNetwork(self)
         newtn.view_like_(self)
         return newtn
 
@@ -918,6 +926,12 @@ class FermionTensorNetwork(BlockTensorNetwork):
         ``FermionTensorNetwork``, only with the tensors corresponding to ``tids``.
         """
         tn = FermionTensorNetwork(())
+        if not virtual:
+            # make sure the relative order is consistent as original network
+            order_map = dict()
+            for tid in tids:
+                order_map[tid] = self.tensor_map[tid].get_fermion_info()[1]
+            tids = sorted(order_map, key=lambda x: order_map[x])
         for tid in tids:
             tn.add_tensor(self.tensor_map[tid], tid=tid, virtual=virtual)
         tn.view_like_(self)
@@ -1202,6 +1216,58 @@ class FermionTensorNetwork(BlockTensorNetwork):
         if return_all:
             return norm, ket, bra
         return norm
+    
+    def gauge_simple_insert(self, gauges):
+        # absorb outer gauges fully into single tensor
+        outer = []
+        inner = []
+
+        if len(self.tensor_map)==len(self.fermion_space.tensor_order):
+            full_ind_map = self.ind_map
+        else:
+            full_ind_map = self.fermion_space.get_ind_map()
+            
+        for (ix, iy), g in gauges.items():
+            tensors = list(self._inds_get(ix, iy))
+            if len(tensors)==2:
+                tl, = self._inds_get(ix)
+                tr, = self._inds_get(iy)
+                location = _get_gauge_location(tl, tr)
+                bond, = tl.bonds(tr)
+                g = sqrt(g)
+                tl.multiply_index_diagonal_(bond, g, location=location[0])
+                tr.multiply_index_diagonal_(bond, g, location=location[1])
+                inner.append(((tl, tr), bond, g, location))
+            elif len(tensors)==1:
+                tl, = tensors
+                itid, = full_ind_map[iy] if ix in tl.inds else full_ind_map[ix]
+                tr = self.fermion_space.tensor_order[itid][0]
+                bond, = tl.bonds(tr)
+                location = _get_gauge_location(tl, tr)[0]
+                tl.multiply_index_diagonal_(bond, g, location=location)
+                outer.append((tl, bond, g, location))
+        return outer, inner
+    
+    @contextlib.contextmanager
+    def gauge_simple_temp(
+        self,
+        gauges,
+        ungauge_outer=True,
+        ungauge_inner=True,
+    ):
+        outer, inner = self.gauge_simple_insert(gauges)
+        try:
+            yield outer, inner
+        finally:
+            while ungauge_outer and outer:
+                t, ix, g, location = outer.pop()
+                g = inv_with_smudge(g, gauge_smudge=0.)
+                t.multiply_index_diagonal_(ix, g, location=location)
+            while ungauge_inner and inner:
+                (tl, tr), ix, g, location = inner.pop()
+                ginv = inv_with_smudge(g, gauge_smudge=0.)
+                tl.multiply_index_diagonal_(ix, ginv, location=location[0])
+                tr.multiply_index_diagonal_(ix, ginv, location=location[1])  
 
     def compute_inds_environment(self, inds, **inds_env_options):
         env = self.copy()
