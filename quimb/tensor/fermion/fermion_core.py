@@ -751,9 +751,9 @@ class FermionTensorNetwork(BlockTensorNetwork):
 
         # short-circuit for copying TensorNetworks
         if isinstance(ts, self.__class__):
-            if not ts.is_continuous():
-                raise TypeError("Tensors not continuously placed in the network, \
-                                this maybe due to this network being part of another network")
+            #if not ts.is_continuous():
+            #    raise TypeError("Tensors not continuously placed in the network, \
+            #                    this maybe due to this network being part of another network")
             fs = FermionSpace()
             self.tag_map = valmap(lambda tids: tids.copy(), ts.tag_map)
             self.ind_map = valmap(lambda tids: tids.copy(), ts.ind_map)
