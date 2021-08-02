@@ -100,7 +100,7 @@ class FermionTensorNetworkGenVector(
         b = k.H
         if normalized:
             # compute <b|k> locally
-            nfact = (k | b).contract(all, optimize=optimize)
+            nfact = (k & b).contract(all, optimize=optimize)
         else:
             nfact = None
 
@@ -130,7 +130,7 @@ class FermionTensorNetworkGenVector(
         Gop = FermionTensor(G.copy(), inds=b_inds+k_inds)
         new_G = b.fermion_space.move_past(Gop).data
         
-        rho = (self | b).contract(all, optimize=optimize)
+        rho = (self & b).contract(all, optimize=optimize)
         # make sure the bra indices lie ahead of ket indices
         rho.transpose_(*b_inds, *k_inds)
         rho = FermionTensorNetwork([rho])

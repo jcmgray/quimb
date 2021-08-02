@@ -19,7 +19,7 @@ class LocalHamGen(LocalHamGen):
         # first combine terms to ensure coo1 < coo2
         for where in tuple(filter(bool, self.terms)):
             coo1, coo2 = where
-            
+
             new_where = coo2, coo1
             if new_where in self.terms:
                 X12 = self.terms.pop(new_where).transpose([1,0,3,2])
@@ -48,7 +48,7 @@ class LocalHamGen(LocalHamGen):
         if key not in cache:
             cache[key] = x.transpose([1,0,3,2])
         return cache[key]
-    
+
     def _expm_cached(self, x, y):
         cache = self._op_cache['expm']
         key = (id(x), y)
@@ -85,33 +85,10 @@ class TEBDGen(TEBDGen):
     arbitrary graph, i.e. applying the exponential of a Hamiltonian using
     a product formula that involves applying local exponentiated gates only.
     """
-
-    def compute_energy(self):
-        """Compute and return the energy of the current state. Subclasses can
-        override this with a custom method to compute the energy.
-        """
-        raise NotImplementedError
-        return self._psi.compute_local_expectation_simple(
-            terms=self.ham.terms,
-            **self.compute_energy_opts
-        )
+    pass
 
 
 class SimpleUpdateGen(SimpleUpdateGen):
-
-    def gate(self, U, where):
-        raise NotImplementedError
-        self._psi.gate_simple_(
-            U, where, gauges=self.gauges, **self.gate_opts
-        )
-
-    def compute_energy(self):
-        raise NotImplementedError
-        return self._psi.compute_local_expectation_simple(
-            terms=self.ham.terms,
-            gauges=self.gauges,
-            **self.compute_energy_opts,
-        )
 
     def get_state(self, absorb_gauges=True):
         psi = self._psi.copy()
@@ -124,7 +101,8 @@ class SimpleUpdateGen(SimpleUpdateGen):
         return psi
 
     def set_state(self, psi):
-        raise NotImplementedError
+        """The default method for setting the current state - simply a copy.
+        Subclasses can override this to perform additional transformations.
+        """
+        self.gauges = dict()
         self._psi = psi.copy()
-        self.gauges = {}
-        self._psi.gauge_all_simple_(gauges=self.gauges)
