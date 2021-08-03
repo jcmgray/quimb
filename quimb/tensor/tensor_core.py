@@ -1268,6 +1268,22 @@ def get_tags(ts):
     return oset.union(*(t.tags for t in ts))
 
 
+def maybe_unwrap(t, preserve_tensor=False, equalize_norms=False):
+    """Maybe unwrap a ``TensorNetwork`` or ``Tensor`` into a ``Tensor`` or
+    scalar, depending on how many tensors and indices it has.
+    """
+    if isinstance(t, TensorNetwork):
+        if equalize_norms is True:
+            # this also redistributes the any collected norm exponent
+            t.equalize_norms_()
+        if t.num_tensors != 1:
+            return t
+        t, = t.tensor_map.values()
+    if preserve_tensor or t.ndim != 0:
+        return t
+    return t.data
+
+
 def tensor_network_distance(
     tnA,
     tnB,
@@ -1925,7 +1941,9 @@ class Tensor(object):
 
     @property
     def size(self):
-        return self._data.size
+        # more robust than calling _data.size (e.g. for torch) - consider
+        # adding do('size', x) to autoray?
+        return prod(self.shape)
 
     @property
     def dtype(self):
@@ -2865,8 +2883,6 @@ class TensorNetwork(object):
         Views the constituent tensors.
         """
         return TensorNetwork((self, other), virtual=True)
-
-    _EXTRA_PROPS = ()
 
     @classmethod
     def from_TN(cls, tn, like=None, inplace=False, **kwargs):
@@ -4016,6 +4032,7 @@ class TensorNetwork(object):
 
         Returns
         -------
+        TensorNetwork
 
         See Also
         --------
@@ -4430,10 +4447,13 @@ class TensorNetwork(object):
                     (tid1, tid2), max_bond=max_bond, cutoff=cutoff,
                     **ensure_dict(contract_around_opts))
 
-            if method == 'contract_compressed':
+            elif method == 'contract_compressed':
                 tn_env.contract_compressed_(
                     max_bond=max_bond, cutoff=cutoff,
                     **ensure_dict(contract_compressed_opts))
+
+            else:
+                raise ValueError(f'Unknown method: {method}')
 
         return tn_env.to_dense([lcut], [rcut], optimize=optimize)
 
@@ -4711,18 +4731,19 @@ class TensorNetwork(object):
         self,
         tid1,
         tid2,
+        absorb='right',
         equalize_norms=False,
         **canonize_opts,
     ):
         Tl = self.tensor_map[tid1]
         Tr = self.tensor_map[tid2]
-        tensor_canonize_bond(Tl, Tr, **canonize_opts)
+        tensor_canonize_bond(Tl, Tr, absorb=absorb, **canonize_opts)
 
         if equalize_norms:
             self.strip_exponent(tid1, equalize_norms)
             self.strip_exponent(tid2, equalize_norms)
 
-    def canonize_between(self, tags1, tags2, **canonize_opts):
+    def canonize_between(self, tags1, tags2, absorb='right', **canonize_opts):
         r"""'Canonize' the bond between the two single tensors in this network
         specified by ``tags1`` and ``tags2`` using ``tensor_canonize_bond``::
 
@@ -4747,6 +4768,8 @@ class TensorNetwork(object):
             become an isometry.
         tags2 : str or sequence of str
             Tags uniquely identifying the second ('right') tensor.
+        absorb : {'left', 'both', 'right'}, optional
+            Which side of the bond to absorb the non-isometric operator.
         canonize_opts
             Supplied to :func:`~quimb.tensor.tensor_core.tensor_canonize_bond`.
 
@@ -4756,7 +4779,7 @@ class TensorNetwork(object):
         """
         tid1, = self._get_tids_from_tags(tags1, which='all')
         tid2, = self._get_tids_from_tags(tags2, which='all')
-        self._canonize_between_tids(tid1, tid2, **canonize_opts)
+        self._canonize_between_tids(tid1, tid2, absorb=absorb, **canonize_opts)
 
     def _get_neighbor_tids(self, tids):
         """Get the tids of tensors connected to the tensor at ``tid``.
@@ -4824,7 +4847,7 @@ class TensorNetwork(object):
         ndim_sort='max',
         distance_sort='min',
         sorter=None,
-        connectivity_weight_bonds=True,
+        weight_bonds=True,
         inwards=True,
     ):
         """Generate a tree on the tensor network graph, fanning out from the
@@ -4855,7 +4878,7 @@ class TensorNetwork(object):
             When expanding the tree, how to choose what nodes to expand to
             next, once connectivity to the current surface has been taken into
             account.
-        connectivity_weight_bonds : bool, optional
+        weight_bonds : bool, optional
             Whether to weight the 'connection' of a candidate tensor to expand
             out to using bond size as well as number of bonds.
 
@@ -4910,7 +4933,7 @@ class TensorNetwork(object):
 
             # keep track of how connected to the current surface potential new
             # nodes are
-            if connectivity_weight_bonds:
+            if weight_bonds:
                 connectivity[tid_neighb] += math.log2(bonds_size(
                     self.tensor_map[tid_surface], self.tensor_map[tid_neighb]))
             else:
@@ -4970,7 +4993,7 @@ class TensorNetwork(object):
         ndim_sort='max',
         distance_sort='min',
         sorter=None,
-        connectivity_weight_bonds=True,
+        weight_bonds=True,
         color='order',
         colormap='Spectral',
         **draw_opts,
@@ -4990,7 +5013,7 @@ class TensorNetwork(object):
                 ndim_sort=ndim_sort,
                 distance_sort=distance_sort,
                 sorter=sorter,
-                connectivity_weight_bonds=connectivity_weight_bonds)
+                weight_bonds=weight_bonds)
 
         for i, (tid1, tid2, d) in enumerate(span):
             # get the tensors on either side of this tree edge
@@ -5035,7 +5058,7 @@ class TensorNetwork(object):
         exclude=None,
         ndim_sort='max',
         distance_sort='min',
-        connectivity_weight_bonds=True,
+        weight_bonds=True,
         color='order',
         colormap='Spectral',
         **draw_opts,
@@ -5077,7 +5100,7 @@ class TensorNetwork(object):
             exclude=exclude,
             ndim_sort=ndim_sort,
             distance_sort=distance_sort,
-            connectivity_weight_bonds=connectivity_weight_bonds,
+            weight_bonds=weight_bonds,
             color=color,
             colormap=colormap,
             **draw_opts)
@@ -5353,7 +5376,7 @@ class TensorNetwork(object):
                     t1, t2, absorb=None, info=info, cutoff=0.0)
 
                 s = info['singular_values'].data
-                smax = do('max', s)
+                smax = s[0]
                 new_gauge = s / smax
                 nfact = do('log10', smax) + nfact
 
@@ -5607,6 +5630,7 @@ class TensorNetwork(object):
         callback_pre_compress=None,
         callback_post_compress=None,
         callback=None,
+        preserve_tensor=False,
         progbar=False,
     ):
         # the boundary - the set of intermediate tensors
@@ -5778,14 +5802,14 @@ class TensorNetwork(object):
             if callback is not None:
                 callback(self, tid_new)
 
-        if equalize_norms is True:
-            # this also redistibutes the collected exponent
-            self.equalize_norms_()
-
         if progbar:
             pbar.close()
 
-        return self
+        return maybe_unwrap(
+            self,
+            preserve_tensor=preserve_tensor,
+            equalize_norms=equalize_norms,
+        )
 
     def _contract_around_tids(
         self,
@@ -5835,20 +5859,19 @@ class TensorNetwork(object):
             equalize_norms=equalize_norms,
             **kwargs)
 
-    def most_central_tid(self):
+    def compute_centralities(self):
         import cotengra as ctg
         hg = ctg.get_hypergraph(
             {tid: t.inds for tid, t in self.tensor_map.items()}
         )
-        cents = hg.simple_centrality()
+        return hg.simple_centrality()
+
+    def most_central_tid(self):
+        cents = self.compute_centralities()
         return max((score, tid) for tid, score in cents.items())[1]
 
     def least_central_tid(self):
-        import cotengra as ctg
-        hg = ctg.get_hypergraph(
-            {tid: t.inds for tid, t in self.tensor_map.items()}
-        )
-        cents = hg.simple_centrality()
+        cents = self.compute_centralities()
         return min((score, tid) for tid, score in cents.items())[1]
 
     def contract_around_center(self, **opts):
@@ -6185,7 +6208,7 @@ class TensorNetwork(object):
 
         See Also
         --------
-        contract, contract_cumulative, contract_structured
+        contract, contract_cumulative
         """
         untagged_tn, tagged_ts = self.partition_tensors(
             tags, inplace=inplace, which=which)
@@ -6226,7 +6249,7 @@ class TensorNetwork(object):
 
         See Also
         --------
-        contract, contract_tags, contract_structured
+        contract, contract_tags
         """
         tn = self if inplace else self.copy()
         c_tags = oset()
@@ -6267,7 +6290,7 @@ class TensorNetwork(object):
 
         See Also
         --------
-        contract_structured, contract_tags, contract_cumulative
+        contract_tags, contract_cumulative
         """
         if tags is all:
             return tensor_contract(*self, **opts)
@@ -6284,7 +6307,7 @@ class TensorNetwork(object):
     contract_ = functools.partialmethod(contract, inplace=True)
 
     def contraction_path(self, optimize=None, **contract_opts):
-        """Compute the contraction path, a sequence of tuple[int, int], for
+        """Compute the contraction path, a sequence of (int, int), for
         the contraction of this entire tensor network using path optimizer
         ``optimize``.
         """
