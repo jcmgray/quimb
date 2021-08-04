@@ -203,3 +203,23 @@ class TestGenericTN:
         edges = [(0, 1), (1, 2), (2, 0)]
         tn = qtn.TN_dimer_covering_from_edges(edges, cover_count=1)
         assert tn ^ all == pytest.approx(0.0)
+
+    def test_tn2d_fillers(self):
+        tn = qtn.TN2D_empty(Lx=2, Ly=2, D=2)
+        assert isinstance(tn, qtn.TensorNetwork2D)
+        assert (
+            (qtn.TN2D_rand(Lx=2, Ly=2, D=2, seed=42) ^ all) ==
+            pytest.approx(qtn.TN2D_rand(Lx=2, Ly=2, D=2, seed=42) ^ all)
+        )
+        tn = qtn.TN2D_with_value(1.0, Lx=2, Ly=3, D=4)
+        assert tn ^ all == pytest.approx(qu.prod(tn.ind_sizes().values()))
+
+    def test_tn3d_fillers(self):
+        tn = qtn.TN3D_empty(Lx=2, Ly=2, Lz=2, D=2)
+        assert isinstance(tn, qtn.TensorNetwork3D)
+        assert (
+            (qtn.TN3D_rand(Lx=2, Ly=2, Lz=2, D=2, seed=42) ^ all) ==
+            pytest.approx(qtn.TN3D_rand(Lx=2, Ly=2, Lz=2, D=2, seed=42) ^ all)
+        )
+        tn = qtn.TN3D_with_value(1.0, Lx=2, Ly=3, Lz=2, D=2)
+        assert tn ^ all == pytest.approx(qu.prod(tn.ind_sizes().values()))
