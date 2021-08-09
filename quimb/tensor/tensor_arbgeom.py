@@ -466,7 +466,7 @@ class TensorNetworkGenVector(TensorNetworkGen,
             )
 
         if normalized:
-            nfact = (self.H | self).contract(all, optimize=optimize)
+            nfact = (self & self.H).contract(all, optimize=optimize)
             if return_all:
                 return {where: x / nfact for where, x in expecs.items()}
             return functools.reduce(add, expecs.values()) / nfact
