@@ -5,35 +5,15 @@ import functools
 from operator import add
 import contextlib
 import numpy as np
+from opt_einsum.contract import parse_backend, _tensordot, _transpose
 
 from ...utils import (oset, valmap, check_opt)
-from ..drawing import draw_tn
 from .block_tools import sqrt, inv_with_smudge
 
-from ..tensor_core import TensorNetwork, rand_uuid, tags_to_oset, group_inds
+from ..tensor_core import TensorNetwork, rand_uuid, tags_to_oset, group_inds, tensor_contract
 from .tensor_block import tensor_split as _tensor_split
-from .tensor_block import _core_contract, tensor_canonize_bond, tensor_compress_bond, BlockTensor, BlockTensorNetwork, get_block_contraction_path_info, tensor_balance_bond
+from .tensor_block import tensor_canonize_bond, tensor_compress_bond, BlockTensor, BlockTensorNetwork, tensor_balance_bond
 from functools import wraps
-
-def contract_decorator(fn):
-    @wraps(fn)
-    def wrapper(T1, T2, *args, **kwargs):
-        tid1, site1 = T1.get_fermion_info()
-        tid2, site2 = T2.get_fermion_info()
-        fs = T1.fermion_owner[0]
-        if site1 > site2:
-            fs.move(tid1, site2+1)
-            out = fn(T1, T2, *args, **kwargs)
-        else:
-            fs.move(tid2, site1+1)
-            out = fn(T2, T1, *args, **kwargs)
-        if not isinstance(out, (float, complex)):
-            fs.replace_tensor(min(site1, site2), out, virtual=True)
-            fs.remove_tensor(min(site1, site2)+1)
-        return out
-    return wrapper
-
-_core_contract = contract_decorator(_core_contract)
 
 def compress_decorator(fn):
     @wraps(fn)
@@ -428,36 +408,80 @@ class FermionSpace:
 # --------------------------------------------------------------------------- #
 #                                Tensor Funcs                                 #
 # --------------------------------------------------------------------------- #
+def _launch_fermion_expression(
+    expr,
+    tensors,
+    inplace=False,
+    backend='auto',
+    preserve_tensor = False,
+    **kwargs
+):
+    evaluate_constants = kwargs.pop('evaluate_constants', False)
+    if evaluate_constants:
+        raise NotImplementedError
 
-def tensor_contract(*tensors, output_inds=None, preserve_tensor=False, inplace=False, **contract_opts):
-    if len(tensors) == 1:
-        if inplace:
-            return tensors[0]
-        else:
-            return tensors[0].copy()
-    path_info = get_block_contraction_path_info(*tensors, **contract_opts)
+    contraction_list = expr.contraction_list
     fs, tid_lst = _dispatch_fermion_space(*tensors, inplace=inplace)
     if inplace:
         tensors = list(tensors)
     else:
         tensors = [fs.tensor_order[tid][0] for tid in tid_lst]
 
-    for conc in path_info.contraction_list:
-        pos1, pos2 = sorted(conc[0])
-        T2 = tensors.pop(pos2)
-        T1 = tensors.pop(pos1)
-        out = _core_contract(T1, T2, preserve_tensor)
-        tensors.append(out)
+    operands = [Ta.data for Ta in tensors]
+    backend = parse_backend(operands, backend)
+    # Start contraction loop
+    for num, contraction in enumerate(contraction_list):
+        inds, idx_rm, einsum_str, _, _ = contraction
+        tmp_operands = [tensors.pop(x) for x in inds]
+        # Call tensordot (check if should prefer einsum, but only if available)
+        input_str, results_index = einsum_str.split('->')
+        input_left, input_right = input_str.split(',')
+        contract_out = (oset(input_left) | oset(input_right)) \
+                     - (oset(input_left) & oset(input_right))
+        if contract_out == oset(results_index):
+            Ta, Tb = tmp_operands
+            input_str, results_index = einsum_str.split('->')
+            tid1, site1 = Ta.get_fermion_info()
+            tid2, site2 = Tb.get_fermion_info()
+            if site1 < site2:
+                fs.move(tid2, site1+1)
+                input_right, input_left = input_left, input_right
+                Ta, Tb = Tb, Ta
+                #input_right, input_left = input_str.split(',')
+            else:
+                fs.move(tid1, site2+1)
+                #input_left, input_right = input_str.split(',')
+            tensor_result = "".join(s for s in input_left + input_right if s not in idx_rm)
+            # Find indices to contract over
+            left_pos, right_pos = [], []
+            for s in idx_rm:
+                left_pos.append(input_left.find(s))
+                right_pos.append(input_right.find(s))
 
-    if not isinstance(out, (float, complex)):
-        _output_inds = out.inds
-        if output_inds is None:
-            output_inds = _output_inds
+            # Contract!
+            new_view = _tensordot(Ta.data, Tb.data, axes=(tuple(left_pos), tuple(right_pos)), backend=backend)
+
+            o_ix = [ind for ind in Ta.inds if ind not in Tb.inds] + \
+                   [ind for ind in Tb.inds if ind not in Ta.inds]
+
+            # Build a new view if needed
+            if (tensor_result != results_index):
+                transpose = tuple(map(tensor_result.index, results_index))
+                new_view = _transpose(new_view, axes=transpose, backend=backend)
+                o_ix = [o_ix[ix] for ix in transpose]
+
+            o_tags = oset.union(Ta.tags, Tb.tags)
+            if len(o_ix) != 0 or preserve_tensor:
+                new_view = Ta.__class__(data=new_view, inds=o_ix, tags=o_tags)
+                fs.replace_tensor(min(site1, site2), new_view, virtual=True)
+                fs.remove_tensor(min(site1, site2)+1)
+        # Call einsum
         else:
-            output_inds = tuple(output_inds)
-        if output_inds!=_output_inds:
-            out.transpose_(*output_inds)
-    return out
+            raise NotImplementedError("Generic Einsum Operations not supported")
+        # Append new items and dereference what we can
+        tensors.append(new_view)
+        del tmp_operands, new_view
+    return tensors[0]
 
 def tensor_split(
     T,
@@ -552,10 +576,10 @@ def _dispatch_fermion_space(*tensors, inplace=True):
                     raise ValueError("Input Network not continous, merge not allowed")
                 for itsr in tsr_or_tn:
                     fs.add_tensor(itsr, virtual=inplace)
-        tid_lst = list(fs.tensor_order.keys())
+        tid_lst = list(fs.tensor_order.keys())[::-1]
     return fs, tid_lst
 
-FERMION_FUNCS = {"tensor_contract": tensor_contract,
+FERMION_FUNCS = {"expression_launcher": _launch_fermion_expression,
                  "tensor_split": tensor_split,
                  "tensor_compress_bond": tensor_compress_bond,
                  "tensor_canonize_bond": tensor_canonize_bond,
@@ -731,13 +755,6 @@ class FermionTensor(BlockTensor):
         """
         return FermionTensorNetwork((self, other), virtual=True)
 
-    def draw(self, *args, **kwargs):
-        """Plot a graph of this tensor and its indices.
-        """
-        draw_tn(FermionTensorNetwork((self,)), *args, **kwargs)
-
-    graph = draw
-
 # --------------------------------------------------------------------------- #
 #                            Tensor Network Class                             #
 # --------------------------------------------------------------------------- #
@@ -870,7 +887,7 @@ class FermionTensorNetwork(BlockTensorNetwork):
             if not self.is_continuous() and not force:
                 raise TypeError("Tensors not continuously placed in the network, \
                                 partial copy not allowed")
-            else:                
+            else:
                 newtn = FermionTensorNetwork(self)
         newtn.view_like_(self)
         return newtn
@@ -1213,7 +1230,7 @@ class FermionTensorNetwork(BlockTensorNetwork):
         if return_all:
             return norm, ket, bra
         return norm
-    
+
     def gauge_simple_insert(self, gauges):
         # absorb outer gauges fully into single tensor
         outer = []
@@ -1223,7 +1240,7 @@ class FermionTensorNetwork(BlockTensorNetwork):
             full_ind_map = self.ind_map
         else:
             full_ind_map = self.fermion_space.get_ind_map()
-            
+
         for (ix, iy), g in gauges.items():
             tensors = list(self._inds_get(ix, iy))
             if len(tensors)==2:
@@ -1244,7 +1261,7 @@ class FermionTensorNetwork(BlockTensorNetwork):
                 tl.multiply_index_diagonal_(bond, g, location=location)
                 outer.append((tl, bond, g, location))
         return outer, inner
-    
+
     @contextlib.contextmanager
     def gauge_simple_temp(
         self,
@@ -1264,7 +1281,7 @@ class FermionTensorNetwork(BlockTensorNetwork):
                 (tl, tr), ix, g, location = inner.pop()
                 ginv = inv_with_smudge(g, gauge_smudge=0.)
                 tl.multiply_index_diagonal_(ix, ginv, location=location[0])
-                tr.multiply_index_diagonal_(ix, ginv, location=location[1])  
+                tr.multiply_index_diagonal_(ix, ginv, location=location[1])
 
     def compute_inds_environment(self, inds, **inds_env_options):
         env = self.copy()

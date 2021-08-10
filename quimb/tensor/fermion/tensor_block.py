@@ -3,83 +3,74 @@
 import functools
 
 import numpy as np
-import opt_einsum as oe
+from opt_einsum.contract import _tensordot, _transpose, parse_backend
 
 from ...utils import (check_opt, oset)
-from ..drawing import draw_tn
 
 from ..tensor_core import (Tensor, TensorNetwork, tags_to_oset, rand_uuid,
-                          _parse_split_opts, concat, unique, _inds_to_eq,
-                          _gen_output_inds, get_contraction)
+                          _parse_split_opts, tensor_contract)
 from .block_tools import get_smudge_balance
 
 # --------------------------------------------------------------------------- #
 #                                Tensor Funcs                                 #
 # --------------------------------------------------------------------------- #
 
-def _core_contract(T1, T2, preserve_tensor=False):
-    conc = [ind for ind in T1.inds if ind in T2.inds]
-    ax1 = [T1.inds.index(ind) for ind in conc]
-    ax2 = [T2.inds.index(ind) for ind in conc]
-    o_array = np.tensordot(T1.data, T2.data, (ax1, ax2))
-    o_ix = tuple([ind for ind in T1.inds+T2.inds if ind not in conc])
-    o_tags = oset.union(T1.tags, T2.tags)
-    if len(o_ix) == 0 and not preserve_tensor:
-        return o_array
-    else:
-        return T1.__class__(data=o_array, inds=o_ix, tags=o_tags)
+def _launch_block_expression(
+    expr,
+    tensors,
+    backend='auto',
+    preserve_tensor = False,
+    **kwargs
+):
+    evaluate_constants = kwargs.pop('evaluate_constants', False)
+    if evaluate_constants:
+        raise NotImplementedError
 
-def get_block_contraction_path_info(*tensors, **contract_opts):
-    i_ix = tuple(t.inds for t in tensors)  # input indices per tensor
-    total_ix = tuple(concat(i_ix))  # list of all input indices
-    all_ix = tuple(unique(total_ix))
-
-    o_ix = tuple(_gen_output_inds(total_ix))
-
-    # possibly map indices into the range needed by opt-einsum
-    eq = _inds_to_eq(i_ix, o_ix)
-
-    size_dict = dict()
-    for T in tensors:
-        i_shape = T.shape
-        for ax, ix in enumerate(T.inds):
-            if ix not in size_dict:
-                size_dict[ix] = i_shape[ax]
-            else:
-                size_dict[ix] = max(i_shape[ax], size_dict[ix])
-
-    ops = []
-    for T in tensors:
-        i_shape = [size_dict[ix] for ix in T.inds]
-        ops.append(tuple(i_shape))
-
-    path_info = get_contraction(eq, *ops, get='info', **contract_opts)
-    path_info.quimb_symbol_map = {
-        oe.get_symbol(i): ix for i, ix in enumerate(all_ix)
-    }
-    return path_info
-
-def tensor_contract(*tensors, output_inds=None, preserve_tensor=False, **contract_opts):
-    if len(tensors) == 1:
-        return tensors[0]
-    path_info = get_block_contraction_path_info(*tensors, **contract_opts)
+    contraction_list = expr.contraction_list
     tensors = list(tensors)
-    for conc in path_info.contraction_list:
-        pos1, pos2 = sorted(conc[0])
-        T2 = tensors.pop(pos2)
-        T1 = tensors.pop(pos1)
-        out = _core_contract(T1, T2, preserve_tensor)
-        tensors.append(out)
+    operands = [Ta.data for Ta in tensors]
+    backend = parse_backend(operands, backend)
+    # Start contraction loop
+    for _, contraction in enumerate(contraction_list):
+        inds, idx_rm, einsum_str, _, _ = contraction
+        tmp_operands = [tensors.pop(x) for x in inds]
+        # Call tensordot (check if should prefer einsum, but only if available)
+        input_str, results_index = einsum_str.split('->')
+        input_left, input_right = input_str.split(',')
+        contract_out = (oset(input_left) | oset(input_right)) \
+                     - (oset(input_left) & oset(input_right))
+        
+        if contract_out == oset(results_index):
+            Ta, Tb = tmp_operands
+            tensor_result = "".join(s for s in input_left + input_right if s not in idx_rm)
+            # Find indices to contract over
+            left_pos, right_pos = [], []
+            for s in idx_rm:
+                left_pos.append(input_left.find(s))
+                right_pos.append(input_right.find(s))
 
-    if not isinstance(out, (float, complex)):
-        _output_inds = out.inds
-        if output_inds is None:
-            output_inds = _output_inds
+            # Contract!
+            new_view = _tensordot(Ta.data, Tb.data, axes=(tuple(left_pos), tuple(right_pos)), backend=backend)
+
+            o_ix = [ind for ind in Ta.inds if ind not in Tb.inds] + \
+                   [ind for ind in Tb.inds if ind not in Ta.inds]
+
+            # Build a new view if needed
+            if (tensor_result != results_index):
+                transpose = tuple(map(tensor_result.index, results_index))
+                new_view = _transpose(new_view, axes=transpose, backend=backend)
+                o_ix = [o_ix[ix] for ix in transpose]
+
+            o_tags = oset.union(Ta.tags, Tb.tags)
+            if len(o_ix) != 0 or preserve_tensor:
+                new_view = Ta.__class__(data=new_view, inds=o_ix, tags=o_tags)
+        # Call einsum
         else:
-            output_inds = tuple(output_inds)
-        if output_inds!=_output_inds:
-            out.transpose_(*output_inds)
-    return out
+            raise NotImplementedError("Generic Einsum Operations not supported")
+        # Append new items and dereference what we can
+        tensors.append(new_view)
+        del tmp_operands, new_view
+    return tensors[0]
 
 def tensor_split(
     T,
@@ -236,13 +227,13 @@ def tensor_balance_bond(t1, t2, smudge=1e-6):
     ix, = t1.bonds(t2)
     t1H = t1.H.reindex_({ix: ix+'*'})
     t2H = t2.H.reindex_({ix: ix+'*'})
-    out1 = _core_contract(t1H, t1)
-    out2 = _core_contract(t2H, t2)
+    out1 = tensor_contract(t1H, t1.copy(), inplace=False)
+    out2 = tensor_contract(t2H, t2.copy(), inplace=False)
     s1, s2 = get_smudge_balance(out1, out2, ix, smudge)
     t1.multiply_index_diagonal_(ix, s1, location="back")
     t2.multiply_index_diagonal_(ix, s2, location="front")
 
-BLOCK_FUNCS = {"tensor_contract": tensor_contract,
+BLOCK_FUNCS = { "expression_launcher": _launch_block_expression,
                 "tensor_split": tensor_split,
                 "tensor_compress_bond": tensor_compress_bond,
                 "tensor_canonize_bond": tensor_canonize_bond,
@@ -393,13 +384,6 @@ class BlockTensor(Tensor):
         return BlockTensorNetwork((self, other), virtual=True)
 
     _EXTRA_PROPS = ()
-
-    def draw(self, *args, **kwargs):
-        """Plot a graph of this tensor and its indices.
-        """
-        draw_tn(BlockTensorNetwork((self,)), *args, **kwargs)
-
-    graph = draw
 
 # --------------------------------------------------------------------------- #
 #                            Tensor Network Class                             #

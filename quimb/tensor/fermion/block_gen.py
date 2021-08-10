@@ -39,7 +39,7 @@ def _dispatch_dq(dq, symmetry):
 
 @backend_wrapper
 def rand_single_block(shape, dtype=float, seed=None,
-                      pattern=None, dq=None, ind=None):
+                      pattern=None, dq=None, ind=None, full_shape=None):
     '''Construct random block tensor with one block
 
     Parameters
@@ -77,11 +77,11 @@ def rand_single_block(shape, dtype=float, seed=None,
     q_labels = [dq if ix==ind else symmetry(0) for ix in range(len(shape))]
     array = randn(shape, dtype=dtype)
     blk = SubTensor(reduced=array, q_labels=q_labels)
-    T = SparseFermionTensor(blocks=[blk, ], pattern=pattern)
+    T = SparseFermionTensor(blocks=[blk, ], pattern=pattern, shape=full_shape)
     return T
 
 @backend_wrapper
-def ones_single_block(shape, pattern=None, dq=None, ind=None):
+def ones_single_block(shape, pattern=None, dq=None, ind=None, full_shape=None):
     '''Construct block tensor filled with ones with a single block
 
     Parameters
@@ -113,12 +113,12 @@ def ones_single_block(shape, pattern=None, dq=None, ind=None):
     q_labels = [dq if ix==ind else symmetry(0) for ix in range(len(shape))]
     array = np.ones(shape)
     blk = SubTensor(reduced=array, q_labels=q_labels)
-    T = SparseFermionTensor(blocks=[blk, ], pattern=pattern)
+    T = SparseFermionTensor(blocks=[blk, ], pattern=pattern, shape=full_shape)
     return T
 
 @backend_wrapper
 def rand_all_blocks(shape, symmetry_info, dtype=float,
-                    seed=None, pattern=None, dq=None):
+                    seed=None, pattern=None, dq=None, full_shape=None):
     '''Construct block tensor with specified blocks
 
     Parameters
@@ -147,6 +147,11 @@ def rand_all_blocks(shape, symmetry_info, dtype=float,
     '''
     if seed is not None:
         np.random.seed(seed)
+    if full_shape is None:
+        full_shape = []
+        for ish, isym in zip(shape, symmetry_info):
+            full_shape.append(ish * len(isym))
+        full_shape = tuple(full_shape)
     symmetry = get_symmetry()
     dq = _dispatch_dq(dq, symmetry)
     bond_infos = []
@@ -159,7 +164,7 @@ def rand_all_blocks(shape, symmetry_info, dtype=float,
                 bonds.append(symmetry(*ibond))
         bonds = dict(zip(bonds, [sh,]*len(bonds)))
         bond_infos.append(BondInfo(bonds))
-    T = SparseFermionTensor.random(bond_infos, pattern=pattern, dq=dq, dtype=dtype)
+    T = SparseFermionTensor.random(bond_infos, pattern=pattern, dq=dq, dtype=dtype, shape=full_shape)
     return T
 
 def gen_2d_bonds(*args):
