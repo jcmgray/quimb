@@ -5,12 +5,16 @@ import functools
 from operator import add
 import contextlib
 import numpy as np
+import scipy.sparse.linalg as spla
+import opt_einsum as oe
 from opt_einsum.contract import parse_backend, _tensordot, _transpose
+from autoray import conj
 
 from ...utils import (oset, valmap, check_opt)
 from .block_tools import sqrt, inv_with_smudge
+from .block_interface import Constructor
 
-from ..tensor_core import TensorNetwork, rand_uuid, tags_to_oset, group_inds, tensor_contract
+from ..tensor_core import TensorNetwork, rand_uuid, tags_to_oset, group_inds, tensor_contract, get_tensor_linop_backend
 from .tensor_block import tensor_split as _tensor_split
 from .tensor_block import tensor_canonize_bond, tensor_compress_bond, BlockTensor, BlockTensorNetwork, tensor_balance_bond
 from functools import wraps
@@ -447,10 +451,8 @@ def _launch_fermion_expression(
                 fs.move(tid2, site1+1)
                 input_right, input_left = input_left, input_right
                 Ta, Tb = Tb, Ta
-                #input_right, input_left = input_str.split(',')
             else:
                 fs.move(tid1, site2+1)
-                #input_left, input_right = input_str.split(',')
             tensor_result = "".join(s for s in input_left + input_right if s not in idx_rm)
             # Find indices to contract over
             left_pos, right_pos = [], []
@@ -1363,3 +1365,207 @@ class FermionTensorNetwork(BlockTensorNetwork):
         """Overload "@" to mean full contraction with another network.
         """
         return FermionTensorNetwork((self, other)) ^ ...
+
+def _tensors_to_constructors(tensors, inds, inv=True):
+    """
+    Generate a pyblock3.algebra.fermion.Constructor object 
+    to allow mapping from vector to tensor and inverse.
+
+    Parameters
+    ----------
+    tensors: a list/tuple of FermionTensors
+        The tensors to gather symmetry information from
+    inds: a list/tuple of strings
+        The indices of the tensor to construct
+    inv: a string of "+" and "-"
+        Whether to take the complementary signs 
+        from the tensor input
+    
+    Returns
+    -------
+    constructor: a pyblock3.algebra.fermion.Constructor object
+    """
+    string_inv = {"+":"-", "-":"+"}
+    pattern = ""
+    bond_infos = []
+    for T in tensors:
+        axes = [T.inds.index(ix) for ix in inds if ix in T.inds]
+        if not axes:
+            continue
+        elif len(axes)==len(inds):
+            return T.data.to_constructor(axes)
+        else:
+            for ix in axes:
+                bond = T.data.get_bond_info(ix, flip=False)
+                bond_infos.append(bond)
+                if inv:
+                    pattern += string_inv[T.data.pattern[ix]]
+                else:
+                    pattern += T.data.pattern[ix]
+    mycon = Constructor.from_bond_infos(bond_infos, pattern)  
+    return mycon   
+    
+class FTNLinearOperator(spla.LinearOperator):
+    r"""Get a fermionic linear operator - something that replicates the matrix-vector
+    operation - for an arbitrary uncontracted  FermionTensorNetwork, e.g::
+
+                 : --O--O--+ +-- :                 --+
+                 :   |     | |   :                   |
+                 : --O--O--O-O-- :    acting on    --V
+                 :   |     |     :                   |
+                 : --+     +---- :                 --+
+        left_inds^               ^right_inds
+
+    This can then be supplied to scipy's sparse linear algebra routines.
+    The ``left_inds`` / ``right_inds`` convention is that the linear operator
+    will have shape matching ``(*left_inds, *right_inds)``, so that the
+    ``right_inds`` are those that will be contracted in a normal
+    matvec / matmat operation::
+
+        _matvec =    --0--v    , _rmatvec =     v--0--
+
+    Parameters
+    ----------
+    tns : sequence of FermionTensors or FermionTensorNetwork
+        A representation of the hamiltonian. If it's a sequence 
+        of fermionTensors, they must be in the same FermionSpace
+    left_inds : sequence of str
+        The 'left' inds of the effective hamiltonian network.
+    right_inds : sequence of str
+        The 'right' inds of the effective hamiltonian network. These should be
+        ordered the same way as ``left_inds``.
+    target_symmetry: symmetry object in pyblock3.algebra.fermion_symmetry
+        The target total symmetry on the right vector
+    right_constructor: pyblock3.algebra.fermion.Constructor object, optional
+        An object to help map the right vector to a FermionTensor data
+    square: bool, optional
+        Whether the operator is expected to have same symmetry blocks in 
+        left/right indices
+    optimize : str, optional
+        The path optimizer to use for the 'matrix-vector' contraction.
+    backend : str, optional
+        The array backend to use for the 'matrix-vector' contraction.
+    is_conj : bool, optional
+        Whether this object should represent the *adjoint* operator.
+    location: string, optional
+        The relative ordering of the vector with respect to the operator
+
+    See Also
+    --------
+    TNLinearOperator
+    """
+
+    def __init__(self, tns, left_inds, right_inds, target_symmetry, right_constructor=None, square=False,
+                optimize='auto', backend=None, is_conj=False, location="back"):
+        if backend is None:
+            self.backend = get_tensor_linop_backend()
+        else:
+            self.backend = backend
+        self.optimize = optimize
+        self.location = location
+        self._dq = target_symmetry
+
+        if isinstance(tns, FermionTensorNetwork):
+            self._tensors = tns.tensors
+        else:
+            self._tensors = tuple(tns)
+
+        if right_constructor is None:
+            self.right_constructor = _tensors_to_constructors(
+                                        self._tensors, right_inds)
+        else:
+            self.right_constructor = right_constructor
+        if square:
+            self.left_constructor = self.right_constructor
+        else:
+            self.left_constructor = _tensors_to_constructors(
+                                        self._tensors, left_inds, 
+                                        inv=False)
+        self.left_inds, self.right_inds = left_inds, right_inds
+        self.tags = oset.union(*(t.tags for t in self._tensors))
+
+        self._kws = {'get': 'expression'}
+
+        # if recent opt_einsum specify constant tensors
+        if hasattr(oe.backends, 'evaluate_constants'):
+            self._kws['constants'] = range(len(self._tensors))
+
+        # conjugate inputs/ouputs rather all tensors if necessary
+        if is_conj:
+            raise NotImplementedError
+        self.is_conj = is_conj
+        self._conj_linop = None
+        self._adjoint_linop = None
+        self._transpose_linop = None
+        self._contractors = dict()
+
+    @property
+    def dtype(self):
+        return self._tensors[0].dtype
+    
+    @property
+    def dq(self):
+        return self._dq
+    
+    @dq.setter
+    def dq(self, new_dq):
+        self._dq = new_dq
+    
+    @property
+    def ldim(self):
+        return self.left_constructor.vector_size(self.dq)
+    
+    @property
+    def rdim(self):
+        return self.right_constructor.vector_size(self.dq)
+
+    @property
+    def shape(self):
+        return (self.ldim, self.rdim)
+    
+    def left_vector_to_tensor(self, vector, dq=None):
+        if dq is None: 
+            dq = self.dq
+        return self.left_constructor.vector_to_tensor(vector, dq)
+    
+    def right_vector_to_tensor(self, vector, dq=None):
+        if dq is None: 
+            dq = self.dq
+        return self.right_constructor.vector_to_tensor(vector, dq)
+    
+    def left_tensor_to_vector(self, T):
+        return self.left_constructor.tensor_to_vector(T)
+
+    def right_tensor_to_vector(self, T):
+        return self.right_constructor.tensor_to_vector(T)
+
+    vector_to_tensor = right_vector_to_tensor
+    tensor_to_vector = left_tensor_to_vector
+
+    def get_contraction_kits(self):
+        fs, tid_lst = _dispatch_fermion_space(*self._tensors, inplace=False)
+        tensors = [fs.tensor_order[tid][0] for tid in tid_lst]
+        return fs, tensors
+
+    def _matvec(self, vec):
+        in_data = self.vector_to_tensor(vec)
+        iT = FermionTensor(in_data, inds=self.right_inds)
+        fs, tensors = self.get_contraction_kits()
+        tensors.append(iT)
+        if self.location == "back":
+            fs.insert_tensor(0, iT, virtual=True) 
+        else:
+            fs.add_tensor(iT, virtual=True)
+
+        # cache the contractor
+        if 'matvec' not in self._contractors:
+            # generate a expression that acts directly on the data
+            self._contractors['matvec'] = tensor_contract(
+                *tensors, output_inds=self.left_inds,
+                optimize=self.optimize, **self._kws)
+
+        expr = self._contractors['matvec']
+        out_data = _launch_fermion_expression(expr, tensors, backend=self.backend, inplace=True).data
+        if self.is_conj:
+            out_data = conj(out_data)
+        return self.tensor_to_vector(out_data)

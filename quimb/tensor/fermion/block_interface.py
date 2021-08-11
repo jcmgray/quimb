@@ -1,5 +1,5 @@
 import sys
-from pyblock3.algebra.fermion import eye
+from pyblock3.algebra.fermion import eye, Constructor
 from pyblock3.algebra import fermion_setting as setting
 from pyblock3.algebra import fermion_ops
 
