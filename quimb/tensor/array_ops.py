@@ -117,7 +117,7 @@ def _unitize_modified_gram_schmidt(A):
 
         Q.append(q / do('linalg.norm', q, 2))
 
-    Q = do('stack', Q, axis=0, like=A)
+    Q = do('stack', tuple(Q), axis=0, like=A)
 
     if thin:
         Q = do('transpose', Q)

@@ -32,6 +32,7 @@ def draw_tn(
     tn,
     color=None,
     *,
+    output_inds=None,
     highlight_inds=(),
     highlight_tids=(),
     highlight_inds_color=(1.0, 0.2, 0.2, 1.0),
@@ -47,6 +48,7 @@ def draw_tn(
     iterations=200,
     initial_layout='spectral',
     use_forceatlas2=1000,
+    use_spring_weight=False,
     node_color=None,
     node_size=None,
     node_shape='o',
@@ -78,6 +80,10 @@ def draw_tn(
     color : sequence of tags, optional
         If given, uniquely color any tensors which have each of the tags.
         If some tensors have more than of the tags, only one color will show.
+    output_inds : sequence of str, optional
+        For hyper tensor networks explicitly specify which indices should be
+        drawn as outer indices. If not set, the outer indices are assumed to be
+        those that only appear on a single tensor.
     highlight_inds : iterable, optional
         Highlight these edges.
     highlight_tids : iterable, optional
@@ -118,6 +124,9 @@ def draw_tn(
         Whether to try and use ``forceatlas2`` (``fa2``) for the spring layout
         relaxation instead of ``networkx``. If an integer, only try and use
         beyond that many nodes (it can give messier results on smaller graphs).
+    use_spring_weight : bool, optional
+        Whether to use inverse bond sizes as spring weights to the force
+        repulsion layout algorithms.
     node_color : tuple[float], optional
         Default color of nodes.
     node_size : None or float, optional
@@ -155,10 +164,17 @@ def draw_tn(
         Explicitly set the x plot range.
     xlims : None or tuple, optional
         Explicitly set the y plot range.
-    get : {Nonr, 'pos'}, optional
-        If ``'pos'``, return the plotting positions of each ``tid`` and ``ind``
-        drawn as a node, this can supplied to subsequent calls as ``fix=pos``
-        to maintain positions, even as the graph structure changes.
+    get : {None, 'pos', 'graph'}, optional
+        If ``None`` then plot as normal, else if:
+
+            - ``'pos'``, return the plotting positions of each ``tid`` and
+              ``ind`` drawn as a node, this can supplied to subsequent calls as
+              ``fix=pos`` to maintain positions, even as the graph structure
+              changes.
+            - ``'graph'``, return the ``networkx.Graph`` object. Note that this
+              will potentially have extra nodes representing output and hyper
+              indices.
+
     return_fig : bool, optional
         If True and ``ax is None`` then return the figure created rather than
         executing ``pyplot.show()``.
@@ -171,6 +187,13 @@ def draw_tn(
     import matplotlib.patches as patches
     from matplotlib.colors import to_rgb
     import math
+
+    if output_inds is None:
+        output_inds = set(tn.outer_inds())
+    elif isinstance(output_inds, str):
+        output_inds = {output_inds}
+    else:
+        output_inds = set(output_inds)
 
     # automatically decide whether to show tags and inds
     if show_inds is None:
@@ -201,7 +224,6 @@ def draw_tn(
 
     # build the graph
     G = nx.Graph()
-
     hyperedges = []
     node_labels = dict()
     edge_labels = dict()
@@ -218,18 +240,18 @@ def draw_tn(
         edge_attrs['multiedge_sizes'] = [edge_attrs['edge_size']]
         edge_attrs['spring_weight'] = 1 / sum(t.ndim for t in tn._inds_get(ix))
 
-        if len(tids) == 2:
+        if (ix in output_inds) or (len(tids) != 2):
+            # hyper or outer edge - needs dummy 'node' shown with zero size
+            hyperedges.append(ix)
+            for tid in tids:
+                _add_or_merge_edge(G, tid, ix, edge_attrs)
+        else:
             # standard edge
             _add_or_merge_edge(G, *tids, edge_attrs)
             if show_inds == 'all':
                 edge_labels[tuple(tids)] = ix
             elif show_inds == 'bond-size':
                 edge_labels[tuple(tids)] = tn.ind_size(ix)
-        else:
-            # hyper or outer edge - needs dummy 'node' shown with zero size
-            hyperedges.append(ix)
-            for tid in tids:
-                _add_or_merge_edge(G, tid, ix, edge_attrs)
 
     # color the nodes
     colors = get_colors(color, custom_colors)
@@ -258,7 +280,7 @@ def draw_tn(
             for i, c in enumerate(color)
         )
         if show_tags:
-            # make the tags appear with auto vertical extend
+            # make the tags appear with auto vertical extent
             node_label = '{' + str(list(t.tags))[1:-1] + '}'
             node_labels[tid] = "\n".join(textwrap.wrap(
                 node_label, max(2 * len(node_label) ** 0.5, 16)
@@ -275,16 +297,19 @@ def draw_tn(
         elif show_inds == 'bond-size':
             node_labels[hix] = tn.ind_size(hix)
 
+    if get == 'graph':
+        return G
+
     if show_inds == 'bond-size':
         font_size = font_size_inner
-        for oix in tn.outer_inds():
+        for oix in output_inds:
             node_labels[oix] = tn.ind_size(oix)
     elif show_inds:
-        for oix in tn.outer_inds():
+        for oix in output_inds:
             node_labels[oix] = oix
 
-    pos = _get_positions(tn, G, fix, initial_layout,
-                         k, iterations, use_forceatlas2)
+    pos = get_positions(tn, G, fix, initial_layout, k, iterations,
+                        use_forceatlas2, use_spring_weight)
 
     if get == 'pos':
         return pos
@@ -564,8 +589,16 @@ def _massage_pos(pos, nangles=360, flatten=False):
     return dict(zip(pos, rxy0))
 
 
-def _get_positions(tn, G, fix, initial_layout,
-                   k, iterations, use_forceatlas2):
+def get_positions(
+    tn,
+    G,
+    fix=None,
+    initial_layout='spectral',
+    k=None,
+    iterations=200,
+    use_forceatlas2=False,
+    use_spring_weight=False,
+):
     import networkx as nx
 
     if fix is None:
@@ -621,13 +654,16 @@ def _get_positions(tn, G, fix, initial_layout,
             (fixed is None) and HAS_FA2 and (len(G) > use_forceatlas2)
         )
 
+        weight = 'spring_weight' if use_spring_weight else None
+
         if should_use_fa2:
             from fa2 import ForceAtlas2
             pos = ForceAtlas2(verbose=False).forceatlas2_networkx_layout(
-                G, pos=pos0, iterations=iterations)
+                G, pos=pos0, iterations=iterations, weight_attr=weight)
         else:
             pos = nx.spring_layout(
-                G, pos=pos0, fixed=fixed, k=k, iterations=iterations)
+                G, pos=pos0, fixed=fixed, k=k, iterations=iterations,
+                weight=weight)
     else:
         pos = pos0
 
