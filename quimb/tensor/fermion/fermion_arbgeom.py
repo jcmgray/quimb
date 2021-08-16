@@ -64,10 +64,11 @@ class FermionTensorNetworkGenVector(
             info = {}
             tn_where.gate_(G, where, info=info, **gate_opts)
             # inner ungauging is performed by tracking the new singular values
-            ((_, ordered_ixs), s), = info.items()
+            ((_, ixs), s), = info.items()
             if renorm:
                 s = s / s.norm()
-            gauges[ordered_ixs] = s
+            gauges.pop((ixs[1], ixs[0]), None)
+            gauges[ixs] = s
         return self
     
     def local_expectation_simple(

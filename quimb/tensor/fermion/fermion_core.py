@@ -420,6 +420,8 @@ def _launch_fermion_expression(
     preserve_tensor = False,
     **kwargs
 ):
+    if len(tensors) == 1:
+        return tensors[0]
     evaluate_constants = kwargs.pop('evaluate_constants', False)
     if evaluate_constants:
         raise NotImplementedError
@@ -603,9 +605,11 @@ def _split_and_replace_in_fs(T, insert_gauge=False, **compress_opts):
 
 def _get_gauge_location(Ti, Tj):
     if Ti.get_fermion_info()[1]<Tj.get_fermion_info()[1]:
-        return "front", "back"
+        flip_pattern = False
+        return "front", "back", flip_pattern
     else:
-        return "back", "front"
+        flip_pattern = True
+        return "back", "front", flip_pattern
 
 # --------------------------------------------------------------------------- #
 #                                Tensor Class                                 #
@@ -1237,6 +1241,7 @@ class FermionTensorNetwork(BlockTensorNetwork):
         # absorb outer gauges fully into single tensor
         outer = []
         inner = []
+    
 
         if len(self.tensor_map)==len(self.fermion_space.tensor_order):
             full_ind_map = self.ind_map
@@ -1248,20 +1253,25 @@ class FermionTensorNetwork(BlockTensorNetwork):
             if len(tensors)==2:
                 tl, = self._inds_get(ix)
                 tr, = self._inds_get(iy)
-                location = _get_gauge_location(tl, tr)
+                locl, locr, flip_pattern = _get_gauge_location(tl, tr)
                 bond, = tl.bonds(tr)
                 g = sqrt(g)
-                tl.multiply_index_diagonal_(bond, g, location=location[0])
-                tr.multiply_index_diagonal_(bond, g, location=location[1])
-                inner.append(((tl, tr), bond, g, location))
+                tl.multiply_index_diagonal_(bond, g, 
+                        location=locl, flip_pattern=flip_pattern)
+                tr.multiply_index_diagonal_(bond, g, 
+                        location=locr, flip_pattern=flip_pattern)
+                inner.append(((tl, tr), bond, g, (locl, locr), flip_pattern))
             elif len(tensors)==1:
                 tl, = tensors
                 itid, = full_ind_map[iy] if ix in tl.inds else full_ind_map[ix]
                 tr = self.fermion_space.tensor_order[itid][0]
                 bond, = tl.bonds(tr)
-                location = _get_gauge_location(tl, tr)[0]
-                tl.multiply_index_diagonal_(bond, g, location=location)
-                outer.append((tl, bond, g, location))
+                if ix in self.ind_map:
+                    locl, _, flip_pattern = _get_gauge_location(tl, tr)
+                else:
+                    _, locl, flip_pattern = _get_gauge_location(tr, tl)
+                tl.multiply_index_diagonal_(bond, g, location=locl, flip_pattern=flip_pattern)
+                outer.append((tl, bond, g, locl, flip_pattern))
         return outer, inner
 
     @contextlib.contextmanager
@@ -1276,14 +1286,17 @@ class FermionTensorNetwork(BlockTensorNetwork):
             yield outer, inner
         finally:
             while ungauge_outer and outer:
-                t, ix, g, location = outer.pop()
+                t, ix, g, location, flip_pattern = outer.pop()
                 g = inv_with_smudge(g, gauge_smudge=0.)
-                t.multiply_index_diagonal_(ix, g, location=location)
+                t.multiply_index_diagonal_(ix, g, 
+                        location=location, flip_pattern=flip_pattern)
             while ungauge_inner and inner:
-                (tl, tr), ix, g, location = inner.pop()
+                (tl, tr), ix, g, location, flip_pattern = inner.pop()
                 ginv = inv_with_smudge(g, gauge_smudge=0.)
-                tl.multiply_index_diagonal_(ix, ginv, location=location[0])
-                tr.multiply_index_diagonal_(ix, ginv, location=location[1])
+                tl.multiply_index_diagonal_(ix, ginv, 
+                        location=location[0], flip_pattern=flip_pattern)
+                tr.multiply_index_diagonal_(ix, ginv, 
+                        location=location[1], flip_pattern=flip_pattern)
 
     def compute_inds_environment(self, inds, **inds_env_options):
         env = self.copy()

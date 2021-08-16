@@ -461,7 +461,6 @@ def gate_string_split_(TG, where, string, original_ts, bonds_along,
 
         if maybe_svals and info is not None:
             s = next(iter(maybe_svals)).data
-            #coo_pair = tuple(sorted((string[i], string[i + 1])))
             coo_pair = (string[i], string[i+1])
             info['singular_values', coo_pair] = s
 
@@ -508,9 +507,9 @@ def gate_string_split_(TG, where, string, original_ts, bonds_along,
             break
     # SVD funcs needs to be modify and make sure S has even parity
     for i, bix, location, s in regauged:
-        snew = inv_with_smudge(s, INVERSE_CUTOFF, gauge_smudge=0)
         t = inner_ts[i]
-        t.multiply_index_diagonal_(bix, snew, location=location)
+        t.multiply_index_diagonal_(bix, s, 
+                location=location, inverse=True)
 
     revert_index_map = {v: k for k, v in reindex_map.items()}
     for to, tn in zip(original_ts, inner_ts):
@@ -540,7 +539,7 @@ def gate_string_reduce_split_(TG, where, string, original_ts, bonds_along,
     outer_ts, inner_ts = [], []
     fermion_info = []
     fs = TG.fermion_owner[0]
-    tid_lst = []
+
     for coo, rix, t in zip(string, inds_to_reduce, original_ts):
         tq, tr = t.split(left_inds=None, right_inds=rix,
                          method='qr', get='tensors', absorb="right")
@@ -638,9 +637,9 @@ def gate_string_reduce_split_(TG, where, string, original_ts, bonds_along,
     ]
 
     for i, bix, location, s in regauged:
-        snew = inv_with_smudge(s, INVERSE_CUTOFF, gauge_smudge=0)
         t = new_ts[i]
-        t.multiply_index_diagonal_(bix, snew, location=location)
+        t.multiply_index_diagonal_(bix, s, 
+                location=location, inverse=True)
 
     for (tid, _), to, t in zip(fermion_info, original_ts, new_ts):
         site = t.get_fermion_info()[1]
@@ -737,28 +736,16 @@ class FermionTensorNetwork2DVector(FermionTensorNetwork2D,
             psi.fermion_space.move(out.get_fermion_info()[0], min(isite))
             return psi
 
-        # following are all based on splitting tensors to maintain structure
-        ij_a, ij_b = where
-
         # parse the argument specifying how to find the path between
         # non-nearest neighbours
         if long_range_path_sequence is not None:
-            # make sure we can index
             long_range_path_sequence = tuple(long_range_path_sequence)
-            # if the first element is a str specifying move sequence, e.g.
-            #     ('v', 'h')
-            #     ('av', 'bv', 'ah', 'bh')  # using swaps
-            manual_lr_path = not isinstance(long_range_path_sequence[0], str)
-            # otherwise assume a path has been manually specified, e.g.
-            #     ((1, 2), (2, 2), (2, 3), ... )
-            #     (((1, 1), (1, 2)), ((4, 3), (3, 3)), ...)  # using swaps
-        else:
-            manual_lr_path = False
-
-        psi.fermion_space.add_tensor(TG, virtual=True)
-        # check if we are not nearest neighbour and need to swap first
+        
         if long_range_use_swaps:
             raise NotImplementedError
+
+        psi.fermion_space.add_tensor(TG, virtual=True)
+        # check if we are not nearest neighbour and need to swap first  
 
         string = tuple(gen_long_range_path(
                  *where, sequence=long_range_path_sequence))
@@ -813,7 +800,9 @@ class FermionTensorNetwork2DVector(FermionTensorNetwork2D,
         plaquette_map=None,
         **plaquette_env_options,
     ):
-        norm, ket, bra = self.make_norm(return_all=True, layer_tags=layer_tags)
+        norm, _, bra = self.make_norm(
+                    return_all=True, layer_tags=layer_tags)
+        
         plaquette_env_options["max_bond"] = max_bond
         plaquette_env_options["cutoff"] = cutoff
         plaquette_env_options["canonize"] = canonize
@@ -868,9 +857,8 @@ class FermionTensorNetwork2DVector(FermionTensorNetwork2D,
                 site_ix = [bra.site_ind(i, j) for i, j in _where]
                 bnds = [rand_uuid() for _ in range(ng)]
                 reindex_map = dict(zip(site_ix, bnds))
-                TG = FermionTensor(G.copy(), inds=site_ix+bnds, left_inds=site_ix)
-                ntsr = len(newtn.tensor_map)
-                fs = newtn.fermion_space
+                TG = FermionTensor(G.copy(), 
+                            inds=site_ix+bnds, left_inds=site_ix)
                 tids = newtn._get_tids_from_inds(site_ix, which='any')
                 for tid_ in tids:
                     tsr = newtn.tensor_map[tid_]

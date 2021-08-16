@@ -1,8 +1,7 @@
 import itertools
 import collections
-
-from ..tensor_arbgeom_tebd import LocalHamGen, TEBDGen, SimpleUpdateGen
-from .block_interface import eye, to_exponential, Hubbard
+from ..tensor_arbgeom_tebd import LocalHamGen, SimpleUpdateGen
+from .block_interface import to_exponential, Hubbard
 
 class LocalHamGen(LocalHamGen):
 
@@ -19,7 +18,6 @@ class LocalHamGen(LocalHamGen):
         # first combine terms to ensure coo1 < coo2
         for where in tuple(filter(bool, self.terms)):
             coo1, coo2 = where
-
             new_where = coo2, coo1
             if new_where in self.terms:
                 X12 = self.terms.pop(new_where).transpose([1,0,3,2])
@@ -57,7 +55,7 @@ class LocalHamGen(LocalHamGen):
             cache[key] = out
         return cache[key]
 
-def Hubbard_from_TN(tn, t, u, mu=0.):
+def Hubbard_from_FTNGen(tn, t, u, mu=0.):
     H2 = dict()
     for i, isite in enumerate(tn.sites):
         ix = tn.site_ind(isite)
@@ -80,25 +78,7 @@ def Hubbard_from_TN(tn, t, u, mu=0.):
             H2[key] = Hubbard(t,u, mu, factors)
     return LocalHamGen(H2)
 
-class TEBDGen(TEBDGen):
-    """Generic class for performing time evolving block decimation on an
-    arbitrary graph, i.e. applying the exponential of a Hamiltonian using
-    a product formula that involves applying local exponentiated gates only.
-    """
-    pass
-
-
 class SimpleUpdateGen(SimpleUpdateGen):
-
-    def get_state(self, absorb_gauges=True):
-        psi = self._psi.copy()
-
-        if absorb_gauges:
-            psi.gauge_simple_insert(self.gauges)
-        else:
-            raise NotImplementedError("gauge has to be absorbed")
-
-        return psi
 
     def set_state(self, psi):
         """The default method for setting the current state - simply a copy.
@@ -106,3 +86,8 @@ class SimpleUpdateGen(SimpleUpdateGen):
         """
         self.gauges = dict()
         self._psi = psi.copy()
+    
+    def get_state(self, absorb_gauges=True):
+        if not absorb_gauges:
+            raise NotImplementedError("gauge must be absorbed")
+        return super().get_state(absorb_gauges)

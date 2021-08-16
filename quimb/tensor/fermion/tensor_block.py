@@ -9,7 +9,7 @@ from ...utils import (check_opt, oset)
 
 from ..tensor_core import (Tensor, TensorNetwork, tags_to_oset, rand_uuid,
                           _parse_split_opts, tensor_contract)
-from .block_tools import get_smudge_balance
+from .block_tools import get_smudge_balance, sqrt, inv_with_smudge, add_with_smudge
 
 # --------------------------------------------------------------------------- #
 #                                Tensor Funcs                                 #
@@ -22,6 +22,8 @@ def _launch_block_expression(
     preserve_tensor = False,
     **kwargs
 ):
+    if len(tensors) == 1:
+        return tensors[0]
     evaluate_constants = kwargs.pop('evaluate_constants', False)
     if evaluate_constants:
         raise NotImplementedError
@@ -71,6 +73,10 @@ def _launch_block_expression(
         tensors.append(new_view)
         del tmp_operands, new_view
     return tensors[0]
+
+def flip_pattern(pattern):
+    string_inv = {"+":"-", "-":"+"}
+    return "".join([string_inv[ix] for ix in pattern])
 
 def tensor_split(
     T,
@@ -348,20 +354,44 @@ class BlockTensor(Tensor):
     def flip(self, ind, inplace=False):
         raise NotImplementedError
 
-    def multiply_index_diagonal(self, ind, x, inplace=False, location="front"):
+    def multiply_index_diagonal(
+            self, 
+            ind, 
+            x, 
+            inplace=False, 
+            location="front",
+            flip_pattern = False,
+            sqrt=False,
+            inverse=False,
+            smudge=0
+        ):
         if location not in ["front", "back"]:
             raise ValueError("invalid for the location of the diagonal")
         t = self if inplace else self.copy()
         ax = t.inds.index(ind)
+        iax = {"front": 1, "back": 0}[location]
         if isinstance(x, Tensor):
             x = x.data
+        if flip_pattern:
+            x = x.copy()
+            x.pattern = flip_pattern(x.pattern)
+        if x.pattern[iax] == t.data.pattern[ax]:
+            raise ValueError("Symmetry relations not compatible")
+        if sqrt:
+            x = sqrt(x)
+        if inverse:
+            x = inv_with_smudge(x, smudge)
+        elif smudge !=0:
+            x = add_with_smudge(x, smudge)
+    
         if location=="front":
-            out = np.tensordot(x, t.data, axes=((1,), (ax,)))
+            out = np.tensordot(x, t.data, axes=((iax,), (ax,)))
             transpose_order = list(range(1, ax+1)) + [0] + list(range(ax+1, t.ndim))
         else:
-            out = np.tensordot(t.data, x, axes=((ax,),(0,)))
+            out = np.tensordot(t.data, x, axes=((ax,),(iax,)))
             transpose_order = list(range(ax)) + [t.ndim-1] + list(range(ax, t.ndim-1))
         data = np.transpose(out, transpose_order)
+        data.shape = t.data.shape
         t.modify(data=data)
         return t
 
