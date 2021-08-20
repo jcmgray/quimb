@@ -560,7 +560,7 @@ class TensorNetworkGenVector(TensorNetworkGen, TensorNetwork):
         optimize,
         normalized=True,
         flatten=True,
-        reduce_inds_onto_bond=False,
+        method='rho',
         return_all=False,
         rehearse=False,
         **contract_compressed_opts,
@@ -616,7 +616,7 @@ class TensorNetworkGenVector(TensorNetworkGen, TensorNetwork):
                 optimize=optimize,
                 normalized=normalized,
                 flatten=flatten,
-                reduce_inds_onto_bond=reduce_inds_onto_bond,
+                method=method,
                 rehearse=rehearse,
                 **contract_compressed_opts,
             )
