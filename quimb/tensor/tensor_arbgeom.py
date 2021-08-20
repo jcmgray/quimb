@@ -3,7 +3,7 @@ from operator import add
 
 from autoray import do, dag
 
-from ..utils import ensure_dict
+from ..utils import check_opt, ensure_dict
 from .tensor_core import TensorNetwork
 
 
@@ -14,18 +14,17 @@ class TensorNetworkGen(TensorNetwork):
     """
 
     _EXTRA_PROPS = (
-        '_sites',
-        '_site_tag_id',
+        "_sites",
+        "_site_tag_id",
     )
 
     def _compatible_arbgeom(self, other):
         """Check whether ``self`` and ``other`` represent the same set of
         sites and are tagged equivalently.
         """
-        return (
-            isinstance(other, TensorNetworkGen) and
-            all(getattr(self, e) == getattr(other, e)
-                for e in TensorNetworkGen._EXTRA_PROPS)
+        return isinstance(other, TensorNetworkGen) and all(
+            getattr(self, e) == getattr(other, e)
+            for e in TensorNetworkGen._EXTRA_PROPS
         )
 
     def __and__(self, other):
@@ -77,7 +76,7 @@ class TensorNetworkGen(TensorNetwork):
             return self.site_tag(x)
         return x
 
-    def _get_tids_from_tags(self, tags, which='all'):
+    def _get_tids_from_tags(self, tags, which="all"):
         """This is the function that lets coordinates such as ``site`` be
         used for many 'tag' based functions.
         """
@@ -88,7 +87,7 @@ class TensorNetworkGen(TensorNetwork):
 def gauge_product_boundary_vector(
     tn,
     tags,
-    which='all',
+    which="all",
     max_bond=1,
     smudge=1e-6,
     canonize_distance=0,
@@ -108,14 +107,16 @@ def gauge_product_boundary_vector(
         # ... or just a local patch
         select_local_opts = ensure_dict(select_local_opts)
         ltn = tn._select_local_tids(
-            tids, max_distance=select_local_distance,
-            virtual=False, **select_local_opts)
+            tids,
+            max_distance=select_local_distance,
+            virtual=False,
+            **select_local_opts,
+        )
         outer_inds = ltn.outer_inds()
         dtn = ltn.H | ltn
 
     # get all inds in the tagged region
-    region_inds = set.union(
-        *(set(tn.tensor_map[tid].inds) for tid in tids))
+    region_inds = set.union(*(set(tn.tensor_map[tid].inds) for tid in tids))
 
     # contract all 'physical' indices so that we have a single layer TN
     #     outside region and double layer sandwich inside region
@@ -134,7 +135,8 @@ def gauge_product_boundary_vector(
         min_distance=1,
         max_bond=max_bond,
         canonize_distance=canonize_distance,
-        **contract_around_opts)
+        **contract_around_opts,
+    )
 
     # select this boundary and compress to ensure it is a product operator
     dtn = dtn._select_without_tids(dtids, virtual=True)
@@ -147,11 +149,11 @@ def gauge_product_boundary_vector(
     #     tensor network that would turn each of these boundary tensors
     #     into identities.
     for t in dtn:
-        ix, = [i for i in t.inds if i in region_inds]
-        _, s, VH = do('linalg.svd', t.data)
+        (ix,) = [i for i in t.inds if i in region_inds]
+        _, s, VH = do("linalg.svd", t.data)
         s = s + smudge
-        G = do('reshape', s**0.5, (-1, 1)) * VH
-        Ginv = dag(VH) * do('reshape', s**-0.5, (1, -1))
+        G = do("reshape", s ** 0.5, (-1, 1)) * VH
+        Ginv = dag(VH) * do("reshape", s ** -0.5, (1, -1))
 
         tid_l, tid_r = sorted(tn.ind_map[ix], key=lambda tid: tid in tids)
         tn.tensor_map[tid_l].gate_(Ginv.T, ix)
@@ -160,17 +162,16 @@ def gauge_product_boundary_vector(
     return tn
 
 
-class TensorNetworkGenVector(TensorNetworkGen,
-                             TensorNetwork):
+class TensorNetworkGenVector(TensorNetworkGen, TensorNetwork):
     """A tensor network which notionally has a single tensor and outer index
     per 'site', though these could be labelled arbitrarily could also be linked
     in an arbitrary geometry by bonds.
     """
 
     _EXTRA_PROPS = (
-        '_sites',
-        '_site_tag_id',
-        '_site_ind_id',
+        "_sites",
+        "_site_tag_id",
+        "_site_ind_id",
     )
 
     @property
@@ -226,18 +227,18 @@ class TensorNetworkGenVector(TensorNetworkGen,
             Whether to renormalise the singular after the gate is applied,
             before reinserting them into ``gauges``.
         """
-        gate_opts.setdefault('absorb', None)
-        gate_opts.setdefault('contract', 'reduce-split')
+        gate_opts.setdefault("absorb", None)
+        gate_opts.setdefault("contract", "reduce-split")
 
-        where_tags = tuple(map(self.site_tag, where))
-        tn_where = self.select_any(where_tags)
+        site_tags = tuple(map(self.site_tag, where))
+        tn_where = self.select_any(site_tags)
 
         with tn_where.gauge_simple_temp(gauges, ungauge_inner=False):
             info = {}
             tn_where.gate_(G, where, info=info, **gate_opts)
 
             # inner ungauging is performed by tracking the new singular values
-            ((_, ix), s), = info.items()
+            (((_, ix), s),) = info.items()
             if renorm:
                 s = s / s[0]
             gauges[ix] = s
@@ -248,10 +249,10 @@ class TensorNetworkGenVector(TensorNetworkGen,
         self,
         G,
         where,
-        normalized=False,
+        normalized=True,
         max_distance=0,
         gauges=None,
-        optimize='auto',
+        optimize="auto",
     ):
         r"""Approximately compute a single local expectation value of the gate
         ``G`` at sites ``where``, either treating the environment beyond
@@ -302,40 +303,34 @@ class TensorNetworkGenVector(TensorNetworkGen,
         """
 
         # select a local neighborhood of tensors
-        where_tags = tuple(map(self.site_tag, where))
+        site_tags = tuple(map(self.site_tag, where))
         k = self.select_local(
-            where_tags, 'any',
-            max_distance=max_distance,
-            virtual=False,
+            site_tags, "any", max_distance=max_distance, virtual=False,
         )
 
         if gauges is not None:
             # gauge the region with simple update style bond gauges
             k.gauge_simple_insert(gauges)
 
-        b = k.H
+        k_inds = tuple(map(self.site_ind, where))
+        b_inds = tuple(map("_bra{}".format, where))
+        b = k.conj().reindex_(dict(zip(k_inds, b_inds)))
+
+        rho = (b | k).to_dense(k_inds, b_inds, optimize=optimize)
+        expec = do("trace", rho @ G)
         if normalized:
-            # compute <b|k> locally
-            nfact = (b | k).contract(all, optimize=optimize)
-        else:
-            nfact = None
+            expec = expec / do("trace", rho)
 
-        # now compute <b|G|k> locally
-        k.gate_(G, where)
-        ex = (b | k).contract(all, optimize=optimize)
-
-        if nfact is not None:
-            return ex / nfact
-        return ex
+        return expec
 
     def compute_local_expectation_simple(
         self,
         terms,
         *,
         max_distance=0,
-        normalized=False,
+        normalized=True,
         gauges=None,
-        optimize='auto',
+        optimize="auto",
         return_all=False,
     ):
         r"""Compute all local expectations of the given terms, either treating
@@ -395,7 +390,8 @@ class TensorNetworkGenVector(TensorNetworkGen,
         expecs = {}
         for where, G in terms.items():
             expecs[where] = self.local_expectation_simple(
-                G, where,
+                G,
+                where,
                 normalized=normalized,
                 max_distance=max_distance,
                 gauges=gauges,
@@ -408,35 +404,26 @@ class TensorNetworkGenVector(TensorNetworkGen,
         return functools.reduce(add, expecs.values())
 
     def local_expectation_exact(
-        self, G, where, optimize='auto-hq', normalized=False,
+        self, G, where, optimize="auto-hq", normalized=True,
     ):
         """Compute the local expectation of operator ``G`` at site(s) ``where``
         by exactly contracting the full overlap tensor network.
         """
-        if not normalized:
-            Gk = self.gate(G, where)
-            b = self.H
-            return (b | Gk).contract(all, optimize=optimize)
-
         k_inds = tuple(map(self.site_ind, where))
-        b_inds = tuple(f'_bra{site}' for site in where)
-        b = self.H.reindex_(dict(zip(k_inds, b_inds)))
+        b_inds = tuple(map("_bra{}".format, where))
+        b = self.conj().reindex_(dict(zip(k_inds, b_inds)))
 
-        rho = (b | self).contract(all, optimize=optimize)
+        rho = (b | self).to_dense(k_inds, b_inds, optimize=optimize)
+        expec = do("trace", rho @ G)
+        if normalized:
+            expec = expec / do("trace", rho)
 
-        rho = TensorNetwork([rho])
-        nfact = rho.trace(k_inds, b_inds)
-        rho.gate_inds_(G, k_inds)
-        expec = rho.trace(k_inds, b_inds)
-        return expec / nfact
+        return expec
 
     def compute_local_expectation_exact(
-        self, terms,
-        optimize='auto-hq',
-        normalized=False,
-        return_all=False,
+        self, terms, optimize="auto-hq", normalized=True, return_all=False,
     ):
-        """Compute the local expectation of operator ``G`` at site(s) ``where``
+        """Compute the local expectations of many operators,
         by exactly contracting the full overlap tensor network.
 
         Parameters
@@ -462,15 +449,184 @@ class TensorNetworkGenVector(TensorNetworkGen,
         expecs = {}
         for where, G in terms.items():
             expecs[where] = self.local_expectation_exact(
-                G, where, optimize=optimize, normalized=False
+                G, where, optimize=optimize, normalized=normalized
             )
-
-        if normalized:
-            nfact = (self.H | self).contract(all, optimize=optimize)
-            if return_all:
-                return {where: x / nfact for where, x in expecs.items()}
-            return functools.reduce(add, expecs.values()) / nfact
 
         if return_all:
             return expecs
         return functools.reduce(add, expecs.values())
+
+    def local_expectation(
+        self,
+        G,
+        where,
+        max_bond,
+        optimize,
+        normalized=True,
+        flatten=True,
+        method='rho',
+        rehearse=False,
+        **contract_compressed_opts,
+    ):
+        """Compute the local expectation of operator ``G`` at site(s) ``where``
+        by approximately contracting the full overlap tensor network.
+
+        Parameters
+        ----------
+        G : array_like
+            The local operator to compute the expectation of.
+        where : node or sequence of nodes
+            The sites to compute the expectation for.
+        max_bond : int
+            The maximum bond dimensions to use while compressed contracting.
+        optimize : str or PathOptimizer, optional
+            The contraction path optimizer to use, should specifically generate
+            contractions paths designed for compressed contraction.
+        normalized : bool, optional
+            Whether to locally normalize the result.
+        flatten : bool, optional
+            Whether to force 'flattening' (contracting all physical indices) of
+            the tensor network before  contraction, whilst this makes the TN
+            generally more complex to contract, the accuracy is usually much
+            improved.
+        rehearse : {False, 'tn', 'tree', True}, optional
+            Whether to perform the computation or not::
+
+                - False: perform the computation.
+                - 'tn': return the tensor network without running the path
+                  optimizer.
+                - True: run the path optimizer and return the
+                  ``cotengra.ContractonTree``..
+                - True: run the path optimizer and return the ``PathInfo``.
+
+        contract_compressed_opts : dict, optional
+            Additional keyword arguments to pass to
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.contract_compressed`.
+
+        Returns
+        -------
+        expec : float
+        """
+        check_opt('method', method, ('rho', 'rho-reduced'))
+        reduce = method == 'rho-reduced'
+
+        # form the partial trace
+        k_inds = tuple(map(self.site_ind, where))
+
+        if reduce:
+            k = self.copy()
+            k.reduce_inds_onto_bond(*k_inds, tags='__BOND__', drop_tags=True)
+        else:
+            k = self
+
+        b_inds = tuple(map("_bra{}".format, where))
+        b = k.conj().reindex_(dict(zip(k_inds, b_inds)))
+
+        tn = b & k
+        output_inds = k_inds + b_inds
+
+        if flatten:
+            for site in self.sites:
+                tn ^= site
+            if reduce:
+                tn ^= '__BOND__'
+
+        if rehearse:
+            if rehearse == 'tn':
+                return tn
+            if rehearse == 'tree':
+                return tn.contraction_tree(optimize, output_inds=output_inds)
+            if rehearse:
+                return tn.contraction_info(optimize, output_inds=output_inds)
+
+        t_rho = tn.contract_compressed(
+            optimize,
+            max_bond=max_bond,
+            output_inds=output_inds,
+            **contract_compressed_opts,
+        )
+
+        rho = t_rho.to_dense(k_inds, b_inds)
+        expec = do("trace", rho @ G)
+        if normalized:
+            expec = expec / do("trace", rho)
+
+        return expec
+
+    def compute_local_expectation(
+        self,
+        terms,
+        max_bond,
+        optimize,
+        normalized=True,
+        flatten=True,
+        reduce_inds_onto_bond=False,
+        return_all=False,
+        rehearse=False,
+        **contract_compressed_opts,
+    ):
+        """Compute the local expectations of many local operators, by
+        approximately contracting the full overlap tensor network.
+
+        Parameters
+        ----------
+        terms : dict[node or (node, node), array_like]
+            The terms to compute the expectation of, with keys being the sites
+            and values being the local operators.
+        max_bond : int
+            The maximum bond dimension to use during contraction.
+        optimize : str or PathOptimizer
+            The compressed contraction path optimizer to use.
+        normalized : bool, optional
+            Whether to locally normalize the result.
+        flatten : bool, optional
+            Whether to force 'flattening' (contracting all physical indices) of
+            the tensor network before  contraction, whilst this makes the TN
+            generally more complex to contract, the accuracy is usually much
+            improved.
+        rehearse : {False, 'tn', 'tree', True}, optional
+            Whether to perform the computations or not::
+
+                - False: perform the computation.
+                - 'tn': return the tensor networks of each local expectation,
+                  without running the path optimizer.
+                - True: run the path optimizer and return the
+                  ``cotengra.ContractonTree`` for each local expectation.
+                - True: run the path optimizer and return the ``PathInfo`` for
+                  each local expectation.
+
+        return_all : bool, optional
+            Whether to return all results, or just the summed expectation. If
+            ``rehease is not False``, this is ignored and a dict is always
+            returned.
+
+        Returns
+        -------
+        expecs : float or dict[node or (node, node), float]
+            If ``return_all==False``, return the summed expectation value of
+            the given terms. Otherwise, return a dictionary mapping each term's
+            location to the expectation value.
+        """
+        expecs = {}
+        for where, G in terms.items():
+            expecs[where] = self.local_expectation(
+                G,
+                where,
+                max_bond,
+                optimize=optimize,
+                normalized=normalized,
+                flatten=flatten,
+                reduce_inds_onto_bond=reduce_inds_onto_bond,
+                rehearse=rehearse,
+                **contract_compressed_opts,
+            )
+
+        if return_all or rehearse:
+            return expecs
+        return functools.reduce(add, expecs.values())
+
+    compute_local_expectation_rehearse = functools.partialmethod(
+        compute_local_expectation, rehearse=True)
+
+    compute_local_expectation_tn = functools.partialmethod(
+        compute_local_expectation, rehearse='tn')

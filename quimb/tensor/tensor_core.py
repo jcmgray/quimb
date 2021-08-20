@@ -3485,7 +3485,7 @@ class TensorNetwork(object):
         --------
         get_symbol_map, get_equation
         """
-        eq = self.get_equation()
+        eq = self.get_equation(output_inds=output_inds)
         lhs, output = eq.split('->')
         inputs = lhs.split(',')
         size_dict = {}
@@ -3915,6 +3915,13 @@ class TensorNetwork(object):
 
         return t1, t2
 
+    def _split_tensor_tid(self, tid, left_inds, **split_opts):
+        t = self._pop_tensor(tid)
+        tl, tr = t.split(left_inds=left_inds, get='tensors', **split_opts)
+        self.add_tensor(tl)
+        self.add_tensor(tr)
+        return self
+
     def split_tensor(
         self,
         tags,
@@ -3926,11 +3933,7 @@ class TensorNetwork(object):
         operation.
         """
         tid, = self._get_tids_from_tags(tags, which='all')
-        t = self._pop_tensor(tid)
-        tl, tr = t.split(left_inds=left_inds, get='tensors', **split_opts)
-        self.add_tensor(tl)
-        self.add_tensor(tr)
-        return self
+        self._split_tensor_tid(tid, left_inds, **split_opts)
 
     def replace_with_identity(self, where, which='any', inplace=False):
         r"""Replace all tensors marked by ``where`` with an
@@ -4116,6 +4119,18 @@ class TensorNetwork(object):
                               for d, i in zip(T.shape, T.inds))
             T.modify(data=do('zeros', new_shape, dtype=T.dtype, like=T.data))
 
+    def _contract_between_tids(self, tid1, tid2, **contract_opts):
+        # allow no-op for same tensor specified twice ('already contracted')
+        if tid1 == tid2:
+            return
+
+        output_inds = self.compute_contracted_inds(tid1, tid2)
+        t1 = self._pop_tensor(tid1)
+        t2 = self._pop_tensor(tid2)
+        t12 = tensor_contract(t1, t2, output_inds=output_inds,
+                              preserve_tensor=True, **contract_opts)
+        self.add_tensor(t12, tid=tid2, virtual=True)
+
     def contract_between(self, tags1, tags2, **contract_opts):
         """Contract the two tensors specified by ``tags1`` and ``tags2``
         respectively. This is an inplace operation. No-op if the tensor
@@ -4132,17 +4147,7 @@ class TensorNetwork(object):
         """
         tid1, = self._get_tids_from_tags(tags1, which='all')
         tid2, = self._get_tids_from_tags(tags2, which='all')
-
-        # allow no-op for same tensor specified twice ('already contracted')
-        if tid1 == tid2:
-            return
-
-        output_inds = self.compute_contracted_inds(tid1, tid2)
-        t1 = self._pop_tensor(tid1)
-        t2 = self._pop_tensor(tid2)
-        t12 = tensor_contract(t1, t2, output_inds=output_inds,
-                              preserve_tensor=True, **contract_opts)
-        self.add_tensor(t12, tid=tid2, virtual=True)
+        self._contract_between_tids(tid1, tid2, **contract_opts)
 
     def contract_ind(self, ind, output_inds=None, **contract_opts):
         """Contract tensors connected by ``ind``.
@@ -4780,6 +4785,43 @@ class TensorNetwork(object):
         tid1, = self._get_tids_from_tags(tags1, which='all')
         tid2, = self._get_tids_from_tags(tags2, which='all')
         self._canonize_between_tids(tid1, tid2, absorb=absorb, **canonize_opts)
+
+    def reduce_inds_onto_bond(self, inda, indb, tags=None, drop_tags=False):
+        """Use QR factorization to 'pull' the indices ``inda`` and ``indb`` off
+        of their respective tensors and onto the bond between them. This is an
+        inplace operation.
+        """
+        tida, = self._get_tids_from_inds(inda)
+        tidb, = self._get_tids_from_inds(indb)
+        ta, tb = self._tids_get(tida, tidb)
+        bix = bonds(ta, tb)
+
+        if ta.ndim > 3:
+            self._split_tensor_tid(
+                tida, left_inds=None, right_inds=[inda, *bix], method='qr')
+            # get new location of ind
+            tida, = self._get_tids_from_inds(inda)
+        else:
+            drop_tags = False
+
+        if tb.ndim > 3:
+            self._split_tensor_tid(
+                tidb, left_inds=None, right_inds=[indb, *bix], method='qr')
+            # get new location of ind
+            tidb, = self._get_tids_from_inds(indb)
+        else:
+            drop_tags = False
+
+        # contract the reduced factors and get the tensor
+        self._contract_between_tids(tida, tidb)
+        tab, = self._inds_get(inda, indb)
+
+        # modify with the desired tags
+        tags = tags_to_oset(tags)
+        if drop_tags:
+            tab.modify(tags=tags)
+        else:
+            tab.modify(tags=tab.tags | tags)
 
     def _get_neighbor_tids(self, tids):
         """Get the tids of tensors connected to the tensor at ``tid``.
@@ -6330,11 +6372,12 @@ class TensorNetwork(object):
         self,
         optimize=None,
         output_inds=None,
-        **contract_opts
     ):
         """Return the :class:`cotengra.ContractionTree` corresponding to
         contracting this entire tensor network with path finder ``optimize``.
         """
+        import cotengra as ctg
+
         inputs, output, size_dict = self.get_inputs_output_size_dict(
             output_inds=output_inds)
 
@@ -6343,14 +6386,16 @@ class TensorNetwork(object):
         if isinstance(optimize, str):
             optimize = oe.paths.get_path_fn(optimize)
 
-        try:
-            tree = optimize.search(inputs, output, size_dict)
-        except AttributeError:
-            import cotengra as ctg
+        if hasattr(optimize, 'search'):
+            return optimize.search(inputs, output, size_dict)
+
+        if callable(optimize):
             path = optimize(inputs, output, size_dict)
-            tree = ctg.ContractionTree.from_path(
-                inputs, output, size_dict, path=path
-            )
+        else:
+            path = optimize
+
+        tree = ctg.ContractionTree.from_path(
+            inputs, output, size_dict, path=path)
 
         return tree
 
