@@ -41,7 +41,7 @@ def _launch_block_expression(
         input_left, input_right = input_str.split(',')
         contract_out = (oset(input_left) | oset(input_right)) \
                      - (oset(input_left) & oset(input_right))
-        
+
         if contract_out == oset(results_index):
             Ta, Tb = tmp_operands
             tensor_result = "".join(s for s in input_left + input_right if s not in idx_rm)
@@ -116,7 +116,10 @@ def tensor_split(
     if method == "svd":
         left, s, right = T.data.tensor_svd(_left_inds, right_idx=_right_inds, **opts)
     elif method == "qr":
-        mod = {"right":"qr", "left":"lq"}[absorb]
+        if absorb == "left":
+            mod = "lq"
+        else:
+            mod = "qr"
         s = None
         left, right = T.data.tensor_qr(_left_inds, right_idx=_right_inds, mod=mod)
     else:
@@ -355,10 +358,10 @@ class BlockTensor(Tensor):
         raise NotImplementedError
 
     def multiply_index_diagonal(
-            self, 
-            ind, 
-            x, 
-            inplace=False, 
+            self,
+            ind,
+            x,
+            inplace=False,
             location="front",
             flip_pattern = False,
             sqrt=False,
@@ -383,7 +386,7 @@ class BlockTensor(Tensor):
             x = inv_with_smudge(x, smudge)
         elif smudge !=0:
             x = add_with_smudge(x, smudge)
-    
+
         if location=="front":
             out = np.tensordot(x, t.data, axes=((iax,), (ax,)))
             transpose_order = list(range(1, ax+1)) + [0] + list(range(ax+1, t.ndim))

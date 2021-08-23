@@ -196,6 +196,176 @@ def TN_rand_reg(
         site_tag_id=site_tag_id, site_ind_id=site_ind_id)
 
 
+def TN2D_from_fill_fn(
+    fill_fn,
+    Lx,
+    Ly,
+    D,
+    cyclic=False,
+    site_tag_id='I{},{}',
+    row_tag_id='ROW{}',
+    col_tag_id='COL{}',
+):
+    """A scalar 2D lattice tensor network with tensors filled by a function.
+
+    Parameters
+    ----------
+    Lx : int
+        Length of side x.
+    Ly : int
+        Length of side y.
+    D : int
+        The bond dimension connecting sites.
+    cyclic : bool or (bool, bool), optional
+        Whether to use periodic boundary conditions. X and Y can be specified
+        separately using a tuple.
+    site_tag_id : str, optional
+        String specifier for naming convention of site tags.
+    row_tag_id : str, optional
+        String specifier for naming convention of row tags.
+    col_tag_id : str, optional
+        String specifier for naming convention of column tags.
+
+    Returns
+    -------
+    TensorNetwork2D
+    """
+    try:
+        cyclic_x, cyclic_y = cyclic
+    except TypeError:
+        cyclic_x = cyclic_y = cyclic
+
+    ts = []
+    bonds = collections.defaultdict(rand_uuid)
+
+    for i, j in itertools.product(range(Lx), range(Ly)):
+        directions = ""
+        inds = []
+
+        if j > 0 or cyclic_y:
+            directions += 'l'
+            inds.append(bonds[(i, (j - 1) % Ly), (i, j)])
+        if j < Ly - 1 or cyclic_y:
+            directions += 'r'
+            inds.append(bonds[(i, j), (i, (j + 1) % Ly)])
+        if i < Lx - 1 or cyclic_x:
+            directions += 'u'
+            inds.append(bonds[(i, j), ((i + 1) % Lx, j)])
+        if i > 0 or cyclic_x:
+            directions += 'd'
+            inds.append(bonds[((i - 1) % Lx, j), (i, j)])
+
+        shape = (D,) * len(inds)
+        data = fill_fn(shape)
+        tags = [site_tag_id.format(i, j),
+                row_tag_id.format(i), col_tag_id.format(j)]
+        ts.append(Tensor(data=data, inds=inds, tags=tags))
+
+    tn = TensorNetwork(ts)
+
+    return tn.view_as_(
+        TensorNetwork2D,
+        Lx=Lx, Ly=Ly,
+        site_tag_id=site_tag_id,
+        row_tag_id=row_tag_id,
+        col_tag_id=col_tag_id,
+    )
+
+
+def TN2D_empty(
+    Lx,
+    Ly,
+    D,
+    cyclic=False,
+    site_tag_id='I{},{}',
+    row_tag_id='ROW{}',
+    col_tag_id='COL{}',
+    dtype='float64',
+):
+    """A scalar 2D lattice tensor network initialized with empty tensors.
+
+    Parameters
+    ----------
+    Lx : int
+        Length of side x.
+    Ly : int
+        Length of side y.
+    D : int
+        The bond dimension connecting sites.
+    cyclic : bool or (bool, bool), optional
+        Whether to use periodic boundary conditions. X and Y can be specified
+        separately using a tuple.
+    site_tag_id : str, optional
+        String specifier for naming convention of site tags.
+    row_tag_id : str, optional
+        String specifier for naming convention of row tags.
+    col_tag_id : str, optional
+        String specifier for naming convention of column tags.
+    dtype : str, optional
+        The data type of the tensors.
+
+    Returns
+    -------
+    TensorNetwork2D
+    """
+    def fill_fn(shape):
+        return np.empty(shape, dtype=dtype)
+
+    return TN2D_from_fill_fn(
+        fill_fn, Lx=Lx, Ly=Ly, D=D, cyclic=cyclic,
+        site_tag_id=site_tag_id, row_tag_id=row_tag_id, col_tag_id=col_tag_id,
+    )
+
+
+def TN2D_with_value(
+    value,
+    Lx,
+    Ly,
+    D,
+    cyclic=False,
+    site_tag_id='I{},{}',
+    row_tag_id='ROW{}',
+    col_tag_id='COL{}',
+    dtype='float64',
+):
+    """A scalar 2D lattice tensor network with every element set to ``value``.
+    This uses ``numpy.broadcast_to`` and therefore essentially no memory.
+
+    Parameters
+    ----------
+    Lx : int
+        Length of side x.
+    Ly : int
+        Length of side y.
+    D : int
+        The bond dimension connecting sites.
+    cyclic : bool or (bool, bool), optional
+        Whether to use periodic boundary conditions. X and Y can be specified
+        separately using a tuple.
+    site_tag_id : str, optional
+        String specifier for naming convention of site tags.
+    row_tag_id : str, optional
+        String specifier for naming convention of row tags.
+    col_tag_id : str, optional
+        String specifier for naming convention of column tags.
+    dtype : str, optional
+        The data type of the tensors.
+
+    Returns
+    -------
+    TensorNetwork2D
+    """
+    element = np.array(value, dtype=dtype)
+
+    def fill_fn(shape):
+        return np.broadcast_to(element, shape)
+
+    return TN2D_from_fill_fn(
+        fill_fn, Lx=Lx, Ly=Ly, D=D, cyclic=cyclic,
+        site_tag_id=site_tag_id, row_tag_id=row_tag_id, col_tag_id=col_tag_id,
+    )
+
+
 @random_seed_fn
 def TN2D_rand(
     Lx,
@@ -228,51 +398,207 @@ def TN2D_rand(
         String specifier for naming convention of column tags.
     dtype : dtype, optional
         Data type of the random arrays.
+    seed : int, optional
+        A random seed.
 
     Returns
     -------
     TensorNetwork2D
     """
+    def fill_fn(shape):
+        return randn(shape, dtype=dtype)
+
+    return TN2D_from_fill_fn(
+        fill_fn, Lx=Lx, Ly=Ly, D=D, cyclic=cyclic,
+        site_tag_id=site_tag_id, row_tag_id=row_tag_id, col_tag_id=col_tag_id,
+    )
+
+
+def TN3D_from_fill_fn(
+    fill_fn,
+    Lx,
+    Ly,
+    Lz,
+    D,
+    cyclic=False,
+    site_tag_id='I{},{},{}',
+    x_tag_id='X{}',
+    y_tag_id='Y{}',
+    z_tag_id='Z{}',
+):
+    """A scalar 3D lattice tensor network with tensors filled by a function.
+
+    Parameters
+    ----------
+    fill_fn : callable
+        A function with signature ``fill_fn(shape) -> array``, used to fill
+        each tensor.
+    Lx : int
+        Length of side x.
+    Ly : int
+        Length of side y.
+    Lz : int
+        Length of side z.
+    D : int
+        The bond dimension connecting sites.
+    cyclic : bool or (bool, bool, bool), optional
+        Whether to use periodic boundary conditions. X, Y and Z can be
+        specified separately using a tuple.
+    site_tag_id : str, optional
+        String formatter specifying how to label each site.
+    dtype : dtype, optional
+        Data type of the random arrays.
+
+    Returns
+    -------
+    TensorNetwork3D
+    """
     try:
-        cyclic_x, cyclic_y = cyclic
+        cyclic_x, cyclic_y, cyclic_z = cyclic
     except TypeError:
-        cyclic_x = cyclic_y = cyclic
+        cyclic_x = cyclic_y = cyclic_z = cyclic
 
     ts = []
     bonds = collections.defaultdict(rand_uuid)
 
-    for i, j in itertools.product(range(Lx), range(Ly)):
+    for i, j, k in itertools.product(range(Lx), range(Ly), range(Lz)):
         directions = ""
         inds = []
 
+        if k > 0 or cyclic_z:
+            directions += 'b'
+            inds.append(bonds[(i, j, (k - 1) % Lz), (i, j, k)])
+        if k < Lz - 1 or cyclic_z:
+            directions += 'a'
+            inds.append(bonds[(i, j, k), (i, j, (k + 1) % Lz)])
         if j > 0 or cyclic_y:
             directions += 'l'
-            inds.append(bonds[(i, (j - 1) % Ly), (i, j)])
+            inds.append(bonds[(i, (j - 1) % Ly, k), (i, j, k)])
         if j < Ly - 1 or cyclic_y:
             directions += 'r'
-            inds.append(bonds[(i, j), (i, (j + 1) % Ly)])
+            inds.append(bonds[(i, j, k), (i, (j + 1) % Ly, k)])
         if i < Lx - 1 or cyclic_x:
             directions += 'u'
-            inds.append(bonds[(i, j), ((i + 1) % Lx, j)])
+            inds.append(bonds[(i, j, k), ((i + 1) % Lx, j, k)])
         if i > 0 or cyclic_x:
             directions += 'd'
-            inds.append(bonds[((i - 1) % Lx, j), (i, j)])
+            inds.append(bonds[((i - 1) % Lx, j, k), (i, j, k)])
 
-        ts.append(Tensor(
-            data=randn([D] * len(inds), dtype=dtype),
-            inds=inds,
-            tags=[site_tag_id.format(i, j),
-                  row_tag_id.format(i),
-                  col_tag_id.format(j)]))
+        shape = (D,) * len(inds)
+        data = fill_fn(shape)
+        tags = [site_tag_id.format(i, j, k), x_tag_id.format(i),
+                y_tag_id.format(j), z_tag_id.format(k)]
+        ts.append(Tensor(data=data, inds=inds, tags=tags))
 
     tn = TensorNetwork(ts)
 
     return tn.view_as_(
-        TensorNetwork2D,
-        Lx=Lx, Ly=Ly,
+        TensorNetwork3D,
+        Lx=Lx, Ly=Ly, Lz=Lz,
         site_tag_id=site_tag_id,
-        row_tag_id=row_tag_id,
-        col_tag_id=col_tag_id,
+        x_tag_id=x_tag_id,
+        y_tag_id=y_tag_id,
+        z_tag_id=z_tag_id,
+    )
+
+
+def TN3D_empty(
+    Lx,
+    Ly,
+    Lz,
+    D,
+    cyclic=False,
+    site_tag_id='I{},{},{}',
+    x_tag_id='X{}',
+    y_tag_id='Y{}',
+    z_tag_id='Z{}',
+    dtype='float64',
+):
+    """A scalar 3D lattice tensor network initialized with empty tensors.
+
+    Parameters
+    ----------
+    Lx : int
+        Length of side x.
+    Ly : int
+        Length of side y.
+    Lz : int
+        Length of side z.
+    D : int
+        The bond dimension connecting sites.
+    cyclic : bool or (bool, bool, bool), optional
+        Whether to use periodic boundary conditions. X, Y and Z can be
+        specified separately using a tuple.
+    site_tag_id : str, optional
+        String formatter specifying how to label each site.
+    dtype : dtype, optional
+        Data type of the random arrays.
+    seed : int, optional
+        Random seed.
+
+    Returns
+    -------
+    TensorNetwork3D
+    """
+    def fill_fn(shape):
+        return np.empty(shape, dtype=dtype)
+
+    return TN3D_from_fill_fn(
+        fill_fn, Lx, Ly, Lz, D,
+        cyclic=cyclic, site_tag_id=site_tag_id,
+        x_tag_id=x_tag_id, y_tag_id=y_tag_id, z_tag_id=z_tag_id,
+    )
+
+
+def TN3D_with_value(
+    value,
+    Lx,
+    Ly,
+    Lz,
+    D,
+    cyclic=False,
+    site_tag_id='I{},{},{}',
+    x_tag_id='X{}',
+    y_tag_id='Y{}',
+    z_tag_id='Z{}',
+    dtype='float64',
+):
+    """A scalar 2D lattice tensor network with every element set to ``value``.
+    This uses ``numpy.broadcast_to`` and therefore essentially no memory.
+
+    Parameters
+    ----------
+    Lx : int
+        Length of side x.
+    Ly : int
+        Length of side y.
+    Lz : int
+        Length of side z.
+    D : int
+        The bond dimension connecting sites.
+    cyclic : bool or (bool, bool, bool), optional
+        Whether to use periodic boundary conditions. X, Y and Z can be
+        specified separately using a tuple.
+    site_tag_id : str, optional
+        String formatter specifying how to label each site.
+    dtype : dtype, optional
+        Data type of the random arrays.
+    seed : int, optional
+        Random seed.
+
+    Returns
+    -------
+    TensorNetwork3D
+    """
+    element = np.array(value, dtype=dtype)
+
+    def fill_fn(shape):
+        return np.broadcast_to(element, shape)
+
+    return TN3D_from_fill_fn(
+        fill_fn, Lx, Ly, Lz, D,
+        cyclic=cyclic, site_tag_id=site_tag_id,
+        x_tag_id=x_tag_id, y_tag_id=y_tag_id, z_tag_id=z_tag_id,
     )
 
 
@@ -308,62 +634,20 @@ def TN3D_rand(
         String formatter specifying how to label each site.
     dtype : dtype, optional
         Data type of the random arrays.
+    seed : int, optional
+        Random seed.
 
     Returns
     -------
     TensorNetwork
     """
-    try:
-        cyclic_x, cyclic_y, cyclic_z = cyclic
-    except TypeError:
-        cyclic_x = cyclic_y = cyclic_z = cyclic
+    def fill_fn(shape):
+        return randn(shape, dtype=dtype)
 
-    ts = []
-    bonds = collections.defaultdict(rand_uuid)
-
-    for i, j, k in itertools.product(range(Lx), range(Ly), range(Lz)):
-        directions = ""
-        inds = []
-
-        if k > 0 or cyclic_z:
-            directions += 'b'
-            inds.append(bonds[(i, j, (k - 1) % Lz), (i, j, k)])
-        if k < Lz - 1 or cyclic_z:
-            directions += 'a'
-            inds.append(bonds[(i, j, k), (i, j, (k + 1) % Lz)])
-        if j > 0 or cyclic_y:
-            directions += 'l'
-            inds.append(bonds[(i, (j - 1) % Ly, k), (i, j, k)])
-        if j < Ly - 1 or cyclic_y:
-            directions += 'r'
-            inds.append(bonds[(i, j, k), (i, (j + 1) % Ly, k)])
-        if i < Lx - 1 or cyclic_x:
-            directions += 'u'
-            inds.append(bonds[(i, j, k), ((i + 1) % Lx, j, k)])
-        if i > 0 or cyclic_x:
-            directions += 'd'
-            inds.append(bonds[((i - 1) % Lx, j, k), (i, j, k)])
-
-        ts.append(Tensor(
-            data=randn([D] * len(inds), dtype=dtype),
-            inds=inds,
-            tags=[
-                site_tag_id.format(i, j, k),
-                x_tag_id.format(i),
-                y_tag_id.format(j),
-                z_tag_id.format(k),
-            ],
-        ))
-
-    tn = TensorNetwork(ts)
-
-    return tn.view_as_(
-        TensorNetwork3D,
-        Lx=Lx, Ly=Ly, Lz=Lz,
-        site_tag_id=site_tag_id,
-        x_tag_id=x_tag_id,
-        y_tag_id=y_tag_id,
-        z_tag_id=z_tag_id,
+    return TN3D_from_fill_fn(
+        fill_fn, Lx, Ly, Lz, D,
+        cyclic=cyclic, site_tag_id=site_tag_id,
+        x_tag_id=x_tag_id, y_tag_id=y_tag_id, z_tag_id=z_tag_id,
     )
 
 

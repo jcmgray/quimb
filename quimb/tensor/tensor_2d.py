@@ -916,6 +916,7 @@ class TensorNetwork2D(TensorNetwork):
         renorm=False,
         optimize='auto-hq',
         opposite_envs=None,
+        equalize_norms=False,
         contract_boundary_opts=None,
     ):
         """Contract the boundary of this 2D TN using the 'full bond'
@@ -951,6 +952,9 @@ class TensorNetwork2D(TensorNetwork):
             Other options given to the opposite direction environment
             contraction.
         """
+        if equalize_norms:
+            raise NotImplementedError
+
         contract_boundary_opts = ensure_dict(contract_boundary_opts)
         contract_boundary_opts.setdefault('max_bond', max_bond)
         contract_boundary_opts.setdefault('cutoff', cutoff)
@@ -1628,8 +1632,9 @@ class TensorNetwork2D(TensorNetwork):
         top=None,
         left=None,
         right=None,
-        inplace=False,
         compress_opts=None,
+        equalize_norms=False,
+        inplace=False,
         **contract_boundary_opts,
     ):
         """Contract the boundary of this 2D tensor network inwards::
@@ -1701,6 +1706,7 @@ class TensorNetwork2D(TensorNetwork):
         contract_boundary_opts['cutoff'] = cutoff
         contract_boundary_opts['canonize'] = canonize
         contract_boundary_opts['layer_tags'] = layer_tags
+        contract_boundary_opts['equalize_norms'] = equalize_norms
         contract_boundary_opts['compress_opts'] = compress_opts
 
         if (mode == 'full-bond'):
@@ -1787,11 +1793,17 @@ class TensorNetwork2D(TensorNetwork):
                     (right - left <= max_separation)
                 )
                 if thin_strip:
+                    if equalize_norms is True:
+                        tn.equalize_norms_()
+
                     return tn.contract(all, optimize='auto-hq')
 
             # check if all directions have reached the ``around`` region
             elif all(reached_stop.values()):
                 break
+
+        if equalize_norms is True:
+            tn.equalize_norms_()
 
         return tn
 

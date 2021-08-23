@@ -845,6 +845,20 @@ class FermionTensorNetwork(BlockTensorNetwork):
         order_map = dict(zip(sort_order, range(ntensors-len(tids), ntensors)))
         self._reorder_from_tid(order_map, inplace=True)
 
+    def _split_tensor_tid(self, tid, left_inds, **split_opts):
+        t = self._pop_tensor(tid)
+        tensors = t.split(left_inds=left_inds, get='tensors', **split_opts)
+        fs = self.fermion_space
+        site = t.get_fermion_info()[1]
+        for i, T in enumerate(tensors[::-1]):
+            if i==0:
+                fs.replace_tensor(site, T, virtual=True)
+            else:
+                fs.insert_tensor(site, T, virtual=True)
+            site += 1
+            self.add_tensor(T, virtual=True)
+        return self
+
     def _refactor_phase_from_tids(self, tids):
         tids = tags_to_oset(tids)
         local_inds = []
@@ -1012,6 +1026,10 @@ class FermionTensorNetwork(BlockTensorNetwork):
     def partition(self, tags, which='any', inplace=False):
         tn = self if inplace else self.copy(full=True)
         return TensorNetwork.partition(tn, tags, which=which, inplace=True)
+
+    def _contract_between_tids(self, tid1, tid2, **contract_opts):
+        contract_opts["inplace"] = True
+        super()._contract_between_tids(tid1, tid2, **contract_opts)
 
     def contract_between(self, tags1, tags2, **contract_opts):
         contract_opts["inplace"] = True
@@ -1241,7 +1259,7 @@ class FermionTensorNetwork(BlockTensorNetwork):
         # absorb outer gauges fully into single tensor
         outer = []
         inner = []
-    
+
 
         if len(self.tensor_map)==len(self.fermion_space.tensor_order):
             full_ind_map = self.ind_map
@@ -1256,9 +1274,9 @@ class FermionTensorNetwork(BlockTensorNetwork):
                 locl, locr, flip_pattern = _get_gauge_location(tl, tr)
                 bond, = tl.bonds(tr)
                 g = sqrt(g)
-                tl.multiply_index_diagonal_(bond, g, 
+                tl.multiply_index_diagonal_(bond, g,
                         location=locl, flip_pattern=flip_pattern)
-                tr.multiply_index_diagonal_(bond, g, 
+                tr.multiply_index_diagonal_(bond, g,
                         location=locr, flip_pattern=flip_pattern)
                 inner.append(((tl, tr), bond, g, (locl, locr), flip_pattern))
             elif len(tensors)==1:
@@ -1288,14 +1306,14 @@ class FermionTensorNetwork(BlockTensorNetwork):
             while ungauge_outer and outer:
                 t, ix, g, location, flip_pattern = outer.pop()
                 g = inv_with_smudge(g, gauge_smudge=0.)
-                t.multiply_index_diagonal_(ix, g, 
+                t.multiply_index_diagonal_(ix, g,
                         location=location, flip_pattern=flip_pattern)
             while ungauge_inner and inner:
                 (tl, tr), ix, g, location, flip_pattern = inner.pop()
                 ginv = inv_with_smudge(g, gauge_smudge=0.)
-                tl.multiply_index_diagonal_(ix, ginv, 
+                tl.multiply_index_diagonal_(ix, ginv,
                         location=location[0], flip_pattern=flip_pattern)
-                tr.multiply_index_diagonal_(ix, ginv, 
+                tr.multiply_index_diagonal_(ix, ginv,
                         location=location[1], flip_pattern=flip_pattern)
 
     def compute_inds_environment(self, inds, **inds_env_options):
@@ -1381,7 +1399,7 @@ class FermionTensorNetwork(BlockTensorNetwork):
 
 def _tensors_to_constructors(tensors, inds, inv=True):
     """
-    Generate a pyblock3.algebra.fermion.Constructor object 
+    Generate a pyblock3.algebra.fermion.Constructor object
     to allow mapping from vector to tensor and inverse.
 
     Parameters
@@ -1391,9 +1409,9 @@ def _tensors_to_constructors(tensors, inds, inv=True):
     inds: a list/tuple of strings
         The indices of the tensor to construct
     inv: a string of "+" and "-"
-        Whether to take the complementary signs 
+        Whether to take the complementary signs
         from the tensor input
-    
+
     Returns
     -------
     constructor: a pyblock3.algebra.fermion.Constructor object
@@ -1415,9 +1433,9 @@ def _tensors_to_constructors(tensors, inds, inv=True):
                     pattern += string_inv[T.data.pattern[ix]]
                 else:
                     pattern += T.data.pattern[ix]
-    mycon = Constructor.from_bond_infos(bond_infos, pattern)  
-    return mycon   
-    
+    mycon = Constructor.from_bond_infos(bond_infos, pattern)
+    return mycon
+
 class FTNLinearOperator(spla.LinearOperator):
     r"""Get a fermionic linear operator - something that replicates the matrix-vector
     operation - for an arbitrary uncontracted  FermionTensorNetwork, e.g::
@@ -1440,7 +1458,7 @@ class FTNLinearOperator(spla.LinearOperator):
     Parameters
     ----------
     tns : sequence of FermionTensors or FermionTensorNetwork
-        A representation of the hamiltonian. If it's a sequence 
+        A representation of the hamiltonian. If it's a sequence
         of fermionTensors, they must be in the same FermionSpace
     left_inds : sequence of str
         The 'left' inds of the effective hamiltonian network.
@@ -1452,7 +1470,7 @@ class FTNLinearOperator(spla.LinearOperator):
     right_constructor: pyblock3.algebra.fermion.Constructor object, optional
         An object to help map the right vector to a FermionTensor data
     square: bool, optional
-        Whether the operator is expected to have same symmetry blocks in 
+        Whether the operator is expected to have same symmetry blocks in
         left/right indices
     optimize : str, optional
         The path optimizer to use for the 'matrix-vector' contraction.
@@ -1492,7 +1510,7 @@ class FTNLinearOperator(spla.LinearOperator):
             self.left_constructor = self.right_constructor
         else:
             self.left_constructor = _tensors_to_constructors(
-                                        self._tensors, left_inds, 
+                                        self._tensors, left_inds,
                                         inv=False)
         self.left_inds, self.right_inds = left_inds, right_inds
         self.tags = oset.union(*(t.tags for t in self._tensors))
@@ -1515,19 +1533,19 @@ class FTNLinearOperator(spla.LinearOperator):
     @property
     def dtype(self):
         return self._tensors[0].dtype
-    
+
     @property
     def dq(self):
         return self._dq
-    
+
     @dq.setter
     def dq(self, new_dq):
         self._dq = new_dq
-    
+
     @property
     def ldim(self):
         return self.left_constructor.vector_size(self.dq)
-    
+
     @property
     def rdim(self):
         return self.right_constructor.vector_size(self.dq)
@@ -1535,17 +1553,17 @@ class FTNLinearOperator(spla.LinearOperator):
     @property
     def shape(self):
         return (self.ldim, self.rdim)
-    
+
     def left_vector_to_tensor(self, vector, dq=None):
-        if dq is None: 
+        if dq is None:
             dq = self.dq
         return self.left_constructor.vector_to_tensor(vector, dq)
-    
+
     def right_vector_to_tensor(self, vector, dq=None):
-        if dq is None: 
+        if dq is None:
             dq = self.dq
         return self.right_constructor.vector_to_tensor(vector, dq)
-    
+
     def left_tensor_to_vector(self, T):
         return self.left_constructor.tensor_to_vector(T)
 
@@ -1566,7 +1584,7 @@ class FTNLinearOperator(spla.LinearOperator):
         fs, tensors = self.get_contraction_kits()
         tensors.append(iT)
         if self.location == "back":
-            fs.insert_tensor(0, iT, virtual=True) 
+            fs.insert_tensor(0, iT, virtual=True)
         else:
             fs.add_tensor(iT, virtual=True)
 

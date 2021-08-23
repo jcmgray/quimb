@@ -125,6 +125,12 @@ class LocalHamGen:
         """
         return len(self.sites)
 
+    def items(self):
+        """Iterate over all terms in the hamiltonian. This is mostly for
+        convenient compatibility with ``compute_local_expectation``.
+        """
+        return self.terms.items()
+
     def _convert_from_qarray_cached(self, x):
         cache = self._op_cache["convert_from_qarray"]
         key = id(x)

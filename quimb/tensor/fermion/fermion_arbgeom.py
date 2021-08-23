@@ -1,5 +1,4 @@
-import numpy as np
-
+from ...utils import check_opt
 from ..tensor_arbgeom import TensorNetworkGen, TensorNetworkGenVector
 from .fermion_core import FermionTensorNetwork, FermionTensor
 
@@ -70,7 +69,7 @@ class FermionTensorNetworkGenVector(
             gauges.pop((ixs[1], ixs[0]), None)
             gauges[ixs] = s
         return self
-    
+
     def local_expectation_simple(
         self,
         G,
@@ -93,7 +92,7 @@ class FermionTensorNetworkGenVector(
         if gauges is not None:
             # gauge the region with simple update style bond gauges
             k.gauge_simple_insert(gauges)
-        
+
         # reconstructing the 'simple' network even though they
         # might not be continugously ordered in original network
         k = k.copy(force=True)
@@ -130,7 +129,7 @@ class FermionTensorNetworkGenVector(
 
         Gop = FermionTensor(G.copy(), inds=b_inds+k_inds)
         new_G = b.fermion_space.move_past(Gop).data
-        
+
         rho = (self & b).contract(all, optimize=optimize)
         # make sure the bra indices lie ahead of ket indices
         rho.transpose_(*b_inds, *k_inds)
@@ -139,3 +138,69 @@ class FermionTensorNetworkGenVector(
         rho.gate_inds_(new_G, k_inds)
         expec = rho.trace(k_inds, b_inds)
         return expec / nfact
+
+    def local_expectation(
+        self,
+        G,
+        where,
+        max_bond,
+        optimize,
+        normalized=True,
+        flatten=True,
+        method='rho',
+        rehearse=False,
+        **contract_compressed_opts,
+    ):
+        check_opt('method', method, ('rho', 'rho-reduced'))
+        reduce = method == 'rho-reduced'
+
+        # form the partial trace
+        k_inds = tuple(map(self.site_ind, where))
+
+        if reduce:
+            k = self.copy()
+            k.reduce_inds_onto_bond(*k_inds, tags='__BOND__', drop_tags=True)
+        else:
+            k = self
+
+        b_inds = tuple(map("_bra{}".format, where))
+        b = k.H.reindex_(dict(zip(k_inds, b_inds)))
+
+        Gop = FermionTensor(G.copy(), inds=b_inds+k_inds)
+        new_G = b.fermion_space.move_past(Gop).data
+
+        tn = k & b
+
+        output_inds = k_inds + b_inds
+
+        if flatten:
+            for site in self.sites:
+                tn ^= site
+            if reduce:
+                tn ^= '__BOND__'
+
+        if rehearse:
+            if rehearse == 'tn':
+                return tn
+            if rehearse == 'tree':
+                return tn.contraction_tree(optimize, output_inds=output_inds)
+            if rehearse:
+                return tn.contraction_info(optimize, output_inds=output_inds)
+
+        t_rho = tn.contract_compressed(
+            optimize,
+            max_bond=max_bond,
+            output_inds=output_inds,
+            **contract_compressed_opts,
+        )
+
+        t_rho.transpose_(*b_inds, *k_inds)
+        t_rho = FermionTensorNetwork([t_rho])
+        if normalized:
+            nfact = t_rho.trace(k_inds, b_inds)
+        else:
+            nfact = 1
+
+        t_rho.gate_inds_(new_G, k_inds)
+        expec = t_rho.trace(k_inds, b_inds) / nfact
+        return expec
