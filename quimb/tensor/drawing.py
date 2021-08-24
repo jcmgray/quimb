@@ -359,7 +359,7 @@ def draw_tn(
         G.nodes[hix]['size'] = 0.0
         G.nodes[hix]['outline_size'] = 0.0
         G.nodes[hix]['outline_color'] = (1.0, 1.0, 1.0, 1.0)
-        G.nodes[hix]['marker'] = ''
+        G.nodes[hix]['marker'] = '.'  # set this to avoid warning - size is 0
         G.nodes[hix]['hatch'] = ''
         if show_inds == 'all':
             node_labels[hix] = hix
