@@ -438,6 +438,39 @@ class TestCircuit:
 
         assert_allclose(exs, aps)
 
+    @pytest.mark.parametrize(
+        "name, densefn, nparam, nqubit",
+        [
+            ('rx', qu.Rx, 1, 1),
+            ('ry', qu.Ry, 1, 1),
+            ('rz', qu.Rz, 1, 1),
+            ('u3', qu.U_gate, 3, 1),
+            ('fsim', qu.fsim, 2, 2),
+            ('fsimg', qu.fsimg, 5, 2),
+        ]
+    )
+    def test_parametrized_gates_rx(self, name, densefn, nparam, nqubit):
+        k0 = qu.rand_ket(2**nqubit)
+        params = qu.randn(nparam)
+        kf = densefn(*params) @ k0
+        k0mps = qtn.MatrixProductState.from_dense(k0, [2] * nqubit)
+        circ = qtn.Circuit(psi0=k0mps, gate_opts={'contract': False})
+        getattr(circ, name)(*params, *range(nqubit), parametrize=True)
+        tn = circ.psi
+        assert isinstance(tn['GATE_0'], qtn.PTensor)
+        assert_allclose(circ.to_dense(), kf)
+
+    def test_apply_raw_gate(self):
+        k0 = qu.rand_ket(4)
+        psi0 = qtn.MatrixProductState.from_dense(k0, [2] * 2)
+        circ = qtn.Circuit(psi0=psi0)
+        U = qu.rand_uni(4)
+        circ.apply_gate_raw(U, [0, 1], tags='UCUSTOM')
+        assert len(circ.gates) == 1
+        assert 'UCUSTOM' in circ.psi.tags
+        assert qu.fidelity(circ.to_dense(), U @ k0) == pytest.approx(1)
+
+
 class TestCircuitGen:
 
     @pytest.mark.parametrize(

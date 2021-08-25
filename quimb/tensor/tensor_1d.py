@@ -514,8 +514,6 @@ class TensorNetwork1D(TensorNetwork):
     def nsites(self):
         """The number of sites.
         """
-        import warnings
-        warnings.warn('`tn.nsites` is deprecated in favor of `tn.L`.')
         return self._L
 
     def gen_site_coos(self):
@@ -2243,8 +2241,8 @@ class MatrixProductState(TensorNetwork1DVector,
 
             - 'ket': vector form as tensor.
             - 'rho': density operator form, i.e. vector outer product
-            - 'ket-dense': like 'ket' but return ``numpy.matrix``.
-            - 'rho-dense': like 'rho' but return ``numpy.matrix``.
+            - 'ket-dense': like 'ket' but return ``qarray``.
+            - 'rho-dense': like 'rho' but return ``qarray``.
 
         cur_orthog : int, optional
             If given, take as the current orthogonality center so as to

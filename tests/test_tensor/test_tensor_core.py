@@ -1287,6 +1287,14 @@ class TestTensorNetwork:
                 if far_tg != tg:
                     ttn[far_tg].H @ ttn[far_tg] == pytest.approx(2)
 
+    def test_tn_split_tensor(self):
+        mps = MPS_rand_state(4, 3)
+        right_inds = bonds(mps[1], mps[2])
+        mps.split_tensor(1, left_inds=None, right_inds=right_inds, rtags='X')
+        assert mps.num_tensors == 5
+        assert mps['X'].shape == (3, 3)
+        assert mps.H @ mps == pytest.approx(1.0)
+
     def test_insert_operator(self):
         p = MPS_rand_state(3, 7, tags='KET')
         q = p.H.retag({'KET': 'BRA'})

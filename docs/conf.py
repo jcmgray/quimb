@@ -33,7 +33,6 @@ from quimb._version import get_versions
 extensions = [
     'sphinx.ext.autodoc',
     'sphinx.ext.autosummary',
-    'sphinx.ext.doctest',
     'sphinx.ext.viewcode',
     'sphinx.ext.napoleon',
     'sphinx.ext.intersphinx',
@@ -71,7 +70,7 @@ master_doc = 'index'
 
 # General information about the project.
 project = 'quimb'
-copyright = '2020, Johnnie Gray'
+copyright = '2015-2021, Johnnie Gray'
 author = 'Johnnie Gray'
 
 # The version info for the project you're documenting, acts as replacement for
@@ -116,7 +115,7 @@ exclude_patterns = ['_build', '**.ipynb_checkpoints']
 # show_authors = False
 
 # The name of the Pygments (syntax highlighting) style to use.
-pygments_style = 'pastie'
+pygments_style = 'default'
 
 # A list of ignored prefixes for module index sorting.
 # modindex_common_prefix = []
@@ -132,13 +131,20 @@ todo_include_todos = False
 
 # The theme to use for HTML and HTML Help pages.  See the documentation for
 # a list of builtin themes.
-html_theme = "pydata_sphinx_theme"
+html_theme = "sphinx_book_theme"
 
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
 # documentation.
 html_theme_options = {
     "github_url": "https://github.com/jcmgray/quimb",
+    "repository_url": "https://github.com/jcmgray/quimb",
+    "use_repository_button": True,
+    "use_issues_button": True,
+    "use_edit_page_button": True,
+    "path_to_docs": "docs",
+    "use_fullscreen_button": False,
+    "use_download_button": False,
 }
 
 # Add any paths that contain custom themes here, relative to this directory.
@@ -146,7 +152,7 @@ html_theme_options = {
 
 # The name for this set of Sphinx documents.  If None, it defaults to
 # "<project> v<release> documentation".
-# html_title = None
+html_title = ''
 
 # A shorter title for the navigation bar.  Default is the same as html_title.
 # html_short_title = None

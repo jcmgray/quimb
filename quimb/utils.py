@@ -414,9 +414,10 @@ def gen_bipartitions(it):
     ``(1, 2), (3, 4)`` is considered the same as ``(3, 4), (1, 2)``.
     """
     n = len(it)
-    for i in range(1, 2**(n - 1)):
-        bitstring_repr = f'{i:0>{n}b}'
-        l, r = [], []
-        for b, x in zip(bitstring_repr, it):
-            (l if b == '0' else r).append(x)
-        yield l, r
+    if n:
+        for i in range(1, 2**(n - 1)):
+            bitstring_repr = f'{i:0>{n}b}'
+            l, r = [], []
+            for b, x in zip(bitstring_repr, it):
+                (l if b == '0' else r).append(x)
+            yield l, r

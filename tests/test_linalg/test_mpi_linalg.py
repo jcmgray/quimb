@@ -6,6 +6,7 @@ from quimb import (
     rand_herm,
     rand_ket,
     eigh,
+    can_use_mpi_pool,
 )
 
 from quimb.linalg import SLEPC4PY_FOUND
@@ -20,18 +21,13 @@ if SLEPC4PY_FOUND:
         NUM_MPI_WORKERS,
     )
 
+slepc4py_test = pytest.mark.skipif(
+    not SLEPC4PY_FOUND, reason="No SLEPc4py installation")
 
-slepc4py_notfound_msg = "No SLEPc4py installation"
-slepc4py_test = pytest.mark.skipif(not SLEPC4PY_FOUND,
-                                   reason=slepc4py_notfound_msg)
+mpipooltest = pytest.mark.skipif(
+    not can_use_mpi_pool(), reason="Not allowed to use MPI pool.")
 
-
-num_workers_to_try = [
-    None,
-    1,
-    2,
-    3,
-]
+num_workers_to_try = [None, 1, 2, 3]
 
 
 @pytest.fixture
@@ -102,6 +98,7 @@ class TestSLEPcMPI:
 
 
 @slepc4py_test
+@mpipooltest
 class TestMPIPool:
     def test_spawning_pool_in_pool(self, bigsparsemat):
         from quimb.linalg.mpi_launcher import get_mpi_pool

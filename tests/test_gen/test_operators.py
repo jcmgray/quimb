@@ -58,7 +58,7 @@ def test_hamiltonian_builder(sparse, stype, dtype):
     assert qu.issparse(H) == sparse
     assert qu.isdense(H) != sparse
     if sparse:
-            assert H.format == stype
+        assert H.format == stype
 
     with pytest.raises(ValueError):  # check immutability
         H[0, 0] = 100
@@ -165,9 +165,10 @@ class TestGates:
 
     def test_fsimg(self):
         assert_allclose(
-                        qu.fsimg(- qu.pi / 2, 0.0, 0.0, 0.0, 0.0),
-                        qu.iswap(), atol=1e-12
-                       )
+            qu.fsimg(- qu.pi / 2, 0.0, 0.0, 0.0, 0.0),
+            qu.iswap(), atol=1e-12
+        )
+
 
 class TestHamHeis:
     def test_ham_heis_2(self):
