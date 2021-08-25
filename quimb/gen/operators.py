@@ -352,7 +352,6 @@ def fsim(theta, phi, dtype=complex, **kwargs):
     return gate
 
 
-<<<<<<< HEAD
 def fsimt(theta, dtype=complex, **kwargs):
     r"""The 'fermionic simulation' gate:
 
@@ -398,27 +397,27 @@ def fsimg(theta, zeta, chi, gamma, phi, dtype=complex, **kwargs):
 =======
 @functools.lru_cache(maxsize=256)
 def fsimg(theta, zeta, chi, gamma, phi, dtype=complex, **kwargs):
-    r"""The 'fermionic simulation' gate, with:
+#    r"The 'fermionic simulation' gate, with:
 
-        * :math:`\theta` is the iSWAP angle
-        * :math:`\phi` is the controlled-phase angle
-        * :math:`\zeta, \chi, \gamma`  are single-qubit phase angles.
+#        * :math:`\theta` is the iSWAP angle
+#        * :math:`\phi` is the controlled-phase angle
+#        * :math:`\zeta, \chi, \gamma`  are single-qubit phase angles.
 
-    .. math::
-        \mathrm{fsimg}(\theta, \zeta, \chi, \gamma, \phi) =
-        \begin{bmatrix}
-        1 & 0 & 0 & 0\\
-        0 & \exp(-i(\gamma +\zeta )) \cos(\theta) &
-        -i \exp(-i(\gamma - \chi )) sin(\theta) & 0\\
-        0 & -i \exp(-i(\gamma + \chi )) sin(\theta) &
-        \exp(-i(\gamma - \zeta )) \cos(\theta) & 0\\
-        0 & 0 & 0 & \exp(-i (\phi +2 \gamma))
-        \end{bmatrix}
+#    .. math::
+#        \mathrm{fsimg}(\theta, \zeta, \chi, \gamma, \phi) =
+#        \begin{bmatrix}
+#        1 & 0 & 0 & 0\\
+#        0 & \exp(-i(\gamma +\zeta )) \cos(\theta) &
+#        -i \exp(-i(\gamma - \chi )) sin(\theta) & 0\\
+#        0 & -i \exp(-i(\gamma + \chi )) sin(\theta) &
+#        \exp(-i(\gamma - \zeta )) \cos(\theta) & 0\\
+#        0 & 0 & 0 & \exp(-i (\phi +2 \gamma))
+#        \end{bmatrix}
 
-    See Equation 18 of https://arxiv.org/abs/2010.07965. Note that ``theta``,
-    ``phi``, ``zeta``, ``chi``, ``gamma`` should be specified in radians and
-    the sign convention with this gate varies. Here for example,
-    ``fsimg(- pi / 2, 0, 0, 0,0) == iswap()``.
+#    See Equation 18 of https://arxiv.org/abs/2010.07965. Note that ``theta``,
+#    ``phi``, ``zeta``, ``chi``, ``gamma`` should be specified in radians and
+#    the sign convention with this gate varies. Here for example,
+#    ``fsimg(- pi / 2, 0, 0, 0,0) == iswap()``.
     """
     from cmath import cos, sin, exp
 

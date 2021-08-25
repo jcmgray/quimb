@@ -1136,20 +1136,7 @@ class TNOptimizer:
         else:
             self._method = self.optimizer
 
-<<<<<<< HEAD
-=======
-    @property
-    def bounds(self):
-        return self._bounds
 
-    @bounds.setter
-    def bounds(self, x):
-        if x is not None:
-            self._bounds = np.array((x,) * self.vectorizer.d)
-        else:
-            self._bounds = None
-
->>>>>>> develop
     def get_tn_opt(self):
         """Extract the optimized tensor network, this is a three part process:
 
@@ -1163,43 +1150,6 @@ class TNOptimizer:
         tn_opt : TensorNetwork
         """
         arrays = tuple(map(self.handler.to_constant, self.vectorizer.unpack()))
-<<<<<<< HEAD
-        inject_(arrays, self.tn_opt)
-        tn = self.norm_fn(self.tn_opt.copy())
-        tn.drop_tags(t for t in tn.tags if variable_finder.match(t))
-
-        for t in tn:
-            if isinstance(t, PTensor):
-                t.params = to_numpy(t.params)
-            else:
-                t.modify(data=to_numpy(t.data))
-
-        return tn
-
-    def optimize(self, n, tol=None, **options):
-        """Run the optimizer for ``n`` function evaluations, using
-        :func:`scipy.optimize.minimize` as the driver for the vectorized
-        computation.
-
-        Parameters
-        ----------
-        n : int
-            Notionally the maximum number of iterations for the optimizer, note
-            that depending on the optimizer being used, this may correspond to
-            number of function evaluations rather than just iterations.
-        tol : None or float, optional
-            Tolerance for convergence, note that various more specific
-            tolerances can usually be supplied to ``options``, depending on
-            the optimizer being used.
-        options
-            Supplied to :func:`scipy.optimize.minimize`.
-
-        Returns
-        -------
-        tn_opt : TensorNetwork
-        """
-        from scipy.optimize import minimize
-=======
         inject_(arrays, self._tn_opt)
         tn = self.norm_fn(self._tn_opt.copy())
         tn.drop_tags(t for t in tn.tags if variable_finder.match(t))
@@ -1209,7 +1159,6 @@ class TNOptimizer:
                 t.params = to_numpy(t.params)
             else:
                 t.modify(data=to_numpy(t.data), left_inds=t.left_inds)
->>>>>>> develop
 
         return tn
 
@@ -1275,9 +1224,6 @@ class TNOptimizer:
 
         return self.get_tn_opt()
 
-<<<<<<< HEAD
-    def optimize_basinhopping(self, n, nhop, temperature=1.0, **options):
-=======
     def optimize_basinhopping(
         self,
         n,
@@ -1287,7 +1233,6 @@ class TNOptimizer:
         hessp=False,
         **options
     ):
->>>>>>> develop
         """Run the optimizer for using :func:`scipy.optimize.basinhopping`
         as the driver for the vectorized computation. This performs ``nhop``
         local optimization each with ``n`` iterations.
@@ -1321,12 +1266,8 @@ class TNOptimizer:
                 x0=self.vectorizer.vector,
                 niter=nhop,
                 minimizer_kwargs=dict(
-<<<<<<< HEAD
-                    jac=True,
-=======
                     jac=jac,
                     hessp=self.vectorized_hessp if hessp else None,
->>>>>>> develop
                     method=self._method,
                     bounds=self.bounds,
                     options=dict(maxiter=n, **options)
@@ -1500,7 +1441,4 @@ class TNOptimizer:
 
         return self.get_tn_opt()
 
-<<<<<<< HEAD
-        return self.get_tn_opt()
-=======
->>>>>>> develop
+
