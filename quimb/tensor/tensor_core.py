@@ -3500,7 +3500,7 @@ class TensorNetwork(object):
         size_dict = {}
         for term, t in zip(inputs, self):
             for k, d in zip(term, t.shape):
-                size_dict[k] = d
+                size_dict[k] = int(d)
         return inputs, output, size_dict
 
     def geometry_hash(self, output_inds=None):
