@@ -402,7 +402,7 @@ class TestBasicTensorOperations:
         assert len(tn.outer_inds()) == 2
         qtn.connect(x, y, 1, 0)
         assert len(tn.outer_inds()) == 0
-        assert (tn ^ all).shape == ()
+        assert tn.contract(all, preserve_tensor=True).shape == ()
         # make sure bond is newly labelled
         assert set('abcd') & set(tn.all_inds()) == set()
 
