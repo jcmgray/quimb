@@ -932,6 +932,10 @@ class FermionTensorNetwork(BlockTensorNetwork):
             tid = self.fermion_space.get_tid_from_site(isite)
             yield self.tensor_map[tid]
 
+    @property
+    def tensors(self):
+        return tuple([T for T in self])
+
     def __setitem__(self, tags, tensor):
         """Set the single tensor uniquely associated with ``tags``.
         """
