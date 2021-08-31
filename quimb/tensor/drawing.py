@@ -100,7 +100,7 @@ def draw_tn(
     multiedge_spread=0.1,
     show_left_inds=True,
     arrow_closeness=1.1,
-    arrow_length=0.1,
+    arrow_length=1.0,
     arrow_overhang=1.0,
     arrow_linewidth=1.0,
     label_color=None,
@@ -359,7 +359,7 @@ def draw_tn(
         G.nodes[hix]['size'] = 0.0
         G.nodes[hix]['outline_size'] = 0.0
         G.nodes[hix]['outline_color'] = (1.0, 1.0, 1.0, 1.0)
-        G.nodes[hix]['marker'] = ''
+        G.nodes[hix]['marker'] = '.'  # set this to avoid warning - size is 0
         G.nodes[hix]['hatch'] = ''
         if show_inds == 'all':
             node_labels[hix] = hix
@@ -455,6 +455,7 @@ def draw_tn(
                     alpha=edge_alpha,
                     linewidth=sz,
                     color=attrs['color'],
+                    zorder=1,
                 ))
 
     scatters = collections.defaultdict(lambda: collections.defaultdict(list))
@@ -480,6 +481,7 @@ def draw_tn(
             linewidths=data['linewidths'],
             edgecolors=data['edgecolors'],
             hatch=hatch,
+            zorder=2,
         )
 
     # draw incomcing arrows for tensor left_inds
@@ -494,14 +496,21 @@ def draw_tn(
                     tidb = tid
                     (xa, ya), (xb, yb) = pos[tida], pos[tidb]
 
+                    edge_width = G.get_edge_data(tida, tidb)['edge_size']
+                    edge_length = ((xb - xa)**2 + (yb - ya)**2)**0.5
+                    arrow_scale = (
+                        0.02 * arrow_length * edge_width / edge_length**0.5
+                    )
+
                     # arrow start and change
                     if ind in multiedge_centers:
                         x, y = multiedge_centers[ind]
                     else:
                         x = (xa + arrow_closeness * xb) / (1 + arrow_closeness)
                         y = (ya + arrow_closeness * yb) / (1 + arrow_closeness)
-                    dx = (xb - xa) * arrow_length
-                    dy = (yb - ya) * arrow_length
+
+                    dx = (xb - xa) * arrow_scale
+                    dy = (yb - ya) * arrow_scale
 
                     ax.add_patch(patches.FancyArrow(
                         x, y, dx, dy,
