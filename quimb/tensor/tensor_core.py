@@ -517,13 +517,6 @@ def tensor_contract(
     scalar or Tensor
     """
 
-    '''
-    if hasattr(tensors[0], "custom_funcs") and get is None:
-        func = tensors[0].custom_funcs["tensor_contract"]
-        return func(*tensors, output_inds=output_inds,
-            preserve_tensor=preserve_tensor, **contract_opts)
-    '''
-
     if backend is None:
         backend = get_contract_backend()
 
@@ -573,7 +566,7 @@ def tensor_contract(
     expression = get_contraction(eq, *shapes, **contract_opts)
     if hasattr(tensors[0], "custom_funcs"):
         func = tensors[0].custom_funcs["expression_launcher"]
-        return func(expression, tensors, backend=backend, inplace=inplace, 
+        return func(expression, tensors, backend=backend, inplace=inplace,
             preserve_tensor=preserve_tensor, **contract_opts)
 
     o_array = expression(*(t.data for t in tensors), backend=backend)
