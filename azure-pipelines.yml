@@ -40,7 +40,7 @@ jobs:
   strategy:
     matrix:
       py39:
-        conda_env: py39
+        conda_env: py39-win
   pool:
     vmImage: 'windows-latest'
   steps:
