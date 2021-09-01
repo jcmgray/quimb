@@ -175,6 +175,8 @@ class FermionTensorNetworkGenVector(
 
         if flatten:
             for site in self.sites:
+                if site in where:
+                    continue
                 tn ^= site
             if reduce:
                 tn ^= '__BOND__'

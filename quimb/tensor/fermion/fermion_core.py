@@ -42,9 +42,15 @@ tensor_canonize_bond = compress_decorator(tensor_canonize_bond)
 class FermionSpace:
     def __init__(self, tensor_order=None, virtual=True):
         self.tensor_order = {}
+        self._tid_counter = 0
         if tensor_order is not None:
             for tid, (tsr, site) in tensor_order.items():
                 self.add_tensor(tsr, tid, site, virtual=virtual)
+
+    def _next_tid(self):
+        while self._tid_counter in self.tensor_order:
+            self._tid_counter = self._tid_counter + 1
+        return self._tid_counter
 
     @property
     def sites(self):
@@ -59,7 +65,9 @@ class FermionSpace:
         """ Copy the FermionSpace object. Tensor ids and positions will be
         preserved and tensors will be copied
         """
-        return FermionSpace(self.tensor_order, virtual=False)
+        new_fs = FermionSpace(self.tensor_order, virtual=False)
+        new_fs._tid_counter = self._tid_counter
+        return new_fs
 
     def add_tensor(self, tsr, tid=None, site=None, virtual=False):
         """ Add a tensor to the current FermionSpace, eg
@@ -79,8 +87,8 @@ class FermionSpace:
             whether to add the tensor inplace
 
         """
-        if (tid is None) or (tid in self.tensor_order.keys()):
-            tid = rand_uuid(base="_T")
+        if (tid is None) or (tid in self.tensor_order):
+            tid = self._next_tid()
         if site is None:
             site = 0 if len(self.sites)==0 else max(self.sites) + 1
         elif site in self.sites:
@@ -109,7 +117,7 @@ class FermionSpace:
         atid = self.get_tid_from_site(site)
         atsr = self.tensor_order[atid][0]
         T = tsr if virtual else tsr.copy()
-        if tid is None or (tid in self.tensor_order.keys() and tid != atid):
+        if tid is None or (tid in self.tensor_order and tid != atid):
             tid = atid
         T.set_fermion_owner(self, tid)
         atsr.remove_fermion_owner()
@@ -134,7 +142,7 @@ class FermionSpace:
             whether to insert the tensor inplace
         """
         if (tid is None) or (tid in self.tensor_order.keys()):
-            tid = rand_uuid(base="_T")
+            tid = self._next_tid()
         if site not in self.sites:
             self.add_tensor(tsr, tid, site=site, virtual=virtual)
         else:
@@ -176,14 +184,6 @@ class FermionSpace:
             raise KeyError("site:%s not occupied"%site)
         idx = self.sites.index(site)
         return list(self.tensor_order.keys())[idx]
-
-    def get_full_info(self, tid_or_site):
-        if isinstance(tid_or_site, str):
-            tid = tid_or_site
-        else:
-            tid = self.get_tid_from_site(self, tid_or_site)
-        T, site = self.tensor_order[tid_or_site]
-        return T, tid, site
 
     def get_ind_map(self):
         ind_map = dict()
@@ -307,7 +307,7 @@ class FermionSpace:
         else:
             self.add_tensor(site, tsr, virtual=True)
 
-    def move(self, tid_or_site, des_site):
+    def move(self, tid, des_site):
         """ Move a tensor inside this FermionSpace to the specified position with Pizorn algorithm.
         Both local and global phase will be factorized to this single tensor
 
@@ -318,8 +318,7 @@ class FermionSpace:
         des_site: int
             the position to move the tensor to
         """
-
-        tsr, tid, site = self.get_full_info(tid_or_site)
+        tsr, site = self.tensor_order[tid]
         avoid_phase = tsr.avoid_phase
         if site == des_site: return
         move_left = (des_site < site)
@@ -691,6 +690,10 @@ class FermionTensor(BlockTensor):
         self.set_fermion_owner(fs, tid)
         if self.owners:
             tn = list(self.owners.values())[0][0]()
+            for ind in self.inds:
+                tn.ind_map[ind] = (tn.ind_map[ind]-oset([old_tid])) | oset([tid])
+            for tag in self.tags:
+                tn.tag_map[tag] = (tn.tag_map[tag]-oset([old_tid])) | oset([tid])
             del tn.tensor_map[old_tid]
             tn.tensor_map[tid] = self
 
@@ -1319,82 +1322,6 @@ class FermionTensorNetwork(BlockTensorNetwork):
                         location=location[0], flip_pattern=flip_pattern)
                 tr.multiply_index_diagonal_(ix, ginv,
                         location=location[1], flip_pattern=flip_pattern)
-
-    def compute_inds_environment(self, inds, **inds_env_options):
-        env = self.copy()
-        if isinstance(inds, str):
-            inds = (inds, )
-        else:
-            inds = tuple(inds)
-        tids = oset()
-        for ix in inds:
-            tids |= env.ind_map[ix]
-        env._contract_around_tids(tids, **inds_env_options)
-        return env
-
-    def compute_inds_expectation(
-        self,
-        terms,
-        max_bond=None,
-        *,
-        gen_seq = None,
-        cutoff=1e-10,
-        layer_tags=('KET', 'BRA'),
-        normalized=False,
-        min_distance = 1,
-        max_distance = None,
-        contract_optimize='auto-hq',
-        return_all=False,
-        **inds_env_options,
-    ):
-        norm, _, bra = self.make_norm(return_all=True, layer_tags=layer_tags)
-
-        inds_env_options["max_bond"] = max_bond
-        inds_env_options["cutoff"] = cutoff
-        inds_env_options["min_distance"] = min_distance
-        inds_env_options["max_distance"] = max_distance
-
-        expecs = dict()
-
-        for inds, G in terms.items():
-            if isinstance(inds, str):
-                _inds = (inds, )
-            else:
-                _inds = tuple(inds)
-            new_inds = tuple([rand_uuid() for _ix in range(len(_inds))])
-            reindex_map = dict(zip(_inds, new_inds))
-            TG = FermionTensor(G.copy(), inds= _inds+new_inds)
-            bra.fermion_space.move_past(TG)
-
-            if callable(gen_seq):
-                inds_env_options["seq"] = gen_seq(inds)
-
-            env = norm.compute_inds_environment(
-                            inds, **inds_env_options)
-
-            if normalized:
-                norm_i0j0 = env.contract(all,
-                            optimize=contract_optimize)
-            else:
-                norm_i0j0 = None
-
-            for ix in _inds:
-                tensors = list(env._inds_get(ix))
-                for T in tensors:
-                    if layer_tags[0] in T.tags:
-                        T.reindex_(reindex_map)
-
-            env.add_tensor(TG, virtual=True)
-            expec_ij = env.contract(all, optimize=contract_optimize)
-            expecs[inds] = expec_ij, norm_i0j0
-
-        if return_all:
-            return expecs
-
-        if normalized:
-            return functools.reduce(add, (e / n for e, n in expecs.values()))
-
-        return functools.reduce(add, (e for e, _ in expecs.values()))
 
     def __matmul__(self, other):
         """Overload "@" to mean full contraction with another network.
