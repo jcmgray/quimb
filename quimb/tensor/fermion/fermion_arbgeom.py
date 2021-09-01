@@ -149,6 +149,7 @@ class FermionTensorNetworkGenVector(
         flatten=True,
         method='rho',
         rehearse=False,
+        symmetrized="auto",
         **contract_compressed_opts,
     ):
         check_opt('method', method, ('rho', 'rho-reduced'))
