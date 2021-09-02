@@ -7,7 +7,6 @@ import functools
 from math import log2
 from numbers import Integral
 
-import opt_einsum as oe
 import scipy.sparse.linalg as spla
 from autoray import do, dag, reshape, conj, get_dtype_name, transpose
 
@@ -16,6 +15,7 @@ import quimb as qu
 from .tensor_core import (
     Tensor,
     TensorNetwork,
+    get_symbol,
     rand_uuid,
     bonds,
     bonds_size,
@@ -61,7 +61,7 @@ def align_TN_1D(*tns, ind_ids=None, inplace=False):
             ind_ids = [tns[0].site_ind_id]
         else:
             ind_ids = [tns[0].lower_ind_id]
-        ind_ids.extend(f"__ind_{oe.get_symbol(i)}{{}}__" for i in range(n - 2))
+        ind_ids.extend(f"__ind_{get_symbol(i)}{{}}__" for i in range(n - 2))
     else:
         ind_ids = tuple(ind_ids)
 

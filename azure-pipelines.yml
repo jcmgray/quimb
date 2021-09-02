@@ -13,18 +13,20 @@ jobs:
         conda_env: py37
       py38:
         conda_env: py38
-      py38-slepc4py:
-        conda_env: py38
+      py39:
+        conda_env: py39
+      py39-slepc4py:
+        conda_env: py39
         install_slepc4py: true
         which_tests: 'core'
-      py38-jax:
-        conda_env: py38-jax
+      py39-jax:
+        conda_env: py39-jax
         which_tests: 'tensor'
-      py38-pytorch:
-        conda_env: py38-pytorch
+      py39-pytorch:
+        conda_env: py39-pytorch
         which_tests: 'tensor'
-      py38-tensorflow:
-        conda_env: py38-tensorflow
+      py39-tensorflow:
+        conda_env: py39-tensorflow
         which_tests: 'tensor'
         quimb_numba_cache: false
         quimb_numba_parallel: false
@@ -37,8 +39,8 @@ jobs:
 - job: Windows
   strategy:
     matrix:
-      py38:
-        conda_env: py38
+      py39:
+        conda_env: py39-win
   pool:
     vmImage: 'windows-latest'
   steps:
@@ -48,8 +50,8 @@ jobs:
 - job: MaxOSX
   strategy:
     matrix:
-      py38:
-        conda_env: py38
+      py39:
+        conda_env: py39
   pool:
     vmImage: 'macOS-latest'
   steps:
