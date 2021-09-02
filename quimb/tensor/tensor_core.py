@@ -4453,6 +4453,19 @@ class TensorNetwork(object):
                     **ensure_dict(contract_around_opts))
 
             elif method == 'contract_compressed':
+
+
+#                print ("visualization")
+#                import sys
+#                sys.path.append('/home/reza/Dropbox/Prog/MERA/')
+#                from visarbgeom import vis_contract_compressed
+#             
+#                vis_contract_compressed(tn_env, max_bond=max_bond, cutoff=cutoff,
+#                    **ensure_dict(contract_compressed_opts))
+
+
+
+
                 tn_env.contract_compressed_(
                     max_bond=max_bond, cutoff=cutoff,
                     **ensure_dict(contract_compressed_opts))
