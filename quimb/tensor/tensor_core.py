@@ -417,6 +417,10 @@ def tags_to_oset(tags):
         return oset(tags)
 
 
+def sortedtuple(x):
+    return tuple(sorted(x))
+
+
 def _gen_output_inds(all_inds):
     """Generate the output, i.e. unique, indices from the set ``inds``. Raise
     if any index found more than twice.
@@ -1986,7 +1990,12 @@ class Tensor(object):
         return tuple(i for i in self.inds if ind_freqs[i] == 2)
 
     def transpose(self, *output_inds, inplace=False):
-        """Transpose this tensor.
+        """Transpose this tensor - permuting the order of both the data *and*
+        the indices. This operation is mainly for ensuring a certain data
+        layout.
+
+        Note to compute the tranditional 'transpose' of an operator, within a
+        contraction for example, you would just use reindexing not this.
 
         Parameters
         ----------
@@ -2002,7 +2011,7 @@ class Tensor(object):
 
         See Also
         --------
-        transpose_like
+        transpose_like, reindex
         """
         t = self if inplace else self.copy()
 
@@ -3491,8 +3500,47 @@ class TensorNetwork(object):
         size_dict = {}
         for term, t in zip(inputs, self):
             for k, d in zip(term, t.shape):
-                size_dict[k] = d
+                size_dict[k] = int(d)
         return inputs, output, size_dict
+
+    def geometry_hash(self, output_inds=None):
+        """A hash of this tensor network's shapes & geometry. A useful check
+        for determinism. Moreover, if this matches for two tensor networks then
+        they can be contracted using the same tree for the same cost. Order of
+        tensors matters for this - two isomorphic tensor networks with shuffled
+        order will not have the same hash value.
+
+        Parameters
+        ----------
+        output_inds : None or sequence of str, optional
+            Manually specify which indices are output indices and their order,
+            otherwise assumed to be all indices that appear once.
+
+        Returns
+        -------
+        str
+
+        Examples
+        --------
+
+            >>> tn = qtn.TN_rand_reg(100, 3, 2, seed=0)
+            >>> tn.geometry_hash()
+            '611495acc6ea330ad8e2dab4a30f64e1b9f93b16'
+
+        """
+        import pickle
+        import hashlib
+
+        inputs, output, size_dict = self.get_inputs_output_size_dict(
+            output_inds=output_inds,
+        )
+
+        # note frozenset is hashable but not consistent -> need sortedtuple
+        return hashlib.sha1(pickle.dumps((
+            tuple(map(sortedtuple, inputs)),
+            sortedtuple(output),
+            sortedtuple(size_dict.items())
+        ))).hexdigest()
 
     def tensors_sorted(self):
         """Return a tuple of tensors sorted by their respective tags, such that

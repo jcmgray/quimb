@@ -456,39 +456,43 @@ class TensorNetworkGenVector(TensorNetworkGen, TensorNetwork):
             return expecs
         return functools.reduce(add, expecs.values())
 
-    def local_expectation(
+    def partial_trace(
         self,
-        G,
-        where,
+        keep,
         max_bond,
         optimize,
-        normalized=True,
         flatten=True,
-        method='rho',
+        reduce=False,
+        normalized=True,
+        symmetrized='auto',
         rehearse=False,
         **contract_compressed_opts,
     ):
-        """Compute the local expectation of operator ``G`` at site(s) ``where``
-        by approximately contracting the full overlap tensor network.
+        """Partially trace this tensor network state, keeping only the sites in
+        ``keep``, using compressed contraction.
 
         Parameters
         ----------
-        G : array_like
-            The local operator to compute the expectation of.
-        where : node or sequence of nodes
-            The sites to compute the expectation for.
+        keep : iterable of hashable
+            The sites to keep.
         max_bond : int
             The maximum bond dimensions to use while compressed contracting.
         optimize : str or PathOptimizer, optional
             The contraction path optimizer to use, should specifically generate
             contractions paths designed for compressed contraction.
-        normalized : bool, optional
-            Whether to locally normalize the result.
         flatten : bool, optional
             Whether to force 'flattening' (contracting all physical indices) of
             the tensor network before  contraction, whilst this makes the TN
             generally more complex to contract, the accuracy is usually much
             improved.
+        reduce : bool, optional
+            Whether to first 'pull' the physical indices off their respective
+            tensors using QR reduction. Experimental.
+        normalized : bool, optional
+            Whether to normalize the reduced density matrix at the end.
+        symmetrized : {'auto', True, False}, optional
+            Whether to symmetrize the reduced density matrix at the end. This
+            should be unecessary if ``flatten`` is set to ``True``.
         rehearse : {False, 'tn', 'tree', True}, optional
             Whether to perform the computation or not::
 
@@ -505,13 +509,14 @@ class TensorNetworkGenVector(TensorNetworkGen, TensorNetwork):
 
         Returns
         -------
-        expec : float
+        rho : array_like
+            The reduce density matrix of sites in ``keep``.
         """
-        check_opt('method', method, ('rho', 'rho-reduced'))
-        reduce = method == 'rho-reduced'
+        if symmetrized == 'auto':
+            symmetrized = not flatten
 
         # form the partial trace
-        k_inds = tuple(map(self.site_ind, where))
+        k_inds = tuple(map(self.site_ind, keep))
 
         if reduce:
             k = self.copy()
@@ -519,7 +524,7 @@ class TensorNetworkGenVector(TensorNetworkGen, TensorNetwork):
         else:
             k = self
 
-        b_inds = tuple(map("_bra{}".format, where))
+        b_inds = tuple(map("_bra{}".format, keep))
         b = k.conj().reindex_(dict(zip(k_inds, b_inds)))
 
         tn = b & k
@@ -547,20 +552,102 @@ class TensorNetworkGenVector(TensorNetworkGen, TensorNetwork):
         )
 
         rho = t_rho.to_dense(k_inds, b_inds)
-        expec = do("trace", rho @ G)
-        if normalized:
-            expec = expec / do("trace", rho)
 
-        return expec
+        if symmetrized:
+            rho = (rho + dag(rho)) / 2
+
+        if normalized:
+            rho = rho / do("trace", rho)
+
+        return rho
+
+    def local_expectation(
+        self,
+        G,
+        where,
+        max_bond,
+        optimize,
+        method='rho',
+        flatten=True,
+        normalized=True,
+        symmetrized='auto',
+        rehearse=False,
+        **contract_compressed_opts,
+    ):
+        """Compute the local expectation of operator ``G`` at site(s) ``where``
+        by approximately contracting the full overlap tensor network.
+
+        Parameters
+        ----------
+        G : array_like
+            The local operator to compute the expectation of.
+        where : node or sequence of nodes
+            The sites to compute the expectation for.
+        max_bond : int
+            The maximum bond dimensions to use while compressed contracting.
+        optimize : str or PathOptimizer, optional
+            The contraction path optimizer to use, should specifically generate
+            contractions paths designed for compressed contraction.
+        method : {'rho', 'rho-reduced'}, optional
+            The method to use to compute the expectation value.
+        flatten : bool, optional
+            Whether to force 'flattening' (contracting all physical indices) of
+            the tensor network before  contraction, whilst this makes the TN
+            generally more complex to contract, the accuracy is usually much
+            improved.
+        normalized : bool, optional
+            If computing via `partial_trace`, whether to normalize the reduced
+            density matrix at the end.
+        symmetrized : {'auto', True, False}, optional
+            If computing via `partial_trace`, whether to symmetrize the reduced
+            density matrix at the end. This should be unecessary if ``flatten``
+            is set to ``True``.
+        rehearse : {False, 'tn', 'tree', True}, optional
+            Whether to perform the computation or not::
+
+                - False: perform the computation.
+                - 'tn': return the tensor network without running the path
+                  optimizer.
+                - True: run the path optimizer and return the
+                  ``cotengra.ContractonTree``..
+                - True: run the path optimizer and return the ``PathInfo``.
+
+        contract_compressed_opts : dict, optional
+            Additional keyword arguments to pass to
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.contract_compressed`.
+
+        Returns
+        -------
+        expec : float
+        """
+        check_opt('method', method, ('rho', 'rho-reduced'))
+        reduce = method == 'rho-reduced'
+
+        rho = self.partial_trace(
+            keep=where,
+            max_bond=max_bond,
+            optimize=optimize,
+            flatten=flatten,
+            reduce=reduce,
+            normalized=normalized,
+            symmetrized=symmetrized,
+            rehearse=rehearse,
+            **contract_compressed_opts,
+        )
+        if rehearse:
+            return rho
+
+        return do("trace", rho @ G)
 
     def compute_local_expectation(
         self,
         terms,
         max_bond,
         optimize,
-        normalized=True,
-        flatten=True,
         method='rho',
+        flatten=True,
+        normalized=True,
+        symmetrized='auto',
         return_all=False,
         rehearse=False,
         **contract_compressed_opts,
@@ -615,6 +702,7 @@ class TensorNetworkGenVector(TensorNetworkGen, TensorNetwork):
                 max_bond,
                 optimize=optimize,
                 normalized=normalized,
+                symmetrized=symmetrized,
                 flatten=flatten,
                 method=method,
                 rehearse=rehearse,
