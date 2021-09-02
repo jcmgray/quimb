@@ -3503,18 +3503,23 @@ class TensorNetwork(object):
                 size_dict[k] = int(d)
         return inputs, output, size_dict
 
-    def geometry_hash(self, output_inds=None):
+    def geometry_hash(self, output_inds=None, strict_index_order=False):
         """A hash of this tensor network's shapes & geometry. A useful check
         for determinism. Moreover, if this matches for two tensor networks then
         they can be contracted using the same tree for the same cost. Order of
         tensors matters for this - two isomorphic tensor networks with shuffled
-        order will not have the same hash value.
+        tensor order will not have the same hash value. Permuting the indices
+        of individual of tensors or the output does not matter unless you set
+        ``strict_index_order=True``.
 
         Parameters
         ----------
         output_inds : None or sequence of str, optional
             Manually specify which indices are output indices and their order,
             otherwise assumed to be all indices that appear once.
+        strict_index_order : bool, optional
+            If ``False``, then the permutation of the indices of each tensor
+            and the output does not matter.
 
         Returns
         -------
@@ -3523,9 +3528,23 @@ class TensorNetwork(object):
         Examples
         --------
 
+        If we transpose some indices, then only the strict hash changes:
+
             >>> tn = qtn.TN_rand_reg(100, 3, 2, seed=0)
             >>> tn.geometry_hash()
-            '611495acc6ea330ad8e2dab4a30f64e1b9f93b16'
+            '18c702b2d026dccb1a69d640b79d22f3e706b6ad'
+
+            >>> tn.geometry_hash(strict_index_order=True)
+            'c109fdb43c5c788c0aef7b8df7bb83853cf67ca1'
+
+            >>> t = tn['I0']
+            >>> t.transpose_(t.inds[2], t.inds[1], t.inds[0])
+            >>> tn.geometry_hash()
+            '18c702b2d026dccb1a69d640b79d22f3e706b6ad'
+
+            >>> tn.geometry_hash(strict_index_order=True)
+            '52c32c1d4f349373f02d512f536b1651dfe25893'
+
 
         """
         import pickle
@@ -3535,11 +3554,25 @@ class TensorNetwork(object):
             output_inds=output_inds,
         )
 
-        # note frozenset is hashable but not consistent -> need sortedtuple
+        if strict_index_order:
+            return hashlib.sha1(pickle.dumps((
+                tuple(map(tuple, inputs)),
+                tuple(output),
+                sortedtuple(size_dict.items())
+            ))).hexdigest()
+
+        edges = collections.defaultdict(list)
+        for ix in output:
+            edges[ix].append(-1)
+        for i, term in enumerate(inputs):
+            for ix in term:
+                edges[ix].append(i)
+
+        # then sort edges by each's incidence nodes
+        canonical_edges = sortedtuple(map(sortedtuple, edges.values()))
+
         return hashlib.sha1(pickle.dumps((
-            tuple(map(sortedtuple, inputs)),
-            sortedtuple(output),
-            sortedtuple(size_dict.items())
+            canonical_edges, sortedtuple(size_dict.items())
         ))).hexdigest()
 
     def tensors_sorted(self):

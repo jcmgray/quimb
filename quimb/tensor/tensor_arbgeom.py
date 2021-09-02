@@ -480,11 +480,11 @@ class TensorNetworkGenVector(TensorNetworkGen, TensorNetwork):
         optimize : str or PathOptimizer, optional
             The contraction path optimizer to use, should specifically generate
             contractions paths designed for compressed contraction.
-        flatten : bool, optional
+        flatten : {False, True, 'all'}, optional
             Whether to force 'flattening' (contracting all physical indices) of
             the tensor network before  contraction, whilst this makes the TN
-            generally more complex to contract, the accuracy is usually much
-            improved.
+            generally more complex to contract, the accuracy is usually
+            improved. If ``'all'`` also flatten the tensors in ``keep``.
         reduce : bool, optional
             Whether to first 'pull' the physical indices off their respective
             tensors using QR reduction. Experimental.
@@ -532,8 +532,9 @@ class TensorNetworkGenVector(TensorNetworkGen, TensorNetwork):
 
         if flatten:
             for site in self.sites:
-                tn ^= site
-            if reduce:
+                if (site not in keep) or (flatten == 'all'):
+                    tn ^= site
+            if reduce and (flatten == 'all'):
                 tn ^= '__BOND__'
 
         if rehearse:

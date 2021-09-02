@@ -217,6 +217,29 @@ def _svd_numpy(x, cutoff=-1.0, cutoff_mode=3,
 
 
 def svd(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0, renorm=0):
+    """Truncated svd or raw array ``x``.
+
+    Parameters
+    ----------
+    cutoff : float
+        Singular value cutoff threshold.
+    cutoff_mode : {1, 2, 3, 4, 5, 6}
+        How to perform the trim:
+
+            - 1: ['abs'], trim values below ``cutoff``
+            - 2: ['rel'], trim values below ``s[0] * cutoff``
+            - 3: ['sum2'], trim s.t. ``sum(s_trim**2) < cutoff``.
+            - 4: ['rsum2'], trim s.t. ``sum(s_trim**2) < sum(s**2) * cutoff``.
+            - 5: ['sum1'], trim s.t. ``sum(s_trim**1) < cutoff``.
+            - 6: ['rsum1'], trim s.t. ``sum(s_trim**1) < sum(s**1) * cutoff``.
+    max_bond : int
+        An explicit maximum bond dimension, use -1 for none.
+    absorb : {-1, 0, 1, None}
+        How to absorb the singular values. -1: left, 0: both, 1: right and
+        None: don't absorb (return).
+    renorm : {0, 1}
+        Whether to renormalize the singular values (depends on `cutoff_mode`).
+    """
     if isinstance(x, np.ndarray):
         return _svd_numpy(x, cutoff, cutoff_mode, max_bond, absorb, renorm)
 
