@@ -31,10 +31,17 @@ def asarray(array):
         if isinstance(x, str):
             # handle recursion error
             return x
+
+        backend = infer_backend(x)
+        if backend != 'builtins':
+            # don't iterate any non-builtin containers
+            backends.add(backend)
+            return x
+
+        # is some kind of python container or element -> iterate or return
         try:
             return tuple(_nd_py_iter(sub) for sub in x)
         except TypeError:
-            backends.add(infer_backend(x))
             return x
 
     nested_tup = _nd_py_iter(array)
