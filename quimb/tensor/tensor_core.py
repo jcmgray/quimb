@@ -20,8 +20,7 @@ import scipy.sparse.linalg as spla
 from autoray import (do, conj, reshape, transpose, astype,
                      infer_backend, get_dtype_name, dag)
 
-from ..core import (qarray, prod, realify_scalar, vdot, common_type,
-                    make_immutable)
+from ..core import (qarray, prod, realify_scalar, vdot, make_immutable)
 from ..utils import (check_opt, oset, concat, frequencies, unique,
                      valmap, ensure_dict, LRU, gen_bipartitions)
 from ..gen.rand import randn, seed_rand, rand_matrix, rand_uni
@@ -29,6 +28,12 @@ from . import decomp
 from .array_ops import (iscomplex, norm_fro, unitize, ndim, asarray, PArray,
                         find_diag_axes, find_antidiag_axes, find_columns)
 from .drawing import draw_tn
+
+
+try:
+    from autoray import get_common_dtype
+except ImportError:
+    from ..core import common_type as get_common_dtype
 
 
 _CONTRACT_STRATEGY = 'greedy'
@@ -7828,7 +7833,7 @@ class TensorNetwork(object):
         """The dtype of this TensorNetwork, this is the minimal common type
         of all the tensors data.
         """
-        return common_type(*self)
+        return get_common_dtype(*self.arrays)
 
     def iscomplex(self):
         return iscomplex(self)

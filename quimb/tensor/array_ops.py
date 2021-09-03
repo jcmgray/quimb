@@ -11,16 +11,42 @@ from ..linalg.base_linalg import norm_fro_dense
 
 
 def asarray(array):
-    """Maybe convert data for a tensor to use.
+    """Maybe convert data for a tensor to use. If ``array`` already has a
+    ``.shape`` attribute, i.e. looks like an array, it is left as-is. Else the
+    elements are inspected to see which libraries' array constructor should be
+    used, defaulting to ``numpy`` if everything is builtin or numpy numbers.
     """
-    should_convert_to_numpy = (
-        isinstance(array, (numpy.matrix, qarray)) or
-        not hasattr(array, 'shape'))
-
-    if should_convert_to_numpy:
+    if isinstance(array, (numpy.matrix, qarray)):
+        # if numpy make sure array not subclass
         return numpy.asarray(array)
 
-    return array
+    if hasattr(array, 'shape'):
+        # otherwise don't touch things which are already array like
+        return array
+
+    # else we some kind of possibly nested python iterable -> inspect items
+    backends = set()
+
+    def _nd_py_iter(x):
+        if isinstance(x, str):
+            # handle recursion error
+            return x
+        try:
+            return tuple(_nd_py_iter(sub) for sub in x)
+        except TypeError:
+            backends.add(infer_backend(x))
+            return x
+
+    nested_tup = _nd_py_iter(array)
+
+    # numpy and builtin elements treat as basic
+    backends -= {"builtins", "numpy"}
+    if not backends:
+        backend = "numpy"
+    else:
+        backend, = backends
+
+    return do('array', nested_tup, like=backend)
 
 
 def ndim(array):
