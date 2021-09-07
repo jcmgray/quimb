@@ -1417,8 +1417,9 @@ class FTNLinearOperator(spla.LinearOperator):
     TNLinearOperator
     """
 
-    def __init__(self, tns, left_inds, right_inds, target_symmetry, right_constructor=None, square=False,
-                optimize='auto', backend=None, is_conj=False, location="back"):
+    def __init__(self, tns, left_inds, right_inds, target_symmetry,
+                constructor=None, optimize='auto', backend=None,
+                is_conj=False, location="back"):
         if backend is None:
             self.backend = get_tensor_linop_backend()
         else:
@@ -1432,17 +1433,19 @@ class FTNLinearOperator(spla.LinearOperator):
         else:
             self._tensors = tuple(tns)
 
-        if right_constructor is None:
-            self.right_constructor = _tensors_to_constructors(
+        shape_dict = dict()
+        for T in self._tensors:
+            shape_dict.update(zip(T.inds, T.shape))
+        ish = tuple([shape_dict[ix] for ix in right_inds])
+        self._shape = ish
+
+        if constructor is None:
+            self.constructor = _tensors_to_constructors(
                                         self._tensors, right_inds)
         else:
-            self.right_constructor = right_constructor
-        if square:
-            self.left_constructor = self.right_constructor
-        else:
-            self.left_constructor = _tensors_to_constructors(
-                                        self._tensors, left_inds,
-                                        inv=False)
+            self.constructor = constructor
+
+
         self.left_inds, self.right_inds = left_inds, right_inds
         self.tags = oset.union(*(t.tags for t in self._tensors))
 
@@ -1453,8 +1456,6 @@ class FTNLinearOperator(spla.LinearOperator):
             self._kws['constants'] = range(len(self._tensors))
 
         # conjugate inputs/ouputs rather all tensors if necessary
-        if is_conj:
-            raise NotImplementedError
         self.is_conj = is_conj
         self._conj_linop = None
         self._adjoint_linop = None
@@ -1474,35 +1475,19 @@ class FTNLinearOperator(spla.LinearOperator):
         self._dq = new_dq
 
     @property
-    def ldim(self):
-        return self.left_constructor.vector_size(self.dq)
-
-    @property
-    def rdim(self):
-        return self.right_constructor.vector_size(self.dq)
-
-    @property
     def shape(self):
-        return (self.ldim, self.rdim)
+        dim = self.constructor.vector_size(self.dq)
+        return (dim, dim)
 
-    def left_vector_to_tensor(self, vector, dq=None):
+    def vector_to_tensor(self, vector, dq=None):
         if dq is None:
             dq = self.dq
-        return self.left_constructor.vector_to_tensor(vector, dq)
+        tensor = self.constructor.vector_to_tensor(vector, dq)
+        tensor.shape = self._shape
+        return tensor
 
-    def right_vector_to_tensor(self, vector, dq=None):
-        if dq is None:
-            dq = self.dq
-        return self.right_constructor.vector_to_tensor(vector, dq)
-
-    def left_tensor_to_vector(self, T):
-        return self.left_constructor.tensor_to_vector(T)
-
-    def right_tensor_to_vector(self, T):
-        return self.right_constructor.tensor_to_vector(T)
-
-    vector_to_tensor = right_vector_to_tensor
-    tensor_to_vector = left_tensor_to_vector
+    def tensor_to_vector(self, T):
+        return self.constructor.tensor_to_vector(T)
 
     def get_contraction_kits(self):
         fs, tid_lst = _dispatch_fermion_space(*self._tensors, inplace=False)
@@ -1510,6 +1495,8 @@ class FTNLinearOperator(spla.LinearOperator):
         return fs, tensors
 
     def _matvec(self, vec):
+        if self.is_conj:
+            vec = conj(vec)
         in_data = self.vector_to_tensor(vec)
         iT = FermionTensor(in_data, inds=self.right_inds)
         fs, tensors = self.get_contraction_kits()
@@ -1527,7 +1514,35 @@ class FTNLinearOperator(spla.LinearOperator):
                 optimize=self.optimize, **self._kws)
 
         expr = self._contractors['matvec']
-        out_data = _launch_fermion_expression(expr, tensors, backend=self.backend, inplace=True).data
+        out_data = _launch_fermion_expression(expr, tensors, backend=self.backend, inplace=True)
+        out_data = out_data.data
         if self.is_conj:
             out_data = conj(out_data)
         return self.tensor_to_vector(out_data)
+
+    def copy(self, conj=False, transpose=False):
+        if transpose:
+            left_inds, right_inds = self.right_inds, self.left_inds
+            target_symmetry = -self.dq
+            location = {"back":"front", "front":"back"}[self.location]
+        else:
+            left_inds, right_inds = self.left_inds, self.right_inds
+            target_symmetry = self.dq
+            location = self.location
+
+        if conj:
+            is_conj = not self.is_conj
+        else:
+            is_conj = self.is_conj
+
+        return FTNLinearOperator(self._tensors, left_inds, right_inds, target_symmetry, optimize=self.optimize, backend=self.backend, is_conj=is_conj, location=location)
+
+    def _adjoint(self):
+        if self._adjoint_linop is None:
+            self._adjoint_linop = self.copy(conj=True, transpose=True)
+        return self._adjoint_linop
+
+    def _transpose(self):
+        if self._transpose_linop is None:
+            self._transpose_linop = self.copy(transpose=True)
+        return self._transpose_linop
