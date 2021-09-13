@@ -620,6 +620,17 @@ class TestMatrixProductState:
         mps = MPS_computational_state('010101')
         assert mps.measure_(3, get='outcome') == 1
 
+    def test_permute_arrays(self):
+        mps = MPS_rand_state(7, 5)
+        k0 = mps.to_dense()
+        mps.canonize(3)
+        mps.permute_arrays('prl')
+        assert mps[0].shape == (2, 2)
+        assert mps[1].shape == (2, 4, 2)
+        assert mps[2].shape == (2, 5, 4)
+        kf = mps.to_dense()
+        assert qu.fidelity(k0, kf) == pytest.approx(1.0)
+
 
 class TestMatrixProductOperator:
 
@@ -791,6 +802,14 @@ class TestMatrixProductOperator:
         Ad, xd, yd = A.to_dense(), x.to_dense(), y.to_dense()
         assert_allclose(Ad @ xd, yd)
 
+    def test_permute_arrays(self):
+        mpo = MPO_rand(4, 3)
+        A0 = mpo.to_dense()
+        mpo.permute_arrays('drul')
+        assert mpo[0].shape == (2, 3, 2)
+        assert mpo[1].shape == (2, 3, 2, 3)
+        Af = mpo.to_dense()
+        assert_allclose(A0, Af)
 
 # --------------------------------------------------------------------------- #
 #                         Test specific 1D instances                          #
