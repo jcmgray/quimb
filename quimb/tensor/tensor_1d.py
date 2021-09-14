@@ -1789,6 +1789,27 @@ class MatrixProductState(TensorNetwork1DVector,
 
     add_MPS_ = functools.partialmethod(add_MPS, inplace=True)
 
+    def permute_arrays(self, shape='lrp'):
+        """Permute the indices of each tensor in this MPS to match ``shape``.
+        This doesn't change how the overall object interacts with other tensor
+        networks but may be useful for extracting the underlying arrays
+        consistently. This is an inplace operation.
+
+        Parameters
+        ----------
+        shape : str, optional
+            A permutation of ``'lrp'`` specifying the desired order of the
+            left, right, and physical indices respectively.
+        """
+        for i in self.sites:
+            inds = {'p': self.site_ind(i)}
+            if self.cyclic or i > 0:
+                inds['l'] = self.bond(i, (i - 1) % self.L)
+            if self.cyclic or i < self.L - 1:
+                inds['r'] = self.bond(i, (i + 1) % self.L)
+            inds = [inds[s] for s in shape if s in inds]
+            self[i].transpose_(*inds)
+
     def __add__(self, other):
         """MPS addition.
         """
@@ -3046,6 +3067,27 @@ class MatrixProductOperator(TensorNetwork1DOperator,
                             f"MatrixProductState, got {type(other)}")
 
     dot = apply
+
+    def permute_arrays(self, shape='lrud'):
+        """Permute the indices of each tensor in this MPO to match ``shape``.
+        This doesn't change how the overall object interacts with other tensor
+        networks but may be useful for extracting the underlying arrays
+        consistently. This is an inplace operation.
+
+        Parameters
+        ----------
+        shape : str, optional
+            A permutation of ``'lrud'`` specifying the desired order of the
+            left, right, upper and lower (down) indices respectively.
+        """
+        for i in self.sites:
+            inds = {'u': self.upper_ind(i), 'd': self.lower_ind(i)}
+            if self.cyclic or i > 0:
+                inds['l'] = self.bond(i, (i - 1) % self.L)
+            if self.cyclic or i < self.L - 1:
+                inds['r'] = self.bond(i, (i + 1) % self.L)
+            inds = [inds[s] for s in shape if s in inds]
+            self[i].transpose_(*inds)
 
     def trace(self, left_inds=None, right_inds=None):
         """Take the trace of this MPO.
