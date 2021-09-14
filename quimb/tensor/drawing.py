@@ -240,7 +240,7 @@ def draw_tn(
     import matplotlib as mpl
     import matplotlib.pyplot as plt
     import matplotlib.patches as patches
-    from matplotlib.colors import to_rgb
+    from matplotlib.colors import to_rgb, to_rgba
     import math
 
     if output_inds is None:
@@ -271,6 +271,9 @@ def draw_tn(
         node_color = draw_color
     else:
         node_color = mpl.colors.to_rgb(node_color)
+
+    highlight_tids_color = to_rgba(highlight_tids_color)
+    highlight_inds_color = to_rgba(highlight_inds_color)
 
     # set the size of the nodes and their border
     node_size = parse_dict_to_tids_or_inds(

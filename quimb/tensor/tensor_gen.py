@@ -91,6 +91,165 @@ def gen_unique_edges(edges):
         seen.add(key)
 
 
+def TN_from_edges_and_fill_fn(
+    fill_fn,
+    edges,
+    D,
+    phys_dim=None,
+    site_tag_id='I{}',
+    site_ind_id='k{}',
+):
+    """Create a tensor network from a sequence of edges defining a graph,
+    and a 'fill' function that maps shapes to data.
+
+    Parameters
+    ----------
+    fill_fn : callable
+        A function with signature ``fill_fn(shape) -> array``, used to fill
+        each tensor.
+    edges : sequence of tuple[hashable, hashable]
+        The graph edges, as a sequence of pairs of hashable objects, for
+        example integers, representing the nodes. You can redundantly specify
+        ``(u, v)`` and ``(v, u)`` and only one edge will be added.
+    D : int
+        The bond dimension connecting tensors.
+    phys_dim : int, optional
+        If not ``None``, give each tensor a 'physical', free index of this size
+        at each node.
+    site_tag_id : str, optional
+        String with formatter to tag sites.
+    site_ind_id : str, optional
+        String with formatter to tag indices (if ``phys_dim`` specified).
+
+    Returns
+    -------
+    TensorNetworkGen or TensorNetworkGenVector
+    """
+    terms = collections.defaultdict(list)
+    bonds = collections.defaultdict(rand_uuid)
+
+    for node_a, node_b in gen_unique_edges(edges):
+        bond = bonds[node_a, node_b]
+        # insert at 0 to exactly match geometry of old TN_rand_reg
+        terms[node_a].insert(0, bond)
+        terms[node_b].insert(0, bond)
+
+    ts = []
+    sites = []
+    for node, inds in sorted(terms.items(), key=lambda x: x[0]):
+        sites.append(node)
+        shape = [D] * len(inds)
+        if phys_dim is not None:
+            inds.append(site_ind_id.format(node))
+            shape.append(phys_dim)
+        data = fill_fn(shape)
+        tags = site_tag_id.format(node)
+        ts.append(Tensor(data=data, inds=inds, tags=tags))
+
+    tn = TensorNetwork(ts)
+
+    if phys_dim is not None:
+        tn.view_as_(
+            TensorNetworkGenVector, sites=sites,
+            site_tag_id=site_tag_id, site_ind_id=site_ind_id
+        )
+    else:
+        tn.view_as_(
+            TensorNetworkGen, sites=sites,
+            site_tag_id=site_tag_id
+        )
+
+    return tn
+
+
+def TN_from_edges_empty(
+    edges,
+    D,
+    phys_dim=None,
+    site_tag_id='I{}',
+    site_ind_id='k{}',
+    dtype='float64',
+):
+    """Create a tensor network from a sequence of edges defining a graph,
+    initialized with empty tensors.
+
+    Parameters
+    ----------
+    edges : sequence of tuple[hashable, hashable]
+        The graph edges, as a sequence of pairs of hashable objects, for
+        example integers, representing the nodes. You can redundantly specify
+        ``(u, v)`` and ``(v, u)`` and only one edge will be added.
+    D : int
+        The bond dimension connecting tensors.
+    phys_dim : int, optional
+        If not ``None``, give each tensor a 'physical', free index of this size
+        at each node.
+    site_tag_id : str, optional
+        String with formatter to tag sites.
+    site_ind_id : str, optional
+        String with formatter to tag indices (if ``phys_dim`` specified).
+    dtype : str, optional
+        The data type of the tensors.
+
+    Returns
+    -------
+    TensorNetworkGen or TensorNetworkGenVector
+    """
+    def fill_fn(shape):
+        return np.empty(shape, dtype=dtype)
+
+    return TN_from_edges_and_fill_fn(
+        edges=edges, D=D, fill_fn=fill_fn, phys_dim=phys_dim,
+        site_tag_id=site_tag_id, site_ind_id=site_ind_id)
+
+
+def TN_from_edges_with_value(
+    value,
+    edges,
+    D,
+    phys_dim=None,
+    site_tag_id='I{}',
+    site_ind_id='k{}',
+    dtype=None,
+):
+    """Create a tensor network from a sequence of edges defining a graph,
+    initialized with a constant value. This uses ``numpy.broadcast_to`` and
+    therefore essentially no memory.
+
+    Parameters
+    ----------
+    value : scalar
+        The value to fill the tensors with.
+    edges : sequence of tuple[hashable, hashable]
+        The graph edges, as a sequence of pairs of hashable objects, for
+        example integers, representing the nodes. You can redundantly specify
+        ``(u, v)`` and ``(v, u)`` and only one edge will be added.
+    D : int
+        The bond dimension connecting tensors.
+    phys_dim : int, optional
+        If not ``None``, give each tensor a 'physical', free index of this size
+        at each node.
+    site_tag_id : str, optional
+        String with formatter to tag sites.
+    site_ind_id : str, optional
+        String with formatter to tag indices (if ``phys_dim`` specified).
+    dtype : str, optional
+        The data type of the tensors.
+
+    Returns
+    -------
+    TensorNetworkGen or TensorNetworkGenVector
+    """
+    element = np.array(value, dtype=dtype)
+
+    def fill_fn(shape):
+        return np.broadcast_to(element, shape)
+
+    return TN_from_edges_and_fill_fn(
+        edges=edges, D=D, fill_fn=fill_fn, phys_dim=phys_dim,
+        site_tag_id=site_tag_id, site_ind_id=site_ind_id)
+
+
 def TN_rand_from_edges(
     edges,
     D,
@@ -122,7 +281,7 @@ def TN_rand_from_edges(
 
     Returns
     -------
-    TensorNetwork
+    TensorNetworkGen or TensorNetworkGenVector
     """
     ts = {}
 
@@ -210,6 +369,9 @@ def TN2D_from_fill_fn(
 
     Parameters
     ----------
+    fill_fn : callable
+        A function with signature ``fill_fn(shape) -> array``, used to fill
+        each tensor.
     Lx : int
         Length of side x.
     Ly : int
@@ -326,13 +488,15 @@ def TN2D_with_value(
     site_tag_id='I{},{}',
     row_tag_id='ROW{}',
     col_tag_id='COL{}',
-    dtype='float64',
+    dtype=None,
 ):
     """A scalar 2D lattice tensor network with every element set to ``value``.
     This uses ``numpy.broadcast_to`` and therefore essentially no memory.
 
     Parameters
     ----------
+    value : scalar
+        The value to fill the tensors with.
     Lx : int
         Length of side x.
     Ly : int
@@ -561,13 +725,15 @@ def TN3D_with_value(
     x_tag_id='X{}',
     y_tag_id='Y{}',
     z_tag_id='Z{}',
-    dtype='float64',
+    dtype=None,
 ):
     """A scalar 2D lattice tensor network with every element set to ``value``.
     This uses ``numpy.broadcast_to`` and therefore essentially no memory.
 
     Parameters
     ----------
+    value : scalar
+        The value to fill the tensors with.
     Lx : int
         Length of side x.
     Ly : int
