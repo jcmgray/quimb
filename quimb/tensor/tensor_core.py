@@ -1997,9 +1997,10 @@ class Tensor(object):
     def transpose(self, *output_inds, inplace=False):
         """Transpose this tensor - permuting the order of both the data *and*
         the indices. This operation is mainly for ensuring a certain data
-        layout.
+        layout since for most operations the specific order of indices doesn't
+        matter.
 
-        Note to compute the tranditional 'transpose' of an operator, within a
+        Note to compute the tranditional 'transpose' of an operator within a
         contraction for example, you would just use reindexing not this.
 
         Parameters
@@ -2162,7 +2163,7 @@ class Tensor(object):
     def gate(self, G, ind, inplace=False, **contract_opts):
         """Gate this tensor - contract a matrix into one of its indices without
         changing its indices. Unlike ``contract``, ``G`` is a raw array and the
-        tensor remains looking exactly the same.
+        tensor remains with the same set of indices.
 
         Parameters
         ----------
@@ -2170,6 +2171,31 @@ class Tensor(object):
             The matrix to gate the tensor index with.
         ind : str
             Which index to apply the gate to.
+
+        Returns
+        -------
+        Tensor
+
+        Examples
+        --------
+
+        Create a random tensor of 4 qubits:
+
+            >>> t = qtn.rand_tensor(
+            ...    shape=[2, 2, 2, 2],
+            ...    inds=['k0', 'k1', 'k2', 'k3'],
+            ... )
+
+        Create another tensor with an X gate applied to qubit 2:
+
+            >>> Gt = t.gate(qu.pauli('X'), 'k2')
+
+        The contraction of these two tensors is now the expectation of that
+        operator:
+
+            >>> t.H @ Gt
+            -4.108910576149794
+
         """
         t = self if inplace else self.copy()
         G_inds = ['__tmp__', ind]
@@ -5749,6 +5775,7 @@ class TensorNetwork(object):
         canonize_after_opts=None,
         gauge_boundary_only=False,
         compress_late=True,
+        compress_min_size=None,
         compress_opts=None,
         compress_span=False,
         compress_exclude=None,
@@ -5796,23 +5823,37 @@ class TensorNetwork(object):
         # keep track of pairs along the tree - often no point compressing these
         #     (potentially, on some complex graphs, one needs to compress)
         if not compress_span:
-            dont_compress_pairs = {frozenset((s[0], s[1])) for s in seq}
+            dont_compress_pairs = {frozenset(s[:2]) for s in seq}
         else:
             # else just exclude the next few upcoming contractions, starting
             # with the first
-            dont_compress_pairs = {frozenset((seq[0][0], seq[0][1]))}
+            compress_span = int(compress_span)
+            dont_compress_pairs = {
+                frozenset(s[:2]) for s in seq[:compress_span]
+            }
 
-        def _should_skip_compression(i, tid1, tid2):
+        def _should_skip_compression(tid1, tid2):
             """The inner closure deciding whether we should compress between
             ``tid1`` and tid2``.
             """
-            pair_key = frozenset((tid1, tid2))
-            return (
+            if (compress_exclude is not None) and (tid2 in compress_exclude):
                 # explicitly excluded from compression
-                ((compress_exclude is not None) and (tid2 in compress_exclude))
-                # or compressing pair that will be eventually contracted
-                or pair_key in dont_compress_pairs
-            )
+                return True
+
+            if frozenset((tid1, tid2)) in dont_compress_pairs:
+                # or compressing pair that will be eventually or soon
+                # contracted
+                return True
+
+            if compress_min_size is not None:
+                t1, t2 = self._tids_get(tid1, tid2)
+                new_size = t1.size * t2.size
+                for ind in t1.bonds(t2):
+                    new_size //= t1.ind_size(ind)
+                if new_size < compress_min_size:
+                    # not going to produce a large tensor so don't bother
+                    # compressing
+                    return True
 
         # options relating to locally canonizing around each compression
         if canonize_distance:
@@ -5865,7 +5906,7 @@ class TensorNetwork(object):
                 t_neighb = self.tensor_map[tid_neighb]
                 tensor_fuse_squeeze(t, t_neighb)
 
-                if _should_skip_compression(i, tid, tid_neighb):
+                if _should_skip_compression(tid, tid_neighb):
                     continue
 
                 # check for compressing large shared (multi) bonds
@@ -5900,13 +5941,19 @@ class TensorNetwork(object):
 
         for i in range(num_contractions):
             # tid1 -> tid2 is inwards on the contraction tree, ``d`` is the
-            # graph distance from the original region
-            tid1, tid2, d = seq[i]
+            # graph distance from the original region, optional
+            tid1, tid2, *maybe_d = seq[i]
+
+            if maybe_d:
+                d, = maybe_d
+            else:
+                d = float('inf')
 
             if compress_span:
                 # only keep track of the next few contractions to ignore
-                for s in seq[i + 1:i + 2]:
-                    dont_compress_pairs.add(frozenset((s[0], s[1])))
+                # (note if False whole seq is already excluded)
+                for s in seq[i + compress_span - 1:i + compress_span]:
+                    dont_compress_pairs.add(frozenset(s[:2]))
 
             if compress_late:
                 # we compress just before we have to contract involved tensors
@@ -6092,7 +6139,7 @@ class TensorNetwork(object):
             tid1 = tids.pop(i)
             tids.append(tid2)
 
-            seq.append((tid1, tid2, float('inf')))
+            seq.append((tid1, tid2))
 
         return tn._contract_compressed_tid_sequence(
             seq=seq,
@@ -6548,9 +6595,12 @@ class TensorNetwork(object):
         into a density matrix: ``TN.to_dense(('k0', 'k1'), ('b0', 'b1'))``.
         """
         tags = contract_opts.pop('tags', all)
-        T = self.contract(
-            tags, output_inds=tuple(concat(inds_seq)), **contract_opts)
-        return T.to_dense(*inds_seq, to_qarray=to_qarray)
+        t = self.contract(
+            tags,
+            output_inds=tuple(concat(inds_seq)),
+            **contract_opts
+        )
+        return t.to_dense(*inds_seq, to_qarray=to_qarray)
 
     @functools.wraps(tensor_network_distance)
     def distance(self, *args, **kwargs):
