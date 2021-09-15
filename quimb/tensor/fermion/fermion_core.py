@@ -896,6 +896,9 @@ class FermionTensorNetwork(BlockTensorNetwork):
             gtid = list(other_tids)[0]
             self.tensor_map[gtid].flip_(global_flip=True)
 
+    def __setitem__(self, tags, tensor):
+        raise NotImplementedError("__setitem__ depreciated in Fermion Tensor Network to avoid ambiguity in FermionSpace")
+
     def copy(self, full=False, force=False):
         """ For full copy, the tensors and underlying FermionSpace(all tensors in it) will
         be copied. For partial copy, the tensors in this network must be continuously
