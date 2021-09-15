@@ -20,8 +20,7 @@ import scipy.sparse.linalg as spla
 from autoray import (do, conj, reshape, transpose, astype,
                      infer_backend, get_dtype_name, dag)
 
-from ..core import (qarray, prod, realify_scalar, vdot, common_type,
-                    make_immutable)
+from ..core import (qarray, prod, realify_scalar, vdot, make_immutable)
 from ..utils import (check_opt, oset, concat, frequencies, unique,
                      valmap, ensure_dict, LRU, gen_bipartitions)
 from ..gen.rand import randn, seed_rand, rand_matrix, rand_uni
@@ -29,6 +28,12 @@ from . import decomp
 from .array_ops import (iscomplex, norm_fro, unitize, ndim, asarray, PArray,
                         find_diag_axes, find_antidiag_axes, find_columns)
 from .drawing import draw_tn
+
+
+try:
+    from autoray import get_common_dtype
+except ImportError:
+    from ..core import common_type as get_common_dtype
 
 
 _CONTRACT_STRATEGY = 'greedy'
@@ -2028,9 +2033,10 @@ class Tensor(object):
     def transpose(self, *output_inds, inplace=False):
         """Transpose this tensor - permuting the order of both the data *and*
         the indices. This operation is mainly for ensuring a certain data
-        layout.
+        layout since for most operations the specific order of indices doesn't
+        matter.
 
-        Note to compute the tranditional 'transpose' of an operator, within a
+        Note to compute the tranditional 'transpose' of an operator within a
         contraction for example, you would just use reindexing not this.
 
         Parameters
@@ -2193,7 +2199,7 @@ class Tensor(object):
     def gate(self, G, ind, inplace=False, **contract_opts):
         """Gate this tensor - contract a matrix into one of its indices without
         changing its indices. Unlike ``contract``, ``G`` is a raw array and the
-        tensor remains looking exactly the same.
+        tensor remains with the same set of indices.
 
         Parameters
         ----------
@@ -2201,6 +2207,31 @@ class Tensor(object):
             The matrix to gate the tensor index with.
         ind : str
             Which index to apply the gate to.
+
+        Returns
+        -------
+        Tensor
+
+        Examples
+        --------
+
+        Create a random tensor of 4 qubits:
+
+            >>> t = qtn.rand_tensor(
+            ...    shape=[2, 2, 2, 2],
+            ...    inds=['k0', 'k1', 'k2', 'k3'],
+            ... )
+
+        Create another tensor with an X gate applied to qubit 2:
+
+            >>> Gt = t.gate(qu.pauli('X'), 'k2')
+
+        The contraction of these two tensors is now the expectation of that
+        operator:
+
+            >>> t.H @ Gt
+            -4.108910576149794
+
         """
         t = self if inplace else self.copy()
         G_inds = ['__tmp__', ind]
@@ -3539,18 +3570,23 @@ class TensorNetwork(object):
                 size_dict[k] = int(d)
         return inputs, output, size_dict
 
-    def geometry_hash(self, output_inds=None):
+    def geometry_hash(self, output_inds=None, strict_index_order=False):
         """A hash of this tensor network's shapes & geometry. A useful check
         for determinism. Moreover, if this matches for two tensor networks then
         they can be contracted using the same tree for the same cost. Order of
         tensors matters for this - two isomorphic tensor networks with shuffled
-        order will not have the same hash value.
+        tensor order will not have the same hash value. Permuting the indices
+        of individual of tensors or the output does not matter unless you set
+        ``strict_index_order=True``.
 
         Parameters
         ----------
         output_inds : None or sequence of str, optional
             Manually specify which indices are output indices and their order,
             otherwise assumed to be all indices that appear once.
+        strict_index_order : bool, optional
+            If ``False``, then the permutation of the indices of each tensor
+            and the output does not matter.
 
         Returns
         -------
@@ -3559,9 +3595,23 @@ class TensorNetwork(object):
         Examples
         --------
 
+        If we transpose some indices, then only the strict hash changes:
+
             >>> tn = qtn.TN_rand_reg(100, 3, 2, seed=0)
             >>> tn.geometry_hash()
-            '611495acc6ea330ad8e2dab4a30f64e1b9f93b16'
+            '18c702b2d026dccb1a69d640b79d22f3e706b6ad'
+
+            >>> tn.geometry_hash(strict_index_order=True)
+            'c109fdb43c5c788c0aef7b8df7bb83853cf67ca1'
+
+            >>> t = tn['I0']
+            >>> t.transpose_(t.inds[2], t.inds[1], t.inds[0])
+            >>> tn.geometry_hash()
+            '18c702b2d026dccb1a69d640b79d22f3e706b6ad'
+
+            >>> tn.geometry_hash(strict_index_order=True)
+            '52c32c1d4f349373f02d512f536b1651dfe25893'
+
 
         """
         import pickle
@@ -3571,11 +3621,25 @@ class TensorNetwork(object):
             output_inds=output_inds,
         )
 
-        # note frozenset is hashable but not consistent -> need sortedtuple
+        if strict_index_order:
+            return hashlib.sha1(pickle.dumps((
+                tuple(map(tuple, inputs)),
+                tuple(output),
+                sortedtuple(size_dict.items())
+            ))).hexdigest()
+
+        edges = collections.defaultdict(list)
+        for ix in output:
+            edges[ix].append(-1)
+        for i, term in enumerate(inputs):
+            for ix in term:
+                edges[ix].append(i)
+
+        # then sort edges by each's incidence nodes
+        canonical_edges = sortedtuple(map(sortedtuple, edges.values()))
+
         return hashlib.sha1(pickle.dumps((
-            tuple(map(sortedtuple, inputs)),
-            sortedtuple(output),
-            sortedtuple(size_dict.items())
+            canonical_edges, sortedtuple(size_dict.items())
         ))).hexdigest()
 
     def tensors_sorted(self):
@@ -5747,6 +5811,7 @@ class TensorNetwork(object):
         canonize_after_opts=None,
         gauge_boundary_only=False,
         compress_late=True,
+        compress_min_size=None,
         compress_opts=None,
         compress_span=False,
         compress_exclude=None,
@@ -5801,23 +5866,37 @@ class TensorNetwork(object):
         # keep track of pairs along the tree - often no point compressing these
         #     (potentially, on some complex graphs, one needs to compress)
         if not compress_span:
-            dont_compress_pairs = {frozenset((s[0], s[1])) for s in seq}
+            dont_compress_pairs = {frozenset(s[:2]) for s in seq}
         else:
             # else just exclude the next few upcoming contractions, starting
             # with the first
-            dont_compress_pairs = {frozenset((seq[0][0], seq[0][1]))}
+            compress_span = int(compress_span)
+            dont_compress_pairs = {
+                frozenset(s[:2]) for s in seq[:compress_span]
+            }
 
-        def _should_skip_compression(i, tid1, tid2):
+        def _should_skip_compression(tid1, tid2):
             """The inner closure deciding whether we should compress between
             ``tid1`` and tid2``.
             """
-            pair_key = frozenset((tid1, tid2))
-            return (
+            if (compress_exclude is not None) and (tid2 in compress_exclude):
                 # explicitly excluded from compression
-                ((compress_exclude is not None) and (tid2 in compress_exclude))
-                # or compressing pair that will be eventually contracted
-                or pair_key in dont_compress_pairs
-            )
+                return True
+
+            if frozenset((tid1, tid2)) in dont_compress_pairs:
+                # or compressing pair that will be eventually or soon
+                # contracted
+                return True
+
+            if compress_min_size is not None:
+                t1, t2 = self._tids_get(tid1, tid2)
+                new_size = t1.size * t2.size
+                for ind in t1.bonds(t2):
+                    new_size //= t1.ind_size(ind)
+                if new_size < compress_min_size:
+                    # not going to produce a large tensor so don't bother
+                    # compressing
+                    return True
 
         # options relating to locally canonizing around each compression
         if canonize_distance:
@@ -5870,7 +5949,7 @@ class TensorNetwork(object):
                 t_neighb = self.tensor_map[tid_neighb]
                 tensor_fuse_squeeze(t, t_neighb)
 
-                if _should_skip_compression(i, tid, tid_neighb):
+                if _should_skip_compression(tid, tid_neighb):
                     continue
 
                 # check for compressing large shared (multi) bonds
@@ -5905,13 +5984,19 @@ class TensorNetwork(object):
 
         for i in range(num_contractions):
             # tid1 -> tid2 is inwards on the contraction tree, ``d`` is the
-            # graph distance from the original region
-            tid1, tid2, d = seq[i]
+            # graph distance from the original region, optional
+            tid1, tid2, *maybe_d = seq[i]
+
+            if maybe_d:
+                d, = maybe_d
+            else:
+                d = float('inf')
 
             if compress_span:
                 # only keep track of the next few contractions to ignore
-                for s in seq[i + 1:i + 2]:
-                    dont_compress_pairs.add(frozenset((s[0], s[1])))
+                # (note if False whole seq is already excluded)
+                for s in seq[i + compress_span - 1:i + compress_span]:
+                    dont_compress_pairs.add(frozenset(s[:2]))
 
             if compress_late:
                 # we compress just before we have to contract involved tensors
@@ -6097,7 +6182,7 @@ class TensorNetwork(object):
             tid1 = tids.pop(i)
             tids.append(tid2)
 
-            seq.append((tid1, tid2, float('inf')))
+            seq.append((tid1, tid2))
 
         return tn._contract_compressed_tid_sequence(
             seq=seq,
@@ -6553,9 +6638,12 @@ class TensorNetwork(object):
         into a density matrix: ``TN.to_dense(('k0', 'k1'), ('b0', 'b1'))``.
         """
         tags = contract_opts.pop('tags', all)
-        T = self.contract(
-            tags, output_inds=tuple(concat(inds_seq)), **contract_opts)
-        return T.to_dense(*inds_seq, to_qarray=to_qarray)
+        t = self.contract(
+            tags,
+            output_inds=tuple(concat(inds_seq)),
+            **contract_opts
+        )
+        return t.to_dense(*inds_seq, to_qarray=to_qarray)
 
     @functools.wraps(tensor_network_distance)
     def distance(self, *args, **kwargs):
@@ -7838,7 +7926,7 @@ class TensorNetwork(object):
         """The dtype of this TensorNetwork, this is the minimal common type
         of all the tensors data.
         """
-        return common_type(*self)
+        return get_common_dtype(*self.arrays)
 
     def iscomplex(self):
         return iscomplex(self)

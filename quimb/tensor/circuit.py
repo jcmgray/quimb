@@ -144,7 +144,7 @@ def rx_gate_param_gen(params):
     s = do('complex', s_re, s_im)
 
     data = [[c, s], [s, c]]
-    return do('array', data, like=params)
+    return ops.asarray(data)
 
 
 def apply_Rx(psi, theta, i, parametrize=False, **gate_opts):
@@ -152,7 +152,7 @@ def apply_Rx(psi, theta, i, parametrize=False, **gate_opts):
     """
     mtags = _merge_tags('RX', gate_opts)
     if parametrize:
-        G = ops.PArray(rx_gate_param_gen, (float(theta),))
+        G = ops.PArray(rx_gate_param_gen, (theta,))
     else:
         G = qu.Rx(float(theta))
     psi.gate_(G, int(i), tags=mtags, **gate_opts)
@@ -170,7 +170,7 @@ def ry_gate_param_gen(params):
     s = do('complex', s_re, s_im)
 
     data = [[c, -s], [s, c]]
-    return do('array', data, like=params)
+    return ops.asarray(data)
 
 
 def apply_Ry(psi, theta, i, parametrize=False, **gate_opts):
@@ -178,7 +178,7 @@ def apply_Ry(psi, theta, i, parametrize=False, **gate_opts):
     """
     mtags = _merge_tags('RY', gate_opts)
     if parametrize:
-        G = ops.PArray(ry_gate_param_gen, (float(theta),))
+        G = ops.PArray(ry_gate_param_gen, (theta,))
     else:
         G = qu.Ry(float(theta))
     psi.gate_(G, int(i), tags=mtags, **gate_opts)
@@ -196,7 +196,7 @@ def rz_gate_param_gen(params):
     s = do('complex', s_re, s_im)
 
     data = [[c + s, 0], [0, c - s]]
-    return do('array', data, like=params)
+    return ops.asarray(data)
 
 
 def apply_Rz(psi, theta, i, parametrize=False, **gate_opts):
@@ -204,7 +204,7 @@ def apply_Rz(psi, theta, i, parametrize=False, **gate_opts):
     """
     mtags = _merge_tags('RZ', gate_opts)
     if parametrize:
-        G = ops.PArray(rz_gate_param_gen, (float(theta),))
+        G = ops.PArray(rz_gate_param_gen, (theta,))
     else:
         G = qu.Rz(float(theta))
     psi.gate_(G, int(i), tags=mtags, **gate_opts)
@@ -235,7 +235,7 @@ def u3_gate_param_gen(params):
 
     data = [[c2, -el * s2],
             [ep * s2, elp * c2]]
-    return do('array', data, like=params)
+    return ops.asarray(data)
 
 
 def apply_U3(psi, theta, phi, lamda, i, parametrize=False, **gate_opts):
@@ -266,7 +266,7 @@ def u2_gate_param_gen(params):
 
     data = [[c00, c01],
             [c10, c11]]
-    return do('array', data, like=params) / 2**0.5
+    return ops.asarray(data) / 2**0.5
 
 
 def apply_U2(psi, phi, lamda, i, parametrize=False, **gate_opts):
@@ -287,7 +287,7 @@ def u1_gate_param_gen(params):
 
     data = [[1, 0],
             [0, c11]]
-    return do('array', data, like=params)
+    return ops.asarray(data)
 
 
 def apply_U1(psi, lamda, i, parametrize=False, **gate_opts):
@@ -307,7 +307,7 @@ def cu3_param_gen(params):
             [[[0, 0], [U3[0, 0], U3[0, 1]]],
              [[0, 0], [U3[1, 0], U3[1, 1]]]]]
 
-    return do('array', data, like=params)
+    return ops.asarray(data)
 
 
 @functools.lru_cache(maxsize=128)
@@ -332,7 +332,7 @@ def cu2_param_gen(params):
             [[[0, 0], [U2[0, 0], U2[0, 1]]],
              [[0, 0], [U2[1, 0], U2[1, 1]]]]]
 
-    return do('array', data, like=params)
+    return ops.asarray(data)
 
 
 @functools.lru_cache(maxsize=128)
@@ -361,7 +361,7 @@ def cu1_param_gen(params):
             [[[0, 0], [1, 0]],
              [[0, 0], [0, c11]]]]
 
-    return do('array', data, like=params)
+    return ops.asarray(data)
 
 
 @functools.lru_cache(maxsize=128)
@@ -398,7 +398,7 @@ def fsim_param_gen(params):
             [[[0, b], [a, 0]],
              [[0, 0], [0, c]]]]
 
-    return do('array', data, like=params)
+    return ops.asarray(data)
 
 
 def apply_fsim(psi, theta, phi, i, j, parametrize=False, **gate_opts):
@@ -460,7 +460,7 @@ def fsimg_param_gen(params):
             [[[0, a12 * e12 * img], [a22 * e22, 0]],
              [[0, 0], [0, c]]]]
 
-    return do('array', data, like=params)
+    return ops.asarray(data)
 
 
 def apply_fsimg(
@@ -488,7 +488,7 @@ def rzz_param_gen(params):
             [[[0, 0], [c10, 0]],
              [[0, 0], [0, c11]]]]
 
-    return do('array', data, like=params)
+    return ops.asarray(data)
 
 
 @functools.lru_cache(maxsize=128)
@@ -507,7 +507,7 @@ def rzz(gamma):
 def apply_rzz(psi, gamma, i, j, parametrize=False, **gate_opts):
     mtags = _merge_tags('RZZ', gate_opts)
     if parametrize:
-        G = ops.PArray(rzz_param_gen, (float(gamma),))
+        G = ops.PArray(rzz_param_gen, (gamma,))
     else:
         G = rzz(float(gamma))
     psi.gate_(G, (int(i), int(j)), tags=mtags, **gate_opts)
