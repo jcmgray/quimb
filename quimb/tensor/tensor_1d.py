@@ -1732,7 +1732,7 @@ class MatrixProductState(TensorNetwork1DVector,
         L = len(dims)
         inds = [site_ind_id.format(i) for i in range(L)]
 
-        T = Tensor(reshape(psi.A, dims), inds=inds)
+        T = Tensor(reshape(ops.asarray(psi), dims), inds=inds)
 
         def gen_tensors():
             #           split
