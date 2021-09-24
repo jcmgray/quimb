@@ -1034,8 +1034,105 @@ class FermionTensorNetwork(BlockTensorNetwork):
         self.exponent = self.exponent + tn.exponent
 
     def partition(self, tags, which='any', inplace=False):
+        """Split this FTN into two, based on which tensors have any or all of
+        ``tags``. Unlike ``partition_tensors``, both results are FTNs which
+        inherit the structure of the initial FTN and are still linked to the
+        same FermionSpace
+
+        Parameters
+        ----------
+        tags : sequence of str
+            The tags to split the network with.
+        which : {'any', 'all'}
+            Whether to split based on matching any or all of the tags.
+        inplace : bool
+            If True, actually remove the tagged tensors from self.
+
+        Returns
+        -------
+        untagged_tn, tagged_tn : (FermionTensorNetwork, FermionTensorNetwork)
+            The untagged and tagged tensor networs.
+
+        See Also
+        --------
+        partition_tensors, select, select_tensors
+        """
+        t1 = self if inplace else self.copy(full=True)
+        tagged_tids = t1._get_tids_from_tags(tags, which=which)
+        t2s = [t1._pop_tensor(tid) for tid in tagged_tids]
+        kws = {'check_collisions': False,
+               'virtual': True}
+        t2 = FermionTensorNetwork(t2s, **kws)
+        t2.view_like_(self)
+        return t1, t2
+
+    def partition_tensors(self, tags, inplace=False, which='any'):
+        """Split this TN into a list of tensors containing any or all of
+        ``tags`` and a ``FermionTensorNetwork`` of the the rest. All
+        FermionTensor and FermionTensorNetwork are still linked to the
+        same FermionSpace
+
+        Parameters
+        ----------
+        tags : sequence of str
+            The list of tags to filter the tensors by. Use ``...``
+            (``Ellipsis``) to filter all.
+        inplace : bool, optional
+            If true, remove tagged tensors from self, else create a new network
+            with the tensors removed.
+        which : {'all', 'any'}
+            Whether to require matching all or any of the tags.
+
+        Returns
+        -------
+        (u_tn, t_ts) : (FermionTensorNetwork, tuple of FermionTensors)
+            The untagged tensor network, and the sequence of tagged FermionTensors.
+
+        See Also
+        --------
+        partition, select, select_tensors
+        """
         tn = self if inplace else self.copy(full=True)
-        return TensorNetwork.partition(tn, tags, which=which, inplace=True)
+        return TensorNetwork.partition_tensors(tn, tags, inplace=True, which=which)
+
+    def _pop_tensor(self, tid, remove_from_fermion_space=False):
+        """Remove a tensor from this network, returning said tensor.
+
+        Parameters
+        ----------
+        tid: str
+            tensor identifier
+        remove_from_fermion_space: optional, {True, False, 'front', 'end'}
+            remove methods:
+                - True   : remove tensor from both TN and FermionSpace,
+                           keep phase as it is
+                - False  : remove tensor from TN,
+                           but still linked to fermion space,
+                           no change on phase
+                - 'front': move tensor to location 0 in FermionSpace,
+                           factorize all phase on remaining tensors,
+                           then remove tensor from both TN and FermionSpace
+                - 'end'  : move tensor to last position in FermionSpace,
+                           factorize all phase on remaining tensors,
+                           then remove tensor from both TN and FermionSpace
+            'front'/'end' can potential fail if the tensor has phase on open indices
+        """
+        check_opt('remove_from_fermion_space',
+                   remove_from_fermion_space,
+                   (True, False, 'front', 'end'))
+        if remove_from_fermion_space:
+            t = self.tensor_map[tid]
+            tid, site = t.get_fermion_info()
+            if remove_from_fermion_space == 'front':
+                site = 0
+                self.fermion_space.move(tid, site)
+                self._refactor_phase_from_tids([tid])
+            elif remove_from_fermion_space == 'end':
+                site = len(self.fermion_space.tensor_order)-1
+                self.fermion_space.move(tid, site)
+                self._refactor_phase_from_tids([tid])
+            self.fermion_space.remove_tensor(site)
+        return TensorNetwork._pop_tensor(self, tid)
 
     def _contract_between_tids(self, tid1, tid2, **contract_opts):
         contract_opts["inplace"] = True
@@ -1388,6 +1485,8 @@ class FTNLinearOperator(spla.LinearOperator):
     matvec / matmat operation::
 
         _matvec =    --0--v    , _rmatvec =     v--0--
+    Note prior to constructing the TNLinearOperator, reordering is needed to move the
+    ket site to location 0 and bra site to the last position.
 
     Parameters
     ----------
@@ -1395,10 +1494,11 @@ class FTNLinearOperator(spla.LinearOperator):
         A representation of the hamiltonian. If it's a sequence
         of fermionTensors, they must be in the same FermionSpace
     left_inds : sequence of str
-        The 'left' inds of the effective hamiltonian network.
+        The 'left' inds of the effective hamiltonian network. Usually the
+        indices of bra tensor in reverse order (to be consisitent with ket)
     right_inds : sequence of str
-        The 'right' inds of the effective hamiltonian network. These should be
-        ordered the same way as ``left_inds``.
+        The 'right' inds of the effective hamiltonian network.
+        Usually the indices of ket tensor
     target_symmetry: symmetry object in pyblock3.algebra.fermion_symmetry
         The target total symmetry on the right vector
     right_constructor: pyblock3.algebra.fermion.Constructor object, optional
