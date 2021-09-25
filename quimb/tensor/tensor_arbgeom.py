@@ -4,6 +4,7 @@ from operator import add
 from autoray import do, dag
 
 from ..utils import check_opt, ensure_dict
+from ..utils import progbar as Progbar
 from .tensor_core import TensorNetwork
 
 
@@ -253,6 +254,7 @@ class TensorNetworkGenVector(TensorNetworkGen, TensorNetwork):
         max_distance=0,
         gauges=None,
         optimize="auto",
+        rehearse=False,
     ):
         r"""Approximately compute a single local expectation value of the gate
         ``G`` at sites ``where``, either treating the environment beyond
@@ -316,7 +318,19 @@ class TensorNetworkGenVector(TensorNetworkGen, TensorNetwork):
         b_inds = tuple(map("_bra{}".format, where))
         b = k.conj().reindex_(dict(zip(k_inds, b_inds)))
 
-        rho = (b | k).to_dense(k_inds, b_inds, optimize=optimize)
+        tn = (b | k)
+
+        if rehearse:
+            if rehearse == 'tn':
+                return tn
+            if rehearse == 'tree':
+                return tn.contraction_tree(
+                    optimize, output_inds=k_inds + b_inds)
+            if rehearse:
+                return tn.contraction_info(
+                    optimize, output_inds=k_inds + b_inds)
+
+        rho = tn.to_dense(k_inds, b_inds, optimize=optimize)
         expec = do("trace", rho @ G)
         if normalized:
             expec = expec / do("trace", rho)
@@ -332,6 +346,8 @@ class TensorNetworkGenVector(TensorNetworkGen, TensorNetwork):
         gauges=None,
         optimize="auto",
         return_all=False,
+        rehearse=False,
+        progbar=False,
     ):
         r"""Compute all local expectations of the given terms, either treating
         the environment beyond ``max_distance`` as the identity, or using
@@ -386,9 +402,14 @@ class TensorNetworkGenVector(TensorNetworkGen, TensorNetwork):
             the given terms. Otherwise, return a dictionary mapping each term's
             location to the expectation value.
         """
-
         expecs = {}
-        for where, G in terms.items():
+
+        if progbar:
+            items = Progbar(terms.items())
+        else:
+            items = terms.items()
+
+        for where, G in items:
             expecs[where] = self.local_expectation_simple(
                 G,
                 where,
@@ -396,15 +417,16 @@ class TensorNetworkGenVector(TensorNetworkGen, TensorNetwork):
                 max_distance=max_distance,
                 gauges=gauges,
                 optimize=optimize,
+                rehearse=rehearse,
             )
 
-        if return_all:
+        if return_all or rehearse:
             return expecs
 
         return functools.reduce(add, expecs.values())
 
     def local_expectation_exact(
-        self, G, where, optimize="auto-hq", normalized=True,
+        self, G, where, optimize="auto-hq", normalized=True, rehearse=False,
     ):
         """Compute the local expectation of operator ``G`` at site(s) ``where``
         by exactly contracting the full overlap tensor network.
@@ -412,8 +434,19 @@ class TensorNetworkGenVector(TensorNetworkGen, TensorNetwork):
         k_inds = tuple(map(self.site_ind, where))
         b_inds = tuple(map("_bra{}".format, where))
         b = self.conj().reindex_(dict(zip(k_inds, b_inds)))
+        tn = (b | self)
 
-        rho = (b | self).to_dense(k_inds, b_inds, optimize=optimize)
+        if rehearse:
+            if rehearse == 'tn':
+                return tn
+            if rehearse == 'tree':
+                return tn.contraction_tree(
+                    optimize, output_inds=k_inds + b_inds)
+            if rehearse:
+                return tn.contraction_info(
+                    optimize, output_inds=k_inds + b_inds)
+
+        rho = tn.to_dense(k_inds, b_inds, optimize=optimize)
         expec = do("trace", rho @ G)
         if normalized:
             expec = expec / do("trace", rho)
@@ -422,6 +455,7 @@ class TensorNetworkGenVector(TensorNetworkGen, TensorNetwork):
 
     def compute_local_expectation_exact(
         self, terms, optimize="auto-hq", normalized=True, return_all=False,
+        rehearse=False, progbar=False,
     ):
         """Compute the local expectations of many operators,
         by exactly contracting the full overlap tensor network.
@@ -438,6 +472,16 @@ class TensorNetworkGenVector(TensorNetworkGen, TensorNetwork):
             Whether to normalize the result.
         return_all : bool, optional
             Whether to return all results, or just the summed expectation.
+        rehearse : {False, 'tn', 'tree', True}, optional
+            Whether to perform the computations or not::
+
+                - False: perform the computation.
+                - 'tn': return the tensor networks of each local expectation,
+                  without running the path optimizer.
+                - True: run the path optimizer and return the
+                  ``cotengra.ContractonTree`` for each local expectation.
+                - True: run the path optimizer and return the ``PathInfo`` for
+                  each local expectation.
 
         Returns
         -------
@@ -447,12 +491,19 @@ class TensorNetworkGenVector(TensorNetworkGen, TensorNetwork):
             location to the expectation value.
         """
         expecs = {}
-        for where, G in terms.items():
+
+        if progbar:
+            items = Progbar(terms.items())
+        else:
+            items = terms.items()
+
+        for where, G in items:
             expecs[where] = self.local_expectation_exact(
-                G, where, optimize=optimize, normalized=normalized
+                G, where, optimize=optimize,
+                normalized=normalized, rehearse=rehearse
             )
 
-        if return_all:
+        if return_all or rehearse:
             return expecs
         return functools.reduce(add, expecs.values())
 
@@ -651,6 +702,7 @@ class TensorNetworkGenVector(TensorNetworkGen, TensorNetwork):
         symmetrized='auto',
         return_all=False,
         rehearse=False,
+        progbar=False,
         **contract_compressed_opts,
     ):
         """Compute the local expectations of many local operators, by
@@ -696,7 +748,13 @@ class TensorNetworkGenVector(TensorNetworkGen, TensorNetwork):
             location to the expectation value.
         """
         expecs = {}
-        for where, G in terms.items():
+
+        if progbar:
+            items = Progbar(terms.items())
+        else:
+            items = terms.items()
+
+        for where, G in items:
             expecs[where] = self.local_expectation(
                 G,
                 where,
