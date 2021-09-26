@@ -740,8 +740,8 @@ def tensor_split(
 
     renorm : {None, bool, or int}, optional
         Whether to renormalize the kept singular values, assuming the bond has
-        a canonical environment, corresponding to maintaining the Frobenius
-        norm or trace. If ``None`` (the default) then this is automatically
+        a canonical environment, corresponding to maintaining the frobenius
+        or nuclear norm. If ``None`` (the default) then this is automatically
         turned on only for ``cutoff_method in {'sum2', 'rsum2', 'sum1',
         'rsum1'}`` with ``method in {'svd', 'eig', 'eigh'}``.
     ltags : sequence of str, optional
@@ -2079,23 +2079,69 @@ class Tensor(object):
 
     transpose_like_ = functools.partialmethod(transpose_like, inplace=True)
 
-    def trace(self, ind1, ind2, inplace=False):
-        """Trace index ``ind1`` with ``ind2``, removing both.
+    def trace(
+        self,
+        left_inds,
+        right_inds,
+        preserve_tensor=False,
+        inplace=False
+    ):
+        """Trace index or indices ``left_inds`` with ``right_inds``, removing
+        them.
+
+        Parameters
+        ----------
+        left_inds : str or sequence of str
+            The left indices to trace, order matching ``right_inds``.
+        right_inds : str or sequence of str
+            The right indices to trace, order matching ``left_inds``.
+        preserve_tensor : bool, optional
+            If ``True``, a tensor will be returned even if no indices remain.
+        inplace : bool, optional
+            Perform the trace inplace.
+
+        Returns
+        -------
+        z : Tensor or scalar
         """
         t = self if inplace else self.copy()
 
+        if isinstance(left_inds, str):
+            left_inds = (left_inds,)
+        if isinstance(right_inds, str):
+            right_inds = (right_inds,)
+
+        if len(left_inds) != len(right_inds):
+            raise ValueError(f"Can't trace {left_inds} with {right_inds}.")
+
+        remap = {}
+        for lix, rix in zip(left_inds, right_inds):
+            remap[lix] = lix
+            remap[rix] = lix
+
         old_inds, new_inds = [], []
         for ix in t.inds:
-            if ix in (ind1, ind2):
-                old_inds.append(ind1)
+            nix = remap.pop(ix, None)
+            if nix is not None:
+                old_inds.append(nix)
             else:
                 old_inds.append(ix)
                 new_inds.append(ix)
+
+        if remap:
+            raise ValueError(f"Indices {tuple(remap)} not found.")
+
         old_inds, new_inds = tuple(old_inds), tuple(new_inds)
 
         eq = _inds_to_eq((old_inds,), new_inds)
         t.modify(apply=lambda x: do('einsum', eq, x, like=x),
                  inds=new_inds, left_inds=None)
+
+        if not preserve_tensor and not new_inds:
+            data_out = t.data
+            if isinstance(data_out, np.ndarray):
+                data_out = realify_scalar(data_out.item())
+            return data_out
 
         return t
 
@@ -3316,6 +3362,13 @@ class TensorNetwork(object):
         """Conjugate all the tensors in this network (leaves all indices).
         """
         return self.conj()
+
+    def norm(self, optimize='auto', **contract_opts):
+        """Frobenius norm of this tensor network. Computed by exactly
+        contracting the TN with its conjugate.
+        """
+        norm = self.conj() | self
+        return norm.contract(optimize=optimize, **contract_opts)**0.5
 
     def make_norm(
         self,
@@ -4658,9 +4711,8 @@ class TensorNetwork(object):
             include=include, exclude=exclude, virtual=False)
 
         tn_loc_compress = tn_loc_target.copy()
-        ta = tn_loc_compress.tensor_map[tid1]
-        tb = tn_loc_compress.tensor_map[tid2]
-        tensor_compress_bond(ta, tb, max_bond=max_bond, cutoff=0.0)
+        tn_loc_compress._compress_between_tids(
+            tid1, tid2, max_bond=max_bond, cutoff=0.0)
 
         tn_loc_opt = tn_loc_compress.fit_(
             tn_loc_target, method=method, **fit_opts)
@@ -6583,6 +6635,20 @@ class TensorNetwork(object):
         return TNLinearOperator(self, left_inds, right_inds, ldims, rdims,
                                 optimize=optimize, backend=backend)
 
+    @functools.wraps(tensor_split)
+    def split(self, left_inds, right_inds=None, **split_opts):
+        """Decompose this tensor network across a bipartition of outer indices.
+
+        This method matches ``Tensor.split`` by converting to a
+        ``TNLinearOperator`` first. Note unless an iterative method is passed
+        to ``method``, the full dense tensor will be contracted.
+        """
+        if right_inds is None:
+            oix = self.outer_inds()
+            right_inds = tuple(ix for ix in oix if ix not in left_inds)
+        T = self.aslinearoperator(left_inds, right_inds)
+        return T.split(**split_opts)
+
     def trace(self, left_inds, right_inds, **contract_opts):
         """Trace over ``left_inds`` joined with ``right_inds``
         """
@@ -6598,6 +6664,7 @@ class TensorNetwork(object):
         t = self.contract(
             tags,
             output_inds=tuple(concat(inds_seq)),
+            preserve_tensor=True,
             **contract_opts
         )
         return t.to_dense(*inds_seq, to_qarray=to_qarray)
@@ -8132,9 +8199,9 @@ class TNLinearOperator(spla.LinearOperator):
         return tensor_contract(*ts, **contract_opts).to_dense(*inds_seq)
 
     @functools.wraps(tensor_split)
-    def split(self, **kwargs):
+    def split(self, **split_opts):
         return tensor_split(self, left_inds=self.left_inds,
-                            right_inds=self.right_inds, **kwargs)
+                            right_inds=self.right_inds, **split_opts)
 
     @property
     def A(self):

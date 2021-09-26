@@ -329,6 +329,23 @@ class TestBasicTensorOperations:
         tc = t.trace('a', 'b')
         assert tc.inds == ('c',)
         assert_allclose(tc.data, np.trace(t.data, axis1=0, axis2=1))
+        with pytest.raises(ValueError):
+            t.trace('a', 'z')
+        assert not isinstance(
+            qtn.rand_tensor([2, 2], 'ab').trace('a', 'b'),
+            qtn.Tensor)
+        assert isinstance(
+            qtn.rand_tensor([2, 2], 'ab').trace('a', 'b',
+                                                preserve_tensor=True),
+            qtn.Tensor)
+
+    def test_tensor_trace_multi(self):
+        t = qtn.rand_tensor((3, 3, 3, 3, 3), 'abcde', dtype='complex128')
+        t1 = t.trace(['a', 'c'], ['e', 'b'])
+        te = t.trace('a', 'e').trace('c', 'b')
+        assert t1.almost_equals(te)
+        with pytest.raises(ValueError):
+            t.trace(['a', 'b', 'c'], ['d', 'e'])
 
     def test_sum_reduce(self):
         t = rand_tensor((2, 3, 4), 'abc')
@@ -662,6 +679,14 @@ class TestTensorFunctions:
         assert_allclose(col_nrm_x2, col_nrm_y2, rtol=10 * smudge)
         z2 = (t1 @ t2).data
         assert_allclose(z1, z2)
+
+    def test_new_ind_with_identity(self):
+        t = rand_tensor((2, 2, 3, 3), 'abcd')
+        t.new_ind_with_identity(
+            'switch', ['a', 'c'], ['b', 'd'], axis=2
+        )
+        assert t.inds == ('a', 'b', 'switch', 'c', 'd')
+        assert t.isel({'switch': 1}).data.sum() == pytest.approx(6)
 
 
 class TestTensorNetwork:
