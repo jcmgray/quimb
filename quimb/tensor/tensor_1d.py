@@ -462,19 +462,6 @@ def superop_TN_1D(tn_super, tn_op,
     return tn_super.reindex(reindex_map) & tn_op.reindex(reindex_map)
 
 
-def rand_padder(vector, pad_width, iaxis, kwargs):
-    """Helper function for padding tensor with random entries.
-    """
-    rand_strength = kwargs.get('rand_strength')
-    if pad_width[0]:
-        vector[:pad_width[0]] = rand_strength * qu.randn(pad_width[0],
-                                                         dtype='float32')
-    if pad_width[1]:
-        vector[-pad_width[1]:] = rand_strength * qu.randn(pad_width[1],
-                                                          dtype='float32')
-    return vector
-
-
 class TensorNetwork1D(TensorNetwork):
     """Base class for tensor networks with a one-dimensional structure.
     """
@@ -1461,8 +1448,13 @@ class TensorNetwork1DFlat(TensorNetwork1D,
         left_inds = Tm1.bonds(self[i - 1])
         return Tm1.singular_values(left_inds, method=method)
 
-    def expand_bond_dimension(self, new_bond_dim, inplace=True, bra=None,
-                              rand_strength=0.0):
+    def expand_bond_dimension(
+        self,
+        new_bond_dim,
+        rand_strength=0.0,
+        bra=None,
+        inplace=True,
+    ):
         """Expand the bond dimensions of this 1D tensor network to at least
         ``new_bond_dim``.
 
@@ -1483,33 +1475,17 @@ class TensorNetwork1DFlat(TensorNetwork1D,
         -------
         MatrixProductState
         """
-        expanded = self if inplace else self.copy()
+        tn = super().expand_bond_dimension(
+            new_bond_dim=new_bond_dim,
+            rand_strength=rand_strength,
+            inplace=inplace,
+        )
 
-        for i in self.gen_site_coos():
-            tensor = expanded[i]
-            inds_to_expand = []
+        if bra is not None:
+            for coo in tn.gen_site_coos():
+                bra[coo].modify(data=tn[coo].data.conj())
 
-            if i > 0 or self.cyclic:
-                inds_to_expand.append(self.bond(i - 1, i))
-            if i < self.L - 1 or self.cyclic:
-                inds_to_expand.append(self.bond(i, i + 1))
-
-            pads = [(0, 0) if i not in inds_to_expand else
-                    (0, max(new_bond_dim - d, 0))
-                    for d, i in zip(tensor.shape, tensor.inds)]
-
-            if rand_strength > 0:
-                edata = do('pad', tensor.data, pads, mode=rand_padder,
-                           rand_strength=rand_strength)
-            else:
-                edata = do('pad', tensor.data, pads, mode='constant')
-
-            tensor.modify(data=edata)
-
-            if bra is not None:
-                bra[i].modify(data=tensor.data.conj())
-
-        return expanded
+        return tn
 
     def count_canonized(self):
         if self.cyclic:

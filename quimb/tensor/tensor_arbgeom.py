@@ -254,7 +254,9 @@ class TensorNetworkGenVector(TensorNetworkGen, TensorNetwork):
         max_distance=0,
         gauges=None,
         optimize="auto",
+        max_bond=None,
         rehearse=False,
+        **contract_opts,
     ):
         r"""Approximately compute a single local expectation value of the gate
         ``G`` at sites ``where``, either treating the environment beyond
@@ -298,6 +300,8 @@ class TensorNetworkGenVector(TensorNetworkGen, TensorNetwork):
         optimize : str or PathOptimizer, optional
             The contraction path optimizer to use, when exactly contracting the
             local tensors.
+        rehearse : {False, 'tn', 'tree', True}, optional
+            Whether to just prepare the computation rather than perform it.
 
         Returns
         -------
@@ -314,28 +318,25 @@ class TensorNetworkGenVector(TensorNetworkGen, TensorNetwork):
             # gauge the region with simple update style bond gauges
             k.gauge_simple_insert(gauges)
 
-        k_inds = tuple(map(self.site_ind, where))
-        b_inds = tuple(map("_bra{}".format, where))
-        b = k.conj().reindex_(dict(zip(k_inds, b_inds)))
+        if max_bond is not None:
+            return k.local_expectation(
+                G=G,
+                where=where,
+                max_bond=max_bond,
+                optimize=optimize,
+                normalized=normalized,
+                rehearse=rehearse,
+                **contract_opts
+            )
 
-        tn = (b | k)
-
-        if rehearse:
-            if rehearse == 'tn':
-                return tn
-            if rehearse == 'tree':
-                return tn.contraction_tree(
-                    optimize, output_inds=k_inds + b_inds)
-            if rehearse:
-                return tn.contraction_info(
-                    optimize, output_inds=k_inds + b_inds)
-
-        rho = tn.to_dense(k_inds, b_inds, optimize=optimize)
-        expec = do("trace", rho @ G)
-        if normalized:
-            expec = expec / do("trace", rho)
-
-        return expec
+        return k.local_expectation_exact(
+            G=G,
+            where=where,
+            optimize=optimize,
+            normalized=normalized,
+            rehearse=rehearse,
+            **contract_opts
+        )
 
     def compute_local_expectation_simple(
         self,
@@ -347,7 +348,9 @@ class TensorNetworkGenVector(TensorNetworkGen, TensorNetwork):
         optimize="auto",
         return_all=False,
         rehearse=False,
+        max_bond=None,
         progbar=False,
+        **contract_opts,
     ):
         r"""Compute all local expectations of the given terms, either treating
         the environment beyond ``max_distance`` as the identity, or using
@@ -418,6 +421,8 @@ class TensorNetworkGenVector(TensorNetworkGen, TensorNetwork):
                 gauges=gauges,
                 optimize=optimize,
                 rehearse=rehearse,
+                max_bond=max_bond,
+                **contract_opts,
             )
 
         if return_all or rehearse:
@@ -426,7 +431,12 @@ class TensorNetworkGenVector(TensorNetworkGen, TensorNetwork):
         return functools.reduce(add, expecs.values())
 
     def local_expectation_exact(
-        self, G, where, optimize="auto-hq", normalized=True, rehearse=False,
+        self,
+        G,
+        where,
+        optimize="auto-hq",
+        normalized=True,
+        rehearse=False,
     ):
         """Compute the local expectation of operator ``G`` at site(s) ``where``
         by exactly contracting the full overlap tensor network.
@@ -569,22 +579,24 @@ class TensorNetworkGenVector(TensorNetworkGen, TensorNetwork):
         # form the partial trace
         k_inds = tuple(map(self.site_ind, keep))
 
+        k = self.copy()
         if reduce:
-            k = self.copy()
             k.reduce_inds_onto_bond(*k_inds, tags='__BOND__', drop_tags=True)
-        else:
-            k = self
 
         b_inds = tuple(map("_bra{}".format, keep))
         b = k.conj().reindex_(dict(zip(k_inds, b_inds)))
 
-        tn = b & k
+        tn = b | k
         output_inds = k_inds + b_inds
 
         if flatten:
             for site in self.sites:
                 if (site not in keep) or (flatten == 'all'):
-                    tn ^= site
+                    # check if site exists still to permit e.g. local methods
+                    # to use this same logic
+                    tag = tn.site_tag(site)
+                    if tag in tn.tag_map:
+                        tn ^= tag
             if reduce and (flatten == 'all'):
                 tn ^= '__BOND__'
 

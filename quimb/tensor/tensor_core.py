@@ -1054,6 +1054,19 @@ def new_bond(T1, T2, size=1, name=None, axis1=0, axis2=0):
     T2.new_ind(name, size=size, axis=axis2)
 
 
+def rand_padder(vector, pad_width, iaxis, kwargs):
+    """Helper function for padding tensor with random entries.
+    """
+    rand_strength = kwargs.get('rand_strength')
+    if pad_width[0]:
+        vector[:pad_width[0]] = rand_strength * randn(pad_width[0],
+                                                      dtype='float32')
+    if pad_width[1]:
+        vector[-pad_width[1]:] = rand_strength * randn(pad_width[1],
+                                                       dtype='float32')
+    return vector
+
+
 def array_direct_product(X, Y, sum_axes=()):
     """Direct product of two arrays.
 
@@ -1924,6 +1937,34 @@ class Tensor(object):
             self.expand_ind(name, size)
 
     new_bond = new_bond
+
+    def new_ind_with_identity(self, name, left_inds, right_inds, axis=0):
+        """Inplace add a new index, where the newly stacked array entries form
+        the identity from ``left_inds`` to ``right_inds``. Selecting 0 or 1 for
+        the new index ``name`` thus is like 'turning off' this tensor if viewed
+        as an operator.
+
+        Parameters
+        ----------
+        name : str
+            Name of the new index.
+        left_inds : tuple[str]
+            Names of the indices forming the left hand side of the operator.
+        right_inds : tuple[str]
+            Names of the indices forming the right hand side of the operator.
+            The dimensions of these must match those of ``left_inds``.
+        axis : int, optional
+            Position of the new index.
+        """
+        ldims = tuple(map(self.ind_size, left_inds))
+        x_id = do('eye', prod(ldims), dtype=self.dtype, like=self.data)
+        x_id = do('reshape', x_id, ldims + ldims)
+        t_id = Tensor(x_id, inds=left_inds + right_inds)
+        t_id.transpose_(*self.inds)
+        new_data = do('stack', (self.data, t_id.data), axis=axis)
+        new_inds = list(self.inds)
+        new_inds.insert(axis, name)
+        self.modify(data=new_data, inds=new_inds)
 
     def conj(self, inplace=False):
         """Conjugate this tensors data (does nothing to indices).
@@ -6973,6 +7014,44 @@ class TensorNetwork(object):
         return tn
 
     fuse_multibonds_ = functools.partialmethod(fuse_multibonds, inplace=True)
+
+    def expand_bond_dimension(
+        self,
+        new_bond_dim,
+        rand_strength=0.0,
+        inds_to_expand=None,
+        inplace=False,
+    ):
+        """Increase the dimension of bonds to at least ``new_bond_dim``.
+        """
+        tn = self if inplace else self.copy()
+
+        if inds_to_expand is None:
+            # find all 'bonds' - indices connecting two or more tensors
+            inds_to_expand = set()
+            for ind, tids in tn.ind_map.items():
+                if len(tids) >= 2:
+                    inds_to_expand.add(ind)
+        else:
+            inds_to_expand = set(inds_to_expand)
+
+        for t in tn:
+            # perform the array expansions
+            pads = [
+                (0, 0) if ind not in inds_to_expand else
+                (0, max(new_bond_dim - d, 0))
+                for d, ind in zip(t.shape, t.inds)
+            ]
+
+            if rand_strength > 0:
+                edata = do('pad', t.data, pads, mode=rand_padder,
+                           rand_strength=rand_strength)
+            else:
+                edata = do('pad', t.data, pads, mode='constant')
+
+            t.modify(data=edata)
+
+        return tn
 
     def flip(self, inds, inplace=False):
         """Flip the dimension corresponding to indices ``inds`` on all tensors

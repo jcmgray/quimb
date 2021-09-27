@@ -26,7 +26,7 @@ from .tensor_core import (
     oset_union,
     bonds_size,
 )
-from .tensor_1d import maybe_factor_gate_into_tensor, rand_padder
+from .tensor_1d import maybe_factor_gate_into_tensor
 from . import decomp
 
 
@@ -3303,35 +3303,19 @@ class TensorNetwork2DFlat(TensorNetwork2D,
 
         Returns
         -------
-        expanded : TensorNetwork2DFlat
+        tn : TensorNetwork2DFlat
         """
+        tn = super().expand_bond_dimension(
+            new_bond_dim=new_bond_dim,
+            rand_strength=rand_strength,
+            inplace=inplace,
+        )
 
-        expanded = self if inplace else self.copy()
+        if bra is not None:
+            for coo in tn.gen_site_coos():
+                bra[coo].modify(data=tn[coo].data.conj())
 
-        for coo_a in self.gen_site_coos():
-            tensor = expanded[coo_a]
-            inds_to_expand = [
-                self.bond(coo_a, coo_b)
-                for coo_b in nearest_neighbors(coo_a)
-                if self.valid_coo(coo_b)
-            ]
-
-            pads = [(0, 0) if i not in inds_to_expand else
-                    (0, max(new_bond_dim - d, 0))
-                    for d, i in zip(tensor.shape, tensor.inds)]
-
-            if rand_strength > 0:
-                edata = do('pad', tensor.data, pads, mode=rand_padder,
-                           rand_strength=rand_strength)
-            else:
-                edata = do('pad', tensor.data, pads, mode='constant')
-
-            tensor.modify(data=edata)
-
-            if bra is not None:
-                bra[coo_a].modify(data=tensor.data.conj())
-
-        return expanded
+        return tn
 
 
 class PEPS(TensorNetwork2DVector,
