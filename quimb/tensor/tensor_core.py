@@ -2531,6 +2531,12 @@ class Tensor(object):
 
     squeeze_ = functools.partialmethod(squeeze, inplace=True)
 
+    def largest_element(self):
+        r"""Return the largest element, in terms of absolute magnitude, of this
+        tensor.
+        """
+        return do('max', do('abs', self.data))
+
     def norm(self):
         """Frobenius norm of this tensor.
         """
@@ -3404,12 +3410,20 @@ class TensorNetwork(object):
         """
         return self.conj()
 
-    def norm(self, optimize='auto', **contract_opts):
+    def largest_element(self):
+        """Return the 'largest element', in terms of absolute magnitude, of
+        this tensor network. This is defined as the product of the largest
+        elements of each tensor in the network, which would be the largest
+        single term occuring if the TN was summed explicitly.
+        """
+        return prod(t.largest_element() for t in self)
+
+    def norm(self, **contract_opts):
         """Frobenius norm of this tensor network. Computed by exactly
         contracting the TN with its conjugate.
         """
         norm = self.conj() | self
-        return norm.contract(optimize=optimize, **contract_opts)**0.5
+        return norm.contract(**contract_opts)**0.5
 
     def make_norm(
         self,
@@ -6669,7 +6683,7 @@ class TensorNetwork(object):
         return TensorNetwork((self, other)) ^ ...
 
     def aslinearoperator(self, left_inds, right_inds, ldims=None, rdims=None,
-                         backend=None, optimize='auto'):
+                         backend=None, optimize=None):
         """View this ``TensorNetwork`` as a
         :class:`~quimb.tensor.tensor_core.TNLinearOperator`.
         """
@@ -8125,7 +8139,7 @@ class TNLinearOperator(spla.LinearOperator):
     """
 
     def __init__(self, tns, left_inds, right_inds, ldims=None, rdims=None,
-                 optimize='auto', backend=None, is_conj=False):
+                 optimize=None, backend=None, is_conj=False):
         if backend is None:
             self.backend = get_tensor_linop_backend()
         else:

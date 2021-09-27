@@ -9,6 +9,7 @@ Examples
   ./examples/ex_2d
   ./examples/ex_quench
   ./examples/ex_distributed_shift_invert
+  ./examples/ex_tn_TRG
   ./examples/ex_tn_rand_uni_gate_graphs
   ./examples/ex_dmrg_periodic
   ./examples/ex_TEBD_evo
