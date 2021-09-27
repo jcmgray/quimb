@@ -2538,7 +2538,14 @@ class Tensor(object):
         return do('max', do('abs', self.data))
 
     def norm(self):
-        """Frobenius norm of this tensor.
+        r"""Frobenius norm of this tensor:
+
+        .. math::
+
+            \|t\|_F = \sqrt{\mathrm{Tr} \left(t^{\dagger} t\right)}
+
+        where the trace is taken over all indices. Equivalent to the square
+        root of the sum of squared singular values across any partition.
         """
         return norm_fro(self.data)
 
@@ -3419,8 +3426,15 @@ class TensorNetwork(object):
         return prod(t.largest_element() for t in self)
 
     def norm(self, **contract_opts):
-        """Frobenius norm of this tensor network. Computed by exactly
-        contracting the TN with its conjugate.
+        r"""Frobenius norm of this tensor network. Computed by exactly
+        contracting the TN with its conjugate:
+
+        .. math::
+
+            \|T\|_F = \sqrt{\mathrm{Tr} \left(T^{\dagger} T\right)}
+
+        where the trace is taken over all indices. Equivalent to the square
+        root of the sum of squared singular values across any partition.
         """
         norm = self.conj() | self
         return norm.contract(**contract_opts)**0.5
