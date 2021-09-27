@@ -473,6 +473,23 @@ class TestTensorFunctions:
         assert_allclose(psim.singular_values('a', method=method)**2,
                         [0.5, 0.5])
 
+    def test_split_renorm(self):
+        t = rand_tensor((3, 3, 3, 3), ['a', 'b', 'c', 'd'])
+        n_nuc = t.singular_values(['a', 'b']).sum()
+        n_fro = (t.singular_values(['a', 'b'])**2).sum()**0.5
+
+        tc = t.split(['a', 'b'], cutoff=0.0, max_bond=5, renorm=1) ^ all
+        nc_nuc = tc.singular_values(['a', 'b']).sum()
+        nc_fro = (tc.singular_values(['a', 'b'])**2).sum()**0.5
+        assert nc_nuc == pytest.approx(n_nuc)
+        assert nc_fro != pytest.approx(n_fro)
+
+        tc = t.split(['a', 'b'], cutoff=0.0, max_bond=5, renorm=2) ^ all
+        nc_nuc = tc.singular_values(['a', 'b']).sum()
+        nc_fro = (tc.singular_values(['a', 'b'])**2).sum()**0.5
+        assert nc_fro == pytest.approx(n_fro)
+        assert nc_nuc != pytest.approx(n_nuc)
+
     def test_absorb_none(self):
         x = qtn.rand_tensor((4, 5, 6, 7), inds='abcd', tags='X', seed=42)
         e = x.H @ x
