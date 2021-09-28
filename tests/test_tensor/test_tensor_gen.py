@@ -225,7 +225,7 @@ class TestGenericTN:
     def test_3d_classical_ising_varying_j(self):
         L = 3
         beta = 0.3
-        edges = qtn.edges_3d_square(L, L, L)
+        edges = qtn.edges_3d_cubic(L, L, L)
         np.random.seed(666)
         js = {
             edge: np.random.normal()
