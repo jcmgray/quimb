@@ -857,8 +857,13 @@ def classical_ising_sqrtS_matrix(beta, j=1.0):
 def classical_ising_T_matrix(beta, j=1.0, h=0.0, directions='lrud'):
     """The single effective TN site for the classical ising model.
     """
+    try:
+        js = tuple(j)
+    except TypeError:
+        js = (j,) * len(directions)
+
     arrays = (
-        [classical_ising_sqrtS_matrix(beta, j=j)] * len(directions) +
+        [classical_ising_sqrtS_matrix(beta, j=j) for j in js] +
         [classical_ising_H_matrix(beta, h)]
     )
     lhs = ",".join(f'i{x}' for x in directions)
@@ -922,29 +927,37 @@ def HTN2D_classical_ising_partition_function(
     --------
     TN2D_classical_ising_partition_function
     """
-
-    ts = []
-
-    S = classical_ising_S_matrix(beta=beta, j=j)
-    H = classical_ising_H_matrix(beta=beta, h=h)
-
     try:
         cyclic_x, cyclic_y = cyclic
     except TypeError:
         cyclic_x = cyclic_y = cyclic
 
+    if callable(j):
+        j_factory = j
+    else:
+        def j_factory(node_a, node_b):
+            return j
+
+    ts = []
     for ni, nj in itertools.product(range(Lx), range(Ly)):
 
         if ni < Lx - 1 or cyclic_x:
-            inds = ind_id.format(ni, nj), ind_id.format((ni + 1) % Lx, nj)
-            ts.append(Tensor(S, inds=inds))
+            node_a, node_b = (ni, nj), ((ni + 1) % Lx, nj)
+            inds = ind_id.format(*node_a), ind_id.format(*node_b)
+            data = classical_ising_S_matrix(
+                beta=beta, j=j_factory(node_a, node_b))
+            ts.append(Tensor(data, inds=inds))
 
         if nj < Ly - 1 or cyclic_y:
-            inds = ind_id.format(ni, nj), ind_id.format(ni, (nj + 1) % Ly)
-            ts.append(Tensor(S, inds=inds))
+            node_a, node_b = (ni, nj), (ni, (nj + 1) % Ly)
+            inds = ind_id.format(*node_a), ind_id.format(*node_b)
+            data = classical_ising_S_matrix(
+                beta=beta, j=j_factory(node_a, node_b))
+            ts.append(Tensor(data, inds=inds))
 
         if h != 0.0:
-            ts.append(Tensor(H, inds=(ind_id.format(ni, nj),)))
+            data = classical_ising_H_matrix(beta=beta, h=h)
+            ts.append(Tensor(data, inds=(ind_id.format(ni, nj),)))
 
     return TensorNetwork(ts)
 
@@ -994,36 +1007,44 @@ def HTN3D_classical_ising_partition_function(
     --------
     TN3D_classical_ising_partition_function
     """
-
-    ts = []
-
-    S = classical_ising_S_matrix(beta=beta, j=j)
-    H = classical_ising_H_matrix(beta=beta, h=h)
-
     try:
         cyclic_x, cyclic_y, cyclic_z = cyclic
     except TypeError:
         cyclic_x = cyclic_y = cyclic_z = cyclic
 
+    if callable(j):
+        j_factory = j
+    else:
+        def j_factory(node_a, node_b):
+            return j
+
+    ts = []
     for ni, nj, nk in itertools.product(range(Lx), range(Ly), range(Lz)):
 
         if ni < Lx - 1 or cyclic_x:
-            inds = (ind_id.format(ni, nj, nk),
-                    ind_id.format((ni + 1) % Lx, nj, nk))
-            ts.append(Tensor(S, inds=inds))
+            node_a, node_b = (ni, nj, nk), ((ni + 1) % Lx, nj, nk)
+            inds = (ind_id.format(*node_a), ind_id.format(*node_b))
+            data = classical_ising_S_matrix(
+                beta=beta, j=j_factory(node_a, node_b))
+            ts.append(Tensor(data, inds=inds))
 
         if nj < Ly - 1 or cyclic_y:
-            inds = (ind_id.format(ni, nj, nk),
-                    ind_id.format(ni, (nj + 1) % Ly, nk))
-            ts.append(Tensor(S, inds=inds))
+            node_a, node_b = (ni, nj, nk), (ni, (nj + 1) % Ly, nk)
+            inds = (ind_id.format(*node_a), ind_id.format(*node_b))
+            data = classical_ising_S_matrix(
+                beta=beta, j=j_factory(node_a, node_b))
+            ts.append(Tensor(data, inds=inds))
 
         if nk < Lz - 1 or cyclic_z:
-            inds = (ind_id.format(ni, nj, nk),
-                    ind_id.format(ni, nj, (nk + 1) % Lz))
-            ts.append(Tensor(S, inds=inds))
+            node_a, node_b = (ni, nj, nk), (ni, nj, (nk + 1) % Lz)
+            inds = (ind_id.format(*node_a), ind_id.format(*node_b))
+            data = classical_ising_S_matrix(
+                beta=beta, j=j_factory(node_a, node_b))
+            ts.append(Tensor(data, inds=inds))
 
         if h != 0.0:
-            ts.append(Tensor(H, inds=(ind_id.format(ni, nj, nk),)))
+            data = classical_ising_H_matrix(beta=beta, h=h)
+            ts.append(Tensor(data, inds=(ind_id.format(ni, nj, nk),)))
 
     return TensorNetwork(ts)
 
@@ -1077,28 +1098,43 @@ def TN2D_classical_ising_partition_function(
     except TypeError:
         cyclic_x = cyclic_y = cyclic
 
+    if callable(j):
+        j_factory = j
+    else:
+        def j_factory(node_a, node_b):
+            return j
+
     ts = []
     bonds = collections.defaultdict(rand_uuid)
 
     for ni, nj in itertools.product(range(Lx), range(Ly)):
         directions = ""
         inds = []
+        js = ()
 
         if nj > 0 or cyclic_y:
+            node_a, node_b = (ni, (nj - 1) % Ly), (ni, nj)
+            js += (j_factory(node_a, node_b),)
             directions += 'l'
-            inds.append(bonds[(ni, (nj - 1) % Ly), (ni, nj)])
+            inds.append(bonds[node_a, node_b])
         if nj < Ly - 1 or cyclic_y:
+            node_a, node_b = (ni, nj), (ni, (nj + 1) % Ly)
+            js += (j_factory(node_a, node_b),)
             directions += 'r'
-            inds.append(bonds[(ni, nj), (ni, (nj + 1) % Ly)])
+            inds.append(bonds[node_a, node_b])
         if ni < Lx - 1 or cyclic_x:
+            node_a, node_b = (ni, nj), ((ni + 1) % Lx, nj)
+            js += (j_factory(node_a, node_b),)
             directions += 'u'
-            inds.append(bonds[(ni, nj), ((ni + 1) % Lx, nj)])
+            inds.append(bonds[node_a, node_b])
         if ni > 0 or cyclic_x:
+            node_a, node_b = ((ni - 1) % Lx, nj), (ni, nj)
+            js += (j_factory(node_a, node_b),)
             directions += 'd'
-            inds.append(bonds[((ni - 1) % Lx, nj), (ni, nj)])
+            inds.append(bonds[node_a, node_b])
 
         ts.append(Tensor(
-            data=classical_ising_T2d_matrix(beta, directions, j=j, h=h),
+            data=classical_ising_T2d_matrix(beta, directions, j=js, h=h),
             inds=inds,
             tags=[site_tag_id.format(ni, nj),
                   row_tag_id.format(ni),
@@ -1164,34 +1200,53 @@ def TN3D_classical_ising_partition_function(
     except TypeError:
         cyclic_x = cyclic_y = cyclic_z = cyclic
 
+    if callable(j):
+        j_factory = j
+    else:
+        def j_factory(node_a, node_b):
+            return j
+
     ts = []
     bonds = collections.defaultdict(rand_uuid)
 
     for ni, nj, nk in itertools.product(range(Lx), range(Ly), range(Lz)):
         directions = ""
         inds = []
+        js = ()
 
         if nk > 0 or cyclic_z:
+            node_a, node_b = (ni, nj, (nk - 1) % Lz), (ni, nj, nk)
+            js += (j_factory(node_a, node_b),)
             directions += 'b'
-            inds.append(bonds[(ni, nj, (nk - 1) % Lz), (ni, nj, nk)])
+            inds.append(bonds[node_a, node_b])
         if nk < Lz - 1 or cyclic_z:
+            node_a, node_b = (ni, nj, nk), (ni, nj, (nk + 1) % Lz)
+            js += (j_factory(node_a, node_b),)
             directions += 'a'
-            inds.append(bonds[(ni, nj, nk), (ni, nj, (nk + 1) % Lz)])
+            inds.append(bonds[node_a, node_b])
         if nj > 0 or cyclic_y:
+            node_a, node_b = (ni, (nj - 1) % Ly, nk), (ni, nj, nk)
+            js += (j_factory(node_a, node_b),)
             directions += 'l'
-            inds.append(bonds[(ni, (nj - 1) % Ly, nk), (ni, nj, nk)])
+            inds.append(bonds[node_a, node_b])
         if nj < Ly - 1 or cyclic_y:
+            node_a, node_b = (ni, nj, nk), (ni, (nj + 1) % Ly, nk)
+            js += (j_factory(node_a, node_b),)
             directions += 'r'
-            inds.append(bonds[(ni, nj, nk), (ni, (nj + 1) % Ly, nk)])
+            inds.append(bonds[node_a, node_b])
         if ni < Lx - 1 or cyclic_x:
+            node_a, node_b = (ni, nj, nk), ((ni + 1) % Lx, nj, nk)
+            js += (j_factory(node_a, node_b),)
             directions += 'u'
-            inds.append(bonds[(ni, nj, nk), ((ni + 1) % Lx, nj, nk)])
+            inds.append(bonds[node_a, node_b])
         if ni > 0 or cyclic_x:
+            node_a, node_b = ((ni - 1) % Lx, nj, nk), (ni, nj, nk)
+            js += (j_factory(node_a, node_b),)
             directions += 'd'
-            inds.append(bonds[((ni - 1) % Lx, nj, nk), (ni, nj, nk)])
+            inds.append(bonds[node_a, node_b])
 
         ts.append(Tensor(
-            data=classical_ising_T3d_matrix(beta, directions, j=j, h=h),
+            data=classical_ising_T3d_matrix(beta, directions, j=js, h=h),
             inds=inds,
             tags=[
                 site_tag_id.format(ni, nj, nk),

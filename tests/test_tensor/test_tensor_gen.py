@@ -1,4 +1,5 @@
 import pytest
+import numpy as np
 from numpy.testing import assert_allclose
 
 import quimb as qu
@@ -193,6 +194,60 @@ class TestGenericTN:
                 G.edges, beta=beta, j=j, h=h
             ).contract(all, output_inds=())
             assert Z3 == pytest.approx(Z4)
+
+    def test_2d_classical_ising_varying_j(self):
+        L = 5
+        beta = 0.3
+        edges = qtn.edges_2d_square(L, L)
+        np.random.seed(666)
+        js = {
+            edge: np.random.normal()
+            for edge in edges
+        }
+        tn = qtn.TN_classical_partition_function_from_edges(
+            edges, beta=beta, j=lambda i, j: js[i, j],
+        )
+        x0 = tn.contract(all, output_inds=())
+        tn = qtn.HTN_classical_partition_function_from_edges(
+            edges, beta=beta, j=lambda i, j: js[i, j],
+        )
+        x1 = tn.contract(all, output_inds=())
+        tn = qtn.TN2D_classical_ising_partition_function(
+            L, L, beta=beta,  j=lambda i, j: js[i, j])
+        x2 = tn.contract(all, output_inds=())
+        tn = qtn.HTN2D_classical_ising_partition_function(
+            L, L, beta=beta,  j=lambda i, j: js[i, j])
+        x3 = tn.contract(all, output_inds=())
+        assert x0 == pytest.approx(x1)
+        assert x1 == pytest.approx(x2)
+        assert x2 == pytest.approx(x3)
+
+    def test_3d_classical_ising_varying_j(self):
+        L = 3
+        beta = 0.3
+        edges = qtn.edges_3d_square(L, L, L)
+        np.random.seed(666)
+        js = {
+            edge: np.random.normal()
+            for edge in edges
+        }
+        tn = qtn.TN_classical_partition_function_from_edges(
+            edges, beta=beta, j=lambda i, j: js[i, j],
+        )
+        x0 = tn.contract(all, output_inds=())
+        tn = qtn.HTN_classical_partition_function_from_edges(
+            edges, beta=beta, j=lambda i, j: js[i, j],
+        )
+        x1 = tn.contract(all, output_inds=())
+        tn = qtn.TN3D_classical_ising_partition_function(
+            L, L, L, beta=beta,  j=lambda i, j: js[i, j])
+        x2 = tn.contract(all, output_inds=())
+        tn = qtn.HTN3D_classical_ising_partition_function(
+            L, L, L, beta=beta,  j=lambda i, j: js[i, j])
+        x3 = tn.contract(all, output_inds=())
+        assert x0 == pytest.approx(x1)
+        assert x1 == pytest.approx(x2)
+        assert x2 == pytest.approx(x3)
 
     def test_tn_dimer_covering(self):
         edges = [(0, 1), (1, 2), (2, 3), (3, 0)]
