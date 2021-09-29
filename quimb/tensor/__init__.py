@@ -129,6 +129,11 @@ from .circuit_gen import (
 from .optimize import (
     TNOptimizer,
 )
+from .tensor_arbgeom_tebd import (
+    LocalHamGen,
+    TEBDGen,
+    SimpleUpdateGen,
+)
 from .tensor_2d import (
     gen_2d_bonds,
     TensorNetwork2D,
@@ -273,6 +278,9 @@ __all__ = (
     "circ_ansatz_1D_rand",
     "circ_qaoa",
     "TNOptimizer",
+    "LocalHamGen",
+    "TEBDGen",
+    "SimpleUpdateGen",
     "gen_2d_bonds",
     "TensorNetwork2D",
     "PEPS",
