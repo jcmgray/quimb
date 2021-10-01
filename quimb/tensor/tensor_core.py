@@ -8451,3 +8451,13 @@ class PTensor(Tensor):
         """Turn this PTensor into a normal Tensor.
         """
         return Tensor(self)
+
+
+class IsoTensor(Tensor):
+    """A ``Tensor`` subclass which keeps its ``left_inds`` by default even
+    when its data is changed.
+    """
+
+    def modify(self, **kwargs):
+        kwargs.setdefault("left_inds", self.left_inds)
+        super().modify(**kwargs)
