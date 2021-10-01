@@ -18,6 +18,7 @@ from ..gen.rand import randn, choice, random_seed_fn, rand_phase
 from .tensor_core import (Tensor, new_bond, TensorNetwork, rand_uuid,
                           tensor_direct_product)
 from .array_ops import asarray, sensibly_scale
+from .decomp import eigh
 from .tensor_arbgeom import TensorNetworkGen, TensorNetworkGenVector
 from .tensor_1d import MatrixProductState, MatrixProductOperator
 from .tensor_2d import gen_2d_bonds, TensorNetwork2D
@@ -840,21 +841,37 @@ def classical_ising_H_matrix(beta, h=0.0):
 
 
 @functools.lru_cache(128)
-def classical_ising_sqrtS_matrix(beta, j=1.0):
+def classical_ising_sqrtS_matrix(beta, j=1.0, asymm=None):
     """The sqrt factorized interaction term for the classical ising model.
+    If ``j`` is negative you can supply ``asymm='l'`` or ``'r'`` to
+    keep the matrix real, but it must be paired with the opposite in a tensor
+    network.
     """
-    S_1_2 = np.array(
-        [[math.cosh(j * beta)**0.5 + math.sinh(j * beta)**0.5,
-          math.cosh(j * beta)**0.5 - math.sinh(j * beta)**0.5],
-         [math.cosh(j * beta)**0.5 - math.sinh(j * beta)**0.5,
-          math.cosh(j * beta)**0.5 + math.sinh(j * beta)**0.5]]
-    ) / 2**0.5
+    if (j < 0.0) and (asymm is not None):
+        Slr = eigh(classical_ising_S_matrix(beta=beta, j=j))
+        S_1_2 = {
+            'l': Slr[0], 'lT': Slr[0].T,
+            'r': Slr[-1], 'rT': Slr[-1].T,
+        }[asymm]
+    else:
+        S_1_2 = np.array(
+            [[math.cosh(j * beta)**0.5 + math.sinh(j * beta)**0.5,
+              math.cosh(j * beta)**0.5 - math.sinh(j * beta)**0.5],
+             [math.cosh(j * beta)**0.5 - math.sinh(j * beta)**0.5,
+              math.cosh(j * beta)**0.5 + math.sinh(j * beta)**0.5]]
+        ) / 2**0.5
     make_immutable(S_1_2)
     return S_1_2
 
 
 @functools.lru_cache(128)
-def classical_ising_T_matrix(beta, j=1.0, h=0.0, directions='lrud'):
+def classical_ising_T_matrix(
+    beta,
+    j=1.0,
+    h=0.0,
+    directions='lrud',
+    asymm=None,
+):
     """The single effective TN site for the classical ising model.
     """
     try:
@@ -862,27 +879,21 @@ def classical_ising_T_matrix(beta, j=1.0, h=0.0, directions='lrud'):
     except TypeError:
         js = (j,) * len(directions)
 
+    try:
+        asymms = tuple(asymm)
+    except TypeError:
+        asymms = (asymm,) * len(directions)
+
     arrays = (
-        [classical_ising_sqrtS_matrix(beta, j=j) for j in js] +
+        [
+            classical_ising_sqrtS_matrix(beta=beta, j=j, asymm=a)
+            for j, a in zip(js, asymms)
+        ] +
         [classical_ising_H_matrix(beta, h)]
     )
     lhs = ",".join(f'i{x}' for x in directions)
     eq = lhs + ",i->" + directions
     return oe.contract(eq, *arrays)
-
-
-@functools.lru_cache(128)
-def classical_ising_T2d_matrix(beta, directions='lrud', j=1.0, h=0.0):
-    """The single effective TN site for the 2D classical ising model.
-    """
-    return classical_ising_T_matrix(beta, j, h, directions)
-
-
-@functools.lru_cache(128)
-def classical_ising_T3d_matrix(beta, directions='lrudab', j=1.0, h=0.0):
-    """The single effective TN site for the 3D classical ising model.
-    """
-    return classical_ising_T_matrix(beta, j, h, directions)
 
 
 def HTN2D_classical_ising_partition_function(
@@ -1111,30 +1122,27 @@ def TN2D_classical_ising_partition_function(
         directions = ""
         inds = []
         js = ()
+        asymms = ()
 
-        if nj > 0 or cyclic_y:
-            node_a, node_b = (ni, (nj - 1) % Ly), (ni, nj)
-            js += (j_factory(node_a, node_b),)
-            directions += 'l'
-            inds.append(bonds[node_a, node_b])
-        if nj < Ly - 1 or cyclic_y:
-            node_a, node_b = (ni, nj), (ni, (nj + 1) % Ly)
-            js += (j_factory(node_a, node_b),)
-            directions += 'r'
-            inds.append(bonds[node_a, node_b])
-        if ni < Lx - 1 or cyclic_x:
-            node_a, node_b = (ni, nj), ((ni + 1) % Lx, nj)
-            js += (j_factory(node_a, node_b),)
-            directions += 'u'
-            inds.append(bonds[node_a, node_b])
-        if ni > 0 or cyclic_x:
-            node_a, node_b = ((ni - 1) % Lx, nj), (ni, nj)
-            js += (j_factory(node_a, node_b),)
-            directions += 'd'
-            inds.append(bonds[node_a, node_b])
+        for inbounds, pair, direction in [
+            (nj > 0 or cyclic_y, ((ni, (nj - 1) % Ly), (ni, nj)), 'l'),
+            (nj < Ly - 1 or cyclic_y, ((ni, nj), (ni, (nj + 1) % Ly)), 'r'),
+            (ni < Lx - 1 or cyclic_x, ((ni, nj), ((ni + 1) % Lx, nj)), 'u'),
+            (ni > 0 or cyclic_x, (((ni - 1) % Lx, nj), (ni, nj)), 'd'),
+        ]:
+            if inbounds:
+                js += (j_factory(*pair),)
+                directions += direction
+                # this is logic for handling negative j without imag tensors
+                # i.e. add the left factor if the first instance of bond, right
+                # factor if second. If j > 0.0 this doesn't matter anyhow
+                asymms += ('l' if pair not in bonds else 'rT',)
+                inds.append(bonds[pair])
 
         ts.append(Tensor(
-            data=classical_ising_T2d_matrix(beta, directions, j=js, h=h),
+            data=classical_ising_T_matrix(
+                beta=beta, directions=directions, j=js, h=h, asymm=asymms,
+            ),
             inds=inds,
             tags=[site_tag_id.format(ni, nj),
                   row_tag_id.format(ni),
@@ -1213,40 +1221,35 @@ def TN3D_classical_ising_partition_function(
         directions = ""
         inds = []
         js = ()
+        asymms = ()
 
-        if nk > 0 or cyclic_z:
-            node_a, node_b = (ni, nj, (nk - 1) % Lz), (ni, nj, nk)
-            js += (j_factory(node_a, node_b),)
-            directions += 'b'
-            inds.append(bonds[node_a, node_b])
-        if nk < Lz - 1 or cyclic_z:
-            node_a, node_b = (ni, nj, nk), (ni, nj, (nk + 1) % Lz)
-            js += (j_factory(node_a, node_b),)
-            directions += 'a'
-            inds.append(bonds[node_a, node_b])
-        if nj > 0 or cyclic_y:
-            node_a, node_b = (ni, (nj - 1) % Ly, nk), (ni, nj, nk)
-            js += (j_factory(node_a, node_b),)
-            directions += 'l'
-            inds.append(bonds[node_a, node_b])
-        if nj < Ly - 1 or cyclic_y:
-            node_a, node_b = (ni, nj, nk), (ni, (nj + 1) % Ly, nk)
-            js += (j_factory(node_a, node_b),)
-            directions += 'r'
-            inds.append(bonds[node_a, node_b])
-        if ni < Lx - 1 or cyclic_x:
-            node_a, node_b = (ni, nj, nk), ((ni + 1) % Lx, nj, nk)
-            js += (j_factory(node_a, node_b),)
-            directions += 'u'
-            inds.append(bonds[node_a, node_b])
-        if ni > 0 or cyclic_x:
-            node_a, node_b = ((ni - 1) % Lx, nj, nk), (ni, nj, nk)
-            js += (j_factory(node_a, node_b),)
-            directions += 'd'
-            inds.append(bonds[node_a, node_b])
+        for inbounds, pair, direction in [
+            (nk > 0 or cyclic_z,
+             ((ni, nj, (nk - 1) % Lz), (ni, nj, nk)), 'b'),
+            (nk < Lz - 1 or cyclic_z,
+             ((ni, nj, nk), (ni, nj, (nk + 1) % Lz)), 'a'),
+            (nj > 0 or cyclic_y,
+             ((ni, (nj - 1) % Ly, nk), (ni, nj, nk)), 'l'),
+            (nj < Ly - 1 or cyclic_y,
+             ((ni, nj, nk), (ni, (nj + 1) % Ly, nk)), 'r'),
+            (ni < Lx - 1 or cyclic_x,
+             ((ni, nj, nk), ((ni + 1) % Lx, nj, nk)), 'u'),
+            (ni > 0 or cyclic_x,
+             (((ni - 1) % Lx, nj, nk), (ni, nj, nk)), 'd'),
+        ]:
+            if inbounds:
+                js += (j_factory(*pair),)
+                directions += direction
+                # this is logic for handling negative j without imag tensors
+                # i.e. add the left factor if the first instance of bond, right
+                # factor if second. If j > 0.0 this doesn't matter anyhow
+                asymms += ('l' if pair not in bonds else 'rT',)
+                inds.append(bonds[pair])
 
         ts.append(Tensor(
-            data=classical_ising_T3d_matrix(beta, directions, j=js, h=h),
+            data=classical_ising_T_matrix(
+                beta=beta, directions=directions, j=js, h=h, asymm=asymms,
+            ),
             inds=inds,
             tags=[
                 site_tag_id.format(ni, nj, nk),
@@ -1394,13 +1397,13 @@ def TN_classical_partition_function_from_edges(
         bond_ab = bond_ind_id.format(node_a, node_b)
 
         # left tensor factor
-        data = classical_ising_sqrtS_matrix(beta=beta, j=j_ab)
+        data = classical_ising_sqrtS_matrix(beta=beta, j=j_ab, asymm='l')
         inds = [f's{node_a}', bond_ab]
         tags = [site_tag_id.format(node_a)]
         ts.append(Tensor(data=data, inds=inds, tags=tags))
 
         # right tensor factor
-        data = classical_ising_sqrtS_matrix(beta=beta, j=j_ab)
+        data = classical_ising_sqrtS_matrix(beta=beta, j=j_ab, asymm='r')
         inds = [bond_ab, f's{node_b}']
         tags = [site_tag_id.format(node_b)]
         ts.append(Tensor(data=data, inds=inds, tags=tags))

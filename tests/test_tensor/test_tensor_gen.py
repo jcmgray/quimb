@@ -205,18 +205,20 @@ class TestGenericTN:
             for edge in edges
         }
         tn = qtn.TN_classical_partition_function_from_edges(
-            edges, beta=beta, j=lambda i, j: js[i, j],
-        )
+            edges, beta=beta, j=lambda i, j: js[i, j])
+        assert tn.dtype == 'float64'
         x0 = tn.contract(all, output_inds=())
         tn = qtn.HTN_classical_partition_function_from_edges(
-            edges, beta=beta, j=lambda i, j: js[i, j],
-        )
+            edges, beta=beta, j=lambda i, j: js[i, j])
+        assert tn.dtype == 'float64'
         x1 = tn.contract(all, output_inds=())
         tn = qtn.TN2D_classical_ising_partition_function(
             L, L, beta=beta,  j=lambda i, j: js[i, j])
+        assert tn.dtype == 'float64'
         x2 = tn.contract(all, output_inds=())
         tn = qtn.HTN2D_classical_ising_partition_function(
             L, L, beta=beta,  j=lambda i, j: js[i, j])
+        assert tn.dtype == 'float64'
         x3 = tn.contract(all, output_inds=())
         assert x0 == pytest.approx(x1)
         assert x1 == pytest.approx(x2)
@@ -232,18 +234,20 @@ class TestGenericTN:
             for edge in edges
         }
         tn = qtn.TN_classical_partition_function_from_edges(
-            edges, beta=beta, j=lambda i, j: js[i, j],
-        )
+            edges, beta=beta, j=lambda i, j: js[i, j])
+        assert tn.dtype == 'float64'
         x0 = tn.contract(all, output_inds=())
         tn = qtn.HTN_classical_partition_function_from_edges(
-            edges, beta=beta, j=lambda i, j: js[i, j],
-        )
+            edges, beta=beta, j=lambda i, j: js[i, j])
+        assert tn.dtype == 'float64'
         x1 = tn.contract(all, output_inds=())
         tn = qtn.TN3D_classical_ising_partition_function(
             L, L, L, beta=beta,  j=lambda i, j: js[i, j])
+        assert tn.dtype == 'float64'
         x2 = tn.contract(all, output_inds=())
         tn = qtn.HTN3D_classical_ising_partition_function(
             L, L, L, beta=beta,  j=lambda i, j: js[i, j])
+        assert tn.dtype == 'float64'
         x3 = tn.contract(all, output_inds=())
         assert x0 == pytest.approx(x1)
         assert x1 == pytest.approx(x2)
