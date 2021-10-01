@@ -3943,6 +3943,7 @@ class TensorNetwork(object):
         self,
         tids,
         max_distance=1,
+        fillin=False,
         reduce_outer=None,
         inwards=False,
         virtual=True,
@@ -3957,6 +3958,17 @@ class TensorNetwork(object):
         for s in span:
             local_tids.add(s[0])
             local_tids.add(s[1])
+
+        for _ in range(int(fillin)):
+            connectivity = frequencies(
+                tid_n
+                for tid in local_tids
+                for tid_n in self._get_neighbor_tids(tid)
+                if tid_n not in local_tids
+            )
+            for tid_n, cnt in connectivity.items():
+                if cnt >= 2:
+                    local_tids.add(tid_n)
 
         tn_sl = self._select_tids(local_tids, virtual=virtual)
 
@@ -3996,6 +4008,9 @@ class TensorNetwork(object):
                 # absorb the factor into the inner tensor then sum over it
                 tn_sl.tensor_map[tid_in].gate_(r, ix).sum_reduce_(ix)
 
+        elif reduce_outer == 'reflect':
+            tn_sl |= tn_sl.H
+
         return tn_sl
 
     def select_local(
@@ -4003,20 +4018,60 @@ class TensorNetwork(object):
         tags,
         which='all',
         max_distance=1,
+        fillin=False,
         reduce_outer=None,
-        inwards=False,
         virtual=True,
         include=None,
         exclude=None,
     ):
+        r"""Select a local region of tensors, based on graph distance
+        ``max_distance`` to any tagged tensors.
+
+        Parameters
+        ----------
+        tags : str or sequence of str
+            The tag or tag sequence defining the initial region.
+        which : {'all', 'any', '!all', '!any'}, optional
+            Whether to require matching all or any of the tags.
+        max_distance : int, optional
+            The maximum distance to the initial tagged region.
+        fillin : bool or int, optional
+            Once the local region has been selected based on graph distance,
+            whether and how many times to 'fill-in' corners by adding tensors
+            connected multiple times. For example, if ``R`` is an initially
+            tagged tensor and ``x`` are locally selected tensors::
+
+                  fillin=0       fillin=1       fillin=2
+
+                 | | | | |      | | | | |      | | | | |
+                -o-o-x-o-o-    -o-x-x-x-o-    -x-x-x-x-x-
+                 | | | | |      | | | | |      | | | | |
+                -o-x-x-x-o-    -x-x-x-x-x-    -x-x-x-x-x-
+                 | | | | |      | | | | |      | | | | |
+                -x-x-R-x-x-    -x-x-R-x-x-    -x-x-R-x-x-
+
+        reduce_outer : {'sum', 'svd', 'svd-sum', 'reflect'}, optional
+            Whether and how to reduce any outer indices of the selected region.
+        virtual : bool, optional
+            Whether the returned tensor network should be a view of the tensors
+            or a copy (``virtual=False``).
+        include : sequence of int, optional
+            Only include tensor with these ``tids``.
+        exclude : sequence of int, optional
+            Only include tensor without these ``tids``.
+
+        Returns
+        -------
+        TensorNetwork
+        """
         check_opt('reduce_outer', reduce_outer,
-                  (None, 'sum', 'svd', 'svd-sum'))
+                  (None, 'sum', 'svd', 'svd-sum', 'reflect'))
 
         return self._select_local_tids(
             tids=self._get_tids_from_tags(tags, which),
             max_distance=max_distance,
+            fillin=fillin,
             reduce_outer=reduce_outer,
-            inwards=inwards,
             virtual=virtual,
             include=include,
             exclude=exclude)
@@ -4776,8 +4831,8 @@ class TensorNetwork(object):
         select_local_opts = ensure_dict(select_local_opts)
         tn_loc_target = self._select_local_tids(
             (tid1, tid2),
-            max_distance=select_local_distance,
-            include=include, exclude=exclude, virtual=False)
+            max_distance=select_local_distance, virtual=False,
+            include=include, exclude=exclude, **select_local_opts)
 
         tn_loc_compress = tn_loc_target.copy()
         tn_loc_compress._compress_between_tids(
@@ -5167,6 +5222,7 @@ class TensorNetwork(object):
         --------
         draw_tree_span
         """
+        # current tensors in the tree -> we will grow this
         region = oset(tids)
 
         # check if we should only allow a certain set of nodes
@@ -5183,11 +5239,20 @@ class TensorNetwork(object):
                 exclude = oset(exclude)
             allowed -= exclude
 
+        # possible merges of neighbors into the region
         candidates = []
+
+        # actual merges we have performed, defining the tree
         merges = {}
+
+        # distance to the original region
         distances = {tid: 0 for tid in region}
+
+        # how many times (or weight) that neighbors are connected to the region
         connectivity = collections.defaultdict(lambda: 0)
 
+        # given equal connectivity compare neighbors based on
+        #      min/max distance and min/max ndim
         distance_coeff = {'min': -1, 'max': 1, 'none': 0}[distance_sort]
         ndim_coeff = {'min': -1, 'max': 1, 'none': 0}[ndim_sort]
 
@@ -5200,8 +5265,9 @@ class TensorNetwork(object):
 
             if tid_neighb not in distances:
                 # defines a new spanning tree edge
-                new_d = distances[tid_surface] + 1
                 merges[tid_neighb] = tid_surface
+                # graph distance to original region
+                new_d = distances[tid_surface] + 1
                 distances[tid_neighb] = new_d
                 if (max_distance is None) or (new_d <= max_distance):
                     candidates.append(tid_neighb)
@@ -5210,7 +5276,8 @@ class TensorNetwork(object):
             # nodes are
             if weight_bonds:
                 connectivity[tid_neighb] += math.log2(bonds_size(
-                    self.tensor_map[tid_surface], self.tensor_map[tid_neighb]))
+                    self.tensor_map[tid_surface], self.tensor_map[tid_neighb]
+                ))
             else:
                 connectivity[tid_neighb] += 1
 
@@ -5218,7 +5285,8 @@ class TensorNetwork(object):
             def _sorter(t):
                 # how to pick which tensor to absorb into the expanding surface
                 # here, choose the candidate that is most connected to current
-                # surface, breaking ties with how close it is to the region
+                # surface, breaking ties with how close it is to the original
+                # region, and how many dimensions it has
                 return (
                     connectivity[t],
                     ndim_coeff * self.tensor_map[t].ndim,
@@ -5234,9 +5302,10 @@ class TensorNetwork(object):
             for tid_next in self._get_neighbor_tids(tid_surface):
                 _check_candidate(tid_surface, tid_next)
 
-        # the sequence of tensors merges to canonize
+        # generate the sequence of tensor merges
         seq = []
         while candidates:
+            # choose the *highest* scoring candidate
             candidates.sort(key=_sorter)
             tid_surface = candidates.pop()
             region.add(tid_surface)
@@ -5244,8 +5313,9 @@ class TensorNetwork(object):
             if distances[tid_surface] > min_distance:
                 # checking distance allows the innermost merges to be ignored,
                 # for example, to contract an environment around a region
-                seq.append((tid_surface, merges[tid_surface],
-                            distances[tid_surface]))
+                seq.append(
+                    (tid_surface, merges[tid_surface], distances[tid_surface])
+                )
 
             # check all the neighbors of the tensor we've just expanded to
             for tid_next in self._get_neighbor_tids(tid_surface):
