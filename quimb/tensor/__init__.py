@@ -130,6 +130,9 @@ from .circuit_gen import (
 from .optimize import (
     TNOptimizer,
 )
+from .tensor_arbgeom import (
+    tensor_network_align,
+)
 from .tensor_arbgeom_tebd import (
     LocalHamGen,
     TEBDGen,
@@ -280,6 +283,7 @@ __all__ = (
     "circ_ansatz_1D_rand",
     "circ_qaoa",
     "TNOptimizer",
+    "tensor_network_align",
     "LocalHamGen",
     "TEBDGen",
     "SimpleUpdateGen",

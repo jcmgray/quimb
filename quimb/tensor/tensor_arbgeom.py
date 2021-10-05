@@ -5,7 +5,7 @@ from autoray import do, dag
 
 from ..utils import check_opt, ensure_dict
 from ..utils import progbar as Progbar
-from .tensor_core import TensorNetwork
+from .tensor_core import TensorNetwork, get_symbol
 
 
 class TensorNetworkGen(TensorNetwork):
@@ -900,3 +900,69 @@ def _tn_local_expectation_exact(tn, *args, **kwargs):
     """Define as function for pickleability.
     """
     return tn.local_expectation_exact(*args, **kwargs)
+
+
+def tensor_network_align(*tns, ind_ids=None, inplace=False):
+    r"""Align an arbitrary number of tensor networks in a stack-like geometry::
+
+        a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a
+        | | | | | | | | | | | | | | | | | | <- ind_ids[0] (defaults to 1st id)
+        b-b-b-b-b-b-b-b-b-b-b-b-b-b-b-b-b-b
+        | | | | | | | | | | | | | | | | | | <- ind_ids[1]
+                       ...
+        | | | | | | | | | | | | | | | | | | <- ind_ids[-2]
+        y-y-y-y-y-y-y-y-y-y-y-y-y-y-y-y-y-y
+        | | | | | | | | | | | | | | | | | | <- ind_ids[-1]
+        z-z-z-z-z-z-z-z-z-z-z-z-z-z-z-z-z-z
+
+    Parameters
+    ----------
+    tns : sequence of TensorNetwork
+        The TNs to align, should be structured and either effective 'vectors'
+        (have a ``site_ind_id``) or 'operators' (have a ``up_ind_id`` and
+        ``lower_ind_id``).
+    ind_ids : None, or sequence of str
+        String with format specifiers to id each level of sites with. Will be
+        automatically generated like ``(tns[0].site_ind_id, "__ind_a{}__",
+        "__ind_b{}__", ...)`` if not given.
+    inplace : bool
+        Whether to modify the input tensor networks inplace.
+
+    Returns
+    -------
+    tns_aligned : sequence of TensorNetwork
+    """
+    if not inplace:
+        tns = [tn.copy() for tn in tns]
+
+    n = len(tns)
+
+    if ind_ids is None:
+        if hasattr(tns[0], "site_ind_id"):
+            ind_ids = [tns[0].site_ind_id]
+        else:
+            ind_ids = [tns[0].lower_ind_id]
+        ind_ids.extend(f"__ind_{get_symbol(i)}{{}}__" for i in range(n - 2))
+    else:
+        ind_ids = tuple(ind_ids)
+
+    for i, tn in enumerate(tns):
+        if hasattr(tn, "site_ind_id"):
+            if i == 0:
+                tn.site_ind_id = ind_ids[i]
+            elif i == n - 1:
+                tn.site_ind_id = ind_ids[i - 1]
+            else:
+                raise ValueError("An TN 'vector' can only be aligned as the "
+                                 "first or last TN in a sequence.")
+
+        elif hasattr(tn, "upper_ind_id") and hasattr(tn, "lower_ind_id"):
+            if i != 0:
+                tn.upper_ind_id = ind_ids[i - 1]
+            if i != n - 1:
+                tn.lower_ind_id = ind_ids[i]
+
+        else:
+            raise ValueError("Can only align vectors and operators currently.")
+
+    return tns

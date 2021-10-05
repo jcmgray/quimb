@@ -31,7 +31,7 @@ def rand_tn1d_sect(n, bd, dtype=complex):
     mps = qtn.MPS_rand_state(n + 2, bd, dtype=dtype)
     mpo = qtn.MPO_rand_herm(n + 2, 5, dtype=dtype)
 
-    norm = qtn.TensorNetwork(qtn.align_TN_1D(mps.H, mpo, mps))
+    norm = qtn.TensorNetwork(qtn.tensor_network_align(mps.H, mpo, mps))
     norm.view_as_(qtn.TensorNetwork1D, like=mps)
 
     lix = qtn.bonds(norm[0], norm[1])

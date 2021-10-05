@@ -10,7 +10,9 @@ from numbers import Integral
 import scipy.sparse.linalg as spla
 from autoray import do, dag, reshape, conj, get_dtype_name, transpose
 
-from ..utils import check_opt, print_multi_line, ensure_dict, partition_all
+from ..utils import (
+    check_opt, print_multi_line, ensure_dict, partition_all, deprecated
+)
 import quimb as qu
 from .tensor_core import (
     Tensor,
@@ -24,67 +26,13 @@ from .tensor_core import (
     get_tags,
     PTensor,
 )
+from .tensor_arbgeom import tensor_network_align
 from ..linalg.base_linalg import norm_trace_dense
 from . import array_ops as ops
 
 
-def align_TN_1D(*tns, ind_ids=None, inplace=False):
-    r"""Align an arbitrary number of 1D tensor networks in a stack-like
-    geometry::
-
-        a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a
-        | | | | | | | | | | | | | | | | | | <- ind_ids[0] (defaults to 1st id)
-        b-b-b-b-b-b-b-b-b-b-b-b-b-b-b-b-b-b
-        | | | | | | | | | | | | | | | | | | <- ind_ids[1]
-                       ...
-        | | | | | | | | | | | | | | | | | | <- ind_ids[-2]
-        y-y-y-y-y-y-y-y-y-y-y-y-y-y-y-y-y-y
-        | | | | | | | | | | | | | | | | | | <- ind_ids[-1]
-        z-z-z-z-z-z-z-z-z-z-z-z-z-z-z-z-z-z
-
-    Parameters
-    ----------
-    tns : sequence of TensorNetwork1D
-        The 1D TNs to align.
-    ind_ids : None, or sequence of str
-        String with format specifiers to id each level of sites with. Will be
-        automatically generated like ``(tns[0].site_ind_id, "__ind_a{}__",
-        "__ind_b{}__", ...)`` if not given.
-    """
-    if not inplace:
-        tns = [tn.copy() for tn in tns]
-
-    n = len(tns)
-
-    if ind_ids is None:
-        if isinstance(tns[0], TensorNetwork1DVector):
-            ind_ids = [tns[0].site_ind_id]
-        else:
-            ind_ids = [tns[0].lower_ind_id]
-        ind_ids.extend(f"__ind_{get_symbol(i)}{{}}__" for i in range(n - 2))
-    else:
-        ind_ids = tuple(ind_ids)
-
-    for i, tn in enumerate(tns):
-        if isinstance(tn, TensorNetwork1DVector):
-            if i == 0:
-                tn.site_ind_id = ind_ids[i]
-            elif i == n - 1:
-                tn.site_ind_id = ind_ids[i - 1]
-            else:
-                raise ValueError("An 1D TN vector can only be aligned as the "
-                                 "first or last TN in a sequence.")
-
-        elif isinstance(tn, MatrixProductOperator):
-            if i != 0:
-                tn.upper_ind_id = ind_ids[i - 1]
-            if i != n - 1:
-                tn.lower_ind_id = ind_ids[i]
-
-        else:
-            raise ValueError("Can only align MPS and MPOs currently.")
-
-    return tns
+align_TN_1D = deprecated(
+    tensor_network_align, 'align_TN_1D', 'tensor_network_align')
 
 
 def expec_TN_1D(*tns, compress=None, eps=1e-15):
@@ -107,7 +55,7 @@ def expec_TN_1D(*tns, compress=None, eps=1e-15):
     x : float
         The expectation value.
     """
-    expec_tn = functools.reduce(operator.or_, align_TN_1D(*tns))
+    expec_tn = functools.reduce(operator.or_, tensor_network_align(*tns))
 
     # if OBC or <= 0.0 specified use exact contraction
     cyclic = any(tn.cyclic for tn in tns)
@@ -615,9 +563,9 @@ class TensorNetwork1D(TensorNetwork):
     def sites(self):
         return tuple(self.gen_site_coos())
 
-    @functools.wraps(align_TN_1D)
+    @functools.wraps(tensor_network_align)
     def align(self, *args, inplace=False, **kwargs):
-        return align_TN_1D(self, *args, inplace=inplace, **kwargs)
+        return tensor_network_align(self, *args, inplace=inplace, **kwargs)
 
     align_ = functools.partialmethod(align, inplace=True)
 
