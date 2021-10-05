@@ -1,10 +1,11 @@
 import functools
 from numbers import Integral
-from itertools import product, starmap
+from itertools import product, starmap, cycle
 from collections import defaultdict
 
 from autoray import do
 
+from ..utils import check_opt, ensure_dict
 from ..gen.rand import randn, seed_rand
 from . import array_ops as ops
 from .tensor_core import (
@@ -73,6 +74,160 @@ def gen_3d_bonds(Lx, Ly, Lz, steppers, coo_filter=None):
                 i2, j2, k2 = stepper(i, j, k)
                 if (0 <= i2 < Lx) and (0 <= j2 < Ly) and (0 <= k2 < Lz):
                     yield (i, j, k), (i2, j2, k2)
+
+
+class Rotator3D:
+    """Object for rotating coordinates and various contraction functions so
+    that the core algorithms only have to written once, but nor does the actual
+    TN have to be modified.
+    """
+
+    def __init__(self, tn, xrange, yrange, zrange, from_which):
+        check_opt('from_which', from_which,
+                  {'xmin', 'xmax', 'ymin', 'ymax', 'zmin', 'zmax'})
+
+        if xrange is None:
+            xrange = (0, tn.Lx - 1)
+        if yrange is None:
+            yrange = (0, tn.Ly - 1)
+        if zrange is None:
+            zrange = (0, tn.Lz - 1)
+
+        self.xrange = xrange
+        self.yrange = yrange
+        self.zrange = zrange
+        self.from_which = from_which
+        self.plane = from_which[0]
+
+        if self.plane == 'x':
+            # -> no rotation needed
+            self.imin, self.imax = sorted(xrange)
+            self.jmin, self.jmax = sorted(yrange)
+            self.kmin, self.kmax = sorted(zrange)
+            self.x_tag = tn.x_tag
+            self.y_tag = tn.y_tag
+            self.z_tag = tn.z_tag
+            self.site_tag = tn.site_tag
+
+        elif self.plane == 'y':
+            # -> (y, z, x)
+            self.imin, self.imax = sorted(yrange)
+            self.jmin, self.jmax = sorted(zrange)
+            self.kmin, self.kmax = sorted(xrange)
+            self.x_tag = tn.y_tag
+            self.y_tag = tn.z_tag
+            self.z_tag = tn.x_tag
+            self.site_tag = lambda i, j, k: tn.site_tag(k, i, j)
+
+        else:  # self.plane == 'z'
+            # -> (z, x, y)
+            self.imin, self.imax = sorted(zrange)
+            self.jmin, self.jmax = sorted(xrange)
+            self.kmin, self.kmax = sorted(yrange)
+            self.x_tag = tn.z_tag
+            self.y_tag = tn.x_tag
+            self.z_tag = tn.y_tag
+            self.site_tag = lambda i, j, k: tn.site_tag(j, k, i)
+
+        if 'min' in from_which:
+            # -> sweeps are increasing
+            self.sweep = range(self.imin, self.imax + 1, + 1)
+            self.istep = +1
+        else:  # 'max'
+            # -> sweeps are decreasing
+            self.sweep = range(self.imax, self.imin - 1, -1)
+            self.istep = -1
+
+
+# reference for viewing a cube from each direction
+#
+#      ┌──┐        ┌──┐        ┌──┐        ┌──┐        ┌──┐        ┌──┐
+#      │y+│        │z+│        │x-│        │y-│        │z-│        │x+│
+#   ┌──┼──┼──┐  ┌──┼──┼──┐  ┌──┼──┼──┐  ┌──┼──┼──┐  ┌──┼──┼──┐  ┌──┼──┼──┐
+#   │z-│x-│z+│  │x-│y-│x+│  │y+│z-│y-│  │z-│x+│z+│  │x-│y+│x+│  │y+│z+│y-│
+#   └──┼──┼──┘, └──┼──┼──┘, └──┼──┼──┘, └──┼──┼──┘, └──┼──┼──┘, └──┼──┼──┘
+#      │y-│        │z-│        │x+│        │y+│        │z+│        │x-│
+#      └──┘        └──┘        └──┘        └──┘        └──┘        └──┘
+
+
+_canonize_plane_opts = {
+    'xmin': {
+        'yreverse': False,
+        'zreverse': False,
+        'coordinate_order': 'yz',
+        'stepping_order': 'zy',
+    },
+    'ymin': {
+        'zreverse': False,
+        'xreverse': True,
+        'coordinate_order': 'zx',
+        'stepping_order': 'xz',
+    },
+    'zmin': {
+        'xreverse': True,
+        'yreverse': True,
+        'coordinate_order': 'xy',
+        'stepping_order': 'yx',
+    },
+    'xmax': {
+        'yreverse': True,
+        'zreverse': True,
+        'coordinate_order': 'yz',
+        'stepping_order': 'zy',
+    },
+    'ymax': {
+        'zreverse': True,
+        'xreverse': False,
+        'coordinate_order': 'zx',
+        'stepping_order': 'xz',
+    },
+    'zmax': {
+        'xreverse': False,
+        'yreverse': False,
+        'coordinate_order': 'xy',
+        'stepping_order': 'yx',
+    },
+}
+
+
+_compress_plane_opts = {
+    'xmin': {
+        'yreverse': True,
+        'zreverse': True,
+        'coordinate_order': 'yz',
+        'stepping_order': 'zy',
+    },
+    'ymin': {
+        'zreverse': True,
+        'xreverse': False,
+        'coordinate_order': 'zx',
+        'stepping_order': 'xz',
+    },
+    'zmin': {
+        'xreverse': False,
+        'yreverse': False,
+        'coordinate_order': 'xy',
+        'stepping_order': 'yx',
+    },
+    'xmax': {
+        'yreverse': False,
+        'zreverse': False,
+        'coordinate_order': 'yz',
+        'stepping_order': 'zy',
+    },
+    'ymax': {
+        'zreverse': False,
+        'xreverse': True,
+        'coordinate_order': 'zx',
+        'stepping_order': 'xz',
+    },
+    'zmax': {
+        'xreverse': True,
+        'yreverse': True,
+        'coordinate_order': 'xy',
+        'stepping_order': 'yx',
+    },
+}
 
 
 class TensorNetwork3D(TensorNetwork):
@@ -240,6 +395,29 @@ class TensorNetwork3D(TensorNetwork):
             lambda i, j, k: (i, j, k + 1),
         ])
 
+    def valid_coo(self, coo, xrange=None, yrange=None, zrange=None):
+        """Check whether ``coo`` is in-bounds.
+
+        Parameters
+        ----------
+        coo : (int, int, int), optional
+            The coordinates to check.
+        xrange, yrange, zrange : (int, int), optional
+            The range of allowed values for the x, y, and z coordinates.
+
+        Returns
+        -------
+        bool
+        """
+        if xrange is None:
+            xrange = (0, self.Lx - 1)
+        if yrange is None:
+            yrange = (0, self.Ly - 1)
+        if zrange is None:
+            zrange = (0, self.Lz - 1)
+        return all(mn <= u <= mx for u, (mn, mx) in
+                   zip(coo, (xrange, yrange, zrange)))
+
     def __getitem__(self, key):
         """Key based tensor selection, checking for integer based shortcut.
         """
@@ -277,6 +455,333 @@ class TensorNetwork3D(TensorNetwork):
         return tn.view_as_(TensorNetwork3DFlat, like=self)
 
     flatten_ = functools.partialmethod(flatten, inplace=True)
+
+    def gen_pairs(
+        self,
+        xrange=None,
+        yrange=None,
+        zrange=None,
+        xreverse=False,
+        yreverse=False,
+        zreverse=False,
+        coordinate_order='xyz',
+        xstep=None,
+        ystep=None,
+        zstep=None,
+        stepping_order='xyz',
+        step_only=None,
+    ):
+        """Helper function for generating pairs of cooordinates for all bonds
+        within a certain range, optionally specifying an order.
+
+        Parameters
+        ----------
+        xrange, yrange, zrange : (int, int), optional
+            The range of allowed values for the x, y, and z coordinates.
+        xreverse, yreverse, zreverse : bool, optional
+            Whether to reverse the order of the x, y, and z sweeps.
+        coordinate_order : str, optional
+            The order in which to sweep the x, y, and z coordinates. Earlier
+            dimensions will change slower. If the corresponding range has
+            size 1 then that dimension doesn't need to be specified.
+        xstep, ystep, zstep : int, optional
+            When generating a bond, step in this direction to yield the
+            neighboring coordinate. By default, these follow ``xreverse``,
+            ``yreverse``, and ``zreverse`` respectively.
+        stepping_order : str, optional
+            The order in which to step the x, y, and z coordinates to generate
+            bonds. Does not need to include all dimensions.
+        step_only : int, optional
+            Only perform the ith steps in ``stepping_order``, used to
+            interleave canonizing and compressing for example.
+
+        Yields
+        ------
+        coo_a, coo_b : ((int, int, int), (int, int, int))
+        """
+        if xrange is None:
+            xrange = (0, self.Lx - 1)
+        if yrange is None:
+            yrange = (0, self.Ly - 1)
+        if zrange is None:
+            zrange = (0, self.Lz - 1)
+
+        # generate the sites and order we will visit them in
+        sweeps = {
+            'x': (
+                range(min(xrange), max(xrange) + 1, +1) if not xreverse else
+                range(max(xrange), min(xrange) - 1, -1)
+            ),
+            'y': (
+                range(min(yrange), max(yrange) + 1, +1) if not yreverse else
+                range(max(yrange), min(yrange) - 1, -1)
+            ),
+            'z': (
+                range(min(zrange), max(zrange) + 1, +1) if not zreverse else
+                range(max(zrange), min(zrange) - 1, -1)
+            ),
+        }
+
+        # for convenience, allow subselecting part of stepping_order only
+        if step_only is not None:
+            stepping_order = stepping_order[step_only]
+
+        # stepping_order = stepping_order[::-1]
+
+        # at each step generate the bonds
+        if xstep is None:
+            xstep = -1 if xreverse else +1
+        if ystep is None:
+            ystep = -1 if yreverse else +1
+        if zstep is None:
+            zstep = -1 if zreverse else +1
+        steps = {
+            'x': lambda i, j, k: (i + xstep, j, k),
+            'y': lambda i, j, k: (i, j + ystep, k),
+            'z': lambda i, j, k: (i, j, k + zstep),
+        }
+
+        # make sure all coordinates exist - only allow them not to be specified
+        # if their range is a unit slice
+        for w in 'xyz':
+            if w not in coordinate_order:
+                if len(sweeps[w]) > 1:
+                    raise ValueError(
+                        f'{w} not in coordinate_order and is not size 1.')
+                else:
+                    # just append -> it won't change order as coord is constant
+                    coordinate_order += w
+        xi, yi, zi = map(coordinate_order.index, 'xyz')
+
+        # generate the pairs
+        for perm_coo_a in product(*(sweeps[xyz] for xyz in coordinate_order)):
+            coo_a = perm_coo_a[xi], perm_coo_a[yi], perm_coo_a[zi]
+            for xyz in stepping_order:
+                coo_b = steps[xyz](*coo_a)
+                # filter out bonds with are out of bounds
+                if self.valid_coo(coo_b, xrange, yrange, zrange):
+                    yield coo_a, coo_b
+
+    def canonize_plane(
+        self,
+        xrange,
+        yrange,
+        zrange,
+        equalize_norms=False,
+        canonize_opts=None,
+        **gen_pair_opts
+    ):
+        """Canonize every pair of tensors within a subrange, optionally
+        specifying a order to visit those pairs in.
+        """
+        canonize_opts = ensure_dict(canonize_opts)
+        canonize_opts.setdefault('equalize_norms', equalize_norms)
+
+        pairs = self.gen_pairs(
+            xrange=xrange, yrange=yrange, zrange=zrange, **gen_pair_opts,
+        )
+
+        for coo_a, coo_b in pairs:
+            self.canonize_between(coo_a, coo_b, **canonize_opts)
+
+    def compress_plane(
+        self,
+        xrange,
+        yrange,
+        zrange,
+        max_bond=None,
+        cutoff=1e-10,
+        equalize_norms=False,
+        compress_opts=None,
+        **gen_pair_opts
+    ):
+        """Compress every pair of tensors within a subrange, optionally
+        specifying a order to visit those pairs in.
+        """
+        compress_opts = ensure_dict(compress_opts)
+        compress_opts.setdefault('absorb', 'both')
+        compress_opts.setdefault('equalize_norms', equalize_norms)
+
+        pairs = list(self.gen_pairs(
+            xrange=xrange, yrange=yrange, zrange=zrange, **gen_pair_opts,
+        ))
+
+        for coo_a, coo_b in pairs:
+            self.compress_between(coo_a, coo_b, max_bond=max_bond,
+                                  cutoff=cutoff, **compress_opts)
+
+    def _contract_boundary_single(
+        self,
+        xrange,
+        yrange,
+        zrange,
+        from_which,
+        max_bond,
+        cutoff=1e-10,
+        canonize=True,
+        canonize_interleave=True,
+        layer_tag=None,
+        equalize_norms=False,
+        compress_opts=None,
+        canonize_opts=None,
+    ):
+        canonize_opts = ensure_dict(canonize_opts)
+        canonize_opts.setdefault('absorb', 'right')
+        compress_opts = ensure_dict(compress_opts)
+        compress_opts.setdefault('absorb', 'both')
+
+        r3d = Rotator3D(self, xrange, yrange, zrange, from_which)
+        site_tag = r3d.site_tag
+        plane, istep = r3d.plane, r3d.istep
+        jmin, jmax = r3d.jmin, r3d.jmax
+        kmin, kmax = r3d.kmin, r3d.kmax
+
+        if canonize_interleave:
+            # interleave canonizing and compressing in each direction
+            step_onlys = [0, 1]
+        else:
+            # perform whole sweep of canonizing before compressing
+            step_onlys = [None]
+
+        for i in r3d.sweep[:-1]:
+            for j in range(jmin, jmax + 1):
+                for k in range(kmin, kmax + 1):
+                    tag1, tag2 = site_tag(i, j, k), site_tag(i + istep, j, k)
+
+                    if layer_tag is None:
+                        # contract *any* tensors with pair of coordinates
+                        self.contract_((tag1, tag2), which='any')
+                    else:
+                        # contract specific pair (i.e. only one 'inner' layer)
+                        self.contract_between(tag1, (tag2, layer_tag))
+
+            for step_only in step_onlys:
+                if canonize:
+                    self.canonize_plane(
+                        xrange=xrange if plane != 'x' else (i, i),
+                        yrange=yrange if plane != 'y' else (i, i),
+                        zrange=zrange if plane != 'z' else (i, i),
+                        equalize_norms=equalize_norms,
+                        canonize_opts=canonize_opts,
+                        step_only=step_only,
+                        **_canonize_plane_opts[from_which]
+                    )
+                self.compress_plane(
+                    xrange=xrange if plane != 'x' else (i, i),
+                    yrange=yrange if plane != 'y' else (i, i),
+                    zrange=zrange if plane != 'z' else (i, i),
+                    max_bond=max_bond, cutoff=cutoff,
+                    equalize_norms=equalize_norms,
+                    compress_opts=compress_opts,
+                    step_only=step_only,
+                    **_compress_plane_opts[from_which]
+                )
+
+    def contract_boundary(
+        self,
+        max_bond=None,
+        *,
+        cutoff=1e-10,
+        canonize=True,
+        max_separation=1,
+        sequence=None,
+        xmin=None,
+        xmax=None,
+        ymin=None,
+        ymax=None,
+        zmin=None,
+        zmax=None,
+        optimize='auto-hq',
+        equalize_norms=False,
+        compress_opts=None,
+        inplace=False,
+        **contract_boundary_opts,
+    ):
+        """
+        """
+        tn = self if inplace else self.copy()
+
+        contract_boundary_opts['max_bond'] = max_bond
+        # contract_boundary_opts['mode'] = mode
+        contract_boundary_opts['cutoff'] = cutoff
+        contract_boundary_opts['canonize'] = canonize
+        # contract_boundary_opts['layer_tags'] = layer_tags
+        contract_boundary_opts['compress_opts'] = compress_opts
+        contract_boundary_opts['equalize_norms'] = equalize_norms
+
+        # set default starting borders
+        if xmin is None:
+            xmin = 0
+        if xmax is None:
+            xmax = tn.Lx - 1
+        if ymin is None:
+            ymin = 0
+        if ymax is None:
+            ymax = tn.Ly - 1
+        if zmin is None:
+            zmin = 0
+        if zmax is None:
+            zmax = tn.Lz - 1
+
+        if sequence is None:
+            sequence = ['xmin', 'xmax', 'ymin', 'ymax', 'zmin', 'zmax']
+
+        finished = {'x': abs(xmax - xmin) <= max_separation,
+                    'y': abs(ymax - ymin) <= max_separation,
+                    'z': abs(zmax - zmin) <= max_separation}
+
+        for direction in cycle(sequence):
+
+            if sum(finished.values()) >= 2:
+                # have reached 'tube' we should contract exactly
+
+                if equalize_norms:
+                    tn.equalize_norms_()
+
+                return tn.contract(..., optimize=optimize)
+
+            xyz, minmax = direction[0], direction[1:]
+            if finished[xyz]:
+                # we have already finished this direction
+                continue
+
+            # prepare the sub-cube we will contract and compress
+            if xyz == 'x':
+                if minmax == 'min':
+                    xrange = (xmin, xmin + 1)
+                    xmin += 1
+                elif minmax == 'max':
+                    xrange = (xmax - 1, xmax)
+                    xmax -= 1
+                finished['x'] = abs(xmax - xmin) <= max_separation
+            else:
+                xrange = (xmin, xmax)
+
+            if xyz == 'y':
+                if minmax == 'min':
+                    yrange = (ymin, ymin + 1)
+                    ymin += 1
+                elif minmax == 'max':
+                    yrange = (ymax - 1, ymax)
+                    ymax -= 1
+                finished['y'] = abs(ymax - ymin) <= max_separation
+            else:
+                yrange = (ymin, ymax)
+
+            if xyz == 'z':
+                if minmax == 'min':
+                    zrange = (zmin, zmin + 1)
+                    zmin += 1
+                elif minmax == 'max':
+                    zrange = (zmax - 1, zmax)
+                    zmax -= 1
+                finished['z'] = abs(zmax - zmin) <= max_separation
+            else:
+                zrange = (zmin, zmax)
+
+            tn._contract_boundary_single(
+                xrange=xrange, yrange=yrange, zrange=zrange,
+                from_which=direction, **contract_boundary_opts)
 
 
 def is_lone_coo(where):
