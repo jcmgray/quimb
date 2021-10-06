@@ -867,11 +867,16 @@ def _compute_expecs_maybe_in_parallel(
     if not isinstance(terms, dict):
         terms = dict(terms.items())
 
-    argss = ((tn, G, where) for where, G in terms.items())
     if executor is None:
-        results = (fn(*args, **kwargs) for args in argss)
+        results = (fn(tn, G, where, **kwargs) for where, G in terms.items())
     else:
-        futures = [executor.submit(fn, *args, **kwargs) for args in argss]
+        if hasattr(executor, 'scatter'):
+            tn = executor.scatter(tn)
+
+        futures = [
+            executor.submit(fn, tn, G, where, **kwargs)
+            for where, G in terms.items()
+        ]
         results = (future.result() for future in futures)
 
     if progbar:

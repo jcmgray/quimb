@@ -2915,7 +2915,7 @@ class MatrixProductOperator(TensorNetwork1DOperator,
             cyclic=self.cyclic,
         )
 
-        AB.fuse_multibonds(inplace=True)
+        AB.fuse_multibonds_()
 
         # optionally compress
         if compress:
