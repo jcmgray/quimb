@@ -17,7 +17,6 @@ import quimb as qu
 from .tensor_core import (
     Tensor,
     TensorNetwork,
-    get_symbol,
     rand_uuid,
     bonds,
     bonds_size,
@@ -26,7 +25,7 @@ from .tensor_core import (
     get_tags,
     PTensor,
 )
-from .tensor_arbgeom import tensor_network_align
+from .tensor_arbgeom import tensor_network_align, tensor_network_apply_op_vec
 from ..linalg.base_linalg import norm_trace_dense
 from . import array_ops as ops
 
@@ -414,6 +413,7 @@ class TensorNetwork1D(TensorNetwork):
     """Base class for tensor networks with a one-dimensional structure.
     """
 
+    _NDIMS = 1
     _EXTRA_PROPS = ('_site_tag_id', '_L')
     _CONTRACT_STRUCTURED = True
 
@@ -788,7 +788,8 @@ class TensorNetwork1DOperator(TensorNetwork1D,
         Parameters
         ----------
         new_id : str
-            A string with a format placeholder to accept an int, e.g. "ket{}".
+            A string with a format placeholder to accept an int, e.g.
+            ``"ket{}"``.
         where : None or slice
             Which sites to update the index labels on. If ``None`` (default)
             all sites.
@@ -804,6 +805,9 @@ class TensorNetwork1DOperator(TensorNetwork1D,
 
         return self.reindex({self.lower_ind(i): new_id.format(i)
                              for i in range(start, stop)}, inplace=inplace)
+
+    reindex_lower_sites_ = functools.partialmethod(
+        reindex_lower_sites, inplace=True)
 
     def reindex_upper_sites(self, new_id, where=None, inplace=False):
         """Update the upper site index labels to a new string specifier.
@@ -828,6 +832,9 @@ class TensorNetwork1DOperator(TensorNetwork1D,
         return self.reindex({self.upper_ind(i): new_id.format(i)
                              for i in range(start, stop)}, inplace=inplace)
 
+    reindex_upper_sites_ = functools.partialmethod(
+        reindex_upper_sites, inplace=True)
+
     def _get_lower_ind_id(self):
         return self._lower_ind_id
 
@@ -837,12 +844,12 @@ class TensorNetwork1DOperator(TensorNetwork1D,
                              " make the two ambiguous.")
 
         if self._lower_ind_id != new_id:
-            self.reindex_lower_sites(new_id, inplace=True)
+            self.reindex_lower_sites_(new_id)
             self._lower_ind_id = new_id
 
-    lower_ind_id = property(_get_lower_ind_id, _set_lower_ind_id,
-                            doc="The string specifier for the lower phyiscal "
-                            "indices")
+    lower_ind_id = property(
+        _get_lower_ind_id, _set_lower_ind_id,
+        doc="The string specifier for the lower phyiscal indices")
 
     def lower_ind(self, i):
         """The name of the lower ('ket') index at site ``i``.
@@ -864,7 +871,7 @@ class TensorNetwork1DOperator(TensorNetwork1D,
                              " make the two ambiguous.")
 
         if self._upper_ind_id != new_id:
-            self.reindex_upper_sites(new_id, inplace=True)
+            self.reindex_upper_sites_(new_id)
             self._upper_ind_id = new_id
 
     upper_ind_id = property(_get_upper_ind_id, _set_upper_ind_id,
@@ -2885,26 +2892,7 @@ class MatrixProductOperator(TensorNetwork1DOperator,
 
     add_MPO_ = functools.partialmethod(add_MPO, inplace=True)
 
-    def _apply_mps(self, other, compress=True, **compress_opts):
-        A, x = self.copy(), other.copy()
-
-        # align the indices
-        A.lower_ind_id = "__tmp{}__"
-        A.upper_ind_id = x.site_ind_id
-        x.reindex_sites_("__tmp{}__")
-
-        # form total network and contract each site
-        x |= A
-        for i in range(x.L):
-            x ^= x.site_tag(i)
-
-        x.fuse_multibonds(inplace=True)
-
-        # optionally compress
-        if compress:
-            x.compress(**compress_opts)
-
-        return x
+    _apply_mps = tensor_network_apply_op_vec
 
     def _apply_mpo(self, other, compress=False, **compress_opts):
         A, B = self.copy(), other.copy()

@@ -132,6 +132,7 @@ from .optimize import (
 )
 from .tensor_arbgeom import (
     tensor_network_align,
+    tensor_network_apply_op_vec,
 )
 from .tensor_arbgeom_tebd import (
     LocalHamGen,
@@ -284,6 +285,7 @@ __all__ = (
     "circ_qaoa",
     "TNOptimizer",
     "tensor_network_align",
+    "tensor_network_apply_op_vec",
     "LocalHamGen",
     "TEBDGen",
     "SimpleUpdateGen",

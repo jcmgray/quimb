@@ -14,6 +14,7 @@ class TensorNetworkGen(TensorNetwork):
     arbitrary geometry by bonds.
     """
 
+    _NDIMS = 1
     _EXTRA_PROPS = (
         "_sites",
         "_site_tag_id",
@@ -902,6 +903,10 @@ def _tn_local_expectation_exact(tn, *args, **kwargs):
     return tn.local_expectation_exact(*args, **kwargs)
 
 
+def get_coordinate_formatter(ndims):
+    return ",".join("{}" for _ in range(ndims))
+
+
 def tensor_network_align(*tns, ind_ids=None, inplace=False):
     r"""Align an arbitrary number of tensor networks in a stack-like geometry::
 
@@ -936,13 +941,17 @@ def tensor_network_align(*tns, ind_ids=None, inplace=False):
         tns = [tn.copy() for tn in tns]
 
     n = len(tns)
+    coordinate_formatter = get_coordinate_formatter(tns[0]._NDIMS)
 
     if ind_ids is None:
         if hasattr(tns[0], "site_ind_id"):
             ind_ids = [tns[0].site_ind_id]
         else:
             ind_ids = [tns[0].lower_ind_id]
-        ind_ids.extend(f"__ind_{get_symbol(i)}{{}}__" for i in range(n - 2))
+        ind_ids.extend(
+            f"__ind_{get_symbol(i)}{coordinate_formatter}__"
+            for i in range(n - 2)
+        )
     else:
         ind_ids = tuple(ind_ids)
 
@@ -966,3 +975,53 @@ def tensor_network_align(*tns, ind_ids=None, inplace=False):
             raise ValueError("Can only align vectors and operators currently.")
 
     return tns
+
+
+def tensor_network_apply_op_vec(
+    tn_op,
+    tn_vec,
+    compress=False,
+    **compress_opts
+):
+    """Apply a general a general tensor network representing an operator (has
+    ``up_ind_id`` and ``lower_ind_id``) to a tensor network representing a
+    vector (has ``site_ind_id``), by contracting each pair of tensors at each
+    site then compressing the resulting tensor network. How the compression
+    takes place is determined by the type of tensor network passed in. The
+    returned tensor network has the same site indices as ``tn_vec``, and it is
+    the ``lower_ind_id`` of ``tn_op`` that is contracted.
+
+    Parameters
+    ----------
+    tn_op : TensorNetwork
+        The tensor network representing the operator.
+    tn_vec : TensorNetwork
+        The tensor network representing the vector.
+    compress : bool
+        Whether to compress the resulting tensor network.
+    compress_opts
+        Options to pass to ``tn_vec.compress``.
+
+    Returns
+    -------
+    tn_op_vec : TensorNetwork
+    """
+    A, x = tn_op.copy(), tn_vec.copy()
+
+    # align the indices
+    coordinate_formatter = get_coordinate_formatter(A._NDIMS)
+    A.lower_ind_id = f"__tmp{coordinate_formatter}__"
+    A.upper_ind_id = x.site_ind_id
+    x.reindex_sites_(f"__tmp{coordinate_formatter}__")
+
+    # form total network and contract each site
+    x |= A
+    for tag in x.site_tags:
+        x ^= tag
+
+    x.fuse_multibonds_()
+    # optionally compress
+    if compress:
+        x.compress(**compress_opts)
+
+    return x

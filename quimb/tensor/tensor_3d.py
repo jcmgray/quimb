@@ -232,6 +232,7 @@ _compress_plane_opts = {
 
 class TensorNetwork3D(TensorNetwork):
 
+    _NDIMS = 3
     _EXTRA_PROPS = (
         '_site_tag_id',
         '_x_tag_id',
