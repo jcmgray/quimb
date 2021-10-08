@@ -611,7 +611,7 @@ class TensorNetwork3D(TensorNetwork):
             self.compress_between(coo_a, coo_b, max_bond=max_bond,
                                   cutoff=cutoff, **compress_opts)
 
-    def _contract_boundary_single(
+    def _contract_boundary(
         self,
         xrange,
         yrange,
@@ -621,7 +621,7 @@ class TensorNetwork3D(TensorNetwork):
         cutoff=1e-10,
         canonize=True,
         canonize_interleave=True,
-        layer_tag=None,
+        layer_tags=None,
         equalize_norms=False,
         compress_opts=None,
         canonize_opts=None,
@@ -644,39 +644,53 @@ class TensorNetwork3D(TensorNetwork):
             # perform whole sweep of canonizing before compressing
             step_onlys = [None]
 
+        if layer_tags is None:
+            layer_tags = [None]
+
         for i in r3d.sweep[:-1]:
-            for j in range(jmin, jmax + 1):
-                for k in range(kmin, kmax + 1):
-                    tag1, tag2 = site_tag(i, j, k), site_tag(i + istep, j, k)
+            for layer_tag in layer_tags:
+                for j in range(jmin, jmax + 1):
+                    for k in range(kmin, kmax + 1):
+                        tag1 = site_tag(i, j, k)  # outer
+                        tag2 = site_tag(i + istep, j, k)  # inner
 
-                    if layer_tag is None:
-                        # contract *any* tensors with pair of coordinates
-                        self.contract_((tag1, tag2), which='any')
-                    else:
-                        # contract specific pair (i.e. only one 'inner' layer)
-                        self.contract_between(tag1, (tag2, layer_tag))
+                        if (layer_tag is None) or len(self.tag_map[tag2]) == 1:
+                            # contract *any* tensors with pair of coordinates
+                            self.contract_((tag1, tag2), which='any')
+                        else:
+                            # ensure boundary is single tensor per site
+                            if len(self.tag_map[tag1]) > 1:
+                                self ^= tag1
 
-            for step_only in step_onlys:
-                if canonize:
-                    self.canonize_plane(
+                            # contract specific pair (i.e. one 'inner' layer)
+                            self.contract_between(tag1, (tag2, layer_tag))
+
+                            # drop inner site tag merged into outer boundary so
+                            # we can still uniquely identify inner tensors
+                            if layer_tag != layer_tags[-1]:
+                                self[tag1].drop_tags(tag2)
+
+                for step_only in step_onlys:
+                    if canonize:
+                        self.canonize_plane(
+                            xrange=xrange if plane != 'x' else (i, i),
+                            yrange=yrange if plane != 'y' else (i, i),
+                            zrange=zrange if plane != 'z' else (i, i),
+                            equalize_norms=equalize_norms,
+                            canonize_opts=canonize_opts,
+                            step_only=step_only,
+                            **_canonize_plane_opts[from_which]
+                        )
+                    self.compress_plane(
                         xrange=xrange if plane != 'x' else (i, i),
                         yrange=yrange if plane != 'y' else (i, i),
                         zrange=zrange if plane != 'z' else (i, i),
+                        max_bond=max_bond, cutoff=cutoff,
                         equalize_norms=equalize_norms,
-                        canonize_opts=canonize_opts,
+                        compress_opts=compress_opts,
                         step_only=step_only,
-                        **_canonize_plane_opts[from_which]
+                        **_compress_plane_opts[from_which]
                     )
-                self.compress_plane(
-                    xrange=xrange if plane != 'x' else (i, i),
-                    yrange=yrange if plane != 'y' else (i, i),
-                    zrange=zrange if plane != 'z' else (i, i),
-                    max_bond=max_bond, cutoff=cutoff,
-                    equalize_norms=equalize_norms,
-                    compress_opts=compress_opts,
-                    step_only=step_only,
-                    **_compress_plane_opts[from_which]
-                )
 
     def contract_boundary(
         self,
@@ -780,7 +794,7 @@ class TensorNetwork3D(TensorNetwork):
             else:
                 zrange = (zmin, zmax)
 
-            tn._contract_boundary_single(
+            tn._contract_boundary(
                 xrange=xrange, yrange=yrange, zrange=zrange,
                 from_which=direction, **contract_boundary_opts)
 
