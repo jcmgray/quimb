@@ -860,7 +860,7 @@ class FermionTensorNetwork(BlockTensorNetwork):
                 fs.insert_tensor(site, T, virtual=True)
             site += 1
             self.add_tensor(T, virtual=True)
-        return self
+        return tensors
 
     def _refactor_phase_from_tids(self, tids):
         tids = tags_to_oset(tids)
