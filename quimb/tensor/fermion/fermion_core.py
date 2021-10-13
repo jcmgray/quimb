@@ -433,6 +433,8 @@ def _launch_fermion_expression(
         tensors = [fs.tensor_order[tid][0] for tid in tid_lst]
 
     operands = [Ta.data for Ta in tensors]
+    global_phase = 0
+    _local_inds = []
     backend = parse_backend(operands, backend)
     # Start contraction loop
     for num, contraction in enumerate(contraction_list):
@@ -464,6 +466,11 @@ def _launch_fermion_expression(
             # Contract!
             new_view = _tensordot(Ta.data, Tb.data, axes=(tuple(left_pos), tuple(right_pos)), backend=backend)
 
+            global_phase += Ta.phase.get("global_flip", False) \
+                          + Tb.phase.get("global_flip", False)
+            _local_inds.extend(Ta.phase.get("local_inds", []))
+            _local_inds.extend(Tb.phase.get("local_inds", []))
+
             o_ix = [ind for ind in Ta.inds if ind not in Tb.inds] + \
                    [ind for ind in Tb.inds if ind not in Ta.inds]
 
@@ -484,6 +491,16 @@ def _launch_fermion_expression(
         # Append new items and dereference what we can
         tensors.append(new_view)
         del tmp_operands, new_view
+
+    if isinstance(tensors[0], FermionTensor):
+        local_inds = []
+        for ind in tensors[0].inds:
+            if _local_inds.count(ind)==1:
+                local_inds.append(ind)
+        global_phase = (global_phase % 2)==1
+        tensors[0].phase = {"global_flip": global_phase,
+                            "local_inds": local_inds}
+    
     return tensors[0]
 
 def tensor_split(
