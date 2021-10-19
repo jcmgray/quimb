@@ -748,8 +748,8 @@ def tensor_split(
 
     renorm : {None, bool, or int}, optional
         Whether to renormalize the kept singular values, assuming the bond has
-        a canonical environment, corresponding to maintaining the Frobenius
-        norm or trace. If ``None`` (the default) then this is automatically
+        a canonical environment, corresponding to maintaining the frobenius
+        or nuclear norm. If ``None`` (the default) then this is automatically
         turned on only for ``cutoff_method in {'sum2', 'rsum2', 'sum1',
         'rsum1'}`` with ``method in {'svd', 'eig', 'eigh'}``.
     ltags : sequence of str, optional
@@ -1088,6 +1088,19 @@ def new_bond(T1, T2, size=1, name=None, axis1=0, axis2=0):
 
     T1.new_ind(name, size=size, axis=axis1)
     T2.new_ind(name, size=size, axis=axis2)
+
+
+def rand_padder(vector, pad_width, iaxis, kwargs):
+    """Helper function for padding tensor with random entries.
+    """
+    rand_strength = kwargs.get('rand_strength')
+    if pad_width[0]:
+        vector[:pad_width[0]] = rand_strength * randn(pad_width[0],
+                                                      dtype='float32')
+    if pad_width[1]:
+        vector[-pad_width[1]:] = rand_strength * randn(pad_width[1],
+                                                       dtype='float32')
+    return vector
 
 
 def array_direct_product(X, Y, sum_axes=()):
@@ -1961,6 +1974,34 @@ class Tensor(object):
 
     new_bond = new_bond
 
+    def new_ind_with_identity(self, name, left_inds, right_inds, axis=0):
+        """Inplace add a new index, where the newly stacked array entries form
+        the identity from ``left_inds`` to ``right_inds``. Selecting 0 or 1 for
+        the new index ``name`` thus is like 'turning off' this tensor if viewed
+        as an operator.
+
+        Parameters
+        ----------
+        name : str
+            Name of the new index.
+        left_inds : tuple[str]
+            Names of the indices forming the left hand side of the operator.
+        right_inds : tuple[str]
+            Names of the indices forming the right hand side of the operator.
+            The dimensions of these must match those of ``left_inds``.
+        axis : int, optional
+            Position of the new index.
+        """
+        ldims = tuple(map(self.ind_size, left_inds))
+        x_id = do('eye', prod(ldims), dtype=self.dtype, like=self.data)
+        x_id = do('reshape', x_id, ldims + ldims)
+        t_id = Tensor(x_id, inds=left_inds + right_inds)
+        t_id.transpose_(*self.inds)
+        new_data = do('stack', (self.data, t_id.data), axis=axis)
+        new_inds = list(self.inds)
+        new_inds.insert(axis, name)
+        self.modify(data=new_data, inds=new_inds)
+
     def conj(self, inplace=False):
         """Conjugate this tensors data (does nothing to indices).
         """
@@ -2115,23 +2156,69 @@ class Tensor(object):
 
     transpose_like_ = functools.partialmethod(transpose_like, inplace=True)
 
-    def trace(self, ind1, ind2, inplace=False):
-        """Trace index ``ind1`` with ``ind2``, removing both.
+    def trace(
+        self,
+        left_inds,
+        right_inds,
+        preserve_tensor=False,
+        inplace=False
+    ):
+        """Trace index or indices ``left_inds`` with ``right_inds``, removing
+        them.
+
+        Parameters
+        ----------
+        left_inds : str or sequence of str
+            The left indices to trace, order matching ``right_inds``.
+        right_inds : str or sequence of str
+            The right indices to trace, order matching ``left_inds``.
+        preserve_tensor : bool, optional
+            If ``True``, a tensor will be returned even if no indices remain.
+        inplace : bool, optional
+            Perform the trace inplace.
+
+        Returns
+        -------
+        z : Tensor or scalar
         """
         t = self if inplace else self.copy()
 
+        if isinstance(left_inds, str):
+            left_inds = (left_inds,)
+        if isinstance(right_inds, str):
+            right_inds = (right_inds,)
+
+        if len(left_inds) != len(right_inds):
+            raise ValueError(f"Can't trace {left_inds} with {right_inds}.")
+
+        remap = {}
+        for lix, rix in zip(left_inds, right_inds):
+            remap[lix] = lix
+            remap[rix] = lix
+
         old_inds, new_inds = [], []
         for ix in t.inds:
-            if ix in (ind1, ind2):
-                old_inds.append(ind1)
+            nix = remap.pop(ix, None)
+            if nix is not None:
+                old_inds.append(nix)
             else:
                 old_inds.append(ix)
                 new_inds.append(ix)
+
+        if remap:
+            raise ValueError(f"Indices {tuple(remap)} not found.")
+
         old_inds, new_inds = tuple(old_inds), tuple(new_inds)
 
         eq = _inds_to_eq((old_inds,), new_inds)
         t.modify(apply=lambda x: do('einsum', eq, x, like=x),
                  inds=new_inds, left_inds=None)
+
+        if not preserve_tensor and not new_inds:
+            data_out = t.data
+            if isinstance(data_out, np.ndarray):
+                data_out = realify_scalar(data_out.item())
+            return data_out
 
         return t
 
@@ -2480,8 +2567,21 @@ class Tensor(object):
 
     squeeze_ = functools.partialmethod(squeeze, inplace=True)
 
+    def largest_element(self):
+        r"""Return the largest element, in terms of absolute magnitude, of this
+        tensor.
+        """
+        return do('max', do('abs', self.data))
+
     def norm(self):
-        """Frobenius norm of this tensor.
+        r"""Frobenius norm of this tensor:
+
+        .. math::
+
+            \|t\|_F = \sqrt{\mathrm{Tr} \left(t^{\dagger} t\right)}
+
+        where the trace is taken over all indices. Equivalent to the square
+        root of the sum of squared singular values across any partition.
         """
         return norm_fro(self.data)
 
@@ -3353,6 +3453,28 @@ class TensorNetwork(object):
         """
         return self.conj()
 
+    def largest_element(self):
+        """Return the 'largest element', in terms of absolute magnitude, of
+        this tensor network. This is defined as the product of the largest
+        elements of each tensor in the network, which would be the largest
+        single term occuring if the TN was summed explicitly.
+        """
+        return prod(t.largest_element() for t in self)
+
+    def norm(self, **contract_opts):
+        r"""Frobenius norm of this tensor network. Computed by exactly
+        contracting the TN with its conjugate:
+
+        .. math::
+
+            \|T\|_F = \sqrt{\mathrm{Tr} \left(T^{\dagger} T\right)}
+
+        where the trace is taken over all indices. Equivalent to the square
+        root of the sum of squared singular values across any partition.
+        """
+        norm = self.conj() | self
+        return norm.contract(**contract_opts)**0.5
+
     def make_norm(
         self,
         mangle_append='*',
@@ -3857,6 +3979,7 @@ class TensorNetwork(object):
         self,
         tids,
         max_distance=1,
+        fillin=False,
         reduce_outer=None,
         inwards=False,
         virtual=True,
@@ -3871,6 +3994,17 @@ class TensorNetwork(object):
         for s in span:
             local_tids.add(s[0])
             local_tids.add(s[1])
+
+        for _ in range(int(fillin)):
+            connectivity = frequencies(
+                tid_n
+                for tid in local_tids
+                for tid_n in self._get_neighbor_tids(tid)
+                if tid_n not in local_tids
+            )
+            for tid_n, cnt in connectivity.items():
+                if cnt >= 2:
+                    local_tids.add(tid_n)
 
         tn_sl = self._select_tids(local_tids, virtual=virtual)
 
@@ -3910,6 +4044,9 @@ class TensorNetwork(object):
                 # absorb the factor into the inner tensor then sum over it
                 tn_sl.tensor_map[tid_in].gate_(r, ix).sum_reduce_(ix)
 
+        elif reduce_outer == 'reflect':
+            tn_sl |= tn_sl.H
+
         return tn_sl
 
     def select_local(
@@ -3917,20 +4054,60 @@ class TensorNetwork(object):
         tags,
         which='all',
         max_distance=1,
+        fillin=False,
         reduce_outer=None,
-        inwards=False,
         virtual=True,
         include=None,
         exclude=None,
     ):
+        r"""Select a local region of tensors, based on graph distance
+        ``max_distance`` to any tagged tensors.
+
+        Parameters
+        ----------
+        tags : str or sequence of str
+            The tag or tag sequence defining the initial region.
+        which : {'all', 'any', '!all', '!any'}, optional
+            Whether to require matching all or any of the tags.
+        max_distance : int, optional
+            The maximum distance to the initial tagged region.
+        fillin : bool or int, optional
+            Once the local region has been selected based on graph distance,
+            whether and how many times to 'fill-in' corners by adding tensors
+            connected multiple times. For example, if ``R`` is an initially
+            tagged tensor and ``x`` are locally selected tensors::
+
+                  fillin=0       fillin=1       fillin=2
+
+                 | | | | |      | | | | |      | | | | |
+                -o-o-x-o-o-    -o-x-x-x-o-    -x-x-x-x-x-
+                 | | | | |      | | | | |      | | | | |
+                -o-x-x-x-o-    -x-x-x-x-x-    -x-x-x-x-x-
+                 | | | | |      | | | | |      | | | | |
+                -x-x-R-x-x-    -x-x-R-x-x-    -x-x-R-x-x-
+
+        reduce_outer : {'sum', 'svd', 'svd-sum', 'reflect'}, optional
+            Whether and how to reduce any outer indices of the selected region.
+        virtual : bool, optional
+            Whether the returned tensor network should be a view of the tensors
+            or a copy (``virtual=False``).
+        include : sequence of int, optional
+            Only include tensor with these ``tids``.
+        exclude : sequence of int, optional
+            Only include tensor without these ``tids``.
+
+        Returns
+        -------
+        TensorNetwork
+        """
         check_opt('reduce_outer', reduce_outer,
-                  (None, 'sum', 'svd', 'svd-sum'))
+                  (None, 'sum', 'svd', 'svd-sum', 'reflect'))
 
         return self._select_local_tids(
             tids=self._get_tids_from_tags(tags, which),
             max_distance=max_distance,
+            fillin=fillin,
             reduce_outer=reduce_outer,
-            inwards=inwards,
             virtual=virtual,
             include=include,
             exclude=exclude)
@@ -4690,13 +4867,12 @@ class TensorNetwork(object):
         select_local_opts = ensure_dict(select_local_opts)
         tn_loc_target = self._select_local_tids(
             (tid1, tid2),
-            max_distance=select_local_distance,
-            include=include, exclude=exclude, virtual=False)
+            max_distance=select_local_distance, virtual=False,
+            include=include, exclude=exclude, **select_local_opts)
 
         tn_loc_compress = tn_loc_target.copy()
-        ta = tn_loc_compress.tensor_map[tid1]
-        tb = tn_loc_compress.tensor_map[tid2]
-        tensor_compress_bond(ta, tb, max_bond=max_bond, cutoff=0.0)
+        tn_loc_compress._compress_between_tids(
+            tid1, tid2, max_bond=max_bond, cutoff=0.0)
 
         tn_loc_opt = tn_loc_compress.fit_(
             tn_loc_target, method=method, **fit_opts)
@@ -5082,6 +5258,7 @@ class TensorNetwork(object):
         --------
         draw_tree_span
         """
+        # current tensors in the tree -> we will grow this
         region = oset(tids)
 
         # check if we should only allow a certain set of nodes
@@ -5098,11 +5275,20 @@ class TensorNetwork(object):
                 exclude = oset(exclude)
             allowed -= exclude
 
+        # possible merges of neighbors into the region
         candidates = []
+
+        # actual merges we have performed, defining the tree
         merges = {}
+
+        # distance to the original region
         distances = {tid: 0 for tid in region}
+
+        # how many times (or weight) that neighbors are connected to the region
         connectivity = collections.defaultdict(lambda: 0)
 
+        # given equal connectivity compare neighbors based on
+        #      min/max distance and min/max ndim
         distance_coeff = {'min': -1, 'max': 1, 'none': 0}[distance_sort]
         ndim_coeff = {'min': -1, 'max': 1, 'none': 0}[ndim_sort]
 
@@ -5115,8 +5301,9 @@ class TensorNetwork(object):
 
             if tid_neighb not in distances:
                 # defines a new spanning tree edge
-                new_d = distances[tid_surface] + 1
                 merges[tid_neighb] = tid_surface
+                # graph distance to original region
+                new_d = distances[tid_surface] + 1
                 distances[tid_neighb] = new_d
                 if (max_distance is None) or (new_d <= max_distance):
                     candidates.append(tid_neighb)
@@ -5125,7 +5312,8 @@ class TensorNetwork(object):
             # nodes are
             if weight_bonds:
                 connectivity[tid_neighb] += math.log2(bonds_size(
-                    self.tensor_map[tid_surface], self.tensor_map[tid_neighb]))
+                    self.tensor_map[tid_surface], self.tensor_map[tid_neighb]
+                ))
             else:
                 connectivity[tid_neighb] += 1
 
@@ -5133,7 +5321,8 @@ class TensorNetwork(object):
             def _sorter(t):
                 # how to pick which tensor to absorb into the expanding surface
                 # here, choose the candidate that is most connected to current
-                # surface, breaking ties with how close it is to the region
+                # surface, breaking ties with how close it is to the original
+                # region, and how many dimensions it has
                 return (
                     connectivity[t],
                     ndim_coeff * self.tensor_map[t].ndim,
@@ -5149,9 +5338,10 @@ class TensorNetwork(object):
             for tid_next in self._get_neighbor_tids(tid_surface):
                 _check_candidate(tid_surface, tid_next)
 
-        # the sequence of tensors merges to canonize
+        # generate the sequence of tensor merges
         seq = []
         while candidates:
+            # choose the *highest* scoring candidate
             candidates.sort(key=_sorter)
             tid_surface = candidates.pop()
             region.add(tid_surface)
@@ -5159,8 +5349,9 @@ class TensorNetwork(object):
             if distances[tid_surface] > min_distance:
                 # checking distance allows the innermost merges to be ignored,
                 # for example, to contract an environment around a region
-                seq.append((tid_surface, merges[tid_surface],
-                            distances[tid_surface]))
+                seq.append(
+                    (tid_surface, merges[tid_surface], distances[tid_surface])
+                )
 
             # check all the neighbors of the tensor we've just expanded to
             for tid_next in self._get_neighbor_tids(tid_surface):
@@ -6619,12 +6810,26 @@ class TensorNetwork(object):
         return TensorNetwork((self, other)) ^ ...
 
     def aslinearoperator(self, left_inds, right_inds, ldims=None, rdims=None,
-                         backend=None, optimize='auto'):
+                         backend=None, optimize=None):
         """View this ``TensorNetwork`` as a
         :class:`~quimb.tensor.tensor_core.TNLinearOperator`.
         """
         return TNLinearOperator(self, left_inds, right_inds, ldims, rdims,
                                 optimize=optimize, backend=backend)
+
+    @functools.wraps(tensor_split)
+    def split(self, left_inds, right_inds=None, **split_opts):
+        """Decompose this tensor network across a bipartition of outer indices.
+
+        This method matches ``Tensor.split`` by converting to a
+        ``TNLinearOperator`` first. Note unless an iterative method is passed
+        to ``method``, the full dense tensor will be contracted.
+        """
+        if right_inds is None:
+            oix = self.outer_inds()
+            right_inds = tuple(ix for ix in oix if ix not in left_inds)
+        T = self.aslinearoperator(left_inds, right_inds)
+        return T.split(**split_opts)
 
     def trace(self, left_inds, right_inds, **contract_opts):
         """Trace over ``left_inds`` joined with ``right_inds``
@@ -6641,6 +6846,7 @@ class TensorNetwork(object):
         t = self.contract(
             tags,
             output_inds=tuple(concat(inds_seq)),
+            preserve_tensor=True,
             **contract_opts
         )
         return t.to_dense(*inds_seq, to_qarray=to_qarray)
@@ -6949,6 +7155,44 @@ class TensorNetwork(object):
         return tn
 
     fuse_multibonds_ = functools.partialmethod(fuse_multibonds, inplace=True)
+
+    def expand_bond_dimension(
+        self,
+        new_bond_dim,
+        rand_strength=0.0,
+        inds_to_expand=None,
+        inplace=False,
+    ):
+        """Increase the dimension of bonds to at least ``new_bond_dim``.
+        """
+        tn = self if inplace else self.copy()
+
+        if inds_to_expand is None:
+            # find all 'bonds' - indices connecting two or more tensors
+            inds_to_expand = set()
+            for ind, tids in tn.ind_map.items():
+                if len(tids) >= 2:
+                    inds_to_expand.add(ind)
+        else:
+            inds_to_expand = set(inds_to_expand)
+
+        for t in tn:
+            # perform the array expansions
+            pads = [
+                (0, 0) if ind not in inds_to_expand else
+                (0, max(new_bond_dim - d, 0))
+                for d, ind in zip(t.shape, t.inds)
+            ]
+
+            if rand_strength > 0:
+                edata = do('pad', t.data, pads, mode=rand_padder,
+                           rand_strength=rand_strength)
+            else:
+                edata = do('pad', t.data, pads, mode='constant')
+
+            t.modify(data=edata)
+
+        return tn
 
     def flip(self, inds, inplace=False):
         """Flip the dimension corresponding to indices ``inds`` on all tensors
@@ -8022,7 +8266,7 @@ class TNLinearOperator(spla.LinearOperator):
     """
 
     def __init__(self, tns, left_inds, right_inds, ldims=None, rdims=None,
-                 optimize='auto', backend=None, is_conj=False):
+                 optimize=None, backend=None, is_conj=False):
         if backend is None:
             self.backend = get_tensor_linop_backend()
         else:
@@ -8175,9 +8419,9 @@ class TNLinearOperator(spla.LinearOperator):
         return tensor_contract(*ts, **contract_opts).to_dense(*inds_seq)
 
     @functools.wraps(tensor_split)
-    def split(self, **kwargs):
+    def split(self, **split_opts):
         return tensor_split(self, left_inds=self.left_inds,
-                            right_inds=self.right_inds, **kwargs)
+                            right_inds=self.right_inds, **split_opts)
 
     @property
     def A(self):
@@ -8320,3 +8564,13 @@ class PTensor(Tensor):
         """Turn this PTensor into a normal Tensor.
         """
         return Tensor(self)
+
+
+class IsoTensor(Tensor):
+    """A ``Tensor`` subclass which keeps its ``left_inds`` by default even
+    when its data is changed.
+    """
+
+    def modify(self, **kwargs):
+        kwargs.setdefault("left_inds", self.left_inds)
+        super().modify(**kwargs)

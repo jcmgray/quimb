@@ -29,6 +29,7 @@ from .tensor_core import (
     Tensor,
     TensorNetwork,
     PTensor,
+    IsoTensor,
     oset,
 )
 from .tensor_gen import (
@@ -129,6 +130,15 @@ from .circuit_gen import (
 from .optimize import (
     TNOptimizer,
 )
+from .tensor_arbgeom import (
+    tensor_network_align,
+    tensor_network_apply_op_vec,
+)
+from .tensor_arbgeom_tebd import (
+    LocalHamGen,
+    TEBDGen,
+    SimpleUpdateGen,
+)
 from .tensor_2d import (
     gen_2d_bonds,
     TensorNetwork2D,
@@ -191,6 +201,7 @@ __all__ = (
     "TensorNetwork",
     "TNLinearOperator1D",
     "PTensor",
+    "IsoTensor",
     "oset",
     "rand_tensor",
     "rand_phased",
@@ -273,6 +284,11 @@ __all__ = (
     "circ_ansatz_1D_rand",
     "circ_qaoa",
     "TNOptimizer",
+    "tensor_network_align",
+    "tensor_network_apply_op_vec",
+    "LocalHamGen",
+    "TEBDGen",
+    "SimpleUpdateGen",
     "gen_2d_bonds",
     "TensorNetwork2D",
     "PEPS",
