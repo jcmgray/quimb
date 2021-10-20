@@ -1,6 +1,8 @@
+from typing import _SpecialForm
 from ...utils import check_opt
 from ..tensor_arbgeom import TensorNetworkGen, TensorNetworkGenVector
 from .fermion_core import FermionTensorNetwork, FermionTensor
+import functools
 
 class FermionTensorNetworkGen(FermionTensorNetwork,
                               TensorNetworkGen):
@@ -74,112 +76,122 @@ class FermionTensorNetworkGenVector(
         self,
         G,
         where,
-        normalized=False,
+        normalized=True,
         max_distance=0,
+        fillin=False,
         gauges=None,
-        optimize='auto',
+        optimize="auto",
+        max_bond=None,
+        rehearse=False,
+        **contract_opts,
     ):
         # select a local neighborhood of tensors
-        where_tags = tuple(map(self.site_tag, where))
-        tn = self.copy()
-
-        k = tn.select_local(
-            where_tags, 'any',
-            max_distance=max_distance,
-            virtual=True,
-        )
+        site_tags = tuple(map(self.site_tag, where))
+        k = self.select_local(site_tags, "any", max_distance=max_distance,
+                              fillin=fillin, virtual=False)
 
         if gauges is not None:
             # gauge the region with simple update style bond gauges
             k.gauge_simple_insert(gauges)
-
-        # reconstructing the 'simple' network even though they
-        # might not be continugously ordered in original network
         k = k.copy(force=True)
 
-        b = k.H
-        if normalized:
-            # compute <b|k> locally
-            nfact = (k & b).contract(all, optimize=optimize)
-        else:
-            nfact = None
+        if max_bond is not None:
+            return k.local_expectation(
+                G=G,
+                where=where,
+                max_bond=max_bond,
+                optimize=optimize,
+                normalized=normalized,
+                rehearse=rehearse,
+                **contract_opts
+            )
 
-        # now compute <b|G|k> locally
-        k.gate_(G, where)
-        ex = (k | b).contract(all, optimize=optimize)
-
-        if nfact is not None:
-            return ex / nfact
-        return ex
+        return k.local_expectation_exact(
+            G=G,
+            where=where,
+            optimize=optimize,
+            normalized=normalized,
+            rehearse=rehearse,
+            **contract_opts
+        )
 
     def local_expectation_exact(
-        self, G, where, optimize='auto-hq', normalized=False,
+        self,
+        G,
+        where,
+        optimize="auto-hq",
+        normalized=True,
+        rehearse=False,
+        **contract_opts,
     ):
         """Compute the local expectation of operator ``G`` at site(s) ``where``
         by exactly contracting the full overlap tensor network.
         """
-        if not normalized:
-            Gk = self.gate(G, where)
-            b = self.H
-            return (Gk | b).contract(all, optimize=optimize)
-
         k_inds = tuple(map(self.site_ind, where))
-        b_inds = tuple(f'_bra{site}' for site in where)
+        b_inds = tuple(map("_bra{}".format, where))
         b = self.H.reindex_(dict(zip(k_inds, b_inds)))
-
         Gop = FermionTensor(G.copy(), inds=b_inds+k_inds)
         new_G = b.fermion_space.move_past(Gop).data
+        tn = self & b
+        output_inds = b_inds + k_inds
+        if rehearse:
+            if rehearse == 'tn':
+                return tn
+            if rehearse == 'tree':
+                return tn.contraction_tree(
+                    optimize, output_inds=output_inds)
+            if rehearse:
+                return tn.contraction_info(
+                    optimize, output_inds=output_inds)
 
-        rho = (self & b).contract(all, optimize=optimize)
+        rho = tn.contract(all, optimize=optimize, output_inds=output_inds)
         # make sure the bra indices lie ahead of ket indices
-        rho.transpose_(*b_inds, *k_inds)
         rho = FermionTensorNetwork([rho])
-        nfact = rho.trace(k_inds, b_inds)
+        if normalized:
+            nfact = rho.trace(k_inds, b_inds)
+        else:
+            nfact = 1
         rho.gate_inds_(new_G, k_inds)
-        expec = rho.trace(k_inds, b_inds)
-        return expec / nfact
+        expec = rho.trace(k_inds, b_inds) / nfact
+        return expec
 
-    def local_expectation(
+    def partial_trace(
         self,
-        G,
-        where,
+        keep,
         max_bond,
         optimize,
-        normalized=True,
         flatten=True,
-        method='rho',
+        reduce=False,
+        normalized=True,
+        symmetrized=False,
         rehearse=False,
-        symmetrized="auto",
         **contract_compressed_opts,
     ):
-        check_opt('method', method, ('rho', 'rho-reduced'))
-        reduce = method == 'rho-reduced'
+        if symmetrized:
+            raise NotImplementedError
 
         # form the partial trace
-        k_inds = tuple(map(self.site_ind, where))
+        k_inds = tuple(map(self.site_ind, keep))
 
+        k = self.copy()
         if reduce:
-            k = self.copy()
             k.reduce_inds_onto_bond(*k_inds, tags='__BOND__', drop_tags=True)
-        else:
-            k = self
 
-        b_inds = tuple(map("_bra{}".format, where))
+        b_inds = tuple(map("_bra{}".format, keep))
         b = k.H.reindex_(dict(zip(k_inds, b_inds)))
 
-        Gop = FermionTensor(G.copy(), inds=b_inds+k_inds)
-        new_G = b.fermion_space.move_past(Gop).data
-
-        tn = k & b
-
-        output_inds = k_inds + b_inds
+        tn = k | b
+        output_inds = b_inds + k_inds
 
         if flatten:
             for site in self.sites:
-                if site in where:
-                    continue
-                tn ^= site
-            if reduce:
+                if (site not in keep) or (flatten == 'all'):
+                    # check if site exists still to permit e.g. local methods
+                    # to use this same logic
+                    tag = tn.site_tag(site)
+                    if tag in tn.tag_map:
+                        tn ^= tag
+            if reduce and (flatten == 'all'):
                 tn ^= '__BOND__'
 
         if rehearse:
@@ -190,20 +202,66 @@ class FermionTensorNetworkGenVector(
             if rehearse:
                 return tn.contraction_info(optimize, output_inds=output_inds)
 
-        t_rho = tn.contract_compressed(
+        rho = tn.contract_compressed(
             optimize,
             max_bond=max_bond,
             output_inds=output_inds,
             **contract_compressed_opts,
         )
 
-        t_rho.transpose_(*b_inds, *k_inds)
-        t_rho = FermionTensorNetwork([t_rho])
+        rho.transpose_(*output_inds)
+        t_rho = FermionTensorNetwork([rho], virtual=True)
         if normalized:
             nfact = t_rho.trace(k_inds, b_inds)
-        else:
-            nfact = 1
+            rho.modify(data=rho.data/nfact)
+        return t_rho
 
-        t_rho.gate_inds_(new_G, k_inds)
-        expec = t_rho.trace(k_inds, b_inds) / nfact
+    def local_expectation(
+        self,
+        G,
+        where,
+        max_bond,
+        optimize,
+        method='rho',
+        flatten=True,
+        normalized=True,
+        symmetrized=False,
+        rehearse=False,
+        **contract_compressed_opts,
+    ):
+
+        check_opt('method', method, ('rho', 'rho-reduced'))
+        reduce = (method == 'rho-reduced')
+
+        k_inds = tuple(map(self.site_ind, where))
+        b_inds = tuple(map("_bra{}".format, where))
+        b = self.H.reindex_(dict(zip(k_inds, b_inds)))
+        Gop = FermionTensor(G.copy(), inds=b_inds+k_inds)
+        new_G = b.fermion_space.move_past(Gop).data
+
+        rho = self.partial_trace(
+            keep=where,
+            max_bond=max_bond,
+            optimize=optimize,
+            flatten=flatten,
+            reduce=reduce,
+            normalized=normalized,
+            symmetrized=symmetrized,
+            rehearse=rehearse,
+            **contract_compressed_opts,
+        )
+        if rehearse:
+            return rho
+
+        rho.gate_inds_(new_G, k_inds)
+        expec = rho.trace(k_inds, b_inds)
         return expec
+
+    compute_local_expectation = functools.partialmethod(
+        TensorNetworkGenVector.compute_local_expectation, symmetrized=False)
+
+    compute_local_expectation_rehearse = functools.partialmethod(
+        compute_local_expectation, rehearse=True)
+
+    compute_local_expectation_tn = functools.partialmethod(
+        compute_local_expectation, rehearse='tn')
