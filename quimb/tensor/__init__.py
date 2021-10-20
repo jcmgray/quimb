@@ -30,6 +30,7 @@ from .tensor_core import (
     TensorNetwork,
     PTensor,
     IsoTensor,
+    COPY_tensor,
     oset,
 )
 from .tensor_gen import (
@@ -202,6 +203,7 @@ __all__ = (
     "TNLinearOperator1D",
     "PTensor",
     "IsoTensor",
+    "COPY_tensor",
     "oset",
     "rand_tensor",
     "rand_phased",
