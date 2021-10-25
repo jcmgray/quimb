@@ -6332,7 +6332,7 @@ class TensorNetwork(object):
 
             seq.append((tid1, tid2))
 
-        return tn._contract_compressed_tid_sequence(
+        t = tn._contract_compressed_tid_sequence(
             seq=seq,
             max_bond=max_bond,
             cutoff=cutoff,
@@ -6349,7 +6349,13 @@ class TensorNetwork(object):
             callback_post_compress=callback_post_compress,
             callback=callback,
             progbar=progbar,
-            **kwargs)
+            **kwargs
+        )
+
+        if output_inds and t.inds != output_inds:
+            t.transpose_(*output_inds)
+
+        return t
 
     contract_compressed_ = functools.partialmethod(
         contract_compressed, inplace=True)
