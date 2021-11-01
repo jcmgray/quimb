@@ -2618,7 +2618,9 @@ class Tensor(object):
 
         # turn the array back into a tensor
         x = reshape(x, [self.ind_size(ix) for ix in LR_inds])
-        Tu = Tensor(x, inds=LR_inds, tags=self.tags, left_inds=left_inds)
+        Tu = self.__class__(
+            x, inds=LR_inds, tags=self.tags, left_inds=left_inds
+        )
 
         if inplace:
             # XXX: do self.transpose_like_(Tu) or Tu.transpose_like_(self)?
