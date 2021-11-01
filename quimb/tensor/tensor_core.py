@@ -1719,7 +1719,7 @@ class Tensor(object):
             tensor network, this simply returns ``self``.
         """
         if not (deep or virtual):
-            return Tensor(self, None)
+            return self.__class__(self, None)
 
         if deep and virtual:
             raise ValueError("Copy can't be both deep and virtual.")
