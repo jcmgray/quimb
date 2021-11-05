@@ -409,6 +409,10 @@ def oset_union(xs):
     return oset(concat(xs))
 
 
+def oset_intersection(xs):
+    return functools.reduce(operator.and_, xs)
+
+
 def tags_to_oset(tags):
     """Parse a ``tags`` argument into an ordered set.
     """
@@ -780,6 +784,8 @@ def tensor_split(
 
     if right_inds is None:
         right_inds = oset(T.inds) - oset(left_inds)
+    else:
+        right_inds = tags_to_oset(right_inds)
 
     if isinstance(T, spla.LinearOperator):
         left_dims = T.ldims
@@ -840,7 +846,14 @@ def tensor_split(
     return TensorNetwork(tensors, virtual=True)
 
 
-def tensor_canonize_bond(T1, T2, absorb='right', **split_opts):
+def tensor_canonize_bond(
+    T1,
+    T2,
+    absorb='right',
+    gauges=None,
+    gauge_smudge=1e-6,
+    **split_opts
+):
     r"""Inplace 'canonization' of two tensors. This gauges the bond between
     the two such that ``T1`` is isometric::
 
@@ -856,6 +869,8 @@ def tensor_canonize_bond(T1, T2, absorb='right', **split_opts):
         The tensor to be isometrized.
     T2 : Tensor
         The tensor to absorb the R-factor into.
+    absorb : {'right', 'left', 'both', None}, optional
+        Which tensor to effectively absorb the singular values into.
     split_opts
         Supplied to :func:`~quimb.tensor.tensor_core.tensor_split`, with
         modified defaults of ``method=='qr'`` and ``absorb='right'``.
@@ -863,31 +878,41 @@ def tensor_canonize_bond(T1, T2, absorb='right', **split_opts):
     check_opt('absorb', absorb, ('left', 'both', 'right'))
 
     if absorb == 'both':
+        # same as doing reduced compression with no truncation
         split_opts.setdefault('cutoff', 0.0)
-        return tensor_compress_bond(T1, T2, **split_opts)
+        return tensor_compress_bond(
+            T1, T2, gauges=gauges, gauge_smudge=gauge_smudge, **split_opts)
 
     split_opts.setdefault('method', 'qr')
     if absorb == 'left':
         T1, T2 = T2, T1
 
-    shared_ix, left_env_ix = T1.filter_bonds(T2)
-    if not shared_ix:
+    lix, bix, _ = tensor_make_single_bond(T1, T2, gauges=gauges)
+    if not bix:
         raise ValueError("The tensors specified don't share an bond.")
-    elif (T1.left_inds is not None) and set(T1.left_inds) == set(left_env_ix):
-        return
-    elif len(shared_ix) > 1:
-        # fuse multibonds
-        T1.fuse_({shared_ix[0]: shared_ix})
-        T2.fuse_({shared_ix[0]: shared_ix})
 
-    new_T1, tRfact = T1.split(left_env_ix, get='tensors', **split_opts)
-    new_T2 = T2.contract(tRfact)
+    if (T1.left_inds is not None) and set(T1.left_inds) == set(lix):
+        # tensor is already isometric with respect to shared bonds
+        return
+
+    if gauges is not None:
+        # gauge outer and inner but only revert outer
+        absorb = None
+        tn = T1 | T2
+        outer, _ = tn.gauge_simple_insert(gauges, smudge=gauge_smudge)
+        gauges.pop(bix, None)
+
+    new_T1, tRfact = T1.split(lix, get='tensors', **split_opts)
+    new_T2 = tRfact @ T2
 
     new_T1.transpose_like_(T1)
     new_T2.transpose_like_(T2)
 
-    T1.modify(data=new_T1.data, left_inds=left_env_ix)
+    T1.modify(data=new_T1.data, left_inds=lix)
     T2.modify(data=new_T2.data)
+
+    if gauges is not None:
+        tn.gauge_simple_remove(outer=outer)
 
 
 def tensor_compress_bond(
@@ -895,6 +920,8 @@ def tensor_compress_bond(
     T2,
     reduced=True,
     absorb='both',
+    gauges=None,
+    gauge_smudge=1e-6,
     info=None,
     **compress_opts
 ):
@@ -932,32 +959,31 @@ def tensor_compress_bond(
     compress_opts :
         Supplied to :func:`~quimb.tensor.tensor_core.tensor_split`.
     """
-    left_env_ix, shared_ix, right_env_ix = group_inds(T1, T2)
 
-    if not shared_ix:
+    lix, bix, rix = tensor_make_single_bond(T1, T2, gauges=gauges)
+    if not bix:
         raise ValueError("The tensors specified don't share an bond.")
-    elif len(shared_ix) > 1:
-        # fuse multibonds
-        T1.fuse_({shared_ix[0]: shared_ix})
-        T2.fuse_({shared_ix[0]: shared_ix})
-        shared_ix = (shared_ix[0],)
+
+    if gauges is not None:
+        absorb = None
+        tn = T1 | T2
+        outer, _ = tn.gauge_simple_insert(gauges, smudge=gauge_smudge)
 
     if reduced is True:
         # a) -> b)
-        T1_L, T1_R = T1.split(left_inds=left_env_ix, right_inds=shared_ix,
-                              get='tensors', method='qr')
-        T2_L, T2_R = T2.split(left_inds=shared_ix, right_inds=right_env_ix,
-                              get='tensors', method='lq')
+        T1_L, T1_R = T1.split(
+            left_inds=lix, right_inds=bix,
+            get='tensors', method='qr')
+        T2_L, T2_R = T2.split(
+            left_inds=bix, right_inds=rix,
+            get='tensors', method='lq')
+
         # b) -> c)
         M = T1_R @ T2_L
         # c) -> d)
-        M_L, *s, M_R = M.split(left_inds=T1_L.bonds(M), get='tensors',
-                               absorb=absorb, **compress_opts)
-
-        # make sure old bond being used
-        ns_ix, = M_L.bonds(M_R)
-        M_L.reindex_({ns_ix: shared_ix[0]})
-        M_R.reindex_({ns_ix: shared_ix[0]})
+        M_L, *s, M_R = M.split(
+            left_inds=T1_L.bonds(M), bond_ind=bix,
+            get='tensors', absorb=absorb, **compress_opts)
 
         # d) -> e)
         T1C = T1_L.contract(M_L, output_inds=T1.inds)
@@ -965,14 +991,14 @@ def tensor_compress_bond(
 
     elif reduced == 'lazy':
         compress_opts.setdefault('method', 'isvd')
-        T12 = TNLinearOperator((T1, T2), left_env_ix, right_env_ix)
+        T12 = TNLinearOperator((T1, T2), lix, rix)
         T1C, *s, T2C = T12.split(get='tensors', absorb=absorb, **compress_opts)
         T1C.transpose_like_(T1)
         T2C.transpose_like_(T2)
 
     else:
         T12 = T1 @ T2
-        T1C, *s, T2C = T12.split(left_inds=left_env_ix, get='tensors',
+        T1C, *s, T2C = T12.split(left_inds=lix, get='tensors',
                                  absorb=absorb, **compress_opts)
         T1C.transpose_like_(T1)
         T2C.transpose_like_(T2)
@@ -982,12 +1008,22 @@ def tensor_compress_bond(
     T2.modify(data=T2C.data)
 
     if absorb == 'right':
-        T1.modify(left_inds=left_env_ix)
+        T1.modify(left_inds=lix)
     elif absorb == 'left':
-        T2.modify(left_inds=right_env_ix)
+        T2.modify(left_inds=rix)
 
     if s and info is not None:
-        info['singular_values'], = s
+        info['singular_values'] = s[0].data
+
+    if gauges is not None:
+        tn.gauge_simple_remove(outer=outer)
+        g = s[0].data
+        fact = g[0]
+        g = g / fact
+        gauges[bix] = g
+        fact_1_2 = fact**0.5
+        T1 *= fact_1_2
+        T2 *= fact_1_2
 
 
 def tensor_balance_bond(t1, t2, smudge=1e-6):
@@ -1012,25 +1048,43 @@ def tensor_balance_bond(t1, t2, smudge=1e-6):
     t2.multiply_index_diagonal_(ix, s**+0.25)
 
 
-def tensor_fuse_squeeze(t1, t2, squeeze=True):
-    """If ``t1`` and ``t2`` share more than one bond fuse it, and if the size
-    of the shared dimenion(s) is 1, squeeze it. Inplace operation.
+def tensor_make_single_bond(t1, t2, gauges=None):
+    """If two tensors share multibonds, fuse them together and return the left
+    indices, bond if it exists, and right indices. Handles simple ``gauges``.
     """
-    shared = bonds(t1, t2)
+    left, shared, right = group_inds(t1, t2)
     nshared = len(shared)
 
     if nshared == 0:
-        return
+        return left, None, right
 
-    ind0 = next(iter(shared))
-
+    bond = next(iter(shared))
     if nshared > 1:
-        t1.fuse_({ind0: shared})
-        t2.fuse_({ind0: shared})
+        t1.fuse_({bond: shared})
+        t2.fuse_({bond: shared})
+        if gauges is not None:
+            gauges[bond] = functools.reduce(
+                lambda x, y: do("kron", x, y),
+                (gauges.pop(ix) for ix in shared)
+            )
+
+    return left, bond, right
+
+
+def tensor_fuse_squeeze(t1, t2, squeeze=True, gauges=None):
+    """If ``t1`` and ``t2`` share more than one bond fuse it, and if the size
+    of the shared dimenion(s) is 1, squeeze it. Inplace operation.
+    """
+    _, ind0, _ = tensor_make_single_bond(t1, t2, gauges=gauges)
 
     if squeeze and t1.ind_size(ind0) == 1:
         t1.squeeze_(include=(ind0,))
         t2.squeeze_(include=(ind0,))
+
+        if gauges is not None:
+            s0_1_2 = gauges.pop(ind0).item()**0.5
+            t1 *= s0_1_2
+            t2 *= s0_1_2
 
 
 def new_bond(T1, T2, size=1, name=None, axis1=0, axis2=0):
@@ -1293,7 +1347,7 @@ def get_tags(ts):
     if isinstance(ts, (TensorNetwork, Tensor)):
         ts = (ts,)
 
-    return oset.union(*(t.tags for t in ts))
+    return oset_union(t.tags for t in ts)
 
 
 def maybe_unwrap(t, preserve_tensor=False, equalize_norms=False):
@@ -2738,6 +2792,14 @@ class Tensor(object):
                 unshared.append(i)
         return shared, unshared
 
+    def __imul__(self, other):
+        self.modify(apply=lambda x: x * other)
+        return self
+
+    def __itruediv__(self, other):
+        self.modify(apply=lambda x: x / other)
+        return self
+
     def __and__(self, other):
         """Combine with another ``Tensor`` or ``TensorNetwork`` into a new
         ``TensorNetwork``.
@@ -3369,7 +3431,7 @@ class TensorNetwork(object):
         """
         tn = self if inplace else self.copy()
 
-        tids = oset.union(*(tn.ind_map.get(ix, oset()) for ix in index_map))
+        tids = oset_union(tn.ind_map.get(ix, oset()) for ix in index_map)
 
         for tid in tids:
             T = tn.tensor_map[tid]
@@ -3759,15 +3821,15 @@ class TensorNetwork(object):
             which = which[1:]
 
         combine = {
-            'all': oset.intersection,
-            'any': oset.union,
+            'all': oset_intersection,
+            'any': oset_union,
         }[which]
 
         tid_sets = tuple(xmap[x] for x in xs)
         if not tid_sets:
             tids = oset()
         else:
-            tids = combine(*tid_sets)
+            tids = combine(tid_sets)
 
         if inverse:
             return oset(self.tensor_map) - tids
@@ -4416,7 +4478,14 @@ class TensorNetwork(object):
                               for d, i in zip(T.shape, T.inds))
             T.modify(data=do('zeros', new_shape, dtype=T.dtype, like=T.data))
 
-    def _contract_between_tids(self, tid1, tid2, **contract_opts):
+    def _contract_between_tids(
+        self,
+        tid1,
+        tid2,
+        equalize_norms=False,
+        gauges=None,
+        **contract_opts,
+    ):
         # allow no-op for same tensor specified twice ('already contracted')
         if tid1 == tid2:
             return
@@ -4424,9 +4493,24 @@ class TensorNetwork(object):
         output_inds = self.compute_contracted_inds(tid1, tid2)
         t1 = self._pop_tensor(tid1)
         t2 = self._pop_tensor(tid2)
-        t12 = tensor_contract(t1, t2, output_inds=output_inds,
-                              preserve_tensor=True, **contract_opts)
+
+        if gauges is not None:
+            for ix in bonds(t1, t2):
+                # about to contract so don't need to balance gauge on both
+                g = gauges.pop(ix)
+                t1.multiply_index_diagonal_(ix, g)
+
+        t12 = tensor_contract(
+            t1, t2,
+            output_inds=output_inds,
+            preserve_tensor=True,
+            **contract_opts,
+        )
         self.add_tensor(t12, tid=tid2, virtual=True)
+
+        # maybe control norm blow-up by stripping the new tensor exponent
+        if equalize_norms:
+            self.strip_exponent(tid2, equalize_norms)
 
     def contract_between(self, tags1, tags2, **contract_opts):
         """Contract the two tensors specified by ``tags1`` and ``tags2``
@@ -4560,6 +4644,14 @@ class TensorNetwork(object):
             inds = (inds,)
 
         ng = len(inds)
+        if (ng == 1) and contract:
+            # single site gate, eagerly applied so contract in directly ->
+            # useful short circuit  as it maintains the index structure exactly
+            ix, = inds
+            t, = tn.ind_map[ix]
+            t.gate_(G, ix)
+            return tn
+
         ndimG = ndim(G)
         ds = [tn.ind_size(ix) for ix in inds]
 
@@ -4766,7 +4858,7 @@ class TensorNetwork(object):
         max_bond,
         cutoff=0.0,
         absorb='both',
-        renorm=True,
+        renorm=False,
         method='eigh',
         select_local_distance=None,
         select_local_opts=None,
@@ -4788,9 +4880,8 @@ class TensorNetwork(object):
         tb = self.tensor_map[tid2]
 
         # handle multibonds and no shared bonds
-        tensor_fuse_squeeze(ta, tb)
-        bix = ta.bonds(tb)
-        if not bix:
+        _, bond, _ = tensor_make_single_bond(ta, tb)
+        if not bond:
             return
 
         E = self._compute_bond_env(
@@ -4811,7 +4902,6 @@ class TensorNetwork(object):
             E, max_bond, method=method, renorm=renorm)
 
         # absorb them into the tensors to compress this bond
-        bond, = bix
         ta.gate_(Cr, bond)
         tb.gate_(Cl.T, bond)
 
@@ -4868,16 +4958,16 @@ class TensorNetwork(object):
         canonize_after_opts=None,
         mode='basic',
         equalize_norms=False,
-        squeeze=True,
+        gauges=None,
+        gauge_smudge=1e-6,
         callback=None,
         **compress_opts
     ):
         ta = self.tensor_map[tid1]
         tb = self.tensor_map[tid2]
 
-        tensor_fuse_squeeze(ta, tb, squeeze=squeeze)
-        lix, bix, rix = group_inds(ta, tb)
-        if len(bix) == 0:
+        lix, bix, rix = tensor_make_single_bond(ta, tb, gauges=gauges)
+        if not bix:
             return
 
         if (max_bond is not None) and (cutoff == 0.0):
@@ -4888,10 +4978,14 @@ class TensorNetwork(object):
                 # right tensor (whichever has smallest outer dimensions) will
                 # produce the required compression without any SVD
                 compress_absorb = 'right' if lsize <= rsize else 'left'
-                tensor_canonize_bond(ta, tb, absorb=compress_absorb)
+                tensor_canonize_bond(
+                    ta, tb, absorb=compress_absorb,
+                    gauges=gauges, gauge_smudge=gauge_smudge)
 
                 if absorb != compress_absorb:
-                    tensor_canonize_bond(ta, tb, absorb=absorb)
+                    tensor_canonize_bond(
+                        ta, tb, absorb=absorb,
+                        gauges=gauges, gauge_smudge=gauge_smudge)
 
                 if equalize_norms:
                     self.strip_exponent(tid1, equalize_norms)
@@ -4905,11 +4999,17 @@ class TensorNetwork(object):
             canonize_opts.setdefault('equalize_norms', equalize_norms)
             self._canonize_around_tids(
                 (tid1, tid2),
-                max_distance=canonize_distance, **canonize_opts)
+                gauges=gauges,
+                max_distance=canonize_distance,
+                **canonize_opts
+            )
 
         compress_opts['max_bond'] = max_bond
         compress_opts['cutoff'] = cutoff
         compress_opts['absorb'] = absorb
+        if gauges is not None:
+            compress_opts['gauges'] = gauges
+            compress_opts['gauge_smudge'] = gauge_smudge
 
         if mode == 'basic':
             tensor_compress_bond(ta, tb, **compress_opts)
@@ -4935,6 +5035,7 @@ class TensorNetwork(object):
             self._gauge_local_tids(
                 tids=(tid1, tid2),
                 max_distance=canonize_after_distance,
+                gauges=gauges,
                 **canonize_after_opts
             )
 
@@ -5629,7 +5730,9 @@ class TensorNetwork(object):
         self,
         max_iterations=5,
         absorb='both',
+        equalize_norms=False,
         inplace=False,
+        **kwargs,
     ):
         """Iterative gauge all the bonds in this tensor network with a basic
         'canonization' strategy.
@@ -5644,6 +5747,14 @@ class TensorNetwork(object):
                     # fused multibond (removed) or not a bond (len(tids != 2))
                     continue
                 tn._canonize_between_tids(tid1, tid2, absorb=absorb)
+
+                if equalize_norms:
+                    tn.strip_exponent(tid1, equalize_norms)
+                    tn.strip_exponent(tid2, equalize_norms)
+
+        if equalize_norms is True:
+            # this also redistributes the any collected norm exponent
+            tn.equalize_norms_()
 
         return tn
 
@@ -5694,19 +5805,7 @@ class TensorNetwork(object):
 
                 t1 = tn.tensor_map[tid1]
                 t2 = tn.tensor_map[tid2]
-                lix, bix, rix = group_inds(t1, t2)
-
-                bond = bix[0]
-                if len(bix) > 1:
-                    # first absorb separate gauges
-                    for ind in bix:
-                        s = gauges.pop(ind, None)
-                        if s is not None:
-                            t1.multiply_index_diagonal_(ind, s**0.5)
-                            t2.multiply_index_diagonal_(ind, s**0.5)
-                    # multibond - fuse it
-                    t1.fuse_({bond: bix})
-                    t2.fuse_({bond: bix})
+                lix, bond, rix = tensor_make_single_bond(t1, t2, gauges=gauges)
 
                 # absorb 'outer' gauges into tensors
                 inv_gauges = []
@@ -5728,7 +5827,7 @@ class TensorNetwork(object):
                 tensor_compress_bond(
                     t1, t2, absorb=None, info=info, cutoff=0.0)
 
-                s = info['singular_values'].data
+                s = info['singular_values']
                 smax = s[0]
                 new_gauge = s / smax
                 nfact = do('log10', smax) + nfact
@@ -5851,7 +5950,7 @@ class TensorNetwork(object):
 
     gauge_local_ = functools.partialmethod(gauge_local, inplace=True)
 
-    def gauge_simple_insert(self, gauges):
+    def gauge_simple_insert(self, gauges, smudge=0.0):
         """Insert the simple update style bond gauges found in ``gauges`` if
         they are present in this tensor network. The gauges inserted are also
         returned so that they can be removed later.
@@ -5878,6 +5977,7 @@ class TensorNetwork(object):
             g = gauges.get(ix, None)
             if g is None:
                 continue
+            g = (g + smudge * g[0])
             t, = self._inds_get(ix)
             t.multiply_index_diagonal_(ix, g)
             outer.append((t, ix, g))
@@ -5888,7 +5988,7 @@ class TensorNetwork(object):
             g = gauges.get(ix, None)
             if g is None:
                 continue
-            g = g ** 0.5
+            g = g**0.5
             tl, tr = self._inds_get(ix)
             tl.multiply_index_diagonal_(ix, g)
             tr.multiply_index_diagonal_(ix, g)
@@ -5896,10 +5996,25 @@ class TensorNetwork(object):
 
         return outer, inner
 
+    @staticmethod
+    def gauge_simple_remove(outer=None, inner=None):
+        """Remove the simple update style bond gauges inserted by
+        ``gauge_simple_insert``.
+        """
+        while outer:
+            t, ix, g = outer.pop()
+            t.multiply_index_diagonal_(ix, g**-1)
+        while inner:
+            (tl, tr), ix, g = inner.pop()
+            ginv = g**-1
+            tl.multiply_index_diagonal_(ix, ginv)
+            tr.multiply_index_diagonal_(ix, ginv)
+
     @contextlib.contextmanager
     def gauge_simple_temp(
         self,
         gauges,
+        smudge=1e-12,
         ungauge_outer=True,
         ungauge_inner=True,
     ):
@@ -5951,18 +6066,13 @@ class TensorNetwork(object):
             28702551.67376789
 
         """
-        outer, inner = self.gauge_simple_insert(gauges)
+        outer, inner = self.gauge_simple_insert(gauges, smudge=smudge)
         try:
             yield outer, inner
         finally:
-            while ungauge_outer and outer:
-                t, ix, g = outer.pop()
-                t.multiply_index_diagonal_(ix, g**-1)
-            while ungauge_inner and inner:
-                (tl, tr), ix, g = inner.pop()
-                ginv = g**-1
-                tl.multiply_index_diagonal_(ix, ginv)
-                tr.multiply_index_diagonal_(ix, ginv)
+            self.gauge_simple_remove(outer=outer if ungauge_outer else None,
+                                     inner=inner if ungauge_inner else None)
+
     def _contract_compressed_tid_sequence(
         self,
         seq,
@@ -5979,6 +6089,8 @@ class TensorNetwork(object):
         compress_span=False,
         compress_exclude=None,
         equalize_norms=False,
+        gauges=None,
+        gauge_smudge=1e-6,
         callback_pre_contract=None,
         callback_post_contract=None,
         callback_pre_compress=None,
@@ -5987,37 +6099,32 @@ class TensorNetwork(object):
         preserve_tensor=False,
         progbar=False,
     ):
+        if gauges is True:
+            gauges = {}
+            self.gauge_all_simple_(gauges=gauges)
+
         # the boundary - the set of intermediate tensors
         boundary = oset()
 
         def _do_contraction(tid1, tid2):
             """The inner closure that contracts the two tensors identified by
-            ``tid1`` and ``tid``.
+            ``tid1`` and ``tid2``.
             """
             if callback_pre_contract is not None:
                 callback_pre_contract(self, (tid1, tid2))
 
-            # pop out the pair of tensors
-            t1, t2 = self._pop_tensor(tid1), self._pop_tensor(tid2)
-
-            # contract them
-            t_new = tensor_contract(t1, t2, preserve_tensor=True)
-
-            # re-add the product, using the same identifier as the (inner) t2
-            tid_new = tid2
-            self.add_tensor(t_new, tid=tid_new, virtual=True)
-
-            # maybe control norm blow-up by stripping the new tensor exponent
-            if equalize_norms:
-                self.strip_exponent(t_new, equalize_norms)
+            # new tensor is now at ``tid2``
+            self._contract_between_tids(
+                tid1, tid2, equalize_norms=equalize_norms, gauges=gauges,
+            )
 
             # update the boundary
-            boundary.add(tid_new)
+            boundary.add(tid2)
 
             if callback_post_contract is not None:
-                callback_post_contract(self, tid_new)
+                callback_post_contract(self, tid2)
 
-            return tid_new, t_new
+            return tid2, self.tensor_map[tid2]
 
         # keep track of pairs along the tree - often no point compressing these
         #     (potentially, on some complex graphs, one needs to compress)
@@ -6103,7 +6210,7 @@ class TensorNetwork(object):
 
                 # first just check for accumulation of small multi-bonds
                 t_neighb = self.tensor_map[tid_neighb]
-                tensor_fuse_squeeze(t, t_neighb)
+                tensor_fuse_squeeze(t, t_neighb, gauges=gauges)
 
                 if _should_skip_compression(tid, tid_neighb):
                     continue
@@ -6123,6 +6230,8 @@ class TensorNetwork(object):
                         canonize_after_distance=canonize_after_distance,
                         canonize_after_opts=canonize_after_opts,
                         equalize_norms=equalize_norms,
+                        gauges=gauges,
+                        gauge_smudge=gauge_smudge,
                         **compress_opts
                     )
 
@@ -6178,6 +6287,9 @@ class TensorNetwork(object):
 
         if progbar:
             pbar.close()
+
+        if gauges:
+            self.gauge_simple_insert(gauges)
 
         return maybe_unwrap(
             self,
@@ -6425,7 +6537,7 @@ class TensorNetwork(object):
         """
         tn = self if inplace else self.copy()
 
-        for tid in oset.union(*map(self.ind_map.__getitem__, selectors)):
+        for tid in oset_union(map(self.ind_map.__getitem__, selectors)):
             tn.tensor_map[tid].isel_(selectors)
 
         return tn
@@ -6573,8 +6685,7 @@ class TensorNetwork(object):
         ----------
         tags : sequence of str
             The list of tags to filter the tensors by. Use ``all`` or ``...``
-            (``Ellipsis``) to contract all tensors. ``...`` will try and use a
-            'structured' contract method if possible.
+            (``Ellipsis``) to contract all tensors.
         inplace : bool, optional
             Whether to perform the contraction inplace.
         which : {'all', 'any'}
@@ -8263,7 +8374,7 @@ class TNLinearOperator(spla.LinearOperator):
         self.left_inds, self.right_inds = left_inds, right_inds
         self.ldims, ld = ldims, prod(ldims)
         self.rdims, rd = rdims, prod(rdims)
-        self.tags = oset.union(*(t.tags for t in self._tensors))
+        self.tags = oset_union(t.tags for t in self._tensors)
 
         self._kws = {'get': 'expression'}
 
