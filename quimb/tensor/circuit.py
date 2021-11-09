@@ -1839,7 +1839,7 @@ class Circuit:
             p_marginal = p_marginal**2
 
         if fix is not None:
-            p_marginal /= nfact
+            p_marginal = p_marginal / nfact
 
         return p_marginal
 
