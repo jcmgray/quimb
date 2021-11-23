@@ -6667,7 +6667,7 @@ class TensorNetwork(object):
         t2.gate_(U, bond)
 
     def insert_gauge(self, U, where1, where2, Uinv=None, tol=1e-10):
-        """Insert the gauge transformation ``U @ U^-1`` into the bond between
+        """Insert the gauge transformation ``U^-1 @ U`` into the bond between
         the tensors, ``T1`` and ``T2``, defined by ``where1`` and ``where2``.
         The resulting tensors at those locations will be ``T1 @ U^-1`` and
         ``U @ T2``.
@@ -6690,7 +6690,7 @@ class TensorNetwork(object):
 
     # ----------------------- contracting the network ----------------------- #
 
-    def contract_tags(self, tags, inplace=False, which='any', **opts):
+    def contract_tags(self, tags, which='any', inplace=False, **opts):
         """Contract the tensors that match any or all of ``tags``.
 
         Parameters

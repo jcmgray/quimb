@@ -89,6 +89,7 @@ from .tensor_gen import (
     ham_2d_ising,
     ham_2d_heis,
     ham_2d_j1j2,
+    ham_3d_heis,
 )
 from .tensor_1d import (
     TensorNetwork1D,
@@ -156,6 +157,9 @@ from .tensor_3d import (
     gen_3d_bonds,
     TensorNetwork3D,
     PEPS3D,
+)
+from .tensor_3d_tebd import (
+    LocalHam3D,
 )
 from .geometry import (
     edges_2d_square,
@@ -302,6 +306,7 @@ __all__ = (
     "gen_3d_bonds",
     "TensorNetwork3D",
     "PEPS3D",
+    "LocalHam3D",
     "edges_2d_square",
     "edges_2d_hexagonal",
     "edges_2d_triangular",

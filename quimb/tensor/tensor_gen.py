@@ -25,6 +25,7 @@ from .tensor_2d import gen_2d_bonds, TensorNetwork2D
 from .tensor_3d import TensorNetwork3D
 from .tensor_1d_tebd import LocalHam1D
 from .tensor_2d_tebd import LocalHam2D
+from .tensor_3d_tebd import LocalHam3D
 
 
 @random_seed_fn
@@ -3219,3 +3220,47 @@ def ham_2d_j1j2(Lx, Ly, j1=1.0, j2=0.5, bz=0.0, **local_ham_2d_opts):
         H1 = -bz * spin_operator('Z').real
 
     return LocalHam2D(Lx, Ly, H2=H2, H1=H1, **local_ham_2d_opts)
+
+
+def ham_3d_heis(Lx, Ly, Lz, j=1.0, bz=0.0, **local_ham_3d_opts):
+    r"""Heisenberg Hamiltonian in
+    :class:`~quimb.tensor.tensor_3d_tebd.LocalHam3D`. form.
+
+    .. math::
+
+        H_\mathrm{Heis} =
+        \sum_{<ij>} (
+            J_X \sigma^X_i \sigma^X_{j} +
+            J_Y \sigma^Y_i \sigma^Y_{j} +
+            J_Z \sigma^Z_i \sigma^Z_{j}
+            )
+        - B_Z \sum_{i} \sigma^Z_{i}
+
+    for nearest neighbors :math:`<ij>`. Note the default convention of
+    antiferromagnetic interactions and spin operators not Pauli matrices.
+
+    Parameters
+    ----------
+    Lx : int
+        The number of x-planes.
+    Ly : int
+        The number of y-planes.
+    Ly : int
+        The number of z-planes.
+    j : float or (float, float, float), optional
+        The XX, YY and ZZ interaction strength. Positive is antiferromagnetic.
+    bz : float, optional
+        The Z-magnetic field strength.
+    local_ham_3d_opts
+        Supplied to :class:`~quimb.tensor.tensor_3d_tebd.LocalHam3D`.
+
+    Returns
+    -------
+    LocalHam3D
+    """
+    H2 = ham_heis(2, j=j, cyclic=False)
+    if bz == 0.0:
+        H1 = None
+    else:
+        H1 = -bz * spin_operator('Z').real
+    return LocalHam3D(Lx, Ly, Lz, H2=H2, H1=H1, **local_ham_3d_opts)
