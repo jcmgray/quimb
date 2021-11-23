@@ -8792,6 +8792,13 @@ class IsoTensor(Tensor):
     when its data is changed.
     """
 
+    __slots__ = ('_data', '_inds', '_tags', '_left_inds', '_owners')
+
     def modify(self, **kwargs):
         kwargs.setdefault("left_inds", self.left_inds)
         super().modify(**kwargs)
+
+    def fuse(self, *args, inplace=False, **kwargs):
+        t = self if inplace else self.copy()
+        t.left_inds = None
+        return Tensor.fuse(t, *args, inplace=True, **kwargs)
