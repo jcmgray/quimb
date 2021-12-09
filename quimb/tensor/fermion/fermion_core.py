@@ -1465,7 +1465,7 @@ def _tensors_to_constructors(tensors, inds, inv=True):
     constructor: a pyblock3.algebra.fermion.Constructor object
     """
     string_inv = {"+":"-", "-":"+"}
-    pattern = ""
+    pattern = [None, ] * len(inds)
     bond_infos = [None, ] * len(inds)
     count = 0
     for T in tensors:
@@ -1474,12 +1474,13 @@ def _tensors_to_constructors(tensors, inds, inv=True):
                 ax = T.inds.index(ind)
                 bond_infos[ix] = T.data.get_bond_info(ax, flip=False)
                 if inv:
-                    pattern += string_inv[T.data.pattern[ax]]
+                    pattern[ix] = string_inv[T.data.pattern[ax]]
                 else:
-                    pattern += T.data.pattern[ax]
+                    pattern[ix] = T.data.pattern[ax]
                 count +=1
         if count == len(inds):
             break
+    pattern = "".join(pattern)
     mycon = Constructor.from_bond_infos(bond_infos, pattern)
     return mycon
 
