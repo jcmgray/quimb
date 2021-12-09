@@ -500,7 +500,7 @@ def _launch_fermion_expression(
         global_phase = (global_phase % 2)==1
         tensors[0].phase = {"global_flip": global_phase,
                             "local_inds": local_inds}
-    
+
     return tensors[0]
 
 def tensor_split(
@@ -1466,21 +1466,20 @@ def _tensors_to_constructors(tensors, inds, inv=True):
     """
     string_inv = {"+":"-", "-":"+"}
     pattern = ""
-    bond_infos = []
+    bond_infos = [None, ] * len(inds)
+    count = 0
     for T in tensors:
-        axes = [T.inds.index(ix) for ix in inds if ix in T.inds]
-        if not axes:
-            continue
-        elif len(axes)==len(inds):
-            return T.data.to_constructor(axes)
-        else:
-            for ix in axes:
-                bond = T.data.get_bond_info(ix, flip=False)
-                bond_infos.append(bond)
+        for ix, ind in enumerate(inds):
+            if ind in T.inds:
+                ax = T.inds.index(ind)
+                bond_infos[ix] = T.data.get_bond_info(ax, flip=False)
                 if inv:
-                    pattern += string_inv[T.data.pattern[ix]]
+                    pattern += string_inv[T.data.pattern[ax]]
                 else:
-                    pattern += T.data.pattern[ix]
+                    pattern += T.data.pattern[ax]
+                count +=1
+        if count == len(inds):
+            break
     mycon = Constructor.from_bond_infos(bond_infos, pattern)
     return mycon
 
