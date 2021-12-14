@@ -17,7 +17,7 @@ from ..gen.operators import (
 from ..gen.rand import randn, choice, random_seed_fn, rand_phase
 from .tensor_core import (Tensor, new_bond, TensorNetwork, rand_uuid,
                           tensor_direct_product)
-from .array_ops import asarray, sensibly_scale
+from .array_ops import asarray, sensibly_scale, reshape
 from .decomp import eigh
 from .tensor_arbgeom import TensorNetworkGen, TensorNetworkGenVector
 from .tensor_1d import MatrixProductState, MatrixProductOperator
@@ -1987,6 +1987,10 @@ def MPO_zeros(L, phys_dim=2, dtype='float64', cyclic=False, **mpo_opts):
         open boundary conditions.
     mpo_opts
         Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductOperator`.
+
+    Returns
+    -------
+    MatrixProductOperator
     """
     cyc_dim = (1,) if cyclic else ()
 
@@ -2000,13 +2004,55 @@ def MPO_zeros(L, phys_dim=2, dtype='float64', cyclic=False, **mpo_opts):
 
 
 def MPO_zeros_like(mpo, **mpo_opts):
-    """Return a zeros matrix operator with the same physical index and
+    """Return a zeros matrix product operator with the same physical index and
     inds/tags as ``mpo``.
+
+    Parameters
+    ----------
+    mpo : MatrixProductOperator
+        The MPO to copy the shape of.
+
+    Returns
+    -------
+    MatrixProductOperator
     """
     return MPO_zeros(L=mpo.L, phys_dim=mpo.phys_dim(),
                      dtype=mpo.dtype, site_tag_id=mpo.site_tag_id,
                      upper_ind_id=mpo.upper_ind_id, cyclic=mpo.cyclic,
                      lower_ind_id=mpo.lower_ind_id, **mpo_opts)
+
+
+def MPO_product_operator(
+    arrays,
+    cyclic=False,
+    **mpo_opts,
+):
+    """Return an MPO of bond dimension 1 representing the product of raw
+    operators given in ``arrays``.
+
+    Parameters
+    ----------
+    arrays : sequence of 2D array_like
+        The operators to form a tensor product of.
+    cyclic : bool, optional
+        Whether to generate a cyclic MPO or not.
+    mpo_opts
+        Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductOperator`.
+
+    Returns
+    -------
+    MatrixProductOperator
+    """
+    cyc_dim = (1,) if cyclic else ()
+
+    def gen_arrays():
+        array_i, *arrays_mid, array_f = arrays
+        yield reshape(array_i, (*cyc_dim, 1, *array_i.shape))
+        for array_m in arrays_mid:
+            yield reshape(array_m, (1, 1, *array_m.shape))
+        yield reshape(array_f, (*cyc_dim, 1, *array_f.shape))
+
+    return MatrixProductOperator(gen_arrays(), shape='lrud', **mpo_opts)
 
 
 @random_seed_fn
