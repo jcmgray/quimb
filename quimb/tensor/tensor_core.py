@@ -7900,8 +7900,17 @@ class TensorNetwork(object):
         exclude_inds=(),
     ):
         from scipy.cluster import hierarchy
+
+        if tids is None:
+            tids = self.tensor_map
         distances = self.compute_shortest_distances(tids, exclude_inds)
-        y = [x[1] for x in sorted(distances.items())]
+
+        dinf = 10 * max(distances.values())
+        y = [
+            distances.get(tuple(sorted((i, j))), dinf)
+            for i, j in itertools.combinations(tids, 2)
+        ]
+
         return hierarchy.linkage(
             y, method=method, optimal_ordering=optimal_ordering
         )
@@ -8162,6 +8171,7 @@ class TensorNetwork(object):
         progbar=False,
         rank_simplify_opts=None,
         loop_simplify_opts=None,
+        custom_methods=(),
     ):
         """Perform a series of tensor network 'simplifications' in a loop until
         there is no more reduction in the number of tensors or indices. Note
@@ -8247,7 +8257,10 @@ class TensorNetwork(object):
                     pbar.set_description(
                         f'{meth} {tn.num_tensors}, {tn.num_indices}')
 
-                if meth == 'D':
+                if meth in custom_methods:
+                    custom_methods[meth](
+                        tn, output_inds=output_inds, atol=atol, cache=cache)
+                elif meth == 'D':
                     tn.diagonal_reduce_(output_inds=ix_o, atol=atol,
                                         cache=cache)
                 elif meth == 'R':
@@ -8374,6 +8387,83 @@ class TensorNetwork(object):
 
     hyperinds_resolve_ = functools.partialmethod(
         hyperinds_resolve, inplace=True)
+
+    def compress_simplify(
+        self,
+        output_inds=None,
+        atol=1e-6,
+        simplify_sequence_a='ADCRS',
+        simplify_sequence_b='RPL',
+        hyperind_resolve_mode='tree',
+        hyperind_resolve_sort='clustering',
+        final_resolve=False,
+        max_simplification_iterations=100,
+        converged_tol=0.01,
+        equalize_norms=True,
+        progbar=False,
+        inplace=False,
+    ):
+        tn = self if inplace else self.copy()
+
+        if output_inds is None:
+            output_inds = self.outer_inds()
+
+        simplify_opts = {
+            'atol': atol,
+            'equalize_norms': equalize_norms,
+            'progbar': progbar,
+            'output_inds': output_inds,
+            'cache': set(),
+        }
+
+        # order of tensors when converting hyperinds
+        if callable(hyperind_resolve_sort) or (hyperind_resolve_sort is None):
+            sorter = hyperind_resolve_sort
+        elif hyperind_resolve_sort == 'centrality':
+            from cotengra.cotengra import nodes_to_centrality
+
+            def sorter(tid):
+                return cents[tid]
+        elif hyperind_resolve_sort == 'random':
+            import random
+
+            def sorter(tid):
+                return random.random()
+
+        else:
+            sorter = hyperind_resolve_sort
+
+        tn.full_simplify_(simplify_sequence_a, **simplify_opts)
+        for i in range(max_simplification_iterations):
+            nv, ne = tn.num_tensors, tn.num_indices
+            if hyperind_resolve_sort == 'centrality':
+                # recompute centralities
+                cents = nodes_to_centrality(
+                    {tid: t.inds for tid, t in tn.tensor_map.items()}
+                )
+            tn.hyperinds_resolve_(hyperind_resolve_mode, sorter=sorter)
+            tn.full_simplify_(simplify_sequence_b, **simplify_opts)
+            tn.full_simplify_(simplify_sequence_a, **simplify_opts)
+            if (
+                (tn.num_tensors == 1) or
+                (tn.num_tensors > (1 - converged_tol) * nv and
+                 tn.num_indices > (1 - converged_tol) * ne)
+            ):
+                break
+
+        if final_resolve:
+            if hyperind_resolve_sort == 'centrality':
+                # recompute centralities
+                cents = nodes_to_centrality(
+                    {tid: t.inds for tid, t in tn.tensor_map.items()}
+                )
+            tn.hyperinds_resolve_(hyperind_resolve_mode, sorter=sorter)
+            tn.full_simplify_(simplify_sequence_b, **simplify_opts)
+
+        return tn
+
+    compress_simplify_ = functools.partialmethod(
+        compress_simplify, inplace=True)
 
     def max_bond(self):
         """Return the size of the largest bond in this network.
