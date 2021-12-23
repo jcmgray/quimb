@@ -108,6 +108,17 @@ devhelp:
 	@echo "# ln -s $(BUILDDIR)/devhelp $$HOME/.local/share/devhelp/quimb"
 	@echo "# devhelp"
 
+docset:
+	make html SPHINXOPTS="-t nobars"
+	$(DOC2DASH) --name quimb --icon _static/quimb_logo.png \
+	    --index-page index.html --online-redirect-url \
+		https://quimb.readthedocs.io/ --destination $(BUILDDIR) \
+		_build/html-nobars/
+	@echo "Build finished; the DocSet file is in $(BUILDDIR)."
+	@echo "Rebuild the html documentation to use it"
+	@echo "# make clean"
+	@echo "# make html"
+
 epub:
 	$(SPHINXBUILD) -b epub $(ALLSPHINXOPTS) $(BUILDDIR)/epub
 	@echo
