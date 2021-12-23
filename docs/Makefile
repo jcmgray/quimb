@@ -6,6 +6,7 @@ SPHINXOPTS    =
 SPHINXBUILD   = sphinx-build
 PAPER         =
 BUILDDIR      = _build
+DOC2DASH      = doc2dash
 
 # User-friendly check for sphinx-build
 ifeq ($(shell which $(SPHINXBUILD) >/dev/null 2>&1; echo $$?), 1)
@@ -113,7 +114,7 @@ docset:
 	$(DOC2DASH) --name quimb --icon _static/quimb_logo.png \
 	    --index-page index.html --online-redirect-url \
 		https://quimb.readthedocs.io/ --destination $(BUILDDIR) \
-		_build/html-nobars/
+		_build/html/
 	@echo "Build finished; the DocSet file is in $(BUILDDIR)."
 	@echo "Rebuild the html documentation to use it"
 	@echo "# make clean"
