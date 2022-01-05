@@ -26,7 +26,8 @@ from .tensor_core import (
     oset_union,
     bonds_size,
 )
-from .tensor_1d import maybe_factor_gate_into_tensor, rand_padder
+from .tensor_arbgeom import tensor_network_apply_op_vec
+from .tensor_1d import maybe_factor_gate_into_tensor
 from . import decomp
 
 
@@ -243,6 +244,7 @@ class TensorNetwork2D(TensorNetwork):
 
     """
 
+    _NDIMS = 2
     _EXTRA_PROPS = (
         '_site_tag_id',
         '_row_tag_id',
@@ -2674,10 +2676,12 @@ class TensorNetwork2DVector(TensorNetwork2D,
             inplace=inplace
         )
 
+    reindex_sites_ = functools.partialmethod(reindex_sites, inplace=True)
+
     @site_ind_id.setter
     def site_ind_id(self, new_id):
         if self._site_ind_id != new_id:
-            self.reindex_sites(new_id, inplace=True)
+            self.reindex_sites_(new_id)
             self._site_ind_id = new_id
 
     @property
@@ -3202,9 +3206,69 @@ class TensorNetwork2DOperator(TensorNetwork2D,
         '_lower_ind_id',
     )
 
-    @property
-    def lower_ind_id(self):
+    def reindex_lower_sites(self, new_id, where=None, inplace=False):
+        """Update the lower site index labels to a new string specifier.
+
+        Parameters
+        ----------
+        new_id : str
+            A string with a format placeholder to accept an int, e.g.
+            ``"ket{},{}"``.
+        where : None or slice
+            Which sites to update the index labels on. If ``None`` (default)
+            all sites.
+        inplace : bool
+            Whether to reindex in place.
+        """
+        if where is None:
+            where = self.gen_site_coos()
+        return self.reindex({
+            self.lower_ind(i, j): new_id.format(i, j)
+            for i, j in where
+        }, inplace=inplace)
+
+    reindex_lower_sites_ = functools.partialmethod(
+        reindex_lower_sites, inplace=True)
+
+    def reindex_upper_sites(self, new_id, where=None, inplace=False):
+        """Update the upper site index labels to a new string specifier.
+
+        Parameters
+        ----------
+        new_id : str
+            A string with a format placeholder to accept an int, e.g.
+            ``"ket{},{}"``.
+        where : None or slice
+            Which sites to update the index labels on. If ``None`` (default)
+            all sites.
+        inplace : bool
+            Whether to reindex in place.
+        """
+        if where is None:
+            where = self.gen_site_coos()
+        return self.reindex({
+            self.upper_ind(i, j): new_id.format(i, j)
+            for i, j in where
+        }, inplace=inplace)
+
+    reindex_upper_sites_ = functools.partialmethod(
+        reindex_upper_sites, inplace=True)
+
+    def _get_lower_ind_id(self):
         return self._lower_ind_id
+
+    def _set_lower_ind_id(self, new_id):
+        if new_id == self._upper_ind_id:
+            raise ValueError("Setting the same upper and lower index ids will"
+                             " make the two ambiguous.")
+
+        if self._lower_ind_id != new_id:
+            self.reindex_lower_sites_(new_id)
+            self._lower_ind_id = new_id
+
+    lower_ind_id = property(
+        _get_lower_ind_id, _set_lower_ind_id,
+        doc="The string specifier for the lower phyiscal indices")
 
     def lower_ind(self, i, j):
         if not isinstance(i, str):
@@ -3219,9 +3283,21 @@ class TensorNetwork2DOperator(TensorNetwork2D,
         """
         return tuple(starmap(self.lower_ind, self.gen_site_coos()))
 
-    @property
-    def upper_ind_id(self):
+    def _get_upper_ind_id(self):
         return self._upper_ind_id
+
+    def _set_upper_ind_id(self, new_id):
+        if new_id == self._lower_ind_id:
+            raise ValueError("Setting the same upper and lower index ids will"
+                             " make the two ambiguous.")
+
+        if self._upper_ind_id != new_id:
+            self.reindex_upper_sites_(new_id)
+            self._upper_ind_id = new_id
+
+    upper_ind_id = property(
+        _get_upper_ind_id, _set_upper_ind_id,
+        doc="The string specifier for the upper phyiscal indices")
 
     def upper_ind(self, i, j):
         if not isinstance(i, str):
@@ -3303,35 +3379,53 @@ class TensorNetwork2DFlat(TensorNetwork2D,
 
         Returns
         -------
-        expanded : TensorNetwork2DFlat
+        tn : TensorNetwork2DFlat
         """
+        tn = super().expand_bond_dimension(
+            new_bond_dim=new_bond_dim,
+            rand_strength=rand_strength,
+            inplace=inplace,
+        )
 
-        expanded = self if inplace else self.copy()
+        if bra is not None:
+            for coo in tn.gen_site_coos():
+                bra[coo].modify(data=tn[coo].data.conj())
 
-        for coo_a in self.gen_site_coos():
-            tensor = expanded[coo_a]
-            inds_to_expand = [
-                self.bond(coo_a, coo_b)
-                for coo_b in nearest_neighbors(coo_a)
-                if self.valid_coo(coo_b)
-            ]
+        return tn
 
-            pads = [(0, 0) if i not in inds_to_expand else
-                    (0, max(new_bond_dim - d, 0))
-                    for d, i in zip(tensor.shape, tensor.inds)]
+    def compress(
+        self,
+        max_bond=None,
+        cutoff=1e-10,
+        equalize_norms=False,
+        row_sweep='right',
+        col_sweep='up',
+        **compress_opts
+    ):
+        """Compress all bonds in this flat 2D tensor network.
 
-            if rand_strength > 0:
-                edata = do('pad', tensor.data, pads, mode=rand_padder,
-                           rand_strength=rand_strength)
-            else:
-                edata = do('pad', tensor.data, pads, mode='constant')
-
-            tensor.modify(data=edata)
-
-            if bra is not None:
-                bra[coo_a].modify(data=tensor.data.conj())
-
-        return expanded
+        Parameters
+        ----------
+        max_bond : int, optional
+            The maximum boundary dimension, AKA 'chi'. The default of ``None``
+            means truncation is left purely to ``cutoff`` and is not
+            recommended in 2D.
+        cutoff : float, optional
+            Cut-off value to used to truncate singular values in the boundary
+            contraction.
+        compress_opts : None or dict, optional
+            Supplied to
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.compress_between`.
+        """
+        compress_opts.setdefault('absorb', 'both')
+        for i in range(self.Lx):
+            self.compress_row(
+                i, sweep=row_sweep, max_bond=max_bond, cutoff=cutoff,
+                equalize_norms=equalize_norms, compress_opts=compress_opts)
+        for j in range(self.Ly):
+            self.compress_column(
+                j, sweep=col_sweep, max_bond=max_bond, cutoff=cutoff,
+                equalize_norms=equalize_norms, compress_opts=compress_opts)
 
 
 class PEPS(TensorNetwork2DVector,
@@ -3883,6 +3977,31 @@ class PEPO(TensorNetwork2DOperator,
         """In-place PEPO addition.
         """
         return self.add_PEPO(other, inplace=True)
+
+    _apply_peps = tensor_network_apply_op_vec
+
+    def apply(self, other, compress=False, **compress_opts):
+        """Act with this PEPO on ``other``, returning a new TN like ``other``
+        with the same outer indices.
+
+        Parameters
+        ----------
+        other : PEPS
+            The TN to act on.
+        compress : bool, optional
+            Whether to compress the resulting TN.
+        compress_opts
+            Supplied to
+            :meth:`~quimb.tensor.tensor_2d.TensorNetwork2DFlat.compress`.
+
+        Returns
+        -------
+        TensorNetwork2DFlat
+        """
+        if isinstance(other, PEPS):
+            return self._apply_peps(other, compress=compress, **compress_opts)
+
+        raise TypeError("Can only apply PEPO to PEPS.")
 
     def show(self):
         """Print a unicode schematic of this PEPO and its bond dimensions.

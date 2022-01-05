@@ -88,7 +88,7 @@ def heis_pbc():
         return psi / factor**0.5
 
     def loss_fn(psi, H):
-        k, H, b = qtn.align_TN_1D(psi, H, psi)
+        k, H, b = qtn.tensor_network_align(psi, H, psi)
         energy = (k & H & b).contract(all, optimize='random-greedy')
         return energy
 
@@ -112,7 +112,7 @@ def ham_mbl_pbc_complex():
         return psi * factor**-0.5
 
     def loss_fn(psi, H):
-        k, H, b = qtn.align_TN_1D(psi, H, psi.H)
+        k, H, b = qtn.tensor_network_align(psi, H, psi.H)
         energy = (k & H & b).contract(all, optimize='random-greedy')
         return real(energy)
 

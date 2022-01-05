@@ -81,7 +81,7 @@ def _renorm_singular_vals(s, n_chi, renorm_power):
 @njit  # pragma: no cover
 def _trim_and_renorm_SVD_numba(U, s, VH, cutoff, cutoff_mode,
                                max_bond, absorb, renorm_power):
-    if cutoff > 0.0:
+    if (cutoff > 0.0) or (renorm_power > 0):
         n_chi = _trim_singular_vals_numba(s, cutoff, cutoff_mode)
 
         if max_bond > 0:
@@ -96,7 +96,7 @@ def _trim_and_renorm_SVD_numba(U, s, VH, cutoff, cutoff_mode,
             U = U[..., :n_chi]
             VH = VH[:n_chi, ...]
 
-    elif max_bond != -1:
+    elif (max_bond != -1) and (max_bond < s.shape[0]):
         U = U[..., :max_bond]
         s = s[:max_bond]
         VH = VH[:max_bond, ...]
@@ -119,7 +119,7 @@ def _trim_and_renorm_SVD_numba(U, s, VH, cutoff, cutoff_mode,
 
 def _trim_and_renorm_SVD(U, s, VH, cutoff, cutoff_mode,
                          max_bond, absorb, renorm_power):
-    if cutoff > 0.0:
+    if (cutoff > 0.0) or (renorm_power > 0):
         if cutoff_mode == 1:
             n_chi = do('count_nonzero', s > cutoff)
 
@@ -145,19 +145,21 @@ def _trim_and_renorm_SVD(U, s, VH, cutoff, cutoff_mode,
         if max_bond > 0:
             n_chi = min(n_chi, max_bond)
 
-        if n_chi < s.shape[0]:
-            s = s[:n_chi]
-            U = U[..., :n_chi]
-            VH = VH[:n_chi, ...]
+    elif max_bond > 0:
+        # only maximum bond specified
+        n_chi = max_bond
+    else:
+        # neither maximum bond dimension nor cutoff specified
+        n_chi = s.shape[0]
+
+    if n_chi < s.shape[0]:
+        s = s[:n_chi]
+        U = U[..., :n_chi]
+        VH = VH[:n_chi, ...]
 
         if renorm_power > 0:
             norm = (tot / csp[n_chi - 1]) ** (1 / p)
             s *= norm
-
-    elif max_bond > 0:
-        s = s[:max_bond]
-        U = U[..., :max_bond]
-        VH = VH[:max_bond, ...]
 
     # XXX: tensorflow can't multiply mixed dtypes
     if infer_backend(s) == 'tensorflow':

@@ -29,6 +29,8 @@ from .tensor_core import (
     Tensor,
     TensorNetwork,
     PTensor,
+    IsoTensor,
+    COPY_tensor,
     oset,
 )
 from .tensor_gen import (
@@ -70,6 +72,7 @@ from .tensor_gen import (
     MPO_zeros_like,
     MPO_rand,
     MPO_rand_herm,
+    MPO_product_operator,
     SpinHam,
     SpinHam1D,
     MPO_ham_ising,
@@ -87,6 +90,7 @@ from .tensor_gen import (
     ham_2d_ising,
     ham_2d_heis,
     ham_2d_j1j2,
+    ham_3d_heis,
 )
 from .tensor_1d import (
     TensorNetwork1D,
@@ -129,6 +133,15 @@ from .circuit_gen import (
 from .optimize import (
     TNOptimizer,
 )
+from .tensor_arbgeom import (
+    tensor_network_align,
+    tensor_network_apply_op_vec,
+)
+from .tensor_arbgeom_tebd import (
+    LocalHamGen,
+    TEBDGen,
+    SimpleUpdateGen,
+)
 from .tensor_2d import (
     gen_2d_bonds,
     TensorNetwork2D,
@@ -145,6 +158,9 @@ from .tensor_3d import (
     gen_3d_bonds,
     TensorNetwork3D,
     PEPS3D,
+)
+from .tensor_3d_tebd import (
+    LocalHam3D,
 )
 from .geometry import (
     edges_2d_square,
@@ -191,6 +207,8 @@ __all__ = (
     "TensorNetwork",
     "TNLinearOperator1D",
     "PTensor",
+    "IsoTensor",
+    "COPY_tensor",
     "oset",
     "rand_tensor",
     "rand_phased",
@@ -230,6 +248,7 @@ __all__ = (
     "MPO_zeros_like",
     "MPO_rand",
     "MPO_rand_herm",
+    "MPO_product_operator",
     "SpinHam",
     "SpinHam1D",
     "MPO_ham_ising",
@@ -273,6 +292,11 @@ __all__ = (
     "circ_ansatz_1D_rand",
     "circ_qaoa",
     "TNOptimizer",
+    "tensor_network_align",
+    "tensor_network_apply_op_vec",
+    "LocalHamGen",
+    "TEBDGen",
+    "SimpleUpdateGen",
     "gen_2d_bonds",
     "TensorNetwork2D",
     "PEPS",
@@ -284,6 +308,7 @@ __all__ = (
     "gen_3d_bonds",
     "TensorNetwork3D",
     "PEPS3D",
+    "LocalHam3D",
     "edges_2d_square",
     "edges_2d_hexagonal",
     "edges_2d_triangular",

@@ -405,6 +405,36 @@ def iswap(dtype=complex, **kwargs):
     return iswap
 
 
+def ncontrolled_gate(ncontrol, gate, dtype=complex, sparse=False):
+    """Build an n-qubit controlled gate. The control qubits are the
+    first ``ncontrol`` qubits.
+
+    Parameters
+    ----------
+    ncontrol : int
+        The number of control qubits.
+    gate : array_like
+        The gate to apply to the controlled qubit(s).
+    dtype : str
+        The data type of the returned matrix.
+    sparse : bool
+        Whether to return a sparse matrix.
+
+    Returns
+    -------
+    C : qarray
+        The n-qubit controlled gate.
+    """
+    dG = gate.shape[0]
+    d = 2**ncontrol * dG
+    # build gate dense and dtype='complex128'
+    op = np.identity(d, dtype='complex128')
+    op[-dG:, -dG:] = gate
+    # then convert to desired dtype and format
+    op = qu(op, dtype=dtype, sparse=sparse)
+    return op
+
+
 @functools.lru_cache(maxsize=16)
 def controlled(s, dtype=complex, sparse=False):
     """Construct a controlled pauli gate for two qubits.
@@ -418,14 +448,13 @@ def controlled(s, dtype=complex, sparse=False):
 
     Returns
     -------
-    C : immutable operator
+    C : qarray
         The controlled two-qubit gate operator.
     """
     # alias not and NOT to x
     s = {'NOT': 'x', 'not': 'x'}.get(s, s)
-    kws = {'dtype': dtype, 'sparse': sparse}
-    op = ((qu([1, 0], qtype='dop', **kws) & eye(2, **kws)) +
-          (qu([0, 1], qtype='dop', **kws) & pauli(s, **kws)))
+    gate = pauli(s)
+    op = ncontrolled_gate(1, gate, dtype=dtype, sparse=sparse)
     make_immutable(op)
     return op
 
@@ -456,6 +485,48 @@ def cZ(dtype=complex, sparse=False):
     """The controlled-Z gate.
     """
     return controlled('Z', dtype=dtype, sparse=sparse)
+
+
+@functools.lru_cache(8)
+def ccX(dtype=complex, sparse=False):
+    """The double controlled X gate.
+    """
+    op = ncontrolled_gate(2, pauli('X'), dtype=dtype, sparse=sparse)
+    make_immutable(op)
+    return op
+
+
+@functools.lru_cache(8)
+def ccY(dtype=complex, sparse=False):
+    """The double controlled Y gate.
+    """
+    op = ncontrolled_gate(2, pauli('Y'), dtype=dtype, sparse=sparse)
+    make_immutable(op)
+    return op
+
+
+@functools.lru_cache(8)
+def ccZ(dtype=complex, sparse=False):
+    """The double controlled Z gate.
+    """
+    op = ncontrolled_gate(2, pauli('Z'), dtype=dtype, sparse=sparse)
+    make_immutable(op)
+    return op
+
+
+@functools.lru_cache(8)
+def controlled_swap(dtype=complex, sparse=False):
+    """The controlled swap or Fredkin gate. The control qubit is the first
+    qubit, if in state |1> a swap is performed on the last two qubits.
+    """
+    op = ncontrolled_gate(1, swap(), dtype=dtype, sparse=sparse)
+    make_immutable(op)
+    return op
+
+
+cswap = controlled_swap
+fredkin = controlled_swap
+toffoli = ccX
 
 
 # --------------------------------------------------------------------------- #

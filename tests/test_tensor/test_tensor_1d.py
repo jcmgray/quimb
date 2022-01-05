@@ -5,10 +5,10 @@ from numpy.testing import assert_allclose
 
 import quimb as qu
 from quimb.tensor import (
-    MatrixProductState, MatrixProductOperator, align_TN_1D, MPS_rand_state,
-    MPO_identity, MPO_identity_like, MPO_zeros, MPO_zeros_like, MPO_rand,
-    MPO_rand_herm, MPO_ham_heis, MPS_neel_state, MPS_zero_state, bonds,
-    MPS_computational_state, Dense1D)
+    MatrixProductState, MatrixProductOperator, tensor_network_align,
+    MPS_rand_state, MPO_identity, MPO_identity_like, MPO_zeros, MPO_zeros_like,
+    MPO_rand, MPO_rand_herm, MPO_ham_heis, MPS_neel_state, MPS_zero_state,
+    bonds, MPS_computational_state, Dense1D)
 from quimb.tensor.tensor_core import oset
 
 
@@ -725,7 +725,7 @@ class TestMatrixProductOperator:
         b = MPS_rand_state(13, 7)
         o1 = k @ b
         i = MPO_identity(13)
-        k, i, b = align_TN_1D(k, i, b)
+        k, i, b = tensor_network_align(k, i, b)
         o2 = (k & i & b) ^ ...
         assert_allclose(o1, o2)
 

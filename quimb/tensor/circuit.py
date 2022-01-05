@@ -1,3 +1,4 @@
+import re
 import math
 import numbers
 import operator
@@ -1838,7 +1839,7 @@ class Circuit:
             p_marginal = p_marginal**2
 
         if fix is not None:
-            p_marginal /= nfact
+            p_marginal = p_marginal / nfact
 
         return p_marginal
 
@@ -1847,7 +1848,7 @@ class Circuit:
     compute_marginal_tn = functools.partialmethod(
         compute_marginal, rehearse="tn")
 
-    def calc_qubit_ordering(self, qubits=None):
+    def calc_qubit_ordering(self, qubits=None, method='greedy-lightcone'):
         """Get a order to measure ``qubits`` in, by greedily choosing whichever
         has the smallest reverse lightcone followed by whichever expands this
         lightcone *least*.
@@ -1870,24 +1871,40 @@ class Circuit:
         else:
             qubits = tuple(sorted(qubits))
 
-        key = ('lightcone_ordering', qubits)
+        key = ('lightcone_ordering', method, qubits)
 
         # check the cache first
         if key in self._storage:
             return self._storage[key]
 
-        cone = set()
-        lctgs = {i: set(self.get_reverse_lightcone_tags(i)) for i in qubits}
+        if method == 'greedy-lightcone':
+            cone = set()
+            lctgs = {
+                i: set(self.get_reverse_lightcone_tags(i))
+                for i in qubits
+            }
 
-        order = []
-        while lctgs:
-            # get the next qubit which adds least num gates to lightcone
-            next_qubit = min(lctgs, key=lambda i: len(lctgs[i] - cone))
-            cone |= lctgs.pop(next_qubit)
-            order.append(next_qubit)
+            order = []
+            while lctgs:
+                # get the next qubit which adds least num gates to lightcone
+                next_qubit = min(lctgs, key=lambda i: len(lctgs[i] - cone))
+                cone |= lctgs.pop(next_qubit)
+                order.append(next_qubit)
+
+        else:
+            # use graph distance based hierachical clustering
+            psi = self.get_psi_simplified('R')
+            qubit_inds = tuple(map(psi.site_ind, qubits))
+            tids = psi._get_tids_from_inds(qubit_inds, 'any')
+            matcher = re.compile(psi.site_ind_id.format(r'(\d+)'))
+            order = []
+            for tid in psi.compute_hierarchical_ordering(tids, method=method):
+                t = psi.tensor_map[tid]
+                for ind in t.inds:
+                    for sq in matcher.findall(ind):
+                        order.append(int(sq))
 
         order = self._storage[key] = tuple(order)
-
         return order
 
     def _parse_qubits_order(self, qubits=None, order=None):

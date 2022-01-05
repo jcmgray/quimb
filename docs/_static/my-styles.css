@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible&family=Roboto+Mono:wght@400;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400;1,700&family=IBM+Plex+Mono:ital,wght@0,400;0,600;1,400;1,600&display=swap');
 
 code {
     color: #ed7a00;
@@ -11,7 +11,7 @@ code {
 }
 
 h1, h2, h3 {
-    font-family: 'Roboto Mono', monospace;
+    font-family: 'IBM Plex Mono', monospace;
     font-weight: bold;
     color: var(--headercolor) !important;
 }
@@ -21,7 +21,7 @@ body {
 }
 
 code, kbd, pre, samp {
-    font-family: 'Roboto Mono', monospace;
+    font-family: 'IBM Plex Mono', monospace;
 }
 
 .content {

@@ -1,5 +1,7 @@
-import pytest
 import itertools
+
+import pytest
+from numpy.testing import assert_allclose
 
 import quimb as qu
 import quimb.tensor as qtn
@@ -302,7 +304,7 @@ class Test2DContract:
         assert e == pytest.approx(ex, rel=1e-2)
 
 
-class TestPEPOConstruct:
+class TestPEPO:
 
     @pytest.mark.parametrize('Lx', [3, 4, 5])
     @pytest.mark.parametrize('Ly', [3, 4, 5])
@@ -352,6 +354,18 @@ class TestPEPOConstruct:
         pab = pa + pb
         assert pab.max_bond() == 5
         assert pab @ pc == pytest.approx(pa @ pc + pb @ pc)
+
+    def test_apply_pepo(self):
+        A = qtn.PEPO.rand(Lx=3, Ly=2, bond_dim=2, seed=1)
+        x = qtn.PEPS.rand(Lx=3, Ly=2, bond_dim=2, seed=0)
+        y = A.apply(x)
+        assert y.num_indices == x.num_indices
+        Ad = A.to_dense()
+        xd = x.to_dense()
+        yd = y.to_dense()
+        assert_allclose(Ad @ xd, yd)
+        yc = A.apply(x, compress=True, max_bond=3)
+        assert yc.max_bond() == 3
 
 
 class TestMisc:
