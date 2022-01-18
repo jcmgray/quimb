@@ -5,3 +5,8 @@
 .container-xl {
 	max-width: max-content;
 }
+
+.col-md-9 {
+	max-width: 100%;
+	flex: 0 0 100%;
+}
