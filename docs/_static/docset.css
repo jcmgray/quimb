@@ -1,3 +1,7 @@
 #site-navigation, .topbar {
 	display: none;
 }
+
+.container-xl {
+	max-width: max-content;
+}
