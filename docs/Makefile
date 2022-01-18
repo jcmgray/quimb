@@ -57,6 +57,11 @@ html:
 	@echo
 	@echo "Build finished. The HTML pages are in $(BUILDDIR)/html."
 
+html-docset:
+	$(SPHINXBUILD) -b html -t docset $(ALLSPHINXOPTS) $(BUILDDIR)/html-docset
+	@echo
+	@echo "Build finished. The HTML pages are in $(BUILDDIR)/html-docset."
+
 dirhtml:
 	$(SPHINXBUILD) -b dirhtml $(ALLSPHINXOPTS) $(BUILDDIR)/dirhtml
 	@echo
@@ -109,16 +114,12 @@ devhelp:
 	@echo "# ln -s $(BUILDDIR)/devhelp $$HOME/.local/share/devhelp/quimb"
 	@echo "# devhelp"
 
-docset:
-	make html SPHINXOPTS="-t nobars"
+docset: html-docset
 	$(DOC2DASH) --name quimb --icon _static/quimb_logo.png \
 	    --index-page index.html --online-redirect-url \
 		https://quimb.readthedocs.io/ --destination $(BUILDDIR) \
-		_build/html/
-	@echo "Build finished; the DocSet file is in $(BUILDDIR)."
-	@echo "Rebuild the html documentation to use it"
-	@echo "# make clean"
-	@echo "# make html"
+		_build/html-docset/
+	@echo "Build finished; the DocSet file is in $(BUILDDIR)/quimb.docset."
 
 epub:
 	$(SPHINXBUILD) -b epub $(ALLSPHINXOPTS) $(BUILDDIR)/epub

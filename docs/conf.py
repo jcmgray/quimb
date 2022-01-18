@@ -176,7 +176,7 @@ def setup(app):
     app.add_css_file("my-styles.css")
 
     # Hide site-navigation sidebar and topbar. Used for DocSet generation.
-    if tags.has("nobars"):
+    if tags.has("docset"):
         app.add_css_file("docset.css")
 
 
