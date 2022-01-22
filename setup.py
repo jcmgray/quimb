@@ -58,6 +58,7 @@ setup(
             'ipython>=7.0',
             'autoray>=0.2.0',
             'opt_einsum>=3.2',
+            'doc2dash>=2.5.1',
         ],
     },
     scripts=['bin/quimb-mpi-python'],
