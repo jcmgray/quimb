@@ -43,6 +43,12 @@ Building the DocSet requires `doc2dash >= 2.4.1 <https://github.com/hynek/doc2da
 2. Run ``make docset`` in the ``quimb/docs`` folder.
 3. Open the file ``quimb/docs/_build/quimb.docset`` to load it to Dash.
 
+Afterwards, in order to update the Dash repository with a the DocSet after a new release:
+
+1. Clone the `Dash-User-Contributions <https://github.com/Kapeli/Dash-User-Contributions>`_.
+2. Go to `docsets/quimb`, create a new directory with the version name inside the `versions` dir and copy there the generated DocSet.
+3. Edit the `docset.json`: update the `"version"` and add a new element below `"specific_versions"`.
+4. Commit and create a new Pull Request.
 
 Minting a Release
 =================
