@@ -6,6 +6,7 @@ SPHINXOPTS    =
 SPHINXBUILD   = sphinx-build
 PAPER         =
 BUILDDIR      = _build
+DOC2DASH      = doc2dash
 
 # User-friendly check for sphinx-build
 ifeq ($(shell which $(SPHINXBUILD) >/dev/null 2>&1; echo $$?), 1)
@@ -55,6 +56,11 @@ html:
 	$(SPHINXBUILD) -b html $(ALLSPHINXOPTS) $(BUILDDIR)/html
 	@echo
 	@echo "Build finished. The HTML pages are in $(BUILDDIR)/html."
+
+html-docset:
+	$(SPHINXBUILD) -b html -t docset $(ALLSPHINXOPTS) $(BUILDDIR)/html-docset
+	@echo
+	@echo "Build finished. The HTML pages are in $(BUILDDIR)/html-docset."
 
 dirhtml:
 	$(SPHINXBUILD) -b dirhtml $(ALLSPHINXOPTS) $(BUILDDIR)/dirhtml
@@ -107,6 +113,13 @@ devhelp:
 	@echo "# mkdir -p $$HOME/.local/share/devhelp/quimb"
 	@echo "# ln -s $(BUILDDIR)/devhelp $$HOME/.local/share/devhelp/quimb"
 	@echo "# devhelp"
+
+docset: html-docset
+	$(DOC2DASH) --name quimb --icon _static/quimb_logo.png \
+	    --index-page index.html --online-redirect-url \
+		https://quimb.readthedocs.io/ --destination $(BUILDDIR) \
+		_build/html-docset/
+	@echo "Build finished; the DocSet file is in $(BUILDDIR)/quimb.docset."
 
 epub:
 	$(SPHINXBUILD) -b epub $(ALLSPHINXOPTS) $(BUILDDIR)/epub
