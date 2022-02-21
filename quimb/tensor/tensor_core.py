@@ -237,6 +237,10 @@ def get_contraction(eq, *shapes, cache=True, get='expr',
         expr = expr_fn(eq, *shapes, optimize=optimize, **kwargs)
         return expr
 
+    # check for user-supplied cache kwarg
+    if 'cache' in kwargs:
+        cache = kwargs['cache']
+
     # make sure shapes are hashable + concrete python ints
     if not (
         isinstance(shapes[0], tuple) and
