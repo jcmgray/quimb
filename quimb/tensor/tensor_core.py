@@ -3598,8 +3598,8 @@ class TensorNetwork(object):
     multiply_ = functools.partialmethod(multiply, inplace=True)
 
     def multiply_each(self, x, inplace=False):
-        """Scalar multiplication of each tensor in this 
-        tensor network with ``x``. If trying to spread a 
+        """Scalar multiplication of each tensor in this
+        tensor network with ``x``. If trying to spread a
         multiplicative factor ``fac`` uniformly over all tensors in the
         network and the number of tensors is large, then calling
         ``multiply(fac)`` can be inaccurate due to precision loss.
