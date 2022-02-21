@@ -320,7 +320,7 @@ def ghz_state(n, **kwargs):
     vector
     """
     psi = (basis_vec(0, 2**n) +
-            basis_vec(2**n - 1, 2**n)) / 2.**.5
+           basis_vec(2**n - 1, 2**n)) / 2.**.5
     return qu(psi, **kwargs)
 
 
@@ -397,7 +397,7 @@ def perm_state(ps):
     return sum(terms()) / math.factorial(n)**0.5
 
 
-def graph_state_1d(n, cyclic=True, sparse=False):
+def graph_state_1d(n, cyclic=False, sparse=False):
     """Graph State on a line.
 
     Parameters

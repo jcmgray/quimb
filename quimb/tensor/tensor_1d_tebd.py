@@ -1,20 +1,21 @@
 import numpy as np
 
-import quimb as qu
+from ..utils import ensure_dict, continuous_progbar, deprecated
+from ..utils import progbar as Progbar
+from .array_ops import norm_fro
+from .tensor_arbgeom_tebd import LocalHamGen
 
 
-class NNI:
+class LocalHam1D(LocalHamGen):
     """An simple interacting hamiltonian object used, for instance, in TEBD.
-    Once instantiated, the ``NNI`` hamiltonian can be called like ``H_nni()``
-    to get the default two-site term, or ``H_nni((i, j))`` to get the term
-    specific to sites ``i`` and ``j``.
-
-    If the terms supplied are anything but a single, two-site term, then the
-    length of hamiltonian ``n`` must be specified too as the gates will no
-    longer be completely translationally invariant.
+    Once instantiated, the ``LocalHam1D`` hamiltonian stores a single term
+    per pair of sites, cached versions of which can be retrieved like
+    ``H.get_gate_expm((i, i + 1), -1j * 0.5)`` etc.
 
     Parameters
     ----------
+    L : int
+        The size of the hamiltonian.
     H2 : array_like or dict[tuple[int], array_like]
         The sum of interaction terms. If a dict is given, the keys should be
         nearest neighbours like ``(10, 11)``, apart from any default term which
@@ -25,150 +26,81 @@ class NNI:
         integer sites, apart from any default term which should have the key
         ``None``, and the values should be the sum of single site terms for
         that site.
-    n : int, optional
-        The size of the hamiltonian.
     cyclic : bool, optional
         Whether the hamiltonian has periodic boundary conditions or not.
 
     Attributes
     ----------
-    special_sites : set[(int, int)]
-        This keeps track of which pairs of sites don't just have the default
-        term
+    terms : dict[tuple[int], array]
+        The terms in the hamiltonian, combined from the inputs such that there
+        is a single term per pair.
 
     Examples
     --------
-    A simple, translationally invariant, interaction-only ``NNI``::
+    A simple, translationally invariant, interaction-only ``LocalHam1D``::
 
         >>> XX = pauli('X') & pauli('X')
         >>> YY = pauli('Y') & pauli('Y')
-        >>> H_nni = NNI(XX + YY)
+        >>> ham = LocalHam1D(L=100, H2=XX + YY)
 
-    The same, but with a translationally invariant field as well (need to set
-    ``n`` since the last gate will be different)::
+    The same, but with a translationally invariant field as well::
 
         >>> Z = pauli('Z')
-        >>> H_nni = NNI(H2=XX + YY, H1=Z, n=100)
+        >>> ham = LocalHam1D(L=100, H2=XX + YY, H1=Z)
 
     Specifying a default interaction and field, with custom values set for some
     sites::
 
         >>> H2 = {None: XX + YY, (49, 50): (XX + YY) / 2}
         >>> H1 = {None: Z, 49: 2 * Z, 50: 2 * Z}
-        >>> H_nni = NNI(H2=H2, H1=H1, n=100)
+        >>> ham = LocalHam1D(L=100, H2=H2, H1=H1)
 
     Specifying the hamiltonian entirely through site specific interactions and
     fields::
 
         >>> H2 = {(i, i + 1): XX + YY for i in range(99)}
         >>> H1 = {i: Z for i in range(100)}
-        >>> H_nni = NNI(H2=H2, H1=H1, n=100)
+        >>> ham = LocalHam1D(L=100, H2=H2, H1=H1)
 
     See Also
     --------
-    SpinHam
+    SpinHam1D
     """
 
-    def __init__(self, H2, H1=None, n=None, cyclic=False):
-        self.n = n
+    def __init__(self, L, H2, H1=None, cyclic=False):
+        self.L = int(L)
         self.cyclic = cyclic
 
-        if isinstance(H2, np.ndarray):
+        # parse two site terms
+        if hasattr(H2, 'shape'):
+            # use as default nearest neighbour term
             H2 = {None: H2}
-        if isinstance(H1, np.ndarray):
-            H1 = {None: H1}
-
-        self.H2s = dict(H2)
-        self.H2s.setdefault(None, None)
-
-        if H1 is not None:
-            self.H1s = dict(H1)
         else:
-            self.H1s = {}
-        self.H1s.setdefault(None, None)
+            H2 = dict(H2)
 
-        # sites where the term might be different
-        self.special_sites = {ij for ij in self.H2s if ij is not None}
-        self.special_sites |= {(i, i + 1) for i in self.H1s if i is not None}
-        obc_with_field = (not self.cyclic) and (self.H1s[None] is not None)
+        default_H2 = H2.pop(None, None)
+        if default_H2 is not None:
+            for i in range(self.L + int(self.cyclic) - 1):
+                coo_a = i
+                coo_b = (i + 1) % self.L
+                if (coo_a, coo_b) not in H2 and (coo_b, coo_a) not in H2:
+                    H2[coo_a, coo_b] = default_H2
 
-        # make sure n is supplied if it is needed
-        if n is None:
-            if (self.special_sites or obc_with_field):
-                raise ValueError("Need to specify ``n`` if this ``NNI`` is "
-                                 "anything but completely translationally "
-                                 "invariant (including OBC w/ field).")
+        super().__init__(H2=H2, H1=H1)
 
-        # manually add the last interaction as a special site for OBC w/ field
-        #     since the last gate has to apply single site field to both sites
-        elif not self.cyclic:
-            if obc_with_field or (self.n - 1 in self.H1s):
-                self.special_sites.add((self.n - 2, self.n - 1))
-
-        # this is the cache for holding generated two-body terms
-        self._terms = {}
-
-    def gen_term(self, sites=None):
-        """Generate the interaction term acting on ``sites``.
+    def mean_norm(self):
+        """Computes the average frobenius norm of local terms.
         """
-        # make sure have sites as (i, i + 1) if supplied
-        if sites is not None:
-            i, j = sites = tuple(sorted(sites))
-            if j - i != 1:
-                raise ValueError("Only nearest neighbour interactions are "
-                                 "supported for an ``NNI``.")
-        else:
-            i = j = None
-
-        term = self.H2s.get(sites, self.H2s[None])
-        if term is None:
-            raise ValueError(f"No term has been set for sites {sites}, either "
-                             "specifically or via a default term.")
-
-        # add single site term to left site if present
-        H1 = self.H1s.get(i, self.H1s[None])
-
-        # but only if this site has a term set
-        if H1 is not None:
-            I_2 = qu.eye(H1.shape[0], dtype=H1.dtype)
-            term = term + qu.kron(H1, I_2)
-
-        # if not PBC, for the last interaction, add to right site as well
-        if sites and (j == self.n - 1) and (not self.cyclic):
-            H1 = self.H1s.get(j, self.H1s[None])
-
-            # but again, only if that site has a term set
-            if H1 is not None:
-                I_2 = qu.eye(H1.shape[0], dtype=H1.dtype)
-                term = term + qu.kron(I_2, H1)
-
-        return term
-
-    def __call__(self, sites=None):
-        """Get the cached term for sites ``sites``, generate if necessary.
-        """
-        try:
-            return self._terms[sites]
-        except KeyError:
-            term = self.gen_term(sites)
-            self._terms[sites] = term
-            return term
-
-    def mean_norm(self, ntype='fro'):
-        """Computes the average frobenius norm of local terms. Also generates
-        all terms if not already cached.
-        """
-        if self.n is None:
-            return qu.norm(self(), ntype)
-
-        nterms = self.n - int(not self.cyclic)
         return sum(
-            qu.norm(self((i, i + 1)), ntype)
-            for i in range(nterms)
-        ) / nterms
+            norm_fro(h)
+            for h in self.terms.values()
+        ) / len(self.terms)
 
     def __repr__(self):
-        return f"<NNI(n={self.n}, cyclic={self.cyclic})>"
+        return f"<LocalHam1D(L={self.L}, cyclic={self.cyclic})>"
+
+
+NNI = deprecated(LocalHam1D, 'NNI', 'LocalHam1D')
 
 
 class TEBD:
@@ -181,7 +113,7 @@ class TEBD:
     ----------
     p0 : MatrixProductState
         Initial state.
-    H : NNI or array_like
+    H : LocalHam1D or array_like
         Dense hamiltonian representing the two body interaction. Should have
         shape ``(d * d, d * d)``, where ``d`` is the physical dimension of
         ``p0``.
@@ -196,6 +128,8 @@ class TEBD:
     split_opts : dict, optional
         Compression options applied for splitting after gate application, see
         :func:`~quimb.tensor.tensor_core.tensor_split`.
+    imag : bool, optional
+        Enable imaginary time evolution. Defaults to false.
 
     See Also
     --------
@@ -203,18 +137,19 @@ class TEBD:
     """
 
     def __init__(self, p0, H, dt=None, tol=None, t0=0.0,
-                 split_opts=None, progbar=True):
+                 split_opts=None, progbar=True, imag=False):
         # prepare initial state
         self._pt = p0.copy()
         self._pt.canonize(0)
-        self.N = self._pt.nsites
+        self.L = self._pt.L
 
-        # handle hamiltonian -> convert array to NNI
+        # handle hamiltonian -> convert array to LocalHam1D
         if isinstance(H, np.ndarray):
-            H = NNI(H, cyclic=p0.cyclic)
-        if not isinstance(H, NNI):
-            raise TypeError("``H`` should be a ``NNI`` or 2-site array, "
-                            "not a TensorNetwork of any form.")
+            H = LocalHam1D(L=self.L, H2=H, cyclic=p0.cyclic)
+
+        if not isinstance(H, LocalHam1D):
+            raise TypeError("``H`` should be a ``LocalHam1D`` or 2-site "
+                            "array, not a TensorNetwork of any form.")
 
         if p0.cyclic != H.cyclic:
             raise ValueError("Both ``p0`` and ``H`` should have matching OBC "
@@ -223,7 +158,6 @@ class TEBD:
         self.H = H
         self.cyclic = H.cyclic
         self._ham_norm = H.mean_norm()
-        self._U_ints = {}
         self._err = 0.0
 
         # set time and tolerance defaults
@@ -232,10 +166,11 @@ class TEBD:
             raise ValueError("Can't set default for both ``dt`` and ``tol``.")
         self.dt = self._dt = dt
         self.tol = tol
+        self.imag = imag
 
         # misc other options
         self.progbar = progbar
-        self.split_opts = {} if split_opts is None else dict(split_opts)
+        self.split_opts = ensure_dict(split_opts)
 
     @property
     def pt(self):
@@ -253,19 +188,12 @@ class TEBD:
         """
         return (tol / (T * self._ham_norm)) ** (1 / order)
 
-    def get_gate(self, dt_frac, sites=None):
+    def _get_gate_from_ham(self, dt_frac, sites):
         """Get the unitary (exponentiated) gate for fraction of timestep
         ``dt_frac`` and sites ``sites``, cached.
         """
-        if sites not in self.H.special_sites:
-            sites = None
-
-        try:
-            return self._U_ints[dt_frac, sites]
-        except KeyError:
-            U = qu.expm(-1.0j * self._dt * dt_frac * self.H(sites))
-            self._U_ints[dt_frac, sites] = U
-            return U
+        imag_factor = 1.0 if self.imag else 1.0j
+        return self.H.get_gate_expm(sites, -imag_factor * self._dt * dt_frac)
 
     def sweep(self, direction, dt_frac, dt=None, queue=False):
         """Perform a single sweep of gates and compression. This shifts the
@@ -318,6 +246,8 @@ class TEBD:
         # ------------------------------------------------------------------- #
 
         if direction == 'right':
+            start_site_ind = 0
+            final_site_ind = self.L - 1
             # Apply even gates:
             #
             #     o-<-<-<-<-<-<-<-<-<-   -<-<
@@ -326,14 +256,32 @@ class TEBD:
             #     | | | | | | | | | |     | |
             #      1   2   3   4   5  ==>
             #
-            for i in range(0, self.N - 1, 2):
-                sites = (i, i + 1)
-                U = self.get_gate(dt_frac, sites)
+            for i in range(start_site_ind, final_site_ind, 2):
+                sites = (i, (i + 1) % self.L)
+                U = self._get_gate_from_ham(dt_frac, sites)
                 self._pt.left_canonize(start=max(0, i - 1), stop=i)
                 self._pt.gate_split_(
                     U, where=sites, absorb='right', **self.split_opts)
 
+            if (self.L % 2 == 1):
+                self._pt.left_canonize_site(self.L - 2)
+                if self.cyclic:
+                    sites = (self.L - 1, 0)
+                    U = self._get_gate_from_ham(dt_frac, sites)
+                    self._pt.right_canonize_site(1)
+                    self._pt.gate_split_(
+                        U, where=sites, absorb='left', **self.split_opts)
+
         elif direction == 'left':
+
+            if self.cyclic and (self.L % 2 == 0):
+                sites = (self.L - 1, 0)
+                U = self._get_gate_from_ham(dt_frac, sites)
+                self._pt.right_canonize_site(1)
+                self._pt.gate_split_(
+                    U, where=sites, absorb='left', **self.split_opts)
+
+            final_site_ind = 1
             # Apply odd gates:
             #
             #     >->->-   ->->->->->->->->-o
@@ -342,16 +290,21 @@ class TEBD:
             #     | | |     | | | | | | | | |
             #           <==  4   3   2   1
             #
-            for i in reversed(range(1, self.N - (0 if self.cyclic else 1), 2)):
-                sites = (i, i + 1)
-                U = self.get_gate(dt_frac, sites)
+            for i in reversed(range(final_site_ind, self.L - 1, 2)):
+                sites = (i, (i + 1) % self.L)
+                U = self._get_gate_from_ham(dt_frac, sites)
                 self._pt.right_canonize(
-                    start=min(self.N - 1, i + 2), stop=i + 1)
+                    start=min(self.L - 1, i + 2), stop=i + 1)
                 self._pt.gate_split_(
                     U, where=sites, absorb='left', **self.split_opts)
 
             # one extra canonicalization not included in last split
             self._pt.right_canonize_site(1)
+
+        # Renormalise after imaginary time evolution
+        if self.imag:
+            factor = self._pt[final_site_ind].norm()
+            self._pt[final_site_ind] /= factor
 
     def _step_order2(self, tau=1, **sweep_opts):
         """Perform a single, second order step.
@@ -427,7 +380,7 @@ class TEBD:
 
         # set up progress bar and start evolution
         progbar = self.progbar if (progbar is None) else progbar
-        progbar = qu.utils.continuous_progbar(self.t, T) if progbar else None
+        progbar = continuous_progbar(self.t, T) if progbar else None
 
         while self.t < T - self.TARGET_TOL:
             if (T - self.t < self._dt):
@@ -481,7 +434,7 @@ class TEBD:
         # set up progress bar
         progbar = self.progbar if (progbar is None) else progbar
         if progbar:
-            ts = qu.utils.progbar(ts)
+            ts = Progbar(ts)
 
         for t in ts:
             self.update_to(t, dt=dt, tol=False, order=order, progbar=False)
@@ -501,9 +454,9 @@ def OTOC_local(psi0, H, H_back, ts, i, A, j=None, B=None,
     ----------
     psi0 : MatrixProductState
         The initial state in MPS form.
-    H : NNI
+    H : LocalHam1D
         The Hamiltonian for forward time-evolution.
-    H_back : NNI
+    H_back : LocalHam1D
         The Hamiltonian for backward time-evolution, should have only
         sign difference with 'H'.
     ts : sequence of float
@@ -527,7 +480,7 @@ def OTOC_local(psi0, H, H_back, ts, i, A, j=None, B=None,
     if j is None:
         j = i
 
-    if initial_eigenstate is 'check':
+    if initial_eigenstate == 'check':
         psi = psi0.gate(B, j, contract=True)
         x = psi0.H.expec(psi)
         y = psi.H.expec(psi)

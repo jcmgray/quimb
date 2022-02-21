@@ -7,7 +7,7 @@ def readme():
         import re
         long_desc = f.read()
         # strip out the raw html images
-        long_desc = re.sub('\.\. raw::[\S\s]*?>\n\n', "", long_desc)
+        long_desc = re.sub(r'\.\. raw::[\S\s]*?>\n\n', "", long_desc)
         return long_desc
 
 
@@ -19,23 +19,24 @@ setup(
     version=versioneer.get_version(),
     cmdclass=versioneer.get_cmdclass(),
     author='Johnnie Gray',
-    author_email="john.gray.14@ucl.ac.uk",
+    author_email="johnniemcgray@gmail.com",
     license='Apache',
     packages=find_packages(exclude=['deps', 'tests*']),
     install_requires=[
-        'numpy>=1.12',
+        'numpy>=1.17',
         'scipy>=1.0.0',
         'numba>=0.39',
         'psutil>=4.3.1',
         'cytoolz>=0.8.0',
         'tqdm>=4',
-        'opt_einsum>=2',
-        'autoray>=0.1',
     ],
     extras_require={
         'tensor': [
-            'matplotlib',
-            'networkx',
+            'matplotlib>=2.0',
+            'networkx>=2.3',
+            'opt_einsum>=3.2',
+            'autoray>=0.2.0',
+            'diskcache>=3.0',
         ],
         'advanced_solvers': [
             'mpi4py',
@@ -43,7 +44,7 @@ setup(
             'slepc4py',
         ],
         'random': [
-            'randomgen>=1.14',
+            'randomgen>=1.18',
         ],
         'tests': [
             'coverage',
@@ -51,10 +52,13 @@ setup(
             'pytest-cov',
         ],
         'docs': [
-            'sphinx',
-            'sphinx_bootstrap_theme',
-            'nbsphinx',
-            'ipython',
+            'sphinx>=2.0',
+            'sphinx-book-theme>=0.1',
+            'nbsphinx>=0.4',
+            'ipython>=7.0',
+            'autoray>=0.2.0',
+            'opt_einsum>=3.2',
+            'doc2dash>=2.4.1',
         ],
     },
     scripts=['bin/quimb-mpi-python'],

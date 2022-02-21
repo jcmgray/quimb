@@ -34,7 +34,6 @@ For these first two modes, only one process ever runs the main script and you do
 * ``quimb-mpi-python --syncro``, "syncro mode": All processes are MPI, are spawned at start and have a single OMP thread. All processes run the main script and have thus have access to the arguments submitted to the mpi pool functions without any communication, but split such work in a round-robin way, and broadcast the result to everyone when the Future's result is called. To maintain syncronicity futures cannot be cancelled. For simple multi-node execution.
 
 .. warning::
-    :class: quimbwarning
 
     In syncro mode, potentially conflicting operations such as IO should be guarded with ``if MPI.COMM_WORLD.Get_rank() == 0`` etc. Additionally, any functions called outside of the MPI pool should be pure to ensure syncronization.
 
@@ -62,7 +61,7 @@ If we run the script in normal mode we get:
 .. code-block:: bash
 
     $ python ex_syncro_expm_evo.py
-    I am worker 0 of total 1 runnning main script...
+    I am worker 0 of total 1 running main script...
     0: ownership=(0, 65536)
     1: ownership=(65536, 131072)
     2: ownership=(131072, 196608)
@@ -84,7 +83,7 @@ Although the process running the main script prints 0 as its rank, it is not one
 
     $ quimb-mpi-python ex_syncro_expm_evo.py
     Launching quimb in mpi4py.futures mode with mpiexec.
-    I am worker 0 of total 4 runnning main script...
+    I am worker 0 of total 4 running main script...
     1: ownership=(65536, 131072)
     2: ownership=(131072, 196608)
     3: ownership=(196608, 262144)
@@ -109,10 +108,10 @@ Finally we can run in in 'syncro' mode:
 
     $ quimb-mpi-python --syncro ex_syncro_expm_evo.py
     Launching quimb in Syncro mode with mpiexec.
-    I am worker 1 of total 4 runnning main script...
-    I am worker 2 of total 4 runnning main script...
-    I am worker 0 of total 4 runnning main script...
-    I am worker 3 of total 4 runnning main script...
+    I am worker 1 of total 4 running main script...
+    I am worker 2 of total 4 running main script...
+    I am worker 0 of total 4 running main script...
+    I am worker 3 of total 4 running main script...
     2: ownership=(131072, 196608)
     1: ownership=(65536, 131072)
     0: ownership=(0, 65536)

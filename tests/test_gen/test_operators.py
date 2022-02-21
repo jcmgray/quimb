@@ -4,6 +4,68 @@ from numpy.testing import assert_allclose
 import quimb as qu
 
 
+@pytest.mark.parametrize("sparse", [False, True])
+@pytest.mark.parametrize("stype", ['csr', 'csc'])
+@pytest.mark.parametrize("dtype", [
+    "don't pass", None, np.float64, np.complex128])
+def test_hamiltonian_builder(sparse, stype, dtype):
+    from quimb.gen.operators import hamiltonian_builder
+
+    @hamiltonian_builder
+    def simple_ham(sparse=None, stype=None, dtype=None):
+        H = qu.qu([[0.0, 1.0],
+                   [1.0, 0.0]], sparse=True, stype='csr', dtype=dtype)
+        return H
+
+    @hamiltonian_builder
+    def simple_ham_complex(sparse=None, stype=None, dtype=None):
+        H = qu.qu([[0.0, 1.0j],
+                   [-1.0j, 0.0]], sparse=True, stype='csr', dtype=dtype)
+        return H
+
+    if dtype == "don't pass":
+        H = simple_ham(sparse=sparse, stype=stype)
+    else:
+        H = simple_ham(sparse=sparse, stype=stype, dtype=dtype)
+
+    if dtype == "don't pass" or dtype is None:
+        # check that passng no actual dtype keeps it as float
+        assert H.dtype == np.float64
+    else:
+        # check that explicit dtypes are respected
+        assert H.dtype == dtype
+    assert qu.issparse(H) == sparse
+    assert qu.isdense(H) != sparse
+    if sparse:
+        assert H.format == stype
+
+    with pytest.raises(ValueError):  # check immutability
+        H[0, 0] = 100
+
+    if dtype == "don't pass":
+        H = simple_ham_complex(sparse=sparse, stype=stype)
+    elif dtype is np.float64:
+        with pytest.warns(np.ComplexWarning):
+            H = simple_ham_complex(sparse=sparse, stype=stype, dtype=dtype)
+    else:
+        H = simple_ham_complex(sparse=sparse, stype=stype, dtype=dtype)
+    if dtype == "don't pass" or dtype is None:
+        # check that passng no actual dtype keeps it as float
+        assert H.dtype == np.complex128
+    else:
+        # check that explicit dtypes are respected
+        assert H.dtype == dtype
+    assert qu.issparse(H) == sparse
+    assert qu.isdense(H) != sparse
+    if sparse:
+        assert H.format == stype
+
+    with pytest.raises(ValueError):  # check immutability
+        H[0, 0] = 100
+
+    return
+
+
 class TestSpinOperator:
     def test_spin_half(self):
         Sx = qu.spin_operator('x', 1 / 2)
@@ -73,7 +135,7 @@ class TestGates:
     @pytest.mark.parametrize("gate", ['Rx', 'Ry', 'Rz', 'T_gate', 'S_gate',
                                       'CNOT', 'cX', 'cY', 'cZ', 'hadamard',
                                       'phase_gate', 'iswap', 'swap', 'U_gate',
-                                      'fsim'])
+                                      'fsim', 'fsimg'])
     @pytest.mark.parametrize('dtype', [np.complex64, np.complex128])
     @pytest.mark.parametrize('sparse', [False, True])
     def test_construct(self, gate, dtype, sparse):
@@ -83,6 +145,8 @@ class TestGates:
             args = (0.1, 0.2, 0.3)
         elif gate in {'fsim'}:
             args = (-1.3, 5.4)
+        elif gate in {'fsimg'}:
+            args = (-1.3, 5.4, 2., 3., 4.)
         else:
             args = ()
         G = getattr(qu, gate)(*args, dtype=dtype, sparse=sparse)
@@ -98,6 +162,12 @@ class TestGates:
 
     def test_fsim(self):
         assert_allclose(qu.fsim(- qu.pi / 2, 0.0), qu.iswap(), atol=1e-12)
+
+    def test_fsimg(self):
+        assert_allclose(
+            qu.fsimg(- qu.pi / 2, 0.0, 0.0, 0.0, 0.0),
+            qu.iswap(), atol=1e-12
+        )
 
 
 class TestHamHeis:
@@ -232,10 +302,20 @@ class TestSwap:
         assert_allclose(s @ a, a.reshape([3, 3]).T.reshape([9, 1]))
 
 
+@pytest.mark.parametrize("sparse", [False, True])
+def test_3qubit_gates(sparse):
+    psi = qu.rand_ket(8)
+    psi = qu.toffoli(sparse=sparse) @ psi
+    psi = qu.ccY(sparse=sparse) @ psi
+    psi = qu.fredkin(sparse=sparse) @ psi
+    psi = qu.ccZ(sparse=sparse) @ psi
+    assert qu.expec(psi, psi) == pytest.approx(1.0)
+
+
 class TestHubbardSpinless:
 
     def test_half_filling_groundstate(self):
-        H = qu.ham_hubbard_hardcore(8, t=0.5, V=1.0, mu=1.0)
+        H = qu.ham_hubbard_hardcore(8, t=0.5, V=1.0, mu=1.0, cyclic=True)
         gs = qu.groundstate(H)
         dims = [2] * 8
         cn = qu.num(2)

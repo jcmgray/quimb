@@ -1,5 +1,6 @@
 import pytest
 import operator
+import importlib
 
 import numpy as np
 from numpy.testing import assert_allclose
@@ -8,25 +9,31 @@ import scipy.sparse.linalg as spla
 import quimb as qu
 import quimb.tensor as qtn
 from quimb.tensor import (
+    oset,
     bonds,
     tensor_contract,
     tensor_direct_product,
     Tensor,
     TensorNetwork,
+    TensorNetwork1D,
     rand_tensor,
     MPS_rand_state,
     TNLinearOperator1D,
 )
-from quimb.tensor.decomp import _trim_singular_vals
+from quimb.tensor.decomp import _trim_singular_vals_numba
 from quimb.tensor.tensor_core import _CONTRACT_BACKEND, _TENSOR_LINOP_BACKEND
 
+autograd_mark = pytest.mark.skipif(
+    importlib.util.find_spec('autograd') is None,
+    reason='autograd not installed')
 
-def test__trim_singular_vals():
+
+def test_trim_singular_vals():
     s = np.array([3., 2., 1., 0.1])
-    assert _trim_singular_vals(s, 0.5, 1) == 3
-    assert _trim_singular_vals(s, 0.5, 2) == 2
-    assert _trim_singular_vals(s, 2, 3) == 2
-    assert _trim_singular_vals(s, 5.02, 3) == 1
+    assert _trim_singular_vals_numba(s, 0.5, 1) == 3
+    assert _trim_singular_vals_numba(s, 0.5, 2) == 2
+    assert _trim_singular_vals_numba(s, 2, 3) == 2
+    assert _trim_singular_vals_numba(s, 5.02, 3) == 1
 
 
 class TestContractOpts:
@@ -49,6 +56,52 @@ class TestContractOpts:
             assert qtn.get_tensor_linop_backend() == 'cupy'
         assert qtn.get_tensor_linop_backend() == _TENSOR_LINOP_BACKEND
 
+    def test_contract_cache(self):
+        import tempfile
+        import os
+        from opt_einsum.paths import register_path_fn
+
+        info = {'num_calls': 0}
+
+        def my_custom_opt(inputs, output, size_dict, memory_limit=None):
+            info['num_calls'] += 1
+            return [(0, 1)] * (len(inputs) - 1)
+
+        register_path_fn('quimb_test_opt', my_custom_opt)
+
+        tn = qtn.MPS_rand_state(4, 3) & qtn.MPS_rand_state(4, 3)
+        assert (
+            tn.contract(all, optimize='quimb_test_opt', get='expression')
+            is
+            tn.contract(all, optimize='quimb_test_opt', get='expression'))
+        assert info['num_calls'] == 1
+
+        # contraction pathinfo objects are now cached together
+        assert (
+            tn.contract(all, optimize='quimb_test_opt', get='path-info')
+            is
+            tn.contract(all, optimize='quimb_test_opt', get='path-info'))
+        assert info['num_calls'] == 1
+
+        # set a directory cache - functions will be run fresh again
+        with tempfile.TemporaryDirectory() as tdir:
+            assert len(os.listdir(tdir)) == 0
+            qtn.set_contract_path_cache(tdir)
+            assert (
+                tn.contract(all, optimize='quimb_test_opt', get='expression')
+                is
+                tn.contract(all, optimize='quimb_test_opt', get='expression'))
+            assert info['num_calls'] == 2
+            assert (
+                tn.contract(all, optimize='quimb_test_opt', get='path-info')
+                is
+                tn.contract(all, optimize='quimb_test_opt', get='path-info'))
+            assert info['num_calls'] == 2
+            assert len(os.listdir(tdir)) != 0
+
+            # need to release close the cache so the directory can be deleted
+            qtn.set_contract_path_cache(None)
+
 
 class TestBasicTensorOperations:
 
@@ -60,6 +113,12 @@ class TestBasicTensorOperations:
 
         with pytest.raises(ValueError):
             Tensor(x, inds=[0, 2], tags='blue')
+
+        assert repr(a) == ("Tensor(shape=(2, 3, 4), "
+                           "inds=(0, 1, 2), tags=oset(['blue']))")
+        assert str(a) == ("Tensor(shape=(2, 3, 4), inds=(0, 1, 2), "
+                          "tags=oset(['blue']), backend='numpy', "
+                          "dtype='float64')")
 
     def test_tensor_copy(self):
         a = Tensor(np.random.randn(2, 3, 4), inds=[0, 1, 2], tags='blue')
@@ -183,7 +242,7 @@ class TestBasicTensorOperations:
         assert isinstance(d, Tensor)
         assert d.shape == (6,)
         assert d.inds == (4,)
-        assert d.tags == {'red', 'blue'}
+        assert d.tags == oset(('red', 'blue'))
 
     def test_contract_with_legal_characters(self):
         a = Tensor(np.random.randn(2, 3, 4), inds='abc',
@@ -217,19 +276,41 @@ class TestBasicTensorOperations:
         b = a.fuse({'bra': ['a', 'c'], 'ket': 'bd'})
         assert set(b.shape) == {8, 15}
         assert set(b.inds) == {'bra', 'ket'}
-        assert b.tags == {'blue'}
+        assert b.tags == oset(('blue',))
 
         b = a.fuse({'ket': 'bd', 'bra': 'ac'})
         assert set(b.shape) == {15, 8}
         assert set(b.inds) == {'ket', 'bra'}
-        assert b.tags == {'blue'}
+        assert b.tags == oset(('blue',))
+
+    def test_unfuse(self):
+        a = Tensor(np.random.rand(2, 3, 4, 5), 'abcd', tags={'blue'})
+        b = a.fuse({'bra': ['a', 'c'], 'ket': 'bd'})
+
+        c = b.unfuse({'bra': ['a', 'c'], 'ket': 'bd'},
+                     {'bra': [2, 4], 'ket': [3, 5]})
+        assert set(c.shape) == {2, 3, 4, 5}
+        assert set(c.inds) == {'a', 'b', 'c', 'd'}
+        assert c.left_inds == b.left_inds
+        assert np.allclose(c.data.reshape(8, 15), b.data)
+
+        b.modify(left_inds=['ket'])
+        c = b.unfuse({'ket': 'bd'}, {'ket': [5, 3]})
+        assert set(c.shape) == {3, 5, 8}
+        assert set(c.inds) == {'b', 'd', 'bra'}
+        assert set(c.tags) == {'blue'}
+        assert set(c.left_inds) == {'b', 'd'}
+
+        b.modify(left_inds=['bra'])
+        c = b.unfuse({'ket': 'bd'}, {'ket': [5, 3]})
+        assert set(c.left_inds) == {'bra'}
 
     def test_fuse_leftover(self):
         a = Tensor(np.random.rand(2, 3, 4, 5, 2, 2), 'abcdef', tags={'blue'})
         b = a.fuse({'bra': 'ac', 'ket': 'bd'})
         assert b.shape == (8, 15, 2, 2)
         assert b.inds == ('bra', 'ket', 'e', 'f')
-        assert b.tags == {'blue'}
+        assert b.tags == oset(('blue',))
 
     def test_tensor_transpose(self):
         a = Tensor(np.random.rand(2, 3, 4, 5, 2, 2), 'abcdef', tags={'blue'})
@@ -239,6 +320,46 @@ class TestBasicTensorOperations:
 
         with pytest.raises(ValueError):
             a.transpose(*'cdfebz')
+
+    def test_tensor_trace(self):
+        t = qtn.rand_tensor((3, 3, 3), 'abc', dtype='complex128')
+        tb = t.trace('a', 'c')
+        assert tb.inds == ('b',)
+        assert_allclose(tb.data, np.trace(t.data, axis1=0, axis2=2))
+        tc = t.trace('a', 'b')
+        assert tc.inds == ('c',)
+        assert_allclose(tc.data, np.trace(t.data, axis1=0, axis2=1))
+        with pytest.raises(ValueError):
+            t.trace('a', 'z')
+        assert not isinstance(
+            qtn.rand_tensor([2, 2], 'ab').trace('a', 'b'),
+            qtn.Tensor)
+        assert isinstance(
+            qtn.rand_tensor([2, 2], 'ab').trace('a', 'b',
+                                                preserve_tensor=True),
+            qtn.Tensor)
+
+    def test_tensor_trace_multi(self):
+        t = qtn.rand_tensor((3, 3, 3, 3, 3), 'abcde', dtype='complex128')
+        t1 = t.trace(['a', 'c'], ['e', 'b'])
+        te = t.trace('a', 'e').trace('c', 'b')
+        assert t1.almost_equals(te)
+        with pytest.raises(ValueError):
+            t.trace(['a', 'b', 'c'], ['d', 'e'])
+
+    def test_sum_reduce(self):
+        t = rand_tensor((2, 3, 4), 'abc')
+        ta = t.sum_reduce('a')
+        assert ta.ndim == 2
+        assert_allclose(ta.data, t.data.sum(axis=0))
+        tb = t.sum_reduce('b')
+        assert tb.ndim == 2
+        assert_allclose(tb.data, t.data.sum(axis=1))
+        tc = t.sum_reduce('c')
+        assert tc.ndim == 2
+        assert_allclose(tc.data, t.data.sum(axis=2))
+        with pytest.raises(ValueError):
+            t.sum_reduce_('d')
 
     def test_ownership(self):
         a = rand_tensor((2, 2), ('a', 'b'), tags={'X', 'Y'})
@@ -277,7 +398,7 @@ class TestBasicTensorOperations:
         assert sum(tn ^ all for tn in pp.cut_iter(*bnds)) == pytest.approx(1.0)
         assert pp ^ all == pytest.approx(1.0)
 
-    @pytest.mark.parametrize("method", ['qr', 'exp', 'mgs'])
+    @pytest.mark.parametrize("method", ['qr', 'exp', 'mgs', 'svd'])
     def test_unitize(self, method):
         t = rand_tensor((2, 3, 4), 'abc')
         assert t.H @ t != pytest.approx(3.0)
@@ -298,9 +419,17 @@ class TestBasicTensorOperations:
         assert len(tn.outer_inds()) == 2
         qtn.connect(x, y, 1, 0)
         assert len(tn.outer_inds()) == 0
-        assert (tn ^ all).shape == ()
+        assert tn.contract(all, preserve_tensor=True).shape == ()
         # make sure bond is newly labelled
         assert set('abcd') & set(tn.all_inds()) == set()
+
+    def test_group_inds(self):
+        x = rand_tensor((2, 2, 2, 2), 'abcd')
+        y = rand_tensor((2, 2, 2), 'bdf')
+        lix, six, rix = qtn.group_inds(x, y)
+        assert lix == ['a', 'c']
+        assert six == ['b', 'd']
+        assert rix == ['f']
 
 
 class TestTensorFunctions:
@@ -309,8 +438,8 @@ class TestTensorFunctions:
     @pytest.mark.parametrize('cutoff', [-1.0, 1e-13, 1e-10])
     @pytest.mark.parametrize('cutoff_mode', ['abs', 'rel', 'sum2'])
     @pytest.mark.parametrize('absorb', ['left', 'both', 'right'])
-    def test_split_tensor_with_vals(self, method, linds, cutoff,
-                                    cutoff_mode, absorb):
+    def test_split_tensor_rank_revealing(self, method, linds, cutoff,
+                                         cutoff_mode, absorb):
         a = rand_tensor((2, 3, 4, 5, 6), inds='abcde', tags='red')
         a_split = a.split(linds, method=method, cutoff=cutoff,
                           cutoff_mode=cutoff_mode, absorb=absorb)
@@ -325,7 +454,7 @@ class TestTensorFunctions:
 
     @pytest.mark.parametrize('method', ['qr', 'lq'])
     @pytest.mark.parametrize('linds', [('a', 'b', 'd'), ('c', 'e')])
-    def test_split_tensor_no_vals(self, method, linds):
+    def test_split_tensor_rank_hidden(self, method, linds):
         a = rand_tensor((2, 3, 4, 5, 6), inds='abcde', tags='red')
         a_split = a.split(linds, method=method)
         assert len(a_split.tensors) == 2
@@ -343,6 +472,92 @@ class TestTensorFunctions:
         assert_allclose(psim.H @ psim, 1.0)
         assert_allclose(psim.singular_values('a', method=method)**2,
                         [0.5, 0.5])
+
+    def test_split_renorm(self):
+        t = rand_tensor((3, 3, 3, 3), ['a', 'b', 'c', 'd'])
+        n_nuc = t.singular_values(['a', 'b']).sum()
+        n_fro = (t.singular_values(['a', 'b'])**2).sum()**0.5
+
+        tc = t.split(['a', 'b'], cutoff=0.0, max_bond=5, renorm=1) ^ all
+        nc_nuc = tc.singular_values(['a', 'b']).sum()
+        nc_fro = (tc.singular_values(['a', 'b'])**2).sum()**0.5
+        assert nc_nuc == pytest.approx(n_nuc)
+        assert nc_fro != pytest.approx(n_fro)
+
+        tc = t.split(['a', 'b'], cutoff=0.0, max_bond=5, renorm=2) ^ all
+        nc_nuc = tc.singular_values(['a', 'b']).sum()
+        nc_fro = (tc.singular_values(['a', 'b'])**2).sum()**0.5
+        assert nc_fro == pytest.approx(n_fro)
+        assert nc_nuc != pytest.approx(n_nuc)
+
+    def test_absorb_none(self):
+        x = qtn.rand_tensor((4, 5, 6, 7), inds='abcd', tags='X', seed=42)
+        e = x.H @ x
+
+        with pytest.raises(ValueError):
+            x.split(['a', 'c'], absorb=None, method='qr')
+
+        xs_tn = x.split(['a', 'c'], absorb=None, stags='S')
+        assert isinstance(xs_tn, TensorNetwork)
+        assert xs_tn.num_tensors == 3
+        e1 = (xs_tn.H & xs_tn).contract(all, output_inds=())
+        assert e1 == pytest.approx(e)
+        assert 'S' in xs_tn.tags
+
+        Tl, Ts, Tr = x.split(['a', 'c'], absorb=None, get='tensors')
+        assert isinstance(Ts, Tensor)
+        assert len(Ts.inds) == 1
+        assert 'X' in Ts.tags
+        Tl.multiply_index_diagonal_(Ts.inds[0], Ts.data)
+        xs_tn = Tl & Tr
+        e2 = (xs_tn.H & xs_tn).contract(all)
+        assert e2 == pytest.approx(e)
+
+        l, s, r = x.split(['a', 'c'], absorb=None, get='arrays')
+        assert s.size == 24
+        y_data = np.einsum('acx,x,xbd->abcd', l, s, r)
+        assert_allclose(y_data, x.data)
+
+        l, s, r = x.split(['a', 'c'], absorb=None, get='arrays', max_bond=20)
+        assert s.size == 20
+        y_data = np.einsum('acx,x,xbd->abcd', l, s, r)
+        assert (
+            qu.norm(y_data, 'fro') ==
+            pytest.approx(qu.norm(x.data, 'fro'), rel=0.1)
+        )
+
+    @pytest.mark.parametrize('method', ['svd', 'eig'])
+    def test_renorm(self, method):
+        U = qu.rand_uni(10)
+        s = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        x = np.einsum('ab,b,bc->ac', U, s, qu.dag(U))
+
+        t = qtn.Tensor(x, inds='ab')
+        fn2 = t.norm()**2
+        trc = np.einsum('aa', t.data).real
+
+        assert fn2 == pytest.approx(385.)
+        assert trc == pytest.approx(55.)
+
+        tn2 = t.split('a', method='svd', cutoff=0.1, cutoff_mode='rsum2')
+        a_fn2 = tn2.H @ tn2
+        assert qtn.bonds_size(*tn2) == 6
+        assert a_fn2 == pytest.approx(fn2)
+
+        tn2 = t.split('a', method='svd', cutoff=40, cutoff_mode='sum2')
+        a_fn2 = tn2.H @ tn2
+        assert qtn.bonds_size(*tn2) == 6
+        assert a_fn2 == pytest.approx(fn2)
+
+        tn1 = t.split('a', method='svd', cutoff=0.2, cutoff_mode='rsum1')
+        a_trc = tn1.trace('a', 'b').real
+        assert qtn.bonds_size(*tn1) == 6
+        assert a_trc == pytest.approx(trc)
+
+        tn1 = t.split('a', method='svd', cutoff=11, cutoff_mode='sum1')
+        a_trc = tn1.trace('a', 'b').real
+        assert qtn.bonds_size(*tn1) == 6
+        assert a_trc == pytest.approx(trc)
 
     @pytest.mark.parametrize('method', ['svd', 'eig'])
     def test_entropy(self, method):
@@ -419,6 +634,26 @@ class TestTensorFunctions:
         assert b.inds == ('b', 'c', 'e')
         assert 'hello' in b.tags
         assert a.shape == (1, 2, 3, 1, 4)
+        c = a.squeeze(include=['d'])
+        assert c.shape == (1, 2, 3, 4)
+        assert c.inds == ('a', 'b', 'c', 'e')
+
+    def test_tensor_fuse_squeeze(self):
+        a = rand_tensor((1, 2, 3), inds='abc')
+        b = rand_tensor((2, 3, 4), inds='bcd')
+        qtn.tensor_fuse_squeeze(a, b)
+        assert a.inds == ('b', 'a')
+        assert a.shape == (6, 1)
+        assert b.inds == ('b', 'd')
+        assert b.shape == (6, 4)
+
+        a = rand_tensor((1, 1, 1), inds='abc')
+        b = rand_tensor((1, 1, 1), inds='bcd')
+        qtn.tensor_fuse_squeeze(a, b)
+        assert a.inds == ('a',)
+        assert a.shape == (1,)
+        assert b.inds == ('d',)
+        assert b.shape == (1,)
 
     @pytest.mark.parametrize('dtype', [None, 'complex128', 'float32'])
     def test_randomize(self, dtype):
@@ -434,6 +669,41 @@ class TestTensorFunctions:
             assert a.dtype == dtype
         else:
             assert a.dtype == 'float64'
+
+    def test_multiply_index_diagonal(self):
+        x = rand_tensor((3, 4), 'ab')
+        y = rand_tensor((4, 5), 'bc')
+        z1 = x @ y
+        # insert a diagonal gauge
+        s = qu.randn(4)
+        z2 = (
+            x.multiply_index_diagonal('b', s) @
+            y.multiply_index_diagonal('b', 1 / s)
+        )
+        assert z1.almost_equals(z2)
+
+    @pytest.mark.parametrize("smudge", [1e-6, 1e-12])
+    def test_balance_bonds(self, smudge):
+        t1 = rand_tensor((3, 4), 'ab')
+        t2 = rand_tensor((4, 5), 'bc')
+        col_nrm_x1 = tensor_contract(t1.H, t1, output_inds='b').data
+        col_nrm_y1 = tensor_contract(t2.H, t2, output_inds='b').data
+        assert not np.allclose(col_nrm_x1, col_nrm_y1, rtol=1e-6)
+        z1 = (t1 @ t2).data
+        qtn.tensor_balance_bond(t1, t2, smudge=smudge)
+        col_nrm_x2 = tensor_contract(t1.H, t1, output_inds='b').data
+        col_nrm_y2 = tensor_contract(t2.H, t2, output_inds='b').data
+        assert_allclose(col_nrm_x2, col_nrm_y2, rtol=10 * smudge)
+        z2 = (t1 @ t2).data
+        assert_allclose(z1, z2)
+
+    def test_new_ind_with_identity(self):
+        t = rand_tensor((2, 2, 3, 3), 'abcd')
+        t.new_ind_with_identity(
+            'switch', ['a', 'c'], ['b', 'd'], axis=2
+        )
+        assert t.inds == ('a', 'b', 'switch', 'c', 'd')
+        assert t.isel({'switch': 1}).data.sum() == pytest.approx(6)
 
 
 class TestTensorNetwork:
@@ -571,6 +841,15 @@ class TestTensorNetwork:
         x2 = (tn & tn.H) ^ ...
         assert_allclose(4 * x1, x2)
 
+    def test_multiply_each(self):
+        a = rand_tensor((2, 3, 4), inds=['0', '1', '2'], tags='red')
+        b = rand_tensor((3, 4, 5), inds=['1', '2', '3'], tags='blue')
+        c = rand_tensor((5, 2, 6), inds=['3', '0', '4'], tags='blue')
+        tn = a & b & c
+        x1 = (tn & tn.H) ^ ...
+        x2 = (tn.multiply_each(2) & tn.H) ^ ...
+        assert_allclose(2**3 * x1, x2)
+
     def test_divide(self):
         a = rand_tensor((2, 3, 4), inds=['0', '1', '2'], tags='red')
         b = rand_tensor((3, 4, 5), inds=['1', '2', '3'], tags='blue')
@@ -608,6 +887,15 @@ class TestTensorNetwork:
         assert a.dtype == b.dtype == c.dtype == 'float32'
         assert_allclose(abs(tn['A'].data), abs(tn['B'].data))
         assert_allclose(abs(tn['B'].data), abs(tn['C'].data))
+
+    def test_tensor_network_sum(self):
+        A = qtn.TN_rand_reg(n=6, reg=3, D=2, phys_dim=2, dtype='complex')
+        B = A.copy()
+        B.randomize_()
+        d1 = A.distance(B)
+        AmB = qtn.tensor_network_sum(A, -1 * B)
+        d2 = (AmB | AmB.H).contract(all)**0.5
+        assert d1 == pytest.approx(d2)
 
     def test_contracting_tensors(self):
         a = rand_tensor((2, 3, 4), inds=[0, 1, 2], tags='red')
@@ -655,13 +943,85 @@ class TestTensorNetwork:
         b = rand_tensor((3, 4, 5), inds=[1, 2, 3], tags='I1')
         c = rand_tensor((5, 2, 6), inds=[3, 0, 4], tags='I2')
         d = rand_tensor((5, 2, 6), inds=[5, 6, 4], tags='I3')
-        tn = TensorNetwork((a, b, c, d), structure="I{}")
+        tn = TensorNetwork((a, b, c, d))
+        tn.view_as_(TensorNetwork1D, L=4, site_tag_id='I{}')
 
         assert len((tn ^ slice(2)).tensors) == 3
         assert len((tn ^ slice(..., 1, -1)).tensors) == 3
         assert len((tn ^ slice(-1, 1)).tensors) == 3
         assert len((tn ^ slice(None, -2, -1)).tensors) == 3
         assert len((tn ^ slice(-2, 0)).tensors) == 3
+
+    def test_contraction_info(self):
+        a = qtn.rand_tensor((8, 8), ('a', 'b'))
+        b = qtn.rand_tensor((8, 8), ('b', 'c'))
+        c = qtn.rand_tensor((8, 8), ('c', 'd'))
+        tn = a | b | c
+        assert tn.contraction_width() == 6
+        assert tn.contraction_cost() == 2 * 8**3
+
+    @pytest.mark.parametrize('method', ('auto', 'dense', 'overlap'))
+    def test_tensor_network_distance(self, method):
+        n = 6
+        A = qtn.TN_rand_reg(n=n, reg=3, D=2, phys_dim=2, dtype=complex)
+        Ad = A.to_dense([f'k{i}' for i in range(n)])
+        B = qtn.TN_rand_reg(n=6, reg=3, D=2, phys_dim=2, dtype=complex)
+        Bd = B.to_dense([f'k{i}' for i in range(n)])
+        d1 = np.linalg.norm(Ad - Bd)
+        d2 = A.distance(B, method=method)
+        assert d1 == pytest.approx(d2)
+
+    @pytest.mark.parametrize('method,opts', (
+        ('als', (('enforce_pos', False),)),
+        ('als', (('enforce_pos', True),)),
+        pytest.param('autodiff', (('distance_method', 'dense'),),
+                     marks=autograd_mark),
+        pytest.param('autodiff', (('distance_method', 'overlap'),),
+                     marks=autograd_mark),
+    ))
+    def test_fit_mps(self, method, opts):
+        k1 = qtn.MPS_rand_state(5, 3, seed=666)
+        k2 = qtn.MPS_rand_state(5, 3, seed=667)
+        assert k1.distance(k2) > 1e-3
+        k1.fit_(k2, method=method, progbar=True, **dict(opts))
+        assert k1.distance(k2) < 1e-3
+
+    @pytest.mark.parametrize('method,opts', (
+        ('als', (('enforce_pos', False),)),
+        ('als', (('enforce_pos', True),)),
+        pytest.param('autodiff', (('distance_method', 'dense'),),
+                     marks=autograd_mark),
+        pytest.param('autodiff', (('distance_method', 'overlap'),),
+                     marks=autograd_mark),
+    ))
+    def test_fit_rand_reg(self, method, opts):
+        r1 = qtn.TN_rand_reg(5, 4, D=2, seed=666, phys_dim=2)
+        k2 = qtn.MPS_rand_state(5, 3, seed=667)
+        assert r1.distance(k2) > 1e-3
+        r1.fit_(k2, method=method, progbar=True, **dict(opts))
+        assert r1.distance(k2) < 1e-3
+
+    @pytest.mark.parametrize('method,opts', (
+        ('als', (('enforce_pos', False),)),
+        ('als', (('enforce_pos', True),)),
+        pytest.param('autodiff', (('distance_method', 'dense'),),
+                     marks=autograd_mark),
+        pytest.param('autodiff', (('distance_method', 'overlap'),),
+                     marks=autograd_mark),
+    ))
+    def test_fit_partial_tags(self, method, opts):
+        k1 = qtn.MPS_rand_state(5, 3, seed=666)
+        k2 = qtn.MPS_rand_state(5, 3, seed=667)
+        d0 = k1.distance(k2)
+        tags = ["I0", "I2", "I4"]
+        k1f = k1.fit(k2, tol=1e-3, tags=tags,
+                     method=method, progbar=True, **dict(opts))
+        assert k1f.distance(k2) < d0
+        assert (k1f[0] - k1[0]).norm() > 1e-12
+        assert (k1f[1] - k1[1]).norm() < 1e-12
+        assert (k1f[2] - k1[2]).norm() > 1e-12
+        assert (k1f[3] - k1[3]).norm() < 1e-12
+        assert (k1f[4] - k1[4]).norm() > 1e-12
 
     def test_reindex(self):
         a = Tensor(np.random.randn(2, 3, 4), inds=[0, 1, 2], tags='red')
@@ -701,7 +1061,8 @@ class TestTensorNetwork:
         b_data = np.random.randn(2, 3, 4)
         a = Tensor(a_data, inds='abc', tags={'I0'})
         b = Tensor(b_data, inds='abc', tags={'I1'})
-        tn = TensorNetwork((a, b), structure="I{}")
+        tn = TensorNetwork((a, b))
+        tn.view_as_(TensorNetwork1D, L=2, site_tag_id='I{}')
         assert_allclose(tn[0].data, a_data)
         new_data = np.random.randn(2, 3, 4)
         tn[1] = Tensor(new_data, inds='abc', tags={'I1', 'red'})
@@ -713,15 +1074,17 @@ class TestTensorNetwork:
         b_data = np.random.randn(2, 3, 4)
         a = Tensor(a_data, inds='abc', tags={'I0'})
         b = Tensor(b_data, inds='abc', tags={'I1'})
-        tn = TensorNetwork((a, b), structure="I{}")
+        tn = TensorNetwork((a, b))
+        tn.view_as_(TensorNetwork1D, L=2, site_tag_id='I{}')
         assert_allclose(tn[0].data, a_data)
         new_data = np.random.randn(2, 3, 4)
         tn[1].modify(data=new_data)
         assert_allclose(tn['I1'].data, new_data)
 
-    def test_combining_with_no_check_collisions(self):
+    def test_make_tids_consecutive_combining_with_no_check_collisions(self):
         p1 = MPS_rand_state(5, 3, phys_dim=3)
         p2 = MPS_rand_state(5, 3, phys_dim=3)
+        p2.make_tids_consecutive(tid0=5)
         # shouldn't need to check any collisions
         tn = TensorNetwork((p1, p2), check_collisions=False)
         # test can contract
@@ -822,7 +1185,7 @@ class TestTensorNetwork:
         assert set(x.inds) == {'a', 'd'}
 
     def test_partition(self):
-        k = MPS_rand_state(10, 7, site_tag_id='Q{}', structure_bsz=4)
+        k = MPS_rand_state(10, 7, site_tag_id='Q{}')
         where = [f'Q{i}' for i in range(10) if i % 2 == 1]
         k.add_tag('odd', where=where, which='any')
 
@@ -830,33 +1193,149 @@ class TestTensorNetwork:
 
         assert len(tn_even.tensors) == len(tn_odd.tensors) == 5
 
-        assert tn_even.structure == 'Q{}'
-        assert tn_even.structure_bsz == 4
-        assert tn_odd.structure == 'Q{}'
-        assert tn_odd.structure_bsz == 4
+        assert tn_even.site_tag_id == 'Q{}'
+        assert tn_odd.site_tag_id == 'Q{}'
 
-        assert (tn_even & tn_odd).sites == range(10)
+        assert (tn_even & tn_odd).sites == tuple(range(10))
 
-    @pytest.mark.parametrize("backend", ['svd', 'eig', 'isvd', 'svds', 'rsvd'])
-    def test_compress_between(self, backend):
+    def test_subgraphs(_):
+        k1 = MPS_rand_state(6, 7, site_ind_id='a{}')
+        k2 = MPS_rand_state(8, 7, site_ind_id='b{}')
+        tn = k1 | k2
+        s1, s2 = tn.subgraphs()
+        assert {s1.num_tensors, s2.num_tensors} == {6, 8}
+
+    def test_compress_multibond(self):
+        A = rand_tensor((7, 2, 2), 'abc', tags='A')
+        A.expand_ind('c', 3)
+        B = rand_tensor((3, 2, 7), 'cbd', tags='B')
+        x0 = (A & B).trace('a', 'd')
+        qtn.tensor_compress_bond(A, B, absorb='left')
+        A.transpose_('a', 'b')
+        assert A.shape == (7, 4)
+        B.transpose_('b', 'd')
+        assert B.shape == (4, 7)
+        assert B.H @ B == pytest.approx(4)
+        x1 = (A & B).trace('a', 'd')
+        assert x1 == pytest.approx(x0)
+
+    def test_canonize_multibond(self):
+        A = rand_tensor((3, 4, 5), 'abc', tags='A')
+        assert A.H @ A != pytest.approx(3)
+        B = rand_tensor((5, 4, 3), 'cbd', tags='B')
+        x0 = (A & B).trace('a', 'd')
+        qtn.tensor_canonize_bond(A, B)
+        assert A.shape == (3, 3)
+        assert B.shape == (3, 3)
+        assert A.H @ A == pytest.approx(3)
+        x1 = (A & B).trace('a', 'd')
+        assert x1 == pytest.approx(x0)
+
+    @pytest.mark.parametrize("method", ['svd', 'eig', 'isvd', 'svds', 'rsvd'])
+    def test_compress_between(self, method):
         A = rand_tensor((3, 4, 5), 'abd', tags={'T1'})
-        tensor_direct_product(A, A, inplace=True)
+        A.expand_ind('d', 10)
         B = rand_tensor((5, 6), 'dc', tags={'T2'})
-        tensor_direct_product(B, B, inplace=True)
-        tn = A & B
-
+        B.expand_ind('d', 10)
+        tn = A | B
         assert A.shared_bond_size(B) == 10
+        tn.compress_between('T1', 'T2', method=method)
+        assert A.shared_bond_size(B) == 5
 
-        tn.compress_between('T1', 'T2', backend=backend)
-
-    @pytest.mark.parametrize("backend", ['svd', 'eig', 'isvd', 'svds', 'rsvd'])
-    def compress_all(self, backend):
+    @pytest.mark.parametrize("method", ['svd', 'eig', 'isvd', 'svds', 'rsvd'])
+    def test_compress_all(self, method):
         k = MPS_rand_state(10, 7)
         k += k
         k /= 2
-        k.compress_all(max_bond=5, backend=backend)
-        assert k.max_bond() == 5
+        k.compress_all_(max_bond=7, method=method)
+        assert k.max_bond() == 7
         assert_allclose(k.H @ k, 1.0)
+
+    def test_canonize_between(self):
+        k = MPS_rand_state(4, 3)
+        k.canonize_between('I1', 'I2')
+        assert k.H @ k == pytest.approx(1)
+        t = k[1]
+        assert t.H @ t == pytest.approx(3)
+        t = k[2]
+        assert t.H @ t != pytest.approx(3)
+        k.canonize_between('I2', 'I1')
+        assert k.H @ k == pytest.approx(1)
+        t = k[1]
+        assert t.H @ t != pytest.approx(3)
+        t = k[2]
+        assert t.H @ t == pytest.approx(3)
+
+    def test_canonize_around(self):
+        # make a small tree tensor network
+        #
+        #             U2--                         v--
+        #             |                            |
+        #             U1--         ==>             v--        etc
+        #             |                            |
+        #   L2---L1---C---R1---R2        >---->---->----O---<
+        #  /     |    |    |    \       /     |    |    |    \
+        #
+        C = qtn.rand_tensor([2], inds=['kC'], tags='C', dtype=complex)
+
+        # left arm
+        L1 = qtn.rand_tensor([2], inds=['kL1'], tags='L1', dtype=complex)
+        qtn.new_bond(C, L1, size=7)
+        L2 = qtn.rand_tensor([2], inds=['kL2'], tags='L2', dtype=complex)
+        qtn.new_bond(L1, L2, size=7)
+
+        # right arm
+        R1 = qtn.rand_tensor([2], inds=['kR1'], tags='R1', dtype=complex)
+        qtn.new_bond(C, R1, size=7)
+        R2 = qtn.rand_tensor([2], inds=['kR2'], tags='R2', dtype=complex)
+        qtn.new_bond(R1, R2, size=7)
+
+        # upper arm
+        U1 = qtn.rand_tensor([2], inds=['kU1'], tags='U1', dtype=complex)
+        qtn.new_bond(C, U1, size=7)
+        U2 = qtn.rand_tensor([2], inds=['kU2'], tags='U2', dtype=complex)
+        qtn.new_bond(U1, U2, size=7)
+
+        # make the TN and randomize the data then normalize
+        ttn = qtn.TensorNetwork([C, L1, L2, R1, R2, U1, U2])
+        ttn.randomize_()
+        ttn /= (ttn.H @ ttn)**0.5
+        assert ttn.H @ ttn == pytest.approx(1.0)
+
+        # test max distance
+        ttn.canonize_around_('C', max_distance=1)
+        assert ttn.H @ ttn == pytest.approx(1.0)
+        assert ttn['C'].H @ ttn['C'] != pytest.approx(1.0)
+
+        # tensors one-away from center should be isometries
+        for tg in ['L1', 'R1', 'U1']:
+            assert ttn[tg].H @ ttn[tg] == pytest.approx(7)
+        # tensors two-away from center should be random
+        for tg in ['L2', 'R2', 'U2']:
+            assert ttn[tg].H @ ttn[tg] != pytest.approx(2)
+
+        ttn.canonize_around_('C', max_distance=2)
+        for tg in ['L2', 'R2', 'U2']:
+            assert ttn[tg].H @ ttn[tg] == pytest.approx(2)
+
+        # test can set the orthogonality center anywhere
+        for tg in ['C', 'L1', 'L2', 'R1', 'R2', 'U1', 'U2']:
+            ttn.canonize_around_(tg)
+            assert ttn.H @ ttn == pytest.approx(1.0)
+            assert ttn[tg].H @ ttn[tg] == pytest.approx(1.0)
+
+            # tensors two-away from center should now be isometries
+            for far_tg in ['L2', 'R2', 'U2']:
+                if far_tg != tg:
+                    ttn[far_tg].H @ ttn[far_tg] == pytest.approx(2)
+
+    def test_tn_split_tensor(self):
+        mps = MPS_rand_state(4, 3)
+        right_inds = bonds(mps[1], mps[2])
+        mps.split_tensor(1, left_inds=None, right_inds=right_inds, rtags='X')
+        assert mps.num_tensors == 5
+        assert mps['X'].shape == (3, 3)
+        assert mps.H @ mps == pytest.approx(1.0)
 
     def test_insert_operator(self):
         p = MPS_rand_state(3, 7, tags='KET')
@@ -898,19 +1377,25 @@ class TestTensorNetwork:
         tn.fuse_multibonds(inplace=True)
         assert len(tn.inner_inds()) == 3
 
-    def test_graph(self):
+    def test_draw(self):
         import matplotlib
+        from matplotlib import pyplot as plt
         matplotlib.use('Template')
         k = MPS_rand_state(10, 7, normalize=False)
-        k.graph(color=['I0', 'I2'])
+        fig = k.draw(color=['I0', 'I2'], return_fig=True)
+        plt.close(fig)
 
-    def test_graph_with_fixed_pos(self):
+    def test_draw_with_fixed_pos(self):
+        import matplotlib
+        from matplotlib import pyplot as plt
+        matplotlib.use('Template')
         n = 7
         p = MPS_rand_state(n, 7, tags='KET')
         q = MPS_rand_state(n, 7, tags='BRA')
         fix = {**{('KET', f'I{i}'): (i, 0) for i in range(n)},
                **{('BRA', f'I{i}'): (i, 1) for i in range(n)}}
-        (q | p).graph(colors=['KET', 'BRA'], fix=fix)
+        fig = (q | p).draw(color=['KET', 'BRA'], fix=fix, return_fig=True)
+        plt.close(fig)
 
     def test_pickle(self):
         import tempfile
@@ -945,10 +1430,124 @@ class TestTensorNetwork:
         x3 = psi.H @ psi
         assert x2 == pytest.approx(x3)
 
+    @pytest.mark.parametrize('dtype', ['float32', 'complex128'])
+    @pytest.mark.parametrize('value', [None, 42])
+    def test_equalize_norms(self, dtype, value):
+        psi = MPS_rand_state(5, 3, dtype=dtype)
+        psi.randomize_(seed=42)
+        x_exp = psi.H @ psi
+        norms = [t.norm() for t in psi]
+        psi.equalize_norms_(value)
+        enorms = [t.norm() for t in psi]
+        if value is None:
+            assert all(n1 != n2 for n1, n2 in zip(norms, enorms))
+            assert psi.H @ psi == pytest.approx(x_exp)
+        else:
+            assert all(n1 == pytest.approx(value) for n1 in enorms)
+            assert (
+                (psi.H @ psi) * 10**(2 * psi.exponent) == pytest.approx(x_exp)
+            )
+
+    @pytest.mark.parametrize("append", [None, '*'])
+    def test_mangle_inner(self, append):
+        a = MPS_rand_state(6, 3)
+        b = a.copy()
+        assert tuple(a.ind_map) == tuple(b.ind_map)
+        b.mangle_inner_(append)
+        assert tuple(a.ind_map) != tuple(b.ind_map)
+        ab = a & b
+        assert all(ix in ab.ind_map for ix in a.ind_map)
+        assert all(ix in ab.ind_map for ix in b.ind_map)
+
+    @pytest.mark.parametrize("mode", ["manual", "dense", "mps", "tree"])
+    def test_hyperind_resolve(self, mode):
+        import networkx as nx
+        import random
+        import collections
+
+        # create a random interaction ising model
+        G = nx.watts_strogatz_graph(10, 4, 0.5, seed=666)
+        edges = tuple(G.edges)
+        js = collections.defaultdict(random.random)
+        htn = qtn.HTN_classical_partition_function_from_edges(
+            edges, j=lambda i, j: js[frozenset((i, j))], beta=0.22, h=0.04)
+        Zh = htn.contract(all, output_inds=())
+
+        if mode == "manual":
+            # resolve manually
+            tn = qtn.TN_classical_partition_function_from_edges(
+                edges, j=lambda i, j: js[frozenset((i, j))], beta=0.22, h=0.04)
+        else:
+            tn = htn.hyperinds_resolve(mode)
+
+        Z = tn.contract(all, output_inds=())
+        assert Z == pytest.approx(Zh)
+        assert max(map(len, tn.ind_map.values())) == 2
+
+
+class TestTensorNetworkSimplifications:
+
+    def test_rank_simplify(self):
+        A = rand_tensor([2, 2, 3], 'abc', tags='A')
+        B = rand_tensor([3, 2], 'cd', tags='B')
+        C = rand_tensor([2, 2, 2], 'def', tags='C')
+        tn = A & B & C
+        tn_s = tn.rank_simplify()
+        assert tn.num_tensors == 3
+        assert tn_s.num_tensors == 2
+        assert (tn ^ all).almost_equals(tn_s ^ all)
+        # checl that 'B' was absorbed into 'A' not 'C'
+        assert set(tn_s['B'].tags) == {'A', 'B'}
+
+    def test_rank_simplify_single_ind(self):
+        ts = [rand_tensor([2], 'a') for _ in range(100)]
+        tn = TensorNetwork(ts)
+        assert len(tn.ind_map) == 1
+        assert len(tn.tensor_map) == 100
+        tn.rank_simplify_()
+        assert len(tn.tensor_map) == 1
+
+    def test_diagonal_reduce(self):
+        A = rand_tensor([2, 2], 'ab', dtype=complex)
+        B = Tensor([[3j, 0.], [0., 4j]], 'bc')
+        C = rand_tensor([2, 2], 'ca', dtype=complex)
+        tn = A & B & C
+        tn_s = tn.diagonal_reduce()
+        assert tn.num_indices == 3
+        assert tn_s.num_indices == 2
+        assert tn ^ all == pytest.approx(tn_s.contract(all, output_inds=[]))
+
+    def test_antidiag_gauge(self):
+        A = rand_tensor([2, 2], 'ab', dtype=complex)
+        B = Tensor([[0., 3j], [4j, 0.]], 'bc')
+        C = rand_tensor([2, 2], 'ca', dtype=complex)
+        tn = A & B & C
+        assert tn.num_indices == 3
+        # can't use diagonal reduction yet
+        assert tn.diagonal_reduce().num_indices == 3
+        # initial gauge doesn't change indices
+        tn_a = tn.antidiag_gauge()
+        assert tn_a.num_indices == 3
+        # but allows the diagonal reduction
+        tn_ad = tn_a.diagonal_reduce()
+        assert tn_ad.num_indices == 2
+        assert tn ^ all == pytest.approx(tn_ad.contract(all, output_inds=[]))
+
+    def test_column_reduce(self):
+        A = rand_tensor([2, 3], 'ab')
+        A.new_ind('c', size=4, axis=-2)
+        B = rand_tensor([4, 5, 6], 'cde')
+        tn = A & B
+        assert tn.num_indices == 5
+        tn_s = tn.column_reduce()
+        assert tn_s.num_indices == 4
+        assert (tn ^ all).almost_equals(tn_s ^ all)
+
 
 class TestTensorNetworkAsLinearOperator:
 
-    def test_against_dense(self):
+    @pytest.mark.parametrize('optimize', ['auto', 'auto-hq'])
+    def test_against_dense(self, optimize):
         A, B, C, D = (
             rand_tensor([3, 5, 5], 'aef'),
             rand_tensor([3, 5, 5], 'beg'),
@@ -957,7 +1556,7 @@ class TestTensorNetworkAsLinearOperator:
         )
 
         tn = A & B & C & D
-        tn_lo = tn.aslinearoperator(('a', 'b'), ('c', 'd'))
+        tn_lo = tn.aslinearoperator(('a', 'b'), ('c', 'd'), optimize=optimize)
         tn_d = tn.to_dense(['a', 'b'], ['c', 'd'])
 
         u, s, v = qu.svds(tn_lo, k=5, backend='scipy')
@@ -968,6 +1567,17 @@ class TestTensorNetworkAsLinearOperator:
         # test matmat
         X = np.random.randn(9, 8) + 1.0j * np.random.randn(9, 8)
         assert_allclose(tn_lo.dot(X), tn_d.dot(X))
+
+    def test_trace_array_function_interface(self):
+        tn = qtn.TensorNetwork((
+            rand_tensor([3, 5, 5], 'aef'),
+            rand_tensor([3, 5, 5], 'beg'),
+            rand_tensor([3, 5, 5], 'cfh'),
+            rand_tensor([3, 5, 5], 'dhg'),
+        ))
+        tn_lo = tn.aslinearoperator(('a', 'b'), ('c', 'd'))
+        tn_d = tn.to_dense(['a', 'b'], ['c', 'd'])
+        assert np.trace(tn_lo) == pytest.approx(np.trace(tn_d))
 
     @pytest.mark.parametrize("dtype", (float, complex))
     @pytest.mark.parametrize("method", ('isvd', 'rsvd'))
@@ -988,7 +1598,7 @@ class TestTensorNetworkAsLinearOperator:
 
         tn.replace_with_svd(where, left_inds=(ul, ll), eps=1e-3, method=method,
                             inplace=True, ltags='_U', rtags='_V')
-        tn.structure = None
+
         x2 = tn ^ ...
 
         # check ltags and rtags have gone in

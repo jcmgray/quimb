@@ -3,3 +3,5 @@ include quimb/_version.py
 include README.rst
 include setup.cfg
 include LICENSE.txt
+graft tests
+graft deps

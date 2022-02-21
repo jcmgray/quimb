@@ -4,7 +4,7 @@ Quantum Information for Many-Body calculations.
 import warnings
 
 # some useful math
-from math import pi, cos, sin, tan, exp, log, log2, sqrt
+from math import pi, cos, sin, tan, exp, log, log2, log10, sqrt
 
 # Core functions
 from .core import (
@@ -83,7 +83,7 @@ from .linalg.base_linalg import (
     Lazy,
 )
 from .linalg.rand_linalg import rsvd, estimate_rank
-from .linalg.mpi_launcher import get_mpi_pool
+from .linalg.mpi_launcher import get_mpi_pool, can_use_mpi_pool
 
 # Generating objects
 from .gen.operators import (
@@ -105,11 +105,19 @@ from .gen.operators import (
     swap,
     iswap,
     fsim,
+    fsimg,
+    ncontrolled_gate,
     controlled,
     CNOT,
     cX,
     cY,
     cZ,
+    ccX,
+    ccY,
+    ccZ,
+    controlled_swap,
+    fredkin,
+    toffoli,
     ham_heis,
     ham_ising,
     ham_XY,
@@ -151,6 +159,7 @@ from .gen.states import (
 )
 from .gen.rand import (
     randn,
+    rand,
     rand_matrix,
     rand_herm,
     rand_pos,
@@ -167,6 +176,7 @@ from .gen.rand import (
     rand_iso,
     rand_mera,
     seed_rand,
+    set_rand_bitgen,
 )
 
 # Functions for calculating properties
@@ -226,6 +236,8 @@ from .linalg.approx_spectral import (
 from .utils import (
     save_to_disk,
     load_from_disk,
+    oset,
+    LRU,
 )
 
 
@@ -328,11 +340,19 @@ __all__ = [
     'swap',
     'iswap',
     'fsim',
+    'fsimg',
+    'ncontrolled_gate',
     'controlled',
     'CNOT',
     'cX',
     'cY',
     'cZ',
+    'ccX',
+    'ccY',
+    'ccZ',
+    'controlled_swap',
+    'fredkin',
+    'toffoli',
     'ham_heis',
     'ham_ising',
     'ham_XY',
@@ -379,12 +399,14 @@ __all__ = [
     'rand_mix',
     'rand_mps',
     'randn',
+    'rand',
     'rand_product_state',
     'rand_matrix_product_state',
     'rand_seperable',
     'rand_iso',
     'rand_mera',
     'seed_rand',
+    'set_rand_bitgen',
     'computational_state',
     # Calc ------------------------------------------------------------------ #
     'expm',
@@ -445,6 +467,7 @@ __all__ = [
     'exp',
     'log',
     'log2',
+    'log10',
     'sqrt',
     'xlogx',
     # Utils ----------------------------------------------------------------- #
@@ -452,4 +475,7 @@ __all__ = [
     'load_from_disk',
     'get_thread_pool',
     'get_mpi_pool',
+    'can_use_mpi_pool',
+    'oset',
+    'LRU',
 ]

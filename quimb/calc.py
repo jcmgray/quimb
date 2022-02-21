@@ -8,10 +8,8 @@ import collections
 from math import sin, cos, pi, log, log2, sqrt
 
 import numpy as np
-import opt_einsum as oe
 import numpy.linalg as nla
 from scipy.optimize import minimize
-from cytoolz import frequencies, keymap
 
 from .core import (
     njit, issparse, isop, zeroify, realify, prod, isvec, dot, dag,
@@ -28,7 +26,13 @@ from .gen.operators import pauli
 from .gen.states import (
     basis_vec, bell_state, bloch_state
 )
-from .utils import int2tup
+from .utils import (int2tup, raise_cant_find_library_function, frequencies,
+                    keymap)
+
+try:
+    from opt_einsum import contract
+except ImportError:
+    contract = raise_cant_find_library_function('opt_einsum')
 
 
 def fidelity(p1, p2, squared=False):
@@ -191,7 +195,7 @@ def kraus_op(rho, Ek, dims=None, where=None, check=False):
         Ei_inds = ['K', 'inew', 'ik']
         Ej_inds = ['K', 'jnew', 'jk']
 
-    sigma = oe.contract(Ek, Ei_inds, rho, rho_inds, Ek.conj(), Ej_inds, out)
+    sigma = contract(Ek, Ei_inds, rho, rho_inds, Ek.conj(), Ej_inds, out)
 
     if dims:
         sigma = sigma.reshape(prod(dims), prod(dims))
@@ -291,7 +295,7 @@ def measure(p, A, eigenvalue=None, tol=1e-12):
     if isvec(p):
         pj = (abs(ev.H @ p)**2).flatten()
     else:
-        pj = oe.contract("jk,kl,lj->j", ev.H, p, ev).real
+        pj = contract("jk,kl,lj->j", ev.H, p, ev).real
 
     # then choose one
     if eigenvalue is None:
@@ -969,7 +973,22 @@ def quantum_discord(p, dims=(2, 2), sysa=0, sysb=1):
 
 @zeroify
 def trace_distance(p1, p2):
-    """Trace distance between two states.
+    r"""Trace distance between two states:
+
+    .. math::
+
+        \delta(\rho, \sigma)
+        =
+        \frac{1}{2} \left| \rho - \sigma \right|_\mathrm{tr}
+
+    If two wavefunctions are supplied the trace distance will be computed via
+    the more efficient expression:
+
+    .. math::
+
+        \delta(|\psi\rangle\langle\psi|, |\phi\rangle\langle\phi|)
+        =
+        \sqrt{1 - \langle \psi | \phi \rangle^2}
 
     Parameters
     ----------

@@ -19,50 +19,57 @@ def get_default_comm():
     return MPI.COMM_SELF
 
 
-class CacheOnComm(object):
-    """
+class _PetscSlepcHandler:
+    """Helper class for caching the PETSc and SLEPc imports and making sure
+    that the MPI comm they use is aligned.
     """
 
-    def __init__(self, comm_fn):
+    def __init__(self):
         self._comm = '__UNINITIALIZED__'
-        self._comm_fn = comm_fn
 
-    def __call__(self, comm=None):
-        # resolve default comm
+    def init_petsc_slepc(self, comm):
+        import os
+        petsc_arch = os.environ.get("PETSC_ARCH", None)
+
+        import petsc4py
+        petsc4py.init(args=['-no_signal_handler'], arch=petsc_arch, comm=comm)
+        import slepc4py
+        slepc4py.init(args=['-no_signal_handler'], arch=petsc_arch)
+
+        self._comm = comm
+        self._PETSc = petsc4py.PETSc
+        self._SLEPc = slepc4py.SLEPc
+
+    def get_petsc(self, comm=None):
         if comm is None:
             comm = get_default_comm()
-        # first call or called with different comm
-        if self._comm != comm:
-            self._result = self._comm_fn(comm=comm)
-            self._comm = comm
-        return self._result, comm
+
+        if comm != self._comm:
+            self.init_petsc_slepc(comm)
+
+        return self._PETSc, comm
+
+    def get_slepc(self, comm=None):
+        if comm is None:
+            comm = get_default_comm()
+
+        if comm != self._comm:
+            self.init_petsc_slepc(comm)
+
+        return self._SLEPc, comm
 
 
-def init_petsc_and_slepc(comm=None):
-    """Make sure petsc is initialized with comm before slepc.
-    """
-    import os
-    petsc_arch = os.environ.get("PETSC_ARCH", None)
-
-    import petsc4py
-    petsc4py.init(args=['-no_signal_handler'], arch=petsc_arch, comm=comm)
-    import slepc4py
-    slepc4py.init(args=['-no_signal_handler'], arch=petsc_arch)
-    return petsc4py.PETSc, slepc4py.SLEPc
+_petsc_slepc_handler = _PetscSlepcHandler()
 
 
-@CacheOnComm
 def get_petsc(comm=None):
-    """Cache petsc module import to allow lazy start.
-    """
-    return init_petsc_and_slepc(comm=comm)[0]
+    global _petsc_slepc_handler
+    return _petsc_slepc_handler.get_petsc(comm=comm)
 
 
-@CacheOnComm
 def get_slepc(comm=None):
-    """Cache slepc module import to allow lazy start.
-    """
-    return init_petsc_and_slepc(comm=comm)[1]
+    global _petsc_slepc_handler
+    return _petsc_slepc_handler.get_slepc(comm=comm)
 
 
 # --------------------------------------------------------------------------- #
@@ -75,10 +82,10 @@ class PetscLinearOperatorContext:
         self.real = lo.dtype in (float, np.float_)
 
     def mult(self, _, x, y):
-        y[:] = self.lo.matvec(x[:])
+        y[:] = self.lo.matvec(x)
 
     def multHermitian(self, _, x, y):
-        y[:] = self.lo.rmatvec(x[:])
+        y[:] = self.lo.rmatvec(x)
 
 
 def linear_operator_2_petsc_shell(lo, comm=None):
@@ -671,7 +678,6 @@ def svds_slepc(A, k=6, ncv=None, return_vecs=True, SVDType='cross',
     else:
         res = np.asarray([svd_solver.getValue(i) for i in range(k)])
 
-    comm.Barrier()
     svd_solver.destroy()
     return res if rank == 0 else None
 
@@ -738,7 +744,6 @@ def mfn_multiply_slepc(mat, vec,
     # --> gather the (distributed) petsc vector to a numpy matrix on master
     all_out = gather_petsc_array(out, comm=comm, out_shape=(-1, 1))
 
-    comm.Barrier()
     mfn.destroy()
     return all_out
 
@@ -782,6 +787,5 @@ def ssolve_slepc(A, y, isherm=True, comm=None, maxiter=None, tol=None,
                            f"{lookup_ksp_error(converged_reason)}")
 
     x = gather_petsc_array(x, comm=comm, out_shape=out_shape)
-    comm.Barrier()
     ksp.destroy()
     return x

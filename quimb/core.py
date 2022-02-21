@@ -10,9 +10,8 @@ import functools
 from numbers import Integral
 
 import numpy as np
-from numpy.matlib import zeros
 import scipy.sparse as sp
-from cytoolz import partition_all
+from .utils import partition_all
 
 
 # --------------------------------------------------------------------------- #
@@ -29,26 +28,44 @@ else:
     import psutil
     _NUM_THREAD_WORKERS = psutil.cpu_count(logical=False)
 
-os.environ['NUMBA_NUM_THREADS'] = str(_NUM_THREAD_WORKERS)
+if ('NUMBA_NUM_THREADS' in os.environ):
+    if int(os.environ['NUMBA_NUM_THREADS']) != _NUM_THREAD_WORKERS:
+        import warnings
+        warnings.warn(
+            "'NUMBA_NUM_THREADS' has been set elsewhere and doesn't match the "
+            "value 'quimb' has tried to set - "
+            f"{os.environ['NUMBA_NUM_THREADS']} vs {_NUM_THREAD_WORKERS}.")
+else:
+    os.environ['NUMBA_NUM_THREADS'] = str(_NUM_THREAD_WORKERS)
 
 # need to set NUMBA_NUM_THREADS first
 import numba  # noqa
 
 _NUMBA_CACHE = {
-    'True': True, 'False': False,
-}[os.environ.get('QUIMB_NUMBA_CACHE', 'True')]
+    'TRUE': True, 'ON': True, 'FALSE': False, 'OFF': False,
+}[os.environ.get('QUIMB_NUMBA_CACHE', 'True').upper()]
+_NUMBA_PAR = {
+    'TRUE': True, 'ON': True, 'FALSE': False, 'OFF': False,
+}[os.environ.get('QUIMB_NUMBA_PARALLEL', 'True').upper()]
 
 njit = functools.partial(numba.njit, cache=_NUMBA_CACHE)
-"""Numba no-python jit, but obeying cache setting."""
+"""Numba no-python jit, but obeying cache setting.
+"""
 
-njit_nocache = functools.partial(numba.njit, cache=False)
-"""No cache alias of njit."""
+pnjit = functools.partial(numba.njit, cache=_NUMBA_CACHE, parallel=_NUMBA_PAR)
+"""Numba no-python jit, but obeying cache setting, with optional parallel
+target, depending on environment variable 'QUIMB_NUMBA_PARALLEL'.
+"""
 
 vectorize = functools.partial(numba.vectorize, cache=_NUMBA_CACHE)
-"""Numba vectorize, but obeying cache setting."""
+"""Numba vectorize, but obeying cache setting.
+"""
 
-pvectorize = functools.partial(numba.vectorize, cache=False, target='parallel')
-"""No cache alias of vectorize."""
+pvectorize = functools.partial(numba.vectorize, cache=_NUMBA_CACHE,
+                               target='parallel' if _NUMBA_PAR else 'cpu')
+"""Numba vectorize, but obeying cache setting, with optional parallel
+target, depending on environment variable 'QUIMB_NUMBA_PARALLEL'.
+"""
 
 
 class CacheThreadPool(object):
@@ -510,7 +527,7 @@ def divide_update_(X, c, out):
         _nb_divide_update_seq(X, c, out=out)
 
 
-@njit(parallel=True)  # pragma: no cover
+@pnjit  # pragma: no cover
 def _dot_csr_matvec_prange(data, indptr, indices, vec, out):
     for i in numba.prange(vec.size):
         isum = 0.0
@@ -598,10 +615,10 @@ def rdot(a, b):  # pragma: no cover
     Here, ``b`` will *not* be conjugated before the inner product.
     """
     a, b = a.reshape((1, -1)), b.reshape((-1, 1))
-    return (a @ b)[0, 0]
+    return (a @ b).item()
 
 
-@njit(parallel=True)
+@pnjit
 def _l_diag_dot_dense_par(l, A, out):  # pragma: no cover
     for i in numba.prange(l.size):
         out[i, :] = l[i] * A[i, :]
@@ -650,7 +667,7 @@ def ldmul(diag, mat):
     return l_diag_dot_dense(diag, mat)
 
 
-@njit(parallel=True)
+@pnjit
 def _r_diag_dot_dense_par(A, l, out):  # pragma: no cover
     for i in numba.prange(l.size):
         out[:, i] = A[:, i] * l[i]
@@ -699,7 +716,7 @@ def rdmul(mat, diag):
     return r_diag_dot_dense(mat, diag)
 
 
-@njit(parallel=True)
+@pnjit
 def _outer_par(a, b, out, m, n):  # pragma: no cover
     for i in numba.prange(m):
         out[i, :] = a[i] * b[:]
@@ -741,7 +758,7 @@ def _nb_kron_exp_seq(a, b, out, m, n, p, q):  # pragma: no cover
             out[ii:fi, ij:fj] = a[i, j] * b
 
 
-@njit(parallel=True)
+@pnjit
 def _nb_kron_exp_par(a, b, out, m, n, p, q):  # pragma: no cover
     for i in numba.prange(m):
         for j in range(n):
@@ -1626,6 +1643,15 @@ def ikron(ops, dims, inds, sparse=None, stype=None,
     >>> A = rand_herm(5)
     >>> ikron(A, [2, -1, 2, -1, 2, -1], [1, 3, 5]).shape
     (1000, 1000)
+
+    Create a two site interaction (note the coefficient `jx` we only need to
+    multiply into a single input operator):
+
+    >>> Sx = spin_operator('X')
+    >>> jx = 0.123
+    >>> jSxSx = ikron([jx * Sx, Sx], [2, 2, 2, 2], [0, 3])
+    >>> np.allclose(jSxSx, jx * (Sx & eye(2) & eye(2) & Sx))
+    True
     """
     # TODO: test 2d+ dims and coos
     # TODO: simplify  with compress coords?
@@ -1850,7 +1876,7 @@ def pkron(op, dims, inds, **ikron_opts):
     dims_cur = (*dims_in, *dims_out)
 
     # find inverse permutation
-    ip = np.empty(n, dtype=np.int)
+    ip = np.empty(n, dtype=np.int32)
     ip[p] = np.arange(n)
 
     return permute(b, dims_cur, ip)
@@ -1944,7 +1970,7 @@ def _trace_lose(p, dims, lose):
     e = dims[lose]
     a = prod(dims[:lose])
     b = prod(dims[lose + 1:])
-    rhos = zeros(shape=(a * b, a * b), dtype=np.complex128)
+    rhos = np.zeros(shape=(a * b, a * b), dtype=np.complex128)
     for i in range(a * b):
         for j in range(i, a * b):
             i_i = e * b * (i // b) + (i % b)
@@ -1966,7 +1992,7 @@ def _trace_keep(p, dims, keep):
     s = dims[keep]
     a = prod(dims[:keep])
     b = prod(dims[keep + 1:])
-    rhos = zeros(shape=(s, s), dtype=np.complex128)
+    rhos = np.zeros(shape=(s, s), dtype=np.complex128)
     for i in range(s):
         for j in range(i, s):
             for k in range(a):

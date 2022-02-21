@@ -31,10 +31,8 @@ def rand_tn1d_sect(n, bd, dtype=complex):
     mps = qtn.MPS_rand_state(n + 2, bd, dtype=dtype)
     mpo = qtn.MPO_rand_herm(n + 2, 5, dtype=dtype)
 
-    norm = qtn.TensorNetwork(qtn.align_TN_1D(mps.H, mpo, mps))
-
-    # greedy not good and contracting with large bsz
-    norm.structure_bsz = 2
+    norm = qtn.TensorNetwork(qtn.tensor_network_align(mps.H, mpo, mps))
+    norm.view_as_(qtn.TensorNetwork1D, like=mps)
 
     lix = qtn.bonds(norm[0], norm[1])
     rix = qtn.bonds(norm[n], norm[n + 1])
@@ -84,7 +82,7 @@ class TestRSVD:
     @pytest.mark.parametrize('p', [0, 5])
     def test_rsvd_adaptive(self, dtype, shape, q, p):
         X = rand_rank(*shape, 10, dtype=dtype)
-        U, s, V = qu.rsvd(X, 1e-5, q=q, p=p, k_start=10)
+        U, s, V = qu.rsvd(X, 1e-6, q=q, p=p, k_start=10)
 
         k = s.size
         assert 10 <= k <= 20

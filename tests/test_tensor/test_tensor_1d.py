@@ -5,10 +5,11 @@ from numpy.testing import assert_allclose
 
 import quimb as qu
 from quimb.tensor import (
-    MatrixProductState, MatrixProductOperator, align_TN_1D, MPS_rand_state,
-    MPO_identity, MPO_identity_like, MPO_zeros, MPO_zeros_like, MPO_rand,
-    MPO_rand_herm, MPO_ham_heis, MPS_neel_state, MPS_zero_state, bonds,
-    MPS_computational_state, Dense1D)
+    MatrixProductState, MatrixProductOperator, tensor_network_align,
+    MPS_rand_state, MPO_identity, MPO_identity_like, MPO_zeros, MPO_zeros_like,
+    MPO_rand, MPO_rand_herm, MPO_ham_heis, MPS_neel_state, MPS_zero_state,
+    bonds, MPS_computational_state, Dense1D)
+from quimb.tensor.tensor_core import oset
 
 
 dtypes = ['float32', 'float64', 'complex64', 'complex128']
@@ -59,9 +60,9 @@ class TestMatrixProductState:
     def test_from_dense(self):
         psi = qu.rand_ket(2**8)
         mps = MatrixProductState.from_dense(psi, dims=[2] * 8)
-        assert mps.tags == {f'I{i}' for i in range(8)}
+        assert mps.tags == oset(f'I{i}' for i in range(8))
         assert mps.site_inds == tuple(f'k{i}' for i in range(8))
-        assert mps.nsites == 8
+        assert mps.L == 8
         mpod = mps.to_dense()
         assert qu.expec(mpod, psi) == pytest.approx(1)
 
@@ -73,8 +74,8 @@ class TestMatrixProductState:
 
         mps.left_canonize_site(0)
         assert mps['I0'].shape == (2, 2)
-        assert mps['I0'].tags == {'I0'}
-        assert mps['I1'].tags == {'I1'}
+        assert mps['I0'].tags == oset(('I0',))
+        assert mps['I1'].tags == oset(('I1',))
 
         U = (mps['I0'].data)
         assert_allclose(U.conj().T @ U, np.eye(2), atol=1e-13)
@@ -98,8 +99,8 @@ class TestMatrixProductState:
 
         mps.right_canonize_site(2)
         assert mps['I2'].shape == (2, 2)
-        assert mps['I2'].tags == {'I2'}
-        assert mps['I1'].tags == {'I1'}
+        assert mps['I2'].tags == oset(('I2',))
+        assert mps['I1'].tags == oset(('I1',))
 
         U = (mps['I2'].data)
         assert_allclose(U.conj().T @ U, np.eye(2), atol=1e-13)
@@ -346,8 +347,7 @@ class TestMatrixProductState:
 
     @pytest.mark.parametrize("rescale", [False, True])
     @pytest.mark.parametrize(
-        "keep", [(2, 3, 4, 6, 8),
-                 slice(-2, 4), slice(3, -1, -1)])
+        "keep", [(2, 3, 4, 6, 8), slice(-2, 4), slice(3, -1, -1), [1]])
     def test_partial_trace(self, rescale, keep):
         n = 10
         p = MPS_rand_state(n, 7)
@@ -357,22 +357,24 @@ class TestMatrixProductState:
             keep = p.slice2sites(keep)
         else:
             if rescale:
-                assert r.lower_inds == ('u0', 'u1', 'u2', 'u3', 'u4')
-                assert r.upper_inds == ('k0', 'k1', 'k2', 'k3', 'k4')
+                if keep == [1]:
+                    assert r.lower_inds == ('u0',)
+                    assert r.upper_inds == ('k0',)
+                else:
+                    assert r.lower_inds == ('u0', 'u1', 'u2', 'u3', 'u4')
+                    assert r.upper_inds == ('k0', 'k1', 'k2', 'k3', 'k4')
             else:
-                assert r.lower_inds == ('u2', 'u3', 'u4', 'u6', 'u8')
-                assert r.upper_inds == ('k2', 'k3', 'k4', 'k6', 'k8')
+                if keep == [1]:
+                    assert r.lower_inds == ('u1',)
+                    assert r.upper_inds == ('k1',)
+                else:
+                    assert r.lower_inds == ('u2', 'u3', 'u4', 'u6', 'u8')
+                    assert r.upper_inds == ('k2', 'k3', 'k4', 'k6', 'k8')
         assert_allclose(r.trace(), 1.0)
         assert qu.isherm(rd)
         pd = p.to_dense()
         rdd = pd.ptr([2] * n, keep=keep)
         assert_allclose(rd, rdd)
-
-    @pytest.mark.parametrize("cyclic", [False, True])
-    def test_specify_sites(self, cyclic):
-        sites = [12, 13, 15, 16, 17]
-        k = MPS_rand_state(5, 7, cyclic=cyclic, sites=sites, nsites=20)
-        assert set(k.tags) == {f'I{i}' for i in sites}
 
     def test_bipartite_schmidt_state(self):
         psi = MPS_rand_state(16, 5)
@@ -409,8 +411,8 @@ class TestMatrixProductState:
                  range(50, 60),
                  range(30, 60)])
     def test_partial_trace_compress(self, method, cyclic, sysa, sysb):
-        k = MPS_rand_state(60, 8, cyclic=cyclic)
-        kws = dict(sysa=sysa, sysb=sysb, eps=1e-4, method=method)
+        k = MPS_rand_state(60, 5, cyclic=cyclic)
+        kws = dict(sysa=sysa, sysb=sysb, eps=1e-6, method=method, verbosity=2)
         rhoc_ab = k.partial_trace_compress(**kws)
         assert set(rhoc_ab.outer_inds()) == {'kA', 'kB', 'bA', 'bB'}
         inds = ['kA', 'kB'], ['bA', 'bB']
@@ -498,20 +500,20 @@ class TestMatrixProductState:
         TG = sorted(p['G'], key=lambda t: sorted(t.tags))
 
         if propagate_tags is False:
-            assert TG[0].tags == {'G'}
-            assert TG[1].tags == {'G'}
+            assert TG[0].tags == oset(('G',))
+            assert TG[1].tags == oset(('G',))
 
         elif propagate_tags == 'register':
-            assert TG[0].tags == {'G', 'I2'}
-            assert TG[1].tags == {'G', 'I3'}
+            assert TG[0].tags == oset(['G', 'I2'])
+            assert TG[1].tags == oset(['G', 'I3'])
 
         elif propagate_tags == 'sites':
-            assert TG[0].tags == {'G', 'I2', 'I3'}
-            assert TG[1].tags == {'G', 'I2', 'I3'}
+            assert TG[0].tags == oset(['G', 'I2', 'I3'])
+            assert TG[1].tags == oset(['G', 'I2', 'I3'])
 
         elif propagate_tags is True:
-            assert TG[0].tags == {'PSI0', 'G', 'I2', 'I3'}
-            assert TG[1].tags == {'PSI0', 'G', 'I2', 'I3'}
+            assert TG[0].tags == oset(['PSI0', 'G', 'I2', 'I3'])
+            assert TG[1].tags == oset(['PSI0', 'G', 'I2', 'I3'])
 
         assert (p.H & p) ^ all == pytest.approx(1.0)
         assert abs((q.H & p) ^ all) < 1.0
@@ -586,6 +588,49 @@ class TestMatrixProductState:
         assert len(psi_cnot.tensors) == len(psi_iswap.tensors) == 4
         assert len(psi_G.tensors) == 3
 
+    @pytest.mark.parametrize('cur_orthog', (None, 3))
+    @pytest.mark.parametrize('site', (0, 5, 9))
+    @pytest.mark.parametrize('outcome', (None, 2))
+    @pytest.mark.parametrize('renorm', (True, False))
+    @pytest.mark.parametrize('remove', (True, False))
+    def test_mps_measure(self, cur_orthog, site, outcome, renorm, remove):
+        psi = MPS_rand_state(10, 7, phys_dim=3, dtype=complex)
+        if cur_orthog:
+            psi.canonize(cur_orthog)
+        outcome, psim = psi.measure(
+            site, outcome=outcome, cur_orthog=cur_orthog,
+            renorm=renorm, remove=remove)
+        newL = 10 - int(remove)
+        assert psim.L == newL
+        assert psim.num_tensors == newL
+        assert set(psim.site_tags) == {f'I{i}' for i in range(newL)}
+        assert set(psim.site_inds) == {f'k{i}' for i in range(newL)}
+        if renorm:
+            assert psim.H @ psim == pytest.approx(1.0)
+        else:
+            assert 0.0 < psim.H @ psim < 1.0
+        new_can_cen = min(site, newL - 1)
+        t = psim[new_can_cen]
+        if renorm:
+            assert t.H @ t == pytest.approx(1.0)
+        else:
+            0.0 < t.H @ t < 1.0
+
+    def test_measure_known_outcome(self):
+        mps = MPS_computational_state('010101')
+        assert mps.measure_(3, get='outcome') == 1
+
+    def test_permute_arrays(self):
+        mps = MPS_rand_state(7, 5)
+        k0 = mps.to_dense()
+        mps.canonize(3)
+        mps.permute_arrays('prl')
+        assert mps[0].shape == (2, 2)
+        assert mps[1].shape == (2, 4, 2)
+        assert mps[2].shape == (2, 5, 4)
+        kf = mps.to_dense()
+        assert qu.fidelity(k0, kf) == pytest.approx(1.0)
+
 
 class TestMatrixProductOperator:
 
@@ -608,6 +653,13 @@ class TestMatrixProductOperator:
         assert set(op.inds) == {
             'k0', 'b0', 'k1', 'b1', 'k2', 'b2', 'k3', 'b3', 'k4', 'b4'
         }
+
+        assert set(mpo.site_tags) == {f'I{i}' for i in range(5)}
+        assert all(f'I{i}' in mpo.tags for i in range(5))
+        mpo.site_tag_id = 'TEST1,{}'
+        assert set(mpo.site_tags) == {f'TEST1,{i}' for i in range(5)}
+        assert not any(f'I{i}' in mpo.tags for i in range(5))
+        assert all(f'TEST1,{i}' in mpo.tags for i in range(5))
 
     @pytest.mark.parametrize("cyclic", [False, True])
     def test_compress_mpo(self, cyclic):
@@ -673,7 +725,7 @@ class TestMatrixProductOperator:
         b = MPS_rand_state(13, 7)
         o1 = k @ b
         i = MPO_identity(13)
-        k, i, b = align_TN_1D(k, i, b)
+        k, i, b = tensor_network_align(k, i, b)
         o2 = (k & i & b) ^ ...
         assert_allclose(o1, o2)
 
@@ -750,14 +802,14 @@ class TestMatrixProductOperator:
         Ad, xd, yd = A.to_dense(), x.to_dense(), y.to_dense()
         assert_allclose(Ad @ xd, yd)
 
-    @pytest.mark.parametrize("cyclic", (False, True))
-    def test_sites_mpo_mps_product(self, cyclic):
-        k = MPS_rand_state(13, 7, cyclic=cyclic)
-        X = MPO_rand_herm(3, 5, sites=[3, 6, 7], nsites=13, cyclic=cyclic)
-        b = k.H
-        k.align_(X, b)
-        assert (k & X & b) ^ ...
-
+    def test_permute_arrays(self):
+        mpo = MPO_rand(4, 3)
+        A0 = mpo.to_dense()
+        mpo.permute_arrays('drul')
+        assert mpo[0].shape == (2, 3, 2)
+        assert mpo[1].shape == (2, 3, 2, 3)
+        Af = mpo.to_dense()
+        assert_allclose(A0, Af)
 
 # --------------------------------------------------------------------------- #
 #                         Test specific 1D instances                          #
@@ -770,9 +822,9 @@ class TestSpecificStatesOperators:
         n = 10
         rmps = MPS_rand_state(
             n, 10, site_tag_id="foo{}", tags='bar', cyclic=cyclic)
-        assert rmps[0].tags == {'foo0', 'bar'}
-        assert rmps[3].tags == {'foo3', 'bar'}
-        assert rmps[-1].tags == {'foo9', 'bar'}
+        assert rmps[0].tags == oset(['foo0', 'bar'])
+        assert rmps[3].tags == oset(['foo3', 'bar'])
+        assert rmps[-1].tags == oset(['foo9', 'bar'])
 
         rmpsH_rmps = rmps.H & rmps
         assert len(rmpsH_rmps.tag_map['foo0']) == 2
@@ -805,9 +857,9 @@ class TestSpecificStatesOperators:
     @pytest.mark.parametrize("n", [2, 3, 4])
     def test_mpo_site_ham_heis(self, cyclic, j, bz, n):
         hh_mpo = MPO_ham_heis(n, tags=['foo'], cyclic=cyclic, j=j, bz=bz)
-        assert hh_mpo[0].tags == {'I0', 'foo'}
-        assert hh_mpo[1].tags == {'I1', 'foo'}
-        assert hh_mpo[-1].tags == {f'I{n - 1}', 'foo'}
+        assert hh_mpo[0].tags == oset(['I0', 'foo'])
+        assert hh_mpo[1].tags == oset(['I1', 'foo'])
+        assert hh_mpo[-1].tags == oset([f'I{n - 1}', 'foo'])
         assert hh_mpo.shape == (2, ) * 2 * n
         hh_ex = qu.ham_heis(n, cyclic=cyclic, j=j, b=bz)
         assert_allclose(
@@ -837,7 +889,7 @@ class TestDense1D:
 
         t_psi = Dense1D(d_psi)
         assert set(t_psi.outer_inds()) == {f'k{i}' for i in range(n)}
-        assert set(t_psi.tags) == {f'I{i}' for i in range(n)}
+        assert t_psi.tags == oset(f'I{i}' for i in range(n))
 
         for i in range(n):
             assert t_psi.H @ t_psi.gate(qu.pauli('Z'), i) == pytest.approx(1)
