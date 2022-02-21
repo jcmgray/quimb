@@ -33,7 +33,7 @@ class TestQuimbify:
         x = [1, 2, 3j]
         p = qu.qu(x, qtype='ket')
         assert(type(p) == qu.qarray)
-        assert(p.dtype == np.complex)
+        assert(p.dtype == complex)
         assert(p.shape == (3, 1))
         p = qu.qu(x, qtype='bra')
         assert(p.shape == (1, 3))
@@ -43,7 +43,7 @@ class TestQuimbify:
         x = np.random.randn(3, 3)
         p = qu.qu(x, qtype='dop')
         assert(type(p) == qu.qarray)
-        assert(p.dtype == np.complex)
+        assert(p.dtype == complex)
         assert(p.shape == (3, 3))
 
     def test_convert_vector_to_dop(self):
@@ -75,7 +75,7 @@ class TestQuimbify:
         assert(type(p) == qu.qarray)
         p = qu.qu(x, 'dop', sparse=True)
         assert(type(p) == sp.csr_matrix)
-        assert(p.dtype == np.complex)
+        assert(p.dtype == complex)
         assert(p.nnz == 2)
 
     def test_sparse_convert_to_dop(self):
@@ -781,3 +781,34 @@ class TestExpec:
         a = qu.singlet(qtype=qtype)
         b = qu.pauli(s, sparse=sparse) & qu.pauli(s, sparse=sparse)
         assert_allclose(qu.expec(a, b), -1)
+
+
+class TestNumbaFuncs:
+
+    @mark.parametrize("size", [300, 3000, (300, 5), (3000, 5)])
+    @mark.parametrize("X_dtype", ['float32', 'float64',
+                                  'complex64', 'complex128'])
+    @mark.parametrize("c_dtype", ['float32', 'float64'])
+    def test_subtract_update(
+        self, size, X_dtype, c_dtype,
+    ):
+        X = qu.randn(size, dtype=X_dtype)
+        Y = qu.randn(size, dtype=X_dtype)
+        c = qu.randn(1, dtype=c_dtype).item()
+        res = X - c * Y
+        qu.core.subtract_update_(X, c, Y)
+        assert_allclose(res, X)
+
+    @mark.parametrize("size", [300, 3000, (300, 5), (3000, 5)])
+    @mark.parametrize("X_dtype", ['float32', 'float64',
+                                  'complex64', 'complex128'])
+    @mark.parametrize("c_dtype", ['float32', 'float64'])
+    def test_divide_update(
+        self, size, X_dtype, c_dtype,
+    ):
+        X = qu.randn(size, dtype=X_dtype)
+        Y = np.empty_like(X)
+        c = qu.randn(1, dtype=c_dtype).item()
+        res = X / c
+        qu.core.divide_update_(X, c, Y)
+        assert_allclose(res, Y, rtol=1e-6)

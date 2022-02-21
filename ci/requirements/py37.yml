@@ -2,6 +2,7 @@ channels:
   - defaults
   - conda-forge
 dependencies:
+  - python=3.7
   - numpy
   - scipy
   - numba
@@ -15,10 +16,10 @@ dependencies:
   - pytest-cov
   - coveralls
   - codecov
-  - opt_einsum
+  - opt_einsum>=3.2
   - joblib
+  - autoray
+  - diskcache
+  - pip
   - pip:
-    - autoray
     - randomgen
-    - codeclimate-test-reporter
-    - codacy-coverage

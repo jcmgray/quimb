@@ -4,10 +4,10 @@ from numbers import Integral
 
 import numpy as np
 import scipy.linalg as sla
-from cytoolz import identity
 
 from ..gen.rand import randn
 from ..core import dag, dot, njit
+from ..utils import identity
 
 
 def lu_orthog(X):

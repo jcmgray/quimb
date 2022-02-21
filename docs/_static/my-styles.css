@@ -1,68 +1,39 @@
-@import url('https://fonts.googleapis.com/css?family=Inconsolata');
-@import url('https://fonts.googleapis.com/css?family=Fira+Sans');
-@import url('https://fonts.googleapis.com/css?family=Fira+Mono');
-
-div.body {
-    max-width: 1200px;
-}
+@import url('https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400;1,700&family=IBM+Plex+Mono:ital,wght@0,400;0,600;1,400;1,600&display=swap');
 
 code {
-    font-family: 'Inconsolata', monospace;
-    font-size: 15px;
-    line-height: 25px;
     color: #ed7a00;
     background-color: #fff9e2;
 }
 
-code, kbd, pre, samp {
-    font-family: 'Inconsolata', monospace;
-    font-size: 17px;
-    line-height: 25px;
+:root{
+    --headercolor: rgb(50, 75, 100);
+    --highlightcolor: rgb(50, 75, 100);
 }
 
-blockquote {
-    font-family: 'Fira Sans', sans-serif;
-    font-size: 17px;
-    line-height: 31px;
+h1, h2, h3 {
+    font-family: 'IBM Plex Mono', monospace;
+    font-weight: bold;
+    color: var(--headercolor) !important;
 }
 
 body {
-    font-family: 'Fira Sans', sans-serif;
-    font-size: 17px;
-    line-height: 31px;
+    font-family: 'Atkinson Hyperlegible', sans-serif;
 }
 
-h1 {
-    font-family: 'Fira Mono', monospace;
-    font-size: 45px;
-    font-weight: bold;
-    line-height: 50px;
-    margin-top: 40px;
-    color: rgb(50, 75, 100);
+code, kbd, pre, samp {
+    font-family: 'IBM Plex Mono', monospace;
 }
 
-h2 {
-    font-family: 'Fira Mono', monospace;
-    font-size: 35px;
-    font-weight: bold;
-    line-height: 50px;
-    margin-top: 40px;
-    color: rgb(50, 75, 100);
+.content {
+    width: 60em;
 }
 
-h3 {
-    font-family: 'Fira Mono', monospace;
-    font-size: 25px;
-    font-weight: bold;
-    line-height: 50px;
-    margin-top: 40px;
-    color: rgb(50, 75, 100);
+.bd-sidebar {
+    padding-top: 0em;
+    padding-right: 2em;
+    padding-left: 2em;
 }
 
-.quimbnote {
-    background-color: rgb(84, 179, 68);
-}
-
-.quimbwarning {
-    background-color: #FE5A3C;
+#site-navigation div.navbar_extra_footer {
+    font-size: .6em;
 }

@@ -1,7 +1,42 @@
 """Miscellenous
 """
-import importlib
 import itertools
+import collections
+from importlib.util import find_spec
+
+
+try:
+    import cytoolz
+    last = cytoolz.last
+    concat = cytoolz.concat
+    frequencies = cytoolz.frequencies
+    partition_all = cytoolz.partition_all
+    merge_with = cytoolz.merge_with
+    valmap = cytoolz.valmap
+    partitionby = cytoolz.partitionby
+    concatv = cytoolz.concatv
+    partition_all = cytoolz.partition_all
+    compose = cytoolz.compose
+    identity = cytoolz.identity
+    isiterable = cytoolz.isiterable
+    unique = cytoolz.unique
+    keymap = cytoolz.keymap
+except ImportError:
+    import toolz
+    last = toolz.last
+    concat = toolz.concat
+    frequencies = toolz.frequencies
+    partition_all = toolz.partition_all
+    merge_with = toolz.merge_with
+    valmap = toolz.valmap
+    partitionby = toolz.partitionby
+    concatv = toolz.concatv
+    partition_all = toolz.partition_all
+    compose = toolz.compose
+    identity = toolz.identity
+    isiterable = toolz.isiterable
+    unique = toolz.unique
+    keymap = toolz.keymap
 
 
 _CHECK_OPT_MSG = "Option `{}` should be one of {}, but got '{}'."
@@ -25,7 +60,7 @@ def find_library(x):
     bool
         If library is available.
     """
-    return importlib.util.find_spec(x) is not None
+    return find_spec(x) is not None
 
 
 def raise_cant_find_library_function(x, extra_msg=None):
@@ -122,7 +157,7 @@ def deprecated(fn, old_name, new_name):
     def new_fn(*args, **kwargs):
         import warnings
         warnings.warn(f"The {old_name} function is deprecated in favor "
-                      "of {new_name}", Warning)
+                      f"of {new_name}", Warning)
         return fn(*args, **kwargs)
 
     return new_fn
@@ -134,6 +169,14 @@ def int2tup(x):
             tuple(x))
 
 
+def ensure_dict(x):
+    """Make sure ``x`` is a ``dict``, creating an empty one if ``x is None``.
+    """
+    if x is None:
+        return {}
+    return dict(x)
+
+
 def pairwise(iterable):
     """Iterate over each pair of neighbours in ``iterable``.
     """
@@ -142,50 +185,42 @@ def pairwise(iterable):
     return zip(a, b)
 
 
-def three_line_multi_print(l1, l2, l3, max_width=None):
+def print_multi_line(*lines, max_width=None):
     if max_width is None:
         import shutil
         max_width, _ = shutil.get_terminal_size()
 
-    if len(l2) <= max_width:
-        print(l1)
-        print(l2)
-        print(l3)
+    max_line_lenth = max(len(ln) for ln in lines)
+
+    if max_line_lenth <= max_width:
+        for ln in lines:
+            print(ln)
+
     else:  # pragma: no cover
         max_width -= 10  # for ellipses and pad
-        n_lines = (len(l2) - 1) // max_width + 1
-        for i in range(n_lines):
+        n_lines = len(lines)
+        n_blocks = (max_line_lenth - 1) // max_width + 1
+
+        for i in range(n_blocks):
             if i == 0:
-                print("   ", l1[i * max_width:(i + 1) * max_width], "   ")
-                print("   ", l2[i * max_width:(i + 1) * max_width], "...")
-                print("   ", l3[i * max_width:(i + 1) * max_width], "   ")
+                for j, l in enumerate(lines):
+                    print(
+                        "..." if j == n_lines // 2 else "   ",
+                        l[i * max_width:(i + 1) * max_width],
+                        "..." if j == n_lines // 2 else "   "
+                    )
                 print(("{:^" + str(max_width) + "}").format("..."))
-            elif i == n_lines - 1:
-                print("   ", l1[i * max_width:(i + 1) * max_width])
-                print("...", l2[i * max_width:(i + 1) * max_width])
-                print("   ", l3[i * max_width:(i + 1) * max_width])
+            elif i == n_blocks - 1:
+                for ln in lines:
+                    print("   ", ln[i * max_width:(i + 1) * max_width])
             else:
-                print("   ", l1[i * max_width:(i + 1) * max_width], "   ")
-                print("...", l2[i * max_width:(i + 1) * max_width], "...")
-                print("   ", l3[i * max_width:(i + 1) * max_width], "   ")
+                for j, ln in enumerate(lines):
+                    print(
+                        "..." if j == n_lines // 2 else "   ",
+                        ln[i * max_width:(i + 1) * max_width],
+                        "..." if j == n_lines // 2 else "   ",
+                    )
                 print(("{:^" + str(max_width) + "}").format("..."))
-
-
-def functions_equal(fn1, fn2):
-    """Check equality of the code in ``fn1`` and ``fn2``.
-    """
-
-    try:
-        code1 = fn1.__code__.co_code
-    except AttributeError:
-        code1 = fn1.__func__.__code__.co_code
-
-    try:
-        code2 = fn2.__code__.co_code
-    except AttributeError:
-        code2 = fn2.__func__.__code__.co_code
-
-    return code1 == code2
 
 
 def save_to_disk(obj, fname, **dump_opts):
@@ -222,5 +257,167 @@ class Verbosify:  # pragma: no cover
         if self.highlight is None:
             print(f"{pre_msg} args {args}, kwargs {kwargs}")
         else:
-            print("{pre_msg}{self.highlight}={kwargs[self.highlight]}")
+            print(f"{pre_msg}{self.highlight}={kwargs[self.highlight]}")
         return self.fn(*args, **kwargs)
+
+
+class oset:
+    """An ordered set which stores elements as the keys of dict (ordered as of
+    python 3.6). 'A few times' slower than using a set directly for small
+    sizes, but makes everything deterministic.
+    """
+
+    __slots__ = ('_d',)
+
+    def __init__(self, it=()):
+        self._d = dict.fromkeys(it)
+
+    @classmethod
+    def _from_dict(cls, d):
+        obj = object.__new__(oset)
+        obj._d = d
+        return obj
+
+    @classmethod
+    def from_dict(cls, d):
+        """Public method makes sure to copy incoming dictionary.
+        """
+        return oset._from_dict(d.copy())
+
+    def copy(self):
+        return oset.from_dict(self._d)
+
+    def add(self, k):
+        self._d[k] = None
+
+    def discard(self, k):
+        self._d.pop(k, None)
+
+    def remove(self, k):
+        del self._d[k]
+
+    def clear(self):
+        self._d.clear()
+
+    def update(self, *others):
+        for o in others:
+            self._d.update(o._d)
+
+    def union(self, *others):
+        u = self.copy()
+        u.update(*others)
+        return u
+
+    def intersection_update(self, *others):
+        if len(others) > 1:
+            si = set.intersection(*(set(o._d) for o in others))
+        else:
+            si = others[0]._d
+        self._d = {k: None for k in self._d if k in si}
+
+    def intersection(self, *others):
+        n_others = len(others)
+        if n_others == 0:
+            return self.copy()
+        elif n_others == 1:
+            si = others[0]._d
+        else:
+            si = set.intersection(*(set(o._d) for o in others))
+        return oset._from_dict({k: None for k in self._d if k in si})
+
+    def difference_update(self, *others):
+        if len(others) > 1:
+            su = set.union(*(set(o._d) for o in others))
+        else:
+            su = others[0]._d
+        self._d = {k: None for k in self._d if k not in su}
+
+    def difference(self, *others):
+        if len(others) > 1:
+            su = set.union(*(set(o._d) for o in others))
+        else:
+            su = others[0]._d
+        return oset._from_dict({k: None for k in self._d if k not in su})
+
+    def popleft(self):
+        k = next(iter(self._d))
+        del self._d[k]
+        return k
+
+    def popright(self):
+        return self._d.popitem()[0]
+
+    def __eq__(self, other):
+        if isinstance(other, oset):
+            return self._d == other._d
+        return False
+
+    def __or__(self, other):
+        return self.union(other)
+
+    def __ior__(self, other):
+        self.update(other)
+        return self
+
+    def __and__(self, other):
+        return self.intersection(other)
+
+    def __iand__(self, other):
+        self.intersection_update(other)
+        return self
+
+    def __sub__(self, other):
+        return self.difference(other)
+
+    def __isub__(self, other):
+        self.difference_update(other)
+        return self
+
+    def __len__(self):
+        return self._d.__len__()
+
+    def __iter__(self):
+        return self._d.__iter__()
+
+    def __contains__(self, x):
+        return self._d.__contains__(x)
+
+    def __repr__(self):
+        return f"oset({list(self._d)})"
+
+
+class LRU(collections.OrderedDict):
+    """Least recently used dict, which evicts old items. Taken from python
+    collections OrderedDict docs.
+    """
+
+    def __init__(self, maxsize, *args, **kwds):
+        self.maxsize = maxsize
+        super().__init__(*args, **kwds)
+
+    def __getitem__(self, key):
+        value = super().__getitem__(key)
+        self.move_to_end(key)
+        return value
+
+    def __setitem__(self, key, value):
+        if key in self:
+            self.move_to_end(key)
+        super().__setitem__(key, value)
+        if len(self) > self.maxsize:
+            oldest = next(iter(self))
+            del self[oldest]
+
+
+def gen_bipartitions(it):
+    """Generate all unique bipartitions of ``it``. Unique meaning
+    ``(1, 2), (3, 4)`` is considered the same as ``(3, 4), (1, 2)``.
+    """
+    n = len(it)
+    if n:
+        for i in range(1, 2**(n - 1)):
+            bitstring_repr = f'{i:0>{n}b}'
+            l, r = [], []
+            for b, x in zip(bitstring_repr, it):
+                (l if b == '0' else r).append(x)
+            yield l, r

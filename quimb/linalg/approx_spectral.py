@@ -11,12 +11,18 @@ import scipy.linalg as scla
 from scipy.ndimage.filters import uniform_filter1d
 
 from ..core import ptr, prod, vdot, njit, dot, subtract_update_, divide_update_
-from ..utils import int2tup
+from ..utils import int2tup, find_library, raise_cant_find_library_function
 from ..gen.rand import randn, rand_rademacher, rand_phase, seed_rand
 from ..linalg.mpi_launcher import get_mpi_pool
-from ..tensor.tensor_core import Tensor
-from ..tensor.tensor_1d import MatrixProductOperator
-from ..tensor.tensor_approx_spectral import construct_lanczos_tridiag_MPO
+
+if find_library('opt_einsum') and find_library('autoray'):
+    from ..tensor.tensor_core import Tensor
+    from ..tensor.tensor_1d import MatrixProductOperator
+    from ..tensor.tensor_approx_spectral import construct_lanczos_tridiag_MPO
+else:
+    reqs = '[opt_einsum,autoray]'
+    Tensor = raise_cant_find_library_function(reqs)
+    construct_lanczos_tridiag_MPO = raise_cant_find_library_function(reqs)
 
 
 # --------------------------------------------------------------------------- #
@@ -140,6 +146,29 @@ def norm_fro(a):
     return sqrt(inner(a, a))
 
 
+def norm_fro_approx(A, **kwargs):
+    r"""Calculate the approximate frobenius norm of any hermitian linear
+    operator:
+
+    .. math::
+
+        \mathrm{Tr} \left[ A^{\dagger} A \right]
+
+    Parameters
+    ----------
+    A : linear operator like
+        Operator with a dot method, assumed to be hermitian, to estimate the
+        frobenius norm of.
+    kwargs
+        Supplied to :func:`approx_spectral_function`.
+
+    Returns
+    -------
+    float
+    """
+    return approx_spectral_function(A, lambda x: x**2, **kwargs)**0.5
+
+
 def random_rect(shape, dist='rademacher', orthog=False, norm=True,
                 seed=False, dtype=complex):
     """Generate a random array optionally orthogonal.
@@ -228,8 +257,8 @@ def construct_lanczos_tridiag(A, K, v0=None, bsz=1, k_min=10, orthog=False,
         orthog = False
         v_shp = (d, bsz)
 
-    alpha = np.zeros(K + 1)
-    beta = np.zeros(K + 2)
+    alpha = np.zeros(K + 1, dtype=get_equivalent_real_dtype(A.dtype))
+    beta = np.zeros(K + 2, dtype=get_equivalent_real_dtype(A.dtype))
     beta[1] = sqrt(prod(v_shp))  # by construction
 
     if v0 is None:
@@ -283,7 +312,7 @@ def lanczos_tridiag_eig(alpha, beta, check_finite=True):
     beta : array of float
         The k={-1, 1} off-diagonal. Only first ``len(alpha) - 1`` entries used.
     """
-    Tk_banded = np.empty((2, alpha.size))
+    Tk_banded = np.empty((2, alpha.size), dtype=alpha.dtype)
     Tk_banded[1, -1] = 0.0  # sometimes can get nan here? -> breaks eig_banded
     Tk_banded[0, :] = alpha
     Tk_banded[1, :beta.size] = beta
@@ -411,10 +440,10 @@ def calc_est_window(estimates, mean_ests, conv_n):
     if len(estimates) > conv_n:
         # check for convergence using variance of paired last m estimates
         #   -> paired because estimates alternate between upper and lower bound
-        paired_ests = [
+        paired_ests = tuple(
             (a + b) / 2 for a, b in
             zip(estimates[-m_est::2], estimates[-m_est + 1::2])
-        ]
+        )
         err = std(paired_ests) / (m_est / 2) ** 0.5
     else:
         err = inf
@@ -517,6 +546,15 @@ def get_single_precision_dtype(dtype):
         return np.complex64
     elif np.issubdtype(dtype, np.floating):
         return np.float32
+    else:
+        raise ValueError(f"dtype {dtype} not understood.")
+
+
+def get_equivalent_real_dtype(dtype):
+    if dtype in ('float64', 'complex128'):
+        return 'float64'
+    elif dtype in ('float32', 'complex64'):
+        return 'float32'
     else:
         raise ValueError(f"dtype {dtype} not understood.")
 

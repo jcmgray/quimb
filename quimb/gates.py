@@ -24,5 +24,13 @@ CZ = operators.cZ()
 SWAP = operators.swap()
 ISWAP = operators.iswap()
 
+CCX = operators.ccX()
+CCY = operators.ccY()
+CCZ = operators.ccZ()
+
+CSWAP = operators.cswap()
+TOFFOLI = operators.toffoli()
+FREDKIN = operators.fredkin()
+
 U3 = operators.U_gate
 fsim = operators.fsim

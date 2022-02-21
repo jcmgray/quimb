@@ -1,224 +1,235 @@
 """Functions for generating random quantum objects and states.
 """
-import os
 import math
 import random
-from importlib.util import find_spec
-from functools import wraps, lru_cache
+from functools import wraps
 from numbers import Integral
+from itertools import count, chain
+from concurrent.futures import wait
 
 import numpy as np
+import numpy.random
 import scipy.sparse as sp
 
 from ..core import (qarray, dag, dot, rdmul, complex_array, get_thread_pool,
                     _NUM_THREAD_WORKERS, qu, ptr, kron, nmlz, prod,
                     vectorize, pvectorize)
 
-# -------------------------------- RANDOMGEN -------------------------------- #
-if (
-    find_spec('randomgen') and
-    os.environ.get('QUIMB_USE_RANDOMGEN', '').lower() not in {'false', 'off'}
-):
 
-    _RANDOM_GENS = []
+class _RGenHandler:
+    """Private object that handles pool of random number generators for
+    parallel number generation - seeding them & changing the underlying bit
+    generators.
+    """
 
-    @lru_cache(2)
-    def _get_randomgens(num_threads):
-        """Cached generation of random number generators, enables
-        ``random_seed_fn`` functionality and greater efficiency.
-        """
-        global _RANDOM_GENS
+    def __init__(self, initial_seed=None, initial_bitgen=None):
+        self.rgs = []
+        self.set_seed(initial_seed)
+        self.set_bitgen(initial_bitgen)
 
-        num_gens = len(_RANDOM_GENS)
-        if num_gens < num_threads:
-            from randomgen import Xoroshiro128
-
-            # add more generators if not enough
-            for _ in range(num_threads - num_gens):
-                _RANDOM_GENS.append(Xoroshiro128())
-
-        return _RANDOM_GENS[:num_threads]
-
-    def seed_rand(seed):
-        # all RNGs inherit state from the first RNG of _get_randomgens
-        _get_randomgens(1)[0].seed(seed)
-
-    def randn(shape=(), dtype=float, scale=1.0, loc=0.0,
-              num_threads=None, seed=None, dist='normal'):
-        """Fast multithreaded generation of random normally distributed data
-        using ``randomgen``.
+    def set_bitgen(self, bitgen):
+        """Set the core underlying bit-generator.
 
         Parameters
         ----------
-        shape : tuple[int]
-            The shape of the output random array.
-        dtype : {'complex128', 'float64', 'complex64' 'float32'}, optional
-            The data-type of the output array.
-        scale : float, optional
-            The width of the distribution (standard deviation if
-            ``dist='normal'``).
-        loc : float, optional
-            The location of the distribution (lower limit if
-            ``dist='uniform'``).
-        num_threads : int, optional
-            How many threads to use. If ``None``, decide automatically.
-        dist : {'normal', 'uniform'}
-            Type of random number to generate.
+        bitgen : {None, str}
+            Which bit generator to use, either from numpy or `randomgen` -
+            https://bashtage.github.io/randomgen/bit_generators/index.html.
         """
-        if seed is not None:
-            seed_rand(seed)
 
-        if isinstance(shape, Integral):
-            d = shape
-            shape = (shape,)
-        else:
-            d = prod(shape)
-
-        if num_threads is None:
-            # only multi-thread for big ``d``
-            if d <= 32768:
-                num_threads = 1
-            else:
-                num_threads = _NUM_THREAD_WORKERS
-
-        rgs = _get_randomgens(num_threads)
-
-        gen_method = {
-            'normal': 'standard_normal',
-            'uniform': 'random_sample'
-        }[dist]
-
-        # sequential generation
-        if num_threads <= 1:
-
-            def create(d, dtype):
-                out = np.empty(d, dtype)
-                getattr(rgs[0].generator, gen_method)(out=out, dtype=dtype)
-                return out
-
-        # threaded generation
-        else:
-            pool = get_thread_pool()
-
-            # copy state to all RGs and jump to ensure no overlap
-            for rg in rgs[1:]:
-                rg.state = rgs[0].state
-                rgs[0].jump()
-
-            gens = [thread_rg.generator for thread_rg in rgs]
-            S = math.ceil(d / num_threads)
-
-            def _fill(gen, out, dtype, first, last):
-                getattr(gen, gen_method)(out=out[first:last], dtype=dtype)
-
-            def create(d, dtype):
-                out = np.empty(d, dtype)
-                # submit thread work
-                fs = [
-                    pool.submit(_fill, gen, out, dtype, i * S, (i + 1) * S)
-                    for i, gen in enumerate(gens)
-                ]
-                # wait for completion
-                [f.result() for f in fs]
-                return out
-
-        if np.issubdtype(dtype, np.floating):
-            out = create(d, dtype)
-
-        elif np.issubdtype(dtype, np.complexfloating):
-            # need to sum two real arrays if generating complex numbers
-            if np.issubdtype(dtype, np.complex64):
-                sub_dtype = np.float32
-            else:
-                sub_dtype = np.float64
-
-            out = complex_array(create(d, sub_dtype), create(d, sub_dtype))
+        if bitgen is None:
+            self.gen_fn = numpy.random.default_rng
 
         else:
-            raise ValueError(f"dtype {dtype} not understood.")
+            try:
+                bg = getattr(numpy.random, bitgen)
+            except AttributeError:
+                import randomgen
+                bg = getattr(randomgen, bitgen)
 
-        if out.dtype != dtype:
-            out = out.astype(dtype)
+            def gen(s):
+                return numpy.random.Generator(bg(s))
 
-        if scale != 1.0:
-            out *= scale
-        if loc != 0.0:
-            out += loc
+            self.gen_fn = gen
 
-        return out.reshape(shape)
+        # delete any old rgens
+        self.rgs = []
 
-    def rand(*args, **kwargs):
-        return randn(*args, dist='uniform', **kwargs)
-
-    def randint(*args, **kwargs):
-        return _get_randomgens(1)[0].generator.randint(*args, **kwargs)
-
-    def choice(*args, **kwargs):
-        return _get_randomgens(1)[0].generator.choice(*args, **kwargs)
-
-# ---------------------------------- NUMPY ---------------------------------- #
-else:  # pragma: no cover
-
-    def seed_rand(seed):
-        np.random.seed(seed)
-
-    def randn(shape=(), dtype=float, scale=1.0, loc=0.0,
-              seed=None, dist='normal'):
-        """Generate normally distributed random array of certain shape and type.
-        Like :func:`numpy.random.randn` but can specify ``dtype``.
+    def set_seed(self, seed=None):
+        """Set the seed for the bit generators.
 
         Parameters
         ----------
-        shape : tuple[int]
-            The shape of the array.
-        dtype : {float, complex, ...}, optional
-            The numpy data type.
-        scale : float, optional
-            The width of the distribution (standard deviation if
-            ``dist='normal'``).
-        loc : float, optional
-            The location of the distribution (lower limit if
-            ``dist='uniform'``).
-        dist : {'normal', 'uniform'}
-            Type of random number to generate.
+        seed : {None, int}, optional
+            Seed supplied to `numpy.random.SeedSequence`. None will randomly
+            the generators (default).
+        """
+        seq = numpy.random.SeedSequence(seed)
+
+        # compute seeds in batches of 4 for perf
+        self.seeds = iter(chain.from_iterable(seq.spawn(4) for _ in count()))
+
+        # delete any old rgens
+        self.rgs = []
+
+    def get_rgens(self, num_threads):
+        """Get a list of the :class:`numpy.random.Generator` instances, having
+        made sure there are at least ``num_threads``.
+
+        Parameters
+        ----------
+        num_threads : int
+            The number of generators to return.
 
         Returns
         -------
-        A : array
+        list[numpy.random.Generator]
         """
-        if seed is not None:
-            seed_rand(seed)
+        num_gens = len(self.rgs)
 
-        def create():
-            if dist == 'normal':
-                return np.random.normal(loc=loc, scale=scale, size=shape)
-            elif dist == 'uniform':
-                return np.random.uniform(low=loc, high=loc + scale, size=shape)
-            else:
-                raise ValueError(f"Distribution '{dist}' not valid.")
+        if num_gens < num_threads:
+            self.rgs.extend(self.gen_fn(next(self.seeds))
+                            for _ in range(num_gens, num_threads))
 
-        # real datatypes
-        if np.issubdtype(dtype, np.floating):
-            x = create()
-        # complex datatypes
-        elif np.issubdtype(dtype, np.complexfloating):
-            x = complex_array(create(), create())
+        return self.rgs[:num_threads]
+
+
+_RG_HANDLER = _RGenHandler()
+
+
+def seed_rand(seed):
+    """See the random number generators, by instantiating a new set of bit
+    generators with a 'seed sequence'.
+    """
+    global _RG_HANDLER
+    return _RG_HANDLER.set_seed(seed)
+
+
+def set_rand_bitgen(bitgen):
+    """Set the core bit generator type to use, from either ``numpy`` or
+    ``randomgen``.
+
+    Parameters
+    ----------
+    bitgen : {'PCG64', 'SFC64', 'MT19937', 'Philox', str}
+        Which bit generator to use.
+    """
+    global _RG_HANDLER
+    return _RG_HANDLER.set_bitgen(bitgen)
+
+
+def _get_rgens(num_threads):
+    global _RG_HANDLER
+    return _RG_HANDLER.get_rgens(num_threads)
+
+
+def randn(shape=(), dtype=float, scale=1.0, loc=0.0,
+          num_threads=None, seed=None, dist='normal'):
+    """Fast multithreaded generation of random normally distributed data
+    using ``randomgen``.
+
+    Parameters
+    ----------
+    shape : tuple[int]
+        The shape of the output random array.
+    dtype : {'complex128', 'float64', 'complex64' 'float32'}, optional
+        The data-type of the output array.
+    scale : float, optional
+        The width of the distribution (standard deviation if
+        ``dist='normal'``).
+    loc : float, optional
+        The location of the distribution (lower limit if
+        ``dist='uniform'``).
+    num_threads : int, optional
+        How many threads to use. If ``None``, decide automatically.
+    dist : {'normal', 'uniform', 'exp'}, optional
+        Type of random number to generate.
+    """
+    if seed is not None:
+        seed_rand(seed)
+
+    if isinstance(shape, Integral):
+        d = shape
+        shape = (shape,)
+    else:
+        d = prod(shape)
+
+    if num_threads is None:
+        # only multi-thread for big ``d``
+        if d <= 32768:
+            num_threads = 1
         else:
-            raise TypeError(f"dtype {dtype} not understood - should be float "
-                            "or complex.")
+            num_threads = _NUM_THREAD_WORKERS
 
-        if x.dtype != dtype:
-            x = x.astype(dtype)
+    rgs = _get_rgens(num_threads)
 
-        return x
+    gen_method = {
+        'uniform': 'random',
+        'normal': 'standard_normal',
+        'exp': 'standard_exponential',
+    }.get(dist, dist)
 
-    choice = np.random.choice
-    randint = np.random.randint
-    rand = np.random.rand
+    # sequential generation
+    if num_threads <= 1:
+
+        def create(d, dtype):
+            out = np.empty(d, dtype)
+            getattr(rgs[0], gen_method)(out=out, dtype=dtype)
+            return out
+
+    # threaded generation
+    else:
+        pool = get_thread_pool()
+        S = math.ceil(d / num_threads)
+
+        def _fill(gen, out, dtype, first, last):
+            getattr(gen, gen_method)(out=out[first:last], dtype=dtype)
+
+        def create(d, dtype):
+            out = np.empty(d, dtype)
+            # submit thread work
+            fs = [
+                pool.submit(_fill, gen, out, dtype, i * S, (i + 1) * S)
+                for i, gen in enumerate(rgs)
+            ]
+            wait(fs)
+            return out
+
+    if np.issubdtype(dtype, np.floating):
+        out = create(d, dtype)
+
+    elif np.issubdtype(dtype, np.complexfloating):
+        # need to sum two real arrays if generating complex numbers
+        if np.issubdtype(dtype, np.complex64):
+            sub_dtype = np.float32
+        else:
+            sub_dtype = np.float64
+
+        out = complex_array(create(d, sub_dtype), create(d, sub_dtype))
+
+    else:
+        raise ValueError(f"dtype {dtype} not understood.")
+
+    if out.dtype != dtype:
+        out = out.astype(dtype)
+
+    if scale != 1.0:
+        out *= scale
+    if loc != 0.0:
+        out += loc
+
+    return out.reshape(shape)
+
+
+@wraps(randn)
+def rand(*args, **kwargs):
+    kwargs.setdefault('dist', 'uniform')
+    return randn(*args, **kwargs)
 
 
 def random_seed_fn(fn):
-    """Modify ``fn`` to take a ``seed`` argument.
+    """Modify ``fn`` to take a ``seed`` argument (so as to seed the random
+    generators once-only at beginning of function not every ``randn`` call).
     """
 
     @wraps(fn)
@@ -228,6 +239,17 @@ def random_seed_fn(fn):
         return fn(*args, **kwargs)
 
     return wrapped_fn
+
+
+def _randint(*args, **kwargs):
+    return _get_rgens(1)[0].integers(*args, **kwargs)
+
+
+def _choice(*args, **kwargs):
+    return _get_rgens(1)[0].choice(*args, **kwargs)
+
+
+choice = random_seed_fn(_choice)
 
 
 @random_seed_fn
@@ -246,7 +268,7 @@ def rand_rademacher(shape, scale=1, dtype=float):
         raise TypeError(f"dtype {dtype} not understood - should be float or "
                         "complex.")
 
-    x = choice(entries, shape)
+    x = _choice(entries, shape)
     if need2convert:
         x = x.astype(dtype)
 
@@ -345,7 +367,7 @@ def rand_matrix(d, scaled=True, sparse=False, stype='csr',
                 random.seed(seed)
             ijs = random.sample(range(0, d**2), k=nnz)
         else:
-            ijs = randint(0, d * d, size=nnz)
+            ijs = _randint(0, d * d, size=nnz)
 
         # want to sample nnz unique (d, d) pairs without building list
         i, j = np.divmod(ijs, d)
@@ -434,7 +456,7 @@ def rand_uni(d, dtype=complex):
     """
     q, r = np.linalg.qr(rand_matrix(d, dtype=dtype))
     r = np.diagonal(r)
-    r = r / np.abs(r)
+    r = r / np.abs(r)  # read-only so not inplace
     return rdmul(q, r)
 
 
@@ -451,28 +473,28 @@ def rand_ket(d, sparse=False, stype='csr', density=0.01, dtype=complex):
 
 
 @random_seed_fn
-def rand_haar_state(d):
+def rand_haar_state(d, dtype=complex):
     """Generate a random state of dimension `d` according to the Haar
     distribution.
     """
-    u = rand_uni(d)
+    u = rand_uni(d, dtype=dtype)
     return u[:, [0]]
 
 
 @random_seed_fn
-def gen_rand_haar_states(d, reps):
+def gen_rand_haar_states(d, reps, dtype=complex):
     """Generate many random Haar states, recycling a random unitary operator
     by using all of its columns (not a good idea?).
     """
     for rep in range(reps):
         cyc = rep % d
         if cyc == 0:
-            u = rand_uni(d)
+            u = rand_uni(d, dtype=dtype)
         yield u[:, [cyc]]
 
 
 @random_seed_fn
-def rand_mix(d, tr_d_min=None, tr_d_max=None, mode='rand'):
+def rand_mix(d, tr_d_min=None, tr_d_max=None, mode='rand', dtype=complex):
     """Constructs a random mixed state by tracing out a random ket
     where the composite system varies in size between 2 and d. This produces
     a spread of states including more purity but has no real meaning.
@@ -482,17 +504,17 @@ def rand_mix(d, tr_d_min=None, tr_d_max=None, mode='rand'):
     if tr_d_max is None:
         tr_d_max = d
 
-    m = randint(tr_d_min, tr_d_max)
+    m = _randint(tr_d_min, tr_d_max)
     if mode == 'rand':
-        psi = rand_ket(d * m)
+        psi = rand_ket(d * m, dtype=dtype)
     elif mode == 'haar':
-        psi = rand_haar_state(d * m)
+        psi = rand_haar_state(d * m, dtype=dtype)
 
     return ptr(psi, [d, m], 0)
 
 
 @random_seed_fn
-def rand_product_state(n, qtype=None):
+def rand_product_state(n, qtype=None, dtype=complex):
     """Generates a ket of `n` many random pure qubits.
     """
     def gen_rand_pure_qubits(n):
@@ -503,7 +525,7 @@ def rand_product_state(n, qtype=None):
             theta = np.arccos(2 * v - 1)
             yield qu([[np.cos(theta / 2.0)],
                       [np.sin(theta / 2.0) * np.exp(1.0j * phi)]],
-                     qtype=qtype)
+                     qtype=qtype, dtype=dtype)
     return kron(*gen_rand_pure_qubits(n))
 
 
@@ -545,7 +567,7 @@ rand_mps = rand_matrix_product_state
 
 
 @random_seed_fn
-def rand_seperable(dims, num_mix=10):
+def rand_seperable(dims, num_mix=10, dtype=complex):
     """Generate a random, mixed, seperable state. E.g rand_seperable([2, 2])
     for a mixed two qubit state with no entanglement.
 
@@ -565,7 +587,7 @@ def rand_seperable(dims, num_mix=10):
 
     def gen_single_sites():
         for dim in dims:
-            yield rand_rho(dim)
+            yield rand_rho(dim, dtype=dtype)
 
     weights = rand(num_mix)
 

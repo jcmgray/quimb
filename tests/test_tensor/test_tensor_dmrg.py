@@ -24,7 +24,7 @@ from quimb.tensor import (
     DMRG1,
     DMRG2,
     DMRGX,
-    SpinHam,
+    SpinHam1D,
 )
 
 
@@ -301,7 +301,7 @@ class TestDMRG2:
 
     def test_total_size_2(self):
         N = 2
-        builder = SpinHam(1 / 2)
+        builder = SpinHam1D(1 / 2)
         for i in range(N - 1):
             builder[i, i + 1] += 1.0, 'Z', 'Z'
 
@@ -313,7 +313,7 @@ class TestDMRG2:
     def test_variable_bond_ham(self):
         import quimb as qu
 
-        HB = SpinHam(1 / 2)
+        HB = SpinHam1D(1 / 2)
         HB[0, 1] += 0.6, 'Z', 'Z'
         HB[1, 2] += 0.7, 'Z', 'Z'
         HB[1, 2] += 0.8, 'X', 'X'

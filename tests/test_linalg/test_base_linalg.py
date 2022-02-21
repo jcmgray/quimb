@@ -337,7 +337,7 @@ class TestLazy:
 
     @pytest.mark.parametrize("backend", ['scipy', 'lobpcg'])
     def test_project_eig(self, backend):
-        Hl = qu.Lazy(qu.ham_heis, 4, sparse=True, shape=(16, 16))
+        Hl = qu.Lazy(qu.ham_heis, 4, sparse=True, shape=(16, 16), cyclic=True)
         Pl = qu.Lazy(qu.zspin_projector, 4, shape=(16, 6))
 
         ge, gs = qu.eigh(Hl, P=Pl, k=1, backend=backend)

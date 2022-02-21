@@ -28,12 +28,27 @@ The tests can also be run with pre-spawned mpi workers using the command ``quimb
 Building the docs locally
 =========================
 
-Building the docs requires `sphinx <http://www.sphinx-doc.org/en/stable/>`_, `sphinx_bootstrap_theme <https://ryan-roemer.github.io/sphinx-bootstrap-theme/>`_, and `nbsphinx <https://nbsphinx.readthedocs.io>`_.
+Building the docs requires `sphinx <http://www.sphinx-doc.org/en/stable/>`_, `sphinx-book-theme <https://github.com/executablebooks/sphinx-book-theme>`_, and `nbsphinx <https://nbsphinx.readthedocs.io>`_.
 
 1. To start from scratch, remove ``quimb/docs/_autosummary`` and ``quimb/docs/_build``.
 2. Run ``make html`` (``make.bat html`` on windows) in the ``quimb/docs`` folder.
 3. Launch the page: ``quimb/docs/_build/html/index.html``.
 
+Building the DocSet
+-------------------
+
+Building the DocSet requires `doc2dash >= 2.4.1 <https://github.com/hynek/doc2dash>`_.
+
+1. To start from scratch, remove ``quimb/docs/_autosummary`` and ``quimb/docs/_build``.
+2. Run ``make docset`` in the ``quimb/docs`` folder.
+3. Open the file ``quimb/docs/_build/quimb.docset`` to load it to Dash.
+
+Afterwards, in order to update the Dash repository with a the DocSet after a new release:
+
+1. Clone the `Dash-User-Contributions <https://github.com/Kapeli/Dash-User-Contributions>`_.
+2. Go to `docsets/quimb`, create a new directory with the version name inside the `versions` dir and copy there the generated DocSet.
+3. Edit the `docset.json`: update the `"version"` and add a new element below `"specific_versions"`.
+4. Commit and create a new Pull Request.
 
 Minting a Release
 =================

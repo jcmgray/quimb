@@ -1,20 +1,35 @@
 """Generate specific tensor network states and operators.
 """
+import math
+import functools
+import itertools
+import collections
 from numbers import Integral
 
 import numpy as np
+import opt_einsum as oe
 
 from ..core import make_immutable, ikron
-from ..gen.operators import spin_operator, eye, _gen_mbl_random_factors
+from ..utils import deprecated, unique, concat
+from ..gen.operators import (
+    spin_operator, eye, _gen_mbl_random_factors, ham_heis
+)
 from ..gen.rand import randn, choice, random_seed_fn, rand_phase
-from .tensor_core import Tensor
-from .array_ops import asarray, sensibly_scale
+from .tensor_core import (Tensor, new_bond, TensorNetwork, rand_uuid,
+                          tensor_direct_product)
+from .array_ops import asarray, sensibly_scale, reshape
+from .decomp import eigh
+from .tensor_arbgeom import TensorNetworkGen, TensorNetworkGenVector
 from .tensor_1d import MatrixProductState, MatrixProductOperator
-from .tensor_tebd import NNI
+from .tensor_2d import gen_2d_bonds, TensorNetwork2D
+from .tensor_3d import TensorNetwork3D
+from .tensor_1d_tebd import LocalHam1D
+from .tensor_2d_tebd import LocalHam2D
+from .tensor_3d_tebd import LocalHam3D
 
 
 @random_seed_fn
-def rand_tensor(shape, inds, tags=None, dtype=float, left_inds=None):
+def rand_tensor(shape, inds, tags=None, dtype='float64', left_inds=None):
     """Generate a random tensor with specified shape and inds.
 
     Parameters
@@ -66,18 +81,1612 @@ def rand_phased(shape, inds, tags=None, dtype=complex):
     return Tensor(data=data, inds=inds, tags=tags)
 
 
+def gen_unique_edges(edges):
+    seen = set()
+    for node_a, node_b in edges:
+        if node_b < node_a:
+            node_a, node_b = node_b, node_a
+        key = (node_a, node_b)
+        if key in seen:
+            continue
+        yield (node_a, node_b)
+        seen.add(key)
+
+
+def TN_from_edges_and_fill_fn(
+    fill_fn,
+    edges,
+    D,
+    phys_dim=None,
+    site_tag_id='I{}',
+    site_ind_id='k{}',
+):
+    """Create a tensor network from a sequence of edges defining a graph,
+    and a 'fill' function that maps shapes to data.
+
+    Parameters
+    ----------
+    fill_fn : callable
+        A function with signature ``fill_fn(shape) -> array``, used to fill
+        each tensor.
+    edges : sequence of tuple[hashable, hashable]
+        The graph edges, as a sequence of pairs of hashable objects, for
+        example integers, representing the nodes. You can redundantly specify
+        ``(u, v)`` and ``(v, u)`` and only one edge will be added.
+    D : int
+        The bond dimension connecting tensors.
+    phys_dim : int, optional
+        If not ``None``, give each tensor a 'physical', free index of this size
+        at each node.
+    site_tag_id : str, optional
+        String with formatter to tag sites.
+    site_ind_id : str, optional
+        String with formatter to tag indices (if ``phys_dim`` specified).
+
+    Returns
+    -------
+    TensorNetworkGen or TensorNetworkGenVector
+    """
+    terms = collections.defaultdict(list)
+    bonds = collections.defaultdict(rand_uuid)
+
+    for node_a, node_b in gen_unique_edges(edges):
+        bond = bonds[node_a, node_b]
+        # insert at 0 to exactly match geometry of old TN_rand_reg
+        terms[node_a].insert(0, bond)
+        terms[node_b].insert(0, bond)
+
+    ts = []
+    sites = []
+    for node, inds in sorted(terms.items(), key=lambda x: x[0]):
+        sites.append(node)
+        shape = [D] * len(inds)
+        if phys_dim is not None:
+            inds.append(site_ind_id.format(node))
+            shape.append(phys_dim)
+        data = fill_fn(shape)
+        tags = site_tag_id.format(node)
+        ts.append(Tensor(data=data, inds=inds, tags=tags))
+
+    tn = TensorNetwork(ts)
+
+    if phys_dim is not None:
+        tn.view_as_(
+            TensorNetworkGenVector, sites=sites,
+            site_tag_id=site_tag_id, site_ind_id=site_ind_id
+        )
+    else:
+        tn.view_as_(
+            TensorNetworkGen, sites=sites,
+            site_tag_id=site_tag_id
+        )
+
+    return tn
+
+
+def TN_from_edges_empty(
+    edges,
+    D,
+    phys_dim=None,
+    site_tag_id='I{}',
+    site_ind_id='k{}',
+    dtype='float64',
+):
+    """Create a tensor network from a sequence of edges defining a graph,
+    initialized with empty tensors.
+
+    Parameters
+    ----------
+    edges : sequence of tuple[hashable, hashable]
+        The graph edges, as a sequence of pairs of hashable objects, for
+        example integers, representing the nodes. You can redundantly specify
+        ``(u, v)`` and ``(v, u)`` and only one edge will be added.
+    D : int
+        The bond dimension connecting tensors.
+    phys_dim : int, optional
+        If not ``None``, give each tensor a 'physical', free index of this size
+        at each node.
+    site_tag_id : str, optional
+        String with formatter to tag sites.
+    site_ind_id : str, optional
+        String with formatter to tag indices (if ``phys_dim`` specified).
+    dtype : str, optional
+        The data type of the tensors.
+
+    Returns
+    -------
+    TensorNetworkGen or TensorNetworkGenVector
+    """
+    def fill_fn(shape):
+        return np.empty(shape, dtype=dtype)
+
+    return TN_from_edges_and_fill_fn(
+        edges=edges, D=D, fill_fn=fill_fn, phys_dim=phys_dim,
+        site_tag_id=site_tag_id, site_ind_id=site_ind_id)
+
+
+def TN_from_edges_with_value(
+    value,
+    edges,
+    D,
+    phys_dim=None,
+    site_tag_id='I{}',
+    site_ind_id='k{}',
+    dtype=None,
+):
+    """Create a tensor network from a sequence of edges defining a graph,
+    initialized with a constant value. This uses ``numpy.broadcast_to`` and
+    therefore essentially no memory.
+
+    Parameters
+    ----------
+    value : scalar
+        The value to fill the tensors with.
+    edges : sequence of tuple[hashable, hashable]
+        The graph edges, as a sequence of pairs of hashable objects, for
+        example integers, representing the nodes. You can redundantly specify
+        ``(u, v)`` and ``(v, u)`` and only one edge will be added.
+    D : int
+        The bond dimension connecting tensors.
+    phys_dim : int, optional
+        If not ``None``, give each tensor a 'physical', free index of this size
+        at each node.
+    site_tag_id : str, optional
+        String with formatter to tag sites.
+    site_ind_id : str, optional
+        String with formatter to tag indices (if ``phys_dim`` specified).
+    dtype : str, optional
+        The data type of the tensors.
+
+    Returns
+    -------
+    TensorNetworkGen or TensorNetworkGenVector
+    """
+    element = np.array(value, dtype=dtype)
+
+    def fill_fn(shape):
+        return np.broadcast_to(element, shape)
+
+    return TN_from_edges_and_fill_fn(
+        edges=edges, D=D, fill_fn=fill_fn, phys_dim=phys_dim,
+        site_tag_id=site_tag_id, site_ind_id=site_ind_id)
+
+
+def TN_rand_from_edges(
+    edges,
+    D,
+    phys_dim=None,
+    seed=None,
+    dtype='float64',
+    site_tag_id='I{}',
+    site_ind_id='k{}',
+):
+    """Create a random tensor network with geometry defined from a sequence
+    of edges defining a graph.
+
+    Parameters
+    ----------
+    G : sequence of tuple[node, node]
+        The edges defining a graph, each element should be a pair of nodes
+        described by hashable objects.
+    D : int
+        The bond dimension connecting tensors.
+    phys_dim : int, optional
+        If not ``None``, give each tensor a 'physical', free index of this size
+        to mimic a wavefunction of ``len(G)`` sites.
+    seed : int, optional
+        A random seed.
+    site_tag_id : str, optional
+        String with formatter to tag sites.
+    site_ind_id : str, optional
+        String with formatter to tag indices (if ``phys_dim`` specified).
+
+    Returns
+    -------
+    TensorNetworkGen or TensorNetworkGenVector
+    """
+    ts = {}
+
+    sites = tuple(sorted(set(concat(edges))))
+
+    for node in sites:
+        t = Tensor(tags=site_tag_id.format(node))
+        if phys_dim is not None:
+            t.new_ind(site_ind_id.format(node), size=phys_dim)
+        ts[node] = t
+
+    for node_a, node_b in gen_unique_edges(edges):
+        new_bond(ts[node_a], ts[node_b], size=D)
+
+    tn = TensorNetwork(ts.values())
+    tn.randomize_(seed=seed, dtype=dtype)
+
+    if phys_dim is not None:
+        tn.view_as_(
+            TensorNetworkGenVector, sites=sites,
+            site_tag_id=site_tag_id, site_ind_id=site_ind_id
+        )
+    else:
+        tn.view_as_(
+            TensorNetworkGen, sites=sites,
+            site_tag_id=site_tag_id
+        )
+
+    return tn
+
+
+def TN_rand_reg(
+    n,
+    reg,
+    D,
+    phys_dim=None,
+    seed=None,
+    dtype='float64',
+    site_tag_id='I{}',
+    site_ind_id='k{}',
+):
+    """Create a random regular tensor network.
+
+    Parameters
+    ----------
+    n : int
+        The number of tensors.
+    reg : int
+        The degree of the tensor network (how many tensors each tensor
+        connects to).
+    D : int
+        The bond dimension connecting tensors.
+    phys_dim : int, optional
+        If not ``None``, give each tensor a 'physical', free index of this size
+        to mimic a wavefunction of ``n`` sites.
+    seed : int, optional
+        A random seed.
+    site_tag_id : str, optional
+        String with formatter to tag sites.
+    site_ind_id : str, optional
+        String with formatter to tag indices (if ``phys_dim`` specified).
+
+    Returns
+    -------
+    TensorNetwork
+    """
+    import networkx as nx
+    G = nx.random_degree_sequence_graph([reg] * n, seed=seed)
+    return TN_rand_from_edges(
+        G.edges, D=D, phys_dim=phys_dim, seed=seed, dtype=dtype,
+        site_tag_id=site_tag_id, site_ind_id=site_ind_id)
+
+
+def TN2D_from_fill_fn(
+    fill_fn,
+    Lx,
+    Ly,
+    D,
+    cyclic=False,
+    site_tag_id='I{},{}',
+    row_tag_id='ROW{}',
+    col_tag_id='COL{}',
+):
+    """A scalar 2D lattice tensor network with tensors filled by a function.
+
+    Parameters
+    ----------
+    fill_fn : callable
+        A function with signature ``fill_fn(shape) -> array``, used to fill
+        each tensor.
+    Lx : int
+        Length of side x.
+    Ly : int
+        Length of side y.
+    D : int
+        The bond dimension connecting sites.
+    cyclic : bool or (bool, bool), optional
+        Whether to use periodic boundary conditions. X and Y can be specified
+        separately using a tuple.
+    site_tag_id : str, optional
+        String specifier for naming convention of site tags.
+    row_tag_id : str, optional
+        String specifier for naming convention of row tags.
+    col_tag_id : str, optional
+        String specifier for naming convention of column tags.
+
+    Returns
+    -------
+    TensorNetwork2D
+    """
+    try:
+        cyclic_x, cyclic_y = cyclic
+    except TypeError:
+        cyclic_x = cyclic_y = cyclic
+
+    ts = []
+    bonds = collections.defaultdict(rand_uuid)
+
+    for i, j in itertools.product(range(Lx), range(Ly)):
+        directions = ""
+        inds = []
+
+        if j > 0 or cyclic_y:
+            directions += 'l'
+            inds.append(bonds[(i, (j - 1) % Ly), (i, j)])
+        if j < Ly - 1 or cyclic_y:
+            directions += 'r'
+            inds.append(bonds[(i, j), (i, (j + 1) % Ly)])
+        if i < Lx - 1 or cyclic_x:
+            directions += 'u'
+            inds.append(bonds[(i, j), ((i + 1) % Lx, j)])
+        if i > 0 or cyclic_x:
+            directions += 'd'
+            inds.append(bonds[((i - 1) % Lx, j), (i, j)])
+
+        shape = (D,) * len(inds)
+        data = fill_fn(shape)
+        tags = [site_tag_id.format(i, j),
+                row_tag_id.format(i), col_tag_id.format(j)]
+        ts.append(Tensor(data=data, inds=inds, tags=tags))
+
+    tn = TensorNetwork(ts)
+
+    return tn.view_as_(
+        TensorNetwork2D,
+        Lx=Lx, Ly=Ly,
+        site_tag_id=site_tag_id,
+        row_tag_id=row_tag_id,
+        col_tag_id=col_tag_id,
+    )
+
+
+def TN2D_empty(
+    Lx,
+    Ly,
+    D,
+    cyclic=False,
+    site_tag_id='I{},{}',
+    row_tag_id='ROW{}',
+    col_tag_id='COL{}',
+    dtype='float64',
+):
+    """A scalar 2D lattice tensor network initialized with empty tensors.
+
+    Parameters
+    ----------
+    Lx : int
+        Length of side x.
+    Ly : int
+        Length of side y.
+    D : int
+        The bond dimension connecting sites.
+    cyclic : bool or (bool, bool), optional
+        Whether to use periodic boundary conditions. X and Y can be specified
+        separately using a tuple.
+    site_tag_id : str, optional
+        String specifier for naming convention of site tags.
+    row_tag_id : str, optional
+        String specifier for naming convention of row tags.
+    col_tag_id : str, optional
+        String specifier for naming convention of column tags.
+    dtype : str, optional
+        The data type of the tensors.
+
+    Returns
+    -------
+    TensorNetwork2D
+    """
+    def fill_fn(shape):
+        return np.empty(shape, dtype=dtype)
+
+    return TN2D_from_fill_fn(
+        fill_fn, Lx=Lx, Ly=Ly, D=D, cyclic=cyclic,
+        site_tag_id=site_tag_id, row_tag_id=row_tag_id, col_tag_id=col_tag_id,
+    )
+
+
+def TN2D_with_value(
+    value,
+    Lx,
+    Ly,
+    D,
+    cyclic=False,
+    site_tag_id='I{},{}',
+    row_tag_id='ROW{}',
+    col_tag_id='COL{}',
+    dtype=None,
+):
+    """A scalar 2D lattice tensor network with every element set to ``value``.
+    This uses ``numpy.broadcast_to`` and therefore essentially no memory.
+
+    Parameters
+    ----------
+    value : scalar
+        The value to fill the tensors with.
+    Lx : int
+        Length of side x.
+    Ly : int
+        Length of side y.
+    D : int
+        The bond dimension connecting sites.
+    cyclic : bool or (bool, bool), optional
+        Whether to use periodic boundary conditions. X and Y can be specified
+        separately using a tuple.
+    site_tag_id : str, optional
+        String specifier for naming convention of site tags.
+    row_tag_id : str, optional
+        String specifier for naming convention of row tags.
+    col_tag_id : str, optional
+        String specifier for naming convention of column tags.
+    dtype : str, optional
+        The data type of the tensors.
+
+    Returns
+    -------
+    TensorNetwork2D
+    """
+    element = np.array(value, dtype=dtype)
+
+    def fill_fn(shape):
+        return np.broadcast_to(element, shape)
+
+    return TN2D_from_fill_fn(
+        fill_fn, Lx=Lx, Ly=Ly, D=D, cyclic=cyclic,
+        site_tag_id=site_tag_id, row_tag_id=row_tag_id, col_tag_id=col_tag_id,
+    )
+
+
+@random_seed_fn
+def TN2D_rand(
+    Lx,
+    Ly,
+    D,
+    cyclic=False,
+    site_tag_id='I{},{}',
+    row_tag_id='ROW{}',
+    col_tag_id='COL{}',
+    dtype='float64',
+):
+    """A random scalar 2D lattice tensor network.
+
+    Parameters
+    ----------
+    Lx : int
+        Length of side x.
+    Ly : int
+        Length of side y.
+    D : int
+        The bond dimension connecting sites.
+    cyclic : bool or (bool, bool), optional
+        Whether to use periodic boundary conditions. X and Y can be specified
+        separately using a tuple.
+    site_tag_id : str, optional
+        String specifier for naming convention of site tags.
+    row_tag_id : str, optional
+        String specifier for naming convention of row tags.
+    col_tag_id : str, optional
+        String specifier for naming convention of column tags.
+    dtype : dtype, optional
+        Data type of the random arrays.
+    seed : int, optional
+        A random seed.
+
+    Returns
+    -------
+    TensorNetwork2D
+    """
+    def fill_fn(shape):
+        return randn(shape, dtype=dtype)
+
+    return TN2D_from_fill_fn(
+        fill_fn, Lx=Lx, Ly=Ly, D=D, cyclic=cyclic,
+        site_tag_id=site_tag_id, row_tag_id=row_tag_id, col_tag_id=col_tag_id,
+    )
+
+
+def TN3D_from_fill_fn(
+    fill_fn,
+    Lx,
+    Ly,
+    Lz,
+    D,
+    cyclic=False,
+    site_tag_id='I{},{},{}',
+    x_tag_id='X{}',
+    y_tag_id='Y{}',
+    z_tag_id='Z{}',
+):
+    """A scalar 3D lattice tensor network with tensors filled by a function.
+
+    Parameters
+    ----------
+    fill_fn : callable
+        A function with signature ``fill_fn(shape) -> array``, used to fill
+        each tensor.
+    Lx : int
+        Length of side x.
+    Ly : int
+        Length of side y.
+    Lz : int
+        Length of side z.
+    D : int
+        The bond dimension connecting sites.
+    cyclic : bool or (bool, bool, bool), optional
+        Whether to use periodic boundary conditions. X, Y and Z can be
+        specified separately using a tuple.
+    site_tag_id : str, optional
+        String formatter specifying how to label each site.
+    dtype : dtype, optional
+        Data type of the random arrays.
+
+    Returns
+    -------
+    TensorNetwork3D
+    """
+    try:
+        cyclic_x, cyclic_y, cyclic_z = cyclic
+    except TypeError:
+        cyclic_x = cyclic_y = cyclic_z = cyclic
+
+    ts = []
+    bonds = collections.defaultdict(rand_uuid)
+
+    for i, j, k in itertools.product(range(Lx), range(Ly), range(Lz)):
+        directions = ""
+        inds = []
+
+        if k > 0 or cyclic_z:
+            directions += 'b'
+            inds.append(bonds[(i, j, (k - 1) % Lz), (i, j, k)])
+        if k < Lz - 1 or cyclic_z:
+            directions += 'a'
+            inds.append(bonds[(i, j, k), (i, j, (k + 1) % Lz)])
+        if j > 0 or cyclic_y:
+            directions += 'l'
+            inds.append(bonds[(i, (j - 1) % Ly, k), (i, j, k)])
+        if j < Ly - 1 or cyclic_y:
+            directions += 'r'
+            inds.append(bonds[(i, j, k), (i, (j + 1) % Ly, k)])
+        if i < Lx - 1 or cyclic_x:
+            directions += 'u'
+            inds.append(bonds[(i, j, k), ((i + 1) % Lx, j, k)])
+        if i > 0 or cyclic_x:
+            directions += 'd'
+            inds.append(bonds[((i - 1) % Lx, j, k), (i, j, k)])
+
+        shape = (D,) * len(inds)
+        data = fill_fn(shape)
+        tags = [site_tag_id.format(i, j, k), x_tag_id.format(i),
+                y_tag_id.format(j), z_tag_id.format(k)]
+        ts.append(Tensor(data=data, inds=inds, tags=tags))
+
+    tn = TensorNetwork(ts)
+
+    return tn.view_as_(
+        TensorNetwork3D,
+        Lx=Lx, Ly=Ly, Lz=Lz,
+        site_tag_id=site_tag_id,
+        x_tag_id=x_tag_id,
+        y_tag_id=y_tag_id,
+        z_tag_id=z_tag_id,
+    )
+
+
+def TN3D_empty(
+    Lx,
+    Ly,
+    Lz,
+    D,
+    cyclic=False,
+    site_tag_id='I{},{},{}',
+    x_tag_id='X{}',
+    y_tag_id='Y{}',
+    z_tag_id='Z{}',
+    dtype='float64',
+):
+    """A scalar 3D lattice tensor network initialized with empty tensors.
+
+    Parameters
+    ----------
+    Lx : int
+        Length of side x.
+    Ly : int
+        Length of side y.
+    Lz : int
+        Length of side z.
+    D : int
+        The bond dimension connecting sites.
+    cyclic : bool or (bool, bool, bool), optional
+        Whether to use periodic boundary conditions. X, Y and Z can be
+        specified separately using a tuple.
+    site_tag_id : str, optional
+        String formatter specifying how to label each site.
+    dtype : dtype, optional
+        Data type of the random arrays.
+    seed : int, optional
+        Random seed.
+
+    Returns
+    -------
+    TensorNetwork3D
+    """
+    def fill_fn(shape):
+        return np.empty(shape, dtype=dtype)
+
+    return TN3D_from_fill_fn(
+        fill_fn, Lx, Ly, Lz, D,
+        cyclic=cyclic, site_tag_id=site_tag_id,
+        x_tag_id=x_tag_id, y_tag_id=y_tag_id, z_tag_id=z_tag_id,
+    )
+
+
+def TN3D_with_value(
+    value,
+    Lx,
+    Ly,
+    Lz,
+    D,
+    cyclic=False,
+    site_tag_id='I{},{},{}',
+    x_tag_id='X{}',
+    y_tag_id='Y{}',
+    z_tag_id='Z{}',
+    dtype=None,
+):
+    """A scalar 2D lattice tensor network with every element set to ``value``.
+    This uses ``numpy.broadcast_to`` and therefore essentially no memory.
+
+    Parameters
+    ----------
+    value : scalar
+        The value to fill the tensors with.
+    Lx : int
+        Length of side x.
+    Ly : int
+        Length of side y.
+    Lz : int
+        Length of side z.
+    D : int
+        The bond dimension connecting sites.
+    cyclic : bool or (bool, bool, bool), optional
+        Whether to use periodic boundary conditions. X, Y and Z can be
+        specified separately using a tuple.
+    site_tag_id : str, optional
+        String formatter specifying how to label each site.
+    dtype : dtype, optional
+        Data type of the random arrays.
+    seed : int, optional
+        Random seed.
+
+    Returns
+    -------
+    TensorNetwork3D
+    """
+    element = np.array(value, dtype=dtype)
+
+    def fill_fn(shape):
+        return np.broadcast_to(element, shape)
+
+    return TN3D_from_fill_fn(
+        fill_fn, Lx, Ly, Lz, D,
+        cyclic=cyclic, site_tag_id=site_tag_id,
+        x_tag_id=x_tag_id, y_tag_id=y_tag_id, z_tag_id=z_tag_id,
+    )
+
+
+@random_seed_fn
+def TN3D_rand(
+    Lx,
+    Ly,
+    Lz,
+    D,
+    cyclic=False,
+    site_tag_id='I{},{},{}',
+    x_tag_id='X{}',
+    y_tag_id='Y{}',
+    z_tag_id='Z{}',
+    dtype='float64',
+):
+    """A random scalar 3D lattice tensor network.
+
+    Parameters
+    ----------
+    Lx : int
+        Length of side x.
+    Ly : int
+        Length of side y.
+    Lz : int
+        Length of side z.
+    D : int
+        The bond dimension connecting sites.
+    cyclic : bool or (bool, bool, bool), optional
+        Whether to use periodic boundary conditions. X, Y and Z can be
+        specified separately using a tuple.
+    site_tag_id : str, optional
+        String formatter specifying how to label each site.
+    dtype : dtype, optional
+        Data type of the random arrays.
+    seed : int, optional
+        Random seed.
+
+    Returns
+    -------
+    TensorNetwork
+    """
+    def fill_fn(shape):
+        return randn(shape, dtype=dtype)
+
+    return TN3D_from_fill_fn(
+        fill_fn, Lx, Ly, Lz, D,
+        cyclic=cyclic, site_tag_id=site_tag_id,
+        x_tag_id=x_tag_id, y_tag_id=y_tag_id, z_tag_id=z_tag_id,
+    )
+
+
+# ---------------------------- classical models ----------------------------- #
+
+@functools.lru_cache(128)
+def classical_ising_S_matrix(beta, j=1.0):
+    """The interaction term for the classical ising model.
+    """
+    S = np.array(
+        [[math.exp(+j * beta), math.exp(-j * beta)],
+         [math.exp(-j * beta), math.exp(+j * beta)]])
+    make_immutable(S)
+    return S
+
+
+@functools.lru_cache(128)
+def classical_ising_H_matrix(beta, h=0.0):
+    """The magnetic field term for the classical ising model.
+    """
+    H = np.array([math.exp(-beta * h), math.exp(beta * h)])
+    make_immutable(H)
+    return H
+
+
+@functools.lru_cache(128)
+def classical_ising_sqrtS_matrix(beta, j=1.0, asymm=None):
+    """The sqrt factorized interaction term for the classical ising model.
+    If ``j`` is negative you can supply ``asymm='l'`` or ``'r'`` to
+    keep the matrix real, but it must be paired with the opposite in a tensor
+    network.
+    """
+    if (j < 0.0) and (asymm is not None):
+        Slr = eigh(classical_ising_S_matrix(beta=beta, j=j))
+        S_1_2 = {
+            'l': Slr[0], 'lT': Slr[0].T,
+            'r': Slr[-1], 'rT': Slr[-1].T,
+        }[asymm]
+    else:
+        S_1_2 = np.array(
+            [[math.cosh(j * beta)**0.5 + math.sinh(j * beta)**0.5,
+              math.cosh(j * beta)**0.5 - math.sinh(j * beta)**0.5],
+             [math.cosh(j * beta)**0.5 - math.sinh(j * beta)**0.5,
+              math.cosh(j * beta)**0.5 + math.sinh(j * beta)**0.5]]
+        ) / 2**0.5
+    make_immutable(S_1_2)
+    return S_1_2
+
+
+@functools.lru_cache(128)
+def classical_ising_T_matrix(
+    beta,
+    j=1.0,
+    h=0.0,
+    directions='lrud',
+    asymm=None,
+):
+    """The single effective TN site for the classical ising model.
+    """
+    try:
+        js = tuple(j)
+    except TypeError:
+        js = (j,) * len(directions)
+
+    try:
+        asymms = tuple(asymm)
+    except TypeError:
+        asymms = (asymm,) * len(directions)
+
+    arrays = (
+        [
+            classical_ising_sqrtS_matrix(beta=beta, j=j, asymm=a)
+            for j, a in zip(js, asymms)
+        ] +
+        [classical_ising_H_matrix(beta, h)]
+    )
+    lhs = ",".join(f'i{x}' for x in directions)
+    eq = lhs + ",i->" + directions
+    return oe.contract(eq, *arrays)
+
+
+def HTN2D_classical_ising_partition_function(
+    Lx,
+    Ly,
+    beta,
+    h=0.0,
+    j=1.0,
+    ind_id='s{},{}',
+    cyclic=False,
+):
+    """Hyper tensor network representation of the 2D classical ising model
+    partition function. The indices will be shared by 4 or 5 tensors depending
+    on whether ``h`` is non-zero. As opposed to the 'normal' tensor network,
+    here each classical spin is still a single index, which is easier to
+    contract exactly.
+
+    Parameters
+    ----------
+    Lx : int
+        Length of side x.
+    Ly : int
+        Length of side y.
+    beta : float
+        The inverse temperature.
+    h : float, optional
+        The magnetic field strength.
+    j : float, optional
+        The interaction strength, positive being *ferromagnetic*.
+    cyclic : bool or (bool, bool), optional
+        Whether to use periodic boundary conditions. X and Y can be specified
+        separately using a tuple.
+    ind_id : str, optional
+        How to label the indices i.e. ``ind_id.format(i, j)``, each of which
+        corresponds to a single classical spin.
+
+    Returns
+    -------
+    TensorNetwork
+
+    See Also
+    --------
+    TN2D_classical_ising_partition_function
+    """
+    try:
+        cyclic_x, cyclic_y = cyclic
+    except TypeError:
+        cyclic_x = cyclic_y = cyclic
+
+    if callable(j):
+        j_factory = j
+    else:
+        def j_factory(node_a, node_b):
+            return j
+
+    ts = []
+    for ni, nj in itertools.product(range(Lx), range(Ly)):
+
+        if ni < Lx - 1 or cyclic_x:
+            node_a, node_b = (ni, nj), ((ni + 1) % Lx, nj)
+            inds = ind_id.format(*node_a), ind_id.format(*node_b)
+            data = classical_ising_S_matrix(
+                beta=beta, j=j_factory(node_a, node_b))
+            ts.append(Tensor(data, inds=inds))
+
+        if nj < Ly - 1 or cyclic_y:
+            node_a, node_b = (ni, nj), (ni, (nj + 1) % Ly)
+            inds = ind_id.format(*node_a), ind_id.format(*node_b)
+            data = classical_ising_S_matrix(
+                beta=beta, j=j_factory(node_a, node_b))
+            ts.append(Tensor(data, inds=inds))
+
+        if h != 0.0:
+            data = classical_ising_H_matrix(beta=beta, h=h)
+            ts.append(Tensor(data, inds=(ind_id.format(ni, nj),)))
+
+    return TensorNetwork(ts)
+
+
+def HTN3D_classical_ising_partition_function(
+    Lx,
+    Ly,
+    Lz,
+    beta,
+    j=1.0,
+    h=0.0,
+    cyclic=False,
+    ind_id='s{},{},{}',
+):
+    """Hyper tensor network representation of the 3D classical ising model
+    partition function. The indices will be shared by 6 or 7 tensors depending
+    on whether ``h`` is non-zero. As opposed to the 'normal' tensor network,
+    here each classical spin is still a single index, which is easier to
+    contract exactly.
+
+    Parameters
+    ----------
+    Lx : int
+        Length of side x.
+    Ly : int
+        Length of side y.
+    Lz : int
+        Length of side z.
+    beta : float
+        The inverse temperature.
+    j : float, optional
+        The interaction strength, positive being *ferromagnetic*.
+    h : float, optional
+        The magnetic field strength.
+    cyclic : bool or (bool, bool, bool), optional
+        Whether to use periodic boundary conditions. X, Y and Z can be
+        specified separately using a tuple.
+    ind_id : str, optional
+        How to label the indices i.e. ``ind_id.format(i, j, k)``, each of which
+        corresponds to a single classical spin.
+
+    Returns
+    -------
+    TensorNetwork
+
+    See Also
+    --------
+    TN3D_classical_ising_partition_function
+    """
+    try:
+        cyclic_x, cyclic_y, cyclic_z = cyclic
+    except TypeError:
+        cyclic_x = cyclic_y = cyclic_z = cyclic
+
+    if callable(j):
+        j_factory = j
+    else:
+        def j_factory(node_a, node_b):
+            return j
+
+    ts = []
+    for ni, nj, nk in itertools.product(range(Lx), range(Ly), range(Lz)):
+
+        if ni < Lx - 1 or cyclic_x:
+            node_a, node_b = (ni, nj, nk), ((ni + 1) % Lx, nj, nk)
+            inds = (ind_id.format(*node_a), ind_id.format(*node_b))
+            data = classical_ising_S_matrix(
+                beta=beta, j=j_factory(node_a, node_b))
+            ts.append(Tensor(data, inds=inds))
+
+        if nj < Ly - 1 or cyclic_y:
+            node_a, node_b = (ni, nj, nk), (ni, (nj + 1) % Ly, nk)
+            inds = (ind_id.format(*node_a), ind_id.format(*node_b))
+            data = classical_ising_S_matrix(
+                beta=beta, j=j_factory(node_a, node_b))
+            ts.append(Tensor(data, inds=inds))
+
+        if nk < Lz - 1 or cyclic_z:
+            node_a, node_b = (ni, nj, nk), (ni, nj, (nk + 1) % Lz)
+            inds = (ind_id.format(*node_a), ind_id.format(*node_b))
+            data = classical_ising_S_matrix(
+                beta=beta, j=j_factory(node_a, node_b))
+            ts.append(Tensor(data, inds=inds))
+
+        if h != 0.0:
+            data = classical_ising_H_matrix(beta=beta, h=h)
+            ts.append(Tensor(data, inds=(ind_id.format(ni, nj, nk),)))
+
+    return TensorNetwork(ts)
+
+
+def TN2D_classical_ising_partition_function(
+    Lx,
+    Ly,
+    beta,
+    j=1.0,
+    h=0.0,
+    cyclic=False,
+    site_tag_id='I{},{}',
+    row_tag_id='ROW{}',
+    col_tag_id='COL{}',
+):
+    """The tensor network representation of the 2D classical ising model
+    partition function.
+
+    Parameters
+    ----------
+    Lx : int
+        Length of side x.
+    Ly : int
+        Length of side y.
+    beta : float
+        The inverse temperature.
+    j : float, optional
+        The interaction strength, positive being *ferromagnetic*.
+    h : float, optional
+        The magnetic field strength.
+    cyclic : bool or (bool, bool), optional
+        Whether to use periodic boundary conditions. X and Y can be specified
+        separately using a tuple.
+    site_tag_id : str, optional
+        String specifier for naming convention of site tags.
+    row_tag_id : str, optional
+        String specifier for naming convention of row tags.
+    col_tag_id : str, optional
+        String specifier for naming convention of column tags.
+
+    Returns
+    -------
+    TensorNetwork2D
+
+    See Also
+    --------
+    HTN2D_classical_ising_partition_function
+    """
+    try:
+        cyclic_x, cyclic_y = cyclic
+    except TypeError:
+        cyclic_x = cyclic_y = cyclic
+
+    if callable(j):
+        j_factory = j
+    else:
+        def j_factory(node_a, node_b):
+            return j
+
+    ts = []
+    bonds = collections.defaultdict(rand_uuid)
+
+    for ni, nj in itertools.product(range(Lx), range(Ly)):
+        directions = ""
+        inds = []
+        js = ()
+        asymms = ()
+
+        for inbounds, pair, direction in [
+            (nj > 0 or cyclic_y, ((ni, (nj - 1) % Ly), (ni, nj)), 'l'),
+            (nj < Ly - 1 or cyclic_y, ((ni, nj), (ni, (nj + 1) % Ly)), 'r'),
+            (ni < Lx - 1 or cyclic_x, ((ni, nj), ((ni + 1) % Lx, nj)), 'u'),
+            (ni > 0 or cyclic_x, (((ni - 1) % Lx, nj), (ni, nj)), 'd'),
+        ]:
+            if inbounds:
+                js += (j_factory(*pair),)
+                directions += direction
+                # this is logic for handling negative j without imag tensors
+                # i.e. add the left factor if the first instance of bond, right
+                # factor if second. If j > 0.0 this doesn't matter anyhow
+                asymms += ('l' if pair not in bonds else 'rT',)
+                inds.append(bonds[pair])
+
+        ts.append(Tensor(
+            data=classical_ising_T_matrix(
+                beta=beta, directions=directions, j=js, h=h, asymm=asymms,
+            ),
+            inds=inds,
+            tags=[site_tag_id.format(ni, nj),
+                  row_tag_id.format(ni),
+                  col_tag_id.format(nj)]))
+
+    tn = TensorNetwork(ts)
+
+    return tn.view_as_(
+        TensorNetwork2D,
+        Lx=Lx, Ly=Ly,
+        site_tag_id=site_tag_id,
+        row_tag_id=row_tag_id,
+        col_tag_id=col_tag_id,
+    )
+
+
+def TN3D_classical_ising_partition_function(
+    Lx,
+    Ly,
+    Lz,
+    beta,
+    j=1.0,
+    h=0.0,
+    cyclic=False,
+    site_tag_id='I{},{},{}',
+    x_tag_id='X{}',
+    y_tag_id='Y{}',
+    z_tag_id='Z{}',
+):
+    """Tensor network representation of the 3D classical ising model
+    partition function.
+
+    Parameters
+    ----------
+    Lx : int
+        Length of side x.
+    Ly : int
+        Length of side y.
+    Lz : int
+        Length of side z.
+    beta : float
+        The inverse temperature.
+    j : float, optional
+        The interaction strength, positive being *ferromagnetic*.
+    h : float, optional
+        The magnetic field strength.
+    cyclic : bool or (bool, bool, bool), optional
+        Whether to use periodic boundary conditions. X, Y and Z can be
+        specified separately using a tuple.
+    site_tag_id : str, optional
+        String formatter specifying how to label each site.
+
+    Returns
+    -------
+    TensorNetwork
+
+    See Also
+    --------
+    HTN3D_classical_ising_partition_function
+    """
+    try:
+        cyclic_x, cyclic_y, cyclic_z = cyclic
+    except TypeError:
+        cyclic_x = cyclic_y = cyclic_z = cyclic
+
+    if callable(j):
+        j_factory = j
+    else:
+        def j_factory(node_a, node_b):
+            return j
+
+    ts = []
+    bonds = collections.defaultdict(rand_uuid)
+
+    for ni, nj, nk in itertools.product(range(Lx), range(Ly), range(Lz)):
+        directions = ""
+        inds = []
+        js = ()
+        asymms = ()
+
+        for inbounds, pair, direction in [
+            (nk > 0 or cyclic_z,
+             ((ni, nj, (nk - 1) % Lz), (ni, nj, nk)), 'b'),
+            (nk < Lz - 1 or cyclic_z,
+             ((ni, nj, nk), (ni, nj, (nk + 1) % Lz)), 'a'),
+            (nj > 0 or cyclic_y,
+             ((ni, (nj - 1) % Ly, nk), (ni, nj, nk)), 'l'),
+            (nj < Ly - 1 or cyclic_y,
+             ((ni, nj, nk), (ni, (nj + 1) % Ly, nk)), 'r'),
+            (ni < Lx - 1 or cyclic_x,
+             ((ni, nj, nk), ((ni + 1) % Lx, nj, nk)), 'u'),
+            (ni > 0 or cyclic_x,
+             (((ni - 1) % Lx, nj, nk), (ni, nj, nk)), 'd'),
+        ]:
+            if inbounds:
+                js += (j_factory(*pair),)
+                directions += direction
+                # this is logic for handling negative j without imag tensors
+                # i.e. add the left factor if the first instance of bond, right
+                # factor if second. If j > 0.0 this doesn't matter anyhow
+                asymms += ('l' if pair not in bonds else 'rT',)
+                inds.append(bonds[pair])
+
+        ts.append(Tensor(
+            data=classical_ising_T_matrix(
+                beta=beta, directions=directions, j=js, h=h, asymm=asymms,
+            ),
+            inds=inds,
+            tags=[
+                site_tag_id.format(ni, nj, nk),
+                x_tag_id.format(ni),
+                y_tag_id.format(nj),
+                z_tag_id.format(nk),
+            ],
+        ))
+
+    tn = TensorNetwork(ts)
+
+    return tn.view_as_(
+        TensorNetwork3D,
+        Lx=Lx, Ly=Ly, Lz=Lz,
+        site_tag_id=site_tag_id,
+        x_tag_id=x_tag_id,
+        y_tag_id=y_tag_id,
+        z_tag_id=z_tag_id,
+    )
+
+
+def HTN_classical_partition_function_from_edges(
+    edges,
+    beta,
+    j=1.0,
+    h=0.0,
+    site_ind_id="s{}",
+    site_tag_id="I{}",
+    bond_tag_id="B{},{}",
+):
+    """Build a hyper tensor network representation of a classical ising model
+    partition function by specifying graph edges. There will be a single
+    tensor *per interaction* rather than per site, as well as a single tensor
+    for each site, if ``h != 0.0``.
+
+    Parameters
+    ----------
+    edges : sequence of tuple[hashable, hashable]
+        The graph edges, as a sequence of pairs of hashable objects, for
+        example integers, representing the nodes. You can redundantly specify
+        ``(u, v)`` and ``(v, u)`` and only one edge will be added.
+    beta : float, optional
+        The inverse temperature.
+    j : float, or callable, optional
+        The interaction strength, positive being *ferromagnetic*. If a
+        callable should have the signature ``j(node_a, node_b)`` and return
+        a float.
+    h : float, or callable, optional
+        The magnetic field strength. If a callable should have the
+        signature ``h(node)`` and return a float.
+    site_ind_id : str, optional
+        A string formatter for naming tensor indices like
+        ``site_ind_id.format(node)``.
+    site_tag_id : str, optional
+        A string formatter for naming tensor tags like
+        ``site_tag_id.format(node)``.
+    bond_tag_id : str, optional
+        A string formatter for naming tensor tags like
+        ``bond_tag_id.format(node_a, node_b)``.
+
+    Returns
+    -------
+    TensorNetwork
+    """
+    if callable(j):
+        j_factory = j
+    else:
+        def j_factory(node_a, node_b):
+            return j
+
+    ts = []
+    for node_a, node_b in gen_unique_edges(edges):
+        data = classical_ising_S_matrix(beta=beta, j=j_factory(node_a, node_b))
+        inds = [site_ind_id.format(node_a),
+                site_ind_id.format(node_b)]
+        tags = [bond_tag_id.format(node_a, node_b),
+                site_tag_id.format(node_a),
+                site_tag_id.format(node_b)]
+        ts.append(Tensor(data=data, inds=inds, tags=tags))
+
+    if h != 0.0:
+        if callable(h):
+            h_factory = h
+        else:
+            def h_factory(node):
+                return h
+
+        for node in unique(concat(edges)):
+            data = classical_ising_H_matrix(beta, h=h_factory(node))
+            inds = [site_ind_id.format(node)]
+            tags = [site_tag_id.format(node)]
+            ts.append(Tensor(data=data, inds=inds, tags=tags))
+
+    return TensorNetwork(ts)
+
+
+def TN_classical_partition_function_from_edges(
+    edges,
+    beta,
+    j=1.0,
+    h=0.0,
+    site_tag_id="I{}",
+    bond_ind_id="b{},{}",
+):
+    """Build a regular tensor network representation of a classical ising model
+    partition function by specifying graph edges. There will be a single
+    tensor per site.
+
+    Parameters
+    ----------
+    edges : sequence of tuple[hashable, hashable]
+        The graph edges, as a sequence of pairs of hashable objects, for
+        example integers, representing the nodes. You can redundantly specify
+        ``(u, v)`` and ``(v, u)`` and only one edge will be added.
+    beta : float, optional
+        The inverse temperature.
+    j : float, or callable, optional
+        The interaction strength, positive being *ferromagnetic*. If a
+        callable should have the signature ``j(node_a, node_b)`` and return
+        a float.
+    h : float, or callable, optional
+        The magnetic field strength. If a callable should have the
+        signature ``h(node)`` and return a float.
+    site_tag_id : str, optional
+        A string formatter for naming tensor tags like
+        ``site_ind_id.format(node)``.
+    bond_ind_id : str, optional
+        A string formatter for naming the indices bewteen tensors like
+        ``bond_ind_id.format(node_a, node_b)``.
+
+    Returns
+    -------
+    TensorNetwork
+    """
+    if callable(j):
+        j_factory = j
+    else:
+        def j_factory(node_a, node_b):
+            return j
+
+    to_contract = collections.defaultdict(list)
+    ts = []
+    for node_a, node_b in gen_unique_edges(edges):
+        j_ab = j_factory(node_a, node_b)
+        bond_ab = bond_ind_id.format(node_a, node_b)
+
+        # left tensor factor
+        data = classical_ising_sqrtS_matrix(beta=beta, j=j_ab, asymm='l')
+        inds = [f's{node_a}', bond_ab]
+        tags = [site_tag_id.format(node_a)]
+        ts.append(Tensor(data=data, inds=inds, tags=tags))
+
+        # right tensor factor
+        data = classical_ising_sqrtS_matrix(beta=beta, j=j_ab, asymm='r')
+        inds = [bond_ab, f's{node_b}']
+        tags = [site_tag_id.format(node_b)]
+        ts.append(Tensor(data=data, inds=inds, tags=tags))
+
+        to_contract[f's{node_a}'].append(bond_ab)
+        to_contract[f's{node_b}'].append(bond_ab)
+
+    sites = tuple(sorted(set(concat(edges))))
+
+    if h != 0.0:
+        if callable(h):
+            h_factory = h
+        else:
+            def h_factory(node):
+                return h
+
+        for node in sites:
+            data = classical_ising_H_matrix(beta, h=h_factory(node))
+            inds = [f's{node}']
+            tags = [site_tag_id.format(node)]
+            ts.append(Tensor(data=data, inds=inds, tags=tags))
+            to_contract[f's{node}'].extend(())
+
+    tn = TensorNetwork(ts)
+
+    for ind, output_inds in to_contract.items():
+        tn.contract_ind(ind, output_inds=output_inds)
+
+    tn.view_as_(TensorNetworkGen, sites=sites, site_tag_id=site_tag_id)
+    return tn
+
+
+@functools.lru_cache(128)
+def dimer_data(d, cover_count=1, dtype=float):
+    shape = [2] * d
+    x = np.zeros(shape, dtype=dtype)
+    index_sum = np.indices(shape).sum(axis=0)
+    x[index_sum == cover_count] = 1
+    make_immutable(x)
+    return x
+
+
+def TN_dimer_covering_from_edges(
+    edges,
+    cover_count=1,
+    site_tag_id="I{}",
+    bond_ind_id="b{},{}",
+    dtype=float,
+):
+    """Make a tensor network from sequence of graph edges that counts the
+    number of ways to cover the graph exactly with dimers. See
+    https://arxiv.org/abs/1805.10598 for the construction.
+
+    Parameters
+    ----------
+    edges : sequence of tuple
+        The edges, each item should be a pair of hashable objects describing
+        nodes linked.
+    cover_count : int, optional
+        The exact number of times each node must be 'covered'. For example
+        1 for a standard dimer covering or 2 for 'ice rules'.
+    site_tag_id : str, optional
+        A string formatter for naming tensor tags like
+        ``site_ind_id.format(node)``.
+    bond_ind_id : str, optional
+        A string formatter for naming the indices bewteen tensors like
+        ``bond_ind_id.format(node_a, node_b)``.
+
+    Returns
+    -------
+    TensorNetwork
+    """
+    nodes2inds = collections.defaultdict(list)
+    for ni, nj in edges:
+        bond = bond_ind_id.format(ni, nj)
+        nodes2inds[ni].append(bond)
+        nodes2inds[nj].append(bond)
+
+    ts = []
+    for node, inds in nodes2inds.items():
+        data = dimer_data(len(inds), cover_count=cover_count, dtype=dtype)
+        tag = site_tag_id.format(node)
+        ts.append(Tensor(data, inds=inds, tags=tag))
+
+    tn = TensorNetwork(ts)
+    sites = tuple(sorted(nodes2inds))
+    tn.view_as_(TensorNetworkGen, sites=sites, site_tag_id=site_tag_id)
+    return tn
+
+
+# --------------------------------------------------------------------------- #
+#                           Weighted Model Counting                           #
+# --------------------------------------------------------------------------- #
+
+
+def clause_negmask(clause):
+    return int("".join('0' if x > 0 else '1' for x in clause), 2)
+
+
+@functools.lru_cache(128)
+def or_clause_data(ndim, m=0, dtype=float, q=2):
+    """Get the array representing satisfiability of ``ndim`` clauses with
+    unsatisfied condition encoded in ``m``.
+    """
+    shape = [q] * ndim
+    t = np.ones(shape, dtype=dtype)
+    t[np.unravel_index(m, shape)] = 0
+    return t
+
+
+def or_clause_tensor(ndim, m, inds, tags=None):
+    """Get the tensor representing satisfiability of ``ndim`` clauses with
+    unsatisfied condition encoded in ``m`` labelled by ``inds`` and ``tags``.
+    """
+    data = or_clause_data(ndim, m=m)
+    return Tensor(data=data, inds=inds, tags=tags)
+
+
+def or_clause_mps_tensors(ndim, m, inds, tags=None):
+    """Get the set of MPS tensors representing satisfiability of ``ndim``
+    clauses with unsatisfied condition encoded in ``m`` labelled by ``inds``
+    and ``tags``.
+    """
+    mps = (
+        MPS_computational_state('+' * ndim, tags=tags) * (2**(ndim / 2)) -
+        MPS_computational_state(f'{m:0>{ndim}b}', tags=tags)
+    )
+    mps.reindex_({
+        mps.site_ind(i): ind
+        for i, ind in enumerate(inds)
+    })
+    return mps.tensors
+
+
+@functools.lru_cache(2**10)
+def or_clause_parafac_data(ndim, m):
+    """Get the set of PARAFAC arrays representing satisfiability of ``ndim``
+    clauses with unsatisfied condition encoded in ``m``.
+    """
+    inds = [f'k{i}' for i in range(ndim)]
+    bond = 'b'
+
+    pfc_ones = np.ones((2, 1))
+    pfc_up = np.array([[1.], [0.]])
+    pfc_dn = np.array([[0.], [1.]])
+
+    ts_ones = [Tensor(data=pfc_ones, inds=[ix, bond]) for ix in inds]
+
+    bmask = f'{m:0>{ndim}b}'
+    ts_mask = [Tensor(data=(pfc_dn if b == '1' else pfc_up), inds=[ix, bond])
+               for ix, b in zip(inds, bmask)]
+
+    # just need to multiply a single mask tensor by -1
+    ts_mask[0] *= -1
+    ts = [tensor_direct_product(t1, t2, sum_inds=(ix,))
+          for ix, t1, t2 in zip(inds, ts_ones, ts_mask)]
+
+    return tuple(t.data for t in ts)
+
+
+def clause_parafac_tensors(ndim, m, inds, tags=None):
+    """Get the set of PARAFAC tensors representing satisfiability of ``ndim``
+    clauses with unsatisfied condition encoded in ``m`` labelled by ``inds``
+    and ``tags``.
+    """
+    bond = rand_uuid()
+    return [Tensor(x, inds=[ix, bond], tags=tags)
+            for x, ix in zip(or_clause_parafac_data(ndim, m), inds)]
+
+
+def HTN_from_cnf(fname, mode='parafac'):
+    """Create a hyper tensor network from a '.cnf' or '.wcnf' file - i.e. a
+    model counting or weighted model counting instance specification.
+
+    Parameters
+    ----------
+    fname : str
+        Path to a '.cnf' or '.wcnf' file.
+    mode : {'parafac', 'mps', 'dense', int}, optional
+        How to represent the clauses:
+
+            * 'parafac' - `N` rank-2 tensors connected by a single hyper index.
+              You could further call :meth:`hyperinds_resolve` for more options
+              to convert the hyper index into a (decomposed) COPY-tensor.
+            * 'mps' - `N` rank-3 tensors connected along a 1D line.
+            * 'dense' - contract the hyper index.
+            * int - use the 'parafac' mode, but only if the length of a clause
+              is larger than this threshold.
+
+    Returns
+    -------
+    htn : TensorNetwork
+    """
+
+    ts = []
+    weights = {}
+    weighted = set()
+    clause_counter = 1
+
+    with open(fname, 'r') as f:
+        for line in f:
+            args = line.split()
+
+            # global info, don't need
+            if args[0] == 'p':
+                # num_vars = int(args[2])
+                # num_clauses = int(args[3])
+                continue
+
+            # translate mc2021 style weight to normal
+            if args[:3] == ['c', 'p', 'weight']:
+                args = ('w', *args[3:5])
+            # variable weight
+            if args[0] == 'w':
+                sgn_var, w = args[1:]
+                sgn_var = int(sgn_var)
+                sgn = '-' if sgn_var < 0 else '+'
+                var = str(abs(sgn_var))
+                w = float(w)
+                weights[var, sgn] = w
+                weighted.add(var)
+                continue
+
+            # ignore empty lines, other comments and info line
+            if (not args) or (args == ['0']) or (args[0][0] in 'c%'):
+                continue
+
+            # clause tensor
+            clause = tuple(map(int, filter(None, args[:-1])))
+
+            # encode the OR statement with possible negations as int
+            m = clause_negmask(clause)
+            inds = [str(abs(var)) for var in clause]
+            tag = f'CLAUSE{clause_counter}'
+
+            if (
+                # parafac mode
+                (mode == 'parafac' and len(inds) > 2) or
+                # parafac above cutoff size mode
+                (isinstance(mode, int) and len(inds) > mode)
+            ):
+                ts.extend(clause_parafac_tensors(len(inds), m, inds, tag))
+
+            elif mode == 'mps' and len(inds) > 2:
+                ts.extend(or_clause_mps_tensors(len(inds), m, inds, tag))
+
+            else:
+                # dense
+                ts.append(or_clause_tensor(len(inds), m, inds, tag))
+
+            clause_counter += 1
+
+    for var in sorted(weighted):
+        wp_specified = (var, '+') in weights
+        wm_specified = (var, '-') in weights
+
+        if wp_specified and wm_specified:
+            wp, wm = weights[var, '+'], weights[var, '-']
+        elif wp_specified:
+            wp = weights[var, '+']
+            wm = 1 - wp
+        elif wm_specified:
+            wm = weights[var, '-']
+            wp = 1 - wm
+
+        ts.append(Tensor([wm, wp], inds=[var], tags=[f'VAR{var}']))
+
+    return TensorNetwork(ts, virtual=True)
+
+
 # --------------------------------------------------------------------------- #
 #                                    MPSs                                     #
 # --------------------------------------------------------------------------- #
 
 @random_seed_fn
-def MPS_rand_state(n, bond_dim, phys_dim=2, normalize=True, cyclic=False,
-                   dtype=float, trans_invar=False, **mps_opts):
+def MPS_rand_state(L, bond_dim, phys_dim=2, normalize=True, cyclic=False,
+                   dtype='float64', trans_invar=False, **mps_opts):
     """Generate a random matrix product state.
 
     Parameters
     ----------
-    n : int
+    L : int
         The number of sites.
     bond_dim : int
         The bond dimension.
@@ -100,20 +1709,26 @@ def MPS_rand_state(n, bond_dim, phys_dim=2, normalize=True, cyclic=False,
         raise ValueError("State cannot be translationally invariant with open "
                          "boundary conditions.")
 
+    # check for site varying physical dimensions
+    if isinstance(phys_dim, Integral):
+        phys_dims = itertools.repeat(phys_dim)
+    else:
+        phys_dims = itertools.cycle(phys_dim)
+
     cyc_dim = (bond_dim,) if cyclic else ()
 
     def gen_shapes():
-        yield (*cyc_dim, bond_dim, phys_dim)
-        for _ in range(n - 2):
-            yield (bond_dim, bond_dim, phys_dim)
-        yield (bond_dim, *cyc_dim, phys_dim)
+        yield (*cyc_dim, bond_dim, next(phys_dims))
+        for _ in range(L - 2):
+            yield (bond_dim, bond_dim, next(phys_dims))
+        yield (bond_dim, *cyc_dim, next(phys_dims))
 
     def gen_data(shape):
         return randn(shape, dtype=dtype)
 
     if trans_invar:
         array = sensibly_scale(gen_data(next(gen_shapes())))
-        arrays = (array for _ in range(n))
+        arrays = (array for _ in range(L))
     else:
         arrays = map(sensibly_scale, map(gen_data, gen_shapes()))
 
@@ -147,7 +1762,7 @@ def MPS_product_state(arrays, cyclic=False, **mps_opts):
     return MatrixProductState(mps_arrays, shape='lrp', **mps_opts)
 
 
-def MPS_computational_state(binary, dtype=float, cyclic=False, **mps_opts):
+def MPS_computational_state(binary, dtype='float64', cyclic=False, **mps_opts):
     """A computational basis state in Matrix Product State form.
 
     Parameters
@@ -164,6 +1779,8 @@ def MPS_computational_state(binary, dtype=float, cyclic=False, **mps_opts):
     array_map = {
         '0': np.array([1., 0.], dtype=dtype),
         '1': np.array([0., 1.], dtype=dtype),
+        '+': np.array([2**-0.5, 2**-0.5], dtype=dtype),
+        '-': np.array([2**-0.5, -2**-0.5], dtype=dtype),
     }
 
     def gen_arrays():
@@ -173,30 +1790,30 @@ def MPS_computational_state(binary, dtype=float, cyclic=False, **mps_opts):
     return MPS_product_state(tuple(gen_arrays()), cyclic=cyclic, **mps_opts)
 
 
-def MPS_neel_state(n, down_first=False, dtype=float, **mps_opts):
+def MPS_neel_state(L, down_first=False, dtype='float64', **mps_opts):
     """Generate the neel state in Matrix Product State form.
 
     Parameters
     ----------
-    n : int
+    L : int
         The number of spins.
     down_first : bool, optional
         Whether to start with '1' (down) or '0' (up) first.
     mps_opts
         Supplied to MatrixProductState constructor.
     """
-    binary_str = "01" * (n // 2) + (n % 2 == 1) * "0"
+    binary_str = "01" * (L // 2) + (L % 2 == 1) * "0"
     if down_first:
         binary_str = "1" + binary_str[:-1]
     return MPS_computational_state(binary_str, dtype=dtype, **mps_opts)
 
 
-def MPS_ghz_state(n, dtype=float, **mps_opts):
+def MPS_ghz_state(L, dtype='float64', **mps_opts):
     """Build the chi=2 OBC MPS representation of the GHZ state.
 
     Parameters
     ----------
-    n : int
+    L : int
         Number of qubits.
     dtype : {'float64', 'complex128', 'float32', 'complex64'}, optional
         The underlying data type.
@@ -208,7 +1825,7 @@ def MPS_ghz_state(n, dtype=float, **mps_opts):
         yield 2**-0.5 * np.array([[1., 0.],
                                   [0., 1.]]).astype(dtype)
 
-        for i in range(1, n - 1):
+        for i in range(1, L - 1):
             yield np.array([[[1., 0.],
                              [0., 0.]],
                             [[0., 0.],
@@ -220,12 +1837,12 @@ def MPS_ghz_state(n, dtype=float, **mps_opts):
     return MatrixProductState(gen_arrays(), **mps_opts)
 
 
-def MPS_w_state(n, dtype=float, **mps_opts):
+def MPS_w_state(L, dtype='float64', **mps_opts):
     """Build the chi=2 OBC MPS representation of the W state.
 
     Parameters
     ----------
-    n : int
+    L : int
         Number of qubits.
     dtype : {'float64', 'complex128', 'float32', 'complex64'}, optional
         The underlying data type.
@@ -235,9 +1852,9 @@ def MPS_w_state(n, dtype=float, **mps_opts):
 
     def gen_arrays():
         yield (np.array([[1., 0.],
-                         [0., 1.]]) / n ** 0.5).astype(dtype)
+                         [0., 1.]]) / L ** 0.5).astype(dtype)
 
-        for i in range(1, n - 1):
+        for i in range(1, L - 1):
             yield np.array([[[1., 0.],
                              [0., 1.]],
                             [[0., 0.],
@@ -250,12 +1867,12 @@ def MPS_w_state(n, dtype=float, **mps_opts):
 
 
 @random_seed_fn
-def MPS_rand_computational_state(n, dtype=float, **mps_opts):
+def MPS_rand_computational_state(L, dtype='float64', **mps_opts):
     """Generate a random computation basis state, like '01101001010'.
 
     Parameters
     ----------
-    n : int
+    L : int
         The number of qubits.
     seed : int, optional
         The seed to use.
@@ -264,17 +1881,17 @@ def MPS_rand_computational_state(n, dtype=float, **mps_opts):
     mps_opts
         Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductState`.
     """
-    cstr = (choice(('0', '1')) for _ in range(n))
+    cstr = (choice(('0', '1')) for _ in range(L))
     return MPS_computational_state(cstr, dtype=dtype, **mps_opts)
 
 
-def MPS_zero_state(n, bond_dim=1, phys_dim=2, cyclic=False,
-                   dtype=float, **mps_opts):
+def MPS_zero_state(L, bond_dim=1, phys_dim=2, cyclic=False,
+                   dtype='float64', **mps_opts):
     """The all-zeros MPS state, of given bond-dimension.
 
     Parameters
     ----------
-    n : int
+    L : int
         The number of sites.
     bond_dim : int, optional
         The bond dimension, defaults to 1.
@@ -292,19 +1909,19 @@ def MPS_zero_state(n, bond_dim=1, phys_dim=2, cyclic=False,
 
     def gen_arrays():
         yield np.zeros((*cyc_dim, bond_dim, phys_dim), dtype=dtype)
-        for _ in range(n - 2):
+        for _ in range(L - 2):
             yield np.zeros((bond_dim, bond_dim, phys_dim), dtype=dtype)
         yield np.zeros((bond_dim, *cyc_dim, phys_dim), dtype=dtype)
 
     return MatrixProductState(gen_arrays(), **mps_opts)
 
 
-def MPS_sampler(n, dtype=complex, squeeze=True, **mps_opts):
+def MPS_sampler(L, dtype=complex, squeeze=True, **mps_opts):
     """A product state for sampling tensor network traces. Seen as a vector it
     has the required property that ``psi.H @ psi == d`` always for hilbert
     space size ``d``.
     """
-    arrays = [rand_phase(2, dtype=dtype) for _ in range(n)]
+    arrays = [rand_phase(2, dtype=dtype) for _ in range(L)]
     psi = MPS_product_state(arrays, **mps_opts)
     if squeeze:
         psi.squeeze_()
@@ -315,12 +1932,12 @@ def MPS_sampler(n, dtype=complex, squeeze=True, **mps_opts):
 #                                    MPOs                                     #
 # --------------------------------------------------------------------------- #
 
-def MPO_identity(n, phys_dim=2, dtype=float, cyclic=False, **mpo_opts):
-    """Generate an identity MPO of size ``n``.
+def MPO_identity(L, phys_dim=2, dtype='float64', cyclic=False, **mpo_opts):
+    """Generate an identity MPO of size ``L``.
 
     Parameters
     ----------
-    n : int
+    L : int
         The number of sites.
     phys_dim : int, optional
         The physical (site) dimensions, defaults to 2.
@@ -337,7 +1954,7 @@ def MPO_identity(n, phys_dim=2, dtype=float, cyclic=False, **mpo_opts):
 
     def gen_arrays():
         yield II.reshape(*cyc_dim, 1, phys_dim, phys_dim)
-        for _ in range(n - 2):
+        for _ in range(L - 2):
             yield II.reshape(1, 1, phys_dim, phys_dim)
         yield II.reshape(1, *cyc_dim, phys_dim, phys_dim)
 
@@ -348,18 +1965,18 @@ def MPO_identity_like(mpo, **mpo_opts):
     """Return an identity matrix operator with the same physical index and
     inds/tags as ``mpo``.
     """
-    return MPO_identity(n=mpo.nsites, phys_dim=mpo.phys_dim(), dtype=mpo.dtype,
+    return MPO_identity(L=mpo.L, phys_dim=mpo.phys_dim(), dtype=mpo.dtype,
                         site_tag_id=mpo.site_tag_id, cyclic=mpo.cyclic,
                         upper_ind_id=mpo.upper_ind_id,
                         lower_ind_id=mpo.lower_ind_id, **mpo_opts)
 
 
-def MPO_zeros(n, phys_dim=2, dtype=float, cyclic=False, **mpo_opts):
-    """Generate a zeros MPO of size ``n``.
+def MPO_zeros(L, phys_dim=2, dtype='float64', cyclic=False, **mpo_opts):
+    """Generate a zeros MPO of size ``L``.
 
     Parameters
     ----------
-    n : int
+    L : int
         The number of sites.
     phys_dim : int, optional
         The physical (site) dimensions, defaults to 2.
@@ -370,12 +1987,16 @@ def MPO_zeros(n, phys_dim=2, dtype=float, cyclic=False, **mpo_opts):
         open boundary conditions.
     mpo_opts
         Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductOperator`.
+
+    Returns
+    -------
+    MatrixProductOperator
     """
     cyc_dim = (1,) if cyclic else ()
 
     def gen_arrays():
         yield np.zeros((*cyc_dim, 1, phys_dim, phys_dim), dtype=dtype)
-        for _ in range(n - 2):
+        for _ in range(L - 2):
             yield np.zeros((1, 1, phys_dim, phys_dim), dtype=dtype)
         yield np.zeros((1, *cyc_dim, phys_dim, phys_dim), dtype=dtype)
 
@@ -383,23 +2004,65 @@ def MPO_zeros(n, phys_dim=2, dtype=float, cyclic=False, **mpo_opts):
 
 
 def MPO_zeros_like(mpo, **mpo_opts):
-    """Return a zeros matrix operator with the same physical index and
+    """Return a zeros matrix product operator with the same physical index and
     inds/tags as ``mpo``.
+
+    Parameters
+    ----------
+    mpo : MatrixProductOperator
+        The MPO to copy the shape of.
+
+    Returns
+    -------
+    MatrixProductOperator
     """
-    return MPO_zeros(n=mpo.nsites, phys_dim=mpo.phys_dim(),
+    return MPO_zeros(L=mpo.L, phys_dim=mpo.phys_dim(),
                      dtype=mpo.dtype, site_tag_id=mpo.site_tag_id,
                      upper_ind_id=mpo.upper_ind_id, cyclic=mpo.cyclic,
                      lower_ind_id=mpo.lower_ind_id, **mpo_opts)
 
 
+def MPO_product_operator(
+    arrays,
+    cyclic=False,
+    **mpo_opts,
+):
+    """Return an MPO of bond dimension 1 representing the product of raw
+    operators given in ``arrays``.
+
+    Parameters
+    ----------
+    arrays : sequence of 2D array_like
+        The operators to form a tensor product of.
+    cyclic : bool, optional
+        Whether to generate a cyclic MPO or not.
+    mpo_opts
+        Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductOperator`.
+
+    Returns
+    -------
+    MatrixProductOperator
+    """
+    cyc_dim = (1,) if cyclic else ()
+
+    def gen_arrays():
+        array_i, *arrays_mid, array_f = arrays
+        yield reshape(array_i, (*cyc_dim, 1, *array_i.shape))
+        for array_m in arrays_mid:
+            yield reshape(array_m, (1, 1, *array_m.shape))
+        yield reshape(array_f, (*cyc_dim, 1, *array_f.shape))
+
+    return MatrixProductOperator(gen_arrays(), shape='lrud', **mpo_opts)
+
+
 @random_seed_fn
-def MPO_rand(n, bond_dim, phys_dim=2, normalize=True, cyclic=False,
-             herm=False, dtype=float, **mpo_opts):
+def MPO_rand(L, bond_dim, phys_dim=2, normalize=True, cyclic=False,
+             herm=False, dtype='float64', **mpo_opts):
     """Generate a random matrix product state.
 
     Parameters
     ----------
-    n : int
+    L : int
         The number of sites.
     bond_dim : int
         The bond dimension.
@@ -420,7 +2083,7 @@ def MPO_rand(n, bond_dim, phys_dim=2, normalize=True, cyclic=False,
     cyc_shp = (bond_dim,) if cyclic else ()
 
     shapes = [(*cyc_shp, bond_dim, phys_dim, phys_dim),
-              *((bond_dim, bond_dim, phys_dim, phys_dim),) * (n - 2),
+              *((bond_dim, bond_dim, phys_dim, phys_dim),) * (L - 2),
               (bond_dim, *cyc_shp, phys_dim, phys_dim)]
 
     def gen_data(shape):
@@ -442,12 +2105,12 @@ def MPO_rand(n, bond_dim, phys_dim=2, normalize=True, cyclic=False,
 
 
 @random_seed_fn
-def MPO_rand_herm(n, bond_dim, phys_dim=2, normalize=True,
-                  dtype=float, **mpo_opts):
+def MPO_rand_herm(L, bond_dim, phys_dim=2, normalize=True,
+                  dtype='float64', **mpo_opts):
     """Generate a random hermitian matrix product operator.
     See :class:`~quimb.tensor.tensor_gen.MPO_rand`.
     """
-    return MPO_rand(n, bond_dim, phys_dim=phys_dim, normalize=normalize,
+    return MPO_rand(L, bond_dim, phys_dim=phys_dim, normalize=normalize,
                     dtype=dtype, herm=True, **mpo_opts)
 
 
@@ -548,7 +2211,7 @@ def spin_ham_mpo_tensor(one_site_terms, two_site_terms, S=1 / 2,
 
 
 class _TermAdder:
-    """Simple class to allow ``SpinHam`` syntax like
+    """Simple class to allow ``SpinHam1D`` syntax like
     ``builder[i, j] += (1/2, 'Z', 'X')``. This object is temporarily created
     by the getitem call, accumulates the new term, then has its the new
     combined list of terms extracted in the setitem call.
@@ -570,9 +2233,9 @@ class _TermAdder:
         return self
 
 
-class SpinHam:
-    """Class for easily building custom spin hamiltonians in MPO or NNI form.
-    Currently limited to nearest neighbour interactions (and single site
+class SpinHam1D:
+    """Class for easily building custom spin hamiltonians in MPO or LocalHam1D
+    form. Currently limited to nearest neighbour interactions (and single site
     terms). It is possible to set 'default' translationally invariant terms,
     but also terms acting on specific sites only (which take precedence).
     It is also possible to build a sparse matrix version of the hamiltonian
@@ -589,7 +2252,7 @@ class SpinHam:
     --------
     Initialize the spin hamiltonian builder:
 
-        >>> builder = SpinHam(S=3 / 2)
+        >>> builder = SpinHam1D(S=3 / 2)
 
     Add some two-site terms:
 
@@ -605,12 +2268,12 @@ class SpinHam:
 
         >>> mpo_ham = builder.build_mpo(100)
         >>> mpo_ham
-        <MatrixProductOperator(tensors=100, structure='I{}', nsites=100)>
+        <MatrixProductOperator(tensors=100, L=100, max_bond=5)>
 
-    Build a NNI version of the hamiltonian for use with TEBD:
+    Build a LocalHam1D version of the hamiltonian for use with TEBD:
 
-        >>> builder.build_nni(100)
-        <NNI(n=100, cyclic=False)>
+        >>> builder.build_local_ham(100)
+        <LocalHam1D(L=100, cyclic=False)>
 
     You can also set terms for specific sites (this overides any of the
     'default', translationally invariant terms set as above):
@@ -716,9 +2379,9 @@ class SpinHam:
                 raise ValueError("Can only add nearest neighbour terms.")
             self.var_two_site_terms[sites] = terms
 
-    def build_mpo(self, n, upper_ind_id='k{}', lower_ind_id='b{}',
+    def build_mpo(self, L, upper_ind_id='k{}', lower_ind_id='b{}',
                   site_tag_id='I{}', tags=None, bond_name=""):
-        """Build an MPO instance of this spin hamiltonian of size ``n``. See
+        """Build an MPO instance of this spin hamiltonian of size ``L``. See
         also ``MatrixProductOperator``.
         """
         # cache the default term
@@ -734,8 +2397,8 @@ class SpinHam:
                 return t_defs[which]
 
         def gen_tensors():
-            for i in range(n):
-                which = {0: 'L', n - 1: 'R'}.get(i, None)
+            for i in range(L):
+                which = {0: 'L', L - 1: 'R'}.get(i, None)
 
                 ij_L = (i - 1, i)
                 ij_R = (i, i + 1)
@@ -765,12 +2428,12 @@ class SpinHam:
                                      lower_ind_id=lower_ind_id,
                                      site_tag_id=site_tag_id, tags=tags)
 
-    def build_sparse(self, n, **ikron_opts):
+    def build_sparse(self, L, **ikron_opts):
         """Build a sparse matrix representation of this Hamiltonian.
 
         Parameters
         ----------
-        n : int, optional
+        L : int, optional
             The number of spins to build the matrix for.
         ikron_opts
             Supplied to :func:`~quimb.core.ikron`.
@@ -782,10 +2445,10 @@ class SpinHam:
         ikron_opts.setdefault('sparse', True)
 
         D = int(2 * self.S + 1)
-        dims = [D] * n
+        dims = [D] * L
 
         terms = []
-        for i in range(n):
+        for i in range(L):
 
             t1s = self.var_one_site_terms.get(i, self.one_site_terms)
             for factor, s in t1s:
@@ -795,7 +2458,7 @@ class SpinHam:
                     ikron(factor * s, dims, i, **ikron_opts)
                 )
 
-            if (i + 1 == n) and (not self.cyclic):
+            if (i + 1 == L) and (not self.cyclic):
                 break
 
             t2s = self.var_two_site_terms.get((i, i + 1), self.two_site_terms)
@@ -831,20 +2494,20 @@ class SpinHam:
         make_immutable(H)
         return H
 
-    def build_nni(self, n=None, **nni_opts):
+    def build_local_ham(self, L=None, **local_ham_1d_opts):
         """Build a nearest neighbour interactor instance of this spin
-        hamiltonian of size ``n``. See also
-        :class:`~quimb.tensor.tensor_tebd.NNI`.
+        hamiltonian of size ``L``. See also
+        :class:`~quimb.tensor.tensor_1d_tebd.LocalHam1D`.
 
         Parameters
         ----------
-        n : int, optional
+        L : int, optional
             The number of spins, if the hamiltonian only has two-site terms
             this is optional.
 
         Returns
         -------
-        NNI
+        LocalHam1D
         """
         H1s, H2s = {}, {}
 
@@ -866,25 +2529,38 @@ class SpinHam:
             for site, terms in self.var_one_site_terms.items():
                 H1s[site] = self._sum_spin_ops(terms)
 
-        return NNI(H2=H2s, H1=H1s, n=n, cyclic=self.cyclic, **nni_opts)
+        return LocalHam1D(H2=H2s, H1=H1s, L=L,
+                          cyclic=self.cyclic, **local_ham_1d_opts)
+
+
+SpinHam = deprecated(SpinHam1D, 'SpinHam', 'SpinHam1D')
 
 
 def _ham_ising(j=1.0, bx=0.0, *, S=1 / 2, cyclic=False):
-    H = SpinHam(S=1 / 2, cyclic=cyclic)
+    H = SpinHam1D(S=1 / 2, cyclic=cyclic)
     H += j, 'Z', 'Z'
     H -= bx, 'X'
     return H
 
 
-def MPO_ham_ising(n, j=1.0, bx=0.0, *, S=1 / 2, cyclic=False, **mpo_opts):
-    """Ising Hamiltonian in MPO form.
+def MPO_ham_ising(L, j=1.0, bx=0.0, *, S=1 / 2, cyclic=False, **mpo_opts):
+    r"""Ising Hamiltonian in MPO form.
+
+    .. math::
+
+        H_\mathrm{Ising} =
+        J \sum_{i} \sigma^Z_i \sigma^Z_{i + 1} -
+        B_x \sum_{i} \sigma^X_i
+
+    Note the default convention of antiferromagnetic interactions and spin
+    operators not Pauli matrices.
 
     Parameters
     ----------
-    n : int
+    L : int
         The number of sites.
     j : float, optional
-        The ZZ interaction strength.
+        The ZZ interaction strength. Positive is antiferromagnetic.
     bx : float, optional
         The X-magnetic field strength.
     S : {1/2, 1, 3/2, ...}, optional
@@ -892,7 +2568,7 @@ def MPO_ham_ising(n, j=1.0, bx=0.0, *, S=1 / 2, cyclic=False, **mpo_opts):
     cyclic : bool, optional
         Generate a MPO with periodic boundary conditions or not, default is
         open boundary conditions.
-    mpo_opts or nni_opts
+    mpo_opts or local_ham_1d_opts
         Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductOperator`.
 
     Returns
@@ -900,38 +2576,52 @@ def MPO_ham_ising(n, j=1.0, bx=0.0, *, S=1 / 2, cyclic=False, **mpo_opts):
     MatrixProductOperator
     """
     H = _ham_ising(j=j, bx=bx, S=S, cyclic=cyclic)
-    return H.build_mpo(n, **mpo_opts)
+    return H.build_mpo(L, **mpo_opts)
 
 
-def NNI_ham_ising(n=None, j=1.0, bx=0.0, *, S=1 / 2, cyclic=False, **nni_opts):
-    """Ising Hamiltonian in NNI form.
+def ham_1d_ising(L=None, j=1.0, bx=0.0, *, S=1 / 2,
+                 cyclic=False, **local_ham_1d_opts):
+    r"""Ising Hamiltonian in
+    :class:`~quimb.tensor.tensor_1d_tebd.LocalHam1D` form.
+
+    .. math::
+
+        H_\mathrm{Ising} =
+        J \sum_{i} \sigma^Z_i \sigma^Z_{i + 1} -
+        B_x \sum_{i} \sigma^X_i
+
+    Note the default convention of antiferromagnetic interactions and spin
+    operators not Pauli matrices.
 
     Parameters
     ----------
-    n : int
+    L : int
         The number of sites.
     j : float, optional
-        The ZZ interaction strength.
+        The ZZ interaction strength. Positive is antiferromagnetic.
     bx : float, optional
         The X-magnetic field strength.
     S : {1/2, 1, 3/2, ...}, optional
         The underlying spin of the system, defaults to 1/2.
     cyclic : bool, optional
-        Generate a NNI with periodic boundary conditions or not, default is
-        open boundary conditions.
-    mpo_opts or nni_opts
-        Supplied to :class:`~quimb.tensor.tensor_1d.NNI`.
+        Generate a hamiltonian with periodic boundary conditions or not,
+        default is open boundary conditions.
+    mpo_opts or local_ham_1d_opts
+        Supplied to :class:`~quimb.tensor.tensor_1d.LocalHam1D`.
 
     Returns
     -------
-    NNI
+    LocalHam1D
     """
     H = _ham_ising(j=j, bx=bx, S=S, cyclic=cyclic)
-    return H.build_nni(n=n, **nni_opts)
+    return H.build_local_ham(L=L, **local_ham_1d_opts)
+
+
+NNI_ham_ising = deprecated(ham_1d_ising, 'NNI_ham_ising', 'ham_1d_ising')
 
 
 def _ham_XY(j=1.0, bz=0.0, *, S=1 / 2, cyclic=False):
-    H = SpinHam(S=S, cyclic=cyclic)
+    H = SpinHam1D(S=S, cyclic=cyclic)
 
     try:
         jx, jy = j
@@ -951,15 +2641,27 @@ def _ham_XY(j=1.0, bz=0.0, *, S=1 / 2, cyclic=False):
     return H
 
 
-def MPO_ham_XY(n, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **mpo_opts):
-    """XY-Hamiltonian in MPO form.
+def MPO_ham_XY(L, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **mpo_opts):
+    r"""XY-Hamiltonian in MPO form.
+
+    .. math::
+
+        H_\mathrm{XY} =
+        \sum_{i} (
+            J_X \sigma^X_i \sigma^X_{i + 1} +
+            J_Y \sigma^Y_i \sigma^Y_{i + 1}
+            )
+        - B_x \sum_{i} \sigma^Z_i
+
+    Note the default convention of antiferromagnetic interactions and spin
+    operators not Pauli matrices.
 
     Parameters
     ----------
-    n : int
+    L : int
         The number of sites.
     j : float or (float, float), optional
-        The XX and YY interaction strength.
+        The XX and YY interaction strength. Positive is antiferromagnetic.
     bz : float, optional
         The Z-magnetic field strength.
     S : {1/2, 1, 3/2, ...}, optional
@@ -967,7 +2669,7 @@ def MPO_ham_XY(n, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **mpo_opts):
     cyclic : bool, optional
         Generate a MPO with periodic boundary conditions or not, default is
         open boundary conditions.
-    mpo_opts or nni_opts
+    mpo_opts or local_ham_1d_opts
         Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductOperator`.
 
     Returns
@@ -975,38 +2677,55 @@ def MPO_ham_XY(n, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **mpo_opts):
     MatrixProductOperator
     """
     H = _ham_XY(j=j, bz=bz, S=S, cyclic=cyclic)
-    return H.build_mpo(n, **mpo_opts)
+    return H.build_mpo(L, **mpo_opts)
 
 
-def NNI_ham_XY(n=None, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **nni_opts):
-    """XY-Hamiltonian in NNI form.
+def ham_1d_XY(L=None, j=1.0, bz=0.0, *, S=1 / 2,
+              cyclic=False, **local_ham_1d_opts):
+    r"""XY-Hamiltonian in
+    :class:`~quimb.tensor.tensor_1d_tebd.LocalHam1D` form.
+
+    .. math::
+
+        H_\mathrm{XY} =
+        \sum_{i} (
+            J_X \sigma^X_i \sigma^X_{i + 1} +
+            J_Y \sigma^Y_i \sigma^Y_{i + 1}
+            )
+        - B_Z \sum_{i} \sigma^Z_i
+
+    Note the default convention of antiferromagnetic interactions and spin
+    operators not Pauli matrices.
 
     Parameters
     ----------
-    n : int
+    L : int
         The number of sites.
     j : float or (float, float), optional
-        The XX and YY interaction strength.
+        The XX and YY interaction strength. Positive is antiferromagnetic.
     bz : float, optional
         The Z-magnetic field strength.
     S : {1/2, 1, 3/2, ...}, optional
         The underlying spin of the system, defaults to 1/2.
     cyclic : bool, optional
-        Generate a NNI with periodic boundary conditions or not, default is
-        open boundary conditions.
-    nni_opts
-        Supplied to :class:`~quimb.tensor.tensor_1d.NNI`.
+        Generate a hamiltonian with periodic boundary conditions or not,
+        default is open boundary conditions.
+    local_ham_1d_opts
+        Supplied to :class:`~quimb.tensor.tensor_1d.LocalHam1D`.
 
     Returns
     -------
-    NNI
+    LocalHam1D
     """
     H = _ham_XY(j=j, bz=bz, S=S, cyclic=cyclic)
-    return H.build_nni(n=n, **nni_opts)
+    return H.build_local_ham(L=L, **local_ham_1d_opts)
+
+
+NNI_ham_XY = deprecated(ham_1d_XY, 'NNI_ham_XY', 'ham_1d_XY')
 
 
 def _ham_heis(j=1.0, bz=0.0, *, S=1 / 2, cyclic=False):
-    H = SpinHam(S=S, cyclic=cyclic)
+    H = SpinHam1D(S=S, cyclic=cyclic)
 
     try:
         jx, jy, jz = j
@@ -1027,15 +2746,28 @@ def _ham_heis(j=1.0, bz=0.0, *, S=1 / 2, cyclic=False):
     return H
 
 
-def MPO_ham_heis(n, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **mpo_opts):
-    """Heisenberg Hamiltonian in MPO form.
+def MPO_ham_heis(L, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **mpo_opts):
+    r"""Heisenberg Hamiltonian in MPO form.
+
+    .. math::
+
+        H_\mathrm{Heis} =
+        \sum_{i} (
+            J_X \sigma^X_i \sigma^X_{i + 1} +
+            J_Y \sigma^Y_i \sigma^Y_{i + 1} +
+            J_Z \sigma^Z_i \sigma^Z_{i + 1}
+            )
+        - B_Z \sum_{i} \sigma^Z_i
+
+    Note the default convention of antiferromagnetic interactions and spin
+    operators not Pauli matrices.
 
     Parameters
     ----------
-    n : int
+    L : int
         The number of sites.
     j : float or (float, float, float), optional
-        The XX, YY and ZZ interaction strength.
+        The XX, YY and ZZ interaction strength. Positive is antiferromagnetic.
     bz : float, optional
         The Z-magnetic field strength.
     S : {1/2, 1, 3/2, ...}, optional
@@ -1051,47 +2783,79 @@ def MPO_ham_heis(n, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **mpo_opts):
     MatrixProductOperator
     """
     H = _ham_heis(j=j, bz=bz, S=S, cyclic=cyclic)
-    return H.build_mpo(n, **mpo_opts)
+    return H.build_mpo(L, **mpo_opts)
 
 
-def NNI_ham_heis(n=None, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **nni_opts):
-    """Heisenberg Hamiltonian in NNI form.
+def ham_1d_heis(L=None, j=1.0, bz=0.0, *, S=1 / 2,
+                cyclic=False, **local_ham_1d_opts):
+    r"""Heisenberg Hamiltonian in
+    :class:`~quimb.tensor.tensor_1d_tebd.LocalHam1D` form.
+
+    .. math::
+
+        H_\mathrm{Heis} =
+        \sum_{i} (
+            J_X \sigma^X_i \sigma^X_{i + 1} +
+            J_Y \sigma^Y_i \sigma^Y_{i + 1} +
+            J_Z \sigma^Z_i \sigma^Z_{i + 1}
+            )
+        - B_Z \sum_{i} \sigma^Z_i
+
+    Note the default convention of antiferromagnetic interactions and spin
+    operators not Pauli matrices.
 
     Parameters
     ----------
-    n : int
+    L : int
         The number of sites.
     j : float or (float, float, float), optional
-        The XX, YY and ZZ interaction strength.
+        The XX, YY and ZZ interaction strength. Positive is antiferromagnetic.
     bz : float, optional
         The Z-magnetic field strength.
     S : {1/2, 1, 3/2, ...}, optional
         The underlying spin of the system, defaults to 1/2.
     cyclic : bool, optional
-        Generate a NNI with periodic boundary conditions or not, default is
-        open boundary conditions.
-    nni_opts
-        Supplied to :class:`~quimb.tensor.tensor_gen.NNI`.
+        Generate a hamiltonian with periodic boundary conditions or not,
+        default is open boundary conditions.
+    local_ham_1d_opts
+        Supplied to :class:`~quimb.tensor.tensor_1d_tebd.LocalHam1D`.
 
     Returns
     -------
-    NNI
+    LocalHam1D
     """
     H = _ham_heis(j=j, bz=bz, S=S, cyclic=cyclic)
-    return H.build_nni(n=n, **nni_opts)
+    return H.build_local_ham(L=L, **local_ham_1d_opts)
 
 
-def MPO_ham_XXZ(n, delta, jxy=1.0, *, S=1 / 2, cyclic=False, **mpo_opts):
-    """XXZ-Hamiltonian in MPO form.
+NNI_ham_heis = deprecated(ham_1d_heis, 'NNI_ham_heis', 'ham_1d_heis')
+
+
+def MPO_ham_XXZ(L, delta, jxy=1.0, *, S=1 / 2, cyclic=False, **mpo_opts):
+    r"""XXZ-Hamiltonian in MPO form.
+
+    .. math::
+
+        H_\mathrm{XXZ} =
+        \sum_{i} (
+            J_X \sigma^X_i \sigma^X_{i + 1} +
+            J_Y \sigma^Y_i \sigma^Y_{i + 1} +
+            \Delta \sigma^Z_i \sigma^Z_{i + 1}
+            )
+        - B_Z \sum_{i} \sigma^Z_i
+
+    Note the default convention of antiferromagnetic interactions and spin
+    operators not Pauli matrices.
 
     Parameters
     ----------
-    n : int
+    L : int
         The number of sites.
     delta : float
-        The Z-interaction strength.
+        The ZZ-interaction strength. Positive is antiferromagnetic.
     jxy : float, optional
-        The X- and Y- interaction strength, defaults to 1.
+        The X- and Y- interaction strength, defaults to 1. Positive is
+        antiferromagnetic.
     S : {1/2, 1, 3/2, ...}, optional
         The underlying spin of the system, defaults to 1/2.
     cyclic : bool, optional
@@ -1104,40 +2868,59 @@ def MPO_ham_XXZ(n, delta, jxy=1.0, *, S=1 / 2, cyclic=False, **mpo_opts):
     -------
     MatrixProductOperator
     """
-    return MPO_ham_heis(n, j=(jxy, jxy, delta), S=S, cyclic=cyclic, **mpo_opts)
+    return MPO_ham_heis(L, j=(jxy, jxy, delta), S=S, cyclic=cyclic, **mpo_opts)
 
 
-def NNI_ham_XXZ(n=None, delta=None, jxy=1.0, *,
-                S=1 / 2, cyclic=False, **nni_opts):
-    """XXZ-Hamiltonian in NNI form.
+def ham_1d_XXZ(L=None, delta=None, jxy=1.0, *,
+               S=1 / 2, cyclic=False, **local_ham_1d_opts):
+    r"""XXZ-Hamiltonian in
+    :class:`~quimb.tensor.tensor_1d_tebd.LocalHam1D` form.
+
+    .. math::
+
+        H_\mathrm{XXZ} =
+        \sum_{i} (
+            J_X \sigma^X_i \sigma^X_{i + 1} +
+            J_Y \sigma^Y_i \sigma^Y_{i + 1} +
+            \Delta \sigma^Z_i \sigma^Z_{i + 1}
+            )
+        - B_Z \sum_{i} \sigma^Z_i
+
+    Note the default convention of antiferromagnetic interactions and spin
+    operators not Pauli matrices.
 
     Parameters
     ----------
-    n : int
+    L : int
         The number of sites.
     delta : float
-        The Z-interaction strength.
+        The ZZ-interaction strength. Positive is antiferromagnetic.
     jxy : float, optional
-        The X- and Y- interaction strength, defaults to 1.
+        The X- and Y- interaction strength, defaults to 1.  Positive is
+        antiferromagnetic.
     S : {1/2, 1, 3/2, ...}, optional
         The underlying spin of the system, defaults to 1/2.
     cyclic : bool, optional
-        Generate a NNI with periodic boundary conditions or not, default is
-        open boundary conditions.
-    nni_opts
-        Supplied to :class:`~quimb.tensor.tensor_gen.NNI`.
+        Generate a hamiltonian with periodic boundary conditions or not,
+        default is open boundary conditions.
+    local_ham_1d_opts
+        Supplied to :class:`~quimb.tensor.tensor_1d_tebd.LocalHam1D`.
 
     Returns
     -------
-    NNI
+    LocalHam1D
     """
     if delta is None:
         raise ValueError("You need to specify ``delta``.")
-    return NNI_ham_heis(n, j=(jxy, jxy, delta), S=S, cyclic=cyclic, **nni_opts)
+    return ham_1d_heis(L, j=(jxy, jxy, delta), S=S,
+                       cyclic=cyclic, **local_ham_1d_opts)
+
+
+NNI_ham_XXZ = deprecated(ham_1d_XXZ, 'NNI_ham_XXZ', 'ham_1d_XXZ')
 
 
 def _ham_bilinear_biquadratic(theta, *, S=1 / 2, cyclic=False):
-    H = SpinHam(S=S, cyclic=cyclic)
+    H = SpinHam1D(S=S, cyclic=cyclic)
 
     H += np.cos(theta), 'X', 'X'
     H += np.cos(theta), 'Y', 'Y'
@@ -1160,14 +2943,14 @@ def _ham_bilinear_biquadratic(theta, *, S=1 / 2, cyclic=False):
     return H
 
 
-def MPO_ham_bilinear_biquadratic(n=None, theta=0, *, S=1 / 2, cyclic=False,
+def MPO_ham_bilinear_biquadratic(L=None, theta=0, *, S=1 / 2, cyclic=False,
                                  compress=True, **mpo_opts):
     """ Hamiltonian of one-dimensional bilinear biquadratic chain in MPO form,
     see PhysRevB.93.184428.
 
     Parameters
     ----------
-    n : int
+    L : int
         The number of sites.
     theta : float or (float, float), optional
         The parameter for linear and non-linear term of interaction strength,
@@ -1175,8 +2958,8 @@ def MPO_ham_bilinear_biquadratic(n=None, theta=0, *, S=1 / 2, cyclic=False,
     S : {1/2, 1, 3/2, ...}, optional
         The underlying spin of the system, defaults to 1/2.
     cyclic : bool, optional
-        Generate a NNI with periodic boundary conditions or not, default is
-        open boundary conditions.
+        Generate a hamiltonian with periodic boundary conditions or not,
+        default is open boundary conditions.
     mpo_opts
         Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductOperator`.
 
@@ -1185,20 +2968,20 @@ def MPO_ham_bilinear_biquadratic(n=None, theta=0, *, S=1 / 2, cyclic=False,
     MatrixProductOperator
     """
     H = _ham_bilinear_biquadratic(theta, S=S, cyclic=cyclic)
-    H_mpo = H.build_mpo(n, **mpo_opts)
+    H_mpo = H.build_mpo(L, **mpo_opts)
     if compress is True:
         H_mpo.compress(cutoff=1e-12, cutoff_mode='rel' if cyclic else 'sum2')
     return H_mpo
 
 
-def NNI_ham_bilinear_biquadratic(n=None, theta=0, *, S=1 / 2,
-                                 cyclic=False, **nni_opts):
-    """ Hamiltonian of one-dimensional bilinear biquadratic chain in NNI form,
-    see PhysRevB.93.184428.
+def ham_1d_bilinear_biquadratic(L=None, theta=0, *, S=1 / 2,
+                                cyclic=False, **local_ham_1d_opts):
+    """ Hamiltonian of one-dimensional bilinear biquadratic chain in LocalHam1D
+    form, see PhysRevB.93.184428.
 
     Parameters
     ----------
-    n : int
+    L : int
         The number of sites.
     theta : float or (float, float), optional
         The parameter for linear and non-linear term of interaction strength,
@@ -1206,28 +2989,33 @@ def NNI_ham_bilinear_biquadratic(n=None, theta=0, *, S=1 / 2,
     S : {1/2, 1, 3/2, ...}, optional
         The underlying spin of the system, defaults to 1/2.
     cyclic : bool, optional
-        Generate a NNI with periodic boundary conditions or not, default is
-        open boundary conditions.
-    nni_opts
-        Supplied to :class:`~quimb.tensor.tensor_gen.NNI`.
+        Generate a hamiltonian with periodic boundary conditions or not,
+        default is open boundary conditions.
+    local_ham_1d_opts
+        Supplied to :class:`~quimb.tensor.tensor_1d_tebd.LocalHam1D`.
 
     Returns
     -------
-    NNI
+    LocalHam1D
     """
     H = _ham_bilinear_biquadratic(theta, S=S, cyclic=cyclic)
-    return H.build_nni(n=n, **nni_opts)
+    return H.build_local_ham(L=L, **local_ham_1d_opts)
 
 
-def _ham_mbl(n, dh, j=1.0, seed=None, S=1 / 2, *, cyclic=False,
+NNI_ham_bilinear_biquadratic = deprecated(ham_1d_bilinear_biquadratic,
+                                          'NNI_ham_bilinear_biquadratic',
+                                          'ham_1d_bilinear_biquadratic')
+
+
+def _ham_mbl(L, dh, j=1.0, seed=None, S=1 / 2, *, cyclic=False,
              dh_dist='s', dh_dim=1, beta=None):
     # start with the heisenberg builder
     H = _ham_heis(j, S=S, cyclic=cyclic)
 
-    dhds, rs = _gen_mbl_random_factors(n, dh, dh_dim, dh_dist, seed, beta)
+    dhds, rs = _gen_mbl_random_factors(L, dh, dh_dim, dh_dist, seed, beta)
 
     # generate noise, potentially in all directions, each with own strength
-    for i in range(n):
+    for i in range(L):
         dh_r_xyzs = zip(dhds, rs[:, i], 'XYZ')
         for dh, r, xyz in dh_r_xyzs:
             H[i] += dh * r, xyz
@@ -1235,18 +3023,32 @@ def _ham_mbl(n, dh, j=1.0, seed=None, S=1 / 2, *, cyclic=False,
     return H
 
 
-def MPO_ham_mbl(n, dh, j=1.0, seed=None, S=1 / 2, *, cyclic=False,
+def MPO_ham_mbl(L, dh, j=1.0, seed=None, S=1 / 2, *, cyclic=False,
                 dh_dist='s', dh_dim=1, beta=None, **mpo_opts):
-    """The many-body-localized spin hamiltonian in MPO form.
+    r"""The many-body-localized spin hamiltonian in MPO form.
+
+    .. math::
+
+        H_\mathrm{MBL} =
+        \sum_{i} (
+            J_X \sigma^X_i \sigma^X_{i + 1} +
+            J_Y \sigma^Y_i \sigma^Y_{i + 1} +
+            J_Z \sigma^Z_i \sigma^Z_{i + 1}
+            )
+        - \sum_{i} h_i \sigma^Z_i
+
+    Note the default convention of antiferromagnetic interactions and spin
+    operators not Pauli matrices.
 
     Parameters
     ----------
-    n : int
+    L : int
         Number of spins.
     dh : float
         Random noise strength.
     j : float, or (float, float, float), optional
-        Interaction strength(s) e.g. 1 or (1., 1., 0.5).
+        Interaction strength(s) e.g. 1 or (1., 1., 0.5).  Positive is
+        antiferromagnetic.
     seed : int, optional
         Random number to seed the noise with.
     S : {1/2, 1, 3/2, ...}, optional
@@ -1264,23 +3066,38 @@ def MPO_ham_mbl(n, dh, j=1.0, seed=None, S=1 / 2, *, cyclic=False,
     -------
     MatrixProductOperator
     """
-    H = _ham_mbl(n, dh=dh, j=j, seed=seed, S=S, cyclic=cyclic,
+    H = _ham_mbl(L, dh=dh, j=j, seed=seed, S=S, cyclic=cyclic,
                  dh_dist=dh_dist, dh_dim=dh_dim, beta=beta)
-    return H.build_mpo(n, **mpo_opts)
+    return H.build_mpo(L, **mpo_opts)
 
 
-def NNI_ham_mbl(n, dh, j=1.0, seed=None, S=1 / 2, *, cyclic=False,
-                dh_dist='s', dh_dim=1, beta=None, **nni_opts):
-    """The many-body-localized spin hamiltonian in NNI form.
+def ham_1d_mbl(L, dh, j=1.0, seed=None, S=1 / 2, *, cyclic=False,
+               dh_dist='s', dh_dim=1, beta=None, **local_ham_1d_opts):
+    r"""The many-body-localized spin hamiltonian in
+    :class:`~quimb.tensor.tensor_1d_tebd.LocalHam1D` form.
+
+    .. math::
+
+        H_\mathrm{MBL} =
+        \sum_{i} (
+            J_X \sigma^X_i \sigma^X_{i + 1} +
+            J_Y \sigma^Y_i \sigma^Y_{i + 1} +
+            J_Z \sigma^Z_i \sigma^Z_{i + 1}
+            )
+        - \sum_{i} h_i \sigma^Z_i
+
+    Note the default convention of antiferromagnetic interactions and spin
+    operators not Pauli matrices.
 
     Parameters
     ----------
-    n : int
+    L : int
         Number of spins.
     dh : float
         Random noise strength.
     j : float, or (float, float, float), optional
-        Interaction strength(s) e.g. 1 or (1., 1., 0.5).
+        Interaction strength(s) e.g. 1 or (1., 1., 0.5).  Positive is
+        antiferromagnetic.
     seed : int, optional
         Random number to seed the noise with.
     S : {1/2, 1, 3/2, ...}, optional
@@ -1291,13 +3108,205 @@ def NNI_ham_mbl(n, dh, j=1.0, seed=None, S=1 / 2, *, cyclic=False,
         Whether to use sqaure, guassian or quasiperiodic noise.
     beta : float, optional
         Frequency of the quasirandom noise, only if ``dh_dist='qr'``.
-    nni_opts
-        Supplied to :class:`NNI`.
+    local_ham_1d_opts
+        Supplied to :class:`LocalHam1D`.
 
     Returns
     -------
-    NNI
+    LocalHam1D
     """
-    H = _ham_mbl(n, dh=dh, j=j, seed=seed, S=S, cyclic=cyclic,
+    H = _ham_mbl(L, dh=dh, j=j, seed=seed, S=S, cyclic=cyclic,
                  dh_dist=dh_dist, dh_dim=dh_dim, beta=beta)
-    return H.build_nni(n, **nni_opts)
+    return H.build_local_ham(L, **local_ham_1d_opts)
+
+
+NNI_ham_mbl = deprecated(ham_1d_mbl, 'NNI_ham_mbl', 'ham_1d_mbl')
+
+
+def ham_2d_ising(Lx, Ly, j=1.0, bx=0.0, **local_ham_2d_opts):
+    r"""Ising Hamiltonian in
+    :class:`~quimb.tensor.tensor_2d_tebd.LocalHam2D` form.
+
+    .. math::
+
+        H_\mathrm{Ising} =
+        J \sum_{<ij>} \sigma^Z_i \sigma^Z_{j} -
+        B_x \sum_{i} \sigma^X_i
+
+    for nearest neighbors :math:`<ij>`. Note the default convention of
+    antiferromagnetic interactions and spin operators not Pauli matrices.
+
+    Parameters
+    ----------
+    Lx : int
+        The number of rows.
+    Ly : int
+        The number of columns.
+    j : float, optional
+        The ZZ interaction strength. Positive is antiferromagnetic.
+    bx : float, optional
+        The X-magnetic field strength.
+    local_ham_2d_opts
+        Supplied to :class:`~quimb.tensor.tensor_2d.LocalHam2D`.
+
+    Returns
+    -------
+    LocalHam2D
+    """
+    H2 = ham_heis(2, j=(0, 0, j), cyclic=False)
+    if bx == 0.0:
+        H1 = None
+    else:
+        H1 = -bx * spin_operator('X').real
+    return LocalHam2D(Lx, Ly, H2=H2, H1=H1, **local_ham_2d_opts)
+
+
+def ham_2d_heis(Lx, Ly, j=1.0, bz=0.0, **local_ham_2d_opts):
+    r"""Heisenberg Hamiltonian in
+    :class:`~quimb.tensor.tensor_2d_tebd.LocalHam2D`. form.
+
+    .. math::
+
+        H_\mathrm{Heis} =
+        \sum_{<ij>} (
+            J_X \sigma^X_i \sigma^X_{j} +
+            J_Y \sigma^Y_i \sigma^Y_{j} +
+            J_Z \sigma^Z_i \sigma^Z_{j}
+            )
+        - B_Z \sum_{i} \sigma^Z_{i}
+
+    for nearest neighbors :math:`<ij>`. Note the default convention of
+    antiferromagnetic interactions and spin operators not Pauli matrices.
+
+    Parameters
+    ----------
+    Lx : int
+        The number of rows.
+    Ly : int
+        The number of columns.
+    j : float or (float, float, float), optional
+        The XX, YY and ZZ interaction strength. Positive is antiferromagnetic.
+    bz : float, optional
+        The Z-magnetic field strength.
+    local_ham_2d_opts
+        Supplied to :class:`~quimb.tensor.tensor_2d_tebd.LocalHam2D`.
+
+    Returns
+    -------
+    LocalHam2D
+    """
+    H2 = ham_heis(2, j=j, cyclic=False)
+    if bz == 0.0:
+        H1 = None
+    else:
+        H1 = -bz * spin_operator('Z').real
+    return LocalHam2D(Lx, Ly, H2=H2, H1=H1, **local_ham_2d_opts)
+
+
+def ham_2d_j1j2(Lx, Ly, j1=1.0, j2=0.5, bz=0.0, **local_ham_2d_opts):
+    r"""Heisenberg Hamiltonian in
+    :class:`~quimb.tensor.tensor_2d_tebd.LocalHam2D`. form.
+
+    .. math::
+
+        H_\mathrm{Heis} =
+        \sum_{<ij>} (
+            J_{1,X} \sigma^X_i \sigma^X_{j} +
+            J_{1,Y} \sigma^Y_i \sigma^Y_{j} +
+            J_{1,Z} \sigma^Z_i \sigma^Z_{j}
+            )
+        +
+        \sum_{<<ij>>} (
+            J_{2,X} \sigma^X_i \sigma^X_{j} +
+            J_{2,Y} \sigma^Y_i \sigma^Y_{j} +
+            J_{2,Z} \sigma^Z_i \sigma^Z_{j}
+            )
+        - B_Z \sum_{i} \sigma^Z_{i}
+
+    for nearest neighbors :math:`<ij>` and diagonal next nearest neighbors
+    :math:`<<ij>>`. Note the default convention of antiferromagnetic
+    interactions and spin operators not Pauli matrices.
+
+    Parameters
+    ----------
+    Lx : int
+        The number of rows.
+    Ly : int
+        The number of columns.
+    j2 : float or (float, float, float), optional
+        The nearest neighbor  XX, YY and ZZ interaction strength. Positive is
+        antiferromagnetic.
+    j2 : float or (float, float, float), optional
+        The diagonal next nearest nearest XX, YY and ZZ interaction strength.
+        Positive is antiferromagnetic.
+    bz : float, optional
+        The Z-magnetic field strength.
+    local_ham_2d_opts
+        Supplied to :class:`~quimb.tensor.tensor_2d_tebd.LocalHam2D`.
+
+    Returns
+    -------
+    LocalHam2D
+    """
+
+    # default nearest neighbor interaction
+    H2 = {None: ham_heis(2, j=j1, cyclic=False)}
+
+    # diagonal next nearest neighbor interactions
+    for bond in gen_2d_bonds(Lx, Ly, steppers=[
+        lambda i, j: (i + 1, j - 1),
+        lambda i, j: (i + 1, j + 1),
+    ]):
+        H2[bond] = ham_heis(2, j=j2, cyclic=False)
+
+    # magnetic field
+    if bz == 0.0:
+        H1 = None
+    else:
+        H1 = -bz * spin_operator('Z').real
+
+    return LocalHam2D(Lx, Ly, H2=H2, H1=H1, **local_ham_2d_opts)
+
+
+def ham_3d_heis(Lx, Ly, Lz, j=1.0, bz=0.0, **local_ham_3d_opts):
+    r"""Heisenberg Hamiltonian in
+    :class:`~quimb.tensor.tensor_3d_tebd.LocalHam3D`. form.
+
+    .. math::
+
+        H_\mathrm{Heis} =
+        \sum_{<ij>} (
+            J_X \sigma^X_i \sigma^X_{j} +
+            J_Y \sigma^Y_i \sigma^Y_{j} +
+            J_Z \sigma^Z_i \sigma^Z_{j}
+            )
+        - B_Z \sum_{i} \sigma^Z_{i}
+
+    for nearest neighbors :math:`<ij>`. Note the default convention of
+    antiferromagnetic interactions and spin operators not Pauli matrices.
+
+    Parameters
+    ----------
+    Lx : int
+        The number of x-planes.
+    Ly : int
+        The number of y-planes.
+    Ly : int
+        The number of z-planes.
+    j : float or (float, float, float), optional
+        The XX, YY and ZZ interaction strength. Positive is antiferromagnetic.
+    bz : float, optional
+        The Z-magnetic field strength.
+    local_ham_3d_opts
+        Supplied to :class:`~quimb.tensor.tensor_3d_tebd.LocalHam3D`.
+
+    Returns
+    -------
+    LocalHam3D
+    """
+    H2 = ham_heis(2, j=j, cyclic=False)
+    if bz == 0.0:
+        H1 = None
+    else:
+        H1 = -bz * spin_operator('Z').real
+    return LocalHam3D(Lx, Ly, Lz, H2=H2, H1=H1, **local_ham_3d_opts)
