@@ -401,6 +401,28 @@ def fsim_param_gen(params):
 
     return ops.asarray(data)
 
+def fsimt_param_gen(params):
+    theta = params[0]
+    a_re = do('cos', theta)
+    a_im = do('imag', a_re)
+    a = do('complex', a_re, a_im)
+
+    b_im = do('sin', theta)
+    b_re = do('imag', b_im)
+    b = do('complex', b_re, b_im)
+
+
+
+    data = [[[[1, 0], [0, 0]],
+             [[0, a], [b, 0]]],
+            [[[0, b], [a, 0]],
+             [[0, 0], [0, 1]]]]
+
+    return do('array', data, like=params)
+
+
+
+
 
 def apply_fsim(psi, theta, phi, i, j, parametrize=False, **gate_opts):
     mtags = _merge_tags('FSIM', gate_opts)
@@ -411,12 +433,32 @@ def apply_fsim(psi, theta, phi, i, j, parametrize=False, **gate_opts):
     psi.gate_(G, (int(i), int(j)), tags=mtags, **gate_opts)
 
 
+def apply_fsimt(psi,theta, i, j, parametrize=False, **gate_opts):
+    mtags = _merge_tags('FSIMT', gate_opts)
+    if parametrize:
+        G = ops.PArray(fsimt_param_gen, (theta,))
+    else:
+        G = qu.fsimt(theta)
+    psi.gate_(G, (int(i), int(j)), tags=mtags, **gate_opts)
+
+
+
+
+
 def fsimg_param_gen(params):
     theta, zeta, chi, gamma, phi = (
         params[0], params[1], params[2], params[3], params[4]
     )
 
-    a11_re = do('cos', theta)
+    e00_im = (gamma + phi)
+    e00_re = do('imag', e00_im)
+    e00 = do('exp', do('complex', e00_re, e00_im))
+
+    c_im = (gamma - phi)
+    c_re = do('imag', c_im)
+    c = do('exp', do('complex', c_re, c_im))
+
+    a11_re = do('sin', theta)
     a11_im = do('imag', a11_re)
     a11 = do('complex', a11_re, a11_im)
 
@@ -424,7 +466,8 @@ def fsimg_param_gen(params):
     e11_re = do('imag', e11_im)
     e11 = do('exp', do('complex', e11_re, e11_im))
 
-    a22_re = do('cos', theta)
+
+    a22_re = -do('sin', theta)
     a22_im = do('imag', a22_re)
     a22 = do('complex', a22_re, a22_im)
 
@@ -432,19 +475,21 @@ def fsimg_param_gen(params):
     e22_re = do('imag', e22_im)
     e22 = do('exp', do('complex', e22_re, e22_im))
 
-    a21_re = do('sin', theta)
+
+
+    a21_re = do('cos', theta)
     a21_im = do('imag', a21_re)
     a21 = do('complex', a21_re, a21_im)
 
-    e21_im = -(gamma - chi)
+    e21_im = -(gamma + phi + chi)
     e21_re = do('imag', e21_im)
     e21 = do('exp', do('complex', e21_re, e21_im))
 
-    a12_re = do('sin', theta)
+    a12_re = do('cos', theta)
     a12_im = do('imag', a12_re)
     a12 = do('complex', a12_re, a12_im)
 
-    e12_im = -(gamma + chi)
+    e12_im = (-gamma + phi + chi)
     e12_re = do('imag', e12_im)
     e12 = do('exp', do('complex', e12_re, e12_im))
 
@@ -606,6 +651,7 @@ GATE_FUNCTIONS = {
     'CU1': apply_cu1,
     'FS': apply_fsim,
     'FSIM': apply_fsim,
+    'FSIMT': apply_fsimt,
     'FSIMG': apply_fsimg,
     'RZZ': apply_rzz,
     'SU4': apply_su4,
