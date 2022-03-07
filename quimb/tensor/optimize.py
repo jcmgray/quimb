@@ -1315,48 +1315,62 @@ class TNOptimizer:
         """
         import nlopt
 
-        try:
-            self._maybe_init_pbar(n)
+        #try:
+        self._maybe_init_pbar(n)
 
-            def f(x, grad):
-                self.vectorizer.vector[:] = x
-                arrays = self.vectorizer.unpack()
-                if grad.size > 0:
-                    result, grads = self.handler.value_and_grad(arrays)
-                    grad[:] = self.vectorizer.pack(grads, 'grad')
-                else:
-                    result = self.handler.value(arrays)
-                self._n += 1
-                self.loss = result.item()
-                self.losses.append(self.loss)
-                self._maybe_update_pbar()
-                return self.loss
+        def f(x, grad):
+            self.vectorizer.vector[:] = x
+            arrays = self.vectorizer.unpack()
+            if grad.size > 0:
+                result, grads = self.handler.value_and_grad(arrays)
+                grad[:] = self.vectorizer.pack(grads, 'grad')
+            else:
+                result = self.handler.value(arrays)
+            self._n += 1
+            self.loss = result.item()
+            self.losses.append(self.loss)
+            self._maybe_update_pbar()
+            return self.loss
 
-            opt = nlopt.opt(getattr(nlopt, self.optimizer), self.d)
-            opt.set_min_objective(f)
-            opt.set_maxeval(n)
+            
+        #opt=opt = nlopt.opt(nlopt.LD_LBFGS, self.d)
+        #print (  self.optimizer.upper() )
+        opt = nlopt.opt(getattr(nlopt, self.optimizer.upper()), self.d)
+        opt.set_min_objective(f)
+        opt.set_maxeval(n)
+        #opt.set_vector_storage(22)
+        opt.set_maxtime(-1)
+        print ( "M", self.optimizer.upper(), opt.get_vector_storage() , opt.get_maxeval(), opt.get_maxtime(), opt.get_xtol_rel(), opt.get_ftol_abs(),
+        opt.get_maxtime() )
 
-            if self.bounds is not None:
-                opt.set_lower_bounds(self.bounds[:, 0])
-                opt.set_upper_bounds(self.bounds[:, 1])
 
-            if self.loss_target is not None:
-                opt.set_stopval(self.loss_target)
-            if ftol_rel is not None:
-                opt.set_ftol_rel(ftol_rel)
-            if ftol_abs is not None:
-                opt.set_ftol_abs(ftol_abs)
-            if xtol_rel is not None:
-                opt.set_xtol_rel(xtol_rel)
-            if xtol_abs is not None:
-                opt.set_xtol_abs(xtol_abs)
 
-            self.vectorizer.vector[:] = opt.optimize(self.vectorizer.vector)
+        if self.bounds is not None:
+            opt.set_lower_bounds(self.bounds[:, 0])
+            opt.set_upper_bounds(self.bounds[:, 1])
 
-        except (KeyboardInterrupt, RuntimeError):
-            pass
-        finally:
-            self._maybe_close_pbar()
+        if self.loss_target is not None:
+            opt.set_stopval(self.loss_target)
+        if ftol_rel is not None:
+            opt.set_ftol_rel(ftol_rel)
+        if ftol_abs is not None:
+            opt.set_ftol_abs(ftol_abs)
+        if xtol_rel is not None:
+            opt.set_xtol_rel(xtol_rel)
+        if xtol_abs is not None:
+            opt.set_xtol_abs(xtol_abs)
+
+        print ("Hi")
+        self.vectorizer.vector[:] = opt.optimize(self.vectorizer.vector)
+        opt_val = opt.last_optimum_value()
+        result = opt.last_optimize_result()
+        print ("info", opt_val, result)
+
+
+        # except (KeyboardInterrupt, RuntimeError):
+        #     pass
+        # finally:
+        #     self._maybe_close_pbar()
 
         return self.get_tn_opt()
 

@@ -867,7 +867,7 @@ class Circuit:
         self._psi.gate_(U, where, tags=tags, **opts)
         self.gates.append((id(U), *where))
 
-    def apply_gate(self, gate_id, *gate_args, gate_round=None, **gate_opts):
+    def apply_gate(self, gate_id, *gate_args, gate_round=None,gate_shared=None, **gate_opts):
         """Apply a single gate to this tensor network quantum circuit. If
         ``gate_round`` is supplied the tensor(s) added will be tagged with
         ``'ROUND_{gate_round}'``. Alternatively, putting an integer first like
@@ -896,6 +896,8 @@ class Circuit:
 
         # unique tag
         tags = tags_to_oset(f'GATE_{len(self.gates)}')
+        if (gate_shared is not None):
+            tags.add(f'{gate_shared}')
 
         # parse which 'round' of gates
         if (gate_round is not None):
