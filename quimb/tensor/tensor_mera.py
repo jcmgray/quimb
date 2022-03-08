@@ -4,7 +4,7 @@ import itertools
 import numpy as np
 
 import quimb as qu
-from .tensor_core import rand_uuid, Tensor, TensorNetwork
+from .tensor_core import rand_uuid, IsoTensor, TensorNetwork
 from .tensor_1d import TensorNetwork1D, TensorNetwork1DVector
 
 
@@ -110,8 +110,8 @@ class MERA(TensorNetwork1DVector,
                         tags += (site_tag_id.format(j),
                                  site_tag_id.format(j + 1))
 
-                    yield Tensor(next(unis), inds=inds,
-                                 tags=tags, left_inds=(ll, lr))
+                    yield IsoTensor(next(unis), inds=inds,
+                                    tags=tags, left_inds=(ll, lr))
 
                     # generate the isometry (offset by one effective site):
                     #      | ui
@@ -124,12 +124,12 @@ class MERA(TensorNetwork1DVector,
                     tags = ("_ISO", f"_LAYER{i}")
 
                     if i < nlayers - 1 or dangle:
-                        yield Tensor(next(isos), inds=inds,
-                                     tags=tags, left_inds=(ll, lr))
+                        yield IsoTensor(next(isos), inds=inds,
+                                        tags=tags, left_inds=(ll, lr))
                     else:
                         # don't leave dangling index at top
                         iso_f = next(isos)
-                        yield Tensor(
+                        yield IsoTensor(
                             np.eye(iso_f.shape[0], dtype=iso_f.dtype) / 2**0.5,
                             inds=inds[:-1], tags=tags, left_inds=(ll, lr)
                         )

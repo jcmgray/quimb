@@ -9,7 +9,7 @@ from collections.abc import Iterable
 
 import tqdm
 import numpy as np
-from autoray import to_numpy, astype
+from autoray import to_numpy, astype, get_dtype_name
 
 from .tensor_core import (
     contract_backend,
@@ -68,7 +68,7 @@ class Vectorizer:
     def __init__(self, arrays):
         self.shapes = [x.shape for x in arrays]
         self.iscomplexes = [iscomplex(x) for x in arrays]
-        self.dtypes = [x.dtype for x in arrays]
+        self.dtypes = [get_dtype_name(x) for x in arrays]
         self.sizes = [np.prod(s) for s in self.shapes]
         self.d = sum(
             (1 + int(cmplx)) * size
@@ -122,7 +122,7 @@ class Vectorizer:
                 array.shape = shape
                 i += 2 * size
 
-            if array.dtype != dtype:
+            if get_dtype_name(array) != dtype:
                 array = astype(array, dtype)
 
             arrays.append(array)
@@ -552,6 +552,19 @@ class MultiLossHandler:
             h.setup_fn(fn)
             self.handlers.append(h)
 
+    def _value_seq(self, arrays):
+        return sum(h.value(arrays) for h in self.handlers)
+
+    def _value_par_seq(self, arrays):
+        futures = [self.executor.submit(h.value, arrays)
+                   for h in self.handlers]
+        return sum(f.result() for f in futures)
+
+    def value(self, arrays):
+        if self.executor is not None:
+            return self._value_par(arrays)
+        return self._value_seq(arrays)
+
     def _value_and_grad_seq(self, arrays):
         h0, *hs = self.handlers
         loss, grads = h0.value_and_grad(arrays)
@@ -907,7 +920,9 @@ class TNOptimizer:
         If supplied, each tag in ``shared_tags`` corresponds to a group of
         tensors to be optimized together.
     constant_tags : str, or sequence of str, optional
-        If supplied, skip optimizing tensors with any of these tags.
+        If supplied, skip optimizing tensors with any of these tags. This
+        'opt-out' mode is overridden if either ``tags`` or ``shared_tags`` is
+        supplied.
     loss_target : float, optional
         Stop optimizing once this loss value is reached.
     optimizer : str, optional

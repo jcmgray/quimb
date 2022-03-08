@@ -1,8 +1,8 @@
 """Miscellenous
 """
-import importlib
 import itertools
 import collections
+from importlib.util import find_spec
 
 
 try:
@@ -60,7 +60,7 @@ def find_library(x):
     bool
         If library is available.
     """
-    return importlib.util.find_spec(x) is not None
+    return find_spec(x) is not None
 
 
 def raise_cant_find_library_function(x, extra_msg=None):

@@ -43,8 +43,12 @@ def parse_dict_to_tids_or_inds(spec, tn, default='__NONE__'):
             new[k] = v
             continue
 
-        for tid in tn._get_tids_from_tags(k):
-            new[tid] = v
+        try:
+            for tid in tn._get_tids_from_tags(k):
+                new[tid] = v
+        except KeyError:
+            # just ignore keys that don't match any tensor
+            pass
 
     return new
 

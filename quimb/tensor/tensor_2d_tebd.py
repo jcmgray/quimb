@@ -231,6 +231,9 @@ class TEBD2D(TEBDGen):
         greedily form an 'edge coloring' based on the sorted list of
         Hamiltonian pair coordinates. If a callable is supplied it will be used
         to generate the ordering before each sweep.
+    second_order_reflect : bool, optional
+        If ``True``, then apply each layer of gates in ``ordering`` forward
+        with half the time step, then the same with reverse order.
     compute_energy_every : None or int, optional
         How often to compute and record the energy. If a positive integer 'n',
         the energy is computed *before* every nth sweep (i.e. including before
@@ -291,6 +294,7 @@ class TEBD2D(TEBDGen):
         imag=True,
         gate_opts=None,
         ordering=None,
+        second_order_reflect=False,
         compute_energy_every=None,
         compute_energy_final=True,
         compute_energy_opts=None,
@@ -308,6 +312,7 @@ class TEBD2D(TEBDGen):
             imag=imag,
             gate_opts=gate_opts,
             ordering=ordering,
+            second_order_reflect=second_order_reflect,
             compute_energy_every=compute_energy_every,
             compute_energy_final=compute_energy_final,
             compute_energy_opts=compute_energy_opts,
@@ -390,6 +395,9 @@ class SimpleUpdate(TEBD2D):
         greedily form an 'edge coloring' based on the sorted list of
         Hamiltonian pair coordinates. If a callable is supplied it will be used
         to generate the ordering before each sweep.
+    second_order_reflect : bool, optional
+        If ``True``, then apply each layer of gates in ``ordering`` forward
+        with half the time step, then the same with reverse order.
     compute_energy_every : None or int, optional
         How often to compute and record the energy. If a positive integer 'n',
         the energy is computed *before* every nth sweep (i.e. including before
@@ -473,6 +481,7 @@ class SimpleUpdate(TEBD2D):
         imag=True,
         gate_opts=None,
         ordering=None,
+        second_order_reflect=False,
         compute_energy_every=None,
         compute_energy_final=True,
         compute_energy_opts=None,
@@ -491,6 +500,7 @@ class SimpleUpdate(TEBD2D):
             imag=imag,
             gate_opts=gate_opts,
             ordering=ordering,
+            second_order_reflect=second_order_reflect,
             compute_energy_every=compute_energy_every,
             compute_energy_final=compute_energy_final,
             compute_energy_opts=compute_energy_opts,
@@ -916,6 +926,9 @@ class FullUpdate(TEBD2D):
         greedily form an 'edge coloring' based on the sorted list of
         Hamiltonian pair coordinates. If a callable is supplied it will be used
         to generate the ordering before each sweep.
+    second_order_reflect : bool, optional
+        If ``True``, then apply each layer of gates in ``ordering`` forward
+        with half the time step, then the same with reverse order.
     compute_energy_every : None or int, optional
         How often to compute and record the energy. If a positive integer 'n',
         the energy is computed *before* every nth sweep (i.e. including before
@@ -1010,6 +1023,7 @@ class FullUpdate(TEBD2D):
         imag=True,
         gate_opts=None,
         ordering=None,
+        second_order_reflect=False,
         compute_energy_every=None,
         compute_energy_final=True,
         compute_energy_opts=None,
@@ -1028,6 +1042,7 @@ class FullUpdate(TEBD2D):
             imag=imag,
             gate_opts=gate_opts,
             ordering=ordering,
+            second_order_reflect=second_order_reflect,
             compute_energy_every=compute_energy_every,
             compute_energy_final=compute_energy_final,
             compute_energy_opts=compute_energy_opts,

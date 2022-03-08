@@ -48,7 +48,7 @@ class TestMERA:
         mera = qt.MERA.rand(16, dangle=True)
         assert mera.H @ mera == pytest.approx(2.0)
         for t in mera:
-            t.modify(data=qu.randn(t.shape), left_inds=t.left_inds)
+            t.modify(data=qu.randn(t.shape))
         assert mera.H @ mera != pytest.approx(2.0)
         mera.unitize_(method=method)
         assert mera.H @ mera == pytest.approx(2.0)

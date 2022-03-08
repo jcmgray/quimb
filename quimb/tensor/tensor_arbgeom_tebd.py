@@ -445,6 +445,7 @@ class TEBDGen:
         imag=True,
         gate_opts=None,
         ordering=None,
+        second_order_reflect=False,
         compute_energy_every=None,
         compute_energy_final=True,
         compute_energy_opts=None,
@@ -495,6 +496,8 @@ class TEBDGen:
         else:
             self.ordering = tuple(ordering)
 
+        self.second_order_reflect = second_order_reflect
+
         # storage
         self._n = 0
         self.its = []
@@ -517,12 +520,18 @@ class TEBDGen:
         else:
             ordering = self.ordering
 
+        if self.second_order_reflect:
+            ordering = tuple(ordering) + tuple(reversed(ordering))
+            factor = 2.0
+        else:
+            factor = 1.0
+
         for where in ordering:
 
             if callable(tau):
-                U = self.ham.get_gate_expm(where, -tau(where))
+                U = self.ham.get_gate_expm(where, -tau(where) / factor)
             else:
-                U = self.ham.get_gate_expm(where, -tau)
+                U = self.ham.get_gate_expm(where, -tau / factor)
 
             self.gate(U, where)
 

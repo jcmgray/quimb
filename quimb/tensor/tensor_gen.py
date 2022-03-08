@@ -17,13 +17,15 @@ from ..gen.operators import (
 from ..gen.rand import randn, choice, random_seed_fn, rand_phase
 from .tensor_core import (Tensor, new_bond, TensorNetwork, rand_uuid,
                           tensor_direct_product)
-from .array_ops import asarray, sensibly_scale
+from .array_ops import asarray, sensibly_scale, reshape
+from .decomp import eigh
 from .tensor_arbgeom import TensorNetworkGen, TensorNetworkGenVector
 from .tensor_1d import MatrixProductState, MatrixProductOperator
 from .tensor_2d import gen_2d_bonds, TensorNetwork2D
 from .tensor_3d import TensorNetwork3D
 from .tensor_1d_tebd import LocalHam1D
 from .tensor_2d_tebd import LocalHam2D
+from .tensor_3d_tebd import LocalHam3D
 
 
 @random_seed_fn
@@ -840,44 +842,59 @@ def classical_ising_H_matrix(beta, h=0.0):
 
 
 @functools.lru_cache(128)
-def classical_ising_sqrtS_matrix(beta, j=1.0):
+def classical_ising_sqrtS_matrix(beta, j=1.0, asymm=None):
     """The sqrt factorized interaction term for the classical ising model.
+    If ``j`` is negative you can supply ``asymm='l'`` or ``'r'`` to
+    keep the matrix real, but it must be paired with the opposite in a tensor
+    network.
     """
-    S_1_2 = np.array(
-        [[math.cosh(j * beta)**0.5 + math.sinh(j * beta)**0.5,
-          math.cosh(j * beta)**0.5 - math.sinh(j * beta)**0.5],
-         [math.cosh(j * beta)**0.5 - math.sinh(j * beta)**0.5,
-          math.cosh(j * beta)**0.5 + math.sinh(j * beta)**0.5]]
-    ) / 2**0.5
+    if (j < 0.0) and (asymm is not None):
+        Slr = eigh(classical_ising_S_matrix(beta=beta, j=j))
+        S_1_2 = {
+            'l': Slr[0], 'lT': Slr[0].T,
+            'r': Slr[-1], 'rT': Slr[-1].T,
+        }[asymm]
+    else:
+        S_1_2 = np.array(
+            [[math.cosh(j * beta)**0.5 + math.sinh(j * beta)**0.5,
+              math.cosh(j * beta)**0.5 - math.sinh(j * beta)**0.5],
+             [math.cosh(j * beta)**0.5 - math.sinh(j * beta)**0.5,
+              math.cosh(j * beta)**0.5 + math.sinh(j * beta)**0.5]]
+        ) / 2**0.5
     make_immutable(S_1_2)
     return S_1_2
 
 
 @functools.lru_cache(128)
-def classical_ising_T_matrix(beta, j=1.0, h=0.0, directions='lrud'):
+def classical_ising_T_matrix(
+    beta,
+    j=1.0,
+    h=0.0,
+    directions='lrud',
+    asymm=None,
+):
     """The single effective TN site for the classical ising model.
     """
+    try:
+        js = tuple(j)
+    except TypeError:
+        js = (j,) * len(directions)
+
+    try:
+        asymms = tuple(asymm)
+    except TypeError:
+        asymms = (asymm,) * len(directions)
+
     arrays = (
-        [classical_ising_sqrtS_matrix(beta, j=j)] * len(directions) +
+        [
+            classical_ising_sqrtS_matrix(beta=beta, j=j, asymm=a)
+            for j, a in zip(js, asymms)
+        ] +
         [classical_ising_H_matrix(beta, h)]
     )
     lhs = ",".join(f'i{x}' for x in directions)
     eq = lhs + ",i->" + directions
     return oe.contract(eq, *arrays)
-
-
-@functools.lru_cache(128)
-def classical_ising_T2d_matrix(beta, directions='lrud', j=1.0, h=0.0):
-    """The single effective TN site for the 2D classical ising model.
-    """
-    return classical_ising_T_matrix(beta, j, h, directions)
-
-
-@functools.lru_cache(128)
-def classical_ising_T3d_matrix(beta, directions='lrudab', j=1.0, h=0.0):
-    """The single effective TN site for the 3D classical ising model.
-    """
-    return classical_ising_T_matrix(beta, j, h, directions)
 
 
 def HTN2D_classical_ising_partition_function(
@@ -922,29 +939,37 @@ def HTN2D_classical_ising_partition_function(
     --------
     TN2D_classical_ising_partition_function
     """
-
-    ts = []
-
-    S = classical_ising_S_matrix(beta=beta, j=j)
-    H = classical_ising_H_matrix(beta=beta, h=h)
-
     try:
         cyclic_x, cyclic_y = cyclic
     except TypeError:
         cyclic_x = cyclic_y = cyclic
 
+    if callable(j):
+        j_factory = j
+    else:
+        def j_factory(node_a, node_b):
+            return j
+
+    ts = []
     for ni, nj in itertools.product(range(Lx), range(Ly)):
 
         if ni < Lx - 1 or cyclic_x:
-            inds = ind_id.format(ni, nj), ind_id.format((ni + 1) % Lx, nj)
-            ts.append(Tensor(S, inds=inds))
+            node_a, node_b = (ni, nj), ((ni + 1) % Lx, nj)
+            inds = ind_id.format(*node_a), ind_id.format(*node_b)
+            data = classical_ising_S_matrix(
+                beta=beta, j=j_factory(node_a, node_b))
+            ts.append(Tensor(data, inds=inds))
 
         if nj < Ly - 1 or cyclic_y:
-            inds = ind_id.format(ni, nj), ind_id.format(ni, (nj + 1) % Ly)
-            ts.append(Tensor(S, inds=inds))
+            node_a, node_b = (ni, nj), (ni, (nj + 1) % Ly)
+            inds = ind_id.format(*node_a), ind_id.format(*node_b)
+            data = classical_ising_S_matrix(
+                beta=beta, j=j_factory(node_a, node_b))
+            ts.append(Tensor(data, inds=inds))
 
         if h != 0.0:
-            ts.append(Tensor(H, inds=(ind_id.format(ni, nj),)))
+            data = classical_ising_H_matrix(beta=beta, h=h)
+            ts.append(Tensor(data, inds=(ind_id.format(ni, nj),)))
 
     return TensorNetwork(ts)
 
@@ -994,36 +1019,44 @@ def HTN3D_classical_ising_partition_function(
     --------
     TN3D_classical_ising_partition_function
     """
-
-    ts = []
-
-    S = classical_ising_S_matrix(beta=beta, j=j)
-    H = classical_ising_H_matrix(beta=beta, h=h)
-
     try:
         cyclic_x, cyclic_y, cyclic_z = cyclic
     except TypeError:
         cyclic_x = cyclic_y = cyclic_z = cyclic
 
+    if callable(j):
+        j_factory = j
+    else:
+        def j_factory(node_a, node_b):
+            return j
+
+    ts = []
     for ni, nj, nk in itertools.product(range(Lx), range(Ly), range(Lz)):
 
         if ni < Lx - 1 or cyclic_x:
-            inds = (ind_id.format(ni, nj, nk),
-                    ind_id.format((ni + 1) % Lx, nj, nk))
-            ts.append(Tensor(S, inds=inds))
+            node_a, node_b = (ni, nj, nk), ((ni + 1) % Lx, nj, nk)
+            inds = (ind_id.format(*node_a), ind_id.format(*node_b))
+            data = classical_ising_S_matrix(
+                beta=beta, j=j_factory(node_a, node_b))
+            ts.append(Tensor(data, inds=inds))
 
         if nj < Ly - 1 or cyclic_y:
-            inds = (ind_id.format(ni, nj, nk),
-                    ind_id.format(ni, (nj + 1) % Ly, nk))
-            ts.append(Tensor(S, inds=inds))
+            node_a, node_b = (ni, nj, nk), (ni, (nj + 1) % Ly, nk)
+            inds = (ind_id.format(*node_a), ind_id.format(*node_b))
+            data = classical_ising_S_matrix(
+                beta=beta, j=j_factory(node_a, node_b))
+            ts.append(Tensor(data, inds=inds))
 
         if nk < Lz - 1 or cyclic_z:
-            inds = (ind_id.format(ni, nj, nk),
-                    ind_id.format(ni, nj, (nk + 1) % Lz))
-            ts.append(Tensor(S, inds=inds))
+            node_a, node_b = (ni, nj, nk), (ni, nj, (nk + 1) % Lz)
+            inds = (ind_id.format(*node_a), ind_id.format(*node_b))
+            data = classical_ising_S_matrix(
+                beta=beta, j=j_factory(node_a, node_b))
+            ts.append(Tensor(data, inds=inds))
 
         if h != 0.0:
-            ts.append(Tensor(H, inds=(ind_id.format(ni, nj, nk),)))
+            data = classical_ising_H_matrix(beta=beta, h=h)
+            ts.append(Tensor(data, inds=(ind_id.format(ni, nj, nk),)))
 
     return TensorNetwork(ts)
 
@@ -1077,28 +1110,40 @@ def TN2D_classical_ising_partition_function(
     except TypeError:
         cyclic_x = cyclic_y = cyclic
 
+    if callable(j):
+        j_factory = j
+    else:
+        def j_factory(node_a, node_b):
+            return j
+
     ts = []
     bonds = collections.defaultdict(rand_uuid)
 
     for ni, nj in itertools.product(range(Lx), range(Ly)):
         directions = ""
         inds = []
+        js = ()
+        asymms = ()
 
-        if nj > 0 or cyclic_y:
-            directions += 'l'
-            inds.append(bonds[(ni, (nj - 1) % Ly), (ni, nj)])
-        if nj < Ly - 1 or cyclic_y:
-            directions += 'r'
-            inds.append(bonds[(ni, nj), (ni, (nj + 1) % Ly)])
-        if ni < Lx - 1 or cyclic_x:
-            directions += 'u'
-            inds.append(bonds[(ni, nj), ((ni + 1) % Lx, nj)])
-        if ni > 0 or cyclic_x:
-            directions += 'd'
-            inds.append(bonds[((ni - 1) % Lx, nj), (ni, nj)])
+        for inbounds, pair, direction in [
+            (nj > 0 or cyclic_y, ((ni, (nj - 1) % Ly), (ni, nj)), 'l'),
+            (nj < Ly - 1 or cyclic_y, ((ni, nj), (ni, (nj + 1) % Ly)), 'r'),
+            (ni < Lx - 1 or cyclic_x, ((ni, nj), ((ni + 1) % Lx, nj)), 'u'),
+            (ni > 0 or cyclic_x, (((ni - 1) % Lx, nj), (ni, nj)), 'd'),
+        ]:
+            if inbounds:
+                js += (j_factory(*pair),)
+                directions += direction
+                # this is logic for handling negative j without imag tensors
+                # i.e. add the left factor if the first instance of bond, right
+                # factor if second. If j > 0.0 this doesn't matter anyhow
+                asymms += ('l' if pair not in bonds else 'rT',)
+                inds.append(bonds[pair])
 
         ts.append(Tensor(
-            data=classical_ising_T2d_matrix(beta, directions, j=j, h=h),
+            data=classical_ising_T_matrix(
+                beta=beta, directions=directions, j=js, h=h, asymm=asymms,
+            ),
             inds=inds,
             tags=[site_tag_id.format(ni, nj),
                   row_tag_id.format(ni),
@@ -1164,34 +1209,48 @@ def TN3D_classical_ising_partition_function(
     except TypeError:
         cyclic_x = cyclic_y = cyclic_z = cyclic
 
+    if callable(j):
+        j_factory = j
+    else:
+        def j_factory(node_a, node_b):
+            return j
+
     ts = []
     bonds = collections.defaultdict(rand_uuid)
 
     for ni, nj, nk in itertools.product(range(Lx), range(Ly), range(Lz)):
         directions = ""
         inds = []
+        js = ()
+        asymms = ()
 
-        if nk > 0 or cyclic_z:
-            directions += 'b'
-            inds.append(bonds[(ni, nj, (nk - 1) % Lz), (ni, nj, nk)])
-        if nk < Lz - 1 or cyclic_z:
-            directions += 'a'
-            inds.append(bonds[(ni, nj, nk), (ni, nj, (nk + 1) % Lz)])
-        if nj > 0 or cyclic_y:
-            directions += 'l'
-            inds.append(bonds[(ni, (nj - 1) % Ly, nk), (ni, nj, nk)])
-        if nj < Ly - 1 or cyclic_y:
-            directions += 'r'
-            inds.append(bonds[(ni, nj, nk), (ni, (nj + 1) % Ly, nk)])
-        if ni < Lx - 1 or cyclic_x:
-            directions += 'u'
-            inds.append(bonds[(ni, nj, nk), ((ni + 1) % Lx, nj, nk)])
-        if ni > 0 or cyclic_x:
-            directions += 'd'
-            inds.append(bonds[((ni - 1) % Lx, nj, nk), (ni, nj, nk)])
+        for inbounds, pair, direction in [
+            (nk > 0 or cyclic_z,
+             ((ni, nj, (nk - 1) % Lz), (ni, nj, nk)), 'b'),
+            (nk < Lz - 1 or cyclic_z,
+             ((ni, nj, nk), (ni, nj, (nk + 1) % Lz)), 'a'),
+            (nj > 0 or cyclic_y,
+             ((ni, (nj - 1) % Ly, nk), (ni, nj, nk)), 'l'),
+            (nj < Ly - 1 or cyclic_y,
+             ((ni, nj, nk), (ni, (nj + 1) % Ly, nk)), 'r'),
+            (ni < Lx - 1 or cyclic_x,
+             ((ni, nj, nk), ((ni + 1) % Lx, nj, nk)), 'u'),
+            (ni > 0 or cyclic_x,
+             (((ni - 1) % Lx, nj, nk), (ni, nj, nk)), 'd'),
+        ]:
+            if inbounds:
+                js += (j_factory(*pair),)
+                directions += direction
+                # this is logic for handling negative j without imag tensors
+                # i.e. add the left factor if the first instance of bond, right
+                # factor if second. If j > 0.0 this doesn't matter anyhow
+                asymms += ('l' if pair not in bonds else 'rT',)
+                inds.append(bonds[pair])
 
         ts.append(Tensor(
-            data=classical_ising_T3d_matrix(beta, directions, j=j, h=h),
+            data=classical_ising_T_matrix(
+                beta=beta, directions=directions, j=js, h=h, asymm=asymms,
+            ),
             inds=inds,
             tags=[
                 site_tag_id.format(ni, nj, nk),
@@ -1339,13 +1398,13 @@ def TN_classical_partition_function_from_edges(
         bond_ab = bond_ind_id.format(node_a, node_b)
 
         # left tensor factor
-        data = classical_ising_sqrtS_matrix(beta=beta, j=j_ab)
+        data = classical_ising_sqrtS_matrix(beta=beta, j=j_ab, asymm='l')
         inds = [f's{node_a}', bond_ab]
         tags = [site_tag_id.format(node_a)]
         ts.append(Tensor(data=data, inds=inds, tags=tags))
 
         # right tensor factor
-        data = classical_ising_sqrtS_matrix(beta=beta, j=j_ab)
+        data = classical_ising_sqrtS_matrix(beta=beta, j=j_ab, asymm='r')
         inds = [bond_ab, f's{node_b}']
         tags = [site_tag_id.format(node_b)]
         ts.append(Tensor(data=data, inds=inds, tags=tags))
@@ -1928,6 +1987,10 @@ def MPO_zeros(L, phys_dim=2, dtype='float64', cyclic=False, **mpo_opts):
         open boundary conditions.
     mpo_opts
         Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductOperator`.
+
+    Returns
+    -------
+    MatrixProductOperator
     """
     cyc_dim = (1,) if cyclic else ()
 
@@ -1941,13 +2004,55 @@ def MPO_zeros(L, phys_dim=2, dtype='float64', cyclic=False, **mpo_opts):
 
 
 def MPO_zeros_like(mpo, **mpo_opts):
-    """Return a zeros matrix operator with the same physical index and
+    """Return a zeros matrix product operator with the same physical index and
     inds/tags as ``mpo``.
+
+    Parameters
+    ----------
+    mpo : MatrixProductOperator
+        The MPO to copy the shape of.
+
+    Returns
+    -------
+    MatrixProductOperator
     """
     return MPO_zeros(L=mpo.L, phys_dim=mpo.phys_dim(),
                      dtype=mpo.dtype, site_tag_id=mpo.site_tag_id,
                      upper_ind_id=mpo.upper_ind_id, cyclic=mpo.cyclic,
                      lower_ind_id=mpo.lower_ind_id, **mpo_opts)
+
+
+def MPO_product_operator(
+    arrays,
+    cyclic=False,
+    **mpo_opts,
+):
+    """Return an MPO of bond dimension 1 representing the product of raw
+    operators given in ``arrays``.
+
+    Parameters
+    ----------
+    arrays : sequence of 2D array_like
+        The operators to form a tensor product of.
+    cyclic : bool, optional
+        Whether to generate a cyclic MPO or not.
+    mpo_opts
+        Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductOperator`.
+
+    Returns
+    -------
+    MatrixProductOperator
+    """
+    cyc_dim = (1,) if cyclic else ()
+
+    def gen_arrays():
+        array_i, *arrays_mid, array_f = arrays
+        yield reshape(array_i, (*cyc_dim, 1, *array_i.shape))
+        for array_m in arrays_mid:
+            yield reshape(array_m, (1, 1, *array_m.shape))
+        yield reshape(array_f, (*cyc_dim, 1, *array_f.shape))
+
+    return MatrixProductOperator(gen_arrays(), shape='lrud', **mpo_opts)
 
 
 @random_seed_fn
@@ -3161,3 +3266,47 @@ def ham_2d_j1j2(Lx, Ly, j1=1.0, j2=0.5, bz=0.0, **local_ham_2d_opts):
         H1 = -bz * spin_operator('Z').real
 
     return LocalHam2D(Lx, Ly, H2=H2, H1=H1, **local_ham_2d_opts)
+
+
+def ham_3d_heis(Lx, Ly, Lz, j=1.0, bz=0.0, **local_ham_3d_opts):
+    r"""Heisenberg Hamiltonian in
+    :class:`~quimb.tensor.tensor_3d_tebd.LocalHam3D`. form.
+
+    .. math::
+
+        H_\mathrm{Heis} =
+        \sum_{<ij>} (
+            J_X \sigma^X_i \sigma^X_{j} +
+            J_Y \sigma^Y_i \sigma^Y_{j} +
+            J_Z \sigma^Z_i \sigma^Z_{j}
+            )
+        - B_Z \sum_{i} \sigma^Z_{i}
+
+    for nearest neighbors :math:`<ij>`. Note the default convention of
+    antiferromagnetic interactions and spin operators not Pauli matrices.
+
+    Parameters
+    ----------
+    Lx : int
+        The number of x-planes.
+    Ly : int
+        The number of y-planes.
+    Ly : int
+        The number of z-planes.
+    j : float or (float, float, float), optional
+        The XX, YY and ZZ interaction strength. Positive is antiferromagnetic.
+    bz : float, optional
+        The Z-magnetic field strength.
+    local_ham_3d_opts
+        Supplied to :class:`~quimb.tensor.tensor_3d_tebd.LocalHam3D`.
+
+    Returns
+    -------
+    LocalHam3D
+    """
+    H2 = ham_heis(2, j=j, cyclic=False)
+    if bz == 0.0:
+        H1 = None
+    else:
+        H1 = -bz * spin_operator('Z').real
+    return LocalHam3D(Lx, Ly, Lz, H2=H2, H1=H1, **local_ham_3d_opts)

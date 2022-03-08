@@ -175,6 +175,10 @@ html_static_path = ['_static']
 def setup(app):
     app.add_css_file("my-styles.css")
 
+    # Hide site-navigation sidebar and topbar. Used for DocSet generation.
+    if tags.has("docset"):
+        app.add_css_file("docset.css")
+
 
 # Add any extra paths that contain custom files (such as robots.txt or
 # .htaccess) here, relative to this directory. These files are copied

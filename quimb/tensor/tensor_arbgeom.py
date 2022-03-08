@@ -4,7 +4,8 @@ from operator import add
 from autoray import do, dag
 
 from ..utils import check_opt, ensure_dict
-from .tensor_core import TensorNetwork
+from ..utils import progbar as Progbar
+from .tensor_core import TensorNetwork, get_symbol
 
 
 class TensorNetworkGen(TensorNetwork):
@@ -13,6 +14,7 @@ class TensorNetworkGen(TensorNetwork):
     arbitrary geometry by bonds.
     """
 
+    _NDIMS = 1
     _EXTRA_PROPS = (
         "_sites",
         "_site_tag_id",
@@ -251,8 +253,12 @@ class TensorNetworkGenVector(TensorNetworkGen, TensorNetwork):
         where,
         normalized=True,
         max_distance=0,
+        fillin=False,
         gauges=None,
         optimize="auto",
+        max_bond=None,
+        rehearse=False,
+        **contract_opts,
     ):
         r"""Approximately compute a single local expectation value of the gate
         ``G`` at sites ``where``, either treating the environment beyond
@@ -289,6 +295,11 @@ class TensorNetworkGenVector(TensorNetworkGen, TensorNetwork):
             The maximum graph distance to include tensors neighboring ``where``
             when computing the expectation. The default 0 means only the
             tensors at sites ``where`` are used.
+        fillin : bool or int, optional
+            When selecting the local tensors, whether and how many times to
+            'fill-in' corner tensors attached multiple times to the local
+            region. On a lattice this fills in the corners. See
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.select_local`.
         gauges : dict[str, array_like], optional
             The store of gauge bonds, the keys being indices and the values
             being the vectors. Only bonds present in this dictionary will be
@@ -296,6 +307,18 @@ class TensorNetworkGenVector(TensorNetworkGen, TensorNetwork):
         optimize : str or PathOptimizer, optional
             The contraction path optimizer to use, when exactly contracting the
             local tensors.
+        max_bond : None or int, optional
+            If specified, use compressed contraction.
+        rehearse : {False, 'tn', 'tree', True}, optional
+            Whether to perform the computations or not::
+
+                - False: perform the computation.
+                - 'tn': return the tensor networks of each local expectation,
+                  without running the path optimizer.
+                - 'tree': run the path optimizer and return the
+                  ``cotengra.ContractonTree`` for each local expectation.
+                - True: run the path optimizer and return the ``PathInfo`` for
+                  each local expectation.
 
         Returns
         -------
@@ -304,34 +327,48 @@ class TensorNetworkGenVector(TensorNetworkGen, TensorNetwork):
 
         # select a local neighborhood of tensors
         site_tags = tuple(map(self.site_tag, where))
-        k = self.select_local(
-            site_tags, "any", max_distance=max_distance, virtual=False,
-        )
+        k = self.select_local(site_tags, "any", max_distance=max_distance,
+                              fillin=fillin, virtual=False)
 
         if gauges is not None:
             # gauge the region with simple update style bond gauges
             k.gauge_simple_insert(gauges)
 
-        k_inds = tuple(map(self.site_ind, where))
-        b_inds = tuple(map("_bra{}".format, where))
-        b = k.conj().reindex_(dict(zip(k_inds, b_inds)))
+        if max_bond is not None:
+            return k.local_expectation(
+                G=G,
+                where=where,
+                max_bond=max_bond,
+                optimize=optimize,
+                normalized=normalized,
+                rehearse=rehearse,
+                **contract_opts
+            )
 
-        rho = (b | k).to_dense(k_inds, b_inds, optimize=optimize)
-        expec = do("trace", rho @ G)
-        if normalized:
-            expec = expec / do("trace", rho)
-
-        return expec
+        return k.local_expectation_exact(
+            G=G,
+            where=where,
+            optimize=optimize,
+            normalized=normalized,
+            rehearse=rehearse,
+            **contract_opts
+        )
 
     def compute_local_expectation_simple(
         self,
         terms,
         *,
         max_distance=0,
+        fillin=False,
         normalized=True,
         gauges=None,
         optimize="auto",
+        max_bond=None,
         return_all=False,
+        rehearse=False,
+        executor=None,
+        progbar=False,
+        **contract_opts,
     ):
         r"""Compute all local expectations of the given terms, either treating
         the environment beyond ``max_distance`` as the identity, or using
@@ -365,6 +402,11 @@ class TensorNetworkGenVector(TensorNetworkGen, TensorNetwork):
             The maximum graph distance to include tensors neighboring each
             term's sites when computing the expectation. The default 0 means
             only the tensors at sites of each term are used.
+        fillin : bool or int, optional
+            When selecting the local tensors, whether and how many times to
+            'fill-in' corner tensors attached multiple times to the local
+            region. On a lattice this fills in the corners. See
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.select_local`.
         normalized : bool, optional
             Whether to locally normalize the result, i.e. divide by the
             expectation value of the identity. This implies that a different
@@ -376,8 +418,28 @@ class TensorNetworkGenVector(TensorNetworkGen, TensorNetwork):
         optimize : str or PathOptimizer, optional
             The contraction path optimizer to use, when exactly contracting the
             local tensors.
+        max_bond : None or int, optional
+            If specified, use compressed contraction.
         return_all : bool, optional
             Whether to return all results, or just the summed expectation.
+        rehearse : {False, 'tn', 'tree', True}, optional
+            Whether to perform the computations or not::
+
+                - False: perform the computation.
+                - 'tn': return the tensor networks of each local expectation,
+                  without running the path optimizer.
+                - 'tree': run the path optimizer and return the
+                  ``cotengra.ContractonTree`` for each local expectation.
+                - True: run the path optimizer and return the ``PathInfo`` for
+                  each local expectation.
+
+        executor : Executor, optional
+            If supplied compute the terms in parallel using this executor.
+        progbar : bool, optional
+            Whether to show a progress bar.
+        contract_opts
+            Supplied to
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.contract`.
 
         Returns
         -------
@@ -386,25 +448,31 @@ class TensorNetworkGenVector(TensorNetworkGen, TensorNetwork):
             the given terms. Otherwise, return a dictionary mapping each term's
             location to the expectation value.
         """
-
-        expecs = {}
-        for where, G in terms.items():
-            expecs[where] = self.local_expectation_simple(
-                G,
-                where,
-                normalized=normalized,
-                max_distance=max_distance,
-                gauges=gauges,
-                optimize=optimize,
-            )
-
-        if return_all:
-            return expecs
-
-        return functools.reduce(add, expecs.values())
+        return _compute_expecs_maybe_in_parallel(
+            fn=_tn_local_expectation_simple,
+            tn=self,
+            terms=terms,
+            return_all=return_all,
+            executor=executor,
+            progbar=progbar,
+            normalized=normalized,
+            max_distance=max_distance,
+            fillin=fillin,
+            gauges=gauges,
+            optimize=optimize,
+            rehearse=rehearse,
+            max_bond=max_bond,
+            **contract_opts,
+        )
 
     def local_expectation_exact(
-        self, G, where, optimize="auto-hq", normalized=True,
+        self,
+        G,
+        where,
+        optimize="auto-hq",
+        normalized=True,
+        rehearse=False,
+        **contract_opts,
     ):
         """Compute the local expectation of operator ``G`` at site(s) ``where``
         by exactly contracting the full overlap tensor network.
@@ -412,8 +480,19 @@ class TensorNetworkGenVector(TensorNetworkGen, TensorNetwork):
         k_inds = tuple(map(self.site_ind, where))
         b_inds = tuple(map("_bra{}".format, where))
         b = self.conj().reindex_(dict(zip(k_inds, b_inds)))
+        tn = (b | self)
 
-        rho = (b | self).to_dense(k_inds, b_inds, optimize=optimize)
+        if rehearse:
+            if rehearse == 'tn':
+                return tn
+            if rehearse == 'tree':
+                return tn.contraction_tree(
+                    optimize, output_inds=k_inds + b_inds)
+            if rehearse:
+                return tn.contraction_info(
+                    optimize, output_inds=k_inds + b_inds)
+
+        rho = tn.to_dense(k_inds, b_inds, optimize=optimize, **contract_opts)
         expec = do("trace", rho @ G)
         if normalized:
             expec = expec / do("trace", rho)
@@ -421,7 +500,16 @@ class TensorNetworkGenVector(TensorNetworkGen, TensorNetwork):
         return expec
 
     def compute_local_expectation_exact(
-        self, terms, optimize="auto-hq", normalized=True, return_all=False,
+        self,
+        terms,
+        optimize="auto-hq",
+        *,
+        normalized=True,
+        return_all=False,
+        rehearse=False,
+        executor=None,
+        progbar=False,
+        **contract_opts,
     ):
         """Compute the local expectations of many operators,
         by exactly contracting the full overlap tensor network.
@@ -438,6 +526,24 @@ class TensorNetworkGenVector(TensorNetworkGen, TensorNetwork):
             Whether to normalize the result.
         return_all : bool, optional
             Whether to return all results, or just the summed expectation.
+        rehearse : {False, 'tn', 'tree', True}, optional
+            Whether to perform the computations or not::
+
+                - False: perform the computation.
+                - 'tn': return the tensor networks of each local expectation,
+                  without running the path optimizer.
+                - 'tree': run the path optimizer and return the
+                  ``cotengra.ContractonTree`` for each local expectation.
+                - True: run the path optimizer and return the ``PathInfo`` for
+                  each local expectation.
+
+        executor : Executor, optional
+            If supplied compute the terms in parallel using this executor.
+        progbar : bool, optional
+            Whether to show a progress bar.
+        contract_opts
+            Supplied to
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.contract`.
 
         Returns
         -------
@@ -446,15 +552,18 @@ class TensorNetworkGenVector(TensorNetworkGen, TensorNetwork):
             the given terms. Otherwise, return a dictionary mapping each term's
             location to the expectation value.
         """
-        expecs = {}
-        for where, G in terms.items():
-            expecs[where] = self.local_expectation_exact(
-                G, where, optimize=optimize, normalized=normalized
-            )
-
-        if return_all:
-            return expecs
-        return functools.reduce(add, expecs.values())
+        return _compute_expecs_maybe_in_parallel(
+            fn=_tn_local_expectation_exact,
+            tn=self,
+            terms=terms,
+            return_all=return_all,
+            executor=executor,
+            progbar=progbar,
+            optimize=optimize,
+            normalized=normalized,
+            rehearse=rehearse,
+            **contract_opts,
+        )
 
     def partial_trace(
         self,
@@ -499,7 +608,7 @@ class TensorNetworkGenVector(TensorNetworkGen, TensorNetwork):
                 - False: perform the computation.
                 - 'tn': return the tensor network without running the path
                   optimizer.
-                - True: run the path optimizer and return the
+                - 'tree': run the path optimizer and return the
                   ``cotengra.ContractonTree``..
                 - True: run the path optimizer and return the ``PathInfo``.
 
@@ -518,22 +627,24 @@ class TensorNetworkGenVector(TensorNetworkGen, TensorNetwork):
         # form the partial trace
         k_inds = tuple(map(self.site_ind, keep))
 
+        k = self.copy()
         if reduce:
-            k = self.copy()
             k.reduce_inds_onto_bond(*k_inds, tags='__BOND__', drop_tags=True)
-        else:
-            k = self
 
         b_inds = tuple(map("_bra{}".format, keep))
         b = k.conj().reindex_(dict(zip(k_inds, b_inds)))
 
-        tn = b & k
+        tn = b | k
         output_inds = k_inds + b_inds
 
         if flatten:
             for site in self.sites:
                 if (site not in keep) or (flatten == 'all'):
-                    tn ^= site
+                    # check if site exists still to permit e.g. local methods
+                    # to use this same logic
+                    tag = tn.site_tag(site)
+                    if tag in tn.tag_map:
+                        tn ^= tag
             if reduce and (flatten == 'all'):
                 tn ^= '__BOND__'
 
@@ -609,7 +720,7 @@ class TensorNetworkGenVector(TensorNetworkGen, TensorNetwork):
                 - False: perform the computation.
                 - 'tn': return the tensor network without running the path
                   optimizer.
-                - True: run the path optimizer and return the
+                - 'tree': run the path optimizer and return the
                   ``cotengra.ContractonTree``..
                 - True: run the path optimizer and return the ``PathInfo``.
 
@@ -622,7 +733,7 @@ class TensorNetworkGenVector(TensorNetworkGen, TensorNetwork):
         expec : float
         """
         check_opt('method', method, ('rho', 'rho-reduced'))
-        reduce = method == 'rho-reduced'
+        reduce = (method == 'rho-reduced')
 
         rho = self.partial_trace(
             keep=where,
@@ -645,12 +756,15 @@ class TensorNetworkGenVector(TensorNetworkGen, TensorNetwork):
         terms,
         max_bond,
         optimize,
+        *,
         method='rho',
         flatten=True,
         normalized=True,
         symmetrized='auto',
         return_all=False,
         rehearse=False,
+        executor=None,
+        progbar=False,
         **contract_compressed_opts,
     ):
         """Compute the local expectations of many local operators, by
@@ -665,28 +779,47 @@ class TensorNetworkGenVector(TensorNetworkGen, TensorNetwork):
             The maximum bond dimension to use during contraction.
         optimize : str or PathOptimizer
             The compressed contraction path optimizer to use.
-        normalized : bool, optional
-            Whether to locally normalize the result.
+        method : {'rho', 'rho-reduced'}, optional
+            The method to use to compute the expectation value.
+
+                - 'rho': compute the expectation value via the reduced density
+                  matrix.
+                - 'rho-reduced': compute the expectation value via the reduced
+                  density matrix, having reduced the physical indices onto the
+                  bonds first.
+
         flatten : bool, optional
             Whether to force 'flattening' (contracting all physical indices) of
             the tensor network before  contraction, whilst this makes the TN
-            generally more complex to contract, the accuracy is usually much
+            generally more complex to contract, the accuracy can often be much
             improved.
+        normalized : bool, optional
+            Whether to locally normalize the result.
+        symmetrized : {'auto', True, False}, optional
+            Whether to symmetrize the reduced density matrix at the end. This
+            should be unecessary if ``flatten`` is set to ``True``.
+        return_all : bool, optional
+            Whether to return all results, or just the summed expectation. If
+            ``rehease is not False``, this is ignored and a dict is always
+            returned.
         rehearse : {False, 'tn', 'tree', True}, optional
             Whether to perform the computations or not::
 
                 - False: perform the computation.
                 - 'tn': return the tensor networks of each local expectation,
                   without running the path optimizer.
-                - True: run the path optimizer and return the
+                - 'tree': run the path optimizer and return the
                   ``cotengra.ContractonTree`` for each local expectation.
                 - True: run the path optimizer and return the ``PathInfo`` for
                   each local expectation.
 
-        return_all : bool, optional
-            Whether to return all results, or just the summed expectation. If
-            ``rehease is not False``, this is ignored and a dict is always
-            returned.
+        executor : Executor, optional
+            If supplied compute the terms in parallel using this executor.
+        progbar : bool, optional
+            Whether to show a progress bar.
+        contract_compressed_opts
+            Supplied to
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.contract_compressed`.
 
         Returns
         -------
@@ -695,27 +828,205 @@ class TensorNetworkGenVector(TensorNetworkGen, TensorNetwork):
             the given terms. Otherwise, return a dictionary mapping each term's
             location to the expectation value.
         """
-        expecs = {}
-        for where, G in terms.items():
-            expecs[where] = self.local_expectation(
-                G,
-                where,
-                max_bond,
-                optimize=optimize,
-                normalized=normalized,
-                symmetrized=symmetrized,
-                flatten=flatten,
-                method=method,
-                rehearse=rehearse,
-                **contract_compressed_opts,
-            )
-
-        if return_all or rehearse:
-            return expecs
-        return functools.reduce(add, expecs.values())
+        return _compute_expecs_maybe_in_parallel(
+            fn=_tn_local_expectation,
+            tn=self,
+            terms=terms,
+            return_all=return_all,
+            executor=executor,
+            progbar=progbar,
+            max_bond=max_bond,
+            optimize=optimize,
+            normalized=normalized,
+            symmetrized=symmetrized,
+            flatten=flatten,
+            method=method,
+            rehearse=rehearse,
+            **contract_compressed_opts,
+        )
 
     compute_local_expectation_rehearse = functools.partialmethod(
         compute_local_expectation, rehearse=True)
 
     compute_local_expectation_tn = functools.partialmethod(
         compute_local_expectation, rehearse='tn')
+
+
+def _compute_expecs_maybe_in_parallel(
+    fn,
+    tn,
+    terms,
+    return_all=False,
+    executor=None,
+    progbar=False,
+    **kwargs,
+):
+    """Unified helpfer function for the various methods that compute many
+    expectations, possibly in parallel, possibly with a progress bar.
+    """
+    if not isinstance(terms, dict):
+        terms = dict(terms.items())
+
+    if executor is None:
+        results = (fn(tn, G, where, **kwargs) for where, G in terms.items())
+    else:
+        if hasattr(executor, 'scatter'):
+            tn = executor.scatter(tn)
+
+        futures = [
+            executor.submit(fn, tn, G, where, **kwargs)
+            for where, G in terms.items()
+        ]
+        results = (future.result() for future in futures)
+
+    if progbar:
+        results = Progbar(results, total=len(terms))
+
+    expecs = dict(zip(terms.keys(), results))
+
+    if return_all or kwargs.get('rehearse', False):
+        return expecs
+
+    return functools.reduce(add, expecs.values())
+
+
+def _tn_local_expectation(tn, *args, **kwargs):
+    """Define as function for pickleability.
+    """
+    return tn.local_expectation(*args, **kwargs)
+
+
+def _tn_local_expectation_simple(tn, *args, **kwargs):
+    """Define as function for pickleability.
+    """
+    return tn.local_expectation_simple(*args, **kwargs)
+
+
+def _tn_local_expectation_exact(tn, *args, **kwargs):
+    """Define as function for pickleability.
+    """
+    return tn.local_expectation_exact(*args, **kwargs)
+
+
+def get_coordinate_formatter(ndims):
+    return ",".join("{}" for _ in range(ndims))
+
+
+def tensor_network_align(*tns, ind_ids=None, inplace=False):
+    r"""Align an arbitrary number of tensor networks in a stack-like geometry::
+
+        a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a
+        | | | | | | | | | | | | | | | | | | <- ind_ids[0] (defaults to 1st id)
+        b-b-b-b-b-b-b-b-b-b-b-b-b-b-b-b-b-b
+        | | | | | | | | | | | | | | | | | | <- ind_ids[1]
+                       ...
+        | | | | | | | | | | | | | | | | | | <- ind_ids[-2]
+        y-y-y-y-y-y-y-y-y-y-y-y-y-y-y-y-y-y
+        | | | | | | | | | | | | | | | | | | <- ind_ids[-1]
+        z-z-z-z-z-z-z-z-z-z-z-z-z-z-z-z-z-z
+
+    Parameters
+    ----------
+    tns : sequence of TensorNetwork
+        The TNs to align, should be structured and either effective 'vectors'
+        (have a ``site_ind_id``) or 'operators' (have a ``up_ind_id`` and
+        ``lower_ind_id``).
+    ind_ids : None, or sequence of str
+        String with format specifiers to id each level of sites with. Will be
+        automatically generated like ``(tns[0].site_ind_id, "__ind_a{}__",
+        "__ind_b{}__", ...)`` if not given.
+    inplace : bool
+        Whether to modify the input tensor networks inplace.
+
+    Returns
+    -------
+    tns_aligned : sequence of TensorNetwork
+    """
+    if not inplace:
+        tns = [tn.copy() for tn in tns]
+
+    n = len(tns)
+    coordinate_formatter = get_coordinate_formatter(tns[0]._NDIMS)
+
+    if ind_ids is None:
+        if hasattr(tns[0], "site_ind_id"):
+            ind_ids = [tns[0].site_ind_id]
+        else:
+            ind_ids = [tns[0].lower_ind_id]
+        ind_ids.extend(
+            f"__ind_{get_symbol(i)}{coordinate_formatter}__"
+            for i in range(n - 2)
+        )
+    else:
+        ind_ids = tuple(ind_ids)
+
+    for i, tn in enumerate(tns):
+        if hasattr(tn, "site_ind_id"):
+            if i == 0:
+                tn.site_ind_id = ind_ids[i]
+            elif i == n - 1:
+                tn.site_ind_id = ind_ids[i - 1]
+            else:
+                raise ValueError("An TN 'vector' can only be aligned as the "
+                                 "first or last TN in a sequence.")
+
+        elif hasattr(tn, "upper_ind_id") and hasattr(tn, "lower_ind_id"):
+            if i != 0:
+                tn.upper_ind_id = ind_ids[i - 1]
+            if i != n - 1:
+                tn.lower_ind_id = ind_ids[i]
+
+        else:
+            raise ValueError("Can only align vectors and operators currently.")
+
+    return tns
+
+
+def tensor_network_apply_op_vec(
+    tn_op,
+    tn_vec,
+    compress=False,
+    **compress_opts
+):
+    """Apply a general a general tensor network representing an operator (has
+    ``up_ind_id`` and ``lower_ind_id``) to a tensor network representing a
+    vector (has ``site_ind_id``), by contracting each pair of tensors at each
+    site then compressing the resulting tensor network. How the compression
+    takes place is determined by the type of tensor network passed in. The
+    returned tensor network has the same site indices as ``tn_vec``, and it is
+    the ``lower_ind_id`` of ``tn_op`` that is contracted.
+
+    Parameters
+    ----------
+    tn_op : TensorNetwork
+        The tensor network representing the operator.
+    tn_vec : TensorNetwork
+        The tensor network representing the vector.
+    compress : bool
+        Whether to compress the resulting tensor network.
+    compress_opts
+        Options to pass to ``tn_vec.compress``.
+
+    Returns
+    -------
+    tn_op_vec : TensorNetwork
+    """
+    A, x = tn_op.copy(), tn_vec.copy()
+
+    # align the indices
+    coordinate_formatter = get_coordinate_formatter(A._NDIMS)
+    A.lower_ind_id = f"__tmp{coordinate_formatter}__"
+    A.upper_ind_id = x.site_ind_id
+    x.reindex_sites_(f"__tmp{coordinate_formatter}__")
+
+    # form total network and contract each site
+    x |= A
+    for tag in x.site_tags:
+        x ^= tag
+
+    x.fuse_multibonds_()
+    # optionally compress
+    if compress:
+        x.compress(**compress_opts)
+
+    return x
