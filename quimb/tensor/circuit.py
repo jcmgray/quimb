@@ -407,20 +407,16 @@ def fsimt_param_gen(params):
     a_im = do('imag', a_re)
     a = do('complex', a_re, a_im)
 
-    b_im = do('sin', theta)
-    b_re = do('imag', b_im)
+    b_re = do('sin', theta)
+    b_im = do('imag', b_re)
     b = do('complex', b_re, b_im)
-
-
 
     data = [[[[1, 0], [0, 0]],
              [[0, a], [b, 0]]],
-            [[[0, b], [a, 0]],
+             [[[0, -b], [a, 0]],
              [[0, 0], [0, 1]]]]
 
     return do('array', data, like=params)
-
-
 
 
 
@@ -433,16 +429,13 @@ def apply_fsim(psi, theta, phi, i, j, parametrize=False, **gate_opts):
     psi.gate_(G, (int(i), int(j)), tags=mtags, **gate_opts)
 
 
-def apply_fsimt(psi,theta, i, j, parametrize=False, **gate_opts):
+def apply_fsimt(psi, theta, i, j, parametrize=False, **gate_opts):
     mtags = _merge_tags('FSIMT', gate_opts)
     if parametrize:
         G = ops.PArray(fsimt_param_gen, (theta,))
     else:
         G = qu.fsimt(theta)
     psi.gate_(G, (int(i), int(j)), tags=mtags, **gate_opts)
-
-
-
 
 
 def fsimg_param_gen(params):
@@ -659,7 +652,7 @@ GATE_FUNCTIONS = {
 
 ONE_QUBIT_PARAM_GATES = {'RX', 'RY', 'RZ', 'U3', 'U2', 'U1'}
 TWO_QUBIT_PARAM_GATES = {
-    'CU3', 'CU2', 'CU1', 'FS', 'FSIM', 'FSIMG', 'RZZ', 'SU4'
+    'CU3', 'CU2', 'CU1', 'FS', 'FSIM', 'FSIMT', 'FSIMG', 'RZZ', 'SU4'
 }
 ALL_PARAM_GATES = ONE_QUBIT_PARAM_GATES | TWO_QUBIT_PARAM_GATES
 
@@ -868,7 +861,7 @@ class Circuit:
         self._psi.gate_(U, where, tags=tags, **opts)
         self.gates.append((id(U), *where))
 
-    def apply_gate(self, gate_id, *gate_args, gate_round=None,gate_shared=None, **gate_opts):
+    def apply_gate(self, gate_id, *gate_args, gate_round=None, gate_shared=None, **gate_opts):
         """Apply a single gate to this tensor network quantum circuit. If
         ``gate_round`` is supplied the tensor(s) added will be tagged with
         ``'ROUND_{gate_round}'``. Alternatively, putting an integer first like
@@ -1045,6 +1038,10 @@ class Circuit:
 
     def fsim(self, theta, phi, i, j, gate_round=None, parametrize=False):
         self.apply_gate('FSIM', theta, phi, i, j,
+                        gate_round=gate_round, parametrize=parametrize)
+
+    def fsim(self, theta, i, j, gate_round=None, parametrize=False):
+        self.apply_gate('FSIMT', theta, i, j,
                         gate_round=gate_round, parametrize=parametrize)
 
     def fsimg(self, theta, zeta, chi, gamma, phi, i, j,
