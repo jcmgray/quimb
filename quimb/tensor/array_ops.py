@@ -484,6 +484,7 @@ class PArray:
         self._shape_fn_id = id(fn)
 
     def copy(self):
+        self.data
         new = PArray(self.fn, self.params, self.shape)
         new._data = self._data  # for efficiency
         return new
