@@ -1355,7 +1355,7 @@ class TNOptimizer:
         opt.set_maxeval(n)
         #opt.set_vector_storage(22)
         opt.set_maxtime(-1)
-        print ( "M", self.optimizer.upper(), opt.get_vector_storage() , opt.get_maxeval(), opt.get_maxtime(), opt.get_xtol_rel(), opt.get_ftol_abs(),
+        #print ( "M", self.optimizer.upper(), opt.get_vector_storage() , opt.get_maxeval(), opt.get_maxtime(), opt.get_xtol_rel(), opt.get_ftol_abs(),
         opt.get_maxtime() )
 
 
@@ -1375,11 +1375,11 @@ class TNOptimizer:
         if xtol_abs is not None:
             opt.set_xtol_abs(xtol_abs)
 
-        print ("Hi")
+        # print ("Hi")
         self.vectorizer.vector[:] = opt.optimize(self.vectorizer.vector)
         opt_val = opt.last_optimum_value()
         result = opt.last_optimize_result()
-        print ("info", opt_val, result)
+        # print ("info", opt_val, result)
 
 
         # except (KeyboardInterrupt, RuntimeError):

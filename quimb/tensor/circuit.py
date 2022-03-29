@@ -401,6 +401,7 @@ def fsim_param_gen(params):
 
     return ops.asarray(data)
 
+
 def fsimt_param_gen(params):
     theta = params[0]
     a_re = do('cos', theta)
@@ -413,11 +414,10 @@ def fsimt_param_gen(params):
 
     data = [[[[1, 0], [0, 0]],
              [[0, a], [b, 0]]],
-             [[[0, -b], [a, 0]],
+            [[[0, -b], [a, 0]],
              [[0, 0], [0, 1]]]]
 
     return do('array', data, like=params)
-
 
 
 def apply_fsim(psi, theta, phi, i, j, parametrize=False, **gate_opts):
@@ -443,15 +443,7 @@ def fsimg_param_gen(params):
         params[0], params[1], params[2], params[3], params[4]
     )
 
-    e00_im = (gamma + phi)
-    e00_re = do('imag', e00_im)
-    e00 = do('exp', do('complex', e00_re, e00_im))
-
-    c_im = (gamma - phi)
-    c_re = do('imag', c_im)
-    c = do('exp', do('complex', c_re, c_im))
-
-    a11_re = do('sin', theta)
+    a11_re = do('cos', theta)
     a11_im = do('imag', a11_re)
     a11 = do('complex', a11_re, a11_im)
 
@@ -459,8 +451,7 @@ def fsimg_param_gen(params):
     e11_re = do('imag', e11_im)
     e11 = do('exp', do('complex', e11_re, e11_im))
 
-
-    a22_re = -do('sin', theta)
+    a22_re = do('cos', theta)
     a22_im = do('imag', a22_re)
     a22 = do('complex', a22_re, a22_im)
 
@@ -468,21 +459,19 @@ def fsimg_param_gen(params):
     e22_re = do('imag', e22_im)
     e22 = do('exp', do('complex', e22_re, e22_im))
 
-
-
-    a21_re = do('cos', theta)
+    a21_re = do('sin', theta)
     a21_im = do('imag', a21_re)
     a21 = do('complex', a21_re, a21_im)
 
-    e21_im = -(gamma + phi + chi)
+    e21_im = -(gamma - chi)
     e21_re = do('imag', e21_im)
     e21 = do('exp', do('complex', e21_re, e21_im))
 
-    a12_re = do('cos', theta)
+    a12_re = do('sin', theta)
     a12_im = do('imag', a12_re)
     a12 = do('complex', a12_re, a12_im)
 
-    e12_im = (-gamma + phi + chi)
+    e12_im = -(gamma + chi)
     e12_re = do('imag', e12_im)
     e12 = do('exp', do('complex', e12_re, e12_im))
 
@@ -861,7 +850,54 @@ class Circuit:
         self._psi.gate_(U, where, tags=tags, **opts)
         self.gates.append((id(U), *where))
 
-    def apply_gate(self, gate_id, *gate_args, gate_round=None, gate_shared=None, **gate_opts):
+    # the gates exist in psi with format "GATE_{}"
+    def partial_gates(self, psi):
+        rex = re.compile("GATE_{}".format(r"\d+"))
+        return list(filter(rex.match, psi.tags))
+
+    # map inds list to corresponding qubits
+    def qubit_map(self, psi, inds):
+        Q_l = []
+        for i in inds:
+            tn = [psi.tensor_map[tid] for tid in psi.ind_map[i]]
+            rex = re.compile(self.psi.site_tag_id.format(r"\d+"))
+            tags_tn = list(filter(rex.match, tn[0].tags))
+            temp = re.findall(r'\d+', *tags_tn)
+            res = list(map(int, temp))
+            Q_l.append(res[0])
+        return Q_l
+
+    # map inds list to corresponding qubits
+    def qubits_in_light_cone(self, psi):
+        ind_open = psi.outer_inds()
+        ind_open_virtual = [x for x in ind_open if not x.startswith('k')]
+        ind_open_physical = list(oset(ind_open)-oset(ind_open_virtual))
+        
+        q_virtual = self.qubit_map(psi, ind_open_virtual)
+        q_physical = self.qubit_map(psi, ind_open_physical)
+
+        return q_virtual, q_physical
+
+
+
+
+
+
+
+    def gate_map(self):
+        dic = {}
+        for i, gate in enumerate(self.gates):
+            if isinstance(gate[-2], numbers.Integral):
+                regs = tuple(gate[-2:])
+            else:
+                regs = tuple(gate[-1:])
+
+            dic.update({f'GATE_{i}': regs})
+
+        return dic
+
+    def apply_gate(self, gate_id, *gate_args, gate_round=None, 
+                   gate_shared=None, **gate_opts):
         """Apply a single gate to this tensor network quantum circuit. If
         ``gate_round`` is supplied the tensor(s) added will be tagged with
         ``'ROUND_{gate_round}'``. Alternatively, putting an integer first like
@@ -1040,7 +1076,7 @@ class Circuit:
         self.apply_gate('FSIM', theta, phi, i, j,
                         gate_round=gate_round, parametrize=parametrize)
 
-    def fsim(self, theta, i, j, gate_round=None, parametrize=False):
+    def fsimt(self, theta, i, j, gate_round=None, parametrize=False):
         self.apply_gate('FSIMT', theta, i, j,
                         gate_round=gate_round, parametrize=parametrize)
 
@@ -1128,6 +1164,108 @@ class Circuit:
             FutureWarning
         )
         return self.get_uni(transposed=True)
+
+    def get_reverse_lightcone_tags_partial(self, psi, where):
+        """Get the tags of gates in this partial circuit corresponding to the 'reverse'
+        lightcone propagating backwards from registers in ``where``.
+
+        Parameters
+        ----------
+        where : int or sequence of int
+            The register or register to get the reverse lightcone of.
+
+        Returns
+        -------
+        tuple[str]
+            The sequence of gate tags (``GATE_{i}``, ...) corresponding to the
+            lightcone.
+        """
+        gate_cone = self.partial_gates(psi)
+        dic_gate = self.gate_map()
+
+        if isinstance(where, numbers.Integral):
+            cone = {where}
+        else:
+            cone = set(where)
+
+        lightcone_tags = []
+
+        for i, gate in reversed(tuple(enumerate(self.gates))):
+
+            if f"GATE_{i}" in gate_cone:
+                if gate[0] == 'IDEN':
+                    continue
+
+                if gate[0] == 'SWAP':
+                    i, j = gate[1:]
+                    i_in_cone = i in cone
+                    j_in_cone = j in cone
+                    if i_in_cone:
+                        cone.add(j)
+                    else:
+                        cone.discard(j)
+                    if j_in_cone:
+                        cone.add(i)
+                    else:
+                        cone.discard(i)
+                    continue
+
+                regs = set(dic_gate[f"GATE_{i}"])
+
+                if regs & cone:
+                    lightcone_tags.append(f"GATE_{i}")
+                    cone |= regs
+
+            # initial state is always part of the lightcone
+
+        lightcone_tags.append('PSI0')
+        lightcone_tags.reverse()
+        return tuple(lightcone_tags), tuple(cone)
+
+    def get_psi_reverse_lightcone_partial(self, psi, where, keep_psi0=False):
+        """Get just the bit of the wavefunction in the reverse lightcone of
+        sites in ``where`` - i.e. causally linked.
+
+        Parameters
+        ----------
+        where : int, or sequence of int
+            The sites to propagate the the lightcone back from, supplied to
+            :meth:`~quimb.tensor.circuit.Circuit.get_reverse_lightcone_tags`.
+        keep_psi0 : bool, optional
+            Keep the tensors corresponding to the initial wavefunction
+            regardless of whether they are outside of the lightcone.
+
+        Returns
+        -------
+        psi_lc : TensorNetwork1DVector
+        """
+        if isinstance(where, numbers.Integral):
+            where = (where,)
+
+        # psi = self.psi
+        # psi = self.psi
+        lightcone_tags_partial, q_partial = self.get_reverse_lightcone_tags_partial(psi, where)
+        psi_lc = psi.select_any(lightcone_tags_partial).view_like_(psi)
+
+        if not keep_psi0:
+            # these sites are in the lightcone regardless of being alone
+            site_inds = set(map(psi.site_ind, where))
+
+            for tid, t in tuple(psi_lc.tensor_map.items()):
+                # get all tensors connected to this tensor (incld itself)
+                neighbors = oset_union(psi_lc.ind_map[ix] for ix in t.inds)
+
+                # lone tensor not attached to anything - drop it
+                # but only if it isn't directly in the ``where`` region
+                if (len(neighbors) == 1) and set(t.inds).isdisjoint(site_inds):
+                    psi_lc._pop_tensor(tid)
+
+        return psi_lc
+
+
+
+
+
 
     def get_reverse_lightcone_tags(self, where):
         """Get the tags of gates in this circuit corresponding to the 'reverse'
