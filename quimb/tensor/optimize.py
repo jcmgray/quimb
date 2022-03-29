@@ -1355,8 +1355,8 @@ class TNOptimizer:
         opt.set_maxeval(n)
         #opt.set_vector_storage(22)
         opt.set_maxtime(-1)
-        #print ( "M", self.optimizer.upper(), opt.get_vector_storage() , opt.get_maxeval(), opt.get_maxtime(), opt.get_xtol_rel(), opt.get_ftol_abs(),
-        opt.get_maxtime() )
+        # print ( "M", self.optimizer.upper(), opt.get_vector_storage() , opt.get_maxeval(), opt.get_maxtime(), opt.get_xtol_rel(), opt.get_ftol_abs(),
+        #         opt.get_maxtime() )
 
 
 
