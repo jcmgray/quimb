@@ -18,6 +18,12 @@ from .tensor_1d import TensorNetwork1DVector, Dense1D, TensorNetwork1DOperator
 from . import array_ops as ops
 
 
+import qiskit 
+
+
+
+
+
 def _convert_ints_and_floats(x):
     if isinstance(x, str):
         try:
@@ -756,7 +762,6 @@ class Circuit:
         psi0_tag='PSI0',
         bra_site_ind_id='b{}',
     ):
-
         if N is None and psi0 is None:
             raise ValueError("You must supply one of `N` or `psi0`.")
 
@@ -773,6 +778,14 @@ class Circuit:
                 raise ValueError("`N` doesn't match `psi0`.")
             self.N = N
             self._psi = psi0.copy()
+
+        self.q_qiskit = []
+        for i in range(self.N):
+            self.q_qiskit.append(qiskit.QuantumRegister(1, f"q{i}"))
+
+        self.c_qiskit = []
+        for i in range(self.N):
+            self.c_qiskit.append(qiskit.ClassicalRegister(1, f"c{i}"))
 
         self._psi.add_tag(psi0_tag)
 
@@ -878,13 +891,7 @@ class Circuit:
 
         return q_virtual, q_physical
 
-
-
-
-
-
-
-    def gate_map(self):
+    def gate_regs_map(self):
         dic = {}
         for i, gate in enumerate(self.gates):
             if isinstance(gate[-2], numbers.Integral):
@@ -895,6 +902,67 @@ class Circuit:
             dic.update({f'GATE_{i}': regs})
 
         return dic
+
+    def gate_params_map(self):
+        dic = {}
+        for i, gate in enumerate(self.gates):
+            if isinstance(gate[-2], numbers.Integral):
+                params = tuple(gate[1:len(gate)-2])
+            else:
+                params = tuple(gate[1:len(gate)-1])
+
+            dic.update({f'GATE_{i}': params})
+
+        return dic
+
+    def gate_id_map(self):
+        dic = {}
+        for i, gate in enumerate(self.gates):
+            dic.update({f'GATE_{i}': gate[0]})
+
+        return dic
+
+    def to_qiskit_gates(self, psi=None):
+        q_virtual, q_physical = self.qubits_in_light_cone(psi)
+        q_l = self.q_qiskit
+        c_l = self.c_qiskit
+
+        q_p = [q_l[i] for i in q_physical] + [q_l[i] for i in q_virtual]
+        c_p = [c_l[i] for i in q_physical] + [c_l[i] for i in q_virtual]
+
+        # qc = qiskit.QuantumCircuit(*q_p)
+        qc = qiskit.QuantumCircuit(*q_p, *c_p)
+
+        gate_p = self.partial_gates(psi)
+        dic_id = self.gate_id_map()
+        dic_r = self.gate_regs_map()
+        dic_p = self.gate_params_map()
+
+        for i in gate_p:
+            if dic_id[i] == "CZ":
+                t0, t1 = dic_r[i]
+                qc.cz(q_l[t0], q_l[t1])
+            if dic_id[i] == "H":
+                t0, = dic_r[i]
+                qc.h(q_l[t0])
+            if dic_id[i] == "RZZ":
+                t0, t1 = dic_r[i]
+                p0,  = dic_p[i]
+                qc.rzz(p0*2., q_l[t0], q_l[t1])
+            if dic_id[i] == "RY":
+                t0, = dic_r[i]
+                p0,  = dic_p[i]
+                qc.ry(p0, q_l[t0])
+            if dic_id[i] == "RX":
+                t0, = dic_r[i]
+                p0,  = dic_p[i]
+                qc.rx(p0, q_l[t0])
+
+        return qc
+
+
+
+
 
     def apply_gate(self, gate_id, *gate_args, gate_round=None, 
                    gate_shared=None, **gate_opts):
