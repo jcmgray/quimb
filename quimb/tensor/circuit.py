@@ -17,11 +17,7 @@ from .tensor_gen import MPS_computational_state
 from .tensor_1d import TensorNetwork1DVector, Dense1D, TensorNetwork1DOperator
 from . import array_ops as ops
 
-
 import qiskit 
-
-
-
 
 
 def _convert_ints_and_floats(x):
@@ -781,11 +777,11 @@ class Circuit:
 
         self.q_qiskit = []
         for i in range(self.N):
-            self.q_qiskit.append(qiskit.QuantumRegister(1, f"q{i}"))
+            self.q_qiskit.append(qiskit.QuantumRegister(1, f"q_{i}"))
 
         self.c_qiskit = []
         for i in range(self.N):
-            self.c_qiskit.append(qiskit.ClassicalRegister(1, f"c{i}"))
+            self.c_qiskit.append(qiskit.ClassicalRegister(1, f"c_{i}"))
 
         self._psi.add_tag(psi0_tag)
 
@@ -928,7 +924,8 @@ class Circuit:
         c_l = self.c_qiskit
 
         q_p = [q_l[i] for i in q_physical] + [q_l[i] for i in q_virtual]
-        c_p = [c_l[i] for i in q_physical] + [c_l[i] for i in q_virtual]
+        # c_p = [c_l[i] for i in q_physical] + [c_l[i] for i in q_virtual]
+        c_p = [c_l[i] for i in q_physical]
 
         # qc = qiskit.QuantumCircuit(*q_p)
         qc = qiskit.QuantumCircuit(*q_p, *c_p)
@@ -959,9 +956,6 @@ class Circuit:
                 qc.rx(p0, q_l[t0])
 
         return qc
-
-
-
 
 
     def apply_gate(self, gate_id, *gate_args, gate_round=None, 
@@ -1249,7 +1243,7 @@ class Circuit:
             lightcone.
         """
         gate_cone = self.partial_gates(psi)
-        dic_gate = self.gate_map()
+        dic_gate = self.gate_regs_map()
 
         if isinstance(where, numbers.Integral):
             cone = {where}
