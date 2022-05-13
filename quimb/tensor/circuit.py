@@ -859,10 +859,87 @@ class Circuit:
         self._psi.gate_(U, where, tags=tags, **opts)
         self.gates.append((id(U), *where))
 
+    def q_drop(self, psi, q_virtual, q_register):
+        q_l_len = []
+        q_l = []
+        gate_l = [] 
+        gate_l_len = []
+        for i in q_virtual:
+            where = (i, )
+            gate, q = self.get_reverse_lightcone_tags_partial(psi, where)
+            q_l_len.append(len(q))
+            gate_l.append(gate)
+            gate_l_len.append(len(gate))
+            q_l.append(q)
+        # rearrange based on size of qubit needed 
+        index_order = sorted(range(len(q_l_len)), key=lambda k: q_l_len[k])
+        q_virtual = [q_virtual[i] for i in index_order] 
+        gate_l = [gate_l[i] for i in index_order] 
+        q_l = [q_l[i] for i in index_order] 
+        q_l_len = [q_l_len[i] for i in index_order] 
+
+        l_gate_total = self.partial_gates(psi)
+        # print(q_virtual_order, gate_l_len, {*l_gate_total},"\n", {*gate_l[0]})
+
+        if 'PSI0' in psi.tags: 
+            tag_slice = oset(l_gate_total)-oset(gate_l[0])
+            tag_slice |= oset(['PSI0'])
+        else:
+            tag_slice = (oset(l_gate_total)-oset(gate_l[0])) - oset(['PSI0'])
+
+        if 'PSI0' in psi.tags:
+            tag_partial = oset(gate_l[0])
+            tag_partial |= oset(['PSI0'])
+        else:
+            tag_partial = oset(gate_l[0])-oset(['PSI0'])
+            
+        # print(  tag_slice, len(tag_slice))
+        psi_lc = psi.select(tag_slice, which='any')
+        # psi_lc = psi.select_any(tag_slice).view_like_(circ.psi)
+
+        for tid, t in tuple(psi_lc.tensor_map.items()):
+            # get all tensors connected to this tensor (incld itself)
+            neighbors = oset_union(psi_lc.ind_map[ix] for ix in t.inds)
+
+            # lone tensor not attached to anything - drop it
+            # but only if it isn't directly in the ``where`` region
+            if (len(neighbors) == 1):
+                psi_lc._pop_tensor(tid)
+
+        # print(  tag_slice, len(tag_slice))
+        psi_p = psi.select(tag_partial, which='any')
+        # psi_lc = psi.select_any(tag_slice).view_like_(circ.psi)
+
+        for tid, t in tuple(psi_p.tensor_map.items()):
+            # get all tensors connected to this tensor (incld itself)
+            neighbors = oset_union(psi_p.ind_map[ix] for ix in t.inds)
+
+            # lone tensor not attached to anything - drop it
+            # but only if it isn't directly in the ``where`` region
+            if (len(neighbors) == 1):
+                psi_p._pop_tensor(tid)
+
+        Q_reuse = q_virtual.pop(0)
+        q_l_register = [i for i in q_l[0] if i in q_register]
+        return psi_lc, q_virtual, Q_reuse, tag_slice-oset(['PSI0']), tag_partial-oset(['PSI0']), q_l_len[0], oset(q_l[0]), oset(q_l_register), psi_p
+
     # the gates exist in psi with format "GATE_{}"
     def partial_gates(self, psi):
         rex = re.compile("GATE_{}".format(r"\d+"))
         return list(filter(rex.match, psi.tags))
+
+    # find register qubits
+    def register_qubit_map(self, psi):
+        Q_l = []
+        if "PSI0" in psi.tags:
+            tags = psi.select(["PSI0"]).tags
+            rex = re.compile(self.psi.site_tag_id.format(r"\d+"))
+            tags_tn = list(filter(rex.match, tags))
+            for i in tags_tn:
+                temp = re.findall(r'\d+', i)
+                res = list(map(int, temp))
+                Q_l.append(res[0])
+        return Q_l
 
     # map inds list to corresponding qubits
     def qubit_map(self, psi, inds):
@@ -874,18 +951,23 @@ class Circuit:
             temp = re.findall(r'\d+', *tags_tn)
             res = list(map(int, temp))
             Q_l.append(res[0])
-        return Q_l
+        # if duplicate==True:
+        #     import collections
+        #     Q_l_rep = oset([item for item, count in collections.Counter(Q_l).items() if count > 1])
+        #     return oset(Q_l)-Q_l_rep
+        # elif duplicate==False:
+        return oset(Q_l)
 
     # map inds list to corresponding qubits
     def qubits_in_light_cone(self, psi):
         ind_open = psi.outer_inds()
         ind_open_virtual = [x for x in ind_open if not x.startswith('k')]
         ind_open_physical = list(oset(ind_open)-oset(ind_open_virtual))
-        
+
         q_virtual = self.qubit_map(psi, ind_open_virtual)
         q_physical = self.qubit_map(psi, ind_open_physical)
 
-        return q_virtual, q_physical
+        return list(q_virtual), list(q_physical)
 
     def gate_regs_map(self):
         dic = {}
