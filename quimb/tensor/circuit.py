@@ -963,7 +963,7 @@ class Circuit:
         ind_open = psi.outer_inds()
         ind_open_virtual = [x for x in ind_open if not x.startswith('k')]
         ind_open_physical = list(oset(ind_open)-oset(ind_open_virtual))
-
+        
         q_virtual = self.qubit_map(psi, ind_open_virtual)
         q_physical = self.qubit_map(psi, ind_open_physical)
 
@@ -1000,16 +1000,60 @@ class Circuit:
 
         return dic
 
-    def to_qiskit_gates(self, psi=None):
+    def optimal_qubits(self, psi):
         q_virtual, q_physical = self.qubits_in_light_cone(psi)
+        q_total = q_virtual + q_physical
+        q_register = self.register_qubit_map(psi)
+        tag_slice = self.partial_gates(psi)
+        psi = psi*1.0
+
+        # print("Total_gates", len(tag_slice))
+        # print(q_virtual, q_physical, q_register, tag_slice)
+
+        tag_step = []
+        tag_partial_step = []
+        q_step = []
+        q_opt_step = []
+        q_required_step = []
+        q_actual_step = []
+        q_register_step = []
+        psi_step = []
+        psi_p_step = []
+
+        while q_virtual:
+            psi_step.append(psi)
+            tag_step.append(tag_slice)
+            psi, q_virtual, q_reuse, tag_slice, tag_partial, q_required, q_actual, q_register, psi_p = self.q_drop(psi, q_virtual, q_register)
+            q_opt_step.append(q_reuse)
+            q_required_step.append(q_required)
+            psi_p_step.append(psi_p)
+            tag_partial_step.append(tag_partial)
+            q_actual_step.append(q_actual)
+            q_register_step.append(q_register)
+
+            q_virtual, q_physical = self.qubits_in_light_cone(psi)
+            q_register = self.register_qubit_map(psi)
+
+        q_opt_f = q_opt_step + [i for i in q_total if i not in q_opt_step] 
+        return q_opt_f
+
+
+    def to_qiskit_gates(self, psi=None, optimal=False, measure=False, q_measure=[]):
+        q_virtual, q_physical = self.qubits_in_light_cone(psi)
+
         q_l = self.q_qiskit
         c_l = self.c_qiskit
-
-        q_p = [q_l[i] for i in q_physical] + [q_l[i] for i in q_virtual]
+        q_p = [q_l[i] for i in q_virtual] + [q_l[i] for i in q_physical]
         # c_p = [c_l[i] for i in q_physical] + [c_l[i] for i in q_virtual]
-        c_p = [c_l[i] for i in q_physical]
+        if q_measure:
+            c_p = [c_l[i] for i in q_measure]
+        else:
+            c_p = [c_l[i] for i in q_physical]
 
-        # qc = qiskit.QuantumCircuit(*q_p)
+        if optimal:
+            q_opt = self.optimal_qubits(psi)
+            q_p = [q_l[i] for i in q_opt]
+            # index = [q_opt.index(i) for i in q_physical]
         qc = qiskit.QuantumCircuit(*q_p, *c_p)
 
         gate_p = self.partial_gates(psi)
@@ -1036,6 +1080,15 @@ class Circuit:
                 t0, = dic_r[i]
                 p0,  = dic_p[i]
                 qc.rx(p0, q_l[t0])
+
+        if measure:
+            if q_measure:
+                for i in q_measure:
+                    qc.measure(q_l[i], c_l[i])
+            else:
+                for i in q_physical:
+                    qc.measure(q_l[i], c_l[i])
+
 
         return qc
 
