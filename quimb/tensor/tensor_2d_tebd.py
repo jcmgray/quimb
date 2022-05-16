@@ -953,11 +953,11 @@ class FullUpdate(TEBD2D):
         that boolean evaluates to ``True`` then terminal the evolution.
     progbar : boolean, optional
         Whether to show a live progress bar during the evolution.
-    fit_strategy : {'als', 'autodiff'}, optional
+    fit_strategy : {'als', 'autodiff-fidelity'}, optional
         Core method used to fit the gate application.
 
             * ``'als'``: alternating least squares
-            * ``'autodiff'``: local fidelity using autodiff
+            * ``'autodiff-fidelity'``: local fidelity using autodiff
 
     fit_opts : dict, optional
         Advanced options for the gate application fitting functions. Defaults
