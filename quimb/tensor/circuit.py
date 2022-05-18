@@ -1037,8 +1037,43 @@ class Circuit:
         q_opt_f = q_opt_step + [i for i in q_total if i not in q_opt_step] 
         return q_opt_f
 
+    def optimal_reuse_tag(self, psi):
+        q_virtual, q_physical = self.qubits_in_light_cone(psi)
+        q_register = self.register_qubit_map(psi)
+        tag_slice = self.partial_gates(psi)
+        psi = psi*1.0
 
-    def to_qiskit_gates(self, psi=None, optimal=False, measure=False, q_measure=[]):
+        # print("Total_gates", len(tag_slice))
+        # print(q_virtual, q_physical, q_register, tag_slice)
+
+        tag_step = []
+        tag_partial_step = []
+        q_opt_step = []
+        q_required_step = []
+        q_actual_step = []
+        q_register_step = []
+        psi_step = []
+        psi_p_step = []
+
+        while q_virtual:
+            psi_step.append(psi)
+            tag_step.append(tag_slice)
+            psi, q_virtual, q_reuse, tag_slice, tag_partial, q_required, q_actual, q_register, psi_p = self.q_drop(psi, q_virtual, q_register)
+            q_opt_step.append(q_reuse)
+            q_required_step.append(q_required)
+            psi_p_step.append(psi_p)
+            tag_partial_step.append(tag_partial)
+            q_actual_step.append(q_actual)
+            q_register_step.append(q_register)
+
+            q_virtual, q_physical = self.qubits_in_light_cone(psi)
+            q_register = self.register_qubit_map(psi)
+
+        return tag_partial_step
+
+
+
+    def to_qiskit_gates(self, psi=None, optimal=False, measure=False, q_measure=[], label_measure="Z"):
         q_virtual, q_physical = self.qubits_in_light_cone(psi)
 
         q_l = self.q_qiskit
@@ -1084,11 +1119,14 @@ class Circuit:
         if measure:
             if q_measure:
                 for i in q_measure:
+                    if label_measure == "X":
+                        qc.h(q_l[i])
                     qc.measure(q_l[i], c_l[i])
             else:
                 for i in q_physical:
+                    if label_measure == "X":
+                        qc.h(q_l[i])
                     qc.measure(q_l[i], c_l[i])
-
 
         return qc
 
