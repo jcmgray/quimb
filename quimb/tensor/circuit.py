@@ -1116,16 +1116,21 @@ class Circuit:
                 p0,  = dic_p[i]
                 qc.rx(p0, q_l[t0])
 
+        if label_measure == "X":
+            if q_measure:
+                for i in q_measure:
+                    qc.h(q_l[i])
+            else:
+                for i in q_physical:
+                    qc.h(q_l[i])
+
+
         if measure:
             if q_measure:
                 for i in q_measure:
-                    if label_measure == "X":
-                        qc.h(q_l[i])
                     qc.measure(q_l[i], c_l[i])
             else:
                 for i in q_physical:
-                    if label_measure == "X":
-                        qc.h(q_l[i])
                     qc.measure(q_l[i], c_l[i])
 
         return qc
