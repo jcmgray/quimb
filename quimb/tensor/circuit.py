@@ -784,6 +784,9 @@ class Circuit:
             self.c_qiskit.append(qiskit.ClassicalRegister(1, f"c_{i}"))
 
         self._psi.add_tag(psi0_tag)
+        for count, ele in enumerate(self._psi):
+            ele.add_tag(f"Qreg{count}")
+            
 
         if tags is not None:
             if isinstance(tags, str):
@@ -1085,6 +1088,9 @@ class Circuit:
         else:
             c_p = [c_l[i] for i in q_physical]
 
+        if measure == "all":
+            c_p = [c_l[i] for i in q_virtual] + [c_l[i] for i in q_physical]
+
         if optimal:
             q_opt = self.optimal_qubits(psi)
             q_p = [q_l[i] for i in q_opt]
@@ -1097,6 +1103,7 @@ class Circuit:
         dic_p = self.gate_params_map()
 
         for i in gate_p:
+            # print("gate",i, dic_id[i])
             if dic_id[i] == "CZ":
                 t0, t1 = dic_r[i]
                 qc.cz(q_l[t0], q_l[t1])
@@ -1106,7 +1113,7 @@ class Circuit:
             if dic_id[i] == "RZZ":
                 t0, t1 = dic_r[i]
                 p0,  = dic_p[i]
-                qc.rzz(p0*2., q_l[t0], q_l[t1])
+                qc.rzz(-p0*2., q_l[t0], q_l[t1])
             if dic_id[i] == "RY":
                 t0, = dic_r[i]
                 p0,  = dic_p[i]
@@ -1115,6 +1122,10 @@ class Circuit:
                 t0, = dic_r[i]
                 p0,  = dic_p[i]
                 qc.rx(p0, q_l[t0])
+            if dic_id[i] == "RZ":
+                t0, = dic_r[i]
+                p0,  = dic_p[i]
+                qc.rz(p0, q_l[t0])
 
         if label_measure == "X":
             if q_measure:
@@ -1124,14 +1135,16 @@ class Circuit:
                 for i in q_physical:
                     qc.h(q_l[i])
 
-
         if measure:
-            if q_measure:
-                for i in q_measure:
-                    qc.measure(q_l[i], c_l[i])
+            if measure=="all":
+                qc.measure_all(add_bits=False)
             else:
-                for i in q_physical:
-                    qc.measure(q_l[i], c_l[i])
+                if q_measure:
+                    for i in q_measure:
+                        qc.measure(q_l[i], c_l[i])
+                else:
+                    for i in q_physical:
+                        qc.measure(q_l[i], c_l[i])
 
         return qc
 
@@ -1167,7 +1180,8 @@ class Circuit:
         # unique tag
         tags = tags_to_oset(f'GATE_{len(self.gates)}')
         if (gate_shared is not None):
-            tags.add(f'{gate_shared}')
+            gate_shared = tags_to_oset(gate_shared)
+            tags = tags | gate_shared
 
         # parse which 'round' of gates
         if (gate_round is not None):
