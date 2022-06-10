@@ -353,7 +353,10 @@ def draw_tn(
         )
         G.nodes[tid]['marker'] = node_shape[tid]
         G.nodes[tid]['hatch'] = node_hatch[tid]
-        if show_tags:
+
+        if show_tags == 'tids':
+            node_labels[tid] = str(tid)
+        elif show_tags:
             # make the tags appear with auto vertical extent
             node_label = '{' + str(list(t.tags))[1:-1] + '}'
             node_labels[tid] = "\n".join(textwrap.wrap(
