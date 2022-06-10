@@ -867,10 +867,10 @@ class TensorNetwork3D(TensorNetwork):
             if sum(finished.values()) >= 2:
                 # have reached 'tube' we should contract exactly
 
-                if equalize_norms:
+                if equalize_norms is True:
                     tn.equalize_norms_()
 
-                return tn.contract(..., optimize=optimize)
+                return tn.contract_(..., optimize=optimize)
 
             xyz, minmax = direction[0], direction[1:]
             if finished[xyz]:
@@ -945,7 +945,10 @@ class TensorNetwork3D(TensorNetwork):
             else:
                 envs = {}
 
-        envs[r3d.sweep[1]] = tn.select_any(p_tag(r3d.sweep[0]))
+        envs[r3d.sweep[1]] = tn.select_any(
+            p_tag(r3d.sweep[0]), virtual=False
+        )
+
         for i in r3d.sweep[:-2]:
             # contract the boundary in one step
             tn._contract_boundary_core(
@@ -956,7 +959,9 @@ class TensorNetwork3D(TensorNetwork):
                 **contract_boundary_opts
             )
             # set the boundary as the environment for the next plane beyond
-            envs[i + 2 * istep] = tn.select_any(p_tag(i + istep))
+            envs[i + 2 * istep] = tn.select_any(
+                p_tag(i + istep), virtual=False
+            )
 
         return envs
 
@@ -1022,15 +1027,15 @@ class TensorNetwork3D(TensorNetwork):
         for s in range(0, Ls[d] - bsz + 1):
             # the central non-boundary slice of tensors
             tags_s = tuple(map(plane_tags[d], range(s, s + bsz)))
-            tn_s = parent_tn.select(tags_s, 'any')
+            tn_s = parent_tn.select_any(tags_s, virtual=False)
 
             # the min boundary
             if s in envs_s_min:
-                tn_s |= envs_s_min[s]
+                tn_s &= envs_s_min[s]
             # the max boundary
             imax = s + bsz - 1
             if imax in envs_s_max:
-                tn_s |= envs_s_max[imax]
+                tn_s &= envs_s_max[imax]
 
             # store the newly created cell along with env
             key_s = tuple(sorted((*parent_key, (d, s, bsz))))
