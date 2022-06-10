@@ -321,6 +321,13 @@ class TestMatrixProductState:
         abmc = a.H @ b
         assert_allclose(ab - ac, abmc)
 
+    def test_amplitude(self):
+        mps = MPS_rand_state(10, 7)
+        k = mps.to_dense()
+        idx = np.random.randint(0, k.shape[0])
+        c_b = mps.amplitude(f'{idx:0>10b}')
+        assert k[idx, 0] == pytest.approx(c_b)
+
     def test_schmidt_values_entropy_gap_simple(self):
         n = 12
         p = MPS_rand_state(n, 16)

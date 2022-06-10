@@ -1369,6 +1369,26 @@ class TensorNetwork1DFlat(TensorNetwork1D,
             bnd_szs.append(self.bond_size(-1, 0))
         return bnd_szs
 
+    def amplitude(self, b):
+        """Compute the amplitude of configuration ``b``.
+
+        Parameters
+        ----------
+        b : sequence of int
+            The configuration to compute the amplitude of.
+
+        Returns
+        -------
+        c_b : scalar
+        """
+        if len(b) != self.nsites:
+            raise ValueError(f"Bit-string {b} length does not "
+                             f"match MPS length {self.nsites}.")
+
+        selector = {self.site_ind(i): int(xi) for i, xi in enumerate(b)}
+        mps_b = self.isel(selector)
+        return mps_b ^ ...
+
     def singular_values(self, i, cur_orthog=None, method='svd'):
         r"""Find the singular values associated with the ith bond::
 
