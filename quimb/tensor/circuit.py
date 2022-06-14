@@ -1156,6 +1156,7 @@ class Circuit:
                         qc.h(q_ancilla)
                         for i in q_measure:
                             qc.cx(q_ancilla, q_l[i])
+                        
                         qc.h(q_ancilla)
                         qc.measure(q_ancilla, c_ancilla)
 
@@ -1163,8 +1164,9 @@ class Circuit:
                             if i not in q_measure:
                                 qc.h(q_l[i])
 
-                        for i in range(len(q_p)):
-                            qc.measure(q_p[i], c_p[i])
+                        for i in q_opt:
+                            if i not in q_measure:
+                                qc.measure(q_l[i], c_l[i])
 
                     elif label_measure == "Z":
                         for i in q_opt:
