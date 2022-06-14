@@ -1137,8 +1137,7 @@ class Circuit:
                 for i in q_measure:
                     qc.h(q_l[i])
         elif label_measure == "X" and label_ancilla == "parity":
-            for i in q_physical:
-                qc.h(q_l[i])
+            pass
         elif label_measure == "Z" and label_ancilla == "parity":
             pass
 
@@ -1164,10 +1163,9 @@ class Circuit:
                             if i not in q_measure:
                                 qc.h(q_l[i])
 
-                        for i in q_opt:
-                            if i not in q_measure:
-                                qc.measure(q_l[i], c_l[i])
-
+                        for i in range(len(q_p)):
+                            qc.measure(q_p[i], c_p[i])
+ 
                     elif label_measure == "Z":
                         for i in q_opt:
                             if i not in q_measure:
