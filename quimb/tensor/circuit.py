@@ -1036,7 +1036,6 @@ class Circuit:
 
             q_virtual, q_physical = self.qubits_in_light_cone(psi)
             q_register = self.register_qubit_map(psi)
-
         q_opt_f = q_opt_step + [i for i in q_total if i not in q_opt_step] 
         return q_opt_f
 
@@ -1075,10 +1074,8 @@ class Circuit:
         return tag_partial_step
 
 
-
     def to_qiskit_gates(self, psi=None, optimal=False, measure=False, q_measure=[], label_measure="Z", label_ancilla="parity"):
         q_virtual, q_physical = self.qubits_in_light_cone(psi)
-
         q_l = self.q_qiskit
         c_l = self.c_qiskit
         q_p = [q_l[i] for i in q_virtual] + [q_l[i] for i in q_physical]
@@ -1096,14 +1093,14 @@ class Circuit:
         if optimal:
             q_opt = self.optimal_qubits(psi)
             q_p = [q_l[i] for i in q_opt]
-            # index = [q_opt.index(i) for i in q_physical]
+            c_p = [c_l[i] for i in q_opt]
+
         qc = qiskit.QuantumCircuit(*q_p, *c_p)
         if label_ancilla == "parity":
             q_ancilla = qiskit.QuantumRegister(1, "q_ancilla")
             c_ancilla = qiskit.ClassicalRegister(1, "c_ancilla")
             qc.add_register(q_ancilla)
             qc.add_register(c_ancilla)
-
 
         gate_p = self.partial_gates(psi)
         dic_id = self.gate_id_map()
@@ -1142,7 +1139,6 @@ class Circuit:
             else:
                 for i in q_physical:
                     qc.h(q_l[i])
-
 
         if measure:
             if measure == "all":
@@ -1533,11 +1529,6 @@ class Circuit:
 
         return psi_lc
 
-
-
-
-
-
     def get_reverse_lightcone_tags(self, where):
         """Get the tags of gates in this circuit corresponding to the 'reverse'
         lightcone propagating backwards from registers in ``where``.
@@ -1585,10 +1576,13 @@ class Circuit:
 
             if regs & cone:
                 lightcone_tags.append(f"GATE_{i}")
+                # lightcone_tags.append(f"Qreg{i}")
                 cone |= regs
 
         # initial state is always part of the lightcone
-        lightcone_tags.append('PSI0')
+        cone_l = list(cone)
+        for i in cone_l:
+            lightcone_tags.append(f"Qreg{i}")
         lightcone_tags.reverse()
 
         return tuple(lightcone_tags)
