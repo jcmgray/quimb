@@ -1096,7 +1096,7 @@ class Circuit:
             c_p = [c_l[i] for i in q_opt]
 
         qc = qiskit.QuantumCircuit(*q_p, *c_p)
-        if label_ancilla == "parity":
+        if label_ancilla == "parity" and label_measure == "X":
             q_ancilla = qiskit.QuantumRegister(1, "q_ancilla")
             c_ancilla = qiskit.ClassicalRegister(1, "c_ancilla")
             qc.add_register(q_ancilla)
@@ -1136,9 +1136,11 @@ class Circuit:
             if q_measure:
                 for i in q_measure:
                     qc.h(q_l[i])
-            else:
-                for i in q_physical:
-                    qc.h(q_l[i])
+        elif label_measure == "X" and label_ancilla == "parity":
+            for i in q_physical:
+                qc.h(q_l[i])
+        elif label_measure == "Z" and label_ancilla == "parity":
+            pass
 
         if measure:
             if measure == "all":
@@ -1148,13 +1150,30 @@ class Circuit:
                     for i in q_measure:
                         qc.measure(q_l[i], c_l[i])
                 elif q_measure and label_ancilla == "parity":
-                    qc.h(q_ancilla)
-                    for i in q_measure:
-                        qc.cx(q_ancilla, q_l[i])
-                    qc.h(q_ancilla)
-                    qc.measure(q_ancilla, c_ancilla)
-                    for i in range(len(q_p)):
-                        qc.measure(q_p[i], c_p[i])
+                    
+                    if label_measure == "X":
+                    
+                        qc.h(q_ancilla)
+                        for i in q_measure:
+                            qc.cx(q_ancilla, q_l[i])
+                        qc.h(q_ancilla)
+                        qc.measure(q_ancilla, c_ancilla)
+
+                        for i in q_opt:
+                            if i not in q_measure:
+                                qc.h(q_l[i])
+
+                        for i in range(len(q_p)):
+                            qc.measure(q_p[i], c_p[i])
+
+                    elif label_measure == "Z":
+                        for i in q_opt:
+                            if i not in q_measure:
+                                qc.h(q_l[i])
+
+                        for i in range(len(q_p)):
+                            qc.measure(q_p[i], c_p[i])
+
                 else:
                     for i in q_physical:
                         qc.measure(q_l[i], c_l[i])
