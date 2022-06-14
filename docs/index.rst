@@ -16,9 +16,6 @@ Welcome to quimb's documentation!
 .. image:: http://joss.theoj.org/papers/10.21105/joss.00819/status.svg
   :target: https://doi.org/10.21105/joss.00819
   :alt: JOSS Paper
-.. image:: https://badges.gitter.im/quimb-chat/community.svg
-  :target: https://gitter.im/quimb-chat/community?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge
-  :alt: Gitter
 
 ----------------------------------------------------------------------------------
 
