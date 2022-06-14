@@ -3,14 +3,26 @@ Changelog
 
 Release notes for ``quimb``.
 
-.. _whats-new.2.0.0:
+.. _whats-new.1.4.0:
 
-v2.0.0 (unreleased)
+v1.4.0 (14th June 2022)
 ----------------------
 
 **Enhancements**
 
-**Bug fixes:**
+- Add 2D tensor network support and algorithms
+- Add 3D tensor network infrastructure
+- Add arbitrary geometry quantum state infrastructure
+- Many changes to :class:`TNOptimizer`
+- Many changes to TN drawing
+- Many changes to :class:`Circuit` simulation
+- Many improvements to TN simplification
+- Make all tag and index operations deterministic
+- Add :func:`~quimb.tensor.tensor_core.tensor_network_sum`,
+  :func:`~quimb.tensor.tensor_core.tensor_network_distance` and
+  :meth:`~quimb.tensor.tensor_core.TensorNetwork.fit`
+- Various memory and performance improvements
+- Various graph generators and TN builders
 
 
 .. _whats-new.1.3.0:
