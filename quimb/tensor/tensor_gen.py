@@ -252,7 +252,7 @@ def TN_from_edges_with_value(
         site_tag_id=site_tag_id, site_ind_id=site_ind_id)
 
 
-def TN_rand_from_edges(
+def TN_from_edges_rand(
     edges,
     D,
     phys_dim=None,
@@ -315,6 +315,11 @@ def TN_rand_from_edges(
     return tn
 
 
+TN_rand_from_edges = deprecated(
+    TN_from_edges_rand, "TN_rand_from_edges", "TN_from_edges_rand"
+)
+
+
 def TN_rand_reg(
     n,
     reg,
@@ -352,7 +357,7 @@ def TN_rand_reg(
     """
     import networkx as nx
     G = nx.random_degree_sequence_graph([reg] * n, seed=seed)
-    return TN_rand_from_edges(
+    return TN_from_edges_rand(
         G.edges, D=D, phys_dim=phys_dim, seed=seed, dtype=dtype,
         site_tag_id=site_tag_id, site_ind_id=site_ind_id)
 
