@@ -1073,9 +1073,9 @@ class Circuit:
 
         return tag_partial_step
 
-
-    def to_qiskit_gates(self, psi=None, optimal=False, measure=False, q_measure=[], label_measure="Z", label_ancilla="parity"):
+    def to_qiskit_gates(self, psi=None, optimal=False, q_measure=[], label_measure="Z", label_ancilla="parity"):
         q_virtual, q_physical = self.qubits_in_light_cone(psi)
+        q_opt = q_virtual, q_physical
         q_l = self.q_qiskit
         c_l = self.c_qiskit
         q_p = [q_l[i] for i in q_virtual] + [q_l[i] for i in q_physical]
@@ -1084,16 +1084,14 @@ class Circuit:
             c_p = [c_l[i] for i in q_measure]
         elif q_measure and label_ancilla == "parity":
             c_p = [c_l[i] for i in q_virtual] + [c_l[i] for i in q_physical]
-        else:
-            c_p = [c_l[i] for i in q_physical]
-
-        if measure == "all":
-            c_p = [c_l[i] for i in q_virtual] + [c_l[i] for i in q_physical]
 
         if optimal:
             q_opt = self.optimal_qubits(psi)
             q_p = [q_l[i] for i in q_opt]
-            c_p = [c_l[i] for i in q_opt]
+            if label_ancilla == "parity":
+                c_p = [c_l[i] for i in q_opt]
+            else:
+                c_p = [c_l[i] for i in q_measure]
 
         qc = qiskit.QuantumCircuit(*q_p, *c_p)
         if label_ancilla == "parity" and label_measure == "X":
@@ -1141,42 +1139,34 @@ class Circuit:
         elif label_measure == "Z" and label_ancilla == "parity":
             pass
 
-        if measure:
-            if measure == "all":
-                qc.measure_all(add_bits=False)
-            else:
-                if q_measure and label_ancilla != "parity":
-                    for i in q_measure:
-                        qc.measure(q_l[i], c_l[i])
-                elif q_measure and label_ancilla == "parity":
-                    
-                    if label_measure == "X":
-                    
-                        qc.h(q_ancilla)
-                        for i in q_measure:
-                            qc.cx(q_ancilla, q_l[i])
-                        
-                        qc.h(q_ancilla)
-                        qc.measure(q_ancilla, c_ancilla)
 
-                        for i in q_opt:
-                            if i not in q_measure:
-                                qc.h(q_l[i])
+        if q_measure and label_ancilla != "parity":
+            for i in q_measure:
+                qc.measure(q_l[i], c_l[i])
+        elif q_measure and label_ancilla == "parity":
+            
+            if label_measure == "X":
+                qc.h(q_ancilla)
+                for i in q_measure:
+                    qc.cx(q_ancilla, q_l[i])
+              
+                qc.h(q_ancilla)
+                qc.measure(q_ancilla, c_ancilla)
 
-                        for i in range(len(q_p)):
-                            qc.measure(q_p[i], c_p[i])
- 
-                    elif label_measure == "Z":
-                        for i in q_opt:
-                            if i not in q_measure:
-                                qc.h(q_l[i])
+                for i in q_opt:
+                    if i not in q_measure:
+                        qc.h(q_l[i])
 
-                        for i in range(len(q_p)):
-                            qc.measure(q_p[i], c_p[i])
+                for i in range(len(q_p)):
+                    qc.measure(q_p[i], c_p[i])
 
-                else:
-                    for i in q_physical:
-                        qc.measure(q_l[i], c_l[i])
+            elif label_measure == "Z":
+                for i in q_opt:
+                    if i not in q_measure:
+                        qc.h(q_l[i])
+
+                for i in range(len(q_p)):
+                    qc.measure(q_p[i], c_p[i])
 
         return qc
 
