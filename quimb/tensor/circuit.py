@@ -1075,7 +1075,7 @@ class Circuit:
 
     def to_qiskit_gates(self, psi=None, optimal=False, q_measure=[], label_measure="Z", label_ancilla="parity"):
         q_virtual, q_physical = self.qubits_in_light_cone(psi)
-        q_opt = q_virtual, q_physical
+        q_opt = q_virtual+q_physical
         q_l = self.q_qiskit
         c_l = self.c_qiskit
         q_p = [q_l[i] for i in q_virtual] + [q_l[i] for i in q_physical]
