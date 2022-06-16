@@ -1036,7 +1036,6 @@ class Circuit:
 
             q_virtual, q_physical = self.qubits_in_light_cone(psi)
             q_register = self.register_qubit_map(psi)
-
         q_opt_f = q_opt_step + [i for i in q_total if i not in q_opt_step] 
         return q_opt_f
 
@@ -1074,28 +1073,32 @@ class Circuit:
 
         return tag_partial_step
 
-
-
-    def to_qiskit_gates(self, psi=None, optimal=False, measure=False, q_measure=[], label_measure="Z"):
+    def to_qiskit_gates(self, psi=None, optimal=False, q_measure=[], label_measure="Z", label_ancilla="parity"):
         q_virtual, q_physical = self.qubits_in_light_cone(psi)
-
+        q_opt = q_virtual+q_physical
         q_l = self.q_qiskit
         c_l = self.c_qiskit
         q_p = [q_l[i] for i in q_virtual] + [q_l[i] for i in q_physical]
         # c_p = [c_l[i] for i in q_physical] + [c_l[i] for i in q_virtual]
-        if q_measure:
+        if q_measure and label_ancilla != "parity":
             c_p = [c_l[i] for i in q_measure]
-        else:
-            c_p = [c_l[i] for i in q_physical]
-
-        if measure == "all":
+        elif q_measure and label_ancilla == "parity":
             c_p = [c_l[i] for i in q_virtual] + [c_l[i] for i in q_physical]
 
         if optimal:
             q_opt = self.optimal_qubits(psi)
             q_p = [q_l[i] for i in q_opt]
-            # index = [q_opt.index(i) for i in q_physical]
+            if label_ancilla == "parity":
+                c_p = [c_l[i] for i in q_opt]
+            else:
+                c_p = [c_l[i] for i in q_measure]
+
         qc = qiskit.QuantumCircuit(*q_p, *c_p)
+        if label_ancilla == "parity" and label_measure == "X":
+            q_ancilla = qiskit.QuantumRegister(1, "q_ancilla")
+            c_ancilla = qiskit.ClassicalRegister(1, "c_ancilla")
+            qc.add_register(q_ancilla)
+            qc.add_register(c_ancilla)
 
         gate_p = self.partial_gates(psi)
         dic_id = self.gate_id_map()
@@ -1127,24 +1130,43 @@ class Circuit:
                 p0,  = dic_p[i]
                 qc.rz(p0, q_l[t0])
 
-        if label_measure == "X":
+        if label_measure == "X" and label_ancilla != "parity":
             if q_measure:
                 for i in q_measure:
                     qc.h(q_l[i])
-            else:
-                for i in q_physical:
-                    qc.h(q_l[i])
+        elif label_measure == "X" and label_ancilla == "parity":
+            pass
+        elif label_measure == "Z" and label_ancilla == "parity":
+            pass
 
-        if measure:
-            if measure=="all":
-                qc.measure_all(add_bits=False)
-            else:
-                if q_measure:
-                    for i in q_measure:
-                        qc.measure(q_l[i], c_l[i])
-                else:
-                    for i in q_physical:
-                        qc.measure(q_l[i], c_l[i])
+
+        if q_measure and label_ancilla != "parity":
+            for i in q_measure:
+                qc.measure(q_l[i], c_l[i])
+        elif q_measure and label_ancilla == "parity":
+            
+            if label_measure == "X":
+                qc.h(q_ancilla)
+                for i in q_measure:
+                    qc.cx(q_ancilla, q_l[i])
+              
+                qc.h(q_ancilla)
+                qc.measure(q_ancilla, c_ancilla)
+
+                for i in q_opt:
+                    if i not in q_measure:
+                        qc.h(q_l[i])
+
+                for i in range(len(q_p)):
+                    qc.measure(q_p[i], c_p[i])
+
+            elif label_measure == "Z":
+                for i in q_opt:
+                    if i not in q_measure:
+                        qc.h(q_l[i])
+
+                for i in range(len(q_p)):
+                    qc.measure(q_p[i], c_p[i])
 
         return qc
 
@@ -1516,11 +1538,6 @@ class Circuit:
 
         return psi_lc
 
-
-
-
-
-
     def get_reverse_lightcone_tags(self, where):
         """Get the tags of gates in this circuit corresponding to the 'reverse'
         lightcone propagating backwards from registers in ``where``.
@@ -1568,10 +1585,13 @@ class Circuit:
 
             if regs & cone:
                 lightcone_tags.append(f"GATE_{i}")
+                # lightcone_tags.append(f"Qreg{i}")
                 cone |= regs
 
         # initial state is always part of the lightcone
-        lightcone_tags.append('PSI0')
+        cone_l = list(cone)
+        for i in cone_l:
+            lightcone_tags.append(f"Qreg{i}")
         lightcone_tags.reverse()
 
         return tuple(lightcone_tags)
