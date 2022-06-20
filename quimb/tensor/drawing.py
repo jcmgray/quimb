@@ -757,8 +757,9 @@ def get_positions(
 
         if should_use_fa2:
             from fa2 import ForceAtlas2
+            # NB: some versions of fa2 don't support the `weight_attr` option
             pos = ForceAtlas2(verbose=False).forceatlas2_networkx_layout(
-                G, pos=pos0, iterations=iterations, weight_attr=weight)
+                G, pos=pos0, iterations=iterations)
         else:
             pos = nx.spring_layout(
                 G, pos=pos0, fixed=fixed, k=k, iterations=iterations,
