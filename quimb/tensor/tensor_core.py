@@ -4495,13 +4495,16 @@ class TensorNetwork(object):
         tid2,
         equalize_norms=False,
         gauges=None,
+        output_inds=None,
         **contract_opts,
     ):
         # allow no-op for same tensor specified twice ('already contracted')
         if tid1 == tid2:
             return
 
-        output_inds = self.compute_contracted_inds(tid1, tid2)
+        local_output_inds = self.compute_contracted_inds(
+            tid1, tid2, output_inds=output_inds
+        )
         t1 = self._pop_tensor(tid1)
         t2 = self._pop_tensor(tid2)
 
@@ -4513,7 +4516,7 @@ class TensorNetwork(object):
 
         t12 = tensor_contract(
             t1, t2,
-            output_inds=output_inds,
+            output_inds=local_output_inds,
             preserve_tensor=True,
             **contract_opts,
         )
@@ -6184,7 +6187,6 @@ class TensorNetwork(object):
 
         # options relating to the compression itself
         compress_opts = ensure_dict(compress_opts)
-        compress_opts.setdefault('absorb', 'left')
 
         # options relating to canonizing around tensors *after* compression
         if canonize_after_distance:
@@ -6228,7 +6230,7 @@ class TensorNetwork(object):
                     continue
 
                 # check for compressing large shared (multi) bonds
-                if bonds_size(t, t_neighb) > chi:
+                if (chi is None) or bonds_size(t, t_neighb) > chi:
                     if callback_pre_compress is not None:
                         callback_pre_compress(self, (tid, tid_neighb))
 
