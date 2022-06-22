@@ -21,7 +21,7 @@ from quimb.tensor import (
     TNLinearOperator1D,
 )
 from quimb.tensor.decomp import _trim_singular_vals_numba
-from quimb.tensor.tensor_core import _CONTRACT_BACKEND, _TENSOR_LINOP_BACKEND
+from quimb.tensor.contraction import _CONTRACT_BACKEND, _TENSOR_LINOP_BACKEND
 
 autograd_mark = pytest.mark.skipif(
     importlib.util.find_spec('autograd') is None,

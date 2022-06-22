@@ -1,4 +1,4 @@
-from .tensor_core import (
+from .contraction import (
     set_contract_path_cache,
     get_contract_strategy,
     set_contract_strategy,
@@ -9,6 +9,8 @@ from .tensor_core import (
     get_tensor_linop_backend,
     set_tensor_linop_backend,
     tensor_linop_backend,
+)
+from .tensor_core import (
     tensor_contract,
     tensor_split,
     tensor_canonize_bond,
