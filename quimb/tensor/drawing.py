@@ -772,3 +772,50 @@ def get_positions(
         pos = _massage_pos(pos)
 
     return pos
+
+
+def visualize_tensor(tensor, **kwargs):
+    """Visualize all entries of a tensor, with indices mapped into the plane
+    and values mapped into a color wheel.
+
+    Parameters
+    ----------
+    tensor : Tensor
+        The tensor to visualize.
+    skew_factor : float, optional
+        When there are more than two dimensions, a factor to scale the
+        rotations by to avoid overlapping data points.
+    size_map : bool, optional
+        Whether to map the tensor value magnitudes to marker size.
+    size_scale : float, optional
+        An overall factor to scale the marker size by.
+    alpha_map : bool, optional
+        Whether to map the tensor value magnitudes to marker alpha.
+    alpha_pow : float, optional
+        The power to raise the magnitude to when mapping to alpha.
+    alpha : float, optional
+        The overall alpha to use for all markers if ``not alpha_map``.
+    show_lattice : bool, optional
+        Show a small grey dot for every 'lattice' point regardless of value.
+    lattice_opts : dict, optional
+        Options to pass to ``maplotlib.Axis.scatter`` for the lattice points.
+    linewidths : float, optional
+        The linewidth to use for the markers.
+    marker : str, optional
+        The marker to use for the markers.
+    figsize : tuple, optional
+        The size of the figure to create, if ``ax`` is not provided.
+    ax : matplotlib.Axis, optional
+        The axis to draw to. If not provided, a new figure will be created.
+
+    Returns
+    -------
+    fig : matplotlib.Figure
+        The figure containing the plot, or ``None`` if ``ax`` was provided.
+    ax : matplotlib.Axis
+        The axis containing the plot.
+    """
+    import xyzpy as xyz
+    kwargs.setdefault('compass', True)
+    kwargs.setdefault('compass_labels', tensor.inds)
+    return xyz.visualize_tensor(tensor.data, **kwargs)

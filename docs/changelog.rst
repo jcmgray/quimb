@@ -3,6 +3,21 @@ Changelog
 
 Release notes for ``quimb``.
 
+.. _whats-new.1.4.1:
+
+v1.4.1 (unreleased)
+----------------------
+
+**Enhancements**
+
+- refactor contraction, allowing using cotengra directly
+- add :meth:`~quimb.core.tensor.Tensor.visualize` for visualizing the actual
+  data entries of an arbitrarily high dimensional tensor
+
+**Bug fixes:**
+
+  - fix force atlas 2 and `weight_attr` bug (:issue:`126`)
+
 .. _whats-new.1.4.0:
 
 v1.4.0 (14th June 2022)
