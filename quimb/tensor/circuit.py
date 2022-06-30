@@ -1073,7 +1073,9 @@ class Circuit:
 
         return tag_partial_step
 
-    def to_qiskit_gates(self, psi=None, optimal=False, q_measure=[], label_measure="Z", label_ancilla="parity"):
+    def to_qiskit_gates(self, psi=None, optimal=False, q_measure=[], 
+                        label_measure="Z", label_ancilla="parity",
+                        label_leakage="leakage"):
         q_virtual, q_physical = self.qubits_in_light_cone(psi)
         q_opt = q_virtual+q_physical
         q_l = self.q_qiskit
@@ -1099,6 +1101,12 @@ class Circuit:
             c_ancilla = qiskit.ClassicalRegister(1, "c_ancilla")
             qc.add_register(q_ancilla)
             qc.add_register(c_ancilla)
+
+        if label_leakage == "leakage":
+            q_ancilla_leakage = qiskit.QuantumRegister(len(q_physical), "q_ancilla_leakage")
+            c_ancilla_leakage = qiskit.ClassicalRegister(len(q_physical), "c_ancilla_leakage")
+            qc.add_register(q_ancilla_leakage)
+            qc.add_register(c_ancilla_leakage)
 
         gate_p = self.partial_gates(psi)
         dic_id = self.gate_id_map()
@@ -1152,6 +1160,14 @@ class Circuit:
               
                 qc.h(q_ancilla)
                 qc.measure(q_ancilla, c_ancilla)
+
+                for count, elem in enumerate(q_physical):
+                    qc.h(q_ancilla_leakage[count])
+                    qc.rzz(math.pi/2, q_ancilla_leakage[count], q_l[elem])
+                    qc.rzz(math.pi/2, q_ancilla_leakage[count], q_l[elem])
+                    qc.h(q_ancilla_leakage[count])
+                    qc.x(q_ancilla_leakage[count])
+                    qc.measure(q_ancilla_leakage[count], c_ancilla_leakage[count])
 
                 for i in q_opt:
                     if i not in q_measure:
