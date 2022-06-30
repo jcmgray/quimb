@@ -1078,16 +1078,14 @@ class Circuit:
                         label_leakage="leakage"):
         q_virtual, q_physical = self.qubits_in_light_cone(psi)
         q_leakage = []
-        
         for i in q_physical:
             q_leakage.append(i)
-            if i % 2==0 and (i+1) not in q_physical:
+            if i % 2 == 0 and (i+1) not in q_physical:
                 if (i+1) in q_virtual:
                     q_leakage.append(i+1)
-            if i%2==1 and (i-1) not in q_physical:
+            if i % 2 == 1 and (i-1) not in q_physical:
                 if (i-1) in q_virtual:
                     q_leakage.append(i-1)
-
 
         q_opt = q_virtual+q_physical
         q_l = self.q_qiskit
@@ -1159,7 +1157,6 @@ class Circuit:
         elif label_measure == "Z" and label_ancilla == "parity":
             pass
 
-
         if q_measure and label_ancilla != "parity":
             for i in q_measure:
                 qc.measure(q_l[i], c_l[i])
@@ -1173,13 +1170,21 @@ class Circuit:
                 qc.h(q_ancilla)
                 qc.measure(q_ancilla, c_ancilla)
 
+                # if label_leakage == "leakage":
+                #     for count, elem in enumerate(q_leakage):
+                #         qc.h(q_ancilla_leakage[count])
+                #         qc.rzz(math.pi/2, q_ancilla_leakage[count], q_l[elem])
+                #         qc.rzz(math.pi/2, q_ancilla_leakage[count], q_l[elem])
+                #         qc.h(q_ancilla_leakage[count])
+                #         qc.x(q_ancilla_leakage[count])
+                #         qc.measure(q_ancilla_leakage[count], c_ancilla_leakage[count])
+
                 if label_leakage == "leakage":
                     for count, elem in enumerate(q_leakage):
-                        qc.h(q_ancilla_leakage[count])
-                        qc.rzz(math.pi/2, q_ancilla_leakage[count], q_l[elem])
-                        qc.rzz(math.pi/2, q_ancilla_leakage[count], q_l[elem])
-                        qc.h(q_ancilla_leakage[count])
-                        qc.x(q_ancilla_leakage[count])
+                        qc.cx(q_l[elem], q_ancilla_leakage[count])
+                        qc.x(q_l[elem])
+                        qc.cx(q_l[elem], q_ancilla_leakage[count])
+                        qc.x(q_l[elem])
                         qc.measure(q_ancilla_leakage[count], c_ancilla_leakage[count])
 
                 for i in q_opt:
