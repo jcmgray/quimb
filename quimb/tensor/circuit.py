@@ -1075,17 +1075,23 @@ class Circuit:
 
     def to_qiskit_gates(self, psi=None, optimal=False, q_measure=[], 
                         label_measure="Z", label_ancilla="parity",
-                        label_leakage="leakage"):
+                        label_leakage="off"):
         q_virtual, q_physical = self.qubits_in_light_cone(psi)
         q_leakage = []
-        for i in q_physical:
-            q_leakage.append(i)
-            if i % 2 == 0 and (i+1) not in q_physical:
-                if (i+1) in q_virtual:
-                    q_leakage.append(i+1)
-            if i % 2 == 1 and (i-1) not in q_physical:
-                if (i-1) in q_virtual:
-                    q_leakage.append(i-1)
+        if label_leakage=="leakage":
+            for i in q_physical:
+                q_leakage.append(i)
+                if i % 2 == 0 and (i+1) not in q_physical:
+                    if (i+1) in q_virtual:
+                        q_leakage.append(i+1)
+                if i % 2 == 1 and (i-1) not in q_physical:
+                    if (i-1) in q_virtual:
+                        q_leakage.append(i-1)
+        elif label_leakage=="leakage-all":
+            q_total=q_virtual+q_physical
+            for i in q_total:
+                q_leakage.append(i)
+
 
         q_opt = q_virtual+q_physical
         q_l = self.q_qiskit
@@ -1112,7 +1118,7 @@ class Circuit:
             qc.add_register(q_ancilla)
             qc.add_register(c_ancilla)
 
-        if label_leakage == "leakage":
+        if label_leakage == "leakage" or label_leakage == "leakage-all":
             q_ancilla_leakage = qiskit.QuantumRegister(len(q_leakage), "q_ancilla_leakage")
             c_ancilla_leakage = qiskit.ClassicalRegister(len(q_leakage), "c_ancilla_leakage")
             qc.add_register(q_ancilla_leakage)
@@ -1179,7 +1185,7 @@ class Circuit:
                 #         qc.x(q_ancilla_leakage[count])
                 #         qc.measure(q_ancilla_leakage[count], c_ancilla_leakage[count])
 
-                if label_leakage == "leakage":
+                if label_leakage == "leakage" or label_leakage == "leakage-all":
                     for count, elem in enumerate(q_leakage):
                         qc.cx(q_l[elem], q_ancilla_leakage[count])
                         qc.x(q_l[elem])
