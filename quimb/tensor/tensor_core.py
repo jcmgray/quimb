@@ -8535,6 +8535,15 @@ class PTensor(Tensor):
         """
         return Tensor(self)
 
+    def __getstate__(self):
+        # Save _parray directly
+        return self._parray, self._inds, self._tags, self._left_inds
+
+    def __setstate__(self, state):
+        self._parray, self._inds, tags, self._left_inds = state
+        self._tags = tags.copy()
+        self._owners = {}
+
 
 class IsoTensor(Tensor):
     """A ``Tensor`` subclass which keeps its ``left_inds`` by default even
