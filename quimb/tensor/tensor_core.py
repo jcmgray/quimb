@@ -8456,6 +8456,8 @@ class PTensor(Tensor):
     PTensor
     """
 
+    __slots__ = ('_parray', '_inds', '_tags', '_left_inds', '_owners')
+
     def __init__(self, fn, params, inds=(), tags=None, left_inds=None):
         super().__init__(
             PArray(fn, params), inds=inds, tags=tags, left_inds=left_inds)

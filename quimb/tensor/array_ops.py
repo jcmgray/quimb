@@ -477,6 +477,8 @@ class PArray:
     PTensor
     """
 
+    __slots__ = ('_fn', '_params', '_data', '_shape', '_shape_fn_id')
+
     def __init__(self, fn, params, shape=None):
         self.fn = fn
         self.params = params
