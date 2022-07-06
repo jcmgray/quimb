@@ -909,8 +909,8 @@ class Circuit:
             self._apply_gate(gate, **gate_opts)
             return
 
-        if hasattr(gate_id, 'shape'):
-            # raw gate
+        if hasattr(gate_id, 'shape') and not isinstance(gate_id, str):
+            # raw gate (numpy strings have a shape - ignore those)
             gate = Gate.from_raw(gate_id, gate_args, gate_round)
             self._apply_gate(gate, **gate_opts)
             return
