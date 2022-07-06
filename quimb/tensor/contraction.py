@@ -4,6 +4,7 @@ import contextlib
 import collections
 
 import opt_einsum as oe
+from opt_einsum.contract import parse_backend
 from autoray import infer_backend
 
 from ..utils import concat
@@ -103,14 +104,34 @@ def _get_contract_path(eq, *shapes, **kwargs):
     return tuple(path)
 
 
-# import cotengra as ctg
+if parse_backend([0], None) == 'numpy':
+    # new enough version to support backend=None
 
+    def _get_contract_expr(eq, *shapes, **kwargs):
+        """Get the contraction expression - callable taking raw arrays.
+        """
+        return oe.contract_expression(eq, *shapes, **kwargs)
 
-def _get_contract_expr(eq, *shapes, **kwargs):
-    """Get the contraction expression - callable taking raw arrays.
-    """
-    # return ctg.contract_expression(eq, *shapes, **kwargs)
-    return oe.contract_expression(eq, *shapes, **kwargs)
+else:
+    # old: wrap expression to always convert backend=None to 'auto'
+
+    class ConvertBackendKwarg:
+
+        __slots__ = ('fn',)
+
+        def __init__(self, fn):
+            self.fn = fn
+
+        def __call__(self, *args, **kwargs):
+            backend = kwargs.pop('backend', 'auto')
+            if backend is None:
+                backend = 'auto'
+            return self.fn(*args, backend=backend, **kwargs)
+
+    def _get_contract_expr(eq, *shapes, **kwargs):
+        return ConvertBackendKwarg(
+            oe.contract_expression(eq, *shapes, **kwargs)
+        )
 
 
 def _get_contract_info(eq, *shapes, **kwargs):
