@@ -13,10 +13,14 @@ v1.4.1 (unreleased)
 - refactor contraction, allowing using cotengra directly
 - add :meth:`~quimb.core.tensor.Tensor.visualize` for visualizing the actual
   data entries of an arbitrarily high dimensional tensor
+- add `Gate` class for more robust tracking and manipulation of gates in
+  quantum :class:`Circuit` simulation
 
 **Bug fixes:**
 
   - fix force atlas 2 and `weight_attr` bug (:issue:`126`)
+  - allow unpickling of `PTensor` objects (:issue:`128`, :pr:`131`)
+
 
 .. _whats-new.1.4.0:
 
