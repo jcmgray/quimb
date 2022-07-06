@@ -1636,7 +1636,6 @@ class Circuit:
         G,
         where,
         optimize='auto-hq',
-        fold=False,
         simplify_sequence='ADCRS',
         simplify_atol=1e-12,
         simplify_equalize_norms=False,
@@ -1708,9 +1707,7 @@ class Circuit:
             'equalize_norms': simplify_equalize_norms,
         }
 
-        rho = self.get_rdm_lightcone_simplified(
-            where=where, fold=fold, **fs_opts
-        )
+        rho = self.get_rdm_lightcone_simplified(where=where, **fs_opts)
         k_inds = tuple(self.ket_site_ind(i) for i in where)
         b_inds = tuple(self.bra_site_ind(i) for i in where)
 
