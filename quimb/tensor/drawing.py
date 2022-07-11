@@ -88,7 +88,7 @@ def draw_tn(
     fix=None,
     k=None,
     iterations=200,
-    initial_layout='spectral',
+    initial_layout='auto',
     use_forceatlas2=1000,
     use_spring_weight=False,
     node_color=None,
@@ -161,8 +161,8 @@ def draw_tn(
     iterations : int, optional
         How many iterations to perform when when finding the best layout
         using node repulsion. Ramp this up if the graph is drawing messily.
-    initial_layout : {'spectral', 'kamada_kawai', 'circular', 'planar', \\
-                      'random', 'shell', 'bipartite', ...}, optional
+    initial_layout : {'auto', 'spectral', 'kamada_kawai', 'circular', \\
+                      'planar', 'random', 'shell', 'bipartite', ...}, optional
         The name of a networkx layout to use before iterating with the
         spring layout. Set ``iterations=0`` if you just want to use this
         layout only.
@@ -702,7 +702,7 @@ def get_positions(
     tn,
     G,
     fix=None,
-    initial_layout='spectral',
+    initial_layout='auto',
     k=None,
     iterations=200,
     use_forceatlas2=False,
@@ -727,6 +727,15 @@ def get_positions(
     if all(node in fix for node in G.nodes):
         # everything is already fixed
         return fix
+
+    if initial_layout == 'auto':
+        # automatically select
+        if len(G) <= 100:
+            # usually nicest
+            initial_layout = 'kamada_kawai'
+        else:
+            # faster, but not as nice
+            initial_layout = 'spectral'
 
     # use spectral or other layout as starting point
     pos0 = getattr(nx, initial_layout + '_layout')(G)
