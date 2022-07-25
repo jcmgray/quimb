@@ -94,6 +94,7 @@ def draw_tn(
     node_color=None,
     node_scale=1.0,
     node_size=None,
+    node_alpha=1.0,
     node_shape='o',
     node_outline_size=None,
     node_outline_darkness=0.8,
@@ -110,6 +111,8 @@ def draw_tn(
     label_color=None,
     font_size=10,
     font_size_inner=7,
+    font_family='monospace',
+    isdark=None,
     figsize=(6, 6),
     margin=None,
     xlims=None,
@@ -175,14 +178,16 @@ def draw_tn(
         repulsion layout algorithms.
     node_color : tuple[float], optional
         Default color of nodes.
+    node_scale : float, optional
+        Scale the node sizes by this factor, in addition to the automatic
+        scaling based on the number of tensors.
     node_size : None, float or dict, optional
         How big to draw the tensors. Can be a global single value, or a dict
         containing values for specific tags or tids. This is in absolute
         figure units. See ``node_scale`` simply scale the node sizes up or
         down.
-    node_scale : float, optional
-        Scale the node sizes by this factor, in addition to the automatica
-        scaling based on the number of tensors.
+    node_alpha : float, optional
+        Transparency of the nodes.
     node_shape : None, str or dict, optional
         What shape to draw the tensors. Should correspond to a matplotlib
         scatter marker. Can be a global single value, or a dict containing
@@ -214,7 +219,13 @@ def draw_tn(
         Font size for drawing tags and outer indices.
     font_size_inner : int, optional
         Font size for drawing inner indices.
-    figsize : tuple of int
+    font_family : str, optional
+        Font family to use for all labels.
+    isdark : bool, optional
+        Explicitly specify that the background is dark, and use slightly
+        different default drawing colors. If not specified detects
+        automatically from `matplotlib.rcParams`.
+    figsize : tuple of int, optional
         The size of the drawing.
     margin : None or float, optional
         Specify an argument for ``ax.margin``, else the plot limits will try
@@ -260,21 +271,30 @@ def draw_tn(
     if show_tags is None:
         show_tags = (tn.num_tensors <= 20)
 
-    isdark = sum(to_rgb(mpl.rcParams['figure.facecolor'])) / 3 < 0.5
+    if isdark is None:
+        isdark = sum(to_rgb(mpl.rcParams['figure.facecolor'])) / 3 < 0.5
+
     if isdark:
-        draw_color = (0.75, 0.77, 0.80, 1.0)
+        default_draw_color = (0.55, 0.57, 0.60, 1.0)
+        default_label_color = (.85, .85, .85, 1.0)
     else:
-        draw_color = (0.45, 0.47, 0.50, 1.0)
+        default_draw_color = (0.45, 0.47, 0.50, 1.0)
+        default_label_color = (.25, .25, .25, 1.0)
 
     if edge_color is None:
-        edge_color = draw_color
+        edge_color = default_draw_color
     else:
         edge_color = mpl.colors.to_rgb(edge_color)
 
     if node_color is None:
-        node_color = draw_color
+        node_color = default_draw_color
     else:
         node_color = mpl.colors.to_rgb(node_color)
+
+    if label_color is None:
+        label_color = default_label_color
+    elif label_color == 'inherit':
+        label_color = mpl.rcParams['axes.labelcolor']
 
     highlight_tids_color = to_rgba(highlight_tids_color)
     highlight_inds_color = to_rgba(highlight_inds_color)
@@ -290,9 +310,6 @@ def draw_tn(
         node_shape, tn, default='o')
     node_hatch = parse_dict_to_tids_or_inds(
         node_hatch, tn, default='')
-
-    if label_color is None:
-        label_color = mpl.rcParams['axes.labelcolor']
 
     # build the graph
     G = nx.Graph()
@@ -358,7 +375,8 @@ def draw_tn(
             node_labels[tid] = str(tid)
         elif show_tags:
             # make the tags appear with auto vertical extent
-            node_label = '{' + str(list(t.tags))[1:-1] + '}'
+            # node_label = '{' + str(list(t.tags))[1:-1] + '}'
+            node_label = ', '.join(map(str, t.tags))
             node_labels[tid] = "\n".join(textwrap.wrap(
                 node_label, max(2 * len(node_label) ** 0.5, 16)
             ))
@@ -421,10 +439,8 @@ def draw_tn(
             ax.set_ylim(ymin - real_node_size, ymax + real_node_size)
         else:
             ax.margins(margin)
-
-        created_fig = True
     else:
-        created_fig = False
+        fig = None
 
     nx.draw_networkx_edges(
         G, pos,
@@ -492,6 +508,7 @@ def draw_tn(
             edgecolors=data['edgecolors'],
             hatch=hatch,
             zorder=2,
+            alpha=node_alpha,
         )
 
     # draw incomcing arrows for tensor left_inds
@@ -545,6 +562,8 @@ def draw_tn(
             edge_labels=edge_labels,
             font_size=font_size_inner,
             font_color=label_color,
+            font_family=font_family,
+            bbox={'ec': (0, 0, 0, 0), 'fc': (0, 0, 0, 0)},
             ax=ax,
         )
     if show_tags or show_inds:
@@ -553,6 +572,7 @@ def draw_tn(
             labels=node_labels,
             font_size=font_size,
             font_color=label_color,
+            font_family=font_family,
             ax=ax,
         )
 
@@ -560,23 +580,50 @@ def draw_tn(
     if colors and legend:
         handles = []
         for color in colors.values():
-            handles += [plt.Line2D([0], [0], marker='o', color=color,
-                                   linestyle='', markersize=10)]
+
+            ecolor = tuple(
+                (1.0 if i == 3 else node_outline_darkness) * c
+                for i, c in enumerate(color)
+            )
+            linewidth = min(3, node_size.default_factory()**0.5 / 5)
+
+            handles += [
+                plt.Line2D(
+                    [0], [0],
+                    marker='o',
+                    color=color,
+                    markeredgecolor=ecolor,
+                    markeredgewidth=linewidth,
+                    linestyle='',
+                    markersize=10
+                )
+            ]
 
         # needed in case '_' is the first character
         lbls = [f" {lbl}" for lbl in colors]
 
-        plt.legend(handles, lbls, ncol=max(round(len(handles) / 20), 1),
-                   loc='center left', bbox_to_anchor=(1, 0.5))
+        legend = plt.legend(
+            handles, lbls,
+            ncol=max(round(len(handles) / 20), 1),
+            loc='center left',
+            bbox_to_anchor=(1, 0.5),
+            labelcolor=label_color,
+            prop={'family': font_family},
+        )
+        # do this manually as otherwise can't make only face transparent
+        legend.get_frame().set_alpha(None)
+        legend.get_frame().set_facecolor((0.0, 0.0, 0.0, 0.0))
+        legend.get_frame().set_edgecolor((0.6, 0.6, 0.6, 0.2))
 
-    if not created_fig:
-        # we added to axisting axes
+    if fig is None:
+        # ax was supplied, don't modify and simply return
         return
-
-    if xlims is not None:
-        ax.set_xlim(xlims)
-    if ylims is not None:
-        ax.set_ylim(ylims)
+    else:
+        # axes and figure were created
+        if xlims is not None:
+            ax.set_xlim(xlims)
+        if ylims is not None:
+            ax.set_ylim(ylims)
 
     if return_fig:
         return fig
