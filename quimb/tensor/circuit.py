@@ -11,10 +11,15 @@ from autoray import do, reshape
 import quimb as qu
 from ..utils import progbar as _progbar
 from ..utils import oset, partitionby, concatv, partition_all, ensure_dict, LRU
-from .tensor_core import (get_tags, tags_to_oset, oset_union, tensor_contract,
-                          PTensor, Tensor, TensorNetwork, rand_uuid)
-from .tensor_gen import MPS_computational_state
-from .tensor_1d import TensorNetwork1DVector, Dense1D, TensorNetwork1DOperator
+from .tensor_core import (
+    get_tags, tags_to_oset, oset_union, tensor_contract,
+    PTensor, Tensor, TensorNetwork, rand_uuid,
+)
+from .tensor_gen import (
+    MPS_computational_state, TN_from_sites_computational_state
+)
+from .tensor_arbgeom import TensorNetworkGenOperator
+from .tensor_1d import Dense1D
 from . import array_ops as ops
 
 
@@ -509,9 +514,15 @@ register_param_gate('SU4', su4_gate_param_gen, 2)
 
 # special non-tensor gates
 
-def apply_swap(psi, i, j):
-    iind, jind = map(psi.site_ind, (int(i), int(j)))
-    psi.reindex_({iind: jind, jind: iind})
+def apply_swap(psi, i, j, **gate_opts):
+
+    contract = gate_opts.pop('contract', None)
+    if contract == 'swap+split':
+        gate_opts.pop('propagate_tags', None)
+        psi.swap_sites_with_compress_(i, j, **gate_opts)
+    else:
+        iind, jind = map(psi.site_ind, (int(i), int(j)))
+        psi.reindex_({iind: jind, jind: iind})
 
 
 register_special_gate('SWAP', apply_swap, 2)
@@ -770,19 +781,19 @@ class Circuit:
         bra_site_ind_id='b{}',
     ):
 
-        if N is None and psi0 is None:
+        if (N is None) and (psi0 is None):
             raise ValueError("You must supply one of `N` or `psi0`.")
 
         elif psi0 is None:
             self.N = N
-            self._psi = MPS_computational_state('0' * N, dtype=psi0_dtype)
+            self._psi = self._init_state(N, dtype=psi0_dtype)
 
         elif N is None:
             self._psi = psi0.copy()
-            self.N = psi0.L
+            self.N = psi0.nsites
 
         else:
-            if N != psi0.L:
+            if N != psi0.nsites:
                 raise ValueError("`N` doesn't match `psi0`.")
             self.N = N
             self._psi = psi0.copy()
@@ -799,11 +810,6 @@ class Circuit:
         self.gate_opts.setdefault('contract', 'auto-split-gate')
         self.gate_opts.setdefault('propagate_tags', 'register')
         self.gates = []
-
-        # when we add gates we will modify the TN structure, apart from in the
-        # 'swap+split' case, which explicitly maintains an MPS
-        if self.gate_opts['contract'] != 'swap+split':
-            self._psi.view_as_(TensorNetwork1DVector)
 
         self._ket_site_ind_id = self._psi.site_ind_id
         self._bra_site_ind_id = bra_site_ind_id
@@ -848,8 +854,14 @@ class Circuit:
         qc.apply_gates(info['gates'])
         return qc
 
+    def _init_state(self, N, dtype='complex128'):
+        return TN_from_sites_computational_state(
+            site_map={i: '0' for i in range(N)},
+            dtype=dtype
+        )
+
     def _apply_gate(self, gate, tags=None, **gate_opts):
-        """Apply a `Gate` to this `Circuit`.
+        """Apply a ``Gate`` to this ``Circuit``.
         """
         tags = tags_to_oset(tags)
         tags.add(f'GATE_{len(self.gates)}')
@@ -858,13 +870,15 @@ class Circuit:
         if gate.tag is not None:
             tags.add(gate.tag)
 
-        if gate.special:
-            # these don't involve gating with an array
-            SPECIAL_GATES[gate.label](self._psi, *gate.params, *gate.qubits)
-        else:
-            # overide any default gate opts
-            opts = {**self.gate_opts, **gate_opts}
+        # overide any default gate opts
+        opts = {**self.gate_opts, **gate_opts}
 
+        if gate.special:
+            # these are specified as a general function
+            SPECIAL_GATES[gate.label](
+                self._psi, *gate.params, *gate.qubits, **opts
+            )
+        else:
             # apply the gate to the TN!
             self._psi.gate_(gate.array, gate.qubits, tags=tags, **opts)
 
@@ -1124,7 +1138,7 @@ class Circuit:
 
         U.reindex_(ixmap)
         U.view_as_(
-            TensorNetwork1DOperator,
+            TensorNetworkGenOperator,
             upper_ind_id=self._ket_site_ind_id,
             lower_ind_id=self._bra_site_ind_id,
         )
@@ -2778,10 +2792,19 @@ class CircuitMPS(Circuit):
     be useful.
     """
 
-    def __init__(self, N=None, psi0=None, gate_opts=None, tags=None):
+    def __init__(
+        self,
+        N=None,
+        psi0=None,
+        gate_opts=None,
+        **circuit_opts,
+    ):
         gate_opts = ensure_dict(gate_opts)
         gate_opts.setdefault('contract', 'swap+split')
-        super().__init__(N, psi0, gate_opts, tags)
+        super().__init__(N, psi0, gate_opts, **circuit_opts)
+
+    def _init_state(self, N, dtype='complex128'):
+        return MPS_computational_state('0' * N, dtype=dtype)
 
     @property
     def psi(self):

@@ -81,6 +81,80 @@ def rand_phased(shape, inds, tags=None, dtype=complex):
     return Tensor(data=data, inds=inds, tags=tags)
 
 
+def TN_from_sites_product_state(
+    site_map,
+    site_tag_id='I{}',
+    site_ind_id='k{}',
+):
+    """A product state in general tensor network form.
+
+    Parameters
+    ----------
+    site_map : dict[hashable, array_like]
+        Mapping of site to local state.
+    site_tag_id : str, optional
+        Format string for site tag labels.
+    site_ind_id : str, optional
+        Format string for site index labels.
+
+    Returns
+    -------
+    TensorNetworkGenVector
+    """
+    sites = tuple(sorted(site_map))
+
+    tn = TensorNetwork([
+        Tensor(
+            data=site_map[site],
+            inds=[site_ind_id.format(site)],
+            tags=[site_tag_id.format(site)],
+        )
+        for site in sites
+    ])
+
+    return tn.view_as_(
+        TensorNetworkGenVector, sites=sites,
+        site_tag_id=site_tag_id, site_ind_id=site_ind_id
+    )
+
+
+def TN_from_sites_computational_state(
+    site_map,
+    site_tag_id='I{}',
+    site_ind_id='k{}',
+    dtype='float64',
+):
+    """A computational basis state in general tensor network form.
+
+    Parameters
+    ----------
+    site_map : dict[hashable, str]
+        Mapping of site to computational state, which should be one of
+        ``('0', '1', '+', '-')``.
+    site_tag_id : str, optional
+        Format string for site tag labels.
+    site_ind_id : str, optional
+        Format string for site index labels.
+    dtype : {'float64', 'complex128', 'float32', 'complex64'}, optional
+        The data type to use for the array representation.
+
+    Returns
+    -------
+    TensorNetworkGenVector
+    """
+    array_map = {
+        '0': np.array([1., 0.], dtype=dtype),
+        '1': np.array([0., 1.], dtype=dtype),
+        '+': np.array([2**-0.5, 2**-0.5], dtype=dtype),
+        '-': np.array([2**-0.5, -2**-0.5], dtype=dtype),
+    }
+    return TN_from_sites_product_state(
+        {k: array_map[v] for k, v in site_map.items()},
+        site_tag_id=site_tag_id,
+        site_ind_id=site_ind_id,
+    )
+
+
 def gen_unique_edges(edges):
     seen = set()
     for node_a, node_b in edges:
@@ -353,7 +427,7 @@ def TN_rand_reg(
 
     Returns
     -------
-    TensorNetwork
+    TensorNetworkGen or TensorNetworkGenVector
     """
     import networkx as nx
     G = nx.random_degree_sequence_graph([reg] * n, seed=seed)
@@ -369,8 +443,8 @@ def TN2D_from_fill_fn(
     D,
     cyclic=False,
     site_tag_id='I{},{}',
-    row_tag_id='ROW{}',
-    col_tag_id='COL{}',
+    x_tag_id='X{}',
+    y_tag_id='Y{}',
 ):
     """A scalar 2D lattice tensor network with tensors filled by a function.
 
@@ -390,9 +464,9 @@ def TN2D_from_fill_fn(
         separately using a tuple.
     site_tag_id : str, optional
         String specifier for naming convention of site tags.
-    row_tag_id : str, optional
+    x_tag_id : str, optional
         String specifier for naming convention of row tags.
-    col_tag_id : str, optional
+    y_tag_id : str, optional
         String specifier for naming convention of column tags.
 
     Returns
@@ -427,7 +501,7 @@ def TN2D_from_fill_fn(
         shape = (D,) * len(inds)
         data = fill_fn(shape)
         tags = [site_tag_id.format(i, j),
-                row_tag_id.format(i), col_tag_id.format(j)]
+                x_tag_id.format(i), y_tag_id.format(j)]
         ts.append(Tensor(data=data, inds=inds, tags=tags))
 
     tn = TensorNetwork(ts)
@@ -436,8 +510,8 @@ def TN2D_from_fill_fn(
         TensorNetwork2D,
         Lx=Lx, Ly=Ly,
         site_tag_id=site_tag_id,
-        row_tag_id=row_tag_id,
-        col_tag_id=col_tag_id,
+        x_tag_id=x_tag_id,
+        y_tag_id=y_tag_id,
     )
 
 
@@ -447,8 +521,8 @@ def TN2D_empty(
     D,
     cyclic=False,
     site_tag_id='I{},{}',
-    row_tag_id='ROW{}',
-    col_tag_id='COL{}',
+    x_tag_id='X{}',
+    y_tag_id='Y{}',
     dtype='float64',
 ):
     """A scalar 2D lattice tensor network initialized with empty tensors.
@@ -466,9 +540,9 @@ def TN2D_empty(
         separately using a tuple.
     site_tag_id : str, optional
         String specifier for naming convention of site tags.
-    row_tag_id : str, optional
+    x_tag_id : str, optional
         String specifier for naming convention of row tags.
-    col_tag_id : str, optional
+    y_tag_id : str, optional
         String specifier for naming convention of column tags.
     dtype : str, optional
         The data type of the tensors.
@@ -482,7 +556,7 @@ def TN2D_empty(
 
     return TN2D_from_fill_fn(
         fill_fn, Lx=Lx, Ly=Ly, D=D, cyclic=cyclic,
-        site_tag_id=site_tag_id, row_tag_id=row_tag_id, col_tag_id=col_tag_id,
+        site_tag_id=site_tag_id, x_tag_id=x_tag_id, y_tag_id=y_tag_id,
     )
 
 
@@ -493,8 +567,8 @@ def TN2D_with_value(
     D,
     cyclic=False,
     site_tag_id='I{},{}',
-    row_tag_id='ROW{}',
-    col_tag_id='COL{}',
+    x_tag_id='X{}',
+    y_tag_id='Y{}',
     dtype=None,
 ):
     """A scalar 2D lattice tensor network with every element set to ``value``.
@@ -515,9 +589,9 @@ def TN2D_with_value(
         separately using a tuple.
     site_tag_id : str, optional
         String specifier for naming convention of site tags.
-    row_tag_id : str, optional
+    x_tag_id : str, optional
         String specifier for naming convention of row tags.
-    col_tag_id : str, optional
+    y_tag_id : str, optional
         String specifier for naming convention of column tags.
     dtype : str, optional
         The data type of the tensors.
@@ -533,7 +607,7 @@ def TN2D_with_value(
 
     return TN2D_from_fill_fn(
         fill_fn, Lx=Lx, Ly=Ly, D=D, cyclic=cyclic,
-        site_tag_id=site_tag_id, row_tag_id=row_tag_id, col_tag_id=col_tag_id,
+        site_tag_id=site_tag_id, x_tag_id=x_tag_id, y_tag_id=y_tag_id,
     )
 
 
@@ -544,8 +618,8 @@ def TN2D_rand(
     D,
     cyclic=False,
     site_tag_id='I{},{}',
-    row_tag_id='ROW{}',
-    col_tag_id='COL{}',
+    x_tag_id='X{}',
+    y_tag_id='Y{}',
     dtype='float64',
 ):
     """A random scalar 2D lattice tensor network.
@@ -563,9 +637,9 @@ def TN2D_rand(
         separately using a tuple.
     site_tag_id : str, optional
         String specifier for naming convention of site tags.
-    row_tag_id : str, optional
+    x_tag_id : str, optional
         String specifier for naming convention of row tags.
-    col_tag_id : str, optional
+    y_tag_id : str, optional
         String specifier for naming convention of column tags.
     dtype : dtype, optional
         Data type of the random arrays.
@@ -581,7 +655,7 @@ def TN2D_rand(
 
     return TN2D_from_fill_fn(
         fill_fn, Lx=Lx, Ly=Ly, D=D, cyclic=cyclic,
-        site_tag_id=site_tag_id, row_tag_id=row_tag_id, col_tag_id=col_tag_id,
+        site_tag_id=site_tag_id, x_tag_id=x_tag_id, y_tag_id=y_tag_id,
     )
 
 
@@ -1074,8 +1148,8 @@ def TN2D_classical_ising_partition_function(
     h=0.0,
     cyclic=False,
     site_tag_id='I{},{}',
-    row_tag_id='ROW{}',
-    col_tag_id='COL{}',
+    x_tag_id='X{}',
+    y_tag_id='Y{}',
 ):
     """The tensor network representation of the 2D classical ising model
     partition function.
@@ -1097,9 +1171,9 @@ def TN2D_classical_ising_partition_function(
         separately using a tuple.
     site_tag_id : str, optional
         String specifier for naming convention of site tags.
-    row_tag_id : str, optional
+    x_tag_id : str, optional
         String specifier for naming convention of row tags.
-    col_tag_id : str, optional
+    y_tag_id : str, optional
         String specifier for naming convention of column tags.
 
     Returns
@@ -1151,8 +1225,8 @@ def TN2D_classical_ising_partition_function(
             ),
             inds=inds,
             tags=[site_tag_id.format(ni, nj),
-                  row_tag_id.format(ni),
-                  col_tag_id.format(nj)]))
+                  x_tag_id.format(ni),
+                  y_tag_id.format(nj)]))
 
     tn = TensorNetwork(ts)
 
@@ -1160,8 +1234,8 @@ def TN2D_classical_ising_partition_function(
         TensorNetwork2D,
         Lx=Lx, Ly=Ly,
         site_tag_id=site_tag_id,
-        row_tag_id=row_tag_id,
-        col_tag_id=col_tag_id,
+        x_tag_id=x_tag_id,
+        y_tag_id=y_tag_id,
     )
 
 
@@ -1774,6 +1848,8 @@ def MPS_computational_state(binary, dtype='float64', cyclic=False, **mps_opts):
     ----------
     binary : str or sequence of int
         String specifying the state, e.g. ``'00101010111'`` or ``[0, 0, 1]``.
+    dtype : {'float64', 'complex128', 'float32', 'complex64'}, optional
+        The data type to use for the array representation.
     cyclic : bool, optional
         Generate a MPS with periodic boundary conditions or not, default open
         boundary conditions.

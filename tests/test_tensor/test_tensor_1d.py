@@ -365,18 +365,22 @@ class TestMatrixProductState:
         else:
             if rescale:
                 if keep == [1]:
-                    assert r.lower_inds == ('u0',)
-                    assert r.upper_inds == ('k0',)
+                    assert r.lower_inds_present == ('u0',)
+                    assert r.upper_inds_present == ('k0',)
                 else:
-                    assert r.lower_inds == ('u0', 'u1', 'u2', 'u3', 'u4')
-                    assert r.upper_inds == ('k0', 'k1', 'k2', 'k3', 'k4')
+                    assert r.lower_inds_present == ('u0', 'u1', 'u2',
+                                                   'u3', 'u4')
+                    assert r.upper_inds_present == ('k0', 'k1', 'k2',
+                                                   'k3', 'k4')
             else:
                 if keep == [1]:
-                    assert r.lower_inds == ('u1',)
-                    assert r.upper_inds == ('k1',)
+                    assert r.lower_inds_present == ('u1',)
+                    assert r.upper_inds_present == ('k1',)
                 else:
-                    assert r.lower_inds == ('u2', 'u3', 'u4', 'u6', 'u8')
-                    assert r.upper_inds == ('k2', 'k3', 'k4', 'k6', 'k8')
+                    assert r.lower_inds_present == ('u2', 'u3', 'u4',
+                                                    'u6', 'u8')
+                    assert r.upper_inds_present == ('k2', 'k3', 'k4',
+                                                    'k6', 'k8')
         assert_allclose(r.trace(), 1.0)
         assert qu.isherm(rd)
         pd = p.to_dense()

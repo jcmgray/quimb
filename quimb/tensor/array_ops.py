@@ -40,7 +40,7 @@ def asarray(array):
 
         # is some kind of python container or element -> iterate or return
         try:
-            return tuple(_nd_py_iter(sub) for sub in x)
+            return list(_nd_py_iter(sub) for sub in x)
         except TypeError:
             return x
 

@@ -3,7 +3,7 @@ import itertools
 from operator import add
 from numbers import Integral
 from collections import defaultdict
-from itertools import product, starmap, cycle, combinations
+from itertools import product, cycle, combinations
 
 from autoray import do, dag
 
@@ -18,6 +18,10 @@ from .tensor_core import (
     oset,
     tags_to_oset,
     rand_uuid,
+)
+from .tensor_arbgeom import (
+    TensorNetworkGen,
+    TensorNetworkGenVector,
 )
 
 
@@ -133,7 +137,7 @@ class Rotator3D:
             self.z_tag = tn.y_tag
             self.site_tag = lambda i, j, k: tn.site_tag(j, k, i)
 
-        if 'min' in from_which:
+        if 'min' in self.from_which:
             # -> sweeps are increasing
             self.sweep = range(self.imin, self.imax + 1, + 1)
             self.istep = +1
@@ -234,7 +238,7 @@ _compress_plane_opts = {
 }
 
 
-class TensorNetwork3D(TensorNetwork):
+class TensorNetwork3D(TensorNetworkGen):
 
     _NDIMS = 3
     _EXTRA_PROPS = (
@@ -258,13 +262,13 @@ class TensorNetwork3D(TensorNetwork):
         )
 
     def __and__(self, other):
-        new = super().__and__(other)
+        new = TensorNetwork.__and__(self, other)
         if self._compatible_3d(other):
             new.view_as_(TensorNetwork3D, like=self)
         return new
 
     def __or__(self, other):
-        new = super().__or__(other)
+        new = TensorNetwork.__or__(self, other)
         if self._compatible_3d(other):
             new.view_as_(TensorNetwork3D, like=self)
         return new
@@ -293,15 +297,11 @@ class TensorNetwork3D(TensorNetwork):
         """
         return self._Lx * self._Ly * self._Lz
 
-    @property
-    def site_tag_id(self):
-        """The string specifier for tagging each site of this 3D TN.
-        """
-        return self._site_tag_id
-
-    def site_tag(self, i, j, k):
+    def site_tag(self, i, j=None, k=None):
         """The name of the tag specifiying the tensor at site ``(i, j, k)``.
         """
+        if j is None:
+            i, j, k = i
         if not isinstance(i, str):
             i = i % self.Lx
         if not isinstance(j, str):
@@ -361,12 +361,6 @@ class TensorNetwork3D(TensorNetwork):
         """
         return tuple(map(self.z_tag, range(self.Lz)))
 
-    @property
-    def site_tags(self):
-        """All of the ``Lx * Ly`` site tags.
-        """
-        return tuple(starmap(self.site_tag, self.gen_site_coos()))
-
     def maybe_convert_coo(self, coo):
         """Check if ``coo`` is a tuple of three ints and convert to the
         corresponding site tag if so.
@@ -423,23 +417,6 @@ class TensorNetwork3D(TensorNetwork):
         return all(mn <= u <= mx for u, (mn, mx) in
                    zip(coo, (xrange, yrange, zrange)))
 
-    def gen_site_coos_present(self):
-        """Return only the sites that are present in this TN.
-
-        Examples
-        --------
-
-            >>> tn = qtn.TN3D_rand(4, 4, 4, 2)
-            >>> tn_sub = tn.select_local('I1,2,3', max_distance=1)
-            >>> list(tn_sub.gen_site_coos_present())
-            [(0, 2, 3), (1, 1, 3), (1, 2, 2), (1, 2, 3), (1, 3, 3), (2, 2, 3)]
-
-        """
-        return (
-            coo for coo in self.gen_site_coos()
-            if self.site_tag(*coo) in self.tag_map
-        )
-
     def get_ranges_present(self):
         """Return the range of site coordinates present in this TN.
 
@@ -459,7 +436,7 @@ class TensorNetwork3D(TensorNetwork):
         """
         xmin = ymin = zmin = float('inf')
         xmax = ymax = zmax = float('-inf')
-        for i, j, k in self.gen_site_coos_present():
+        for i, j, k in self.gen_sites_present():
             xmin = min(i, xmin)
             ymin = min(j, ymin)
             zmin = min(k, zmin)
@@ -576,8 +553,6 @@ class TensorNetwork3D(TensorNetwork):
         if step_only is not None:
             stepping_order = stepping_order[step_only]
 
-        # stepping_order = stepping_order[::-1]
-
         # at each step generate the bonds
         if xstep is None:
             xstep = -1 if xreverse else +1
@@ -635,13 +610,13 @@ class TensorNetwork3D(TensorNetwork):
             tag_a = self.site_tag(*coo_a)
             tag_b = self.site_tag(*coo_b)
 
+            # make sure single tensor at each site, skip if none
             try:
                 num_a = len(self.tag_map[tag_a])
                 if num_a > 1:
                     self ^= tag_a
             except KeyError:
                 continue
-
             try:
                 num_b = len(self.tag_map[tag_b])
                 if num_b > 1:
@@ -669,21 +644,21 @@ class TensorNetwork3D(TensorNetwork):
         compress_opts.setdefault('absorb', 'both')
         compress_opts.setdefault('equalize_norms', equalize_norms)
 
-        pairs = list(self.gen_pairs(
+        pairs = self.gen_pairs(
             xrange=xrange, yrange=yrange, zrange=zrange, **gen_pair_opts,
-        ))
+        )
 
         for coo_a, coo_b in pairs:
             tag_a = self.site_tag(*coo_a)
             tag_b = self.site_tag(*coo_b)
 
+            # make sure single tensor at each site, skip if none
             try:
                 num_a = len(self.tag_map[tag_a])
                 if num_a > 1:
                     self ^= tag_a
             except KeyError:
                 continue
-
             try:
                 num_b = len(self.tag_map[tag_b])
                 if num_b > 1:
@@ -733,7 +708,6 @@ class TensorNetwork3D(TensorNetwork):
 
         for i in r3d.sweep[:-1]:
             for layer_tag in layer_tags:
-
                 for j in range(jmin, jmax + 1):
                     for k in range(kmin, kmax + 1):
 
@@ -1131,8 +1105,7 @@ def calc_cell_map(cells):
     return mapping
 
 
-class TensorNetwork3DVector(TensorNetwork3D,
-                            TensorNetwork):
+class TensorNetwork3DVector(TensorNetwork3D, TensorNetworkGenVector):
     """Mixin class  for a 3D square lattice vector TN, i.e. one with a single
     physical index per site.
     """
@@ -1148,11 +1121,9 @@ class TensorNetwork3DVector(TensorNetwork3D,
         '_site_ind_id',
     )
 
-    @property
-    def site_ind_id(self):
-        return self._site_ind_id
-
-    def site_ind(self, i, j, k):
+    def site_ind(self, i, j=None, k=None):
+        if j is None:
+            i, j, k = i
         if not isinstance(i, str):
             i = i % self.Lx
         if not isinstance(j, str):
@@ -1163,7 +1134,7 @@ class TensorNetwork3DVector(TensorNetwork3D,
 
     def reindex_sites(self, new_id, where=None, inplace=False):
         if where is None:
-            where = self.gen_site_coos()
+            where = self.gen_sites_present()
 
         return self.reindex(
             {
@@ -1171,30 +1142,6 @@ class TensorNetwork3DVector(TensorNetwork3D,
             },
             inplace=inplace
         )
-
-    @site_ind_id.setter
-    def site_ind_id(self, new_id):
-        if self._site_ind_id != new_id:
-            self.reindex_sites(new_id, inplace=True)
-            self._site_ind_id = new_id
-
-    @property
-    def site_inds(self):
-        """All of the site inds.
-        """
-        return tuple(starmap(self.site_ind, self.gen_site_coos()))
-
-    def to_dense(self, *inds_seq, **contract_opts):
-        """Return the dense ket version of this 3D vector, i.e. a ``qarray``
-        with shape (-1, 1).
-        """
-        if not inds_seq:
-            # just use list of site indices
-            return do('reshape', TensorNetwork.to_dense(
-                self, self.site_inds, **contract_opts
-            ), (-1, 1))
-
-        return TensorNetwork.to_dense(self, *inds_seq, **contract_opts)
 
     def phys_dim(self, i=None, j=None, k=None):
         """Get the size of the physical indices / a specific physical index.
@@ -1226,7 +1173,7 @@ class TensorNetwork3DVector(TensorNetwork3D,
         else:
             where = tuple(where)
 
-        inds = tuple(starmap(self.site_ind, where))
+        inds = tuple(map(self.site_ind, where))
         return super().gate_inds(
             G, inds, contract=contract, tags=tags, info=info, inplace=inplace,
             **compress_opts
@@ -1235,8 +1182,7 @@ class TensorNetwork3DVector(TensorNetwork3D,
     gate_ = functools.partialmethod(gate, inplace=True)
 
 
-class TensorNetwork3DFlat(TensorNetwork3D,
-                          TensorNetwork):
+class TensorNetwork3DFlat(TensorNetwork3D):
     """Mixin class for a 3D square lattice tensor network with a single tensor
     per site, for example, both PEPS and PEPOs.
     """
@@ -1265,10 +1211,7 @@ class TensorNetwork3DFlat(TensorNetwork3D,
         return self[coo1].ind_size(b_ix)
 
 
-class PEPS3D(TensorNetwork3DVector,
-             TensorNetwork3DFlat,
-             TensorNetwork3D,
-             TensorNetwork):
+class PEPS3D(TensorNetwork3DVector, TensorNetwork3DFlat):
     r"""Projected Entangled Pair States object (3D).
 
     Parameters
