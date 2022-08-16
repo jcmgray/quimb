@@ -201,6 +201,7 @@ def get_contractor(
     cache=True,
     get='expr',
     optimize=None,
+    use_cotengra='auto',
     **kwargs
 ):
     """Get an callable expression that will evaluate ``eq`` based on
@@ -235,7 +236,16 @@ def get_contractor(
     if optimize is None:
         optimize = get_contract_strategy()
 
-    if (get == 'expr') and infer_backend(optimize) == 'cotengra':
+    use_cotengra_expression = (
+        (get == 'expr') and
+        (use_cotengra is not False) and
+        (
+            (use_cotengra is True) or
+            (infer_backend(optimize) == 'cotengra')  # 'auto'
+        )
+    )
+
+    if use_cotengra_expression:
         # can use more advanced contraction expression with slicing etc.
         import cotengra as ctg
         return ctg.contract_expression(

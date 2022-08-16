@@ -5656,6 +5656,7 @@ class TensorNetwork(object):
         smudge=1e-12,
         power=1.0,
         gauges=None,
+        equalize_norms=False,
         inplace=False,
     ):
         """Iterative gauge all the bonds in this tensor network with a 'simple
@@ -5731,11 +5732,21 @@ class TensorNetwork(object):
                 for t, ix, inv_s in inv_gauges:
                     t.multiply_index_diagonal_(ix, inv_s)
 
+                if equalize_norms:
+                    # the norms of the tensors are not kept under control by
+                    # the the orthogonalization because of the inverse gauge
+                    # application above, so explicitly equalize here
+                    tn.strip_exponent(tid1)
+                    tn.strip_exponent(tid2)
+
             not_converged = not all_converged
             it += 1
 
-        # redistribute the accrued scaling
-        tn.multiply_each_(10**(nfact / tn.num_tensors))
+        if equalize_norms:
+            tn.exponent += nfact
+        else:
+            # redistribute the accrued scaling
+            tn.multiply_each_(10**(nfact / tn.num_tensors))
 
         if not gauges_supplied:
             # absorb all bond gauges
@@ -5968,15 +5979,17 @@ class TensorNetwork(object):
         seq,
         max_bond=None,
         cutoff=1e-10,
-        canonize_distance=0,
+        tree_gauge_distance=1,
+        canonize_distance=None,
         canonize_opts=None,
-        canonize_after_distance=0,
+        canonize_after_distance=None,
         canonize_after_opts=None,
-        gauge_boundary_only=False,
+        gauge_boundary_only=True,
         compress_late=True,
         compress_min_size=None,
         compress_opts=None,
         compress_span=False,
+        compress_matrices=True,
         compress_exclude=None,
         equalize_norms=False,
         gauges=None,
@@ -5989,9 +6002,28 @@ class TensorNetwork(object):
         preserve_tensor=False,
         progbar=False,
     ):
+        if canonize_distance is None:
+            canonize_distance = tree_gauge_distance
+        if canonize_after_distance is None:
+            canonize_after_distance = tree_gauge_distance
+
+        if (canonize_distance == -1) and (gauges is None):
+            gauges = True
+            canonize_distance = 0
+
         if gauges is True:
             gauges = {}
-            self.gauge_all_simple_(gauges=gauges)
+            if gauge_boundary_only:
+                data_like = next(iter(self.tensor_map.values())).data
+                gauges = {
+                    ix: do("ones", (self.ind_size(ix),),
+                           dtype=data_like.dtype, like=data_like)
+                    for ix in self.inner_inds()
+                }
+            else:
+                self.gauge_all_simple_(
+                    gauges=gauges, equalize_norms=equalize_norms
+                )
 
         # the boundary - the set of intermediate tensors
         boundary = oset()
@@ -6039,6 +6071,14 @@ class TensorNetwork(object):
             if frozenset((tid1, tid2)) in dont_compress_pairs:
                 # or compressing pair that will be eventually or soon
                 # contracted
+                return True
+
+            if (
+                (not compress_matrices) and
+                (len(self._get_neighbor_tids([tid1])) <= 2) and
+                (len(self._get_neighbor_tids([tid1])) <= 2)
+            ):
+                # both are effectively matrices
                 return True
 
             if compress_min_size is not None:
@@ -6195,11 +6235,7 @@ class TensorNetwork(object):
         span_opts=None,
         max_bond=None,
         cutoff=1e-10,
-        canonize_distance=0,
         canonize_opts=None,
-        gauge_boundary_only=False,
-        compress_opts=None,
-        equalize_norms=False,
         inplace=True,
         **kwargs,
     ):
@@ -6226,12 +6262,7 @@ class TensorNetwork(object):
             seq,
             max_bond=max_bond,
             cutoff=cutoff,
-            canonize_distance=canonize_distance,
-            canonize_opts=canonize_opts,
-            gauge_boundary_only=gauge_boundary_only,
-            compress_opts=compress_opts,
             compress_exclude=tids,
-            equalize_norms=equalize_norms,
             **kwargs)
 
     def compute_centralities(self):
@@ -6272,11 +6303,26 @@ class TensorNetwork(object):
         span_opts=None,
         max_bond=None,
         cutoff=1e-10,
-        canonize_distance=0,
+        tree_gauge_distance=1,
+        canonize_distance=None,
         canonize_opts=None,
-        gauge_boundary_only=False,
+        canonize_after_distance=None,
+        canonize_after_opts=None,
+        gauge_boundary_only=True,
+        compress_late=True,
+        compress_min_size=None,
         compress_opts=None,
+        compress_span=False,
+        compress_matrices=True,
+        compress_exclude=None,
         equalize_norms=False,
+        gauges=None,
+        gauge_smudge=1e-6,
+        callback_pre_contract=None,
+        callback_post_contract=None,
+        callback_pre_compress=None,
+        callback_post_compress=None,
+        callback=None,
         inplace=False,
         **kwargs
     ):
@@ -6292,11 +6338,26 @@ class TensorNetwork(object):
             span_opts=span_opts,
             max_bond=max_bond,
             cutoff=cutoff,
+            tree_gauge_distance=tree_gauge_distance,
             canonize_distance=canonize_distance,
             canonize_opts=canonize_opts,
+            canonize_after_distance=canonize_after_distance,
+            canonize_after_opts=canonize_after_opts,
             gauge_boundary_only=gauge_boundary_only,
+            compress_late=compress_late,
+            compress_min_size=compress_min_size,
             compress_opts=compress_opts,
+            compress_span=compress_span,
+            compress_matrices=compress_matrices,
+            compress_exclude=compress_exclude,
             equalize_norms=equalize_norms,
+            gauges=gauges,
+            gauge_smudge=gauge_smudge,
+            callback_pre_contract=callback_pre_contract,
+            callback_post_contract=callback_post_contract,
+            callback_pre_compress=callback_pre_compress,
+            callback_post_compress=callback_post_compress,
+            callback=callback,
             inplace=inplace,
             **kwargs)
 
@@ -6308,13 +6369,21 @@ class TensorNetwork(object):
         output_inds=None,
         max_bond=None,
         cutoff=1e-10,
-        canonize_distance=0,
+        tree_gauge_distance=1,
+        canonize_distance=None,
         canonize_opts=None,
-        gauge_boundary_only=False,
+        canonize_after_distance=None,
+        canonize_after_opts=None,
+        gauge_boundary_only=True,
+        compress_late=True,
+        compress_min_size=None,
         compress_opts=None,
         compress_span=True,
+        compress_matrices=True,
         compress_exclude=None,
         equalize_norms=False,
+        gauges=None,
+        gauge_smudge=1e-6,
         callback_pre_contract=None,
         callback_post_contract=None,
         callback_pre_compress=None,
@@ -6345,13 +6414,21 @@ class TensorNetwork(object):
             seq=seq,
             max_bond=max_bond,
             cutoff=cutoff,
+            tree_gauge_distance=tree_gauge_distance,
             canonize_distance=canonize_distance,
             canonize_opts=canonize_opts,
+            canonize_after_distance=canonize_after_distance,
+            canonize_after_opts=canonize_after_opts,
             gauge_boundary_only=gauge_boundary_only,
+            compress_late=compress_late,
+            compress_min_size=compress_min_size,
             compress_opts=compress_opts,
             compress_span=compress_span,
+            compress_matrices=compress_matrices,
             compress_exclude=compress_exclude,
             equalize_norms=equalize_norms,
+            gauges=gauges,
+            gauge_smudge=gauge_smudge,
             callback_pre_contract=callback_pre_contract,
             callback_post_contract=callback_post_contract,
             callback_pre_compress=callback_pre_compress,
@@ -6362,6 +6439,7 @@ class TensorNetwork(object):
         )
 
         if output_inds and t.inds != output_inds:
+            # ensure output ordering of indices
             t.transpose_(*output_inds)
 
         return t
@@ -6567,7 +6645,18 @@ class TensorNetwork(object):
 
     # ----------------------- contracting the network ----------------------- #
 
-    def contract_tags(self, tags, which='any', inplace=False, **opts):
+    def contract_tags(
+        self,
+        tags,
+        which='any',
+        output_inds=None,
+        optimize=None,
+        get=None,
+        backend=None,
+        preserve_tensor=False,
+        inplace=False,
+        **opts
+    ):
         """Contract the tensors that match any or all of ``tags``.
 
         Parameters
@@ -6575,10 +6664,50 @@ class TensorNetwork(object):
         tags : sequence of str
             The list of tags to filter the tensors by. Use ``all`` or ``...``
             (``Ellipsis``) to contract all tensors.
-        inplace : bool, optional
-            Whether to perform the contraction inplace.
         which : {'all', 'any'}
             Whether to require matching all or any of the tags.
+        output_inds : sequence of str, optional
+            The indices to specify as outputs of the contraction. If not given,
+            and the tensor network has no hyper-indices, these are computed
+            automatically as every index appearing once.
+        optimize : {None, str, path_like, PathOptimizer}, optional
+            The contraction path optimization strategy to use.
+
+                - ``None``: use the default strategy,
+                - str: use the preset strategy with the given name,
+                - path_like: use this exact path,
+                - ``opt_einsum.PathOptimizer``: find the path using this
+                  optimizer.
+                - ``cotengra.HyperOptimizer``: find and perform the contraction
+                  using ``cotengra``.
+                - ``cotengra.ContractionTree``: use this exact tree and perform
+                  contraction using ``cotengra``.
+
+            Contraction with ``cotengra`` might be a bit more efficient but the
+            main reason would be to handle sliced contraction automatically.
+        get : {None, 'expression', 'path-info', 'opt_einsum'}, optional
+            What to return. If:
+
+                * ``None`` (the default) - return the resulting scalar or
+                  Tensor.
+                * ``'expression'`` - return the ``opt_einsum`` expression that
+                  performs the contraction and operates on the raw arrays.
+                * ``'symbol-map'`` - return the dict mapping ``opt_einsum``
+                  symbols to tensor indices.
+                * ``'path-info'`` - return the full ``opt_einsum`` path object
+                  with detailed information such as flop cost. The symbol-map
+                  is also added to the ``quimb_symbol_map`` attribute.
+
+        backend : {'auto', 'numpy', 'jax', 'cupy', 'tensorflow', ...}, optional
+            Which backend to use to perform the contraction. Must be a valid
+            ``opt_einsum`` backend with the relevant library installed.
+        preserve_tensor : bool, optional
+            Whether to return a tensor regardless of whether the output object
+            is a scalar (has no indices) or not.
+        inplace : bool, optional
+            Whether to perform the contraction inplace.
+        opts
+            Passed to :func:`~quimb.tensor.tensor_core.tensor_contract`.
 
         Returns
         -------
@@ -6599,7 +6728,9 @@ class TensorNetwork(object):
                              "(Change this to a no-op maybe?)")
 
         contracted = tensor_contract(
-            *tagged_ts, preserve_tensor=not contracting_all, **opts
+            *tagged_ts, output_inds=output_inds,
+            optimize=optimize, get=get, backend=backend,
+            preserve_tensor=preserve_tensor or (not contracting_all), **opts
         )
 
         if contracting_all:
@@ -6608,7 +6739,127 @@ class TensorNetwork(object):
         untagged_tn.add_tensor(contracted, virtual=True)
         return untagged_tn
 
-    def contract_cumulative(self, tags_seq, inplace=False, **opts):
+    contract_tags_ = functools.partialmethod(contract_tags, inplace=True)
+
+    def contract(
+        self,
+        tags=...,
+        output_inds=None,
+        optimize=None,
+        get=None,
+        backend=None,
+        preserve_tensor=False,
+        max_bond=None,
+        inplace=False,
+        **opts,
+    ):
+        """Contract some, or all, of the tensors in this network. This method
+        dispatches to ``contract_tags``, ``contract_structured``, or
+        ``contract_compressed`` based on the various arguments.
+
+        Parameters
+        ----------
+        tags : sequence of str, all, or Ellipsis, optional
+            Any tensors with any of these tags with be contracted. Use ``all``
+            or ``...`` (``Ellipsis``) to contract all tensors. ``...`` will try
+            and use a 'structured' contract method if possible.
+        output_inds : sequence of str, optional
+            The indices to specify as outputs of the contraction. If not given,
+            and the tensor network has no hyper-indices, these are computed
+            automatically as every index appearing once.
+        optimize : {None, str, path_like, PathOptimizer}, optional
+            The contraction path optimization strategy to use.
+
+                - ``None``: use the default strategy,
+                - str: use the preset strategy with the given name,
+                - path_like: use this exact path,
+                - ``opt_einsum.PathOptimizer``: find the path using this
+                  optimizer.
+                - ``cotengra.HyperOptimizer``: find and perform the contraction
+                  using ``cotengra``.
+                - ``cotengra.ContractionTree``: use this exact tree and perform
+                  contraction using ``cotengra``.
+
+            Contraction with ``cotengra`` might be a bit more efficient but the
+            main reason would be to handle sliced contraction automatically.
+        get : {None, 'expression', 'path-info', 'opt_einsum'}, optional
+            What to return. If:
+
+                * ``None`` (the default) - return the resulting scalar or
+                  Tensor.
+                * ``'expression'`` - return the ``opt_einsum`` expression that
+                  performs the contraction and operates on the raw arrays.
+                * ``'symbol-map'`` - return the dict mapping ``opt_einsum``
+                  symbols to tensor indices.
+                * ``'path-info'`` - return the full ``opt_einsum`` path object
+                  with detailed information such as flop cost. The symbol-map
+                  is also added to the ``quimb_symbol_map`` attribute.
+
+        backend : {'auto', 'numpy', 'jax', 'cupy', 'tensorflow', ...}, optional
+            Which backend to use to perform the contraction. Must be a valid
+            ``opt_einsum`` backend with the relevant library installed.
+        preserve_tensor : bool, optional
+            Whether to return a tensor regardless of whether the output object
+            is a scalar (has no indices) or not.
+        inplace : bool, optional
+            Whether to perform the contraction inplace. This is only valid
+            if not all tensors are contracted (which doesn't produce a TN).
+        opts
+            Passed to :func:`~quimb.tensor.tensor_core.tensor_contract`,
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.contract_compressed`
+            .
+
+        Returns
+        -------
+        TensorNetwork, Tensor or scalar
+            The result of the contraction, still a ``TensorNetwork`` if the
+            contraction was only partial.
+
+        See Also
+        --------
+        contract_tags, contract_cumulative
+        """
+        opts['output_inds'] = output_inds
+        opts['optimize'] = optimize
+        opts['get'] = get
+        opts['backend'] = backend
+        opts['preserve_tensor'] = preserve_tensor
+
+        all_tags = (tags is all) or (tags is ...)
+
+        if max_bond is not None:
+            if not all_tags:
+                raise NotImplementedError
+            if opts.pop('get', None) is not None:
+                raise NotImplementedError
+            if opts.pop('backend', None) is not None:
+                raise NotImplementedError
+
+            return self.contract_compressed(
+                max_bond=max_bond, inplace=inplace, **opts)
+
+        # this checks whether certain TN classes have a manually specified
+        #     contraction pattern (e.g. 1D along the line)
+        if self._CONTRACT_STRUCTURED:
+            if (tags is ...) or isinstance(tags, slice):
+                return self.contract_structured(tags, inplace=inplace, **opts)
+
+        # contracting everything to single output
+        if all_tags:
+            return tensor_contract(*self, **opts)
+
+        # else just contract those tensors specified by tags.
+        return self.contract_tags(tags, inplace=inplace, **opts)
+
+    contract_ = functools.partialmethod(contract, inplace=True)
+
+    def contract_cumulative(
+        self,
+        tags_seq,
+        output_inds=None,
+        inplace=False,
+        **opts
+    ):
         """Cumulative contraction of tensor network. Contract the first set of
         tags, then that set with the next set, then both of those with the next
         and so forth. Could also be described as an manually ordered
@@ -6618,8 +6869,14 @@ class TensorNetwork(object):
         ----------
         tags_seq : sequence of sequence of str
             The list of tag-groups to cumulatively contract.
+        output_inds : sequence of str, optional
+            The indices to specify as outputs of the contraction. If not given,
+            and the tensor network has no hyper-indices, these are computed
+            automatically as every index appearing once.
         inplace : bool, optional
             Whether to perform the contraction inplace.
+        opts
+            Passed to :func:`~quimb.tensor.tensor_core.tensor_contract`.
 
         Returns
         -------
@@ -6645,46 +6902,10 @@ class TensorNetwork(object):
                 # nothing more to contract
                 break
 
+        if isinstance(tn, Tensor) and output_inds is not None:
+            tn.transpose_(*output_inds)
+
         return tn
-
-    def contract(self, tags=..., inplace=False, **opts):
-        """Contract some, or all, of the tensors in this network. This method
-        dispatches to ``contract_structured`` or ``contract_tags``.
-
-        Parameters
-        ----------
-        tags : sequence of str
-            Any tensors with any of these tags with be contracted. Set to
-            ``...`` (``Ellipsis``) to contract all tensors, the default.
-        inplace : bool, optional
-            Whether to perform the contraction inplace. This is only valid
-            if not all tensors are contracted (which doesn't produce a TN).
-        opts
-            Passed to ``tensor_contract``.
-
-        Returns
-        -------
-        TensorNetwork, Tensor or scalar
-            The result of the contraction, still a ``TensorNetwork`` if the
-            contraction was only partial.
-
-        See Also
-        --------
-        contract_tags, contract_cumulative
-        """
-        if tags is all:
-            return tensor_contract(*self, **opts)
-
-        # this checks whether certain TN classes have a manually specified
-        #     contraction pattern (e.g. 1D along the line)
-        if self._CONTRACT_STRUCTURED:
-            if (tags is ...) or isinstance(tags, slice):
-                return self.contract_structured(tags, inplace=inplace, **opts)
-
-        # else just contract those tensors specified by tags.
-        return self.contract_tags(tags, inplace=inplace, **opts)
-
-    contract_ = functools.partialmethod(contract, inplace=True)
 
     def contraction_path(self, optimize=None, **contract_opts):
         """Compute the contraction path, a sequence of (int, int), for
@@ -7145,9 +7366,9 @@ class TensorNetwork(object):
                 if len(tids) >= 2:
                     inds_to_expand.add(ind)
         else:
-            inds_to_expand = set(inds_to_expand)
+            inds_to_expand = tags_to_oset(inds_to_expand)
 
-        for t in tn:
+        for t in tn._inds_get(*inds_to_expand):
             # perform the array expansions
             pads = [
                 (0, 0) if ind not in inds_to_expand else
@@ -7164,6 +7385,9 @@ class TensorNetwork(object):
             t.modify(data=edata)
 
         return tn
+
+    expand_bond_dimension_ = functools.partialmethod(
+        expand_bond_dimension, inplace=True)
 
     def flip(self, inds, inplace=False):
         """Flip the dimension corresponding to indices ``inds`` on all tensors
