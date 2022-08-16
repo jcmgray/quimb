@@ -2479,12 +2479,19 @@ class Tensor(object):
         """
         return self.contract(other)
 
+    def as_network(self, virtual=True):
+        """Return a ``TensorNetwork`` with only this tensor.
+        """
+        return TensorNetwork((self,), virtual=virtual)
+
+    @functools.wraps(draw_tn)
     def draw(self, *args, **kwargs):
         """Plot a graph of this tensor and its indices.
         """
-        draw_tn(TensorNetwork((self,)), *args, **kwargs)
+        return draw_tn(self.as_network(), *args, **kwargs)
 
     graph = draw
+    visualize = visualize_tensor
 
     def __getstate__(self):
         # This allows pickling, since the copy has no weakrefs.

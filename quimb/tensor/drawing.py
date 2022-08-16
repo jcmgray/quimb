@@ -87,7 +87,7 @@ def draw_tn(
     legend=True,
     fix=None,
     k=None,
-    iterations=200,
+    iterations='auto',
     initial_layout='auto',
     use_forceatlas2=1000,
     use_spring_weight=False,
@@ -751,7 +751,7 @@ def get_positions(
     fix=None,
     initial_layout='auto',
     k=None,
-    iterations=200,
+    iterations='auto',
     use_forceatlas2=False,
     use_spring_weight=False,
 ):
@@ -783,6 +783,10 @@ def get_positions(
         else:
             # faster, but not as nice
             initial_layout = 'spectral'
+
+    if iterations == 'auto':
+        # the smaller the graph, the more iterations we can afford
+        iterations = max(200, 1000 - len(G))
 
     # use spectral or other layout as starting point
     pos0 = getattr(nx, initial_layout + '_layout')(G)

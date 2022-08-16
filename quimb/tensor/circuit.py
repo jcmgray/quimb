@@ -2843,7 +2843,7 @@ class CircuitDense(Circuit):
     @property
     def psi(self):
         t = self._psi ^ all
-        psi = TensorNetwork([t])
+        psi = t.as_network()
         psi.view_as_(Dense1D, like=self._psi)
         return psi
 

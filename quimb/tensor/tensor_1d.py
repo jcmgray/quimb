@@ -1902,7 +1902,7 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
 
         # if single site a single tensor is produced
         if isinstance(rho, Tensor):
-            rho = TensorNetwork([rho])
+            rho = rho.as_network()
 
         if rescale_sites:
             # e.g. [3, 4, 5, 7, 9] -> [0, 1, 2, 3, 4]
