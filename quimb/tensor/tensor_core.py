@@ -8006,7 +8006,7 @@ class TensorNetwork(object):
             tids = self.tensor_map
         distances = self.compute_shortest_distances(tids, exclude_inds)
 
-        dinf = 10 * max(distances.values())
+        dinf = 10 * max(distances.values(), default=1)
         y = [
             distances.get(tuple(sorted((i, j))), dinf)
             for i, j in itertools.combinations(tids, 2)
@@ -8023,13 +8023,16 @@ class TensorNetwork(object):
         optimal_ordering=True,
         exclude_inds=(),
         are_sorted=False,
+        linkage=None,
     ):
+        """Compute a hierarchical grouping of ``tids``, as a ``ssa_path``.
+        """
+        if linkage is None:
+            linkage = self.compute_hierarchical_linkage(
+                tids, method=method, exclude_inds=exclude_inds,
+                optimal_ordering=optimal_ordering)
 
-        L = self.compute_hierarchical_linkage(
-            tids, method=method, exclude_inds=exclude_inds,
-            optimal_ordering=optimal_ordering)
-
-        sorted_ssa_path = ((int(x[0]), int(x[1])) for x in L)
+        sorted_ssa_path = ((int(x[0]), int(x[1])) for x in linkage)
         if are_sorted:
             return tuple(sorted_ssa_path)
 
@@ -8050,15 +8053,77 @@ class TensorNetwork(object):
         method='weighted',
         optimal_ordering=True,
         exclude_inds=(),
+        linkage=None,
     ):
         from scipy.cluster import hierarchy
+
         if tids is None:
             tids = list(self.tensor_map)
-        L = self.compute_hierarchical_linkage(
-            tids, method=method, exclude_inds=exclude_inds,
-            optimal_ordering=optimal_ordering)
+
+        if linkage is None:
+            linkage = self.compute_hierarchical_linkage(
+                tids, method=method, exclude_inds=exclude_inds,
+                optimal_ordering=optimal_ordering)
+
         node2tid = {i: tid for i, tid in enumerate(sorted(tids))}
-        return tuple(map(node2tid.__getitem__, hierarchy.leaves_list(L)))
+        return tuple(map(node2tid.__getitem__, hierarchy.leaves_list(linkage)))
+
+    def compute_hierarchical_grouping(
+        self,
+        max_group_size,
+        tids=None,
+        method='weighted',
+        optimal_ordering=True,
+        exclude_inds=(),
+        linkage=None,
+    ):
+        """Group ``tids`` (by default, all tensors) into groups of size
+        ``max_group_size`` or less, using a hierarchical clustering.
+        """
+        if tids is None:
+            tids = list(self.tensor_map)
+
+        tids = sorted(tids)
+
+        if linkage is None:
+            linkage = self.compute_hierarchical_linkage(
+                tids, method=method, exclude_inds=exclude_inds,
+                optimal_ordering=optimal_ordering)
+
+        ssa_path = self.compute_hierarchical_ssa_path(
+            tids=tids, method=method, exclude_inds=exclude_inds,
+            are_sorted=True, linkage=linkage,
+        )
+
+        # follow ssa_path, agglomerating groups as long they small enough
+        groups = {i: (tid,) for i, tid in enumerate(tids)}
+        ssa = len(tids) - 1
+        for i, j in ssa_path:
+            ssa += 1
+
+            if (i not in groups) or (j not in groups):
+                # children already too big
+                continue
+
+            if len(groups[i]) + len(groups[j]) > max_group_size:
+                # too big, skip
+                continue
+
+            # merge groups
+            groups[ssa] = groups.pop(i) + groups.pop(j)
+
+        # now sort groups by when their nodes in leaf ordering
+        ordering = self.compute_hierarchical_ordering(
+            tids=tids, method=method, exclude_inds=exclude_inds,
+            optimal_ordering=optimal_ordering, linkage=linkage,
+        )
+        score = {tid: i for i, tid in enumerate(ordering)}
+        groups = sorted(
+            groups.items(),
+            key=lambda kv: sum(map(score.__getitem__, kv[1]))
+        )
+
+        return tuple(kv[1] for kv in groups)
 
     def pair_simplify(
         self,
