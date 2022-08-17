@@ -13,14 +13,15 @@ v1.4.1 (unreleased)
 - unify much functionality from 1D, 2D and 3D into general arbitrary geometry
   class :class:`quimb.tensor.tensor_arbgeom.TensorNetworkGen`
 - refactor contraction, allowing using cotengra directly
-- add :meth:`~quimb.core.tensor.Tensor.visualize` for visualizing the actual
-  data entries of an arbitrarily high dimensional tensor
-- add `Gate` class for more robust tracking and manipulation of gates in
-  quantum :class:`Circuit` simulation
+- add :meth:`~quimb.tensor.tensor_core.Tensor.visualize` for visualizing the
+  actual data entries of an arbitrarily high dimensional tensor
+- add :class:`~quimb.tensor.circuit.Gate` class for more robust tracking and
+  manipulation of gates in quantum :class:`~quimb.tensor.circuit.Circuit`
+  simulation
 - tweak TN drawing style and layout
 - tweak default gauging options of compressed contraction
-- add :meth:`~quimb.tensor_core.TensorNetwork.compute_hierarchical_grouping`
-- add :meth:`~quimb.tensor_core.Tensor.as_network`
+- add :meth:`~quimb.tensor.tensor_core.TensorNetwork.compute_hierarchical_grouping`
+- add :meth:`~quimb.tensor.tensor_core.Tensor.as_network`
 
 **Bug fixes:**
 
