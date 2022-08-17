@@ -6,7 +6,7 @@ import random
 
 import quimb as qu
 
-from .tensor_gen import MPO_rand, MPO_zeros_like
+from .tensor_builder import MPO_rand, MPO_zeros_like
 
 
 def construct_lanczos_tridiag_MPO(A, K, v0=None, initial_bond_dim=None,

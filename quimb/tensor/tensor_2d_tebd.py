@@ -674,8 +674,8 @@ def gate_full_update_als(
     condition_maintain_norms=True,
     condition_balance_bonds=True,
 ):
-    ket_plq = ket.select_any(tags_plq).view_like_(ket)
-    bra_plq = bra.select_any(tags_plq).view_like_(bra)
+    ket_plq = ket.select_any(tags_plq)
+    bra_plq = bra.select_any(tags_plq)
 
     # this is the full target (copy - not virtual)
     target = ket_plq.gate(G, where, contract=False) | env

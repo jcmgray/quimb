@@ -36,7 +36,7 @@ from .tensor_core import (
     COPY_tensor,
     oset,
 )
-from .tensor_gen import (
+from .tensor_builder import (
     rand_tensor,
     rand_phased,
     TN_rand_reg,
@@ -62,6 +62,8 @@ from .tensor_gen import (
     TN_from_edges_with_value,
     TN_from_edges_rand,
     TN_rand_from_edges,
+    HTN_CP_from_sites_and_fill_fn,
+    HTN_dual_from_edges_and_fill_fn,
     HTN_from_cnf,
     MPS_rand_state,
     MPS_product_state,
@@ -242,6 +244,8 @@ __all__ = (
     "TN_from_edges_with_value",
     "TN_from_edges_rand",
     "TN_rand_from_edges",
+    "HTN_CP_from_sites_and_fill_fn",
+    "HTN_dual_from_edges_and_fill_fn",
     "HTN_from_cnf",
     "MPS_rand_state",
     "MPS_product_state",

@@ -1,4 +1,4 @@
-"""Generate specific tensor network states and operators.
+"""Build specific tensor networks, including states and operators.
 """
 import math
 import functools
@@ -434,6 +434,148 @@ def TN_rand_reg(
     return TN_from_edges_rand(
         G.edges, D=D, phys_dim=phys_dim, seed=seed, dtype=dtype,
         site_tag_id=site_tag_id, site_ind_id=site_ind_id)
+
+
+def HTN_CP_from_inds_and_fill_fn(
+    fill_fn,
+    inds,
+    sizes,
+    D,
+    tags=None,
+    bond_ind=None,
+):
+    """reate a CP-decomposition structured hyper tensor network from a
+    sequence of indices and a fill function.
+
+    Parameters
+    ----------
+    fill_fn : callable
+        A function that takes a shape and returns an array.
+    inds : sequence of str
+        The outer indices of the network.
+    sizes : sequence of int
+        The outer sizes of the network.
+    D : int
+        The bond dimension of the inner hyper index.
+    tags : sequence of str, optional
+        A tag for each tensor if supplied.
+    bond_ind : str, optional
+        If given, a specific name for the inner hyper index.
+    """
+
+    tn = TensorNetwork([])
+
+    if tags is None:
+        tags = [None] * len(inds)
+
+    if bond_ind is None:
+        bond_ind = rand_uuid()
+
+    for ix, p, tag in zip(inds, sizes, tags):
+        tn |= Tensor(
+            data=fill_fn(shape=(D, p)),
+            inds=(bond_ind, ix),
+            tags=tag,
+        )
+
+    return tn
+
+
+def HTN_CP_from_sites_and_fill_fn(
+    fill_fn,
+    sites,
+    D,
+    phys_dim=2,
+    site_tag_id='I{}',
+    site_ind_id='k{}',
+    bond_ind=None,
+):
+    """Create a CP-decomposition structured hyper tensor network from a
+    sequence of sites and a fill function.
+
+    Parameters
+    ----------
+    fill_fn : callable
+        A function that takes a shape and returns an array.
+    sites : sequence of hashable
+        The sites of the tensor network.
+    D : int
+        The hyper bond dimension connecting tensors.
+    phys_dim : int, optional
+        The size of the outer, physical indices.
+    site_tag_id : str, optional
+        String with formatter to tag sites.
+    site_ind_id : str, optional
+        String with formatter to tag indices (if ``phys_dim`` specified).
+
+    Returns
+    -------
+    TensorNetworkGenVector
+    """
+    tn = TensorNetwork([])
+
+    if bond_ind is None:
+        bond_ind = rand_uuid()
+
+    for site in sites:
+        tn |= Tensor(
+            data=fill_fn(shape=(D, phys_dim)),
+            inds=(bond_ind, site_ind_id.format(site)),
+            tags=site_tag_id.format(site),
+        )
+
+    return tn.view_as_(
+        TensorNetworkGenVector,
+        sites=sites,
+        site_tag_id=site_tag_id,
+        site_ind_id=site_ind_id
+    )
+
+
+def HTN_dual_from_edges_and_fill_fn(
+    fill_fn,
+    edges,
+    D,
+    phys_dim=None,
+    site_tag_id='I{}',
+    site_ind_id='k{}',
+):
+    """Create a hyper tensor network with a tensor on each bond and a hyper
+    index on each node.
+    """
+    bonds = collections.defaultdict(rand_uuid)
+    nodes = sorted(set().union(*edges))
+
+    ts = []
+    for node_a, node_b in gen_unique_edges(edges):
+        data = fill_fn((D, D))
+        inds = (bonds[node_a], bonds[node_b])
+        tags = (site_tag_id.format(node_a), site_tag_id.format(node_b))
+        ts.append(Tensor(data, inds, tags))
+
+    sites = tuple(bonds)
+
+    if phys_dim is not None:
+        for node, bnd in bonds.items():
+            data = fill_fn((D, phys_dim))
+            inds = (bnd, site_ind_id.format(node))
+            tags = site_tag_id.format(node)
+            ts.append(Tensor(data, inds, tags))
+
+    tn = TensorNetwork(ts)
+
+    if phys_dim is not None:
+        tn.view_as_(
+            TensorNetworkGenVector, sites=sites,
+            site_tag_id=site_tag_id, site_ind_id=site_ind_id
+        )
+    else:
+        tn.view_as_(
+            TensorNetworkGen, sites=sites,
+            site_tag_id=site_tag_id,
+        )
+
+    return tn
 
 
 def TN2D_from_fill_fn(
@@ -2189,7 +2331,7 @@ def MPO_rand(L, bond_dim, phys_dim=2, normalize=True, cyclic=False,
 def MPO_rand_herm(L, bond_dim, phys_dim=2, normalize=True,
                   dtype='float64', **mpo_opts):
     """Generate a random hermitian matrix product operator.
-    See :class:`~quimb.tensor.tensor_gen.MPO_rand`.
+    See :class:`~quimb.tensor.tensor_builder.MPO_rand`.
     """
     return MPO_rand(L, bond_dim, phys_dim=phys_dim, normalize=normalize,
                     dtype=dtype, herm=True, **mpo_opts)
