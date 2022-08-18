@@ -200,6 +200,13 @@ class TensorNetworkGen(TensorNetwork):
             sites = tuple(self.gen_site_coos())
         return sites
 
+    def _get_site_set(self):
+        """The set of all sites.
+        """
+        if getattr(self, "_site_set", None) is None:
+            self._site_set = set(self.sites)
+        return self._site_set
+
     def gen_sites_present(self):
         """Generate the sites which are currently present (e.g. if a local view
         of a larger tensor network), based on whether their tags are present.
@@ -298,7 +305,7 @@ class TensorNetworkGen(TensorNetwork):
         tag if so, else return ``x``.
         """
         try:
-            if x in self._get_site_tag_set():
+            if x in self._get_site_set():
                 return self.site_tag(x)
         except TypeError:
             pass
