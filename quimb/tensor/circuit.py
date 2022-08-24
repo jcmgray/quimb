@@ -1668,7 +1668,7 @@ class Circuit:
         where :math:`\bar{q}` is the set of qubits :math:`G` acts one and
         :math:`\psi_{\bar{q}}` is the circuit wavefunction only with gates in
         the causal cone of this set. If you supply a tuple or list of gates
-        then the expectations will be computed simulteneously.
+        then the expectations will be computed simultaneously.
 
         Parameters
         ----------
@@ -2575,7 +2575,7 @@ class Circuit:
     def simulate_counts(self, C, seed=None, reverse=False, **to_dense_opts):
         """Simulate measuring all qubits in the computational basis many times.
         Unlike :meth:`~quimb.tensor.circuit.Circuit.sample`, this generates all
-        the samples simulteneously using the full wavefunction constructed from
+        the samples simultaneously using the full wavefunction constructed from
         :meth:`~quimb.tensor.circuit.Circuit.to_dense`, then calling
         :func:`~quimb.calc.simulate_counts`.
 
