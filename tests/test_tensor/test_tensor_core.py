@@ -321,6 +321,15 @@ class TestBasicTensorOperations:
         with pytest.raises(ValueError):
             a.transpose(*'cdfebz')
 
+    def test_tensor_moveindex(self):
+        A = rand_tensor([3, 4, 5], ['a', 'b', 'c'])
+        B = rand_tensor([3, 4, 5], ['a', 'b', 'c'])
+        x = A @ B
+        A.moveindex_('b', 0)
+        B.moveindex_('b', -1)
+        assert A.inds[0] == 'b' and B.inds[2] == 'b'
+        assert A @ B == pytest.approx(x)
+
     def test_tensor_trace(self):
         t = qtn.rand_tensor((3, 3, 3), 'abc', dtype='complex128')
         tb = t.trace('a', 'c')

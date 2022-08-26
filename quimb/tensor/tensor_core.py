@@ -1842,6 +1842,36 @@ class Tensor(object):
 
     transpose_like_ = functools.partialmethod(transpose_like, inplace=True)
 
+    def moveindex(self, ind, axis, inplace=False):
+        """Move the index ``ind`` to position ``axis``. Like ``transpose``,
+        this permutes the order of both the data *and* the indices and is
+        mainly for ensuring a certain data layout since for most operations the
+        specific order of indices doesn't matter.
+
+        Parameters
+        ----------
+        ind : str
+            The index to move.
+        axis : int
+            The new position to move ``ind`` to. Can be negative.
+        inplace : bool, optional
+            Whether to perform the move inplace or not.
+
+        Returns
+        -------
+        Tensor
+        """
+        new_inds = [ix for ix in self.inds if ix != ind]
+
+        if axis < 0:
+            # list.insert has different convention for negative axis
+            axis += self.ndim + 1
+
+        new_inds.insert(axis, ind)
+        return self.transpose(*new_inds, inplace=inplace)
+
+    moveindex_ = functools.partialmethod(moveindex, inplace=True)
+
     def trace(
         self,
         left_inds,
