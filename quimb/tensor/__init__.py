@@ -1,4 +1,4 @@
-from .tensor_core import (
+from .contraction import (
     set_contract_path_cache,
     get_contract_strategy,
     set_contract_strategy,
@@ -9,6 +9,8 @@ from .tensor_core import (
     get_tensor_linop_backend,
     set_tensor_linop_backend,
     tensor_linop_backend,
+)
+from .tensor_core import (
     tensor_contract,
     tensor_split,
     tensor_canonize_bond,
@@ -20,6 +22,7 @@ from .tensor_core import (
     tensor_network_distance,
     tensor_network_fit_autodiff,
     tensor_network_fit_als,
+    tensor_network_gate_inds,
     rand_uuid,
     bonds,
     bonds_size,
@@ -30,13 +33,15 @@ from .tensor_core import (
     TensorNetwork,
     PTensor,
     IsoTensor,
+    COPY_tensor,
     oset,
 )
-from .tensor_gen import (
+from .tensor_builder import (
     rand_tensor,
     rand_phased,
-    TN_rand_from_edges,
     TN_rand_reg,
+    TN_from_sites_product_state,
+    TN_from_sites_computational_state,
     TN2D_from_fill_fn,
     TN2D_empty,
     TN2D_with_value,
@@ -55,6 +60,10 @@ from .tensor_gen import (
     TN_from_edges_and_fill_fn,
     TN_from_edges_empty,
     TN_from_edges_with_value,
+    TN_from_edges_rand,
+    TN_rand_from_edges,
+    HTN_CP_from_sites_and_fill_fn,
+    HTN_dual_from_edges_and_fill_fn,
     HTN_from_cnf,
     MPS_rand_state,
     MPS_product_state,
@@ -71,6 +80,7 @@ from .tensor_gen import (
     MPO_zeros_like,
     MPO_rand,
     MPO_rand_herm,
+    MPO_product_operator,
     SpinHam,
     SpinHam1D,
     MPO_ham_ising,
@@ -88,6 +98,7 @@ from .tensor_gen import (
     ham_2d_ising,
     ham_2d_heis,
     ham_2d_j1j2,
+    ham_3d_heis,
 )
 from .tensor_1d import (
     TensorNetwork1D,
@@ -156,6 +167,9 @@ from .tensor_3d import (
     TensorNetwork3D,
     PEPS3D,
 )
+from .tensor_3d_tebd import (
+    LocalHam3D,
+)
 from .geometry import (
     edges_2d_square,
     edges_2d_hexagonal,
@@ -191,6 +205,7 @@ __all__ = (
     "tensor_network_distance",
     "tensor_network_fit_autodiff",
     "tensor_network_fit_als",
+    "tensor_network_gate_inds",
     "rand_uuid",
     "bonds",
     "bonds_size",
@@ -202,10 +217,13 @@ __all__ = (
     "TNLinearOperator1D",
     "PTensor",
     "IsoTensor",
+    "COPY_tensor",
     "oset",
     "rand_tensor",
     "rand_phased",
     "TN_rand_reg",
+    "TN_from_sites_product_state",
+    "TN_from_sites_computational_state",
     "TN2D_from_fill_fn",
     "TN2D_empty",
     "TN2D_with_value",
@@ -218,13 +236,16 @@ __all__ = (
     "TN3D_classical_ising_partition_function",
     "HTN2D_classical_ising_partition_function",
     "HTN3D_classical_ising_partition_function",
-    "TN_rand_from_edges",
     "HTN_classical_partition_function_from_edges",
     "TN_classical_partition_function_from_edges",
     "TN_dimer_covering_from_edges",
     "TN_from_edges_and_fill_fn",
     "TN_from_edges_empty",
     "TN_from_edges_with_value",
+    "TN_from_edges_rand",
+    "TN_rand_from_edges",
+    "HTN_CP_from_sites_and_fill_fn",
+    "HTN_dual_from_edges_and_fill_fn",
     "HTN_from_cnf",
     "MPS_rand_state",
     "MPS_product_state",
@@ -241,6 +262,7 @@ __all__ = (
     "MPO_zeros_like",
     "MPO_rand",
     "MPO_rand_herm",
+    "MPO_product_operator",
     "SpinHam",
     "SpinHam1D",
     "MPO_ham_ising",
@@ -300,6 +322,7 @@ __all__ = (
     "gen_3d_bonds",
     "TensorNetwork3D",
     "PEPS3D",
+    "LocalHam3D",
     "edges_2d_square",
     "edges_2d_hexagonal",
     "edges_2d_triangular",

@@ -43,8 +43,12 @@ def parse_dict_to_tids_or_inds(spec, tn, default='__NONE__'):
             new[k] = v
             continue
 
-        for tid in tn._get_tids_from_tags(k):
-            new[tid] = v
+        try:
+            for tid in tn._get_tids_from_tags(k):
+                new[tid] = v
+        except KeyError:
+            # just ignore keys that don't match any tensor
+            pass
 
     return new
 
@@ -83,13 +87,14 @@ def draw_tn(
     legend=True,
     fix=None,
     k=None,
-    iterations=200,
-    initial_layout='spectral',
+    iterations='auto',
+    initial_layout='auto',
     use_forceatlas2=1000,
     use_spring_weight=False,
     node_color=None,
     node_scale=1.0,
     node_size=None,
+    node_alpha=1.0,
     node_shape='o',
     node_outline_size=None,
     node_outline_darkness=0.8,
@@ -106,6 +111,8 @@ def draw_tn(
     label_color=None,
     font_size=10,
     font_size_inner=7,
+    font_family='monospace',
+    isdark=None,
     figsize=(6, 6),
     margin=None,
     xlims=None,
@@ -157,8 +164,8 @@ def draw_tn(
     iterations : int, optional
         How many iterations to perform when when finding the best layout
         using node repulsion. Ramp this up if the graph is drawing messily.
-    initial_layout : {'spectral', 'kamada_kawai', 'circular', 'planar', \\
-                      'random', 'shell', 'bipartite', ...}, optional
+    initial_layout : {'auto', 'spectral', 'kamada_kawai', 'circular', \\
+                      'planar', 'random', 'shell', 'bipartite', ...}, optional
         The name of a networkx layout to use before iterating with the
         spring layout. Set ``iterations=0`` if you just want to use this
         layout only.
@@ -171,14 +178,16 @@ def draw_tn(
         repulsion layout algorithms.
     node_color : tuple[float], optional
         Default color of nodes.
+    node_scale : float, optional
+        Scale the node sizes by this factor, in addition to the automatic
+        scaling based on the number of tensors.
     node_size : None, float or dict, optional
         How big to draw the tensors. Can be a global single value, or a dict
         containing values for specific tags or tids. This is in absolute
         figure units. See ``node_scale`` simply scale the node sizes up or
         down.
-    node_scale : float, optional
-        Scale the node sizes by this factor, in addition to the automatica
-        scaling based on the number of tensors.
+    node_alpha : float, optional
+        Transparency of the nodes.
     node_shape : None, str or dict, optional
         What shape to draw the tensors. Should correspond to a matplotlib
         scatter marker. Can be a global single value, or a dict containing
@@ -210,7 +219,13 @@ def draw_tn(
         Font size for drawing tags and outer indices.
     font_size_inner : int, optional
         Font size for drawing inner indices.
-    figsize : tuple of int
+    font_family : str, optional
+        Font family to use for all labels.
+    isdark : bool, optional
+        Explicitly specify that the background is dark, and use slightly
+        different default drawing colors. If not specified detects
+        automatically from `matplotlib.rcParams`.
+    figsize : tuple of int, optional
         The size of the drawing.
     margin : None or float, optional
         Specify an argument for ``ax.margin``, else the plot limits will try
@@ -256,21 +271,30 @@ def draw_tn(
     if show_tags is None:
         show_tags = (tn.num_tensors <= 20)
 
-    isdark = sum(to_rgb(mpl.rcParams['figure.facecolor'])) / 3 < 0.5
+    if isdark is None:
+        isdark = sum(to_rgb(mpl.rcParams['figure.facecolor'])) / 3 < 0.5
+
     if isdark:
-        draw_color = (0.75, 0.77, 0.80, 1.0)
+        default_draw_color = (0.55, 0.57, 0.60, 1.0)
+        default_label_color = (.85, .85, .85, 1.0)
     else:
-        draw_color = (0.45, 0.47, 0.50, 1.0)
+        default_draw_color = (0.45, 0.47, 0.50, 1.0)
+        default_label_color = (.25, .25, .25, 1.0)
 
     if edge_color is None:
-        edge_color = draw_color
+        edge_color = default_draw_color
     else:
         edge_color = mpl.colors.to_rgb(edge_color)
 
     if node_color is None:
-        node_color = draw_color
+        node_color = default_draw_color
     else:
         node_color = mpl.colors.to_rgb(node_color)
+
+    if label_color is None:
+        label_color = default_label_color
+    elif label_color == 'inherit':
+        label_color = mpl.rcParams['axes.labelcolor']
 
     highlight_tids_color = to_rgba(highlight_tids_color)
     highlight_inds_color = to_rgba(highlight_inds_color)
@@ -286,9 +310,6 @@ def draw_tn(
         node_shape, tn, default='o')
     node_hatch = parse_dict_to_tids_or_inds(
         node_hatch, tn, default='')
-
-    if label_color is None:
-        label_color = mpl.rcParams['axes.labelcolor']
 
     # build the graph
     G = nx.Graph()
@@ -349,9 +370,13 @@ def draw_tn(
         )
         G.nodes[tid]['marker'] = node_shape[tid]
         G.nodes[tid]['hatch'] = node_hatch[tid]
-        if show_tags:
+
+        if show_tags == 'tids':
+            node_labels[tid] = str(tid)
+        elif show_tags:
             # make the tags appear with auto vertical extent
-            node_label = '{' + str(list(t.tags))[1:-1] + '}'
+            # node_label = '{' + str(list(t.tags))[1:-1] + '}'
+            node_label = ', '.join(map(str, t.tags))
             node_labels[tid] = "\n".join(textwrap.wrap(
                 node_label, max(2 * len(node_label) ** 0.5, 16)
             ))
@@ -414,10 +439,8 @@ def draw_tn(
             ax.set_ylim(ymin - real_node_size, ymax + real_node_size)
         else:
             ax.margins(margin)
-
-        created_fig = True
     else:
-        created_fig = False
+        fig = None
 
     nx.draw_networkx_edges(
         G, pos,
@@ -485,6 +508,7 @@ def draw_tn(
             edgecolors=data['edgecolors'],
             hatch=hatch,
             zorder=2,
+            alpha=node_alpha,
         )
 
     # draw incomcing arrows for tensor left_inds
@@ -538,6 +562,8 @@ def draw_tn(
             edge_labels=edge_labels,
             font_size=font_size_inner,
             font_color=label_color,
+            font_family=font_family,
+            bbox={'ec': (0, 0, 0, 0), 'fc': (0, 0, 0, 0)},
             ax=ax,
         )
     if show_tags or show_inds:
@@ -546,6 +572,7 @@ def draw_tn(
             labels=node_labels,
             font_size=font_size,
             font_color=label_color,
+            font_family=font_family,
             ax=ax,
         )
 
@@ -553,23 +580,50 @@ def draw_tn(
     if colors and legend:
         handles = []
         for color in colors.values():
-            handles += [plt.Line2D([0], [0], marker='o', color=color,
-                                   linestyle='', markersize=10)]
+
+            ecolor = tuple(
+                (1.0 if i == 3 else node_outline_darkness) * c
+                for i, c in enumerate(color)
+            )
+            linewidth = min(3, node_size.default_factory()**0.5 / 5)
+
+            handles += [
+                plt.Line2D(
+                    [0], [0],
+                    marker='o',
+                    color=color,
+                    markeredgecolor=ecolor,
+                    markeredgewidth=linewidth,
+                    linestyle='',
+                    markersize=10
+                )
+            ]
 
         # needed in case '_' is the first character
         lbls = [f" {lbl}" for lbl in colors]
 
-        plt.legend(handles, lbls, ncol=max(round(len(handles) / 20), 1),
-                   loc='center left', bbox_to_anchor=(1, 0.5))
+        legend = plt.legend(
+            handles, lbls,
+            ncol=max(round(len(handles) / 20), 1),
+            loc='center left',
+            bbox_to_anchor=(1, 0.5),
+            labelcolor=label_color,
+            prop={'family': font_family},
+        )
+        # do this manually as otherwise can't make only face transparent
+        legend.get_frame().set_alpha(None)
+        legend.get_frame().set_facecolor((0.0, 0.0, 0.0, 0.0))
+        legend.get_frame().set_edgecolor((0.6, 0.6, 0.6, 0.2))
 
-    if not created_fig:
-        # we added to axisting axes
+    if fig is None:
+        # ax was supplied, don't modify and simply return
         return
-
-    if xlims is not None:
-        ax.set_xlim(xlims)
-    if ylims is not None:
-        ax.set_ylim(ylims)
+    else:
+        # axes and figure were created
+        if xlims is not None:
+            ax.set_xlim(xlims)
+        if ylims is not None:
+            ax.set_ylim(ylims)
 
     if return_fig:
         return fig
@@ -695,9 +749,9 @@ def get_positions(
     tn,
     G,
     fix=None,
-    initial_layout='spectral',
+    initial_layout='auto',
     k=None,
-    iterations=200,
+    iterations='auto',
     use_forceatlas2=False,
     use_spring_weight=False,
 ):
@@ -720,6 +774,19 @@ def get_positions(
     if all(node in fix for node in G.nodes):
         # everything is already fixed
         return fix
+
+    if initial_layout == 'auto':
+        # automatically select
+        if len(G) <= 100:
+            # usually nicest
+            initial_layout = 'kamada_kawai'
+        else:
+            # faster, but not as nice
+            initial_layout = 'spectral'
+
+    if iterations == 'auto':
+        # the smaller the graph, the more iterations we can afford
+        iterations = max(200, 1000 - len(G))
 
     # use spectral or other layout as starting point
     pos0 = getattr(nx, initial_layout + '_layout')(G)
@@ -750,8 +817,9 @@ def get_positions(
 
         if should_use_fa2:
             from fa2 import ForceAtlas2
+            # NB: some versions of fa2 don't support the `weight_attr` option
             pos = ForceAtlas2(verbose=False).forceatlas2_networkx_layout(
-                G, pos=pos0, iterations=iterations, weight_attr=weight)
+                G, pos=pos0, iterations=iterations)
         else:
             pos = nx.spring_layout(
                 G, pos=pos0, fixed=fixed, k=k, iterations=iterations,
@@ -764,3 +832,50 @@ def get_positions(
         pos = _massage_pos(pos)
 
     return pos
+
+
+def visualize_tensor(tensor, **kwargs):
+    """Visualize all entries of a tensor, with indices mapped into the plane
+    and values mapped into a color wheel.
+
+    Parameters
+    ----------
+    tensor : Tensor
+        The tensor to visualize.
+    skew_factor : float, optional
+        When there are more than two dimensions, a factor to scale the
+        rotations by to avoid overlapping data points.
+    size_map : bool, optional
+        Whether to map the tensor value magnitudes to marker size.
+    size_scale : float, optional
+        An overall factor to scale the marker size by.
+    alpha_map : bool, optional
+        Whether to map the tensor value magnitudes to marker alpha.
+    alpha_pow : float, optional
+        The power to raise the magnitude to when mapping to alpha.
+    alpha : float, optional
+        The overall alpha to use for all markers if ``not alpha_map``.
+    show_lattice : bool, optional
+        Show a small grey dot for every 'lattice' point regardless of value.
+    lattice_opts : dict, optional
+        Options to pass to ``maplotlib.Axis.scatter`` for the lattice points.
+    linewidths : float, optional
+        The linewidth to use for the markers.
+    marker : str, optional
+        The marker to use for the markers.
+    figsize : tuple, optional
+        The size of the figure to create, if ``ax`` is not provided.
+    ax : matplotlib.Axis, optional
+        The axis to draw to. If not provided, a new figure will be created.
+
+    Returns
+    -------
+    fig : matplotlib.Figure
+        The figure containing the plot, or ``None`` if ``ax`` was provided.
+    ax : matplotlib.Axis
+        The axis containing the plot.
+    """
+    import xyzpy as xyz
+    kwargs.setdefault('compass', True)
+    kwargs.setdefault('compass_labels', tensor.inds)
+    return xyz.visualize_tensor(tensor.data, **kwargs)

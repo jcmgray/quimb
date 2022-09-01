@@ -1,3 +1,4 @@
+import re
 import math
 import numbers
 import operator
@@ -10,10 +11,15 @@ from autoray import do, reshape
 import quimb as qu
 from ..utils import progbar as _progbar
 from ..utils import oset, partitionby, concatv, partition_all, ensure_dict, LRU
-from .tensor_core import (get_tags, tags_to_oset, oset_union, tensor_contract,
-                          PTensor, Tensor, TensorNetwork, rand_uuid)
-from .tensor_gen import MPS_computational_state
-from .tensor_1d import TensorNetwork1DVector, Dense1D, TensorNetwork1DOperator
+from .tensor_core import (
+    get_tags, tags_to_oset, oset_union, tensor_contract,
+    PTensor, Tensor, TensorNetwork, rand_uuid,
+)
+from .tensor_builder import (
+    MPS_computational_state, TN_from_sites_computational_state
+)
+from .tensor_arbgeom import TensorNetworkGenOperator
+from .tensor_1d import Dense1D
 from . import array_ops as ops
 
 
@@ -97,40 +103,96 @@ def parse_qasm_url(url, **kwargs):
 
 # -------------------------- core gate functions ---------------------------- #
 
-def _merge_tags(tags, gate_opts):
-    return oset.union(*map(tags_to_oset, (tags, gate_opts.pop('tags', None))))
+
+ALL_GATES = set()
+ONE_QUBIT_GATES = set()
+TWO_QUBIT_GATES = set()
+ALL_PARAM_GATES = set()
+ONE_QUBIT_PARAM_GATES = set()
+TWO_QUBIT_PARAM_GATES = set()
+
+# the tensor tags to use for each gate (defaults to label)
+GATE_TAGS = {}
+
+# the number of qubits a gate acts on
+GATE_SIZE = {}
+
+# gates which just require a constant array
+CONSTANT_GATES = {}
+
+# gates which are parametrized
+PARAM_GATES = {}
+
+# gates which involve a non-array operation such as reindexing only
+SPECIAL_GATES = {}
 
 
-def build_gate_1(gate, tags=None):
-    """Build a function that applies ``gate`` to a tensor network wavefunction.
-    """
-
-    def apply_constant_single_qubit_gate(psi, i, **gate_opts):
-        mtags = _merge_tags(tags, gate_opts)
-        psi.gate_(gate, int(i), tags=mtags, **gate_opts)
-
-    return apply_constant_single_qubit_gate
-
-
-def build_gate_2(gate, tags=None):
-    """Build a function that applies ``gate`` to a tensor network wavefunction.
-    """
-
-    def apply_constant_two_qubit_gate(psi, i, j, **gate_opts):
-        mtags = _merge_tags(tags, gate_opts)
-        psi.gate_(gate, (int(i), int(j)), tags=mtags, **gate_opts)
-
-    return apply_constant_two_qubit_gate
+def register_constant_gate(name, G, num_qubits, tag=None):
+    if tag is None:
+        tag = name
+    GATE_TAGS[name] = tag
+    CONSTANT_GATES[name] = G
+    GATE_SIZE[name] = num_qubits
+    if num_qubits == 1:
+        ONE_QUBIT_GATES.add(name)
+    elif num_qubits == 2:
+        TWO_QUBIT_GATES.add(name)
+    ALL_GATES.add(name)
 
 
-# non tensor gates
+def register_param_gate(name, param_fn, num_qubits, tag=None):
+    if tag is None:
+        tag = name
+    GATE_TAGS[name] = tag
+    PARAM_GATES[name] = param_fn
+    GATE_SIZE[name] = num_qubits
+    if num_qubits == 1:
+        ONE_QUBIT_GATES.add(name)
+        ONE_QUBIT_PARAM_GATES.add(name)
+    elif num_qubits == 2:
+        TWO_QUBIT_GATES.add(name)
+        TWO_QUBIT_PARAM_GATES.add(name)
+    ALL_GATES.add(name)
+    ALL_PARAM_GATES.add(name)
 
-def apply_swap(psi, i, j, **gate_opts):
-    iind, jind = map(psi.site_ind, (int(i), int(j)))
-    psi.reindex_({iind: jind, jind: iind})
+
+def register_special_gate(name, fn, num_qubits, tag=None):
+    if tag is None:
+        tag = name
+    GATE_TAGS[name] = tag
+    GATE_SIZE[name] = num_qubits
+    if num_qubits == 1:
+        ONE_QUBIT_GATES.add(name)
+    elif num_qubits == 2:
+        TWO_QUBIT_GATES.add(name)
+    SPECIAL_GATES[name] = fn
+    ALL_GATES.add(name)
 
 
-# parametrizable gates
+# constant single qubit gates
+register_constant_gate('H', qu.hadamard(), 1)
+register_constant_gate('X', qu.pauli('X'), 1)
+register_constant_gate('Y', qu.pauli('Y'), 1)
+register_constant_gate('Z', qu.pauli('Z'), 1)
+register_constant_gate('S', qu.S_gate(), 1)
+register_constant_gate('T', qu.T_gate(), 1)
+register_constant_gate('X_1_2', qu.Xsqrt(), 1, 'X_1/2')
+register_constant_gate('Y_1_2', qu.Ysqrt(), 1, 'Y_1/2')
+register_constant_gate('Z_1_2', qu.Zsqrt(), 1, 'Z_1/2')
+register_constant_gate('W_1_2', qu.Wsqrt(), 1, 'W_1/2')
+register_constant_gate('HZ_1_2', qu.Wsqrt(), 1, 'W_1/2')
+
+
+# constant two qubit gates
+register_constant_gate('CNOT', qu.CNOT(), 2)
+register_constant_gate('CX', qu.cX(), 2)
+register_constant_gate('CY', qu.cY(), 2)
+register_constant_gate('CZ', qu.cZ(), 2)
+register_constant_gate('ISWAP', qu.iswap(), 2)
+register_constant_gate('IS', qu.iswap(), 2, 'ISWAP')
+
+
+# single parametrizable gates
 
 def rx_gate_param_gen(params):
     phi = params[0]
@@ -147,15 +209,7 @@ def rx_gate_param_gen(params):
     return ops.asarray(data)
 
 
-def apply_Rx(psi, theta, i, parametrize=False, **gate_opts):
-    """Apply an X-rotation of ``theta`` to tensor network wavefunction ``psi``.
-    """
-    mtags = _merge_tags('RX', gate_opts)
-    if parametrize:
-        G = ops.PArray(rx_gate_param_gen, (theta,))
-    else:
-        G = qu.Rx(float(theta))
-    psi.gate_(G, int(i), tags=mtags, **gate_opts)
+register_param_gate('RX', rx_gate_param_gen, 1)
 
 
 def ry_gate_param_gen(params):
@@ -173,15 +227,7 @@ def ry_gate_param_gen(params):
     return ops.asarray(data)
 
 
-def apply_Ry(psi, theta, i, parametrize=False, **gate_opts):
-    """Apply a Y-rotation of ``theta`` to tensor network wavefunction ``psi``.
-    """
-    mtags = _merge_tags('RY', gate_opts)
-    if parametrize:
-        G = ops.PArray(ry_gate_param_gen, (theta,))
-    else:
-        G = qu.Ry(float(theta))
-    psi.gate_(G, int(i), tags=mtags, **gate_opts)
+register_param_gate('RY', ry_gate_param_gen, 1)
 
 
 def rz_gate_param_gen(params):
@@ -199,15 +245,7 @@ def rz_gate_param_gen(params):
     return ops.asarray(data)
 
 
-def apply_Rz(psi, theta, i, parametrize=False, **gate_opts):
-    """Apply a Z-rotation of ``theta`` to tensor network wavefunction ``psi``.
-    """
-    mtags = _merge_tags('RZ', gate_opts)
-    if parametrize:
-        G = ops.PArray(rz_gate_param_gen, (theta,))
-    else:
-        G = qu.Rz(float(theta))
-    psi.gate_(G, int(i), tags=mtags, **gate_opts)
+register_param_gate('RZ', rz_gate_param_gen, 1)
 
 
 def u3_gate_param_gen(params):
@@ -238,13 +276,7 @@ def u3_gate_param_gen(params):
     return ops.asarray(data)
 
 
-def apply_U3(psi, theta, phi, lamda, i, parametrize=False, **gate_opts):
-    mtags = _merge_tags('U3', gate_opts)
-    if parametrize:
-        G = ops.PArray(u3_gate_param_gen, (theta, phi, lamda))
-    else:
-        G = qu.U_gate(theta, phi, lamda)
-    psi.gate_(G, int(i), tags=mtags, **gate_opts)
+register_param_gate('U3', u3_gate_param_gen, 1)
 
 
 def u2_gate_param_gen(params):
@@ -269,13 +301,7 @@ def u2_gate_param_gen(params):
     return ops.asarray(data) / 2**0.5
 
 
-def apply_U2(psi, phi, lamda, i, parametrize=False, **gate_opts):
-    mtags = _merge_tags('U2', gate_opts)
-    if parametrize:
-        G = ops.PArray(u2_gate_param_gen, (phi, lamda))
-    else:
-        G = qu.U_gate(np.pi / 2, phi, lamda)
-    psi.gate_(G, int(i), tags=mtags, **gate_opts)
+register_param_gate('U2', u2_gate_param_gen, 1)
 
 
 def u1_gate_param_gen(params):
@@ -290,14 +316,10 @@ def u1_gate_param_gen(params):
     return ops.asarray(data)
 
 
-def apply_U1(psi, lamda, i, parametrize=False, **gate_opts):
-    mtags = _merge_tags('U1', gate_opts)
-    if parametrize:
-        G = ops.PArray(u1_gate_param_gen, (lamda,))
-    else:
-        G = qu.U_gate(0.0, 0.0, lamda)
-    psi.gate_(G, int(i), tags=mtags, **gate_opts)
+register_param_gate('U1', u1_gate_param_gen, 1)
 
+
+# two qubit parametrizable gates
 
 def cu3_param_gen(params):
     U3 = u3_gate_param_gen(params)
@@ -310,18 +332,7 @@ def cu3_param_gen(params):
     return ops.asarray(data)
 
 
-@functools.lru_cache(maxsize=128)
-def cu3(theta, phi, lamda):
-    return cu3_param_gen(np.array([theta, phi, lamda]))
-
-
-def apply_cu3(psi, theta, phi, lamda, i, j, parametrize=False, **gate_opts):
-    mtags = _merge_tags('CU3', gate_opts)
-    if parametrize:
-        G = ops.PArray(cu3_param_gen, (theta, phi, lamda))
-    else:
-        G = cu3(theta, phi, lamda)
-    psi.gate_(G, (int(i), int(j)), tags=mtags, **gate_opts)
+register_param_gate('CU3', cu3_param_gen, 2)
 
 
 def cu2_param_gen(params):
@@ -335,18 +346,7 @@ def cu2_param_gen(params):
     return ops.asarray(data)
 
 
-@functools.lru_cache(maxsize=128)
-def cu2(phi, lamda):
-    return cu2_param_gen(np.array([phi, lamda]))
-
-
-def apply_cu2(psi, phi, lamda, i, j, parametrize=False, **gate_opts):
-    mtags = _merge_tags('CU2', gate_opts)
-    if parametrize:
-        G = ops.PArray(cu2_param_gen, (phi, lamda))
-    else:
-        G = cu2(phi, lamda)
-    psi.gate_(G, (int(i), int(j)), tags=mtags, **gate_opts)
+register_param_gate('CU2', cu2_param_gen, 2)
 
 
 def cu1_param_gen(params):
@@ -364,18 +364,7 @@ def cu1_param_gen(params):
     return ops.asarray(data)
 
 
-@functools.lru_cache(maxsize=128)
-def cu1(lamda):
-    return cu1_param_gen(np.array([lamda]))
-
-
-def apply_cu1(psi, lamda, i, j, parametrize=False, **gate_opts):
-    mtags = _merge_tags('CU1', gate_opts)
-    if parametrize:
-        G = ops.PArray(cu1_param_gen, (lamda,))
-    else:
-        G = cu1(lamda)
-    psi.gate_(G, (int(i), int(j)), tags=mtags, **gate_opts)
+register_param_gate('CU1', cu1_param_gen, 2)
 
 
 def fsim_param_gen(params):
@@ -401,13 +390,8 @@ def fsim_param_gen(params):
     return ops.asarray(data)
 
 
-def apply_fsim(psi, theta, phi, i, j, parametrize=False, **gate_opts):
-    mtags = _merge_tags('FSIM', gate_opts)
-    if parametrize:
-        G = ops.PArray(fsim_param_gen, (theta, phi))
-    else:
-        G = qu.fsim(theta, phi)
-    psi.gate_(G, (int(i), int(j)), tags=mtags, **gate_opts)
+register_param_gate('FSIM', fsim_param_gen, 2)
+register_param_gate('FS', fsim_param_gen, 2, 'FSIM')
 
 
 def fsimg_param_gen(params):
@@ -463,21 +447,18 @@ def fsimg_param_gen(params):
     return ops.asarray(data)
 
 
-def apply_fsimg(
-    psi,
-    theta, zeta, chi, gamma, phi,
-    i, j, parametrize=False, **gate_opts
-):
-
-    mtags = _merge_tags('FSIMG', gate_opts)
-    if parametrize:
-        G = ops.PArray(fsimg_param_gen, (theta, zeta, chi, gamma, phi))
-    else:
-        G = qu.fsimg(theta, zeta, chi, gamma, phi)
-    psi.gate_(G, (int(i), int(j)), tags=mtags, **gate_opts)
+register_param_gate('FSIMG', fsimg_param_gen, 2)
 
 
 def rzz_param_gen(params):
+    r"""
+    The gate describing an Ising interaction evolution, or 'ZZ'-rotation.
+
+    .. math::
+
+        \mathrm{RZZ}(\gamma) = \exp(-i \gamma Z_i Z_j)
+
+    """
     gamma = params[0]
 
     c00 = c11 = do('complex', do('cos', gamma), do('sin', gamma))
@@ -491,30 +472,17 @@ def rzz_param_gen(params):
     return ops.asarray(data)
 
 
-@functools.lru_cache(maxsize=128)
-def rzz(gamma):
-    r"""
-    The gate describing an Ising interaction evolution, or 'ZZ'-rotation.
-
-    .. math::
-
-        \mathrm{RZZ}(\gamma) = \exp(-i \gamma Z_i Z_j)
-
-    """
-    return rzz_param_gen(np.array([gamma]))
-
-
-def apply_rzz(psi, gamma, i, j, parametrize=False, **gate_opts):
-    mtags = _merge_tags('RZZ', gate_opts)
-    if parametrize:
-        G = ops.PArray(rzz_param_gen, (gamma,))
-    else:
-        G = rzz(float(gamma))
-    psi.gate_(G, (int(i), int(j)), tags=mtags, **gate_opts)
+register_param_gate('RZZ', rzz_param_gen, 2)
 
 
 def su4_gate_param_gen(params):
     """See https://arxiv.org/abs/quant-ph/0308006 - Fig. 7.
+    params:
+    #     theta1, phi1, lamda1,
+    #     theta2, phi2, lamda2,
+    #     theta3, phi3, lamda3,
+    #     theta4, phi4, lamda4,
+    #     t1, t2, t3,
     """
 
     TA1 = Tensor(u3_gate_param_gen(params[0:3]), ['a1', 'a0'])
@@ -541,80 +509,165 @@ def su4_gate_param_gen(params):
     ).data
 
 
-def apply_su4(
-    psi,
-    theta1, phi1, lamda1,
-    theta2, phi2, lamda2,
-    theta3, phi3, lamda3,
-    theta4, phi4, lamda4,
-    t1, t2, t3,
-    i, j,
-    parametrize=False,
-    **gate_opts
-):
-    """See https://arxiv.org/abs/quant-ph/0308006 - Fig. 7.
-    """
-    params = (theta1, phi1, lamda1,
-              theta2, phi2, lamda2,
-              theta3, phi3, lamda3,
-              theta4, phi4, lamda4,
-              t1, t2, t3,)
+register_param_gate('SU4', su4_gate_param_gen, 2)
 
-    mtags = _merge_tags('SU4', gate_opts)
-    if parametrize:
-        G = ops.PArray(su4_gate_param_gen, params)
+
+# special non-tensor gates
+
+def apply_swap(psi, i, j, **gate_opts):
+
+    contract = gate_opts.pop('contract', None)
+    if contract == 'swap+split':
+        gate_opts.pop('propagate_tags', None)
+        psi.swap_sites_with_compress_(i, j, **gate_opts)
     else:
-        G = su4_gate_param_gen(params)
+        iind, jind = map(psi.site_ind, (int(i), int(j)))
+        psi.reindex_({iind: jind, jind: iind})
 
-    psi.gate_(G, (int(i), int(j)), tags=mtags, **gate_opts)
+
+register_special_gate('SWAP', apply_swap, 2)
+register_special_gate('IDEN', lambda *_, **__: None, 1)
 
 
-GATE_FUNCTIONS = {
-    # constant single qubit gates
-    'H': build_gate_1(qu.hadamard(), tags='H'),
-    'X': build_gate_1(qu.pauli('X'), tags='X'),
-    'Y': build_gate_1(qu.pauli('Y'), tags='Y'),
-    'Z': build_gate_1(qu.pauli('Z'), tags='Z'),
-    'S': build_gate_1(qu.S_gate(), tags='S'),
-    'T': build_gate_1(qu.T_gate(), tags='T'),
-    'X_1_2': build_gate_1(qu.Xsqrt(), tags='X_1/2'),
-    'Y_1_2': build_gate_1(qu.Ysqrt(), tags='Y_1/2'),
-    'Z_1_2': build_gate_1(qu.Zsqrt(), tags='Z_1/2'),
-    'W_1_2': build_gate_1(qu.Wsqrt(), tags='W_1/2'),
-    'HZ_1_2': build_gate_1(qu.Wsqrt(), tags='W_1/2'),
-    # constant two qubit gates
-    'CNOT': build_gate_2(qu.CNOT(), tags='CNOT'),
-    'CX': build_gate_2(qu.cX(), tags='CX'),
-    'CY': build_gate_2(qu.cY(), tags='CY'),
-    'CZ': build_gate_2(qu.cZ(), tags='CZ'),
-    'IS': build_gate_2(qu.iswap(), tags='ISWAP'),
-    'ISWAP': build_gate_2(qu.iswap(), tags='ISWAP'),
-    # special non-tensor gates
-    'IDEN': lambda *args, **kwargs: None,
-    'SWAP': apply_swap,
-    # single parametrizable gates
-    'RX': apply_Rx,
-    'RY': apply_Ry,
-    'RZ': apply_Rz,
-    'U3': apply_U3,
-    'U2': apply_U2,
-    'U1': apply_U1,
-    # two qubit parametrizable gates
-    'CU3': apply_cu3,
-    'CU2': apply_cu2,
-    'CU1': apply_cu1,
-    'FS': apply_fsim,
-    'FSIM': apply_fsim,
-    'FSIMG': apply_fsimg,
-    'RZZ': apply_rzz,
-    'SU4': apply_su4,
-}
+@functools.lru_cache(2**15)
+def _cached_param_gate_build(fn, params):
+    return fn(params)
 
-ONE_QUBIT_PARAM_GATES = {'RX', 'RY', 'RZ', 'U3', 'U2', 'U1'}
-TWO_QUBIT_PARAM_GATES = {
-    'CU3', 'CU2', 'CU1', 'FS', 'FSIM', 'FSIMG', 'RZZ', 'SU4'
-}
-ALL_PARAM_GATES = ONE_QUBIT_PARAM_GATES | TWO_QUBIT_PARAM_GATES
+
+class Gate:
+    """A simple class for storing the details of a gate.
+
+    Parameters
+    ----------
+    label : str
+        The name or 'identifier' of the gate.
+    params : Iterable[float]
+        The parameters of the gate.
+    qubits : Iterable[int]
+        Which qubits the gate acts on.
+    round : int, optional
+        If given, which round or layer the gate is part of.
+    parametrize : bool, optional
+        Whether the gate will correspond to a parametrized tensor.
+    """
+
+    __slots__ = (
+        "_label",
+        "_params",
+        "_qubits",
+        "_round",
+        "_parametrize",
+        "_tag",
+        "_special",
+        "_constant",
+        "_array",
+    )
+
+    def __init__(
+        self,
+        label,
+        params,
+        qubits,
+        round=None,
+        parametrize=False,
+    ):
+        self._label = label.upper()
+        self._params = tuple(params)
+        self._qubits = tuple(qubits)
+        self._round = int(round) if round is not None else round
+        self._parametrize = bool(parametrize)
+
+        self._tag = GATE_TAGS[self._label]
+        self._special = self._label in SPECIAL_GATES
+        self._constant = self._label in CONSTANT_GATES
+        if (self._special or self._constant) and self._parametrize:
+            raise ValueError(
+                f"Cannot parametrize the gate: {self._label}."
+            )
+        self._array = None
+
+    @classmethod
+    def from_raw(cls, U, qubits, round=None):
+        new = object.__new__(cls)
+        new._label = f'RAW{id(U)}'
+        new._params = 'raw'
+        new._qubits = tuple(qubits)
+        new._round = int(round) if round is not None else round
+        new._special = False
+        new._parametrize = isinstance(U, ops.PArray)
+        new._tag = None
+        new._array = U
+        return new
+
+    @property
+    def label(self):
+        return self._label
+
+    @property
+    def params(self):
+        return self._params
+
+    @property
+    def qubits(self):
+        return self._qubits
+
+    @property
+    def round(self):
+        return self._round
+
+    @property
+    def special(self):
+        return self._special
+
+    @property
+    def parametrize(self):
+        return self._parametrize
+
+    @property
+    def tag(self):
+        return self._tag
+
+    def build_array(self):
+        """Build the array representation of the gate.
+        """
+        if self._special:
+            # these don't use an array
+            raise ValueError(
+                f"{self.label} gates have no array to build."
+            )
+
+        if self._constant:
+            # simply return the constant array
+            return CONSTANT_GATES[self._label]
+
+        # build the array
+        param_fn = PARAM_GATES[self._label]
+        if self._parametrize:
+            # either lazily, as tensor will be parametrized
+            return ops.PArray(param_fn, self._params)
+
+        # or cached directly into array
+        return _cached_param_gate_build(param_fn, self._params)
+
+    @property
+    def array(self):
+        if self._array is None:
+            self._array = self.build_array()
+        return self._array
+
+    def __repr__(self):
+        return (
+            f"<{self.__class__.__name__}(" +
+            f"label={self._label}, " +
+            f"params={self._params}, " +
+            f"qubits={self._qubits}, " +
+            (f"round={self._round}" if self._round is not None else "") +
+            (
+                f", parametrize={self._parametrize})"
+                if self._parametrize else ""
+            )
+            + f")>"
+        )
 
 
 def sample_bitstring_from_prob_ndarray(p):
@@ -728,19 +781,19 @@ class Circuit:
         bra_site_ind_id='b{}',
     ):
 
-        if N is None and psi0 is None:
+        if (N is None) and (psi0 is None):
             raise ValueError("You must supply one of `N` or `psi0`.")
 
         elif psi0 is None:
             self.N = N
-            self._psi = MPS_computational_state('0' * N, dtype=psi0_dtype)
+            self._psi = self._init_state(N, dtype=psi0_dtype)
 
         elif N is None:
             self._psi = psi0.copy()
-            self.N = psi0.L
+            self.N = psi0.nsites
 
         else:
-            if N != psi0.L:
+            if N != psi0.nsites:
                 raise ValueError("`N` doesn't match `psi0`.")
             self.N = N
             self._psi = psi0.copy()
@@ -757,11 +810,6 @@ class Circuit:
         self.gate_opts.setdefault('contract', 'auto-split-gate')
         self.gate_opts.setdefault('propagate_tags', 'register')
         self.gates = []
-
-        # when we add gates we will modify the TN structure, apart from in the
-        # 'swap+split' case, which explicitly maintains an MPS
-        if self.gate_opts['contract'] != 'swap+split':
-            self._psi.view_as_(TensorNetwork1DVector)
 
         self._ket_site_ind_id = self._psi.site_ind_id
         self._bra_site_ind_id = bra_site_ind_id
@@ -806,22 +854,45 @@ class Circuit:
         qc.apply_gates(info['gates'])
         return qc
 
-    def apply_gate_raw(self, U, where, tags=None,
-                       gate_round=None, **gate_opts):
-        """Apply the raw array ``U`` as a gate on qubits in ``where``. It will
-        be assumed to be unitary for the sake of computing reverse lightcones.
-        """
-        tags = (
-            tags_to_oset(tags) |
-            tags_to_oset(f'GATE_{len(self.gates)}')
+    def _init_state(self, N, dtype='complex128'):
+        return TN_from_sites_computational_state(
+            site_map={i: '0' for i in range(N)},
+            dtype=dtype
         )
-        if (gate_round is not None):
-            tags.add(f'ROUND_{gate_round}')
-        opts = {**self.gate_opts, **gate_opts}
-        self._psi.gate_(U, where, tags=tags, **opts)
-        self.gates.append((id(U), *where))
 
-    def apply_gate(self, gate_id, *gate_args, gate_round=None, **gate_opts):
+    def _apply_gate(self, gate, tags=None, **gate_opts):
+        """Apply a ``Gate`` to this ``Circuit``.
+        """
+        tags = tags_to_oset(tags)
+        tags.add(f'GATE_{len(self.gates)}')
+        if gate.round is not None:
+            tags.add(f'ROUND_{gate.round}')
+        if gate.tag is not None:
+            tags.add(gate.tag)
+
+        # overide any default gate opts
+        opts = {**self.gate_opts, **gate_opts}
+
+        if gate.special:
+            # these are specified as a general function
+            SPECIAL_GATES[gate.label](
+                self._psi, *gate.params, *gate.qubits, **opts
+            )
+        else:
+            # apply the gate to the TN!
+            self._psi.gate_(gate.array, gate.qubits, tags=tags, **opts)
+
+        # keep track of the gates applied
+        self.gates.append(gate)
+
+    def apply_gate(
+        self,
+        gate_id,
+        *gate_args,
+        gate_round=None,
+        parametrize=False,
+        **gate_opts,
+    ):
         """Apply a single gate to this tensor network quantum circuit. If
         ``gate_round`` is supplied the tensor(s) added will be tagged with
         ``'ROUND_{gate_round}'``. Alternatively, putting an integer first like
@@ -835,7 +906,7 @@ class Circuit:
 
         Parameters
         ----------
-        gate_id : str
+        gate_id : str or Gate
             Which type of gate to apply.
         gate_args : list[str]
             The argument to supply to it.
@@ -847,37 +918,40 @@ class Circuit:
             Supplied to the gate function, options here will override the
             default ``gate_opts``.
         """
+        if isinstance(gate_id, Gate):
+            # already encapuslated
+            self._apply_gate(gate, **gate_opts)
+            return
 
-        # unique tag
-        tags = tags_to_oset(f'GATE_{len(self.gates)}')
+        if hasattr(gate_id, 'shape') and not isinstance(gate_id, str):
+            # raw gate (numpy strings have a shape - ignore those)
+            gate = Gate.from_raw(gate_id, gate_args, gate_round)
+            self._apply_gate(gate, **gate_opts)
+            return
 
-        # parse which 'round' of gates
-        if (gate_round is not None):
-            tags.add(f'ROUND_{gate_round}')
-        elif isinstance(gate_id, numbers.Integral) or gate_id.isdigit():
+        # else convert from tuple
+        if isinstance(gate_id, numbers.Integral) or gate_id.isdigit():
             # gate round given as first entry of qasm line
-            tags.add(f'ROUND_{gate_id}')
+            gate_round = gate_id
             gate_id, gate_args = gate_args[0], gate_args[1:]
+        nq = GATE_SIZE[gate_id.upper()]
+        params, qubits, = gate_args[:-nq], gate_args[-nq:]
 
-        gate_id = gate_id.upper()
-        gate_fn = GATE_FUNCTIONS[gate_id]
+        gate = Gate(gate_id, params, qubits, gate_round, parametrize)
+        self._apply_gate(gate, **gate_opts)
 
-        # overide any default gate opts
-        opts = {**self.gate_opts, **gate_opts}
-
-        # handle parametrize kwarg for non-parametrizable gates
-        if ('parametrize' in opts) and (gate_id not in ALL_PARAM_GATES):
-            parametrize = opts.pop('parametrize')
-            if parametrize:
-                msg = f"The gate '{gate_id}' cannot be parametrized."
-                raise ValueError(msg)
-            # can pop+ignore if False
-
-        # gate the TN!
-        gate_fn(self._psi, *gate_args, tags=tags, **opts)
-
-        # keep track of the gates applied
-        self.gates.append((gate_id, *gate_args))
+    def apply_gate_raw(
+        self,
+        U,
+        where,
+        gate_round=None,
+        **gate_opts
+    ):
+        """Apply the raw array ``U`` as a gate on qubits in ``where``. It will
+        be assumed to be unitary for the sake of computing reverse lightcones.
+        """
+        gate = Gate.from_raw(U, where, gate_round)
+        self._apply_gate(gate, **gate_opts)
 
     def apply_gates(self, gates):
         """Apply a sequence of gates to this tensor network quantum circuit.
@@ -1064,7 +1138,7 @@ class Circuit:
 
         U.reindex_(ixmap)
         U.view_as_(
-            TensorNetwork1DOperator,
+            TensorNetworkGenOperator,
             upper_ind_id=self._ket_site_ind_id,
             lower_ind_id=self._bra_site_ind_id,
         )
@@ -1106,11 +1180,11 @@ class Circuit:
         lightcone_tags = []
 
         for i, gate in reversed(tuple(enumerate(self.gates))):
-            if gate[0] == 'IDEN':
+            if gate.label == 'IDEN':
                 continue
 
-            if gate[0] == 'SWAP':
-                i, j = gate[1:]
+            if gate.label == 'SWAP':
+                i, j = gate.qubits
                 i_in_cone = i in cone
                 j_in_cone = j in cone
                 if i_in_cone:
@@ -1123,11 +1197,7 @@ class Circuit:
                     cone.discard(i)
                 continue
 
-            if isinstance(gate[-2], numbers.Integral):
-                regs = set(gate[-2:])
-            else:
-                regs = set(gate[-1:])
-
+            regs = set(gate.qubits)
             if regs & cone:
                 lightcone_tags.append(f"GATE_{i}")
                 cone |= regs
@@ -1319,7 +1389,7 @@ class Circuit:
         simplify_sequence='ADCRS',
         simplify_atol=1e-12,
         simplify_equalize_norms=False,
-        backend='auto',
+        backend=None,
         dtype='complex128',
         target_size=None,
         rehearse=False,
@@ -1474,7 +1544,7 @@ class Circuit:
         simplify_sequence='ADCRS',
         simplify_atol=1e-12,
         simplify_equalize_norms=False,
-        backend='auto',
+        backend=None,
         dtype='complex128',
         target_size=None,
         rehearse=False,
@@ -1583,7 +1653,7 @@ class Circuit:
         simplify_sequence='ADCRS',
         simplify_atol=1e-12,
         simplify_equalize_norms=False,
-        backend='auto',
+        backend=None,
         dtype='complex128',
         target_size=None,
         rehearse=False,
@@ -1598,7 +1668,7 @@ class Circuit:
         where :math:`\bar{q}` is the set of qubits :math:`G` acts one and
         :math:`\psi_{\bar{q}}` is the circuit wavefunction only with gates in
         the causal cone of this set. If you supply a tuple or list of gates
-        then the expectations will be computed simulteneously.
+        then the expectations will be computed simultaneously.
 
         Parameters
         ----------
@@ -1709,7 +1779,7 @@ class Circuit:
         where,
         fix=None,
         optimize='auto-hq',
-        backend='auto',
+        backend=None,
         dtype='complex64',
         simplify_sequence='ADCRS',
         simplify_atol=1e-6,
@@ -1838,7 +1908,7 @@ class Circuit:
             p_marginal = p_marginal**2
 
         if fix is not None:
-            p_marginal /= nfact
+            p_marginal = p_marginal / nfact
 
         return p_marginal
 
@@ -1847,7 +1917,7 @@ class Circuit:
     compute_marginal_tn = functools.partialmethod(
         compute_marginal, rehearse="tn")
 
-    def calc_qubit_ordering(self, qubits=None):
+    def calc_qubit_ordering(self, qubits=None, method='greedy-lightcone'):
         """Get a order to measure ``qubits`` in, by greedily choosing whichever
         has the smallest reverse lightcone followed by whichever expands this
         lightcone *least*.
@@ -1870,24 +1940,40 @@ class Circuit:
         else:
             qubits = tuple(sorted(qubits))
 
-        key = ('lightcone_ordering', qubits)
+        key = ('lightcone_ordering', method, qubits)
 
         # check the cache first
         if key in self._storage:
             return self._storage[key]
 
-        cone = set()
-        lctgs = {i: set(self.get_reverse_lightcone_tags(i)) for i in qubits}
+        if method == 'greedy-lightcone':
+            cone = set()
+            lctgs = {
+                i: set(self.get_reverse_lightcone_tags(i))
+                for i in qubits
+            }
 
-        order = []
-        while lctgs:
-            # get the next qubit which adds least num gates to lightcone
-            next_qubit = min(lctgs, key=lambda i: len(lctgs[i] - cone))
-            cone |= lctgs.pop(next_qubit)
-            order.append(next_qubit)
+            order = []
+            while lctgs:
+                # get the next qubit which adds least num gates to lightcone
+                next_qubit = min(lctgs, key=lambda i: len(lctgs[i] - cone))
+                cone |= lctgs.pop(next_qubit)
+                order.append(next_qubit)
+
+        else:
+            # use graph distance based hierachical clustering
+            psi = self.get_psi_simplified('R')
+            qubit_inds = tuple(map(psi.site_ind, qubits))
+            tids = psi._get_tids_from_inds(qubit_inds, 'any')
+            matcher = re.compile(psi.site_ind_id.format(r'(\d+)'))
+            order = []
+            for tid in psi.compute_hierarchical_ordering(tids, method=method):
+                t = psi.tensor_map[tid]
+                for ind in t.inds:
+                    for sq in matcher.findall(ind):
+                        order.append(int(sq))
 
         order = self._storage[key] = tuple(order)
-
         return order
 
     def _parse_qubits_order(self, qubits=None, order=None):
@@ -1922,7 +2008,7 @@ class Circuit:
         max_marginal_storage=2**20,
         seed=None,
         optimize='auto-hq',
-        backend='auto',
+        backend=None,
         dtype='complex64',
         simplify_sequence='ADCRS',
         simplify_atol=1e-6,
@@ -2175,7 +2261,7 @@ class Circuit:
         max_marginal_storage=2**20,
         seed=None,
         optimize='auto-hq',
-        backend='auto',
+        backend=None,
         dtype='complex64',
         simplify_sequence='ADCRS',
         simplify_atol=1e-6,
@@ -2391,7 +2477,7 @@ class Circuit:
         simplify_sequence='R',
         simplify_atol=1e-12,
         simplify_equalize_norms=False,
-        backend='auto',
+        backend=None,
         dtype=None,
         target_size=None,
         rehearse=False,
@@ -2489,7 +2575,7 @@ class Circuit:
     def simulate_counts(self, C, seed=None, reverse=False, **to_dense_opts):
         """Simulate measuring all qubits in the computational basis many times.
         Unlike :meth:`~quimb.tensor.circuit.Circuit.sample`, this generates all
-        the samples simulteneously using the full wavefunction constructed from
+        the samples simultaneously using the full wavefunction constructed from
         :meth:`~quimb.tensor.circuit.Circuit.to_dense`, then calling
         :func:`~quimb.calc.simulate_counts`.
 
@@ -2665,14 +2751,15 @@ class Circuit:
             The tensor network to find the updated parameters from.
         """
         for i, gate in enumerate(self.gates):
-            label = gate[0]
             tag = f'GATE_{i}'
             t = tn[tag]
 
             # sanity check that tensor(s) `t` correspond to the correct gate
-            if label not in get_tags(t):
-                raise ValueError(f"The tensor(s) correponding to gate {i} "
-                                 f"should be tagged with '{label}', got {t}.")
+            if gate.tag not in get_tags(t):
+                raise ValueError(
+                    f"The tensor(s) correponding to gate {i} "
+                    f"should be tagged with '{gate.tag}', got {t}."
+                )
 
             # only update gates and tensors if they are parametrizable
             if isinstance(t, PTensor):
@@ -2680,16 +2767,14 @@ class Circuit:
                 # update the actual tensor
                 self._psi[tag].params = t.params
 
-                # update the gate entry
-                if label in ONE_QUBIT_PARAM_GATES:
-                    new_gate = (label, *t.params, gate[-1])
-                elif label in TWO_QUBIT_PARAM_GATES:
-                    new_gate = (label, *t.params, *gate[-2:])
-                else:
-                    raise ValueError(f"Didn't recognise '{label}' "
-                                     "gate as parametrizable.")
-
-                self.gates[i] = new_gate
+                # update the circuit's gate record
+                self.gates[i] = Gate(
+                    label=gate.label,
+                    params=t.params,
+                    qubits=gate.qubits,
+                    round=gate.round,
+                    parametrize=True
+                )
 
     @property
     def num_gates(self):
@@ -2707,10 +2792,19 @@ class CircuitMPS(Circuit):
     be useful.
     """
 
-    def __init__(self, N=None, psi0=None, gate_opts=None, tags=None):
+    def __init__(
+        self,
+        N=None,
+        psi0=None,
+        gate_opts=None,
+        **circuit_opts,
+    ):
         gate_opts = ensure_dict(gate_opts)
         gate_opts.setdefault('contract', 'swap+split')
-        super().__init__(N, psi0, gate_opts, tags)
+        super().__init__(N, psi0, gate_opts, **circuit_opts)
+
+    def _init_state(self, N, dtype='complex128'):
+        return MPS_computational_state('0' * N, dtype=dtype)
 
     @property
     def psi(self):
@@ -2749,7 +2843,7 @@ class CircuitDense(Circuit):
     @property
     def psi(self):
         t = self._psi ^ all
-        psi = TensorNetwork([t])
+        psi = t.as_network()
         psi.view_as_(Dense1D, like=self._psi)
         return psi
 

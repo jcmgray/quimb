@@ -21,7 +21,7 @@ from quimb.tensor import (
     TNLinearOperator1D,
 )
 from quimb.tensor.decomp import _trim_singular_vals_numba
-from quimb.tensor.tensor_core import _CONTRACT_BACKEND, _TENSOR_LINOP_BACKEND
+from quimb.tensor.contraction import _CONTRACT_BACKEND, _TENSOR_LINOP_BACKEND
 
 autograd_mark = pytest.mark.skipif(
     importlib.util.find_spec('autograd') is None,
@@ -320,6 +320,15 @@ class TestBasicTensorOperations:
 
         with pytest.raises(ValueError):
             a.transpose(*'cdfebz')
+
+    def test_tensor_moveindex(self):
+        A = rand_tensor([3, 4, 5], ['a', 'b', 'c'])
+        B = rand_tensor([3, 4, 5], ['a', 'b', 'c'])
+        x = A @ B
+        A.moveindex_('b', 0)
+        B.moveindex_('b', -1)
+        assert A.inds[0] == 'b' and B.inds[2] == 'b'
+        assert A @ B == pytest.approx(x)
 
     def test_tensor_trace(self):
         t = qtn.rand_tensor((3, 3, 3), 'abc', dtype='complex128')

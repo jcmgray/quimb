@@ -28,9 +28,9 @@ class TestPEPSConstruct:
         assert psi.bond_size((1, 1), (1, 2)) == (4)
 
         for i in range(Lx):
-            assert len(psi.select(f'ROW{i}').tensor_map) == Ly
+            assert len(psi.select(f'X{i}').tensor_map) == Ly
         for j in range(Ly):
-            assert len(psi.select(f'COL{j}').tensor_map) == Lx
+            assert len(psi.select(f'Y{j}').tensor_map) == Lx
 
         for i in range(Lx):
             for j in range(Ly):
@@ -151,9 +151,9 @@ class TestPEPSConstruct:
             assert set(psi['G1'].tags) == {'G1'}
             assert set(psi['G2'].tags) == {'G2'}
         if propagate_tags is True:
-            tgs1 = {'I1,1', 'I1,2', 'G1', 'PSI0', 'COL1', 'COL2', 'ROW1'}
+            tgs1 = {'I1,1', 'I1,2', 'G1', 'PSI0', 'Y1', 'Y2', 'X1'}
             assert set(psi['G1'][0].tags) == tgs1
-            assert set(psi['G2'].tags) == tgs1 | {'G2', 'I3,2', 'ROW3', 'COL2'}
+            assert set(psi['G2'].tags) == tgs1 | {'G2', 'I3,2', 'X3', 'Y2'}
         if propagate_tags == 'sites':
             assert set(psi['G1'].tags) == {'G1', 'I1,1', 'I1,2'}
             assert set(psi['G2'].tags) == {'G2', 'I1,1', 'I1,2', 'I3,2'}
@@ -185,12 +185,24 @@ class Test2DContract:
         xt = norm.contract_boundary(max_bond=27, mode='full-bond')
         assert xt == pytest.approx(xe, rel=1e-2)
 
+    def test_ising_accuracy_regression(self):
+        tn = qtn.TN2D_classical_ising_partition_function(16, 16, 0.44)
+        Zex = 8.459419593253275e+100
+        for s in 'bltr':
+            Zap = tn.contract_boundary(max_bond=8, sequence=s)
+            rerr = abs(1 - Zap / Zex)
+            assert rerr < 2.2e-7
+        for s in ['bt', 'lr']:
+            Zap = tn.contract_boundary(max_bond=8, sequence=s)
+            rerr = abs(1 - Zap / Zex)
+            assert rerr < 3.9e-9
+
     @pytest.mark.parametrize("mode,two_layer", [
         ('mps', False),
         ('mps', True),
         ('full-bond', False),
     ])
-    def test_compute_row_envs(self, mode, two_layer):
+    def test_compute_x_envs(self, mode, two_layer):
         psi = qtn.PEPS.rand(5, 4, 2, seed=42, tags='KET')
         norm = psi.make_norm()
         ex = norm.contract(all)
@@ -200,13 +212,13 @@ class Test2DContract:
                              'layer_tags': ['KET', 'BRA']}
         else:
             compress_opts = {'cutoff': 1e-6, 'max_bond': 8, 'mode': mode}
-        row_envs = norm.compute_row_environments(**compress_opts)
+        row_envs = norm.compute_x_environments(**compress_opts)
 
         for i in range(norm.Lx):
             norm_i = (
-                row_envs['bottom', i] &
-                norm.select(norm.row_tag(i)) &
-                row_envs['top', i]
+                row_envs['xmin', i] &
+                norm.select(norm.x_tag(i)) &
+                row_envs['xmax', i]
             )
             x = norm_i.contract(all)
             assert x == pytest.approx(ex, rel=1e-2)
@@ -216,7 +228,7 @@ class Test2DContract:
         ('mps', True),
         ('full-bond', False),
     ])
-    def test_compute_col_envs(self, mode, two_layer):
+    def test_compute_y_envs(self, mode, two_layer):
         psi = qtn.PEPS.rand(4, 5, 2, seed=42, tags='KET')
         norm = psi.retag({'KET': 'BRA'}).H | psi
         ex = norm.contract(all)
@@ -226,13 +238,13 @@ class Test2DContract:
                              'layer_tags': ['KET', 'BRA']}
         else:
             compress_opts = {'cutoff': 1e-6, 'max_bond': 8, 'mode': mode}
-        col_envs = norm.compute_col_environments(**compress_opts)
+        col_envs = norm.compute_y_environments(**compress_opts)
 
         for j in range(norm.Lx):
             norm_j = (
-                col_envs['left', j] &
-                norm.select(norm.col_tag(j)) &
-                col_envs['right', j]
+                col_envs['ymin', j] &
+                norm.select(norm.y_tag(j)) &
+                col_envs['ymax', j]
             )
             x = norm_j.contract(all)
             assert x == pytest.approx(ex, rel=1e-2)
@@ -328,9 +340,9 @@ class TestPEPO:
         assert X.bond_size((1, 1), (1, 2)) == (4)
 
         for i in range(Lx):
-            assert len(X.select(f'ROW{i}').tensor_map) == Ly
+            assert len(X.select(f'X{i}').tensor_map) == Ly
         for j in range(Ly):
-            assert len(X.select(f'COL{j}').tensor_map) == Lx
+            assert len(X.select(f'Y{j}').tensor_map) == Lx
 
         for i in range(Lx):
             for j in range(Ly):

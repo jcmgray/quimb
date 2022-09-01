@@ -302,6 +302,16 @@ class TestSwap:
         assert_allclose(s @ a, a.reshape([3, 3]).T.reshape([9, 1]))
 
 
+@pytest.mark.parametrize("sparse", [False, True])
+def test_3qubit_gates(sparse):
+    psi = qu.rand_ket(8)
+    psi = qu.toffoli(sparse=sparse) @ psi
+    psi = qu.ccY(sparse=sparse) @ psi
+    psi = qu.fredkin(sparse=sparse) @ psi
+    psi = qu.ccZ(sparse=sparse) @ psi
+    assert qu.expec(psi, psi) == pytest.approx(1.0)
+
+
 class TestHubbardSpinless:
 
     def test_half_filling_groundstate(self):

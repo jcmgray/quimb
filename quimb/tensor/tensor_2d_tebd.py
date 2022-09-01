@@ -674,8 +674,8 @@ def gate_full_update_als(
     condition_maintain_norms=True,
     condition_balance_bonds=True,
 ):
-    ket_plq = ket.select_any(tags_plq).view_like_(ket)
-    bra_plq = bra.select_any(tags_plq).view_like_(bra)
+    ket_plq = ket.select_any(tags_plq)
+    bra_plq = bra.select_any(tags_plq)
 
     # this is the full target (copy - not virtual)
     target = ket_plq.gate(G, where, contract=False) | env
@@ -953,11 +953,11 @@ class FullUpdate(TEBD2D):
         that boolean evaluates to ``True`` then terminal the evolution.
     progbar : boolean, optional
         Whether to show a live progress bar during the evolution.
-    fit_strategy : {'als', 'autodiff'}, optional
+    fit_strategy : {'als', 'autodiff-fidelity'}, optional
         Core method used to fit the gate application.
 
             * ``'als'``: alternating least squares
-            * ``'autodiff'``: local fidelity using autodiff
+            * ``'autodiff-fidelity'``: local fidelity using autodiff
 
     fit_opts : dict, optional
         Advanced options for the gate application fitting functions. Defaults
