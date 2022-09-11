@@ -1593,7 +1593,8 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
     def swap_sites_with_compress(self, i, j, cur_orthog=None,
                                  inplace=False, **compress_opts):
         """Swap sites ``i`` and ``j`` by contracting, then splitting with the
-        physical indices swapped.
+        physical indices swapped. If the sites are not adjacent, this will
+        happen multiple times.
 
         Parameters
         ----------
@@ -1608,11 +1609,15 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         compress_opts
             Supplied to :func:`~quimb.tensor.tensor_core.tensor_split`.
         """
+        mps = self if inplace else self.copy()
+
         i, j = sorted((i, j))
         if i + 1 != j:
-            raise ValueError("Sites aren't adjacent.")
+            mps.swap_site_to_(j, i, cur_orthog=cur_orthog)
+            # first site is now at j + 1, move back up
+            mps.swap_site_to_(i + 1, j, cur_orthog=(i, i + 1))
+            return mps
 
-        mps = self if inplace else self.copy()
         mps.canonize((i, j), cur_orthog)
 
         # get site tensors and indices
