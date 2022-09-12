@@ -920,7 +920,7 @@ class Circuit:
         """
         if isinstance(gate_id, Gate):
             # already encapuslated
-            self._apply_gate(gate, **gate_opts)
+            self._apply_gate(gate_id, **gate_opts)
             return
 
         if hasattr(gate_id, 'shape') and not isinstance(gate_id, str):

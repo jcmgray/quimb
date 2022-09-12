@@ -573,6 +573,19 @@ class TestMatrixProductState:
         Gd = qu.ikron(G, [2] * 10, (7, 8))
         assert psi.to_dense().H @ (Gd @ psid) == pytest.approx(1.0)
 
+    def test_swap_far_sites(self):
+        psi = MPS_rand_state(7, 2)
+        for i, j in [(0, 6), (6, 1), (5, 2)]:
+            k1 = psi.to_dense([
+                psi.site_ind(
+                    j if site == i else
+                    i if site == j else
+                    site
+                ) for site in psi.sites
+            ])
+            k2 = psi.swap_sites_with_compress(i, j).to_dense()
+            assert qu.fidelity(k1, k2) == pytest.approx(1.0)
+
     def test_swap_gating(self):
         psi0 = MPS_rand_state(20, 5)
         CNOT = qu.controlled('not')
