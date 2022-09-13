@@ -18,7 +18,7 @@ from .tensor_1d import TensorNetwork1DVector, Dense1D, TensorNetwork1DOperator
 from . import array_ops as ops
 
 import qiskit 
-
+from math import pi
 
 def _convert_ints_and_floats(x):
     if isinstance(x, str):
@@ -81,6 +81,73 @@ def parse_qasm(qasm):
         'n': n,
         'gates': gates,
         'n_gates': len(gates),
+        'round_specified': round_specified,
+    }
+
+
+def parse_open_qasm(qasm):
+    """Parse qasm from a string.
+
+    Parameters
+    ----------
+    qasm : str
+        The full string of the qasm file.
+
+    Returns
+    -------
+    circuit_info : dict
+        Information about the circuit:
+
+        - circuit_info['n']: the number of qubits
+        - circuit_info['n_gates']: the number of gates in total
+        - circuit_info['gates']: list[list[str]], list of gates, each of which
+          is a list of strings read from a line of the qasm file.
+    """
+
+    lines = qasm.split('\n')
+    print(pi, eval('pi/2'), eval('2* pi / 4')) 
+    # turn into tuples of python types
+    gates = []
+    qubits = []
+    for count, line in enumerate(lines):
+        if line.startswith("qreg"):
+            match = re.findall("\d+", line)
+            qubits.append(int(match[0]))
+        elif line.startswith(("creg", "include", "measure", "OPENQASM", "barrier")):
+            continue
+        elif line:
+            gates.append(tuple(map(_convert_ints_and_floats, line.strip().split(" "))))
+
+    n = int(sum(qubits))
+    gate_f = []
+    for i in gates:
+            gate, q = i
+            q_l = []
+            parameter_l = []
+            gate_l = []
+            gate_symbol = gate.split("(")[0]
+            
+            gate_l.append(gate_symbol)
+            match = re.findall("\d+", q)
+            if match:
+                match = [int(i) for i in match]
+                q_l = match
+            
+            match = re.findall('\(.*?\)', gate)
+            
+            if match:
+                match = [i.replace('(', '').replace(')', '') for i in match]
+                match = [float(eval(i)) for i in match]
+                parameter_l = match
+
+            zip_all = (*gate_l, *parameter_l, *q_l)
+            gate_f.append(zip_all)
+
+    round_specified = isinstance(gates[0][0], numbers.Integral)
+    return {
+        'n': n,
+        'gates': tuple(gate_f),
+        'n_gates': len(gate_f),
         'round_specified': round_specified,
     }
 
@@ -821,6 +888,15 @@ class Circuit:
         self._sampled_conditionals = dict()
 
     @classmethod
+    def from_open_qasm(cls, qasm, **quantum_circuit_opts):
+        """Generate a ``Circuit`` instance from a qasm string.
+        """
+        info = parse_open_qasm(qasm)
+        qc = cls(info['n'], **quantum_circuit_opts)
+        qc.apply_gates(info['gates'])
+        return qc
+
+    @classmethod
     def from_qasm(cls, qasm, **quantum_circuit_opts):
         """Generate a ``Circuit`` instance from a qasm string.
         """
@@ -1276,7 +1352,7 @@ class Circuit:
             The sequence of gates to apply.
         """
         for gate in gates:
-            self.apply_gate(*gate)
+            self.apply_gate(*gate, contract=False)
 
         self._psi.squeeze_()
 
