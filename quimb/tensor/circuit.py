@@ -85,7 +85,7 @@ def parse_qasm(qasm):
     }
 
 
-def parse_open_qasm(qasm):
+def parse_open_qasm(qasm, symbol_q):
     """Parse qasm from a string.
 
     Parameters
@@ -105,7 +105,7 @@ def parse_open_qasm(qasm):
     """
 
     lines = qasm.split('\n')
-    print(pi, eval('pi/2'), eval('2* pi / 4')) 
+
     # turn into tuples of python types
     gates = []
     qubits = []
@@ -128,18 +128,17 @@ def parse_open_qasm(qasm):
             gate_symbol = gate.split("(")[0]
             
             gate_l.append(gate_symbol)
-            match = re.findall("\d+", q)
+            match = re.findall(symbol_q+"\d+", q)
             if match:
-                match = [int(i) for i in match]
-                q_l = match
-            
+                match = [int(i.replace(symbol_q, '')) for i in match]
+                q_l = match  
             match = re.findall('\(.*?\)', gate)
             
             if match:
                 match = [i.replace('(', '').replace(')', '') for i in match]
                 match = [float(eval(i)) for i in match]
                 parameter_l = match
-
+            
             zip_all = (*gate_l, *parameter_l, *q_l)
             gate_f.append(zip_all)
 
@@ -888,10 +887,10 @@ class Circuit:
         self._sampled_conditionals = dict()
 
     @classmethod
-    def from_open_qasm(cls, qasm, **quantum_circuit_opts):
+    def from_open_qasm(cls, qasm, symbol_q, **quantum_circuit_opts):
         """Generate a ``Circuit`` instance from a qasm string.
         """
-        info = parse_open_qasm(qasm)
+        info = parse_open_qasm(qasm, symbol_q)
         qc = cls(info['n'], **quantum_circuit_opts)
         qc.apply_gates(info['gates'])
         return qc
@@ -1301,6 +1300,9 @@ class Circuit:
 
         for i in gate_p:
             # print("gate",i, dic_id[i])
+            if dic_id[i] == "CX":
+                t0, t1 = dic_r[i]
+                qc.cx(q_l[t0], q_l[t1])
             if dic_id[i] == "CNOT":
                 t0, t1 = dic_r[i]
                 qc.cx(q_l[t0], q_l[t1])
