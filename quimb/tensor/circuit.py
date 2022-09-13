@@ -510,8 +510,8 @@ def apply_fsimg(
 def rzz_param_gen(params):
     gamma = params[0]
 
-    c00 = c11 = do('complex', do('cos', gamma), do('sin', gamma))
-    c01 = c10 = do('complex', do('cos', gamma), -do('sin', gamma))
+    c00 = c11 = do('complex', do('cos', gamma / 2), -do('sin', gamma / 2))
+    c01 = c10 = do('complex', do('cos', gamma / 2), do('sin', gamma / 2))
 
     data = [[[[c00, 0], [0, 0]],
              [[0, c01], [0, 0]]],
@@ -528,7 +528,7 @@ def rzz(gamma):
 
     .. math::
 
-        \mathrm{RZZ}(\gamma) = \exp(-i \gamma Z_i Z_j)
+        \mathrm{RZZ}(\gamma) = \exp(-i (\gamma / 2.) Z_i Z_j)
 
     """
     return rzz_param_gen(np.array([gamma]))
@@ -1078,17 +1078,17 @@ class Circuit:
                         label_leakage="off"):
         q_virtual, q_physical = self.qubits_in_light_cone(psi)
         q_leakage = []
-        if label_leakage=="leakage":
+        if label_leakage == "leakage":
             for i in q_physical:
                 q_leakage.append(i)
                 if i % 2 == 0 and (i+1) not in q_physical:
                     if (i+1) in q_virtual:
                         q_leakage.append(i+1)
-                if i % 2 == 1 and (i-1) not in q_physical:
+                if (i % 2) == 1 and (i-1) not in q_physical:
                     if (i-1) in q_virtual:
                         q_leakage.append(i-1)
-        elif label_leakage=="leakage-all":
-            q_total=q_virtual+q_physical
+        elif label_leakage == "leakage-all":
+            q_total = q_virtual+q_physical
             for i in q_total:
                 q_leakage.append(i)
 
@@ -1140,7 +1140,7 @@ class Circuit:
             if dic_id[i] == "RZZ":
                 t0, t1 = dic_r[i]
                 p0,  = dic_p[i]
-                qc.rzz(-p0*2., q_l[t0], q_l[t1])
+                qc.rzz(p0, q_l[t0], q_l[t1])
             if dic_id[i] == "RY":
                 t0, = dic_r[i]
                 p0,  = dic_p[i]
@@ -1207,6 +1207,61 @@ class Circuit:
 
                 for i in range(len(q_p)):
                     qc.measure(q_p[i], c_p[i])
+
+        return qc
+
+
+    def to_qiskit(self):
+
+        q_l = self.q_qiskit
+        #c_l = self.c_qiskit
+        #qc = qiskit.QuantumCircuit(*q_l, *c_l)
+        qc = qiskit.QuantumCircuit(*q_l)
+
+        gate_p = self.partial_gates(self.psi)
+        dic_id = self.gate_id_map()
+        dic_r = self.gate_regs_map()
+        dic_p = self.gate_params_map()
+
+        for i in gate_p:
+            # print("gate",i, dic_id[i])
+            if dic_id[i] == "CNOT":
+                t0, t1 = dic_r[i]
+                qc.cx(q_l[t0], q_l[t1])
+            if dic_id[i] == "CZ":
+                t0, t1 = dic_r[i]
+                qc.cz(q_l[t0], q_l[t1])
+            if dic_id[i] == "H":
+                t0, = dic_r[i]
+                qc.h(q_l[t0])
+            if dic_id[i] == "RZZ":
+                t0, t1 = dic_r[i]
+                p0,  = dic_p[i]
+                qc.rzz(p0, q_l[t0], q_l[t1])
+            if dic_id[i] == "RY":
+                t0, = dic_r[i]
+                p0,  = dic_p[i]
+                qc.ry(p0, q_l[t0])
+            if dic_id[i] == "RX":
+                t0, = dic_r[i]
+                p0,  = dic_p[i]
+                qc.rx(p0, q_l[t0])
+            if dic_id[i] == "RZ":
+                t0, = dic_r[i]
+                p0,  = dic_p[i]
+                qc.rz(p0, q_l[t0])
+            if dic_id[i] == "X":
+                t0, = dic_r[i]
+                qc.x(q_l[t0])
+            if dic_id[i] == "Y":
+                t0, = dic_r[i]
+                qc.y(q_l[t0])
+            if dic_id[i] == "Z":
+                t0, = dic_r[i]
+                qc.z(q_l[t0])
+            if dic_id[i] == "T":
+                t0, = dic_r[i]
+                qc.t(q_l[t0])
 
         return qc
 
