@@ -113,8 +113,10 @@ def parse_open_qasm(qasm, symbol_q):
         if line.startswith("qreg"):
             match = re.findall("\d+", line)
             qubits.append(int(match[0]))
-        elif line.startswith(("creg", "include", "measure", "OPENQASM", "barrier")):
+        elif line.startswith(("creg", "include", "measure", "OPENQASM", "barrier", "reset", "if")):
             continue
+        elif line.startswith(("gate")):
+            print("warnning, gate is not used")
         elif line:
             gates.append(tuple(map(_convert_ints_and_floats, line.strip().split(" "))))
 
@@ -134,11 +136,16 @@ def parse_open_qasm(qasm, symbol_q):
                 q_l = match  
             match = re.findall('\(.*?\)', gate)
             
+
             if match:
                 match = [i.replace('(', '').replace(')', '') for i in match]
-                match = [float(eval(i)) for i in match]
-                parameter_l = match
-            
+                if "," in match[0]:
+                    n_float = match[0].split(",")
+                    parameter_l = [float(i) for i in n_float] 
+                else:
+                    match = [float(eval(i)) for i in match]
+                    parameter_l = match
+        
             zip_all = (*gate_l, *parameter_l, *q_l)
             gate_f.append(zip_all)
 
@@ -1316,6 +1323,10 @@ class Circuit:
                 t0, t1 = dic_r[i]
                 p0,  = dic_p[i]
                 qc.rzz(p0, q_l[t0], q_l[t1])
+            if dic_id[i] == "U3":
+                t0,  = dic_r[i]
+                p0, p1, p2 = dic_p[i]
+                qc.u3(p0, p1, p2, q_l[t0])
             if dic_id[i] == "RY":
                 t0, = dic_r[i]
                 p0,  = dic_p[i]
