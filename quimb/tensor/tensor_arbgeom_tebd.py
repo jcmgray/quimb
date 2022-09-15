@@ -215,9 +215,7 @@ class LocalHamGen:
         """
         import networkx as nx
 
-        G = nx.Graph()
-        for site_a, site_b in self.terms:
-            G.add_edge(site_a, site_b)
+        G = nx.Graph(tuple(self.terms))
 
         coloring = list(
             nx.coloring.greedy_color(
@@ -228,7 +226,11 @@ class LocalHamGen:
         # sort into color groups
         coloring.sort(key=lambda coo_color: coo_color[1])
 
-        return [coo for coo, _ in coloring]
+        return [
+            # networkx doesn't preserve node order of edge spec
+            tuple(sorted(coo)) for
+            coo, _ in coloring
+        ]
 
     def get_auto_ordering(self, order="sort", **kwargs):
         """Get an ordering of the terms to use with TEBD, for example. The

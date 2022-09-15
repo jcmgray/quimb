@@ -3,14 +3,52 @@ Changelog
 
 Release notes for ``quimb``.
 
-.. _whats-new.2.0.0:
+.. _whats-new.1.4.1:
 
-v2.0.0 (unreleased)
+v1.4.1 (unreleased)
 ----------------------
 
 **Enhancements**
 
+- unify much functionality from 1D, 2D and 3D into general arbitrary geometry
+  class :class:`quimb.tensor.tensor_arbgeom.TensorNetworkGen`
+- refactor contraction, allowing using cotengra directly
+- add :meth:`~quimb.tensor.tensor_core.Tensor.visualize` for visualizing the
+  actual data entries of an arbitrarily high dimensional tensor
+- add :class:`~quimb.tensor.circuit.Gate` class for more robust tracking and
+  manipulation of gates in quantum :class:`~quimb.tensor.circuit.Circuit`
+  simulation
+- tweak TN drawing style and layout
+- tweak default gauging options of compressed contraction
+- add :meth:`~quimb.tensor.tensor_core.TensorNetwork.compute_hierarchical_grouping`
+- add :meth:`~quimb.tensor.tensor_core.Tensor.as_network`
+
 **Bug fixes:**
+
+  - fix force atlas 2 and `weight_attr` bug (:issue:`126`)
+  - allow unpickling of `PTensor` objects (:issue:`128`, :pull:`131`)
+
+
+.. _whats-new.1.4.0:
+
+v1.4.0 (14th June 2022)
+----------------------
+
+**Enhancements**
+
+- Add 2D tensor network support and algorithms
+- Add 3D tensor network infrastructure
+- Add arbitrary geometry quantum state infrastructure
+- Many changes to :class:`~quimb.tensor.optimize.TNOptimizer`
+- Many changes to TN drawing
+- Many changes to :class:`~quimb.tensor.circuit.Circuit` simulation
+- Many improvements to TN simplification
+- Make all tag and index operations deterministic
+- Add :func:`~quimb.tensor.tensor_core.tensor_network_sum`,
+  :func:`~quimb.tensor.tensor_core.tensor_network_distance` and
+  :meth:`~quimb.tensor.tensor_core.TensorNetwork.fit`
+- Various memory and performance improvements
+- Various graph generators and TN builders
 
 
 .. _whats-new.1.3.0:
@@ -25,7 +63,7 @@ v1.3.0 (18th Feb 2020)
 - Added :meth:`quimb.tensor.tensor_core.Tensor.randomize` and :meth:`quimb.tensor.tensor_core.TensorNetwork.randomize` to randomize tensor and tensor network entries.
 - Automatically squeeze tensor networks when rank-simplifying.
 - Add :meth:`~quimb.tensor.tensor_1d.TensorNetwork1DFlat.compress_site` for compressing around single sites of MPS etc.
-- Add :func:`~quimb.tensor.tensor_gen.MPS_ghz_state` and :func:`~quimb.tensor.tensor_gen.MPS_w_state` for building bond dimension 2 open boundary MPS reprentations of those states.
+- Add :func:`~quimb.tensor.tensor_builder.MPS_ghz_state` and :func:`~quimb.tensor.tensor_builder.MPS_w_state` for building bond dimension 2 open boundary MPS reprentations of those states.
 - Various changes in conjunction with `autoray <https://github.com/jcmgray/autoray>`_ to improve the agnostic-ness of tensor network operations with respect to the backend array type.
 - Add :func:`~quimb.tensor.tensor_core.new_bond` on top of :meth:`quimb.tensor.tensor_core.Tensor.new_ind` and :meth:`quimb.tensor.tensor_core.Tensor.expand_ind` for more graph orientated construction of tensor networks, see :ref:`tn-creation-graph-style`.
 - Add the :func:`~quimb.gen.operators.fsim` gate.
@@ -74,7 +112,7 @@ v1.2.0 (6th June 2019)
 - TN: make many more tensor operations agnostic of the array backend (e.g. numpy, cupy,
   tensorflow, ...)
 - TN: allow :func:`~quimb.tensor.tensor_1d.align_TN_1D` to take an MPO as the first argument
-- TN: add :meth:`~quimb.tensor.tensor_gen.SpinHam1D.build_sparse`
+- TN: add :meth:`~quimb.tensor.tensor_builder.SpinHam1D.build_sparse`
 - TN: add :meth:`quimb.tensor.tensor_core.Tensor.unitize` and :meth:`quimb.tensor.tensor_core.TensorNetwork.unitize` to impose unitary/isometric constraints on tensors specfied using the ``left_inds`` kwarg
 - Many updates to tensor network quantum circuit
   (:class:`quimb.tensor.circuit.Circuit`) simulation including:
