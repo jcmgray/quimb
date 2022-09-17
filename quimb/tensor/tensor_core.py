@@ -737,12 +737,12 @@ def tensor_make_single_bond(t1, t2, gauges=None):
     """If two tensors share multibonds, fuse them together and return the left
     indices, bond if it exists, and right indices. Handles simple ``gauges``.
     """
-    if hasattr(t1, "custom_funcs"):
-        func = t1.custom_funcs.get("tensor_fuse_squeeze", None)
-        if func is not None:
-            return func(t1, t2)
-        else:
-            return
+    # if hasattr(t1, "custom_funcs"):
+    #     func = t1.custom_funcs.get("tensor_fuse_squeeze", None)
+    #     if func is not None:
+    #         return func(t1, t2)
+    #     else:
+    #         return
     left, shared, right = group_inds(t1, t2)
     nshared = len(shared)
 

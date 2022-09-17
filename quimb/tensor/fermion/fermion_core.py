@@ -1175,9 +1175,8 @@ class FermionTensorNetwork(BlockTensorNetwork):
             raise ValueError("No tags were found - nothing to contract. "
                              "(Change this to a no-op maybe?)")
         opts["inplace"] = True
-        contracted = tensor_contract(
-            *tagged_ts, preserve_tensor=not contracting_all, **opts
-        )
+        opts.setdefault("preserve_tensor", not contracting_all)
+        contracted = tensor_contract(*tagged_ts, **opts)
 
         if contracting_all:
             return contracted

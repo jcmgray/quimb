@@ -45,8 +45,8 @@ class FermionTensorNetwork2D(FermionTensorNetwork, TensorNetwork2D):
     """
     _EXTRA_PROPS = (
         '_site_tag_id',
-        '_row_tag_id',
-        '_col_tag_id',
+        '_x_tag_id',
+        '_y_tag_id',
         '_Lx',
         '_Ly',
     )
@@ -185,7 +185,7 @@ class FermionTensorNetwork2D(FermionTensorNetwork, TensorNetwork2D):
         tn = self.reorder(direction, layer_tags=layer_tags)
 
         r2d = Rotator2D(tn, xrange, yrange, from_which)
-        sweep, row_tag = r2d.vertical_sweep, r2d.row_tag
+        sweep, x_tag = r2d.vertical_sweep, r2d.x_tag
         contract_boundary_fn = r2d.get_contract_boundary_fn()
 
         if envs is None:
@@ -196,7 +196,7 @@ class FermionTensorNetwork2D(FermionTensorNetwork, TensorNetwork2D):
             contract_boundary_opts.setdefault('opposite_envs', {})
 
         envs[from_which, sweep[0]] = FermionTensorNetwork([])
-        first_row = row_tag(sweep[0])
+        first_row = x_tag(sweep[0])
         envs['mid', sweep[0]] = tn.select(first_row).copy()
         if len(sweep)==1:
             return envs
@@ -207,9 +207,9 @@ class FermionTensorNetwork2D(FermionTensorNetwork, TensorNetwork2D):
         for i in sweep[2:]:
             iprevprev = i - 2 * sweep.step
             iprev = i - sweep.step
-            envs['mid', iprev] = tn.select(row_tag(iprev)).copy()
+            envs['mid', iprev] = tn.select(x_tag(iprev)).copy()
             if dense:
-                tn ^= (row_tag(iprevprev), row_tag(iprev))
+                tn ^= (x_tag(iprevprev), x_tag(iprev))
             else:
                 contract_boundary_fn(
                     iprevprev, iprev,
@@ -508,7 +508,7 @@ def gate_string_split_(TG, where, string, original_ts, bonds_along,
     # SVD funcs needs to be modify and make sure S has even parity
     for i, bix, location, s in regauged:
         t = inner_ts[i]
-        t.multiply_index_diagonal_(bix, s, 
+        t.multiply_index_diagonal_(bix, s,
                 location=location, inverse=True)
 
     revert_index_map = {v: k for k, v in reindex_map.items()}
@@ -638,7 +638,7 @@ def gate_string_reduce_split_(TG, where, string, original_ts, bonds_along,
 
     for i, bix, location, s in regauged:
         t = new_ts[i]
-        t.multiply_index_diagonal_(bix, s, 
+        t.multiply_index_diagonal_(bix, s,
                 location=location, inverse=True)
 
     for (tid, _), to, t in zip(fermion_info, original_ts, new_ts):
@@ -658,8 +658,8 @@ class FermionTensorNetwork2DVector(FermionTensorNetwork2D,
 
     _EXTRA_PROPS = (
         '_site_tag_id',
-        '_row_tag_id',
-        '_col_tag_id',
+        '_x_tag_id',
+        '_y_tag_id',
         '_Lx',
         '_Ly',
         '_site_ind_id',
@@ -740,12 +740,12 @@ class FermionTensorNetwork2DVector(FermionTensorNetwork2D,
         # non-nearest neighbours
         if long_range_path_sequence is not None:
             long_range_path_sequence = tuple(long_range_path_sequence)
-        
+
         if long_range_use_swaps:
             raise NotImplementedError
 
         psi.fermion_space.add_tensor(TG, virtual=True)
-        # check if we are not nearest neighbour and need to swap first  
+        # check if we are not nearest neighbour and need to swap first
 
         string = tuple(gen_long_range_path(
                  *where, sequence=long_range_path_sequence))
@@ -802,7 +802,7 @@ class FermionTensorNetwork2DVector(FermionTensorNetwork2D,
     ):
         norm, _, bra = self.make_norm(
                     return_all=True, layer_tags=layer_tags)
-        
+
         plaquette_env_options["max_bond"] = max_bond
         plaquette_env_options["cutoff"] = cutoff
         plaquette_env_options["canonize"] = canonize
@@ -857,7 +857,7 @@ class FermionTensorNetwork2DVector(FermionTensorNetwork2D,
                 site_ix = [bra.site_ind(i, j) for i, j in _where]
                 bnds = [rand_uuid() for _ in range(ng)]
                 reindex_map = dict(zip(site_ix, bnds))
-                TG = FermionTensor(G.copy(), 
+                TG = FermionTensor(G.copy(),
                             inds=site_ix+bnds, left_inds=site_ix)
                 tids = newtn._get_tids_from_inds(site_ix, which='any')
                 for tid_ in tids:
@@ -882,8 +882,8 @@ class FermionTensorNetwork2DOperator(FermionTensorNetwork2D,
 
     _EXTRA_PROPS = (
         '_site_tag_id',
-        '_row_tag_id',
-        '_col_tag_id',
+        '_x_tag_id',
+        '_y_tag_id',
         '_Lx',
         '_Ly',
         '_upper_ind_id',
@@ -903,8 +903,8 @@ class FermionTensorNetwork2DFlat(FermionTensorNetwork2D,
 
     _EXTRA_PROPS = (
         '_site_tag_id',
-        '_row_tag_id',
-        '_col_tag_id',
+        '_x_tag_id',
+        '_y_tag_id',
         '_Lx',
         '_Ly',
     )
@@ -922,8 +922,8 @@ class FPEPS(FermionTensorNetwork2DVector,
 
     _EXTRA_PROPS = (
         '_site_tag_id',
-        '_row_tag_id',
-        '_col_tag_id',
+        '_x_tag_id',
+        '_y_tag_id',
         '_Lx',
         '_Ly',
         '_site_ind_id',
@@ -931,7 +931,7 @@ class FPEPS(FermionTensorNetwork2DVector,
 
     def __init__(self, arrays, *, shape='urdlp', tags=None,
                  site_ind_id='k{},{}', site_tag_id='I{},{}',
-                 row_tag_id='ROW{}', col_tag_id='COL{}', **tn_opts):
+                 x_tag_id='X{}', y_tag_id='Y{}', **tn_opts):
 
         if isinstance(arrays, FPEPS):
             super().__init__(arrays)
@@ -940,8 +940,8 @@ class FPEPS(FermionTensorNetwork2DVector,
         tags = tags_to_oset(tags)
         self._site_ind_id = site_ind_id
         self._site_tag_id = site_tag_id
-        self._row_tag_id = row_tag_id
-        self._col_tag_id = col_tag_id
+        self._x_tag_id = x_tag_id
+        self._y_tag_id = y_tag_id
 
         arrays = tuple(tuple(x for x in xs) for xs in arrays)
         self._Lx = len(arrays)
@@ -991,8 +991,8 @@ class FPEPS(FermionTensorNetwork2DVector,
             # mix site, row, column and global tags
 
             ij_tags = tags | oset((self.site_tag(i, j),
-                                   self.row_tag(i),
-                                   self.col_tag(j)))
+                                   self.x_tag(i),
+                                   self.y_tag(j)))
 
             # create the site tensor!
             tensors.append(FermionTensor(data=array, inds=inds, tags=ij_tags))
@@ -1115,8 +1115,8 @@ class FPEPO(FermionTensorNetwork2DOperator,
 
     _EXTRA_PROPS = (
         '_site_tag_id',
-        '_row_tag_id',
-        '_col_tag_id',
+        '_x_tag_id',
+        '_y_tag_id',
         '_Lx',
         '_Ly',
         '_upper_ind_id',
@@ -1125,7 +1125,7 @@ class FPEPO(FermionTensorNetwork2DOperator,
 
     def __init__(self, arrays, *, shape='urdlbk', tags=None,
                  upper_ind_id='k{},{}', lower_ind_id='b{},{}',
-                 site_tag_id='I{},{}', row_tag_id='ROW{}', col_tag_id='COL{}',
+                 site_tag_id='I{},{}', x_tag_id='X{}', y_tag_id='Y{}',
                  **tn_opts):
 
         if isinstance(arrays, FPEPO):
@@ -1136,8 +1136,8 @@ class FPEPO(FermionTensorNetwork2DOperator,
         self._upper_ind_id = upper_ind_id
         self._lower_ind_id = lower_ind_id
         self._site_tag_id = site_tag_id
-        self._row_tag_id = row_tag_id
-        self._col_tag_id = col_tag_id
+        self._x_tag_id = x_tag_id
+        self._y_tag_id = y_tag_id
 
         arrays = tuple(tuple(x for x in xs) for xs in arrays)
         self._Lx = len(arrays)
@@ -1187,8 +1187,8 @@ class FPEPO(FermionTensorNetwork2DOperator,
 
             # mix site, row, column and global tags
             ij_tags = tags | oset((self.site_tag(i, j),
-                                   self.row_tag(i),
-                                   self.col_tag(j)))
+                                   self.x_tag(i),
+                                   self.y_tag(j)))
 
             # create the site tensor!
             tensors.append(FermionTensor(data=array, inds=inds, tags=ij_tags))
