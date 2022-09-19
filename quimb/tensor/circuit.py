@@ -6,7 +6,7 @@ import functools
 import itertools
 
 import numpy as np
-from autoray import do, reshape
+from autoray import do, reshape, conj
 
 import quimb as qu
 from ..utils import progbar as _progbar
@@ -234,6 +234,18 @@ def apply_Rx(psi, theta, i, parametrize=False, **gate_opts):
     psi.gate_(G, int(i), tags=mtags, **gate_opts)
 
 
+def apply_Rx_conj(psi, theta, i, parametrize=False, **gate_opts):
+    """Apply an X-rotation of ``theta`` to tensor network wavefunction ``psi``.
+    """
+    mtags = _merge_tags('RX', gate_opts)
+    if parametrize:
+        G = ops.PArray(rx_gate_param_gen, (theta,))
+        G.add_function(conj)
+    else:
+        G = qu.Rx(float(theta)).conj()
+    psi.gate_(G, int(i), tags=mtags, **gate_opts)
+
+
 def ry_gate_param_gen(params):
     phi = params[0]
 
@@ -258,6 +270,18 @@ def apply_Ry(psi, theta, i, parametrize=False, **gate_opts):
     else:
         G = qu.Ry(float(theta))
     psi.gate_(G, int(i), tags=mtags, **gate_opts)
+
+def apply_Ry_conj(psi, theta, i, parametrize=False, **gate_opts):
+    """Apply a Y-rotation of ``theta`` to tensor network wavefunction ``psi``.
+    """
+    mtags = _merge_tags('RY', gate_opts)
+    if parametrize:
+        G = ops.PArray(ry_gate_param_gen, (theta,))
+        G.add_function(conj)
+    else:
+        G = qu.Ry(float(theta)).conj()
+    psi.gate_(G, int(i), tags=mtags, **gate_opts)
+
 
 
 def rz_gate_param_gen(params):
@@ -285,6 +309,16 @@ def apply_Rz(psi, theta, i, parametrize=False, **gate_opts):
         G = qu.Rz(float(theta))
     psi.gate_(G, int(i), tags=mtags, **gate_opts)
 
+def apply_Rz_conj(psi, theta, i, parametrize=False, **gate_opts):
+    """Apply a Z-rotation of ``theta`` to tensor network wavefunction ``psi``.
+    """
+    mtags = _merge_tags('RZ', gate_opts)
+    if parametrize:
+        G = ops.PArray(rz_gate_param_gen, (theta,))
+        G.add_function(conj)
+    else:
+        G = qu.Rz(float(theta)).conj()
+    psi.gate_(G, int(i), tags=mtags, **gate_opts)
 
 def u3_gate_param_gen(params):
     theta, phi, lamda = params[0], params[1], params[2]
@@ -322,6 +356,15 @@ def apply_U3(psi, theta, phi, lamda, i, parametrize=False, **gate_opts):
         G = qu.U_gate(theta, phi, lamda)
     psi.gate_(G, int(i), tags=mtags, **gate_opts)
 
+def apply_U3_conj(psi, theta, phi, lamda, i, parametrize=False, **gate_opts):
+    mtags = _merge_tags('U3', gate_opts)
+    if parametrize:
+        G = ops.PArray(u3_gate_param_gen, (theta, phi, lamda))
+        G.add_function(conj)
+    else:
+        G = qu.U_gate(theta, phi, lamda).conj()
+    psi.gate_(G, int(i), tags=mtags, **gate_opts)
+
 
 def u2_gate_param_gen(params):
     phi, lamda = params[0], params[1]
@@ -354,6 +397,17 @@ def apply_U2(psi, phi, lamda, i, parametrize=False, **gate_opts):
     psi.gate_(G, int(i), tags=mtags, **gate_opts)
 
 
+
+def apply_U2_conj(psi, phi, lamda, i, parametrize=False, **gate_opts):
+    mtags = _merge_tags('U2', gate_opts)
+    if parametrize:
+        G = ops.PArray(u2_gate_param_gen, (phi, lamda))
+        G.add_function(conj)
+    else:
+        G = qu.U_gate(np.pi / 2, phi, lamda).conj()
+    psi.gate_(G, int(i), tags=mtags, **gate_opts)
+
+
 def u1_gate_param_gen(params):
     lamda = params[0]
 
@@ -372,6 +426,15 @@ def apply_U1(psi, lamda, i, parametrize=False, **gate_opts):
         G = ops.PArray(u1_gate_param_gen, (lamda,))
     else:
         G = qu.U_gate(0.0, 0.0, lamda)
+    psi.gate_(G, int(i), tags=mtags, **gate_opts)
+
+def apply_U1_conj(psi, lamda, i, parametrize=False, **gate_opts):
+    mtags = _merge_tags('U1', gate_opts)
+    if parametrize:
+        G = ops.PArray(u1_gate_param_gen, (lamda,))
+        G.add_function(conj)
+    else:
+        G = qu.U_gate(0.0, 0.0, lamda).conj()
     psi.gate_(G, int(i), tags=mtags, **gate_opts)
 
 
@@ -400,6 +463,16 @@ def apply_cu3(psi, theta, phi, lamda, i, j, parametrize=False, **gate_opts):
     psi.gate_(G, (int(i), int(j)), tags=mtags, **gate_opts)
 
 
+def apply_cu3_conj(psi, theta, phi, lamda, i, j, parametrize=False, **gate_opts):
+    mtags = _merge_tags('CU3', gate_opts)
+    if parametrize:
+        G = ops.PArray(cu3_param_gen, (theta, phi, lamda))
+        G.add_function(conj)
+    else:
+        G = cu3(theta, phi, lamda).conj
+    psi.gate_(G, (int(i), int(j)), tags=mtags, **gate_opts)
+
+
 def cu2_param_gen(params):
     U2 = u2_gate_param_gen(params)
 
@@ -424,6 +497,15 @@ def apply_cu2(psi, phi, lamda, i, j, parametrize=False, **gate_opts):
         G = cu2(phi, lamda)
     psi.gate_(G, (int(i), int(j)), tags=mtags, **gate_opts)
 
+
+def apply_cu2_conj(psi, phi, lamda, i, j, parametrize=False, **gate_opts):
+    mtags = _merge_tags('CU2', gate_opts)
+    if parametrize:
+        G = ops.PArray(cu2_param_gen, (phi, lamda))
+        G.add_function(conj)
+    else:
+        G = cu2(phi, lamda).conj()
+    psi.gate_(G, (int(i), int(j)), tags=mtags, **gate_opts)
 
 def cu1_param_gen(params):
     lamda = params[0]
@@ -452,6 +534,17 @@ def apply_cu1(psi, lamda, i, j, parametrize=False, **gate_opts):
     else:
         G = cu1(lamda)
     psi.gate_(G, (int(i), int(j)), tags=mtags, **gate_opts)
+
+
+def apply_cu1_conj(psi, lamda, i, j, parametrize=False, **gate_opts):
+    mtags = _merge_tags('CU1', gate_opts)
+    if parametrize:
+        G = ops.PArray(cu1_param_gen, (lamda,))
+        G.add_function(conj)
+    else:
+        G = cu1(lamda).conj()
+    psi.gate_(G, (int(i), int(j)), tags=mtags, **gate_opts)
+
 
 
 def fsim_param_gen(params):
@@ -504,6 +597,17 @@ def apply_fsim(psi, theta, phi, i, j, parametrize=False, **gate_opts):
     psi.gate_(G, (int(i), int(j)), tags=mtags, **gate_opts)
 
 
+
+def apply_fsim_conj(psi, theta, phi, i, j, parametrize=False, **gate_opts):
+    mtags = _merge_tags('FSIM', gate_opts)
+    if parametrize:
+        G = ops.PArray(fsim_param_gen, (theta, phi))
+        G.add_function(conj)
+    else:
+        G = qu.fsim(theta, phi).conj()
+    psi.gate_(G, (int(i), int(j)), tags=mtags, **gate_opts)
+
+
 def apply_fsimt(psi, theta, i, j, parametrize=False, **gate_opts):
     mtags = _merge_tags('FSIMT', gate_opts)
     if parametrize:
@@ -511,6 +615,18 @@ def apply_fsimt(psi, theta, i, j, parametrize=False, **gate_opts):
     else:
         G = qu.fsimt(theta)
     psi.gate_(G, (int(i), int(j)), tags=mtags, **gate_opts)
+
+
+
+def apply_fsimt_conj(psi, theta, i, j, parametrize=False, **gate_opts):
+    mtags = _merge_tags('FSIMT', gate_opts)
+    if parametrize:
+        G = ops.PArray(fsimt_param_gen, (theta,))
+        G.add_function(conj)
+    else:
+        G = qu.fsimt(theta).conj()
+    psi.gate_(G, (int(i), int(j)), tags=mtags, **gate_opts)
+
 
 
 def fsimg_param_gen(params):
@@ -580,6 +696,25 @@ def apply_fsimg(
     psi.gate_(G, (int(i), int(j)), tags=mtags, **gate_opts)
 
 
+def apply_fsimg_conj(
+    psi,
+    theta, zeta, chi, gamma, phi,
+    i, j, parametrize=False, **gate_opts
+):
+
+    mtags = _merge_tags('FSIMG', gate_opts)
+    if parametrize:
+        G = ops.PArray(fsimg_param_gen, (theta, zeta, chi, gamma, phi))
+        G.add_function(conj)
+    else:
+        G = qu.fsimg(theta, zeta, chi, gamma, phi).conj()
+    psi.gate_(G, (int(i), int(j)), tags=mtags, **gate_opts)
+
+
+
+
+
+
 def rzz_param_gen(params):
     gamma = params[0]
 
@@ -613,6 +748,16 @@ def apply_rzz(psi, gamma, i, j, parametrize=False, **gate_opts):
         G = ops.PArray(rzz_param_gen, (gamma,))
     else:
         G = rzz(float(gamma))
+    psi.gate_(G, (int(i), int(j)), tags=mtags, **gate_opts)
+
+
+def apply_rzz_conj(psi, gamma, i, j, parametrize=False, **gate_opts):
+    mtags = _merge_tags('RZZ', gate_opts)
+    if parametrize:
+        G = ops.PArray(rzz_param_gen, (gamma,))
+        G.add_function(conj)
+    else:
+        G = rzz(float(gamma)).conj()
     psi.gate_(G, (int(i), int(j)), tags=mtags, **gate_opts)
 
 
@@ -672,68 +817,113 @@ def apply_su4(
     psi.gate_(G, (int(i), int(j)), tags=mtags, **gate_opts)
 
 
+def apply_su4_conj(
+    psi,
+    theta1, phi1, lamda1,
+    theta2, phi2, lamda2,
+    theta3, phi3, lamda3,
+    theta4, phi4, lamda4,
+    t1, t2, t3,
+    i, j,
+    parametrize=False,
+    **gate_opts
+):
+    """See https://arxiv.org/abs/quant-ph/0308006 - Fig. 7.
+    """
+    params = (theta1, phi1, lamda1,
+              theta2, phi2, lamda2,
+              theta3, phi3, lamda3,
+              theta4, phi4, lamda4,
+              t1, t2, t3,)
+
+    mtags = _merge_tags('SU4', gate_opts)
+    if parametrize:
+        G = ops.PArray(su4_gate_param_gen, params)
+        G.add_function(conj)
+    else:
+        G = su4_gate_param_gen(params).conj()
+
+    psi.gate_(G, (int(i), int(j)), tags=mtags, **gate_opts)
+
+
+
 GATE_FUNCTIONS = {
     # constant single qubit gates
     'H': build_gate_1(qu.hadamard(), tags='H'),
-    'H_dagg': build_gate_1(qu.hadamard().conj(), tags='H'),
+    'H_conj': build_gate_1(qu.hadamard().conj(), tags='H'),
     'X': build_gate_1(qu.pauli('X'), tags='X'),
-    'X_dagg': build_gate_1(qu.pauli('X').conj(), tags='X'),
+    'X_conj': build_gate_1(qu.pauli('X').conj(), tags='X'),
     'Y': build_gate_1(qu.pauli('Y'), tags='Y'),
-    'Y_dagg': build_gate_1(qu.pauli('Y').conj(), tags='Y'),
+    'Y_conj': build_gate_1(qu.pauli('Y').conj(), tags='Y'),
     'Z': build_gate_1(qu.pauli('Z'), tags='Z'),
-    'Z_dagg': build_gate_1(qu.pauli('Z').conj(), tags='Z'),
+    'Z_conj': build_gate_1(qu.pauli('Z').conj(), tags='Z'),
     'S': build_gate_1(qu.S_gate(), tags='S'),
-    'S_dagg': build_gate_1(qu.S_gate().conj(), tags='S'),
+    'S_conj': build_gate_1(qu.S_gate().conj(), tags='S'),
     'T': build_gate_1(qu.T_gate(), tags='T'),
-    'T_dagg': build_gate_1(qu.T_gate().conj(), tags='T'),
+    'T_conj': build_gate_1(qu.T_gate().conj(), tags='T'),
     'X_1_2': build_gate_1(qu.Xsqrt(), tags='X_1/2'),
-    'X_1_2_dagg': build_gate_1(qu.Xsqrt().conj(), tags='X_1/2'),
+    'X_1_2_conj': build_gate_1(qu.Xsqrt().conj(), tags='X_1/2'),
     'Y_1_2': build_gate_1(qu.Ysqrt(), tags='Y_1/2'),
-    'Y_1_2_dagg': build_gate_1(qu.Ysqrt().conj(), tags='Y_1/2'),
+    'Y_1_2_conj': build_gate_1(qu.Ysqrt().conj(), tags='Y_1/2'),
     'Z_1_2': build_gate_1(qu.Zsqrt(), tags='Z_1/2'),
-    'Z_1_2_dagg': build_gate_1(qu.Zsqrt().conj(), tags='Z_1/2'),
+    'Z_1_2_conj': build_gate_1(qu.Zsqrt().conj(), tags='Z_1/2'),
     'W_1_2': build_gate_1(qu.Wsqrt(), tags='W_1/2'),
-    'W_1_2_dagg': build_gate_1(qu.Wsqrt().conj(), tags='W_1/2'),
+    'W_1_2_conj': build_gate_1(qu.Wsqrt().conj(), tags='W_1/2'),
     'HZ_1_2': build_gate_1(qu.Wsqrt(), tags='W_1/2'),
-    'HZ_1_2_dagg': build_gate_1(qu.Wsqrt().conj(), tags='W_1/2'),
+    'HZ_1_2_conj': build_gate_1(qu.Wsqrt().conj(), tags='W_1/2'),
     # constant two qubit gates
     'CNOT': build_gate_2(qu.CNOT(), tags='CNOT'),
-    'CNOT_dagg': build_gate_2(qu.CNOT().conj(), tags='CNOT'),
+    'CNOT_conj': build_gate_2(qu.CNOT().conj(), tags='CNOT'),
     'CX': build_gate_2(qu.cX(), tags='CX'),
-    'CX_dagg': build_gate_2(qu.cX().conj(), tags='CX'),
+    'CX_conj': build_gate_2(qu.cX().conj(), tags='CX'),
     'CY': build_gate_2(qu.cY(), tags='CY'),
-    'CY_dagg': build_gate_2(qu.cY().conj(), tags='CY'),
+    'CY_conj': build_gate_2(qu.cY().conj(), tags='CY'),
     'CZ': build_gate_2(qu.cZ(), tags='CZ'),
-    'CZ_dagg': build_gate_2(qu.cZ().conj(), tags='CZ'),
+    'CZ_conj': build_gate_2(qu.cZ().conj(), tags='CZ'),
     'IS': build_gate_2(qu.iswap(), tags='ISWAP'),
-    'IS_dagg': build_gate_2(qu.iswap().conj(), tags='ISWAP'),
+    'IS_conj': build_gate_2(qu.iswap().conj(), tags='ISWAP'),
     'ISWAP': build_gate_2(qu.iswap(), tags='ISWAP'),
-    'ISWAP_dagg': build_gate_2(qu.iswap().conj(), tags='ISWAP'),
+    'ISWAP_conj': build_gate_2(qu.iswap().conj(), tags='ISWAP'),
     # special non-tensor gates
     'IDEN': lambda *args, **kwargs: None,
     'SWAP': apply_swap,
     # single parametrizable gates
     'RX': apply_Rx,
+    'RX_conj': apply_Rx_conj,
     'RY': apply_Ry,
+    'RY_conj': apply_Ry_conj,
     'RZ': apply_Rz,
+    'RZ_conj': apply_Rz_conj,
     'U3': apply_U3,
+    'U3_conj': apply_U3_conj,
     'U2': apply_U2,
+    'U2_conj': apply_U2_conj,
     'U1': apply_U1,
+    'U1_conj': apply_U1_conj,
     # two qubit parametrizable gates
     'CU3': apply_cu3,
+    'CU3_conj': apply_cu3_conj,
     'CU2': apply_cu2,
+    'CU2_conj': apply_cu2_conj,
     'CU1': apply_cu1,
+    'CU1_conj': apply_cu1_conj,
     'FS': apply_fsim,
+    'FS_conj': apply_fsim_conj,
     'FSIM': apply_fsim,
+    'FSIM_conj': apply_fsim_conj,
     'FSIMT': apply_fsimt,
+    'FSIMT_conj': apply_fsimt_conj,
     'FSIMG': apply_fsimg,
+    'FSIMG_conj': apply_fsimg_conj,
     'RZZ': apply_rzz,
+    'RZZ_conj': apply_rzz_conj,
     'SU4': apply_su4,
+    'SU4_conj': apply_su4_conj,
 }
 
 ONE_QUBIT_PARAM_GATES = {'RX', 'RY', 'RZ', 'U3', 'U2', 'U1'}
 TWO_QUBIT_PARAM_GATES = {
-    'CU3', 'CU2', 'CU1', 'FS', 'FSIM', 'FSIMT', 'FSIMG', 'RZZ', 'SU4'
+    'CU3', 'CU2', 'CU1', 'FS', 'FSIM', 'FSIMT', 'FSIMG', 'RZZ', 'SU4',
 }
 TWO_QUBIT_GATES = {'CNOT', 'CX', 'CY', 'CZ', 'IS', 'ISWAP'}
 ONE_QUBIT_GATES = {'H', 'X', 'Y', 'Z', 'S', 'T', 'X_1_2', 'Y_1_2', 'Z_1_2', 'W_1_2', 'HZ_1_2'}
@@ -1433,6 +1623,7 @@ class Circuit:
 
         gate_id = gate_id.upper()
         gate_fn = GATE_FUNCTIONS[gate_id]
+        gate_fn_dagg = GATE_FUNCTIONS[gate_id+"_conj"]
 
         # overide any default gate opts
         opts = {**self.gate_opts, **gate_opts}
@@ -1451,71 +1642,24 @@ class Circuit:
         # keep track of the gates applied
         self.gates.append((gate_id, *gate_args))
 
-        all_param_gates = ONE_QUBIT_PARAM_GATES | TWO_QUBIT_PARAM_GATES
+        all_ONE_QUBIT_GATES = ONE_QUBIT_PARAM_GATES | ONE_QUBIT_GATES
+        all_TWO_QUBIT_GATES = TWO_QUBIT_PARAM_GATES | TWO_QUBIT_GATES
 
-        if gate_id in all_param_gates:
-            where = [i  for i in gate_args if isinstance(i, numbers.Integral)]
+        if gate_id in all_ONE_QUBIT_GATES:
+            where = [int(gate_args[-1])]
             parameters_ = list(gate_args[:len(gate_args)-len(where)])
-            
-            if gate_id in ONE_QUBIT_PARAM_GATES:
-                if gate_id=="U3":
-                    parameters_dagger = [parameters_[0], -1. * parameters_[1], -1. *parameters_[2]]
-                elif gate_id=="RY":
-                    parameters_dagger = [+1.*i for i in parameters_]                
-                else:
-                    parameters_dagger = [-1.*i for i in parameters_]
+        if gate_id in all_TWO_QUBIT_GATES:
+            where = [int(gate_args[-2]), int(gate_args[-1])]
+            parameters_ = list(gate_args[:len(gate_args)-len(where)])
 
+        # where = [i  for i in gate_args if isinstance(i, numbers.Integral)]
+        # parameters_ = list(gate_args[:len(gate_args)-len(where)])
+        
+        where_even = [2*i for i in where]
+        where_odd = [2*i+1 for i in where]
 
-
-            print("gate_id", gate_id, len(parameters_), parameters_)
-            if gate_id in TWO_QUBIT_PARAM_GATES:
-                if gate_id=="SU4":
-                    parameters_dagger = [parameters_[0], -1. * parameters_[1], -1. * parameters_[2] , 
-                                         parameters_[3], -1. * parameters_[4], -1. * parameters_[5],
-                                         parameters_[6], -1. * parameters_[7], -1. * parameters_[8],
-                                         parameters_[9], -1. * parameters_[10], -1. * parameters_[11],
-                                         -1. * parameters_[12], 1. * parameters_[13], 1. * parameters_[14],
-                                        ]
-                # elif gate_id=="FSIM":
-                #     parameters_dagger = [parameters_[0], -1.0 * parameters_[1]]
-                # elif gate_id=="FSIMT":
-                #     parameters_dagger = [parameters_[0]]
-                # elif gate_id=="FSIMG":
-                #     parameters_dagger = [parameters_[0], -1.0 * parameters_[1], -1.0 * parameters_[2], 
-                #                          -1.0 * parameters_[3], -1.0 * parameters_[4]]
-                # else:                                    
-                else:
-                    parameters_dagger = [-1.*i for i in parameters_]
-
-            print("where, parameters_", where, parameters_)
-            where_even = [2*i for i in where]
-            gate_args_even = parameters_ + where_even
-            print("gate_args_even", * parameters_ + where_even)
-            gate_fn(self._rho, * parameters_ + where_even, tags=tags, **opts)
-            where_odd = [2*i+1 for i in where]
-            gate_args_odd = parameters_dagger + where_odd
-            print("gate_args_odd", * parameters_dagger + where_odd)
-            gate_fn(self._rho, * parameters_dagger + where_odd, tags=tags, **opts)
-
-        all_constant_gates = TWO_QUBIT_GATES | ONE_QUBIT_GATES
-        if gate_id in all_constant_gates:
-            gate_args_even = [2*i for i in gate_args]
-            print(gate_id, gate_args, gate_args_even)
-            gate_fn(self._rho, *gate_args_even, tags=tags, **opts)
-            gate_args_odd = [2*i+1 for i in gate_args]
-            print(gate_id, gate_args, gate_args_odd)
-            gate_fn_dagg = GATE_FUNCTIONS[gate_id+"_dagg"]
-            print(gate_id+"_dagg",GATE_FUNCTIONS[gate_id+"_dagg"])
-            gate_fn_dagg(self._rho, *gate_args_odd, tags=tags, **opts)
-
-# ONE_QUBIT_PARAM_GATES = {'RX', 'RY', 'RZ', 'U3', 'U2', 'U1'}
-# TWO_QUBIT_PARAM_GATES = {
-#     'CU3', 'CU2', 'CU1', 'FS', 'FSIM', 'FSIMT', 'FSIMG', 'RZZ', 'SU4'
-# }
-# TWO_QUBIT_GATES = {'CNOT', 'CX' 'CY', 'CZ', 'IS', 'ISWAP'}
-# ONE_QUBIT_GATES = {'H', 'X' 'Y', 'Z', 'S', 'T', 'X_1_2', 'Y_1_2', 'Z_1_2', 'W_1_2', 'HZ_1_2'}
-
-
+        gate_fn(self._rho, * parameters_ + where_even, tags=tags, **opts)
+        gate_fn_dagg(self._rho, * parameters_ + where_odd, tags=tags, **opts)
 
     def apply_gates(self, gates):
         """Apply a sequence of gates to this tensor network quantum circuit.
