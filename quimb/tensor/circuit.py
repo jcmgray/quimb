@@ -675,23 +675,40 @@ def apply_su4(
 GATE_FUNCTIONS = {
     # constant single qubit gates
     'H': build_gate_1(qu.hadamard(), tags='H'),
+    'H_dagg': build_gate_1(qu.hadamard().conj(), tags='H'),
     'X': build_gate_1(qu.pauli('X'), tags='X'),
+    'X_dagg': build_gate_1(qu.pauli('X').conj(), tags='X'),
     'Y': build_gate_1(qu.pauli('Y'), tags='Y'),
+    'Y_dagg': build_gate_1(qu.pauli('Y').conj(), tags='Y'),
     'Z': build_gate_1(qu.pauli('Z'), tags='Z'),
+    'Z_dagg': build_gate_1(qu.pauli('Z').conj(), tags='Z'),
     'S': build_gate_1(qu.S_gate(), tags='S'),
+    'S_dagg': build_gate_1(qu.S_gate().conj(), tags='S'),
     'T': build_gate_1(qu.T_gate(), tags='T'),
+    'T_dagg': build_gate_1(qu.T_gate().conj(), tags='T'),
     'X_1_2': build_gate_1(qu.Xsqrt(), tags='X_1/2'),
+    'X_1_2_dagg': build_gate_1(qu.Xsqrt().conj(), tags='X_1/2'),
     'Y_1_2': build_gate_1(qu.Ysqrt(), tags='Y_1/2'),
+    'Y_1_2_dagg': build_gate_1(qu.Ysqrt().conj(), tags='Y_1/2'),
     'Z_1_2': build_gate_1(qu.Zsqrt(), tags='Z_1/2'),
+    'Z_1_2_dagg': build_gate_1(qu.Zsqrt().conj(), tags='Z_1/2'),
     'W_1_2': build_gate_1(qu.Wsqrt(), tags='W_1/2'),
+    'W_1_2_dagg': build_gate_1(qu.Wsqrt().conj(), tags='W_1/2'),
     'HZ_1_2': build_gate_1(qu.Wsqrt(), tags='W_1/2'),
+    'HZ_1_2_dagg': build_gate_1(qu.Wsqrt().conj(), tags='W_1/2'),
     # constant two qubit gates
     'CNOT': build_gate_2(qu.CNOT(), tags='CNOT'),
+    'CNOT_dagg': build_gate_2(qu.CNOT().conj(), tags='CNOT'),
     'CX': build_gate_2(qu.cX(), tags='CX'),
+    'CX_dagg': build_gate_2(qu.cX().conj(), tags='CX'),
     'CY': build_gate_2(qu.cY(), tags='CY'),
+    'CY_dagg': build_gate_2(qu.cY().conj(), tags='CY'),
     'CZ': build_gate_2(qu.cZ(), tags='CZ'),
+    'CZ_dagg': build_gate_2(qu.cZ().conj(), tags='CZ'),
     'IS': build_gate_2(qu.iswap(), tags='ISWAP'),
+    'IS_dagg': build_gate_2(qu.iswap().conj(), tags='ISWAP'),
     'ISWAP': build_gate_2(qu.iswap(), tags='ISWAP'),
+    'ISWAP_dagg': build_gate_2(qu.iswap().conj(), tags='ISWAP'),
     # special non-tensor gates
     'IDEN': lambda *args, **kwargs: None,
     'SWAP': apply_swap,
@@ -718,6 +735,9 @@ ONE_QUBIT_PARAM_GATES = {'RX', 'RY', 'RZ', 'U3', 'U2', 'U1'}
 TWO_QUBIT_PARAM_GATES = {
     'CU3', 'CU2', 'CU1', 'FS', 'FSIM', 'FSIMT', 'FSIMG', 'RZZ', 'SU4'
 }
+TWO_QUBIT_GATES = {'CNOT', 'CX', 'CY', 'CZ', 'IS', 'ISWAP'}
+ONE_QUBIT_GATES = {'H', 'X', 'Y', 'Z', 'S', 'T', 'X_1_2', 'Y_1_2', 'Z_1_2', 'W_1_2', 'HZ_1_2'}
+
 ALL_PARAM_GATES = ONE_QUBIT_PARAM_GATES | TWO_QUBIT_PARAM_GATES
 
 
@@ -825,6 +845,7 @@ class Circuit:
         self,
         N=None,
         psi0=None,
+        rho0=None,
         gate_opts=None,
         tags=None,
         psi0_dtype='complex128',
@@ -835,8 +856,10 @@ class Circuit:
             raise ValueError("You must supply one of `N` or `psi0`.")
 
         elif psi0 is None:
+            print("Hi")
             self.N = N
             self._psi = MPS_computational_state('0' * N, dtype=psi0_dtype)
+            self._rho = MPS_computational_state('0' * int(2 * N), dtype=psi0_dtype)
 
         elif N is None:
             self._psi = psi0.copy()
@@ -847,6 +870,13 @@ class Circuit:
                 raise ValueError("`N` doesn't match `psi0`.")
             self.N = N
             self._psi = psi0.copy()
+
+
+        if rho0 is None:
+            self._rho = MPS_computational_state('0' * int(2 * N), dtype=psi0_dtype)
+        else:
+            self._rho = MPS_computational_state('0' * int(2 * N), dtype=psi0_dtype)
+
 
         self.q_qiskit = []
         for i in range(self.N):
@@ -860,12 +890,15 @@ class Circuit:
         for count, ele in enumerate(self._psi):
             ele.add_tag(f"Qreg{count}")
             
+        for count, ele in enumerate(self._rho):
+            ele.add_tag(f"Qreg{count}")
 
         if tags is not None:
             if isinstance(tags, str):
                 tags = (tags,)
             for tag in tags:
                 self._psi.add_tag(tag)
+                self._rho.add_tag(tag)
 
         self.gate_opts = ensure_dict(gate_opts)
         self.gate_opts.setdefault('contract', 'auto-split-gate')
@@ -928,6 +961,7 @@ class Circuit:
         qc = cls(info['n'], **quantum_circuit_opts)
         qc.apply_gates(info['gates'])
         return qc
+
 
     def apply_gate_raw(self, U, where, tags=None,
                        gate_round=None, **gate_opts):
@@ -1417,6 +1451,72 @@ class Circuit:
         # keep track of the gates applied
         self.gates.append((gate_id, *gate_args))
 
+        all_param_gates = ONE_QUBIT_PARAM_GATES | TWO_QUBIT_PARAM_GATES
+
+        if gate_id in all_param_gates:
+            where = [i  for i in gate_args if isinstance(i, numbers.Integral)]
+            parameters_ = list(gate_args[:len(gate_args)-len(where)])
+            
+            if gate_id in ONE_QUBIT_PARAM_GATES:
+                if gate_id=="U3":
+                    parameters_dagger = [parameters_[0], -1. * parameters_[1], -1. *parameters_[2]]
+                elif gate_id=="RY":
+                    parameters_dagger = [+1.*i for i in parameters_]                
+                else:
+                    parameters_dagger = [-1.*i for i in parameters_]
+
+
+
+            print("gate_id", gate_id, len(parameters_), parameters_)
+            if gate_id in TWO_QUBIT_PARAM_GATES:
+                if gate_id=="SU4":
+                    parameters_dagger = [parameters_[0], -1. * parameters_[1], -1. * parameters_[2] , 
+                                         parameters_[3], -1. * parameters_[4], -1. * parameters_[5],
+                                         parameters_[6], -1. * parameters_[7], -1. * parameters_[8],
+                                         parameters_[9], -1. * parameters_[10], -1. * parameters_[11],
+                                         -1. * parameters_[12], 1. * parameters_[13], 1. * parameters_[14],
+                                        ]
+                # elif gate_id=="FSIM":
+                #     parameters_dagger = [parameters_[0], -1.0 * parameters_[1]]
+                # elif gate_id=="FSIMT":
+                #     parameters_dagger = [parameters_[0]]
+                # elif gate_id=="FSIMG":
+                #     parameters_dagger = [parameters_[0], -1.0 * parameters_[1], -1.0 * parameters_[2], 
+                #                          -1.0 * parameters_[3], -1.0 * parameters_[4]]
+                # else:                                    
+                else:
+                    parameters_dagger = [-1.*i for i in parameters_]
+
+            print("where, parameters_", where, parameters_)
+            where_even = [2*i for i in where]
+            gate_args_even = parameters_ + where_even
+            print("gate_args_even", * parameters_ + where_even)
+            gate_fn(self._rho, * parameters_ + where_even, tags=tags, **opts)
+            where_odd = [2*i+1 for i in where]
+            gate_args_odd = parameters_dagger + where_odd
+            print("gate_args_odd", * parameters_dagger + where_odd)
+            gate_fn(self._rho, * parameters_dagger + where_odd, tags=tags, **opts)
+
+        all_constant_gates = TWO_QUBIT_GATES | ONE_QUBIT_GATES
+        if gate_id in all_constant_gates:
+            gate_args_even = [2*i for i in gate_args]
+            print(gate_id, gate_args, gate_args_even)
+            gate_fn(self._rho, *gate_args_even, tags=tags, **opts)
+            gate_args_odd = [2*i+1 for i in gate_args]
+            print(gate_id, gate_args, gate_args_odd)
+            gate_fn_dagg = GATE_FUNCTIONS[gate_id+"_dagg"]
+            print(gate_id+"_dagg",GATE_FUNCTIONS[gate_id+"_dagg"])
+            gate_fn_dagg(self._rho, *gate_args_odd, tags=tags, **opts)
+
+# ONE_QUBIT_PARAM_GATES = {'RX', 'RY', 'RZ', 'U3', 'U2', 'U1'}
+# TWO_QUBIT_PARAM_GATES = {
+#     'CU3', 'CU2', 'CU1', 'FS', 'FSIM', 'FSIMT', 'FSIMG', 'RZZ', 'SU4'
+# }
+# TWO_QUBIT_GATES = {'CNOT', 'CX' 'CY', 'CZ', 'IS', 'ISWAP'}
+# ONE_QUBIT_GATES = {'H', 'X' 'Y', 'Z', 'S', 'T', 'X_1_2', 'Y_1_2', 'Z_1_2', 'W_1_2', 'HZ_1_2'}
+
+
+
     def apply_gates(self, gates):
         """Apply a sequence of gates to this tensor network quantum circuit.
 
@@ -1579,6 +1679,28 @@ class Circuit:
         psi.squeeze_()
         psi.astype_(psi.dtype)
         return psi
+
+
+    @property
+    def rho(self):
+        """Tensor network representation of the wavefunction.
+        """
+        # make sure all same dtype and drop singlet dimensions
+        rho = self._rho.copy()
+        map_k = {f"k{2*i}": f"k{i}" for i in range(self.N)}
+        map_b = {f"k{2*i+1}": f"b{i}" for i in range(self.N)}
+        print(map_b, map_k,)
+        # for i in rho:
+        #     print(i)
+        rho.reindex_(map_b)
+        rho.reindex_(map_k)
+        # for i in rho:
+        #     print("new", i)
+
+        rho.squeeze_()
+        rho.astype_(rho.dtype)
+        return rho
+
 
     def get_uni(self, transposed=False):
         """Tensor network representation of the unitary operator (i.e. with

@@ -362,7 +362,7 @@ def fsimt(theta, dtype=complex, **kwargs):
         1 & 0 & 0 & 0\\
         0 & \cos(\theta) &  sin(\theta) & 0\\
         0 & - sin(\theta) & \cos(\theta) & 0\\
-        0 & 0 & 0 & \exp(-i \phi)
+        0 & 0 & 0 & 1
         \end{bmatrix}
 
     Note that ``theta`` and ``phi`` should be specified in radians and the sign
