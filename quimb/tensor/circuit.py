@@ -48,6 +48,78 @@ def _put_registers_last(x):
     return tuple(concatv(*parts[:-2], parts[-1], parts[-2]))
 
 
+def parse_open_qasm(qasm, symbol_q):
+    """Parse qasm from a string.
+
+    Parameters
+    ----------
+    qasm : str
+        The full string of the qasm file.
+
+    Returns
+    -------
+    circuit_info : dict
+        Information about the circuit:
+
+        - circuit_info['n']: the number of qubits
+        - circuit_info['n_gates']: the number of gates in total
+        - circuit_info['gates']: list[list[str]], list of gates, each of which
+          is a list of strings read from a line of the qasm file.
+    """
+
+    lines = qasm.split('\n')
+
+    # turn into tuples of python types
+    gates = []
+    qubits = []
+    for count, line in enumerate(lines):
+        if line.startswith("qreg"):
+            match = re.findall("\d+", line)
+            qubits.append(int(match[0]))
+        elif line.startswith(("creg", "include", "measure", "OPENQASM", "barrier", "reset", "if")):
+            continue
+        elif line.startswith(("gate")):
+            print("warnning, gate definition is not used")
+        elif line:
+            gates.append(tuple(map(_convert_ints_and_floats, line.strip().split(" "))))
+
+    n = int(sum(qubits))
+    gate_f = []
+    for i in gates:
+        gate, q = i
+        q_l = []
+        parameter_l = []
+        gate_l = []
+        gate_symbol = gate.split("(")[0]
+        
+        gate_l.append(gate_symbol)
+        match = re.findall(symbol_q+"\d+", q)
+        if match:
+            match = [int(i.replace(symbol_q, '')) for i in match]
+            q_l = match  
+        match = re.findall('\(.*?\)', gate)
+
+        if match:
+            match = [i.replace('(', '').replace(')', '') for i in match]
+            if "," in match[0]:
+                n_float = match[0].split(",")
+                parameter_l = [float(i) for i in n_float] 
+            else:
+                match = [float(eval(i)) for i in match]
+                parameter_l = match
+        
+            zip_all = (*gate_l, *parameter_l, *q_l)
+            gate_f.append(zip_all)
+
+    round_specified = isinstance(gates[0][0], numbers.Integral)
+    return {
+        'n': n,
+        'gates': tuple(gate_f),
+        'n_gates': len(gate_f),
+        'round_specified': round_specified,
+    }
+
+
 def parse_qasm(qasm):
     """Parse qasm from a string.
 
@@ -456,13 +528,13 @@ def rzz_param_gen(params):
 
     .. math::
 
-        \mathrm{RZZ}(\gamma) = \exp(-i \gamma Z_i Z_j)
+        \mathrm{RZZ}(\gamma) = \exp(-i \gamma / 2 Z_i Z_j)
 
     """
     gamma = params[0]
 
-    c00 = c11 = do('complex', do('cos', gamma), do('sin', gamma))
-    c01 = c10 = do('complex', do('cos', gamma), -do('sin', gamma))
+    c00 = c11 = do('complex', do('cos', gamma/2), -do('sin', gamma/2))
+    c01 = c10 = do('complex', do('cos', gamma/2), do('sin', gamma/2))
 
     data = [[[[c00, 0], [0, 0]],
              [[0, c01], [0, 0]]],
@@ -827,6 +899,16 @@ class Circuit:
         self._storage = dict()
         self._sampled_conditionals = dict()
 
+
+    @classmethod
+    def from_open_qasm(cls, qasm, symbol_q, **quantum_circuit_opts):
+        """Generate a ``Circuit`` instance from a qasm string.
+        """
+        info = parse_open_qasm(qasm, symbol_q)
+        qc = cls(info['n'], **quantum_circuit_opts)
+        qc.apply_gates(info['gates'])
+        return qc
+
     @classmethod
     def from_qasm(cls, qasm, **quantum_circuit_opts):
         """Generate a ``Circuit`` instance from a qasm string.
@@ -1156,6 +1238,62 @@ class Circuit:
             FutureWarning
         )
         return self.get_uni(transposed=True)
+
+    def to_qasm(self):
+        qasm = f"""OPENQASM 2.0;
+        include "qelib1.inc";
+        qreg q[{self.N}];
+        """ 
+        qasm += """gate cnot q0,q1
+        {
+            cx q0,q1;
+        }
+        """
+        qasm += """gate su4(theta1, phi1, lamda1,theta2, phi2, lamda2,theta3, phi3, lamda3,theta4, phi4, lamda4, t1, t2, t3) q0,q1
+        {
+            u3(theta1, phi1, lamda1) q0;
+            u3(theta2, phi2, lamda2) q1;
+            cx q1,q0;
+            rz(t1) q0;
+            ry(t2) q1;
+            cx q0,q1;
+            ry(t3) q1;
+            cx q1,q0;
+            u3(theta3, phi3, lamda3) q0;
+            u3(theta4, phi4, lamda4) q1;
+
+        }
+        """
+
+        for i in self.gates:
+            print(i.label, type(i.label[:]), *i.params, i.qubits)
+            if len(i.qubits) == 1:
+                q0, = i.qubits
+                if len(i.params) == 1:
+                    param_ = (i.params[0])
+                    qasm += f""" {i.label.lower()}({param_}) q[{q0}];\n"""
+                elif len(i.params) > 1:
+                    qasm += f""" {i.label.lower()}{i.params} q[{q0}];\n"""
+                else:
+                    qasm += f""" {i.label.lower()} q[{q0}];\n"""
+
+            if len(i.qubits) == 2:
+                q0, q1 = i.qubits
+                gate_id = i.label.lower()
+                if len(i.params) == 1:
+                    param_ = (i.params[0])
+                    qasm += f""" {gate_id}({param_}) q[{q0}],q[{q1}];\n"""
+                elif len(i.params) > 1:
+                    qasm += f""" {gate_id}{i.params} q[{q0}],q[{q1}];\n"""
+                else:
+                    qasm += f""" {gate_id} q[{q0}],q[{q1}];\n"""
+
+
+
+
+        return qasm
+
+
 
     def get_reverse_lightcone_tags(self, where):
         """Get the tags of gates in this circuit corresponding to the 'reverse'
