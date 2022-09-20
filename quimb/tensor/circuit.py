@@ -171,6 +171,82 @@ def parse_qasm_url(url, **kwargs):
     return parse_qasm(request.urlopen(url).read().decode(), **kwargs)
 
 
+# -------------------------- noisy channel ---------------------------- #
+
+
+def Y_CHANN_OQ(e=[1.-0.25, 0.25]):
+    II = qu.pauli('I') & qu.pauli('I')
+    YY = qu.pauli('Y') & qu.pauli('Y').conj()
+    Super_opt = e[0] * II + e[1] * YY  
+    return Super_opt
+
+
+def Z_CHANN_OQ(e=[1.-0.25, 0.25]):
+    II = qu.pauli('I') & qu.pauli('I')
+    ZZ = qu.pauli('Z') & qu.pauli('Z')
+    Super_opt = e[0] * II + e[1] * ZZ 
+    return Super_opt
+
+
+def X_CHANN_OQ(e=[1.-0.25, 0.25]):
+    II = qu.pauli('I') & qu.pauli('I')
+    XX = qu.pauli('X') & qu.pauli('X')
+    Super_opt =  e[0]  * II  +  e[1] * XX  
+    return Super_opt
+
+
+def QD_CHANN_OQ(e=[1.-0.5, 0.5/3., 0.5/3, 0.5/3.]):
+    II = qu.pauli('I') & qu.pauli('I')
+    XX = qu.pauli('X') & qu.pauli('X')
+    YY = qu.pauli('Y') & qu.pauli('Y').conj()
+    ZZ = qu.pauli('Z') & qu.pauli('Z')
+    Super_opt = e[0] * II + e[1]*XX + e[2] * ZZ + e[3]*YY
+    return Super_opt
+
+
+def QD_CHANN_TQ(e=[1-0.5, 0.5/15, 0.5/15, 0.5/15, 0.5/15, 0.5/15,
+                0.5/15, 0.5/15, 0.5/15, 0.5/15, 0.5/15, 0.5/15, 0.5/15,
+                0.5/15, 0.5/15, 0.5/15]):
+    l_term = [
+                qu.pauli('I') & qu.pauli('I') & qu.pauli('I') & qu.pauli('I'),       # II \rho II
+                qu.pauli('I') & qu.pauli('x') & qu.pauli('I') & qu.pauli('X'),       # IX \rho IX
+                qu.pauli('I') & qu.pauli('Z') & qu.pauli('I') & qu.pauli('Z'),       # IZ \rho IZ
+                qu.pauli('I') & qu.pauli('Y') & qu.pauli('I') & qu.pauli('Y').conj(), # IY \rho IY
+
+                qu.pauli('X') & qu.pauli('I') & qu.pauli('X') & qu.pauli('I'),        # XI \rho XI
+                qu.pauli('X') & qu.pauli('Y') & qu.pauli('X') & qu.pauli('Y').conj(), # XY \rho XY
+                qu.pauli('X') & qu.pauli('Z') & qu.pauli('X') & qu.pauli('Z'),        # XZ \rho XZ
+                qu.pauli('X') & qu.pauli('X') & qu.pauli('X') & qu.pauli('X'),        # XX \rho XX
+
+                qu.pauli('Y') & qu.pauli('I') & qu.pauli('Y').conj() & qu.pauli('I'),         # YI \rho YI
+                qu.pauli('Y') & qu.pauli('Y') & qu.pauli('Y').conj() & qu.pauli('Y').conj(),  # YY \rho YY
+                qu.pauli('Y') & qu.pauli('Z') & qu.pauli('Y').conj() & qu.pauli('Z'),         # YZ \rho YZ
+                qu.pauli('Y') & qu.pauli('X') & qu.pauli('Y').conj() & qu.pauli('X'),         # YX \rho YX
+
+                qu.pauli('Z') & qu.pauli('I') & qu.pauli('Z') & qu.pauli('I'),        # ZI \rho ZI
+                qu.pauli('Z') & qu.pauli('Y') & qu.pauli('Z') & qu.pauli('Y').conj(), # ZY \rho ZY
+                qu.pauli('Z') & qu.pauli('Z') & qu.pauli('Z') & qu.pauli('Z'),        # ZZ \rho ZZ
+                qu.pauli('Z') & qu.pauli('X') & qu.pauli('Z') & qu.pauli('X')]        # ZX \rho ZX
+
+    Super_opt = l_term[0] * 0.
+    for count, i in enumerate(l_term):
+        Super_opt += i * e[count] 
+
+    return Super_opt
+
+
+
+NOISE_FUNCTIONS = {
+    # single qubit channel
+    'One_Qubit_Depolarizing': QD_CHANN_OQ,
+    'One_Qubit_X': X_CHANN_OQ,
+    'One_Qubit_Y': Y_CHANN_OQ,
+    'One_Qubit_Z': Z_CHANN_OQ,
+
+    # two qubit channel
+    'Two_Qubit_Depolarizing': QD_CHANN_TQ
+
+}
 # -------------------------- core gate functions ---------------------------- #
 
 def _merge_tags(tags, gate_opts):
@@ -1578,9 +1654,8 @@ class Circuit:
 
         return qc
 
-
     def apply_gate(self, gate_id, *gate_args, gate_round=None, 
-                   gate_shared=None, **gate_opts):
+                   gate_tags=None, **gate_opts):
         """Apply a single gate to this tensor network quantum circuit. If
         ``gate_round`` is supplied the tensor(s) added will be tagged with
         ``'ROUND_{gate_round}'``. Alternatively, putting an integer first like
@@ -1609,9 +1684,9 @@ class Circuit:
 
         # unique tag
         tags = tags_to_oset(f'GATE_{len(self.gates)}')
-        if (gate_shared is not None):
-            gate_shared = tags_to_oset(gate_shared)
-            tags = tags | gate_shared
+        if (gate_tags is not None):
+            gate_tags = tags_to_oset(gate_tags)
+            tags = tags | gate_tags
 
         # parse which 'round' of gates
         if (gate_round is not None):
@@ -1648,10 +1723,11 @@ class Circuit:
         if gate_id in all_ONE_QUBIT_GATES:
             where = [int(gate_args[-1])]
             parameters_ = list(gate_args[:len(gate_args)-len(where)])
+            SO = QD_CHANN_OQ(e=[1-0.5, 0.5/3., 0.5/3., 0.5/3])
         if gate_id in all_TWO_QUBIT_GATES:
             where = [int(gate_args[-2]), int(gate_args[-1])]
             parameters_ = list(gate_args[:len(gate_args)-len(where)])
-
+            SO = QD_CHANN_TQ()
         # where = [i  for i in gate_args if isinstance(i, numbers.Integral)]
         # parameters_ = list(gate_args[:len(gate_args)-len(where)])
         
@@ -1660,6 +1736,16 @@ class Circuit:
 
         gate_fn(self._rho, * parameters_ + where_even, tags=tags, **opts)
         gate_fn_dagg(self._rho, * parameters_ + where_odd, tags=tags, **opts)
+
+        if gate_id in all_ONE_QUBIT_GATES:
+            print(where_even+where_odd, SO)
+            self._rho.gate_(SO, where_even+where_odd, tags=["OQ_NOISE"])
+        
+        if gate_id in all_TWO_QUBIT_GATES:
+            print(where_even+where_odd)
+            self._rho.gate_(SO, where_even+where_odd, tags=["TQ_NOISE"])
+
+
 
     def apply_gates(self, gates):
         """Apply a sequence of gates to this tensor network quantum circuit.
