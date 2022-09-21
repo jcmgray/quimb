@@ -216,15 +216,17 @@ def QD_CHANN_TQ(e=[1-0.5, 0.5/15, 0.5/15, 0.5/15, 0.5/15, 0.5/15,
 
 
 
-def apply_Depolarizing(psi, where, e=None,  **gate_opts):
+def apply_Depolarizing(psi, where, e=None, tags={}, **gate_opts):
     """Apply an Depolarizing Channel to tensor network wavefunction ``psi ~ rho``.
     """
     if len(where) == 4:
         G = QD_CHANN_TQ(e = e)
-        psi.gate_(G, where, tags="depol_two", parametrize=False, contract=False)
+        tags.add("depol_two")
+        psi.gate_(G, where, tags=tags, parametrize=False,contract=False)
     if len(where) == 2:
         G = QD_CHANN_OQ(e = e)
-        psi.gate_(G, where, tags="depol_one", parametrize=False, contract=False)
+        tags.add("depol_one")
+        psi.gate_(G, where, tags=tags, parametrize=False, contract=False)
 
 
 
@@ -1726,7 +1728,7 @@ class Circuit:
 
         if noise_id:
             noise_fn = NOISE_FUNCTIONS[noise_id]
-            noise_fn(self._rho, where_even+where_odd, e = noise_params, **opts)
+            noise_fn(self._rho, where_even+where_odd, e = noise_params, tags=tags, **opts)
 
 
 
@@ -1903,14 +1905,8 @@ class Circuit:
         rho = self._rho.copy()
         map_k = {f"k{2*i}": f"k{i}" for i in range(self.N)}
         map_b = {f"k{2*i+1}": f"b{i}" for i in range(self.N)}
-        print(map_b, map_k,)
-        # for i in rho:
-        #     print(i)
         rho.reindex_(map_b)
         rho.reindex_(map_k)
-        # for i in rho:
-        #     print("new", i)
-
         rho.squeeze_()
         rho.astype_(rho.dtype)
         return rho
