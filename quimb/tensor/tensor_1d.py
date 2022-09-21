@@ -25,7 +25,13 @@ from .tensor_core import (
     get_tags,
     PTensor,
 )
-from .tensor_arbgeom import tensor_network_align, tensor_network_apply_op_vec
+from .tensor_arbgeom import (
+    TensorNetworkGen,
+    TensorNetworkGenVector,
+    TensorNetworkGenOperator,
+    tensor_network_align,
+    tensor_network_apply_op_vec,
+)
 from ..linalg.base_linalg import norm_trace_dense
 from . import array_ops as ops
 
@@ -100,11 +106,18 @@ def maybe_factor_gate_into_tensor(G, dp, ng, where):
     return G
 
 
-def gate_TN_1D(tn, G, where, contract=False, tags=None,
-               propagate_tags='sites', inplace=False,
-               cur_orthog=None, **compress_opts):
-    r"""Act with the gate ``g`` on sites ``where``, maintaining the outer
-    indices of the 1D tensor netowork::
+def gate_TN_1D(
+    tn, G, where,
+    contract=False,
+    tags=None,
+    propagate_tags='sites',
+    info=None,
+    inplace=False,
+    cur_orthog=None,
+    **compress_opts,
+):
+    r"""Act with the gate ``G`` on sites ``where``, maintaining the outer
+    indices of the 1D tensor network::
 
 
         contract=False       contract=True
@@ -203,128 +216,28 @@ def gate_TN_1D(tn, G, where, contract=False, tags=None,
     >>> p.outer_inds()
     ('k0', 'k1', 'k2')
     """
-    check_opt('contract', contract, _VALID_GATE_CONTRACT)
-    check_opt('propagate_tags', propagate_tags, _VALID_GATE_PROPAGATE)
-
-    psi = tn if inplace else tn.copy()
-
     if isinstance(where, Integral):
         where = (where,)
     ng = len(where)  # number of sites the gate acts on
 
-    dp = psi.phys_dim(where[0])
-    tags = tags_to_oset(tags)
-
-    if (ng > 2) and contract in _TWO_BODY_ONLY:
-        raise ValueError(f"Can't use `contract='{contract}'` for >2 sites.")
-
-    G = maybe_factor_gate_into_tensor(G, dp, ng, where)
-
-    if contract == 'swap+split' and ng > 1:
-        psi.gate_with_auto_swap(G, where, cur_orthog=cur_orthog,
-                                inplace=True, **compress_opts)
-        return psi
-
-    bnds = [rand_uuid() for _ in range(ng)]
-    site_ix = [psi.site_ind(i) for i in where]
-    gate_ix = site_ix + bnds
-
-    psi.reindex_(dict(zip(site_ix, bnds)))
-
-    # get the sites that used to have the physical indices
-    site_tids = psi._get_tids_from_inds(bnds, which='any')
-
-    # convert the gate into a tensor - check if it is parametrized
-    if isinstance(G, ops.PArray):
-        if (ng >= 2) and (contract is not False):
-            raise ValueError(
-                "For a parametrized gate acting on more than one site "
-                "``contract`` must be false to preserve the array shape.")
-
-        TG = PTensor.from_parray(G, gate_ix, tags=tags, left_inds=bnds)
-    else:
-        TG = Tensor(G, gate_ix, tags=tags, left_inds=bnds)
-
-    # handle 'swap+split' only for ``ng == 1``
-    if contract in (True, 'swap+split'):
-        # pop the sites, contract, then re-add
-        pts = [psi._pop_tensor(tid) for tid in site_tids]
-        psi |= TG.contract(*pts)
-        return psi
-
-    # if not contracting the gate into the network, work out which tags to
-    # 'propagate' forward from the tensors being acted on to the gate tensors
-    if propagate_tags:
-        if propagate_tags == 'register':
-            old_tags = oset(map(psi.site_tag, where))
+    if contract == 'swap+split':
+        if ng >= 2:
+            return tn.gate_with_auto_swap(
+                G, where, cur_orthog=cur_orthog,
+                inplace=inplace, **compress_opts
+            )
         else:
-            old_tags = get_tags(psi.tensor_map[tid] for tid in site_tids)
+            contract = True
 
-        if propagate_tags == 'sites':
-            # use regex to take tags only matching e.g. 'I0', 'I13'
-            rex = re.compile(psi.site_tag_id.format(r"\d+"))
-            old_tags = oset(filter(rex.match, old_tags))
-
-        TG.modify(tags=TG.tags | old_tags)
-
-    if ng == 1:
-        psi |= TG
-        return psi
-
-    # check if we should split multi-site gates (which may result in an easier
-    #     tensor network to contract if we use compression)
-    if contract in ('split-gate', 'auto-split-gate'):
-        #  | |       | |
-        #  GGG  -->  G~G
-        #  | |       | |
-        ts_gate_norm = TG.split(TG.inds[::2], get='tensors', **compress_opts)
-
-    # sometimes it is worth performing the decomposition *across* the gate,
-    #     effectively introducing a SWAP
-    if contract in ('swap-split-gate', 'auto-split-gate'):
-        #            \ /
-        #  | |        X
-        #  GGG  -->  / \
-        #  | |       G~G
-        #            | |
-        ts_gate_swap = TG.split(TG.inds[::3], get='tensors', **compress_opts)
-
-    # like 'split-gate' but check the rank for swapped indices also, and if no
-    #     rank reduction, simply don't swap
-    if contract == 'auto-split-gate':
-        #            | |      \ /
-        #  | |       | |       X           | |
-        #  GGG  -->  G~G  or  / \   or ... GGG
-        #  | |       | |      G~G          | |
-        #            | |      | |
-        norm_rank = bonds_size(*ts_gate_norm)
-        swap_rank = bonds_size(*ts_gate_swap)
-
-        if swap_rank < norm_rank:
-            contract = 'swap-split-gate'
-        elif norm_rank < dp**ng:
-            contract = 'split-gate'
-        else:
-            # else no rank reduction available - leave as ``contract=False``.
-            contract = False
-
-    if contract == 'swap-split-gate':
-        ts_gate = ts_gate_swap
-    elif contract == 'split-gate':
-        ts_gate = ts_gate_norm
-    else:
-        ts_gate = (TG,)
-
-    # if we are splitting the gate then only add site tags on the tensors
-    # directly 'above' the site
-    if contract in ('split-gate', 'swap-split-gate'):
-        if propagate_tags == 'register':
-            ts_gate[0].drop_tags(psi.site_tag(where[1]))
-            ts_gate[1].drop_tags(psi.site_tag(where[0]))
-
-    for t in ts_gate:
-        psi |= t
-    return psi
+    return TensorNetworkGenVector.gate(
+        tn, G, where,
+        contract=contract,
+        tags=tags,
+        propagate_tags=propagate_tags,
+        info=info,
+        inplace=inplace,
+        **compress_opts,
+    )
 
 
 def superop_TN_1D(tn_super, tn_op,
@@ -409,7 +322,7 @@ def superop_TN_1D(tn_super, tn_op,
     return tn_super.reindex(reindex_map) & tn_op.reindex(reindex_map)
 
 
-class TensorNetwork1D(TensorNetwork):
+class TensorNetwork1D(TensorNetworkGen):
     """Base class for tensor networks with a one-dimensional structure.
     """
 
@@ -428,20 +341,20 @@ class TensorNetwork1D(TensorNetwork):
         )
 
     def __and__(self, other):
-        new = super().__and__(other)
+        new = TensorNetwork.__and__(self, other)
         if self._compatible_1d(other):
             new.view_as_(TensorNetwork1D, like=self)
         return new
 
     def __or__(self, other):
-        new = super().__or__(other)
+        new = TensorNetwork.__or__(self, other)
         if self._compatible_1d(other):
             new.view_as_(TensorNetwork1D, like=self)
         return new
 
     @property
     def L(self):
-        """The number of sites.
+        """The number of sites, i.e. length.
         """
         return self._L
 
@@ -452,21 +365,16 @@ class TensorNetwork1D(TensorNetwork):
         return self._L
 
     def gen_site_coos(self):
-        return tuple(i for i in range(self.L) if
-                     self.site_tag(i) in self.tag_map)
-
-    @property
-    def site_tag_id(self):
-        """The string specifier for tagging each site of this 1D TN.
+        """Generate the coordinates of all possible sites.
         """
-        return self._site_tag_id
+        return range(self._L)
 
     def site_tag(self, i):
         """The name of the tag specifiying the tensor at site ``i``.
         """
         if not isinstance(i, str):
             i = i % self.L
-        return self.site_tag_id.format(i)
+        return self._site_tag_id.format(i)
 
     def slice2sites(self, tag_slice):
         """Take a slice object, and work out its implied start, stop and step,
@@ -523,51 +431,12 @@ class TensorNetwork1D(TensorNetwork):
         corresponding site tag if so.
         """
         if isinstance(x, Integral):
-            return (self.site_tag(x),)
+            return self.site_tag(x)
 
         if isinstance(x, slice):
             return tuple(map(self.site_tag, self.slice2sites(x)))
 
         return x
-
-    def _get_tids_from_tags(self, tags, which='all'):
-        """This is the function that lets single integers be used for many
-        'tag' based functions.
-        """
-        tags = self.maybe_convert_coo(tags)
-        return super()._get_tids_from_tags(tags, which=which)
-
-    def retag_sites(self, new_id, where=None, inplace=False):
-        """Modify the site tags for all or some tensors in this 1D TN
-        (without changing the ``site_tag_id``).
-        """
-        if where is None:
-            where = self.gen_site_coos()
-
-        return self.retag({self.site_tag(i): new_id.format(i) for i in where},
-                          inplace=inplace)
-
-    @site_tag_id.setter
-    def site_tag_id(self, new_id):
-        if self._site_tag_id != new_id:
-            self.retag_sites(new_id, inplace=True)
-            self._site_tag_id = new_id
-
-    @property
-    def site_tags(self):
-        """An ordered tuple of the actual site tags.
-        """
-        return tuple(map(self.site_tag, self.gen_site_coos()))
-
-    @property
-    def sites(self):
-        return tuple(self.gen_site_coos())
-
-    @functools.wraps(tensor_network_align)
-    def align(self, *args, inplace=False, **kwargs):
-        return tensor_network_align(self, *args, inplace=inplace, **kwargs)
-
-    align_ = functools.partialmethod(align, inplace=True)
 
     def contract_structured(
         self,
@@ -629,8 +498,7 @@ class TensorNetwork1D(TensorNetwork):
         return s
 
 
-class TensorNetwork1DVector(TensorNetwork1D,
-                            TensorNetwork):
+class TensorNetwork1DVector(TensorNetwork1D, TensorNetworkGenVector):
     """1D Tensor network which overall is like a vector with a single type of
     site ind.
     """
@@ -640,15 +508,6 @@ class TensorNetwork1DVector(TensorNetwork1D,
         '_site_ind_id',
         '_L',
     )
-
-    def reindex_all(self, new_id, inplace=False):
-        """Reindex all physical sites and change the ``site_ind_id``.
-        """
-        tn = self if inplace else self.copy()
-        tn.site_ind_id = new_id
-        return tn
-
-    reindex_all_ = functools.partialmethod(reindex_all, inplace=True)
 
     def reindex_sites(self, new_id, where=None, inplace=False):
         """Update the physical site index labels to a new string specifier.
@@ -665,27 +524,15 @@ class TensorNetwork1DVector(TensorNetwork1D,
             Whether to reindex in place.
         """
         if where is None:
-            indices = self.gen_site_coos()
+            where = self.gen_sites_present()
         elif isinstance(where, slice):
-            indices = self.slice2sites(where)
+            where = self.slice2sites(where)
         else:
-            indices = where
+            where = where
 
-        return self.reindex({self.site_ind(i): new_id.format(i)
-                             for i in indices}, inplace=inplace)
+        return super().reindex_sites(new_id, where, inplace=inplace)
 
     reindex_sites_ = functools.partialmethod(reindex_sites, inplace=True)
-
-    def _get_site_ind_id(self):
-        return self._site_ind_id
-
-    def _set_site_ind_id(self, new_id):
-        if self._site_ind_id != new_id:
-            self.reindex_sites_(new_id)
-            self._site_ind_id = new_id
-
-    site_ind_id = property(_get_site_ind_id, _set_site_ind_id,
-                           doc="The string specifier for the physical indices")
 
     def site_ind(self, i):
         """Get the physical index name of site ``i``.
@@ -693,29 +540,6 @@ class TensorNetwork1DVector(TensorNetwork1D,
         if not isinstance(i, str):
             i = i % self.L
         return self.site_ind_id.format(i)
-
-    @property
-    def site_inds(self):
-        """An ordered tuple of the actual physical indices.
-        """
-        return tuple(map(self.site_ind, self.gen_site_coos()))
-
-    def to_dense(self, *inds_seq, **contract_opts):
-        """Return the dense ket version of this 1D vector, i.e. a
-        ``qarray`` with shape (-1, 1).
-        """
-        if not inds_seq:
-            # just use list of site indices
-            return do('reshape', TensorNetwork.to_dense(
-                self, self.site_inds, **contract_opts
-            ), (-1, 1))
-
-        return TensorNetwork.to_dense(self, *inds_seq, **contract_opts)
-
-    def phys_dim(self, i=None):
-        if i is None:
-            i = next(iter(self.gen_site_coos()))
-        return self.ind_size(self.site_ind(i))
 
     @functools.wraps(gate_TN_1D)
     def gate(self, *args, inplace=False, **kwargs):
@@ -772,8 +596,7 @@ class TensorNetwork1DVector(TensorNetwork1D,
         return cAB - cA * cB
 
 
-class TensorNetwork1DOperator(TensorNetwork1D,
-                              TensorNetwork):
+class TensorNetwork1DOperator(TensorNetwork1D, TensorNetworkGenOperator):
 
     _EXTRA_PROPS = (
         '_site_tag_id',
@@ -835,88 +658,11 @@ class TensorNetwork1DOperator(TensorNetwork1D,
     reindex_upper_sites_ = functools.partialmethod(
         reindex_upper_sites, inplace=True)
 
-    def _get_lower_ind_id(self):
-        return self._lower_ind_id
-
-    def _set_lower_ind_id(self, new_id):
-        if new_id == self._upper_ind_id:
-            raise ValueError("Setting the same upper and lower index ids will"
-                             " make the two ambiguous.")
-
-        if self._lower_ind_id != new_id:
-            self.reindex_lower_sites_(new_id)
-            self._lower_ind_id = new_id
-
-    lower_ind_id = property(
-        _get_lower_ind_id, _set_lower_ind_id,
-        doc="The string specifier for the lower phyiscal indices")
-
-    def lower_ind(self, i):
-        """The name of the lower ('ket') index at site ``i``.
-        """
-        return self.lower_ind_id.format(i)
-
-    @property
-    def lower_inds(self):
-        """An ordered tuple of the actual lower physical indices.
-        """
-        return tuple(map(self.lower_ind, self.gen_site_coos()))
-
-    def _get_upper_ind_id(self):
-        return self._upper_ind_id
-
-    def _set_upper_ind_id(self, new_id):
-        if new_id == self._lower_ind_id:
-            raise ValueError("Setting the same upper and lower index ids will"
-                             " make the two ambiguous.")
-
-        if self._upper_ind_id != new_id:
-            self.reindex_upper_sites_(new_id)
-            self._upper_ind_id = new_id
-
-    upper_ind_id = property(_get_upper_ind_id, _set_upper_ind_id,
-                            doc="The string specifier for the upper phyiscal "
-                            "indices")
-
-    def upper_ind(self, i):
-        """The name of the upper ('bra') index at site ``i``.
-        """
-        return self.upper_ind_id.format(i)
-
-    @property
-    def upper_inds(self):
-        """An ordered tuple of the actual upper physical indices.
-        """
-        return tuple(map(self.upper_ind, self.gen_site_coos()))
-
-    def to_dense(self, *inds_seq, **contract_opts):
-        """Return the dense matrix version of this 1D operator, i.e. a
-        ``qarray`` with shape (d, d).
-        """
-        if not inds_seq:
-            inds_seq = (self.upper_inds, self.lower_inds)
-
-        return TensorNetwork.to_dense(self, *inds_seq, **contract_opts)
-
-    def phys_dim(self, i=None, which='upper'):
-        """Get a physical index size of this 1D operator.
-        """
-        if i is None:
-            i = next(iter(self.gen_site_coos()))
-
-        if which == 'upper':
-            return self[i].ind_size(self.upper_ind(i))
-
-        if which == 'lower':
-            return self[i].ind_size(self.lower_ind(i))
-
-
 def set_default_compress_mode(opts, cyclic=False):
     opts.setdefault('cutoff_mode', 'rel' if cyclic else 'rsum2')
 
 
-class TensorNetwork1DFlat(TensorNetwork1D,
-                          TensorNetwork):
+class TensorNetwork1DFlat(TensorNetwork1D):
     """1D Tensor network which has a flat structure.
     """
 
@@ -1369,6 +1115,26 @@ class TensorNetwork1DFlat(TensorNetwork1D,
             bnd_szs.append(self.bond_size(-1, 0))
         return bnd_szs
 
+    def amplitude(self, b):
+        """Compute the amplitude of configuration ``b``.
+
+        Parameters
+        ----------
+        b : sequence of int
+            The configuration to compute the amplitude of.
+
+        Returns
+        -------
+        c_b : scalar
+        """
+        if len(b) != self.nsites:
+            raise ValueError(f"Bit-string {b} length does not "
+                             f"match MPS length {self.nsites}.")
+
+        selector = {self.site_ind(i): int(xi) for i, xi in enumerate(b)}
+        mps_b = self.isel(selector)
+        return mps_b ^ ...
+
     def singular_values(self, i, cur_orthog=None, method='svd'):
         r"""Find the singular values associated with the ith bond::
 
@@ -1437,7 +1203,7 @@ class TensorNetwork1DFlat(TensorNetwork1D,
         )
 
         if bra is not None:
-            for coo in tn.gen_site_coos():
+            for coo in tn.gen_sites_present():
                 bra[coo].modify(data=tn[coo].data.conj())
 
         return tn
@@ -1532,10 +1298,7 @@ class TensorNetwork1DFlat(TensorNetwork1D,
         print_multi_line(l1, l2, l3, max_width=max_width)
 
 
-class MatrixProductState(TensorNetwork1DVector,
-                         TensorNetwork1DFlat,
-                         TensorNetwork1D,
-                         TensorNetwork):
+class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
     """Initialise a matrix product state, with auto labelling and tagging.
 
     Parameters
@@ -1694,7 +1457,7 @@ class MatrixProductState(TensorNetwork1DVector,
 
         new_mps = self if inplace else self.copy()
 
-        for i in new_mps.gen_site_coos():
+        for i in new_mps.gen_sites_present():
             t1, t2 = new_mps[i], other[i]
 
             if set(t1.inds) != set(t2.inds):
@@ -1732,7 +1495,7 @@ class MatrixProductState(TensorNetwork1DVector,
             A permutation of ``'lrp'`` specifying the desired order of the
             left, right, and physical indices respectively.
         """
-        for i in self.sites:
+        for i in self.gen_sites_present():
             inds = {'p': self.site_ind(i)}
             if self.cyclic or i > 0:
                 inds['l'] = self.bond(i, (i - 1) % self.L)
@@ -1818,39 +1581,20 @@ class MatrixProductState(TensorNetwork1DVector,
         --------
         gate, gate_with_auto_swap
         """
-        tn = self if inplace else self.copy()
-
-        i, j = where
-
-        Ti, Tj = tn[i], tn[j]
-        ix_i, ix_j = tn.site_ind(i), tn.site_ind(j)
-
-        # Make Tensor of gate
-        d = tn.phys_dim(i)
-        TG = Tensor(reshape(ops.asarray(G), (d, d, d, d)),
-                    inds=("_tmpi", "_tmpj", ix_i, ix_j))
-
-        # Contract gate into the two sites
-        TG = TG.contract(Ti, Tj)
-        TG.reindex_({"_tmpi": ix_i, "_tmpj": ix_j})
-
-        # Split the tensor
-        _, left_ix = Ti.filter_bonds(Tj)
         set_default_compress_mode(compress_opts, self.cyclic)
-        nTi, nTj = TG.split(left_inds=left_ix, get='tensors', **compress_opts)
-
-        # make sure the new data shape matches and reinsert
-        Ti.modify(data=nTi.transpose_like_(Ti).data)
-        Tj.modify(data=nTj.transpose_like_(Tj).data)
-
-        return tn
+        ix_i, ix_j = map(self.site_ind, where)
+        # note that 'reduce-split' is unecessary: tensors have ndim<=3
+        return self.gate_inds(
+            G, (ix_i, ix_j), contract='split', inplace=inplace, **compress_opts
+        )
 
     gate_split_ = functools.partialmethod(gate_split, inplace=True)
 
     def swap_sites_with_compress(self, i, j, cur_orthog=None,
                                  inplace=False, **compress_opts):
         """Swap sites ``i`` and ``j`` by contracting, then splitting with the
-        physical indices swapped.
+        physical indices swapped. If the sites are not adjacent, this will
+        happen multiple times.
 
         Parameters
         ----------
@@ -1865,11 +1609,15 @@ class MatrixProductState(TensorNetwork1DVector,
         compress_opts
             Supplied to :func:`~quimb.tensor.tensor_core.tensor_split`.
         """
+        mps = self if inplace else self.copy()
+
         i, j = sorted((i, j))
         if i + 1 != j:
-            raise ValueError("Sites aren't adjacent.")
+            mps.swap_site_to_(j, i, cur_orthog=cur_orthog)
+            # first site is now at j + 1, move back up
+            mps.swap_site_to_(i + 1, j, cur_orthog=(i, i + 1))
+            return mps
 
-        mps = self if inplace else self.copy()
         mps.canonize((i, j), cur_orthog)
 
         # get site tensors and indices
@@ -1893,6 +1641,11 @@ class MatrixProductState(TensorNetwork1DVector,
         Tj.modify(data=sTj.data)
 
         return mps
+
+    swap_sites_with_compress_ = functools.partialmethod(
+        swap_sites_with_compress,
+        inplace=True,
+    )
 
     def swap_site_to(self, i, f, cur_orthog=None,
                      inplace=False, **compress_opts):
@@ -1934,8 +1687,14 @@ class MatrixProductState(TensorNetwork1DVector,
 
         return mps
 
-    def gate_with_auto_swap(self, G, where, inplace=False,
-                            cur_orthog=None, **compress_opts):
+    swap_site_to_ = functools.partialmethod(swap_site_to, inplace=True)
+
+    def gate_with_auto_swap(
+        self, G, where,
+        inplace=False,
+        cur_orthog=None,
+        **compress_opts
+    ):
         """Perform a two site gate on this MPS by, if necessary, swapping and
         compressing the sites until they are adjacent, using ``gate_split``,
         then unswapping the sites back to their original position.
@@ -1975,9 +1734,14 @@ class MatrixProductState(TensorNetwork1DVector,
         # move j site back to original position
         if need2swap:
             mps.swap_site_to(i + 1, j, cur_orthog=(i, i + 1),
-                             inplace=True, **compress_opts, )
+                             inplace=True, **compress_opts)
 
         return mps
+
+    gate_with_auto_swap_ = functools.partialmethod(
+        gate_with_auto_swap,
+        inplace=True,
+    )
 
     def magnetization(self, i, direction='Z', cur_orthog=None):
         """Compute the magnetization at site ``i``.
@@ -2121,7 +1885,7 @@ class MatrixProductState(TensorNetwork1DVector,
 
         keep = sorted(keep)
 
-        for i in self.gen_site_coos():
+        for i in self.gen_sites_present():
             if i in keep:
                 #      |
                 #     -o-             |
@@ -2143,7 +1907,7 @@ class MatrixProductState(TensorNetwork1DVector,
 
         # if single site a single tensor is produced
         if isinstance(rho, Tensor):
-            rho = TensorNetwork([rho])
+            rho = rho.as_network()
 
         if rescale_sites:
             # e.g. [3, 4, 5, 7, 9] -> [0, 1, 2, 3, 4]
@@ -2163,9 +1927,9 @@ class MatrixProductState(TensorNetwork1DVector,
         rho.view_as_(
             MatrixProductOperator,
             cyclic=self.cyclic, L=L, site_tag_id=self.site_tag_id,
-            lower_ind_id=upper_ind_id, upper_ind_id=self.site_ind_id, )
-
-        rho.fuse_multibonds(inplace=True)
+            lower_ind_id=upper_ind_id, upper_ind_id=self.site_ind_id,
+        )
+        rho.fuse_multibonds_()
         return rho
 
     def ptr(self, keep, upper_ind_id="b{}", rescale_sites=True):
@@ -2754,10 +2518,7 @@ class MatrixProductState(TensorNetwork1DVector,
     measure_ = functools.partialmethod(measure, inplace=True)
 
 
-class MatrixProductOperator(TensorNetwork1DOperator,
-                            TensorNetwork1DFlat,
-                            TensorNetwork1D,
-                            TensorNetwork):
+class MatrixProductOperator(TensorNetwork1DOperator, TensorNetwork1DFlat):
     """Initialise a matrix product operator, with auto labelling and tagging.
 
     Parameters
@@ -2865,7 +2626,7 @@ class MatrixProductOperator(TensorNetwork1DOperator,
 
         summed = self if inplace else self.copy()
 
-        for i in summed.gen_site_coos():
+        for i in summed.gen_sites_present():
             t1, t2 = summed[i], other[i]
 
             if set(t1.inds) != set(t2.inds):
@@ -2992,7 +2753,7 @@ class MatrixProductOperator(TensorNetwork1DOperator,
             A permutation of ``'lrud'`` specifying the desired order of the
             left, right, upper and lower (down) indices respectively.
         """
-        for i in self.sites:
+        for i in self.gen_sites_present():
             inds = {'u': self.upper_ind(i), 'd': self.lower_ind(i)}
             if self.cyclic or i > 0:
                 inds['l'] = self.bond(i, (i - 1) % self.L)
@@ -3005,9 +2766,9 @@ class MatrixProductOperator(TensorNetwork1DOperator,
         """Take the trace of this MPO.
         """
         if left_inds is None:
-            left_inds = map(self.upper_ind, self.gen_site_coos())
+            left_inds = map(self.upper_ind, self.gen_sites_present())
         if right_inds is None:
-            right_inds = map(self.lower_ind, self.gen_site_coos())
+            right_inds = map(self.lower_ind, self.gen_sites_present())
 
         return super().trace(left_inds, right_inds)
 
@@ -3058,18 +2819,12 @@ class MatrixProductOperator(TensorNetwork1DOperator,
         """
         return self.add_MPO(-1 * other, inplace=True)
 
-    @property
-    def lower_inds(self):
-        """An ordered tuple of the actual lower physical indices.
-        """
-        return tuple(map(self.lower_ind, self.gen_site_coos()))
-
     def rand_state(self, bond_dim, **mps_opts):
         """Get a random vector matching this MPO.
         """
         return qu.tensor.MPS_rand_state(
             self.L, bond_dim=bond_dim,
-            phys_dim=[self.phys_dim(i) for i in self.sites],
+            phys_dim=[self.phys_dim(i) for i in self.gen_sites_present()],
             dtype=self.dtype, cyclic=self.cyclic, **mps_opts
         )
 
@@ -3106,9 +2861,7 @@ class MatrixProductOperator(TensorNetwork1DOperator,
         print_multi_line(l1, l2, l3, max_width=max_width)
 
 
-class Dense1D(TensorNetwork1DVector,
-              TensorNetwork1D,
-              TensorNetwork):
+class Dense1D(TensorNetwork1DVector):
     """Mimics other 1D tensor network structures, but really just keeps the
     full state in a single tensor. This allows e.g. applying gates in the same
     way for quantum circuit simulation as lazily represented hilbert spaces.
@@ -3174,10 +2927,7 @@ class Dense1D(TensorNetwork1DVector,
         return cls(array, **dense1d_opts)
 
 
-class SuperOperator1D(
-    TensorNetwork1D,
-    TensorNetwork,
-):
+class SuperOperator1D(TensorNetwork1D):
     r"""A 1D tensor network super-operator class::
 
         0   1   2       n-1
@@ -3240,10 +2990,11 @@ class SuperOperator1D(
         self._inner_lower_ind_id = inner_lower_ind_id
         self._outer_lower_ind_id = outer_lower_ind_id
 
-        outer_upper_inds = map(outer_upper_ind_id.format, self.gen_site_coos())
-        inner_upper_inds = map(inner_upper_ind_id.format, self.gen_site_coos())
-        inner_lower_inds = map(inner_lower_ind_id.format, self.gen_site_coos())
-        outer_lower_inds = map(outer_lower_ind_id.format, self.gen_site_coos())
+        sites_present = tuple(self.gen_sites_present())
+        outer_upper_inds = map(outer_upper_ind_id.format, sites_present)
+        inner_upper_inds = map(inner_upper_ind_id.format, sites_present)
+        inner_lower_inds = map(inner_lower_ind_id.format, sites_present)
+        outer_lower_inds = map(outer_lower_ind_id.format, sites_present)
 
         # process tags
         self._site_tag_id = site_tag_id

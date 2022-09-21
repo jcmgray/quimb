@@ -13,7 +13,9 @@ from ..utils import progbar as _progbar
 from ..utils import oset, partitionby, concatv, partition_all, ensure_dict, LRU
 from .tensor_core import (get_tags, tags_to_oset, oset_union, tensor_contract,
                           PTensor, Tensor, TensorNetwork, rand_uuid)
-from .tensor_gen import MPS_computational_state
+from .tensor_builder import (
+    MPS_computational_state, TN_from_sites_computational_state
+)
 from .tensor_1d import TensorNetwork1DVector, Dense1D, TensorNetwork1DOperator
 from . import array_ops as ops
 

@@ -11,8 +11,10 @@ import tqdm
 import numpy as np
 from autoray import to_numpy, astype, get_dtype_name
 
-from .tensor_core import (
+from .contraction import (
     contract_backend,
+)
+from .tensor_core import (
     Tensor,
     TensorNetwork,
     PTensor,
