@@ -173,35 +173,13 @@ def parse_qasm_url(url, **kwargs):
 
 # -------------------------- noisy channel ---------------------------- #
 
-
-def Y_CHANN_OQ(e=[1.-0.25, 0.25]):
-    II = qu.pauli('I') & qu.pauli('I')
-    YY = qu.pauli('Y') & qu.pauli('Y').conj()
-    Super_opt = e[0] * II + e[1] * YY  
-    return Super_opt
-
-
-def Z_CHANN_OQ(e=[1.-0.25, 0.25]):
-    II = qu.pauli('I') & qu.pauli('I')
-    ZZ = qu.pauli('Z') & qu.pauli('Z')
-    Super_opt = e[0] * II + e[1] * ZZ 
-    return Super_opt
-
-
-def X_CHANN_OQ(e=[1.-0.25, 0.25]):
-    II = qu.pauli('I') & qu.pauli('I')
-    XX = qu.pauli('X') & qu.pauli('X')
-    Super_opt =  e[0]  * II  +  e[1] * XX  
-    return Super_opt
-
-
 def QD_CHANN_OQ(e=[1.-0.5, 0.5/3., 0.5/3, 0.5/3.]):
     II = qu.pauli('I') & qu.pauli('I')
     XX = qu.pauli('X') & qu.pauli('X')
     YY = qu.pauli('Y') & qu.pauli('Y').conj()
     ZZ = qu.pauli('Z') & qu.pauli('Z')
     Super_opt = e[0] * II + e[1]*XX + e[2] * ZZ + e[3]*YY
-    return Super_opt
+    return Super_opt.reshape(2, 2, 2, 2)
 
 
 def QD_CHANN_TQ(e=[1-0.5, 0.5/15, 0.5/15, 0.5/15, 0.5/15, 0.5/15,
@@ -230,23 +208,29 @@ def QD_CHANN_TQ(e=[1-0.5, 0.5/15, 0.5/15, 0.5/15, 0.5/15, 0.5/15,
 
     Super_opt = l_term[0] * 0.
     for count, i in enumerate(l_term):
-        Super_opt += i * e[count] 
+        Super_opt += i * e[count]
 
-    return Super_opt
+    return Super_opt.reshape(2, 2, 2, 2, 2, 2, 2, 2)
+
+
+
+def apply_Depolarizing(psi, where, e=None,  **gate_opts):
+    """Apply an Depolarizing Channel to tensor network wavefunction ``psi ~ rho``.
+    """
+    if len(where) == 4:
+        G = QD_CHANN_TQ(e = e)
+        psi.gate_(G, where, tags="depol_two", parametrize=False, contract=False)
+    if len(where) == 2:
+        G = QD_CHANN_OQ(e = e)
+        psi.gate_(G, where, tags="depol_one", parametrize=False, contract=False)
 
 
 
 NOISE_FUNCTIONS = {
     # single qubit channel
-    'One_Qubit_Depolarizing': QD_CHANN_OQ,
-    'One_Qubit_X': X_CHANN_OQ,
-    'One_Qubit_Y': Y_CHANN_OQ,
-    'One_Qubit_Z': Z_CHANN_OQ,
-
-    # two qubit channel
-    'Two_Qubit_Depolarizing': QD_CHANN_TQ
-
+    'depol': apply_Depolarizing,
 }
+
 # -------------------------- core gate functions ---------------------------- #
 
 def _merge_tags(tags, gate_opts):
@@ -1654,7 +1638,7 @@ class Circuit:
 
         return qc
 
-    def apply_gate(self, gate_id, *gate_args, gate_round=None, 
+    def apply_gate(self, gate_id, *gate_args, noise_id=None, noise_params=None, gate_round=None, 
                    gate_tags=None, **gate_opts):
         """Apply a single gate to this tensor network quantum circuit. If
         ``gate_round`` is supplied the tensor(s) added will be tagged with
@@ -1737,13 +1721,11 @@ class Circuit:
         gate_fn(self._rho, * parameters_ + where_even, tags=tags, **opts)
         gate_fn_dagg(self._rho, * parameters_ + where_odd, tags=tags, **opts)
 
-        if gate_id in all_ONE_QUBIT_GATES:
-            print(where_even+where_odd, SO)
-            self._rho.gate_(SO, where_even+where_odd, tags=["OQ_NOISE"])
-        
-        if gate_id in all_TWO_QUBIT_GATES:
-            print(where_even+where_odd)
-            self._rho.gate_(SO, where_even+where_odd, tags=["TQ_NOISE"])
+
+        if noise_id:
+            noise_fn = NOISE_FUNCTIONS[noise_id]
+            noise_fn(self._rho, where_even+where_odd, e = noise_params, **opts)
+
 
 
 
