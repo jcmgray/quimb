@@ -1907,6 +1907,14 @@ class Circuit:
         map_b = {f"k{2*i+1}": f"b{i}" for i in range(self.N)}
         rho.reindex_(map_b)
         rho.reindex_(map_k)
+
+        map_k = {f"Qreg{2*i}": f"l_{i}" for i in range(self.N)}
+        rho.retag_(map_k)
+        map_k = {f"Qreg{2*i+1}": f"Qreg{i}" for i in range(self.N)}
+        rho.retag_(map_k)
+        map_k = {f"l_{i}": f"Qreg{i}" for i in range(self.N)}
+        rho.retag_(map_k)
+
         rho.squeeze_()
         rho.astype_(rho.dtype)
         return rho
