@@ -2737,14 +2737,20 @@ def _tensor_network_gate_inds_basic(
 
     # new indices to join old physical sites to new gate
     bnds = [rand_uuid() for _ in range(ng)]
-    reindex_map = dict(zip(inds, bnds))
+    reindex_map = dict(zip(inds, bnds))    
+    inds_G = (*inds, *bnds)
 
     # tensor representing the gate
     if isparam:
         TG = PTensor.from_parray(
             G, inds=(*inds, *bnds), tags=tags, left_inds=bnds)
     else:
-        TG = Tensor(G, inds=(*inds, *bnds), tags=tags, left_inds=bnds)
+        if len(inds_G) == len(G.shape):
+            TG = Tensor(G, inds=(*inds, *bnds), tags=tags, left_inds=bnds)
+        else:
+            inds_extra = abs(len(inds_G) - len(G.shape))
+            bnds_extra = [rand_uuid() for _ in range(inds_extra)]
+            TG = Tensor(G, inds=(*inds, *bnds, *bnds_extra), tags=tags, left_inds=bnds)
 
     if contract is False:
         #
@@ -3053,19 +3059,25 @@ def tensor_network_gate_inds(
     """
     check_opt('contract', contract, _VALID_GATE_CONTRACT)
 
+
     tn = self if inplace else self.copy()
 
     ng = len(inds)
     ndimG = ndim(G)
     dims = [tn.ind_size(ix) for ix in inds]
 
-    if ndimG != 2 * ng:
-        # gate supplied as matrix, factorize it
-        G = reshape(G, dims * 2)
+    try:
+        if ndimG != 2 * ng:
+            # gate supplied as matrix, factorize it
+            G = reshape(G, dims * 2)
+    except:
+        pass
+#        dims_rest = list(G.shape)[len(2*dims):]
+#        G = reshape(G, dims * 2 + dims_rest)
 
-    if not all(d == dims[i % ng] for i, d in enumerate(G.shape)):
-        raise ValueError(f"Gate with shape {G.shape} doesn't match "
-                         f"indices {inds} with dimensions {dims}.")
+    # if not all(d == dims[i % ng] for i, d in enumerate(G.shape)):
+    #     raise ValueError(f"Gate with shape {G.shape} doesn't match "
+    #                      f"indices {inds} with dimensions {dims}.")
 
     basic = (contract in _BASIC_GATE_CONTRACT)
     if (not basic) and (ng == 1):

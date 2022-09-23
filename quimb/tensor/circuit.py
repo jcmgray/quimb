@@ -176,54 +176,48 @@ def parse_qasm_url(url, **kwargs):
 # -------------------------- noisy channel ---------------------------- #
 
 def QD_CHANN_OQ(e=[1.-0.5, 0.5/3., 0.5/3, 0.5/3.]):
-    II = qu.pauli('I') & qu.pauli('I')
-    XX = qu.pauli('X') & qu.pauli('X')
-    YY = qu.pauli('Y') & qu.pauli('Y').conj()
-    ZZ = qu.pauli('Z') & qu.pauli('Z')
-    Super_opt = e[0] * II + e[1]*XX + e[2] * ZZ + e[3]*YY
-    return Super_opt.reshape(2, 2, 2, 2)
+    I = qu.pauli('I') 
+    X = qu.pauli('X') 
+    Y = qu.pauli('Y') 
+    Z = qu.pauli('Z')
+    pauli_l = [I, X, Y, Z]
+    Super_opt = np.zeros([2, 2, 4], dtype="complex128")
+
+    for i in range(4):
+        Super_opt[:, :, i] = pauli_l[i] * (e[i]**0.5)
+
+
+    return Super_opt
 
 
 def QD_CHANN_TQ(e=[1-0.5, 0.5/15, 0.5/15, 0.5/15, 0.5/15, 0.5/15,
                 0.5/15, 0.5/15, 0.5/15, 0.5/15, 0.5/15, 0.5/15, 0.5/15,
                 0.5/15, 0.5/15, 0.5/15]):
-    l_term = [
-                qu.pauli('I') & qu.pauli('I') & qu.pauli('I') & qu.pauli('I'),       # II \rho II
-                qu.pauli('I') & qu.pauli('x') & qu.pauli('I') & qu.pauli('X'),       # IX \rho IX
-                qu.pauli('I') & qu.pauli('Z') & qu.pauli('I') & qu.pauli('Z'),       # IZ \rho IZ
-                qu.pauli('I') & qu.pauli('Y') & qu.pauli('I') & qu.pauli('Y').conj(), # IY \rho IY
 
-                qu.pauli('X') & qu.pauli('I') & qu.pauli('X') & qu.pauli('I'),        # XI \rho XI
-                qu.pauli('X') & qu.pauli('Y') & qu.pauli('X') & qu.pauli('Y').conj(), # XY \rho XY
-                qu.pauli('X') & qu.pauli('Z') & qu.pauli('X') & qu.pauli('Z'),        # XZ \rho XZ
-                qu.pauli('X') & qu.pauli('X') & qu.pauli('X') & qu.pauli('X'),        # XX \rho XX
+    I = qu.pauli('I') 
+    X = qu.pauli('X') 
+    Y = qu.pauli('Y') 
+    Z = qu.pauli('Z')
 
-                qu.pauli('Y') & qu.pauli('I') & qu.pauli('Y').conj() & qu.pauli('I'),         # YI \rho YI
-                qu.pauli('Y') & qu.pauli('Y') & qu.pauli('Y').conj() & qu.pauli('Y').conj(),  # YY \rho YY
-                qu.pauli('Y') & qu.pauli('Z') & qu.pauli('Y').conj() & qu.pauli('Z'),         # YZ \rho YZ
-                qu.pauli('Y') & qu.pauli('X') & qu.pauli('Y').conj() & qu.pauli('X'),         # YX \rho YX
+    pauli_l = [I & I, I & Z, I & X, I & Y,
+               X & I, X & Z, X & X, X & Y,
+               Z & I, Z & Z, Z & X, Z & Y,
+               Y & I, Y & Z, Y & X, Y & Y,
+              ]
+    Super_opt = np.zeros([4, 4, 16], dtype="complex128")
+    for i in range(16):
+        Super_opt[:, :,  i] = pauli_l[i] * (e[i]**0.5)
 
-                qu.pauli('Z') & qu.pauli('I') & qu.pauli('Z') & qu.pauli('I'),        # ZI \rho ZI
-                qu.pauli('Z') & qu.pauli('Y') & qu.pauli('Z') & qu.pauli('Y').conj(), # ZY \rho ZY
-                qu.pauli('Z') & qu.pauli('Z') & qu.pauli('Z') & qu.pauli('Z'),        # ZZ \rho ZZ
-                qu.pauli('Z') & qu.pauli('X') & qu.pauli('Z') & qu.pauli('X')]        # ZX \rho ZX
-
-    Super_opt = l_term[0] * 0.
-    for count, i in enumerate(l_term):
-        Super_opt += i * e[count]
-
-    return Super_opt.reshape(2, 2, 2, 2, 2, 2, 2, 2)
-
-
+    return Super_opt.reshape(2,2,2,2,16)
 
 def apply_Depolarizing(psi, where, e=None, tags={}, **gate_opts):
     """Apply an Depolarizing Channel to tensor network wavefunction ``psi ~ rho``.
     """
-    if len(where) == 4:
+    if len(where) == 2:
         G = QD_CHANN_TQ(e = e)
         tags.add("depol_two")
         psi.gate_(G, where, tags=tags, parametrize=False,contract=False)
-    if len(where) == 2:
+    if len(where) == 1:
         G = QD_CHANN_OQ(e = e)
         tags.add("depol_one")
         psi.gate_(G, where, tags=tags, parametrize=False, contract=False)
@@ -1108,15 +1102,17 @@ class Circuit:
     ):
         if N is None and psi0 is None:
             raise ValueError("You must supply one of `N` or `psi0`.")
+        if N is None and rho0 is None:
+            raise ValueError("You must supply one of `N` or `rho0`.")
 
         elif psi0 is None:
-            print("Hi")
             self.N = N
             self._psi = MPS_computational_state('0' * N, dtype=psi0_dtype)
-            self._rho = MPS_computational_state('0' * int(2 * N), dtype=psi0_dtype)
+            self._rho = MPS_computational_state('0' * N, dtype=psi0_dtype)
 
         elif N is None:
             self._psi = psi0.copy()
+            self._rho = rho0.copy()
             self.N = psi0.L
 
         else:
@@ -1124,12 +1120,7 @@ class Circuit:
                 raise ValueError("`N` doesn't match `psi0`.")
             self.N = N
             self._psi = psi0.copy()
-
-
-        if rho0 is None:
-            self._rho = MPS_computational_state('0' * int(2 * N), dtype=psi0_dtype)
-        else:
-            self._rho = MPS_computational_state('0' * int(2 * N), dtype=psi0_dtype)
+            self._rho = rho0.copy()
 
 
         self.q_qiskit = []
@@ -1672,6 +1663,8 @@ class Circuit:
 
         # unique tag
         tags = tags_to_oset(f'GATE_{len(self.gates)}')
+        tags_noise = tags_to_oset(f'GATE_{len(self.gates)}')
+
         if (gate_tags is not None):
             gate_tags = tags_to_oset(gate_tags)
             tags = tags | gate_tags
@@ -1679,14 +1672,15 @@ class Circuit:
         # parse which 'round' of gates
         if (gate_round is not None):
             tags.add(f'ROUND_{gate_round}')
+            tags_noise.add(f'ROUND_{gate_round}')
         elif isinstance(gate_id, numbers.Integral) or gate_id.isdigit():
             # gate round given as first entry of qasm line
             tags.add(f'ROUND_{gate_id}')
+            tags_noise.add(f'ROUND_{gate_id}')
             gate_id, gate_args = gate_args[0], gate_args[1:]
 
         gate_id = gate_id.upper()
         gate_fn = GATE_FUNCTIONS[gate_id]
-        gate_fn_dagg = GATE_FUNCTIONS[gate_id+"_conj"]
 
         # overide any default gate opts
         opts = {**self.gate_opts, **gate_opts}
@@ -1701,35 +1695,23 @@ class Circuit:
 
         # gate the TN!
         gate_fn(self._psi, *gate_args, tags=tags, **opts)
+        gate_fn(self._rho, *gate_args, tags=tags, **opts)
 
         # keep track of the gates applied
         self.gates.append((gate_id, *gate_args))
 
+        # add noisy channel to ket of rho!
         all_ONE_QUBIT_GATES = ONE_QUBIT_PARAM_GATES | ONE_QUBIT_GATES
         all_TWO_QUBIT_GATES = TWO_QUBIT_PARAM_GATES | TWO_QUBIT_GATES
 
         if gate_id in all_ONE_QUBIT_GATES:
             where = [int(gate_args[-1])]
-            parameters_ = list(gate_args[:len(gate_args)-len(where)])
-            SO = QD_CHANN_OQ(e=[1-0.5, 0.5/3., 0.5/3., 0.5/3])
         if gate_id in all_TWO_QUBIT_GATES:
             where = [int(gate_args[-2]), int(gate_args[-1])]
-            parameters_ = list(gate_args[:len(gate_args)-len(where)])
-            SO = QD_CHANN_TQ()
-        # where = [i  for i in gate_args if isinstance(i, numbers.Integral)]
-        # parameters_ = list(gate_args[:len(gate_args)-len(where)])
-        
-        where_even = [2*i for i in where]
-        where_odd = [2*i+1 for i in where]
-
-        gate_fn(self._rho, * parameters_ + where_even, tags=tags, **opts)
-        gate_fn_dagg(self._rho, * parameters_ + where_odd, tags=tags, **opts)
-
 
         if noise_id:
             noise_fn = NOISE_FUNCTIONS[noise_id]
-            noise_fn(self._rho, where_even+where_odd, e = noise_params, tags=tags, **opts)
-
+            noise_fn(self._rho, where, e = noise_params, tags=tags_noise, **opts)
 
 
 
@@ -1903,18 +1885,6 @@ class Circuit:
         """
         # make sure all same dtype and drop singlet dimensions
         rho = self._rho.copy()
-        map_k = {f"k{2*i}": f"k{i}" for i in range(self.N)}
-        map_b = {f"k{2*i+1}": f"b{i}" for i in range(self.N)}
-        rho.reindex_(map_b)
-        rho.reindex_(map_k)
-
-        map_k = {f"Qreg{2*i}": f"l_{i}" for i in range(self.N)}
-        rho.retag_(map_k)
-        map_k = {f"Qreg{2*i+1}": f"Qreg{i}" for i in range(self.N)}
-        rho.retag_(map_k)
-        map_k = {f"l_{i}": f"Qreg{i}" for i in range(self.N)}
-        rho.retag_(map_k)
-
         rho.squeeze_()
         rho.astype_(rho.dtype)
         return rho
