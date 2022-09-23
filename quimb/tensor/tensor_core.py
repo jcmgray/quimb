@@ -2739,18 +2739,25 @@ def _tensor_network_gate_inds_basic(
     bnds = [rand_uuid() for _ in range(ng)]
     reindex_map = dict(zip(inds, bnds))    
     inds_G = (*inds, *bnds)
+    ndimG = ndim(G)
 
     # tensor representing the gate
     if isparam:
-        TG = PTensor.from_parray(
-            G, inds=(*inds, *bnds), tags=tags, left_inds=bnds)
+        if len(inds_G) == ndimG:
+            TG = PTensor.from_parray(
+                G, inds=(*inds, *bnds), tags=tags, left_inds=bnds)
+        else:
+            inds_extra = abs(len(inds_G) - ndimG)
+            bnds_extra = [rand_uuid() for _ in range(inds_extra)]
+            TG = PTensor.from_parray(
+                G, inds=(*inds, *bnds, *bnds_extra), tags=tags, left_inds=bnds+bnds_extra)
     else:
-        if len(inds_G) == len(G.shape):
+        if len(inds_G) == ndimG:
             TG = Tensor(G, inds=(*inds, *bnds), tags=tags, left_inds=bnds)
         else:
-            inds_extra = abs(len(inds_G) - len(G.shape))
+            inds_extra = abs(len(inds_G) - ndimG)
             bnds_extra = [rand_uuid() for _ in range(inds_extra)]
-            TG = Tensor(G, inds=(*inds, *bnds, *bnds_extra), tags=tags, left_inds=bnds)
+            TG = Tensor(G, inds=(*inds, *bnds, *bnds_extra), tags=tags, left_inds=bnds+bnds_extra)
 
     if contract is False:
         #
@@ -3059,7 +3066,6 @@ def tensor_network_gate_inds(
     """
     check_opt('contract', contract, _VALID_GATE_CONTRACT)
 
-
     tn = self if inplace else self.copy()
 
     ng = len(inds)
@@ -3075,9 +3081,11 @@ def tensor_network_gate_inds(
 #        dims_rest = list(G.shape)[len(2*dims):]
 #        G = reshape(G, dims * 2 + dims_rest)
 
-    # if not all(d == dims[i % ng] for i, d in enumerate(G.shape)):
-    #     raise ValueError(f"Gate with shape {G.shape} doesn't match "
-    #                      f"indices {inds} with dimensions {dims}.")
+    Gshape_ = list(G.shape)[:2 * ng]
+
+    if not all(d == dims[i % ng] for i, d in enumerate(Gshape_)):
+        raise ValueError(f"Gate with shape {G.shape} doesn't match "
+                         f"indices {inds} with dimensions {dims}.")
 
     basic = (contract in _BASIC_GATE_CONTRACT)
     if (not basic) and (ng == 1):
