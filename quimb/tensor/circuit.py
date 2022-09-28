@@ -770,9 +770,6 @@ def apply_fsimg_conj(
 
 
 
-
-
-
 def rzz_param_gen(params):
     gamma = params[0]
 
@@ -787,6 +784,36 @@ def rzz_param_gen(params):
     return ops.asarray(data)
 
 
+def rxx_param_gen(params):
+    gamma = params[0]
+
+    c00 = do('cos', gamma / 2.)   
+    c11 = do('sin', gamma / 2.)
+
+    img_re = do('real', -1.j)
+    img_im = do('imag', -1.j)
+    img = do('complex', img_re, img_im)
+
+    data = [[[[c00, 0], [0, img * c11]],
+             [[0, c00], [img *c11, 0]]],
+            [[[0, img *c11], [c00, 0]],
+             [[img *c11, 0], [0, c00]]]]
+
+    return ops.asarray(data)
+
+@functools.lru_cache(maxsize=128)
+def rxx(gamma):
+    r"""
+    The gate describing an Ising interaction evolution, or 'ZZ'-rotation.
+
+    .. math::
+
+        \mathrm{RXX}(\gamma) = \exp(-i (\gamma / 2.) X_i X_j)
+
+    """
+    return rxx_param_gen(np.array([gamma]))
+
+
 @functools.lru_cache(maxsize=128)
 def rzz(gamma):
     r"""
@@ -798,6 +825,16 @@ def rzz(gamma):
 
     """
     return rzz_param_gen(np.array([gamma]))
+
+
+def apply_rxx(psi, gamma, i, j, parametrize=False, **gate_opts):
+    mtags = _merge_tags('RXX', gate_opts)
+    if parametrize:
+        G = ops.PArray(rxx_param_gen, (gamma,))
+    else:
+        G = rxx(float(gamma))
+    psi.gate_(G, (int(i), int(j)), tags=mtags, **gate_opts)
+
 
 
 def apply_rzz(psi, gamma, i, j, parametrize=False, **gate_opts):
@@ -974,6 +1011,7 @@ GATE_FUNCTIONS = {
     'FSIMG': apply_fsimg,
     'FSIMG_conj': apply_fsimg_conj,
     'RZZ': apply_rzz,
+    'RXX': apply_rxx,
     'RZZ_conj': apply_rzz_conj,
     'SU4': apply_su4,
     'SU4_conj': apply_su4_conj,
@@ -981,7 +1019,7 @@ GATE_FUNCTIONS = {
 
 ONE_QUBIT_PARAM_GATES = {'RX', 'RY', 'RZ', 'U3', 'U2', 'U1'}
 TWO_QUBIT_PARAM_GATES = {
-    'CU3', 'CU2', 'CU1', 'FS', 'FSIM', 'FSIMT', 'FSIMG', 'RZZ', 'SU4',
+    'CU3', 'CU2', 'CU1', 'FS', 'FSIM', 'FSIMT', 'FSIMG', 'RZZ', 'SU4', 'RXX',
 }
 TWO_QUBIT_GATES = {'CNOT', 'CX', 'CY', 'CZ', 'IS', 'ISWAP'}
 ONE_QUBIT_GATES = {'H', 'X', 'Y', 'Z', 'S', 'T', 'X_1_2', 'Y_1_2', 'Z_1_2', 'W_1_2', 'HZ_1_2'}
@@ -1502,6 +1540,10 @@ class Circuit:
                 t0, t1 = dic_r[i]
                 p0,  = dic_p[i]
                 qc.rzz(p0, q_l[t0], q_l[t1])
+            if dic_id[i] == "RXX":
+                t0, t1 = dic_r[i]
+                p0,  = dic_p[i]
+                qc.rzz(p0, q_l[t0], q_l[t1])
             if dic_id[i] == "RY":
                 t0, = dic_r[i]
                 p0,  = dic_p[i]
@@ -1845,6 +1887,10 @@ class Circuit:
 
     def rzz(self, theta, i, j, gate_round=None, parametrize=False):
         self.apply_gate('RZZ', theta, i, j,
+                        gate_round=gate_round, parametrize=parametrize)
+
+    def rxx(self, theta, i, j, gate_round=None, parametrize=False):
+        self.apply_gate('RXX', theta, i, j,
                         gate_round=gate_round, parametrize=parametrize)
 
     def su4(
