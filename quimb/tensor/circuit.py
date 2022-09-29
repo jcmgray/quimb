@@ -1048,6 +1048,7 @@ GATE_FUNCTIONS = {
     'FSIMG_conj': apply_fsimg_conj,
     'RZZ': apply_rzz,
     'RXX': apply_rxx,
+    'RYY': apply_ryy,
     'RZZ_conj': apply_rzz_conj,
     'SU4': apply_su4,
     'SU4_conj': apply_su4_conj,
@@ -1055,7 +1056,7 @@ GATE_FUNCTIONS = {
 
 ONE_QUBIT_PARAM_GATES = {'RX', 'RY', 'RZ', 'U3', 'U2', 'U1'}
 TWO_QUBIT_PARAM_GATES = {
-    'CU3', 'CU2', 'CU1', 'FS', 'FSIM', 'FSIMT', 'FSIMG', 'RZZ', 'SU4', 'RXX',
+    'CU3', 'CU2', 'CU1', 'FS', 'FSIM', 'FSIMT', 'FSIMG', 'RZZ', 'SU4', 'RXX', 'RYY'
 }
 TWO_QUBIT_GATES = {'CNOT', 'CX', 'CY', 'CZ', 'IS', 'ISWAP'}
 ONE_QUBIT_GATES = {'H', 'X', 'Y', 'Z', 'S', 'T', 'X_1_2', 'Y_1_2', 'Z_1_2', 'W_1_2', 'HZ_1_2'}
