@@ -824,10 +824,15 @@ def ryy_param_gen(params):
     img_im = do('imag', 1.j)
     img = do('complex', img_re, img_im)
 
+    img_re_ = do('real', -1.j)
+    img_im_ = do('imag', -1.j)
+    img_ = do('complex', img_re_, img_im_)
+
+
     data = [[[[c00, 0], [0, img * c11]],
-             [[0, c00], [-img *c11, 0]]],
-            [[[0, -img *c11], [c00, 0]],
-             [[img *c11, 0], [0, c00]]]]
+             [[0, c00], [img_ * c11, 0]]],
+            [[[0, img_ * c11], [c00, 0]],
+             [[img * c11, 0], [0, c00]]]]
 
     return ops.asarray(data)
 
