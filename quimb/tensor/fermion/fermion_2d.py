@@ -178,15 +178,14 @@ class FermionTensorNetwork2D(FermionTensorNetwork, TensorNetwork2D):
         the environments of rows and columns. The returned tensor network
         also contains the original plaquettes
         """
-        direction = {"left": "col",
-                     "right": "col",
-                     "top": "row",
-                     "bottom": "row"}[from_which]
+        direction = {"ymin": "col",
+                     "ymax": "col",
+                     "xmax": "row",
+                     "xmin": "row"}[from_which]
         tn = self.reorder(direction, layer_tags=layer_tags)
 
         r2d = Rotator2D(tn, xrange, yrange, from_which)
-        sweep, x_tag = r2d.vertical_sweep, r2d.x_tag
-        contract_boundary_fn = r2d.get_contract_boundary_fn()
+        sweep, x_tag = r2d.sweep, r2d.x_tag
 
         if envs is None:
             envs = {}
@@ -211,8 +210,14 @@ class FermionTensorNetwork2D(FermionTensorNetwork, TensorNetwork2D):
             if dense:
                 tn ^= (x_tag(iprevprev), x_tag(iprev))
             else:
-                contract_boundary_fn(
-                    iprevprev, iprev,
+                tn.contract_boundary_from_(
+                    xrange=(
+                        (iprevprev, iprev) if r2d.plane == 'x' else r2d.xrange
+                    ),
+                    yrange=(
+                        (iprevprev, iprev) if r2d.plane == 'y' else r2d.yrange
+                    ),
+                    from_which=from_which,
                     max_bond=max_bond,
                     cutoff=cutoff,
                     mode=mode,
@@ -226,19 +231,19 @@ class FermionTensorNetwork2D(FermionTensorNetwork, TensorNetwork2D):
 
         return envs
 
-    compute_bottom_environments = functools.partialmethod(
-        compute_environments, from_which='bottom')
+    compute_xmin_environments = functools.partialmethod(
+        compute_environments, from_which='xmin')
 
-    compute_top_environments = functools.partialmethod(
-        compute_environments, from_which='top')
+    compute_xmax_environments = functools.partialmethod(
+        compute_environments, from_which='xmax')
 
-    compute_left_environments = functools.partialmethod(
-        compute_environments, from_which='left')
+    compute_ymin_environments = functools.partialmethod(
+        compute_environments, from_which='ymin')
 
-    compute_right_environments = functools.partialmethod(
-        compute_environments, from_which='right')
+    compute_ymax_environments = functools.partialmethod(
+        compute_environments, from_which='ymax')
 
-    def _compute_plaquette_environments_row_first(
+    def _compute_plaquette_environments_x_first(
         self,
         x_bsz,
         y_bsz,
@@ -247,21 +252,19 @@ class FermionTensorNetwork2D(FermionTensorNetwork, TensorNetwork2D):
         canonize=True,
         layer_tags=None,
         second_dense=None,
-        row_envs=None,
+        x_envs=None,
         **compute_environment_opts
     ):
         if second_dense is None:
             second_dense = x_bsz < 2
 
-        # first we contract from either side to produce column environments
-        if row_envs is None:
-            row_envs = self.compute_row_environments(
+        if x_envs is None:
+            x_envs = self.compute_x_environments(
                 max_bond=max_bond, cutoff=cutoff, canonize=canonize,
                 layer_tags=layer_tags, **compute_environment_opts)
 
-        # next we form vertical strips and contract from both top and bottom
-        #     for each column
-        col_envs = dict()
+        # next we form vertical strips and contract in both y directions
+        y_envs = dict()
         for i in range(self.Lx - x_bsz + 1):
             #
             #      ●━━━●━━━●━━━●━━━●━━━●━━━●━━━●━━━●━━━●
@@ -272,10 +275,10 @@ class FermionTensorNetwork2D(FermionTensorNetwork, TensorNetwork2D):
             #     ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱
             #      ●━━━●━━━●━━━●━━━●━━━●━━━●━━━●━━━●━━━●
             #
-            row_i = FermionTensorNetwork((
-                row_envs['bottom', i],
-                *[row_envs['mid', i+x] for x in range(x_bsz)],
-                row_envs['top', i + x_bsz - 1],
+            tn_xi = FermionTensorNetwork((
+                x_envs['xmax', i],
+                *[x_envs['mid', i+x] for x in range(x_bsz)],
+                x_envs['xmin', i + x_bsz - 1],
             )).view_as_(FermionTensorNetwork2D, like=self)
             #
             #           y_bsz
@@ -287,43 +290,43 @@ class FermionTensorNetwork2D(FermionTensorNetwork, TensorNetwork2D):
             #       ●── .  . ──●            │╰─ . . ─╯│     ┴
             #       │          │            ╰──     ──╯
             #       ●──      ──●
-            #     'left'    'right'       'left'    'right'
+            #     'ymin'    'ymax'        'ymin'    'ymax'
             #
-            col_envs[i] = row_i.compute_col_environments(
+            y_envs[i] = tn_xi.compute_y_environments(
                 xrange=(max(i - 1, 0), min(i + x_bsz, self.Lx - 1)),
                 max_bond=max_bond, cutoff=cutoff,
                 canonize=canonize, layer_tags=layer_tags,
                 dense=second_dense, **compute_environment_opts)
 
         # then range through all the possible plaquettes, selecting the correct
-        # boundary tensors from either the column or row environments
+        # boundary tensors from either the x or y environments
         plaquette_envs = dict()
         for i0, j0 in product(range(self.Lx - x_bsz + 1),
                               range(self.Ly - y_bsz + 1)):
 
             # we want to select bordering tensors from:
             #
-            #       L──A──A──R    <- A from the row environments
+            #       L──A──A──R    <- A from the x environments
             #       │  │  │  │
             #  i0+1 L──●──●──R
-            #       │  │  │  │    <- L, R from the column environments
+            #       │  │  │  │    <- L, R from the y environments
             #  i0   L──●──●──R
             #       │  │  │  │
-            #       L──B──B──R    <- B from the row environments
+            #       L──B──B──R    <- B from the x environments
             #
             #         j0  j0+1
             #
             env_ij = FermionTensorNetwork((
-                col_envs[i0]['left', j0],
-                *[col_envs[i0]['mid', ix] for ix in range(j0, j0+y_bsz)],
-                col_envs[i0]['right', j0 + y_bsz - 1]
+                y_envs[i0]['ymin', j0],
+                *[y_envs[i0]['mid', ix] for ix in range(j0, j0+y_bsz)],
+                y_envs[i0]['ymax', j0 + y_bsz - 1]
             ), check_collisions=False)
 
             plaquette_envs[(i0, j0), (x_bsz, y_bsz)] = env_ij
 
         return plaquette_envs
 
-    def _compute_plaquette_environments_col_first(
+    def _compute_plaquette_environments_y_first(
         self,
         x_bsz,
         y_bsz,
@@ -332,21 +335,20 @@ class FermionTensorNetwork2D(FermionTensorNetwork, TensorNetwork2D):
         canonize=True,
         layer_tags=None,
         second_dense=None,
-        col_envs=None,
+        y_envs=None,
         **compute_environment_opts
     ):
         if second_dense is None:
             second_dense = y_bsz < 2
 
-        # first we contract from either side to produce column environments
-        if col_envs is None:
-            col_envs = self.compute_col_environments(
+        # first we contract from either side to produce y environments
+        if y_envs is None:
+            y_envs = self.compute_y_environments(
                 max_bond=max_bond, cutoff=cutoff, canonize=canonize,
                 layer_tags=layer_tags, **compute_environment_opts)
 
-        # next we form vertical strips and contract from both top and bottom
-        #     for each column
-        row_envs = dict()
+        # next we form vertical strips and contract from both x directions
+        x_envs = dict()
         for j in range(self.Ly - y_bsz + 1):
             #
             #        y_bsz
@@ -363,50 +365,50 @@ class FermionTensorNetwork2D(FermionTensorNetwork, TensorNetwork2D):
             #     ┃╭─|o─|o─╮┃
             #     ●──o╱─o╱──●
             #
-            col_j = FermionTensorNetwork((
-                col_envs['left', j],
-                *[col_envs['mid', j+jn] for jn in range(y_bsz)],
-                col_envs['right', j + y_bsz - 1],
+            tn_yj = FermionTensorNetwork((
+                y_envs['ymin', j],
+                *[y_envs['mid', j+jn] for jn in range(y_bsz)],
+                y_envs['ymax', j + y_bsz - 1],
             )).view_as_(FermionTensorNetwork2D, like=self)
             #
             #        y_bsz
             #        <-->        second_dense=True
             #     ●──●──●──●      ╭──●──╮
-            #     │  │  │  │  or  │ ╱ ╲ │    'top'
+            #     │  │  │  │  or  │ ╱ ╲ │    'xmax'
             #        .  .           . .                  ┬
             #                                            ┊ x_bsz
             #        .  .           . .                  ┴
-            #     │  │  │  │  or  │ ╲ ╱ │    'bottom'
+            #     │  │  │  │  or  │ ╲ ╱ │    'xmin'
             #     ●──●──●──●      ╰──●──╯
             #
-            row_envs[j] = col_j.compute_row_environments(
+            x_envs[j] = tn_yj.compute_x_environments(
                 yrange=(max(j - 1, 0), min(j + y_bsz, self.Ly - 1)),
                 max_bond=max_bond, cutoff=cutoff, canonize=canonize,
                 layer_tags=layer_tags, dense=second_dense,
                 **compute_environment_opts)
 
         # then range through all the possible plaquettes, selecting the correct
-        # boundary tensors from either the column or row environments
+        # boundary tensors from either the x or y environments
         plaquette_envs = dict()
         for i0, j0 in product(range(self.Lx - x_bsz + 1),
                               range(self.Ly - y_bsz + 1)):
 
             # we want to select bordering tensors from:
             #
-            #          A──A──A──A    <- A from the row environments
+            #          A──A──A──A    <- A from the x environments
             #          │  │  │  │
             #     i0+1 L──●──●──R
-            #          │  │  │  │    <- L, R from the column environments
+            #          │  │  │  │    <- L, R from the y environments
             #     i0   L──●──●──R
             #          │  │  │  │
-            #          B──B──B──B    <- B from the row environments
+            #          B──B──B──B    <- B from the x environments
             #
             #            j0  j0+1
             #
             env_ij = FermionTensorNetwork((
-                row_envs[j0]['bottom', i0],
-                *[row_envs[j0]['mid', ix] for ix in range(i0, i0+x_bsz)],
-                row_envs[j0]['top', i0 + x_bsz - 1]
+                x_envs[j0]['xmin', i0],
+                *[x_envs[j0]['mid', ix] for ix in range(i0, i0+x_bsz)],
+                x_envs[j0]['xmax', i0 + x_bsz - 1]
             ), check_collisions=False)
 
             plaquette_envs[(i0, j0), (x_bsz, y_bsz)] = env_ij
@@ -988,7 +990,7 @@ class FPEPS(FermionTensorNetwork2DVector,
                 inds.append(ix[(i, j - 1), (i, j)])
             inds.append(self.site_ind(i, j))
 
-            # mix site, row, column and global tags
+            # mix site, x, y and global tags
 
             ij_tags = tags | oset((self.site_tag(i, j),
                                    self.x_tag(i),
@@ -1185,7 +1187,7 @@ class FPEPO(FermionTensorNetwork2DOperator,
             inds.append(self.lower_ind(i, j))
             inds.append(self.upper_ind(i, j))
 
-            # mix site, row, column and global tags
+            # mix site, x, y and global tags
             ij_tags = tags | oset((self.site_tag(i, j),
                                    self.x_tag(i),
                                    self.y_tag(j)))
