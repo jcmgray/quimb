@@ -814,6 +814,35 @@ def rxx(gamma):
     return rxx_param_gen(np.array([gamma]))
 
 
+def ryy_param_gen(params):
+    gamma = params[0]
+
+    c00 = do('cos', gamma / 2.)   
+    c11 = do('sin', gamma / 2.)
+
+    img_re = do('real', -1.j)
+    img_im = do('imag', -1.j)
+    img = do('complex', img_re, img_im)
+
+    data = [[[[c00, 0], [0, img * c11]],
+             [[0, c00], [-img *c11, 0]]],
+            [[[0, -img *c11], [c00, 0]],
+             [[img *c11, 0], [0, c00]]]]
+
+    return ops.asarray(data)
+
+
+def ryy(gamma):
+    r"""
+    The gate describing an Ising interaction evolution, or 'ZZ'-rotation.
+
+    .. math::
+
+        \mathrm{Ryy}(\gamma) = \exp(-i (\gamma / 2.) Y_i Y_j)
+
+    """
+    return ryy_param_gen(np.array([gamma]))
+
 @functools.lru_cache(maxsize=128)
 def rzz(gamma):
     r"""
@@ -835,6 +864,13 @@ def apply_rxx(psi, gamma, i, j, parametrize=False, **gate_opts):
         G = rxx(float(gamma))
     psi.gate_(G, (int(i), int(j)), tags=mtags, **gate_opts)
 
+def apply_ryy(psi, gamma, i, j, parametrize=False, **gate_opts):
+    mtags = _merge_tags('RYY', gate_opts)
+    if parametrize:
+        G = ops.PArray(ryy_param_gen, (gamma,))
+    else:
+        G = ryy(float(gamma))
+    psi.gate_(G, (int(i), int(j)), tags=mtags, **gate_opts)
 
 
 def apply_rzz(psi, gamma, i, j, parametrize=False, **gate_opts):
@@ -1891,6 +1927,10 @@ class Circuit:
 
     def rxx(self, theta, i, j, gate_round=None, parametrize=False):
         self.apply_gate('RXX', theta, i, j,
+                        gate_round=gate_round, parametrize=parametrize)
+
+    def ryy(self, theta, i, j, gate_round=None, parametrize=False):
+        self.apply_gate('RYY', theta, i, j,
                         gate_round=gate_round, parametrize=parametrize)
 
     def su4(
