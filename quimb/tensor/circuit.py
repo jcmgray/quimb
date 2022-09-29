@@ -813,42 +813,40 @@ def rxx(gamma):
     """
     return rxx_param_gen(np.array([gamma]))
 
-@functools.lru_cache(maxsize=128)
 def ryy_param_gen(params):
     gamma = params[0]
 
     c00 = do('cos', gamma / 2.)   
     c11 = do('sin', gamma / 2.)
 
-    img_re = do('real', 1.j)
-    img_im = do('imag', 1.j)
+    img_re = do('real', -1.j)
+    img_im = do('imag', -1.j)
     img = do('complex', img_re, img_im)
 
-    img_re_ = do('real', -1.j)
-    img_im_ = do('imag', -1.j)
+    img_re_ = do('real', 1.j)
+    img_im_ = do('imag', 1.j)
     img_ = do('complex', img_re_, img_im_)
 
-    data = [[[[c00, 0], [0, img * c11]],
-             [[0, c00], [img_ *c11, 0]]],
-            [[[0, img_ *c11], [c00, 0]],
-             [[img *c11, 0], [0, c00]]]]
+    data = [[[[c00, 0], [0, img_ * c11]],
+             [[0, c00], [img * c11, 0]]],
+            [[[0, img * c11], [c00, 0]],
+             [[img_ * c11, 0], [0, c00]]]]
 
-    print(data)
     return ops.asarray(data)
 
 
+@functools.lru_cache(maxsize=128)
 def ryy(gamma):
     r"""
     The gate describing an Ising interaction evolution, or 'ZZ'-rotation.
 
     .. math::
 
-        \mathrm{Ryy}(\gamma) = \exp(-i (\gamma / 2.) Y_i Y_j)
+        \mathrm{RXX}(\gamma) = \exp(-i (\gamma / 2.) X_i X_j)
 
     """
     return ryy_param_gen(np.array([gamma]))
 
-print("ryy", ryy(pi))
 
 @functools.lru_cache(maxsize=128)
 def rzz(gamma):
