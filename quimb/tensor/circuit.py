@@ -828,7 +828,6 @@ def ryy_param_gen(params):
     img_im_ = do('imag', -1.j)
     img_ = do('complex', img_re_, img_im_)
 
-
     data = [[[[c00, 0], [0, img * c11]],
              [[0, c00], [img_ * c11, 0]]],
             [[[0, img_ * c11], [c00, 0]],
@@ -847,6 +846,8 @@ def ryy(gamma):
 
     """
     return ryy_param_gen(np.array([gamma]))
+
+print("ryy", ryy(pi))
 
 @functools.lru_cache(maxsize=128)
 def rzz(gamma):
