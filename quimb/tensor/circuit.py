@@ -813,15 +813,15 @@ def rxx(gamma):
     """
     return rxx_param_gen(np.array([gamma]))
 
-
+@functools.lru_cache(maxsize=128)
 def ryy_param_gen(params):
     gamma = params[0]
 
     c00 = do('cos', gamma / 2.)   
     c11 = do('sin', gamma / 2.)
 
-    img_re = do('real', -1.j)
-    img_im = do('imag', -1.j)
+    img_re = do('real', 1.j)
+    img_im = do('imag', 1.j)
     img = do('complex', img_re, img_im)
 
     data = [[[[c00, 0], [0, img * c11]],
@@ -863,6 +863,7 @@ def apply_rxx(psi, gamma, i, j, parametrize=False, **gate_opts):
     else:
         G = rxx(float(gamma))
     psi.gate_(G, (int(i), int(j)), tags=mtags, **gate_opts)
+
 
 def apply_ryy(psi, gamma, i, j, parametrize=False, **gate_opts):
     mtags = _merge_tags('RYY', gate_opts)
@@ -1581,6 +1582,11 @@ class Circuit:
                 t0, t1 = dic_r[i]
                 p0,  = dic_p[i]
                 qc.rzz(p0, q_l[t0], q_l[t1])
+            if dic_id[i] == "RYY":
+                t0, t1 = dic_r[i]
+                p0,  = dic_p[i]
+                qc.rzz(p0, q_l[t0], q_l[t1])
+
             if dic_id[i] == "RY":
                 t0, = dic_r[i]
                 p0,  = dic_p[i]
