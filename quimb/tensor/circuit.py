@@ -1793,7 +1793,6 @@ class Circuit:
             where = [int(gate_args[-2]), int(gate_args[-1])]
 
         if noise_id:
-            print("noise_id", noise_id)
             noise_fn = NOISE_FUNCTIONS[noise_id]
             noise_fn(self._rho, where, e = noise_params, tags=tags_noise, **opts)
 
