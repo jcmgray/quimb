@@ -194,16 +194,17 @@ def QD_CHANN_TQ(e=[1-0.5, 0.5/15, 0.5/15, 0.5/15, 0.5/15, 0.5/15,
                 0.5/15, 0.5/15, 0.5/15, 0.5/15, 0.5/15, 0.5/15, 0.5/15,
                 0.5/15, 0.5/15, 0.5/15]):
 
-    I = qu.pauli('I') 
-    X = qu.pauli('X') 
-    Y = qu.pauli('Y') 
+    I = qu.pauli('I')
+    X = qu.pauli('X')
+    Y = qu.pauli('Y')
     Z = qu.pauli('Z')
 
     pauli_l = [I & I, I & Z, I & X, I & Y,
-               X & I, X & Z, X & X, X & Y,
                Z & I, Z & Z, Z & X, Z & Y,
+               X & I, X & Z, X & X, X & Y,
                Y & I, Y & Z, Y & X, Y & Y,
-              ]
+               ]
+              
     Super_opt = np.zeros([4, 4, 16], dtype="complex128")
     for i in range(16):
         Super_opt[:, :,  i] = pauli_l[i] * (e[i]**0.5)
@@ -769,12 +770,11 @@ def apply_fsimg_conj(
     psi.gate_(G, (int(i), int(j)), tags=mtags, **gate_opts)
 
 
-
 def rzz_param_gen(params):
     gamma = params[0]
 
-    c00 = c11 = do('complex', do('cos', gamma / 2), -do('sin', gamma / 2))
-    c01 = c10 = do('complex', do('cos', gamma / 2), do('sin', gamma / 2))
+    c00 = c11 = do('complex', do('cos', gamma / 2.), -do('sin', gamma / 2.))
+    c01 = c10 = do('complex', do('cos', gamma / 2.), do('sin', gamma / 2.))
 
     data = [[[[c00, 0], [0, 0]],
              [[0, c01], [0, 0]]],
@@ -782,6 +782,29 @@ def rzz_param_gen(params):
              [[0, 0], [0, c11]]]]
 
     return ops.asarray(data)
+
+
+@functools.lru_cache(maxsize=128)
+def rzz(gamma):
+    r"""
+    The gate describing an Ising interaction evolution, or 'ZZ'-rotation.
+
+    .. math::
+
+        \mathrm{RZZ}(\gamma) = \exp(-i (\gamma / 2.) Z_i Z_j)
+
+    """
+    return rzz_param_gen(np.array([gamma]))
+
+def apply_rzz(psi, gamma, i, j, parametrize=False, **gate_opts):
+    mtags = _merge_tags('RZZ', gate_opts)
+    if parametrize:
+        G = ops.PArray(rzz_param_gen, (gamma,))
+    else:
+        G = rzz(float(gamma))
+    psi.gate_(G, (int(i), int(j)), tags=mtags, **gate_opts)
+
+
 
 
 def rxx_param_gen(params):
@@ -812,6 +835,18 @@ def rxx(gamma):
 
     """
     return rxx_param_gen(np.array([gamma]))
+
+def apply_rxx(psi, gamma, i, j, parametrize=False, **gate_opts):
+    mtags = _merge_tags('RXX', gate_opts)
+    if parametrize:
+        G = ops.PArray(rxx_param_gen, (gamma,))
+    else:
+        G = rxx(float(gamma))
+    psi.gate_(G, (int(i), int(j)), tags=mtags, **gate_opts)
+
+
+
+
 
 def ryy_param_gen(params):
     gamma = params[0]
@@ -848,53 +883,12 @@ def ryy(gamma):
     return ryy_param_gen(np.array([gamma]))
 
 
-@functools.lru_cache(maxsize=128)
-def rzz(gamma):
-    r"""
-    The gate describing an Ising interaction evolution, or 'ZZ'-rotation.
-
-    .. math::
-
-        \mathrm{RZZ}(\gamma) = \exp(-i (\gamma / 2.) Z_i Z_j)
-
-    """
-    return rzz_param_gen(np.array([gamma]))
-
-
-def apply_rxx(psi, gamma, i, j, parametrize=False, **gate_opts):
-    mtags = _merge_tags('RXX', gate_opts)
-    if parametrize:
-        G = ops.PArray(rxx_param_gen, (gamma,))
-    else:
-        G = rxx(float(gamma))
-    psi.gate_(G, (int(i), int(j)), tags=mtags, **gate_opts)
-
-
 def apply_ryy(psi, gamma, i, j, parametrize=False, **gate_opts):
     mtags = _merge_tags('RYY', gate_opts)
     if parametrize:
         G = ops.PArray(ryy_param_gen, (gamma,))
     else:
         G = ryy(float(gamma))
-    psi.gate_(G, (int(i), int(j)), tags=mtags, **gate_opts)
-
-
-def apply_rzz(psi, gamma, i, j, parametrize=False, **gate_opts):
-    mtags = _merge_tags('RZZ', gate_opts)
-    if parametrize:
-        G = ops.PArray(rzz_param_gen, (gamma,))
-    else:
-        G = rzz(float(gamma))
-    psi.gate_(G, (int(i), int(j)), tags=mtags, **gate_opts)
-
-
-def apply_rzz_conj(psi, gamma, i, j, parametrize=False, **gate_opts):
-    mtags = _merge_tags('RZZ', gate_opts)
-    if parametrize:
-        G = ops.PArray(rzz_param_gen, (gamma,))
-        G.add_function(conj)
-    else:
-        G = rzz(float(gamma)).conj()
     psi.gate_(G, (int(i), int(j)), tags=mtags, **gate_opts)
 
 
@@ -1055,7 +1049,6 @@ GATE_FUNCTIONS = {
     'RZZ': apply_rzz,
     'RXX': apply_rxx,
     'RYY': apply_ryy,
-    'RZZ_conj': apply_rzz_conj,
     'SU4': apply_su4,
     'SU4_conj': apply_su4_conj,
 }
@@ -1762,11 +1755,11 @@ class Circuit:
         # parse which 'round' of gates
         if (gate_round is not None):
             tags.add(f'ROUND_{gate_round}')
-            tags_noise.add(f'ROUND_{gate_round}')
+            #tags_noise.add(f'ROUND_{gate_round}')
         elif isinstance(gate_id, numbers.Integral) or gate_id.isdigit():
             # gate round given as first entry of qasm line
             tags.add(f'ROUND_{gate_id}')
-            tags_noise.add(f'ROUND_{gate_id}')
+            #tags_noise.add(f'ROUND_{gate_id}')
             gate_id, gate_args = gate_args[0], gate_args[1:]
 
         gate_id = gate_id.upper()
@@ -1800,6 +1793,7 @@ class Circuit:
             where = [int(gate_args[-2]), int(gate_args[-1])]
 
         if noise_id:
+            print("noise_id", noise_id)
             noise_fn = NOISE_FUNCTIONS[noise_id]
             noise_fn(self._rho, where, e = noise_params, tags=tags_noise, **opts)
 
