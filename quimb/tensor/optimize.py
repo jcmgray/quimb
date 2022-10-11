@@ -853,10 +853,10 @@ def parse_constant_arg(arg, to_constant):
         return valmap(to_constant, arg)
 
     if isinstance(arg, list):
-        return list(map(to_constant, arg))
+        return list(parse_constant_arg(i, to_constant) for i in arg)
 
     if isinstance(arg, tuple):
-        return tuple(map(to_constant, arg))
+        return tuple(parse_constant_arg(i, to_constant) for i in arg)
 
     # assume ``arg`` is a raw array
     return to_constant(arg)
