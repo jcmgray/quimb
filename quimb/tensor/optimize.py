@@ -850,7 +850,7 @@ def parse_constant_arg(arg, to_constant):
         return constant_t(arg, to_constant)
 
     if isinstance(arg, dict):
-        return valmap(to_constant, arg)
+        return valmap(lambda i: parse_constant_arg(i, to_constant), arg)
 
     if isinstance(arg, list):
         return list(parse_constant_arg(i, to_constant) for i in arg)
