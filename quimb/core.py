@@ -3,8 +3,8 @@
 
 import os
 import math
+from math import prod
 import cmath
-import operator
 import itertools
 import functools
 from numbers import Integral
@@ -144,12 +144,6 @@ def par_reduce(fn, seq, nthreads=_NUM_THREAD_WORKERS):
         return _inner_preduce(new_x)
 
     return _inner_preduce(tuple(seq))
-
-
-def prod(xs):
-    """Product (as in multiplication) of an iterable.
-    """
-    return functools.reduce(operator.mul, xs, 1)
 
 
 def make_immutable(mat):
