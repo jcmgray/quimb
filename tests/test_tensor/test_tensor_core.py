@@ -20,7 +20,7 @@ from quimb.tensor import (
     MPS_rand_state,
     TNLinearOperator1D,
 )
-from quimb.tensor.decomp import _trim_singular_vals_numba
+from quimb.tensor.decomp import _compute_number_svals_to_keep_numba
 from quimb.tensor.contraction import _CONTRACT_BACKEND, _TENSOR_LINOP_BACKEND
 
 autograd_mark = pytest.mark.skipif(
@@ -30,10 +30,10 @@ autograd_mark = pytest.mark.skipif(
 
 def test_trim_singular_vals():
     s = np.array([3., 2., 1., 0.1])
-    assert _trim_singular_vals_numba(s, 0.5, 1) == 3
-    assert _trim_singular_vals_numba(s, 0.5, 2) == 2
-    assert _trim_singular_vals_numba(s, 2, 3) == 2
-    assert _trim_singular_vals_numba(s, 5.02, 3) == 1
+    assert _compute_number_svals_to_keep_numba(s, 0.5, 1) == 3
+    assert _compute_number_svals_to_keep_numba(s, 0.5, 2) == 2
+    assert _compute_number_svals_to_keep_numba(s, 2, 3) == 2
+    assert _compute_number_svals_to_keep_numba(s, 5.02, 3) == 1
 
 
 class TestContractOpts:
@@ -439,6 +439,15 @@ class TestBasicTensorOperations:
         assert lix == ['a', 'c']
         assert six == ['b', 'd']
         assert rix == ['f']
+
+    def test_group_inds_tensor_network(self):
+        tn = qtn.TN2D_with_value(1.0, 4, 4, 2)
+        ltn = tn.select(['I1,1', 'I1,2'], 'any')
+        rtn = tn.select(['I2,1', 'I2,2'], 'any')
+        lix, six, rix = qtn.group_inds(ltn, rtn)
+        assert len(lix) == len(rix) == 4
+        assert len(six) == 2
+        assert ltn.inds_size(six) == 4
 
 
 class TestTensorFunctions:
@@ -1481,14 +1490,14 @@ class TestTensorNetwork:
         htn = qtn.HTN_classical_partition_function_from_edges(
             edges, j=lambda i, j: js[frozenset((i, j))], beta=0.22, h=0.04)
         Zh = htn.contract(all, output_inds=())
-
+        assert len(htn.get_hyperinds(output_inds=())) == 10
         if mode == "manual":
             # resolve manually
             tn = qtn.TN_classical_partition_function_from_edges(
                 edges, j=lambda i, j: js[frozenset((i, j))], beta=0.22, h=0.04)
         else:
             tn = htn.hyperinds_resolve(mode)
-
+        assert len(tn.get_hyperinds()) == 0
         Z = tn.contract(all, output_inds=())
         assert Z == pytest.approx(Zh)
         assert max(map(len, tn.ind_map.values())) == 2
