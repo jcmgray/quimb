@@ -20,7 +20,7 @@ from quimb.tensor import (
     MPS_rand_state,
     TNLinearOperator1D,
 )
-from quimb.tensor.decomp import _trim_singular_vals_numba
+from quimb.tensor.decomp import _compute_number_svals_to_keep_numba
 from quimb.tensor.contraction import _CONTRACT_BACKEND, _TENSOR_LINOP_BACKEND
 
 autograd_mark = pytest.mark.skipif(
@@ -30,10 +30,10 @@ autograd_mark = pytest.mark.skipif(
 
 def test_trim_singular_vals():
     s = np.array([3., 2., 1., 0.1])
-    assert _trim_singular_vals_numba(s, 0.5, 1) == 3
-    assert _trim_singular_vals_numba(s, 0.5, 2) == 2
-    assert _trim_singular_vals_numba(s, 2, 3) == 2
-    assert _trim_singular_vals_numba(s, 5.02, 3) == 1
+    assert _compute_number_svals_to_keep_numba(s, 0.5, 1) == 3
+    assert _compute_number_svals_to_keep_numba(s, 0.5, 2) == 2
+    assert _compute_number_svals_to_keep_numba(s, 2, 3) == 2
+    assert _compute_number_svals_to_keep_numba(s, 5.02, 3) == 1
 
 
 class TestContractOpts:

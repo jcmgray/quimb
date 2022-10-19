@@ -275,10 +275,10 @@ def rand_uuid(base=""):
 
 _VALID_SPLIT_GET = {None, 'arrays', 'tensors', 'values'}
 _SPLIT_FNS = {
-    'svd': decomp.svd,
-    'eig': decomp.eig,
-    'qr': decomp.qr,
-    'lq': decomp.lq,
+    'svd': decomp.svd_truncated,
+    'eig': decomp.svd_via_eig_truncated,
+    'qr': decomp.qr_stabilized,
+    'lq': decomp.lq_stabilized,
     'eigh': decomp.eigh,
     'cholesky': decomp.cholesky,
     'isvd': decomp.isvd,
@@ -321,7 +321,7 @@ def _parse_split_opts(method, cutoff, absorb, max_bond, cutoff_mode, renorm):
     if (method in _FULL_SPLIT_METHODS) and (renorm is None):
         opts['renorm'] = _RENORM_LOOKUP.get(cutoff_mode, 0)
     else:
-        opts['renorm'] = 0 if renorm is None else int(renorm)
+        opts['renorm'] = 0 if renorm is None else renorm
 
     return opts
 
