@@ -67,6 +67,10 @@ pvectorize = functools.partial(numba.vectorize, cache=_NUMBA_CACHE,
 target, depending on environment variable 'QUIMB_NUMBA_PARALLEL'.
 """
 
+generated_jit = functools.partial(numba.generated_jit, cache=_NUMBA_CACHE)
+"""Numba generated jit, but obeying cache setting.
+"""
+
 
 class CacheThreadPool(object):
     """
