@@ -15,12 +15,12 @@ from ..utils import int2tup, find_library, raise_cant_find_library_function
 from ..gen.rand import randn, rand_rademacher, rand_phase, seed_rand
 from ..linalg.mpi_launcher import get_mpi_pool
 
-if find_library('opt_einsum') and find_library('autoray'):
+if find_library("opt_einsum") and find_library("autoray"):
     from ..tensor.tensor_core import Tensor
     from ..tensor.tensor_1d import MatrixProductOperator
     from ..tensor.tensor_approx_spectral import construct_lanczos_tridiag_MPO
 else:
-    reqs = '[opt_einsum,autoray]'
+    reqs = "[opt_einsum,autoray]"
     Tensor = raise_cant_find_library_function(reqs)
     construct_lanczos_tridiag_MPO = raise_cant_find_library_function(reqs)
 
@@ -61,18 +61,24 @@ def lazy_ptr_linop(psi_ab, dims, sysa, **linop_opts):
     """
     sysa = int2tup(sysa)
 
-    Kab = Tensor(np.asarray(psi_ab).reshape(dims),
-                 inds=[('kA{}' if i in sysa else 'xB{}').format(i)
-                       for i in range(len(dims))])
+    Kab = Tensor(
+        np.asarray(psi_ab).reshape(dims),
+        inds=[
+            ("kA{}" if i in sysa else "xB{}").format(i)
+            for i in range(len(dims))
+        ],
+    )
 
-    Bab = Tensor(Kab.data.conjugate(),
-                 inds=[('bA{}' if i in sysa else 'xB{}').format(i)
-                       for i in range(len(dims))])
+    Bab = Tensor(
+        Kab.data.conjugate(),
+        inds=[
+            ("bA{}" if i in sysa else "xB{}").format(i)
+            for i in range(len(dims))
+        ],
+    )
 
     return (Kab & Bab).aslinearoperator(
-        [f'kA{i}' for i in sysa],
-        [f'bA{i}' for i in sysa],
-        **linop_opts
+        [f"kA{i}" for i in sysa], [f"bA{i}" for i in sysa], **linop_opts
     )
 
 
@@ -115,18 +121,30 @@ def lazy_ptr_ppt_linop(psi_abc, dims, sysa, sysb, **linop_opts):
     sysa, sysb = int2tup(sysa), int2tup(sysb)
     sys_ab = sorted(sysa + sysb)
 
-    Kabc = Tensor(np.asarray(psi_abc).reshape(dims),
-                  inds=[('kA{}' if i in sysa else 'kB{}' if i in sysb else
-                         'xC{}').format(i) for i in range(len(dims))])
+    Kabc = Tensor(
+        np.asarray(psi_abc).reshape(dims),
+        inds=[
+            ("kA{}" if i in sysa else "kB{}" if i in sysb else "xC{}").format(
+                i
+            )
+            for i in range(len(dims))
+        ],
+    )
 
-    Babc = Tensor(Kabc.data.conjugate(),
-                  inds=[('bA{}' if i in sysa else 'bB{}' if i in sysb else
-                         'xC{}').format(i) for i in range(len(dims))])
+    Babc = Tensor(
+        Kabc.data.conjugate(),
+        inds=[
+            ("bA{}" if i in sysa else "bB{}" if i in sysb else "xC{}").format(
+                i
+            )
+            for i in range(len(dims))
+        ],
+    )
 
     return (Kabc & Babc).aslinearoperator(
-        [('bA{}' if i in sysa else 'kB{}').format(i) for i in sys_ab],
-        [('kA{}' if i in sysa else 'bB{}').format(i) for i in sys_ab],
-        **linop_opts
+        [("bA{}" if i in sysa else "kB{}").format(i) for i in sys_ab],
+        [("kA{}" if i in sysa else "bB{}").format(i) for i in sys_ab],
+        **linop_opts,
     )
 
 
@@ -134,15 +152,14 @@ def lazy_ptr_ppt_linop(psi_abc, dims, sysa, sysb, **linop_opts):
 #                         Lanczos tri-diag technique                          #
 # --------------------------------------------------------------------------- #
 
+
 def inner(a, b):
-    """Inner product between two vectors
-    """
+    """Inner product between two vectors"""
     return vdot(a, b).real
 
 
 def norm_fro(a):
-    """'Frobenius' norm of a vector.
-    """
+    """'Frobenius' norm of a vector."""
     return sqrt(inner(a, a))
 
 
@@ -166,11 +183,17 @@ def norm_fro_approx(A, **kwargs):
     -------
     float
     """
-    return approx_spectral_function(A, lambda x: x**2, **kwargs)**0.5
+    return approx_spectral_function(A, lambda x: x**2, **kwargs) ** 0.5
 
 
-def random_rect(shape, dist='rademacher', orthog=False, norm=True,
-                seed=False, dtype=complex):
+def random_rect(
+    shape,
+    dist="rademacher",
+    orthog=False,
+    norm=True,
+    seed=False,
+    dtype=complex,
+):
     """Generate a random array optionally orthogonal.
 
     Parameters
@@ -188,16 +211,18 @@ def random_rect(shape, dist='rademacher', orthog=False, norm=True,
         # needs to be truly random so e.g. MPI processes don't overlap
         seed_rand(random.SystemRandom().randint(0, 2**32 - 1))
 
-    if dist == 'rademacher':
+    if dist == "rademacher":
         V = rand_rademacher(shape, scale=1 / sqrt(prod(shape)), dtype=dtype)
         # already normalized
 
-    elif dist == 'gaussian':
-        V = randn(shape, scale=1 / (prod(shape)**0.5 * 2**0.5), dtype=dtype)
+    elif dist == "gaussian":
+        V = randn(
+            shape, scale=1 / (prod(shape) ** 0.5 * 2**0.5), dtype=dtype
+        )
         if norm:
             V /= norm_fro(V)
 
-    elif dist == 'phase':
+    elif dist == "phase":
         V = rand_phase(shape, scale=1 / sqrt(prod(shape)), dtype=dtype)
         # already normalized
 
@@ -211,8 +236,17 @@ def random_rect(shape, dist='rademacher', orthog=False, norm=True,
     return V
 
 
-def construct_lanczos_tridiag(A, K, v0=None, bsz=1, k_min=10, orthog=False,
-                              beta_tol=1e-6, seed=False, v0_opts=None):
+def construct_lanczos_tridiag(
+    A,
+    K,
+    v0=None,
+    bsz=1,
+    k_min=10,
+    orthog=False,
+    beta_tol=1e-6,
+    seed=False,
+    v0_opts=None,
+):
     """Construct the tridiagonal lanczos matrix using only matvec operators.
     This is a generator that iteratively yields the alpha and beta digaonals
     at each step.
@@ -288,7 +322,9 @@ def construct_lanczos_tridiag(A, K, v0=None, bsz=1, k_min=10, orthog=False,
 
         # check for convergence
         if abs(beta[j + 1]) < beta_tol:
-            yield alpha[1:j + 1].copy(), beta[2:j + 2].copy(), beta[1]**2 / bsz
+            yield alpha[1 : j + 1].copy(), beta[2 : j + 2].copy(), beta[
+                1
+            ] ** 2 / bsz
             break
 
         v[()] = q
@@ -299,7 +335,9 @@ def construct_lanczos_tridiag(A, K, v0=None, bsz=1, k_min=10, orthog=False,
             Q = np.concatenate((Q, q.reshape(-1, 1)), axis=1)
 
         if j >= k_min:
-            yield alpha[1:j + 1].copy(), beta[2:j + 2].copy(), beta[1]**2 / bsz
+            yield alpha[1 : j + 1].copy(), beta[2 : j + 2].copy(), beta[
+                1
+            ] ** 2 / bsz
 
 
 def lanczos_tridiag_eig(alpha, beta, check_finite=True):
@@ -315,25 +353,26 @@ def lanczos_tridiag_eig(alpha, beta, check_finite=True):
     Tk_banded = np.empty((2, alpha.size), dtype=alpha.dtype)
     Tk_banded[1, -1] = 0.0  # sometimes can get nan here? -> breaks eig_banded
     Tk_banded[0, :] = alpha
-    Tk_banded[1, :beta.size] = beta
+    Tk_banded[1, : beta.size] = beta
 
     try:
         tl, tv = scla.eig_banded(
-            Tk_banded, lower=True, check_finite=check_finite)
+            Tk_banded, lower=True, check_finite=check_finite
+        )
 
     # sometimes get no convergence -> use dense hermitian method
     except scla.LinAlgError:  # pragma: no cover
         tl, tv = np.linalg.eigh(
-            np.diag(alpha) + np.diag(beta[:alpha.size - 1], -1), UPLO='L')
+            np.diag(alpha) + np.diag(beta[: alpha.size - 1], -1), UPLO="L"
+        )
 
     return tl, tv
 
 
 def calc_trace_fn_tridiag(tl, tv, f, pos=True):
-    """Spectral ritz function sum, weighted by ritz vectors.
-    """
+    """Spectral ritz function sum, weighted by ritz vectors."""
     return sum(
-        tv[0, i]**2 * f(max(tl[i], 0.0) if pos else tl[i])
+        tv[0, i] ** 2 * f(max(tl[i], 0.0) if pos else tl[i])
         for i in range(tl.size)
     )
 
@@ -382,17 +421,15 @@ def nbsum(xs):
 
 @njit  # pragma: no cover
 def std(xs):
-    """Simple standard deviation - don't invoke numpy for small lists.
-    """
+    """Simple standard deviation - don't invoke numpy for small lists."""
     N = len(xs)
     xm = nbsum(xs) / N
-    var = nbsum([(x - xm)**2 for x in xs]) / N
+    var = nbsum([(x - xm) ** 2 for x in xs]) / N
     return var**0.5
 
 
 def calc_est_fit(estimates, conv_n, tau):
-    """Make estimate by fitting exponential convergence to estimates.
-    """
+    """Make estimate by fitting exponential convergence to estimates."""
     n = len(estimates)
 
     if n < conv_n:
@@ -412,12 +449,16 @@ def calc_est_fit(estimates, conv_n, tau):
             warnings.simplefilter("ignore")
 
             # fit the inverse data with a line, weighting recent ests more
-            popt, pcov = np.polyfit(x=(1 / ks[ni:]),
-                                    y=smoothed_estimates[ni:],
-                                    w=ks[ni:], deg=1, cov=True)
+            popt, pcov = np.polyfit(
+                x=(1 / ks[ni:]),
+                y=smoothed_estimates[ni:],
+                w=ks[ni:],
+                deg=1,
+                cov=True,
+            )
 
         # estimate of function at 1 / k = 0 and standard error
-        est, err = popt[-1], abs(pcov[-1, -1])**0.5
+        est, err = popt[-1], abs(pcov[-1, -1]) ** 0.5
 
     except (ValueError, RuntimeError):
         est, err = nan, inf
@@ -441,8 +482,8 @@ def calc_est_window(estimates, mean_ests, conv_n):
         # check for convergence using variance of paired last m estimates
         #   -> paired because estimates alternate between upper and lower bound
         paired_ests = tuple(
-            (a + b) / 2 for a, b in
-            zip(estimates[-m_est::2], estimates[-m_est + 1::2])
+            (a + b) / 2
+            for a, b in zip(estimates[-m_est::2], estimates[-m_est + 1 :: 2])
         )
         err = std(paired_ests) / (m_est / 2) ** 0.5
     else:
@@ -451,15 +492,29 @@ def calc_est_window(estimates, mean_ests, conv_n):
     return est, err
 
 
-def single_random_estimate(A, K, bsz, beta_tol, v0, f, pos, tau, tol_scale,
-                           k_min=10, verbosity=0, *, seed=None,
-                           v0_opts=None, **lanczos_opts):
+def single_random_estimate(
+    A,
+    K,
+    bsz,
+    beta_tol,
+    v0,
+    f,
+    pos,
+    tau,
+    tol_scale,
+    k_min=10,
+    verbosity=0,
+    *,
+    seed=None,
+    v0_opts=None,
+    **lanczos_opts,
+):
     # choose normal (any LinearOperator) or MPO lanczos tridiag construction
     if isinstance(A, MatrixProductOperator):
         lanc_fn = construct_lanczos_tridiag_MPO
     else:
         lanc_fn = construct_lanczos_tridiag
-        lanczos_opts['bsz'] = bsz
+        lanczos_opts["bsz"] = bsz
 
     estimates = []
     mean_ests = []
@@ -469,8 +524,15 @@ def single_random_estimate(A, K, bsz, beta_tol, v0, f, pos, tau, tol_scale,
 
     # iteratively build the lanczos matrix, checking for convergence
     for alpha, beta, scaling in lanc_fn(
-            A, K=K, beta_tol=beta_tol, seed=seed, k_min=k_min - 2 * conv_n,
-            v0=v0() if callable(v0) else v0, v0_opts=v0_opts, **lanczos_opts):
+        A,
+        K=K,
+        beta_tol=beta_tol,
+        seed=seed,
+        k_min=k_min - 2 * conv_n,
+        v0=v0() if callable(v0) else v0,
+        v0_opts=v0_opts,
+        **lanczos_opts,
+    ):
 
         try:
             Tl, Tv = lanczos_tridiag_eig(alpha, beta, check_finite=False)
@@ -497,8 +559,11 @@ def single_random_estimate(A, K, bsz, beta_tol, v0, f, pos, tau, tol_scale,
         fit_est, fit_err = calc_est_fit(mean_ests, conv_n, tau)
 
         # take whichever has lowest error
-        est, err = min((win_est, win_err), (fit_est, fit_err),
-                       key=lambda est_err: est_err[1])
+        est, err = min(
+            (win_est, win_err),
+            (fit_est, fit_err),
+            key=lambda est_err: est_err[1],
+        )
 
         converged = err < tau * (abs(win_est) + tol_scale)
 
@@ -522,8 +587,7 @@ def single_random_estimate(A, K, bsz, beta_tol, v0, f, pos, tau, tol_scale,
 
 
 def calc_stats(samples, mean_p, mean_s, tol, tol_scale):
-    """Get an estimate from samples.
-    """
+    """Get an estimate from samples."""
     samples = np.array(samples)
 
     xtrim = ext_per_trim(samples, p=mean_p, s=mean_s)
@@ -551,19 +615,35 @@ def get_single_precision_dtype(dtype):
 
 
 def get_equivalent_real_dtype(dtype):
-    if dtype in ('float64', 'complex128'):
-        return 'float64'
-    elif dtype in ('float32', 'complex64'):
-        return 'float32'
+    if dtype in ("float64", "complex128"):
+        return "float64"
+    elif dtype in ("float32", "complex64"):
+        return "float32"
     else:
         raise ValueError(f"dtype {dtype} not understood.")
 
 
-def approx_spectral_function(A, f, tol=1e-2, *, bsz=1, R=1024, tol_scale=1,
-                             tau=1e-4, k_min=10, k_max=512, beta_tol=1e-6,
-                             mpi=False, mean_p=0.7, mean_s=1.0, pos=False,
-                             v0=None, verbosity=0, single_precision='AUTO',
-                             **lanczos_opts):
+def approx_spectral_function(
+    A,
+    f,
+    tol=1e-2,
+    *,
+    bsz=1,
+    R=1024,
+    tol_scale=1,
+    tau=1e-4,
+    k_min=10,
+    k_max=512,
+    beta_tol=1e-6,
+    mpi=False,
+    mean_p=0.7,
+    mean_s=1.0,
+    pos=False,
+    v0=None,
+    verbosity=0,
+    single_precision="AUTO",
+    **lanczos_opts,
+):
     """Approximate a spectral function, that is, the quantity ``Tr(f(A))``.
 
     Parameters
@@ -640,8 +720,8 @@ def approx_spectral_function(A, f, tol=1e-2, *, bsz=1, R=1024, tol_scale=1,
     --------
     construct_lanczos_tridiag
     """
-    if single_precision == 'AUTO':
-        single_precision = hasattr(A, 'astype')
+    if single_precision == "AUTO":
+        single_precision = hasattr(A, "astype")
     if single_precision:
         A = A.astype(get_single_precision_dtype(A.dtype))
 
@@ -658,17 +738,30 @@ def approx_spectral_function(A, f, tol=1e-2, *, bsz=1, R=1024, tol_scale=1,
         print(f"LANCZOS f(A) CALC: tol={tol}, tau={tau}, R={R}, bsz={bsz}")
 
     # generate repeat estimates
-    kwargs = {'A': A, 'K': k_max, 'bsz': bsz, 'beta_tol': beta_tol,
-              'v0': v0, 'f': f, 'pos': pos, 'tau': tau, 'k_min': k_min,
-              'tol_scale': tol_scale, 'verbosity': verbosity, **lanczos_opts}
+    kwargs = {
+        "A": A,
+        "K": k_max,
+        "bsz": bsz,
+        "beta_tol": beta_tol,
+        "v0": v0,
+        "f": f,
+        "pos": pos,
+        "tau": tau,
+        "k_min": k_min,
+        "tol_scale": tol_scale,
+        "verbosity": verbosity,
+        **lanczos_opts,
+    }
 
     if not mpi:
+
         def gen_results():
             for _ in range(R):
                 yield single_random_estimate(**kwargs)
+
     else:
         pool = get_mpi_pool()
-        kwargs['seed'] = True
+        kwargs["seed"] = True
         fs = [pool.submit(single_random_estimate, **kwargs) for _ in range(R)]
 
         def gen_results():
@@ -688,7 +781,8 @@ def approx_spectral_function(A, f, tol=1e-2, *, bsz=1, R=1024, tol_scale=1,
         # wait a few iterations before checking error on mean breakout
         if len(samples) >= 3:
             estimate, err, converged = calc_stats(
-                samples, mean_p, mean_s, tol, tol_scale)
+                samples, mean_p, mean_s, tol, tol_scale
+            )
 
             if verbosity >= 1:
                 print(f"Total estimate = {estimate} ± {err}")
@@ -710,11 +804,11 @@ def approx_spectral_function(A, f, tol=1e-2, *, bsz=1, R=1024, tol_scale=1,
         if extra_futures:
             samples.extend(f.result() for f in extra_futures)
             estimate, err, converged = calc_stats(
-                samples, mean_p, mean_s, tol, tol_scale)
+                samples, mean_p, mean_s, tol, tol_scale
+            )
 
     if estimate is None:
-        estimate, err, _ = calc_stats(
-            samples, mean_p, mean_s, tol, tol_scale)
+        estimate, err, _ = calc_stats(samples, mean_p, mean_s, tol, tol_scale)
 
     if verbosity >= 1:
         print(f"ESTIMATE is {estimate} ± {err}")
@@ -750,6 +844,7 @@ def tr_xlogx_approx(*args, **kwargs):
 #                             Specific quantities                             #
 # --------------------------------------------------------------------------- #
 
+
 def entropy_subsys_approx(psi_ab, dims, sysa, backend=None, **kwargs):
     """Approximate the (Von Neumann) entropy of a pure state's subsystem.
 
@@ -765,7 +860,7 @@ def entropy_subsys_approx(psi_ab, dims, sysa, backend=None, **kwargs):
         Supplied to :func:`approx_spectral_function`.
     """
     lo = lazy_ptr_linop(psi_ab, dims=dims, sysa=sysa, backend=backend)
-    return - tr_xlogx_approx(lo, **kwargs)
+    return -tr_xlogx_approx(lo, **kwargs)
 
 
 def tr_sqrt_subsys_approx(psi_ab, dims, sysa, backend=None, **kwargs):
@@ -787,10 +882,10 @@ def tr_sqrt_subsys_approx(psi_ab, dims, sysa, backend=None, **kwargs):
 
 
 def norm_ppt_subsys_approx(psi_abc, dims, sysa, sysb, backend=None, **kwargs):
-    """Estimate the norm of the partial transpose of a pure state's subsystem.
-    """
-    lo = lazy_ptr_ppt_linop(psi_abc, dims=dims, sysa=sysa,
-                            sysb=sysb, backend=backend)
+    """Estimate the norm of the partial transpose of a pure state's subsystem."""
+    lo = lazy_ptr_ppt_linop(
+        psi_abc, dims=dims, sysa=sysa, sysb=sysb, backend=backend
+    )
     return tr_abs_approx(lo, **kwargs)
 
 
@@ -863,8 +958,10 @@ def gen_bipartite_spectral_fn(exact_fn, approx_fn, pure_default):
         The function, with signature:
         ``(psi_ab, dims, sysa, approx_thresh=2**13, **approx_opts)``
     """
-    def bipartite_spectral_fn(psi_ab, dims, sysa, approx_thresh=2**13,
-                              **approx_opts):
+
+    def bipartite_spectral_fn(
+        psi_ab, dims, sysa, approx_thresh=2**13, **approx_opts
+    ):
         sysa = int2tup(sysa)
         sz_a = prod(d for i, d in enumerate(dims) if i in sysa)
         sz_b = prod(dims) // sz_a
