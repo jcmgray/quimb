@@ -322,9 +322,11 @@ def construct_lanczos_tridiag(
 
         # check for convergence
         if abs(beta[j + 1]) < beta_tol:
-            yield alpha[1 : j + 1].copy(), beta[2 : j + 2].copy(), beta[
-                1
-            ] ** 2 / bsz
+            yield (
+                alpha[1 : j + 1].copy(),
+                beta[2 : j + 2].copy(),
+                beta[1] ** 2 / bsz,
+            )
             break
 
         v[()] = q
@@ -335,9 +337,11 @@ def construct_lanczos_tridiag(
             Q = np.concatenate((Q, q.reshape(-1, 1)), axis=1)
 
         if j >= k_min:
-            yield alpha[1 : j + 1].copy(), beta[2 : j + 2].copy(), beta[
-                1
-            ] ** 2 / bsz
+            yield (
+                alpha[1 : j + 1].copy(),
+                beta[2 : j + 2].copy(),
+                beta[1] ** 2 / bsz,
+            )
 
 
 def lanczos_tridiag_eig(alpha, beta, check_finite=True):
@@ -550,7 +554,8 @@ def single_random_estimate(
         if abs(beta[-1]) < beta_tol:
             if verbosity >= 2:
                 print(f"k={k}: Beta breadown, returning {Gf}.")
-            return Gf
+            est = Gf
+            break
 
         # compute an estimate and error using a window of the last few results
         win_est, win_err = calc_est_window(estimates, mean_ests, conv_n)
@@ -564,11 +569,9 @@ def single_random_estimate(
             (fit_est, fit_err),
             key=lambda est_err: est_err[1],
         )
-
         converged = err < tau * (abs(win_est) + tol_scale)
 
         if verbosity >= 2:
-
             if verbosity >= 3:
                 print(f"est_win={win_est}, err_win={win_err}")
                 print(f"est_fit={fit_est}, err_fit={fit_err}")
@@ -642,6 +645,7 @@ def approx_spectral_function(
     v0=None,
     verbosity=0,
     single_precision="AUTO",
+    info=None,
     **lanczos_opts,
 ):
     """Approximate a spectral function, that is, the quantity ``Tr(f(A))``.
@@ -726,12 +730,13 @@ def approx_spectral_function(
         A = A.astype(get_single_precision_dtype(A.dtype))
 
     if (v0 is not None) and not callable(v0):
+        # we only have one sample to run
         R = 1
     else:
         R = max(1, int(R / bsz))
 
-    # require better precision for the lanczos procedure, otherwise biased
     if tau is None:
+        # require better precision for the lanczos procedure, otherwise biased
         tau = tol / 1000
 
     if verbosity:
@@ -783,10 +788,8 @@ def approx_spectral_function(
             estimate, err, converged = calc_stats(
                 samples, mean_p, mean_s, tol, tol_scale
             )
-
             if verbosity >= 1:
                 print(f"Total estimate = {estimate} ± {err}")
-
             if converged:
                 if verbosity >= 1:
                     print(f"Repeat {len(samples)}: converged to tol {tol}")
@@ -802,6 +805,7 @@ def approx_spectral_function(
                 f.cancel()
 
         if extra_futures:
+            # might as well combine finished samples
             samples.extend(f.result() for f in extra_futures)
             estimate, err, converged = calc_stats(
                 samples, mean_p, mean_s, tol, tol_scale
@@ -812,6 +816,12 @@ def approx_spectral_function(
 
     if verbosity >= 1:
         print(f"ESTIMATE is {estimate} ± {err}")
+
+    if info is not None:
+        if "samples" in info:
+            info["samples"] = samples
+        if "error" in info:
+            info["error"] = err
 
     return estimate
 
