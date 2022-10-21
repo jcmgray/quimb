@@ -35,7 +35,7 @@ setup(
             'matplotlib>=2.0',
             'networkx>=2.3',
             'opt_einsum>=3.2',
-            'autoray>=0.2.0',
+            'autoray>=0.5.1',
             'diskcache>=3.0',
         ],
         'advanced_solvers': [

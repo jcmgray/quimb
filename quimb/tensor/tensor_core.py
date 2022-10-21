@@ -1623,6 +1623,36 @@ class Tensor(object):
             raise ValueError(f"The 'left' indices {self.left_inds} are "
                              f"not found in {self.inds}.")
 
+    def get_params(self):
+        """A simple function that returns the 'parameters' of the underlying
+        data array. This is mainly for providing an interface for 'structured'
+        arrays e.g. with block sparsity to interact with optimization.
+        """
+        if hasattr(self.data, "get_params"):
+            params = self.data.get_params()
+        elif hasattr(self.data, "params"):
+            params = self.data.params
+        else:
+            params = self.data
+
+        if isinstance(params, qarray):
+            # some optimizers don't like ndarray subclasses such as qarray
+            params = params.A
+
+        return params
+
+    def set_params(self, params):
+        """A simple function that sets the 'parameters' of the underlying
+        data array. This is mainly for providing an interface for 'structured'
+        arrays e.g. with block sparsity to interact with optimization.
+        """
+        if hasattr(self.data, "set_params"):
+            self.data.set_params(params)
+        elif hasattr(self.data, "params"):
+            self.data.params = params
+        else:
+            self._data = params
+
     def isel(self, selectors, inplace=False):
         """Select specific values for some dimensions/indices of this tensor,
         thereby removing them. Analogous to ``X[:, :, 3, :, :]`` with arrays.
@@ -9155,13 +9185,23 @@ class PTensor(Tensor):
     def fn(self, x):
         self._parray.fn = x
 
+    def get_params(self):
+        """Get the parameters of this ``PTensor``.
+        """
+        return self._parray.params
+
+    def set_params(self, params):
+        """Set the parameters of this ``PTensor``.
+        """
+        self._parray.params = params
+
     @property
     def params(self):
-        return self._parray.params
+        return self.get_params()
 
     @params.setter
     def params(self, x):
-        self._parray.params = x
+        self.set_params(x)
 
     @property
     def shape(self):

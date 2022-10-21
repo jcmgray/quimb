@@ -237,6 +237,10 @@ from .utils import (
     load_from_disk,
     oset,
     LRU,
+    tree_map,
+    tree_apply,
+    tree_flatten,
+    tree_unflatten,
 )
 
 
@@ -477,4 +481,8 @@ __all__ = [
     'can_use_mpi_pool',
     'oset',
     'LRU',
+    'tree_map',
+    'tree_apply',
+    'tree_flatten',
+    'tree_unflatten',
 ]

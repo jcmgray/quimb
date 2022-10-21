@@ -15,7 +15,7 @@ from autoray import (
     backend_like,
 )
 
-from ..core import njit
+from ..core import njit, generated_jit
 from ..linalg import base_linalg
 from ..linalg import rand_linalg
 
@@ -70,6 +70,28 @@ def ldmul_numba(d, x):
 @njit  # pragma: no cover
 def lddiv_numba(d, x):
     return x / d.reshape(-1, 1)
+
+
+@compose
+def sgn(x):
+    """Get the 'sign' of ``x``, such that ``x / sgn(x)`` is real and
+    non-negative.
+    """
+    return x / (do('abs', x) + (x == 0.0))
+
+
+@sgn.register("numpy")
+@generated_jit
+def sgn_numba(x):
+    from numba import types
+    if hasattr(x, "dtype"):
+        dtype = x.dtype
+    else:
+        dtype = x
+    if isinstance(dtype, types.Complex):
+        return lambda x: x / (np.abs(x) + (x == 0.0))
+    else:
+        return lambda x: np.sign(x) + (x == 0.0)
 
 
 def _trim_and_renorm_svd_result(
@@ -277,6 +299,7 @@ def _trim_and_renorm_svd_result_numba(
     return U, None, VH
 
 
+@svd_truncated.register("numpy")
 @njit  # pragma: no cover
 def svd_truncated_numba(
     x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0, renorm=0
@@ -286,9 +309,6 @@ def svd_truncated_numba(
     return _trim_and_renorm_svd_result_numba(
         U, s, VH, cutoff, cutoff_mode, max_bond, absorb, renorm
     )
-
-
-svd_truncated.register("numpy", svd_truncated_numba)
 
 
 def svdvals(x):
@@ -379,7 +399,7 @@ def eigh(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0, renorm=0):
     s, U = np.linalg.eigh(x)
     s, U = s[::-1], U[:, ::-1]  # make sure largest singular value first
 
-    V = ldmul_numba(np.sign(s), dag_numba(U))
+    V = ldmul_numba(sgn_numba(s), dag_numba(U))
     s = np.abs(s)
     return _trim_and_renorm_svd_result_numba(
         U, s, V, cutoff, cutoff_mode, max_bond, absorb, renorm
@@ -485,7 +505,7 @@ def eigsh(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0, renorm=0):
 
     s, U = base_linalg.eigh(x, k=k)
     s, U = s[::-1], U[:, ::-1]  # make sure largest singular value first
-    V = ldmul_numba(np.sign(s), dag_numba(U))
+    V = ldmul_numba(sgn(s), dag_numba(U))
     s = np.abs(s)
     return _trim_and_renorm_svd_result_numba(
         U, s, V, cutoff, cutoff_mode, max_bond, absorb, renorm
@@ -499,27 +519,23 @@ def qr_stabilized(x, backend=None):
         Q, R = do("linalg.qr", x)
         # stabilize the diagonal of R
         rd = do("diag", R)
-        # sign returns 0.0 for 0.0, so we need to handle
-        s = do("sign", rd) + (rd == 0.0)
+        s = sgn(rd)
         Q = rdmul(Q, s)
         R = ldmul(s, R)
         return Q, None, R
 
 
+@qr_stabilized.register("numpy")
 @njit  # pragma: no cover
 def qr_stabilized_numba(x):
     Q, R = np.linalg.qr(x)
     for i in range(R.shape[0]):
         rii = R[i, i]
-        if rii == 0.0:
-            continue
-        s = np.sign(rii)
-        Q[:, i] *= s
-        R[i, i:] *= s
+        si = sgn_numba(rii)
+        if si != 1.0:
+            Q[:, i] *= si
+            R[i, i:] *= si
     return Q, None, R
-
-
-qr_stabilized.register("numpy", qr_stabilized_numba)
 
 
 @compose
@@ -529,13 +545,12 @@ def lq_stabilized(x, backend=None):
         return do("transpose", L), None, do("transpose", Q)
 
 
+@lq_stabilized.register("numpy")
 @njit  # pragma: no cover
 def lq_stabilized_numba(x):
     Q, _, L = qr_stabilized_numba(x.T)
     return L.T, None, Q.T
 
-
-lq_stabilized.register("numpy", lq_stabilized_numba)
 
 
 @njit  # pragma: no cover
