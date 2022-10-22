@@ -20,9 +20,8 @@ from .tensor_core import (
     PTensor,
     tags_to_oset,
 )
-from .array_ops import iscomplex
-from ..core import qarray
-from ..utils import valmap, ensure_dict
+from ..core import qarray, prod
+from ..utils import valmap, ensure_dict, tree_map, tree_flatten, tree_unflatten
 
 if importlib.util.find_spec("jax") is not None:
     _DEFAULT_BACKEND = 'jax'
@@ -49,58 +48,98 @@ _COMPLEX_CONVERSION = {
 }
 
 
-def equivalent_real_type(x):
-    return _REAL_CONVERSION[x.dtype.name]
+class ArrayInfo:
+    """Simple container for recording size and dtype information about arrays.
+    """
+
+    __slots__ = (
+        'shape', 'size', 'dtype', 'iscomplex', 'real_size',
+        'equivalent_real_type', 'equivalent_complex_type',
+    )
+
+    def __init__(self, array):
+        self.shape = array.shape
+        self.size = prod(self.shape)
+        self.dtype = get_dtype_name(array)
+        self.equivalent_real_type = _REAL_CONVERSION[self.dtype]
+        self.equivalent_complex_type = _COMPLEX_CONVERSION[self.dtype]
+        self.iscomplex = 'complex' in self.dtype
+        self.real_size = self.size * (2 if self.iscomplex else 1)
+
+    def __repr__(self):
+        return (
+            "ArrayInfo("
+            f"shape={self.shape}, "
+            f"size={self.size}, "
+            f"dtype={self.dtype}"
+            ")"
+        )
 
 
-def equivalent_complex_type(x):
-    return _COMPLEX_CONVERSION[x.dtype.name]
+def is_not_container(x):
+    """The default ``is_leaf`` definition for ``Vectorizer``.
+    """
+    return not isinstance(x, (tuple, list, dict))
 
 
 class Vectorizer:
-    """Object for mapping a sequence of mixed real/complex n-dimensional arrays
-    to a single numpy vector and back and forth.
+    """Object for mapping back and forth between any pytree of mixed
+    real/complex n-dimensional arrays to a single, real, double precision numpy
+    vector, as required by ``scipy.optimize`` routines.
 
     Parameters
     ----------
-    array : sequence of array
-        The set of arrays to map into a single real vector.
+    tree : pytree of array
+        Any nested container of arrays, which will be flattened and packed into
+        a single float64 vector.
+    is_leaf : callable, optional
+        A function which takes a single argument and returns ``True`` if it is
+        a leaf node in the tree and should be extracted, ``False`` otherwise.
+        Defaults to everything that is not a tuple, list or dict.
     """
 
-    def __init__(self, arrays):
-        self.shapes = [x.shape for x in arrays]
-        self.iscomplexes = [iscomplex(x) for x in arrays]
-        self.dtypes = [get_dtype_name(x) for x in arrays]
-        self.sizes = [np.prod(s) for s in self.shapes]
-        self.d = sum(
-            (1 + int(cmplx)) * size
-            for size, cmplx in zip(self.sizes, self.iscomplexes)
-        )
+    def __init__(self, tree, is_leaf=is_not_container):
+        self.is_leaf = is_leaf
+
+        arrays = []
+        self.infos = []
+        self.d = 0
+
+        def extracter(x):
+            arrays.append(x)
+            info = ArrayInfo(x)
+            self.infos.append(info)
+            self.d += info.real_size
+            return info
+
+        self.ref_tree = tree_map(tree, extracter, self.is_leaf)
         self.pack(arrays)
 
-    def pack(self, arrays, name='vector'):
+    def pack(self, tree, name='vector'):
         """Take ``arrays`` and pack their values into attribute `.{name}`, by
         default `.vector`.
         """
+        arrays = tree_flatten(tree, self.is_leaf)
 
-        # scipy's optimization routines require real, double data
+        # create the vector if it doesn't exist yet
         if not hasattr(self, name):
             setattr(self, name, np.empty(self.d, 'float64'))
         x = getattr(self, name)
 
         i = 0
-        for array, size, cmplx in zip(arrays, self.sizes, self.iscomplexes):
-
+        for array, info in zip(arrays, self.infos):
             if not isinstance(array, np.ndarray):
                 array = to_numpy(array)
-
-            if not cmplx:
-                x[i:i + size] = array.reshape(-1)
-                i += size
+            # flatten
+            if info.iscomplex:
+                # view as real array of double the length
+                real_view = array.reshape(-1).view(info.equivalent_real_type)
             else:
-                real_view = array.reshape(-1).view(equivalent_real_type(array))
-                x[i:i + 2 * size] = real_view
-                i += 2 * size
+                real_view = array.reshape(-1)
+            # pack into our vector
+            f = i + info.real_size
+            x[i:f] = real_view
+            i = f
 
         return x
 
@@ -112,43 +151,28 @@ class Vectorizer:
 
         i = 0
         arrays = []
-        for shape, size, cmplx, dtype in zip(self.shapes, self.sizes,
-                                             self.iscomplexes, self.dtypes):
-            if not cmplx:
-                array = vector[i:i + size]
-                array.shape = shape
-                i += size
-            else:
-                array = vector[i:i + 2 * size]
-                array = array.view(equivalent_complex_type(array))
-                array.shape = shape
-                i += 2 * size
-
-            if get_dtype_name(array) != dtype:
-                array = astype(array, dtype)
-
+        for info in self.infos:
+            # get the linear slice
+            f = i + info.real_size
+            array = vector[i:f]
+            i = f
+            if info.iscomplex:
+                # view as complex array of half the length
+                array = array.view(np.complex128)
+            # reshape (inplace)
+            array.shape = info.shape
+            if get_dtype_name(array) != info.dtype:
+                # cast as original dtype
+                array = astype(array, info.dtype)
             arrays.append(array)
 
-        return arrays
+        return tree_unflatten(
+            arrays,  self.ref_tree, lambda x: isinstance(x, ArrayInfo)
+        )
 
 
 _VARIABLE_TAG = "__VARIABLE{}__"
 variable_finder = re.compile(r'__VARIABLE(\d+)__')
-
-
-def _get_tensor_data(t):
-    """Simple function to extract tensor data.
-    """
-    if isinstance(t, PTensor):
-        data = t.params
-    else:
-        data = t.data
-
-    # jax doesn't like numpy.ndarray subclasses...
-    if isinstance(data, qarray):
-        data = data.A
-
-    return data
 
 
 def _parse_opt_in(tn, tags, shared_tags, to_constant):
@@ -165,7 +189,7 @@ def _parse_opt_in(tn, tags, shared_tags, to_constant):
     for t in tn_ag.select_tensors(individual_tags, 'any'):
         # append the raw data but mark the corresponding tensor
         # for reinsertion
-        data = _get_tensor_data(t)
+        data = t.get_params()
         variables.append(data)
         t.add_tag(_VARIABLE_TAG.format(len(variables) - 1))
 
@@ -176,7 +200,7 @@ def _parse_opt_in(tn, tags, shared_tags, to_constant):
         test_data = None
 
         for t in tn_ag.select_tensors(tag):
-            data = _get_tensor_data(t)
+            data = t.get_params()
 
             # detect that this tensor is already variable tagged and skip
             # if it is
@@ -222,7 +246,7 @@ def _parse_opt_out(tn, constant_tags, to_constant,):
 
         # append the raw data but mark the corresponding tensor
         # for reinsertion
-        data = _get_tensor_data(t)
+        data = t.get_params()
         variables.append(data)
         t.add_tag(_VARIABLE_TAG.format(len(variables) - 1))
 
@@ -608,12 +632,7 @@ def inject_(arrays, tn):
             match = variable_finder.match(tag)
             if match is not None:
                 i = int(match.groups(1)[0])
-
-                if isinstance(t, PTensor):
-                    t.params = arrays[i]
-                else:
-                    t.modify(data=arrays[i], left_inds=t.left_inds)
-
+                t.set_params(arrays[i])
                 break
 
 
@@ -850,13 +869,13 @@ def parse_constant_arg(arg, to_constant):
         return constant_t(arg, to_constant)
 
     if isinstance(arg, dict):
-        return valmap(to_constant, arg)
+        return valmap(lambda i: parse_constant_arg(i, to_constant), arg)
 
     if isinstance(arg, list):
-        return list(map(to_constant, arg))
+        return list(parse_constant_arg(i, to_constant) for i in arg)
 
     if isinstance(arg, tuple):
-        return tuple(map(to_constant, arg))
+        return tuple(parse_constant_arg(i, to_constant) for i in arg)
 
     # assume ``arg`` is a raw array
     return to_constant(arg)
@@ -994,10 +1013,9 @@ class TNOptimizer:
         self.reset(tn, loss_target=loss_target)
 
         # convert constant arrays ahead of time to correct backend
-        self.loss_constants = {
-            k: parse_constant_arg(v, self.handler.to_constant)
-            for k, v in ensure_dict(loss_constants).items()
-        }
+        self.loss_constants = parse_constant_arg(
+            ensure_dict(loss_constants), self.handler.to_constant
+        )
         self.loss_kwargs = ensure_dict(loss_kwargs)
         kws = {**self.loss_constants, **self.loss_kwargs}
 
@@ -1193,9 +1211,10 @@ class TNOptimizer:
         tol=None,
         jac=True,
         hessp=False,
+        optlib='scipy',
         **options
     ):
-        """Run the optimizer for ``n`` function evaluations, using
+        """Run the optimizer for ``n`` function evaluations, using by default
         :func:`scipy.optimize.minimize` as the driver for the vectorized
         computation. Supplying the gradient and hessian vector product is
         controlled by the ``jac`` and ``hessp`` options respectively.
@@ -1215,12 +1234,37 @@ class TNOptimizer:
             function.
         hessp : bool, optional
             Whether to supply the hessian vector product of the loss function.
+        optlib : {'scipy', 'nlopt'}, optional
+            Which optimization library to use.
         options
-            Supplied to :func:`scipy.optimize.minimize`.
+            Supplied to :func:`scipy.optimize.minimize` or whichever optimizer
+            is being used.
 
         Returns
         -------
         tn_opt : TensorNetwork
+        """
+        return {
+            'scipy': self.optimize_scipy,
+            'nlopt': self.optimize_nlopt,
+        }[optlib](
+            n=n,
+            tol=tol,
+            jac=jac,
+            hessp=hessp,
+            **options
+        )
+
+    def optimize_scipy(
+        self,
+        n,
+        tol=None,
+        jac=True,
+        hessp=False,
+        **options
+    ):
+        """Scipy based optimization, see
+        :meth:`~quimb.tensor.optimize.TNOptimizer.optimize` for details.
         """
         from scipy.optimize import minimize
 
@@ -1340,6 +1384,13 @@ class TNOptimizer:
         """
         import nlopt
 
+        # translate directly comparable algorithms
+        optimizer = {
+            'L-BFGS-B': 'LD_LBFGS',
+            'COBYLA': 'LN_COBYLA',
+            'SLSQP': 'LD_SLSQP',
+        }.get(self.optimizer.upper(), self.optimizer)
+
         try:
             self._maybe_init_pbar(n)
 
@@ -1357,7 +1408,7 @@ class TNOptimizer:
                 self._maybe_update_pbar()
                 return self.loss
 
-            opt = nlopt.opt(getattr(nlopt, self.optimizer), self.d)
+            opt = nlopt.opt(getattr(nlopt, optimizer), self.d)
             opt.set_min_objective(f)
             opt.set_maxeval(n)
 

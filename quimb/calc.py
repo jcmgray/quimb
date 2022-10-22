@@ -5,14 +5,14 @@ import numbers
 import itertools
 import functools
 import collections
-from math import sin, cos, pi, log, log2, sqrt
+from math import sin, cos, pi, log, log2, sqrt, prod
 
 import numpy as np
 import numpy.linalg as nla
 from scipy.optimize import minimize
 
 from .core import (
-    njit, issparse, isop, zeroify, realify, prod, isvec, dot, dag,
+    njit, issparse, isop, zeroify, realify, isvec, dot, dag,
     qu, kron, eye, ikron, tr, ptr, infer_size, expec, dop, ensure_qarray,
 )
 from .linalg.base_linalg import (

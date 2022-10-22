@@ -275,10 +275,10 @@ def rand_uuid(base=""):
 
 _VALID_SPLIT_GET = {None, 'arrays', 'tensors', 'values'}
 _SPLIT_FNS = {
-    'svd': decomp.svd,
-    'eig': decomp.eig,
-    'qr': decomp.qr,
-    'lq': decomp.lq,
+    'svd': decomp.svd_truncated,
+    'eig': decomp.svd_via_eig_truncated,
+    'qr': decomp.qr_stabilized,
+    'lq': decomp.lq_stabilized,
     'eigh': decomp.eigh,
     'cholesky': decomp.cholesky,
     'isvd': decomp.isvd,
@@ -321,7 +321,7 @@ def _parse_split_opts(method, cutoff, absorb, max_bond, cutoff_mode, renorm):
     if (method in _FULL_SPLIT_METHODS) and (renorm is None):
         opts['renorm'] = _RENORM_LOOKUP.get(cutoff_mode, 0)
     else:
-        opts['renorm'] = 0 if renorm is None else int(renorm)
+        opts['renorm'] = 0 if renorm is None else renorm
 
     return opts
 
@@ -921,20 +921,47 @@ def bonds_size(t1, t2):
     """Get the size of the bonds linking tensors or tensor networks ``t1`` and
     ``t2``.
     """
-    return prod(t1.ind_size(ix) for ix in bonds(t1, t2))
+    return t1.inds_size(bonds(t1, t2))
 
 
 def group_inds(t1, t2):
-    """Group bonds into left only, shared, and right only.
+    """Group bonds into left only, shared, and right only. If ``t1`` or ``t2``
+    are ``TensorNetwork`` objects, then only outer indices are considered.
+
+    Parameters
+    ----------
+    t1 : Tensor or TensorNetwork
+        The first tensor or tensor network.
+    t2 : Tensor or TensorNetwork
+        The second tensor or tensor network.
+
+    Returns
+    -------
+    left_inds : list[str]
+        Indices only in ``t1``.
+    shared_inds : list[str]
+        Indices in both ``t1`` and ``t2``.
+    right_inds : list[str]
+        Indices only in ``t2``.
     """
     left_inds, shared_inds, right_inds = [], [], []
 
-    for ix in t1.inds:
-        if ix in t2.inds:
+    if isinstance(t1, TensorNetwork):
+        inds1 = t1._outer_inds
+    else:
+        inds1 = t1.inds
+
+    if isinstance(t2, TensorNetwork):
+        inds2 = t2._outer_inds
+    else:
+        inds2 = t2.inds
+
+    for ix in inds1:
+        if ix in inds2:
             shared_inds.append(ix)
         else:
             left_inds.append(ix)
-    for ix in t2.inds:
+    for ix in inds2:
         if ix not in shared_inds:
             right_inds.append(ix)
 
@@ -1078,7 +1105,7 @@ def tensor_network_distance(
             "Can only fit tensor networks with matching outer indices.")
 
     if method == 'auto':
-        d = prod(map(tnA.ind_size, oix))
+        d = tnA.inds_size(oix)
         if d <= 1 << 16:
             method = 'dense'
         else:
@@ -1562,6 +1589,36 @@ class Tensor(object):
             raise ValueError(f"The 'left' indices {self.left_inds} are "
                              f"not found in {self.inds}.")
 
+    def get_params(self):
+        """A simple function that returns the 'parameters' of the underlying
+        data array. This is mainly for providing an interface for 'structured'
+        arrays e.g. with block sparsity to interact with optimization.
+        """
+        if hasattr(self.data, "get_params"):
+            params = self.data.get_params()
+        elif hasattr(self.data, "params"):
+            params = self.data.params
+        else:
+            params = self.data
+
+        if isinstance(params, qarray):
+            # some optimizers don't like ndarray subclasses such as qarray
+            params = params.A
+
+        return params
+
+    def set_params(self, params):
+        """A simple function that sets the 'parameters' of the underlying
+        data array. This is mainly for providing an interface for 'structured'
+        arrays e.g. with block sparsity to interact with optimization.
+        """
+        if hasattr(self.data, "set_params"):
+            self.data.set_params(params)
+        elif hasattr(self.data, "params"):
+            self.data.params = params
+        else:
+            self._data = params
+
     def isel(self, selectors, inplace=False):
         """Select specific values for some dimensions/indices of this tensor,
         thereby removing them. Analogous to ``X[:, :, 3, :, :]`` with arrays.
@@ -1745,6 +1802,11 @@ class Tensor(object):
         """Return the size of dimension corresponding to ``ind``.
         """
         return int(self.shape[self.inds.index(ind)])
+
+    def inds_size(self, inds):
+        """Return the total size of dimensions corresponding to ``inds``.
+        """
+        return math.prod(map(self.ind_size, inds))
 
     def shared_bond_size(self, other):
         """Get the total size of the shared index(es) with ``other``.
@@ -7171,6 +7233,11 @@ class TensorNetwork(object):
         tid = next(iter(self.ind_map[ind]))
         return self.tensor_map[tid].ind_size(ind)
 
+    def inds_size(self, inds):
+        """Return the total size of dimensions corresponding to ``inds``.
+        """
+        return math.prod(map(self.ind_size, inds))
+
     def ind_sizes(self):
         """Get dict of each index mapped to its size.
         """
@@ -7194,6 +7261,45 @@ class TensorNetwork(object):
         tensor network was fully contracted.
         """
         return tuple((self.ind_size(i), i) for i in self._outer_inds)
+
+    def outer_size(self):
+        """Get the total size of the 'outer' indices, i.e. as if this tensor
+        network was fully contracted.
+        """
+        return self.inds_size(self._outer_inds)
+
+    def get_hyperinds(self, output_inds=None):
+        """Get a tuple of all 'hyperinds', defined as those indices which don't
+        appear exactly twice on either the tensors *or* in the 'outer' (i.e.
+        output) indices.
+
+        Note the default set of 'outer' indices is calculated as only those
+        indices that appear once on the tensors, so these likely need to be
+        manually specified, otherwise, for example, an index that appears on
+        two tensors *and* the output will incorrectly be identified as
+        non-hyper.
+
+        Parameters
+        ----------
+        output_inds : None, str or sequence of str, optional
+            The outer or output index or indices. If not specified then taken
+            as every index that appears only once on the tensors (and thus
+            non-hyper).
+
+        Returns
+        -------
+        tuple[str]
+            The tensor network hyperinds.
+        """
+        if output_inds is None:
+            output_inds = set(self.outer_inds())
+        else:
+            output_inds = tags_to_oset(output_inds)
+
+        return tuple(
+            ix for ix, tids in self.ind_map.items()
+            if (len(tids) + int(ix in output_inds)) != 2
+        )
 
     def compute_contracted_inds(self, *tids, output_inds=None):
         """Get the indices describing the tensor contraction of tensors
@@ -9054,13 +9160,23 @@ class PTensor(Tensor):
     def fn(self, x):
         self._parray.fn = x
 
+    def get_params(self):
+        """Get the parameters of this ``PTensor``.
+        """
+        return self._parray.params
+
+    def set_params(self, params):
+        """Set the parameters of this ``PTensor``.
+        """
+        self._parray.params = params
+
     @property
     def params(self):
-        return self._parray.params
+        return self.get_params()
 
     @params.setter
     def params(self, x):
-        self._parray.params = x
+        self.set_params(x)
 
     @property
     def shape(self):

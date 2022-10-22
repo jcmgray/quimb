@@ -43,6 +43,9 @@ _CHECK_OPT_MSG = "Option `{}` should be one of {}, but got '{}'."
 
 
 def check_opt(name, value, valid):
+    """Check whether ``value`` takes one of ``valid`` options, and raise an
+    informative error if not.
+    """
     if value not in valid:
         raise ValueError(_CHECK_OPT_MSG.format(name, valid, value))
 
@@ -153,6 +156,8 @@ else:  # pragma: no cover
 
 
 def deprecated(fn, old_name, new_name):
+    """Mark a function as deprecated, and indicate the new name.
+    """
 
     def new_fn(*args, **kwargs):
         import warnings
@@ -186,6 +191,8 @@ def pairwise(iterable):
 
 
 def print_multi_line(*lines, max_width=None):
+    """Print multiple lines, with a maximum width.
+    """
     if max_width is None:
         import shutil
         max_width, _ = shutil.get_terminal_size()
@@ -421,3 +428,96 @@ def gen_bipartitions(it):
             for b, x in zip(bitstring_repr, it):
                 (l if b == '0' else r).append(x)
             yield l, r
+
+
+def tree_map(tree, f, is_leaf):
+    """Map ``f`` over all leaves in ``tree``, rerturning a new pytree.
+
+    Parameters
+    ----------
+    tree : pytree
+        A nested sequence of tuples, lists, dicts and other objects.
+    f : callable
+        A function to apply to all leaves in ``tree``.
+    is_leaf : callable
+        A function to determine if an object is a leaf, ``f`` is only applied
+        to objects for which ``is_leaf(x)`` returns ``True``.
+
+    Returns
+    -------
+    pytree
+    """
+    if is_leaf(tree):
+        return f(tree)
+    elif isinstance(tree, (list, tuple)):
+        return type(tree)(tree_map(x, f, is_leaf) for x in tree)
+    elif isinstance(tree, dict):
+        return {k: tree_map(v, f, is_leaf) for k, v in tree.items()}
+    else:
+        return tree
+
+
+def tree_apply(tree, f, is_leaf):
+    """Apply ``f`` to all objs in ``tree``, no new pytree is built.
+
+    Parameters
+    ----------
+    tree : pytree
+        A nested sequence of tuples, lists, dicts and other objects.
+    f : callable
+        A function to apply to all leaves in ``tree``.
+    is_leaf : callable
+        A function to determine if an object is a leaf, ``f`` is only applied
+        to objects for which ``is_leaf(x)`` returns ``True``.
+    """
+    if is_leaf(tree):
+        f(tree)
+    elif isinstance(tree, (list, tuple)):
+        for x in tree:
+            tree_apply(x, f, is_leaf)
+    elif isinstance(tree, dict):
+        for x in tree.values():
+            tree_apply(x, f, is_leaf)
+
+
+def tree_flatten(tree, is_leaf):
+    """Flatten ``tree`` into a list of objs.
+
+    Parameters
+    ----------
+    tree : pytree
+        A nested sequence of tuples, lists, dicts and other objects.
+    is_leaf : callable
+        A function to determine if an object is a leaf, only objects for which
+        ``is_leaf(x)`` returns ``True`` are returned in the flattened list.
+
+    Returns
+    -------
+    list
+    """
+    flat = []
+    tree_apply(tree, flat.append, is_leaf)
+    return flat
+
+
+def tree_unflatten(objs, tree, is_leaf):
+    """Unflatten ``objs`` into a pytree of the same structure as ``tree``.
+
+    Parameters
+    ----------
+    objs : sequence
+        A sequence of objects to be unflattened into a pytree.
+    tree : pytree
+        A nested sequence of tuples, lists, dicts and other objects, the objs
+        will be inserted into a new pytree of the same structure.
+    is_leaf : callable
+        A function to determine if an object is a leaf, only objects for which
+        ``is_leaf(x)`` returns ``True`` will have the next item from ``objs``
+        inserted.
+
+    Returns
+    -------
+    pytree
+    """
+    objs = iter(objs)
+    return tree_map(tree, lambda _: next(objs), is_leaf)
