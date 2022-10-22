@@ -4,12 +4,11 @@ Quantum Information for Many-Body calculations.
 import warnings
 
 # some useful math
-from math import pi, cos, sin, tan, exp, log, log2, log10, sqrt
+from math import pi, cos, sin, tan, exp, log, log2, log10, sqrt, prod
 
 # Core functions
 from .core import (
     qarray,
-    prod,
     isket,
     isbra,
     isop,
@@ -239,6 +238,10 @@ from .utils import (
     load_from_disk,
     oset,
     LRU,
+    tree_map,
+    tree_apply,
+    tree_flatten,
+    tree_unflatten,
 )
 
 
@@ -480,4 +483,8 @@ __all__ = [
     'can_use_mpi_pool',
     'oset',
     'LRU',
+    'tree_map',
+    'tree_apply',
+    'tree_flatten',
+    'tree_unflatten',
 ]

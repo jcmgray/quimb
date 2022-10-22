@@ -3,8 +3,8 @@
 
 import os
 import math
+from math import prod
 import cmath
-import operator
 import itertools
 import functools
 from numbers import Integral
@@ -65,6 +65,10 @@ pvectorize = functools.partial(numba.vectorize, cache=_NUMBA_CACHE,
                                target='parallel' if _NUMBA_PAR else 'cpu')
 """Numba vectorize, but obeying cache setting, with optional parallel
 target, depending on environment variable 'QUIMB_NUMBA_PARALLEL'.
+"""
+
+generated_jit = functools.partial(numba.generated_jit, cache=_NUMBA_CACHE)
+"""Numba generated jit, but obeying cache setting.
 """
 
 
@@ -144,12 +148,6 @@ def par_reduce(fn, seq, nthreads=_NUM_THREAD_WORKERS):
         return _inner_preduce(new_x)
 
     return _inner_preduce(tuple(seq))
-
-
-def prod(xs):
-    """Product (as in multiplication) of an iterable.
-    """
-    return functools.reduce(operator.mul, xs, 1)
 
 
 def make_immutable(mat):
