@@ -352,6 +352,37 @@ def fsim(theta, phi, dtype=complex, **kwargs):
     return gate
 
 
+def fsimt(theta, dtype=complex, **kwargs):
+    r"""The 'fermionic simulation' gate:
+
+    .. math::
+
+        \mathrm{fsim}(\theta, \phi) =
+        \begin{bmatrix}
+        1 & 0 & 0 & 0\\
+        0 & \cos(\theta) &  sin(\theta) & 0\\
+        0 & - sin(\theta) & \cos(\theta) & 0\\
+        0 & 0 & 0 & 1
+        \end{bmatrix}
+
+    Note that ``theta`` and ``phi`` should be specified in radians and the sign
+    convention with this gate varies. Here for example,
+    ``fsim(- pi / 2, 0) == iswap()``.
+    """
+    from cmath import cos, sin, exp
+
+    a = cos(theta)
+    b = sin(theta)
+    gate = [[1, 0, 0, 0],
+            [0, a, b, 0],
+            [0, -b, a, 0],
+            [0, 0, 0, 1]]
+
+    gate = qu(gate, dtype=dtype, **kwargs)
+    make_immutable(gate)
+    return gate
+
+
 @functools.lru_cache(maxsize=256)
 def fsimg(theta, zeta, chi, gamma, phi, dtype=complex, **kwargs):
     r"""The 'fermionic simulation' gate, with:

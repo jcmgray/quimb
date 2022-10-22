@@ -2799,14 +2799,27 @@ def _tensor_network_gate_inds_basic(
 
     # new indices to join old physical sites to new gate
     bnds = [rand_uuid() for _ in range(ng)]
-    reindex_map = dict(zip(inds, bnds))
+    reindex_map = dict(zip(inds, bnds))    
+    inds_G = (*inds, *bnds)
+    ndimG = ndim(G)
 
     # tensor representing the gate
     if isparam:
-        TG = PTensor.from_parray(
-            G, inds=(*inds, *bnds), tags=tags, left_inds=bnds)
+        if len(inds_G) == ndimG:
+            TG = PTensor.from_parray(
+                G, inds=(*inds, *bnds), tags=tags, left_inds=bnds)
+        else:
+            inds_extra = abs(len(inds_G) - ndimG)
+            bnds_extra = [rand_uuid() for _ in range(inds_extra)]
+            TG = PTensor.from_parray(
+                G, inds=(*inds, *bnds, *bnds_extra), tags=tags, left_inds=bnds+bnds_extra)
     else:
-        TG = Tensor(G, inds=(*inds, *bnds), tags=tags, left_inds=bnds)
+        if len(inds_G) == ndimG:
+            TG = Tensor(G, inds=(*inds, *bnds), tags=tags, left_inds=bnds)
+        else:
+            inds_extra = abs(len(inds_G) - ndimG)
+            bnds_extra = [rand_uuid() for _ in range(inds_extra)]
+            TG = Tensor(G, inds=(*inds, *bnds, *bnds_extra), tags=tags, left_inds=bnds+bnds_extra)
 
     if contract is False:
         #
@@ -3121,11 +3134,18 @@ def tensor_network_gate_inds(
     ndimG = ndim(G)
     dims = [tn.ind_size(ix) for ix in inds]
 
-    if ndimG != 2 * ng:
-        # gate supplied as matrix, factorize it
-        G = reshape(G, dims * 2)
+    try:
+        if ndimG != 2 * ng:
+            # gate supplied as matrix, factorize it
+            G = reshape(G, dims * 2)
+    except:
+        pass
+#        dims_rest = list(G.shape)[len(2*dims):]
+#        G = reshape(G, dims * 2 + dims_rest)
 
-    if not all(d == dims[i % ng] for i, d in enumerate(G.shape)):
+    Gshape_ = list(G.shape)[:2 * ng]
+
+    if not all(d == dims[i % ng] for i, d in enumerate(Gshape_)):
         raise ValueError(f"Gate with shape {G.shape} doesn't match "
                          f"indices {inds} with dimensions {dims}.")
 
@@ -4821,6 +4841,19 @@ class TensorNetwork(object):
                     **ensure_dict(contract_around_opts))
 
             elif method == 'contract_compressed':
+
+
+#                print ("visualization")
+#                import sys
+#                sys.path.append('/home/reza/Dropbox/Prog/MERA/')
+#                from visarbgeom import vis_contract_compressed
+#             
+#                vis_contract_compressed(tn_env, max_bond=max_bond, cutoff=cutoff,
+#                    **ensure_dict(contract_compressed_opts))
+
+
+
+
                 tn_env.contract_compressed_(
                     max_bond=max_bond, cutoff=cutoff,
                     **ensure_dict(contract_compressed_opts))

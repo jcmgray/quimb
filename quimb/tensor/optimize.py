@@ -1163,22 +1163,14 @@ class TNOptimizer:
 
     @optimizer.setter
     def optimizer(self, x):
+        if isinstance(x, str):
+            x = x.lower()
         self._optimizer = x
         if self.optimizer in _STOC_GRAD_METHODS:
             self._method = _STOC_GRAD_METHODS[self.optimizer]()
         else:
             self._method = self.optimizer
 
-    @property
-    def bounds(self):
-        return self._bounds
-
-    @bounds.setter
-    def bounds(self, x):
-        if x is not None:
-            self._bounds = np.array((x,) * self.vectorizer.d)
-        else:
-            self._bounds = None
 
     def get_tn_opt(self):
         """Extract the optimized tensor network, this is a three part process:
@@ -1516,4 +1508,5 @@ class TNOptimizer:
         self.vectorizer.vector[:] = recommendation.value
 
         return self.get_tn_opt()
+
 
