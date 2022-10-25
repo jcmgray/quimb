@@ -398,6 +398,39 @@ class JaxHandler:
         return tuple(map(to_numpy, jax_arrays))
 
 
+try:
+    import jax
+    from .tensor_1d import MatrixProductState, MatrixProductOperator
+    from .tensor_2d import PEPS, PEPO
+    from .tensor_3d import PEPS3D
+
+    def pack(tn):
+        return (tn.arrays, tn)
+
+    def unpack(aux, children):
+        obj = aux.copy()
+        for tensor, array in zip(obj.tensors, children):
+            tensor._data = array
+
+        return obj
+
+    jax.tree_util.register_pytree_node(TensorNetwork, pack, unpack)
+    jax.tree_util.register_pytree_node(MatrixProductState, pack, unpack)
+    jax.tree_util.register_pytree_node(MatrixProductOperator, pack, unpack)
+    jax.tree_util.register_pytree_node(PEPS, pack, unpack)
+    jax.tree_util.register_pytree_node(PEPO, pack, unpack)
+    jax.tree_util.register_pytree_node(PEPS3D, pack, unpack)
+
+    jax.tree_util.register_pytree_node(
+        Tensor,
+        lambda t: (t.data, (t.inds, t.tags, t.left_inds)),
+        lambda aux, children: Tensor(data=children, inds=aux[0], tags=aux[1], left_inds=aux[2])
+    )
+
+except ImportError:
+    pass
+
+
 @functools.lru_cache(1)
 def get_tensorflow():
     import tensorflow
