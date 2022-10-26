@@ -1056,6 +1056,14 @@ class TNOptimizer:
     autodiff_backend : {'jax', 'autograd', 'tensorflow', 'torch'}, optional
         Which backend library to use to perform the automatic differentation
         (and computation).
+    callback : callable, optional
+        A function to call after each optimization step. It should take the
+        current ``TNOptimizer`` instance as its only argument. Information such
+        as the current loss and number of evaluations can then be accessed::
+
+            def callback(tnopt):
+                print(tnopt.nevals, tnopt.loss)
+
     backend_opts
         Supplied to the backend function compiler and array handler. For
         example ``jit_fn=True`` or ``device='cpu'`` .
@@ -1077,6 +1085,7 @@ class TNOptimizer:
         bounds=None,
         autodiff_backend="AUTO",
         executor=None,
+        callback=None,
         **backend_opts,
     ):
         self.progbar = progbar
@@ -1138,6 +1147,7 @@ class TNOptimizer:
         # options to do with the minimizer
         self.bounds = bounds
         self.optimizer = optimizer
+        self.callback = callback
 
     def _set_tn(self, tn):
         # work out which tensors to optimize and get the underlying data
@@ -1198,6 +1208,10 @@ class TNOptimizer:
             # for scipy terminating optimizer with callback doesn't work
             raise KeyboardInterrupt
 
+    def _maybe_call_callback(self):
+        if self.callback is not None:
+            self.callback(self)
+
     def vectorized_value(self, x):
         """The value of the loss function at vector ``x``."""
         self.vectorizer.vector[:] = x
@@ -1207,6 +1221,7 @@ class TNOptimizer:
         self._n += 1
         self._maybe_update_pbar()
         self._check_loss_target()
+        self._maybe_call_callback()
         return self.loss
 
     def vectorized_value_and_grad(self, x):
@@ -1220,6 +1235,7 @@ class TNOptimizer:
         vec_grad = self.vectorizer.pack(grads, "grad")
         self._maybe_update_pbar()
         self._check_loss_target()
+        self._maybe_call_callback()
         return self.loss, vec_grad
 
     def vectorized_hessp(self, x, p):
