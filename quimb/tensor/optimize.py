@@ -363,7 +363,7 @@ class AutoGradHandler:
 
     def value_and_grad(self, arrays):
         loss, grads = self._value_and_grad(arrays)
-        return loss, [x.conj() for x in grads]
+        return loss, tree_map(grads, lambda x: x.conj(), is_not_container)
 
 
 @functools.lru_cache(1)
@@ -410,16 +410,19 @@ class JaxHandler:
         self._hvp = hvp
 
     def value(self, arrays):
-        jax_arrays = tuple(map(self.to_constant, arrays))
+        jax_arrays = tree_map(arrays, self.to_constant, is_not_container)
         return to_numpy(self._backend_fn(jax_arrays))
 
     def value_and_grad(self, arrays):
         loss, grads = self._value_and_grad(arrays)
-        return loss, [to_numpy(x.conj()) for x in grads]
+        return (
+            loss,
+            tree_map(grads, lambda x: to_numpy(x.conj()), is_not_container)
+        )
 
     def hessp(self, primals, tangents):
         jax_arrays = self._hvp(primals, tangents)
-        return tuple(map(to_numpy, jax_arrays))
+        return tree_map(jax_arrays, to_numpy, is_not_container)
 
 
 @functools.lru_cache(1)
@@ -467,23 +470,25 @@ class TensorFlowHandler:
             self._backend_fn = fn
 
     def value(self, arrays):
-        tf_arrays = tuple(map(self.to_constant, arrays))
+        tf_arrays = tree_map(arrays, self.to_constant, is_not_container)
         return to_numpy(self._backend_fn(tf_arrays))
 
     def value_and_grad(self, arrays):
         tf = get_tensorflow()
-        variables = [self.to_variable(x) for x in arrays]
+
+        variables = tree_map(arrays, self.to_variable, is_not_container)
 
         with tf.GradientTape() as t:
             result = self._backend_fn(variables)
-        tf_grads = t.gradient(result, variables)
 
-        grads = [
-            # unused variables return as None
-            # NB note different convention for conjugation (i.e. none)
-            np.zeros_like(arrays[i]) if g is None else to_numpy(g)
-            for i, g in enumerate(tf_grads)
-        ]
+        tf_grads = t.gradient(
+            result,
+            variables,
+            # want to return zeros for unconnected gradients
+            unconnected_gradients=tf.UnconnectedGradients.ZERO,
+        )
+
+        grads = tree_map(tf_grads, to_numpy, is_not_container)
         loss = to_numpy(result)
         return loss, grads
 
@@ -518,7 +523,7 @@ class TorchHandler:
     def _setup_backend_fn(self, arrays):
         torch = get_torch()
         if self.jit_fn:
-            example_inputs = (tuple(map(self.to_constant, arrays)),)
+            example_inputs = (tree_map(arrays, self.to_variable, is_not_container),)
             self._backend_fn = torch.jit.trace(
                 self._fn, example_inputs=example_inputs)
         else:
@@ -527,23 +532,24 @@ class TorchHandler:
     def value(self, arrays):
         if self._backend_fn is None:
             self._setup_backend_fn(arrays)
-        torch_arrays = tuple(map(self.to_constant, arrays))
+        torch_arrays = tree_map(arrays, self.to_constant, is_not_container)
         return to_numpy(self._backend_fn(torch_arrays))
 
     def value_and_grad(self, arrays):
-        torch = get_torch()
-
         if self._backend_fn is None:
             self._setup_backend_fn(arrays)
 
-        variables = [self.to_variable(x) for x in arrays]
+        variables = tree_map(arrays, self.to_variable, is_not_container)
         result = self._backend_fn(variables)
-        torch_grads = torch.autograd.grad(result, variables, allow_unused=True)
-        grads = [
-            # unused variables return as None
-            np.zeros_like(arrays[i]) if g is None else to_numpy(g).conj()
-            for i, g in enumerate(torch_grads)
-        ]
+
+        def get_gradient_from_torch(t):
+            if t.grad is None:
+                return np.zeros(t.shape, dtype=get_dtype_name(t))
+            return to_numpy(t.grad).conj()
+
+        result.backward()
+        grads = tree_map(variables, get_gradient_from_torch, is_not_container)
+
         loss = to_numpy(result)
         return loss, grads
 
@@ -598,7 +604,7 @@ class MultiLossHandler:
         grads = list(map(np.array, grads))
         for h in hs:
             loss_i, grads_i = h.value_and_grad(arrays)
-            loss += loss_i
+            loss = loss + loss_i
             for i, g_i in enumerate(grads_i):
                 grads[i] += g_i
         return loss, grads
@@ -614,7 +620,7 @@ class MultiLossHandler:
 
         # process remaining results
         for loss_i, grads_i in results:
-            loss += loss_i
+            loss = loss + loss_i
             for i, g_i in enumerate(grads_i):
                 grads[i] += g_i
 
@@ -1192,7 +1198,11 @@ class TNOptimizer:
         -------
         tn_opt : TensorNetwork
         """
-        arrays = tuple(map(self.handler.to_constant, self.vectorizer.unpack()))
+        arrays = tree_map(
+            self.vectorizer.unpack(),
+            self.handler.to_constant,
+            is_not_container
+        )
         inject_(arrays, self._tn_opt)
         tn = self.norm_fn(self._tn_opt.copy())
         tn.drop_tags(t for t in tn.tags if variable_finder.match(t))
