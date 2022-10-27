@@ -430,15 +430,23 @@ def gen_bipartitions(it):
             yield l, r
 
 
-def tree_map(tree, f, is_leaf):
+
+def is_not_container(x):
+    """The default ``is_leaf`` definition for pytree functions. Anything that
+    is not a tuple, list or dict returns ``True``.
+    """
+    return not isinstance(x, (tuple, list, dict))
+
+
+def tree_map(f, tree, is_leaf=is_not_container):
     """Map ``f`` over all leaves in ``tree``, rerturning a new pytree.
 
     Parameters
     ----------
-    tree : pytree
-        A nested sequence of tuples, lists, dicts and other objects.
     f : callable
         A function to apply to all leaves in ``tree``.
+    tree : pytree
+        A nested sequence of tuples, lists, dicts and other objects.
     is_leaf : callable
         A function to determine if an object is a leaf, ``f`` is only applied
         to objects for which ``is_leaf(x)`` returns ``True``.
@@ -450,22 +458,22 @@ def tree_map(tree, f, is_leaf):
     if is_leaf(tree):
         return f(tree)
     elif isinstance(tree, (list, tuple)):
-        return type(tree)(tree_map(x, f, is_leaf) for x in tree)
+        return type(tree)(tree_map(f, x, is_leaf) for x in tree)
     elif isinstance(tree, dict):
-        return {k: tree_map(v, f, is_leaf) for k, v in tree.items()}
+        return {k: tree_map(f, v, is_leaf) for k, v in tree.items()}
     else:
         return tree
 
 
-def tree_apply(tree, f, is_leaf):
+def tree_apply(f, tree, is_leaf=is_not_container):
     """Apply ``f`` to all objs in ``tree``, no new pytree is built.
 
     Parameters
     ----------
-    tree : pytree
-        A nested sequence of tuples, lists, dicts and other objects.
     f : callable
         A function to apply to all leaves in ``tree``.
+    tree : pytree
+        A nested sequence of tuples, lists, dicts and other objects.
     is_leaf : callable
         A function to determine if an object is a leaf, ``f`` is only applied
         to objects for which ``is_leaf(x)`` returns ``True``.
@@ -474,13 +482,13 @@ def tree_apply(tree, f, is_leaf):
         f(tree)
     elif isinstance(tree, (list, tuple)):
         for x in tree:
-            tree_apply(x, f, is_leaf)
+            tree_apply(f, x, is_leaf)
     elif isinstance(tree, dict):
         for x in tree.values():
-            tree_apply(x, f, is_leaf)
+            tree_apply(f, x, is_leaf)
 
 
-def tree_flatten(tree, is_leaf):
+def tree_flatten(tree, is_leaf=is_not_container):
     """Flatten ``tree`` into a list of objs.
 
     Parameters
@@ -496,11 +504,11 @@ def tree_flatten(tree, is_leaf):
     list
     """
     flat = []
-    tree_apply(tree, flat.append, is_leaf)
+    tree_apply(flat.append, tree, is_leaf)
     return flat
 
 
-def tree_unflatten(objs, tree, is_leaf):
+def tree_unflatten(objs, tree, is_leaf=is_not_container):
     """Unflatten ``objs`` into a pytree of the same structure as ``tree``.
 
     Parameters
@@ -520,4 +528,4 @@ def tree_unflatten(objs, tree, is_leaf):
     pytree
     """
     objs = iter(objs)
-    return tree_map(tree, lambda _: next(objs), is_leaf)
+    return tree_map(lambda _: next(objs), tree, is_leaf)

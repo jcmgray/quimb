@@ -80,11 +80,6 @@ class ArrayInfo:
         )
 
 
-def is_not_container(x):
-    """The default ``is_leaf`` definition for ``Vectorizer``."""
-    return not isinstance(x, (tuple, list, dict))
-
-
 class Vectorizer:
     """Object for mapping back and forth between any pytree of mixed
     real/complex n-dimensional arrays to a single, real, double precision numpy
@@ -101,9 +96,7 @@ class Vectorizer:
         Defaults to everything that is not a tuple, list or dict.
     """
 
-    def __init__(self, tree, is_leaf=is_not_container):
-        self.is_leaf = is_leaf
-
+    def __init__(self, tree):
         arrays = []
         self.infos = []
         self.d = 0
@@ -115,14 +108,14 @@ class Vectorizer:
             self.d += info.real_size
             return info
 
-        self.ref_tree = tree_map(tree, extracter, self.is_leaf)
+        self.ref_tree = tree_map(extracter, tree)
         self.pack(arrays)
 
     def pack(self, tree, name="vector"):
         """Take ``arrays`` and pack their values into attribute `.{name}`, by
         default `.vector`.
         """
-        arrays = tree_flatten(tree, self.is_leaf)
+        arrays = tree_flatten(tree)
 
         # create the vector if it doesn't exist yet
         if not hasattr(self, name):
@@ -342,17 +335,31 @@ def parse_network_to_backend(
     )
 
 
-def constant_t(t, to_constant):
-    ag_t = t.copy()
-    ag_t.modify(apply=to_constant)
-    return ag_t
+def convert_raw_arrays(x, f):
+    """Given a ``TensorNetwork``, ``Tensor``, or other possibly structured raw
+    array, return a copy where the underyling data has had ``f``
+    applied to it. Structured raw arrays should implement the
+    ``tree = get_params()`` and ``set_params(tree)`` methods which get or set
+    their underlying data using an arbitrary pytree.
+    """
+    try:
+        # Tensor, TensorNetwork...
+        x = x.copy()
+        x.apply_to_arrays(f)
+        return x
+    except AttributeError:
+        pass
 
+    try:
+        # raw structured arrays that provide the {get|set}_params interface
+        x = x.copy()
+        x.set_params(tree_map(f, x.get_params()))
+        return x
+    except AttributeError:
+        pass
 
-def constant_tn(tn, to_constant):
-    """Convert a tensor network's arrays to constants."""
-    ag_tn = tn.copy()
-    ag_tn.apply_to_arrays(to_constant)
-    return ag_tn
+    # other raw arrays
+    return f(x)
 
 
 @functools.lru_cache(1)
@@ -386,7 +393,7 @@ class AutoGradHandler:
 
     def value_and_grad(self, arrays):
         loss, grads = self._value_and_grad(arrays)
-        return loss, tree_map(grads, lambda x: x.conj(), is_not_container)
+        return loss, tree_map(lambda x: x.conj(), grads)
 
 
 @functools.lru_cache(1)
@@ -434,19 +441,19 @@ class JaxHandler:
         self._hvp = hvp
 
     def value(self, arrays):
-        jax_arrays = tree_map(arrays, self.to_constant, is_not_container)
+        jax_arrays = tree_map(self.to_constant, arrays)
         return to_numpy(self._backend_fn(jax_arrays))
 
     def value_and_grad(self, arrays):
         loss, grads = self._value_and_grad(arrays)
         return (
             loss,
-            tree_map(grads, lambda x: to_numpy(x.conj()), is_not_container),
+            tree_map(lambda x: to_numpy(x.conj()), grads),
         )
 
     def hessp(self, primals, tangents):
         jax_arrays = self._hvp(primals, tangents)
-        return tree_map(jax_arrays, to_numpy, is_not_container)
+        return tree_map(to_numpy, jax_arrays)
 
 
 @functools.lru_cache(1)
@@ -495,13 +502,13 @@ class TensorFlowHandler:
             self._backend_fn = fn
 
     def value(self, arrays):
-        tf_arrays = tree_map(arrays, self.to_constant, is_not_container)
+        tf_arrays = tree_map(self.to_constant, arrays)
         return to_numpy(self._backend_fn(tf_arrays))
 
     def value_and_grad(self, arrays):
         tf = get_tensorflow()
 
-        variables = tree_map(arrays, self.to_variable, is_not_container)
+        variables = tree_map(self.to_variable, arrays)
 
         with tf.GradientTape() as t:
             result = self._backend_fn(variables)
@@ -513,7 +520,7 @@ class TensorFlowHandler:
             unconnected_gradients=tf.UnconnectedGradients.ZERO,
         )
 
-        grads = tree_map(tf_grads, to_numpy, is_not_container)
+        grads = tree_map(to_numpy, tf_grads)
         loss = to_numpy(result)
         return loss, grads
 
@@ -548,9 +555,7 @@ class TorchHandler:
     def _setup_backend_fn(self, arrays):
         torch = get_torch()
         if self.jit_fn:
-            example_inputs = (
-                tree_map(arrays, self.to_variable, is_not_container),
-            )
+            example_inputs = (tree_map(self.to_variable, arrays),)
             self._backend_fn = torch.jit.trace(
                 self._fn, example_inputs=example_inputs
             )
@@ -560,14 +565,14 @@ class TorchHandler:
     def value(self, arrays):
         if self._backend_fn is None:
             self._setup_backend_fn(arrays)
-        torch_arrays = tree_map(arrays, self.to_constant, is_not_container)
+        torch_arrays = tree_map(self.to_constant, arrays)
         return to_numpy(self._backend_fn(torch_arrays))
 
     def value_and_grad(self, arrays):
         if self._backend_fn is None:
             self._setup_backend_fn(arrays)
 
-        variables = tree_map(arrays, self.to_variable, is_not_container)
+        variables = tree_map(self.to_variable, arrays)
         result = self._backend_fn(variables)
 
         def get_gradient_from_torch(t):
@@ -576,7 +581,7 @@ class TorchHandler:
             return to_numpy(t.grad).conj()
 
         result.backward()
-        grads = tree_map(variables, get_gradient_from_torch, is_not_container)
+        grads = tree_map(get_gradient_from_torch, variables)
 
         loss = to_numpy(result)
         return loss, grads
@@ -952,28 +957,6 @@ _STOC_GRAD_METHODS = {
 }
 
 
-def parse_constant_arg(arg, to_constant):
-    # check if tensor network supplied
-    if isinstance(arg, TensorNetwork):
-        # convert it to constant TN
-        return constant_tn(arg, to_constant)
-
-    if isinstance(arg, Tensor):
-        return constant_t(arg, to_constant)
-
-    if isinstance(arg, dict):
-        return valmap(lambda i: parse_constant_arg(i, to_constant), arg)
-
-    if isinstance(arg, list):
-        return list(parse_constant_arg(i, to_constant) for i in arg)
-
-    if isinstance(arg, tuple):
-        return tuple(parse_constant_arg(i, to_constant) for i in arg)
-
-    # assume ``arg`` is a raw array
-    return to_constant(arg)
-
-
 class MakeArrayFn:
     """Class wrapper so picklable."""
 
@@ -1113,9 +1096,10 @@ class TNOptimizer:
 
         self.reset(tn, loss_target=loss_target)
 
-        # convert constant arrays ahead of time to correct backend
-        self.loss_constants = parse_constant_arg(
-            ensure_dict(loss_constants), self.handler.to_constant
+        # convert constant raw arrays ahead of time to correct backend
+        self.loss_constants = tree_map(
+            functools.partial(convert_raw_arrays, f=self.handler.to_constant),
+            ensure_dict(loss_constants),
         )
         self.loss_kwargs = ensure_dict(loss_kwargs)
         kws = {**self.loss_constants, **self.loss_kwargs}
@@ -1299,9 +1283,8 @@ class TNOptimizer:
         tn_opt : TensorNetwork
         """
         arrays = tree_map(
-            self.vectorizer.unpack(),
             self.handler.to_constant,
-            is_not_container,
+            self.vectorizer.unpack(),
         )
         inject_(arrays, self._tn_opt)
         tn = self.norm_fn(self._tn_opt.copy())
