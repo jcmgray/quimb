@@ -25,7 +25,7 @@ except ImportError:
 
 from ..core import (qarray, prod, realify_scalar, vdot, make_immutable)
 from ..utils import (check_opt, oset, concat, frequencies, unique,
-                     valmap, ensure_dict, LRU, gen_bipartitions)
+                     valmap, ensure_dict, LRU, gen_bipartitions, tree_map)
 from ..gen.rand import randn, seed_rand, rand_matrix, rand_uni
 from . import decomp
 from .array_ops import (iscomplex, norm_fro, unitize, ndim, asarray, PArray,
@@ -1652,6 +1652,13 @@ class Tensor(object):
             self.data.params = params
         else:
             self._data = params
+
+    def apply_to_arrays(self, fn):
+        """Apply the function ``fn`` to the underlying data array(s). This
+        is meant for changing how the raw arrays are backed (e.g. converting
+        between dtypes or libraries) but not their 'numerical meaning'.
+        """
+        self.set_params(tree_map(fn, self.get_params()))
 
     def isel(self, selectors, inplace=False):
         """Select specific values for some dimensions/indices of this tensor,
@@ -3992,10 +3999,12 @@ class TensorNetwork(object):
         return tuple(x[0] for x in ts_and_sorted_tags)
 
     def apply_to_arrays(self, fn):
-        """Modify every tensor's array inplace by applying ``fn`` to it.
+        """Modify every tensor's array inplace by applying ``fn`` to it. This
+        is meant for changing how the raw arrays are backed (e.g. converting
+        between dtypes or libraries) but not their 'numerical meaning'.
         """
         for t in self:
-            t.modify(apply=fn)
+            t.apply_to_arrays(fn)
 
     # ----------------- selecting and splitting the network ----------------- #
 

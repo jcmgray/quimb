@@ -2,7 +2,7 @@ channels:
   - defaults
   - conda-forge
 dependencies:
-  - python=3.8
+  - python=3.10
   - numpy
   - scipy
   - numba
@@ -20,7 +20,6 @@ dependencies:
   - joblib
   - autoray
   - diskcache
-  - tensorflow
   - pip
   - pip:
     - randomgen
