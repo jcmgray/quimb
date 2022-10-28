@@ -413,6 +413,7 @@ def draw_tn(
 
     if ax is None:
         fig, ax = plt.subplots(figsize=figsize, constrained_layout=True)
+        fig.patch.set_alpha(0.0)
         ax.axis('off')
         ax.set_aspect('equal')
         if title is not None:
