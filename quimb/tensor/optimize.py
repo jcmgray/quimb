@@ -1422,6 +1422,9 @@ class TNOptimizer:
     def optimize_nlopt(
         self,
         n,
+        tol=None,
+        jac=True,
+        hessp=False,
         ftol_rel=None,
         ftol_abs=None,
         xtol_rel=None,
@@ -1436,6 +1439,14 @@ class TNOptimizer:
         ----------
         n : int
             The maximum number of iterations for the optimizer.
+        tol : None or float, optional
+            Tolerance for convergence, here this is taken to be the relative
+            tolerance for the loss (``ftol_rel`` below overrides this).
+        jac : bool, optional
+            Whether to supply the jacobian, i.e. gradient, of the loss
+            function.
+        hessp : bool, optional
+            Whether to supply the hessian vector product of the loss function.
         ftol_rel : float, optional
             Set relative tolerance on function value.
         ftol_abs : float, optional
@@ -1450,6 +1461,23 @@ class TNOptimizer:
         tn_opt : TensorNetwork
         """
         import nlopt
+
+        if not (jac is True and hessp is False):
+            raise NotImplementedError(
+                "Only gradient based optimizers are "
+                "supported with nlopt currently."
+            )
+
+        if tol == 0.0:
+            # assume no stopping criteria
+            ftol_rel == 0.0 if ftol_rel is None else ftol_rel
+            ftol_abs == 0.0 if ftol_abs is None else ftol_abs
+            xtol_rel == 0.0 if xtol_rel is None else xtol_rel
+            xtol_abs == 0.0 if xtol_abs is None else xtol_abs
+
+        elif (tol is not None) and (ftol_rel is None):
+            # assume relative loss tolerance is specified
+            ftol_rel = tol
 
         # translate directly comparable algorithms
         optimizer = {
