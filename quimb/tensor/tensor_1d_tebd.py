@@ -374,6 +374,7 @@ class TEBD:
             Manually turn the progress bar off.
         """
         if T < self.t - self.TARGET_TOL:
+            # can't go backwards yet
             raise NotImplementedError
 
         self._compute_sweep_dt_tol(T, dt, tol, order)
@@ -382,18 +383,12 @@ class TEBD:
         progbar = self.progbar if (progbar is None) else progbar
         progbar = continuous_progbar(self.t, T) if progbar else None
 
-        while self.t < T - self.TARGET_TOL:
-            if (T - self.t < self._dt):
-                # set custom dt if within one step of final time
-                dt = T - self.t
-                # also make sure queued sweeps are drained
-                queue = False
-            else:
-                dt = None
-                queue = True
+        while self.t < T - self._dt:
+            # get closer until we can reach in a single step
+            self.step(order=order, progbar=progbar, dt=None, queue=True)
 
-            # perform a step!
-            self.step(order=order, progbar=progbar, dt=dt, queue=queue)
+        # always perform final sweep with queue draining
+        self.step(order=order, progbar=progbar, dt=T - self.t, queue=False)
 
         if progbar:
             progbar.close()
