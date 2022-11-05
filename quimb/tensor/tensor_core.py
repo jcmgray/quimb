@@ -6947,7 +6947,7 @@ class TensorNetwork(object):
 
         # contracting everything to single output
         if all_tags:
-            return tensor_contract(*self, **opts)
+            return tensor_contract(*self.tensor_map.values(), **opts)
 
         # else just contract those tensors specified by tags.
         return self.contract_tags(tags, inplace=inplace, **opts)
