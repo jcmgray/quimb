@@ -556,9 +556,14 @@ class TorchHandler:
         torch = get_torch()
         if self.jit_fn:
             example_inputs = (tree_map(self.to_variable, arrays),)
-            self._backend_fn = torch.jit.trace(
-                self._fn, example_inputs=example_inputs
-            )
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    action='ignore',
+                    message=".*can't record the data flow of Python values.*",
+                )
+                self._backend_fn = torch.jit.trace(
+                    self._fn, example_inputs=example_inputs
+                )
         else:
             self._backend_fn = self._fn
 
