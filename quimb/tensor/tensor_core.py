@@ -7500,7 +7500,28 @@ class TensorNetwork(object):
         inds_to_expand=None,
         inplace=False,
     ):
-        """Increase the dimension of bonds to at least ``new_bond_dim``.
+        """Increase the dimension of all or some of the bonds in this tensor
+        network to at least ``new_bond_dim``, optinally adding some random
+        noise to the new entries.
+
+        Parameters
+        ----------
+        new_bond_dim : int
+            The minimum bond dimension to expand to, if the bond dimension is
+            already larger than this it will be left unchanged.
+        rand_strength : float, optional
+            The strength of random noise to add to the new array entries,
+            if any. The noise is drawn from a normal distribution with
+            standard deviation ``rand_strength``.
+        inds_to_expand : sequence of str, optional
+            The indices to expand, if not all.
+        inplace : bool, optional
+            Whether to expand this tensor network in place, or return a new
+            one.
+
+        Returns
+        -------
+        TensorNetwork
         """
         tn = self if inplace else self.copy()
 

@@ -241,6 +241,7 @@ from .utils import (
     tree_apply,
     tree_flatten,
     tree_unflatten,
+    format_number_with_error,
 )
 
 

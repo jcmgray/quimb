@@ -15,6 +15,7 @@ try:
     valmap = cytoolz.valmap
     partitionby = cytoolz.partitionby
     concatv = cytoolz.concatv
+    partition = cytoolz.partition
     partition_all = cytoolz.partition_all
     compose = cytoolz.compose
     identity = cytoolz.identity
@@ -29,6 +30,7 @@ except ImportError:
     partition_all = toolz.partition_all
     merge_with = toolz.merge_with
     valmap = toolz.valmap
+    partition = toolz.partition
     partitionby = toolz.partitionby
     concatv = toolz.concatv
     partition_all = toolz.partition_all
@@ -228,6 +230,58 @@ def print_multi_line(*lines, max_width=None):
                         "..." if j == n_lines // 2 else "   ",
                     )
                 print(("{:^" + str(max_width) + "}").format("..."))
+
+
+def format_number_with_error(x, err):
+    """Given ``x`` with error ``err``, format a string showing the relevant
+    digits of ``x`` with two significant digits of the error bracketed, and
+    overall exponent if necessary.
+
+    Parameters
+    ----------
+    x : float
+        The value to print.
+    err : float
+        The error on ``x``.
+
+    Returns
+    -------
+    str
+
+    Examples
+    --------
+
+        >>> print_number_with_uncertainty(0.1542412, 0.0626653)
+        '0.154(63)'
+
+        >>> print_number_with_uncertainty(-128124123097, 6424)
+        '-1.281241231(64)e+11'
+
+    """
+    # compute an overall scaling for both values
+    x_exponent = max(
+        int(f'{x:e}'.split('e')[1]),
+        int(f'{err:e}'.split('e')[1]) + 1,
+    )
+    # for readability try and show values close to 1 with no exponent
+    hide_exponent = (
+         # nicer showing 0.xxx(yy) than x.xx(yy)e-1
+        (x_exponent in (0, -1)) or
+        # also nicer showing xx.xx(yy) than x.xxx(yy)e+1
+        ((x_exponent == +1) and (err < abs(x / 10)))
+    )
+    if hide_exponent:
+        suffix = ""
+    else:
+        x = x / 10**x_exponent
+        err = err / 10**x_exponent
+        suffix = f"e{x_exponent:+03d}"
+
+    # work out how many digits to print
+    # format the main number and bracketed error
+    mantissa, exponent = f'{err:.1e}'.split('e')
+    mantissa, exponent = mantissa.replace('.', ''), int(exponent)
+    return f'{x:.{abs(exponent) + 1}f}({mantissa}){suffix}'
 
 
 def save_to_disk(obj, fname, **dump_opts):
