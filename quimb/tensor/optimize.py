@@ -342,10 +342,55 @@ class AutoGradHandler:
         return loss, [x.conj() for x in grads]
 
 
+def jax_tn_pack(tn: TensorNetwork):
+    return (tn.arrays, tn)
+
+
+def jax_tn_unpack(aux: TensorNetwork, children) -> TensorNetwork:
+    tn = aux.copy()
+    for tensor, array in zip(tn.tensors, children):
+        tensor._data = array
+
+    return tn
+
+
 @functools.lru_cache(1)
 def get_jax():
     import jax
+
+    jax_update_register()
+
     return jax
+
+
+_JAX_REGISTERED_TN_CLASSES = {}
+
+
+def jax_update_register():
+    import jax
+
+    global _JAX_REGISTERED_TN_CLASSES
+
+    if Tensor not in _JAX_REGISTERED_TN_CLASSES:
+        jax.tree_util.register_pytree_node(
+            Tensor,
+            lambda t: (t.data, (t.inds, t.tags, t.left_inds)),
+            lambda aux, children: Tensor(data=children, inds=aux[0], tags=aux[1], left_inds=aux[2])
+        )
+
+    if TensorNetwork not in _JAX_REGISTERED_TN_CLASSES:
+        jax.tree_util.register_pytree_node(TensorNetwork, jax_tn_pack, jax_tn_unpack)
+
+    queue = [Tensor, TensorNetwork]
+    while len(queue) > 0:
+        parent = queue.pop()
+
+        for child in parent.__subclasses__():
+            queue.append(child)
+
+            if child not in _JAX_REGISTERED_TN_CLASSES:
+                _JAX_REGISTERED_TN_CLASSES.add(child)
+                jax.pytree.register_pytree_node(child, jax_tn_pack, jax_tn_unpack)
 
 
 class JaxHandler:
@@ -396,39 +441,6 @@ class JaxHandler:
     def hessp(self, primals, tangents):
         jax_arrays = self._hvp(primals, tangents)
         return tuple(map(to_numpy, jax_arrays))
-
-
-try:
-    import jax
-    from .tensor_1d import MatrixProductState, MatrixProductOperator
-    from .tensor_2d import PEPS, PEPO
-    from .tensor_3d import PEPS3D
-
-    def pack(tn):
-        return (tn.arrays, tn)
-
-    def unpack(aux, children):
-        obj = aux.copy()
-        for tensor, array in zip(obj.tensors, children):
-            tensor._data = array
-
-        return obj
-
-    jax.tree_util.register_pytree_node(TensorNetwork, pack, unpack)
-    jax.tree_util.register_pytree_node(MatrixProductState, pack, unpack)
-    jax.tree_util.register_pytree_node(MatrixProductOperator, pack, unpack)
-    jax.tree_util.register_pytree_node(PEPS, pack, unpack)
-    jax.tree_util.register_pytree_node(PEPO, pack, unpack)
-    jax.tree_util.register_pytree_node(PEPS3D, pack, unpack)
-
-    jax.tree_util.register_pytree_node(
-        Tensor,
-        lambda t: (t.data, (t.inds, t.tags, t.left_inds)),
-        lambda aux, children: Tensor(data=children, inds=aux[0], tags=aux[1], left_inds=aux[2])
-    )
-
-except ImportError:
-    pass
 
 
 @functools.lru_cache(1)
