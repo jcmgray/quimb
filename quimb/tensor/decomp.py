@@ -1,7 +1,6 @@
 import functools
 
 import numpy as np
-import scipy.linalg as scla
 import scipy.sparse.linalg as spla
 import scipy.linalg.interpolative as sli
 from autoray import (
@@ -756,3 +755,110 @@ def similarity_compress(X, max_bond, renorm=True, method="eigh"):
     #     X = np.ascontiguousarray(X)
     fn = _similarity_compress_fns[method, isnumpy]
     return fn(X, max_bond, int(renorm))
+
+
+@compose
+def isometrize_qr(x, backend=None):
+    """Perform isometrization using the QR decomposition.
+    """
+    with backend_like(backend):
+        fat = x.shape[0] < x.shape[1]
+        if fat:
+            x = do("transpose", x)
+        Q, R = do('linalg.qr', x)
+        # stabilize qr by fixing diagonal of R in canonical, positive form (we
+        # don't actaully do anything to R, just absorb the necessary sign -> Q)
+        rd = do('diag', R)
+        s = do('sign', rd) + (rd == 0)
+        Q = Q * reshape(s, (1, -1))
+        if fat:
+            Q = do("transpose", Q)
+        return Q
+
+
+@compose
+def isometrize_svd(x, backend=None):
+    with backend_like(backend):
+        fat = x.shape[0] < x.shape[1]
+        if fat:
+            x = do("transpose", x)
+
+        Q = do('linalg.svd', x)[0]
+        if fat:
+            Q = do("transpose", Q)
+
+        return Q
+
+
+@compose
+def isometrize_exp(x, backend):
+    r"""Perform isometrization using the using anti-symmetric matrix
+    exponentiation.
+
+    .. math::
+
+            U_A = \exp{A - A^\dagger}
+
+    If ``x`` is rectangular it is completed with zeros first.
+    """
+    with backend_like(backend):
+        m, n = x.shape
+        d = max(m, n)
+        x = do(
+            'pad', x, [[0, d - m], [0, d - n]], 'constant', constant_values=0.0
+        )
+        expx = do('linalg.expm', x - dag(x))
+        return expx[:m, :n]
+
+
+@compose
+def isometrize_modified_gram_schmidt(A, backend=None):
+    """Perform isometrization explicitly using the modified Gram Schmidt
+    procedure.
+    """
+    with backend_like(backend):
+        m, n = A.shape
+
+        thin = m > n
+        if thin:
+            A = do('transpose', A)
+
+        Q = []
+        for j in range(0, min(m, n)):
+
+            q = A[j, :]
+            for i in range(0, j):
+                rij = do('tensordot', do('conj', Q[i]), q, 1)
+                q = q - rij * Q[i]
+
+            Q.append(q / do('linalg.norm', q, 2))
+
+        Q = do('stack', tuple(Q), axis=0, like=A)
+
+        if thin:
+            Q = do('transpose', Q)
+
+        return Q
+
+
+_ISOMETRIZE_METHODS = {
+    'qr': isometrize_qr,
+    'svd': isometrize_svd,
+    'exp': isometrize_exp,
+    'mgs': isometrize_modified_gram_schmidt,
+}
+
+
+def isometrize(x, method='qr'):
+    """Generate a isometric (or unitary if square) matrix from array ``x``.
+
+    Parameters
+    ----------
+    x : array
+        The matrix to project into isometrix form.
+    method : {'qr', 'svd', 'exp', 'mgs'}, optional
+        The method used to generate the isometry. Note ``'qr'`` is the fastest
+        and most robust but, for example, some libraries cannot back-propagate
+        through it.
+    """
+    return _ISOMETRIZE_METHODS[method](x)

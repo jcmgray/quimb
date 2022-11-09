@@ -179,6 +179,8 @@ class TensorNetworkGenIso(TensorNetworkGenVector):
                 tags.add('UNI')
             else:
                 tags.add('ISO')
+            if nabove == 0:
+                tags.add('CAP')
             left_inds = below_ix
 
         # rewire and add tensor
@@ -456,13 +458,19 @@ class TensorNetworkGenIso(TensorNetworkGenVector):
         inds_done = oset(tn.site_inds)
         tids_todo = tn._get_tids_from_inds(inds_done, 'any')
 
+        # XXX: switch this logic to get_tree_span('CAP')? to
+        # ensure topologically sorted order?
         while tids_todo:
             tid = tids_todo.popleft()
             t = tn.tensor_map[tid]
 
-            below_inds, above_inds = oset(), oset()
-            for ix in t.inds:
-                (below_inds if ix in inds_done else above_inds).add(ix)
+            if t.left_inds is not None:
+                below_inds = oset(t.left_inds)
+                above_inds = oset(t.inds) - below_inds
+            else:
+                below_inds, above_inds = oset(), oset()
+                for ix in t.inds:
+                    (below_inds if ix in inds_done else above_inds).add(ix)
 
             if len(above_inds) == 0:
                 # top piece
@@ -488,7 +496,8 @@ class TensorNetworkGenIso(TensorNetworkGenVector):
                     tn.expand_bond_dimension_(
                         new_bond_dim=t.ind_size(bix),
                         rand_strength=rand_strength,
-                        inds_to_expand=aix)
+                        inds_to_expand=aix
+                    )
 
             else:
                 raise NotImplementedError

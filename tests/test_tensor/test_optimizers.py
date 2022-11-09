@@ -245,7 +245,7 @@ def test_parametrized_circuit(backend):
 
 
 def mera_norm_fn(mera):
-    return mera.unitize(method='mgs')
+    return mera.isometrize(method='mgs')
 
 
 def mera_local_expectation(mera, terms, where):

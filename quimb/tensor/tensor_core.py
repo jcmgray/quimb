@@ -24,11 +24,11 @@ except ImportError:
     from ..core import common_type as get_common_dtype
 
 from ..core import (qarray, prod, realify_scalar, vdot, make_immutable)
-from ..utils import (check_opt, oset, concat, frequencies, unique,
+from ..utils import (check_opt, oset, concat, frequencies, unique, deprecated,
                      valmap, ensure_dict, LRU, gen_bipartitions, tree_map)
 from ..gen.rand import randn, seed_rand, rand_matrix, rand_uni
 from . import decomp
-from .array_ops import (iscomplex, norm_fro, unitize, ndim, asarray, PArray,
+from .array_ops import (iscomplex, norm_fro, ndim, asarray, PArray,
                         find_diag_axes, find_antidiag_axes, find_columns)
 from .drawing import draw_tn, visualize_tensor
 
@@ -2388,7 +2388,7 @@ class Tensor(object):
         T.modify(data=(T.data + TH.data) / 2)
         return T
 
-    def unitize(self, left_inds=None, inplace=False, method='qr'):
+    def isometrize(self, left_inds=None, inplace=False, method='qr'):
         r"""Make this tensor unitary (or isometric) with respect to
         ``left_inds``. The underlying method is set by ``method``.
 
@@ -2402,13 +2402,13 @@ class Tensor(object):
         method : {'qr', 'exp', 'mgs'}, optional
             How to generate the unitary matrix. The options are:
 
-            - 'qr': use a QR decomposition directly.
+            - 'qr': use a (stabilized) QR decomposition directly.
+            - 'svd': use the left singular vectors of the SVD
             - 'exp': exponential the padded, anti-hermitian part of the array
             - 'mgs': use a explicit modified-gram-schmidt procedure
 
             Generally, 'qr' is the fastest and best approach, however currently
-            ``tensorflow`` cannot back-propagate through for instance, making
-            the other two methods necessary.
+            ``tensorflow`` cannot back-propagate through it for instance.
 
         Returns
         -------
@@ -2435,7 +2435,7 @@ class Tensor(object):
 
         # fuse this tensor into a matrix and 'isometrize' it
         x = self.to_dense(L_inds, R_inds)
-        x = unitize(x, method=method)
+        x = decomp.isometrize(x, method=method)
 
         # turn the array back into a tensor
         x = reshape(x, [self.ind_size(ix) for ix in LR_inds])
@@ -2450,7 +2450,9 @@ class Tensor(object):
 
         return Tu
 
-    unitize_ = functools.partialmethod(unitize, inplace=True)
+    isometrize_ = functools.partialmethod(isometrize, inplace=True)
+    unitize = deprecated(isometrize, 'unitize', 'isometrize')
+    unitize_ = deprecated(isometrize_, 'unitize_', 'isometrize_')
 
     def randomize(self, dtype=None, inplace=False, **randn_opts):
         """Randomize the entries of this tensor.
@@ -7332,8 +7334,25 @@ class TensorNetwork(object):
 
     squeeze_ = functools.partialmethod(squeeze, inplace=True)
 
-    def unitize(self, method='qr', allow_no_left_inds=False, inplace=False):
-        """
+    def isometrize(self, method='qr', allow_no_left_inds=False, inplace=False):
+        """Project every tensor in this network into an isometric form,
+        assuming they have ``left_inds`` marked.
+
+        Parameters
+        ----------
+        method : {"qr", "svd", "exp", "mgs"}, optional
+            The method to use to project the tensors into isometric form. The
+            various methods have different advantages when it comes to speed
+            and gradient stability etc.
+        allow_no_left_inds : bool, optional
+            If ``True`` then allow tensors with no ``left_inds`` to be
+            left alone, rather than raising an error.
+        inplace : bool, optional
+            If ``True`` then perform the operation in-place.
+
+        Returns
+        -------
+        TensorNetwork
         """
         tn = self if inplace else self.copy()
         for t in tn:
@@ -7342,10 +7361,12 @@ class TensorNetwork(object):
                     continue
                 raise ValueError("The tensor {} doesn't have left indices "
                                  "marked using the `left_inds` attribute.")
-            t.unitize_(method=method)
+            t.isometrize_(method=method)
         return tn
 
-    unitize_ = functools.partialmethod(unitize, inplace=True)
+    isometrize_ = functools.partialmethod(isometrize, inplace=True)
+    unitize = deprecated(isometrize, 'unitize', 'isometrize')
+    unitize_ = deprecated(isometrize_, 'unitize_', 'isometrize_')
 
     def randomize(self, dtype=None, seed=None, inplace=False, **randn_opts):
         """Randomize every tensor in this TN - see

@@ -3,10 +3,16 @@
 import itertools
 
 import numpy
-from autoray import do, reshape, transpose, dag, infer_backend, get_dtype_name
+from autoray import (
+    do,
+    reshape,
+    infer_backend,
+    get_dtype_name,
+    compose
+)
 
 from ..core import njit, qarray
-from ..utils import compose
+from ..utils import compose as fn_compose
 from ..linalg.base_linalg import norm_fro_dense
 
 
@@ -57,6 +63,8 @@ def asarray(array):
 
 
 def ndim(array):
+    """The number of dimensions of an array.
+    """
     try:
         return array.ndim
     except AttributeError:
@@ -66,18 +74,24 @@ def ndim(array):
 # ------------- miscelleneous other backend agnostic functions -------------- #
 
 def iscomplex(x):
+    """Does ``x`` have a complex dtype?
+    """
     if infer_backend(x) == 'builtins':
         return isinstance(x, complex)
     return 'complex' in get_dtype_name(x)
 
 
+@compose
 def norm_fro(x):
-    if isinstance(x, numpy.ndarray):
-        return norm_fro_dense(x.reshape(-1))
+    """The frobenius norm of an array.
+    """
     try:
-        return do('linalg.norm', reshape(x, [-1]), 2)
+        return do('linalg.norm', reshape(x, (-1,)), 2)
     except AttributeError:
         return do('sum', do('multiply', do('conj', x), x)) ** 0.5
+
+
+norm_fro.register("numpy", norm_fro_dense)
 
 
 def sensibly_scale(x):
@@ -85,100 +99,6 @@ def sensibly_scale(x):
     networks consisting of such arrays do not have gigantic norms.
     """
     return x / norm_fro(x)**(1.5 / ndim(x))
-
-
-def _unitize_qr(x):
-    """Perform isometrization using the QR decomposition.
-    """
-    fat = x.shape[0] < x.shape[1]
-    if fat:
-        x = transpose(x)
-
-    Q = do('linalg.qr', x)[0]
-    if fat:
-        Q = transpose(Q)
-
-    return Q
-
-
-def _unitize_svd(x):
-    fat = x.shape[0] < x.shape[1]
-    if fat:
-        x = transpose(x)
-
-    Q = do('linalg.svd', x)[0]
-    if fat:
-        Q = transpose(Q)
-
-    return Q
-
-
-def _unitize_exp(x):
-    r"""Perform isometrization using the using anti-symmetric matrix
-    exponentiation.
-
-    .. math::
-
-            U_A = \exp{A - A^\dagger}
-
-    If ``x`` is rectangular it is completed with zeros first.
-    """
-    m, n = x.shape
-    d = max(m, n)
-    x = do('pad', x, [[0, d - m], [0, d - n]], 'constant', constant_values=0.0)
-    expx = do('linalg.expm', x - dag(x))
-    return expx[:m, :n]
-
-
-def _unitize_modified_gram_schmidt(A):
-    """Perform isometrization explicitly using the modified Gram Schmidt
-    procedure.
-    """
-    m, n = A.shape
-
-    thin = m > n
-    if thin:
-        A = do('transpose', A)
-
-    Q = []
-    for j in range(0, min(m, n)):
-
-        q = A[j, :]
-        for i in range(0, j):
-            rij = do('tensordot', do('conj', Q[i]), q, 1)
-            q = q - rij * Q[i]
-
-        Q.append(q / do('linalg.norm', q, 2))
-
-    Q = do('stack', tuple(Q), axis=0, like=A)
-
-    if thin:
-        Q = do('transpose', Q)
-
-    return Q
-
-
-_UNITIZE_METHODS = {
-    'qr': _unitize_qr,
-    'svd': _unitize_svd,
-    'exp': _unitize_exp,
-    'mgs': _unitize_modified_gram_schmidt,
-}
-
-
-def unitize(x, method='qr'):
-    """Generate a isometric (or unitary if square) matrix from array ``x``.
-
-    Parameters
-    ----------
-    x : array
-        The matrix to generate the isometry from.
-    method : {'qr', 'exp', 'mgs'}, optional
-        The method used to generate the isometry. Note ``'qr'`` is the fastest
-        and most robust but, for example, some libraries cannot back-propagate
-        through it.
-    """
-    return _UNITIZE_METHODS[method](x)
 
 
 @njit
@@ -532,4 +452,4 @@ class PArray:
         ``g(f(params))``.
         """
         f = self.fn
-        self.fn = compose(g, f)
+        self.fn = fn_compose(g, f)
