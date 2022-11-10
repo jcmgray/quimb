@@ -981,76 +981,76 @@ def apply_su4_conj(
 GATE_FUNCTIONS = {
     # constant single qubit gates
     'H': build_gate_1(qu.hadamard(), tags='H'),
-    'H_conj': build_gate_1(qu.hadamard().conj(), tags='H'),
+    'H_CONJ': build_gate_1(qu.hadamard().conj(), tags='H'),
     'X': build_gate_1(qu.pauli('X'), tags='X'),
-    'X_conj': build_gate_1(qu.pauli('X').conj(), tags='X'),
+    'X_CONJ': build_gate_1(qu.pauli('X').conj(), tags='X'),
     'Y': build_gate_1(qu.pauli('Y'), tags='Y'),
-    'Y_conj': build_gate_1(qu.pauli('Y').conj(), tags='Y'),
+    'Y_CONJ': build_gate_1(qu.pauli('Y').conj(), tags='Y'),
     'Z': build_gate_1(qu.pauli('Z'), tags='Z'),
-    'Z_conj': build_gate_1(qu.pauli('Z').conj(), tags='Z'),
+    'Z_CONJ': build_gate_1(qu.pauli('Z').conj(), tags='Z'),
     'S': build_gate_1(qu.S_gate(), tags='S'),
-    'S_conj': build_gate_1(qu.S_gate().conj(), tags='S'),
+    'S_CONJ': build_gate_1(qu.S_gate().conj(), tags='S'),
     'T': build_gate_1(qu.T_gate(), tags='T'),
-    'T_conj': build_gate_1(qu.T_gate().conj(), tags='T'),
+    'T_CONJ': build_gate_1(qu.T_gate().conj(), tags='T'),
     'X_1_2': build_gate_1(qu.Xsqrt(), tags='X_1/2'),
-    'X_1_2_conj': build_gate_1(qu.Xsqrt().conj(), tags='X_1/2'),
+    'X_1_2_CONJ': build_gate_1(qu.Xsqrt().conj(), tags='X_1/2'),
     'Y_1_2': build_gate_1(qu.Ysqrt(), tags='Y_1/2'),
-    'Y_1_2_conj': build_gate_1(qu.Ysqrt().conj(), tags='Y_1/2'),
+    'Y_1_2_CONJ': build_gate_1(qu.Ysqrt().conj(), tags='Y_1/2'),
     'Z_1_2': build_gate_1(qu.Zsqrt(), tags='Z_1/2'),
-    'Z_1_2_conj': build_gate_1(qu.Zsqrt().conj(), tags='Z_1/2'),
+    'Z_1_2_CONJ': build_gate_1(qu.Zsqrt().conj(), tags='Z_1/2'),
     'W_1_2': build_gate_1(qu.Wsqrt(), tags='W_1/2'),
-    'W_1_2_conj': build_gate_1(qu.Wsqrt().conj(), tags='W_1/2'),
+    'W_1_2_CONJ': build_gate_1(qu.Wsqrt().conj(), tags='W_1/2'),
     'HZ_1_2': build_gate_1(qu.Wsqrt(), tags='W_1/2'),
-    'HZ_1_2_conj': build_gate_1(qu.Wsqrt().conj(), tags='W_1/2'),
+    'HZ_1_2_CONJ': build_gate_1(qu.Wsqrt().conj(), tags='W_1/2'),
     # constant two qubit gates
     'CNOT': build_gate_2(qu.CNOT(), tags='CNOT'),
-    'CNOT_conj': build_gate_2(qu.CNOT().conj(), tags='CNOT'),
+    'CNOT_CONJ': build_gate_2(qu.CNOT().conj(), tags='CNOT'),
     'CX': build_gate_2(qu.cX(), tags='CX'),
-    'CX_conj': build_gate_2(qu.cX().conj(), tags='CX'),
+    'CX_CONJ': build_gate_2(qu.cX().conj(), tags='CX'),
     'CY': build_gate_2(qu.cY(), tags='CY'),
-    'CY_conj': build_gate_2(qu.cY().conj(), tags='CY'),
+    'CY_CONJ': build_gate_2(qu.cY().conj(), tags='CY'),
     'CZ': build_gate_2(qu.cZ(), tags='CZ'),
-    'CZ_conj': build_gate_2(qu.cZ().conj(), tags='CZ'),
+    'CZ_CONJ': build_gate_2(qu.cZ().conj(), tags='CZ'),
     'IS': build_gate_2(qu.iswap(), tags='ISWAP'),
-    'IS_conj': build_gate_2(qu.iswap().conj(), tags='ISWAP'),
+    'IS_CONJ': build_gate_2(qu.iswap().conj(), tags='ISWAP'),
     'ISWAP': build_gate_2(qu.iswap(), tags='ISWAP'),
-    'ISWAP_conj': build_gate_2(qu.iswap().conj(), tags='ISWAP'),
+    'ISWAP_CONJ': build_gate_2(qu.iswap().conj(), tags='ISWAP'),
     # special non-tensor gates
     'IDEN': lambda *args, **kwargs: None,
     'SWAP': apply_swap,
     # single parametrizable gates
     'RX': apply_Rx,
-    'RX_conj': apply_Rx_conj,
+    'RX_CONJ': apply_Rx_conj,
     'RY': apply_Ry,
-    'RY_conj': apply_Ry_conj,
+    'RY_CONJ': apply_Ry_conj,
     'RZ': apply_Rz,
-    'RZ_conj': apply_Rz_conj,
+    'RZ_CONJ': apply_Rz_conj,
     'U3': apply_U3,
-    'U3_conj': apply_U3_conj,
+    'U3_CONJ': apply_U3_conj,
     'U2': apply_U2,
     'U2_conj': apply_U2_conj,
     'U1': apply_U1,
     'U1_conj': apply_U1_conj,
     # two qubit parametrizable gates
     'CU3': apply_cu3,
-    'CU3_conj': apply_cu3_conj,
+    'CU3_CONJ': apply_cu3_conj,
     'CU2': apply_cu2,
-    'CU2_conj': apply_cu2_conj,
+    'CU2_CONJ': apply_cu2_conj,
     'CU1': apply_cu1,
-    'CU1_conj': apply_cu1_conj,
+    'CU1_CONJ': apply_cu1_conj,
     'FS': apply_fsim,
-    'FS_conj': apply_fsim_conj,
+    'FS_CONJ': apply_fsim_conj,
     'FSIM': apply_fsim,
-    'FSIM_conj': apply_fsim_conj,
+    'FSIM_CONJ': apply_fsim_conj,
     'FSIMT': apply_fsimt,
-    'FSIMT_conj': apply_fsimt_conj,
+    'FSIMT_CONJ': apply_fsimt_conj,
     'FSIMG': apply_fsimg,
-    'FSIMG_conj': apply_fsimg_conj,
+    'FSIMG_CONJ': apply_fsimg_conj,
     'RZZ': apply_rzz,
     'RXX': apply_rxx,
     'RYY': apply_ryy,
     'SU4': apply_su4,
-    'SU4_conj': apply_su4_conj,
+    'SU4_CONJ': apply_su4_conj,
 }
 
 ONE_QUBIT_PARAM_GATES = {'RX', 'RY', 'RZ', 'U3', 'U2', 'U1'}
@@ -2025,6 +2025,61 @@ class Circuit:
             FutureWarning
         )
         return self.get_uni(transposed=True)
+
+
+    def get_uni_(self, transposed=False):
+        """Tensor network representation of the unitary operator (i.e. with
+        the initial state removed).
+        """
+        U = self.rho
+
+        if transposed:
+            # rename the initial state rand_uuid bonds to 1D site inds
+            ixmap = {self.ket_site_ind(i): self.bra_site_ind(i)
+                     for i in range(self.N)}
+        else:
+            ixmap = {}
+
+        # the first `N` tensors should be the tensors of input state
+        tids = tuple(U.tensor_map)[:self.N]
+        for i, tid in enumerate(tids):
+            t = U._pop_tensor(tid)
+            old_ix, = t.inds
+
+            if transposed:
+                ixmap[old_ix] = f'k{i}'
+            else:
+                ixmap[old_ix] = f'b{i}'
+
+        U.reindex_(ixmap)
+        U.view_as_(
+            TensorNetwork1DOperator,
+            upper_ind_id=self._ket_site_ind_id,
+            lower_ind_id=self._bra_site_ind_id,
+        )
+
+        return U
+
+    @property
+    def U_super(self):
+        import warnings
+        warnings.warn(
+            "In future the tensor network returned by ``circ.uni`` will not "
+            "be transposed as it is currently, to match the expectation from "
+            "``U = circ.uni.to_dense()`` behaving like ``U @ psi``. You can "
+            "retain this behaviour with ``circ.get_uni(transposed=True)``.",
+            FutureWarning
+        )
+        return self.get_uni_(transposed=True)
+
+
+
+
+
+
+
+
+
 
     def get_reverse_lightcone_tags_partial(self, psi, where):
         """Get the tags of gates in this partial circuit corresponding to the 'reverse'
