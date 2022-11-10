@@ -267,9 +267,9 @@ def draw_tn(
 
     # automatically decide whether to show tags and inds
     if show_inds is None:
-        show_inds = (tn.num_tensors <= 20)
+        show_inds = (len(tn.outer_inds()) <= 20)
     if show_tags is None:
-        show_tags = (tn.num_tensors <= 20)
+        show_tags = (len(tn.tag_map) <= 20)
 
     if isdark is None:
         isdark = sum(to_rgb(mpl.rcParams['figure.facecolor'])) / 3 < 0.5
@@ -413,6 +413,7 @@ def draw_tn(
 
     if ax is None:
         fig, ax = plt.subplots(figsize=figsize, constrained_layout=True)
+        fig.patch.set_alpha(0.0)
         ax.axis('off')
         ax.set_aspect('equal')
         if title is not None:

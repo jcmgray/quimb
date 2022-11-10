@@ -313,7 +313,7 @@ class LocalHamGen:
         ----------
         ordering : {'sort', None, 'random'}, optional
             An ordering of the termns, or an argument to be supplied to
-            :meth:`quimb.tensor.tensor_gen_tebd.LocalHamGen.get_auto_ordering`
+            :meth:`quimb.tensor.tensor_arbgeom_tebd.LocalHamGen.get_auto_ordering`
             to generate this automatically.
         show_norm : bool, optional
             Show the norm of each term as edge labels.
