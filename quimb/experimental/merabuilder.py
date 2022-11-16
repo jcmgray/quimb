@@ -187,7 +187,7 @@ class TensorNetworkGenIso(TensorNetworkGenVector):
         self.reindex_(reindex_map)
         self |= IsoTensor(
             data=G,
-            inds=above_ix + below_ix,
+            inds=below_ix + above_ix,
             left_inds=left_inds,
             tags=tags,
         )
@@ -246,7 +246,7 @@ class TensorNetworkGenIso(TensorNetworkGenVector):
         elif operation in ("iso", "tree"):
             current_size = prod(shape)
             new_size = min(current_size, max_bond)
-            shape = (new_size, *shape)
+            shape = (*shape, new_size)
         else:  # "cap"
             shape = tuple(shape)
 
@@ -632,7 +632,7 @@ class MERA(TensorNetwork1DVector, TensorNetworkGenIso):
         uni_fill_fn=None,
         iso_fill_fn=None,
         cap_fill_fn=None,
-        **mera_opts
+        **kwargs
     ):
         """Create a 1D MERA using ``fill_fn(shape) -> array_like`` to fill the
         tensors.
@@ -669,10 +669,10 @@ class MERA(TensorNetwork1DVector, TensorNetworkGenIso):
             A function which takes a shape and returns an array_like of that
             shape. This is used to fill the cap tensors. If ``None`` then
             ``fill_fn`` is used.
-        mera_opts
+        kwargs
             Supplied to ``TensorNetworkGenIso.__init__``.
         """
-        mera = cls.empty(sites=range(L), phys_dim=phys_dim, **mera_opts)
+        mera = cls.empty(sites=range(L), phys_dim=phys_dim, **kwargs)
         mera._L = L
 
         if uni_fill_fn is None:
@@ -680,32 +680,32 @@ class MERA(TensorNetwork1DVector, TensorNetworkGenIso):
         if iso_fill_fn is None:
             iso_fill_fn = fill_fn
         if cap_fill_fn is None:
-            cap_fill_fn = fill_fn
+            cap_fill_fn = iso_fill_fn
 
-        for l in itertools.count():
+        for lyr in itertools.count():
             remaining_sites = sorted(mera._open_upper_sites)
 
             if len(remaining_sites) <= block_size + 1:
                 # can terminate with a 'cap'
                 mera.layer_gate_fill_fn(
-                    cap_fill_fn, "cap", remaining_sites, D, tags=f'LAYER{l}',
+                    cap_fill_fn, "cap", remaining_sites, D, tags=f'LAYER{lyr}',
                 )
                 break
 
             # else add a disentangling and grouping layer
             uni_groups, iso_groups = calc_1d_unis_isos(
-                remaining_sites, block_size, cyclic, group_from_right=l % 2,
+                remaining_sites, block_size, cyclic, group_from_right=lyr % 2,
             )
             for uni_sites in uni_groups:
                 mera.layer_gate_fill_fn(
-                    uni_fill_fn, "uni", uni_sites, D, tags=f'LAYER{l}',
+                    uni_fill_fn, "uni", uni_sites, D, tags=f'LAYER{lyr}',
                 )
             for iso_sites in iso_groups:
                 mera.layer_gate_fill_fn(
-                    iso_fill_fn, "iso", iso_sites, D, tags=f'LAYER{l}',
+                    iso_fill_fn, "iso", iso_sites, D, tags=f'LAYER{lyr}',
                 )
 
-        mera._num_layers = l + 1
+        mera._num_layers = lyr + 1
 
         return mera
 
@@ -718,16 +718,41 @@ class MERA(TensorNetwork1DVector, TensorNetworkGenIso):
         block_size=2,
         phys_dim=2,
         cyclic=True,
-        **mera_opts
+        isometrize_method="qr",
+        **kwargs
     ):
-        """Return a random (un-isometrized) MERA.
+        """Return a random (optionally isometrized) MERA.
+
+        Parameters
+        ----------
+        L : int
+            The number of sites.
+        D : int
+            The maximum bond dimension.
+        seed : int, optional
+            A random seed.
+        block_size : int, optional
+            The size of the isometry blocks. Binary MERA is the default,
+            ternary MERA is ``block_size=3``.
+        phys_dim : int, optional
+            The dimension of the physical indices.
+        cyclic : bool, optional
+            Whether to apply disentangler / unitaries across the boundary. The
+            isometries will never be applied across the boundary, but since
+            they always form a tree such a bipartition is natural.
+        isometrize_method : str or None, optional
+            If given, the method to use to isometrize the MERA. If ``None``
+            then the MERA is not isometrized.
         """
         import numpy as np
         rng = np.random.default_rng(seed)
-        return cls.from_fill_fn(
+        mera = cls.from_fill_fn(
             lambda shape: rng.normal(size=shape),
-            L, D, block_size, phys_dim, cyclic, **mera_opts,
+            L, D, block_size, phys_dim, cyclic, **kwargs,
         )
+        if isometrize_method is not None:
+            mera.isometrize_(isometrize_method)
+        return mera
 
     @property
     def num_layers(self):
