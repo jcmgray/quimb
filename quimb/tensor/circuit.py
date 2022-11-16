@@ -3793,6 +3793,7 @@ class Circuit:
 
                 # update the actual tensor
                 self._psi[tag].params = t.params
+                self._rho[tag].params = t.params
 
                 # update the gate entry
                 if label in ONE_QUBIT_PARAM_GATES:
