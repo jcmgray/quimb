@@ -9,7 +9,7 @@ from collections.abc import Iterable
 
 import tqdm
 import numpy as np
-from autoray import to_numpy, astype, get_dtype_name, do
+from autoray import to_numpy, astype, get_dtype_name
 
 from .contraction import (
     contract_backend,
@@ -116,12 +116,12 @@ class Vectorizer:
                                              self.iscomplexes, self.dtypes):
             if not cmplx:
                 array = vector[i:i + size]
-                array = do("reshape", array, shape)
+                array.shape = shape
                 i += size
             else:
                 array = vector[i:i + 2 * size]
                 array = array.view(equivalent_complex_type(array))
-                array = do("reshape", array, shape)
+                array.shape = shape
                 i += 2 * size
 
             if get_dtype_name(array) != dtype:
