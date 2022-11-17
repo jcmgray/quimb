@@ -15,6 +15,7 @@ try:
     valmap = cytoolz.valmap
     partitionby = cytoolz.partitionby
     concatv = cytoolz.concatv
+    partition = cytoolz.partition
     partition_all = cytoolz.partition_all
     compose = cytoolz.compose
     identity = cytoolz.identity
@@ -29,6 +30,7 @@ except ImportError:
     partition_all = toolz.partition_all
     merge_with = toolz.merge_with
     valmap = toolz.valmap
+    partition = toolz.partition
     partitionby = toolz.partitionby
     concatv = toolz.concatv
     partition_all = toolz.partition_all
@@ -43,6 +45,9 @@ _CHECK_OPT_MSG = "Option `{}` should be one of {}, but got '{}'."
 
 
 def check_opt(name, value, valid):
+    """Check whether ``value`` takes one of ``valid`` options, and raise an
+    informative error if not.
+    """
     if value not in valid:
         raise ValueError(_CHECK_OPT_MSG.format(name, valid, value))
 
@@ -153,6 +158,8 @@ else:  # pragma: no cover
 
 
 def deprecated(fn, old_name, new_name):
+    """Mark a function as deprecated, and indicate the new name.
+    """
 
     def new_fn(*args, **kwargs):
         import warnings
@@ -186,6 +193,8 @@ def pairwise(iterable):
 
 
 def print_multi_line(*lines, max_width=None):
+    """Print multiple lines, with a maximum width.
+    """
     if max_width is None:
         import shutil
         max_width, _ = shutil.get_terminal_size()
@@ -221,6 +230,58 @@ def print_multi_line(*lines, max_width=None):
                         "..." if j == n_lines // 2 else "   ",
                     )
                 print(("{:^" + str(max_width) + "}").format("..."))
+
+
+def format_number_with_error(x, err):
+    """Given ``x`` with error ``err``, format a string showing the relevant
+    digits of ``x`` with two significant digits of the error bracketed, and
+    overall exponent if necessary.
+
+    Parameters
+    ----------
+    x : float
+        The value to print.
+    err : float
+        The error on ``x``.
+
+    Returns
+    -------
+    str
+
+    Examples
+    --------
+
+        >>> print_number_with_uncertainty(0.1542412, 0.0626653)
+        '0.154(63)'
+
+        >>> print_number_with_uncertainty(-128124123097, 6424)
+        '-1.281241231(64)e+11'
+
+    """
+    # compute an overall scaling for both values
+    x_exponent = max(
+        int(f'{x:e}'.split('e')[1]),
+        int(f'{err:e}'.split('e')[1]) + 1,
+    )
+    # for readability try and show values close to 1 with no exponent
+    hide_exponent = (
+         # nicer showing 0.xxx(yy) than x.xx(yy)e-1
+        (x_exponent in (0, -1)) or
+        # also nicer showing xx.xx(yy) than x.xxx(yy)e+1
+        ((x_exponent == +1) and (err < abs(x / 10)))
+    )
+    if hide_exponent:
+        suffix = ""
+    else:
+        x = x / 10**x_exponent
+        err = err / 10**x_exponent
+        suffix = f"e{x_exponent:+03d}"
+
+    # work out how many digits to print
+    # format the main number and bracketed error
+    mantissa, exponent = f'{err:.1e}'.split('e')
+    mantissa, exponent = mantissa.replace('.', ''), int(exponent)
+    return f'{x:.{abs(exponent) + 1}f}({mantissa}){suffix}'
 
 
 def save_to_disk(obj, fname, **dump_opts):
@@ -421,3 +482,104 @@ def gen_bipartitions(it):
             for b, x in zip(bitstring_repr, it):
                 (l if b == '0' else r).append(x)
             yield l, r
+
+
+
+def is_not_container(x):
+    """The default ``is_leaf`` definition for pytree functions. Anything that
+    is not a tuple, list or dict returns ``True``.
+    """
+    return not isinstance(x, (tuple, list, dict))
+
+
+def tree_map(f, tree, is_leaf=is_not_container):
+    """Map ``f`` over all leaves in ``tree``, rerturning a new pytree.
+
+    Parameters
+    ----------
+    f : callable
+        A function to apply to all leaves in ``tree``.
+    tree : pytree
+        A nested sequence of tuples, lists, dicts and other objects.
+    is_leaf : callable
+        A function to determine if an object is a leaf, ``f`` is only applied
+        to objects for which ``is_leaf(x)`` returns ``True``.
+
+    Returns
+    -------
+    pytree
+    """
+    if is_leaf(tree):
+        return f(tree)
+    elif isinstance(tree, (list, tuple)):
+        return type(tree)(tree_map(f, x, is_leaf) for x in tree)
+    elif isinstance(tree, dict):
+        return {k: tree_map(f, v, is_leaf) for k, v in tree.items()}
+    else:
+        return tree
+
+
+def tree_apply(f, tree, is_leaf=is_not_container):
+    """Apply ``f`` to all objs in ``tree``, no new pytree is built.
+
+    Parameters
+    ----------
+    f : callable
+        A function to apply to all leaves in ``tree``.
+    tree : pytree
+        A nested sequence of tuples, lists, dicts and other objects.
+    is_leaf : callable
+        A function to determine if an object is a leaf, ``f`` is only applied
+        to objects for which ``is_leaf(x)`` returns ``True``.
+    """
+    if is_leaf(tree):
+        f(tree)
+    elif isinstance(tree, (list, tuple)):
+        for x in tree:
+            tree_apply(f, x, is_leaf)
+    elif isinstance(tree, dict):
+        for x in tree.values():
+            tree_apply(f, x, is_leaf)
+
+
+def tree_flatten(tree, is_leaf=is_not_container):
+    """Flatten ``tree`` into a list of objs.
+
+    Parameters
+    ----------
+    tree : pytree
+        A nested sequence of tuples, lists, dicts and other objects.
+    is_leaf : callable
+        A function to determine if an object is a leaf, only objects for which
+        ``is_leaf(x)`` returns ``True`` are returned in the flattened list.
+
+    Returns
+    -------
+    list
+    """
+    flat = []
+    tree_apply(flat.append, tree, is_leaf)
+    return flat
+
+
+def tree_unflatten(objs, tree, is_leaf=is_not_container):
+    """Unflatten ``objs`` into a pytree of the same structure as ``tree``.
+
+    Parameters
+    ----------
+    objs : sequence
+        A sequence of objects to be unflattened into a pytree.
+    tree : pytree
+        A nested sequence of tuples, lists, dicts and other objects, the objs
+        will be inserted into a new pytree of the same structure.
+    is_leaf : callable
+        A function to determine if an object is a leaf, only objects for which
+        ``is_leaf(x)`` returns ``True`` will have the next item from ``objs``
+        inserted.
+
+    Returns
+    -------
+    pytree
+    """
+    objs = iter(objs)
+    return tree_map(lambda _: next(objs), tree, is_leaf)

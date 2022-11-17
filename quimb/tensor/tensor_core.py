@@ -24,11 +24,11 @@ except ImportError:
     from ..core import common_type as get_common_dtype
 
 from ..core import (qarray, prod, realify_scalar, vdot, make_immutable)
-from ..utils import (check_opt, oset, concat, frequencies, unique,
-                     valmap, ensure_dict, LRU, gen_bipartitions)
+from ..utils import (check_opt, oset, concat, frequencies, unique, deprecated,
+                     valmap, ensure_dict, LRU, gen_bipartitions, tree_map)
 from ..gen.rand import randn, seed_rand, rand_matrix, rand_uni
 from . import decomp
-from .array_ops import (iscomplex, norm_fro, unitize, ndim, asarray, PArray,
+from .array_ops import (iscomplex, norm_fro, ndim, asarray, PArray,
                         find_diag_axes, find_antidiag_axes, find_columns)
 from .drawing import draw_tn, visualize_tensor
 
@@ -1589,6 +1589,43 @@ class Tensor(object):
             raise ValueError(f"The 'left' indices {self.left_inds} are "
                              f"not found in {self.inds}.")
 
+    def get_params(self):
+        """A simple function that returns the 'parameters' of the underlying
+        data array. This is mainly for providing an interface for 'structured'
+        arrays e.g. with block sparsity to interact with optimization.
+        """
+        if hasattr(self.data, "get_params"):
+            params = self.data.get_params()
+        elif hasattr(self.data, "params"):
+            params = self.data.params
+        else:
+            params = self.data
+
+        if isinstance(params, qarray):
+            # some optimizers don't like ndarray subclasses such as qarray
+            params = params.A
+
+        return params
+
+    def set_params(self, params):
+        """A simple function that sets the 'parameters' of the underlying
+        data array. This is mainly for providing an interface for 'structured'
+        arrays e.g. with block sparsity to interact with optimization.
+        """
+        if hasattr(self.data, "set_params"):
+            self.data.set_params(params)
+        elif hasattr(self.data, "params"):
+            self.data.params = params
+        else:
+            self._data = params
+
+    def apply_to_arrays(self, fn):
+        """Apply the function ``fn`` to the underlying data array(s). This
+        is meant for changing how the raw arrays are backed (e.g. converting
+        between dtypes or libraries) but not their 'numerical meaning'.
+        """
+        self.set_params(tree_map(fn, self.get_params()))
+
     def isel(self, selectors, inplace=False):
         """Select specific values for some dimensions/indices of this tensor,
         thereby removing them. Analogous to ``X[:, :, 3, :, :]`` with arrays.
@@ -2168,7 +2205,8 @@ class Tensor(object):
             Mapping like: ``{new_ind: sequence of existing inds, ...}`` or an
             ordered mapping like ``[(new_ind_1, old_inds_1), ...]`` in which
             case the output tensor's fused inds will be ordered. In both cases
-            the new indices are created at the beginning of the tensor's shape.
+            the new indices are created at the minimum axis of any of the
+            indices that will be fused.
 
         Returns
         -------
@@ -2182,21 +2220,28 @@ class Tensor(object):
         else:
             new_fused_inds, fused_inds = zip(*fuse_map)
 
-        unfused_inds = tuple(i for i in t.inds if not
-                             any(i in fs for fs in fused_inds))
+        # compute numerical axes groups to supply to the array function fuse
+        ind2ax = {ind: ax for ax, ind in enumerate(t.inds)}
+        axes_groups = []
+        gax0 = float('inf')
+        for fused_ind_group in fused_inds:
+            group = []
+            for ind in fused_ind_group:
+                gax = ind2ax.pop(ind)
+                gax0 = min(gax0, gax)
+                group.append(gax)
+            axes_groups.append(group)
 
-        # transpose tensor to bring groups of fused inds to the beginning
-        t.transpose_(*concat(fused_inds), *unfused_inds)
-
-        # for each set of fused dims, group into product, then add remaining
-        dims = iter(t.shape)
-        dims = [prod(next(dims) for _ in fs) for fs in fused_inds] + list(dims)
-
-        # create new tensor with new + remaining indices
+        # modify new tensor with new + remaining indices
         #     + drop 'left' marked indices since they might be fused
-        t.modify(data=reshape(t.data, dims),
-                 inds=(*new_fused_inds, *unfused_inds))
-
+        t.modify(
+            data=do("fuse", t.data, *axes_groups),
+            inds=(
+                *t.inds[:gax0],  # by defn these are not fused
+                *new_fused_inds,
+                *(ix for ix in t.inds[gax0:] if ix in ind2ax),
+            ),
+        )
         return t
 
     fuse_ = functools.partialmethod(fuse, inplace=True)
@@ -2265,7 +2310,8 @@ class Tensor(object):
         for each of inds in ``inds_seqs``. E.g. to convert several sites
         into a density matrix: ``T.to_dense(('k0', 'k1'), ('b0', 'b1'))``.
         """
-        x = self.fuse([(str(i), ix) for i, ix in enumerate(inds_seq)]).data
+        fuse_map = [(f"__d{i}__", ix) for i, ix in enumerate(inds_seq)]
+        x = self.fuse(fuse_map).data
         if (infer_backend(x) == 'numpy') and to_qarray:
             return qarray(x)
         return x
@@ -2351,7 +2397,7 @@ class Tensor(object):
         T.modify(data=(T.data + TH.data) / 2)
         return T
 
-    def unitize(self, left_inds=None, inplace=False, method='qr'):
+    def isometrize(self, left_inds=None, inplace=False, method='qr'):
         r"""Make this tensor unitary (or isometric) with respect to
         ``left_inds``. The underlying method is set by ``method``.
 
@@ -2365,13 +2411,13 @@ class Tensor(object):
         method : {'qr', 'exp', 'mgs'}, optional
             How to generate the unitary matrix. The options are:
 
-            - 'qr': use a QR decomposition directly.
+            - 'qr': use a (stabilized) QR decomposition directly.
+            - 'svd': use the left singular vectors of the SVD
             - 'exp': exponential the padded, anti-hermitian part of the array
             - 'mgs': use a explicit modified-gram-schmidt procedure
 
             Generally, 'qr' is the fastest and best approach, however currently
-            ``tensorflow`` cannot back-propagate through for instance, making
-            the other two methods necessary.
+            ``tensorflow`` cannot back-propagate through it for instance.
 
         Returns
         -------
@@ -2398,7 +2444,7 @@ class Tensor(object):
 
         # fuse this tensor into a matrix and 'isometrize' it
         x = self.to_dense(L_inds, R_inds)
-        x = unitize(x, method=method)
+        x = decomp.isometrize(x, method=method)
 
         # turn the array back into a tensor
         x = reshape(x, [self.ind_size(ix) for ix in LR_inds])
@@ -2413,7 +2459,9 @@ class Tensor(object):
 
         return Tu
 
-    unitize_ = functools.partialmethod(unitize, inplace=True)
+    isometrize_ = functools.partialmethod(isometrize, inplace=True)
+    unitize = deprecated(isometrize, 'unitize', 'isometrize')
+    unitize_ = deprecated(isometrize_, 'unitize_', 'isometrize_')
 
     def randomize(self, dtype=None, inplace=False, **randn_opts):
         """Randomize the entries of this tensor.
@@ -3928,10 +3976,12 @@ class TensorNetwork(object):
         return tuple(x[0] for x in ts_and_sorted_tags)
 
     def apply_to_arrays(self, fn):
-        """Modify every tensor's array inplace by applying ``fn`` to it.
+        """Modify every tensor's array inplace by applying ``fn`` to it. This
+        is meant for changing how the raw arrays are backed (e.g. converting
+        between dtypes or libraries) but not their 'numerical meaning'.
         """
         for t in self:
-            t.modify(apply=fn)
+            t.apply_to_arrays(fn)
 
     # ----------------- selecting and splitting the network ----------------- #
 
@@ -6908,7 +6958,7 @@ class TensorNetwork(object):
 
         # contracting everything to single output
         if all_tags:
-            return tensor_contract(*self, **opts)
+            return tensor_contract(*self.tensor_map.values(), **opts)
 
         # else just contract those tensors specified by tags.
         return self.contract_tags(tags, inplace=inplace, **opts)
@@ -7293,8 +7343,25 @@ class TensorNetwork(object):
 
     squeeze_ = functools.partialmethod(squeeze, inplace=True)
 
-    def unitize(self, method='qr', allow_no_left_inds=False, inplace=False):
-        """
+    def isometrize(self, method='qr', allow_no_left_inds=False, inplace=False):
+        """Project every tensor in this network into an isometric form,
+        assuming they have ``left_inds`` marked.
+
+        Parameters
+        ----------
+        method : {"qr", "svd", "exp", "mgs"}, optional
+            The method to use to project the tensors into isometric form. The
+            various methods have different advantages when it comes to speed
+            and gradient stability etc.
+        allow_no_left_inds : bool, optional
+            If ``True`` then allow tensors with no ``left_inds`` to be
+            left alone, rather than raising an error.
+        inplace : bool, optional
+            If ``True`` then perform the operation in-place.
+
+        Returns
+        -------
+        TensorNetwork
         """
         tn = self if inplace else self.copy()
         for t in tn:
@@ -7303,10 +7370,12 @@ class TensorNetwork(object):
                     continue
                 raise ValueError("The tensor {} doesn't have left indices "
                                  "marked using the `left_inds` attribute.")
-            t.unitize_(method=method)
+            t.isometrize_(method=method)
         return tn
 
-    unitize_ = functools.partialmethod(unitize, inplace=True)
+    isometrize_ = functools.partialmethod(isometrize, inplace=True)
+    unitize = deprecated(isometrize, 'unitize', 'isometrize')
+    unitize_ = deprecated(isometrize_, 'unitize_', 'isometrize_')
 
     def randomize(self, dtype=None, seed=None, inplace=False, **randn_opts):
         """Randomize every tensor in this TN - see
@@ -7461,7 +7530,28 @@ class TensorNetwork(object):
         inds_to_expand=None,
         inplace=False,
     ):
-        """Increase the dimension of bonds to at least ``new_bond_dim``.
+        """Increase the dimension of all or some of the bonds in this tensor
+        network to at least ``new_bond_dim``, optinally adding some random
+        noise to the new entries.
+
+        Parameters
+        ----------
+        new_bond_dim : int
+            The minimum bond dimension to expand to, if the bond dimension is
+            already larger than this it will be left unchanged.
+        rand_strength : float, optional
+            The strength of random noise to add to the new array entries,
+            if any. The noise is drawn from a normal distribution with
+            standard deviation ``rand_strength``.
+        inds_to_expand : sequence of str, optional
+            The indices to expand, if not all.
+        inplace : bool, optional
+            Whether to expand this tensor network in place, or return a new
+            one.
+
+        Returns
+        -------
+        TensorNetwork
         """
         tn = self if inplace else self.copy()
 
@@ -9117,13 +9207,23 @@ class PTensor(Tensor):
     def fn(self, x):
         self._parray.fn = x
 
+    def get_params(self):
+        """Get the parameters of this ``PTensor``.
+        """
+        return self._parray.params
+
+    def set_params(self, params):
+        """Set the parameters of this ``PTensor``.
+        """
+        self._parray.params = params
+
     @property
     def params(self):
-        return self._parray.params
+        return self.get_params()
 
     @params.setter
     def params(self, x):
-        self._parray.params = x
+        self.set_params(x)
 
     @property
     def shape(self):

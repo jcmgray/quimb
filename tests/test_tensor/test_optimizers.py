@@ -9,7 +9,7 @@ import opt_einsum as oe
 
 import quimb as qu
 import quimb.tensor as qtn
-from quimb.tensor.optimize import parse_network_to_backend, _get_tensor_data
+from quimb.tensor.optimize import Vectorizer, parse_network_to_backend
 
 
 found_torch = importlib.util.find_spec('torch') is not None
@@ -122,8 +122,6 @@ def ham_mbl_pbc_complex():
 
 
 def test_vectorizer():
-    from quimb.tensor.optimize import Vectorizer
-
     shapes = [(2, 3), (4, 5), (6, 7, 8)]
     dtypes = ['complex64', 'float32', 'complex64']
     arrays = [qu.randn(s, dtype=dtype) for s, dtype in zip(shapes, dtypes)]
@@ -140,6 +138,45 @@ def test_vectorizer():
     new_arrays = v.unpack(v.grad)
     for x, y in zip(grads, new_arrays):
         assert_allclose(x, y)
+
+
+def rand_array(rng):
+    ndim = rng.integers(1, 6)
+    shape = rng.integers(2, 6, size=ndim)
+    dtype = rng.choice(['float32', 'float64', 'complex64', 'complex128'])
+    x = rng.normal(shape).astype(dtype)
+    if 'complex' in dtype:
+        x += 1j * rng.normal(shape).astype(dtype)
+    return x
+
+
+def random_array_pytree(rng, max_depth=3):
+
+    def _recurse(d=0):
+        if d >= max_depth:
+            return rand_array(rng)
+        t = rng.choice(['array', 'list', 'tuple', 'dict'])
+        if t == 'array':
+            return rand_array(rng)
+        elif t == 'list':
+            return [_recurse(d + 1) for _ in range(rng.integers(2, 6))]
+        elif t == 'tuple':
+            return tuple([_recurse(d + 1) for _ in range(rng.integers(2, 6))])
+        elif t == 'dict':
+            cs = (chr(i) for i in range(ord('a'), ord('z') + 1))
+            return {
+                next(cs): _recurse(d + 1) for _ in range(rng.integers(2, 6))
+            }
+
+    return _recurse()
+
+
+def test_vectorizer_pytree():
+    tree = random_array_pytree(np.random.default_rng(666))
+    v = Vectorizer(tree)
+    new_tree = v.unpack()
+    assert tree is not new_tree
+    assert str(tree) == str(new_tree)
 
 
 @pytest.mark.parametrize('backend', [jax_case, autograd_case,
@@ -208,7 +245,7 @@ def test_parametrized_circuit(backend):
 
 
 def mera_norm_fn(mera):
-    return mera.unitize(method='mgs')
+    return mera.isometrize(method='mgs')
 
 
 def mera_local_expectation(mera, terms, where):
@@ -351,6 +388,6 @@ def test_shared_tags(tagged_qaoa_tn, backend):
         test_data = None
         for t in psi_opt.select_tensors(tag):
             if test_data is None:
-                test_data = _get_tensor_data(t)
+                test_data = t.get_params()
             else:
-                assert_allclose(test_data, _get_tensor_data(t))
+                assert_allclose(test_data, t.get_params())

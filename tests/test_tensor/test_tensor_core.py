@@ -408,10 +408,10 @@ class TestBasicTensorOperations:
         assert pp ^ all == pytest.approx(1.0)
 
     @pytest.mark.parametrize("method", ['qr', 'exp', 'mgs', 'svd'])
-    def test_unitize(self, method):
+    def test_isometrize(self, method):
         t = rand_tensor((2, 3, 4), 'abc')
         assert t.H @ t != pytest.approx(3.0)
-        t.unitize('b', inplace=True, method=method)
+        t.isometrize('b', inplace=True, method=method)
         assert t.H @ t == pytest.approx(3.0)
         assert t.inds == ('b', 'a', 'c')
 
@@ -660,8 +660,8 @@ class TestTensorFunctions:
         a = rand_tensor((1, 2, 3), inds='abc')
         b = rand_tensor((2, 3, 4), inds='bcd')
         qtn.tensor_fuse_squeeze(a, b)
-        assert a.inds == ('b', 'a')
-        assert a.shape == (6, 1)
+        assert a.inds == ('a', 'b')
+        assert a.shape == (1, 6)
         assert b.inds == ('b', 'd')
         assert b.shape == (6, 4)
 

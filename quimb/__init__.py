@@ -237,13 +237,17 @@ from .utils import (
     load_from_disk,
     oset,
     LRU,
+    tree_map,
+    tree_apply,
+    tree_flatten,
+    tree_unflatten,
+    format_number_with_error,
 )
 
 
 # versioneer
-from ._version import get_versions
-__version__ = get_versions()['version']
-del get_versions
+from . import _version
+__version__ = _version.get_versions()['version']
 
 
 warnings.filterwarnings('ignore', message='Caching is not available when ')
@@ -477,4 +481,8 @@ __all__ = [
     'can_use_mpi_pool',
     'oset',
     'LRU',
+    'tree_map',
+    'tree_apply',
+    'tree_flatten',
+    'tree_unflatten',
 ]

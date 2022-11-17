@@ -35,7 +35,7 @@ setup(
             'matplotlib>=2.0',
             'networkx>=2.3',
             'opt_einsum>=3.2',
-            'autoray>=0.2.0',
+            'autoray>=0.5.1',
             'diskcache>=3.0',
         ],
         'advanced_solvers': [
@@ -62,14 +62,14 @@ setup(
         ],
     },
     scripts=['bin/quimb-mpi-python'],
-    python_requires='>=3.6',
+    python_requires='>=3.8',
     classifiers=[
         'Development Status :: 3 - Alpha',
         'License :: OSI Approved :: Apache Software License',
         'Programming Language :: Python :: 3',
-        'Programming Language :: Python :: 3.6',
-        'Programming Language :: Python :: 3.7',
         'Programming Language :: Python :: 3.8',
+        'Programming Language :: Python :: 3.9',
+        'Programming Language :: Python :: 3.10',
     ],
     keywords='quantum physics tensor networks tensors dmrg tebd',
 )
