@@ -660,8 +660,8 @@ class TestTensorFunctions:
         a = rand_tensor((1, 2, 3), inds='abc')
         b = rand_tensor((2, 3, 4), inds='bcd')
         qtn.tensor_fuse_squeeze(a, b)
-        assert a.inds == ('b', 'a')
-        assert a.shape == (6, 1)
+        assert a.inds == ('a', 'b')
+        assert a.shape == (1, 6)
         assert b.inds == ('b', 'd')
         assert b.shape == (6, 4)
 

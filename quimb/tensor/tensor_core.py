@@ -2205,7 +2205,8 @@ class Tensor(object):
             Mapping like: ``{new_ind: sequence of existing inds, ...}`` or an
             ordered mapping like ``[(new_ind_1, old_inds_1), ...]`` in which
             case the output tensor's fused inds will be ordered. In both cases
-            the new indices are created at the beginning of the tensor's shape.
+            the new indices are created at the minimum axis of any of the
+            indices that will be fused.
 
         Returns
         -------
@@ -2219,21 +2220,28 @@ class Tensor(object):
         else:
             new_fused_inds, fused_inds = zip(*fuse_map)
 
-        unfused_inds = tuple(i for i in t.inds if not
-                             any(i in fs for fs in fused_inds))
+        # compute numerical axes groups to supply to the array function fuse
+        ind2ax = {ind: ax for ax, ind in enumerate(t.inds)}
+        axes_groups = []
+        gax0 = float('inf')
+        for fused_ind_group in fused_inds:
+            group = []
+            for ind in fused_ind_group:
+                gax = ind2ax.pop(ind)
+                gax0 = min(gax0, gax)
+                group.append(gax)
+            axes_groups.append(group)
 
-        # transpose tensor to bring groups of fused inds to the beginning
-        t.transpose_(*concat(fused_inds), *unfused_inds)
-
-        # for each set of fused dims, group into product, then add remaining
-        dims = iter(t.shape)
-        dims = [prod(next(dims) for _ in fs) for fs in fused_inds] + list(dims)
-
-        # create new tensor with new + remaining indices
+        # modify new tensor with new + remaining indices
         #     + drop 'left' marked indices since they might be fused
-        t.modify(data=reshape(t.data, dims),
-                 inds=(*new_fused_inds, *unfused_inds))
-
+        t.modify(
+            data=do("fuse", t.data, *axes_groups),
+            inds=(
+                *t.inds[:gax0],  # by defn these are not fused
+                *new_fused_inds,
+                *(ix for ix in t.inds[gax0:] if ix in ind2ax),
+            ),
+        )
         return t
 
     fuse_ = functools.partialmethod(fuse, inplace=True)
@@ -2302,7 +2310,8 @@ class Tensor(object):
         for each of inds in ``inds_seqs``. E.g. to convert several sites
         into a density matrix: ``T.to_dense(('k0', 'k1'), ('b0', 'b1'))``.
         """
-        x = self.fuse([(str(i), ix) for i, ix in enumerate(inds_seq)]).data
+        fuse_map = [(f"__d{i}__", ix) for i, ix in enumerate(inds_seq)]
+        x = self.fuse(fuse_map).data
         if (infer_backend(x) == 'numpy') and to_qarray:
             return qarray(x)
         return x
