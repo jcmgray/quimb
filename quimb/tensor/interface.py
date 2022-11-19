@@ -1,3 +1,7 @@
+"""Tools for interfacing the tensor and tensor network objects with other
+libraries.
+"""
+
 import functools
 
 from ..utils import tree_map
@@ -16,7 +20,7 @@ class Placeholder:
 
 
 def pack(obj):
-    """Take a tensor or tensor network like object and return a aux needed
+    """Take a tensor or tensor network like object and return a skeleton needed
     to reconstruct it, and a pytree of raw parameters.
 
     Parameters
@@ -27,46 +31,58 @@ def pack(obj):
 
     Returns
     -------
-    children : pytree
+    params : pytree
         A pytree of raw parameter arrays.
-    aux : Tensor, TensorNetwork, or similar
+    skeleton : Tensor, TensorNetwork, or similar
         A copy of ``obj`` with all references to the original data removed.
     """
-    aux = obj.copy()
-    children = aux.get_params()
-    placeholders = tree_map(lambda x: Placeholder(x.shape), children)
-    aux.set_params(placeholders)
-    return children, aux
+    skeleton = obj.copy()
+    params = skeleton.get_params()
+    placeholders = tree_map(lambda x: Placeholder(x.shape), params)
+    skeleton.set_params(placeholders)
+    return params, skeleton
 
 
-def unpack(children, aux):
-    """Take a aux of a tensor or tensor network like object and a pytree
+def unpack(params, skeleton):
+    """Take a skeleton of a tensor or tensor network like object and a pytree
     of raw parameters and return a new reconstructed object with those
     parameters inserted.
 
     Parameters
     ----------
-    children : pytree
+    params : pytree
         A pytree of raw parameter arrays, with the same structure as the
-        output of ``aux.get_params()``.
-    aux : Tensor, TensorNetwork, or similar
+        output of ``skeleton.get_params()``.
+    skeleton : Tensor, TensorNetwork, or similar
         Something that has ``copy``, ``set_params``, and ``get_params``
         methods.
 
     Returns
     -------
     obj : Tensor, TensorNetwork, or similar
-        A copy of ``aux`` with parameters inserted.
+        A copy of ``skeleton`` with parameters inserted.
     """
-    obj = aux.copy()
-    obj.set_params(children)
+    obj = skeleton.copy()
+    obj.set_params(params)
     return obj
 
 
 # -------------------------------- jax -------------------------------------- #
 
 
-_JAX_REGISTERED_TN_CLASSES = {}
+_JAX_REGISTERED_TN_CLASSES = set()
+
+
+def jax_pack(obj):
+    # jax requires the top level children to be a tuple
+    params, aux = pack(obj)
+    return (params,), aux
+
+
+def jax_unpack(aux, children):
+    # jax also flips the return order from above
+    params, = children
+    return unpack(params, aux)
 
 
 def jax_register_pytree():
@@ -76,7 +92,8 @@ def jax_register_pytree():
     while queue:
         cls = queue.pop()
         if cls not in _JAX_REGISTERED_TN_CLASSES:
-             jax.tree_util.register_pytree_node(cls, pack, unpack)
+            jax.tree_util.register_pytree_node(cls, jax_pack, jax_unpack)
+            _JAX_REGISTERED_TN_CLASSES.add(cls)
         queue.extend(cls.__subclasses__())
 
 
