@@ -36,6 +36,11 @@ from .tensor_core import (
     COPY_tensor,
     oset,
 )
+from .interface import (
+    pack,
+    unpack,
+    jax_register_pytree,
+)
 from .tensor_builder import (
     rand_tensor,
     rand_phased,
@@ -219,6 +224,9 @@ __all__ = (
     "IsoTensor",
     "COPY_tensor",
     "oset",
+    "pack",
+    "unpack",
+    "jax_register_pytree",
     "rand_tensor",
     "rand_phased",
     "TN_rand_reg",
@@ -280,6 +288,7 @@ __all__ = (
     "ham_2d_ising",
     "ham_2d_heis",
     "ham_2d_j1j2",
+    "ham_3d_heis",
     "TensorNetwork1D",
     "MatrixProductState",
     "MatrixProductOperator",
