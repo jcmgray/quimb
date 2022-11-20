@@ -12,8 +12,8 @@ class Placeholder:
 
     __slots__ = ("shape",)
 
-    def __init__(self, shape):
-        self.shape = shape
+    def __init__(self, x):
+        self.shape = getattr(x, "shape", None)
 
     def __repr__(self):
         return f"Placeholder(shape={self.shape})"
@@ -38,7 +38,7 @@ def pack(obj):
     """
     skeleton = obj.copy()
     params = skeleton.get_params()
-    placeholders = tree_map(lambda x: Placeholder(x.shape), params)
+    placeholders = tree_map(Placeholder, params)
     skeleton.set_params(placeholders)
     return params, skeleton
 
@@ -76,12 +76,13 @@ _JAX_REGISTERED_TN_CLASSES = set()
 def jax_pack(obj):
     # jax requires the top level children to be a tuple
     params, aux = pack(obj)
-    return (params,), aux
+    children = (params,)
+    return children, aux
 
 
 def jax_unpack(aux, children):
     # jax also flips the return order from above
-    params, = children
+    (params,) = children
     return unpack(params, aux)
 
 
