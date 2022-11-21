@@ -124,3 +124,7 @@ docs/_autosummary/
 *.ipynb_checkpoints/
 
 \.vscode/
+
+
+# quimb specific
+ctg_cache
