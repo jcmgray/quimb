@@ -18,6 +18,7 @@ diagonal or anti-diagonal real dimension 2 operators.
 TODO:
 
     - [ ] automatic MPO generator
+    - [ ] product of operators generator (e.g. for PEPS DMRG)
     - [ ] complex and single precision support (lower priority)
     - [ ] support for non-diagonal and dimension > 2 operators (lower priority)
 
@@ -29,9 +30,11 @@ DONE:
     - [x] numba accelerated coupled config
     - [x] general definition and automatic 'symbolic' jordan wigner
     - [x] multithreaded sparse matrix construction
+    - [x] LocalHam generator (e.g. for simple update, normal PEPS algs)
 
 """
 
+import functools
 import collections
 
 import numpy as np
@@ -321,9 +324,25 @@ _OPMAP = {
     # creation / annihilation operators
     "+": {0: (1, 1.0)},
     "-": {1: (0, 1.0)},
-    # number operator
+    # number and symmetric number operator
     "n": {1: (1, 1.0)},
+    "sn": {0: (0, -0.5), 1: (1, 0.5)},
 }
+
+
+@functools.lru_cache(maxsize=None)
+def get_mat(op, dtype=None):
+    if dtype is None:
+        if op in {'y', 'sy'}:
+            dtype = np.complex128
+        else:
+            dtype = np.float64
+    a = np.zeros((2, 2), dtype=dtype)
+    for j, (i, xij) in _OPMAP[op].items():
+        a[i, j] = xij
+    # make immutable since caching
+    a.flags.writeable = False
+    return a
 
 
 class SparseOperatorBuilder:
@@ -415,7 +434,8 @@ class SparseOperatorBuilder:
                 - ``'sx'``, ``'sy'``, ``'sz'``: spin operators (i.e. scaled
                   Pauli matrices)
                 - ``'+'``, ``'-'``: creation/annihilation operators
-                - ``'n'``: number operator
+                - ``'n'``, ``'sn'``: number and symmetric number (n - 1/2)
+                   operators
 
         sites : sequence of hashable
             The coordinates of the operators that ``ops`` acts on.
@@ -549,6 +569,31 @@ class SparseOperatorBuilder:
         A = self.build_sparse_matrix(stype="coo")
         return A.A
 
+    def build_local_terms(self):
+        """Get a dictionary of local terms, where each key is a sorted tuple
+        of sites, and each value is the local matrix representation of the
+        operator on those sites. For use with e.g. tensor network algorithms.
+
+        Note terms acting on the same sites are summed together and the size of
+        each local matrix is exponential in the locality of that term.
+
+        Returns
+        -------
+        Hk : dict[tuple[hashable], numpy.ndarray]
+            The local terms.
+        """
+        Hk = {}
+        for coeff, ops, *sites in self.terms:
+            # sort ops and sites according to sites
+            sites, ops = zip(*sorted(zip(sites, ops)))
+            mats = tuple(get_mat(op) for op in ops)
+            hk = coeff * functools.reduce(np.kron, mats)
+            if sites not in Hk:
+                Hk[sites] = hk.copy()
+            else:
+                Hk[sites] += hk
+        return Hk
+
     def config_coupling(self, config):
         """Get a list of other configurations coupled to ``config`` by this
         operator, and the corresponding coupling coefficients. This is for
@@ -577,9 +622,9 @@ class SparseOperatorBuilder:
         """
         print(self)
         for t, (coeff, ops, *sites) in enumerate(self.terms):
-            s = ['.'] * self.nsites
+            s = ['. '] * self.nsites
             for op, site in zip(ops, sites):
-                s[self.site_to_reg(site)] = op
+                s[self.site_to_reg(site)] = f"{op:<2}"
             print("".join(s), f"{coeff:+}")
 
     def __repr__(self):

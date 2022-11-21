@@ -396,11 +396,55 @@ class AutoGradHandler:
         return loss, tree_map(lambda x: x.conj(), grads)
 
 
+def jax_tn_pack(tn: TensorNetwork):
+    return (tn.arrays, tn)
+
+
+def jax_tn_unpack(aux: TensorNetwork, children) -> TensorNetwork:
+    tn = aux.copy()
+    for tensor, array in zip(tn.tensors, children):
+        tensor._data = array
+
+    return tn
+
+
 @functools.lru_cache(1)
 def get_jax():
     import jax
 
+    jax_update_register()
+
     return jax
+
+
+_JAX_REGISTERED_TN_CLASSES = {}
+
+
+def jax_update_register():
+    import jax
+
+    global _JAX_REGISTERED_TN_CLASSES
+
+    if Tensor not in _JAX_REGISTERED_TN_CLASSES:
+        jax.tree_util.register_pytree_node(
+            Tensor,
+            lambda t: (t.data, (t.inds, t.tags, t.left_inds)),
+            lambda aux, children: Tensor(data=children, inds=aux[0], tags=aux[1], left_inds=aux[2])
+        )
+
+    if TensorNetwork not in _JAX_REGISTERED_TN_CLASSES:
+        jax.tree_util.register_pytree_node(TensorNetwork, jax_tn_pack, jax_tn_unpack)
+
+    queue = [Tensor, TensorNetwork]
+    while len(queue) > 0:
+        parent = queue.pop()
+
+        for child in parent.__subclasses__():
+            queue.append(child)
+
+            if child not in _JAX_REGISTERED_TN_CLASSES:
+                _JAX_REGISTERED_TN_CLASSES.add(child)
+                jax.pytree.register_pytree_node(child, jax_tn_pack, jax_tn_unpack)
 
 
 class JaxHandler:

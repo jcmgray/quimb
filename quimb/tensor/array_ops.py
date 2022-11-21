@@ -1,14 +1,16 @@
 """Backend agnostic array operations.
 """
+import functools
 import itertools
 
 import numpy
 from autoray import (
+    compose,
     do,
-    reshape,
-    infer_backend,
     get_dtype_name,
-    compose
+    get_lib_fn,
+    infer_backend,
+    reshape,
 )
 
 from ..core import njit, qarray
@@ -60,6 +62,84 @@ def asarray(array):
         backend, = backends
 
     return do('array', nested_tup, like=backend)
+
+
+@functools.lru_cache(2**14)
+def calc_fuse_perm_and_shape(shape, axes_groups):
+    ndim = len(shape)
+
+    # which group does each axis appear in, if any
+    num_groups = len(axes_groups)
+    ax2group = {ax: g for g, axes in enumerate(axes_groups) for ax in axes}
+
+    # the permutation will be the same for every block: precalculate
+    # n.b. all new groups will be inserted at the *first fused axis*
+    position = min((min(g) for g in axes_groups))
+    axes_before = tuple(
+        ax for ax in range(position)
+        if ax2group.setdefault(ax, None) is None
+    )
+    axes_after = tuple(
+        ax for ax in range(position, ndim)
+        if ax2group.setdefault(ax, None) is None
+    )
+    perm = (*axes_before, *(ax for g in axes_groups for ax in g), *axes_after)
+
+    # track where each axis will be in the new array
+    new_axes = {ax: ax for ax in axes_before}
+    for i, g in enumerate(axes_groups):
+        for ax in g:
+            new_axes[ax] = position + i
+    for i, ax in enumerate(axes_after):
+        new_axes[ax] = position + num_groups + i
+    new_ndim = len(axes_before) + num_groups + len(axes_after)
+
+    new_shape = [1] * new_ndim
+    for i, d in enumerate(shape):
+        g = ax2group[i]
+        new_ax = new_axes[i]
+        if g is None:
+            # not fusing, new value is just copied
+            new_shape[new_ax] = d
+        else:
+            # fusing: need to accumulate
+            new_shape[new_ax] *= d
+
+    return perm, tuple(new_shape)
+
+
+@compose
+def fuse(x, *axes_groups, backend=None):
+    """Fuse the give group or groups of axes. The new fused axes will be
+    inserted at the minimum index of any fused axis (even if it is not in
+    the first group). For example, ``fuse(x, [5, 3], [7, 2, 6])`` will
+    produce an array with axes like::
+
+        groups inserted at axis 2, removed beyond that.
+                ......<--
+        (0, 1, g0, g1, 4, 8, ...)
+                |   |
+                |   g1=(7, 2, 6)
+                g0=(5, 3)
+
+    Parameters
+    ----------
+    axes_groups : sequence of sequences of int
+        The axes to fuse. Each group of axes will be fused into a single
+        axis.
+    """
+    if backend is None:
+        backend = infer_backend(x)
+    _transpose = get_lib_fn(backend, "transpose")
+    _reshape = get_lib_fn(backend, "reshape")
+
+    axes_groups =tuple(map(tuple, axes_groups))
+    if not any(axes_groups):
+        return x
+
+    shape = tuple(map(int, x.shape))
+    perm, new_shape = calc_fuse_perm_and_shape(shape, axes_groups)
+    return _reshape(_transpose(x, perm), new_shape)
 
 
 def ndim(array):
