@@ -3,7 +3,6 @@
 
 import os
 import math
-from math import prod
 import cmath
 import itertools
 import functools
@@ -13,40 +12,60 @@ import numpy as np
 import scipy.sparse as sp
 from .utils import partition_all
 
+try:
+    from math import prod
+except ImportError:
+    from functools import reduce
+    from operator import mul
+
+    def prod(iterable):
+        return reduce(mul, iterable, 1)
+
 
 # --------------------------------------------------------------------------- #
 #                            Accelerated Functions                            #
 # --------------------------------------------------------------------------- #
 
-for env_var in ['QUIMB_NUM_THREAD_WORKERS',
-                'QUIMB_NUM_PROCS',
-                'OMP_NUM_THREADS']:
+for env_var in [
+    "QUIMB_NUM_THREAD_WORKERS",
+    "QUIMB_NUM_PROCS",
+    "OMP_NUM_THREADS",
+]:
     if env_var in os.environ:
         _NUM_THREAD_WORKERS = int(os.environ[env_var])
         break
 else:
     import psutil
+
     _NUM_THREAD_WORKERS = psutil.cpu_count(logical=False)
 
-if ('NUMBA_NUM_THREADS' in os.environ):
-    if int(os.environ['NUMBA_NUM_THREADS']) != _NUM_THREAD_WORKERS:
+if "NUMBA_NUM_THREADS" in os.environ:
+    if int(os.environ["NUMBA_NUM_THREADS"]) != _NUM_THREAD_WORKERS:
         import warnings
+
         warnings.warn(
             "'NUMBA_NUM_THREADS' has been set elsewhere and doesn't match the "
             "value 'quimb' has tried to set - "
-            f"{os.environ['NUMBA_NUM_THREADS']} vs {_NUM_THREAD_WORKERS}.")
+            f"{os.environ['NUMBA_NUM_THREADS']} vs {_NUM_THREAD_WORKERS}."
+        )
 else:
-    os.environ['NUMBA_NUM_THREADS'] = str(_NUM_THREAD_WORKERS)
+    os.environ["NUMBA_NUM_THREADS"] = str(_NUM_THREAD_WORKERS)
 
 # need to set NUMBA_NUM_THREADS first
 import numba  # noqa
 
 _NUMBA_CACHE = {
-    'TRUE': True, 'ON': True, 'FALSE': False, 'OFF': False,
-}[os.environ.get('QUIMB_NUMBA_CACHE', 'True').upper()]
+    "TRUE": True,
+    "ON": True,
+    "FALSE": False,
+    "OFF": False,
+}[os.environ.get("QUIMB_NUMBA_CACHE", "True").upper()]
 _NUMBA_PAR = {
-    'TRUE': True, 'ON': True, 'FALSE': False, 'OFF': False,
-}[os.environ.get('QUIMB_NUMBA_PARALLEL', 'True').upper()]
+    "TRUE": True,
+    "ON": True,
+    "FALSE": False,
+    "OFF": False,
+}[os.environ.get("QUIMB_NUMBA_PARALLEL", "True").upper()]
 
 njit = functools.partial(numba.njit, cache=_NUMBA_CACHE)
 """Numba no-python jit, but obeying cache setting.
@@ -61,8 +80,11 @@ vectorize = functools.partial(numba.vectorize, cache=_NUMBA_CACHE)
 """Numba vectorize, but obeying cache setting.
 """
 
-pvectorize = functools.partial(numba.vectorize, cache=_NUMBA_CACHE,
-                               target='parallel' if _NUMBA_PAR else 'cpu')
+pvectorize = functools.partial(
+    numba.vectorize,
+    cache=_NUMBA_CACHE,
+    target="parallel" if _NUMBA_PAR else "cpu",
+)
 """Numba vectorize, but obeying cache setting, with optional parallel
 target, depending on environment variable 'QUIMB_NUMBA_PARALLEL'.
 """
@@ -73,11 +95,10 @@ generated_jit = functools.partial(numba.generated_jit, cache=_NUMBA_CACHE)
 
 
 class CacheThreadPool(object):
-    """
-    """
+    """ """
 
     def __init__(self, func):
-        self._settings = '__UNINITIALIZED__'
+        self._settings = "__UNINITIALIZED__"
         self._pool_fn = func
 
     def __call__(self, num_threads=None):
@@ -85,7 +106,7 @@ class CacheThreadPool(object):
         if num_threads is None:
             num_threads = _NUM_THREAD_WORKERS
         # first call
-        if self._settings == '__UNINITIALIZED__':
+        if self._settings == "__UNINITIALIZED__":
             self._pool = self._pool_fn(num_threads)
             self._settings = num_threads
         # new type of pool requested
@@ -99,6 +120,7 @@ class CacheThreadPool(object):
 @CacheThreadPool
 def get_thread_pool(num_workers=None):
     from concurrent.futures import ThreadPoolExecutor
+
     return ThreadPoolExecutor(num_workers)
 
 
@@ -160,10 +182,10 @@ def make_immutable(mat):
     """
     if issparse(mat):
         mat.data.flags.writeable = False
-        if mat.format in {'csr', 'csc', 'bsr'}:
+        if mat.format in {"csr", "csc", "bsr"}:
             mat.indices.flags.writeable = False
             mat.indptr.flags.writeable = False
-        elif mat.format == 'coo':
+        elif mat.format == "coo":
             mat.row.flags.writeable = False
             mat.col.flags.writeable = False
     else:
@@ -229,14 +251,14 @@ class qarray(np.ndarray):
         np.set_printoptions(**current_printopts)
         return s
 
+
 # --------------------------------------------------------------------------- #
 # Decorators for standardizing output                                         #
 # --------------------------------------------------------------------------- #
 
 
 def ensure_qarray(fn):
-    """Decorator that wraps output as a ``qarray``.
-    """
+    """Decorator that wraps output as a ``qarray``."""
 
     @functools.wraps(fn)
     def qarray_fn(*args, **kwargs):
@@ -256,8 +278,8 @@ def realify_scalar(x, imag_tol=1e-12):
 
 
 def realify(fn, imag_tol=1e-12):
-    """Decorator that drops ``fn``'s output imaginary part if very small.
-    """
+    """Decorator that drops ``fn``'s output imaginary part if very small."""
+
     @functools.wraps(fn)
     def realified_fn(*args, **kwargs):
         return realify_scalar(fn(*args, **kwargs), imag_tol=imag_tol)
@@ -266,28 +288,28 @@ def realify(fn, imag_tol=1e-12):
 
 
 def zeroify(fn, tol=1e-14):
-    """Decorator that rounds ``fn``'s output to zero if very small.
-    """
+    """Decorator that rounds ``fn``'s output to zero if very small."""
+
     @functools.wraps(fn)
     def zeroified_f(*args, **kwargs):
         x = fn(*args, **kwargs)
         return 0.0 if abs(x) < tol else x
+
     return zeroified_f
 
 
-_COMPLEX_DTYPES = {'complex64', 'complex128'}
-_DOUBLE_DTYPES = {'float64', 'complex128'}
+_COMPLEX_DTYPES = {"complex64", "complex128"}
+_DOUBLE_DTYPES = {"float64", "complex128"}
 _DTYPE_MAP = {
-    (False, False): 'float32',
-    (False, True): 'float64',
-    (True, False): 'complex64',
-    (True, True): 'complex128',
+    (False, False): "float32",
+    (False, True): "float64",
+    (True, False): "complex64",
+    (True, True): "complex128",
 }
 
 
 def common_type(*arrays):
-    """Quick compute the minimal dtype sufficient for ``arrays``.
-    """
+    """Quick compute the minimal dtype sufficient for ``arrays``."""
     dtypes = {array.dtype.name for array in arrays}
     has_complex = not _COMPLEX_DTYPES.isdisjoint(dtypes)
     has_double = not _DOUBLE_DTYPES.isdisjoint(dtypes)
@@ -295,8 +317,8 @@ def common_type(*arrays):
 
 
 def upcast(fn):
-    """Decorator to make sure the types of two numpy arguments match.
-    """
+    """Decorator to make sure the types of two numpy arguments match."""
+
     def upcasted_fn(a, b):
         if a.dtype == b.dtype:
             return fn(a, b)
@@ -311,9 +333,9 @@ def upcast(fn):
 # Type and shape checks                                                       #
 # --------------------------------------------------------------------------- #
 
+
 def dag(qob):
-    """Conjugate transpose.
-    """
+    """Conjugate transpose."""
     try:
         return qob.H
     except AttributeError:
@@ -321,46 +343,39 @@ def dag(qob):
 
 
 def isket(qob):
-    """Checks if ``qob`` is in ket form -- an array column.
-    """
+    """Checks if ``qob`` is in ket form -- an array column."""
     return qob.shape[0] > 1 and qob.shape[1] == 1  # Column vector check
 
 
 def isbra(qob):
-    """Checks if ``qob`` is in bra form -- an array row.
-    """
+    """Checks if ``qob`` is in bra form -- an array row."""
     return qob.shape[0] == 1 and qob.shape[1] > 1  # Row vector check
 
 
 def isop(qob):
-    """Checks if ``qob`` is an operator.
-    """
+    """Checks if ``qob`` is an operator."""
     s = qob.shape
     return len(s) == 2 and (s[0] > 1) and (s[1] > 1)
 
 
 def isvec(qob):
-    """Checks if ``qob`` is row-vector, column-vector or one-dimensional.
-    """
+    """Checks if ``qob`` is row-vector, column-vector or one-dimensional."""
     shp = qob.shape
     return len(shp) == 1 or (len(shp) == 2 and (shp[0] == 1 or shp[1] == 1))
 
 
 def issparse(qob):
-    """Checks if ``qob`` is explicitly sparse.
-    """
+    """Checks if ``qob`` is explicitly sparse."""
     return isinstance(qob, sp.spmatrix)
 
 
 def isdense(qob):
-    """Checks if ``qob`` is explicitly dense.
-    """
+    """Checks if ``qob`` is explicitly dense."""
     return isinstance(qob, np.ndarray)
 
 
 def isreal(qob, **allclose_opts):
-    """Checks if ``qob`` is approximately real.
-    """
+    """Checks if ``qob`` is approximately real."""
     data = qob.data if issparse(qob) else qob
 
     # check dtype
@@ -433,14 +448,13 @@ def _nb_complex_base(real, imag):  # pragma: no cover
     return real + 1j * imag
 
 
-_cmplx_sigs = ['complex64(float32, float32)', 'complex128(float64, float64)']
+_cmplx_sigs = ["complex64(float32, float32)", "complex128(float64, float64)"]
 _nb_complex_seq = vectorize(_cmplx_sigs)(_nb_complex_base)
 _nb_complex_par = pvectorize(_cmplx_sigs)(_nb_complex_base)
 
 
 def complex_array(real, imag):
-    """Accelerated creation of complex array.
-    """
+    """Accelerated creation of complex array."""
     if real.size > 50000:
         return _nb_complex_par(real, imag)
     return _nb_complex_seq(real, imag)
@@ -450,8 +464,7 @@ def complex_array(real, imag):
 @upcast
 @njit
 def mul_dense(x, y):  # pragma: no cover
-    """Numba-accelerated element-wise multiplication of two dense matrices.
-    """
+    """Numba-accelerated element-wise multiplication of two dense matrices."""
     return x * y
 
 
@@ -484,12 +497,14 @@ def _nb_subtract_update_base(X, c, Z):  # pragma: no cover
     return X - c * Z
 
 
-_sbtrct_sigs = ['float32(float32, float32, float32)',
-                'float32(float32, float64, float32)',
-                'float64(float64, float64, float64)',
-                'complex64(complex64, float32, complex64)',
-                'complex64(complex64, float64, complex64)',
-                'complex128(complex128, float64, complex128)']
+_sbtrct_sigs = [
+    "float32(float32, float32, float32)",
+    "float32(float32, float64, float32)",
+    "float64(float64, float64, float64)",
+    "complex64(complex64, float32, complex64)",
+    "complex64(complex64, float64, complex64)",
+    "complex128(complex128, float64, complex128)",
+]
 _nb_subtract_update_seq = vectorize(_sbtrct_sigs)(_nb_subtract_update_base)
 _nb_subtract_update_par = pvectorize(_sbtrct_sigs)(_nb_subtract_update_base)
 
@@ -508,17 +523,18 @@ def _nb_divide_update_base(X, c):  # pragma: no cover
     return X / c
 
 
-_divd_sigs = ['float32(float32, float32)',
-              'float64(float64, float64)',
-              'complex64(complex64, float32)',
-              'complex128(complex128, float64)']
+_divd_sigs = [
+    "float32(float32, float32)",
+    "float64(float64, float64)",
+    "complex64(complex64, float32)",
+    "complex128(complex128, float64)",
+]
 _nb_divide_update_seq = vectorize(_divd_sigs)(_nb_divide_update_base)
 _nb_divide_update_par = pvectorize(_divd_sigs)(_nb_divide_update_base)
 
 
 def divide_update_(X, c, out):
-    """Accelerated computation of ``X / c`` into ``out``.
-    """
+    """Accelerated computation of ``X / c`` into ``out``."""
     if X.size > 2048:
         _nb_divide_update_par(X, c, out=out)
     else:
@@ -563,8 +579,7 @@ def par_dot_csr_matvec(A, x):
 
 
 def dot_sparse(a, b):
-    """Dot product for sparse matrix, dispatching to parallel for v large nnz.
-    """
+    """Dot product for sparse matrix, dispatching to parallel for v large nnz."""
     out = a @ b
 
     if isdense(out) and (isinstance(b, qarray) or isinstance(a, qarray)):
@@ -722,8 +737,7 @@ def _outer_par(a, b, out, m, n):  # pragma: no cover
 
 @ensure_qarray
 def outer(a, b):
-    """Outer product between two vectors (no conjugation).
-    """
+    """Outer product between two vectors (no conjugation)."""
     m, n = a.size, b.size
 
     if m * n < 2**14:
@@ -737,8 +751,7 @@ def outer(a, b):
 
 @vectorize
 def explt(l, t):  # pragma: no cover
-    """Complex exponenital as used in solution to schrodinger equation.
-    """
+    """Complex exponenital as used in solution to schrodinger equation."""
     return cmath.exp((-1.0j * t) * l)
 
 
@@ -786,10 +799,15 @@ def kron_sparse(a, b, stype=None):
     Output format can be specified or will be automatically determined.
     """
     if stype is None:
-        stype = ("bsr" if isinstance(b, np.ndarray) or b.format == 'bsr' else
-                 b.format if isinstance(a, np.ndarray) else
-                 "csc" if a.format == "csc" and b.format == "csc" else
-                 "csr")
+        stype = (
+            "bsr"
+            if isinstance(b, np.ndarray) or b.format == "bsr"
+            else b.format
+            if isinstance(a, np.ndarray)
+            else "csc"
+            if a.format == "csc" and b.format == "csc"
+            else "csr"
+        )
 
     return sp.kron(a, b, format=stype)
 
@@ -808,10 +826,12 @@ def kron_dispatch(a, b, stype=None):
 #                                Core Functions                               #
 # --------------------------------------------------------------------------- #
 
-_SPARSE_CONSTRUCTORS = {"csr": sp.csr_matrix,
-                        "bsr": sp.bsr_matrix,
-                        "csc": sp.csc_matrix,
-                        "coo": sp.coo_matrix}
+_SPARSE_CONSTRUCTORS = {
+    "csr": sp.csr_matrix,
+    "bsr": sp.bsr_matrix,
+    "csc": sp.csc_matrix,
+    "coo": sp.coo_matrix,
+}
 
 
 def sparse_matrix(data, stype="csr", dtype=complex):
@@ -834,11 +854,11 @@ def sparse_matrix(data, stype="csr", dtype=complex):
 
 _EXPEC_METHODS = {
     # [isop(a), isop(b), issparse(a) or issparse(b)]
-    (0, 0, 0): lambda a, b: abs(vdot(a, b))**2,
+    (0, 0, 0): lambda a, b: abs(vdot(a, b)) ** 2,
     (0, 1, 0): lambda a, b: vdot(a, b @ a),
     (1, 0, 0): lambda a, b: vdot(b, a @ b),
     (1, 1, 0): lambda a, b: _trace_dense(a @ b),
-    (0, 0, 1): lambda a, b: abs(dot(dag(a), b)[0, 0])**2,
+    (0, 0, 1): lambda a, b: abs(dot(dag(a), b)[0, 0]) ** 2,
     (0, 1, 1): realify(lambda a, b: dot(dag(a), dot(b, a))[0, 0]),
     (1, 0, 1): realify(lambda a, b: dot(dag(b), dot(a, b))[0, 0]),
     (1, 1, 1): lambda a, b: _trace_sparse(dot(a, b)),
@@ -900,7 +920,7 @@ def normalize(qob, inplace=True):
     if isop(qob):
         n_factor = trace(qob)
     else:
-        n_factor = expectation(qob, qob)**0.25
+        n_factor = expectation(qob, qob) ** 0.25
 
     qob[:] /= n_factor
     return qob
@@ -942,8 +962,15 @@ def chop(qob, tol=1.0e-15, inplace=True):
 chop_ = functools.partial(chop, inplace=True)
 
 
-def quimbify(data, qtype=None, normalized=False, chopped=False,
-             sparse=None, stype=None, dtype=complex):
+def quimbify(
+    data,
+    qtype=None,
+    normalized=False,
+    chopped=False,
+    sparse=None,
+    stype=None,
+    dtype=complex,
+):
     """Converts data to 'quantum' i.e. complex matrices, kets being columns.
 
     Parameters
@@ -1004,16 +1031,18 @@ def quimbify(data, qtype=None, normalized=False, chopped=False,
     """
 
     sparse_input = issparse(data)
-    sparse_output = ((sparse) or
-                     (sparse_input and sparse is None) or
-                     (sparse is None and stype))
+    sparse_output = (
+        (sparse)
+        or (sparse_input and sparse is None)
+        or (sparse is None and stype)
+    )
     # Infer output sparse format from input if necessary
     if sparse_input and sparse_output and stype is None:
         stype = data.format
 
     if (qtype is None) and (np.ndim(data) == 1):
         # assume quimbify simple list -> ket
-        qtype = 'ket'
+        qtype = "ket"
 
     if qtype is not None:
         # Must be dense to reshape
@@ -1032,8 +1061,9 @@ def quimbify(data, qtype=None, normalized=False, chopped=False,
 
     # Check if already sparse matrix, or wanted to be one
     if sparse_output:
-        data = sparse_matrix(data, dtype=dtype,
-                             stype=(stype if stype is not None else "csr"))
+        data = sparse_matrix(
+            data, dtype=dtype, stype=(stype if stype is not None else "csr")
+        )
 
     # Optionally normalize and chop small components
     if normalized:
@@ -1047,13 +1077,13 @@ def quimbify(data, qtype=None, normalized=False, chopped=False,
 qu = quimbify
 """Alias of :func:`quimbify`."""
 
-ket = functools.partial(quimbify, qtype='ket')
+ket = functools.partial(quimbify, qtype="ket")
 """Convert an object into a ket."""
 
-bra = functools.partial(quimbify, qtype='bra')
+bra = functools.partial(quimbify, qtype="bra")
 """Convert an object into a bra."""
 
-dop = functools.partial(quimbify, qtype='dop')
+dop = functools.partial(quimbify, qtype="dop")
 """Convert an object into a density operator."""
 
 sparse = functools.partial(quimbify, sparse=True)
@@ -1087,8 +1117,10 @@ def infer_size(p, base=2):
     sz = math.log(max(p.shape), base)
 
     if sz % 1 > 1e-13:
-        raise ValueError(f"This state does not seem to be composed of sites"
-                         "of equal size {base}.")
+        raise ValueError(
+            f"This state does not seem to be composed of sites"
+            "of equal size {base}."
+        )
 
     return int(sz)
 
@@ -1096,8 +1128,7 @@ def infer_size(p, base=2):
 @realify
 @njit
 def _trace_dense(op):  # pragma: no cover
-    """Trace of a dense operator.
-    """
+    """Trace of a dense operator."""
     x = 0.0
     for i in range(op.shape[0]):
         x += op[i, i]
@@ -1106,8 +1137,7 @@ def _trace_dense(op):  # pragma: no cover
 
 @realify
 def _trace_sparse(op):
-    """Trace of a sparse operator.
-    """
+    """Trace of a sparse operator."""
     return np.sum(op.diagonal())
 
 
@@ -1129,14 +1159,12 @@ def trace(mat):
 
 @ensure_qarray
 def _identity_dense(d, dtype=complex):
-    """Returns a dense, identity of given dimension ``d`` and type ``dtype``.
-    """
+    """Returns a dense, identity of given dimension ``d`` and type ``dtype``."""
     return np.eye(d, dtype=dtype)
 
 
 def _identity_sparse(d, stype="csr", dtype=complex):
-    """Returns a sparse, complex identity of order d.
-    """
+    """Returns a sparse, complex identity of order d."""
     return sp.eye(d, dtype=dtype, format=stype)
 
 
@@ -1171,8 +1199,7 @@ speye = functools.partial(identity, sparse=True)
 
 
 def _kron_core(*ops, stype=None, coo_build=False, parallel=False):
-    """Core kronecker product for a sequence of objects.
-    """
+    """Core kronecker product for a sequence of objects."""
     tmp_stype = "coo" if coo_build or stype == "coo" else None
     reducer = par_reduce if parallel else functools.reduce
     return reducer(functools.partial(kron_dispatch, stype=tmp_stype), ops)
@@ -1200,7 +1227,7 @@ def dynal(x, bases):
     >>> sum(d * b for d, b in zip(drep, bs_szs))
     3279
     """
-    bs_szs = [prod(bases[i + 1:]) for i in range(len(bases))]
+    bs_szs = [prod(bases[i + 1 :]) for i in range(len(bases))]
 
     for b in bs_szs:
         div = x // b
@@ -1285,7 +1312,7 @@ def kron(*ops, stype=None, coo_build=False, parallel=False, ownership=None):
     <256x1024 sparse matrix of type '<class 'numpy.complex128'>'
             with 13122 stored elements in Compressed Sparse Row format>
     """
-    core_kws = {'coo_build': coo_build, 'stype': stype, 'parallel': parallel}
+    core_kws = {"coo_build": coo_build, "stype": stype, "parallel": parallel}
 
     if ownership is None:
         X = _kron_core(*ops, **core_kws)
@@ -1303,7 +1330,7 @@ def kron(*ops, stype=None, coo_build=False, parallel=False, ownership=None):
 
         # check if the kron has naturally oversliced
         if matching_dyn:
-            mtchn_bs = [prod(dims[i + 1:]) for i in range(len(matching_dyn))]
+            mtchn_bs = [prod(dims[i + 1 :]) for i in range(len(matching_dyn))]
             coeffs_bases = tuple(zip(mtchn_bs, matching_dyn))
             ri_got = sum(d * b[0] for d, b in coeffs_bases)
             rf_got = sum(d * b[1] for d, b in coeffs_bases) + mtchn_bs[-1]
@@ -1316,7 +1343,7 @@ def kron(*ops, stype=None, coo_build=False, parallel=False, ownership=None):
             # we can't slice 'coo' matrices -> convert to 'csr'
             if sp.isspmatrix_coo(X):
                 X = X.tocsr()
-            X = X[di:(None if df == 0 else df), :]
+            X = X[di : (None if df == 0 else df), :]
 
     if stype is not None:
         return X.asformat(stype)
@@ -1349,8 +1376,7 @@ def kronpow(a, p, **kron_opts):
 
 
 def _find_shape_of_nested_int_array(x):
-    """Take a n-nested list/tuple of integers and find its array shape.
-    """
+    """Take a n-nested list/tuple of integers and find its array shape."""
     shape = [len(x)]
     sub_x = x[0]
     while not np.issubdtype(type(sub_x), np.integer):
@@ -1408,12 +1434,14 @@ def _dim_map_nd(szs, coos, cyclic=False, trim=False):
     return (sum(c * m for c, m in zip(coo, strides)) for coo in coos)
 
 
-_dim_mapper_methods = {(1, False, False): _dim_map_1d,
-                       (1, False, True): _dim_map_1dtrim,
-                       (1, True, False): _dim_map_1dcyclic,
-                       (2, False, False): _dim_map_2d,
-                       (2, False, True): _dim_map_2dtrim,
-                       (2, True, False): _dim_map_2dcyclic}
+_dim_mapper_methods = {
+    (1, False, False): _dim_map_1d,
+    (1, False, True): _dim_map_1dtrim,
+    (1, True, False): _dim_map_1dcyclic,
+    (2, False, False): _dim_map_2d,
+    (2, False, True): _dim_map_2dtrim,
+    (2, True, False): _dim_map_2dcyclic,
+}
 
 
 def dim_map(dims, coos, cyclic=False, trim=False):
@@ -1528,9 +1556,13 @@ def _dim_compressor(dims, inds):  # pragma: no cover
                 yield (autoplace_count, 1)
                 autoplace_count = 0
             blocksize_id *= dim
-    yield ((blocksize_op, 1) if blocksize_op > 1 else
-           (blocksize_id, 0) if blocksize_id > 1 else
-           (autoplace_count, 1))
+    yield (
+        (blocksize_op, 1)
+        if blocksize_op > 1
+        else (blocksize_id, 0)
+        if blocksize_id > 1
+        else (autoplace_count, 1)
+    )
 
 
 def dim_compress(dims, inds):
@@ -1577,8 +1609,16 @@ def dim_compress(dims, inds):
     return dims, inds
 
 
-def ikron(ops, dims, inds, sparse=None, stype=None,
-          coo_build=False, parallel=False, ownership=None):
+def ikron(
+    ops,
+    dims,
+    inds,
+    sparse=None,
+    stype=None,
+    coo_build=False,
+    parallel=False,
+    ownership=None,
+):
     """Tensor an operator into a larger space by padding with identities.
 
     Automatically placing a large operator over several dimensions is allowed
@@ -1677,9 +1717,11 @@ def ikron(ops, dims, inds, sparse=None, stype=None,
     inds, ops = set(inds), iter(ops)
 
     # can't slice "coo" format so use "csr" if ownership specified
-    eye_kws = {'sparse': sparse,
-               'stype': "csr" if ownership else "coo",
-               'dtype': dtype}
+    eye_kws = {
+        "sparse": sparse,
+        "stype": "csr" if ownership else "coo",
+        "dtype": dtype,
+    }
 
     def gen_ops():
         cff_id = 1  # keeps track of compressing adjacent identities
@@ -1719,30 +1761,33 @@ def ikron(ops, dims, inds, sparse=None, stype=None,
         if cff_id > 1:
             yield eye(cff_id, **eye_kws)
 
-    return kron(*gen_ops(), stype=stype, coo_build=coo_build,
-                parallel=parallel, ownership=ownership)
+    return kron(
+        *gen_ops(),
+        stype=stype,
+        coo_build=coo_build,
+        parallel=parallel,
+        ownership=ownership,
+    )
 
 
 @ensure_qarray
 def _permute_dense(p, dims, perm):
-    """Permute the subsytems of a dense array.
-    """
+    """Permute the subsytems of a dense array."""
     p, perm = np.asarray(p), np.asarray(perm)
     d = prod(dims)
 
     if isop(p):
-        return (p.reshape([*dims, *dims])
-                .transpose([*perm, *(perm + len(dims))])
-                .reshape([d, d]))
+        return (
+            p.reshape([*dims, *dims])
+            .transpose([*perm, *(perm + len(dims))])
+            .reshape([d, d])
+        )
 
-    return (p.reshape(dims)
-            .transpose(perm)
-            .reshape([d, 1]))
+    return p.reshape(dims).transpose(perm).reshape([d, 1])
 
 
 def _permute_sparse(a, dims, perm):
-    """Permute the subsytems of a sparse matrix.
-    """
+    """Permute the subsytems of a sparse matrix."""
     perm, dims = np.asarray(perm), np.asarray(dims)
 
     # New dimensions & stride (i.e. product of preceding dimensions)
@@ -1867,7 +1912,8 @@ def pkron(op, dims, inds, **ikron_opts):
         inds_out, dims_out = (), ()
     else:
         inds_out, dims_out = zip(
-            *((i, x) for i, x in enumerate(dims) if i not in inds))
+            *((i, x) for i, x in enumerate(dims) if i not in inds)
+        )
 
     # current order and dimensions of system
     p = [*inds, *inds_out]
@@ -1881,8 +1927,7 @@ def pkron(op, dims, inds, **ikron_opts):
 
 
 def ind_complement(inds, n):
-    """Return the indices below ``n`` not contained in ``inds``.
-    """
+    """Return the indices below ``n`` not contained in ``inds``."""
     return tuple(i for i in range(n) if i not in inds)
 
 
@@ -1939,8 +1984,7 @@ def itrace(a, axes=(0, 1)):
 
 @ensure_qarray
 def _partial_trace_dense(p, dims, keep):
-    """Perform partial trace of a dense matrix.
-    """
+    """Perform partial trace of a dense matrix."""
     if isinstance(keep, Integral):
         keep = (keep,)
     if isvec(p):  # p = psi
@@ -1967,7 +2011,7 @@ def _trace_lose(p, dims, lose):
     dims = np.asarray(dims)
     e = dims[lose]
     a = prod(dims[:lose])
-    b = prod(dims[lose + 1:])
+    b = prod(dims[lose + 1 :])
     rhos = np.zeros(shape=(a * b, a * b), dtype=np.complex128)
     for i in range(a * b):
         for j in range(i, a * b):
@@ -1989,7 +2033,7 @@ def _trace_keep(p, dims, keep):
     dims = np.asarray(dims)
     s = dims[keep]
     a = prod(dims[:keep])
-    b = prod(dims[keep + 1:])
+    b = prod(dims[keep + 1 :])
     rhos = np.zeros(shape=(s, s), dtype=np.complex128)
     for i in range(s):
         for j in range(i, s):
@@ -2012,10 +2056,9 @@ def _partial_trace_simple(p, dims, keep):
     dims, keep = dim_compress(dims, keep)
     if len(keep) == 1:
         return _trace_keep(p, dims, *keep)
-    lmax = max(enumerate(dims),
-               key=lambda ix: (ix[0] not in keep) * ix[1])[0]
+    lmax = max(enumerate(dims), key=lambda ix: (ix[0] not in keep) * ix[1])[0]
     p = _trace_lose(p, dims, lmax)
-    dims = (*dims[:lmax], *dims[lmax + 1:])
+    dims = (*dims[:lmax], *dims[lmax + 1 :])
     keep = {(ind if ind < lmax else ind - 1) for ind in keep}
     return _partial_trace_simple(p, dims, keep)
 
@@ -2118,8 +2161,8 @@ sp.coo_matrix.__and__ = kron_dispatch
 
 
 def csr_mulvec_wrap(fn):
-    """Dispatch sparse csr-vector multiplication to parallel method.
-    """
+    """Dispatch sparse csr-vector multiplication to parallel method."""
+
     @functools.wraps(fn)
     def csr_mul_vector(A, x):
         if A.nnz > 50000 and _NUM_THREAD_WORKERS > 1:
@@ -2137,6 +2180,7 @@ def sp_mulvec_wrap(fn):
     """Scipy sparse doesn't call __array_finalize__ so need to explicitly
     make sure qarray input -> qarray output.
     """
+
     @functools.wraps(fn)
     def qarrayed_fn(self, other):
         out = fn(self, other)

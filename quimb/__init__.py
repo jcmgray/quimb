@@ -6,19 +6,10 @@ import warnings
 # some useful math
 from math import pi, cos, sin, tan, exp, log, log2, log10, sqrt
 
-try:
-    from math import prod
-except ImportError:
-    from functools import reduce
-    from operator import mul
-
-    def prod(iterable):
-        return reduce(mul, iterable, 1)
-
-
 # Core functions
 from .core import (
     qarray,
+    prod,
     isket,
     isbra,
     isop,
