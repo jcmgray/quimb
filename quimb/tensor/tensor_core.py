@@ -1813,7 +1813,7 @@ class Tensor(object):
     def inds_size(self, inds):
         """Return the total size of dimensions corresponding to ``inds``.
         """
-        return math.prod(map(self.ind_size, inds))
+        return prod(map(self.ind_size, inds))
 
     def shared_bond_size(self, other):
         """Get the total size of the shared index(es) with ``other``.
@@ -7243,7 +7243,7 @@ class TensorNetwork(object):
     def inds_size(self, inds):
         """Return the total size of dimensions corresponding to ``inds``.
         """
-        return math.prod(map(self.ind_size, inds))
+        return prod(map(self.ind_size, inds))
 
     def ind_sizes(self):
         """Get dict of each index mapped to its size.
