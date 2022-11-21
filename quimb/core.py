@@ -15,11 +15,10 @@ from .utils import partition_all
 try:
     from math import prod
 except ImportError:
-    from functools import reduce
-    from operator import mul
+    import operator
 
     def prod(iterable):
-        return reduce(mul, iterable, 1)
+        return functools.reduce(operator.mul, iterable, 1)
 
 
 # --------------------------------------------------------------------------- #
