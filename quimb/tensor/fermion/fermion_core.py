@@ -425,7 +425,10 @@ def _launch_fermion_expression(
     if evaluate_constants:
         raise NotImplementedError
 
-    contraction_list = expr.contraction_list
+    if hasattr(expr, "contraction_list"):
+        contraction_list = expr.contraction_list
+    else:
+        contraction_list = expr.fn.contraction_list
     fs, tid_lst = _dispatch_fermion_space(*tensors, inplace=inplace)
     if inplace:
         tensors = list(tensors)

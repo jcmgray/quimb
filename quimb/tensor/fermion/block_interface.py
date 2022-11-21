@@ -3,6 +3,16 @@ from pyblock3.algebra.fermion import eye, Constructor
 from pyblock3.algebra import fermion_setting as setting
 from pyblock3.algebra import fermion_ops
 
+from pyblock3.algebra import fermion_setting as setting
+use_ad = setting.dispatch_settings(ad=None)
+
+if use_ad:
+    from pyblock3.algebra.ad.fermion import eye
+    from pyblock3.algebra.ad import fermion_ops
+else:
+    from pyblock3.algebra.fermion import eye, Constructor
+    from pyblock3.algebra import fermion_ops
+
 this = sys.modules[__name__]
 this.DEFAULT_SYMMETRY = "U1"
 this.USE_CPP = True

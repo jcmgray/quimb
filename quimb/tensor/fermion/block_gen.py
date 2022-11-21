@@ -3,9 +3,6 @@ from itertools import product
 
 from ...gen.rand import randn
 from .block_interface import dispatch_settings, get_symmetry
-
-from pyblock3.algebra.core import SubTensor
-from pyblock3.algebra.fermion import SparseFermionTensor
 from pyblock3.algebra.symmetry import BondInfo
 
 def backend_wrapper(func):
@@ -76,7 +73,14 @@ def rand_single_block(shape, dtype=float, seed=None,
         dq = - dq
     q_labels = [dq if ix==ind else symmetry(0) for ix in range(len(shape))]
     array = randn(shape, dtype=dtype)
-    blk = SubTensor(reduced=array, q_labels=q_labels)
+    from pyblock3.algebra import fermion_setting as setting
+    use_ad = setting.dispatch_settings(ad=None)
+    if use_ad:
+        from pyblock3.algebra.ad.fermion import SparseFermionTensor, SubTensor
+        blk = SubTensor(data=array, q_labels=q_labels)
+    else:
+        from pyblock3.algebra.fermion import SparseFermionTensor, SubTensor
+        blk = SubTensor(reduced=array, q_labels=q_labels)
     T = SparseFermionTensor(blocks=[blk, ], pattern=pattern, shape=full_shape)
     return T
 
@@ -112,7 +116,14 @@ def ones_single_block(shape, pattern=None, dq=None, ind=None, full_shape=None):
         dq = - dq
     q_labels = [dq if ix==ind else symmetry(0) for ix in range(len(shape))]
     array = np.ones(shape)
-    blk = SubTensor(reduced=array, q_labels=q_labels)
+    from pyblock3.algebra import fermion_setting as setting
+    use_ad = setting.dispatch_settings(ad=None)
+    if use_ad:
+        from pyblock3.algebra.ad.fermion import SparseFermionTensor, SubTensor
+        blk = SubTensor(data=array, q_labels=q_labels)
+    else:
+        from pyblock3.algebra.fermion import SparseFermionTensor, SubTensor
+        blk = SubTensor(reduced=array, q_labels=q_labels)
     T = SparseFermionTensor(blocks=[blk, ], pattern=pattern, shape=full_shape)
     return T
 
@@ -164,6 +175,12 @@ def rand_all_blocks(shape, symmetry_info, dtype=float,
                 bonds.append(symmetry(*ibond))
         bonds = dict(zip(bonds, [sh,]*len(bonds)))
         bond_infos.append(BondInfo(bonds))
+    from pyblock3.algebra import fermion_setting as setting
+    use_ad = setting.dispatch_settings(ad=None)
+    if use_ad:
+        from pyblock3.algebra.ad.fermion import SparseFermionTensor
+    else:
+        from pyblock3.algebra.fermion import SparseFermionTensor
     T = SparseFermionTensor.random(bond_infos, pattern=pattern, dq=dq, dtype=dtype, shape=full_shape)
     return T
 
