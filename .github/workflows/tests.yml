@@ -24,15 +24,15 @@ jobs:
         - os: windows-latest
           python-version: 3.9
           env: base
-        - os: ubuntu-latest
-          python-version: 3.9
-          env: torch
-        - os: ubuntu-latest
-          python-version: 3.9
-          env: jax
-        - os: ubuntu-latest
-          python-version: 3.9
-          env: tensorflow
+        # - os: ubuntu-latest
+        #   python-version: 3.9
+        #   env: torch
+        # - os: ubuntu-latest
+        #   python-version: 3.9
+        #   env: jax
+        # - os: ubuntu-latest
+        #   python-version: 3.9
+        #   env: tensorflow
 
     steps:
     - uses: actions/checkout@v3
