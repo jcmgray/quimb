@@ -8,11 +8,11 @@ dependencies:
   - diskcache
   - joblib
   - matplotlib
-  - mpi4py
-  - mpich
+  - mpi4py>=3.1
   - networkx
   - numba>=0.56
   - numpy
+  - openmpi
   - opt_einsum>=3.2
   - petsc=*=*complex*
   - petsc4py
