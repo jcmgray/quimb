@@ -17,4 +17,5 @@ dependencies:
   - pytest-cov
   - randomgen
   - scipy
+  - tensorflow>=2
   - tqdm

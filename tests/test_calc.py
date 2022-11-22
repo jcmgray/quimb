@@ -143,7 +143,7 @@ class TestKrausOp:
         IIX = qu.ikron(qu.rand_matrix(2), dims, 2)
         dcmp = qu.pauli_decomp(IIX, mode='c')
         for p, x in dcmp.items():
-            if x == 0j:
+            if abs(x) < 1e-12:
                 assert (p[0] != 'I') or (p[1] != 'I')
             else:
                 assert p[0] == p[1] == 'I'
@@ -151,10 +151,8 @@ class TestKrausOp:
         KIIXK = qu.kraus_op(IIX, K, dims=dims, where=[0, 2])
         dcmp = qu.pauli_decomp(KIIXK, mode='c')
         for p, x in dcmp.items():
-            if x == 0j:
-                assert p[1] != 'I'
-            else:
-                assert p[1] == 'I'
+             if abs(x) > 1e-12:
+                assert (p == 'III') or p[0] != 'I'
 
 
 class TestProjector:

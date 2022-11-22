@@ -1,9 +1,11 @@
 channels:
+  - pytorch
   - defaults
   - conda-forge
 dependencies:
   - autoray
   - coverage
+  - cpuonly
   - cytoolz
   - diskcache
   - joblib
@@ -15,6 +17,7 @@ dependencies:
   - psutil
   - pytest
   - pytest-cov
+  - pytorch
   - randomgen
   - scipy
   - tqdm

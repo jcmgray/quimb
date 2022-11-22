@@ -17,6 +17,8 @@ jobs:
         os: [ubuntu-latest]
         python-version: [3.7, 3.8, 3.9, '3.10']
         env: [base]
+        pytest_folder: [tests]
+        pytest_ignore: [""]
         include:
         - os: macos-latest
           python-version: 3.9
@@ -24,15 +26,22 @@ jobs:
         - os: windows-latest
           python-version: 3.9
           env: base
-        # - os: ubuntu-latest
-        #   python-version: 3.9
-        #   env: torch
-        # - os: ubuntu-latest
-        #   python-version: 3.9
-        #   env: jax
-        # - os: ubuntu-latest
-        #   python-version: 3.9
-        #   env: tensorflow
+        - os: ubuntu-latest
+          python-version: 3.9
+          env: torch
+          pytest_folder: tests/test_tensor
+        - os: ubuntu-latest
+          python-version: 3.9
+          env: jax
+          pytest_folder: tests/test_tensor
+        - os: ubuntu-latest
+          python-version: 3.9
+          env: tensorflow
+          pytest_folder: tests/test_tensor
+        - os: ubuntu-latest
+          python-version: 3.9
+          env: slepc
+          pytest_ignore: "tests/test_tensor"
 
     steps:
     - uses: actions/checkout@v3
@@ -46,7 +55,7 @@ jobs:
         cache-env: true
 
     - name: Test all with pytest
-      run: pytest tests/ --cov=quimb --cov-report=xml
+      run: pytest ${{ matrix.pytest_folder }} --cov=quimb --cov-report=xml --ignore=${{ matrix.pytest_ignore }}
 
     - name: Report to codecov
       uses: codecov/codecov-action@v3

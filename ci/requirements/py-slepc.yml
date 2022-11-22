@@ -8,13 +8,18 @@ dependencies:
   - diskcache
   - joblib
   - matplotlib
+  - mpi4py
   - networkx
   - numba>=0.56
   - numpy
   - opt_einsum>=3.2
+  - petsc=*=*complex*
+  - petsc4py
   - psutil
   - pytest
   - pytest-cov
   - randomgen
   - scipy
+  - slepc=*=*complex*
+  - slepc4py
   - tqdm
