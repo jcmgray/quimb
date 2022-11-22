@@ -5,34 +5,53 @@ import numbers
 import itertools
 import functools
 import collections
-from math import sin, cos, pi, log, log2, sqrt, prod
+from math import sin, cos, pi, log, log2, sqrt
 
 import numpy as np
 import numpy.linalg as nla
 from scipy.optimize import minimize
 
 from .core import (
-    njit, issparse, isop, zeroify, realify, isvec, dot, dag,
-    qu, kron, eye, ikron, tr, ptr, infer_size, expec, dop, ensure_qarray,
+    dag,
+    dop,
+    dot,
+    ensure_qarray,
+    expec,
+    eye,
+    ikron,
+    infer_size,
+    isop,
+    issparse,
+    isvec,
+    kron,
+    njit,
+    prod,
+    ptr,
+    qu,
+    realify,
+    tr,
+    zeroify,
 )
-from .linalg.base_linalg import (
-    eigh, eigvalsh, norm, sqrtm, norm_trace_dense
-)
+from .linalg.base_linalg import eigh, eigvalsh, norm, sqrtm, norm_trace_dense
 from .linalg.approx_spectral import (
-    entropy_subsys_approx, tr_sqrt_subsys_approx,
-    logneg_subsys_approx, gen_bipartite_spectral_fn,
+    entropy_subsys_approx,
+    gen_bipartite_spectral_fn,
+    logneg_subsys_approx,
+    tr_sqrt_subsys_approx,
 )
 from .gen.operators import pauli
-from .gen.states import (
-    basis_vec, bell_state, bloch_state
+from .gen.states import basis_vec, bell_state, bloch_state
+from .utils import (
+    frequencies,
+    int2tup,
+    keymap,
+    raise_cant_find_library_function,
 )
-from .utils import (int2tup, raise_cant_find_library_function, frequencies,
-                    keymap)
 
 try:
     from opt_einsum import contract
 except ImportError:
-    contract = raise_cant_find_library_function('opt_einsum')
+    contract = raise_cant_find_library_function("opt_einsum")
 
 
 def fidelity(p1, p2, squared=False):
@@ -55,7 +74,7 @@ def fidelity(p1, p2, squared=False):
     if isvec(p1) or isvec(p2):
         F = expec(p1, p2).real
         if not squared:
-            F = max(0.0, F)**0.5
+            F = max(0.0, F) ** 0.5
         return F
 
     sqrho = sqrtm(p1)
@@ -149,8 +168,8 @@ def kraus_op(rho, Ek, dims=None, where=None, check=False):
         Ek = np.stack(Ek, axis=0)
 
     if check:
-        SEk = np.einsum('kij,kil', Ek.conj(), Ek)
-        if norm(SEk - eye(Ek.shape[-1]), 'fro') > 1e-12:
+        SEk = np.einsum("kij,kil", Ek.conj(), Ek)
+        if norm(SEk - eye(Ek.shape[-1]), "fro") > 1e-12:
             raise ValueError("Did not find ``sum(E_k.H @ Ek) == 1``.")
 
     if int(dims is None) + int(where is None) == 1:
@@ -169,31 +188,31 @@ def kraus_op(rho, Ek, dims=None, where=None, check=False):
         kdims = tuple(dims[i] for i in where)
         Ek = Ek.reshape((-1,) + kdims + kdims)
 
-        rho_inds, out, Ei_inds, Ej_inds = [], [], ['K'], ['K']
+        rho_inds, out, Ei_inds, Ej_inds = [], [], ["K"], ["K"]
         for i in range(N):
             if i in where:
-                xi, xj = f'i{i}k', f'j{i}k'
+                xi, xj = f"i{i}k", f"j{i}k"
                 for inds in (rho_inds, Ei_inds):
                     inds.append(xi)
                 for inds in (rho_inds, Ej_inds):
                     inds.append(xj)
-                xi, xj = f'i{i}new', f'j{i}new'
+                xi, xj = f"i{i}new", f"j{i}new"
                 for inds in (out, Ei_inds):
                     inds.append(xi)
                 for inds in (out, Ej_inds):
                     inds.append(xj)
             else:
-                xi, xj = f'i{i}', f'j{i}'
+                xi, xj = f"i{i}", f"j{i}"
                 for inds in (rho_inds, out):
                     inds.append(xi)
                     inds.append(xj)
         for inds in (rho_inds, out, Ei_inds, Ej_inds):
             inds.sort()
     else:
-        rho_inds = ['ik', 'jk']
-        out = ['inew', 'jnew']
-        Ei_inds = ['K', 'inew', 'ik']
-        Ej_inds = ['K', 'jnew', 'jk']
+        rho_inds = ["ik", "jk"]
+        out = ["inew", "jnew"]
+        Ei_inds = ["K", "inew", "ik"]
+        Ej_inds = ["K", "jnew", "jk"]
 
     sigma = contract(Ek, Ei_inds, rho, rho_inds, Ek.conj(), Ej_inds, out)
 
@@ -233,7 +252,7 @@ def projector(A, eigenvalue=1.0, tol=1e-12, autoblock=False):
     P = np.zeros_like(ev)
     for i in which:
         vi = ev[:, i]
-        P += (vi @ vi.H)
+        P += vi @ vi.H
     return P
 
 
@@ -293,7 +312,7 @@ def measure(p, A, eigenvalue=None, tol=1e-12):
 
     # compute prob of each eigenvector
     if isvec(p):
-        pj = (abs(ev.H @ p)**2).flatten()
+        pj = (abs(ev.H @ p) ** 2).flatten()
     else:
         pj = contract("jk,kl,lj->j", ev.H, p, ev).real
 
@@ -365,7 +384,7 @@ def simulate_counts(p, C, phys_dim=2, seed=None):
     raw_counts = np.random.choice(np.arange(d), size=C, p=pi)
 
     # convert to frequencies of binary
-    bin_str = '{:0>' + str(n) + 'b}'
+    bin_str = "{:0>" + str(n) + "b}"
     results = keymap(bin_str.format, frequencies(raw_counts))
 
     return results
@@ -438,7 +457,7 @@ def entropy(a, rank=None):
         if rank is None:
             evals = eigvalsh(a)
         else:  # know that not all eigenvalues needed
-            evals = eigvalsh(a, k=rank, which='LM', backend='AUTO')
+            evals = eigvalsh(a, k=rank, which="LM", backend="AUTO")
 
     evals = evals[evals > 0.0]
     return np.sum(-evals * np.log2(evals))
@@ -538,12 +557,15 @@ def check_dims_and_indices(dims, *syss):
     all_sys = sum(syss, ())
 
     if not all(0 <= i < nsys for i in all_sys):
-        raise ValueError(f"Indices specified in `sysa` and `sysb` must be "
-                         "in range({nsys}) for dims {dims}.")
+        raise ValueError(
+            f"Indices specified in `sysa` and `sysb` must be "
+            "in range({nsys}) for dims {dims}."
+        )
 
 
-def mutinf_subsys(psi_abc, dims, sysa, sysb, approx_thresh=2**13,
-                  **approx_opts):
+def mutinf_subsys(
+    psi_abc, dims, sysa, sysb, approx_thresh=2**13, **approx_opts
+):
     """Calculate the mutual information of two subsystems of a pure state,
     possibly using an approximate lanczos method for large subsytems.
 
@@ -580,7 +602,7 @@ def mutinf_subsys(psi_abc, dims, sysa, sysb, approx_thresh=2**13,
     sz_b = prod(d for i, d in enumerate(dims) if i in sysb)
     sz_c = prod(dims) // (sz_a * sz_b)
 
-    kws = {'approx_thresh': approx_thresh, **approx_opts}
+    kws = {"approx_thresh": approx_thresh, **approx_opts}
 
     if sz_c == 1:
         hab = 0.0
@@ -626,17 +648,16 @@ def schmidt_gap(psi_ab, dims, sysa):
         sysa = sysb
 
     rho_a = ptr(psi_ab, dims, sysa)
-    el = eigvalsh(rho_a, k=2, which='LM')
+    el = eigvalsh(rho_a, k=2, which="LM")
     return abs(el[0] - el[1])
 
 
 def tr_sqrt(A, rank=None):
-    """Return the trace of the sqrt of a positive semidefinite operator.
-    """
+    """Return the trace of the sqrt of a positive semidefinite operator."""
     if rank is None:
         el = eigvalsh(A, sort=False)
     else:
-        el = eigvalsh(A, k=rank, which='LM', backend='AUTO')
+        el = eigvalsh(A, k=rank, which="LM", backend="AUTO")
     return np.sum(np.sqrt(el[el > 0.0]))
 
 
@@ -704,10 +725,12 @@ def partial_transpose(p, dims=(2, 2), sysa=0):
             perm_ket_inds.append(i)
             perm_bra_inds.append(i + ndims)
 
-    return (np.asarray(qu(p, "dop"))
-            .reshape((*dims, *dims))
-            .transpose((*perm_ket_inds, *perm_bra_inds))
-            .reshape((prod(dims), prod(dims))))
+    return (
+        np.asarray(qu(p, "dop"))
+        .reshape((*dims, *dims))
+        .transpose((*perm_ket_inds, *perm_bra_inds))
+        .reshape((prod(dims), prod(dims)))
+    )
 
 
 def partial_transpose_norm(p, dims, sysa):
@@ -729,7 +752,7 @@ def partial_transpose_norm(p, dims, sysa):
             sysa = sysb
 
         rhoa = ptr(p, dims, sysa)
-        return tr_sqrt(rhoa)**2
+        return tr_sqrt(rhoa) ** 2
 
     return norm_trace_dense(partial_transpose(p, dims, sysa), isherm=True)
 
@@ -764,8 +787,9 @@ def logneg(p, dims=(2, 2), sysa=0):
 logarithmic_negativity = logneg
 
 
-def logneg_subsys(psi_abc, dims, sysa, sysb,
-                  approx_thresh=2**13, **approx_opts):
+def logneg_subsys(
+    psi_abc, dims, sysa, sysb, approx_thresh=2**13, **approx_opts
+):
     """Compute the logarithmic negativity between two subsystems of a pure
     state, possibly using an approximate lanczos for large subsystems. Uses
     a special method if the two subsystems form a bipartition of the state.
@@ -806,8 +830,12 @@ def logneg_subsys(psi_abc, dims, sysa, sysb,
 
     # check for pure bipartition
     if sz_c == 1:
-        psi_ab_ppt_norm = tr_sqrt_subsys(
-            psi_abc, dims, sysa, approx_thresh=approx_thresh, **approx_opts)**2
+        psi_ab_ppt_norm = (
+            tr_sqrt_subsys(
+                psi_abc, dims, sysa, approx_thresh=approx_thresh, **approx_opts
+            )
+            ** 2
+        )
         return max(log2(psi_ab_ppt_norm), 0.0)
 
     # check whether to use approx lanczos method
@@ -882,11 +910,11 @@ def concurrence(p, dims=(2, 2), sysa=0, sysb=1):
     if len(dims) > 2:
         p = ptr(p, dims, (sysa, sysb))
 
-    Y = pauli('Y')
+    Y = pauli("Y")
 
     if isop(p):
         pt = dot(kron(Y, Y), dot(p.conj(), kron(Y, Y)))
-        evals = (nla.eigvals(dot(p, pt)).real**2)**0.25
+        evals = (nla.eigvals(dot(p, pt)).real ** 2) ** 0.25
         return max(0, 2 * np.max(evals) - np.sum(evals))
     else:
         pt = dot(kron(Y, Y), p.conj())
@@ -923,6 +951,7 @@ def one_way_classical_information(p_ab, prjs, precomp_func=False):
                 prob = tr(p_ab_j)
                 p_a_j = ptr(p_ab_j, (2, 2), 0) / prob
                 yield prob, p_a_j
+
         return s_a - sum(p * entropy(rho) for p, rho in gen_paj())
 
     return owci if precomp_func else owci(prjs)
@@ -963,8 +992,9 @@ def quantum_discord(p, dims=(2, 2), sysa=0, sysb=1):
         prjb = eye(2) - prja
         return iab - owci((prja, prjb))
 
-    opt = minimize(trial_qd, (pi / 2, pi),
-                   method="SLSQP", bounds=((0, pi), (0, 2 * pi)))
+    opt = minimize(
+        trial_qd, (pi / 2, pi), method="SLSQP", bounds=((0, pi), (0, 2 * pi))
+    )
     if opt.success:
         return opt.fun
     else:  # pragma: no cover
@@ -1008,8 +1038,9 @@ def trace_distance(p1, p2):
         return sqrt(1 - expec(p1, p2))
 
     # Otherwise do full calculation
-    return 0.5 * norm((p1 if p1_is_op else dop(p1)) -
-                      (p2 if p2_is_op else dop(p2)), "tr")
+    return 0.5 * norm(
+        (p1 if p1_is_op else dop(p1)) - (p2 if p2_is_op else dop(p2)), "tr"
+    )
 
 
 def cprint(psi, prec=6):
@@ -1045,7 +1076,7 @@ def cprint(psi, prec=6):
     coeff_str = "{:." + str(prec) + "}"
 
     coeffs, cs = [], []
-    for c in itertools.product('01', repeat=n):
+    for c in itertools.product("01", repeat=n):
         c = "".join(c)
         ix = int(c, 2)
         coeff = psi.item(ix)
@@ -1119,23 +1150,20 @@ def decomp(a, fn, fn_args, fn_d, nmlz_func, mode="p", tol=1e-3):
         return names_cffs
 
 
-pauli_decomp = functools.partial(decomp,
-                                 fn=pauli,
-                                 fn_args='IXYZ',
-                                 fn_d=2,
-                                 nmlz_func=lambda n: 2**-n)
+pauli_decomp = functools.partial(
+    decomp, fn=pauli, fn_args="IXYZ", fn_d=2, nmlz_func=lambda n: 2**-n
+)
 """Decompose an operator into Paulis."""
 
-bell_decomp = functools.partial(decomp,
-                                fn=bell_state,
-                                fn_args=(0, 1, 2, 3),
-                                fn_d=4,
-                                nmlz_func=lambda x: 1)
+bell_decomp = functools.partial(
+    decomp, fn=bell_state, fn_args=(0, 1, 2, 3), fn_d=4, nmlz_func=lambda x: 1
+)
 """Decompose an operator into bell-states."""
 
 
-def correlation(p, A, B, sysa, sysb, dims=None, sparse=None,
-                precomp_func=False):
+def correlation(
+    p, A, B, sysa, sysb, dims=None, sparse=None, precomp_func=False
+):
     """Calculate the correlation between two sites given two operators.
 
     Parameters
@@ -1171,9 +1199,11 @@ def correlation(p, A, B, sysa, sysb, dims=None, sparse=None,
     if sparse is None:
         sparse = issparse(A) or issparse(B)
 
-    opts = {'sparse': sparse,
-            'coo_build': sparse,
-            'stype': 'csr' if sparse else None}
+    opts = {
+        "sparse": sparse,
+        "coo_build": sparse,
+        "stype": "csr" if sparse else None,
+    }
     opab = ikron((A, B), dims, (sysa, sysb), **opts)
     A = ikron((A,), dims, sysa, **opts)
     B = ikron((B,), dims, sysb, **opts)
@@ -1185,8 +1215,9 @@ def correlation(p, A, B, sysa, sysb, dims=None, sparse=None,
     return corr if precomp_func else corr(p)
 
 
-def pauli_correlations(p, ss=("xx", "yy", "zz"), sysa=0, sysb=1,
-                       sum_abs=False, precomp_func=False):
+def pauli_correlations(
+    p, ss=("xx", "yy", "zz"), sysa=0, sysb=1, sum_abs=False, precomp_func=False
+):
     """Calculate the correlation between sites for a list of operator pairs
     choisen from the pauli matrices.
 
@@ -1213,10 +1244,12 @@ def pauli_correlations(p, ss=("xx", "yy", "zz"), sysa=0, sysb=1,
         the correlations for an arbitrary state, depending on ``sum_abs`` and
         ``precomp_func``.
     """
+
     def gen_corr_list():
         for s1, s2 in ss:
-            yield correlation(p, pauli(s1), pauli(s2), sysa, sysb,
-                              precomp_func=precomp_func)
+            yield correlation(
+                p, pauli(s1), pauli(s2), sysa, sysb, precomp_func=precomp_func
+            )
 
     if sum_abs:
 
@@ -1228,8 +1261,9 @@ def pauli_correlations(p, ss=("xx", "yy", "zz"), sysa=0, sysb=1,
     return tuple(gen_corr_list())
 
 
-def ent_cross_matrix(p, sz_blc=1, ent_fn=logneg, calc_self_ent=True,
-                     upscale=False):
+def ent_cross_matrix(
+    p, sz_blc=1, ent_fn=logneg, calc_self_ent=True, upscale=False
+):
     """Calculate the pair-wise function ent_fn  between all sites or blocks
     of a state.
 
@@ -1278,14 +1312,22 @@ def ent_cross_matrix(p, sz_blc=1, ent_fn=logneg, calc_self_ent=True,
                     if calc_self_ent:
                         rhoa = ptr(p, dims, [i + b for b in range(sz_blc)])
                         psiap = purify(rhoa)
-                        ent = ent_fn(psiap,
-                                     dims=(2**sz_blc, 2**sz_blc)) / sz_blc
+                        ent = (
+                            ent_fn(psiap, dims=(2**sz_blc, 2**sz_blc))
+                            / sz_blc
+                        )
                     else:
                         ent = np.nan
                 else:
-                    rhoab = ptr(p, dims, [i + b for b in range(sz_blc)] +
-                                         [j + b for b in range(sz_blc)])
-                    ent = ent_fn(rhoab, dims=(2**sz_blc, 2**sz_blc)) / sz_blc
+                    rhoab = ptr(
+                        p,
+                        dims,
+                        [i + b for b in range(sz_blc)]
+                        + [j + b for b in range(sz_blc)],
+                    )
+                    ent = (
+                        ent_fn(rhoab, dims=(2**sz_blc, 2**sz_blc)) / sz_blc
+                    )
                 ents[i // sz_blc, j // sz_blc] = ent
                 ents[j // sz_blc, i // sz_blc] = ent
 
@@ -1294,33 +1336,50 @@ def ent_cross_matrix(p, sz_blc=1, ent_fn=logneg, calc_self_ent=True,
 
         for i in range(n):
             for j in range(i, n):
-                up_ents[i * sz_blc:(i + 1) * sz_blc,
-                        j * sz_blc:(j + 1) * sz_blc] = ents[i, j]
-                up_ents[j * sz_blc:(j + 1) * sz_blc,
-                        i * sz_blc:(i + 1) * sz_blc] = ents[j, i]
+                up_ents[
+                    i * sz_blc : (i + 1) * sz_blc,
+                    j * sz_blc : (j + 1) * sz_blc,
+                ] = ents[i, j]
+                up_ents[
+                    j * sz_blc : (j + 1) * sz_blc,
+                    i * sz_blc : (i + 1) * sz_blc,
+                ] = ents[j, i]
 
         ents = up_ents
 
     return ents
 
 
-def qid(p, dims, inds, precomp_func=False, sparse_comp=True,
-        norm_func=norm, power=2, coeff=1):
+def qid(
+    p,
+    dims,
+    inds,
+    precomp_func=False,
+    sparse_comp=True,
+    norm_func=norm,
+    power=2,
+    coeff=1,
+):
     # Check inputs
     inds = (inds,) if isinstance(inds, numbers.Number) else inds
 
     # Construct operators
-    ops_i = tuple(tuple(ikron(pauli(s), dims, ind, sparse=sparse_comp)
-                        for s in "xyz")
-                  for ind in inds)
+    ops_i = tuple(
+        tuple(ikron(pauli(s), dims, ind, sparse=sparse_comp) for s in "xyz")
+        for ind in inds
+    )
 
     # Define function closed over precomputed operators
     def qid_func(x):
         if isvec(x):
             x = dop(x)
-        return tuple(sum(coeff * norm_func(dot(x, op) - dot(op, x))**power
-                         for op in ops)
-                     for ops in ops_i)
+        return tuple(
+            sum(
+                coeff * norm_func(dot(x, op) - dot(op, x)) ** power
+                for op in ops
+            )
+            for ops in ops_i
+        )
 
     return qid_func if precomp_func else qid_func(p)
 
@@ -1427,5 +1486,5 @@ def heisenberg_energy(L):
     """
     Einf = (0.5 - 2 * log(2)) * L
     Efinite = pi**2 / (6 * L)
-    correction = 1 + 0.375 / log(L)**3
+    correction = 1 + 0.375 / log(L) ** 3
     return (Einf - Efinite * correction) / 2
