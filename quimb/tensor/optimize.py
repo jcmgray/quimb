@@ -12,10 +12,10 @@ import numpy as np
 from autoray import to_numpy, astype, get_dtype_name
 
 from .tensor_core import (
-    contract_backend,
     PTensor,
     tags_to_oset,
 )
+from .contraction import contract_backend
 from .interface import get_jax
 from ..core import prod
 from ..utils import ensure_dict, tree_map, tree_flatten, tree_unflatten
