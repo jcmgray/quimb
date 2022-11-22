@@ -74,7 +74,7 @@ def calc_fuse_perm_and_shape(shape, axes_groups):
 
     # the permutation will be the same for every block: precalculate
     # n.b. all new groups will be inserted at the *first fused axis*
-    position = min((min(g) for g in axes_groups))
+    position = min(g for gax in axes_groups for g in gax)
     axes_before = tuple(
         ax for ax in range(position)
         if ax2group.setdefault(ax, None) is None
