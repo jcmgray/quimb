@@ -12,6 +12,7 @@ import numpy as np
 from autoray import to_numpy, astype, get_dtype_name
 
 from .tensor_core import (
+    contract_backend,
     PTensor,
     tags_to_oset,
 )
