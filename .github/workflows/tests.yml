@@ -23,21 +23,26 @@ jobs:
         - os: macos-latest
           python-version: 3.9
           env: base
+
         - os: windows-latest
           python-version: 3.9
           env: base
+
         - os: ubuntu-latest
           python-version: 3.9
           env: torch
           pytest_folder: tests/test_tensor
+
         - os: ubuntu-latest
           python-version: 3.9
           env: jax
           pytest_folder: tests/test_tensor
+
         - os: ubuntu-latest
           python-version: 3.9
           env: tensorflow
           pytest_folder: tests/test_tensor
+
         - os: ubuntu-latest
           python-version: 3.9
           env: slepc

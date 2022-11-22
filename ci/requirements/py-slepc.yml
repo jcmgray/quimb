@@ -9,6 +9,7 @@ dependencies:
   - joblib
   - matplotlib
   - mpi4py
+  - mpich
   - networkx
   - numba>=0.56
   - numpy
