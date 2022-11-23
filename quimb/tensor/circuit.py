@@ -3781,7 +3781,7 @@ class Circuit:
         for i, gate in enumerate(self.gates):
             label = gate[0]
             tag = f'GATE_{i}'
-            t = tn[tag]
+            t = tn[[tag]+[label]]
 
             # sanity check that tensor(s) `t` correspond to the correct gate
             if label not in get_tags(t):
@@ -3792,8 +3792,8 @@ class Circuit:
             if isinstance(t, PTensor):
 
                 # update the actual tensor
-                self._psi[tag].params = t.params
-                self._rho[tag].params = t.params
+                self._psi[[tag]+[label]].params = t.params
+                self._rho[[tag]+[label]].params = t.params
 
                 # update the gate entry
                 if label in ONE_QUBIT_PARAM_GATES:
