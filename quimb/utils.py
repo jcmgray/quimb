@@ -542,7 +542,7 @@ def tree_apply(f, tree, is_leaf=is_not_container):
             tree_apply(f, x, is_leaf)
 
 
-def tree_flatten(tree, is_leaf=is_not_container):
+def tree_flatten(tree, get_ref=False, is_leaf=is_not_container):
     """Flatten ``tree`` into a list of objs.
 
     Parameters
@@ -555,11 +555,20 @@ def tree_flatten(tree, is_leaf=is_not_container):
 
     Returns
     -------
-    list
+    objs : list
+        The flattened list of leaf objects.
+    (ref_tree) : pytree
+        If ``get_ref`` is ``True``, a reference tree, with leaves of None, is
+        returned which can be used to reconstruct the original tree.
     """
-    flat = []
-    tree_apply(flat.append, tree, is_leaf)
-    return flat
+    objs = []
+    if get_ref:
+        # return a new tree with None leaves, as well as the flatten
+        ref_tree = tree_map(objs.append, tree, is_leaf)
+        return objs, ref_tree
+    else:
+        tree_apply(objs.append, tree, is_leaf)
+        return objs
 
 
 def tree_unflatten(objs, tree, is_leaf=is_not_container):
