@@ -60,11 +60,11 @@ jobs:
         cache-env: true
 
     - name: Matrix submodule tests with pytest
-      if: ${{ matrix.testset }} == 'matrix'
+      if: ${{ matrix.testset == 'matrix' }}
       run: pytest tests/ --cov=quimb --cov-report=xml --ignore=tests/test_tensor
 
     - name: Tensor tests with pytest
-      if: ${{ matrix.testset }} == 'tensor'
+      if: ${{ matrix.testset == 'tensor' }}
       run: pytest tests/test_tensor --cov=quimb --cov-report=xml
 
     - name: Report to codecov
