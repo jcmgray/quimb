@@ -14,19 +14,31 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
+        testset: [matrix, tensor]
+        env: [base]
         os: [ubuntu-latest]
         python-version: [3.7, 3.8, 3.9, '3.10']
-        env: [base]
-        testset: [matrix, tensor]
 
         include:
         - os: macos-latest
           python-version: 3.9
           env: base
+          testset: matrix
+
+        - os: macos-latest
+          python-version: 3.9
+          env: base
+          testset: tensor
 
         - os: windows-latest
           python-version: 3.9
           env: base
+          testset: matrix
+
+        - os: windows-latest
+          python-version: 3.9
+          env: base
+          testset: tensor
 
         - os: ubuntu-latest
           python-version: 3.9
@@ -46,7 +58,7 @@ jobs:
         - os: ubuntu-latest
           python-version: 3.9
           env: slepc
-          test: matrix
+          testset: matrix
 
     steps:
     - uses: actions/checkout@v3
