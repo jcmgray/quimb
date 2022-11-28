@@ -166,9 +166,9 @@ def norm_fro(x):
     """The frobenius norm of an array.
     """
     try:
-        return do('linalg.norm', reshape(x, (-1,)), 2)
+        return do("linalg.norm", reshape(x, (-1,)))
     except AttributeError:
-        return do('sum', do('multiply', do('conj', x), x)) ** 0.5
+        return do("sum", do("abs", x)**2) ** 0.5
 
 
 norm_fro.register("numpy", norm_fro_dense)
