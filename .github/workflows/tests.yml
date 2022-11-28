@@ -21,44 +21,44 @@ jobs:
 
         include:
         - os: macos-latest
-          python-version: 3.9
-          env: base
           testset: matrix
+          env: base
+          python-version: 3.9
 
         - os: macos-latest
-          python-version: 3.9
-          env: base
           testset: tensor
+          env: base
+          python-version: 3.9
 
         - os: windows-latest
-          python-version: 3.9
-          env: base
           testset: matrix
+          env: base
+          python-version: 3.9
 
         - os: windows-latest
-          python-version: 3.9
+          testset: tensor
           env: base
-          testset: tensor
-
-        - os: ubuntu-latest
           python-version: 3.9
-          env: torch
-          testset: tensor
 
-        - os: ubuntu-latest
-          python-version: 3.9
-          env: jax
+        - env: torch
           testset: tensor
-
-        - os: ubuntu-latest
+          os: ubuntu-latest
           python-version: 3.9
-          env: tensorflow
+
+        - env: jax
           testset: tensor
-
-        - os: ubuntu-latest
+          os: ubuntu-latest
           python-version: 3.9
-          env: slepc
+
+        - env: tensorflow
+          testset: tensor
+          os: ubuntu-latest
+          python-version: 3.9
+
+        - env: slepc
           testset: matrix
+          os: ubuntu-latest
+          python-version: 3.9
 
     steps:
     - uses: actions/checkout@v3
