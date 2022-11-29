@@ -5,7 +5,7 @@ Release notes for ``quimb``.
 
 .. _whats-new.1.4.1:
 
-v1.4.1 (unreleased)
+v1.4.1 (28th November 2022)
 ----------------------
 
 **Enhancements**
@@ -22,6 +22,16 @@ v1.4.1 (unreleased)
 - tweak default gauging options of compressed contraction
 - add :meth:`~quimb.tensor.tensor_core.TensorNetwork.compute_hierarchical_grouping`
 - add :meth:`~quimb.tensor.tensor_core.Tensor.as_network`
+- add :meth:`~quimb.tensor.tensor_core.TensorNetwork.inds_size`
+- add :meth:`~quimb.tensor.tensor_core.TensorNetwork.get_hyperinds`
+- add :meth:`~quimb.tensor.tensor_core.TensorNetwork.outer_size`
+- improve :meth:`~quimb.tensor.tensor_core.TensorNetwork.group_inds`
+- refactor tensor decompositiona and 'isometrization' methods
+- begin supporting pytree specifications in `TNOptimizer`, e.g. for constants
+- add `experimental` submodule for new sharing features
+- register tensor and tensor network objects with `jax` pytree interface
+  (:pull:`150`)
+- update CI infrastructure
 
 **Bug fixes:**
 
