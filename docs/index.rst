@@ -1,14 +1,14 @@
 Welcome to quimb's documentation!
 =================================
 
-.. image:: https://dev.azure.com/quimb-org/quimb/_apis/build/status/jcmgray.quimb?branchName=develop
-  :target: https://dev.azure.com/quimb-org/quimb/
-  :alt: Azure
+.. image:: https://github.com/jcmgray/quimb/actions/workflows/tests.yml/badge.svg
+  :target: https://github.com/jcmgray/quimb/actions/workflows/tests.yml
+  :alt: Tests
 .. image:: https://codecov.io/gh/jcmgray/quimb/branch/master/graph/badge.svg
   :target: https://codecov.io/gh/jcmgray/quimb
   :alt: Code Coverage
-.. image:: https://img.shields.io/lgtm/grade/python/g/jcmgray/quimb.svg
-  :target: https://lgtm.com/projects/g/jcmgray/quimb
+.. image:: https://app.codacy.com/project/badge/Grade/3c7462a3c45f41fd9d8f0a746a65c37c
+  :target: https://www.codacy.com/gh/jcmgray/quimb/dashboard?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=jcmgray/quimb&amp;utm_campaign=Badge_Grade
   :alt: Code Quality
 .. image:: https://readthedocs.org/projects/quimb/badge/?version=latest
   :target: http://quimb.readthedocs.io/en/latest/?badge=latest
@@ -16,6 +16,9 @@ Welcome to quimb's documentation!
 .. image:: http://joss.theoj.org/papers/10.21105/joss.00819/status.svg
   :target: https://doi.org/10.21105/joss.00819
   :alt: JOSS Paper
+.. image:: https://img.shields.io/pypi/v/quimb?color=teal
+   :target: https://pypi.org/project/quimb/
+   :alt: PyPI
 
 ----------------------------------------------------------------------------------
 
