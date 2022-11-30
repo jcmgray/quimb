@@ -1,5 +1,4 @@
 from setuptools import setup, find_packages
-import versioneer
 
 
 def readme():
@@ -15,9 +14,8 @@ setup(
     name='quimb',
     description='Quantum information and many-body library.',
     long_description=readme(),
+    long_description_content_type='text/x-rst',
     url='http://quimb.readthedocs.io',
-    version=versioneer.get_version(),
-    cmdclass=versioneer.get_cmdclass(),
     author='Johnnie Gray',
     author_email="johnniemcgray@gmail.com",
     license='Apache',

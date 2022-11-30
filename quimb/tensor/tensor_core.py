@@ -1470,15 +1470,46 @@ class Tensor(object):
         self._tags = tags_to_oset(tags)
         self._left_inds = tuple(left_inds) if left_inds is not None else None
 
-        nd = ndim(self._data)
-        if nd != len(self.inds):
+        if ndim(self._data) != len(self.inds):
             raise ValueError(
                 f"Wrong number of inds, {self.inds}, supplied for array"
-                f" of shape {self._data.shape}.")
-
+                f" of shape {self._data.shape}."
+            )
         if self.left_inds and any(i not in self.inds for i in self.left_inds):
-            raise ValueError(f"The 'left' indices {self.left_inds} are not "
-                             f"found in {self.inds}.")
+            raise ValueError(
+                f"The 'left' indices {self.left_inds} are not "
+                f"found in {self.inds}."
+            )
+
+    def get_params(self):
+        """A simple function that returns the 'parameters' of the underlying
+        data array. This is mainly for providing an interface for 'structured'
+        arrays e.g. with block sparsity to interact with optimization.
+        """
+        if hasattr(self.data, "get_params"):
+            params = self.data.get_params()
+        elif hasattr(self.data, "params"):
+            params = self.data.params
+        else:
+            params = self.data
+
+        if isinstance(params, qarray):
+            # some optimizers don't like ndarray subclasses such as qarray
+            params = params.A
+
+        return params
+
+    def set_params(self, params):
+        """A simple function that sets the 'parameters' of the underlying
+        data array. This is mainly for providing an interface for 'structured'
+        arrays e.g. with block sparsity to interact with optimization.
+        """
+        if hasattr(self.data, "set_params"):
+            self.data.set_params(params)
+        elif hasattr(self.data, "params"):
+            self.data.params = params
+        else:
+            self._data = params
 
     def copy(self, deep=False, virtual=False):
         """Copy this tensor.
@@ -1622,36 +1653,6 @@ class Tensor(object):
         if self.left_inds and any(i not in self.inds for i in self.left_inds):
             raise ValueError(f"The 'left' indices {self.left_inds} are "
                              f"not found in {self.inds}.")
-
-    def get_params(self):
-        """A simple function that returns the 'parameters' of the underlying
-        data array. This is mainly for providing an interface for 'structured'
-        arrays e.g. with block sparsity to interact with optimization.
-        """
-        if hasattr(self.data, "get_params"):
-            params = self.data.get_params()
-        elif hasattr(self.data, "params"):
-            params = self.data.params
-        else:
-            params = self.data
-
-        if isinstance(params, qarray):
-            # some optimizers don't like ndarray subclasses such as qarray
-            params = params.A
-
-        return params
-
-    def set_params(self, params):
-        """A simple function that sets the 'parameters' of the underlying
-        data array. This is mainly for providing an interface for 'structured'
-        arrays e.g. with block sparsity to interact with optimization.
-        """
-        if hasattr(self.data, "set_params"):
-            self.data.set_params(params)
-        elif hasattr(self.data, "params"):
-            self.data.params = params
-        else:
-            self._data = params
 
     def apply_to_arrays(self, fn):
         """Apply the function ``fn`` to the underlying data array(s). This
@@ -3375,6 +3376,18 @@ class TensorNetwork(object):
         return self.__class__(self, virtual=virtual)
 
     __copy__ = copy
+
+    def get_params(self):
+        """Get a pytree of the 'parameters', i.e. all underlying data arrays.
+        """
+        return {tid: t.get_params() for tid, t in self.tensor_map.items()}
+
+    def set_params(self, params):
+        """Take a pytree of the 'parameters', i.e. all underlying data arrays,
+        as returned by ``get_params`` and set them.
+        """
+        for tid, t_params in params.items():
+            self.tensor_map[tid].set_params(t_params)
 
     def _link_tags(self, tags, tid):
         """Link ``tid`` to each of ``tags``.

@@ -14,39 +14,51 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest]
-        python-version: [3.7, 3.8, 3.9, '3.10']
+        testset: [matrix, tensor]
         env: [base]
-        pytest_folder: [tests]
-        pytest_ignore: [""]
+        os: [ubuntu-latest]
+        python-version: [3.8, 3.9, '3.10']
+
         include:
         - os: macos-latest
-          python-version: 3.9
+          testset: matrix
           env: base
+          python-version: 3.9
+
+        - os: macos-latest
+          testset: tensor
+          env: base
+          python-version: 3.9
 
         - os: windows-latest
-          python-version: 3.9
+          testset: matrix
           env: base
-
-        - os: ubuntu-latest
           python-version: 3.9
-          env: torch
-          pytest_folder: tests/test_tensor
 
-        - os: ubuntu-latest
+        - os: windows-latest
+          testset: tensor
+          env: base
           python-version: 3.9
-          env: jax
-          pytest_folder: tests/test_tensor
 
-        - os: ubuntu-latest
+        - env: torch
+          testset: tensor
+          os: ubuntu-latest
           python-version: 3.9
-          env: tensorflow
-          pytest_folder: tests/test_tensor
 
-        - os: ubuntu-latest
+        - env: jax
+          testset: tensor
+          os: ubuntu-latest
           python-version: 3.9
-          env: slepc
-          pytest_ignore: "tests/test_tensor"
+
+        - env: tensorflow
+          testset: tensor
+          os: ubuntu-latest
+          python-version: 3.9
+
+        - env: slepc
+          testset: matrix
+          os: ubuntu-latest
+          python-version: 3.9
 
     steps:
     - uses: actions/checkout@v3
@@ -59,8 +71,13 @@ jobs:
         extra-specs: python=${{ matrix.python-version }}
         cache-env: true
 
-    - name: Test all with pytest
-      run: pytest ${{ matrix.pytest_folder }} --cov=quimb --cov-report=xml --ignore=${{ matrix.pytest_ignore }}
+    - name: Matrix submodule tests with pytest
+      if: ${{ matrix.testset == 'matrix' }}
+      run: pytest tests/ --cov=quimb --cov-report=xml --ignore=tests/test_tensor
+
+    - name: Tensor tests with pytest
+      if: ${{ matrix.testset == 'tensor' }}
+      run: pytest tests/test_tensor --cov=quimb --cov-report=xml
 
     - name: Report to codecov
       uses: codecov/codecov-action@v3

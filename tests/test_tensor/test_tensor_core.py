@@ -990,7 +990,7 @@ class TestTensorNetwork:
         assert d1 == pytest.approx(d2)
 
     @pytest.mark.parametrize('method,opts', (
-        ('als', (('enforce_pos', False),)),
+        ('als', (('enforce_pos', False), ('solver', 'lstsq'))),
         ('als', (('enforce_pos', True),)),
         pytest.param('autodiff', (('distance_method', 'dense'),),
                      marks=autograd_mark),

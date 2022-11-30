@@ -11,17 +11,14 @@ import tqdm
 import numpy as np
 from autoray import to_numpy, astype, get_dtype_name
 
-from .contraction import (
-    contract_backend,
-)
 from .tensor_core import (
-    Tensor,
-    TensorNetwork,
     PTensor,
     tags_to_oset,
 )
-from ..core import qarray, prod
-from ..utils import valmap, ensure_dict, tree_map, tree_flatten, tree_unflatten
+from .contraction import contract_backend
+from .interface import get_jax
+from ..core import prod
+from ..utils import ensure_dict, tree_map, tree_flatten, tree_unflatten
 
 if importlib.util.find_spec("jax") is not None:
     _DEFAULT_BACKEND = "jax"
@@ -394,57 +391,6 @@ class AutoGradHandler:
     def value_and_grad(self, arrays):
         loss, grads = self._value_and_grad(arrays)
         return loss, tree_map(lambda x: x.conj(), grads)
-
-
-def jax_tn_pack(tn: TensorNetwork):
-    return (tn.arrays, tn)
-
-
-def jax_tn_unpack(aux: TensorNetwork, children) -> TensorNetwork:
-    tn = aux.copy()
-    for tensor, array in zip(tn.tensors, children):
-        tensor._data = array
-
-    return tn
-
-
-@functools.lru_cache(1)
-def get_jax():
-    import jax
-
-    jax_update_register()
-
-    return jax
-
-
-_JAX_REGISTERED_TN_CLASSES = {}
-
-
-def jax_update_register():
-    import jax
-
-    global _JAX_REGISTERED_TN_CLASSES
-
-    if Tensor not in _JAX_REGISTERED_TN_CLASSES:
-        jax.tree_util.register_pytree_node(
-            Tensor,
-            lambda t: (t.data, (t.inds, t.tags, t.left_inds)),
-            lambda aux, children: Tensor(data=children, inds=aux[0], tags=aux[1], left_inds=aux[2])
-        )
-
-    if TensorNetwork not in _JAX_REGISTERED_TN_CLASSES:
-        jax.tree_util.register_pytree_node(TensorNetwork, jax_tn_pack, jax_tn_unpack)
-
-    queue = [Tensor, TensorNetwork]
-    while len(queue) > 0:
-        parent = queue.pop()
-
-        for child in parent.__subclasses__():
-            queue.append(child)
-
-            if child not in _JAX_REGISTERED_TN_CLASSES:
-                _JAX_REGISTERED_TN_CLASSES.add(child)
-                jax.pytree.register_pytree_node(child, jax_tn_pack, jax_tn_unpack)
 
 
 class JaxHandler:

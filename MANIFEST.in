@@ -1,4 +1,3 @@
-include versioneer.py
 include quimb/_version.py
 include README.rst
 include setup.cfg

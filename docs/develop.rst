@@ -53,14 +53,13 @@ Afterwards, in order to update the Dash repository with a the DocSet after a new
 Minting a Release
 =================
 
-``quimb`` uses `versioneer <https://github.com/warner/python-versioneer>`_
-to manage versions and releases. The steps to release a new version
+``quimb`` uses `setuptools_scm <https://github.com/pypa/setuptools_scm>`_
+to manage version. The steps to release a new version
 on `pypi <https://pypi.org>`_  are as follows:
 
 1. Make sure all tests are passing, as well as the continuous integration
    and readthedocs build.
 2. ``git tag`` the release with next ``X.Y.Z`` (n.b. no 'v' prefix).
 3. Remove any old builds: ``rm dist/*```
-4. Build the tar and wheel ``python setup.py bdist_wheel sdist``
-5. Optionally remove the ``build`` folder.
-6. Upload using twine: ``twine upload dist/*``
+4. Build the tar and wheel ``python -m build``
+5. Upload using twine: ``twine upload dist/*``

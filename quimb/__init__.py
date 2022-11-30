@@ -246,12 +246,6 @@ from .utils import (
 )
 
 
-# versioneer
-from . import _version
-
-__version__ = _version.get_versions()["version"]
-
-
 warnings.filterwarnings("ignore", message="Caching is not available when ")
 
 
@@ -487,4 +481,5 @@ __all__ = [
     "tree_apply",
     "tree_flatten",
     "tree_unflatten",
+    "format_number_with_error",
 ]
