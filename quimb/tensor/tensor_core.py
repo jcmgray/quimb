@@ -5046,6 +5046,7 @@ class TensorNetwork(object):
             self._canonize_around_tids(
                 (tid1, tid2),
                 gauges=gauges,
+                gauge_smudge=gauge_smudge,
                 max_distance=canonize_distance,
                 **canonize_opts
             )
@@ -5180,12 +5181,20 @@ class TensorNetwork(object):
         tid1,
         tid2,
         absorb='right',
+        gauges=None,
+        gauge_smudge=1e-6,
         equalize_norms=False,
         **canonize_opts,
     ):
         Tl = self.tensor_map[tid1]
         Tr = self.tensor_map[tid2]
-        tensor_canonize_bond(Tl, Tr, absorb=absorb, **canonize_opts)
+        tensor_canonize_bond(
+            Tl, Tr,
+            absorb=absorb,
+            gauges=gauges,
+            gauge_smudge=gauge_smudge,
+            **canonize_opts
+        )
 
         if equalize_norms:
             self.strip_exponent(tid1, equalize_norms)
@@ -5620,6 +5629,8 @@ class TensorNetwork(object):
         gauge_links=False,
         link_absorb='both',
         inwards=True,
+        gauges=None,
+        gauge_smudge=1e-6,
         **canonize_opts
     ):
         span_opts = ensure_dict(span_opts)
@@ -5658,12 +5669,22 @@ class TensorNetwork(object):
             for _ in range(int(gauge_links)):
                 for tid1, tid2 in links:
                     self._canonize_between_tids(
-                        tid1, tid2, absorb=link_absorb, **canonize_opts)
+                        tid1, tid2,
+                        absorb=link_absorb,
+                        gauges=gauges,
+                        gauge_smudge=gauge_smudge,
+                        **canonize_opts
+                    )
 
         # gauge inwards *along* the branches
         for tid1, tid2, _ in seq:
             self._canonize_between_tids(
-                tid1, tid2, absorb=absorb, **canonize_opts)
+                tid1, tid2,
+                absorb=absorb,
+                gauges=gauges,
+                gauge_smudge=gauge_smudge,
+                **canonize_opts
+            )
 
         return self
 
@@ -5777,9 +5798,11 @@ class TensorNetwork(object):
         self,
         max_iterations=5,
         absorb='both',
+        gauges=None,
+        gauge_smudge=1e-6,
         equalize_norms=False,
         inplace=False,
-        **kwargs,
+        **canonize_opts,
     ):
         """Iterative gauge all the bonds in this tensor network with a basic
         'canonization' strategy.
@@ -5793,7 +5816,13 @@ class TensorNetwork(object):
                 except (KeyError, ValueError):
                     # fused multibond (removed) or not a bond (len(tids != 2))
                     continue
-                tn._canonize_between_tids(tid1, tid2, absorb=absorb)
+                tn._canonize_between_tids(
+                    tid1, tid2,
+                    absorb=absorb,
+                    gauges=gauges,
+                    gauge_smudge=gauge_smudge,
+                    **canonize_opts
+                )
 
                 if equalize_norms:
                     tn.strip_exponent(tid1, equalize_norms)
@@ -6008,7 +6037,7 @@ class TensorNetwork(object):
 
     gauge_local_ = functools.partialmethod(gauge_local, inplace=True)
 
-    def gauge_simple_insert(self, gauges, smudge=0.0):
+    def gauge_simple_insert(self, gauges, remove=False, smudge=0.0):
         """Insert the simple update style bond gauges found in ``gauges`` if
         they are present in this tensor network. The gauges inserted are also
         returned so that they can be removed later.
@@ -6019,6 +6048,10 @@ class TensorNetwork(object):
             The store of bond gauges, the keys being indices and the values
             being the vectors. Only bonds present in this dictionary will be
             gauged.
+        remove : bool, optional
+            Whether to remove the gauges from the store after inserting them.
+        smudge : float, optional
+            A small value to add to the gauge vectors to avoid singularities.
 
         Returns
         -------
@@ -6029,10 +6062,15 @@ class TensorNetwork(object):
             The sequence of gauges applied to inner indices, each a tuple of
             the two inner tensors, the inner bond and the gauge vector applied.
         """
+        if remove:
+            _get = gauges.pop
+        else:
+            _get = gauges.get
+
         # absorb outer gauges fully into single tensor
         outer = []
         for ix in self.outer_inds():
-            g = gauges.get(ix, None)
+            g = _get(ix, None)
             if g is None:
                 continue
             g = (g + smudge * g[0])
@@ -6043,7 +6081,7 @@ class TensorNetwork(object):
         # absorb inner gauges half and half into both tensors
         inner = []
         for ix in self.inner_inds():
-            g = gauges.get(ix, None)
+            g = _get(ix, None)
             if g is None:
                 continue
             g = g**0.5
@@ -6377,7 +6415,7 @@ class TensorNetwork(object):
             pbar.close()
 
         if gauges:
-            self.gauge_simple_insert(gauges)
+            self.gauge_simple_insert(gauges, remove=True)
 
         return maybe_unwrap(
             self,

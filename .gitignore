@@ -128,3 +128,4 @@ docs/_autosummary/
 
 # quimb specific
 ctg_cache
+quimb/_version.py

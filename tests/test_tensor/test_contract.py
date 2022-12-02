@@ -87,7 +87,7 @@ def test_contract_approx_with_gauges(
     )
     Zex = tn ^ ...
     Z = tn.contract_around(
-        'I3,3',
+        around,
         max_bond=8,
         gauges=True,
         gauge_boundary_only=gauge_boundary_only,
