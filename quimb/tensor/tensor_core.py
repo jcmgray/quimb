@@ -717,8 +717,8 @@ def tensor_make_single_bond(t1, t2, gauges=None):
 
     bond = next(iter(shared))
     if nshared > 1:
-        t1.fuse_({bond: shared})
-        t2.fuse_({bond: shared})
+
+        # possibly fuse gauges
         if gauges is not None and any(ix in gauges for ix in shared):
             # gather all the separate gauges
             gs = [
@@ -729,6 +729,9 @@ def tensor_make_single_bond(t1, t2, gauges=None):
             ]
             # contract into a single gauge
             gauges[bond] = functools.reduce(lambda x, y: do("kron", x, y), gs)
+
+        t1.fuse_({bond: shared})
+        t2.fuse_({bond: shared})
 
     return left, bond, right
 

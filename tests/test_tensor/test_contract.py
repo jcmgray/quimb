@@ -72,9 +72,14 @@ class TestContractOpts:
             qtn.set_contract_path_cache(None)
 
 
+@pytest.mark.parametrize('around', ['I3,3', 'I0,0', 'I1,2'])
 @pytest.mark.parametrize('equalize_norms', [False, True])
 @pytest.mark.parametrize('gauge_boundary_only', [False, True])
-def test_contract_approx_with_gauges(equalize_norms, gauge_boundary_only):
+def test_contract_approx_with_gauges(
+    around,
+    equalize_norms,
+    gauge_boundary_only
+):
     rng = np.random.default_rng(42)
     tn = qtn.TN2D_from_fill_fn(
         lambda shape: rng.uniform(size=shape, low=-0.5),
