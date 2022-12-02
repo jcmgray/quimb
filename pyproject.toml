@@ -5,3 +5,4 @@ requires = [
 ]
 
 [tool.setuptools_scm]
+write_to = "quimb/_version.py"
