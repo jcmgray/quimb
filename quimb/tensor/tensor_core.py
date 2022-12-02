@@ -3586,18 +3586,22 @@ class TensorNetwork(object):
         for tid in tids:
             self.tensor_map[tid].add_tag(tag)
 
-    def drop_tags(self, tags):
-        """Remove a tag from any tensors in this network which have it.
-        Inplace operation.
+    def drop_tags(self, tags=None):
+        """Remove a tag or tags from this tensor network, defaulting to all.
+        This is an inplace operation.
 
         Parameters
         ----------
-        tags : str or sequence of str
-            The tag or tags to drop.
+        tags : str or sequence of str or None, optional
+            The tag or tags to drop. If ``None``, drop all tags.
         """
-        tags = tags_to_oset(tags)
+        if tags is not None:
+            tags = tags_to_oset(tags)
+            tids = self._get_tids_from_tags(tags, which='any')
+        else:
+            tids = self.tensor_map.keys()
 
-        for t in self:
+        for t in self._tids_get(*tids):
             t.drop_tags(tags)
 
     def retag(self, tag_map, inplace=False):

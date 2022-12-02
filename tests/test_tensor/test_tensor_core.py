@@ -808,6 +808,14 @@ class TestTensorNetwork:
         tn.drop_tags(['blue'])
         assert set(tn.tag_map.keys()) == set()
 
+    def test_drop_tags(self):
+        mps = MPS_rand_state(5, 2)
+        mps.drop_tags([mps.site_tag(i) for i in (0, 2, 4)])
+        assert mps.tags == oset([mps.site_tag(1), mps.site_tag(3)])
+        mps.drop_tags()
+        assert mps.tags == oset()
+        assert not mps.tag_map
+
     def test_conj(self):
         a_data = np.random.randn(2, 3, 4) + 1.0j * np.random.randn(2, 3, 4)
         b_data = np.random.randn(3, 4, 5) + 1.0j * np.random.randn(3, 4, 5)
