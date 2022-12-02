@@ -76,13 +76,14 @@ def sgn(x):
     """Get the 'sign' of ``x``, such that ``x / sgn(x)`` is real and
     non-negative.
     """
-    return x / (do('abs', x) + (x == 0.0))
+    return x / (do("abs", x) + (x == 0.0))
 
 
 @sgn.register("numpy")
 @generated_jit
 def sgn_numba(x):
     from numba import types
+
     if hasattr(x, "dtype"):
         dtype = x.dtype
     else:
@@ -551,7 +552,6 @@ def lq_stabilized_numba(x):
     return L.T, None, Q.T
 
 
-
 @njit  # pragma: no cover
 def _cholesky_numba(x, cutoff=-1, cutoff_mode=3, max_bond=-1, absorb=0):
     """SVD-decomposition, using cholesky decomposition, only works if
@@ -759,41 +759,27 @@ def similarity_compress(X, max_bond, renorm=True, method="eigh"):
 
 @compose
 def isometrize_qr(x, backend=None):
-    """Perform isometrization using the QR decomposition.
-    """
+    """Perform isometrization using the QR decomposition."""
     with backend_like(backend):
-        fat = x.shape[0] < x.shape[1]
-        if fat:
-            x = do("transpose", x)
-        Q, R = do('linalg.qr', x)
+        Q, R = do("linalg.qr", x)
         # stabilize qr by fixing diagonal of R in canonical, positive form (we
         # don't actaully do anything to R, just absorb the necessary sign -> Q)
-        rd = do('diag', R)
-        s = do('sign', rd) + (rd == 0)
+        rd = do("diag", R)
+        s = do("sign", rd) + (rd == 0)
         Q = Q * reshape(s, (1, -1))
-        if fat:
-            Q = do("transpose", Q)
         return Q
 
 
 @compose
 def isometrize_svd(x, backend=None):
-    with backend_like(backend):
-        fat = x.shape[0] < x.shape[1]
-        if fat:
-            x = do("transpose", x)
-
-        Q = do('linalg.svd', x)[0]
-        if fat:
-            Q = do("transpose", Q)
-
-        return Q
+    """Perform isometrization using the SVD decomposition."""
+    U, _, VH = do("linalg.svd", x, like=backend)
+    return U @ VH
 
 
 @compose
 def isometrize_exp(x, backend):
-    r"""Perform isometrization using the using anti-symmetric matrix
-    exponentiation.
+    r"""Perform isometrization using anti-symmetric matrix exponentiation.
 
     .. math::
 
@@ -805,60 +791,133 @@ def isometrize_exp(x, backend):
         m, n = x.shape
         d = max(m, n)
         x = do(
-            'pad', x, [[0, d - m], [0, d - n]], 'constant', constant_values=0.0
+            "pad", x, [[0, d - m], [0, d - n]], "constant", constant_values=0.0
         )
-        expx = do('linalg.expm', x - dag(x))
-        return expx[:m, :n]
+        x = x - dag(x)
+        Q = do("linalg.expm", x)
+        return Q[:m, :n]
+
+
+@compose
+def isometrize_cayley(x, backend):
+    r"""Perform isometrization using anti-symmetric matrix exponentiation.
+
+    .. math::
+
+            U_A = (I + \dfrac{A}{2})(I - \dfrac{A}{2})^{-1}
+
+    If ``x`` is rectangular it is completed with zeros first.
+    """
+    with backend_like(backend):
+        m, n = x.shape
+        d = max(m, n)
+        x = do(
+            "pad", x, [[0, d - m], [0, d - n]], "constant", constant_values=0.0
+        )
+        x = x - dag(x)
+        x = x / 2.
+        if backend == "torch":
+            # XXX: move device handling upstream in to autoray?
+            Id = do("eye", d, like=x, device=x.device)
+        else:
+            Id = do("eye", d, like=x)
+        Q = do('linalg.solve', Id - x, Id + x)
+        return Q[:m, :n]
 
 
 @compose
 def isometrize_modified_gram_schmidt(A, backend=None):
     """Perform isometrization explicitly using the modified Gram Schmidt
-    procedure.
+    procedure (this is slow but a useful reference).
     """
     with backend_like(backend):
-        m, n = A.shape
-
-        thin = m > n
-        if thin:
-            A = do('transpose', A)
-
         Q = []
-        for j in range(0, min(m, n)):
-
-            q = A[j, :]
+        for j in range(A.shape[1]):
+            q = A[:, j]
             for i in range(0, j):
-                rij = do('tensordot', do('conj', Q[i]), q, 1)
+                rij = do("tensordot", do("conj", Q[i]), q, 1)
                 q = q - rij * Q[i]
-
-            Q.append(q / do('linalg.norm', q, 2))
-
-        Q = do('stack', tuple(Q), axis=0, like=A)
-
-        if thin:
-            Q = do('transpose', Q)
-
+            Q.append(q / do("linalg.norm", q))
+        Q = do("stack", tuple(Q), axis=1)
         return Q
 
 
+@compose
+def isometrize_householder(X, backend=None):
+    with backend_like(backend):
+        X = do("tril", X, -1)
+        tau = 2. / (1. + do("sum", do("conj", X) * X, 0))
+        Q = do("linalg.householder_product", X, tau)
+        return Q
+
+
+def isometrize_torch_householder(x):
+    """Isometrize ``x`` using the Householder reflection method, as implemented
+    by the ``torch_householder`` package.
+    """
+    from torch_householder import torch_householder_orgqr
+
+    return torch_householder_orgqr(x)
+
+
 _ISOMETRIZE_METHODS = {
-    'qr': isometrize_qr,
-    'svd': isometrize_svd,
-    'exp': isometrize_exp,
-    'mgs': isometrize_modified_gram_schmidt,
+    "qr": isometrize_qr,
+    "svd": isometrize_svd,
+    "mgs": isometrize_modified_gram_schmidt,
+    "exp": isometrize_exp,
+    "cayley": isometrize_cayley,
+    "householder": isometrize_householder,
+    "torch_householder": isometrize_torch_householder,
 }
 
 
-def isometrize(x, method='qr'):
-    """Generate a isometric (or unitary if square) matrix from array ``x``.
+def isometrize(x, method="qr"):
+    """Generate an isometric (or unitary if square) / orthogonal matrix from
+    array ``x``.
 
     Parameters
     ----------
     x : array
         The matrix to project into isometrix form.
-    method : {'qr', 'svd', 'exp', 'mgs'}, optional
-        The method used to generate the isometry. Note ``'qr'`` is the fastest
-        and most robust but, for example, some libraries cannot back-propagate
-        through it.
+    method : str, optional
+        The method used to generate the isometry. The options are:
+
+        - "qr": use the Q factor of the QR decomposition of ``x`` with the
+          constraint that the diagonal of ``R`` is positive.
+        - "svd": uses ``U @ VH`` of the SVD decomposition of ``x``. This is
+          useful for finding the 'closest' isometric matrix to ``x``, such as
+          when it has been expanded with noise etc. But is less stable for
+          differentiation / optimization.
+        - "exp": use the matrix exponential of ``x - dag(x)``, first
+          completing ``x`` with zeros if it is rectangular. This is a good
+          parametrization for optimization, but more expensive for non-square
+          ``x``.
+        - "cayley": use the Cayley transform of ``x - dag(x)``, first
+          completing ``x`` with zeros if it is rectangular. This is a good
+          parametrization for optimization (one the few compatible with
+          `HIPS/autograd` e.g.), but more expensive for non-square ``x``.
+        - "householder": use the Householder reflection method directly. This
+          requires that the backend implements "linalg.householder_product".
+        - "torch_householder": use the Householder reflection method directly,
+          using the ``torch_householder`` package. This requires that the
+          package is installed and that the backend is ``"torch"``. This is
+          generally the best parametrizing method for "torch" if available.
+        - "mgs": use a python implementation of the modified Gram Schmidt
+          method directly. This is slow if not compiled but a useful reference.
+
+        Not all backends support all methods or differentiating through all
+        methods.
+
+    Returns
+    -------
+    Q : array
+        The isometrization / orthogonalization of ``x``.
     """
-    return _ISOMETRIZE_METHODS[method](x)
+    m, n = x.shape
+    fat = m < n
+    if fat:
+        x = do("transpose", x)
+    Q = _ISOMETRIZE_METHODS[method](x)
+    if fat:
+        Q = do("transpose", Q)
+    return Q

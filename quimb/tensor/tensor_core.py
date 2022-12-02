@@ -2398,7 +2398,7 @@ class Tensor(object):
         T.modify(data=(T.data + TH.data) / 2)
         return T
 
-    def isometrize(self, left_inds=None, inplace=False, method='qr'):
+    def isometrize(self, left_inds=None, method='qr', inplace=False):
         r"""Make this tensor unitary (or isometric) with respect to
         ``left_inds``. The underlying method is set by ``method``.
 
@@ -2407,18 +2407,39 @@ class Tensor(object):
         left_inds : sequence of str
             The indices to group together and treat as the left hand side of a
             matrix.
+        method : str, optional
+            The method used to generate the isometry. The options are:
+
+            - "qr": use the Q factor of the QR decomposition of ``x`` with the
+              constraint that the diagonal of ``R`` is positive.
+            - "svd": uses ``U @ VH`` of the SVD decomposition of ``x``. This is
+              useful for finding the 'closest' isometric matrix to ``x``, such
+              as when it has been expanded with noise etc. But is less stable
+              for differentiation / optimization.
+            - "exp": use the matrix exponential of ``x - dag(x)``, first
+              completing ``x`` with zeros if it is rectangular. This is a good
+              parametrization for optimization, but more expensive for
+              non-square ``x``.
+            - "cayley": use the Cayley transform of ``x - dag(x)``, first
+              completing ``x`` with zeros if it is rectangular. This is a good
+              parametrization for optimization (one the few compatible with
+              `HIPS/autograd` e.g.), but more expensive for non-square ``x``.
+            - "householder": use the Householder reflection method directly.
+              This requires that the backend implements
+              "linalg.householder_product".
+            - "torch_householder": use the Householder reflection method
+              directly, using the ``torch_householder`` package. This requires
+              that the package is installed and that the backend is
+              ``"torch"``. This is generally the best parametrizing method for
+              "torch" if available.
+            - "mgs": use a python implementation of the modified Gram Schmidt
+              method directly. This is slow if not compiled but a useful
+              reference.
+
+            Not all backends support all methods or differentiating through all
+            methods.
         inplace : bool, optional
             Whether to perform the unitization inplace.
-        method : {'qr', 'exp', 'mgs'}, optional
-            How to generate the unitary matrix. The options are:
-
-            - 'qr': use a (stabilized) QR decomposition directly.
-            - 'svd': use the left singular vectors of the SVD
-            - 'exp': exponential the padded, anti-hermitian part of the array
-            - 'mgs': use a explicit modified-gram-schmidt procedure
-
-            Generally, 'qr' is the fastest and best approach, however currently
-            ``tensorflow`` cannot back-propagate through it for instance.
 
         Returns
         -------
@@ -7362,10 +7383,37 @@ class TensorNetwork(object):
 
         Parameters
         ----------
-        method : {"qr", "svd", "exp", "mgs"}, optional
-            The method to use to project the tensors into isometric form. The
-            various methods have different advantages when it comes to speed
-            and gradient stability etc.
+        method : str, optional
+            The method used to generate the isometry. The options are:
+
+            - "qr": use the Q factor of the QR decomposition of ``x`` with the
+              constraint that the diagonal of ``R`` is positive.
+            - "svd": uses ``U @ VH`` of the SVD decomposition of ``x``. This is
+              useful for finding the 'closest' isometric matrix to ``x``, such
+              as when it has been expanded with noise etc. But is less stable
+              for differentiation / optimization.
+            - "exp": use the matrix exponential of ``x - dag(x)``, first
+              completing ``x`` with zeros if it is rectangular. This is a good
+              parametrization for optimization, but more expensive for
+              non-square ``x``.
+            - "cayley": use the Cayley transform of ``x - dag(x)``, first
+              completing ``x`` with zeros if it is rectangular. This is a good
+              parametrization for optimization (one the few compatible with
+              `HIPS/autograd` e.g.), but more expensive for non-square ``x``.
+            - "householder": use the Householder reflection method directly.
+              This requires that the backend implements
+              "linalg.householder_product".
+            - "torch_householder": use the Householder reflection method
+              directly, using the ``torch_householder`` package. This requires
+              that the package is installed and that the backend is
+              ``"torch"``. This is generally the best parametrizing method for
+              "torch" if available.
+            - "mgs": use a python implementation of the modified Gram Schmidt
+              method directly. This is slow if not compiled but a useful
+              reference.
+
+            Not all backends support all methods or differentiating through all
+            methods.
         allow_no_left_inds : bool, optional
             If ``True`` then allow tensors with no ``left_inds`` to be
             left alone, rather than raising an error.

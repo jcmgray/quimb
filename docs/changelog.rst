@@ -3,6 +3,29 @@ Changelog
 
 Release notes for ``quimb``.
 
+.. _whats-new.1.4.3:
+
+v1.4.3 (unreleased)
+----------------------
+
+**Enhancements**
+
+- refactor 'isometrize' methods including new "cayley", "householder" and
+  "torch_householder" methods. See :func:`quimb.tensor.decomp.isometrize`.
+
+**Bug fixes:**
+
+
+.. _whats-new.1.4.2:
+
+v1.4.2 (28th November 2022)
+----------------------
+
+**Enhancements**
+
+- move from versioneer to to
+  `setuptools_scm <https://pypi.org/project/setuptools-scm/>`_ for versioning
+
 .. _whats-new.1.4.1:
 
 v1.4.1 (28th November 2022)

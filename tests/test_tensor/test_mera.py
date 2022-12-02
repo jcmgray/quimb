@@ -43,7 +43,7 @@ class TestMERA:
         # check only need 'lightcone' to compute local
         assert mera.select(7).H @ meraX.select(7) == pytest.approx(x2)
 
-    @pytest.mark.parametrize("method", ['qr', 'exp', 'mgs'])
+    @pytest.mark.parametrize("method", ['qr', 'exp', 'cayley', 'mgs', 'svd'])
     def test_isometrize(self, method):
         mera = qt.MERA.rand(16, dangle=True)
         assert mera.H @ mera == pytest.approx(2.0)

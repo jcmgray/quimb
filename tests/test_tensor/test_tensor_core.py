@@ -407,11 +407,13 @@ class TestBasicTensorOperations:
         assert sum(tn ^ all for tn in pp.cut_iter(*bnds)) == pytest.approx(1.0)
         assert pp ^ all == pytest.approx(1.0)
 
-    @pytest.mark.parametrize("method", ['qr', 'exp', 'mgs', 'svd'])
+    @pytest.mark.parametrize(
+        "method", ['qr', 'svd', 'exp', 'cayley', 'mgs', 'svd']
+    )
     def test_isometrize(self, method):
         t = rand_tensor((2, 3, 4), 'abc')
         assert t.H @ t != pytest.approx(3.0)
-        t.isometrize('b', inplace=True, method=method)
+        t.isometrize_('b', method=method)
         assert t.H @ t == pytest.approx(3.0)
         assert t.inds == ('b', 'a', 'c')
 

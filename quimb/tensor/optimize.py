@@ -1341,6 +1341,9 @@ class TNOptimizer:
         else:
             fun = self.vectorized_value
 
+        if self._method in ('l-bfgs-b', 'tnc'):
+            options.setdefault('maxfun', n)
+
         try:
             self._maybe_init_pbar(n)
             self.res = minimize(
@@ -1428,7 +1431,11 @@ class TNOptimizer:
         """Run the optimizer for ``n`` function evaluations, using ``nlopt`` as
         the backend library to run the optimization. Whether the gradient is
         computed depends on which ``optimizer`` is selected, see valid options
-        at  https://nlopt.readthedocs.io/en/latest/NLopt_Algorithms/.
+        at https://nlopt.readthedocs.io/en/latest/NLopt_Algorithms/.
+
+        The following scipy ``optimizer`` options are automatically translated
+        to the corresponding ``nlopt`` algorithms: {"l-bfgs-b", "slsqp", "tnc",
+        "cobyla"}.
 
         Parameters
         ----------
@@ -1476,10 +1483,11 @@ class TNOptimizer:
 
         # translate directly comparable algorithms
         optimizer = {
-            "L-BFGS-B": "LD_LBFGS",
-            "COBYLA": "LN_COBYLA",
-            "SLSQP": "LD_SLSQP",
-        }.get(self.optimizer.upper(), self.optimizer)
+            "l-bfgs-b": "LD_LBFGS",
+            "slsqp": "LD_SLSQP",
+            "tnc": "LD_TNEWTON_PRECOND_RESTART",
+            "cobyla": "LN_COBYLA",
+        }.get(self.optimizer.lower(), self.optimizer)
 
         try:
             self._maybe_init_pbar(n)
