@@ -719,21 +719,16 @@ def tensor_make_single_bond(t1, t2, gauges=None):
     if nshared > 1:
         t1.fuse_({bond: shared})
         t2.fuse_({bond: shared})
-        if gauges is not None:
-
-            gs = [gauges.pop(ix) for ix in shared if ix in gauges]
-
-            if len(gs) == len(shared):
-                # all index gauges present already -> merge
-                gauges[bond] = functools.reduce(
-                    lambda x, y: do("kron", x, y), gs
-                )
-            elif len(gs) > 0:
-                # only some present - error for now, full handling would be to
-                # yield ones for missing indices
-                raise ValueError('Only some indices found in `gauges`.')
-
-            # if none are present there is nothing to do
+        if gauges is not None and any(ix in gauges for ix in shared):
+            # gather all the separate gauges
+            gs = [
+                gauges.pop(ix) if ix in gauges else
+                # if not present, ones is the identity gauge
+                do("ones", t1.ind_size(ix), like=t1.data)
+                for ix in shared
+            ]
+            # contract into a single gauge
+            gauges[bond] = functools.reduce(lambda x, y: do("kron", x, y), gs)
 
     return left, bond, right
 
