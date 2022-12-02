@@ -3243,9 +3243,9 @@ class TensorNetwork(object):
     _EXTRA_PROPS = ()
     _CONTRACT_STRUCTURED = False
 
-    def __init__(self, ts, *, virtual=False, check_collisions=True):
+    def __init__(self, ts=(), *, virtual=False, check_collisions=True):
 
-        # short-circuit for copying TensorNetworks
+        # short-circuit for copying or casting as TensorNetwork
         if isinstance(ts, TensorNetwork):
             self.tag_map = valmap(lambda tids: tids.copy(), ts.tag_map)
             self.ind_map = valmap(lambda tids: tids.copy(), ts.ind_map)
