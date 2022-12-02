@@ -4718,8 +4718,9 @@ class TensorNetwork(object):
         if gauges is not None:
             for ix in bonds(t1, t2):
                 # about to contract so don't need to balance gauge on both
-                g = gauges.pop(ix)
-                t1.multiply_index_diagonal_(ix, g)
+                g = gauges.pop(ix, None)
+                if g is not None:
+                    t1.multiply_index_diagonal_(ix, g)
 
         t12 = tensor_contract(
             t1, t2,
