@@ -21,7 +21,6 @@ from quimb.tensor import (
     TNLinearOperator1D,
 )
 from quimb.tensor.decomp import _compute_number_svals_to_keep_numba
-from quimb.tensor.contraction import _CONTRACT_BACKEND, _TENSOR_LINOP_BACKEND
 
 autograd_mark = pytest.mark.skipif(
     importlib.util.find_spec('autograd') is None,
@@ -34,73 +33,6 @@ def test_trim_singular_vals():
     assert _compute_number_svals_to_keep_numba(s, 0.5, 2) == 2
     assert _compute_number_svals_to_keep_numba(s, 2, 3) == 2
     assert _compute_number_svals_to_keep_numba(s, 5.02, 3) == 1
-
-
-class TestContractOpts:
-
-    def test_contract_strategy(self):
-        assert qtn.get_contract_strategy() == 'greedy'
-        with qtn.contract_strategy('auto'):
-            assert qtn.get_contract_strategy() == 'auto'
-        assert qtn.get_contract_strategy() == 'greedy'
-
-    def test_contract_backend(self):
-        assert qtn.get_contract_backend() == _CONTRACT_BACKEND
-        with qtn.contract_backend('cupy'):
-            assert qtn.get_contract_backend() == 'cupy'
-        assert qtn.get_contract_backend() == _CONTRACT_BACKEND
-
-    def test_tensor_linop_backend(self):
-        assert qtn.get_tensor_linop_backend() == _TENSOR_LINOP_BACKEND
-        with qtn.tensor_linop_backend('cupy'):
-            assert qtn.get_tensor_linop_backend() == 'cupy'
-        assert qtn.get_tensor_linop_backend() == _TENSOR_LINOP_BACKEND
-
-    def test_contract_cache(self):
-        import tempfile
-        import os
-        from opt_einsum.paths import register_path_fn
-
-        info = {'num_calls': 0}
-
-        def my_custom_opt(inputs, output, size_dict, memory_limit=None):
-            info['num_calls'] += 1
-            return [(0, 1)] * (len(inputs) - 1)
-
-        register_path_fn('quimb_test_opt', my_custom_opt)
-
-        tn = qtn.MPS_rand_state(4, 3) & qtn.MPS_rand_state(4, 3)
-        assert (
-            tn.contract(all, optimize='quimb_test_opt', get='expression')
-            is
-            tn.contract(all, optimize='quimb_test_opt', get='expression'))
-        assert info['num_calls'] == 1
-
-        # contraction pathinfo objects are now cached together
-        assert (
-            tn.contract(all, optimize='quimb_test_opt', get='path-info')
-            is
-            tn.contract(all, optimize='quimb_test_opt', get='path-info'))
-        assert info['num_calls'] == 1
-
-        # set a directory cache - functions will be run fresh again
-        with tempfile.TemporaryDirectory() as tdir:
-            assert len(os.listdir(tdir)) == 0
-            qtn.set_contract_path_cache(tdir)
-            assert (
-                tn.contract(all, optimize='quimb_test_opt', get='expression')
-                is
-                tn.contract(all, optimize='quimb_test_opt', get='expression'))
-            assert info['num_calls'] == 2
-            assert (
-                tn.contract(all, optimize='quimb_test_opt', get='path-info')
-                is
-                tn.contract(all, optimize='quimb_test_opt', get='path-info'))
-            assert info['num_calls'] == 2
-            assert len(os.listdir(tdir)) != 0
-
-            # need to release close the cache so the directory can be deleted
-            qtn.set_contract_path_cache(None)
 
 
 class TestBasicTensorOperations:

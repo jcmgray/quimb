@@ -720,10 +720,20 @@ def tensor_make_single_bond(t1, t2, gauges=None):
         t1.fuse_({bond: shared})
         t2.fuse_({bond: shared})
         if gauges is not None:
-            gauges[bond] = functools.reduce(
-                lambda x, y: do("kron", x, y),
-                (gauges.pop(ix) for ix in shared)
-            )
+
+            gs = [gauges.pop(ix) for ix in shared if ix in gauges]
+
+            if len(gs) == len(shared):
+                # all index gauges present already -> merge
+                gauges[bond] = functools.reduce(
+                    lambda x, y: do("kron", x, y), gs
+                )
+            elif len(gs) > 0:
+                # only some present - error for now, full handling would be to
+                # yield ones for missing indices
+                raise ValueError('Only some indices found in `gauges`.')
+
+            # if none are present there is nothing to do
 
     return left, bond, right
 
@@ -6464,7 +6474,6 @@ class TensorNetwork(object):
         compress_opts=None,
         compress_span=False,
         compress_matrices=True,
-        compress_exclude=None,
         equalize_norms=False,
         gauges=None,
         gauge_smudge=1e-6,
@@ -6499,7 +6508,6 @@ class TensorNetwork(object):
             compress_opts=compress_opts,
             compress_span=compress_span,
             compress_matrices=compress_matrices,
-            compress_exclude=compress_exclude,
             equalize_norms=equalize_norms,
             gauges=gauges,
             gauge_smudge=gauge_smudge,
@@ -6509,7 +6517,8 @@ class TensorNetwork(object):
             callback_post_compress=callback_post_compress,
             callback=callback,
             inplace=inplace,
-            **kwargs)
+            **kwargs
+        )
 
     contract_around_ = functools.partialmethod(contract_around, inplace=True)
 
