@@ -19,6 +19,12 @@ source = ["quimb"]
 
 [tool.pylama]
 ignore = "C901"
+max_line_length = 79
+
+[tool.ruff]
+line-length = 79
+target-version = "py38"
+ignore = ["E741"]
 
 [tool.black]
 line-length = 79

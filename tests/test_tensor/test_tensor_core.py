@@ -5,6 +5,7 @@ import importlib
 import numpy as np
 from numpy.testing import assert_allclose
 import scipy.sparse.linalg as spla
+import autoray as ar
 
 import quimb as qu
 import quimb.tensor as qtn
@@ -919,6 +920,20 @@ class TestTensorNetwork:
         tn = a | b | c
         assert tn.contraction_width() == 6
         assert tn.contraction_cost() == 2 * 8**3
+
+    def test_contract_to_dense_reduced_factor(self):
+        tn = qtn.PEPS.rand(2, 2, 2)
+        left_inds = ["k0,0", "k0,1"]
+        right_inds = ["k1,0", "k1,1"]
+        A = tn.to_dense(left_inds, right_inds)
+        L = tn.compute_reduced_factor("left", left_inds, right_inds)
+        Linv = ar.do("linalg.inv", L)
+        Ul = Linv @ A
+        assert_allclose(Ul.T @ Ul, np.eye(4), atol=1e-10)
+        R = tn.compute_reduced_factor("right", left_inds, right_inds)
+        Rinv = ar.do("linalg.inv", R)
+        Ur = A @ Rinv
+        assert_allclose(Ur @ Ur.T, np.eye(4), atol=1e-10)
 
     @pytest.mark.parametrize('method', ('auto', 'dense', 'overlap'))
     def test_tensor_network_distance(self, method):

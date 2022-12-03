@@ -1,7 +1,6 @@
 """Classes and algorithms related to 1D tensor networks.
 """
 
-import re
 import operator
 import functools
 from math import log2
@@ -11,7 +10,7 @@ import scipy.sparse.linalg as spla
 from autoray import do, dag, reshape, conj, get_dtype_name, transpose
 
 from ..utils import (
-    check_opt, print_multi_line, ensure_dict, partition_all, deprecated
+    print_multi_line, ensure_dict, partition_all, deprecated
 )
 import quimb as qu
 from .tensor_core import (
@@ -19,11 +18,8 @@ from .tensor_core import (
     TensorNetwork,
     rand_uuid,
     bonds,
-    bonds_size,
     oset,
     tags_to_oset,
-    get_tags,
-    PTensor,
 )
 from .tensor_arbgeom import (
     TensorNetworkGen,
@@ -657,6 +653,7 @@ class TensorNetwork1DOperator(TensorNetwork1D, TensorNetworkGenOperator):
 
     reindex_upper_sites_ = functools.partialmethod(
         reindex_upper_sites, inplace=True)
+
 
 def set_default_compress_mode(opts, cyclic=False):
     opts.setdefault('cutoff_mode', 'rel' if cyclic else 'rsum2')

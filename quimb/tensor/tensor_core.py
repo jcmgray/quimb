@@ -388,7 +388,7 @@ def tensor_split(
         connecting three tensors. If ``get='tensors'`` or ``get='arrays'`` then
         a tuple like ``(left, s, right)`` is returned.
     max_bond : None or int
-        If integer, the maxmimum number of singular values to keep, regardless
+        If integer, the maximum number of singular values to keep, regardless
         of ``cutoff``.
     cutoff : float, optional
         The threshold below which to discard singular values, only applies to
@@ -1464,7 +1464,7 @@ class Tensor(object):
         # a new or copied Tensor always has no owners
         self._owners = dict()
 
-        # Short circuit for copying Tensors
+        # short circuit for copying / casting Tensor instances
         if isinstance(data, Tensor):
             self._data = data.data
             self._inds = data.inds
@@ -7271,6 +7271,92 @@ class TensorNetwork(object):
             **contract_opts
         )
         return t.to_dense(*inds_seq, to_qarray=to_qarray)
+
+    def compute_reduced_factor(
+        self,
+        side,
+        left_inds,
+        right_inds,
+        optimize="auto-hq",
+        **contract_opts,
+    ):
+        """Compute either the left or right 'reduced factor' of this tensor
+        network. I.e., view as an operator, ``X``, mapping ``left_inds`` to
+        ``right_inds`` and compute ``L`` or ``R`` such that ``X = U_R @ R`` or
+        ``X = L @ U_L``, with ``U_R`` and ``U_L`` unitary operators that are
+        not computed. Only ``dag(X) @ X`` or ``X @ dag(X)`` is contracted,
+        which is generally cheaper than contracting ``X`` itself.
+
+        Parameters
+        ----------
+        self : TensorNetwork
+            The tensor network to compute the reduced factor of.
+        side : {'left', 'right'}
+            Whether to compute the left or right reduced factor. If 'right'
+            then ``dag(X) @ X`` is contracted, otherwise ``X @ dag(X)``.
+        left_inds : sequence of str
+            The indices forming the left side of the operator.
+        right_inds : sequence of str
+            The indices forming the right side of the operator.
+        contract_opts : dict, optional
+            Optinos to pass to
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.to_dense`.
+
+        Returns
+        -------
+        array_like
+        """
+        check_opt("side", side, ("left", "right"))
+
+        if left_inds is None:
+            right_inds = tags_to_oset(right_inds)
+            left_inds = self._outer_inds - right_inds
+        if right_inds is None:
+            left_inds = tags_to_oset(left_inds)
+            right_inds = self._outer_inds - left_inds
+
+        d0 = self.inds_size(left_inds)
+        d1 = self.inds_size(right_inds)
+
+        if side == "right":
+            # form dag(X) @ X --> left_inds are contracted
+            ixmap = {ix: rand_uuid() for ix in right_inds}
+            if d0 < d1:
+                # know exactly low-rank, so truncate
+                keep = d0
+            else:
+                keep = None
+        else:  # 'left'
+            # form X @ dag(X) --> right_inds are contracted
+            ixmap = {ix: rand_uuid() for ix in left_inds}
+            if d1 < d0:
+                # know exactly low-rank, so truncate
+                keep = d1
+            else:
+                keep = None
+
+        # contract to dense array
+        tnd = self.reindex(ixmap).conj_() & self
+        XX = tnd.to_dense(
+            ixmap.values(), ixmap.keys(), optimize=optimize, **contract_opts
+        )
+        s2, W = do("linalg.eigh", XX)
+
+        if keep is not None:
+            # outer dimension smaller -> exactly low-rank
+            s2 = s2[-keep:]
+            W = W[:, -keep:]
+
+        # might have negative eigenvalues due to numerical error from squaring
+        s2 = do("clip", s2, s2[-1] * 1e-12, None)
+        s = do("sqrt", s2)
+
+        if side == "right":
+            factor = decomp.ldmul(s, dag(W))
+        else:  # 'left'
+            factor = decomp.rdmul(W, s)
+
+        return factor
 
     @functools.wraps(tensor_network_distance)
     def distance(self, *args, **kwargs):
