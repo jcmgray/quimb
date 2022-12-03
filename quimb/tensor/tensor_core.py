@@ -1183,7 +1183,9 @@ def tensor_network_fit_autodiff(
     """
     from .optimize import TNOptimizer
 
-    xBB = (tn_target | tn_target.H).contract(all, optimize=contract_optimize)
+    xBB = (tn_target | tn_target.H).contract(
+        ..., output_inds=(), optimize=contract_optimize,
+    )
 
     tnopt = TNOptimizer(
         tn=tn,
@@ -1203,6 +1205,89 @@ def tensor_network_fit_autodiff(
         t1.modify(data=t2.data)
 
     return tn
+
+
+def _tn_fit_als_core(
+    var_tags,
+    tnAA,
+    tnAB,
+    xBB,
+    tol,
+    contract_optimize,
+    steps,
+    enforce_pos,
+    pos_smudge,
+    solver='solve',
+    progbar=False,
+):
+    # want to cache from sweep to sweep but also not infinitely
+    cachesize = len(var_tags) * (tnAA.num_tensors + tnAB.num_tensors)
+    cache = LRU(maxsize=cachesize)
+
+    # shared intermediates + greedy = good reuse of contractions
+    with oe.shared_intermediates(cache), contract_strategy(contract_optimize):
+
+        # prepare each of the contractions we are going to repeat
+        env_contractions = []
+        for tg in var_tags:
+            # varying tensor and conjugate in norm <A|A>
+            tk = tnAA['__KET__', tg]
+            tb = tnAA['__BRA__', tg]
+
+            # get inds, and ensure any bonds come last, for linalg.solve
+            lix, bix, rix = group_inds(tb, tk)
+            tk.transpose_(*rix, *bix)
+            tb.transpose_(*lix, *bix)
+
+            # form TNs with 'holes', i.e. environment tensors networks
+            A_tn = tnAA.select((tg,), '!all')
+            y_tn = tnAB.select((tg,), '!all')
+
+            env_contractions.append((tk, tb, lix, bix, rix, A_tn, y_tn))
+
+        if tol != 0.0:
+            old_d = float('inf')
+
+        if progbar:
+            import tqdm
+            pbar = tqdm.trange(steps)
+        else:
+            pbar = range(steps)
+
+        # the main iterative sweep on each tensor, locally optimizing
+        for _ in pbar:
+            for (tk, tb, lix, bix, rix, A_tn, y_tn) in env_contractions:
+                Ni = A_tn.to_dense(lix, rix)
+                Wi = y_tn.to_dense(rix, bix)
+
+                if enforce_pos:
+                    el, ev = do('linalg.eigh', Ni)
+                    el = do('clip', el, el[-1] * pos_smudge, None)
+                    Ni_p = ev * do('reshape', el, (1, -1)) @ dag(ev)
+                else:
+                    Ni_p = Ni
+
+                if solver == 'solve':
+                    x = do('linalg.solve', Ni_p, Wi)
+                elif solver == 'lstsq':
+                    x = do('linalg.lstsq', Ni_p, Wi, rcond=pos_smudge)[0]
+
+                x_r = do('reshape', x, tk.shape)
+                # n.b. because we are using virtual TNs -> updates propagate
+                tk.modify(data=x_r)
+                tb.modify(data=do('conj', x_r))
+
+            # assess | A - B | for convergence or printing
+            if (tol != 0.0) or progbar:
+                xAA = do('trace', dag(x) @ (Ni @ x))  # <A|A>
+                xAB = do('trace', do('real', dag(x) @ Wi))  # <A|B>
+                d = do('abs', (xAA - 2 * xAB + xBB))**0.5
+                if abs(d - old_d) < tol:
+                    break
+                old_d = d
+
+            if progbar:
+                pbar.set_description(str(d))
 
 
 def tensor_network_fit_als(
@@ -1284,11 +1369,11 @@ def tensor_network_fit_als(
     else:
         to_tag = tna.select_tensors(tags, 'any')
 
-    tagged = []
+    var_tags = []
     for i, t in enumerate(to_tag):
         var_tag = f'__VAR{i}__'
         t.add_tag(var_tag)
-        tagged.append(var_tag)
+        var_tags.append(var_tag)
 
     # form the norm of the varying TN (A) and its overlap with the target (B)
     if tnAA is None:
@@ -1296,80 +1381,28 @@ def tensor_network_fit_als(
     if tnAB is None:
         tnAB = tna | tn_target.H
 
+    if (tol != 0.0) and (xBB is None):
+        # <B|B>
+        xBB = (tn_target | tn_target.H).contract(
+            ..., optimize=contract_optimize, output_inds=(),
+        )
+
     if pos_smudge is None:
         pos_smudge = max(tol, 1e-15)
 
-    # want to cache from sweep to sweep but also not infinitely
-    cachesize = len(tagged) * (tn.num_tensors + tn_target.num_tensors)
-    cache = LRU(maxsize=cachesize)
-
-    # shared intermediates + greedy = good reuse of contractions
-    with oe.shared_intermediates(cache), contract_strategy(contract_optimize):
-
-        # prepare each of the contractions we are going to repeat
-        env_contractions = []
-        for tg in tagged:
-            # varying tensor and conjugate in norm <A|A>
-            tk = tnAA['__KET__', tg]
-            tb = tnAA['__BRA__', tg]
-
-            # get inds, and ensure any bonds come last, for linalg.solve
-            lix, bix, rix = group_inds(tb, tk)
-            tk.transpose_(*rix, *bix)
-            tb.transpose_(*lix, *bix)
-
-            # form TNs with 'holes', i.e. environment tensors networks
-            A_tn = tnAA.select((tg,), '!all')
-            y_tn = tnAB.select((tg,), '!all')
-
-            env_contractions.append((tk, tb, lix, bix, rix, A_tn, y_tn))
-
-        if tol != 0.0:
-            old_d = float('inf')
-            if xBB is None:
-                # compute this so tracking real norm distance is accurate
-                xBB = (tn_target | tn_target.H) ^ all  # <B|B>
-
-        if progbar:
-            import tqdm
-            pbar = tqdm.trange(steps)
-        else:
-            pbar = range(steps)
-
-        # the main iterative sweep on each tensor, locally optimizing
-        for _ in pbar:
-            for (tk, tb, lix, bix, rix, A_tn, y_tn) in env_contractions:
-                Ni = A_tn.to_dense(lix, rix)
-                Wi = y_tn.to_dense(rix, bix)
-
-                if enforce_pos:
-                    el, ev = do('linalg.eigh', Ni)
-                    el = do('clip', el, el[-1] * pos_smudge, None)
-                    Ni_p = ev * do('reshape', el, (1, -1)) @ dag(ev)
-                else:
-                    Ni_p = Ni
-
-                if solver == 'solve':
-                    x = do('linalg.solve', Ni_p, Wi)
-                elif solver == 'lstsq':
-                    x = do('linalg.lstsq', Ni_p, Wi, rcond=pos_smudge)[0]
-
-                x_r = do('reshape', x, tk.shape)
-                # n.b. because we are using virtual TNs -> updates propagate
-                tk.modify(data=x_r)
-                tb.modify(data=do('conj', x_r))
-
-            # assess | A - B | for convergence or printing
-            if (tol != 0.0) or progbar:
-                xAA = do('trace', dag(x) @ (Ni @ x))  # <A|A>
-                xAB = do('trace', do('real', dag(x) @ Wi))  # <A|B>
-                d = do('abs', (xAA - 2 * xAB + xBB))**0.5
-                if abs(d - old_d) < tol:
-                    break
-                old_d = d
-
-            if progbar:
-                pbar.set_description(str(d))
+    _tn_fit_als_core(
+        var_tags=var_tags,
+        tnAA=tnAA,
+        tnAB=tnAB,
+        xBB=xBB,
+        tol=tol,
+        contract_optimize=contract_optimize,
+        steps=steps,
+        enforce_pos=enforce_pos,
+        pos_smudge=pos_smudge,
+        solver=solver,
+        progbar=progbar,
+    )
 
     if not inplace:
         tn = tn.copy()
