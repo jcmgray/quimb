@@ -7,3 +7,10 @@ requires = [
 
 [tool.setuptools_scm]
 write_to = "quimb/_version.py"
+
+[tool.coverage.run]
+omit = ["*/quimb/experimental/*"]
+source = ["quimb"]
+
+[tool.pylama]
+ignore = "C901"
