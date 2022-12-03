@@ -8,9 +8,18 @@ requires = [
 [tool.setuptools_scm]
 write_to = "quimb/_version.py"
 
+[tool.pytest.ini_options]
+testpaths = "tests"
+addopts = "--cov=quimb --cov-report term-missing --cov-report xml:coverage.xml --verbose --durations=10"
+filterwarnings = "once"
+
 [tool.coverage.run]
 omit = ["*/quimb/experimental/*"]
 source = ["quimb"]
 
 [tool.pylama]
 ignore = "C901"
+
+[tool.black]
+line-length = 79
+target-version = ['py38']
