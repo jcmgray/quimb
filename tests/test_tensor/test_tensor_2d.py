@@ -165,7 +165,7 @@ class TestPEPSConstruct:
 
 class Test2DContract:
 
-    @pytest.mark.parametrize('mode', ['mps', "coarse-grain", "full-bond"])
+    @pytest.mark.parametrize('mode', ['mps', "projector", "full-bond"])
     def test_contract_boundary(self, mode):
         # make a large but cheap and easy (mostly positive) TN
         rng = np.random.default_rng(42)
