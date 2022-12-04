@@ -1,6 +1,7 @@
 import itertools
 
 import pytest
+import numpy as np
 from numpy.testing import assert_allclose
 
 import quimb as qu
@@ -163,6 +164,18 @@ class TestPEPSConstruct:
 
 
 class Test2DContract:
+
+    @pytest.mark.parametrize('mode', ['mps', "coarse-grain", "full-bond"])
+    def test_contract_boundary(self, mode):
+        # make a large but cheap and easy (mostly positive) TN
+        rng = np.random.default_rng(42)
+        tn = qtn.TN2D_from_fill_fn(
+            lambda shape: rng.uniform(low=-0.1, size=shape),
+            Lx=8, Ly=8, D=2,
+        )
+        Zex = tn.contract(...)
+        Z = tn.contract_boundary(max_bond=4, mode=mode)
+        assert Z == pytest.approx(Zex, rel=1e-3)
 
     def test_contract_2d_one_layer_boundary(self):
         psi = qtn.PEPS.rand(4, 4, 3, seed=42)

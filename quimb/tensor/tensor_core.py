@@ -7358,6 +7358,120 @@ class TensorNetwork(object):
 
         return factor
 
+    def insert_compressor_between_regions(
+        self,
+        ltags,
+        rtags,
+        max_bond=None,
+        cutoff=1e-10,
+        select_which="any",
+        insert_into=None,
+        new_tags=None,
+        new_ltags=None,
+        new_rtags=None,
+        optimize="auto-hq",
+        inplace=False,
+        **compress_opts,
+    ):
+        """Compute and insert a pair of 'oblique' projection tensors (see for
+        example https://arxiv.org/abs/1905.02351) that effectively compresses
+        between two regions of the tensor network. Useful for various
+        approximate contraction methods such as HOTRG and CTMRG.
+
+        Parameters
+        ----------
+        ltags : sequence of str
+            The tags of the tensors in the left region.
+        rtags : sequence of str
+            The tags of the tensors in the right region.
+        max_bond : int or None, optional
+            The maximum bond dimension to use for the compression (i.e. shared
+            by the two projection tensors). If ``None`` then the maximum
+            is controlled by ``cutoff``.
+        cutoff : float, optional
+            The cutoff to use for the compression.
+        select_which : {'any', 'all', 'none'}, optional
+            How to select the regions based on the tags, see
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.select`.
+        insert_into : TensorNetwork, optional
+            If given, insert the new tensors into this tensor network, assumed
+            to have the same relevant indices as ``self``.
+        new_tags : str or sequence of str, optional
+            The tag(s) to add to both the new tensors.
+        new_ltags : str or sequence of str, optional
+            The tag(s) to add to the new left projection tensor.
+        new_rtags : str or sequence of str, optional
+            The tag(s) to add to the new right projection tensor.
+        optimize : str or PathOptimizer, optional
+            How to optimize the contraction of the projection tensors.
+        inplace : bool, optional
+            Whether perform the insertion in-place. If ``insert_into`` is
+            supplied then this doesn't matter, and that tensor network will
+            be modified and returned.
+
+        Returns
+        -------
+        TensorNetwork
+
+        See Also
+        --------
+        compute_reduced_factor, select
+        """
+        if compress_opts.pop("absorb", "both") != "both":
+            raise NotImplementedError("Only `absorb=both` supported.")
+
+        tn = self if (inplace or (insert_into is not None)) else self.copy()
+
+        # get views of the left and right regions - 'X' and 'Y'
+        ltn = tn.select(ltags, which=select_which)
+        rtn = tn.select(rtags, which=select_which)
+
+        # get the connecting indices and corresponding sizes
+        bix = bonds(ltn, rtn)
+        bix_sizes = [tn.ind_size(ix) for ix in bix]
+
+        # contract the reduced factors
+        Rl = ltn.compute_reduced_factor("right", None, bix, optimize=optimize)
+        Rr = rtn.compute_reduced_factor("left", bix, None, optimize=optimize)
+
+        # then combine and perform truncated SVD on these
+        Ut, st, VHt = decomp.svd_truncated(
+            Rl @ Rr, max_bond=max_bond, cutoff=cutoff,
+            absorb=None, **compress_opts
+        )
+        st_sqrt = do("sqrt", st)
+
+        # then form the 'oblique' projectors
+        Pl = Rr @ decomp.rddiv(dag(VHt), st_sqrt)
+        Pl = reshape(Pl, (*bix_sizes, -1))
+        Pr = decomp.lddiv(st_sqrt, dag(Ut)) @ Rl
+        Pr = reshape(Pr, (-1, *bix_sizes))
+
+        if insert_into is not None:
+            tn = insert_into
+            ltn = tn.select(ltags, which=select_which)
+            rtn = tn.select(rtags, which=select_which)
+
+        # finally cut the bonds
+        new_lix = [rand_uuid() for _ in bix]
+        new_rix = [rand_uuid() for _ in bix]
+        new_bix = [rand_uuid()]
+        ltn.reindex_(dict(zip(bix, new_lix)))
+        rtn.reindex_(dict(zip(bix, new_rix)))
+
+        # ... and insert the new projectors in place
+        new_tags = tags_to_oset(new_tags)
+        new_ltags = new_tags | tags_to_oset(new_ltags)
+        new_rtags = new_tags | tags_to_oset(new_rtags)
+        tn |= Tensor(Pl, inds=new_lix + new_bix, tags=new_ltags)
+        tn |= Tensor(Pr, inds=new_bix + new_rix, tags=new_rtags)
+
+        return tn
+
+    insert_compressor_between_regions_ = functools.partialmethod(
+        insert_compressor_between_regions, inplace=True
+    )
+
     @functools.wraps(tensor_network_distance)
     def distance(self, *args, **kwargs):
         return tensor_network_distance(self, *args, **kwargs)

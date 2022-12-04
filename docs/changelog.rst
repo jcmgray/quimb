@@ -12,6 +12,11 @@ v1.4.3 (unreleased)
 
 - refactor 'isometrize' methods including new "cayley", "householder" and
   "torch_householder" methods. See :func:`quimb.tensor.decomp.isometrize`.
+- add :meth:`~quimb.tensor.tensor_core.TensorNetwork.compute_reduced_factor`
+  and :meth:`~quimb.tensor.tensor_core.TensorNetwork.insert_compressor_between_regions`
+  methos, for some RG style algorithms.
+- add the ``mode="projector"`` option for 2D tensor network contractions
+
 
 **Bug fixes:**
 

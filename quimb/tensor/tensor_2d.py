@@ -111,9 +111,22 @@ class Rotator2D:
     """Object for rotating coordinates and various contraction functions so
     that the core algorithms only have to written once, but nor does the actual
     TN have to be modified.
+
+    Parameters
+    ----------
+    tn : TensorNetwork2D
+        The tensor network to rotate coordinates for.
+    xrange : tuple[int, int]
+        The range of x-coordinates to range over.
+    yrange : tuple[int, int]
+        The range of y-coordinates to range over.
+    from_which : {'xmin', 'xmax', 'ymin', 'ymax'}
+        The direction to sweep from.
+    stepsize : int, optional
+        The step size to use when sweeping.
     """
 
-    def __init__(self, tn, xrange, yrange, from_which):
+    def __init__(self, tn, xrange, yrange, from_which, stepsize=1):
         check_opt('from_which', from_which, {'xmin', 'xmax', 'ymin', 'ymax'})
 
         if xrange is None:
@@ -144,12 +157,14 @@ class Rotator2D:
 
         if 'min' in self.from_which:
             # -> sweeps are increasing
-            self.sweep = range(self.imin, self.imax + 1, +1)
-            self.istep = +1
+            self.sweep = range(self.imin, self.imax + 1, +stepsize)
+            self.istep = +stepsize
         else:  # 'max'
             # -> sweeps are decreasing
-            self.sweep = range(self.imax, self.imin - 1, -1)
-            self.istep = -1
+            self.sweep = range(self.imax, self.imin - 1, -stepsize)
+            self.istep = -stepsize
+
+        self.sweep_other = range(self.jmin, self.jmax + 1)
 
     def get_opposite_env_fn(self):
         """Get the function and location label for contracting boundaries in
@@ -925,14 +940,13 @@ class TensorNetwork2D(TensorNetworkGen):
         r2d = Rotator2D(self, xrange, yrange, from_which)
         site_tag = r2d.site_tag
         plane, istep = r2d.plane, r2d.istep
-        jmin, jmax = r2d.jmin, r2d.jmax
 
         if layer_tags is None:
             layer_tags = [None]
 
         for i in r2d.sweep[:-1]:
             for layer_tag in layer_tags:
-                for j in range(jmin, jmax + 1):
+                for j in r2d.sweep_other:
 
                     tag1 = site_tag(i, j)  # outer
                     tag2 = site_tag(i + istep, j)  # inner
@@ -1102,7 +1116,7 @@ class TensorNetwork2D(TensorNetworkGen):
         for i in r2d.sweep[:-1]:
 
             # contract inwards, no compression
-            for j in range(jmin, jmax + 1):
+            for j in r2d.sweep_other:
                 #
                 #             j  j+1   ...
                 #         │   │   │   │   │   │
@@ -1198,6 +1212,99 @@ class TensorNetwork2D(TensorNetworkGen):
                 self.insert_gauge(
                     Cr, [site_tag(i, j)], [site_tag(i, j + 1)], Cl)
 
+    def _contract_boundary_projector(
+        self,
+        xrange,
+        yrange,
+        from_which,
+        max_bond=None,
+        cutoff=1e-10,
+        lazy=False,
+        equalize_norms=False,
+        optimize="auto-hq",
+        compress_opts=None,
+    ):
+        """Contract the boundary of this 2D tensor network by explicitly
+        computing and inserting explicit local projector tensors, which can
+        optionally be left uncontracted. Multilayer networks are naturally
+        supported.
+
+        Parameters
+        ----------
+        xrange : tuple
+            The range of x indices to contract.
+        yrange : tuple
+            The range of y indices to contract.
+        from_which : {'xmin', 'xmax', 'ymin', 'ymax'}
+            From which boundary to contract.
+        max_bond : int, optional
+            The maximum bond dimension to contract to. If ``None`` (default),
+            compression is left to ``cutoff``.
+        cutoff : float, optional
+            The cutoff to use for boundary compression.
+        lazy : bool, optional
+            Whether to leave the boundary tensors uncontracted. If ``False``
+            (the default), the boundary tensors are contracted and the
+            resulting boundary has a single tensor per site.
+        equalize_norms : bool, optional
+            Whether to actively absorb the norm of modified tensors into
+            ``self.exponent``.
+        optimize : str or PathOptimizer, optional
+            The contract path optimization to use when forming the projector
+            tensors.
+        compress_opts : dict, optional
+            Other options to pass to
+            :func:`~quimb.tensor.decomp.svd_truncated`.
+
+        See Also
+        --------
+        insert_compressor_between_regions
+        """
+        compress_opts = ensure_dict(compress_opts)
+
+        # we compute the projectors from an untouched copy
+        tn_calc = self.copy()
+
+        r = Rotator2D(self, xrange, yrange, from_which)
+        i0, i1 = r.sweep[:2]
+        j0 = r.sweep_other[0]
+
+        for j in r.sweep_other:
+
+            tag_ij = r.site_tag(i0, j)
+            tag_ip1j = r.site_tag(i1, j)
+
+            if j != j0:
+                ltags = r.site_tag(i0, j - 1), r.site_tag(i1, j - 1)
+                rtags = (tag_ij, tag_ip1j)
+                #      │         │
+                #    ──O─┐ chi ┌─O──  i+1
+                #      │ └─▷═◁─┘ │
+                #      │ ┌┘   └┐ │
+                #    ──O─┘     └─O──  i
+                #     j-1        j
+                tn_calc.insert_compressor_between_regions(
+                    ltags,
+                    rtags,
+                    new_ltags=ltags,
+                    new_rtags=rtags,
+                    insert_into=self,
+                    max_bond=max_bond,
+                    cutoff=cutoff,
+                    **compress_opts,
+                )
+
+        if not lazy:
+            # contract each pair of boundary tensors with their projectors
+            for j in r.sweep_other:
+                self.contract_tags_(
+                    (r.site_tag(i0, j), r.site_tag(i1, j)), optimize=optimize,
+                )
+
+        if equalize_norms:
+            for t in self.select_tensors(r.x_tag(i1)):
+                self.strip_exponent(t, equalize_norms)
+
     def contract_boundary_from(
         self,
         xrange,
@@ -1217,7 +1324,7 @@ class TensorNetwork2D(TensorNetworkGen):
         """Unified entrypoint for contracting any rectangular patch of tensors
         from any direction, with any boundary method.
         """
-        check_opt('mode', mode, {'mps', 'full-bond'})
+        check_opt('mode', mode, ('mps', 'projector', 'full-bond'))
 
         tn = self if inplace else self.copy()
 
@@ -1231,12 +1338,17 @@ class TensorNetwork2D(TensorNetworkGen):
             tn._contract_boundary_full_bond(**contract_boundary_opts)
             return tn
 
-        # mps mode options
         contract_boundary_opts["cutoff"] = cutoff
+        contract_boundary_opts["compress_opts"] = compress_opts
+
+        if mode == 'projector':
+            tn._contract_boundary_projector(**contract_boundary_opts)
+            return tn
+
+        # mode == 'mps' options
         contract_boundary_opts["canonize"] = canonize
         contract_boundary_opts["layer_tags"] = layer_tags
         contract_boundary_opts["sweep_reverse"] = sweep_reverse
-        contract_boundary_opts["compress_opts"] = compress_opts
         self._contract_boundary_core(**contract_boundary_opts)
 
         return tn
@@ -1954,8 +2066,46 @@ class TensorNetwork2D(TensorNetworkGen):
         envs=None,
         **contract_boundary_opts
     ):
-        """Compute the ``self.Lx`` 1D boundary tensor networks describing
-        the environments of rows and columns.
+        """Compute the 1D boundary tensor networks describing the environments
+        of rows and columns.
+
+        Parameters
+        ----------
+        from_which : {'xmin', 'xmax', 'ymin', 'ymax'}
+            Which boundary to compute the environments from.
+        xrange : tuple[int], optional
+            The range of rows to compute the environments for.
+        yrange : tuple[int], optional
+            The range of columns to compute the environments for.
+        max_bond : int, optional
+            The maximum bond dimension of the environments.
+        cutoff : float, optional
+            The cutoff for the singular values of the environments.
+        canonize : bool, optional
+            Whether to canonicalize along each MPS environment before
+            compressing.
+        mode : {'mps', 'projector', 'full-bond'}, optional
+            Which contraction method to use for the environments.
+        layer_tags : str or iterable[str], optional
+            If this 2D TN is multi-layered (e.g. a bra and a ket), and
+            ``mode == 'mps'``, contract and compress each specified layer
+            separately, for a cheaper contraction.
+        dense : bool, optional
+            Whether to use dense tensors for the environments.
+        compress_opts : dict, optional
+            Other options to pass to
+            :func:`~quimb.tensor.tensor_core.tensor_compress_bond`.
+        envs : dict, optional
+            An existing dictionary to store the environments in.
+        contract_boundary_opts
+            Other options to pass to
+            :meth:`~quimb.tensor.tensor_2d.TensorNetwork2D.contract_boundary_from`.
+
+        Returns
+        -------
+        envs : dict
+            A dictionary of the environments, with keys of the form
+            ``(from_which, row_or_col_index)``.
         """
         tn = self.copy()
 
