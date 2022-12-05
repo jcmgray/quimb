@@ -17,3 +17,4 @@ Examples
   ./examples/ex_tensorflow_optimize_pbc_mps
   ./examples/ex_tn_train_circuit
   ./examples/ex_tn_qaoa_energy_bayesopt
+  ./examples/ex_quimb_with_jax_flax_optax
