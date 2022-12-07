@@ -11,10 +11,9 @@ Things to check if new functionality added:
 1. Ensure functions are unit tested.
 2. Ensure functions have `numpy style docstrings <http://sphinxcontrib-napoleon.readthedocs.io/en/latest/example_numpy.html>`_.
 3. Ensure code is PEP8 compliant.
-4. If module, add to ``docs/api.rst`` for autosummarizing.
-5. Add to ``quimb/__init__.py`` and ``"__all__"`` if appropriate (or the
+4. Add to ``quimb/__init__.py`` and ``"__all__"`` if appropriate (or the
    tensor network equivalent ``quimb.tensor.__init__.py``).
-6. Add to changelog and elsewhere in docs.
+5. Add to changelog and elsewhere in docs.
 
 
 Running the Tests
@@ -28,11 +27,17 @@ The tests can also be run with pre-spawned mpi workers using the command ``quimb
 Building the docs locally
 =========================
 
-Building the docs requires `sphinx <http://www.sphinx-doc.org/en/stable/>`_, `sphinx-book-theme <https://github.com/executablebooks/sphinx-book-theme>`_, and `nbsphinx <https://nbsphinx.readthedocs.io>`_.
+Building the docs requires `sphinx <http://www.sphinx-doc.org>`_,
+`myst_nb <https://myst-nb.readthedocs.io>`_,
+`sphinx-autoapi <https://sphinx-autoapi.readthedocs.io>`_,
+`sphinx_copybutton <https://sphinx-copybutton.readthedocs.io>`_,
+and
+`furo <https://github.com/pradyunsg/furo>`_.
 
-1. To start from scratch, remove ``quimb/docs/_autosummary`` and ``quimb/docs/_build``.
-2. Run ``make html`` (``make.bat html`` on windows) in the ``quimb/docs`` folder.
-3. Launch the page: ``quimb/docs/_build/html/index.html``.
+1. ``cd`` into the ``quimb/docs`` folder.
+2. To start from scratch, remove the ``_autosummary`` and ``_build`` folders.
+3. Run ``sphinx-build -b html . ./_build/html/``.
+4. Launch the page: ``open _build/html/index.html``.
 
 Building the DocSet
 -------------------

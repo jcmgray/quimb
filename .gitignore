@@ -116,6 +116,7 @@ $RECYCLE.BIN/
 *.lnk
 
 docs/_autosummary/
+docs/autoapi
 
 .fuse_hidden*
 

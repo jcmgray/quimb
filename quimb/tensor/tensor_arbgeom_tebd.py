@@ -6,7 +6,7 @@ from autoray import do, to_numpy, dag
 
 from ..core import eye, kron, qarray
 from ..utils import ensure_dict
-from ..utils import progbar as Progbar
+from ..utils import progbar as Progbar, default_to_neutral_style
 from .tensor_core import Tensor
 from .drawing import get_colors, get_positions
 
@@ -296,6 +296,7 @@ class LocalHamGen:
         s = "<LocalHamGen(nsites={}, num_terms={})>"
         return s.format(self.nsites, len(self.terms))
 
+    @default_to_neutral_style
     def draw(
         self,
         ordering="sort",

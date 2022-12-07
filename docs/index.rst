@@ -108,14 +108,3 @@ Notes on contributing to ``quimb`` and release details can be found below:
 
   develop
   changelog
-
-
-Indices and tables
-------------------
-
-The following sections contain the complete listing of functions, classes and modules in ``quimb``.
-
-* :ref:`genindex`
-* :ref:`modindex`
-* :ref:`search`
-

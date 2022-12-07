@@ -51,8 +51,11 @@ setup(
         ],
         'docs': [
             'sphinx>=2.0',
-            'sphinx-book-theme>=0.1',
-            'nbsphinx>=0.4',
+            'sphinx-autoapi'
+            'sphinx-copybutton',
+            'myst-nb',
+            'furo',
+            'setuptools_scm',
             'ipython>=7.0',
             'autoray>=0.2.0',
             'opt_einsum>=3.2',

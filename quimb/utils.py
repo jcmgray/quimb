@@ -1,5 +1,6 @@
-"""Miscellenous
+"""Misc utility functions.
 """
+import functools
 import itertools
 import collections
 from importlib.util import find_spec
@@ -348,6 +349,12 @@ class oset:
     def copy(self):
         return oset.from_dict(self._d)
 
+    def __deepcopy__(self, memo):
+        # always use hashable entries so just take normal copy
+        new = self.copy()
+        memo[id(self)] = new
+        return new
+
     def add(self, k):
         self._d[k] = None
 
@@ -592,3 +599,42 @@ def tree_unflatten(objs, tree, is_leaf=is_not_container):
     """
     objs = iter(objs)
     return tree_map(lambda _: next(objs), tree, is_leaf)
+
+
+# a style to use for matplotlib that works with light and dark backgrounds
+NEUTRAL_STYLE = {
+    'axes.edgecolor': (0.5, 0.5, 0.5),
+    'axes.facecolor': (0, 0, 0, 0),
+    'axes.grid': True,
+    'axes.labelcolor': (0.5, 0.5, 0.5),
+    'axes.spines.right': False,
+    'axes.spines.top': False,
+    'figure.facecolor': (0, 0, 0, 0),
+    'grid.alpha': 0.1,
+    'grid.color': (0.5, 0.5, 0.5),
+    'legend.frameon': False,
+    'text.color': (0.5, 0.5, 0.5),
+    'xtick.color': (0.5, 0.5, 0.5),
+    'xtick.minor.visible': True,
+    'ytick.color': (0.5, 0.5, 0.5),
+    'ytick.minor.visible': True,
+}
+
+
+def default_to_neutral_style(fn):
+    """Wrap a function or method to use the neutral style by default.
+    """
+
+    @functools.wraps(fn)
+    def wrapper(*args, style="neutral", **kwargs):
+        import matplotlib.pyplot as plt
+
+        if style == "neutral":
+            style = NEUTRAL_STYLE
+        elif not style:
+            style = {}
+
+        with plt.style.context(style):
+            return fn(*args, **kwargs)
+
+    return wrapper
