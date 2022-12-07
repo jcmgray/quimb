@@ -6,11 +6,19 @@ h1, h2, h3 {
 }
 
 h1 {
-    font-size: 2.1rem;
+	font-size: 2.0rem;
+}
+
+h2 {
+	font-size: 1.75rem;
+}
+
+h3 {
+	font-size: 1.5rem;
 }
 
 .toctree-l2 {
-	font-size: 0.85em;
+	font-size: 0.85rem;
 }
 
 body {
@@ -18,7 +26,7 @@ body {
 }
 
 article {
-	font-size: 0.9em
+	font-size: 0.9rem;
 }
 
 code, kbd, pre, samp {

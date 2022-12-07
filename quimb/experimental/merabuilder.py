@@ -1,6 +1,6 @@
 """Tools for constructing MERA for arbitrary geometry.
 
-TODO:
+TODO::
 
     - [ ] 2D, 3D MERA classes
     - [ ] general strategies for arbitrary geometries
@@ -8,7 +8,7 @@ TODO:
     - [ ] handle dangling case
     - [ ] invariant generators?
 
- DONE:
+ DONE::
 
     - [x] layer_gate methods for arbitrary geometry
     - [x] 1D: generic way to handle finite and open boundary conditions
