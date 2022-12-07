@@ -51,7 +51,7 @@ setup(
         ],
         'docs': [
             'sphinx>=2.0',
-            'sphinx-autoapi'
+            'sphinx-autoapi',
             'sphinx-copybutton',
             'myst-nb',
             'furo',
