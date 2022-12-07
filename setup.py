@@ -56,7 +56,7 @@ setup(
             'myst-nb',
             'furo',
             'setuptools_scm',
-            'ipython>=7.0',
+            'ipython!=8.7.0',
             'autoray>=0.2.0',
             'opt_einsum>=3.2',
             'doc2dash>=2.4.1',
