@@ -42,11 +42,12 @@ version = '.'.join(release.split('.')[:2])
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
 extensions = [
-    'myst_nb',
     'sphinx.ext.intersphinx',
     'sphinx.ext.extlinks',
     'sphinx.ext.napoleon',
     'sphinx.ext.linkcode',
+    'myst_nb',
+    "sphinx_design",
     'sphinx_copybutton',
     'autoapi.extension',
 ]

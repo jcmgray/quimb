@@ -35,7 +35,7 @@ and
 `furo <https://github.com/pradyunsg/furo>`_.
 
 1. ``cd`` into the ``quimb/docs`` folder.
-2. To start from scratch, remove the ``_autosummary`` and ``_build`` folders.
+2. To start from scratch, remove the ``_build`` folder.
 3. Run ``sphinx-build -b html . ./_build/html/``.
 4. Launch the page: ``open _build/html/index.html``.
 
@@ -44,7 +44,7 @@ Building the DocSet
 
 Building the DocSet requires `doc2dash >= 2.4.1 <https://github.com/hynek/doc2dash>`_.
 
-1. To start from scratch, remove ``quimb/docs/_autosummary`` and ``quimb/docs/_build``.
+1. To start from scratch, remove ``quimb/docs/_build``.
 2. Run ``make docset`` in the ``quimb/docs`` folder.
 3. Open the file ``quimb/docs/_build/quimb.docset`` to load it to Dash.
 

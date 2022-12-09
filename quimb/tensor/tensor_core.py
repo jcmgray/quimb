@@ -136,16 +136,20 @@ def tensor_contract(
     preserve_tensor=False,
     **contract_opts
 ):
-    """Efficiently contract multiple tensors, combining their tags.
+    """Contract a collection of tensors into a scalar or tensor, automatically
+    aligning their indices and computing an optimized contraction path.
+    The output tensor will have the union of tags from the input tensors.
 
     Parameters
     ----------
     tensors : sequence of Tensor
         The tensors to contract.
     output_inds : sequence of str
-        If given, the desired order of output indices, else defaults to the
-        order they occur in the input indices. You need to supply this if the
-        tensors supplied have any hyper indices.
+        The output indices. These can be inferred if the contraction has no
+        'hyper' indices, in which case the output indices are those that appear
+        only once in the input indices, and ordered as they appear in the
+        inputs. For hyper indices or a specific ordering, these must be
+        supplied.
     optimize : {None, str, path_like, PathOptimizer}, optional
         The contraction path optimization strategy to use.
 
@@ -154,23 +158,26 @@ def tensor_contract(
             - path_like: use this exact path,
             - ``opt_einsum.PathOptimizer``: find the path using this optimizer.
             - ``cotengra.HyperOptimizer``: find and perform the contraction
-              using ``cotengra``.
+              using ``cotengra``
             - ``cotengra.ContractionTree``: use this exact tree and perform
-              contraction using ``cotengra``.
+              contraction using ``cotengra``
 
         Contraction with ``cotengra`` might be a bit more efficient but the
-        main reason would be to handle sliced contraction automatically.
-    get : {None, 'expression', 'path-info', 'opt_einsum'}, optional
+        main reason would be to handle sliced contraction automatically, as
+        well as the fact that it uses ``autoray`` internally.
+    get : {None, 'expression', 'path', 'path-info', 'symbol-map'}, optional
         What to return. If:
 
             * ``None`` (the default) - return the resulting scalar or Tensor.
-            * ``'expression'`` - return the ``opt_einsum`` expression that
+            * ``'expression'`` - return a callbable expression that
               performs the contraction and operates on the raw arrays.
-            * ``'symbol-map'`` - return the dict mapping ``opt_einsum`` symbols
-              to tensor indices.
+            * ``'path'`` - return the ``opt_einsum`` style 'path' as a list of
+              tuples.
             * ``'path-info'`` - return the full ``opt_einsum`` path object with
               detailed information such as flop cost. The symbol-map is also
               added to the ``quimb_symbol_map`` attribute.
+            * ``'symbol-map'`` - return the dict mapping ``opt_einsum`` symbols
+              (single unicode characters) to tensor indices.
 
     backend : {'auto', 'numpy', 'jax', 'cupy', 'tensorflow', ...}, optional
         Which backend to use to perform the contraction. Must be a valid
@@ -5484,7 +5491,7 @@ class TensorNetwork(object):
                 # how to pick which tensor to absorb into the expanding surface
                 # here, choose the candidate that is most connected to current
                 # surface, breaking ties with how close it is to the original
-                # region, and how many dimensions it has
+                # tree, and how many dimensions it has
                 return (
                     connectivity[t],
                     ndim_coeff * self.tensor_map[t].ndim,

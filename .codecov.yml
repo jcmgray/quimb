@@ -2,6 +2,7 @@ codecov:
   require_ci_to_pass: yes
 
 coverage:
+  range: 50..100
   status:
     project:
       default:

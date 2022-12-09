@@ -53,6 +53,7 @@ setup(
             'sphinx>=2.0',
             'sphinx-autoapi',
             'sphinx-copybutton',
+            'sphinx-design',
             'myst-nb',
             'furo',
             'setuptools_scm',
