@@ -24,8 +24,8 @@ Welcome to quimb's documentation!
   :alt: PyPI
 
 `quimb <https://github.com/jcmgray/quimb>`_ is an easy but fast python library
-for 'quantum information many-body' calculations, focusing primarily on tensor
-networks. The code is hosted on `github <https://github.com/jcmgray/quimb>`_,
+for *'quantum information many-body'* calculations, focusing primarily on **tensor
+networks**. The code is hosted on `github <https://github.com/jcmgray/quimb>`_,
 and docs are hosted on `readthedocs <http://quimb.readthedocs.io/en/latest/>`_.
 Functionality is split into two main modules:
 

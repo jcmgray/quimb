@@ -1,6 +1,7 @@
 .. raw:: html
 
-    <img src="https://github.com/jcmgray/quimb/blob/develop/docs/_static/quimb_logo_title.png" width="450px">
+    <img src="https://github.com/jcmgray/quimb/blob/docs-myst-nb-furo/docs/_static/logo-banner.svg" width="800px">
+
 
 .. image:: https://github.com/jcmgray/quimb/actions/workflows/tests.yml/badge.svg
   :target: https://github.com/jcmgray/quimb/actions/workflows/tests.yml
@@ -21,22 +22,16 @@
    :target: https://pypi.org/project/quimb/
    :alt: PyPI
 
+``quimb`` is an easy but fast python library
+for *'quantum information many-body'* calculations, focusing primarily on **tensor
+networks**. The code is hosted on `github <https://github.com/jcmgray/quimb>`_,
+and docs are hosted on `readthedocs <http://quimb.readthedocs.io/en/latest/>`_.
+Functionality is split into two main modules:
 
 ----------------------------------------------------------------------------------
 
-`quimb <https://github.com/jcmgray/quimb>`_ is an easy but fast python library
-for 'quantum information many-body' calculations, focusing primarily on tensor
-networks. The code is hosted on `github <https://github.com/jcmgray/quimb>`_,
-and docs are hosted on `readthedocs <http://quimb.readthedocs.io/en/latest/>`_.
-
-.. raw:: html
-
-    <img src="https://github.com/jcmgray/quimb/blob/docs-myst-nb-furo/docs/_static/kagome-contract-treeset-2.png" width="800px">
-
-Functionality is split into two main modules:
-
-The `quimb.tensor` module contains tools for working with **tensors
-and tensor networks**. It has a particular focus on automatically``
+The ``quimb.tensor`` module contains tools for working with **tensors
+and tensor networks**. It has a particular focus on automatically
 handling arbitrary geometry, e.g. beyond 1D and 2D lattices. With this
 you can:
 
@@ -51,12 +46,13 @@ you can:
 
 .. raw:: html
 
-    <img src="https://github.com/jcmgray/quimb/blob/docs-myst-nb-furo/docs/_static/rand-tensor.svg" width="800px">
+    <img src="https://github.com/jcmgray/quimb/blob/docs-myst-nb-furo/docs/_static/rand-tensor.svg" width="300px">
 
+----------------------------------------------------------------------------------
 
-The core `quimb` module contains tools for reference
+The core ``quimb`` module contains tools for reference
 **'exact'** quantum calculations, where the states and operator are
-represented as either `numpy.ndarray` or `scipy.sparse`
+represented as either ``numpy.ndarray`` or ``scipy.sparse``
 **matrices**. With this you can:
 
 * construct operators in complicated tensor spaces
@@ -64,13 +60,15 @@ represented as either `numpy.ndarray` or `scipy.sparse`
   with `slepc <https://slepc.upv.es/>`_
 * compute various quantities including entanglement measures
 * take advantage of `numba <https://numba.pydata.org>`_ accelerations
-* stochastically estimate :math:`\mathrm{Tr}f(X)` quantities
+* stochastically estimate $\\mathrm{Tr}f(X)$ quantities
 
 .. raw:: html
 
-    <img src="https://github.com/jcmgray/quimb/blob/docs-myst-nb-furo/docs/_static/rand-herm-matrix.svg" width="800px">
+    <img src="https://github.com/jcmgray/quimb/blob/docs-myst-nb-furo/docs/_static/rand-herm-matrix.svg" width="300px">
 
-The **full documentation** can be found at: `<http://quimb.readthedocs.io/en/latest/>`_.
+----------------------------------------------------------------------------------
+
+The **full documentation** can be found at: `<http://quimb.readthedocs.io>`_.
 Contributions of any sort are very welcome - please see the `contributing guide <https://github.com/jcmgray/quimb/blob/develop/.github/CONTRIBUTING.md>`_.
 `Issues <https://github.com/jcmgray/quimb/issues>`_ and `pull requests <https://github.com/jcmgray/quimb/pulls>`_ are hosted on `github <https://github.com/jcmgray/quimb>`_.
-For other questions and suggestions, please use the `dicusssions page <https://github.com/jcmgray/quimb/discussions>`_.
+For other questions and suggestions, please use the `discussions page <https://github.com/jcmgray/quimb/discussions>`_.
