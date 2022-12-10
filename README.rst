@@ -26,7 +26,7 @@
 for *'quantum information many-body'* calculations, focusing primarily on **tensor
 networks**. The code is hosted on `github <https://github.com/jcmgray/quimb>`_,
 and docs are hosted on `readthedocs <http://quimb.readthedocs.io/en/latest/>`_.
-Functionality is split into two main modules:
+Functionality is split in two:
 
 ----------------------------------------------------------------------------------
 
@@ -41,8 +41,8 @@ you can:
   `jax <https://jax.readthedocs.io>`_ and
   `torch <https://pytorch.org/>`_ via
   `autoray <https://github.com/jcmgray/autoray/>`_
-* run specific MPS, PEPS, MERA and quantum circuit algorithms, such as
-  DMRG, TEBD & Simple- or Full-Update
+* run specific MPS, PEPS, MERA and quantum circuit algorithms, such as DMRG &
+  TEBD
 
 .. raw:: html
 
@@ -68,7 +68,12 @@ represented as either ``numpy.ndarray`` or ``scipy.sparse``
 
 ----------------------------------------------------------------------------------
 
-The **full documentation** can be found at: `<http://quimb.readthedocs.io>`_.
-Contributions of any sort are very welcome - please see the `contributing guide <https://github.com/jcmgray/quimb/blob/develop/.github/CONTRIBUTING.md>`_.
-`Issues <https://github.com/jcmgray/quimb/issues>`_ and `pull requests <https://github.com/jcmgray/quimb/pulls>`_ are hosted on `github <https://github.com/jcmgray/quimb>`_.
-For other questions and suggestions, please use the `discussions page <https://github.com/jcmgray/quimb/discussions>`_.
+The **full documentation** can be found at:
+`quimb.readthedocs.io <https://quimb.readthedocs.io>`_.
+Contributions of any sort are very welcome - please see the
+`contributing guide <https://github.com/jcmgray/quimb/blob/develop/.github/CONTRIBUTING.md>`_.
+`Issues <https://github.com/jcmgray/quimb/issues>`_ and
+`pull requests <https://github.com/jcmgray/quimb/pulls>`_ are hosted on
+`github <https://github.com/jcmgray/quimb>`_.
+For other questions and suggestions, please use the
+`discussions page <https://github.com/jcmgray/quimb/discussions>`_.

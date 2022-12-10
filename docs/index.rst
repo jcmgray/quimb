@@ -27,17 +27,17 @@ Welcome to quimb's documentation!
 for *'quantum information many-body'* calculations, focusing primarily on **tensor
 networks**. The code is hosted on `github <https://github.com/jcmgray/quimb>`_,
 and docs are hosted on `readthedocs <http://quimb.readthedocs.io/en/latest/>`_.
-Functionality is split into two main modules:
+Functionality is split in two:
 
 .. grid:: 2
 
     .. grid-item-card::  Tensor module
         :img-bottom: _static/rand-tensor.svg
 
-        The :mod:`quimb.tensor` module contains tools for working with tensors
-        and tensor networks. It has a particular focus on automatically``
-        handling arbitrary geometry, e.g. beyond 1D and 2D lattices. With this
-        you can:
+        The :mod:`quimb.tensor` module contains tools for working with
+        **tensors and tensor networks**. It has a particular focus on
+        automatically handling arbitrary geometry, e.g. beyond 1D and 2D
+        lattices. With this you can:
 
         * construct and manipulate arbitrary (hyper) graphs of tensor networks
         * automatically contract, optimize and draw networks
@@ -46,15 +46,15 @@ Functionality is split into two main modules:
           `torch <https://pytorch.org/>`_ via
           `autoray <https://github.com/jcmgray/autoray/>`_
         * run specific MPS, PEPS, MERA and quantum circuit algorithms, such as
-          DMRG, TEBD & Simple- or Full-Update
+          DMRG & TEBD
 
     .. grid-item-card::  Matrix module
         :img-bottom: _static/rand-herm-matrix.svg
 
         The core :mod:`quimb` module contains tools for reference
-        'exact' quantum calculations, where the states and operator are
+        **'exact'** quantum calculations, where the states and operator are
         represented as either :class:`numpy.ndarray` or :mod:`scipy.sparse`
-        matrices. With this you can:
+        **matrices**. With this you can:
 
         * construct operators in complicated tensor spaces
         * find groundstates, excited states and do time evolutions, including
@@ -125,4 +125,8 @@ Notes on contributing to ``quimb`` and release details can be found below:
 
   develop
   changelog
+
+.. toctree::
+  :hidden:
+
   GitHub Repository <https://github.com/jcmgray/quimb>
