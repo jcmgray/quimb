@@ -1,6 +1,6 @@
 .. raw:: html
 
-    <img src="https://github.com/jcmgray/quimb/blob/docs-myst-nb-furo/docs/_static/logo-banner.svg" width="800px">
+    <img src="https://github.com/jcmgray/quimb/blob/docs-myst-nb-furo/docs/_static/logo-banner.png" width="800px">
 
 
 .. image:: https://github.com/jcmgray/quimb/actions/workflows/tests.yml/badge.svg
