@@ -23,21 +23,19 @@ Welcome to quimb's documentation!
   :target: https://pypi.org/project/quimb/
   :alt: PyPI
 
-----------------------------------------------------------------------------------
-
 `quimb <https://github.com/jcmgray/quimb>`_ is an easy but fast python library
-for quantum information and many-body calculations, including with tensor
+for 'quantum information many-body' calculations, focusing primarily on tensor
 networks. The code is hosted on `github <https://github.com/jcmgray/quimb>`_,
-do please submit any issues or pull requests there. It is also thoroughly
-unit-tested and the tests might be the best place to look for detailed
-documentation.
+and docs are hosted on `readthedocs <http://quimb.readthedocs.io/en/latest/>`_.
+Functionality is split into two main modules:
 
 .. grid:: 2
 
     .. grid-item-card::  Tensor module
+        :img-bottom: _static/rand-tensor.svg
 
         The :mod:`quimb.tensor` module contains tools for working with tensors
-        and tensor networks. It has a particular focus on automatically
+        and tensor networks. It has a particular focus on automatically``
         handling arbitrary geometry, e.g. beyond 1D and 2D lattices. With this
         you can:
 
@@ -50,10 +48,8 @@ documentation.
         * run specific MPS, PEPS, MERA and quantum circuit algorithms, such as
           DMRG, TEBD & Simple- or Full-Update
 
-        .. image:: _static/rand-tensor.svg
-          :alt: A random 4D tensor
-
     .. grid-item-card::  Matrix module
+        :img-bottom: _static/rand-herm-matrix.svg
 
         The core :mod:`quimb` module contains tools for reference
         'exact' quantum calculations, where the states and operator are
@@ -66,9 +62,6 @@ documentation.
         * compute various quantities including entanglement measures
         * take advantage of `numba <https://numba.pydata.org>`_ accelerations
         * stochastically estimate :math:`\mathrm{Tr}f(X)` quantities
-
-        .. image:: _static/rand-herm-matrix.svg
-          :alt: A random hermitian matrix
 
 
 User Guide
@@ -94,7 +87,8 @@ The following guides give a basic introduction to the various parts:
 Examples
 --------
 
-The following examples, generated from the notebooks in ``docs/examples``, demonstrate some more advanced features or complete usage:
+The following examples, generated from the notebooks in ``docs/examples``,
+demonstrate some more advanced features or complete usage:
 
 .. toctree::
   :maxdepth: 2
@@ -105,7 +99,9 @@ The following examples, generated from the notebooks in ``docs/examples``, demon
 Citing
 ------
 
-``quimb`` is published in the Journal of Open Source Software `here <https://doi.org/10.21105/joss.00819>`_ - if it's ever useful in research please consider citing it!
+``quimb`` is published in the Journal of Open Source Software
+`here <https://doi.org/10.21105/joss.00819>`_ - if it's ever useful in research
+please consider citing it!
 
 .. code-block:: latex
 
@@ -129,3 +125,4 @@ Notes on contributing to ``quimb`` and release details can be found below:
 
   develop
   changelog
+  GitHub Repository <https://github.com/jcmgray/quimb>
