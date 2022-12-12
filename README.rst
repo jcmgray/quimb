@@ -1,6 +1,6 @@
 .. raw:: html
 
-    <img src="https://github.com/jcmgray/quimb/blob/docs-myst-nb-furo/docs/_static/logo-banner.png" width="800px">
+    <img src="https://github.com/jcmgray/quimb/blob/HEAD/docs/_static/logo-banner.png" width="800px">
 
 
 .. image:: https://github.com/jcmgray/quimb/actions/workflows/tests.yml/badge.svg
@@ -46,7 +46,7 @@ you can:
 
 .. raw:: html
 
-    <img src="https://github.com/jcmgray/quimb/blob/docs-myst-nb-furo/docs/_static/rand-tensor.svg" width="300px">
+    <img src="https://github.com/jcmgray/quimb/blob/HEAD/docs/_static/rand-tensor.svg" width="300px">
 
 ----------------------------------------------------------------------------------
 
@@ -64,7 +64,7 @@ represented as either ``numpy.ndarray`` or ``scipy.sparse``
 
 .. raw:: html
 
-    <img src="https://github.com/jcmgray/quimb/blob/docs-myst-nb-furo/docs/_static/rand-herm-matrix.svg" width="300px">
+    <img src="https://github.com/jcmgray/quimb/blob/HEAD/docs/_static/rand-herm-matrix.svg" width="300px">
 
 ----------------------------------------------------------------------------------
 
