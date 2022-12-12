@@ -15,14 +15,14 @@ and optionally producing:
 Currently only supports composing operators which are sums of products of
 diagonal or anti-diagonal real dimension 2 operators.
 
-TODO:
+TODO::
 
     - [ ] automatic MPO generator
     - [ ] product of operators generator (e.g. for PEPS DMRG)
     - [ ] complex and single precision support (lower priority)
     - [ ] support for non-diagonal and dimension > 2 operators (lower priority)
 
-DONE:
+DONE::
 
     - [x] use compact bitbasis
     - [x] design interface for HilbertSpace / OperatorBuilder interaction

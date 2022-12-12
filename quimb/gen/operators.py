@@ -26,12 +26,14 @@ def spin_operator(label, S=1 / 2, **kwargs):
     ----------
     label : str
         The type of operator, can be one of six options:
+
             - ``{'x', 'X'}``, x-spin operator.
             - ``{'y', 'Y'}``, y-spin operator.
             - ``{'z', 'Z'}``, z-spin operator.
             - ``{'+', 'p'}``, Raising operator.
             - ``{'-', 'm'}``, Lowering operator.
             - ``{'i', 'I'}``, identity operator.
+
     S : float, optional
         The spin of particle to act on, default to spin-1/2.
     kwargs

@@ -258,6 +258,8 @@ from .utils import (
     tree_flatten,
     tree_unflatten,
     format_number_with_error,
+    NEUTRAL_STYLE,
+    default_to_neutral_style,
 )
 
 
@@ -497,4 +499,6 @@ __all__ = [
     "tree_flatten",
     "tree_unflatten",
     "format_number_with_error",
+    "NEUTRAL_STYLE",
+    "default_to_neutral_style",
 ]

@@ -1,6 +1,6 @@
-############
+============
 Installation
-############
+============
 
 :mod:`quimb` itself is a pure python package and can now be found on PyPI:
 

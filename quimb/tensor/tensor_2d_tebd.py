@@ -5,7 +5,7 @@ import scipy.sparse.linalg as spla
 from opt_einsum import shared_intermediates
 from autoray import do, dag, conj, reshape
 
-from ..utils import pairwise
+from ..utils import pairwise, default_to_neutral_style
 from .drawing import get_colors
 from .tensor_core import Tensor, contract_strategy
 from .optimize import TNOptimizer
@@ -90,6 +90,7 @@ class LocalHam2D(LocalHamGen):
         s = "<LocalHam2D(Lx={}, Ly={}, num_terms={})>"
         return s.format(self.Lx, self.Ly, len(self.terms))
 
+    @default_to_neutral_style
     def draw(
         self,
         ordering='sort',

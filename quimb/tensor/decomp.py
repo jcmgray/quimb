@@ -783,7 +783,7 @@ def isometrize_exp(x, backend):
 
     .. math::
 
-            U_A = \exp{A - A^\dagger}
+            U_A = \exp \left( X - X^\dagger \right)
 
     If ``x`` is rectangular it is completed with zeros first.
     """
@@ -800,13 +800,14 @@ def isometrize_exp(x, backend):
 
 @compose
 def isometrize_cayley(x, backend):
-    r"""Perform isometrization using anti-symmetric matrix exponentiation.
+    r"""Perform isometrization using an anti-symmetric Cayley transform.
 
     .. math::
 
             U_A = (I + \dfrac{A}{2})(I - \dfrac{A}{2})^{-1}
 
-    If ``x`` is rectangular it is completed with zeros first.
+    where :math:`A = X - X^\dagger`. If ``x`` is rectangular it is completed
+    with zeros first.
     """
     with backend_like(backend):
         m, n = x.shape

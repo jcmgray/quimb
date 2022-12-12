@@ -1,12 +1,11 @@
-===============
-Core User Guide
-===============
+============
+Matrix Guide
+============
 
 .. toctree::
   :numbered:
   :maxdepth: 2
 
-  installation
   basics
   generate
   calculating quantities

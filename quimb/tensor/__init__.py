@@ -1,3 +1,6 @@
+"""Tensor and tensor network functionality.
+"""
+
 from .contraction import (
     set_contract_path_cache,
     get_contract_strategy,

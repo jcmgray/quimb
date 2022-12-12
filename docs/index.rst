@@ -1,3 +1,6 @@
+.. image:: ./_static/kagome-contract-treeset-2.png
+  :width: 800px
+
 Welcome to quimb's documentation!
 =================================
 
@@ -17,37 +20,48 @@ Welcome to quimb's documentation!
   :target: https://doi.org/10.21105/joss.00819
   :alt: JOSS Paper
 .. image:: https://img.shields.io/pypi/v/quimb?color=teal
-   :target: https://pypi.org/project/quimb/
-   :alt: PyPI
+  :target: https://pypi.org/project/quimb/
+  :alt: PyPI
 
-----------------------------------------------------------------------------------
+`quimb <https://github.com/jcmgray/quimb>`_ is an easy but fast python library
+for *'quantum information many-body'* calculations, focusing primarily on **tensor
+networks**. The code is hosted on `github <https://github.com/jcmgray/quimb>`_,
+and docs are hosted on `readthedocs <http://quimb.readthedocs.io/en/latest/>`_.
+Functionality is split in two:
 
-`quimb <https://github.com/jcmgray/quimb>`_ is an easy but fast python library for quantum information and many-body calculations, including with tensor networks. The code is hosted on `github <https://github.com/jcmgray/quimb>`_, do please submit any issues or pull requests there. It is also thoroughly unit-tested and the tests might be the best place to look for detailed documentation.
+.. grid:: 2
 
-The **core** ``quimb`` module:
+    .. grid-item-card::  Tensor module
+        :img-bottom: _static/rand-tensor.svg
 
-* Uses straight ``numpy`` and ``scipy.sparse`` matrices as quantum objects
-* Accelerates and parallelizes many operations using `numba <https://numba.pydata.org>`_.
-* Makes it easy to construct operators in large tensor spaces (e.g. 2D lattices)
-* Uses efficient methods to compute various quantities including entanglement measures
-* Has many built-in states and operators, including those based on fast, parallel random number generation
-* Can perform evolutions with several methods, computing quantities on the fly
-* Has an optional `slepc4py <https://bitbucket.org/slepc/slepc4py>`_ interface for easy distributed (MPI) linear algebra. This can massively increase the performance when seeking, for example, mid-spectrum eigenstates
+        The :mod:`quimb.tensor` module contains tools for working with
+        **tensors and tensor networks**. It has a particular focus on
+        automatically handling arbitrary geometry, e.g. beyond 1D and 2D
+        lattices. With this you can:
 
-The **tensor network** submodule ``quimb.tensor``:
+        * construct and manipulate arbitrary (hyper) graphs of tensor networks
+        * automatically contract, optimize and draw networks
+        * use various backend array libraries such as
+          `jax <https://jax.readthedocs.io>`_ and
+          `torch <https://pytorch.org/>`_ via
+          `autoray <https://github.com/jcmgray/autoray/>`_
+        * run specific MPS, PEPS, MERA and quantum circuit algorithms, such as
+          DMRG & TEBD
 
-* Uses a geometry free representation of tensor networks
-* Uses `opt_einsum <https://github.com/dgasmith/opt_einsum>`_ to find efficient contraction orders for hundreds or thousands of tensors
-* Can perform those contractions on various backends, including with a GPU
-* Can plot any network, color-coded, with bond size represented
-* Can treat any network as a scipy ``LinearOperator``, allowing many decompositions
-* Can perform DMRG1, DMRG2 and DMRGX, in matrix product state language
-* Has tools to efficiently address periodic problems (transfer matrix compression and pseudo-orthogonalization)
-* Can perform MPS time evolutions with TEBD
-* Can optimize any tensor network with ``tensorflow`` or ``pytorch``
+    .. grid-item-card::  Matrix module
+        :img-bottom: _static/rand-herm-matrix.svg
 
-.. image:: ./_static/montage.png
-  :width: 800px
+        The core :mod:`quimb` module contains tools for reference
+        **'exact'** quantum calculations, where the states and operator are
+        represented as either :class:`numpy.ndarray` or :mod:`scipy.sparse`
+        **matrices**. With this you can:
+
+        * construct operators in complicated tensor spaces
+        * find groundstates, excited states and do time evolutions, including
+          with `slepc <https://slepc.upv.es/>`_
+        * compute various quantities including entanglement measures
+        * take advantage of `numba <https://numba.pydata.org>`_ accelerations
+        * stochastically estimate :math:`\mathrm{Tr}f(X)` quantities
 
 
 User Guide
@@ -56,23 +70,25 @@ User Guide
 The following guides give a basic introduction to the various parts:
 
 .. toctree::
-  :maxdepth: 2
+  :maxdepth: 1
 
-  index_core
-
+  installation
 
 .. toctree::
   :maxdepth: 2
 
+  index_core
   index_tn
 
 
 .. _examples:
 
+
 Examples
 --------
 
-The following examples, generated from the notebooks in ``docs/examples``, demonstrate some more advanced features or complete usage:
+The following examples, generated from the notebooks in ``docs/examples``,
+demonstrate some more advanced features or complete usage:
 
 .. toctree::
   :maxdepth: 2
@@ -83,7 +99,9 @@ The following examples, generated from the notebooks in ``docs/examples``, demon
 Citing
 ------
 
-``quimb`` is published in the Journal of Open Source Software `here <https://doi.org/10.21105/joss.00819>`_ - if it's ever useful in research please consider citing it!
+``quimb`` is published in the Journal of Open Source Software
+`here <https://doi.org/10.21105/joss.00819>`_ - if it's ever useful in research
+please consider citing it!
 
 .. code-block:: latex
 
@@ -97,7 +115,6 @@ Citing
     }
 
 
-
 Notes
 -----
 
@@ -109,13 +126,7 @@ Notes on contributing to ``quimb`` and release details can be found below:
   develop
   changelog
 
+.. toctree::
+  :hidden:
 
-Indices and tables
-------------------
-
-The following sections contain the complete listing of functions, classes and modules in ``quimb``.
-
-* :ref:`genindex`
-* :ref:`modindex`
-* :ref:`search`
-
+  GitHub Repository <https://github.com/jcmgray/quimb>
