@@ -1,3 +1,6 @@
+"""Functions for decomposing and projecting matrices.
+"""
+
 import functools
 
 import numpy as np

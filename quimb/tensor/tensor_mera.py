@@ -1,3 +1,6 @@
+"""Tools for building and computing with MERA.
+"""
+
 from math import log2
 import itertools
 

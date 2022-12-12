@@ -1,3 +1,6 @@
+"""Tools for performing TEBD like algorithms on a 3D lattice.
+"""
+
 from .tensor_3d import gen_3d_bonds
 from .tensor_arbgeom_tebd import LocalHamGen
 

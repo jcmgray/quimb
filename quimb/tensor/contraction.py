@@ -1,3 +1,6 @@
+"""Functions relating to tensor network contraction.
+"""
+
 import functools
 import threading
 import contextlib

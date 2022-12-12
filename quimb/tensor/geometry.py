@@ -1,3 +1,6 @@
+"""Some functions for generating the edges of a lattice.
+"""
+
 import itertools
 
 

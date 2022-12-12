@@ -1,3 +1,6 @@
+"""Functions for generating specific, e.g. ansatz, circuits.
+"""
+
 import math
 import random
 import itertools

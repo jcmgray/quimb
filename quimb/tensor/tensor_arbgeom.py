@@ -1,3 +1,6 @@
+"""Classes and algorithms related to arbitrary geometry tensor networks.
+"""
+
 import functools
 from operator import add
 

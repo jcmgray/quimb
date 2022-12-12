@@ -1,3 +1,7 @@
+"""Numba accelerated functions for finding charge sectors and subselecting
+submatrices.
+"""
+
 import numpy as np
 import numba
 

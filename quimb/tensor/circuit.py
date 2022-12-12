@@ -1,3 +1,6 @@
+"""Tools for quantum circuit simulation using tensor networks.
+"""
+
 import re
 import math
 import numbers

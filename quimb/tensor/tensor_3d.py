@@ -1,3 +1,6 @@
+"""Classes and algorithms related to 3D tensor networks.
+"""
+
 import functools
 import itertools
 from operator import add

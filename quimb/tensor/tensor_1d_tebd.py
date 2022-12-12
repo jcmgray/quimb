@@ -1,3 +1,6 @@
+"""Tools for performing TEBD like algorithms in 1D.
+"""
+
 import numpy as np
 
 from ..utils import ensure_dict, continuous_progbar, deprecated
