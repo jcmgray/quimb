@@ -1131,7 +1131,7 @@ class Circuit:
         # the first `N` tensors should be the tensors of input state
         tids = tuple(U.tensor_map)[:self.N]
         for i, tid in enumerate(tids):
-            t = U._pop_tensor(tid)
+            t = U.pop_tensor(tid)
             old_ix, = t.inds
 
             if transposed:
@@ -1246,7 +1246,7 @@ class Circuit:
                 # lone tensor not attached to anything - drop it
                 # but only if it isn't directly in the ``where`` region
                 if (len(neighbors) == 1) and set(t.inds).isdisjoint(site_inds):
-                    psi_lc._pop_tensor(tid)
+                    psi_lc.pop_tensor(tid)
 
         return psi_lc
 

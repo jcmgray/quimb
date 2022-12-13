@@ -2946,7 +2946,7 @@ def _tensor_network_gate_inds_basic(
         site_tids = tn._get_tids_from_inds(bnds, which='any')
 
         # pop the sites, contract, then re-add
-        pts = [tn._pop_tensor(tid) for tid in site_tids]
+        pts = [tn.pop_tensor(tid) for tid in site_tids]
         tn |= tensor_contract(*pts, TG)
 
         return tn
@@ -3581,7 +3581,7 @@ class TensorNetwork(object):
         """Reset the `tids` - node identifies - to be consecutive integers.
         """
         tids = tuple(self.tensor_map.keys())
-        ts = tuple(map(self._pop_tensor, tids))
+        ts = tuple(map(self.pop_tensor, tids))
         self._tid_counter = tid0
         self.add(ts, virtual=True)
 
@@ -3619,8 +3619,8 @@ class TensorNetwork(object):
         """
         return len(self.ind_map)
 
-    def _pop_tensor(self, tid):
-        """Remove a tensor from this network, returning said tensor.
+    def pop_tensor(self, tid):
+        """Remove tensor with ``tid`` from this network, and return it.
         """
         # pop the tensor itself
         t = self.tensor_map.pop(tid)
@@ -3634,6 +3634,8 @@ class TensorNetwork(object):
 
         return t
 
+    _pop_tensor = deprecated(pop_tensor, "_pop_tensor", "pop_tensor",)
+
     def delete(self, tags, which='all'):
         """Delete any tensors which match all or any of ``tags``.
 
@@ -3646,7 +3648,7 @@ class TensorNetwork(object):
         """
         tids = self._get_tids_from_tags(tags, which=which)
         for tid in tuple(tids):
-            self._pop_tensor(tid)
+            self.pop_tensor(tid)
 
     def add_tag(self, tag, where=None, which='all'):
         """Add tag to every tensor in this network, or if ``where`` is
@@ -4231,7 +4233,7 @@ class TensorNetwork(object):
         """
         tn = self.copy(virtual=virtual)
         for tid in tids:
-            tn._pop_tensor(tid)
+            tn.pop_tensor(tid)
         return tn
 
     def select(self, tags, which='all', virtual=True):
@@ -4470,7 +4472,7 @@ class TensorNetwork(object):
             raise TypeError("Can only set value with a new 'Tensor'.")
 
         tid, = tids
-        self._pop_tensor(tid)
+        self.pop_tensor(tid)
         self.add_tensor(tensor, tid=tid, virtual=True)
 
     def __delitem__(self, tags):
@@ -4478,7 +4480,7 @@ class TensorNetwork(object):
         """
         tids = self._get_tids_from_tags(tags, which='all')
         for tid in tuple(tids):
-            self._pop_tensor(tid)
+            self.pop_tensor(tid)
 
     def partition_tensors(self, tags, inplace=False, which='any'):
         """Split this TN into a list of tensors containing any or all of
@@ -4512,7 +4514,7 @@ class TensorNetwork(object):
 
         # Copy untagged to new network, and pop tagged tensors from this
         untagged_tn = self if inplace else self.copy()
-        tagged_ts = tuple(map(untagged_tn._pop_tensor, sorted(tagged_tids)))
+        tagged_ts = tuple(map(untagged_tn.pop_tensor, sorted(tagged_tids)))
 
         return untagged_tn, tagged_ts
 
@@ -4545,7 +4547,7 @@ class TensorNetwork(object):
 
         if inplace:
             t1 = self
-            t2s = [t1._pop_tensor(tid) for tid in tagged_tids]
+            t2s = [t1.pop_tensor(tid) for tid in tagged_tids]
             t2 = TensorNetwork(t2s, **kws)
             t2.view_like_(self)
 
@@ -4561,7 +4563,7 @@ class TensorNetwork(object):
         return t1, t2
 
     def _split_tensor_tid(self, tid, left_inds, **split_opts):
-        t = self._pop_tensor(tid)
+        t = self.pop_tensor(tid)
         tl, tr = t.split(left_inds=left_inds, get='tensors', **split_opts)
         self.add_tensor(tl)
         self.add_tensor(tr)
@@ -4780,8 +4782,8 @@ class TensorNetwork(object):
         local_output_inds = self.compute_contracted_inds(
             tid1, tid2, output_inds=output_inds
         )
-        t1 = self._pop_tensor(tid1)
-        t2 = self._pop_tensor(tid2)
+        t1 = self.pop_tensor(tid1)
+        t2 = self.pop_tensor(tid2)
 
         if gauges is not None:
             for ix in bonds(t1, t2):
@@ -4827,7 +4829,7 @@ class TensorNetwork(object):
         output_inds = self.compute_contracted_inds(
             *tids, output_inds=output_inds)
         tnew = tensor_contract(
-            *map(self._pop_tensor, tids), output_inds=output_inds,
+            *map(self.pop_tensor, tids), output_inds=output_inds,
             preserve_tensor=True, **contract_opts
         )
         self.add_tensor(tnew, tid=tids[0], virtual=True)
@@ -8034,7 +8036,7 @@ class TensorNetwork(object):
             # remove floating scalar tensors -->
             #     these have no indices so won't be caught otherwise
             if t.ndim == 0:
-                tn._pop_tensor(tid)
+                tn.pop_tensor(tid)
                 scalars.append(t.data)
                 continue
 
@@ -8080,7 +8082,7 @@ class TensorNetwork(object):
 
                 # check if we have created a scalar
                 if t.ndim == 0:
-                    tn._pop_tensor(tid)
+                    tn.pop_tensor(tid)
                     scalars.append(t.data)
 
                 continue
@@ -8136,8 +8138,8 @@ class TensorNetwork(object):
                 continue
 
             _, tid_a, tid_b, out_ab, deincr = min(cands)
-            ta = tn._pop_tensor(tid_a)
-            tb = tn._pop_tensor(tid_b)
+            ta = tn.pop_tensor(tid_a)
+            tb = tn.pop_tensor(tid_b)
             tab = ta.contract(tb, output_inds=out_ab)
 
             for ix in deincr:
@@ -8464,7 +8466,7 @@ class TensorNetwork(object):
                     break
 
             if found:
-                tn._pop_tensor(tid)
+                tn.pop_tensor(tid)
                 tn |= tl
                 tn |= tr
 
@@ -8781,7 +8783,7 @@ class TensorNetwork(object):
             # perform the decomposition that minimizes the new size
             _, pair, tl, tr = min(cands, key=lambda x: x[0])
             for tid in tuple(pair):
-                tn._pop_tensor(tid)
+                tn.pop_tensor(tid)
             tn |= tl
             tn |= tr
 
@@ -8890,7 +8892,7 @@ class TensorNetwork(object):
             # perform the decomposition that minimizes the new size
             _, loop, tl, tr = min(cands, key=lambda x: x[0])
             for tid in loop:
-                tn._pop_tensor(tid)
+                tn.pop_tensor(tid)
             tn |= tl
             tn |= tr
 

@@ -3330,7 +3330,7 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
             site_tids = psi._get_tids_from_inds(bnds, which='any')
 
             # pop the sites, contract, then re-add
-            pts = [psi._pop_tensor(tid) for tid in site_tids]
+            pts = [psi.pop_tensor(tid) for tid in site_tids]
             psi |= tensor_contract(*pts, TG)
 
             return psi
