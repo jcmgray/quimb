@@ -1,5 +1,5 @@
-Built-in & Random States & Operators
-====================================
+Generating Objects
+==================
 
 States
 ------

@@ -77,8 +77,8 @@ The following guides give a basic introduction to the various parts:
 .. toctree::
   :maxdepth: 2
 
-  index_core
   index_tn
+  index_core
 
 
 .. _examples:

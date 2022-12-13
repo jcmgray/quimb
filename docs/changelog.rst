@@ -24,6 +24,9 @@ v1.4.3 (unreleased)
 - update the docs to use the `furo <https://pradyunsg.me/furo/>`_ theme,
   `myst_nb <https://myst-nb.readthedocs.io/en/latest/>`_ for notebooks, and
   several other `sphinx` extensions.
+- add the `'adabelief'` optimizer to
+  :class:`~quimb.tensor.optimize.TNOptimizer` as well as a quick plotter:
+  :meth:`~quimb.tensor.optimize.TNOptimizer.plot`
 
 
 **Bug fixes:**

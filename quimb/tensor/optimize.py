@@ -18,7 +18,14 @@ from .tensor_core import (
 from .contraction import contract_backend
 from .interface import get_jax
 from ..core import prod
-from ..utils import ensure_dict, tree_map, tree_flatten, tree_unflatten
+from ..utils import (
+    ensure_dict,
+    tree_map,
+    tree_flatten,
+    tree_unflatten,
+    default_to_neutral_style,
+)
+
 
 if importlib.util.find_spec("jax") is not None:
     _DEFAULT_BACKEND = "jax"
@@ -548,7 +555,7 @@ class TorchHandler:
             example_inputs = (tree_map(self.to_variable, arrays),)
             with warnings.catch_warnings():
                 warnings.filterwarnings(
-                    action='ignore',
+                    action="ignore",
                     message=".*can't record the data flow of Python values.*",
                 )
                 self._backend_fn = torch.jit.trace(
@@ -842,8 +849,8 @@ class ADAM:
 
             m = (1 - beta1) * g + beta1 * m  # first  moment estimate.
             v = (1 - beta2) * (g**2) + beta2 * v  # second moment estimate.
-            mhat = m / (1 - beta1 ** (self._i))  # bias correction.
-            vhat = v / (1 - beta2 ** (self._i))
+            mhat = m / (1 - beta1**self._i)  # bias correction.
+            vhat = v / (1 - beta2**self._i)
             x = x - learning_rate * mhat / (np.sqrt(vhat) + eps)
 
             if bounds is not None:
@@ -944,11 +951,83 @@ class NADAM:
         )
 
 
+class ADABELIEF:
+    """Stateful ``scipy.optimize.minimize`` compatible implementation of
+    ADABELIEF - https://arxiv.org/abs/2010.07468.
+
+    Adapted from ``autograd/misc/optimizers.py``.
+    """
+
+    def __init__(self):
+        from scipy.optimize import OptimizeResult
+
+        self.OptimizeResult = OptimizeResult
+        self._i = 0
+        self._m = None
+        self._s = None
+
+    def get_m(self, x):
+        if self._m is None:
+            self._m = np.zeros_like(x)
+        return self._m
+
+    def get_s(self, x):
+        if self._s is None:
+            self._s = np.zeros_like(x)
+        return self._s
+
+    def __call__(
+        self,
+        fun,
+        x0,
+        jac,
+        args=(),
+        learning_rate=0.001,
+        beta1=0.9,
+        beta2=0.999,
+        eps=1e-8,
+        maxiter=1000,
+        callback=None,
+        bounds=None,
+        **kwargs,
+    ):
+        x = x0
+        m = self.get_m(x)
+        s = self.get_s(x)
+
+        for _ in range(maxiter):
+            self._i += 1
+
+            g = jac(x)
+
+            if callback and callback(x):
+                break
+
+            m = (1 - beta1) * g + beta1 * m
+            s = (1 - beta2) * (g - m) ** 2 + beta2 * s + eps
+            # bias correction
+            mhat = m / (1 - beta1**self._i)
+            shat = s / (1 - beta2**self._i)
+            x = x - learning_rate * mhat / (np.sqrt(shat) + eps)
+
+            if bounds is not None:
+                x = np.clip(x, bounds[:, 0], bounds[:, 1])
+
+        # save for restart
+        self._m = m
+        self._s = s
+
+        return self.OptimizeResult(
+            x=x, fun=fun(x), jac=g, nit=self._i, nfev=self._i, success=True
+        )
+
+
 _STOC_GRAD_METHODS = {
     "sgd": SGD,
     "rmsprop": RMSPROP,
     "adam": ADAM,
     "nadam": NADAM,
+    "adabelief": ADABELIEF,
 }
 
 
@@ -1243,7 +1322,8 @@ class TNOptimizer:
 
     @property
     def optimizer(self):
-        """The underlying optimizer that works with the vectorized functions."""
+        """The underlying optimizer that works with the vectorized functions.
+        """
         return self._optimizer
 
     @optimizer.setter
@@ -1341,8 +1421,8 @@ class TNOptimizer:
         else:
             fun = self.vectorized_value
 
-        if self._method in ('l-bfgs-b', 'tnc'):
-            options.setdefault('maxfun', n)
+        if self._method in ("l-bfgs-b", "tnc"):
+            options.setdefault("maxfun", n)
 
         try:
             self._maybe_init_pbar(n)
@@ -1614,3 +1694,67 @@ class TNOptimizer:
         self.vectorizer.vector[:] = recommendation.value
 
         return self.get_tn_opt()
+
+    @default_to_neutral_style
+    def plot(
+        self,
+        xscale="symlog",
+        xscale_linthresh=20,
+        zoom="auto",
+        hlines=(),
+    ):
+        """Plot the loss function as a function of the number of iterations.
+
+        Parameters
+        ----------
+        xscale : str, optional
+            The scale of the x-axis. Default is ``"symlog"``, i.e. linear for
+            the first part of the plot, and logarithmic for the rest, changing
+            at ``xscale_linthresh``.
+        xscale_linthresh : int, optional
+            The threshold for the change from linear to logarithmic scale,
+            if ``xscale`` is ``"symlog"``. Default is ``20``.
+        zoom : None or int, optional
+            If not ``None``, show an inset plot of the last ``zoom``
+            iterations.
+        hlines : dict, optional
+            A dictionary of horizontal lines to plot. The keys are the labels
+            of the lines, and the values are the y-values of the lines.
+
+        Returns
+        -------
+        fig : matplotlib.figure.Figure
+            The figure object.
+        ax : matplotlib.axes.Axes
+            The axes object.
+        """
+        import matplotlib.pyplot as plt
+        from matplotlib.colors import hsv_to_rgb
+
+        ys = np.array(self.losses)
+        xs = np.arange(ys.size)
+
+        fig, ax = plt.subplots()
+        ax.plot(xs, ys, ".-")
+        if xscale == "symlog":
+            ax.set_xscale(xscale, linthresh=xscale_linthresh)
+        else:
+            ax.set_xscale(xscale)
+        ax.set_xlabel("Iteration")
+        ax.set_ylabel("Loss")
+
+        if hlines:
+            hlines = dict(hlines)
+            for i, (label, value) in enumerate(hlines.items()):
+                color = hsv_to_rgb([(0.1 * i) % 1.0, 0.9, 0.9])
+                ax.axhline(value, color=color, ls="--", label=label)
+                ax.text(1, value, label, color=color, va="bottom", ha="left")
+
+        if zoom is not None:
+            if zoom == "auto":
+                zoom = min(50, ys.size // 2)
+
+            iax = ax.inset_axes([0.5, 0.5, 0.5, 0.5])
+            iax.plot(xs[-zoom:], ys[-zoom:], ".-")
+
+        return fig, ax

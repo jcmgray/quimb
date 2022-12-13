@@ -1,8 +1,8 @@
 .. _mpistuff:
 
-#############################
-Distributed Parallelism - MPI
-#############################
+###
+MPI
+###
 
 The ``slepc`` and ``petsc`` parts of ``quimb`` (``eigh(..., k=..., method='slepc')``, ``svds(..., method='slepc')``, ``expm(..., method='slepc')`` etc.), as well as often being faster than ``scipy``, perform the calculations using MPI and are thus suited to clusters with many nodes.
 
