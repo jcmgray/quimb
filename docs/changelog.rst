@@ -16,6 +16,14 @@ v1.4.3 (unreleased)
   and :meth:`~quimb.tensor.tensor_core.TensorNetwork.insert_compressor_between_regions`
   methos, for some RG style algorithms.
 - add the ``mode="projector"`` option for 2D tensor network contractions
+- add HOTRG style coarse graining and contraction in 2D and 3D. See
+  :meth:`~quimb.tensor.tensor_2d.TensorNetwork2D.coarse_grain_hotrg`,
+  :meth:`~quimb.tensor.tensor_2d.TensorNetwork2D.contract_hotrg`,
+  :meth:`~quimb.tensor.tensor_3d.TensorNetwork3D.coarse_grain_hotrg`, and
+  :meth:`~quimb.tensor.tensor_3d.TensorNetwork3D.contract_hotrg`,
+- update the docs to use the `furo <https://pradyunsg.me/furo/>`_ theme,
+  `myst_nb <https://myst-nb.readthedocs.io/en/latest/>`_ for notebooks, and
+  several other `sphinx` extensions.
 
 
 **Bug fixes:**

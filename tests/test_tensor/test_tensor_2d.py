@@ -1,6 +1,7 @@
 import itertools
 
 import pytest
+import autoray as ar
 import numpy as np
 from numpy.testing import assert_allclose
 
@@ -241,8 +242,7 @@ class Test2DContract:
             assert Zap == pytest.approx(8.459419593253275e+100, rel=2.2e-7)
         for s in ['bt', 'lr']:
             Zap = tn.contract_boundary(max_bond=8, sequence=s)
-            rerr = abs(1 - Zap / Zex)
-            assert rerr < 3.9e-9
+            assert Zap == pytest.approx(8.459419593253275e+100, rel=3.9e-9)
 
     @pytest.mark.parametrize("mode,two_layer", [
         ('mps', False),
