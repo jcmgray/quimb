@@ -198,13 +198,47 @@ class Test2DContract:
         xt = norm.contract_boundary(max_bond=27, mode='full-bond')
         assert xt == pytest.approx(xe, rel=1e-2)
 
+    @pytest.mark.parametrize("lazy", [False, True])
+    def test_coarse_grain_basics(self, lazy):
+        tn = qtn.TN2D_from_fill_fn(
+            lambda shape: ar.lazy.Variable(shape, backend="numpy"),
+            Lx=6, Ly=7, D=2,
+        )
+        tncg = tn.coarse_grain_hotrg("x", max_bond=3, cutoff=0.0, lazy=lazy)
+        assert (tncg.Lx, tncg.Ly) == (3, 7)
+        assert not tncg.outer_inds()
+        assert tncg.max_bond() == 3
+        assert 'I4,0' not in tncg.tag_map
+        assert 'X5' not in tncg.tag_map
+
+        tncg = tn.coarse_grain_hotrg("y", max_bond=3, cutoff=0.0, lazy=lazy)
+        assert (tncg.Lx, tncg.Ly) == (6, 4)
+        assert not tncg.outer_inds()
+        assert tncg.max_bond() == 3
+        assert 'I0,5' not in tncg.tag_map
+        assert 'Y6' not in tncg.tag_map
+
+    def test_contract_hotrg(self):
+        tn = qtn.TN2D_classical_ising_partition_function(16, 16, 0.44)
+        Zap = tn.contract_hotrg(max_bond=5) ^ ...
+        assert Zap == pytest.approx(8.459419593253275e+100, rel=2e-3)
+
+    def test_contract_hotrg_two_layer_rand_peps(self):
+        rng = np.random.default_rng(42)
+        psi = qtn.PEPS.from_fill_fn(
+            lambda shape: rng.uniform(low=-0.1, size=shape),
+            Lx=7, Ly=5, bond_dim=2
+        )
+        norm = psi.make_norm()
+        xe = norm.contract(all, optimize='auto-hq')
+        xt = norm.contract_hotrg(max_bond=5) ^ ...
+        assert xt == pytest.approx(xe, rel=1e-4)
+
     def test_ising_accuracy_regression(self):
         tn = qtn.TN2D_classical_ising_partition_function(16, 16, 0.44)
-        Zex = 8.459419593253275e+100
         for s in 'bltr':
             Zap = tn.contract_boundary(max_bond=8, sequence=s)
-            rerr = abs(1 - Zap / Zex)
-            assert rerr < 2.2e-7
+            assert Zap == pytest.approx(8.459419593253275e+100, rel=2.2e-7)
         for s in ['bt', 'lr']:
             Zap = tn.contract_boundary(max_bond=8, sequence=s)
             rerr = abs(1 - Zap / Zex)

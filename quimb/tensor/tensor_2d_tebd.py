@@ -1,3 +1,6 @@
+"""Tools for performing TEBD like algorithms on a 2D lattice.
+"""
+
 from itertools import starmap
 
 import numpy as np

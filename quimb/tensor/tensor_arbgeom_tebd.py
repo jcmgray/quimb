@@ -1,3 +1,6 @@
+"""Tools for performing TEBD like algorithms on arbitrary lattices.
+"""
+
 import random
 import itertools
 import collections
@@ -469,6 +472,7 @@ class TEBDGen:
 
         # default time step to use
         self.tau = tau
+        self.last_tau = 0.0
 
         # parse gate application options
         if D is None:
@@ -530,16 +534,21 @@ class TEBDGen:
             factor = 1.0
 
         for where in ordering:
-
             if callable(tau):
-                U = self.ham.get_gate_expm(where, -tau(where) / factor)
+                self.last_tau = tau(where)
             else:
-                U = self.ham.get_gate_expm(where, -tau / factor)
+                self.last_tau = tau
+
+            U = self.ham.get_gate_expm(where, -self.last_tau / factor)
 
             self.gate(U, where)
 
     def _update_progbar(self, pbar):
-        desc = f"n={self._n}, tau={self.tau}, energy~{float(self.energy):.6f}"
+        desc = (
+            f"n={self._n}, "
+            f"tau={float(self.last_tau):.4f}, "
+            f"energy~{float(self.energy):.6f}"
+        )
         pbar.set_description(desc)
 
     def evolve(self, steps, tau=None, progbar=None):
@@ -631,7 +640,7 @@ class TEBDGen:
             en = en / self.ham.nsites
 
         self.energies.append(float(en))
-        self.taus.append(float(self.tau))
+        self.taus.append(float(self.last_tau))
         self.its.append(self._n)
 
         if self.keep_best and en < self.best['energy']:
@@ -677,7 +686,7 @@ class TEBDGen:
         """Compute and return the energy of the current state. Subclasses can
         override this with a custom method to compute the energy.
         """
-        return self._psi.compute_local_expectation_simple(
+        return self._psi.compute_local_expectation_cluster(
             terms=self.ham.terms,
             **self.compute_energy_opts
         )
@@ -689,6 +698,8 @@ class TEBDGen:
 
 
 class SimpleUpdateGen(TEBDGen):
+    """Simple update for arbitrary geometry hamiltonians.
+    """
 
     def gate(self, U, where):
         self._psi.gate_simple_(
@@ -696,7 +707,7 @@ class SimpleUpdateGen(TEBDGen):
         )
 
     def compute_energy(self):
-        return self._psi.compute_local_expectation_simple(
+        return self._psi.compute_local_expectation_cluster(
             terms=self.ham.terms,
             gauges=self.gauges,
             **self.compute_energy_opts,
@@ -713,7 +724,12 @@ class SimpleUpdateGen(TEBDGen):
 
         return psi
 
-    def set_state(self, psi):
+    def set_state(self, psi, gauges=None):
         self._psi = psi.copy()
-        self.gauges = {}
-        self._psi.gauge_all_simple_(gauges=self.gauges)
+        if gauges is None:
+            self.gauges = {}
+            self._psi.gauge_all_simple_(gauges=self.gauges)
+        else:
+            self.gauges = dict(gauges)
+
+

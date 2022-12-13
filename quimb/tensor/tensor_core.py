@@ -1990,6 +1990,11 @@ class Tensor(object):
 
     moveindex_ = functools.partialmethod(moveindex, inplace=True)
 
+    def item(self):
+        """Return the scalar value of this tensor, if it has a single element.
+        """
+        return self.data.item()
+
     def trace(
         self,
         left_inds,
@@ -2655,9 +2660,28 @@ class Tensor(object):
         return TensorNetwork((self, other), virtual=True)
 
     def __matmul__(self, other):
-        """Explicitly contract with another tensor.
+        """Explicitly contract with another tensor. Avoids some slight overhead
+        of calling the full :func:`~quimb.tensor.tensor_core.tensor_contract`.
         """
-        return self.contract(other)
+        lix, bix, rix = group_inds(self, other)
+        ax1 = [self.inds.index(b) for b in bix]
+        ax2 = [other.inds.index(b) for b in bix]
+        data_out = do(
+            'tensordot',
+            self.data,
+            other.data,
+            axes=(ax1, ax2),
+            like=get_contract_backend(),
+        )
+        new_inds = lix + rix
+        if not new_inds:
+            # scalar
+            if isinstance(data_out, np.ndarray):
+                # turn into python scalar
+                data_out = realify_scalar(data_out.item())
+            return data_out
+        new_tags = self.tags | other.tags
+        return self.__class__(data_out, inds=new_inds, tags=new_tags)
 
     def as_network(self, virtual=True):
         """Return a ``TensorNetwork`` with only this tensor.
@@ -3740,6 +3764,12 @@ class TensorNetwork(object):
         """Conjugate all the tensors in this network (leaves all indices).
         """
         return self.conj()
+
+    def item(self):
+        """Return the scalar value of this tensor network, if it is a scalar.
+        """
+        t, = self.tensor_map.values()
+        return t.item()
 
     def largest_element(self):
         """Return the 'largest element', in terms of absolute magnitude, of

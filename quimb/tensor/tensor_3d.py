@@ -1021,6 +1021,207 @@ class TensorNetwork3D(TensorNetworkGen):
         # one of key_s == key
         return envs[key].copy()
 
+    def coarse_grain_hotrg(
+        self,
+        direction,
+        max_bond=None,
+        cutoff=1e-10,
+        lazy=False,
+        equalize_norms=False,
+        optimize="auto-hq",
+        compress_opts=None,
+        inplace=False,
+    ):
+        """Coarse grain this tensor network in ``direction`` using HOTRG. This
+        inserts oblique projectors between tensor pairs and then optionally
+        contracts them into new sites for form a lattice half the size.
+
+        Parameters
+        ----------
+        direction : {'x', 'y', 'z'}
+            The direction to coarse grain in.
+        max_bond : int, optional
+            The maximum bond dimension of the projector pairs inserted.
+        cutoff : float, optional
+            The cutoff for the singular values of the projector pairs.
+        lazy : bool, optional
+            Whether to contract the coarse graining projectors or leave them
+            in the tensor network lazily. Default is to contract them.
+        equalize_norms : bool, optional
+            Whether to equalize the norms of the tensors in the coarse grained
+            lattice.
+        optimize : str, optional
+            The optimization method to use when contracting the coarse grained
+            lattice, if ``lazy=False``.
+        compress_opts : None or dict, optional
+            Supplied to
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.insert_compressor_between_regions`.
+        inplace : bool, optional
+            Whether to perform the coarse graining in place.
+
+        Returns
+        -------
+        TensorNetwork2D
+            The coarse grained tensor network, with size halved in
+            ``direction``.
+
+        See Also
+        --------
+        contract_hotrg, insert_compressor_between_regions
+        """
+        compress_opts = ensure_dict(compress_opts)
+        check_opt("direction", direction, ("x", "y", "z"))
+
+        tn = self if inplace else self.copy()
+        tn_calc = tn.copy()
+
+        r = Rotator3D(tn, None, None, None, direction + "min")
+
+        retag_map = {}
+
+        for i in range(r.imin, r.imax + 1, 2):
+            next_i_in_lattice = (i + 1 <= r.imax)
+            for j in range(r.jmin, r.jmax + 1):
+                for k in range(r.kmin, r.kmax + 1):
+
+                    tag_ijk = r.site_tag(i, j, k)
+                    tag_ip1jk = r.site_tag(i + 1, j, k)
+                    new_tag = r.site_tag(i // 2, j, k)
+                    retag_map[tag_ijk] = new_tag
+                    if next_i_in_lattice:
+                        retag_map[tag_ip1jk] = new_tag
+
+                    # insert the 'y'-orientated projectors
+                    if (j > 0) and next_i_in_lattice:
+                        ltags = (
+                            r.site_tag(i, j - 1, k),
+                            r.site_tag(i + 1, j - 1, k)
+                        )
+                        rtags = (tag_ijk, tag_ip1jk)
+                        tn_calc.insert_compressor_between_regions(
+                            ltags,
+                            rtags,
+                            new_ltags=ltags,
+                            new_rtags=rtags,
+                            insert_into=tn,
+                            max_bond=max_bond,
+                            cutoff=cutoff,
+                            **compress_opts,
+                        )
+
+                    # insert the 'z'-orientated projectors
+                    if (k > 0) and next_i_in_lattice:
+                        ltags = (
+                            r.site_tag(i, j, k - 1),
+                            r.site_tag(i + 1, j, k - 1)
+                        )
+                        rtags = (tag_ijk, tag_ip1jk)
+                        tn_calc.insert_compressor_between_regions(
+                            ltags,
+                            rtags,
+                            new_ltags=ltags,
+                            new_rtags=rtags,
+                            insert_into=tn,
+                            max_bond=max_bond,
+                            cutoff=cutoff,
+                            **compress_opts,
+                        )
+
+            retag_map[r.x_tag(i)] = r.x_tag(i // 2)
+            if next_i_in_lattice:
+                retag_map[r.x_tag(i + 1)] = r.x_tag(i // 2)
+
+        # then we retag the tensor network and adjust its size
+        tn.retag_(retag_map)
+        if direction == "x":
+            tn._Lx = tn.Lx // 2 + tn.Lx % 2
+        elif direction == "y":
+            tn._Ly = tn.Ly // 2 + tn.Ly % 2
+        else:  # direction == "z":
+            tn._Lz = tn.Lz // 2 + tn.Lz % 2
+
+        # need this since we've fundamentally changed the geometry
+        tn.reset_cached_properties()
+
+        if not lazy:
+            # contract each pair of tensors with their projectors
+            for st in tn.site_tags:
+                tn.contract_tags_(st, optimize=optimize)
+
+        if equalize_norms:
+            tn.equalize_norms_(value=equalize_norms)
+
+        return tn
+
+    coarse_grain_hotrg_ = functools.partialmethod(
+        coarse_grain_hotrg, inplace=True
+    )
+
+    def contract_hotrg(
+        self,
+        max_bond=None,
+        cutoff=1e-10,
+        directions=("x", "y", "z"),
+        lazy=False,
+        equalize_norms=False,
+        inplace=False,
+        **coarse_grain_opts
+    ):
+        """Contract this tensor network using the finite version of HOTRG. The
+        TN is contracted sequentially in ``directions`` by inserting oblique
+        projectors between tensor pairs, and then optionally contracting these
+        new effective sites. The algorithm stops when only one direction has a
+        length larger than 2, and thus exact contraction can be used.
+
+        Parameters
+        ----------
+        max_bond : int, optional
+            The maximum bond dimension of the projector pairs inserted.
+        cutoff : float, optional
+            The cutoff for the singular values of the projector pairs.
+        directions : tuple of str, optional
+            The directions to contract in.  Default is to contract in all
+            directions.
+        lazy : bool, optional
+            Whether to contract the coarse graining projectors or leave them
+            in the tensor network lazily. Default is to contract them.
+        equalize_norms : bool or float, optional
+            Whether to equalize the norms of the tensors in the tensor network
+            after each coarse graining step.
+        inplace : bool, optional
+            Whether to perform the coarse graining in place.
+        coarse_grain_opts
+            Additional options to pass to :meth:`coarse_grain_hotrg`.
+
+        Returns
+        -------
+        TensorNetwork3D
+            The contracted tensor network, which will have no more than one
+            directino of length > 2.
+
+        See Also
+        --------
+        coarse_grain_hotrg, insert_compressor_between_regions
+        """
+        tn = self if inplace else self.copy()
+
+        # contract until only a single length is non-1D, (i.e. L>2 )
+        directions = [d for d in directions if getattr(tn, "L" + d) > 2]
+        while len(directions) > 1:
+            direction = directions.pop(0)
+            tn.coarse_grain_hotrg_(
+                direction=direction,
+                max_bond=max_bond,
+                cutoff=cutoff,
+                lazy=lazy,
+                equalize_norms=equalize_norms,
+                **coarse_grain_opts
+            )
+            if getattr(tn, "L" + direction) > 2:
+                directions.append(direction)
+
+        return tn
+
 
 def is_lone_coo(where):
     """Check if ``where`` has been specified as a single coordinate triplet.
@@ -1755,7 +1956,7 @@ class PEPS3D(TensorNetwork3DVector, TensorNetwork3DFlat):
                 storage_factory=storage_factory,
                 **contract_boundary_opts,
             )
-            expecs[where] = do("trace", G @ rho)
+            expecs[where] = do("tensordot", G, rho, ((0, 1), (1, 0)))
 
         if return_all:
             return expecs
