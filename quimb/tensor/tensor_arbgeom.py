@@ -8,18 +8,13 @@ from autoray import do, dag
 
 from ..utils import check_opt, deprecated, ensure_dict
 from ..utils import progbar as Progbar
-from ..core import prod
 from .tensor_core import (
-    Tensor,
     TensorNetwork,
     get_symbol,
     rand_uuid,
-    IsoTensor,
     oset,
-    oset_union,
     tags_to_oset,
 )
-from . import array_ops as ops
 
 
 def get_coordinate_formatter(ndims):

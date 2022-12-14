@@ -1167,11 +1167,14 @@ class TensorNetwork3D(TensorNetworkGen):
         inplace=False,
         **coarse_grain_opts
     ):
-        """Contract this tensor network using the finite version of HOTRG. The
-        TN is contracted sequentially in ``directions`` by inserting oblique
-        projectors between tensor pairs, and then optionally contracting these
-        new effective sites. The algorithm stops when only one direction has a
-        length larger than 2, and thus exact contraction can be used.
+        """Contract this tensor network using the finite version of HOTRG.
+        See https://arxiv.org/abs/1201.1144v4 and
+        https://arxiv.org/abs/1905.02351 for the more optimal computaton of the
+        projectors used here. The TN is contracted sequentially in
+        ``directions`` by inserting oblique projectors between tensor pairs,
+        and then optionally contracting these new effective sites. The
+        algorithm stops when only one direction has a length larger than 2, and
+        thus exact contraction can be used.
 
         Parameters
         ----------

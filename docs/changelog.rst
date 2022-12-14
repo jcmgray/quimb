@@ -21,6 +21,11 @@ v1.4.3 (unreleased)
   :meth:`~quimb.tensor.tensor_2d.TensorNetwork2D.contract_hotrg`,
   :meth:`~quimb.tensor.tensor_3d.TensorNetwork3D.coarse_grain_hotrg`, and
   :meth:`~quimb.tensor.tensor_3d.TensorNetwork3D.contract_hotrg`,
+- add CTMRG style contraction for 2D tensor networks:
+  :meth:`~quimb.tensor.tensor_2d.TensorNetwork2D.contract_ctmrg`
+- add 2D tensor network 'corner double line' (CDL) builders:
+  :func:`~quimb.tensor.tensor_builder.TN2D_corner_double_line`, and
+  :func:`~quimb.tensor.tensor_builder.TN2D_corner_double_line_rand`
 - update the docs to use the `furo <https://pradyunsg.me/furo/>`_ theme,
   `myst_nb <https://myst-nb.readthedocs.io/en/latest/>`_ for notebooks, and
   several other `sphinx` extensions.

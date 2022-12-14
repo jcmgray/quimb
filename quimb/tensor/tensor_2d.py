@@ -1258,7 +1258,7 @@ class TensorNetwork2D(TensorNetworkGen):
 
         See Also
         --------
-        insert_compressor_between_regions
+        TensorNetwork.insert_compressor_between_regions
         """
         compress_opts = ensure_dict(compress_opts)
 
@@ -2719,7 +2719,7 @@ class TensorNetwork2D(TensorNetworkGen):
     ):
         """Coarse grain this tensor network in ``direction`` using HOTRG. This
         inserts oblique projectors between tensor pairs and then optionally
-        contracts them into new sites for form a lattice half the length.
+        contracts them into new sites for form a lattice half the size.
 
         Parameters
         ----------
@@ -2752,7 +2752,7 @@ class TensorNetwork2D(TensorNetworkGen):
 
         See Also
         --------
-        contract_hotrg, insert_compressor_between_regions
+        contract_hotrg, TensorNetwork.insert_compressor_between_regions
         """
         compress_opts = ensure_dict(compress_opts)
         check_opt("direction", direction, ("x", "y"))
@@ -2836,11 +2836,14 @@ class TensorNetwork2D(TensorNetworkGen):
         inplace=False,
         **coarse_grain_opts
     ):
-        """Contract this tensor network using the finite version of HOTRG. The
-        TN is contracted sequentially in ``directions`` by inserting oblique
-        projectors between plaquettes, and then optionally contracting these
-        new effective sites. The algorithm stops when only one direction has a
-        length larger than 2, and thus exact contraction can be used.
+        """Contract this tensor network using the finite version of HOTRG.
+        See https://arxiv.org/abs/1201.1144v4 and
+        https://arxiv.org/abs/1905.02351 for the more optimal computaton of the
+        projectors used here. The TN is contracted sequentially in
+        ``directions`` by inserting oblique projectors between plaquettes, and
+        then optionally contracting these new effective sites. The algorithm
+        stops when only one direction has a length larger than 2, and thus
+        exact contraction can be used.
 
         Parameters
         ----------
@@ -2866,11 +2869,12 @@ class TensorNetwork2D(TensorNetworkGen):
         -------
         TensorNetwork2D
             The contracted tensor network, which will have no more than one
-            directino of length > 2.
+            direction of length > 2.
 
         See Also
         --------
-        coarse_grain_hotrg, insert_compressor_between_regions
+        coarse_grain_hotrg, contract_ctmrg,
+        TensorNetwork.insert_compressor_between_regions
         """
         tn = self if inplace else self.copy()
 
@@ -2891,6 +2895,99 @@ class TensorNetwork2D(TensorNetworkGen):
 
         return tn
 
+    def contract_ctmrg(
+        self,
+        max_bond=None,
+        cutoff=1e-10,
+        directions=("xmin", "xmax", "ymin", "ymax"),
+        lazy=False,
+        equalize_norms=False,
+        inplace=False,
+        **contract_boundary_opts,
+    ):
+        """Contract this 2D tensor network using the finite analog of the
+        CTMRG algorithm - https://arxiv.org/abs/cond-mat/9507087. The TN is
+        contracted sequentially in ``directions`` by inserting oblique
+        projectors between boundary pairs, and then optionally contracting
+        these new effective sites. The algorithm stops when only one direction
+        has a length larger than 2, and thus exact contraction can be used.
+
+        Parameters
+        ----------
+        max_bond : int, optional
+            The maximum bond dimension of the projector pairs inserted.
+        cutoff : float, optional
+            The cutoff for the singular values of the projector pairs.
+        directions : tuple of str, optional
+            The directions to contract in.  Default is to contract in all
+            directions.
+        lazy : bool, optional
+            Whether to contract the boundary projectors or leave them
+            in the tensor network lazily. Default is to contract them.
+        equalize_norms : bool or float, optional
+            Whether to equalize the norms of the tensors in the tensor network
+            after each boundary contraction step.
+        inplace : bool, optional
+            Whether to perform the boundary contraction in place.
+        contract_boundary_opts
+            Additional options to pass to :meth:`contract_boundary_from`.
+
+        Returns
+        -------
+        TensorNetwork2D
+            The contracted tensor network, which will have no more than one
+            direction of length > 2.
+
+        See Also
+        --------
+        contract_boundary_from, contract_hotrg,
+        TensorNetwork.insert_compressor_between_regions
+        """
+        tn = self if inplace else self.copy()
+
+        contract_boundary_opts.setdefault("mode", "projector")
+
+        boundaries = {
+            "xmin": 0,
+            "xmax": tn.Lx - 1,
+            "ymin": 0,
+            "ymax": tn.Ly - 1,
+        }
+        separations = {
+            "x": tn.Lx - 1,
+            "y": tn.Ly - 1,
+        }
+
+        directions = [d for d in directions if separations[d[0]] > 1]
+
+        while directions:
+            direction = directions.pop(0)
+            if separations[direction[0]] <= 1:
+                continue
+            else:
+                directions.append(direction)
+
+            xrange = (boundaries["xmin"], boundaries["xmax"])
+            yrange = (boundaries["ymin"], boundaries["ymax"])
+
+            tn.contract_boundary_from_(
+                xrange, yrange,
+                from_which=direction,
+                max_bond=max_bond,
+                cutoff=cutoff,
+                lazy=lazy,
+                equalize_norms=equalize_norms,
+                **contract_boundary_opts,
+            )
+
+            xy, minmax = direction[0], direction[1:]
+            separations[xy] -= 1
+            if minmax == "min":
+                boundaries[direction] += 1
+            else:
+                boundaries[direction] -= 1
+
+        return tn
 
 def is_lone_coo(where):
     """Check if ``where`` has been specified as a single coordinate pair.

@@ -17,7 +17,7 @@ from ..gen.operators import (
     ham_heis,
     spin_operator,
 )
-from ..gen.rand import randn, choice, random_seed_fn, rand_phase
+from ..gen.rand import seed_rand, randn, choice, random_seed_fn, rand_phase
 from .tensor_core import (
     new_bond,
     rand_uuid,
@@ -852,6 +852,206 @@ def TN2D_rand(
         site_tag_id=site_tag_id,
         x_tag_id=x_tag_id,
         y_tag_id=y_tag_id,
+    )
+
+
+def TN2D_corner_double_line(
+    Lx,
+    Ly,
+    line_size=2,
+    fill_fn=None,
+    site_tag_id='I{},{}',
+    x_tag_id='X{}',
+    y_tag_id='Y{}',
+    random_rewire=False,
+    random_rewire_seed=None,
+    contract=True,
+    fuse=True,
+):
+    """Build a 2D 'corner double line' (CDL) tensor network. Each plaquette
+    contributes a matrix (by default the identity) at each corner, connected in
+    a loop. The corners for each site are then grouped and optionally
+    contracted. Such a tensor network has strong local correlations. See
+    https://arxiv.org/abs/1412.0732. If the sites are not contracted, the
+    resulting network is a product of loops that can be easily and exactly
+    contracted.
+
+    Parameters
+    ----------
+    Lx : int
+        Length of side x.
+    Ly : int
+        Length of side y.
+    line_size : int, optional
+        The dimension of the matrices at each corner. If `contract` is True,
+        then the resulting bonds with have dimension `line_size**2`.
+    fill_fn : callable, optional
+        A function that takes a shape and returns a matrix of the desired
+        dimension. By default, the identity matrix is used.
+    site_tag_id : str, optional
+        String specifier for naming convention of site tags.
+    x_tag_id : str, optional
+        String specifier for naming convention of row tags.
+    y_tag_id : str, optional
+        String specifier for naming convention of column tags.
+    random_rewire : bool, optional
+        If true, at each site the wires will be randomly permuted, this forms
+        a tensor network with random, potentially long-range loops.
+    random_rewire_seed : int, optional
+        A random seed for the random rewire.
+    contract : bool, optional
+        Whether to contract the corners at each site into a single tensor.
+    fuse : bool, optional
+        Whether to fuse the resulting multibonds.
+
+    Returns
+    -------
+    TensorNetwork2D
+    """
+    if fill_fn is None:
+
+        def fill_fn(shape):
+            return eye(shape[0], dtype='float64')
+
+    tn = TensorNetwork()
+    for i, j in itertools.product(range(Lx), range(Ly)):
+        if (i + 1 >= Lx) or (j + 1 >= Ly):
+            # plaquette doesn't exist
+            continue
+
+        plaq_inds = {
+            'l': rand_uuid(),
+            't': rand_uuid(),
+            'r': rand_uuid(),
+            'b': rand_uuid(),
+        }
+
+        for corner in ['bl', 'tl', 'tr', 'br']:
+            data = fill_fn((line_size, line_size))
+
+            if corner == 'bl':
+                inds = (plaq_inds['b'], plaq_inds['l'])
+                tags = (
+                    site_tag_id.format(i, j),
+                    x_tag_id.format(i),
+                    y_tag_id.format(j),
+                    "BL",
+                )
+            elif corner == 'tl':
+                inds = (plaq_inds['l'], plaq_inds['t'])
+                tags = (
+                    site_tag_id.format(i + 1, j),
+                    x_tag_id.format(i + 1),
+                    y_tag_id.format(j),
+                    "TL",
+                )
+            elif corner == 'tr':
+                inds = (plaq_inds['t'], plaq_inds['r'])
+                tags = (
+                    site_tag_id.format(i + 1, j + 1),
+                    x_tag_id.format(i + 1),
+                    y_tag_id.format(j + 1),
+                    "TR",
+                )
+            else:  # corner == 'br':
+                inds = (plaq_inds['r'], plaq_inds['b'])
+                tags = (
+                    site_tag_id.format(i, j + 1),
+                    x_tag_id.format(i),
+                    y_tag_id.format(j + 1),
+                    "BR",
+                )
+
+            tn |= Tensor(data=data, inds=inds, tags=tags)
+
+    tn.view_as_(
+        TensorNetwork2D,
+        Lx=Lx, Ly=Ly, site_tag_id=site_tag_id,
+        x_tag_id=x_tag_id, y_tag_id=y_tag_id
+    )
+
+    if random_rewire:
+        rng = np.random.default_rng(random_rewire_seed)
+        # at each site, randomly permute the indices to rewire the bonds
+        for tag in tn.site_tags:
+            stn = tn.select(tag)
+            inds = stn.all_inds()
+            new_inds = rng.permutation(inds)
+            stn.reindex_(dict(zip(inds, new_inds)))
+
+    if contract:
+        for tag in tn.site_tags:
+            tn ^= tag
+        if fuse:
+            tn.fuse_multibonds_()
+
+    return tn
+
+
+def TN2D_corner_double_line_rand(
+    Lx,
+    Ly,
+    line_size=2,
+    seed=None,
+    dist="normal",
+    dtype='float64',
+    site_tag_id='I{},{}',
+    x_tag_id='X{}',
+    y_tag_id='Y{}',
+    random_rewire=False,
+    contract=True,
+    fuse=True,
+):
+    """Build a 2D 'corner double line' tensor network with random matrices at
+    each corner.
+
+    Parameters
+    ----------
+    Lx : int
+        Length of side x.
+    Ly : int
+        Length of side y.
+    line_size : int, optional
+        The dimension of the matrices at each corner. If `contract` is True,
+        then the resulting bonds with have dimension `line_size**2`.
+    seed : int, optional
+        A random seed for the random matrices.
+    dist : str, optional
+        The distribution to use for the random matrices.
+    dtype : str, optional
+        The dtype of the random matrices.
+    site_tag_id : str, optional
+        String specifier for naming convention of site tags.
+    x_tag_id : str, optional
+        String specifier for naming convention of row tags.
+    y_tag_id : str, optional
+        String specifier for naming convention of column tags.
+    random_rewire : bool, optional
+        If true, at each site the wires will be randomly permuted, this forms
+        a tensor network with random, potentially long-range loops.
+    contract : bool, optional
+        Whether to contract the corners at each site into a single tensor.
+    fuse : bool, optional
+        Whether to fuse the resulting multibonds.
+    """
+    if seed is not None:
+        seed_rand(seed)
+
+    def fill_fn(shape):
+        return randn(shape, dtype=dtype, dist=dist)
+
+    return TN2D_corner_double_line(
+        Lx,
+        Ly,
+        line_size=line_size,
+        fill_fn=fill_fn,
+        site_tag_id=site_tag_id,
+        x_tag_id=x_tag_id,
+        y_tag_id=y_tag_id,
+        random_rewire=random_rewire,
+        random_rewire_seed=seed,
+        contract=contract,
+        fuse=fuse,
     )
 
 

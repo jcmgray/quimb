@@ -4847,7 +4847,7 @@ class TensorNetwork(object):
     ):
         r"""Gate some indices of this tensor network with another tensor
         network. That is, rewire and then combine them such that the new tensor
-        network has the same outer indices as before, but now includes gate.
+        network has the same outer indices as before, but now includes gate::
 
             gate_inds_outer
              :
