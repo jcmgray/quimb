@@ -858,7 +858,7 @@ def TN2D_rand(
 def TN2D_corner_double_line(
     Lx,
     Ly,
-    line_size=2,
+    line_dim=2,
     fill_fn=None,
     site_tag_id='I{},{}',
     x_tag_id='X{}',
@@ -882,9 +882,9 @@ def TN2D_corner_double_line(
         Length of side x.
     Ly : int
         Length of side y.
-    line_size : int, optional
+    line_dim : int, optional
         The dimension of the matrices at each corner. If `contract` is True,
-        then the resulting bonds with have dimension `line_size**2`.
+        then the resulting bonds with have dimension `line_dim**2`.
     fill_fn : callable, optional
         A function that takes a shape and returns a matrix of the desired
         dimension. By default, the identity matrix is used.
@@ -927,7 +927,7 @@ def TN2D_corner_double_line(
         }
 
         for corner in ['bl', 'tl', 'tr', 'br']:
-            data = fill_fn((line_size, line_size))
+            data = fill_fn((line_dim, line_dim))
 
             if corner == 'bl':
                 inds = (plaq_inds['b'], plaq_inds['l'])
@@ -991,7 +991,7 @@ def TN2D_corner_double_line(
 def TN2D_corner_double_line_rand(
     Lx,
     Ly,
-    line_size=2,
+    line_dim=2,
     seed=None,
     dist="normal",
     dtype='float64',
@@ -1011,9 +1011,9 @@ def TN2D_corner_double_line_rand(
         Length of side x.
     Ly : int
         Length of side y.
-    line_size : int, optional
+    line_dim : int, optional
         The dimension of the matrices at each corner. If `contract` is True,
-        then the resulting bonds with have dimension `line_size**2`.
+        then the resulting bonds with have dimension `line_dim**2`.
     seed : int, optional
         A random seed for the random matrices.
     dist : str, optional
@@ -1043,7 +1043,7 @@ def TN2D_corner_double_line_rand(
     return TN2D_corner_double_line(
         Lx,
         Ly,
-        line_size=line_size,
+        line_dim=line_dim,
         fill_fn=fill_fn,
         site_tag_id=site_tag_id,
         x_tag_id=x_tag_id,
