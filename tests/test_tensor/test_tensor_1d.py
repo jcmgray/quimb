@@ -539,6 +539,16 @@ class TestMatrixProductState:
         p.gate_(G, (1, n - 2), contract='swap+split')
         assert p.bond_sizes() == [1] + [2] * (n - 3) + [1]
 
+    def test_flip(self):
+        p = MPS_rand_state(5, 3)
+        pf = p.flip()
+        # we want a single index per dimension, not all combined into one
+        inds = [[ix] for ix in p.site_inds]
+        assert_allclose(
+            p.to_dense(*inds),
+            pf.to_dense(*inds).transpose()
+        )
+
     def test_correlation(self):
         ghz = (MPS_computational_state('0000') +
                MPS_computational_state('1111')) / 2**0.5

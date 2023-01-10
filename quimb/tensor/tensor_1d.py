@@ -1740,6 +1740,23 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         inplace=True,
     )
 
+    def flip(self, inplace=False):
+        """Reverse the order of the sites in the MPS, such that site ``i`` is
+        now at site ``L - i - 1``.
+        """
+        flipped = self if inplace else self.copy()
+
+        retag_map = {
+            self.site_tag(i): self.site_tag(self.L - i - 1)
+            for i in self.sites
+        }
+        reindex_map = {
+            self.site_ind(i): self.site_ind(self.L - i - 1)
+            for i in self.sites
+        }
+
+        return flipped.retag_(retag_map).reindex_(reindex_map)
+
     def magnetization(self, i, direction='Z', cur_orthog=None):
         """Compute the magnetization at site ``i``.
         """
