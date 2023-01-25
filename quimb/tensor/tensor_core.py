@@ -306,6 +306,7 @@ _CUTOFF_MODES = {'abs': 1, 'rel': 2, 'sum2': 3,
 _RENORM_LOOKUP = {'sum2': 2, 'rsum2': 2, 'sum1': 1, 'rsum1': 1}
 
 
+@functools.lru_cache(None)
 def _parse_split_opts(method, cutoff, absorb, max_bond, cutoff_mode, renorm):
     opts = dict()
 
@@ -331,6 +332,19 @@ def _parse_split_opts(method, cutoff, absorb, max_bond, cutoff_mode, renorm):
         opts['renorm'] = 0 if renorm is None else renorm
 
     return opts
+
+
+@functools.lru_cache(None)
+def _check_left_right_isom(method, absorb):
+    left_isom = (
+        (method in _LEFT_ISOM_METHODS) or
+        (method in _ISOM_METHODS and absorb in (None, 'right'))
+    )
+    right_isom = (
+        (method == _RIGHT_ISOM_METHODS) or
+        (method in _ISOM_METHODS and absorb in (None, 'left'))
+    )
+    return left_isom, right_isom
 
 
 def tensor_split(
@@ -462,7 +476,11 @@ def tensor_split(
         TT = T.transpose(*left_inds, *right_inds)
         left_dims = TT.shape[:len(left_inds)]
         right_dims = TT.shape[len(left_inds):]
-        array = reshape(TT.data, (prod(left_dims), prod(right_dims)))
+
+        if len(left_dims) > 1 or len(right_dims) > 1:
+            array = do("reshape", TT.data, (prod(left_dims), prod(right_dims)))
+        else:
+            array = TT.data
 
     if get == 'values':
         return _SPLIT_VALUES_FNS[method](array)
@@ -472,8 +490,10 @@ def tensor_split(
 
     # ``s`` itself will be None unless ``absorb=None`` is specified
     left, s, right = _SPLIT_FNS[method](array, **opts)
-    left = reshape(left, (*left_dims, -1))
-    right = reshape(right, (-1, *right_dims))
+    if len(left_dims) > 1:
+        left = do("reshape", left, (*left_dims, -1))
+    if len(right_dims) > 1:
+        right = do("reshape", right, (-1, *right_dims))
 
     if get == 'arrays':
         if absorb is None:
@@ -495,10 +515,7 @@ def tensor_split(
         tensors = (Tl, Tr)
 
     # work out if we have created left and/or right isometric tensors
-    left_isom = ((method == 'qr') or (method in _ISOM_METHODS and
-                                      absorb in (None, 'right')))
-    right_isom = ((method == 'lq') or (method in _ISOM_METHODS and
-                                       absorb in (None, 'left')))
+    left_isom, right_isom = _check_left_right_isom(method, absorb)
     if left_isom:
         Tl.modify(left_inds=left_inds)
     if right_isom:
@@ -1903,15 +1920,18 @@ class Tensor(object):
         t = self if inplace else self.copy()
 
         output_inds = tuple(output_inds)  # need to re-use this.
+        if t.inds == output_inds:
+            # no need to do anything
+            return t
 
         if set(t.inds) != set(output_inds):
-            raise ValueError("'output_inds' must be permutation of the current"
-                             f" tensor indices, but {set(t.inds)} != "
-                             f"{set(output_inds)}")
+            raise ValueError(
+                "'output_inds' must be permutation of the current"
+                f" tensor indices, but {set(t.inds)} != {set(output_inds)}"
+            )
 
         current_ind_map = {ind: i for i, ind in enumerate(t.inds)}
         perm = tuple(current_ind_map[i] for i in output_inds)
-
         t.modify(apply=lambda x: transpose(x, perm), inds=output_inds)
         return t
 
