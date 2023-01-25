@@ -2174,12 +2174,28 @@ def HTN_from_cnf(fname, mode="parafac"):
                 # num_clauses = int(args[3])
                 continue
 
+            if args[:2] == ["c", "weights"]:
+                # MINIC2D weight format, all variable weights specified in
+                # pairs, on a single line
+                for v, (wp, wm) in enumerate(zip(args[2::2], args[3::2])):
+                    weights[str(v + 1), "+"] = float(wp)
+                    weights[str(v + 1), "-"] = float(wm)
+                    weighted.add(str(v + 1))
+                continue
+
             # translate mc2021 style weight to normal
             if args[:3] == ["c", "p", "weight"]:
                 args = ("w", *args[3:5])
-            # variable weight
+
             if args[0] == "w":
+                # CACHET / MCC weight format, each weight a separate line, and
+                # only the positive or negative weight is specified
                 sgn_var, w = args[1:]
+
+                if w == "-1":
+                    # equal weighting as (1, 1): can ignore
+                    continue
+
                 sgn_var = int(sgn_var)
                 sgn = "-" if sgn_var < 0 else "+"
                 var = str(abs(sgn_var))
@@ -2192,13 +2208,17 @@ def HTN_from_cnf(fname, mode="parafac"):
             if (not args) or (args == ["0"]) or (args[0][0] in "c%"):
                 continue
 
-            # clause tensor
+            # clause tensor, drop last '0' (endline marker) and empty strings
+            if args[-1] != "0":
+                raise ValueError(f"Invalid clause: {line}")
+
             clause = tuple(map(int, filter(None, args[:-1])))
 
             # encode the OR statement with possible negations as int
             m = clause_negmask(clause)
             inds = [str(abs(var)) for var in clause]
             tag = f"CLAUSE{clause_counter}"
+            clause_counter += 1
 
             if (
                 # parafac mode
@@ -2216,8 +2236,7 @@ def HTN_from_cnf(fname, mode="parafac"):
                 # dense
                 ts.append(or_clause_tensor(len(inds), m, inds, tag))
 
-            clause_counter += 1
-
+    # handle weights as rank one tensors connected to that index only
     for var in sorted(weighted):
         wp_specified = (var, "+") in weights
         wm_specified = (var, "-") in weights

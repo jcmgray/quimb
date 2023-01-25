@@ -36,6 +36,8 @@ v1.4.3 (unreleased)
   ``TensorNetwork.draw(dim=3, backend='matplotlib3d')`` or
   ``TensorNetwork.draw(dim=3, backend='plotly')``
   ). The new ``backend='plotly'`` can also be used for 2D interactive plots.
+- Update :func:`~quimb.tensor.tensor_builder.HTN_from_cnf` to handle more
+  weighted model counting formats.
 
 
 **Bug fixes:**
