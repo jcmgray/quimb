@@ -105,7 +105,17 @@ def calc_fuse_perm_and_shape(shape, axes_groups):
             # fusing: need to accumulate
             new_shape[new_ax] *= d
 
-    return perm, tuple(new_shape)
+    if all(i == ax for i, ax in enumerate(perm)):
+        # no need to transpose
+        perm = None
+
+    if all(d1 == d2 for d1, d2 in zip(shape, new_shape)):
+        # no need to reshape
+        new_shape = None
+    else:
+        new_shape = tuple(new_shape)
+
+    return perm, new_shape
 
 
 @compose
@@ -139,7 +149,13 @@ def fuse(x, *axes_groups, backend=None):
 
     shape = tuple(map(int, x.shape))
     perm, new_shape = calc_fuse_perm_and_shape(shape, axes_groups)
-    return _reshape(_transpose(x, perm), new_shape)
+
+    if perm is not None:
+        x = _transpose(x, perm)
+    if new_shape is not None:
+        x = _reshape(x, new_shape)
+
+    return x
 
 
 def ndim(array):
