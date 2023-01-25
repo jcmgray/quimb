@@ -346,6 +346,54 @@ def svd_truncated_lazy(
     return U, s, VH
 
 
+@compose
+def lu_truncated(
+    x,
+    cutoff=-1.0,
+    cutoff_mode=3,
+    max_bond=-1,
+    absorb=0,
+    renorm=0,
+    backend=None,
+):
+    if absorb != 0:
+        raise NotImplementedError(
+            f"Can't handle absorb{absorb} in lu_truncated."
+        )
+    elif renorm != 0:
+        raise NotImplementedError(
+            f"Can't handle renorm={renorm} in lu_truncated."
+        )
+    elif max_bond != -1:
+        # use argsort(sl * su) to handle this?
+        raise NotImplementedError(
+            f"Can't handle max_bond={max_bond} in lu_truncated."
+        )
+
+    with backend_like(backend):
+        PL, U = do('scipy.linalg.lu', x, permute_l=True)
+
+        sl = do('sum', do('abs', PL), axis=0)
+        su = do('sum', do('abs', U), axis=1)
+
+        if cutoff_mode == 2:
+            abs_cutoff_l = cutoff * do('max', sl)
+            abs_cutoff_u = cutoff * do('max', su)
+        elif cutoff_mode == 1:
+            abs_cutoff_l = abs_cutoff_u = cutoff
+        else:
+            raise NotImplementedError(
+                f"Can't handle cutoff_mode={cutoff_mode} in lu_truncated."
+            )
+
+        idx = (sl > abs_cutoff_l) & (su > abs_cutoff_u)
+
+        PL = PL[:, idx]
+        U = U[idx, :]
+
+        return PL, None, U
+
+
 def svdvals(x):
     """SVD-decomposition, but return singular values only."""
     return np.linalg.svd(x, full_matrices=False, compute_uv=False)
@@ -620,6 +668,42 @@ def cholesky(x, cutoff=-1, cutoff_mode=3, max_bond=-1, absorb=0):
         # try adding cutoff identity - assuming it is approx allowable error
         xi = x + 2 * cutoff * np.eye(x.shape[0])
         return _cholesky_numba(xi, cutoff, cutoff_mode, max_bond, absorb)
+
+
+@compose
+def polar_right(x):
+    """Polar decomposition of ``x``."""
+    W, s, VH = do("linalg.svd", x)
+    U = W @ VH
+    P = dag(VH) @ ldmul(s, VH)
+    return U, None, P
+
+
+@polar_right.register("numpy")
+@njit  # pragma: no cover
+def polar_right_numba(x):
+    W, s, VH = np.linalg.svd(x, full_matrices=0)
+    U = W @ VH
+    P = dag_numba(VH) @ ldmul_numba(s, VH)
+    return U, None, P
+
+
+@compose
+def polar_left(x):
+    """Polar decomposition of ``x``."""
+    W, s, VH = do("linalg.svd", x)
+    U = W @ VH
+    P = rdmul(W, s) @ dag(W)
+    return P, None, U
+
+
+@polar_left.register("numpy")
+@njit  # pragma: no cover
+def polar_left_numba(x):
+    W, s, VH = np.linalg.svd(x, full_matrices=0)
+    U = W @ VH
+    P = rdmul_numba(W, s) @ dag_numba(W)
+    return P, None, U
 
 
 # ------ similarity transforms for compressing effective environments ------- #
