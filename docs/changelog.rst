@@ -32,6 +32,10 @@ v1.4.3 (unreleased)
 - add the `'adabelief'` optimizer to
   :class:`~quimb.tensor.optimize.TNOptimizer` as well as a quick plotter:
   :meth:`~quimb.tensor.optimize.TNOptimizer.plot`
+- add initial 3D plotting methods for tensors networks (
+  ``TensorNetwork.draw(dim=3, backend='matplotlib3d')`` or
+  ``TensorNetwork.draw(dim=3, backend='plotly')``
+  ). The new ``backend='plotly'`` can also be used for 2D interactive plots.
 
 
 **Bug fixes:**

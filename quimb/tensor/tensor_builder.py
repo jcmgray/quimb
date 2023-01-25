@@ -876,6 +876,9 @@ def TN2D_corner_double_line(
     resulting network is a product of loops that can be easily and exactly
     contracted.
 
+    Note that if identity matrices are used, the contracted value of the tensor
+    network is ``line_dim**num_plaquettes``.
+
     Parameters
     ----------
     Lx : int
