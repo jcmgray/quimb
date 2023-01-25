@@ -2,19 +2,22 @@
 """
 
 import functools
+import operator
 
 import numpy as np
 import scipy.sparse.linalg as spla
 import scipy.linalg.interpolative as sli
 from autoray import (
-    do,
-    reshape,
-    dag,
-    infer_backend,
     astype,
-    get_dtype_name,
-    compose,
     backend_like,
+    compose,
+    dag,
+    do,
+    get_dtype_name,
+    get_lib_fn,
+    infer_backend,
+    lazy,
+    reshape,
 )
 
 from ..core import njit, generated_jit
@@ -314,6 +317,35 @@ def svd_truncated_numba(
     )
 
 
+@svd_truncated.register("autoray.lazy")
+@lazy.core.lazy_cache("svd_truncated")
+def svd_truncated_lazy(
+    x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0, renorm=0,
+):
+    if cutoff != 0.0:
+        raise ValueError("Can't handle dynamic cutoffs in lazy mode.")
+
+    m, n = x.shape
+    k = min(m, n)
+    if max_bond > 0:
+        k = min(k, max_bond)
+
+    lsvdt = x.to(
+        fn=get_lib_fn(x.backend, "svd_truncated"),
+        args=(x, cutoff, cutoff_mode, max_bond, absorb, renorm),
+        shape=(3,)
+    )
+
+    U = lsvdt.to(operator.getitem, (lsvdt, 0), shape=(m, k))
+    if absorb is None:
+        s = lsvdt.to(operator.getitem, (lsvdt, 1), shape=(k,))
+    else:
+        s = None
+    VH = lsvdt.to(operator.getitem, (lsvdt, 2), shape=(k, n))
+
+    return U, s, VH
+
+
 def svdvals(x):
     """SVD-decomposition, but return singular values only."""
     return np.linalg.svd(x, full_matrices=False, compute_uv=False)
@@ -538,6 +570,21 @@ def qr_stabilized_numba(x):
         if si != 1.0:
             Q[:, i] *= si
             R[i, i:] *= si
+    return Q, None, R
+
+
+@qr_stabilized.register("autoray.lazy")
+@lazy.core.lazy_cache("qr_stabilized")
+def qr_stabilized_lazy(x):
+    m, n = x.shape
+    k = min(m, n)
+    lqrs = x.to(
+        fn=get_lib_fn(x.backend, "qr_stabilized"),
+        args=(x,),
+        shape=(3,),
+    )
+    Q = lqrs.to(operator.getitem, (lqrs, 0), shape=(m, k))
+    R = lqrs.to(operator.getitem, (lqrs, 2), shape=(k, n))
     return Q, None, R
 
 
