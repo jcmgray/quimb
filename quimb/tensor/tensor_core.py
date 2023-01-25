@@ -490,7 +490,7 @@ def tensor_split(
         left_dims = TT.shape[:len(left_inds)]
         right_dims = TT.shape[len(left_inds):]
 
-        if len(left_dims) > 1 or len(right_dims) > 1:
+        if (len(left_dims), len(right_dims)) != (1, 1):
             array = do("reshape", TT.data, (prod(left_dims), prod(right_dims)))
         else:
             array = TT.data
@@ -503,9 +503,9 @@ def tensor_split(
 
     # ``s`` itself will be None unless ``absorb=None`` is specified
     left, s, right = _SPLIT_FNS[method](array, **opts)
-    if len(left_dims) > 1:
+    if len(left_dims) != 1:
         left = do("reshape", left, (*left_dims, -1))
-    if len(right_dims) > 1:
+    if len(right_dims) != 1:
         right = do("reshape", right, (-1, *right_dims))
 
     if get == 'arrays':

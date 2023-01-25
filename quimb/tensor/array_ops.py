@@ -109,11 +109,10 @@ def calc_fuse_perm_and_shape(shape, axes_groups):
         # no need to transpose
         perm = None
 
-    if all(d1 == d2 for d1, d2 in zip(shape, new_shape)):
+    new_shape = tuple(new_shape)
+    if shape == new_shape:
         # no need to reshape
         new_shape = None
-    else:
-        new_shape = tuple(new_shape)
 
     return perm, new_shape
 
