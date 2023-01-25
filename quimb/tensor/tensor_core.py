@@ -284,8 +284,11 @@ _VALID_SPLIT_GET = {None, 'arrays', 'tensors', 'values'}
 _SPLIT_FNS = {
     'svd': decomp.svd_truncated,
     'eig': decomp.svd_via_eig_truncated,
+    'lu': decomp.lu_truncated,
     'qr': decomp.qr_stabilized,
     'lq': decomp.lq_stabilized,
+    'polar_right': decomp.polar_right,
+    'polar_left': decomp.polar_left,
     'eigh': decomp.eigh,
     'cholesky': decomp.cholesky,
     'isvd': decomp.isvd,
@@ -295,9 +298,15 @@ _SPLIT_FNS = {
 }
 _SPLIT_VALUES_FNS = {'svd': decomp.svdvals, 'eig': decomp.svdvals_eig}
 _FULL_SPLIT_METHODS = {'svd', 'eig', 'eigh'}
-_RANK_HIDDEN_METHODS = {'qr', 'lq', 'cholesky'}
-_DENSE_ONLY_METHODS = {'svd', 'eig', 'eigh', 'cholesky', 'qr', 'lq'}
+_RANK_HIDDEN_METHODS = {'qr', 'lq', 'cholesky', 'polar_right', 'polar_left'}
+_DENSE_ONLY_METHODS = {
+    'svd', 'eig', 'eigh', 'cholesky', 'qr', 'lq', 'polar_right', 'polar_left',
+    'lu',
+}
+_LEFT_ISOM_METHODS = {'qr', 'polar_right'}
+_RIGHT_ISOM_METHODS = {'lq', 'polar_left'}
 _ISOM_METHODS = {'svd', 'eig', 'eigh', 'isvd', 'svds', 'rsvd', 'eigsh'}
+
 _CUTOFF_LOOKUP = {None: -1.0}
 _ABSORB_LOOKUP = {'left': -1, 'both': 0, 'right': 1, None: None}
 _MAX_BOND_LOOKUP = {None: -1}
@@ -378,6 +387,8 @@ def tensor_split(
 
             - ``'svd'``: full SVD, allows truncation.
             - ``'eig'``: full SVD via eigendecomp, allows truncation.
+            - ``'lu'``: full LU decomposition, allows truncation. This method
+              favors tensor sparsity but is not rank optimal.
             - ``'svds'``: iterative svd, allows truncation.
             - ``'isvd'``: iterative svd using interpolative methods, allows
               truncation.
@@ -387,6 +398,8 @@ def tensor_split(
               hermitian.
             - ``'qr'``: full QR decomposition.
             - ``'lq'``: full LR decomposition.
+            - ``'polar_right'``: full polar decomposition as ``A = UP``.
+            - ``'polar_left'``: full polar decomposition as ``A = PU``.
             - ``'cholesky'``: full cholesky decomposition, tensor must be
               positive.
 
@@ -8445,6 +8458,7 @@ class TensorNetwork(object):
         equalize_norms=False,
         cache=None,
         inplace=False,
+        **split_opts,
     ):
         """Find tensors which have low rank SVD decompositions across any
         combination of bonds and perform them.
@@ -8478,8 +8492,13 @@ class TensorNetwork(object):
 
             found = False
             for lix, rix in gen_bipartitions(t.inds):
-                tl, tr = t.split(lix, right_inds=rix,
-                                 get='tensors', cutoff=atol)
+                tl, tr = t.split(
+                    lix,
+                    right_inds=rix,
+                    get='tensors',
+                    cutoff=atol,
+                    **split_opts,
+                )
                 new_size = max(tl.size, tr.size)
                 if new_size < t.size:
                     found = True
@@ -8936,6 +8955,7 @@ class TensorNetwork(object):
         progbar=False,
         rank_simplify_opts=None,
         loop_simplify_opts=None,
+        split_simplify_opts=None,
         custom_methods=(),
     ):
         """Perform a series of tensor network 'simplifications' in a loop until
@@ -8994,6 +9014,7 @@ class TensorNetwork(object):
 
         rank_simplify_opts = ensure_dict(rank_simplify_opts)
         loop_simplify_opts = ensure_dict(loop_simplify_opts)
+        split_simplify_opts = ensure_dict(split_simplify_opts)
 
         # all the methods
         if output_inds is None:
@@ -9039,7 +9060,8 @@ class TensorNetwork(object):
                     tn.column_reduce_(output_inds=ix_o, atol=atol, cache=cache)
                 elif meth == 'S':
                     tn.split_simplify_(atol=atol, cache=cache,
-                                       equalize_norms=equalize_norms)
+                                       equalize_norms=equalize_norms,
+                                       **split_simplify_opts)
                 elif meth == 'L':
                     tn.loop_simplify_(output_inds=ix_o, cutoff=atol,
                                       cache=cache,
@@ -9167,6 +9189,7 @@ class TensorNetwork(object):
         equalize_norms=True,
         progbar=False,
         inplace=False,
+        **full_simplify_opts,
     ):
         tn = self if inplace else self.copy()
 
@@ -9179,6 +9202,7 @@ class TensorNetwork(object):
             'progbar': progbar,
             'output_inds': output_inds,
             'cache': set(),
+            **full_simplify_opts,
         }
 
         # order of tensors when converting hyperinds

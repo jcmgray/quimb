@@ -38,6 +38,10 @@ v1.4.3 (unreleased)
   ). The new ``backend='plotly'`` can also be used for 2D interactive plots.
 - Update :func:`~quimb.tensor.tensor_builder.HTN_from_cnf` to handle more
   weighted model counting formats.
+- various optimizations for minimizing computational graph size and
+  construction time.
+- add ``'lu'``, ``'polar_left'`` and ``'polar_right'`` methods to
+  :func:`~quimb.tensor.tensor_core.tensor_split`.
 
 
 **Bug fixes:**
