@@ -1402,6 +1402,8 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         split_opts
             Supplied to :func:`~quimb.tensor.tensor_core.tensor_split` to
             in order to partition the dense vector into tensors.
+            ``absorb='left'`` is set by default, to ensure the compression
+            is canonical / optimal.
 
         Returns
         -------
@@ -1419,11 +1421,11 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
             | | | | | |
         """
         set_default_compress_mode(split_opts)
+        # ensure compression is canonical / optimal
+        split_opts.setdefault("absorb", "left")
 
         L = len(dims)
         inds = [site_ind_id.format(i) for i in range(L)]
-
-        T = Tensor(reshape(ops.asarray(psi), dims), inds=inds)
 
         def gen_tensors():
             #           split
@@ -1433,18 +1435,34 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
             #     |||||||  | | |
             #     .......
             #    left_inds
-            TM = T
+            tm = Tensor(
+                data=reshape(ops.asarray(psi), dims),
+                inds=inds,
+            )
             for i in range(L - 1, 0, -1):
-                TM, TR = TM.split(left_inds=inds[:i], get='tensors',
-                                  rtags=site_tag_id.format(i), **split_opts)
-                yield TR
-            TM.add_tag(site_tag_id.format(0))
-            yield TM
+                tm, tr = tm.split(
+                    left_inds=inds[:i],
+                    get='tensors',
+                    rtags=site_tag_id.format(i),
+                    **split_opts
+                )
+                yield tr
+            tm.add_tag(site_tag_id.format(0))
+            yield tm
 
-        tn = TensorNetwork(gen_tensors())
-        return cls.from_TN(tn, cyclic=False, L=L,
-                           site_ind_id=site_ind_id,
-                           site_tag_id=site_tag_id)
+        # the reverse is purely asthetic so the tensors are stored in the
+        # TN dictionary in the same order as the sites
+        ts = tuple(gen_tensors())[::-1]
+
+        mps = TensorNetwork(ts)
+        # cast as correct TN class
+        return mps.view_as_(
+            cls,
+            L=L,
+            cyclic=False,
+            site_ind_id=site_ind_id,
+            site_tag_id=site_tag_id,
+        )
 
     def add_MPS(self, other, inplace=False, compress=False, **compress_opts):
         """Add another MatrixProductState to this one.
