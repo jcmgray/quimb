@@ -58,11 +58,24 @@ class TestMatrixProductState:
         assert_allclose(z3, z7)
 
     def test_from_dense(self):
-        psi = qu.rand_ket(2**8)
-        mps = MatrixProductState.from_dense(psi, dims=[2] * 8)
-        assert mps.tags == oset(f'I{i}' for i in range(8))
-        assert mps.site_inds == tuple(f'k{i}' for i in range(8))
-        assert mps.L == 8
+        L = 8
+        psi = qu.rand_ket(2**L)
+        mps = MatrixProductState.from_dense(psi, dims=[2] * L)
+        assert mps.tags == oset(f'I{i}' for i in range(L))
+        assert mps.site_inds == tuple(f'k{i}' for i in range(L))
+        assert mps.L == L
+        assert mps.bond_sizes() == [2, 4, 8, 16, 8, 4, 2]
+        mpod = mps.to_dense()
+        assert qu.expec(mpod, psi) == pytest.approx(1)
+
+    def test_from_dense_low_rank(self):
+        L = 6
+        psi = qu.ghz_state(L)
+        mps = MatrixProductState.from_dense(psi, dims=[2] * L)
+        assert mps.tags == oset(f'I{i}' for i in range(L))
+        assert mps.site_inds == tuple(f'k{i}' for i in range(L))
+        assert mps.L == L
+        assert mps.bond_sizes() == [2, 2, 2, 2, 2]
         mpod = mps.to_dense()
         assert qu.expec(mpod, psi) == pytest.approx(1)
 
