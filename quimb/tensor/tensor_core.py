@@ -52,7 +52,8 @@ def oset_union(xs):
 
 
 def oset_intersection(xs):
-    return functools.reduce(operator.and_, xs)
+    x0, *xs = xs
+    return x0.intersection(*xs)
 
 
 def tags_to_oset(tags):
