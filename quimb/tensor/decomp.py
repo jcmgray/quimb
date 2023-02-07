@@ -20,7 +20,7 @@ from autoray import (
     reshape,
 )
 
-from ..core import njit, generated_jit
+from ..core import njit
 from ..linalg import base_linalg
 from ..linalg import rand_linalg
 
@@ -82,22 +82,15 @@ def sgn(x):
     """Get the 'sign' of ``x``, such that ``x / sgn(x)`` is real and
     non-negative.
     """
-    return x / (do("abs", x) + (x == 0.0))
+    x0 = (x == 0.0)
+    return (x + x0) / (do("abs", x) + x0)
 
 
 @sgn.register("numpy")
-@generated_jit
+@njit  # pragma: no cover
 def sgn_numba(x):
-    from numba import types
-
-    if hasattr(x, "dtype"):
-        dtype = x.dtype
-    else:
-        dtype = x
-    if isinstance(dtype, types.Complex):
-        return lambda x: x / (np.abs(x) + (x == 0.0))
-    else:
-        return lambda x: np.sign(x) + (x == 0.0)
+    x0 = (x == 0.0)
+    return (x + x0) / (np.abs(x) + x0)
 
 
 def _trim_and_renorm_svd_result(

@@ -46,6 +46,8 @@ v1.4.3 (unreleased)
 
 **Bug fixes:**
 
+- fix :func:`~quimb.tensor.decomp.qr_stabilized` bug for strictly upper
+  triangular R factors.
 
 .. _whats-new.1.4.2:
 
