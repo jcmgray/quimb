@@ -15,7 +15,7 @@ def test_sgn_convention():
     assert sgn(0.0 + 0.0j) == 1
     assert sgn(1.0 + 2.0j) != 1
     assert sgn(1.0 + 2.0j) != -1
-    assert abs(sgn(1.0 + 2.0j)) == 1
+    assert abs(sgn(1.0 + 2.0j)) == pytest.approx(1)
 
 
 @pytest.mark.parametrize('dtype', [
