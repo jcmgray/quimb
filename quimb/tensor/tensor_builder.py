@@ -2059,6 +2059,8 @@ def TN_dimer_covering_from_edges(
 
 
 def clause_negmask(clause):
+    """Encode a clause as a single integer ``m``.
+    """
     return int("".join("0" if x > 0 else "1" for x in clause), 2)
 
 
@@ -2073,37 +2075,39 @@ def or_clause_data(ndim, m=0, dtype=float, q=2):
     return t
 
 
-def or_clause_tensor(ndim, m, inds, tags=None):
+def or_clause_tensor(ndim, m, inds, tags=None, dtype='float64'):
     """Get the tensor representing satisfiability of ``ndim`` clauses with
     unsatisfied condition encoded in ``m`` labelled by ``inds`` and ``tags``.
     """
-    data = or_clause_data(ndim, m=m)
+    data = or_clause_data(ndim, m=m, dtype=dtype)
     return Tensor(data=data, inds=inds, tags=tags)
 
 
-def or_clause_mps_tensors(ndim, m, inds, tags=None):
+def or_clause_mps_tensors(ndim, m, inds, tags=None, dtype='float64'):
     """Get the set of MPS tensors representing satisfiability of ``ndim``
     clauses with unsatisfied condition encoded in ``m`` labelled by ``inds``
     and ``tags``.
     """
-    mps = MPS_computational_state("+" * ndim, tags=tags) * (
-        2 ** (ndim / 2)
-    ) - MPS_computational_state(f"{m:0>{ndim}b}", tags=tags)
+    mps = (
+        MPS_computational_state("+" * ndim, tags=tags, dtype=dtype)
+        * (2 ** (ndim / 2))
+        - MPS_computational_state(f"{m:0>{ndim}b}", tags=tags, dtype=dtype)
+    )
     mps.reindex_({mps.site_ind(i): ind for i, ind in enumerate(inds)})
     return mps.tensors
 
 
 @functools.lru_cache(2**10)
-def or_clause_parafac_data(ndim, m):
+def or_clause_parafac_data(ndim, m, dtype='float64'):
     """Get the set of PARAFAC arrays representing satisfiability of ``ndim``
     clauses with unsatisfied condition encoded in ``m``.
     """
     inds = [f"k{i}" for i in range(ndim)]
     bond = "b"
 
-    pfc_ones = np.ones((2, 1))
-    pfc_up = np.array([[1.0], [0.0]])
-    pfc_dn = np.array([[0.0], [1.0]])
+    pfc_ones = np.ones((2, 1), dtype=dtype)
+    pfc_up = np.array([[1], [0]], dtype=dtype)
+    pfc_dn = np.array([[0], [1]], dtype=dtype)
 
     ts_ones = [Tensor(data=pfc_ones, inds=[ix, bond]) for ix in inds]
 
@@ -2123,7 +2127,7 @@ def or_clause_parafac_data(ndim, m):
     return tuple(t.data for t in ts)
 
 
-def clause_parafac_tensors(ndim, m, inds, tags=None):
+def clause_parafac_tensors(ndim, m, inds, tags=None, dtype='float64'):
     """Get the set of PARAFAC tensors representing satisfiability of ``ndim``
     clauses with unsatisfied condition encoded in ``m`` labelled by ``inds``
     and ``tags``.
@@ -2131,11 +2135,212 @@ def clause_parafac_tensors(ndim, m, inds, tags=None):
     bond = rand_uuid()
     return [
         Tensor(x, inds=[ix, bond], tags=tags)
-        for x, ix in zip(or_clause_parafac_data(ndim, m), inds)
+        for x, ix in zip(or_clause_parafac_data(ndim, m, dtype), inds)
     ]
 
 
-def HTN_from_cnf(fname, mode="parafac"):
+def HTN_from_clauses(
+    clauses,
+    weights=None,
+    mode='parafac',
+    dtype='float64',
+    clause_tag_id="CLAUSE{}",
+    var_ind_id="var{}",
+    weight_tag_id="WEIGHT{}",
+):
+    """Given a list of clauses, create a hyper tensor network, with a single
+    hyper index for each variable, and single tensor or tensor decomposition
+    for each clause. If weights are given, there will also be a single tensor
+    for each non-trivially weighted variable.
+
+    Parameters
+    ----------
+    clauses : sequence of tuple[int]
+        The clauses as a sequence of tuples of integers. Each integer
+        represents a variable, and the sign indicates whether it is negated.
+        The variables thus must be non-zero integers.
+    weights : dict[int, float], optional
+        The weights for each variable. Each key should be a signed variable
+        integer, such that relative weights for a variable ``v`` are
+        ``(weights[-v], weights[v])``. If only one is given of this pair, the
+        other is assumed to sum to 1. If a variable is not supplied, or
+        ``weights=None``, then both weights are assumed to be 1 and no tensor
+        is created for the variable.
+    mode : {'parafac', 'mps', 'dense', int}, optional
+        How to represent the clauses:
+
+            * 'parafac' - `N` rank-2 tensors connected by a single hyper index.
+              You could further call :meth:`hyperinds_resolve` for more options
+              to convert the hyper index into a (decomposed) COPY-tensor.
+            * 'mps' - `N` rank-3 tensors connected along a 1D line.
+            * 'dense' - contract the hyper index.
+            * int - use the 'parafac' mode, but only if the length of a clause
+              is larger than this threshold.
+
+        Note that variables are always represented by a single (hyper) index,
+        which is like an implicit PARAFAC decomposition.
+    dtype : str
+        The data type of the tensors.
+    clause_tag_id : str
+        The tag to use for the clause tensors. The tag will be formatted with
+        the clause index.
+    var_ind_id : str
+        The index to use for the variable tensors. The index will be formatted
+        with the variable index.
+    weight_tag_id : str
+        The tag to use for the weight tensors. The tag will be formatted with
+        the variable index.
+
+    Returns
+    -------
+    htn : TensorNetwork
+    """
+    ts = []
+
+    for c, clause in enumerate(clauses):
+
+        ndim = len(clause)
+        m = clause_negmask(clause)
+        inds = [var_ind_id.format(abs(var)) for var in clause]
+        tag = clause_tag_id.format(c)
+
+        if (
+            # parafac mode
+            (mode == "parafac" and ndim > 2) or
+            # parafac above cutoff size mode
+            (isinstance(mode, int) and ndim > mode)
+        ):
+            ts.extend(clause_parafac_tensors(ndim, m, inds, tag, dtype))
+        elif (
+            # mps mode
+            (mode == "mps") and
+            # only makes sense for 3 or more tensors
+            (ndim >= 3)
+        ):
+            ts.extend(or_clause_mps_tensors(ndim, m, inds, tag, dtype))
+        else:
+            # dense
+            ts.append(or_clause_tensor(ndim, m, inds, tag, dtype))
+
+    if weights is not None:
+        weights = dict(weights)
+        while weights:
+            sv, w = weights.popitem()
+            if sv > 0:
+                wp = w
+                # if negative weight not present, use 1 - positive weight
+                wm = weights.pop(-sv, 1 - wp)
+            else:
+                wm = w
+                # if positive weight not present, use 1 - negative weight
+                wp = weights.pop(-sv, 1 - wm)
+
+            if (wm, wp) == (1, 1):
+                # not needed
+                continue
+
+            # handle weights as 1D tensor connected to that variable only
+            v = abs(sv)
+            data = np.array([wm, wp], dtype=dtype)
+            inds = [var_ind_id.format(v)]
+            tags = [weight_tag_id.format(v)]
+            ts.append(Tensor(data=data, inds=inds, tags=tags))
+
+    return TensorNetwork(ts, virtual=True)
+
+
+def cnf_file_parse(fname):
+    """Parse a DIMACS style 'cnf' file into a list of clauses, and possibly a
+    dictionary of weights. The weights, if present, can be specified either as:
+
+        - (CACHET format): a line per weight like ``w {signed_var} {weight}``,
+          where ``signed_var`` is an integer whose sign specifies the sign of
+          the weight being set.
+        - (MC2021 competition format): the same as above, but with each line
+          specified as ``c p weight {signed_var} {weight}``.
+        - (MINIC2D format): a single line of the form
+          ``c weights {wp_1} {wm_1} {wp_2} {wm_2}... ``,   where ``wp_i`` and
+          ``wn_i`` are the positive and negative weights for variable ``i``.
+          Weights specified this way are overriden by the previous two formats.
+
+    Parameters
+    ----------
+    fname : str
+        Path to a '.cnf' or '.wcnf' file.
+
+    Returns
+    -------
+    instance : dict
+    """
+    clauses = []
+    weights = {}
+    k = float('-inf')
+
+    with open(fname, "r") as f:
+        for line in f:
+            args = line.split()
+
+            # global info, just record
+            if args[0] == "p":
+                # args[1] specifies task
+                num_variables = int(args[2])
+                num_clauses = int(args[3])
+                continue
+
+            if args[:2] == ["c", "weights"]:
+                # MINIC2D weight format, all variable weights specified in
+                # pairs, on a single line
+                for v, (wp, wm) in enumerate(zip(args[2::2], args[3::2])):
+                    weights[-(v + 1)] = float(wm)
+                    weights[+(v + 1)] = float(wp)
+                continue
+
+            # translate mc2021 style weight to normal
+            if args[:3] == ["c", "p", "weight"]:
+                args = ("w", *args[3:5])
+
+            if args[0] == "w":
+                # CACHET / MCC weight format, each weight a separate line, and
+                # only the positive or negative weight is specified
+                sgn_var, w = args[1:]
+
+                if w == "-1":
+                    # equal weighting as (1, 1): can ignore
+                    continue
+
+                weights[int(sgn_var)] = float(w)
+                continue
+
+            # ignore empty lines, other comments and info line
+            if (not args) or (args == ["0"]) or (args[0][0] in "c%"):
+                continue
+
+            # clause tensor, drop last '0' (endline marker) and empty strings
+            if args[-1] != "0":
+                raise ValueError(f"Invalid clause: {line}")
+
+            clause = tuple(map(int, filter(None, args[:-1])))
+            k = max(k, len(clause))
+            clauses.append(clause)
+
+    return {
+        "num_variables": num_variables,
+        "num_clauses": num_clauses,
+        "clauses": clauses,
+        "weights": weights,
+        "k": k,
+    }
+
+
+def HTN_from_cnf(
+    fname,
+    mode='parafac',
+    dtype='float64',
+    clause_tag_id="CLAUSE{}",
+    var_ind_id="var{}",
+    weight_tag_id="WEIGHT{}",
+    **kwargs,
+):
     """Create a hyper tensor network from a '.cnf' or '.wcnf' file - i.e. a
     model counting or weighted model counting instance specification.
 
@@ -2154,105 +2359,171 @@ def HTN_from_cnf(fname, mode="parafac"):
             * int - use the 'parafac' mode, but only if the length of a clause
               is larger than this threshold.
 
+    dtype : str or dtype, optional
+        Data type of the tensors.
+    clause_tag_id : str, optional
+        Format string for clause tags.
+    var_ind_id : str, optional
+        Format string for variable indices.
+    weight_tag_id : str, optional
+        Format string for weight tags.
+    kwargs
+        Additional keyword arguments passed to :func:`HTN_from_clauses`.
+
     Returns
     -------
     htn : TensorNetwork
     """
+    instance = cnf_file_parse(fname)
+    return HTN_from_clauses(
+        clauses=instance["clauses"],
+        weights=instance["weights"],
+        mode=mode,
+        dtype=dtype,
+        clause_tag_id=clause_tag_id,
+        var_ind_id=var_ind_id,
+        weight_tag_id=weight_tag_id,
+        **kwargs
+    )
 
-    ts = []
-    weights = {}
-    weighted = set()
-    clause_counter = 1
 
-    with open(fname, "r") as f:
-        for line in f:
-            args = line.split()
+def random_ksat_instance(
+    k,
+    num_variables,
+    num_clauses=None,
+    alpha=None,
+    seed=None,
+    allow_repeat_variables=False,
+):
+    """Create a random k-SAT instance.
 
-            # global info, don't need
-            if args[0] == "p":
-                # num_vars = int(args[2])
-                # num_clauses = int(args[3])
-                continue
+    Parameters
+    ----------
+    k : int
+        Number of variables per clause.
+    num_variables : int
+        Number of variables in the instance.
+    num_clauses : int, optional
+        Number of clauses in the instance. If not specified, will be
+        determined from `alpha`.
+    alpha : float, optional
+        If `num_clauses` is not directly specified then the average number of
+        clauses *per variable*. Taken as a Poisson parameter. Either this or
+        `num_clauses` must be specified.
+    seed : int, optional
+        Random seed.
+    allow_repeat_variables : bool, optional
+        Whether to allow the same variable to appear multiple times in a
+        single clause.
 
-            if args[:2] == ["c", "weights"]:
-                # MINIC2D weight format, all variable weights specified in
-                # pairs, on a single line
-                for v, (wp, wm) in enumerate(zip(args[2::2], args[3::2])):
-                    weights[str(v + 1), "+"] = float(wp)
-                    weights[str(v + 1), "-"] = float(wm)
-                    weighted.add(str(v + 1))
-                continue
+    Returns
+    -------
+    instance : dict
+        Dictionary with keys 'num_variables', 'num_clauses', 'clauses'. The
+        'clauses' key contains a list of tuples, each tuple representing a
+        clause. Within each tuple, each element is an integer representing a
+        variable, with the sign of the integer representing the sign of the
+        variable in the clause.
+    """
+    rng = np.random.default_rng(seed)
+    all_vars = np.arange(1, num_variables + 1)
 
-            # translate mc2021 style weight to normal
-            if args[:3] == ["c", "p", "weight"]:
-                args = ("w", *args[3:5])
+    if alpha is not None:
+        if num_clauses is not None:
+            raise ValueError("Can't' specify both `num_clauses` and `alpha`.")
+        num_clauses = rng.poisson(alpha * num_variables)
+    elif num_clauses is None:
+        raise ValueError("Must specify either `num_clauses` or `alpha`.")
 
-            if args[0] == "w":
-                # CACHET / MCC weight format, each weight a separate line, and
-                # only the positive or negative weight is specified
-                sgn_var, w = args[1:]
+    clauses = []
+    for _ in range(num_clauses):
+        vs = rng.choice(all_vars, size=k, replace=allow_repeat_variables)
+        sgns = rng.choice([-1, 1], size=k)
+        clauses.append(tuple(s * v for s, v in zip(sgns, vs)))
 
-                if w == "-1":
-                    # equal weighting as (1, 1): can ignore
-                    continue
+    return {
+        "num_variables": num_variables,
+        "num_clauses": num_clauses,
+        "clauses": clauses,
+        "k": k,
+    }
 
-                sgn_var = int(sgn_var)
-                sgn = "-" if sgn_var < 0 else "+"
-                var = str(abs(sgn_var))
-                w = float(w)
-                weights[var, sgn] = w
-                weighted.add(var)
-                continue
 
-            # ignore empty lines, other comments and info line
-            if (not args) or (args == ["0"]) or (args[0][0] in "c%"):
-                continue
+def HTN_random_ksat(
+    k,
+    num_variables,
+    num_clauses=None,
+    alpha=None,
+    seed=None,
+    allow_repeat_variables=False,
+    mode='parafac',
+    dtype='float64',
+    clause_tag_id='CLAUSE{}',
+    variable_ind_id='var{}',
+):
+    """Create a random k-SAT instance encoded as a hyper tensor network.
 
-            # clause tensor, drop last '0' (endline marker) and empty strings
-            if args[-1] != "0":
-                raise ValueError(f"Invalid clause: {line}")
+    Parameters
+    ----------
+    k : int
+        Number of variables per clause.
+    num_variables : int
+        Number of variables in the instance.
+    num_clauses : int, optional
+        Number of clauses in the instance. If not specified, will be
+        determined from `alpha`.
+    alpha : float, optional
+        If `num_clauses` is not directly specified then the average number of
+        clauses *per variable*. Taken as a Poisson parameter. Either this or
+        `num_clauses` must be specified.
+    seed : int, optional
+        Random seed.
+    allow_repeat_variables : bool, optional
+        Whether to allow the same variable to appear multiple times in a
+        single clause.
+    mode : {'parafac', 'mps', 'dense', int}, optional
+        How to represent the clauses:
 
-            clause = tuple(map(int, filter(None, args[:-1])))
+            * 'parafac' - `N` rank-2 tensors connected by a single hyper index.
+              You could further call :meth:`hyperinds_resolve` for more options
+              to convert the hyper index into a (decomposed) COPY-tensor.
+            * 'mps' - `N` rank-3 tensors connected along a 1D line.
+            * 'dense' - contract the hyper index.
+            * int - use the 'parafac' mode, but only if the length of a clause
+              is larger than this threshold.
 
-            # encode the OR statement with possible negations as int
-            m = clause_negmask(clause)
-            inds = [str(abs(var)) for var in clause]
-            tag = f"CLAUSE{clause_counter}"
-            clause_counter += 1
+        Note that variables are always represented by a single (hyper) index,
+        which is like an implicit PARAFAC decomposition.
+    dtype : str, optional
+        Data type of the tensors.
+    clause_tag_id : str, optional
+        Format string for clause tags. Should contain a single `{}` which
+        will be replaced by the clause number.
+    variable_ind_id : str, optional
+        Format string for variable indices. Should contain a single `{}` which
+        will be replaced by the variable number.
 
-            if (
-                # parafac mode
-                (mode == "parafac" and len(inds) > 2)
-                or
-                # parafac above cutoff size mode
-                (isinstance(mode, int) and len(inds) > mode)
-            ):
-                ts.extend(clause_parafac_tensors(len(inds), m, inds, tag))
+    Returns
+    -------
+    TensorNetwork
+    """
 
-            elif mode == "mps" and len(inds) > 2:
-                ts.extend(or_clause_mps_tensors(len(inds), m, inds, tag))
+    instance = random_ksat_instance(
+        k,
+        num_variables,
+        num_clauses=num_clauses,
+        alpha=alpha,
+        seed=seed,
+        allow_repeat_variables=allow_repeat_variables,
+    )
 
-            else:
-                # dense
-                ts.append(or_clause_tensor(len(inds), m, inds, tag))
-
-    # handle weights as rank one tensors connected to that index only
-    for var in sorted(weighted):
-        wp_specified = (var, "+") in weights
-        wm_specified = (var, "-") in weights
-
-        if wp_specified and wm_specified:
-            wp, wm = weights[var, "+"], weights[var, "-"]
-        elif wp_specified:
-            wp = weights[var, "+"]
-            wm = 1 - wp
-        elif wm_specified:
-            wm = weights[var, "-"]
-            wp = 1 - wm
-
-        ts.append(Tensor([wm, wp], inds=[var], tags=[f"VAR{var}"]))
-
-    return TensorNetwork(ts, virtual=True)
+    return HTN_from_clauses(
+        instance['clauses'],
+        mode=mode,
+        dtype=dtype,
+        clause_tag_id=clause_tag_id,
+        var_ind_id=variable_ind_id,
+    )
 
 
 # --------------------------------------------------------------------------- #

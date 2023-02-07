@@ -13,14 +13,15 @@
 # import os
 # import sys
 # sys.path.insert(0, os.path.abspath('.'))
-import sys, os
+import sys
+import os
 sys.path.append(os.path.abspath("./_pygments"))
 
 
 # -- Project information -----------------------------------------------------
 
 project = 'quimb'
-copyright = '2022, Johnnie Gray'
+copyright = '2015-2023, Johnnie Gray'
 author = 'Johnnie Gray'
 
 # The full version, including alpha/beta/rc tags
