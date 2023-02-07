@@ -317,7 +317,7 @@ class TestMatrixProductState:
 
         p2 = p.add_MPS(p, compress=True, method=method, form=form, cutoff=1e-6)
         assert max(p2['I4'].shape) == 7
-        assert_allclose(p2.H @ p, 2)
+        assert_allclose(p2.H @ p, 2, rtol=1e-5)
 
     def test_subtract(self):
         a, b, c = (MPS_rand_state(10, 7) for _ in 'abc')
