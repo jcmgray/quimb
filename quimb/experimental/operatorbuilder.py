@@ -873,8 +873,8 @@ class SparseOperatorBuilder:
             _, railb = node_b
             Wts[rega][raila, railb, :, :] = mat
 
-        Wts[0] = Wts[0][0, :, :, :]
-        Wts[-1] = Wts[-1][:, 0, :, :]
+        Wts[0] = Wts[0].sum(axis=0)
+        Wts[-1] = Wts[-1].sum(axis=1)
 
         return qtn.MatrixProductOperator(Wts, **mpo_opts)
 
