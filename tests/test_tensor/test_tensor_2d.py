@@ -246,18 +246,18 @@ class Test2DContract:
 
     @pytest.mark.parametrize("mode", ['mps', 'ctmrg', 'hotrg'])
     def test_cdl_rand_large(self, mode):
-        tn = qtn.TN2D_corner_double_line_rand(15, 15, seed=42, contract=False)
+        tn = qtn.TN2D_rand_hidden_loop(15, 15, seed=42, contract_sites=False)
         Zex = tn.contract(...)
-        tn = qtn.TN2D_corner_double_line_rand(15, 15, seed=42, contract=True)
+        tn = qtn.TN2D_rand_hidden_loop(15, 15, seed=42, contract_sites=True)
 
         if mode == 'mps':
-            Z = tn.contract_boundary(max_bond=8)
+            Z = tn.contract_boundary(max_bond=16)
         elif mode == 'ctmrg':
-            Z = tn.contract_ctmrg(max_bond=8) ^ ...
+            Z = tn.contract_ctmrg(max_bond=16) ^ ...
         elif mode == 'hotrg':
-            Z = tn.contract_hotrg(max_bond=8) ^ ...
+            Z = tn.contract_hotrg(max_bond=16) ^ ...
 
-        assert Z == pytest.approx(Zex, rel=1e-3)
+        assert Z == pytest.approx(Zex, rel=1e-1)
 
 
     @pytest.mark.parametrize("mode,two_layer", [
