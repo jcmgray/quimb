@@ -42,6 +42,7 @@ v1.4.3 (unreleased)
   construction time.
 - add ``'lu'``, ``'polar_left'`` and ``'polar_right'`` methods to
   :func:`~quimb.tensor.tensor_core.tensor_split`.
+- add experimental arbitrary hamilotonian MPO building
 
 
 **Bug fixes:**

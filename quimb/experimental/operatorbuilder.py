@@ -118,6 +118,14 @@ class HilbertSpace:
         self._mapping_inv = dict(enumerate(self._sites))
         self._mapping = {s: i for i, s in self._mapping_inv.items()}
 
+    def set_ordering(self, order=None):
+        if (order is not None) and (not callable(order)):
+            order = order.index
+        self._order = order
+        self._sites = tuple(sorted(self._sites, key=self._order))
+        self._mapping_inv = dict(enumerate(self._sites))
+        self._mapping = {s: i for i, s in self._mapping_inv.items()}
+
     @classmethod
     def from_edges(cls, edges, order=None):
         """Construct a HilbertSpace from a set of edges, which are pairs of
@@ -264,10 +272,7 @@ class HilbertSpace:
         set.
         """
         if k is None:
-            return {
-                site: np.random.randint(2)
-                for site in self.sites
-            }
+            return {site: np.random.randint(2) for site in self.sites}
         r = np.random.randint(self.get_size(k))
         b = rank_to_bit(r, self.nsites, k)
         return self.bit_to_config(b)
@@ -313,6 +318,7 @@ class HilbertSpace:
 
 
 _OPMAP = {
+    "I": {0: (0, 1.0), 1: (1, 1.0)},
     # pauli matrices
     "x": {0: (1, 1.0), 1: (0, 1.0)},
     "y": {0: (1, 1.0j), 1: (0, -1.0j)},
@@ -333,7 +339,7 @@ _OPMAP = {
 @functools.lru_cache(maxsize=None)
 def get_mat(op, dtype=None):
     if dtype is None:
-        if op in {'y', 'sy'}:
+        if op in {"y", "sy"}:
             dtype = np.complex128
         else:
             dtype = np.float64
@@ -443,9 +449,8 @@ class SparseOperatorBuilder:
         self._terms.append((coeff, tuple(ops), *sites))
         for site in sites:
             if (
-                (self._hilbert_space is not None) and not
-                self._hilbert_space.has_site(site)
-            ):
+                self._hilbert_space is not None
+            ) and not self._hilbert_space.has_site(site):
                 raise ValueError(f"Site {site} not in the Hilbert space.")
             self._sites_used.add(site)
 
@@ -458,6 +463,9 @@ class SparseOperatorBuilder:
         strings to all creation and annihilation operators, and then
         simplifying the resulting terms.
         """
+        # TODO: check if transform has been applied already
+        # TODO: store untransformed terms, so we can re-order at will
+
         new_terms = []
 
         for coeff, old_ops, *sites in self._terms:
@@ -470,6 +478,7 @@ class SparseOperatorBuilder:
                     reg = self.site_to_reg(site)
                     if op in {"+", "-"}:
                         # apply z everywhere below site
+                        # TODO: implement a 'species' filter
                         for i in range(reg):
                             jw_strings[i] += "z"
                     # terminate with the actual operator
@@ -482,7 +491,17 @@ class SparseOperatorBuilder:
                         jw_strings.replace("zz", "")
                         .replace("+z", "+")
                         .replace("z-", "-")
+                        # the following generate 'm'inus signs
+                        .replace("z+", "m+")
+                        .replace("-z", "m-")
                     )
+
+                    num_m = jw_simplified.count("m")
+                    if num_m:
+                        jw_simplified = jw_simplified.replace("m", "")
+                        if num_m % 2:
+                            coeff = -coeff
+
                     if jw_simplified:
                         # keep only non identity operator terms
                         new_ops.append(jw_simplified)
@@ -556,6 +575,7 @@ class SparseOperatorBuilder:
         scipy.sparse matrix
         """
         import scipy.sparse as sp
+
         coo, cis, cjs, N = self.build_coo_data(*k, parallel=parallel)
         A = sp.coo_matrix((coo, (cis, cjs)), shape=(N, N))
         if stype != "coo":
@@ -618,14 +638,245 @@ class SparseOperatorBuilder:
         return [bit_to_config(bj) for bj in bjs], coeffs
 
     def show(self):
-        """Print an ascii representation of the terms in this operator.
-        """
+        """Print an ascii representation of the terms in this operator."""
         print(self)
         for t, (coeff, ops, *sites) in enumerate(self.terms):
-            s = ['. '] * self.nsites
+            s = [". "] * self.nsites
             for op, site in zip(ops, sites):
                 s[self.site_to_reg(site)] = f"{op:<2}"
             print("".join(s), f"{coeff:+}")
+
+    def build_state_machine_greedy(self):
+        # XXX: optimal method : https://arxiv.org/abs/2006.02056
+
+        import networkx as nx
+
+        # - nodes of the state machine are a 2D grid of (register, 'rail'),
+        #   with the maximum number of rails giving the eventual bond dimension
+        # - there are N + 1 registers for N sites
+        # - each edge from (r, i) to (r + 1, j) represents a term that will be
+        #   placed in the rth MPO tensor at entry like W[i, j, :, :] = op
+        # - each node has either a single inwards or outwards edge
+        G = nx.DiGraph()
+        G.add_node((0, 0))
+
+        # count how many rails are at each register
+        num_rails = [1] + [0] * self.nsites
+
+        def new_edge(a, b):
+            # need to track which terms pass through this edge so we can
+            # place the coefficient somewhere unique at the end
+            G.add_edge(a, b, op=op, weight=1, unique_term=t)
+
+        def check_right():
+            # check if can **right share**
+            # - check all existing potential next nodes
+            # - current op must match or not exist
+            # - right strings must match
+            # - must be single output node
+            for rail in range(num_rails[reg + 1]):
+                cand_node = (reg + 1, rail)
+                if G.out_degree(cand_node) > 1:
+                    continue
+
+                if G.nodes[cand_node]["out_string"] != string[reg + 1 :]:
+                    continue
+
+                e = (current_node, cand_node)
+                if e not in G.edges:
+                    new_edge(current_node, cand_node)
+                    return cand_node
+                else:
+                    if G.edges[e]["op"] != op:
+                        continue
+                    G.edges[e]["weight"] += 1
+                    G.edges[e]["unique_term"] = None
+                    return cand_node
+
+                # XXX: if we can right share, don't need to do anything
+                # more since whole remaining string is shared?
+
+        def check_left():
+            # check if can **left share**
+            # - check all out edges
+            # - current op must match AND
+            # - must be single input node
+            for e in G.edges(current_node):
+                cand_node = e[1]
+                if G.in_degree(cand_node) <= 1:
+                    if G.edges[e]["op"] == op:
+                        G.edges[e]["weight"] += 1
+                        G.edges[e]["unique_term"] = None
+                        return cand_node
+
+        def create_new():
+            # create a new rail at the next register
+            next_node = (reg + 1, num_rails[reg + 1])
+            num_rails[reg + 1] += 1
+            new_edge(current_node, next_node)
+            return next_node
+
+        # each term guaranteed has a unique edge somewhere, which we can place
+        # the coefficient on later
+        coeffs_to_place = {}
+
+        for t, (coeff, ops, *sites) in enumerate(self.terms):
+            # build full string for this term including identity ops
+            rmap = {self.site_to_reg(site): op for site, op in zip(sites, ops)}
+            string = tuple(rmap.get(r, "I") for r in range(self.nsites))
+
+            current_node = (0, 0)
+            for reg, op in enumerate(string):
+                cand_node = check_right()
+                if cand_node is not None:
+                    # can share right part of string
+                    current_node = cand_node
+                else:
+                    cand_node = check_left()
+                    if cand_node is not None:
+                        # can share left part of string
+                        current_node = cand_node
+                    else:
+                        # have to create new node
+                        current_node = create_new()
+
+                if G.out_degree(current_node) <= 1:
+                    # record what the right matching string is
+                    G.nodes[current_node]["out_string"] = string[reg + 1 :]
+                else:
+                    G.nodes[current_node]["out_string"] = None
+
+            if coeff != 1:
+                # record that we still need to place coeff somewhere
+                coeffs_to_place[t] = coeff
+
+        for _, _, data in G.edges(data=True):
+            data["coeff"] = coeffs_to_place.pop(data["unique_term"], None)
+
+        if coeffs_to_place:
+            raise ValueError("Failed to place all coefficients.")
+
+        G.graph["nsites"] = self.nsites
+        G.graph["num_rails"] = tuple(num_rails)
+        G.graph["max_num_rails"] = max(num_rails)
+
+        return G
+
+    def draw_state_machine(
+        self,
+        method="greedy",
+        figsize="auto",
+    ):
+        import math
+        from matplotlib import pyplot as plt
+        from quimb.tensor.drawing import auto_colors
+
+        if method == "greedy":
+            G = self.build_state_machine_greedy()
+        else:
+            raise ValueError(f"Unknown method {method}")
+
+        def labelled_arrow(ax, p1, p2, label, color, width):
+            angle = math.atan2(p2[1] - p1[1], p2[0] - p1[0])
+            ax.annotate(
+                "",
+                xy=p2,
+                xycoords="data",
+                xytext=p1,
+                textcoords="data",
+                arrowprops=dict(
+                    arrowstyle="->",
+                    color=color,
+                    alpha=0.75,
+                    linewidth=width,
+                ),
+            )
+            p_middle = (p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2
+            ax.text(
+                *p_middle,
+                label,
+                color=color,
+                ha="center",
+                va="center",
+                rotation=angle * 180 / math.pi,
+                alpha=1.0,
+                transform_rotates_text=True,
+            )
+
+        if figsize == "auto":
+            width = G.graph["nsites"]
+            # maximum number of nodes on any rail
+            height = G.graph["max_num_rails"] / 2
+            figsize = (width, height)
+
+        fig, ax = plt.subplots(figsize=figsize)
+        fig.patch.set_alpha(0.0)
+        ax.set_axis_off()
+        ax.set_xlim(-0.5, G.graph["nsites"] + 0.5)
+        ax.set_ylim(-0.5, G.graph["max_num_rails"] + 0.5)
+
+        # draw each edge as a colored, labelled node
+        ops = sorted(
+            {data["op"] for _, _, data in G.edges(data=True)} - {"I"}, key=str
+        )
+        all_colors = auto_colors(len(ops))
+        colors = {op: c for op, c in zip(ops, all_colors)}
+        colors["I"] = "grey"
+        for n1, n2, data in G.edges(data=True):
+            color = colors[data["op"]]
+            width = math.log2(1 + data["weight"])
+            label = data["op"]
+            if data["coeff"] is not None:
+                label += f" * {data['coeff']}"
+            label += "\n"
+            labelled_arrow(ax, n1, n2, label, color, width)
+
+        # label which MPO site along the bottom
+        for i in range(G.graph["nsites"]):
+            ax.text(
+                i + 0.5,
+                -1.0,
+                "$W_{" + str(i) + "}$",
+                ha="center",
+                va="center",
+                color=(0.5, 0.5, 0.5),
+                fontsize=12,
+            )
+
+        plt.show()
+        plt.close(fig)
+
+    def build_mpo(self, method="greedy", **mpo_opts):
+        import numpy as np
+        import quimb as qu
+        import quimb.tensor as qtn
+
+        if method == "greedy":
+            G = self.build_state_machine_greedy()
+        else:
+            raise ValueError(f"Unknown method {method}.")
+
+        Wts = [
+            np.zeros((dl, dr, 2, 2), dtype=float)
+            for dl, dr in qu.utils.pairwise(G.graph["num_rails"])
+        ]
+
+        for node_a, node_b, data in G.edges(data=True):
+            op = data["op"]
+            coeff = data["coeff"]
+            if coeff is not None:
+                mat = coeff * get_mat(op)
+            else:
+                mat = get_mat(op)
+
+            rega, raila = node_a
+            _, railb = node_b
+            Wts[rega][raila, railb, :, :] = mat
+
+        Wts[0] = Wts[0][0, :, :, :]
+        Wts[-1] = Wts[-1][:, 0, :, :]
+
+        return qtn.MatrixProductOperator(Wts, **mpo_opts)
 
     def __repr__(self):
         return (
@@ -675,7 +926,8 @@ def comb(n, k):
 
 @njit
 def get_all_equal_weight_bits(n, k, dtype=np.int64):
-    """Get an array of all 'bits' (integers), with n bits, and k of them set."""
+    """Get an array of all 'bits' (integers), with n bits, and k of them set.
+    """
     if k == 0:
         return np.array([0], dtype=dtype)
 
@@ -737,19 +989,20 @@ def rank_to_bit(r, n, k):
 def _recursively_fill_flatconfigs(flatconfigs, n, k, c, r):
     c0 = c * (n - k) // n
     # set the entries of the left binary subtree
-    flatconfigs[r: r + c0, -n] = 0
+    flatconfigs[r : r + c0, -n] = 0
     # set the entries of the right binary subtree
-    flatconfigs[r + c0: r + c, -n] = 1
+    flatconfigs[r + c0 : r + c, -n] = 1
     if n > 1:
         # process each subtree recursively
         _recursively_fill_flatconfigs(flatconfigs, n - 1, k, c0, r)
-        _recursively_fill_flatconfigs(flatconfigs, n - 1, k - 1, c - c0, r + c0)
+        _recursively_fill_flatconfigs(
+            flatconfigs, n - 1, k - 1, c - c0, r + c0
+        )
 
 
 @njit
 def get_all_equal_weight_flatconfigs(n, k):
-    """Get every flat configuration of length n with k bits set.
-    """
+    """Get every flat configuration of length n with k bits set."""
     c = comb(n, k)
     flatconfigs = np.empty((c, n), dtype=np.uint8)
     _recursively_fill_flatconfigs(flatconfigs, n, k, c, 0)
@@ -758,13 +1011,13 @@ def get_all_equal_weight_flatconfigs(n, k):
 
 @njit
 def flatconfig_to_bit(flatconfig):
-    """Given a flat configuration, return the corresponding bitstring.
-    """
+    """Given a flat configuration, return the corresponding bitstring."""
     b = 0
     for i, x in enumerate(flatconfig):
         if x:
             b |= 1 << i
     return b
+
 
 @njit
 def flatconfig_to_rank(flatconfig, n, k):
@@ -960,7 +1213,10 @@ def build_coupling(terms, site_to_reg):
                     cij = coeff * cij
 
                 # populate just the term/reg/bit maps we need
-                coupling_map.setdefault(t, {}).setdefault(reg, {})[xi] = (xj, cij)
+                coupling_map.setdefault(t, {}).setdefault(reg, {})[xi] = (
+                    xj,
+                    cij,
+                )
             first = False
 
     return coupling_map
@@ -1038,7 +1294,8 @@ def coupled_bits_numba(bi, coupling_map):
                 # already seed this config - just add coeff
                 loc = bitmap[bj]
                 cijs[loc] += cij
-            except:
+            except Exception:
+                # TODO: check performance of numba exception catching
                 bjs[buf_ptr] = bj
                 cijs[buf_ptr] = cij
                 bitmap[bj] = buf_ptr
@@ -1138,7 +1395,9 @@ def build_coo_numba(bits, coupling_map, parallel=False):
     # can be concentrated in certain ranges and we want each thread to have
     # roughly the same amount of work to do
     fs = [
-        pool.submit(_build_coo_numba_core, bits=bits[i::n_thread_workers], **kws)
+        pool.submit(
+            _build_coo_numba_core, bits=bits[i::n_thread_workers], **kws
+        )
         for i in range(n_thread_workers)
     ]
 
@@ -1161,28 +1420,28 @@ def build_coo_numba(bits, coupling_map, parallel=False):
 
 # -------------------------- specific hamiltonians -------------------------- #
 
+
 def fermi_hubbard_from_edges(edges, t=1.0, U=1.0, mu=0.0):
-    """
-    """
+    """ """
     H = SparseOperatorBuilder()
     sites, edges = parse_edges_to_unique(edges)
 
     if t != 0.0:
         for cooa, coob in edges:
             # hopping
-            for s in ['↑', '↓']:
-                H += (-t, '+-', (s, *cooa), (s, *coob))
-                H += (-t, '+-', (s, *coob), (s, *cooa))
+            for s in ["↑", "↓"]:
+                H += (-t, "+-", (s, *cooa), (s, *coob))
+                H += (-t, "+-", (s, *coob), (s, *cooa))
 
     for coo in sites:
         # interaction
         if U != 0.0:
-            H += (U, 'nn', ('↑', *coo), ('↓', *coo))
+            H += (U, "nn", ("↑", *coo), ("↓", *coo))
 
         # chemical potential
         if mu != 0.0:
-            H += (mu, 'n', ('↑', *coo))
-            H += (mu, 'n', ('↓', *coo))
+            H += (mu, "n", ("↑", *coo))
+            H += (mu, "n", ("↓", *coo))
 
     H.jordan_wigner_transform()
     return H
@@ -1194,21 +1453,20 @@ def fermi_hubbard_spinless_from_edges(edges, t=1.0, mu=0.0):
 
     for cooa, coob in edges:
         # hopping
-        H += (-t, '+-', cooa, coob)
-        H += (-t, '+-', coob, cooa)
+        H += (-t, "+-", cooa, coob)
+        H += (-t, "+-", coob, cooa)
 
     # chemical potential
     if mu != 0.0:
         for coo in sites:
-            H += (mu, 'n', coo)
+            H += (mu, "n", coo)
 
     H.jordan_wigner_transform()
     return H
 
 
 def heisenberg_from_edges(edges, j=1.0, b=0.0, hilbert_space=None):
-    """
-    """
+    """ """
     try:
         jx, jy, jz = j
     except TypeError:
@@ -1223,25 +1481,25 @@ def heisenberg_from_edges(edges, j=1.0, b=0.0, hilbert_space=None):
     sites, edges = parse_edges_to_unique(edges)
 
     for cooa, coob in edges:
-        if (jx == jy):
-            if (jx != 0.0):
-                H += (jx / 2, '+-', cooa, coob)
-                H += (jx / 2, '-+', cooa, coob)
+        if jx == jy:
+            if jx != 0.0:
+                H += (jx / 2, "+-", cooa, coob)
+                H += (jx / 2, "-+", cooa, coob)
         else:
             if jx != 0.0:
-                H += (jx, ('sx', 'sx'), cooa, coob)
+                H += (jx, ("sx", "sx"), cooa, coob)
             if jy != 0.0:
-                H += (jy, ('sy', 'sy'), cooa, coob)
+                H += (jy, ("sy", "sy"), cooa, coob)
 
         if jz != 0.0:
-            H += (j, ('sz', 'sz'), cooa, coob)
+            H += (j, ("sz", "sz"), cooa, coob)
 
     for site in sites:
         if bx != 0.0:
-            H += (bx, ('sx',), site)
+            H += (bx, ("sx",), site)
         if by != 0.0:
-            H += (by, ('sy',), site)
+            H += (by, ("sy",), site)
         if bz != 0.0:
-            H += (bz, ('sz',), site)
+            H += (bz, ("sz",), site)
 
     return H
