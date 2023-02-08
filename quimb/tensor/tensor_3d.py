@@ -15,12 +15,12 @@ from ..utils import progbar as Progbar
 from ..gen.rand import randn, seed_rand
 from . import array_ops as ops
 from .tensor_core import (
-    Tensor,
-    TensorNetwork,
     bonds_size,
     oset,
-    tags_to_oset,
     rand_uuid,
+    tags_to_oset,
+    Tensor,
+    TensorNetwork,
 )
 from .tensor_arbgeom import (
     TensorNetworkGen,
@@ -28,7 +28,7 @@ from .tensor_arbgeom import (
 )
 
 
-def gen_3d_bonds(Lx, Ly, Lz, steppers, coo_filter=None):
+def gen_3d_bonds(Lx, Ly, Lz, steppers=None, coo_filter=None):
     """Convenience function for tiling pairs of bond coordinates on a 3D
     lattice given a function like ``lambda i, j, k: (i + 1, j + 1, k + 1)``.
 
@@ -42,7 +42,8 @@ def gen_3d_bonds(Lx, Ly, Lz, steppers, coo_filter=None):
         The number of z-slices.
     steppers : callable or sequence of callable
         Function(s) that take args ``(i, j, k)`` and generate another
-        coordinate, thus defining a bond.
+        coordinate, thus defining a bond. Only valid steps are taken. If not
+        given, defaults to nearest neighbor bonds.
     coo_filter : callable
         Function that takes args ``(i, j, k)`` and only returns ``True`` if
         this is to be a valid starting coordinate.
@@ -75,6 +76,12 @@ def gen_3d_bonds(Lx, Ly, Lz, steppers, coo_filter=None):
         ((1, 1, 0), (1, 1, 1))
 
     """
+    if steppers is None:
+        steppers = [
+            lambda i, j, k: (i, j, k + 1),
+            lambda i, j, k: (i, j + 1, k),
+            lambda i, j, k: (i + 1, j, k),
+        ]
 
     if callable(steppers):
         steppers = (steppers,)
@@ -85,6 +92,118 @@ def gen_3d_bonds(Lx, Ly, Lz, steppers, coo_filter=None):
                 i2, j2, k2 = stepper(i, j, k)
                 if (0 <= i2 < Lx) and (0 <= j2 < Ly) and (0 <= k2 < Lz):
                     yield (i, j, k), (i2, j2, k2)
+
+
+def gen_3d_plaquette(coo0, steps):
+    """Generate a plaquette at site ``coo0`` by stepping first in ``steps`` and
+    then the reverse steps.
+
+    Parameters
+    ----------
+    coo0 : tuple
+        The coordinate of the first site in the plaquette.
+    steps : tuple
+        The steps to take to generate the plaquette. Each element should be
+        one of ``('x+', 'x-', 'y+', 'y-', 'z+', 'z-')``.
+
+    Yields
+    ------
+    coo : tuple
+        The coordinates of the sites in the plaquette, including the last
+        site which will be the same as the first.
+    """
+    x, y, z = coo0
+    smap = {'+': +1, '-': -1}
+    step_backs = []
+    yield x, y, z
+    for step in steps:
+        d, s = step
+        x, y, z = {
+            'x': (x + smap[s], y, z),
+            'y': (x, y + smap[s], z),
+            'z': (x, y, z + smap[s]),
+        }[d]
+        yield x, y, z
+        step_backs.append(d + '-' if s == '+' else '-')
+    for step in step_backs:
+        d, s = step
+        x, y, z = {
+            'x': (x + smap[s], y, z),
+            'y': (x, y + smap[s], z),
+            'z': (x, y, z + smap[s]),
+        }[d]
+        yield x, y, z
+
+
+def gen_3d_plaquettes(Lx, Ly, Lz, tiling='1'):
+    """Generate a tiling of plaquettes in a cubic 3D lattice.
+
+    Parameters
+    ----------
+    Lx : int
+        The length of the lattice in the x direction.
+    Ly : int
+        The length of the lattice in the y direction.
+    Lz : int
+        The length of the lattice in the z direction.
+    tiling : {'1', '2', '4', 'full'}
+        The tiling to use:
+
+        - '1': plaquettes in a sparse checkerboard pattern, such that each edge
+            is covered by a maximum of one plaquette.
+        - '2': less sparse checkerboard pattern, such that each edge is
+            covered by a maximum of two plaquettes.
+        - '4' or 'full': dense tiling of plaquettes. All bulk edges will
+            be covered four times.
+
+    Yields
+    ------
+    plaquette : tuple[tuple[int]]
+        The coordinates of the sites in each plaquette, including the last
+        site which will be the same as the first.
+    """
+    if isinstance(tiling, int):
+        tiling = str(tiling)
+
+    if tiling == '1':
+        for x, y, z in itertools.product(range(Lx), range(Ly), range(Lz)):
+            if (x % 2 == 0) and (y % 2 == 0) and (x < Lx - 1 and y < Ly - 1):
+                yield tuple(gen_3d_plaquette((x, y, z), ('x+', 'y+')))
+            if (y % 2 == 1) and (z % 2 == 0) and (y < Ly - 1 and z < Lz - 1):
+                yield tuple(gen_3d_plaquette((x, y, z), ('y+', 'z+')))
+            if (z % 2 == 1) and (x % 2 == 1) and (z < Lz - 1 and x < Lx - 1):
+                yield tuple(gen_3d_plaquette((x, y, z), ('z+', 'x+')))
+    elif tiling == '2':
+        for x, y, z in itertools.product(range(Lx), range(Ly), range(Lz)):
+            if ((x + y) % 2 == 0) and (x < Lx - 1 and y < Ly - 1):
+                yield tuple(gen_3d_plaquette((x, y, z), ('x+', 'y+')))
+            if ((y + z) % 2 == 0) and (y < Ly - 1 and z < Lz - 1):
+                yield tuple(gen_3d_plaquette((x, y, z), ('y+', 'z+')))
+            if ((x + z) % 2 == 1) and (z < Lz - 1 and x < Lx - 1):
+                yield tuple(gen_3d_plaquette((x, y, z), ('z+', 'x+')))
+    elif tiling in ('4', 'full'):
+        for x, y, z in itertools.product(range(Lx), range(Ly), range(Lz)):
+            if (x < Lx - 1 and y < Ly - 1):
+                yield tuple(gen_3d_plaquette((x, y, z), ('x+', 'y+')))
+            if (y < Ly - 1 and z < Lz - 1):
+                yield tuple(gen_3d_plaquette((x, y, z), ('y+', 'z+')))
+            if (z < Lz - 1 and x < Lx - 1):
+                yield tuple(gen_3d_plaquette((x, y, z), ('z+', 'x+')))
+    else:
+        raise ValueError(
+            "Invalid tiling: {}. Must be one of '1', '2', '4', 'full'."
+        )
+
+
+def gen_3d_strings(Lx, Ly, Lz):
+    """Generate all length-wise strings in a cubic 3D lattice.
+    """
+    for x, y in itertools.product(range(Lx), range(Ly)):
+        yield tuple((x, y, z) for z in range(Lz))
+    for y, z in itertools.product(range(Ly), range(Lz)):
+        yield tuple((x, y, z) for x in range(Lx))
+    for x, z in itertools.product(range(Lx), range(Lz)):
+        yield tuple((x, y, z) for y in range(Ly))
 
 
 class Rotator3D:

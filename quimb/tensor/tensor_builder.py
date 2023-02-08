@@ -25,15 +25,40 @@ from .tensor_core import (
     Tensor,
     TensorNetwork,
 )
-from .array_ops import asarray, sensibly_scale, reshape
+from .array_ops import asarray, sensibly_scale, reshape, do
 from .decomp import eigh
 from .tensor_arbgeom import TensorNetworkGen, TensorNetworkGenVector
 from .tensor_1d import MatrixProductState, MatrixProductOperator
-from .tensor_2d import gen_2d_bonds, TensorNetwork2D
-from .tensor_3d import TensorNetwork3D
+from .tensor_2d import gen_2d_bonds, gen_2d_plaquettes, TensorNetwork2D
+from .tensor_3d import gen_3d_bonds, gen_3d_plaquettes, TensorNetwork3D
 from .tensor_1d_tebd import LocalHam1D
 from .tensor_2d_tebd import LocalHam2D
 from .tensor_3d_tebd import LocalHam3D
+
+
+@functools.lru_cache(maxsize=64)
+def delta_array(shape, dtype='float64'):
+    x = np.zeros(shape, dtype=dtype)
+    idx = np.indices(x.shape)
+    # 1 where all indices are equal
+    x[(idx[0] == idx).all(axis=0)] = 1
+    return x
+
+
+def get_rand_fill_fn(
+    dist="normal",
+    loc=0.0,
+    scale=1.0,
+    seed=None,
+    dtype='float64',
+):
+    if seed is not None:
+        seed_rand(seed)
+
+    def fill_fn(shape):
+        return randn(shape, dtype=dtype, dist=dist, loc=loc, scale=scale)
+
+    return fill_fn
 
 
 @random_seed_fn
@@ -177,6 +202,18 @@ def gen_unique_edges(edges):
             continue
         yield (node_a, node_b)
         seen.add(key)
+
+
+def compute_string_edge_frequencies(strings):
+    """Compute a dictionary of edge frequencies for a list of strings,
+    including plaquettes.
+    """
+    counts = collections.defaultdict(int)
+    for s in strings:
+        for cooa, coob in zip(s, s[1:]):
+            counts[tuple(sorted((cooa, coob)))] += 1
+        counts[tuple(sorted((s[0], s[-1])))] += 1
+    return counts
 
 
 def TN_from_edges_and_fill_fn(
@@ -464,6 +501,126 @@ def TN_rand_reg(
     )
 
 
+def TN_from_strings(
+    strings,
+    fill_fn=None,
+    line_dim=2,
+    allow_plaquettes=True,
+    site_tag_id='I{}',
+    random_rewire=False,
+    random_rewire_seed=None,
+    join=False,
+    normalize=False,
+    contract_sites=True,
+    fuse_multibonds=True,
+    **contract_opts
+):
+    if fill_fn is None:
+        fill_fn = delta_array
+
+    # find all unique sites
+    sites = tuple(sorted(set.union(*map(set, strings))))
+
+    tn = TensorNetwork()
+
+    # first place each string as a 1D tensor network
+    for string in strings:
+        string_inds = collections.defaultdict(rand_uuid)
+
+        is_plaquette = allow_plaquettes and (string[0] == string[-1])
+        if is_plaquette:
+            # can then treat as all middle
+            string = (*string, string[1])
+        else:
+            # string start
+            data = fill_fn((line_dim,))
+            inds = (string_inds[tuple(sorted((string[0], string[1])))],)
+            tags = (site_tag_id.format(string[0]),)
+            tn |= Tensor(data=data, inds=inds, tags=tags)
+
+        for i in range(1, len(string) - 1):
+            # string middle
+            data = fill_fn((line_dim, line_dim))
+            inds = (
+                string_inds[tuple(sorted((string[i - 1], string[i])))],
+                string_inds[tuple(sorted((string[i], string[i + 1])))]
+            )
+            tags = (site_tag_id.format(string[i]),)
+            tn |= Tensor(data=data, inds=inds, tags=tags)
+
+        if not is_plaquette:
+            # string end
+            data = fill_fn((line_dim,))
+            inds = (string_inds[tuple(sorted((string[-2], string[-1])))],)
+            tags = (site_tag_id.format(string[-1]),)
+            tn |= Tensor(data=data, inds=inds, tags=tags)
+
+    tn.view_as_(TensorNetworkGen, sites=sites, site_tag_id=site_tag_id)
+
+    if random_rewire:
+        rng = np.random.default_rng(random_rewire_seed)
+        # at each site, randomly permute the indices to rewire the bonds
+        for tag in tn.site_tags:
+            stn = tn.select(tag)
+            inds = stn.all_inds()
+            new_inds = rng.permutation(inds)
+            stn.reindex_(dict(zip(inds, new_inds)))
+
+    if join:
+        # at each site, join pairs of string ends up
+        for tag in tn.site_tags:
+            # get all tensors at this site
+            stn = tn.select(tag)
+            # get all string ends (i.e. vectors)
+            ts = [t for t in stn if t.ndim == 1]
+            for i in range(0, len(ts) - 1, 2):
+                # pairwise iterate and connect with new bond and data
+                ta, tb = ts[i], ts[i + 1]
+                new_bond(ta, tb, size=line_dim)
+                ta.modify(data=fill_fn(ta.shape))
+                tb.modify(data=fill_fn(tb.shape))
+
+            if (join == 'all') and (len(ts) % 2 == 1):
+                # connect dangling bond to nearest neighbor, even if this
+                # creates merged loops
+                ta = ts[-1]
+                tb = min(
+                    [t for t in stn if t is not ta],
+                    # choose to merge with shortest neithboring loop however
+                    key=lambda t: len(stn._ind_to_subgraph_tids(t.inds[0]))
+                )
+                new_bond(ta, tb, size=line_dim)
+                ta.modify(data=fill_fn(ta.shape))
+                tb.modify(data=fill_fn(tb.shape))
+
+    if normalize:
+        # normalize the tensor network, while it is still easy to contract
+
+        sign = 1
+        for tn_i in tn.subgraphs():
+            # contract each subgraph/loop seperately
+            z_i = tn_i.contract(**contract_opts)
+            sign *= do('sign', z_i)
+            tn.exponent -= do('log10', do('abs', z_i))
+
+        if sign < 0:
+            # can multiply any tensor by -1 to flip global sign
+            tn.tensors[0].modify(apply=lambda x: sign * x)
+
+        # distribute collected exponent to all tensors
+        tn.equalize_norms_()
+
+    if contract_sites:
+        # contract all tensors at each site into a single tensor
+        for tag in tn.site_tags:
+            tn ^= tag
+        if fuse_multibonds:
+            # make all edges have a single bond
+            tn.fuse_multibonds_()
+
+    return tn
+
+
 def HTN_CP_from_inds_and_fill_fn(
     fill_fn,
     inds,
@@ -606,6 +763,50 @@ def HTN_dual_from_edges_and_fill_fn(
         )
 
     return tn
+
+
+def convert_to_2d(
+    tn,
+    Lx=None,
+    Ly=None,
+    site_tag_id='I{},{}',
+    x_tag_id='X{}',
+    y_tag_id='Y{}',
+    inplace=False,
+):
+    """Convert ``tn`` to a :class:`~quimb.tensor.tensor_2d.TensorNetwork2D`,
+    assuming that is has a generic geometry with sites labelled by (i, j)
+    coordinates already. Useful for constructing 2D tensor networks from
+    functions that only require a list of edges etc.
+    """
+    import itertools
+    from quimb.tensor.tensor_2d import TensorNetwork2D
+
+    tn2d = tn if inplace else tn.copy()
+
+    if Lx is None:
+        Lx = max(coo[0] for coo in tn2d.sites) + 1
+    if Ly is None:
+        Ly = max(coo[1] for coo in tn2d.sites) + 1
+
+    for i, j in itertools.product(range(Lx), range(Ly)):
+        old = tn2d.site_tag((i, j))
+        new = site_tag_id.format(i, j)
+        t = tn2d.select(old)
+        t.retag_({old: new})
+        t.add_tag((x_tag_id.format(i), y_tag_id.format(j)))
+
+    tn2d.view_as_(
+        TensorNetwork2D,
+        site_tag_id=site_tag_id,
+        x_tag_id=x_tag_id,
+        y_tag_id=y_tag_id,
+        Lx=Lx,
+        Ly=Ly,
+    )
+    tn2d.reset_cached_properties()
+
+    return tn2d
 
 
 def TN2D_from_fill_fn(
@@ -800,7 +1001,6 @@ def TN2D_with_value(
     )
 
 
-@random_seed_fn
 def TN2D_rand(
     Lx,
     Ly,
@@ -809,6 +1009,10 @@ def TN2D_rand(
     site_tag_id="I{},{}",
     x_tag_id="X{}",
     y_tag_id="Y{}",
+    dist="normal",
+    loc=0,
+    scale=1,
+    seed=None,
     dtype="float64",
 ):
     """A random scalar 2D lattice tensor network.
@@ -830,18 +1034,22 @@ def TN2D_rand(
         String specifier for naming convention of row tags.
     y_tag_id : str, optional
         String specifier for naming convention of column tags.
-    dtype : dtype, optional
-        Data type of the random arrays.
+    dist : str, optional
+        The distribution to sample from.
+    loc : float, optional
+        The 'location' of the distribution, its meaning depends on ``dist``.
+    scale : float, optional
+        The 'scale' of the distribution, its meaning depends on ``dist``.
     seed : int, optional
         A random seed.
+    dtype : dtype, optional
+        Data type of the random arrays.
 
     Returns
     -------
     TensorNetwork2D
     """
-
-    def fill_fn(shape):
-        return randn(shape, dtype=dtype)
+    fill_fn = get_rand_fill_fn(dist, loc, scale, seed, dtype)
 
     return TN2D_from_fill_fn(
         fill_fn,
@@ -856,17 +1064,14 @@ def TN2D_rand(
 
 
 def TN2D_corner_double_line(
-    Lx,
-    Ly,
+    Lx, Ly,
     line_dim=2,
-    fill_fn=None,
+    tiling=2,
+    fill_missing_edges=True,
     site_tag_id='I{},{}',
     x_tag_id='X{}',
     y_tag_id='Y{}',
-    random_rewire=False,
-    random_rewire_seed=None,
-    contract=True,
-    fuse=True,
+    **kwargs
 ):
     """Build a 2D 'corner double line' (CDL) tensor network. Each plaquette
     contributes a matrix (by default the identity) at each corner, connected in
@@ -887,175 +1092,147 @@ def TN2D_corner_double_line(
         Length of side y.
     line_dim : int, optional
         The dimension of the matrices at each corner. If `contract` is True,
-        then the resulting bonds with have dimension `line_dim**2`.
-    fill_fn : callable, optional
-        A function that takes a shape and returns a matrix of the desired
-        dimension. By default, the identity matrix is used.
+        then the resulting bonds with have dimension `line_dim**tiling`.
+    tiling : {1, 2}, optional
+        How to tile the plaquettes. If ``1``, the plaquettes are tiled in a
+        checkerboard pattern resulting in a single line per edge. If ``2``, the
+        plaquettes are tiled in a dense pattern resulting in two lines per
+        edge.
+    fill_missing_edges : bool, optional
+        Whether to fill in the missing edges around the border with open
+        strings, ensuring every bond exists and has the same dimension.
     site_tag_id : str, optional
         String specifier for naming convention of site tags.
     x_tag_id : str, optional
         String specifier for naming convention of row tags.
     y_tag_id : str, optional
         String specifier for naming convention of column tags.
-    random_rewire : bool, optional
-        If true, at each site the wires will be randomly permuted, this forms
-        a tensor network with random, potentially long-range loops.
-    random_rewire_seed : int, optional
-        A random seed for the random rewire.
-    contract : bool, optional
-        Whether to contract the corners at each site into a single tensor.
-    fuse : bool, optional
-        Whether to fuse the resulting multibonds.
+    kwargs
+        Additional keyword arguments are passed to :func:`TN_from_strings`.
 
     Returns
     -------
     TensorNetwork2D
+
+    See Also
+    --------
+    TN_from_strings
     """
-    if fill_fn is None:
+    # start with a tiling of plaquettes (loop strings)
+    strings = list(gen_2d_plaquettes(Lx, Ly, tiling=tiling))
 
-        def fill_fn(shape):
-            return eye(shape[0], dtype='float64')
+    if fill_missing_edges:
+        # add open strings to fill in any missing edges
+        freqs = compute_string_edge_frequencies(strings)
+        for edge in gen_2d_bonds(Lx, Ly):
+            edge_density = freqs.get(edge, 0)
+            if edge_density < tiling:
+                strings.extend([edge] * (tiling - edge_density))
 
-    tn = TensorNetwork()
-    for i, j in itertools.product(range(Lx), range(Ly)):
-        if (i + 1 >= Lx) or (j + 1 >= Ly):
-            # plaquette doesn't exist
-            continue
-
-        plaq_inds = {
-            'l': rand_uuid(),
-            't': rand_uuid(),
-            'r': rand_uuid(),
-            'b': rand_uuid(),
-        }
-
-        for corner in ['bl', 'tl', 'tr', 'br']:
-            data = fill_fn((line_dim, line_dim))
-
-            if corner == 'bl':
-                inds = (plaq_inds['b'], plaq_inds['l'])
-                tags = (
-                    site_tag_id.format(i, j),
-                    x_tag_id.format(i),
-                    y_tag_id.format(j),
-                    "BL",
-                )
-            elif corner == 'tl':
-                inds = (plaq_inds['l'], plaq_inds['t'])
-                tags = (
-                    site_tag_id.format(i + 1, j),
-                    x_tag_id.format(i + 1),
-                    y_tag_id.format(j),
-                    "TL",
-                )
-            elif corner == 'tr':
-                inds = (plaq_inds['t'], plaq_inds['r'])
-                tags = (
-                    site_tag_id.format(i + 1, j + 1),
-                    x_tag_id.format(i + 1),
-                    y_tag_id.format(j + 1),
-                    "TR",
-                )
-            else:  # corner == 'br':
-                inds = (plaq_inds['r'], plaq_inds['b'])
-                tags = (
-                    site_tag_id.format(i, j + 1),
-                    x_tag_id.format(i),
-                    y_tag_id.format(j + 1),
-                    "BR",
-                )
-
-            tn |= Tensor(data=data, inds=inds, tags=tags)
-
-    tn.view_as_(
-        TensorNetwork2D,
-        Lx=Lx, Ly=Ly, site_tag_id=site_tag_id,
-        x_tag_id=x_tag_id, y_tag_id=y_tag_id
+    tn = TN_from_strings(
+        strings,
+        line_dim=line_dim,
+        **kwargs
     )
 
-    if random_rewire:
-        rng = np.random.default_rng(random_rewire_seed)
-        # at each site, randomly permute the indices to rewire the bonds
-        for tag in tn.site_tags:
-            stn = tn.select(tag)
-            inds = stn.all_inds()
-            new_inds = rng.permutation(inds)
-            stn.reindex_(dict(zip(inds, new_inds)))
-
-    if contract:
-        for tag in tn.site_tags:
-            tn ^= tag
-        if fuse:
-            tn.fuse_multibonds_()
-
-    return tn
-
-
-def TN2D_corner_double_line_rand(
-    Lx,
-    Ly,
-    line_dim=2,
-    seed=None,
-    dist="normal",
-    dtype='float64',
-    site_tag_id='I{},{}',
-    x_tag_id='X{}',
-    y_tag_id='Y{}',
-    random_rewire=False,
-    contract=True,
-    fuse=True,
-):
-    """Build a 2D 'corner double line' tensor network with random matrices at
-    each corner.
-
-    Parameters
-    ----------
-    Lx : int
-        Length of side x.
-    Ly : int
-        Length of side y.
-    line_dim : int, optional
-        The dimension of the matrices at each corner. If `contract` is True,
-        then the resulting bonds with have dimension `line_dim**2`.
-    seed : int, optional
-        A random seed for the random matrices.
-    dist : str, optional
-        The distribution to use for the random matrices.
-    dtype : str, optional
-        The dtype of the random matrices.
-    site_tag_id : str, optional
-        String specifier for naming convention of site tags.
-    x_tag_id : str, optional
-        String specifier for naming convention of row tags.
-    y_tag_id : str, optional
-        String specifier for naming convention of column tags.
-    random_rewire : bool, optional
-        If true, at each site the wires will be randomly permuted, this forms
-        a tensor network with random, potentially long-range loops.
-    contract : bool, optional
-        Whether to contract the corners at each site into a single tensor.
-    fuse : bool, optional
-        Whether to fuse the resulting multibonds.
-    """
-    if seed is not None:
-        seed_rand(seed)
-
-    def fill_fn(shape):
-        return randn(shape, dtype=dtype, dist=dist)
-
-    return TN2D_corner_double_line(
-        Lx,
-        Ly,
-        line_dim=line_dim,
-        fill_fn=fill_fn,
+    return convert_to_2d(
+        tn, Lx, Ly,
         site_tag_id=site_tag_id,
         x_tag_id=x_tag_id,
         y_tag_id=y_tag_id,
-        random_rewire=random_rewire,
-        random_rewire_seed=seed,
-        contract=contract,
-        fuse=fuse,
+        inplace=True
     )
+
+
+def TN2D_rand_hidden_loop(
+    Lx, Ly,
+    line_dim=2,
+    line_density=2,
+    seed=None,
+    dist="normal",
+    dtype='float64',
+    loc=0.0,
+    scale=1.0,
+    gauge_random=True,
+    site_tag_id='I{},{}',
+    x_tag_id='X{}',
+    y_tag_id='Y{}',
+    **kwargs
+):
+    fill_fn = get_rand_fill_fn(dist, loc, scale, seed, dtype)
+
+    edges = tuple(gen_2d_bonds(Lx, Ly)) * line_density
+
+    kwargs.setdefault("join", True)
+    kwargs.setdefault("random_rewire", True)
+    kwargs.setdefault("random_rewire_seed", seed)
+    tn =  TN_from_strings(
+        edges,
+        line_dim=line_dim,
+        fill_fn=fill_fn,
+        **kwargs
+    )
+
+    if gauge_random:
+        tn.gauge_all_random_()
+
+    return convert_to_2d(
+        tn, Lx, Ly,
+        site_tag_id=site_tag_id,
+        x_tag_id=x_tag_id,
+        y_tag_id=y_tag_id,
+        inplace=True,
+    )
+
+
+def convert_to_3d(
+    tn,
+    Lx=None,
+    Ly=None,
+    Lz=None,
+    site_tag_id='I{},{},{}',
+    x_tag_id='X{}',
+    y_tag_id='Y{}',
+    z_tag_id='Z{}',
+    inplace=False,
+):
+    """Convert ``tn`` to a :class:`~quimb.tensor.tensor_3d.TensorNetwork3D`,
+    assuming that is has a generic geometry with sites labelled by (i, j, k)
+    coordinates already. Useful for constructing 3D tensor networks from
+    functions that only require a list of edges etc.
+    """
+    import itertools
+    from quimb.tensor.tensor_3d import TensorNetwork3D
+
+    tn3d = tn if inplace else tn.copy()
+
+    if Lx is None:
+        Lx = max(coo[0] for coo in tn3d.sites) + 1
+    if Ly is None:
+        Ly = max(coo[1] for coo in tn3d.sites) + 1
+    if Lz is None:
+        Lz = max(coo[2] for coo in tn3d.sites) + 1
+
+    for i, j, k in itertools.product(range(Lx), range(Ly), range(Lz)):
+        old = tn3d.site_tag((i, j, k))
+        new = site_tag_id.format(i, j, k)
+        t = tn3d.select(old)
+        t.retag_({old: new})
+        t.add_tag((x_tag_id.format(i), y_tag_id.format(j), z_tag_id.format(k)))
+
+    tn3d.view_as_(
+        TensorNetwork3D,
+        site_tag_id=site_tag_id,
+        x_tag_id=x_tag_id,
+        y_tag_id=y_tag_id,
+        z_tag_id=z_tag_id,
+        Lx=Lx,
+        Ly=Ly,
+        Lz=Lz,
+    )
+    tn3d.reset_cached_properties()
+
+    return tn3d
 
 
 def TN3D_from_fill_fn(
@@ -1269,7 +1446,6 @@ def TN3D_with_value(
     )
 
 
-@random_seed_fn
 def TN3D_rand(
     Lx,
     Ly,
@@ -1280,6 +1456,10 @@ def TN3D_rand(
     x_tag_id="X{}",
     y_tag_id="Y{}",
     z_tag_id="Z{}",
+    dist="normal",
+    loc=0.0,
+    scale=1.0,
+    seed=None,
     dtype="float64",
 ):
     """A random scalar 3D lattice tensor network.
@@ -1308,9 +1488,7 @@ def TN3D_rand(
     -------
     TensorNetwork
     """
-
-    def fill_fn(shape):
-        return randn(shape, dtype=dtype)
+    fill_fn = get_rand_fill_fn(dist, loc, scale, seed, dtype)
 
     return TN3D_from_fill_fn(
         fill_fn,
@@ -1323,6 +1501,87 @@ def TN3D_rand(
         x_tag_id=x_tag_id,
         y_tag_id=y_tag_id,
         z_tag_id=z_tag_id,
+    )
+
+
+def TN3D_corner_double_line(
+    Lx, Ly, Lz,
+    line_dim=2,
+    tiling=2,
+    fill_missing_edges=True,
+    site_tag_id='I{},{},{}',
+    x_tag_id='X{}',
+    y_tag_id='Y{}',
+    z_tag_id='Z{}',
+    **kwargs
+):
+    # start with a tiling of plaquettes (loop strings)
+    strings = list(gen_3d_plaquettes(Lx, Ly, Lz, tiling=tiling))
+
+    if fill_missing_edges:
+        # add open strings to fill in any missing edges
+        freqs = compute_string_edge_frequencies(strings)
+        for edge in gen_3d_bonds(Lx, Ly, Lz):
+            edge_density = freqs.get(edge, 0)
+            if edge_density < tiling:
+                strings.extend([edge] * (tiling - edge_density))
+
+    tn = TN_from_strings(
+        strings,
+        line_dim=line_dim,
+        **kwargs
+    )
+
+    return convert_to_3d(
+        tn, Lx, Ly, Lz,
+        site_tag_id=site_tag_id,
+        x_tag_id=x_tag_id,
+        y_tag_id=y_tag_id,
+        z_tag_id=z_tag_id,
+        inplace=True
+    )
+
+
+def TN3D_rand_hidden_loop(
+    Lx, Ly, Lz,
+    line_dim=2,
+    line_density=2,
+    seed=None,
+    dist="normal",
+    dtype='float64',
+    loc=0.0,
+    scale=1.0,
+    gauge_random=True,
+    site_tag_id='I{},{},{}',
+    x_tag_id='X{}',
+    y_tag_id='Y{}',
+    z_tag_id='Z{}',
+    **kwargs
+):
+    fill_fn = get_rand_fill_fn(dist, loc, scale, seed, dtype)
+
+    edges = tuple(gen_3d_bonds(Lx, Ly, Lz)) * line_density
+
+    kwargs.setdefault("join", True)
+    kwargs.setdefault("random_rewire", True)
+    kwargs.setdefault("random_rewire_seed", seed)
+    tn =  TN_from_strings(
+        edges,
+        line_dim=line_dim,
+        fill_fn=fill_fn,
+        **kwargs
+    )
+
+    if gauge_random:
+        tn.gauge_all_random_()
+
+    return convert_to_3d(
+        tn, Lx, Ly, Lz,
+        site_tag_id=site_tag_id,
+        x_tag_id=x_tag_id,
+        y_tag_id=y_tag_id,
+        z_tag_id=z_tag_id,
+        inplace=True,
     )
 
 

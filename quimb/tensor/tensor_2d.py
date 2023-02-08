@@ -22,21 +22,21 @@ from ..utils import (
 )
 from . import array_ops as ops
 from .tensor_core import (
-    Tensor,
-    bonds,
-    rand_uuid,
-    oset,
-    tags_to_oset,
-    TensorNetwork,
-    tensor_contract,
-    oset_union,
     bonds_size,
+    bonds,
+    oset_union,
+    oset,
+    rand_uuid,
+    tags_to_oset,
+    tensor_contract,
+    Tensor,
+    TensorNetwork,
 )
 from .tensor_arbgeom import (
+    tensor_network_apply_op_vec,
     TensorNetworkGen,
-    TensorNetworkGenVector,
     TensorNetworkGenOperator,
-    tensor_network_apply_op_vec
+    TensorNetworkGenVector,
 )
 from .tensor_1d import maybe_factor_gate_into_tensor
 from . import decomp
@@ -51,7 +51,7 @@ def nearest_neighbors(coo):
     return ((i - 1, j), (i, j - 1), (i, j + 1), (i + 1, j))
 
 
-def gen_2d_bonds(Lx, Ly, steppers, coo_filter=None):
+def gen_2d_bonds(Lx, Ly, steppers=None, coo_filter=None):
     """Convenience function for tiling pairs of bond coordinates on a 2D
     lattice given a function like ``lambda i, j: (i + 1, j + 1)``.
 
@@ -61,9 +61,10 @@ def gen_2d_bonds(Lx, Ly, steppers, coo_filter=None):
         The number of rows.
     Ly : int
         The number of columns.
-    steppers : callable or sequence of callable
+    steppers : callable or sequence of callable, optional
         Function(s) that take args ``(i, j)`` and generate another coordinate,
-        thus defining a bond.
+        thus defining a bond. Only valid steps are taken. If not given,
+        defaults to nearest neighbor bonds.
     coo_filter : callable
         Function that takes args ``(i, j)`` and only returns ``True`` if this
         is to be a valid starting coordinate.
@@ -95,6 +96,11 @@ def gen_2d_bonds(Lx, Ly, steppers, coo_filter=None):
         ((0, 1), (1, 0))
 
     """
+    if steppers is None:
+        steppers = [
+            lambda i, j: (i, j + 1),
+            lambda i, j: (i + 1, j),
+        ]
 
     if callable(steppers):
         steppers = (steppers,)
@@ -105,6 +111,89 @@ def gen_2d_bonds(Lx, Ly, steppers, coo_filter=None):
                 i2, j2 = stepper(i, j)
                 if (0 <= i2 < Lx) and (0 <= j2 < Ly):
                     yield (i, j), (i2, j2)
+
+
+def gen_2d_plaquette(coo0, steps):
+    """Generate a plaquette at site ``coo0`` by stepping first in ``steps`` and
+    then the reverse steps.
+
+    Parameters
+    ----------
+    coo0 : tuple
+        The coordinate of the first site in the plaquette.
+    steps : tuple
+        The steps to take to generate the plaquette. Each element should be
+        one of ``('x+', 'x-', 'y+', 'y-')``.
+
+    Yields
+    ------
+    coo : tuple
+        The coordinates of the sites in the plaquette, including the last
+        site which will be the same as the first.
+    """
+    x, y = coo0
+    smap = {'+': +1, '-': -1}
+    step_backs = []
+    yield x, y
+    for step in steps:
+        d, s = step
+        x, y = {
+            'x': (x + smap[s], y),
+            'y': (x, y + smap[s]),
+        }[d]
+        yield x, y
+        step_backs.append(d + '-' if s == '+' else '-')
+    for step in step_backs:
+        d, s = step
+        x, y = {
+            'x': (x + smap[s], y),
+            'y': (x, y + smap[s]),
+        }[d]
+        yield x, y
+
+
+def gen_2d_plaquettes(Lx, Ly, tiling):
+    """Generate a tiling of plaquettes in a square 2D lattice.
+
+    Parameters
+    ----------
+    Lx : int
+        The length of the lattice in the x direction.
+    Ly : int
+        The length of the lattice in the y direction.
+    tiling : {'1', '2', 'full'}
+        The tiling to use:
+
+        - '1': plaquettes in a checkerboard pattern, such that each edge
+            is covered by a maximum of one plaquette.
+        - '2' or 'full': dense tiling of plaquettes. All bulk edges will
+            be covered twice.
+
+    Yields
+    ------
+    plaquette : tuple[tuple[int]]
+        The coordinates of the sites in each plaquette, including the last
+        site which will be the same as the first.
+    """
+    if str(tiling) == '1':
+        for x, y in product(range(Lx), range(Ly)):
+            if ((x + y) % 2 == 0) and (x < Lx - 1 and y < Ly - 1):
+                yield tuple(gen_2d_plaquette((x, y), ('x+', 'y+')))
+    elif str(tiling) in ('2', "full"):
+        for x, y in product(range(Lx), range(Ly)):
+            if (x < Lx - 1 and y < Ly - 1):
+                yield tuple(gen_2d_plaquette((x, y), ('x+', 'y+')))
+    else:
+        raise ValueError("`tiling` must be one of: '1', '2', 'full'.")
+
+
+def gen_2d_strings(Lx, Ly):
+    """Generate all length-wise strings in a square 2D lattice.
+    """
+    for x in range(Lx):
+        yield tuple((x, y) for y in range(Ly))
+    for y in range(Ly):
+        yield tuple((x, y) for x in range(Lx))
 
 
 class Rotator2D:

@@ -24,8 +24,7 @@ v1.4.3 (unreleased)
 - add CTMRG style contraction for 2D tensor networks:
   :meth:`~quimb.tensor.tensor_2d.TensorNetwork2D.contract_ctmrg`
 - add 2D tensor network 'corner double line' (CDL) builders:
-  :func:`~quimb.tensor.tensor_builder.TN2D_corner_double_line`, and
-  :func:`~quimb.tensor.tensor_builder.TN2D_corner_double_line_rand`
+  :func:`~quimb.tensor.tensor_builder.TN2D_corner_double_line`
 - update the docs to use the `furo <https://pradyunsg.me/furo/>`_ theme,
   `myst_nb <https://myst-nb.readthedocs.io/en/latest/>`_ for notebooks, and
   several other `sphinx` extensions.
@@ -38,6 +37,14 @@ v1.4.3 (unreleased)
   ). The new ``backend='plotly'`` can also be used for 2D interactive plots.
 - Update :func:`~quimb.tensor.tensor_builder.HTN_from_cnf` to handle more
   weighted model counting formats.
+- Add :func:`~quimb.tensor.tensor_builder.cnf_file_parse`
+- Add :func:`~quimb.tensor.tensor_builder.random_ksat_instance`
+- Add :func:`~quimb.tensor.tensor_builder.TN_from_strings`
+- Add :func:`~quimb.tensor.tensor_builder.convert_to_2d`
+- Add :func:`~quimb.tensor.tensor_builder.TN2D_rand_hidden_loop`
+- Add :func:`~quimb.tensor.tensor_builder.convert_to_3d`
+- Add :func:`~quimb.tensor.tensor_builder.TN3D_corner_double_line`
+- Add :func:`~quimb.tensor.tensor_builder.TN3D_rand_hidden_loop`
 - various optimizations for minimizing computational graph size and
   construction time.
 - add ``'lu'``, ``'polar_left'`` and ``'polar_right'`` methods to
