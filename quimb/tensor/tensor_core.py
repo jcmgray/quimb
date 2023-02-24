@@ -743,9 +743,31 @@ def tensor_balance_bond(t1, t2, smudge=1e-6):
     t2.multiply_index_diagonal_(ix, s**+0.25)
 
 
+def tensor_multifuse(ts, inds, gauges=None):
+    """For tensors ``ts`` which should all have indices ``inds``, fuse the
+    those bonds together, optionally updating ``gauges`` if present. Inplace
+    operation.
+    """
+    if (gauges is not None) and any(ix in gauges for ix in inds):
+        # gauge fusing
+        gs = [
+            gauges.pop(ix) if ix in gauges else
+            # if not present, ones is the identity gauge
+            do("ones", ts[0].ind_size(ix), like=ts[0].data)
+            for ix in inds
+        ]
+        # contract into a single gauge
+        gauges[inds[0]] = functools.reduce(lambda x, y: do("kron", x, y), gs)
+
+    # index fusing
+    for t in ts:
+        t.fuse_({inds[0]: inds})
+
+
 def tensor_make_single_bond(t1, t2, gauges=None):
     """If two tensors share multibonds, fuse them together and return the left
     indices, bond if it exists, and right indices. Handles simple ``gauges``.
+    Inplace operation.
     """
     left, shared, right = group_inds(t1, t2)
     nshared = len(shared)
@@ -753,25 +775,10 @@ def tensor_make_single_bond(t1, t2, gauges=None):
     if nshared == 0:
         return left, None, right
 
-    bond = next(iter(shared))
     if nshared > 1:
+        tensor_multifuse((t1, t2), shared, gauges=gauges)
 
-        # possibly fuse gauges
-        if gauges is not None and any(ix in gauges for ix in shared):
-            # gather all the separate gauges
-            gs = [
-                gauges.pop(ix) if ix in gauges else
-                # if not present, ones is the identity gauge
-                do("ones", t1.ind_size(ix), like=t1.data)
-                for ix in shared
-            ]
-            # contract into a single gauge
-            gauges[bond] = functools.reduce(lambda x, y: do("kron", x, y), gs)
-
-        t1.fuse_({bond: shared})
-        t2.fuse_({bond: shared})
-
-    return left, bond, right
+    return left, shared[0], right
 
 
 def tensor_fuse_squeeze(t1, t2, squeeze=True, gauges=None):
@@ -2698,8 +2705,8 @@ class Tensor(object):
         of calling the full :func:`~quimb.tensor.tensor_core.tensor_contract`.
         """
         lix, bix, rix = group_inds(self, other)
-        ax1 = [self.inds.index(b) for b in bix]
-        ax2 = [other.inds.index(b) for b in bix]
+        ax1 = tuple(self.inds.index(b) for b in bix)
+        ax2 = tuple(other.inds.index(b) for b in bix)
         data_out = do(
             'tensordot',
             self.data,
@@ -5951,6 +5958,7 @@ class TensorNetwork(object):
         power=1.0,
         gauges=None,
         equalize_norms=False,
+        progbar=False,
         inplace=False,
     ):
         """Iterative gauge all the bonds in this tensor network with a 'simple
@@ -5972,12 +5980,18 @@ class TensorNetwork(object):
         # accrue scaling to avoid numerical blow-ups
         nfact = 0.0
 
+        if progbar:
+            import tqdm
+            pbar = tqdm.tqdm()
+        else:
+            pbar = None
+
         it = 0
         not_converged = True
         while not_converged and it < max_iterations:
 
             # can only converge if tol > 0.0
-            all_converged = tol > 0.0
+            max_sdiff = -1.0
 
             for ind in inds:
                 try:
@@ -6015,11 +6029,17 @@ class TensorNetwork(object):
                 new_gauge = s / smax
                 nfact = do('log10', smax) + nfact
 
-                if tol > 0.0:
+                if (tol > 0.0) or (pbar is not None):
                     # check convergence
                     old_gauge = gauges.get(bond, 1.0)
+
+                    if getattr(old_gauge, 'size', 1) != new_gauge.size:
+                        # the bond has changed size, so we can't compare
+                        # the singular values directly
+                        old_gauge = 1.0
+
                     sdiff = do('linalg.norm', old_gauge - new_gauge)
-                    all_converged &= sdiff < tol
+                    max_sdiff = max(max_sdiff, sdiff)
 
                 # update inner gauge and undo outer gauges
                 gauges[bond] = new_gauge
@@ -6033,7 +6053,14 @@ class TensorNetwork(object):
                     tn.strip_exponent(tid1)
                     tn.strip_exponent(tid2)
 
-            not_converged = not all_converged
+            if pbar is not None:
+                pbar.update()
+                pbar.set_description(
+                    f"max|dS|={max_sdiff:.2e}, "
+                    f"nfact={nfact:.2f}"
+                )
+
+            not_converged = max_sdiff > tol
             it += 1
 
         if equalize_norms:
@@ -6054,13 +6081,22 @@ class TensorNetwork(object):
 
     gauge_all_simple_ = functools.partialmethod(gauge_all_simple, inplace=True)
 
-    def gauge_all_random(self, iterations=1, unitary=True, inplace=False):
+    def gauge_all_random(
+        self,
+        max_iterations=1,
+        unitary=True,
+        seed=None,
+        inplace=False
+    ):
         """Gauge all the bonds in this network randomly. This is largely for
         testing purposes.
         """
         tn = self if inplace else self.copy()
 
-        for _ in range(iterations):
+        if seed is not None:
+            seed_rand(seed)
+
+        for _ in range(max_iterations):
             for ix, tids in tn.ind_map.items():
                 try:
                     tid1, tid2 = tids
@@ -6087,6 +6123,32 @@ class TensorNetwork(object):
         return tn
 
     gauge_all_random_ = functools.partialmethod(gauge_all_random, inplace=True)
+
+    def gauge_all(self, method="canonize", **gauge_opts):
+        """Gauge all bonds in this network using one of several strategies.
+
+        Parameters
+        ----------
+        method : str, optional
+            The method to use for gauging. One of "canonize", "simple", or
+            "random". Default is "canonize".
+        gauge_opts : dict, optional
+            Additional keyword arguments to pass to the chosen method.
+
+        See Also
+        --------
+        gauge_all_canonize, gauge_all_simple, gauge_all_random
+        """
+        check_opt("method", method, ("canonize", "simple", "random"))
+
+        if method == "canonize":
+            return self.gauge_all_canonize(**gauge_opts)
+        if method == "simple":
+            return self.gauge_all_simple(**gauge_opts)
+        if method == "random":
+            return self.gauge_all_random(**gauge_opts)
+
+    gauge_all_ = functools.partialmethod(gauge_all, inplace=True)
 
     def _gauge_local_tids(
         self,
@@ -6143,7 +6205,13 @@ class TensorNetwork(object):
 
     gauge_local_ = functools.partialmethod(gauge_local, inplace=True)
 
-    def gauge_simple_insert(self, gauges, remove=False, smudge=0.0):
+    def gauge_simple_insert(
+        self,
+        gauges,
+        remove=False,
+        smudge=0.0,
+        power=1.0,
+    ):
         """Insert the simple update style bond gauges found in ``gauges`` if
         they are present in this tensor network. The gauges inserted are also
         returned so that they can be removed later.
@@ -6179,7 +6247,7 @@ class TensorNetwork(object):
             g = _get(ix, None)
             if g is None:
                 continue
-            g = (g + smudge * g[0])
+            g = (g + smudge * g[0])**power
             t, = self._inds_get(ix)
             t.multiply_index_diagonal_(ix, g)
             outer.append((t, ix, g))
@@ -7372,7 +7440,7 @@ class TensorNetwork(object):
         right_inds : sequence of str
             The indices forming the right side of the operator.
         contract_opts : dict, optional
-            Optinos to pass to
+            Options to pass to
             :meth:`~quimb.tensor.tensor_core.TensorNetwork.to_dense`.
 
         Returns
@@ -7620,7 +7688,7 @@ class TensorNetwork(object):
         return oset(self.tag_map)
 
     def all_inds(self):
-        """Return a tuple of all indices (with repetition) in this network.
+        """Return a tuple of all indices in this network.
         """
         return tuple(self.ind_map)
 
@@ -7664,6 +7732,21 @@ class TensorNetwork(object):
         network was fully contracted.
         """
         return self.inds_size(self._outer_inds)
+
+    def get_multibonds(self):
+        # XXX: handle hyper/output_inds
+        seen = collections.defaultdict(list)
+        for ix, tids in self.ind_map.items():
+
+            # outer bonds are never multi
+            if len(tids) > 1:
+                seen[tuple(sorted(tids))].append(ix)
+
+        return {
+            tuple(ixs): tids
+            for tids, ixs in seen.items()
+            if len(ixs) > 1
+        }
 
     def get_hyperinds(self, output_inds=None):
         """Get a tuple of all 'hyperinds', defined as those indices which don't
@@ -7918,23 +8001,16 @@ class TensorNetwork(object):
 
     balance_bonds_ = functools.partialmethod(balance_bonds, inplace=True)
 
-    def fuse_multibonds(self, inplace=False):
+    def fuse_multibonds(self, gauges=None, inplace=False):
         """Fuse any multi-bonds (more than one index shared by the same pair
         of tensors) into a single bond.
         """
         tn = self if inplace else self.copy()
 
-        seen = collections.defaultdict(list)
-        for ix, tids in tn.ind_map.items():
+        multibonds = self.get_multibonds()
 
-            # only want to fuse inner bonds
-            if len(tids) > 1:
-                seen[frozenset(tids)].append(ix)
-
-        for tidset, ixs in seen.items():
-            if len(ixs) > 1:
-                for tid in sorted(tidset):
-                    self.tensor_map[tid].fuse_({ixs[0]: ixs})
+        for inds, tids in multibonds.items():
+            tensor_multifuse(tuple(tn._tids_get(*tids)), inds, gauges)
 
         return tn
 
@@ -8602,8 +8678,12 @@ class TensorNetwork(object):
                 # check for new visitors -> those with shortest path d
                 for diff_tid in visitors[tid] - old_visitors[tid]:
                     any_change = True
-                    if tid in tids:
-                        distances[tuple(sorted((tid, diff_tid)))] = d
+                    if (
+                        (tid in tids) and
+                        (diff_tid in tids) and
+                        (tid < diff_tid)
+                    ):
+                        distances[tid, diff_tid] = d
 
             if (len(distances) == N) or (not any_change):
                 # all pair combinations have been computed, or everything
@@ -8625,7 +8705,7 @@ class TensorNetwork(object):
             tids = self.tensor_map
         distances = self.compute_shortest_distances(tids, exclude_inds)
 
-        dinf = 10 * max(distances.values(), default=1)
+        dinf = 10  * self.num_tensors
         y = [
             distances.get(tuple(sorted((i, j))), dinf)
             for i, j in itertools.combinations(tids, 2)
@@ -8958,6 +9038,7 @@ class TensorNetwork(object):
         loop_simplify_opts=None,
         split_simplify_opts=None,
         custom_methods=(),
+        split_method="svd",
     ):
         """Perform a series of tensor network 'simplifications' in a loop until
         there is no more reduction in the number of tensors or indices. Note
@@ -9015,7 +9096,9 @@ class TensorNetwork(object):
 
         rank_simplify_opts = ensure_dict(rank_simplify_opts)
         loop_simplify_opts = ensure_dict(loop_simplify_opts)
+        loop_simplify_opts.setdefault("method", split_method)
         split_simplify_opts = ensure_dict(split_simplify_opts)
+        split_simplify_opts.setdefault("method", split_method)
 
         # all the methods
         if output_inds is None:
@@ -9093,7 +9176,13 @@ class TensorNetwork(object):
 
     full_simplify_ = functools.partialmethod(full_simplify, inplace=True)
 
-    def hyperinds_resolve(self, mode='dense', sorter=None, inplace=False):
+    def hyperinds_resolve(
+        self,
+        mode='dense',
+        sorter=None,
+        output_inds=None,
+        inplace=False,
+    ):
         """Convert this into a regular tensor network, where all indices
         appear at most twice, by inserting COPY tensor or tensor networks
         for each hyper index.
@@ -9114,7 +9203,11 @@ class TensorNetwork(object):
         TensorNetwork
         """
         check_opt('mode', mode, ('dense', 'mps', 'tree'))
+
         tn = self if inplace else self.copy()
+
+        if output_inds is None:
+            output_inds = self.outer_inds()
 
         if sorter == 'centrality':
             from cotengra.cotengra import nodes_to_centrality
@@ -9158,6 +9251,9 @@ class TensorNetwork(object):
                     t.reindex_({ix: new_ix})
                     copy_inds.append(new_ix)
 
+                if ix in output_inds:
+                    copy_inds.append(ix)
+
                 # inject new tensor(s) to connect dangling inds
                 if mode == 'dense':
                     copy_tensors.append(
@@ -9185,6 +9281,7 @@ class TensorNetwork(object):
         hyperind_resolve_mode='tree',
         hyperind_resolve_sort='clustering',
         final_resolve=False,
+        split_method="svd",
         max_simplification_iterations=100,
         converged_tol=0.01,
         equalize_norms=True,
@@ -9203,6 +9300,7 @@ class TensorNetwork(object):
             'progbar': progbar,
             'output_inds': output_inds,
             'cache': set(),
+            'split_method': split_method,
             **full_simplify_opts,
         }
 
@@ -9223,6 +9321,12 @@ class TensorNetwork(object):
         else:
             sorter = hyperind_resolve_sort
 
+        hyperresolve_opts = {
+            'mode': hyperind_resolve_mode,
+            'sorter': sorter,
+            'output_inds': output_inds,
+        }
+
         tn.full_simplify_(simplify_sequence_a, **simplify_opts)
         for i in range(max_simplification_iterations):
             nv, ne = tn.num_tensors, tn.num_indices
@@ -9231,7 +9335,7 @@ class TensorNetwork(object):
                 cents = nodes_to_centrality(
                     {tid: t.inds for tid, t in tn.tensor_map.items()}
                 )
-            tn.hyperinds_resolve_(hyperind_resolve_mode, sorter=sorter)
+            tn.hyperinds_resolve_(**hyperresolve_opts)
             tn.full_simplify_(simplify_sequence_b, **simplify_opts)
             tn.full_simplify_(simplify_sequence_a, **simplify_opts)
             if (
@@ -9247,7 +9351,7 @@ class TensorNetwork(object):
                 cents = nodes_to_centrality(
                     {tid: t.inds for tid, t in tn.tensor_map.items()}
                 )
-            tn.hyperinds_resolve_(hyperind_resolve_mode, sorter=sorter)
+            tn.hyperinds_resolve_(**hyperresolve_opts)
             tn.full_simplify_(simplify_sequence_b, **simplify_opts)
 
         return tn

@@ -1459,6 +1459,23 @@ class TestTensorNetwork:
         assert Z == pytest.approx(Zh)
         assert max(map(len, tn.ind_map.values())) == 2
 
+    def test_hyperind_simplification_with_outputs(self):
+        htn = qtn.HTN_random_ksat(3, 10, alpha=3.0, seed=42)
+        assert htn.get_hyperinds()
+        htn.randomize_()
+        output_inds = [f"var{v}" for v in range(1, 11)]
+        pex = htn.contract(output_inds=output_inds).data
+        stn1= htn.compress_simplify(output_inds=output_inds)
+        p1 = stn1.contract(output_inds=output_inds).data
+        assert stn1.get_hyperinds()
+        assert_allclose(pex, p1)
+        stn2 = stn1.compress_simplify(
+            output_inds=output_inds, final_resolve=True
+        )
+        assert not stn2.get_hyperinds()
+        p2 = stn2.contract(output_inds=output_inds).data
+        assert_allclose(pex, p2)
+
 
 class TestTensorNetworkSimplifications:
 
