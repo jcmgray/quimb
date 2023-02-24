@@ -23,9 +23,13 @@ from quimb.tensor import (
 )
 from quimb.tensor.decomp import _compute_number_svals_to_keep_numba
 
-autograd_mark = pytest.mark.skipif(
+requires_autograd = pytest.mark.skipif(
     importlib.util.find_spec("autograd") is None,
     reason="autograd not installed",
+)
+requires_cotengra = pytest.mark.skipif(
+    importlib.util.find_spec("cotengra") is None,
+    reason="cotengra not installed",
 )
 
 
@@ -972,12 +976,12 @@ class TestTensorNetwork:
             pytest.param(
                 "autodiff",
                 (("distance_method", "dense"),),
-                marks=autograd_mark,
+                marks=requires_autograd,
             ),
             pytest.param(
                 "autodiff",
                 (("distance_method", "overlap"),),
-                marks=autograd_mark,
+                marks=requires_autograd,
             ),
         ),
     )
@@ -996,12 +1000,12 @@ class TestTensorNetwork:
             pytest.param(
                 "autodiff",
                 (("distance_method", "dense"),),
-                marks=autograd_mark,
+                marks=requires_autograd,
             ),
             pytest.param(
                 "autodiff",
                 (("distance_method", "overlap"),),
-                marks=autograd_mark,
+                marks=requires_autograd,
             ),
         ),
     )
@@ -1020,12 +1024,12 @@ class TestTensorNetwork:
             pytest.param(
                 "autodiff",
                 (("distance_method", "dense"),),
-                marks=autograd_mark,
+                marks=requires_autograd,
             ),
             pytest.param(
                 "autodiff",
                 (("distance_method", "overlap"),),
-                marks=autograd_mark,
+                marks=requires_autograd,
             ),
         ),
     )
@@ -1522,6 +1526,7 @@ class TestTensorNetwork:
         assert Z == pytest.approx(Zh)
         assert max(map(len, tn.ind_map.values())) == 2
 
+    @requires_cotengra
     def test_hyperind_simplification_with_outputs(self):
         htn = qtn.HTN_random_ksat(3, 10, alpha=3.0, seed=42)
         assert htn.get_hyperinds()
