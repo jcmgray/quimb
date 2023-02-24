@@ -37,7 +37,7 @@ from .tensor_3d_tebd import LocalHam3D
 
 
 @functools.lru_cache(maxsize=64)
-def delta_array(shape, dtype='float64'):
+def delta_array(shape, dtype="float64"):
     x = np.zeros(shape, dtype=dtype)
     idx = np.indices(x.shape)
     # 1 where all indices are equal
@@ -50,7 +50,7 @@ def get_rand_fill_fn(
     loc=0.0,
     scale=1.0,
     seed=None,
-    dtype='float64',
+    dtype="float64",
 ):
     if seed is not None:
         seed_rand(seed)
@@ -506,7 +506,7 @@ def TN_from_strings(
     fill_fn=None,
     line_dim=2,
     allow_plaquettes=True,
-    site_tag_id='I{}',
+    site_tag_id="I{}",
     random_rewire=False,
     random_rewire_seed=None,
     join=False,
@@ -514,7 +514,7 @@ def TN_from_strings(
     normalize=False,
     contract_sites=True,
     fuse_multibonds=True,
-    **contract_opts
+    **contract_opts,
 ):
     if fill_fn is None:
         fill_fn = delta_array
@@ -544,7 +544,7 @@ def TN_from_strings(
             data = fill_fn((line_dim, line_dim))
             inds = (
                 string_inds[tuple(sorted((string[i - 1], string[i])))],
-                string_inds[tuple(sorted((string[i], string[i + 1])))]
+                string_inds[tuple(sorted((string[i], string[i + 1])))],
             )
             tags = (site_tag_id.format(string[i]),)
             tn |= Tensor(data=data, inds=inds, tags=tags)
@@ -585,10 +585,14 @@ def TN_from_strings(
             while len(ts) > 1:
                 ta = ts.pop(0)
                 if join_avoid_self_loops:
-                    i = next((
-                        i for i, t in enumerate(ts)
-                        if ind_locs[ta.inds[0]] != ind_locs[t.inds[0]]
-                    ), 0)
+                    i = next(
+                        (
+                            i
+                            for i, t in enumerate(ts)
+                            if ind_locs[ta.inds[0]] != ind_locs[t.inds[0]]
+                        ),
+                        0,
+                    )
                 else:
                     i = 0
                 tb = ts.pop(i)
@@ -596,14 +600,14 @@ def TN_from_strings(
                 ta.modify(data=fill_fn(ta.shape))
                 tb.modify(data=fill_fn(tb.shape))
 
-            if (join == 'all') and ts:
+            if (join == "all") and ts:
                 # connect dangling bond to nearest neighbor, even if this
                 # creates merged loops
-                ta, = ts
+                (ta,) = ts
                 tb = min(
                     [t for t in stn if t is not ta],
                     # choose to merge with shortest neithboring loop however
-                    key=lambda t: len(stn._ind_to_subgraph_tids(t.inds[0]))
+                    key=lambda t: len(stn._ind_to_subgraph_tids(t.inds[0])),
                 )
                 new_bond(ta, tb, size=line_dim)
                 ta.modify(data=fill_fn(ta.shape))
@@ -618,8 +622,8 @@ def TN_from_strings(
             tn_i = tn_i.rank_simplify(equalize_norms=1.0)
             tn.exponent -= tn_i.exponent
             z_i = tn_i.contract(**contract_opts)
-            sign *= do('sign', z_i)
-            tn.exponent -= do('log10', do('abs', z_i))
+            sign *= do("sign", z_i)
+            tn.exponent -= do("log10", do("abs", z_i))
 
         if sign < 0:
             # can multiply any tensor by -1 to flip global sign
@@ -787,9 +791,9 @@ def convert_to_2d(
     tn,
     Lx=None,
     Ly=None,
-    site_tag_id='I{},{}',
-    x_tag_id='X{}',
-    y_tag_id='Y{}',
+    site_tag_id="I{},{}",
+    x_tag_id="X{}",
+    y_tag_id="Y{}",
     inplace=False,
 ):
     """Convert ``tn`` to a :class:`~quimb.tensor.tensor_2d.TensorNetwork2D`,
@@ -1082,14 +1086,15 @@ def TN2D_rand(
 
 
 def TN2D_corner_double_line(
-    Lx, Ly,
+    Lx,
+    Ly,
     line_dim=2,
     tiling=2,
     fill_missing_edges=True,
-    site_tag_id='I{},{}',
-    x_tag_id='X{}',
-    y_tag_id='Y{}',
-    **kwargs
+    site_tag_id="I{},{}",
+    x_tag_id="X{}",
+    y_tag_id="Y{}",
+    **kwargs,
 ):
     """Build a 2D 'corner double line' (CDL) tensor network. Each plaquette
     contributes a matrix (by default the identity) at each corner, connected in
@@ -1147,35 +1152,34 @@ def TN2D_corner_double_line(
             if edge_density < tiling:
                 strings.extend([edge] * (tiling - edge_density))
 
-    tn = TN_from_strings(
-        strings,
-        line_dim=line_dim,
-        **kwargs
-    )
+    tn = TN_from_strings(strings, line_dim=line_dim, **kwargs)
 
     return convert_to_2d(
-        tn, Lx, Ly,
+        tn,
+        Lx,
+        Ly,
         site_tag_id=site_tag_id,
         x_tag_id=x_tag_id,
         y_tag_id=y_tag_id,
-        inplace=True
+        inplace=True,
     )
 
 
 def TN2D_rand_hidden_loop(
-    Lx, Ly,
+    Lx,
+    Ly,
     line_dim=2,
     line_density=2,
     seed=None,
     dist="normal",
-    dtype='float64',
+    dtype="float64",
     loc=0.0,
     scale=1.0,
     gauge_random=True,
-    site_tag_id='I{},{}',
-    x_tag_id='X{}',
-    y_tag_id='Y{}',
-    **kwargs
+    site_tag_id="I{},{}",
+    x_tag_id="X{}",
+    y_tag_id="Y{}",
+    **kwargs,
 ):
     fill_fn = get_rand_fill_fn(dist, loc, scale, seed, dtype)
 
@@ -1184,18 +1188,15 @@ def TN2D_rand_hidden_loop(
     kwargs.setdefault("join", True)
     kwargs.setdefault("random_rewire", True)
     kwargs.setdefault("random_rewire_seed", seed)
-    tn =  TN_from_strings(
-        edges,
-        line_dim=line_dim,
-        fill_fn=fill_fn,
-        **kwargs
-    )
+    tn = TN_from_strings(edges, line_dim=line_dim, fill_fn=fill_fn, **kwargs)
 
     if gauge_random:
         tn.gauge_all_random_()
 
     return convert_to_2d(
-        tn, Lx, Ly,
+        tn,
+        Lx,
+        Ly,
         site_tag_id=site_tag_id,
         x_tag_id=x_tag_id,
         y_tag_id=y_tag_id,
@@ -1208,10 +1209,10 @@ def convert_to_3d(
     Lx=None,
     Ly=None,
     Lz=None,
-    site_tag_id='I{},{},{}',
-    x_tag_id='X{}',
-    y_tag_id='Y{}',
-    z_tag_id='Z{}',
+    site_tag_id="I{},{},{}",
+    x_tag_id="X{}",
+    y_tag_id="Y{}",
+    z_tag_id="Z{}",
     inplace=False,
 ):
     """Convert ``tn`` to a :class:`~quimb.tensor.tensor_3d.TensorNetwork3D`,
@@ -1523,15 +1524,17 @@ def TN3D_rand(
 
 
 def TN3D_corner_double_line(
-    Lx, Ly, Lz,
+    Lx,
+    Ly,
+    Lz,
     line_dim=2,
     tiling=2,
     fill_missing_edges=True,
-    site_tag_id='I{},{},{}',
-    x_tag_id='X{}',
-    y_tag_id='Y{}',
-    z_tag_id='Z{}',
-    **kwargs
+    site_tag_id="I{},{},{}",
+    x_tag_id="X{}",
+    y_tag_id="Y{}",
+    z_tag_id="Z{}",
+    **kwargs,
 ):
     # start with a tiling of plaquettes (loop strings)
     strings = list(gen_3d_plaquettes(Lx, Ly, Lz, tiling=tiling))
@@ -1544,37 +1547,38 @@ def TN3D_corner_double_line(
             if edge_density < tiling:
                 strings.extend([edge] * (tiling - edge_density))
 
-    tn = TN_from_strings(
-        strings,
-        line_dim=line_dim,
-        **kwargs
-    )
+    tn = TN_from_strings(strings, line_dim=line_dim, **kwargs)
 
     return convert_to_3d(
-        tn, Lx, Ly, Lz,
+        tn,
+        Lx,
+        Ly,
+        Lz,
         site_tag_id=site_tag_id,
         x_tag_id=x_tag_id,
         y_tag_id=y_tag_id,
         z_tag_id=z_tag_id,
-        inplace=True
+        inplace=True,
     )
 
 
 def TN3D_rand_hidden_loop(
-    Lx, Ly, Lz,
+    Lx,
+    Ly,
+    Lz,
     line_dim=2,
     line_density=2,
     seed=None,
     dist="normal",
-    dtype='float64',
+    dtype="float64",
     loc=0.0,
     scale=1.0,
     gauge_random=True,
-    site_tag_id='I{},{},{}',
-    x_tag_id='X{}',
-    y_tag_id='Y{}',
-    z_tag_id='Z{}',
-    **kwargs
+    site_tag_id="I{},{},{}",
+    x_tag_id="X{}",
+    y_tag_id="Y{}",
+    z_tag_id="Z{}",
+    **kwargs,
 ):
     fill_fn = get_rand_fill_fn(dist, loc, scale, seed, dtype)
 
@@ -1583,18 +1587,16 @@ def TN3D_rand_hidden_loop(
     kwargs.setdefault("join", True)
     kwargs.setdefault("random_rewire", True)
     kwargs.setdefault("random_rewire_seed", seed)
-    tn =  TN_from_strings(
-        edges,
-        line_dim=line_dim,
-        fill_fn=fill_fn,
-        **kwargs
-    )
+    tn = TN_from_strings(edges, line_dim=line_dim, fill_fn=fill_fn, **kwargs)
 
     if gauge_random:
         tn.gauge_all_random_()
 
     return convert_to_3d(
-        tn, Lx, Ly, Lz,
+        tn,
+        Lx,
+        Ly,
+        Lz,
         site_tag_id=site_tag_id,
         x_tag_id=x_tag_id,
         y_tag_id=y_tag_id,
@@ -1750,7 +1752,6 @@ def HTN2D_classical_ising_partition_function(
 
     ts = []
     for ni, nj in itertools.product(range(Lx), range(Ly)):
-
         if ni < Lx - 1 or cyclic_x:
             node_a, node_b = (ni, nj), ((ni + 1) % Lx, nj)
             inds = ind_id.format(*node_a), ind_id.format(*node_b)
@@ -1833,7 +1834,6 @@ def HTN3D_classical_ising_partition_function(
 
     ts = []
     for ni, nj, nk in itertools.product(range(Lx), range(Ly), range(Lz)):
-
         if ni < Lx - 1 or cyclic_x:
             node_a, node_b = (ni, nj, nk), ((ni + 1) % Lx, nj, nk)
             inds = (ind_id.format(*node_a), ind_id.format(*node_b))
@@ -2336,8 +2336,7 @@ def TN_dimer_covering_from_edges(
 
 
 def clause_negmask(clause):
-    """Encode a clause as a single integer ``m``.
-    """
+    """Encode a clause as a single integer ``m``."""
     return int("".join("0" if x > 0 else "1" for x in clause), 2)
 
 
@@ -2352,7 +2351,7 @@ def or_clause_data(ndim, m=0, dtype=float, q=2):
     return t
 
 
-def or_clause_tensor(ndim, m, inds, tags=None, dtype='float64'):
+def or_clause_tensor(ndim, m, inds, tags=None, dtype="float64"):
     """Get the tensor representing satisfiability of ``ndim`` clauses with
     unsatisfied condition encoded in ``m`` labelled by ``inds`` and ``tags``.
     """
@@ -2360,16 +2359,14 @@ def or_clause_tensor(ndim, m, inds, tags=None, dtype='float64'):
     return Tensor(data=data, inds=inds, tags=tags)
 
 
-def or_clause_mps_tensors(ndim, m, inds, tags=None, dtype='float64'):
+def or_clause_mps_tensors(ndim, m, inds, tags=None, dtype="float64"):
     """Get the set of MPS tensors representing satisfiability of ``ndim``
     clauses with unsatisfied condition encoded in ``m`` labelled by ``inds``
     and ``tags``.
     """
-    mps = (
-        MPS_computational_state("+" * ndim, dtype=dtype)
-        * (2 ** (ndim / 2))
-        - MPS_computational_state(f"{m:0>{ndim}b}", dtype=dtype)
-    )
+    mps = MPS_computational_state("+" * ndim, dtype=dtype) * (
+        2 ** (ndim / 2)
+    ) - MPS_computational_state(f"{m:0>{ndim}b}", dtype=dtype)
     mps.drop_tags()
     if tags is not None:
         mps.add_tag(tags)
@@ -2378,7 +2375,7 @@ def or_clause_mps_tensors(ndim, m, inds, tags=None, dtype='float64'):
 
 
 @functools.lru_cache(2**10)
-def or_clause_parafac_data(ndim, m, dtype='float64'):
+def or_clause_parafac_data(ndim, m, dtype="float64"):
     """Get the set of PARAFAC arrays representing satisfiability of ``ndim``
     clauses with unsatisfied condition encoded in ``m``.
     """
@@ -2407,7 +2404,7 @@ def or_clause_parafac_data(ndim, m, dtype='float64'):
     return tuple(t.data for t in ts)
 
 
-def clause_parafac_tensors(ndim, m, inds, tags=None, dtype='float64'):
+def clause_parafac_tensors(ndim, m, inds, tags=None, dtype="float64"):
     """Get the set of PARAFAC tensors representing satisfiability of ``ndim``
     clauses with unsatisfied condition encoded in ``m`` labelled by ``inds``
     and ``tags``.
@@ -2422,8 +2419,8 @@ def clause_parafac_tensors(ndim, m, inds, tags=None, dtype='float64'):
 def HTN_from_clauses(
     clauses,
     weights=None,
-    mode='parafac',
-    dtype='float64',
+    mode="parafac",
+    dtype="float64",
     clause_tag_id="CLAUSE{}",
     var_ind_id="var{}",
     weight_tag_id="WEIGHT{}",
@@ -2478,7 +2475,6 @@ def HTN_from_clauses(
     ts = []
 
     for c, clause in enumerate(clauses):
-
         ndim = len(clause)
         m = clause_negmask(clause)
         inds = [var_ind_id.format(abs(var)) for var in clause]
@@ -2486,14 +2482,16 @@ def HTN_from_clauses(
 
         if (
             # parafac mode
-            (mode == "parafac" and ndim > 2) or
+            (mode == "parafac" and ndim > 2)
+            or
             # parafac above cutoff size mode
             (isinstance(mode, int) and ndim > mode)
         ):
             ts.extend(clause_parafac_tensors(ndim, m, inds, tag, dtype))
         elif (
             # mps mode
-            (mode == "mps") and
+            (mode == "mps")
+            and
             # only makes sense for 3 or more tensors
             (ndim >= 3)
         ):
@@ -2554,7 +2552,7 @@ def cnf_file_parse(fname):
     """
     clauses = []
     weights = {}
-    k = float('-inf')
+    k = float("-inf")
 
     with open(fname, "r") as f:
         for line in f:
@@ -2614,8 +2612,8 @@ def cnf_file_parse(fname):
 
 def HTN_from_cnf(
     fname,
-    mode='parafac',
-    dtype='float64',
+    mode="parafac",
+    dtype="float64",
     clause_tag_id="CLAUSE{}",
     var_ind_id="var{}",
     weight_tag_id="WEIGHT{}",
@@ -2663,7 +2661,7 @@ def HTN_from_cnf(
         clause_tag_id=clause_tag_id,
         var_ind_id=var_ind_id,
         weight_tag_id=weight_tag_id,
-        **kwargs
+        **kwargs,
     )
 
 
@@ -2736,10 +2734,10 @@ def HTN_random_ksat(
     alpha=None,
     seed=None,
     allow_repeat_variables=False,
-    mode='parafac',
-    dtype='float64',
-    clause_tag_id='CLAUSE{}',
-    variable_ind_id='var{}',
+    mode="parafac",
+    dtype="float64",
+    clause_tag_id="CLAUSE{}",
+    variable_ind_id="var{}",
 ):
     """Create a random k-SAT instance encoded as a hyper tensor network.
 
@@ -2798,7 +2796,7 @@ def HTN_random_ksat(
     )
 
     return HTN_from_clauses(
-        instance['clauses'],
+        instance["clauses"],
         mode=mode,
         dtype=dtype,
         clause_tag_id=clause_tag_id,
@@ -3646,7 +3644,6 @@ class SpinHam1D:
 
         terms = []
         for i in range(L):
-
             t1s = self.var_one_site_terms.get(i, self.one_site_terms)
             for factor, s in t1s:
                 if isinstance(s, str):
