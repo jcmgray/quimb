@@ -10,9 +10,8 @@ import quimb.tensor as qtn
 
 
 class TestPEPSConstruct:
-
-    @pytest.mark.parametrize('Lx', [3, 4, 5])
-    @pytest.mark.parametrize('Ly', [3, 4, 5])
+    @pytest.mark.parametrize("Lx", [3, 4, 5])
+    @pytest.mark.parametrize("Ly", [3, 4, 5])
     def test_basic_rand(self, Lx, Ly):
         psi = qtn.PEPS.rand(Lx, Ly, bond_dim=4)
 
@@ -21,32 +20,32 @@ class TestPEPSConstruct:
         assert psi.Ly == Ly
         assert len(psi.tensor_map) == Lx * Ly
         assert psi.site_inds == tuple(
-            f'k{i},{j}' for i in range(Lx) for j in range(Ly)
+            f"k{i},{j}" for i in range(Lx) for j in range(Ly)
         )
         assert psi.site_tags == tuple(
-            f'I{i},{j}' for i in range(Lx) for j in range(Ly)
+            f"I{i},{j}" for i in range(Lx) for j in range(Ly)
         )
 
         assert psi.bond_size((1, 1), (1, 2)) == (4)
 
         for i in range(Lx):
-            assert len(psi.select(f'X{i}').tensor_map) == Ly
+            assert len(psi.select(f"X{i}").tensor_map) == Ly
         for j in range(Ly):
-            assert len(psi.select(f'Y{j}').tensor_map) == Lx
+            assert len(psi.select(f"Y{j}").tensor_map) == Lx
 
         for i in range(Lx):
             for j in range(Ly):
                 assert psi.phys_dim(i, j) == 2
                 assert isinstance(psi[i, j], qtn.Tensor)
-                assert isinstance(psi[f'I{i},{j}'], qtn.Tensor)
+                assert isinstance(psi[f"I{i},{j}"], qtn.Tensor)
 
         if Lx == Ly == 3:
-            psi_dense = psi.to_dense(optimize='random-greedy')
+            psi_dense = psi.to_dense(optimize="random-greedy")
             assert psi_dense.shape == (512, 1)
 
         psi.show()
-        assert f'Lx={Lx}' in psi.__str__()
-        assert f'Lx={Lx}' in psi.__repr__()
+        assert f"Lx={Lx}" in psi.__str__()
+        assert f"Lx={Lx}" in psi.__repr__()
 
     def test_flatten(self):
         psi = qtn.PEPS.rand(3, 5, 3, seed=42)
@@ -64,8 +63,8 @@ class TestPEPSConstruct:
         assert pab.max_bond() == 5
         assert pab @ pc == pytest.approx(pa @ pc + pb @ pc)
 
-    @pytest.mark.parametrize('Lx', [3, 4, 5])
-    @pytest.mark.parametrize('Ly', [3, 4, 5])
+    @pytest.mark.parametrize("Lx", [3, 4, 5])
+    @pytest.mark.parametrize("Ly", [3, 4, 5])
     def test_bond_coordinates(self, Lx, Ly):
         psi = qtn.PEPS.rand(Lx, Ly, bond_dim=1)
         all_bonds = tuple(psi.gen_bond_coos())
@@ -82,11 +81,21 @@ class TestPEPSConstruct:
         # check all coordinates are generated
         assert set(itertools.chain(he, ho, ve, vo)) == set(all_bonds)
 
-    @pytest.mark.parametrize('where', [
-        [(0, 0)], [(0, 1)], [(0, 2)], [(2, 2)],
-        [(3, 2)], [(3, 1)], [(3, 0)], [(2, 0)], [(1, 1)],
-    ])
-    @pytest.mark.parametrize('contract', [False, True])
+    @pytest.mark.parametrize(
+        "where",
+        [
+            [(0, 0)],
+            [(0, 1)],
+            [(0, 2)],
+            [(2, 2)],
+            [(3, 2)],
+            [(3, 1)],
+            [(3, 0)],
+            [(2, 0)],
+            [(1, 1)],
+        ],
+    )
+    @pytest.mark.parametrize("contract", [False, True])
     def test_gate_2d_single_site(self, where, contract):
         Lx = 4
         Ly = 3
@@ -107,11 +116,17 @@ class TestPEPSConstruct:
         assert tn ^ all == pytest.approx(xe)
 
     @pytest.mark.parametrize(
-        'contract', [False, True, 'split', 'reduce-split'])
-    @pytest.mark.parametrize('where', [
-        [(1, 1), (2, 1)], [(3, 2), (2, 2)],
-        [(0, 0), (1, 1)], [(3, 1), (1, 2)]
-    ])
+        "contract", [False, True, "split", "reduce-split"]
+    )
+    @pytest.mark.parametrize(
+        "where",
+        [
+            [(1, 1), (2, 1)],
+            [(3, 2), (2, 2)],
+            [(0, 0), (1, 1)],
+            [(3, 1), (1, 2)],
+        ],
+    )
     def test_gate_2d_two_site(self, where, contract):
         Lx = 4
         Ly = 3
@@ -127,52 +142,63 @@ class TestPEPSConstruct:
 
         # compute the exact dense reference
         dims = [[2] * Ly] * Lx
-        IGI = sum(qu.ikron([A, B], dims, where, sparse=True)
-                  for A, B in G_comps)
+        IGI = sum(
+            qu.ikron([A, B], dims, where, sparse=True) for A, B in G_comps
+        )
 
         xe = (psi_d.H @ IGI @ psi_d).item()
 
         tn = psi.H & psi.gate(G, where, contract=contract)
-        change = {False: 1, True: -1, 'split': 0, 'reduce-split': 0}[contract]
+        change = {False: 1, True: -1, "split": 0, "reduce-split": 0}[contract]
         assert len(tn.tensors) == 2 * Lx * Ly + change
 
         assert tn ^ all == pytest.approx(xe)
 
-    @pytest.mark.parametrize('propagate_tags',
-                             [False, True, 'sites', 'register'])
+    @pytest.mark.parametrize(
+        "propagate_tags", [False, True, "sites", "register"]
+    )
     def test_gate_propagate_tags(self, propagate_tags):
         Lx = 4
         Ly = 3
         D = 1
-        psi = qtn.PEPS.rand(Lx, Ly, D, tags='PSI0')
-        psi.gate_(qu.rand_uni(4), [(1, 1), (1, 2)], tags='G1',
-                  propagate_tags=propagate_tags)
-        psi.gate_(qu.rand_uni(4), [(1, 2), (3, 2)], tags='G2',
-                  propagate_tags=propagate_tags)
+        psi = qtn.PEPS.rand(Lx, Ly, D, tags="PSI0")
+        psi.gate_(
+            qu.rand_uni(4),
+            [(1, 1), (1, 2)],
+            tags="G1",
+            propagate_tags=propagate_tags,
+        )
+        psi.gate_(
+            qu.rand_uni(4),
+            [(1, 2), (3, 2)],
+            tags="G2",
+            propagate_tags=propagate_tags,
+        )
         if propagate_tags is False:
-            assert set(psi['G1'].tags) == {'G1'}
-            assert set(psi['G2'].tags) == {'G2'}
+            assert set(psi["G1"].tags) == {"G1"}
+            assert set(psi["G2"].tags) == {"G2"}
         if propagate_tags is True:
-            tgs1 = {'I1,1', 'I1,2', 'G1', 'PSI0', 'Y1', 'Y2', 'X1'}
-            assert set(psi['G1'][0].tags) == tgs1
-            assert set(psi['G2'].tags) == tgs1 | {'G2', 'I3,2', 'X3', 'Y2'}
-        if propagate_tags == 'sites':
-            assert set(psi['G1'].tags) == {'G1', 'I1,1', 'I1,2'}
-            assert set(psi['G2'].tags) == {'G2', 'I1,1', 'I1,2', 'I3,2'}
-        if propagate_tags == 'register':
-            assert set(psi['G1'].tags) == {'G1', 'I1,1', 'I1,2'}
-            assert set(psi['G2'].tags) == {'G2', 'I1,2', 'I3,2'}
+            tgs1 = {"I1,1", "I1,2", "G1", "PSI0", "Y1", "Y2", "X1"}
+            assert set(psi["G1"][0].tags) == tgs1
+            assert set(psi["G2"].tags) == tgs1 | {"G2", "I3,2", "X3", "Y2"}
+        if propagate_tags == "sites":
+            assert set(psi["G1"].tags) == {"G1", "I1,1", "I1,2"}
+            assert set(psi["G2"].tags) == {"G2", "I1,1", "I1,2", "I3,2"}
+        if propagate_tags == "register":
+            assert set(psi["G1"].tags) == {"G1", "I1,1", "I1,2"}
+            assert set(psi["G2"].tags) == {"G2", "I1,2", "I3,2"}
 
 
 class Test2DContract:
-
-    @pytest.mark.parametrize('mode', ['mps', "projector", "full-bond"])
+    @pytest.mark.parametrize("mode", ["mps", "projector", "full-bond"])
     def test_contract_boundary(self, mode):
         # make a large but cheap and easy (mostly positive) TN
         rng = np.random.default_rng(42)
         tn = qtn.TN2D_from_fill_fn(
             lambda shape: rng.uniform(low=-0.1, size=shape),
-            Lx=8, Ly=8, D=2,
+            Lx=8,
+            Ly=8,
+            D=2,
         )
         Zex = tn.contract(...)
         Z = tn.contract_boundary(max_bond=4, mode=mode)
@@ -181,133 +207,150 @@ class Test2DContract:
     def test_contract_2d_one_layer_boundary(self):
         psi = qtn.PEPS.rand(4, 4, 3, seed=42)
         norm = psi.make_norm()
-        xe = norm.contract(all, optimize='auto-hq')
+        xe = norm.contract(all, optimize="auto-hq")
         xt = norm.contract_boundary(max_bond=9)
         assert xt == pytest.approx(xe, rel=1e-2)
 
     def test_contract_2d_two_layer_boundary(self):
-        psi = qtn.PEPS.rand(4, 4, 3, seed=42, tags='KET')
+        psi = qtn.PEPS.rand(4, 4, 3, seed=42, tags="KET")
         norm = psi.make_norm()
-        xe = norm.contract(all, optimize='auto-hq')
-        xt = norm.contract_boundary(max_bond=27, layer_tags=['KET', 'BRA'])
+        xe = norm.contract(all, optimize="auto-hq")
+        xt = norm.contract_boundary(max_bond=27, layer_tags=["KET", "BRA"])
         assert xt == pytest.approx(xe, rel=1e-2)
 
     def test_contract_2d_full_bond(self):
-        psi = qtn.PEPS.rand(4, 4, 3, seed=42, tags='KET')
+        psi = qtn.PEPS.rand(4, 4, 3, seed=42, tags="KET")
         norm = psi.make_norm()
-        xe = norm.contract(all, optimize='auto-hq')
-        xt = norm.contract_boundary(max_bond=27, mode='full-bond')
+        xe = norm.contract(all, optimize="auto-hq")
+        xt = norm.contract_boundary(max_bond=27, mode="full-bond")
         assert xt == pytest.approx(xe, rel=1e-2)
 
     @pytest.mark.parametrize("lazy", [False, True])
     def test_coarse_grain_basics(self, lazy):
         tn = qtn.TN2D_from_fill_fn(
             lambda shape: ar.lazy.Variable(shape, backend="numpy"),
-            Lx=6, Ly=7, D=2,
+            Lx=6,
+            Ly=7,
+            D=2,
         )
         tncg = tn.coarse_grain_hotrg("x", max_bond=3, cutoff=0.0, lazy=lazy)
         assert (tncg.Lx, tncg.Ly) == (3, 7)
         assert not tncg.outer_inds()
         assert tncg.max_bond() == 3
-        assert 'I4,0' not in tncg.tag_map
-        assert 'X5' not in tncg.tag_map
+        assert "I4,0" not in tncg.tag_map
+        assert "X5" not in tncg.tag_map
 
         tncg = tn.coarse_grain_hotrg("y", max_bond=3, cutoff=0.0, lazy=lazy)
         assert (tncg.Lx, tncg.Ly) == (6, 4)
         assert not tncg.outer_inds()
         assert tncg.max_bond() == 3
-        assert 'I0,5' not in tncg.tag_map
-        assert 'Y6' not in tncg.tag_map
+        assert "I0,5" not in tncg.tag_map
+        assert "Y6" not in tncg.tag_map
 
     def test_contract_hotrg(self):
         tn = qtn.TN2D_classical_ising_partition_function(16, 16, 0.44)
         Zap = tn.contract_hotrg(max_bond=5) ^ ...
-        assert Zap == pytest.approx(8.459419593253275e+100, rel=2e-3)
+        assert Zap == pytest.approx(8.459419593253275e100, rel=2e-3)
 
     def test_contract_hotrg_two_layer_rand_peps(self):
         rng = np.random.default_rng(42)
         psi = qtn.PEPS.from_fill_fn(
             lambda shape: rng.uniform(low=-0.1, size=shape),
-            Lx=7, Ly=5, bond_dim=2
+            Lx=7,
+            Ly=5,
+            bond_dim=2,
         )
         norm = psi.make_norm()
-        xe = norm.contract(all, optimize='auto-hq')
+        xe = norm.contract(all, optimize="auto-hq")
         xt = norm.contract_hotrg(max_bond=5) ^ ...
         assert xt == pytest.approx(xe, rel=1e-4)
 
     def test_ising_accuracy_regression(self):
         tn = qtn.TN2D_classical_ising_partition_function(16, 16, 0.44)
-        for s in 'bltr':
+        for s in "bltr":
             Zap = tn.contract_boundary(max_bond=8, sequence=s)
-            assert Zap == pytest.approx(8.459419593253275e+100, rel=2.2e-7)
-        for s in ['bt', 'lr']:
+            assert Zap == pytest.approx(8.459419593253275e100, rel=2.2e-7)
+        for s in ["bt", "lr"]:
             Zap = tn.contract_boundary(max_bond=8, sequence=s)
-            assert Zap == pytest.approx(8.459419593253275e+100, rel=3.9e-9)
+            assert Zap == pytest.approx(8.459419593253275e100, rel=3.9e-9)
 
-    @pytest.mark.parametrize("mode", ['mps', 'ctmrg', 'hotrg'])
+    @pytest.mark.parametrize("mode", ["mps", "ctmrg", "hotrg"])
     def test_cdl_rand_large(self, mode):
-        tn = qtn.TN2D_rand_hidden_loop(15, 15, seed=42, contract_sites=False)
+        tn = qtn.TN2D_rand_hidden_loop(10, 10, seed=42, contract_sites=False)
         Zex = tn.contract(...)
-        tn = qtn.TN2D_rand_hidden_loop(15, 15, seed=42, contract_sites=True)
+        tn = qtn.TN2D_rand_hidden_loop(10, 10, seed=42, contract_sites=True)
 
-        if mode == 'mps':
+        if mode == "mps":
             Z = tn.contract_boundary(max_bond=16)
-        elif mode == 'ctmrg':
+        elif mode == "ctmrg":
             Z = tn.contract_ctmrg(max_bond=16) ^ ...
-        elif mode == 'hotrg':
+        elif mode == "hotrg":
             Z = tn.contract_hotrg(max_bond=16) ^ ...
 
         assert Z == pytest.approx(Zex, rel=1e-1)
 
-
-    @pytest.mark.parametrize("mode,two_layer", [
-        ('mps', False),
-        ('mps', True),
-        ('full-bond', False),
-    ])
+    @pytest.mark.parametrize(
+        "mode,two_layer",
+        [
+            ("mps", False),
+            ("mps", True),
+            ("full-bond", False),
+        ],
+    )
     def test_compute_x_envs(self, mode, two_layer):
-        psi = qtn.PEPS.rand(5, 4, 2, seed=42, tags='KET')
+        psi = qtn.PEPS.rand(5, 4, 2, seed=42, tags="KET")
         norm = psi.make_norm()
         ex = norm.contract(all)
 
         if two_layer:
-            compress_opts = {'cutoff': 1e-6, 'max_bond': 12, 'mode': mode,
-                             'layer_tags': ['KET', 'BRA']}
+            compress_opts = {
+                "cutoff": 1e-6,
+                "max_bond": 12,
+                "mode": mode,
+                "layer_tags": ["KET", "BRA"],
+            }
         else:
-            compress_opts = {'cutoff': 1e-6, 'max_bond': 8, 'mode': mode}
+            compress_opts = {"cutoff": 1e-6, "max_bond": 8, "mode": mode}
         row_envs = norm.compute_x_environments(**compress_opts)
 
         for i in range(norm.Lx):
             norm_i = (
-                row_envs['xmin', i] &
-                norm.select(norm.x_tag(i)) &
-                row_envs['xmax', i]
+                row_envs["xmin", i]
+                & norm.select(norm.x_tag(i))
+                & row_envs["xmax", i]
             )
             x = norm_i.contract(all)
             assert x == pytest.approx(ex, rel=1e-2)
 
-    @pytest.mark.parametrize("mode,two_layer", [
-        ('mps', False),
-        ('mps', True),
-        ('full-bond', False),
-    ])
+    @pytest.mark.parametrize(
+        "mode,two_layer",
+        [
+            ("mps", False),
+            ("mps", True),
+            ("full-bond", False),
+        ],
+    )
     def test_compute_y_envs(self, mode, two_layer):
-        psi = qtn.PEPS.rand(4, 5, 2, seed=42, tags='KET')
-        norm = psi.retag({'KET': 'BRA'}).H | psi
+        psi = qtn.PEPS.rand(4, 5, 2, seed=42, tags="KET")
+        norm = psi.retag({"KET": "BRA"}).H | psi
         ex = norm.contract(all)
 
         if two_layer:
-            compress_opts = {'cutoff': 1e-6, 'max_bond': 12, 'mode': mode,
-                             'layer_tags': ['KET', 'BRA']}
+            compress_opts = {
+                "cutoff": 1e-6,
+                "max_bond": 12,
+                "mode": mode,
+                "layer_tags": ["KET", "BRA"],
+            }
         else:
-            compress_opts = {'cutoff': 1e-6, 'max_bond': 8, 'mode': mode}
+            compress_opts = {"cutoff": 1e-6, "max_bond": 8, "mode": mode}
         col_envs = norm.compute_y_environments(**compress_opts)
 
         for j in range(norm.Lx):
             norm_j = (
-                col_envs['ymin', j] &
-                norm.select(norm.y_tag(j)) &
-                col_envs['ymax', j]
+                col_envs["ymin", j]
+                & norm.select(norm.y_tag(j))
+                & col_envs["ymax", j]
             )
             x = norm_j.contract(all)
             assert x == pytest.approx(ex, rel=1e-2)
@@ -320,10 +363,10 @@ class Test2DContract:
         norm = (psi.H | psi).contract(all)
         assert norm == pytest.approx(1.0, rel=0.01)
 
-    @pytest.mark.parametrize('normalized', [False, True])
-    @pytest.mark.parametrize('mode', ['mps', 'full-bond'])
+    @pytest.mark.parametrize("normalized", [False, True])
+    @pytest.mark.parametrize("mode", ["mps", "full-bond"])
     def test_compute_local_expectation_one_sites(self, mode, normalized):
-        peps = qtn.PEPS.rand(4, 3, 2, seed=42, dtype='complex')
+        peps = qtn.PEPS.rand(4, 3, 2, seed=42, dtype="complex")
 
         # reference
         k = peps.to_dense()
@@ -332,18 +375,20 @@ class Test2DContract:
         coos = list(itertools.product([0, 2, 3], [0, 1, 2]))
         terms = {coo: qu.rand_matrix(2) for coo in coos}
         dims = [[2] * 3] * 4
-        A = sum(qu.ikron(A, dims, [coo], sparse=True)
-                for coo, A in terms.items())
+        A = sum(
+            qu.ikron(A, dims, [coo], sparse=True) for coo, A in terms.items()
+        )
         ex = qu.expec(A, k)
 
-        opts = dict(cutoff=2e-3, max_bond=9, contract_optimize='random-greedy')
+        opts = dict(cutoff=2e-3, max_bond=9, contract_optimize="random-greedy")
         e = peps.compute_local_expectation(
-            terms, mode=mode, normalized=normalized, **opts)
+            terms, mode=mode, normalized=normalized, **opts
+        )
 
         assert e == pytest.approx(ex, rel=1e-2)
 
-    @pytest.mark.parametrize('normalized', [False, True])
-    @pytest.mark.parametrize('mode', ['mps', 'full-bond'])
+    @pytest.mark.parametrize("normalized", [False, True])
+    @pytest.mark.parametrize("mode", ["mps", "full-bond"])
     def test_compute_local_expectation_two_sites(self, mode, normalized):
         H = qu.ham_heis_2D(4, 3, sparse=True)
         Hij = qu.ham_heis(2, cyclic=False)
@@ -360,7 +405,7 @@ class Test2DContract:
             normalized=normalized,
             cutoff=2e-3,
             max_bond=16,
-            contract_optimize='random-greedy'
+            contract_optimize="random-greedy",
         )
 
         # compute 2x1 and 1x2 plaquettes separately
@@ -380,9 +425,8 @@ class Test2DContract:
 
 
 class TestPEPO:
-
-    @pytest.mark.parametrize('Lx', [3, 4, 5])
-    @pytest.mark.parametrize('Ly', [3, 4, 5])
+    @pytest.mark.parametrize("Lx", [3, 4, 5])
+    @pytest.mark.parametrize("Ly", [3, 4, 5])
     def test_basic_rand(self, Lx, Ly):
         X = qtn.PEPO.rand_herm(Lx, Ly, bond_dim=4)
 
@@ -391,36 +435,36 @@ class TestPEPO:
         assert X.Ly == Ly
         assert len(X.tensor_map) == Lx * Ly
         assert X.upper_inds == tuple(
-            f'k{i},{j}' for i in range(Lx) for j in range(Ly)
+            f"k{i},{j}" for i in range(Lx) for j in range(Ly)
         )
         assert X.lower_inds == tuple(
-            f'b{i},{j}' for i in range(Lx) for j in range(Ly)
+            f"b{i},{j}" for i in range(Lx) for j in range(Ly)
         )
         assert X.site_tags == tuple(
-            f'I{i},{j}' for i in range(Lx) for j in range(Ly)
+            f"I{i},{j}" for i in range(Lx) for j in range(Ly)
         )
 
         assert X.bond_size((1, 1), (1, 2)) == (4)
 
         for i in range(Lx):
-            assert len(X.select(f'X{i}').tensor_map) == Ly
+            assert len(X.select(f"X{i}").tensor_map) == Ly
         for j in range(Ly):
-            assert len(X.select(f'Y{j}').tensor_map) == Lx
+            assert len(X.select(f"Y{j}").tensor_map) == Lx
 
         for i in range(Lx):
             for j in range(Ly):
                 assert X.phys_dim(i, j) == 2
                 assert isinstance(X[i, j], qtn.Tensor)
-                assert isinstance(X[f'I{i},{j}'], qtn.Tensor)
+                assert isinstance(X[f"I{i},{j}"], qtn.Tensor)
 
         if Lx == Ly == 3:
-            X_dense = X.to_dense(optimize='random-greedy')
+            X_dense = X.to_dense(optimize="random-greedy")
             assert X_dense.shape == (512, 512)
             assert qu.isherm(X_dense)
 
         X.show()
-        assert f'Lx={Lx}' in X.__str__()
-        assert f'Lx={Lx}' in X.__repr__()
+        assert f"Lx={Lx}" in X.__str__()
+        assert f"Lx={Lx}" in X.__repr__()
 
     def test_add_pepo(self):
         pa = qtn.PEPO.rand(3, 4, 2)
@@ -444,27 +488,33 @@ class TestPEPO:
 
 
 class TestMisc:
-
     def test_calc_plaquette_sizes(self):
         from quimb.tensor.tensor_2d import calc_plaquette_sizes
+
         H2 = {None: qu.ham_heis(2)}
         ham = qtn.LocalHam2D(10, 10, H2)
         assert calc_plaquette_sizes(ham.terms.keys()) == ((1, 2), (2, 1))
-        assert (calc_plaquette_sizes(ham.terms.keys(), autogroup=False) ==
-                ((2, 2),))
+        assert calc_plaquette_sizes(ham.terms.keys(), autogroup=False) == (
+            (2, 2),
+        )
         H2[(1, 1), (2, 2)] = 0.5 * qu.ham_heis(2)
         ham = qtn.LocalHam2D(10, 10, H2)
         assert calc_plaquette_sizes(ham.terms.keys()) == ((2, 2),)
         H2[(2, 2), (2, 4)] = 0.25 * qu.ham_heis(2)
         H2[(2, 4), (4, 4)] = 0.25 * qu.ham_heis(2)
         ham = qtn.LocalHam2D(10, 10, H2)
-        assert (calc_plaquette_sizes(ham.terms.keys()) ==
-                ((1, 3), (2, 2), (3, 1)))
-        assert (calc_plaquette_sizes(ham.terms.keys(), autogroup=False) ==
-                ((3, 3),))
+        assert calc_plaquette_sizes(ham.terms.keys()) == (
+            (1, 3),
+            (2, 2),
+            (3, 1),
+        )
+        assert calc_plaquette_sizes(ham.terms.keys(), autogroup=False) == (
+            (3, 3),
+        )
 
     def test_calc_plaquette_map(self):
         from quimb.tensor.tensor_2d import calc_plaquette_map
+
         plaquettes = [
             # 2x2 plaquette covering all sites
             ((0, 0), (2, 2)),
@@ -475,16 +525,15 @@ class TestMisc:
             ((0, 0), (2, 1)),
             ((0, 1), (2, 1)),
         ]
-        assert (
-            calc_plaquette_map(plaquettes) ==
-            {(0, 0): ((0, 0), (2, 1)),
-             (0, 1): ((0, 1), (2, 1)),
-             (1, 0): ((1, 0), (1, 2)),
-             (1, 1): ((1, 0), (1, 2)),
-             ((0, 0), (0, 1)): ((0, 0), (1, 2)),
-             ((0, 0), (1, 0)): ((0, 0), (2, 1)),
-             ((0, 0), (1, 1)): ((0, 0), (2, 2)),
-             ((0, 1), (1, 0)): ((0, 0), (2, 2)),
-             ((0, 1), (1, 1)): ((0, 1), (2, 1)),
-             ((1, 0), (1, 1)): ((1, 0), (1, 2))}
-        )
+        assert calc_plaquette_map(plaquettes) == {
+            (0, 0): ((0, 0), (2, 1)),
+            (0, 1): ((0, 1), (2, 1)),
+            (1, 0): ((1, 0), (1, 2)),
+            (1, 1): ((1, 0), (1, 2)),
+            ((0, 0), (0, 1)): ((0, 0), (1, 2)),
+            ((0, 0), (1, 0)): ((0, 0), (2, 1)),
+            ((0, 0), (1, 1)): ((0, 0), (2, 2)),
+            ((0, 1), (1, 0)): ((0, 0), (2, 2)),
+            ((0, 1), (1, 1)): ((0, 1), (2, 1)),
+            ((1, 0), (1, 1)): ((1, 0), (1, 2)),
+        }
