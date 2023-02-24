@@ -510,6 +510,7 @@ def TN_from_strings(
     random_rewire=False,
     random_rewire_seed=None,
     join=False,
+    join_avoid_self_loops=True,
     normalize=False,
     contract_sites=True,
     fuse_multibonds=True,
@@ -566,6 +567,12 @@ def TN_from_strings(
             new_inds = rng.permutation(inds)
             stn.reindex_(dict(zip(inds, new_inds)))
 
+    # compute which pairs of sites each index appears at
+    ind_locs = {}
+    for tag in tn.site_tags:
+        for ind in tn.select(tag).all_inds():
+            ind_locs.setdefault(ind, set()).add(tag)
+
     if join:
         # at each site, join pairs of string ends up
         for tag in tn.site_tags:
@@ -573,17 +580,26 @@ def TN_from_strings(
             stn = tn.select(tag)
             # get all string ends (i.e. vectors)
             ts = [t for t in stn if t.ndim == 1]
-            for i in range(0, len(ts) - 1, 2):
-                # pairwise iterate and connect with new bond and data
-                ta, tb = ts[i], ts[i + 1]
+
+            # connect pairs of tensors, but try avoid creating trivial loops
+            while len(ts) > 1:
+                ta = ts.pop(0)
+                if join_avoid_self_loops:
+                    i = next((
+                        i for i, t in enumerate(ts)
+                        if ind_locs[ta.inds[0]] != ind_locs[t.inds[0]]
+                    ), 0)
+                else:
+                    i = 0
+                tb = ts.pop(i)
                 new_bond(ta, tb, size=line_dim)
                 ta.modify(data=fill_fn(ta.shape))
                 tb.modify(data=fill_fn(tb.shape))
 
-            if (join == 'all') and (len(ts) % 2 == 1):
+            if (join == 'all') and ts:
                 # connect dangling bond to nearest neighbor, even if this
                 # creates merged loops
-                ta = ts[-1]
+                ta, = ts
                 tb = min(
                     [t for t in stn if t is not ta],
                     # choose to merge with shortest neithboring loop however
@@ -599,6 +615,8 @@ def TN_from_strings(
         sign = 1
         for tn_i in tn.subgraphs():
             # contract each subgraph/loop seperately
+            tn_i = tn_i.rank_simplify(equalize_norms=1.0)
+            tn.exponent -= tn_i.exponent
             z_i = tn_i.contract(**contract_opts)
             sign *= do('sign', z_i)
             tn.exponent -= do('log10', do('abs', z_i))
@@ -2348,10 +2366,13 @@ def or_clause_mps_tensors(ndim, m, inds, tags=None, dtype='float64'):
     and ``tags``.
     """
     mps = (
-        MPS_computational_state("+" * ndim, tags=tags, dtype=dtype)
+        MPS_computational_state("+" * ndim, dtype=dtype)
         * (2 ** (ndim / 2))
-        - MPS_computational_state(f"{m:0>{ndim}b}", tags=tags, dtype=dtype)
+        - MPS_computational_state(f"{m:0>{ndim}b}", dtype=dtype)
     )
+    mps.drop_tags()
+    if tags is not None:
+        mps.add_tag(tags)
     mps.reindex_({mps.site_ind(i): ind for i, ind in enumerate(inds)})
     return mps.tensors
 
