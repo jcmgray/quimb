@@ -1716,10 +1716,12 @@ class Tensor(object):
     def isel(self, selectors, inplace=False):
         """Select specific values for some dimensions/indices of this tensor,
         thereby removing them. Analogous to ``X[:, :, 3, :, :]`` with arrays.
+        The indices to select from can be specified either by integer, in which
+        case the correspoding index is removed, or by a slice.
 
         Parameters
         ----------
-        selectors : dict[str, int]
+        selectors : dict[str, int], dict[str, slice]
             Mapping of index(es) to which value to take.
         inplace : bool, optional
             Whether to select inplace or not.
@@ -1740,7 +1742,10 @@ class Tensor(object):
         """
         T = self if inplace else self.copy()
 
-        new_inds = tuple(ix for ix in self.inds if ix not in selectors)
+        new_inds = tuple(
+            ix for ix in self.inds
+            if (ix not in selectors) or isinstance(selectors[ix], slice)
+        )
 
         data_loc = tuple(selectors.get(ix, slice(None)) for ix in self.inds)
         T.modify(apply=lambda x: x[data_loc], inds=new_inds, left_inds=None)
@@ -5288,6 +5293,77 @@ class TensorNetwork(object):
         return tn
 
     compress_all_ = functools.partialmethod(compress_all, inplace=True)
+
+    def compress_all_tree(self, inplace=False, **compress_opts):
+        """Canonically compress this tensor network, assuming it to be a tree.
+        This generates a tree spanning out from the most central tensor, then
+        compresses all bonds inwards in a depth-first manner, using an infinite
+        ``canonize_distance`` to shift the orthogonality center.
+        """
+        tn = self if inplace else self.copy()
+
+        # order out spanning tree by depth first search
+        def sorter(t, tn, distances, connectivity):
+            return distances[t]
+
+        tid0 = tn.most_central_tid()
+        span = tn.get_tree_span([tid0], sorter=sorter)
+        for tid1, tid2, _ in span:
+            # absorb='right' shifts orthog center inwards
+            tn._compress_between_tids(
+                tid1, tid2, absorb='right',
+                canonize_distance=float('inf'), **compress_opts)
+
+        return tn
+
+    compress_all_tree_ = functools.partialmethod(
+        compress_all_tree, inplace=True
+    )
+
+    def compress_all_simple(
+        self,
+        max_bond,
+        gauges=None,
+        max_iterations=10,
+        tol=0.0,
+        smudge=1e-12,
+        power=1.0,
+        inplace=False,
+        **gauge_simple_opts,
+    ):
+        """
+        """
+        tn = self if inplace else self.copy()
+
+        # equalize the gauges
+        tn.gauge_all_simple_(
+            gauges=gauges,
+            max_iterations=max_iterations,
+            tol=tol,
+            smudge=smudge,
+            power=power,
+            **gauge_simple_opts
+        )
+
+        # truncate the tensors
+        tn.isel_({
+            ix: slice(None, max_bond)
+            for ix in gauges
+        })
+
+        # truncate the gauges
+        for ix in gauges:
+            gauges[ix] = gauges[ix][:max_bond]
+
+        # re-insert if not tracking externally
+        if gauges is None:
+            tn.gauge_simple_insert(gauges)
+
+        return tn
+
+    compress_all_simple_ = functools.partialmethod(
+        compress_all_simple, inplace=True
+    )
 
     def _canonize_between_tids(
         self,
