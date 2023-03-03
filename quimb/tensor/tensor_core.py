@@ -5333,7 +5333,14 @@ class TensorNetwork(object):
     ):
         """
         """
+        if max_iterations < 1:
+            raise ValueError("Must have at least one iteration to compress.")
+
         tn = self if inplace else self.copy()
+
+        gauges_supplied = gauges is not None
+        if not gauges_supplied:
+            gauges = {}
 
         # equalize the gauges
         tn.gauge_all_simple_(
@@ -5356,7 +5363,7 @@ class TensorNetwork(object):
             gauges[ix] = gauges[ix][:max_bond]
 
         # re-insert if not tracking externally
-        if gauges is None:
+        if not gauges_supplied:
             tn.gauge_simple_insert(gauges)
 
         return tn
@@ -6136,7 +6143,7 @@ class TensorNetwork(object):
                     f"nfact={nfact:.2f}"
                 )
 
-            not_converged = max_sdiff > tol
+            not_converged = (tol == 0.0) or (max_sdiff > tol)
             it += 1
 
         if equalize_norms:
