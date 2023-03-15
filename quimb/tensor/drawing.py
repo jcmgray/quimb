@@ -27,13 +27,15 @@ def draw_tn(
     custom_colors=None,
     title=None,
     legend=True,
+    dim=2,
     fix=None,
-    k=None,
-    iterations='auto',
+    layout='auto',
     initial_layout='auto',
+    iterations='auto',
+    k=None,
     use_forceatlas2=1000,
     use_spring_weight=False,
-    dim=2,
+    pos=None,
     node_color=None,
     node_scale=1.0,
     node_size=None,
@@ -98,21 +100,34 @@ def draw_tn(
         Set a title for the axis.
     legend : bool, optional
         Whether to draw a legend for the colored tags.
+    dim : {2, 2.5, 3}, optional
+        What dimension to position the graph nodes in. 2.5 positions the nodes
+        in 3D but then projects then down to 2D.
     fix : dict[tags_ind_or_tid], (float, float)], optional
         Used to specify actual relative positions for each tensor node.
         Each key should be a sequence of tags that uniquely identifies a
         tensor, a ``tid``, or a ``ind``, and each value should be a ``(x, y)``
         coordinate tuple.
-    k : float, optional
-        The optimal distance between nodes.
+    layout : str, optional
+        How to layout the graph. Can be any of the following:
+
+            - ``'auto'``: layout the graph using a networkx method then relax
+              the layout using a force-directed algorithm.
+            - a networkx layout method name, e.g. ``'kamada_kawai'``: just
+              layout the graph using a networkx method, with no relaxation.
+            - a graphviz method such as ``'dot'``, ``'neato'`` or ``'sfdp'``:
+              layout the graph using ``pygraphviz``.
+
+    initial_layout : {'auto', 'spectral', 'kamada_kawai', 'circular', \\
+                      'planar', 'random', 'shell', 'bipartite', ...}, optional
+        If ``layout == 'auto'`` The name of a networkx layout to use before
+        iterating with the spring layout. Set `layout` directly or
+        ``iterations=0`` if you don't want any spring relaxation.
     iterations : int, optional
         How many iterations to perform when when finding the best layout
         using node repulsion. Ramp this up if the graph is drawing messily.
-    initial_layout : {'auto', 'spectral', 'kamada_kawai', 'circular', \\
-                      'planar', 'random', 'shell', 'bipartite', ...}, optional
-        The name of a networkx layout to use before iterating with the
-        spring layout. Set ``iterations=0`` if you just want to use this
-        layout only.
+    k : float, optional
+        The optimal distance between nodes.
     use_forceatlas2 : bool or int, optional
         Whether to try and use ``forceatlas2`` (``fa2``) for the spring layout
         relaxation instead of ``networkx``. If an integer, only try and use
@@ -120,6 +135,10 @@ def draw_tn(
     use_spring_weight : bool, optional
         Whether to use inverse bond sizes as spring weights to the force
         repulsion layout algorithms.
+    pos : dict, optional
+        Pre-computed positions for the nodes. If given, this will override
+        ``layout``. The nodes shouuld be exactly the same as the nodes in the
+        graph returned by ``draw(get='graph')``.
     node_color : tuple[float], optional
         Default color of nodes.
     node_scale : float, optional
@@ -346,21 +365,25 @@ def draw_tn(
         for oix in output_inds:
             G.nodes[oix]['label'] = oix
 
-    pos = get_positions(
-        tn=tn,
-        G=G,
-        fix=fix,
-        initial_layout=initial_layout,
-        k=k,
-        dim=dim,
-        iterations=iterations,
-        use_forceatlas2=use_forceatlas2,
-        use_spring_weight=use_spring_weight,
-    )
-    if get == "pos":
-        return pos
     if get == "graph":
         return G
+
+    if pos is None:
+        pos = get_positions(
+            tn=tn,
+            G=G,
+            fix=fix,
+            layout=layout,
+            initial_layout=initial_layout,
+            k=k,
+            dim=dim,
+            iterations=iterations,
+            use_forceatlas2=use_forceatlas2,
+            use_spring_weight=use_spring_weight,
+        )
+
+    if get == "pos":
+        return pos
     if get == "graph,pos":
         return G, pos
 
@@ -399,6 +422,7 @@ def draw_tn(
         )
 
     if backend == "matplotlib3d":
+        # TODO: support more style options
         return _draw_matplotlib3d(
             G,
             pos,
@@ -408,9 +432,11 @@ def draw_tn(
         )
 
     if backend == "plotly":
+        # TODO: support more style options
         return _draw_plotly(
             G,
             pos,
+            figsize=figsize,
         )
 
 
@@ -783,6 +809,7 @@ def _draw_matplotlib3d(
         fig = plt.figure(figsize=figsize)
         fig.patch.set_alpha(0.0)
         ax = plt.axes([0, 0, 1, 1], projection='3d')
+        ax.patch.set_alpha(0.0)
 
         xmin = min(node_source['x'])
         xmax = max(node_source['x'])
@@ -858,6 +885,7 @@ def _draw_matplotlib3d(
 def _draw_plotly(
     G,
     pos,
+    figsize=(6, 6),
 ):
     import plotly.graph_objects as go
 
@@ -867,8 +895,8 @@ def _draw_plotly(
     fig.update_xaxes(visible=False)
     fig.update_yaxes(visible=False)
     fig.update_layout(
-        width=500,
-        height=500,
+        width=100 * figsize[0],
+        height=100 * figsize[1],
         margin=dict(l=10, r=10, b=10, t=10),
         plot_bgcolor="rgba(0,0,0,0)",
         paper_bgcolor="rgba(0,0,0,0)",
@@ -1068,17 +1096,93 @@ def _massage_pos(pos, nangles=360, flatten=False):
     return dict(zip(pos, rxy0))
 
 
+def layout_pygraphviz(
+    G,
+    prog='neato',
+    dim=2,
+    **kwargs,
+):
+    # TODO: fix nodes with pin attribute
+    # TODO: initial positions
+    # TODO: max iters
+    # TODO: spring parameter
+    import pygraphviz as pgv
+
+    aG = pgv.AGraph()
+    mapping = {}
+    for nodea, nodeb in G.edges():
+        s_nodea = str(nodea)
+        s_nodeb = str(nodeb)
+        mapping[s_nodea] = nodea
+        mapping[s_nodeb] = nodeb
+        aG.add_edge(s_nodea, s_nodeb)
+
+    kwargs = {}
+
+    if dim == 2.5:
+        kwargs['dim'] = 3
+        kwargs['dimen'] = 2
+    else:
+        kwargs['dim'] =  kwargs['dimen'] = dim
+    args = ' '.join(f'-G{k}={v}' for k, v in kwargs.items())
+
+    # run layout algorithm
+    aG.layout(prog=prog, args=args)
+
+    # extract layout
+    pos = {}
+    for snode, node in mapping.items():
+        spos = aG.get_node(snode).attr['pos']
+        pos[node] = tuple(map(float, spos.split(',')))
+
+    # normalize to unit square
+    xmin = ymin = zmin = float('inf')
+    xmax = ymax = zmaz = float('-inf')
+    for x, y, *maybe_z in pos.values():
+        xmin = min(xmin, x)
+        xmax = max(xmax, x)
+        ymin = min(ymin, y)
+        ymax = max(ymax, y)
+        for z in maybe_z:
+            zmin = min(zmin, z)
+            zmaz = max(zmaz, z)
+
+    for node, (x, y, *maybe_z) in pos.items():
+        pos[node] = (
+            2 * (x - xmin) / (xmax - xmin) - 1,
+            2 * (y - ymin) / (ymax - ymin) - 1,
+            *(2 * (z - zmin) / (zmaz - zmin) - 1 for z in maybe_z),
+        )
+
+    return pos
+
+
 def get_positions(
     tn,
     G,
-    fix=None,
-    initial_layout='auto',
+    *,
     dim=2,
-    k=None,
+    fix=None,
+    layout='auto',
+    initial_layout='auto',
     iterations='auto',
+    k=None,
     use_forceatlas2=False,
     use_spring_weight=False,
 ):
+    if layout in ('dot', 'neato', 'fdp', 'sfdp'):
+        if fix or k or iterations != 'auto':
+            import warnings
+            warnings.warn(
+                "Layout is being done by pygraphviz, so `fix`, "
+                "`k`, and `iterations` are currently ignored."
+            )
+        return layout_pygraphviz(G, prog=layout, dim=dim)
+
+    if layout != 'auto':
+        initial_layout = layout
+        iterations = 0
+
     import networkx as nx
 
     if fix is None:
@@ -1112,6 +1216,12 @@ def get_positions(
         # the smaller the graph, the more iterations we can afford
         iterations = max(200, 1000 - len(G))
 
+    if dim == 2.5:
+        dim = 3
+        project_back_to_2d = True
+    else:
+        project_back_to_2d = False
+
     # use spectral or other layout as starting point
     ly_opts = {'dim': dim} if dim != 2 else {}
     pos0 = getattr(nx, initial_layout + '_layout')(G, **ly_opts)
@@ -1130,8 +1240,10 @@ def get_positions(
     if iterations:
 
         if use_forceatlas2 is True:
+            # turn on for more than 1 node
             use_forceatlas2 = 1
         elif use_forceatlas2 in (0, False):
+            # never turn on
             use_forceatlas2 = float('inf')
 
         should_use_fa2 = (
@@ -1156,6 +1268,11 @@ def get_positions(
             )
     else:
         pos = pos0
+
+    if project_back_to_2d:
+        # project back to 2d
+        pos = {k: v[:2] for k, v in pos.items()}
+        dim = 2
 
     if (not fix) and (dim == 2):
         # finally rotate them to cover a small vertical span
