@@ -17,10 +17,10 @@ diagonal or anti-diagonal real dimension 2 operators.
 
 TODO::
 
-    - [ ] automatic MPO generator
+    - [ ] fix sparse matrix being built in opposite direction
     - [ ] product of operators generator (e.g. for PEPS DMRG)
     - [ ] complex and single precision support (lower priority)
-    - [ ] support for non-diagonal and dimension > 2 operators (lower priority)
+    - [ ] support for non-diagonal and qudit operators (lower priority)
 
 DONE::
 
@@ -31,11 +31,12 @@ DONE::
     - [x] general definition and automatic 'symbolic' jordan wigner
     - [x] multithreaded sparse matrix construction
     - [x] LocalHam generator (e.g. for simple update, normal PEPS algs)
+    - [x] automatic MPO generator
 
 """
 
+import operator
 import functools
-import collections
 
 import numpy as np
 from numba import njit
@@ -67,7 +68,7 @@ def parse_edges_to_unique(edges):
 
     Parameters
     ----------
-    edges : sequence of (hashable, hashable)
+    edges : Iterable[tuple[hashable, hashable]]]
         The edges to parse.
 
     Returns
@@ -107,7 +108,6 @@ class HilbertSpace:
     """
 
     def __init__(self, sites, order=None):
-
         if isinstance(sites, int):
             sites = range(sites)
 
@@ -223,6 +223,16 @@ class HilbertSpace:
             config[self.reg_to_site(i)] = flatconfig[i]
         return config
 
+    def rand_config(self, k=None):
+        """Get a random configuration, optionally requiring it has ``k`` bits
+        set.
+        """
+        if k is None:
+            return {site: np.random.randint(2) for site in self.sites}
+        r = np.random.randint(self.get_size(k))
+        b = rank_to_bit(r, self.nsites, k)
+        return self.bit_to_config(b)
+
     @property
     def sites(self):
         """The ordered tuple of all sites in the Hilbert space."""
@@ -266,16 +276,6 @@ class HilbertSpace:
             raise ValueError("`k` must sum to the number of sites")
 
         return size
-
-    def rand_config(self, k=None):
-        """Get a random configuration, optionally requiring it has ``k`` bits
-        set.
-        """
-        if k is None:
-            return {site: np.random.randint(2) for site in self.sites}
-        r = np.random.randint(self.get_size(k))
-        b = rank_to_bit(r, self.nsites, k)
-        return self.bit_to_config(b)
 
     def get_bitbasis(self, *k, dtype=np.int64):
         """Get a basis for the Hilbert space, in terms of an integer bitarray,
@@ -330,25 +330,89 @@ _OPMAP = {
     # creation / annihilation operators
     "+": {0: (1, 1.0)},
     "-": {1: (0, 1.0)},
-    # number and symmetric number operator
+    # number, symmetric number, and hole operators
     "n": {1: (1, 1.0)},
     "sn": {0: (0, -0.5), 1: (1, 0.5)},
+    "h": {0: (0, 1.0)},
 }
 
 
 @functools.lru_cache(maxsize=None)
 def get_mat(op, dtype=None):
     if dtype is None:
-        if op in {"y", "sy"}:
+        if any(
+            isinstance(coeff, complex) for _, (_, coeff) in _OPMAP[op].items()
+        ):
             dtype = np.complex128
         else:
             dtype = np.float64
+
     a = np.zeros((2, 2), dtype=dtype)
     for j, (i, xij) in _OPMAP[op].items():
         a[i, j] = xij
     # make immutable since caching
     a.flags.writeable = False
     return a
+
+
+@functools.lru_cache(maxsize=2**14)
+def simplify_single_site_ops(coeff, ops):
+    """Simplify a sequence of operators acting on the same site.
+
+    Parameters
+    ----------
+    coeff : float or complex
+        The coefficient of the operator sequence.
+    ops : tuple of str
+        The operator sequence.
+
+    Returns
+    -------
+    new_coeff : float or complex
+        The simplified coefficient.
+    new_op : str
+        The single, simplified operator that the sequence maps to, up to
+        scalar multiplication.
+
+    Examples
+    --------
+
+        >>> simplify_single_site_ops(1.0, ('+', 'z', 'z', 'z', 'z', '-'))
+        (1.0, 'n')
+
+        >>> simplify_single_site_ops(1.0, ("x", "y", "z"))
+        (-1j, 'I')
+
+    """
+
+    if len(ops) == 1:
+        return coeff, ops[0]
+
+    # product all the matrices
+    combo_mat = functools.reduce(operator.matmul, map(get_mat, ops))
+    combo_coeff = combo_mat.flat[np.argmax(np.abs(combo_mat))]
+
+    if combo_coeff == 0.0:
+        # null-term
+        return 0, None
+
+    # find the reference operator that maps to this matrix
+    for op in _OPMAP:
+        ref_mat = get_mat(op)
+        ref_coeff = ref_mat.flat[np.argmax(np.abs(ref_mat))]
+        if (
+            (combo_mat / combo_coeff).round(12)
+            == (ref_mat / ref_coeff).round(12)
+        ).all():
+            break
+    else:
+        raise ValueError(f"No match found for '{ops}'")
+
+    coeff *= ref_coeff / combo_coeff
+    if coeff.imag == 0.0:
+        coeff = coeff.real
+
+    return coeff, op
 
 
 class SparseOperatorBuilder:
@@ -364,16 +428,17 @@ class SparseOperatorBuilder:
         on each of these.
     hilbert_space : HilbertSpace
         The Hilbert space to build the operator in. If this is not supplied
-        then a minimal Hilbert space will be constructed from the sites used.
+        then a minimal Hilbert space will be constructed from the sites used,
+        when required.
     """
 
     def __init__(self, terms=(), hilbert_space=None):
-        self._terms = []
+        self._term_store = {}
         self._sites_used = set()
         self._hilbert_space = hilbert_space
         self._coupling_map = None
-        for coeff, ops, *sites in terms:
-            self.add_term(coeff, ops, *sites)
+        for term in terms:
+            self.add_term(*term)
 
     @property
     def sites_used(self):
@@ -387,18 +452,18 @@ class SparseOperatorBuilder:
 
     @property
     def terms(self):
-        """A tuple of the terms seen so far."""
-        return tuple(self._terms)
+        """A tuple of the simplified terms seen so far."""
+        return tuple((coeff, ops) for ops, coeff in self._term_store.items())
 
     @property
     def nterms(self):
         """The total number of terms seen so far."""
-        return len(self._terms)
+        return len(self._term_store)
 
     @property
     def locality(self):
         """The locality of the operator, the maximum support of any term."""
-        return max(len(sites) for _, _, *sites in self.terms)
+        return max(len(ops) for ops in self._term_store)
 
     @property
     def hilbert_space(self):
@@ -413,7 +478,7 @@ class SparseOperatorBuilder:
     def coupling_map(self):
         if self._coupling_map is None:
             self._coupling_map = build_coupling_numba(
-                self.terms, self.hilbert_space.site_to_reg
+                self._term_store, self.hilbert_space.site_to_reg
             )
         return self._coupling_map
 
@@ -425,34 +490,76 @@ class SparseOperatorBuilder:
         """Get the site of register / linear index ``reg``."""
         return self.hilbert_space.reg_to_site(reg)
 
-    def add_term(self, coeff, ops, *sites):
+    def add_term(self, *coeff_ops):
         """Add a term to the operator.
 
         Parameters
         ----------
-        coeff : float
+        coeff : float, optional
             The overall coefficient of the term.
-        ops : sequence of str
-            The operators of the term, that together form a product. Each
-            ``op`` should be one of:
+        ops : sequence of tuple[str, hashable]
+            The operators of the term, together with the sites they act on.
+            Each term should be a pair of ``(operator, site)``, where
+            ``operator`` can be:
 
                 - ``'x'``, ``'y'``, ``'z'``: Pauli matrices
                 - ``'sx'``, ``'sy'``, ``'sz'``: spin operators (i.e. scaled
                   Pauli matrices)
                 - ``'+'``, ``'-'``: creation/annihilation operators
-                - ``'n'``, ``'sn'``: number and symmetric number (n - 1/2)
-                   operators
+                - ``'n'``, ``'sn'``, or ``'h'``: number, symmetric
+                  number (n - 1/2) and hole (1 - n) operators
 
-        sites : sequence of hashable
-            The coordinates of the operators that ``ops`` acts on.
+            And ``site`` is a hashable object that represents the site that
+            the operator acts on.
+
         """
-        self._terms.append((coeff, tuple(ops), *sites))
-        for site in sites:
+        if isinstance(coeff_ops[0], (tuple, list)):
+            # assume coeff is 1.0
+            coeff = 1
+            ops = coeff_ops
+        else:
+            coeff, *ops = coeff_ops
+
+        if coeff == 0.0:
+            # null-term
+            return
+
+        # print(coeff, ops, '->')
+
+        # collect operators acting on the same site
+        collected = {}
+        for op, site in ops:
+            # check that the site is valid if the Hilbert space is known
             if (
                 self._hilbert_space is not None
             ) and not self._hilbert_space.has_site(site):
                 raise ValueError(f"Site {site} not in the Hilbert space.")
             self._sites_used.add(site)
+            collected.setdefault(site, []).append(op)
+
+        # simplify operators acting on the smae site & don't add null-terms
+        simplified_ops = []
+        for site, collected_ops in collected.items():
+            coeff, op = simplify_single_site_ops(coeff, tuple(collected_ops))
+
+            if op is None:
+                # null-term ('e.g. '++' or '--')
+                # print('null-term')
+                # print()
+                return
+
+            if op != "I":
+                # only need to record non-identity operators
+                simplified_ops.append((op, site))
+
+        key = tuple(simplified_ops)
+
+        # print(coeff, key)
+        # print()
+
+        new_coeff = self._term_store.pop(key, 0.0) + coeff
+        if new_coeff != 0.0:
+            self._term_store[key] = new_coeff
 
     def __iadd__(self, term):
         self.add_term(*term)
@@ -466,54 +573,29 @@ class SparseOperatorBuilder:
         # TODO: check if transform has been applied already
         # TODO: store untransformed terms, so we can re-order at will
 
-        new_terms = []
+        old_term_store = self._term_store.copy()
+        self._term_store.clear()
 
-        for coeff, old_ops, *sites in self._terms:
-            if {"+", "-"}.intersection(old_ops):
+        for term, coeff in old_term_store.items():
+            if not term:
+                self.add_term(coeff, *term)
+                continue
 
-                # explicitly collect and simplify z strings:
-                jw_strings = collections.defaultdict(str)
-                for op, site in zip(old_ops, sites):
-                    # get the linear index of the site
+            ops, site = zip(*term)
+            if {"+", "-"}.intersection(ops):
+                new_term = []
+
+                for op, site in term:
                     reg = self.site_to_reg(site)
                     if op in {"+", "-"}:
-                        # apply z everywhere below site
-                        # TODO: implement a 'species' filter
-                        for i in range(reg):
-                            jw_strings[i] += "z"
-                    # terminate with the actual operator
-                    jw_strings[reg] += op
+                        for r in range(reg):
+                            site_below = self.reg_to_site(r)
+                            new_term.append(("z", site_below))
+                    new_term.append((op, site))
 
-                # now simplify the z strings
-                new_ops, new_sites = [], []
-                for reg, jw_strings in jw_strings.items():
-                    jw_simplified = (
-                        jw_strings.replace("zz", "")
-                        .replace("+z", "+")
-                        .replace("z-", "-")
-                        # the following generate 'm'inus signs
-                        .replace("z+", "m+")
-                        .replace("-z", "m-")
-                    )
-
-                    num_m = jw_simplified.count("m")
-                    if num_m:
-                        jw_simplified = jw_simplified.replace("m", "")
-                        if num_m % 2:
-                            coeff = -coeff
-
-                    if jw_simplified:
-                        # keep only non identity operator terms
-                        new_ops.append(jw_simplified)
-                        new_sites.append(self.reg_to_site(reg))
-
-                # replace term with the new one, strings inserted
-                new_terms.append((coeff, tuple(new_ops), *new_sites))
+                self.add_term(coeff, *new_term)
             else:
-                # doesn't involve any creation/annihilation operators
-                new_terms.append((coeff, old_ops, *sites))
-
-        self._terms = new_terms
+                self.add_term(coeff, *term)
 
     def build_coo_data(self, *k, parallel=False):
         """Build the raw data for a sparse matrix in COO format. Optionally
@@ -603,9 +685,9 @@ class SparseOperatorBuilder:
             The local terms.
         """
         Hk = {}
-        for coeff, ops, *sites in self.terms:
-            # sort ops and sites according to sites
-            sites, ops = zip(*sorted(zip(sites, ops)))
+
+        for term, coeff in self._term_store.items():
+            ops, sites = zip(*term)
             mats = tuple(get_mat(op) for op in ops)
             hk = coeff * functools.reduce(np.kron, mats)
             if sites not in Hk:
@@ -637,12 +719,12 @@ class SparseOperatorBuilder:
         bjs, coeffs = coupled_bits_numba(b, self.coupling_map)
         return [bit_to_config(bj) for bj in bjs], coeffs
 
-    def show(self):
+    def show(self, filler="."):
         """Print an ascii representation of the terms in this operator."""
         print(self)
-        for t, (coeff, ops, *sites) in enumerate(self.terms):
-            s = [". "] * self.nsites
-            for op, site in zip(ops, sites):
+        for t, (term, coeff) in enumerate(self._term_store.items()):
+            s = [f"{filler} "] * self.nsites
+            for op, site in term:
                 s[self.site_to_reg(site)] = f"{op:<2}"
             print("".join(s), f"{coeff:+}")
 
@@ -720,9 +802,9 @@ class SparseOperatorBuilder:
         # the coefficient on later
         coeffs_to_place = {}
 
-        for t, (coeff, ops, *sites) in enumerate(self.terms):
+        for t, (term, coeff) in enumerate(self._term_store.items()):
             # build full string for this term including identity ops
-            rmap = {self.site_to_reg(site): op for site, op in zip(sites, ops)}
+            rmap = {self.site_to_reg(site): op for op, site in term}
             string = tuple(rmap.get(r, "I") for r in range(self.nsites))
 
             current_node = (0, 0)
@@ -926,8 +1008,7 @@ def comb(n, k):
 
 @njit
 def get_all_equal_weight_bits(n, k, dtype=np.int64):
-    """Get an array of all 'bits' (integers), with n bits, and k of them set.
-    """
+    """Get an array of all 'bits' (integers), with n bits, and k of them set."""
     if k == 0:
         return np.array([0], dtype=dtype)
 
@@ -1142,14 +1223,14 @@ def build_bitmap(configs):
     return {b: i for i, b in enumerate(configs)}
 
 
-def build_coupling_numba(terms, site_to_reg):
+def build_coupling_numba(term_store, site_to_reg):
     """Create a sparse nested dictionary of how each term couples each
     local site configuration to which other local site configuration, and
     with what coefficient, suitable for use with numba.
 
     Parameters
     ----------
-    terms : sequence of (coeff, ops, *sites)
+    term_store : dict[term, coeff]
         The terms of the operator.
     site_to_reg : callable
         A function that maps a site to a linear register index.
@@ -1169,10 +1250,10 @@ def build_coupling_numba(terms, site_to_reg):
     coupling_map = Dict.empty(types.int64, ty_site)
 
     # for term t ...
-    for t, (coeff, ops, *sites) in enumerate(terms):
+    for t, (term, coeff) in enumerate(term_store.items()):
         first = True
         # which couples sites with product of ops ...
-        for op, site in zip(ops, sites):
+        for op, site in term:
             reg = site_to_reg(site)
             # -> bit `xi` at `reg` is coupled to `xj` with coeff `cij`
             #          : reg
@@ -1195,13 +1276,13 @@ def build_coupling_numba(terms, site_to_reg):
     return coupling_map
 
 
-def build_coupling(terms, site_to_reg):
+def build_coupling(term_store, site_to_reg):
     coupling_map = dict()
     # for term t ...
-    for t, (coeff, ops, *sites) in enumerate(terms):
+    for t, (term, coeff) in enumerate(term_store.items()):
         first = True
         # which couples sites with product of ops ...
-        for op, site in zip(ops, sites):
+        for op, site in term:
             reg = site_to_reg(site)
             # -> bit `xi` at `reg` is coupled to `xj` with coeff `cij`
             #          : reg
@@ -1290,11 +1371,11 @@ def coupled_bits_numba(bi, coupling_map):
                 bj = flip_nth_bit(bj, reg)
         else:
             # no break - all terms survived
-            try:
+            if bj in bitmap:
                 # already seed this config - just add coeff
                 loc = bitmap[bj]
                 cijs[loc] += cij
-            except Exception:
+            else:
                 # TODO: check performance of numba exception catching
                 bjs[buf_ptr] = bj
                 cijs[buf_ptr] = cij
@@ -1351,7 +1432,7 @@ def _build_coo_numba_core(bits, coupling_map, bitmap=None):
 
 def build_coo_numba(bits, coupling_map, parallel=False):
     """Build an operator in COO form, using the basis ``bits`` and the
-     ``coupling_map``, optionally multhreaded.
+     ``coupling_map``, optionally multithreaded.
 
     Parameters
     ----------
@@ -1429,44 +1510,66 @@ def fermi_hubbard_from_edges(edges, t=1.0, U=1.0, mu=0.0):
     if t != 0.0:
         for cooa, coob in edges:
             # hopping
-            for s in ["↑", "↓"]:
-                H += (-t, "+-", (s, *cooa), (s, *coob))
-                H += (-t, "+-", (s, *coob), (s, *cooa))
+            for s in "↑↓":
+                H += -t, ("+", (s, *cooa)), ("-", (s, *coob))
+                H += -t, ("+", (s, *coob)), ("-", (s, *cooa))
 
     for coo in sites:
         # interaction
-        if U != 0.0:
-            H += (U, "nn", ("↑", *coo), ("↓", *coo))
+        H += U, ("n", ("↑", *coo)), ("n", ("↓", *coo))
 
         # chemical potential
-        if mu != 0.0:
-            H += (mu, "n", ("↑", *coo))
-            H += (mu, "n", ("↓", *coo))
+        H += mu, ("n", ("↑", *coo))
+        H += mu, ("n", ("↓", *coo))
 
     H.jordan_wigner_transform()
     return H
 
 
 def fermi_hubbard_spinless_from_edges(edges, t=1.0, mu=0.0):
+    """
+    """
     H = SparseOperatorBuilder()
     sites, edges = parse_edges_to_unique(edges)
 
     for cooa, coob in edges:
         # hopping
-        H += (-t, "+-", cooa, coob)
-        H += (-t, "+-", coob, cooa)
+        H += -t, ("+", cooa), ("-", coob)
+        H += -t, ("+", coob), ("-", cooa)
 
     # chemical potential
-    if mu != 0.0:
-        for coo in sites:
-            H += (mu, "n", coo)
+    for coo in sites:
+        H += mu, ("n", coo)
 
     H.jordan_wigner_transform()
     return H
 
 
 def heisenberg_from_edges(edges, j=1.0, b=0.0, hilbert_space=None):
-    """ """
+    """Create a Heisenberg Hamiltonian on the graph defined by ``edges``.
+
+    Parameters
+    ----------
+    edges : Iterable[tuple[hashable, hashable]]
+        The edges, as pairs of hashable 'sites', that define the graph.
+        Multiple edges are allowed, and will be treated as a single edge.
+    j : float or tuple[float, float, float], optional
+        The Heisenberg exchange coupling constant(s). If a single float is
+        given, it is used for all three terms. If a tuple of three floats is
+        given, they are used for the xx, yy, and zz terms respectively. Note
+        that positive values of ``j`` correspond to antiferromagnetic coupling.
+    b : float or tuple[float, float, float], optional
+        The magnetic field strength(s). If a single float is given, it is used
+        taken as a z-field. If a tuple of three floats is given, they are used
+        for the x, y, and z fields respectively.
+    hilbert_space : HilbertSpace, optional
+        The Hilbert space to use. If not given, one will be constructed
+        automatically from the edges.
+
+    Returns
+    -------
+    H : SparseOperatorBuilder
+    """
     try:
         jx, jy, jz = j
     except TypeError:
@@ -1482,24 +1585,18 @@ def heisenberg_from_edges(edges, j=1.0, b=0.0, hilbert_space=None):
 
     for cooa, coob in edges:
         if jx == jy:
-            if jx != 0.0:
-                H += (jx / 2, "+-", cooa, coob)
-                H += (jx / 2, "-+", cooa, coob)
+            # keep things real
+            H += jx / 2, ("+", cooa), ("-", coob)
+            H += jx / 2, ("-", cooa), ("+", coob)
         else:
-            if jx != 0.0:
-                H += (jx, ("sx", "sx"), cooa, coob)
-            if jy != 0.0:
-                H += (jy, ("sy", "sy"), cooa, coob)
+            H += jx, ("sx", cooa), ("sx", coob)
+            H += jy, ("sy", cooa), ("sy", coob)
 
-        if jz != 0.0:
-            H += (j, ("sz", "sz"), cooa, coob)
+        H += (jz, ("sz", "sz"), cooa, coob)
 
     for site in sites:
-        if bx != 0.0:
-            H += (bx, ("sx",), site)
-        if by != 0.0:
-            H += (by, ("sy",), site)
-        if bz != 0.0:
-            H += (bz, ("sz",), site)
+        H += bx, ("sx", site)
+        H += by, ("sy", site)
+        H += bz, ("sz", site)
 
     return H
