@@ -9,7 +9,7 @@ import numpy as np
 from ..utils import valmap
 
 
-HAS_FA2 = importlib.util.find_spec('fa2') is not None
+HAS_FA2 = importlib.util.find_spec("fa2") is not None
 
 
 def draw_tn(
@@ -29,9 +29,9 @@ def draw_tn(
     legend=True,
     dim=2,
     fix=None,
-    layout='auto',
-    initial_layout='auto',
-    iterations='auto',
+    layout="auto",
+    initial_layout="auto",
+    iterations="auto",
     k=None,
     use_forceatlas2=1000,
     use_spring_weight=False,
@@ -40,10 +40,10 @@ def draw_tn(
     node_scale=1.0,
     node_size=None,
     node_alpha=1.0,
-    node_shape='o',
+    node_shape="o",
     node_outline_size=None,
     node_outline_darkness=0.8,
-    node_hatch='',
+    node_hatch="",
     edge_color=None,
     edge_scale=1.0,
     edge_alpha=1 / 2,
@@ -56,7 +56,7 @@ def draw_tn(
     label_color=None,
     font_size=10,
     font_size_inner=7,
-    font_family='monospace',
+    font_family="monospace",
     isdark=None,
     backend="matplotlib",
     figsize=(6, 6),
@@ -228,22 +228,22 @@ def draw_tn(
 
     # automatically decide whether to show tags and inds
     if show_inds is None:
-        show_inds = (len(tn.outer_inds()) <= 20)
+        show_inds = len(tn.outer_inds()) <= 20
     if show_tags is None:
-        show_tags = (len(tn.tag_map) <= 20)
+        show_tags = len(tn.tag_map) <= 20
 
     if isdark is None:
-        isdark = sum(to_rgb(mpl.rcParams['figure.facecolor'])) / 3 < 0.5
+        isdark = sum(to_rgb(mpl.rcParams["figure.facecolor"])) / 3 < 0.5
 
     if isdark:
         default_draw_color = (0.55, 0.57, 0.60, 1.0)
-        default_label_color = (.85, .85, .85, 1.0)
+        default_label_color = (0.85, 0.85, 0.85, 1.0)
     else:
         default_draw_color = (0.45, 0.47, 0.50, 1.0)
-        default_label_color = (.25, .25, .25, 1.0)
+        default_label_color = (0.25, 0.25, 0.25, 1.0)
 
     if edge_color is None:
-        edge_color =mpl.colors.to_rgba(default_draw_color, edge_alpha)
+        edge_color = mpl.colors.to_rgba(default_draw_color, edge_alpha)
     else:
         edge_color = mpl.colors.to_rgba(edge_color, edge_alpha)
 
@@ -254,8 +254,8 @@ def draw_tn(
 
     if label_color is None:
         label_color = default_label_color
-    elif label_color == 'inherit':
-        label_color = mpl.rcParams['axes.labelcolor']
+    elif label_color == "inherit":
+        label_color = mpl.rcParams["axes.labelcolor"]
 
     highlight_tids_color = to_rgba(highlight_tids_color, node_alpha)
     highlight_inds_color = to_rgba(highlight_inds_color, edge_alpha)
@@ -263,15 +263,15 @@ def draw_tn(
     # set the size of the nodes and their border
     default_node_size = node_scale * 1000 / tn.num_tensors**0.7
     node_size = parse_dict_to_tids_or_inds(
-        node_size, tn, default=default_node_size,
+        node_size,
+        tn,
+        default=default_node_size,
     )
     node_outline_size = parse_dict_to_tids_or_inds(
         node_outline_size, tn, default=min(3, default_node_size**0.5 / 5)
     )
-    node_shape = parse_dict_to_tids_or_inds(
-        node_shape, tn, default='o')
-    node_hatch = parse_dict_to_tids_or_inds(
-        node_hatch, tn, default='')
+    node_shape = parse_dict_to_tids_or_inds(node_shape, tn, default="o")
+    node_hatch = parse_dict_to_tids_or_inds(node_hatch, tn, default="")
 
     # build the graph
     G = nx.Graph()
@@ -280,16 +280,16 @@ def draw_tn(
     for ix, tids in tn.ind_map.items():
         # general information for this index
         edge_attrs = {
-            'color': (
+            "color": (
                 highlight_inds_color if ix in highlight_inds else edge_color
             ),
-            'ind': ix,
-            'ind_size': str(tn.ind_size(ix)),
-            'edge_size': edge_scale * math.log2(tn.ind_size(ix)),
+            "ind": ix,
+            "ind_size": str(tn.ind_size(ix)),
+            "edge_size": edge_scale * math.log2(tn.ind_size(ix)),
         }
-        edge_attrs['multiedge_inds'] = [edge_attrs['ind']]
-        edge_attrs['multiedge_sizes'] = [edge_attrs['edge_size']]
-        edge_attrs['spring_weight'] = 1 / sum(t.ndim for t in tn._inds_get(ix))
+        edge_attrs["multiedge_inds"] = [edge_attrs["ind"]]
+        edge_attrs["multiedge_sizes"] = [edge_attrs["edge_size"]]
+        edge_attrs["spring_weight"] = 1 / sum(t.ndim for t in tn._inds_get(ix))
 
         if (ix in output_inds) or (len(tids) != 2):
             # hyper or outer edge - needs dummy 'node' shown with zero size
@@ -299,71 +299,70 @@ def draw_tn(
         else:
             # standard edge
             _add_or_merge_edge(G, *tids, edge_attrs)
-            if show_inds == 'all':
-                G.edges[tuple(tids)]['label'] = ix
-            elif show_inds == 'bond-size':
-                G.edges[tuple(tids)]['label'] = tn.ind_size(ix)
+            if show_inds == "all":
+                G.edges[tuple(tids)]["label"] = ix
+            elif show_inds == "bond-size":
+                G.edges[tuple(tids)]["label"] = tn.ind_size(ix)
 
     # color the nodes
     colors = get_colors(color, custom_colors, node_alpha)
 
     # set parameters for all the nodes
     for tid, t in tn.tensor_map.items():
-
         if tid not in G.nodes:
             # e.g. tensor is a scalar -> has not been added via an edge
             if not show_scalars:
                 continue
             G.add_node(tid)
 
-        G.nodes[tid]['tid'] = tid
-        G.nodes[tid]['tags'] = str(list(t.tags))
-        G.nodes[tid]['shape'] = str(t.shape)
-        G.nodes[tid]['size'] = node_size[tid]
-        G.nodes[tid]['outline_size'] = node_outline_size[tid]
+        G.nodes[tid]["tid"] = tid
+        G.nodes[tid]["tags"] = str(list(t.tags))
+        G.nodes[tid]["shape"] = str(t.shape)
+        G.nodes[tid]["size"] = node_size[tid]
+        G.nodes[tid]["outline_size"] = node_outline_size[tid]
         color = node_color
         for tag in colors:
             if tag in t.tags:
                 color = colors[tag]
         if tid in highlight_tids:
             color = highlight_tids_color
-        G.nodes[tid]['color'] = color
-        G.nodes[tid]['outline_color'] = tuple(
+        G.nodes[tid]["color"] = color
+        G.nodes[tid]["outline_color"] = tuple(
             (1.0 if i == 3 else node_outline_darkness) * c
             for i, c in enumerate(color)
         )
-        G.nodes[tid]['marker'] = node_shape[tid]
-        G.nodes[tid]['hatch'] = node_hatch[tid]
+        G.nodes[tid]["marker"] = node_shape[tid]
+        G.nodes[tid]["hatch"] = node_hatch[tid]
 
-        if show_tags == 'tids':
-            G.nodes[tid]['label'] = str(tid)
+        if show_tags == "tids":
+            G.nodes[tid]["label"] = str(tid)
         elif show_tags:
             # make the tags appear with auto vertical extent
             # node_label = '{' + str(list(t.tags))[1:-1] + '}'
-            node_label = ', '.join(map(str, t.tags))
-            G.nodes[tid]['label'] = "\n".join(textwrap.wrap(
-                node_label, max(2 * len(node_label) ** 0.5, 16)
-            ))
+            node_label = ", ".join(map(str, t.tags))
+            G.nodes[tid]["label"] = "\n".join(
+                textwrap.wrap(node_label, max(2 * len(node_label) ** 0.5, 16))
+            )
 
     for hix in hyperedges:
-        G.nodes[hix]['ind'] = hix
-        G.nodes[hix]['color'] = (1.0, 1.0, 1.0, 1.0)
-        G.nodes[hix]['size'] = 0.0
-        G.nodes[hix]['outline_size'] = 0.0
-        G.nodes[hix]['outline_color'] = (1.0, 1.0, 1.0, 1.0)
-        G.nodes[hix]['marker'] = '.'  # set this to avoid warning - size is 0
-        G.nodes[hix]['hatch'] = ''
-        if show_inds == 'all':
-            G.nodes[hix]['label'] = hix
-        elif show_inds == 'bond-size':
-            G.nodes[hix]['label'] = tn.ind_size(hix)
+        G.nodes[hix]["ind"] = hix
+        G.nodes[hix]["color"] = (1.0, 1.0, 1.0, 1.0)
+        G.nodes[hix]["size"] = 0.0
+        G.nodes[hix]["outline_size"] = 0.0
+        G.nodes[hix]["outline_color"] = (1.0, 1.0, 1.0, 1.0)
+        G.nodes[hix]["marker"] = "."  # set this to avoid warning - size is 0
+        G.nodes[hix]["hatch"] = ""
+        if show_inds == "all":
+            G.nodes[hix]["label"] = hix
+        elif show_inds == "bond-size":
+            G.nodes[hix]["label"] = tn.ind_size(hix)
 
-    if show_inds == 'bond-size':
+    if show_inds == "bond-size":
         for oix in output_inds:
-            G.nodes[oix]['label'] = tn.ind_size(oix)
+            G.nodes[oix]["label"] = tn.ind_size(oix)
     elif show_inds:
         for oix in output_inds:
-            G.nodes[oix]['label'] = oix
+            G.nodes[oix]["label"] = oix
 
     if get == "graph":
         return G
@@ -440,7 +439,7 @@ def draw_tn(
         )
 
 
-def parse_dict_to_tids_or_inds(spec, tn, default='__NONE__'):
+def parse_dict_to_tids_or_inds(spec, tn, default="__NONE__"):
     """Parse a dictionary possibly containing a mix of tags, tids and inds, to
     a dictionary with only sinlge tids and inds as keys. If a tag or set of
     tags are given as a key, all matching tensor tids will receive the value.
@@ -451,7 +450,7 @@ def parse_dict_to_tids_or_inds(spec, tn, default='__NONE__'):
         return collections.defaultdict(lambda: spec)
 
     # allow not specifying a default value
-    if default != '__NONE__':
+    if default != "__NONE__":
         new = collections.defaultdict(lambda: default)
     else:
         new = {}
@@ -463,7 +462,8 @@ def parse_dict_to_tids_or_inds(spec, tn, default='__NONE__'):
     for k, v in spec.items():
         if (
             # given as tid
-            (isinstance(k, int) and k in tn.tensor_map) or
+            (isinstance(k, int) and k in tn.tensor_map)
+            or
             # given as ind
             (isinstance(k, str) and k in tn.ind_map)
         ):
@@ -488,20 +488,21 @@ def _add_or_merge_edge(G, u, v, attrs):
         # multibond - update attrs
         attrs0 = G.edges[u, v]
         # average colors
-        attrs0['color'] = tuple(
-            (x + y) / 2 for x, y in zip(attrs0['color'], attrs['color'])
+        attrs0["color"] = tuple(
+            (x + y) / 2 for x, y in zip(attrs0["color"], attrs["color"])
         )
-        attrs0['ind'] += ' ' + attrs['ind']
-        attrs0['ind_size'] = f"{attrs0['ind_size']} {attrs['ind_size']}"
+        attrs0["ind"] += " " + attrs["ind"]
+        attrs0["ind_size"] = f"{attrs0['ind_size']} {attrs['ind_size']}"
         # hide original edge and instead track multiple bond sizes
-        attrs0['multiedge_inds'].append(attrs['ind'])
-        attrs0['multiedge_sizes'].append(attrs['edge_size'])
-        attrs0['spring_weight'] /= (attrs['edge_size'] + 1)
-        attrs0['edge_size'] = 0
+        attrs0["multiedge_inds"].append(attrs["ind"])
+        attrs0["multiedge_sizes"].append(attrs["edge_size"])
+        attrs0["spring_weight"] /= attrs["edge_size"] + 1
+        attrs0["edge_size"] = 0
 
 
 def _draw_matplotlib(
-    G, pos,
+    G,
+    pos,
     *,
     tn,
     hyperedges,
@@ -524,7 +525,7 @@ def _draw_matplotlib(
     arrow_linewidth=1.0,
     font_size=10,
     font_size_inner=7,
-    font_family='monospace',
+    font_family="monospace",
     figsize=(6, 6),
     margin=None,
     xlims=None,
@@ -539,13 +540,13 @@ def _draw_matplotlib(
     if ax is None:
         fig, ax = plt.subplots(figsize=figsize, constrained_layout=True)
         fig.patch.set_alpha(0.0)
-        ax.axis('off')
-        ax.set_aspect('equal')
+        ax.axis("off")
+        ax.set_aspect("equal")
         if title is not None:
             ax.set_title(str(title))
 
-        xmin = ymin = +float('inf')
-        xmax = ymax = -float('inf')
+        xmin = ymin = +float("inf")
+        xmax = ymax = -float("inf")
         for xy in pos.values():
             xmin = min(xmin, xy[0])
             xmax = max(xmax, xy[0])
@@ -557,10 +558,13 @@ def _draw_matplotlib(
             #     using the networkx node_size parameter, *which is in absolute
             #     units* and so must be inverse transformed using matplotlib!
             inv = ax.transData.inverted()
-            real_node_size = (abs(
-                inv.transform((0, default_node_size))[1] -
-                inv.transform((0, 0))[1]
-            ) ** 0.5) / 4
+            real_node_size = (
+                abs(
+                    inv.transform((0, default_node_size))[1]
+                    - inv.transform((0, 0))[1]
+                )
+                ** 0.5
+            ) / 4
             ax.set_xlim(xmin - real_node_size, xmax + real_node_size)
             ax.set_ylim(ymin - real_node_size, ymax + real_node_size)
         else:
@@ -569,66 +573,69 @@ def _draw_matplotlib(
         fig = None
 
     nx.draw_networkx_edges(
-        G, pos,
-        width=tuple(x[2]['edge_size'] for x in G.edges(data=True)),
-        edge_color=tuple(x[2]['color'] for x in G.edges(data=True)),
+        G,
+        pos,
+        width=tuple(x[2]["edge_size"] for x in G.edges(data=True)),
+        edge_color=tuple(x[2]["color"] for x in G.edges(data=True)),
         ax=ax,
     )
 
     # draw multiedges
     multiedge_centers = {}
     for i, j, attrs in G.edges(data=True):
-        sizes = attrs['multiedge_sizes']
+        sizes = attrs["multiedge_sizes"]
         multiplicity = len(sizes)
         if multiplicity > 1:
             rads = np.linspace(
                 multiplicity * -multiedge_spread,
                 multiplicity * +multiedge_spread,
-                multiplicity
+                multiplicity,
             )
 
             xa, ya = pos[i]
             xb, yb = pos[j]
-            xab, yab = (xa + xb) / 2., (ya + yb) / 2.
+            xab, yab = (xa + xb) / 2.0, (ya + yb) / 2.0
             dx, dy = xb - xa, yb - ya
 
-            inds = attrs['multiedge_inds']
+            inds = attrs["multiedge_inds"]
             for sz, rad, ix in zip(sizes, rads, inds):
-
                 # store the central point of the arc in case its needed by
                 # the arrow drawing functionality
                 cx, cy = xab + rad * dy * 0.5, yab - rad * dx * 0.5
                 multiedge_centers[ix] = (cx, cy)
 
-                ax.add_patch(patches.FancyArrowPatch(
-                    (xa, ya), (xb, yb),
-                    connectionstyle=patches.ConnectionStyle.Arc3(rad=rad),
-                    linewidth=sz,
-                    color=attrs['color'],
-                    zorder=1,
-                ))
+                ax.add_patch(
+                    patches.FancyArrowPatch(
+                        (xa, ya),
+                        (xb, yb),
+                        connectionstyle=patches.ConnectionStyle.Arc3(rad=rad),
+                        linewidth=sz,
+                        color=attrs["color"],
+                        zorder=1,
+                    )
+                )
 
     scatters = collections.defaultdict(lambda: collections.defaultdict(list))
     for node, attrs in G.nodes(data=True):
         # need to group by marker and hatch as matplotlib doesn't map these
-        key = (attrs['marker'], attrs['hatch'])
-        scatters[key]['x'].append(pos[node][0])
-        scatters[key]['y'].append(pos[node][1])
-        scatters[key]['s'].append(attrs['size'])
-        scatters[key]['c'].append(attrs['color'])
-        scatters[key]['linewidths'].append(attrs['outline_size'])
-        scatters[key]['edgecolors'].append(attrs['outline_color'])
+        key = (attrs["marker"], attrs["hatch"])
+        scatters[key]["x"].append(pos[node][0])
+        scatters[key]["y"].append(pos[node][1])
+        scatters[key]["s"].append(attrs["size"])
+        scatters[key]["c"].append(attrs["color"])
+        scatters[key]["linewidths"].append(attrs["outline_size"])
+        scatters[key]["edgecolors"].append(attrs["outline_color"])
 
     # plot the nodes
     for (marker, hatch), data in scatters.items():
         ax.scatter(
-            data['x'],
-            data['y'],
-            s=data['s'],
-            c=data['c'],
+            data["x"],
+            data["y"],
+            s=data["s"],
+            c=data["c"],
             marker=marker,
-            linewidths=data['linewidths'],
-            edgecolors=data['edgecolors'],
+            linewidths=data["linewidths"],
+            edgecolors=data["edgecolors"],
             hatch=hatch,
             zorder=2,
         )
@@ -641,12 +648,12 @@ def _draw_matplotlib(
                     if ind in hyperedges:
                         tida = ind
                     else:
-                        tida, = (x for x in tn.ind_map[ind] if x != tid)
+                        (tida,) = (x for x in tn.ind_map[ind] if x != tid)
                     tidb = tid
                     (xa, ya), (xb, yb) = pos[tida], pos[tidb]
 
-                    edge_width = G.get_edge_data(tida, tidb)['edge_size']
-                    edge_length = ((xb - xa)**2 + (yb - ya)**2)**0.5
+                    edge_width = G.get_edge_data(tida, tidb)["edge_size"]
+                    edge_length = ((xb - xa) ** 2 + (yb - ya) ** 2) ** 0.5
                     arrow_scale = (
                         0.02 * arrow_length * edge_width / edge_length**0.5
                     )
@@ -661,40 +668,48 @@ def _draw_matplotlib(
                     dx = (xb - xa) * arrow_scale
                     dy = (yb - ya) * arrow_scale
 
-                    ax.add_patch(patches.FancyArrow(
-                        x, y, dx, dy,
-                        width=0,  # don't draw tail
-                        length_includes_head=True,
-                        head_width=(dx**2 + dy**2)**0.5,
-                        head_length=(dx**2 + dy**2)**0.5,
-                        linewidth=arrow_linewidth,
-                        color=(
-                            highlight_inds_color if ind in highlight_inds else
-                            edge_color
-                        ),
-                        fill=True,
-                        shape='full',
-                        overhang=arrow_overhang,
-                    ))
+                    ax.add_patch(
+                        patches.FancyArrow(
+                            x,
+                            y,
+                            dx,
+                            dy,
+                            width=0,  # don't draw tail
+                            length_includes_head=True,
+                            head_width=(dx**2 + dy**2) ** 0.5,
+                            head_length=(dx**2 + dy**2) ** 0.5,
+                            linewidth=arrow_linewidth,
+                            color=(
+                                highlight_inds_color
+                                if ind in highlight_inds
+                                else edge_color
+                            ),
+                            fill=True,
+                            shape="full",
+                            overhang=arrow_overhang,
+                        )
+                    )
 
-    if show_inds in {'all', 'bond-size'}:
+    if show_inds in {"all", "bond-size"}:
         nx.draw_networkx_edge_labels(
-            G, pos,
+            G,
+            pos,
             edge_labels={
-                (nodea, nodeb): data.get('label', '')
+                (nodea, nodeb): data.get("label", "")
                 for nodea, nodeb, data in G.edges(data=True)
             },
             font_size=font_size_inner,
             font_color=label_color,
             font_family=font_family,
-            bbox={'ec': (0, 0, 0, 0), 'fc': (0, 0, 0, 0)},
+            bbox={"ec": (0, 0, 0, 0), "fc": (0, 0, 0, 0)},
             ax=ax,
         )
     if show_tags or show_inds:
         nx.draw_networkx_labels(
-            G, pos,
+            G,
+            pos,
             labels={
-                node: data.get('label', '')
+                node: data.get("label", "")
                 for node, data in G.nodes(data=True)
             },
             font_size=(
@@ -709,7 +724,6 @@ def _draw_matplotlib(
     if colors and legend:
         handles = []
         for color in colors.values():
-
             ecolor = tuple(
                 (1.0 if i == 3 else node_outline_darkness) * c
                 for i, c in enumerate(color)
@@ -718,13 +732,14 @@ def _draw_matplotlib(
 
             handles += [
                 plt.Line2D(
-                    [0], [0],
-                    marker='o',
+                    [0],
+                    [0],
+                    marker="o",
                     color=color,
                     markeredgecolor=ecolor,
                     markeredgewidth=linewidth,
-                    linestyle='',
-                    markersize=10
+                    linestyle="",
+                    markersize=10,
                 )
             ]
 
@@ -732,12 +747,13 @@ def _draw_matplotlib(
         lbls = [f" {lbl}" for lbl in colors]
 
         legend = plt.legend(
-            handles, lbls,
+            handles,
+            lbls,
             ncol=max(round(len(handles) / 20), 1),
-            loc='center left',
+            loc="center left",
             bbox_to_anchor=(1, 0.5),
             labelcolor=label_color,
-            prop={'family': font_family},
+            prop={"family": font_family},
         )
         # do this manually as otherwise can't make only face transparent
         legend.get_frame().set_alpha(None)
@@ -787,8 +803,17 @@ def _linearize_graph_data(G, pos):
         if maybe_z:
             node_source["z"].extend(maybe_z)
 
-        for k in ("size", "color", "outline_color", "outline_size",
-                  "hatch", "tags", "shape", "tid", "label"):
+        for k in (
+            "size",
+            "color",
+            "outline_color",
+            "outline_size",
+            "hatch",
+            "tags",
+            "shape",
+            "tid",
+            "label",
+        ):
             node_source[k].append(data.get(k, None))
 
     return dict(edge_source), dict(node_source)
@@ -808,79 +833,87 @@ def _draw_matplotlib3d(
     if ax is None:
         fig = plt.figure(figsize=figsize)
         fig.patch.set_alpha(0.0)
-        ax = plt.axes([0, 0, 1, 1], projection='3d')
+        ax = plt.axes([0, 0, 1, 1], projection="3d")
         ax.patch.set_alpha(0.0)
 
-        xmin = min(node_source['x'])
-        xmax = max(node_source['x'])
-        ymin = min(node_source['y'])
-        ymax = max(node_source['y'])
-        zmin = min(node_source['z'])
-        zmax = max(node_source['z'])
+        xmin = min(node_source["x"])
+        xmax = max(node_source["x"])
+        ymin = min(node_source["y"])
+        ymax = max(node_source["y"])
+        zmin = min(node_source["z"])
+        zmax = max(node_source["z"])
         xyzmin = min((xmin, ymin, zmin))
         xyzmax = max((xmax, ymax, zmax))
 
         ax.set_xlim(xyzmin, xyzmax)
         ax.set_ylim(xyzmin, xyzmax)
         ax.set_zlim(xyzmin, xyzmax)
-        ax.set_aspect('equal')
-        ax.axis('off')
+        ax.set_aspect("equal")
+        ax.axis("off")
 
     # draw the edges
     # TODO: multiedges and left_inds
-    for i in range(len(edge_source['x0'])):
-        x0, x1 = edge_source['x0'][i], edge_source['x1'][i]
+    for i in range(len(edge_source["x0"])):
+        x0, x1 = edge_source["x0"][i], edge_source["x1"][i]
         xm = (x0 + x1) / 2
-        y0, y1 = edge_source['y0'][i], edge_source['y1'][i]
+        y0, y1 = edge_source["y0"][i], edge_source["y1"][i]
         ym = (y0 + y1) / 2
-        z0, z1 = edge_source['z0'][i], edge_source['z1'][i]
+        z0, z1 = edge_source["z0"][i], edge_source["z1"][i]
         zm = (z0 + z1) / 2
         ax.plot3D(
-            [x0, x1], [y0, y1], [z0, z1],
-            c=edge_source['color'][i],
-            linewidth=edge_source['edge_size'][i]
+            [x0, x1],
+            [y0, y1],
+            [z0, z1],
+            c=edge_source["color"][i],
+            linewidth=edge_source["edge_size"][i],
         )
-        label = edge_source['label'][i]
+        label = edge_source["label"][i]
         if label:
             ax.text(
-                xm, ym, zm,
+                xm,
+                ym,
+                zm,
                 s=label,
-                ha='center', va='center',
-                color=edge_source['color'][i], fontsize=6,
+                ha="center",
+                va="center",
+                color=edge_source["color"][i],
+                fontsize=6,
             )
 
     # draw the nodes
     ax.scatter3D(
-        xs='x',
-        ys='y',
-        zs='z',
-        c='color',
-        s='size',
+        xs="x",
+        ys="y",
+        zs="z",
+        c="color",
+        s="size",
         data=node_source,
         depthshade=False,
-        edgecolors=node_source['outline_color'],
-        linewidth=node_source['outline_size'],
+        edgecolors=node_source["outline_color"],
+        linewidth=node_source["outline_size"],
     )
 
     for x, y, label in zip(
-        node_source['x'],
-        node_source['y'],
-        node_source['label']
+        node_source["x"], node_source["y"], node_source["label"]
     ):
         if label:
             ax.text(
-                x, y, 0,
+                x,
+                y,
+                0,
                 s=label,
-                ha='center', va='center',
-                color='black', fontsize=6,
+                ha="center",
+                va="center",
+                color="black",
+                fontsize=6,
             )
-
 
     if return_fig:
         return fig
     else:
         plt.show()
         plt.close(fig)
+
 
 def _draw_plotly(
     G,
@@ -905,7 +938,7 @@ def _draw_plotly(
             xaxis=dict(visible=False),
             yaxis=dict(visible=False),
             zaxis=dict(visible=False),
-        )
+        ),
     )
 
     for i in range(len(edge_source["x0"])):
@@ -921,18 +954,17 @@ def _draw_plotly(
                 color=to_rgba_str(rgb, 1.0),
                 width=2.5 * edge_source["edge_size"][i],
             ),
-            customdata=[[
-                edge_source['ind'][i], edge_source['ind_size'][i]
-            ]] * 2,
+            customdata=[[edge_source["ind"][i], edge_source["ind_size"][i]]]
+            * 2,
             # show ind and ind_size on hover:
             hovertemplate="%{customdata[0]}<br>size: %{customdata[1]}",
-            mode='lines',
+            mode="lines",
             name="",
         )
-        if 'z0' in edge_source:
+        if "z0" in edge_source:
             z0, z1 = edge_source["z0"][i], edge_source["z1"][i]
             zm = (z0 + z1) / 2
-            edge_kwargs['z'] = [z0, zm, z1]
+            edge_kwargs["z"] = [z0, zm, z1]
             fig.add_trace(go.Scatter3d(**edge_kwargs))
         else:
             fig.add_trace(go.Scatter(**edge_kwargs))
@@ -947,21 +979,21 @@ def _draw_plotly(
             line=dict(
                 color=list(map(to_rgba_str, node_source["outline_color"])),
                 width=2,
-            )
+            ),
         ),
-        customdata=list(zip(
-            node_source["tid"], node_source["shape"], node_source["tags"]
-        )),
+        customdata=list(
+            zip(node_source["tid"], node_source["shape"], node_source["tags"])
+        ),
         hovertemplate=(
             "tid: %{customdata[0]}<br>"
             "shape: %{customdata[1]}<br>"
             "tags: %{customdata[2]}"
         ),
         mode="markers",
-        name=""
+        name="",
     )
-    if 'z' in node_source:
-        node_kwargs['z'] = node_source['z']
+    if "z" in node_source:
+        node_kwargs["z"] = node_source["z"]
         fig.add_trace(go.Scatter3d(**node_kwargs))
     else:
         fig.add_trace(go.Scatter(**node_kwargs))
@@ -971,29 +1003,28 @@ def _draw_plotly(
 # colorblind palettes by Bang Wong (https://www.nature.com/articles/nmeth.1618)
 
 _COLORS_DEFAULT = (
-    '#56B4E9',  # light blue
-    '#E69F00',  # orange
-    '#009E73',  # green
-    '#D55E00',  # red
-    '#F0E442',  # yellow
-    '#CC79A7',  # purple
-    '#0072B2',  # dark blue
+    "#56B4E9",  # light blue
+    "#E69F00",  # orange
+    "#009E73",  # green
+    "#D55E00",  # red
+    "#F0E442",  # yellow
+    "#CC79A7",  # purple
+    "#0072B2",  # dark blue
 )
 
 _COLORS_SORTED = (
-    '#0072B2',  # dark blue
-    '#56B4E9',  # light blue
-    '#009E73',  # green
-    '#F0E442',  # yellow
-    '#E69F00',  # orange
-    '#D55E00',  # red
-    '#CC79A7',  # purple
+    "#0072B2",  # dark blue
+    "#56B4E9",  # light blue
+    "#009E73",  # green
+    "#F0E442",  # yellow
+    "#E69F00",  # orange
+    "#D55E00",  # red
+    "#CC79A7",  # purple
 )
 
 
 def mod_sat(c, mod, alpha):
-    """Modify the luminosity of rgb color ``c``.
-    """
+    """Modify the luminosity of rgb color ``c``."""
     from matplotlib.colors import hsv_to_rgb, rgb_to_hsv
 
     h, s, v = rgb_to_hsv(c[:3])
@@ -1004,7 +1035,7 @@ def auto_colors(nc, alpha=None):
     import math
     from matplotlib.colors import LinearSegmentedColormap
 
-    cmap = LinearSegmentedColormap.from_list('wong', _COLORS_SORTED)
+    cmap = LinearSegmentedColormap.from_list("wong", _COLORS_SORTED)
 
     xs = list(map(cmap, np.linspace(0, 1.0, nc)))
 
@@ -1019,7 +1050,7 @@ def auto_colors(nc, alpha=None):
     return [
         mod_sat(
             c,
-            1 - sat_mod_factor * math.sin(math.pi * i / sat_mod_period)**2,
+            1 - sat_mod_factor * math.sin(math.pi * i / sat_mod_period) ** 2,
             alpha,
         )
         for i, c in enumerate(xs)
@@ -1027,8 +1058,7 @@ def auto_colors(nc, alpha=None):
 
 
 def get_colors(color, custom_colors=None, alpha=None):
-    """Generate a sequence of rgbs for tag(s) ``color``.
-    """
+    """Generate a sequence of rgbs for tag(s) ``color``."""
     from matplotlib.colors import to_rgba
 
     if color is None:
@@ -1052,6 +1082,7 @@ def get_colors(color, custom_colors=None, alpha=None):
 
 def to_rgba_str(color, alpha=None):
     from matplotlib.colors import to_rgba
+
     rgba = to_rgba(color, alpha)
     r = int(rgba[0] * 255) if isinstance(rgba[0], float) else rgba[0]
     g = int(rgba[1] * 255) if isinstance(rgba[1], float) else rgba[1]
@@ -1060,8 +1091,7 @@ def to_rgba_str(color, alpha=None):
 
 
 def _rotate(xy, theta):
-    """Return a rotated set of points.
-    """
+    """Return a rotated set of points."""
     s = np.sin(theta)
     c = np.cos(theta)
 
@@ -1073,14 +1103,12 @@ def _rotate(xy, theta):
 
 
 def _span(xy):
-    """Return the vertical span of the points.
-    """
+    """Return the vertical span of the points."""
     return xy[:, 1].max() - xy[:, 1].min()
 
 
 def _massage_pos(pos, nangles=360, flatten=False):
-    """Rotate a position dict's points to cover a small vertical span
-    """
+    """Rotate a position dict's points to cover a small vertical span"""
     xy = np.empty((len(pos), 2))
     for i, (x, y) in enumerate(pos.values()):
         xy[i, 0] = x
@@ -1098,7 +1126,7 @@ def _massage_pos(pos, nangles=360, flatten=False):
 
 def layout_pygraphviz(
     G,
-    prog='neato',
+    prog="neato",
     dim=2,
     **kwargs,
 ):
@@ -1120,11 +1148,11 @@ def layout_pygraphviz(
     kwargs = {}
 
     if dim == 2.5:
-        kwargs['dim'] = 3
-        kwargs['dimen'] = 2
+        kwargs["dim"] = 3
+        kwargs["dimen"] = 2
     else:
-        kwargs['dim'] =  kwargs['dimen'] = dim
-    args = ' '.join(f'-G{k}={v}' for k, v in kwargs.items())
+        kwargs["dim"] = kwargs["dimen"] = dim
+    args = " ".join(f"-G{k}={v}" for k, v in kwargs.items())
 
     # run layout algorithm
     aG.layout(prog=prog, args=args)
@@ -1132,12 +1160,12 @@ def layout_pygraphviz(
     # extract layout
     pos = {}
     for snode, node in mapping.items():
-        spos = aG.get_node(snode).attr['pos']
-        pos[node] = tuple(map(float, spos.split(',')))
+        spos = aG.get_node(snode).attr["pos"]
+        pos[node] = tuple(map(float, spos.split(",")))
 
     # normalize to unit square
-    xmin = ymin = zmin = float('inf')
-    xmax = ymax = zmaz = float('-inf')
+    xmin = ymin = zmin = float("inf")
+    xmax = ymax = zmaz = float("-inf")
     for x, y, *maybe_z in pos.values():
         xmin = min(xmin, x)
         xmax = max(xmax, x)
@@ -1163,23 +1191,24 @@ def get_positions(
     *,
     dim=2,
     fix=None,
-    layout='auto',
-    initial_layout='auto',
-    iterations='auto',
+    layout="auto",
+    initial_layout="auto",
+    iterations="auto",
     k=None,
     use_forceatlas2=False,
     use_spring_weight=False,
 ):
-    if layout in ('dot', 'neato', 'fdp', 'sfdp'):
-        if fix or k or iterations != 'auto':
+    if layout in ("dot", "neato", "fdp", "sfdp"):
+        if fix or k or iterations != "auto":
             import warnings
+
             warnings.warn(
                 "Layout is being done by pygraphviz, so `fix`, "
                 "`k`, and `iterations` are currently ignored."
             )
         return layout_pygraphviz(G, prog=layout, dim=dim)
 
-    if layout != 'auto':
+    if layout != "auto":
         initial_layout = layout
         iterations = 0
 
@@ -1192,7 +1221,8 @@ def get_positions(
         # find range with which to scale spectral points with
         xmin, xmax, ymin, ymax = (
             f(fix.values(), key=lambda xy: xy[i])[i]
-            for f, i in [(min, 0), (max, 0), (min, 1), (max, 1)])
+            for f, i in [(min, 0), (max, 0), (min, 1), (max, 1)]
+        )
         if xmin == xmax:
             xmin, xmax = xmin - 1, xmax + 1
         if ymin == ymax:
@@ -1203,16 +1233,16 @@ def get_positions(
         # everything is already fixed
         return fix
 
-    if initial_layout == 'auto':
+    if initial_layout == "auto":
         # automatically select
         if len(G) <= 100:
             # usually nicest
-            initial_layout = 'kamada_kawai'
+            initial_layout = "kamada_kawai"
         else:
             # faster, but not as nice
-            initial_layout = 'spectral'
+            initial_layout = "spectral"
 
-    if iterations == 'auto':
+    if iterations == "auto":
         # the smaller the graph, the more iterations we can afford
         iterations = max(200, 1000 - len(G))
 
@@ -1223,48 +1253,61 @@ def get_positions(
         project_back_to_2d = False
 
     # use spectral or other layout as starting point
-    ly_opts = {'dim': dim} if dim != 2 else {}
-    pos0 = getattr(nx, initial_layout + '_layout')(G, **ly_opts)
+    ly_opts = {"dim": dim} if dim != 2 else {}
+    pos0 = getattr(nx, initial_layout + "_layout")(G, **ly_opts)
 
     # scale points to fit with specified positions
     if fix:
         # but update with fixed positions
-        pos0.update(valmap(lambda xy: np.array(
-            (2 * (xy[0] - xymin) / (xymax - xymin) - 1,
-             2 * (xy[1] - xymin) / (xymax - xymin) - 1)), fix))
+        pos0.update(
+            valmap(
+                lambda xy: np.array(
+                    (
+                        2 * (xy[0] - xymin) / (xymax - xymin) - 1,
+                        2 * (xy[1] - xymin) / (xymax - xymin) - 1,
+                    )
+                ),
+                fix,
+            )
+        )
         fixed = fix.keys()
     else:
         fixed = None
 
     # and then relax remaining using spring layout
     if iterations:
-
         if use_forceatlas2 is True:
             # turn on for more than 1 node
             use_forceatlas2 = 1
         elif use_forceatlas2 in (0, False):
             # never turn on
-            use_forceatlas2 = float('inf')
+            use_forceatlas2 = float("inf")
 
         should_use_fa2 = (
-            (fixed is None) and
-            HAS_FA2 and
-            (len(G) > use_forceatlas2) and
-            (dim == 2)
+            (fixed is None)
+            and HAS_FA2
+            and (len(G) > use_forceatlas2)
+            and (dim == 2)
         )
 
-        weight = 'spring_weight' if use_spring_weight else None
+        weight = "spring_weight" if use_spring_weight else None
 
         if should_use_fa2:
             from fa2 import ForceAtlas2
+
             # NB: some versions of fa2 don't support the `weight_attr` option
             pos = ForceAtlas2(verbose=False).forceatlas2_networkx_layout(
                 G, pos=pos0, iterations=iterations
             )
         else:
             pos = nx.spring_layout(
-                G, pos=pos0, fixed=fixed, k=k, dim=dim,
-                iterations=iterations, weight=weight
+                G,
+                pos=pos0,
+                fixed=fixed,
+                k=k,
+                dim=dim,
+                iterations=iterations,
+                weight=weight,
             )
     else:
         pos = pos0
@@ -1323,6 +1366,8 @@ def visualize_tensor(tensor, **kwargs):
         The axis containing the plot.
     """
     import xyzpy as xyz
-    kwargs.setdefault('compass', True)
-    kwargs.setdefault('compass_labels', tensor.inds)
+
+    kwargs.setdefault("legend", True)
+    kwargs.setdefault("compass", True)
+    kwargs.setdefault("compass_labels", tensor.inds)
     return xyz.visualize_tensor(tensor.data, **kwargs)
