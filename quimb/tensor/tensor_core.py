@@ -7039,7 +7039,7 @@ class TensorNetwork(object):
         # reindex one tensor, and add a new A tensor joining the bonds
         nbnd = rand_uuid()
         T2.reindex_({bnd: nbnd})
-        TA = Tensor(A, inds=(bnd, nbnd), tags=tags)
+        TA = A.__class__(A, inds=(bnd, nbnd), tags=tags)
         tn |= TA
 
         return tn
