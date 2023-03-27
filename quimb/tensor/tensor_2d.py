@@ -320,14 +320,30 @@ class TensorNetwork2D(TensorNetworkGen):
                 for e in TensorNetwork2D._EXTRA_PROPS)
         )
 
-    def __and__(self, other):
-        new = TensorNetwork.__and__(self, other)
-        if self._compatible_2d(other):
-            new.view_as_(TensorNetwork2D, like=self)
-        return new
+    def combine(self, other, *, virtual=False, check_collisions=True):
+        """Combine this tensor network with another, returning a new tensor
+        network. If the two are compatible, cast the resulting tensor network
+        to a :class:`TensorNetwork2D` instance.
 
-    def __or__(self, other):
-        new = TensorNetwork.__or__(self, other)
+        Parameters
+        ----------
+        other : TensorNetwork2D or TensorNetwork
+            The other tensor network to combine with.
+        virtual : bool, optional
+            Whether the new tensor network should copy all the incoming tensors
+            (``False``, the default), or view them as virtual (``True``).
+        check_collisions : bool, optional
+            Whether to check for index collisions between the two tensor
+            networks before combining them. If ``True`` (the default), any
+            inner indices that clash will be mangled.
+
+        Returns
+        -------
+        TensorNetwork2D or TensorNetwork
+        """
+        new = super().combine(
+            other, virtual=virtual, check_collisions=check_collisions
+        )
         if self._compatible_2d(other):
             new.view_as_(TensorNetwork2D, like=self)
         return new

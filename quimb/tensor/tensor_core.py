@@ -3390,17 +3390,43 @@ class TensorNetwork(object):
         for t in ts:
             self.add(t, virtual=virtual, check_collisions=check_collisions)
 
+    def combine(self, other, *, virtual=False, check_collisions=True):
+        """Combine this tensor network with another, returning a new tensor
+        network.
+
+        Parameters
+        ----------
+        other : TensorNetwork
+            The other tensor network to combine with.
+        virtual : bool, optional
+            Whether the new tensor network should copy all the incoming tensors
+            (``False``, the default), or view them as virtual (``True``).
+        check_collisions : bool, optional
+            Whether to check for index collisions between the two tensor
+            networks before combining them. If ``True`` (the default), any
+            inner indices that clash will be mangled.
+
+        Returns
+        -------
+        TensorNetwork
+        """
+        return TensorNetwork(
+            (self, other),
+            virtual=virtual,
+            check_collisions=check_collisions,
+        )
+
     def __and__(self, other):
         """Combine this tensor network with more tensors, without contracting.
         Copies the tensors.
         """
-        return TensorNetwork((self, other))
+        return self.combine(other, virtual=False, check_collisions=True)
 
     def __or__(self, other):
         """Combine this tensor network with more tensors, without contracting.
         Views the constituent tensors.
         """
-        return TensorNetwork((self, other), virtual=True)
+        return self.combine(other, virtual=True, check_collisions=True)
 
     @classmethod
     def from_TN(cls, tn, like=None, inplace=False, **kwargs):
