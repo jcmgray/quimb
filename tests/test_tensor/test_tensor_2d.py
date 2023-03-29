@@ -225,15 +225,14 @@ class Test2DContract:
         xt = norm.contract_boundary(max_bond=27, mode="full-bond")
         assert xt == pytest.approx(xe, rel=1e-2)
 
-    @pytest.mark.parametrize('dims', [(10, 4), (4, 10)])
+    @pytest.mark.parametrize("dims", [(10, 4), (4, 10)])
     def test_contract_boundary_stopping_criterion(self, dims):
         tn = qtn.TN2D_from_fill_fn(
             lambda shape: ar.lazy.Variable(shape=shape, backend="numpy"),
-            *dims, D=2,
+            *dims,
+            D=2,
         )
-        tn.contract_ctmrg_(
-            4, cutoff=0.0, final_contract=False, progbar=True
-        )
+        tn.contract_ctmrg_(4, cutoff=0.0, final_contract=False, progbar=True)
         assert tn.max_bond() == 4
         assert 16 <= tn.num_tensors <= 20
 

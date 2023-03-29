@@ -133,22 +133,22 @@ def gen_2d_plaquette(coo0, steps):
         site which will be the same as the first.
     """
     x, y = coo0
-    smap = {'+': +1, '-': -1}
+    smap = {"+": +1, "-": -1}
     step_backs = []
     yield x, y
     for step in steps:
         d, s = step
         x, y = {
-            'x': (x + smap[s], y),
-            'y': (x, y + smap[s]),
+            "x": (x + smap[s], y),
+            "y": (x, y + smap[s]),
         }[d]
         yield x, y
-        step_backs.append(d + '-' if s == '+' else '-')
+        step_backs.append(d + "-" if s == "+" else "-")
     for step in step_backs:
         d, s = step
         x, y = {
-            'x': (x + smap[s], y),
-            'y': (x, y + smap[s]),
+            "x": (x + smap[s], y),
+            "y": (x, y + smap[s]),
         }[d]
         yield x, y
 
@@ -176,21 +176,20 @@ def gen_2d_plaquettes(Lx, Ly, tiling):
         The coordinates of the sites in each plaquette, including the last
         site which will be the same as the first.
     """
-    if str(tiling) == '1':
+    if str(tiling) == "1":
         for x, y in product(range(Lx), range(Ly)):
             if ((x + y) % 2 == 0) and (x < Lx - 1 and y < Ly - 1):
-                yield tuple(gen_2d_plaquette((x, y), ('x+', 'y+')))
-    elif str(tiling) in ('2', "full"):
+                yield tuple(gen_2d_plaquette((x, y), ("x+", "y+")))
+    elif str(tiling) in ("2", "full"):
         for x, y in product(range(Lx), range(Ly)):
-            if (x < Lx - 1 and y < Ly - 1):
-                yield tuple(gen_2d_plaquette((x, y), ('x+', 'y+')))
+            if x < Lx - 1 and y < Ly - 1:
+                yield tuple(gen_2d_plaquette((x, y), ("x+", "y+")))
     else:
         raise ValueError("`tiling` must be one of: '1', '2', 'full'.")
 
 
 def gen_2d_strings(Lx, Ly):
-    """Generate all length-wise strings in a square 2D lattice.
-    """
+    """Generate all length-wise strings in a square 2D lattice."""
     for x in range(Lx):
         yield tuple((x, y) for y in range(Ly))
     for y in range(Ly):
@@ -217,7 +216,7 @@ class Rotator2D:
     """
 
     def __init__(self, tn, xrange, yrange, from_which, stepsize=1):
-        check_opt('from_which', from_which, {'xmin', 'xmax', 'ymin', 'ymax'})
+        check_opt("from_which", from_which, {"xmin", "xmax", "ymin", "ymax"})
 
         if xrange is None:
             xrange = (0, tn.Lx - 1)
@@ -230,7 +229,7 @@ class Rotator2D:
         self.from_which = from_which
         self.plane = from_which[0]
 
-        if self.plane == 'x':
+        if self.plane == "x":
             # -> no rotation needed
             self.imin, self.imax = sorted(xrange)
             self.jmin, self.jmax = sorted(yrange)
@@ -245,7 +244,7 @@ class Rotator2D:
             self.x_tag = tn.y_tag
             self.site_tag = lambda i, j: tn.site_tag(j, i)
 
-        if 'min' in self.from_which:
+        if "min" in self.from_which:
             # -> sweeps are increasing
             self.sweep = range(self.imin, self.imax + 1, +stepsize)
             self.istep = +stepsize
@@ -261,19 +260,38 @@ class Rotator2D:
         the opposite direction to main sweep.
         """
         return {
-            'xmin': (functools.partial(self.tn.compute_xmax_environments,
-                                       yrange=self.yrange), 'xmax'),
-            'xmax': (functools.partial(self.tn.compute_xmin_environments,
-                                       yrange=self.yrange), 'xmin'),
-            'ymin': (functools.partial(self.tn.compute_ymax_environments,
-                                       xrange=self.xrange), 'ymax'),
-            'ymax': (functools.partial(self.tn.compute_ymin_environments,
-                                       xrange=self.xrange), 'ymin'),
+            "xmin": (
+                functools.partial(
+                    self.tn.compute_xmax_environments, yrange=self.yrange
+                ),
+                "xmax",
+            ),
+            "xmax": (
+                functools.partial(
+                    self.tn.compute_xmin_environments, yrange=self.yrange
+                ),
+                "xmin",
+            ),
+            "ymin": (
+                functools.partial(
+                    self.tn.compute_ymax_environments, xrange=self.xrange
+                ),
+                "ymax",
+            ),
+            "ymax": (
+                functools.partial(
+                    self.tn.compute_ymin_environments, xrange=self.xrange
+                ),
+                "ymin",
+            ),
         }[self.from_which]
 
 
 BOUNDARY_SEQUENCE_VALID = {
-    "xmin", "xmax", "ymin", "ymax",
+    "xmin",
+    "xmax",
+    "ymin",
+    "ymax",
 }
 BOUNDARY_SEQUENCE_MAP = {
     "b": "xmin",
@@ -285,6 +303,7 @@ BOUNDARY_SEQUENCE_MAP = {
     "r": "ymax",
     "ymax": "ymax",
 }
+
 
 def parse_boundary_sequence(sequence):
     """Ensure ``sequence`` is a tuple of boundary sequence strings from
@@ -328,21 +347,20 @@ class TensorNetwork2D(TensorNetworkGen):
 
     _NDIMS = 2
     _EXTRA_PROPS = (
-        '_site_tag_id',
-        '_x_tag_id',
-        '_y_tag_id',
-        '_Lx',
-        '_Ly',
+        "_site_tag_id",
+        "_x_tag_id",
+        "_y_tag_id",
+        "_Lx",
+        "_Ly",
     )
 
     def _compatible_2d(self, other):
         """Check whether ``self`` and ``other`` are compatible 2D tensor
         networks such that they can remain a 2D tensor network when combined.
         """
-        return (
-            isinstance(other, TensorNetwork2D) and
-            all(getattr(self, e) == getattr(other, e)
-                for e in TensorNetwork2D._EXTRA_PROPS)
+        return isinstance(other, TensorNetwork2D) and all(
+            getattr(self, e) == getattr(other, e)
+            for e in TensorNetwork2D._EXTRA_PROPS
         )
 
     def combine(self, other, *, virtual=False, check_collisions=True):
@@ -375,25 +393,21 @@ class TensorNetwork2D(TensorNetworkGen):
 
     @property
     def Lx(self):
-        """The number of rows.
-        """
+        """The number of rows."""
         return self._Lx
 
     @property
     def Ly(self):
-        """The number of columns.
-        """
+        """The number of columns."""
         return self._Ly
 
     @property
     def nsites(self):
-        """The total number of sites.
-        """
+        """The total number of sites."""
         return self._Lx * self._Ly
 
     def site_tag(self, i, j=None):
-        """The name of the tag specifiying the tensor at site ``(i, j)``.
-        """
+        """The name of the tag specifiying the tensor at site ``(i, j)``."""
         if j is None:
             i, j = i
         if not isinstance(i, str):
@@ -404,8 +418,7 @@ class TensorNetwork2D(TensorNetworkGen):
 
     @property
     def x_tag_id(self):
-        """The string specifier for tagging each row of this 2D TN.
-        """
+        """The string specifier for tagging each row of this 2D TN."""
         return self._x_tag_id
 
     def x_tag(self, i):
@@ -415,17 +428,15 @@ class TensorNetwork2D(TensorNetworkGen):
 
     @property
     def x_tags(self):
-        """A tuple of all of the ``Lx`` different row tags.
-        """
+        """A tuple of all of the ``Lx`` different row tags."""
         return tuple(map(self.x_tag, range(self.Lx)))
 
-    row_tag = deprecated(x_tag, 'row_tag', 'x_tag')
-    row_tags = deprecated(x_tags, 'row_tags', 'x_tags')
+    row_tag = deprecated(x_tag, "row_tag", "x_tag")
+    row_tags = deprecated(x_tags, "row_tags", "x_tags")
 
     @property
     def y_tag_id(self):
-        """The string specifier for tagging each column of this 2D TN.
-        """
+        """The string specifier for tagging each column of this 2D TN."""
         return self._y_tag_id
 
     def y_tag(self, j):
@@ -435,12 +446,11 @@ class TensorNetwork2D(TensorNetworkGen):
 
     @property
     def y_tags(self):
-        """A tuple of all of the ``Ly`` different column tags.
-        """
+        """A tuple of all of the ``Ly`` different column tags."""
         return tuple(map(self.y_tag, range(self.Ly)))
 
-    col_tag = deprecated(y_tag, 'col_tag', 'y_tag')
-    col_tags = deprecated(y_tags, 'col_tags', 'y_tags')
+    col_tag = deprecated(y_tag, "col_tag", "y_tag")
+    col_tags = deprecated(y_tags, "col_tags", "y_tags")
 
     def maybe_convert_coo(self, x):
         """Check if ``x`` is a tuple of two ints and convert to the
@@ -454,7 +464,7 @@ class TensorNetwork2D(TensorNetworkGen):
                 pass
         return x
 
-    def _get_tids_from_tags(self, tags, which='all'):
+    def _get_tids_from_tags(self, tags, which="all"):
         """This is the function that lets coordinates such as ``(i, j)`` be
         used for many 'tag' based functions.
         """
@@ -462,117 +472,171 @@ class TensorNetwork2D(TensorNetworkGen):
         return super()._get_tids_from_tags(tags, which=which)
 
     def gen_site_coos(self):
-        """Generate coordinates for all the sites in this 2D TN.
-        """
+        """Generate coordinates for all the sites in this 2D TN."""
         return product(range(self.Lx), range(self.Ly))
 
     def gen_bond_coos(self):
-        """Generate pairs of coordinates for all the bonds in this 2D TN.
-        """
-        return gen_2d_bonds(self.Lx, self.Ly, steppers=[
-            lambda i, j: (i, j + 1),
-            lambda i, j: (i + 1, j)
-        ])
+        """Generate pairs of coordinates for all the bonds in this 2D TN."""
+        return gen_2d_bonds(
+            self.Lx,
+            self.Ly,
+            steppers=[lambda i, j: (i, j + 1), lambda i, j: (i + 1, j)],
+        )
 
     def gen_horizontal_bond_coos(self):
-        """Generate all coordinate pairs like ``(i, j), (i, j + 1)``.
-        """
-        return gen_2d_bonds(self.Lx, self.Ly, steppers=[
-            lambda i, j: (i, j + 1),
-        ])
+        """Generate all coordinate pairs like ``(i, j), (i, j + 1)``."""
+        return gen_2d_bonds(
+            self.Lx,
+            self.Ly,
+            steppers=[
+                lambda i, j: (i, j + 1),
+            ],
+        )
 
     def gen_horizontal_even_bond_coos(self):
         """Generate all coordinate pairs like ``(i, j), (i, j + 1)`` where
         ``j`` is even, which thus don't overlap at all.
         """
-        return gen_2d_bonds(self.Lx, self.Ly, steppers=[
-            lambda i, j: (i, j + 1),
-        ], coo_filter=lambda i, j: j % 2 == 0)
+        return gen_2d_bonds(
+            self.Lx,
+            self.Ly,
+            steppers=[
+                lambda i, j: (i, j + 1),
+            ],
+            coo_filter=lambda i, j: j % 2 == 0,
+        )
 
     def gen_horizontal_odd_bond_coos(self):
         """Generate all coordinate pairs like ``(i, j), (i, j + 1)`` where
         ``j`` is odd, which thus don't overlap at all.
         """
-        return gen_2d_bonds(self.Lx, self.Ly, steppers=[
-            lambda i, j: (i, j + 1),
-        ], coo_filter=lambda i, j: j % 2 == 1)
+        return gen_2d_bonds(
+            self.Lx,
+            self.Ly,
+            steppers=[
+                lambda i, j: (i, j + 1),
+            ],
+            coo_filter=lambda i, j: j % 2 == 1,
+        )
 
     def gen_vertical_bond_coos(self):
-        """Generate all coordinate pairs like ``(i, j), (i + 1, j)``.
-        """
-        return gen_2d_bonds(self.Lx, self.Ly, steppers=[
-            lambda i, j: (i + 1, j),
-        ])
+        """Generate all coordinate pairs like ``(i, j), (i + 1, j)``."""
+        return gen_2d_bonds(
+            self.Lx,
+            self.Ly,
+            steppers=[
+                lambda i, j: (i + 1, j),
+            ],
+        )
 
     def gen_vertical_even_bond_coos(self):
         """Generate all coordinate pairs like ``(i, j), (i + 1, j)`` where
         ``i`` is even, which thus don't overlap at all.
         """
-        return gen_2d_bonds(self.Lx, self.Ly, steppers=[
-            lambda i, j: (i + 1, j),
-        ], coo_filter=lambda i, j: i % 2 == 0)
+        return gen_2d_bonds(
+            self.Lx,
+            self.Ly,
+            steppers=[
+                lambda i, j: (i + 1, j),
+            ],
+            coo_filter=lambda i, j: i % 2 == 0,
+        )
 
     def gen_vertical_odd_bond_coos(self):
         """Generate all coordinate pairs like ``(i, j), (i + 1, j)`` where
         ``i`` is odd, which thus don't overlap at all.
         """
-        return gen_2d_bonds(self.Lx, self.Ly, steppers=[
-            lambda i, j: (i + 1, j),
-        ], coo_filter=lambda i, j: i % 2 == 1)
+        return gen_2d_bonds(
+            self.Lx,
+            self.Ly,
+            steppers=[
+                lambda i, j: (i + 1, j),
+            ],
+            coo_filter=lambda i, j: i % 2 == 1,
+        )
 
     def gen_diagonal_left_bond_coos(self):
-        """Generate all coordinate pairs like ``(i, j), (i + 1, j - 1)``.
-        """
-        return gen_2d_bonds(self.Lx, self.Ly, steppers=[
-            lambda i, j: (i + 1, j - 1),
-        ])
+        """Generate all coordinate pairs like ``(i, j), (i + 1, j - 1)``."""
+        return gen_2d_bonds(
+            self.Lx,
+            self.Ly,
+            steppers=[
+                lambda i, j: (i + 1, j - 1),
+            ],
+        )
 
     def gen_diagonal_left_even_bond_coos(self):
         """Generate all coordinate pairs like ``(i, j), (i + 1, j - 1)`` where
         ``j`` is even, which thus don't overlap at all.
         """
-        return gen_2d_bonds(self.Lx, self.Ly, steppers=[
-            lambda i, j: (i + 1, j - 1),
-        ], coo_filter=lambda i, j: j % 2 == 0)
+        return gen_2d_bonds(
+            self.Lx,
+            self.Ly,
+            steppers=[
+                lambda i, j: (i + 1, j - 1),
+            ],
+            coo_filter=lambda i, j: j % 2 == 0,
+        )
 
     def gen_diagonal_left_odd_bond_coos(self):
         """Generate all coordinate pairs like ``(i, j), (i + 1, j - 1)`` where
         ``j`` is odd, which thus don't overlap at all.
         """
-        return gen_2d_bonds(self.Lx, self.Ly, steppers=[
-            lambda i, j: (i + 1, j - 1),
-        ], coo_filter=lambda i, j: j % 2 == 1)
+        return gen_2d_bonds(
+            self.Lx,
+            self.Ly,
+            steppers=[
+                lambda i, j: (i + 1, j - 1),
+            ],
+            coo_filter=lambda i, j: j % 2 == 1,
+        )
 
     def gen_diagonal_right_bond_coos(self):
-        """Generate all coordinate pairs like ``(i, j), (i + 1, j + 1)``.
-        """
-        return gen_2d_bonds(self.Lx, self.Ly, steppers=[
-            lambda i, j: (i + 1, j + 1),
-        ])
+        """Generate all coordinate pairs like ``(i, j), (i + 1, j + 1)``."""
+        return gen_2d_bonds(
+            self.Lx,
+            self.Ly,
+            steppers=[
+                lambda i, j: (i + 1, j + 1),
+            ],
+        )
 
     def gen_diagonal_right_even_bond_coos(self):
         """Generate all coordinate pairs like ``(i, j), (i + 1, j + 1)`` where
         ``i`` is even, which thus don't overlap at all.
         """
-        return gen_2d_bonds(self.Lx, self.Ly, steppers=[
-            lambda i, j: (i + 1, j + 1),
-        ], coo_filter=lambda i, j: i % 2 == 0)
+        return gen_2d_bonds(
+            self.Lx,
+            self.Ly,
+            steppers=[
+                lambda i, j: (i + 1, j + 1),
+            ],
+            coo_filter=lambda i, j: i % 2 == 0,
+        )
 
     def gen_diagonal_right_odd_bond_coos(self):
         """Generate all coordinate pairs like ``(i, j), (i + 1, j + 1)`` where
         ``i`` is odd, which thus don't overlap at all.
         """
-        return gen_2d_bonds(self.Lx, self.Ly, steppers=[
-            lambda i, j: (i + 1, j + 1),
-        ], coo_filter=lambda i, j: i % 2 == 1)
+        return gen_2d_bonds(
+            self.Lx,
+            self.Ly,
+            steppers=[
+                lambda i, j: (i + 1, j + 1),
+            ],
+            coo_filter=lambda i, j: i % 2 == 1,
+        )
 
     def gen_diagonal_bond_coos(self):
-        """Generate all next nearest neighbor diagonal coordinate pairs.
-        """
-        return gen_2d_bonds(self.Lx, self.Ly, steppers=[
-            lambda i, j: (i + 1, j - 1),
-            lambda i, j: (i + 1, j + 1),
-        ])
+        """Generate all next nearest neighbor diagonal coordinate pairs."""
+        return gen_2d_bonds(
+            self.Lx,
+            self.Ly,
+            steppers=[
+                lambda i, j: (i + 1, j - 1),
+                lambda i, j: (i + 1, j + 1),
+            ],
+        )
 
     def valid_coo(self, coo, xrange=None, yrange=None):
         """Check whether ``coo`` is in-bounds.
@@ -602,8 +666,8 @@ class TensorNetwork2D(TensorNetworkGen):
         xrange, yrange : tuple[tuple[int, int]]
             The minimum and maximum site coordinates present in each direction.
         """
-        xmin = ymin = float('inf')
-        xmax = ymax = float('-inf')
+        xmin = ymin = float("inf")
+        xmax = ymax = float("-inf")
         for i, j in self.gen_sites_present():
             xmin = min(i, xmin)
             ymin = min(j, ymin)
@@ -612,34 +676,29 @@ class TensorNetwork2D(TensorNetworkGen):
         return (xmin, xmax), (ymin, ymax)
 
     def __getitem__(self, key):
-        """Key based tensor selection, checking for integer based shortcut.
-        """
+        """Key based tensor selection, checking for integer based shortcut."""
         return super().__getitem__(self.maybe_convert_coo(key))
 
     def show(self):
-        """Print a unicode schematic of this 2D TN and its bond dimensions.
-        """
+        """Print a unicode schematic of this 2D TN and its bond dimensions."""
         show_2d(self)
 
     def __repr__(self):
-        """Insert number of rows and columns into standard print.
-        """
+        """Insert number of rows and columns into standard print."""
         s = super().__repr__()
-        extra = f', Lx={self.Lx}, Ly={self.Ly}, max_bond={self.max_bond()}'
-        s = f'{s[:-2]}{extra}{s[-2:]}'
+        extra = f", Lx={self.Lx}, Ly={self.Ly}, max_bond={self.max_bond()}"
+        s = f"{s[:-2]}{extra}{s[-2:]}"
         return s
 
     def __str__(self):
-        """Insert number of rows and columns into standard print.
-        """
+        """Insert number of rows and columns into standard print."""
         s = super().__str__()
-        extra = f', Lx={self.Lx}, Ly={self.Ly}, max_bond={self.max_bond()}'
-        s = f'{s[:-1]}{extra}{s[-1:]}'
+        extra = f", Lx={self.Lx}, Ly={self.Ly}, max_bond={self.max_bond()}"
+        s = f"{s[:-1]}{extra}{s[-1:]}"
         return s
 
     def flatten(self, fuse_multibonds=True, inplace=False):
-        """Contract all tensors corresponding to each site into one.
-        """
+        """Contract all tensors corresponding to each site into one."""
         tn = self if inplace else self.copy()
 
         for i, j in self.gen_site_coos():
@@ -658,10 +717,10 @@ class TensorNetwork2D(TensorNetworkGen):
         yrange=None,
         xreverse=False,
         yreverse=False,
-        coordinate_order='xy',
+        coordinate_order="xy",
         xstep=None,
         ystep=None,
-        stepping_order='xy',
+        stepping_order="xy",
         step_only=None,
     ):
         """Helper function for generating pairs of cooordinates for all bonds
@@ -699,13 +758,15 @@ class TensorNetwork2D(TensorNetworkGen):
 
         # generate the sites and order we will visit them in
         sweeps = {
-            'x': (
-                range(min(xrange), max(xrange) + 1, +1) if not xreverse else
-                range(max(xrange), min(xrange) - 1, -1)
+            "x": (
+                range(min(xrange), max(xrange) + 1, +1)
+                if not xreverse
+                else range(max(xrange), min(xrange) - 1, -1)
             ),
-            'y': (
-                range(min(yrange), max(yrange) + 1, +1) if not yreverse else
-                range(max(yrange), min(yrange) - 1, -1)
+            "y": (
+                range(min(yrange), max(yrange) + 1, +1)
+                if not yreverse
+                else range(max(yrange), min(yrange) - 1, -1)
             ),
         }
 
@@ -719,21 +780,22 @@ class TensorNetwork2D(TensorNetworkGen):
         if ystep is None:
             ystep = -1 if yreverse else +1
         steps = {
-            'x': lambda i, j: (i + xstep, j),
-            'y': lambda i, j: (i, j + ystep),
+            "x": lambda i, j: (i + xstep, j),
+            "y": lambda i, j: (i, j + ystep),
         }
 
         # make sure all coordinates exist - only allow them not to be specified
         # if their range is a unit slice
-        for w in 'xy':
+        for w in "xy":
             if w not in coordinate_order:
                 if len(sweeps[w]) > 1:
                     raise ValueError(
-                        f'{w} not in coordinate_order and is not size 1.')
+                        f"{w} not in coordinate_order and is not size 1."
+                    )
                 else:
                     # just append -> it won't change order as coord is constant
                     coordinate_order += w
-        xi, yi = map(coordinate_order.index, 'xy')
+        xi, yi = map(coordinate_order.index, "xy")
 
         # generate the pairs
         for perm_coo_a in product(*(sweeps[xy] for xy in coordinate_order)):
@@ -750,13 +812,13 @@ class TensorNetwork2D(TensorNetworkGen):
         yrange,
         equalize_norms=False,
         canonize_opts=None,
-        **gen_pair_opts
+        **gen_pair_opts,
     ):
         """Canonize every pair of tensors within a subrange, optionally
         specifying a order to visit those pairs in.
         """
         canonize_opts = ensure_dict(canonize_opts)
-        canonize_opts.setdefault('equalize_norms', equalize_norms)
+        canonize_opts.setdefault("equalize_norms", equalize_norms)
 
         pairs = self.gen_pairs(xrange=xrange, yrange=yrange, **gen_pair_opts)
 
@@ -822,10 +884,12 @@ class TensorNetwork2D(TensorNetworkGen):
         canonize_opts
             Supplied to ``canonize_between``.
         """
-        check_opt('sweep', sweep, ('right', 'left'))
+        check_opt("sweep", sweep, ("right", "left"))
         self.canonize_plane(
-            xrange=(i, i), yrange=yrange,
-            yreverse=(sweep == 'left'), **canonize_opts
+            xrange=(i, i),
+            yrange=yrange,
+            yreverse=(sweep == "left"),
+            **canonize_opts,
         )
 
     def canonize_column(self, j, sweep, xrange=None, **canonize_opts):
@@ -876,17 +940,19 @@ class TensorNetwork2D(TensorNetworkGen):
         canonize_opts
             Supplied to ``canonize_between``.
         """
-        check_opt('sweep', sweep, ('up', 'down'))
+        check_opt("sweep", sweep, ("up", "down"))
         self.canonize_plane(
-            yrange=(j, j), xrange=xrange,
-            xreverse=(sweep == 'down'), **canonize_opts
+            yrange=(j, j),
+            xrange=xrange,
+            xreverse=(sweep == "down"),
+            **canonize_opts,
         )
 
     def canonize_row_around(self, i, around=(0, 1)):
         # sweep to the right
-        self.canonize_row(i, sweep='right', yrange=(0, min(around)))
+        self.canonize_row(i, sweep="right", yrange=(0, min(around)))
         # sweep to the left
-        self.canonize_row(i, sweep='left', yrange=(max(around), self.Ly - 1))
+        self.canonize_row(i, sweep="left", yrange=(max(around), self.Ly - 1))
 
     def compress_plane(
         self,
@@ -896,16 +962,20 @@ class TensorNetwork2D(TensorNetworkGen):
         cutoff=1e-10,
         equalize_norms=False,
         compress_opts=None,
-        **gen_pair_opts
+        **gen_pair_opts,
     ):
         """Compress every pair of tensors within a subrange, optionally
         specifying a order to visit those pairs in.
         """
         compress_opts = ensure_dict(compress_opts)
-        compress_opts.setdefault('absorb', 'right')
-        compress_opts.setdefault('equalize_norms', equalize_norms)
+        compress_opts.setdefault("absorb", "right")
+        compress_opts.setdefault("equalize_norms", equalize_norms)
 
-        pairs = self.gen_pairs(xrange=xrange, yrange=yrange, **gen_pair_opts,)
+        pairs = self.gen_pairs(
+            xrange=xrange,
+            yrange=yrange,
+            **gen_pair_opts,
+        )
 
         for coo_a, coo_b in pairs:
             tag_a = self.site_tag(*coo_a)
@@ -925,8 +995,9 @@ class TensorNetwork2D(TensorNetworkGen):
             except KeyError:
                 continue
 
-            self.compress_between(tag_a, tag_b, max_bond=max_bond,
-                                  cutoff=cutoff, **compress_opts)
+            self.compress_between(
+                tag_a, tag_b, max_bond=max_bond, cutoff=cutoff, **compress_opts
+            )
 
     def compress_row(
         self,
@@ -984,10 +1055,14 @@ class TensorNetwork2D(TensorNetworkGen):
         compress_opts : None or dict, optional
             Supplied to :meth:`compress_between`.
         """
-        check_opt('sweep', sweep, ('right', 'left'))
+        check_opt("sweep", sweep, ("right", "left"))
         self.compress_plane(
-            xrange=(i, i), yrange=yrange, yreverse=(sweep == 'left'),
-            max_bond=max_bond, cutoff=cutoff, equalize_norms=equalize_norms,
+            xrange=(i, i),
+            yrange=yrange,
+            yreverse=(sweep == "left"),
+            max_bond=max_bond,
+            cutoff=cutoff,
+            equalize_norms=equalize_norms,
             compress_opts=compress_opts,
         )
 
@@ -1055,10 +1130,14 @@ class TensorNetwork2D(TensorNetworkGen):
         compress_opts : None or dict, optional
             Supplied to :meth:`compress_between`.
         """
-        check_opt('sweep', sweep, ('up', 'down'))
+        check_opt("sweep", sweep, ("up", "down"))
         self.compress_plane(
-            yrange=(j, j), xrange=xrange, xreverse=(sweep == 'down'),
-            max_bond=max_bond, cutoff=cutoff, equalize_norms=equalize_norms,
+            yrange=(j, j),
+            xrange=xrange,
+            xreverse=(sweep == "down"),
+            max_bond=max_bond,
+            cutoff=cutoff,
+            equalize_norms=equalize_norms,
             compress_opts=compress_opts,
         )
 
@@ -1078,9 +1157,9 @@ class TensorNetwork2D(TensorNetworkGen):
         canonize_opts=None,
     ):
         canonize_opts = ensure_dict(canonize_opts)
-        canonize_opts.setdefault('absorb', 'right')
+        canonize_opts.setdefault("absorb", "right")
         compress_opts = ensure_dict(compress_opts)
-        compress_opts.setdefault('absorb', 'right')
+        compress_opts.setdefault("absorb", "right")
 
         r2d = Rotator2D(self, xrange, yrange, from_which)
         site_tag = r2d.site_tag
@@ -1092,13 +1171,11 @@ class TensorNetwork2D(TensorNetworkGen):
         for i in r2d.sweep[:-1]:
             for layer_tag in layer_tags:
                 for j in r2d.sweep_other:
-
                     tag1 = site_tag(i, j)  # outer
                     tag2 = site_tag(i + istep, j)  # inner
 
-                    if (
-                        (tag1 not in self.tag_map) or
-                        (tag2 not in self.tag_map)
+                    if (tag1 not in self.tag_map) or (
+                        tag2 not in self.tag_map
                     ):
                         # allow completely missing sites
                         continue
@@ -1111,7 +1188,7 @@ class TensorNetwork2D(TensorNetworkGen):
                         #     │  │  │  │  │  -->  O══O══O══O══O
                         #     O──O──O──O──O  i
                         #
-                        self.contract_((tag1, tag2), which='any')
+                        self.contract_((tag1, tag2), which="any")
                     else:
                         # make sure the exterior sites are a single tensor
                         #
@@ -1131,8 +1208,9 @@ class TensorNetwork2D(TensorNetworkGen):
                         #    O══<══<══<══<
                         #
                         self.contract_between(
-                            tag1, (tag2, layer_tag),
-                            equalize_norms=equalize_norms
+                            tag1,
+                            (tag2, layer_tag),
+                            equalize_norms=equalize_norms,
                         )
 
                         # drop inner site tag merged into outer boundary so
@@ -1149,16 +1227,17 @@ class TensorNetwork2D(TensorNetworkGen):
                         #      ^  ╲ │  │  │
                         # compress  O──O──O
                         #
-                        tid1, = self.tag_map[tag1]
+                        (tid1,) = self.tag_map[tag1]
                         for tidn in self._get_neighbor_tids(tid1):
                             t1, tn = self._tids_get(tid1, tidn)
                             if bonds_size(t1, tn) > max_bond:
                                 self._compress_between_tids(
-                                    tidn, tid1,
+                                    tidn,
+                                    tid1,
                                     max_bond=max_bond,
                                     cutoff=cutoff,
                                     equalize_norms=equalize_norms,
-                                    **compress_opts
+                                    **compress_opts,
                                 )
 
                 if compress_late:
@@ -1170,9 +1249,9 @@ class TensorNetwork2D(TensorNetworkGen):
                         #     O══O══<══<══<
                         #
                         self.canonize_plane(
-                            xrange=xrange if plane != 'x' else (i, i),
+                            xrange=xrange if plane != "x" else (i, i),
                             xreverse=not sweep_reverse,
-                            yrange=yrange if plane != 'y' else (i, i),
+                            yrange=yrange if plane != "y" else (i, i),
                             yreverse=not sweep_reverse,
                             equalize_norms=equalize_norms,
                             canonize_opts=canonize_opts,
@@ -1183,11 +1262,12 @@ class TensorNetwork2D(TensorNetworkGen):
                     #    .  .           -->     .  .        -->        .  .
                     #
                     self.compress_plane(
-                        xrange=xrange if plane != 'x' else (i, i),
+                        xrange=xrange if plane != "x" else (i, i),
                         xreverse=sweep_reverse,
-                        yrange=yrange if plane != 'y' else (i, i),
+                        yrange=yrange if plane != "y" else (i, i),
                         yreverse=sweep_reverse,
-                        max_bond=max_bond, cutoff=cutoff,
+                        max_bond=max_bond,
+                        cutoff=cutoff,
                         equalize_norms=equalize_norms,
                         compress_opts=compress_opts,
                     )
@@ -1199,9 +1279,9 @@ class TensorNetwork2D(TensorNetworkGen):
         from_which,
         max_bond,
         cutoff=0.0,
-        method='eigh',
+        method="eigh",
         renorm=False,
-        optimize='auto-hq',
+        optimize="auto-hq",
         opposite_envs=None,
         equalize_norms=False,
         contract_boundary_opts=None,
@@ -1243,8 +1323,8 @@ class TensorNetwork2D(TensorNetworkGen):
             raise NotImplementedError
 
         contract_boundary_opts = ensure_dict(contract_boundary_opts)
-        contract_boundary_opts.setdefault('max_bond', max_bond)
-        contract_boundary_opts.setdefault('cutoff', cutoff)
+        contract_boundary_opts.setdefault("max_bond", max_bond)
+        contract_boundary_opts.setdefault("cutoff", cutoff)
 
         # rotate coordinates and sweeps rather than actual TN
         r2d = Rotator2D(self, xrange, yrange, from_which)
@@ -1259,7 +1339,6 @@ class TensorNetwork2D(TensorNetworkGen):
 
         # now contract in the other direction
         for i in r2d.sweep[:-1]:
-
             # contract inwards, no compression
             for j in r2d.sweep_other:
                 #
@@ -1269,8 +1348,9 @@ class TensorNetwork2D(TensorNetworkGen):
                 #    ...        \ │   │   │   │    ...
                 #          ->     ●━━━●━━━●━━━●━         i
                 #
-                self.contract_([site_tag(i, j),
-                                site_tag(i + istep, j)], which='any')
+                self.contract_(
+                    [site_tag(i, j), site_tag(i + istep, j)], which="any"
+                )
 
             # form strip of current row and approx top environment
             #     the canonicalization 'compresses' outer bonds
@@ -1315,8 +1395,10 @@ class TensorNetwork2D(TensorNetworkGen):
                 renvs[j] = ladder.select(y_tag(j + 1)) @ renvs[j + 1]
 
             for j in range(jmin, jmax):
-                if bonds_size(self[site_tag(i, j)],
-                              self[site_tag(i, j + 1)]) <= max_bond:
+                if (
+                    bonds_size(self[site_tag(i, j)], self[site_tag(i, j + 1)])
+                    <= max_bond
+                ):
                     # no need to form env operator and compress
                     continue
 
@@ -1337,14 +1419,19 @@ class TensorNetwork2D(TensorNetworkGen):
 
                 lcut = rand_uuid()
                 rcut = rand_uuid()
-                tn_be.cut_between(site_tag(i, j), site_tag(i, j + 1),
-                                  left_ind=lcut, right_ind=rcut)
+                tn_be.cut_between(
+                    site_tag(i, j),
+                    site_tag(i, j + 1),
+                    left_ind=lcut,
+                    right_ind=rcut,
+                )
 
                 # form dense environment and find symmetric compressors
                 E = tn_be.to_dense([rcut], [lcut], optimize=optimize)
 
                 Cl, Cr = decomp.similarity_compress(
-                    E, max_bond, method=method, renorm=renorm)
+                    E, max_bond, method=method, renorm=renorm
+                )
 
                 # insert compressors back in base TN
                 #
@@ -1355,7 +1442,8 @@ class TensorNetwork2D(TensorNetworkGen):
                 #       <--  -->
                 #
                 self.insert_gauge(
-                    Cr, [site_tag(i, j)], [site_tag(i, j + 1)], Cl)
+                    Cr, [site_tag(i, j)], [site_tag(i, j + 1)], Cl
+                )
 
     def _contract_boundary_projector(
         self,
@@ -1415,7 +1503,6 @@ class TensorNetwork2D(TensorNetworkGen):
             tn_calc = self.copy()
 
             for j in r.sweep_other:
-
                 tag_ij = r.site_tag(i0, j)
                 tag_ip1j = r.site_tag(i1, j)
 
@@ -1460,7 +1547,7 @@ class TensorNetwork2D(TensorNetworkGen):
         *,
         cutoff=1e-10,
         canonize=True,
-        mode='mps',
+        mode="mps",
         layer_tags=None,
         sweep_reverse=False,
         compress_opts=None,
@@ -1470,7 +1557,7 @@ class TensorNetwork2D(TensorNetworkGen):
         """Unified entrypoint for contracting any rectangular patch of tensors
         from any direction, with any boundary method.
         """
-        check_opt('mode', mode, ('mps', 'projector', 'full-bond'))
+        check_opt("mode", mode, ("mps", "projector", "full-bond"))
 
         tn = self if inplace else self.copy()
 
@@ -1480,14 +1567,14 @@ class TensorNetwork2D(TensorNetworkGen):
         contract_boundary_opts["from_which"] = from_which
         contract_boundary_opts["max_bond"] = max_bond
 
-        if mode == 'full-bond':
+        if mode == "full-bond":
             tn._contract_boundary_full_bond(**contract_boundary_opts)
             return tn
 
         contract_boundary_opts["cutoff"] = cutoff
         contract_boundary_opts["compress_opts"] = compress_opts
 
-        if mode == 'projector':
+        if mode == "projector":
             tn._contract_boundary_projector(**contract_boundary_opts)
             return tn
 
@@ -1500,7 +1587,8 @@ class TensorNetwork2D(TensorNetworkGen):
         return tn
 
     contract_boundary_from_ = functools.partialmethod(
-        contract_boundary_from, inplace=True)
+        contract_boundary_from, inplace=True
+    )
 
     def contract_boundary_from_xmin(
         self,
@@ -1510,7 +1598,7 @@ class TensorNetwork2D(TensorNetworkGen):
         *,
         cutoff=1e-10,
         canonize=True,
-        mode='mps',
+        mode="mps",
         layer_tags=None,
         sweep_reverse=False,
         compress_opts=None,
@@ -1616,7 +1704,8 @@ class TensorNetwork2D(TensorNetworkGen):
         )
 
     contract_boundary_from_xmin_ = functools.partialmethod(
-        contract_boundary_from_xmin, inplace=True)
+        contract_boundary_from_xmin, inplace=True
+    )
 
     def contract_boundary_from_xmax(
         self,
@@ -1626,7 +1715,7 @@ class TensorNetwork2D(TensorNetworkGen):
         *,
         cutoff=1e-10,
         canonize=True,
-        mode='mps',
+        mode="mps",
         layer_tags=None,
         inplace=False,
         sweep_reverse=False,
@@ -1732,7 +1821,8 @@ class TensorNetwork2D(TensorNetworkGen):
         )
 
     contract_boundary_from_xmax_ = functools.partialmethod(
-        contract_boundary_from_xmax, inplace=True)
+        contract_boundary_from_xmax, inplace=True
+    )
 
     def contract_boundary_from_ymin(
         self,
@@ -1742,7 +1832,7 @@ class TensorNetwork2D(TensorNetworkGen):
         *,
         cutoff=1e-10,
         canonize=True,
-        mode='mps',
+        mode="mps",
         layer_tags=None,
         sweep_reverse=False,
         compress_opts=None,
@@ -1865,7 +1955,8 @@ class TensorNetwork2D(TensorNetworkGen):
         )
 
     contract_boundary_from_ymin_ = functools.partialmethod(
-        contract_boundary_from_ymin, inplace=True)
+        contract_boundary_from_ymin, inplace=True
+    )
 
     def contract_boundary_from_ymax(
         self,
@@ -1875,7 +1966,7 @@ class TensorNetwork2D(TensorNetworkGen):
         *,
         cutoff=1e-10,
         canonize=True,
-        mode='mps',
+        mode="mps",
         layer_tags=None,
         sweep_reverse=False,
         compress_opts=None,
@@ -1997,7 +2088,8 @@ class TensorNetwork2D(TensorNetworkGen):
         )
 
     contract_boundary_from_ymax_ = functools.partialmethod(
-        contract_boundary_from_ymax, inplace=True)
+        contract_boundary_from_ymax, inplace=True
+    )
 
     def _contract_interleaved_boundary_sequence(
         self,
@@ -2069,10 +2161,10 @@ class TensorNetwork2D(TensorNetworkGen):
             target_ymin = min(x[1] for x in around)
             target_ymax = max(x[1] for x in around)
             target_check = {
-                'xmin': lambda x: x >= target_xmin - 1,
-                'xmax': lambda x: x <= target_xmax + 1,
-                'ymin': lambda y: y >= target_ymin - 1,
-                'ymax': lambda y: y <= target_ymax + 1,
+                "xmin": lambda x: x >= target_xmin - 1,
+                "xmax": lambda x: x <= target_xmax + 1,
+                "ymin": lambda y: y >= target_ymin - 1,
+                "ymax": lambda y: y <= target_ymax + 1,
             }
 
         if sequence is None:
@@ -2087,10 +2179,11 @@ class TensorNetwork2D(TensorNetworkGen):
         def _is_finished(direction):
             return (
                 # two opposing sides have got sufficiently close
-                (separations[direction[0]] <= max_separation) or
-                (
+                (separations[direction[0]] <= max_separation)
+                or (
                     # there is a target region
-                    (around is not None) and
+                    (around is not None)
+                    and
                     # and we have reached it
                     target_check[direction](boundaries[direction])
                 )
@@ -2149,9 +2242,10 @@ class TensorNetwork2D(TensorNetworkGen):
                 pbar.update()
 
             # check if enough directions are finished -> reached max separation
-            if sum(
-                separations[d] > max_separation for d in "xy"
-            ) <= max_unfinished:
+            if (
+                sum(separations[d] > max_separation for d in "xy")
+                <= max_unfinished
+            ):
                 break
 
         if equalize_norms is True:
@@ -2179,7 +2273,7 @@ class TensorNetwork2D(TensorNetworkGen):
         *,
         cutoff=1e-10,
         canonize=True,
-        mode='mps',
+        mode="mps",
         layer_tags=None,
         compress_opts=None,
         sequence=None,
@@ -2270,17 +2364,17 @@ class TensorNetwork2D(TensorNetworkGen):
             Supplied to :meth:`contract_boundary_from`, including compression
             and canonization options.
         """
-        contract_boundary_opts['max_bond'] = max_bond
-        contract_boundary_opts['mode'] = mode
-        contract_boundary_opts['cutoff'] = cutoff
-        contract_boundary_opts['canonize'] = canonize
-        contract_boundary_opts['layer_tags'] = layer_tags
-        contract_boundary_opts['compress_opts'] = compress_opts
+        contract_boundary_opts["max_bond"] = max_bond
+        contract_boundary_opts["mode"] = mode
+        contract_boundary_opts["cutoff"] = cutoff
+        contract_boundary_opts["canonize"] = canonize
+        contract_boundary_opts["layer_tags"] = layer_tags
+        contract_boundary_opts["compress_opts"] = compress_opts
 
-        if (mode == 'full-bond'):
+        if mode == "full-bond":
             # set shared storage for opposite direction boundary contractions,
             #     this will be lazily filled by _contract_boundary_full_bond
-            contract_boundary_opts.setdefault('opposite_envs', {})
+            contract_boundary_opts.setdefault("opposite_envs", {})
 
         return self._contract_interleaved_boundary_sequence(
             contract_boundary_opts=contract_boundary_opts,
@@ -2299,7 +2393,8 @@ class TensorNetwork2D(TensorNetworkGen):
         )
 
     contract_boundary_ = functools.partialmethod(
-        contract_boundary, inplace=True)
+        contract_boundary, inplace=True
+    )
 
     def contract_mps_sweep(
         self,
@@ -2308,7 +2403,7 @@ class TensorNetwork2D(TensorNetworkGen):
         cutoff=1e-10,
         canonize=True,
         direction=None,
-        **contract_boundary_opts
+        **contract_boundary_opts,
     ):
         """Contract this 2D tensor network by sweeping an MPS across from one
         side to the other.
@@ -2339,28 +2434,28 @@ class TensorNetwork2D(TensorNetworkGen):
             max_bond=max_bond,
             cutoff=cutoff,
             canonize=canonize,
-            sequence = [direction],
+            sequence=[direction],
             **contract_boundary_opts,
         )
 
-    def contract_full_bootstrap(self, n, *, optimize='auto-hq', **kwargs):
+    def contract_full_bootstrap(self, n, *, optimize="auto-hq", **kwargs):
         if n < 2:
             raise ValueError(f"``n`` must be at least 2 (got {n}).")
 
         if self.Lx >= self.Ly:
             fn_a = self.compute_xmax_environments
             fn_b = self.compute_xmin_environments
-            mid, lbl_a, lbl_b = self.Ly // 2, 'xmax', 'xmin'
+            mid, lbl_a, lbl_b = self.Ly // 2, "xmax", "xmin"
         else:
             fn_a = self.compute_ymax_environments
             fn_b = self.compute_ymin_environments
-            mid, lbl_a, lbl_b = self.Lx // 2, 'ymax', 'ymin'
+            mid, lbl_a, lbl_b = self.Lx // 2, "ymax", "ymin"
 
-        kwargs.setdefault('envs', {})
-        envs = kwargs['envs']
-        kwargs['opposite_envs'] = envs
+        kwargs.setdefault("envs", {})
+        envs = kwargs["envs"]
+        kwargs["opposite_envs"] = envs
         for _, env_compute in zip(range(1, n), cycle([fn_b, fn_a])):
-            env_compute(mode='full-bond', **kwargs)
+            env_compute(mode="full-bond", **kwargs)
 
         tn = envs[lbl_a, mid] | envs[lbl_b, mid + 1]
         return tn.contract(all, optimize=optimize)
@@ -2374,12 +2469,12 @@ class TensorNetwork2D(TensorNetworkGen):
         *,
         cutoff=1e-10,
         canonize=True,
-        mode='mps',
+        mode="mps",
         layer_tags=None,
         dense=False,
         compress_opts=None,
         envs=None,
-        **contract_boundary_opts
+        **contract_boundary_opts,
     ):
         """Compute the 1D boundary tensor networks describing the environments
         of rows and columns.
@@ -2430,9 +2525,9 @@ class TensorNetwork2D(TensorNetworkGen):
         if envs is None:
             envs = {}
 
-        if mode == 'full-bond':
+        if mode == "full-bond":
             # set shared storage for opposite env contractions
-            contract_boundary_opts.setdefault('opposite_envs', {})
+            contract_boundary_opts.setdefault("opposite_envs", {})
 
         envs[from_which, sweep[0]] = TensorNetwork([])
         first_row = x_tag(sweep[0])
@@ -2448,10 +2543,10 @@ class TensorNetwork2D(TensorNetworkGen):
             else:
                 tn.contract_boundary_from_(
                     xrange=(
-                        (iprevprev, iprev) if r2d.plane == 'x' else r2d.xrange
+                        (iprevprev, iprev) if r2d.plane == "x" else r2d.xrange
                     ),
                     yrange=(
-                        (iprevprev, iprev) if r2d.plane == 'y' else r2d.yrange
+                        (iprevprev, iprev) if r2d.plane == "y" else r2d.yrange
                     ),
                     from_which=from_which,
                     max_bond=max_bond,
@@ -2468,7 +2563,8 @@ class TensorNetwork2D(TensorNetworkGen):
         return envs
 
     compute_xmin_environments = functools.partialmethod(
-        compute_environments, from_which='xmin')
+        compute_environments, from_which="xmin"
+    )
     """Compute the ``self.Lx`` 1D boundary tensor networks describing
     the lower environments of each row in this 2D tensor network. See
     :meth:`~quimb.tensor.tensor_2d.TensorNetwork2D.compute_x_environments`
@@ -2476,7 +2572,8 @@ class TensorNetwork2D(TensorNetworkGen):
     """
 
     compute_xmax_environments = functools.partialmethod(
-        compute_environments, from_which='xmax')
+        compute_environments, from_which="xmax"
+    )
     """Compute the ``self.Lx`` 1D boundary tensor networks describing
     the upper environments of each row in this 2D tensor network. See
     :meth:`~quimb.tensor.tensor_2d.TensorNetwork2D.compute_x_environments`
@@ -2484,7 +2581,8 @@ class TensorNetwork2D(TensorNetworkGen):
     """
 
     compute_ymin_environments = functools.partialmethod(
-        compute_environments, from_which='ymin')
+        compute_environments, from_which="ymin"
+    )
     """Compute the ``self.Ly`` 1D boundary tensor networks describing
     the left environments of each column in this 2D tensor network. See
     :meth:`~quimb.tensor.tensor_2d.TensorNetwork2D.compute_y_environments`
@@ -2492,7 +2590,8 @@ class TensorNetwork2D(TensorNetworkGen):
     """
 
     compute_ymax_environments = functools.partialmethod(
-        compute_environments, from_which='ymax')
+        compute_environments, from_which="ymax"
+    )
     """Compute the ``self.Ly`` 1D boundary tensor networks describing
     the right environments of each column in this 2D tensor network. See
     :meth:`~quimb.tensor.tensor_2d.TensorNetwork2D.compute_y_environments`
@@ -2506,11 +2605,11 @@ class TensorNetwork2D(TensorNetworkGen):
         cutoff=1e-10,
         canonize=True,
         dense=False,
-        mode='mps',
+        mode="mps",
         layer_tags=None,
         compress_opts=None,
         envs=None,
-        **contract_boundary_opts
+        **contract_boundary_opts,
     ):
         r"""Compute the ``2 * self.Lx`` 1D boundary tensor networks describing
         the lower and upper environments of each row in this 2D tensor network,
@@ -2578,13 +2677,13 @@ class TensorNetwork2D(TensorNetworkGen):
             The two environment tensor networks of row ``i`` will be stored in
             ``x_envs['xmin', i]`` and ``x_envs['xmax', i]``.
         """
-        contract_boundary_opts['max_bond'] = max_bond
-        contract_boundary_opts['cutoff'] = cutoff
-        contract_boundary_opts['canonize'] = canonize
-        contract_boundary_opts['mode'] = mode
-        contract_boundary_opts['dense'] = dense
-        contract_boundary_opts['layer_tags'] = layer_tags
-        contract_boundary_opts['compress_opts'] = compress_opts
+        contract_boundary_opts["max_bond"] = max_bond
+        contract_boundary_opts["cutoff"] = cutoff
+        contract_boundary_opts["canonize"] = canonize
+        contract_boundary_opts["mode"] = mode
+        contract_boundary_opts["dense"] = dense
+        contract_boundary_opts["layer_tags"] = layer_tags
+        contract_boundary_opts["compress_opts"] = compress_opts
 
         if envs is None:
             envs = {}
@@ -2601,11 +2700,11 @@ class TensorNetwork2D(TensorNetworkGen):
         cutoff=1e-10,
         canonize=True,
         dense=False,
-        mode='mps',
+        mode="mps",
         layer_tags=None,
         compress_opts=None,
         envs=None,
-        **contract_boundary_opts
+        **contract_boundary_opts,
     ):
         r"""Compute the ``2 * self.Ly`` 1D boundary tensor networks describing
         the left ('ymin') and right ('ymax') environments of each column in
@@ -2685,13 +2784,13 @@ class TensorNetwork2D(TensorNetworkGen):
             The two environment tensor networks of column ``j`` will be stored
             in ``y_envs['ymin', j]`` and ``y_envs['ymax', j]``.
         """
-        contract_boundary_opts['max_bond'] = max_bond
-        contract_boundary_opts['cutoff'] = cutoff
-        contract_boundary_opts['canonize'] = canonize
-        contract_boundary_opts['mode'] = mode
-        contract_boundary_opts['dense'] = dense
-        contract_boundary_opts['layer_tags'] = layer_tags
-        contract_boundary_opts['compress_opts'] = compress_opts
+        contract_boundary_opts["max_bond"] = max_bond
+        contract_boundary_opts["cutoff"] = cutoff
+        contract_boundary_opts["canonize"] = canonize
+        contract_boundary_opts["mode"] = mode
+        contract_boundary_opts["dense"] = dense
+        contract_boundary_opts["layer_tags"] = layer_tags
+        contract_boundary_opts["compress_opts"] = compress_opts
 
         if envs is None:
             envs = {}
@@ -2711,7 +2810,7 @@ class TensorNetwork2D(TensorNetworkGen):
         layer_tags=None,
         second_dense=None,
         x_envs=None,
-        **compute_environment_opts
+        **compute_environment_opts,
     ):
         if second_dense is None:
             second_dense = x_bsz < 2
@@ -2719,8 +2818,12 @@ class TensorNetwork2D(TensorNetworkGen):
         # first we contract from either side to produce row environments
         if x_envs is None:
             x_envs = self.compute_x_environments(
-                max_bond=max_bond, cutoff=cutoff, canonize=canonize,
-                layer_tags=layer_tags, **compute_environment_opts)
+                max_bond=max_bond,
+                cutoff=cutoff,
+                canonize=canonize,
+                layer_tags=layer_tags,
+                **compute_environment_opts,
+            )
 
         # next we form horizontal strips and contract from both left and right
         #     for each row
@@ -2735,11 +2838,13 @@ class TensorNetwork2D(TensorNetworkGen):
             #     ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱
             #      ●━━━●━━━●━━━●━━━●━━━●━━━●━━━●━━━●━━━●
             #
-            row_i = TensorNetwork((
-                x_envs['xmin', i],
-                self.select_any([self.x_tag(i + x) for x in range(x_bsz)]),
-                x_envs['xmax', i + x_bsz - 1],
-            )).view_as_(TensorNetwork2D, like=self)
+            row_i = TensorNetwork(
+                (
+                    x_envs["xmin", i],
+                    self.select_any([self.x_tag(i + x) for x in range(x_bsz)]),
+                    x_envs["xmax", i + x_bsz - 1],
+                )
+            ).view_as_(TensorNetwork2D, like=self)
             #
             #           y_bsz
             #           <-->               second_dense=True
@@ -2754,16 +2859,20 @@ class TensorNetwork2D(TensorNetworkGen):
             #
             y_envs[i] = row_i.compute_y_environments(
                 xrange=(max(i - 1, 0), min(i + x_bsz, self.Lx - 1)),
-                max_bond=max_bond, cutoff=cutoff,
-                canonize=canonize, layer_tags=layer_tags,
-                dense=second_dense, **compute_environment_opts)
+                max_bond=max_bond,
+                cutoff=cutoff,
+                canonize=canonize,
+                layer_tags=layer_tags,
+                dense=second_dense,
+                **compute_environment_opts,
+            )
 
         # then range through all the possible plaquettes, selecting the correct
         # boundary tensors from either the column or row environments
         plaquette_envs = dict()
-        for i0, j0 in product(range(self.Lx - x_bsz + 1),
-                              range(self.Ly - y_bsz + 1)):
-
+        for i0, j0 in product(
+            range(self.Lx - x_bsz + 1), range(self.Ly - y_bsz + 1)
+        ):
             # we want to select bordering tensors from:
             #
             #       L──A──A──R    <- A from the row environments
@@ -2778,26 +2887,32 @@ class TensorNetwork2D(TensorNetworkGen):
             #
             ymin_coos = ((i0 + x, j0 - 1) for x in range(-1, x_bsz + 1))
             ymin_tags = tuple(
-                map(self.site_tag, filter(self.valid_coo, ymin_coos)))
+                map(self.site_tag, filter(self.valid_coo, ymin_coos))
+            )
 
             ymax_coos = ((i0 + x, j0 + y_bsz) for x in range(-1, x_bsz + 1))
             ymax_tags = tuple(
-                map(self.site_tag, filter(self.valid_coo, ymax_coos)))
+                map(self.site_tag, filter(self.valid_coo, ymax_coos))
+            )
 
             xmin_coos = ((i0 - 1, j0 + x) for x in range(y_bsz))
             xmin_tags = tuple(
-                map(self.site_tag, filter(self.valid_coo, xmin_coos)))
+                map(self.site_tag, filter(self.valid_coo, xmin_coos))
+            )
 
             above_coos = ((i0 + x_bsz, j0 + x) for x in range(y_bsz))
             above_tags = tuple(
-                map(self.site_tag, filter(self.valid_coo, above_coos)))
+                map(self.site_tag, filter(self.valid_coo, above_coos))
+            )
 
-            env_ij = TensorNetwork((
-                y_envs[i0]['ymin', j0].select_any(ymin_tags),
-                y_envs[i0]['ymax', j0 + y_bsz - 1].select_any(ymax_tags),
-                x_envs['xmin', i0].select_any(xmin_tags),
-                x_envs['xmax', i0 + x_bsz - 1].select_any(above_tags),
-            ))
+            env_ij = TensorNetwork(
+                (
+                    y_envs[i0]["ymin", j0].select_any(ymin_tags),
+                    y_envs[i0]["ymax", j0 + y_bsz - 1].select_any(ymax_tags),
+                    x_envs["xmin", i0].select_any(xmin_tags),
+                    x_envs["xmax", i0 + x_bsz - 1].select_any(above_tags),
+                )
+            )
 
             # finally, absorb any rank-2 corner tensors
             env_ij.rank_simplify_()
@@ -2816,7 +2931,7 @@ class TensorNetwork2D(TensorNetworkGen):
         layer_tags=None,
         second_dense=None,
         y_envs=None,
-        **compute_environment_opts
+        **compute_environment_opts,
     ):
         if second_dense is None:
             second_dense = y_bsz < 2
@@ -2824,8 +2939,12 @@ class TensorNetwork2D(TensorNetworkGen):
         # first we contract from either side to produce column environments
         if y_envs is None:
             y_envs = self.compute_y_environments(
-                max_bond=max_bond, cutoff=cutoff, canonize=canonize,
-                layer_tags=layer_tags, **compute_environment_opts)
+                max_bond=max_bond,
+                cutoff=cutoff,
+                canonize=canonize,
+                layer_tags=layer_tags,
+                **compute_environment_opts,
+            )
 
         # next we form vertical strips and contract from both top and bottom
         #     for each column
@@ -2846,11 +2965,15 @@ class TensorNetwork2D(TensorNetworkGen):
             #     ┃╭─|o─|o─╮┃
             #     ●──o╱─o╱──●
             #
-            col_j = TensorNetwork((
-                y_envs['ymin', j],
-                self.select_any([self.y_tag(j + jn) for jn in range(y_bsz)]),
-                y_envs['ymax', j + y_bsz - 1],
-            )).view_as_(TensorNetwork2D, like=self)
+            col_j = TensorNetwork(
+                (
+                    y_envs["ymin", j],
+                    self.select_any(
+                        [self.y_tag(j + jn) for jn in range(y_bsz)]
+                    ),
+                    y_envs["ymax", j + y_bsz - 1],
+                )
+            ).view_as_(TensorNetwork2D, like=self)
             #
             #        y_bsz
             #        <-->        second_dense=True
@@ -2864,16 +2987,20 @@ class TensorNetwork2D(TensorNetworkGen):
             #
             x_envs[j] = col_j.compute_x_environments(
                 yrange=(max(j - 1, 0), min(j + y_bsz, self.Ly - 1)),
-                max_bond=max_bond, cutoff=cutoff, canonize=canonize,
-                layer_tags=layer_tags, dense=second_dense,
-                **compute_environment_opts)
+                max_bond=max_bond,
+                cutoff=cutoff,
+                canonize=canonize,
+                layer_tags=layer_tags,
+                dense=second_dense,
+                **compute_environment_opts,
+            )
 
         # then range through all the possible plaquettes, selecting the correct
         # boundary tensors from either the column or row environments
         plaquette_envs = dict()
-        for i0, j0 in product(range(self.Lx - x_bsz + 1),
-                              range(self.Ly - y_bsz + 1)):
-
+        for i0, j0 in product(
+            range(self.Lx - x_bsz + 1), range(self.Ly - y_bsz + 1)
+        ):
             # we want to select bordering tensors from:
             #
             #          A──A──A──A    <- A from the row environments
@@ -2888,26 +3015,32 @@ class TensorNetwork2D(TensorNetworkGen):
             #
             ymin_coos = ((i0 + x, j0 - 1) for x in range(x_bsz))
             ymin_tags = tuple(
-                map(self.site_tag, filter(self.valid_coo, ymin_coos)))
+                map(self.site_tag, filter(self.valid_coo, ymin_coos))
+            )
 
             ymax_coos = ((i0 + x, j0 + y_bsz) for x in range(x_bsz))
             ymax_tags = tuple(
-                map(self.site_tag, filter(self.valid_coo, ymax_coos)))
+                map(self.site_tag, filter(self.valid_coo, ymax_coos))
+            )
 
-            xmin_coos = ((i0 - 1, j0 + x) for x in range(- 1, y_bsz + 1))
+            xmin_coos = ((i0 - 1, j0 + x) for x in range(-1, y_bsz + 1))
             xmin_tags = tuple(
-                map(self.site_tag, filter(self.valid_coo, xmin_coos)))
+                map(self.site_tag, filter(self.valid_coo, xmin_coos))
+            )
 
-            xmax_coos = ((i0 + x_bsz, j0 + x) for x in range(- 1, y_bsz + 1))
+            xmax_coos = ((i0 + x_bsz, j0 + x) for x in range(-1, y_bsz + 1))
             xmax_tags = tuple(
-                map(self.site_tag, filter(self.valid_coo, xmax_coos)))
+                map(self.site_tag, filter(self.valid_coo, xmax_coos))
+            )
 
-            env_ij = TensorNetwork((
-                y_envs['ymin', j0].select_any(ymin_tags),
-                y_envs['ymax', j0 + y_bsz - 1].select_any(ymax_tags),
-                x_envs[j0]['xmin', i0].select_any(xmin_tags),
-                x_envs[j0]['xmax', i0 + x_bsz - 1].select_any(xmax_tags),
-            ))
+            env_ij = TensorNetwork(
+                (
+                    y_envs["ymin", j0].select_any(ymin_tags),
+                    y_envs["ymax", j0 + y_bsz - 1].select_any(ymax_tags),
+                    x_envs[j0]["xmin", i0].select_any(xmin_tags),
+                    x_envs[j0]["xmax", i0 + x_bsz - 1].select_any(xmax_tags),
+                )
+            )
 
             # finally, absorb any rank-2 corner tensors
             env_ij.rank_simplify_()
@@ -2924,7 +3057,7 @@ class TensorNetwork2D(TensorNetworkGen):
         *,
         cutoff=1e-10,
         canonize=True,
-        mode='mps',
+        mode="mps",
         layer_tags=None,
         first_contract=None,
         second_dense=None,
@@ -2999,24 +3132,31 @@ class TensorNetwork2D(TensorNetworkGen):
         """
         if first_contract is None:
             if x_bsz > y_bsz:
-                first_contract = 'y'
+                first_contract = "y"
             elif y_bsz > x_bsz:
-                first_contract = 'x'
+                first_contract = "x"
             elif self.Lx >= self.Ly:
-                first_contract = 'x'
+                first_contract = "x"
             else:
-                first_contract = 'y'
+                first_contract = "y"
 
         compute_env_fn = {
-            'x': self._compute_plaquette_environments_x_first,
-            'y': self._compute_plaquette_environments_y_first,
+            "x": self._compute_plaquette_environments_x_first,
+            "y": self._compute_plaquette_environments_y_first,
         }[first_contract]
 
         return compute_env_fn(
-            x_bsz=x_bsz, y_bsz=y_bsz, max_bond=max_bond, cutoff=cutoff,
-            canonize=canonize, mode=mode, layer_tags=layer_tags,
-            compress_opts=compress_opts, second_dense=second_dense,
-            **compute_environment_opts)
+            x_bsz=x_bsz,
+            y_bsz=y_bsz,
+            max_bond=max_bond,
+            cutoff=cutoff,
+            canonize=canonize,
+            mode=mode,
+            layer_tags=layer_tags,
+            compress_opts=compress_opts,
+            second_dense=second_dense,
+            **compute_environment_opts,
+        )
 
     def coarse_grain_hotrg(
         self,
@@ -3078,8 +3218,7 @@ class TensorNetwork2D(TensorNetworkGen):
         retag_map = {}
 
         for i in range(r.imin, r.imax + 1, 2):
-
-            next_i_in_lattice = (i + 1 <= r.imax)
+            next_i_in_lattice = i + 1 <= r.imax
 
             for j in range(r.jmin, r.jmax + 1):
                 #      │         │
@@ -3154,7 +3293,7 @@ class TensorNetwork2D(TensorNetworkGen):
         final_contract_opts=None,
         progbar=False,
         inplace=False,
-        **coarse_grain_opts
+        **coarse_grain_opts,
     ):
         """Contract this tensor network using the finite version of HOTRG.
         See https://arxiv.org/abs/1201.1144v4 and
@@ -3228,11 +3367,8 @@ class TensorNetwork2D(TensorNetworkGen):
             canonize_opts = ensure_dict(canonize_opts)
             canonize_opts.setdefault("max_iterations", 2)
 
-
         if progbar:
-            pbar = Progbar(
-                desc=f"contracting HOTRG, Lx={tn.Lx}, Ly={tn.Ly}"
-            )
+            pbar = Progbar(desc=f"contracting HOTRG, Lx={tn.Lx}, Ly={tn.Ly}")
         else:
             pbar = None
 
@@ -3262,7 +3398,7 @@ class TensorNetwork2D(TensorNetworkGen):
                 cutoff=cutoff,
                 lazy=lazy,
                 equalize_norms=equalize_norms,
-                **coarse_grain_opts
+                **coarse_grain_opts,
             )
 
             if pbar is not None:
@@ -3294,7 +3430,7 @@ class TensorNetwork2D(TensorNetworkGen):
         canonize=False,
         canonize_opts=None,
         lazy=False,
-        mode='projector',
+        mode="projector",
         compress_opts=None,
         sequence=("xmin", "xmax", "ymin", "ymax"),
         xmin=None,
@@ -3384,11 +3520,11 @@ class TensorNetwork2D(TensorNetworkGen):
         contract_boundary_from, contract_hotrg,
         TensorNetwork.insert_compressor_between_regions
         """
-        contract_boundary_opts['max_bond'] = max_bond
-        contract_boundary_opts['cutoff'] = cutoff
-        contract_boundary_opts['mode'] = mode
-        contract_boundary_opts['compress_opts'] = compress_opts
-        contract_boundary_opts['lazy'] = lazy
+        contract_boundary_opts["max_bond"] = max_bond
+        contract_boundary_opts["cutoff"] = cutoff
+        contract_boundary_opts["mode"] = mode
+        contract_boundary_opts["compress_opts"] = compress_opts
+        contract_boundary_opts["lazy"] = lazy
 
         if lazy:
             # we are implicitly asking for the tensor network
@@ -3414,17 +3550,25 @@ class TensorNetwork2D(TensorNetworkGen):
 
     contract_ctmrg_ = functools.partialmethod(contract_ctmrg, inplace=True)
 
+
 def is_lone_coo(where):
-    """Check if ``where`` has been specified as a single coordinate pair.
-    """
+    """Check if ``where`` has been specified as a single coordinate pair."""
     return (len(where) == 2) and (isinstance(where[0], Integral))
 
 
-def gate_string_split_(TG, where, string, original_ts, bonds_along,
-                       reindex_map, site_ix, info, **compress_opts):
-
+def gate_string_split_(
+    TG,
+    where,
+    string,
+    original_ts,
+    bonds_along,
+    reindex_map,
+    site_ix,
+    info,
+    **compress_opts,
+):
     # by default this means singuvalues are kept in the string 'blob' tensor
-    compress_opts.setdefault('absorb', 'right')
+    compress_opts.setdefault("absorb", "right")
 
     # the outer, neighboring indices of each tensor in the string
     neighb_inds = []
@@ -3456,14 +3600,15 @@ def gate_string_split_(TG, where, string, original_ts, bonds_along,
 
         # split the blob!
         inner_ts[i], *maybe_svals, blob = blob.split(
-            left_inds=lix, get='tensors', bond_ind=bix, **compress_opts)
+            left_inds=lix, get="tensors", bond_ind=bix, **compress_opts
+        )
 
         # if singular values are returned (``absorb=None``) check if we should
         #     return them via ``info``, e.g. for ``SimpleUpdate`
         if maybe_svals and info is not None:
             s = next(iter(maybe_svals)).data
             coo_pair = tuple(sorted((string[i], string[i + 1])))
-            info['singular_values', coo_pair] = s
+            info["singular_values", coo_pair] = s
 
             # regauge the blob but record so as to unguage later
             if i != j - 1:
@@ -3486,14 +3631,15 @@ def gate_string_split_(TG, where, string, original_ts, bonds_along,
 
         # split the blob!
         inner_ts[j], *maybe_svals, blob = blob.split(
-            left_inds=lix, get='tensors', bond_ind=bix, **compress_opts)
+            left_inds=lix, get="tensors", bond_ind=bix, **compress_opts
+        )
 
         # if singular values are returned (``absorb=None``) check if we should
         #     return them via ``info``, e.g. for ``SimpleUpdate`
         if maybe_svals and info is not None:
             s = next(iter(maybe_svals)).data
             coo_pair = tuple(sorted((string[j - 1], string[j])))
-            info['singular_values', coo_pair] = s
+            info["singular_values", coo_pair] = s
 
             # regauge the blob but record so as to unguage later
             if j != i + 1:
@@ -3517,11 +3663,19 @@ def gate_string_split_(TG, where, string, original_ts, bonds_along,
         to.modify(data=tn.data)
 
 
-def gate_string_reduce_split_(TG, where, string, original_ts, bonds_along,
-                              reindex_map, site_ix, info, **compress_opts):
-
+def gate_string_reduce_split_(
+    TG,
+    where,
+    string,
+    original_ts,
+    bonds_along,
+    reindex_map,
+    site_ix,
+    info,
+    **compress_opts,
+):
     # by default this means singuvalues are kept in the string 'blob' tensor
-    compress_opts.setdefault('absorb', 'right')
+    compress_opts.setdefault("absorb", "right")
 
     # indices to reduce, first and final include physical indices for gate
     inds_to_reduce = [(bonds_along[0], site_ix[0])]
@@ -3532,8 +3686,9 @@ def gate_string_reduce_split_(TG, where, string, original_ts, bonds_along,
     # tensors that remain on the string sites and those pulled into string
     outer_ts, inner_ts = [], []
     for coo, rix, t in zip(string, inds_to_reduce, original_ts):
-        tq, tr = t.split(left_inds=None, right_inds=rix,
-                         method='qr', get='tensors')
+        tq, tr = t.split(
+            left_inds=None, right_inds=rix, method="qr", get="tensors"
+        )
         outer_ts.append(tq)
         inner_ts.append(tr.reindex_(reindex_map) if coo in where else tr)
 
@@ -3547,7 +3702,6 @@ def gate_string_reduce_split_(TG, where, string, original_ts, bonds_along,
     j = len(string) - 1
 
     while True:
-
         # extract at beginning of string
         lix = bonds(blob, outer_ts[i])
         if i == 0:
@@ -3560,14 +3714,15 @@ def gate_string_reduce_split_(TG, where, string, original_ts, bonds_along,
 
         # split the blob!
         inner_ts[i], *maybe_svals, blob = blob.split(
-            left_inds=lix, get='tensors', bond_ind=bix, **compress_opts)
+            left_inds=lix, get="tensors", bond_ind=bix, **compress_opts
+        )
 
         # if singular values are returned (``absorb=None``) check if we should
         #     return them via ``info``, e.g. for ``SimpleUpdate`
         if maybe_svals and info is not None:
             s = next(iter(maybe_svals)).data
             coo_pair = tuple(sorted((string[i], string[i + 1])))
-            info['singular_values', coo_pair] = s
+            info["singular_values", coo_pair] = s
 
             # regauge the blob but record so as to unguage later
             if i != j - 1:
@@ -3592,14 +3747,15 @@ def gate_string_reduce_split_(TG, where, string, original_ts, bonds_along,
 
         # split the blob!
         inner_ts[j], *maybe_svals, blob = blob.split(
-            left_inds=lix, get='tensors', bond_ind=bix, **compress_opts)
+            left_inds=lix, get="tensors", bond_ind=bix, **compress_opts
+        )
 
         # if singular values are returned (``absorb=None``) check if we should
         #     return them via ``info``, e.g. for ``SimpleUpdate`
         if maybe_svals and info is not None:
             s = next(iter(maybe_svals)).data
             coo_pair = tuple(sorted((string[j - 1], string[j])))
-            info['singular_values', coo_pair] = s
+            info["singular_values", coo_pair] = s
 
             # regauge the blob but record so as to unguage later
             if j != i + 1:
@@ -3634,17 +3790,16 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
     """
 
     _EXTRA_PROPS = (
-        '_site_tag_id',
-        '_x_tag_id',
-        '_y_tag_id',
-        '_Lx',
-        '_Ly',
-        '_site_ind_id',
+        "_site_tag_id",
+        "_x_tag_id",
+        "_y_tag_id",
+        "_Lx",
+        "_Ly",
+        "_site_ind_id",
     )
 
     def site_ind(self, i, j=None):
-        """Return the physical index of site ``(i, j)``.
-        """
+        """Return the physical index of site ``(i, j)``."""
         if j is None:
             i, j = i
         if not isinstance(i, str):
@@ -3658,24 +3813,19 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
             where = self.gen_sites_present()
 
         return self.reindex(
-            {
-                self.site_ind(*ij): new_id.format(*ij) for ij in where
-            },
-            inplace=inplace
+            {self.site_ind(*ij): new_id.format(*ij) for ij in where},
+            inplace=inplace,
         )
 
     reindex_sites_ = functools.partialmethod(reindex_sites, inplace=True)
 
     def phys_dim(self, i=None, j=None):
-        """Get the size of the physical indices / a specific physical index.
-        """
+        """Get the size of the physical indices / a specific physical index."""
         if (i is not None) and (j is not None):
             pix = self.site_ind(i, j)
         else:
             # allow for when some physical indices might have been contracted
-            pix = next(iter(
-                ix for ix in self.site_inds if ix in self.ind_map
-            ))
+            pix = next(iter(ix for ix in self.site_inds if ix in self.ind_map))
         return self.ind_size(pix)
 
     def gate(
@@ -3684,12 +3834,12 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
         where,
         contract=False,
         tags=None,
-        propagate_tags='sites',
+        propagate_tags="sites",
         inplace=False,
         info=None,
         long_range_use_swaps=False,
         long_range_path_sequence=None,
-        **compress_opts
+        **compress_opts,
     ):
         """Apply the dense gate ``G``, maintaining the physical indices of this
         2D vector tensor network.
@@ -3789,7 +3939,7 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
         For one site gates when one of the 'split' methods is supplied
         ``contract=True`` is assumed.
         """
-        check_opt("contract", contract, (False, True, 'split', 'reduce-split'))
+        check_opt("contract", contract, (False, True, "split", "reduce-split"))
 
         psi = self if inplace else self.copy()
 
@@ -3822,14 +3972,16 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
             #      ╱   ╱
             #
             if propagate_tags:
-                if propagate_tags == 'register':
+                if propagate_tags == "register":
                     old_tags = oset(map(psi.site_tag, where))
                 else:
-                    old_tags = oset_union(psi.tensor_map[tid].tags
-                                          for ind in site_ix
-                                          for tid in psi.ind_map[ind])
+                    old_tags = oset_union(
+                        psi.tensor_map[tid].tags
+                        for ind in site_ix
+                        for tid in psi.ind_map[ind]
+                    )
 
-                if propagate_tags == 'sites':
+                if propagate_tags == "sites":
                     # use regex to take tags only matching e.g. 'I4,3'
                     rex = re.compile(psi.site_tag_id.format(r"\d+", r"\d+"))
                     old_tags = oset(filter(rex.match, old_tags))
@@ -3849,7 +4001,7 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
             psi.reindex_(reindex_map)
 
             # get the sites that used to have the physical indices
-            site_tids = psi._get_tids_from_inds(bnds, which='any')
+            site_tids = psi._get_tids_from_inds(bnds, which="any")
 
             # pop the sites, contract, then re-add
             pts = [psi.pop_tensor(tid) for tid in site_tids]
@@ -3877,27 +4029,28 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
 
         # check if we are not nearest neighbour and need to swap first
         if long_range_use_swaps:
-
             if manual_lr_path:
                 *swaps, final = long_range_path_sequence
             else:
                 # find a swap path
                 *swaps, final = gen_long_range_swap_path(
-                    ij_a, ij_b, sequence=long_range_path_sequence)
+                    ij_a, ij_b, sequence=long_range_path_sequence
+                )
 
             # move the sites together
-            SWAP = get_swap(dp, dtype=get_dtype_name(G),
-                            backend=infer_backend(G))
+            SWAP = get_swap(
+                dp, dtype=get_dtype_name(G), backend=infer_backend(G)
+            )
             for pair in swaps:
-                psi.gate_(SWAP, pair, contract=contract, absorb='right')
+                psi.gate_(SWAP, pair, contract=contract, absorb="right")
 
-            compress_opts['info'] = info
-            compress_opts['contract'] = contract
+            compress_opts["info"] = info
+            compress_opts["contract"] = contract
 
             # perform actual gate also compressing etc on 'way back'
             psi.gate_(G, final, **compress_opts)
 
-            compress_opts.setdefault('absorb', 'both')
+            compress_opts.setdefault("absorb", "both")
             for pair in reversed(swaps):
                 psi.gate_(SWAP, pair, **compress_opts)
 
@@ -3906,27 +4059,37 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
         if manual_lr_path:
             string = long_range_path_sequence
         else:
-            string = tuple(gen_long_range_path(
-                *where, sequence=long_range_path_sequence))
+            string = tuple(
+                gen_long_range_path(*where, sequence=long_range_path_sequence)
+            )
 
         # the tensors along this string, which will be updated
         original_ts = [psi[coo] for coo in string]
 
         # the len(string) - 1 indices connecting the string
-        bonds_along = [next(iter(bonds(t1, t2)))
-                       for t1, t2 in pairwise(original_ts)]
+        bonds_along = [
+            next(iter(bonds(t1, t2))) for t1, t2 in pairwise(original_ts)
+        ]
 
-        if contract == 'split':
+        if contract == "split":
             #
             #       │╱  │╱          │╱  │╱
             #     ──GGGGG──  ==>  ──G┄┄┄G──
             #      ╱   ╱           ╱   ╱
             #
             gate_string_split_(
-                TG, where, string, original_ts, bonds_along,
-                reindex_map, site_ix, info, **compress_opts)
+                TG,
+                where,
+                string,
+                original_ts,
+                bonds_along,
+                reindex_map,
+                site_ix,
+                info,
+                **compress_opts,
+            )
 
-        elif contract == 'reduce-split':
+        elif contract == "reduce-split":
             #
             #       │   │             │ │
             #       GGGGG             GGG               │ │
@@ -3936,8 +4099,16 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
             #    <QR> <LQ>                            <SVD>
             #
             gate_string_reduce_split_(
-                TG, where, string, original_ts, bonds_along,
-                reindex_map, site_ix, info, **compress_opts)
+                TG,
+                where,
+                string,
+                original_ts,
+                bonds_along,
+                reindex_map,
+                site_ix,
+                info,
+                **compress_opts,
+            )
 
         return psi
 
@@ -3945,11 +4116,10 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
 
     def compute_norm(
         self,
-        layer_tags=('KET', 'BRA'),
+        layer_tags=("KET", "BRA"),
         **contract_opts,
     ):
-        """Compute the norm of this vector via boundary contraction.
-        """
+        """Compute the norm of this vector via boundary contraction."""
         norm = self.make_norm(layer_tags=layer_tags)
         return norm.contract_boundary(layer_tags=layer_tags, **contract_opts)
 
@@ -3960,11 +4130,11 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
         *,
         cutoff=1e-10,
         canonize=True,
-        mode='mps',
-        layer_tags=('KET', 'BRA'),
+        mode="mps",
+        layer_tags=("KET", "BRA"),
         normalized=False,
         autogroup=True,
-        contract_optimize='auto-hq',
+        contract_optimize="auto-hq",
         return_all=False,
         plaquette_envs=None,
         plaquette_map=None,
@@ -4038,8 +4208,11 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
 
             plaquette_envs = dict()
             for x_bsz, y_bsz in calc_plaquette_sizes(terms.keys(), autogroup):
-                plaquette_envs.update(norm.compute_plaquette_environments(
-                    x_bsz=x_bsz, y_bsz=y_bsz, **plaquette_env_options))
+                plaquette_envs.update(
+                    norm.compute_plaquette_environments(
+                        x_bsz=x_bsz, y_bsz=y_bsz, **plaquette_env_options
+                    )
+                )
 
         if plaquette_map is None:
             # work out which plaquettes to use for which terms
@@ -4064,9 +4237,9 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
             with oe.shared_intermediates():
                 # compute local estimation of norm for this plaquette
                 if normalized:
-                    norm_i0j0 = (
-                        ket_local | bra_and_env
-                    ).contract(all, optimize=contract_optimize)
+                    norm_i0j0 = (ket_local | bra_and_env).contract(
+                        all, optimize=contract_optimize
+                    )
                 else:
                     norm_i0j0 = None
 
@@ -4092,8 +4265,8 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
         *,
         cutoff=1e-10,
         canonize=True,
-        mode='mps',
-        layer_tags=('KET', 'BRA'),
+        mode="mps",
+        layer_tags=("KET", "BRA"),
         balance_bonds=False,
         equalize_norms=False,
         inplace=False,
@@ -4139,7 +4312,8 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
         nfact = norm.contract_boundary(**contract_boundary_opts)
 
         n_ket = self.multiply_each(
-            nfact**(-1 / (2 * self.num_tensors)), inplace=inplace)
+            nfact ** (-1 / (2 * self.num_tensors)), inplace=inplace
+        )
 
         if balance_bonds:
             n_ket.balance_bonds_()
@@ -4158,13 +4332,13 @@ class TensorNetwork2DOperator(TensorNetwork2D, TensorNetworkGenOperator):
     """
 
     _EXTRA_PROPS = (
-        '_site_tag_id',
-        '_x_tag_id',
-        '_y_tag_id',
-        '_Lx',
-        '_Ly',
-        '_upper_ind_id',
-        '_lower_ind_id',
+        "_site_tag_id",
+        "_x_tag_id",
+        "_y_tag_id",
+        "_Lx",
+        "_Ly",
+        "_upper_ind_id",
+        "_lower_ind_id",
     )
 
     def reindex_lower_sites(self, new_id, where=None, inplace=False):
@@ -4183,13 +4357,14 @@ class TensorNetwork2DOperator(TensorNetwork2D, TensorNetworkGenOperator):
         """
         if where is None:
             where = self.gen_sites_present()
-        return self.reindex({
-            self.lower_ind(i, j): new_id.format(i, j)
-            for i, j in where
-        }, inplace=inplace)
+        return self.reindex(
+            {self.lower_ind(i, j): new_id.format(i, j) for i, j in where},
+            inplace=inplace,
+        )
 
     reindex_lower_sites_ = functools.partialmethod(
-        reindex_lower_sites, inplace=True)
+        reindex_lower_sites, inplace=True
+    )
 
     def reindex_upper_sites(self, new_id, where=None, inplace=False):
         """Update the upper site index labels to a new string specifier.
@@ -4207,17 +4382,17 @@ class TensorNetwork2DOperator(TensorNetwork2D, TensorNetworkGenOperator):
         """
         if where is None:
             where = self.gen_sites_present()
-        return self.reindex({
-            self.upper_ind(i, j): new_id.format(i, j)
-            for i, j in where
-        }, inplace=inplace)
+        return self.reindex(
+            {self.upper_ind(i, j): new_id.format(i, j) for i, j in where},
+            inplace=inplace,
+        )
 
     reindex_upper_sites_ = functools.partialmethod(
-        reindex_upper_sites, inplace=True)
+        reindex_upper_sites, inplace=True
+    )
 
     def lower_ind(self, i, j=None):
-        """Get the lower index for a given site.
-        """
+        """Get the lower index for a given site."""
         if j is None:
             i, j = i
         if not isinstance(i, str):
@@ -4227,8 +4402,7 @@ class TensorNetwork2DOperator(TensorNetwork2D, TensorNetworkGenOperator):
         return self.lower_ind_id.format(i, j)
 
     def upper_ind(self, i, j=None):
-        """Get the upper index for a given site.
-        """
+        """Get the upper index for a given site."""
         if j is None:
             i, j = i
         if not isinstance(i, str):
@@ -4237,13 +4411,12 @@ class TensorNetwork2DOperator(TensorNetwork2D, TensorNetworkGenOperator):
             j = j % self.Ly
         return self.upper_ind_id.format(i, j)
 
-    def phys_dim(self, i=0, j=0, which='upper'):
-        """Get a physical index size of this 2D operator.
-        """
-        if which == 'upper':
+    def phys_dim(self, i=0, j=0, which="upper"):
+        """Get a physical index size of this 2D operator."""
+        if which == "upper":
             return self[i, j].ind_size(self.upper_ind(i, j))
 
-        if which == 'lower':
+        if which == "lower":
             return self[i, j].ind_size(self.lower_ind(i, j))
 
 
@@ -4253,28 +4426,28 @@ class TensorNetwork2DFlat(TensorNetwork2D):
     """
 
     _EXTRA_PROPS = (
-        '_site_tag_id',
-        '_x_tag_id',
-        '_y_tag_id',
-        '_Lx',
-        '_Ly',
+        "_site_tag_id",
+        "_x_tag_id",
+        "_y_tag_id",
+        "_Lx",
+        "_Ly",
     )
 
     def bond(self, coo1, coo2):
         """Get the name of the index defining the bond between sites at
         ``coo1`` and ``coo2``.
         """
-        b_ix, = self[coo1].bonds(self[coo2])
+        (b_ix,) = self[coo1].bonds(self[coo2])
         return b_ix
 
     def bond_size(self, coo1, coo2):
-        """Return the size of the bond between sites at ``coo1`` and ``coo2``.
-        """
+        """Return the size of the bond between sites at ``coo1`` and ``coo2``."""
         b_ix = self.bond(coo1, coo2)
         return self[coo1].ind_size(b_ix)
 
-    def expand_bond_dimension(self, new_bond_dim, inplace=True, bra=None,
-                              rand_strength=0.0):
+    def expand_bond_dimension(
+        self, new_bond_dim, inplace=True, bra=None, rand_strength=0.0
+    ):
         """Increase the bond dimension of this flat, 2D, tensor network,
         padding the tensor data with either zeros or random entries.
 
@@ -4313,9 +4486,9 @@ class TensorNetwork2DFlat(TensorNetwork2D):
         max_bond=None,
         cutoff=1e-10,
         equalize_norms=False,
-        row_sweep='right',
-        col_sweep='up',
-        **compress_opts
+        row_sweep="right",
+        col_sweep="up",
+        **compress_opts,
     ):
         """Compress all bonds in this flat 2D tensor network.
 
@@ -4331,15 +4504,25 @@ class TensorNetwork2DFlat(TensorNetwork2D):
         compress_opts : None or dict, optional
             Supplied to :meth:`compress_between`.
         """
-        compress_opts.setdefault('absorb', 'both')
+        compress_opts.setdefault("absorb", "both")
         for i in range(self.Lx):
             self.compress_row(
-                i, sweep=row_sweep, max_bond=max_bond, cutoff=cutoff,
-                equalize_norms=equalize_norms, compress_opts=compress_opts)
+                i,
+                sweep=row_sweep,
+                max_bond=max_bond,
+                cutoff=cutoff,
+                equalize_norms=equalize_norms,
+                compress_opts=compress_opts,
+            )
         for j in range(self.Ly):
             self.compress_column(
-                j, sweep=col_sweep, max_bond=max_bond, cutoff=cutoff,
-                equalize_norms=equalize_norms, compress_opts=compress_opts)
+                j,
+                sweep=col_sweep,
+                max_bond=max_bond,
+                cutoff=cutoff,
+                equalize_norms=equalize_norms,
+                compress_opts=compress_opts,
+            )
 
 
 class PEPS(TensorNetwork2DVector, TensorNetwork2DFlat):
@@ -4382,27 +4565,26 @@ class PEPS(TensorNetwork2DVector, TensorNetwork2DFlat):
     """
 
     _EXTRA_PROPS = (
-        '_site_tag_id',
-        '_x_tag_id',
-        '_y_tag_id',
-        '_Lx',
-        '_Ly',
-        '_site_ind_id',
+        "_site_tag_id",
+        "_x_tag_id",
+        "_y_tag_id",
+        "_Lx",
+        "_Ly",
+        "_site_ind_id",
     )
 
     def __init__(
         self,
         arrays,
         *,
-        shape='urdlp',
+        shape="urdlp",
         tags=None,
-        site_ind_id='k{},{}',
-        site_tag_id='I{},{}',
-        x_tag_id='X{}',
-        y_tag_id='Y{}',
-        **tn_opts
+        site_ind_id="k{},{}",
+        site_tag_id="I{},{}",
+        x_tag_id="X{}",
+        y_tag_id="Y{}",
+        **tn_opts,
     ):
-
         if isinstance(arrays, PEPS):
             super().__init__(arrays)
             return
@@ -4428,41 +4610,41 @@ class PEPS(TensorNetwork2DVector, TensorNetwork2DFlat):
             #     other than up right down left physical
             array_order = shape
             if i == self.Lx - 1:
-                array_order = array_order.replace('u', '')
+                array_order = array_order.replace("u", "")
             if j == self.Ly - 1:
-                array_order = array_order.replace('r', '')
+                array_order = array_order.replace("r", "")
             if i == 0:
-                array_order = array_order.replace('d', '')
+                array_order = array_order.replace("d", "")
             if j == 0:
-                array_order = array_order.replace('l', '')
+                array_order = array_order.replace("l", "")
 
             # allow convention of missing bonds to be singlet dimensions
             if len(array.shape) != len(array_order):
-                array = do('squeeze', array)
+                array = do("squeeze", array)
 
             transpose_order = tuple(
-                array_order.find(x) for x in 'urdlp' if x in array_order
+                array_order.find(x) for x in "urdlp" if x in array_order
             )
             if transpose_order != tuple(range(len(array_order))):
-                array = do('transpose', array, transpose_order)
+                array = do("transpose", array, transpose_order)
 
             # get the relevant indices corresponding to neighbours
             inds = []
-            if 'u' in array_order:
+            if "u" in array_order:
                 inds.append(ix[(i, j), (i + 1, j)])
-            if 'r' in array_order:
+            if "r" in array_order:
                 inds.append(ix[(i, j), (i, j + 1)])
-            if 'd' in array_order:
+            if "d" in array_order:
                 inds.append(ix[(i - 1, j), (i, j)])
-            if 'l' in array_order:
+            if "l" in array_order:
                 inds.append(ix[(i, j - 1), (i, j)])
             inds.append(self.site_ind(i, j))
 
             # mix site, row, column and global tags
 
-            ij_tags = tags | oset((self.site_tag(i, j),
-                                   self.x_tag(i),
-                                   self.y_tag(j)))
+            ij_tags = tags | oset(
+                (self.site_tag(i, j), self.x_tag(i), self.y_tag(j))
+            )
 
             # create the site tensor!
             tensors.append(Tensor(data=array, inds=inds, tags=ij_tags))
@@ -4470,9 +4652,7 @@ class PEPS(TensorNetwork2DVector, TensorNetwork2DFlat):
         super().__init__(tensors, virtual=True, **tn_opts)
 
     @classmethod
-    def from_fill_fn(
-        cls, fill_fn, Lx, Ly, bond_dim, phys_dim=2, **peps_opts
-    ):
+    def from_fill_fn(cls, fill_fn, Lx, Ly, bond_dim, phys_dim=2, **peps_opts):
         """Create a 2D PEPS from a filling function with signature
         ``fill_fn(shape)``.
 
@@ -4496,7 +4676,6 @@ class PEPS(TensorNetwork2DVector, TensorNetwork2DFlat):
         arrays = [[None for _ in range(Ly)] for _ in range(Lx)]
 
         for i, j in product(range(Lx), range(Ly)):
-
             shape = []
             if i != Lx - 1:  # bond up
                 shape.append(bond_dim)
@@ -4513,7 +4692,7 @@ class PEPS(TensorNetwork2DVector, TensorNetwork2DFlat):
         return cls(arrays, **peps_opts)
 
     @classmethod
-    def empty(cls, Lx, Ly, bond_dim, phys_dim=2, like='numpy', **peps_opts):
+    def empty(cls, Lx, Ly, bond_dim, phys_dim=2, like="numpy", **peps_opts):
         """Create an empty 2D PEPS.
 
         Parameters
@@ -4539,11 +4718,15 @@ class PEPS(TensorNetwork2DVector, TensorNetwork2DFlat):
         """
         return cls.from_fill_fn(
             lambda shape: do("zeros", shape, like=like),
-            Lx, Ly, bond_dim, phys_dim, **peps_opts
+            Lx,
+            Ly,
+            bond_dim,
+            phys_dim,
+            **peps_opts,
         )
 
     @classmethod
-    def ones(cls, Lx, Ly, bond_dim, phys_dim=2, like='numpy', **peps_opts):
+    def ones(cls, Lx, Ly, bond_dim, phys_dim=2, like="numpy", **peps_opts):
         """Create a 2D PEPS whose tensors are filled with ones.
 
         Parameters
@@ -4569,12 +4752,17 @@ class PEPS(TensorNetwork2DVector, TensorNetwork2DFlat):
         """
         return cls.from_fill_fn(
             lambda shape: do("ones", shape, like=like),
-            Lx, Ly, bond_dim, phys_dim, **peps_opts
+            Lx,
+            Ly,
+            bond_dim,
+            phys_dim,
+            **peps_opts,
         )
 
     @classmethod
-    def rand(cls, Lx, Ly, bond_dim, phys_dim=2,
-             dtype=float, seed=None, **peps_opts):
+    def rand(
+        cls, Lx, Ly, bond_dim, phys_dim=2, dtype=float, seed=None, **peps_opts
+    ):
         """Create a random (un-normalized) PEPS.
 
         Parameters
@@ -4606,16 +4794,16 @@ class PEPS(TensorNetwork2DVector, TensorNetwork2DFlat):
             seed_rand(seed)
 
         def fill_fn(shape):
-            return ops.sensibly_scale(ops.sensibly_scale(
-                randn(shape, dtype=dtype)))
+            return ops.sensibly_scale(
+                ops.sensibly_scale(randn(shape, dtype=dtype))
+            )
 
         return cls.from_fill_fn(
             fill_fn, Lx, Ly, bond_dim, phys_dim, **peps_opts
         )
 
     def add_PEPS(self, other, inplace=False):
-        """Add this PEPS with another.
-        """
+        """Add this PEPS with another."""
         if (self.Lx, self.Ly) != (other.Lx, other.Ly):
             raise ValueError("PEPS must be the same size.")
 
@@ -4649,18 +4837,15 @@ class PEPS(TensorNetwork2DVector, TensorNetwork2DFlat):
     add_PEPS_ = functools.partialmethod(add_PEPS, inplace=True)
 
     def __add__(self, other):
-        """PEPS addition.
-        """
+        """PEPS addition."""
         return self.add_PEPS(other, inplace=False)
 
     def __iadd__(self, other):
-        """In-place PEPS addition.
-        """
+        """In-place PEPS addition."""
         return self.add_PEPS(other, inplace=True)
 
     def show(self):
-        """Print a unicode schematic of this PEPS and its bond dimensions.
-        """
+        """Print a unicode schematic of this PEPS and its bond dimensions."""
         show_2d(self, show_lower=True)
 
 
@@ -4706,20 +4891,28 @@ class PEPO(TensorNetwork2DOperator, TensorNetwork2DFlat):
     """
 
     _EXTRA_PROPS = (
-        '_site_tag_id',
-        '_x_tag_id',
-        '_y_tag_id',
-        '_Lx',
-        '_Ly',
-        '_upper_ind_id',
-        '_lower_ind_id',
+        "_site_tag_id",
+        "_x_tag_id",
+        "_y_tag_id",
+        "_Lx",
+        "_Ly",
+        "_upper_ind_id",
+        "_lower_ind_id",
     )
 
-    def __init__(self, arrays, *, shape='urdlbk', tags=None,
-                 upper_ind_id='k{},{}', lower_ind_id='b{},{}',
-                 site_tag_id='I{},{}', x_tag_id='X{}', y_tag_id='Y{}',
-                 **tn_opts):
-
+    def __init__(
+        self,
+        arrays,
+        *,
+        shape="urdlbk",
+        tags=None,
+        upper_ind_id="k{},{}",
+        lower_ind_id="b{},{}",
+        site_tag_id="I{},{}",
+        x_tag_id="X{}",
+        y_tag_id="Y{}",
+        **tn_opts,
+    ):
         if isinstance(arrays, PEPO):
             super().__init__(arrays)
             return
@@ -4746,41 +4939,41 @@ class PEPO(TensorNetwork2DOperator, TensorNetwork2DFlat):
             #     other than up right down left physical
             array_order = shape
             if i == self.Lx - 1:
-                array_order = array_order.replace('u', '')
+                array_order = array_order.replace("u", "")
             if j == self.Ly - 1:
-                array_order = array_order.replace('r', '')
+                array_order = array_order.replace("r", "")
             if i == 0:
-                array_order = array_order.replace('d', '')
+                array_order = array_order.replace("d", "")
             if j == 0:
-                array_order = array_order.replace('l', '')
+                array_order = array_order.replace("l", "")
 
             # allow convention of missing bonds to be singlet dimensions
             if len(array.shape) != len(array_order):
-                array = do('squeeze', array)
+                array = do("squeeze", array)
 
             transpose_order = tuple(
-                array_order.find(x) for x in 'urdlbk' if x in array_order
+                array_order.find(x) for x in "urdlbk" if x in array_order
             )
             if transpose_order != tuple(range(len(array_order))):
-                array = do('transpose', array, transpose_order)
+                array = do("transpose", array, transpose_order)
 
             # get the relevant indices corresponding to neighbours
             inds = []
-            if 'u' in array_order:
+            if "u" in array_order:
                 inds.append(ix[(i + 1, j), (i, j)])
-            if 'r' in array_order:
+            if "r" in array_order:
                 inds.append(ix[(i, j), (i, j + 1)])
-            if 'd' in array_order:
+            if "d" in array_order:
                 inds.append(ix[(i, j), (i - 1, j)])
-            if 'l' in array_order:
+            if "l" in array_order:
                 inds.append(ix[(i, j - 1), (i, j)])
             inds.append(self.lower_ind(i, j))
             inds.append(self.upper_ind(i, j))
 
             # mix site, row, column and global tags
-            ij_tags = tags | oset((self.site_tag(i, j),
-                                   self.x_tag(i),
-                                   self.y_tag(j)))
+            ij_tags = tags | oset(
+                (self.site_tag(i, j), self.x_tag(i), self.y_tag(j))
+            )
 
             # create the site tensor!
             tensors.append(Tensor(data=array, inds=inds, tags=ij_tags))
@@ -4788,8 +4981,17 @@ class PEPO(TensorNetwork2DOperator, TensorNetwork2DFlat):
         super().__init__(tensors, virtual=True, **tn_opts)
 
     @classmethod
-    def rand(cls, Lx, Ly, bond_dim, phys_dim=2, herm=False,
-             dtype=float, seed=None, **pepo_opts):
+    def rand(
+        cls,
+        Lx,
+        Ly,
+        bond_dim,
+        phys_dim=2,
+        herm=False,
+        dtype=float,
+        seed=None,
+        **pepo_opts,
+    ):
         """Create a random PEPO.
 
         Parameters
@@ -4822,7 +5024,6 @@ class PEPO(TensorNetwork2DOperator, TensorNetwork2DFlat):
         arrays = [[None for _ in range(Ly)] for _ in range(Lx)]
 
         for i, j in product(range(Lx), range(Ly)):
-
             shape = []
             if i != Lx - 1:  # bond up
                 shape.append(bond_dim)
@@ -4835,13 +5036,14 @@ class PEPO(TensorNetwork2DOperator, TensorNetwork2DFlat):
             shape.append(phys_dim)
             shape.append(phys_dim)
 
-            X = ops.sensibly_scale(ops.sensibly_scale(
-                randn(shape, dtype=dtype)))
+            X = ops.sensibly_scale(
+                ops.sensibly_scale(randn(shape, dtype=dtype))
+            )
 
             if herm:
                 new_order = list(range(len(shape)))
                 new_order[-2], new_order[-1] = new_order[-1], new_order[-2]
-                X = (do('conj', X) + do('transpose', X, new_order)) / 2
+                X = (do("conj", X) + do("transpose", X, new_order)) / 2
 
             arrays[i][j] = X
 
@@ -4850,8 +5052,7 @@ class PEPO(TensorNetwork2DOperator, TensorNetwork2DFlat):
     rand_herm = functools.partialmethod(rand, herm=True)
 
     def add_PEPO(self, other, inplace=False):
-        """Add this PEPO with another.
-        """
+        """Add this PEPO with another."""
         if (self.Lx, self.Ly) != (other.Lx, other.Ly):
             raise ValueError("PEPOs must be the same size.")
 
@@ -4886,13 +5087,11 @@ class PEPO(TensorNetwork2DOperator, TensorNetwork2DFlat):
     add_PEPO_ = functools.partialmethod(add_PEPO, inplace=True)
 
     def __add__(self, other):
-        """PEPO addition.
-        """
+        """PEPO addition."""
         return self.add_PEPO(other, inplace=False)
 
     def __iadd__(self, other):
-        """In-place PEPO addition.
-        """
+        """In-place PEPO addition."""
         return self.add_PEPO(other, inplace=True)
 
     _apply_peps = tensor_network_apply_op_vec
@@ -4921,39 +5120,39 @@ class PEPO(TensorNetwork2DOperator, TensorNetwork2DFlat):
         raise TypeError("Can only apply PEPO to PEPS.")
 
     def show(self):
-        """Print a unicode schematic of this PEPO and its bond dimensions.
-        """
+        """Print a unicode schematic of this PEPO and its bond dimensions."""
         show_2d(self, show_lower=True, show_upper=True)
 
 
 def show_2d(tn_2d, show_lower=False, show_upper=False):
-    """Base function for printing a unicode schematic of flat 2D TNs.
-    """
+    """Base function for printing a unicode schematic of flat 2D TNs."""
 
-    lb = '╱' if show_lower else ' '
-    ub = '╱' if show_upper else ' '
+    lb = "╱" if show_lower else " "
+    ub = "╱" if show_upper else " "
 
-    line0 = ' ' + (f' {ub}{{:^3}}' * (tn_2d.Ly - 1)) + f' {ub}'
+    line0 = " " + (f" {ub}{{:^3}}" * (tn_2d.Ly - 1)) + f" {ub}"
     bszs = [tn_2d.bond_size((0, j), (0, j + 1)) for j in range(tn_2d.Ly - 1)]
 
     lines = [line0.format(*bszs)]
 
     for i in range(tn_2d.Lx - 1):
-        lines.append(' ●' + ('━━━━●' * (tn_2d.Ly - 1)))
+        lines.append(" ●" + ("━━━━●" * (tn_2d.Ly - 1)))
 
         # vertical bonds
-        lines.append(f'{lb}┃{{:<3}}' * tn_2d.Ly)
+        lines.append(f"{lb}┃{{:<3}}" * tn_2d.Ly)
         bszs = [tn_2d.bond_size((i, j), (i + 1, j)) for j in range(tn_2d.Ly)]
         lines[-1] = lines[-1].format(*bszs)
 
         # horizontal bonds bottom
-        lines.append(' ┃' + (f'{ub}{{:^3}}┃' * (tn_2d.Ly - 1)) + f'{ub}')
-        bszs = [tn_2d.bond_size((i + 1, j), (i + 1, j + 1))
-                for j in range(tn_2d.Ly - 1)]
+        lines.append(" ┃" + (f"{ub}{{:^3}}┃" * (tn_2d.Ly - 1)) + f"{ub}")
+        bszs = [
+            tn_2d.bond_size((i + 1, j), (i + 1, j + 1))
+            for j in range(tn_2d.Ly - 1)
+        ]
         lines[-1] = lines[-1].format(*bszs)
 
-    lines.append(' ●' + ('━━━━●' * (tn_2d.Ly - 1)))
-    lines.append(f'{lb}    ' * tn_2d.Ly)
+    lines.append(" ●" + ("━━━━●" * (tn_2d.Ly - 1)))
+    lines.append(f"{lb}    " * tn_2d.Ly)
 
     print_multi_line(*lines)
 
@@ -5027,13 +5226,15 @@ def calc_plaquette_sizes(coo_groups, autogroup=True):
 
     # remove block size pairs that can be contained in another block pair size
     #     e.g. {(1, 2), (2, 1), (2, 2)} -> ((2, 2),)
-    bszs = tuple(sorted(
-        b for b in bszs
-        if not any(
-            (b[0] <= b2[0]) and (b[1] <= b2[1])
-            for b2 in bszs - {b}
+    bszs = tuple(
+        sorted(
+            b
+            for b in bszs
+            if not any(
+                (b[0] <= b2[0]) and (b[1] <= b2[1]) for b2 in bszs - {b}
+            )
         )
-    ))
+    )
 
     # return each plaquette size separately
     if autogroup:
@@ -5055,9 +5256,9 @@ def plaquette_to_sites(p):
         ((3, 4), (3, 5), (4, 4), (4, 5))
     """
     (i0, j0), (di, dj) = p
-    return tuple((i, j)
-                 for i in range(i0, i0 + di)
-                 for j in range(j0, j0 + dj))
+    return tuple(
+        (i, j) for i in range(i0, i0 + di) for j in range(j0, j0 + dj)
+    )
 
 
 def calc_plaquette_map(plaquettes):
@@ -5139,9 +5340,9 @@ def gen_long_range_path(ij_a, ij_b, sequence=None):
         return
 
     if sequence is None:
-        poss_moves = cycle(('v', 'h'))
-    elif sequence == 'random':
-        poss_moves = (random.choice('vh') for _ in count())
+        poss_moves = cycle(("v", "h"))
+    elif sequence == "random":
+        poss_moves = (random.choice("vh") for _ in count())
     else:
         poss_moves = cycle(sequence)
 
@@ -5152,7 +5353,7 @@ def gen_long_range_path(ij_a, ij_b, sequence=None):
             yield ij_b
             return
 
-        if (move == 'v') and (di != 0):
+        if (move == "v") and (di != 0):
             # move a vertically
             istep = min(max(di, -1), +1)
             new_ij_a = (ia + istep, ja)
@@ -5160,7 +5361,7 @@ def gen_long_range_path(ij_a, ij_b, sequence=None):
             ij_a = new_ij_a
             ia += istep
             di -= istep
-        elif (move == 'h') and (dj != 0):
+        elif (move == "h") and (dj != 0):
             # move a horizontally
             jstep = min(max(dj, -1), +1)
             new_ij_a = (ia, ja + jstep)
@@ -5202,14 +5403,14 @@ def gen_long_range_swap_path(ij_a, ij_b, sequence=None):
         return
 
     if sequence is None:
-        poss_moves = cycle(('av', 'bv', 'ah', 'bh'))
-    elif sequence == 'random':
-        poss_moves = (random.choice(('av', 'bv', 'ah', 'bh')) for _ in count())
+        poss_moves = cycle(("av", "bv", "ah", "bh"))
+    elif sequence == "random":
+        poss_moves = (random.choice(("av", "bv", "ah", "bh")) for _ in count())
     else:
         poss_moves = cycle(sequence)
 
     for move in poss_moves:
-        if (move == 'av') and (di != 0):
+        if (move == "av") and (di != 0):
             # move a vertically
             istep = min(max(di, -1), +1)
             new_ij_a = (ia + istep, ja)
@@ -5218,7 +5419,7 @@ def gen_long_range_swap_path(ij_a, ij_b, sequence=None):
             ia += istep
             di -= istep
 
-        elif (move == 'bv') and (di != 0):
+        elif (move == "bv") and (di != 0):
             # move b vertically
             istep = min(max(di, -1), +1)
             new_ij_b = (ib - istep, jb)
@@ -5231,7 +5432,7 @@ def gen_long_range_swap_path(ij_a, ij_b, sequence=None):
             ib -= istep
             di -= istep
 
-        elif (move == 'ah') and (dj != 0):
+        elif (move == "ah") and (dj != 0):
             # move a horizontally
             jstep = min(max(dj, -1), +1)
             new_ij_a = (ia, ja + jstep)
@@ -5240,7 +5441,7 @@ def gen_long_range_swap_path(ij_a, ij_b, sequence=None):
             ja += jstep
             dj -= jstep
 
-        elif (move == 'bh') and (dj != 0):
+        elif (move == "bh") and (dj != 0):
             # move b horizontally
             jstep = min(max(dj, -1), +1)
             new_ij_b = (ib, jb - jstep)
@@ -5268,4 +5469,4 @@ def swap_path_to_long_range_path(swap_path, ij_a):
 @functools.lru_cache(8)
 def get_swap(dp, dtype, backend):
     SWAP = swap(dp, dtype=dtype)
-    return do('array', SWAP, like=backend)
+    return do("array", SWAP, like=backend)

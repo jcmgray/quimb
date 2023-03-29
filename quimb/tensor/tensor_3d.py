@@ -112,29 +112,29 @@ def gen_3d_plaquette(coo0, steps):
         site which will be the same as the first.
     """
     x, y, z = coo0
-    smap = {'+': +1, '-': -1}
+    smap = {"+": +1, "-": -1}
     step_backs = []
     yield x, y, z
     for step in steps:
         d, s = step
         x, y, z = {
-            'x': (x + smap[s], y, z),
-            'y': (x, y + smap[s], z),
-            'z': (x, y, z + smap[s]),
+            "x": (x + smap[s], y, z),
+            "y": (x, y + smap[s], z),
+            "z": (x, y, z + smap[s]),
         }[d]
         yield x, y, z
-        step_backs.append(d + '-' if s == '+' else '-')
+        step_backs.append(d + "-" if s == "+" else "-")
     for step in step_backs:
         d, s = step
         x, y, z = {
-            'x': (x + smap[s], y, z),
-            'y': (x, y + smap[s], z),
-            'z': (x, y, z + smap[s]),
+            "x": (x + smap[s], y, z),
+            "y": (x, y + smap[s], z),
+            "z": (x, y, z + smap[s]),
         }[d]
         yield x, y, z
 
 
-def gen_3d_plaquettes(Lx, Ly, Lz, tiling='1'):
+def gen_3d_plaquettes(Lx, Ly, Lz, tiling="1"):
     """Generate a tiling of plaquettes in a cubic 3D lattice.
 
     Parameters
@@ -164,30 +164,30 @@ def gen_3d_plaquettes(Lx, Ly, Lz, tiling='1'):
     if isinstance(tiling, int):
         tiling = str(tiling)
 
-    if tiling == '1':
+    if tiling == "1":
         for x, y, z in itertools.product(range(Lx), range(Ly), range(Lz)):
             if (x % 2 == 0) and (y % 2 == 0) and (x < Lx - 1 and y < Ly - 1):
-                yield tuple(gen_3d_plaquette((x, y, z), ('x+', 'y+')))
+                yield tuple(gen_3d_plaquette((x, y, z), ("x+", "y+")))
             if (y % 2 == 1) and (z % 2 == 0) and (y < Ly - 1 and z < Lz - 1):
-                yield tuple(gen_3d_plaquette((x, y, z), ('y+', 'z+')))
+                yield tuple(gen_3d_plaquette((x, y, z), ("y+", "z+")))
             if (z % 2 == 1) and (x % 2 == 1) and (z < Lz - 1 and x < Lx - 1):
-                yield tuple(gen_3d_plaquette((x, y, z), ('z+', 'x+')))
-    elif tiling == '2':
+                yield tuple(gen_3d_plaquette((x, y, z), ("z+", "x+")))
+    elif tiling == "2":
         for x, y, z in itertools.product(range(Lx), range(Ly), range(Lz)):
             if ((x + y) % 2 == 0) and (x < Lx - 1 and y < Ly - 1):
-                yield tuple(gen_3d_plaquette((x, y, z), ('x+', 'y+')))
+                yield tuple(gen_3d_plaquette((x, y, z), ("x+", "y+")))
             if ((y + z) % 2 == 0) and (y < Ly - 1 and z < Lz - 1):
-                yield tuple(gen_3d_plaquette((x, y, z), ('y+', 'z+')))
+                yield tuple(gen_3d_plaquette((x, y, z), ("y+", "z+")))
             if ((x + z) % 2 == 1) and (z < Lz - 1 and x < Lx - 1):
-                yield tuple(gen_3d_plaquette((x, y, z), ('z+', 'x+')))
-    elif tiling in ('4', 'full'):
+                yield tuple(gen_3d_plaquette((x, y, z), ("z+", "x+")))
+    elif tiling in ("4", "full"):
         for x, y, z in itertools.product(range(Lx), range(Ly), range(Lz)):
-            if (x < Lx - 1 and y < Ly - 1):
-                yield tuple(gen_3d_plaquette((x, y, z), ('x+', 'y+')))
-            if (y < Ly - 1 and z < Lz - 1):
-                yield tuple(gen_3d_plaquette((x, y, z), ('y+', 'z+')))
-            if (z < Lz - 1 and x < Lx - 1):
-                yield tuple(gen_3d_plaquette((x, y, z), ('z+', 'x+')))
+            if x < Lx - 1 and y < Ly - 1:
+                yield tuple(gen_3d_plaquette((x, y, z), ("x+", "y+")))
+            if y < Ly - 1 and z < Lz - 1:
+                yield tuple(gen_3d_plaquette((x, y, z), ("y+", "z+")))
+            if z < Lz - 1 and x < Lx - 1:
+                yield tuple(gen_3d_plaquette((x, y, z), ("z+", "x+")))
     else:
         raise ValueError(
             "Invalid tiling: {}. Must be one of '1', '2', '4', 'full'."
@@ -195,8 +195,7 @@ def gen_3d_plaquettes(Lx, Ly, Lz, tiling='1'):
 
 
 def gen_3d_strings(Lx, Ly, Lz):
-    """Generate all length-wise strings in a cubic 3D lattice.
-    """
+    """Generate all length-wise strings in a cubic 3D lattice."""
     for x, y in itertools.product(range(Lx), range(Ly)):
         yield tuple((x, y, z) for z in range(Lz))
     for y, z in itertools.product(range(Ly), range(Lz)):
@@ -212,8 +211,11 @@ class Rotator3D:
     """
 
     def __init__(self, tn, xrange, yrange, zrange, from_which):
-        check_opt('from_which', from_which,
-                  {'xmin', 'xmax', 'ymin', 'ymax', 'zmin', 'zmax'})
+        check_opt(
+            "from_which",
+            from_which,
+            {"xmin", "xmax", "ymin", "ymax", "zmin", "zmax"},
+        )
 
         if xrange is None:
             xrange = (0, tn.Lx - 1)
@@ -228,7 +230,7 @@ class Rotator3D:
         self.from_which = from_which
         self.plane = from_which[0]
 
-        if self.plane == 'x':
+        if self.plane == "x":
             # -> no rotation needed
             self.imin, self.imax = sorted(xrange)
             self.jmin, self.jmax = sorted(yrange)
@@ -238,7 +240,7 @@ class Rotator3D:
             self.z_tag = tn.z_tag
             self.site_tag = tn.site_tag
 
-        elif self.plane == 'y':
+        elif self.plane == "y":
             # -> (y, z, x)
             self.imin, self.imax = sorted(yrange)
             self.jmin, self.jmax = sorted(zrange)
@@ -258,9 +260,9 @@ class Rotator3D:
             self.z_tag = tn.y_tag
             self.site_tag = lambda i, j, k: tn.site_tag(j, k, i)
 
-        if 'min' in self.from_which:
+        if "min" in self.from_which:
             # -> sweeps are increasing
-            self.sweep = range(self.imin, self.imax + 1, + 1)
+            self.sweep = range(self.imin, self.imax + 1, +1)
             self.istep = +1
         else:  # 'max'
             # -> sweeps are decreasing
@@ -280,81 +282,81 @@ class Rotator3D:
 
 
 _canonize_plane_opts = {
-    'xmin': {
-        'yreverse': False,
-        'zreverse': False,
-        'coordinate_order': 'yz',
-        'stepping_order': 'zy',
+    "xmin": {
+        "yreverse": False,
+        "zreverse": False,
+        "coordinate_order": "yz",
+        "stepping_order": "zy",
     },
-    'ymin': {
-        'zreverse': False,
-        'xreverse': True,
-        'coordinate_order': 'zx',
-        'stepping_order': 'xz',
+    "ymin": {
+        "zreverse": False,
+        "xreverse": True,
+        "coordinate_order": "zx",
+        "stepping_order": "xz",
     },
-    'zmin': {
-        'xreverse': True,
-        'yreverse': True,
-        'coordinate_order': 'xy',
-        'stepping_order': 'yx',
+    "zmin": {
+        "xreverse": True,
+        "yreverse": True,
+        "coordinate_order": "xy",
+        "stepping_order": "yx",
     },
-    'xmax': {
-        'yreverse': True,
-        'zreverse': True,
-        'coordinate_order': 'yz',
-        'stepping_order': 'zy',
+    "xmax": {
+        "yreverse": True,
+        "zreverse": True,
+        "coordinate_order": "yz",
+        "stepping_order": "zy",
     },
-    'ymax': {
-        'zreverse': True,
-        'xreverse': False,
-        'coordinate_order': 'zx',
-        'stepping_order': 'xz',
+    "ymax": {
+        "zreverse": True,
+        "xreverse": False,
+        "coordinate_order": "zx",
+        "stepping_order": "xz",
     },
-    'zmax': {
-        'xreverse': False,
-        'yreverse': False,
-        'coordinate_order': 'xy',
-        'stepping_order': 'yx',
+    "zmax": {
+        "xreverse": False,
+        "yreverse": False,
+        "coordinate_order": "xy",
+        "stepping_order": "yx",
     },
 }
 
 
 _compress_plane_opts = {
-    'xmin': {
-        'yreverse': True,
-        'zreverse': True,
-        'coordinate_order': 'yz',
-        'stepping_order': 'zy',
+    "xmin": {
+        "yreverse": True,
+        "zreverse": True,
+        "coordinate_order": "yz",
+        "stepping_order": "zy",
     },
-    'ymin': {
-        'zreverse': True,
-        'xreverse': False,
-        'coordinate_order': 'zx',
-        'stepping_order': 'xz',
+    "ymin": {
+        "zreverse": True,
+        "xreverse": False,
+        "coordinate_order": "zx",
+        "stepping_order": "xz",
     },
-    'zmin': {
-        'xreverse': False,
-        'yreverse': False,
-        'coordinate_order': 'xy',
-        'stepping_order': 'yx',
+    "zmin": {
+        "xreverse": False,
+        "yreverse": False,
+        "coordinate_order": "xy",
+        "stepping_order": "yx",
     },
-    'xmax': {
-        'yreverse': False,
-        'zreverse': False,
-        'coordinate_order': 'yz',
-        'stepping_order': 'zy',
+    "xmax": {
+        "yreverse": False,
+        "zreverse": False,
+        "coordinate_order": "yz",
+        "stepping_order": "zy",
     },
-    'ymax': {
-        'zreverse': False,
-        'xreverse': True,
-        'coordinate_order': 'zx',
-        'stepping_order': 'xz',
+    "ymax": {
+        "zreverse": False,
+        "xreverse": True,
+        "coordinate_order": "zx",
+        "stepping_order": "xz",
     },
-    'zmax': {
-        'xreverse': True,
-        'yreverse': True,
-        'coordinate_order': 'xy',
-        'stepping_order': 'yx',
+    "zmax": {
+        "xreverse": True,
+        "yreverse": True,
+        "coordinate_order": "xy",
+        "stepping_order": "yx",
     },
 }
 
@@ -376,26 +378,24 @@ def parse_boundary_sequence(sequence):
 
 
 class TensorNetwork3D(TensorNetworkGen):
-
     _NDIMS = 3
     _EXTRA_PROPS = (
-        '_site_tag_id',
-        '_x_tag_id',
-        '_y_tag_id',
-        '_z_tag_id',
-        '_Lx',
-        '_Ly',
-        '_Lz',
+        "_site_tag_id",
+        "_x_tag_id",
+        "_y_tag_id",
+        "_z_tag_id",
+        "_Lx",
+        "_Ly",
+        "_Lz",
     )
 
     def _compatible_3d(self, other):
         """Check whether ``self`` and ``other`` are compatible 3D tensor
         networks such that they can remain a 3D tensor network when combined.
         """
-        return (
-            isinstance(other, TensorNetwork3D) and
-            all(getattr(self, e) == getattr(other, e)
-                for e in TensorNetwork3D._EXTRA_PROPS)
+        return isinstance(other, TensorNetwork3D) and all(
+            getattr(self, e) == getattr(other, e)
+            for e in TensorNetwork3D._EXTRA_PROPS
         )
 
     def combine(self, other, *, virtual=False, check_collisions=True):
@@ -428,31 +428,26 @@ class TensorNetwork3D(TensorNetworkGen):
 
     @property
     def Lx(self):
-        """The number of x-slices.
-        """
+        """The number of x-slices."""
         return self._Lx
 
     @property
     def Ly(self):
-        """The number of y-slices.
-        """
+        """The number of y-slices."""
         return self._Ly
 
     @property
     def Lz(self):
-        """The number of z-slices.
-        """
+        """The number of z-slices."""
         return self._Lz
 
     @property
     def nsites(self):
-        """The total number of sites.
-        """
+        """The total number of sites."""
         return self._Lx * self._Ly * self._Lz
 
     def site_tag(self, i, j=None, k=None):
-        """The name of the tag specifiying the tensor at site ``(i, j, k)``.
-        """
+        """The name of the tag specifiying the tensor at site ``(i, j, k)``."""
         if j is None:
             i, j, k = i
         if not isinstance(i, str):
@@ -465,8 +460,7 @@ class TensorNetwork3D(TensorNetworkGen):
 
     @property
     def x_tag_id(self):
-        """The string specifier for tagging each x-slice of this 3D TN.
-        """
+        """The string specifier for tagging each x-slice of this 3D TN."""
         return self._x_tag_id
 
     def x_tag(self, i):
@@ -476,14 +470,12 @@ class TensorNetwork3D(TensorNetworkGen):
 
     @property
     def x_tags(self):
-        """A tuple of all of the ``Lx`` different x-slice tags.
-        """
+        """A tuple of all of the ``Lx`` different x-slice tags."""
         return tuple(map(self.x_tag, range(self.Lx)))
 
     @property
     def y_tag_id(self):
-        """The string specifier for tagging each y-slice of this 3D TN.
-        """
+        """The string specifier for tagging each y-slice of this 3D TN."""
         return self._y_tag_id
 
     def y_tag(self, j):
@@ -493,14 +485,12 @@ class TensorNetwork3D(TensorNetworkGen):
 
     @property
     def y_tags(self):
-        """A tuple of all of the ``Ly`` different y-slice tags.
-        """
+        """A tuple of all of the ``Ly`` different y-slice tags."""
         return tuple(map(self.y_tag, range(self.Ly)))
 
     @property
     def z_tag_id(self):
-        """The string specifier for tagging each z-slice of this 3D TN.
-        """
+        """The string specifier for tagging each z-slice of this 3D TN."""
         return self._z_tag_id
 
     def z_tag(self, k):
@@ -510,8 +500,7 @@ class TensorNetwork3D(TensorNetworkGen):
 
     @property
     def z_tags(self):
-        """A tuple of all of the ``Lz`` different z-slice tags.
-        """
+        """A tuple of all of the ``Lz`` different z-slice tags."""
         return tuple(map(self.z_tag, range(self.Lz)))
 
     def maybe_convert_coo(self, coo):
@@ -526,7 +515,7 @@ class TensorNetwork3D(TensorNetworkGen):
                 pass
         return coo
 
-    def _get_tids_from_tags(self, tags, which='all'):
+    def _get_tids_from_tags(self, tags, which="all"):
         """This is the function that lets coordinates such as ``(i, j, k)`` be
         used for many 'tag' based functions.
         """
@@ -534,18 +523,21 @@ class TensorNetwork3D(TensorNetworkGen):
         return super()._get_tids_from_tags(tags, which=which)
 
     def gen_site_coos(self):
-        """Generate coordinates for all the sites in this 3D TN.
-        """
+        """Generate coordinates for all the sites in this 3D TN."""
         return product(range(self.Lx), range(self.Ly), range(self.Lz))
 
     def gen_bond_coos(self):
-        """Generate pairs of coordinates for all the bonds in this 3D TN.
-        """
-        return gen_3d_bonds(self.Lx, self.Ly, self.Lz, steppers=[
-            lambda i, j, k: (i + 1, j, k),
-            lambda i, j, k: (i, j + 1, k),
-            lambda i, j, k: (i, j, k + 1),
-        ])
+        """Generate pairs of coordinates for all the bonds in this 3D TN."""
+        return gen_3d_bonds(
+            self.Lx,
+            self.Ly,
+            self.Lz,
+            steppers=[
+                lambda i, j, k: (i + 1, j, k),
+                lambda i, j, k: (i, j + 1, k),
+                lambda i, j, k: (i, j, k + 1),
+            ],
+        )
 
     def valid_coo(self, coo, xrange=None, yrange=None, zrange=None):
         """Check whether ``coo`` is in-bounds.
@@ -567,8 +559,9 @@ class TensorNetwork3D(TensorNetworkGen):
             yrange = (0, self.Ly - 1)
         if zrange is None:
             zrange = (0, self.Lz - 1)
-        return all(mn <= u <= mx for u, (mn, mx) in
-                   zip(coo, (xrange, yrange, zrange)))
+        return all(
+            mn <= u <= mx for u, (mn, mx) in zip(coo, (xrange, yrange, zrange))
+        )
 
     def get_ranges_present(self):
         """Return the range of site coordinates present in this TN.
@@ -587,8 +580,8 @@ class TensorNetwork3D(TensorNetworkGen):
             ((0, 2), (1, 3), (2, 3))
 
         """
-        xmin = ymin = zmin = float('inf')
-        xmax = ymax = zmax = float('-inf')
+        xmin = ymin = zmin = float("inf")
+        xmax = ymax = zmax = float("-inf")
         for i, j, k in self.gen_sites_present():
             xmin = min(i, xmin)
             ymin = min(j, ymin)
@@ -599,31 +592,31 @@ class TensorNetwork3D(TensorNetworkGen):
         return (xmin, xmax), (ymin, ymax), (zmin, zmax)
 
     def __getitem__(self, key):
-        """Key based tensor selection, checking for integer based shortcut.
-        """
+        """Key based tensor selection, checking for integer based shortcut."""
         return super().__getitem__(self.maybe_convert_coo(key))
 
     def __repr__(self):
-        """Insert number of slices into standard print.
-        """
+        """Insert number of slices into standard print."""
         s = super().__repr__()
-        extra = (f', Lx={self.Lx}, Ly={self.Ly}, Lz={self.Lz}, '
-                 f'max_bond={self.max_bond()}')
-        s = f'{s[:-2]}{extra}{s[-2:]}'
+        extra = (
+            f", Lx={self.Lx}, Ly={self.Ly}, Lz={self.Lz}, "
+            f"max_bond={self.max_bond()}"
+        )
+        s = f"{s[:-2]}{extra}{s[-2:]}"
         return s
 
     def __str__(self):
-        """Insert number of slices into standard print.
-        """
+        """Insert number of slices into standard print."""
         s = super().__repr__()
-        extra = (f', Lx={self.Lx}, Ly={self.Ly}, Lz={self.Lz}'
-                 f'max_bond={self.max_bond()}')
-        s = f'{s[:-2]}{extra}{s[-2:]}'
+        extra = (
+            f", Lx={self.Lx}, Ly={self.Ly}, Lz={self.Lz}"
+            f"max_bond={self.max_bond()}"
+        )
+        s = f"{s[:-2]}{extra}{s[-2:]}"
         return s
 
     def flatten(self, fuse_multibonds=True, inplace=False):
-        """Contract all tensors corresponding to each site into one.
-        """
+        """Contract all tensors corresponding to each site into one."""
         tn = self if inplace else self.copy()
 
         for i, j, k in self.gen_site_coos():
@@ -644,11 +637,11 @@ class TensorNetwork3D(TensorNetworkGen):
         xreverse=False,
         yreverse=False,
         zreverse=False,
-        coordinate_order='xyz',
+        coordinate_order="xyz",
         xstep=None,
         ystep=None,
         zstep=None,
-        stepping_order='xyz',
+        stepping_order="xyz",
         step_only=None,
     ):
         """Helper function for generating pairs of cooordinates for all bonds
@@ -688,17 +681,20 @@ class TensorNetwork3D(TensorNetworkGen):
 
         # generate the sites and order we will visit them in
         sweeps = {
-            'x': (
-                range(min(xrange), max(xrange) + 1, +1) if not xreverse else
-                range(max(xrange), min(xrange) - 1, -1)
+            "x": (
+                range(min(xrange), max(xrange) + 1, +1)
+                if not xreverse
+                else range(max(xrange), min(xrange) - 1, -1)
             ),
-            'y': (
-                range(min(yrange), max(yrange) + 1, +1) if not yreverse else
-                range(max(yrange), min(yrange) - 1, -1)
+            "y": (
+                range(min(yrange), max(yrange) + 1, +1)
+                if not yreverse
+                else range(max(yrange), min(yrange) - 1, -1)
             ),
-            'z': (
-                range(min(zrange), max(zrange) + 1, +1) if not zreverse else
-                range(max(zrange), min(zrange) - 1, -1)
+            "z": (
+                range(min(zrange), max(zrange) + 1, +1)
+                if not zreverse
+                else range(max(zrange), min(zrange) - 1, -1)
             ),
         }
 
@@ -714,22 +710,23 @@ class TensorNetwork3D(TensorNetworkGen):
         if zstep is None:
             zstep = -1 if zreverse else +1
         steps = {
-            'x': lambda i, j, k: (i + xstep, j, k),
-            'y': lambda i, j, k: (i, j + ystep, k),
-            'z': lambda i, j, k: (i, j, k + zstep),
+            "x": lambda i, j, k: (i + xstep, j, k),
+            "y": lambda i, j, k: (i, j + ystep, k),
+            "z": lambda i, j, k: (i, j, k + zstep),
         }
 
         # make sure all coordinates exist - only allow them not to be specified
         # if their range is a unit slice
-        for w in 'xyz':
+        for w in "xyz":
             if w not in coordinate_order:
                 if len(sweeps[w]) > 1:
                     raise ValueError(
-                        f'{w} not in coordinate_order and is not size 1.')
+                        f"{w} not in coordinate_order and is not size 1."
+                    )
                 else:
                     # just append -> it won't change order as coord is constant
                     coordinate_order += w
-        xi, yi, zi = map(coordinate_order.index, 'xyz')
+        xi, yi, zi = map(coordinate_order.index, "xyz")
 
         # generate the pairs
         for perm_coo_a in product(*(sweeps[xyz] for xyz in coordinate_order)):
@@ -747,16 +744,19 @@ class TensorNetwork3D(TensorNetworkGen):
         zrange,
         equalize_norms=False,
         canonize_opts=None,
-        **gen_pair_opts
+        **gen_pair_opts,
     ):
         """Canonize every pair of tensors within a subrange, optionally
         specifying a order to visit those pairs in.
         """
         canonize_opts = ensure_dict(canonize_opts)
-        canonize_opts.setdefault('equalize_norms', equalize_norms)
+        canonize_opts.setdefault("equalize_norms", equalize_norms)
 
         pairs = self.gen_pairs(
-            xrange=xrange, yrange=yrange, zrange=zrange, **gen_pair_opts,
+            xrange=xrange,
+            yrange=yrange,
+            zrange=zrange,
+            **gen_pair_opts,
         )
 
         for coo_a, coo_b in pairs:
@@ -788,17 +788,20 @@ class TensorNetwork3D(TensorNetworkGen):
         cutoff=1e-10,
         equalize_norms=False,
         compress_opts=None,
-        **gen_pair_opts
+        **gen_pair_opts,
     ):
         """Compress every pair of tensors within a subrange, optionally
         specifying a order to visit those pairs in.
         """
         compress_opts = ensure_dict(compress_opts)
-        compress_opts.setdefault('absorb', 'both')
-        compress_opts.setdefault('equalize_norms', equalize_norms)
+        compress_opts.setdefault("absorb", "both")
+        compress_opts.setdefault("equalize_norms", equalize_norms)
 
         pairs = self.gen_pairs(
-            xrange=xrange, yrange=yrange, zrange=zrange, **gen_pair_opts,
+            xrange=xrange,
+            yrange=yrange,
+            zrange=zrange,
+            **gen_pair_opts,
         )
 
         for coo_a, coo_b in pairs:
@@ -819,8 +822,9 @@ class TensorNetwork3D(TensorNetworkGen):
             except KeyError:
                 continue
 
-            self.compress_between(tag_a, tag_b, max_bond=max_bond,
-                                  cutoff=cutoff, **compress_opts)
+            self.compress_between(
+                tag_a, tag_b, max_bond=max_bond, cutoff=cutoff, **compress_opts
+            )
 
     def _contract_boundary_core(
         self,
@@ -839,9 +843,9 @@ class TensorNetwork3D(TensorNetworkGen):
         canonize_opts=None,
     ):
         canonize_opts = ensure_dict(canonize_opts)
-        canonize_opts.setdefault('absorb', 'right')
+        canonize_opts.setdefault("absorb", "right")
         compress_opts = ensure_dict(compress_opts)
-        compress_opts.setdefault('absorb', 'both')
+        compress_opts.setdefault("absorb", "both")
 
         r3d = Rotator3D(self, xrange, yrange, zrange, from_which)
         site_tag = r3d.site_tag
@@ -863,20 +867,18 @@ class TensorNetwork3D(TensorNetworkGen):
             for layer_tag in layer_tags:
                 for j in range(jmin, jmax + 1):
                     for k in range(kmin, kmax + 1):
-
                         tag1 = site_tag(i, j, k)  # outer
                         tag2 = site_tag(i + istep, j, k)  # inner
 
-                        if (
-                            (tag1 not in self.tag_map) or
-                            (tag2 not in self.tag_map)
+                        if (tag1 not in self.tag_map) or (
+                            tag2 not in self.tag_map
                         ):
                             # allow completely missing sites
                             continue
 
                         if (layer_tag is None) or len(self.tag_map[tag2]) == 1:
                             # contract *any* tensors with pair of coordinates
-                            self.contract_((tag1, tag2), which='any')
+                            self.contract_((tag1, tag2), which="any")
                         else:
                             # ensure boundary is single tensor per site
                             if len(self.tag_map[tag1]) > 1:
@@ -884,8 +886,9 @@ class TensorNetwork3D(TensorNetworkGen):
 
                             # contract specific pair (i.e. one 'inner' layer)
                             self.contract_between(
-                                tag1, (tag2, layer_tag),
-                                equalize_norms=equalize_norms
+                                tag1,
+                                (tag2, layer_tag),
+                                equalize_norms=equalize_norms,
                             )
 
                             # drop inner site tag merged into outer boundary so
@@ -894,39 +897,41 @@ class TensorNetwork3D(TensorNetworkGen):
                                 self[tag1].drop_tags(tag2)
 
                         if not compress_late:
-                            tid1, = self.tag_map[tag1]
+                            (tid1,) = self.tag_map[tag1]
                             for tidn in self._get_neighbor_tids(tid1):
                                 t1, tn = self._tids_get(tid1, tidn)
                                 if bonds_size(t1, tn) > max_bond:
                                     self._compress_between_tids(
-                                        tid1, tidn,
+                                        tid1,
+                                        tidn,
                                         max_bond=max_bond,
                                         cutoff=cutoff,
                                         equalize_norms=equalize_norms,
-                                        **compress_opts
+                                        **compress_opts,
                                     )
 
                 if compress_late:
                     for step_only in step_onlys:
                         if canonize:
                             self.canonize_plane(
-                                xrange=xrange if plane != 'x' else (i, i),
-                                yrange=yrange if plane != 'y' else (i, i),
-                                zrange=zrange if plane != 'z' else (i, i),
+                                xrange=xrange if plane != "x" else (i, i),
+                                yrange=yrange if plane != "y" else (i, i),
+                                zrange=zrange if plane != "z" else (i, i),
                                 equalize_norms=equalize_norms,
                                 canonize_opts=canonize_opts,
                                 step_only=step_only,
-                                **_canonize_plane_opts[from_which]
+                                **_canonize_plane_opts[from_which],
                             )
                         self.compress_plane(
-                            xrange=xrange if plane != 'x' else (i, i),
-                            yrange=yrange if plane != 'y' else (i, i),
-                            zrange=zrange if plane != 'z' else (i, i),
-                            max_bond=max_bond, cutoff=cutoff,
+                            xrange=xrange if plane != "x" else (i, i),
+                            yrange=yrange if plane != "y" else (i, i),
+                            zrange=zrange if plane != "z" else (i, i),
+                            max_bond=max_bond,
+                            cutoff=cutoff,
                             equalize_norms=equalize_norms,
                             compress_opts=compress_opts,
                             step_only=step_only,
-                            **_compress_plane_opts[from_which]
+                            **_compress_plane_opts[from_which],
                         )
 
     def _contract_boundary_projector(
@@ -954,18 +959,17 @@ class TensorNetwork3D(TensorNetworkGen):
             canonize_opts.setdefault("max_iterations", 2)
             self.select(r.x_tag(r.sweep[0])).gauge_all_(**canonize_opts)
 
-        sweep_other = tuple(itertools.product(
-            range(r.jmin, r.jmax + 1),
-            range(r.kmin, r.kmax + 1)
-        ))
+        sweep_other = tuple(
+            itertools.product(
+                range(r.jmin, r.jmax + 1), range(r.kmin, r.kmax + 1)
+            )
+        )
 
         for i0, i1 in pairwise(r.sweep):
-
             # we compute the projectors from an untouched copy
             tn_calc = self.copy()
 
             for j, k in sweep_other:
-
                 tag_ijk = r.site_tag(i0, j, k)
                 tag_ip1jk = r.site_tag(i1, j, k)
                 rtags = (tag_ijk, tag_ip1jk)
@@ -1013,7 +1017,7 @@ class TensorNetwork3D(TensorNetworkGen):
         max_bond=None,
         *,
         cutoff=1e-10,
-        mode='peps',
+        mode="peps",
         equalize_norms=False,
         compress_opts=None,
         canonize_opts=None,
@@ -1023,7 +1027,7 @@ class TensorNetwork3D(TensorNetworkGen):
         """Unified entrypoint for contracting any rectangular patch of tensors
         from any direction, with any boundary method.
         """
-        check_opt('mode', mode, ('peps', 'projector'))
+        check_opt("mode", mode, ("peps", "projector"))
 
         tn = self if inplace else self.copy()
 
@@ -1037,7 +1041,7 @@ class TensorNetwork3D(TensorNetworkGen):
         contract_boundary_opts["equalize_norms"] = equalize_norms
         contract_boundary_opts["compress_opts"] = compress_opts
 
-        if mode == 'projector':
+        if mode == "projector":
             return tn._contract_boundary_projector(**contract_boundary_opts)
 
         # mode == 'peps' options
@@ -1047,7 +1051,8 @@ class TensorNetwork3D(TensorNetworkGen):
         )
 
     contract_boundary_from_ = functools.partialmethod(
-        contract_boundary_from, inplace=True)
+        contract_boundary_from, inplace=True
+    )
 
     def _contract_interleaved_boundary_sequence(
         self,
@@ -1125,12 +1130,12 @@ class TensorNetwork3D(TensorNetworkGen):
             target_zmin = min(x[2] for x in around)
             target_zmax = max(x[2] for x in around)
             target_check = {
-                'xmin': lambda x: x >= target_xmin - 1,
-                'xmax': lambda x: x <= target_xmax + 1,
-                'ymin': lambda y: y >= target_ymin - 1,
-                'ymax': lambda y: y <= target_ymax + 1,
-                'zmin': lambda z: z >= target_zmin - 1,
-                'zmax': lambda z: z <= target_zmax + 1,
+                "xmin": lambda x: x >= target_xmin - 1,
+                "xmax": lambda x: x <= target_xmax + 1,
+                "ymin": lambda y: y >= target_ymin - 1,
+                "ymax": lambda y: y <= target_ymax + 1,
+                "zmin": lambda z: z >= target_zmin - 1,
+                "zmax": lambda z: z <= target_zmax + 1,
             }
 
         if sequence is None:
@@ -1141,10 +1146,11 @@ class TensorNetwork3D(TensorNetworkGen):
         def _is_finished(direction):
             return (
                 # two opposing sides have got sufficiently close
-                (separations[direction[0]] <= max_separation) or
-                (
+                (separations[direction[0]] <= max_separation)
+                or (
                     # there is a target region
-                    (around is not None) and
+                    (around is not None)
+                    and
                     # and we have reached it
                     target_check[direction](boundaries[direction])
                 )
@@ -1214,9 +1220,10 @@ class TensorNetwork3D(TensorNetworkGen):
                 pbar.update()
 
             # check if enough directions are finished -> reached max separation
-            if sum(
-                separations[d] > max_separation for d in "xyz"
-            ) <= max_unfinished:
+            if (
+                sum(separations[d] > max_separation for d in "xyz")
+                <= max_unfinished
+            ):
                 break
 
         if equalize_norms is True:
@@ -1244,7 +1251,7 @@ class TensorNetwork3D(TensorNetworkGen):
         max_bond=None,
         *,
         cutoff=1e-10,
-        mode='peps',
+        mode="peps",
         canonize=True,
         compress_opts=None,
         sequence=None,
@@ -1264,13 +1271,12 @@ class TensorNetwork3D(TensorNetworkGen):
         inplace=False,
         **contract_boundary_opts,
     ):
-        """
-        """
-        contract_boundary_opts['max_bond'] = max_bond
-        contract_boundary_opts['cutoff'] = cutoff
-        contract_boundary_opts['mode'] = mode
-        contract_boundary_opts['canonize'] = canonize
-        contract_boundary_opts['compress_opts'] = compress_opts
+        """ """
+        contract_boundary_opts["max_bond"] = max_bond
+        contract_boundary_opts["cutoff"] = cutoff
+        contract_boundary_opts["mode"] = mode
+        contract_boundary_opts["canonize"] = canonize
+        contract_boundary_opts["compress_opts"] = compress_opts
 
         return self._contract_interleaved_boundary_sequence(
             contract_boundary_opts=contract_boundary_opts,
@@ -1292,7 +1298,8 @@ class TensorNetwork3D(TensorNetworkGen):
         )
 
     contract_boundary_ = functools.partialmethod(
-        contract_boundary, inplace=True)
+        contract_boundary, inplace=True
+    )
 
     def _compute_plane_envs(
         self,
@@ -1321,18 +1328,16 @@ class TensorNetwork3D(TensorNetworkGen):
             else:
                 envs = {}
 
-        envs[r3d.sweep[1]] = tn.select_any(
-            p_tag(r3d.sweep[0]), virtual=False
-        )
+        envs[r3d.sweep[1]] = tn.select_any(p_tag(r3d.sweep[0]), virtual=False)
 
         for i in r3d.sweep[:-2]:
             # contract the boundary in one step
             tn.contract_boundary_from_(
-                xrange=xrange if plane != 'x' else (i, i + istep),
-                yrange=yrange if plane != 'y' else (i, i + istep),
-                zrange=zrange if plane != 'z' else (i, i + istep),
+                xrange=xrange if plane != "x" else (i, i + istep),
+                yrange=yrange if plane != "y" else (i, i + istep),
+                zrange=zrange if plane != "z" else (i, i + istep),
                 from_which=from_which,
-                **contract_boundary_opts
+                **contract_boundary_opts,
             )
             # set the boundary as the environment for the next plane beyond
             envs[i + 2 * istep] = tn.select_any(
@@ -1349,8 +1354,7 @@ class TensorNetwork3D(TensorNetworkGen):
         boundary_order=None,
         **contract_boundary_opts,
     ):
-        """Recursively compute the necessary 2D, 1D, and 0D environments.
-        """
+        """Recursively compute the necessary 2D, 1D, and 0D environments."""
         if not key:
             # env is the whole TN
             return self.copy()
@@ -1365,7 +1369,7 @@ class TensorNetwork3D(TensorNetworkGen):
             return envs[key].copy()
 
         if boundary_order is None:
-            scores = {'x': -self.Lx, 'y': -self.Ly, 'z': -self.Lz}
+            scores = {"x": -self.Lx, "y": -self.Ly, "z": -self.Lz}
             boundary_order = sorted(scores, key=scores.__getitem__)
 
         # check already available parent environments
@@ -1380,25 +1384,35 @@ class TensorNetwork3D(TensorNetworkGen):
 
             # else choose a parent to compute
             parent_tn = self._maybe_compute_cell_env(
-                key=parent_key, envs=envs, storage_factory=storage_factory,
-                boundary_order=boundary_order, **contract_boundary_opts)
+                key=parent_key,
+                envs=envs,
+                storage_factory=storage_factory,
+                boundary_order=boundary_order,
+                **contract_boundary_opts,
+            )
 
         # need to compute parent first - first set the parents range
-        Ls = {'x': self.Lx, 'y': self.Ly, 'z': self.Lz}
-        plane_tags = {'x': self.x_tag, 'y': self.y_tag, 'z': self.z_tag}
-        ranges = {'xrange': None, 'yrange': None, 'zrange': None}
+        Ls = {"x": self.Lx, "y": self.Ly, "z": self.Lz}
+        plane_tags = {"x": self.x_tag, "y": self.y_tag, "z": self.z_tag}
+        ranges = {"xrange": None, "yrange": None, "zrange": None}
         for d, s, bsz in parent_key:
-            ranges[f'{d}range'] = (max(0, s - 1), min(s + bsz, Ls[d] - 1))
+            ranges[f"{d}range"] = (max(0, s - 1), min(s + bsz, Ls[d] - 1))
 
         # then compute the envs for the new direction ``d``
-        (d, _, bsz), = (x for x in key if x not in parent_key)
+        ((d, _, bsz),) = (x for x in key if x not in parent_key)
 
         envs_s_min = parent_tn._compute_plane_envs(
-            from_which=f'{d}min', storage_factory=storage_factory,
-            **ranges, **contract_boundary_opts)
+            from_which=f"{d}min",
+            storage_factory=storage_factory,
+            **ranges,
+            **contract_boundary_opts,
+        )
         envs_s_max = parent_tn._compute_plane_envs(
-            from_which=f'{d}max', storage_factory=storage_factory,
-            **ranges, **contract_boundary_opts)
+            from_which=f"{d}max",
+            storage_factory=storage_factory,
+            **ranges,
+            **contract_boundary_opts,
+        )
 
         for s in range(0, Ls[d] - bsz + 1):
             # the central non-boundary slice of tensors
@@ -1479,10 +1493,9 @@ class TensorNetwork3D(TensorNetworkGen):
         retag_map = {}
 
         for i in range(r.imin, r.imax + 1, 2):
-            next_i_in_lattice = (i + 1 <= r.imax)
+            next_i_in_lattice = i + 1 <= r.imax
             for j in range(r.jmin, r.jmax + 1):
                 for k in range(r.kmin, r.kmax + 1):
-
                     tag_ijk = r.site_tag(i, j, k)
                     tag_ip1jk = r.site_tag(i + 1, j, k)
                     new_tag = r.site_tag(i // 2, j, k)
@@ -1494,7 +1507,7 @@ class TensorNetwork3D(TensorNetworkGen):
                     if (j > 0) and next_i_in_lattice:
                         ltags = (
                             r.site_tag(i, j - 1, k),
-                            r.site_tag(i + 1, j - 1, k)
+                            r.site_tag(i + 1, j - 1, k),
                         )
                         rtags = (tag_ijk, tag_ip1jk)
                         tn_calc.insert_compressor_between_regions(
@@ -1512,7 +1525,7 @@ class TensorNetwork3D(TensorNetworkGen):
                     if (k > 0) and next_i_in_lattice:
                         ltags = (
                             r.site_tag(i, j, k - 1),
-                            r.site_tag(i + 1, j, k - 1)
+                            r.site_tag(i + 1, j, k - 1),
                         )
                         rtags = (tag_ijk, tag_ip1jk)
                         tn_calc.insert_compressor_between_regions(
@@ -1571,7 +1584,7 @@ class TensorNetwork3D(TensorNetworkGen):
         final_contract_opts=None,
         progbar=False,
         inplace=False,
-        **coarse_grain_opts
+        **coarse_grain_opts,
     ):
         """Contract this tensor network using the finite version of HOTRG.
         See https://arxiv.org/abs/1201.1144v4 and
@@ -1670,7 +1683,7 @@ class TensorNetwork3D(TensorNetworkGen):
                 cutoff=cutoff,
                 lazy=lazy,
                 equalize_norms=equalize_norms,
-                **coarse_grain_opts
+                **coarse_grain_opts,
             )
 
             if pbar is not None:
@@ -1686,8 +1699,7 @@ class TensorNetwork3D(TensorNetworkGen):
 
         if pbar is not None:
             pbar.set_description(
-                f"contracted HOTRG, "
-                f"Lx={tn.Lx}, Ly={tn.Ly}, Lz={tn.Lz}"
+                f"contracted HOTRG, " f"Lx={tn.Lx}, Ly={tn.Ly}, Lz={tn.Lz}"
             )
             pbar.close()
 
@@ -1703,8 +1715,7 @@ class TensorNetwork3D(TensorNetworkGen):
 
 
 def is_lone_coo(where):
-    """Check if ``where`` has been specified as a single coordinate triplet.
-    """
+    """Check if ``where`` has been specified as a single coordinate triplet."""
     return (len(where) == 3) and (isinstance(where[0], Integral))
 
 
@@ -1722,13 +1733,16 @@ def calc_cell_sizes(coo_groups, autogroup=True):
         bszs.add((xsz, ysz, zsz))
 
     # remove block size pairs that can be contained in another block pair size
-    bszs = tuple(sorted(
-        b for b in bszs
-        if not any(
-            (b[0] <= b2[0]) and (b[1] <= b2[1]) and (b[2] <= b2[2])
-            for b2 in bszs - {b}
+    bszs = tuple(
+        sorted(
+            b
+            for b in bszs
+            if not any(
+                (b[0] <= b2[0]) and (b[1] <= b2[1]) and (b[2] <= b2[2])
+                for b2 in bszs - {b}
+            )
         )
-    ))
+    )
 
     # return each cell size separately
     if autogroup:
@@ -1748,10 +1762,12 @@ def cell_to_sites(p):
         ((3, 4), (3, 5), (4, 4), (4, 5))
     """
     (i0, j0, k0), (di, dj, dk) = p
-    return tuple((i, j, k)
-                 for i in range(i0, i0 + di)
-                 for j in range(j0, j0 + dj)
-                 for k in range(k0, k0 + dk))
+    return tuple(
+        (i, j, k)
+        for i in range(i0, i0 + di)
+        for j in range(j0, j0 + dj)
+        for k in range(k0, k0 + dk)
+    )
 
 
 def sites_to_cell(sites):
@@ -1763,8 +1779,8 @@ def sites_to_cell(sites):
         >>> sites_to_cell([(1, 3, 3), (2, 2, 4)])
         ((1, 2, 3) , (2, 2, 2))
     """
-    imin = jmin = kmin = float('inf')
-    imax = jmax = kmax = float('-inf')
+    imin = jmin = kmin = float("inf")
+    imax = jmax = kmax = float("-inf")
     for i, j, k in sites:
         imin, jmin, kmin = min(imin, i), min(jmin, j), min(kmin, k)
         imax, jmax, kmax = max(imax, i), max(jmax, j), max(kmax, k)
@@ -1794,14 +1810,14 @@ class TensorNetwork3DVector(TensorNetwork3D, TensorNetworkGenVector):
     """
 
     _EXTRA_PROPS = (
-        '_site_tag_id',
-        '_x_tag_id',
-        '_y_tag_id',
-        '_z_tag_id',
-        '_Lx',
-        '_Ly',
-        '_Lz',
-        '_site_ind_id',
+        "_site_tag_id",
+        "_x_tag_id",
+        "_y_tag_id",
+        "_z_tag_id",
+        "_Lx",
+        "_Ly",
+        "_Lz",
+        "_site_ind_id",
     )
 
     def site_ind(self, i, j=None, k=None):
@@ -1820,22 +1836,17 @@ class TensorNetwork3DVector(TensorNetwork3D, TensorNetworkGenVector):
             where = self.gen_sites_present()
 
         return self.reindex(
-            {
-                self.site_ind(*coo): new_id.format(*coo) for coo in where
-            },
-            inplace=inplace
+            {self.site_ind(*coo): new_id.format(*coo) for coo in where},
+            inplace=inplace,
         )
 
     def phys_dim(self, i=None, j=None, k=None):
-        """Get the size of the physical indices / a specific physical index.
-        """
+        """Get the size of the physical indices / a specific physical index."""
         if (i is not None) and (j is not None) and (k is not None):
             pix = self.site_ind(i, j, k)
         else:
             # allow for when some physical indices might have been contracted
-            pix = next(iter(
-                ix for ix in self.site_inds if ix in self.ind_map
-            ))
+            pix = next(iter(ix for ix in self.site_inds if ix in self.ind_map))
         return self.ind_size(pix)
 
     def gate(
@@ -1858,8 +1869,13 @@ class TensorNetwork3DVector(TensorNetwork3D, TensorNetworkGenVector):
 
         inds = tuple(map(self.site_ind, where))
         return super().gate_inds(
-            G, inds, contract=contract, tags=tags, info=info, inplace=inplace,
-            **compress_opts
+            G,
+            inds,
+            contract=contract,
+            tags=tags,
+            info=info,
+            inplace=inplace,
+            **compress_opts,
         )
 
     gate_ = functools.partialmethod(gate, inplace=True)
@@ -1871,25 +1887,24 @@ class TensorNetwork3DFlat(TensorNetwork3D):
     """
 
     _EXTRA_PROPS = (
-        '_site_tag_id',
-        '_x_tag_id',
-        '_y_tag_id',
-        '_z_tag_id',
-        '_Lx',
-        '_Ly',
-        '_Lz',
+        "_site_tag_id",
+        "_x_tag_id",
+        "_y_tag_id",
+        "_z_tag_id",
+        "_Lx",
+        "_Ly",
+        "_Lz",
     )
 
     def bond(self, coo1, coo2):
         """Get the name of the index defining the bond between sites at
         ``coo1`` and ``coo2``.
         """
-        b_ix, = self[coo1].bonds(self[coo2])
+        (b_ix,) = self[coo1].bonds(self[coo2])
         return b_ix
 
     def bond_size(self, coo1, coo2):
-        """Return the size of the bond between sites at ``coo1`` and ``coo2``.
-        """
+        """Return the size of the bond between sites at ``coo1`` and ``coo2``."""
         b_ix = self.bond(coo1, coo2)
         return self[coo1].ind_size(b_ix)
 
@@ -1922,30 +1937,29 @@ class PEPS3D(TensorNetwork3DVector, TensorNetwork3DFlat):
     """
 
     _EXTRA_PROPS = (
-        '_site_tag_id',
-        '_x_tag_id',
-        '_y_tag_id',
-        '_z_tag_id',
-        '_Lx',
-        '_Ly',
-        '_Lz',
-        '_site_ind_id',
+        "_site_tag_id",
+        "_x_tag_id",
+        "_y_tag_id",
+        "_z_tag_id",
+        "_Lx",
+        "_Ly",
+        "_Lz",
+        "_site_ind_id",
     )
 
     def __init__(
         self,
         arrays,
         *,
-        shape='urfdlbp',
+        shape="urfdlbp",
         tags=None,
-        site_ind_id='k{},{},{}',
-        site_tag_id='I{},{},{}',
-        x_tag_id='X{}',
-        y_tag_id='Y{}',
-        z_tag_id='Z{}',
-        **tn_opts
+        site_ind_id="k{},{},{}",
+        site_tag_id="I{},{},{}",
+        x_tag_id="X{}",
+        y_tag_id="Y{}",
+        z_tag_id="Z{}",
+        **tn_opts,
     ):
-
         if isinstance(arrays, PEPS3D):
             super().__init__(arrays)
             return
@@ -1973,54 +1987,60 @@ class PEPS3D(TensorNetwork3DVector, TensorNetwork3DFlat):
             #     other than up right front down left behind physical
             array_order = shape
             if i == self.Lx - 1:
-                array_order = array_order.replace('u', '')
+                array_order = array_order.replace("u", "")
             if j == self.Ly - 1:
-                array_order = array_order.replace('r', '')
+                array_order = array_order.replace("r", "")
             if k == self.Lz - 1:
-                array_order = array_order.replace('f', '')
+                array_order = array_order.replace("f", "")
             if i == 0:
-                array_order = array_order.replace('d', '')
+                array_order = array_order.replace("d", "")
             if j == 0:
-                array_order = array_order.replace('l', '')
+                array_order = array_order.replace("l", "")
             if k == 0:
-                array_order = array_order.replace('b', '')
+                array_order = array_order.replace("b", "")
 
             # allow convention of missing bonds to be singlet dimensions
             if len(array.shape) != len(array_order):
-                array = do('squeeze', array)
+                array = do("squeeze", array)
 
             transpose_order = tuple(
-                array_order.find(x) for x in 'urfdlbp' if x in array_order
+                array_order.find(x) for x in "urfdlbp" if x in array_order
             )
             if transpose_order != tuple(range(len(array_order))):
-                array = do('transpose', array, transpose_order)
+                array = do("transpose", array, transpose_order)
 
             # get the relevant indices corresponding to neighbours
             inds = []
-            if 'u' in array_order:
+            if "u" in array_order:
                 inds.append(ix[(i, j, k), (i + 1, j, k)])
-            if 'r' in array_order:
+            if "r" in array_order:
                 inds.append(ix[(i, j, k), (i, j + 1, k)])
-            if 'f' in array_order:
+            if "f" in array_order:
                 inds.append(ix[(i, j, k), (i, j, k + 1)])
-            if 'd' in array_order:
+            if "d" in array_order:
                 inds.append(ix[(i - 1, j, k), (i, j, k)])
-            if 'l' in array_order:
+            if "l" in array_order:
                 inds.append(ix[(i, j - 1, k), (i, j, k)])
-            if 'b' in array_order:
+            if "b" in array_order:
                 inds.append(ix[(i, j, k - 1), (i, j, k)])
             inds.append(self.site_ind(i, j, k))
 
             # mix site, slice and global tags
-            ijk_tags = tags | oset((self.site_tag(i, j, k), self.x_tag(i),
-                                   self.y_tag(j), self.z_tag(k)))
+            ijk_tags = tags | oset(
+                (
+                    self.site_tag(i, j, k),
+                    self.x_tag(i),
+                    self.y_tag(j),
+                    self.z_tag(k),
+                )
+            )
 
             # create the site tensor!
             tensors.append(Tensor(data=array, inds=inds, tags=ijk_tags))
 
         super().__init__(tensors, virtual=True, **tn_opts)
 
-    def permute_arrays(self, shape='urfdlbp'):
+    def permute_arrays(self, shape="urfdlbp"):
         """Permute the indices of each tensor in this PEPS3D to match
         ``shape``. This doesn't change how the overall object interacts with
         other tensor networks but may be useful for extracting the underlying
@@ -2033,24 +2053,24 @@ class PEPS3D(TensorNetwork3DVector, TensorNetwork3DFlat):
             left, right, and physical indices respectively.
         """
         steps = {
-            'u': lambda i, j, k: (i + 1, j, k),
-            'r': lambda i, j, k: (i, j + 1, k),
-            'f': lambda i, j, k: (i, j, k + 1),
-            'd': lambda i, j, k: (i - 1, j, k),
-            'l': lambda i, j, k: (i, j - 1, k),
-            'b': lambda i, j, k: (i, j, k - 1),
+            "u": lambda i, j, k: (i + 1, j, k),
+            "r": lambda i, j, k: (i, j + 1, k),
+            "f": lambda i, j, k: (i, j, k + 1),
+            "d": lambda i, j, k: (i - 1, j, k),
+            "l": lambda i, j, k: (i, j - 1, k),
+            "b": lambda i, j, k: (i, j, k - 1),
         }
         for i, j, k in self.gen_site_coos():
             t = self[i, j, k]
             inds = []
             for s in shape:
-                if s == 'p':
+                if s == "p":
                     inds.append(self.site_ind(i, j, k))
                 else:
                     coo2 = steps[s](i, j, k)
                     if self.valid_coo(coo2):
                         t2 = self[coo2]
-                        bix, = t.bonds(t2)
+                        (bix,) = t.bonds(t2)
                         inds.append(bix)
             t.transpose_(*inds)
 
@@ -2080,13 +2100,11 @@ class PEPS3D(TensorNetwork3DVector, TensorNetwork3DFlat):
         -------
         psi : PEPS3D
         """
-        arrays = [[[None
-                    for _ in range(Lz)]
-                   for _ in range(Ly)]
-                  for _ in range(Lx)]
+        arrays = [
+            [[None for _ in range(Lz)] for _ in range(Ly)] for _ in range(Lx)
+        ]
 
         for i, j, k in product(range(Lx), range(Ly), range(Lz)):
-
             shape = []
             if i != Lx - 1:  # bond up
                 shape.append(bond_dim)
@@ -2108,7 +2126,14 @@ class PEPS3D(TensorNetwork3DVector, TensorNetwork3DFlat):
 
     @classmethod
     def empty(
-        self, Lx, Ly, Lz, bond_dim, phys_dim=2, like='numpy', **peps3d_opts,
+        self,
+        Lx,
+        Ly,
+        Lz,
+        bond_dim,
+        phys_dim=2,
+        like="numpy",
+        **peps3d_opts,
     ):
         """Create an empty 3D PEPS.
 
@@ -2137,12 +2162,24 @@ class PEPS3D(TensorNetwork3DVector, TensorNetwork3DFlat):
         """
         return self.from_fill_fn(
             lambda shape: do("zeros", shape, like=like),
-            Lx, Ly, Lz, bond_dim, phys_dim, **peps3d_opts
+            Lx,
+            Ly,
+            Lz,
+            bond_dim,
+            phys_dim,
+            **peps3d_opts,
         )
 
     @classmethod
     def ones(
-        self, Lx, Ly, Lz, bond_dim, phys_dim=2, like='numpy', **peps3d_opts,
+        self,
+        Lx,
+        Ly,
+        Lz,
+        bond_dim,
+        phys_dim=2,
+        like="numpy",
+        **peps3d_opts,
     ):
         """Create a 3D PEPS whose tensors are filled with ones.
 
@@ -2171,13 +2208,25 @@ class PEPS3D(TensorNetwork3DVector, TensorNetwork3DFlat):
         """
         return self.from_fill_fn(
             lambda shape: do("ones", shape, like=like),
-            Lx, Ly, Lz, bond_dim, phys_dim, **peps3d_opts
+            Lx,
+            Ly,
+            Lz,
+            bond_dim,
+            phys_dim,
+            **peps3d_opts,
         )
 
     @classmethod
     def rand(
-        cls, Lx, Ly, Lz, bond_dim, phys_dim=2,
-        dtype='float64', seed=None, **peps3d_opts
+        cls,
+        Lx,
+        Ly,
+        Lz,
+        bond_dim,
+        phys_dim=2,
+        dtype="float64",
+        seed=None,
+        **peps3d_opts,
     ):
         """Create a random (un-normalized) 3D PEPS.
 
@@ -2212,8 +2261,9 @@ class PEPS3D(TensorNetwork3DVector, TensorNetwork3DFlat):
             seed_rand(seed)
 
         def fill_fn(shape):
-            return ops.sensibly_scale(ops.sensibly_scale(
-                randn(shape, dtype=dtype)))
+            return ops.sensibly_scale(
+                ops.sensibly_scale(randn(shape, dtype=dtype))
+            )
 
         return cls.from_fill_fn(
             fill_fn, Lx, Ly, Lz, bond_dim, phys_dim, **peps3d_opts
@@ -2230,9 +2280,9 @@ class PEPS3D(TensorNetwork3DVector, TensorNetwork3DFlat):
         gauges=False,
         flatten=False,
         normalized=True,
-        symmetrized='auto',
+        symmetrized="auto",
         get=None,
-        **contract_boundary_opts
+        **contract_boundary_opts,
     ):
         if is_lone_coo(keep):
             keep = (keep,)
@@ -2240,21 +2290,25 @@ class PEPS3D(TensorNetwork3DVector, TensorNetwork3DFlat):
         tags = [self.site_tag(i, j, k) for i, j, k in keep]
 
         k = self.select_local(
-            tags, 'any', max_distance=max_distance,
-            fillin=fillin, virtual=False)
+            tags,
+            "any",
+            max_distance=max_distance,
+            fillin=fillin,
+            virtual=False,
+        )
 
-        k.add_tag('KET')
+        k.add_tag("KET")
         if gauges:
             k.gauge_simple_insert(gauges)
 
         kix = [self.site_ind(i, j, k) for i, j, k in keep]
         bix = [rand_uuid() for _ in kix]
 
-        b = k.H.reindex_(dict(zip(kix, bix))).retag_({'KET': 'BRA'})
+        b = k.H.reindex_(dict(zip(kix, bix))).retag_({"KET": "BRA"})
         rho_tn = k | b
         rho_tn.fuse_multibonds_()
 
-        if get == 'tn':
+        if get == "tn":
             return rho_tn
 
         # contract boundaries largest dimension last
@@ -2262,22 +2316,24 @@ class PEPS3D(TensorNetwork3DVector, TensorNetwork3DFlat):
         imin, imax = min(ri), max(ri)
         jmin, jmax = min(rj), max(rj)
         kmin, kmax = min(rk), max(rk)
-        sequence = sorted([
-            ((imax - imin), ('xmin', 'xmax')),
-            ((jmax - jmin), ('ymin', 'ymax')),
-            ((kmax - kmin), ('zmin', 'zmax')),
-        ])
+        sequence = sorted(
+            [
+                ((imax - imin), ("xmin", "xmax")),
+                ((jmax - jmin), ("ymin", "ymax")),
+                ((kmax - kmin), ("zmin", "zmax")),
+            ]
+        )
         sequence = [x for s in sequence for x in s[1]]
 
         rho_t = rho_tn.contract_boundary(
             max_bond=max_bond,
             cutoff=cutoff,
             sequence=sequence,
-            layer_tags=None if flatten else ('KET', 'BRA'),
-            **contract_boundary_opts
+            layer_tags=None if flatten else ("KET", "BRA"),
+            **contract_boundary_opts,
         )
 
-        if symmetrized == 'auto':
+        if symmetrized == "auto":
             symmetrized = not flatten
 
         rho = rho_t.to_dense(kix, bix)
@@ -2299,12 +2355,12 @@ class PEPS3D(TensorNetwork3DVector, TensorNetwork3DFlat):
         canonize=True,
         flatten=False,
         normalized=True,
-        symmetrized='auto',
+        symmetrized="auto",
         envs=None,
         storage_factory=None,
         boundary_order=None,
-        contract_cell_optimize='auto-hq',
-        contract_cell_method='boundary',
+        contract_cell_optimize="auto-hq",
+        contract_cell_method="boundary",
         contract_cell_opts=None,
         get=None,
         **contract_boundary_opts,
@@ -2313,13 +2369,13 @@ class PEPS3D(TensorNetwork3DVector, TensorNetwork3DFlat):
 
         norm = self.make_norm()
 
-        contract_boundary_opts['max_bond'] = max_bond
-        contract_boundary_opts['cutoff'] = cutoff
-        contract_boundary_opts['canonize'] = canonize
-        contract_boundary_opts['layer_tags'] = (
-            None if flatten else ('KET', 'BRA')
+        contract_boundary_opts["max_bond"] = max_bond
+        contract_boundary_opts["cutoff"] = cutoff
+        contract_boundary_opts["canonize"] = canonize
+        contract_boundary_opts["layer_tags"] = (
+            None if flatten else ("KET", "BRA")
         )
-        if symmetrized == 'auto':
+        if symmetrized == "auto":
             symmetrized = not flatten
 
         # get minimal covering cell, allow single coordinate
@@ -2329,22 +2385,26 @@ class PEPS3D(TensorNetwork3DVector, TensorNetwork3DFlat):
 
         # get the environment surrounding the cell, allowing reuse via ``envs``
         (i, j, k), (x_bsz, y_bsz, z_bsz) = cell
-        key = (('x', i, x_bsz), ('y', j, y_bsz), ('z', k, z_bsz))
+        key = (("x", i, x_bsz), ("y", j, y_bsz), ("z", k, z_bsz))
         tn_cell = norm._maybe_compute_cell_env(
-            key=key, envs=envs, storage_factory=storage_factory,
-            boundary_order=boundary_order, **contract_boundary_opts)
+            key=key,
+            envs=envs,
+            storage_factory=storage_factory,
+            boundary_order=boundary_order,
+            **contract_boundary_opts,
+        )
 
         # cut the bonds between target norm sites to make density matrix
         tags = [tn_cell.site_tag(*site) for site in keep]
         kix = [f"k{i},{j},{k}" for i, j, k in keep]
         bix = [f"b{i},{j},{k}" for i, j, k in keep]
         for tag, ind_k, ind_b in zip(tags, kix, bix):
-            tn_cell.cut_between((tag, 'KET'), (tag, 'BRA'), ind_k, ind_b)
+            tn_cell.cut_between((tag, "KET"), (tag, "BRA"), ind_k, ind_b)
 
-        if get == 'tn':
+        if get == "tn":
             return tn_cell
 
-        if contract_cell_method == 'boundary':
+        if contract_cell_method == "boundary":
             # perform the contract to single tensor as boundary contraction
             # -> still likely far too expensive to contract exactly
             xmin, xmax = max(0, i - 1), min(i + x_bsz, self.Lx - 1)
@@ -2353,35 +2413,40 @@ class PEPS3D(TensorNetwork3DVector, TensorNetwork3DFlat):
 
             sequence = []
             if i > 0:
-                sequence.append('xmin')
+                sequence.append("xmin")
             if i < self.Lx - 1:
-                sequence.append('xmax')
+                sequence.append("xmax")
             if j > 0:
-                sequence.append('ymin')
+                sequence.append("ymin")
             if j < self.Ly - 1:
-                sequence.append('ymax')
+                sequence.append("ymax")
             if k > 0:
-                sequence.append('zmin')
+                sequence.append("zmin")
             if k < self.Lz - 1:
-                sequence.append('zmax')
+                sequence.append("zmax")
 
             # contract longest boundary first
-            scores = {'x': xmax - xmin, 'y': ymax - ymin, 'z': zmax - zmin}
+            scores = {"x": xmax - xmin, "y": ymax - ymin, "z": zmax - zmin}
             sequence.sort(key=lambda s: scores[s[0]], reverse=True)
 
             rho_tn = tn_cell.contract_boundary_(
-                xmin=xmin, xmax=xmax,
-                ymin=ymin, ymax=ymax,
-                zmin=zmin, zmax=zmax,
+                xmin=xmin,
+                xmax=xmax,
+                ymin=ymin,
+                ymax=ymax,
+                zmin=zmin,
+                zmax=zmax,
                 sequence=sequence,
                 optimize=contract_cell_optimize,
-                **contract_boundary_opts)
+                **contract_boundary_opts,
+            )
         else:
-            contract_cell_opts.setdefault('optimize', contract_cell_optimize)
-            contract_cell_opts.setdefault('max_bond', max_bond)
-            contract_cell_opts.setdefault('cutoff', cutoff)
+            contract_cell_opts.setdefault("optimize", contract_cell_optimize)
+            contract_cell_opts.setdefault("max_bond", max_bond)
+            contract_cell_opts.setdefault("cutoff", cutoff)
             rho_tn = tn_cell.contract_compressed_(
-                output_inds=kix + bix, **contract_cell_opts)
+                output_inds=kix + bix, **contract_cell_opts
+            )
 
         # turn into raw array
         rho = rho_tn.to_dense(kix, bix)
@@ -2403,12 +2468,12 @@ class PEPS3D(TensorNetwork3DVector, TensorNetwork3DFlat):
         canonize=True,
         flatten=False,
         normalized=True,
-        symmetrized='auto',
+        symmetrized="auto",
         return_all=False,
         envs=None,
         storage_factory=None,
         progbar=False,
-        **contract_boundary_opts
+        **contract_boundary_opts,
     ):
         if envs is None:
             if storage_factory is not None:
