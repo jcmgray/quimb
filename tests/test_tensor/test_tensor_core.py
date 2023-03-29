@@ -917,9 +917,11 @@ class TestTensorNetwork:
         for tag, names in d2.tag_map.items():
             assert d.tag_map[tag] == names
 
+        assert isinstance(d >> ["red", "green", "blue"], Tensor)
+
         # test inplace
         d >>= ["red", "green", "blue"]
-        assert isinstance(d, Tensor)
+        assert isinstance(d, TensorNetwork)
 
     def test_contract_with_slices(self):
         a = rand_tensor((2, 3, 4), inds=[0, 1, 2], tags="I0")
