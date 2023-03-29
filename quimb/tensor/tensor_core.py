@@ -128,6 +128,15 @@ def _inds_to_eq(inputs, output):
 _VALID_CONTRACT_GET = {None, 'expression', 'path', 'path-info', 'symbol-map'}
 
 
+def maybe_realify_scalar(data):
+    """If ``data`` is a numpy array, check if its complex with small imaginary
+    part, and if so return only the real part, otherwise do nothing.
+    """
+    if isinstance(data, np.ndarray):
+        data = realify_scalar(data.item())
+    return data
+
+
 def tensor_contract(
     *tensors,
     output_inds=None,
@@ -243,9 +252,7 @@ def tensor_contract(
     data_out = expression(*arrays, backend=backend)
 
     if not inds_out and not preserve_tensor:
-        if isinstance(data_out, np.ndarray):
-            data_out = realify_scalar(data_out.item())
-        return data_out
+        return maybe_realify_scalar(data_out)
 
     # union of all tags
     tags_out = oset_union(t.tags for t in tensors)
@@ -1087,20 +1094,58 @@ def get_tags(ts):
     return oset_union(t.tags for t in ts)
 
 
-def maybe_unwrap(t, preserve_tensor=False, equalize_norms=False):
+def maybe_unwrap(
+    t,
+    preserve_tensor_network=False,
+    preserve_tensor=False,
+    equalize_norms=False,
+    output_inds=None,
+):
     """Maybe unwrap a ``TensorNetwork`` or ``Tensor`` into a ``Tensor`` or
-    scalar, depending on how many tensors and indices it has.
+    scalar, depending on how many tensors and indices it has, optionally
+    handling accrued exponent normalization and output index ordering (if a
+    tensor).
+
+    Parameters
+    ----------
+    t : Tensor or TensorNetwork
+        The tensor or tensor network to unwrap.
+    preserve_tensor_network : bool, optional
+        If ``True``, then don't unwrap a ``TensorNetwork`` to a ``Tensor`` even
+        if it has only one tensor.
+    preserve_tensor : bool, optional
+        If ``True``, then don't unwrap a ``Tensor`` to a scalar even if it has
+        no indices.
+    equalize_norms : bool, optional
+        If ``True``, then equalize the norms of all tensors in the tensor
+        network before unwrapping.
+    output_inds : sequence of str, optional
+        If unwrapping a tensor, then transpose it to the specified indices.
+
+    Returns
+    -------
+    TensorNetwork, Tensor or Number
     """
     if isinstance(t, TensorNetwork):
         if equalize_norms is True:
             # this also redistributes the any collected norm exponent
             t.equalize_norms_()
-        if t.num_tensors != 1:
+
+        if preserve_tensor_network or (t.num_tensors != 1):
             return t
+
+        # else get the single tensor
         t, = t.tensor_map.values()
+
+    if output_inds is not None and t.inds != output_inds:
+        t.transpose_(*output_inds)
+
     if preserve_tensor or t.ndim != 0:
+        # return as a tensor
         return t
-    return t.data
+
+    # else return as a scalar, maybe dropping imaginary part
+    return maybe_realify_scalar(t.data)
 
 
 def tensor_network_distance(
@@ -6459,6 +6504,7 @@ class TensorNetwork(object):
         seq,
         max_bond=None,
         cutoff=1e-10,
+        output_inds=None,
         tree_gauge_distance=1,
         canonize_distance=None,
         canonize_opts=None,
@@ -6481,7 +6527,10 @@ class TensorNetwork(object):
         callback=None,
         preserve_tensor=False,
         progbar=False,
+        inplace=False,
     ):
+        tn = self if inplace else self.copy()
+
         if canonize_distance is None:
             canonize_distance = tree_gauge_distance
         if canonize_after_distance is None:
@@ -6494,14 +6543,14 @@ class TensorNetwork(object):
         if gauges is True:
             gauges = {}
             if gauge_boundary_only:
-                data_like = next(iter(self.tensor_map.values())).data
+                data_like = next(iter(tn.tensor_map.values())).data
                 gauges = {
-                    ix: do("ones", (self.ind_size(ix),),
+                    ix: do("ones", (tn.ind_size(ix),),
                            dtype=data_like.dtype, like=data_like)
-                    for ix in self.inner_inds()
+                    for ix in tn.inner_inds()
                 }
             else:
-                self.gauge_all_simple_(
+                tn.gauge_all_simple_(
                     gauges=gauges, equalize_norms=equalize_norms
                 )
 
@@ -6513,10 +6562,10 @@ class TensorNetwork(object):
             ``tid1`` and ``tid2``.
             """
             if callback_pre_contract is not None:
-                callback_pre_contract(self, (tid1, tid2))
+                callback_pre_contract(tn, (tid1, tid2))
 
             # new tensor is now at ``tid2``
-            self._contract_between_tids(
+            tn._contract_between_tids(
                 tid1, tid2, equalize_norms=equalize_norms, gauges=gauges,
             )
 
@@ -6524,9 +6573,9 @@ class TensorNetwork(object):
             boundary.add(tid2)
 
             if callback_post_contract is not None:
-                callback_post_contract(self, tid2)
+                callback_post_contract(tn, tid2)
 
-            return tid2, self.tensor_map[tid2]
+            return tid2, tn.tensor_map[tid2]
 
         # keep track of pairs along the tree - often no point compressing these
         #     (potentially, on some complex graphs, one needs to compress)
@@ -6555,14 +6604,14 @@ class TensorNetwork(object):
 
             if (
                 (not compress_matrices) and
-                (len(self._get_neighbor_tids([tid1])) <= 2) and
-                (len(self._get_neighbor_tids([tid1])) <= 2)
+                (len(tn._get_neighbor_tids([tid1])) <= 2) and
+                (len(tn._get_neighbor_tids([tid1])) <= 2)
             ):
                 # both are effectively matrices
                 return True
 
             if compress_min_size is not None:
-                t1, t2 = self._tids_get(tid1, tid2)
+                t1, t2 = tn._tids_get(tid1, tid2)
                 new_size = t1.size * t2.size
                 for ind in t1.bonds(t2):
                     new_size //= t1.ind_size(ind)
@@ -6615,10 +6664,10 @@ class TensorNetwork(object):
                 # skip compression
                 return
 
-            for tid_neighb in self._get_neighbor_tids(tid):
+            for tid_neighb in tn._get_neighbor_tids(tid):
 
                 # first just check for accumulation of small multi-bonds
-                t_neighb = self.tensor_map[tid_neighb]
+                t_neighb = tn.tensor_map[tid_neighb]
                 tensor_fuse_squeeze(t, t_neighb, gauges=gauges)
 
                 if _should_skip_compression(tid, tid_neighb):
@@ -6627,9 +6676,9 @@ class TensorNetwork(object):
                 # check for compressing large shared (multi) bonds
                 if (chi is None) or bonds_size(t, t_neighb) > chi:
                     if callback_pre_compress is not None:
-                        callback_pre_compress(self, (tid, tid_neighb))
+                        callback_pre_compress(tn, (tid, tid_neighb))
 
-                    self._compress_between_tids(
+                    tn._compress_between_tids(
                         tid,
                         tid_neighb,
                         max_bond=chi,
@@ -6645,7 +6694,7 @@ class TensorNetwork(object):
                     )
 
                     if callback_post_compress is not None:
-                        callback_post_compress(self, (tid, tid_neighb))
+                        callback_post_compress(tn, (tid, tid_neighb))
 
         num_contractions = len(seq)
 
@@ -6674,7 +6723,7 @@ class TensorNetwork(object):
 
             if compress_late:
                 # we compress just before we have to contract involved tensors
-                t1, t2 = self._tids_get(tid1, tid2)
+                t1, t2 = tn._tids_get(tid1, tid2)
                 _compress_neighbors(tid1, t1, d)
                 _compress_neighbors(tid2, t2, d)
 
@@ -6692,18 +6741,20 @@ class TensorNetwork(object):
                 _compress_neighbors(tid_new, t_new, d)
 
             if callback is not None:
-                callback(self, tid_new)
+                callback(tn, tid_new)
 
         if progbar:
             pbar.close()
 
         if gauges:
-            self.gauge_simple_insert(gauges, remove=True)
+            tn.gauge_simple_insert(gauges, remove=True)
 
         return maybe_unwrap(
-            self,
+            tn,
+            preserve_tensor_network=inplace,
             preserve_tensor=preserve_tensor,
             equalize_norms=equalize_norms,
+            output_inds=output_inds,
         )
 
     def _contract_around_tids(
@@ -6716,18 +6767,15 @@ class TensorNetwork(object):
         max_bond=None,
         cutoff=1e-10,
         canonize_opts=None,
-        inplace=True,
         **kwargs,
     ):
         """Contract around ``tids``, by following a greedily generated
         spanning tree, and compressing whenever two tensors in the outer
         'boundary' share more than one index.
         """
-        tn = self if inplace else self.copy()
-
         if seq is None:
             span_opts = ensure_dict(span_opts)
-            seq = tn.get_tree_span(
+            seq = self.get_tree_span(
                 tids,
                 min_distance=min_distance,
                 max_distance=max_distance,
@@ -6738,12 +6786,13 @@ class TensorNetwork(object):
             canonize_opts.get('exclude', ()), tids
         ))
 
-        return tn._contract_compressed_tid_sequence(
+        return self._contract_compressed_tid_sequence(
             seq,
             max_bond=max_bond,
             cutoff=cutoff,
             compress_exclude=tids,
-            **kwargs)
+            **kwargs
+        )
 
     def compute_centralities(self):
         import cotengra as ctg
@@ -6869,15 +6918,12 @@ class TensorNetwork(object):
         callback_post_compress=None,
         callback=None,
         progbar=False,
-        inplace=False,
         **kwargs
     ):
-        tn = self if inplace else self.copy()
-
-        path = tn.contraction_path(optimize, output_inds=output_inds)
+        path = self.contraction_path(optimize, output_inds=output_inds)
 
         # generate the list of merges (tid1 -> tid2)
-        tids = list(tn.tensor_map)
+        tids = list(self.tensor_map)
         seq = []
         for i, j in path:
             if i > j:
@@ -6889,10 +6935,11 @@ class TensorNetwork(object):
 
             seq.append((tid1, tid2))
 
-        t = tn._contract_compressed_tid_sequence(
+        return self._contract_compressed_tid_sequence(
             seq=seq,
             max_bond=max_bond,
             cutoff=cutoff,
+            output_inds=output_inds,
             tree_gauge_distance=tree_gauge_distance,
             canonize_distance=canonize_distance,
             canonize_opts=canonize_opts,
@@ -6916,12 +6963,6 @@ class TensorNetwork(object):
             progbar=progbar,
             **kwargs
         )
-
-        if output_inds and t.inds != output_inds:
-            # ensure output ordering of indices
-            t.transpose_(*output_inds)
-
-        return t
 
     contract_compressed_ = functools.partialmethod(
         contract_compressed, inplace=True)
@@ -7134,7 +7175,7 @@ class TensorNetwork(object):
         backend=None,
         preserve_tensor=False,
         inplace=False,
-        **opts
+        **contract_opts
     ):
         """Contract the tensors that match any or all of ``tags``.
 
@@ -7185,7 +7226,7 @@ class TensorNetwork(object):
             is a scalar (has no indices) or not.
         inplace : bool, optional
             Whether to perform the contraction inplace.
-        opts
+        contract_opts
             Passed to :func:`~quimb.tensor.tensor_core.tensor_contract`.
 
         Returns
@@ -7199,20 +7240,35 @@ class TensorNetwork(object):
         contract, contract_cumulative
         """
         untagged_tn, tagged_ts = self.partition_tensors(
-            tags, inplace=inplace, which=which)
-
-        contracting_all = untagged_tn is None
-        if not tagged_ts:
-            raise ValueError("No tags were found - nothing to contract. "
-                             "(Change this to a no-op maybe?)")
-
-        contracted = tensor_contract(
-            *tagged_ts, output_inds=output_inds,
-            optimize=optimize, get=get, backend=backend,
-            preserve_tensor=preserve_tensor or (not contracting_all), **opts
+            tags, inplace=inplace, which=which
         )
 
-        if contracting_all:
+        if not tagged_ts:
+            raise ValueError(
+                "No tags were found - nothing to contract. "
+                "(Change this to a no-op maybe?)"
+            )
+
+        # whether we should let tensor_contract return a raw scalar
+        preserve_tensor = (
+            preserve_tensor or
+            inplace or
+            (untagged_tn.num_tensors >= 1)
+        )
+
+        contracted = tensor_contract(
+            *tagged_ts,
+            output_inds=output_inds,
+            optimize=optimize,
+            get=get,
+            backend=backend,
+            preserve_tensor=preserve_tensor,
+            **contract_opts
+        )
+
+        if (untagged_tn.num_tensors == 0) and (not inplace):
+            # contracted all down to single tensor or scalar -> return it
+            # (apart from if inplace -> we want to keep the tensor network)
             return contracted
 
         untagged_tn.add_tensor(contracted, virtual=True)
@@ -7324,10 +7380,10 @@ class TensorNetwork(object):
                 return self.contract_structured(tags, inplace=inplace, **opts)
 
         # contracting everything to single output
-        if all_tags:
+        if all_tags and not inplace:
             return tensor_contract(*self.tensor_map.values(), **opts)
 
-        # else just contract those tensors specified by tags.
+        # contract some or all tensors, but keeping tensor network
         return self.contract_tags(tags, inplace=inplace, **opts)
 
     contract_ = functools.partialmethod(contract, inplace=True)
@@ -7336,6 +7392,8 @@ class TensorNetwork(object):
         self,
         tags_seq,
         output_inds=None,
+        preserve_tensor=False,
+        equalize_norms=False,
         inplace=False,
         **opts
     ):
@@ -7352,6 +7410,9 @@ class TensorNetwork(object):
             The indices to specify as outputs of the contraction. If not given,
             and the tensor network has no hyper-indices, these are computed
             automatically as every index appearing once.
+        preserve_tensor : bool, optional
+            Whether to return a tensor regardless of whether the output object
+            is a scalar (has no indices) or not.
         inplace : bool, optional
             Whether to perform the contraction inplace.
         opts
@@ -7375,16 +7436,19 @@ class TensorNetwork(object):
             c_tags |= tags_to_oset(tags)
 
             # peform the next contraction
-            tn = tn.contract_tags(c_tags, inplace=True, which='any', **opts)
+            tn.contract_tags_(c_tags, which='any', **opts)
 
-            if not isinstance(tn, TensorNetwork):
+            if tn.num_tensors == 1:
                 # nothing more to contract
                 break
 
-        if isinstance(tn, Tensor) and output_inds is not None:
-            tn.transpose_(*output_inds)
-
-        return tn
+        return maybe_unwrap(
+            tn,
+            preserve_tensor_network=inplace,
+            preserve_tensor=preserve_tensor,
+            equalize_norms=equalize_norms,
+            output_inds=output_inds,
+        )
 
     def contraction_path(self, optimize=None, **contract_opts):
         """Compute the contraction path, a sequence of (int, int), for

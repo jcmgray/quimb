@@ -6,11 +6,11 @@ import itertools
 from operator import add
 from numbers import Integral
 from collections import defaultdict
-from itertools import product, cycle, combinations
+from itertools import product, combinations
 
 from autoray import do, dag
 
-from ..utils import check_opt, ensure_dict
+from ..utils import check_opt, ensure_dict, pairwise
 from ..utils import progbar as Progbar
 from ..gen.rand import randn, seed_rand
 from . import array_ops as ops
@@ -20,7 +20,6 @@ from .tensor_core import (
     rand_uuid,
     tags_to_oset,
     Tensor,
-    TensorNetwork,
 )
 from .tensor_arbgeom import (
     TensorNetworkGen,
@@ -358,6 +357,22 @@ _compress_plane_opts = {
         'stepping_order': 'yx',
     },
 }
+
+BOUNDARY_SEQUENCE_MAP = {
+    "xmin": "xmin",
+    "xmax": "xmax",
+    "ymin": "ymin",
+    "ymax": "ymax",
+    "zmin": "zmin",
+    "zmax": "zmax",
+}
+
+
+def parse_boundary_sequence(sequence):
+    if isinstance(sequence, str):
+        if sequence in BOUNDARY_SEQUENCE_MAP:
+            return (sequence,)
+    return tuple(BOUNDARY_SEQUENCE_MAP[s] for s in sequence)
 
 
 class TensorNetwork3D(TensorNetworkGen):
@@ -914,13 +929,130 @@ class TensorNetwork3D(TensorNetworkGen):
                             **_compress_plane_opts[from_which]
                         )
 
-    def contract_boundary(
+    def _contract_boundary_projector(
         self,
+        xrange,
+        yrange,
+        zrange,
+        from_which,
+        max_bond=None,
+        cutoff=1e-10,
+        canonize=False,
+        layer_tags=None,
+        lazy=False,
+        equalize_norms=False,
+        optimize="auto-hq",
+        compress_opts=None,
+        canonize_opts=None,
+    ):
+        compress_opts = ensure_dict(compress_opts)
+
+        r = Rotator3D(self, xrange, yrange, zrange, from_which)
+
+        if canonize:
+            canonize_opts = ensure_dict(canonize_opts)
+            canonize_opts.setdefault("max_iterations", 2)
+            self.select(r.x_tag(r.sweep[0])).gauge_all_(**canonize_opts)
+
+        sweep_other = tuple(itertools.product(
+            range(r.jmin, r.jmax + 1),
+            range(r.kmin, r.kmax + 1)
+        ))
+
+        for i0, i1 in pairwise(r.sweep):
+
+            # we compute the projectors from an untouched copy
+            tn_calc = self.copy()
+
+            for j, k in sweep_other:
+
+                tag_ijk = r.site_tag(i0, j, k)
+                tag_ip1jk = r.site_tag(i1, j, k)
+                rtags = (tag_ijk, tag_ip1jk)
+
+                poss_ltags = []
+                if j != r.jmin:
+                    poss_ltags.append(
+                        (r.site_tag(i0, j - 1, k), r.site_tag(i1, j - 1, k))
+                    )
+                if k != r.kmin:
+                    poss_ltags.append(
+                        (r.site_tag(i0, j, k - 1), r.site_tag(i1, j, k - 1))
+                    )
+
+                for ltags in poss_ltags:
+                    tn_calc.insert_compressor_between_regions(
+                        ltags,
+                        rtags,
+                        new_ltags=ltags,
+                        new_rtags=rtags,
+                        insert_into=self,
+                        max_bond=max_bond,
+                        cutoff=cutoff,
+                        **compress_opts,
+                    )
+
+            if not lazy:
+                # contract each pair of boundary tensors with their projectors
+                for j, k in sweep_other:
+                    self.contract_tags_(
+                        (r.site_tag(i0, j, k), r.site_tag(i1, j, k)),
+                        optimize=optimize,
+                    )
+
+            if equalize_norms:
+                for t in self.select_tensors(r.x_tag(i1)):
+                    self.strip_exponent(t, equalize_norms)
+
+    def contract_boundary_from(
+        self,
+        xrange,
+        yrange,
+        zrange,
+        from_which,
         max_bond=None,
         *,
         cutoff=1e-10,
-        canonize=True,
-        max_separation=1,
+        mode='peps',
+        equalize_norms=False,
+        compress_opts=None,
+        canonize_opts=None,
+        inplace=False,
+        **contract_boundary_opts,
+    ):
+        """Unified entrypoint for contracting any rectangular patch of tensors
+        from any direction, with any boundary method.
+        """
+        check_opt('mode', mode, ('peps', 'projector'))
+
+        tn = self if inplace else self.copy()
+
+        # universal options
+        contract_boundary_opts["xrange"] = xrange
+        contract_boundary_opts["yrange"] = yrange
+        contract_boundary_opts["zrange"] = zrange
+        contract_boundary_opts["from_which"] = from_which
+        contract_boundary_opts["max_bond"] = max_bond
+        contract_boundary_opts["cutoff"] = cutoff
+        contract_boundary_opts["equalize_norms"] = equalize_norms
+        contract_boundary_opts["compress_opts"] = compress_opts
+
+        if mode == 'projector':
+            return tn._contract_boundary_projector(**contract_boundary_opts)
+
+        # mode == 'peps' options
+        return tn._contract_boundary_core(
+            canonize_opts=canonize_opts,
+            **contract_boundary_opts,
+        )
+
+    contract_boundary_from_ = functools.partialmethod(
+        contract_boundary_from, inplace=True)
+
+    def _contract_interleaved_boundary_sequence(
+        self,
+        *,
+        contract_boundary_opts=None,
         sequence=None,
         xmin=None,
         xmax=None,
@@ -928,23 +1060,34 @@ class TensorNetwork3D(TensorNetworkGen):
         ymax=None,
         zmin=None,
         zmax=None,
-        optimize='auto-hq',
+        max_separation=1,
+        max_unfinished=1,
+        around=None,
         equalize_norms=False,
-        compress_opts=None,
+        canonize=False,
+        canonize_opts=None,
+        final_contract=True,
+        final_contract_opts=None,
+        progbar=False,
         inplace=False,
-        **contract_boundary_opts,
     ):
-        """
+        """Unified handler for performing iterleaved contractions in a
+        sequence of inwards boundary directions.
         """
         tn = self if inplace else self.copy()
 
-        contract_boundary_opts['max_bond'] = max_bond
-        # contract_boundary_opts['mode'] = mode
-        contract_boundary_opts['cutoff'] = cutoff
-        contract_boundary_opts['canonize'] = canonize
-        # contract_boundary_opts['layer_tags'] = layer_tags
-        contract_boundary_opts['compress_opts'] = compress_opts
-        contract_boundary_opts['equalize_norms'] = equalize_norms
+        contract_boundary_opts = ensure_dict(contract_boundary_opts)
+        if canonize:
+            canonize_opts = ensure_dict(canonize_opts)
+            canonize_opts.setdefault("max_iterations", 2)
+
+        if progbar:
+            pbar = Progbar()
+            pbar.set_description(
+                f"contracting boundary, Lx={tn.Lx}, Ly={tn.Ly}, Lz={tn.Lz}"
+            )
+        else:
+            pbar = None
 
         # set default starting borders
         if any(d is None for d in (xmin, xmax, ymin, ymax, zmin, zmax)):
@@ -954,78 +1097,199 @@ class TensorNetwork3D(TensorNetworkGen):
                 (auto_zmin, auto_zmax),
             ) = self.get_ranges_present()
 
-        if xmin is None:
-            xmin = auto_xmin
-        if xmax is None:
-            xmax = auto_xmax
-        if ymin is None:
-            ymin = auto_ymin
-        if ymax is None:
-            ymax = auto_ymax
-        if zmin is None:
-            zmin = auto_zmin
-        if zmax is None:
-            zmax = auto_zmax
+        # location of current boundaries
+        boundaries = {
+            "xmin": auto_xmin if xmin is None else xmin,
+            "xmax": auto_xmax if xmax is None else xmax,
+            "ymin": auto_ymin if ymin is None else ymin,
+            "ymax": auto_ymax if ymax is None else ymax,
+            "zmin": auto_zmin if zmin is None else zmin,
+            "zmax": auto_zmax if zmax is None else zmax,
+        }
+        separations = {
+            d: boundaries[f"{d}max"] - boundaries[f"{d}min"] for d in "xyz"
+        }
+        boundary_tags = {
+            "xmin": tn.x_tag(boundaries["xmin"]),
+            "xmax": tn.x_tag(boundaries["xmax"]),
+            "ymin": tn.y_tag(boundaries["ymin"]),
+            "ymax": tn.y_tag(boundaries["ymax"]),
+            "zmin": tn.z_tag(boundaries["zmin"]),
+            "zmax": tn.z_tag(boundaries["zmax"]),
+        }
+        if around is not None:
+            target_xmin = min(x[0] for x in around)
+            target_xmax = max(x[0] for x in around)
+            target_ymin = min(x[1] for x in around)
+            target_ymax = max(x[1] for x in around)
+            target_zmin = min(x[2] for x in around)
+            target_zmax = max(x[2] for x in around)
+            target_check = {
+                'xmin': lambda x: x >= target_xmin - 1,
+                'xmax': lambda x: x <= target_xmax + 1,
+                'ymin': lambda y: y >= target_ymin - 1,
+                'ymax': lambda y: y <= target_ymax + 1,
+                'zmin': lambda z: z >= target_zmin - 1,
+                'zmax': lambda z: z <= target_zmax + 1,
+            }
 
         if sequence is None:
-            sequence = ['xmin', 'xmax', 'ymin', 'ymax', 'zmin', 'zmax']
+            sequence = ("xmin", "xmax", "ymin", "ymax", "zmin", "zmax")
+        else:
+            sequence = parse_boundary_sequence(sequence)
 
-        finished = {'x': abs(xmax - xmin) <= max_separation,
-                    'y': abs(ymax - ymin) <= max_separation,
-                    'z': abs(zmax - zmin) <= max_separation}
+        def _is_finished(direction):
+            return (
+                # two opposing sides have got sufficiently close
+                (separations[direction[0]] <= max_separation) or
+                (
+                    # there is a target region
+                    (around is not None) and
+                    # and we have reached it
+                    target_check[direction](boundaries[direction])
+                )
+            )
 
-        for direction in cycle(sequence):
-
-            if sum(finished.values()) >= 2:
-                # have reached 'tube' we should contract exactly
-
-                if equalize_norms is True:
-                    tn.equalize_norms_()
-
-                return tn.contract_(..., optimize=optimize)
-
-            xyz, minmax = direction[0], direction[1:]
-            if finished[xyz]:
-                # we have already finished this direction
+        sequence = [d for d in sequence if not _is_finished(d)]
+        while sequence:
+            direction = sequence.pop(0)
+            if _is_finished(direction):
+                # just remove direction from sequence
                 continue
+            # do a contraction, and keep direction in sequence to try again
+            sequence.append(direction)
 
-            # prepare the sub-cube we will contract and compress
-            if xyz == 'x':
-                if minmax == 'min':
-                    xrange = (xmin, xmin + 1)
-                    xmin += 1
-                elif minmax == 'max':
-                    xrange = (xmax - 1, xmax)
-                    xmax -= 1
-                finished['x'] = abs(xmax - xmin) <= max_separation
+            if pbar is not None:
+                pbar.set_description(
+                    f"contracting {direction}, "
+                    f"Lx={separations['x'] + 1}, "
+                    f"Ly={separations['y'] + 1}, "
+                    f"Lz={separations['z'] + 1}"
+                )
+
+            if canonize:
+                tn.select(boundary_tags[direction]).gauge_all_(**canonize_opts)
+
+            if direction[0] == "x":
+                if direction[1:] == "min":
+                    xrange = (boundaries["xmin"], boundaries["xmin"] + 1)
+                else:  # xmax
+                    xrange = (boundaries["xmax"] - 1, boundaries["xmax"])
+                yrange = (boundaries["ymin"], boundaries["ymax"])
+                zrange = (boundaries["zmin"], boundaries["zmax"])
+            elif direction[0] == "y":
+                if direction[1:] == "min":
+                    yrange = (boundaries["ymin"], boundaries["ymin"] + 1)
+                else:  # ymax
+                    yrange = (boundaries["ymax"] - 1, boundaries["ymax"])
+                xrange = (boundaries["xmin"], boundaries["xmax"])
+                zrange = (boundaries["zmin"], boundaries["zmax"])
+            else:  # z
+                if direction[1:] == "min":
+                    zrange = (boundaries["zmin"], boundaries["zmin"] + 1)
+                else:  # zmax
+                    zrange = (boundaries["zmax"] - 1, boundaries["zmax"])
+                xrange = (boundaries["xmin"], boundaries["xmax"])
+                yrange = (boundaries["ymin"], boundaries["ymax"])
+
+            # do the contractions!
+            tn.contract_boundary_from_(
+                xrange=xrange,
+                yrange=yrange,
+                zrange=zrange,
+                from_which=direction,
+                equalize_norms=equalize_norms,
+                **contract_boundary_opts,
+            )
+
+            # update the boundaries and separations
+            xyz, minmax = direction[0], direction[1:]
+            separations[xyz] -= 1
+            if minmax == "min":
+                boundaries[direction] += 1
             else:
-                xrange = (xmin, xmax)
+                boundaries[direction] -= 1
 
-            if xyz == 'y':
-                if minmax == 'min':
-                    yrange = (ymin, ymin + 1)
-                    ymin += 1
-                elif minmax == 'max':
-                    yrange = (ymax - 1, ymax)
-                    ymax -= 1
-                finished['y'] = abs(ymax - ymin) <= max_separation
-            else:
-                yrange = (ymin, ymax)
+            if pbar is not None:
+                pbar.update()
 
-            if xyz == 'z':
-                if minmax == 'min':
-                    zrange = (zmin, zmin + 1)
-                    zmin += 1
-                elif minmax == 'max':
-                    zrange = (zmax - 1, zmax)
-                    zmax -= 1
-                finished['z'] = abs(zmax - zmin) <= max_separation
-            else:
-                zrange = (zmin, zmax)
+            # check if enough directions are finished -> reached max separation
+            if sum(
+                separations[d] > max_separation for d in "xyz"
+            ) <= max_unfinished:
+                break
 
-            tn._contract_boundary_core(
-                xrange=xrange, yrange=yrange, zrange=zrange,
-                from_which=direction, **contract_boundary_opts)
+        if equalize_norms is True:
+            tn.equalize_norms_()
+
+        if pbar is not None:
+            pbar.set_description(
+                f"contracted boundary, "
+                f"Lx={separations['x'] + 1}, "
+                f"Ly={separations['y'] + 1}, "
+                f"Lz={separations['z'] + 1}"
+            )
+            pbar.close()
+
+        if final_contract and (around is None):
+            final_contract_opts = ensure_dict(final_contract_opts)
+            final_contract_opts.setdefault("optimize", "auto-hq")
+            final_contract_opts.setdefault("inplace", inplace)
+            return tn.contract(**final_contract_opts)
+
+        return tn
+
+    def contract_boundary(
+        self,
+        max_bond=None,
+        *,
+        cutoff=1e-10,
+        mode='peps',
+        canonize=True,
+        compress_opts=None,
+        sequence=None,
+        xmin=None,
+        xmax=None,
+        ymin=None,
+        ymax=None,
+        zmin=None,
+        zmax=None,
+        max_separation=1,
+        max_unfinished=1,
+        around=None,
+        equalize_norms=False,
+        final_contract=True,
+        final_contract_opts=None,
+        progbar=False,
+        inplace=False,
+        **contract_boundary_opts,
+    ):
+        """
+        """
+        contract_boundary_opts['max_bond'] = max_bond
+        contract_boundary_opts['cutoff'] = cutoff
+        contract_boundary_opts['mode'] = mode
+        contract_boundary_opts['canonize'] = canonize
+        contract_boundary_opts['compress_opts'] = compress_opts
+
+        return self._contract_interleaved_boundary_sequence(
+            contract_boundary_opts=contract_boundary_opts,
+            sequence=sequence,
+            xmin=xmin,
+            xmax=xmax,
+            ymin=ymin,
+            ymax=ymax,
+            zmin=zmin,
+            zmax=zmax,
+            max_separation=max_separation,
+            max_unfinished=max_unfinished,
+            around=around,
+            equalize_norms=equalize_norms,
+            final_contract=final_contract,
+            final_contract_opts=final_contract_opts,
+            progbar=progbar,
+            inplace=inplace,
+        )
 
     contract_boundary_ = functools.partialmethod(
         contract_boundary, inplace=True)
@@ -1063,7 +1327,7 @@ class TensorNetwork3D(TensorNetworkGen):
 
         for i in r3d.sweep[:-2]:
             # contract the boundary in one step
-            tn._contract_boundary_core(
+            tn.contract_boundary_from_(
                 xrange=xrange if plane != 'x' else (i, i + istep),
                 yrange=yrange if plane != 'y' else (i, i + istep),
                 zrange=zrange if plane != 'z' else (i, i + istep),
@@ -1296,9 +1560,16 @@ class TensorNetwork3D(TensorNetworkGen):
         self,
         max_bond=None,
         cutoff=1e-10,
-        directions=("x", "y", "z"),
+        canonize=False,
+        canonize_opts=None,
+        sequence=("x", "y", "z"),
+        max_separation=1,
+        max_unfinished=1,
         lazy=False,
         equalize_norms=False,
+        final_contract=True,
+        final_contract_opts=None,
+        progbar=False,
         inplace=False,
         **coarse_grain_opts
     ):
@@ -1306,8 +1577,8 @@ class TensorNetwork3D(TensorNetworkGen):
         See https://arxiv.org/abs/1201.1144v4 and
         https://arxiv.org/abs/1905.02351 for the more optimal computaton of the
         projectors used here. The TN is contracted sequentially in
-        ``directions`` by inserting oblique projectors between tensor pairs,
-        and then optionally contracting these new effective sites. The
+        ``sequence`` directions by inserting oblique projectors between tensor
+        pairs, and then optionally contracting these new effective sites. The
         algorithm stops when only one direction has a length larger than 2, and
         thus exact contraction can be used.
 
@@ -1317,15 +1588,28 @@ class TensorNetwork3D(TensorNetworkGen):
             The maximum bond dimension of the projector pairs inserted.
         cutoff : float, optional
             The cutoff for the singular values of the projector pairs.
-        directions : tuple of str, optional
+        sequence : tuple of str, optional
             The directions to contract in.  Default is to contract in all
             directions.
+        max_separation : int, optional
+            The maximum distance between sides (i.e. length - 1) of the tensor
+            network before that direction is considered finished.
+        max_unfinished : int, optional
+            The maximum number of directions that can be unfinished (i.e. are
+            still longer than max_separation + 1) before the coarse graining
+            terminates.
         lazy : bool, optional
             Whether to contract the coarse graining projectors or leave them
             in the tensor network lazily. Default is to contract them.
         equalize_norms : bool or float, optional
             Whether to equalize the norms of the tensors in the tensor network
             after each coarse graining step.
+        final_contract : bool, optional
+            Whether to exactly contract the remaining tensor network after the
+            coarse graining contractions.
+        final_contract_opts : None or dict, optional
+            Options to pass to :meth:`contract`, ``optimize`` defaults to
+            ``'auto-hq'``.
         inplace : bool, optional
             Whether to perform the coarse graining in place.
         coarse_grain_opts
@@ -1343,10 +1627,43 @@ class TensorNetwork3D(TensorNetworkGen):
         """
         tn = self if inplace else self.copy()
 
-        # contract until only a single length is non-1D, (i.e. L>2 )
-        directions = [d for d in directions if getattr(tn, "L" + d) > 2]
-        while len(directions) > 1:
-            direction = directions.pop(0)
+        if lazy:
+            # we are implicitly asking for the tensor network
+            final_contract = False
+
+        if canonize:
+            canonize_opts = ensure_dict(canonize_opts)
+            canonize_opts.setdefault("max_iterations", 2)
+
+        if progbar:
+            pbar = Progbar(
+                desc=f"contracting HOTRG, Lx={tn.Lx}, Ly={tn.Ly}, Lz={tn.Lz}"
+            )
+        else:
+            pbar = None
+
+        def _is_finished(direction):
+            return getattr(tn, "L" + direction) <= max_separation + 1
+
+        sequence = [d for d in sequence if not _is_finished(d)]
+        while sequence:
+            direction = sequence.pop(0)
+            if _is_finished(direction):
+                # just remove direction from sequence
+                continue
+            # do a contraction, and keep direction in sequence to try again
+            sequence.append(direction)
+
+            if pbar is not None:
+                pbar.set_description(
+                    f"contracting {direction}, "
+                    f"Lx={tn.Lx}, Ly={tn.Ly}, Lz={tn.Lz}"
+                )
+
+            if canonize:
+                tn.gauge_all_(**canonize_opts)
+
+            # do the contractions!
             tn.coarse_grain_hotrg_(
                 direction=direction,
                 max_bond=max_bond,
@@ -1355,10 +1672,34 @@ class TensorNetwork3D(TensorNetworkGen):
                 equalize_norms=equalize_norms,
                 **coarse_grain_opts
             )
-            if getattr(tn, "L" + direction) > 2:
-                directions.append(direction)
+
+            if pbar is not None:
+                pbar.update()
+
+            # check if enough directions are finished -> reached max separation
+            if sum(not _is_finished(d) for d in "xyz") <= max_unfinished:
+                break
+
+        if equalize_norms is True:
+            # redistribute the exponent equally among all tensors
+            tn.equalize_norms_()
+
+        if pbar is not None:
+            pbar.set_description(
+                f"contracted HOTRG, "
+                f"Lx={tn.Lx}, Ly={tn.Ly}, Lz={tn.Lz}"
+            )
+            pbar.close()
+
+        if final_contract:
+            final_contract_opts = ensure_dict(final_contract_opts)
+            final_contract_opts.setdefault("optimize", "auto-hq")
+            final_contract_opts.setdefault("inplace", inplace)
+            return tn.contract(**final_contract_opts)
 
         return tn
+
+    contract_hotrg_ = functools.partialmethod(contract_hotrg, inplace=True)
 
 
 def is_lone_coo(where):

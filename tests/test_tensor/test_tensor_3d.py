@@ -17,6 +17,18 @@ class Test3DManualContract:
         f = -qu.log(Z) / (L**3 * beta)
         assert f == pytest.approx(fex, rel=1e-3)
 
+    @pytest.mark.parametrize('dims', [(10, 4, 3), (4, 3, 10), (3, 10, 4)])
+    def test_contract_boundary_stopping_criterion(self, dims):
+        tn = qtn.TN3D_from_fill_fn(
+            lambda shape: ar.lazy.Variable(shape=shape, backend="numpy"),
+            *dims, D=2,
+        )
+        tn.contract_boundary_(
+            4, cutoff=0.0, final_contract=False, progbar=True
+        )
+        assert tn.max_bond() == 4
+        assert 32 <= tn.num_tensors <= 40
+
     @pytest.mark.parametrize("lazy", [False, True])
     def test_coarse_grain_basics(self, lazy):
         tn = qtn.TN3D_from_fill_fn(
@@ -47,6 +59,7 @@ class Test3DManualContract:
         beta = 0.3
         fex = -2.7654417752878
         tn = qtn.TN3D_classical_ising_partition_function(L, L, L, beta=beta)
-        Z = tn.contract_hotrg(max_bond=4) ^ ...
+        tn.contract_hotrg_(max_bond=4, progbar=True, equalize_norms=1.0)
+        Z = tn.item() * 10**tn.exponent
         f = -qu.log(Z) / (L**3 * beta)
         assert f == pytest.approx(fex, rel=1e-2)

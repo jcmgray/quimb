@@ -935,6 +935,21 @@ class TestTensorNetwork:
         assert len((tn ^ slice(None, -2, -1)).tensors) == 3
         assert len((tn ^ slice(-2, 0)).tensors) == 3
 
+
+    @pytest.mark.parametrize("structured", [True, False])
+    @pytest.mark.parametrize("inplace", [True, False])
+    def test_contract_output_unwrapping(self, structured, inplace):
+        psi = qtn.MPS_rand_state(5, 3)
+        tn = psi.H & psi
+        if structured:
+            tags = ...
+        else:
+            tags = all
+
+        x = tn.contract(tags, inplace=inplace)
+
+        assert isinstance(x, TensorNetwork) == inplace
+
     def test_contraction_info(self):
         a = qtn.rand_tensor((8, 8), ("a", "b"))
         b = qtn.rand_tensor((8, 8), ("b", "c"))

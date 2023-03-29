@@ -20,6 +20,7 @@ from ..utils import (
     pairwise,
     ensure_dict,
 )
+from ..utils import progbar as Progbar
 from . import array_ops as ops
 from .tensor_core import (
     bonds_size,
@@ -269,6 +270,30 @@ class Rotator2D:
             'ymax': (functools.partial(self.tn.compute_ymin_environments,
                                        xrange=self.xrange), 'ymin'),
         }[self.from_which]
+
+
+BOUNDARY_SEQUENCE_VALID = {
+    "xmin", "xmax", "ymin", "ymax",
+}
+BOUNDARY_SEQUENCE_MAP = {
+    "b": "xmin",
+    "xmin": "xmin",
+    "t": "xmax",
+    "xmax": "xmax",
+    "l": "ymin",
+    "ymin": "ymin",
+    "r": "ymax",
+    "ymax": "ymax",
+}
+
+def parse_boundary_sequence(sequence):
+    """Ensure ``sequence`` is a tuple of boundary sequence strings from
+    ``{'xmin', 'xmax', 'ymin', 'ymax'}``
+    """
+    if isinstance(sequence, str):
+        if sequence in BOUNDARY_SEQUENCE_VALID:
+            return (sequence,)
+    return tuple(BOUNDARY_SEQUENCE_MAP[d] for d in sequence)
 
 
 class TensorNetwork2D(TensorNetworkGen):
@@ -568,6 +593,23 @@ class TensorNetwork2D(TensorNetworkGen):
         if yrange is None:
             yrange = (0, self.Ly - 1)
         return all(mn <= u <= mx for u, (mn, mx) in zip(coo, (xrange, yrange)))
+
+    def get_ranges_present(self):
+        """Return the range of site coordinates present in this TN.
+
+        Returns
+        -------
+        xrange, yrange : tuple[tuple[int, int]]
+            The minimum and maximum site coordinates present in each direction.
+        """
+        xmin = ymin = float('inf')
+        xmax = ymax = float('-inf')
+        for i, j in self.gen_sites_present():
+            xmin = min(i, xmin)
+            ymin = min(j, ymin)
+            xmax = max(i, xmax)
+            ymax = max(j, ymax)
+        return (xmin, xmax), (ymin, ymax)
 
     def __getitem__(self, key):
         """Key based tensor selection, checking for integer based shortcut.
@@ -940,8 +982,7 @@ class TensorNetwork2D(TensorNetworkGen):
             Cut-off value to used to truncate singular values in the boundary
             contraction.
         compress_opts : None or dict, optional
-            Supplied to
-            :meth:`~quimb.tensor.tensor_core.TensorNetwork.compress_between`.
+            Supplied to :meth:`compress_between`.
         """
         check_opt('sweep', sweep, ('right', 'left'))
         self.compress_plane(
@@ -1012,8 +1053,7 @@ class TensorNetwork2D(TensorNetworkGen):
             Cut-off value to used to truncate singular values in the boundary
             contraction.
         compress_opts : None or dict, optional
-            Supplied to
-            :meth:`~quimb.tensor.tensor_core.TensorNetwork.compress_between`.
+            Supplied to :meth:`compress_between`.
         """
         check_opt('sweep', sweep, ('up', 'down'))
         self.compress_plane(
@@ -1367,48 +1407,49 @@ class TensorNetwork2D(TensorNetworkGen):
         """
         compress_opts = ensure_dict(compress_opts)
 
-        # we compute the projectors from an untouched copy
-        tn_calc = self.copy()
-
         r = Rotator2D(self, xrange, yrange, from_which)
-        i0, i1 = r.sweep[:2]
         j0 = r.sweep_other[0]
 
-        for j in r.sweep_other:
+        for i0, i1 in pairwise(r.sweep):
+            # we compute the projectors from an untouched copy
+            tn_calc = self.copy()
 
-            tag_ij = r.site_tag(i0, j)
-            tag_ip1j = r.site_tag(i1, j)
-
-            if j != j0:
-                ltags = r.site_tag(i0, j - 1), r.site_tag(i1, j - 1)
-                rtags = (tag_ij, tag_ip1j)
-                #      │         │
-                #    ──O─┐ chi ┌─O──  i+1
-                #      │ └─▷═◁─┘ │
-                #      │ ┌┘   └┐ │
-                #    ──O─┘     └─O──  i
-                #     j-1        j
-                tn_calc.insert_compressor_between_regions(
-                    ltags,
-                    rtags,
-                    new_ltags=ltags,
-                    new_rtags=rtags,
-                    insert_into=self,
-                    max_bond=max_bond,
-                    cutoff=cutoff,
-                    **compress_opts,
-                )
-
-        if not lazy:
-            # contract each pair of boundary tensors with their projectors
             for j in r.sweep_other:
-                self.contract_tags_(
-                    (r.site_tag(i0, j), r.site_tag(i1, j)), optimize=optimize,
-                )
 
-        if equalize_norms:
-            for t in self.select_tensors(r.x_tag(i1)):
-                self.strip_exponent(t, equalize_norms)
+                tag_ij = r.site_tag(i0, j)
+                tag_ip1j = r.site_tag(i1, j)
+
+                if j != j0:
+                    ltags = r.site_tag(i0, j - 1), r.site_tag(i1, j - 1)
+                    rtags = (tag_ij, tag_ip1j)
+                    #      │         │
+                    #    ──O─┐ chi ┌─O──  i+1
+                    #      │ └─▷═◁─┘ │
+                    #      │ ┌┘   └┐ │
+                    #    ──O─┘     └─O──  i
+                    #     j-1        j
+                    tn_calc.insert_compressor_between_regions(
+                        ltags,
+                        rtags,
+                        new_ltags=ltags,
+                        new_rtags=rtags,
+                        insert_into=self,
+                        max_bond=max_bond,
+                        cutoff=cutoff,
+                        **compress_opts,
+                    )
+
+            if not lazy:
+                # contract each pair of boundary tensors with their projectors
+                for j in r.sweep_other:
+                    self.contract_tags_(
+                        (r.site_tag(i0, j), r.site_tag(i1, j)),
+                        optimize=optimize,
+                    )
+
+            if equalize_norms:
+                for t in self.select_tensors(r.x_tag(i1)):
+                    self.strip_exponent(t, equalize_norms)
 
     def contract_boundary_from(
         self,
@@ -1454,7 +1495,7 @@ class TensorNetwork2D(TensorNetworkGen):
         contract_boundary_opts["canonize"] = canonize
         contract_boundary_opts["layer_tags"] = layer_tags
         contract_boundary_opts["sweep_reverse"] = sweep_reverse
-        self._contract_boundary_core(**contract_boundary_opts)
+        tn._contract_boundary_core(**contract_boundary_opts)
 
         return tn
 
@@ -1550,8 +1591,7 @@ class TensorNetwork2D(TensorNetworkGen):
             which tensors end up being canonized. Setting this to true sweeps
             the compression from largest to smallest coordinates.
         compress_opts : None or dict, optional
-            Supplied to
-            :meth:`~quimb.tensor.tensor_core.TensorNetwork.compress_between`.
+            Supplied to :meth:`compress_between`.
         inplace : bool, optional
             Whether to perform the contraction inplace or not.
 
@@ -1667,8 +1707,7 @@ class TensorNetwork2D(TensorNetworkGen):
             which tensors end up being canonized. Setting this to true sweeps
             the compression from largest to smallest coordinates.
         compress_opts : None or dict, optional
-            Supplied to
-            :meth:`~quimb.tensor.tensor_core.TensorNetwork.compress_between`.
+            Supplied to :meth:`compress_between`.
         inplace : bool, optional
             Whether to perform the contraction inplace or not.
 
@@ -1801,8 +1840,7 @@ class TensorNetwork2D(TensorNetworkGen):
             which tensors end up being canonized. Setting this to true sweeps
             the compression from largest to smallest coordinates.
         compress_opts : None or dict, optional
-            Supplied to
-            :meth:`~quimb.tensor.tensor_core.TensorNetwork.compress_between`.
+            Supplied to :meth:`compress_between`.
         inplace : bool, optional
             Whether to perform the contraction inplace or not.
 
@@ -1934,8 +1972,7 @@ class TensorNetwork2D(TensorNetworkGen):
             which tensors end up being canonized. Setting this to true sweeps
             the compression from largest to smallest coordinates.
         compress_opts : None or dict, optional
-            Supplied to
-            :meth:`~quimb.tensor.tensor_core.TensorNetwork.compress_between`.
+            Supplied to :meth:`compress_between`.
         inplace : bool, optional
             Whether to perform the contraction inplace or not.
 
@@ -1962,23 +1999,200 @@ class TensorNetwork2D(TensorNetworkGen):
     contract_boundary_from_ymax_ = functools.partialmethod(
         contract_boundary_from_ymax, inplace=True)
 
+    def _contract_interleaved_boundary_sequence(
+        self,
+        *,
+        contract_boundary_opts=None,
+        sequence=None,
+        xmin=None,
+        xmax=None,
+        ymin=None,
+        ymax=None,
+        max_separation=1,
+        max_unfinished=1,
+        around=None,
+        equalize_norms=False,
+        canonize=False,
+        canonize_opts=None,
+        final_contract=True,
+        final_contract_opts=None,
+        progbar=False,
+        inplace=False,
+    ):
+        """Unified handler for performing iterleaved contractions in a
+        sequence of inwards boundary directions.
+        """
+        tn = self if inplace else self.copy()
+
+        contract_boundary_opts = ensure_dict(contract_boundary_opts)
+        if canonize:
+            canonize_opts = ensure_dict(canonize_opts)
+            canonize_opts.setdefault("max_iterations", 2)
+
+        if progbar:
+            pbar = Progbar()
+            pbar.set_description(
+                f"contracting boundary, Lx={tn.Lx}, Ly={tn.Ly}"
+            )
+        else:
+            pbar = None
+
+        # set default starting borders
+        if any(d is None for d in (xmin, xmax, ymin, ymax)):
+            (
+                (auto_xmin, auto_xmax),
+                (auto_ymin, auto_ymax),
+            ) = self.get_ranges_present()
+
+        # location of current boundaries
+        boundaries = {
+            "xmin": auto_xmin if xmin is None else xmin,
+            "xmax": auto_xmax if xmax is None else xmax,
+            "ymin": auto_ymin if ymin is None else ymin,
+            "ymax": auto_ymax if ymax is None else ymax,
+        }
+        separations = {
+            d: boundaries[f"{d}max"] - boundaries[f"{d}min"] for d in "xy"
+        }
+        boundary_tags = {
+            "xmin": tn.x_tag(boundaries["xmin"]),
+            "xmax": tn.x_tag(boundaries["xmax"]),
+            "ymin": tn.y_tag(boundaries["ymin"]),
+            "ymax": tn.y_tag(boundaries["ymax"]),
+        }
+        if around is not None:
+            if sequence is None:
+                sequence = ("xmin", "xmax", "ymin", "ymax")
+
+            target_xmin = min(x[0] for x in around)
+            target_xmax = max(x[0] for x in around)
+            target_ymin = min(x[1] for x in around)
+            target_ymax = max(x[1] for x in around)
+            target_check = {
+                'xmin': lambda x: x >= target_xmin - 1,
+                'xmax': lambda x: x <= target_xmax + 1,
+                'ymin': lambda y: y >= target_ymin - 1,
+                'ymax': lambda y: y <= target_ymax + 1,
+            }
+
+        if sequence is None:
+            # contract in both sides along short dimension -> less compression
+            if self.Lx >= self.Ly:
+                sequence = ("xmin", "xmax")
+            else:
+                sequence = ("ymin", "ymax")
+        else:
+            sequence = parse_boundary_sequence(sequence)
+
+        def _is_finished(direction):
+            return (
+                # two opposing sides have got sufficiently close
+                (separations[direction[0]] <= max_separation) or
+                (
+                    # there is a target region
+                    (around is not None) and
+                    # and we have reached it
+                    target_check[direction](boundaries[direction])
+                )
+            )
+
+        sequence = [d for d in sequence if not _is_finished(d)]
+
+        while sequence:
+            direction = sequence.pop(0)
+            if _is_finished(direction):
+                # just remove direction from sequence
+                continue
+            # do a contraction, and keep direction in sequence to try again
+            sequence.append(direction)
+
+            if pbar is not None:
+                pbar.set_description(
+                    f"contracting {direction}, "
+                    f"Lx={separations['x'] + 1}, "
+                    f"Ly={separations['y'] + 1}"
+                )
+
+            if canonize:
+                tn.select(boundary_tags[direction]).gauge_all_(**canonize_opts)
+
+            if direction[0] == "x":
+                if direction[1:] == "min":
+                    xrange = (boundaries["xmin"], boundaries["xmin"] + 1)
+                else:  # xmax
+                    xrange = (boundaries["xmax"] - 1, boundaries["xmax"])
+                yrange = (boundaries["ymin"], boundaries["ymax"])
+            else:  # y
+                if direction[1:] == "min":
+                    yrange = (boundaries["ymin"], boundaries["ymin"] + 1)
+                else:  # ymax
+                    yrange = (boundaries["ymax"] - 1, boundaries["ymax"])
+                xrange = (boundaries["xmin"], boundaries["xmax"])
+
+            tn.contract_boundary_from_(
+                xrange=xrange,
+                yrange=yrange,
+                from_which=direction,
+                equalize_norms=equalize_norms,
+                **contract_boundary_opts,
+            )
+
+            # update the boundaries and separations
+            xy, minmax = direction[0], direction[1:]
+            separations[xy] -= 1
+            if minmax == "min":
+                boundaries[direction] += 1
+            else:
+                boundaries[direction] -= 1
+
+            if pbar is not None:
+                pbar.update()
+
+            # check if enough directions are finished -> reached max separation
+            if sum(
+                separations[d] > max_separation for d in "xy"
+            ) <= max_unfinished:
+                break
+
+        if equalize_norms is True:
+            tn.equalize_norms_()
+
+        if pbar is not None:
+            pbar.set_description(
+                f"contracted boundary, "
+                f"Lx={separations['x'] + 1}, "
+                f"Ly={separations['y'] + 1}"
+            )
+            pbar.close()
+
+        if final_contract and (around is None):
+            final_contract_opts = ensure_dict(final_contract_opts)
+            final_contract_opts.setdefault("optimize", "auto-hq")
+            final_contract_opts.setdefault("inplace", inplace)
+            return tn.contract(**final_contract_opts)
+
+        return tn
+
     def contract_boundary(
         self,
-        around=None,
         max_bond=None,
         *,
         cutoff=1e-10,
         canonize=True,
         mode='mps',
         layer_tags=None,
-        max_separation=1,
+        compress_opts=None,
         sequence=None,
         xmin=None,
         xmax=None,
         ymin=None,
         ymax=None,
-        compress_opts=None,
+        max_separation=1,
+        around=None,
         equalize_norms=False,
+        final_contract=True,
+        final_contract_opts=None,
+        progbar=None,
         inplace=False,
         **contract_boundary_opts,
     ):
@@ -1993,7 +2207,8 @@ class TensorNetwork2D(TensorNetworkGen):
             ●──●──●──●
 
         Optionally from any or all of the boundary, in multiple layers, and
-        stopping around a region.
+        stopping around a region. The default is to contract the boundary from
+        the two shortest opposing sides.
 
         Parameters
         ----------
@@ -2014,14 +2229,14 @@ class TensorNetwork2D(TensorNetworkGen):
         layer_tags : None or sequence of str, optional
             If given, perform a multilayer contraction, contracting the inner
             sites in each layer into the boundary individually.
-        max_separation : int, optional
-            If ``around is None``, when any two sides become this far apart
-            simply contract the remaining tensor network.
-        sequence : sequence of {'b', 'l', 't', 'r'}, optional
+        compress_opts : None or dict, optional
+            Other low level options to pass to
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.compress_between`.
+        sequence : sequence of {'xmin', 'xmax', 'ymin', 'ymax'}, optional
             Which directions to cycle throught when performing the inwards
-            contractions: 'b', 'l', 't', 'r' corresponding to *from the*
-            bottom, left, top and right respectively. If ``around`` is
-            specified you will likely need all of these!
+            contractions, i.e. *from* that direction. If ``around`` is
+            specified you will likely need all of these! Default is to contract
+            from the two shortest opposing sides.
         xmin : int, optional
             The initial bottom boundary row, defaults to 0.
         xmax : int, optional
@@ -2030,28 +2245,36 @@ class TensorNetwork2D(TensorNetworkGen):
             The initial left boundary column, defaults to 0.
         ymax : int, optional
             The initial right boundary column, defaults to ``Ly - 1``..
+        max_separation : int, optional
+            If ``around is None``, when any two sides become this far apart
+            simply contract the remaining tensor network.
+        around : None or sequence of (int, int), optional
+            If given, don't contract the square of sites bounding these
+            coordinates.
+        equalize_norms : bool or float, optional
+            Whether to equalize the norms of the boundary tensors after each
+            contraction, gathering the overall scaling coefficient, log10, in
+            ``tn.exponent``.
+        final_contract : bool, optional
+            Whether to exactly contract the remaining tensor network after the
+            boundary contraction.
+        final_contract_opts : None or dict, optional
+            Options to pass to
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.contract`,
+            ``optimize`` defaults to ``'auto-hq'``.
+        progbar : bool, optional
+            Whether to show a progress bar.
         inplace : bool, optional
             Whether to perform the contraction in place or not.
-        compress_opts : None or dict, optional
-            Supplied to
-            :meth:`~quimb.tensor.tensor_core.TensorNetwork.compress_between`.
         contract_boundary_opts
-            Supplied to
-            :meth:`~quimb.tensor.tensor_2d.TensorNetwork2D.contract_boundary_from_xmin`,
-            :meth:`~quimb.tensor.tensor_2d.TensorNetwork2D.contract_boundary_from_ymin`,
-            :meth:`~quimb.tensor.tensor_2d.TensorNetwork2D.contract_boundary_from_xmax`,
-            or
-            :meth:`~quimb.tensor.tensor_2d.TensorNetwork2D.contract_boundary_from_ymax`,
-            including compression and canonization options.
+            Supplied to :meth:`contract_boundary_from`, including compression
+            and canonization options.
         """
-        tn = self if inplace else self.copy()
-
         contract_boundary_opts['max_bond'] = max_bond
         contract_boundary_opts['mode'] = mode
         contract_boundary_opts['cutoff'] = cutoff
         contract_boundary_opts['canonize'] = canonize
         contract_boundary_opts['layer_tags'] = layer_tags
-        contract_boundary_opts['equalize_norms'] = equalize_norms
         contract_boundary_opts['compress_opts'] = compress_opts
 
         if (mode == 'full-bond'):
@@ -2059,101 +2282,88 @@ class TensorNetwork2D(TensorNetworkGen):
             #     this will be lazily filled by _contract_boundary_full_bond
             contract_boundary_opts.setdefault('opposite_envs', {})
 
-        # set default starting borders
-        if xmin is None:
-            xmin = 0
-        if xmax is None:
-            xmax = tn.Lx - 1
-        if ymin is None:
-            ymin = 0
-        if ymax is None:
-            ymax = tn.Ly - 1
-
-        stop_i_min = stop_i_max = stop_j_min = stop_j_max = None
-
-        if around is not None:
-            if sequence is None:
-                sequence = 'bltr'
-            stop_i_min = min(x[0] for x in around)
-            stop_i_max = max(x[0] for x in around)
-            stop_j_min = min(x[1] for x in around)
-            stop_j_max = max(x[1] for x in around)
-        elif sequence is None:
-            # contract in both sides along short dimension
-            if self.Lx >= self.Ly:
-                sequence = 'bt'
-            else:
-                sequence = 'lr'
-
-        # keep track of whether we have hit the ``around`` region.
-        reached_stop = {direction: False for direction in sequence}
-
-        for direction in cycle(sequence):
-
-            if direction == 'b':
-                # for each direction check if we have reached the 'stop' region
-                if (around is None) or (xmin + 1 < stop_i_min):
-                    tn.contract_boundary_from_xmin_(
-                        xrange=(xmin, xmin + 1), yrange=(ymin, ymax),
-                        sweep_reverse=False, **contract_boundary_opts)
-                    xmin += 1
-                else:
-                    reached_stop[direction] = True
-
-            elif direction == 'l':
-                if (around is None) or (ymin + 1 < stop_j_min):
-                    tn.contract_boundary_from_ymin_(
-                        xrange=(xmin, xmax), yrange=(ymin, ymin + 1),
-                        sweep_reverse=False, **contract_boundary_opts)
-                    ymin += 1
-                else:
-                    reached_stop[direction] = True
-
-            elif direction == 't':
-                if (around is None) or (xmax - 1 > stop_i_max):
-                    tn.contract_boundary_from_xmax_(
-                        xrange=(xmax, xmax - 1), yrange=(ymin, ymax),
-                        sweep_reverse=False, **contract_boundary_opts)
-                    xmax -= 1
-                else:
-                    reached_stop[direction] = True
-
-            elif direction == 'r':
-                if (around is None) or (ymax - 1 > stop_j_max):
-                    tn.contract_boundary_from_ymax_(
-                        xrange=(xmin, xmax), yrange=(ymax, ymax - 1),
-                        sweep_reverse=False, **contract_boundary_opts)
-                    ymax -= 1
-                else:
-                    reached_stop[direction] = True
-
-            else:
-                raise ValueError("'sequence' should be an iterable of "
-                                 "'b', 'l', 't', 'r' only.")
-
-            if around is None:
-                # check if TN has become thin enough to just contract
-                thin_strip = (
-                    (xmax - xmin <= max_separation) or
-                    (ymax - ymin <= max_separation)
-                )
-                if thin_strip:
-                    if equalize_norms is True:
-                        tn.equalize_norms_()
-
-                    return tn.contract(all, optimize='auto-hq')
-
-            # check if all directions have reached the ``around`` region
-            elif all(reached_stop.values()):
-                break
-
-        if equalize_norms is True:
-            tn.equalize_norms_()
-
-        return tn
+        return self._contract_interleaved_boundary_sequence(
+            contract_boundary_opts=contract_boundary_opts,
+            sequence=sequence,
+            xmin=xmin,
+            xmax=xmax,
+            ymin=ymin,
+            ymax=ymax,
+            max_separation=max_separation,
+            around=around,
+            equalize_norms=equalize_norms,
+            final_contract=final_contract,
+            final_contract_opts=final_contract_opts,
+            progbar=progbar,
+            inplace=inplace,
+        )
 
     contract_boundary_ = functools.partialmethod(
         contract_boundary, inplace=True)
+
+    def contract_mps_sweep(
+        self,
+        max_bond=None,
+        *,
+        cutoff=1e-10,
+        canonize=True,
+        direction=None,
+        **contract_boundary_opts
+    ):
+        """Contract this 2D tensor network by sweeping an MPS across from one
+        side to the other.
+
+        Parameters
+        ----------
+        max_bond : int, optional
+            The maximum boundary dimension, AKA 'chi'. The default of ``None``
+            means truncation is left purely to ``cutoff`` and is not
+            recommended in 2D.
+        cutoff : float, optional
+            Cut-off value to used to truncate singular values in the boundary
+            contraction.
+        canonize : bool, optional
+            Whether to sweep one way with canonization before compressing.
+        direction : {'xmin', 'xmax', 'ymin', 'ymax'}, optional
+            Which direction to sweep from. If ``None`` (default) then the
+            shortest boundary is chosen.
+        contract_boundary_opts
+            Supplied to :meth:`contract_boundary_from`, including compression
+            and canonization options.
+        """
+        if direction is None:
+            # choose shortest boundary (i.e. more steps but less compression)
+            direction = "xmin" if self.Ly <= self.Lx else "ymin"
+
+        return self.contract_boundary(
+            max_bond=max_bond,
+            cutoff=cutoff,
+            canonize=canonize,
+            sequence = [direction],
+            **contract_boundary_opts,
+        )
+
+    def contract_full_bootstrap(self, n, *, optimize='auto-hq', **kwargs):
+        if n < 2:
+            raise ValueError(f"``n`` must be at least 2 (got {n}).")
+
+        if self.Lx >= self.Ly:
+            fn_a = self.compute_xmax_environments
+            fn_b = self.compute_xmin_environments
+            mid, lbl_a, lbl_b = self.Ly // 2, 'xmax', 'xmin'
+        else:
+            fn_a = self.compute_ymax_environments
+            fn_b = self.compute_ymin_environments
+            mid, lbl_a, lbl_b = self.Lx // 2, 'ymax', 'ymin'
+
+        kwargs.setdefault('envs', {})
+        envs = kwargs['envs']
+        kwargs['opposite_envs'] = envs
+        for _, env_compute in zip(range(1, n), cycle([fn_b, fn_a])):
+            env_compute(mode='full-bond', **kwargs)
+
+        tn = envs[lbl_a, mid] | envs[lbl_b, mid + 1]
+        return tn.contract(all, optimize=optimize)
 
     def compute_environments(
         self,
@@ -2352,8 +2562,7 @@ class TensorNetwork2D(TensorNetworkGen):
             tensor specified by ``[(i + 1, j), layer_tag]``, for each
             ``layer_tag`` in ``layer_tags``.
         compress_opts : None or dict, optional
-            Supplied to
-            :meth:`~quimb.tensor.tensor_core.TensorNetwork.compress_between`.
+            Supplied to :meth:`compress_between`.
         envs : dict, optional
             Supply an existing dictionary to store the environments in.
         contract_boundary_opts
@@ -2462,8 +2671,7 @@ class TensorNetwork2D(TensorNetworkGen):
             tensor specified by ``[(i + 1, j), layer_tag]``, for each
             ``layer_tag`` in ``layer_tags``.
         compress_opts : None or dict, optional
-            Supplied to
-            :meth:`~quimb.tensor.tensor_core.TensorNetwork.compress_between`.
+            Supplied to :meth:`compress_between`.
         contract_boundary_opts
             Supplied to
             :meth:`~quimb.tensor.tensor_2d.TensorNetwork2D.contract_boundary_from_ymin`
@@ -2774,8 +2982,7 @@ class TensorNetwork2D(TensorNetworkGen):
             a dense tensor or boundary method. By default this is only turned
             on if the ``bsz`` in the corresponding direction is 1.
         compress_opts : None or dict, optional
-            Supplied to
-            :meth:`~quimb.tensor.tensor_core.TensorNetwork.compress_between`.
+            Supplied to :meth:`compress_between`.
         compute_environment_opts
             Supplied to
             :meth:`~quimb.tensor.tensor_2d.TensorNetwork2D.compute_y_environments`
@@ -2934,10 +3141,18 @@ class TensorNetwork2D(TensorNetworkGen):
     def contract_hotrg(
         self,
         max_bond=None,
+        *,
         cutoff=1e-10,
-        directions=("x", "y"),
+        canonize=False,
+        canonize_opts=None,
+        sequence=("x", "y"),
+        max_separation=1,
+        max_unfinished=1,
         lazy=False,
         equalize_norms=False,
+        final_contract=True,
+        final_contract_opts=None,
+        progbar=False,
         inplace=False,
         **coarse_grain_opts
     ):
@@ -2945,10 +3160,10 @@ class TensorNetwork2D(TensorNetworkGen):
         See https://arxiv.org/abs/1201.1144v4 and
         https://arxiv.org/abs/1905.02351 for the more optimal computaton of the
         projectors used here. The TN is contracted sequentially in
-        ``directions`` by inserting oblique projectors between plaquettes, and
-        then optionally contracting these new effective sites. The algorithm
-        stops when only one direction has a length larger than 2, and thus
-        exact contraction can be used.
+        ``sequence`` directions by inserting oblique projectors between
+        plaquettes, and then optionally contracting these new effective sites.
+        The algorithm stops when only one direction has a length larger than 2,
+        and thus exact contraction can be used.
 
         Parameters
         ----------
@@ -2956,15 +3171,37 @@ class TensorNetwork2D(TensorNetworkGen):
             The maximum bond dimension of the projector pairs inserted.
         cutoff : float, optional
             The cutoff for the singular values of the projector pairs.
-        directions : tuple of str, optional
+        canonize : bool, optional
+            Whether to canonize all tensors before each contraction,
+            via :meth:`gauge_all`.
+        canonize_opts : None or dict, optional
+            Additional options to pass to
+            :meth:`gauge_all`.
+        sequence : tuple of str, optional
             The directions to contract in.  Default is to contract in all
             directions.
+        max_separation : int, optional
+            The maximum distance between sides (i.e. length - 1) of the tensor
+            network before that direction is considered finished.
+        max_unfinished : int, optional
+            The maximum number of directions that can be unfinished (i.e. are
+            still longer than max_separation + 1) before the coarse graining
+            terminates.
         lazy : bool, optional
             Whether to contract the coarse graining projectors or leave them
             in the tensor network lazily. Default is to contract them.
         equalize_norms : bool or float, optional
-            Whether to equalize the norms of the tensors in the tensor network
-            after each coarse graining step.
+            Whether to equalize the norms of all tensors after each
+            contraction, gathering the overall scaling coefficient, log10, in
+            ``tn.exponent``.
+        final_contract : bool, optional
+            Whether to exactly contract the remaining tensor network after the
+            coarse graining contractions.
+        final_contract_opts : None or dict, optional
+            Options to pass to :meth:`contract`, ``optimize`` defaults to
+            ``'auto-hq'``.
+        progbar : bool, optional
+            Whether to show a progress bar.
         inplace : bool, optional
             Whether to perform the coarse graining in place.
         coarse_grain_opts
@@ -2983,10 +3220,42 @@ class TensorNetwork2D(TensorNetworkGen):
         """
         tn = self if inplace else self.copy()
 
-        # contract until only a single length is non-1D, (i.e. L>2 )
-        directions = [d for d in directions if getattr(tn, "L" + d) > 2]
-        while len(directions) > 1:
-            direction = directions.pop(0)
+        if lazy:
+            # we are implicitly asking for the tensor network
+            final_contract = False
+
+        if canonize:
+            canonize_opts = ensure_dict(canonize_opts)
+            canonize_opts.setdefault("max_iterations", 2)
+
+
+        if progbar:
+            pbar = Progbar(
+                desc=f"contracting HOTRG, Lx={tn.Lx}, Ly={tn.Ly}"
+            )
+        else:
+            pbar = None
+
+        def _is_finished(direction):
+            return getattr(tn, "L" + direction) <= max_separation + 1
+
+        sequence = [d for d in sequence if not _is_finished(d)]
+        while sequence:
+            direction = sequence.pop(0)
+            if _is_finished(direction):
+                # just remove direction from sequence
+                continue
+            # do a contraction, and keep direction in sequence to try again
+            sequence.append(direction)
+
+            if pbar is not None:
+                pbar.set_description(
+                    f"contracting {direction}, Lx={tn.Lx}, Ly={tn.Ly}"
+                )
+
+            if canonize:
+                tn.gauge_all_(**canonize_opts)
+
             tn.coarse_grain_hotrg_(
                 direction=direction,
                 max_bond=max_bond,
@@ -2995,24 +3264,55 @@ class TensorNetwork2D(TensorNetworkGen):
                 equalize_norms=equalize_norms,
                 **coarse_grain_opts
             )
-            if getattr(tn, "L" + direction) > 2:
-                directions.append(direction)
+
+            if pbar is not None:
+                pbar.update()
+
+            # check if enough directions are finished -> reached max separation
+            if sum(not _is_finished(d) for d in "xy") <= max_unfinished:
+                break
+
+        if equalize_norms is True:
+            # redistribute the exponent equally among all tensors
+            tn.equalize_norms_()
+
+        if final_contract:
+            final_contract_opts = ensure_dict(final_contract_opts)
+            final_contract_opts.setdefault("optimize", "auto-hq")
+            final_contract_opts.setdefault("inplace", inplace)
+            return tn.contract(**final_contract_opts)
 
         return tn
+
+    contract_hotrg_ = functools.partialmethod(contract_hotrg, inplace=True)
 
     def contract_ctmrg(
         self,
         max_bond=None,
+        *,
         cutoff=1e-10,
-        directions=("xmin", "xmax", "ymin", "ymax"),
+        canonize=False,
+        canonize_opts=None,
         lazy=False,
+        mode='projector',
+        compress_opts=None,
+        sequence=("xmin", "xmax", "ymin", "ymax"),
+        xmin=None,
+        xmax=None,
+        ymin=None,
+        ymax=None,
+        max_separation=1,
+        around=None,
         equalize_norms=False,
+        final_contract=True,
+        final_contract_opts=None,
+        progbar=False,
         inplace=False,
         **contract_boundary_opts,
     ):
         """Contract this 2D tensor network using the finite analog of the
         CTMRG algorithm - https://arxiv.org/abs/cond-mat/9507087. The TN is
-        contracted sequentially in ``directions`` by inserting oblique
+        contracted sequentially in ``sequence`` directions by inserting oblique
         projectors between boundary pairs, and then optionally contracting
         these new effective sites. The algorithm stops when only one direction
         has a length larger than 2, and thus exact contraction can be used.
@@ -3023,15 +3323,51 @@ class TensorNetwork2D(TensorNetworkGen):
             The maximum bond dimension of the projector pairs inserted.
         cutoff : float, optional
             The cutoff for the singular values of the projector pairs.
-        directions : tuple of str, optional
-            The directions to contract in.  Default is to contract in all
-            directions.
+        canonize : bool, optional
+            Whether to canonize the boundary tensors before each contraction,
+            via :meth:`gauge_all`.
+        canonize_opts : None or dict, optional
+            Additional options to pass to :meth:`gauge_all`.
         lazy : bool, optional
-            Whether to contract the boundary projectors or leave them
+            Whether to contract the coarse graining projectors or leave them
             in the tensor network lazily. Default is to contract them.
+        mode : str, optional
+            The method to perform the boundary contraction. Defaults to
+            ``'projector'``.
+        compress_opts : None or dict, optional
+            Other low level options to pass to
+            :meth:`insert_compressor_between_regions`.
+        sequence : sequence of {'xmin', 'xmax', 'ymin', 'ymax'}, optional
+            Which directions to cycle throught when performing the inwards
+            contractions, i.e. *from* that direction. If ``around`` is
+            specified you will likely need all of these! Default is to contract
+            in all directions.
+        xmin : int, optional
+            The initial bottom boundary row, defaults to 0.
+        xmax : int, optional
+            The initial top boundary row, defaults to ``Lx - 1``.
+        ymin : int, optional
+            The initial left boundary column, defaults to 0.
+        ymax : int, optional
+            The initial right boundary column, defaults to ``Ly - 1``..
+        max_separation : int, optional
+            If ``around is None``, when any two sides become this far apart
+            simply contract the remaining tensor network.
+        around : None or sequence of (int, int), optional
+            If given, don't contract the square of sites bounding these
+            coordinates.
         equalize_norms : bool or float, optional
-            Whether to equalize the norms of the tensors in the tensor network
-            after each boundary contraction step.
+            Whether to equalize the norms of the boundary tensors after each
+            contraction, gathering the overall scaling coefficient, log10, in
+            ``tn.exponent``.
+        final_contract : bool, optional
+            Whether to exactly contract the remaining tensor network after the
+            boundary contraction.
+        final_contract_opts : None or dict, optional
+            Options to pass to :meth:`contract`, ``optimize`` defaults to
+            ``'auto-hq'``.
+        progbar : bool, optional
+            Whether to show a progress bar.
         inplace : bool, optional
             Whether to perform the boundary contraction in place.
         contract_boundary_opts
@@ -3039,60 +3375,44 @@ class TensorNetwork2D(TensorNetworkGen):
 
         Returns
         -------
-        TensorNetwork2D
-            The contracted tensor network, which will have no more than one
-            direction of length > 2.
+        scalar or TensorNetwork2D
+            Either the fully contracted scalar (if ``final_contract=True`` and
+            ``around=None``) or the partially contracted tensor network.
 
         See Also
         --------
         contract_boundary_from, contract_hotrg,
         TensorNetwork.insert_compressor_between_regions
         """
-        tn = self if inplace else self.copy()
+        contract_boundary_opts['max_bond'] = max_bond
+        contract_boundary_opts['cutoff'] = cutoff
+        contract_boundary_opts['mode'] = mode
+        contract_boundary_opts['compress_opts'] = compress_opts
+        contract_boundary_opts['lazy'] = lazy
 
-        contract_boundary_opts.setdefault("mode", "projector")
+        if lazy:
+            # we are implicitly asking for the tensor network
+            final_contract = False
 
-        boundaries = {
-            "xmin": 0,
-            "xmax": tn.Lx - 1,
-            "ymin": 0,
-            "ymax": tn.Ly - 1,
-        }
-        separations = {
-            "x": tn.Lx - 1,
-            "y": tn.Ly - 1,
-        }
+        return self._contract_interleaved_boundary_sequence(
+            contract_boundary_opts=contract_boundary_opts,
+            canonize=canonize,
+            canonize_opts=canonize_opts,
+            sequence=sequence,
+            xmin=xmin,
+            xmax=xmax,
+            ymin=ymin,
+            ymax=ymax,
+            max_separation=max_separation,
+            around=around,
+            equalize_norms=equalize_norms,
+            final_contract=final_contract,
+            final_contract_opts=final_contract_opts,
+            progbar=progbar,
+            inplace=inplace,
+        )
 
-        directions = [d for d in directions if separations[d[0]] > 1]
-
-        while directions:
-            direction = directions.pop(0)
-            if separations[direction[0]] <= 1:
-                continue
-            else:
-                directions.append(direction)
-
-            xrange = (boundaries["xmin"], boundaries["xmax"])
-            yrange = (boundaries["ymin"], boundaries["ymax"])
-
-            tn.contract_boundary_from_(
-                xrange, yrange,
-                from_which=direction,
-                max_bond=max_bond,
-                cutoff=cutoff,
-                lazy=lazy,
-                equalize_norms=equalize_norms,
-                **contract_boundary_opts,
-            )
-
-            xy, minmax = direction[0], direction[1:]
-            separations[xy] -= 1
-            if minmax == "min":
-                boundaries[direction] += 1
-            else:
-                boundaries[direction] -= 1
-
-        return tn
+    contract_ctmrg_ = functools.partialmethod(contract_ctmrg, inplace=True)
 
 def is_lone_coo(where):
     """Check if ``where`` has been specified as a single coordinate pair.
@@ -3699,10 +4019,9 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
             ``((x0, y0), (dx, dy))``) to use for which coordinates, it will be
             calculated automatically otherwise.
         plaquette_env_options
-            Supplied to
-            :meth:`~quimb.tensor.tensor_2d.TensorNetwork2D.compute_plaquette_environments`
-            to generate the plaquette environments, equivalent to approximately
-            performing the partial trace.
+            Supplied to :meth:`compute_plaquette_environments` to generate the
+            plaquette environments, equivalent to approximately performing the
+            partial trace.
 
         Returns
         -------
@@ -3807,9 +4126,8 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
         inplace : bool, optional
             Whether to perform the normalization inplace or not.
         contract_boundary_opts
-            Supplied to
-            :meth:`~quimb.tensor.tensor_2d.TensorNetwork2D.contract_boundary`,
-            by default, two layer contraction will be used.
+            Supplied to :meth:`contract_boundary`, by default, two layer
+            contraction will be used.
         """
         contract_boundary_opts["max_bond"] = max_bond
         contract_boundary_opts["cutoff"] = cutoff
@@ -4011,8 +4329,7 @@ class TensorNetwork2DFlat(TensorNetwork2D):
             Cut-off value to used to truncate singular values in the boundary
             contraction.
         compress_opts : None or dict, optional
-            Supplied to
-            :meth:`~quimb.tensor.tensor_core.TensorNetwork.compress_between`.
+            Supplied to :meth:`compress_between`.
         """
         compress_opts.setdefault('absorb', 'both')
         for i in range(self.Lx):

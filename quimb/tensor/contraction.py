@@ -204,7 +204,7 @@ def get_contractor(
     cache=True,
     get='expr',
     optimize=None,
-    use_cotengra='auto',
+    use_cotengra="auto",
     **kwargs
 ):
     """Get an callable expression that will evaluate ``eq`` based on

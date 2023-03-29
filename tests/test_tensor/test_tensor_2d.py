@@ -225,6 +225,18 @@ class Test2DContract:
         xt = norm.contract_boundary(max_bond=27, mode="full-bond")
         assert xt == pytest.approx(xe, rel=1e-2)
 
+    @pytest.mark.parametrize('dims', [(10, 4), (4, 10)])
+    def test_contract_boundary_stopping_criterion(self, dims):
+        tn = qtn.TN2D_from_fill_fn(
+            lambda shape: ar.lazy.Variable(shape=shape, backend="numpy"),
+            *dims, D=2,
+        )
+        tn.contract_ctmrg_(
+            4, cutoff=0.0, final_contract=False, progbar=True
+        )
+        assert tn.max_bond() == 4
+        assert 16 <= tn.num_tensors <= 20
+
     @pytest.mark.parametrize("lazy", [False, True])
     def test_coarse_grain_basics(self, lazy):
         tn = qtn.TN2D_from_fill_fn(
@@ -249,7 +261,8 @@ class Test2DContract:
 
     def test_contract_hotrg(self):
         tn = qtn.TN2D_classical_ising_partition_function(16, 16, 0.44)
-        Zap = tn.contract_hotrg(max_bond=5) ^ ...
+        tn.contract_hotrg_(max_bond=5, progbar=True, equalize_norms=1.0)
+        Zap = tn.item() * 10**tn.exponent
         assert Zap == pytest.approx(8.459419593253275e100, rel=2e-3)
 
     def test_contract_hotrg_two_layer_rand_peps(self):
@@ -262,15 +275,15 @@ class Test2DContract:
         )
         norm = psi.make_norm()
         xe = norm.contract(all, optimize="auto-hq")
-        xt = norm.contract_hotrg(max_bond=5) ^ ...
+        xt = norm.contract_hotrg(max_bond=5)
         assert xt == pytest.approx(xe, rel=1e-4)
 
     def test_ising_accuracy_regression(self):
         tn = qtn.TN2D_classical_ising_partition_function(16, 16, 0.44)
-        for s in "bltr":
+        for s in [("xmin",), ("xmax",), ("ymin",), ("ymax",)]:
             Zap = tn.contract_boundary(max_bond=8, sequence=s)
             assert Zap == pytest.approx(8.459419593253275e100, rel=2.2e-7)
-        for s in ["bt", "lr"]:
+        for s in [("xmin", "xmax"), ("ymin", "ymax")]:
             Zap = tn.contract_boundary(max_bond=8, sequence=s)
             assert Zap == pytest.approx(8.459419593253275e100, rel=3.9e-9)
 
@@ -283,9 +296,9 @@ class Test2DContract:
         if mode == "mps":
             Z = tn.contract_boundary(max_bond=16)
         elif mode == "ctmrg":
-            Z = tn.contract_ctmrg(max_bond=16) ^ ...
+            Z = tn.contract_ctmrg(max_bond=16)
         elif mode == "hotrg":
-            Z = tn.contract_hotrg(max_bond=16) ^ ...
+            Z = tn.contract_hotrg(max_bond=16)
 
         assert Z == pytest.approx(Zex, rel=1e-1)
 
