@@ -4625,10 +4625,6 @@ class TensorNetwork(object):
         """
         tagged_tids = self._get_tids_from_tags(tags, which=which)
 
-        # check if all tensors have been tagged
-        if len(tagged_tids) == self.num_tensors:
-            return None, self.tensor_map.values()
-
         # Copy untagged to new network, and pop tagged tensors from this
         untagged_tn = self if inplace else self.copy()
         tagged_ts = tuple(map(untagged_tn.pop_tensor, sorted(tagged_tids)))
