@@ -5576,7 +5576,15 @@ class TensorNetwork(object):
         tid2, = self._get_tids_from_tags(tags2, which='all')
         self._canonize_between_tids(tid1, tid2, absorb=absorb, **canonize_opts)
 
-    def reduce_inds_onto_bond(self, inda, indb, tags=None, drop_tags=False):
+    def reduce_inds_onto_bond(
+        self,
+        inda,
+        indb,
+        tags=None,
+        drop_tags=False,
+        combine=True,
+        ndim_cutoff=3,
+    ):
         """Use QR factorization to 'pull' the indices ``inda`` and ``indb`` off
         of their respective tensors and onto the bond between them. This is an
         inplace operation.
@@ -5586,7 +5594,7 @@ class TensorNetwork(object):
         ta, tb = self._tids_get(tida, tidb)
         bix = bonds(ta, tb)
 
-        if ta.ndim > 3:
+        if ta.ndim > ndim_cutoff:
             self._split_tensor_tid(
                 tida, left_inds=None, right_inds=[inda, *bix], method='qr')
             # get new location of ind
@@ -5594,7 +5602,7 @@ class TensorNetwork(object):
         else:
             drop_tags = False
 
-        if tb.ndim > 3:
+        if tb.ndim > ndim_cutoff:
             self._split_tensor_tid(
                 tidb, left_inds=None, right_inds=[indb, *bix], method='qr')
             # get new location of ind
@@ -5603,15 +5611,26 @@ class TensorNetwork(object):
             drop_tags = False
 
         # contract the reduced factors and get the tensor
-        self._contract_between_tids(tida, tidb)
-        tab, = self._inds_get(inda, indb)
-
-        # modify with the desired tags
         tags = tags_to_oset(tags)
-        if drop_tags:
-            tab.modify(tags=tags)
+        if combine:
+            self._contract_between_tids(tida, tidb)
+            tab, = self._inds_get(inda, indb)
+
+            # modify with the desired tags
+            if drop_tags:
+                tab.modify(tags=tags)
+            else:
+                tab.modify(tags=tab.tags | tags)
+
         else:
-            tab.modify(tags=tab.tags | tags)
+            ta, = self._inds_get(inda)
+            tb, = self._inds_get(indb)
+            if drop_tags:
+                ta.modify(tags=tags)
+                tb.modify(tags=tags)
+            else:
+                ta.modify(tags=ta.tags | tags)
+                tb.modify(tags=tb.tags | tags)
 
     def _get_neighbor_tids(self, tids, exclude_inds=()):
         """Get the tids of tensors connected to the tensor at ``tid``.
