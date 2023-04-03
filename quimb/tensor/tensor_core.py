@@ -2836,7 +2836,7 @@ class Tensor(object):
         """
         return {
             "backend": self.backend,
-            "dtype": get_dtype_name(self.dtype),
+            "dtype": get_dtype_name(self.data),
         }
 
     def _repr_info_str(self, normal=True, extra=False):
