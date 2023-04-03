@@ -1197,10 +1197,15 @@ def tensor_network_distance(
     """
     check_opt('method', method, ('auto', 'dense', 'overlap'))
 
+    tnA = tnA.as_network()
+    tnB = tnB.as_network()
+
     oix = tnA.outer_inds()
     if set(oix) != set(tnB.outer_inds()):
         raise ValueError(
-            "Can only fit tensor networks with matching outer indices.")
+            "Can only compute distance between tensor "
+            "networks with matching outer indices."
+        )
 
     if method == 'auto':
         d = tnA.inds_size(oix)
@@ -1284,7 +1289,8 @@ def tensor_network_fit_autodiff(
         loss_kwargs={'method': distance_method, 'optimize': contract_optimize},
         autodiff_backend=autodiff_backend,
         progbar=progbar,
-        **kwargs)
+        **kwargs
+    )
 
     tn_fit = tnopt.optimize(steps, tol=tol)
 
@@ -7596,6 +7602,14 @@ class TensorNetwork(object):
         """
         return TensorNetwork((self, other)) ^ ...
 
+    def as_network(self, virtual=True):
+        """Matching method (for ensuring object is a tensor network) to
+        :meth:`~quimb.tensor.tensor_core.Tensor.as_network`, which simply
+        returns ``self`` if ``virtual=True``.
+        """
+        return self if virtual else self.copy()
+
+
     def aslinearoperator(self, left_inds, right_inds, ldims=None, rdims=None,
                          backend=None, optimize=None):
         """View this ``TensorNetwork`` as a
@@ -7899,6 +7913,8 @@ class TensorNetwork(object):
         fitting_opts['tol'] = tol
         fitting_opts['inplace'] = inplace
         fitting_opts['progbar'] = progbar
+
+        tn_target = tn_target.as_network()
 
         if method == 'autodiff':
             return tensor_network_fit_autodiff(self, tn_target, **fitting_opts)

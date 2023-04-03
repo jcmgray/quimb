@@ -19,3 +19,4 @@ Examples
   ./examples/ex_tn_qaoa_energy_bayesopt
   ./examples/ex_quimb_within_torch
   ./examples/ex_quimb_within_jax_flax_optax
+  ./examples/ex_tn_tensor_fitting
