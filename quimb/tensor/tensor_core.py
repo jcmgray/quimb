@@ -2818,6 +2818,9 @@ class Tensor(object):
         self._owners = {}
 
     def _repr_info(self):
+        """General info to show in various reprs. Sublasses can add more
+        relevant info to this dict.
+        """
         info = {
             "shape": self.shape,
             "inds": self.inds,
@@ -2828,12 +2831,30 @@ class Tensor(object):
         return info
 
     def _repr_info_extra(self):
+        """General detailed info to show in various reprs. Sublasses can add
+        more relevant info to this dict.
+        """
         return {
             "backend": self.backend,
-            "dtype": self.dtype,
+            "dtype": get_dtype_name(self.dtype),
         }
 
+    def _repr_info_str(self, normal=True, extra=False):
+        """Render the general info as a string.
+        """
+        info = {}
+        if normal:
+            info.update(self._repr_info())
+        if extra:
+            info.update(self._repr_info_extra())
+        return ", ".join(
+            "{}={}".format(k, f"'{v}'" if isinstance(v, str) else v)
+            for k, v in info.items()
+        )
+
     def _repr_html_(self):
+        """Render this Tensor as HTML, for Jupyter notebooks.
+        """
         s = "<samp>"
         s += "<details>"
         s += "<summary>"
@@ -2853,22 +2874,14 @@ class Tensor(object):
         s += "</samp>"
         return s
 
-    def __repr__(self):
+    def __str__(self):
         return (
-            f"{self.__class__.__name__}(" +
-            ", ".join(
-                f"{k}={v}" for k, v in self._repr_info().items()
-            ) +
-            ")"
+            f"{self.__class__.__name__}({self._repr_info_str(extra=True)})"
         )
 
-    def __str__(self):
-        info = self._repr_info()
-        info.update(self._repr_info_extra())
+    def __repr__(self):
         return (
-            f"{self.__class__.__name__}(" +
-            ", ".join(f"{k}={v}" for k, v in info.items()) +
-            ")"
+            f"{self.__class__.__name__}({self._repr_info_str()})"
         )
 
 
@@ -9646,17 +9659,30 @@ class TensorNetwork(object):
             t.add_owner(self, tid=tid)
 
     def _repr_info(self):
+        """General info to show in various reprs. Sublasses can add more
+        relevant info to this dict.
+        """
         return {
             'tensors': self.num_tensors,
             'indices': self.num_indices,
         }
 
+    def _repr_info_str(self):
+        """Render the general info as a string.
+        """
+        return ", ".join(
+            "{}={}".format(k, f"'{v}'" if isinstance(v, str) else v)
+            for k, v in self._repr_info().items()
+        )
+
     def _repr_html_(self):
+        """Render this TensorNetwork as HTML, for Jupyter notebooks.
+        """
         s = "<samp>"
         s += "<details>"
         s += "<summary>"
         s += f"{auto_color_html(self.__class__.__name__)}"
-        s += f"({', '.join(f'{k}={v}' for k, v in self._repr_info().items())})"
+        s += f"({self._repr_info_str()})"
         s += "</summary>"
         for t in self:
             s += t._repr_html_()
@@ -9671,18 +9697,11 @@ class TensorNetwork(object):
                 f"    {repr(t)},{os.linesep}"
                 for t in self.tensors
             ) +
-            f"]{self._repr_info()})"
+            f"], {self._repr_info_str()})"
         )
 
     def __repr__(self):
-        rep = f"<{self.__class__.__name__}("
-        rep += (
-            ", ".join(
-                f"{k}={v}"
-                for k, v in self._repr_info().items()
-            )
-        )
-        return rep + ")>"
+        return f"{self.__class__.__name__}({self._repr_info_str()})"
 
     draw = draw_tn
     draw_3d = functools.partialmethod(
