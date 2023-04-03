@@ -1371,3 +1371,93 @@ def visualize_tensor(tensor, **kwargs):
     kwargs.setdefault("compass", True)
     kwargs.setdefault("compass_labels", tensor.inds)
     return xyz.visualize_tensor(tensor.data, **kwargs)
+
+
+COLORING_SEED = 8  # 8, 10
+
+
+def set_coloring_seed(seed):
+    """Set the seed for the random color generator.
+
+    Parameters
+    ----------
+    seed : int
+        The seed to use.
+    """
+    global COLORING_SEED
+    COLORING_SEED = seed
+
+
+def hash_to_nvalues(s, nval, seed=None):
+    """Hash the string ``s`` to ``nval`` different floats in the range [0, 1].
+    """
+    import hashlib
+
+    if seed is None:
+        seed = COLORING_SEED
+
+    m = hashlib.sha256()
+    m.update(f"{seed}".encode())
+    m.update(s.encode())
+    hsh = m.hexdigest()
+
+    b = len(hsh) // nval
+    if b == 0:
+        raise ValueError(
+            f"Can't extract {nval} values from hash of length {len(hsh)}"
+        )
+    return tuple(
+        int(hsh[i * b : (i + 1) * b], 16) / 16**b for i in range(nval)
+    )
+
+
+def hash_to_color(
+    s,
+    hmin=0.0,
+    hmax=1.0,
+    smin=0.3,
+    smax=0.8,
+    vmin=0.8,
+    vmax=0.9,
+):
+    """Generate a random color for a string  ``s``.
+
+    Parameters
+    ----------
+    s : str
+        The string to generate a color for.
+    hmin : float, optional
+        The minimum hue value.
+    hmax : float, optional
+        The maximum hue value.
+    smin : float, optional
+        The minimum saturation value.
+    smax : float, optional
+        The maximum saturation value.
+    vmin : float, optional
+        The minimum value value.
+    vmax : float, optional
+        The maximum value value.
+
+    Returns
+    -------
+    color : tuple
+        A tuple of floats in the range [0, 1] representing the RGB color.
+    """
+    from matplotlib.colors import to_hex, hsv_to_rgb
+
+    h, s, v = hash_to_nvalues(s, 3)
+    h = hmin + h * (hmax - hmin)
+    s = smin + s * (smax - smin)
+    v = vmin + v * (vmax - vmin)
+
+    rgb = hsv_to_rgb((h, s, v))
+    return to_hex(rgb)
+
+
+def auto_color_html(s):
+    """Automatically hash and color a string for HTML display.
+    """
+    if not isinstance(s, str):
+        s = str(s)
+    return f'<b style="color: {hash_to_color(s)};">{s}</b>'

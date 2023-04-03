@@ -17,7 +17,7 @@ import numpy as np
 import opt_einsum as oe
 import scipy.sparse.linalg as spla
 from autoray import (do, conj, reshape, transpose, astype,
-                     infer_backend, get_dtype_name, dag)
+                     infer_backend, get_dtype_name, dag, shape)
 try:
     from autoray import get_common_dtype
 except ImportError:
@@ -30,7 +30,7 @@ from ..gen.rand import randn, seed_rand, rand_matrix, rand_uni
 from . import decomp
 from .array_ops import (iscomplex, norm_fro, ndim, asarray, PArray,
                         find_diag_axes, find_antidiag_axes, find_columns)
-from .drawing import draw_tn, visualize_tensor
+from .drawing import draw_tn, visualize_tensor, auto_color_html
 
 from .contraction import (
     get_contractor,
@@ -1906,21 +1906,35 @@ class Tensor(object):
 
     @property
     def shape(self):
-        return self._data.shape
+        """The size of each dimension.
+        """
+        return shape(self._data)
 
     @property
     def ndim(self):
+        """The number of dimensions.
+        """
         return len(self._inds)
 
     @property
     def size(self):
+        """The total number of array elements.
+        """
         # more robust than calling _data.size (e.g. for torch) - consider
         # adding do('size', x) to autoray?
         return prod(self.shape)
 
     @property
     def dtype(self):
+        """The data type of the array elements.
+        """
         return self._data.dtype
+
+    @property
+    def backend(self):
+        """The backend inferred from the data.
+        """
+        return infer_backend(self._data)
 
     def iscomplex(self):
         return iscomplex(self.data)
@@ -2797,17 +2811,59 @@ class Tensor(object):
         self._tags = tags.copy()
         self._owners = {}
 
+    def _repr_info(self):
+        info = {
+            "shape": self.shape,
+            "inds": self.inds,
+            "tags": self.tags,
+        }
+        if self._left_inds is not None:
+            info["left_inds"] = self._left_inds
+        return info
+
+    def _repr_info_extra(self):
+        return {
+            "backend": self.backend,
+            "dtype": self.dtype,
+        }
+
+    def _repr_html_(self):
+        s = "<samp>"
+        s += "<details>"
+        s += "<summary>"
+        shape_repr = ', '.join(auto_color_html(d) for d in self.shape)
+        inds_repr = ', '.join(auto_color_html(ix) for ix in self.inds)
+        tags_repr = ', '.join(auto_color_html(tag) for tag in self.tags)
+        s += (
+            f"{auto_color_html(self.__class__.__name__)}("
+            f'shape=({shape_repr}), inds=[{inds_repr}], tags={{{tags_repr}}}'
+            "),"
+        )
+        s += "</summary>"
+        s += f"backend={auto_color_html(self.backend)}, "
+        s += f"dtype={auto_color_html(self.dtype)}, "
+        s += f"data={repr(self.data)}"
+        s += "</details>"
+        s += "</samp>"
+        return s
+
     def __repr__(self):
-        return (f"{self.__class__.__name__}("
-                f"shape={tuple(map(int, self.data.shape))}, "
-                f"inds={self.inds}, "
-                f"tags={self.tags})")
+        return (
+            f"{self.__class__.__name__}(" +
+            ", ".join(
+                f"{k}={v}" for k, v in self._repr_info().items()
+            ) +
+            ")"
+        )
 
     def __str__(self):
-        s = self.__repr__()[:-1]
-        s += (f", backend='{infer_backend(self.data)}'"
-              f", dtype='{get_dtype_name(self.data)}')")
-        return s
+        info = self._repr_info()
+        info.update(self._repr_info_extra())
+        return (
+            f"{self.__class__.__name__}(" +
+            ", ".join(f"{k}={v}" for k, v in info.items()) +
+            ")"
+        )
 
 
 @functools.lru_cache(128)
@@ -9573,22 +9629,55 @@ class TensorNetwork(object):
         for tid, t in self.__dict__['tensor_map'].items():
             t.add_owner(self, tid=tid)
 
+    def _repr_info(self):
+        return {
+            'tensors': self.num_tensors,
+            'indices': self.num_indices,
+        }
+
+    def _repr_html_(self):
+        s = "<samp>"
+        s += "<details>"
+        s += "<summary>"
+        s += f"{auto_color_html(self.__class__.__name__)}"
+        s += f"({', '.join(f'{k}={v}' for k, v in self._repr_info().items())})"
+        s += "</summary>"
+        for t in self:
+            s += t._repr_html_()
+        s += "</details>"
+        s += "</samp>"
+        return s
+
     def __str__(self):
-        return "{}([{}{}{}])".format(
-            self.__class__.__name__,
-            os.linesep,
-            "".join(["    " + repr(t) + "," + os.linesep
-                     for t in self.tensors[:-1]]),
-            "    " + repr(self.tensors[-1]) + "," + os.linesep)
+        return (
+            f"{self.__class__.__name__}([{os.linesep}" +
+            "".join(
+                f"    {repr(t)},{os.linesep}"
+                for t in self.tensors
+            ) +
+            f"]{self._repr_info()})"
+        )
 
     def __repr__(self):
         rep = f"<{self.__class__.__name__}("
-        rep += f"tensors={self.num_tensors}"
-        rep += f", indices={self.num_indices}"
-
+        rep += (
+            ", ".join(
+                f"{k}={v}"
+                for k, v in self._repr_info().items()
+            )
+        )
         return rep + ")>"
 
     draw = draw_tn
+    draw_3d = functools.partialmethod(
+        draw, dim=3, backend='matplotlib3d'
+    )
+    draw_interactive = functools.partialmethod(
+        draw, backend='plotly'
+    )
+    draw_3d_interactive = functools.partialmethod(
+        draw, dim=3, backend='plotly'
+    )
     graph = draw_tn
 
 

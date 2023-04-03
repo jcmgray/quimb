@@ -493,21 +493,11 @@ class TensorNetwork1D(TensorNetworkGen):
         # contract each block of sites cumulatively
         return self.contract_cumulative(tags_seq, inplace=inplace, **opts)
 
-    def __repr__(self):
-        """Insert length and max bond into standard print.
-        """
-        s = super().__repr__()
-        extra = f', L={self.L}, max_bond={self.max_bond()}'
-        s = f'{s[:-2]}{extra}{s[-2:]}'
-        return s
-
-    def __str__(self):
-        """Insert length and max bond into standard print.
-        """
-        s = super().__str__()
-        extra = f', L={self.L}, max_bond={self.max_bond()}'
-        s = f'{s[:-1]}{extra}{s[-1:]}'
-        return s
+    def _repr_info(self):
+        info = super()._repr_info()
+        info["L"] = self.L
+        info["max_bond"] = self.max_bond()
+        return info
 
 
 class TensorNetwork1DVector(TensorNetwork1D, TensorNetworkGenVector):

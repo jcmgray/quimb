@@ -27,13 +27,13 @@ setup(
         'psutil>=4.3.1',
         'cytoolz>=0.8.0',
         'tqdm>=4',
+        'opt_einsum>=3.2',
+        'autoray>=0.5.1',
     ],
     extras_require={
         'tensor': [
             'matplotlib>=2.0',
             'networkx>=2.3',
-            'opt_einsum>=3.2',
-            'autoray>=0.5.1',
             'diskcache>=3.0',
         ],
         'advanced_solvers': [

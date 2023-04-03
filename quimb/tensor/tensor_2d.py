@@ -683,19 +683,12 @@ class TensorNetwork2D(TensorNetworkGen):
         """Print a unicode schematic of this 2D TN and its bond dimensions."""
         show_2d(self)
 
-    def __repr__(self):
-        """Insert number of rows and columns into standard print."""
-        s = super().__repr__()
-        extra = f", Lx={self.Lx}, Ly={self.Ly}, max_bond={self.max_bond()}"
-        s = f"{s[:-2]}{extra}{s[-2:]}"
-        return s
-
-    def __str__(self):
-        """Insert number of rows and columns into standard print."""
-        s = super().__str__()
-        extra = f", Lx={self.Lx}, Ly={self.Ly}, max_bond={self.max_bond()}"
-        s = f"{s[:-1]}{extra}{s[-1:]}"
-        return s
+    def _repr_info(self):
+        info = super()._repr_info()
+        info["Lx"] = self.Lx
+        info["Ly"] = self.Ly
+        info["max_bond"] = self.max_bond()
+        return info
 
     def flatten(self, fuse_multibonds=True, inplace=False):
         """Contract all tensors corresponding to each site into one."""

@@ -595,25 +595,13 @@ class TensorNetwork3D(TensorNetworkGen):
         """Key based tensor selection, checking for integer based shortcut."""
         return super().__getitem__(self.maybe_convert_coo(key))
 
-    def __repr__(self):
-        """Insert number of slices into standard print."""
-        s = super().__repr__()
-        extra = (
-            f", Lx={self.Lx}, Ly={self.Ly}, Lz={self.Lz}, "
-            f"max_bond={self.max_bond()}"
-        )
-        s = f"{s[:-2]}{extra}{s[-2:]}"
-        return s
-
-    def __str__(self):
-        """Insert number of slices into standard print."""
-        s = super().__repr__()
-        extra = (
-            f", Lx={self.Lx}, Ly={self.Ly}, Lz={self.Lz}"
-            f"max_bond={self.max_bond()}"
-        )
-        s = f"{s[:-2]}{extra}{s[-2:]}"
-        return s
+    def _repr_info(self):
+        info = super()._repr_info()
+        info["Lx"] = self.Lx
+        info["Ly"] = self.Ly
+        info["Lz"] = self.Lz
+        info["max_bond"] = self.max_bond()
+        return info
 
     def flatten(self, fuse_multibonds=True, inplace=False):
         """Contract all tensors corresponding to each site into one."""
