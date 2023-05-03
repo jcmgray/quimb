@@ -7,7 +7,7 @@ Welcome to quimb's documentation!
 .. image:: https://github.com/jcmgray/quimb/actions/workflows/tests.yml/badge.svg
   :target: https://github.com/jcmgray/quimb/actions/workflows/tests.yml
   :alt: Tests
-.. image:: https://codecov.io/gh/jcmgray/quimb/branch/develop/graph/badge.svg
+.. image:: https://codecov.io/gh/jcmgray/quimb/branch/main/graph/badge.svg
   :target: https://codecov.io/gh/jcmgray/quimb
   :alt: Code Coverage
 .. image:: https://app.codacy.com/project/badge/Grade/3c7462a3c45f41fd9d8f0a746a65c37c

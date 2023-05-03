@@ -13,7 +13,7 @@ The code is hosted on `github <https://github.com/jcmgray/quimb>`_ and if the de
 
 .. code-block:: bash
 
-    pip install --no-deps -U git+https://github.com/jcmgray/quimb.git@develop
+    pip install --no-deps -U git+https://github.com/jcmgray/quimb.git@main
 
 
 Required Dependencies
