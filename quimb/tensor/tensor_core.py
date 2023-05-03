@@ -16,8 +16,9 @@ from numbers import Integral
 import numpy as np
 import opt_einsum as oe
 import scipy.sparse.linalg as spla
-from autoray import (do, conj, reshape, transpose, astype,
-                     infer_backend, get_dtype_name, dag, shape)
+from autoray import (
+    do, conj, astype, infer_backend, get_dtype_name, dag, shape
+)
 try:
     from autoray import get_common_dtype
 except ImportError:
@@ -1216,8 +1217,8 @@ def tensor_network_distance(
 
     # directly form vectorizations of both
     if method == 'dense':
-        A = tnA.to_dense(oix, to_qarray=False)
-        B = tnB.to_dense(oix, to_qarray=False)
+        A = tnA.to_dense(oix)
+        B = tnB.to_dense(oix)
         return do('linalg.norm', A - B)
 
     # overlap method
@@ -1515,7 +1516,7 @@ def tensor_network_fit_als(
 #                                Tensor Class                                 #
 # --------------------------------------------------------------------------- #
 
-class Tensor(object):
+class Tensor:
     """A labelled, tagged n-dimensional array. The index labels are used
     instead of axis numbers to identify dimensions, and are preserved through
     operations. The tags are used to identify the tensor within networks, and
@@ -1934,7 +1935,7 @@ class Tensor(object):
     def dtype(self):
         """The data type of the array elements.
         """
-        return self._data.dtype
+        return getattr(self._data, "dtype", None)
 
     @property
     def backend(self):
@@ -2023,7 +2024,7 @@ class Tensor(object):
 
         current_ind_map = {ind: i for i, ind in enumerate(t.inds)}
         perm = tuple(current_ind_map[i] for i in output_inds)
-        t.modify(apply=lambda x: transpose(x, perm), inds=output_inds)
+        t.modify(apply=lambda x: do("transpose", x, perm), inds=output_inds)
         return t
 
     transpose_ = functools.partialmethod(transpose, inplace=True)
@@ -2229,11 +2230,52 @@ class Tensor(object):
     def split(self, *args, **kwargs):
         return tensor_split(self, *args, **kwargs)
 
+    def compute_reduced_factor(
+        self,
+        side,
+        left_inds,
+        right_inds,
+        **split_opts,
+    ):
+        check_opt("side", side, ("left", "right"))
+
+        split_opts["left_inds"] = left_inds
+        split_opts["right_inds"] = right_inds
+        split_opts["get"] = "arrays"
+        if side == "right":
+            which = 1
+            split_opts["method"] = "qr"
+        else:  # side == "left"
+            which = 0
+            split_opts["method"] = "lq"
+
+        return tensor_split(self, **split_opts)[which]
+
+        X = self.to_dense(left_inds, right_inds)
+
+        if side == "right":
+            # contract the left indices
+            XX = dag(X) @ X
+        else: # "left"
+            # contract the right indices
+            XX = X @ dag(X)
+
+        return decomp.squared_op_to_reduced_factor(
+            XX, *shape(X), right=(side == "right")
+        )
+
+
     @functools.wraps(tensor_network_distance)
     def distance(self, other, **contract_opts):
         return tensor_network_distance(self, other, **contract_opts)
 
-    def gate(self, G, ind, inplace=False, **contract_opts):
+    def gate(
+        self,
+        G,
+        ind,
+        preserve_inds=True,
+        inplace=False,
+    ):
         """Gate this tensor - contract a matrix into one of its indices without
         changing its indices. Unlike ``contract``, ``G`` is a raw array and the
         tensor remains with the same set of indices.
@@ -2271,10 +2313,20 @@ class Tensor(object):
 
         """
         t = self if inplace else self.copy()
-        G_inds = ['__tmp__', ind]
-        out = ['__tmp__' if ix == ind else ix for ix in t.inds]
-        new_data = oe.contract(G, G_inds, t.data, t.inds, out, **contract_opts)
-        t.modify(data=new_data)
+
+        ax = t.inds.index(ind)
+        new_data = do("tensordot", G, t.data, ((1,), (ax,)))
+
+        if preserve_inds:
+            # gated index is now first axis, so move it to the correct position
+            perm = (*range(1, ax + 1), 0, *range(ax + 1, t.ndim))
+            new_data = do("transpose", new_data, perm)
+            t.modify(data=new_data)
+        else:
+            # simply update index labels
+            new_inds = (ind, *t.inds[:ax], *t.inds[ax + 1:])
+            t.modify(data=new_data, inds=new_inds)
+
         return t
 
     gate_ = functools.partialmethod(gate, inplace=True)
@@ -2463,23 +2515,25 @@ class Tensor(object):
         # create new tensor with new + remaining indices
         #     + updated 'left' marked indices assuming all unfused left inds
         #       remain 'left' marked
-        t.modify(data=reshape(t.data, new_dims),
+        t.modify(data=do("reshape", t.data, new_dims),
                  inds=new_inds, left_inds=new_left_inds)
 
         return t
 
     unfuse_ = functools.partialmethod(unfuse, inplace=True)
 
-    def to_dense(self, *inds_seq, to_qarray=True):
+    def to_dense(self, *inds_seq, to_qarray=False):
         """Convert this Tensor into an dense array, with a single dimension
         for each of inds in ``inds_seqs``. E.g. to convert several sites
         into a density matrix: ``T.to_dense(('k0', 'k1'), ('b0', 'b1'))``.
         """
         fuse_map = [(f"__d{i}__", ix) for i, ix in enumerate(inds_seq)]
         x = self.fuse(fuse_map).data
-        if (infer_backend(x) == 'numpy') and to_qarray:
+        if to_qarray and (infer_backend(x) == 'numpy'):
             return qarray(x)
         return x
+
+    to_qarray = functools.partialmethod(to_dense, to_qarray=True)
 
     def squeeze(self, include=None, inplace=False):
         """Drop any singlet dimensions from this tensor.
@@ -2509,10 +2563,10 @@ class Tensor(object):
         if not new_shape_new_inds:
             # squeezing everything -> can't unzip `new_shape_new_inds`
             new_inds = ()
-            new_data = reshape(t.data, ())
+            new_data = do("reshape", t.data, ())
         else:
             new_shape, new_inds = zip(*new_shape_new_inds)
-            new_data = reshape(t.data, new_shape)
+            new_data = do("reshape", t.data, new_shape)
 
         new_left_inds = (
             None if self.left_inds is None else
@@ -2633,7 +2687,7 @@ class Tensor(object):
         x = decomp.isometrize(x, method=method)
 
         # turn the array back into a tensor
-        x = reshape(x, [self.ind_size(ix) for ix in LR_inds])
+        x = do("reshape", x, [self.ind_size(ix) for ix in LR_inds])
         Tu = self.__class__(
             x, inds=LR_inds, tags=self.tags, left_inds=left_inds
         )
@@ -2697,7 +2751,9 @@ class Tensor(object):
         tensor being contracted into index ``ind``.
         """
         t = self if inplace else self.copy()
-        x_broadcast = reshape(x, [(-1 if i == ind else 1) for i in t.inds])
+        x_broadcast = do(
+            "reshape", x, tuple((-1 if i == ind else 1) for i in t.inds)
+        )
         t.modify(data=t.data * x_broadcast)
         return t
 
@@ -2869,7 +2925,10 @@ class Tensor(object):
         s += "</summary>"
         s += f"backend={auto_color_html(self.backend)}, "
         s += f"dtype={auto_color_html(self.dtype)}, "
-        s += f"data={repr(self.data)}"
+        if self.size > 100:
+            s += "data=..."
+        else:
+            s += f"data={repr(self.data)}"
         s += "</details>"
         s += "</samp>"
         return s
@@ -3401,7 +3460,7 @@ def tensor_network_gate_inds(
 
     if ndimG != 2 * ng:
         # gate supplied as matrix, factorize it
-        G = reshape(G, dims * 2)
+        G = do("reshape", G, dims * 2)
 
     if not all(d == dims[i % ng] for i, d in enumerate(G.shape)):
         raise ValueError(f"Gate with shape {G.shape} doesn't match "
@@ -5099,6 +5158,106 @@ class TensorNetwork(object):
         gate_inds_with_tn, inplace=True
     )
 
+    def _compute_tree_gauges(self, tree, outputs):
+        """Given a ``tree`` of connected tensors, absorb the gauges from
+        outside inwards, finally outputing the gauges associated with the
+        ``outputs``.
+
+        Parameters
+        ----------
+        tree : sequence of (tid_outer, tid_inner, distance)
+            The tree of connected tensors, see :meth:`get_tree_span`.
+        outputs : sequence of (tid, ind)
+            Each output is specified by a tensor id and an index, such that
+            having absorbed all gauges in the tree, the effective reduced
+            factor of the tensor with respect to the index is returned.
+
+        Returns
+        -------
+        Gouts : sequence of array
+            The effective reduced factors of the tensor index pairs specified
+            in ``outputs``, each a matrix.
+        """
+        Gs = {}
+
+        for tid_outer, tid_inner, _ in tree:
+            t_outer = self.tensor_map[tid_outer]
+            t_inner = self.tensor_map[tid_inner]
+
+            # group indices and ensure single connecting bond
+            outer_ix, inner_ix, _ = tensor_make_single_bond(
+                t_outer,
+                t_inner,
+            )
+
+            # absorb any present gauges into the outer tensor
+            for ix in outer_ix:
+                if ix in Gs:
+                    t_outer = t_outer.gate(Gs.pop(ix), ix)
+
+            # compute the reduced factor to accumulated inwards
+            new_G = t_outer.compute_reduced_factor('right', outer_ix, inner_ix)
+
+            # store the normalized gauge associated with the tree bond
+            Gs[inner_ix] = new_G / do("linalg.norm", new_G)
+
+        # compute the final output gauges
+        Gouts = []
+        for tid, ind in outputs:
+            t_outer = self.tensor_map[tid]
+
+            # absorb any present gauges into the output tensor
+            outer_ix = tuple(ix for ix in t_outer.inds if ix != ind)
+            for ix in outer_ix:
+                if ix in Gs:
+                    t_outer = t_outer.gate(Gs.pop(ix), ix)
+
+            # compute the final reduced factor
+            Gout = t_outer.compute_reduced_factor('right', outer_ix, ind)
+            Gouts.append(Gout)
+
+        return Gouts
+
+    def _compress_between_virtual_tree_tids(
+        self,
+        tidl,
+        tidr,
+        max_bond,
+        cutoff,
+        r,
+        absorb="both",
+        include=None,
+        exclude=None,
+        span_opts=None,
+        **compress_opts,
+    ):
+        check_opt("absorb", absorb, ("both",))
+
+        span_opts = ensure_dict(span_opts)
+        span_opts["max_distance"] = r
+        span_opts["include"] = include
+        span_opts["exclude"] = exclude
+
+        compress_opts["max_bond"] = max_bond
+        compress_opts["cutoff"] = cutoff
+
+        tl = self.tensor_map[tidl]
+        tr = self.tensor_map[tidr]
+        _, bix, _ = tensor_make_single_bond(tl, tr)
+
+        # build a single tree spanning out from both tensors
+        tree = self.get_tree_span([tidl, tidr], **span_opts)
+
+        # compute the output gauges associated with the tree
+        Rl, Rr = self._compute_tree_gauges(tree, [(tidl, bix), (tidr, bix)])
+
+        # compute the oblique projectors from the reduced factors
+        Pl, Pr = decomp.compute_oblique_projectors(Rl, Rr.T, **compress_opts)
+
+        # absorb the projectors into the tensors to perform the compression
+        tl.gate_(Pl.T, bix)
+        tr.gate_(Pr, bix)
+
     def _compute_bond_env(
         self, tid1, tid2,
         select_local_distance=None,
@@ -5277,27 +5436,53 @@ class TensorNetwork(object):
             return
 
         if (max_bond is not None) and (cutoff == 0.0):
-            lsize = prod(map(self.ind_size, lix))
-            rsize = prod(map(self.ind_size, rix))
+            lsize = self.inds_size(lix)
+            rsize = self.inds_size(rix)
             if (lsize <= max_bond) or (rsize <= max_bond):
                 # special case - fixing any orthonormal basis for the left or
                 # right tensor (whichever has smallest outer dimensions) will
                 # produce the required compression without any SVD
                 compress_absorb = 'right' if lsize <= rsize else 'left'
                 tensor_canonize_bond(
-                    ta, tb, absorb=compress_absorb,
-                    gauges=gauges, gauge_smudge=gauge_smudge)
+                    ta, tb,
+                    absorb=compress_absorb,
+                    gauges=gauges,
+                    gauge_smudge=gauge_smudge,
+                )
 
                 if absorb != compress_absorb:
                     tensor_canonize_bond(
-                        ta, tb, absorb=absorb,
-                        gauges=gauges, gauge_smudge=gauge_smudge)
+                        ta, tb,
+                        absorb=absorb,
+                        gauges=gauges,
+                        gauge_smudge=gauge_smudge,
+                    )
 
                 if equalize_norms:
                     self.strip_exponent(tid1, equalize_norms)
                     self.strip_exponent(tid2, equalize_norms)
 
                 return
+
+        compress_opts['max_bond'] = max_bond
+        compress_opts['cutoff'] = cutoff
+        compress_opts['absorb'] = absorb
+        if gauges is not None:
+            compress_opts['gauges'] = gauges
+            compress_opts['gauge_smudge'] = gauge_smudge
+
+        if isinstance(mode, str) and "virtual" in mode:
+            # canonize distance is handled by the virtual tree
+            # -> turn off explicit tree canonization
+            compress_opts.setdefault("r", canonize_distance)
+            if canonize_opts is not None:
+                compress_opts.setdefault(
+                    "include", canonize_opts.get("include", None)
+                )
+                compress_opts.setdefault(
+                    "exclude", canonize_opts.get("exclude", None)
+                )
+            canonize_distance = None
 
         if canonize_distance:
             # gauge around pair by absorbing QR factors along bonds
@@ -5311,26 +5496,27 @@ class TensorNetwork(object):
                 **canonize_opts
             )
 
-        compress_opts['max_bond'] = max_bond
-        compress_opts['cutoff'] = cutoff
-        compress_opts['absorb'] = absorb
-        if gauges is not None:
-            compress_opts['gauges'] = gauges
-            compress_opts['gauge_smudge'] = gauge_smudge
-
         if mode == 'basic':
-            tensor_compress_bond(ta, tb, **compress_opts)
-
+            tensor_compress_bond(
+                ta, tb, **compress_opts
+            )
+        elif mode == 'virtual-tree':
+            self._compress_between_virtual_tree_tids(
+                tid1, tid2, **compress_opts
+            )
         elif mode == 'full-bond':
-            self._compress_between_full_bond_tids(tid1, tid2, **compress_opts)
-
-
+            self._compress_between_full_bond_tids(
+                tid1, tid2, **compress_opts
+            )
         elif mode == 'local-fit':
-            self._compress_between_local_fit(tid1, tid2, **compress_opts)
-
+            self._compress_between_local_fit(
+                tid1, tid2, **compress_opts
+            )
         else:
             # assume callable
-            mode(self, tid1, tid2, **compress_opts)
+            mode(
+                self, tid1, tid2, **compress_opts
+            )
 
         if equalize_norms:
             self.strip_exponent(tid1, equalize_norms)
@@ -7670,7 +7856,7 @@ class TensorNetwork(object):
         tn = self.reindex({u: l for u, l in zip(left_inds, right_inds)})
         return tn.contract_tags(..., **contract_opts)
 
-    def to_dense(self, *inds_seq, to_qarray=True, **contract_opts):
+    def to_dense(self, *inds_seq, to_qarray=False, **contract_opts):
         """Convert this network into an dense array, with a single dimension
         for each of inds in ``inds_seqs``. E.g. to convert several sites
         into a density matrix: ``TN.to_dense(('k0', 'k1'), ('b0', 'b1'))``.
@@ -7733,42 +7919,20 @@ class TensorNetwork(object):
         if side == "right":
             # form dag(X) @ X --> left_inds are contracted
             ixmap = {ix: rand_uuid() for ix in right_inds}
-            if d0 < d1:
-                # know exactly low-rank, so truncate
-                keep = d0
-            else:
-                keep = None
         else:  # 'left'
             # form X @ dag(X) --> right_inds are contracted
             ixmap = {ix: rand_uuid() for ix in left_inds}
-            if d1 < d0:
-                # know exactly low-rank, so truncate
-                keep = d1
-            else:
-                keep = None
 
         # contract to dense array
         tnd = self.reindex(ixmap).conj_() & self
         XX = tnd.to_dense(
-            ixmap.values(), ixmap.keys(), optimize=optimize, **contract_opts
+            ixmap.values(), ixmap.keys(),
+            optimize=optimize, **contract_opts
         )
-        s2, W = do("linalg.eigh", XX)
 
-        if keep is not None:
-            # outer dimension smaller -> exactly low-rank
-            s2 = s2[-keep:]
-            W = W[:, -keep:]
-
-        # might have negative eigenvalues due to numerical error from squaring
-        s2 = do("clip", s2, s2[-1] * 1e-12, None)
-        s = do("sqrt", s2)
-
-        if side == "right":
-            factor = decomp.ldmul(s, dag(W))
-        else:  # 'left'
-            factor = decomp.rdmul(W, s)
-
-        return factor
+        return decomp.squared_op_to_reduced_factor(
+            XX, d0, d1, right=(side == "right"),
+        )
 
     def insert_compressor_between_regions(
         self,
@@ -7846,18 +8010,16 @@ class TensorNetwork(object):
         Rl = ltn.compute_reduced_factor("right", None, bix, optimize=optimize)
         Rr = rtn.compute_reduced_factor("left", bix, None, optimize=optimize)
 
-        # then combine and perform truncated SVD on these
-        Ut, st, VHt = decomp.svd_truncated(
-            Rl @ Rr, max_bond=max_bond, cutoff=cutoff,
-            absorb=None, **compress_opts
-        )
-        st_sqrt = do("sqrt", st)
-
         # then form the 'oblique' projectors
-        Pl = Rr @ decomp.rddiv(dag(VHt), st_sqrt)
-        Pl = reshape(Pl, (*bix_sizes, -1))
-        Pr = decomp.lddiv(st_sqrt, dag(Ut)) @ Rl
-        Pr = reshape(Pr, (-1, *bix_sizes))
+        Pl, Pr = decomp.compute_oblique_projectors(
+            Rl, Rr,
+            max_bond=max_bond,
+            cutoff=cutoff,
+            **compress_opts,
+        )
+
+        Pl = do("reshape", Pl, (*bix_sizes, -1))
+        Pr = do("reshape", Pr, (-1, *bix_sizes))
 
         if insert_into is not None:
             tn = insert_into
@@ -9830,7 +9992,7 @@ class TNLinearOperator(spla.LinearOperator):
         super().__init__(dtype=self._tensors[0].dtype, shape=(ld, rd))
 
     def _matvec(self, vec):
-        in_data = reshape(vec, self.rdims)
+        in_data = do("reshape", vec, self.rdims)
 
         if self.is_conj:
             in_data = conj(in_data)
@@ -9853,7 +10015,7 @@ class TNLinearOperator(spla.LinearOperator):
 
     def _matmat(self, mat):
         d = mat.shape[-1]
-        in_data = reshape(mat, (*self.rdims, d))
+        in_data = do("reshape", mat, (*self.rdims, d))
 
         if self.is_conj:
             in_data = conj(in_data)
@@ -9876,7 +10038,7 @@ class TNLinearOperator(spla.LinearOperator):
         if self.is_conj:
             out_data = conj(out_data)
 
-        return reshape(out_data, (-1, d))
+        return do("reshape", out_data, (-1, d))
 
     def trace(self):
         if 'trace' not in self._contractors:

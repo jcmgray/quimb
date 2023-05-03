@@ -535,7 +535,7 @@ class TensorNetworkGenVector(TensorNetworkGen):
     def to_dense(
         self,
         *inds_seq,
-        to_qarray=True,
+        to_qarray=False,
         to_ket=None,
         **contract_opts
     ):
@@ -1500,7 +1500,7 @@ class TensorNetworkGenOperator(TensorNetworkGen):
     def to_dense(
         self,
         *inds_seq,
-        to_qarray=True,
+        to_qarray=False,
         **contract_opts
     ):
         """Contract this tensor network 'operator' into a dense array.

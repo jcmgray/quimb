@@ -1049,3 +1049,127 @@ def isometrize(x, method="qr"):
     if fat:
         Q = do("transpose", Q)
     return Q
+
+
+@compose
+def squared_op_to_reduced_factor(x2, dl, dr, right=True):
+    """Given the square, ``x2``, of an operator ``x``, compute either the left
+    or right reduced factor matrix of the unsquared operator ``x`` with
+    original shape ``(dl, dr)``.
+    """
+    s2, W = do("linalg.eigh", x2)
+
+    if right:
+        if dl < dr:
+            # know exactly low-rank, so truncate
+            keep = dl
+        else:
+            keep = None
+    else:
+        if dl > dr:
+            # know exactly low-rank, so truncate
+            keep = dr
+        else:
+            keep = None
+
+    if keep is not None:
+        # outer dimension smaller -> exactly low-rank
+        s2 = s2[-keep:]
+        W = W[:, -keep:]
+
+    # might have negative eigenvalues due to numerical error from squaring
+    s2 = do("clip", s2, s2[-1] * 1e-12, None)
+    s = do("sqrt", s2)
+
+    if right:
+        factor = ldmul(s, dag(W))
+    else:  # 'left'
+        factor = rdmul(W, s)
+
+    return factor
+
+
+@squared_op_to_reduced_factor.register("numpy")
+@njit
+def squared_op_to_reduced_factor_numba(x2, dl, dr, right=True):
+    s2, W = np.linalg.eigh(x2)
+
+    if right:
+        if dl < dr:
+            # know exactly low-rank, so truncate
+            keep = dl
+        else:
+            keep = None
+    else:
+        if dl > dr:
+            # know exactly low-rank, so truncate
+            keep = dr
+        else:
+            keep = None
+
+    if keep is not None:
+        # outer dimension smaller -> exactly low-rank
+        s2 = s2[-keep:]
+        W = W[:, -keep:]
+
+    # might have negative eigenvalues due to numerical error from squaring
+    s2 = np.clip(s2, 0.0, None)
+    s = np.sqrt(s2)
+
+    if right:
+        factor = ldmul_numba(s, dag_numba(W))
+    else:  # 'left'
+        factor = rdmul_numba(W, s)
+
+    return factor
+
+
+def compute_oblique_projectors(
+    Rl, Rr, max_bond, cutoff, absorb="both", **compress_opts
+):
+    """Compute the oblique projectors for two reduced factor matrices that
+    describe a gauge on a bond. Concretely, assuming that ``Rl`` and ``Rr`` are
+    the reduced factor matrices for local operator ``A``, such that:
+
+    .. math::
+
+        A = Q_L R_L R_R Q_R
+
+    with ``Q_L`` and ``Q_R`` isometric matrices, then the optimal inner
+    truncation is given by:
+
+    .. math::
+
+        A' = Q_L P_L P_R' Q_R
+
+    Parameters
+    ----------
+    Rl : array
+        The left reduced factor matrix.
+    Rr : array
+        The right reduced factor matrix.
+
+    Returns
+    -------
+    Pl : array
+        The left oblique projector.
+    Pr : array
+        The right oblique projector.
+    """
+    if absorb != "both":
+        raise NotImplementedError("only absorb='both' supported")
+
+    Ut, st, VHt = svd_truncated(
+        Rl @ Rr,
+        max_bond=max_bond,
+        cutoff=cutoff,
+        absorb=None,
+        **compress_opts
+    )
+    st_sqrt = do("sqrt", st)
+
+    # then form the 'oblique' projectors
+    Pl = Rr @ rddiv(dag(VHt), st_sqrt)
+    Pr = lddiv(st_sqrt, dag(Ut)) @ Rl
+
+    return Pl, Pr

@@ -176,6 +176,8 @@ def draw_tn(
         The size of the arrow with respect to the edge.
     arrow_overhang : float, optional
         Varies the arrowhead between a triangle (0.0) and 'V' (1.0).
+    arrow_linewidth : float, optional
+        The width of the arrow line itself.
     label_color : tuple[float], optional
         Color to draw labels with.
     font_size : int, optional
