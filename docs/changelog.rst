@@ -3,9 +3,9 @@ Changelog
 
 Release notes for ``quimb``.
 
-.. _whats-new.1.4.3:
+.. _whats-new.1.5.0:
 
-v1.4.3 (unreleased)
+v1.5.0 (2023-05-03)
 -------------------
 
 **Enhancements**
@@ -50,13 +50,16 @@ v1.4.3 (unreleased)
 - add ``'lu'``, ``'polar_left'`` and ``'polar_right'`` methods to
   :func:`~quimb.tensor.tensor_core.tensor_split`.
 - add experimental arbitrary hamilotonian MPO building
-- :class:`TensorNetwork`: allow empty constructor (i.e. no tensors)
-- :meth:`TensorNetwork.drop_tags`: allow all tags to be dropped
+- :class:`~quimb.tensor.tensor_core.TensorNetwork`: allow empty constructor
+  (i.e. no tensors representing simply the scalar 1)
+- :meth:`~quimb.tensor.tensor_core.TensorNetwork.drop_tags`: allow all tags to
+  be dropped
 - tweaks to compressed contraction and gauging
 - add jax, flax and optax example
 - add 3D and interactive plotting of tensors networks with via plotly.
 - add pygraphiviz layout options
-- add :meth:`TensorNetwork.combine` for unified handling of combining
+- add :meth:`~quimb.tensor.tensor_core.TensorNetwork.combine` for unified
+  handling of combining
   tensor networks potentially with structure
 - add HTML colored pretty printing of tensor networks for notebooks
 - add `quimb.experimental.cluster_update.py`
