@@ -541,7 +541,7 @@ class TestTensorFunctions:
     @pytest.mark.parametrize("method", ["svd", "eig"])
     def test_entropy_matches_dense(self, method):
         p = MPS_rand_state(5, 32)
-        p_dense = p.to_dense()
+        p_dense = p.to_qarray()
         real_svn = qu.entropy(p_dense.ptr([2] * 5, [0, 1, 2]))
 
         svn = (p ^ ...).entropy(("k0", "k1", "k2"))

@@ -580,6 +580,8 @@ class TensorNetworkGenVector(TensorNetworkGen):
 
         return x
 
+    to_qarray = functools.partialmethod(to_dense, to_qarray=True)
+
     def gate(
         self, G, where,
         contract=False,
@@ -1530,6 +1532,8 @@ class TensorNetworkGenOperator(TensorNetworkGen):
             to_qarray=to_qarray,
             **contract_opts
         )
+
+    to_qarray = functools.partialmethod(to_dense, to_qarray=True)
 
     def phys_dim(self, site=None, which='upper'):
         """Get the physical dimension of ``site``.

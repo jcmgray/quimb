@@ -622,4 +622,4 @@ def rand_mera(n, invariant=False, dtype=complex):
     else:
         constructor = qt.MERA.rand
 
-    return constructor(n, dtype=dtype).to_dense()
+    return constructor(n, dtype=dtype).to_qarray()

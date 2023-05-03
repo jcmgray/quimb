@@ -7870,6 +7870,8 @@ class TensorNetwork(object):
         )
         return t.to_dense(*inds_seq, to_qarray=to_qarray)
 
+    to_qarray = functools.partialmethod(to_dense, to_qarray=True)
+
     def compute_reduced_factor(
         self,
         side,
@@ -10081,7 +10083,7 @@ class TNLinearOperator(spla.LinearOperator):
             self._adjoint_linop = self.copy(conj=True, transpose=True)
         return self._adjoint_linop
 
-    def to_dense(self, *inds_seq, **contract_opts):
+    def to_dense(self, *inds_seq, to_qarray=False, **contract_opts):
         """Convert this TNLinearOperator into a dense array, defaulting to
         grouping the left and right indices respectively.
         """
@@ -10095,7 +10097,11 @@ class TNLinearOperator(spla.LinearOperator):
         if not inds_seq:
             inds_seq = self.left_inds, self.right_inds
 
-        return tensor_contract(*ts, **contract_opts).to_dense(*inds_seq)
+        return tensor_contract(*ts, **contract_opts).to_dense(
+            *inds_seq, to_qarray=to_qarray,
+        )
+
+    to_qarray = functools.partialmethod(to_dense, to_qarray=True)
 
     @functools.wraps(tensor_split)
     def split(self, **split_opts):

@@ -198,11 +198,11 @@ class TestDMRG1:
         assert dmrg.solve(tol=tol / 10, verbosity=1)
         assert dmrg.state.cyclic == cyclic
         eff_e, mps_gs = dmrg.energy, dmrg.state
-        mps_gs_dense = mps_gs.to_dense()
+        mps_gs_dense = mps_gs.to_qarray()
 
         assert_allclose(mps_gs_dense.H @ mps_gs_dense, 1.0, rtol=tol)
 
-        h_dense = h.to_dense()
+        h_dense = h.to_qarray()
 
         # check against dense form
         actual_e, gs = eigh(h_dense, k=1)
@@ -225,11 +225,11 @@ class TestDMRG1:
         dmrg = DMRG1(h, bond_dims=8)
         assert dmrg.solve(verbosity=1)
         eff_e, mps_gs = dmrg.energy, dmrg.state
-        mps_gs_dense = mps_gs.to_dense()
+        mps_gs_dense = mps_gs.to_qarray()
         assert_allclose(mps_gs_dense.H @ mps_gs_dense, 1.0)
 
         # check against dense
-        h_dense = h.to_dense()
+        h_dense = h.to_qarray()
         actual_e, gs = eigh(h_dense, k=1)
         assert_allclose(actual_e, eff_e)
         assert_allclose(abs(expec(mps_gs_dense, gs)), 1.0)
@@ -260,11 +260,11 @@ class TestDMRG2:
         # assert dmrg._k[0].dtype == float
 
         eff_e, mps_gs = dmrg.energy, dmrg.state
-        mps_gs_dense = mps_gs.to_dense()
+        mps_gs_dense = mps_gs.to_qarray()
 
         assert_allclose(expec(mps_gs_dense, mps_gs_dense), 1.0, rtol=tol)
 
-        h_dense = h.to_dense()
+        h_dense = h.to_qarray()
 
         # check against dense form
         actual_e, gs = eigh(h_dense, k=1)
@@ -332,7 +332,7 @@ class TestDMRG2:
             qu.ikron(0.9 * Sy & Sy, [2, 2, 2, 2], [2, 3])
         )
 
-        assert_allclose(H_explicit, H_mpo.to_dense())
+        assert_allclose(H_explicit, H_mpo.to_qarray())
         assert_allclose(H_explicit, H_sps.A)
 
 
@@ -358,8 +358,8 @@ class TestDMRGX:
         # check normalized
         assert_allclose(dmrgx._k.H @ dmrgx._k, 1.0)
 
-        k = dmrgx._k.to_dense()
-        h = ham.to_dense()
+        k = dmrgx._k.to_qarray()
+        h = ham.to_qarray()
         el, ev = eigh(h)
 
         # check variance very low

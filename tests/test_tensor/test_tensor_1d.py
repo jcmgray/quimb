@@ -65,7 +65,7 @@ class TestMatrixProductState:
         assert mps.site_inds == tuple(f'k{i}' for i in range(L))
         assert mps.L == L
         assert mps.bond_sizes() == [2, 4, 8, 16, 8, 4, 2]
-        mpod = mps.to_dense()
+        mpod = mps.to_qarray()
         assert qu.expec(mpod, psi) == pytest.approx(1)
 
     def test_from_dense_low_rank(self):
@@ -76,7 +76,7 @@ class TestMatrixProductState:
         assert mps.site_inds == tuple(f'k{i}' for i in range(L))
         assert mps.L == L
         assert mps.bond_sizes() == [2, 2, 2, 2, 2]
-        mpod = mps.to_dense()
+        mpod = mps.to_qarray()
         assert qu.expec(mpod, psi) == pytest.approx(1)
 
     def test_left_canonize_site(self):
@@ -336,7 +336,7 @@ class TestMatrixProductState:
 
     def test_amplitude(self):
         mps = MPS_rand_state(10, 7)
-        k = mps.to_dense()
+        k = mps.to_qarray()
         idx = np.random.randint(0, k.shape[0])
         c_b = mps.amplitude(f'{idx:0>10b}')
         assert k[idx, 0] == pytest.approx(c_b)
@@ -351,7 +351,7 @@ class TestMatrixProductState:
             sgs.append(p.schmidt_gap(i, cur_orthog=i - 1))
             svns.append(p.entropy(i, cur_orthog=i))
 
-        pd = p.to_dense()
+        pd = p.to_qarray()
         ex_svns = [
             qu.entropy_subsys(pd, [2] * n, range(i)) for i in range(1, n)
         ]
@@ -372,7 +372,7 @@ class TestMatrixProductState:
         n = 10
         p = MPS_rand_state(n, 7)
         r = p.ptr(keep=keep, upper_ind_id='u{}', rescale_sites=rescale)
-        rd = r.to_dense()
+        rd = r.to_qarray()
         if isinstance(keep, slice):
             keep = p.slice2sites(keep)
         else:
@@ -396,13 +396,13 @@ class TestMatrixProductState:
                                                     'k6', 'k8')
         assert_allclose(r.trace(), 1.0)
         assert qu.isherm(rd)
-        pd = p.to_dense()
+        pd = p.to_qarray()
         rdd = pd.ptr([2] * n, keep=keep)
         assert_allclose(rd, rdd)
 
     def test_bipartite_schmidt_state(self):
         psi = MPS_rand_state(16, 5)
-        psid = psi.to_dense()
+        psid = psi.to_qarray()
         eln = qu.logneg(psid, [2**7, 2**9])
 
         s_d_ket = psi.bipartite_schmidt_state(7, get='ket-dense')
@@ -491,7 +491,7 @@ class TestMatrixProductState:
         lr, = bonds(kb[k.site_tag(stop - 1), 'KET'],
                     kb[k.site_tag(stop), 'KET'])
 
-        ii = ii.to_dense((ul, ur), (ll, lr))
+        ii = ii.to_qarray((ul, ur), (ll, lr))
         assert_allclose(ii, np.eye(ii.shape[0]), rtol=0.001, atol=0.001)
 
     @pytest.mark.parametrize("bsz", [1, 2])
@@ -558,8 +558,8 @@ class TestMatrixProductState:
         # we want a single index per dimension, not all combined into one
         inds = [[ix] for ix in p.site_inds]
         assert_allclose(
-            p.to_dense(*inds),
-            pf.to_dense(*inds).transpose()
+            p.to_qarray(*inds),
+            pf.to_qarray(*inds).transpose()
         )
 
     def test_correlation(self):
@@ -592,21 +592,21 @@ class TestMatrixProductState:
         assert abs(psi2.H @ psi) < 1.0
 
         # check matches dense application of gate
-        psid = psi2.to_dense()
+        psid = psi2.to_qarray()
         Gd = qu.ikron(G, [2] * 10, (7, 8))
-        assert psi.to_dense().H @ (Gd @ psid) == pytest.approx(1.0)
+        assert psi.to_qarray().H @ (Gd @ psid) == pytest.approx(1.0)
 
     def test_swap_far_sites(self):
         psi = MPS_rand_state(7, 2)
         for i, j in [(0, 6), (6, 1), (5, 2)]:
-            k1 = psi.to_dense([
+            k1 = psi.to_qarray([
                 psi.site_ind(
                     j if site == i else
                     i if site == j else
                     site
                 ) for site in psi.sites
             ])
-            k2 = psi.swap_sites_with_compress(i, j).to_dense()
+            k2 = psi.swap_sites_with_compress(i, j).to_qarray()
             assert qu.fidelity(k1, k2) == pytest.approx(1.0)
 
     def test_swap_gating(self):
@@ -669,13 +669,13 @@ class TestMatrixProductState:
 
     def test_permute_arrays(self):
         mps = MPS_rand_state(7, 5)
-        k0 = mps.to_dense()
+        k0 = mps.to_qarray()
         mps.canonize(3)
         mps.permute_arrays('prl')
         assert mps[0].shape == (2, 2)
         assert mps[1].shape == (2, 4, 2)
         assert mps[2].shape == (2, 5, 4)
-        kf = mps.to_dense()
+        kf = mps.to_qarray()
         assert qu.fidelity(k0, kf) == pytest.approx(1.0)
 
 
@@ -727,7 +727,7 @@ class TestMatrixProductOperator:
 
     def test_adding_mpo(self):
         h = MPO_ham_heis(6)
-        hd = h.to_dense()
+        hd = h.to_qarray()
         assert_allclose(h @ h.H, (hd @ hd.H).tr())
         h2 = h + h
         assert_allclose(h2 @ h2.H, (hd @ hd.H).tr() * 4)
@@ -801,13 +801,13 @@ class TestMatrixProductOperator:
     def test_partial_transpose(self):
         p = MPS_rand_state(8, 10)
         r = p.ptr([2, 3, 4, 5, 6, 7])
-        rd = r.to_dense()
+        rd = r.to_qarray()
 
         assert qu.isherm(rd)
         assert qu.ispos(rd)
 
         rpt = r.partial_transpose([0, 1, 2])
-        rptd = rpt.to_dense()
+        rptd = rpt.to_qarray()
 
         upper_inds = tuple(f'b{i}' for i in range(6))
         lower_inds = tuple(f'k{i}' for i in range(6))
@@ -833,7 +833,7 @@ class TestMatrixProductOperator:
         assert C.max_bond() == 25
         assert C.upper_ind_id == 'q{}'
         assert C.lower_ind_id == 'w{}'
-        Ad, Bd, Cd = A.to_dense(), B.to_dense(), C.to_dense()
+        Ad, Bd, Cd = A.to_qarray(), B.to_qarray(), C.to_qarray()
         assert_allclose(Ad @ Bd, Cd)
 
     @pytest.mark.parametrize("cyclic", (False, True))
@@ -846,16 +846,16 @@ class TestMatrixProductOperator:
         assert isinstance(y, MatrixProductState)
         assert len(y.tensors) == 8
         assert y.site_ind_id == site_ind_id
-        Ad, xd, yd = A.to_dense(), x.to_dense(), y.to_dense()
+        Ad, xd, yd = A.to_qarray(), x.to_qarray(), y.to_qarray()
         assert_allclose(Ad @ xd, yd)
 
     def test_permute_arrays(self):
         mpo = MPO_rand(4, 3)
-        A0 = mpo.to_dense()
+        A0 = mpo.to_qarray()
         mpo.permute_arrays('drul')
         assert mpo[0].shape == (2, 3, 2)
         assert mpo[1].shape == (2, 3, 2, 3)
-        Af = mpo.to_dense()
+        Af = mpo.to_qarray()
         assert_allclose(A0, Af)
 
 # --------------------------------------------------------------------------- #
@@ -887,7 +887,7 @@ class TestSpecificStatesOperators:
     def test_mps_computation_state(self):
         p = MPS_neel_state(10)
         pd = qu.neel_state(10)
-        assert_allclose(p.to_dense(), pd)
+        assert_allclose(p.to_qarray(), pd)
 
     def test_zero_state(self):
         z = MPS_zero_state(21, 7)
@@ -910,7 +910,7 @@ class TestSpecificStatesOperators:
         assert hh_mpo.shape == (2, ) * 2 * n
         hh_ex = qu.ham_heis(n, cyclic=cyclic, j=j, b=bz)
         assert_allclose(
-            qu.eigvalsh(hh_ex), qu.eigvalsh(hh_mpo.to_dense()), atol=1e-13)
+            qu.eigvalsh(hh_ex), qu.eigvalsh(hh_mpo.to_qarray()), atol=1e-13)
 
     def test_mpo_zeros(self):
         mpo0 = MPO_zeros(10)

@@ -20,7 +20,7 @@ class TestMERA:
         assert mera.H @ mera == pytest.approx(1.0)
 
         # test dense conversion
-        md = mera.to_dense()
+        md = mera.to_qarray()
         assert md.H @ md == pytest.approx(1.0)
 
     def test_1d_vector_methods(self):
@@ -31,7 +31,7 @@ class TestMERA:
         assert mera is not meraX
         x1 = mera.H @ meraX
 
-        md = mera.to_dense()
+        md = mera.to_qarray()
         mdX = qu.ikron(X, [2] * 16, 7) @ md
         x2 = md.H @ mdX
         # check against dense

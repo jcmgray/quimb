@@ -40,7 +40,7 @@ class TestPEPSConstruct:
                 assert isinstance(psi[f"I{i},{j}"], qtn.Tensor)
 
         if Lx == Ly == 3:
-            psi_dense = psi.to_dense(optimize="random-greedy")
+            psi_dense = psi.to_qarray(optimize="random-greedy")
             assert psi_dense.shape == (512, 1)
 
         psi.show()
@@ -102,7 +102,7 @@ class TestPEPSConstruct:
         D = 2
 
         psi = qtn.PEPS.rand(Lx, Ly, bond_dim=D, seed=42, dtype=complex)
-        psi_d = psi.to_dense()
+        psi_d = psi.to_qarray()
         G = qu.rand_matrix(2)
 
         # compute the exact dense reference
@@ -133,7 +133,7 @@ class TestPEPSConstruct:
         D = 2
 
         psi = qtn.PEPS.rand(Lx, Ly, bond_dim=D, seed=42, dtype=complex)
-        psi_d = psi.to_dense()
+        psi_d = psi.to_qarray()
 
         # ikron can't tensor operators across non-adjacent subsytems
         # so we explicitly construct the gate as a sum of tensor components
@@ -381,7 +381,7 @@ class Test2DContract:
         peps = qtn.PEPS.rand(4, 3, 2, seed=42, dtype="complex")
 
         # reference
-        k = peps.to_dense()
+        k = peps.to_qarray()
         if normalized:
             qu.normalize(k)
         coos = list(itertools.product([0, 2, 3], [0, 1, 2]))
@@ -406,7 +406,7 @@ class Test2DContract:
         Hij = qu.ham_heis(2, cyclic=False)
 
         peps = qtn.PEPS.rand(4, 3, 2, seed=42)
-        k = peps.to_dense()
+        k = peps.to_qarray()
 
         if normalized:
             qu.normalize(k)
@@ -470,7 +470,7 @@ class TestPEPO:
                 assert isinstance(X[f"I{i},{j}"], qtn.Tensor)
 
         if Lx == Ly == 3:
-            X_dense = X.to_dense(optimize="random-greedy")
+            X_dense = X.to_qarray(optimize="random-greedy")
             assert X_dense.shape == (512, 512)
             assert qu.isherm(X_dense)
 
@@ -491,9 +491,9 @@ class TestPEPO:
         x = qtn.PEPS.rand(Lx=3, Ly=2, bond_dim=2, seed=0)
         y = A.apply(x)
         assert y.num_indices == x.num_indices
-        Ad = A.to_dense()
-        xd = x.to_dense()
-        yd = y.to_dense()
+        Ad = A.to_qarray()
+        xd = x.to_qarray()
+        yd = y.to_qarray()
         assert_allclose(Ad @ xd, yd)
         yc = A.apply(x, compress=True, max_bond=3)
         assert yc.max_bond() == 3
