@@ -133,6 +133,7 @@ class Drawing:
 
         if len(coo) == 2:
             x, y = coo
+            style.setdefault("zorder", +0.02)
         else:
             x, y = self._3d_project(*coo)
             style.setdefault("zorder", self._coo_to_zorder(*coo) + 0.02)
@@ -207,6 +208,7 @@ class Drawing:
 
         if len(coo) == 2:
             x, y = coo
+            style.setdefault("zorder", +0.01)
         else:
             x, y = self._3d_project(*coo)
             style.setdefault("zorder", self._coo_to_zorder(*coo) + 0.01)
@@ -519,6 +521,8 @@ class Drawing:
                 "zorder", min(self._coo_to_zorder(*coo) for coo in coos) - 0.01
             )
             coos = [self._3d_project(*coo) for coo in coos]
+        else:
+            style.setdefault("zorder", -0.01)
 
         N = len(coos)
 
@@ -549,6 +553,70 @@ class Drawing:
             self._adjust_lims(*coo)
         for coo in control_pts.values():
             self._adjust_lims(*coo)
+
+    def patch_around(
+        self,
+        coos,
+        radius=0.0,
+        resolution=12,
+        preset=None,
+        **kwargs
+    ):
+        """Draw a patch around the given coordinates, by contructing a convex
+        hull around the points, optionally including an extra uniform or per
+        coordinate radius.
+
+        Parameters
+        ----------
+        coos : sequence[tuple[int, int]] or sequence[tuple[int, int, int]]
+            The coordinates of the points to draw the patch around. If 3D, the
+            coordinates will be projected onto the 2D plane, and a z-order will
+            be assigned based on *min* z-order of the endpoints.
+        radius : float or sequence[float], optional
+            The radius of the patch around each point. If a sequence, must be
+            the same length as ``coos``. Default is 0.0.
+        resolution : int, optional
+            The number of points to use pad around each point. Default is 12.
+        preset : str, optional
+            A preset style to use for the patch.
+        kwargs
+            Specific style options passed to ``matplotlib.patches.PathPatch``.
+        """
+        import numpy as np
+        from scipy.spatial import ConvexHull
+
+        style = parse_style_preset(self.presets, preset, **kwargs)
+
+        if isinstance(radius, (int, float)):
+            radius = [radius] * len(coos)
+
+        if len(coos[0]) != 2:
+            # use min so the patch appears *just* behind the elements
+            # its meant to highlight
+            style.setdefault(
+                "zorder", min(self._coo_to_zorder(*coo) for coo in coos) - 0.01
+            )
+            coos = [self._3d_project(*coo) for coo in coos]
+        else:
+            style.setdefault("zorder", -0.01)
+
+        expanded_pts = []
+        for coo, r in zip(coos, radius):
+            if r == 0:
+                expanded_pts.append(coo)
+            else:
+                expanded_pts.extend(gen_points_around(coo, r, resolution))
+
+        if len(expanded_pts) <= 3:
+            # need at least 3 points to make convex hull
+            boundary_pts = expanded_pts
+        else:
+            expanded_pts = np.array(expanded_pts)
+            hull = ConvexHull(expanded_pts)
+            boundary_pts = expanded_pts[hull.vertices]
+
+        self.patch(boundary_pts, preset=preset, **style)
+
 
     def patch_around_circles(
         self,
@@ -603,6 +671,8 @@ class Drawing:
             )
             cooa = self._3d_project(*cooa)
             coob = self._3d_project(*coob)
+        else:
+            style.setdefault("zorder", -0.01)
 
         forward, inverse = get_rotator_and_inverse(cooa, coob)
         xb = forward(*coob)[0]
@@ -854,3 +924,15 @@ def get_control_points(pa, pb, pc, spacing=1 / 3):
     c_ab, c_bc = inverse(*rc_ab), inverse(*rc_bc)
 
     return c_ab, c_bc
+
+
+def gen_points_around(coo, radius=1, resolution=12):
+    """Generate points around a circle.
+    """
+    x, y = coo
+    dphi = 2 * pi / resolution
+    phis = (i * dphi for i in range(resolution))
+    for phi in phis:
+        xa = x + radius * cos(phi)
+        ya = y + radius * sin(phi)
+        yield xa, ya
