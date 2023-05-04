@@ -1,5 +1,6 @@
 name: Build and Upload quimb to PyPI
 on:
+  workflow_dispatch:
   release:
     types:
       - published
