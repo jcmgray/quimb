@@ -64,7 +64,7 @@ on `pypi <https://pypi.org>`_  are as follows:
 
 1. Make sure all tests are passing, as well as the continuous integration
    and readthedocs build.
-2. ``git tag`` the release with next ``X.Y.Z`` (n.b. no 'v' prefix).
+2. ``git tag`` the release with next ``vX.Y.Z``
 3. Remove any old builds: ``rm dist/*```
 4. Build the tar and wheel ``python -m build``
 5. Upload using twine: ``twine upload dist/*``
