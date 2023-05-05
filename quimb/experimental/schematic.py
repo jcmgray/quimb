@@ -244,6 +244,38 @@ class Drawing:
         style.setdefault("linewidth", 0.0)
         self.circle(coo, **style)
 
+    def cube(self, coo, preset=None, **kwargs):
+        """Draw a cube at the specified coordinate, which must be 3D.
+
+        Parameters
+        ----------
+        coo : tuple[int, int, int]
+            The 3D coordinate of the cube. The coordinate will
+            be projected onto the 2D plane, and a z-order will be assigned.
+        preset : str, optional
+            A preset style to use for the cube.
+        kwargs
+            Specific style options passed to ``matplotlib.patches.Polygon``.
+        """
+        style = parse_style_preset(self.presets, preset, **kwargs)
+
+        r = style.pop("radius", 0.25)
+        x, y, z = coo
+        xm, xp = x - r, x + r
+        ym, yp = y - r, y + r
+        zm, zp = z - r, z + r
+
+        faces = [
+            ((xm, ym, zm), (xm, ym, zp), (xm, yp, zp), (xm, yp, zm)),
+            ((xp, ym, zm), (xp, ym, zp), (xp, yp, zp), (xp, yp, zm)),
+            ((xp, ym, zm), (xp, ym, zp), (xm, ym, zp), (xm, ym, zm)),
+            ((xp, yp, zm), (xp, yp, zp), (xm, yp, zp), (xm, yp, zm)),
+            ((xp, ym, zm), (xp, yp, zm), (xm, yp, zm), (xm, ym, zm)),
+            ((xp, ym, zp), (xp, yp, zp), (xm, yp, zp), (xm, ym, zp)),
+        ]
+        for face in faces:
+            self.shape(face, preset=preset, **style)
+
     def line(self, cooa, coob, preset=None, **kwargs):
         """Draw a line between two coordinates.
 
@@ -276,6 +308,7 @@ class Drawing:
 
         if len(cooa) == 2:
             xs, ys = zip(*(cooa, coob))
+            style.setdefault("zorder", +0.0)
         else:
             style.setdefault(
                 "zorder",
@@ -329,7 +362,7 @@ class Drawing:
             Specific style options passed to ``matplotlib.lines.Line2D``.
         """
         style = parse_style_preset(self.presets, preset, **kwargs)
-        style.setdefault("color", (0.5, 0.5, 0.5))
+        style.setdefault("color", (0.25, 0.25, 0.25))
         style.setdefault("center", 0.5)
         style.setdefault("width", 0.05)
         style.setdefault("length", 0.1)
@@ -424,9 +457,9 @@ class Drawing:
             moves = [Path.MOVETO, Path.CURVE3, Path.CURVE3]
 
             for i in range(1, N - 2):
-                path.extend((
-                    control_pts[i, "r"], control_pts[i + 1, 'l'], coos[i + 1]
-                ))
+                path.extend(
+                    (control_pts[i, "r"], control_pts[i + 1, "l"], coos[i + 1])
+                )
                 moves.extend((Path.CURVE4, Path.CURVE4, Path.CURVE4))
 
             path.extend((control_pts[N - 2, "r"], coos[N - 1]))
@@ -464,6 +497,7 @@ class Drawing:
         style.setdefault("facecolor", (0.4, 0.5, 0.6))
         style.setdefault("edgecolor", darken_color(style["facecolor"], 0.5))
         style.setdefault("linewidth", 2)
+        style.setdefault("joinstyle", "round")
 
         if len(coos[0]) != 2:
             style.setdefault(
@@ -555,12 +589,7 @@ class Drawing:
             self._adjust_lims(*coo)
 
     def patch_around(
-        self,
-        coos,
-        radius=0.0,
-        resolution=12,
-        preset=None,
-        **kwargs
+        self, coos, radius=0.0, resolution=12, preset=None, **kwargs
     ):
         """Draw a patch around the given coordinates, by contructing a convex
         hull around the points, optionally including an extra uniform or per
@@ -617,7 +646,6 @@ class Drawing:
 
         self.patch(boundary_pts, preset=preset, **style)
 
-
     def patch_around_circles(
         self,
         cooa,
@@ -660,6 +688,7 @@ class Drawing:
         Drawing.patch
         """
         style = parse_style_preset(self.presets, preset, **kwargs)
+        style.setdefault("smoothing", 1.0)
 
         if pinch is True:
             pinch = 1 - padding
@@ -764,7 +793,7 @@ def axonometric_project(
     x, y : float
         The 2D coordinates of the projected point.
     """
-    i *= xscale
+    i *= (xscale * 0.8)
     j *= yscale
     k *= zscale
     return (
@@ -927,8 +956,7 @@ def get_control_points(pa, pb, pc, spacing=1 / 3):
 
 
 def gen_points_around(coo, radius=1, resolution=12):
-    """Generate points around a circle.
-    """
+    """Generate points around a circle."""
     x, y = coo
     dphi = 2 * pi / resolution
     phis = (i * dphi for i in range(resolution))
