@@ -1563,18 +1563,18 @@ class Tensor:
 
         # short circuit for copying / casting Tensor instances
         if isinstance(data, Tensor):
-            self._data = data.data
-            self._inds = data.inds
-            self._tags = data.tags.copy()
-            self._left_inds = data.left_inds
+            self._set_data(data.data)
+            self._set_inds(data.inds)
+            self._set_tags(data.tags)
+            self._set_left_inds(data.left_inds)
             return
 
-        self._data = asarray(data)
-        self._inds = tuple(inds)
-        self._tags = tags_to_oset(tags)
-        self._left_inds = tuple(left_inds) if left_inds is not None else None
+        self._set_data(data)
+        self._set_inds(inds)
+        self._set_tags(tags)
+        self._set_left_inds(left_inds)
 
-        if ndim(self._data) != len(self.inds):
+        if ndim(self._data) != len(self._inds):
             raise ValueError(
                 f"Wrong number of inds, {self.inds}, supplied for array"
                 f" of shape {self._data.shape}."
@@ -1584,6 +1584,21 @@ class Tensor:
                 f"The 'left' indices {self.left_inds} are not "
                 f"found in {self.inds}."
             )
+
+    def _set_data(self, data):
+        self._data = asarray(data)
+
+    def _set_inds(self, inds):
+        self._inds = tuple(inds)
+
+    def _set_tags(self, tags):
+        self._tags = tags_to_oset(tags)
+
+    def _set_left_inds(self, left_inds):
+        if left_inds is None:
+            self._left_inds = None
+        else:
+            self._left_inds = tuple(left_inds)
 
     def get_params(self):
         """A simple function that returns the 'parameters' of the underlying
@@ -1613,7 +1628,7 @@ class Tensor:
         elif hasattr(self.data, "params"):
             self.data.params = params
         else:
-            self._data = params
+            self._set_data(params)
 
     def copy(self, deep=False, virtual=False):
         """Copy this tensor.
@@ -1695,7 +1710,7 @@ class Tensor:
         return len(self._owners) > 0
 
     def _apply_function(self, fn):
-        self._data = fn(self.data)
+        self._set_data(fn(self.data))
 
     def modify(self, **kwargs):
         """Overwrite the data of this tensor in place.
@@ -1715,7 +1730,7 @@ class Tensor:
             New grouping of indices to be 'on the left'.
         """
         if 'data' in kwargs:
-            self._data = asarray(kwargs.pop('data'))
+            self._set_data(kwargs.pop('data'))
             self._left_inds = None
 
         if 'apply' in kwargs:
@@ -7947,6 +7962,7 @@ class TensorNetwork(object):
         new_tags=None,
         new_ltags=None,
         new_rtags=None,
+        bond_ind=None,
         optimize="auto-hq",
         inplace=False,
         **compress_opts,
@@ -7998,6 +8014,9 @@ class TensorNetwork(object):
         if compress_opts.pop("absorb", "both") != "both":
             raise NotImplementedError("Only `absorb=both` supported.")
 
+        if bond_ind is None:
+            bond_ind = rand_uuid()
+
         tn = self if (inplace or (insert_into is not None)) else self.copy()
 
         # get views of the left and right regions - 'X' and 'Y'
@@ -8031,7 +8050,7 @@ class TensorNetwork(object):
         # finally cut the bonds
         new_lix = [rand_uuid() for _ in bix]
         new_rix = [rand_uuid() for _ in bix]
-        new_bix = [rand_uuid()]
+        new_bix = [bond_ind]
         ltn.reindex_(dict(zip(bix, new_lix)))
         rtn.reindex_(dict(zip(bix, new_rix)))
 
@@ -10171,33 +10190,38 @@ class PTensor(Tensor):
     PTensor
     """
 
-    __slots__ = ('_parray', '_inds', '_tags', '_left_inds', '_owners')
+    __slots__ = ('_data', '_inds', '_tags', '_left_inds', '_owners')
 
     def __init__(self, fn, params, inds=(), tags=None, left_inds=None):
         super().__init__(
-            PArray(fn, params), inds=inds, tags=tags, left_inds=left_inds)
+            PArray(fn, params),
+            inds=inds,
+            tags=tags,
+            left_inds=left_inds,
+        )
 
     @classmethod
     def from_parray(cls, parray, inds=(), tags=None, left_inds=None):
         obj = cls.__new__(cls)
         super(PTensor, obj).__init__(
-            parray, inds=inds, tags=tags, left_inds=left_inds)
+            parray,
+            inds=inds,
+            tags=tags,
+            left_inds=left_inds,
+        )
         return obj
 
     def copy(self):
         """Copy this parametrized tensor.
         """
-        return PTensor.from_parray(self._parray.copy(), inds=self.inds,
-                                   tags=self.tags, left_inds=self.left_inds)
+        return PTensor.from_parray(
+            self._data.copy(),
+            inds=self.inds,
+            tags=self.tags,
+            left_inds=self.left_inds
+        )
 
-    @property
-    def _data(self):
-        """Make ``_data`` read-only and handle conjugation lazily.
-        """
-        return self._parray.data
-
-    @_data.setter
-    def _data(self, x):
+    def _set_data(self, x):
         if not isinstance(x, PArray):
             raise TypeError(
                 "You can only directly update the data of a ``PTensor`` with "
@@ -10205,29 +10229,29 @@ class PTensor(Tensor):
                 "``.modify(apply=fn)`` method. Alternatively you can convert "
                 "this ``PTensor to a normal ``Tensor`` with "
                 "``t.unparametrize()``")
-        self._parray = x
+        self._data = x
 
     @property
     def data(self):
-        return self._data
+        return self._data.data
 
     @property
     def fn(self):
-        return self._parray.fn
+        return self._data.fn
 
     @fn.setter
     def fn(self, x):
-        self._parray.fn = x
+        self._data.fn = x
 
     def get_params(self):
         """Get the parameters of this ``PTensor``.
         """
-        return self._parray.params
+        return self._data.params
 
     def set_params(self, params):
         """Set the parameters of this ``PTensor``.
         """
-        self._parray.params = params
+        self._data.params = params
 
     @property
     def params(self):
@@ -10239,13 +10263,19 @@ class PTensor(Tensor):
 
     @property
     def shape(self):
-        return self._parray.shape
+        return self._data.shape
+
+    @property
+    def backend(self):
+        """The backend inferred from the data.
+        """
+        return infer_backend(self.params)
 
     def _apply_function(self, fn):
         """Apply ``fn`` to the data array of this ``PTensor`` (lazily), by
         composing it with the current parametrized array function.
         """
-        self._parray.add_function(fn)
+        self._data.add_function(fn)
 
     def conj(self, inplace=False):
         """Conjugate this parametrized tensor - done lazily whenever the
@@ -10260,14 +10290,19 @@ class PTensor(Tensor):
     def unparametrize(self):
         """Turn this PTensor into a normal Tensor.
         """
-        return Tensor(self)
+        return Tensor(
+            data=self.data,
+            inds=self.inds,
+            tags=self.tags,
+            left_inds=self.left_inds,
+        )
 
     def __getstate__(self):
-        # Save _parray directly
-        return self._parray, self._inds, self._tags, self._left_inds
+        # Save _data directly
+        return self._data, self._inds, self._tags, self._left_inds
 
     def __setstate__(self, state):
-        self._parray, self._inds, tags, self._left_inds = state
+        self._data, self._inds, tags, self._left_inds = state
         self._tags = tags.copy()
         self._owners = {}
 
