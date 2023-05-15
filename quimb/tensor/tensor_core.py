@@ -145,6 +145,7 @@ def tensor_contract(
     get=None,
     backend=None,
     preserve_tensor=False,
+    drop_tags=False,
     **contract_opts
 ):
     """Contract a collection of tensors into a scalar or tensor, automatically
@@ -196,6 +197,9 @@ def tensor_contract(
     preserve_tensor : bool, optional
         Whether to return a tensor regardless of whether the output object
         is a scalar (has no indices) or not.
+    drop_tags : bool, optional
+        Whether to drop all tags from the output tensor. By default the output
+        tensor will keep the union of all tags from the input tensors.
     contract_opts
         Passed to ``opt_einsum.contract_expression`` or
         ``opt_einsum.contract_path``.
@@ -255,8 +259,11 @@ def tensor_contract(
     if not inds_out and not preserve_tensor:
         return maybe_realify_scalar(data_out)
 
-    # union of all tags
-    tags_out = oset_union(t.tags for t in tensors)
+    if drop_tags:
+        tags_out = None
+    else:
+        # union of all tags
+        tags_out = oset_union(t.tags for t in tensors)
 
     return Tensor(data=data_out, inds=inds_out, tags=tags_out)
 
@@ -5667,7 +5674,7 @@ class TensorNetwork(object):
         self,
         max_bond,
         gauges=None,
-        max_iterations=10,
+        max_iterations=5,
         tol=0.0,
         smudge=1e-12,
         power=1.0,

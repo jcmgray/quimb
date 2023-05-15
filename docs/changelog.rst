@@ -11,6 +11,8 @@ v1.5.1 (unreleased)
 **Enhancements:**
 
 - add :func:`~quimb.tensor.tensor_builder.MPS_COPY`.
+- add 'density matrix' and 'zip-up' MPO-MPS algorithms.
+- add `drop_tags` option to :meth:`~quimb.tensor.tensor_contract`
 
 **Bug fixes:**
 
