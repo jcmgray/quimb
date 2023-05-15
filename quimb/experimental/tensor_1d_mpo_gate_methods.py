@@ -3,9 +3,10 @@
 
 TODO:
 
+- [x] density matrix method
+- [x] zip-up method
 - [ ] implement early compress boundary method
 - [ ] find out why projector method is slower than expected
-- [ ] density matrix method
 - [ ] left/right compressed optimal projector method
 
 """
