@@ -3,6 +3,18 @@ Changelog
 
 Release notes for ``quimb``.
 
+.. _whats-new.1.5.1:
+
+v1.5.1 (unreleased)
+-------------------
+
+**Enhancements:**
+
+- add :func:`~quimb.tensor.tensor_builder.MPS_COPY`.
+
+**Bug fixes:**
+
+
 .. _whats-new.1.5.0:
 
 v1.5.0 (2023-05-03)

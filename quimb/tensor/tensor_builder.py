@@ -2952,6 +2952,37 @@ def MPS_neel_state(L, down_first=False, dtype="float64", **mps_opts):
     return MPS_computational_state(binary_str, dtype=dtype, **mps_opts)
 
 
+def MPS_COPY(
+    L,
+    phys_dim=2,
+    dtype="float64",
+    **mps_opts,
+):
+    """Build a matrix product state representation of the COPY tensor.
+
+    Parameters
+    ----------
+    L : int
+        The number of sites.
+    phys_dim : int, optional
+        The physical (site) dimensions, defaults to 2.
+    dtype : str or dtype, optional
+        The data type of the tensor network, defaults to 'float64'.
+
+    Returns
+    -------
+    MatrixProductState
+    """
+
+    def gen_arrays():
+        yield delta_array((phys_dim,) * 2, dtype=dtype)
+        for i in range(1, L - 1):
+            yield delta_array((phys_dim,) * 3, dtype=dtype)
+        yield delta_array((phys_dim,) * 2, dtype=dtype)
+
+    return MatrixProductState(gen_arrays(), **mps_opts)
+
+
 def MPS_ghz_state(L, dtype="float64", **mps_opts):
     """Build the chi=2 OBC MPS representation of the GHZ state.
 
@@ -2964,18 +2995,7 @@ def MPS_ghz_state(L, dtype="float64", **mps_opts):
     mps_opts
         Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductState`.
     """
-
-    def gen_arrays():
-        yield 2**-0.5 * np.array([[1.0, 0.0], [0.0, 1.0]]).astype(dtype)
-
-        for i in range(1, L - 1):
-            yield np.array(
-                [[[1.0, 0.0], [0.0, 0.0]], [[0.0, 0.0], [0.0, 1.0]]]
-            ).astype(dtype)
-
-        yield np.array([[1.0, 0.0], [0.0, 1.0]]).astype(dtype)
-
-    return MatrixProductState(gen_arrays(), **mps_opts)
+    return MPS_COPY(L, dtype=dtype, **mps_opts) / 2**0.5
 
 
 def MPS_w_state(L, dtype="float64", **mps_opts):
