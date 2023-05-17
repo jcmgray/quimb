@@ -16,6 +16,7 @@ v1.5.1 (unreleased)
 
 **Bug fixes:**
 
+- :class:`Circuit`: use stack for more robust parametrized gate generation
 
 .. _whats-new.1.5.0:
 

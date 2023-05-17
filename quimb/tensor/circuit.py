@@ -9,7 +9,7 @@ import functools
 import itertools
 
 import numpy as np
-from autoray import do, reshape
+from autoray import do, reshape, backend_like
 
 import quimb as qu
 from ..utils import progbar as _progbar
@@ -24,6 +24,12 @@ from .tensor_builder import (
 from .tensor_arbgeom import TensorNetworkGenOperator
 from .tensor_1d import Dense1D
 from . import array_ops as ops
+
+
+def recursive_stack(x):
+    if not isinstance(x, (list, tuple)):
+        return x
+    return do("stack", tuple(map(recursive_stack, x)))
 
 
 def _convert_ints_and_floats(x):
@@ -200,16 +206,16 @@ register_constant_gate('IS', qu.iswap(), 2, 'ISWAP')
 def rx_gate_param_gen(params):
     phi = params[0]
 
-    c_re = do('cos', phi / 2)
-    c_im = do('imag', c_re)
-    c = do('complex', c_re, c_im)
+    with backend_like(phi):
+        c_re = do('cos', phi / 2)
+        c_im = do('imag', c_re)
+        c = do('complex', c_re, c_im)
 
-    s_im = -do('sin', phi / 2)
-    s_re = do('imag', s_im)
-    s = do('complex', s_re, s_im)
+        s_im = -do('sin', phi / 2)
+        s_re = do('imag', s_im)
+        s = do('complex', s_re, s_im)
 
-    data = [[c, s], [s, c]]
-    return ops.asarray(data)
+        return recursive_stack(((c, s), (s, c)))
 
 
 register_param_gate('RX', rx_gate_param_gen, 1)
@@ -218,16 +224,16 @@ register_param_gate('RX', rx_gate_param_gen, 1)
 def ry_gate_param_gen(params):
     phi = params[0]
 
-    c_re = do('cos', phi / 2)
-    c_im = do('imag', c_re)
-    c = do('complex', c_re, c_im)
+    with backend_like(phi):
+        c_re = do('cos', phi / 2)
+        c_im = do('imag', c_re)
+        c = do('complex', c_re, c_im)
 
-    s_re = do('sin', phi / 2)
-    s_im = do('imag', s_re)
-    s = do('complex', s_re, s_im)
+        s_re = do('sin', phi / 2)
+        s_im = do('imag', s_re)
+        s = do('complex', s_re, s_im)
 
-    data = [[c, -s], [s, c]]
-    return ops.asarray(data)
+        return recursive_stack(((c, -s), (s, c)))
 
 
 register_param_gate('RY', ry_gate_param_gen, 1)
@@ -236,16 +242,19 @@ register_param_gate('RY', ry_gate_param_gen, 1)
 def rz_gate_param_gen(params):
     phi = params[0]
 
-    c_re = do('cos', phi / 2)
-    c_im = do('imag', c_re)
-    c = do('complex', c_re, c_im)
+    with backend_like(phi):
+        c_re = do('cos', phi / 2)
+        c_im = do('imag', c_re)
+        c = do('complex', c_re, c_im)
 
-    s_im = -do('sin', phi / 2)
-    s_re = do('imag', s_im)
-    s = do('complex', s_re, s_im)
+        s_im = -do('sin', phi / 2)
+        s_re = do('imag', s_im)
+        s = do('complex', s_re, s_im)
 
-    data = [[c + s, 0], [0, c - s]]
-    return ops.asarray(data)
+        # get a 'backend zero'
+        z = 0.0 * c_re
+
+        return recursive_stack(((c + s, z), (z, c - s)))
 
 
 register_param_gate('RZ', rz_gate_param_gen, 1)
@@ -254,29 +263,28 @@ register_param_gate('RZ', rz_gate_param_gen, 1)
 def u3_gate_param_gen(params):
     theta, phi, lamda = params[0], params[1], params[2]
 
-    c2_re = do('cos', theta / 2)
-    c2_im = do('imag', c2_re)
-    c2 = do('complex', c2_re, c2_im)
+    with backend_like(theta):
+        c2_re = do('cos', theta / 2)
+        c2_im = do('imag', c2_re)
+        c2 = do('complex', c2_re, c2_im)
 
-    s2_re = do('sin', theta / 2)
-    s2_im = do('imag', s2_re)
-    s2 = do('complex', s2_re, s2_im)
+        s2_re = do('sin', theta / 2)
+        s2_im = do('imag', s2_re)
+        s2 = do('complex', s2_re, s2_im)
 
-    el_im = lamda
-    el_re = do('imag', el_im)
-    el = do('exp', do('complex', el_re, el_im))
+        el_im = lamda
+        el_re = do('imag', el_im)
+        el = do('exp', do('complex', el_re, el_im))
 
-    ep_im = phi
-    ep_re = do('imag', ep_im)
-    ep = do('exp', do('complex', ep_re, ep_im))
+        ep_im = phi
+        ep_re = do('imag', ep_im)
+        ep = do('exp', do('complex', ep_re, ep_im))
 
-    elp_im = lamda + phi
-    elp_re = do('imag', elp_im)
-    elp = do('exp', do('complex', elp_re, elp_im))
+        elp_im = lamda + phi
+        elp_re = do('imag', elp_im)
+        elp = do('exp', do('complex', elp_re, elp_im))
 
-    data = [[c2, -el * s2],
-            [ep * s2, elp * c2]]
-    return ops.asarray(data)
+        return recursive_stack(((c2, -el * s2), (ep * s2, elp * c2)))
 
 
 register_param_gate('U3', u3_gate_param_gen, 1)
@@ -285,23 +293,23 @@ register_param_gate('U3', u3_gate_param_gen, 1)
 def u2_gate_param_gen(params):
     phi, lamda = params[0], params[1]
 
-    c00 = 1
+    with backend_like(phi):
+        # get a 'backend one'
+        c00 = 0.0 * phi + 1.0
 
-    c01_im = lamda
-    c01_re = do('imag', c01_im)
-    c01 = - do('exp', do('complex', c01_re, c01_im))
+        c01_im = lamda
+        c01_re = do('imag', c01_im)
+        c01 = - do('exp', do('complex', c01_re, c01_im))
 
-    c10_im = phi
-    c10_re = do('imag', c10_im)
-    c10 = do('exp', do('complex', c10_re, c10_im))
+        c10_im = phi
+        c10_re = do('imag', c10_im)
+        c10 = do('exp', do('complex', c10_re, c10_im))
 
-    c11_im = phi + lamda
-    c11_re = do('imag', c11_im)
-    c11 = do('exp', do('complex', c11_re, c11_im))
+        c11_im = phi + lamda
+        c11_re = do('imag', c11_im)
+        c11 = do('exp', do('complex', c11_re, c11_im))
 
-    data = [[c00, c01],
-            [c10, c11]]
-    return ops.asarray(data) / 2**0.5
+        return recursive_stack(((c00, c01), (c10, c11))) / 2**0.5
 
 
 register_param_gate('U2', u2_gate_param_gen, 1)
@@ -310,13 +318,17 @@ register_param_gate('U2', u2_gate_param_gen, 1)
 def u1_gate_param_gen(params):
     lamda = params[0]
 
-    c11_im = lamda
-    c11_re = do('imag', c11_im)
-    c11 = do('exp', do('complex', c11_re, c11_im))
+    with backend_like(lamda):
+        # get a 'backend zero'
+        c01 = c10 = 0.0 * lamda
+        # get a 'backend one'
+        c00 = c10 + 1.0
 
-    data = [[1, 0],
-            [0, c11]]
-    return ops.asarray(data)
+        c11_im = lamda
+        c11_re = do('imag', c11_im)
+        c11 = do('exp', do('complex', c11_re, c11_im))
+
+        return recursive_stack(((c00, c01), (c10, c11)))
 
 
 register_param_gate('U1', u1_gate_param_gen, 1)
@@ -327,12 +339,18 @@ register_param_gate('U1', u1_gate_param_gen, 1)
 def cu3_param_gen(params):
     U3 = u3_gate_param_gen(params)
 
-    data = [[[[1, 0], [0, 0]],
-             [[0, 1], [0, 0]]],
-            [[[0, 0], [U3[0, 0], U3[0, 1]]],
-             [[0, 0], [U3[1, 0], U3[1, 1]]]]]
+    with backend_like(U3):
+        # get a 'backend zero'
+        c0 = 0.0 * U3[0, 0]
+        # get a 'backend one'
+        c1 = c0 + 1.0
 
-    return ops.asarray(data)
+        data = ((((c1, c0), (c0, c0)),
+                ((c0, c1), (c0, c0))),
+                (((c0, c0), (U3[0, 0], U3[0, 1])),
+                ((c0, c0), (U3[1, 0], U3[1, 1]))))
+
+        return recursive_stack(data)
 
 
 register_param_gate('CU3', cu3_param_gen, 2)
@@ -341,12 +359,18 @@ register_param_gate('CU3', cu3_param_gen, 2)
 def cu2_param_gen(params):
     U2 = u2_gate_param_gen(params)
 
-    data = [[[[1, 0], [0, 0]],
-             [[0, 1], [0, 0]]],
-            [[[0, 0], [U2[0, 0], U2[0, 1]]],
-             [[0, 0], [U2[1, 0], U2[1, 1]]]]]
+    with backend_like(U2):
+        # get a 'backend zero'
+        c0 = 0.0 * U2[0, 0]
+        # get a 'backend one'
+        c1 = c0 + 1.0
 
-    return ops.asarray(data)
+        data = ((((c1, c0), (c0, c0)),
+                ((c0, c1), (c0, c0))),
+                (((c0, c0), (U2[0, 0], U2[0, 1])),
+                ((c0, c0), (U2[1, 0], U2[1, 1]))))
+
+        return recursive_stack(data)
 
 
 register_param_gate('CU2', cu2_param_gen, 2)
@@ -355,16 +379,22 @@ register_param_gate('CU2', cu2_param_gen, 2)
 def cu1_param_gen(params):
     lamda = params[0]
 
-    c11_im = lamda
-    c11_re = do('imag', c11_im)
-    c11 = do('exp', do('complex', c11_re, c11_im))
+    with backend_like(lamda):
+        c11_im = lamda
+        c11_re = do('imag', c11_im)
+        c11 = do('exp', do('complex', c11_re, c11_im))
 
-    data = [[[[1, 0], [0, 0]],
-             [[0, 1], [0, 0]]],
-            [[[0, 0], [1, 0]],
-             [[0, 0], [0, c11]]]]
+        # get a 'backend zero'
+        c0 = 0.0 * c11
+        # get a 'backend one'
+        c1 = c0 + 1.0
 
-    return ops.asarray(data)
+        data = ((((c1, c0), (c0, c0)),
+                ((c0, c1), (c0, c0))),
+                (((c0, c0), (c1, c0)),
+                ((c0, c0), (c0, c11))))
+
+        return recursive_stack(data)
 
 
 register_param_gate('CU1', cu1_param_gen, 2)
@@ -373,24 +403,30 @@ register_param_gate('CU1', cu1_param_gen, 2)
 def fsim_param_gen(params):
     theta, phi = params[0], params[1]
 
-    a_re = do('cos', theta)
-    a_im = do('imag', a_re)
-    a = do('complex', a_re, a_im)
+    with backend_like(theta):
+        a_re = do('cos', theta)
+        a_im = do('imag', a_re)
+        a = do('complex', a_re, a_im)
 
-    b_im = -do('sin', theta)
-    b_re = do('imag', b_im)
-    b = do('complex', b_re, b_im)
+        b_im = -do('sin', theta)
+        b_re = do('imag', b_im)
+        b = do('complex', b_re, b_im)
 
-    c_im = -phi
-    c_re = do('imag', c_im)
-    c = do('exp', do('complex', c_re, c_im))
+        c_im = -phi
+        c_re = do('imag', c_im)
+        c = do('exp', do('complex', c_re, c_im))
 
-    data = [[[[1, 0], [0, 0]],
-             [[0, a], [b, 0]]],
-            [[[0, b], [a, 0]],
-             [[0, 0], [0, c]]]]
+        # get a 'backend zero'
+        c0 = 0.0 * c
+        # get a 'backend one'
+        c1 = c0 + 1.0
 
-    return ops.asarray(data)
+        data = ((((c1, c0), (c0, c0)),
+                ((c0, a), (b, c0))),
+                (((c0, b), (a, c0)),
+                ((c0, c0), (c0, c))))
+
+        return recursive_stack(data)
 
 
 register_param_gate('FSIM', fsim_param_gen, 2)
@@ -402,52 +438,58 @@ def fsimg_param_gen(params):
         params[0], params[1], params[2], params[3], params[4]
     )
 
-    a11_re = do('cos', theta)
-    a11_im = do('imag', a11_re)
-    a11 = do('complex', a11_re, a11_im)
+    with backend_like(theta):
+        a11_re = do('cos', theta)
+        a11_im = do('imag', a11_re)
+        a11 = do('complex', a11_re, a11_im)
 
-    e11_im = -(gamma + zeta)
-    e11_re = do('imag', e11_im)
-    e11 = do('exp', do('complex', e11_re, e11_im))
+        e11_im = -(gamma + zeta)
+        e11_re = do('imag', e11_im)
+        e11 = do('exp', do('complex', e11_re, e11_im))
 
-    a22_re = do('cos', theta)
-    a22_im = do('imag', a22_re)
-    a22 = do('complex', a22_re, a22_im)
+        a22_re = do('cos', theta)
+        a22_im = do('imag', a22_re)
+        a22 = do('complex', a22_re, a22_im)
 
-    e22_im = -(gamma - zeta)
-    e22_re = do('imag', e22_im)
-    e22 = do('exp', do('complex', e22_re, e22_im))
+        e22_im = -(gamma - zeta)
+        e22_re = do('imag', e22_im)
+        e22 = do('exp', do('complex', e22_re, e22_im))
 
-    a21_re = do('sin', theta)
-    a21_im = do('imag', a21_re)
-    a21 = do('complex', a21_re, a21_im)
+        a21_re = do('sin', theta)
+        a21_im = do('imag', a21_re)
+        a21 = do('complex', a21_re, a21_im)
 
-    e21_im = -(gamma - chi)
-    e21_re = do('imag', e21_im)
-    e21 = do('exp', do('complex', e21_re, e21_im))
+        e21_im = -(gamma - chi)
+        e21_re = do('imag', e21_im)
+        e21 = do('exp', do('complex', e21_re, e21_im))
 
-    a12_re = do('sin', theta)
-    a12_im = do('imag', a12_re)
-    a12 = do('complex', a12_re, a12_im)
+        a12_re = do('sin', theta)
+        a12_im = do('imag', a12_re)
+        a12 = do('complex', a12_re, a12_im)
 
-    e12_im = -(gamma + chi)
-    e12_re = do('imag', e12_im)
-    e12 = do('exp', do('complex', e12_re, e12_im))
+        e12_im = -(gamma + chi)
+        e12_re = do('imag', e12_im)
+        e12 = do('exp', do('complex', e12_re, e12_im))
 
-    img_re = do('real', -1.j)
-    img_im = do('imag', -1.j)
-    img = do('complex', img_re, img_im)
+        img_re = do('real', -1.j)
+        img_im = do('imag', -1.j)
+        img = do('complex', img_re, img_im)
 
-    c_im = -(2 * gamma + phi)
-    c_re = do('imag', c_im)
-    c = do('exp', do('complex', c_re, c_im))
+        c_im = -(2 * gamma + phi)
+        c_re = do('imag', c_im)
+        c = do('exp', do('complex', c_re, c_im))
 
-    data = [[[[1, 0], [0, 0]],
-             [[0, a11 * e11], [a21 * e21 * img, 0]]],
-            [[[0, a12 * e12 * img], [a22 * e22, 0]],
-             [[0, 0], [0, c]]]]
+        # get a 'backend zero'
+        c0 = 0.0 * c
+        # get a 'backend one'
+        c1 = c0 + 1.0
 
-    return ops.asarray(data)
+        data = ((((c1, c0), (c0, c0)),
+                ((c0, a11 * e11), (a21 * e21 * img, c0))),
+                (((c0, a12 * e12 * img), (a22 * e22, c0)),
+                ((c0, c0), (c0, c))))
+
+        return recursive_stack(data)
 
 
 register_param_gate('FSIMG', fsimg_param_gen, 2)
@@ -464,15 +506,19 @@ def rzz_param_gen(params):
     """
     gamma = params[0]
 
-    c00 = c11 = do('complex', do('cos', gamma), do('sin', gamma))
-    c01 = c10 = do('complex', do('cos', gamma), -do('sin', gamma))
+    with backend_like(gamma):
+        c00 = c11 = do('complex', do('cos', gamma), do('sin', gamma))
+        c01 = c10 = do('complex', do('cos', gamma), -do('sin', gamma))
 
-    data = [[[[c00, 0], [0, 0]],
-             [[0, c01], [0, 0]]],
-            [[[0, 0], [c10, 0]],
-             [[0, 0], [0, c11]]]]
+        # get a 'backend zero'
+        c0 = 0.0 * c00
 
-    return ops.asarray(data)
+        data = ((((c00, c0), (c0, c0)),
+                 ((c0, c01), (c0, c0))),
+                (((c0, c0), (c10, c0)),
+                 ((c0, c0), (c0, c11))))
+
+        return recursive_stack(data)
 
 
 register_param_gate('RZZ', rzz_param_gen, 2)
@@ -650,7 +696,10 @@ class Gate:
             return ops.PArray(param_fn, self._params)
 
         # or cached directly into array
-        return _cached_param_gate_build(param_fn, self._params)
+        try:
+            return _cached_param_gate_build(param_fn, self._params)
+        except TypeError:
+            return param_fn(self._params)
 
     @property
     def array(self):
@@ -669,7 +718,7 @@ class Gate:
                 f", parametrize={self._parametrize})"
                 if self._parametrize else ""
             )
-            + f")>"
+            + ")>"
         )
 
 
