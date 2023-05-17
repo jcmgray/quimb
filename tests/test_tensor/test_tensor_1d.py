@@ -544,13 +544,26 @@ class TestMatrixProductState:
         assert len(p.tensors) == 7
         assert set(p.outer_inds()) == {f'k{i}' for i in range(5)}
 
-    def test_gate_swap_and_split(self):
+    def test_gate_swap_and_split_bond_sizes(self):
         n = 10
         p = MPS_computational_state('0' * n)
         assert p.bond_sizes() == [1] * (n - 1)
         G = qu.rand_uni(4)
         p.gate_(G, (1, n - 2), contract='swap+split')
         assert p.bond_sizes() == [1] + [2] * (n - 3) + [1]
+
+    def test_gate_swap_and_split_matches(self):
+        k = MPS_rand_state(6, 7)
+        kr = k.copy()
+
+        gates = [qu.rand_uni(4) for _ in range(3)]
+        wheres = [(0, 5), (3, 2), (4, 1)]
+
+        for G, (i, j) in zip(gates, wheres):
+            k.gate_(G, (i, j), contract='swap+split')
+            kr.gate_inds_(G, (k.site_ind(i), k.site_ind(j)))
+
+        assert_allclose(k.to_dense(), kr.to_dense())
 
     def test_flip(self):
         p = MPS_rand_state(5, 3)

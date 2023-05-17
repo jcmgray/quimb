@@ -1739,23 +1739,42 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         """
         mps = self if inplace else self.copy()
 
-        i, j = sorted(where)
-        need2swap = i + 1 != j
+        i, j = where
+
+        need2flip = (i > j)
+        if need2flip:
+            # work with i < j but flip application of gate when necessary
+            i, j = j, i
+
+        need2swap = (i + 1 != j)
 
         # move j site adjacent to i site
         if need2swap:
-            mps.swap_site_to(j, i + 1, cur_orthog=cur_orthog,
-                             inplace=True, **compress_opts)
+            mps.swap_site_to(
+                j, i + 1,
+                cur_orthog=cur_orthog,
+                inplace=True,
+                **compress_opts
+            )
             cur_orthog = (i + 1, i + 2)
 
         # make sure sites are orthog center, then apply and split
         mps.canonize((i, i + 1), cur_orthog)
-        mps.gate_split_(G, (i, i + 1), **compress_opts)
+        mps.gate_split_(
+            G,
+            where=(i + 1, i) if need2flip else (i, i + 1),
+            **compress_opts
+        )
 
-        # move j site back to original position
         if need2swap:
-            mps.swap_site_to(i + 1, j, cur_orthog=(i, i + 1),
-                             inplace=True, **compress_opts)
+            # move j site back to original position
+            mps.swap_site_to(
+                i + 1,
+                j,
+                cur_orthog=(i, i + 1),
+                inplace=True,
+                **compress_opts
+            )
 
         return mps
 
