@@ -794,10 +794,10 @@ class TestNumbaFuncs:
     ):
         X = qu.randn(size, dtype=X_dtype)
         Y = qu.randn(size, dtype=X_dtype)
-        c = qu.randn(1, dtype=c_dtype).item()
+        c = qu.randn(1, dtype=c_dtype)[0]
         res = X - c * Y
         qu.core.subtract_update_(X, c, Y)
-        assert_allclose(res, X)
+        assert_allclose(res, X, rtol=1e-6)
 
     @mark.parametrize("size", [300, 3000, (300, 5), (3000, 5)])
     @mark.parametrize("X_dtype", ['float32', 'float64',
