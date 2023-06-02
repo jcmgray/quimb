@@ -9166,6 +9166,24 @@ class TensorNetwork(object):
 
         if tids is None:
             tids = self.tensor_map
+
+        try:
+            from cotengra import get_hypergraph
+            hg = get_hypergraph(
+                {
+                    tid: t.inds
+                    for tid, t in self.tensor_map.items()
+                }, accel="auto",
+            )
+            for ix in exclude_inds:
+                hg.remove_edge(ix)
+            y = hg.all_shortest_distances_condensed(tuple(tids))
+            return hierarchy.linkage(
+                y, method=method, optimal_ordering=optimal_ordering
+            )
+        except ImportError:
+            pass
+
         distances = self.compute_shortest_distances(tids, exclude_inds)
 
         dinf = 10  * self.num_tensors
