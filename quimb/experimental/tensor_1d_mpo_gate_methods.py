@@ -274,7 +274,13 @@ def mps_gate_with_mpo_zipup(
     mpo = mpo.copy()
 
     if canonize:
-        # put in 'pseudo' right canonical form
+        # put in 'pseudo' right canonical form:
+        #
+        #     │ │ │ │ │ │ │ │ │ │
+        #     ○─◀─◀─◀─◀─◀─◀─◀─◀─◀  MPO
+        #     │ │ │ │ │ │ │ │ │ │
+        #     ○─◀─◀─◀─◀─◀─◀─◀─◀─◀  MPS
+        #
         mps.right_canonize()
         mpo.right_canonize()
 
@@ -286,13 +292,24 @@ def mps_gate_with_mpo_zipup(
     bix = None
     sVH = None
     for i in range(tn.L - 1):
-
+        #             sVH
+        #     │ │ │ │     │ │ │ │ │ │ │
+        #     ▶═▶═▶═▶══□──◀─◀─◀─◀─◀─◀─◀
+        #        :      ╲ │ │ │ │ │ │ │
+        #   max_bond      ◀─◀─◀─◀─◀─◀─◀
+        #                 i
+        #              .... contract
         if sVH is None:
             # first site
             C = tn.select(i).contract(optimize=optimize)
         else:
             C = (sVH | tn.select(i)).contract(optimize=optimize)
-
+        #                i
+        #     │ │ │ │    │  │ │ │ │ │ │
+        #     ▶═▶═▶═▶════□──◀─◀─◀─◀─◀─◀
+        #             :   ╲ │ │ │ │ │ │
+        #           bix  :  ◀─◀─◀─◀─◀─◀
+        #               split
         left_inds = [mps.site_ind(i)]
         if bix is not None:
             left_inds.append(bix)
@@ -311,6 +328,12 @@ def mps_gate_with_mpo_zipup(
         )
         sVH.drop_tags()
         Us.append(U)
+        #              i
+        #     │ │ │ │  │    │ │ │ │ │ │
+        #     ▶═▶═▶═▶══▶═□──◀─◀─◀─◀─◀─◀
+        #                 ╲ │ │ │ │ │ │
+        #              : :  ◀─◀─◀─◀─◀─◀
+        #              U sVH
 
     Us.append((sVH | tn.select(tn.L - 1)).contract(optimize=optimize))
 
