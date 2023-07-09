@@ -5672,7 +5672,8 @@ class TensorNetwork(object):
 
     def compress_all_simple(
         self,
-        max_bond,
+        max_bond=None,
+        cutoff=1e-10,
         gauges=None,
         max_iterations=5,
         tol=0.0,
@@ -5703,14 +5704,22 @@ class TensorNetwork(object):
         )
 
         # truncate the tensors
-        tn.isel_({
-            ix: slice(None, max_bond)
-            for ix in gauges
-        })
+        slicers = {}
+        for ix, s in gauges.items():
+            if cutoff != 0.0:
+                max_cutoff = do("count_nonzero", s > cutoff * s[0])
+                if max_bond is None:
+                    ix_max_bond = max_cutoff
+                else:
+                    ix_max_bond = min(max_bond, max_cutoff)
+            else:
+                ix_max_bond = max_bond
+            slicers[ix] = slice(None, ix_max_bond)
+        tn.isel_(slicers)
 
         # truncate the gauges
         for ix in gauges:
-            gauges[ix] = gauges[ix][:max_bond]
+            gauges[ix] = gauges[ix][slicers[ix]]
 
         # re-insert if not tracking externally
         if not gauges_supplied:
