@@ -4065,7 +4065,7 @@ class TensorNetwork(object):
         where the trace is taken over all indices. Equivalent to the square
         root of the sum of squared singular values across any partition.
         """
-        norm = self.conj() | self
+        norm = self | self.conj()
         return norm.contract(**contract_opts)**0.5
 
     def make_norm(
