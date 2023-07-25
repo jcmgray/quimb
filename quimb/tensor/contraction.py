@@ -1,14 +1,14 @@
 """Functions relating to tensor network contraction.
 """
-
 import functools
+import itertools
 import threading
 import contextlib
 import collections
 
 import opt_einsum as oe
 from opt_einsum.contract import parse_backend
-from autoray import infer_backend
+from autoray import infer_backend, shape
 
 from ..utils import concat
 
@@ -296,6 +296,106 @@ def get_contractor(
         info = info_fn(eq, *shapes, optimize=path, **kwargs)
         return info
 
+
+@functools.lru_cache(2**12)
+def get_symbol(i):
+    """Get the 'ith' symbol.
+    """
+    return oe.get_symbol(i)
+
+
+def empty_symbol_map():
+    """Get a default dictionary that will populate with symbol entries as they
+    are accessed.
+    """
+    return collections.defaultdict(map(get_symbol, itertools.count()).__next__)
+
+
+def inds_to_symbols(inputs):
+    """Map a sequence of inputs terms, containing any hashable indices, to
+    single unicode letters, appropriate for einsum.
+
+    Parameters
+    ----------
+    inputs : sequence of sequence of hashable
+        The input indices per tensor.
+
+    Returns
+    -------
+    symbols : dict[hashable, str]
+        The mapping from index to symbol.
+    """
+    symbols = empty_symbol_map()
+    return {
+        ix: symbols[ix]
+        for term in inputs
+        for ix in term
+    }
+
+
+@functools.lru_cache(2**12)
+def inds_to_eq(inputs, output=None):
+    """Turn input and output indices of any sort into a single 'equation'
+    string where each index is a single 'symbol' (unicode character).
+
+    Parameters
+    ----------
+    inputs : sequence of sequence of hashable
+        The input indices per tensor.
+    output : sequence of hashable
+        The output indices.
+
+    Returns
+    -------
+    eq : str
+        The string to feed to einsum/contract.
+    """
+    symbols = empty_symbol_map()
+    in_str = ("".join(symbols[ix] for ix in inds) for inds in inputs)
+    in_str = ",".join(in_str)
+    if output is None:
+        out_str = "".join(
+            ix for ix in symbols.values() if in_str.count(ix) == 1
+        )
+    else:
+        out_str = "".join(symbols[ix] for ix in output)
+    return f"{in_str}->{out_str}"
+
+
+def array_contract(
+    arrays,
+    inputs,
+    output=None,
+    optimize=None,
+    backend=None,
+    **contract_opts
+):
+    """Contraction interface for raw arrays with arbitrary hashable indices.
+
+    Parameters
+    ----------
+    arrays : sequence of array_like
+        The arrays to contract.
+    inputs : sequence of sequence of hashable
+        The input indices per tensor.
+    output : sequence of hashable, optional
+        The output indices, will be computed as every index that appears only
+        once in the inputs if not given.
+    optimize : None, str, path_like, PathOptimizer, optional
+        How to compute the contraction path.
+    backend : None, str, optional
+        Which backend to use for the contraction.
+    contract_opts
+        Supplied to ``contract_expression``.
+
+    Returns
+    -------
+    array_like
+    """
+    eq = inds_to_eq(inputs, output)
+    shapes = tuple(shape(a) for a in arrays)
+    f = get_contractor(eq, *shapes, optimize=optimize, **contract_opts)
+    return f(*arrays, backend=backend)
 
 try:
     from opt_einsum.contract import infer_backend as _oe_infer_backend

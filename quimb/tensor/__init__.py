@@ -12,6 +12,9 @@ from .contraction import (
     set_contract_strategy,
     set_tensor_linop_backend,
     tensor_linop_backend,
+    get_symbol,
+    inds_to_eq,
+    array_contract,
 )
 from .tensor_core import (
     bonds_size,
@@ -327,6 +330,9 @@ __all__ = (
     "tensor_direct_product",
     "tensor_fuse_squeeze",
     "tensor_linop_backend",
+    "get_symbol",
+    "inds_to_eq",
+    "array_contract",
     "tensor_network_align",
     "tensor_network_apply_op_vec",
     "tensor_network_distance",

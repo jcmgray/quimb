@@ -17,7 +17,7 @@ import numpy as np
 import opt_einsum as oe
 import scipy.sparse.linalg as spla
 from autoray import (
-    do, conj, astype, infer_backend, get_dtype_name, dag, shape
+    do, conj, astype, infer_backend, get_dtype_name, dag, shape, size
 )
 try:
     from autoray import get_common_dtype
@@ -39,8 +39,16 @@ from .contraction import (
     get_contract_strategy,
     get_tensor_linop_backend,
     contract_strategy,
+    get_symbol,
+    inds_to_symbols,
+    inds_to_eq,
+    array_contract,
 )
 
+_inds_to_eq = deprecated(inds_to_eq, '_inds_to_eq', 'inds_to_eq')
+get_symbol = deprecated(
+    get_symbol, 'tensor_core.get_symbol', 'contraction.get_symbol'
+)
 
 # --------------------------------------------------------------------------- #
 #                                Tensor Funcs                                 #
@@ -87,43 +95,6 @@ def _gen_output_inds(all_inds):
             )
         elif freq == 1:
             yield ind
-
-
-@functools.lru_cache(2**12)
-def get_symbol(i):
-    """Get the 'ith' symbol.
-    """
-    return oe.get_symbol(i)
-
-
-def empty_symbol_map():
-    """Get a default dictionary that will populate with symbol entries as they
-    are accessed.
-    """
-    return collections.defaultdict(map(get_symbol, itertools.count()).__next__)
-
-
-@functools.lru_cache(2**12)
-def _inds_to_eq(inputs, output):
-    """Turn input and output indices of any sort into a single 'equation'
-    string where each index is a single 'symbol' (unicode character).
-
-    Parameters
-    ----------
-    inputs : sequence of sequence of str
-        The input indices per tensor.
-    output : sequence of str
-        The output indices.
-
-    Returns
-    -------
-    eq : str
-        The string to feed to einsum/contract.
-    """
-    symbol_get = empty_symbol_map().__getitem__
-    in_str = ("".join(map(symbol_get, inds)) for inds in inputs)
-    out_str = "".join(map(symbol_get, output))
-    return ",".join(in_str) + f"->{out_str}"
 
 
 _VALID_CONTRACT_GET = {None, 'expression', 'path', 'path-info', 'symbol-map'}
@@ -222,26 +193,20 @@ def tensor_contract(
         inds_out = tuple(output_inds)
 
     # possibly map indices into the range needed by opt-einsum
-    eq = _inds_to_eq(inds, inds_out)
+    eq = inds_to_eq(inds, inds_out)
 
     if get is not None:
         check_opt('get', get, _VALID_CONTRACT_GET)
 
         if get == 'symbol-map':
-            return {
-                get_symbol(i): ix
-                for i, ix in enumerate(unique(concat(inds)))
-            }
+            return inds_to_symbols(inds)
 
         if get == 'path':
             return get_contractor(eq, *shapes, get='path', **contract_opts)
 
         if get == 'path-info':
             pathinfo = get_contractor(eq, *shapes, get='info', **contract_opts)
-            pathinfo.quimb_symbol_map = {
-                get_symbol(i): ix
-                for i, ix in enumerate(unique(concat(inds)))
-            }
+            pathinfo.quimb_symbol_map = inds_to_symbols(inds)
             return pathinfo
 
         if get == 'expression':
@@ -2228,7 +2193,7 @@ class Tensor:
         if len(old_inds) == len(new_inds):
             return t
 
-        eq = _inds_to_eq((old_inds,), new_inds)
+        eq = inds_to_eq((old_inds,), new_inds)
         t.modify(apply=lambda x: do('einsum', eq, x, like=x),
                  inds=new_inds, left_inds=None)
 
@@ -4220,11 +4185,7 @@ class TensorNetwork(object):
         --------
         get_equation, get_inputs_output_size_dict
         """
-        symbol_map = empty_symbol_map()
-        for t in self:
-            for ix in t.inds:
-                symbol_map[ix]
-        return symbol_map
+        return inds_to_symbols(t.inds for t in self)
 
     def get_equation(self, output_inds=None):
         """Get the 'equation' describing this tensor network, in ``einsum``
@@ -4254,7 +4215,7 @@ class TensorNetwork(object):
         if output_inds is None:
             output_inds = self.outer_inds()
         inputs_inds = tuple(t.inds for t in self)
-        return _inds_to_eq(inputs_inds, output_inds)
+        return inds_to_eq(inputs_inds, output_inds)
 
     def get_inputs_output_size_dict(self, output_inds=None):
         """Get a tuple of ``inputs``, ``output`` and ``size_dict`` suitable for

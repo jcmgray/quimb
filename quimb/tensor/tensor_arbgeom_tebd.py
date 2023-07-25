@@ -328,8 +328,6 @@ class LocalHamGen:
             Whether to show the legend of which terms are in which group.
         ax : None or matplotlib.Axes, optional
             Add to a existing set of axes.
-        return_fig : bool, optional
-            Whether to return any newly created figure.
         """
         import networkx as nx
         import matplotlib.pyplot as plt
