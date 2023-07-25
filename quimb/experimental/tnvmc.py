@@ -7,6 +7,7 @@ import random
 import numpy as np
 import autoray as ar
 
+from quimb.utils import default_to_neutral_style
 from quimb import format_number_with_error
 
 
@@ -610,35 +611,44 @@ class MetropolisHastingsSampler:
         self.prob_fn = kwargs['amplitude_factory'].prob
         self.sub_sampler.update(**kwargs)
 
+    @default_to_neutral_style
     def plot(self):
         from matplotlib import pyplot as plt
 
         fig, axs = plt.subplots(ncols=2, figsize=(8, 4))
-        fig.suptitle(f'acceptance ratio = {100 * self.acceptance_ratio:.2f} %')
+        fig.suptitle(f"acceptance ratio = {100 * self.acceptance_ratio:.2f} %")
 
         mins = min(self.omegas)
         maxs = max(self.omegas)
 
-        axs[0].plot([mins, maxs], [mins, maxs], color='red')
-        axs[0].scatter(self.probs, self.omegas, marker='.', alpha=0.5)
-        axs[0].set_xlabel('$\pi(x)$')
-        axs[0].set_ylabel('$\omega(x)$')
-        axs[0].set_xscale('log')
-        axs[0].set_yscale('log')
-        axs[0].grid(True, c=(0.97 ,0.97, 0.97), which='major')
+        axs[0].plot([mins, maxs], [mins, maxs], color="red")
+        axs[0].scatter(
+            self.probs, self.omegas, marker=".", alpha=0.5, zorder=-10
+        )
+        axs[0].set_rasterization_zorder(0)
+        axs[0].set_xlabel("$\pi(x)$")
+        axs[0].set_ylabel("$\omega(x)$")
+        axs[0].set_xscale("log")
+        axs[0].set_yscale("log")
+        axs[0].grid(True, c=(0.97, 0.97, 0.97), which="major")
         axs[0].set_axisbelow(True)
 
         minh = np.log10(min(self.acceptances))
         maxh = np.log10(max(self.acceptances))
-        axs[1].hist(self.acceptances, bins=np.logspace(minh, maxh), color='green');
-        axs[1].set_xlabel('$A = \dfrac{\pi(x)\omega(y)}{\pi(y)\omega(x)}$')
-        axs[1].axvline(1.0, color='orange')
-        axs[1].set_xscale('log')
-        axs[1].grid(True, c=(0.97 ,0.97, 0.97), which='major')
+        axs[1].hist(
+            self.acceptances, bins=np.logspace(minh, maxh), color="green"
+        )
+        axs[1].set_xlabel("$A = \dfrac{\pi(x)\omega(y)}{\pi(y)\omega(x)}$")
+        axs[1].axvline(1.0, color="orange")
+        axs[1].set_xscale("log")
+        axs[1].grid(True, c=(0.97, 0.97, 0.97), which="major")
         axs[1].set_axisbelow(True)
+
+        return fig, axs
 
 
 # --------------------------------------------------------------------------- #
+
 
 def auto_share_multicall(func, arrays, configs):
     """Call the function ``func``, which should be an array
@@ -1350,55 +1360,124 @@ class TNVMC:
 
         return rs, energies
 
+    @default_to_neutral_style
     def plot(
         self,
         figsize=(12, 6),
         yrange_quantile=(0.01, 0.99),
+        zoom="auto",
+        hlines=(),
     ):
         from matplotlib import pyplot as plt
 
         x = np.arange(len(self.local_energies))
         # these are all views
-        y = np.frombuffer(self.local_energies)
-        ym = np.frombuffer(self.energies)
-        yerr = np.frombuffer(self.energy_errors)
+        y = np.array(self.local_energies)
+        ym = np.array(self.energies)
+        yerr = np.array(self.energy_errors)
         yplus = ym + yerr
         yminus = ym - yerr
+        yv = np.array(self.energy_variances[10:])
 
-        fig, ax = plt.subplots(figsize=figsize)
+        fig = plt.figure(figsize=figsize)
+        gs = fig.add_gridspec(nrows=2, ncols=3)
+
+        ax = fig.add_subplot(gs[:, :2])
         ax.plot(
-            x, y, '.', alpha=0.5, markersize=1.0, zorder=-10,
-            color=(0.1, 0.5, .7)
+            x,
+            y,
+            ".",
+            alpha=0.5,
+            markersize=1.0,
+            zorder=-10,
+            color=(0.1, 0.5, 0.7),
         )
         ax.fill_between(
-            x, yminus, yplus, alpha=0.45, color=(0.6, .8, .6)
+            x, yminus, yplus,
+            alpha=0.45,
+            color=(0.6, 0.8, 0.6),
+            zorder=-11,
         )
         ax.plot(
-            x, ym, '-', alpha=0.9, zorder=-10, linewidth=2, color=(0.6, .8, .6)
+            x,
+            ym,
+            "-",
+            alpha=0.9,
+            zorder=-10,
+            linewidth=2,
+            color=(0.6, 0.8, 0.6),
         )
+        ax.set_ylim(
+            np.quantile(y, yrange_quantile[0]),
+            np.quantile(y, yrange_quantile[1]),
+        )
+        ax.set_xlabel("Number of local energy evaluations")
+        ax.set_ylabel("Energy per site", color=(0.6, 0.8, 0.6))
 
-        # ax.text(0, yf[0], f'{yf[0]:.4f}', c=(0.3, .6, .3), ha='left', va='top')
-        # ax.text(len(yf), yf[-1], f'{yf[-1]:.4f}', c=(0.3, .6, .3), ha='left', va='top')
+        if hlines:
+            from matplotlib.colors import hsv_to_rgb
 
-        # en_su = -0.719025
-        # ax.axhline(en_su, linestyle='--', c=(.9, .3, .3), lw=2)
-        # ax.text(x[-1], en_su, f'D={D} SU', ha='left', va='bottom', c=(.9, .3, .3))
+            hlines = dict(hlines)
+            for i, (label, value) in enumerate(hlines.items()):
+                color = hsv_to_rgb([(0.1 * i) % 1.0, 0.9, 0.9])
+                ax.axhline(value, color=color, ls="--", label=label)
+                ax.text(1, value, label, color=color, va="bottom", ha="left")
 
-        # ax.axhline(-0.653179604041, linestyle='--', c=(.6, .3, .3), lw=2)
-        # ax.text(x[-1], -0.653179604041, 'D=3 exact', ha='left', va='bottom', c=(.6, .3, .3))
-
-        # ax.axhline(en_ex, linestyle='--', c=(.3, .3, .3), lw=2)
-        # ax.text(x[-1], en_ex, 'ED', ha='left', va='top', c=(.3, .3, .3))
-
-        # for vl in vlines:
-        #     ax.axvline(vl, zorder=0, color=(.99, .8, .0), alpha=0.5, lw=1)
-
-        ax.set_ylim(np.quantile(y, yrange_quantile[0]),
-                    np.quantile(y, yrange_quantile[1]))
         ax.set_rasterization_zorder(0)
 
-        ax.set_xlabel('Number of local energy evaluations')
-        ax.set_ylabel('Energy per site')
+        ax_var = fig.add_subplot(gs[1, 2])
+        ax_var.plot(
+            x[10:],
+            yv,
+            "-",
+            alpha=0.9,
+            zorder=-10,
+            linewidth=2,
+            color=(1.0, 0.7, 0.4),
+        )
+        ax_var.set_yscale('log')
+        ax_var.text(
+            0.9,
+            0.9,
+            "Energy variance",
+            color=(1.0, 0.7, 0.4),
+            horizontalalignment='right',
+            verticalalignment='top',
+            transform=ax_var.transAxes,
+        )
+        ax_var.set_rasterization_zorder(0)
 
+        if zoom is not None:
+            if zoom == "auto":
+                zoom = min(10_000, y.size // 2)
 
-        return fig, ax
+            ax_zoom = fig.add_subplot(gs[0, 2])
+            ax_zoom.fill_between(
+                x[-zoom:],
+                yminus[-zoom:],
+                yplus[-zoom:],
+                alpha=0.45,
+                color=(0.6, 0.8, 0.6),
+                zorder=-11,
+            )
+            ax_zoom.plot(
+                x[-zoom:],
+                ym[-zoom:],
+                "-",
+                alpha=0.9,
+                zorder=-10,
+                linewidth=2,
+                color=(0.6, 0.8, 0.6),
+            )
+            ax_zoom.text(
+                0.9,
+                0.9,
+                "Zoom",
+                color=(0.6, 0.8, 0.6),
+                horizontalalignment='right',
+                verticalalignment='top',
+                transform=ax_zoom.transAxes,
+            )
+            ax_zoom.set_rasterization_zorder(0)
+
+        return fig, [ax, ax_zoom, ax_var]

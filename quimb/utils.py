@@ -801,7 +801,12 @@ def default_to_neutral_style(fn):
     """
 
     @functools.wraps(fn)
-    def wrapper(*args, style="neutral", **kwargs):
+    def wrapper(
+        *args,
+        style="neutral",
+        show_and_close=True,
+        **kwargs
+    ):
         import matplotlib.pyplot as plt
 
         if style == "neutral":
@@ -810,6 +815,12 @@ def default_to_neutral_style(fn):
             style = {}
 
         with plt.style.context(style):
-            return fn(*args, **kwargs)
+            out = fn(*args, **kwargs)
+
+            if show_and_close:
+                plt.show()
+                plt.close()
+
+            return out
 
     return wrapper
