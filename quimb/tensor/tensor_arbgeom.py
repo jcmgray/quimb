@@ -595,7 +595,7 @@ class TensorNetworkGenVector(TensorNetworkGen):
         is essentially a wrapper around
         :meth:`~quimb.tensor.tensor_core.TensorNetwork.gate_inds` apart from
         ``where`` can be specified as a list of sites, and tags can be
-        optionally, intelligently propgated to the new gate tensor.
+        optionally, intelligently propagated to the new gate tensor.
 
         .. math::
 

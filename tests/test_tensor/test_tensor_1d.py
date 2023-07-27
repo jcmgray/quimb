@@ -21,6 +21,7 @@ class TestMatrixProductState:
                    [np.random.rand(5, 5, 2)
                     for _ in range(3)] + [np.random.rand(5, 2)])
         mps = MatrixProductState(tensors)
+        mps.check()
         assert len(mps.tensors) == 5
         nmps = mps.reindex_sites('foo{}', inplace=False, where=slice(0, 3))
         assert nmps.site_ind_id == "k{}"

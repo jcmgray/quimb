@@ -1652,6 +1652,19 @@ class Tensor:
     def left_inds(self, left_inds):
         self._left_inds = tuple(left_inds) if left_inds is not None else None
 
+    def check(self):
+        """Do some basic diagnostics on this tensor, raising errors if
+        something is wrong."""
+        if ndim(self.data) != len(self.inds):
+            raise ValueError(
+                f"Wrong number of inds, {self.inds}, supplied for array"
+                f" of shape {self.data.shape}."
+            )
+        if not do("all", do("isfinite", self.data)):
+            raise ValueError(
+                f"Tensor data contains non-finite values: {self.data}."
+            )
+
     @property
     def owners(self):
         return self._owners
@@ -1665,10 +1678,7 @@ class Tensor:
     def remove_owner(self, tn):
         """Remove TensorNetwork ``tn`` as an owner of this Tensor.
         """
-        try:
-            del self._owners[hash(tn)]
-        except KeyError:
-            pass
+        self._owners.pop(hash(tn), None)
 
     def check_owners(self):
         """Check if this tensor is 'owned' by any alive TensorNetworks. Also
@@ -2148,7 +2158,7 @@ class Tensor:
 
         old_inds, new_inds = tuple(old_inds), tuple(new_inds)
 
-        eq = _inds_to_eq((old_inds,), new_inds)
+        eq = inds_to_eq((old_inds,), new_inds)
         t.modify(apply=lambda x: do('einsum', eq, x, like=x),
                  inds=new_inds, left_inds=None)
 
@@ -3887,6 +3897,60 @@ class TensorNetwork(object):
         tids = self._get_tids_from_tags(tags, which=which)
         for tid in tuple(tids):
             self.pop_tensor(tid)
+
+    def check(self):
+        """Check some basic diagnostics of the tensor network.
+        """
+        for tid, t in self.tensor_map.items():
+            t.check()
+
+            if not t.check_owners():
+                raise ValueError(
+                    f"Tensor {tid} doesn't have any owners, but should have "
+                    "this tensor network as one."
+                )
+            if not any(
+                (tid == ref_tid and (ref() is self))
+                for ref, ref_tid in t._owners.values()
+            ):
+                raise ValueError(
+                    f"Tensor {tid} does not have this tensor network as an "
+                    "owner."
+                )
+
+            # check indices correctly registered
+            for ix in t.inds:
+                ix_tids = self.ind_map.get(ix, None)
+                if ix_tids is None:
+                    raise ValueError(
+                        f"Index {ix} of tensor {tid} not in index map."
+                    )
+                if tid not in ix_tids:
+                    raise ValueError(
+                        f"Tensor {tid} not registered under index {ix}."
+                    )
+
+            # check tags correctly registered
+            for tag in t.tags:
+                tag_tids = self.tag_map.get(tag, None)
+                if tag_tids is None:
+                    raise ValueError(
+                        f"Tag {tag} of tensor {tid} not in tag map."
+                    )
+                if tid not in tag_tids:
+                    raise ValueError(
+                        f"Tensor {tid} not registered under tag {tag}."
+                    )
+
+        # check that all index dimensions match across incident tensors
+        for ix, tids in self.ind_map.items():
+            ts = tuple(self._tids_get(*tids))
+            dims = {t.ind_size(ix) for t in ts}
+            if len(dims) != 1:
+                raise ValueError(
+                    "Mismatched index dimension for index "
+                    f"'{ix}' in tensors {ts}."
+                )
 
     def add_tag(self, tag, where=None, which='all'):
         """Add tag to every tensor in this network, or if ``where`` is
@@ -5826,6 +5890,64 @@ class TensorNetwork(object):
         neighbors -= tids
 
         return neighbors
+
+    def _get_subgraph_tids(self, tids):
+        """Get the tids of tensors connected, by any distance, to the tensor or
+        region of tensors ``tids``.
+        """
+        region = tags_to_oset(tids)
+        queue = list(self._get_neighbor_tids(region))
+        while queue:
+            tid = queue.pop()
+            if tid not in region:
+                region.add(tid)
+                queue.extend(self._get_neighbor_tids([tid]))
+        return region
+
+    def _ind_to_subgraph_tids(self, ind):
+        """Get the tids of tensors connected, by any distance, to the index
+        ``ind``.
+        """
+        return self._get_subgraph_tids(self._get_tids_from_inds(ind))
+
+    def istree(self):
+        """Check if this tensor network has a tree structure, (treating
+        multibonds as a single edge).
+
+        Examples
+        --------
+
+            >>> MPS_rand_state(10, 7).istree()
+            True
+
+            >>> MPS_rand_state(10, 7, cyclic=True).istree()
+            False
+
+        """
+        tid0 = next(iter(self.tensor_map))
+        region = [(tid0, None)]
+        seen = {tid0}
+        while region:
+            tid, ptid = region.pop()
+            for ntid in self._get_neighbor_tids(tid):
+                if ntid == ptid:
+                    # ignore the previous tid we just came from
+                    continue
+                if ntid in seen:
+                    # found a loop
+                    return False
+                # expand the queue
+                region.append((ntid, tid))
+                seen.add(ntid)
+        return True
+
+    def isconnected(self):
+        """Check whether this tensor network is connected, i.e. whether
+        there is a path between any two tensors, (including size 1 indices).
+        """
+        tid0 = next(iter(self.tensor_map))
+        region = self._get_subgraph_tids([tid0])
+        return len(region) == len(self.tensor_map)
 
     def subgraphs(self, virtual=False):
         """Split this tensor network into disconneceted subgraphs.
@@ -9048,6 +9170,19 @@ class TensorNetwork(object):
         inputs = {tid: t.inds for tid, t in self.tensor_map.items()}
         hg = get_hypergraph(inputs, accel='auto')
         return hg.compute_loops(max_loop_length)
+
+    def _get_string_between_tids(self, tida, tidb):
+        strings = [(tida,)]
+        while strings:
+            string = strings.pop(0)
+            tid_current = string[-1]
+            for tid_next in self._get_neighbor_tids(tid_current):
+                if tid_next == tidb:
+                    # finished!
+                    return string + (tidb,)
+                if tid_next not in string:
+                    # continue onwards!
+                    strings.append(string + (tid_next,))
 
     def tids_are_connected(self, tids):
         """Check whether nodes ``tids`` are connected.
