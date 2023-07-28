@@ -2,7 +2,7 @@ channels:
   - conda-forge
   - defaults
 dependencies:
-  - autoray
+  - autoray>=0.6.6
   - coverage
   - cytoolz
   - diskcache

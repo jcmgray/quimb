@@ -28,7 +28,7 @@ setup(
         'cytoolz>=0.8.0',
         'tqdm>=4',
         'opt_einsum>=3.2',
-        'autoray>=0.5.1',
+        'autoray>=0.6.6',
     ],
     extras_require={
         'tensor': [
@@ -58,7 +58,7 @@ setup(
             'furo',
             'setuptools_scm',
             'ipython!=8.7.0',
-            'autoray>=0.2.0',
+            'autoray>=0.6.6',
             'opt_einsum>=3.2',
             'doc2dash>=2.4.1',
         ],

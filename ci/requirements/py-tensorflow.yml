@@ -2,7 +2,7 @@ channels:
   - defaults
   - conda-forge
 dependencies:
-  - autoray
+  - autoray>=0.6.6
   - coverage
   - cytoolz
   - diskcache
@@ -17,5 +17,7 @@ dependencies:
   - pytest-cov
   - randomgen
   - scipy
-  - tensorflow>=2
   - tqdm
+  - pip
+  - pip:
+    - tensorflow
