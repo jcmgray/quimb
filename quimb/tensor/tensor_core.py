@@ -8025,9 +8025,14 @@ class TensorNetwork(object):
         if left_inds is None:
             right_inds = tags_to_oset(right_inds)
             left_inds = self._outer_inds - right_inds
+        elif isinstance(left_inds, str):
+            left_inds = (left_inds,)
+
         if right_inds is None:
             left_inds = tags_to_oset(left_inds)
             right_inds = self._outer_inds - left_inds
+        elif isinstance(right_inds, str):
+            right_inds = (right_inds,)
 
         d0 = self.inds_size(left_inds)
         d1 = self.inds_size(right_inds)
