@@ -10016,8 +10016,12 @@ class TensorNetwork(object):
         s += f"{auto_color_html(self.__class__.__name__)}"
         s += f"({self._repr_info_str()})"
         s += "</summary>"
-        for t in self:
+        for i, t in enumerate(self):
             s += t._repr_html_()
+            if i >= 99:
+                # only show 100 tensors
+                s += "<p>...</p>"
+                break
         s += "</details>"
         s += "</samp>"
         return s
