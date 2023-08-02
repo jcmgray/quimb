@@ -317,6 +317,22 @@ class TestBasicTensorOperations:
         with pytest.raises(ValueError):
             t.sum_reduce_("d")
 
+    def test_vector_reduce(self):
+        t = rand_tensor((2, 3, 4), "abc")
+        g = qu.randn(3)
+        tv = t.vector_reduce('b', g)
+        assert tv.shape == (2, 4)
+        assert tv.inds == ('a', 'c')
+        assert_allclose(tv.data, np.einsum('abc,b->ac', t.data, g))
+
+    def test_sum_reduce(self):
+        t = rand_tensor((2, 3, 4), "abc")
+        x = np.einsum('abc->ac', t.data)
+        t.sum_reduce_("b")
+        assert t.shape == (2, 4)
+        assert t.inds == ('a', 'c')
+        assert_allclose(t.data, x)
+
     def test_ownership(self):
         a = rand_tensor((2, 2), ("a", "b"), tags={"X", "Y"})
         b = rand_tensor((2, 2), ("b", "c"), tags={"X", "Z"})

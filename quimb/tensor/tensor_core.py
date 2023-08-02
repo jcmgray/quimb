@@ -2192,6 +2192,35 @@ class Tensor:
 
     sum_reduce_ = functools.partialmethod(sum_reduce, inplace=True)
 
+    def vector_reduce(self, ind, v, inplace=False):
+        """Contract the vector ``v`` with the index ``ind`` of this tensor,
+        removing it.
+
+        Parameters
+        ----------
+        ind : str
+            The index to contract.
+        v : array_like
+            The vector to contract with.
+        inplace : bool, optional
+            Whether to perform the reduction inplace.
+
+        Returns
+        -------
+        Tensor
+        """
+        t = self if inplace else self.copy()
+        axis= t.inds.index(ind)
+        new_data = array_contract(
+            (t.data, v),
+            (tuple(range(self.ndim)), (axis,)),
+        )
+        new_inds = t.inds[:axis] + t.inds[axis + 1:]
+        t.modify(data=new_data, inds=new_inds)
+        return t
+
+    vector_reduce_ = functools.partialmethod(vector_reduce, inplace=True)
+
     def collapse_repeated(self, inplace=False):
         """Take the diagonals of any repeated indices, such that each index
         only appears once.
@@ -7420,6 +7449,49 @@ class TensorNetwork(object):
         return tn
 
     isel_ = functools.partialmethod(isel, inplace=True)
+
+    def sum_reduce(self, ind, inplace=False):
+        """Sum over the index ``ind`` of this tensor network, removing it. This
+        is like contracting a vector of ones in, or marginalizing a classical
+        probability distribution.
+
+        Parameters
+        ----------
+        ind : str
+            The index to sum over.
+        inplace : bool, optional
+            Whether to perform the reduction inplace.
+        """
+        tn = self if inplace else self.copy()
+        t, = tn._inds_get(ind)
+        t.sum_reduce_(ind)
+        return tn
+
+    sum_reduce_ = functools.partialmethod(sum_reduce, inplace=True)
+
+    def vector_reduce(self, ind, v, inplace=False):
+        """Contract the vector ``v`` with the index ``ind`` of this tensor
+        network, removing it.
+
+        Parameters
+        ----------
+        ind : str
+            The index to contract.
+        v : array_like
+            The vector to contract with.
+        inplace : bool, optional
+            Whether to perform the reduction inplace.
+
+        Returns
+        -------
+        TensorNetwork
+        """
+        tn = self if inplace else self.copy()
+        t, = tn._inds_get(ind)
+        t.vector_reduce_(ind, v)
+        return tn
+
+    vector_reduce_ = functools.partialmethod(vector_reduce, inplace=True)
 
     def cut_iter(self, *inds):
         """Cut and iterate over one or more indices in this tensor network.
