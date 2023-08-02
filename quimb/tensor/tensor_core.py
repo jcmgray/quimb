@@ -6930,9 +6930,10 @@ class TensorNetwork(object):
         canonize_after_distance=None,
         canonize_after_opts=None,
         gauge_boundary_only=True,
-        compress_late=True,
-        compress_min_size=None,
         compress_opts=None,
+        compress_late=True,
+        compress_mode="auto",
+        compress_min_size=None,
         compress_span=False,
         compress_matrices=True,
         compress_exclude=None,
@@ -6950,10 +6951,26 @@ class TensorNetwork(object):
     ):
         tn = self if inplace else self.copy()
 
+        # options relating to the compression itself
+        compress_opts = ensure_dict(compress_opts)
+
+        if compress_mode == "auto":
+            if tree_gauge_distance == 0:
+                compress_mode = "basic"
+            else:
+                compress_mode = "virtual-tree"
+        compress_opts.setdefault("mode", compress_mode)
+
         if canonize_distance is None:
             canonize_distance = tree_gauge_distance
+
         if canonize_after_distance is None:
-            canonize_after_distance = tree_gauge_distance
+            if compress_mode == "virtual-tree":
+                # can avoid resetting the tree gauge
+                canonize_after_distance = 0
+            elif compress_mode == "basic":
+                # do an eager tree guage and reset
+                canonize_after_distance = tree_gauge_distance
 
         if (canonize_distance == -1) and (gauges is None):
             gauges = True
@@ -6975,6 +6992,23 @@ class TensorNetwork(object):
 
         # the boundary - the set of intermediate tensors
         boundary = oset()
+
+        # options relating to locally canonizing around each compression
+        if canonize_distance:
+            canonize_opts = ensure_dict(canonize_opts)
+            canonize_opts.setdefault('equalize_norms', equalize_norms)
+            if gauge_boundary_only:
+                canonize_opts['include'] = boundary
+            else:
+                canonize_opts['include'] = None
+
+        # options relating to canonizing around tensors *after* compression
+        if canonize_after_distance:
+            canonize_after_opts = ensure_dict(canonize_after_opts)
+            if gauge_boundary_only:
+                canonize_after_opts['include'] = boundary
+            else:
+                canonize_after_opts['include'] = None
 
         def _do_contraction(tid1, tid2):
             """The inner closure that contracts the two tensors identified by
@@ -7038,26 +7072,6 @@ class TensorNetwork(object):
                     # not going to produce a large tensor so don't bother
                     # compressing
                     return True
-
-        # options relating to locally canonizing around each compression
-        if canonize_distance:
-            canonize_opts = ensure_dict(canonize_opts)
-            canonize_opts.setdefault('equalize_norms', equalize_norms)
-            if gauge_boundary_only:
-                canonize_opts['include'] = boundary
-            else:
-                canonize_opts['include'] = None
-
-        # options relating to the compression itself
-        compress_opts = ensure_dict(compress_opts)
-
-        # options relating to canonizing around tensors *after* compression
-        if canonize_after_distance:
-            canonize_after_opts = ensure_dict(canonize_after_opts)
-            if gauge_boundary_only:
-                canonize_after_opts['include'] = boundary
-            else:
-                canonize_after_opts['include'] = None
 
         # allow dynamic compresson options based on distance
         if callable(max_bond):
