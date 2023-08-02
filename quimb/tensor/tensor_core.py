@@ -6606,7 +6606,7 @@ class TensorNetwork(object):
                     # check convergence
                     old_gauge = gauges.get(bond, 1.0)
 
-                    if getattr(old_gauge, 'size', 1) != new_gauge.size:
+                    if size(old_gauge) != size(new_gauge):
                         # the bond has changed size, so we can't compare
                         # the singular values directly
                         old_gauge = 1.0
