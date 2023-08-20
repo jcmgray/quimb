@@ -24,7 +24,7 @@
 
 ``quimb`` is an easy but fast python library
 for *'quantum information many-body'* calculations, focusing primarily on **tensor
-networks**. The code is hosted on `github <https://github.com/jcmgray/quimb>`_,
+networks**. The code is hosted on `GitHub <https://github.com/jcmgray/quimb>`_,
 and docs are hosted on `readthedocs <http://quimb.readthedocs.io/en/latest/>`_.
 Functionality is split in two:
 
@@ -74,6 +74,6 @@ Contributions of any sort are very welcome - please see the
 `contributing guide <https://github.com/jcmgray/quimb/blob/main/.github/CONTRIBUTING.md>`_.
 `Issues <https://github.com/jcmgray/quimb/issues>`_ and
 `pull requests <https://github.com/jcmgray/quimb/pulls>`_ are hosted on
-`github <https://github.com/jcmgray/quimb>`_.
+`GitHub <https://github.com/jcmgray/quimb>`_.
 For other questions and suggestions, please use the
 `discussions page <https://github.com/jcmgray/quimb/discussions>`_.
