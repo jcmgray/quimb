@@ -36,10 +36,15 @@ def pack(obj):
     skeleton : Tensor, TensorNetwork, or similar
         A copy of ``obj`` with all references to the original data removed.
     """
-    skeleton = obj.copy()
-    params = skeleton.get_params()
-    placeholders = tree_map(Placeholder, params)
-    skeleton.set_params(placeholders)
+    try:
+        skeleton = obj.copy()
+        params = skeleton.get_params()
+        placeholders = tree_map(Placeholder, params)
+        skeleton.set_params(placeholders)
+    except AttributeError:
+        # assume it's a raw array
+        params = obj
+        skeleton = Placeholder(obj)
     return params, skeleton
 
 
@@ -62,8 +67,12 @@ def unpack(params, skeleton):
     obj : Tensor, TensorNetwork, or similar
         A copy of ``skeleton`` with parameters inserted.
     """
-    obj = skeleton.copy()
-    obj.set_params(params)
+    try:
+        obj = skeleton.copy()
+        obj.set_params(params)
+    except AttributeError:
+        # assume it's a raw array
+        obj = params
     return obj
 
 
