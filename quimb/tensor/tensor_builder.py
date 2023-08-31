@@ -501,6 +501,51 @@ def TN_rand_reg(
     )
 
 
+def TN_rand_tree(
+    n,
+    D,
+    phys_dim=None,
+    seed=None,
+    dtype="float64",
+    site_tag_id="I{}",
+    site_ind_id="k{}",
+):
+    """Create a random tree tensor network.
+
+    Parameters
+    ----------
+    n : int
+        The number of tensors.
+    D : int
+        The bond dimension connecting tensors.
+    phys_dim : int, optional
+        If not ``None``, give each tensor a 'physical', free index of this size
+        to mimic a wavefunction of ``n`` sites.
+    seed : int, optional
+        A random seed.
+    site_tag_id : str, optional
+        String with formatter to tag sites.
+    site_ind_id : str, optional
+        String with formatter to tag indices (if ``phys_dim`` specified).
+
+    Returns
+    -------
+    TensorNetworkGen or TensorNetworkGenVector
+    """
+    import networkx as nx
+
+    G = nx.random_tree(n, seed=seed)
+    return TN_from_edges_rand(
+        G.edges,
+        D=D,
+        phys_dim=phys_dim,
+        seed=seed,
+        dtype=dtype,
+        site_tag_id=site_tag_id,
+        site_ind_id=site_ind_id,
+    )
+
+
 def TN_from_strings(
     strings,
     fill_fn=None,
