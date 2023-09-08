@@ -12,54 +12,63 @@ defaults:
 jobs:
   run-tests:
     runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.flaky }}
     strategy:
       matrix:
         testset: [matrix, tensor]
         env: [base]
         os: [ubuntu-latest]
         python-version: [3.9, '3.10', '3.11']
+        flaky: [false]
 
         include:
         - os: macos-latest
           testset: matrix
           env: base
           python-version: '3.11'
-          continue-on-error: true
+          flaky: true
 
         - os: macos-latest
           testset: tensor
           env: base
           python-version: '3.11'
+          flaky: false
 
         - os: windows-latest
           testset: matrix
           env: base
           python-version: '3.11'
+          flaky: false
 
         - os: windows-latest
           testset: tensor
           env: base
           python-version: '3.11'
+          flaky: false
 
         - env: torch
           testset: tensor
           os: ubuntu-latest
           python-version: '3.11'
+          flaky: false
 
         - env: jax
           testset: tensor
           os: ubuntu-latest
           python-version: '3.11'
+          flaky: false
 
         - env: tensorflow
           testset: tensor
           os: ubuntu-latest
           python-version: '3.11'
+          flaky: false
 
         - env: slepc
           testset: matrix
           os: ubuntu-latest
           python-version: '3.11'
+          flaky: false
 
     steps:
     - uses: actions/checkout@v3
