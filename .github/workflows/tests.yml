@@ -17,48 +17,48 @@ jobs:
         testset: [matrix, tensor]
         env: [base]
         os: [ubuntu-latest]
-        python-version: [3.8, 3.9, '3.10']
+        python-version: [3.9, '3.10', '3.11']
 
         include:
         - os: macos-latest
           testset: matrix
           env: base
-          python-version: 3.9
+          python-version: '3.11'
 
         - os: macos-latest
           testset: tensor
           env: base
-          python-version: 3.9
+          python-version: '3.11'
 
         - os: windows-latest
           testset: matrix
           env: base
-          python-version: 3.9
+          python-version: '3.11'
 
         - os: windows-latest
           testset: tensor
           env: base
-          python-version: 3.9
+          python-version: '3.11'
 
         - env: torch
           testset: tensor
           os: ubuntu-latest
-          python-version: 3.9
+          python-version: '3.11'
 
         - env: jax
           testset: tensor
           os: ubuntu-latest
-          python-version: 3.9
+          python-version: '3.11'
 
         - env: tensorflow
           testset: tensor
           os: ubuntu-latest
-          python-version: 3.9
+          python-version: '3.11'
 
         - env: slepc
           testset: matrix
           os: ubuntu-latest
-          python-version: 3.9
+          python-version: '3.11'
 
     steps:
     - uses: actions/checkout@v3
