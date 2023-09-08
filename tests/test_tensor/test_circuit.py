@@ -525,7 +525,7 @@ class TestCircuitGen:
         terms = {(i, j): 1. for i, j in G.edges}
         ZZ = qu.pauli('Z') & qu.pauli('Z')
 
-        gammas = [0.6]
+        gammas = [-0.6]
         betas = [-0.4]
 
         circ1 = qtn.circ_qaoa(terms, 1, gammas, betas)
@@ -536,7 +536,7 @@ class TestCircuitGen:
         )
         assert energy1 < -4
 
-        gammas = [0.4]
+        gammas = [-0.4]
         betas = [0.3]
 
         circ2 = qtn.circ_qaoa(terms, 1, gammas, betas)

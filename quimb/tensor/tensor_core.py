@@ -6955,7 +6955,7 @@ class TensorNetwork(object):
         compress_opts = ensure_dict(compress_opts)
 
         if compress_mode == "auto":
-            if tree_gauge_distance == 0:
+            if (tree_gauge_distance == 0) or (gauges is not None):
                 compress_mode = "basic"
             else:
                 compress_mode = "virtual-tree"
