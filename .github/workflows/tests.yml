@@ -12,21 +12,19 @@ defaults:
 jobs:
   run-tests:
     runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ matrix.flaky }}
     strategy:
       matrix:
         testset: [matrix, tensor]
         env: [base]
         os: [ubuntu-latest]
         python-version: [3.9, '3.10', '3.11']
-        flaky: [false]
 
         include:
         - os: macos-latest
           testset: matrix
           env: base
           python-version: '3.11'
-          flaky: true
+          continue-on-error: true
 
         - os: macos-latest
           testset: tensor
