@@ -42,9 +42,12 @@ class _RGenHandler:
 
         else:
             try:
+                # try numpy first
                 bg = getattr(numpy.random, bitgen)
             except AttributeError:
+                # and then (now largely deprecated) randomgen
                 import randomgen
+
                 bg = getattr(randomgen, bitgen)
 
             def gen(s):
@@ -125,8 +128,7 @@ def _get_rgens(num_threads):
 
 def randn(shape=(), dtype=float, scale=1.0, loc=0.0,
           num_threads=None, seed=None, dist='normal'):
-    """Fast multithreaded generation of random normally distributed data
-    using ``randomgen``.
+    """Fast multithreaded generation of random normally distributed data.
 
     Parameters
     ----------

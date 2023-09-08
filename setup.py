@@ -41,9 +41,6 @@ setup(
             'petsc4py',
             'slepc4py',
         ],
-        'random': [
-            'randomgen>=1.18',
-        ],
         'tests': [
             'coverage',
             'pytest',

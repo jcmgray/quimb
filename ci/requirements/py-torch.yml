@@ -18,6 +18,5 @@ dependencies:
   - pytest
   - pytest-cov
   - pytorch
-  - randomgen
   - scipy
   - tqdm

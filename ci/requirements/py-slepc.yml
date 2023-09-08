@@ -19,7 +19,6 @@ dependencies:
   - psutil
   - pytest
   - pytest-cov
-  - randomgen
   - scipy
   - slepc=*=*complex*
   - slepc4py
