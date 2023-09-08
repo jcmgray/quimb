@@ -13,13 +13,21 @@ from autoray import do, reshape, backend_like
 
 import quimb as qu
 from ..utils import progbar as _progbar
-from ..utils import oset, partitionby, concatv, partition_all, ensure_dict, LRU
+from ..utils import partitionby, concatv, partition_all, ensure_dict, LRU
 from .tensor_core import (
-    get_tags, tags_to_oset, oset_union, tensor_contract,
-    PTensor, Tensor, TensorNetwork, rand_uuid,
+    get_tags,
+    oset_union,
+    PTensor,
+    rand_uuid,
+    tags_to_oset,
+    tensor_contract,
+    tensor_network_sum,
+    Tensor,
+    TensorNetwork,
 )
 from .tensor_builder import (
-    MPS_computational_state, TN_from_sites_computational_state
+    MPS_computational_state,
+    TN_from_sites_computational_state,
 )
 from .tensor_arbgeom import TensorNetworkGenOperator
 from .tensor_1d import Dense1D
@@ -76,13 +84,14 @@ def parse_qasm(qasm):
           is a list of strings read from a line of the qasm file.
     """
 
-    lines = qasm.split('\n')
+    lines = qasm.split("\n")
     n = int(lines[0])
 
     # turn into tuples of python types
     gates = [
         tuple(map(_convert_ints_and_floats, line.strip().split(" ")))
-        for line in lines[1:] if line
+        for line in lines[1:]
+        if line
     ]
 
     # put registers/parameters in standard order and detect if gate round used
@@ -90,23 +99,22 @@ def parse_qasm(qasm):
     round_specified = isinstance(gates[0][0], numbers.Integral)
 
     return {
-        'n': n,
-        'gates': gates,
-        'n_gates': len(gates),
-        'round_specified': round_specified,
+        "n": n,
+        "gates": gates,
+        "n_gates": len(gates),
+        "round_specified": round_specified,
     }
 
 
 def parse_qasm_file(fname, **kwargs):
-    """Parse a qasm file.
-    """
+    """Parse a qasm file."""
     return parse_qasm(open(fname).read(), **kwargs)
 
 
 def parse_qasm_url(url, **kwargs):
-    """Parse a qasm url.
-    """
+    """Parse a qasm url."""
     from urllib import request
+
     return parse_qasm(request.urlopen(url).read().decode(), **kwargs)
 
 
@@ -179,77 +187,80 @@ def register_special_gate(name, fn, num_qubits, tag=None):
 
 
 # constant single qubit gates
-register_constant_gate('H', qu.hadamard(), 1)
-register_constant_gate('X', qu.pauli('X'), 1)
-register_constant_gate('Y', qu.pauli('Y'), 1)
-register_constant_gate('Z', qu.pauli('Z'), 1)
-register_constant_gate('S', qu.S_gate(), 1)
-register_constant_gate('T', qu.T_gate(), 1)
-register_constant_gate('X_1_2', qu.Xsqrt(), 1, 'X_1/2')
-register_constant_gate('Y_1_2', qu.Ysqrt(), 1, 'Y_1/2')
-register_constant_gate('Z_1_2', qu.Zsqrt(), 1, 'Z_1/2')
-register_constant_gate('W_1_2', qu.Wsqrt(), 1, 'W_1/2')
-register_constant_gate('HZ_1_2', qu.Wsqrt(), 1, 'W_1/2')
+register_constant_gate("H", qu.hadamard(), 1)
+register_constant_gate("X", qu.pauli("X"), 1)
+register_constant_gate("Y", qu.pauli("Y"), 1)
+register_constant_gate("Z", qu.pauli("Z"), 1)
+register_constant_gate("S", qu.S_gate(), 1)
+register_constant_gate("SDG", qu.S_gate().H, 1)
+register_constant_gate("T", qu.T_gate(), 1)
+register_constant_gate("TDG", qu.T_gate().H, 1)
+register_constant_gate("X_1_2", qu.Xsqrt(), 1, "X_1/2")
+register_constant_gate("Y_1_2", qu.Ysqrt(), 1, "Y_1/2")
+register_constant_gate("Z_1_2", qu.Zsqrt(), 1, "Z_1/2")
+register_constant_gate("W_1_2", qu.Wsqrt(), 1, "W_1/2")
+register_constant_gate("HZ_1_2", qu.Wsqrt(), 1, "W_1/2")
 
 
 # constant two qubit gates
-register_constant_gate('CNOT', qu.CNOT(), 2)
-register_constant_gate('CX', qu.cX(), 2)
-register_constant_gate('CY', qu.cY(), 2)
-register_constant_gate('CZ', qu.cZ(), 2)
-register_constant_gate('ISWAP', qu.iswap(), 2)
-register_constant_gate('IS', qu.iswap(), 2, 'ISWAP')
+register_constant_gate("CNOT", qu.CNOT(), 2)
+register_constant_gate("CX", qu.cX(), 2)
+register_constant_gate("CY", qu.cY(), 2)
+register_constant_gate("CZ", qu.cZ(), 2)
+register_constant_gate("ISWAP", qu.iswap(), 2)
+register_constant_gate("IS", qu.iswap(), 2, "ISWAP")
 
 
 # single parametrizable gates
+
 
 def rx_gate_param_gen(params):
     phi = params[0]
 
     with backend_like(phi):
-        c_re = do('cos', phi / 2)
-        c_im = do('imag', c_re)
-        c = do('complex', c_re, c_im)
+        c_re = do("cos", phi / 2)
+        c_im = do("imag", c_re)
+        c = do("complex", c_re, c_im)
 
-        s_im = -do('sin', phi / 2)
-        s_re = do('imag', s_im)
-        s = do('complex', s_re, s_im)
+        s_im = -do("sin", phi / 2)
+        s_re = do("imag", s_im)
+        s = do("complex", s_re, s_im)
 
         return recursive_stack(((c, s), (s, c)))
 
 
-register_param_gate('RX', rx_gate_param_gen, 1)
+register_param_gate("RX", rx_gate_param_gen, 1)
 
 
 def ry_gate_param_gen(params):
     phi = params[0]
 
     with backend_like(phi):
-        c_re = do('cos', phi / 2)
-        c_im = do('imag', c_re)
-        c = do('complex', c_re, c_im)
+        c_re = do("cos", phi / 2)
+        c_im = do("imag", c_re)
+        c = do("complex", c_re, c_im)
 
-        s_re = do('sin', phi / 2)
-        s_im = do('imag', s_re)
-        s = do('complex', s_re, s_im)
+        s_re = do("sin", phi / 2)
+        s_im = do("imag", s_re)
+        s = do("complex", s_re, s_im)
 
         return recursive_stack(((c, -s), (s, c)))
 
 
-register_param_gate('RY', ry_gate_param_gen, 1)
+register_param_gate("RY", ry_gate_param_gen, 1)
 
 
 def rz_gate_param_gen(params):
     phi = params[0]
 
     with backend_like(phi):
-        c_re = do('cos', phi / 2)
-        c_im = do('imag', c_re)
-        c = do('complex', c_re, c_im)
+        c_re = do("cos", phi / 2)
+        c_im = do("imag", c_re)
+        c = do("complex", c_re, c_im)
 
-        s_im = -do('sin', phi / 2)
-        s_re = do('imag', s_im)
-        s = do('complex', s_re, s_im)
+        s_im = -do("sin", phi / 2)
+        s_re = do("imag", s_im)
+        s = do("complex", s_re, s_im)
 
         # get a 'backend zero'
         z = 0.0 * c_re
@@ -257,37 +268,37 @@ def rz_gate_param_gen(params):
         return recursive_stack(((c + s, z), (z, c - s)))
 
 
-register_param_gate('RZ', rz_gate_param_gen, 1)
+register_param_gate("RZ", rz_gate_param_gen, 1)
 
 
 def u3_gate_param_gen(params):
     theta, phi, lamda = params[0], params[1], params[2]
 
     with backend_like(theta):
-        c2_re = do('cos', theta / 2)
-        c2_im = do('imag', c2_re)
-        c2 = do('complex', c2_re, c2_im)
+        c2_re = do("cos", theta / 2)
+        c2_im = do("imag", c2_re)
+        c2 = do("complex", c2_re, c2_im)
 
-        s2_re = do('sin', theta / 2)
-        s2_im = do('imag', s2_re)
-        s2 = do('complex', s2_re, s2_im)
+        s2_re = do("sin", theta / 2)
+        s2_im = do("imag", s2_re)
+        s2 = do("complex", s2_re, s2_im)
 
         el_im = lamda
-        el_re = do('imag', el_im)
-        el = do('exp', do('complex', el_re, el_im))
+        el_re = do("imag", el_im)
+        el = do("exp", do("complex", el_re, el_im))
 
         ep_im = phi
-        ep_re = do('imag', ep_im)
-        ep = do('exp', do('complex', ep_re, ep_im))
+        ep_re = do("imag", ep_im)
+        ep = do("exp", do("complex", ep_re, ep_im))
 
         elp_im = lamda + phi
-        elp_re = do('imag', elp_im)
-        elp = do('exp', do('complex', elp_re, elp_im))
+        elp_re = do("imag", elp_im)
+        elp = do("exp", do("complex", elp_re, elp_im))
 
         return recursive_stack(((c2, -el * s2), (ep * s2, elp * c2)))
 
 
-register_param_gate('U3', u3_gate_param_gen, 1)
+register_param_gate("U3", u3_gate_param_gen, 1)
 
 
 def u2_gate_param_gen(params):
@@ -298,21 +309,21 @@ def u2_gate_param_gen(params):
         c00 = 0.0 * phi + 1.0
 
         c01_im = lamda
-        c01_re = do('imag', c01_im)
-        c01 = - do('exp', do('complex', c01_re, c01_im))
+        c01_re = do("imag", c01_im)
+        c01 = -do("exp", do("complex", c01_re, c01_im))
 
         c10_im = phi
-        c10_re = do('imag', c10_im)
-        c10 = do('exp', do('complex', c10_re, c10_im))
+        c10_re = do("imag", c10_im)
+        c10 = do("exp", do("complex", c10_re, c10_im))
 
         c11_im = phi + lamda
-        c11_re = do('imag', c11_im)
-        c11 = do('exp', do('complex', c11_re, c11_im))
+        c11_re = do("imag", c11_im)
+        c11 = do("exp", do("complex", c11_re, c11_im))
 
         return recursive_stack(((c00, c01), (c10, c11))) / 2**0.5
 
 
-register_param_gate('U2', u2_gate_param_gen, 1)
+register_param_gate("U2", u2_gate_param_gen, 1)
 
 
 def u1_gate_param_gen(params):
@@ -325,16 +336,17 @@ def u1_gate_param_gen(params):
         c00 = c10 + 1.0
 
         c11_im = lamda
-        c11_re = do('imag', c11_im)
-        c11 = do('exp', do('complex', c11_re, c11_im))
+        c11_re = do("imag", c11_im)
+        c11 = do("exp", do("complex", c11_re, c11_im))
 
         return recursive_stack(((c00, c01), (c10, c11)))
 
 
-register_param_gate('U1', u1_gate_param_gen, 1)
+register_param_gate("U1", u1_gate_param_gen, 1)
 
 
 # two qubit parametrizable gates
+
 
 def cu3_param_gen(params):
     U3 = u3_gate_param_gen(params)
@@ -345,15 +357,18 @@ def cu3_param_gen(params):
         # get a 'backend one'
         c1 = c0 + 1.0
 
-        data = ((((c1, c0), (c0, c0)),
-                ((c0, c1), (c0, c0))),
-                (((c0, c0), (U3[0, 0], U3[0, 1])),
-                ((c0, c0), (U3[1, 0], U3[1, 1]))))
+        data = (
+            (((c1, c0), (c0, c0)), ((c0, c1), (c0, c0))),
+            (
+                ((c0, c0), (U3[0, 0], U3[0, 1])),
+                ((c0, c0), (U3[1, 0], U3[1, 1])),
+            ),
+        )
 
         return recursive_stack(data)
 
 
-register_param_gate('CU3', cu3_param_gen, 2)
+register_param_gate("CU3", cu3_param_gen, 2)
 
 
 def cu2_param_gen(params):
@@ -361,19 +376,22 @@ def cu2_param_gen(params):
 
     with backend_like(U2):
         # get a 'backend zero'
-        c0 = 0.0 * U2[0, 0]
+        zero = 0.0 * U2[0, 0]
         # get a 'backend one'
-        c1 = c0 + 1.0
+        one = zero + 1.0
 
-        data = ((((c1, c0), (c0, c0)),
-                ((c0, c1), (c0, c0))),
-                (((c0, c0), (U2[0, 0], U2[0, 1])),
-                ((c0, c0), (U2[1, 0], U2[1, 1]))))
+        data = (
+            (((one, zero), (zero, zero)), ((zero, one), (zero, zero))),
+            (
+                ((zero, zero), (U2[0, 0], U2[0, 1])),
+                ((zero, zero), (U2[1, 0], U2[1, 1])),
+            ),
+        )
 
         return recursive_stack(data)
 
 
-register_param_gate('CU2', cu2_param_gen, 2)
+register_param_gate("CU2", cu2_param_gen, 2)
 
 
 def cu1_param_gen(params):
@@ -381,147 +399,277 @@ def cu1_param_gen(params):
 
     with backend_like(lamda):
         c11_im = lamda
-        c11_re = do('imag', c11_im)
-        c11 = do('exp', do('complex', c11_re, c11_im))
+        c11_re = do("imag", c11_im)
+        c11 = do("exp", do("complex", c11_re, c11_im))
 
         # get a 'backend zero'
-        c0 = 0.0 * c11
+        zero = 0.0 * c11
         # get a 'backend one'
-        c1 = c0 + 1.0
+        one = zero + 1.0
 
-        data = ((((c1, c0), (c0, c0)),
-                ((c0, c1), (c0, c0))),
-                (((c0, c0), (c1, c0)),
-                ((c0, c0), (c0, c11))))
+        data = (
+            (((one, zero), (zero, zero)), ((zero, one), (zero, zero))),
+            (((zero, zero), (one, zero)), ((zero, zero), (zero, c11))),
+        )
 
         return recursive_stack(data)
 
 
-register_param_gate('CU1', cu1_param_gen, 2)
+register_param_gate("CU1", cu1_param_gen, 2)
+
+
+def crx_param_gen(params):
+    """Parametrized controlled X-rotation."""
+    theta = params[0]
+
+    with backend_like(theta):
+        # get a 'backend zero' and 'backend one'
+        zero = 0.0 * theta
+        one = zero + 1.0
+
+        ccos = do("complex", do("cos", theta / 2), zero)
+        csin = do("complex", zero, -do("sin", theta / 2))
+
+        data = (
+            (((one, zero), (zero, zero)), ((zero, one), (zero, zero))),
+            (((zero, zero), (ccos, csin)), ((zero, zero), (csin, ccos))),
+        )
+
+        return recursive_stack(data)
+
+
+register_param_gate("CRX", crx_param_gen, 2)
+
+
+def cry_param_gen(params):
+    """Parametrized controlled Y-rotation."""
+    theta = params[0]
+
+    with backend_like(theta):
+        # get a 'backend zero' and 'backend one'
+        zero = 0.0 * theta
+        one = zero + 1.0
+
+        ccos = do("complex", do("cos", theta / 2), zero)
+        csin = do("complex", do("sin", theta / 2), zero)
+
+        data = (
+            (((one, zero), (zero, zero)), ((zero, one), (zero, zero))),
+            (((zero, zero), (ccos, -csin)), ((zero, zero), (csin, ccos))),
+        )
+
+        return recursive_stack(data)
+
+
+register_param_gate("CRY", cry_param_gen, 2)
+
+
+def crz_param_gen(params):
+    """Parametrized controlled Z-rotation."""
+    theta = params[0]
+
+    with backend_like(theta):
+        # get a 'backend zero' and 'backend one'
+        zero = 0.0 * theta
+        one = zero + 1.0
+        theta_2 = theta / 2
+
+        c = do("complex", do("cos", theta_2), zero)
+        s = do("complex", zero, -do("sin", theta_2))
+
+        data = (
+            (((one, zero), (zero, zero)), ((zero, one), (zero, zero))),
+            (((zero, zero), (c + s, zero)), ((zero, zero), (zero, c - s))),
+        )
+
+        return recursive_stack(data)
+
+
+register_param_gate("CRZ", crz_param_gen, 2)
 
 
 def fsim_param_gen(params):
     theta, phi = params[0], params[1]
 
     with backend_like(theta):
-        a_re = do('cos', theta)
-        a_im = do('imag', a_re)
-        a = do('complex', a_re, a_im)
+        a_re = do("cos", theta)
+        a_im = do("imag", a_re)
+        a = do("complex", a_re, a_im)
 
-        b_im = -do('sin', theta)
-        b_re = do('imag', b_im)
-        b = do('complex', b_re, b_im)
+        b_im = -do("sin", theta)
+        b_re = do("imag", b_im)
+        b = do("complex", b_re, b_im)
 
         c_im = -phi
-        c_re = do('imag', c_im)
-        c = do('exp', do('complex', c_re, c_im))
+        c_re = do("imag", c_im)
+        c = do("exp", do("complex", c_re, c_im))
 
         # get a 'backend zero'
-        c0 = 0.0 * c
+        zero = 0.0 * c
         # get a 'backend one'
-        c1 = c0 + 1.0
+        one = zero + 1.0
 
-        data = ((((c1, c0), (c0, c0)),
-                ((c0, a), (b, c0))),
-                (((c0, b), (a, c0)),
-                ((c0, c0), (c0, c))))
+        data = (
+            (((one, zero), (zero, zero)), ((zero, a), (b, zero))),
+            (((zero, b), (a, zero)), ((zero, zero), (zero, c))),
+        )
 
         return recursive_stack(data)
 
 
-register_param_gate('FSIM', fsim_param_gen, 2)
-register_param_gate('FS', fsim_param_gen, 2, 'FSIM')
+register_param_gate("FSIM", fsim_param_gen, 2)
+register_param_gate("FS", fsim_param_gen, 2, "FSIM")
 
 
 def fsimg_param_gen(params):
     theta, zeta, chi, gamma, phi = (
-        params[0], params[1], params[2], params[3], params[4]
+        params[0],
+        params[1],
+        params[2],
+        params[3],
+        params[4],
     )
 
     with backend_like(theta):
-        a11_re = do('cos', theta)
-        a11_im = do('imag', a11_re)
-        a11 = do('complex', a11_re, a11_im)
+        a11_re = do("cos", theta)
+        a11_im = do("imag", a11_re)
+        a11 = do("complex", a11_re, a11_im)
 
         e11_im = -(gamma + zeta)
-        e11_re = do('imag', e11_im)
-        e11 = do('exp', do('complex', e11_re, e11_im))
+        e11_re = do("imag", e11_im)
+        e11 = do("exp", do("complex", e11_re, e11_im))
 
-        a22_re = do('cos', theta)
-        a22_im = do('imag', a22_re)
-        a22 = do('complex', a22_re, a22_im)
+        a22_re = do("cos", theta)
+        a22_im = do("imag", a22_re)
+        a22 = do("complex", a22_re, a22_im)
 
         e22_im = -(gamma - zeta)
-        e22_re = do('imag', e22_im)
-        e22 = do('exp', do('complex', e22_re, e22_im))
+        e22_re = do("imag", e22_im)
+        e22 = do("exp", do("complex", e22_re, e22_im))
 
-        a21_re = do('sin', theta)
-        a21_im = do('imag', a21_re)
-        a21 = do('complex', a21_re, a21_im)
+        a21_re = do("sin", theta)
+        a21_im = do("imag", a21_re)
+        a21 = do("complex", a21_re, a21_im)
 
         e21_im = -(gamma - chi)
-        e21_re = do('imag', e21_im)
-        e21 = do('exp', do('complex', e21_re, e21_im))
+        e21_re = do("imag", e21_im)
+        e21 = do("exp", do("complex", e21_re, e21_im))
 
-        a12_re = do('sin', theta)
-        a12_im = do('imag', a12_re)
-        a12 = do('complex', a12_re, a12_im)
+        a12_re = do("sin", theta)
+        a12_im = do("imag", a12_re)
+        a12 = do("complex", a12_re, a12_im)
 
         e12_im = -(gamma + chi)
-        e12_re = do('imag', e12_im)
-        e12 = do('exp', do('complex', e12_re, e12_im))
+        e12_re = do("imag", e12_im)
+        e12 = do("exp", do("complex", e12_re, e12_im))
 
-        img_re = do('real', -1.j)
-        img_im = do('imag', -1.j)
-        img = do('complex', img_re, img_im)
+        img_re = do("real", -1.0j)
+        img_im = do("imag", -1.0j)
+        img = do("complex", img_re, img_im)
 
         c_im = -(2 * gamma + phi)
-        c_re = do('imag', c_im)
-        c = do('exp', do('complex', c_re, c_im))
+        c_re = do("imag", c_im)
+        c = do("exp", do("complex", c_re, c_im))
 
         # get a 'backend zero'
         c0 = 0.0 * c
         # get a 'backend one'
         c1 = c0 + 1.0
 
-        data = ((((c1, c0), (c0, c0)),
-                ((c0, a11 * e11), (a21 * e21 * img, c0))),
-                (((c0, a12 * e12 * img), (a22 * e22, c0)),
-                ((c0, c0), (c0, c))))
+        data = (
+            (((c1, c0), (c0, c0)), ((c0, a11 * e11), (a21 * e21 * img, c0))),
+            (((c0, a12 * e12 * img), (a22 * e22, c0)), ((c0, c0), (c0, c))),
+        )
 
         return recursive_stack(data)
 
 
-register_param_gate('FSIMG', fsimg_param_gen, 2)
+register_param_gate("FSIMG", fsimg_param_gen, 2)
 
 
-def rzz_param_gen(params):
-    r"""
-    The gate describing an Ising interaction evolution, or 'ZZ'-rotation.
+def rxx_param_gen(params):
+    r"""Parametrized two qubit XX-rotation.
 
     .. math::
 
-        \mathrm{RZZ}(\gamma) = \exp(-i \gamma Z_i Z_j)
+        \mathrm{RXX}(\theta) = \exp(-i \frac{\theta}{2} X_i X_j)
 
     """
-    gamma = params[0]
+    theta = params[0]
 
-    with backend_like(gamma):
-        c00 = c11 = do('complex', do('cos', gamma), do('sin', gamma))
-        c01 = c10 = do('complex', do('cos', gamma), -do('sin', gamma))
-
+    with backend_like(theta):
         # get a 'backend zero'
-        c0 = 0.0 * c00
+        zero = 0.0 * theta
 
-        data = ((((c00, c0), (c0, c0)),
-                 ((c0, c01), (c0, c0))),
-                (((c0, c0), (c10, c0)),
-                 ((c0, c0), (c0, c11))))
+        theta_2 = theta / 2
+        ccos = do("complex", do("cos", theta_2), zero)
+        csin = do("complex", zero, -do("sin", theta_2))
+
+        data = (
+            (((ccos, zero), (zero, csin)), ((zero, ccos), (csin, zero))),
+            (((zero, csin), (ccos, zero)), ((csin, zero), (zero, ccos))),
+        )
 
         return recursive_stack(data)
 
 
-register_param_gate('RZZ', rzz_param_gen, 2)
+register_param_gate("RXX", rxx_param_gen, 2)
+
+
+def ryy_param_gen(params):
+    r"""Parametrized two qubit YY-rotation.
+
+    .. math::
+
+        \mathrm{RYY}(\theta) = \exp(-i \frac{\theta}{2} Y_i Y_j)
+
+    """
+    theta = params[0]
+
+    with backend_like(theta):
+        # get a 'backend zero'
+        zero = 0.0 * theta
+        theta_2 = theta / 2
+        ccos = do("complex", do("cos", theta_2), zero)
+        csin = do("complex", zero, do("sin", theta_2))
+
+        data = (
+            (((ccos, zero), (zero, csin)), ((zero, ccos), (-csin, zero))),
+            (((zero, -csin), (ccos, zero)), ((csin, zero), (zero, ccos))),
+        )
+
+        return recursive_stack(data)
+
+
+register_param_gate("RYY", ryy_param_gen, 2)
+
+
+def rzz_param_gen(params):
+    r"""Parametrized two qubit ZZ-rotation.
+
+    .. math::
+
+        \mathrm{RZZ}(\theta) = \exp(-i \frac{\theta}{2} Z_i Z_j)
+
+    """
+    theta = params[0]
+
+    with backend_like(theta):
+        # get a 'backend zero'
+        zero = 0.0 * theta
+        theta_2 = theta / 2
+        c00 = c11 = do("complex", do("cos", theta_2), do("sin", -theta_2))
+        c01 = c10 = do("complex", do("cos", theta_2), do("sin", theta_2))
+
+        data = (
+            (((c00, zero), (zero, zero)), ((zero, c01), (zero, zero))),
+            (((zero, zero), (c10, zero)), ((zero, zero), (zero, c11))),
+        )
+
+        return recursive_stack(data)
+
+
+register_param_gate("RZZ", rzz_param_gen, 2)
 
 
 def su4_gate_param_gen(params):
@@ -534,48 +682,59 @@ def su4_gate_param_gen(params):
     #     t1, t2, t3,
     """
 
-    TA1 = Tensor(u3_gate_param_gen(params[0:3]), ['a1', 'a0'])
-    TA2 = Tensor(u3_gate_param_gen(params[3:6]), ['b1', 'b0'])
+    TA1 = Tensor(u3_gate_param_gen(params[0:3]), ["a1", "a0"])
+    TA2 = Tensor(u3_gate_param_gen(params[3:6]), ["b1", "b0"])
 
-    cnot = do('array', qu.CNOT().reshape(2, 2, 2, 2),
-              like=params, dtype=TA1.data.dtype)
+    cnot = do(
+        "array",
+        qu.CNOT().reshape(2, 2, 2, 2),
+        like=params,
+        dtype=TA1.data.dtype,
+    )
 
-    TNOTC1 = Tensor(cnot, ['b2', 'a2', 'b1', 'a1'])
-    TRz1 = Tensor(rz_gate_param_gen(params[12:13]), inds=['a3', 'a2'])
-    TRy2 = Tensor(ry_gate_param_gen(params[13:14]), inds=['b3', 'b2'])
-    TCNOT2 = Tensor(cnot, ['a5', 'b4', 'a3', 'b3'])
-    TRy3 = Tensor(ry_gate_param_gen(params[14:15]), inds=['b5', 'b4'])
-    TNOTC3 = Tensor(cnot, ['b6', 'a6', 'b5', 'a5'])
-    TA3 = Tensor(u3_gate_param_gen(params[6:9]), ['a7', 'a6'])
-    TA4 = Tensor(u3_gate_param_gen(params[9:12]), ['b7', 'b6'])
+    TNOTC1 = Tensor(cnot, ["b2", "a2", "b1", "a1"])
+    TRz1 = Tensor(rz_gate_param_gen(params[12:13]), inds=["a3", "a2"])
+    TRy2 = Tensor(ry_gate_param_gen(params[13:14]), inds=["b3", "b2"])
+    TCNOT2 = Tensor(cnot, ["a5", "b4", "a3", "b3"])
+    TRy3 = Tensor(ry_gate_param_gen(params[14:15]), inds=["b5", "b4"])
+    TNOTC3 = Tensor(cnot, ["b6", "a6", "b5", "a5"])
+    TA3 = Tensor(u3_gate_param_gen(params[6:9]), ["a7", "a6"])
+    TA4 = Tensor(u3_gate_param_gen(params[9:12]), ["b7", "b6"])
 
     return tensor_contract(
-        TA1, TA2, TNOTC1,
-        TRz1, TRy2, TCNOT2, TRy3,
-        TNOTC3, TA3, TA4,
-        output_inds=['a7', 'b7'] + ['a0', 'b0'],
-        optimize='auto-hq',
+        TA1,
+        TA2,
+        TNOTC1,
+        TRz1,
+        TRy2,
+        TCNOT2,
+        TRy3,
+        TNOTC3,
+        TA3,
+        TA4,
+        output_inds=["a7", "b7"] + ["a0", "b0"],
+        optimize="auto-hq",
     ).data
 
 
-register_param_gate('SU4', su4_gate_param_gen, 2)
+register_param_gate("SU4", su4_gate_param_gen, 2)
 
 
 # special non-tensor gates
 
-def apply_swap(psi, i, j, **gate_opts):
 
-    contract = gate_opts.pop('contract', None)
-    if contract == 'swap+split':
-        gate_opts.pop('propagate_tags', None)
+def apply_swap(psi, i, j, **gate_opts):
+    contract = gate_opts.pop("contract", None)
+    if contract == "swap+split":
+        gate_opts.pop("propagate_tags", None)
         psi.swap_sites_with_compress_(i, j, **gate_opts)
     else:
         iind, jind = map(psi.site_ind, (int(i), int(j)))
         psi.reindex_({iind: jind, jind: iind})
 
 
-register_special_gate('SWAP', apply_swap, 2)
-register_special_gate('IDEN', lambda *_, **__: None, 1)
+register_special_gate("SWAP", apply_swap, 2)
+register_special_gate("IDEN", lambda *_, **__: None, 1)
 
 
 @functools.lru_cache(2**15)
@@ -630,16 +789,14 @@ class Gate:
         self._special = self._label in SPECIAL_GATES
         self._constant = self._label in CONSTANT_GATES
         if (self._special or self._constant) and self._parametrize:
-            raise ValueError(
-                f"Cannot parametrize the gate: {self._label}."
-            )
+            raise ValueError(f"Cannot parametrize the gate: {self._label}.")
         self._array = None
 
     @classmethod
     def from_raw(cls, U, qubits, round=None):
         new = object.__new__(cls)
-        new._label = f'RAW{id(U)}'
-        new._params = 'raw'
+        new._label = f"RAW{id(U)}"
+        new._params = "raw"
         new._qubits = tuple(qubits)
         new._round = int(round) if round is not None else round
         new._special = False
@@ -677,13 +834,10 @@ class Gate:
         return self._tag
 
     def build_array(self):
-        """Build the array representation of the gate.
-        """
+        """Build the array representation of the gate."""
         if self._special:
             # these don't use an array
-            raise ValueError(
-                f"{self.label} gates have no array to build."
-            )
+            raise ValueError(f"{self.label} gates have no array to build.")
 
         if self._constant:
             # simply return the constant array
@@ -709,14 +863,15 @@ class Gate:
 
     def __repr__(self):
         return (
-            f"<{self.__class__.__name__}(" +
-            f"label={self._label}, " +
-            f"params={self._params}, " +
-            f"qubits={self._qubits}, " +
-            (f"round={self._round}" if self._round is not None else "") +
-            (
+            f"<{self.__class__.__name__}("
+            + f"label={self._label}, "
+            + f"params={self._params}, "
+            + f"qubits={self._qubits}"
+            + (f", round={self._round}" if self._round is not None else "")
+            + (
                 f", parametrize={self._parametrize})"
-                if self._parametrize else ""
+                if self._parametrize
+                else ""
             )
             + ")>"
         )
@@ -740,14 +895,15 @@ def sample_bitstring_from_prob_ndarray(p):
 
 def rehearsal_dict(tn, info):
     return {
-        'tn': tn,
-        'info': info,
-        'W': math.log2(info.largest_intermediate),
-        'C': math.log10(info.opt_cost / 2),
+        "tn": tn,
+        "info": info,
+        "W": math.log2(info.largest_intermediate),
+        "C": math.log10(info.opt_cost / 2),
     }
 
 
 # --------------------------- main circuit class ---------------------------- #
+
 
 class Circuit:
     """Class for simulating quantum circuits using tensor networks.
@@ -828,11 +984,10 @@ class Circuit:
         psi0=None,
         gate_opts=None,
         tags=None,
-        psi0_dtype='complex128',
-        psi0_tag='PSI0',
-        bra_site_ind_id='b{}',
+        psi0_dtype="complex128",
+        psi0_tag="PSI0",
+        bra_site_ind_id="b{}",
     ):
-
         if (N is None) and (psi0 is None):
             raise ValueError("You must supply one of `N` or `psi0`.")
 
@@ -859,8 +1014,8 @@ class Circuit:
                 self._psi.add_tag(tag)
 
         self.gate_opts = ensure_dict(gate_opts)
-        self.gate_opts.setdefault('contract', 'auto-split-gate')
-        self.gate_opts.setdefault('propagate_tags', 'register')
+        self.gate_opts.setdefault("contract", "auto-split-gate")
+        self.gate_opts.setdefault("propagate_tags", "register")
         self.gates = []
 
         self._ket_site_ind_id = self._psi.site_ind_id
@@ -869,8 +1024,10 @@ class Circuit:
         if self._ket_site_ind_id == self._bra_site_ind_id:
             raise ValueError(
                 "The 'ket' and 'bra' site ind ids clash : "
-                "'{}' and '{}".format(self._ket_site_ind_id,
-                                      self._bra_site_ind_id))
+                "'{}' and '{}".format(
+                    self._ket_site_ind_id, self._bra_site_ind_id
+                )
+            )
 
         self.ket_site_ind = self._ket_site_ind_id.format
         self.bra_site_ind = self._bra_site_ind_id.format
@@ -881,44 +1038,39 @@ class Circuit:
 
     @classmethod
     def from_qasm(cls, qasm, **quantum_circuit_opts):
-        """Generate a ``Circuit`` instance from a qasm string.
-        """
+        """Generate a ``Circuit`` instance from a qasm string."""
         info = parse_qasm(qasm)
-        qc = cls(info['n'], **quantum_circuit_opts)
-        qc.apply_gates(info['gates'])
+        qc = cls(info["n"], **quantum_circuit_opts)
+        qc.apply_gates(info["gates"])
         return qc
 
     @classmethod
     def from_qasm_file(cls, fname, **quantum_circuit_opts):
-        """Generate a ``Circuit`` instance from a qasm file.
-        """
+        """Generate a ``Circuit`` instance from a qasm file."""
         info = parse_qasm_file(fname)
-        qc = cls(info['n'], **quantum_circuit_opts)
-        qc.apply_gates(info['gates'])
+        qc = cls(info["n"], **quantum_circuit_opts)
+        qc.apply_gates(info["gates"])
         return qc
 
     @classmethod
     def from_qasm_url(cls, url, **quantum_circuit_opts):
-        """Generate a ``Circuit`` instance from a qasm url.
-        """
+        """Generate a ``Circuit`` instance from a qasm url."""
         info = parse_qasm_url(url)
-        qc = cls(info['n'], **quantum_circuit_opts)
-        qc.apply_gates(info['gates'])
+        qc = cls(info["n"], **quantum_circuit_opts)
+        qc.apply_gates(info["gates"])
         return qc
 
-    def _init_state(self, N, dtype='complex128'):
+    def _init_state(self, N, dtype="complex128"):
         return TN_from_sites_computational_state(
-            site_map={i: '0' for i in range(N)},
-            dtype=dtype
+            site_map={i: "0" for i in range(N)}, dtype=dtype
         )
 
     def _apply_gate(self, gate, tags=None, **gate_opts):
-        """Apply a ``Gate`` to this ``Circuit``.
-        """
+        """Apply a ``Gate`` to this ``Circuit``."""
         tags = tags_to_oset(tags)
-        tags.add(f'GATE_{len(self.gates)}')
+        tags.add(f"GATE_{len(self.gates)}")
         if gate.round is not None:
-            tags.add(f'ROUND_{gate.round}')
+            tags.add(f"ROUND_{gate.round}")
         if gate.tag is not None:
             tags.add(gate.tag)
 
@@ -975,7 +1127,7 @@ class Circuit:
             self._apply_gate(gate_id, **gate_opts)
             return
 
-        if hasattr(gate_id, 'shape') and not isinstance(gate_id, str):
+        if hasattr(gate_id, "shape") and not isinstance(gate_id, str):
             # raw gate (numpy strings have a shape - ignore those)
             gate = Gate.from_raw(gate_id, gate_args, gate_round)
             self._apply_gate(gate, **gate_opts)
@@ -987,92 +1139,104 @@ class Circuit:
             gate_round = gate_id
             gate_id, gate_args = gate_args[0], gate_args[1:]
         nq = GATE_SIZE[gate_id.upper()]
-        params, qubits, = gate_args[:-nq], gate_args[-nq:]
+        (
+            params,
+            qubits,
+        ) = (
+            gate_args[:-nq],
+            gate_args[-nq:],
+        )
 
         gate = Gate(gate_id, params, qubits, gate_round, parametrize)
         self._apply_gate(gate, **gate_opts)
 
-    def apply_gate_raw(
-        self,
-        U,
-        where,
-        gate_round=None,
-        **gate_opts
-    ):
+    def apply_gate_raw(self, U, where, gate_round=None, **gate_opts):
         """Apply the raw array ``U`` as a gate on qubits in ``where``. It will
         be assumed to be unitary for the sake of computing reverse lightcones.
         """
         gate = Gate.from_raw(U, where, gate_round)
         self._apply_gate(gate, **gate_opts)
 
-    def apply_gates(self, gates):
+    def apply_gates(self, gates, **gate_opts):
         """Apply a sequence of gates to this tensor network quantum circuit.
 
         Parameters
         ----------
         gates : list[list[str]]
             The sequence of gates to apply.
+        gate_opts
+            Supplied to :meth:`~quimb.tensor.circuit.Circuit.apply_gate`.
         """
         for gate in gates:
-            self.apply_gate(*gate)
+            if isinstance(gate, Gate):
+                self._apply_gate(gate, **gate_opts)
+            else:
+                self.apply_gate(*gate, **gate_opts)
 
         self._psi.squeeze_()
 
     def apply_circuit(self, gates):  # pragma: no cover
         import warnings
-        msg = ("``apply_circuit`` is deprecated in favour of ``apply_gates``.")
+
+        msg = "``apply_circuit`` is deprecated in favour of ``apply_gates``."
         warnings.warn(msg, DeprecationWarning)
         self.apply_gates(gates)
 
     def h(self, i, gate_round=None):
-        self.apply_gate('H', i, gate_round=gate_round)
+        self.apply_gate("H", i, gate_round=gate_round)
 
     def x(self, i, gate_round=None):
-        self.apply_gate('X', i, gate_round=gate_round)
+        self.apply_gate("X", i, gate_round=gate_round)
 
     def y(self, i, gate_round=None):
-        self.apply_gate('Y', i, gate_round=gate_round)
+        self.apply_gate("Y", i, gate_round=gate_round)
 
     def z(self, i, gate_round=None):
-        self.apply_gate('Z', i, gate_round=gate_round)
+        self.apply_gate("Z", i, gate_round=gate_round)
 
     def s(self, i, gate_round=None):
-        self.apply_gate('S', i, gate_round=gate_round)
+        self.apply_gate("S", i, gate_round=gate_round)
+
+    def sdg(self, i, gate_round=None):
+        self.apply_gate("SDG", i, gate_round=gate_round)
 
     def t(self, i, gate_round=None):
-        self.apply_gate('T', i, gate_round=gate_round)
+        self.apply_gate("T", i, gate_round=gate_round)
+
+    def tdg(self, i, gate_round=None):
+        self.apply_gate("TDG", i, gate_round=gate_round)
 
     def x_1_2(self, i, gate_round=None):
-        self.apply_gate('X_1_2', i, gate_round=gate_round)
+        self.apply_gate("X_1_2", i, gate_round=gate_round)
 
     def y_1_2(self, i, gate_round=None):
-        self.apply_gate('Y_1_2', i, gate_round=gate_round)
+        self.apply_gate("Y_1_2", i, gate_round=gate_round)
 
     def z_1_2(self, i, gate_round=None):
-        self.apply_gate('Z_1_2', i, gate_round=gate_round)
+        self.apply_gate("Z_1_2", i, gate_round=gate_round)
 
     def w_1_2(self, i, gate_round=None):
-        self.apply_gate('W_1_2', i, gate_round=gate_round)
+        self.apply_gate("W_1_2", i, gate_round=gate_round)
 
     def hz_1_2(self, i, gate_round=None):
-        self.apply_gate('HZ_1_2', i, gate_round=gate_round)
+        self.apply_gate("HZ_1_2", i, gate_round=gate_round)
 
     # constant two qubit gates
 
     def cnot(self, i, j, gate_round=None):
-        self.apply_gate('CNOT', i, j, gate_round=gate_round)
+        self.apply_gate("CNOT", i, j, gate_round=gate_round)
 
     def cx(self, i, j, gate_round=None):
-        self.apply_gate('CX', i, j, gate_round=gate_round)
+        self.apply_gate("CX", i, j, gate_round=gate_round)
 
     def cy(self, i, j, gate_round=None):
-        self.apply_gate('CY', i, j, gate_round=gate_round)
+        self.apply_gate("CY", i, j, gate_round=gate_round)
 
     def cz(self, i, j, gate_round=None):
-        self.apply_gate('CZ', i, j, gate_round=gate_round)
+        self.apply_gate("CZ", i, j, gate_round=gate_round)
 
     def iswap(self, i, j, gate_round=None):
-        self.apply_gate('ISWAP', i, j)
+        self.apply_gate("ISWAP", i, j)
 
     # special non-tensor gates
 
@@ -1080,84 +1244,188 @@ class Circuit:
         pass
 
     def swap(self, i, j, gate_round=None):
-        self.apply_gate('SWAP', i, j)
+        self.apply_gate("SWAP", i, j)
 
     # parametrizable gates
 
     def rx(self, theta, i, gate_round=None, parametrize=False):
-        self.apply_gate('RX', theta, i, gate_round=gate_round,
-                        parametrize=parametrize)
+        self.apply_gate(
+            "RX", theta, i, gate_round=gate_round, parametrize=parametrize
+        )
 
     def ry(self, theta, i, gate_round=None, parametrize=False):
-        self.apply_gate('RY', theta, i, gate_round=gate_round,
-                        parametrize=parametrize)
+        self.apply_gate(
+            "RY", theta, i, gate_round=gate_round, parametrize=parametrize
+        )
 
     def rz(self, theta, i, gate_round=None, parametrize=False):
-        self.apply_gate('RZ', theta, i, gate_round=gate_round,
-                        parametrize=parametrize)
+        self.apply_gate(
+            "RZ", theta, i, gate_round=gate_round, parametrize=parametrize
+        )
 
     def u3(self, theta, phi, lamda, i, gate_round=None, parametrize=False):
-        self.apply_gate('U3', theta, phi, lamda, i,
-                        gate_round=gate_round, parametrize=parametrize)
+        self.apply_gate(
+            "U3",
+            theta,
+            phi,
+            lamda,
+            i,
+            gate_round=gate_round,
+            parametrize=parametrize,
+        )
 
     def u2(self, phi, lamda, i, gate_round=None, parametrize=False):
-        self.apply_gate('U2', phi, lamda, i,
-                        gate_round=gate_round, parametrize=parametrize)
+        self.apply_gate(
+            "U2", phi, lamda, i, gate_round=gate_round, parametrize=parametrize
+        )
 
     def u1(self, lamda, i, gate_round=None, parametrize=False):
-        self.apply_gate('U1', lamda, i,
-                        gate_round=gate_round, parametrize=parametrize)
+        self.apply_gate(
+            "U1", lamda, i, gate_round=gate_round, parametrize=parametrize
+        )
 
     def cu3(self, theta, phi, lamda, i, j, gate_round=None, parametrize=False):
-        self.apply_gate('CU3', theta, phi, lamda, i, j,
-                        gate_round=gate_round, parametrize=parametrize)
+        self.apply_gate(
+            "CU3",
+            theta,
+            phi,
+            lamda,
+            i,
+            j,
+            gate_round=gate_round,
+            parametrize=parametrize,
+        )
 
     def cu2(self, phi, lamda, i, j, gate_round=None, parametrize=False):
-        self.apply_gate('CU2', phi, lamda, i, j,
-                        gate_round=gate_round, parametrize=parametrize)
+        self.apply_gate(
+            "CU2",
+            phi,
+            lamda,
+            i,
+            j,
+            gate_round=gate_round,
+            parametrize=parametrize,
+        )
 
     def cu1(self, lamda, i, j, gate_round=None, parametrize=False):
-        self.apply_gate('CU1', lamda, i, j,
-                        gate_round=gate_round, parametrize=parametrize)
+        self.apply_gate(
+            "CU1", lamda, i, j, gate_round=gate_round, parametrize=parametrize
+        )
 
     def fsim(self, theta, phi, i, j, gate_round=None, parametrize=False):
-        self.apply_gate('FSIM', theta, phi, i, j,
-                        gate_round=gate_round, parametrize=parametrize)
+        self.apply_gate(
+            "FSIM",
+            theta,
+            phi,
+            i,
+            j,
+            gate_round=gate_round,
+            parametrize=parametrize,
+        )
 
-    def fsimg(self, theta, zeta, chi, gamma, phi, i, j,
-              gate_round=None, parametrize=False):
-        self.apply_gate('FSIMG', theta, zeta, chi, gamma, phi, i, j,
-                        gate_round=gate_round, parametrize=parametrize)
+    def fsimg(
+        self,
+        theta,
+        zeta,
+        chi,
+        gamma,
+        phi,
+        i,
+        j,
+        gate_round=None,
+        parametrize=False,
+    ):
+        self.apply_gate(
+            "FSIMG",
+            theta,
+            zeta,
+            chi,
+            gamma,
+            phi,
+            i,
+            j,
+            gate_round=gate_round,
+            parametrize=parametrize,
+        )
+
+    def rxx(self, theta, i, j, gate_round=None, parametrize=False):
+        self.apply_gate(
+            "RXX", theta, i, j, gate_round=gate_round, parametrize=parametrize
+        )
+
+    def ryy(self, theta, i, j, gate_round=None, parametrize=False):
+        self.apply_gate(
+            "RYY", theta, i, j, gate_round=gate_round, parametrize=parametrize
+        )
 
     def rzz(self, theta, i, j, gate_round=None, parametrize=False):
-        self.apply_gate('RZZ', theta, i, j,
-                        gate_round=gate_round, parametrize=parametrize)
+        self.apply_gate(
+            "RZZ", theta, i, j, gate_round=gate_round, parametrize=parametrize
+        )
+
+    def crx(self, theta, i, j, gate_round=None, parametrize=False):
+        self.apply_gate(
+            "CRX", theta, i, j, gate_round=gate_round, parametrize=parametrize
+        )
+
+    def cry(self, theta, i, j, gate_round=None, parametrize=False):
+        self.apply_gate(
+            "CRY", theta, i, j, gate_round=gate_round, parametrize=parametrize
+        )
+
+    def crz(self, theta, i, j, gate_round=None, parametrize=False):
+        self.apply_gate(
+            "CRZ", theta, i, j, gate_round=gate_round, parametrize=parametrize
+        )
 
     def su4(
         self,
-        theta1, phi1, lamda1,
-        theta2, phi2, lamda2,
-        theta3, phi3, lamda3,
-        theta4, phi4, lamda4,
-        t1, t2, t3,
-        i, j,
-        gate_round=None, parametrize=False
+        theta1,
+        phi1,
+        lamda1,
+        theta2,
+        phi2,
+        lamda2,
+        theta3,
+        phi3,
+        lamda3,
+        theta4,
+        phi4,
+        lamda4,
+        t1,
+        t2,
+        t3,
+        i,
+        j,
+        gate_round=None,
+        parametrize=False,
     ):
         self.apply_gate(
-            'SU4',
-            theta1, phi1, lamda1,
-            theta2, phi2, lamda2,
-            theta3, phi3, lamda3,
-            theta4, phi4, lamda4,
-            t1, t2, t3,
-            i, j,
-            gate_round=gate_round, parametrize=parametrize
+            "SU4",
+            theta1,
+            phi1,
+            lamda1,
+            theta2,
+            phi2,
+            lamda2,
+            theta3,
+            phi3,
+            lamda3,
+            theta4,
+            phi4,
+            lamda4,
+            t1,
+            t2,
+            t3,
+            i,
+            j,
+            gate_round=gate_round,
+            parametrize=parametrize,
         )
 
     @property
     def psi(self):
-        """Tensor network representation of the wavefunction.
-        """
+        """Tensor network representation of the wavefunction."""
         # make sure all same dtype and drop singlet dimensions
         psi = self._psi.copy()
         psi.squeeze_()
@@ -1172,21 +1440,23 @@ class Circuit:
 
         if transposed:
             # rename the initial state rand_uuid bonds to 1D site inds
-            ixmap = {self.ket_site_ind(i): self.bra_site_ind(i)
-                     for i in range(self.N)}
+            ixmap = {
+                self.ket_site_ind(i): self.bra_site_ind(i)
+                for i in range(self.N)
+            }
         else:
             ixmap = {}
 
         # the first `N` tensors should be the tensors of input state
-        tids = tuple(U.tensor_map)[:self.N]
+        tids = tuple(U.tensor_map)[: self.N]
         for i, tid in enumerate(tids):
             t = U.pop_tensor(tid)
-            old_ix, = t.inds
+            (old_ix,) = t.inds
 
             if transposed:
-                ixmap[old_ix] = f'k{i}'
+                ixmap[old_ix] = f"k{i}"
             else:
-                ixmap[old_ix] = f'b{i}'
+                ixmap[old_ix] = f"b{i}"
 
         U.reindex_(ixmap)
         U.view_as_(
@@ -1200,12 +1470,13 @@ class Circuit:
     @property
     def uni(self):
         import warnings
+
         warnings.warn(
             "In future the tensor network returned by ``circ.uni`` will not "
             "be transposed as it is currently, to match the expectation from "
             "``U = circ.uni.to_dense()`` behaving like ``U @ psi``. You can "
             "retain this behaviour with ``circ.get_uni(transposed=True)``.",
-            FutureWarning
+            FutureWarning,
         )
         return self.get_uni(transposed=True)
 
@@ -1232,10 +1503,10 @@ class Circuit:
         lightcone_tags = []
 
         for i, gate in reversed(tuple(enumerate(self.gates))):
-            if gate.label == 'IDEN':
+            if gate.label == "IDEN":
                 continue
 
-            if gate.label == 'SWAP':
+            if gate.label == "SWAP":
                 i, j = gate.qubits
                 i_in_cone = i in cone
                 j_in_cone = j in cone
@@ -1255,7 +1526,7 @@ class Circuit:
                 cone |= regs
 
         # initial state is always part of the lightcone
-        lightcone_tags.append('PSI0')
+        lightcone_tags.append("PSI0")
         lightcone_tags.reverse()
 
         return tuple(lightcone_tags)
@@ -1316,7 +1587,7 @@ class Circuit:
         arrays,
         overhead_warn=2.0,
     ):
-        key = ('sliced_contractor', info.eq, target_size)
+        key = ("sliced_contractor", info.eq, target_size)
         if key in self._storage:
             sc = self._storage[key]
             sc.arrays = arrays
@@ -1329,19 +1600,18 @@ class Circuit:
 
         if cost_sl.overhead > overhead_warn:
             import warnings
+
             warnings.warn(
                 f"Slicing contraction to size {target_size} has introduced"
-                f" an FLOPs overhead of {cost_sl.overhead:.2f}x.")
+                f" an FLOPs overhead of {cost_sl.overhead:.2f}x."
+            )
 
         sc = sf.SlicedContractor(arrays)
         self._storage[key] = sc
         return sc
 
     def get_psi_simplified(
-        self,
-        seq='ADCRS',
-        atol=1e-12,
-        equalize_norms=False
+        self, seq="ADCRS", atol=1e-12, equalize_norms=False
     ):
         """Get the full wavefunction post local tensor network simplification.
 
@@ -1363,7 +1633,7 @@ class Circuit:
         """
         self._maybe_init_storage()
 
-        key = ('psi_simplified', seq, atol)
+        key = ("psi_simplified", seq, atol)
         if key in self._storage:
             return self._storage[key].copy()
 
@@ -1372,8 +1642,12 @@ class Circuit:
         output_inds = tuple(map(psi.site_ind, range(self.N)))
 
         # simplify the state and cache it
-        psi.full_simplify_(seq=seq, atol=atol, output_inds=output_inds,
-                           equalize_norms=equalize_norms)
+        psi.full_simplify_(
+            seq=seq,
+            atol=atol,
+            output_inds=output_inds,
+            equalize_norms=equalize_norms,
+        )
         self._storage[key] = psi
 
         # return a copy so we can modify it inplace
@@ -1382,7 +1656,7 @@ class Circuit:
     def get_rdm_lightcone_simplified(
         self,
         where,
-        seq='ADCRS',
+        seq="ADCRS",
         atol=1e-12,
         equalize_norms=False,
     ):
@@ -1411,7 +1685,7 @@ class Circuit:
         -------
         TensorNetwork
         """
-        key = ('rdm_lightcone_simplified', tuple(sorted(where)), seq, atol)
+        key = ("rdm_lightcone_simplified", tuple(sorted(where)), seq, atol)
         if key in self._storage:
             return self._storage[key].copy()
 
@@ -1427,8 +1701,12 @@ class Circuit:
         output_inds = b_inds + k_inds
 
         # # simplify the norm and cache it
-        rho_lc.full_simplify_(seq=seq, atol=atol, output_inds=output_inds,
-                              equalize_norms=equalize_norms)
+        rho_lc.full_simplify_(
+            seq=seq,
+            atol=atol,
+            output_inds=output_inds,
+            equalize_norms=equalize_norms,
+        )
         self._storage[key] = rho_lc
 
         # return a copy so we can modify it inplace
@@ -1437,12 +1715,12 @@ class Circuit:
     def amplitude(
         self,
         b,
-        optimize='auto-hq',
-        simplify_sequence='ADCRS',
+        optimize="auto-hq",
+        simplify_sequence="ADCRS",
         simplify_atol=1e-12,
         simplify_equalize_norms=False,
         backend=None,
-        dtype='complex128',
+        dtype="complex128",
         target_size=None,
         rehearse=False,
     ):
@@ -1489,13 +1767,15 @@ class Circuit:
         self._maybe_init_storage()
 
         if len(b) != self.N:
-            raise ValueError(f"Bit-string {b} length does not "
-                             f"match number of qubits {self.N}.")
+            raise ValueError(
+                f"Bit-string {b} length does not "
+                f"match number of qubits {self.N}."
+            )
 
         fs_opts = {
-            'seq': simplify_sequence,
-            'atol': simplify_atol,
-            'equalize_norms': simplify_equalize_norms,
+            "seq": simplify_sequence,
+            "atol": simplify_atol,
+            "equalize_norms": simplify_equalize_norms,
         }
 
         # get the full wavefunction simplified
@@ -1514,7 +1794,7 @@ class Circuit:
 
         # get the contraction path info
         info = psi_b.contract(
-            all, output_inds=(), optimize=optimize, get='path-info'
+            all, output_inds=(), optimize=optimize, get="path-info"
         )
 
         if rehearse:
@@ -1535,12 +1815,12 @@ class Circuit:
 
     def amplitude_rehearse(
         self,
-        b='random',
-        simplify_sequence='ADCRS',
+        b="random",
+        simplify_sequence="ADCRS",
         simplify_atol=1e-12,
         simplify_equalize_norms=False,
-        optimize='auto-hq',
-        dtype='complex128',
+        optimize="auto-hq",
+        dtype="complex128",
         rehearse=True,
     ):
         """Perform just the tensor network simplifications and contraction path
@@ -1576,15 +1856,19 @@ class Circuit:
         dict
 
         """
-        if b == 'random':
+        if b == "random":
             import random
-            b = [random.choice('01') for _ in range(self.N)]
+
+            b = [random.choice("01") for _ in range(self.N)]
 
         return self.amplitude(
-            b=b, optimize=optimize, dtype=dtype, rehearse=rehearse,
+            b=b,
+            optimize=optimize,
+            dtype=dtype,
+            rehearse=rehearse,
             simplify_sequence=simplify_sequence,
             simplify_atol=simplify_atol,
-            simplify_equalize_norms=simplify_equalize_norms
+            simplify_equalize_norms=simplify_equalize_norms,
         )
 
     amplitude_tn = functools.partialmethod(amplitude_rehearse, rehearse="tn")
@@ -1592,12 +1876,12 @@ class Circuit:
     def partial_trace(
         self,
         keep,
-        optimize='auto-hq',
-        simplify_sequence='ADCRS',
+        optimize="auto-hq",
+        simplify_sequence="ADCRS",
         simplify_atol=1e-12,
         simplify_equalize_norms=False,
         backend=None,
-        dtype='complex128',
+        dtype="complex128",
         target_size=None,
         rehearse=False,
     ):
@@ -1657,11 +1941,14 @@ class Circuit:
         if isinstance(keep, numbers.Integral):
             keep = (keep,)
 
-        output_inds = (tuple(map(self.ket_site_ind, keep)) +
-                       tuple(map(self.bra_site_ind, keep)))
+        output_inds = tuple(map(self.ket_site_ind, keep)) + tuple(
+            map(self.bra_site_ind, keep)
+        )
 
         rho = self.get_rdm_lightcone_simplified(
-            where=keep, seq=simplify_sequence, atol=simplify_atol,
+            where=keep,
+            seq=simplify_sequence,
+            atol=simplify_atol,
             equalize_norms=simplify_equalize_norms,
         ).astype_(dtype)
 
@@ -1669,10 +1956,7 @@ class Circuit:
             return rho
 
         info = rho.contract(
-            all,
-            output_inds=output_inds,
-            optimize=optimize,
-            get='path-info'
+            all, output_inds=output_inds, optimize=optimize, get="path-info"
         )
 
         if rehearse:
@@ -1686,27 +1970,29 @@ class Circuit:
         else:
             # perform the full contraction with the path found
             rho_dense = rho.contract(
-                all, output_inds=output_inds,
-                optimize=info.path, backend=backend
+                all,
+                output_inds=output_inds,
+                optimize=info.path,
+                backend=backend,
             ).data
 
-        return ops.reshape(rho_dense, [2**len(keep), 2**len(keep)])
+        return ops.reshape(rho_dense, [2 ** len(keep), 2 ** len(keep)])
 
     partial_trace_rehearse = functools.partialmethod(
-        partial_trace, rehearse=True)
-    partial_trace_tn = functools.partialmethod(
-        partial_trace, rehearse="tn")
+        partial_trace, rehearse=True
+    )
+    partial_trace_tn = functools.partialmethod(partial_trace, rehearse="tn")
 
     def local_expectation(
         self,
         G,
         where,
-        optimize='auto-hq',
-        simplify_sequence='ADCRS',
+        optimize="auto-hq",
+        simplify_sequence="ADCRS",
         simplify_atol=1e-12,
         simplify_equalize_norms=False,
         backend=None,
-        dtype='complex128',
+        dtype="complex128",
         target_size=None,
         rehearse=False,
     ):
@@ -1768,9 +2054,9 @@ class Circuit:
             where = (where,)
 
         fs_opts = {
-            'seq': simplify_sequence,
-            'atol': simplify_atol,
-            'equalize_norms': simplify_equalize_norms,
+            "seq": simplify_sequence,
+            "atol": simplify_atol,
+            "equalize_norms": simplify_equalize_norms,
         }
 
         rho = self.get_rdm_lightcone_simplified(where=where, **fs_opts)
@@ -1780,7 +2066,7 @@ class Circuit:
         if isinstance(G, (list, tuple)):
             # if we have multiple expectations create an extra indexed stack
             nG = len(G)
-            G_data = do('stack', G)
+            G_data = do("stack", G)
             G_data = reshape(G_data, (nG,) + (2,) * 2 * len(where))
             output_inds = (rand_uuid(),)
         else:
@@ -1798,10 +2084,7 @@ class Circuit:
             return rhoG
 
         info = rhoG.contract(
-            all,
-            output_inds=output_inds,
-            optimize=optimize,
-            get='path-info'
+            all, output_inds=output_inds, optimize=optimize, get="path-info"
         )
 
         if rehearse:
@@ -1813,8 +2096,12 @@ class Circuit:
             sc = self._get_sliced_contractor(info, target_size, arrays)
             g_ex = sc.contract_all(backend=backend)
         else:
-            g_ex = rhoG.contract(all, output_inds=output_inds,
-                                 optimize=info.path, backend=backend)
+            g_ex = rhoG.contract(
+                all,
+                output_inds=output_inds,
+                optimize=info.path,
+                backend=backend,
+            )
 
         if isinstance(g_ex, Tensor):
             g_ex = tuple(g_ex.data)
@@ -1822,18 +2109,20 @@ class Circuit:
         return g_ex
 
     local_expectation_rehearse = functools.partialmethod(
-        local_expectation, rehearse=True)
+        local_expectation, rehearse=True
+    )
     local_expectation_tn = functools.partialmethod(
-        local_expectation, rehearse="tn")
+        local_expectation, rehearse="tn"
+    )
 
     def compute_marginal(
         self,
         where,
         fix=None,
-        optimize='auto-hq',
+        optimize="auto-hq",
         backend=None,
-        dtype='complex64',
-        simplify_sequence='ADCRS',
+        dtype="complex64",
+        simplify_sequence="ADCRS",
         simplify_atol=1e-6,
         simplify_equalize_norms=True,
         target_size=None,
@@ -1883,9 +2172,9 @@ class Circuit:
         output_inds = [self.ket_site_ind(i) for i in where]
 
         fs_opts = {
-            'seq': simplify_sequence,
-            'atol': simplify_atol,
-            'equalize_norms': simplify_equalize_norms,
+            "seq": simplify_sequence,
+            "atol": simplify_atol,
+            "equalize_norms": simplify_equalize_norms,
         }
 
         # lightcone region is target qubit plus fixed qubits
@@ -1895,7 +2184,7 @@ class Circuit:
         region = tuple(sorted(region))
 
         # have we fixed or are measuring all qubits?
-        final_marginal = (len(region) == self.N)
+        final_marginal = len(region) == self.N
 
         # these both are cached and produce TN copies
         if final_marginal:
@@ -1905,9 +2194,9 @@ class Circuit:
             # can use lightcone cancellation on partially traced qubits
             nm_lc = self.get_rdm_lightcone_simplified(region, **fs_opts)
             # re-connect the ket and bra indices as taking diagonal
-            nm_lc.reindex_({
-                self.bra_site_ind(i): self.ket_site_ind(i) for i in region
-            })
+            nm_lc.reindex_(
+                {self.bra_site_ind(i): self.ket_site_ind(i) for i in region}
+            )
 
         if fix:
             # project (slice) fixed tensors with bitstring
@@ -1919,11 +2208,11 @@ class Circuit:
 
         # for stability with very small probabilities, scale by average prob
         if fix is not None:
-            nfact = 2**len(fix)
+            nfact = 2 ** len(fix)
             if final_marginal:
-                nm_lc.multiply_(nfact**0.5, spread_over='all')
+                nm_lc.multiply_(nfact**0.5, spread_over="all")
             else:
-                nm_lc.multiply_(nfact, spread_over='all')
+                nm_lc.multiply_(nfact, spread_over="all")
 
         # cast to desired data type
         nm_lc.astype_(dtype)
@@ -1936,8 +2225,7 @@ class Circuit:
         #     contraction path cache if the structure generated *is* the same
         #     so still pretty efficient to just overwrite
         info = nm_lc.contract(
-            all, output_inds=output_inds,
-            optimize=optimize, get='path-info'
+            all, output_inds=output_inds, optimize=optimize, get="path-info"
         )
 
         if rehearse:
@@ -1950,10 +2238,14 @@ class Circuit:
             p_marginal = abs(sc.contract_all(backend=backend))
         else:
             # perform the full contraction with the path found
-            p_marginal = abs(nm_lc.contract(
-                all, output_inds=output_inds,
-                optimize=info.path, backend=backend
-            ).data)
+            p_marginal = abs(
+                nm_lc.contract(
+                    all,
+                    output_inds=output_inds,
+                    optimize=info.path,
+                    backend=backend,
+                ).data
+            )
 
         if final_marginal:
             # we only did half the ket contraction so need to square
@@ -1965,11 +2257,13 @@ class Circuit:
         return p_marginal
 
     compute_marginal_rehearse = functools.partialmethod(
-        compute_marginal, rehearse=True)
+        compute_marginal, rehearse=True
+    )
     compute_marginal_tn = functools.partialmethod(
-        compute_marginal, rehearse="tn")
+        compute_marginal, rehearse="tn"
+    )
 
-    def calc_qubit_ordering(self, qubits=None, method='greedy-lightcone'):
+    def calc_qubit_ordering(self, qubits=None, method="greedy-lightcone"):
         """Get a order to measure ``qubits`` in, by greedily choosing whichever
         has the smallest reverse lightcone followed by whichever expands this
         lightcone *least*.
@@ -1992,17 +2286,16 @@ class Circuit:
         else:
             qubits = tuple(sorted(qubits))
 
-        key = ('lightcone_ordering', method, qubits)
+        key = ("lightcone_ordering", method, qubits)
 
         # check the cache first
         if key in self._storage:
             return self._storage[key]
 
-        if method == 'greedy-lightcone':
+        if method == "greedy-lightcone":
             cone = set()
             lctgs = {
-                i: set(self.get_reverse_lightcone_tags(i))
-                for i in qubits
+                i: set(self.get_reverse_lightcone_tags(i)) for i in qubits
             }
 
             order = []
@@ -2014,10 +2307,10 @@ class Circuit:
 
         else:
             # use graph distance based hierachical clustering
-            psi = self.get_psi_simplified('R')
+            psi = self.get_psi_simplified("R")
             qubit_inds = tuple(map(psi.site_ind, qubits))
-            tids = psi._get_tids_from_inds(qubit_inds, 'any')
-            matcher = re.compile(psi.site_ind_id.format(r'(\d+)'))
+            tids = psi._get_tids_from_inds(qubit_inds, "any")
+            matcher = re.compile(psi.site_ind_id.format(r"(\d+)"))
             order = []
             for tid in psi.compute_hierarchical_ordering(tids, method=method):
                 t = psi.tensor_map[tid]
@@ -2047,8 +2340,7 @@ class Circuit:
         group.
         """
         return tuple(
-            tuple(sorted(g))
-            for g in partition_all(group_size, order)
+            tuple(sorted(g)) for g in partition_all(group_size, order)
         )
 
     def sample(
@@ -2059,10 +2351,10 @@ class Circuit:
         group_size=1,
         max_marginal_storage=2**20,
         seed=None,
-        optimize='auto-hq',
+        optimize="auto-hq",
         backend=None,
-        dtype='complex64',
-        simplify_sequence='ADCRS',
+        dtype="complex64",
+        simplify_sequence="ADCRS",
         simplify_atol=1e-6,
         simplify_equalize_norms=False,
         target_size=None,
@@ -2176,7 +2468,6 @@ class Circuit:
         result = dict()
         for _ in range(C):
             for where in groups:
-
                 # key - (tuple[int] where, tuple[tuple[int q, str b])
                 # value  - marginal probability distribution of `where` given
                 #     prior results, as an ndarray
@@ -2197,7 +2488,7 @@ class Circuit:
                         simplify_equalize_norms=simplify_equalize_norms,
                         target_size=target_size,
                     )
-                    p = do('to_numpy', p).astype('float64')
+                    p = do("to_numpy", p).astype("float64")
                     p /= p.sum()
 
                     if self._marginal_storage_size <= max_marginal_storage:
@@ -2222,8 +2513,8 @@ class Circuit:
         order=None,
         group_size=1,
         result=None,
-        optimize='auto-hq',
-        simplify_sequence='ADCRS',
+        optimize="auto-hq",
+        simplify_sequence="ADCRS",
         simplify_atol=1e-6,
         simplify_equalize_norms=False,
         rehearse=True,
@@ -2282,7 +2573,7 @@ class Circuit:
         groups = self._group_order(order, group_size)
 
         if result is None:
-            result = {q: '0' for q in qubits}
+            result = {q: "0" for q in qubits}
 
         fix = {}
         tns_and_infos = {}
@@ -2312,10 +2603,10 @@ class Circuit:
         marginal_qubits,
         max_marginal_storage=2**20,
         seed=None,
-        optimize='auto-hq',
+        optimize="auto-hq",
         backend=None,
-        dtype='complex64',
-        simplify_sequence='ADCRS',
+        dtype="complex64",
+        simplify_sequence="ADCRS",
         simplify_atol=1e-6,
         simplify_equalize_norms=False,
         target_size=None,
@@ -2402,10 +2693,9 @@ class Circuit:
 
         result = dict()
         for _ in range(C):
-
             # generate a random bit-string for the fixed qubits
             for q in fix_qubits:
-                result[q] = np.random.choice(('0', '1'))
+                result[q] = np.random.choice(("0", "1"))
 
             # compute the remaining marginal
             key = (where, tuple(sorted(result.items())))
@@ -2421,7 +2711,7 @@ class Circuit:
                     simplify_equalize_norms=simplify_equalize_norms,
                     target_size=target_size,
                 )
-                p = do('to_numpy', p).astype('float64')
+                p = do("to_numpy", p).astype("float64")
                 p /= p.sum()
 
                 if self._marginal_storage_size <= max_marginal_storage:
@@ -2444,11 +2734,11 @@ class Circuit:
         self,
         marginal_qubits,
         result=None,
-        optimize='auto-hq',
-        simplify_sequence='ADCRS',
+        optimize="auto-hq",
+        simplify_sequence="ADCRS",
         simplify_atol=1e-6,
         simplify_equalize_norms=False,
-        dtype='complex64',
+        dtype="complex64",
         rehearse=True,
     ):
         """Rehearse chaotic sampling (perform just the TN simplifications and
@@ -2499,7 +2789,7 @@ class Circuit:
         fix_qubits = tuple(q for q in qubits if q not in where)
 
         if result is None:
-            fix = {q: '0' for q in fix_qubits}
+            fix = {q: "0" for q in fix_qubits}
         else:
             fix = {q: result[q] for q in fix_qubits}
 
@@ -2520,13 +2810,14 @@ class Circuit:
         return {where: rehs}
 
     sample_chaotic_tn = functools.partialmethod(
-        sample_chaotic_rehearse, rehearse="tn")
+        sample_chaotic_rehearse, rehearse="tn"
+    )
 
     def to_dense(
         self,
         reverse=False,
-        optimize='auto-hq',
-        simplify_sequence='R',
+        optimize="auto-hq",
+        simplify_sequence="R",
         simplify_atol=1e-12,
         simplify_equalize_norms=False,
         backend=None,
@@ -2581,7 +2872,7 @@ class Circuit:
         psi = self.get_psi_simplified(
             seq=simplify_sequence,
             atol=simplify_atol,
-            equalize_norms=simplify_equalize_norms
+            equalize_norms=simplify_equalize_norms,
         )
 
         if dtype is not None:
@@ -2596,7 +2887,7 @@ class Circuit:
 
         # get the contraction path info
         info = psi.contract(
-            all, output_inds=output_inds, optimize=optimize, get='path-info'
+            all, output_inds=output_inds, optimize=optimize, get="path-info"
         )
 
         if rehearse:
@@ -2610,8 +2901,10 @@ class Circuit:
         else:
             # perform the full contraction with the path found
             psi_tensor = psi.contract(
-                all, output_inds=output_inds,
-                optimize=info.path, backend=backend
+                all,
+                output_inds=output_inds,
+                optimize=info.path,
+                backend=backend,
             ).data
 
         k = ops.reshape(psi_tensor, (-1, 1))
@@ -2706,23 +2999,23 @@ class Circuit:
             try:
                 p = cache[b]
             except KeyError:
-                p = cache[b] = abs(self.amplitude(b, **amplitude_opts))**2
+                p = cache[b] = abs(self.amplitude(b, **amplitude_opts)) ** 2
             psum += cnt * p
             M += cnt
 
-        return (2 ** self.N) / M * psum - 1
+        return (2**self.N) / M * psum - 1
 
     def xeb_ex(
         self,
-        optimize='auto-hq',
-        simplify_sequence='R',
+        optimize="auto-hq",
+        simplify_sequence="R",
         simplify_atol=1e-12,
         simplify_equalize_norms=False,
         dtype=None,
         backend=None,
         autojit=False,
         progbar=False,
-        **contract_opts
+        **contract_opts,
     ):
         """Compute the exactly expected XEB for this circuit. The main feature
         here is that if you supply a cotengra optimizer that searches for
@@ -2765,25 +3058,24 @@ class Circuit:
 
         arrays = psi.arrays
         if backend is not None:
-            arrays = [do('array', x, like=backend) for x in arrays]
+            arrays = [do("array", x, like=backend) for x in arrays]
 
         # perform map-reduce style computation over output wavefunction chunks
         # so we don't need entire wavefunction in memory at same time
         chunks = tree.gen_output_chunks(
-            arrays,
-            autojit=autojit,
-            **contract_opts
+            arrays, autojit=autojit, **contract_opts
         )
         if progbar:
             chunks = _progbar(chunks, total=tree.nchunks)
 
         def f(chunk):
-            return do('sum', do('abs', chunk)**4)
+            return do("sum", do("abs", chunk) ** 4)
 
         if autojit:
             # since we convert the arrays above, the jit backend is
             # automatically inferred
             from autoray import autojit
+
             f = autojit(f)
 
         p2sum = functools.reduce(operator.add, map(f, chunks))
@@ -2803,7 +3095,7 @@ class Circuit:
             The tensor network to find the updated parameters from.
         """
         for i, gate in enumerate(self.gates):
-            tag = f'GATE_{i}'
+            tag = f"GATE_{i}"
             t = tn[tag]
 
             # sanity check that tensor(s) `t` correspond to the correct gate
@@ -2815,7 +3107,6 @@ class Circuit:
 
             # only update gates and tensors if they are parametrizable
             if isinstance(t, PTensor):
-
                 # update the actual tensor
                 self._psi[tag].params = t.params
 
@@ -2825,7 +3116,7 @@ class Circuit:
                     params=t.params,
                     qubits=gate.qubits,
                     round=gate.round,
-                    parametrize=True
+                    parametrize=True,
                 )
 
     @property
@@ -2852,11 +3143,11 @@ class CircuitMPS(Circuit):
         **circuit_opts,
     ):
         gate_opts = ensure_dict(gate_opts)
-        gate_opts.setdefault('contract', 'swap+split')
+        gate_opts.setdefault("contract", "swap+split")
         super().__init__(N, psi0, gate_opts, **circuit_opts)
 
-    def _init_state(self, N, dtype='complex128'):
-        return MPS_computational_state('0' * N, dtype=dtype)
+    def _init_state(self, N, dtype="complex128"):
+        return MPS_computational_state("0" * N, dtype=dtype)
 
     @property
     def psi(self):
@@ -2865,12 +3156,13 @@ class CircuitMPS(Circuit):
 
     @property
     def uni(self):
-        raise ValueError("You can't extract the circuit unitary "
-                         "TN from a ``CircuitMPS``.")
+        raise ValueError(
+            "You can't extract the circuit unitary "
+            "TN from a ``CircuitMPS``."
+        )
 
     def calc_qubit_ordering(self, qubits=None):
-        """MPS already has a natural ordering.
-        """
+        """MPS already has a natural ordering."""
         if qubits is None:
             return tuple(range(self.N))
         else:
@@ -2884,12 +3176,11 @@ class CircuitMPS(Circuit):
 
 
 class CircuitDense(Circuit):
-    """Quantum circuit simulation keeping the state in full dense form.
-    """
+    """Quantum circuit simulation keeping the state in full dense form."""
 
     def __init__(self, N=None, psi0=None, gate_opts=None, tags=None):
         gate_opts = ensure_dict(gate_opts)
-        gate_opts.setdefault('contract', True)
+        gate_opts.setdefault("contract", True)
         super().__init__(N, psi0, gate_opts, tags)
 
     @property
@@ -2901,12 +3192,13 @@ class CircuitDense(Circuit):
 
     @property
     def uni(self):
-        raise ValueError("You can't extract the circuit unitary "
-                         "TN from a ``CircuitDense``.")
+        raise ValueError(
+            "You can't extract the circuit unitary "
+            "TN from a ``CircuitDense``."
+        )
 
     def calc_qubit_ordering(self, qubits=None):
-        """Qubit ordering doesn't matter for a dense wavefunction.
-        """
+        """Qubit ordering doesn't matter for a dense wavefunction."""
         if qubits is None:
             return tuple(range(self.N))
         else:

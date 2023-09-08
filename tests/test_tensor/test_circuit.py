@@ -164,6 +164,12 @@ class TestCircuit:
             ('swap', 2, 0),
             ('iswap', 2, 0),
             # two qubit parametrizable
+            ('rxx', 2, 1),
+            ('ryy', 2, 1),
+            ('rzz', 2, 1),
+            ('crx', 2, 1),
+            ('cry', 2, 1),
+            ('crz', 2, 1),
             ('cu3', 2, 3),
             ('cu2', 2, 2),
             ('cu1', 2, 1),
@@ -519,7 +525,7 @@ class TestCircuitGen:
         terms = {(i, j): 1. for i, j in G.edges}
         ZZ = qu.pauli('Z') & qu.pauli('Z')
 
-        gammas = [1.2]
+        gammas = [0.6]
         betas = [-0.4]
 
         circ1 = qtn.circ_qaoa(terms, 1, gammas, betas)
