@@ -491,7 +491,7 @@ def cZ(dtype=complex, sparse=False):
 
 @functools.lru_cache(8)
 def ccX(dtype=complex, sparse=False):
-    """The double controlled X gate.
+    """The double controlled X gate, or Toffoli gate.
     """
     op = ncontrolled_gate(2, pauli('X'), dtype=dtype, sparse=sparse)
     make_immutable(op)

@@ -221,6 +221,18 @@ class TestCircuit:
 
         assert qu.fidelity(psi_a, psi_b) == pytest.approx(1.0)
 
+    def test_three_qubit_gates(self):
+        psi0 = qtn.MPS_rand_state(3, 2)
+        circ = qtn.Circuit(psi0=psi0)
+        circ.ccx(0, 1, 2)
+        circ.cswap(2, 1, 0)
+        circ.toffoli(0, 1, 2)
+        circ.ccy(1, 0, 2)
+        circ.ccz(1, 2, 0)
+        circ.fredkin(2, 1, 0)
+        psi = circ.psi.to_dense()
+        assert qu.expec(psi, psi) == pytest.approx(1.0)
+
     def test_auto_split_gate(self):
 
         n = 3

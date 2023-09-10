@@ -1,12 +1,13 @@
 """Tools for quantum circuit simulation using tensor networks.
 """
 
-import re
+import functools
+import itertools
 import math
 import numbers
 import operator
-import functools
-import itertools
+import re
+import warnings
 
 import numpy as np
 from autoray import do, reshape, backend_like
@@ -65,12 +66,12 @@ def _put_registers_last(x):
     return tuple(concatv(*parts[:-2], parts[-1], parts[-2]))
 
 
-def parse_qasm(qasm):
+def parse_qasm(contents):
     """Parse qasm from a string.
 
     Parameters
     ----------
-    qasm : str
+    contents : str
         The full string of the qasm file.
 
     Returns
@@ -84,7 +85,7 @@ def parse_qasm(qasm):
           is a list of strings read from a line of the qasm file.
     """
 
-    lines = qasm.split("\n")
+    lines = contents.split("\n")
     n = int(lines[0])
 
     # turn into tuples of python types
@@ -203,12 +204,22 @@ register_constant_gate("HZ_1_2", qu.Wsqrt(), 1, "W_1/2")
 
 
 # constant two qubit gates
-register_constant_gate("CNOT", qu.CNOT(), 2)
 register_constant_gate("CX", qu.cX(), 2)
+register_constant_gate("CNOT", qu.CNOT(), 2, "CX")
 register_constant_gate("CY", qu.cY(), 2)
 register_constant_gate("CZ", qu.cZ(), 2)
 register_constant_gate("ISWAP", qu.iswap(), 2)
 register_constant_gate("IS", qu.iswap(), 2, "ISWAP")
+
+
+# constant three qubit gates
+register_constant_gate("CCX", qu.ccX(), 3)
+register_constant_gate("CCNOT", qu.ccX(), 3, "CCX")
+register_constant_gate("TOFFOLI", qu.ccX(), 3, "CCX")
+register_constant_gate("CCY", qu.ccY(), 3)
+register_constant_gate("CCZ", qu.ccZ(), 3)
+register_constant_gate("CSWAP", qu.cswap(), 3)
+register_constant_gate("FREDKIN", qu.cswap(), 3, "CSWAP")
 
 
 # single parametrizable gates
@@ -218,13 +229,11 @@ def rx_gate_param_gen(params):
     phi = params[0]
 
     with backend_like(phi):
-        c_re = do("cos", phi / 2)
-        c_im = do("imag", c_re)
-        c = do("complex", c_re, c_im)
+        # get a real backend zero
+        zero = phi * 0.0
 
-        s_im = -do("sin", phi / 2)
-        s_re = do("imag", s_im)
-        s = do("complex", s_re, s_im)
+        c = do("complex", do("cos", phi / 2), zero)
+        s = do("complex", zero, -do("sin", phi / 2))
 
         return recursive_stack(((c, s), (s, c)))
 
@@ -236,13 +245,11 @@ def ry_gate_param_gen(params):
     phi = params[0]
 
     with backend_like(phi):
-        c_re = do("cos", phi / 2)
-        c_im = do("imag", c_re)
-        c = do("complex", c_re, c_im)
+        # get a real backend zero
+        zero = phi * 0.0
 
-        s_re = do("sin", phi / 2)
-        s_im = do("imag", s_re)
-        s = do("complex", s_re, s_im)
+        c = do("complex", do("cos", phi / 2), zero)
+        s = do("complex", do("sin", phi / 2), zero)
 
         return recursive_stack(((c, -s), (s, c)))
 
@@ -254,18 +261,16 @@ def rz_gate_param_gen(params):
     phi = params[0]
 
     with backend_like(phi):
-        c_re = do("cos", phi / 2)
-        c_im = do("imag", c_re)
-        c = do("complex", c_re, c_im)
+        # get a real backend zero
+        zero = phi * 0.0
 
-        s_im = -do("sin", phi / 2)
-        s_re = do("imag", s_im)
-        s = do("complex", s_re, s_im)
+        c = do("complex", do("cos", phi / 2), zero)
+        s = do("complex", zero, -do("sin", phi / 2))
 
-        # get a 'backend zero'
-        z = 0.0 * c_re
+        # get a complex backend zero
+        zero = do("complex", zero, zero)
 
-        return recursive_stack(((c + s, z), (z, c - s)))
+        return recursive_stack(((c + s, zero), (zero, c - s)))
 
 
 register_param_gate("RZ", rz_gate_param_gen, 1)
@@ -275,25 +280,14 @@ def u3_gate_param_gen(params):
     theta, phi, lamda = params[0], params[1], params[2]
 
     with backend_like(theta):
-        c2_re = do("cos", theta / 2)
-        c2_im = do("imag", c2_re)
-        c2 = do("complex", c2_re, c2_im)
+        # get a real backend zero
+        zero = theta * 0.0
 
-        s2_re = do("sin", theta / 2)
-        s2_im = do("imag", s2_re)
-        s2 = do("complex", s2_re, s2_im)
-
-        el_im = lamda
-        el_re = do("imag", el_im)
-        el = do("exp", do("complex", el_re, el_im))
-
-        ep_im = phi
-        ep_re = do("imag", ep_im)
-        ep = do("exp", do("complex", ep_re, ep_im))
-
-        elp_im = lamda + phi
-        elp_re = do("imag", elp_im)
-        elp = do("exp", do("complex", elp_re, elp_im))
+        c2 = do("complex", do("cos", theta / 2), zero)
+        s2 = do("complex", do("sin", theta / 2), zero)
+        el = do("exp", do("complex", zero, lamda))
+        ep = do("exp", do("complex", zero, phi))
+        elp = do("exp", do("complex", zero, lamda + phi))
 
         return recursive_stack(((c2, -el * s2), (ep * s2, elp * c2)))
 
@@ -305,22 +299,18 @@ def u2_gate_param_gen(params):
     phi, lamda = params[0], params[1]
 
     with backend_like(phi):
-        # get a 'backend one'
-        c00 = 0.0 * phi + 1.0
+        # get a real backend zero
+        zero = phi * 0.0
 
-        c01_im = lamda
-        c01_re = do("imag", c01_im)
-        c01 = -do("exp", do("complex", c01_re, c01_im))
+        c01 = -do("exp", do("complex", zero, lamda))
+        c10 = do("exp", do("complex", zero, phi))
+        c11 = do("exp", do("complex", zero, phi + lamda))
 
-        c10_im = phi
-        c10_re = do("imag", c10_im)
-        c10 = do("exp", do("complex", c10_re, c10_im))
+        # get a complex backend zero and backend one
+        zero = do("complex", zero, zero)
+        one = zero + 1.0
 
-        c11_im = phi + lamda
-        c11_re = do("imag", c11_im)
-        c11 = do("exp", do("complex", c11_re, c11_im))
-
-        return recursive_stack(((c00, c01), (c10, c11))) / 2**0.5
+        return recursive_stack(((one, c01), (c10, c11))) / 2**0.5
 
 
 register_param_gate("U2", u2_gate_param_gen, 1)
@@ -330,16 +320,16 @@ def u1_gate_param_gen(params):
     lamda = params[0]
 
     with backend_like(lamda):
-        # get a 'backend zero'
-        c01 = c10 = 0.0 * lamda
-        # get a 'backend one'
-        c00 = c10 + 1.0
+        # get a real backend zero
+        zero = lamda * 0.0
 
-        c11_im = lamda
-        c11_re = do("imag", c11_im)
-        c11 = do("exp", do("complex", c11_re, c11_im))
+        c11 = do("exp", do("complex", zero, lamda))
 
-        return recursive_stack(((c00, c01), (c10, c11)))
+        # get a complex backend zero and backend one
+        zero = do("complex", zero, zero)
+        one = zero + 1.0
+
+        return recursive_stack(((one, zero), (zero, c11)))
 
 
 register_param_gate("U1", u1_gate_param_gen, 1)
@@ -353,15 +343,15 @@ def cu3_param_gen(params):
 
     with backend_like(U3):
         # get a 'backend zero'
-        c0 = 0.0 * U3[0, 0]
+        zero = 0.0 * U3[0, 0]
         # get a 'backend one'
-        c1 = c0 + 1.0
+        one = zero + 1.0
 
         data = (
-            (((c1, c0), (c0, c0)), ((c0, c1), (c0, c0))),
+            (((one, zero), (zero, zero)), ((zero, one), (zero, zero))),
             (
-                ((c0, c0), (U3[0, 0], U3[0, 1])),
-                ((c0, c0), (U3[1, 0], U3[1, 1])),
+                ((zero, zero), (U3[0, 0], U3[0, 1])),
+                ((zero, zero), (U3[1, 0], U3[1, 1])),
             ),
         )
 
@@ -398,13 +388,13 @@ def cu1_param_gen(params):
     lamda = params[0]
 
     with backend_like(lamda):
-        c11_im = lamda
-        c11_re = do("imag", c11_im)
-        c11 = do("exp", do("complex", c11_re, c11_im))
+        # get a real backend zero
+        zero = 0.0 * lamda
 
-        # get a 'backend zero'
-        zero = 0.0 * c11
-        # get a 'backend one'
+        c11 = do("exp", do("complex", zero, lamda))
+
+        # get a complex backend zero and backend one
+        zero = do("complex", zero, zero)
         one = zero + 1.0
 
         data = (
@@ -423,12 +413,15 @@ def crx_param_gen(params):
     theta = params[0]
 
     with backend_like(theta):
-        # get a 'backend zero' and 'backend one'
+        # get a real backend zero
         zero = 0.0 * theta
-        one = zero + 1.0
 
         ccos = do("complex", do("cos", theta / 2), zero)
         csin = do("complex", zero, -do("sin", theta / 2))
+
+        # get a complex backend zero and backend one
+        zero = do("complex", zero, zero)
+        one = zero + 1.0
 
         data = (
             (((one, zero), (zero, zero)), ((zero, one), (zero, zero))),
@@ -446,12 +439,15 @@ def cry_param_gen(params):
     theta = params[0]
 
     with backend_like(theta):
-        # get a 'backend zero' and 'backend one'
+        # get a real backend zero
         zero = 0.0 * theta
-        one = zero + 1.0
 
         ccos = do("complex", do("cos", theta / 2), zero)
         csin = do("complex", do("sin", theta / 2), zero)
+
+        # get a complex backend zero and backend one
+        zero = do("complex", zero, zero)
+        one = zero + 1.0
 
         data = (
             (((one, zero), (zero, zero)), ((zero, one), (zero, zero))),
@@ -469,13 +465,16 @@ def crz_param_gen(params):
     theta = params[0]
 
     with backend_like(theta):
-        # get a 'backend zero' and 'backend one'
+        # get a real backend zero
         zero = 0.0 * theta
-        one = zero + 1.0
-        theta_2 = theta / 2
 
+        theta_2 = theta / 2
         c = do("complex", do("cos", theta_2), zero)
         s = do("complex", zero, -do("sin", theta_2))
+
+        # get a complex backend zero and backend one
+        zero = do("complex", zero, zero)
+        one = zero + 1.0
 
         data = (
             (((one, zero), (zero, zero)), ((zero, one), (zero, zero))),
@@ -492,21 +491,15 @@ def fsim_param_gen(params):
     theta, phi = params[0], params[1]
 
     with backend_like(theta):
-        a_re = do("cos", theta)
-        a_im = do("imag", a_re)
-        a = do("complex", a_re, a_im)
+        # get a real backend zero
+        zero = theta * 0.0
 
-        b_im = -do("sin", theta)
-        b_re = do("imag", b_im)
-        b = do("complex", b_re, b_im)
+        a = do("complex", do("cos", theta), zero)
+        b = do("complex", zero, -do("sin", theta))
+        c = do("exp", do("complex", zero, -phi))
 
-        c_im = -phi
-        c_re = do("imag", c_im)
-        c = do("exp", do("complex", c_re, c_im))
-
-        # get a 'backend zero'
-        zero = 0.0 * c
-        # get a 'backend one'
+        # get a complex backend zero and backend one
+        zero = do("complex", zero, zero)
         one = zero + 1.0
 
         data = (
@@ -529,56 +522,37 @@ def fsimg_param_gen(params):
         params[3],
         params[4],
     )
+    """Parametrized, most general number conserving two qubit gate.
+    """
 
     with backend_like(theta):
-        a11_re = do("cos", theta)
-        a11_im = do("imag", a11_re)
-        a11 = do("complex", a11_re, a11_im)
+        # get a real backend zero
+        zero = 0.0 * theta
 
-        e11_im = -(gamma + zeta)
-        e11_re = do("imag", e11_im)
-        e11 = do("exp", do("complex", e11_re, e11_im))
+        cos = do("cos", theta)
+        sin = do("sin", theta)
 
-        a22_re = do("cos", theta)
-        a22_im = do("imag", a22_re)
-        a22 = do("complex", a22_re, a22_im)
+        c11 = do("exp", do("complex", zero, -(gamma + zeta))) * do(
+            "complex", cos, zero
+        )
+        c12 = do("exp", do("complex", zero, -(gamma - chi))) * do(
+            "complex", zero, -sin
+        )
+        c21 = do("exp", do("complex", zero, -(gamma + chi))) * do(
+            "complex", zero, -sin
+        )
+        c22 = do("exp", do("complex", zero, -(gamma - zeta))) * do(
+            "complex", cos, zero
+        )
+        c33 = do("exp", do("complex", zero, -(2 * gamma + phi)))
 
-        e22_im = -(gamma - zeta)
-        e22_re = do("imag", e22_im)
-        e22 = do("exp", do("complex", e22_re, e22_im))
-
-        a21_re = do("sin", theta)
-        a21_im = do("imag", a21_re)
-        a21 = do("complex", a21_re, a21_im)
-
-        e21_im = -(gamma - chi)
-        e21_re = do("imag", e21_im)
-        e21 = do("exp", do("complex", e21_re, e21_im))
-
-        a12_re = do("sin", theta)
-        a12_im = do("imag", a12_re)
-        a12 = do("complex", a12_re, a12_im)
-
-        e12_im = -(gamma + chi)
-        e12_re = do("imag", e12_im)
-        e12 = do("exp", do("complex", e12_re, e12_im))
-
-        img_re = do("real", -1.0j)
-        img_im = do("imag", -1.0j)
-        img = do("complex", img_re, img_im)
-
-        c_im = -(2 * gamma + phi)
-        c_re = do("imag", c_im)
-        c = do("exp", do("complex", c_re, c_im))
-
-        # get a 'backend zero'
-        c0 = 0.0 * c
-        # get a 'backend one'
-        c1 = c0 + 1.0
+        # get a complex backend zero and backend one
+        zero = do("complex", zero, zero)
+        one = zero + 1.0
 
         data = (
-            (((c1, c0), (c0, c0)), ((c0, a11 * e11), (a21 * e21 * img, c0))),
-            (((c0, a12 * e12 * img), (a22 * e22, c0)), ((c0, c0), (c0, c))),
+            (((one, zero), (zero, zero)), ((zero, c11), (c12, zero))),
+            (((zero, c21), (c22, zero)), ((zero, zero), (zero, c33))),
         )
 
         return recursive_stack(data)
@@ -598,12 +572,15 @@ def rxx_param_gen(params):
     theta = params[0]
 
     with backend_like(theta):
-        # get a 'backend zero'
+        # get a real 'backend zero'
         zero = 0.0 * theta
 
         theta_2 = theta / 2
         ccos = do("complex", do("cos", theta_2), zero)
         csin = do("complex", zero, -do("sin", theta_2))
+
+        # get a complex backend zero
+        zero = do("complex", zero, zero)
 
         data = (
             (((ccos, zero), (zero, csin)), ((zero, ccos), (csin, zero))),
@@ -627,11 +604,15 @@ def ryy_param_gen(params):
     theta = params[0]
 
     with backend_like(theta):
-        # get a 'backend zero'
+        # get a real 'backend zero'
         zero = 0.0 * theta
+
         theta_2 = theta / 2
         ccos = do("complex", do("cos", theta_2), zero)
         csin = do("complex", zero, do("sin", theta_2))
+
+        # get a complex backend zero
+        zero = do("complex", zero, zero)
 
         data = (
             (((ccos, zero), (zero, csin)), ((zero, ccos), (-csin, zero))),
@@ -655,11 +636,15 @@ def rzz_param_gen(params):
     theta = params[0]
 
     with backend_like(theta):
-        # get a 'backend zero'
+        # get a real 'backend zero'
         zero = 0.0 * theta
+
         theta_2 = theta / 2
         c00 = c11 = do("complex", do("cos", theta_2), do("sin", -theta_2))
         c01 = c10 = do("complex", do("cos", theta_2), do("sin", theta_2))
+
+        # get a complex backend zero
+        zero = do("complex", zero, zero)
 
         data = (
             (((c00, zero), (zero, zero)), ((zero, c01), (zero, zero))),
@@ -1182,88 +1167,112 @@ class Circuit:
         warnings.warn(msg, DeprecationWarning)
         self.apply_gates(gates)
 
-    def h(self, i, gate_round=None):
-        self.apply_gate("H", i, gate_round=gate_round)
+    def h(self, i, gate_round=None, **kwargs):
+        self.apply_gate("H", i, gate_round=gate_round, **kwargs)
 
-    def x(self, i, gate_round=None):
-        self.apply_gate("X", i, gate_round=gate_round)
+    def x(self, i, gate_round=None, **kwargs):
+        self.apply_gate("X", i, gate_round=gate_round, **kwargs)
 
-    def y(self, i, gate_round=None):
-        self.apply_gate("Y", i, gate_round=gate_round)
+    def y(self, i, gate_round=None, **kwargs):
+        self.apply_gate("Y", i, gate_round=gate_round, **kwargs)
 
-    def z(self, i, gate_round=None):
-        self.apply_gate("Z", i, gate_round=gate_round)
+    def z(self, i, gate_round=None, **kwargs):
+        self.apply_gate("Z", i, gate_round=gate_round, **kwargs)
 
-    def s(self, i, gate_round=None):
-        self.apply_gate("S", i, gate_round=gate_round)
+    def s(self, i, gate_round=None, **kwargs):
+        self.apply_gate("S", i, gate_round=gate_round, **kwargs)
 
-    def sdg(self, i, gate_round=None):
-        self.apply_gate("SDG", i, gate_round=gate_round)
+    def sdg(self, i, gate_round=None, **kwargs):
+        self.apply_gate("SDG", i, gate_round=gate_round, **kwargs)
 
-    def t(self, i, gate_round=None):
-        self.apply_gate("T", i, gate_round=gate_round)
+    def t(self, i, gate_round=None, **kwargs):
+        self.apply_gate("T", i, gate_round=gate_round, **kwargs)
 
-    def tdg(self, i, gate_round=None):
-        self.apply_gate("TDG", i, gate_round=gate_round)
+    def tdg(self, i, gate_round=None, **kwargs):
+        self.apply_gate("TDG", i, gate_round=gate_round, **kwargs)
 
-    def x_1_2(self, i, gate_round=None):
-        self.apply_gate("X_1_2", i, gate_round=gate_round)
+    def x_1_2(self, i, gate_round=None, **kwargs):
+        self.apply_gate("X_1_2", i, gate_round=gate_round, **kwargs)
 
-    def y_1_2(self, i, gate_round=None):
-        self.apply_gate("Y_1_2", i, gate_round=gate_round)
+    def y_1_2(self, i, gate_round=None, **kwargs):
+        self.apply_gate("Y_1_2", i, gate_round=gate_round, **kwargs)
 
-    def z_1_2(self, i, gate_round=None):
-        self.apply_gate("Z_1_2", i, gate_round=gate_round)
+    def z_1_2(self, i, gate_round=None, **kwargs):
+        self.apply_gate("Z_1_2", i, gate_round=gate_round, **kwargs)
 
-    def w_1_2(self, i, gate_round=None):
-        self.apply_gate("W_1_2", i, gate_round=gate_round)
+    def w_1_2(self, i, gate_round=None, **kwargs):
+        self.apply_gate("W_1_2", i, gate_round=gate_round, **kwargs)
 
-    def hz_1_2(self, i, gate_round=None):
-        self.apply_gate("HZ_1_2", i, gate_round=gate_round)
+    def hz_1_2(self, i, gate_round=None, **kwargs):
+        self.apply_gate("HZ_1_2", i, gate_round=gate_round, **kwargs)
 
     # constant two qubit gates
 
-    def cnot(self, i, j, gate_round=None):
-        self.apply_gate("CNOT", i, j, gate_round=gate_round)
+    def cnot(self, i, j, gate_round=None, **kwargs):
+        self.apply_gate("CNOT", i, j, gate_round=gate_round, **kwargs)
 
-    def cx(self, i, j, gate_round=None):
-        self.apply_gate("CX", i, j, gate_round=gate_round)
+    def cx(self, i, j, gate_round=None, **kwargs):
+        self.apply_gate("CX", i, j, gate_round=gate_round, **kwargs)
 
-    def cy(self, i, j, gate_round=None):
-        self.apply_gate("CY", i, j, gate_round=gate_round)
+    def cy(self, i, j, gate_round=None, **kwargs):
+        self.apply_gate("CY", i, j, gate_round=gate_round, **kwargs)
 
-    def cz(self, i, j, gate_round=None):
-        self.apply_gate("CZ", i, j, gate_round=gate_round)
+    def cz(self, i, j, gate_round=None, **kwargs):
+        self.apply_gate("CZ", i, j, gate_round=gate_round, **kwargs)
 
-    def iswap(self, i, j, gate_round=None):
-        self.apply_gate("ISWAP", i, j)
+    def iswap(self, i, j, gate_round=None, **kwargs):
+        self.apply_gate("ISWAP", i, j, **kwargs)
 
     # special non-tensor gates
 
     def iden(self, i, gate_round=None):
         pass
 
-    def swap(self, i, j, gate_round=None):
-        self.apply_gate("SWAP", i, j)
+    def swap(self, i, j, gate_round=None, **kwargs):
+        self.apply_gate("SWAP", i, j, **kwargs)
 
     # parametrizable gates
 
-    def rx(self, theta, i, gate_round=None, parametrize=False):
+    def rx(self, theta, i, gate_round=None, parametrize=False, **kwargs):
         self.apply_gate(
-            "RX", theta, i, gate_round=gate_round, parametrize=parametrize
+            "RX",
+            theta,
+            i,
+            gate_round=gate_round,
+            parametrize=parametrize,
+            **kwargs,
         )
 
-    def ry(self, theta, i, gate_round=None, parametrize=False):
+    def ry(self, theta, i, gate_round=None, parametrize=False, **kwargs):
         self.apply_gate(
-            "RY", theta, i, gate_round=gate_round, parametrize=parametrize
+            "RY",
+            theta,
+            i,
+            gate_round=gate_round,
+            parametrize=parametrize,
+            **kwargs,
         )
 
-    def rz(self, theta, i, gate_round=None, parametrize=False):
+    def rz(self, theta, i, gate_round=None, parametrize=False, **kwargs):
         self.apply_gate(
-            "RZ", theta, i, gate_round=gate_round, parametrize=parametrize
+            "RZ",
+            theta,
+            i,
+            gate_round=gate_round,
+            parametrize=parametrize,
+            **kwargs,
         )
 
-    def u3(self, theta, phi, lamda, i, gate_round=None, parametrize=False):
+    def u3(
+        self,
+        theta,
+        phi,
+        lamda,
+        i,
+        gate_round=None,
+        parametrize=False,
+        **kwargs,
+    ):
         self.apply_gate(
             "U3",
             theta,
@@ -1272,19 +1281,41 @@ class Circuit:
             i,
             gate_round=gate_round,
             parametrize=parametrize,
+            **kwargs,
         )
 
-    def u2(self, phi, lamda, i, gate_round=None, parametrize=False):
+    def u2(self, phi, lamda, i, gate_round=None, parametrize=False, **kwargs):
         self.apply_gate(
-            "U2", phi, lamda, i, gate_round=gate_round, parametrize=parametrize
+            "U2",
+            phi,
+            lamda,
+            i,
+            gate_round=gate_round,
+            parametrize=parametrize,
+            **kwargs,
         )
 
-    def u1(self, lamda, i, gate_round=None, parametrize=False):
+    def u1(self, lamda, i, gate_round=None, parametrize=False, **kwargs):
         self.apply_gate(
-            "U1", lamda, i, gate_round=gate_round, parametrize=parametrize
+            "U1",
+            lamda,
+            i,
+            gate_round=gate_round,
+            parametrize=parametrize,
+            **kwargs,
         )
 
-    def cu3(self, theta, phi, lamda, i, j, gate_round=None, parametrize=False):
+    def cu3(
+        self,
+        theta,
+        phi,
+        lamda,
+        i,
+        j,
+        gate_round=None,
+        parametrize=False,
+        **kwargs,
+    ):
         self.apply_gate(
             "CU3",
             theta,
@@ -1294,9 +1325,12 @@ class Circuit:
             j,
             gate_round=gate_round,
             parametrize=parametrize,
+            **kwargs,
         )
 
-    def cu2(self, phi, lamda, i, j, gate_round=None, parametrize=False):
+    def cu2(
+        self, phi, lamda, i, j, gate_round=None, parametrize=False, **kwargs
+    ):
         self.apply_gate(
             "CU2",
             phi,
@@ -1305,14 +1339,23 @@ class Circuit:
             j,
             gate_round=gate_round,
             parametrize=parametrize,
+            **kwargs,
         )
 
-    def cu1(self, lamda, i, j, gate_round=None, parametrize=False):
+    def cu1(self, lamda, i, j, gate_round=None, parametrize=False, **kwargs):
         self.apply_gate(
-            "CU1", lamda, i, j, gate_round=gate_round, parametrize=parametrize
+            "CU1",
+            lamda,
+            i,
+            j,
+            gate_round=gate_round,
+            parametrize=parametrize,
+            **kwargs,
         )
 
-    def fsim(self, theta, phi, i, j, gate_round=None, parametrize=False):
+    def fsim(
+        self, theta, phi, i, j, gate_round=None, parametrize=False, **kwargs
+    ):
         self.apply_gate(
             "FSIM",
             theta,
@@ -1321,6 +1364,7 @@ class Circuit:
             j,
             gate_round=gate_round,
             parametrize=parametrize,
+            **kwargs,
         )
 
     def fsimg(
@@ -1334,6 +1378,7 @@ class Circuit:
         j,
         gate_round=None,
         parametrize=False,
+        **kwargs,
     ):
         self.apply_gate(
             "FSIMG",
@@ -1346,36 +1391,73 @@ class Circuit:
             j,
             gate_round=gate_round,
             parametrize=parametrize,
+            **kwargs,
         )
 
-    def rxx(self, theta, i, j, gate_round=None, parametrize=False):
+    def rxx(self, theta, i, j, gate_round=None, parametrize=False, **kwargs):
         self.apply_gate(
-            "RXX", theta, i, j, gate_round=gate_round, parametrize=parametrize
+            "RXX",
+            theta,
+            i,
+            j,
+            gate_round=gate_round,
+            parametrize=parametrize,
+            **kwargs,
         )
 
-    def ryy(self, theta, i, j, gate_round=None, parametrize=False):
+    def ryy(self, theta, i, j, gate_round=None, parametrize=False, **kwargs):
         self.apply_gate(
-            "RYY", theta, i, j, gate_round=gate_round, parametrize=parametrize
+            "RYY",
+            theta,
+            i,
+            j,
+            gate_round=gate_round,
+            parametrize=parametrize,
+            **kwargs,
         )
 
-    def rzz(self, theta, i, j, gate_round=None, parametrize=False):
+    def rzz(self, theta, i, j, gate_round=None, parametrize=False, **kwargs):
         self.apply_gate(
-            "RZZ", theta, i, j, gate_round=gate_round, parametrize=parametrize
+            "RZZ",
+            theta,
+            i,
+            j,
+            gate_round=gate_round,
+            parametrize=parametrize,
+            **kwargs,
         )
 
-    def crx(self, theta, i, j, gate_round=None, parametrize=False):
+    def crx(self, theta, i, j, gate_round=None, parametrize=False, **kwargs):
         self.apply_gate(
-            "CRX", theta, i, j, gate_round=gate_round, parametrize=parametrize
+            "CRX",
+            theta,
+            i,
+            j,
+            gate_round=gate_round,
+            parametrize=parametrize,
+            **kwargs,
         )
 
-    def cry(self, theta, i, j, gate_round=None, parametrize=False):
+    def cry(self, theta, i, j, gate_round=None, parametrize=False, **kwargs):
         self.apply_gate(
-            "CRY", theta, i, j, gate_round=gate_round, parametrize=parametrize
+            "CRY",
+            theta,
+            i,
+            j,
+            gate_round=gate_round,
+            parametrize=parametrize,
+            **kwargs,
         )
 
-    def crz(self, theta, i, j, gate_round=None, parametrize=False):
+    def crz(self, theta, i, j, gate_round=None, parametrize=False, **kwargs):
         self.apply_gate(
-            "CRZ", theta, i, j, gate_round=gate_round, parametrize=parametrize
+            "CRZ",
+            theta,
+            i,
+            j,
+            gate_round=gate_round,
+            parametrize=parametrize,
+            **kwargs,
         )
 
     def su4(
@@ -1399,6 +1481,7 @@ class Circuit:
         j,
         gate_round=None,
         parametrize=False,
+        **kwargs,
     ):
         self.apply_gate(
             "SU4",
@@ -1421,7 +1504,29 @@ class Circuit:
             j,
             gate_round=gate_round,
             parametrize=parametrize,
+            **kwargs,
         )
+
+    def ccx(self, i, j, k, gate_round=None, **kwargs):
+        self.apply_gate("CCX", i, j, k, gate_round=gate_round, **kwargs)
+
+    def ccnot(self, i, j, k, gate_round=None, **kwargs):
+        self.apply_gate("CCNOT", i, j, k, gate_round=gate_round, **kwargs)
+
+    def toffoli(self, i, j, k, gate_round=None, **kwargs):
+        self.apply_gate("TOFFOLI", i, j, k, gate_round=gate_round, **kwargs)
+
+    def ccy(self, i, j, k, gate_round=None, **kwargs):
+        self.apply_gate("CCY", i, j, k, gate_round=gate_round, **kwargs)
+
+    def ccz(self, i, j, k, gate_round=None, **kwargs):
+        self.apply_gate("CCZ", i, j, k, gate_round=gate_round, **kwargs)
+
+    def cswap(self, i, j, k, gate_round=None, **kwargs):
+        self.apply_gate("CSWAP", i, j, k, gate_round=gate_round, **kwargs)
+
+    def fredkin(self, i, j, k, gate_round=None, **kwargs):
+        self.apply_gate("FREDKIN", i, j, k, gate_round=gate_round, **kwargs)
 
     @property
     def psi(self):

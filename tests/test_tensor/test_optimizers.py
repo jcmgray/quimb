@@ -218,6 +218,48 @@ def test_optimize_ham_mbl_complex(ham_mbl_pbc_complex, backend, method):
 
 
 @pytest.mark.parametrize('backend', [jax_case, autograd_case,
+                                     pytorch_case, tensorflow_case])
+def test_every_parametrized_gate(backend):
+    circ = qtn.Circuit(2)
+    circ.rx(*qu.randn(1), 0, parametrize=True, tags=['OPTIMIZE'])
+    circ.ry(*qu.randn(1), 1, parametrize=True, tags=['OPTIMIZE'])
+    circ.rz(*qu.randn(1), 0, parametrize=True, tags=['OPTIMIZE'])
+    circ.rxx(*qu.randn(1), 0, 1, parametrize=True, tags=['OPTIMIZE'])
+    circ.ryy(*qu.randn(1), 0, 1, parametrize=True, tags=['OPTIMIZE'])
+    circ.rzz(*qu.randn(1), 1, 0, parametrize=True, tags=['OPTIMIZE'])
+    circ.crx(*qu.randn(1), 1, 0, parametrize=True, tags=['OPTIMIZE'])
+    circ.cry(*qu.randn(1), 0, 1, parametrize=True, tags=['OPTIMIZE'])
+    circ.crz(*qu.randn(1), 1, 0, parametrize=True, tags=['OPTIMIZE'])
+    circ.u1(*qu.randn(1), 1, parametrize=True, tags=['OPTIMIZE'])
+    circ.u2(*qu.randn(2), 0, parametrize=True, tags=['OPTIMIZE'])
+    circ.u3(*qu.randn(3), 1, parametrize=True, tags=['OPTIMIZE'])
+    circ.cu1(*qu.randn(1), 0, 1, parametrize=True, tags=['OPTIMIZE'])
+    circ.cu2(*qu.randn(2), 1, 0, parametrize=True, tags=['OPTIMIZE'])
+    circ.cu3(*qu.randn(3), 1, 0, parametrize=True, tags=['OPTIMIZE'])
+    circ.fsim(*qu.randn(2), 0, 1, parametrize=True, tags=['OPTIMIZE'])
+    circ.fsimg(*qu.randn(5), 1, 0, parametrize=True, tags=['OPTIMIZE'])
+    circ.su4(*qu.randn(15), 0, 1, parametrize=True, tags=['OPTIMIZE'])
+    psi = circ.psi
+
+    target = qtn.Dense1D(qu.rand_haar_state(4))
+
+    def loss(psi, target):
+        return -real(psi.H @ target)**2
+
+    f0 = loss(psi, target)
+    tnopt = qtn.TNOptimizer(
+        psi,
+        loss,
+        tags='OPTIMIZE',
+        loss_constants={'target': target},
+        autodiff_backend=backend,
+        device='cpu',
+    )
+    tnopt.optimize(1)
+    assert tnopt.loss < f0
+
+
+@pytest.mark.parametrize('backend', [jax_case, autograd_case,
                                      tensorflow_case])
 def test_parametrized_circuit(backend):
     H = qu.ham_mbl(4, dh=3.0, dh_dim=3)
