@@ -561,6 +561,31 @@ def fsimg_param_gen(params):
 register_param_gate("FSIMG", fsimg_param_gen, 2)
 
 
+def givens_param_gen(params):
+    theta = params[0]
+
+    with backend_like(theta):
+        # get a real backend zero
+        zero = 0.0 * theta
+
+        a = do("complex", do("cos", theta), zero)
+        b = do("complex", do("sin", theta), zero)
+
+        # get a complex backend zero and backend one
+        zero = do("complex", zero, zero)
+        one = zero + 1.0
+
+        data = (
+            (((one, zero), (zero, zero)), ((zero, a), (-b, zero))),
+            (((zero, b), (a, zero)), ((zero, zero), (zero, one))),
+        )
+
+        return recursive_stack(data)
+
+
+register_param_gate("GIVENS", givens_param_gen, num_qubits=2)
+
+
 def rxx_param_gen(params):
     r"""Parametrized two qubit XX-rotation.
 
@@ -1387,6 +1412,19 @@ class Circuit:
             chi,
             gamma,
             phi,
+            i,
+            j,
+            gate_round=gate_round,
+            parametrize=parametrize,
+            **kwargs,
+        )
+
+    def givens(
+        self, theta, i, j, gate_round=None, parametrize=False, **kwargs
+    ):
+        self.apply_gate(
+            "GIVENS",
+            theta,
             i,
             j,
             gate_round=gate_round,

@@ -3493,8 +3493,12 @@ def tensor_network_gate_inds(
                          f"indices {inds} with dimensions {dims}.")
 
     basic = (contract in _BASIC_GATE_CONTRACT)
-    if (not basic) and (ng == 1):
+    if (
         # if single ind, gate splitting methods are same as lazy
+        ((not basic) and (ng == 1)) or
+        # or for 3+ sites, treat auto as no splitting
+        ((contract == "auto-split-gate") and (ng > 2))
+    ):
         basic = True
         contract = False
 
