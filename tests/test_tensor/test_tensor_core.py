@@ -306,6 +306,7 @@ class TestBasicTensorOperations:
     def test_sum_reduce(self):
         t = rand_tensor((2, 3, 4), "abc")
         ta = t.sum_reduce("a")
+        assert ta.inds == ("b", "c")
         assert ta.ndim == 2
         assert_allclose(ta.data, t.data.sum(axis=0))
         tb = t.sum_reduce("b")
@@ -324,14 +325,6 @@ class TestBasicTensorOperations:
         assert tv.shape == (2, 4)
         assert tv.inds == ('a', 'c')
         assert_allclose(tv.data, np.einsum('abc,b->ac', t.data, g))
-
-    def test_sum_reduce(self):
-        t = rand_tensor((2, 3, 4), "abc")
-        x = np.einsum('abc->ac', t.data)
-        t.sum_reduce_("b")
-        assert t.shape == (2, 4)
-        assert t.inds == ('a', 'c')
-        assert_allclose(t.data, x)
 
     def test_ownership(self):
         a = rand_tensor((2, 2), ("a", "b"), tags={"X", "Y"})
@@ -635,6 +628,9 @@ class TestTensorFunctions:
         c = a.squeeze(include=["d"])
         assert c.shape == (1, 2, 3, 4)
         assert c.inds == ("a", "b", "c", "e")
+        d = a.squeeze(exclude=["d"])
+        assert d.shape == (2, 3, 1, 4)
+        assert d.inds == ("b", "c", "d", "e")
 
     def test_tensor_fuse_squeeze(self):
         a = rand_tensor((1, 2, 3), inds="abc")

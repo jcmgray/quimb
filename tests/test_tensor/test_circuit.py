@@ -448,6 +448,11 @@ class TestCircuit:
         assert exps[1] == pytest.approx(-1)
         assert exps[2] == pytest.approx(-1)
 
+    def test_local_expectation_len1(self):
+        circ = qtn.Circuit(1)
+        circ.apply_gate("H", 0, gate_round=0)
+        circ.local_expectation([qu.pauli("X")], (0,))
+
     def test_uni_to_dense(self):
         import cmath
         circ = qft_circ(3)

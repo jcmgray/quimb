@@ -2561,7 +2561,12 @@ class Tensor:
 
     to_qarray = functools.partialmethod(to_dense, to_qarray=True)
 
-    def squeeze(self, include=None, inplace=False):
+    def squeeze(
+        self,
+        include=None,
+        exclude=None,
+        inplace=False,
+    ):
         """Drop any singlet dimensions from this tensor.
 
         Parameters
@@ -2570,6 +2575,10 @@ class Tensor:
             Whether modify the original or return a new tensor.
         include : sequence of str, optional
             Only squeeze dimensions with indices in this list.
+        exclude : sequence of str, optional
+            Squeeze all dimensions except those with indices in this list.
+        inplace : bool, optional
+            Whether to perform the squeeze inplace or not.
 
         Returns
         -------
@@ -2581,26 +2590,35 @@ class Tensor:
         if 1 not in t.shape:
             return t
 
-        new_shape_new_inds = [
-            (d, i) for d, i in zip(self.shape, self.inds)
-            if (d > 1) or (include is not None and i not in include)
-        ]
+        new_inds = []
+        new_shape = []
+        any_squeezed =  False
+        for ix, d in zip(t.inds, t.shape):
+            keep = (
+                # not squeezable
+                (d > 1) or
+                # is not in the list of allowed indices
+                (include is not None and ix not in include) or
+                # is in the list of not allowed indices
+                (exclude is not None and ix in exclude)
+            )
+            if keep:
+                new_inds.append(ix)
+                new_shape.append(d)
+            else:
+                any_squeezed = True
 
-        if not new_shape_new_inds:
-            # squeezing everything -> can't unzip `new_shape_new_inds`
-            new_inds = ()
-            new_data = do("reshape", t.data, ())
-        else:
-            new_shape, new_inds = zip(*new_shape_new_inds)
-            new_data = do("reshape", t.data, new_shape)
+        if not any_squeezed:
+            return t
 
+        new_data = do("reshape", t.data, tuple(new_shape))
+
+        # we can propagate 'left' marked indices through squeezing
         new_left_inds = (
             None if self.left_inds is None else
             (i for i in self.left_inds if i in new_inds)
         )
-
-        if len(t.inds) != len(new_inds):
-            t.modify(data=new_data, inds=new_inds, left_inds=new_left_inds)
+        t.modify(data=new_data, inds=new_inds, left_inds=new_left_inds)
 
         return t
 
@@ -8383,13 +8401,39 @@ class TensorNetwork(object):
         """
         return self.inds_size(self._outer_inds)
 
-    def get_multibonds(self):
-        # XXX: handle hyper/output_inds
-        seen = collections.defaultdict(list)
-        for ix, tids in self.ind_map.items():
+    def get_multibonds(
+        self,
+        include=None,
+        exclude=None,
+    ):
+        """Get a dict of 'multibonds' in this tensor network, i.e. groups of
+        two or more indices that appear on exactly the same tensors and thus
+        could be fused, for example.
 
-            # outer bonds are never multi
-            if len(tids) > 1:
+        Parameters
+        ----------
+        include : sequence of str, optional
+            Only consider these indices, by default all indices.
+        exclude : sequence of str, optional
+            Ignore these indices, by default the outer indices of this TN.
+
+        Returns
+        -------
+        dict[tuple[str], tuple[int]]
+            A dict mapping the tuple of indices that could be fused to the
+            tuple of tensor ids they appear on.
+        """
+        if include is None:
+            include = self.ind_map
+        if exclude is None:
+            exclude = self._outer_inds
+
+        seen = collections.defaultdict(list)
+        for ix in include:
+            tids = self.ind_map[ix]
+
+            # outer bonds should always be kept separate
+            if ix not in exclude:
                 seen[tuple(sorted(tids))].append(ix)
 
         return {
@@ -8451,16 +8495,38 @@ class TensorNetwork(object):
             (ix in output_inds)
         )
 
-    def squeeze(self, fuse=False, inplace=False):
+    def squeeze(
+        self,
+        fuse=False,
+        include=None,
+        exclude=None,
+        inplace=False,
+    ):
         """Drop singlet bonds and dimensions from this tensor network. If
         ``fuse=True`` also fuse all multibonds between tensors.
+
+        Parameters
+        ----------
+        fuse : bool, optional
+            Whether to fuse multibonds between tensors as well as squeezing.
+        include : sequence of str, optional
+            Only squeeze these indices, by default all indices.
+        exclude : sequence of str, optional
+            Ignore these indices, by default the outer indices of this TN.
+        inplace : bool, optional
+            Whether to perform the squeeze and optional fuse inplace.
+
+        Returns
+        -------
+        TensorNetwork
         """
         tn = self if inplace else self.copy()
+
         for t in tn:
-            t.squeeze_()
+            t.squeeze_(include=include, exclude=exclude)
 
         if fuse:
-            tn.fuse_multibonds_()
+            tn.fuse_multibonds_(include=include, exclude=exclude)
 
         return tn
 
@@ -8651,14 +8717,28 @@ class TensorNetwork(object):
 
     balance_bonds_ = functools.partialmethod(balance_bonds, inplace=True)
 
-    def fuse_multibonds(self, gauges=None, inplace=False):
+    def fuse_multibonds(
+        self,
+        gauges=None,
+        include=None,
+        exclude=None,
+        inplace=False,
+    ):
         """Fuse any multi-bonds (more than one index shared by the same pair
         of tensors) into a single bond.
+
+        Parameters
+        ----------
+        gauges : None or dict[str, array_like], optional
+            If supplied, also fuse the gauges contained in this dict.
+        include : sequence of str, optional
+            Only consider these indices, by default all indices.
+        exclude : sequence of str, optional
+            Ignore these indices, by default the outer indices of this TN.
         """
         tn = self if inplace else self.copy()
 
-        multibonds = self.get_multibonds()
-
+        multibonds = self.get_multibonds(include=include, exclude=exclude)
         for inds, tids in multibonds.items():
             tensor_multifuse(tuple(tn._tids_get(*tids)), inds, gauges)
 
@@ -9773,7 +9853,6 @@ class TensorNetwork(object):
         split_simplify, loop_simplify
         """
         tn = self if inplace else self.copy()
-        tn.squeeze_()
 
         rank_simplify_opts = ensure_dict(rank_simplify_opts)
         loop_simplify_opts = ensure_dict(loop_simplify_opts)
@@ -9784,6 +9863,8 @@ class TensorNetwork(object):
         # all the methods
         if output_inds is None:
             output_inds = self.outer_inds()
+
+        tn.squeeze_(exclude=output_inds)
 
         if cache is None:
             cache = set()
