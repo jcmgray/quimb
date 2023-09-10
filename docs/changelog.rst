@@ -3,9 +3,36 @@ Changelog
 
 Release notes for ``quimb``.
 
+.. _whats-new.1.6.0:
+
+v1.6.0 (2023-09-10)
+-------------------
+
+**Breaking Changes**
+
+- Quantum circuit RZZ definition corrected (angle changed by -1/2 to match
+  qiskit).
+
+**Enhancements:**
+
+- add OpenQASM 2.0 parsing support: :meth:`Circuit.from_openqasm2_file`
+- :class:`Circuit`: add RXX, RYY, CRX, CRY, CRZ, toffoli, fredkin, givens gates
+- truncate TN pretty html reprentation to 100 tensors for performance
+- add :meth:`Tensor.sum_reduce` and :meth:`Tensor.vector_reduce`
+- :meth:`contract_compressed`, default to 'virtual-tree' gauge
+- add :func:`TN_rand_tree`
+- `experimental.operatorbuilder`: fix parallel and heisenberg builder
+- make parametrized gate generation even more robost (ensure matching types
+  so e.g. tensorflow can be used)
+
+**Bug fixes:**
+
+- fix gauge size check for some backends
+
+
 .. _whats-new.1.5.1:
 
-v1.5.1 (unreleased)
+v1.5.1 (2023-07-28)
 -------------------
 
 **Enhancements:**
@@ -13,10 +40,17 @@ v1.5.1 (unreleased)
 - add :func:`~quimb.tensor.tensor_builder.MPS_COPY`.
 - add 'density matrix' and 'zip-up' MPO-MPS algorithms.
 - add `drop_tags` option to :meth:`~quimb.tensor.tensor_contract`
+- :meth:`compress_all_simple`, allow cutoff.
+- add structure checking debug methods: :meth:`Tensor.check` and
+  :meth:`TensorNetwork.check`.
+- add several direction contraction utility functions: :func:`get_symbol`,
+  :func:`inds_to_eq` and :func:`array_contract`.
 
 **Bug fixes:**
 
 - :class:`Circuit`: use stack for more robust parametrized gate generation
+- fix for :meth:`gate_with_auto_swap` for `i > j`.
+- fix bug where calling `tn.norm()` would mangle indices.
 
 .. _whats-new.1.5.0:
 

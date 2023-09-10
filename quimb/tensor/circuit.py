@@ -210,10 +210,6 @@ def parse_openqasm2_str(contents):
                 match.group(3),
             )
 
-            if label.upper() not in ALL_GATES:
-                # not implemented by quimb yet
-                raise NotImplementedError(f"unsupported gate: {line}")
-
             if params:
                 params = tuple(
                     eval(param, {"pi": math.pi})
@@ -923,6 +919,10 @@ class Gate:
         parametrize=False,
     ):
         self._label = label.upper()
+
+        if self._label not in ALL_GATES:
+            raise ValueError(f"Unknown gate: {self._label}.")
+
         self._params = tuple(params)
         self._qubits = tuple(qubits)
         self._round = int(round) if round is not None else round
