@@ -1883,36 +1883,6 @@ class Circuit:
             self._sampled_conditionals.clear()
             self._marginal_storage_size = 0
 
-    def _get_sliced_contractor(
-        self,
-        info,
-        target_size,
-        arrays,
-        overhead_warn=2.0,
-    ):
-        key = ("sliced_contractor", info.eq, target_size)
-        if key in self._storage:
-            sc = self._storage[key]
-            sc.arrays = arrays
-            return sc
-
-        from cotengra import SliceFinder
-
-        sf = SliceFinder(info, target_size=target_size)
-        ix_sl, cost_sl = sf.search()
-
-        if cost_sl.overhead > overhead_warn:
-            import warnings
-
-            warnings.warn(
-                f"Slicing contraction to size {target_size} has introduced"
-                f" an FLOPs overhead of {cost_sl.overhead:.2f}x."
-            )
-
-        sc = sf.SlicedContractor(arrays)
-        self._storage[key] = sc
-        return sc
-
     def get_psi_simplified(
         self, seq="ADCRS", atol=1e-12, equalize_norms=False
     ):
@@ -2024,7 +1994,6 @@ class Circuit:
         simplify_equalize_norms=False,
         backend=None,
         dtype="complex128",
-        target_size=None,
         rehearse=False,
     ):
         r"""Get the amplitude coefficient of bitstring ``b``.
@@ -2055,11 +2024,6 @@ class Circuit:
             ``'cupy'`` or ``'jax'``. Passed to ``opt_einsum``.
         dtype : str, optional
             Data type to cast the TN to before contraction.
-        target_size : None or int, optional
-            The largest size of tensor to allow. If specified and any
-            contraction involves tensors bigger than this, 'slice' the
-            contraction into independent parts and sum them individually.
-            Requires ``cotengra`` currently.
         rehearse : bool or "tn", optional
             If ``True``, generate and cache the simplified tensor network and
             contraction path but don't actually perform the contraction.
@@ -2097,22 +2061,16 @@ class Circuit:
 
         # get the contraction path info
         info = psi_b.contract(
-            all, output_inds=(), optimize=optimize, get="path-info"
+            ..., output_inds=(), optimize=optimize, get="path-info"
         )
 
         if rehearse:
             return rehearsal_dict(psi_b, info)
 
-        if target_size is not None:
-            # perform the 'sliced' contraction restricted to ``target_size``
-            arrays = tuple(t.data for t in psi_b)
-            sc = self._get_sliced_contractor(info, target_size, arrays)
-            c_b = sc.contract_all(backend=backend)
-        else:
-            # perform the full contraction with the path found
-            c_b = psi_b.contract(
-                all, output_inds=(), optimize=info.path, backend=backend
-            )
+        # perform the full contraction with the path found
+        c_b = psi_b.contract(
+            ..., output_inds=(), optimize=info.path, backend=backend
+        )
 
         return c_b
 
@@ -2185,7 +2143,6 @@ class Circuit:
         simplify_equalize_norms=False,
         backend=None,
         dtype="complex128",
-        target_size=None,
         rehearse=False,
     ):
         r"""Perform the partial trace on the circuit wavefunction, retaining
@@ -2224,11 +2181,6 @@ class Circuit:
             ``'cupy'`` or ``'jax'``. Passed to ``opt_einsum``.
         dtype : str, optional
             Data type to cast the TN to before contraction.
-        target_size : None or int, optional
-            The largest size of tensor to allow. If specified and any
-            contraction involves tensors bigger than this, 'slice' the
-            contraction into independent parts and sum them individually.
-            Requires ``cotengra`` currently.
         rehearse : bool or "tn", optional
             If ``True``, generate and cache the simplified tensor network and
             contraction path but don't actually perform the contraction.
@@ -2259,25 +2211,19 @@ class Circuit:
             return rho
 
         info = rho.contract(
-            all, output_inds=output_inds, optimize=optimize, get="path-info"
+            ..., output_inds=output_inds, optimize=optimize, get="path-info"
         )
 
         if rehearse:
             return rehearsal_dict(rho, info)
 
-        if target_size is not None:
-            # perform the 'sliced' contraction restricted to ``target_size``
-            arrays = tuple(t.data for t in rho)
-            sc = self._get_sliced_contractor(info, target_size, arrays)
-            rho_dense = sc.contract_all(backend=backend)
-        else:
-            # perform the full contraction with the path found
-            rho_dense = rho.contract(
-                all,
-                output_inds=output_inds,
-                optimize=info.path,
-                backend=backend,
-            ).data
+        # perform the full contraction with the path found
+        rho_dense = rho.contract(
+            ...,
+            output_inds=output_inds,
+            optimize=info.path,
+            backend=backend,
+        ).data
 
         return ops.reshape(rho_dense, [2 ** len(keep), 2 ** len(keep)])
 
@@ -2296,7 +2242,6 @@ class Circuit:
         simplify_equalize_norms=False,
         backend=None,
         dtype="complex128",
-        target_size=None,
         rehearse=False,
     ):
         r"""Compute the a single expectation value of operator ``G``, acting on
@@ -2313,7 +2258,7 @@ class Circuit:
 
         Parameters
         ----------
-        G : array or tuple[array] or list[array]
+        G : array or sequence[array]
             The raw operator(s) to find the expectation of.
         where : int or sequence of int
             Which qubits the operator acts on.
@@ -2335,11 +2280,6 @@ class Circuit:
             ``'cupy'`` or ``'jax'``. Passed to ``opt_einsum``.
         dtype : str, optional
             Data type to cast the TN to before contraction.
-        target_size : None or int, optional
-            The largest size of tensor to allow. If specified and any
-            contraction involves tensors bigger than this, 'slice' the
-            contraction into independent parts and sum them individually.
-            Requires ``cotengra`` currently.
         gate_opts : None or dict_like
             Options to use when applying ``G`` to the wavefunction.
         rehearse : bool or "tn", optional
@@ -2387,24 +2327,18 @@ class Circuit:
             return rhoG
 
         info = rhoG.contract(
-            all, output_inds=output_inds, optimize=optimize, get="path-info"
+            ..., output_inds=output_inds, optimize=optimize, get="path-info"
         )
 
         if rehearse:
             return rehearsal_dict(rhoG, info)
 
-        if target_size is not None:
-            # perform the 'sliced' contraction restricted to ``target_size``
-            arrays = tuple(t.data for t in rhoG)
-            sc = self._get_sliced_contractor(info, target_size, arrays)
-            g_ex = sc.contract_all(backend=backend)
-        else:
-            g_ex = rhoG.contract(
-                all,
-                output_inds=output_inds,
-                optimize=info.path,
-                backend=backend,
-            )
+        g_ex = rhoG.contract(
+            ...,
+            output_inds=output_inds,
+            optimize=info.path,
+            backend=backend,
+        )
 
         if isinstance(g_ex, Tensor):
             g_ex = tuple(g_ex.data)
@@ -2428,7 +2362,6 @@ class Circuit:
         simplify_sequence="ADCRS",
         simplify_atol=1e-6,
         simplify_equalize_norms=True,
-        target_size=None,
         rehearse=False,
     ):
         """Compute the probability tensor of qubits in ``where``, given
@@ -2462,11 +2395,6 @@ class Circuit:
         rehearse : bool or "tn", optional
             Whether to perform the marginal contraction or just return the
             associated TN and contraction path information.
-        target_size : None or int, optional
-            The largest size of tensor to allow. If specified and any
-            contraction involves tensors bigger than this, 'slice' the
-            contraction into independent parts and sum them individually.
-            Requires ``cotengra`` currently.
         """
         self._maybe_init_storage()
 
@@ -2528,27 +2456,21 @@ class Circuit:
         #     contraction path cache if the structure generated *is* the same
         #     so still pretty efficient to just overwrite
         info = nm_lc.contract(
-            all, output_inds=output_inds, optimize=optimize, get="path-info"
+            ..., output_inds=output_inds, optimize=optimize, get="path-info"
         )
 
         if rehearse:
             return rehearsal_dict(nm_lc, info)
 
-        if target_size is not None:
-            # perform the 'sliced' contraction restricted to ``target_size``
-            arrays = tuple(t.data for t in nm_lc)
-            sc = self._get_sliced_contractor(info, target_size, arrays)
-            p_marginal = abs(sc.contract_all(backend=backend))
-        else:
-            # perform the full contraction with the path found
-            p_marginal = abs(
-                nm_lc.contract(
-                    all,
-                    output_inds=output_inds,
-                    optimize=info.path,
-                    backend=backend,
-                ).data
-            )
+        # perform the full contraction with the path found
+        p_marginal = abs(
+            nm_lc.contract(
+                ...,
+                output_inds=output_inds,
+                optimize=info.path,
+                backend=backend,
+            ).data
+        )
 
         if final_marginal:
             # we only did half the ket contraction so need to square
@@ -2660,7 +2582,6 @@ class Circuit:
         simplify_sequence="ADCRS",
         simplify_atol=1e-6,
         simplify_equalize_norms=False,
-        target_size=None,
     ):
         r"""Sample the circuit given by ``gates``, ``C`` times, using lightcone
         cancelling and caching marginal distribution results. This is a
@@ -2746,11 +2667,6 @@ class Circuit:
             :meth:`~quimb.tensor.tensor_core.TensorNetwork.full_simplify`.
         simplify_equalize_norms : bool, optional
             Actively renormalize tensor norms during simplification.
-        target_size : None or int, optional
-            The largest size of tensor to allow. If specified and any
-            contraction involves tensors bigger than this, 'slice' the
-            contraction into independent parts and sum them individually.
-            Requires ``cotengra`` currently.
 
         Yields
         ------
@@ -2789,7 +2705,6 @@ class Circuit:
                         simplify_sequence=simplify_sequence,
                         simplify_atol=simplify_atol,
                         simplify_equalize_norms=simplify_equalize_norms,
-                        target_size=target_size,
                     )
                     p = do("to_numpy", p).astype("float64")
                     p /= p.sum()
@@ -2912,7 +2827,6 @@ class Circuit:
         simplify_sequence="ADCRS",
         simplify_atol=1e-6,
         simplify_equalize_norms=False,
-        target_size=None,
     ):
         r"""Sample from this circuit, *assuming* it to be chaotic. Which is to
         say, only compute and sample correctly from the final marginal,
@@ -2968,11 +2882,6 @@ class Circuit:
             :meth:`~quimb.tensor.tensor_core.TensorNetwork.full_simplify`.
         simplify_equalize_norms : bool, optional
             Actively renormalize tensor norms during simplification.
-        target_size : None or int, optional
-            The largest size of tensor to allow. If specified and any
-            contraction involves tensors bigger than this, 'slice' the
-            contraction into independent parts and sum them individually.
-            Requires ``cotengra`` currently.
 
         Yields
         ------
@@ -3012,7 +2921,6 @@ class Circuit:
                     simplify_sequence=simplify_sequence,
                     simplify_atol=simplify_atol,
                     simplify_equalize_norms=simplify_equalize_norms,
-                    target_size=target_size,
                 )
                 p = do("to_numpy", p).astype("float64")
                 p /= p.sum()
@@ -3125,7 +3033,6 @@ class Circuit:
         simplify_equalize_norms=False,
         backend=None,
         dtype=None,
-        target_size=None,
         rehearse=False,
     ):
         """Generate the dense representation of the final wavefunction.
@@ -3155,11 +3062,6 @@ class Circuit:
             ``'cupy'`` or ``'jax'``. Passed to ``opt_einsum``.
         dtype : str, optional
             Data type to cast the TN to before contraction.
-        target_size : None or int, optional
-            The largest size of tensor to allow. If specified and any
-            contraction involves tensors bigger than this, 'slice' the
-            contraction into independent parts and sum them individually.
-            Requires ``cotengra`` currently.
         rehearse : bool, optional
             If ``True``, generate and cache the simplified tensor network and
             contraction path but don't actually perform the contraction.
@@ -3190,25 +3092,19 @@ class Circuit:
 
         # get the contraction path info
         info = psi.contract(
-            all, output_inds=output_inds, optimize=optimize, get="path-info"
+            ..., output_inds=output_inds, optimize=optimize, get="path-info"
         )
 
         if rehearse:
             return rehearsal_dict(psi, info)
 
-        if target_size is not None:
-            # perform the 'sliced' contraction restricted to ``target_size``
-            arrays = tuple(t.data for t in psi)
-            sc = self._get_sliced_contractor(info, target_size, arrays)
-            psi_tensor = sc.contract_all(backend=backend)
-        else:
-            # perform the full contraction with the path found
-            psi_tensor = psi.contract(
-                all,
-                output_inds=output_inds,
-                optimize=info.path,
-                backend=backend,
-            ).data
+        # perform the full contraction with the path found
+        psi_tensor = psi.contract(
+            ...,
+            output_inds=output_inds,
+            optimize=info.path,
+            backend=backend,
+        ).data
 
         k = ops.reshape(psi_tensor, (-1, 1))
 
@@ -3488,7 +3384,7 @@ class CircuitDense(Circuit):
 
     @property
     def psi(self):
-        t = self._psi ^ all
+        t = self._psi ^ ...
         psi = t.as_network()
         psi.view_as_(Dense1D, like=self._psi)
         return psi
