@@ -166,7 +166,7 @@ def _trim_and_renorm_svd_result(
 def svd_truncated(
     x,
     cutoff=-1.0,
-    cutoff_mode=3,
+    cutoff_mode=4,
     max_bond=-1,
     absorb=0,
     renorm=0,
@@ -301,7 +301,7 @@ def _trim_and_renorm_svd_result_numba(
 @svd_truncated.register("numpy")
 @njit  # pragma: no cover
 def svd_truncated_numba(
-    x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0, renorm=0
+    x, cutoff=-1.0, cutoff_mode=4, max_bond=-1, absorb=0, renorm=0
 ):
     """Accelerated version of ``svd_truncated`` for numpy arrays."""
     U, s, VH = np.linalg.svd(x, full_matrices=False)
@@ -313,7 +313,7 @@ def svd_truncated_numba(
 @svd_truncated.register("autoray.lazy")
 @lazy.core.lazy_cache("svd_truncated")
 def svd_truncated_lazy(
-    x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0, renorm=0,
+    x, cutoff=-1.0, cutoff_mode=4, max_bond=-1, absorb=0, renorm=0,
 ):
     if cutoff != 0.0:
         raise ValueError("Can't handle dynamic cutoffs in lazy mode.")
@@ -343,7 +343,7 @@ def svd_truncated_lazy(
 def lu_truncated(
     x,
     cutoff=-1.0,
-    cutoff_mode=3,
+    cutoff_mode=4,
     max_bond=-1,
     absorb=0,
     renorm=0,
@@ -394,7 +394,7 @@ def svdvals(x):
 
 @njit  # pragma: no cover
 def _svd_via_eig_truncated_numba(
-    x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0, renorm=0
+    x, cutoff=-1.0, cutoff_mode=4, max_bond=-1, absorb=0, renorm=0
 ):
     """SVD-split via eigen-decomposition."""
     if x.shape[0] > x.shape[1]:
@@ -423,7 +423,7 @@ def _svd_via_eig_truncated_numba(
 
 
 def svd_via_eig_truncated(
-    x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0, renorm=0
+    x, cutoff=-1.0, cutoff_mode=4, max_bond=-1, absorb=0, renorm=0
 ):
     if isinstance(x, np.ndarray):
         return _svd_via_eig_truncated_numba(
@@ -468,7 +468,7 @@ def svdvals_eig(x):  # pragma: no cover
 
 
 @njit  # pragma: no cover
-def eigh(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0, renorm=0):
+def eigh(x, cutoff=-1.0, cutoff_mode=4, max_bond=-1, absorb=0, renorm=0):
     """SVD-decomposition, using hermitian eigen-decomposition, only works if
     ``x`` is hermitian.
     """
@@ -497,7 +497,7 @@ def _choose_k(x, cutoff, max_bond):
     return "full" if k > d // 2 else k
 
 
-def svds(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0, renorm=0):
+def svds(x, cutoff=0.0, cutoff_mode=4, max_bond=-1, absorb=0, renorm=0):
     """SVD-decomposition using iterative methods. Allows the
     computation of only a certain number of singular values, e.g. max_bond,
     from the get-go, and is thus more efficient. Can also supply
@@ -516,7 +516,7 @@ def svds(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0, renorm=0):
     )
 
 
-def isvd(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0, renorm=0):
+def isvd(x, cutoff=0.0, cutoff_mode=4, max_bond=-1, absorb=0, renorm=0):
     """SVD-decomposition using interpolative matrix random methods. Allows the
     computation of only a certain number of singular values, e.g. max_bond,
     from the get-go, and is thus more efficient. Can also supply
@@ -536,7 +536,7 @@ def isvd(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0, renorm=0):
     )
 
 
-def _rsvd_numpy(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0, renorm=0):
+def _rsvd_numpy(x, cutoff=0.0, cutoff_mode=4, max_bond=-1, absorb=0, renorm=0):
     if max_bond > 0:
         if cutoff > 0.0:
             # adapt and block
@@ -551,7 +551,7 @@ def _rsvd_numpy(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0, renorm=0):
     )
 
 
-def rsvd(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0, renorm=0):
+def rsvd(x, cutoff=0.0, cutoff_mode=4, max_bond=-1, absorb=0, renorm=0):
     """SVD-decomposition using randomized methods (due to Halko). Allows the
     computation of only a certain number of singular values, e.g. max_bond,
     from the get-go, and is thus more efficient. Can also supply
@@ -566,7 +566,7 @@ def rsvd(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0, renorm=0):
     )
 
 
-def eigsh(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0, renorm=0):
+def eigsh(x, cutoff=0.0, cutoff_mode=4, max_bond=-1, absorb=0, renorm=0):
     """SVD-decomposition using iterative hermitian eigen decomp, thus assuming
     that ``x`` is hermitian. Allows the computation of only a certain number of
     singular values, e.g. max_bond, from the get-go, and is thus more
@@ -644,7 +644,7 @@ def lq_stabilized_numba(x):
 
 
 @njit  # pragma: no cover
-def _cholesky_numba(x, cutoff=-1, cutoff_mode=3, max_bond=-1, absorb=0):
+def _cholesky_numba(x, cutoff=-1, cutoff_mode=4, max_bond=-1, absorb=0):
     """SVD-decomposition, using cholesky decomposition, only works if
     ``x`` is positive definite.
     """
@@ -652,7 +652,7 @@ def _cholesky_numba(x, cutoff=-1, cutoff_mode=3, max_bond=-1, absorb=0):
     return L, None, dag_numba(L)
 
 
-def cholesky(x, cutoff=-1, cutoff_mode=3, max_bond=-1, absorb=0):
+def cholesky(x, cutoff=-1, cutoff_mode=4, max_bond=-1, absorb=0):
     try:
         return _cholesky_numba(x, cutoff, cutoff_mode, max_bond, absorb)
     except np.linalg.LinAlgError as e:
@@ -1158,6 +1158,9 @@ def compute_oblique_projectors(
     """
     if absorb != "both":
         raise NotImplementedError("only absorb='both' supported")
+
+    if max_bond is None:
+        max_bond = -1
 
     Ut, st, VHt = svd_truncated(
         Rl @ Rr,

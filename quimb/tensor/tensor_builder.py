@@ -4234,7 +4234,7 @@ def MPO_ham_bilinear_biquadratic(
     H = _ham_bilinear_biquadratic(theta, S=S, cyclic=cyclic)
     H_mpo = H.build_mpo(L, **mpo_opts)
     if compress is True:
-        H_mpo.compress(cutoff=1e-12, cutoff_mode="rel" if cyclic else "sum2")
+        H_mpo.compress(cutoff=1e-12, cutoff_mode="rel" if cyclic else "rsum2")
     return H_mpo
 
 
