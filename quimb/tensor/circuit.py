@@ -14,7 +14,14 @@ from autoray import do, reshape, backend_like
 
 import quimb as qu
 from ..utils import progbar as _progbar
-from ..utils import partitionby, concatv, partition_all, ensure_dict, LRU
+from ..utils import (
+    concatv,
+    deprecated,
+    ensure_dict,
+    LRU,
+    partition_all,
+    partitionby,
+)
 from .tensor_core import (
     get_tags,
     oset_union,
@@ -66,13 +73,15 @@ def _put_registers_last(x):
     return tuple(concatv(*parts[:-2], parts[-1], parts[-2]))
 
 
-def parse_qasm(contents):
-    """Parse qasm from a string.
+def parse_qsim_str(contents):
+    """Parse a 'qsim' input format string into circuit information.
+
+    The format is described here: https://quantumai.google/qsim/input_format.
 
     Parameters
     ----------
     contents : str
-        The full string of the qasm file.
+        The full string of the qsim file.
 
     Returns
     -------
@@ -82,7 +91,7 @@ def parse_qasm(contents):
         - circuit_info['n']: the number of qubits
         - circuit_info['n_gates']: the number of gates in total
         - circuit_info['gates']: list[list[str]], list of gates, each of which
-          is a list of strings read from a line of the qasm file.
+          is a list of strings read from a line of the qsim file.
     """
 
     lines = contents.split("\n")
@@ -107,16 +116,140 @@ def parse_qasm(contents):
     }
 
 
-def parse_qasm_file(fname, **kwargs):
-    """Parse a qasm file."""
-    return parse_qasm(open(fname).read(), **kwargs)
+def parse_qsim_file(fname, **kwargs):
+    """Parse a qsim file."""
+    with open(fname) as f:
+        return parse_qsim_str(f.read(), **kwargs)
 
 
-def parse_qasm_url(url, **kwargs):
-    """Parse a qasm url."""
+def parse_qsim_url(url, **kwargs):
+    """Parse a qsim url."""
     from urllib import request
 
-    return parse_qasm(request.urlopen(url).read().decode(), **kwargs)
+    return parse_qsim_str(request.urlopen(url).read().decode(), **kwargs)
+
+
+def parse_openqasm2_str(contents):
+    """Parse the string contents of an OpenQASM 2.0 file. This parser only
+    supports basic gate definitions, and is not guaranteed to check the full
+    openqasm grammar.
+    """
+    # define regular expressions for parsing
+    rgxs = {
+        "header": re.compile(r"(OPENQASM\s+2.0;)|(include\s+\"qelib1.inc\";)"),
+        "comment": re.compile(r"^//"),
+        "comment_start": re.compile(r"/\*"),
+        "comment_end": re.compile(r"\*/"),
+        "qreg": re.compile(r"qreg\s+(\w+)\s*\[(\d+)\];"),
+        "gate": re.compile(
+            r"(\w+)\s*(\(.*\))?\s*(\w+\[\d+\]\s*(,\s*\w+\[\d+\])*);"
+        ),
+        "error": re.compile(r"^(gate|if)"),
+        "ignore": re.compile(r"^(creg|measure|barrier)"),
+    }
+
+    # initialise number of qubits to zero and an empty list for gates
+    sitemap = {}
+    gates = []
+    # only want to warn once about each ignored instruction
+    warned = {}
+
+    # Process each line
+    in_comment = False
+    for line in contents.split("\n"):
+        line = line.strip()
+
+        if not line:
+            # blank line
+            continue
+        if rgxs["comment"].match(line):
+            # single comment
+            continue
+        if rgxs["comment_start"].match(line):
+            # start of multiline comments
+            in_comment = True
+        if in_comment:
+            # in multiline comment, check if its ending
+            in_comment = not bool(rgxs["comment_end"].match(line))
+            continue
+        if rgxs["header"].match(line):
+            # ignore standard header lines
+            continue
+
+        match = rgxs["qreg"].match(line)
+        if match:
+            # quantum register -> extend sites
+            name, nq = match.groups()
+            for i in range(int(nq)):
+                sitemap[f"{name}[{i}]"] = len(sitemap)
+            continue
+
+        match = rgxs["ignore"].match(line)
+        if match:
+            # certain operations we can just ignore and warn about
+            (op,) = match.groups()
+            if not warned.get(op, False):
+                warnings.warn(
+                    f"Unsupported operation ignored: {op}", SyntaxWarning
+                )
+                warned[op] = True
+            continue
+
+        if rgxs["error"].match(line):
+            # raise hard error for custom tate defns etc
+            raise NotImplementedError(
+                f"Custom gate definitions are not supported: {line}"
+            )
+
+        match = rgxs["gate"].search(line)
+        if match:
+            # apply a gate
+            label, params, qubits = (
+                match.group(1),
+                match.group(2),
+                match.group(3),
+            )
+
+            if label.upper() not in ALL_GATES:
+                # not implemented by quimb yet
+                raise NotImplementedError(f"unsupported gate: {line}")
+
+            if params:
+                params = tuple(
+                    eval(param, {"pi": math.pi})
+                    for param in params.strip("()").split(",")
+                )
+            else:
+                params = ()
+
+            qubits = tuple(
+                sitemap[qubit.strip()] for qubit in qubits.split(",")
+            )
+            gates.append(Gate(label, params, qubits))
+            continue
+
+        # if not covered by previous checks, simply raise
+        raise SyntaxError(f"{line}")
+
+    return {
+        "n": len(sitemap),
+        "sitemap": sitemap,
+        "gates": gates,
+        "n_gates": len(gates),
+    }
+
+
+def parse_openqasm2_file(fname, **kwargs):
+    """Parse an OpenQASM 2.0 file."""
+    with open(fname) as f:
+        return parse_openqasm2_str(f.read(), **kwargs)
+
+
+def parse_openqasm2_url(url, **kwargs):
+    """Parse an OpenQASM 2.0 url."""
+    from urllib import request
+
+    return parse_openqasm2_str(request.urlopen(url).read().decode(), **kwargs)
 
 
 # -------------------------- core gate functions ---------------------------- #
@@ -1047,26 +1180,60 @@ class Circuit:
         self._sampled_conditionals = dict()
 
     @classmethod
-    def from_qasm(cls, qasm, **quantum_circuit_opts):
-        """Generate a ``Circuit`` instance from a qasm string."""
-        info = parse_qasm(qasm)
-        qc = cls(info["n"], **quantum_circuit_opts)
+    def from_qsim_str(cls, contents, **circuit_opts):
+        """Generate a ``Circuit`` instance from a 'qsim' string."""
+        info = parse_qsim_str(contents)
+        qc = cls(info["n"], **circuit_opts)
         qc.apply_gates(info["gates"])
         return qc
 
     @classmethod
-    def from_qasm_file(cls, fname, **quantum_circuit_opts):
-        """Generate a ``Circuit`` instance from a qasm file."""
-        info = parse_qasm_file(fname)
-        qc = cls(info["n"], **quantum_circuit_opts)
+    def from_qsim_file(cls, fname, **circuit_opts):
+        """Generate a ``Circuit`` instance from a 'qsim' file.
+
+        The qsim file format is described here:
+        https://quantumai.google/qsim/input_format.
+        """
+        info = parse_qsim_file(fname)
+        qc = cls(info["n"], **circuit_opts)
         qc.apply_gates(info["gates"])
         return qc
 
     @classmethod
-    def from_qasm_url(cls, url, **quantum_circuit_opts):
-        """Generate a ``Circuit`` instance from a qasm url."""
-        info = parse_qasm_url(url)
-        qc = cls(info["n"], **quantum_circuit_opts)
+    def from_qsim_url(cls, url, **circuit_opts):
+        """Generate a ``Circuit`` instance from a 'qsim' url."""
+        info = parse_qsim_url(url)
+        qc = cls(info["n"], **circuit_opts)
+        qc.apply_gates(info["gates"])
+        return qc
+
+    from_qasm = deprecated(from_qsim_str, "from_qasm", "from_qsim_str")
+    from_qasm_file = deprecated(
+        from_qsim_file, "from_qasm_file", "from_qsim_file"
+    )
+    from_qasm_url = deprecated(from_qsim_url, "from_qasm_url", "from_qsim_url")
+
+    @classmethod
+    def from_openqasm2_str(cls, contents, **circuit_opts):
+        """Generate a ``Circuit`` instance from an OpenQASM 2.0 string."""
+        info = parse_openqasm2_str(contents)
+        qc = cls(info["n"], **circuit_opts)
+        qc.apply_gates(info["gates"])
+        return qc
+
+    @classmethod
+    def from_openqasm2_file(cls, fname, **circuit_opts):
+        """Generate a ``Circuit`` instance from an OpenQASM 2.0 file."""
+        info = parse_openqasm2_file(fname)
+        qc = cls(info["n"], **circuit_opts)
+        qc.apply_gates(info["gates"])
+        return qc
+
+    @classmethod
+    def from_openqasm2_url(cls, url, **circuit_opts):
+        """Generate a ``Circuit`` instance from an OpenQASM 2.0 url."""
+        info = parse_openqasm2_url(url)
+        qc = cls(info["n"], **circuit_opts)
         qc.apply_gates(info["gates"])
         return qc
 
@@ -1184,13 +1351,6 @@ class Circuit:
                 self.apply_gate(*gate, **gate_opts)
 
         self._psi.squeeze_()
-
-    def apply_circuit(self, gates):  # pragma: no cover
-        import warnings
-
-        msg = "``apply_circuit`` is deprecated in favour of ``apply_gates``."
-        warnings.warn(msg, DeprecationWarning)
-        self.apply_gates(gates)
 
     def h(self, i, gate_round=None, **kwargs):
         self.apply_gate("H", i, gate_round=gate_round, **kwargs)

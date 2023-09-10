@@ -15,7 +15,7 @@ def rand_reg_graph(reg, n, seed=None):
     return G
 
 
-def graph_to_qasm(G, gamma0=-0.743043, beta0=0.754082):
+def graph_to_qsim(G, gamma0=-0.743043, beta0=0.754082):
     n = G.number_of_nodes()
 
     # add all the gates
@@ -95,6 +95,36 @@ def swappy_circ(n, depth):
     return circ
 
 
+def example_openqasm2_qft():
+    return """
+    // quantum Fourier transform
+
+    OPENQASM 2.0;
+    include "qelib1.inc";
+
+    qreg q[4];
+    creg c[4];
+    x q[0];
+    x q[2];
+    barrier q;
+    h q[0];
+    cu1(pi/2) q[1],q[0];
+    h q[1];
+    cu1(pi/4) q[2],q[0];
+    cu1(pi/2) q[2],q[1];
+    /*
+    This is a multi line comment.
+    */
+    h q[2];
+    cu1(pi/8) q[3],q[0];
+    cu1(pi/4) q[3],q[1];
+    cu1(pi/2) q[3],q[2];
+    h q[3];
+
+    measure q -> c;
+    """
+
+
 class TestCircuit:
 
     def test_prepare_GHZ(self):
@@ -116,17 +146,21 @@ class TestCircuit:
         assert '111' in counts
         assert counts['000'] + counts['111'] == 1024
 
-    def test_from_qasm(self):
+    def test_from_qsim(self):
         G = rand_reg_graph(reg=3, n=18, seed=42)
-        qasm = graph_to_qasm(G)
-        qc = qtn.Circuit.from_qasm(qasm)
+        qsim = graph_to_qsim(G)
+        qc = qtn.Circuit.from_qsim_str(qsim)
         assert (qc.psi.H & qc.psi) ^ all == pytest.approx(1.0)
 
-    def test_from_qasm_mps_swapsplit(self):
+    def test_from_qsim_mps_swapsplit(self):
         G = rand_reg_graph(reg=3, n=18, seed=42)
-        qasm = graph_to_qasm(G)
-        qc = qtn.CircuitMPS.from_qasm(qasm)
+        qsim = graph_to_qsim(G)
+        qc = qtn.CircuitMPS.from_qsim_str(qsim)
         assert len(qc.psi.tensors) == 18
+        assert (qc.psi.H & qc.psi) ^ all == pytest.approx(1.0)
+
+    def test_from_openqasm2(self):
+        qc = qtn.Circuit.from_openqasm2_str(example_openqasm2_qft())
         assert (qc.psi.H & qc.psi) ^ all == pytest.approx(1.0)
 
     @pytest.mark.parametrize(
