@@ -246,6 +246,9 @@ def draw_tn(
 
     if edge_color is None:
         edge_color = mpl.colors.to_rgba(default_draw_color, edge_alpha)
+    elif edge_color is True:
+        # hash edge to get color
+        pass    
     else:
         edge_color = mpl.colors.to_rgba(edge_color, edge_alpha)
 
@@ -283,7 +286,9 @@ def draw_tn(
         # general information for this index
         edge_attrs = {
             "color": (
-                highlight_inds_color if ix in highlight_inds else edge_color
+                highlight_inds_color if ix in highlight_inds
+                else to_rgba(hash_to_color(ix)) if edge_color is True
+                else edge_color
             ),
             "ind": ix,
             "ind_size": str(tn.ind_size(ix)),
