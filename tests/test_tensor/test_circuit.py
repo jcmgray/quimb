@@ -527,6 +527,32 @@ class TestCircuit:
         assert 'UCUSTOM' in circ.psi.tags
         assert qu.fidelity(circ.to_dense(), U @ k0) == pytest.approx(1)
 
+    def test_apply_controlled_gate_basic_equiv(self):
+        circ = qtn.Circuit(3)
+        circ.apply_gate('x', qubits=(2,), controls=(0, 1))
+        U = circ.get_uni().to_dense()
+        assert_allclose(U, qu.toffoli())
+
+        circ = qtn.Circuit(3)
+        circ.apply_gate('swap', qubits=(1, 2), controls=(0,))
+        U = circ.get_uni().to_dense()
+        assert_allclose(U, qu.fredkin())
+
+    def test_multi_controlled_circuit(self):
+        import random
+
+        N = 10
+        circ = qtn.Circuit(N)
+        regs = list(range(N))
+        random.shuffle(regs)
+        circ.apply_gate('H', regs[0])
+        for i in range(N - 1):
+            circ.apply_gate('CNOT', regs[i], regs[i + 1])
+        circ.apply_gate('X', N - 1, controls=range(N - 1))
+        circ.apply_gate('SWAP', qubits=(N - 2, N - 1), controls=range(N - 2))
+        (b,) = circ.sample(1, group_size=3)
+        assert b[N - 2] == '0'
+
 
 class TestCircuitGen:
 

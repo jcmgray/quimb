@@ -903,7 +903,7 @@ def tensor_direct_product(T1, T2, sum_inds=(), inplace=False):
     return new_T
 
 
-def tensor_network_sum(tnA, tnB):
+def tensor_network_sum(tnA, tnB, inplace=False):
     """Sum of two tensor networks, whose indices should match exactly, using
     direct products.
 
@@ -919,18 +919,22 @@ def tensor_network_sum(tnA, tnB):
     TensorNetwork
         The sum of ``tnA`` and ``tnB``, with increased bond dimensions.
     """
-    oix = tnA.outer_inds()
+    tnAB = tnA if inplace else tnA.copy()
 
-    ts = []
-    for t1, t2 in zip(tnA, tnB):
+    oix = tnAB.outer_inds()
 
-        if set(t1.inds) != set(t2.inds):
+    for tid, t in tnAB.tensor_map.items():
+        ta = tnA.tensor_map[tid]
+        tb = tnB.tensor_map[tid]
+
+        if set(ta.inds) != set(tb.inds):
             raise ValueError("Can only sum TNs with exactly matching indices.")
 
-        sum_inds = [ix for ix in t1.inds if ix in oix]
-        ts.append(tensor_direct_product(t1, t2, sum_inds))
+        sum_inds = [ix for ix in ta.inds if ix in oix]
+        tab = tensor_direct_product(ta, tb, sum_inds)
+        t.modify(data=tab.data)
 
-    return TensorNetwork(ts).view_like_(tnA)
+    return tnAB
 
 
 def bonds(t1, t2):

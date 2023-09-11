@@ -29,13 +29,12 @@ from .tensor_core import (
     rand_uuid,
     tags_to_oset,
     tensor_contract,
-    tensor_network_sum,
     Tensor,
-    TensorNetwork,
 )
 from .tensor_builder import (
     MPS_computational_state,
     TN_from_sites_computational_state,
+    HTN_CP_operator_from_products,
 )
 from .tensor_arbgeom import TensorNetworkGenOperator
 from .tensor_1d import Dense1D
@@ -303,7 +302,7 @@ def register_param_gate(name, param_fn, num_qubits, tag=None):
     ALL_PARAM_GATES.add(name)
 
 
-def register_special_gate(name, fn, num_qubits, tag=None):
+def register_special_gate(name, fn, num_qubits, tag=None, array=None):
     if tag is None:
         tag = name
     GATE_TAGS[name] = tag
@@ -314,6 +313,8 @@ def register_special_gate(name, fn, num_qubits, tag=None):
         TWO_QUBIT_GATES.add(name)
     SPECIAL_GATES[name] = fn
     ALL_GATES.add(name)
+    if array is not None:
+        CONSTANT_GATES[name] = array
 
 
 # constant single qubit gates
@@ -872,8 +873,82 @@ def apply_swap(psi, i, j, **gate_opts):
         psi.reindex_({iind: jind, jind: iind})
 
 
-register_special_gate("SWAP", apply_swap, 2)
-register_special_gate("IDEN", lambda *_, **__: None, 1)
+register_special_gate("SWAP", apply_swap, 2, array=qu.swap(2))
+register_special_gate("IDEN", lambda *_, **__: None, 1, array=qu.identity(2))
+
+
+
+def build_controlled_gate_htn(
+    ncontrol,
+    gate,
+    upper_inds,
+    lower_inds,
+    tags_each=None,
+    tags_all=None,
+    bond_ind=None,
+):
+    ngate = len(gate.qubits)
+    gate_shape = (2,) * (2 * ngate)
+    array = gate.array.reshape(gate_shape)
+
+    I2 = qu.identity(2, dtype=array.dtype)
+    IG = qu.identity(2**ngate, dtype=array.dtype).reshape(gate_shape)
+    p1 = qu.down(qtype="dop", dtype=array.dtype)  # |1><1|
+
+    array_seqs = [[I2] * ncontrol + [IG], [p1] * ncontrol + [array - IG]]
+
+    # might need to group indices and tags on the target gate if multi-qubit
+    if ngate > 1:
+        upper_inds = (*upper_inds[:ncontrol], upper_inds[ncontrol:])
+        lower_inds = (*lower_inds[:ncontrol], lower_inds[ncontrol:])
+        tags_each = (*tags_each[:ncontrol], tags_each[ncontrol:])
+
+    htn = HTN_CP_operator_from_products(
+        array_seqs,
+        upper_inds=upper_inds,
+        lower_inds=lower_inds,
+        tags_each=tags_each,
+        tags_all=tags_all,
+        bond_ind=bond_ind,
+    )
+
+    return htn
+
+
+def apply_controlled_gate(
+    psi,
+    gate,
+    tags=None,
+    contract="auto-split-gate",
+    propagate_tags="register",
+):
+    assert contract == "auto-split-gate"
+    assert propagate_tags == "register"
+
+    all_qubits = (*gate.controls, *gate.qubits)
+    ncontrol = len(gate.controls)
+    ngate = len(gate.qubits)
+    ntotal = ncontrol + ngate
+
+    upper_inds = [rand_uuid() for _ in range(ntotal)]
+    lower_inds = [rand_uuid() for _ in range(ntotal)]
+    tags_sequence = [psi.site_tag(i) for i in all_qubits]
+
+    htn = build_controlled_gate_htn(
+        ncontrol,
+        gate,
+        upper_inds=upper_inds,
+        lower_inds=lower_inds,
+        tags_each=tags_sequence,
+        tags_all=tags,
+    )
+
+    psi.gate_inds_with_tn_(
+        [psi.site_ind(i) for i in all_qubits],
+        htn,
+        lower_inds,
+        upper_inds,
+    )
 
 
 @functools.lru_cache(2**15)
@@ -890,8 +965,10 @@ class Gate:
         The name or 'identifier' of the gate.
     params : Iterable[float]
         The parameters of the gate.
-    qubits : Iterable[int]
+    qubits : Iterable[int], optional
         Which qubits the gate acts on.
+    controls : Iterable[int], optional
+        Which qubits are the controls.
     round : int, optional
         If given, which round or layer the gate is part of.
     parametrize : bool, optional
@@ -902,6 +979,7 @@ class Gate:
         "_label",
         "_params",
         "_qubits",
+        "_controls",
         "_round",
         "_parametrize",
         "_tag",
@@ -914,7 +992,8 @@ class Gate:
         self,
         label,
         params,
-        qubits,
+        qubits=None,
+        controls=None,
         round=None,
         parametrize=False,
     ):
@@ -924,7 +1003,16 @@ class Gate:
             raise ValueError(f"Unknown gate: {self._label}.")
 
         self._params = tuple(params)
-        self._qubits = tuple(qubits)
+        if qubits is None:
+            self._qubits = None
+        else:
+            self._qubits = tuple(qubits)
+
+        if controls is None:
+            self._controls = None
+        else:
+            self._controls = tuple(controls)
+
         self._round = int(round) if round is not None else round
         self._parametrize = bool(parametrize)
 
@@ -936,11 +1024,18 @@ class Gate:
         self._array = None
 
     @classmethod
-    def from_raw(cls, U, qubits, round=None):
+    def from_raw(cls, U, qubits=None, controls=None, round=None):
         new = object.__new__(cls)
         new._label = f"RAW{id(U)}"
         new._params = "raw"
-        new._qubits = tuple(qubits)
+        if qubits is None:
+            new._qubits = None
+        else:
+            new._qubits = tuple(qubits)
+        if controls is None:
+            new._controls = None
+        else:
+            new._controls = tuple(controls)
         new._round = int(round) if round is not None else round
         new._special = False
         new._parametrize = isinstance(U, ops.PArray)
@@ -961,6 +1056,10 @@ class Gate:
         return self._qubits
 
     @property
+    def controls(self):
+        return self._controls
+
+    @property
     def round(self):
         return self._round
 
@@ -977,9 +1076,11 @@ class Gate:
         return self._tag
 
     def build_array(self):
-        """Build the array representation of the gate."""
-        if self._special:
-            # these don't use an array
+        """Build the array representation of the gate. For controlled gates
+        this excludes the control qubits.
+        """
+        if self._special and (self._label not in CONSTANT_GATES):
+            # these don't have an array representation
             raise ValueError(f"{self.label} gates have no array to build.")
 
         if self._constant:
@@ -1010,6 +1111,7 @@ class Gate:
             + f"label={self._label}, "
             + f"params={self._params}, "
             + f"qubits={self._qubits}"
+            + (f", controls={self._controls})" if self._controls else "")
             + (f", round={self._round}" if self._round is not None else "")
             + (
                 f", parametrize={self._parametrize})"
@@ -1043,6 +1145,92 @@ def rehearsal_dict(tn, info):
         "W": math.log2(info.largest_intermediate),
         "C": math.log10(info.opt_cost / 2),
     }
+
+
+def parse_to_gate(
+    gate_id,
+    *gate_args,
+    params=None,
+    qubits=None,
+    controls=None,
+    gate_round=None,
+    parametrize=None,
+):
+    """Map all types of gate specification into a `Gate` object."""
+
+    if isinstance(gate_id, Gate):
+        # already a gate
+        if gate_args:
+            raise ValueError(
+                "You cannot specify ``gate_args`` for an already "
+                "encapsulated gate."
+            )
+
+        if any((params, qubits, controls, gate_round, parametrize)):
+            raise ValueError(
+                "You cannot specify ``controls`` or ``gate_round`` for an "
+                "already encapsulated gate - supply directly to the  `Gate` "
+                "constructor instead."
+            )
+        return gate_id
+
+    if hasattr(gate_id, "shape") and not isinstance(gate_id, str):
+        # raw gate (numpy strings have a shape - ignore those)
+
+        if parametrize is not None:
+            raise ValueError(
+                "You cannot specify ``parametrize`` for raw gate, supply a "
+                "``PArray`` instead."
+            )
+
+        return Gate.from_raw(
+            U=gate_id,
+            qubits=gate_args,
+            controls=controls,
+            round=gate_round,
+        )
+
+    # else gate is specified as a tuple or kwargs
+
+    if isinstance(gate_id, numbers.Integral) or gate_id.isdigit():
+        # gate round given as first entry of tuple
+        if gate_round is None:
+            # explicilty specified ``gate_round`` takes precedence
+            gate_round = gate_id
+        gate_id, gate_args = gate_args[0], gate_args[1:]
+
+    if parametrize is None:
+        parametrize = False
+
+    if gate_args:
+        if any((params, qubits)):
+            raise ValueError(
+                "You cannot specify ``params`` or ``qubits`` "
+                "when supplying ``gate_args``."
+            )
+
+        nq = GATE_SIZE[gate_id.upper()]
+        (
+            params,
+            qubits,
+        ) = (
+            gate_args[:-nq],
+            gate_args[-nq:],
+        )
+
+    else:
+        # qubits and params specified directly
+        if params is None:
+            params = ()
+
+    return Gate(
+        label=gate_id,
+        params=params,
+        qubits=qubits,
+        controls=controls,
+        round=gate_round,
+        parametrize=parametrize,
+    )
 
 
 # --------------------------- main circuit class ---------------------------- #
@@ -1126,6 +1314,8 @@ class Circuit:
         N=None,
         psi0=None,
         gate_opts=None,
+        gate_contract="auto-split-gate",
+        gate_propagate_tags="register",
         tags=None,
         psi0_dtype="complex128",
         psi0_tag="PSI0",
@@ -1157,8 +1347,8 @@ class Circuit:
                 self._psi.add_tag(tag)
 
         self.gate_opts = ensure_dict(gate_opts)
-        self.gate_opts.setdefault("contract", "auto-split-gate")
-        self.gate_opts.setdefault("propagate_tags", "register")
+        self.gate_opts.setdefault("contract", gate_contract)
+        self.gate_opts.setdefault("propagate_tags", gate_propagate_tags)
         self.gates = []
 
         self._ket_site_ind_id = self._psi.site_ind_id
@@ -1254,7 +1444,11 @@ class Circuit:
         # overide any default gate opts
         opts = {**self.gate_opts, **gate_opts}
 
-        if gate.special:
+        if gate.controls:
+            apply_controlled_gate(
+                self._psi, gate, tags=tags, **opts
+            )
+        elif gate.special:
             # these are specified as a general function
             SPECIAL_GATES[gate.label](
                 self._psi, *gate.params, *gate.qubits, **opts
@@ -1270,6 +1464,9 @@ class Circuit:
         self,
         gate_id,
         *gate_args,
+        params=None,
+        qubits=None,
+        controls=None,
         gate_round=None,
         parametrize=False,
         **gate_opts,
@@ -1287,10 +1484,18 @@ class Circuit:
 
         Parameters
         ----------
-        gate_id : str or Gate
-            Which type of gate to apply.
+        gate_id : Gate, str, or array_like
+            Which gate to apply. This can be:
+
+                - A ``Gate`` instance, i.e. with parameters and qubits already
+                  specified.
+                - A string, e.g. ``'H'``, ``'U3'``, etc. in which case
+                  ``gate_args`` should be supplied with ``(*params, *qubits)``.
+                - A raw array, in which case ``gate_args`` should be supplied
+                  with ``(*qubits,)``.
+
         gate_args : list[str]
-            The argument to supply to it.
+            The arguments to supply to it.
         gate_round : int, optional
             The gate round. If ``gate_id`` is integer-like, will also be taken
             from here, with then ``gate_id, gate_args = gate_args[0],
@@ -1299,32 +1504,15 @@ class Circuit:
             Supplied to the gate function, options here will override the
             default ``gate_opts``.
         """
-        if isinstance(gate_id, Gate):
-            # already encapuslated
-            self._apply_gate(gate_id, **gate_opts)
-            return
-
-        if hasattr(gate_id, "shape") and not isinstance(gate_id, str):
-            # raw gate (numpy strings have a shape - ignore those)
-            gate = Gate.from_raw(gate_id, gate_args, gate_round)
-            self._apply_gate(gate, **gate_opts)
-            return
-
-        # else convert from tuple
-        if isinstance(gate_id, numbers.Integral) or gate_id.isdigit():
-            # gate round given as first entry of qasm line
-            gate_round = gate_id
-            gate_id, gate_args = gate_args[0], gate_args[1:]
-        nq = GATE_SIZE[gate_id.upper()]
-        (
-            params,
-            qubits,
-        ) = (
-            gate_args[:-nq],
-            gate_args[-nq:],
+        gate = parse_to_gate(
+            gate_id,
+            *gate_args,
+            params=params,
+            qubits=qubits,
+            controls=controls,
+            gate_round=gate_round,
+            parametrize=parametrize,
         )
-
-        gate = Gate(gate_id, params, qubits, gate_round, parametrize)
         self._apply_gate(gate, **gate_opts)
 
     def apply_gate_raw(self, U, where, gate_round=None, **gate_opts):
@@ -1808,8 +1996,14 @@ class Circuit:
         for i, gate in reversed(tuple(enumerate(self.gates))):
             if gate.label == "IDEN":
                 continue
-
-            if gate.label == "SWAP":
+            elif gate.controls:
+                # TODO: only add if any *targets* in cone, requires changes
+                # elsewhere to make sure tensors aren't then missing
+                regs = {*gate.controls, *gate.qubits}
+                if regs & cone:
+                    lightcone_tags.append(f"GATE_{i}")
+                    cone |= regs
+            elif gate.label == "SWAP":
                 i, j = gate.qubits
                 i_in_cone = i in cone
                 j_in_cone = j in cone
@@ -1821,12 +2015,11 @@ class Circuit:
                     cone.add(i)
                 else:
                     cone.discard(i)
-                continue
-
-            regs = set(gate.qubits)
-            if regs & cone:
-                lightcone_tags.append(f"GATE_{i}")
-                cone |= regs
+            else:
+                regs = set(gate.qubits)
+                if regs & cone:
+                    lightcone_tags.append(f"GATE_{i}")
+                    cone |= regs
 
         # initial state is always part of the lightcone
         lightcone_tags.append("PSI0")
@@ -2061,7 +2254,7 @@ class Circuit:
 
         # get the contraction path info
         info = psi_b.contract(
-            ..., output_inds=(), optimize=optimize, get="path-info"
+            all, output_inds=(), optimize=optimize, get="path-info"
         )
 
         if rehearse:
@@ -2069,7 +2262,7 @@ class Circuit:
 
         # perform the full contraction with the path found
         c_b = psi_b.contract(
-            ..., output_inds=(), optimize=info.path, backend=backend
+            all, output_inds=(), optimize=info.path, backend=backend
         )
 
         return c_b
@@ -2211,7 +2404,7 @@ class Circuit:
             return rho
 
         info = rho.contract(
-            ..., output_inds=output_inds, optimize=optimize, get="path-info"
+            all, output_inds=output_inds, optimize=optimize, get="path-info"
         )
 
         if rehearse:
@@ -2219,7 +2412,7 @@ class Circuit:
 
         # perform the full contraction with the path found
         rho_dense = rho.contract(
-            ...,
+            all,
             output_inds=output_inds,
             optimize=info.path,
             backend=backend,
@@ -2327,14 +2520,14 @@ class Circuit:
             return rhoG
 
         info = rhoG.contract(
-            ..., output_inds=output_inds, optimize=optimize, get="path-info"
+            all, output_inds=output_inds, optimize=optimize, get="path-info"
         )
 
         if rehearse:
             return rehearsal_dict(rhoG, info)
 
         g_ex = rhoG.contract(
-            ...,
+            all,
             output_inds=output_inds,
             optimize=info.path,
             backend=backend,
@@ -2456,7 +2649,7 @@ class Circuit:
         #     contraction path cache if the structure generated *is* the same
         #     so still pretty efficient to just overwrite
         info = nm_lc.contract(
-            ..., output_inds=output_inds, optimize=optimize, get="path-info"
+            all, output_inds=output_inds, optimize=optimize, get="path-info"
         )
 
         if rehearse:
@@ -2465,7 +2658,7 @@ class Circuit:
         # perform the full contraction with the path found
         p_marginal = abs(
             nm_lc.contract(
-                ...,
+                all,
                 output_inds=output_inds,
                 optimize=info.path,
                 backend=backend,
@@ -3092,7 +3285,7 @@ class Circuit:
 
         # get the contraction path info
         info = psi.contract(
-            ..., output_inds=output_inds, optimize=optimize, get="path-info"
+            all, output_inds=output_inds, optimize=optimize, get="path-info"
         )
 
         if rehearse:
@@ -3100,7 +3293,7 @@ class Circuit:
 
         # perform the full contraction with the path found
         psi_tensor = psi.contract(
-            ...,
+            all,
             output_inds=output_inds,
             optimize=info.path,
             backend=backend,
@@ -3339,10 +3532,11 @@ class CircuitMPS(Circuit):
         N=None,
         psi0=None,
         gate_opts=None,
+        gate_contract="swap+split",
         **circuit_opts,
     ):
         gate_opts = ensure_dict(gate_opts)
-        gate_opts.setdefault("contract", "swap+split")
+        gate_opts.setdefault("contract", gate_contract)
         super().__init__(N, psi0, gate_opts, **circuit_opts)
 
     def _init_state(self, N, dtype="complex128"):
@@ -3377,9 +3571,11 @@ class CircuitMPS(Circuit):
 class CircuitDense(Circuit):
     """Quantum circuit simulation keeping the state in full dense form."""
 
-    def __init__(self, N=None, psi0=None, gate_opts=None, tags=None):
+    def __init__(
+        self, N=None, psi0=None, gate_opts=None, gate_contract=True, tags=None
+    ):
         gate_opts = ensure_dict(gate_opts)
-        gate_opts.setdefault("contract", True)
+        gate_opts.setdefault("contract", gate_contract)
         super().__init__(N, psi0, gate_opts, tags)
 
     @property

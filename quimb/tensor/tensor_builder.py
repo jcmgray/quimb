@@ -21,7 +21,9 @@ from ..gen.rand import seed_rand, randn, choice, random_seed_fn, rand_phase
 from .tensor_core import (
     new_bond,
     rand_uuid,
+    tags_to_oset,
     tensor_direct_product,
+    tensor_network_sum,
     Tensor,
     TensorNetwork,
 )
@@ -715,7 +717,7 @@ def HTN_CP_from_inds_and_fill_fn(
         If given, a specific name for the inner hyper index.
     """
 
-    tn = TensorNetwork([])
+    tn = TensorNetwork()
 
     if tags is None:
         tags = [None] * len(inds)
@@ -742,7 +744,7 @@ def HTN_CP_from_sites_and_fill_fn(
     site_ind_id="k{}",
     bond_ind=None,
 ):
-    """Create a CP-decomposition structured hyper tensor network from a
+    """Create a CP-decomposition structured hyper tensor network state from a
     sequence of sites and a fill function.
 
     Parameters
@@ -782,6 +784,81 @@ def HTN_CP_from_sites_and_fill_fn(
         site_tag_id=site_tag_id,
         site_ind_id=site_ind_id,
     )
+
+
+def HTN_CP_operator_from_products(
+    array_seqs,
+    upper_inds,
+    lower_inds,
+    tags_each=None,
+    tags_all=None,
+    bond_ind=None,
+):
+    """Construct a CP form hyper tensor network of the sum of matrix strings:
+
+    .. math::
+
+        \sum_i A_i B_i C_i \ldots
+
+    using a single hyper index to enumerate each sequence of operators.
+
+    Parameters
+    ----------
+    array_seqs : sequence[arrays_like]
+        The arrays to use in each product, each of which should be 2D.
+    upper_inds : sequence[sequence[str]]
+        The upper indices to use for each array in each product.
+    lower_inds : sequence[sequence[str]]
+        The lower indices to use for each array in each product.
+    tags_each : sequence[sequence[str]], optional
+        The tags to use for each array in each product.
+    tags_all : sequence[str], optional
+        The tags to use for the whole hyper tensor network.
+    bond_ind : str, optional
+        The name of the hyper index to use, by default randomly generated.
+
+    Returns
+    -------
+    htn : TensorNetwork
+    """
+
+    # make sure both are tuple[tuple[str]]
+    upper_inds = tuple(
+        (lix,) if isinstance(lix, str) else lix for lix in upper_inds
+    )
+    lower_inds = tuple(
+        (lix,) if isinstance(lix, str) else lix for lix in lower_inds
+    )
+
+    # default values
+    if tags_each is None:
+        tags_each = [None] * len(upper_inds)
+    if bond_ind is None:
+        bond_ind = rand_uuid()
+
+
+    # construct the product TNs each with hyper bond D=1
+    tns = []
+    for arrays in array_seqs:
+        tn = TensorNetwork()
+        for array, uix, lix, tgs in zip(
+            arrays, upper_inds, lower_inds, tags_each
+        ):
+            tn |= Tensor(
+                data=array.reshape((1, *array.shape)),
+                inds=(bond_ind, *uix, *lix),
+                tags=tgs,
+            )
+        tns.append(tn)
+
+    # sum them into single HTN with D > 1
+    tn = functools.reduce(tensor_network_sum, tns)
+
+    # add global tags
+    for tag in  tags_to_oset(tags_all):
+        tn.add_tag(tag)
+
+    return tn
 
 
 def HTN_dual_from_edges_and_fill_fn(

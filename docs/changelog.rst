@@ -3,6 +3,22 @@ Changelog
 
 Release notes for ``quimb``.
 
+.. _whats-new.1.6.1:
+
+v1.6.1 (unreleased)
+-------------------
+
+**Breaking Changes**
+
+- :class:`~quimb.tensor.Circuit` : remove `target_size` in preparation for
+  all contraction specifications to be encapsulated at the contract level (e.g.
+  with `cotengra`)
+
+**Enhancements:**
+
+- :class:`~quimb.tensor.Circuit` : allow any gate to be controlled by any
+  number of qubits.
+
 .. _whats-new.1.6.0:
 
 v1.6.0 (2023-09-10)
