@@ -2959,7 +2959,7 @@ class Tensor:
     def _repr_html_(self):
         """Render this Tensor as HTML, for Jupyter notebooks.
         """
-        s = "<samp>"
+        s = "<samp style='font-size: 12px;'>"
         s += "<details>"
         s += "<summary>"
         shape_repr = ', '.join(auto_color_html(d) for d in self.shape)
@@ -10190,7 +10190,7 @@ class TensorNetwork(object):
     def _repr_html_(self):
         """Render this TensorNetwork as HTML, for Jupyter notebooks.
         """
-        s = "<samp>"
+        s = "<samp style='font-size: 12px;'>"
         s += "<details>"
         s += "<summary>"
         s += f"{auto_color_html(self.__class__.__name__)}"
