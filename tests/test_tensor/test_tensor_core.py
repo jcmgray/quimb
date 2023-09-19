@@ -321,10 +321,10 @@ class TestBasicTensorOperations:
     def test_vector_reduce(self):
         t = rand_tensor((2, 3, 4), "abc")
         g = qu.randn(3)
-        tv = t.vector_reduce('b', g)
+        tv = t.vector_reduce("b", g)
         assert tv.shape == (2, 4)
-        assert tv.inds == ('a', 'c')
-        assert_allclose(tv.data, np.einsum('abc,b->ac', t.data, g))
+        assert tv.inds == ("a", "c")
+        assert_allclose(tv.data, np.einsum("abc,b->ac", t.data, g))
 
     def test_ownership(self):
         a = rand_tensor((2, 2), ("a", "b"), tags={"X", "Y"})
@@ -696,6 +696,16 @@ class TestTensorFunctions:
         assert t.inds == ("a", "b", "switch", "c", "d")
         assert t.isel({"switch": 1}).data.sum() == pytest.approx(6)
 
+    def test_idxmin(self):
+        data = np.arange(24).reshape(2, 3, 4)
+        t = Tensor(data, inds=["a", "b", "c"])
+        assert t.idxmax() == {"a": 1, "b": 2, "c": 3}
+        assert t.idxmin() == {"a": 0, "b": 0, "c": 0}
+        data = np.arange(24).reshape(2, 3, 4) - 11.5
+        t = Tensor(data, inds=["a", "b", "c"])
+        assert t.idxmin("abs") == {"a": 0, "b": 2, "c": 3}
+        assert t.idxmax(lambda x: 1 / x) == {"a": 1, "b": 0, "c": 0}
+
 
 class TestTensorNetwork:
     def test_combining_tensors(self):
@@ -952,7 +962,6 @@ class TestTensorNetwork:
         assert len((tn ^ slice(-1, 1)).tensors) == 3
         assert len((tn ^ slice(None, -2, -1)).tensors) == 3
         assert len((tn ^ slice(-2, 0)).tensors) == 3
-
 
     @pytest.mark.parametrize("structured", [True, False])
     @pytest.mark.parametrize("inplace", [True, False])
@@ -1584,28 +1593,29 @@ class TestTensorNetwork:
 
     def test_istree(self):
         assert Tensor().as_network().istree()
-        tn = rand_tensor([2] * 1, ['x']).as_network()
+        tn = rand_tensor([2] * 1, ["x"]).as_network()
         assert tn.istree()
-        tn |= rand_tensor([2] * 3, ['x', 'y', 'z'])
+        tn |= rand_tensor([2] * 3, ["x", "y", "z"])
         assert tn.istree()
-        tn |= rand_tensor([2] * 2, ['y', 'z'])
+        tn |= rand_tensor([2] * 2, ["y", "z"])
         assert tn.istree()
-        tn |= rand_tensor([2] * 2, ['x', 'z'])
+        tn |= rand_tensor([2] * 2, ["x", "z"])
         assert not tn.istree()
 
     def test_isconnected(self):
         assert Tensor().as_network().isconnected()
-        tn = rand_tensor([2] * 1, ['x']).as_network()
+        tn = rand_tensor([2] * 1, ["x"]).as_network()
         assert tn.isconnected()
-        tn |= rand_tensor([2] * 3, ['x', 'y', 'z'])
+        tn |= rand_tensor([2] * 3, ["x", "y", "z"])
         assert tn.isconnected()
-        tn |= rand_tensor([2] * 2, ['w', 'u'])
+        tn |= rand_tensor([2] * 2, ["w", "u"])
         assert not tn.isconnected()
         assert not (Tensor() | Tensor()).isconnected()
 
     def test_get_string_between_tids(self):
         tn = MPS_rand_state(5, 3)
         assert tn._get_string_between_tids(0, 4) == (0, 1, 2, 3, 4)
+
 
 class TestTensorNetworkSimplifications:
     def test_rank_simplify(self):

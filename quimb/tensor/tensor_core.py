@@ -2634,6 +2634,61 @@ class Tensor:
         """
         return do('max', do('abs', self.data))
 
+    def idxmin(self, f=None):
+        """Get the index configuration of the minimum element of this tensor,
+        optionally applying ``f`` first.
+
+        Parameters
+        ----------
+        f : callable or str, optional
+            If a callable, apply this function to the tensor data before
+            finding the minimum element. If a string, apply
+            ``autoray.do(f, data)``.
+
+        Returns
+        -------
+        dict[str, int]
+            Mapping of index names to their values at the minimum element.
+        """
+        if f is None:
+            data = self.data
+        elif isinstance(f, str):
+            data = do(f, self.data)
+        else:
+            data = f(self.data)
+
+        flat_idx = do("argmin", data)
+        idx = np.unravel_index(flat_idx, self.shape)
+        return dict(zip(self.inds, idx))
+
+    def idxmax(self, f=None):
+        """Get the index configuration of the maximum element of this tensor,
+        optionally applying ``f`` first.
+
+        Parameters
+        ----------
+        f : callable or str, optional
+            If a callable, apply this function to the tensor data before
+            finding the maximum element. If a string, apply
+            ``autoray.do(f, data)``.
+
+        Returns
+        -------
+        dict[str, int]
+            Mapping of index names to their values at the maximum element.
+        """
+        if f is None:
+            data = self.data
+        elif isinstance(f, str):
+            data = do(f, self.data)
+        else:
+            data = f(self.data)
+
+        flat_idx = do("argmax", data)
+        idx = np.unravel_index(flat_idx, self.shape)
+        return dict(zip(self.inds, idx))
+
+
     def norm(self):
         r"""Frobenius norm of this tensor:
 
