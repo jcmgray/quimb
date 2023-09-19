@@ -2719,6 +2719,8 @@ class Tensor:
         T.modify(data=(T.data + TH.data) / 2)
         return T
 
+    symmetrize_ = functools.partialmethod(symmetrize, inplace=True)
+
     def isometrize(self, left_inds=None, method='qr', inplace=False):
         r"""Make this tensor unitary (or isometric) with respect to
         ``left_inds``. The underlying method is set by ``method``.
