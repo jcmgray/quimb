@@ -147,7 +147,7 @@ def linkcode_resolve(domain, info):
     if "+" in quimb.__version__:
         return (
             f"https://github.com/jcmgray/quimb/blob/"
-            f"develop/quimb/{fn}{linespec}"
+            f"main/quimb/{fn}{linespec}"
         )
     else:
         return (
