@@ -1796,6 +1796,7 @@ def classical_ising_T_matrix(
     j=1.0,
     h=0.0,
     directions="lrud",
+    output=False,
     asymm=None,
 ):
     """The single effective TN site for the classical ising model."""
@@ -1815,6 +1816,10 @@ def classical_ising_T_matrix(
     ] + [classical_ising_H_matrix(beta, h)]
     lhs = ",".join(f"i{x}" for x in directions)
     eq = lhs + ",i->" + directions
+
+    if output:
+        eq += 'i'
+
     return oe.contract(eq, *arrays)
 
 
@@ -1997,6 +2002,8 @@ def TN2D_classical_ising_partition_function(
     site_tag_id="I{},{}",
     x_tag_id="X{}",
     y_tag_id="Y{}",
+    outputs=(),
+    ind_id="s{},{}",
 ):
     """The tensor network representation of the 2D classical ising model
     partition function.
@@ -2010,7 +2017,9 @@ def TN2D_classical_ising_partition_function(
     beta : float
         The inverse temperature.
     j : float, optional
-        The interaction strength, positive being *ferromagnetic*.
+        The interaction strength, positive being *ferromagnetic*. If a callable
+        it should have the signature ``j(node_a, node_b)`` and return a float
+        for the coupling strength betwen ``node_a`` and ``node_b``.
     h : float, optional
         The magnetic field strength.
     cyclic : bool or (bool, bool), optional
@@ -2022,6 +2031,12 @@ def TN2D_classical_ising_partition_function(
         String specifier for naming convention of row tags.
     y_tag_id : str, optional
         String specifier for naming convention of column tags.
+    outputs : sequence of tuple[int, int], optional
+        Which sites to generate output indices (i.e. dangling legs) for.
+        The index is named according to ``ind_id``.
+    ind_id : str, optional
+        How to label the indices i.e. ``ind_id.format(i, j)``, each of
+        which corresponds to a single classical spin in ``outputs``.
 
     Returns
     -------
@@ -2042,6 +2057,12 @@ def TN2D_classical_ising_partition_function(
 
         def j_factory(node_a, node_b):
             return j
+
+    if outputs:
+        if isinstance(outputs[0], int):
+            # single output
+            outputs = (outputs,)
+        outputs = set(outputs)
 
     ts = []
     bonds = collections.defaultdict(rand_uuid)
@@ -2067,6 +2088,10 @@ def TN2D_classical_ising_partition_function(
                 asymms += ("l" if pair not in bonds else "rT",)
                 inds.append(bonds[pair])
 
+        site_is_output = (ni, nj) in outputs
+        if site_is_output:
+            inds.append(ind_id.format(ni, nj))
+
         ts.append(
             Tensor(
                 data=classical_ising_T_matrix(
@@ -2075,6 +2100,7 @@ def TN2D_classical_ising_partition_function(
                     j=js,
                     h=h,
                     asymm=asymms,
+                    output=site_is_output,
                 ),
                 inds=inds,
                 tags=[
@@ -2109,6 +2135,8 @@ def TN3D_classical_ising_partition_function(
     x_tag_id="X{}",
     y_tag_id="Y{}",
     z_tag_id="Z{}",
+    outputs=(),
+    ind_id="s{},{},{}",
 ):
     """Tensor network representation of the 3D classical ising model
     partition function.
@@ -2123,8 +2151,10 @@ def TN3D_classical_ising_partition_function(
         Length of side z.
     beta : float
         The inverse temperature.
-    j : float, optional
-        The interaction strength, positive being *ferromagnetic*.
+    j : float or callable, optional
+        The interaction strength, positive being *ferromagnetic*. If a callable
+        it should have the signature ``j(node_a, node_b)`` and return a float
+        for the coupling strength betwen ``node_a`` and ``node_b``.
     h : float, optional
         The magnetic field strength.
     cyclic : bool or (bool, bool, bool), optional
@@ -2132,6 +2162,18 @@ def TN3D_classical_ising_partition_function(
         specified separately using a tuple.
     site_tag_id : str, optional
         String formatter specifying how to label each site.
+    x_tag_id : str, optional
+        String formatter specifying how to label each x-plane.
+    y_tag_id : str, optional
+        String formatter specifying how to label each y-plane.
+    z_tag_id : str, optional
+        String formatter specifying how to label each z-plane.
+    outputs : sequence of tuple[int, int, int], optional
+        Which sites to generate output indices (i.e. dangling legs) for.
+        The index is named according to ``ind_id``.
+    ind_id : str, optional
+        How to label the indices i.e. ``ind_id.format(i, j, k)``, each of
+        which corresponds to a single classical spin in ``outputs``.
 
     Returns
     -------
@@ -2152,6 +2194,12 @@ def TN3D_classical_ising_partition_function(
 
         def j_factory(node_a, node_b):
             return j
+
+    if outputs:
+        if isinstance(outputs[0], int):
+            # single output
+            outputs = (outputs,)
+        outputs = set(outputs)
 
     ts = []
     bonds = collections.defaultdict(rand_uuid)
@@ -2191,6 +2239,10 @@ def TN3D_classical_ising_partition_function(
                 asymms += ("l" if pair not in bonds else "rT",)
                 inds.append(bonds[pair])
 
+        site_is_output = (ni, nj, nk) in outputs
+        if site_is_output:
+            inds.append(ind_id.format(ni, nj, nk))
+
         ts.append(
             Tensor(
                 data=classical_ising_T_matrix(
@@ -2199,6 +2251,7 @@ def TN3D_classical_ising_partition_function(
                     j=js,
                     h=h,
                     asymm=asymms,
+                    output=site_is_output,
                 ),
                 inds=inds,
                 tags=[
