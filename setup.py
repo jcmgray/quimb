@@ -49,6 +49,7 @@ setup(
         'docs': [
             'sphinx>=2.0',
             'sphinx-autoapi',
+            'astroid!=3.0.0',
             'sphinx-copybutton',
             'sphinx-design',
             'myst-nb',
