@@ -15,6 +15,7 @@ from ..utils import progbar as Progbar
 from ..gen.rand import randn, seed_rand
 from . import array_ops as ops
 from .tensor_core import (
+    bonds,
     bonds_size,
     oset,
     rand_uuid,
@@ -239,6 +240,9 @@ class Rotator3D:
             self.y_tag = tn.y_tag
             self.z_tag = tn.z_tag
             self.site_tag = tn.site_tag
+            self.is_cyclic_x = tn.is_cyclic_x
+            self.is_cyclic_y = tn.is_cyclic_y
+            self.is_cyclic_z = tn.is_cyclic_z
 
         elif self.plane == "y":
             # -> (y, z, x)
@@ -249,6 +253,9 @@ class Rotator3D:
             self.y_tag = tn.z_tag
             self.z_tag = tn.x_tag
             self.site_tag = lambda i, j, k: tn.site_tag(k, i, j)
+            self.is_cyclic_x = tn.is_cyclic_y
+            self.is_cyclic_y = tn.is_cyclic_z
+            self.is_cyclic_z = tn.is_cyclic_x
 
         else:  # self.plane == 'z'
             # -> (z, x, y)
@@ -259,6 +266,9 @@ class Rotator3D:
             self.y_tag = tn.x_tag
             self.z_tag = tn.y_tag
             self.site_tag = lambda i, j, k: tn.site_tag(j, k, i)
+            self.is_cyclic_x = tn.is_cyclic_z
+            self.is_cyclic_y = tn.is_cyclic_x
+            self.is_cyclic_z = tn.is_cyclic_y
 
         if "min" in self.from_which:
             # -> sweeps are increasing
@@ -590,6 +600,63 @@ class TensorNetwork3D(TensorNetworkGen):
             ymax = max(j, ymax)
             zmax = max(k, zmax)
         return (xmin, xmax), (ymin, ymax), (zmin, zmax)
+
+    def is_cyclic_x(self, j=None, k=None, imin=None, imax=None):
+        """Check if the x dimension is cyclic (periodic), specifically whether
+        a bond exists between ``(imin, j, k)`` and ``(imax, j, k)``, with
+        default values of ``imin = 0`` and ``imax = Lx - 1``, and ``j`` and
+        ``k`` the center of the lattice.
+        """
+        if j is None:
+            j = self.Ly // 2
+        if k is None:
+            k = self.Lz // 2
+        if imin is None:
+            imin = 0
+        if imax is None:
+            imax = self.Lx - 1
+        return bool(bonds(
+            self[self.site_tag(imin, j, k)],
+            self[self.site_tag(imax, j, k)],
+        ))
+
+    def is_cyclic_y(self, i=None, k=None, jmin=None, jmax=None):
+        """Check if the y dimension is cyclic (periodic), specifically whether
+        a bond exists between ``(i, jmin, k)`` and ``(i, jmax, k)``, with
+        default values of ``jmin = 0`` and ``jmax = Ly - 1``, and ``i`` and
+        ``k`` the center of the lattice.
+        """
+        if i is None:
+            i = self.Lx // 2
+        if k is None:
+            k = self.Lz // 2
+        if jmin is None:
+            jmin = 0
+        if jmax is None:
+            jmax = self.Ly - 1
+        return bool(bonds(
+            self[self.site_tag(i, jmin, k)],
+            self[self.site_tag(i, jmax, k)],
+        ))
+
+    def is_cyclic_z(self, i=None, j=None, kmin=None, kmax=None):
+        """Check if the z dimension is cyclic (periodic), specifically whether
+        a bond exists between ``(i, j, kmin)`` and ``(i, j, kmax)``, with
+        default values of ``kmin = 0`` and ``kmax = Lz - 1``, and ``i`` and
+        ``j`` the center of the lattice.
+        """
+        if i is None:
+            i = self.Lx // 2
+        if j is None:
+            j = self.Ly // 2
+        if kmin is None:
+            kmin = 0
+        if kmax is None:
+            kmax = self.Lz - 1
+        return bool(bonds(
+            self[self.site_tag(i, j, kmin)],
+            self[self.site_tag(i, j, kmax)],
+        ))
 
     def __getitem__(self, key):
         """Key based tensor selection, checking for integer based shortcut."""
@@ -1061,6 +1128,7 @@ class TensorNetwork3D(TensorNetworkGen):
         canonize_opts=None,
         final_contract=True,
         final_contract_opts=None,
+        optimize="auto-hq",
         progbar=False,
         inplace=False,
     ):
@@ -1228,7 +1296,7 @@ class TensorNetwork3D(TensorNetworkGen):
 
         if final_contract and (around is None):
             final_contract_opts = ensure_dict(final_contract_opts)
-            final_contract_opts.setdefault("optimize", "auto-hq")
+            final_contract_opts.setdefault("optimize", optimize)
             final_contract_opts.setdefault("inplace", inplace)
             return tn.contract(**final_contract_opts)
 
@@ -1255,6 +1323,7 @@ class TensorNetwork3D(TensorNetworkGen):
         equalize_norms=False,
         final_contract=True,
         final_contract_opts=None,
+        optimize="auto-hq",
         progbar=False,
         inplace=False,
         **contract_boundary_opts,
@@ -1281,6 +1350,7 @@ class TensorNetwork3D(TensorNetworkGen):
             equalize_norms=equalize_norms,
             final_contract=final_contract,
             final_contract_opts=final_contract_opts,
+            optimize=optimize,
             progbar=progbar,
             inplace=inplace,
         )

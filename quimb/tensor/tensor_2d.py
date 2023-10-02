@@ -236,6 +236,8 @@ class Rotator2D:
             self.x_tag = tn.x_tag
             self.y_tag = tn.y_tag
             self.site_tag = tn.site_tag
+            self.is_cyclic_x = tn.is_cyclic_x
+            self.is_cyclic_y = tn.is_cyclic_y
         else:  # 'y'
             # -> rotate 90deg
             self.imin, self.imax = sorted(yrange)
@@ -243,6 +245,8 @@ class Rotator2D:
             self.y_tag = tn.x_tag
             self.x_tag = tn.y_tag
             self.site_tag = lambda i, j: tn.site_tag(j, i)
+            self.is_cyclic_x = tn.is_cyclic_y
+            self.is_cyclic_y = tn.is_cyclic_x
 
         if "min" in self.from_which:
             # -> sweeps are increasing
@@ -674,6 +678,44 @@ class TensorNetwork2D(TensorNetworkGen):
             xmax = max(i, xmax)
             ymax = max(j, ymax)
         return (xmin, xmax), (ymin, ymax)
+
+    def is_cyclic_x(self, j=None, imin=None, imax=None):
+        """Check if the x dimension is cyclic (periodic), specifically whether
+        a bond exists between ``(imin, j)`` and ``(imax, j)``, with default
+        values of ``imin = 0`` and ``imax = Lx - 1``, and ``j`` at the center
+        of the lattice.
+        """
+        if j is None:
+            j = self.Ly // 2
+        if imin is None:
+            imin = 0
+        if imax is None:
+            imax = self.Lx - 1
+        return bool(
+            bonds(
+                self[self.site_tag(imin, j)],
+                self[self.site_tag(imax, j)],
+            )
+        )
+
+    def is_cyclic_y(self, i=None, jmin=None, jmax=None):
+        """Check if the y dimension is cyclic (periodic), specifically whether
+        a bond exists between ``(i, jmin)`` and ``(i, jmax)``, with default
+        values of ``jmin = 0`` and ``jmax = Ly - 1``, and ``i`` at the center
+        of the lattice.
+        """
+        if i is None:
+            i = self.Lx // 2
+        if jmin is None:
+            jmin = 0
+        if jmax is None:
+            jmax = self.Ly - 1
+        return bool(
+            bonds(
+                self[self.site_tag(i, jmin)],
+                self[self.site_tag(i, jmax)],
+            )
+        )
 
     def __getitem__(self, key):
         """Key based tensor selection, checking for integer based shortcut."""
@@ -1489,7 +1531,7 @@ class TensorNetwork2D(TensorNetworkGen):
         compress_opts = ensure_dict(compress_opts)
 
         r = Rotator2D(self, xrange, yrange, from_which)
-        j0 = r.sweep_other[0]
+        cyclic_y = r.is_cyclic_y()
 
         for i0, i1 in pairwise(r.sweep):
             # we compute the projectors from an untouched copy
@@ -1499,15 +1541,16 @@ class TensorNetwork2D(TensorNetworkGen):
                 tag_ij = r.site_tag(i0, j)
                 tag_ip1j = r.site_tag(i1, j)
 
-                if j != j0:
-                    ltags = r.site_tag(i0, j - 1), r.site_tag(i1, j - 1)
-                    rtags = (tag_ij, tag_ip1j)
+                if (j < r.jmax) or cyclic_y:
+                    ltags = (tag_ij, tag_ip1j)
+                    jp1 = j + 1 if j < r.jmax else r.jmin
+                    rtags = r.site_tag(i0, jp1), r.site_tag(i1, jp1)
                     #      │         │
                     #    ──O─┐ chi ┌─O──  i+1
                     #      │ └─▷═◁─┘ │
                     #      │ ┌┘   └┐ │
                     #    ──O─┘     └─O──  i
-                    #     j-1        j
+                    #      j        j+1
                     tn_calc.insert_compressor_between_regions(
                         ltags,
                         rtags,
@@ -2431,6 +2474,10 @@ class TensorNetwork2D(TensorNetworkGen):
             **contract_boundary_opts,
         )
 
+    contract_mps_sweep_ = functools.partialmethod(
+        contract_mps_sweep, inplace=True
+    )
+
     def contract_full_bootstrap(self, n, *, optimize="auto-hq", **kwargs):
         if n < 2:
             raise ValueError(f"``n`` must be at least 2 (got {n}).")
@@ -3206,6 +3253,7 @@ class TensorNetwork2D(TensorNetworkGen):
         tn_calc = tn.copy()
 
         r = Rotator2D(tn, None, None, direction + "min")
+        cyclic_y = r.is_cyclic_y()
 
         # track new coordinates / tags
         retag_map = {}
@@ -3220,7 +3268,7 @@ class TensorNetwork2D(TensorNetworkGen):
                 #      │ ┌┘   └┐ │
                 #    ──O─┘     └─O──  i
                 #      │         │
-                #     j-1        j
+                #      j        j+1
                 tag_ij = r.site_tag(i, j)
                 tag_ip1j = r.site_tag(i + 1, j)
                 new_tag = r.site_tag(i // 2, j)
@@ -3228,9 +3276,12 @@ class TensorNetwork2D(TensorNetworkGen):
                 if next_i_in_lattice:
                     retag_map[tag_ip1j] = new_tag
 
-                if (j > 0) and next_i_in_lattice:
-                    ltags = r.site_tag(i, j - 1), r.site_tag(i + 1, j - 1)
-                    rtags = (tag_ij, tag_ip1j)
+                if next_i_in_lattice and ((j + 1 <= r.jmax) or cyclic_y):
+                    ltags = (tag_ij, tag_ip1j)
+
+                    # handle cyclic case
+                    jp1 = j + 1 if (j + 1 <= r.jmax) else r.jmin
+                    rtags = r.site_tag(i, jp1), r.site_tag(i + 1, jp1)
                     tn_calc.insert_compressor_between_regions(
                         ltags,
                         rtags,
@@ -4434,7 +4485,8 @@ class TensorNetwork2DFlat(TensorNetwork2D):
         return b_ix
 
     def bond_size(self, coo1, coo2):
-        """Return the size of the bond between sites at ``coo1`` and ``coo2``."""
+        """Return the size of the bond between sites at ``coo1`` and ``coo2``.
+        """
         b_ix = self.bond(coo1, coo2)
         return self[coo1].ind_size(b_ix)
 
@@ -4645,7 +4697,15 @@ class PEPS(TensorNetwork2DVector, TensorNetwork2DFlat):
         super().__init__(tensors, virtual=True, **tn_opts)
 
     @classmethod
-    def from_fill_fn(cls, fill_fn, Lx, Ly, bond_dim, phys_dim=2, **peps_opts):
+    def from_fill_fn(
+        cls,
+        fill_fn,
+        Lx,
+        Ly,
+        bond_dim,
+        phys_dim=2,
+        **peps_opts,
+    ):
         """Create a 2D PEPS from a filling function with signature
         ``fill_fn(shape)``.
 

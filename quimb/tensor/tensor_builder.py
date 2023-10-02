@@ -836,7 +836,6 @@ def HTN_CP_operator_from_products(
     if bond_ind is None:
         bond_ind = rand_uuid()
 
-
     # construct the product TNs each with hyper bond D=1
     tns = []
     for arrays in array_seqs:
@@ -855,7 +854,7 @@ def HTN_CP_operator_from_products(
     tn = functools.reduce(tensor_network_sum, tns)
 
     # add global tags
-    for tag in  tags_to_oset(tags_all):
+    for tag in tags_to_oset(tags_all):
         tn.add_tag(tag)
 
     return tn
@@ -1818,7 +1817,7 @@ def classical_ising_T_matrix(
     eq = lhs + ",i->" + directions
 
     if output:
-        eq += 'i'
+        eq += "i"
 
     return oe.contract(eq, *arrays)
 

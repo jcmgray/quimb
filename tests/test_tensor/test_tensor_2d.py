@@ -435,6 +435,24 @@ class Test2DContract:
 
         assert e == pytest.approx(ex, rel=1e-2)
 
+    def test_cyclic_basic(self):
+        tn = qtn.TN2D_rand(Lx=3, Ly=4, D=2, cyclic=True)
+        assert tn.is_cyclic_x()
+        assert tn.is_cyclic_y()
+        assert tn.num_indices == 2 * 3 * 4
+        tn = qtn.TN2D_rand(Lx=3, Ly=4, D=2, cyclic=(False, True))
+        assert not tn.is_cyclic_x()
+        assert tn.is_cyclic_y()
+        assert tn.num_indices == 2 * 3 * 4 - 4
+        tn = qtn.TN2D_rand(Lx=3, Ly=4, D=2, cyclic=(True, False))
+        assert tn.is_cyclic_x()
+        assert not tn.is_cyclic_y()
+        assert tn.num_indices == 2 * 3 * 4 - 3
+        tn = qtn.TN2D_rand(Lx=3, Ly=4, D=2, cyclic=(False, False))
+        assert not tn.is_cyclic_x()
+        assert not tn.is_cyclic_y()
+        assert tn.num_indices == 2 * 3 * 4 - 7
+
 
 class TestPEPO:
     @pytest.mark.parametrize("Lx", [3, 4, 5])

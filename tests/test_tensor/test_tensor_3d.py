@@ -5,6 +5,36 @@ import quimb as qu
 import quimb.tensor as qtn
 
 
+class TestTensorNetwork3D:
+    def test_cyclic_basic(self):
+        tn = qtn.TN3D_empty(Lx=3, Ly=4, Lz=5, D=2, cyclic=True)
+        assert tn.is_cyclic_x()
+        assert tn.is_cyclic_y()
+        assert tn.is_cyclic_z()
+        assert tn.num_indices == 3 * tn.nsites
+        tn = qtn.TN3D_empty(Lx=3, Ly=4, Lz=5, D=2, cyclic=(False, False, True))
+        assert not tn.is_cyclic_x()
+        assert not tn.is_cyclic_y()
+        assert tn.is_cyclic_z()
+        assert tn.num_indices == 3 * tn.nsites - (tn.Lx * tn.Lz) - (
+            tn.Ly * tn.Lz
+        )
+        tn = qtn.TN3D_empty(Lx=3, Ly=4, Lz=5, D=2, cyclic=(False, True, False))
+        assert not tn.is_cyclic_x()
+        assert tn.is_cyclic_y()
+        assert not tn.is_cyclic_z()
+        assert tn.num_indices == 3 * tn.nsites - (tn.Lx * tn.Ly) - (
+            tn.Ly * tn.Lz
+        )
+        tn = qtn.TN3D_empty(Lx=3, Ly=4, Lz=5, D=2, cyclic=(True, False, False))
+        assert tn.is_cyclic_x()
+        assert not tn.is_cyclic_y()
+        assert not tn.is_cyclic_z()
+        assert tn.num_indices == 3 * tn.nsites - (tn.Lx * tn.Ly) - (
+            tn.Lx * tn.Lz
+        )
+
+
 class Test3DManualContract:
     @pytest.mark.parametrize("canonize", [False, True])
     def test_contract_boundary_ising_model(self, canonize):
