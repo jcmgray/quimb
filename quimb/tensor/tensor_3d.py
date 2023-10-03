@@ -388,6 +388,10 @@ def parse_boundary_sequence(sequence):
 
 
 class TensorNetwork3D(TensorNetworkGen):
+    """Mixin class for tensor networks with a cubic lattice three-dimensional
+    structure.
+    """
+
     _NDIMS = 3
     _EXTRA_PROPS = (
         "_site_tag_id",
