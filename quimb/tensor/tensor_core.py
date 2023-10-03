@@ -5807,6 +5807,61 @@ class TensorNetwork(object):
         compress_all_tree, inplace=True
     )
 
+    def compress_all_1d(
+        self,
+        max_bond=None,
+        cutoff=1e-10,
+        canonize=True,
+        inplace=False,
+        **compress_opts,
+    ):
+        """Compress a tensor network that you know has a 1D topology, this
+        proceeds by generating a spanning 'tree' from around the least central
+        tensor, then optionally canonicalizing all bonds outwards and
+        compressing inwards.
+
+        Parameters
+        ----------
+        max_bond : int, optional
+            The maximum bond dimension to compress to.
+        cutoff : float, optional
+            The singular value cutoff to use.
+        canonize : bool, optional
+            Whether to canonize all bonds outwards first.
+        inplace : bool, optional
+            Whether to perform the compression inplace.
+        compress_opts
+            Supplied to :func:`~quimb.tensor.tensor_core.tensor_compress_bond`.
+
+        Returns
+        -------
+        TensorNetwork
+        """
+        tn = self if inplace else self.copy()
+
+        tid0 = tn.least_central_tid()
+        span = tn.get_tree_span([tid0])
+
+        if canonize:
+            for tida, tidb, _ in span:
+                tn._canonize_between_tids(tida, tidb, absorb='right')
+            compress_opts.setdefault('absorb', 'right')
+        else:
+            compress_opts.setdefault('absorb', 'both')
+
+        for tida, tidb, _ in reversed(span):
+            tn._compress_between_tids(
+                tidb,
+                tida,
+                max_bond=max_bond,
+                cutoff=cutoff,
+                **compress_opts,
+            )
+
+        return tn
+
+    compress_all_1d_ = functools.partialmethod(compress_all_1d, inplace=True)
+
     def compress_all_simple(
         self,
         max_bond=None,

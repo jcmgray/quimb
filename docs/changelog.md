@@ -21,6 +21,9 @@ Release notes for `quimb`.
   [`is_cyclic_z`](quimb.tensor.TensorNetwork3D.is_cyclic_z) to
   [TensorNetwork2D](quimb.tensor.TensorNetwork2D) and
   [TensorNetwork3D](quimb.tensor.TensorNetwork3D).
+- add [TensorNetwork.compress_all_1d](quimb.tensor.TensorNetwork.compress_all_1d)
+  for compressing generic tensor networks that you promise have a 1D topology,
+  without casting as a [TensorNetwork1D](quimb.tensor.TensorNetwork1D).
 
 (whats-new-1-6-0)=
 

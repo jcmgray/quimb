@@ -1332,6 +1332,15 @@ class TestTensorNetwork:
         assert k.max_bond() == 7
         assert_allclose(k.H @ k, 1.0)
 
+    def test_compress_all_1d(self):
+        mpo = qtn.MPO_rand(10, 7)
+        mpo1 = mpo.copy()
+        mpo1.compress(max_bond=4, renorm=False)
+        mpo2 = mpo.compress_all_1d(max_bond=4, renorm=False)
+        assert mpo1.max_bond() == mpo2.max_bond() == 4
+        assert mpo2 is not mpo
+        assert_allclose(mpo1.H @ mpo, mpo2.H @ mpo)
+
     def test_canonize_between(self):
         k = MPS_rand_state(4, 3)
         k.canonize_between("I1", "I2")
