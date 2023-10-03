@@ -3017,45 +3017,44 @@ def MPS_rand_state(
     mps_opts
         Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductState`.
     """
-    if trans_invar and not cyclic:
-        raise ValueError(
-            "State cannot be translationally invariant with open "
-            "boundary conditions."
+    if trans_invar:
+        if not cyclic:
+            raise ValueError(
+                "State cannot be translationally invariant with open "
+                "boundary conditions."
+            )
+        array = sensibly_scale(
+            randn(shape=(bond_dim, bond_dim, phys_dim), dtype=dtype)
         )
 
-    # check for site varying physical dimensions
-    if isinstance(phys_dim, Integral):
-        phys_dims = itertools.repeat(phys_dim)
+        def fill_fn(shape):
+            return array
+
     else:
-        phys_dims = itertools.cycle(phys_dim)
+        def fill_fn(shape):
+            return sensibly_scale(randn(shape, dtype=dtype))
 
-    cyc_dim = (bond_dim,) if cyclic else ()
-
-    def gen_shapes():
-        yield (*cyc_dim, bond_dim, next(phys_dims))
-        for _ in range(L - 2):
-            yield (bond_dim, bond_dim, next(phys_dims))
-        yield (bond_dim, *cyc_dim, next(phys_dims))
-
-    def gen_data(shape):
-        return randn(shape, dtype=dtype)
-
-    if trans_invar:
-        array = sensibly_scale(gen_data(next(gen_shapes())))
-        arrays = (array for _ in range(L))
-    else:
-        arrays = map(sensibly_scale, map(gen_data, gen_shapes()))
-
-    rmps = MatrixProductState(arrays, **mps_opts)
+    mps = MatrixProductState.from_fill_fn(
+        fill_fn,
+        L=L,
+        bond_dim=bond_dim,
+        phys_dim=phys_dim,
+        cyclic=cyclic,
+        **mps_opts,
+    )
 
     if normalize == "left":
-        rmps.left_canonize(normalize=True)
+        if cyclic:
+            raise ValueError("Cannot left normalize cyclic MPS.")
+        mps.left_canonize(normalize=True)
     elif normalize == "right":
-        rmps.left_canonize(normalize=True)
+        if cyclic:
+            raise ValueError("Cannot right normalize cyclic MPS.")
+        mps.left_canonize(normalize=True)
     elif normalize:
-        rmps /= (rmps.H @ rmps) ** 0.5
+        mps.normalize()
 
-    return rmps
+    return mps
 
 
 def MPS_product_state(arrays, cyclic=False, **mps_opts):
@@ -3238,15 +3237,17 @@ def MPS_zero_state(
     mps_opts
         Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductState`.
     """
-    cyc_dim = (bond_dim,) if cyclic else ()
+    def fill_fn(shape):
+        return np.zeros(shape, dtype=dtype)
 
-    def gen_arrays():
-        yield np.zeros((*cyc_dim, bond_dim, phys_dim), dtype=dtype)
-        for _ in range(L - 2):
-            yield np.zeros((bond_dim, bond_dim, phys_dim), dtype=dtype)
-        yield np.zeros((bond_dim, *cyc_dim, phys_dim), dtype=dtype)
-
-    return MatrixProductState(gen_arrays(), **mps_opts)
+    return MatrixProductState.from_fill_fn(
+        fill_fn,
+        L=L,
+        bond_dim=bond_dim,
+        phys_dim=phys_dim,
+        cyclic=cyclic,
+        **mps_opts
+    )
 
 
 def MPS_sampler(L, dtype=complex, squeeze=True, **mps_opts):

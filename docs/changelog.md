@@ -14,7 +14,7 @@ Release notes for `quimb`.
 
 **Enhancements:**
 
-- {class}`~quimb.tensor.Circuit` : allow any gate to be controlled by any
+- [`Circuit`](quimb.tensor.Circuit) : allow any gate to be controlled by any
   number of qubits.
 - add [`is_cyclic_x`](quimb.tensor.TensorNetwork2D.is_cyclic_x),
   [`is_cyclic_y`](quimb.tensor.TensorNetwork2D.is_cyclic_y) and
@@ -24,6 +24,8 @@ Release notes for `quimb`.
 - add [TensorNetwork.compress_all_1d](quimb.tensor.TensorNetwork.compress_all_1d)
   for compressing generic tensor networks that you promise have a 1D topology,
   without casting as a [TensorNetwork1D](quimb.tensor.TensorNetwork1D).
+- add [MatrixProductState.from_fill_fn](quimb.tensor.tensor_1d.MatrixProductState.from_fill_fn)
+  for constructing MPS from a function that fills the tensors.
 
 (whats-new-1-6-0)=
 

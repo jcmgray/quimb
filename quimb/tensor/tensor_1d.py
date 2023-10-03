@@ -3,6 +3,7 @@
 
 import operator
 import functools
+import itertools
 import collections
 from math import log2
 from numbers import Integral
@@ -1125,7 +1126,8 @@ class TensorNetwork1DFlat(TensorNetwork1D):
             self.right_compress_site(i + 1, bra=bra, **compress_opts)
 
     def bond(self, i, j):
-        """Get the name of the index defining the bond between sites i and j."""
+        """Get the name of the index defining the bond between sites i and j.
+        """
         (bond,) = self[i].bonds(self[j])
         return bond
 
@@ -1438,8 +1440,46 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         site_tag_id="I{}",
         tags=None,
     ):
+        """Create a random MPS by supplying a function to generate the data
+        for each site.
+
+        Parameters
+        ----------
+        fill_fn : callable
+            A function with signature
+            ``fill_fn(shape : tuple[int]) -> array_like``.
+        L : int
+            The number of sites.
+        bond_dim : int
+            The bond dimension.
+        phys_dim : int or Sequence[int], optional
+            The physical dimension(s) of each site, if a sequence it will be
+            cycled over.
+        cyclic : bool, optional
+            Whether the MPS should be cyclic (periodic).
+        shape : str, optional
+            What specific order to layout the indices in, should be a sequence
+            of ``'l'``, ``'r'``, and ``'p'``, corresponding to left, right, and
+            physical indices respectively.
+        site_ind_id : str, optional
+            How to label the physical site indices.
+        site_tag_id : str, optional
+            How to tag the physical sites.
+        tags : str or sequence of str, optional
+            Global tags to attach to all tensors.
+
+        Returns
+        -------
+        MatrixProductState
+        """
         if set(shape) - set("lrp"):
             raise ValueError("Invalid shape string: {}".format(shape))
+
+        # check for site varying physical dimensions
+        if isinstance(phys_dim, Integral):
+            phys_dims = itertools.repeat(phys_dim)
+        else:
+            phys_dims = itertools.cycle(phys_dim)
 
         mps = TensorNetwork()
         global_tags = tags_to_oset(tags)
@@ -1459,7 +1499,7 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
                         data_shape.append(bond_dim)
                 else:  # c == 'p':
                     inds.append(site_ind_id.format(i))
-                    data_shape.append(phys_dim)
+                    data_shape.append(next(phys_dims))
             data = fill_fn(data_shape)
             tags = global_tags | oset((site_tag_id.format(i),))
             mps |= Tensor(data, inds=inds, tags=tags)
